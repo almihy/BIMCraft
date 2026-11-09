@@ -2322,7 +2322,7 @@ impl BimApp {
             self.run("material", p);
         }
         if let Some(material) = picture {
-            let dialog = rfd::AsyncFileDialog::new().add_filter(t("Pictures"), &["png", "jpg", "jpeg"]);
+            let dialog = crate::dialog::Ask::new().add_filter(t("Pictures"), &["png", "jpg", "jpeg"]);
             self.ask_file(ctx, dialog, false, move |app, path| {
                 app.run("material", json!({"name": material, "texture": {"kind": "image", "path": path.to_string_lossy()}}));
             });

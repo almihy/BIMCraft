@@ -185,7 +185,7 @@ impl BimApp {
                 self.status = crate::Status { text, error: true };
                 return;
             }
-            let dialog = rfd::AsyncFileDialog::new().set_title(label.clone());
+            let dialog = crate::dialog::Ask::new().set_title(label.clone());
             self.plugin_pick = Some((id.to_string(), serde_json::Map::new()));
             self.ask_file(ctx, dialog, false, move |app, path| {
                 let Some((command, mut params)) = app.plugin_pick.take() else { return };

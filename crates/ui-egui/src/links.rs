@@ -5,13 +5,20 @@ use std::path::Path;
 use egui::Context;
 use serde_json::json;
 
+use bimcraft_i18n::msg;
+
 use crate::BimApp;
 use crate::lang::t;
 
 impl BimApp {
     /// Link Model (LK): the file the user picks.
     pub(crate) fn link_model_dialog(&mut self, ctx: &Context) {
-        let dialog = rfd::AsyncFileDialog::new().add_filter(t("BIMCraft project or IFC"), &["bimcraft", "ifc"]);
+        // A hosted window's page reads a Revit model itself, and gives it as the project it becomes.
+        let dialog = if self.hosted() {
+            crate::dialog::Ask::new().add_filter(t(msg!("BIMCraft project, IFC or Revit")), &["bimcraft", "ifc", "rvt"])
+        } else {
+            crate::dialog::Ask::new().add_filter(t("BIMCraft project or IFC"), &["bimcraft", "ifc"])
+        };
         self.ask_file(ctx, dialog, false, |app, path| app.link_path(&path));
     }
 

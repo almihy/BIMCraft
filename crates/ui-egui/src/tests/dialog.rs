@@ -16,7 +16,7 @@ fn open_dialog(h: &mut Harness<BimApp>) -> std::sync::mpsc::Sender<Option<Vec<Pa
         let said: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
         app.status = Status { text: said.join("; "), error: false };
     });
-    h.state_mut().dialog = Some(Dialog { answer, then });
+    h.state_mut().dialog = Some(Dialog { answer, then, asked: None });
     tx
 }
 

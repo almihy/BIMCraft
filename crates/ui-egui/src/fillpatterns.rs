@@ -761,11 +761,11 @@ impl BimApp {
         }
         match (ask, drafted) {
             (Some(FileAsk::Import), _) => {
-                let dialog = rfd::AsyncFileDialog::new().add_filter(t("Fill patterns"), &["pat", "PAT"]);
+                let dialog = crate::dialog::Ask::new().add_filter(t("Fill patterns"), &["pat", "PAT"]);
                 self.ask_file(ctx, dialog, false, |app, path| app.import_patterns(&path));
             }
             (Some(FileAsk::Export), Some(drafted)) => {
-                let dialog = rfd::AsyncFileDialog::new().add_filter(t("Fill patterns"), &["pat"]).set_file_name("patterns.pat");
+                let dialog = crate::dialog::Ask::new().add_filter(t("Fill patterns"), &["pat"]).set_file_name("patterns.pat");
                 self.ask_file(ctx, dialog, true, move |app, path| app.export_patterns(&path, &drafted));
             }
             (Some(FileAsk::Custom), _) => self.pick_pattern_lines(),

@@ -3048,7 +3048,7 @@ impl BimApp {
     fn ask_path(&mut self, ctx: &Context, what: &str, ext: &str, then: impl FnOnce(&mut BimApp, PathBuf) + 'static) {
         let name = format!("{}.{ext}", self.session.model.name.replace(['/', '\\'], "-"));
         let ext = ext.to_string();
-        let dialog = rfd::AsyncFileDialog::new().add_filter(t(what), &[&ext]).set_file_name(name);
+        let dialog = crate::dialog::Ask::new().add_filter(t(what), &[&ext]).set_file_name(name);
         self.ask_file(ctx, dialog, true, move |app, p| {
             then(app, if p.extension().is_some_and(|e| e.eq_ignore_ascii_case(&ext)) { p } else { p.with_extension(&ext) });
         });
@@ -3062,7 +3062,7 @@ impl BimApp {
         let Some(reply) = self.run("open", json!({"path": path.to_string_lossy()})) else {
             self.forget_recent_if_gone(path);
             // Even a damaged original can have a healthy recovery copy.
-            if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("ifc")) {
+            if !self.hosted && !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("ifc")) {
                 self.inspect_recovery(path.to_path_buf());
             }
             return false;
@@ -3190,9 +3190,10 @@ impl BimApp {
                 self.open_path(&path);
             }
             Pending::Open => {
-                let revit = self.revit.is_some();
+                // A hosted window's page reads a Revit model itself, and gives it as the project it becomes.
+                let revit = self.revit.is_some() || self.hosted;
                 let name = t(if revit { msg!("BIMCraft project, IFC or Revit") } else { "BIMCraft project or IFC" });
-                let dialog = rfd::AsyncFileDialog::new().add_filter(name, &revit::open_extensions(revit));
+                let dialog = crate::dialog::Ask::new().add_filter(name, &revit::open_extensions(revit));
                 self.ask_file(ctx, dialog, false, |app, path| {
                     app.open_path(&path);
                 });
@@ -3556,11 +3557,16 @@ impl BimApp {
             .clicked()
         };
         let cmd = |k: Key| Some(KeyboardShortcut::new(Modifiers::COMMAND, k));
-        // A hosted window's files are the page's: it saves there, and keeps its settings.
+        // A hosted window's files are the page's: it saves the project there, and keeps its settings. What it opens and
+        // exports, the page picks and keeps (`dialog.rs`).
         if self.hosted {
             if item(ui, "Save", cmd(Key::S)) {
                 self.save(ctx, None);
             }
+            if item(ui, msg!("Open IFC or Revit Model…"), None) {
+                self.guard(Pending::Open, ctx);
+            }
+            self.export_menu(ui, ctx);
             ui.separator();
             if item(ui, msg!("Settings…"), Some(KeyboardShortcut::new(Modifiers::COMMAND, Key::Comma))) {
                 self.settings_page = Some(settings::Page::Interface);
@@ -3583,6 +3589,21 @@ impl BimApp {
         if !self.autosave.candidates.is_empty() && item(ui, msg!("Recover Autosave…"), None) {
             self.autosave.show_recovery = true;
         }
+        self.export_menu(ui, ctx);
+        self.report_menu(ui);
+        self.update_menu(ui);
+        ui.separator();
+        if item(ui, msg!("Settings…"), Some(KeyboardShortcut::new(Modifiers::COMMAND, Key::Comma))) {
+            self.settings_page = Some(settings::Page::Interface);
+        }
+        ui.separator();
+        if item(ui, msg!("Exit"), None) {
+            ctx.send_viewport_cmd(ViewportCommand::Close);
+        }
+    }
+
+    /// File > Export: the model as IFC, the view as a picture, the sheets as PDF, the 3D scene as glTF.
+    fn export_menu(&mut self, ui: &mut Ui, ctx: &Context) {
         SubMenuButton::new(t("Export")).ui(ui, |ui| {
             if ui.button(t("IFC…")).clicked() {
                 self.export(ctx, "IFC4", "ifc");
@@ -3600,16 +3621,6 @@ impl BimApp {
                 self.export(ctx, msg!("glTF binary"), "glb");
             }
         });
-        self.report_menu(ui);
-        self.update_menu(ui);
-        ui.separator();
-        if item(ui, msg!("Settings…"), Some(KeyboardShortcut::new(Modifiers::COMMAND, Key::Comma))) {
-            self.settings_page = Some(settings::Page::Interface);
-        }
-        ui.separator();
-        if item(ui, msg!("Exit"), None) {
-            ctx.send_viewport_cmd(ViewportCommand::Close);
-        }
     }
 
     /// Ribbon buttons that pick tools, under the panel's name.
@@ -4451,7 +4462,7 @@ impl BimApp {
             panel(ui, msg!("Mode"), |ui| {
                 let tip = msg!("Load Family: a family saved as a .json file, BIMCraft's own");
                 if big_button(ui, Icon::LoadFamily, "Load Family", false, tip).clicked() {
-                    let dialog = rfd::AsyncFileDialog::new().add_filter(t("BIMCraft family"), &["json"]);
+                    let dialog = crate::dialog::Ask::new().add_filter(t("BIMCraft family"), &["json"]);
                     self.ask_file(ui.ctx(), dialog, false, |app, path| {
                         if let Some(r) = app.run("family", json!({"path": path.to_string_lossy()})) {
                             let name = r["name"].as_str().unwrap_or_default().to_string();

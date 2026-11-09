@@ -121,3 +121,99 @@ fn the_page_dresses_the_window_in_its_colours() {
     assert!(crate::style::dark());
     assert_eq!(crate::style::pal().panel, egui::Color32::from_rgb(23, 28, 37));
 }
+
+/// A room drawn in metres on WALLS, as a DXF.
+fn room_dxf() -> Vec<u8> {
+    let pairs = |list: &[(i32, &str)]| list.iter().map(|(c, v)| format!("{c}\n{v}\n")).collect::<String>();
+    let lines: String = [((0, 0), (10, 0)), ((10, 0), (10, 6)), ((10, 6), (0, 6)), ((0, 6), (0, 0))]
+        .iter()
+        .map(|((ax, ay), (bx, by))| {
+            pairs(&[(0, "LINE"), (8, "WALLS"), (10, &ax.to_string()), (20, &ay.to_string()), (11, &bx.to_string()), (21, &by.to_string())])
+        })
+        .collect();
+    format!("0\nSECTION\n2\nENTITIES\n{lines}0\nENDSEC\n0\nEOF\n").into_bytes()
+}
+
+/// The ask open now.
+fn asked(h: &Harness<BimApp>) -> crate::host::FileRequest {
+    h.state().file_request().cloned().expect("the page is asked for a file")
+}
+
+#[test]
+fn import_cad_in_a_hosted_window_asks_the_page_and_reads_the_drawing_it_gives() {
+    let mut h = hosted(BOX);
+    let ctx = h.ctx.clone();
+    h.state_mut().import_cad_dialog(&ctx, false);
+    h.run();
+    let r = asked(&h);
+    assert!(!r.save && r.multiple, "{r:?}");
+    assert_eq!(r.extensions, ["dxf", "dwg"]);
+    assert!(crate::dialog::BEGUN.with(|b| b.borrow_mut().pop()).is_none(), "no system dialog");
+    h.state_mut().give_file("files/doc_1/Survey.dxf", room_dxf());
+    h.state_mut().answer_file_request(r.id, Some(vec!["files/doc_1/Survey.dxf".into()]));
+    h.run();
+    assert!(h.state().file_request().is_none(), "answered");
+    press(&mut h, "OK");
+    let cads = h.state().session.model.elements.values().filter(|e| matches!(e, Element::CadImport(_))).count();
+    assert_eq!(cads, 1, "{}", h.state().status.text);
+}
+
+#[test]
+fn a_model_the_page_gives_is_linked_and_read_again_after_the_page_puts_the_model_in_place() {
+    let mut house = Session::new();
+    house.script(SAMPLE).unwrap();
+    let text = house.model.to_json().unwrap();
+    let mut h = hosted(BOX);
+    let ctx = h.ctx.clone();
+    h.state_mut().link_model_dialog(&ctx);
+    h.run();
+    let r = asked(&h);
+    assert!(r.extensions.contains(&"rvt".to_string()), "the page reads Revit models itself: {r:?}");
+    // A cancel does nothing.
+    h.state_mut().answer_file_request(r.id, None);
+    h.run();
+    assert!(h.state().file_request().is_none());
+    h.state_mut().link_model_dialog(&ctx);
+    h.run();
+    let r = asked(&h);
+    h.state_mut().give_file("files/doc_2/House.bimcraft", text.clone().into_bytes());
+    h.state_mut().answer_file_request(r.id, Some(vec!["files/doc_2/House.bimcraft".into()]));
+    h.run();
+    assert!(h.state().files_wanted().is_empty(), "read: {}", h.state().status.text);
+    assert_eq!(h.state().session.model.loaded.len(), 1);
+    // The page's model, from its text: the link is there, what it read is not, until the page gives it again.
+    let (m, _) = bimcraft_core::model::Model::read(&h.state().session.model.to_json().unwrap()).unwrap();
+    h.state_mut().replace_model(m);
+    h.run();
+    assert_eq!(h.state().files_wanted(), ["files/doc_2/House.bimcraft"]);
+    h.state_mut().give_file("files/doc_2/House.bimcraft", text.into_bytes());
+    let model = Arc::clone(&h.state().session.model);
+    h.state_mut().mark_saved(&model);
+    let r = h.state_mut().reload_links().unwrap();
+    assert_eq!(r["reloaded"], json!(["House"]), "{r}");
+    assert!(h.state().files_wanted().is_empty());
+    assert!(!h.state().dirty(), "reading the links is no change of the person's");
+}
+
+#[test]
+fn export_in_a_hosted_window_asks_the_page_where_and_leaves_what_it_wrote_for_the_page() {
+    let mut h = hosted(BOX);
+    press(&mut h, "File");
+    assert!(h.query_by_label("Open IFC or Revit Model…").is_some(), "the page picks what to open");
+    // The submenu's label carries its arrow too.
+    h.get_by_label_contains("Export").click();
+    h.run();
+    press(&mut h, "IFC…");
+    let r = asked(&h);
+    assert!(r.save, "{r:?}");
+    assert_eq!(r.extensions, ["ifc"]);
+    let name = r.name.clone().unwrap();
+    assert!(name.ends_with(".ifc"), "{name}");
+    h.state_mut().answer_file_request(r.id, Some(vec![format!("out/{name}")]));
+    h.run();
+    let written = h.state_mut().take_written();
+    assert_eq!(written.len(), 1);
+    assert_eq!(written[0].0, format!("out/{name}"));
+    assert!(String::from_utf8_lossy(&written[0].1).starts_with("ISO-10303-21"));
+    assert!(!h.state().has_written(), "taken");
+}

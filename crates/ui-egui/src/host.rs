@@ -4,14 +4,21 @@
 //! ([`BimApp::take_save_request`]); the page puts in a newer project when its agent changed it ([`BimApp::replace_model`]) and
 //! runs its agent's commands on the open one ([`BimApp::execute_for_agent`]); it dresses the window in its own colours
 //! ([`BimApp::set_host_look`]).
+//!
+//! Its files are the page's too. Open, Link, Import CAD, Point Cloud and the rest ask the page for a file
+//! ([`BimApp::file_request`]): the page gives its bytes under a name ([`BimApp::give_file`]) and answers with the name
+//! ([`BimApp::answer_file_request`]). Export asks it where to save, the same way, and what is written waits for the page to
+//! take it ([`BimApp::take_written`]). A model the project links is read from the page too: [`BimApp::files_wanted`] names
+//! the files its links read that are not read yet, and [`BimApp::reload_links`] reads them once the page gave them.
 
 use std::sync::Arc;
 
 use bimcraft_core::engine::Session;
-use bimcraft_core::model::Model;
+use bimcraft_core::model::{Element, Model};
 use egui::{Context, ThemePreference};
 use serde_json::Value;
 
+pub use crate::dialog::FileRequest;
 pub use crate::style::Skin;
 use crate::{BimApp, Pending};
 
@@ -36,6 +43,8 @@ impl BimApp {
     pub fn hosted_on(session: Session) -> BimApp {
         let mut app = BimApp::new(session);
         app.hosted = true;
+        // What it writes (Export) is the page's to keep, not a file on this computer's disk.
+        app.session.files.keep_writes = true;
         app
     }
 
@@ -87,6 +96,52 @@ impl BimApp {
         }
         self.tidy();
         result
+    }
+
+    /// Gives the window the file `name` (a path as the page names its files, "files/<id>/Plan.dxf"), its `bytes`, to read
+    /// as a file at that path.
+    pub fn give_file(&mut self, name: &str, bytes: Vec<u8>) {
+        self.session.files.give(name, bytes);
+    }
+
+    /// What was written for the page (Export) since the last call: each file's name and bytes.
+    pub fn take_written(&mut self) -> Vec<(String, Vec<u8>)> {
+        self.session.files.take_written()
+    }
+
+    /// Whether something was written that the page has not taken yet.
+    pub fn has_written(&self) -> bool {
+        self.session.files.has_written()
+    }
+
+    /// The files the project's links read that are not read: a model reopened from its text (the page's `load`) holds its
+    /// links and not what they read. A link made from a project's text (the site) is the page's to make again, and is not
+    /// among them.
+    pub fn files_wanted(&self) -> Vec<String> {
+        let m = &self.session.model;
+        let mut out: Vec<String> = m
+            .elements
+            .values()
+            .filter_map(|e| match e {
+                Element::Link(l) if !l.path.starts_with("text:") && !m.loaded.contains_key(&l.path) => Some(l.path.clone()),
+                _ => None,
+            })
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    /// Reads the files of the project's links again, from those the page gave: `{reloaded, failed}`. Reading them is no
+    /// change of the person's (Reload Links is no undo step), and a saved model stays saved.
+    pub fn reload_links(&mut self) -> Result<Value, String> {
+        let was_saved = !self.dirty();
+        let reply = self.session.execute("reload", &serde_json::json!({}));
+        if was_saved {
+            self.saved = Arc::clone(&self.session.model);
+        }
+        self.tidy();
+        reply
     }
 
     /// Wear the page's look from the next frame.

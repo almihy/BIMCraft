@@ -571,7 +571,7 @@ impl BimApp {
 
         if load_asked {
             let dialog =
-                rfd::AsyncFileDialog::new().add_filter("Shortcut files (*.md, *.txt, *.json, *.xml)", &["md", "txt", "json", "xml"]);
+                crate::dialog::Ask::new().add_filter("Shortcut files (*.md, *.txt, *.json, *.xml)", &["md", "txt", "json", "xml"]);
             self.ask_file(ctx, dialog, false, |app, path| {
                 app.load_shortcuts_from_file(&path);
             });
