@@ -253,6 +253,7 @@ const OWN: &[(&str, usize, &[Own])] = &[
             LEVEL,
             AREA,
             (msg!("Perimeter"), Kind::Length, From::Metres("perimeter_m")),
+            (msg!("Occupancy"), Kind::Text, From::Key("occupancy")),
             COUNT,
             (msg!("Unbounded Height"), Kind::Length, From::Key("unbounded_height")),
             VOLUME,

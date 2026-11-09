@@ -19,7 +19,7 @@ impl BimApp {
         } else {
             crate::dialog::Ask::new().add_filter(t("BIMCraft project or IFC"), &["bimcraft", "ifc"])
         };
-        self.ask_file(ctx, dialog, false, |app, path| app.link_path(&path));
+        self.ask_file(ctx, dialog.set_title(t("Link Model")), false, |app, path| app.link_path(&path));
     }
 
     /// Links the project at `path`, kept relative to this project's folder where it lies under it, so the two move together.

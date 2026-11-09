@@ -70,6 +70,8 @@ pub const CEILING_CUT: f64 = 2300.0;
 pub const CEILING_HEIGHT: f64 = 2600.0;
 /// The steepest slope a floor or a roof may have, degrees.
 pub const MAX_SLOPE: f64 = 75.0;
+/// The closest a floor's contours may be drawn, mm: a site's are a metre or half a metre apart.
+pub const MIN_CONTOURS: f64 = 50.0;
 /// The version of the project file this build writes, and the newest it reads. 18: a family's connector may be a `pipe`,
 /// `data` or `earthing` one, with no `system` (a pipe's `domain`, `flow`, `size`), and any may have a place (`at`, `direction`);
 /// the starter fixtures and fittings have them; a project may hold title blocks of its own (`title_blocks`, library entries of
@@ -500,6 +502,11 @@ pub struct Material {
     pub cut_pattern: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surface_pattern: Option<String>,
+    /// The colour its surface pattern is drawn in, as Revit's Surface Pattern colour: none, the drawing's grey (a ceiling's,
+    /// ink). A solid surface pattern in a colour fills what a plan sees of a floor with it: a site plan's lawn green, its
+    /// road grey.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub surface_color: Option<[u8; 3]>,
     /// What its surfaces look like in the 3D view, over its colour.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub texture: Option<Texture>,
@@ -520,9 +527,17 @@ impl Default for Material {
             surface: Pattern::None,
             cut_pattern: None,
             surface_pattern: None,
+            surface_color: None,
             texture: None,
             transparency: 0,
         }
+    }
+}
+
+impl Material {
+    /// The colour its surface pattern is drawn in: its own, else `default`.
+    pub fn surface_ink(&self, default: crate::render::Rgb) -> crate::render::Rgb {
+        self.surface_color.map_or(default, |[r, g, b]| crate::render::Rgb(r, g, b))
     }
 }
 
@@ -593,6 +608,12 @@ pub struct Floor {
     /// or one slope.
     #[serde(default, skip_serializing_if = "Shape::is_empty")]
     pub shape: Shape,
+    /// How far apart, mm, its plan draws its top's contours, as a Revit toposolid's Contour Display: a line wherever its top
+    /// stands at a whole number of them over zero, every fifth heavier, and not its creases. 0, none: a floor's creases.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub contours: f64,
+    // ponytail: a toposolid's own category (Revit's Toposolid) when the site is modelled here (site option B); a floor that
+    // draws contours is enough for a linked site's ground.
     /// Its values of the project's parameters, by name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub params: BTreeMap<String, serde_json::Value>,
@@ -856,6 +877,10 @@ pub struct Room {
     pub point: P2,
     pub name: String,
     pub number: String,
+    /// Revit's Occupancy: what the room is used for (a bedroom, an office, a kitchen), as the brief and the codes name its use;
+    /// empty when not said.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub occupancy: String,
     /// What it is filled with on plans, red, green and blue: none, no fill.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub colour: Option<[u8; 3]>,
@@ -889,6 +914,7 @@ impl Room {
             point,
             name: name.into(),
             number: number.into(),
+            occupancy: String::new(),
             colour: None,
             params: BTreeMap::new(),
             base_offset: 0.0,
@@ -4404,6 +4430,7 @@ impl Model {
             pattern_angle: 0.0,
             sketch: Vec::new(),
             shape: r.shape.clone(),
+            contours: 0.0,
             params: BTreeMap::new(),
         }
     }
@@ -6604,6 +6631,9 @@ impl Model {
                 openings(&who, &f.boundary, &f.openings)?;
                 crate::sketch::check(&who, e.sketch().map_or(&[][..], Vec::as_slice))?;
                 coord(&format!("{who} offset"), f.offset)?;
+                if !(f.contours == 0.0 || (f.contours.is_finite() && f.contours >= MIN_CONTOURS)) {
+                    return Err(format!("{who}: contours {} mm apart: at least {MIN_CONTOURS} mm, or 0 for none", f.contours));
+                }
                 if !(f.slope.is_finite() && f.slope.abs() <= MAX_SLOPE) {
                     return Err(format!("{who}: slope {}° isn't between -{MAX_SLOPE}° and {MAX_SLOPE}°", f.slope));
                 }
@@ -6713,6 +6743,7 @@ impl Model {
                 point(&who, r.point)?;
                 text(&who, "name", &r.name)?;
                 text(&who, "number", &r.number)?;
+                text(&who, "occupancy", &r.occupancy)?;
                 kept(&who, r)?;
                 if let Some(t) = r.top_level {
                     level_ok(t)?;

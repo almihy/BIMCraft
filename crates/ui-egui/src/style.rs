@@ -586,25 +586,55 @@ pub fn families() -> [FontFamily; 3] {
 // The core's, which text types letter notes in: the window holds one copy.
 use bimcraft_core::text::{PLEX_MONO, PLEX_SANS};
 
+/// The lettering a hosting page sets its own text in (`host.rs`), for the window to wear: a sans, variable in weight or
+/// not, and a monospace, as the bytes of TrueType or OpenType files.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PageFonts {
+    pub sans: Option<Arc<Vec<u8>>>,
+    pub mono: Option<Arc<Vec<u8>>>,
+}
+
 /// IBM Plex Sans (regular, and semibold as a family of its own) and Plex Mono first, egui's own faces behind them for the
-/// symbols Plex hasn't.
-fn fonts() -> FontDefinitions {
+/// symbols Plex hasn't. A hosting page's own faces (`page`) go before Plex, which stays behind them for what they haven't.
+fn fonts(page: Option<&PageFonts>) -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
     let behind = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
+    let sans = page.and_then(|p| p.sans.clone());
     for (name, weight, family) in [("plex-sans", 400.0, FontFamily::Proportional), (SEMIBOLD, 600.0, FontFamily::Name(SEMIBOLD.into()))] {
         let mut data = FontData::from_static(PLEX_SANS);
         data.tweak.coords = VariationCoords::new([(b"wght", weight)]);
         fonts.font_data.insert(name.to_owned(), Arc::new(data));
-        fonts.families.insert(family, std::iter::once(name.to_owned()).chain(behind.iter().cloned()).collect());
+        let mut first = vec![name.to_owned()];
+        if let Some(bytes) = &sans {
+            let own = format!("page-{name}");
+            let mut data = FontData::from_owned(bytes.as_ref().clone());
+            data.tweak.coords = VariationCoords::new([(b"wght", weight)]);
+            fonts.font_data.insert(own.clone(), Arc::new(data));
+            first.insert(0, own);
+        }
+        fonts.families.insert(family, first.into_iter().chain(behind.iter().cloned()).collect());
     }
     fonts.font_data.insert("plex-mono".to_owned(), Arc::new(FontData::from_static(PLEX_MONO)));
-    fonts.families.entry(FontFamily::Monospace).or_default().insert(0, "plex-mono".to_owned());
+    let mono = fonts.families.entry(FontFamily::Monospace).or_default();
+    mono.insert(0, "plex-mono".to_owned());
+    if let Some(bytes) = page.and_then(|p| p.mono.as_ref()) {
+        mono.insert(0, "page-mono".to_owned());
+        fonts.font_data.insert("page-mono".to_owned(), Arc::new(FontData::from_owned(bytes.as_ref().clone())));
+    }
     fonts
 }
 
+/// The window's fonts again, a hosting page's (`page`) first: the page gave them after the window started. The fonts with the
+/// hanzi and the Hangul (`lang::use_cjk_font`) are put behind them again.
+pub fn refont(ctx: &Context, page: Option<&PageFonts>) {
+    ctx.set_fonts(fonts(page));
+    crate::lang::forget_cjk_font(ctx);
+}
+
 /// The fonts, the theme's preference and how shapes are tessellated, once: the widgets' look follows the profile ([`follow`]).
-pub fn apply(ctx: &Context) {
-    ctx.set_fonts(fonts());
+/// A hosting page's fonts (`page`) go first.
+pub fn apply(ctx: &Context, page: Option<&PageFonts>) {
+    ctx.set_fonts(fonts(page));
     ctx.options_mut(|o| {
         o.theme_preference = ThemePreference::System;
         o.fallback_theme = Theme::Light;

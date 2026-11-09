@@ -148,6 +148,7 @@ fn import_cad_in_a_hosted_window_asks_the_page_and_reads_the_drawing_it_gives() 
     let r = asked(&h);
     assert!(!r.save && r.multiple, "{r:?}");
     assert_eq!(r.extensions, ["dxf", "dwg"]);
+    assert_eq!(r.title.as_deref(), Some("Import CAD"), "the page's picker names what it is for");
     assert!(crate::dialog::BEGUN.with(|b| b.borrow_mut().pop()).is_none(), "no system dialog");
     h.state_mut().give_file("files/doc_1/Survey.dxf", room_dxf());
     h.state_mut().answer_file_request(r.id, Some(vec!["files/doc_1/Survey.dxf".into()]));
@@ -169,6 +170,7 @@ fn a_model_the_page_gives_is_linked_and_read_again_after_the_page_puts_the_model
     h.run();
     let r = asked(&h);
     assert!(r.extensions.contains(&"rvt".to_string()), "the page reads Revit models itself: {r:?}");
+    assert_eq!(r.title.as_deref(), Some("Link Model"));
     // A cancel does nothing.
     h.state_mut().answer_file_request(r.id, None);
     h.run();
@@ -207,6 +209,7 @@ fn export_in_a_hosted_window_asks_the_page_where_and_leaves_what_it_wrote_for_th
     let r = asked(&h);
     assert!(r.save, "{r:?}");
     assert_eq!(r.extensions, ["ifc"]);
+    assert_eq!(r.title.as_deref(), Some("Export"));
     let name = r.name.clone().unwrap();
     assert!(name.ends_with(".ifc"), "{name}");
     h.state_mut().answer_file_request(r.id, Some(vec![format!("out/{name}")]));

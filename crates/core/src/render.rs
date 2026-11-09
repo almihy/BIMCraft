@@ -2677,10 +2677,10 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, t
                             p,
                             std::slice::from_ref(&piece),
                             std::slice::from_ref(&piece),
-                            FAINT,
+                            x.surface_ink(FAINT),
                             (f.pattern_origin, f.pattern_angle),
                         ),
-                        None => surface(&mut d, &piece, x.surface, FAINT),
+                        None => surface(&mut d, &piece, x.surface, x.surface_ink(FAINT)),
                     }
                 }
             }
@@ -2688,8 +2688,11 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, t
         for ring in std::iter::once(&f.boundary).chain(&f.openings) {
             d.line(ring, BY_CATEGORY, FAINT, true);
         }
-        // A shaped one's creases: the edges of each of its planes, as thin as its outline.
-        if !f.shape.is_empty() {
+        // A shaped one's creases: the edges of each of its planes, as thin as its outline; or, drawn as a toposolid is, its
+        // contours.
+        if f.contours > 0.0 {
+            contours(&mut d, m, f);
+        } else if !f.shape.is_empty() {
             for (loops, _) in m.shape_planes(f).unwrap_or_default() {
                 for ring in &loops {
                     d.line(ring, BY_CATEGORY, FAINT, true);
@@ -3218,10 +3221,44 @@ fn cut_layer(d: &mut Drawing, m: &Model, layer: &Layer, ring: &[P2], u: P2, room
     }
 }
 
-/// A surface pattern over `ring`, where its lines are far enough apart to read.
+/// A surface pattern over `ring`, where its lines are far enough apart to read; a solid one at any scale.
 fn surface(d: &mut Drawing, ring: &[P2], pattern: Pattern, color: Rgb) {
-    if MODULE * d.view.scale >= GAP / 2.0 {
+    if pattern == Pattern::Solid || MODULE * d.view.scale >= GAP / 2.0 {
         hatch(d, ring, pattern, P2(1.0, 0.0), color, MODULE);
+    }
+}
+
+/// The most contour lines a floor's plan draws: past it, its contours are too close to read at any scale.
+const MOST_CONTOURS: i64 = 2000;
+
+/// A floor's contours in plan, as Revit draws a toposolid's: where its top stands at each whole number of `contours` over
+/// zero, thin, every fifth heavier.
+fn contours(d: &mut Drawing, m: &Model, f: &crate::model::Floor) {
+    let step = f.contours;
+    let faces = m.floor_faces(f);
+    let zs = faces.iter().flat_map(|(ring, plane)| ring.iter().map(move |q| plane.at(*q)));
+    let (lo, hi) = zs.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), z| (lo.min(z), hi.max(z)));
+    if !(lo.is_finite() && hi.is_finite()) || ((hi - lo) / step) as i64 > MOST_CONTOURS {
+        return;
+    }
+    for (ring, plane) in &faces {
+        let (a, b) = ring.iter().map(|q| plane.at(*q)).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), z| (lo.min(z), hi.max(z)));
+        for k in (a / step).ceil() as i64..=(b / step).floor() as i64 {
+            let at = k as f64 * step;
+            // A convex face crosses a level line at two points of its edges, each edge counted from below to above.
+            let cross: Vec<P2> = ring
+                .iter()
+                .zip(ring.iter().cycle().skip(1))
+                .filter_map(|(p, q)| {
+                    let (zp, zq) = (plane.at(*p), plane.at(*q));
+                    ((zp < at) != (zq < at)).then(|| *p + (*q - *p) * ((at - zp) / (zq - zp)))
+                })
+                .collect();
+            if let [p, q] = cross.as_slice() {
+                let pen = if k.rem_euclid(5) == 0 { Pen::PROJECTION } else { Pen::FINE };
+                d.line(&[*p, *q], pen, FAINT, false);
+            }
+        }
     }
 }
 
@@ -3361,8 +3398,10 @@ fn ceiling(d: &mut Drawing, m: &Model, c: &Ceiling) {
             let replaced = override_patterns(d, m, std::slice::from_ref(&piece), false, (P2(0.0, 0.0), 0.0));
             if !replaced && let Some(x) = material {
                 match x.surface_pattern.as_ref().and_then(|n| m.fill_patterns.get(n)) {
-                    Some(p) => fill_pattern(d, p, std::slice::from_ref(&piece), std::slice::from_ref(&piece), INK, (P2(0.0, 0.0), 0.0)),
-                    None => surface(d, &piece, x.surface, INK),
+                    Some(p) => {
+                        fill_pattern(d, p, std::slice::from_ref(&piece), std::slice::from_ref(&piece), x.surface_ink(INK), (P2(0.0, 0.0), 0.0))
+                    }
+                    None => surface(d, &piece, x.surface, x.surface_ink(INK)),
                 }
             }
         }

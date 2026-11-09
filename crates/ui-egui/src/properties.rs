@@ -168,6 +168,7 @@ fn rows(category: &str) -> &'static [Row] {
             ("Dimensions", "volume_m3", "Volume (m³)", Shown),
             ("Identity Data", "number", "Number", Text),
             ("Identity Data", "name", "Name", Text),
+            ("Identity Data", "occupancy", msg!("Occupancy"), Text),
             ("Other", "point", msg!("Location"), Point),
             ("Other", "frozen", msg!("Frozen"), Flag),
         ],
@@ -688,12 +689,17 @@ fn pattern_name(p: Pattern) -> &'static str {
     PATTERNS.iter().find(|(q, _)| *q == p).map_or("None", |(_, n)| n)
 }
 
+/// The grey a surface pattern is drawn in when its material gives no colour (the plan's faint lines).
+const SURFACE_GREY: [u8; 3] = [120, 120, 120];
+
 /// The Materials window: the library's materials, the one picked to edit, its name as typed (a
 /// rename once typed in), its colour as picked (applied once the mouse lets go).
 pub(crate) struct MaterialsDialog {
     picked: String,
     name: String,
     color: Option<[u8; 3]>,
+    /// Its surface pattern's colour as picked (applied once the mouse lets go).
+    surface_color: Option<[u8; 3]>,
     /// Its transparency as set on the slider, percent (applied once the mouse lets go).
     clear: Option<u8>,
     /// The texture's fields as typed (a tile's width and height, the angle, the offset across and up), for the material and
@@ -706,7 +712,7 @@ pub(crate) struct MaterialsDialog {
 impl MaterialsDialog {
     pub(crate) fn new(m: &Model) -> MaterialsDialog {
         let picked = m.materials.keys().next().cloned().unwrap_or_default();
-        MaterialsDialog { name: picked.clone(), picked, color: None, clear: None, texture: None, swatch: None }
+        MaterialsDialog { name: picked.clone(), picked, color: None, surface_color: None, clear: None, texture: None, swatch: None }
     }
 }
 
@@ -2302,6 +2308,15 @@ impl BimApp {
                             c.response.labelled_by(l.id);
                             ui.end_row();
                         }
+                        // The colour its surface pattern is drawn in, as Revit's Surface Pattern colour: a solid one fills floors
+                        // in plan with it.
+                        let l = ui.label(t("Surface Pattern Color"));
+                        let ink = d.surface_color.get_or_insert(m.surface_color.unwrap_or(SURFACE_GREY));
+                        ui.color_edit_button_srgb(ink).labelled_by(l.id);
+                        if released && Some(*ink) != m.surface_color && !(m.surface_color.is_none() && *ink == SURFACE_GREY) {
+                            run = Some(json!({"name": d.picked, "surface_color": *ink}));
+                        }
+                        ui.end_row();
                         // Its texture: a pattern drawn in code or a picture, over its colour in the 3D view; a tile of it this
                         // big, turned and moved.
                         let l = ui.label(t("Texture"));
@@ -2404,13 +2419,13 @@ impl BimApp {
             self.run("material", p);
         }
         if let Some(material) = picture {
-            let dialog = crate::dialog::Ask::new().add_filter(t("Pictures"), &["png", "jpg", "jpeg"]);
+            let dialog = crate::dialog::Ask::new().add_filter(t("Pictures"), &["png", "jpg", "jpeg"]).set_title(t("Texture"));
             self.ask_file(ctx, dialog, false, move |app, path| {
                 app.run("material", json!({"name": material, "texture": {"kind": "image", "path": path.to_string_lossy()}}));
             });
         }
         if let Some(n) = picked {
-            (d.name, d.picked, d.color, d.clear) = (n.clone(), n, None, None);
+            (d.name, d.picked, d.color, d.surface_color, d.clear) = (n.clone(), n, None, None, None);
         } else if !self.session.model.materials.contains_key(&d.picked) {
             d = MaterialsDialog::new(&self.session.model);
         } else if d.color.is_some_and(|c| self.session.model.materials.get(&d.picked).is_some_and(|m| m.color == c)) {
@@ -2418,6 +2433,9 @@ impl BimApp {
         }
         if d.clear.is_some_and(|c| self.session.model.materials.get(&d.picked).is_some_and(|m| m.transparency == c)) {
             d.clear = None;
+        }
+        if d.surface_color.is_some_and(|c| self.session.model.materials.get(&d.picked).is_some_and(|m| m.surface_color == Some(c))) {
+            d.surface_color = None;
         }
         if !(close || r.should_close()) {
             self.materials_dialog = Some(d);

@@ -115,6 +115,8 @@ mod room_freeze_tests;
 #[cfg(test)]
 mod room_height_tests;
 #[cfg(test)]
+mod site_plan_tests;
+#[cfg(test)]
 mod room_of_tests;
 pub mod rooms;
 #[cfg(test)]

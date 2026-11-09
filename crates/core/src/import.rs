@@ -2053,6 +2053,7 @@ pub(crate) fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, S
                 structural: bearing.contains(&id),
                 pattern_origin: P2(0.0, 0.0),
                 pattern_angle: 0.0,
+                contours: 0.0,
             };
             // What doesn't fold into planes, or folds into others (a step, which a shape can't make), comes in as before: by
             // its largest face turned up.
@@ -2108,6 +2109,7 @@ pub(crate) fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, S
             structural: bearing.contains(&id),
             pattern_origin: P2(0.0, 0.0),
             pattern_angle: 0.0,
+            contours: 0.0,
         };
         let fid = m.insert(Element::Floor(floor));
         from.insert(fid, who(id));

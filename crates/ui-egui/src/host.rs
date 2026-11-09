@@ -156,6 +156,18 @@ impl BimApp {
         Ok(merged)
     }
 
+    /// Letter the window in the page's own fonts from the next frame: its sans (variable in weight or not: semibold titles
+    /// take its 600) and its monospace, each the bytes of a TrueType or OpenType file. IBM Plex stays behind them for what
+    /// they haven't; none puts Plex back.
+    pub fn set_host_fonts(&mut self, sans: Option<Vec<u8>>, mono: Option<Vec<u8>>) {
+        let fonts = crate::style::PageFonts { sans: sans.map(Arc::new), mono: mono.map(Arc::new) };
+        let fonts = (fonts != crate::style::PageFonts::default()).then_some(fonts);
+        if fonts != self.page_fonts {
+            self.page_fonts = fonts;
+            self.refont = true;
+        }
+    }
+
     /// Wear the page's look from the next frame.
     pub fn set_host_look(&mut self, look: HostLook) {
         self.theme_wanted = Some(if look.dark { ThemePreference::Dark } else { ThemePreference::Light });

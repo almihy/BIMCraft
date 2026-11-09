@@ -828,6 +828,10 @@ pub struct BimApp {
     closing: bool,
     title: String,
     styled: bool,
+    /// The lettering a hosting page sets its text in (`host.rs`), which the window wears; and whether it was given since the
+    /// window last set its fonts.
+    page_fonts: Option<style::PageFonts>,
+    refont: bool,
     /// The updater, which the desktop app attaches: a window starts without one, and so never phones home.
     pub updates: Option<bimcraft_update::Updater>,
     /// The 3D mouse's reader, which the desktop app attaches: a window starts without one, so a test never opens a device.
@@ -1453,6 +1457,8 @@ impl BimApp {
             closing: false,
             title: String::new(),
             styled: false,
+            page_fonts: None,
+            refont: false,
             updates: None,
             space_mouse: None,
             revit: None,
@@ -1622,8 +1628,10 @@ impl BimApp {
             ctx.request_repaint();
         }
         if !self.styled {
-            style::apply(&ctx);
-            self.styled = true;
+            style::apply(&ctx, self.page_fonts.as_ref());
+            (self.styled, self.refont) = (true, false);
+        } else if std::mem::take(&mut self.refont) {
+            style::refont(&ctx, self.page_fonts.as_ref());
         }
         if let Some(theme) = self.theme_wanted.take() {
             ctx.set_theme(theme);
@@ -3050,7 +3058,7 @@ impl BimApp {
             return self.ask_host_to_save(ctx, then);
         }
         let later = ctx.clone();
-        self.ask_path(ctx, msg!("BIMCraft project"), "bimcraft", move |app, p| {
+        self.ask_path(ctx, "Save", msg!("BIMCraft project"), "bimcraft", move |app, p| {
             if app.save_to(&p)
                 && let Some(then) = then
             {
@@ -3060,16 +3068,17 @@ impl BimApp {
     }
 
     fn export(&mut self, ctx: &Context, what: &str, ext: &str) {
-        self.ask_path(ctx, what, ext, |app, p| {
+        self.ask_path(ctx, "Export", what, ext, |app, p| {
             app.save_to(&p);
         });
     }
 
-    /// Asks, in the system's file dialog, where to save, and calls `then` with the path, ending in `.ext`, in a later frame.
-    fn ask_path(&mut self, ctx: &Context, what: &str, ext: &str, then: impl FnOnce(&mut BimApp, PathBuf) + 'static) {
+    /// Asks, in the system's file dialog titled `title`, where to save, and calls `then` with the path, ending in `.ext`, in a
+    /// later frame.
+    fn ask_path(&mut self, ctx: &Context, title: &str, what: &str, ext: &str, then: impl FnOnce(&mut BimApp, PathBuf) + 'static) {
         let name = format!("{}.{ext}", self.session.model.name.replace(['/', '\\'], "-"));
         let ext = ext.to_string();
-        let dialog = crate::dialog::Ask::new().add_filter(t(what), &[&ext]).set_file_name(name);
+        let dialog = crate::dialog::Ask::new().add_filter(t(what), &[&ext]).set_file_name(name).set_title(t(title));
         self.ask_file(ctx, dialog, true, move |app, p| {
             then(app, if p.extension().is_some_and(|e| e.eq_ignore_ascii_case(&ext)) { p } else { p.with_extension(&ext) });
         });
@@ -3139,6 +3148,7 @@ impl BimApp {
         (fresh.light_canvas, fresh.scheme, fresh.accent) = (self.light_canvas, self.scheme, self.accent);
         (fresh.panel_colour, fresh.canvas_colour, fresh.text_colour) = (self.panel_colour, self.canvas_colour, self.text_colour);
         fresh.styled = self.styled;
+        (fresh.page_fonts, fresh.refont) = (self.page_fonts.take(), self.refont);
         fresh.theme_wanted = self.theme_wanted.take();
         fresh.docking = std::mem::take(&mut self.docking);
         (fresh.settings_path, fresh.settings_kept) = (self.settings_path.take(), self.settings_kept.take());
@@ -3214,7 +3224,7 @@ impl BimApp {
                 // A hosted window's page reads a Revit model itself, and gives it as the project it becomes.
                 let revit = self.revit.is_some() || self.hosted;
                 let name = t(if revit { msg!("BIMCraft project, IFC or Revit") } else { "BIMCraft project or IFC" });
-                let dialog = crate::dialog::Ask::new().add_filter(name, &revit::open_extensions(revit));
+                let dialog = crate::dialog::Ask::new().add_filter(name, &revit::open_extensions(revit)).set_title(t("Open"));
                 self.ask_file(ctx, dialog, false, |app, path| {
                     app.open_path(&path);
                 });
@@ -4487,7 +4497,7 @@ impl BimApp {
             panel(ui, msg!("Mode"), |ui| {
                 let tip = msg!("Load Family: a family saved as a .json file, BIMCraft's own");
                 if big_button(ui, Icon::LoadFamily, "Load Family", false, tip).clicked() {
-                    let dialog = crate::dialog::Ask::new().add_filter(t("BIMCraft family"), &["json"]);
+                    let dialog = crate::dialog::Ask::new().add_filter(t("BIMCraft family"), &["json"]).set_title(t("Load Family"));
                     self.ask_file(ui.ctx(), dialog, false, |app, path| {
                         if let Some(r) = app.run("family", json!({"path": path.to_string_lossy()})) {
                             let name = r["name"].as_str().unwrap_or_default().to_string();

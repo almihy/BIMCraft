@@ -451,9 +451,10 @@ other_files(
         "room",
         ui_msg!("Room"),
         &["RM"],
-        "{point: [x,y], level?, name?, number?, top_level?, limit_offset?, base_offset?, frozen?} bounded by the walls and the \
-         room separation lines around the point (walls the level's `computation_height` cuts; separation lines whatever their \
-         height). Placed where nothing encloses it, or in a space another room has (two rooms can't share one; the first \
+        "{point: [x,y], level?, name?, number?, occupancy?, top_level?, limit_offset?, base_offset?, frozen?} bounded by the walls \
+         and the room separation lines around the point (walls the level's `computation_height` cuts; separation lines \
+         whatever their height). `occupancy` is Revit's Occupancy, what the room is used for (bedroom, office, kitchen; also \
+         `modify {id, occupancy}`): what reads a room's use reads it, and its name only when it is empty. Placed where nothing encloses it, or in a space another room has (two rooms can't share one; the first \
          keeps it), it is placed unbounded, a 1000 mm square, and the reply has a `warning`. Its height is Revit's: from \
          `base_offset` mm over its level (0) up to `limit_offset` mm over its upper limit `top_level` (null: Not Bounded, \
          over its own level). Unless given, 300 mm under the level above (`top_level` that level, `limit_offset` -300), or \
@@ -1017,11 +1018,13 @@ other_files(
         "material",
         "Materials",
         &[],
-        "{name, color?: \"#rrggbb\" | [r, g, b], transparency?: 0-100, cut?, surface?, texture?: {kind?, size?: [w, h], angle?, offset?: [x, y], path?, \
+        "{name, color?: \"#rrggbb\" | [r, g, b], transparency?: 0-100, cut?, surface?, surface_color?, texture?: {kind?, size?: [w, h], angle?, offset?: [x, y], path?, \
          image?} | null, rename?, delete?: true} a material of the project's library, created or changed: its colour in shaded 3D \
          views, its `transparency` there (percent of what lies behind it that shows through, 0 opaque; the starter Glass has 70), \
          the pattern its cut shows in plans and sections (where a layer is wide enough to hold it), and the one its \
-         surfaces show at its size in the building (a floor's top in plan, a ceiling's underside in its ceiling plan). Patterns: \
+         surfaces show at its size in the building (a floor's top in plan, a ceiling's underside in its ceiling plan), drawn in \
+         `surface_color` (\"#rrggbb\" or [r, g, b]; null, the drawing's grey): a solid one fills a plan's floors in that colour, as \
+         a site plan's lawns and roads. Patterns: \
          none, solid, diagonal, crosshatch, horizontal, vertical, grid, brick, concrete, insulation, or the name of one of the \
          project's fill patterns (see `fill_pattern`), kept while the material shows it and renamed with it. Its `texture` is what its \
          surfaces look like in the 3D view, over its colour, a tile of it `size` mm across and up, turned `angle` degrees and \
@@ -7667,6 +7670,7 @@ fn floor(s: &mut Session, p: &Value) -> R {
     };
     let (offset, slope) = (num(c, p, "offset")?.unwrap_or(0.0), num(c, p, "slope")?.unwrap_or(0.0));
     let structural = flag(c, p, "structural")?;
+    let contours = num(c, p, "contours")?.unwrap_or(0.0);
     // Its openings lie inside it and apart, or the model refuses it.
     let area = m2(geom::area(&boundary) - openings.iter().map(|o| geom::area(o).abs()).sum::<f64>());
     let id = s.model_mut().insert(Element::Floor(Floor {
@@ -7683,6 +7687,7 @@ fn floor(s: &mut Session, p: &Value) -> R {
         shape: Default::default(),
         pattern_origin: P2(0.0, 0.0),
         pattern_angle: 0.0,
+        contours,
     }));
     Ok(json!({"id": id, "area_m2": area}))
 }
@@ -8006,6 +8011,7 @@ fn room(s: &mut Session, p: &Value) -> R {
         })),
     };
     let mut r = Room::new(level, point, name, number.clone());
+    r.occupancy = string(c, p, "occupancy")?.unwrap_or_default();
     r.frozen = flag(c, p, "frozen")?;
     r.base_offset = num(c, p, "base_offset")?.unwrap_or(0.0);
     let limit_offset = num(c, p, "limit_offset")?;
@@ -10372,6 +10378,14 @@ fn material(s: &mut Session, p: &Value) -> R {
     }
     if let Some(v) = p.get("color").filter(|v| !v.is_null()) {
         mat.color = colour(v).ok_or_else(|| bad(c, format!("`color` is \"#rrggbb\" or [r, g, b], each 0 to 255, not {v}")))?;
+    }
+    match p.get("surface_color") {
+        None => {}
+        Some(Value::Null) => mat.surface_color = None,
+        Some(v) => {
+            mat.surface_color =
+                Some(colour(v).ok_or_else(|| bad(c, format!("`surface_color` is \"#rrggbb\" or [r, g, b], each 0 to 255, or null, not {v}")))?);
+        }
     }
     if let Some(v) = p.get("transparency").filter(|v| !v.is_null()) {
         mat.transparency = v

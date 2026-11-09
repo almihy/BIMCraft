@@ -33,7 +33,7 @@ impl BimApp {
     /// Insert > Point Cloud: the files the user picks, then the box for them.
     pub(crate) fn point_cloud_dialog(&mut self, ctx: &Context) {
         let formats = ["pts", "xyz", "txt", "ply", "las", "laz", "e57", "rcp", "rcs"];
-        let dialog = crate::dialog::Ask::new().add_filter(t("Point clouds"), &formats);
+        let dialog = crate::dialog::Ask::new().add_filter(t("Point clouds"), &formats).set_title(t("Point Cloud"));
         self.ask_files(ctx, dialog, |app, paths| app.point_cloud_paths(paths));
     }
 

@@ -4,6 +4,7 @@
 //! ```js
 //! const app = new WebApp();
 //! app.set_theme('{"dark": false, "panel": "#ffffff", "accent": "#2b50d8"}');  // before or after the start
+//! app.set_fonts(sansTtfBytes, monoTtfBytes);  // the page's lettering, before or after the start
 //! await app.start(canvas, projectJsonOrNull, onSave, onChange);
 //! app.project();          // the model's JSON, to save
 //! app.saved();            // what project() last gave is saved
@@ -158,6 +159,8 @@ pub struct WebApp {
     given: RefCell<Option<Arc<Model>>>,
     /// The look asked for, kept for the start when asked before it.
     look: RefCell<Option<HostLook>>,
+    /// The page's fonts, kept for the start when given before it: its sans and its monospace.
+    fonts: RefCell<(Option<Vec<u8>>, Option<Vec<u8>>)>,
     /// What the page hears of files, set before the start or after it.
     files: Rc<RefCell<FileHooks>>,
     /// The model as `take_changes` last gave it, with the others' changes since: what changed here since is this person's,
@@ -175,6 +178,7 @@ impl WebApp {
             changes: Rc::new(Cell::new(0)),
             given: RefCell::new(None),
             look: RefCell::new(None),
+            fonts: RefCell::new((None, None)),
             files: Rc::new(RefCell::new(FileHooks::default())),
             sent: RefCell::new(None),
         }
@@ -198,6 +202,8 @@ impl WebApp {
         if let Some(look) = *self.look.borrow() {
             app.set_host_look(look);
         }
+        let (sans, mono) = self.fonts.borrow().clone();
+        app.set_host_fonts(sans, mono);
         *self.sent.borrow_mut() = Some(Arc::clone(&app.session.model));
         let host = Host {
             seen: Arc::clone(&app.session.model),
@@ -345,6 +351,16 @@ impl WebApp {
         }
         self.repaint();
         Ok(())
+    }
+
+    /// Letters the interface in the page's own fonts: `sans` (variable in weight or not) and `mono`, each the bytes of a
+    /// TrueType or OpenType file (not WOFF); none keeps BIMCraft's IBM Plex. Before or after the start.
+    pub fn set_fonts(&self, sans: Option<Vec<u8>>, mono: Option<Vec<u8>>) {
+        *self.fonts.borrow_mut() = (sans.clone(), mono.clone());
+        if let Some(mut host) = self.runner.app_mut::<Host>() {
+            host.app.set_host_fonts(sans, mono);
+        }
+        self.repaint();
     }
 
     /// What the page hears of files: `on_ask(askJson)` when the person wants a file, or where to save one; `on_written()` when

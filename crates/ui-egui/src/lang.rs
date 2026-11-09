@@ -174,6 +174,11 @@ fn cjk_font_tried(ctx: &Context) -> Option<bool> {
     ctx.data(|d| d.get_temp::<Option<bool>>(Id::new("cjk-font"))).flatten()
 }
 
+/// The window's fonts were set anew (`style::refont`): [`use_cjk_font`] puts the CJK fonts behind them again.
+pub(crate) fn forget_cjk_font(ctx: &Context) {
+    ctx.data_mut(|d| d.remove::<Option<bool>>(Id::new("cjk-font")));
+}
+
 /// Looks for fonts with the hanzi and the Hangul. The app holds one, so that a test can say there is none.
 pub type FontFinder = fn() -> Fonts;
 

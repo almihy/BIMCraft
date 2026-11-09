@@ -506,7 +506,7 @@ impl BimApp {
     /// Import DXF…: the file the user picks, read into the title block shown (a new one, named for the file, when there's
     /// none), and the dialog open on it again.
     fn import_title_block(&mut self, ctx: &Context, name: String) {
-        let dialog = crate::dialog::Ask::new().add_filter(t("CAD drawings (DWG, DXF)"), &["dxf", "dwg"]);
+        let dialog = crate::dialog::Ask::new().add_filter(t("CAD drawings (DWG, DXF)"), &["dxf", "dwg"]).set_title(t("Title Blocks"));
         self.ask_files(ctx, dialog, move |app, paths| {
             let Some(path) = paths.into_iter().next() else { return };
             let name = if name.is_empty() {

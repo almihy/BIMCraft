@@ -41,6 +41,21 @@ fn a_room_reaches_300_mm_under_the_level_above_unless_told_and_its_volume_is_its
 }
 
 #[test]
+fn a_room_says_what_it_is_used_for_in_its_occupancy_which_modify_changes_and_a_schedule_lists() {
+    let mut s = Session::new();
+    let id = box_with_room(&mut s, json!({"name": "Majlis", "occupancy": "Living"}));
+    assert_eq!(room(&mut s, id)["occupancy"], "Living");
+    run(&mut s, "modify", json!({"id": id, "occupancy": "Guest reception"}));
+    assert_eq!(room(&mut s, id)["occupancy"], "Guest reception");
+    // Emptied, it isn't written.
+    run(&mut s, "modify", json!({"id": id, "occupancy": ""}));
+    assert_eq!(room(&mut s, id).get("occupancy"), None);
+    run(&mut s, "modify", json!({"id": id, "occupancy": "Living"}));
+    let t = run(&mut s, "schedule", json!({"name": "Uses", "category": "rooms", "fields": ["Name", "Occupancy"]}));
+    assert!(t.to_string().contains("\"Living\""), "{t}");
+}
+
+#[test]
 fn a_room_reaches_its_upper_limit_plus_its_limit_offset_from_its_base_offset() {
     let mut s = Session::new();
     let l2 = run(&mut s, "inspect", json!({}))["levels"].as_array().unwrap().iter().find(|l| l["name"] == "Level 2").cloned();
