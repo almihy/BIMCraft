@@ -3089,7 +3089,7 @@ fn relink(s: &mut Session) -> Vec<Value> {
 
 /// The `path` a link made from a project's text is kept under: `text:` and its name. No file is read for it; a front end
 /// that keeps the project elsewhere (Arqiflow's site) links it again from its text.
-const LINK_TEXT: &str = "text:";
+const LINK_TEXT: &str = crate::link::FROM_TEXT;
 
 /// A project's text, read as `open` reads a file: its own links are not followed.
 fn read_link_text(text: &str) -> Result<Arc<Model>, String> {

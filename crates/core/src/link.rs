@@ -15,6 +15,10 @@ use crate::geom::P2;
 use crate::ids::{Id, LINKED};
 use crate::model::{Element, Model};
 
+/// The start of the `path` of a link made from a project's text (`link {text}`): `text:` and its name. No file is read for
+/// it; a front end that keeps the project elsewhere (Arqiflow's site) links it again from its text.
+pub const FROM_TEXT: &str = "text:";
+
 /// How close two levels' elevations must be, mm, for a link's level to stand on this project's.
 const SAME_LEVEL: f64 = 1.0;
 

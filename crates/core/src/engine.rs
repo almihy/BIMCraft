@@ -110,7 +110,7 @@ pub struct Step {
     pub made: Vec<(&'static str, usize)>,
     pub removed: Vec<(&'static str, usize)>,
     /// Whether the model the step goes back to passed [`Model::check`]: going back to it needs no check.
-    checked: bool,
+    pub(crate) checked: bool,
 }
 
 impl Step {
@@ -157,8 +157,8 @@ pub struct Session {
     /// project's first phase, and no option. Not the model's: set with `phase` and `option`.
     pub phase: Option<String>,
     pub option: Option<String>,
-    undo: Vec<(Step, Arc<Model>)>,
-    redo: Vec<(Step, Arc<Model>)>,
+    pub(crate) undo: Vec<(Step, Arc<Model>)>,
+    pub(crate) redo: Vec<(Step, Arc<Model>)>,
     /// How many times a command's model was checked, for tests that it was or wasn't.
     #[cfg(test)]
     pub(crate) checks: usize,
@@ -179,7 +179,7 @@ pub struct Session {
     /// The last model a command left that passed [`Model::check`]. Held here, it is never changed in place: a change
     /// outside a command copies it first, so a model still this one is one that passed, and the next command need only
     /// check what it changes ([`Model::check_changed`]).
-    verified: Option<Arc<Model>>,
+    pub(crate) verified: Option<Arc<Model>>,
 }
 
 impl Default for Session {
