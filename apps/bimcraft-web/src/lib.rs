@@ -15,6 +15,8 @@
 //! // Editing together (bimcraft_core::sync): changes keyed by GUID, to and from the others' copies.
 //! app.take_changes();       // what changed here since last taken: '{"elements": {guid: json | null}, "project": {...}}'
 //! app.apply_changes(json);  // the others' changes taken in, checked: '{"taken": n, "refused": [...]}'
+//! app.history();            // this person's undo history, to keep across a reload (by GUID)
+//! app.restore_history(text);  // put back on the project opened again: '{"undo": n, "redo": n}'
 //! ```
 //!
 //! Its files are the page's (`bimcraft_ui_egui::host`). Open, Link, Import CAD, Point Cloud and Export ask the page:
@@ -316,6 +318,22 @@ impl WebApp {
         };
         self.repaint();
         Ok(merged.to_json().to_string())
+    }
+
+    /// This person's undo history, to keep outside the page so a reload keeps it (`bimcraft_core::sync::History`, JSON):
+    /// their own commands' steps, by GUID.
+    pub fn history(&self) -> Result<String, JsValue> {
+        Ok(self.host()?.app.session.kept_history().map_err(err)?.to_json())
+    }
+
+    /// Puts back a history `history` gave, on the same project opened again, once it says what the room says: what the
+    /// others changed since is brought to every step, so undo takes back this person's own work alone. The model stays as
+    /// it is. Replies `{"undo": n, "redo": n}`, or throws (another project's history).
+    pub fn restore_history(&self, history: &str) -> Result<String, JsValue> {
+        let h = bimcraft_core::sync::History::read(history).map_err(err)?;
+        let (undo, redo) = self.host()?.app.session.restore_history(&h).map_err(err)?;
+        self.repaint();
+        Ok(serde_json::json!({"undo": undo, "redo": redo}).to_string())
     }
 
     /// Dresses the interface in the page's look: `{"dark": bool, "compact": bool}` and colours as `"#rrggbb"`: `panel`, `text`,
