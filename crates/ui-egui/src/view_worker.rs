@@ -2,8 +2,11 @@
 //! input and one completed result. Superseded generations never reach the caller.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, Weak, mpsc};
+use std::sync::{Arc, Mutex, Weak};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::{OnceLock, mpsc};
 
+#[cfg(not(target_arch = "wasm32"))]
 type Task = Box<dyn FnOnce() + Send>;
 
 /// Cooperative cancellation; identity also names a generation across counter wrap/undo.
@@ -22,10 +25,12 @@ impl Cancel {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 struct Pool {
     send: mpsc::SyncSender<Task>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Pool {
     fn shared() -> Result<&'static Self, String> {
         static POOL: OnceLock<Result<Pool, String>> = OnceLock::new();
@@ -121,10 +126,25 @@ impl<I: Send + 'static, O: Send + 'static> Latest<I, O> {
     }
 
     pub(crate) fn start(&self) -> Result<(), String> {
-        let mut state = self.state.lock().map_err(|_| "view worker state is unavailable")?;
+        let state = self.state.lock().map_err(|_| "view worker state is unavailable")?;
         if state.running || state.pending.is_none() {
             return Ok(());
         }
+        // A browser page has no threads to spare (a wasm32 build without atomics): the job runs here, in the frame.
+        #[cfg(target_arch = "wasm32")]
+        {
+            let mut state = state;
+            state.running = true;
+            drop(state);
+            Self::run(Arc::downgrade(&self.state), Arc::clone(&self.wake));
+            Ok(())
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.start_on_pool(state)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn start_on_pool(&self, mut state: std::sync::MutexGuard<'_, State<I, O>>) -> Result<(), String> {
         let pool = Pool::shared()?;
         state.running = true;
         let weak = Arc::downgrade(&self.state);
