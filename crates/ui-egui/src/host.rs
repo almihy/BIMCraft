@@ -11,10 +11,13 @@
 //! take it ([`BimApp::take_written`]). A model the project links is read from the page too: [`BimApp::files_wanted`] names
 //! the files its links read that are not read yet, and [`BimApp::reload_links`] reads them once the page gave them.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use bimcraft_core::engine::Session;
+use bimcraft_core::ids::Guid;
 use bimcraft_core::model::{Element, Model};
+use bimcraft_core::sync::{Changes, Merged};
 use egui::{Context, ThemePreference};
 use serde_json::Value;
 
@@ -142,6 +145,15 @@ impl BimApp {
         }
         self.tidy();
         reply
+    }
+
+    /// Take in what others editing the same project changed (`bimcraft_core::sync`): the model checked, what would break it
+    /// refused and named, and the elements of `keep` (this person's changes the page has not sent yet) left as they are.
+    /// Undo and redo stay this person's: they take back and put back their own commands, not the others' changes.
+    pub fn merge_remote(&mut self, c: &Changes, keep: &BTreeSet<Guid>) -> Result<Merged, String> {
+        let merged = self.session.merge(c, keep)?;
+        self.tidy();
+        Ok(merged)
     }
 
     /// Wear the page's look from the next frame.

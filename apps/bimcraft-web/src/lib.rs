@@ -11,6 +11,10 @@
 //! app.load(projectJson);  // put a newer model in place (the agent changed it on the server)
 //! app.execute("wall", '{"points": [[0, 0], [6000, 0]]}');  // a command on the open model, an undo step
 //! app.link_site(siteProjectJson);  // the site around the model, linked: halftone, never edited (again: the newer site)
+//!
+//! // Editing together (bimcraft_core::sync): changes keyed by GUID, to and from the others' copies.
+//! app.take_changes();       // what changed here since last taken: '{"elements": {guid: json | null}, "project": {...}}'
+//! app.apply_changes(json);  // the others' changes taken in, checked: '{"taken": n, "refused": [...]}'
 //! ```
 //!
 //! Its files are the page's (`bimcraft_ui_egui::host`). Open, Link, Import CAD, Point Cloud and Export ask the page:
@@ -27,11 +31,14 @@
 //! ```
 #![cfg(target_arch = "wasm32")]
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use bimcraft_core::engine::Session;
+use bimcraft_core::ids::Guid;
 use bimcraft_core::model::Model;
+use bimcraft_core::sync::{self, Changes};
 use bimcraft_ui_egui::BimApp;
 use bimcraft_ui_egui::host::{HostLook, Skin};
 use serde_json::Value;
@@ -153,6 +160,9 @@ pub struct WebApp {
     look: RefCell<Option<HostLook>>,
     /// What the page hears of files, set before the start or after it.
     files: Rc<RefCell<FileHooks>>,
+    /// The model as `take_changes` last gave it, with the others' changes since: what changed here since is this person's,
+    /// not sent yet.
+    sent: RefCell<Option<Arc<Model>>>,
 }
 
 #[wasm_bindgen]
@@ -166,6 +176,7 @@ impl WebApp {
             given: RefCell::new(None),
             look: RefCell::new(None),
             files: Rc::new(RefCell::new(FileHooks::default())),
+            sent: RefCell::new(None),
         }
     }
 
@@ -187,6 +198,7 @@ impl WebApp {
         if let Some(look) = *self.look.borrow() {
             app.set_host_look(look);
         }
+        *self.sent.borrow_mut() = Some(Arc::clone(&app.session.model));
         let host = Host {
             seen: Arc::clone(&app.session.model),
             app,
@@ -248,6 +260,7 @@ impl WebApp {
             let mut host = self.host()?;
             host.app.replace_model(model);
             host.seen = Arc::clone(&host.app.session.model);
+            *self.sent.borrow_mut() = Some(Arc::clone(&host.app.session.model));
         }
         self.repaint();
         Ok(())
@@ -267,6 +280,42 @@ impl WebApp {
     /// given again, the newer site takes its place. Its reply as JSON, or its refusal thrown.
     pub fn link_site(&self, project: &str) -> Result<String, JsValue> {
         self.execute("link", &serde_json::json!({"text": project, "name": SITE}).to_string())
+    }
+
+    /// What changed in the model since this was last called (or since the start, or `load`), to send to the others editing
+    /// it: `{"elements": {guid: json | null}, "project": {key: json | null}}`, by GUID, each element as the file holds it.
+    pub fn take_changes(&self) -> Result<String, JsValue> {
+        let now = Arc::clone(&self.host()?.app.session.model);
+        let sent = self.sent.borrow_mut().replace(Arc::clone(&now));
+        let Some(sent) = sent else { return Ok(Changes::default().to_json()) };
+        match sync::changes(&sent, &now) {
+            Ok(c) => Ok(c.to_json()),
+            Err(e) => {
+                *self.sent.borrow_mut() = Some(sent);
+                Err(err(e))
+            }
+        }
+    }
+
+    /// Takes in what the others changed (`{"elements": {guid: json | null}, "project": {key: json | null}, "complete"?}`;
+    /// `complete`: everything the shared model holds, what it doesn't name being removed). The model is checked: what would
+    /// break it is left out and named. This person's changes not taken yet stay as they are, to be sent; their undo stays
+    /// theirs. Replies `{"taken": n, "refused": [{what, error}]}`.
+    pub fn apply_changes(&self, changes: &str) -> Result<String, JsValue> {
+        let c = Changes::read(changes).map_err(err)?;
+        let merged = {
+            let mut host = self.host()?;
+            let now = Arc::clone(&host.app.session.model);
+            let sent = self.sent.borrow().clone().unwrap_or_else(|| Arc::clone(&now));
+            let mine: BTreeSet<Guid> = sync::changes(&sent, &now).map_err(err)?.elements.into_keys().collect();
+            let merged = host.app.merge_remote(&c, &mine).map_err(err)?;
+            // What was sent takes the same changes, so that what changed here since is still this person's alone.
+            let after = sent.with_changes(&merged.taken, &merged.ids).map(Arc::new).unwrap_or_else(|_| Arc::clone(&host.app.session.model));
+            *self.sent.borrow_mut() = Some(after);
+            merged
+        };
+        self.repaint();
+        Ok(merged.to_json().to_string())
     }
 
     /// Dresses the interface in the page's look: `{"dark": bool, "compact": bool}` and colours as `"#rrggbb"`: `panel`, `text`,

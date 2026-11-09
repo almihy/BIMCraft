@@ -7246,7 +7246,7 @@ impl Model {
 
     /// Whether everything but the elements and the ids still to give is the same in both. Every field is named, so a new
     /// one must say how it compares.
-    fn same_settings(&self, o: &Model) -> bool {
+    pub(crate) fn same_settings(&self, o: &Model) -> bool {
         let Model {
             format,
             name,

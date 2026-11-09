@@ -131,6 +131,20 @@ impl Engine {
         self.s.model.to_json().map_err(err)
     }
 
+    /// Everything the model holds, as changes that make another copy of it say the same (`bimcraft_core::sync`):
+    /// `{"elements": {guid: json}, "project": {key: json}, "complete": true}`. A link from a project's text is left out.
+    pub fn entries(&self) -> Result<String, JsError> {
+        bimcraft_core::sync::entries(&self.s.model).map(|c| c.to_json()).map_err(err)
+    }
+
+    /// Takes in another copy's changes (`{"elements": {guid: json | null}, "project": {key: json | null}, "complete"?}`):
+    /// the model checked, and what would break it left out. Replies `{"taken": n, "refused": [{what, error}]}`.
+    pub fn apply_changes(&mut self, changes: &str) -> Result<String, JsError> {
+        let c = bimcraft_core::sync::Changes::read(changes).map_err(err)?;
+        let merged = self.s.merge(&c, &Default::default()).map_err(err)?;
+        Ok(merged.to_json().to_string())
+    }
+
     /// Opens a project from its JSON text.
     pub fn open_project(&mut self, text: &str) -> Result<String, JsError> {
         let (m, left_out) = bimcraft_core::model::Model::read(text).map_err(err)?;
