@@ -41,6 +41,14 @@ impl Engine {
         self.s.script(text).map(|v| Value::Array(v).to_string()).map_err(err)
     }
 
+    /// Links the project `project` (its .bimcraft JSON) under `name`, a reference drawn halftone in the plans, sections and
+    /// 3D and never edited: the `link {text, name}` command, an undo step. Linked again under the same name, the newer text
+    /// takes its place. Its reply as JSON (`id`, `name`, `elements`, `replaced`).
+    pub fn link_text(&mut self, name: &str, project: &str) -> Result<String, JsError> {
+        let p = serde_json::json!({"text": project, "name": name});
+        self.s.execute("link", &p).map(|v| v.to_string()).map_err(err)
+    }
+
     /// Builds the sample house.
     pub fn sample(&mut self) -> Result<(), JsError> {
         self.s.script(SAMPLE).map(|_| ()).map_err(err)

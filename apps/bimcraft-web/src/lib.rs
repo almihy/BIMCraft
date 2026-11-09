@@ -10,6 +10,7 @@
 //! app.rev();              // a counter that goes up when the model changes
 //! app.load(projectJson);  // put a newer model in place (the agent changed it on the server)
 //! app.execute("wall", '{"points": [[0, 0], [6000, 0]]}');  // a command on the open model, an undo step
+//! app.link_site(siteProjectJson);  // the site around the model, linked: halftone, never edited (again: the newer site)
 //! ```
 #![cfg(target_arch = "wasm32")]
 use std::cell::{Cell, RefCell};
@@ -189,6 +190,13 @@ impl WebApp {
         reply.map(|v| v.to_string()).map_err(err)
     }
 
+    /// Shows the site (`project`, an engine project of it, .bimcraft JSON) around the model, as Revit shows a linked site:
+    /// halftone in the plans, sections and 3D, snapped to and never edited. It is the link named "Site", made from text;
+    /// given again, the newer site takes its place. Its reply as JSON, or its refusal thrown.
+    pub fn link_site(&self, project: &str) -> Result<String, JsValue> {
+        self.execute("link", &serde_json::json!({"text": project, "name": SITE}).to_string())
+    }
+
     /// Dresses the interface in the page's look: `{"dark": bool, "compact": bool}` and colours as `"#rrggbb"`: `panel`, `text`,
     /// `accent`, `canvas`, `app_bar`, `app_bar_text`, `border`, `muted`, `bar`, `surface`. Any left out keeps BIMCraft's own.
     pub fn set_theme(&self, theme: &str) -> Result<(), JsValue> {
@@ -234,6 +242,9 @@ impl Default for WebApp {
         WebApp::new()
     }
 }
+
+/// The name of the link `WebApp::link_site` makes.
+const SITE: &str = "Site";
 
 /// `#rrggbb` as `[r, g, b]`.
 fn hex(s: &str) -> Option<[u8; 3]> {
