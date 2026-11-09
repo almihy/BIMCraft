@@ -2863,14 +2863,14 @@ fn with_links(s: &mut Session, mut reply: Value) -> Value {
 fn open_file(s: &mut Session, p: &Value) -> R {
     let c = "open";
     let path = PathBuf::from(string(c, p, "path")?.ok_or_else(|| bad(c, "`path` is required"))?);
-    let size = std::fs::metadata(&path).map_err(|e| bad(c, format!("{}: {e}", path.display())))?.len();
+    let size = s.files.given.size(&path).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
     let most = max_file(&ext(&path));
     if size >= most {
         return Err(bad(c, format!("{} is too large ({size} bytes; `open` takes one under {most})", path.display())));
     }
     // IFC comes in as a new project: saving it asks where.
     if ext(&path) == "ifc" {
-        let bytes = std::fs::read(&path).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
+        let bytes = s.files.given.read(&path).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
         let stem = path.file_stem().map_or_else(|| "Project".into(), |s| s.to_string_lossy().into_owned());
         let file = crate::step::parse(&bytes).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
         let seed = crate::import::seed(&bytes);
@@ -2893,7 +2893,7 @@ fn open_file(s: &mut Session, p: &Value) -> R {
         s.reset(i.model, None);
         return Ok(reply);
     }
-    let text = std::fs::read_to_string(&path).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
+    let text = s.files.given.read_to_string(&path).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
     let (mut m, left_out) = Model::read(&text).map_err(|e| bad(c, format!("{} is not a BIMCraft project: {e}", path.display())))?;
     m.adopt_materials();
     // A project parameter named as a phase or a design option is held under is from before they were: it keeps its values, renamed.
@@ -2916,7 +2916,9 @@ fn open_file(s: &mut Session, p: &Value) -> R {
     m.sync_library();
     m.check().map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
     let name = m.name.clone();
-    s.reset(m, Some(path.clone()));
+    // A project a front end gave is no file on disk to save back to.
+    let kept = (!s.files.given.has(&path)).then(|| path.clone());
+    s.reset(m, kept);
     let mut reply = json!({"path": path, "name": name});
     if !renamed.is_empty() {
         reply["renamed"] = json!(renamed);
@@ -3037,6 +3039,7 @@ fn insert_from(s: &mut Session, p: &Value) -> R {
     let path = string(c, p, "path")?.ok_or_else(|| bad(c, "`path` is required"))?;
     // Read as `open` reads it, in a session of its own.
     let mut other = Session::new();
+    other.files.given = s.files.given.clone();
     open_file(&mut other, &json!({"path": path})).map_err(|e| bad(c, e.trim_start_matches("open: ")))?;
     let ids: Vec<Id> = match p.get("ids") {
         v if absent(v) => Vec::new(),
@@ -3057,6 +3060,7 @@ fn read_link(s: &Session, path: &str) -> Result<Arc<Model>, String> {
     }
     let full = beside(s, path);
     let mut other = Session::new();
+    other.files.given = s.files.given.clone();
     open_file(&mut other, &json!({"path": full})).map_err(|e| e.trim_start_matches("open: ").to_string())?;
     Ok(other.model)
 }
@@ -3199,12 +3203,13 @@ fn save(s: &mut Session, p: &Value) -> R {
     };
     let format = ext(&path);
     if format == "ifc" {
-        std::fs::write(&path, crate::ifc::export(&s.model)).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
+        let ifc = crate::ifc::export(&s.model).into_bytes();
+        s.files.write(&path, ifc).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
         return Ok(json!({"path": path, "format": "IFC4"}));
     }
     if format == "glb" {
         let out = crate::gltf::export(&crate::link::seen(&s.model)).map_err(|e| bad(c, e))?;
-        std::fs::write(&path, &out.bytes).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
+        s.files.write(&path, out.bytes).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
         return Ok(json!({"path": path, "format": "glTF 2.0", "elements": out.nodes, "triangles": out.triangles}));
     }
     if format == "pdf" {
@@ -3223,15 +3228,25 @@ fn save(s: &mut Session, p: &Value) -> R {
         }
         sheets.sort_by(|a, b| a.0.cmp(b.0));
         let pages: Vec<(&Drawing, P2)> = sheets.iter().map(|(_, d, p)| (d, *p)).collect();
-        std::fs::write(&path, pdf::pdf(&pages)).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
-        return Ok(json!({"path": path, "format": "PDF", "pages": pages.len()}));
+        let (bytes, count) = (pdf::pdf(&pages), pages.len());
+        drop(pages);
+        drop(sheets);
+        drop(seen);
+        s.files.write(&path, bytes).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
+        return Ok(json!({"path": path, "format": "PDF", "pages": count}));
     }
     if matches!(format.as_str(), "svg" | "png") {
         let level = level_param(c, &s.model, &json!({}), "view")?;
-        write_plan(&render::plan(&crate::link::seen(&s.model), level, 1600, 1000), &path)?;
+        let bytes = plan_bytes(&render::plan(&crate::link::seen(&s.model), level, 1600, 1000), &path)?;
+        s.files.write(&path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
         return Ok(json!({"path": path, "format": format}));
     }
     let text = s.model.to_json().map_err(|e| bad(c, e))?;
+    if s.files.keeps_writes() {
+        // Written for the front end to take: no file on disk is the project's.
+        s.files.write(&path, text.into_bytes()).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
+        return Ok(json!({"path": path, "format": "bimcraft"}));
+    }
     crate::autosave::atomic_write(&path, &text).map_err(|e| bad(c, e))?;
     s.path = Some(path.clone());
     Ok(json!({"path": path, "format": "bimcraft"}))
@@ -3272,21 +3287,21 @@ pub fn base64(bytes: &[u8]) -> String {
     out
 }
 
-fn write_plan(d: &render::Drawing, path: &Path) -> Result<(), String> {
-    let bytes = match ext(path).as_str() {
+/// A plan as the file `path` names it: .svg or .png.
+fn plan_bytes(d: &render::Drawing, path: &Path) -> Result<Vec<u8>, String> {
+    Ok(match ext(path).as_str() {
         "svg" => render::svg(d).into_bytes(),
         "png" => render::png(d)?,
         other => return Err(format!("render: write a .png or .svg, not `.{other}`")),
-    };
-    std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))
+    })
 }
 
 /// A picture that only comes as PNG (the 3D view, a section): written to `path`, a .png, when
 /// there is one, else returned in base64; `info` says what it is.
-fn png_reply(c: &str, p: &Value, png: Vec<u8>, mut info: Value) -> R {
+fn png_reply(c: &str, files: &mut crate::files::Files, p: &Value, png: Vec<u8>, mut info: Value) -> R {
     match string(c, p, "path")? {
         Some(path) if ext(Path::new(&path)) == "png" => {
-            std::fs::write(&path, png).map_err(|e| bad(c, format!("{path}: {e}")))?;
+            files.write(Path::new(&path), png).map_err(|e| bad(c, format!("{path}: {e}")))?;
             info["path"] = json!(path);
         }
         Some(path) => return Err(bad(c, format!("only plans make SVGs; save this view as .png, not as {path}"))),
@@ -3464,6 +3479,7 @@ fn render_view(s: &mut Session, p: &Value) -> R {
         let png = image.png().map_err(|e| bad(c, e))?;
         return png_reply(
             c,
+            &mut s.files,
             p,
             png,
             json!({"width": w3, "height": h3, "view": name, "kind": "3D view", "azimuth": cam.azimuth, "elevation": cam.elevation,
@@ -3478,7 +3494,7 @@ fn render_view(s: &mut Session, p: &Value) -> R {
     });
     if let Some((id, name, kind)) = cut {
         let (png, notes) = render::section_png_noted(m, id, render::section_fit(m, id, w3, h3)).map_err(|e| bad(c, e))?;
-        return png_reply(c, p, png, with_notes(json!({"width": w3, "height": h3, "view": name, "kind": kind}), &notes));
+        return png_reply(c, &mut s.files, p, png, with_notes(json!({"width": w3, "height": h3, "view": name, "kind": kind}), &notes));
     }
     // A sheet, by number, name or id, unless a level is called that.
     let level = match view {
@@ -3497,10 +3513,10 @@ fn render_view(s: &mut Session, p: &Value) -> R {
         let d = sheet::draw(m, id).ok_or_else(|| bad(c, format!("sheet {number} can't be drawn")))?;
         let info = with_notes(json!({"width": d.view.width, "height": d.view.height, "view": number, "kind": "sheet"}), &d.notes);
         if let Some(path) = string(c, p, "path")?.filter(|path| ext(Path::new(path)) == "pdf") {
-            std::fs::write(&path, pdf::pdf(&[(&d, size)])).map_err(|e| bad(c, format!("{path}: {e}")))?;
+            s.files.write(Path::new(&path), pdf::pdf(&[(&d, size)])).map_err(|e| bad(c, format!("{path}: {e}")))?;
             return Ok(with_notes(json!({"path": path, "view": info["view"], "kind": "sheet"}), &d.notes));
         }
-        return png_reply(c, p, render::png(&d)?, info);
+        return png_reply(c, &mut s.files, p, render::png(&d)?, info);
     }
     let level = level_param(c, m, p, "view")?;
     let (d, kind) = match flag(c, p, "ceiling")? {
@@ -3510,7 +3526,7 @@ fn render_view(s: &mut Session, p: &Value) -> R {
     match string(c, p, "path")? {
         Some(path) => {
             let path = PathBuf::from(path);
-            write_plan(&d, &path)?;
+            s.files.write(&path, plan_bytes(&d, &path)?).map_err(|e| format!("{}: {e}", path.display()))?;
             Ok(with_notes(json!({"path": path, "width": w, "height": h, "view": level_name(m, level), "kind": kind}), &d.notes))
         }
         None => Ok(with_notes(
@@ -6424,11 +6440,11 @@ fn point_cloud(s: &mut Session, p: &Value) -> R {
             let options = cloud::Options { scale, spacing, cap: (cap / paths.len()).max(1) };
             let mut scans = Vec::with_capacity(paths.len());
             for (path, format) in paths.iter().zip(formats) {
-                let len = std::fs::metadata(path).map_err(|e| bad(c, format!("{}: {e}", path.display())))?.len();
+                let len = s.files.given.size(path).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
                 if len > cloud::MAX_BYTES as u64 {
                     return Err(bad(c, format!("{} is too large ({len} bytes; up to {})", path.display(), cloud::MAX_BYTES)));
                 }
-                let bytes = std::fs::read(path).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
+                let bytes = s.files.given.read(path).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
                 let read = cloud::read(&bytes, format, &options).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
                 let source = path.file_name().map_or_else(String::new, |s| s.to_string_lossy().into_owned());
                 scans.push((source, read));
@@ -6484,6 +6500,9 @@ fn point_cloud(s: &mut Session, p: &Value) -> R {
 /// The file `path` names, a relative one beside the project's file: where a link or a linked drawing is read from.
 fn beside(s: &Session, path: &str) -> PathBuf {
     let at = PathBuf::from(path);
+    if s.files.given.has(&at) {
+        return at;
+    }
     match (&s.path, at.is_relative()) {
         (Some(project), true) => project.parent().map_or(at.clone(), |dir| dir.join(&at)),
         _ => at,
@@ -6496,6 +6515,9 @@ fn read_dxf_file(s: &Session, path: &str) -> Result<(Vec<u8>, Vec<String>), Stri
     let full = beside(s, path);
     match ext(&full).as_str() {
         "dxf" => {}
+        "dwg" if s.files.given.has(&full) => {
+            return Err(format!("{}: a DWG given as bytes is read once it is converted; give it as the DXF it becomes", full.display()));
+        }
         "dwg" => {
             let Some(read) = &s.dwg else {
                 return Err(format!(
@@ -6508,11 +6530,11 @@ fn read_dxf_file(s: &Session, path: &str) -> Result<(Vec<u8>, Vec<String>), Stri
         }
         other => return Err(format!("{}: a .{other} file isn't a CAD drawing BIMCraft reads; it reads DXF", full.display())),
     }
-    let len = std::fs::metadata(&full).map_err(|e| format!("{}: {e}", full.display()))?.len();
+    let len = s.files.given.size(&full).map_err(|e| format!("{}: {e}", full.display()))?;
     if len > crate::dxf::MAX_BYTES as u64 {
         return Err(format!("{} is too large ({len} bytes; up to {})", full.display(), crate::dxf::MAX_BYTES));
     }
-    std::fs::read(&full).map(|bytes| (bytes, Vec::new())).map_err(|e| format!("{}: {e}", full.display()))
+    s.files.given.read(&full).map(|bytes| (bytes, Vec::new())).map_err(|e| format!("{}: {e}", full.display()))
 }
 
 /// The CAD import `id` names, by id or GUID.
@@ -9975,6 +9997,7 @@ fn place(s: &mut Session, p: &Value) -> R {
 fn material(s: &mut Session, p: &Value) -> R {
     let c = "material";
     let name = string(c, p, "name")?.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).ok_or_else(|| bad(c, "`name` is required"))?;
+    let given = s.files.given.clone();
     let m = s.model_mut();
     if flag(c, p, "delete")? {
         if !m.materials.contains_key(&name) {
@@ -9994,7 +10017,7 @@ fn material(s: &mut Session, p: &Value) -> R {
     match p.get("texture") {
         None => {}
         Some(Value::Null) => mat.texture = None,
-        Some(Value::Object(o)) => mat.texture = Some(texture_param(c, m, o, mat.texture.take())?),
+        Some(Value::Object(o)) => mat.texture = Some(texture_param(c, m, &given, o, mat.texture.take())?),
         Some(v) => return Err(bad(c, format!("`texture` is {{kind, size?, angle?, offset?, path?}} or null, not {v}"))),
     }
     if let Some(v) = p.get("color").filter(|v| !v.is_null()) {
@@ -10065,7 +10088,13 @@ fn pair(c: &str, key: &str, v: &Value) -> Result<[f64; 2], String> {
 
 /// A material's texture as the JSON `p` says over its `old` one: kind, size, angle, offset, and for a picture the file to take
 /// into the project (`path`) or the project's own picture (`image`).
-fn texture_param(c: &str, m: &mut Model, p: &Map<String, Value>, old: Option<Texture>) -> Result<Texture, String> {
+fn texture_param(
+    c: &str,
+    m: &mut Model,
+    given: &crate::files::Given,
+    p: &Map<String, Value>,
+    old: Option<Texture>,
+) -> Result<Texture, String> {
     if let Some(k) = p.keys().find(|k| !["kind", "size", "angle", "offset", "path", "image"].contains(&k.as_str())) {
         return Err(bad(c, format!("texture: `{k}` isn't one of kind, size, angle, offset, path, image")));
     }
@@ -10089,11 +10118,11 @@ fn texture_param(c: &str, m: &mut Model, p: &Map<String, Value>, old: Option<Tex
     match (kind, p.get("path").filter(|v| !v.is_null()), p.get("image").filter(|v| !v.is_null())) {
         (Kind::Image, Some(path), _) => {
             let path = PathBuf::from(path.as_str().ok_or_else(|| bad(c, format!("texture `path` is a file's path, not {path}")))?);
-            let len = std::fs::metadata(&path).map_err(|e| bad(c, format!("{}: {e}", path.display())))?.len();
+            let len = given.size(&path).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
             if len > texture::MAX_BYTES as u64 {
                 return Err(bad(c, format!("{} is too large ({len} bytes)", path.display())));
             }
-            let bytes = std::fs::read(&path).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
+            let bytes = given.read(&path).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
             let stem = path.file_stem().map_or_else(|| "picture".into(), |s| s.to_string_lossy().into_owned());
             let picture = Picture::import(&stem, &bytes).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
             let (id, (w, h)) = (picture.id(), picture.size());
@@ -10305,11 +10334,11 @@ fn family(s: &mut Session, p: &Value) -> R {
     let mut p = p.clone();
     if let Some(path) = string(c, &p, "path")? {
         let path = PathBuf::from(path);
-        let size = std::fs::metadata(&path).map_err(|e| bad(c, format!("{}: {e}", path.display())))?.len();
+        let size = s.files.given.size(&path).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
         if size >= MAX_FILE {
             return Err(bad(c, format!("{} is too large ({size} bytes)", path.display())));
         }
-        let text = std::fs::read_to_string(&path).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
+        let text = s.files.given.read_to_string(&path).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
         let loaded: Value = serde_json::from_str(&text).map_err(|e| bad(c, format!("{} is not a family: {e}", path.display())))?;
         let Value::Object(mut fields) = loaded else {
             return Err(bad(c, format!("{} is not a family: it isn't an object", path.display())));

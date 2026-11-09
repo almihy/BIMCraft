@@ -166,6 +166,9 @@ pub struct Session {
     resets: usize,
     /// What reads a DWG drawing, when the app has one (`cad::DwgReader`); none says to save it as DXF.
     pub dwg: Option<crate::cad::DwgReader>,
+    /// The files a front end with no disk gave the session to read, and what its commands wrote while it keeps its writes
+    /// (`files::Files`).
+    pub files: crate::files::Files,
     /// The commands plugins registered, beside the static [`commands`]. They belong to this session, not the
     /// process, so two sessions and the tests never share them.
     external: Vec<ExternalCommand>,
@@ -243,6 +246,7 @@ impl Session {
             checks: 0,
             resets: 0,
             dwg: None,
+            files: crate::files::Files::default(),
             external: Vec::new(),
             read_only: None,
             verified: None,
