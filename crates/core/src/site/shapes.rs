@@ -5,6 +5,9 @@
 //! STUB: the signatures below are the contract the element (model.rs, commands.rs) is built against. The bodies are
 //! filled in by the shapes port; it may add to these types, never change what is here.
 
+#[path = "poly.rs"]
+pub mod poly;
+
 use std::collections::BTreeMap;
 
 use super::{Poly, Props};

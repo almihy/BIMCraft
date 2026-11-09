@@ -46,6 +46,9 @@ cfb = "0.15"
 memchr = "2"
 # Text notes' fonts: IBM Plex's outlines, its weights too, read from the files the packages carry.
 ttf-parser = { version = "0.25", features = ["gvar-alloc"] }
+# The site's shapes (site/poly.rs): polygon booleans, offsets (butt ends, mitred and round joins) and lines clipped by
+# polygons, in pure Rust so the core still builds for the browser.
+i_overlay = { version = "9.1", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
