@@ -714,7 +714,7 @@ fn rgb(c: Rgb) -> [f32; 3] {
 /// Whether the work since `scope` began ran the card out of memory; what else went wrong, as text.
 fn out_of_memory(scopes: [wgpu::ErrorScopeGuard; 2]) -> Result<bool, String> {
     let [first, second] = scopes;
-    let (memory, other) = (pollster::block_on(second.pop()), pollster::block_on(first.pop()));
+    let (memory, other) = (answer(second.pop()), answer(first.pop()));
     match (memory, other) {
         (Some(_), _) => Ok(true),
         (None, Some(e)) => Err(e.to_string()),
@@ -727,11 +727,58 @@ fn out_of_memory(scopes: [wgpu::ErrorScopeGuard; 2]) -> Result<bool, String> {
 fn caught(scopes: [wgpu::ErrorScopeGuard; 2]) -> Result<(), String> {
     let [first, second] = scopes;
     // Popped in the order they were pushed in reverse.
-    let (inner, outer) = (pollster::block_on(second.pop()), pollster::block_on(first.pop()));
+    let (inner, outer) = (answer(second.pop()), answer(first.pop()));
     match inner.or(outer) {
         Some(e) => Err(e.to_string()),
         None => Ok(()),
     }
+}
+
+/// A scope's answer: waited for on a computer. In a browser it comes as a promise, which nothing on the page's one thread
+/// can wait for: the answer there now is taken, else it is looked at in the frames after ([`late`]), and none is said now.
+#[cfg(not(target_arch = "wasm32"))]
+fn answer(popped: impl std::future::Future<Output = Option<wgpu::Error>>) -> Option<wgpu::Error> {
+    pollster::block_on(popped)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn answer(popped: impl std::future::Future<Output = Option<wgpu::Error>> + 'static) -> Option<wgpu::Error> {
+    let mut popped = Box::pin(popped);
+    match popped.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())) {
+        std::task::Poll::Ready(e) => e,
+        std::task::Poll::Pending => {
+            LATE.with(|late| late.borrow_mut().push(popped));
+            None
+        }
+    }
+}
+
+/// The scopes' answers still to come, in a browser.
+#[cfg(target_arch = "wasm32")]
+type Answer = std::pin::Pin<Box<dyn std::future::Future<Output = Option<wgpu::Error>>>>;
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static LATE: std::cell::RefCell<Vec<Answer>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// What went wrong on the card since, that came after the frame that asked (in a browser): the first error, as text.
+fn late() -> Option<String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let mut first = None;
+        LATE.with(|late| {
+            late.borrow_mut().retain_mut(|popped| match popped.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())) {
+                std::task::Poll::Ready(e) => {
+                    first = first.take().or(e.map(|e| e.to_string()));
+                    false
+                }
+                std::task::Poll::Pending => true,
+            });
+        });
+        first
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    None
 }
 
 fn scopes(device: &wgpu::Device) -> [wgpu::ErrorScopeGuard; 2] {
@@ -1004,6 +1051,11 @@ impl Gpu {
     /// is the exact one; false while it stands in, or the exact one is on its way: then draw again with the same camera on the
     /// next frame, until it is.
     pub fn draw_cut(&mut self, mesh: &Arc<Mesh>, cam: &Camera, tints: &[(Id, Rgb)], ground: Rgb, cut: Cut) -> Result<bool, String> {
+        // What a browser's card said of earlier work, which no frame could wait for.
+        if let Some(e) = late() {
+            (self.mesh, self.targets) = (None, None);
+            return Err(e);
+        }
         let guard = scopes(&self.device);
         let drawn = self.encode(mesh, cam, tints, ground, cut);
         let full = out_of_memory(guard);

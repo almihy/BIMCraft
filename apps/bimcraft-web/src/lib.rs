@@ -201,7 +201,7 @@ impl WebApp {
             app.set_host_look(look);
         }
         *self.sent.borrow_mut() = Some(Arc::clone(&app.session.model));
-        let host = Host {
+        let mut host = Host {
             seen: Arc::clone(&app.session.model),
             app,
             changes: Rc::clone(&self.changes),
@@ -213,9 +213,15 @@ impl WebApp {
         self.runner
             .start(
                 canvas,
-                eframe::WebOptions::default(),
+                web_options(),
                 Box::new(move |cc| {
                     *ctx.borrow_mut() = Some(cc.egui_ctx.clone());
+                    // The 3D view, and the plans' kept triangles, drawn on the card the page draws on (WebGPU; WebGL2 where
+                    // there is none, which the 3D view can't use, so it is drawn on the processor there), as the desktop
+                    // app does.
+                    if let Some(state) = cc.wgpu_render_state.as_ref() {
+                        host.app.use_graphics_card(state);
+                    }
                     Ok(Box::new(host))
                 }),
             )
@@ -450,6 +456,21 @@ impl Default for WebApp {
     fn default() -> WebApp {
         WebApp::new()
     }
+}
+
+/// eframe's web runner on wgpu, asking the card for buffers as big as it has (the desktop app's `limits_for`): the 3D view
+/// draws models of any size.
+fn web_options() -> eframe::WebOptions {
+    let mut options = eframe::WebOptions::default();
+    if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_options.wgpu_setup {
+        let asked = Arc::clone(&setup.device_descriptor);
+        setup.device_descriptor = Arc::new(move |adapter| {
+            let mut descriptor = asked(adapter);
+            descriptor.required_limits = bimcraft_ui_egui::limits_for(adapter, descriptor.required_limits);
+            descriptor
+        });
+    }
+    options
 }
 
 /// The name of the link `WebApp::link_site` makes.

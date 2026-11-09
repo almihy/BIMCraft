@@ -124,7 +124,7 @@ impl BimApp {
         let side = PATCH * f64::from(ppp) / cam.scale.max(1e-12);
         let (across, up) = plane.axes();
         let (start, from) = if workplane::is_level(&plane) {
-            let corner = m.model_box().map_or([0.0; 3], |(lo, _)| lo);
+            let corner = self.orbit.model_box(m).map_or([0.0; 3], |(lo, _)| lo);
             (plane.nearest(corner), -1.5)
         } else {
             (plane.origin, -0.5)
