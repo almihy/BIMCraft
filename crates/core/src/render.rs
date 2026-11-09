@@ -2664,7 +2664,10 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, t
         d.owner = Some(id);
         // Surface overrides also work on an unpatterned material and at coarse detail.
         let material = m.type_layers("floor", &f.type_name).first().and_then(|l| m.materials.get(&l.material));
-        for (face, rise) in m.floor_slabs(f) {
+        // In plan a shaped top is its outline: its patterns go over it whole, not plane by plane, or each plane's edge would
+        // show as a seam through a fill (a terrain's thousands of them).
+        let flat = (!f.shape.is_empty()).then(|| crate::model::Floor { shape: Default::default(), ..f.clone() });
+        for (face, rise) in m.floor_slabs(flat.as_ref().unwrap_or(f)) {
             for piece in m.less_shafts(&face, rise).0 {
                 let replaced = override_patterns(&mut d, m, std::slice::from_ref(&piece), false, (f.pattern_origin, f.pattern_angle));
                 if !replaced
