@@ -5054,7 +5054,8 @@ impl BimApp {
                 if let Some(note) = self.snap_note() {
                     ui.label(RichText::new(note).color(pal().accent_ink));
                 }
-                if self.dirty() {
+                // A hosted window's page says whether its project is saved.
+                if self.dirty() && !self.hosted {
                     ui.label(RichText::new(t("Unsaved changes")).color(pal().muted));
                 }
                 self.option_selector(ui);

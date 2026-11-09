@@ -55,6 +55,8 @@ fn save_in_a_hosted_window_asks_the_page_and_opens_no_dialog() {
     // Saved, the model is no longer unsaved.
     h.state_mut().execute_for_agent("wall", &json!({"points": [[0, 0], [0, 3000]]})).unwrap();
     assert!(h.state().dirty());
+    h.run();
+    assert!(h.query_by_label("Unsaved changes").is_none(), "the page says whether it is saved");
     let model = Arc::clone(&h.state().session.model);
     h.state_mut().mark_saved(&model);
     assert!(!h.state().dirty());
