@@ -49,6 +49,30 @@ impl Engine {
         self.s.execute("link", &p).map(|v| v.to_string()).map_err(err)
     }
 
+    /// Gives the engine the file `name` (a path as the server names its files: "files/doc_1/Plan.dxf"), its `bytes`: a command
+    /// that reads a file (`open`, `link`, `insert`, `import_cad`, `point_cloud`, a material's picture) reads it from there.
+    pub fn give_file(&mut self, name: &str, bytes: Vec<u8>) {
+        self.s.files.give(name, bytes);
+    }
+
+    /// Lets go of the file given as `name`, or of all of them when it is empty.
+    pub fn forget_files(&mut self, name: &str) {
+        self.s.files.forget(Some(name).filter(|n| !n.is_empty()));
+    }
+
+    /// What the commands wrote since the last call (`save` as IFC, glTF, PDF, PNG or SVG; `render` to a path), in place of
+    /// files on disk: `[{name, bytes}]`, `bytes` a Uint8Array.
+    pub fn take_written(&mut self) -> js_sys::Array {
+        let out = js_sys::Array::new();
+        for (name, bytes) in self.s.files.take_written() {
+            let o = js_sys::Object::new();
+            let _ = js_sys::Reflect::set(&o, &"name".into(), &JsValue::from_str(&name));
+            let _ = js_sys::Reflect::set(&o, &"bytes".into(), &js_sys::Uint8Array::from(bytes.as_slice()));
+            out.push(&o);
+        }
+        out
+    }
+
     /// Builds the sample house.
     pub fn sample(&mut self) -> Result<(), JsError> {
         self.s.script(SAMPLE).map(|_| ()).map_err(err)
@@ -110,7 +134,10 @@ impl Engine {
     /// Opens a project from its JSON text.
     pub fn open_project(&mut self, text: &str) -> Result<String, JsError> {
         let (m, left_out) = bimcraft_core::model::Model::read(text).map_err(err)?;
+        // The files given stay: they are given to the engine, not to a project.
+        let files = std::mem::take(&mut self.s.files);
         self.s = Session::new();
+        self.s.files = files;
         self.s.model = Arc::new(m);
         Ok(serde_json::json!({ "left_out": left_out }).to_string())
     }

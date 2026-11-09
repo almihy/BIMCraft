@@ -12,6 +12,19 @@
 //! app.execute("wall", '{"points": [[0, 0], [6000, 0]]}');  // a command on the open model, an undo step
 //! app.link_site(siteProjectJson);  // the site around the model, linked: halftone, never edited (again: the newer site)
 //! ```
+//!
+//! Its files are the page's (`bimcraft_ui_egui::host`). Open, Link, Import CAD, Point Cloud and Export ask the page:
+//!
+//! ```js
+//! app.on_files(onAsk, onWritten, onWanted);
+//! // onAsk({id, save, multiple, what, extensions, name, title}): the person wants a file (or, `save`, where to save one).
+//! app.give_file("files/doc_1/Plan.dxf", bytes);   // the bytes of a file picked, under a name of the page's
+//! app.answer_files(id, ["files/doc_1/Plan.dxf"]); // the names, or null when cancelled; for `save`, the name to save as
+//! // onWritten(): what Export wrote is ready
+//! app.take_written();     // [{name, bytes}]
+//! // onWanted(["files/doc_2/House.ifc"]): the files the model's links read, which the page gives and then
+//! app.reload_links();
+//! ```
 #![cfg(target_arch = "wasm32")]
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -24,7 +37,7 @@ use bimcraft_ui_egui::host::{HostLook, Skin};
 use serde_json::Value;
 use wasm_bindgen::prelude::*;
 
-/// The interface and what the page hears from it: a change to the model, and Save.
+/// The interface and what the page hears from it: a change to the model, Save, and its files.
 struct Host {
     app: BimApp,
     /// The model as last seen after a frame, and how many times it has changed since the start.
@@ -32,6 +45,46 @@ struct Host {
     changes: Rc<Cell<u64>>,
     on_save: Option<js_sys::Function>,
     on_change: Option<js_sys::Function>,
+    files: Rc<RefCell<FileHooks>>,
+}
+
+/// What the page hears of files, and what it was last told.
+#[derive(Default)]
+struct FileHooks {
+    on_ask: Option<js_sys::Function>,
+    on_written: Option<js_sys::Function>,
+    on_wanted: Option<js_sys::Function>,
+    /// The ask last told, so each is told once.
+    asked: u64,
+    /// The files the links want, as last told.
+    wanted: Vec<String>,
+}
+
+impl Host {
+    /// After a frame: tells the page of a new ask for a file, of files written for it, and of files its links want.
+    fn tell_files(&mut self) {
+        let mut hooks = self.files.borrow_mut();
+        if let Some(r) = self.app.file_request()
+            && r.id != hooks.asked
+        {
+            hooks.asked = r.id;
+            let ask = serde_json::json!({
+                "id": r.id, "save": r.save, "multiple": r.multiple, "what": r.what, "extensions": r.extensions,
+                "name": r.name, "title": r.title,
+            });
+            later_with(hooks.on_ask.clone(), JsValue::from_str(&ask.to_string()));
+        }
+        if self.app.has_written() {
+            later_with(hooks.on_written.clone(), JsValue::UNDEFINED);
+        }
+        let wanted = self.app.files_wanted();
+        if wanted != hooks.wanted {
+            hooks.wanted = wanted;
+            if !hooks.wanted.is_empty() {
+                later_with(hooks.on_wanted.clone(), JsValue::from_str(&Value::from(hooks.wanted.clone()).to_string()));
+            }
+        }
+    }
 }
 
 impl eframe::App for Host {
@@ -45,6 +98,7 @@ impl eframe::App for Host {
         if self.app.take_save_request() {
             later(self.on_save.clone(), None);
         }
+        self.tell_files();
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
@@ -65,6 +119,14 @@ fn later(f: Option<js_sys::Function>, arg: Option<u64>) {
             Some(n) => f.call1(&JsValue::NULL, &JsValue::from_f64(n as f64)),
             None => f.call0(&JsValue::NULL),
         };
+    });
+}
+
+/// Calls `f` with `arg` once the frame is over, as [`later`] does.
+fn later_with(f: Option<js_sys::Function>, arg: JsValue) {
+    let Some(f) = f else { return };
+    wasm_bindgen_futures::spawn_local(async move {
+        let _ = f.call1(&JsValue::NULL, &arg);
     });
 }
 
@@ -89,6 +151,8 @@ pub struct WebApp {
     given: RefCell<Option<Arc<Model>>>,
     /// The look asked for, kept for the start when asked before it.
     look: RefCell<Option<HostLook>>,
+    /// What the page hears of files, set before the start or after it.
+    files: Rc<RefCell<FileHooks>>,
 }
 
 #[wasm_bindgen]
@@ -101,6 +165,7 @@ impl WebApp {
             changes: Rc::new(Cell::new(0)),
             given: RefCell::new(None),
             look: RefCell::new(None),
+            files: Rc::new(RefCell::new(FileHooks::default())),
         }
     }
 
@@ -122,7 +187,14 @@ impl WebApp {
         if let Some(look) = *self.look.borrow() {
             app.set_host_look(look);
         }
-        let host = Host { seen: Arc::clone(&app.session.model), app, changes: Rc::clone(&self.changes), on_save, on_change };
+        let host = Host {
+            seen: Arc::clone(&app.session.model),
+            app,
+            changes: Rc::clone(&self.changes),
+            on_save,
+            on_change,
+            files: Rc::clone(&self.files),
+        };
         let ctx = Rc::clone(&self.ctx);
         self.runner
             .start(
@@ -224,6 +296,76 @@ impl WebApp {
         }
         self.repaint();
         Ok(())
+    }
+
+    /// What the page hears of files: `on_ask(askJson)` when the person wants a file, or where to save one; `on_written()` when
+    /// Export wrote something for it to take; `on_wanted(namesJson)` with the files the model's links read and have not, after
+    /// the start and each `load`. Each is called once the frame is over.
+    pub fn on_files(&self, on_ask: Option<js_sys::Function>, on_written: Option<js_sys::Function>, on_wanted: Option<js_sys::Function>) {
+        let mut hooks = self.files.borrow_mut();
+        (hooks.on_ask, hooks.on_written, hooks.on_wanted) = (on_ask, on_written, on_wanted);
+        hooks.wanted.clear();
+        drop(hooks);
+        self.repaint();
+    }
+
+    /// The ask for a file open now, as `on_ask` gave it; null when there is none.
+    pub fn file_request(&self) -> Result<Option<String>, JsValue> {
+        Ok(self.host()?.app.file_request().map(|r| {
+            serde_json::json!({
+                "id": r.id, "save": r.save, "multiple": r.multiple, "what": r.what, "extensions": r.extensions,
+                "name": r.name, "title": r.title,
+            })
+            .to_string()
+        }))
+    }
+
+    /// Gives the interface the file `name` (a name of the page's, ending in its kind: "files/doc_1/Plan.dxf"), its `bytes`,
+    /// read as the file at that path would be.
+    pub fn give_file(&self, name: &str, bytes: Vec<u8>) -> Result<(), JsValue> {
+        self.host()?.app.give_file(name, bytes);
+        Ok(())
+    }
+
+    /// Answers ask `id`: `names` (JSON, a list of the names given), or null when the person cancelled. For a `save`, the one
+    /// name to save as; what is written comes to `on_written`.
+    pub fn answer_files(&self, id: f64, names: Option<String>) -> Result<(), JsValue> {
+        let names: Option<Vec<String>> = match names.filter(|n| !n.trim().is_empty() && n.trim() != "null") {
+            Some(text) => Some(serde_json::from_str(&text).map_err(err)?),
+            None => None,
+        };
+        self.host()?.app.answer_file_request(id as u64, names);
+        self.repaint();
+        Ok(())
+    }
+
+    /// What was written for the page since the last call: `[{name, bytes}]`, `bytes` a Uint8Array.
+    pub fn take_written(&self) -> Result<js_sys::Array, JsValue> {
+        let out = js_sys::Array::new();
+        for (name, bytes) in self.host()?.app.take_written() {
+            let o = js_sys::Object::new();
+            js_sys::Reflect::set(&o, &"name".into(), &JsValue::from_str(&name))?;
+            js_sys::Reflect::set(&o, &"bytes".into(), &js_sys::Uint8Array::from(bytes.as_slice()))?;
+            out.push(&o);
+        }
+        Ok(out)
+    }
+
+    /// The files the model's links read and have not (JSON, a list of names): the page gives them, then `reload_links`.
+    pub fn files_wanted(&self) -> Result<String, JsValue> {
+        Ok(Value::from(self.host()?.app.files_wanted()).to_string())
+    }
+
+    /// Reads the links' files again, from those given: `{reloaded, failed}` as JSON. No change of the person's.
+    pub fn reload_links(&self) -> Result<String, JsValue> {
+        let reply = {
+            let mut host = self.host()?;
+            let reply = host.app.reload_links();
+            host.seen = Arc::clone(&host.app.session.model);
+            reply
+        };
+        self.repaint();
+        reply.map(|v| v.to_string()).map_err(err)
     }
 
     /// Whether the interface crashed: the page then starts it again from the last saved model.
