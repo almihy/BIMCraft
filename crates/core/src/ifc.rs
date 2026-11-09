@@ -1677,7 +1677,11 @@ pub fn export(m: &Model) -> String {
         w.define(project, PHASING, &props, (PHASED, PHASED_DEFINES), 0);
     }
 
+    // The browser has no system clock in Rust's std (it would panic there): the file's date is left at the epoch.
+    #[cfg(not(target_arch = "wasm32"))]
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    #[cfg(target_arch = "wasm32")]
+    let now = 0u64;
     let app = s(&format!("BIMCraft {}", env!("CARGO_PKG_VERSION")));
     format!(
         "ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION(('ViewDefinition [DesignTransferView]'),'2;1');\n\

@@ -7685,6 +7685,13 @@ pub fn mix(mut z: u64) -> u64 {
     z ^ (z >> 31)
 }
 
+#[cfg(target_arch = "wasm32")]
+fn fresh_uid() -> u64 {
+    // The browser has no clock or process id in Rust's std (each would panic there): its random numbers instead.
+    mix(getrandom::u64().unwrap_or(0x2545_F491_4F6C_DD1D))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn fresh_uid() -> u64 {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64);
     mix(nanos ^ u64::from(std::process::id()).rotate_left(32))
