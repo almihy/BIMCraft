@@ -14,7 +14,7 @@
 <canvas id="app"></canvas>
 <div id="status">Loading BIMCraft…</div>
 <script type="module">
-import init, { WebApp } from "./app/bimcraft_webapp.js";
+import init, { WebApp, sample_project } from "./app/bimcraft_webapp.js";
 const status = document.getElementById("status");
 const t0 = performance.now();
 await init();
@@ -22,7 +22,8 @@ const t1 = performance.now();
 const app = new WebApp();
 window.bimApp = app;
 try {
-  await app.start(document.getElementById("app"), new URLSearchParams(location.search).get("sample") !== "0");
+  const sample = new URLSearchParams(location.search).get("sample") !== "0";
+  await app.start(document.getElementById("app"), sample ? sample_project() : null, () => console.log("save asked"), (rev) => console.log("changed", rev));
   status.textContent = `Loaded in ${(t1 - t0).toFixed(0)} ms, started in ${(performance.now() - t1).toFixed(0)} ms`;
   setTimeout(() => status.remove(), 4000);
 } catch (e) {
