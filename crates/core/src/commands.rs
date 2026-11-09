@@ -130,12 +130,15 @@ other_files(
         "link",
         "Link Model",
         &["LK"],
-        "{path, name?, at?: [x, y], angle?: degrees} another project (.bimcraft or .ifc) shown in this one as a reference that \
+        "{path | text, name?, at?: [x, y], angle?: degrees} another project (.bimcraft or .ifc) shown in this one as a reference that \
          can't be edited, as Revit's Link Revit: its walls, floors, roofs, columns, stairs and the rest of what it builds are \
          drawn in the plans, sections and 3D views, halftone, and snapped to; nothing of it is selected, scheduled, checked or \
          exported. It stands with its origin at `at` (default [0, 0]) turned `angle` about it; its levels stand at their own \
          elevations, on this project's levels at the same height. `path` is read now and again by `reload`, and kept as given: \
-         a relative one is relative to this project's file. `name` defaults to the file's. Returns `id`, `name`, `elements`",
+         a relative one is relative to this project's file. `name` defaults to the file's. Or `text`, a .bimcraft project's own \
+         text, for a front end that keeps its projects with no files (Arqiflow's site): it is read once and kept by no file, \
+         `reload` and `open` can't read it again, and linked again under the same `name` it takes the place of that link from \
+         text (`replaced`). Returns `id`, `name`, `elements`",
         link_model,
         Files::Read,
     )
@@ -3047,6 +3050,11 @@ fn insert_from(s: &mut Session, p: &Value) -> R {
 
 /// The project a link's `path` names, read as `open` reads it: its own links are not followed.
 fn read_link(s: &Session, path: &str) -> Result<Arc<Model>, String> {
+    if let Some(name) = path.strip_prefix(LINK_TEXT) {
+        return Err(format!(
+            "`{name}` was linked from a project's text, which no file keeps: link it again with `link {{text, name: \"{name}\"}}`"
+        ));
+    }
     let full = beside(s, path);
     let mut other = Session::new();
     open_file(&mut other, &json!({"path": full})).map_err(|e| e.trim_start_matches("open: ").to_string())?;
@@ -3079,9 +3087,65 @@ fn relink(s: &mut Session) -> Vec<Value> {
     failed
 }
 
+/// The `path` a link made from a project's text is kept under: `text:` and its name. No file is read for it; a front end
+/// that keeps the project elsewhere (Arqiflow's site) links it again from its text.
+const LINK_TEXT: &str = "text:";
+
+/// A project's text, read as `open` reads a file: its own links are not followed.
+fn read_link_text(text: &str) -> Result<Arc<Model>, String> {
+    if text.len() as u64 >= MAX_FILE {
+        return Err(format!("the project's text is too large ({} bytes; a link takes one under {MAX_FILE})", text.len()));
+    }
+    let (mut m, _) = Model::read(text).map_err(|e| format!("`text` is not a BIMCraft project: {e}"))?;
+    m.adopt_materials();
+    m.sync_library();
+    m.check().map_err(|e| format!("`text`: {e}"))?;
+    Ok(Arc::new(m))
+}
+
+/// `link {text, name?, at?, angle?}`: a project given as its text. Linked again under a name a link from text already has,
+/// it takes that link's place: the newer text, and where it stands.
+fn link_text(s: &mut Session, p: &Value, text: &str) -> R {
+    let c = "link";
+    let other = read_link_text(text).map_err(|e| bad(c, e))?;
+    let name = string(c, p, "name")?.unwrap_or_else(|| "Link".into());
+    let path = format!("{LINK_TEXT}{name}");
+    let at = point_opt(c, p, "at")?.unwrap_or(P2(0.0, 0.0));
+    let angle = num(c, p, "angle")?.unwrap_or(0.0);
+    let elements = other.elements.len();
+    let there = s.model.elements.iter().find_map(|(id, e)| match e {
+        Element::Link(l) if l.path == path => Some(*id),
+        _ => None,
+    });
+    let m = s.model_mut();
+    let link = Element::Link(crate::model::Link { name: name.clone(), path: path.clone(), at, angle });
+    let id = match there {
+        Some(id) => {
+            m.elements.insert(id, link);
+            id
+        }
+        None => m.insert(link),
+    };
+    m.loaded.insert(path, other);
+    Ok(json!({"id": id, "name": name, "elements": elements, "replaced": there.is_some()}))
+}
+
 fn link_model(s: &mut Session, p: &Value) -> R {
     let c = "link";
-    let path = string(c, p, "path")?.ok_or_else(|| bad(c, "`path` is required"))?;
+    match p.get("text") {
+        Some(Value::String(text)) => {
+            if !absent(p.get("path")) {
+                return Err(bad(c, "give `path` or `text`, not both"));
+            }
+            return link_text(s, p, text);
+        }
+        None | Some(Value::Null) => {}
+        Some(_) => return Err(bad(c, "`text` must be a project's text (.bimcraft JSON)")),
+    }
+    let path = string(c, p, "path")?.ok_or_else(|| bad(c, "`path` (or `text`) is required"))?;
+    if path.starts_with(LINK_TEXT) {
+        return Err(bad(c, format!("a path can't start with `{LINK_TEXT}`: that is how a link from text is kept")));
+    }
     let other = read_link(s, &path).map_err(|e| bad(c, e))?;
     let name = match string(c, p, "name")? {
         Some(n) => n,
