@@ -64,6 +64,26 @@ impl Engine {
         Ok(render::svg(&render::plan(&m, id, width, height)))
     }
 
+    /// The plan of a level (by name; the lowest when empty) as PNG.
+    pub fn plan_png(&self, level: &str, width: u32, height: u32) -> Result<Vec<u8>, JsError> {
+        let m = link::seen(&self.s.model);
+        let levels = m.levels();
+        let id = if level.is_empty() {
+            levels.first().map(|(id, _)| *id)
+        } else {
+            levels.iter().find(|(_, l)| l.name == level).map(|(id, _)| *id)
+        };
+        let id = id.ok_or_else(|| err("no such level"))?;
+        render::png(&render::plan(&m, id, width, height)).map_err(err)
+    }
+
+    /// The levels, lowest first: `[{"name", "elevation"}]` (mm).
+    pub fn levels(&self) -> String {
+        let levels: Vec<Value> =
+            self.s.model.levels().iter().map(|(_, l)| serde_json::json!({"name": l.name, "elevation": l.elevation})).collect();
+        Value::Array(levels).to_string()
+    }
+
     /// The 3D scene as glTF binary.
     pub fn glb(&self) -> Result<Vec<u8>, JsError> {
         gltf::export(&link::seen(&self.s.model)).map(|o| o.bytes).map_err(err)
