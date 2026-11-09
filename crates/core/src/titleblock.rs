@@ -543,7 +543,11 @@ pub fn check_values(who: &str, values: &BTreeMap<String, String>) -> Result<(), 
 
 /// Today's date, as `language` writes dates: day, month and year, ISO's year, month and day in English and Swedish.
 pub fn today(language: Language) -> String {
+    #[cfg(not(target_arch = "wasm32"))]
     let days = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() / 86_400);
+    // The browser has no system clock in Rust's std (it would panic there): JavaScript's, in ms since the epoch.
+    #[cfg(target_arch = "wasm32")]
+    let days = (js_sys::Date::now() / 86_400_000.0).max(0.0) as u64;
     let (y, m, d) = civil(i64::try_from(days).unwrap_or(0));
     date(language, y, m, d)
 }
