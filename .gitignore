@@ -8,3 +8,8 @@ target/
 /COMPILADO/
 /COMPILADO_COMPLETO/
 .vscode/
+
+# The browser build (crates/web) and its demo
+/target-wasm
+/web-demo/pkg
+/web-demo/node
