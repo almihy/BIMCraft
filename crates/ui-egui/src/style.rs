@@ -244,10 +244,50 @@ pub fn palette(dark: bool, look: Look) -> Palette {
     let base = look.panel_colour.map_or(base, |c| with_ground(base, rgb(c)));
     let base = look.text_colour.map_or(base, |c| with_text(base, rgb(c)));
     // The tints of what is picked, made again over the user's accent or their panels.
-    if look.accent.is_none() && look.panel_colour.is_none() {
-        return base;
+    let base =
+        if look.accent.is_none() && look.panel_colour.is_none() { base } else { with_accent(base, look.accent.map_or(base.accent, rgb)) };
+    look.skin.over(base)
+}
+
+/// The colours a page that holds the window (`host.rs`) dresses it in, over the rest of the look, so it reads as part of that
+/// page: its top bar, its borders, its dimmer lettering, its bands and its fields. What is read on them is stepped until it reads.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Skin {
+    pub app_bar: Option<[u8; 3]>,
+    pub app_bar_text: Option<[u8; 3]>,
+    pub border: Option<[u8; 3]>,
+    pub muted: Option<[u8; 3]>,
+    pub bar: Option<[u8; 3]>,
+    pub surface: Option<[u8; 3]>,
+}
+
+impl Skin {
+    /// `p` in these colours.
+    pub fn over(self, p: Palette) -> Palette {
+        if self == Skin::default() {
+            return p;
+        }
+        let rgb = |[r, g, b]: [u8; 3]| Color32::from_rgb(r, g, b);
+        let mut q = Palette {
+            border: self.border.map_or(p.border, rgb),
+            bar: self.bar.map_or(p.bar, rgb),
+            surface: self.surface.map_or(p.surface, rgb),
+            ..p
+        };
+        if let Some(c) = self.muted {
+            q.muted = step(rgb(c), ink_on(q.panel), &[q.panel, q.bar, q.surface, q.hover_fill], 4.5);
+        }
+        q.text = step(q.text, ink_on(q.panel), &grounds(&q), 4.5);
+        if self.app_bar.is_some() || self.app_bar_text.is_some() {
+            let bar = self.app_bar.map_or(p.app_bar, rgb);
+            let ink = ink_on(bar);
+            let hover = mix(bar, ink, 0.08);
+            let text = step(self.app_bar_text.map_or(p.app_bar_text, rgb), ink, &[bar, hover], 4.5);
+            let muted = step(mix(text, bar, 0.3), text, &[bar, hover], 4.5);
+            (q.app_bar, q.app_bar_hover, q.app_bar_text, q.app_bar_muted) = (bar, hover, text, muted);
+        }
+        q
     }
-    with_accent(base, look.accent.map_or(base.accent, rgb))
 }
 
 /// `a` and `b` mixed, `t` of the way to `b`.
@@ -449,6 +489,8 @@ pub struct Look {
     pub panel_colour: Option<[u8; 3]>,
     pub canvas_colour: Option<[u8; 3]>,
     pub text_colour: Option<[u8; 3]>,
+    /// A hosting page's colours over all of it (`host.rs`).
+    pub skin: Skin,
 }
 
 /// Draw this frame in the theme egui shows: the system's, unless the user picked one; in the look the user kept.

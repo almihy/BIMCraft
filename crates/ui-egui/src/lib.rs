@@ -33,6 +33,7 @@ mod gpu;
 pub use gpu::limits_for;
 mod graphics;
 mod groups;
+pub mod host;
 pub mod icons;
 mod inquiry;
 pub mod lang;
@@ -834,6 +835,13 @@ pub struct BimApp {
     dialog: Option<dialog::Dialog>,
     /// What the last Revit import left out and brought in, for as long as its project is the one open.
     revit_report: Option<revit::Report>,
+    /// The window is inside a page that keeps the project (Arqiflow's editor, `host.rs`): no files, start page, updater,
+    /// plugins or control port, and Save asks the page.
+    hosted: bool,
+    /// The hosting page's colours over the look (`style::Skin`).
+    skin: style::Skin,
+    /// Save was asked for while hosted: the page takes it ([`BimApp::take_save_request`]).
+    save_asked: bool,
 }
 
 /// The Options Bar's Height: up to a level above the plan's `level` (by default the next one up),
@@ -1440,6 +1448,9 @@ impl BimApp {
             opens: Vec::new(),
             dialog: None,
             revit_report: None,
+            hosted: false,
+            skin: style::Skin::default(),
+            save_asked: false,
         }
     }
 
@@ -1612,6 +1623,7 @@ impl BimApp {
             panel_colour: self.panel_colour,
             canvas_colour: self.canvas_colour,
             text_colour: self.text_colour,
+            skin: self.skin,
         };
         style::follow(&ctx, look);
         ribbon::tool_rules(self.tools_hidden.clone(), self.scale, self.editing_tools);
@@ -1936,10 +1948,11 @@ impl BimApp {
         } else if pressed(Modifiers::COMMAND, Key::S) {
             self.save(ctx, None);
         }
-        if pressed(Modifiers::COMMAND, Key::O) {
+        // A hosted window's project is the page's: it opens and starts none of its own.
+        if pressed(Modifiers::COMMAND, Key::O) && !self.hosted {
             self.guard(Pending::Open, ctx);
         }
-        if pressed(Modifiers::COMMAND, Key::N) {
+        if pressed(Modifiers::COMMAND, Key::N) && !self.hosted {
             self.guard(Pending::New, ctx);
         }
         if pressed(Modifiers::COMMAND, Key::K) {
@@ -1951,7 +1964,7 @@ impl BimApp {
         if pressed(Modifiers::COMMAND, Key::Num1) {
             self.toggle_properties();
         }
-        if pressed(Modifiers::COMMAND, Key::P) {
+        if pressed(Modifiers::COMMAND, Key::P) && !self.hosted {
             self.export(ctx, "PDF", "pdf");
         }
         // The rest belongs to a text field while one has the keyboard.
@@ -2996,6 +3009,9 @@ impl BimApp {
 
     /// Saves to the project's file, or asks where first. `then` is done once it is saved.
     fn save(&mut self, ctx: &Context, then: Option<Pending>) {
+        if self.hosted {
+            return self.ask_host_to_save(ctx, then);
+        }
         match self.session.path.clone() {
             Some(p) => {
                 if self.save_to(&p)
@@ -3009,6 +3025,9 @@ impl BimApp {
     }
 
     fn save_as(&mut self, ctx: &Context, then: Option<Pending>) {
+        if self.hosted {
+            return self.ask_host_to_save(ctx, then);
+        }
         let later = ctx.clone();
         self.ask_path(ctx, msg!("BIMCraft project"), "bimcraft", move |app, p| {
             if app.save_to(&p)
@@ -3086,6 +3105,7 @@ impl BimApp {
         let mut fresh = BimApp::new(std::mem::take(&mut self.session));
         fresh.status = std::mem::take(&mut self.status);
         fresh.os_events = self.os_events.take();
+        (fresh.hosted, fresh.save_asked, fresh.skin) = (self.hosted, self.save_asked, self.skin);
         (fresh.own_title_bar, fresh.system_title_bar) = (self.own_title_bar, self.system_title_bar);
         (fresh.thin, fresh.lang, fresh.snaps, fresh.ribbon_min) = (self.thin, self.lang, self.snaps, self.ribbon_min);
         (fresh.compact, fresh.profile, fresh.scale) = (self.compact, self.profile, self.scale);
@@ -3195,12 +3215,12 @@ impl BimApp {
         let ctx = ui.ctx().clone();
         let row = ui
             .horizontal(|ui| {
-                if icon_button(ui, Icon::Home, "Home").clicked() {
+                if !self.hosted && icon_button(ui, Icon::Home, "Home").clicked() {
                     self.toggle_home();
                 }
                 let file = egui::Button::new(RichText::new(t("File")).color(pal().app_bar_text)).frame(false).min_size(vec2(44.0, 24.0));
                 MenuButton::from_button(file).ui(ui, |ui| self.file_menu(ui, &ctx));
-                if icon_button(ui, Icon::Open, "Open").clicked() {
+                if !self.hosted && icon_button(ui, Icon::Open, "Open").clicked() {
                     self.guard(Pending::Open, &ctx);
                 }
                 if icon_button(ui, Icon::Save, "Save").clicked() {
@@ -3232,7 +3252,9 @@ impl BimApp {
                 if find.clicked() {
                     self.find = Some(String::new());
                 }
-                self.scale_chip(ui);
+                if !self.hosted {
+                    self.scale_chip(ui);
+                }
             })
             .response
             .rect;
@@ -3534,6 +3556,17 @@ impl BimApp {
             .clicked()
         };
         let cmd = |k: Key| Some(KeyboardShortcut::new(Modifiers::COMMAND, k));
+        // A hosted window's files are the page's: it saves there, and keeps its settings.
+        if self.hosted {
+            if item(ui, "Save", cmd(Key::S)) {
+                self.save(ctx, None);
+            }
+            ui.separator();
+            if item(ui, msg!("Settings…"), Some(KeyboardShortcut::new(Modifiers::COMMAND, Key::Comma))) {
+                self.settings_page = Some(settings::Page::Interface);
+            }
+            return;
+        }
         if item(ui, "New", cmd(Key::N)) {
             self.guard(Pending::New, ctx);
         }
@@ -4110,7 +4143,7 @@ impl BimApp {
             }
             let tip =
                 msg!("Plugins: the WASM extensions in your plugin folder, what became of each, their log, and switching them on and off");
-            if big_button(ui, Icon::Code, "Plugins", self.plugins_dialog, tip).clicked() {
+            if !self.hosted && big_button(ui, Icon::Code, "Plugins", self.plugins_dialog, tip).clicked() {
                 self.plugins_dialog = true;
             }
             let tip = msg!("Project Parameters: values of your own each element of their categories holds, for schedules and IFC");

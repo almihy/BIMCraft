@@ -489,9 +489,11 @@ impl BimApp {
                         let note = if temp.reveal && !temp.hides() { msg!("Revealing hidden elements") } else { "Temporary Hide/Isolate" };
                         ui.label(RichText::new(tf("{} (HR resets)", &[t(note)])).color(FRAME));
                     }
-                    // The control port: off, listening, the agents connected, read-only.
-                    ui.separator();
-                    self.agents_indicator(ui);
+                    // The control port: off, listening, the agents connected, read-only. A hosted window has none.
+                    if !self.hosted() {
+                        ui.separator();
+                        self.agents_indicator(ui);
+                    }
                 })
             })
             .response

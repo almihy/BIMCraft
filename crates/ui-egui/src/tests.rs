@@ -5854,6 +5854,7 @@ mod fonts;
 mod gpu;
 mod graphics;
 mod groups;
+mod host;
 mod inspector;
 mod korean;
 mod light_canvas;

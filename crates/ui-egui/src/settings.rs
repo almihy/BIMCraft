@@ -268,6 +268,11 @@ pub enum Page {
 impl Page {
     pub const ALL: [Page; 6] = [Page::Interface, Page::Performance, Page::Graphics, Page::Files, Page::Agents, Page::Updates];
 
+    /// Whether a hosted window shows the page: what it holds is the window's own, not files on disk, the control port or updates.
+    pub fn hosted(self) -> bool {
+        matches!(self, Page::Interface | Page::Performance | Page::Graphics)
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Page::Interface => "User Interface",
@@ -376,6 +381,11 @@ impl BimApp {
     /// The Settings window, while it's open: its pages down the left, the one picked beside them.
     pub(crate) fn settings_window(&mut self, ctx: &Context) {
         let Some(mut page) = self.settings_page else { return };
+        // A hosted window has no files, control port or updater of its own: their pages are the page's business.
+        let pages: Vec<Page> = Page::ALL.into_iter().filter(|p| !self.hosted() || p.hosted()).collect();
+        if !pages.contains(&page) {
+            page = Page::Interface;
+        }
         let mut close = false;
         let r = Modal::new(UiId::new("settings"), t("Settings")).width(660.0).show(ctx, |ui| {
             crate::popup::body(ui, |ui| {
@@ -384,7 +394,7 @@ impl BimApp {
                 ui.allocate_ui_with_layout(vec2(660.0, 380.0), Layout::left_to_right(Align::Min), |ui| {
                     ui.vertical(|ui| {
                         ui.set_width(150.0);
-                        for p in Page::ALL {
+                        for &p in &pages {
                             if ui.selectable_label(page == p, t(p.name())).clicked() {
                                 page = p;
                             }

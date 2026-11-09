@@ -159,6 +159,10 @@ impl BimApp {
 
     /// Home and Ctrl+D: the start page over the project, or, from it, back to the project (when there is one behind it).
     pub(crate) fn toggle_home(&mut self) {
+        // A hosted window's project is the page's: it has no start page.
+        if self.hosted() {
+            return;
+        }
         if !self.home.shown {
             (self.home.shown, self.home.over) = (true, true);
         } else if self.home.over {
