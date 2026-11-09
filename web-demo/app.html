@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BIMCraft interface in the browser</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1f22; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
+  #status { position: absolute; left: 12px; bottom: 10px; font: 12px system-ui; color: #9aa; pointer-events: none; }
+</style>
+</head>
+<body>
+<canvas id="app"></canvas>
+<div id="status">Loading BIMCraft…</div>
+<script type="module">
+import init, { WebApp } from "./app/bimcraft_webapp.js";
+const status = document.getElementById("status");
+const t0 = performance.now();
+await init();
+const t1 = performance.now();
+const app = new WebApp();
+window.bimApp = app;
+try {
+  await app.start(document.getElementById("app"), new URLSearchParams(location.search).get("sample") !== "0");
+  status.textContent = `Loaded in ${(t1 - t0).toFixed(0)} ms, started in ${(performance.now() - t1).toFixed(0)} ms`;
+  setTimeout(() => status.remove(), 4000);
+} catch (e) {
+  status.textContent = "Failed: " + (e?.message ?? e);
+  console.error(e);
+}
+</script>
+</body>
+</html>

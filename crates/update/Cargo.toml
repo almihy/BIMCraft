@@ -17,5 +17,11 @@ testing = []
 serde = { workspace = true }
 serde_json = { workspace = true }
 semver = { workspace = true }
+
+# The browser (Arqiflow's build of the interface) has no updater: no network, and ring's C does not build for wasm32.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ureq = { workspace = true }
 ring = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+sha2 = "0.10"

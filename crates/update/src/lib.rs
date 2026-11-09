@@ -14,15 +14,46 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(not(target_arch = "wasm32"))]
 use ring::digest::{Context, SHA256};
+/// The browser's SHA-256 (ring's C does not build for wasm32), under ring's names.
+#[cfg(target_arch = "wasm32")]
+mod sha {
+    use sha2::Digest;
+
+    pub struct Algorithm;
+    pub static SHA256: Algorithm = Algorithm;
+
+    pub struct Context(sha2::Sha256);
+
+    impl Context {
+        pub fn new(_: &Algorithm) -> Context {
+            Context(sha2::Sha256::new())
+        }
+
+        pub fn update(&mut self, bytes: &[u8]) {
+            self.0.update(bytes);
+        }
+
+        pub fn finish(self) -> [u8; 32] {
+            self.0.finalize().into()
+        }
+    }
+}
 pub use semver::Version;
 use serde_json::Value;
+#[cfg(target_arch = "wasm32")]
+use sha::{Context, SHA256};
 
 pub mod appimage;
 pub mod detect;
 mod exec;
 pub mod install;
 pub mod macos;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod net;
+#[cfg(target_arch = "wasm32")]
+#[path = "net_none.rs"]
 pub mod net;
 pub mod prefs;
 #[cfg(any(test, feature = "testing"))]

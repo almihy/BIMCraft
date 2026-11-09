@@ -7,7 +7,7 @@ use bimcraft_i18n::msg;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, channel};
-use std::time::{Duration, SystemTime};
+use web_time::{Duration, SystemTime};
 
 use bimcraft_core::model::Model;
 use bimcraft_core::view3d::{AZIMUTH, ELEVATION, Scene};
@@ -111,6 +111,17 @@ fn back(ui: &mut Ui) -> Response {
 }
 
 /// How long ago `when` was, in words.
+/// A file's time as this crate's `SystemTime` (in a browser that is web_time's, not std's; elsewhere the same).
+#[cfg(not(target_arch = "wasm32"))]
+fn own_time(t: std::time::SystemTime) -> SystemTime {
+    t
+}
+
+#[cfg(target_arch = "wasm32")]
+fn own_time(t: std::time::SystemTime) -> SystemTime {
+    web_time::UNIX_EPOCH + t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default()
+}
+
 fn ago(when: SystemTime) -> String {
     let secs = SystemTime::now().duration_since(when).unwrap_or(Duration::ZERO).as_secs();
     let (minutes, hours, days) = (secs / 60, secs / 3600, secs / 86_400);
@@ -418,7 +429,7 @@ impl BimApp {
         let clip = Rect::from_min_max(text_at, pos2(rect.right() - 12.0, rect.bottom()));
         let p = p.with_clip_rect(clip);
         p.text(text_at, Align2::LEFT_TOP, name, FontId::proportional(14.5), ink);
-        let when = std::fs::metadata(path).and_then(|m| m.modified()).ok().map(ago);
+        let when = std::fs::metadata(path).and_then(|m| m.modified()).ok().map(|t| ago(own_time(t)));
         let folder = path.parent().and_then(Path::file_name).map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
         let detail = match when {
             Some(w) if !folder.is_empty() => format!("{folder} · {w}"),

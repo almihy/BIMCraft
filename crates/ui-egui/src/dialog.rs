@@ -3,10 +3,14 @@
 //! the window's thread (AppKit wants that, and the sheet it opens does not block) and waited for on a thread of its own: the
 //! window keeps its event loop, and the path comes back in a later frame.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::future::Future;
 use std::path::PathBuf;
+#[cfg(not(target_arch = "wasm32"))]
 use std::pin::Pin;
-use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+use std::sync::mpsc::{Receiver, TryRecvError};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::mpsc::{Sender, channel};
 
 use egui::Context;
 
@@ -24,6 +28,7 @@ pub(crate) struct Dialog {
 impl BimApp {
     /// Asks for a file to open, or for where to save one (`save`), and calls `then` with the path in a later frame. Nothing
     /// happens if the dialog is cancelled, and a second dialog is not opened while one is.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn ask_file(
         &mut self,
         ctx: &Context,
@@ -48,6 +53,7 @@ impl BimApp {
     }
 
     /// Asks for one file or several to open, and calls `then` with their paths in a later frame, as [`BimApp::ask_file`] does.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn ask_files(
         &mut self,
         ctx: &Context,
@@ -57,6 +63,7 @@ impl BimApp {
         self.begin(ctx, Box::pin(dialog.pick_files()), Box::new(then));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn begin(&mut self, ctx: &Context, future: Pin<Box<dyn Future<Output = Option<Vec<rfd::FileHandle>>> + Send>>, then: Then) {
         if self.dialog.is_some() {
             return;
@@ -64,6 +71,27 @@ impl BimApp {
         let (tx, answer) = channel();
         wait(ctx, future, tx);
         self.dialog = Some(Dialog { answer, then });
+    }
+
+    /// In a browser there are no paths to give: the page that holds the interface (Arqiflow) brings files in and out itself.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn ask_file(
+        &mut self,
+        _ctx: &Context,
+        _dialog: rfd::AsyncFileDialog,
+        _save: bool,
+        _then: impl FnOnce(&mut BimApp, PathBuf) + 'static,
+    ) {
+    }
+
+    /// In a browser there are no paths to give, as for [`BimApp::ask_file`].
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn ask_files(
+        &mut self,
+        _ctx: &Context,
+        _dialog: rfd::AsyncFileDialog,
+        _then: impl FnOnce(&mut BimApp, Vec<PathBuf>) + 'static,
+    ) {
     }
 
     /// Once a frame: acts on the path an open dialog has given. A thread that died leaves no answer, and the dialog is dropped.
@@ -86,7 +114,7 @@ impl BimApp {
 /// Waits for `future`'s answer on a thread of its own and sends it on `tx`. The future is made by the caller, on the window's
 /// thread: on macOS that is where the dialog is begun (its sheet opens at once and does not block), and only waiting for it
 /// is done on the thread.
-#[cfg(not(test))]
+#[cfg(all(not(test), not(target_arch = "wasm32")))]
 fn wait(ctx: &Context, future: Pin<Box<dyn Future<Output = Option<Vec<rfd::FileHandle>>> + Send>>, tx: Sender<Option<Vec<PathBuf>>>) {
     let ctx = ctx.clone();
     std::thread::spawn(move || {

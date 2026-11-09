@@ -23,6 +23,8 @@ rayon = { workspace = true }
 bytemuck = "1"
 rfd = { workspace = true }
 sys-locale = { workspace = true }
+# Instant and SystemTime that work in a browser too (std's panic there); std's own elsewhere.
+web-time = "1"
 
 # The 3D mouse (`spacemouse.rs`), read from its HID reports through hidapi's own Windows backend: pure Rust, MIT.
 [target.'cfg(windows)'.dependencies]

@@ -13,3 +13,4 @@ target/
 /target-wasm
 /web-demo/pkg
 /web-demo/node
+/web-demo/app
