@@ -326,7 +326,34 @@ fn clean(rings: &[Ring], least: usize) -> Vec<Ring> {
 }
 
 fn flatten(shapes: Vec<Vec<Vec<Xy>>>) -> Vec<Ring> {
-    shapes.into_iter().flatten().filter(|r| r.len() >= 3).collect()
+    shapes.into_iter().flatten().map(despike).filter(|r| r.len() >= 3 && ring_area(r).abs() > 1e-6).collect()
+}
+
+/// A ring without repeated points and without spikes (out and back along the same line), which the integer snapping
+/// of a boolean can leave where two edges almost lie on each other.
+pub fn despike(r: Ring) -> Ring {
+    let mut r = r;
+    let mut changed = true;
+    while changed && r.len() >= 3 {
+        changed = false;
+        let n = r.len();
+        let mut out: Ring = Vec::with_capacity(n);
+        for i in 0..n {
+            let (p, q, s) = (r[(i + n - 1) % n], r[i], r[(i + 1) % n]);
+            let repeated = dist(p, q) < 1e-6;
+            // q is the tip of a spike when the edges into and out of it run back on each other.
+            let (a, b) = (sub(q, p), sub(s, q));
+            let (la, lb) = (a[0].hypot(a[1]), b[0].hypot(b[1]));
+            let spike = la > 0.0 && lb > 0.0 && dot(a, b) < 0.0 && cross(a, b).abs() <= 1e-9 * la * lb + 1e-6 * la.max(lb);
+            if repeated || spike {
+                changed = true;
+                continue;
+            }
+            out.push(q);
+        }
+        r = out;
+    }
+    r
 }
 
 /// Union of rings (non-zero): outer rings counter-clockwise, holes clockwise.
@@ -380,6 +407,37 @@ pub fn grow(rings: &[Ring], d: f64, tol: f64) -> Vec<Ring> {
     flatten(s.outline(&style))
 }
 
+/// What a closing by `radius` (grown by it, then shrunk by it, round) adds to `rings`: the pieces it fills in where
+/// shapes meet, each at least `least` mm². A shape's arcs are polygons, and the closing rounds each of their corners by
+/// a crumb under a millimetre thick; those crumbs, and the hairlines the snapping of the booleans leaves along the
+/// edges, are left out: the pieces are what lies off `rings` by a fiftieth of a millimetre (no hairline is that thick),
+/// and a piece counts only where some of it lies more than a millimetre off them. Union a piece with what it meets
+/// through [`join`], which closes that fiftieth.
+pub fn closing_pieces(rings: &[Ring], radius: f64, least: f64) -> Vec<Ring> {
+    if !(radius > 0.0) || rings.is_empty() {
+        return Vec::new();
+    }
+    let closed = grow(&grow(rings, radius, ARC_TOL), -radius, ARC_TOL);
+    let cores: Vec<Ring> = difference(&closed, &grow(rings, 1.0, 0.5)).into_iter().filter(|g| ring_area(g) > 1.0).collect();
+    if cores.is_empty() {
+        return Vec::new();
+    }
+    difference(&closed, &grow(rings, 0.02, 0.01))
+        .into_iter()
+        .filter(|g| ring_area(g) > least && cores.iter().any(|c| c.iter().any(|q| in_ring(g, *q))))
+        .collect()
+}
+
+/// The union of a shape and pieces that touch it (or lie within a fiftieth of a millimetre of it): one shape, the
+/// hair's breadth between them closed.
+pub fn join(shape: &[Ring], pieces: &[Ring]) -> Vec<Ring> {
+    let mut all = shape.to_vec();
+    all.extend(pieces.iter().cloned());
+    let u = union(&all);
+    let outers = |rs: &[Ring]| rs.iter().filter(|r| ring_area(r) > 0.0).count();
+    if outers(&u) > outers(shape) { grow(&grow(&u, 0.1, ARC_TOL), -0.1, ARC_TOL) } else { u }
+}
+
 /// The strip `width` wide along a line: butt ends, mitred corners (squared off past the mitre limit, as Clipper2's),
 /// as one union (shapely's flat-capped mitred buffer).
 pub fn band(line: &[Xy], width: f64) -> Vec<Ring> {
@@ -415,7 +473,12 @@ pub fn band(line: &[Xy], width: f64) -> Vec<Ring> {
         let s = if turn > 0.0 { -1.0 } else { 1.0 };
         let (a, b) = (at(pts[i], n0, s * h), at(pts[i], n1, s * h));
         let cos_a = dot(n0, n1);
-        let mut wedge = vec![pts[i], a];
+        // The wedge reaches from inside the corner (half a half width in along its bisector), so that none of its edges
+        // lies on a piece's own end.
+        let inward = [n0[0] + n1[0], n0[1] + n1[1]];
+        let li = inward[0].hypot(inward[1]);
+        let v = if li > 1e-12 { at(pts[i], [inward[0] / li, inward[1] / li], -s * h / 2.0) } else { pts[i] };
+        let mut wedge = vec![v, a];
         if cos_a > 2.0 / (MITRE_LIMIT * MITRE_LIMIT) - 1.0 {
             // The mitre: where the two edges meet.
             let m = [(n0[0] + n1[0]) * s * h / (1.0 + cos_a), (n0[1] + n1[1]) * s * h / (1.0 + cos_a)];
