@@ -492,4 +492,46 @@ mod tests {
             .count();
         assert_eq!(linked_fills, 0);
     }
+
+    /// A box of walls as a project's text.
+    fn box_text(width: f64) -> String {
+        let mut other = Session::new();
+        run(&mut other, "wall", json!({"points": [[0, 0], [width, 0], [width, 6000], [0, 6000]], "closed": true}));
+        other.model.to_json().unwrap()
+    }
+
+    #[test]
+    fn a_link_from_text_is_drawn_and_linked_again_takes_its_place() {
+        let mut s = Session::new();
+        let out = run(&mut s, "link", json!({"text": box_text(8000.0), "name": "Site", "at": [1000, 0]}));
+        assert_eq!((out["name"].as_str(), out["replaced"].as_bool()), (Some("Site"), Some(false)));
+        let linked = walls(&seen(&s.model));
+        assert_eq!(linked.len(), 4);
+        assert!(linked.iter().all(|(id, _)| is_linked(*id)));
+        assert!(linked.iter().any(|(_, w)| w.start == P2(1000.0, 0.0)), "it stands at `at`");
+        assert!(walls(&s.model).is_empty(), "nothing of it is the project's");
+        // The same name again: the newer text, in the same link.
+        let again = run(&mut s, "link", json!({"text": box_text(12000.0), "name": "Site"}));
+        assert_eq!((again["id"].clone(), again["replaced"].as_bool()), (out["id"].clone(), Some(true)));
+        let links = s.model.elements.iter().filter(|(_, e)| matches!(e, Element::Link(_))).count();
+        assert_eq!(links, 1);
+        let ends: Vec<f64> = walls(&seen(&s.model)).iter().map(|(_, w)| w.end.0.max(w.start.0)).collect();
+        assert!(ends.iter().any(|x| (*x - 12000.0).abs() < 1e-6), "{ends:?}");
+        // Undo brings back the first text; and the project keeps the link, whose text no file holds.
+        run(&mut s, "undo", json!({}));
+        assert_eq!(walls(&seen(&s.model)).len(), 4);
+        let reload = run(&mut s, "reload", json!({}));
+        assert!(reload["failed"][0]["error"].as_str().is_some_and(|e| e.contains("text")), "{reload}");
+    }
+
+    #[test]
+    fn what_cant_be_a_link_from_text_is_refused() {
+        let mut s = Session::new();
+        assert!(s.execute("link", &json!({"text": "not a project"})).unwrap_err().contains("not a BIMCraft project"));
+        assert!(s.execute("link", &json!({"text": 42})).is_err());
+        assert!(s.execute("link", &json!({"text": box_text(8000.0), "path": "x.bimcraft"})).unwrap_err().contains("not both"));
+        assert!(s.execute("link", &json!({"path": "text:Site"})).unwrap_err().contains("text:"));
+        assert!(s.execute("link", &json!({"text": box_text(8000.0), "angle": f64::MAX})).is_err());
+        assert!(s.model.elements.iter().all(|(_, e)| !matches!(e, Element::Link(_))), "the model is as it was");
+    }
 }
