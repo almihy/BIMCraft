@@ -5067,7 +5067,8 @@ impl Model {
 
     /// The default 3D view, `{3D}`: the 3D view of that name, once something has made it.
     pub fn default_3d(&self) -> Option<Id> {
-        self.elements.iter().find_map(|(id, e)| matches!(e, Element::View3D(v) if v.name == "{3D}").then_some(*id))
+        // Among the 3D views (the lookup's, once made), not every element: the interface asks for it many times a frame.
+        self.rare("view3d").into_iter().find(|id| matches!(self.elements.get(*id), Some(Element::View3D(v)) if v.name == "{3D}"))
     }
 
     /// The level a point at height `z` stands on: the highest level at or below it, else the lowest. A camera stands on the

@@ -75,3 +75,15 @@ opt-level = 2
 opt-level = 2
 [profile.dev.package.cfb]
 opt-level = 2
+
+# The browser builds (crates/web, apps/bimcraft-web), which a page downloads: `cargo build --profile wasm`. Optimised for
+# size (s: 24 MB, 5.9 MB as brotli, against 27 MB and 6.7 MB at 3, and no slower to open or draw in the browser), as one
+# unit optimised whole (LTO), with no unwinding (WebAssembly aborts on a panic anyway) and no symbols.
+[profile.wasm]
+inherits = "release"
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+debug = false

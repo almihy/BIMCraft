@@ -184,3 +184,87 @@ fn ones_own_changes_not_sent_yet_stay_and_a_whole_model_makes_a_copy_say_it() {
     assert_eq!(by_guid(&a.model), by_guid(&b.model));
     assert_eq!(b.model.check(), Ok(()));
 }
+
+/// `s`'s project opened again from its file, as a page reloaded opens it, with the site linked again (each copy's own).
+fn reopened(s: &Session) -> Session {
+    let mut x = Session::new();
+    x.reset(Model::read(&s.model.to_json().unwrap()).unwrap().0, None);
+    run(&mut x, "link", json!({"text": Session::new().model.to_json().unwrap(), "name": "Site"}));
+    x
+}
+
+/// The history kept as the page keeps it: JSON, read back.
+fn kept(s: &Session) -> sync::History {
+    sync::History::read(&s.kept_history().unwrap().to_json()).unwrap()
+}
+
+#[test]
+fn a_kept_undo_history_goes_back_on_the_project_opened_again() {
+    let (mut a, _) = two();
+    run(&mut a, "link", json!({"text": Session::new().model.to_json().unwrap(), "name": "Site"}));
+    let m0 = by_guid(&a.model);
+    let wall = run(&mut a, "wall", json!({"points": [[0, 0], [6000, 0]]}))["ids"][0].as_u64().unwrap();
+    let m1 = by_guid(&a.model);
+    run(&mut a, "door", json!({"wall": wall, "offset": 3000}));
+    let m2 = by_guid(&a.model);
+    run(&mut a, "wall", json!({"points": [[0, 4000], [6000, 4000]]}));
+    let m3 = by_guid(&a.model);
+    // The last wall undone: a redo step, kept too.
+    run(&mut a, "undo", json!({}));
+    let h = kept(&a);
+    assert_eq!(h.undo.iter().map(|s| s.label.as_str()).collect::<Vec<_>>(), ["Wall", "Door"], "the site's link is no step of the person's");
+    assert_eq!(h.redo.len(), 1);
+
+    let mut b = reopened(&a);
+    assert_eq!(b.restore_history(&h), Ok((2, 1)));
+    assert_eq!(b.history(), ["Wall", "Door"]);
+    run(&mut b, "redo", json!({}));
+    assert_eq!(by_guid(&b.model), m3);
+    run(&mut b, "undo", json!({"count": 2}));
+    assert_eq!(by_guid(&b.model), m1, "the door undone, by GUID");
+    run(&mut b, "undo", json!({}));
+    assert_eq!(by_guid(&b.model), m0);
+    assert_eq!(b.model.elements.values().filter(|e| sync::own(e)).count(), 1, "the site stays linked through it all");
+    run(&mut b, "redo", json!({"count": 2}));
+    assert_eq!(by_guid(&b.model), m2);
+    assert_eq!(b.model.check(), Ok(()));
+}
+
+#[test]
+fn a_kept_history_leaves_the_others_work_since_in_place() {
+    let (mut a, mut other) = two();
+    let mine = run(&mut a, "wall", json!({"points": [[0, 0], [6000, 0]]}))["ids"][0].as_u64().unwrap();
+    let mine = a.model.elements.guid(mine).unwrap();
+    // The room has A's wall; another person draws one after A's page went.
+    let start = other.model.clone();
+    send_model(&start, &a.model, &mut other);
+    let theirs = run(&mut other, "wall", json!({"points": [[0, 8000], [6000, 8000]]}))["ids"][0].as_u64().unwrap();
+    let theirs = other.model.elements.guid(theirs).unwrap();
+    let h = kept(&a);
+    let mut b = reopened(&other);
+    assert_eq!(b.restore_history(&h), Ok((1, 0)));
+    run(&mut b, "undo", json!({}));
+    assert!(b.model.elements.get(mine).is_none(), "A's own wall is taken back");
+    assert!(b.model.elements.get(theirs).is_some(), "the other's stays");
+    assert_eq!(b.model.check(), Ok(()));
+}
+
+#[test]
+fn a_history_goes_back_only_on_its_own_project_and_under_the_steps_taken_since() {
+    let (mut a, _) = two();
+    run(&mut a, "wall", json!({"points": [[0, 0], [6000, 0]]}));
+    let h = kept(&a);
+    let mut stranger = Session::new();
+    run(&mut stranger, "new", json!({}));
+    assert!(stranger.restore_history(&h).is_err());
+    assert!(stranger.history().is_empty());
+    // A step taken before the history came back stays on top of it.
+    let mut b = reopened(&a);
+    run(&mut b, "wall", json!({"points": [[0, 3000], [6000, 3000]]}));
+    // Under the site's link and the new wall: three steps.
+    assert_eq!(b.restore_history(&h), Ok((3, 0)));
+    run(&mut b, "undo", json!({"count": 3}));
+    assert_eq!(walls(&b.model), 0);
+    run(&mut b, "redo", json!({"count": 3}));
+    assert_eq!(walls(&b.model), 2);
+}

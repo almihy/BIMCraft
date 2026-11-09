@@ -116,7 +116,7 @@ pub struct Step {
 impl Step {
     /// Without a look at every element: what's new has an id past every one `before` had (ids only go up), and only when
     /// the counts say something went is `before` searched for what.
-    fn new(label: &str, before: &Model, after: &Model) -> Step {
+    pub(crate) fn new(label: &str, before: &Model, after: &Model) -> Step {
         let tally = |elements: &mut dyn Iterator<Item = &Element>| {
             let mut counts: Vec<(&'static str, usize)> = Vec::new();
             for e in elements {

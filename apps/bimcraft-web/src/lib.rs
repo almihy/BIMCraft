@@ -16,6 +16,8 @@
 //! // Editing together (bimcraft_core::sync): changes keyed by GUID, to and from the others' copies.
 //! app.take_changes();       // what changed here since last taken: '{"elements": {guid: json | null}, "project": {...}}'
 //! app.apply_changes(json);  // the others' changes taken in, checked: '{"taken": n, "refused": [...]}'
+//! app.history();            // this person's undo history, to keep across a reload (by GUID)
+//! app.restore_history(text);  // put back on the project opened again: '{"undo": n, "redo": n}'
 //! ```
 //!
 //! Its files are the page's (`bimcraft_ui_egui::host`). Open, Link, Import CAD, Point Cloud and Export ask the page:
@@ -205,7 +207,7 @@ impl WebApp {
         let (sans, mono) = self.fonts.borrow().clone();
         app.set_host_fonts(sans, mono);
         *self.sent.borrow_mut() = Some(Arc::clone(&app.session.model));
-        let host = Host {
+        let mut host = Host {
             seen: Arc::clone(&app.session.model),
             app,
             changes: Rc::clone(&self.changes),
@@ -217,9 +219,15 @@ impl WebApp {
         self.runner
             .start(
                 canvas,
-                eframe::WebOptions::default(),
+                web_options(),
                 Box::new(move |cc| {
                     *ctx.borrow_mut() = Some(cc.egui_ctx.clone());
+                    // The 3D view, and the plans' kept triangles, drawn on the card the page draws on (WebGPU; WebGL2 where
+                    // there is none, which the 3D view can't use, so it is drawn on the processor there), as the desktop
+                    // app does.
+                    if let Some(state) = cc.wgpu_render_state.as_ref() {
+                        host.app.use_graphics_card(state);
+                    }
                     Ok(Box::new(host))
                 }),
             )
@@ -322,6 +330,22 @@ impl WebApp {
         };
         self.repaint();
         Ok(merged.to_json().to_string())
+    }
+
+    /// This person's undo history, to keep outside the page so a reload keeps it (`bimcraft_core::sync::History`, JSON):
+    /// their own commands' steps, by GUID.
+    pub fn history(&self) -> Result<String, JsValue> {
+        Ok(self.host()?.app.session.kept_history().map_err(err)?.to_json())
+    }
+
+    /// Puts back a history `history` gave, on the same project opened again, once it says what the room says: what the
+    /// others changed since is brought to every step, so undo takes back this person's own work alone. The model stays as
+    /// it is. Replies `{"undo": n, "redo": n}`, or throws (another project's history).
+    pub fn restore_history(&self, history: &str) -> Result<String, JsValue> {
+        let h = bimcraft_core::sync::History::read(history).map_err(err)?;
+        let (undo, redo) = self.host()?.app.session.restore_history(&h).map_err(err)?;
+        self.repaint();
+        Ok(serde_json::json!({"undo": undo, "redo": redo}).to_string())
     }
 
     /// Dresses the interface in the page's look: `{"dark": bool, "compact": bool}` and colours as `"#rrggbb"`: `panel`, `text`,
@@ -448,6 +472,21 @@ impl Default for WebApp {
     fn default() -> WebApp {
         WebApp::new()
     }
+}
+
+/// eframe's web runner on wgpu, asking the card for buffers as big as it has (the desktop app's `limits_for`): the 3D view
+/// draws models of any size.
+fn web_options() -> eframe::WebOptions {
+    let mut options = eframe::WebOptions::default();
+    if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_options.wgpu_setup {
+        let asked = Arc::clone(&setup.device_descriptor);
+        setup.device_descriptor = Arc::new(move |adapter| {
+            let mut descriptor = asked(adapter);
+            descriptor.required_limits = bimcraft_ui_egui::limits_for(adapter, descriptor.required_limits);
+            descriptor
+        });
+    }
+    options
 }
 
 /// The name of the link `WebApp::link_site` makes.

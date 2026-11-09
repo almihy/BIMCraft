@@ -249,6 +249,9 @@ pub struct Orbit {
     pub(crate) triad: crate::triad::Over,
     /// What the Aligned Dimension tool has picked in the 3D view so far: its references, before a click places its line.
     pub(crate) dim3: Vec<Ref3>,
+    /// The model's box ([`Model::model_box`]) as the model shown last has it, which the work plane's patch stands by in every
+    /// frame: found once for each model, for it builds every solid (a frame's worth and more of a large model in a browser).
+    model_box: std::sync::Mutex<Option<(Arc<Model>, Option<([f64; 3], [f64; 3])>)>>,
 }
 
 /// A room as the 3D view draws it: its outline in plan (an unbounded one's square), swept from `bottom` to `top`.
@@ -293,6 +296,7 @@ impl Default for Orbit {
             wall_base: None,
             triad: Default::default(),
             dim3: Vec::new(),
+            model_box: std::sync::Mutex::new(None),
         }
     }
 }
@@ -413,6 +417,19 @@ pub(crate) fn rgb(c: Color32) -> Rgb {
 }
 
 impl Orbit {
+    /// [`Model::model_box`] of `m`, found once for each model.
+    pub(crate) fn model_box(&self, m: &Arc<Model>) -> Option<([f64; 3], [f64; 3])> {
+        let mut kept = self.model_box.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        match &*kept {
+            Some((k, b)) if Arc::ptr_eq(k, m) => *b,
+            _ => {
+                let b = m.model_box();
+                *kept = Some((Arc::clone(m), b));
+                b
+            }
+        }
+    }
+
     pub(crate) fn suspend(&mut self) {
         self.worker = None;
         self.requested = None;
@@ -1445,7 +1462,7 @@ impl BimApp {
         let m = &self.session.model;
         let new_sketch = self.sketch.as_ref().and_then(|sk| sk.surface.filter(|_| sk.plan == crate::Sheet::View3D));
         if (self.work_plane.is_some() || new_sketch.is_some())
-            && let Some(extent) = m.model_box()
+            && let Some(extent) = self.orbit.model_box(m)
             && let Ok(plane) = m.work_plane(m.default_3d()).resolve(m)
         {
             let plane = new_sketch.map_or(plane, Frame::from);

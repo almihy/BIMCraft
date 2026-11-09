@@ -21,7 +21,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::engine::Session;
+use crate::engine::{Session, Step};
 use crate::ids::{Changed, Elements, Guid, Id};
 use crate::model::{Element, Model};
 
@@ -375,5 +375,142 @@ impl Session {
         self.model = Arc::new(model);
         self.verified = Some(Arc::clone(&self.model));
         Ok(merged)
+    }
+}
+
+/// A copy's undo history, kept outside it so that it outlives the copy (a page reloaded): [`Session::kept_history`] gives it,
+/// [`Session::restore_history`] puts it back on the same project opened again. It holds what this copy's own commands did and
+/// nothing else, by GUID: each step the changes that make the model nearer the present into the model of that step. The model
+/// it is put back on holds the others' work done since, and every model of the history is brought that, as
+/// [`Session::merge`] brings what comes in live: undo stays this copy's, across a reload too.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct History {
+    /// The project's `uid`: a history goes back only on its own project.
+    pub uid: u64,
+    /// What the elements and settings the steps touch said when it was kept, from which what the others changed of them
+    /// since is told.
+    pub now: Changes,
+    /// The undo steps, oldest first.
+    pub undo: Vec<KeptStep>,
+    /// The redo steps, the next to redo last.
+    pub redo: Vec<KeptStep>,
+}
+
+/// One step of a [`History`].
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KeptStep {
+    pub label: String,
+    /// What makes the model nearer the present (the next step's, or the model's) into this step's model.
+    pub changes: Changes,
+    /// The ids its model gave the elements `changes` puts in, given them again where they are free.
+    #[serde(default)]
+    pub ids: BTreeMap<Guid, Id>,
+}
+
+impl History {
+    pub fn read(text: &str) -> Result<History, String> {
+        serde_json::from_str(text).map_err(|e| format!("the undo history isn't readable: {e}"))
+    }
+
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).unwrap_or_else(|_| "{}".into())
+    }
+}
+
+impl Session {
+    /// The undo history to keep (see [`History`]). Steps that changed nothing another copy would see (the link of a site
+    /// made from text, each copy's own) are left out.
+    pub fn kept_history(&self) -> Result<History, String> {
+        let mut h = History { uid: self.model.uid, ..History::default() };
+        let (mut elements, mut touched) = (BTreeSet::new(), BTreeSet::new());
+        for (stack, out) in [(&self.undo, &mut h.undo), (&self.redo, &mut h.redo)] {
+            let mut nearer: &Model = &self.model;
+            for (step, m) in stack.iter().rev() {
+                let c = changes(nearer, m)?;
+                nearer = m;
+                if c.is_empty() {
+                    continue;
+                }
+                elements.extend(c.elements.keys().copied());
+                touched.extend(c.project.keys().cloned());
+                let ids =
+                    c.elements.iter().filter(|(_, v)| v.is_some()).filter_map(|(g, _)| m.elements.id(*g).map(|id| (*g, id))).collect();
+                out.push(KeptStep { label: step.label.clone(), changes: c, ids });
+            }
+            out.reverse();
+        }
+        for g in elements {
+            let e = self.model.elements.get(g).filter(|e| !own(e));
+            h.now.elements.insert(g, e.map(element_text).transpose()?);
+        }
+        if !touched.is_empty() {
+            let now = settings(&self.model)?;
+            for k in touched {
+                let v = now.get(&k).map(Value::to_string);
+                h.now.project.insert(k, v);
+            }
+        }
+        Ok(h)
+    }
+
+    /// Puts back a history [`Session::kept_history`] gave, on the same project opened again; the model stays as it is. What
+    /// the others changed since of what the history touches is brought to every model of it. A step that can't be brought
+    /// back ends the history there, the older ones with it. Steps this session took since it opened stay on top of those put
+    /// back (and the redo steps are then its own); steps of its own that changed nothing another copy would see (the site's
+    /// link) go. Gives how many undo and redo steps there are.
+    pub fn restore_history(&mut self, h: &History) -> Result<(usize, usize), String> {
+        if h.uid != self.model.uid {
+            return Err("the undo history is another project's".into());
+        }
+        // Where the history ends: the model as it opened, before the steps of this session that changed something.
+        let mut own_steps = false;
+        let mut nearer: &Model = &self.model;
+        for (_, m) in self.undo.iter().rev() {
+            own_steps |= !changes(m, nearer)?.is_empty();
+            nearer = m;
+        }
+        let anchor = match self.undo.first() {
+            Some((_, m)) if own_steps => Arc::clone(m),
+            _ => Arc::clone(&self.model),
+        };
+        // That model as the history last knew it, where the history touches it, and what the others changed of that since.
+        let base = Arc::new(anchor.with_changes(&h.now, &BTreeMap::new())?);
+        let since = changes(&base, &anchor)?;
+        let since_ids: BTreeMap<Guid, Id> = since.elements.keys().filter_map(|g| anchor.elements.id(*g).map(|id| (*g, id))).collect();
+        let mut built: [Vec<(Step, Arc<Model>)>; 2] = Default::default();
+        for (which, kept) in [&h.undo, &h.redo].into_iter().enumerate() {
+            let redo = which == 1;
+            let (mut raw_nearer, mut nearer) = (Arc::clone(&base), Arc::clone(&anchor));
+            let mut out = Vec::new();
+            for ks in kept.iter().rev() {
+                let Ok(raw) = raw_nearer.with_changes(&ks.changes, &ks.ids).map(Arc::new) else { break };
+                let model = if since.is_empty() {
+                    Arc::clone(&raw)
+                } else {
+                    match raw.with_changes(&since, &since_ids) {
+                        Ok(m) => Arc::new(m),
+                        Err(_) => break,
+                    }
+                };
+                let step = if redo { Step::new(&ks.label, &nearer, &model) } else { Step::new(&ks.label, &model, &nearer) };
+                out.push((step, Arc::clone(&model)));
+                (raw_nearer, nearer) = (raw, model);
+            }
+            out.reverse();
+            built[which] = out;
+        }
+        let [mut undo, redo] = built;
+        if own_steps {
+            undo.append(&mut self.undo);
+        } else {
+            self.undo.clear();
+            self.redo = redo;
+        }
+        let over = undo.len().saturating_sub(crate::engine::UNDO_LIMIT);
+        undo.drain(..over);
+        self.undo = undo;
+        Ok((self.undo.len(), self.redo.len()))
     }
 }
