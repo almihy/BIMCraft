@@ -1,0 +1,15 @@
+const { Engine } = require('./node/bimcraft_web.js');
+const t0 = performance.now();
+const e = new Engine();
+e.sample();
+const t1 = performance.now();
+const svg = e.plan_svg('', 1600, 1000);
+const t2 = performance.now();
+const glb = e.glb();
+const ifc = e.ifc();
+const t3 = performance.now();
+console.log('sample house built in', (t1 - t0).toFixed(0), 'ms; plan', (t2 - t1).toFixed(0), 'ms; glb+ifc', (t3 - t2).toFixed(0), 'ms');
+console.log('svg', svg.length, 'glb', glb.length, 'ifc', ifc.length, 'commands', JSON.parse(e.commands()).length);
+const r = e.execute('wall', JSON.stringify({ points: [[0, -3000], [6000, -3000]] }));
+console.log('wall ->', r.slice(0, 200));
+console.log(e.execute('inspect', '').slice(0, 300));

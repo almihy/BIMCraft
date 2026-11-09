@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BIMCraft engine in the browser</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 0; background: #f4f4f2; color: #222; }
+  header { padding: 10px 16px; background: #1f2a30; color: #fff; display: flex; gap: 16px; align-items: center; }
+  header b { font-size: 15px; }
+  #status { opacity: .85; }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; height: calc(100vh - 150px); }
+  .pane { background: #fff; border: 1px solid #ddd; border-radius: 6px; overflow: hidden; position: relative; }
+  .pane h2 { margin: 0; font-size: 12px; font-weight: 600; padding: 6px 10px; border-bottom: 1px solid #eee; background: #fafafa; }
+  #plan svg { width: 100%; height: calc(100% - 28px); }
+  #view3d canvas { display: block; }
+  form { display: flex; gap: 8px; padding: 0 12px 12px; }
+  input { flex: 1; font: 13px ui-monospace, monospace; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+  button { padding: 8px 14px; border: 0; border-radius: 4px; background: #1f6f5c; color: #fff; cursor: pointer; }
+  #reply { font: 12px ui-monospace, monospace; padding: 0 12px; color: #555; white-space: pre-wrap; max-height: 40px; overflow: auto; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<header><b>BIMCraft engine, running in this browser tab</b><span id="status">Loading the engine…</span></header>
+<main>
+  <div class="pane" id="plan"><h2>Level 1 plan (drawn by the engine)</h2></div>
+  <div class="pane" id="view3d"><h2>3D (the engine's glTF, shown with three.js)</h2></div>
+</main>
+<form id="cmd">
+  <input id="line" value='wall {"points": [[10300, 0], [14300, 0], [14300, 7300], [10300, 7300]]}' aria-label="Command">
+  <button>Run command</button>
+</form>
+<div id="reply"></div>
+<script type="module">
+import init, { Engine } from "./pkg/bimcraft_web.js";
+import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+const status = document.getElementById("status");
+const t0 = performance.now();
+await init();
+const t1 = performance.now();
+const e = new Engine();
+e.sample();
+const t2 = performance.now();
+window.engine = e;
+
+// 3D
+const host = document.getElementById("view3d");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+const scene = new THREE.Scene();
+scene.background = new THREE.Color("#eef1f3");
+scene.add(new THREE.HemisphereLight(0xffffff, 0x888888, 2.2));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(8, 12, 6); scene.add(sun);
+const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 1000);
+const controls = new OrbitControls(camera, renderer.domElement);
+host.appendChild(renderer.domElement);
+function size() {
+  const w = host.clientWidth, h = host.clientHeight - 28;
+  renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+size(); addEventListener("resize", size);
+let model = null, fitted = false;
+const loader = new GLTFLoader();
+function show3d() {
+  const bytes = e.glb();
+  loader.parse(bytes.buffer, "", (g) => {
+    if (model) scene.remove(model);
+    model = g.scene; scene.add(model);
+    if (!fitted) {
+      const box = new THREE.Box3().setFromObject(model), c = box.getCenter(new THREE.Vector3()), r = box.getSize(new THREE.Vector3()).length();
+      camera.position.copy(c).add(new THREE.Vector3(1, 0.9, 1.2).normalize().multiplyScalar(r * 1.8));
+      controls.target.copy(c); controls.update(); fitted = true;
+    }
+  });
+}
+(function loop() { renderer.render(scene, camera); requestAnimationFrame(loop); })();
+
+function showPlan() {
+  const pane = document.getElementById("plan");
+  pane.querySelector("svg")?.remove();
+  pane.insertAdjacentHTML("beforeend", e.plan_svg("", 1600, 1000));
+}
+function refresh() { showPlan(); show3d(); }
+refresh();
+const t3 = performance.now();
+status.textContent = `Engine loaded in ${(t1 - t0).toFixed(0)} ms · sample house built in ${(t2 - t1).toFixed(0)} ms · plan and 3D in ${(t3 - t2).toFixed(0)} ms · ${JSON.parse(e.commands()).length} commands`;
+
+document.getElementById("cmd").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  const line = document.getElementById("line").value.trim();
+  const sp = line.indexOf(" ");
+  const name = sp < 0 ? line : line.slice(0, sp), params = sp < 0 ? "" : line.slice(sp + 1);
+  const out = document.getElementById("reply");
+  try {
+    const s = performance.now();
+    const r = e.execute(name, params);
+    refresh();
+    out.textContent = `${name} → ${r}  (${(performance.now() - s).toFixed(0)} ms with redraw)`;
+  } catch (err) { out.textContent = String(err.message || err); }
+});
+</script>
+</body>
+</html>
