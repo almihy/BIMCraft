@@ -30,6 +30,26 @@ fixtures in `server/tests/fixtures/site_kinds/`), and `web/lib/parking/` (car pa
 - **`mass`**: a building on the masterplan is a mass (BIMCraft's), with the masterplan's figures for it (use, storeys,
   floor height, attic, roof and pitch, label, entrance) beside its outline and height.
 
+### In a file and in `element_json`
+
+A site element, as the file and the live room hold it (the element's serde, tagged by `category`; references are
+GUIDs):
+
+```json
+{"category": "site", "kind": "lane", "use": "road", "name": "Street", "level": "<level GUID>",
+ "phase": "existing", "source": "site", "ref": "street:edge 0",
+ "props": {"path": [[-10000, -4000], [79950, -4000]], "width": 8000, "lanes": 2, "lane_width": 3000, "kerb": 150},
+ "outline": [{"outer": [[0, 0], [1000, 0], [1000, 1000]], "holes": []}],
+ "parts": [{"role": "carriageway", "polys": [], "lines": []}],
+ "layout": {"pieces": [{"kind": "stall", "level": "Level 1", "props": {}, "outline": []}], "result": {}}}
+```
+
+`layout` only on a car park; `parts`, `source`, `ref` and `name` left out when empty; `phase` left out when `new`.
+A mass on the masterplan carries the same under `site`: `{"category": "mass", …, "site": {"use": "housing",
+"phase": "existing", "source": "overture", "ref": "building:overture:17", "props": {"storeys": 2,
+"floor_height": 3000, "roof": "flat", "label": "B6", …}}}`, its outline its `boundary` and its height worked out from
+its storeys and floor height when it has them.
+
 ### The kinds
 
 | kind | Revit's | uses (the first is the default) |
