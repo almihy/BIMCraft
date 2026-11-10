@@ -4173,8 +4173,7 @@ impl BimApp {
             && let Some(o) = ui.input(|i| i.pointer.press_origin())
         {
             let near = |q: P2| pos(rect.min, view.px(q)).distance(o);
-            self.site_grip =
-                grips.iter().filter(|g| near(g.2) <= 8.0).min_by(|a, b| near(a.2).total_cmp(&near(b.2))).map(|g| (g.0, g.1));
+            self.site_grip = grips.iter().filter(|g| near(g.2) <= 8.0).min_by(|a, b| near(a.2).total_cmp(&near(b.2))).map(|g| (g.0, g.1));
         }
         let Some((key, i)) = self.site_grip else { return false };
         if !response.drag_stopped() {

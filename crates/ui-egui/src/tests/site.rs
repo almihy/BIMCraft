@@ -32,7 +32,9 @@ const RECT: [P2; 4] = [P2(1000.0, 1000.0), P2(7000.0, 1000.0), P2(7000.0, 5000.0
 fn the_tab_is_massing_and_site_with_the_site_panels_after_the_massing_tools() {
     let mut h = app(BOX);
     press(&mut h, "Massing & Site");
-    for tool in ["Mass", "Toposolid", "Sub-divide", "Road", "Building Pad", "Property Line", "Site Component", "Parking Component", "Parking Area"] {
+    for tool in
+        ["Mass", "Toposolid", "Sub-divide", "Road", "Building Pad", "Property Line", "Site Component", "Parking Component", "Parking Area"]
+    {
         assert!(h.query_all_by_label(tool).next().is_some(), "{tool}");
     }
     // BIMCraft's own profile has them in its Tools palette too.
@@ -240,9 +242,7 @@ fn a_mass_shows_its_masterplan_figures_and_storeys_set_its_height() {
 #[test]
 fn a_trees_point_and_a_paths_points_are_grips() {
     let mut h = app(BOX);
-    h.state_mut()
-        .execute_for_agent("site", &json!({"kind": "tree", "props": {"at": [4000, 3000]}}))
-        .unwrap();
+    h.state_mut().execute_for_agent("site", &json!({"kind": "tree", "props": {"at": [4000, 3000]}})).unwrap();
     let (tree, _) = site_of(&h, "tree").unwrap();
     h.state_mut().selection = vec![tree];
     h.run();

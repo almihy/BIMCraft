@@ -39,7 +39,7 @@ else ties them to the mass, and IFC carries no mark: what comes back from a file
 `Mass`, its footprint swept up; a lofted one is a closed `IFCTRIANGULATEDFACESET` with a `BIMCraft_Mass` property set (`ifc::LOFT`) whose
 `Loft` says as JSON how the footprint and the top outline pair up, since a face set doesn't. Import reads those before the proxies that
 become components of families, and takes a lofted one only when that set's outlines are the body's bottom and its top; a mass whose
-outline changes from base to top with no such set is left out and listed. The desktop's Massing tab has the Mass tool (`Tool::Mass`:
+outline changes from base to top with no such set is left out and listed. The desktop's Massing & Site tab has the Mass tool (`Tool::Mass`:
 corners clicked, Enter or the first corner again finishes, `finish_mass`), Show Mass (the button is pressed while the view shows
 masses) and, for each selected mass, the Model by Face buttons, which run the face commands, and Update to Face; a mass's Properties
 hold its levels and offsets and `Top Outline`, its corners as `x, y` parted by `;`, blank for none.

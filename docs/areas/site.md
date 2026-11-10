@@ -178,6 +178,53 @@ of Arqiflow's beside them under familiar names. Buildings on the masterplan stay
 In the Revit build each becomes Revit's own element: a toposolid, a property line, a sub-division, planting and site
 components, parking components, a building pad.
 
+### In the desktop (`crates/ui-egui/src/site.rs`)
+
+The tab is **Massing & Site** (`Tab::Massing`): Conceptual Mass and Model by Face, then the panels **Model Site**
+(Toposolid, Sub-divide with Road small beside it, Building Pad), **Modify Site** (Property Line) and **Components** (Site
+Component, Parking Component with Parking Area small beside it). Every tool is `Tool::Site(SiteTool)`; BIMCraft's own
+profile shows the same panels in its Tools palette. Each has its icon in `icons.rs` (`Icon::Toposolid`, `Subdivide`, `Road`,
+`BuildingPad`, `PropertyLine`, `SiteComponent`, `ParkingComponent`, `ParkingArea`), and an entry in Keyboard Shortcuts and
+Find (TS, BP and PL run the tools as the commands' aliases).
+
+How each takes its clicks (`SiteChoices::taking`, by the shape of the kind it makes):
+
+| Tool | Clicks | Options Bar | Makes |
+|---|---|---|---|
+| Toposolid | sketch mode at once (as Floor): the Draw panel's lines, arcs, rectangles…, Finish Edit Mode | | `toposolid {boundary}` |
+| Sub-divide | sketch the area; a pitch, a click where its middle goes (its standard size), Space a quarter turn | Type (Paving, Terrace, Landscape, Water, Stream, Pitch, Playground), Use (the type's uses: lawn, meadow…; pond, lake…; tennis, padel…) | `site {kind, use, props: {control}}`; a stream `{path}`; a pitch `{at, angle}` |
+| Road | sketch its path: lines and arcs end to end, Finish | Use (Lane, Footpath, Road, Promenade), Width, Lanes (a road's) | `site {kind: lane, props: {path, width?, lanes?}}` |
+| Building Pad | sketch its outline, Finish | Height Offset | `building_pad {boundary, offset?}` |
+| Property Line | sketch the plot's loop, arcs kept as bulges, Finish | | `property_line {points}` |
+| Site Component | a tree, a bike rack or a play area: a click, Space a quarter turn; a hedge: sketch its path | Type (Tree, Hedge, Bike Rack, Play Area), Use, Crown / Width / Radius / Spaces | `site {kind, props: {at, angle?, crown?…}}` or `{path}` |
+| Parking Component | a click, Space a quarter turn | Use (Standard, Accessible, EV) | `site {kind: parking_stall, props: {at, angle}}` |
+| Parking Area | sketch an area (Area) or a path (Row), Finish | Area or Row | `site {kind: car_park, props: {control}}` laid out, or `parking_band {path}` |
+
+A sketch is `sketch::Of::Site {level, tool}`: its contextual tab is the sketch's (Draw, Modify, Mode), its Options Bar the
+tool's, and Finish (`finish_site_sketch`) solves an outline with the core's `sketch::solve_one` (one outline, no holes) or
+joins a path with `sketch::chain` (lines end to end into `[x, y, bulge]` points; a property line's must close, a path's
+must not). An Options Bar choice that changes how the tool takes its clicks (Sub-divide's Pitch, Site Component's Hedge,
+Parking Area's Row) begins the tool again that way, while the sketch has no lines. Previews: a placing tool draws what a
+click would make under the cursor (`site::ghost`, the element shaped alone by `shapes::normalise` and drawn by
+`render::sketch`); a path being sketched draws the road, hedge or row its lines make so far (kept while the lines and choices
+stay the same, `BimApp::site_ghost`).
+
+Properties (`site_properties`): a site element's Level (read only) and Name, then a **Site** group: Kind (read only), Use
+and Phase (drop-downs, by name), and each prop the catalogue gives its kind that is one value (a length in the project's
+units, a count, an angle, yes or no, text; a surface a drop-down of its kind's surfaces); blank takes a prop back to the
+figures' default. Read only under Dimensions: its area; a car park's stalls, accessible stalls and area per stall; a road's
+carriageway and pavements (`roads::section_of`). Each edit is one `site_edit`. A mass has a **Masterplan** group: its use,
+phase and the masterplan props (storeys, floor height, roof, pitch…), its height following its storeys. A toposolid's rows
+are a floor's and its contour interval; a pad's its level, offset, area, thickness and elevation; a property line's its
+name, area and perimeter.
+
+Selected alone with Modify, a site element shows grips (`site_grips`): each point of its path, each control point of its
+area, the point a tree, a stall, a pitch or a bike rack stands on. A drag moves the point, snapped, the element drawn as it
+would be while it moves, and its release is one `site_edit`. **Edit Path** (a path's) and **Edit Boundary** (an area's, a
+pad's, a property line's) in the Mode panel sketch its line again (`Of::EditSite`): Finish sets the path or control ring
+(`site_edit`), a pad's boundary or a property line's points (`modify`). A toposolid's Edit Boundary is the core's
+`edit_boundary`, as a floor's, its shape points inside kept.
+
 ## Commands
 
 Every one checks its keys (a key it doesn't take is refused, naming the ones it does).
@@ -201,6 +248,7 @@ Every one checks its keys (a key it doesn't take is refused, naming the ones it 
 - `toposolid {boundary, points?: [[x, y, z], …], contours?, type?, level?, offset?}` (TS): `points` the ground's
   heights over its level (shape points); `contours` mm apart (1000; 0 none); `type` a floor type (`Toposolid`, 1000 mm,
   made when the project hasn't one). Returns `id`, `area_m2`.
+- `edit_boundary {id, sketch?}` on a toposolid: its outline and openings redrawn, as a floor's, its shape points inside kept; `sketch::chain` joins sketch lines end to end into a path's `[x, y, bulge]` points (what the desktop's path tools send).
 - `building_pad {boundary, type?, level?, offset?}` (BP): `type` a floor type (`Building Pad`, 300 mm, made when
   missing). Returns `id`, `area_m2` and `cuts` (the toposolids it cuts).
 - The Modify tools (move, copy, rotate, mirror, array, delete) move a site element's truth: its points, paths and

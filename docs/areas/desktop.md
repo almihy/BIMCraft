@@ -47,7 +47,10 @@ around a light drawing leaves it as it is.
 
 New and Open (`BimApp::reopened`) keep the look: a new `BimApp` would run `style::apply` again, which sets the theme
 preference back to the system's (and `keep_settings` would then write that over the user's choice), so `reopened` carries
-`styled`, `theme_wanted` and `light_canvas` over.
+`styled`, `theme_wanted` and `light_canvas` over. A hosting page (`host.rs`, Arqiflow's editor) dresses the window with
+`set_host_look`: it changes light or dark and the colours it sends (none, BIMCraft's own), never the person's Light Canvas, and
+the layout (Compact) only when the page asks for a different one than it last did, so a page that sends its look with every
+theme change wipes no choice the person made since (`tests/host.rs`).
 
 Application dialogs use `popup.rs`: a shared modal frame with a draggable title bar and a corner × button. Each dialog keeps its own
 position while the application is open; dragging is constrained to the application window. The × button follows Cancel/Close, so it never
@@ -407,6 +410,11 @@ would set. `BimApp::triad_input` makes the widget over the view's, sensing click
 its own and never reaches the model behind (the view under it is not hovered either); `view3d` turns the camera with what it asks, and
 `triad_draw` draws over the picture, so the processor's and the card's alike, and the pick uses the camera alone, so it picks the same
 on both. A floating or linked 3D view beside the active one draws it but takes no clicks.
+
+The Massing & Site tab's site tools (`site.rs`; [the site](site.md)) sketch an outline or a path at once in a plan, as Floor
+does (`begin_site`, `sketch::Of::Site`), or place where clicked, Space turning what they place; their Options Bar holds the
+kind, use and size, and a placing tool and a path being sketched preview what they make. A site element selected alone has
+grips on its points and Edit Boundary or Edit Path in the Mode panel (`Of::EditSite`).
 
 Floor goes into sketch mode at once, in a plan as in 3D, as Revit's does (`set_tool`); its sketch's ribbon has Walls' Outline
 (`walls_outline_panel`), which puts the outline the level's walls enclose, and its courtyards, in the sketch as lines to edit

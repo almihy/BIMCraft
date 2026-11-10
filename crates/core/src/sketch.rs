@@ -581,7 +581,9 @@ pub fn chain(lines: &[SketchLine]) -> Result<(Vec<[f64; 3]>, bool), String> {
     }
     // How many other lines' ends meet each end: one at most, or the path branches there.
     let ends: Vec<[P2; 2]> = lines.iter().map(|l| [l.start(), l.end()]).collect();
-    let meets = |p: P2, not: usize| ends.iter().enumerate().filter(|(j, _)| *j != not).flat_map(|(_, e)| e.iter()).filter(|q| close(p, **q)).count();
+    let meets = |p: P2, not: usize| {
+        ends.iter().enumerate().filter(|(j, _)| *j != not).flat_map(|(_, e)| e.iter()).filter(|q| close(p, **q)).count()
+    };
     for (i, e) in ends.iter().enumerate() {
         for p in e {
             if meets(*p, i) > 1 {

@@ -5801,7 +5801,7 @@ fn the_door_tool_places_the_projects_single_door_of_a_family_and_the_type_select
 
 /// A tool or button from the Massing tab.
 fn massing(h: &mut Harness<BimApp>, label: &str) {
-    press(h, "Massing");
+    press(h, "Massing & Site");
     press(h, label);
 }
 
@@ -5927,9 +5927,9 @@ mod revit;
 mod rooms;
 mod section_box;
 mod shape3d;
-mod site;
 mod sheets;
 mod shortcuts_kept;
+mod site;
 mod sketch;
 mod sketch3d;
 mod smallest;

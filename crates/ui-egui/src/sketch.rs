@@ -799,8 +799,14 @@ impl BimApp {
                         self.cancel_sketch();
                     }
                 } else if self.site_boundary().is_some_and(|(_, path)| path) {
-                    if big_button(ui, Icon::Line, msg!("Edit Path"), false, msg!("Edit Path: sketch its path again, lines and arcs end to end"))
-                        .clicked()
+                    if big_button(
+                        ui,
+                        Icon::Line,
+                        msg!("Edit Path"),
+                        false,
+                        msg!("Edit Path: sketch its path again, lines and arcs end to end"),
+                    )
+                    .clicked()
                     {
                         self.edit_boundary();
                     }

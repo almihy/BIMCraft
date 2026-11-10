@@ -18,7 +18,7 @@ fn the_window_speaks_chinese_once_it_is_put_in_it_and_keeps_to_it() {
     h.state_mut().set_lang(&ctx, Lang::Chinese);
     h.run();
     assert_eq!(h.state().lang, Lang::Chinese);
-    for word in ["文件", "建筑", "注释", "体量建模", "视图", "管理", "修改"] {
+    for word in ["文件", "建筑", "注释", "体量和场地", "视图", "管理", "修改"] {
         assert!(h.query_all_by_label(word).next().is_some(), "the ribbon's tab `{word}`");
     }
     assert!(h.query_by_label("Architecture").is_none());
@@ -46,7 +46,7 @@ fn the_window_speaks_traditional_chinese_apart_from_the_simplified_and_keeps_to_
     h.state_mut().set_lang(&ctx, Lang::TraditionalChinese);
     h.run();
     assert_eq!(h.state().lang, Lang::TraditionalChinese);
-    for word in ["檔案", "建築", "註釋", "體量建模", "視圖", "管理", "修改"] {
+    for word in ["檔案", "建築", "註釋", "量體與基地", "視圖", "管理", "修改"] {
         assert!(h.query_all_by_label(word).next().is_some(), "the ribbon's tab `{word}`");
     }
     assert!(h.query_all_by_label("建筑").next().is_none(), "no Simplified word on a Traditional window");

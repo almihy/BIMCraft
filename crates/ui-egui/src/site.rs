@@ -454,7 +454,9 @@ impl BimApp {
                     (
                         Icon::Subdivide,
                         msg!("Sub-divide"),
-                        msg!("Sub-divide / Graded Region: an area of the ground, of the Options Bar's type: paving, a terrace, a lawn, water, a stream, a pitch, a playground"),
+                        msg!(
+                            "Sub-divide / Graded Region: an area of the ground, of the Options Bar's type: paving, a terrace, a lawn, water, a stream, a pitch, a playground"
+                        ),
                         SiteTool::Subdivide,
                     ),
                     (
@@ -486,7 +488,9 @@ impl BimApp {
                     (
                         Icon::SiteComponent,
                         msg!("Site Component"),
-                        msg!("Site Component: a tree, a bike rack or a play area where you click (Space turns it), or a hedge along a sketched path"),
+                        msg!(
+                            "Site Component: a tree, a bike rack or a play area where you click (Space turns it), or a hedge along a sketched path"
+                        ),
                         SiteTool::Component,
                     ),
                     (
@@ -510,7 +514,8 @@ impl BimApp {
                     // Road beside Sub-divide and Parking Area beside Parking Component, as Revit puts a tool's sibling.
                     let small = matches!(tool, SiteTool::Road | SiteTool::ParkingArea);
                     let on = self.site_on(tool);
-                    let clicked = if small { small_button(ui, icon, label, on, tip) } else { big_button(ui, icon, label, on, tip) }.clicked();
+                    let clicked =
+                        if small { small_button(ui, icon, label, on, tip) } else { big_button(ui, icon, label, on, tip) }.clicked();
                     if clicked {
                         if self.sketch.is_some() {
                             self.cancel_sketch();
@@ -876,18 +881,16 @@ impl BimApp {
     pub(crate) fn site_properties(&mut self, ui: &mut Ui, model: &Model, ids: &[Id]) {
         let &[id] = ids else { return };
         let units = model.units;
-        let (kind, use_, uses, phase, props, figures): (String, String, Vec<&'static str>, String, Props, Vec<(String, String)>) =
-            match model.elements.get(id) {
-                Some(Element::Site(st)) => {
-                    let uses = shapes::kind(&st.kind).map(|k| k.uses.to_vec()).unwrap_or_default();
-                    (st.kind.clone(), st.use_.clone(), uses, st.phase.clone(), st.props.clone(), site_figures(model, st))
-                }
-                Some(Element::Mass(ms)) => {
-                    let s = ms.site.clone().unwrap_or_default();
-                    ("mass".into(), s.use_, masterplan::MASS_USES.to_vec(), s.phase, s.props, Vec::new())
-                }
-                _ => return,
-            };
+        let (kind, uses, figures): (String, &[&str], Vec<(String, String)>) = match model.elements.get(id) {
+            Some(Element::Site(st)) => (st.kind.clone(), shapes::kind(&st.kind).map_or(&[], |k| k.uses), site_figures(model, st)),
+            Some(Element::Mass(_)) => ("mass".into(), &masterplan::MASS_USES, Vec::new()),
+            _ => return,
+        };
+        let (use_, phase, props) = match model.elements.get(id) {
+            Some(Element::Site(st)) => (st.use_.clone(), st.phase.clone(), st.props.clone()),
+            Some(Element::Mass(ms)) => ms.site.clone().map(|s| (s.use_, s.phase, s.props)).unwrap_or_default(),
+            _ => return,
+        };
         let mut change: Option<Result<Value, String>> = None;
         let mass = kind == "mass";
         // One group: what it is, then the props its kind is drawn with, by the catalogue.
