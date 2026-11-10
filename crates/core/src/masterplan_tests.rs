@@ -495,3 +495,16 @@ fn a_site_schedule_lists_its_elements_by_kind_use_and_area() {
     let text = r.to_string();
     assert!(text.contains("meadow") && text.contains("tree"), "{text}");
 }
+
+#[test]
+fn a_site_element_draws_in_its_own_levels_plan_only() {
+    let mut s = Session::new();
+    run(&mut s, "level", json!({"name": "Deck", "elevation": 3000}));
+    let up =
+        id(&run(&mut s, "site", json!({"kind": "landscape", "level": "Deck", "props": {"control": [[0, 0], [9000, 0], [9000, 9000]]}})));
+    let down = id(&run(&mut s, "site", json!({"kind": "paving", "props": {"control": [[0, 0], [9000, 0], [9000, 9000]]}})));
+    let owners = |l: Id| render::plan(&s.model, l, 200, 200).owners.into_iter().flatten().collect::<std::collections::BTreeSet<Id>>();
+    let deck = s.model.levels().iter().find(|(_, l)| l.name == "Deck").map(|(id, _)| *id).unwrap();
+    assert!(owners(level(&s)).contains(&down) && !owners(level(&s)).contains(&up));
+    assert!(owners(deck).contains(&up) && !owners(deck).contains(&down));
+}

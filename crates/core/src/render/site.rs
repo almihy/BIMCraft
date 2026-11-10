@@ -7,7 +7,7 @@
 use super::{Drawing, Part, Prim, Rgb};
 use crate::geom::{self, P2};
 use crate::masterplan::{self, BuildingPad, PropertyLine, Site};
-use crate::model::{Id, Model};
+use crate::model::{Guid, Id, Model};
 use crate::site::Poly;
 use crate::styles::BY_CATEGORY;
 
@@ -239,9 +239,9 @@ pub(super) fn building_pad(d: &mut Drawing, id: Id, p: &BuildingPad) {
     d.own(None);
 }
 
-/// Every site element, property line and building pad of `elements` the view shows, the site's areas first (in the
-/// order they were made), then the pads and the property lines over them.
-pub(super) fn draw(d: &mut Drawing, m: &Model, elements: &[(Id, &crate::model::Element)], shown: &dyn Fn(Id) -> bool) {
+/// Every site element, property line and building pad of `elements` on `level` the view shows, the site's areas first
+/// (by layer, then in the order they were made), then the pads and the property lines over them.
+pub(super) fn draw(d: &mut Drawing, m: &Model, level: Guid, elements: &[(Id, &crate::model::Element)], shown: &dyn Fn(Id) -> bool) {
     use crate::model::Element;
     let _ = m;
     // Ground first, then what lies on it: lawns, paving and water; hedges; lanes; roads; parking; trees over it all.
@@ -257,7 +257,7 @@ pub(super) fn draw(d: &mut Drawing, m: &Model, elements: &[(Id, &crate::model::E
         .iter()
         .filter(|(id, _)| shown(*id))
         .filter_map(|(id, e)| match e {
-            Element::Site(s) => Some((rank(s), *id, &**s)),
+            Element::Site(s) if s.level == level => Some((rank(s), *id, &**s)),
             _ => None,
         })
         .collect();
@@ -267,8 +267,8 @@ pub(super) fn draw(d: &mut Drawing, m: &Model, elements: &[(Id, &crate::model::E
     }
     for (id, e) in elements.iter().filter(|(id, _)| shown(*id)) {
         match e {
-            Element::BuildingPad(p) => building_pad(d, *id, p),
-            Element::PropertyLine(p) => property_line(d, *id, p),
+            Element::BuildingPad(p) if p.level == level => building_pad(d, *id, p),
+            Element::PropertyLine(p) if p.level == level => property_line(d, *id, p),
             _ => {}
         }
     }

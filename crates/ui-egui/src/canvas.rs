@@ -4106,6 +4106,7 @@ impl BimApp {
                 top_level: None,
                 height: 1.0,
                 base_offset: 0.0,
+                site: None,
                 params: Default::default(),
             }));
             let (area, unit) = m.units.area(geom::area(&ring).abs());

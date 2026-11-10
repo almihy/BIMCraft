@@ -2665,7 +2665,7 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, t
     // building pads cut them), then the site's elements on it (`render/site.rs`), then the building's floors.
     for pass in 0..2 {
         if pass == 1 && !up {
-            site::draw(&mut d, m, &elements, &shown);
+            site::draw(&mut d, m, level, &elements, &shown);
         }
         for (&id, e) in all().filter(|_| !up).filter(|(id, _)| shown(**id)) {
             let cut;
