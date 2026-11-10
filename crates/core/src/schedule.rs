@@ -498,6 +498,33 @@ const OWN: &[(&str, usize, &[Own])] = &[
         &[("Mass", Kind::Text, From::Key("mass")), LEVEL, AREA, ("Perimeter", Kind::Length, From::Metres("perimeter_m")), VOLUME, COUNT],
     ),
     ("level", 2, &[("Elevation", Kind::Length, From::Key("elevation")), NAME, COUNT]),
+    // The masterplan (masterplan.rs): each site element by its kind and use, its area and its phase; a car park's stalls.
+    (
+        "site",
+        6,
+        &[
+            ID,
+            ("Kind", Kind::Text, From::Key("kind")),
+            ("Use", Kind::Text, From::Key("use")),
+            NAME,
+            LEVEL,
+            AREA,
+            ("Phase", Kind::Text, From::Key("phase")),
+            ("Stalls", Kind::Number, From::Key("stalls")),
+            ("Source", Kind::Text, From::Key("source")),
+            COUNT,
+            PHASE_CREATED,
+            PHASE_DEMOLISHED,
+            DESIGN_OPTION,
+        ],
+    ),
+    ("propertyline", 4, &[ID, NAME, LEVEL, AREA, ("Perimeter", Kind::Length, From::Metres("perimeter_m")), COUNT]),
+    ("toposolid", 5, &[ID, TYPE, LEVEL, AREA, THICKNESS, ("Volume", Kind::Number, From::Key("volume_m3")), COUNT, PHASE_CREATED, PHASE_DEMOLISHED]),
+    (
+        "buildingpad",
+        5,
+        &[ID, TYPE, LEVEL, AREA, ("Elevation", Kind::Length, From::Key("elevation")), THICKNESS, COUNT, PHASE_CREATED, PHASE_DEMOLISHED],
+    ),
 ];
 
 /// The fields of what schedules aren't of: annotation, views and sheets, what Filter on a selection goes by
@@ -524,7 +551,7 @@ pub fn categories() -> Vec<&'static str> {
 
 /// The categories a multi-category schedule lists where it names none: what's built, not rooms, levels and masses.
 pub fn built() -> Vec<&'static str> {
-    categories().into_iter().filter(|c| !matches!(*c, "room" | "level" | "mass" | "massfloor")).collect()
+    categories().into_iter().filter(|c| !matches!(*c, "room" | "level" | "mass" | "massfloor" | "propertyline")).collect()
 }
 
 /// The categories multi-category schedule `sc` lists, as elements name theirs.

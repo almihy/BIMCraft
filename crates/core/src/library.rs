@@ -1384,6 +1384,9 @@ impl crate::model::Element {
         match self {
             Element::Wall(w) => f(&Kind::Type(category), &mut w.type_name),
             Element::Floor(x) => f(&Kind::Type(category), &mut x.type_name),
+            // A toposolid and a building pad are of the floor types, as Revit's of their own floor-like types.
+            Element::Toposolid(x) => f(&Kind::Type("floor".into()), &mut x.type_name),
+            Element::BuildingPad(x) => f(&Kind::Type("floor".into()), &mut x.type_name),
             Element::Ceiling(x) => f(&Kind::Type(category), &mut x.type_name),
             Element::Roof(x) => f(&Kind::Type(category), &mut x.type_name),
             Element::Railing(x) => f(&Kind::Type(category), &mut x.type_name),

@@ -331,7 +331,7 @@ fn is_yes(b: &bool) -> bool {
     *b
 }
 
-fn is_zero(x: &f64) -> bool {
+pub(crate) fn is_zero(x: &f64) -> bool {
     *x == 0.0
 }
 
@@ -804,6 +804,10 @@ pub struct Mass {
     /// sloped mass is one whose top outline is its footprint moved sideways. None: it stands straight up.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub top: Option<Vec<P2>>,
+    /// A building on the masterplan: its use, phase, where it came from and its figures (storeys, floor height, roof…),
+    /// which give it its height ([`crate::masterplan::MassSite`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub site: Option<crate::masterplan::MassSite>,
     /// Its values of the project's parameters, by name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub params: BTreeMap<String, serde_json::Value>,
@@ -2079,7 +2083,10 @@ macro_rules! visit_refs {
                 if let Some(g) = & $($m)? w.attach_top { f(g) }
                 if let Some(g) = & $($m)? w.attach_base { f(g) }
             }
-            Element::Floor(Floor { level, .. }) | Element::Ceiling(Ceiling { level, .. }) => f(level),
+            Element::Floor(Floor { level, .. }) | Element::Toposolid(Floor { level, .. }) | Element::Ceiling(Ceiling { level, .. }) => f(level),
+            Element::Site(s) => f(& $($m)? s.level),
+            Element::PropertyLine(p) => f(& $($m)? p.level),
+            Element::BuildingPad(p) => f(& $($m)? p.level),
             Element::Room(Room { level, top_level, .. }) => {
                 f(level);
                 if let Some(g) = top_level { f(g) }
@@ -2212,6 +2219,17 @@ pub enum Element {
     PointCloud(PointCloud),
     /// A CAD drawing placed in the model.
     CadImport(CadImport),
+    /// An element of the site and masterplan: a lane, a lawn, a pond, a tree, a car park… (`masterplan.rs`).
+    Site(Box<crate::masterplan::Site>),
+    /// Revit's Property Line: the plot's boundary.
+    #[serde(rename = "propertyline")]
+    PropertyLine(crate::masterplan::PropertyLine),
+    /// Revit's Toposolid: the ground, a floor's shape (outline, shape points at their heights, contours) in its own
+    /// category.
+    Toposolid(Floor),
+    /// Revit's Building Pad: a flat pad that cuts the toposolid it lies in.
+    #[serde(rename = "buildingpad")]
+    BuildingPad(crate::masterplan::BuildingPad),
 }
 
 impl Element {
@@ -2220,6 +2238,9 @@ impl Element {
         match self {
             Element::Wall(Wall { params, .. })
             | Element::Floor(Floor { params, .. })
+            | Element::Toposolid(Floor { params, .. })
+            | Element::PropertyLine(crate::masterplan::PropertyLine { params, .. })
+            | Element::BuildingPad(crate::masterplan::BuildingPad { params, .. })
             | Element::Ceiling(Ceiling { params, .. })
             | Element::Roof(Roof { params, .. })
             | Element::Mass(Mass { params, .. })
@@ -2234,6 +2255,7 @@ impl Element {
             | Element::Stair(Stair { params, .. })
             | Element::Ramp(Ramp { params, .. })
             | Element::Railing(Railing { params, .. }) => Some(params),
+            Element::Site(s) => Some(&s.params),
             _ => None,
         }
     }
@@ -2243,6 +2265,9 @@ impl Element {
         match self {
             Element::Wall(Wall { params, .. })
             | Element::Floor(Floor { params, .. })
+            | Element::Toposolid(Floor { params, .. })
+            | Element::PropertyLine(crate::masterplan::PropertyLine { params, .. })
+            | Element::BuildingPad(crate::masterplan::BuildingPad { params, .. })
             | Element::Ceiling(Ceiling { params, .. })
             | Element::Roof(Roof { params, .. })
             | Element::Mass(Mass { params, .. })
@@ -2257,6 +2282,7 @@ impl Element {
             | Element::Stair(Stair { params, .. })
             | Element::Ramp(Ramp { params, .. })
             | Element::Railing(Railing { params, .. }) => Some(params),
+            Element::Site(s) => Some(&mut s.params),
             _ => None,
         }
     }
@@ -2431,6 +2457,10 @@ impl Element {
             Element::Ramp(_) => "ramp",
             Element::Railing(_) => "railing",
             Element::Roof(_) => "roof",
+            Element::Site(_) => "site",
+            Element::PropertyLine(_) => "propertyline",
+            Element::Toposolid(_) => "toposolid",
+            Element::BuildingPad(_) => "buildingpad",
         }
     }
 }
@@ -2916,6 +2946,10 @@ pub struct Model {
     /// Its title blocks, by name: what a sheet that names one draws in its bottom right corner, and the fields it fills in.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub title_blocks: BTreeMap<String, crate::titleblock::TitleBlock>,
+    /// The masterplan's figures a firm or the project sets its own (a lane's width, a tree's crown…), by Arqiflow's names,
+    /// lengths in mm (`site_figures`; `site::shapes::FIGURES` has the rest).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub site_figures: BTreeMap<String, f64>,
     /// Its values of its title blocks' project fields (and of an automatic field it gives one to), by uppercase key: what
     /// every sheet's title block says for them.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -3029,6 +3063,7 @@ impl Model {
             dimension_types: crate::dims::types(),
             detail_groups: BTreeMap::new(),
             title_blocks: BTreeMap::new(),
+            site_figures: BTreeMap::new(),
             title_values: BTreeMap::new(),
             reinforcement: BTreeMap::new(),
             voltages: crate::electrical::voltages(),
@@ -4303,7 +4338,10 @@ impl Model {
             Element::PointCloud(pc) => Some(pc.level),
             Element::CadImport(ci) => Some(ci.level),
             Element::Wall(w) => Some(w.level),
-            Element::Floor(f) => Some(f.level),
+            Element::Floor(f) | Element::Toposolid(f) => Some(f.level),
+            Element::Site(st) => Some(st.level),
+            Element::PropertyLine(p) => Some(p.level),
+            Element::BuildingPad(p) => Some(p.level),
             Element::Ceiling(c) => Some(c.level),
             Element::Shaft(sh) => Some(sh.level),
             Element::Mass(ms) => Some(ms.level),
@@ -6551,6 +6589,20 @@ impl Model {
                 level_ok(rs.level)?;
                 line(&who, rs.start, rs.end)?;
             }
+            Element::Site(st) => {
+                level_ok(st.level)?;
+                crate::masterplan::check_site(&who, st)?;
+            }
+            Element::PropertyLine(pl) => {
+                level_ok(pl.level)?;
+                crate::masterplan::check_property_line(&who, pl)?;
+            }
+            Element::BuildingPad(bp) => {
+                known(&who, &bp.type_name, &self.types.floor)?;
+                level_ok(bp.level)?;
+                boundary(&who, &bp.boundary)?;
+                coord(&format!("{who} offset"), bp.offset)?;
+            }
             Element::Rebar(rb) => {
                 level_ok(rb.level)?;
                 text(&who, "grade", &rb.grade)?;
@@ -6623,7 +6675,7 @@ impl Model {
                     ));
                 }
             }
-            Element::Floor(f) => {
+            Element::Floor(f) | Element::Toposolid(f) => {
                 point(&format!("{who} pattern origin"), f.pattern_origin)?;
                 coord(&format!("{who} pattern angle"), f.pattern_angle)?;
                 known(&who, &f.type_name, &self.types.floor)?;
@@ -6683,6 +6735,9 @@ impl Model {
                 let (bottom, top) = self.span(ms.level, ms.base_offset, ms.top_level, ms.height);
                 if top <= bottom + TOL {
                     return Err(format!("{who}: its top must be above its base"));
+                }
+                if let Some(site) = &ms.site {
+                    crate::masterplan::check_mass_site(&who, site)?;
                 }
                 if let Some(crown) = &ms.top {
                     // Its points first: past that, the rings pair up and the cross sections can be worked out.
@@ -7480,6 +7535,7 @@ impl Model {
             dimension_types,
             detail_groups,
             title_blocks,
+            site_figures,
             title_values,
             reinforcement,
             voltages,
@@ -7521,6 +7577,7 @@ impl Model {
             && *dimension_types == o.dimension_types
             && *detail_groups == o.detail_groups
             && *title_blocks == o.title_blocks
+            && *site_figures == o.site_figures
             && *title_values == o.title_values
             && *reinforcement == o.reinforcement
             && *voltages == o.voltages
@@ -7703,7 +7760,7 @@ fn ccw(ring: &[P2]) -> Vec<P2> {
 /// is, or convex pieces once a hole cuts it: the triangles round the holes (`triangulation::constrained`); or, where that
 /// refuses them or its triangles miss some of the area (a hole over or along the outline's edge), the outline cut by each
 /// hole in turn, which leaves thousands of slivers round finely curved ones.
-fn solid(loops: &[Vec<P2>], holes: &[Vec<P2>]) -> Vec<Vec<P2>> {
+pub(crate) fn solid(loops: &[Vec<P2>], holes: &[Vec<P2>]) -> Vec<Vec<P2>> {
     let Some((outline, inner)) = loops.split_first() else { return Vec::new() };
     let cuts: Vec<Vec<P2>> = inner.iter().chain(holes).cloned().collect();
     if cuts.is_empty() {

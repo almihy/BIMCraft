@@ -59,7 +59,10 @@ fn element_lines(m: &Model, e: &Element) -> Vec<Line> {
             out.extend(axes(c.at, c.angle, 100.0));
             out
         }
-        Element::Floor(f) => std::iter::once(&f.boundary).chain(&f.openings).flat_map(|r| path(r, true)).collect(),
+        Element::Floor(f) | Element::Toposolid(f) => std::iter::once(&f.boundary).chain(&f.openings).flat_map(|r| path(r, true)).collect(),
+        Element::Site(st) => st.outline.iter().flat_map(|p| std::iter::once(&p.outer).chain(&p.holes)).flat_map(|r| path(r, true)).collect(),
+        Element::PropertyLine(pl) => path(&pl.ring(), true),
+        Element::BuildingPad(bp) => path(&bp.boundary, true),
         Element::Ceiling(c) => std::iter::once(&c.boundary).chain(&c.openings).flat_map(|r| path(r, true)).collect(),
         Element::Roof(r) => {
             std::iter::once(m.roof_outline(r)).chain(r.courtyards.clone()).chain(r.openings.clone()).flat_map(|r| path(&r, true)).collect()

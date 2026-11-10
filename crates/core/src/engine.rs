@@ -464,6 +464,11 @@ impl Session {
                 if unsettled {
                     self.model_mut().keep_rooms();
                 }
+                // The site's shapes worked out again where what they are drawn from changed (masterplan.rs): a site element
+                // moved, a lane that meets it, a car park round what it keeps clear of.
+                if cmd.undoable && !crate::masterplan::SHAPES_ITSELF.contains(&cmd.id) {
+                    crate::masterplan::keep(self, &before);
+                }
                 // Locked and equal dimensions moved what they measure to as the command moved it.
                 if cmd.undoable {
                     crate::constraints::keep(self, &before)?;

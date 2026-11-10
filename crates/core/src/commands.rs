@@ -21,6 +21,7 @@ use crate::language::Language;
 use crate::library::Kind as LibKind;
 use crate::lines::{DetailLine, LineStyle};
 use crate::massing;
+use crate::masterplan;
 use crate::model::{
     CEILING_HEIGHT, CadImport, Ceiling, CeilingType, Column, ColumnType, Component, DEFAULT_HEIGHT, DimKind, Dimension, Dimension3D,
     Element, End, Extrusion, Face, Facing, Floor, FloorType, Grid, Guid, Id, Key, Landing, Layer, Level, Line, Location, MAX_COORD,
@@ -41,6 +42,9 @@ use crate::workplane::{Surface, WorkPlane};
 use crate::{pdf, render, schedule, sheet, snap, stairs, view3d};
 
 type R = Result<Value, String>;
+
+mod site;
+use site::{building_pad, property_line, site as site_cmd, site_edit, site_figures, site_kinds, toposolid};
 
 const fn edit(id: &'static str, label: &'static str, aliases: &'static [&'static str], params: &'static str, run: Run) -> Command {
     Command { id, label, aliases, params, run, undoable: true, menu: None, files: Files::None }
@@ -379,7 +383,7 @@ other_files(
         "mass",
         "Mass",
         &["MS"],
-        "{boundary: [[x,y],…], level?, top_level?, height?, base_offset?, top?: [[x,y],…], lean?: [dx,dy], name?} a mass, Revit's \
+        "{boundary: [[x,y],…], level?, top_level?, height?, base_offset?, top?: [[x,y],…], lean?: [dx,dy], name?, site?} a mass, Revit's \
          conceptual volume: the footprint extruded from `base_offset` above the level up to the next level, or `height` mm, or up \
          to `top_level`. With `top`, an outline of as many points as the footprint (twin for twin, running the same way round), \
          it is lofted straight from the footprint to it; `lean` makes one by moving the footprint sideways by [dx, dy] for its \
@@ -387,8 +391,98 @@ other_files(
          lofted), a see-through solid in 3D; its own category, `mass`, which views may hide. Its areas and volumes, per level \
          too, are those of the cross sections between its outlines, exactly. Make \
          floors from it with `mass_floors`, walls, a floor and a roof from its faces with `wall_by_face`, `floor_by_face` \
-         and `roof_by_face`",
+         and `roof_by_face`. A building on the masterplan carries its figures as `site` {use?: housing|office|retail|mixed|community, \
+         phase?, source?, ref?, props?: {storeys, floor_height, attic, roof, pitch, ridge, label, entrance, …}} (docs/areas/site.md; \
+         `site_edit` changes them): with `storeys`, its height is storeys × floor height (the `building.floor_height` figure \
+         where it gives none)",
         mass,
+    ),
+    edit(
+        "site",
+        "Site Element",
+        &["SI"],
+        "{kind, use?, name?, level?, phase?: new|existing|demolished|planned, source?, ref?, props} one element of the site and \
+         masterplan (docs/areas/site.md): `kind` one of lane, parking_band, car_park, parking_stall, paving, terrace, landscape, \
+         tree, hedge, water, stream, pitch, playground, play_area, bike_rack, ramp; `use` one of its kind's (a lane's lane, \
+         footpath, road or promenade; a landscape's lawn, meadow, planting…; none, the kind's first). `props` is what a person \
+         drew, its truth, lengths and points in mm, angles in degrees: a path kind's `path` [[x, y] or [x, y, bulge], …] and \
+         `width`; an area's `control` ring [[x, y], …] and `smooth` (0 to 5 passes); a tree's, a pitch's, a bike rack's or a \
+         parking stall's `at` [x, y] (and `angle`, `length`, `width`, `depth`, `crown`, …); a road's cross-section (`lanes`, \
+         `lane_width`, `median`, `kerb`, `oneway`, `markings`); a car park's `control` and its choices (`standard`, `angle`, \
+         `stall_width`, `stall_depth`, `aisle`, `column_every`, `access`…). What each kind takes, and the figures it fills in \
+         what isn't given from, is `site_kinds`. Its shape is worked out at once (its `outline`, its `parts`: a road's \
+         carriageway, pavements, kerbs and markings, a tree's crown…; a car park's `layout`, its aisles, stalls and columns \
+         laid out and counted), and again whenever it or a lane it meets changes, as the Modify tools move its truth. \
+         `phase` is Arqiflow's, kept as its Phase Created and Phase Demolished: existing and demolished in the first phase, \
+         new and planned in the last. `source` and `ref` say where context came from (site, osm, overture) and its id there; \
+         existing context draws halftone. Refused, saying why, where its shape can't be worked out (a lane with no path). \
+         Returns `id`, `area_m2`, `notes` (what to tell the person: a pitch outside its type's sizes), `filled` (the props \
+         filled in from the figures) and `element`",
+        site_cmd,
+    ),
+    edit(
+        "site_edit",
+        "Edit Site Element",
+        &[],
+        "{id, use?, name?, phase?, source?, ref?, level?, props?} changes a site element: each prop given is set, and one \
+         given null is taken back to its default (the figures', filled in again); its shape is worked out again with the \
+         lanes it meets, and a car park laid out again. On a mass, its masterplan figures (`site`): `use` (housing, office, \
+         retail, mixed, community), `phase`, `source`, `ref` and `props` (storeys, floor_height, attic, roof, pitch, ridge, \
+         overhang, label, entrance [x, y], unit_type…), its height then storeys × floor height. Returns as `site` does, and \
+         for a mass its `height` and `site`",
+        site_edit,
+    ),
+    edit(
+        "site_figures",
+        "Site Figures",
+        &[],
+        "{values?: {name: number | null}} the project's own figures the site's elements are drawn with where they say none \
+         (a firm's: `lane.width`, `road.width`, `tree.crown`, `parking.bay_width`, `building.floor_height`…, lengths in mm, \
+         by Arqiflow's names), null taking one back to Arqiflow's. Every site element is shaped again with them. Without \
+         `values`, only reads. Returns `figures` {name: {value, type, own}}",
+        site_figures,
+    ),
+    other(
+        "site_kinds",
+        "Site Kinds",
+        "{} the catalogue of the site's kinds: each kind's label, Revit's equivalent, its uses (the first the default), what it \
+         is drawn as (polygon, point, path), what each of its props is (length mm, point [x, y] mm, points, path, angle \
+         degrees, percent, fraction, count, string, boolean, area mm², or an object or list of them), its figures and the \
+         defaults it fills in; a mass's too; and every figure with its value and what it is. Arqiflow converts its metres \
+         from it",
+        site_kinds,
+    ),
+    edit(
+        "property_line",
+        "Property Line",
+        &["PL"],
+        "{points: [[x, y] or [x, y, bulge], …], level?, name?} Revit's Property Line: the plot's boundary through `points`, \
+         closed (the last joins the first), an arc where a point gives the bulge of the piece from it to the next (DXF's: \
+         the tangent of a quarter of its angle, positive counter-clockwise). Drawn dash-dot in plan. Returns `id` and its \
+         `area_m2`, its arcs' exactly",
+        property_line,
+    ),
+    edit(
+        "toposolid",
+        "Toposolid",
+        &["TS"],
+        "{boundary: [[x,y],…], points?: [[x, y, z], …], contours?, type?, level?, offset?} Revit's Toposolid: the ground, a \
+         slab along `boundary` its type's thickness deep (a floor type; `Toposolid`, 1000 mm, made when the project hasn't \
+         one), its top `offset` over its level and shaped through `points`, each the ground's height there over the level (a \
+         survey's spot heights). Its plan draws its contours `contours` mm apart (1000; 0 none), every fifth heavier; the \
+         Modify tools take it as a floor. Building pads cut it. Returns `id` and `area_m2`",
+        toposolid,
+    ),
+    edit(
+        "building_pad",
+        "Building Pad",
+        &["BP"],
+        "{boundary: [[x,y],…], type?, level?, offset?} Revit's Building Pad: a flat pad along `boundary`, its top `offset` \
+         over its level, its type's thickness under that (a floor type; `Building Pad`, 300 mm, made when the project hasn't \
+         one). It cuts the toposolid on its level it lies wholly inside: the toposolid's plan and 3D view leave a hole its \
+         shape, its contours stopping at its edge and the ground round it as it was, and the pad is a slab in the hole at its \
+         own height. Returns `id`, `area_m2` and `cuts`, the toposolids it cuts",
+        building_pad,
     ),
     edit(
         "mass_floors",
@@ -2766,8 +2860,28 @@ pub fn element_json_with(m: &Model, id: Id, rooms: &crate::rooms::Rooms) -> Valu
             extra.insert("level".into(), json!(m.level_of(e)));
             extra.insert("at".into(), json!(m.anchor(t.host).map(|a| a + t.offset)));
         }
+        Element::Site(st) => {
+            // Its area: its outline's, less its holes.
+            let a: f64 = st.outline.iter().map(|p| geom::area(&p.outer).abs() - p.holes.iter().map(|h| geom::area(h).abs()).sum::<f64>()).sum();
+            extra.insert("area_m2".into(), json!(m2(a)));
+            if let Some(l) = &st.layout {
+                extra.insert("stalls".into(), l.result.get("stalls").cloned().unwrap_or(json!(0)));
+            }
+        }
+        Element::PropertyLine(pl) => {
+            extra.insert("area_m2".into(), json!(m2(pl.area())));
+            let ring = pl.ring();
+            let perimeter: f64 = ring.iter().zip(ring.iter().cycle().skip(1)).map(|(a, b)| a.dist(*b)).sum();
+            extra.insert("perimeter_m".into(), json!((perimeter / 10.0).round() / 100.0));
+        }
+        Element::BuildingPad(bp) => {
+            let (bottom, top) = m.pad_span(bp);
+            extra.insert("area_m2".into(), json!(m2(geom::area(&bp.boundary).abs())));
+            extra.insert("thickness".into(), json!(top - bottom));
+            extra.insert("elevation".into(), json!(top));
+        }
         // Areas less the openings and shafts through them.
-        Element::Floor(f) => {
+        Element::Floor(f) | Element::Toposolid(f) => {
             let left: f64 = m.floor_slabs(f).iter().map(|(face, rise)| area(&m.less_shafts(face, *rise).0)).sum();
             extra.insert("area_m2".into(), json!(m2(left)));
             extra.insert("thickness".into(), json!(m.types.floor.get(&f.type_name).map_or(0.0, |t| t.thickness)));
@@ -7786,8 +7900,16 @@ fn mass(s: &mut Session, p: &Value) -> R {
         top_level,
         height,
         base_offset: num(c, p, "base_offset")?.unwrap_or(0.0),
+        site: site::mass_site(c, p)?,
         params: Default::default(),
     };
+    let mut ms = ms;
+    if let Some(site) = &ms.site {
+        if let Some(h) = masterplan::mass_height(site, &masterplan::figures(m)) {
+            (ms.height, ms.top_level) = (h, None);
+        }
+        masterplan::put_phase(&m.phases, &mut ms.params, &site.phase);
+    }
     let (area, height, volume) = mass_size(m, &ms);
     let id = s.model_mut().insert(Element::Mass(ms));
     Ok(json!({"id": id, "area_m2": area, "height": height, "volume_m3": volume}))
@@ -11728,7 +11850,7 @@ pub(crate) fn transform(c: &str, m: &Model, mut e: Element, id: Id, mo: &Motion,
                 (q[0], q[1]) = (moved.0, moved.1);
             }
         }
-        Element::Floor(fl) => {
+        Element::Floor(fl) | Element::Toposolid(fl) => {
             fl.boundary.iter_mut().chain(fl.openings.iter_mut().flatten()).for_each(|q| *q = f(*q));
             // A mirror turns the outline clockwise; floors keep theirs counter-clockwise.
             if mo.mirror {
@@ -11752,13 +11874,47 @@ pub(crate) fn transform(c: &str, m: &Model, mut e: Element, id: Id, mo: &Motion,
                 boundary.reverse();
             }
         }
-        // Its top outline goes the same way, twin for twin.
-        Element::Mass(Mass { boundary, top, .. }) => {
+        // Its top outline goes the same way, twin for twin; its masterplan figures' points and directions too.
+        Element::Mass(Mass { boundary, top, site, .. }) => {
             for ring in std::iter::once(boundary).chain(top.as_mut()) {
                 ring.iter_mut().for_each(|q| *q = f(*q));
                 if mo.mirror {
                     ring.reverse();
                 }
+            }
+            if let Some(site) = site {
+                crate::masterplan::transform_props("mass", &mut site.props, f, mo.mirror);
+            }
+        }
+        // Its truth goes (paths, control points, where it stands and which way it faces), and its shape with it until
+        // `masterplan::keep` works it out again after the command.
+        Element::Site(st) => {
+            let kind = st.kind.clone();
+            crate::masterplan::transform_props(&kind, &mut st.props, f, mo.mirror);
+            let poly = |p: &mut crate::site::Poly| p.outer.iter_mut().chain(p.holes.iter_mut().flatten()).for_each(|q| *q = f(*q));
+            st.outline.iter_mut().for_each(poly);
+            for part in &mut st.parts {
+                part.polys.iter_mut().for_each(poly);
+                part.lines.iter_mut().flatten().for_each(|q| *q = f(*q));
+            }
+            for piece in st.layout.iter_mut().flat_map(|l| l.pieces.iter_mut()) {
+                piece.outline.iter_mut().for_each(poly);
+            }
+        }
+        // A mirror image of an arc bulges the other way.
+        Element::PropertyLine(pl) => {
+            for q in &mut pl.points {
+                let p = f(P2(q[0], q[1]));
+                (q[0], q[1]) = (p.0, p.1);
+                if mo.mirror {
+                    q[2] = -q[2];
+                }
+            }
+        }
+        Element::BuildingPad(bp) => {
+            bp.boundary.iter_mut().for_each(|q| *q = f(*q));
+            if mo.mirror {
+                bp.boundary.reverse();
             }
         }
         // A frozen room's boundary goes with it.

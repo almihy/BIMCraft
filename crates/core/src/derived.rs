@@ -82,6 +82,10 @@ fn found_otherwise(e: &Element) -> bool {
             | Element::Component(_)
             | Element::Room(_)
             | Element::RoomSeparator(_)
+            // The masterplan's on their level: what points at it.
+            | Element::Site(_)
+            | Element::PropertyLine(_)
+            | Element::BuildingPad(_)
             | Element::Ceiling(_)
             | Element::Text(_)
             | Element::DetailLine(_)

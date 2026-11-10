@@ -17,7 +17,9 @@
 //! - a pitch: `run_off` (its playing area with its margins) and `marking` (its painted lines);
 //! - water: `bank` (the planted ring inside its outline);
 //! - a ramp: `open` (its mouth) and `covered` (the rest);
-//! - a parking band: `aisle`, `stall` and `accessible_stall` (one poly per bay, in [`band_bays`]' order).
+//! - a parking band: `aisle`, `stall` and `accessible_stall` (one poly per bay, in [`band_bays`]' order);
+//! - a parking stall (one bay, Revit's Parking Component): `stall`, `accessible_stall` or `ev_stall` (its poly) and
+//!   `mouth` (lines: its open side, where a car drives in).
 
 #[path = "poly.rs"]
 pub mod poly;
@@ -49,13 +51,16 @@ pub struct Item<'a> {
     pub context: bool,
 }
 
-/// What a part of an element's shape is, for drawing and building it.
-#[derive(Clone, Debug, Default, PartialEq)]
+/// What a part of an element's shape is, for drawing and building it. A file keeps it as `{role, polys?, lines?}`.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Part {
     /// "carriageway", "pavement", "median", "kerb", "marking", "centre_line", "turning_head", "fillet", "crown",
     /// "covered", "open", "pad", "run_off", … (docs/areas/site.md).
     pub role: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub polys: Vec<Poly>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub lines: Vec<Vec<P2>>,
 }
 
@@ -133,6 +138,13 @@ pub const KINDS: &[Kind] = &[
     Kind { kind: "play_area", uses: &["equipment", "toddlers", "juniors"], shape: "polygon", label: "Play area", revit: "Site Component" },
     Kind { kind: "bike_rack", uses: &["residents", "visitors"], shape: "point", label: "Bike rack", revit: "Site Component" },
     Kind { kind: "ramp", uses: &["cars"], shape: "path", label: "Ramp", revit: "(a site ramp)" },
+    Kind {
+        kind: "parking_stall",
+        uses: &["standard", "accessible", "ev"],
+        shape: "point",
+        label: "Parking stall",
+        revit: "Parking Component",
+    },
 ];
 
 /// A kind by its name.
@@ -472,6 +484,11 @@ pub fn fill_defaults(kind_: &str, use_: &str, p: &Props, figures: &Figures) -> P
             set("width", f("ramp.width").into());
             set("open_length", f("ramp.open_length").into());
             set("gradient", f("ramp.gradient").into());
+        }
+        "parking_stall" => {
+            set("width", f("parking.bay_width").into());
+            set("depth", f("parking.bay_depth").into());
+            set("angle", 90.0.into());
         }
         "parking_band" => {
             set("aisle", f("parking.aisle").into());
@@ -941,6 +958,29 @@ fn shape_one(
             out.parts.push(part("pad", &[pad]));
             out.parts.push(line_part("point", vec![vec![c]]));
         }
+        "parking_stall" => {
+            let c = point(p, "at").ok_or("A parking stall is placed by its `at`, the middle of the bay.")?;
+            let (w, d) = (num_or(p, "width", 2500.0), num_or(p, "depth", 5000.0));
+            if w <= 0.0 || d <= 0.0 {
+                return Err("A parking stall's `width` and `depth` are more than 0 mm.".into());
+            }
+            // Its depth along `angle` (the way a car drives in), its width across.
+            let angle = num(p, "angle").unwrap_or(90.0);
+            let ring = poly::oriented_rect(c, angle, d, w);
+            out.outline = rings_to(std::slice::from_ref(&ring));
+            let role = match use_ {
+                "accessible" => "accessible_stall",
+                "ev" => "ev_stall",
+                _ => "stall",
+            };
+            out.parts.push(part(role, &[ring]));
+            let a = angle.to_radians();
+            let (u, n) = ([a.cos(), a.sin()], [-a.sin(), a.cos()]);
+            let back = [c[0] - u[0] * d / 2.0, c[1] - u[1] * d / 2.0];
+            let mouth = vec![[back[0] - n[0] * w / 2.0, back[1] - n[1] * w / 2.0], [back[0] + n[0] * w / 2.0, back[1] + n[1] * w / 2.0]];
+            out.parts.push(line_part("mouth", vec![mouth]));
+            out.parts.push(line_part("point", vec![vec![c]]));
+        }
         "tree" => {
             let c = point(p, "at").ok_or("A tree is placed by its `at` (a survey's tree by the survey).")?;
             let crown = num(p, "crown").unwrap_or(6000.0).abs();
@@ -1192,6 +1232,7 @@ pub fn props_of(kind_: &str) -> serde_json::Map<String, Value> {
             "path": "path", "width": "length", "open_length": "length", "to_level": "string", "gradient": "percent",
             "from_lane": "string",
         }),
+        "parking_stall" => json!({"at": "point", "angle": "angle", "width": "length", "depth": "length"}),
         "parking_band" => json!({
             "path": "path", "aisle": "length", "bay_depth": "length", "bay_width": "length", "angle": "angle",
             "sides": "string", "omit": list(bay.clone()), "accessible": list(bay),
@@ -1273,6 +1314,7 @@ pub fn catalog() -> Value {
             "bike_rack" => &["bike_rack.spaces"],
             "ramp" => &["ramp.width", "ramp.open_length", "ramp.gradient"],
             "parking_band" => &["parking.aisle", "parking.bay_depth", "parking.bay_width"],
+            "parking_stall" => &["parking.bay_depth", "parking.bay_width"],
             "car_park" => &["parking.level_height"],
             "mass" => &[
                 "building.storeys",

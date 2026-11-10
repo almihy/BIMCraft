@@ -27,7 +27,7 @@ mod fill_tests;
 /// The categories a plan, a section or a 3D view draws, and so may hide and override: those of the
 /// model, then those of the annotation. A family component is of its family's category (see [`COMPONENTS`]); `component`, which
 /// names them all, is no row of its own (see [`COMPONENT`]).
-pub const MODEL: [&str; 45] = [
+pub const MODEL: [&str; 49] = [
     "wall",
     "floor",
     "ceiling",
@@ -73,6 +73,11 @@ pub const MODEL: [&str; 45] = [
     "ramp",
     "railing",
     "roof",
+    // The site and masterplan (masterplan.rs): Revit's Toposolid, Pads, Property Lines, and the site's own.
+    "toposolid",
+    "buildingpad",
+    "propertyline",
+    "site",
 ];
 /// What every family component is, named as a whole: an override, a view filter, a view template or a schedule that names
 /// `component` means every one of [`COMPONENTS`], as it did when they were one row. It is no row of Visibility/Graphics or

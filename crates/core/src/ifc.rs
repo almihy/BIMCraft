@@ -83,6 +83,9 @@ pub const LOFT: &str = "BIMCraft_Mass";
 /// The object type a room separation line's virtual element carries, which the import reads it back by.
 pub const SEPARATION: &str = "RoomSeparation";
 
+/// The object type a property line's virtual element carries.
+pub const PROPERTY_LINE: &str = "PropertyLine";
+
 /// The property set what a placed device's connector says that IFC's `Pset_ElectricalDeviceCommon` has no property for goes
 /// in: its load in VA (in all, and `LoadVAPhase1`… for each phase), its system and its classification.
 pub const CONNECTOR_SET: &str = "BIMCraft_Connector";
@@ -891,9 +894,18 @@ pub fn export(m: &Model) -> String {
                 let values = wall_quantities(m, wl, holes.get(&id).map_or(&[][..], |h| h.as_slice()));
                 w.quantities(ent, "Qto_WallBaseQuantities", &values, id);
             }
-            Element::Floor(f) => {
+            Element::Floor(f) | Element::Toposolid(f) => {
                 let Some(&(_, storey)) = storeys.get(&f.level) else { continue };
                 let at = w.place(Some(storey), (0.0, 0.0, 0.0), None);
+                // A toposolid is the ground, as its building pads cut it: an IfcGeographicElement of TERRAIN.
+                let topo = matches!(e, Element::Toposolid(_));
+                let cut;
+                let f = if topo {
+                    cut = m.toposolid_cut(f);
+                    &cut
+                } else {
+                    f
+                };
                 // Level, its outline less its openings swept up to its top; sloped or shaped, a shell round each
                 // piece of it.
                 let depth = m.floor_depth(f);
@@ -909,6 +921,16 @@ pub fn export(m: &Model) -> String {
                     let faces: Vec<Vec<P3>> = m.floor_slabs(f).into_iter().map(|(face, _)| face).collect();
                     w.breps(&faces, m.elevation(f.level), depth)
                 };
+                if topo {
+                    let ent = w.add(format!(
+                        "IFCGEOGRAPHICELEMENT({},$,'Toposolid',$,{},#{at},#{shape},'{id}',.TERRAIN.)",
+                        w.guid(ELEMENT, id),
+                        s(&f.type_name)
+                    ));
+                    contained.entry(f.level).or_default().push(ent);
+                    products.insert(id, ent);
+                    continue;
+                }
                 let ent = w.add(format!(
                     "IFCSLAB({},$,{},$,{},#{at},#{shape},'{id}',.FLOOR.)",
                     w.guid(ELEMENT, id),
@@ -1234,6 +1256,79 @@ pub fn export(m: &Model) -> String {
             }
             // On a stair or a ramp, it's one of its parts; see below.
             // A room separation line: a virtual element along its line, which bounds spaces and is nothing else.
+            // A building pad: a base slab, its outline swept up through its type's thickness to its top.
+            Element::BuildingPad(bp) => {
+                let Some(&(_, storey)) = storeys.get(&bp.level) else { continue };
+                let at = w.place(Some(storey), (0.0, 0.0, 0.0), None);
+                let (bottom, top) = m.pad_span(bp);
+                let base = m.elevation(bp.level);
+                let profile = w.profile(&bp.boundary, &[]);
+                let shape = w.body(profile, bottom - base, top - bottom, &[]);
+                let ent = w.add(format!(
+                    "IFCSLAB({},$,'Building Pad',$,{},#{at},#{shape},'{id}',.BASESLAB.)",
+                    w.guid(ELEMENT, id),
+                    s(&bp.type_name)
+                ));
+                contained.entry(bp.level).or_default().push(ent);
+                products.insert(id, ent);
+                w.typed("IFCSLABTYPE", ".BASESLAB.", &bp.type_name, ent);
+            }
+            // The site's: planting and water as IfcGeographicElement, the rest (lanes, paving, parking, pitches, play) as
+            // IfcCivilElement, each its kind and use as its object type, its 3D view's slabs swept up.
+            Element::Site(st) => {
+                let Some(&(_, storey)) = storeys.get(&st.level) else { continue };
+                let at = w.place(Some(storey), (0.0, 0.0, 0.0), None);
+                let base = m.elevation(st.level);
+                let pieces = crate::masterplan::solids(m, st);
+                if pieces.is_empty() {
+                    continue;
+                }
+                let solids: Vec<(u64, f64, f64)> = pieces
+                    .iter()
+                    .filter(|(r, lo, hi, _)| r.len() >= 3 && hi > lo)
+                    .map(|(r, lo, hi, _)| {
+                        let mut ring = r.clone();
+                        if geom::area(&ring) < 0.0 {
+                            ring.reverse();
+                        }
+                        (w.profile(&ring, &[]), lo - base, hi - lo)
+                    })
+                    .collect();
+                if solids.is_empty() {
+                    continue;
+                }
+                let shape = w.bodies(&solids, &[], None);
+                let what = if st.use_.is_empty() { st.kind.clone() } else { format!("{}: {}", st.kind, st.use_) };
+                let name = if st.name.is_empty() { what.clone() } else { st.name.clone() };
+                let ent = if matches!(st.kind.as_str(), "landscape" | "tree" | "hedge" | "water" | "stream") {
+                    w.add(format!(
+                        "IFCGEOGRAPHICELEMENT({},$,{},$,{},#{at},#{shape},'{id}',.USERDEFINED.)",
+                        w.guid(ELEMENT, id),
+                        s(&name),
+                        s(&what)
+                    ))
+                } else {
+                    w.add(format!("IFCCIVILELEMENT({},$,{},$,{},#{at},#{shape},'{id}')", w.guid(ELEMENT, id), s(&name), s(&what)))
+                };
+                contained.entry(st.level).or_default().push(ent);
+                products.insert(id, ent);
+            }
+            // A property line: a virtual element along it, closed, as a room separation line is.
+            Element::PropertyLine(pl) => {
+                let Some(&(_, storey)) = storeys.get(&pl.level) else { continue };
+                let at = w.place(Some(storey), (0.0, 0.0, 0.0), None);
+                let line = w.polyline(&pl.ring());
+                let rep = w.add(format!("IFCSHAPEREPRESENTATION(#{axis},'Axis','Curve2D',(#{line}))"));
+                let shape = w.add(format!("IFCPRODUCTDEFINITIONSHAPE($,$,(#{rep}))"));
+                let name = if pl.name.is_empty() { "Property Line".to_string() } else { pl.name.clone() };
+                let ent = w.add(format!(
+                    "IFCVIRTUALELEMENT({},$,{},$,'{PROPERTY_LINE}',#{at},#{shape},'{id}')",
+                    w.guid(ELEMENT, id),
+                    s(&name)
+                ));
+                contained.entry(pl.level).or_default().push(ent);
+                products.insert(id, ent);
+            }
             Element::RoomSeparator(rs) => {
                 let Some(&(_, storey)) = storeys.get(&rs.level) else { continue };
                 let at = w.place(Some(storey), (0.0, 0.0, 0.0), None);

@@ -37,6 +37,7 @@ use crate::{font, massing, sheet, stairs};
 mod dimensions;
 use dimensions::dimension;
 mod regions;
+mod site;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rgb(pub u8, pub u8, pub u8);
@@ -752,6 +753,9 @@ fn plan_filter<'a>(
             }
             Element::Room(x) => x.level == level,
             Element::RoomSeparator(x) => x.level == level,
+            Element::Site(x) => x.level == level,
+            Element::PropertyLine(x) => x.level == level,
+            Element::BuildingPad(x) => x.level == level,
             Element::Rebar(_) => m.level_of(e) == Some(level),
             Element::Ceiling(_) => false,
             // A 3D view's own dimension shows in no plan.
@@ -2230,7 +2234,7 @@ fn section_base_cancellable(
             return None;
         }
         let layers = match m.elements.get(owner) {
-            Some(Element::Floor(f)) => m.type_layers("floor", &f.type_name),
+            Some(Element::Floor(f) | Element::Toposolid(f)) => m.type_layers("floor", &f.type_name),
             Some(Element::Roof(r)) => m.type_layers("roof", &r.type_name),
             Some(Element::Ceiling(c)) => m.type_layers("ceiling", &c.type_name),
             _ => continue,
@@ -2653,9 +2657,22 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, t
         cad_imports(&mut d, m, key, level, &look);
     }
     // Floors whose tops it sees, from the cut plane down to the view depth: their outlines and their
-    // openings', the holes shafts cut in them, and a sloped one's slope arrow.
+    // openings', the holes shafts cut in them, and a sloped one's slope arrow. The ground first (toposolids, as their
+    // building pads cut them), then the site's elements on it (`render/site.rs`), then the building's floors.
+    for pass in 0..2 {
+    if pass == 1 && !up {
+        site::draw(&mut d, m, &elements, &shown);
+    }
     for (&id, e) in all().filter(|_| !up).filter(|(id, _)| shown(**id)) {
-        let Element::Floor(f) = e else { continue };
+        let cut;
+        let f = match (pass, e) {
+            (0, Element::Toposolid(t)) => {
+                cut = m.toposolid_cut(t);
+                &cut
+            }
+            (1, Element::Floor(f)) => f,
+            _ => continue,
+        };
         let top = m.floor_top(f);
         let (lo, hi) = f.boundary.iter().map(|q| top.at(*q)).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), z| (lo.min(z), hi.max(z)));
         if hi < range.depth || lo > range.cut {
@@ -2706,6 +2723,7 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, t
         if let Some([tail, head]) = f.arrow.filter(|_| f.slope != 0.0) {
             slope_arrow(&mut d, tail, head, f.slope);
         }
+    }
     }
     // Components it sees, in projection, as Revit draws furniture: whole while any of one is under
     // the cut plane and over the view depth; and the symbols of those on its level.

@@ -49,6 +49,8 @@ const GLASS: Rgb = Rgb(166, 200, 228);
 const ROOF: Rgb = Rgb(176, 118, 96);
 const CEILING: Rgb = Rgb(244, 242, 236);
 const MASS: Rgb = Rgb(158, 190, 224);
+/// The ground: a toposolid's earth.
+const TERRAIN: Rgb = Rgb(150, 168, 118);
 const RAIL: Rgb = Rgb(120, 122, 128);
 /// A beam, a footing, a structural column made of nothing the library has.
 const STRUCTURE: Rgb = Rgb(182, 184, 190);
@@ -862,6 +864,22 @@ fn solids_in_with(
                     slabs(&mut out, m, id, SLAB, face, rise);
                 }
             }
+            // The ground, as its building pads cut it: their holes through it, each pad a slab in its own.
+            Element::Toposolid(t) => {
+                let f = m.toposolid_cut(t);
+                for (face, rise) in m.floor_slabs(&f) {
+                    slabs(&mut out, m, id, TERRAIN, face, rise);
+                }
+            }
+            Element::BuildingPad(p) => out.push(slab(id, SLAB, &p.boundary, m.pad_span(p))),
+            // The site's: each area a thin slab, a tree its trunk and crown, a car park its levels' pieces (masterplan.rs).
+            Element::Site(st) => {
+                for (ring, lo, hi, color) in crate::masterplan::solids(m, st) {
+                    if hi > lo && ring.len() >= 3 {
+                        out.push(slab(id, color, &ring, (lo, hi)));
+                    }
+                }
+            }
             Element::Ceiling(c) => {
                 for (face, rise) in m.ceiling_slabs(c) {
                     slabs(&mut out, m, id, CEILING, face, rise);
@@ -1136,7 +1154,7 @@ pub(crate) fn shaded(m: &Model) -> Vec<Solid> {
 fn layered(m: &Model, s: Solid) -> Vec<Solid> {
     let layers = match m.elements.get(s.owner()) {
         Some(Element::Wall(w)) => m.type_layers("wall", &w.type_name),
-        Some(Element::Floor(f)) => m.type_layers("floor", &f.type_name),
+        Some(Element::Floor(f) | Element::Toposolid(f)) => m.type_layers("floor", &f.type_name),
         Some(Element::Roof(r)) => m.type_layers("roof", &r.type_name),
         Some(Element::Ceiling(c)) => m.type_layers("ceiling", &c.type_name),
         _ => &[],

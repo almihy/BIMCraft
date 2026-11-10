@@ -2412,6 +2412,7 @@ pub(crate) fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, S
             top_level,
             height: (height * 1000.0).round() / 1000.0,
             base_offset,
+            site: None,
             params: Default::default(),
         };
         let mid = m.insert(Element::Mass(mass));

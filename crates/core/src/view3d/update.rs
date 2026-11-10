@@ -292,6 +292,9 @@ fn draws(e: &Element) -> bool {
             e,
             Element::Wall(_)
                 | Element::Floor(_)
+                | Element::Toposolid(_)
+                | Element::BuildingPad(_)
+                | Element::Site(_)
                 | Element::Ceiling(_)
                 | Element::Roof(_)
                 | Element::Column(_)

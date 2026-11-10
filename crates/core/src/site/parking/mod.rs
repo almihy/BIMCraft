@@ -60,11 +60,14 @@ pub struct Obstacle {
 /// its open side, mm) and `accessible: true` or `ev: true`; an `aisle` with `part` "access" (an accessible bay's
 /// access aisle); a `column`; and an `aisle` with `part` "ramp" for a ramp the layout placed (below ground, none
 /// drawn). Outlines counter-clockwise, to the millimetre.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Piece {
     pub kind: String,
     pub level: String,
+    #[serde(default)]
     pub props: Props,
+    #[serde(default)]
     pub outline: Vec<Poly>,
 }
 
@@ -75,9 +78,12 @@ pub struct Piece {
 /// "ring"), `directions` (degrees), `basement`, `area_per_stall` (m² of the plot a bay, as Arqiflow's figure),
 /// `ways` (each `{at: [x, y] mm, kind: "in" | "out" | "both"}`, above ground) and `notes` (what the person should be
 /// told).
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Layout {
+    #[serde(default)]
     pub pieces: Vec<Piece>,
+    #[serde(default)]
     pub result: Props,
 }
 
