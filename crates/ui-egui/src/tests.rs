@@ -5948,6 +5948,7 @@ mod typeprops;
 mod view_controls;
 mod window;
 mod working3d;
+mod zoomed_out;
 mod workplane;
 
 #[test]
