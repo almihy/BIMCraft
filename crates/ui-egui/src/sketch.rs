@@ -37,6 +37,10 @@ pub enum Of {
     Region { view: Id, masking: bool },
     /// The element's outline and holes, redrawn.
     Edit(Id),
+    /// A site tool's outline or path, on the level (`site.rs`): what Finish makes is the tool's, as its Options Bar says.
+    Site { level: Id, tool: crate::site::SiteTool },
+    /// A site element's, a building pad's or a property line's line redrawn: its path, else its outline.
+    EditSite { id: Id, path: bool },
 }
 
 /// A drag with Modify while sketching: a grip at a line's end, or a selection box from a pixel.
@@ -89,6 +93,9 @@ impl Sketch {
             Of::Region { masking: false, .. } => msg!("Create Filled Region Boundary"),
             Of::Region { masking: true, .. } => msg!("Create Masking Region Boundary"),
             Of::Edit(_) => "Edit Boundary",
+            Of::Site { tool, .. } => tool.title(),
+            Of::EditSite { path: true, .. } => msg!("Edit Path"),
+            Of::EditSite { path: false, .. } => "Edit Boundary",
         }
     }
 
@@ -351,6 +358,10 @@ impl BimApp {
     /// kept from its last sketch with their ids.
     pub(crate) fn edit_boundary(&mut self) {
         let &[id] = self.selection.as_slice() else { return };
+        if self.site_boundary().is_some() {
+            self.edit_site_boundary(id);
+            return;
+        }
         if let Some(r) = self.run("edit_boundary", json!({"id": id}))
             && let Ok(lines) = serde_json::from_value::<Vec<SketchLine>>(r["sketch"].clone())
         {
@@ -362,9 +373,11 @@ impl BimApp {
     pub(crate) fn boundary_selected(&self) -> bool {
         match self.selection.as_slice() {
             [id] => match self.session.model.elements.get(*id) {
-                Some(Element::Floor(_) | Element::Ceiling(_) | Element::Shaft(_) | Element::FilledRegion(_)) => true,
+                Some(Element::Floor(_) | Element::Toposolid(_) | Element::Ceiling(_) | Element::Shaft(_) | Element::FilledRegion(_)) => {
+                    true
+                }
                 Some(Element::Roof(r)) => r.extrusion.is_none(),
-                _ => false,
+                _ => self.site_boundary().is_some(),
             },
             _ => false,
         }
@@ -373,6 +386,21 @@ impl BimApp {
     /// Finish Edit Mode: the lines solved and made into what the sketch is for, selected; or what's wrong said, the lines it
     /// names marked, still sketching.
     pub(crate) fn finish_sketch(&mut self) {
+        // A site tool's outline or path, or a site element's redrawn: made by its own commands (`site.rs`).
+        let site = match self.sketch.as_ref().map(|s| s.of) {
+            Some(Of::Site { level, tool }) => Some(self.finish_site_sketch(level, tool)),
+            Some(Of::EditSite { id, .. }) => Some(self.finish_site_edit(id)),
+            _ => None,
+        };
+        if let Some(made) = site {
+            if let Some(made) = made {
+                self.sketch = None;
+                self.tool = Tool::Modify;
+                self.forget_picks();
+                self.selection = made["id"].as_u64().into_iter().collect();
+            }
+            return;
+        }
         let Some(sk) = &mut self.sketch else { return };
         // A region is any number of outlines; the rest, one.
         let many = match sk.of {
@@ -433,6 +461,7 @@ impl BimApp {
                 ("filled_region", json!({"view": view, "sketch": lines, "type": sk.region.0, "line_style": sk.region.1}))
             }
             Of::Edit(id) => ("edit_boundary", json!({"id": id, "sketch": lines})),
+            Of::Site { .. } | Of::EditSite { .. } => return,
         };
         // Solved, it may still be refused for what it makes (a shaft with a hole): the command says why.
         if let Some(made) = self.run(id, p) {
@@ -447,7 +476,7 @@ impl BimApp {
     /// Cancel Edit Mode: the lines dropped, the model as it was.
     pub(crate) fn cancel_sketch(&mut self) {
         let edited = match self.sketch.take() {
-            Some(Sketch { of: Of::Edit(id), .. }) => Some(id),
+            Some(Sketch { of: Of::Edit(id) | Of::EditSite { id, .. }, .. }) => Some(id),
             _ => None,
         };
         self.tool = Tool::Modify;
@@ -768,6 +797,12 @@ impl BimApp {
                         .clicked()
                     {
                         self.cancel_sketch();
+                    }
+                } else if self.site_boundary().is_some_and(|(_, path)| path) {
+                    if big_button(ui, Icon::Line, msg!("Edit Path"), false, msg!("Edit Path: sketch its path again, lines and arcs end to end"))
+                        .clicked()
+                    {
+                        self.edit_boundary();
                     }
                 } else if big_button(ui, Icon::Line, "Edit Boundary", false, "Edit Boundary: sketch its outline and holes again").clicked()
                 {

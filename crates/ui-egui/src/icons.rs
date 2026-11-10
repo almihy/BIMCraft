@@ -116,6 +116,14 @@ icon_names! {
     Ceiling,
     Shaft,
     Mass,
+    Toposolid,
+    Subdivide,
+    Road,
+    BuildingPad,
+    PropertyLine,
+    SiteComponent,
+    ParkingComponent,
+    ParkingArea,
     SlopeArrow,
     ModifySubElements,
     AddPoint,
@@ -1030,6 +1038,69 @@ pub fn outlines(icon: Icon, compact: bool) -> Vec<Outline> {
             g.closed(&[(4.0, 9.0), (15.0, 9.0), (15.0, 20.0), (4.0, 20.0)]);
             g.line(&[(4.0, 9.0), (9.0, 4.0), (20.0, 4.0), (20.0, 15.0), (15.0, 20.0)]);
             g.line(&[(15.0, 9.0), (20.0, 4.0)]);
+        }
+        Icon::Toposolid => {
+            // The ground: a slab whose top rolls, and a contour across its face.
+            g.line(&[(3.0, 13.0), (7.0, 9.0), (11.0, 11.0), (15.0, 6.0), (21.0, 10.0)]);
+            g.line(&[(3.0, 13.0), (3.0, 20.0), (21.0, 20.0), (21.0, 10.0)]);
+            if !compact {
+                g.line(&[(6.0, 16.5), (10.0, 14.5), (14.0, 15.5), (18.0, 13.0)]);
+            }
+        }
+        Icon::Subdivide => {
+            // A region cut out of the ground's outline.
+            g.closed(&[(3.0, 4.0), (21.0, 4.0), (21.0, 20.0), (3.0, 20.0)]);
+            g.closed(&[(8.0, 9.0), (16.0, 8.0), (17.0, 15.0), (10.0, 16.0)]);
+        }
+        Icon::Road => {
+            // A road running away: its edges closing in, its centre line dashed.
+            g.line(&[(3.0, 21.0), (9.0, 3.0)]);
+            g.line(&[(21.0, 21.0), (15.0, 3.0)]);
+            g.line(&[(12.0, 20.0), (12.0, 16.5)]);
+            g.line(&[(12.0, 13.0), (12.0, 10.0)]);
+            if !compact {
+                g.line(&[(12.0, 7.0), (12.0, 4.5)]);
+            }
+        }
+        Icon::BuildingPad => {
+            // A slab let into the ground, the ground stepping down round it.
+            g.line(&[(3.0, 9.0), (7.0, 9.0), (7.0, 16.0), (17.0, 16.0), (17.0, 9.0), (21.0, 9.0)]);
+            g.closed(&[(8.5, 11.5), (15.5, 11.5), (15.5, 14.5), (8.5, 14.5)]);
+        }
+        Icon::PropertyLine => {
+            // The plot's boundary, dash and dot, as a plan draws it.
+            let corners = [(4.0, 5.0), (20.0, 5.0), (20.0, 19.0), (4.0, 19.0)];
+            for i in 0..4 {
+                let (a, b) = (corners[i], corners[(i + 1) % 4]);
+                let at = |t: f32| (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
+                g.line(&[at(0.0), at(0.38)]);
+                g.line(&[at(0.62), at(1.0)]);
+                if !compact {
+                    g.line(&[at(0.48), at(0.52)]);
+                }
+            }
+        }
+        Icon::SiteComponent => {
+            // A tree: its crown, its trunk and the ground it stands on.
+            g.circle((12.0, 9.0), 6.0);
+            g.line(&[(12.0, 15.0), (12.0, 20.5)]);
+            g.line(&[(7.0, 20.5), (17.0, 20.5)]);
+        }
+        Icon::ParkingComponent => {
+            // One bay, open at its foot, and a P in it.
+            g.line(&[(5.0, 21.0), (5.0, 3.0), (19.0, 3.0), (19.0, 21.0)]);
+            g.line(&[(10.0, 17.0), (10.0, 7.0), (13.0, 7.0)]);
+            g.arc((13.0, 9.75), 2.75, -90.0, 90.0);
+            g.line(&[(13.0, 12.5), (10.0, 12.5)]);
+        }
+        Icon::ParkingArea => {
+            // A row of bays along an aisle, the way in arrowed.
+            g.line(&[(3.0, 12.0), (21.0, 12.0)]);
+            for x in [3.0, 9.0, 15.0, 21.0] {
+                g.line(&[(x, 3.0), (x, 12.0)]);
+            }
+            g.line(&[(5.0, 18.0), (19.0, 18.0)]);
+            g.line(&[(16.0, 15.5), (19.0, 18.0), (16.0, 20.5)]);
         }
         Icon::SlopeArrow => {
             // A constant-depth inclined slab; the slope arrow is parallel to its face.

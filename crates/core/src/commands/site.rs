@@ -170,7 +170,8 @@ pub(super) fn site_edit(s: &mut Session, p: &Value) -> R {
             answer(&s.model, id, &reset)
         }
         Some(Element::Mass(mut ms)) => {
-            let mut site = ms.site.take().unwrap_or_default();
+            // A mass with no masterplan figures yet gets them, new.
+            let mut site = ms.site.take().unwrap_or_else(|| MassSite { phase: "new".into(), ..MassSite::default() });
             if let Some(u) = string(c, p, "use")? {
                 site.use_ = u;
             }

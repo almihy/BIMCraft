@@ -529,3 +529,13 @@ fn edit_boundary_redraws_a_toposolid_and_keeps_its_heights_inside() {
     assert_eq!(f.shape.points.iter().filter(|p| p.at == P2(20000.0, 20000.0)).count(), 1, "the point inside keeps its height");
     assert_eq!(f.sketch.len(), 4, "it keeps its sketch");
 }
+
+#[test]
+fn site_edit_gives_a_plain_mass_its_masterplan_figures_new() {
+    let mut s = Session::new();
+    let mass = id(&run(&mut s, "mass", json!({"boundary": [[0, 0], [4000, 0], [4000, 3000], [0, 3000]], "height": 3000})));
+    let r = run(&mut s, "site_edit", json!({"id": mass, "props": {"storeys": 4}}));
+    assert_eq!(r["height"], json!(12000.0), "{r}");
+    let Some(Element::Mass(ms)) = s.model.elements.get(mass) else { panic!() };
+    assert_eq!(ms.site.as_ref().map(|x| x.phase.as_str()), Some("new"));
+}

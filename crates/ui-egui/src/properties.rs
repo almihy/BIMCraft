@@ -205,6 +205,28 @@ fn rows(category: &str) -> &'static [Row] {
             ("Dimensions", "gross_floor_area_m2", "Gross Floor Area", AreaShown),
             ("Identity Data", "name", "Name", Text),
         ],
+        "toposolid" => &[
+            ("Constraints", "level", "Level", Level),
+            ("Constraints", "offset", "Height Offset From Level", Length),
+            ("Dimensions", "area_m2", "Area", AreaShown),
+            ("Dimensions", "thickness", "Thickness", LengthShown),
+            ("Dimensions", "volume_m3", "Volume (m³)", Shown),
+            ("Graphics", "contours", msg!("Contour Interval"), Length),
+        ],
+        "buildingpad" => &[
+            ("Constraints", "level", "Level", Level),
+            ("Constraints", "offset", "Height Offset From Level", Length),
+            ("Dimensions", "area_m2", "Area", AreaShown),
+            ("Dimensions", "thickness", "Thickness", LengthShown),
+            ("Dimensions", "elevation", "Elevation", LengthShown),
+        ],
+        "propertyline" => &[
+            ("Constraints", "level", "Level", LevelName),
+            ("Dimensions", "area_m2", "Area", AreaShown),
+            ("Dimensions", "perimeter_m", "Perimeter", MetresShown),
+            ("Identity Data", "name", "Name", Text),
+        ],
+        "site" => &[("Constraints", "level", "Level", LevelName), ("Identity Data", "name", "Name", Text)],
         "level" => &[
             ("Constraints", "elevation", "Elevation", Length),
             ("Dimensions", "computation_height", msg!("Computation Height"), Length),
@@ -492,6 +514,10 @@ fn icon(category: &str) -> Icon {
         "ceiling" | "ceiling plan" => Icon::Ceiling,
         "shaft" => Icon::Shaft,
         "mass" => Icon::Mass,
+        "toposolid" => Icon::Toposolid,
+        "buildingpad" => Icon::BuildingPad,
+        "propertyline" => Icon::PropertyLine,
+        "site" => Icon::SiteComponent,
         "ramp" => Icon::Ramp,
         "railing" => Icon::Railing,
         "text" => Icon::Text,
@@ -893,6 +919,7 @@ impl BimApp {
             ([], Tool::Ceiling, _) => Subject::New("ceiling"),
             ([], Tool::Shaft(_), _) => Subject::New("shaft"),
             ([], Tool::Mass(_), _) => Subject::New("mass"),
+            ([], Tool::Site(t), _) => Subject::New(t.category()),
             // A section's or an elevation's view shows its own parameters.
             ([], _, Sheet::Section(id) | Sheet::Paper(id)) => Subject::Element(id),
             // Modify, and the tools that pick walls rather than place anything: the view.
@@ -1106,6 +1133,7 @@ impl BimApp {
             if let Subject::Element(id) = subject {
                 self.ties(ui, &model, id);
             }
+            self.site_properties(ui, &model, &ids);
             self.component_parameters(ui, &model, &ids);
             self.project_parameters(ui, &model, &ids);
             self.sheet_title_block(ui, &model, &ids);

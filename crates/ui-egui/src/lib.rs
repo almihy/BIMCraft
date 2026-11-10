@@ -63,6 +63,7 @@ mod section_box;
 mod section_worker;
 pub mod settings;
 mod shape;
+mod site;
 pub mod shortcuts;
 mod sketch;
 mod sketch3d;
@@ -257,6 +258,9 @@ pub enum Tool {
     Shaft(Option<P2>),
     /// A mass: the corners of its footprint, as clicked so far.
     Mass(Vec<P2>),
+    /// A tool of the Massing & Site tab's site panels (`site.rs`): placing where clicked; one that draws an outline or a
+    /// path sketches it.
+    Site(site::SiteTool),
     /// A detail line in the Options Bar's line style: its points, as clicked so far.
     DetailLine(Vec<P2>),
     /// The selected floor's slope arrow: its tail, once clicked.
@@ -629,6 +633,11 @@ pub struct BimApp {
     /// The Mass tool's top, as the Shaft tool's.
     mass_top: Option<Option<Id>>,
     mass_height: String,
+    /// The site tools' Options Bars (`site.rs`), the preview of a site path being sketched, and the selected site element's
+    /// grip being dragged: its prop and the point's place in it.
+    site: site::SiteChoices,
+    site_ghost: site::GhostCache,
+    site_grip: Option<(&'static str, usize)>,
     /// The Camera tool's eye and target heights over the plan's level, and its lens, as typed.
     camera_eye_height: String,
     camera_target_height: String,
@@ -1214,7 +1223,7 @@ const TABS: [(Tab, &str, Icon); 12] = [
     (Tab::Data, msg!("Data"), Icon::DataOutlet),
     (Tab::Insert, msg!("Insert"), Icon::ImportCad),
     (Tab::Annotate, msg!("Annotate"), Icon::Dimension),
-    (Tab::Massing, msg!("Massing"), Icon::Mass),
+    (Tab::Massing, msg!("Massing & Site"), Icon::Mass),
     (Tab::View, msg!("View"), Icon::View3D),
     (Tab::Manage, msg!("Manage"), Icon::Settings),
     (Tab::Modify, "Modify", Icon::Modify),
@@ -1343,6 +1352,9 @@ impl BimApp {
             shaft_height: units.length(3000.0),
             mass_top: None,
             mass_height: units.length(3000.0),
+            site: site::SiteChoices::default(),
+            site_ghost: Default::default(),
+            site_grip: None,
             camera_eye_height: units.length(1600.0),
             camera_target_height: units.length(1200.0),
             camera_lens: "35".into(),
@@ -1569,6 +1581,7 @@ impl BimApp {
             Tool::Ceiling => Some(msg!("Place Ceiling")),
             Tool::Shaft(_) => Some(msg!("Create Shaft Opening")),
             Tool::Mass(_) => Some(msg!("Create Mass")),
+            Tool::Site(t) => Some(t.title()),
         };
         if let Some(what) = place {
             return Some(format!("{} | {}", t("Modify"), t(what)));
@@ -2047,6 +2060,9 @@ impl BimApp {
         if matches!(self.tool, Tool::Component | Tool::Fixture(_)) && pressed(Modifiers::NONE, Key::Space) {
             self.component_angle = (self.component_angle + 90.0) % 360.0;
         }
+        if matches!(self.tool, Tool::Site(_)) && pressed(Modifiers::NONE, Key::Space) {
+            self.site.angle = (self.site.angle + 90.0) % 360.0;
+        }
         // F8 is the one function key for the guides. F11 is free: the system may use it for full screen.
         if pressed(Modifiers::NONE, Key::F8) {
             self.toggle_alignment_guides();
@@ -2287,6 +2303,9 @@ impl BimApp {
                 Some("column") => Tool::Column,
                 Some("footing") => Tool::Stand("footing"),
                 Some("mass") => Tool::Mass(Vec::new()),
+                Some("toposolid") => Tool::Site(site::SiteTool::Toposolid),
+                Some("building_pad") => Tool::Site(site::SiteTool::BuildingPad),
+                Some("property_line") => Tool::Site(site::SiteTool::PropertyLine),
                 Some("show_mass") => {
                     self.show_mass();
                     return true;
@@ -2585,6 +2604,12 @@ impl BimApp {
         }
         self.snap_once = None;
         self.tool = tool;
+        // A site tool that draws an outline or a path sketches it at once, as Floor does.
+        if let Tool::Site(t) = self.tool {
+            self.site.angle = 0.0;
+            self.begin_site(t);
+            return;
+        }
         // Floor sketches its outline at once, as Revit's does (Walls' Outline puts the walls' in the sketch).
         if self.tool == Tool::Floor
             && self.sketch.is_none()
@@ -3729,6 +3754,7 @@ impl BimApp {
                 }
             });
         });
+        self.site_panels(ui);
     }
 
     /// Show Mass (MH): the masses in the view on screen, hidden if they show and shown if they're hidden.
@@ -4658,6 +4684,9 @@ impl BimApp {
                 self.note_options(ui);
                 return;
             }
+            if let Some(sketch::Of::Site { tool, .. }) = self.sketch.as_ref().map(|s| s.of) {
+                self.site_options(ui, tool);
+            }
             if self.sketch.is_some() {
                 self.sketch_options(ui);
                 match self.tool {
@@ -4701,6 +4730,7 @@ impl BimApp {
                         height_options(ui, &self.session.model, level, &mut self.mass_top, &mut self.mass_height, "mass-top");
                     }
                 }
+                Tool::Site(t) => self.site_options(ui, t),
                 Tool::Ceiling => {
                     let l = ui.label(t("Height Offset:"));
                     let hint = self.session.model.units.name();
@@ -5032,6 +5062,7 @@ impl BimApp {
             Tool::Column => msg!("Click to place a column, as high as the Options Bar says."),
             Tool::Run(..) | Tool::Stand(_) => structure::hint(&self.tool).unwrap_or_default(),
             Tool::Component | Tool::Fixture(_) => msg!("Click where the component goes; Space turns it a quarter turn."),
+            Tool::Site(_) => msg!("Click where it goes; Space turns it a quarter turn."),
             Tool::Stair(pts) if pts.is_empty() => msg!("Click where the stair starts: the middle of its first riser."),
             Tool::Stair(pts) if pts.len() == 1 => {
                 msg!("Click where its run ends: past its last riser, one run to the level above; short of it, a landing. Esc cancels.")

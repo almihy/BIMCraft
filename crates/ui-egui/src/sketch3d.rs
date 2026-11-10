@@ -114,8 +114,10 @@ impl BimApp {
     fn snap3(&self, m: &Model, plane: &Plane, raw: P2, from: &[P2], square: bool) -> P2 {
         let Some(sk) = &self.sketch else { return raw };
         let (level, editing) = match sk.of {
-            Of::Edit(id) => (m.elements.get(id).and_then(|e| m.level_of(e)).and_then(|g| m.elements.id(g)), Some(id)),
-            Of::Floor(level) | Of::Ceiling(level) | Of::Roof(level) | Of::Shaft(level) => (Some(level), None),
+            Of::Edit(id) | Of::EditSite { id, .. } => {
+                (m.elements.get(id).and_then(|e| m.level_of(e)).and_then(|g| m.elements.id(g)), Some(id))
+            }
+            Of::Floor(level) | Of::Ceiling(level) | Of::Roof(level) | Of::Shaft(level) | Of::Site { level, .. } => (Some(level), None),
             Of::Region { .. } => (None, None),
         };
         let Some(level) = level else { return raw };

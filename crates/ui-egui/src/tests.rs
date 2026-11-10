@@ -2854,7 +2854,7 @@ mass {"boundary": [[1000, 1000], [3000, 1000], [3000, 2000], [1000, 2000]], "nam
         h.run();
         let tr = |en: &'static str| crate::lang::translated_in(l, en).unwrap_or(en);
         let mut missed = Vec::new();
-        for tab in ["Architecture", "Annotate", "Massing", "View", "Manage", "Modify"] {
+        for tab in ["Architecture", "Annotate", "Massing & Site", "View", "Manage", "Modify"] {
             press(&mut h, tr(tab));
             missed.extend(english(&h, l));
         }
@@ -2889,7 +2889,7 @@ mass {"boundary": [[1000, 1000], [3000, 1000], [3000, 2000], [1000, 2000]], "nam
         }
         // The Mass tool with its Options Bar and prompts, and the Massing tab with a mass selected.
         key(&mut h, Key::Escape);
-        press(&mut h, tr("Massing"));
+        press(&mut h, tr("Massing & Site"));
         press(&mut h, tr("Mass"));
         click(&mut h, P2(4000.0, 3000.0));
         missed.extend(english(&h, l));
@@ -2898,7 +2898,7 @@ mass {"boundary": [[1000, 1000], [3000, 1000], [3000, 2000], [1000, 2000]], "nam
         key(&mut h, Key::Escape);
         key(&mut h, Key::Escape);
         click(&mut h, P2(2000.0, 1000.0));
-        press(&mut h, tr("Massing"));
+        press(&mut h, tr("Massing & Site"));
         missed.extend(english(&h, l));
         // Project Parameters; New Schedule; a schedule, its properties' every tab.
         key(&mut h, Key::Escape);
@@ -5927,6 +5927,7 @@ mod revit;
 mod rooms;
 mod section_box;
 mod shape3d;
+mod site;
 mod sheets;
 mod shortcuts_kept;
 mod sketch;

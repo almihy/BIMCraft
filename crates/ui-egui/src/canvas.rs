@@ -1617,6 +1617,7 @@ impl BimApp {
         self.grip_drag(ui, &response, rect, &view, level);
         self.line_grip_drag(ui, &response, rect, &view, level);
         let dragged = self.shape_grip_drag(ui, &response, rect, &view, level) || dragged;
+        let dragged = self.site_grip_drag(ui, &response, rect, &view, level) || dragged;
         // A drag from an element moves the selection; from empty floor, it draws a selection box.
         if response.drag_started_by(PointerButton::Primary)
             && self.tool == Tool::Modify
@@ -1625,6 +1626,7 @@ impl BimApp {
             && self.canvas.crop_drag.is_none()
             && self.canvas.grip.is_none()
             && self.drawing.grip.is_none()
+            && self.site_grip.is_none()
             && let Some(o) = ui.input(|i| i.pointer.press_origin())
         {
             let o = (o.x - rect.min.x, o.y - rect.min.y);
@@ -1802,6 +1804,7 @@ impl BimApp {
             }
         }
         self.grip_overlay(ui, &model, &view, rect, level, &d, d.place);
+        self.site_grip_overlay(ui, &model, &view, rect, level);
         // Where the cursor snaps is worked out only while a grip is held to it.
         let cursor = self
             .drawing
@@ -2336,6 +2339,11 @@ impl BimApp {
             Tool::Column => {
                 let at = self.snap_point(m, level, v, at, &[], false);
                 self.place_column(level, at, 0.0);
+            }
+            // A site tool that places: its tree, bike rack, play area, pitch or stall where clicked.
+            &Tool::Site(t) => {
+                let at = self.snap_point(m, level, v, at, &[], false);
+                self.site_click(t, level, at);
             }
             // Its start, where its first run ends, and which way the next turns: done when it climbs all
             // the way.
@@ -3617,7 +3625,18 @@ impl BimApp {
         let in_view = || m.plan_view(key).map(|_| m.guid(key));
         let sketched = |e: &Element| ghost(p, Place::at(origin), &render::sketch(m, *v, m.next_id, e), &[m.next_id], &|pt| pt);
         let ghost = |f: &dyn Fn(Pos2) -> Pos2| ghost(p, sc.place, sc.d, &self.selection, f);
+        // A site path being sketched: the road, hedge or row of stalls its lines make so far.
+        if let Some(e) = self.site_sketch_ghost(m) {
+            sketched(&e);
+        }
         let chain = match &self.tool {
+            // What a site tool that places would make here.
+            &Tool::Site(t) => {
+                if let Some(e) = self.site_click_ghost(m, t, level, self.found(sc, q, &[], false)) {
+                    sketched(&e);
+                }
+                return;
+            }
             Tool::Wall(chain) | Tool::Railing(chain) | Tool::Mass(chain) | Tool::DetailLine(chain) | Tool::SketchLine(chain) => {
                 chain.as_slice()
             }
@@ -4140,6 +4159,64 @@ impl BimApp {
 }
 
 impl BimApp {
+    /// A drag from a grip of the site element selected alone (a path's point, a control point, a tree's point) moves that
+    /// point, snapped; on release, one `site_edit`, its shape worked out again. Whether it took the release, which is then no
+    /// click.
+    pub(crate) fn site_grip_drag(&mut self, ui: &Ui, response: &Response, rect: Rect, view: &View, level: Id) -> bool {
+        let grips = self.site_grips();
+        if grips.is_empty() {
+            self.site_grip = None;
+            return false;
+        }
+        let local = |q: Pos2| (q.x - rect.min.x, q.y - rect.min.y);
+        if response.drag_started_by(PointerButton::Primary)
+            && let Some(o) = ui.input(|i| i.pointer.press_origin())
+        {
+            let near = |q: P2| pos(rect.min, view.px(q)).distance(o);
+            self.site_grip =
+                grips.iter().filter(|g| near(g.2) <= 8.0).min_by(|a, b| near(a.2).total_cmp(&near(b.2))).map(|g| (g.0, g.1));
+        }
+        let Some((key, i)) = self.site_grip else { return false };
+        if !response.drag_stopped() {
+            return false;
+        }
+        self.site_grip = None;
+        let Some(q) = ui.input(|i| i.pointer.latest_pos()) else { return true };
+        let m = std::sync::Arc::clone(&self.session.model);
+        let to = self.snap(&m, level, view, local(q), &[], false).at;
+        self.snap_once = None;
+        if grips.iter().find(|g| g.0 == key && g.1 == i).is_some_and(|g| g.2.dist(to) > TOL) {
+            self.site_grip_drop(key, i, to);
+        }
+        true
+    }
+
+    /// The selected site element's grips, and while one is dragged, the element as it would be with the point where the
+    /// cursor snaps.
+    fn site_grip_overlay(&self, ui: &Ui, m: &Model, view: &View, rect: Rect, level: Id) {
+        let grips = self.site_grips();
+        if grips.is_empty() {
+            return;
+        }
+        let p = ui.painter_at(rect);
+        let at = |q: P2| pos(rect.min, view.px(q));
+        let cursor = self
+            .site_grip
+            .and_then(|_| ui.input(|i| i.pointer.latest_pos()))
+            .map(|q| self.snap(m, level, view, (q.x - rect.min.x, q.y - rect.min.y), &[], false).at);
+        if let (Some((key, i)), Some(to)) = (self.site_grip, cursor)
+            && let Some(e) = self.site_grip_ghost(m, key, i, to)
+        {
+            ghost(&p, Place::at(rect.min), &render::sketch(m, *view, m.next_id, &e), &[m.next_id], &|pt| pt);
+        }
+        for (key, i, q) in grips {
+            let held = self.site_grip == Some((key, i));
+            let r = Rect::from_center_size(at(if held { cursor.unwrap_or(q) } else { q }), vec2(9.0, 9.0));
+            p.rect_filled(r, 1.0, if held { pal().accent } else { pal().surface });
+            p.rect_stroke(r, 1.0, Stroke::new(1.5, pal().accent), StrokeKind::Middle);
+        }
+    }
+
     /// Under Modify Sub Elements, a drag from one of the selected floor's shape points moves it in plan, snapped, at its
     /// height, the split lines ending there going with it; on release, one `edit_shape`. Whether it took the release, which is
     /// then no click.
