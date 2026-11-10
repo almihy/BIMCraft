@@ -3588,10 +3588,16 @@ impl BimApp {
 
     /// The application menu, under the File tab.
     fn file_menu(&mut self, ui: &mut Ui, ctx: &Context) {
+        // A Mac's shortcuts as its symbols (⌘S) where the window has egui's fonts, which have them; else in words (Cmd+S),
+        // which IBM Plex has.
+        #[cfg(feature = "egui-fonts")]
+        let written = |k: &KeyboardShortcut| ctx.format_shortcut(k);
+        #[cfg(not(feature = "egui-fonts"))]
+        let written = |k: &KeyboardShortcut| k.format(&egui::ModifierNames::NAMES, ctx.os() == egui::os::OperatingSystem::Mac);
         let item = |ui: &mut Ui, label: &str, keys: Option<KeyboardShortcut>| {
             let b = egui::Button::new(t(label));
             ui.add(match keys {
-                Some(k) => b.shortcut_text(ctx.format_shortcut(&k)),
+                Some(k) => b.shortcut_text(written(&k)),
                 None => b,
             })
             .clicked()
