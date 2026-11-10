@@ -194,7 +194,15 @@ fn ray_hit(o: Pt, d: Pt, a: Pt, b: Pt) -> Option<RayHit> {
 
 /// The throats a car could come in or go out by: from a street side, straight to an aisle.
 #[allow(clippy::too_many_arguments)]
-fn throat_options(plan: &WPlan, streets: &[StreetSide], clear: &Region, s: &Settings, kind: AccessKind, from: Option<Pt>, relax: bool) -> Vec<Throat> {
+fn throat_options(
+    plan: &WPlan,
+    streets: &[StreetSide],
+    clear: &Region,
+    s: &Settings,
+    kind: AccessKind,
+    from: Option<Pt>,
+    relax: bool,
+) -> Vec<Throat> {
     let from_corner = if relax { 0.0 } else { s.entry_from_corner };
     let reach = if relax { 250.0 } else { 40.0 };
     let width = if kind == AccessKind::Both { s.drive_aisle } else { s.one_way_entry };
@@ -304,7 +312,10 @@ fn throat_options(plan: &WPlan, streets: &[StreetSide], clear: &Region, s: &Sett
 /// The ways in and out: those the person placed, else the best one found (two on a big car park).
 fn throats_for(plan: &WPlan, streets: &[StreetSide], clear: &Region, s: &Settings, given: &[Access], relax: bool) -> Vec<Throat> {
     if !given.is_empty() {
-        return given.iter().filter_map(|g| throat_options(plan, streets, clear, s, g.kind, Some(g.at), relax).into_iter().next()).collect();
+        return given
+            .iter()
+            .filter_map(|g| throat_options(plan, streets, clear, s, g.kind, Some(g.at), relax).into_iter().next())
+            .collect();
     }
     let options = throat_options(plan, streets, clear, s, AccessKind::Both, None, relax);
     let cost = |o: &Throat| plan.stalls.iter().filter(|x| hits(&o.poly, &x.poly)).count() as f64 + o.len / 10.0 + o.off * 4.0;
@@ -458,7 +469,9 @@ fn find_ramp(input: &Input, s: &Settings) -> Option<Ring> {
     }
     let mut best: Option<(Ring, usize)> = None;
     let mut walls: Vec<usize> = (0..n).collect();
-    walls.sort_by(|&i, &j| dist(ground[j], ground[(j + 1) % n]).partial_cmp(&dist(ground[i], ground[(i + 1) % n])).unwrap_or(std::cmp::Ordering::Equal));
+    walls.sort_by(|&i, &j| {
+        dist(ground[j], ground[(j + 1) % n]).partial_cmp(&dist(ground[i], ground[(i + 1) % n])).unwrap_or(std::cmp::Ordering::Equal)
+    });
     walls.truncate(3);
     for i in walls {
         let a = ground[i];
@@ -471,7 +484,12 @@ fn find_ramp(input: &Input, s: &Settings) -> Option<Ring> {
         let nn = [-t[1], t[0]];
         for start in [0.0, len - l] {
             let p0 = [a[0] + t[0] * start, a[1] + t[1] * start];
-            let poly = vec![p0, [p0[0] + t[0] * l, p0[1] + t[1] * l], [p0[0] + t[0] * l + nn[0] * w, p0[1] + t[1] * l + nn[1] * w], [p0[0] + nn[0] * w, p0[1] + nn[1] * w]];
+            let poly = vec![
+                p0,
+                [p0[0] + t[0] * l, p0[1] + t[1] * l],
+                [p0[0] + t[0] * l + nn[0] * w, p0[1] + t[1] * l + nn[1] * w],
+                [p0[0] + nn[0] * w, p0[1] + nn[1] * w],
+            ];
             if !poly.iter().all(|&p| point_in_ring(p, &ground) || dist_to_ring(p, &ground) < 0.01) {
                 continue;
             }
@@ -542,7 +560,11 @@ pub fn solve(input: &Input) -> Solved {
     let basement = input.basement.is_some();
     let ramp_rings: Vec<Ring> = input.basement.iter().flatten().map(|r| ccw(r)).collect();
     let site = ccw(&input.site);
-    let raw: Ring = if input.site.len() > 1 && dist(input.site[0], input.site[input.site.len() - 1]) < 1e-6 { input.site[..input.site.len() - 1].to_vec() } else { input.site.clone() };
+    let raw: Ring = if input.site.len() > 1 && dist(input.site[0], input.site[input.site.len() - 1]) < 1e-6 {
+        input.site[..input.site.len() - 1].to_vec()
+    } else {
+        input.site.clone()
+    };
     let plot_area = ring_area(&site).abs();
     let mut holes: Vec<Ring> = input.obstacles.iter().map(|o| offset_ring(&ccw(o), -s.building_clearance)).collect();
     holes.extend(input.keep_clear.iter().map(|o| ccw(o)));
@@ -551,8 +573,11 @@ pub fn solve(input: &Input) -> Solved {
     let clear = Region::new(site.clone(), input.obstacles.iter().map(|o| ccw(o)).collect());
     let origin = site.first().copied().unwrap_or([0.0, 0.0]);
     let mut notes: Vec<String> = Vec::new();
-    let street_lines: Vec<(Pt, Pt)> =
-        if basement || raw.is_empty() { Vec::new() } else { input.streets.iter().map(|&i| (raw[i % raw.len()], raw[(i + 1) % raw.len()])).collect() };
+    let street_lines: Vec<(Pt, Pt)> = if basement || raw.is_empty() {
+        Vec::new()
+    } else {
+        input.streets.iter().map(|&i| (raw[i % raw.len()], raw[(i + 1) % raw.len()])).collect()
+    };
     let mut streets: Vec<StreetSide> = street_lines
         .iter()
         .map(|&(a, b)| {
@@ -565,7 +590,11 @@ pub fn solve(input: &Input) -> Solved {
             StreetSide { a, b, n }
         })
         .collect();
-    let mut access: Vec<Access> = if basement { Vec::new() } else { input.access.iter().copied().chain(input.entries.iter().map(|&at| Access { at, kind: AccessKind::Both })).collect() };
+    let mut access: Vec<Access> = if basement {
+        Vec::new()
+    } else {
+        input.access.iter().copied().chain(input.entries.iter().map(|&at| Access { at, kind: AccessKind::Both })).collect()
+    };
     let ramps: Vec<((Pt, Pt), Pt)> = ramp_rings.iter().map(|r| ramp_foot(r, &site)).collect();
     for (foot, out) in &ramps {
         streets.push(StreetSide { a: foot.0, b: foot.1, n: *out });
@@ -580,23 +609,19 @@ pub fn solve(input: &Input) -> Solved {
 
     let pick = |ctx: &mut Ctx, part: &Region| -> Option<Candidate> {
         let mut plans: Vec<(f64, WPlan)> = Vec::new();
-        let t0 = std::time::Instant::now(); // TIMING
         for &deg in &degs {
             for plan in lay_plot(ctx, part, deg, &s, origin, &street_lines, free_dirs) {
                 plans.push((deg, plan));
             }
         }
-        let t1 = t0.elapsed(); // TIMING
         if free_dirs {
             for plan in lay_oblique(ctx, part, &s, origin) {
                 plans.push((plan.dirs.first().copied().unwrap_or(f64::NAN), plan));
             }
         }
-        let t2 = t0.elapsed(); // TIMING
         for plan in lay_ring(ctx, part, &s, origin, &degs, input.quick, basement) {
             plans.push((plan.dirs.first().copied().unwrap_or(f64::NAN), plan));
         }
-        let t3 = t0.elapsed(); // TIMING
         let mut best: Option<Candidate> = None;
         for (deg, mut plan) in plans {
             // The bays a person took out are planted.
@@ -660,14 +685,18 @@ pub fn solve(input: &Input) -> Solved {
             }
             let ins: Vec<&Throat> = throats.iter().filter(|t| t.kind != AccessKind::Out).collect();
             let reach: HashSet<i64> = if !ins.is_empty() { reachable(&plan, &ins) } else { plan.aisles.iter().map(|a| a.id).collect() };
-            let count = plan.stalls.iter().filter(|st| reach.contains(&opens_onto(st)) && !throats.iter().any(|t| hits(&t.poly, &st.poly))).count() as f64;
+            let count =
+                plan.stalls.iter().filter(|st| reach.contains(&opens_onto(st)) && !throats.iter().any(|t| hits(&t.poly, &st.poly))).count()
+                    as f64;
             let paved = paved_w(&plan);
-            let score = count - paved / PAVED_PER_BAY - if !streets.is_empty() && ins.is_empty() { 10000.0 } else { 0.0 } - if relaxed { 0.5 } else { 0.0 };
+            let score = count
+                - paved / PAVED_PER_BAY
+                - if !streets.is_empty() && ins.is_empty() { 10000.0 } else { 0.0 }
+                - if relaxed { 0.5 } else { 0.0 };
             if best.as_ref().is_none_or(|b| score > b.score) {
                 best = Some(Candidate { deg, plan, reach, throats, score, relaxed });
             }
         }
-        if std::env::var_os("PARKING_T").is_some() { eprintln!("plot {:?} oblique {:?} ring {:?} pick {:?}", t1, t2 - t1, t3 - t2, t0.elapsed() - t3); } // TIMING
         best
     };
     let mut chosen: Vec<Candidate> = Vec::new();
@@ -720,16 +749,25 @@ pub fn solve(input: &Input) -> Solved {
     let Candidate { deg: best_deg, mut plan, reach, throats, relaxed, .. } = best;
     trim_drives(&mut plan, &throats);
     if basement && ramps.is_empty() {
-        notes.push("No ramp reaches this level and none fits along a wall: draw the ramp. The layout is shown as if every aisle were reached.".to_string());
+        notes.push(
+            "No ramp reaches this level and none fits along a wall: draw the ramp. The layout is shown as if every aisle were reached."
+                .to_string(),
+        );
     } else if basement && throats.is_empty() {
         notes.push("No aisle can be reached straight from the foot of a ramp: move the ramp so its foot faces an aisle. The layout is shown as if every aisle were reached.".to_string());
     } else if !streets.is_empty() && throats.is_empty() {
         notes.push("No aisle can be reached straight from a street side: place a way in on a street. The layout is shown as if every aisle were reached.".to_string());
     }
     if relaxed && !throats.is_empty() && basement {
-        notes.push("A ramp's foot does not face an aisle square: the way off it runs at an angle into the nearest aisle. Check the turn.".to_string());
+        notes.push(
+            "A ramp's foot does not face an aisle square: the way off it runs at an angle into the nearest aisle. Check the turn."
+                .to_string(),
+        );
     } else if relaxed && !throats.is_empty() {
-        notes.push(format!("A way in or out is nearer a street corner than {} m, or runs a long way to its aisle: check it with the traffic engineer.", num(s.entry_from_corner)));
+        notes.push(format!(
+            "A way in or out is nearer a street corner than {} m, or runs a long way to its aisle: check it with the traffic engineer.",
+            num(s.entry_from_corner)
+        ));
     }
     if streets.is_empty() && !basement {
         notes.push("No street side given: the ways in are not drawn and every aisle is taken as reached.".to_string());
@@ -738,7 +776,10 @@ pub fn solve(input: &Input) -> Solved {
         notes.push("Columns are set out for square bays only: with angled bays, place them by hand.".to_string());
     }
     if !basement && access.len() > throats.len() {
-        notes.push(format!("{} of the ways in or out placed could not be joined to an aisle: place them on a street side, in line with an aisle.", access.len() - throats.len()));
+        notes.push(format!(
+            "{} of the ways in or out placed could not be joined to an aisle: place them on a street side, in line with an aisle.",
+            access.len() - throats.len()
+        ));
     }
     if !throats.is_empty() && throats.iter().all(|t| t.kind == AccessKind::In) {
         notes.push("There is a way in but no way out: add an exit, or make the entrance both ways.".to_string());
@@ -772,7 +813,11 @@ pub fn solve(input: &Input) -> Solved {
 
     // Accessible bays nearest the building's entrance: two to an access aisle, as many as the count needs.
     let need = accessible_needed(&s, kept.len());
-    let target: Pt = input.target.or_else(|| throats.first().map(|t| t.at)).or_else(|| streets.first().map(|st| [(st.a[0] + st.b[0]) / 2.0, (st.a[1] + st.b[1]) / 2.0])).unwrap_or(origin);
+    let target: Pt = input
+        .target
+        .or_else(|| throats.first().map(|t| t.at))
+        .or_else(|| streets.first().map(|st| [(st.a[0] + st.b[0]) / 2.0, (st.a[1] + st.b[1]) / 2.0]))
+        .unwrap_or(origin);
     let by_near = |kept: &[WStall]| -> Vec<usize> {
         let mut order: Vec<(f64, usize)> = kept.iter().enumerate().map(|(i, st)| (dist(centre(&st.poly), target), i)).collect();
         order.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap_or(std::cmp::Ordering::Equal));
@@ -836,18 +881,25 @@ pub fn solve(input: &Input) -> Solved {
         }
     }
 
-    let stalls: Vec<Stall> = kept.iter().filter(|st| !st.access).map(|st| Stall { poly: st.poly.clone(), kind: st.kind, mouth: st.mouth }).collect();
+    let stalls: Vec<Stall> =
+        kept.iter().filter(|st| !st.access).map(|st| Stall { poly: st.poly.clone(), kind: st.kind, mouth: st.mouth }).collect();
     let access_aisles: Vec<Ring> = kept.iter().filter(|st| st.access).map(|st| st.poly.clone()).collect();
     let used_aisles: Vec<&WAisle> = plan.aisles.iter().filter(|a| reach.contains(&a.id)).collect();
     let mut aisles: Vec<Aisle> = used_aisles.iter().map(|a| Aisle { poly: a.poly.clone(), kind: a.kind, flow: a.flow }).collect();
     aisles.extend(throats.iter().map(|t| Aisle { poly: t.poly.clone(), kind: AisleKind::Throat, flow: None }));
-    let islands: Vec<(Ring, IslandKind)> = plan.islands.iter().filter(|i| !throats.iter().any(|t| hits(&t.poly, &i.poly))).map(|i| (i.poly.clone(), i.kind)).collect();
+    let islands: Vec<(Ring, IslandKind)> =
+        plan.islands.iter().filter(|i| !throats.iter().any(|t| hits(&t.poly, &i.poly))).map(|i| (i.poly.clone(), i.kind)).collect();
     let mut paved_area = 0.0;
     for p in used_aisles.iter().map(|a| &a.poly).chain(throats.iter().map(|t| &t.poly)).chain(kept.iter().map(|st| &st.poly)) {
         paved_area += ring_area(p).abs();
     }
     let count = stalls.len();
-    let columns: Vec<Ring> = plan.columns.iter().filter(|c| !throats.iter().any(|t| hits(&t.poly, c)) && !aisles.iter().any(|a| hits(&a.poly, c))).cloned().collect();
+    let columns: Vec<Ring> = plan
+        .columns
+        .iter()
+        .filter(|c| !throats.iter().any(|t| hits(&t.poly, c)) && !aisles.iter().any(|a| hits(&a.poly, c)))
+        .cloned()
+        .collect();
     let mut directions: Vec<f64> = Vec::new();
     for d in &plan.dirs {
         let v = js_round(d * 100.0) / 100.0;

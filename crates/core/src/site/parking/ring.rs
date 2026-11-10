@@ -93,7 +93,18 @@ enum Row {
 /// The middle of a ring layout, in its own frame: a stack of `n` aisles, `below` and `above` rows outside the
 /// outermost aisles (2: a second row backing on to it and facing the loop). Aisles run on to the loop.
 #[allow(clippy::too_many_arguments)]
-fn lay_middle(gg: &Region, gr: &Region, lp: &[MiddleLoop], s: &Settings, n: i64, below: i64, above: i64, off: f64, shift: f64, tally: bool) -> Option<Plan> {
+fn lay_middle(
+    gg: &Region,
+    gr: &Region,
+    lp: &[MiddleLoop],
+    s: &Settings,
+    n: i64,
+    below: i64,
+    above: i64,
+    off: f64,
+    shift: f64,
+    tally: bool,
+) -> Option<Plan> {
     let b = bounds(&gg.outer);
     let r = row_depth(s);
     let single = s.one_way && n == 1;
@@ -172,7 +183,8 @@ fn lay_middle(gg: &Region, gr: &Region, lp: &[MiddleLoop], s: &Settings, n: i64,
         if kind == Row::Aisle {
             continue;
         }
-        let own: Vec<LAisle> = if aisle >= 0 { rects.iter().find(|(k, _)| *k == aisle).map(|x| x.1.clone()).unwrap_or_default() } else { Vec::new() };
+        let own: Vec<LAisle> =
+            if aisle >= 0 { rects.iter().find(|(k, _)| *k == aisle).map(|x| x.1.clone()).unwrap_or_default() } else { Vec::new() };
         if aisle >= 0 && own.is_empty() {
             continue;
         }
@@ -367,7 +379,12 @@ fn best_middles(gg: &Region, gr: &Region, lp: &[MiddleLoop], s: &Settings, keep:
         }
     }
     sort_tries(&mut tried);
-    tried.iter().take(keep).filter_map(|t| lay_middle(gg, gr, lp, s, t.n, t.lo, t.hi, t.off, t.shift, false)).filter(|p| !p.stalls.is_empty()).collect()
+    tried
+        .iter()
+        .take(keep)
+        .filter_map(|t| lay_middle(gg, gr, lp, s, t.n, t.lo, t.hi, t.off, t.shift, false))
+        .filter(|p| !p.stalls.is_empty())
+        .collect()
 }
 
 /// A side a row of bays can face a loop from: the row stands to the left of `v`, opening onto `piece`.
@@ -381,7 +398,20 @@ struct LoopSide {
 /// A row of square bays along a side: from `v` leftwards `dep` deep, as many as fit between `lo` and `hi` along it
 /// (the grid moved on by `shift`), each kept where `ok` says; runs too short are planted.
 #[allow(clippy::too_many_arguments)]
-fn row_along(v: (Pt, Pt), mut lo: f64, mut hi: f64, dep: f64, ew: f64, shift: f64, min_run: f64, ok: &dyn Fn(&[Pt]) -> bool, mouth_at: f64, aisle: i64, tag: &str, sh: f64) -> (Vec<WStall>, Vec<WStall>) {
+fn row_along(
+    v: (Pt, Pt),
+    mut lo: f64,
+    mut hi: f64,
+    dep: f64,
+    ew: f64,
+    shift: f64,
+    min_run: f64,
+    ok: &dyn Fn(&[Pt]) -> bool,
+    mouth_at: f64,
+    aisle: i64,
+    tag: &str,
+    sh: f64,
+) -> (Vec<WStall>, Vec<WStall>) {
     let l = dist(v.0, v.1);
     let mut kept = Vec::new();
     let mut planted = Vec::new();
@@ -420,7 +450,15 @@ fn row_along(v: (Pt, Pt), mut lo: f64, mut hi: f64, dep: f64, ew: f64, shift: f6
             close(&mut run, &mut kept, &mut planted);
             continue;
         }
-        run.push(WStall { poly, mouth: pt(x + ew / 2.0, mouth_at), aisle, row: tag.to_string(), cell, kind: StallKind::Standard, access: false });
+        run.push(WStall {
+            poly,
+            mouth: pt(x + ew / 2.0, mouth_at),
+            aisle,
+            row: tag.to_string(),
+            cell,
+            kind: StallKind::Standard,
+            access: false,
+        });
     }
     close(&mut run, &mut kept, &mut planted);
     (kept, planted)
@@ -433,7 +471,9 @@ pub fn attach(outer: &[Pt], holes: &[Ring], within: f64) -> (Region, Vec<Region>
     let mut inner: Vec<Ring> = Vec::new();
     for given in holes {
         let mut h = given.clone();
-        let at = grounds.iter().position(|g| h.iter().any(|&p| point_in_ring(p, g)) || g.iter().any(|&p| point_in_ring(p, &h)) || cut_out(g, &h).is_some());
+        let at = grounds
+            .iter()
+            .position(|g| h.iter().any(|&p| point_in_ring(p, g)) || g.iter().any(|&p| point_in_ring(p, &h)) || cut_out(g, &h).is_some());
         let Some(at) = at else { continue };
         let ground = grounds[at].clone();
         if h.iter().all(|&p| point_in_ring(p, &ground) && dist_to_ring(p, &ground) > 1e-4) {
@@ -480,7 +520,11 @@ pub fn attach(outer: &[Pt], holes: &[Ring], within: f64) -> (Region, Vec<Region>
     let parts: Vec<Region> = grounds
         .into_iter()
         .map(|g| {
-            let hs = inner.iter().filter(|h| h.iter().any(|&p| point_in_ring(p, &g)) || shared_area(&hull(h), &hull(&g)) > 0.01).cloned().collect();
+            let hs = inner
+                .iter()
+                .filter(|h| h.iter().any(|&p| point_in_ring(p, &g)) || shared_area(&hull(h), &hull(&g)) > 0.01)
+                .cloned()
+                .collect();
             Region::new(g, hs)
         })
         .collect();
@@ -532,7 +576,14 @@ fn ring_sizes(s: &Settings, square: bool) -> Sizes {
             cut: if angled { s.aisle_two_way } else { s.aisle },
         };
     }
-    Sizes { a: s.aisle, dep: row_depth(s), pitch: pitch_of(s), lean: lean_of(s), one_way: angled && s.one_way, cut: if angled { s.aisle_two_way } else { s.aisle } }
+    Sizes {
+        a: s.aisle,
+        dep: row_depth(s),
+        pitch: pitch_of(s),
+        lean: lean_of(s),
+        one_way: angled && s.one_way,
+        cut: if angled { s.aisle_two_way } else { s.aisle },
+    }
 }
 
 /// The plot laid out as a ring: a row along every side, the loop aisle, and the middle set out along each of `degs`.
@@ -641,7 +692,12 @@ fn lay_ring_wings(ctx: &mut Ctx, usable: &Region, s: &Settings, origin: Pt, squa
                 continue;
             }
             let span = [lo0[0].min(hi0[0]), lo0[1].max(hi0[1])];
-            let aisle = WAisle { id: ctx.id(), poly: [[lo0[0], y0], [lo0[1], y0], [hi0[1], y1], [hi0[0], y1]].iter().map(|&x| to_world(&f, x)).collect(), kind: AisleKind::Cross, flow: None };
+            let aisle = WAisle {
+                id: ctx.id(),
+                poly: [[lo0[0], y0], [lo0[1], y0], [hi0[1], y1], [hi0[0], y1]].iter().map(|&x| to_world(&f, x)).collect(),
+                kind: AisleKind::Cross,
+                flow: None,
+            };
             if !usable.holes.iter().all(|h| !hits(h, &aisle.poly)) {
                 continue;
             }
@@ -656,7 +712,10 @@ fn lay_ring_wings(ctx: &mut Ctx, usable: &Region, s: &Settings, origin: Pt, squa
                 let Some(half) = half else { continue };
                 let yy = if k == 0 { y1 } else { y0 };
                 let on_cut = move |u: Pt, v: Pt| {
-                    (lv(u) - yy).abs() < 0.01 && (lv(v) - yy).abs() < 0.01 && along(u).min(along(v)) >= span[0] - 0.5 && along(u).max(along(v)) <= span[1] + 0.5
+                    (lv(u) - yy).abs() < 0.01
+                        && (lv(v) - yy).abs() < 0.01
+                        && along(u).min(along(v)) >= span[0] - 0.5
+                        && along(u).max(along(v)) <= span[1] + 0.5
                 };
                 let mut all = vec![deg, (deg + 90.0) % 180.0];
                 all.extend(directions(&half.outer, 3, 10.0));
@@ -713,7 +772,18 @@ type Open<'a> = Option<(&'a dyn Fn(Pt, Pt) -> bool, &'a WAisle)>;
 /// One ring. `open` says which sides of the ground lie on its shared aisle, which the ring shares with the ring
 /// beyond it (a wing's): no row along such a side and no loop of its own there.
 #[allow(clippy::too_many_arguments)]
-fn lay_ring_with(ctx: &mut Ctx, usable: &Region, s: &Settings, origin: Pt, degs: &[f64], against: f64, cuts: bool, square: bool, quick: bool, open: Open) -> Vec<WPlan> {
+fn lay_ring_with(
+    ctx: &mut Ctx,
+    usable: &Region,
+    s: &Settings,
+    origin: Pt,
+    degs: &[f64],
+    against: f64,
+    cuts: bool,
+    square: bool,
+    quick: bool,
+    open: Open,
+) -> Vec<WPlan> {
     let ring = offset_ring(&straighten(&offset_ring(&usable.outer, 0.0), 0.3), 0.0);
     if ring.len() < 3 {
         return Vec::new();
@@ -730,7 +800,11 @@ fn lay_ring_with(ctx: &mut Ctx, usable: &Region, s: &Settings, origin: Pt, degs:
     }
     let holes: Vec<Ring> = usable.holes.iter().map(|h| ccw(h)).collect();
     let hole_hit = |poly: &[Pt]| {
-        holes.iter().any(|h| hits(poly, h) || h.iter().any(|&p| point_in_ring(p, poly)) || poly.iter().any(|&p| point_in_ring(p, h) && dist_to_ring(p, h) > 0.001))
+        holes.iter().any(|h| {
+            hits(poly, h)
+                || h.iter().any(|&p| point_in_ring(p, poly))
+                || poly.iter().any(|&p| point_in_ring(p, h) && dist_to_ring(p, h) > 0.001)
+        })
     };
     let on_ground = |poly: &[Pt]| poly.iter().all(|&p| point_in_ring(p, &ring) || dist_to_ring(p, &ring) < 0.01);
     let deep_enough = |d: f64| {
@@ -768,10 +842,16 @@ fn lay_ring_with(ctx: &mut Ctx, usable: &Region, s: &Settings, origin: Pt, degs:
                 vec![u.0, u.1, aj.0]
             }
         };
-        if ring_area(&poly) < 1.0 || hole_hit(&poly) || !on_ground(&poly) || poly.iter().any(|&x| dist_to_ring(x, &ring) > (dep + aa) * 2.0) {
+        if ring_area(&poly) < 1.0 || hole_hit(&poly) || !on_ground(&poly) || poly.iter().any(|&x| dist_to_ring(x, &ring) > (dep + aa) * 2.0)
+        {
             continue;
         }
-        let piece = WAisle { id: ctx.id(), poly, kind: AisleKind::Cross, flow: if one_way { Some(unit(ring[i], ring[(i + 1) % nn])) } else { None } };
+        let piece = WAisle {
+            id: ctx.id(),
+            poly,
+            kind: AisleKind::Cross,
+            flow: if one_way { Some(unit(ring[i], ring[(i + 1) % nn])) } else { None },
+        };
         lp.push(piece.clone());
         piece_of[i] = Some(piece.clone());
         if let Some(v) = v {
@@ -808,7 +888,20 @@ fn lay_ring_with(ctx: &mut Ctx, usable: &Region, s: &Settings, origin: Pt, degs:
         let in_strip = |poly: &[Pt]| poly.iter().all(|&x| point_in_ring(x, &strip) || dist_to_ring(x, &strip) < 0.01);
         let (kept, planted) = {
             let bb = &busy_base;
-            row_along((p, q), lo, hi, dep, ew, 0.0, s.min_run, &|poly| in_strip(poly) && !hole_hit(poly) && !bb.clash(poly), dep, piece.id, &format!("ring|{i}"), lean)
+            row_along(
+                (p, q),
+                lo,
+                hi,
+                dep,
+                ew,
+                0.0,
+                s.min_run,
+                &|poly| in_strip(poly) && !hole_hit(poly) && !bb.clash(poly),
+                dep,
+                piece.id,
+                &format!("ring|{i}"),
+                lean,
+            )
         };
         for st in kept {
             busy_base.add(&st.poly);
@@ -831,7 +924,8 @@ fn lay_ring_with(ctx: &mut Ctx, usable: &Region, s: &Settings, origin: Pt, degs:
         }
         let m = h.len();
         let side_of = |d: f64| inset_sides(h, &vec![-d; m]);
-        let at_b: Vec<Option<(Pt, Pt)>> = if against > 0.0 { side_of(against) } else { (0..m).map(|i| Some((h[i], h[(i + 1) % m]))).collect() };
+        let at_b: Vec<Option<(Pt, Pt)>> =
+            if against > 0.0 { side_of(against) } else { (0..m).map(|i| Some((h[i], h[(i + 1) % m]))).collect() };
         let at_l = side_of(against + aa);
         let mut pieces: Vec<Option<WAisle>> = Vec::new();
         for i in 0..m {
@@ -840,7 +934,8 @@ fn lay_ring_with(ctx: &mut Ctx, usable: &Region, s: &Settings, origin: Pt, degs:
                 continue;
             };
             let poly = vec![b.1, b.0, l.0, l.1];
-            let piece = WAisle { id: ctx.id(), poly: ccw(&poly), kind: AisleKind::Cross, flow: if one_way { Some(unit(l.1, l.0)) } else { None } };
+            let piece =
+                WAisle { id: ctx.id(), poly: ccw(&poly), kind: AisleKind::Cross, flow: if one_way { Some(unit(l.1, l.0)) } else { None } };
             let ok = ring_area(&piece.poly) > 1.0
                 && on_ground(&piece.poly)
                 && !bay_index.clash(&piece.poly)
@@ -863,7 +958,20 @@ fn lay_ring_with(ctx: &mut Ctx, usable: &Region, s: &Settings, origin: Pt, degs:
                 let l = dist(p, q);
                 let (kept, planted) = {
                     let bb = &busy_base;
-                    row_along((p, q), 0.0, l, against, ew, 0.0, s.min_run, &|poly| !hole_hit(poly) && !bb.clash(poly) && on_ground(poly), against, piece.id, &format!("bld|{hk}|{i}"), lean)
+                    row_along(
+                        (p, q),
+                        0.0,
+                        l,
+                        against,
+                        ew,
+                        0.0,
+                        s.min_run,
+                        &|poly| !hole_hit(poly) && !bb.clash(poly) && on_ground(poly),
+                        against,
+                        piece.id,
+                        &format!("bld|{hk}|{i}"),
+                        lean,
+                    )
                 };
                 for st in kept {
                     busy_base.add(&st.poly);
@@ -882,7 +990,8 @@ fn lay_ring_with(ctx: &mut Ctx, usable: &Region, s: &Settings, origin: Pt, degs:
     // The middle, inside the loop: each part of it deep enough, on its own.
     let inners = loops_of(&at_a, dep + aa);
     let fronts = loops_of(&at_r, dep);
-    let in_middle = |p: Pt| inners.iter().any(|r| point_in_ring(p, r)) && !hole_out.iter().any(|h| point_in_ring(p, h) && dist_to_ring(p, h) > 0.01);
+    let in_middle =
+        |p: Pt| inners.iter().any(|r| point_in_ring(p, r)) && !hole_out.iter().any(|h| point_in_ring(p, h) && dist_to_ring(p, h) > 0.01);
     let front_of = |c: &[Pt]| -> Option<Ring> {
         let c0 = c.first().copied();
         fronts.iter().find(|r| c0.is_some_and(|c0| point_in_ring(c0, r))).or(fronts.first()).cloned()
@@ -920,8 +1029,11 @@ fn lay_ring_with(ctx: &mut Ctx, usable: &Region, s: &Settings, origin: Pt, degs:
             let mut best_row: Vec<WStall> = Vec::new();
             for f in [0.0, 0.25, 0.5, 0.75] {
                 let bz = &busy;
-                let ok = |poly: &[Pt]| poly.iter().all(|&p| in_middle(p) || seg_distance(p, v0, v1) < 0.01) && !hole_hit(poly) && !bz.clash(poly);
-                let (kept, _) = row_along(side.v, 0.0, l, dep, ew, f * ew, s.min_run, &ok, 0.0, side.piece.id, &format!("inner|{}", side.tag), lean);
+                let ok = |poly: &[Pt]| {
+                    poly.iter().all(|&p| in_middle(p) || seg_distance(p, v0, v1) < 0.01) && !hole_hit(poly) && !bz.clash(poly)
+                };
+                let (kept, _) =
+                    row_along(side.v, 0.0, l, dep, ew, f * ew, s.min_run, &ok, 0.0, side.piece.id, &format!("inner|{}", side.tag), lean);
                 if kept.len() > best_row.len() {
                     best_row = kept;
                 }
@@ -950,7 +1062,14 @@ fn lay_ring_with(ctx: &mut Ctx, usable: &Region, s: &Settings, origin: Pt, degs:
                     [b[0] - a[0], b[1] - a[1]]
                 };
                 if !local_loops.iter().any(|(d, _)| *d == deg) {
-                    let made = pieces.iter().map(|x| MiddleLoop { id: x.id, poly: ccw(&x.poly.iter().map(|&p| to_local(&f, p)).collect::<Ring>()), flow: x.flow.map(along) }).collect();
+                    let made = pieces
+                        .iter()
+                        .map(|x| MiddleLoop {
+                            id: x.id,
+                            poly: ccw(&x.poly.iter().map(|&p| to_local(&f, p)).collect::<Ring>()),
+                            flow: x.flow.map(along),
+                        })
+                        .collect();
                     local_loops.push((deg, made));
                 }
                 let loop_l: &[MiddleLoop] = local_loops.iter().find(|(d, _)| *d == deg).map(|x| x.1.as_slice()).unwrap_or(&[]);
@@ -1077,7 +1196,12 @@ fn lay_ring_with(ctx: &mut Ctx, usable: &Region, s: &Settings, origin: Pt, degs:
                 continue;
             }
             let Some(front) = front_of(&c0) else { continue };
-            let others: Vec<Part> = inners.iter().enumerate().filter(|(xi, x)| *xi != ci && ring_area(x) >= 50.0).filter_map(|(_, x)| whole(x, directions(x, 2, 10.0))).collect();
+            let others: Vec<Part> = inners
+                .iter()
+                .enumerate()
+                .filter(|(xi, x)| *xi != ci && ring_area(x) >= 50.0)
+                .filter_map(|(_, x)| whole(x, directions(x, 2, 10.0)))
+                .collect();
             let mut tried: Vec<String> = Vec::new();
             let m = c0.len();
             for i in 0..m {
@@ -1100,11 +1224,18 @@ fn lay_ring_with(ctx: &mut Ctx, usable: &Region, s: &Settings, origin: Pt, degs:
                         tried.push(key);
                         let f = frame_of(c, deg);
                         let front_l = region_to_local(&f, &Region::new(front.clone(), hole_front.clone()));
-                        let Some(span) = strip_spans(&front_l, y0, y1).into_iter().find(|&[lo, hi]| lo <= 0.5 && hi >= -0.5) else { continue };
+                        let Some(span) = strip_spans(&front_l, y0, y1).into_iter().find(|&[lo, hi]| lo <= 0.5 && hi >= -0.5) else {
+                            continue;
+                        };
                         if span[1] - span[0] < 10.0 {
                             continue;
                         }
-                        let cut = WAisle { id: ctx.id(), poly: corners(&rect(span[0], y0, span[1], y1)).into_iter().map(|x| to_world(&f, x)).collect(), kind: AisleKind::Cross, flow: None };
+                        let cut = WAisle {
+                            id: ctx.id(),
+                            poly: corners(&rect(span[0], y0, span[1], y1)).into_iter().map(|x| to_world(&f, x)).collect(),
+                            kind: AisleKind::Cross,
+                            flow: None,
+                        };
                         if hole_hit(&cut.poly) || bay_index.clash(&cut.poly) {
                             continue;
                         }

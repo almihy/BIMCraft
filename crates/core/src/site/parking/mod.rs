@@ -115,7 +115,13 @@ pub fn lay_out(props: &Props, level: &str, levels: &[LevelIn], obstacles: &[Obst
 
 /// What the car park is laid out from (Arqiflow's `carParkInput`), in metres: the solver's input, and whether it is
 /// below ground. An error says why it cannot be.
-pub fn input_of(props: &Props, level: &str, levels: &[LevelIn], obstacles: &[Obstacle], streets: &[(P2, P2)]) -> Result<(Input, bool), String> {
+pub fn input_of(
+    props: &Props,
+    level: &str,
+    levels: &[LevelIn],
+    obstacles: &[Obstacle],
+    streets: &[(P2, P2)],
+) -> Result<(Input, bool), String> {
     let r3 = |v: f64| js_round(v) / 1000.0; // mm to metres, to the millimetre
     let control = points(props.get("control")).ok_or("The car park has no area: give its control ring, three points or more.")?;
     let mut area: Ring = control.iter().map(|p| [r3(p[0]), r3(p[1])]).collect();
@@ -179,8 +185,12 @@ pub fn input_of(props: &Props, level: &str, levels: &[LevelIn], obstacles: &[Obs
             .collect(),
         _ => Vec::new(),
     };
-    let street_lines: Vec<(Pt, Pt)> =
-        streets.iter().take(MAX_POINTS).filter(|(a, c)| finite_pt(a.0, a.1) && finite_pt(c.0, c.1)).map(|(a, c)| ([a.0 / 1000.0, a.1 / 1000.0], [c.0 / 1000.0, c.1 / 1000.0])).collect();
+    let street_lines: Vec<(Pt, Pt)> = streets
+        .iter()
+        .take(MAX_POINTS)
+        .filter(|(a, c)| finite_pt(a.0, a.1) && finite_pt(c.0, c.1))
+        .map(|(a, c)| ([a.0 / 1000.0, a.1 / 1000.0], [c.0 / 1000.0, c.1 / 1000.0]))
+        .collect();
     // A side is a street side when it runs along a lane or the plot's street edge (within a metre and a half).
     let mut street_sides: Vec<usize> = Vec::new();
     if !basement {
@@ -199,8 +209,11 @@ pub fn input_of(props: &Props, level: &str, levels: &[LevelIn], obstacles: &[Obs
             }
         }
     }
-    let access: Vec<Access> =
-        if basement { Vec::new() } else { access_raw.iter().filter_map(|&(at, k)| Some(Access { at: [r3(at[0] * 1000.0), r3(at[1] * 1000.0)], kind: k? })).collect() };
+    let access: Vec<Access> = if basement {
+        Vec::new()
+    } else {
+        access_raw.iter().filter_map(|&(at, k)| Some(Access { at: [r3(at[0] * 1000.0), r3(at[1] * 1000.0)], kind: k? })).collect()
+    };
     let removed: Vec<Pt> = match props.get("removed") {
         Some(Value::Array(list)) => list.iter().take(100_000).filter_map(|x| point(Some(x))).map(|p| [r3(p[0]), r3(p[1])]).collect(),
         _ => Vec::new(),
@@ -344,7 +357,11 @@ pub fn pieces_of(l: &solve::Solved, level: &str) -> Vec<Piece> {
 
 /// What a layout came to (Arqiflow's `carParkResult`).
 pub fn result_of(l: &solve::Solved, basement: bool) -> Props {
-    let ways: Vec<Value> = if basement { Vec::new() } else { l.entries.iter().map(|w| json!({ "at": [to_mm(w.at[0]), to_mm(w.at[1])], "kind": w.kind.name() })).collect() };
+    let ways: Vec<Value> = if basement {
+        Vec::new()
+    } else {
+        l.entries.iter().map(|w| json!({ "at": [to_mm(w.at[0]), to_mm(w.at[1])], "kind": w.kind.name() })).collect()
+    };
     let v = json!({
         "stalls": l.metrics.stalls,
         "accessible": l.metrics.accessible,

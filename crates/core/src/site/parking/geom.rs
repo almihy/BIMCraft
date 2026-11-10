@@ -397,11 +397,17 @@ pub fn to_world(f: &Frame, p: Pt) -> Pt {
 }
 
 pub fn region_to_local(f: &Frame, g: &Region) -> Region {
-    Region::new(g.outer.iter().map(|&p| to_local(f, p)).collect(), g.holes.iter().map(|h| h.iter().map(|&p| to_local(f, p)).collect()).collect())
+    Region::new(
+        g.outer.iter().map(|&p| to_local(f, p)).collect(),
+        g.holes.iter().map(|h| h.iter().map(|&p| to_local(f, p)).collect()).collect(),
+    )
 }
 
 pub fn region_to_world(f: &Frame, g: &Region) -> Region {
-    Region::new(g.outer.iter().map(|&p| to_world(f, p)).collect(), g.holes.iter().map(|h| h.iter().map(|&p| to_world(f, p)).collect()).collect())
+    Region::new(
+        g.outer.iter().map(|&p| to_world(f, p)).collect(),
+        g.holes.iter().map(|h| h.iter().map(|&p| to_world(f, p)).collect()).collect(),
+    )
 }
 
 #[derive(Clone, Copy, Debug)]

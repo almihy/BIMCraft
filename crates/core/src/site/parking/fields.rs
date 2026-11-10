@@ -240,7 +240,17 @@ fn widest(spans: &[Span]) -> Option<Span> {
 /// The field laid out one way: a stack of `n` aisles across it, its sides and ends as said. None when the aisles do
 /// not fit inside.
 #[allow(clippy::too_many_arguments)]
-fn lay_field(f: &FieldSpec, s: &Settings, n: i64, south: FSide, north: FSide, west: End, east: End, offset: f64, tally: bool) -> Option<Plan> {
+fn lay_field(
+    f: &FieldSpec,
+    s: &Settings,
+    n: i64,
+    south: FSide,
+    north: FSide,
+    west: End,
+    east: End,
+    offset: f64,
+    tally: bool,
+) -> Option<Plan> {
     let g = f.region;
     let b = bounds(&g.outer);
     let r = row_depth(s);
@@ -337,7 +347,15 @@ fn lay_field(f: &FieldSpec, s: &Settings, n: i64, south: FSide, north: FSide, we
                 if tally {
                     plan.count = Some(plan.count.unwrap_or(0.0) + 1.0);
                 } else {
-                    plan.stalls.push(LStall { r: sr, aisle, side, row: tag.to_string(), cell: (i - 1.0) as i64, kind: StallKind::Standard, sh: 0.0 });
+                    plan.stalls.push(LStall {
+                        r: sr,
+                        aisle,
+                        side,
+                        row: tag.to_string(),
+                        cell: (i - 1.0) as i64,
+                        kind: StallKind::Standard,
+                        sh: 0.0,
+                    });
                 }
             }
         };
@@ -404,7 +422,15 @@ fn lay_field(f: &FieldSpec, s: &Settings, n: i64, south: FSide, north: FSide, we
                 }
             } else if len >= s.min_run {
                 for &k in run.iter() {
-                    plan.stalls.push(LStall { r: cell(k), aisle: t.aisle, side, row: tag.clone(), cell: k as i64, kind: StallKind::Standard, sh });
+                    plan.stalls.push(LStall {
+                        r: cell(k),
+                        aisle: t.aisle,
+                        side,
+                        row: tag.clone(),
+                        cell: k as i64,
+                        kind: StallKind::Standard,
+                        sh,
+                    });
                 }
             } else {
                 for &k in run.iter() {
@@ -449,15 +475,39 @@ fn lay_field(f: &FieldSpec, s: &Settings, n: i64, south: FSide, north: FSide, we
         close(&mut run, &mut plan);
         // The end islands, where the row stops short of a cross aisle.
         if e > 0.0 && faces_own && !own.is_empty() && !outer {
-            let xf = if cg != 0.0 { if k_first <= k_last { xk(k_first) } else { xl } } else { gx + k0 * w };
-            let xe = if cg != 0.0 { if k_first <= k_last { xk(k_last) + w } else { xr } } else { gx + k1 * w };
+            let xf = if cg != 0.0 {
+                if k_first <= k_last {
+                    xk(k_first)
+                } else {
+                    xl
+                }
+            } else {
+                gx + k0 * w
+            };
+            let xe = if cg != 0.0 {
+                if k_first <= k_last {
+                    xk(k_last) + w
+                } else {
+                    xr
+                }
+            } else {
+                gx + k1 * w
+            };
             let nn = t.kind == StripKind::RowN;
             if west != End::Open && xf > xl + 0.05 {
-                let poly = if nn { vec![[xl, t.y0], [xf + sh, t.y0], [xf, t.y1], [xl, t.y1]] } else { vec![[xl, t.y0], [xf, t.y0], [xf + sh, t.y1], [xl, t.y1]] };
+                let poly = if nn {
+                    vec![[xl, t.y0], [xf + sh, t.y0], [xf, t.y1], [xl, t.y1]]
+                } else {
+                    vec![[xl, t.y0], [xf, t.y0], [xf + sh, t.y1], [xl, t.y1]]
+                };
                 plan.islands.push(LIsland { r: rect(xl, t.y0, xf, t.y1), kind: IslandKind::End, poly: Some(poly) });
             }
             if east != End::Open && xr > xe + 0.05 {
-                let poly = if nn { vec![[xe + sh, t.y0], [xr, t.y0], [xr, t.y1], [xe, t.y1]] } else { vec![[xe, t.y0], [xr, t.y0], [xr, t.y1], [xe + sh, t.y1]] };
+                let poly = if nn {
+                    vec![[xe + sh, t.y0], [xr, t.y0], [xr, t.y1], [xe, t.y1]]
+                } else {
+                    vec![[xe, t.y0], [xr, t.y0], [xr, t.y1], [xe + sh, t.y1]]
+                };
                 plan.islands.push(LIsland { r: rect(xe, t.y0, xr, t.y1), kind: IslandKind::End, poly: Some(poly) });
             }
         }
@@ -511,7 +561,19 @@ fn columns_of(plan: &Plan, strips: &[(f64, f64, StripKind)], xk: &dyn Fn(f64) ->
 pub fn columns_of_rows(plan: &Plan, rows: &[(f64, f64, bool, bool)], xk: &dyn Fn(f64) -> f64, w: f64, cg: f64, cs: f64) -> Vec<Rect> {
     let strips: Vec<(f64, f64, StripKind)> = rows
         .iter()
-        .map(|&(y0, y1, aisle, north)| (y0, y1, if aisle { StripKind::Aisle } else if north { StripKind::RowN } else { StripKind::RowS }))
+        .map(|&(y0, y1, aisle, north)| {
+            (
+                y0,
+                y1,
+                if aisle {
+                    StripKind::Aisle
+                } else if north {
+                    StripKind::RowN
+                } else {
+                    StripKind::RowS
+                },
+            )
+        })
         .collect();
     columns_of(plan, &strips, xk, w, cg, cs)
 }
@@ -532,11 +594,15 @@ pub fn best_field(ctx: &mut Ctx, f: &FieldSpec, s: &Settings) -> Option<Rc<Plan>
             key.push(mm(p[1]));
         }
     }
-    let k = FieldKey(key, f.ext, match f.street {
-        None => 0,
-        Some(Side::S) => 1,
-        Some(_) => 2,
-    });
+    let k = FieldKey(
+        key,
+        f.ext,
+        match f.street {
+            None => 0,
+            Some(Side::S) => 1,
+            Some(_) => 2,
+        },
+    );
     if let Some(p) = ctx.field_memo.get(&k) {
         return p.clone();
     }
@@ -725,7 +791,11 @@ pub fn place(ctx: &mut Ctx, plan: &Plan, frame: &Frame, tag: &str, deg: f64) -> 
             access: false,
         })
         .collect();
-    let islands = plan.islands.iter().map(|i| WIsland { poly: i.poly.clone().unwrap_or_else(|| corners(&i.r)).into_iter().map(w).collect(), kind: i.kind }).collect();
+    let islands = plan
+        .islands
+        .iter()
+        .map(|i| WIsland { poly: i.poly.clone().unwrap_or_else(|| corners(&i.r)).into_iter().map(w).collect(), kind: i.kind })
+        .collect();
     let columns = plan.columns.as_ref().map(|c| c.iter().map(|r| corners(r).into_iter().map(w).collect()).collect()).unwrap_or_default();
     WPlan { aisles, stalls, islands, columns, fields: 1, dirs: vec![deg], ring: false }
 }
@@ -789,7 +859,15 @@ fn angle_off(a: f64, b: f64) -> f64 {
 
 /// The plot laid out with the rows along `deg`: as one field, or as two either side of a drive aisle cut at an inside
 /// corner, each of the two then also tried in its own directions.
-pub fn lay_plot(ctx: &mut Ctx, usable: &Region, deg: f64, s: &Settings, origin: Pt, streets_w: &[(Pt, Pt)], own_directions: bool) -> Vec<WPlan> {
+pub fn lay_plot(
+    ctx: &mut Ctx,
+    usable: &Region,
+    deg: f64,
+    s: &Settings,
+    origin: Pt,
+    streets_w: &[(Pt, Pt)],
+    own_directions: bool,
+) -> Vec<WPlan> {
     let frame = frame_of(origin, deg);
     let g = region_to_local(&frame, usable);
     let street_side = |f: &Frame, r: &Region| -> Option<Side> {
@@ -817,7 +895,8 @@ pub fn lay_plot(ctx: &mut Ctx, usable: &Region, deg: f64, s: &Settings, origin: 
     }
     let d = s.drive_aisle;
     let mut tried: Vec<String> = Vec::new();
-    let outer_corners: Vec<String> = reflex_corners(&g.outer, &[]).iter().map(|p| format!("{},{}", to_fixed(p[0], 3), to_fixed(p[1], 3))).collect();
+    let outer_corners: Vec<String> =
+        reflex_corners(&g.outer, &[]).iter().map(|p| format!("{},{}", to_fixed(p[0], 3), to_fixed(p[1], 3))).collect();
     for c in reflex_corners(&g.outer, &g.holes) {
         let wing = outer_corners.contains(&format!("{},{}", to_fixed(c[0], 3), to_fixed(c[1], 3)));
         for horizontal in [true, false] {
@@ -833,14 +912,25 @@ pub fn lay_plot(ctx: &mut Ctx, usable: &Region, deg: f64, s: &Settings, origin: 
                 let above = clip_half(&g, &|p| lo(p) - (at + d));
                 let (Some(below), Some(above)) = (below, above) else { continue };
                 let spans = if horizontal { strip_spans(&g, at, at + d) } else { column_spans(&g, at, at + d) };
-                let drive_rects: Vec<Rect> =
-                    spans.iter().filter(|[p, q]| q - p > d).map(|&[p, q]| if horizontal { rect(p, at, q, at + d) } else { rect(at, p, at + d, q) }).collect();
+                let drive_rects: Vec<Rect> = spans
+                    .iter()
+                    .filter(|[p, q]| q - p > d)
+                    .map(|&[p, q]| if horizontal { rect(p, at, q, at + d) } else { rect(at, p, at + d, q) })
+                    .collect();
                 if drive_rects.is_empty() {
                     continue;
                 }
-                let drives_l: Vec<LAisle> = drive_rects.iter().map(|r| LAisle { id: ctx.id(), r: *r, kind: AisleKind::Drive, flow: None }).collect();
-                let drives: Vec<WAisle> =
-                    drives_l.iter().map(|a| WAisle { id: a.id, poly: corners(&a.r).into_iter().map(|p| to_world(&frame, p)).collect(), kind: AisleKind::Drive, flow: None }).collect();
+                let drives_l: Vec<LAisle> =
+                    drive_rects.iter().map(|r| LAisle { id: ctx.id(), r: *r, kind: AisleKind::Drive, flow: None }).collect();
+                let drives: Vec<WAisle> = drives_l
+                    .iter()
+                    .map(|a| WAisle {
+                        id: a.id,
+                        poly: corners(&a.r).into_iter().map(|p| to_world(&frame, p)).collect(),
+                        kind: AisleKind::Drive,
+                        flow: None,
+                    })
+                    .collect();
                 let part_of = |ctx: &mut Ctx, region: &Region, ext: Ext, tag: &str| -> Option<WPlan> {
                     let aligned = best_field(ctx, &FieldSpec { region, ext, street: street_side(&frame, region) }, s);
                     let mut best = aligned.map(|a| {
@@ -855,7 +945,11 @@ pub fn lay_plot(ctx: &mut Ctx, usable: &Region, deg: f64, s: &Settings, origin: 
                             }
                             let f2 = frame_of(origin, dd);
                             let r2 = region_to_local(&f2, &world);
-                            let Some(p2) = best_field(ctx, &FieldSpec { region: &r2, ext: Ext::default(), street: street_side(&f2, &r2) }, s) else { continue };
+                            let Some(p2) =
+                                best_field(ctx, &FieldSpec { region: &r2, ext: Ext::default(), street: street_side(&f2, &r2) }, s)
+                            else {
+                                continue;
+                            };
                             let w2 = place(ctx, &p2, &f2, tag, dd);
                             if !w2.aisles.iter().any(|a| drives.iter().any(|dr| touch_along(&a.poly, &dr.poly, 2.0))) {
                                 continue;
@@ -867,8 +961,18 @@ pub fn lay_plot(ctx: &mut Ctx, usable: &Region, deg: f64, s: &Settings, origin: 
                     }
                     best
                 };
-                let pa = part_of(ctx, &below, if horizontal { Ext { n: true, ..Ext::default() } } else { Ext { e: true, ..Ext::default() } }, "B");
-                let pb = part_of(ctx, &above, if horizontal { Ext { s: true, ..Ext::default() } } else { Ext { w: true, ..Ext::default() } }, "C");
+                let pa = part_of(
+                    ctx,
+                    &below,
+                    if horizontal { Ext { n: true, ..Ext::default() } } else { Ext { e: true, ..Ext::default() } },
+                    "B",
+                );
+                let pb = part_of(
+                    ctx,
+                    &above,
+                    if horizontal { Ext { s: true, ..Ext::default() } } else { Ext { w: true, ..Ext::default() } },
+                    "C",
+                );
                 if pa.is_none() && pb.is_none() {
                     continue;
                 }
@@ -931,7 +1035,12 @@ pub fn lay_oblique(ctx: &mut Ctx, usable: &Region, s: &Settings, origin: Pt) -> 
             let nn = [-u[1], u[0]];
             let p0 = [c[0] - u[0] * reach + nn[0] * lo, c[1] - u[1] * reach + nn[1] * lo];
             let p1 = [c[0] + u[0] * reach + nn[0] * lo, c[1] + u[1] * reach + nn[1] * lo];
-            let strip = vec![p0, p1, [p1[0] + nn[0] * (hi - lo), p1[1] + nn[1] * (hi - lo)], [p0[0] + nn[0] * (hi - lo), p0[1] + nn[1] * (hi - lo)]];
+            let strip = vec![
+                p0,
+                p1,
+                [p1[0] + nn[0] * (hi - lo), p1[1] + nn[1] * (hi - lo)],
+                [p0[0] + nn[0] * (hi - lo), p0[1] + nn[1] * (hi - lo)],
+            ];
             let drive_poly = clip_convex(&outer, &strip);
             if drive_poly.len() < 3 || ring_area(&drive_poly).abs() < d * 10.0 {
                 continue;
@@ -955,7 +1064,12 @@ pub fn lay_oblique(ctx: &mut Ctx, usable: &Region, s: &Settings, origin: Pt) -> 
                     let pb = bounds(&r.outer);
                     let along = ((dd - deg + 180.0) % 180.0).abs() < 0.5;
                     let across = ((dd - deg + 270.0) % 180.0).abs() < 0.5;
-                    let ext = Ext { s: along && db.y1 <= pb.y0 + 0.5, n: along && db.y0 >= pb.y1 - 0.5, w: across && db.x1 <= pb.x0 + 0.5, e: across && db.x0 >= pb.x1 - 0.5 };
+                    let ext = Ext {
+                        s: along && db.y1 <= pb.y0 + 0.5,
+                        n: along && db.y0 >= pb.y1 - 0.5,
+                        w: across && db.x1 <= pb.x0 + 0.5,
+                        e: across && db.x0 >= pb.x1 - 0.5,
+                    };
                     let Some(raw) = best_field(ctx, &FieldSpec { region: &r, ext, street: None }, s) else { continue };
                     let plan_w = if ext.s || ext.n || ext.w || ext.e {
                         let dr = [LAisle { id: drive.id, r: rect(db.x0, db.y0, db.x1, db.y1), kind: AisleKind::Drive, flow: None }];
