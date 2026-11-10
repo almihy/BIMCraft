@@ -82,6 +82,8 @@ pub mod link;
 pub mod loads;
 pub mod massing;
 pub mod masterplan;
+#[cfg(test)]
+mod masterplan_tests;
 pub mod model;
 pub mod nbr5410;
 pub mod network;

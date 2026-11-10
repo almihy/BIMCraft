@@ -642,8 +642,9 @@ pub fn reshape_all(m: &mut Model) {
     }
 }
 
+/// What shapes the site: its elements, and the masses (buildings) its car parks keep clear of.
 fn relevant(e: Option<&Element>) -> bool {
-    matches!(e, Some(Element::Site(_)) | Some(Element::Mass(crate::model::Mass { site: Some(_), .. })))
+    matches!(e, Some(Element::Site(_) | Element::Mass(_)))
 }
 
 /// A box [x0, y0, x1, y1].
@@ -753,7 +754,7 @@ fn plan(m: &Model, before: Option<&Model>, changed: &Changed) -> Vec<Update> {
             _ => {}
         }
     }
-    if all && by_level.is_empty() && !masses.iter().any(|(_, ms)| ms.site.is_some()) {
+    if by_level.is_empty() && !masses.iter().any(|(_, ms)| ms.site.is_some()) {
         return Vec::new();
     }
     let mut out = Vec::new();

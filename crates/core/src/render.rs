@@ -1115,12 +1115,16 @@ fn plan_shows_among(m: &Model, key: Guid, among: bool) -> Vec<P2> {
                 extent.extend(m.cad_box(*id).into_iter().flatten())
             }
             Element::Floor(Floor { level: l, boundary, .. })
+            | Element::Toposolid(Floor { level: l, boundary, .. })
             | Element::Ceiling(Ceiling { level: l, boundary, .. })
             | Element::Shaft(Shaft { level: l, boundary, .. })
                 if *l == level =>
             {
                 extent.extend(boundary)
             }
+            Element::Site(st) if st.level == level => extent.extend(st.outline.iter().flat_map(|p| p.outer.iter().copied())),
+            Element::PropertyLine(pl) if pl.level == level => extent.extend(pl.ring()),
+            Element::BuildingPad(bp) if bp.level == level => extent.extend(bp.boundary.iter().copied()),
             Element::Room(r) if r.level == level => extent.push(r.point),
             Element::Mass(ms) if m.mass_cut_by(ms, r.cut) => extent.extend(m.mass_outline(ms, r.cut)),
             Element::Component(c) if c.level == level => {
