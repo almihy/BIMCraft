@@ -556,17 +556,80 @@ pub(crate) fn color(c: Rgb) -> Color32 {
     Color32::from_rgb(over(r), over(g), over(b))
 }
 
-/// Whether a ring turns one way all round.
-fn convex(r: &[(f32, f32)]) -> bool {
+/// Screen points nearer each other than this (px) are one: zoomed out, many of an outline's points come to a few thousandths of a
+/// pixel apart, where the way from one to the next is the rounding of the numbers, not the drawing's.
+const ONE_POINT: f32 = 0.01;
+/// The cosine of the sharpest corner egui is left to join (about 143°). egui feathers a convex fill and mitres a closed line along
+/// each corner's normal divided by how far the corner turns back, without limit: a corner that nearly doubles back (a sliver, a
+/// hatch's spur) reaches across the view, so past this a fill is triangulated and a closed line drawn as an open one, which egui
+/// bevels. Its mitre here is at most about three times its width.
+const SHARPEST: f32 = -0.8;
+
+/// Whether a corner of cosine `cos` is sharper than egui joins (or not a number, which egui can't).
+fn sharp(cos: f32) -> bool {
+    cos.is_nan() || cos < SHARPEST
+}
+
+/// `pts` without the points that are one with the one before them, and, round a ring, the last that is one with the first.
+fn distinct(pts: &[Pos2], ring: bool) -> Vec<Pos2> {
+    let mut out: Vec<Pos2> = Vec::with_capacity(pts.len());
+    for q in pts {
+        if out.last().is_none_or(|l| l.distance(*q) >= ONE_POINT) {
+            out.push(*q);
+        }
+    }
+    while ring && out.len() > 1 && out[0].distance(out[out.len() - 1]) < ONE_POINT {
+        out.pop();
+    }
+    out
+}
+
+/// The cosine of each corner of ring `r` (its points [`distinct`]), between the side coming in and the one going out: 1 straight
+/// on, -1 turned straight back; and which way it turns.
+fn corners(r: &[Pos2]) -> impl Iterator<Item = (usize, f32, f32)> + '_ {
     let n = r.len();
-    let turns: Vec<f32> = (0..n)
-        .map(|i| {
-            let (a, b, c) = (r[i], r[(i + 1) % n], r[(i + 2) % n]);
-            (b.0 - a.0) * (c.1 - b.1) - (b.1 - a.1) * (c.0 - b.0)
-        })
-        .filter(|t| t.abs() > 1e-3)
-        .collect();
-    turns.iter().all(|t| *t > 0.0) || turns.iter().all(|t| *t < 0.0)
+    (0..n).map(move |i| {
+        let (a, b, c) = (r[(i + n - 1) % n], r[i], r[(i + 1) % n]);
+        let (u, v) = ((b - a).normalized(), (c - b).normalized());
+        (i, u.dot(v), u.x * v.y - u.y * v.x)
+    })
+}
+
+/// Whether ring `r` (its points [`distinct`]) turns one way all round, with no corner sharper than egui joins: a convex polygon
+/// egui fills and feathers as it is.
+fn convex(r: &[Pos2]) -> bool {
+    if r.len() < 3 {
+        return false;
+    }
+    let (mut left, mut right) = (false, false);
+    for (_, cos, sin) in corners(r) {
+        if sharp(cos) {
+            return false;
+        }
+        // A side straight on from the one before turns neither way.
+        if sin.abs() > 1e-4 {
+            if sin > 0.0 { left = true } else { right = true }
+        }
+    }
+    !(left && right)
+}
+
+/// Closed line `pts` (its points [`distinct`]) as egui draws it without a corner reaching past its width: as it is, or, with a
+/// corner sharper than egui mitres, as an open line from that corner round to it again, which egui bevels.
+fn closed_line(pts: Vec<Pos2>, stroke: Stroke) -> Shape {
+    // A ring all on one point is that point, as egui draws a line too short to see.
+    if let [q] = pts[..] {
+        return Shape::line_segment([q, q + vec2(ONE_POINT, 0.0)], stroke);
+    }
+    let sharpest = if pts.len() < 3 { None } else { corners(&pts).filter(|(_, cos, _)| sharp(*cos)).min_by(|a, b| a.1.total_cmp(&b.1)) };
+    match sharpest {
+        Some((i, ..)) => {
+            let mut open: Vec<Pos2> = pts[i..].iter().chain(&pts[..=i]).copied().collect();
+            open.dedup();
+            Shape::line(open, stroke)
+        }
+        None => Shape::closed_line(pts, stroke),
+    }
 }
 
 fn pos(origin: Pos2, (x, y): (f32, f32)) -> Pos2 {
@@ -700,17 +763,22 @@ pub(crate) fn paint_prim(
             }
             out(Shape::mesh(mesh));
             for r in rings {
-                out(Shape::closed_line(r.iter().map(|q| at.pos(*q)).collect(), Stroke::new(0.5, fill)));
+                out(closed_line(distinct(&r.iter().map(|q| at.pos(*q)).collect::<Vec<_>>(), true), Stroke::new(0.5, fill)));
             }
         }
-        // Ordinary fills are convex rings or independent polygons, triangulated without seams.
+        // Ordinary fills are convex rings, feathered as egui fills them, or independent polygons, triangulated without seams. Whether
+        // a ring is convex is read on screen, where it is drawn, and turned the same however big it is.
         Prim::Fill { rings, color: c } => {
             let fill = accent.map_or(color(*c), |a| a.1);
-            match rings.as_slice() {
-                [r] if convex(r) => {
-                    out(Shape::convex_polygon(r.iter().map(|q| at.pos(*q)).collect(), fill, Stroke::NONE));
+            let one = match rings.as_slice() {
+                [r] => Some(distinct(&r.iter().map(|q| at.pos(*q)).collect::<Vec<_>>(), true)).filter(|r| convex(r)),
+                _ => None,
+            };
+            match one {
+                Some(r) => {
+                    out(Shape::convex_polygon(r, fill, Stroke::NONE));
                 }
-                _ => {
+                None => {
                     let mut mesh = Mesh::default();
                     for r in rings {
                         let ring: Vec<P2> = r.iter().map(|q| P2(f64::from(q.0), f64::from(q.1))).collect();
@@ -752,7 +820,7 @@ pub(crate) fn paint_prim(
                     Shape::dashed_line_with_offset(&pts, stroke, &on, &off, 0.0).into_iter().for_each(&mut *out);
                 }
                 None if *closed => {
-                    out(Shape::closed_line(pts, stroke));
+                    out(closed_line(distinct(&pts, true), stroke));
                 }
                 None => {
                     out(Shape::line(pts, stroke));
