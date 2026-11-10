@@ -21,9 +21,9 @@ bottom left corner (`BimApp::corner_name`, over the view control bar where that 
 reads `Level 1 (Ceiling Plan)`, as an image's does). They are the window's alone: `render::draw` has neither, so no PNG, sheet or
 printout does. File > Settings > User Interface > Plans has a box for each (`BimApp::show_origin`, `show_view_name`; kept in
 `settings.json` as `origin_marker` and `view_name`, on when the file doesn't say), and New and Open keep them. The 3D view, sections
-and sheets have neither. Tests: `tests/origin.rs`, in both profiles.
+and sheets have neither. Tests: `tests/origin.rs`.
 
-The minimap (`minimap.rs`, the same in both profiles) is at the top of the Navigator, Rev's Project Browser, under a header that folds
+The minimap (`minimap.rs`) is at the top of the Project Browser, under a header that folds
 it away: folded at first, so the tree keeps its room (the tests that click the tree's entries where they are drawn rely on it), and
 egui keeps the fold for the session. Unfolded, it is as wide as the palette and no taller than a third of what is left of it. For the
 active plan, ceiling plan, section or elevation it draws the whole view small (`render::plan`, `render::ceiling_plan`, or a section's
@@ -31,7 +31,7 @@ picture and `render::section_over`, fitted into `SIZE`), drawn again only for an
 a zoom; the 3D view, sheets and schedules have none. The part the view shows is outlined on it, from the canvas's camera
 (`Canvas::view`). A click centres the view there and a drag pans it as it goes, both through `Canvas::centre`, which keeps the zoom: a
 drag begun on the outline takes the view with it, one begun beside it moves the view there first. `tests/minimap.rs` clicks and drags
-it in both profiles (`Minimap::screen` is where a model point is on it).
+it (`Minimap::screen` is where a model point is on it).
 
 View > Dark Mode opens a small theme menu: As the System, Light, Dark, or Dark UI, Light Canvas. The same choices are in
 Settings > User Interface. The last choice keeps plans, ceiling plans, sections, elevations and 3D views on a light background
@@ -93,7 +93,7 @@ Allow agents to edit this project (on by default, kept too) is `bridge::Access`:
 (`Session::reading`), so an edit, an undo or a redo, a script holding one, or a save over the project's own file comes back as an
 error that names the box, and what reads (inspect, schedules, render, exports to new files, the sheets to PDF) still answers; the
 user's own commands are never read-only. An agent may ask to only read as well (`"read_only": true` in a request, which
-`mcp --connect --read-only` sends). The view control bar ends with the port's state, in both profiles (`agents_indicator`): Agents:
+`mcp --connect --read-only` sends). The view control bar ends with the port's state (`agents_indicator`): Agents:
 off, Agents: port N, or Agents: N connected (a connection counts once it has said a request with the token), with read-only when edits
 are off; a click opens Settings at Agents.
 A script request may ask for a dry run (`"dry_run": true`, `Session::script_dry_run`): the window runs it all or nothing, takes it
@@ -140,7 +140,7 @@ the draft curve, keeps its id, GUID and style, and moves joined endpoints so a c
 reference stays fixed. Changes use the sketch's Ctrl+Z history and reach the model only through Finish Edit Mode; Cancel
 leaves the model as it was. Invalid geometry leaves the draft and reference intact, and undo or Escape drops stale picks.
 
-A sketch line picked alone in Modify has a small palette over the view at its middle (`BimApp::edge_palette`, both profiles): Add
+A sketch line picked alone in Modify has a small palette over the view at its middle (`BimApp::edge_palette`): Add
 Vertex (which no panel offers while sketching), Split Element, Offset and Trim/Extend to Corner, each starting its tool. The sketch's contextual ribbon includes Align, Trim/Extend to Corner, Trim/Extend Single/Multiple Elements, Split and
 Offset. Trim highlights sketch candidates and keeps its first pick lit; its prompt says which line to pick and to click
 the part to keep. A failed trim leaves that first pick available for another target; a successful edit clears the error.
@@ -221,42 +221,35 @@ state and its commands: the project's own types and a family's in `properties.rs
 pattern's … opens the Patterns tab. The dialogs are one width, and the table's body one height where the window has room, known from the first frame:
 a body that fitted its rows grew over a few frames, and a click meant for one row landed on the next. A refusal is said in the dialog.
 
-BIMCraft's tools and Find. BIMCraft has no ribbon: its tools are the Tools palette (`dock::Palette::Tools`, `BimApp::tool_column`), a
-palette like the others, so it docks on any side, floats and closes, and the settings file keeps where (one a file from before it never
-named docks first on the left). Down its left a rail of the ribbon's tabs (`TABS`, each with an icon); beside it, as rows under their panels'
-names (`ribbon::rows`, which draws a tab's own panel code in the list mode a folded panel uses), the Select panel once
-(`ribbon::skip_select`), the contextual tab's rows named for the tool in hand or the selection, and the open tab's. The rows scroll both ways
-and never widen the column. Rev never shows the palette (`show` puts it away each frame) and BIMCraft brings it back. BIMCraft's default
-layout (`Docking::default`) is the Tools palette on the left and Properties over the Project Browser on the right, which BIMCraft calls the
-Inspector and the Navigator (`Palette::label`); Rev resets to Revit's (`Docking::revit`). Find (`find.rs`, Ctrl+K in both profiles, and a
-button on BIMCraft's title bar) lists every action a shortcut can be given (`shortcuts::ACTIONS`, with its keys) and every view the browser
-opens (`BimApp::openable`), by every word typed (`find::matches`); Enter takes the first, a click the one clicked, Escape or a click beside it
-closes it. Keyboard shortcuts are the same in both profiles. The tests of what the tools do drive Rev's ribbon (`app` is Rev's, with Revit's
-layout); BIMCraft's own chrome is tested through `bimcraft` (`tests/profile.rs`, `tests/look.rs`, `tests/smallest.rs`).
+The interface is Rev's, the ribbon tool its users know: the ribbon over the view, Properties over the Project Browser down the left
+(`Docking::default`, which Settings' Reset Palette Layout puts back). Find (`find.rs`, Ctrl+K, and the search icon on the quick access bar)
+lists every action a shortcut can be given (`shortcuts::ACTIONS`, with its keys) and every view the browser opens (`BimApp::openable`), by
+every word typed (`find::matches`); Enter takes the first, a click the one clicked, Escape or a click beside it closes it. Rev copies a
+layout, never another program's pictures or words: its icons are the ones `icons.rs` draws. `tests/interface.rs` drives it, and
+`tests/smallest.rs` runs the least window in both layouts. (There was a second interface, BIMCraft's own, with its tools in a Tools
+palette; it is gone, and a settings file that still names a `profile` or places the Tools palette opens Rev's: what it doesn't know is
+left out.)
 
-The profiles differ in looks only: every feature one has, the other has too, the way its look shows it (Find is a wide button on
-BIMCraft's title bar and an icon among Rev's; the tools are the Tools palette or the ribbon). Scale, Edit Tools and presets (`presets.rs`)
-are window settings in `settings.json`, never in a project, and work the same on both. The project's scale (`presets::Scale`: Sketch,
-Studio, Team, Team the default so nobody loses a tool) leaves out panels and tools a project doesn't need yet (`Scale::hides`, by English
-name: below Team design options, links and inquiry, in Sketch also sheets, phasing and view templates); a chip on the title bar of both
-profiles switches it at any time and lists the presets, Edit Tools and Manage Presets. Edit Tools turns every tool, a ribbon button or a
-palette row, into a box to tick (`edit_tool`): a click ticks or clears it and takes no tool, and what is cleared is `tools_hidden`, left
-out of the ribbon and the palette (Find still lists it). The ribbon and the palette read both through `ribbon::tool_rules`, set each frame;
-`ribbon::panel` leaves out a panel the scale does, `big_button`, `small_button`, `stacked_button` and `list_row` a tool. A preset
-(`presets::Preset`) keeps, by name, where the palettes are, the tools shown, the scale and the layout; Settings > User Interface > Presets
-saves the layout now under a name, uses or deletes one, and shows every tool again. A settings file's presets are read as hostile: unnamed,
-over-long or repeated ones are left out, 32 at most.
+Scale, Edit Tools and presets (`presets.rs`) are window settings in `settings.json`, never in a project. The project's scale
+(`presets::Scale`: Sketch, Studio, Team, Team the default so nobody loses a tool) leaves out panels and tools a project doesn't need yet
+(`Scale::hides`, by English name: below Team design options, links and inquiry, in Sketch also sheets, phasing and view templates); a chip
+on the quick access bar switches it at any time and lists the presets, Edit Tools and Manage Presets. Edit Tools turns every ribbon tool
+into a box to tick (`edit_tool`): a click ticks or clears it and takes no tool, and what is cleared is `tools_hidden`, left off the ribbon
+(Find still lists it). The ribbon reads both through `ribbon::tool_rules`, set each frame; `ribbon::panel` leaves out a panel the scale
+does, `big_button`, `small_button`, `stacked_button` and `list_row` a tool. A preset (`presets::Preset`) keeps, by name, where the palettes
+are, the tools shown, the scale and the layout; Settings > User Interface > Presets saves the layout now under a name, uses or deletes one,
+and shows every tool again. A settings file's presets are read as hostile: unnamed, over-long or repeated ones are left out, 32 at most.
 
-Themes, the same in both profiles. The window follows the system's light or dark until the user picks (Settings > User Interface >
-Theme, or View > Dark Mode); beside the profile's own light, dark and dark-with-a-light-canvas are three presets, dark ones (`style::Scheme`:
+Themes. The window follows the system's light or dark until the user picks (Settings > User Interface >
+Theme, or View > Dark Mode); beside the window's own light, dark and dark-with-a-light-canvas are three presets, dark ones (`style::Scheme`:
 Dracula, after the open theme of that name, Midnight and AMOLED), and an accent colour of the user's own over any of them. `style::palette`
-works out the frame's colours from the profile, light or dark, the scheme and the accent, `style::follow` puts them in force each frame (and
+works out the frame's colours from light or dark, the scheme and the accent, `style::follow` puts them in force each frame (and
 the widgets' look once they change) and `pal()` returns them, by value. An accent (`with_accent`) is the fills and strokes, a quarter of it
 over the card for what is picked, and its lettering stepped toward the text's colour until it holds 4.5:1 on every ground it is read on, so
 any accent stays legible; the contrast test runs every theme and an accent of every kind on each. The drawing keeps its own colours
 (`canvas_pal`). `settings.json` keeps the scheme and the accent beside the theme.
 
-Own colours over any theme, the same in both profiles. Beside the accent, Settings > User Interface > Theme takes a panel colour, a
+Own colours over any theme. Beside the accent, Settings > User Interface > Theme takes a panel colour, a
 canvas colour and a text colour of the user's own (`style::Look::panel_colour`, `canvas_colour`, `text_colour`), each with a Reset
 that brings back the scheme's; `settings.json` keeps them as `panel_colour`, `canvas_colour` and `text_colour`, read as the accent is
 (`colour()`), so one this version can't read is left out and the scheme's stands. Two grounds, because the window has two: the
@@ -273,7 +266,7 @@ kept by their ground's colour, so a new one draws them again. `style::follow` re
 The contrast test runs every base with these colours at their worst (white, black, the grey both inks read worst on, a pale yellow,
 a navy, pure red, and a text the panel's own colour).
 
-The Inspector's pictures, the same in both profiles. Under the filter row, the type the palette shows is drawn when it has layers
+The pictures in Properties. Under the filter row, the type the palette shows is drawn when it has layers
 (`properties::layer_picture`, for walls, floors, roofs and ceilings, `LAYERED`): each layer to its thickness in its material's colour, a
 type without layers as one band. A wall's run from its exterior face to its interior one, with the location line the selected walls share
 dashed where it runs (`walls::depth`, the core's own rule) and named under it; a click on the picture sets the line nearest it, through
@@ -288,7 +281,7 @@ and 5%, the one they share lit, a click setting `slope` through `modify` as the 
 floor with no slope arrow says it is flat and how to slope it, with a button that starts the Slope Arrow tool for it: the picture
 never makes up an arrow, since `Model::check` refuses a sloped floor without one.
 
-What an element is tied to, the same in both profiles (Rev's in its ruled grid, BIMCraft's as Inspector rows). Each tie is a link,
+What an element is tied to (in Properties' ruled grid). Each tie is a link,
 named by the other element's category and id, that makes it the selection, which every view shows. In the element's own rows: a
 door's or a window's Host Wall, a railing's, a spot's and a tag's host (`Kind::Link`), and beside a wall's greyed Top and Base is
 Attached, the roof or floor it is attached to. For one element, a Tied To group (`properties::ties`) lists the rest: a wall's
@@ -320,7 +313,7 @@ drawing's layers, which are a view's own; its OK puts the categories, filters an
 its four offsets, and Background Grids the grid editor. A view's Properties name its template on a button (`properties::wide_button`, as wide as the drop-downs, as Edit… is), which
 opens the same dialog as Assign View Template: <None> first, the view's kind's tab showing, and OK also sets the template the view follows.
 
-Visibility sets (`BimApp::visibility_sets`, `templates.rs`, the same in both profiles) are view templates, switched from the view control bar: no
+Visibility sets (`BimApp::visibility_sets`, `templates.rs`) are view templates, switched from the view control bar: no
 layer is given to an element, and no new kind of entry was needed, because a template already holds what a view shows and its phase and a view
 that stops following one has its own settings back as they were. The bar's Visibility Set menu names the template the view follows (<None> for
 its own), lists <None> and the templates of the view's kind (`listed`), and a pick is one `graphics {template}`. Its Save as field makes one from
@@ -349,7 +342,7 @@ for a face square to the screen); a primary drag from one (`section_box::grip_at
 runs `section_box` when the drag ends. The grip takes the drag, not the camera, and a click on a grip picks nothing behind it. A
 plan's (and a plan view's) Properties have Section Box under Extents too, a `Flag` row: ticked, the plan shows what the box keeps.
 
-Linked 3D View (VIEW-13; `section_box.rs`, a button on a plan's view control bar in both profiles). On, the 3D view floats beside the plan
+Linked 3D View (VIEW-13; `section_box.rs`, a button on a plan's view control bar). On, the 3D view floats beside the plan
 (`float_view`, the plan staying the view the tools work in) and is cut to what the plan shows (`plan_box`): its level, from its view range's
 bottom (the level, unless the range says) up to its top (the model's top over the highest level, which has none), across the part of the plan
 the canvas shows (`Canvas::view`). `BimApp::follow_plan`, run with the active plan's bar, sets it again when the hand rests (no button down,
@@ -440,7 +433,7 @@ Tabs. Ribbon and view tabs are pills (`tab_button_with`): the open one in the ac
 when open and tinted green when not. A view's × is part of its tab (`tab_button_with`'s `room`). The ribbon's tab row scrolls
 sideways with the wheel in a window too narrow for it.
 
-The look. `style.rs` holds the tokens: the palettes, light and dark, with a dark app bar; the
+The look. `style.rs` holds the tokens: the palettes, light and dark, the app bar in each the window's colour (light, with a hairline under it, in the light theme; dark in the dark ones); the
 card frame (`style::card`: 8 px corners, a hairline border and a soft shadow, standing `GAP` off the edges it's told to); IBM Plex Sans
 and Mono (`assets/fonts`, SIL OFL 1.1; built into the executable, so `NOTICE` names them with their versions and sha256 and every package
 carries it and both OFL.txt, as `copy_docs` in `packaging/env.sh`, `bimcraft.wxs` and `portable.ps1` do: `tests/fonts.rs` checks), with
@@ -462,15 +455,6 @@ Text holds 4.5:1 and a focus ring or an icon 3:1 on what it sits on, in both the
 window draws): `accent` is for fills, strokes and the drawing, `accent_ink` for the accent as text, an icon or a focus ring
 (`style::focus_ring`, which on the app bar is the bar's lettering colour), `on_context` for the open contextual tab's lettering. A new pair of
 colours goes in that test.
-
-Profiles. File > Settings > User Interface > Profile picks the interface the window wears (`style::Profile`, kept in `settings.json` as
-`profile`, a name this version doesn't know read as the default): BIMCraft's own, the default, or Rev, the ribbon tool its users know.
-They differ in where things are, never in what the window is drawn in: Rev has the ribbon where BIMCraft has the Tools palette (`BimApp::show`), Revit's
-palette layout and names (`Docking::revit`, `Palette::label`), and Find as an icon among the app bar's. The cards, the colours, the dark
-app bar with File on it, the pills of the ribbon's and the view's tabs, the Options Bar over the view and the Layout choice are one code path and one
-palette in both, so a change to the look reaches both.
-What's left of the difference is read in the frame through `style::rev()`, never a second copy of a widget. Rev copies a layout, never another program's pictures or
-words: its icons are the ones `icons.rs` draws. `tests/profile.rs` drives it, and `tests/smallest.rs` runs the least window in both profiles and both layouts.
 
 The title bar (`titlebar.rs`). On Windows and Linux the window draws its own (`BimApp::own_title_bar`, set by `main`, which opens
 the window without the system's decorations): the app bar is the title bar. Its bare ground moves the window and a double-click

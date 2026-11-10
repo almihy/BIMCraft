@@ -40,7 +40,7 @@ tool (DW, `BimApp::demolish`, in the Modify tab's Phasing panel) runs `modify {p
 plan, a section or the 3D view: the phase of the view on screen (the project's last unless it has one), or null when the element
 already comes down in it, one undo step a click. A door or window that only follows its wall gets a note instead, and an element that
 holds no `params` (annotation, levels, grids, shafts) says so and changes nothing.
-The view control bar's Renovation menu (`BimApp::renovation_menu`, `phasing.rs` in the desktop, the same in both profiles) says in plain
+The view control bar's Renovation menu (`BimApp::renovation_menu`, `phasing.rs` in the desktop) says in plain
 words which phase of the work a plan, a section or the 3D view shows: All (no phase and no phase filter of its own, the view as it
 starts), Existing (the project's first phase, every status by its category), Demolition (the last phase through a filter that hides
 what is new, draws what stood before by its category and what comes down overridden) and New (the last through one that draws what

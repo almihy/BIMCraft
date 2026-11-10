@@ -48,9 +48,12 @@ fn a_settings_file_from_when_there_were_profiles_opens_the_one_interface_and_set
     for gone in ["Profile", "BIMCraft", "Rev"] {
         assert!(h.query_by_label(gone).is_none(), "no {gone} in Settings");
     }
+    // A change rewrites the file, and it keeps no profile and no Tools palette.
+    h.get_by_role_and_label(Role::RadioButton, "Compact").click_accesskit();
+    h.run();
     press(&mut h, "Close");
     let kept: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
-    assert!(kept.get("profile").is_none(), "the file no longer keeps one: {kept}");
+    assert!(kept.get("profile").is_none() && !kept["palettes"].to_string().contains("Tools"), "{kept}");
 }
 
 #[test]
