@@ -140,7 +140,8 @@ fn the_modify_tools_move_turn_and_mirror_a_site_elements_truth() {
     run(&mut s, "copy", json!({"ids": [pitch], "by": [50000, 0]}));
     assert_eq!(s.model.elements.len(), before + 1);
     // A parking band's sides go to the other side of a mirror.
-    let band = id(&run(&mut s, "site", json!({"kind": "parking_band", "props": {"path": [[0, -30000], [30000, -30000]], "sides": "left"}})));
+    let band =
+        id(&run(&mut s, "site", json!({"kind": "parking_band", "props": {"path": [[0, -30000], [30000, -30000]], "sides": "left"}})));
     run(&mut s, "mirror", json!({"ids": [band], "axis": [[0, -40000], [1000, -40000]]}));
     assert_eq!(site(&s, band).props["sides"], json!("right"));
     // A lane's arc bulges the other way once mirrored.
@@ -199,8 +200,11 @@ fn a_site_elements_phase_is_its_phase_created_and_demolished_and_the_demolish_to
     let st = site(&s, tree);
     assert_eq!((st.params["Phase Created"].clone(), st.params["Phase Demolished"].clone()), (json!("Existing"), json!("New Construction")));
     // Its params changed with the Demolish tool's `modify`: its phase follows them.
-    let lawn =
-        id(&run(&mut s, "site", json!({"kind": "landscape", "use": "lawn", "phase": "existing", "props": {"control": [[0, 0], [9000, 0], [9000, 9000]]}})));
+    let lawn = id(&run(
+        &mut s,
+        "site",
+        json!({"kind": "landscape", "use": "lawn", "phase": "existing", "props": {"control": [[0, 0], [9000, 0], [9000, 9000]]}}),
+    ));
     run(&mut s, "modify", json!({"id": lawn, "params": {"Phase Demolished": "New Construction"}}));
     assert_eq!(site(&s, lawn).phase, "demolished");
     // A phase filter hides it as any element: Show New leaves out what stood before.
@@ -244,7 +248,9 @@ fn a_mass_on_the_masterplan_takes_its_height_from_its_storeys() {
     assert_eq!(e["site"]["props"]["label"], json!("B6"));
     assert_eq!(e["site"]["phase"], json!("existing"));
     assert!(s.execute("site_edit", &json!({"id": ms, "use": "castle"})).unwrap_err().contains("castle"));
-    assert!(s.execute("mass", &json!({"boundary": [[0, 0], [1, 0], [1, 1]], "site": {"props": {"towers": 3}}})).unwrap_err().contains("towers"));
+    assert!(
+        s.execute("mass", &json!({"boundary": [[0, 0], [1, 0], [1, 1]], "site": {"props": {"towers": 3}}})).unwrap_err().contains("towers")
+    );
     // Its entrance moves with it.
     run(&mut s, "site_edit", json!({"id": ms, "props": {"entrance": [5000, 0]}}));
     run(&mut s, "move", json!({"ids": [ms], "by": [1000, 2000]}));
@@ -255,8 +261,13 @@ fn a_mass_on_the_masterplan_takes_its_height_from_its_storeys() {
 #[test]
 fn the_plan_fills_each_area_in_its_surfaces_colour_and_picks_it() {
     let mut s = Session::new();
-    let lawn = id(&run(&mut s, "site", json!({"kind": "landscape", "use": "lawn", "props": {"control": [[0, 0], [20000, 0], [20000, 20000], [0, 20000]]}})));
-    let pond = id(&run(&mut s, "site", json!({"kind": "water", "props": {"control": [[30000, 0], [50000, 0], [50000, 20000], [30000, 20000]]}})));
+    let lawn = id(&run(
+        &mut s,
+        "site",
+        json!({"kind": "landscape", "use": "lawn", "props": {"control": [[0, 0], [20000, 0], [20000, 20000], [0, 20000]]}}),
+    ));
+    let pond =
+        id(&run(&mut s, "site", json!({"kind": "water", "props": {"control": [[30000, 0], [50000, 0], [50000, 20000], [30000, 20000]]}})));
     let road = lane(&mut s, json!([[-10000, 30000], [60000, 30000]]), "road");
     let context = id(&run(
         &mut s,
@@ -281,7 +292,11 @@ fn the_plan_fills_each_area_in_its_surfaces_colour_and_picks_it() {
 fn trees_draw_their_crowns_and_what_comes_down_is_dashed() {
     let mut s = Session::new();
     let tree = id(&run(&mut s, "site", json!({"kind": "tree", "props": {"at": [0, 0], "crown": 8000}})));
-    let gone = id(&run(&mut s, "site", json!({"kind": "paving", "phase": "demolished", "props": {"control": [[10000, 0], [20000, 0], [20000, 10000], [10000, 10000]]}})));
+    let gone = id(&run(
+        &mut s,
+        "site",
+        json!({"kind": "paving", "phase": "demolished", "props": {"control": [[10000, 0], [20000, 0], [20000, 10000], [10000, 10000]]}}),
+    ));
     let (d, png) = plan(&s);
     assert_eq!(pixel(&d, &png, P2(2000.0, 0.0)), Rgb(169, 209, 142), "a crown's green");
     let dashed = d.prims.iter().zip(&d.owners).any(|(p, o)| matches!(p, Prim::Line { dash: Some(_), .. }) && *o == Some(gone));
@@ -343,7 +358,9 @@ fn a_toposolid_draws_its_contours_and_a_building_pad_cuts_them_in_plan_and_3d() 
             .zip(&d.owners)
             .zip(&d.parts)
             .filter_map(|((p, o), part)| match p {
-                Prim::Line { pts, .. } if *o == Some(topo) && *part != render::Part::Pattern && pts.len() == 2 && (pts[0].0 - pts[1].0).abs() < 0.5 => {
+                Prim::Line { pts, .. }
+                    if *o == Some(topo) && *part != render::Part::Pattern && pts.len() == 2 && (pts[0].0 - pts[1].0).abs() < 0.5 =>
+                {
                     let m0 = d.view.mm(pts[0]);
                     let m1 = d.view.mm(pts[1]);
                     Some([m0.0 as f32, m0.1 as f32, m1.0 as f32, m1.1 as f32])
@@ -356,7 +373,8 @@ fn a_toposolid_draws_its_contours_and_a_building_pad_cuts_them_in_plan_and_3d() 
     let at_20m = |ls: &[[f32; 4]]| ls.iter().filter(|l| (l[0] - 20000.0).abs() < 100.0).map(|l| (l[1] - l[3]).abs()).sum::<f32>();
     assert!((at_20m(&whole) - 40000.0).abs() < 200.0, "the 2 m contour runs right across: {whole:?}");
     // The pad: the contour stops at its edge.
-    let pad = run(&mut s, "building_pad", json!({"boundary": [[15000, 15000], [25000, 15000], [25000, 25000], [15000, 25000]], "offset": 1500}));
+    let pad =
+        run(&mut s, "building_pad", json!({"boundary": [[15000, 15000], [25000, 15000], [25000, 25000], [15000, 25000]], "offset": 1500}));
     assert_eq!(pad["cuts"], json!([topo]));
     let pad = id(&pad);
     let cut = contour_lines(&s);
@@ -365,10 +383,13 @@ fn a_toposolid_draws_its_contours_and_a_building_pad_cuts_them_in_plan_and_3d() 
     let solids = crate::view3d::solids(&s.model);
     let pad_solids: Vec<_> = solids.iter().filter(|x| x.owner() == pad).collect();
     assert_eq!(pad_solids.len(), 1);
-    assert_eq!(s.model.pad_span(match s.model.elements.get(pad) {
-        Some(Element::BuildingPad(p)) => p,
-        _ => panic!(),
-    }), (1200.0, 1500.0));
+    assert_eq!(
+        s.model.pad_span(match s.model.elements.get(pad) {
+            Some(Element::BuildingPad(p)) => p,
+            _ => panic!(),
+        }),
+        (1200.0, 1500.0)
+    );
     let Some(Element::Toposolid(t)) = s.model.elements.get(topo) else { panic!() };
     let cut = s.model.toposolid_cut(t);
     assert_eq!(cut.openings.len(), 1);
@@ -385,7 +406,8 @@ fn a_toposolid_draws_its_contours_and_a_building_pad_cuts_them_in_plan_and_3d() 
 fn the_3d_view_builds_areas_as_thin_slabs_and_trees_a_trunk_and_a_crown() {
     let mut s = Session::new();
     let tree = id(&run(&mut s, "site", json!({"kind": "tree", "props": {"at": [0, 0], "height": 10000}})));
-    let lawn = id(&run(&mut s, "site", json!({"kind": "landscape", "use": "lawn", "props": {"control": [[0, 0], [9000, 0], [9000, 9000]]}})));
+    let lawn =
+        id(&run(&mut s, "site", json!({"kind": "landscape", "use": "lawn", "props": {"control": [[0, 0], [9000, 0], [9000, 9000]]}})));
     let road = lane(&mut s, json!([[-10000, 20000], [10000, 20000]]), "road");
     let st = site(&s, tree);
     let pieces = crate::masterplan::solids(&s.model, &st);
@@ -440,10 +462,17 @@ fn a_file_keeps_site_elements_as_the_doc_says_and_an_older_reader_leaves_out_wha
     }
     // As the doc's JSON has it.
     let v: Value = serde_json::from_str(&text).unwrap();
-    let elements = v["elements"].as_object().map(|o| o.values().cloned().collect::<Vec<_>>()).or_else(|| v["elements"].as_array().cloned()).unwrap();
+    let elements =
+        v["elements"].as_object().map(|o| o.values().cloned().collect::<Vec<_>>()).or_else(|| v["elements"].as_array().cloned()).unwrap();
     let street = elements.iter().find(|e| e["category"] == "site" && e["kind"] == "lane").unwrap();
-    assert_eq!((street["use"].clone(), street["phase"].clone(), street["ref"].clone()), (json!("road"), json!("existing"), json!("street:edge 0")));
-    assert!(street["outline"][0]["outer"].is_array() && street["parts"].as_array().is_some_and(|p| p.iter().any(|p| p["role"] == "carriageway")));
+    assert_eq!(
+        (street["use"].clone(), street["phase"].clone(), street["ref"].clone()),
+        (json!("road"), json!("existing"), json!("street:edge 0"))
+    );
+    assert!(
+        street["outline"][0]["outer"].is_array()
+            && street["parts"].as_array().is_some_and(|p| p.iter().any(|p| p["role"] == "carriageway"))
+    );
     assert!(elements.iter().any(|e| e["category"] == "site" && e["layout"]["pieces"].is_array()));
     assert!(elements.iter().any(|e| e["category"] == "toposolid") && elements.iter().any(|e| e["category"] == "buildingpad"));
     // A key of a newer version inside a site element is left out and named.
@@ -456,7 +485,11 @@ fn a_file_keeps_site_elements_as_the_doc_says_and_an_older_reader_leaves_out_wha
 #[test]
 fn a_site_schedule_lists_its_elements_by_kind_use_and_area() {
     let mut s = Session::new();
-    run(&mut s, "site", json!({"kind": "landscape", "use": "meadow", "props": {"control": [[0, 0], [10000, 0], [10000, 10000], [0, 10000]]}}));
+    run(
+        &mut s,
+        "site",
+        json!({"kind": "landscape", "use": "meadow", "props": {"control": [[0, 0], [10000, 0], [10000, 10000], [0, 10000]]}}),
+    );
     run(&mut s, "site", json!({"kind": "tree", "props": {"at": [0, 0]}}));
     let r = run(&mut s, "schedule", json!({"name": "Site Schedule", "category": "site"}));
     let text = r.to_string();

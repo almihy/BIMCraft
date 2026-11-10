@@ -1321,11 +1321,8 @@ pub fn export(m: &Model) -> String {
                 let rep = w.add(format!("IFCSHAPEREPRESENTATION(#{axis},'Axis','Curve2D',(#{line}))"));
                 let shape = w.add(format!("IFCPRODUCTDEFINITIONSHAPE($,$,(#{rep}))"));
                 let name = if pl.name.is_empty() { "Property Line".to_string() } else { pl.name.clone() };
-                let ent = w.add(format!(
-                    "IFCVIRTUALELEMENT({},$,{},$,'{PROPERTY_LINE}',#{at},#{shape},'{id}')",
-                    w.guid(ELEMENT, id),
-                    s(&name)
-                ));
+                let ent =
+                    w.add(format!("IFCVIRTUALELEMENT({},$,{},$,'{PROPERTY_LINE}',#{at},#{shape},'{id}')", w.guid(ELEMENT, id), s(&name)));
                 contained.entry(pl.level).or_default().push(ent);
                 products.insert(id, ent);
             }

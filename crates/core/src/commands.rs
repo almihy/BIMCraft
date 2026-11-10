@@ -2862,7 +2862,8 @@ pub fn element_json_with(m: &Model, id: Id, rooms: &crate::rooms::Rooms) -> Valu
         }
         Element::Site(st) => {
             // Its area: its outline's, less its holes.
-            let a: f64 = st.outline.iter().map(|p| geom::area(&p.outer).abs() - p.holes.iter().map(|h| geom::area(h).abs()).sum::<f64>()).sum();
+            let a: f64 =
+                st.outline.iter().map(|p| geom::area(&p.outer).abs() - p.holes.iter().map(|h| geom::area(h).abs()).sum::<f64>()).sum();
             extra.insert("area_m2".into(), json!(m2(a)));
             if let Some(l) = &st.layout {
                 extra.insert("stalls".into(), l.result.get("stalls").cloned().unwrap_or(json!(0)));
@@ -10505,8 +10506,9 @@ fn material(s: &mut Session, p: &Value) -> R {
         None => {}
         Some(Value::Null) => mat.surface_color = None,
         Some(v) => {
-            mat.surface_color =
-                Some(colour(v).ok_or_else(|| bad(c, format!("`surface_color` is \"#rrggbb\" or [r, g, b], each 0 to 255, or null, not {v}")))?);
+            mat.surface_color = Some(
+                colour(v).ok_or_else(|| bad(c, format!("`surface_color` is \"#rrggbb\" or [r, g, b], each 0 to 255, or null, not {v}")))?,
+            );
         }
     }
     if let Some(v) = p.get("transparency").filter(|v| !v.is_null()) {

@@ -118,8 +118,6 @@ mod room_freeze_tests;
 #[cfg(test)]
 mod room_height_tests;
 #[cfg(test)]
-mod site_plan_tests;
-#[cfg(test)]
 mod room_of_tests;
 pub mod rooms;
 #[cfg(test)]
@@ -134,9 +132,11 @@ pub mod selection;
 mod shape_tests;
 pub mod shared;
 pub mod sheet;
+pub mod site;
+#[cfg(test)]
+mod site_plan_tests;
 pub mod skeleton;
 pub mod sketch;
-pub mod site;
 pub mod snap;
 pub mod stairs;
 pub mod standards;

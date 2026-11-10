@@ -2664,70 +2664,71 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, t
     // openings', the holes shafts cut in them, and a sloped one's slope arrow. The ground first (toposolids, as their
     // building pads cut them), then the site's elements on it (`render/site.rs`), then the building's floors.
     for pass in 0..2 {
-    if pass == 1 && !up {
-        site::draw(&mut d, m, &elements, &shown);
-    }
-    for (&id, e) in all().filter(|_| !up).filter(|(id, _)| shown(**id)) {
-        let cut;
-        let f = match (pass, e) {
-            (0, Element::Toposolid(t)) => {
-                cut = m.toposolid_cut(t);
-                &cut
-            }
-            (1, Element::Floor(f)) => f,
-            _ => continue,
-        };
-        let top = m.floor_top(f);
-        let (lo, hi) = f.boundary.iter().map(|q| top.at(*q)).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), z| (lo.min(z), hi.max(z)));
-        if hi < range.depth || lo > range.cut {
-            continue;
+        if pass == 1 && !up {
+            site::draw(&mut d, m, &elements, &shown);
         }
-        d.owner = Some(id);
-        // Surface overrides also work on an unpatterned material and at coarse detail.
-        let material = m.type_layers("floor", &f.type_name).first().and_then(|l| m.materials.get(&l.material));
-        // In plan a shaped top is its outline: its patterns go over it whole, not plane by plane, or each plane's edge would
-        // show as a seam through a fill (a terrain's thousands of them).
-        let flat = (!f.shape.is_empty()).then(|| crate::model::Floor { shape: Default::default(), ..f.clone() });
-        for (face, rise) in m.floor_slabs(flat.as_ref().unwrap_or(f)) {
-            for piece in m.less_shafts(&face, rise).0 {
-                let replaced = override_patterns(&mut d, m, std::slice::from_ref(&piece), false, (f.pattern_origin, f.pattern_angle));
-                if !replaced
-                    && d.detail == Detail::Fine
-                    && let Some(x) = material
-                {
-                    match x.surface_pattern.as_ref().and_then(|n| m.fill_patterns.get(n)) {
-                        Some(p) => fill_pattern(
-                            &mut d,
-                            p,
-                            std::slice::from_ref(&piece),
-                            std::slice::from_ref(&piece),
-                            x.surface_ink(FAINT),
-                            (f.pattern_origin, f.pattern_angle),
-                        ),
-                        None => surface(&mut d, &piece, x.surface, x.surface_ink(FAINT)),
+        for (&id, e) in all().filter(|_| !up).filter(|(id, _)| shown(**id)) {
+            let cut;
+            let f = match (pass, e) {
+                (0, Element::Toposolid(t)) => {
+                    cut = m.toposolid_cut(t);
+                    &cut
+                }
+                (1, Element::Floor(f)) => f,
+                _ => continue,
+            };
+            let top = m.floor_top(f);
+            let (lo, hi) =
+                f.boundary.iter().map(|q| top.at(*q)).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), z| (lo.min(z), hi.max(z)));
+            if hi < range.depth || lo > range.cut {
+                continue;
+            }
+            d.owner = Some(id);
+            // Surface overrides also work on an unpatterned material and at coarse detail.
+            let material = m.type_layers("floor", &f.type_name).first().and_then(|l| m.materials.get(&l.material));
+            // In plan a shaped top is its outline: its patterns go over it whole, not plane by plane, or each plane's edge would
+            // show as a seam through a fill (a terrain's thousands of them).
+            let flat = (!f.shape.is_empty()).then(|| crate::model::Floor { shape: Default::default(), ..f.clone() });
+            for (face, rise) in m.floor_slabs(flat.as_ref().unwrap_or(f)) {
+                for piece in m.less_shafts(&face, rise).0 {
+                    let replaced = override_patterns(&mut d, m, std::slice::from_ref(&piece), false, (f.pattern_origin, f.pattern_angle));
+                    if !replaced
+                        && d.detail == Detail::Fine
+                        && let Some(x) = material
+                    {
+                        match x.surface_pattern.as_ref().and_then(|n| m.fill_patterns.get(n)) {
+                            Some(p) => fill_pattern(
+                                &mut d,
+                                p,
+                                std::slice::from_ref(&piece),
+                                std::slice::from_ref(&piece),
+                                x.surface_ink(FAINT),
+                                (f.pattern_origin, f.pattern_angle),
+                            ),
+                            None => surface(&mut d, &piece, x.surface, x.surface_ink(FAINT)),
+                        }
                     }
                 }
             }
-        }
-        for ring in std::iter::once(&f.boundary).chain(&f.openings) {
-            d.line(ring, BY_CATEGORY, FAINT, true);
-        }
-        // A shaped one's creases: the edges of each of its planes, as thin as its outline; or, drawn as a toposolid is, its
-        // contours.
-        if f.contours > 0.0 {
-            contours(&mut d, m, f);
-        } else if !f.shape.is_empty() {
-            for (loops, _) in m.shape_planes(f).unwrap_or_default() {
-                for ring in &loops {
-                    d.line(ring, BY_CATEGORY, FAINT, true);
+            for ring in std::iter::once(&f.boundary).chain(&f.openings) {
+                d.line(ring, BY_CATEGORY, FAINT, true);
+            }
+            // A shaped one's creases: the edges of each of its planes, as thin as its outline; or, drawn as a toposolid is, its
+            // contours.
+            if f.contours > 0.0 {
+                contours(&mut d, m, f);
+            } else if !f.shape.is_empty() {
+                for (loops, _) in m.shape_planes(f).unwrap_or_default() {
+                    for ring in &loops {
+                        d.line(ring, BY_CATEGORY, FAINT, true);
+                    }
                 }
             }
+            holes(&mut d, m, &m.floor_slabs(f));
+            if let Some([tail, head]) = f.arrow.filter(|_| f.slope != 0.0) {
+                slope_arrow(&mut d, tail, head, f.slope);
+            }
         }
-        holes(&mut d, m, &m.floor_slabs(f));
-        if let Some([tail, head]) = f.arrow.filter(|_| f.slope != 0.0) {
-            slope_arrow(&mut d, tail, head, f.slope);
-        }
-    }
     }
     // Components it sees, in projection, as Revit draws furniture: whole while any of one is under
     // the cut plane and over the view depth; and the symbols of those on its level.
@@ -3423,9 +3424,14 @@ fn ceiling(d: &mut Drawing, m: &Model, c: &Ceiling) {
             let replaced = override_patterns(d, m, std::slice::from_ref(&piece), false, (P2(0.0, 0.0), 0.0));
             if !replaced && let Some(x) = material {
                 match x.surface_pattern.as_ref().and_then(|n| m.fill_patterns.get(n)) {
-                    Some(p) => {
-                        fill_pattern(d, p, std::slice::from_ref(&piece), std::slice::from_ref(&piece), x.surface_ink(INK), (P2(0.0, 0.0), 0.0))
-                    }
+                    Some(p) => fill_pattern(
+                        d,
+                        p,
+                        std::slice::from_ref(&piece),
+                        std::slice::from_ref(&piece),
+                        x.surface_ink(INK),
+                        (P2(0.0, 0.0), 0.0),
+                    ),
                     None => surface(d, &piece, x.surface, x.surface_ink(INK)),
                 }
             }

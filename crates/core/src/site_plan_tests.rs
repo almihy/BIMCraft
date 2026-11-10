@@ -15,7 +15,11 @@ fn run(s: &mut Session, c: &str, p: Value) -> Value {
 /// A lawn 10 m square at the origin, in a material whose solid surface pattern is green.
 fn lawn(s: &mut Session) -> Id {
     run(s, "material", json!({"name": "Lawn", "color": [92, 138, 70], "surface": "solid", "surface_color": [120, 180, 90]}));
-    run(s, "type", json!({"category": "floor", "name": "Lawn 50", "layers": [{"function": "structure", "material": "Lawn", "thickness": 50}]}));
+    run(
+        s,
+        "type",
+        json!({"category": "floor", "name": "Lawn 50", "layers": [{"function": "structure", "material": "Lawn", "thickness": 50}]}),
+    );
     let id = run(s, "floor", json!({"boundary": [[0, 0], [10000, 0], [10000, 10000], [0, 10000]], "type": "Lawn 50"}))["id"].clone();
     serde_json::from_value(id).unwrap()
 }
@@ -45,10 +49,14 @@ fn a_floor_whose_material_has_a_solid_surface_in_a_colour_fills_its_plan_with_it
     // Without a colour of its own, the drawing's grey, as before.
     let mut grey = Session::new();
     grey.execute("material", &json!({"name": "Lawn", "surface": "solid"})).unwrap();
-    grey.execute("type", &json!({"category": "floor", "name": "Lawn 50", "layers": [{"function": "structure", "material": "Lawn", "thickness": 50}]}))
-        .unwrap();
+    grey.execute(
+        "type",
+        &json!({"category": "floor", "name": "Lawn 50", "layers": [{"function": "structure", "material": "Lawn", "thickness": 50}]}),
+    )
+    .unwrap();
     let gid: Id = serde_json::from_value(
-        grey.execute("floor", &json!({"boundary": [[0, 0], [10000, 0], [10000, 10000], [0, 10000]], "type": "Lawn 50"})).unwrap()["id"].clone(),
+        grey.execute("floor", &json!({"boundary": [[0, 0], [10000, 0], [10000, 10000], [0, 10000]], "type": "Lawn 50"})).unwrap()["id"]
+            .clone(),
     )
     .unwrap();
     let plain = render::draw(&grey.model, grey.model.levels()[0].0, view());
@@ -99,7 +107,8 @@ fn a_floor_with_contours_draws_them_where_its_shaped_top_crosses_each_interval_a
     run(&mut s, "modify", json!({"id": id, "contours": 1000}));
     let drawn = lines(&s);
     // At 1, 2, 3 and 4 m: each a north-south line, crossing whichever planes it does.
-    let xs: std::collections::BTreeSet<i64> = drawn.iter().filter(|l| (l[0] - l[2]).abs() < 0.5).map(|l| (l[0] / 4.0).round() as i64).collect();
+    let xs: std::collections::BTreeSet<i64> =
+        drawn.iter().filter(|l| (l[0] - l[2]).abs() < 0.5).map(|l| (l[0] / 4.0).round() as i64).collect();
     assert_eq!(xs.len(), 4, "a contour a metre: {drawn:?}");
     assert!(drawn.iter().all(|l| (l[0] - l[2]).abs() < 0.5), "every one runs north-south, no crease is drawn: {drawn:?}");
     assert_ne!(drawn.len(), creases);

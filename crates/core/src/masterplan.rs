@@ -234,7 +234,12 @@ fn phase_of(phases: &[String], params: &BTreeMap<String, Value>, was: &str) -> S
 
 /// The phase to keep and the params to keep with it: the phase when it changed (or the element is new), else what its
 /// params say when they changed.
-fn phase_in_step(phases: &[String], phase: &str, params: &BTreeMap<String, Value>, before: Option<(&str, &BTreeMap<String, Value>)>) -> (String, BTreeMap<String, Value>) {
+fn phase_in_step(
+    phases: &[String],
+    phase: &str,
+    params: &BTreeMap<String, Value>,
+    before: Option<(&str, &BTreeMap<String, Value>)>,
+) -> (String, BTreeMap<String, Value>) {
     let mut params = params.clone();
     let phase = match before {
         Some((was, old)) if was == phase && *old != params => phase_of(phases, &params, phase),
@@ -407,7 +412,10 @@ fn check_value(key: &str, t: &Value, v: &Value) -> Result<(), String> {
     let number = |cap: f64| v.as_f64().is_some_and(|x| finite(x, cap));
     let ok = match t {
         Value::String(s) => match s.as_str() {
-            "length" => number(MAX_COORD) || v.as_array().is_some_and(|a| a.len() <= 16 && a.iter().all(|x| x.as_f64().is_some_and(|x| finite(x, MAX_COORD)))),
+            "length" => {
+                number(MAX_COORD)
+                    || v.as_array().is_some_and(|a| a.len() <= 16 && a.iter().all(|x| x.as_f64().is_some_and(|x| finite(x, MAX_COORD))))
+            }
             "area" => number(1e18),
             "angle" | "percent" | "number" => number(1e9),
             "fraction" => v.as_f64().is_some_and(|x| (0.0..=1.0).contains(&x)),
@@ -483,7 +491,9 @@ fn short(v: &Value) -> String {
 pub fn check_props(kind: &str, props: &Props) -> Result<(), String> {
     let spec = shapes::props_of(kind);
     for (k, v) in props {
-        let t = spec.get(k).ok_or_else(|| format!("`{k}` isn't a prop of a {}; it takes: {} (site_kinds lists them)", kind.replace('_', " "), names(&spec)))?;
+        let t = spec.get(k).ok_or_else(|| {
+            format!("`{k}` isn't a prop of a {}; it takes: {} (site_kinds lists them)", kind.replace('_', " "), names(&spec))
+        })?;
         check_value(k, t, v)?;
     }
     Ok(())
@@ -629,7 +639,9 @@ fn what_changed(m: &Model, before: &Model) -> Changed {
         return Changed::All;
     }
     match m.elements.changed_since(&before.elements) {
-        Changed::Ids(ids) if ids.iter().any(|id| [m, before].iter().any(|x| matches!(x.elements.get(*id), Some(Element::Level(_))))) => Changed::All,
+        Changed::Ids(ids) if ids.iter().any(|id| [m, before].iter().any(|x| matches!(x.elements.get(*id), Some(Element::Level(_))))) => {
+            Changed::All
+        }
         c => c,
     }
 }
@@ -701,7 +713,11 @@ fn props_box(p: &Props) -> Option<Bx> {
             visit(v);
         }
     }
-    let half = ["width", "aisle", "crown", "length"].iter().filter_map(|k| p.get(*k).and_then(Value::as_f64)).filter(|v| v.is_finite()).fold(0.0, f64::max);
+    let half = ["width", "aisle", "crown", "length"]
+        .iter()
+        .filter_map(|k| p.get(*k).and_then(Value::as_f64))
+        .filter(|v| v.is_finite())
+        .fold(0.0, f64::max);
     b.map(|b| grow(b, half.min(MAX_COORD)))
 }
 
@@ -738,7 +754,11 @@ fn level_of(e: &Element) -> Option<Guid> {
 fn plan(m: &Model, before: Option<&Model>, changed: &Changed) -> Vec<Update> {
     let all = matches!(changed, Changed::All);
     let ids: BTreeSet<Id> = match changed {
-        Changed::Ids(ids) => ids.iter().copied().filter(|id| relevant(m.elements.get(*id)) || before.is_some_and(|b| relevant(b.elements.get(*id)))).collect(),
+        Changed::Ids(ids) => ids
+            .iter()
+            .copied()
+            .filter(|id| relevant(m.elements.get(*id)) || before.is_some_and(|b| relevant(b.elements.get(*id))))
+            .collect(),
         Changed::All => BTreeSet::new(),
     };
     if !all && ids.is_empty() {
@@ -791,7 +811,8 @@ fn plan(m: &Model, before: Option<&Model>, changed: &Changed) -> Vec<Update> {
             }
         }
     }
-    let levels: Vec<parking::LevelIn> = m.levels().iter().map(|(_, l)| parking::LevelIn { name: l.name.clone(), elevation: l.elevation }).collect();
+    let levels: Vec<parking::LevelIn> =
+        m.levels().iter().map(|(_, l)| parking::LevelIn { name: l.name.clone(), elevation: l.elevation }).collect();
     for (level, touched) in dirty {
         let Some(sites) = by_level.get(&level) else { continue };
         let kind_of = |id: Id| sites.iter().find(|(i, _)| *i == id).map(|(_, s)| s.kind.as_str());
@@ -807,10 +828,15 @@ fn plan(m: &Model, before: Option<&Model>, changed: &Changed) -> Vec<Update> {
         // Lanes meet lanes: those within reach of a changed lane (as it is, or was) are shaped again with it, and theirs
         // given to them so their own corners stay as they were.
         let is_lane = |id: Id| kind_of(id) == Some("lane") || was_kind(id).as_deref() == Some("lane");
-        let lane_boxes: Vec<Bx> = touched.iter().filter(|(id, _, _)| is_lane(*id)).filter_map(|(_, b, _)| b.map(|b| grow(b, REACH))).collect();
+        let lane_boxes: Vec<Bx> =
+            touched.iter().filter(|(id, _, _)| is_lane(*id)).filter_map(|(_, b, _)| b.map(|b| grow(b, REACH))).collect();
         let lanes: Vec<(Id, Option<Bx>)> = sites.iter().filter(|(_, s)| s.kind == "lane").map(|(id, s)| (*id, site_box(s))).collect();
         let near = |boxes: &[Bx], skip: &BTreeSet<Id>| -> BTreeSet<Id> {
-            lanes.iter().filter(|(id, b)| !skip.contains(id) && b.is_some_and(|b| boxes.iter().any(|c| meet(&b, c)))).map(|(id, _)| *id).collect()
+            lanes
+                .iter()
+                .filter(|(id, b)| !skip.contains(id) && b.is_some_and(|b| boxes.iter().any(|c| meet(&b, c))))
+                .map(|(id, _)| *id)
+                .collect()
         };
         let mut write: BTreeSet<Id> = changed_here.clone();
         let n1 = if all { BTreeSet::new() } else { near(&lane_boxes, &write) };
@@ -832,7 +858,14 @@ fn plan(m: &Model, before: Option<&Model>, changed: &Changed) -> Vec<Update> {
         let items: Vec<shapes::Item> = shape
             .iter()
             .zip(&keys)
-            .map(|((_, s), key)| shapes::Item { key, kind: &s.kind, use_: s.use_or_default(), props: &s.props, phase: &s.phase, context: s.context() })
+            .map(|((_, s), key)| shapes::Item {
+                key,
+                kind: &s.kind,
+                use_: s.use_or_default(),
+                props: &s.props,
+                phase: &s.phase,
+                context: s.context(),
+            })
             .collect();
         let shaped = shapes::normalise(&items, &figures);
         let mut now: BTreeMap<Id, Site> = BTreeMap::new();
@@ -882,10 +915,19 @@ fn plan(m: &Model, before: Option<&Model>, changed: &Changed) -> Vec<Update> {
                 })
                 .collect();
             obstacles.extend(masses.iter().filter(|(_, ms)| ms.level == level).map(|(id, ms)| {
-                (*id, parking::Obstacle { kind: "mass".into(), level: level_name.clone(), outline: vec![Poly { outer: ms.footprint(), holes: Vec::new() }] })
+                (
+                    *id,
+                    parking::Obstacle {
+                        kind: "mass".into(),
+                        level: level_name.clone(),
+                        outline: vec![Poly { outer: ms.footprint(), holes: Vec::new() }],
+                    },
+                )
             }));
             for id in parks {
-                let Some(s) = now.get(&id).cloned().or_else(|| sites.iter().find(|(i, _)| *i == id).map(|(_, s)| (*s).clone())) else { continue };
+                let Some(s) = now.get(&id).cloned().or_else(|| sites.iter().find(|(i, _)| *i == id).map(|(_, s)| (*s).clone())) else {
+                    continue;
+                };
                 let others: Vec<parking::Obstacle> = obstacles.iter().filter(|(o, _)| *o != id).map(|(_, o)| o.clone()).collect();
                 let mut layout = parking::lay_out(&s.props, &level_name, &levels, &others, &[]);
                 let band = m.guid(id).to_string();
@@ -938,7 +980,8 @@ impl Model {
             if p.level != f.level || p.boundary.len() < 3 {
                 continue;
             }
-            let apart = |ring: &[P2]| !p.boundary.iter().any(|q| geom::contains(ring, *q)) && !ring.iter().any(|q| geom::contains(&p.boundary, *q));
+            let apart =
+                |ring: &[P2]| !p.boundary.iter().any(|q| geom::contains(ring, *q)) && !ring.iter().any(|q| geom::contains(&p.boundary, *q));
             let inside = p.boundary.iter().all(|q| geom::contains(&f.boundary, *q))
                 && !f.boundary.iter().any(|q| geom::contains(&p.boundary, *q))
                 && f.openings.iter().all(|o| apart(o))
@@ -1068,7 +1111,11 @@ fn rings_of(polys: &[Poly]) -> Vec<Vec<P2>> {
     polys
         .iter()
         .flat_map(|p| {
-            if p.holes.is_empty() || p.outer.len() < 3 { vec![p.outer.clone()] } else { crate::model::solid(std::slice::from_ref(&p.outer), &p.holes) }
+            if p.holes.is_empty() || p.outer.len() < 3 {
+                vec![p.outer.clone()]
+            } else {
+                crate::model::solid(std::slice::from_ref(&p.outer), &p.holes)
+            }
         })
         .filter(|r| r.len() >= 3)
         .collect()
@@ -1096,7 +1143,20 @@ pub fn solids(m: &Model, s: &Site) -> Vec<Piece3> {
             slab(&part("median"), 0.0, 150.0, hex("#5b8743"));
         }
         "lane" => slab(&s.outline, 0.0, 50.0, surface.unwrap_or_else(|| hex("#8f8371"))),
-        "landscape" => slab(&s.outline, 0.0, 20.0, surface.unwrap_or_else(|| hex(if use_ == "meadow" { "#a2b46a" } else if use_ == "lawn" || use_ == "orchard" { "#7ea458" } else { "#5b8743" }))),
+        "landscape" => slab(
+            &s.outline,
+            0.0,
+            20.0,
+            surface.unwrap_or_else(|| {
+                hex(if use_ == "meadow" {
+                    "#a2b46a"
+                } else if use_ == "lawn" || use_ == "orchard" {
+                    "#7ea458"
+                } else {
+                    "#5b8743"
+                })
+            }),
+        ),
         "water" | "stream" => {
             let level = if s.kind == "water" { num(&s.props, "level").unwrap_or(-300.0) } else { -200.0 };
             slab(&s.outline, level - 20.0, level, hex("#4d8dbb"));
@@ -1133,7 +1193,18 @@ pub fn solids(m: &Model, s: &Site) -> Vec<Piece3> {
             slab(&part("stall"), 0.0, 40.0, hex("#a4aab2"));
             slab(&part("accessible_stall"), 0.0, 40.0, hex("#2f6fd6"));
         }
-        "parking_stall" => slab(&s.outline, 0.0, 40.0, if use_ == "accessible" { hex("#2f6fd6") } else if use_ == "ev" { hex("#12b76a") } else { hex("#a4aab2") }),
+        "parking_stall" => slab(
+            &s.outline,
+            0.0,
+            40.0,
+            if use_ == "accessible" {
+                hex("#2f6fd6")
+            } else if use_ == "ev" {
+                hex("#12b76a")
+            } else {
+                hex("#a4aab2")
+            },
+        ),
         "pitch" => {
             slab(&part("run_off"), 0.0, 30.0, hex("#6f9a52"));
             slab(&s.outline, 0.0, 40.0, surface.unwrap_or_else(|| hex("#7ea458")));

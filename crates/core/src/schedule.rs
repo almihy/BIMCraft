@@ -519,7 +519,11 @@ const OWN: &[(&str, usize, &[Own])] = &[
         ],
     ),
     ("propertyline", 4, &[ID, NAME, LEVEL, AREA, ("Perimeter", Kind::Length, From::Metres("perimeter_m")), COUNT]),
-    ("toposolid", 5, &[ID, TYPE, LEVEL, AREA, THICKNESS, ("Volume", Kind::Number, From::Key("volume_m3")), COUNT, PHASE_CREATED, PHASE_DEMOLISHED]),
+    (
+        "toposolid",
+        5,
+        &[ID, TYPE, LEVEL, AREA, THICKNESS, ("Volume", Kind::Number, From::Key("volume_m3")), COUNT, PHASE_CREATED, PHASE_DEMOLISHED],
+    ),
     (
         "buildingpad",
         5,

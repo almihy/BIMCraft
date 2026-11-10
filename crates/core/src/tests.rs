@@ -2470,8 +2470,42 @@ fn hostile_params_never_panic_or_break_the_model() {
         json!({"id": footing, "join": null}),
         json!({"id": 100002, "join": "no"}),
     ];
+    // The site's (masterplan.rs): a road, a car park, a toposolid with a pad on it and a property line, last so that no
+    // id moves; and payloads with their keys, hostile, and the Modify tools taking them.
+    let made: Vec<Value> = [
+        ("site", json!({"kind": "lane", "use": "road", "props": {"path": [[-5000, -5000], [15000, -5000]]}})),
+        ("site", json!({"kind": "car_park", "props": {"control": [[20000, 0], [50000, 0], [50000, 20000], [20000, 20000]]}})),
+        (
+            "toposolid",
+            json!({"boundary": [[-20000, -20000], [0, -20000], [0, -10000], [-20000, -10000]], "points": [[-20000, -20000, 500]]}),
+        ),
+        ("building_pad", json!({"boundary": [[-15000, -18000], [-5000, -18000], [-5000, -12000], [-15000, -12000]], "offset": 200})),
+        ("property_line", json!({"points": [[-30000, -30000], [60000, -30000], [60000, 30000, 0.3], [-30000, 30000]]})),
+    ]
+    .iter()
+    .map(|(c, p)| base.execute(c, p).map_or(Value::Null, |r| r["id"].clone()))
+    .collect();
+    assert!(made.iter().all(Value::is_u64), "the sweep's base has its site: {made:?}");
+    let (road, park, topo, pad) = (made[0].clone(), made[1].clone(), made[2].clone(), made[3].clone());
+    let site = [
+        json!({"kind": "lane", "props": {"path": [[0, 0], [1e300, 0]]}}),
+        json!({"kind": "car_park", "props": {"control": [[0, 0], [1e9, 0], [1e9, 1e9]], "stall_width": -1, "access": "x"}}),
+        json!({"kind": "tree", "use": "x", "phase": "ancient", "props": {"at": [f64::MAX, 0], "crown": 1e300}}),
+        json!({"kind": "lane", "use": "road", "props": {"path": [[0, 0], [1000, 0, 1e6]], "lanes": 1e300, "heads": {"start": {"shape": "round", "radius": -1}}}}),
+        json!({"kind": "parking_band", "props": {"path": [[0, 0], [5e8, 0]], "angle": 1e-300, "omit": [{"piece": 1e300}]}}),
+        json!({"kind": "water", "props": {"control": [[0, 0], [1, 0], [0, 1]], "smooth": 1e300, "bank": 1e9}}),
+        json!({"id": road, "props": {"width": null, "path": "x"}, "phase": "demolished", "use": "motorway"}),
+        json!({"id": park, "props": {"control": [[0, 0], [1, 0], [0, 1]], "column_every": 1e9}}),
+        json!({"id": topo, "props": {"storeys": 1e300}, "contours": 5}),
+        json!({"values": {"lane.width": 1e300, "nope": 1, "tree.crown": -1}}),
+        json!({"values": {"parking.bay_width": 1, "building.floor_height": 0}}),
+        json!({"points": [[0, 0, 1e300], [1, 0], [0, 1]], "boundary": [[0, 0], [1e9, 0], [0, 1e9]], "contours": 5, "offset": 1e300}),
+        json!({"ids": [road, park, topo, pad], "by": [9.99e8, 0]}),
+        json!({"ids": [road, park, pad], "about": [0, 0], "angle": 45, "copy": true}),
+        json!({"ids": [road, park, topo, pad], "axis": [[0, 0], [1000, 1000]]}),
+    ];
     let hostile: Vec<Value> =
-        hostile.into_iter().chain(detailing.into_iter().map(|(_, p)| p)).chain(slopes).chain(offsets).chain(grips).collect();
+        hostile.into_iter().chain(detailing.into_iter().map(|(_, p)| p)).chain(slopes).chain(offsets).chain(grips).chain(site).collect();
     // Each command against each value, on a copy of the same session; the commands shared out between the cores.
     let cmds: Vec<_> = commands().iter().filter(|c| !matches!(c.id, "open" | "save")).collect();
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get());

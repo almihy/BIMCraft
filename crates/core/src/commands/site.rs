@@ -235,7 +235,10 @@ pub(super) fn site_figures(s: &mut Session, p: &Value) -> R {
                 figures.remove(k);
                 continue;
             }
-            let n = x.as_f64().filter(|n| n.is_finite() && n.abs() <= crate::model::MAX_COORD).ok_or_else(|| bad(c, format!("`{k}` is a number, got {x}")))?;
+            let n = x
+                .as_f64()
+                .filter(|n| n.is_finite() && n.abs() <= crate::model::MAX_COORD)
+                .ok_or_else(|| bad(c, format!("`{k}` is a number, got {x}")))?;
             let ok = match *what {
                 "length" => n >= 0.0 || k == "water.level",
                 "count" => (0.0..=1e6).contains(&n),
@@ -256,7 +259,9 @@ pub(super) fn site_figures(s: &mut Session, p: &Value) -> R {
     let f = masterplan::figures(&s.model);
     let all: Map<String, Value> = shapes::FIGURES
         .iter()
-        .map(|(n, _, t)| ((*n).to_string(), json!({"value": shapes::figure(&f, n), "type": t, "own": s.model.site_figures.contains_key(*n)})))
+        .map(|(n, _, t)| {
+            ((*n).to_string(), json!({"value": shapes::figure(&f, n), "type": t, "own": s.model.site_figures.contains_key(*n)}))
+        })
         .collect();
     Ok(json!({"figures": all}))
 }
@@ -289,11 +294,13 @@ pub(super) fn property_line(s: &mut Session, p: &Value) -> R {
     let ring: Vec<P2> = pl.points.iter().map(|q| P2(q[0], q[1])).collect();
     if geom::area(&ring) < 0.0 {
         let n = pl.points.len();
-        let mut r: Vec<[f64; 3]> = (0..n).map(|i| {
-            let q = pl.points[n - 1 - i];
-            let b = pl.points[(2 * n - 2 - i) % n][2];
-            [q[0], q[1], -b]
-        }).collect();
+        let mut r: Vec<[f64; 3]> = (0..n)
+            .map(|i| {
+                let q = pl.points[n - 1 - i];
+                let b = pl.points[(2 * n - 2 - i) % n][2];
+                [q[0], q[1], -b]
+            })
+            .collect();
         std::mem::swap(&mut pl.points, &mut r);
     }
     masterplan::check_property_line(c, &pl)?;
@@ -350,7 +357,8 @@ pub(super) fn toposolid(s: &mut Session, p: &Value) -> R {
         }
         for q in a {
             let xyz = q.as_array().and_then(|x| Some([x.first()?.as_f64()?, x.get(1)?.as_f64()?, x.get(2)?.as_f64()?]));
-            let Some([x, y, z]) = xyz.filter(|x| x.len() == 3 && x.iter().all(|v| v.is_finite() && v.abs() <= crate::model::MAX_COORD)) else {
+            let Some([x, y, z]) = xyz.filter(|x| x.len() == 3 && x.iter().all(|v| v.is_finite() && v.abs() <= crate::model::MAX_COORD))
+            else {
                 return Err(bad(c, format!("`points`: {q} is not a point [x, y, z] in mm")));
             };
             shape.points.push(ShapePoint { at: P2(x, y), z: z - offset, ..Default::default() });
