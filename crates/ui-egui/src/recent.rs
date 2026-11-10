@@ -3,7 +3,6 @@
 
 use std::path::{Path, PathBuf};
 
-use egui::containers::menu::SubMenuButton;
 use egui::{Button, Context, Ui};
 use serde_json::{Value, json};
 
@@ -131,7 +130,7 @@ impl BimApp {
             return;
         }
         let files: Vec<(String, PathBuf)> = self.recent.labels().into_iter().zip(self.recent.paths().iter().cloned()).collect();
-        SubMenuButton::new(t("Open Recent")).ui(ui, |ui| {
+        crate::submenu(t("Open Recent")).ui(ui, |ui| {
             for (label, path) in files {
                 if ui.button(label).on_hover_text(path.to_string_lossy()).clicked() {
                     self.guard(Pending::OpenPath(path), ctx);

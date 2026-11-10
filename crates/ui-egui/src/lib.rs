@@ -937,6 +937,12 @@ fn top_params(m: &Model, level: Id, top: Option<Option<Id>>, height: &str) -> Re
     }
 }
 
+/// A menu's item that opens a menu of its own, with an arrow that IBM Plex has: egui's own (`⏵`) is only in egui's fonts,
+/// which a page's window is built without.
+pub(crate) fn submenu(label: &str) -> SubMenuButton<'_> {
+    SubMenuButton::from_button(egui::Button::new(label).right_text("›"))
+}
+
 /// A ribbon button: an icon over its label, tinted while its tool is on; as wide as its label, which breaks over two lines
 /// when one would make it wider than `WIDE`.
 fn big_button(ui: &mut Ui, icon: Icon, label: &str, active: bool, tip: &str) -> Response {
@@ -3639,7 +3645,7 @@ impl BimApp {
 
     /// File > Export: the model as IFC, the view as a picture, the sheets as PDF, the 3D scene as glTF.
     fn export_menu(&mut self, ui: &mut Ui, ctx: &Context) {
-        SubMenuButton::new(t("Export")).ui(ui, |ui| {
+        submenu(t("Export")).ui(ui, |ui| {
             if ui.button(t("IFC…")).clicked() {
                 self.export(ctx, "IFC4", "ifc");
             }
