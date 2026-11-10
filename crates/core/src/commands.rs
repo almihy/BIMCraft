@@ -9431,7 +9431,7 @@ fn sketch_lines(_: &mut Session, p: &Value) -> R {
 /// An element's sketch: the one it keeps, while that still draws its outline and holes; else their edges, as new lines.
 fn boundary_now(e: &Element) -> Option<Vec<SketchLine>> {
     let (outline, holes) = match e {
-        Element::Floor(f) => (f.boundary.clone(), f.openings.clone()),
+        Element::Floor(f) | Element::Toposolid(f) => (f.boundary.clone(), f.openings.clone()),
         Element::Ceiling(x) => (x.boundary.clone(), x.openings.clone()),
         Element::Roof(r) if r.extrusion.is_none() => (r.boundary.clone(), r.courtyards.clone()),
         Element::Shaft(sh) => (sh.boundary.clone(), Vec::new()),
@@ -9488,6 +9488,12 @@ fn edit_boundary(s: &mut Session, p: &Value) -> R {
             let shape;
             (shape, said) = shape_within(m, &f, &r.outer, &r.holes);
             Element::Floor(Floor { boundary: r.outer, openings: r.holes, sketch: lines, shape, ..f })
+        }
+        // The ground, as a floor: its points that stay inside keep their heights.
+        Element::Toposolid(f) => {
+            let shape;
+            (shape, said) = shape_within(m, &f, &r.outer, &r.holes);
+            Element::Toposolid(Floor { boundary: r.outer, openings: r.holes, sketch: lines, shape, ..f })
         }
         Element::Ceiling(x) => Element::Ceiling(Ceiling { boundary: r.outer, openings: r.holes, sketch: lines, ..x }),
         Element::Shaft(_) if !r.holes.is_empty() => return Err(bad(c, "a shaft is one outline with no holes in it")),

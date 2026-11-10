@@ -508,3 +508,24 @@ fn a_site_element_draws_in_its_own_levels_plan_only() {
     assert!(owners(level(&s)).contains(&down) && !owners(level(&s)).contains(&up));
     assert!(owners(deck).contains(&up) && !owners(deck).contains(&down));
 }
+
+#[test]
+fn edit_boundary_redraws_a_toposolid_and_keeps_its_heights_inside() {
+    let mut s = Session::new();
+    let topo = id(&run(
+        &mut s,
+        "toposolid",
+        json!({"boundary": [[0, 0], [40000, 0], [40000, 40000], [0, 40000]], "points": [[20000, 20000, 1500]]}),
+    ));
+    let lines = run(&mut s, "edit_boundary", json!({"id": topo}))["sketch"].clone();
+    assert_eq!(lines.as_array().map(Vec::len), Some(4), "{lines}");
+    run(
+        &mut s,
+        "edit_boundary",
+        json!({"id": topo, "sketch": [[[0, 0], [30000, 0]], [[30000, 0], [30000, 30000]], [[30000, 30000], [0, 30000]], [[0, 30000], [0, 0]]]}),
+    );
+    let Some(Element::Toposolid(f)) = s.model.elements.get(topo) else { panic!("still a toposolid") };
+    assert!((crate::geom::area(&f.boundary).abs() - 9.0e8).abs() < 1.0);
+    assert_eq!(f.shape.points.iter().filter(|p| p.at == P2(20000.0, 20000.0)).count(), 1, "the point inside keeps its height");
+    assert_eq!(f.sketch.len(), 4, "it keeps its sketch");
+}

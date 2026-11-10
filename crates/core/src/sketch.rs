@@ -539,6 +539,91 @@ pub fn lines_of(outline: &[P2], holes: &[Vec<P2>]) -> Vec<SketchLine> {
         .collect()
 }
 
+/// A line's pieces from its start to its end, each `(from, to, bulge)`: a line's or an arc's segments of a polyline with the
+/// bulge DXF gives a piece (the tangent of a quarter of its sweep, positive counter-clockwise), any other curve its points as
+/// drawn, straight between.
+fn pieces(c: &Curve) -> Vec<(P2, P2, f64)> {
+    match c {
+        Curve::Poly { points, arcs, closed } => {
+            let n = points.len();
+            let count = if *closed && n >= 2 { n } else { n.saturating_sub(1) };
+            (0..count)
+                .filter_map(|i| {
+                    let sweep = arcs.get(i).copied().unwrap_or(0.0);
+                    Some((*points.get(i)?, *points.get((i + 1) % n)?, (sweep.to_radians() / 4.0).tan()))
+                })
+                .collect()
+        }
+        _ => c.points().windows(2).map(|w| (w[0], w[1], 0.0)).collect(),
+    }
+}
+
+/// The lines joined end to end into one path, in the order they meet: its points `[x, y, bulge]` (the bulge of the piece from
+/// that point to the next, as a site element's path and a property line's points hold it), and whether it closes back on its
+/// start (then its last point is not the first again). Err says why they are no one path: none, a gap, or a branch.
+pub fn chain(lines: &[SketchLine]) -> Result<(Vec<[f64; 3]>, bool), String> {
+    if lines.is_empty() {
+        return Err("Draw the path: lines and arcs, end to end.".into());
+    }
+    if lines.len() > MAX_LINES {
+        return Err(format!("{} lines, more than {MAX_LINES}.", lines.len()));
+    }
+    let close = |a: P2, b: P2| a.dist(b) <= TOL;
+    // One closed curve alone (a circle, a closed polyline) is a loop already.
+    if let [one] = lines
+        && one.curve.is_closed()
+    {
+        let ps = pieces(&one.curve);
+        return Ok((ps.iter().map(|(a, _, b)| [a.0, a.1, *b]).collect(), true));
+    }
+    if let Some(i) = lines.iter().position(|l| l.curve.is_closed()) {
+        return Err(format!("line {i} is closed on itself: a path is lines end to end."));
+    }
+    // How many other lines' ends meet each end: one at most, or the path branches there.
+    let ends: Vec<[P2; 2]> = lines.iter().map(|l| [l.start(), l.end()]).collect();
+    let meets = |p: P2, not: usize| ends.iter().enumerate().filter(|(j, _)| *j != not).flat_map(|(_, e)| e.iter()).filter(|q| close(p, **q)).count();
+    for (i, e) in ends.iter().enumerate() {
+        for p in e {
+            if meets(*p, i) > 1 {
+                return Err(format!("three or more lines meet at ({:.0}, {:.0}): a path goes through a point once.", p.0, p.1));
+            }
+        }
+    }
+    // From a free end, if there is one; else it is a loop, from the first line's start.
+    let first = ends.iter().enumerate().find_map(|(i, e)| e.iter().position(|p| meets(*p, i) == 0).map(|k| (i, k == 1)));
+    let closed = first.is_none();
+    let (mut at, mut flip) = first.unwrap_or((0, false));
+    let mut used = vec![false; lines.len()];
+    let mut out: Vec<[f64; 3]> = Vec::new();
+    let mut end;
+    loop {
+        used[at] = true;
+        let c = if flip { lines[at].curve.reversed() } else { lines[at].curve.clone() };
+        out.extend(pieces(&c).iter().map(|(a, _, b)| [a.0, a.1, *b]));
+        end = c.end();
+        let next = (0..lines.len()).filter(|j| !used[*j]).find_map(|j| match ends[j] {
+            [s, _] if close(s, end) => Some((j, false)),
+            [_, e] if close(e, end) => Some((j, true)),
+            _ => None,
+        });
+        match next {
+            Some((j, f)) => (at, flip) = (j, f),
+            None => break,
+        }
+    }
+    if used.iter().any(|u| !u) {
+        return Err("the lines are not one path: they leave a gap, or part.".into());
+    }
+    if closed {
+        if out.len() < 3 {
+            return Err("a loop needs three points or more.".into());
+        }
+    } else {
+        out.push([end.0, end.1, 0.0]);
+    }
+    Ok((out, closed))
+}
+
 /// Whether `lines` solve to `outline` and `holes`, each ring the same points round in the same order from any start, either
 /// way round: a sketch kept with an element is still what it draws.
 pub fn draws(lines: &[SketchLine], outline: &[P2], holes: &[Vec<P2>]) -> bool {
@@ -953,6 +1038,34 @@ fn cap(mut problems: Vec<Problem>) -> Vec<Problem> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn lines_end_to_end_chain_into_one_path_with_their_arcs_bulges() {
+        // Drawn out of order and one of them backwards: a line, an arc a half circle to the left, a line.
+        let lines = vec![
+            SketchLine::arc(P2(1000.0, 0.0), P2(1000.0, 2000.0), P2(2000.0, 1000.0)),
+            SketchLine::new(P2(0.0, 0.0), P2(1000.0, 0.0)),
+            SketchLine::new(P2(0.0, 2000.0), P2(1000.0, 2000.0)),
+        ];
+        let (path, closed) = chain(&lines).unwrap();
+        assert!(!closed);
+        assert_eq!(path.len(), 4);
+        let (a, b) = (path[0], path[3]);
+        // From one free end to the other, either way round.
+        assert!((a[0] == 0.0 && a[1] == 0.0 && b[1] == 2000.0) || (a[1] == 2000.0 && b[1] == 0.0), "{path:?}");
+        let bulges: Vec<f64> = path.iter().map(|p| p[2]).collect();
+        assert_eq!(bulges.iter().filter(|b| (b.abs() - 1.0).abs() < 1e-9).count(), 1, "a half circle bulges 1: {bulges:?}");
+        // A loop closes; a branch and a gap are refused.
+        let square = lines_of(&[P2(0.0, 0.0), P2(1.0e3, 0.0), P2(1.0e3, 1.0e3), P2(0.0, 1.0e3)], &[]);
+        let (ring, closed) = chain(&square).unwrap();
+        assert!(closed && ring.len() == 4);
+        let mut branch = square.clone();
+        branch.push(SketchLine::new(P2(0.0, 0.0), P2(-500.0, 0.0)));
+        assert!(chain(&branch).unwrap_err().contains("three or more"));
+        let gap = vec![SketchLine::new(P2(0.0, 0.0), P2(1.0e3, 0.0)), SketchLine::new(P2(2.0e3, 0.0), P2(3.0e3, 0.0))];
+        assert!(chain(&gap).unwrap_err().contains("gap"));
+        assert!(chain(&[]).is_err());
+    }
+
     use super::*;
 
     fn ring(pts: &[(f64, f64)]) -> Vec<SketchLine> {
