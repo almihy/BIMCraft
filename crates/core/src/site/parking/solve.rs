@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use super::fields::*;
 use super::geom::*;
 use super::ring::{attach, lay_ring};
-use super::standards::{accessible_needed, ramp_length, settings_of, Given, Settings};
+use super::standards::{Given, Settings, accessible_needed, ramp_length, settings_of};
 
 // ====================================================================================================== the API
 /// A way in or out: in, out, or both ways.
@@ -251,10 +251,11 @@ fn throat_options(
     let square = |options: &mut Vec<Throat>, p: Pt, st: &StreetSide| {
         let mut t: Option<f64> = None;
         for al in &plan.aisles {
-            if let Some(tt) = ray_into([p[0] - st.n[0] * 0.01, p[1] - st.n[1] * 0.01], st.n, &al.poly) {
-                if tt < reach * 1.5 && t.is_none_or(|t| tt < t) {
-                    t = Some(tt);
-                }
+            if let Some(tt) = ray_into([p[0] - st.n[0] * 0.01, p[1] - st.n[1] * 0.01], st.n, &al.poly)
+                && tt < reach * 1.5
+                && t.is_none_or(|t| tt < t)
+            {
+                t = Some(tt);
             }
         }
         let Some(t) = t else { return };
@@ -270,10 +271,10 @@ fn throat_options(
     if let Some(from) = from {
         let mut st: Option<&StreetSide> = streets.first();
         for x in streets {
-            if let Some(m) = st {
-                if seg_dist(from, x.a, x.b) < seg_dist(from, m.a, m.b) {
-                    st = Some(x);
-                }
+            if let Some(m) = st
+                && seg_dist(from, x.a, x.b) < seg_dist(from, m.a, m.b)
+            {
+                st = Some(x);
             }
         }
         if let Some(st) = st {
@@ -323,12 +324,11 @@ fn throats_for(plan: &WPlan, streets: &[StreetSide], clear: &Region, s: &Setting
     costed.sort_by(|m, n| m.0.partial_cmp(&n.0).unwrap_or(std::cmp::Ordering::Equal));
     let options: Vec<Throat> = costed.into_iter().map(|x| x.1).collect();
     let mut out: Vec<Throat> = options.iter().take(1).cloned().collect();
-    if let Some(first) = out.first().cloned() {
-        if plan.stalls.len() as f64 >= s.second_access_over {
-            if let Some(far) = options.iter().find(|o| dist(o.at, first.at) >= 40.0) {
-                out.push(far.clone());
-            }
-        }
+    if let Some(first) = out.first().cloned()
+        && plan.stalls.len() as f64 >= s.second_access_over
+        && let Some(far) = options.iter().find(|o| dist(o.at, first.at) >= 40.0)
+    {
+        out.push(far.clone());
     }
     out
 }
@@ -358,11 +358,7 @@ fn reachable(plan: &WPlan, throats: &[&Throat]) -> HashSet<i64> {
 
 /// The aisle id a stall opens onto, its drive aisle when it faces one.
 fn opens_onto(st: &WStall) -> i64 {
-    if st.aisle >= EXT_BASE {
-        st.aisle - EXT_BASE
-    } else {
-        st.aisle
-    }
+    if st.aisle >= EXT_BASE { st.aisle - EXT_BASE } else { st.aisle }
 }
 
 /// A drive aisle runs only as far as what it serves: a stub past them is cut off.
@@ -521,24 +517,21 @@ fn centre(p: &[Pt]) -> Pt {
 
 /// JavaScript's `${n}` of a number as the notes print it.
 fn num(v: f64) -> String {
-    if v == v.trunc() && v.abs() < 1e15 {
-        format!("{}", v as i64)
-    } else {
-        format!("{v}")
-    }
+    if v == v.trunc() && v.abs() < 1e15 { format!("{}", v as i64) } else { format!("{v}") }
 }
 
 /// The car park laid out (Arqiflow's `solveParking`).
 pub fn solve(input: &Input) -> Solved {
-    if let Some(ramps) = &input.basement {
-        if ramps.is_empty() {
-            let s0 = settings_of(&input.settings);
-            if let Some(ramp) = find_ramp(input, &s0) {
-                let mut l = solve(&Input { basement: Some(vec![ramp]), ..input.clone() });
-                for r in &mut l.ramps {
-                    r.found = true;
-                }
-                l.notes.insert(
+    if let Some(ramps) = &input.basement
+        && ramps.is_empty()
+    {
+        let s0 = settings_of(&input.settings);
+        if let Some(ramp) = find_ramp(input, &s0) {
+            let mut l = solve(&Input { basement: Some(vec![ramp]), ..input.clone() });
+            for r in &mut l.ramps {
+                r.found = true;
+            }
+            l.notes.insert(
                     0,
                     format!(
                         "No ramp is drawn on this level: one is placed, {} m long and {} m wide ({}% for {} m floor to floor). Draw the ramp where it comes down.",
@@ -548,8 +541,7 @@ pub fn solve(input: &Input) -> Solved {
                         num(s0.floor_to_floor)
                     ),
                 );
-                return l;
-            }
+            return l;
         }
     }
     let mut ctx = Ctx::new();
@@ -701,10 +693,10 @@ pub fn solve(input: &Input) -> Solved {
     };
     let mut chosen: Vec<Candidate> = Vec::new();
     for part in &parts {
-        if let Some(c) = pick(&mut ctx, part) {
-            if !c.plan.stalls.is_empty() {
-                chosen.push(c);
-            }
+        if let Some(c) = pick(&mut ctx, part)
+            && !c.plan.stalls.is_empty()
+        {
+            chosen.push(c);
         }
     }
     let n_chosen = chosen.len();

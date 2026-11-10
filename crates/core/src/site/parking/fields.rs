@@ -5,7 +5,7 @@
 use std::rc::Rc;
 
 use super::geom::*;
-use super::standards::{lean_of, pitch_of, row_depth, Settings};
+use super::standards::{Settings, lean_of, pitch_of, row_depth};
 
 // ====================================================================================================== shared
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -392,11 +392,12 @@ fn lay_field(
         let outer = faces_own && (ti == 0 || ti == ns - 1);
         let mut lo = xl + e;
         let mut hi = xr - e;
-        if outer && !own.is_empty() {
-            if let Some(al) = plan.aisles.iter().find(|x| x.id == t.aisle) {
-                lo = al.r.x0 + e;
-                hi = al.r.x1 - e;
-            }
+        if outer
+            && !own.is_empty()
+            && let Some(al) = plan.aisles.iter().find(|x| x.id == t.aisle)
+        {
+            lo = al.r.x0 + e;
+            hi = al.r.x1 - e;
         }
         if !faces_own {
             lo = b.x0 + e;
@@ -458,10 +459,10 @@ fn lay_field(
                 }
                 k_first = k_first.min(kk);
                 k_last = k_last.max(kk);
-                if let Some(&last) = run.last() {
-                    if kk != last + 1.0 {
-                        close(&mut run, &mut plan);
-                    }
+                if let Some(&last) = run.last()
+                    && kk != last + 1.0
+                {
+                    close(&mut run, &mut plan);
                 }
                 if every != 0.0 && modeq(kk, every + 1.0, every) {
                     close(&mut run, &mut plan);
@@ -475,24 +476,8 @@ fn lay_field(
         close(&mut run, &mut plan);
         // The end islands, where the row stops short of a cross aisle.
         if e > 0.0 && faces_own && !own.is_empty() && !outer {
-            let xf = if cg != 0.0 {
-                if k_first <= k_last {
-                    xk(k_first)
-                } else {
-                    xl
-                }
-            } else {
-                gx + k0 * w
-            };
-            let xe = if cg != 0.0 {
-                if k_first <= k_last {
-                    xk(k_last) + w
-                } else {
-                    xr
-                }
-            } else {
-                gx + k1 * w
-            };
+            let xf = if cg != 0.0 { if k_first <= k_last { xk(k_first) } else { xl } } else { gx + k0 * w };
+            let xe = if cg != 0.0 { if k_first <= k_last { xk(k_last) + w } else { xr } } else { gx + k1 * w };
             let nn = t.kind == StripKind::RowN;
             if west != End::Open && xf > xl + 0.05 {
                 let poly = if nn {
@@ -673,11 +658,7 @@ fn best_field_of(f: &FieldSpec, s: &Settings) -> Option<Plan> {
                     continue;
                 }
                 let offsets: Vec<f64> = if so == FSide::Out && no == FSide::Out {
-                    if n == 0 || slack < 0.05 {
-                        vec![0.0]
-                    } else {
-                        vec![]
-                    }
+                    if n == 0 || slack < 0.05 { vec![0.0] } else { vec![] }
                 } else if so == FSide::Out {
                     vec![0.0]
                 } else if no == FSide::Out {

@@ -266,20 +266,12 @@ pub fn row_depth(s: &Settings) -> f64 {
 
 /// How far apart the bays come along their aisle.
 pub fn pitch_of(s: &Settings) -> f64 {
-    if s.angle >= 89.9 {
-        s.stall_width
-    } else {
-        s.stall_width / ((s.angle * std::f64::consts::PI) / 180.0).sin()
-    }
+    if s.angle >= 89.9 { s.stall_width } else { s.stall_width / ((s.angle * std::f64::consts::PI) / 180.0).sin() }
 }
 
 /// How far an angled bay's back runs past its front, along the aisle (0 at 90°).
 pub fn lean_of(s: &Settings) -> f64 {
-    if s.angle >= 89.9 {
-        0.0
-    } else {
-        row_depth(s) / ((s.angle * std::f64::consts::PI) / 180.0).tan()
-    }
+    if s.angle >= 89.9 { 0.0 } else { row_depth(s) / ((s.angle * std::f64::consts::PI) / 180.0).tan() }
 }
 
 /// A straight ramp's length: its slope, and a transition at half the slope at each end (3.6 m each).

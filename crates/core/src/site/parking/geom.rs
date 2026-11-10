@@ -105,11 +105,7 @@ pub fn hypot(a: f64, b: f64) -> f64 {
 /// `Math.round`: halves go up.
 pub fn js_round(x: f64) -> f64 {
     let c = x.ceil();
-    if c - 0.5 > x {
-        c - 1.0
-    } else {
-        c
-    }
+    if c - 0.5 > x { c - 1.0 } else { c }
 }
 
 /// `x.toFixed(digits)`: the exact value rounded, halves away from zero.
@@ -143,11 +139,7 @@ pub fn to_fixed(x: f64, digits: usize) -> String {
 
 /// `x || 1`: a length of nothing (or not a number) taken as 1.
 pub fn or1(x: f64) -> f64 {
-    if x == 0.0 || x.is_nan() {
-        1.0
-    } else {
-        x
-    }
+    if x == 0.0 || x.is_nan() { 1.0 } else { x }
 }
 
 // ---------------------------------------------------------------------------------------------------- rings
@@ -317,11 +309,11 @@ fn strip_hits(ring: &[Pt], y_lo: f64, y_hi: f64) -> Vec<Span> {
     spans.sort_by(|p, q| p[0].partial_cmp(&q[0]).unwrap_or(std::cmp::Ordering::Equal));
     let mut merged: Vec<Span> = Vec::new();
     for s in spans {
-        if let Some(last) = merged.last_mut() {
-            if s[0] <= last[1] {
-                last[1] = last[1].max(s[1]);
-                continue;
-            }
+        if let Some(last) = merged.last_mut()
+            && s[0] <= last[1]
+        {
+            last[1] = last[1].max(s[1]);
+            continue;
         }
         merged.push(s);
     }
@@ -483,11 +475,7 @@ pub fn clean(r: &[Pt]) -> Ring {
         })
         .map(|i| first[i])
         .collect();
-    if out.len() >= 3 {
-        out
-    } else {
-        r.to_vec()
-    }
+    if out.len() >= 3 { out } else { r.to_vec() }
 }
 
 fn clip_ring(r: &[Pt], side: &dyn Fn(Pt) -> f64) -> Ring {
@@ -579,11 +567,7 @@ pub fn shared_area(a: &[Pt], b: &[Pt]) -> f64 {
         return 0.0;
     }
     let piece = clip_convex(a, b);
-    if piece.len() >= 3 {
-        ring_area(&piece).abs()
-    } else {
-        0.0
-    }
+    if piece.len() >= 3 { ring_area(&piece).abs() } else { 0.0 }
 }
 
 /// Two convex pieces a car drives between: they overlap, or share an edge `least` long or more.
@@ -638,11 +622,7 @@ pub fn ray_into(o: Pt, d: Pt, piece: &[Pt]) -> Option<f64> {
             t1 = t1.min(t);
         }
     }
-    if t0 <= t1 && t1 >= 0.0 {
-        Some(t0.max(0.0))
-    } else {
-        None
-    }
+    if t0 <= t1 && t1 >= 0.0 { Some(t0.max(0.0)) } else { None }
 }
 
 // ---------------------------------------------------------------------------------------------------- untangling
@@ -842,6 +822,12 @@ impl PieceIndex {
             }
         }
         false
+    }
+}
+
+impl Default for PieceIndex {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

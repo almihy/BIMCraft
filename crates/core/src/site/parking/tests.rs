@@ -2,10 +2,10 @@
 //! against Arqiflow's own layouts (fixtures/, made by fixtures/make.ts from the TypeScript): the same bays, the same
 //! accessible bays, every bay within 5 mm.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::geom::*;
-use super::solve::{solve, Access, AccessKind, Input, Solved};
+use super::solve::{Access, AccessKind, Input, Solved, solve};
 use super::standards::Given;
 use super::*;
 
@@ -105,10 +105,11 @@ fn faults(l: &Solved, buildings: &[Ring]) -> Vec<String> {
             out.push(format!("a bay opens onto no aisle at {}", at(&s.poly)));
         }
         let back = [2.0 * c[0] - s.mouth[0], 2.0 * c[1] - s.mouth[1]];
-        if let Some(f) = on.iter().find_map(|x| x.flow) {
-            if on.iter().all(|x| x.flow.is_some()) && (back[0] - s.mouth[0]) * f[0] + (back[1] - s.mouth[1]) * f[1] < -0.05 {
-                out.push(format!("a bay leans against its aisle's traffic at {}", at(&s.poly)));
-            }
+        if let Some(f) = on.iter().find_map(|x| x.flow)
+            && on.iter().all(|x| x.flow.is_some())
+            && (back[0] - s.mouth[0]) * f[0] + (back[1] - s.mouth[1]) * f[1] < -0.05
+        {
+            out.push(format!("a bay leans against its aisle's traffic at {}", at(&s.poly)));
         }
     }
     let mut seen: Vec<String> = Vec::new();

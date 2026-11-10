@@ -8,6 +8,9 @@
 //! geometry), [`standards`] (the sizes), `fields` (a field of modules, a plot cut in fields), `ring` (rows round every
 //! side and a middle), [`solve`] (the ways in, the pick, the accessible bays).
 
+// `!(a < b)` is the TypeScript's own test, and it is true for NaN where `a >= b` is not: the port keeps it.
+#![allow(clippy::neg_cmp_op_on_partial_ord)]
+
 pub mod geom;
 pub mod solve;
 pub mod standards;
@@ -18,11 +21,11 @@ mod ring;
 #[cfg(test)]
 mod tests;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::{Poly, Props};
 use crate::geom::P2;
-use geom::{js_round, Pt, Ring};
+use geom::{Pt, Ring, js_round};
 use solve::{Access, AccessKind, Input};
 use standards::Given;
 

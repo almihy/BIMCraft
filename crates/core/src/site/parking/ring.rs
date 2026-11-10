@@ -4,7 +4,7 @@
 
 use super::fields::*;
 use super::geom::*;
-use super::standards::{lean_of, pitch_of, row_depth, standard, Settings};
+use super::standards::{Settings, lean_of, pitch_of, row_depth, standard};
 
 /// Each side of a counter-clockwise ring moved `by[i]` inward: its new ends, or None where the side has closed up.
 fn inset_sides(ring: &[Pt], by: &[f64]) -> Vec<Option<(Pt, Pt)>> {
@@ -200,10 +200,10 @@ fn lay_middle(
                     m = *x;
                 }
             }
-            if let Some(piece) = lp.iter().find(|x| point_in_ring([(m[0] + m[1]) / 2.0, fy], &x.poly)) {
-                if let Some(f) = piece.flow {
-                    sign = if f[0] < 0.0 { -1.0 } else { 1.0 };
-                }
+            if let Some(piece) = lp.iter().find(|x| point_in_ring([(m[0] + m[1]) / 2.0, fy], &x.poly))
+                && let Some(f) = piece.flow
+            {
+                sign = if f[0] < 0.0 { -1.0 } else { 1.0 };
             }
         }
         let sh = (if aisle >= 0 { own[0].flow.unwrap_or(1.0) } else { sign }) * lean;
@@ -323,10 +323,10 @@ fn best_middles(gg: &Region, gr: &Region, lp: &[MiddleLoop], s: &Settings, keep:
         })
     };
     let lay = |tried: &mut Vec<Try>, t: Try| {
-        if let Some(plan) = lay_middle(gg, gr, lp, s, t.n, t.lo, t.hi, t.off, t.shift, true) {
-            if plan.count.unwrap_or(0.0) != 0.0 {
-                tried.push(Try { score: score_p(&plan) + if on_grid(t.shift) { 0.001 } else { 0.0 }, ..t });
-            }
+        if let Some(plan) = lay_middle(gg, gr, lp, s, t.n, t.lo, t.hi, t.off, t.shift, true)
+            && plan.count.unwrap_or(0.0) != 0.0
+        {
+            tried.push(Try { score: score_p(&plan) + if on_grid(t.shift) { 0.001 } else { 0.0 }, ..t });
         }
     };
     let n_max = ((h + 2.0 * r) / (s.aisle + 2.0 * r)).floor() + 1.0;
