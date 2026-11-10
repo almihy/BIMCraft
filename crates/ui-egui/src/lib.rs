@@ -522,6 +522,8 @@ pub struct BimApp {
     ribbon_bottom: Pos2,
     /// The Compact layout (File > Settings): the bars and palettes flush to the edges, not floating cards.
     compact: bool,
+    /// The layout a hosting page last asked for (`set_host_look`): asked again, the same, it leaves the person's own choice.
+    host_compact: Option<bool>,
     /// Which interface the window wears (File > Settings): BIMCraft's own, or Rev.
     profile: style::Profile,
     /// A preset's colours when dark, and the user's accent (Settings > User Interface > Theme).
@@ -1268,6 +1270,7 @@ impl BimApp {
             grab: egui::Vec2::ZERO,
             ribbon_min: false,
             compact: false,
+            host_compact: None,
             profile: style::Profile::default(),
             scheme: style::Scheme::default(),
             accent: None,

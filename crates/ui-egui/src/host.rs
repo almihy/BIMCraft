@@ -168,15 +168,18 @@ impl BimApp {
         }
     }
 
-    /// Wear the page's look from the next frame.
+    /// Wear the page's look from the next frame: its light or dark and the colours it sends (none, BIMCraft's own). What the
+    /// person picked for themselves stays: the Light Canvas is theirs, and the layout changes only when the page asks for a
+    /// different one than it last did, so a page that sends its look again with each theme change wipes no choice.
     pub fn set_host_look(&mut self, look: HostLook) {
         self.theme_wanted = Some(if look.dark { ThemePreference::Dark } else { ThemePreference::Light });
         (self.panel_colour, self.text_colour, self.accent, self.canvas_colour) = (look.panel, look.text, look.accent, look.canvas);
         self.skin = look.skin;
-        if let Some(compact) = look.compact {
+        if let Some(compact) = look.compact
+            && self.host_compact != Some(compact)
+        {
+            self.host_compact = Some(compact);
             self.compact = compact;
         }
-        // Light lines on a dark drawing, as the page's own drawings are in its dark theme.
-        self.light_canvas = false;
     }
 }

@@ -122,6 +122,29 @@ fn the_page_dresses_the_window_in_its_colours() {
     assert_eq!(crate::style::pal().panel, egui::Color32::from_rgb(23, 28, 37));
 }
 
+#[test]
+fn the_pages_look_changes_only_what_it_sends_and_keeps_the_persons_own_choices() {
+    let mut h = hosted(BOX);
+    h.state_mut().set_host_look(HostLook { dark: true, compact: Some(true), ..HostLook::default() });
+    h.run();
+    assert!(crate::style::compact());
+    // The person picks the Light Canvas and the floating cards for themselves.
+    (h.state_mut().light_canvas, h.state_mut().compact) = (true, false);
+    // The page sends its look again, light now, the same layout as before: the person's choices stay.
+    h.state_mut().set_host_look(HostLook { dark: false, compact: Some(true), ..HostLook::default() });
+    h.run();
+    assert!(!crate::style::dark(), "light or dark is the page's");
+    assert!(h.state().light_canvas, "the Light Canvas is the person's");
+    assert!(!h.state().compact, "the layout the page asked for already does not undo the person's");
+    h.state_mut().set_host_look(HostLook { dark: true, ..HostLook::default() });
+    h.run();
+    assert!(h.state().light_canvas && !h.state().compact, "a look with no layout keeps it");
+    // A layout the page had not asked for is the page's change.
+    h.state_mut().set_host_look(HostLook { dark: true, compact: Some(false), ..HostLook::default() });
+    h.state_mut().set_host_look(HostLook { dark: true, compact: Some(true), ..HostLook::default() });
+    assert!(h.state().compact);
+}
+
 /// A room drawn in metres on WALLS, as a DXF.
 fn room_dxf() -> Vec<u8> {
     let pairs = |list: &[(i32, &str)]| list.iter().map(|(c, v)| format!("{c}\n{v}\n")).collect::<String>();
