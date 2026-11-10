@@ -11,6 +11,7 @@ use web_time::{Duration, SystemTime};
 
 use bimcraft_core::model::Model;
 use bimcraft_core::view3d::{AZIMUTH, ELEVATION, Scene};
+#[cfg(feature = "updater")]
 use bimcraft_update::State;
 use egui::epaint::{Mesh, PathShape, Shadow};
 use egui::{
@@ -146,8 +147,11 @@ enum Click {
     Forget(PathBuf),
     Back,
     Page(String),
+    #[cfg(feature = "updater")]
     Update,
+    #[cfg(feature = "updater")]
     Check,
+    #[cfg(feature = "updater")]
     Restart,
 }
 
@@ -284,16 +288,19 @@ impl BimApp {
             }
             Click::Back => self.home.shown = false,
             Click::Page(url) => ctx.open_url(OpenUrl::new_tab(url)),
+            #[cfg(feature = "updater")]
             Click::Update => {
                 if let Some(u) = self.updates.as_mut() {
                     u.update_now();
                 }
             }
+            #[cfg(feature = "updater")]
             Click::Check => {
                 if let Some(u) = self.updates.as_mut() {
                     u.check_now();
                 }
             }
+            #[cfg(feature = "updater")]
             Click::Restart => self.guard(Pending::Update, &ctx),
         }
     }
@@ -464,6 +471,13 @@ impl BimApp {
     }
 
     /// Whether an update is out, right to left.
+    #[cfg(not(feature = "updater"))]
+    fn update_status(&self, ui: &mut Ui, _: &mut Option<Click>) {
+        ui.label(RichText::new(t("This copy doesn't look for updates.")).color(pal().muted));
+    }
+
+    /// Whether an update is out, right to left.
+    #[cfg(feature = "updater")]
     fn update_status(&self, ui: &mut Ui, click: &mut Option<Click>) {
         let Some(u) = self.updates.as_ref() else {
             ui.label(RichText::new(t("This copy doesn't look for updates.")).color(pal().muted));
@@ -546,6 +560,7 @@ fn action(ui: &mut Ui, icon: Icon, title: &str, hint: &str, keys: &str) -> Respo
 }
 
 /// A rounded label, tinted.
+#[cfg(feature = "updater")]
 fn pill(ui: &mut Ui, text: &str, color: Color32) {
     Frame::new()
         .fill(color.gamma_multiply(0.14))

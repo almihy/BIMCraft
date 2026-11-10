@@ -159,7 +159,8 @@ pub fn get() -> Lang {
 }
 
 /// The language the system's settings ask for (on Linux, `LC_ALL`, `LC_MESSAGES` or `LANG`), when
-/// it's one there is; else English.
+/// it's one there is; else English. A browser's window has none: its page says.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn from_env() -> Lang {
     sys_locale::get_locale().and_then(|l| Lang::from_code(&l)).unwrap_or_default()
 }

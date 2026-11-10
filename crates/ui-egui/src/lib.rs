@@ -47,6 +47,7 @@ mod objectstyles;
 mod orbit;
 mod paper;
 mod phasing;
+#[cfg(feature = "plugins")]
 mod plugins;
 mod popup;
 mod presets;
@@ -79,6 +80,7 @@ mod titlebar;
 mod titleblocks;
 mod triad;
 mod typeprops;
+#[cfg(feature = "updater")]
 mod updates;
 mod view_worker;
 pub mod window;
@@ -287,6 +289,29 @@ pub struct Status {
     pub error: bool,
 }
 
+impl BimApp {
+    /// Whether an update is being put in place, which holds the window until it has gone through or failed.
+    pub(crate) fn installing(&self) -> bool {
+        #[cfg(feature = "updater")]
+        return self.updates.as_ref().is_some_and(|u| matches!(u.state(), bimcraft_update::State::Installing { .. }));
+        #[cfg(not(feature = "updater"))]
+        false
+    }
+
+    /// Whether the Plugins window is open.
+    fn plugins_open(&self) -> bool {
+        #[cfg(feature = "plugins")]
+        return self.plugins_dialog;
+        #[cfg(not(feature = "plugins"))]
+        false
+    }
+}
+
+/// `text` in the status box, as an error.
+pub(crate) fn failed(text: String) -> Status {
+    Status { text, error: true }
+}
+
 /// A snap override typed as a shortcut, for the next point picked: Revit's SE, SM, SI, SC, SP and
 /// SN (that snap alone), and SO (none).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -312,6 +337,7 @@ enum Tab {
     Modify,
     Context,
     /// A tab a plugin declared, by its place in [`BimApp::plugin_tabs`].
+    #[cfg(feature = "plugins")]
     Plugin(usize),
 }
 
@@ -331,6 +357,7 @@ fn tab_key(tab: Tab) -> u64 {
         Tab::Manage => 10,
         Tab::Modify => 11,
         Tab::Context => 12,
+        #[cfg(feature = "plugins")]
         Tab::Plugin(i) => 100 + i as u64,
     }
 }
@@ -347,6 +374,7 @@ enum Pending {
     OpenPath(PathBuf),
     Close,
     /// Close, so the installer can replace the program, and start it again updated.
+    #[cfg(feature = "updater")]
     Update,
 }
 
@@ -794,16 +822,22 @@ pub struct BimApp {
     /// Manage > Technical Standards, while open.
     standards_dialog: Option<standards::StandardsDialog>,
     /// The plugins of the user's folder, the tabs they put on the ribbon, and the Plugins window while it is open.
+    #[cfg(feature = "plugins")]
     pub(crate) plugins: bimcraft_plugin::Plugins,
+    #[cfg(feature = "plugins")]
     pub(crate) plugin_tabs: Vec<bimcraft_plugin::RibbonTab>,
+    #[cfg(feature = "plugins")]
     pub(crate) plugins_dialog: bool,
     /// A report a plugin's function asked the window to show, while it is open.
+    #[cfg(feature = "plugins")]
     pub(crate) plugin_report: Option<plugins::PluginReport>,
     /// A plugin's function whose path the user is choosing in the system's dialog: its command, and the parameters with
     /// the path left to set. Running a function is one click on the ribbon, and a function that needs a file asks for
     /// it there.
+    #[cfg(feature = "plugins")]
     pub(crate) plugin_pick: Option<(String, serde_json::Map<String, serde_json::Value>)>,
     /// The folder being read on a thread of its own, so the first frame isn't kept waiting by it.
+    #[cfg(feature = "plugins")]
     plugins_job: Option<std::sync::mpsc::Receiver<bimcraft_plugin::Plugins>>,
     /// Manage > Electrical Settings, while open.
     electrical_dialog: Option<electrical::ElectricalDialog>,
@@ -842,6 +876,7 @@ pub struct BimApp {
     page_fonts: Option<style::PageFonts>,
     refont: bool,
     /// The updater, which the desktop app attaches: a window starts without one, and so never phones home.
+    #[cfg(feature = "updater")]
     pub updates: Option<bimcraft_update::Updater>,
     /// The 3D mouse's reader, which the desktop app attaches: a window starts without one, so a test never opens a device.
     pub space_mouse: Option<spacemouse::SpaceMouse>,
@@ -910,6 +945,7 @@ fn big_button(ui: &mut Ui, icon: Icon, label: &str, active: bool, tip: &str) -> 
 
 /// A ribbon button whose label is a plugin's data: it isn't translated, as its manifest wrote it, and it has no icon
 /// (icons come later, from a limited set of glyphs in the manifest).
+#[cfg(feature = "plugins")]
 fn plugin_button(ui: &mut Ui, label: &str, tip: &str) -> Response {
     const WIDE: f32 = 78.0;
     if ribbon::left_out(label) {
@@ -947,6 +983,7 @@ fn plugin_button(ui: &mut Ui, label: &str, tip: &str) -> Response {
 }
 
 /// A plugin's button in its panel's list: its row is text alone, as its ribbon button has no icon.
+#[cfg(feature = "plugins")]
 fn plugin_row(ui: &mut Ui, label: &str, tip: &str) -> Response {
     let width = ui.available_width().max(200.0);
     let (rect, r) = ui.allocate_exact_size(vec2(width, 30.0), Sense::click());
@@ -1424,11 +1461,17 @@ impl BimApp {
             sketch: None,
             mode_width: 0.0,
             standards_dialog: None,
+            #[cfg(feature = "plugins")]
             plugins: bimcraft_plugin::Plugins::empty(),
+            #[cfg(feature = "plugins")]
             plugin_tabs: Vec::new(),
+            #[cfg(feature = "plugins")]
             plugins_dialog: false,
+            #[cfg(feature = "plugins")]
             plugin_report: None,
+            #[cfg(feature = "plugins")]
             plugin_pick: None,
+            #[cfg(feature = "plugins")]
             plugins_job: None,
             electrical_dialog: None,
             options_dialog: None,
@@ -1452,6 +1495,7 @@ impl BimApp {
             styled: false,
             page_fonts: None,
             refont: false,
+            #[cfg(feature = "updater")]
             updates: None,
             space_mouse: None,
             revit: None,
@@ -1648,7 +1692,7 @@ impl BimApp {
         let hanzi = lang::use_cjk_font(&ctx, self.font_finder);
         if self.lang.is_chinese() && !hanzi {
             self.lang = Lang::English;
-            self.status = updates::failed(t(lang::NO_CHINESE_FONT).to_string());
+            self.status = failed(t(lang::NO_CHINESE_FONT).to_string());
         }
         lang::set(self.lang);
         // What agents asked of the project comes before the tidying, which puts right what a command left stale.
@@ -1661,8 +1705,10 @@ impl BimApp {
             self.autosave_document();
         }
         self.tidy();
+        #[cfg(feature = "updater")]
         self.poll_updates(&ctx);
         self.poll_revit(&ctx);
+        #[cfg(feature = "plugins")]
         self.poll_plugins(&ctx);
         self.poll_autosave(&ctx);
         self.keys(&ctx);
@@ -1720,6 +1766,7 @@ impl BimApp {
         });
         let card = style::card([true, true, true, false]);
         Panel::top("ribbon").frame(card).show_separator_line(false).show(ui, |ui| self.ribbon(ui));
+        #[cfg(feature = "updater")]
         if self.has_update_banner() {
             Panel::top("update").frame(Frame::NONE).show_separator_line(false).show(ui, |ui| self.update_banner(ui));
         }
@@ -1944,7 +1991,7 @@ impl BimApp {
             || self.ids_of_selection.is_some()
             || self.selection_filter.is_some()
             || self.settings_page.is_some()
-            || self.plugins_dialog
+            || self.plugins_open()
             || self.find.is_some()
             || self.new_schedule.is_some()
             || self.show_shortcuts
@@ -3160,7 +3207,11 @@ impl BimApp {
         fresh.docking = std::mem::take(&mut self.docking);
         (fresh.settings_path, fresh.settings_kept) = (self.settings_path.take(), self.settings_kept.take());
         fresh.window = std::mem::take(&mut self.window);
-        (fresh.updates, fresh.revit) = (self.updates.take(), self.revit.take());
+        #[cfg(feature = "updater")]
+        {
+            fresh.updates = self.updates.take();
+        }
+        fresh.revit = self.revit.take();
         // The 3D mouse's reader runs for the window, not the project: without it the cap would move nothing once a project is open.
         fresh.space_mouse = self.space_mouse.take();
         fresh.control = self.control.take();
@@ -3172,11 +3223,14 @@ impl BimApp {
         fresh.home = self.home.put_away();
         // A new or opened project keeps the plugins and their tabs: they are the user's folder, not the project's, and the
         // session's external commands were already registered. Re-registering puts them back if the project replaced them.
-        (fresh.plugins, fresh.plugin_tabs) = (std::mem::take(&mut self.plugins), std::mem::take(&mut self.plugin_tabs));
-        fresh.plugins_job = self.plugins_job.take();
-        fresh.plugins_dialog = self.plugins_dialog;
-        fresh.plugins.register(&mut fresh.session);
-        fresh.plugin_tabs = fresh.plugins.tabs();
+        #[cfg(feature = "plugins")]
+        {
+            (fresh.plugins, fresh.plugin_tabs) = (std::mem::take(&mut self.plugins), std::mem::take(&mut self.plugin_tabs));
+            fresh.plugins_job = self.plugins_job.take();
+            fresh.plugins_dialog = self.plugins_dialog;
+            fresh.plugins.register(&mut fresh.session);
+            fresh.plugin_tabs = fresh.plugins.tabs();
+        }
         *self = fresh;
     }
 
@@ -3241,6 +3295,7 @@ impl BimApp {
                 self.closing = true;
                 ctx.send_viewport_cmd(ViewportCommand::Close);
             }
+            #[cfg(feature = "updater")]
             Pending::Update => {
                 self.retire_autosave();
                 self.install_update();
@@ -3395,6 +3450,7 @@ impl BimApp {
                 let now = tab_key(self.tab);
                 let changed = ui.ctx().data(|d| d.get_temp::<u64>(seen)) != Some(now);
                 ui.ctx().data_mut(|d| d.insert_temp(seen, now));
+                #[cfg(feature = "plugins")]
                 let plugin_tabs: Vec<String> = self.plugin_tabs.iter().map(|p| self.plugin_tab_name(p)).collect();
                 ScrollArea::horizontal()
                     .id_salt("ribbon-tabs")
@@ -3411,6 +3467,7 @@ impl BimApp {
                                 self.ribbon_tab(&r, tab);
                             }
                             // The plugins' tabs come after BIMCraft's, each as its manifest declared it.
+                            #[cfg(feature = "plugins")]
                             for (i, label) in plugin_tabs.iter().enumerate() {
                                 let tab = Tab::Plugin(i);
                                 let r = tab_button(ui, label, self.tab == tab, false);
@@ -3503,6 +3560,7 @@ impl BimApp {
             Tab::View => self.view_tab(ui),
             Tab::Manage => self.manage_tab(ui),
             Tab::Modify | Tab::Context => self.modify_tab(ui),
+            #[cfg(feature = "plugins")]
             Tab::Plugin(i) => self.plugin_tab(ui, i),
         }
     }
@@ -3567,6 +3625,7 @@ impl BimApp {
         }
         self.export_menu(ui, ctx);
         self.report_menu(ui);
+        #[cfg(feature = "updater")]
         self.update_menu(ui);
         ui.separator();
         if item(ui, msg!("Settings…"), Some(KeyboardShortcut::new(Modifiers::COMMAND, Key::Comma))) {
@@ -4075,11 +4134,14 @@ impl BimApp {
                         self.show_palette(p, on);
                     }
                 }
-                ui.separator();
-                ui.label(RichText::new(t("Language")).color(pal().muted));
-                for l in Lang::ALL {
-                    if ui.selectable_label(self.lang == l, l.label()).clicked() {
-                        self.set_lang(ui.ctx(), l);
+                // A hosted window speaks its page's language: the page decides it.
+                if !self.hosted {
+                    ui.separator();
+                    ui.label(RichText::new(t("Language")).color(pal().muted));
+                    for l in Lang::ALL {
+                        if ui.selectable_label(self.lang == l, l.label()).clicked() {
+                            self.set_lang(ui.ctx(), l);
+                        }
                     }
                 }
             });
@@ -4129,10 +4191,14 @@ impl BimApp {
             if big_button(ui, Icon::Favorite, "Favorites", self.favorites_dialog.is_some(), tip).clicked() {
                 self.open_favorites();
             }
-            let tip =
-                msg!("Plugins: the WASM extensions in your plugin folder, what became of each, their log, and switching them on and off");
-            if !self.hosted && big_button(ui, Icon::Code, "Plugins", self.plugins_dialog, tip).clicked() {
-                self.plugins_dialog = true;
+            #[cfg(feature = "plugins")]
+            {
+                let tip = msg!(
+                    "Plugins: the WASM extensions in your plugin folder, what became of each, their log, and switching them on and off"
+                );
+                if !self.hosted && big_button(ui, Icon::Code, "Plugins", self.plugins_dialog, tip).clicked() {
+                    self.plugins_dialog = true;
+                }
             }
             let tip = msg!("Project Parameters: values of your own each element of their categories holds, for schedules and IFC");
             if big_button(ui, Icon::Parameters, "Project Parameters", self.parameters_dialog.is_some(), tip).clicked() {
@@ -5289,9 +5355,12 @@ impl BimApp {
         self.selection_filter_window(ctx);
         self.shortcuts_window(ctx);
         self.settings_window(ctx);
+        #[cfg(feature = "plugins")]
         self.plugins_window(ctx);
+        #[cfg(feature = "plugins")]
         self.plugin_report_window(ctx);
         self.background_grid_window(ctx);
+        #[cfg(feature = "updater")]
         self.installing_box(ctx);
         self.importing_box(ctx);
         self.report_window(ctx);

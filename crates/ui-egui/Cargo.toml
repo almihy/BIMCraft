@@ -10,21 +10,41 @@ rust-version = "1.95"
 [lints]
 workspace = true
 
+[features]
+# The desktop app's window (apps/bimcraft): everything. A window a page hosts (apps/bimcraft-web, Arqiflow's editor) is built
+# with none of these: it runs no plugins and no updater, letters its interface in IBM Plex and the page's fonts, and speaks
+# the languages `build.rs` lists for it (English alone today), the page deciding which.
+default = ["desktop"]
+desktop = ["plugins", "updater", "egui-fonts", "all-languages", "eframe/default"]
+# The WASM plugins of the user's folder (bimcraft-plugin, with its interpreter), their ribbon tabs and the Plugins window.
+plugins = ["dep:bimcraft-plugin"]
+# Looking for, downloading and installing a newer release (bimcraft-update): the banner, the start page's line, Settings' page.
+updater = ["dep:bimcraft-update"]
+# egui's own faces behind Plex (Ubuntu Light, Hack, Noto Emoji and the emoji icon font), for symbols and emoji that Plex
+# hasn't, in names that come from files.
+egui-fonts = ["egui/default_fonts"]
+# Every interface catalog in translations/ui; without it, only those `build.rs` lists in `LANGUAGES`.
+all-languages = []
+
 [dependencies]
 bimcraft-i18n = { workspace = true }
 bimcraft-core = { workspace = true }
-bimcraft-plugin = { workspace = true }
-bimcraft-update = { workspace = true }
+bimcraft-plugin = { workspace = true, optional = true }
+bimcraft-update = { workspace = true, optional = true }
 serde_json = { workspace = true }
 egui = { workspace = true }
-eframe = { workspace = true }
+# eframe's default features but egui's fonts (`egui-fonts`) and the desktop's windowing ones (`desktop`).
+eframe = { workspace = true, features = ["accesskit", "links", "web_screen_reader", "wgpu"] }
 pollster = "1"
 rayon = { workspace = true }
 bytemuck = "1"
-rfd = { workspace = true }
-sys-locale = { workspace = true }
 # Instant and SystemTime that work in a browser too (std's panic there); std's own elsewhere.
 web-time = "1"
+
+# The system's file dialogs and its language: a browser has neither (a hosted window asks its page).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rfd = { workspace = true }
+sys-locale = { workspace = true }
 
 # The 3D mouse (`spacemouse.rs`), read from its HID reports through hidapi's own Windows backend: pure Rust, MIT.
 [target.'cfg(windows)'.dependencies]

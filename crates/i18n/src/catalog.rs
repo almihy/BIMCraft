@@ -271,7 +271,8 @@ fn append_obsolete(lines: &mut Vec<String>, entry: &Entry) {
 
 /// Validate catalogs and generate sorted static Rust tables for a domain. Only translated,
 /// non-fuzzy entries are embedded, so every other lookup falls back to its English source.
-pub fn compile(directory: &Path, output: &Path) -> Result<(), String> {
+/// `languages` names the catalogs to embed (by file name: `pt`, `zh_TW`); `None` embeds every one.
+pub fn compile(directory: &Path, output: &Path, languages: Option<&[&str]>) -> Result<(), String> {
     println!("cargo:rerun-if-changed={}", directory.display());
     let mut paths = fs::read_dir(directory)
         .map_err(|e| format!("{}: {e}", directory.display()))?
@@ -282,6 +283,9 @@ pub fn compile(directory: &Path, output: &Path) -> Result<(), String> {
     let mut generated = String::from("pub const CATALOGS: bimcraft_i18n::Catalogs = &[\n");
     for path in paths.iter().filter(|p| p.extension().is_some_and(|e| e == "po")) {
         let language = path.file_stem().and_then(|s| s.to_str()).ok_or("invalid catalog filename")?;
+        if languages.is_some_and(|only| !only.contains(&language)) {
+            continue;
+        }
         let document = read(path)?;
         generated.push_str(&format!("({language:?}, &[\n"));
         for entry in document.entries.values().filter(|e| !e.fuzzy && !e.translation.trim().is_empty()) {
@@ -342,12 +346,20 @@ mod tests {
         .unwrap();
         fs::write(directory.path().join("es.po"), "msgid \"Save\"\nmsgstr \"Guardar\"\n").unwrap();
         let output = directory.path().join("catalogs.rs");
-        compile(directory.path(), &output).unwrap();
-        let generated = fs::read_to_string(output).unwrap();
+        compile(directory.path(), &output, None).unwrap();
+        let generated = fs::read_to_string(&output).unwrap();
         syn::parse_file(&generated).unwrap();
         assert!(generated.contains("Salvar") && generated.contains("Guardar"));
         assert!(!generated.contains("Blank") && !generated.contains("Count") && !generated.contains("Antigo"));
         assert!(generated.find("es").unwrap() < generated.find("pt").unwrap());
+        // Only the languages asked for, and none at all: English alone.
+        compile(directory.path(), &output, Some(&["es"])).unwrap();
+        let generated = fs::read_to_string(&output).unwrap();
+        assert!(generated.contains("Guardar") && !generated.contains("Salvar"));
+        compile(directory.path(), &output, Some(&[])).unwrap();
+        let generated = fs::read_to_string(&output).unwrap();
+        syn::parse_file(&generated).unwrap();
+        assert!(!generated.contains("Guardar") && !generated.contains("Salvar"));
     }
 
     #[test]

@@ -22,6 +22,7 @@ pub(crate) enum Found {
     /// A 3D view: the default `{3D}` when none.
     View3D(Option<Id>),
     /// A function a plugin registered, by its command id (`plugin:<plugin>:<function>`), run as its ribbon button runs it.
+    #[cfg(feature = "plugins")]
     Plugin(String),
 }
 
@@ -42,19 +43,9 @@ impl BimApp {
         });
         let views = self.openable().into_iter().map(|(label, f)| (label, None, f));
         // The plugins' functions, as their ribbon tabs list them.
-        let owners = self.plugins.owners();
-        let plugin_commands = self.plugins.plugins.iter().filter(|p| p.status.is_loaded()).flat_map(|p| {
-            p.manifest
-                .functions
-                .iter()
-                .filter_map(|f| {
-                    let id = format!("plugin:{}:{}", p.manifest.id, f.id);
-                    let owner = owners.get(&id)?;
-                    Some((format!("{} · {}", f.label, owner), None, Found::Plugin(id)))
-                })
-                .collect::<Vec<_>>()
-        });
-        actions.chain(plugin_commands).chain(views).filter(|(label, ..)| matches(label, query)).take(MOST).collect()
+        #[cfg(feature = "plugins")]
+        let actions = actions.chain(self.plugin_functions());
+        actions.chain(views).filter(|(label, ..)| matches(label, query)).take(MOST).collect()
     }
 
     /// Find, while it's open: a field across the top of the window, and under it what matches.
@@ -116,6 +107,7 @@ impl BimApp {
             }
             Some(Found::View(sheet)) => self.open_sheet(sheet),
             Some(Found::View3D(id)) => self.open_3d(id),
+            #[cfg(feature = "plugins")]
             Some(Found::Plugin(id)) => {
                 let label = self.plugins.owners().get(id.as_str()).cloned().unwrap_or_else(|| id.clone());
                 self.run_plugin_function(&id, label, ctx);

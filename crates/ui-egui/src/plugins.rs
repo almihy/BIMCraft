@@ -135,6 +135,19 @@ impl BimApp {
         }
     }
 
+    /// The functions of the plugins that loaded, for Find: each named with the tab it is on.
+    pub(crate) fn plugin_functions(&self) -> Vec<(String, Option<&'static str>, crate::find::Found)> {
+        let owners = self.plugins.owners();
+        let loaded = self.plugins.plugins.iter().filter(|p| p.status.is_loaded());
+        loaded
+            .flat_map(|p| p.manifest.functions.iter().map(move |f| (format!("plugin:{}:{}", p.manifest.id, f.id), &f.label)))
+            .filter_map(|(id, label)| {
+                let owner = owners.get(&id)?;
+                Some((format!("{label} · {owner}"), None, crate::find::Found::Plugin(id)))
+            })
+            .collect()
+    }
+
     /// A plugin tab that is open while the folder is read again gives way to BIMCraft's own: its index may name another tab
     /// now, or none.
     fn leave_a_gone_plugin_tab(&mut self) {

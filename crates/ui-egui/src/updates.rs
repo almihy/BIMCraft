@@ -15,7 +15,7 @@ use egui::{Button, Color32, Context, Frame, Id, OpenUrl, ProgressBar, RichText, 
 
 use crate::lang::{t, tf};
 use crate::style::pal;
-use crate::{BimApp, Pending, Status};
+use crate::{BimApp, Pending, Status, failed};
 
 /// What a click on the banner asks for, done once it's drawn.
 enum Click {
@@ -24,10 +24,6 @@ enum Click {
     Skip,
     Restart,
     Page(String),
-}
-
-pub(crate) fn failed(text: String) -> Status {
-    Status { text, error: true }
 }
 
 impl BimApp {
@@ -53,11 +49,6 @@ impl BimApp {
                 return;
             }
         };
-    }
-
-    /// Whether an update is being put in place, which holds the window until it has gone through or failed.
-    pub(crate) fn installing(&self) -> bool {
-        self.updates.as_ref().is_some_and(|u| matches!(u.state(), State::Installing { .. }))
     }
 
     /// Whether the banner has something to say.

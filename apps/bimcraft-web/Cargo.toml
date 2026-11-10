@@ -12,8 +12,9 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 bimcraft-core = { workspace = true }
+# A hosted window: none of the desktop's features (no plugins, updater, egui's own fonts or other languages).
 bimcraft-ui-egui = { workspace = true }
-eframe = { workspace = true }
+eframe = { workspace = true, features = ["wgpu"] }
 egui = { workspace = true }
 js-sys = "0.3"
 serde_json = { workspace = true }

@@ -23,7 +23,7 @@ use crate::dock::{Docking, Palette};
 use crate::lang::{Lang, t, tf};
 use crate::presets::{Preset, Scale, hidden_from_json, presets_from_json};
 use crate::style::{Scheme, pal};
-use crate::updates::failed;
+use crate::failed;
 use std::collections::BTreeSet;
 
 /// The settings file's name, in the folder of the favorites.
@@ -521,14 +521,17 @@ impl BimApp {
             let tip = msg!("The ribbon, the palettes and the bars flush to the window's edges");
             ui.radio_value(&mut self.compact, true, t("Compact")).on_hover_text(t(tip));
         });
-        heading(ui, "Language");
-        ComboBox::from_id_salt("settings-language").selected_text(self.lang.label()).width(200.0).show_ui(ui, |ui| {
-            for l in Lang::ALL {
-                if ui.selectable_label(self.lang == l, l.label()).clicked() {
-                    self.set_lang(ctx, l);
+        // A hosted window speaks its page's language: the page decides it.
+        if !self.hosted() {
+            heading(ui, "Language");
+            ComboBox::from_id_salt("settings-language").selected_text(self.lang.label()).width(200.0).show_ui(ui, |ui| {
+                for l in Lang::ALL {
+                    if ui.selectable_label(self.lang == l, l.label()).clicked() {
+                        self.set_lang(ctx, l);
+                    }
                 }
-            }
-        });
+            });
+        }
         heading(ui, msg!("Ribbon"));
         ui.checkbox(&mut self.ribbon_min, t("Minimize the ribbon to its tabs"))
             .on_hover_text(t("Double-clicking a tab's name does the same; a click on a tab then shows its tools until one is picked"));
@@ -567,11 +570,12 @@ impl BimApp {
     }
 
     fn updates_page(&mut self, ui: &mut Ui) {
+        #[cfg(feature = "updater")]
         if self.updates.is_some() {
             self.update_menu(ui);
-        } else {
-            ui.label(RichText::new(t("This copy doesn't look for updates.")).color(pal().muted));
+            return;
         }
+        ui.label(RichText::new(t("This copy doesn't look for updates.")).color(pal().muted));
     }
 }
 

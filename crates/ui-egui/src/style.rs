@@ -557,8 +557,9 @@ pub struct PageFonts {
     pub mono: Option<Arc<Vec<u8>>>,
 }
 
-/// IBM Plex Sans (regular, and semibold as a family of its own) and Plex Mono first, egui's own faces behind them for the
-/// symbols Plex hasn't. A hosting page's own faces (`page`) go before Plex, which stays behind them for what they haven't.
+/// IBM Plex Sans (regular, and semibold as a family of its own) and Plex Mono first; egui's own faces behind them for the
+/// symbols and emoji Plex hasn't, in a build with them (the `egui-fonts` feature: the desktop's, not a page's). A hosting
+/// page's own faces (`page`) go before Plex, which stays behind them for what they haven't.
 fn fonts(page: Option<&PageFonts>) -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
     let behind = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();

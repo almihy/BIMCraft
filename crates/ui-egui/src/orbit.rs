@@ -1029,7 +1029,7 @@ impl BimApp {
                     return;
                 }
                 Err(e) => {
-                    self.status = crate::updates::failed(crate::lang::tf(
+                    self.status = crate::failed(crate::lang::tf(
                         "The graphics card couldn't draw the 3D view ({}): it is drawn on the processor",
                         &[&e],
                     ));
@@ -1085,7 +1085,7 @@ impl BimApp {
                         (drawn, exact) = (true, whole);
                     }
                     Err(e) => {
-                        self.status = crate::updates::failed(crate::lang::tf(
+                        self.status = crate::failed(crate::lang::tf(
                             "The graphics card couldn't draw the 3D view ({}): it is drawn on the processor",
                             &[&e],
                         ));
