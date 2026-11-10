@@ -19,13 +19,14 @@
 //!   meets, and stop or give-way lines and one-way arrows are painted.
 //!
 //! The browser's memo (work kept between frames of a drag) is not ported: every call works everything out, which a
-//! level of a hundred and fifty roads does in a few tens of milliseconds.
+//! level of a hundred and fifty roads does in about 50 ms natively (the roads and junctions on rayon's threads; about
+//! 220 ms on one thread, as in the browser).
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::poly::{
-    ARC_TOL, Ring, Shape, Xy, at, band, ccw, clip_lines, closing_pieces, cross, difference, dist, dot, grow, hull, in_rings, intersection,
-    join, left_of, line_distance, ring_area, rings_distance, seg_point, shape_distance, sub, union,
+    ARC_TOL, Ring, Shape, Xy, at, band, ccw, clip_lines, closing_pieces, cross, difference, dist, dot, each, each_index, grow, hull,
+    in_rings, intersection, join, left_of, line_distance, ring_area, rings_distance, seg_point, shape_distance, sub, union,
 };
 use crate::site::Props;
 
@@ -565,7 +566,7 @@ struct Patch {
 
 /// The patch that joins two pieces at a joint for half widths `half`: owned by the wider (by the first id where they
 /// are as wide), which is cut back by the taper where the edges move.
-fn patch_of(roads: &[RoadIn], j: &Joint, half: &dyn Fn(&Section) -> f64) -> Patch {
+fn patch_of(roads: &[RoadIn], j: &Joint, half: &(dyn Fn(&Section) -> f64 + Sync)) -> Patch {
     let (ha, hb) = (half(&roads[j.a].s), half(&roads[j.b].s));
     let a_owns = ha > hb + 1e-3 || ((ha - hb).abs() <= 1e-3 && roads[j.a].id < roads[j.b].id);
     let (o, oe, x, xe) = if a_owns { (j.a, j.ae, j.b, j.be) } else { (j.b, j.be, j.a, j.ae) };
@@ -632,8 +633,8 @@ fn corners(p: Xy, parts: &[&Vec<Ring>], radius: f64, reach: f64) -> Vec<Ring> {
 fn joined(
     roads: &[RoadIn],
     own: Vec<Vec<Ring>>,
-    half: &dyn Fn(&Section) -> f64,
-    radius: &dyn Fn(&Section) -> f64,
+    half: &(dyn Fn(&Section) -> f64 + Sync),
+    radius: &(dyn Fn(&Section) -> f64 + Sync),
     jts: &[Joint],
     js: &[Junction],
 ) -> (Vec<Vec<Ring>>, Vec<Patch>) {
@@ -642,50 +643,48 @@ fn joined(
     for (n, (j, p)) in jts.iter().zip(&all).enumerate() {
         patches[if p.a_owns { j.a } else { j.b }].push(n);
     }
-    let with: Vec<Vec<Ring>> = own
-        .into_iter()
-        .enumerate()
-        .map(|(k, g)| {
-            if patches[k].is_empty() {
-                return g;
+    let with: Vec<Vec<Ring>> = each_index(roads.len(), |k| {
+        let mut g = own[k].clone();
+        if patches[k].is_empty() {
+            return g;
+        }
+        for &n in &patches[k] {
+            if let Some(c) = &all[n].cut {
+                g = difference(&g, c);
             }
-            let mut g = g;
-            for &n in &patches[k] {
-                if let Some(c) = &all[n].cut {
-                    g = difference(&g, c);
-                }
-            }
-            g.extend(patches[k].iter().map(|&n| ccw(all[n].ring.clone())));
-            union(&g)
-        })
-        .collect();
-    let mut extra: Vec<Vec<Ring>> = vec![Vec::new(); roads.len()];
-    for j in js {
+        }
+        g.extend(patches[k].iter().map(|&n| ccw(all[n].ring.clone())));
+        union(&g)
+    });
+    // Each junction's corners (on their own: they read only the roads' shapes), then given to the roads they touch.
+    let found: Vec<Vec<(usize, Ring)>> = each(js, |j| {
         let pick = if j.ending.is_empty() { &j.at[..1] } else { &j.ending[..] };
         let r = pick.iter().map(|&k| radius(&roads[k].s)).fold(f64::INFINITY, f64::min);
         let most = j.at.iter().map(|&k| roads[k].s.outer()).fold(0.0, f64::max);
         // Far enough for a corner at a sharp angle (its arc runs on radius / tan(angle / 2) along each road).
         let reach = 1.5 * most + 6.0 * r + 1000.0;
         let parts: Vec<&Vec<Ring>> = j.at.iter().map(|&k| &with[k]).collect();
+        let mut out = Vec::new();
         for g in corners(j.p, &parts, r, reach) {
             for &o in pick {
                 if rings_distance(std::slice::from_ref(&g), &with[o]) < 1.0 {
-                    extra[o].push(g.clone());
+                    out.push((o, g.clone()));
                 }
             }
         }
+        out
+    });
+    let mut extra: Vec<Vec<Ring>> = vec![Vec::new(); roads.len()];
+    for (o, g) in found.into_iter().flatten() {
+        extra[o].push(g);
     }
-    let shapes = with
-        .iter()
-        .zip(extra)
-        .map(|(w, x)| {
-            if x.is_empty() {
-                return w.clone();
-            }
-            // A corner piece lies a hair's breadth off its road: closed onto it.
-            join(w, &x)
-        })
-        .collect();
+    let shapes = each_index(roads.len(), |k| {
+        if extra[k].is_empty() {
+            return with[k].clone();
+        }
+        // A corner piece lies a hair's breadth off its road: closed onto it.
+        join(&with[k], &extra[k])
+    });
     (shapes, all)
 }
 
@@ -730,9 +729,12 @@ pub struct RoadParts {
     pub paint: Vec<Ring>,
 }
 
+/// A road's median (its middle and width, if it has one) and painted lines (each's offset and kind), across it.
+pub type Across = (Option<(f64, f64)>, Vec<(f64, MarkKind)>);
+
 /// The parts of a road across, as offsets to the left of its line: the median's middle and width, and the lines
 /// painted. Driving on the right: the way along the line is on its right.
-pub fn across(s: &Section) -> (Option<(f64, f64)>, Vec<(f64, MarkKind)>) {
+pub fn across(s: &Section) -> Across {
     let p = s.paved();
     let lw = s.lane_width;
     let mut marks = Vec::new();
@@ -1008,7 +1010,7 @@ pub fn net(roads: &[RoadIn], lay: &Layout, outlines: &[Vec<Ring>]) -> Vec<RoadPa
         all.extend(boxes[k].iter().cloned());
         if all.is_empty() { Vec::new() } else { grow(&union(&all), STOP, ARC_TOL) }
     };
-    let stopped: Vec<Vec<Ring>> = (0..roads.len()).map(stop_rings).collect();
+    let stopped: Vec<Vec<Ring>> = each_index(roads.len(), stop_rings);
     let marks_of: Vec<Vec<Mark>> = roads
         .iter()
         .enumerate()
@@ -1171,10 +1173,9 @@ pub fn net(roads: &[RoadIn], lay: &Layout, outlines: &[Vec<Ring>]) -> Vec<RoadPa
     }
     // The kerb lines and the back of the pavements: each road's edges less what lies in the roads near it, each grown
     // once.
-    let cw_grown: Vec<Vec<Ring>> = cw.iter().map(|g| grow(g, SHARED, 5.0)).collect();
-    let ol_grown: Vec<Vec<Ring>> = outlines.iter().map(|g| grow(g, SHARED, 5.0)).collect();
-    let mut out = Vec::with_capacity(roads.len());
-    for k in 0..roads.len() {
+    let cw_grown: Vec<Vec<Ring>> = each(&cw, |g| grow(g, SHARED, 5.0));
+    let ol_grown: Vec<Vec<Ring>> = each(outlines, |g| grow(g, SHARED, 5.0));
+    each_index(roads.len(), |k| {
         let is_piece = |o: &usize| partners.contains(&pair(k, *o));
         let mut kclip: Vec<Ring> = Vec::new();
         let mut bclip: Vec<Ring> = Vec::new();
@@ -1196,17 +1197,8 @@ pub fn net(roads: &[RoadIn], lay: &Layout, outlines: &[Vec<Ring>]) -> Vec<RoadPa
         let pavement = difference(&outlines[k], &paved);
         let mut marks = marks_of[k].clone();
         marks.extend(across2[k].iter().cloned());
-        out.push(RoadParts {
-            carriageway: cw[k].clone(),
-            pavement,
-            median: median_of[k].clone(),
-            marks,
-            kerbs,
-            backs,
-            paint: std::mem::take(&mut paint[k]),
-        });
-    }
-    out
+        RoadParts { carriageway: cw[k].clone(), pavement, median: median_of[k].clone(), marks, kerbs, backs, paint: paint[k].clone() }
+    })
 }
 
 #[cfg(test)]

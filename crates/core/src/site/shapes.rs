@@ -71,14 +71,8 @@ pub struct Shaped {
 }
 
 /// Arqiflow's figures (site_kinds.FIGURES), by the name a firm sets its own by, in mm for lengths.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Figures(pub BTreeMap<String, f64>);
-
-impl Default for Figures {
-    fn default() -> Self {
-        Figures(BTreeMap::new())
-    }
-}
 
 // ====================================================================== the kinds and their figures
 /// How finely an arc is cut into pieces: each within 20 mm of the true arc.
@@ -362,7 +356,7 @@ pub fn arc_points(p0: Xy, p1: Xy, bulge: f64, tol: f64) -> Vec<Xy> {
     let (cx, cy) = ((p0[0] + p1[0]) / 2.0 + nx * s, (p0[1] + p1[1]) / 2.0 + ny * s);
     let a0 = (p0[1] - cy).atan2(p0[0] - cx);
     let step = if r > tol { 2.0 * (1.0 - tol / r).clamp(-1.0, 1.0).acos() } else { std::f64::consts::FRAC_PI_2 };
-    let n = ((theta.abs() / step - 1e-9).ceil().max(1.0)).min(10_000.0) as usize;
+    let n = (theta.abs() / step - 1e-9).ceil().clamp(1.0, 10_000.0) as usize;
     let mut out: Vec<Xy> = (1..n)
         .map(|k| {
             let t = a0 + theta * k as f64 / n as f64;
@@ -695,6 +689,7 @@ pub fn arc_footprint(arc: &Props) -> Option<(Ring, Vec<(Ring, f64)>)> {
 // ====================================================================== the parking band
 /// Parking stalls in a row on one side of a straight line a–b (Arqiflow's geo.stalls_along): `angle` between the
 /// stall's depth and the line (90 square to it), `start` and `end` kept clear at each end.
+#[allow(clippy::too_many_arguments)] // Arqiflow's geo.stalls_along, argument for argument.
 pub fn stalls_along(a: Xy, b: Xy, width: f64, depth: f64, left: bool, angle: f64, start: f64, end: f64) -> Vec<Ring> {
     let length = poly::dist(a, b);
     if [length, width, depth].iter().any(|v| v.is_nan() || *v <= 0.0) {
@@ -838,6 +833,9 @@ fn area_of(ring: Ring) -> Vec<Ring> {
     poly::union(&[poly::ccw(ring)])
 }
 
+/// A lane's centre line and its own outline, kept for the lanes and roads to join.
+type LaneOwn = (Vec<Xy>, Vec<Ring>);
+
 /// What one item's truth gives before it meets its neighbours, into `out`; a lane's own outline is returned for the
 /// roads and lanes to join.
 fn shape_one(
@@ -847,7 +845,7 @@ fn shape_one(
     figures: &Figures,
     blocked: &[Ring],
     out: &mut Shaped,
-) -> Result<Option<(Vec<Xy>, Vec<Ring>)>, String> {
+) -> Result<Option<LaneOwn>, String> {
     let path = |p: &Props| densify(p.get("path").unwrap_or(&Value::Null), ARC_TOLERANCE);
     match it.kind {
         "lane" => {
@@ -939,7 +937,7 @@ fn shape_one(
             let c = point(p, "at").ok_or("A bike rack is placed by its `at`.")?;
             let spaces = num_or(p, "spaces", 10.0);
             let pad = poly::oriented_rect(c, num(p, "angle").unwrap_or(0.0), (BIKE_RACK_PER_SPACE * spaces).max(800.0), BIKE_RACK_DEPTH);
-            out.outline = rings_to(&[pad.clone()]);
+            out.outline = rings_to(std::slice::from_ref(&pad));
             out.parts.push(part("pad", &[pad]));
             out.parts.push(line_part("point", vec![vec![c]]));
         }
@@ -948,7 +946,7 @@ fn shape_one(
             let crown = num(p, "crown").unwrap_or(6000.0).abs();
             let ring = poly::circle(c, crown / 2.0, CIRCLE_SIDES);
             if crown > 0.0 {
-                out.outline = rings_to(&[ring.clone()]);
+                out.outline = rings_to(std::slice::from_ref(&ring));
                 out.parts.push(part("crown", &[ring]));
             }
             out.parts.push(line_part("point", vec![vec![c]]));
@@ -1028,12 +1026,7 @@ pub fn normalise(items: &[Item<'_>], figures: &Figures) -> Vec<Shaped> {
             }
         }
         if !band_pass {
-            blocked = items
-                .iter()
-                .zip(&out)
-                .filter(|(it, _)| it.kind == "ramp")
-                .flat_map(|(_, s)| poly::rings_of(&s.outline))
-                .collect();
+            blocked = items.iter().zip(&out).filter(|(it, _)| it.kind == "ramp").flat_map(|(_, s)| poly::rings_of(&s.outline)).collect();
         }
     }
     // Roads that meet make one paved area: each road's outline takes the rounded corners where it meets another road;

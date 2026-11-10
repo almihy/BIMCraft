@@ -310,6 +310,25 @@ pub fn rings_point_distance(a: &[Ring], p: Xy) -> f64 {
     shape_distance(&Shape { rings: a, lines: &[] }, &Shape { rings: &[], lines: &pt }).unwrap_or(f64::INFINITY)
 }
 
+/// `f` of each item, in their order: on rayon's threads natively, one after another in the browser (no threads there).
+pub fn each<T: Sync, U: Send>(items: &[T], f: impl Fn(&T) -> U + Sync + Send) -> Vec<U> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use rayon::prelude::*;
+        items.par_iter().map(f).collect()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        items.iter().map(f).collect()
+    }
+}
+
+/// `f` of 0..n, in order (see [`each`]).
+pub fn each_index<U: Send>(n: usize, f: impl Fn(usize) -> U + Sync + Send) -> Vec<U> {
+    let ks: Vec<usize> = (0..n).collect();
+    each(&ks, |&k| f(k))
+}
+
 // ====================================================================== i_overlay
 /// Rings fit for `i_overlay`: at least `least` finite points each, within the model.
 fn clean(rings: &[Ring], least: usize) -> Vec<Ring> {

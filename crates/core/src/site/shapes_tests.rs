@@ -157,7 +157,7 @@ fn roads_that_meet_make_one_paved_area_drawn_with_its_parts() {
 fn the_figures_fill_in_what_was_not_given_and_a_firm_s_own_are_taken() {
     let p: Props = serde_json::from_value(json!({"path": [[0, 0], [40000, 0]]})).expect("props");
     let item = Item { key: "l", kind: "lane", use_: "", props: &p, phase: "new", context: false };
-    let s = normalise(&[item.clone()], &Figures::default());
+    let s = normalise(std::slice::from_ref(&item), &Figures::default());
     assert_eq!(s[0].filled["width"], json!(5500.0));
     assert_eq!(s[0].filled["corner_radius"], json!(3000.0));
     assert!((poly::area(&poly::rings_of(&s[0].outline)) - 40000.0 * 5500.0).abs() < 10.0);
@@ -237,7 +237,7 @@ fn a_parking_band_keeps_the_bays_a_person_removed_out() {
         &Figures::default(),
     );
     let stalls = s[0].parts.iter().find(|p| p.role == "stall").map_or(0, |p| p.polys.len());
-    assert!(stalls < 16 + 16 - 2 && stalls >= 16 + 16 - 2 - 3, "{stalls}");
+    assert!((16 + 16 - 2 - 3..16 + 16 - 2).contains(&stalls), "{stalls}");
 }
 
 #[test]
@@ -377,4 +377,7 @@ fn a_hundred_and_fifty_roads_are_shaped_quickly() {
     eprintln!("150 roads: {ms:.1} ms");
     assert_eq!(s.len(), 150);
     assert!(s.iter().all(|x| !x.outline.is_empty()));
+    if !cfg!(debug_assertions) {
+        assert!(ms < 100.0, "150 roads took {ms:.1} ms");
+    }
 }
