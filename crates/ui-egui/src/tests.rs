@@ -28,22 +28,9 @@ fn app(script: &str) -> Harness<'static, BimApp> {
 /// The app with frames `step` seconds apart. Each queued event runs a frame, so a double click
 /// (two clicks within 300 ms) needs short ones.
 fn app_at(script: &str, step: f32) -> Harness<'static, BimApp> {
-    harness(script, step, crate::style::Profile::Rev)
-}
-
-/// The app on a script in BIMCraft's own profile: no ribbon, the Tools palette down the left, the Inspector and the Navigator down
-/// the right. `app` is Rev's, with Revit's palette layout: the tests of what the tools do were written round the ribbon.
-fn bimcraft(script: &str) -> Harness<'static, BimApp> {
-    harness(script, 0.25, crate::style::Profile::BimCraft)
-}
-
-fn harness(script: &str, step: f32, profile: crate::style::Profile) -> Harness<'static, BimApp> {
     let mut s = Session::new();
     s.script(script).unwrap();
-    let mut app = BimApp::new(s);
-    if profile == crate::style::Profile::Rev {
-        (app.profile, app.docking) = (profile, crate::dock::Docking::revit());
-    }
+    let app = BimApp::new(s);
     let mut h = Harness::builder()
         .with_size([1280.0, 800.0])
         .with_max_steps(32)
@@ -329,9 +316,8 @@ fn same_point(a: [f64; 3], b: [f64; 3]) -> bool {
 
 #[test]
 fn the_window_draws_a_thin_stroke_s_soft_edge_past_a_clip_as_the_kept_triangles_do() {
-    for h in [app(""), bimcraft("")] {
-        assert!(!h.ctx.tessellation_options(|o| o.coarse_tessellation_culling), "style::tessellation");
-    }
+    let h = app("");
+    assert!(!h.ctx.tessellation_options(|o| o.coarse_tessellation_culling), "style::tessellation");
 }
 
 #[test]
@@ -1027,14 +1013,13 @@ fn saving_writes_the_project_and_exports_by_extension() {
 }
 
 #[test]
-fn file_export_lists_the_3d_scene_as_gltf_in_both_profiles_and_an_export_leaves_the_project_unsaved() {
-    for (name, mut h) in [("Rev", app(SAMPLE)), ("BIMCraft", bimcraft(SAMPLE))] {
-        press(&mut h, "File");
-        // The submenu's label carries its arrow too.
-        h.get_by_label_contains("Export").click();
-        h.run();
-        assert!(h.query_by_label("3D Scene as glTF…").is_some(), "{name}: File > Export lists glTF");
-    }
+fn file_export_lists_the_3d_scene_as_gltf_and_an_export_leaves_the_project_unsaved() {
+    let mut h = app(SAMPLE);
+    press(&mut h, "File");
+    // The submenu's label carries its arrow too.
+    h.get_by_label_contains("Export").click();
+    h.run();
+    assert!(h.query_by_label("3D Scene as glTF…").is_some(), "File > Export lists glTF");
     let mut h = app(SAMPLE);
     let dir = std::env::temp_dir().join(format!("bimcraft-ui-gltf-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -5903,6 +5888,7 @@ mod graphics;
 mod groups;
 mod host;
 mod inspector;
+mod interface;
 mod korean;
 mod light_canvas;
 mod lines;
@@ -5920,7 +5906,6 @@ mod planviews;
 mod plugins;
 mod popup;
 mod presets;
-mod profile;
 mod purge;
 mod reinforce;
 mod revit;

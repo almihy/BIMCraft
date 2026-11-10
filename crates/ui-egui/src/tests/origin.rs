@@ -60,61 +60,50 @@ fn in_corner(h: &Harness<BimApp>, name: &str) -> bool {
     out.iter().any(|t| t == name)
 }
 
-/// A way to build the app on a script: Rev's, or BIMCraft's own.
-type Build = fn(&str) -> Harness<'static, BimApp>;
-
-fn both_profiles() -> [(&'static str, Build); 2] {
-    [("Rev", app), ("BIMCraft", bimcraft)]
-}
-
 #[test]
 fn a_plan_shows_a_marker_at_the_origin_and_its_name_in_the_corner_until_the_settings_say_not() {
-    for (profile, build) in both_profiles() {
-        let mut h = build(BOX);
-        assert!(h.state().show_origin && h.state().show_view_name, "{profile}: both on by default");
-        let o = h.state().screen(P2(0.0, 0.0));
-        let (x, y) = arms(&h, o);
-        assert_eq!(x, Some(o + vec2(ORIGIN_ARM, 0.0)), "{profile}: the x arm runs east along the screen");
-        assert_eq!(y, Some(o - vec2(0.0, ORIGIN_ARM)), "{profile}: the y arm runs north, up the screen");
-        assert_eq!(letters(&h), ["X", "Y"], "{profile}: and each is lettered");
-        assert!(in_corner(&h, "Level 1"), "{profile}");
+    let mut h = app(BOX);
+    assert!(h.state().show_origin && h.state().show_view_name, "both on by default");
+    let o = h.state().screen(P2(0.0, 0.0));
+    let (x, y) = arms(&h, o);
+    assert_eq!(x, Some(o + vec2(ORIGIN_ARM, 0.0)), "the x arm runs east along the screen");
+    assert_eq!(y, Some(o - vec2(0.0, ORIGIN_ARM)), "the y arm runs north, up the screen");
+    assert_eq!(letters(&h), ["X", "Y"], "and each is lettered");
+    assert!(in_corner(&h, "Level 1"));
 
-        h.state_mut().show_origin = false;
-        h.run();
-        let o = h.state().screen(P2(0.0, 0.0));
-        assert_eq!(arms(&h, o), (None, None), "{profile}: off, no marker");
-        assert!(letters(&h).is_empty(), "{profile}");
-        assert!(in_corner(&h, "Level 1"), "{profile}: the name is the other box's");
+    h.state_mut().show_origin = false;
+    h.run();
+    let o = h.state().screen(P2(0.0, 0.0));
+    assert_eq!(arms(&h, o), (None, None), "off, no marker");
+    assert!(letters(&h).is_empty());
+    assert!(in_corner(&h, "Level 1"), "the name is the other box's");
 
-        h.state_mut().show_view_name = false;
-        h.run();
-        assert!(!in_corner(&h, "Level 1"), "{profile}: off, no name in the corner");
+    h.state_mut().show_view_name = false;
+    h.run();
+    assert!(!in_corner(&h, "Level 1"), "off, no name in the corner");
 
-        h.state_mut().show_origin = true;
-        h.run();
-        let o = h.state().screen(P2(0.0, 0.0));
-        assert!(arms(&h, o).0.is_some() && !in_corner(&h, "Level 1"), "{profile}: each box is its own");
-    }
+    h.state_mut().show_origin = true;
+    h.run();
+    let o = h.state().screen(P2(0.0, 0.0));
+    assert!(arms(&h, o).0.is_some() && !in_corner(&h, "Level 1"), "each box is its own");
 }
 
 #[test]
 fn a_ceiling_plan_has_them_too_and_the_other_views_do_not() {
-    for (profile, build) in both_profiles() {
-        let mut h = build(BOX);
-        h.state_mut().open_sheet(Sheet::Ceiling(100000));
-        h.run();
-        assert_eq!(h.state().sheet, Sheet::Ceiling(100000), "{profile}");
-        let o = h.state().screen(P2(0.0, 0.0));
-        assert_eq!(arms(&h, o).0, Some(o + vec2(ORIGIN_ARM, 0.0)), "{profile}: the ceiling plan's marker");
-        assert!(in_corner(&h, "Level 1 (Ceiling Plan)"), "{profile}: and its name says what it is");
+    let mut h = app(BOX);
+    h.state_mut().open_sheet(Sheet::Ceiling(100000));
+    h.run();
+    assert_eq!(h.state().sheet, Sheet::Ceiling(100000));
+    let o = h.state().screen(P2(0.0, 0.0));
+    assert_eq!(arms(&h, o).0, Some(o + vec2(ORIGIN_ARM, 0.0)), "the ceiling plan's marker");
+    assert!(in_corner(&h, "Level 1 (Ceiling Plan)"), "and its name says what it is");
 
-        // A marker is a plan's aid: the 3D view draws neither.
-        shortcut(&mut h, "3D");
-        assert_eq!(h.state().sheet, Sheet::View3D, "{profile}");
-        let o = h.state().screen(P2(0.0, 0.0));
-        assert_eq!(arms(&h, o), (None, None), "{profile}: none in the 3D view");
-        assert!(letters(&h).is_empty() && !in_corner(&h, "Level 1"), "{profile}");
-    }
+    // A marker is a plan's aid: the 3D view draws neither.
+    shortcut(&mut h, "3D");
+    assert_eq!(h.state().sheet, Sheet::View3D);
+    let o = h.state().screen(P2(0.0, 0.0));
+    assert_eq!(arms(&h, o), (None, None), "none in the 3D view");
+    assert!(letters(&h).is_empty() && !in_corner(&h, "Level 1"));
 }
 
 #[test]
@@ -132,40 +121,38 @@ fn a_marker_whose_origin_is_off_the_screen_is_not_drawn_and_the_name_still_is() 
 fn the_boxes_in_settings_turn_them_off_and_the_file_keeps_them() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("settings.json");
-    for (profile, build) in both_profiles() {
-        let _ = std::fs::remove_file(&file);
-        let mut h = build(BOX);
-        h.state_mut().use_settings(file.clone());
-        h.state_mut().settings_page = Some(Page::Interface);
+    let _ = std::fs::remove_file(&file);
+    let mut h = app(BOX);
+    h.state_mut().use_settings(file.clone());
+    h.state_mut().settings_page = Some(Page::Interface);
+    h.run();
+    for label in ["Show the origin marker in plans", "Show the view's name in the corner of plans"] {
+        let box_ = h.get_by_role_and_label(Role::CheckBox, label);
+        assert_eq!(box_.accesskit_node().toggled(), Some(egui::accesskit::Toggled::True), "{label} is on to begin with");
+        box_.scroll_to_me();
         h.run();
-        for label in ["Show the origin marker in plans", "Show the view's name in the corner of plans"] {
-            let box_ = h.get_by_role_and_label(Role::CheckBox, label);
-            assert_eq!(box_.accesskit_node().toggled(), Some(egui::accesskit::Toggled::True), "{profile}: {label} is on to begin with");
-            box_.scroll_to_me();
-            h.run();
-            pick(&mut h, Role::CheckBox, label);
-        }
-        assert!(!h.state().show_origin && !h.state().show_view_name, "{profile}");
-        press(&mut h, "Close");
-        let o = h.state().screen(P2(0.0, 0.0));
-        assert_eq!(arms(&h, o), (None, None), "{profile}: the box took the marker off the plan");
-        assert!(!in_corner(&h, "Level 1"), "{profile}: and the name");
-        let kept: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
-        assert_eq!((kept["origin_marker"].as_bool(), kept["view_name"].as_bool()), (Some(false), Some(false)), "{profile}");
-
-        // The next window starts without them, and a box ticked again is kept too.
-        let mut again = build(BOX);
-        again.state_mut().use_settings(file.clone());
-        again.run();
-        assert!(!again.state().show_origin && !again.state().show_view_name, "{profile}");
-        let o = again.state().screen(P2(0.0, 0.0));
-        assert_eq!(arms(&again, o), (None, None), "{profile}");
-        assert!(!in_corner(&again, "Level 1"), "{profile}");
-        again.state_mut().show_origin = true;
-        again.run();
-        let kept: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
-        assert_eq!((kept["origin_marker"].as_bool(), kept["view_name"].as_bool()), (Some(true), Some(false)), "{profile}");
+        pick(&mut h, Role::CheckBox, label);
     }
+    assert!(!h.state().show_origin && !h.state().show_view_name);
+    press(&mut h, "Close");
+    let o = h.state().screen(P2(0.0, 0.0));
+    assert_eq!(arms(&h, o), (None, None), "the box took the marker off the plan");
+    assert!(!in_corner(&h, "Level 1"), "and the name");
+    let kept: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!((kept["origin_marker"].as_bool(), kept["view_name"].as_bool()), (Some(false), Some(false)));
+
+    // The next window starts without them, and a box ticked again is kept too.
+    let mut again = app(BOX);
+    again.state_mut().use_settings(file.clone());
+    again.run();
+    assert!(!again.state().show_origin && !again.state().show_view_name);
+    let o = again.state().screen(P2(0.0, 0.0));
+    assert_eq!(arms(&again, o), (None, None));
+    assert!(!in_corner(&again, "Level 1"));
+    again.state_mut().show_origin = true;
+    again.run();
+    let kept: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!((kept["origin_marker"].as_bool(), kept["view_name"].as_bool()), (Some(true), Some(false)));
 }
 
 #[test]

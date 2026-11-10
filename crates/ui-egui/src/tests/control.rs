@@ -246,48 +246,47 @@ fn until(h: &mut Harness<BimApp>, done: impl Fn(&Harness<BimApp>) -> bool) -> bo
 }
 
 #[test]
-fn settings_open_the_port_and_close_it_and_the_view_control_bar_says_how_it_is_in_both_profiles() {
-    for mut h in [app(BOX), bimcraft(BOX)] {
-        assert!(h.query_by_label("Agents: off").is_some(), "the bar says no agent can come in");
-        agents_page(&mut h);
-        pick(&mut h, Role::CheckBox, "Let agents work on this project");
-        let port = entry(&h).port;
-        assert!(port != 0 && h.state().agents.listen, "listening, on a port that was free, and kept");
-        assert!(h.query_by_label_contains(&format!("port {port}: agents connect with")).is_some(), "Settings says where");
-        press(&mut h, "Close");
-        let listening = format!("Agents: port {port}");
-        assert!(h.query_by_label(&listening).is_some(), "the bar says the port");
-        // An agent that has said hello is counted while it stays, and no longer once it has gone.
-        let token = entry(&h).token;
-        let agent = std::thread::spawn(move || {
-            let stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
-            stream.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
-            let (mut writer, mut reader) = (stream.try_clone().unwrap(), BufReader::new(stream));
-            writeln!(writer, "{}", json!({"token": token, "op": "hello"})).unwrap();
-            let mut reply = String::new();
-            reader.read_line(&mut reply).unwrap();
-            (writer, reply)
-        });
-        while !agent.is_finished() {
-            h.step();
-            std::thread::sleep(Duration::from_millis(2));
-        }
-        let (held, reply) = agent.join().unwrap();
-        assert!(reply.contains("bimcraft"), "{reply}");
-        assert!(until(&mut h, |h| h.query_by_label("Agents: 1 connected").is_some()), "one agent connected");
-        drop(held);
-        assert!(until(&mut h, |h| h.query_by_label(&listening).is_some()), "the agent has gone");
-        // Closed from Settings: the bar says so, and the port is let go, so nothing answers on it.
-        agents_page(&mut h);
-        pick(&mut h, Role::CheckBox, "Let agents work on this project");
-        assert!(h.state().control.is_none() && !h.state().agents.listen);
-        press(&mut h, "Close");
-        assert!(h.query_by_label("Agents: off").is_some());
-        let start = web_time::Instant::now();
-        while TcpStream::connect(("127.0.0.1", port)).is_ok() {
-            assert!(start.elapsed() < Duration::from_secs(10), "port {port} still listens");
-            std::thread::sleep(Duration::from_millis(20));
-        }
+fn settings_open_the_port_and_close_it_and_the_view_control_bar_says_how_it_is() {
+    let mut h = app(BOX);
+    assert!(h.query_by_label("Agents: off").is_some(), "the bar says no agent can come in");
+    agents_page(&mut h);
+    pick(&mut h, Role::CheckBox, "Let agents work on this project");
+    let port = entry(&h).port;
+    assert!(port != 0 && h.state().agents.listen, "listening, on a port that was free, and kept");
+    assert!(h.query_by_label_contains(&format!("port {port}: agents connect with")).is_some(), "Settings says where");
+    press(&mut h, "Close");
+    let listening = format!("Agents: port {port}");
+    assert!(h.query_by_label(&listening).is_some(), "the bar says the port");
+    // An agent that has said hello is counted while it stays, and no longer once it has gone.
+    let token = entry(&h).token;
+    let agent = std::thread::spawn(move || {
+        let stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+        let (mut writer, mut reader) = (stream.try_clone().unwrap(), BufReader::new(stream));
+        writeln!(writer, "{}", json!({"token": token, "op": "hello"})).unwrap();
+        let mut reply = String::new();
+        reader.read_line(&mut reply).unwrap();
+        (writer, reply)
+    });
+    while !agent.is_finished() {
+        h.step();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let (held, reply) = agent.join().unwrap();
+    assert!(reply.contains("bimcraft"), "{reply}");
+    assert!(until(&mut h, |h| h.query_by_label("Agents: 1 connected").is_some()), "one agent connected");
+    drop(held);
+    assert!(until(&mut h, |h| h.query_by_label(&listening).is_some()), "the agent has gone");
+    // Closed from Settings: the bar says so, and the port is let go, so nothing answers on it.
+    agents_page(&mut h);
+    pick(&mut h, Role::CheckBox, "Let agents work on this project");
+    assert!(h.state().control.is_none() && !h.state().agents.listen);
+    press(&mut h, "Close");
+    assert!(h.query_by_label("Agents: off").is_some());
+    let start = web_time::Instant::now();
+    while TcpStream::connect(("127.0.0.1", port)).is_ok() {
+        assert!(start.elapsed() < Duration::from_secs(10), "port {port} still listens");
+        std::thread::sleep(Duration::from_millis(20));
     }
 }
 

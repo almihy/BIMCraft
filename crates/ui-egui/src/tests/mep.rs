@@ -715,7 +715,9 @@ fn drawn_of(h: &Harness<BimApp>, id: Id) -> usize {
 }
 
 /// Hiding Lighting Fixtures in Visibility/Graphics on the plan leaves the luminaires out of it, and the outlets and switches in.
-fn lighting_hidden_in_visibility_graphics(mut h: Harness<'static, BimApp>) {
+#[test]
+fn hiding_lighting_in_visibility_graphics_hides_the_luminaires_of_the_plan() {
+    let mut h = app(FIXTURES_PLAN);
     let (lamp, outlet, switch) = (placed(&h, "Ceiling Luminaire"), placed(&h, "Outlet"), placed(&h, "Switch"));
     assert!([lamp, outlet, switch].iter().all(|id| drawn_of(&h, *id) > 0), "all three are drawn to begin with");
     shortcut(&mut h, "VV");
@@ -734,19 +736,11 @@ fn lighting_hidden_in_visibility_graphics(mut h: Harness<'static, BimApp>) {
     assert!(bimcraft_core::graphics::Look::of(&h.state().session.model, 100001).shows(lamp));
 }
 
-#[test]
-fn hiding_lighting_in_visibility_graphics_hides_the_luminaires_of_the_plan_in_rev() {
-    lighting_hidden_in_visibility_graphics(app(FIXTURES_PLAN));
-}
-
-#[test]
-fn hiding_lighting_in_visibility_graphics_hides_the_luminaires_of_the_plan_in_bimcraft() {
-    lighting_hidden_in_visibility_graphics(bimcraft(FIXTURES_PLAN));
-}
-
 /// A project from before the rows were split, which hid `component` in a view, shows its rows as hidden and lets the view show
 /// one of them again.
-fn an_older_components_override_is_the_rows_of_the_family_categories(mut h: Harness<'static, BimApp>) {
+#[test]
+fn an_older_components_override_is_the_rows_of_the_family_categories() {
+    let mut h = app(FIXTURES_PLAN);
     let (lamp, outlet) = (placed(&h, "Ceiling Luminaire"), placed(&h, "Outlet"));
     h.state_mut().run("graphics", json!({"view": 100000, "hide": ["component"]}));
     h.run();
@@ -758,14 +752,4 @@ fn an_older_components_override_is_the_rows_of_the_family_categories(mut h: Harn
     let g = plan_graphics(&h, 100000);
     assert!(!g.categories.contains_key("component") && !g.hides("lighting") && g.hides("outlet"), "{g:?}");
     assert!(drawn_of(&h, lamp) > 0 && drawn_of(&h, outlet) == 0);
-}
-
-#[test]
-fn an_older_components_override_is_the_rows_of_the_family_categories_in_rev() {
-    an_older_components_override_is_the_rows_of_the_family_categories(app(FIXTURES_PLAN));
-}
-
-#[test]
-fn an_older_components_override_is_the_rows_of_the_family_categories_in_bimcraft() {
-    an_older_components_override_is_the_rows_of_the_family_categories(bimcraft(FIXTURES_PLAN));
 }

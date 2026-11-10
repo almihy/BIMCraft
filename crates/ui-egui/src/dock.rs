@@ -154,7 +154,6 @@ impl Default for Docking {
 }
 
 impl Docking {
-
     pub fn side(&self, side: Side) -> &[Stack] {
         match side {
             Side::Left => &self.left,

@@ -25,7 +25,7 @@ fn add_in_the_dialog(h: &mut Harness<BimApp>, keys: &str, action: &str) {
 /// not tied to its field.
 fn type_beside(h: &mut Harness<BimApp>, label: &str, text: &str) {
     let at = h.get_by_label(label).rect();
-    // Of the fields on that row, to its right, the nearest (BIMCraft's Inspector has others on the row, further right).
+    // Of the fields on that row, to its right, the nearest.
     let field = h
         .get_all_by_role(Role::TextInput)
         .filter(|n| n.rect().left() >= at.right() && (n.rect().center().y - at.center().y).abs() < 6.0)
@@ -41,26 +41,24 @@ fn type_beside(h: &mut Harness<BimApp>, label: &str, text: &str) {
 
 #[test]
 fn a_shortcut_made_is_kept_in_the_settings_and_works_in_the_next_window() {
-    for (profile, build) in [("Rev", app as fn(&str) -> Harness<'static, BimApp>), ("BIMCraft", bimcraft)] {
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("settings.json");
-        let mut h = build("");
-        h.state_mut().use_settings(file.clone());
-        assert!(h.state().custom_shortcuts.is_empty(), "{profile}: none until one is made");
-        add_in_the_dialog(&mut h, "ZW", "Door");
-        h.run();
-        assert_eq!(h.state().custom_shortcuts.get("ZW").map(String::as_str), Some("Door"), "{profile}");
-        assert_eq!(kept(&file)["shortcuts"], json!({"ZW": "Door"}), "{profile}: written as it is made");
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("settings.json");
+    let mut h = app("");
+    h.state_mut().use_settings(file.clone());
+    assert!(h.state().custom_shortcuts.is_empty(), "none until one is made");
+    add_in_the_dialog(&mut h, "ZW", "Door");
+    h.run();
+    assert_eq!(h.state().custom_shortcuts.get("ZW").map(String::as_str), Some("Door"));
+    assert_eq!(kept(&file)["shortcuts"], json!({"ZW": "Door"}), "written as it is made");
 
-        // The next window, built from those settings, has it, and the key does what it was made to do.
-        let mut again = build("");
-        again.state_mut().use_settings(file.clone());
-        again.run();
-        assert_eq!(again.state().custom_shortcuts.get("ZW").map(String::as_str), Some("Door"), "{profile}");
-        shortcut(&mut again, "ZW");
-        assert!(matches!(again.state().tool, Tool::Door), "{profile}: the key made last time picks the Door tool");
-        assert_eq!(kept(&file)["shortcuts"], json!({"ZW": "Door"}), "{profile}: and starting did not rewrite it");
-    }
+    // The next window, built from those settings, has it, and the key does what it was made to do.
+    let mut again = app("");
+    again.state_mut().use_settings(file.clone());
+    again.run();
+    assert_eq!(again.state().custom_shortcuts.get("ZW").map(String::as_str), Some("Door"));
+    shortcut(&mut again, "ZW");
+    assert!(matches!(again.state().tool, Tool::Door), "the key made last time picks the Door tool");
+    assert_eq!(kept(&file)["shortcuts"], json!({"ZW": "Door"}), "and starting did not rewrite it");
 }
 
 #[test]
