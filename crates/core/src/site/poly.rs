@@ -270,15 +270,10 @@ pub fn shape_distance(a: &Shape<'_>, b: &Shape<'_>) -> Option<f64> {
         return None;
     }
     let first = |s: &Shape<'_>| s.rings.first().and_then(|r| r.first()).or_else(|| s.lines.first().and_then(|l| l.first())).copied();
-    if let Some(p) = first(a) {
-        if !b.rings.is_empty() && in_rings(b.rings, p) {
-            return Some(0.0);
-        }
-    }
-    if let Some(p) = first(b) {
-        if !a.rings.is_empty() && in_rings(a.rings, p) {
-            return Some(0.0);
-        }
+    if first(a).is_some_and(|p| !b.rings.is_empty() && in_rings(b.rings, p))
+        || first(b).is_some_and(|p| !a.rings.is_empty() && in_rings(a.rings, p))
+    {
+        return Some(0.0);
     }
     let mut best = f64::INFINITY;
     let bb = bounds_of(&sb);
@@ -318,11 +313,7 @@ pub fn rings_point_distance(a: &[Ring], p: Xy) -> f64 {
 // ====================================================================== i_overlay
 /// Rings fit for `i_overlay`: at least `least` finite points each, within the model.
 fn clean(rings: &[Ring], least: usize) -> Vec<Ring> {
-    rings
-        .iter()
-        .filter(|r| r.len() >= least && r.iter().all(|p| ok(*p)))
-        .cloned()
-        .collect()
+    rings.iter().filter(|r| r.len() >= least && r.iter().all(|p| ok(*p))).cloned().collect()
 }
 
 fn flatten(shapes: Vec<Vec<Vec<Xy>>>) -> Vec<Ring> {
@@ -414,7 +405,7 @@ pub fn grow(rings: &[Ring], d: f64, tol: f64) -> Vec<Ring> {
 /// and a piece counts only where some of it lies more than a millimetre off them. Union a piece with what it meets
 /// through [`join`], which closes that fiftieth.
 pub fn closing_pieces(rings: &[Ring], radius: f64, least: f64) -> Vec<Ring> {
-    if !(radius > 0.0) || rings.is_empty() {
+    if radius.is_nan() || radius <= 0.0 || rings.is_empty() {
         return Vec::new();
     }
     let closed = grow(&grow(rings, radius, ARC_TOL), -radius, ARC_TOL);
@@ -450,7 +441,7 @@ pub fn band(line: &[Xy], width: f64) -> Vec<Ring> {
             pts.push(p);
         }
     }
-    if pts.len() < 2 || !(width > 0.0) || !width.is_finite() || width > MAX_COORD {
+    if pts.len() < 2 || !width.is_finite() || width <= 0.0 || width > MAX_COORD {
         return Vec::new();
     }
     let h = width / 2.0;
@@ -510,11 +501,7 @@ pub fn band(line: &[Xy], width: f64) -> Vec<Ring> {
 
 /// Polylines less what lies inside `rings` (non-zero), or only what does: the pieces left, each two points or more.
 pub fn clip_lines(lines: &[Vec<Xy>], rings: &[Ring], keep_outside: bool) -> Vec<Vec<Xy>> {
-    let ls: Vec<Vec<Xy>> = lines
-        .iter()
-        .filter(|l| l.len() >= 2 && l.iter().all(|p| ok(*p)))
-        .cloned()
-        .collect();
+    let ls: Vec<Vec<Xy>> = lines.iter().filter(|l| l.len() >= 2 && l.iter().all(|p| ok(*p))).cloned().collect();
     if ls.is_empty() {
         return Vec::new();
     }
@@ -541,7 +528,10 @@ pub fn polys_of(rings: &[Ring]) -> Vec<Poly> {
     polys.sort_by(|a, b| ring_area(&b.0).total_cmp(&ring_area(&a.0)));
     polys
         .into_iter()
-        .map(|(o, hs)| Poly { outer: o.into_iter().map(to_p2).collect(), holes: hs.into_iter().map(|h| h.into_iter().map(to_p2).collect()).collect() })
+        .map(|(o, hs)| Poly {
+            outer: o.into_iter().map(to_p2).collect(),
+            holes: hs.into_iter().map(|h| h.into_iter().map(to_p2).collect()).collect(),
+        })
         .collect()
 }
 
@@ -570,7 +560,10 @@ pub fn rounded(polys: Vec<Poly>, step: f64) -> Vec<Poly> {
     let r = |p: P2| P2((p.0 / step).round() * step, (p.1 / step).round() * step);
     polys
         .into_iter()
-        .map(|p| Poly { outer: p.outer.into_iter().map(r).collect(), holes: p.holes.into_iter().map(|h| h.into_iter().map(r).collect()).collect() })
+        .map(|p| Poly {
+            outer: p.outer.into_iter().map(r).collect(),
+            holes: p.holes.into_iter().map(|h| h.into_iter().map(r).collect()).collect(),
+        })
         .collect()
 }
 

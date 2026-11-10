@@ -13,12 +13,15 @@ const TOL: f64 = 5.0;
 
 fn rings_of_geojson(g: &Value) -> Vec<Ring> {
     let ring = |r: &Value| -> Ring {
-        let pts: Ring = r.as_array().into_iter().flatten().filter_map(|q| Some([q[0].as_f64()? * 1000.0, q[1].as_f64()? * 1000.0])).collect();
+        let pts: Ring =
+            r.as_array().into_iter().flatten().filter_map(|q| Some([q[0].as_f64()? * 1000.0, q[1].as_f64()? * 1000.0])).collect();
         poly::open(&pts)
     };
     match g["type"].as_str() {
         Some("Polygon") => g["coordinates"].as_array().into_iter().flatten().map(ring).collect(),
-        Some("MultiPolygon") => g["coordinates"].as_array().into_iter().flatten().flat_map(|p| p.as_array().into_iter().flatten().map(ring)).collect(),
+        Some("MultiPolygon") => {
+            g["coordinates"].as_array().into_iter().flatten().flat_map(|p| p.as_array().into_iter().flatten().map(ring)).collect()
+        }
         _ => Vec::new(),
     }
 }
@@ -129,7 +132,11 @@ fn roads_that_meet_make_one_paved_area_drawn_with_its_parts() {
     for c in data["cases"].as_array().expect("cases") {
         let name = c["name"].as_str().unwrap_or("");
         let props: Vec<Props> = c["roads"].as_array().expect("roads").iter().map(|r| props_mm("lane", &r["props"])).collect();
-        let items: Vec<Item<'_>> = props.iter().enumerate().map(|(i, p)| Item { key: ["a", "b", "c", "d"][i], kind: "lane", use_: "road", props: p, phase: "new", context: false }).collect();
+        let items: Vec<Item<'_>> = props
+            .iter()
+            .enumerate()
+            .map(|(i, p)| Item { key: ["a", "b", "c", "d"][i], kind: "lane", use_: "road", props: p, phase: "new", context: false })
+            .collect();
         let shaped = normalise(&items, &Figures::default());
         let mut all: Vec<Ring> = Vec::new();
         for s in &shaped {
@@ -196,7 +203,8 @@ fn a_pitch_a_ramp_water_and_a_bike_rack_have_their_parts() {
     let open = s[0].parts.iter().find(|p| p.role == "open").expect("open");
     assert!((poly::area(&poly::rings_of(&open.polys)) - 12000.0 * 3500.0).abs() < 10.0);
     assert!(s[0].parts.iter().any(|p| p.role == "covered"));
-    let w: Props = serde_json::from_value(json!({"control": [[0, 0], [30000, 0], [40000, 20000], [10000, 25000]], "bank": 1000})).expect("props");
+    let w: Props =
+        serde_json::from_value(json!({"control": [[0, 0], [30000, 0], [40000, 20000], [10000, 25000]], "bank": 1000})).expect("props");
     let s = normalise(&[Item { key: "w", kind: "water", use_: "", props: &w, phase: "new", context: false }], &Figures::default());
     assert_eq!(s[0].filled["smooth"], json!(3));
     assert!(s[0].parts.iter().any(|p| p.role == "bank"));
@@ -218,6 +226,17 @@ fn a_parking_band_keeps_the_bays_a_person_removed_out() {
     let stalls = s[0].parts.iter().find(|p| p.role == "stall").map_or(0, |p| p.polys.len());
     let acc = s[0].parts.iter().find(|p| p.role == "accessible_stall").map_or(0, |p| p.polys.len());
     assert_eq!((stalls, acc), (16 + 16 - 2, 1));
+    // A ramp across its left row takes the bays it stands on.
+    let r: Props = serde_json::from_value(json!({"path": [[20000, 30000], [20000, 4000]], "width": 3500})).expect("props");
+    let s = normalise(
+        &[
+            Item { key: "x", kind: "parking_band", use_: "", props: &p, phase: "new", context: false },
+            Item { key: "r", kind: "ramp", use_: "", props: &r, phase: "new", context: false },
+        ],
+        &Figures::default(),
+    );
+    let stalls = s[0].parts.iter().find(|p| p.role == "stall").map_or(0, |p| p.polys.len());
+    assert!(stalls < 16 + 16 - 2 && stalls >= 16 + 16 - 2 - 3, "{stalls}");
 }
 
 #[test]
@@ -272,10 +291,41 @@ fn the_catalogue_says_every_kind_s_props_and_figures() {
     assert_eq!(mm["heads"]["start"]["radius"], json!(9000.0));
     let back = convert("lane", &mm, 0.001);
     assert_eq!(back["width"], json!(5.5));
-    let cp: Props = serde_json::from_value(json!({"control": [[1, 2]], "result": {"area_per_stall": 25.0, "ways": [{"at": [1, 1], "kind": "in"}]}})).expect("props");
+    let cp: Props =
+        serde_json::from_value(json!({"control": [[1, 2]], "result": {"area_per_stall": 25.0, "ways": [{"at": [1, 1], "kind": "in"}]}}))
+            .expect("props");
     let cp = convert("car_park", &cp, 1000.0);
     assert_eq!(cp["result"]["area_per_stall"], json!(25.0e6));
     assert_eq!(cp["result"]["ways"][0]["at"], json!([1000.0, 1000.0]));
+}
+
+#[test]
+#[ignore]
+fn timing_of_the_polygon_operations() {
+    let a = poly::band(&[[-60000.0, 0.0], [60000.0, 0.0]], 20000.0);
+    let b = poly::band(&[[0.0, 0.0], [0.0, 60000.0]], 11000.0);
+    let disc = poly::circle([0.0, 0.0], 67000.0, 64);
+    let time = |name: &str, f: &dyn Fn() -> usize| {
+        let t = std::time::Instant::now();
+        let mut n = 0;
+        for _ in 0..100 {
+            n += f();
+        }
+        eprintln!("{name}: {:.3} ms each ({n})", t.elapsed().as_secs_f64() * 10.0);
+    };
+    let mut both = a.clone();
+    both.extend(b.iter().cloned());
+    time("union", &|| poly::union(&both).len());
+    time("intersection", &|| poly::intersection(&a, std::slice::from_ref(&disc)).len());
+    let local = poly::union(&both);
+    time("grow 4 m", &|| poly::grow(&local, 4000.0, poly::ARC_TOL).len());
+    let g = poly::grow(&local, 4000.0, poly::ARC_TOL);
+    eprintln!("grown points: {}", g.iter().map(Vec::len).sum::<usize>());
+    time("shrink 4 m", &|| poly::grow(&g, -4000.0, poly::ARC_TOL).len());
+    time("grow 1 mm", &|| poly::grow(&local, 1.0, 0.5).len());
+    time("grow 0.02 mm", &|| poly::grow(&local, 0.02, 0.01).len());
+    time("closing pieces", &|| poly::closing_pieces(&local, 4000.0, 100.0).len());
+    time("band", &|| poly::band(&[[-60000.0, 0.0], [60000.0, 0.0]], 20000.0).len());
 }
 
 /// A level of a hundred and fifty roads, crossing in a grid, the outlines and their parts. Run with `--release` (and
@@ -296,7 +346,30 @@ fn a_hundred_and_fifty_roads_are_shaped_quickly() {
     }
     props.truncate(150);
     let keys: Vec<String> = (0..props.len()).map(|i| format!("r{i:03}")).collect();
-    let items: Vec<Item<'_>> = props.iter().zip(&keys).map(|(p, k)| Item { key: k, kind: "lane", use_: "road", props: p, phase: "existing", context: true }).collect();
+    let items: Vec<Item<'_>> = props
+        .iter()
+        .zip(&keys)
+        .map(|(p, k)| Item { key: k, kind: "lane", use_: "road", props: p, phase: "existing", context: true })
+        .collect();
+    let t = std::time::Instant::now();
+    let rs: Vec<roads::RoadIn> = props
+        .iter()
+        .zip(&keys)
+        .map(|(p, k)| {
+            let mut all = p.clone();
+            all.extend(fill_defaults("lane", "road", p, &Figures::default()));
+            let line = densify(&all["path"], ARC_TOLERANCE).expect("a path");
+            let s = roads::section_of(&all);
+            roads::RoadIn { id: k.clone(), own: Some(poly::band(&line, s.outer())), line, s }
+        })
+        .collect();
+    eprintln!("own: {:.1} ms", t.elapsed().as_secs_f64() * 1000.0);
+    let lay = roads::layout(&rs);
+    eprintln!("layout: {:.1} ms ({} junctions, {} joints)", t.elapsed().as_secs_f64() * 1000.0, lay.junctions.len(), lay.joints.len());
+    let o = roads::outlines(&rs, &lay);
+    eprintln!("outlines: {:.1} ms", t.elapsed().as_secs_f64() * 1000.0);
+    let _ = roads::net(&rs, &lay, &o);
+    eprintln!("net: {:.1} ms", t.elapsed().as_secs_f64() * 1000.0);
     let t = std::time::Instant::now();
     let s = normalise(&items, &Figures::default());
     let ms = t.elapsed().as_secs_f64() * 1000.0;

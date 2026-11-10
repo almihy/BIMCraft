@@ -109,7 +109,13 @@ pub const KINDS: &[Kind] = &[
     Kind { kind: "lane", uses: &["lane", "footpath", "road", "promenade"], shape: "path", label: "Lane", revit: "(roads: Civil's)" },
     Kind { kind: "parking_band", uses: &["parking"], shape: "path", label: "Parking", revit: "Parking Component" },
     Kind { kind: "car_park", uses: &["parking"], shape: "polygon", label: "Car park", revit: "Parking Component, laid out" },
-    Kind { kind: "paving", uses: &["forecourt", "apron", "square", "court"], shape: "polygon", label: "Paving", revit: "Toposolid subdivision" },
+    Kind {
+        kind: "paving",
+        uses: &["forecourt", "apron", "square", "court"],
+        shape: "polygon",
+        label: "Paving",
+        revit: "Toposolid subdivision",
+    },
     Kind { kind: "terrace", uses: &["terrace"], shape: "polygon", label: "Terrace", revit: "Toposolid subdivision" },
     Kind {
         kind: "landscape",
@@ -204,14 +210,44 @@ pub struct PitchSize {
 }
 
 pub const PITCH_SIZES: &[PitchSize] = &[
-    PitchSize { use_: "five_a_side", size: (39000.0, 21700.0), range: Some(((25000.0, 42000.0), (16000.0, 25000.0))), label: "Five-a-side", margin: None },
-    PitchSize { use_: "futsal", size: (40000.0, 20000.0), range: Some(((38000.0, 42000.0), (18000.0, 25000.0))), label: "Futsal", margin: None },
-    PitchSize { use_: "football_7", size: (60000.0, 40000.0), range: Some(((50000.0, 65000.0), (30000.0, 45000.0))), label: "Football 7-a-side", margin: None },
-    PitchSize { use_: "football_11", size: (105000.0, 68000.0), range: Some(((90000.0, 120000.0), (45000.0, 90000.0))), label: "Football 11-a-side", margin: None },
+    PitchSize {
+        use_: "five_a_side",
+        size: (39000.0, 21700.0),
+        range: Some(((25000.0, 42000.0), (16000.0, 25000.0))),
+        label: "Five-a-side",
+        margin: None,
+    },
+    PitchSize {
+        use_: "futsal",
+        size: (40000.0, 20000.0),
+        range: Some(((38000.0, 42000.0), (18000.0, 25000.0))),
+        label: "Futsal",
+        margin: None,
+    },
+    PitchSize {
+        use_: "football_7",
+        size: (60000.0, 40000.0),
+        range: Some(((50000.0, 65000.0), (30000.0, 45000.0))),
+        label: "Football 7-a-side",
+        margin: None,
+    },
+    PitchSize {
+        use_: "football_11",
+        size: (105000.0, 68000.0),
+        range: Some(((90000.0, 120000.0), (45000.0, 90000.0))),
+        label: "Football 11-a-side",
+        margin: None,
+    },
     PitchSize { use_: "basketball", size: (28000.0, 15000.0), range: None, label: "Basketball", margin: None },
     PitchSize { use_: "tennis", size: (23770.0, 10970.0), range: None, label: "Tennis", margin: Some((6400.0, 3660.0)) },
     PitchSize { use_: "padel", size: (20000.0, 10000.0), range: None, label: "Padel", margin: None },
-    PitchSize { use_: "multi_sport", size: (30000.0, 15000.0), range: Some(((20000.0, 44000.0), (12000.0, 22000.0))), label: "Multi-sport", margin: None },
+    PitchSize {
+        use_: "multi_sport",
+        size: (30000.0, 15000.0),
+        range: Some(((20000.0, 44000.0), (12000.0, 22000.0))),
+        label: "Multi-sport",
+        margin: None,
+    },
 ];
 
 /// A pitch's size by its use; an unknown use is a multi-sport pitch.
@@ -221,7 +257,8 @@ pub fn pitch_size(use_: &str) -> &'static PitchSize {
 }
 
 const STREAM_WIDTH: &[(&str, &str)] = &[("stream", "stream.width"), ("rill", "rill.width"), ("ditch", "ditch.width")];
-const LANE_WIDTH: &[(&str, &str)] = &[("lane", "lane.width"), ("road", "road.width"), ("footpath", "path.width"), ("promenade", "path.width")];
+const LANE_WIDTH: &[(&str, &str)] =
+    &[("lane", "lane.width"), ("road", "road.width"), ("footpath", "path.width"), ("promenade", "path.width")];
 const LANDSCAPE_SURFACE: &[(&str, &str)] = &[
     ("lawn", "grass"),
     ("meadow", "meadow"),
@@ -479,7 +516,13 @@ pub fn turning_head(line: &[Xy], width: f64, end: usize, head: &Value, figures: 
     let w2 = width / 2.0;
     if h.get("shape").and_then(Value::as_str) == Some("hammerhead") {
         let arm = num_or(h, "arm", figure(figures, "lane.hammerhead_arm"));
-        let (lo, hi) = if k > 0.0 { (-w2, arm) } else if k < 0.0 { (-arm, w2) } else { (-arm, arm) };
+        let (lo, hi) = if k > 0.0 {
+            (-w2, arm)
+        } else if k < 0.0 {
+            (-arm, w2)
+        } else {
+            (-arm, arm)
+        };
         let r: Ring = [(lo, -width), (hi, -width), (hi, 0.0), (lo, 0.0)]
             .iter()
             .map(|(s, t)| [p[0] + n[0] * s + d[0] * t, p[1] + n[1] * s + d[1] * t])
@@ -508,7 +551,7 @@ pub fn lane_own(line: &[Xy], width: f64, heads: Option<&Value>, figures: &Figure
 /// Where this lane's ends meet other lanes: the inside corners rounded by `radius` (the pieces a closing of the two
 /// leaves near this lane's end; the lane that ends at a junction takes its corners).
 pub fn lane_fillets(own: &[Ring], line: &[Xy], width: f64, others: &[&Vec<Ring>], radius: f64) -> Vec<Ring> {
-    if !(radius > 0.0) || others.is_empty() || line.is_empty() {
+    if radius.is_nan() || radius <= 0.0 || others.is_empty() || line.is_empty() {
         return Vec::new();
     }
     let mut out = Vec::new();
@@ -558,9 +601,8 @@ pub fn pitch_outside_range(use_: &str, length: f64, width: f64) -> Option<String
     match s.range {
         None => ((length - s.size.0).abs() > 10.0 || (width - s.size.1).abs() > 10.0)
             .then(|| format!("A {} court is {} × {} m.", s.label.to_lowercase(), m(s.size.0), m(s.size.1))),
-        Some(((l0, l1), (w0, w1))) => (!(l0 <= length && length <= l1 && w0 <= width && width <= w1)).then(|| {
-            format!("A {} pitch is {}–{} m long and {}–{} m wide.", s.label.to_lowercase(), m(l0), m(l1), m(w0), m(w1))
-        }),
+        Some(((l0, l1), (w0, w1))) => (!((l0..=l1).contains(&length) && (w0..=w1).contains(&width)))
+            .then(|| format!("A {} pitch is {}–{} m long and {}–{} m wide.", s.label.to_lowercase(), m(l0), m(l1), m(w0), m(w1))),
     }
 }
 
@@ -655,7 +697,7 @@ pub fn arc_footprint(arc: &Props) -> Option<(Ring, Vec<(Ring, f64)>)> {
 /// stall's depth and the line (90 square to it), `start` and `end` kept clear at each end.
 pub fn stalls_along(a: Xy, b: Xy, width: f64, depth: f64, left: bool, angle: f64, start: f64, end: f64) -> Vec<Ring> {
     let length = poly::dist(a, b);
-    if !(length > 0.0) || !(width > 0.0) || !(depth > 0.0) {
+    if [length, width, depth].iter().any(|v| v.is_nan() || *v <= 0.0) {
         return Vec::new();
     }
     let d = [(b[0] - a[0]) / length, (b[1] - a[1]) / length];
@@ -722,7 +764,7 @@ pub fn band_bays(key: &str, p: &Props, blocked: &[Ring]) -> Result<(Vec<Ring>, V
     let depth = num(p, "bay_depth").unwrap_or(5000.0);
     let width = num(p, "bay_width").unwrap_or(2500.0);
     let angle = num_or(p, "angle", 90.0);
-    if !(angle > 0.0 && angle <= 90.0) {
+    if angle.is_nan() || angle <= 0.0 || angle > 90.0 {
         return Err("A parking band's angle is more than 0° and at most 90°.".into());
     }
     let sides: &[&'static str] = match p.get("sides").and_then(Value::as_str) {
@@ -748,7 +790,8 @@ pub fn band_bays(key: &str, p: &Props, blocked: &[Ring]) -> Result<(Vec<Ring>, V
         for &side in sides {
             let k = if side == "left" { 1.0 } else { -1.0 };
             let o = [-dy * k * aisle / 2.0, dx * k * aisle / 2.0];
-            let stalls = stalls_along([a[0] + o[0], a[1] + o[1]], [b[0] + o[0], b[1] + o[1]], width, depth, side == "left", angle, start, end);
+            let stalls =
+                stalls_along([a[0] + o[0], a[1] + o[1]], [b[0] + o[0], b[1] + o[1]], width, depth, side == "left", angle, start, end);
             for (j, s) in stalls.into_iter().enumerate() {
                 if has(&omit, i, side, j) {
                     continue;
@@ -797,7 +840,14 @@ fn area_of(ring: Ring) -> Vec<Ring> {
 
 /// What one item's truth gives before it meets its neighbours, into `out`; a lane's own outline is returned for the
 /// roads and lanes to join.
-fn shape_one(it: &Item<'_>, use_: &str, p: &Props, figures: &Figures, out: &mut Shaped) -> Result<Option<(Vec<Xy>, Vec<Ring>)>, String> {
+fn shape_one(
+    it: &Item<'_>,
+    use_: &str,
+    p: &Props,
+    figures: &Figures,
+    blocked: &[Ring],
+    out: &mut Shaped,
+) -> Result<Option<(Vec<Xy>, Vec<Ring>)>, String> {
     let path = |p: &Props| densify(p.get("path").unwrap_or(&Value::Null), ARC_TOLERANCE);
     match it.kind {
         "lane" => {
@@ -851,7 +901,8 @@ fn shape_one(it: &Item<'_>, use_: &str, p: &Props, figures: &Figures, out: &mut 
             out.outline = vec![Poly { outer: r.into_iter().map(poly::to_p2).collect(), holes: Vec::new() }];
         }
         "water" | "landscape" | "paving" | "playground" | "terrace" => {
-            let ring = points(p, "control")?.ok_or_else(|| format!("A {} is drawn from its `control` points.", it.kind.replace('_', " ")))?;
+            let ring =
+                points(p, "control")?.ok_or_else(|| format!("A {} is drawn from its `control` points.", it.kind.replace('_', " ")))?;
             let passes = smooth_passes(p, ring.len());
             let rings = area_of(poly::chaikin(&ring, passes));
             if it.kind == "water" {
@@ -904,7 +955,7 @@ fn shape_one(it: &Item<'_>, use_: &str, p: &Props, figures: &Figures, out: &mut 
         }
         "parking_band" => {
             // Its bays keep clear of the ramps given with it (the cores of the level are the building's).
-            let (aisles, bays) = band_bays(it.key, p, &[])?;
+            let (aisles, bays) = band_bays(it.key, p, blocked)?;
             out.parts.push(part("aisle", &aisles));
             let mut all = aisles.clone();
             for acc in [false, true] {
@@ -919,7 +970,12 @@ fn shape_one(it: &Item<'_>, use_: &str, p: &Props, figures: &Figures, out: &mut 
             out.outline = rings_to(&if whole.is_empty() { poly::band(&line, num(p, "aisle").unwrap_or(6000.0)) } else { whole });
             out.parts.push(line_part("path", vec![line]));
         }
-        other => return Err(format!("A site element is one of: {}; not \"{other}\".", KINDS.iter().map(|k| k.kind).collect::<Vec<_>>().join(", "))),
+        other => {
+            return Err(format!(
+                "A site element is one of: {}; not \"{other}\".",
+                KINDS.iter().map(|k| k.kind).collect::<Vec<_>>().join(", ")
+            ));
+        }
     }
     Ok(None)
 }
@@ -958,11 +1014,26 @@ pub fn normalise(items: &[Item<'_>], figures: &Figures) -> Vec<Shaped> {
     }
     // Each one's own shape; the lanes kept to join.
     let mut lanes: Vec<(usize, Vec<Xy>, Vec<Ring>)> = Vec::new();
-    for (i, it) in items.iter().enumerate() {
-        match shape_one(it, uses[i], &props[i], figures, &mut out[i]) {
-            Ok(Some((line, own))) => lanes.push((i, line, own)),
-            Ok(None) => {}
-            Err(e) => out[i].notes.push(e),
+    // Parking bands last: their bays keep clear of the ramps (Arqiflow's: of the cores and ramps on their level).
+    let mut blocked: Vec<Ring> = Vec::new();
+    for band_pass in [false, true] {
+        for (i, it) in items.iter().enumerate() {
+            if (it.kind == "parking_band") != band_pass {
+                continue;
+            }
+            match shape_one(it, uses[i], &props[i], figures, &blocked, &mut out[i]) {
+                Ok(Some((line, own))) => lanes.push((i, line, own)),
+                Ok(None) => {}
+                Err(e) => out[i].notes.push(e),
+            }
+        }
+        if !band_pass {
+            blocked = items
+                .iter()
+                .zip(&out)
+                .filter(|(it, _)| it.kind == "ramp")
+                .flat_map(|(_, s)| poly::rings_of(&s.outline))
+                .collect();
         }
     }
     // Roads that meet make one paved area: each road's outline takes the rounded corners where it meets another road;
@@ -1001,7 +1072,11 @@ pub fn normalise(items: &[Item<'_>], figures: &Figures) -> Vec<Shaped> {
             }
             s.parts.push(line_part("kerb", rp.kerbs));
             s.parts.push(line_part("pavement_edge", rp.backs));
-            for (role, kind_) in [("marking", roads::MarkKind::Lane), ("centre_line", roads::MarkKind::Centre), ("double_centre_line", roads::MarkKind::Double)] {
+            for (role, kind_) in [
+                ("marking", roads::MarkKind::Lane),
+                ("centre_line", roads::MarkKind::Centre),
+                ("double_centre_line", roads::MarkKind::Double),
+            ] {
                 let lines: Vec<Vec<Xy>> = rp.marks.iter().filter(|m| m.kind == kind_).map(|m| m.line.clone()).collect();
                 if !lines.is_empty() {
                     s.parts.push(line_part(role, lines));
@@ -1063,7 +1138,9 @@ fn scale_value(t: &Value, v: &Value, k: f64) -> Value {
                 Value::Array(a) => Value::Array(
                     a.iter()
                         .map(|q| match q {
-                            Value::Array(c) => Value::Array(c.iter().take(2).map(|x| num_k(x, k)).chain(c.iter().skip(2).cloned()).collect()),
+                            Value::Array(c) => {
+                                Value::Array(c.iter().take(2).map(|x| num_k(x, k)).chain(c.iter().skip(2).cloned()).collect())
+                            }
                             _ => q.clone(),
                         })
                         .collect(),
@@ -1155,7 +1232,15 @@ pub fn props_of(kind_: &str) -> serde_json::Map<String, Value> {
     // What every site element may hold: its phase, surface and label, where context came from (`ref`, `fetched`),
     // the print of what it was made from (`made`) and whether it counts as built.
     if let Value::Object(m) = &mut p {
-        for (k, t) in [("phase", "string"), ("surface", "string"), ("label", "string"), ("ref", "string"), ("fetched", "string"), ("made", "string"), ("built", "boolean")] {
+        for (k, t) in [
+            ("phase", "string"),
+            ("surface", "string"),
+            ("label", "string"),
+            ("ref", "string"),
+            ("fetched", "string"),
+            ("made", "string"),
+            ("built", "boolean"),
+        ] {
             m.entry(k).or_insert_with(|| json!(t));
         }
     }
@@ -1174,12 +1259,19 @@ fn figures_of(names: &[&str]) -> Value {
 /// every figure with what it is. The `site_kinds` command answers it, and Arqiflow converts its metres from it.
 pub fn catalog() -> Value {
     let mut kinds = serde_json::Map::new();
-    let mut all: Vec<(&str, &[&str], &str, &str, &str)> =
-        KINDS.iter().map(|k| (k.kind, k.uses, k.shape, k.label, k.revit)).collect();
+    let mut all: Vec<(&str, &[&str], &str, &str, &str)> = KINDS.iter().map(|k| (k.kind, k.uses, k.shape, k.label, k.revit)).collect();
     all.push(("mass", &["housing", "office", "retail", "mixed", "community"], "polygon", "Building", "Mass"));
     for (name, uses, shape, label, revit) in all {
         let names: &[&str] = match name {
-            "lane" => &["lane.width", "path.width", "road.width", "lane.corner_radius", "road.corner_radius", "lane.turning_head_radius", "lane.hammerhead_arm"],
+            "lane" => &[
+                "lane.width",
+                "path.width",
+                "road.width",
+                "lane.corner_radius",
+                "road.corner_radius",
+                "lane.turning_head_radius",
+                "lane.hammerhead_arm",
+            ],
             "water" => &["water.level", "water.depth", "water.smooth"],
             "stream" => &["stream.width", "rill.width", "ditch.width"],
             "tree" => &["tree.crown", "tree.height"],
@@ -1189,7 +1281,15 @@ pub fn catalog() -> Value {
             "ramp" => &["ramp.width", "ramp.open_length", "ramp.gradient"],
             "parking_band" => &["parking.aisle", "parking.bay_depth", "parking.bay_width"],
             "car_park" => &["parking.level_height"],
-            "mass" => &["building.storeys", "building.attic", "building.floor_height", "roof.pitch", "roof.overhang", "roof.step_drop", "area.attic_factor"],
+            "mass" => &[
+                "building.storeys",
+                "building.attic",
+                "building.floor_height",
+                "roof.pitch",
+                "roof.overhang",
+                "roof.step_drop",
+                "area.attic_factor",
+            ],
             _ => &[],
         };
         // The defaults a new one is drawn with (site_kinds.defaults): from a path and a control ring, both left out.
@@ -1208,14 +1308,33 @@ pub fn catalog() -> Value {
         if let Value::Object(m) = &mut k {
             match name {
                 "lane" => {
-                    m.insert("width_by_use".into(), Value::Object(LANE_WIDTH.iter().map(|(u, n)| ((*u).into(), json!(figure(&Figures::default(), n)))).collect()));
+                    m.insert(
+                        "width_by_use".into(),
+                        Value::Object(LANE_WIDTH.iter().map(|(u, n)| ((*u).into(), json!(figure(&Figures::default(), n)))).collect()),
+                    );
                     m.insert(
                         "corner_radius_by_use".into(),
-                        Value::Object(LANE_WIDTH.iter().map(|(u, _)| ((*u).into(), json!(figure(&Figures::default(), if *u == "road" { "road.corner_radius" } else { "lane.corner_radius" })))).collect()),
+                        Value::Object(
+                            LANE_WIDTH
+                                .iter()
+                                .map(|(u, _)| {
+                                    (
+                                        (*u).into(),
+                                        json!(figure(
+                                            &Figures::default(),
+                                            if *u == "road" { "road.corner_radius" } else { "lane.corner_radius" }
+                                        )),
+                                    )
+                                })
+                                .collect(),
+                        ),
                     );
                 }
                 "stream" => {
-                    m.insert("width_by_use".into(), Value::Object(STREAM_WIDTH.iter().map(|(u, n)| ((*u).into(), json!(figure(&Figures::default(), n)))).collect()));
+                    m.insert(
+                        "width_by_use".into(),
+                        Value::Object(STREAM_WIDTH.iter().map(|(u, n)| ((*u).into(), json!(figure(&Figures::default(), n)))).collect()),
+                    );
                 }
                 "pitch" => {
                     m.insert(

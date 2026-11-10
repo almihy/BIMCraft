@@ -24,8 +24,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::poly::{
-    Ring, Xy, at, band, ccw, clip_lines, closing_pieces, cross, difference, dist, dot, grow, hull, in_rings, intersection, join, left_of,
-    line_distance, ring_area, rings_distance, seg_point, shape_distance, sub, union, ARC_TOL, Shape,
+    ARC_TOL, Ring, Shape, Xy, at, band, ccw, clip_lines, closing_pieces, cross, difference, dist, dot, grow, hull, in_rings, intersection,
+    join, left_of, line_distance, ring_area, rings_distance, seg_point, shape_distance, sub, union,
 };
 use crate::site::Props;
 
@@ -100,11 +100,7 @@ pub fn for_row(row: f64) -> (i64, f64, bool, f64, bool) {
     let n = (n - n % 2).clamp(2, MOST_LANES);
     // A pavement of a metre at the least, on a street wide enough.
     let least = if row >= 8000.0 { 1000.0 } else { 0.0 };
-    let lw = if n as f64 * LANE <= avail + 1e-6 {
-        LANE
-    } else {
-        2750.0_f64.max(LANE.min((row - median - 2.0 * least) / n as f64))
-    };
+    let lw = if n as f64 * LANE <= avail + 1e-6 { LANE } else { 2750.0_f64.max(LANE.min((row - median - 2.0 * least) / n as f64)) };
     (n, r50(lw), false, median, true)
 }
 
@@ -316,7 +312,7 @@ pub fn line_outside(line: &[Xy], rings: &[Ring], least: f64) -> Vec<Vec<Xy>> {
 pub fn dashes(line: &[Xy], dash: f64, gap: f64) -> Vec<Vec<Xy>> {
     let mut out = Vec::new();
     let period = dash + gap;
-    if !(dash > 0.0) || !(gap >= 0.0) || !period.is_finite() {
+    if dash.is_nan() || gap.is_nan() || dash <= 0.0 || gap < 0.0 || !period.is_finite() {
         return out;
     }
     let mut along = 0.0;
@@ -343,10 +339,8 @@ pub fn dashes(line: &[Xy], dash: f64, gap: f64) -> Vec<Vec<Xy>> {
             along += step;
         }
     }
-    if let Some(c) = cur {
-        if c.len() >= 2 {
-            out.push(c);
-        }
+    if let Some(c) = cur.filter(|c| c.len() >= 2) {
+        out.push(c);
     }
     out
 }
@@ -444,11 +438,7 @@ pub fn joints(roads: &[RoadIn], near: &[Vec<usize>]) -> Vec<Joint> {
         }
     }
     cands.sort_by(|x, y| {
-        x.0.total_cmp(&y.0)
-            .then(x.1.a.cmp(&y.1.a))
-            .then(x.1.b.cmp(&y.1.b))
-            .then(x.1.ae.cmp(&y.1.ae))
-            .then(x.1.be.cmp(&y.1.be))
+        x.0.total_cmp(&y.0).then(x.1.a.cmp(&y.1.a)).then(x.1.b.cmp(&y.1.b)).then(x.1.ae.cmp(&y.1.ae)).then(x.1.be.cmp(&y.1.be))
     });
     let mut used: BTreeSet<(usize, usize)> = BTreeSet::new();
     let mut out = Vec::new();
@@ -494,11 +484,8 @@ pub fn junctions(roads: &[RoadIn], js: &[Joint], near: &[Vec<usize>]) -> Vec<Jun
                 continue;
             }
             let p = end_of(&a.line, end).0;
-            let mut at_: Vec<usize> = near[i]
-                .iter()
-                .copied()
-                .filter(|&j| line_distance(&roads[j].line, p).0 <= roads[j].s.outer() / 2.0 + TOUCH)
-                .collect();
+            let mut at_: Vec<usize> =
+                near[i].iter().copied().filter(|&j| line_distance(&roads[j].line, p).0 <= roads[j].s.outer() / 2.0 + TOUCH).collect();
             for j in at_.clone() {
                 for e2 in [0, 1] {
                     let Some(&(other, _)) = joint_at.get(&(j, e2)) else { continue };
@@ -525,9 +512,9 @@ pub fn junctions(roads: &[RoadIn], js: &[Joint], near: &[Vec<usize>]) -> Vec<Jun
             }
             let b = &roads[j];
             for p in crossings(&a.line, &b.line) {
-                let near_end = [(a, b), (b, a)].iter().any(|(r, o)| {
-                    [r.line[0], r.line[r.line.len() - 1]].iter().any(|q| dist(*q, p) <= o.s.outer() / 2.0 + TOUCH)
-                });
+                let near_end = [(a, b), (b, a)]
+                    .iter()
+                    .any(|(r, o)| [r.line[0], r.line[r.line.len() - 1]].iter().any(|q| dist(*q, p) <= o.s.outer() / 2.0 + TOUCH));
                 if !near_end {
                     out.push(Junction { p, at: vec![i, j], ending: vec![] });
                 }
@@ -609,7 +596,7 @@ fn patch_of(roads: &[RoadIn], j: &Joint, half: &dyn Fn(&Section) -> f64) -> Patc
 
 /// The pieces a closing by `radius` fills in where `parts` meet near `p` (within `reach`).
 fn corners(p: Xy, parts: &[&Vec<Ring>], radius: f64, reach: f64) -> Vec<Ring> {
-    if !(radius > 0.0) {
+    if radius.is_nan() || radius <= 0.0 {
         return Vec::new();
     }
     let disc: Ring = (0..64)
@@ -634,8 +621,7 @@ fn corners(p: Xy, parts: &[&Vec<Ring>], radius: f64, reach: f64) -> Vec<Ring> {
         .into_iter()
         .filter(|g| {
             ring_area(g) > 100.0
-                && shape_distance(&Shape { rings: std::slice::from_ref(g), lines: &[] }, &Shape { rings: &[], lines: &edge })
-                    .unwrap_or(0.0)
+                && shape_distance(&Shape { rings: std::slice::from_ref(g), lines: &[] }, &Shape { rings: &[], lines: &edge }).unwrap_or(0.0)
                     > 10.0
         })
         .collect()
@@ -1071,18 +1057,17 @@ pub fn net(roads: &[RoadIn], lay: &Layout, outlines: &[Vec<Ring>]) -> Vec<RoadPa
     for j in js {
         for &k in &j.at {
             let ends = j.ending.contains(&k);
-            let majors: Vec<usize> = j
-                .at
-                .iter()
-                .copied()
-                .filter(|&o| {
-                    o != k
-                        && !partners.contains(&pair(k, o))
-                        && !j.ending.contains(&o)
-                        && runs_on(o, j.p)
-                        && (ends || bigger(&roads[o].s, &roads[k].s))
-                })
-                .collect();
+            let majors: Vec<usize> =
+                j.at.iter()
+                    .copied()
+                    .filter(|&o| {
+                        o != k
+                            && !partners.contains(&pair(k, o))
+                            && !j.ending.contains(&o)
+                            && runs_on(o, j.p)
+                            && (ends || bigger(&roads[o].s, &roads[k].s))
+                    })
+                    .collect();
             if majors.is_empty() {
                 continue;
             }
@@ -1116,9 +1101,7 @@ pub fn net(roads: &[RoadIn], lay: &Layout, outlines: &[Vec<Ring>]) -> Vec<RoadPa
                     let (p, d) = point_at(&r.line, s);
                     let n = left_of(d);
                     let clear = [span.0, (span.0 + span.1) / 2.0, span.1].iter().all(|&v| {
-                        majors
-                            .iter()
-                            .all(|&o| line_distance(&roads[o].line, at(p, n, v)).0 >= roads[o].s.paved() / 2.0 + STOP - 1e-6)
+                        majors.iter().all(|&o| line_distance(&roads[o].line, at(p, n, v)).0 >= roads[o].s.paved() / 2.0 + STOP - 1e-6)
                     });
                     if clear {
                         paint[k].extend(line_across(&r.line, s, forward, &r.s, stop));
@@ -1251,10 +1234,8 @@ mod tests {
 
     #[test]
     fn a_tees_corners_are_the_ending_roads_and_rounded_by_the_kerb_less_the_pavement() {
-        let rs = vec![
-            road("a", vec![[-60000.0, 0.0], [60000.0, 0.0]], 20000.0, 4),
-            road("b", vec![[0.0, 0.0], [0.0, 60000.0]], 11000.0, 2),
-        ];
+        let rs =
+            vec![road("a", vec![[-60000.0, 0.0], [60000.0, 0.0]], 20000.0, 4), road("b", vec![[0.0, 0.0], [0.0, 60000.0]], 11000.0, 2)];
         let lay = layout(&rs);
         let o = outlines(&rs, &lay);
         assert!((area(&o[0]) - 120000.0 * 20000.0).abs() < 1e3, "{}", area(&o[0]));
