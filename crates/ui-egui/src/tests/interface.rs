@@ -91,7 +91,8 @@ fn name_bands(h: &Harness<BimApp>) -> usize {
 fn the_window_wears_the_floating_cards_the_app_bar_and_the_views_little_tabs_and_compact_is_its_to_pick() {
     let mut h = app(BOX);
     let ground = app_bar_ground(&h);
-    assert!(luminance(ground) < 0.1, "dark in the light theme: {ground:?}");
+    assert!(luminance(ground) > 0.8, "light in the light theme: {ground:?}");
+    assert_eq!(crate::style::app_bar_rule().map(|s| s.color), Some(crate::style::pal().border), "a hairline under it");
     let gap = f32::from(crate::style::GAP);
     assert!(h.get_by_label("Architecture").rect().left() > gap, "the ribbon's card stands off the window's edge");
     assert_eq!(name_bands(&h), 0, "the panels' names are on no bands");
@@ -211,4 +212,28 @@ fn find_runs_a_tool_or_opens_a_view_by_what_is_typed() {
     assert!(h.state().find.is_some());
     key(&mut h, Key::Escape);
     assert!(h.state().find.is_none(), "Escape closes it");
+}
+
+#[test]
+fn the_app_bar_is_light_in_the_light_theme_and_dark_in_the_dark_ones_light_canvas_or_not() {
+    for (theme, light_canvas, light) in [
+        (egui::ThemePreference::Light, false, true),
+        (egui::ThemePreference::Dark, false, false),
+        (egui::ThemePreference::Dark, true, false),
+    ] {
+        let mut h = app(BOX);
+        h.state_mut().light_canvas = light_canvas;
+        h.ctx.set_theme(theme);
+        h.run();
+        h.run();
+        let ground = app_bar_ground(&h);
+        assert_eq!(luminance(ground) > 0.5, light, "{theme:?}, light canvas {light_canvas}: {ground:?}");
+        assert_eq!(crate::style::app_bar_rule().is_some(), light, "a hairline under a light bar alone");
+        let p = crate::style::pal();
+        for (what, ink) in [("lettering", p.app_bar_text), ("dimmer lettering", p.app_bar_muted)] {
+            for g in [p.app_bar, p.app_bar_hover] {
+                assert!(crate::style::contrast(ink, g) >= 4.5, "{theme:?}: {what} {ink:?} on {g:?}");
+            }
+        }
+    }
 }

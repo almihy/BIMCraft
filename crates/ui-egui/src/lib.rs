@@ -1706,6 +1706,9 @@ impl BimApp {
         Panel::top("quick-access").frame(app_bar).show_separator_line(false).show(ui, |ui| {
             // Where the window draws its own title bar, this is it: its ground moves the window, its corner closes it.
             let bar = ui.max_rect().expand2(vec2(8.0, 5.0));
+            if let Some(rule) = style::app_bar_rule() {
+                ui.painter().hline(bar.x_range(), bar.bottom() - 0.5, rule);
+            }
             let own = self.own_bar();
             if own {
                 titlebar::drag_area(ui, bar);
@@ -1778,6 +1781,9 @@ impl BimApp {
         Panel::top("start-title-bar").frame(Frame::new().fill(pal().app_bar)).exact_size(34.0).show_separator_line(false).show(ui, |ui| {
             let bar = ui.max_rect();
             titlebar::drag_area(ui, bar);
+            if let Some(rule) = style::app_bar_rule() {
+                ui.painter().hline(bar.x_range(), bar.bottom() - 0.5, rule);
+            }
             ui.painter().text(
                 bar.left_center() + vec2(14.0, 0.0),
                 Align2::LEFT_CENTER,

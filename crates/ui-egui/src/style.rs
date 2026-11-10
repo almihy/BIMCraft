@@ -1,5 +1,5 @@
 //! Look and feel: a lean desktop tool, light or dark (the system's theme until one is picked on the View tab).
-//! A dark app bar on top; under it the view, and over it the ribbon, the Options Bar, the palettes and the status bar as
+//! The app bar on top (light in the light theme, a hairline under it; dark in the dark ones); under it the view, and over it the ribbon, the Options Bar, the palettes and the status bar as
 //! cards: rounded, a hairline border and a soft shadow, `GAP` off the edges and each other (the Floating layout), or the
 //! same pieces flush and square (Compact). One blue accent for the active tool, selection and focus; IBM Plex for the
 //! lettering; the icons are drawn in `icons.rs`.
@@ -79,10 +79,10 @@ pub const LIGHT: Palette = Palette {
     on_context: rgb(0xFFFFFF),
     surface: rgb(0xFFFFFF),
     desk: rgb(0xD4D4D4),
-    app_bar: rgb(0x343840),
-    app_bar_text: rgb(0xE6EAF2),
-    app_bar_muted: rgb(0xBEC3CB),
-    app_bar_hover: rgb(0x4A4F59),
+    app_bar: rgb(0xF2F3F6),
+    app_bar_text: rgb(0x262A32),
+    app_bar_muted: rgb(0x5B606B),
+    app_bar_hover: rgb(0xE2E5EA),
     shadow: Color32::from_rgba_premultiplied(9, 10, 12, 46),
 };
 
@@ -379,13 +379,13 @@ thread_local! {
     static COMPACT: Cell<bool> = const { Cell::new(false) };
     /// The colours this frame is drawn in (`palette`), set by `follow`.
     static CURRENT: Cell<Palette> = const { Cell::new(LIGHT) };
-    /// Whether what's drawn now is on the dark app bar, where icons are light.
+    /// Whether what's drawn now is on the app bar, where icons take its lettering's colour.
     static ON_APP_BAR: Cell<bool> = const { Cell::new(false) };
     /// Whether the window has its semibold lettering yet: fonts set take effect a frame later.
     static SEMIBOLD_ON: Cell<bool> = const { Cell::new(false) };
 }
 
-/// Draw what `add` draws on the app bar: icons and their hover light on dark.
+/// Draw what `add` draws on the app bar: icons in its lettering's colour, their hover its own.
 pub fn on_app_bar<R>(add: impl FnOnce() -> R) -> R {
     ON_APP_BAR.with(|b| b.set(true));
     let r = add();
@@ -394,9 +394,15 @@ pub fn on_app_bar<R>(add: impl FnOnce() -> R) -> R {
 }
 
 /// The ring round what has keyboard focus: the accent's ink, which holds on a card, a tint and a hovered row, and on the app bar
-/// the lettering's colour, since the accent is dim on the light theme's dark bar.
+/// the lettering's colour, which holds on the bar whatever colour a theme or a hosting page gives it.
 pub fn focus_ring() -> Stroke {
     Stroke::new(2.0, if ON_APP_BAR.with(Cell::get) { pal().app_bar_text } else { pal().accent_ink })
+}
+
+/// The hairline under the app bar where the bar is light, as the cards' borders part them from what is round them; a dark bar
+/// stands apart from the light or dark cards under it without one.
+pub fn app_bar_rule() -> Option<Stroke> {
+    (ink_on(pal().app_bar) == Color32::BLACK).then(|| Stroke::new(1.0, pal().border))
 }
 
 /// An icon's ink and its hover's fill where it's drawn: on the app bar or on a card.
