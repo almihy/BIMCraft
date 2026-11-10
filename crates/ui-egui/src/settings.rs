@@ -20,10 +20,10 @@ use serde_json::{Value, json};
 
 use crate::BimApp;
 use crate::dock::{Docking, Palette};
+use crate::failed;
 use crate::lang::{Lang, t, tf};
 use crate::presets::{Preset, Scale, hidden_from_json, presets_from_json};
 use crate::style::{Scheme, pal};
-use crate::failed;
 use std::collections::BTreeSet;
 
 /// The settings file's name, in the folder of the favorites.
