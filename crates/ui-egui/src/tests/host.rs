@@ -32,7 +32,7 @@ fn a_hosted_window_opens_on_the_first_floor_plan_with_none_of_the_desktops_files
     }
     assert!(h.query_all_by_label_contains("Settings").next().is_some(), "the window's own settings stay");
     // The desktop's window keeps all of it.
-    let mut d = bimcraft(BOX);
+    let mut d = app(BOX);
     assert!(d.query_by_label("Open").is_some() && d.query_by_label("Team").is_some());
     press(&mut d, "File");
     assert!(d.query_all_by_label_contains("Save As").next().is_some());

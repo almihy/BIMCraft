@@ -28,29 +28,16 @@ use crate::{BimApp, Sheet, icon_button};
 pub enum Palette {
     Properties,
     Browser,
-    /// BIMCraft's tools, in place of the ribbon: Rev, which has the ribbon, never shows it.
-    Tools,
 }
 
 impl Palette {
-    pub const ALL: [Palette; 3] = [Palette::Properties, Palette::Browser, Palette::Tools];
+    pub const ALL: [Palette; 2] = [Palette::Properties, Palette::Browser];
 
     /// Its name: what its tab says (in the interface's language) and what the settings file keeps it as.
     pub fn name(self) -> &'static str {
         match self {
             Palette::Properties => "Properties",
             Palette::Browser => msg!("Project Browser"),
-            Palette::Tools => msg!("Tools"),
-        }
-    }
-
-    /// What its title and tab say in the profile this frame wears: BIMCraft calls Properties the Inspector and the Project
-    /// Browser the Navigator.
-    pub fn label(self) -> &'static str {
-        match (self, crate::style::rev()) {
-            (Palette::Properties, false) => msg!("Inspector"),
-            (Palette::Browser, false) => msg!("Navigator"),
-            _ => self.name(),
         }
     }
 
@@ -125,8 +112,8 @@ pub enum Target {
     Float(Pos2),
 }
 
-/// How wide a side holding the Tools palette alone starts, in points.
-const TOOLS_WIDTH: f32 = 240.0;
+/// How wide a side starts, in points.
+const SIDE_WIDTH: f32 = 290.0;
 /// How much wider the right side starts than the left, in points.
 const RIGHT_EXTRA: f32 = 12.0;
 /// A palette's window, when it starts floating.
@@ -154,11 +141,11 @@ pub struct Docking {
 }
 
 impl Default for Docking {
-    /// BIMCraft's: the tools down the left, the Inspector over the Navigator down the right.
+    /// Revit's: Properties over the Project Browser, down the left side.
     fn default() -> Docking {
         Docking {
-            left: vec![Stack::of(Palette::Tools)],
-            right: vec![Stack::of(Palette::Properties), Stack::of(Palette::Browser)],
+            left: vec![Stack::of(Palette::Properties), Stack::of(Palette::Browser)],
+            right: Vec::new(),
             bottom: Vec::new(),
             floats: Vec::new(),
             home: BTreeMap::new(),
@@ -167,17 +154,6 @@ impl Default for Docking {
 }
 
 impl Docking {
-    /// Rev's, as Revit's: Properties over the Project Browser, down the left side.
-    pub fn revit() -> Docking {
-        Docking {
-            left: vec![Stack::of(Palette::Properties), Stack::of(Palette::Browser)],
-            right: Vec::new(),
-            bottom: Vec::new(),
-            floats: Vec::new(),
-            home: BTreeMap::from([(Palette::Tools, Side::Left)]),
-        }
-    }
-
     pub fn side(&self, side: Side) -> &[Stack] {
         match side {
             Side::Left => &self.left,
@@ -407,7 +383,7 @@ impl Docking {
         let closed: BTreeSet<Palette> = v["closed"].as_array().into_iter().flatten().filter_map(|n| Palette::named(n.as_str()?)).collect();
         for p in Palette::ALL {
             if !d.shown(p) && !closed.contains(&p) {
-                // First on the left: the Tools palette, which a file from before it holds nothing of, stands where it would have.
+                // First on the left: a palette a file from before it holds nothing of stands where it would have.
                 d.put(p, Target::Side(Side::Left));
                 d.left.rotate_right(1);
             }
@@ -455,13 +431,10 @@ impl BimApp {
             if self.docking.side(side).is_empty() {
                 continue;
             }
-            // A side of the Tools palette alone is a rail and a column of names wide.
-            let tools = self.docking.side(side) == [Stack::of(Palette::Tools)];
-            let width = if tools { TOOLS_WIDTH } else { 290.0 };
             let panel = match side {
-                Side::Left => Panel::left("dock-left").default_size(width),
+                Side::Left => Panel::left("dock-left").default_size(SIDE_WIDTH),
                 // The right side's card meets the window's edge, where its scroll bar must clear the edge that resizes the window.
-                Side::Right => Panel::right("dock-right").default_size(width + RIGHT_EXTRA),
+                Side::Right => Panel::right("dock-right").default_size(SIDE_WIDTH + RIGHT_EXTRA),
                 Side::Bottom => Panel::bottom("dock-bottom").default_size(240.0),
             };
             panel.frame(frame).show_separator_line(false).resizable(true).min_size(140.0).show(ui, |ui| self.dock_side(ui, side));
@@ -569,7 +542,7 @@ impl BimApp {
             ui.spacing_mut().item_spacing.x = 2.0;
             if !lone {
                 for tab in &stack.tabs {
-                    let r = palette_tab(ui, t(tab.label()), *tab == shown);
+                    let r = palette_tab(ui, t(tab.name()), *tab == shown);
                     if r.clicked() {
                         self.docking.activate(*tab);
                     }
@@ -614,8 +587,8 @@ impl BimApp {
     /// A palette's title: the Project Browser's names the project, as Revit's does.
     fn palette_title(&self, p: Palette) -> String {
         match p {
-            Palette::Properties | Palette::Tools => t(p.label()).to_string(),
-            Palette::Browser => format!("{} · {}", t(p.label()), self.session.model.name),
+            Palette::Properties => t(p.name()).to_string(),
+            Palette::Browser => format!("{} · {}", t(p.name()), self.session.model.name),
         }
     }
 
@@ -628,7 +601,6 @@ impl BimApp {
                 scroll.id_salt("properties").show(ui, |ui| Frame::new().inner_margin(8.0).show(ui, |ui| self.properties(ui)));
             }
             Palette::Browser => self.browser_palette(ui),
-            Palette::Tools => self.tool_column(ui),
         }
     }
 

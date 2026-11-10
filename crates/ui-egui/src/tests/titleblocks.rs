@@ -125,17 +125,18 @@ fn tb_opens_view_title_blocks_and_ks_lists_it() {
     assert!(crate::shortcuts().contains(&("TB", "Title Blocks")), "and Keyboard Shortcuts (KS) lists it");
 }
 
-/// The same flow in BIMCraft's own profile: View > Title Blocks is a row of the Tools palette, and a sheet's title block
-/// is picked in the Inspector, as Rev's Properties picks it.
+/// View > Title Blocks on the ribbon edits the project's title blocks, and a sheet's title block is picked in Properties.
 #[test]
-fn the_tools_palette_opens_title_blocks_and_the_inspector_picks_a_sheets() {
-    let mut h = bimcraft(&format!("{BOX}\n{SELO}"));
-    assert!(h.query_by_label("Title Blocks").is_none(), "the palette shows its first tab's tools");
-    let view = h.get_all_by_label("View").map(|n| n.rect()).find(|r| r.left() < 60.0).unwrap();
-    click_at(&mut h, view.center());
+fn the_ribbon_opens_title_blocks_and_properties_picks_a_sheets() {
+    let mut h = app(&format!(
+        "{BOX}
+{SELO}"
+    ));
+    assert!(h.query_by_label("Title Blocks").is_none(), "the ribbon shows its first tab's tools");
+    press(&mut h, "View");
     assert_eq!(h.state().tab, Tab::View);
     press(&mut h, "Title Blocks");
-    assert!(h.state().title_blocks_dialog.is_some(), "the palette's Title Blocks opens the dialog");
+    assert!(h.state().title_blocks_dialog.is_some(), "the ribbon's Title Blocks opens the dialog");
     // A project field's value, typed in the dialog, is the project's on Apply; New and Add Field make another.
     h.state_mut().title_blocks_dialog.as_mut().unwrap().set_value("CLIENTE", "Maria Conceição");
     press_near(&mut h, "Apply", "Cancel");
@@ -145,11 +146,7 @@ fn the_tools_palette_opens_title_blocks_and_the_inspector_picks_a_sheets() {
     press(&mut h, "OK");
     assert!(h.state().title_blocks_dialog.is_none(), "OK closes it");
     assert_eq!(h.state().session.model.title_blocks["Title Block 1"].fields.len(), 1);
-    // TB opens it here too.
-    shortcut(&mut h, "TB");
-    assert!(h.state().title_blocks_dialog.is_some(), "TB in BIMCraft's profile");
-    press(&mut h, "Cancel");
-    // The sheet on the built-in one picks ESCRITORIO in the Inspector, and fills in its sheet field there.
+    // The sheet on the built-in one picks ESCRITORIO in Properties, and fills in its sheet field there.
     let sheets = ids(&h, "sheet");
     h.state_mut().open_sheet(Sheet::Paper(sheets[1]));
     h.run();
@@ -163,5 +160,5 @@ fn the_tools_palette_opens_title_blocks_and_the_inspector_picks_a_sheets() {
     assert_eq!(h.state().session.model.sheet(sheets[1]).unwrap().fields["DESENHO"], "M.S.");
     h.get_by_label("Edit Title Blocks…").click_accesskit();
     h.run();
-    assert!(h.state().title_blocks_dialog.is_some(), "Edit Title Blocks… opens the dialog from the Inspector");
+    assert!(h.state().title_blocks_dialog.is_some(), "Edit Title Blocks… opens the dialog from Properties");
 }

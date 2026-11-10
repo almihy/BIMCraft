@@ -142,7 +142,9 @@ fn sample_model() -> bimcraft_core::model::Model {
 }
 
 /// Pressing "Sample Project" on the start page opens the sample house as a project nobody has saved.
-fn opens_the_sample(mut h: Harness<'static, BimApp>) {
+#[test]
+fn the_start_page_opens_the_sample_house() {
+    let mut h = app("");
     h.state_mut().show_start_page();
     h.run();
     press(&mut h, "Sample Project");
@@ -153,16 +155,6 @@ fn opens_the_sample(mut h: Harness<'static, BimApp>) {
     assert!(h.state().session.path.is_none(), "unsaved: Save asks where to put it");
     assert!(h.state().session.history().is_empty(), "building the sample is not a stack of undo steps");
     assert!(!h.state().dirty(), "nothing has been changed since it opened");
-}
-
-#[test]
-fn the_start_page_opens_the_sample_house_in_rev() {
-    opens_the_sample(app(""));
-}
-
-#[test]
-fn the_start_page_opens_the_sample_house_in_bimcraft() {
-    opens_the_sample(bimcraft(""));
 }
 
 #[test]

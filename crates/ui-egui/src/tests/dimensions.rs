@@ -185,22 +185,20 @@ dimension {"refs": [[0, 2000], [2000, 2000]], "at": [1000, -1000]}"#;
 
 #[test]
 fn typing_3000_into_a_dimension_between_two_walls_moves_the_second_wall() {
-    for own in [false, true] {
-        let mut h = if own { bimcraft(TWO_WALLS) } else { app(TWO_WALLS) };
-        let id = ids(&h, "dimension")[0];
-        h.state_mut().selection = vec![id];
-        h.run();
-        h.get_by_label("Dimension 2000").click();
-        h.run();
-        h.key_press_modifiers(Modifiers::COMMAND, Key::A);
-        h.event(Event::Text("3000".into()));
-        h.run();
-        key(&mut h, Key::Enter);
-        assert_eq!(field(&h, id, "values"), json!([3000.0]), "{}", h.state().status.text);
-        let walls = ids(&h, "wall");
-        assert_eq!((field(&h, walls[0], "start"), field(&h, walls[1], "start")), (json!([0.0, 0.0]), json!([3000.0, 0.0])));
-        assert!(h.query_by_label("Dimension 3000").is_some(), "its number, typed again");
-    }
+    let mut h = app(TWO_WALLS);
+    let id = ids(&h, "dimension")[0];
+    h.state_mut().selection = vec![id];
+    h.run();
+    h.get_by_label("Dimension 2000").click();
+    h.run();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    h.event(Event::Text("3000".into()));
+    h.run();
+    key(&mut h, Key::Enter);
+    assert_eq!(field(&h, id, "values"), json!([3000.0]), "{}", h.state().status.text);
+    let walls = ids(&h, "wall");
+    assert_eq!((field(&h, walls[0], "start"), field(&h, walls[1], "start")), (json!([0.0, 0.0]), json!([3000.0, 0.0])));
+    assert!(h.query_by_label("Dimension 3000").is_some(), "its number, typed again");
 }
 
 #[test]

@@ -53,7 +53,7 @@ fn the_project_browser_scrolls_from_anywhere_across_its_palette() {
 #[test]
 fn palettes_dock_left_right_or_bottom_float_and_close_by_their_menus() {
     let mut h = app(BOX);
-    assert_eq!(*docking(&h), Docking::revit(), "Rev's: Properties over the Project Browser, on the left");
+    assert_eq!(*docking(&h), Docking::default(), "Revit's: Properties over the Project Browser, on the left");
     dock_by_menu(&mut h, "Properties", "Dock Right");
     assert_eq!(docking(&h).docked(Palette::Properties), Some(Side::Right));
     assert!(at(&h, "Dock Properties").x > 1000.0, "drawn down the right side");
@@ -255,7 +255,7 @@ fn settings_open_from_the_file_menu_and_set_the_theme_the_ribbon_and_the_palette
     assert!(!docking(&h).shown(Palette::Browser));
     h.get_by_label("Reset Palette Layout").click_accesskit();
     h.run();
-    assert_eq!(*docking(&h), Docking::revit(), "Rev's layout, in Rev");
+    assert_eq!(*docking(&h), Docking::default(), "the layout as at first");
     // What is still to come shows, greyed out.
     press(&mut h, "Performance");
     assert!(h.get_by_label("Smooth lines (anti-aliasing)").accesskit_node().is_disabled());
@@ -341,9 +341,8 @@ fn a_layout_reads_back_as_written_and_a_hostile_one_reads_as_sense() {
         "floats": [{"tabs": ["Project Browser"], "at": [1e300, -1e300], "size": [0, 1e9]}, {"tabs": ["Properties"], "at": [0, 0], "size": [100, 100]}],
     });
     let d = Docking::from_json(&hostile);
-    assert_eq!(d.left.len(), 2, "and the Tools palette, which the file doesn't name, first");
-    assert_eq!(d.left[0].tabs, [Palette::Tools]);
-    assert_eq!((d.left[1].tabs.as_slice(), d.left[1].active), ([Palette::Properties].as_slice(), 0));
+    assert_eq!(d.left.len(), 1);
+    assert_eq!((d.left[0].tabs.as_slice(), d.left[0].active), ([Palette::Properties].as_slice(), 0));
     let f = d.float_of(Palette::Browser).unwrap();
     assert!(f.at.x <= 20_000.0 && f.at.y >= -20_000.0 && f.size.x >= 120.0 && f.size.y <= 4000.0, "{f:?}");
     assert_eq!(d.floats.len(), 1, "Properties is placed once");
@@ -354,31 +353,27 @@ fn a_layout_reads_back_as_written_and_a_hostile_one_reads_as_sense() {
 }
 
 #[test]
-fn a_palette_dropped_at_the_top_of_another_goes_above_it_in_its_own_stack_in_both_profiles() {
-    for rev in [true, false] {
-        let mut h = if rev { app(BOX) } else { bimcraft(BOX) };
-        let (side, first, second) =
-            if rev { (Side::Left, "Properties", "Project Browser") } else { (Side::Right, "Inspector", "Navigator") };
-        let stacks = |h: &Harness<BimApp>| docking(h).side(side).iter().map(|s| s.tabs.clone()).collect::<Vec<_>>();
-        assert_eq!(stacks(&h), [vec![Palette::Properties], vec![Palette::Browser]], "rev {rev}: as they start");
-        // The second's title to the top edge of the first's header: above it, no tabs made.
-        let header = h.state().drop_headers.iter().find(|(p, _, _)| *p == Palette::Properties).map(|(_, r, _)| *r).unwrap();
-        let from = at_start(&h, &format!("{second} ·"));
-        drag_screen(&mut h, from, pos2(header.center().x, header.top() + 2.0), PointerButton::Primary);
-        assert_eq!(stacks(&h), [vec![Palette::Browser], vec![Palette::Properties]], "rev {rev}: {second} above {first}");
-    }
+fn a_palette_dropped_at_the_top_of_another_goes_above_it_in_its_own_stack() {
+    let mut h = app(BOX);
+    let stacks = |h: &Harness<BimApp>| docking(h).side(Side::Left).iter().map(|s| s.tabs.clone()).collect::<Vec<_>>();
+    assert_eq!(stacks(&h), [vec![Palette::Properties], vec![Palette::Browser]], "as they start");
+    // The Project Browser's title to the top edge of Properties' header: above it, no tabs made.
+    let header = h.state().drop_headers.iter().find(|(p, _, _)| *p == Palette::Properties).map(|(_, r, _)| *r).unwrap();
+    let from = at_start(&h, "Project Browser ·");
+    drag_screen(&mut h, from, pos2(header.center().x, header.top() + 2.0), PointerButton::Primary);
+    assert_eq!(stacks(&h), [vec![Palette::Browser], vec![Palette::Properties]], "the Project Browser above Properties");
 }
 
 #[test]
 fn the_app_bars_palettes_menu_brings_a_closed_palette_back_and_resets_the_layout() {
-    let mut h = bimcraft(BOX);
-    h.state_mut().show_palette(Palette::Tools, false);
+    let mut h = app(BOX);
+    h.state_mut().show_palette(Palette::Properties, false);
     h.state_mut().show_palette(Palette::Browser, false);
     h.run();
     press(&mut h, "Palettes");
-    pick(&mut h, Role::CheckBox, "Tools");
-    assert!(docking(&h).shown(Palette::Tools), "the Tools palette, which has no shortcut, comes back from the bar");
+    pick(&mut h, Role::CheckBox, "Properties");
+    assert!(docking(&h).shown(Palette::Properties), "a closed palette comes back from the bar");
     press(&mut h, "Palettes");
     press(&mut h, "Reset Palette Layout");
-    assert_eq!(docking(&h), &Docking::default(), "the layout as at first, the Navigator back too");
+    assert_eq!(docking(&h), &Docking::default(), "the layout as at first, the Project Browser back too");
 }

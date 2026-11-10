@@ -1,32 +1,30 @@
 //! The 3D view as a working view: a drag orbits round the point under the cursor and the wheel zooms toward it, and the drawing
 //! tools (walls, beams and braces, pipes, conduits and trays, columns, components) take their points on the face under the cursor,
-//! snapped as a plan snaps; over empty space each says what it needs. In both profiles, on the processor's picture and, where the
-//! machine has a graphics adapter, on the card's.
+//! snapped as a plan snaps; over empty space each says what it needs. On the processor's picture and, where the machine has a
+//! graphics adapter, on the card's.
 
 use super::*;
 use crate::gpu::{Card, headless};
 use bimcraft_core::view3d::P3;
 
-/// The 3D view of `script` in each window it is driven in: BIMCraft's and Rev's, drawn on the processor and on the card (where
+/// The 3D view of `script` in each window it is driven in: drawn on the processor and on the card (where
 /// there is one: a runner without a graphics adapter says so and drives the processor's alone), each named for its failures.
 fn views(script: &str) -> Vec<(String, Harness<'static, BimApp>)> {
     let mut out = Vec::new();
-    for rev in [false, true] {
-        for card in [false, true] {
-            let mut h = if rev { app(script) } else { bimcraft(script) };
-            if card {
-                let Some(gpu) = headless() else {
-                    eprintln!("no graphics adapter here: the card's 3D view is not driven");
-                    continue;
-                };
-                h.state_mut().card = Card::with(gpu);
-            }
-            shortcut(&mut h, "3D");
-            assert_eq!(h.state().sheet, Sheet::View3D);
-            assert_eq!(h.state().orbit.on_card, card, "{:?}", h.state().card.note);
-            let name = format!("{} on the {}", if rev { "Rev" } else { "BIMCraft" }, if card { "card" } else { "processor" });
-            out.push((name, h));
+    for card in [false, true] {
+        let mut h = app(script);
+        if card {
+            let Some(gpu) = headless() else {
+                eprintln!("no graphics adapter here: the card's 3D view is not driven");
+                continue;
+            };
+            h.state_mut().card = Card::with(gpu);
         }
+        shortcut(&mut h, "3D");
+        assert_eq!(h.state().sheet, Sheet::View3D);
+        assert_eq!(h.state().orbit.on_card, card, "{:?}", h.state().card.note);
+        let name = format!("on the {}", if card { "card" } else { "processor" });
+        out.push((name, h));
     }
     out
 }

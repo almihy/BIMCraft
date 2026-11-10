@@ -363,7 +363,7 @@ impl BimApp {
         }
     }
 
-    /// The port's state on the view control bar, in both profiles: a click opens Settings at Agents.
+    /// The port's state on the view control bar: a click opens Settings at Agents.
     pub(crate) fn agents_indicator(&mut self, ui: &mut Ui) {
         let state = self.agents_state();
         let ink = match &self.control {

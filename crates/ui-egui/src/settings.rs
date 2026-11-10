@@ -2,7 +2,7 @@
 //! `settings.json` beside the favorites and the update settings ([`beside`]), which the desktop's `main` hands the app
 //! ([`BimApp::use_settings`]); a window that wasn't given the file (every test's) keeps them for as long as it's open.
 //! What it keeps: the theme and whether the drawing stays light in a dark one, the user's own accent, panel, canvas and text colours,
-//! the profile, the layout, interface language, ribbon, palettes, the
+//! the layout, interface language, ribbon, palettes, the
 //! window's size, the background autosave interval, the colour High Contrast Point Clouds draws scans in, whether plans show the
 //! origin marker and their view's name in the corner, the shortcuts the user made, and the control port
 //! for agents (whether the window opens it, on which port, and whether agents may edit the project or only read it).
@@ -22,7 +22,7 @@ use crate::BimApp;
 use crate::dock::{Docking, Palette};
 use crate::lang::{Lang, t, tf};
 use crate::presets::{Preset, Scale, hidden_from_json, presets_from_json};
-use crate::style::{Profile, Scheme, pal};
+use crate::style::{Scheme, pal};
 use crate::updates::failed;
 use std::collections::BTreeSet;
 
@@ -91,7 +91,6 @@ pub struct Settings {
     pub light_canvas: bool,
     /// The Compact layout: the bars and palettes flush to the window's edges, not floating cards.
     pub compact: bool,
-    pub profile: Profile,
     /// A preset's colours when dark, and the user's accent.
     pub scheme: Scheme,
     pub accent: Option<[u8; 3]>,
@@ -99,7 +98,7 @@ pub struct Settings {
     pub panel_colour: Option<[u8; 3]>,
     pub canvas_colour: Option<[u8; 3]>,
     pub text_colour: Option<[u8; 3]>,
-    /// The project's scale, the tools taken out of the ribbon and the Tools palette, and the presets (`presets.rs`).
+    /// The project's scale, the tools taken out of the ribbon, and the presets (`presets.rs`).
     pub scale: Scale,
     pub tools_hidden: BTreeSet<String>,
     pub presets: Vec<Preset>,
@@ -138,7 +137,6 @@ impl Settings {
             "theme": theme,
             "light_canvas": self.light_canvas,
             "layout": if self.compact { "compact" } else { "floating" },
-            "profile": self.profile.code(),
             "scheme": self.scheme.code(),
             "accent": self.accent,
             "panel_colour": self.panel_colour,
@@ -182,7 +180,6 @@ impl Settings {
                 Some("floating") => false,
                 _ => base.compact,
             },
-            profile: v["profile"].as_str().and_then(Profile::from_code).unwrap_or(base.profile),
             scheme: v["scheme"].as_str().and_then(Scheme::from_code).unwrap_or(base.scheme),
             accent: own("accent", base.accent),
             panel_colour: own("panel_colour", base.panel_colour),
@@ -302,14 +299,10 @@ impl BimApp {
         let now = self.settings_now(ThemePreference::System);
         let kept = read(&path).map_or(now.clone(), |v| Settings::from_json(&v, now));
         (self.lang, self.ribbon_min, self.docking) = (kept.language, kept.ribbon_minimized, kept.docking.clone());
-        (self.compact, self.profile, self.scale) = (kept.compact, kept.profile, kept.scale);
+        (self.compact, self.scale) = (kept.compact, kept.scale);
         (self.scheme, self.accent) = (kept.scheme, kept.accent);
         (self.panel_colour, self.canvas_colour, self.text_colour) = (kept.panel_colour, kept.canvas_colour, kept.text_colour);
         (self.tools_hidden, self.presets) = (kept.tools_hidden.clone(), kept.presets.clone());
-        // BIMCraft has no ribbon: it starts with its tools out, whatever a session in Rev left.
-        if self.profile == Profile::BimCraft {
-            self.docking.show(Palette::Tools, true);
-        }
         self.theme_wanted = Some(kept.theme);
         self.light_canvas = kept.light_canvas;
         self.autosave.interval_minutes = kept.autosave_minutes;
@@ -335,7 +328,6 @@ impl BimApp {
             theme,
             light_canvas: self.light_canvas,
             compact: self.compact,
-            profile: self.profile,
             scheme: self.scheme,
             accent: self.accent,
             panel_colour: self.panel_colour,
@@ -452,8 +444,8 @@ impl BimApp {
         }
     }
 
-    /// A box for each palette, shown or closed, and the layout the profile starts in: Settings > User Interface's, and the
-    /// app bar's Palettes menu, which is the way back for the Tools palette, as it has no shortcut.
+    /// A box for each palette, shown or closed, and the layout the window starts in: Settings > User Interface's, and the
+    /// app bar's Palettes menu.
     pub(crate) fn palette_switches(&mut self, ui: &mut Ui) {
         for p in Palette::ALL {
             let mut on = self.docking.shown(p);
@@ -461,32 +453,13 @@ impl BimApp {
                 self.show_palette(p, on);
             }
         }
-        let (tip, layout) = match self.profile {
-            Profile::BimCraft => {
-                (msg!("The tools on the left, the Inspector over the Navigator on the right, as at first"), Docking::default())
-            }
-            Profile::Rev => (msg!("Properties over the Project Browser, on the left, as at first"), Docking::revit()),
-        };
+        let tip = msg!("Properties over the Project Browser, on the left, as at first");
         if ui.button(t("Reset Palette Layout")).on_hover_text(t(tip)).clicked() {
-            self.docking = layout;
+            self.docking = Docking::default();
         }
     }
 
     fn interface_page(&mut self, ui: &mut Ui, ctx: &Context) {
-        heading(ui, msg!("Profile"));
-        let before = self.profile;
-        ui.horizontal(|ui| {
-            for (profile, tip) in [
-                (Profile::BimCraft, msg!("BIMCraft's own: the tools in a palette, the Inspector and the Navigator on the right")),
-                (Profile::Rev, msg!("The ribbon over the view, Properties and the Project Browser on the left")),
-            ] {
-                ui.radio_value(&mut self.profile, profile, profile.name()).on_hover_text(t(tip));
-            }
-        });
-        // Back in BIMCraft, its tools come back where they were: Rev, which has the ribbon, put them away.
-        if before != self.profile && self.profile == Profile::BimCraft {
-            self.docking.show(Palette::Tools, true);
-        }
         heading(ui, msg!("Presets"));
         self.presets_section(ui);
         heading(ui, msg!("Theme"));

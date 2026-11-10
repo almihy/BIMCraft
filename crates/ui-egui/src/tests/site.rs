@@ -37,10 +37,6 @@ fn the_tab_is_massing_and_site_with_the_site_panels_after_the_massing_tools() {
     {
         assert!(h.query_all_by_label(tool).next().is_some(), "{tool}");
     }
-    // BIMCraft's own profile has them in its Tools palette too.
-    let mut b = bimcraft(BOX);
-    press(&mut b, "Massing & Site");
-    assert!(b.query_all_by_label("Parking Area").next().is_some());
 }
 
 #[test]

@@ -1,4 +1,4 @@
-//! Find (Ctrl+K in both profiles, and the Find button on BIMCraft's title bar): every tool and command the window runs by name
+//! Find (Ctrl+K, and the Find button on the quick access bar): every tool and command the window runs by name
 //! (`shortcuts::ACTIONS`, the ones a shortcut can be given) and every view the Project Browser opens, found by the words typed.
 //! Enter takes the first, a click the one clicked; Escape or a click elsewhere closes it.
 
@@ -32,25 +32,6 @@ pub(crate) fn matches(label: &str, query: &str) -> bool {
     words.peek().is_some() && words.all(|w| label.contains(&w.to_lowercase()))
 }
 
-/// The Find button on BIMCraft's title bar: a search icon, its name, and Ctrl K.
-pub(crate) fn button(ui: &mut egui::Ui) -> egui::Response {
-    let (rect, r) = ui.allocate_exact_size(vec2(116.0, 24.0), Sense::click());
-    let name = t("Find");
-    r.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, name));
-    let p = ui.painter();
-    let (ink, ground) = crate::style::icon_inks();
-    p.rect_filled(rect, 6.0, if r.hovered() { ground } else { pal().app_bar_hover.gamma_multiply(0.6) });
-    if r.has_focus() {
-        p.rect_stroke(rect, 6.0, crate::style::focus_ring(), egui::StrokeKind::Inside);
-    }
-    let icon = egui::Rect::from_center_size(rect.left_center() + vec2(14.0, 0.0), vec2(15.0, 15.0));
-    crate::icons::paint(p, crate::icons::Icon::Search, icon, ink);
-    let font = egui::FontId::proportional(12.5);
-    p.text(rect.left_center() + vec2(28.0, 0.0), Align2::LEFT_CENTER, name, font.clone(), ink);
-    p.text(rect.right_center() - vec2(8.0, 0.0), Align2::RIGHT_CENTER, "Ctrl K", font, pal().app_bar_muted);
-    r.on_hover_text(t("Find a tool, a view or a setting (Ctrl+K)"))
-}
-
 impl BimApp {
     /// What Find lists for `query`: the tools and commands, then the views, `MOST` at most; each with the shortcut it has.
     pub(crate) fn find_matches(&self, query: &str) -> Vec<(String, Option<&'static str>, Found)> {
@@ -60,7 +41,7 @@ impl BimApp {
             (t(a).to_string(), key, Found::Action(a))
         });
         let views = self.openable().into_iter().map(|(label, f)| (label, None, f));
-        // The plugins' functions, as their ribbon tabs and the Tools palette list them.
+        // The plugins' functions, as their ribbon tabs list them.
         let owners = self.plugins.owners();
         let plugin_commands = self.plugins.plugins.iter().filter(|p| p.status.is_loaded()).flat_map(|p| {
             p.manifest

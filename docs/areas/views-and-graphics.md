@@ -458,7 +458,7 @@ from a sun are not drawn yet. The desktop's dialog (`display.rs`) opens by GD an
 menu, alike in both looks of the window, and runs the command on the 3D view on screen.
 
 The 3D scene can be exported as glTF 2.0 binary, for Blender and other viewers (`gltf.rs`: `save` to a `.glb`, which the CLI's `--save` and
-`convert` and the MCP server reach too, and File > Export > 3D Scene as glTF in both profiles). It writes the triangles of `Scene::facets`,
+`convert` and the MCP server reach too, and File > Export > 3D Scene as glTF). It writes the triangles of `Scene::facets`,
 the ones the processor's picture and the card's mesh are made of, as the default 3D view shows them (`Look::of_3d`): its phase and phase
 filter, its design options, what Visibility/Graphics hides, and the colours and transparency it paints, linked models included
 (`extras.linked`). A section box on that view is not applied, the whole of each element shown is written, and neither are textures, edges,
@@ -480,7 +480,7 @@ whichever drew the picture on screen. A drag orbits round the surface's point un
 (`Camera::orbit_about` turns the whole camera about it, so the point keeps its pixel, in perspective too), round the target where
 nothing is; the wheel zooms toward it (`Camera::zoom_about` closes the target and the eye in on it), and with nothing under the
 cursor zooms about the cursor as before. `the_surface_under_a_pixel_is_the_same_through_the_mesh_as_the_picture_and_an_orbit_or_a_zoom_about_it_keeps_it_there`
-checks the two painters agree, and `tests/working3d.rs` drives it in both profiles, on the card where the machine has one.
+checks the two painters agree, and `tests/working3d.rs` drives it on the card where the machine has one.
 
 The 3D view's tools draw on a **work plane**, as Revit's (`workplane.rs`): `work_plane` takes the surface under the cursor and,
 for a face that is level and turned up (a floor's top, a flat roof's, a level's plane), gives the level its points go on (the face's
@@ -752,7 +752,7 @@ object (code 101 on, written since 2018) is read past (`dxf.rs`), so its 10s and
 formatting, as `\C` is. `TitleBlock::make_field` turns a text into a field of a key (`key_for` suggests one from what it says) whose
 default is what it said.
 A single line of DXF text keeps its braces (`dxf::decode`), as AutoCAD shows them; only multi-line text's braces are formatting.
-`title_values` gives the project's values. In the desktop, View > Title Blocks (TB, in either profile) lists them (New, Duplicate, Delete, Import DXF…) and
+`title_values` gives the project's values. In the desktop, View > Title Blocks (TB) lists them (New, Duplicate, Delete, Import DXF…) and
 edits the one picked, with a preview drawn by the core (`titleblock::preview`) as the first sheet that names it fills it in: its fields,
 with the project's values, its texts, its straight lines and its size; a sheet's Properties pick its title block and fill in its sheet
 fields. The preview is the editor: a click picks a text (`Text::outline`), a drag moves it, the arrow keys nudge it half a

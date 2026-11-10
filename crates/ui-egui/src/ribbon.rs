@@ -36,13 +36,9 @@ pub(crate) struct Seen {
 thread_local! {
     /// Whether the tools drawn now are a panel's list: rows of an icon and its name, not the ribbon's buttons.
     static LISTING: Cell<bool> = const { Cell::new(false) };
-    /// Whether the rows drawn now are BIMCraft's Tools palette, each panel's under its name ([`rows`]).
-    static IN_PALETTE: Cell<bool> = const { Cell::new(false) };
-    /// Whether the tabs' Select panel is left out: the Tools palette draws it once, over the tabs it shows.
-    static SKIP_SELECT: Cell<bool> = const { Cell::new(false) };
-    /// What the ribbon and the Tools palette leave out this frame, and whether Edit Tools is on (`presets.rs`).
+    /// What the ribbon leaves out this frame, and whether Edit Tools is on (`presets.rs`).
     static TOOL_RULES: RefCell<(std::collections::BTreeSet<String>, Scale, bool)> = RefCell::new(Default::default());
-    /// Whether a tab's tools are being drawn, on the ribbon or in the Tools palette: the rules apply there alone, not to the view
+    /// Whether a tab's tools are being drawn on the ribbon: the rules apply there alone, not to the view
     /// control bar's buttons, which are drawn the same way.
     static IN_TOOLS: Cell<bool> = const { Cell::new(false) };
     /// The tools whose box was ticked or cleared in Edit Tools this frame, by name.
@@ -67,26 +63,6 @@ thread_local! {
 /// Whether the tools drawn now go in a panel's list.
 pub(crate) fn listing() -> bool {
     LISTING.with(Cell::get)
-}
-
-/// Whether the rows drawn now are the Tools palette's (not a panel's list, which is narrower and in a popup).
-pub(crate) fn in_palette() -> bool {
-    IN_PALETTE.with(Cell::get)
-}
-
-/// Draws a tab's panels, `add` drawing them, as rows down `ui`, each panel's under its name: BIMCraft's Tools palette, which
-/// shows as rows what the ribbon lays out as buttons. (After PR 194's tool palette, by PolyglotOpenstreetmap.)
-pub(crate) fn rows(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
-    LISTING.with(|l| l.set(true));
-    IN_PALETTE.with(|p| p.set(true));
-    IN_TOOLS.with(|i| i.set(true));
-    ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing.y = 0.0;
-        add(ui);
-    });
-    IN_TOOLS.with(|i| i.set(false));
-    IN_PALETTE.with(|p| p.set(false));
-    LISTING.with(|l| l.set(false));
 }
 
 /// What the tools drawn this frame leave out (the user's hidden tools, the project's scale), and whether Edit Tools is on.
@@ -122,16 +98,6 @@ pub(crate) fn toggle(name: &str) {
 /// The tools ticked or cleared since the last call.
 pub(crate) fn take_toggled() -> Vec<String> {
     TOGGLED.with(|t| std::mem::take(&mut *t.borrow_mut()))
-}
-
-/// Leaves the tabs' Select panel out of what is drawn next, or puts it back.
-pub(crate) fn skip_select(skip: bool) {
-    SKIP_SELECT.with(|s| s.set(skip));
-}
-
-/// Whether the Select panel is being left out.
-pub(crate) fn skipping_select() -> bool {
-    SKIP_SELECT.with(Cell::get)
 }
 
 /// Counts a ribbon tool, and says whether its panel has handed it over to its list: then it isn't drawn on the ribbon. A
@@ -210,18 +176,12 @@ pub(crate) fn fits(seen: &[Seen], whole: f32, room: f32) -> Vec<(String, Fit)> {
 
 /// A ribbon panel: its tools over its name, which lists them; or, folded, one button that does.
 pub(crate) fn panel(ui: &mut Ui, title: &str, mut add: impl FnMut(&mut Ui)) {
-    // A panel the project's scale leaves out: not drawn, on the ribbon or in the Tools palette.
+    // A panel the project's scale leaves out: not drawn.
     if scale_hides(title) {
         return;
     }
     if listing() {
-        // Inside another panel's list (a folded panel's): the tools as rows; in the Tools palette, under the panel's name.
-        if in_palette() {
-            // Painted: a panel may be named as a tab is (the Structure tab's Structure panel), and its tools say the rest.
-            let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::hover());
-            let at = r.left_bottom() - vec2(0.0, 6.0);
-            ui.painter().text(at, Align2::LEFT_BOTTOM, t(title), FontId::proportional(11.5), pal().muted);
-        }
+        // Inside another panel's list (a folded panel's): the tools as rows.
         add(ui);
         return;
     }
@@ -297,8 +257,7 @@ fn open_if_asked(ui: &Ui, r: &Response) {
 /// with it itself, so in a list the choices are a submenu of it. A tool the panel has handed over or folded has no button on the
 /// ribbon to hang them from: a request to open them opens the panel's list, where its row is.
 pub(crate) fn choices(ui: &Ui, r: &Response, open: bool, content: impl FnOnce(&mut Ui)) -> bool {
-    // The Tools palette is in no popup: there a row's choices are a menu of its own, as a ribbon button's are.
-    if listing() && !in_palette() {
+    if listing() {
         egui::containers::menu::SubMenu::new().show(ui, r, content);
         return false;
     }

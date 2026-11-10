@@ -1,11 +1,10 @@
 //! Look and feel: a lean desktop tool, light or dark (the system's theme until one is picked on the View tab).
-//! A dark app bar on top; under it the view, and over it the ribbon, the Options Bar, the palettes and the status bar as
+//! The app bar on top (light in the light theme, a hairline under it; dark in the dark ones); under it the view, and over it the ribbon, the Options Bar, the palettes and the status bar as
 //! cards: rounded, a hairline border and a soft shadow, `GAP` off the edges and each other (the Floating layout), or the
 //! same pieces flush and square (Compact). One blue accent for the active tool, selection and focus; IBM Plex for the
 //! lettering; the icons are drawn in `icons.rs`.
 //! A dark interface may keep the drawing canvas light; canvas painters use `canvas_dark`, chrome uses `dark`. The user's own panel,
 //! canvas and text colours go over any of it, what is read on them stepped until it reads (`with_ground`, `with_text`).
-//! Both profiles (`Profile`) wear this one look: they differ in where the tools are, never in what the window is drawn in.
 
 use std::cell::Cell;
 use std::sync::Arc;
@@ -80,10 +79,10 @@ pub const LIGHT: Palette = Palette {
     on_context: rgb(0xFFFFFF),
     surface: rgb(0xFFFFFF),
     desk: rgb(0xD4D4D4),
-    app_bar: rgb(0x343840),
-    app_bar_text: rgb(0xE6EAF2),
-    app_bar_muted: rgb(0xBEC3CB),
-    app_bar_hover: rgb(0x4A4F59),
+    app_bar: rgb(0xF2F3F6),
+    app_bar_text: rgb(0x262A32),
+    app_bar_muted: rgb(0x5B606B),
+    app_bar_hover: rgb(0xE2E5EA),
     shadow: Color32::from_rgba_premultiplied(9, 10, 12, 46),
 };
 
@@ -192,7 +191,7 @@ pub const AMOLED: Palette = Palette {
     ..DARK
 };
 
-/// The colours a user picks over the profile's own: one of the presets (dark ones), or the profile's light and dark.
+/// The colours a user picks over the window's own: one of the presets (dark ones), or its own light and dark.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Scheme {
     #[default]
@@ -230,7 +229,7 @@ impl Scheme {
     }
 }
 
-/// The colours a frame is drawn in: the profile's own, light or dark, or the scheme picked when dark (the presets are dark ones),
+/// The colours a frame is drawn in: the window's own, light or dark, or the scheme picked when dark (the presets are dark ones),
 /// with the user's own panel, text and accent colours over them when there are some.
 pub fn palette(dark: bool, look: Look) -> Palette {
     let base = match (dark, look.scheme) {
@@ -378,17 +377,15 @@ thread_local! {
     static GROUND: Cell<Option<Color32>> = const { Cell::new(None) };
     /// Whether this frame lays the window out flush (Compact) rather than in cards (Floating).
     static COMPACT: Cell<bool> = const { Cell::new(false) };
-    /// Whether this frame wears the Rev profile.
-    static REV: Cell<bool> = const { Cell::new(false) };
     /// The colours this frame is drawn in (`palette`), set by `follow`.
     static CURRENT: Cell<Palette> = const { Cell::new(LIGHT) };
-    /// Whether what's drawn now is on the dark app bar, where icons are light.
+    /// Whether what's drawn now is on the app bar, where icons take its lettering's colour.
     static ON_APP_BAR: Cell<bool> = const { Cell::new(false) };
     /// Whether the window has its semibold lettering yet: fonts set take effect a frame later.
     static SEMIBOLD_ON: Cell<bool> = const { Cell::new(false) };
 }
 
-/// Draw what `add` draws on the app bar: icons and their hover light on dark.
+/// Draw what `add` draws on the app bar: icons in its lettering's colour, their hover its own.
 pub fn on_app_bar<R>(add: impl FnOnce() -> R) -> R {
     ON_APP_BAR.with(|b| b.set(true));
     let r = add();
@@ -397,9 +394,15 @@ pub fn on_app_bar<R>(add: impl FnOnce() -> R) -> R {
 }
 
 /// The ring round what has keyboard focus: the accent's ink, which holds on a card, a tint and a hovered row, and on the app bar
-/// the lettering's colour, since the accent is dim on the light theme's dark bar.
+/// the lettering's colour, which holds on the bar whatever colour a theme or a hosting page gives it.
 pub fn focus_ring() -> Stroke {
     Stroke::new(2.0, if ON_APP_BAR.with(Cell::get) { pal().app_bar_text } else { pal().accent_ink })
+}
+
+/// The hairline under the app bar where the bar is light, as the cards' borders part them from what is round them; a dark bar
+/// stands apart from the light or dark cards under it without one.
+pub fn app_bar_rule() -> Option<Stroke> {
+    (ink_on(pal().app_bar) == Color32::BLACK).then(|| Stroke::new(1.0, pal().border))
 }
 
 /// An icon's ink and its hover's fill where it's drawn: on the app bar or on a card.
@@ -407,7 +410,7 @@ pub fn icon_inks() -> (Color32, Color32) {
     if ON_APP_BAR.with(Cell::get) { (pal().app_bar_text, pal().app_bar_hover) } else { (pal().icon, pal().hover_fill) }
 }
 
-/// The colours this frame is drawn in: the profile's, light or dark, or a preset, with the user's accent (`palette`).
+/// The colours this frame is drawn in: light or dark, or a preset, with the user's accent (`palette`).
 pub fn pal() -> Palette {
     CURRENT.with(Cell::get)
 }
@@ -441,39 +444,6 @@ pub fn canvas_pal() -> &'static Palette {
     if canvas_dark() { &DARK } else { &CANVAS_LIGHT }
 }
 
-/// Which interface the window wears: BIMCraft's own (the default), its tools a palette, or Rev, the ribbon tool its users know:
-/// the ribbon in place of the palette, Revit's palette layout and names. One look: the same cards, colours and Layout.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Profile {
-    #[default]
-    BimCraft,
-    Rev,
-}
-
-impl Profile {
-    pub const ALL: [Profile; 2] = [Profile::BimCraft, Profile::Rev];
-
-    /// Its name, which is its label too: a name, so never translated.
-    pub fn name(self) -> &'static str {
-        match self {
-            Profile::BimCraft => "BIMCraft",
-            Profile::Rev => "Rev",
-        }
-    }
-
-    /// What the settings file keeps.
-    pub fn code(self) -> &'static str {
-        match self {
-            Profile::BimCraft => "bimcraft",
-            Profile::Rev => "rev",
-        }
-    }
-
-    pub fn from_code(code: &str) -> Option<Profile> {
-        Profile::ALL.into_iter().find(|p| p.code() == code)
-    }
-}
-
 /// How the window is drawn beyond the theme: what the user kept on the View tab and in Settings.
 #[derive(Clone, Copy, Default, PartialEq)]
 pub struct Look {
@@ -481,7 +451,6 @@ pub struct Look {
     pub light_canvas: bool,
     /// The cards sit flush and square (Compact) rather than floating.
     pub compact: bool,
-    pub profile: Profile,
     /// A preset's colours when dark, and the user's accent.
     pub scheme: Scheme,
     pub accent: Option<[u8; 3]>,
@@ -501,9 +470,8 @@ pub fn follow(ctx: &Context, look: Look) {
     CANVAS_DARK.with(|d| d.set(ground.map_or(dark() && !look.light_canvas, |g| ink_on(g) == Color32::WHITE)));
     GROUND.with(|g| g.set(ground));
     COMPACT.with(|c| c.set(look.compact));
-    REV.with(|r| r.set(look.profile == Profile::Rev));
     CURRENT.with(|c| c.set(palette(dark(), look)));
-    // The widgets' look is the context's, set for both themes: again only when the look changes (the profile, the colours).
+    // The widgets' look is the context's, set for both themes: again only when the look changes (the layout, the colours).
     let styled = egui::Id::new("styled-look");
     if ctx.data(|d| d.get_temp::<Look>(styled)) != Some(look) {
         visuals(ctx, look);
@@ -516,11 +484,6 @@ pub fn follow(ctx: &Context, look: Look) {
 /// Whether this frame is laid out flush: the Compact layout.
 pub fn compact() -> bool {
     COMPACT.with(Cell::get)
-}
-
-/// Whether this frame wears the Rev profile.
-pub fn rev() -> bool {
-    REV.with(Cell::get)
 }
 
 /// The gap round the cards: none in the Compact layout.
@@ -631,7 +594,7 @@ pub fn refont(ctx: &Context, page: Option<&PageFonts>) {
     crate::lang::forget_cjk_font(ctx);
 }
 
-/// The fonts, the theme's preference and how shapes are tessellated, once: the widgets' look follows the profile ([`follow`]).
+/// The fonts, the theme's preference and how shapes are tessellated, once: the widgets' look follows the user's ([`follow`]).
 /// A hosting page's fonts (`page`) go first.
 pub fn apply(ctx: &Context, page: Option<&PageFonts>) {
     ctx.set_fonts(fonts(page));

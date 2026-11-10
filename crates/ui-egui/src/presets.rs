@@ -1,7 +1,7 @@
-//! What BIMCraft's Tools palette offers, and the layouts a user keeps: the project's scale (Sketch, Studio, Team), which leaves out
-//! the tools a project doesn't need yet; the tools the user took out of the palette (its Edit Tools); and presets, each of these with
-//! where the palettes are and the layout, under a name. All of it the window's, kept in `settings.json`, never in a project. The same in both profiles: Rev's ribbon leaves
-//! out and edits its buttons as BIMCraft's Tools palette does its rows (`ribbon::tool_rules`).
+//! What the ribbon offers, and the layouts a user keeps: the project's scale (Sketch, Studio, Team), which leaves out the tools a
+//! project doesn't need yet; the tools the user took out of the ribbon (its Edit Tools); and presets, each of these with where the
+//! palettes are and the layout, under a name. All of it the window's, kept in `settings.json`, never in a project
+//! (`ribbon::tool_rules`).
 
 use std::collections::BTreeSet;
 
@@ -18,11 +18,11 @@ use crate::style::pal;
 /// The most presets kept, and the longest name one has.
 pub const MOST: usize = 32;
 const NAME: usize = 64;
-/// The most tools a palette leaves out, and the longest name one has.
+/// The most tools the ribbon leaves out, and the longest name one has.
 const HIDDEN: usize = 256;
 const TOOL: usize = 64;
 
-/// How much of BIMCraft a project needs: what the Tools palette offers grows with it.
+/// How much of BIMCraft a project needs: what the ribbon offers grows with it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Scale {
     Sketch,
@@ -56,7 +56,7 @@ impl Scale {
         Scale::ALL.into_iter().find(|s| s.code() == code)
     }
 
-    /// Whether the Tools palette leaves out the panel or the tool named `name` (its English name) at this scale: a team's (design
+    /// Whether the ribbon leaves out the panel or the tool named `name` (its English name) at this scale: a team's (design
     /// options, links, inquiry) below Team, and the documents' (sheets, phasing, view templates) in Sketch too.
     pub fn hides(self, name: &str) -> bool {
         const TEAM: [&str; 4] = ["Design Options", "Links", "Link", "Inquiry"];
@@ -150,7 +150,7 @@ impl BimApp {
         self.preset_note = None;
     }
 
-    /// The chip on BIMCraft's title bar: the project's scale, and under it the scales and the presets, to switch at any time.
+    /// The chip on the quick access bar: the project's scale, and under it the scales and the presets, to switch at any time.
     pub(crate) fn scale_chip(&mut self, ui: &mut Ui) {
         let chip =
             Button::new(RichText::new(t(self.scale.name())).color(pal().app_bar_text)).fill(pal().app_bar_hover).min_size(vec2(64.0, 24.0));
@@ -186,7 +186,7 @@ impl BimApp {
     }
 
     /// Settings > User Interface's presets: the project's scale, each preset to use or delete, the layout now kept under a name,
-    /// and every tool back in the Tools palette.
+    /// and every tool back on the ribbon.
     pub(crate) fn presets_section(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             ui.label(t("Project scale:"));
@@ -238,7 +238,7 @@ mod tests {
     fn presets_read_back_as_written_and_a_hostile_list_reads_as_sense() {
         let p = Preset {
             name: "Documentation".into(),
-            docking: Docking::revit(),
+            docking: Docking::default(),
             hidden: BTreeSet::from(["Door".to_string()]),
             scale: Scale::Team,
             compact: true,
