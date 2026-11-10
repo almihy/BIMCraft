@@ -268,3 +268,103 @@ fn a_history_goes_back_only_on_its_own_project_and_under_the_steps_taken_since()
     run(&mut b, "redo", json!({"count": 3}));
     assert_eq!(walls(&b.model), 2);
 }
+
+/// The wall type of `m`'s first wall.
+fn wall_type(m: &Model) -> String {
+    m.elements.values().find_map(|e| if let Element::Wall(w) = e { Some(w.type_name.clone()) } else { None }).unwrap()
+}
+
+#[test]
+fn a_kept_history_takes_back_drawn_walls_a_door_and_a_delete_though_the_room_says_them_otherwise_since() {
+    let (mut a, mut other) = two();
+    run(&mut a, "link", json!({"text": Session::new().model.to_json().unwrap(), "name": "Site"}));
+    let m0 = by_guid(&a.model);
+    let w1 = run(&mut a, "wall", json!({"points": [[0, 0], [6000, 0]]}))["ids"][0].as_u64().unwrap();
+    let m1 = by_guid(&a.model);
+    let w2 = run(&mut a, "wall", json!({"points": [[0, 4000], [6000, 4000]]}))["ids"][0].as_u64().unwrap();
+    let m2 = by_guid(&a.model);
+    run(&mut a, "door", json!({"wall": w1, "offset": 3000}));
+    let m3 = by_guid(&a.model);
+    let g2 = a.model.elements.guid(w2).unwrap();
+    let w3 = run(&mut a, "wall", json!({"points": [[0, 8000], [6000, 8000]]}))["ids"][0].as_u64().unwrap();
+    run(&mut a, "delete", json!({"ids": [w3]}));
+    let m5 = by_guid(&a.model);
+    let h = kept(&a);
+    assert_eq!(h.undo.iter().map(|s| s.label.as_str()).collect::<Vec<_>>(), ["Wall", "Wall", "Door", "Wall", "Delete"]);
+
+    // The room has A's work; after A's page went, another moves A's second wall (and the server's copy may say A's
+    // walls a little otherwise than A's page did: the same to the history).
+    send_model(&other.model.clone(), &a.model, &mut other);
+    let og2 = other.model.elements.id(g2).unwrap();
+    run(&mut other, "move", json!({"ids": [og2], "by": [500, 0]}));
+    let moved = by_guid(&other.model);
+    let mut b = reopened(&other);
+    assert_eq!(b.restore_history(&h), Ok((5, 0)));
+    run(&mut b, "undo", json!({"count": 2}));
+    assert_eq!(by_guid(&b.model), moved, "the deleted wall back and gone again");
+    run(&mut b, "undo", json!({}));
+    let mut want = m2.clone();
+    want.insert(g2, moved[&g2].clone());
+    assert_eq!(by_guid(&b.model), want, "the door taken back; the other's move of the wall stays");
+    run(&mut b, "undo", json!({}));
+    assert!(b.model.elements.get(g2).is_none(), "the second wall taken back, moved as it was");
+    assert_eq!(by_guid(&b.model), m1);
+    run(&mut b, "undo", json!({}));
+    assert_eq!(by_guid(&b.model), m0, "the first wall taken back: nothing of A's is left");
+    assert_eq!(walls(&b.model), 0);
+    run(&mut b, "redo", json!({"count": 3}));
+    let mut want = m3.clone();
+    want.insert(g2, moved[&g2].clone());
+    assert_eq!(by_guid(&b.model), want);
+    assert_eq!(b.model.check(), Ok(()));
+    let _ = m5;
+}
+
+#[test]
+fn undo_takes_back_a_drawn_wall_the_others_changed_since() {
+    let (mut a, mut b) = two();
+    let before = a.model.clone();
+    let w = run(&mut a, "wall", json!({"points": [[0, 0], [6000, 0]]}))["ids"][0].as_u64().unwrap();
+    let g = a.model.elements.guid(w).unwrap();
+    send(&before, &a, &mut b);
+    // B moves A's wall; A takes it in, then undoes drawing it.
+    let before = b.model.clone();
+    let bw = b.model.elements.id(g).unwrap();
+    run(&mut b, "move", json!({"ids": [bw], "by": [0, 500]}));
+    send(&before, &b, &mut a);
+    assert_eq!(by_guid(&a.model), by_guid(&b.model));
+    run(&mut a, "undo", json!({}));
+    assert!(a.model.elements.get(g).is_none(), "A's wall is taken back, moved or not");
+    run(&mut a, "redo", json!({}));
+    assert_eq!(by_guid(&a.model), by_guid(&b.model), "and comes back as B left it");
+    assert_eq!(a.model.check(), Ok(()));
+}
+
+#[test]
+fn settings_and_the_elements_that_need_them_come_across_together() {
+    let (mut a, mut b) = two();
+    let before = a.model.clone();
+    run(&mut a, "wall", json!({"points": [[0, 0], [6000, 0]]}));
+    send(&before, &a, &mut b);
+    // A renames the wall's type: the type list and the wall change together, and neither passes B's check alone.
+    let before = a.model.clone();
+    let was = wall_type(&a.model);
+    run(&mut a, "rename_type", json!({"category": "wall", "type": was, "name": "Renamed wall"}));
+    let got = send(&before, &a, &mut b);
+    assert!(got.refused.is_empty(), "{:?}", got.refused);
+    assert_eq!(wall_type(&b.model), "Renamed wall");
+    assert_eq!(by_guid(&a.model), by_guid(&b.model));
+    assert_eq!(b.model.check(), Ok(()));
+    // A whole other project opened in A (its own types, its own walls) comes to B whole, as the room keeps it.
+    let mut other = Session::new();
+    run(&mut other, "new", json!({}));
+    run(&mut other, "type", json!({"category": "wall", "name": "Brick 300", "thickness": 300}));
+    run(&mut other, "wall", json!({"points": [[0, 0], [9000, 0]], "type": "Brick 300"}));
+    run(&mut other, "delete_type", json!({"category": "wall", "type": was}));
+    let all = sync::entries(&other.model).unwrap();
+    let got = b.merge(&all, &BTreeSet::new()).unwrap();
+    assert!(got.refused.is_empty(), "{:?}", got.refused);
+    assert_eq!(by_guid(&b.model), by_guid(&other.model));
+    assert_eq!(wall_type(&b.model), "Brick 300");
+    assert_eq!(b.model.check(), Ok(()));
+}

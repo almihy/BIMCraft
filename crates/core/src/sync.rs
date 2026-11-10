@@ -171,6 +171,23 @@ impl Model {
     /// ids to give new elements where they are free (those another model of the same history gave them).
     pub fn merged(&self, c: &Changes, keep: &BTreeSet<Guid>, ids: &BTreeMap<Guid, Id>) -> Result<(Model, Merged), String> {
         let mut out = Merged::default();
+        // Settings and elements together first: another project opened in a copy (an .rvt, an .ifc) changes both, its
+        // types and the walls of those types, and neither passes the check without the other.
+        if !c.project.is_empty()
+            && let Ok(mut all) = self.with_settings(c, false)
+        {
+            let wanted = Changes { project: BTreeMap::new(), ..c.clone() };
+            let mut got = Merged::default();
+            let whole = all.take_elements(&wanted, keep, ids, &mut got).and_then(|()| {
+                all.sync_library();
+                all.check()
+            });
+            if whole.is_ok() && got.refused.is_empty() {
+                out.taken = Changes { elements: got.taken.elements, project: c.project.clone(), complete: c.complete };
+                out.ids = got.ids;
+                return Ok((all, out));
+            }
+        }
         // The settings first, all or none: the elements are checked against them.
         let base = match self.with_settings(c, true) {
             Ok(m) => {
@@ -330,6 +347,15 @@ impl Model {
         Ok(())
     }
 
+    /// `c`, which the others made to a model that had the elements `had`, as it is brought to this model of the undo history:
+    /// what they changed of an element this model has not (one a later step of this copy's made) is left out, or going back
+    /// to before that step would bring the element back. What they made and took away is brought as it is.
+    pub fn brought(&self, c: &Changes, had: impl Fn(&Guid) -> bool) -> Changes {
+        let mut out = c.clone();
+        out.elements.retain(|g, v| v.is_none() || !had(g) || self.elements.contains_key(*g));
+        out
+    }
+
     /// `c` taken in without a check: for a model of the history, or what a copy last sent, what [`Model::merged`] took of it
     /// for the model now.
     pub fn with_changes(&self, c: &Changes, ids: &BTreeMap<Guid, Id>) -> Result<Model, String> {
@@ -353,11 +379,13 @@ impl Session {
         }
         // What `complete` took out is named in `taken`, so the history is brought it element by element.
         let ids: BTreeMap<Guid, Id> = merged.taken.elements.keys().filter_map(|g| model.elements.id(*g).map(|id| (*g, id))).collect();
+        let now = Arc::clone(&self.model);
+        let had = |g: &Guid| now.elements.contains_key(*g);
         for stack in [&mut self.undo, &mut self.redo] {
             // Newest last: a model that can't be brought them ends the history there, the older ones with it.
             let mut cut = None;
             for (i, (step, m)) in stack.iter_mut().enumerate().rev() {
-                match m.with_changes(&merged.taken, &ids) {
+                match m.with_changes(&m.brought(&merged.taken, had), &ids) {
                     Ok(n) => {
                         *m = Arc::new(n);
                         step.checked = false;
@@ -489,7 +517,7 @@ impl Session {
                 let model = if since.is_empty() {
                     Arc::clone(&raw)
                 } else {
-                    match raw.with_changes(&since, &since_ids) {
+                    match raw.with_changes(&raw.brought(&since, |g| base.elements.contains_key(*g)), &since_ids) {
                         Ok(m) => Arc::new(m),
                         Err(_) => break,
                     }
