@@ -107,6 +107,7 @@ fn recent_files_are_tiles_with_a_picture_that_open_with_a_click() {
     assert_eq!(walls(&h).len(), 4);
 }
 
+#[cfg(feature = "updater")]
 #[test]
 fn the_footer_says_whether_an_update_is_out() {
     use bimcraft_update::testing::{Fake, release_json};

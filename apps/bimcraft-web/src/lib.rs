@@ -159,10 +159,10 @@ pub struct WebApp {
     changes: Rc<Cell<u64>>,
     /// The model `project` last gave, which `saved` marks as saved.
     given: RefCell<Option<Arc<Model>>>,
-    /// The look asked for, kept for the start when asked before it.
-    look: RefCell<Option<HostLook>>,
-    /// The page's fonts, kept for the start when given before it: its sans and its monospace.
-    fonts: RefCell<(Option<Vec<u8>>, Option<Vec<u8>>)>,
+    /// The look asked for, kept for the start when asked before it or while it is under way.
+    look: Rc<RefCell<Option<HostLook>>>,
+    /// The page's fonts, kept for the start when given before it or while it is under way: its sans and its monospace.
+    fonts: Rc<RefCell<(Option<Vec<u8>>, Option<Vec<u8>>)>>,
     /// What the page hears of files, set before the start or after it.
     files: Rc<RefCell<FileHooks>>,
     /// The model as `take_changes` last gave it, with the others' changes since: what changed here since is this person's,
@@ -179,8 +179,8 @@ impl WebApp {
             ctx: Rc::new(RefCell::new(None)),
             changes: Rc::new(Cell::new(0)),
             given: RefCell::new(None),
-            look: RefCell::new(None),
-            fonts: RefCell::new((None, None)),
+            look: Rc::new(RefCell::new(None)),
+            fonts: Rc::new(RefCell::new((None, None))),
             files: Rc::new(RefCell::new(FileHooks::default())),
             sent: RefCell::new(None),
         }
@@ -200,12 +200,7 @@ impl WebApp {
             let (model, _) = Model::read(&text).map_err(err)?;
             session.reset(model, None);
         }
-        let mut app = BimApp::hosted_on(session);
-        if let Some(look) = *self.look.borrow() {
-            app.set_host_look(look);
-        }
-        let (sans, mono) = self.fonts.borrow().clone();
-        app.set_host_fonts(sans, mono);
+        let app = BimApp::hosted_on(session);
         *self.sent.borrow_mut() = Some(Arc::clone(&app.session.model));
         let mut host = Host {
             seen: Arc::clone(&app.session.model),
@@ -216,12 +211,20 @@ impl WebApp {
             files: Rc::clone(&self.files),
         };
         let ctx = Rc::clone(&self.ctx);
+        let (look, fonts) = (Rc::clone(&self.look), Rc::clone(&self.fonts));
         self.runner
             .start(
                 canvas,
                 web_options(),
                 Box::new(move |cc| {
                     *ctx.borrow_mut() = Some(cc.egui_ctx.clone());
+                    // The look and the fonts the page asked for, before the start or while the runner was setting up (until
+                    // this runs, the page's set_theme and set_fonts have no window to go to).
+                    if let Some(look) = *look.borrow() {
+                        host.app.set_host_look(look);
+                    }
+                    let (sans, mono) = fonts.borrow().clone();
+                    host.app.set_host_fonts(sans, mono);
                     // The 3D view, and the plans' kept triangles, drawn on the card the page draws on (WebGPU; WebGL2 where
                     // there is none, which the 3D view can't use, so it is drawn on the processor there), as the desktop
                     // app does.

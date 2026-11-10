@@ -5903,6 +5903,7 @@ mod origin;
 mod patterns;
 mod perspective;
 mod planviews;
+#[cfg(feature = "plugins")]
 mod plugins;
 mod popup;
 mod presets;
@@ -6023,6 +6024,7 @@ fn show_mass_hides_and_shows_the_masses_in_the_view_on_screen() {
 
 mod structure;
 
+#[cfg(feature = "updater")]
 mod updates {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, Ordering};

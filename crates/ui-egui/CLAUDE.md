@@ -7,6 +7,9 @@ startup, tags) is [the desktop](../../docs/areas/desktop.md).
 
 ## Adding to the window
 
+- **What only the desktop has** goes behind a feature (`Cargo.toml`: `plugins`, `updater`, `egui-fonts`, `all-languages`,
+  all in `desktop`): the browser's window (apps/bimcraft-web, Arqiflow's) is built without them.
+
 - **A tool or a button runs a command.** A new one is a command first (core), then a ribbon button or a tool that passes its
   parameters; its Revit shortcut goes in `SHORTCUTS` (`lib.rs`) and so in Keyboard Shortcuts (KS).
 - **Labels use English source messages**, translated through `lang::t`, `lang::tf` or `lang::tc`. Mark indirectly selected labels
@@ -29,7 +32,8 @@ startup, tags) is [the desktop](../../docs/areas/desktop.md).
   a model point, `press(&mut h, "Label")` for a button, `shortcut(&mut h, "EH")`, `key`, `type_into(&mut h, "Label:", "text")`, `pick`
   for a check box or radio button, and `h.state()` to read the app. New behaviour gets a test in `tests.rs` or, for an area, in `tests/<area>.rs`.
 - Filter while you work: `cargo test -p bimcraft-ui-egui <part of a name>` (`dock`, `browser`, `autosave`, `unhide`, `tag_by_category`).
-  The whole crate runs in about 35 seconds.
+  The whole crate runs in about 35 seconds. The tests are of the desktop's window, with the default features (`desktop`):
+  without them (the browser's build) the translations, egui's fonts, plugins and the updater they check are not there.
 - Traps: `press("X")` panics when two nodes carry the label (a ribbon tab and a button; a palette and a window): check
   `h.state()` or set the state; a status box in the view's corner can lie over a modal's buttons, so a modal says its errors
   inside itself; a field inside a `Grid` comes out narrow, so use `ui.add_sized`.
