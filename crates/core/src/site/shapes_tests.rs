@@ -147,7 +147,8 @@ fn roads_that_meet_make_one_paved_area_drawn_with_its_parts() {
             }
         }
         let whole = poly::union(&all);
-        assert_eq!(whole.iter().filter(|r| poly::ring_area(r) > 0.0).count(), 1, "{name}: one paved area");
+        let areas: Vec<f64> = whole.iter().map(|r| poly::ring_area(r)).collect();
+        assert_eq!(areas.iter().filter(|a| **a > 0.0).count(), 1, "{name}: one paved area, not {areas:?}");
         assert!(whole.iter().all(|r| poly::ring_area(r) > 0.0), "{name}: no holes");
     }
 }

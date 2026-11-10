@@ -316,8 +316,9 @@ fn clean(rings: &[Ring], least: usize) -> Vec<Ring> {
     rings.iter().filter(|r| r.len() >= least && r.iter().all(|p| ok(*p))).cloned().collect()
 }
 
+/// The rings of a boolean's result, less the crumbs its snapping leaves (under a hundredth of a mm²).
 fn flatten(shapes: Vec<Vec<Vec<Xy>>>) -> Vec<Ring> {
-    shapes.into_iter().flatten().map(despike).filter(|r| r.len() >= 3 && ring_area(r).abs() > 1e-6).collect()
+    shapes.into_iter().flatten().map(despike).filter(|r| r.len() >= 3 && ring_area(r).abs() > 0.01).collect()
 }
 
 /// A ring without repeated points and without spikes (out and back along the same line), which the integer snapping
@@ -386,16 +387,36 @@ pub fn grow(rings: &[Ring], d: f64, tol: f64) -> Vec<Ring> {
     if d.abs() < 1e-9 {
         return union(&s);
     }
-    // i_overlay takes the most a round corner's piece may turn: the angle whose arc stays within `tol`.
-    let r = d.abs();
-    let step = if r > tol { 2.0 * (1.0 - tol / r).clamp(-1.0, 1.0).acos() } else { std::f64::consts::FRAC_PI_2 };
-    let style = OutlineStyle::new(d).line_join(LineJoin::Round(step));
     // Its input must be one non-overlapping set (outer rings counter-clockwise).
     let s = union(&s);
     if s.is_empty() {
         return Vec::new();
     }
-    flatten(s.outline(&style))
+    if d > 0.0 {
+        return outline(&s, d, tol);
+    }
+    // Shrunk: what is left of it once what lies around it, grown by as much, is taken away. i_overlay's own inward
+    // offset is a hundred times slower on rings with many short edges (a grown shape's arcs); this is the same shape.
+    let r = -d;
+    let (mut x0, mut y0, mut x1, mut y1) = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for p in s.iter().flatten() {
+        (x0, y0, x1, y1) = (x0.min(p[0]), y0.min(p[1]), x1.max(p[0]), y1.max(p[1]));
+    }
+    let pad = r + 1000.0;
+    let frame: Ring = vec![[x0 - pad, y0 - pad], [x1 + pad, y0 - pad], [x1 + pad, y1 + pad], [x0 - pad, y1 + pad]];
+    let around = difference(&[frame], &s);
+    if around.is_empty() {
+        return s;
+    }
+    difference(&s, &outline(&around, r, tol))
+}
+
+/// One non-overlapping set grown by `d` > 0 with round corners within `tol` of the true arc.
+fn outline(s: &[Ring], d: f64, tol: f64) -> Vec<Ring> {
+    // i_overlay takes the most a round corner's piece may turn: the angle whose arc stays within `tol`.
+    let step = if d > tol { 2.0 * (1.0 - tol / d).clamp(-1.0, 1.0).acos() } else { std::f64::consts::FRAC_PI_2 };
+    let style = OutlineStyle::new(d).line_join(LineJoin::Round(step));
+    flatten(s.to_vec().outline(&style))
 }
 
 /// What a closing by `radius` (grown by it, then shrunk by it, round) adds to `rings`: the pieces it fills in where
@@ -408,7 +429,11 @@ pub fn closing_pieces(rings: &[Ring], radius: f64, least: f64) -> Vec<Ring> {
     if radius.is_nan() || radius <= 0.0 || rings.is_empty() {
         return Vec::new();
     }
-    let closed = grow(&grow(rings, radius, ARC_TOL), -radius, ARC_TOL);
+    // Grown with coarse arcs (an eighth of a turn each): the shrink cuts every arc around a corner back to the corner,
+    // and the rounded pieces a closing fills in are the shrink's own arcs, kept fine. Fine arcs here are thousands of
+    // short edges for the shrink to work through.
+    let coarse = radius * (1.0 - (std::f64::consts::PI / 8.0).cos());
+    let closed = grow(&grow(rings, radius, coarse.max(ARC_TOL)), -radius, ARC_TOL);
     let cores: Vec<Ring> = difference(&closed, &grow(rings, 1.0, 0.5)).into_iter().filter(|g| ring_area(g) > 1.0).collect();
     if cores.is_empty() {
         return Vec::new();
