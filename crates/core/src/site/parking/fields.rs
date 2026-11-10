@@ -2,7 +2,6 @@
 //! plot"). A field is set out along one direction as aisles with a row of bays each side, perimeter rows, cross aisles
 //! at both ends and end rows; the plot is one field, or two either side of a drive aisle cut at an inside corner.
 
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use super::geom::*;
@@ -56,12 +55,12 @@ pub enum IslandKind {
 /// from more than one cut).
 pub struct Ctx {
     pub next_id: i64,
-    pub field_memo: HashMap<FieldKey, Option<Rc<Plan>>>,
+    pub field_memo: FxMap<FieldKey, Option<Rc<Plan>>>,
 }
 
 impl Ctx {
     pub fn new() -> Ctx {
-        Ctx { next_id: 0, field_memo: HashMap::new() }
+        Ctx { next_id: 0, field_memo: FxMap::default() }
     }
     pub fn id(&mut self) -> i64 {
         let id = self.next_id;
@@ -702,7 +701,7 @@ pub struct WPlan {
 
 /// A field's plan, laid out in `frame`, on the plot.
 pub fn place(ctx: &mut Ctx, plan: &Plan, frame: &Frame, tag: &str, deg: f64) -> WPlan {
-    let mut ids: HashMap<i64, i64> = HashMap::new();
+    let mut ids: FxMap<i64, i64> = FxMap::default();
     let w = |p: Pt| to_world(frame, p);
     let aisles: Vec<WAisle> = plan
         .aisles

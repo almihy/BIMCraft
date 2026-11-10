@@ -69,6 +69,8 @@ function cases(): Case[] {
       streets: [[[-5, 0], [75, 0]]],
     },
   });
+  // More random plots for a wider check (`node … more <i> <out>`), not kept in the repository.
+  if (process.argv[2] === "more") for (let i = 24; i < 84; i++) out.push({ name: `random ${i}`, input: randomPlot() });
   return out;
 }
 
@@ -92,7 +94,9 @@ function layout(L: ParkingLayout) {
 const all = cases();
 if (process.argv[2] === "list") console.log(all.length);
 else {
-  const c = all[Number(process.argv[2])];
+  const more = process.argv[2] === "more";
+  if (more) process.argv.splice(2, 1);
+  const c = more ? all[56 + Number(process.argv[2])] : all[Number(process.argv[2])];
   const t = performance.now();
   let out: Record<string, unknown>;
   if (c.input) {

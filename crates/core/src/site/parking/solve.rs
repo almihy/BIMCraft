@@ -580,19 +580,23 @@ pub fn solve(input: &Input) -> Solved {
 
     let pick = |ctx: &mut Ctx, part: &Region| -> Option<Candidate> {
         let mut plans: Vec<(f64, WPlan)> = Vec::new();
+        let t0 = std::time::Instant::now(); // TIMING
         for &deg in &degs {
             for plan in lay_plot(ctx, part, deg, &s, origin, &street_lines, free_dirs) {
                 plans.push((deg, plan));
             }
         }
+        let t1 = t0.elapsed(); // TIMING
         if free_dirs {
             for plan in lay_oblique(ctx, part, &s, origin) {
                 plans.push((plan.dirs.first().copied().unwrap_or(f64::NAN), plan));
             }
         }
+        let t2 = t0.elapsed(); // TIMING
         for plan in lay_ring(ctx, part, &s, origin, &degs, input.quick, basement) {
             plans.push((plan.dirs.first().copied().unwrap_or(f64::NAN), plan));
         }
+        let t3 = t0.elapsed(); // TIMING
         let mut best: Option<Candidate> = None;
         for (deg, mut plan) in plans {
             // The bays a person took out are planted.
@@ -663,6 +667,7 @@ pub fn solve(input: &Input) -> Solved {
                 best = Some(Candidate { deg, plan, reach, throats, score, relaxed });
             }
         }
+        if std::env::var_os("PARKING_T").is_some() { eprintln!("plot {:?} oblique {:?} ring {:?} pick {:?}", t1, t2 - t1, t3 - t2, t0.elapsed() - t3); } // TIMING
         best
     };
     let mut chosen: Vec<Candidate> = Vec::new();

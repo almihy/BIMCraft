@@ -6,7 +6,8 @@
 //! `toFixed`), so the layouts come out the same as Arqiflow's.
 
 use std::cell::{OnceCell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::hash::BuildHasherDefault;
 
 pub type Pt = [f64; 2];
 pub type Ring = Vec<Pt>;
@@ -15,13 +16,48 @@ pub type Span = [f64; 2];
 
 pub const EPS: f64 = 1e-6;
 
+/// A quick hash for the solver's own keys (numbers): the maps are asked millions of times a layout.
+#[derive(Clone, Copy, Default)]
+pub struct Fx(u64);
+
+impl Fx {
+    fn add(&mut self, i: u64) {
+        self.0 = (self.0.rotate_left(5) ^ i).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+}
+
+impl std::hash::Hasher for Fx {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.add(b as u64);
+        }
+    }
+    fn write_u8(&mut self, i: u8) {
+        self.add(i as u64);
+    }
+    fn write_u64(&mut self, i: u64) {
+        self.add(i);
+    }
+    fn write_i64(&mut self, i: i64) {
+        self.add(i as u64);
+    }
+    fn write_usize(&mut self, i: usize) {
+        self.add(i as u64);
+    }
+}
+
+pub type FxMap<K, V> = HashMap<K, V, BuildHasherDefault<Fx>>;
+
 /// An outline and the holes in it (buildings, things kept clear). It remembers the strips asked of it, as the
 /// TypeScript does per object: a copy starts with none.
 #[derive(Debug, Default)]
 pub struct Region {
     pub outer: Ring,
     pub holes: Vec<Ring>,
-    memo: RefCell<HashMap<(i64, i64), Vec<Span>>>,
+    memo: RefCell<FxMap<(i64, i64), Vec<Span>>>,
     swapped: OnceCell<Box<Region>>,
 }
 
@@ -33,7 +69,7 @@ impl Clone for Region {
 
 impl Region {
     pub fn new(outer: Ring, holes: Vec<Ring>) -> Region {
-        Region { outer, holes, memo: RefCell::new(HashMap::new()), swapped: OnceCell::new() }
+        Region { outer, holes, memo: RefCell::new(FxMap::default()), swapped: OnceCell::new() }
     }
 }
 
@@ -674,8 +710,8 @@ pub fn untangle(r: &[Pt], keep: &dyn Fn(Pt) -> bool) -> Vec<Ring> {
             }
         }
         let m = seq.len();
-        let mut other: HashMap<usize, usize> = HashMap::new();
-        let mut first: HashMap<usize, usize> = HashMap::new();
+        let mut other: FxMap<usize, usize> = FxMap::default();
+        let mut first: FxMap<usize, usize> = FxMap::default();
         for (k, e) in seq.iter().enumerate() {
             if e.1 == usize::MAX {
                 continue;
@@ -741,7 +777,7 @@ pub fn untangle(r: &[Pt], keep: &dyn Fn(Pt) -> bool) -> Vec<Ring> {
 // ---------------------------------------------------------------------------------------------------- clash index
 /// Convex pieces filed by where they are, so asking whether a new piece clashes with any of them is quick.
 pub struct PieceIndex {
-    cells: HashMap<i64, Vec<usize>>,
+    cells: FxMap<i64, Vec<usize>>,
     pieces: Vec<Ring>,
     boxes: Vec<Bounds>,
     size: f64,
@@ -749,7 +785,7 @@ pub struct PieceIndex {
 
 impl PieceIndex {
     pub fn new() -> PieceIndex {
-        PieceIndex { cells: HashMap::new(), pieces: Vec::new(), boxes: Vec::new(), size: 8.0 }
+        PieceIndex { cells: FxMap::default(), pieces: Vec::new(), boxes: Vec::new(), size: 8.0 }
     }
 
     fn keys(&self, b: &Bounds) -> Vec<i64> {
@@ -782,14 +818,13 @@ impl PieceIndex {
     /// Whether `p` shares more than 0.005 m² with a piece filed.
     pub fn clash(&self, p: &[Pt]) -> bool {
         let b = bounds(p);
-        let mut seen: Vec<usize> = Vec::new();
+        let mut seen: HashSet<usize, BuildHasherDefault<Fx>> = HashSet::default();
         for k in self.keys(&b) {
             let Some(list) = self.cells.get(&k) else { continue };
             for &id in list {
-                if seen.contains(&id) {
+                if !seen.insert(id) {
                     continue;
                 }
-                seen.push(id);
                 let q = &self.boxes[id];
                 if q.x0 >= b.x1 || b.x0 >= q.x1 || q.y0 >= b.y1 || b.y0 >= q.y1 {
                     continue;
@@ -870,7 +905,7 @@ pub fn cut_out(outer: &[Pt], piece: &[Pt]) -> Option<Vec<Ring>> {
             frags.push((q, p));
         }
     }
-    let mut from: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
+    let mut from: FxMap<(i64, i64), Vec<usize>> = FxMap::default();
     for (k, f) in frags.iter().enumerate() {
         from.entry(key4(f.0)).or_default().push(k);
     }

@@ -507,21 +507,82 @@ fn javascript_numbers_round_and_print_as_javascript_does() {
     assert_eq!(to_fixed(13.375, 2), "13.38");
     assert_eq!(to_fixed(2.0, 1), "2.0");
     assert_eq!(hypot(3.0, 4.0), 5.0);
+    // V8's own, where a plain square root differs in the last place.
+    assert_eq!(hypot(-35.58827996514192, 25.119284067824154), 43.56035012436616);
 }
 
 // ---------------------------------------------------------------------------------------------------- Arqiflow's own layouts
 fn fixtures() -> Vec<(String, Value)> {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/site/parking/fixtures");
+    // PARKING_FIXTURES names another folder of them (a wider check, made by `make.ts more`).
+    let dir = match std::env::var_os("PARKING_FIXTURES") {
+        Some(d) => std::path::PathBuf::from(d),
+        None => std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/site/parking/fixtures"),
+    };
     let mut names: Vec<_> = std::fs::read_dir(&dir).map(|d| d.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "json")).collect()).unwrap_or_default();
     names.sort();
     names
         .into_iter()
         .filter_map(|p| {
             let text = std::fs::read_to_string(&p).ok()?;
-            let v: Value = serde_json::from_str(&text).ok()?;
-            Some((p.file_name()?.to_string_lossy().to_string(), v))
+            let v: Value = serde_json::from_str(&quote_numbers(&text)).ok()?;
+            Some((p.file_name()?.to_string_lossy().to_string(), unquote(v)))
         })
         .collect()
+}
+
+/// The JSON with every number written as a string, so it can be read to the last bit: serde_json (without its
+/// `float_roundtrip` feature) reads some decimals a place off, where JavaScript and `str::parse` read them exactly.
+fn quote_numbers(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 2);
+    let mut in_str = false;
+    let mut escaped = false;
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if in_str {
+            out.push(c);
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                in_str = false;
+            }
+            continue;
+        }
+        if c == '"' {
+            in_str = true;
+            out.push(c);
+        } else if c == '-' || c.is_ascii_digit() {
+            out.push('"');
+            out.push('#');
+            out.push(c);
+            while let Some(&d) = chars.peek() {
+                if d.is_ascii_digit() || "+-.eE".contains(d) {
+                    out.push(d);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            out.push('"');
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// The numbers `quote_numbers` wrote as strings, back as numbers, read exactly.
+fn unquote(v: Value) -> Value {
+    match v {
+        Value::String(s) => match s.strip_prefix('#').and_then(|t| t.parse::<f64>().ok()).and_then(serde_json::Number::from_f64) {
+            Some(n) => Value::Number(n),
+            None => Value::String(s),
+        },
+        Value::Array(a) => Value::Array(a.into_iter().map(unquote).collect()),
+        Value::Object(m) => Value::Object(m.into_iter().map(|(k, v)| (k, unquote(v))).collect()),
+        other => other,
+    }
 }
 
 fn pt_of(v: &Value) -> Pt {
@@ -543,7 +604,7 @@ fn input_from(v: &Value) -> Input {
     Input {
         site: ring_of(&v["site"]),
         obstacles: rings_of(&v["obstacles"]),
-        streets: v["streets"].as_array().map(|a| a.iter().filter_map(|x| x.as_u64().map(|x| x as usize)).collect()).unwrap_or_default(),
+        streets: v["streets"].as_array().map(|a| a.iter().filter_map(|x| x.as_f64().map(|x| x as usize)).collect()).unwrap_or_default(),
         access: v["access"].as_array().map(|a| a.iter().filter_map(|x| Some(Access { at: pt_of(&x["at"]), kind: AccessKind::parse(x["kind"].as_str()?)? })).collect()).unwrap_or_default(),
         entries: v["entries"].as_array().map(|a| a.iter().map(pt_of).collect()).unwrap_or_default(),
         keep_clear: rings_of(&v["keepClear"]),
@@ -634,11 +695,14 @@ fn compare_solved(l: &Solved, want: &Value) -> Vec<String> {
     }
     out.extend(rings_differ("columns", &l.columns, &rings_of(&want["columns"]), 0.005));
     let entries = want["entries"].as_array().cloned().unwrap_or_default();
-    let ours: Vec<String> = l.entries.iter().map(|e| format!("{} {} {}", e.kind.name(), to_fixed(e.at[0], 2), to_fixed(e.at[1], 2))).collect();
-    let theirs: Vec<String> =
-        entries.iter().map(|e| format!("{} {} {}", e["kind"].as_str().unwrap_or(""), to_fixed(pt_of(&e["at"])[0], 2), to_fixed(pt_of(&e["at"])[1], 2))).collect();
-    if ours != theirs {
-        out.push(format!("ways in {ours:?}, Arqiflow's {theirs:?}"));
+    let same_ways = l.entries.len() == entries.len()
+        && l.entries.iter().zip(&entries).all(|(e, w)| {
+            let at = pt_of(&w["at"]);
+            e.kind.name() == w["kind"].as_str().unwrap_or("") && (e.at[0] - at[0]).abs() <= 0.005 && (e.at[1] - at[1]).abs() <= 0.005
+        });
+    if !same_ways {
+        let ours: Vec<String> = l.entries.iter().map(|e| format!("{} {:?}", e.kind.name(), e.at)).collect();
+        out.push(format!("ways in {ours:?}, Arqiflow's {entries:?}"));
     }
     let ramps = want["ramps"].as_array().cloned().unwrap_or_default();
     out.extend(rings_differ("ramps", &l.ramps.iter().map(|r| r.poly.clone()).collect::<Vec<_>>(), &ramps.iter().map(|r| ring_of(&r["poly"])).collect::<Vec<_>>(), 0.005));
@@ -743,7 +807,7 @@ fn compare_layout(l: &Layout, want: &Value) -> Vec<String> {
 #[test]
 fn the_layouts_match_arqiflows() {
     let cases = fixtures();
-    assert!(cases.len() >= 50, "{} fixtures", cases.len());
+    assert!(cases.len() >= 50 || std::env::var_os("PARKING_FIXTURES").is_some(), "{} fixtures", cases.len());
     let mut report = Vec::new();
     let mut matched = 0;
     for (name, case) in &cases {
@@ -822,14 +886,37 @@ fn hostile_props_never_panic() {
     }
 }
 
+/// A large car park (3 ha, over 800 bays, a building on it) in well under a second (the core is built optimised in
+/// debug too; release is quicker still).
 #[test]
 fn a_large_car_park_is_quick() {
-    if cfg!(debug_assertions) {
-        return;
-    }
     let props = mm_props(json!({ "control": [[0, 0], [200000, 0], [200000, 150000], [0, 150000]] }));
+    let building = Obstacle { kind: "mass".into(), level: "L".into(), outline: vec![Poly { outer: vec![P2(150000.0, 100000.0), P2(190000.0, 100000.0), P2(190000.0, 140000.0), P2(150000.0, 140000.0)], holes: vec![] }] };
     let t = std::time::Instant::now();
-    let l = lay_out(&props, "L", &[], &[], &[(P2(0.0, 0.0), P2(200000.0, 0.0))]);
-    assert!(l.result["stalls"].as_u64().unwrap_or(0) > 800);
-    assert!(t.elapsed().as_millis() < 1000, "{:?}", t.elapsed());
+    let l = lay_out(&props, "L", &[], &[building], &[(P2(0.0, 0.0), P2(200000.0, 0.0))]);
+    let took = t.elapsed();
+    assert!(l.result["stalls"].as_u64().unwrap_or(0) > 800, "{}", l.result["stalls"]);
+    assert!(took.as_millis() < 1000, "{took:?}");
+}
+
+/// How long each of Arqiflow's cases takes here (`--ignored --nocapture`).
+#[test]
+#[ignore]
+fn timings() {
+    for (name, case) in fixtures() {
+        if std::env::var_os("PARKING_ONE").is_some_and(|n| n != name.as_str()) {
+            continue;
+        }
+        let mut best = std::time::Duration::MAX;
+        for _ in 0..3 {
+            let t = std::time::Instant::now();
+            if let Some(input) = case.get("input") {
+                solve(&input_from(input));
+            } else {
+                car_park_layout(&case["car_park"]);
+            }
+            best = best.min(t.elapsed());
+        }
+        eprintln!("{name} {best:?} (Arqiflow {} ms)", case["ms"]);
+    }
 }
