@@ -152,6 +152,9 @@ pub fn sample_project() -> Result<String, JsValue> {
     session.model.to_json().map_err(err)
 }
 
+/// The page's fonts: the bytes of its sans and of its monospace.
+type PageFonts = (Option<Vec<u8>>, Option<Vec<u8>>);
+
 #[wasm_bindgen]
 pub struct WebApp {
     runner: eframe::WebRunner,
@@ -162,7 +165,7 @@ pub struct WebApp {
     /// The look asked for, kept for the start when asked before it or while it is under way.
     look: Rc<RefCell<Option<HostLook>>>,
     /// The page's fonts, kept for the start when given before it or while it is under way: its sans and its monospace.
-    fonts: Rc<RefCell<(Option<Vec<u8>>, Option<Vec<u8>>)>>,
+    fonts: Rc<RefCell<PageFonts>>,
     /// What the page hears of files, set before the start or after it.
     files: Rc<RefCell<FileHooks>>,
     /// The model as `take_changes` last gave it, with the others' changes since: what changed here since is this person's,
