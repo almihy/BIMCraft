@@ -72,6 +72,25 @@ What each kind's props are, which are lengths and which are points, and the figu
 `site_kinds` command answers it (`site::shapes::catalog`), so Arqiflow converts between its metres and these
 millimetres from the engine's own list.
 
+### The tools (owner's decision, 10 November)
+
+The ribbon tab is **Massing & Site**: BIMCraft's massing tools, then Revit's site tools under Revit's names, and two
+of Arqiflow's beside them under familiar names. Buildings on the masterplan stay masses.
+
+| Tool | Makes |
+|---|---|
+| Toposolid | a `toposolid`: the ground, from the survey, with its terrain |
+| Property Line | a `propertyline`: the plot |
+| Sub-divide / Graded Region | a `site` area cut into the ground: `paving`, `terrace`, `landscape` (lawn, meadow, planting…), `water`, `stream`, `pitch`, `playground` |
+| Road (beside Sub-divide) | a `site` `lane`: a path with a width (lane, footpath, road with its cross-section, promenade) |
+| Site Component | a `site` `tree`, `hedge`, `bike_rack`, `play_area` (trees, planting, furniture) |
+| Parking Component | one stall: a `site` `parking_stall` (bay width by depth, at a point and an angle) |
+| Parking Area (beside Parking Component) | a `site` `parking_band` (a row of stalls along a path) or `car_park` (an area laid out and counted) |
+| Building Pad | a `buildingpad`: a flat pad cut into the toposolid at a height |
+
+In the Revit build each becomes Revit's own element: a toposolid, a property line, a sub-division, planting and site
+components, parking components, a building pad.
+
 ## Commands
 
 - `site {kind, use?, name?, level?, phase?, source?, ref?, props}`: places one; its shape is worked out at once.
