@@ -528,8 +528,6 @@ pub struct BimApp {
     compact: bool,
     /// The layout a hosting page last asked for (`set_host_look`): asked again, the same, it leaves the person's own choice.
     host_compact: Option<bool>,
-    /// Which interface the window wears (File > Settings): BIMCraft's own, or Rev.
-    profile: style::Profile,
     /// A preset's colours when dark, and the user's accent (Settings > User Interface > Theme).
     scheme: style::Scheme,
     accent: Option<[u8; 3]>,
@@ -950,7 +948,7 @@ fn plugin_button(ui: &mut Ui, label: &str, tip: &str) -> Response {
 
 /// A plugin's button in its panel's list: its row is text alone, as its ribbon button has no icon.
 fn plugin_row(ui: &mut Ui, label: &str, tip: &str) -> Response {
-    let width = if ribbon::in_palette() { ui.available_width() } else { ui.available_width().max(200.0) };
+    let width = ui.available_width().max(200.0);
     let (rect, r) = ui.allocate_exact_size(vec2(width, 30.0), Sense::click());
     let enabled = ui.is_enabled();
     r.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, false, label));
@@ -1055,8 +1053,8 @@ fn list_row_in(ui: &mut Ui, icon: Icon, label: &str, active: bool, tip: &str, tr
     }
     let name = label;
     let (label, tip) = if translate { (t(label).to_string(), t(tip)) } else { (label.to_string(), t(tip)) };
-    // A panel's list is at least a menu wide; the Tools palette's rows are as wide as its column.
-    let width = if ribbon::in_palette() { ui.available_width() } else { ui.available_width().max(200.0) };
+    // A panel's list is at least a menu wide.
+    let width = ui.available_width().max(200.0);
     let (rect, r) = ui.allocate_exact_size(vec2(width, 30.0), Sense::click());
     let enabled = ui.is_enabled();
     r.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, active, &label));
@@ -1081,7 +1079,7 @@ fn list_row_in(ui: &mut Ui, icon: Icon, label: &str, active: bool, tip: &str, tr
     r.on_hover_text(tip)
 }
 
-/// In Edit Tools a tool's button or row is a box to tick, what the ribbon or the Tools palette shows: a click ticks or clears it and
+/// In Edit Tools a tool's button or row is a box to tick, what the ribbon shows: a click ticks or clears it and
 /// takes no tool. `name` is its English name, which the settings file keeps.
 fn edit_tool(ui: &Ui, r: Response, rect: Rect, name: &str) -> Response {
     let shown = !ribbon::tool_hidden(name);
@@ -1213,40 +1211,21 @@ fn tab_button_with(ui: &mut Ui, label: &str, active: bool, contextual: bool, sen
 /// How tall a card floating over a view is (its tabs, its view control bar), points.
 const FLOATING_CARD: f32 = 30.0;
 
-/// The ribbon's tabs, in order, with the icon the Tools palette's rail gives each (the contextual tab comes after them).
-const TABS: [(Tab, &str, Icon); 12] = [
-    (Tab::Architecture, msg!("Architecture"), Icon::Wall),
-    (Tab::Structure, msg!("Structure"), Icon::Beam),
-    (Tab::Plumbing, msg!("Plumbing"), Icon::Pipe),
-    (Tab::Electrical, msg!("Electrical"), Icon::Luminaire),
-    (Tab::Lightning, msg!("Lightning Protection"), Icon::DownConductor),
-    (Tab::Data, msg!("Data"), Icon::DataOutlet),
-    (Tab::Insert, msg!("Insert"), Icon::ImportCad),
-    (Tab::Annotate, msg!("Annotate"), Icon::Dimension),
-    (Tab::Massing, msg!("Massing & Site"), Icon::Mass),
-    (Tab::View, msg!("View"), Icon::View3D),
-    (Tab::Manage, msg!("Manage"), Icon::Settings),
-    (Tab::Modify, "Modify", Icon::Modify),
+/// The ribbon's tabs, in order (the contextual tab comes after them).
+const TABS: [(Tab, &str); 12] = [
+    (Tab::Architecture, msg!("Architecture")),
+    (Tab::Structure, msg!("Structure")),
+    (Tab::Plumbing, msg!("Plumbing")),
+    (Tab::Electrical, msg!("Electrical")),
+    (Tab::Lightning, msg!("Lightning Protection")),
+    (Tab::Data, msg!("Data")),
+    (Tab::Insert, msg!("Insert")),
+    (Tab::Annotate, msg!("Annotate")),
+    (Tab::Massing, msg!("Massing & Site")),
+    (Tab::View, msg!("View")),
+    (Tab::Manage, msg!("Manage")),
+    (Tab::Modify, "Modify"),
 ];
-
-/// A tab on the Tools palette's rail: its icon, lit while it is open; its name for screen readers and in its tooltip.
-fn rail_button(ui: &mut Ui, icon: Icon, label: &str, open: bool) -> Response {
-    let label = t(label);
-    let (rect, r) = ui.allocate_exact_size(vec2(32.0, 30.0), Sense::click());
-    r.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, open, label));
-    let (fill, ink) = match (open, r.hovered()) {
-        (true, _) => (pal().select_fill, pal().accent_ink),
-        (false, true) => (pal().hover_fill, pal().icon),
-        (false, false) => (Color32::TRANSPARENT, pal().icon),
-    };
-    let p = ui.painter();
-    p.rect_filled(rect, 6.0, fill);
-    if r.has_focus() {
-        p.rect_stroke(rect, 6.0, style::focus_ring(), StrokeKind::Inside);
-    }
-    icons::paint(p, icon, Rect::from_center_size(rect.center(), vec2(19.0, 19.0)), ink);
-    r.on_hover_text(label)
-}
 
 impl BimApp {
     pub fn new(session: Session) -> BimApp {
@@ -1280,7 +1259,6 @@ impl BimApp {
             ribbon_min: false,
             compact: false,
             host_compact: None,
-            profile: style::Profile::default(),
             scheme: style::Scheme::default(),
             accent: None,
             panel_colour: None,
@@ -1655,7 +1633,6 @@ impl BimApp {
         let look = style::Look {
             light_canvas: self.light_canvas,
             compact: self.compact,
-            profile: self.profile,
             scheme: self.scheme,
             accent: self.accent,
             panel_colour: self.panel_colour,
@@ -1738,12 +1715,8 @@ impl BimApp {
                 titlebar::caption_buttons(ui, bar);
             }
         });
-        // The ribbon is Rev's: BIMCraft's tools are a palette (`Palette::Tools`), which Rev never shows.
-        if style::rev() {
-            self.docking.show(dock::Palette::Tools, false);
-            let card = style::card([true, true, true, false]);
-            Panel::top("ribbon").frame(card).show_separator_line(false).show(ui, |ui| self.ribbon(ui));
-        }
+        let card = style::card([true, true, true, false]);
+        Panel::top("ribbon").frame(card).show_separator_line(false).show(ui, |ui| self.ribbon(ui));
         if self.has_update_banner() {
             Panel::top("update").frame(Frame::NONE).show_separator_line(false).show(ui, |ui| self.update_banner(ui));
         }
@@ -1787,7 +1760,7 @@ impl BimApp {
         self.warning(&ctx);
         self.dialogs(&ctx);
         self.find_window(&ctx);
-        // What Edit Tools ticked or cleared, on the ribbon or in the Tools palette.
+        // What Edit Tools ticked or cleared on the ribbon.
         for name in ribbon::take_toggled() {
             if !self.tools_hidden.remove(&name) {
                 self.tools_hidden.insert(name);
@@ -3166,7 +3139,7 @@ impl BimApp {
         (fresh.hosted, fresh.save_asked, fresh.skin) = (self.hosted, self.save_asked, self.skin);
         (fresh.own_title_bar, fresh.system_title_bar) = (self.own_title_bar, self.system_title_bar);
         (fresh.thin, fresh.lang, fresh.snaps, fresh.ribbon_min) = (self.thin, self.lang, self.snaps, self.ribbon_min);
-        (fresh.compact, fresh.profile, fresh.scale) = (self.compact, self.profile, self.scale);
+        (fresh.compact, fresh.scale) = (self.compact, self.scale);
         (fresh.tools_hidden, fresh.presets) = (std::mem::take(&mut self.tools_hidden), std::mem::take(&mut self.presets));
         fresh.font_finder = self.font_finder;
         fresh.scan_contrast = self.scan_contrast;
@@ -3306,10 +3279,9 @@ impl BimApp {
                 if icon_button(ui, Icon::Settings, "Settings").clicked() {
                     self.settings_page = Some(settings::Page::Interface);
                 }
-                // Find and the project's scale, in both profiles: BIMCraft's Find a field's width, Rev's an icon among the others.
+                // Find and the project's scale.
                 ui.separator();
-                let find = if style::rev() { icon_button(ui, Icon::Search, "Find") } else { find::button(ui) };
-                if find.clicked() {
+                if icon_button(ui, Icon::Search, "Find").clicked() {
                     self.find = Some(String::new());
                 }
                 if !self.hosted {
@@ -3322,8 +3294,8 @@ impl BimApp {
         // buttons on the left and, where the window draws its own title bar, the caption buttons on the right; else as near it
         // as that room allows, and cut short where even it is too little.
         let gap = 12.0;
-        // Which palettes show, in both profiles, at the bar's right end where an editor keeps its layout's buttons: a closed
-        // palette comes back from here, the Tools palette too, which has no shortcut. The title's middle stays the window's.
+        // Which palettes show, at the bar's right end where an editor keeps its layout's buttons: a closed palette comes back from
+        // here. The title's middle stays the window's.
         let end = ui.max_rect().right() + if self.own_bar() { 8.0 - 3.0 * titlebar::BUTTON_WIDTH } else { 0.0 } - 4.0;
         let at = Rect::from_min_size(pos2(end - 26.0, row.center().y - 12.0), vec2(26.0, 24.0));
         let palettes = ui.put(at, |ui: &mut Ui| icon_button(ui, Icon::Interface, msg!("Palettes")));
@@ -3425,7 +3397,7 @@ impl BimApp {
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 2.0;
-                            for (tab, label, _) in TABS {
+                            for (tab, label) in TABS {
                                 let r = tab_button(ui, label, self.tab == tab, false);
                                 if changed && self.tab == tab {
                                     r.scroll_to_me(None);
@@ -3510,7 +3482,7 @@ impl BimApp {
         }
     }
 
-    /// The panels of `tab`: on the ribbon side by side, in the Tools palette as rows.
+    /// The panels of `tab`, side by side.
     fn tab_content(&mut self, ui: &mut Ui, tab: Tab) {
         match tab {
             Tab::Architecture => self.architecture_tab(ui),
@@ -3527,67 +3499,6 @@ impl BimApp {
             Tab::Modify | Tab::Context => self.modify_tab(ui),
             Tab::Plugin(i) => self.plugin_tab(ui, i),
         }
-    }
-
-    /// BIMCraft's Tools palette, in place of the ribbon: a rail of the ribbon's tabs down its left, and beside it, as rows under their
-    /// panels' names, the Select panel, the tool in hand's or the selection's (the contextual tab's, named for it) and the open tab's.
-    pub(crate) fn tool_column(&mut self, ui: &mut Ui) {
-        let open = if self.tab == Tab::Context { self.back } else { self.tab };
-        // The rail and the rows side by side, each in a rect of its own: what is wider than the rows' is cut, never widens the column.
-        let all = ui.available_rect_before_wrap();
-        let rail = all.with_max_x(all.left() + 36.0).shrink2(vec2(2.0, 4.0));
-        let rows = all.with_min_x(all.left() + 40.0);
-        ui.painter().vline(rows.left() - 2.0, all.y_range().shrink(6.0), Stroke::new(1.0, pal().border));
-        ui.scope_builder(UiBuilder::new().max_rect(rail), |ui| {
-            // A palette too short for every tab scrolls them, as the rows beside them scroll theirs.
-            ScrollArea::vertical().id_salt("tool-rail").auto_shrink([false, false]).show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 2.0;
-                for (tab, label, icon) in TABS {
-                    if rail_button(ui, icon, label, tab == open).clicked() {
-                        self.tab = tab;
-                    }
-                }
-                // The plugins' tabs come after BIMCraft's, scrolling with them.
-                let plugin_tabs: Vec<String> = self.plugin_tabs.iter().map(|p| self.plugin_tab_name(p)).collect();
-                for (i, label) in plugin_tabs.iter().enumerate() {
-                    if rail_button(ui, Icon::Code, label, Tab::Plugin(i) == open).clicked() {
-                        self.tab = Tab::Plugin(i);
-                    }
-                }
-            });
-        });
-        ui.scope_builder(UiBuilder::new().max_rect(rows), |ui| {
-            ScrollArea::both().id_salt("tool-column").auto_shrink([false, false]).show(ui, |ui| {
-                ui.set_max_width(rows.width() - 12.0);
-                let edit = if self.editing_tools { msg!("Done") } else { msg!("Edit Tools") };
-                let tip = msg!("Tick the tools this palette shows; Find still has the others");
-                if ui.button(t(edit)).on_hover_text(t(tip)).clicked() {
-                    self.editing_tools = !self.editing_tools;
-                }
-                ribbon::rows(ui, |ui| self.select_panel(ui));
-                ribbon::skip_select(true);
-                let context = self.context();
-                if let Some(name) = &context {
-                    ui.add_space(8.0);
-                    ui.label(RichText::new(name).color(pal().context).strong());
-                    ribbon::rows(ui, |ui| self.modify_tab(ui));
-                }
-                // The Modify tab is what the contextual rows already are.
-                if open != Tab::Modify || context.is_none() {
-                    ui.add_space(8.0);
-                    // Painted: the rail's button already names it for screen readers.
-                    let (label, plugin) = match open {
-                        Tab::Plugin(i) => (self.plugin_tabs.get(i).map(|t| self.plugin_tab_name(t)).unwrap_or_default(), true),
-                        tab => (TABS.iter().find(|(t, ..)| *t == tab).map_or("", |(_, label, _)| *label).to_string(), false),
-                    };
-                    let label = if plugin { label } else { t(&label).to_string() };
-                    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 18.0), Sense::hover());
-                    ui.painter().text(r.left_center(), Align2::LEFT_CENTER, label, style::semibold(13.0), pal().text);
-                    ribbon::rows(ui, |ui| self.tab_content(ui, open));
-                }
-                ribbon::skip_select(false);
-            });
-        });
     }
 
     /// The ribbon tab's panels of tools.
@@ -3686,10 +3597,6 @@ impl BimApp {
     /// The Select panel each tab starts with: Modify, and Revit's Filter while something is selected, to keep some of it by
     /// category or by the values of a parameter they all have.
     fn select_panel(&mut self, ui: &mut Ui) {
-        // The Tools palette draws it once, over the tabs it shows.
-        if ribbon::skipping_select() {
-            return;
-        }
         panel(ui, msg!("Select"), |ui| {
             if big_button(ui, Icon::Modify, "Modify", structure::same_tool(&self.tool, &Tool::Modify), msg!("Modify (MD): select elements"))
                 .clicked()

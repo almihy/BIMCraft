@@ -1,5 +1,5 @@
-//! The Navigator's minimap: the active plan, ceiling plan, section or elevation drawn whole and small at the top of the
-//! Navigator (Rev's Project Browser), the part the view shows outlined on it. A click centres the view there; a drag pans it
+//! The Project Browser's minimap: the active plan, ceiling plan, section or elevation drawn whole and small at the top of the
+//! Project Browser, the part the view shows outlined on it. A click centres the view there; a drag pans it
 //! as it goes. The 3D view, sheets and schedules have none.
 
 use std::sync::{Arc, Weak};
