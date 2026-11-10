@@ -539,3 +539,12 @@ fn site_edit_gives_a_plain_mass_its_masterplan_figures_new() {
     let Some(Element::Mass(ms)) = s.model.elements.get(mass) else { panic!() };
     assert_eq!(ms.site.as_ref().map(|x| x.phase.as_str()), Some("new"));
 }
+
+#[test]
+fn a_site_element_a_tool_previews_is_drawn_as_its_plan_draws_it() {
+    let mut s = Session::new();
+    let tree = id(&run(&mut s, "site", json!({"kind": "tree", "props": {"at": [0, 0]}})));
+    let e = s.model.elements.get(tree).cloned().unwrap();
+    let v = render::plan(&s.model, level(&s), 400, 400).view;
+    assert!(!render::sketch(&s.model, v, s.model.next_id, &e).prims.is_empty(), "a tree's crown and its point");
+}

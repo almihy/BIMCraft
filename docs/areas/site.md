@@ -181,8 +181,8 @@ components, parking components, a building pad.
 ### In the desktop (`crates/ui-egui/src/site.rs`)
 
 The tab is **Massing & Site** (`Tab::Massing`): Conceptual Mass and Model by Face, then the panels **Model Site**
-(Toposolid, Sub-divide with Road small beside it, Building Pad), **Modify Site** (Property Line) and **Components** (Site
-Component, Parking Component with Parking Area small beside it). Every tool is `Tool::Site(SiteTool)`; BIMCraft's own
+(Toposolid, Sub-divide with Road beside it, Building Pad), **Modify Site** (Property Line) and **Components** (Site
+Component, Parking Component with Parking Area beside it). Every tool is `Tool::Site(SiteTool)`; BIMCraft's own
 profile shows the same panels in its Tools palette. Each has its icon in `icons.rs` (`Icon::Toposolid`, `Subdivide`, `Road`,
 `BuildingPad`, `PropertyLine`, `SiteComponent`, `ParkingComponent`, `ParkingArea`), and an entry in Keyboard Shortcuts and
 Find (TS, BP and PL run the tools as the commands' aliases).

@@ -1214,6 +1214,10 @@ pub fn sketch(m: &Model, view: View, id: Id, e: &Element) -> Drawing {
         Element::RoomSeparator(rs) => d.line(&[rs.start, rs.end], Pen::PROJECTION, INK, false),
         Element::Roof(r) => roof(&mut d, m, r),
         Element::Mass(ms) => d.dashed(&ms.boundary, Pen::MEDIUM, MASS, true),
+        // A site tool's preview: the element as its plan draws it.
+        Element::Site(st) => site::site(&mut d, id, st),
+        Element::PropertyLine(pl) => site::property_line(&mut d, id, pl),
+        Element::BuildingPad(bp) => site::building_pad(&mut d, id, bp),
         _ => {}
     }
     let annotation = on.is_some() || matches!(e, Element::Section(_) | Element::Elevation(_));

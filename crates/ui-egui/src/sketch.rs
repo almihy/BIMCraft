@@ -933,6 +933,15 @@ impl BimApp {
         });
     }
 
+    /// Whether the sketch draws a path, open: a road's, a hedge's, a stream's, a row of parking's.
+    fn sketching_path(&self) -> bool {
+        match self.sketch.as_ref().map(|s| s.of) {
+            Some(Of::Site { tool, .. }) => self.site.taking(tool) == crate::site::Taking::Path,
+            Some(Of::EditSite { path, .. }) => path,
+            _ => false,
+        }
+    }
+
     /// What the status bar says while sketching, or None when not.
     pub(crate) fn sketch_prompt(&self) -> Option<&'static str> {
         self.sketch.as_ref()?;
@@ -945,6 +954,10 @@ impl BimApp {
             Tool::TrimTo { .. } => msg!("Pick a sketch line to trim or extend, on the part to keep. Esc clears the boundary."),
             Tool::SketchLine(_) if self.shape() != draw::Shape::Line => return self.shape_prompt(),
             Tool::SketchLine(chain) if chain.is_empty() => "Click where the line starts.",
+            // A path's sketch: lines and arcs end to end, left open.
+            Tool::SketchLine(_) if self.sketching_path() => {
+                msg!("Click the path's next point; Finish Edit Mode when it is drawn, or Esc to start another line.")
+            }
             Tool::SketchLine(_) => msg!("Click the line's end; the next starts there. The first point again closes the loop; Esc stops."),
             Tool::SketchPick => msg!("Click a wall: a boundary line along it."),
             Tool::Modify if self.sketch_surface().is_some() => {

@@ -411,7 +411,7 @@ msgid "Add Type"
 msgstr "添加类型"
 
 #: crates/ui-egui/src/draw.rs:1071
-#: crates/ui-egui/src/sketch.rs:1002
+#: crates/ui-egui/src/sketch.rs:1015
 msgid "Add Vertex"
 msgstr "添加顶点"
 
@@ -822,7 +822,7 @@ msgstr "附着墙："
 msgid "Attached Walls"
 msgstr "附着的墙"
 
-#: crates/ui-egui/src/site.rs:248
+#: crates/ui-egui/src/site.rs:247
 msgid "Attic"
 msgstr ""
 
@@ -1146,21 +1146,17 @@ msgstr "构建"
 msgid "Building 3D view…"
 msgstr ""
 
-#: crates/ui-egui/src/site.rs:470
+#: crates/ui-egui/src/site.rs:473
 msgid "Building Pad"
 msgstr "建筑地坪"
 
-#: crates/ui-egui/src/site.rs:471
+#: crates/ui-egui/src/site.rs:474
 msgid "Building Pad (BP): sketch a flat pad cut into the toposolid, its top at the Options Bar's offset"
 msgstr ""
 
 #: crates/ui-egui/src/start.rs:310
 msgid "Building information modelling, open and free."
 msgstr "开放、免费的建筑信息模型。"
-
-#: crates/ui-egui/src/site.rs:245
-msgid "Built"
-msgstr ""
 
 #: crates/ui-egui/src/properties.rs:2017
 msgid "Built-in"
@@ -1590,7 +1586,7 @@ msgstr "单击一面墙以放置门。"
 msgid "Click a wall to place the window."
 msgstr "单击一面墙以放置窗。"
 
-#: crates/ui-egui/src/sketch.rs:949
+#: crates/ui-egui/src/sketch.rs:962
 msgid "Click a wall: a boundary line along it."
 msgstr "单击一面墙：沿其绘制一条边界线。"
 
@@ -1739,7 +1735,7 @@ msgstr "单击要修剪或延伸到边界的线，在要保留的部分上。"
 msgid "Click the line's end: the profile rises from it at the Options Bar's slope."
 msgstr "单击直线的终点：轮廓按选项栏所设的坡度从其升起。"
 
-#: crates/ui-egui/src/sketch.rs:948
+#: crates/ui-egui/src/sketch.rs:961
 msgid "Click the line's end; the next starts there. The first point again closes the loop; Esc stops."
 msgstr "单击线的终点，下一条线从那里开始。再次单击第一个点闭合环；按 Esc 停止。"
 
@@ -1770,6 +1766,10 @@ msgstr "单击另一端。"
 #: crates/ui-egui/src/lib.rs:5080
 msgid "Click the path's next point. Enter finishes, Esc cancels."
 msgstr "单击路径的下一个点。按 Enter 完成，按 Esc 取消。"
+
+#: crates/ui-egui/src/sketch.rs:959
+msgid "Click the path's next point; Finish Edit Mode when it is drawn, or Esc to start another line."
+msgstr ""
 
 #: crates/ui-egui/src/lib.rs:5041
 msgid "Click the ruler's start: points snap as they do drawing."
@@ -2115,7 +2115,7 @@ msgstr "构件"
 msgid "Component (CM): a family's type, where you click; Space turns it"
 msgstr "构件 (CM)：在单击处放置族的类型；按空格键旋转"
 
-#: crates/ui-egui/src/site.rs:486
+#: crates/ui-egui/src/site.rs:489
 msgid "Components"
 msgstr ""
 
@@ -2386,15 +2386,15 @@ msgstr "创建遮罩区域边界"
 msgid "Create Mass"
 msgstr "创建体量"
 
-#: crates/ui-egui/src/site.rs:359
+#: crates/ui-egui/src/site.rs:362
 msgid "Create Pad Boundary"
 msgstr ""
 
-#: crates/ui-egui/src/site.rs:363
+#: crates/ui-egui/src/site.rs:366
 msgid "Create Parking Area"
 msgstr ""
 
-#: crates/ui-egui/src/site.rs:360
+#: crates/ui-egui/src/site.rs:363
 msgid "Create Property Line"
 msgstr ""
 
@@ -2406,7 +2406,7 @@ msgstr "创建栏杆路径"
 msgid "Create Ramp"
 msgstr "创建坡道"
 
-#: crates/ui-egui/src/site.rs:358
+#: crates/ui-egui/src/site.rs:361
 msgid "Create Road Path"
 msgstr ""
 
@@ -2430,11 +2430,11 @@ msgstr "创建类似"
 msgid "Create Stair"
 msgstr "创建楼梯"
 
-#: crates/ui-egui/src/site.rs:357
+#: crates/ui-egui/src/site.rs:360
 msgid "Create Sub-region"
 msgstr ""
 
-#: crates/ui-egui/src/site.rs:356
+#: crates/ui-egui/src/site.rs:359
 msgid "Create Toposolid"
 msgstr ""
 
@@ -2511,7 +2511,7 @@ msgstr "剖切面"
 msgid "Cylinder"
 msgstr "圆柱体"
 
-#: crates/core/src/render.rs:3714
+#: crates/core/src/render.rs:3718
 msgid "DN"
 msgstr "下"
 
@@ -3631,7 +3631,7 @@ msgstr "面层面：外部"
 msgid "Finish Face: Interior"
 msgstr "面层面：内部"
 
-#: crates/ui-egui/src/site.rs:435
+#: crates/ui-egui/src/site.rs:438
 msgid "Finish or cancel the sketch before changing what it draws."
 msgstr ""
 
@@ -3717,7 +3717,7 @@ msgstr "楼板"
 msgid "Floor Drain"
 msgstr "地漏"
 
-#: crates/ui-egui/src/site.rs:249
+#: crates/ui-egui/src/site.rs:248
 msgid "Floor Height"
 msgstr ""
 
@@ -4329,7 +4329,7 @@ msgid "Imported {}: {}."
 msgstr "已导入 {}：{}。"
 
 #: crates/ui-egui/src/properties.rs:2168
-#: crates/ui-egui/src/site.rs:246
+#: crates/ui-egui/src/site.rs:245
 msgid "In"
 msgstr "内"
 
@@ -5286,7 +5286,7 @@ msgstr "模型显示"
 msgid "Model Line Weights"
 msgstr "模型线宽"
 
-#: crates/ui-egui/src/site.rs:446
+#: crates/ui-egui/src/site.rs:449
 msgid "Model Site"
 msgstr "场地建模"
 
@@ -5310,7 +5310,7 @@ msgstr "修改 (MD)：选择图元"
 msgid "Modify Lines"
 msgstr "修改线"
 
-#: crates/ui-egui/src/site.rs:477
+#: crates/ui-egui/src/site.rs:480
 msgid "Modify Site"
 msgstr "修改场地"
 
@@ -5397,7 +5397,7 @@ msgstr "NBR 17068：延伸 2 至 3 mm"
 msgid "NBR 6492: Target in plan (±0.00), equilateral triangle in section"
 msgstr "NBR 6492：平面采用圆环靶心 (±0.00)，剖面采用等边三角形"
 
-#: crates/core/src/render.rs:2912
+#: crates/core/src/render.rs:2916
 msgid "NOT ENCLOSED"
 msgstr "未封闭"
 
@@ -5772,7 +5772,7 @@ msgstr ""
 #: crates/core/src/schedule.rs:201
 #: crates/ui-egui/src/linestyles/creator.rs:76
 #: crates/ui-egui/src/sketch.rs:758
-#: crates/ui-egui/src/sketch.rs:1004
+#: crates/ui-egui/src/sketch.rs:1017
 #: crates/ui-egui/src/workplane.rs:242
 msgid "Offset"
 msgstr "偏移"
@@ -5836,7 +5836,7 @@ msgstr ""
 msgid "Open Recent"
 msgstr "最近打开"
 
-#: crates/ui-egui/src/site.rs:423
+#: crates/ui-egui/src/site.rs:426
 msgid "Open a floor plan to draw on the site."
 msgstr ""
 
@@ -5958,7 +5958,7 @@ msgstr "插座"
 msgid "Outlets & Equipment"
 msgstr "插座和设备"
 
-#: crates/ui-egui/src/site.rs:253
+#: crates/ui-egui/src/site.rs:252
 msgid "Overhang"
 msgstr ""
 
@@ -6073,19 +6073,19 @@ msgstr "父视图"
 msgid "Parking"
 msgstr ""
 
-#: crates/ui-egui/src/site.rs:504
+#: crates/ui-egui/src/site.rs:507
 msgid "Parking Area"
 msgstr "停车区域"
 
-#: crates/ui-egui/src/site.rs:505
+#: crates/ui-egui/src/site.rs:508
 msgid "Parking Area: a row of stalls along a sketched path, or a car park laid out over a sketched area"
 msgstr ""
 
-#: crates/ui-egui/src/site.rs:498
+#: crates/ui-egui/src/site.rs:501
 msgid "Parking Component"
 msgstr "停车场构件"
 
-#: crates/ui-egui/src/site.rs:499
+#: crates/ui-egui/src/site.rs:502
 msgid "Parking Component: one parking stall where you click; Space turns it"
 msgstr ""
 
@@ -6303,7 +6303,7 @@ msgstr "请拾取模型的一个角点、一条边或一个面来标注尺寸。
 msgid "Pick a curved wall or an arc."
 msgstr "拾取一面弧形墙或一段圆弧。"
 
-#: crates/ui-egui/src/sketch.rs:940
+#: crates/ui-egui/src/sketch.rs:949
 msgid "Pick a highlighted model edge or sketch line as the alignment reference."
 msgstr "拾取高亮显示的模型边或草图线作为对齐参照。"
 
@@ -6323,11 +6323,11 @@ msgstr "选取屋顶或楼板：所选墙的顶部跟随其底面。"
 msgid "Pick a round column, a curved wall, a circle or an arc."
 msgstr "拾取圆柱、弧形墙、圆或圆弧。"
 
-#: crates/ui-egui/src/sketch.rs:944
+#: crates/ui-egui/src/sketch.rs:953
 msgid "Pick a sketch line as the trim/extend boundary."
 msgstr "拾取一条草图线作为修剪/延伸边界。"
 
-#: crates/ui-egui/src/sketch.rs:945
+#: crates/ui-egui/src/sketch.rs:954
 msgid "Pick a sketch line to trim or extend, on the part to keep. Esc clears the boundary."
 msgstr "拾取要修剪或延伸的草图线，在要保留的部分上。按 Esc 清除边界。"
 
@@ -6359,11 +6359,11 @@ msgstr "从列表中选择"
 msgid "Pick more references, or click away from them where the dimension line goes; Space steps Auto, Aligned, Horizontal, Vertical. Esc cancels."
 msgstr "拾取更多参照，或在远离参照处单击放置尺寸线；空格键在自动、对齐、水平、垂直之间切换。Esc 取消。"
 
-#: crates/ui-egui/src/sketch.rs:952
+#: crates/ui-egui/src/sketch.rs:965
 msgid "Pick sketch lines (a box picks several); drag a picked line's end over its plane to move it; Shift and the middle button orbit; Delete removes them. Finish Edit Mode when every loop is closed."
 msgstr "拾取草图线（方框可拾取多条）；拖动所选线的端点在其平面上移动；Shift 加中键环绕；按 Delete 删除。所有环闭合后完成编辑模式。"
 
-#: crates/ui-egui/src/sketch.rs:957
+#: crates/ui-egui/src/sketch.rs:970
 msgid "Pick sketch lines (a box picks several); drag a picked line's end to move it; Delete removes them. Finish Edit Mode when every loop is closed."
 msgstr "选择草图线（框选可选多条）；拖动所选线的端点以移动它；按 Delete 删除。所有环闭合后完成编辑模式。"
 
@@ -6375,7 +6375,7 @@ msgstr "拾取图元上要移动并旋转到参照上的高亮边。"
 msgid "Pick the first line to round."
 msgstr "拾取要倒圆角的第一条线。"
 
-#: crates/ui-egui/src/sketch.rs:942
+#: crates/ui-egui/src/sketch.rs:951
 msgid "Pick the first sketch line, on the part to keep."
 msgstr "拾取第一条草图线，在要保留的部分上。"
 
@@ -6383,7 +6383,7 @@ msgstr "拾取第一条草图线，在要保留的部分上。"
 msgid "Pick the first wall or line, on the part to keep."
 msgstr "拾取第一面墙或第一条线，在要保留的部分上。"
 
-#: crates/ui-egui/src/sketch.rs:941
+#: crates/ui-egui/src/sketch.rs:950
 msgid "Pick the highlighted sketch line to move and turn onto the reference; joined ends follow."
 msgstr "拾取要移动并旋转到参照上的高亮草图线；相连的端点随之移动。"
 
@@ -6407,7 +6407,7 @@ msgstr "拾取第二条线。"
 msgid "Pick the second point on the arc. Esc cancels."
 msgstr "拾取圆弧上的第二个点。Esc 取消。"
 
-#: crates/ui-egui/src/sketch.rs:943
+#: crates/ui-egui/src/sketch.rs:952
 msgid "Pick the second sketch line, on the part to keep."
 msgstr "拾取第二条草图线，在要保留的部分上。"
 
@@ -6569,7 +6569,7 @@ msgstr "放置标高"
 msgid "Place Lighting Fixture"
 msgstr "放置照明设备"
 
-#: crates/ui-egui/src/site.rs:362
+#: crates/ui-egui/src/site.rs:365
 msgid "Place Parking Component"
 msgstr ""
 
@@ -6613,7 +6613,7 @@ msgstr "放置房间"
 msgid "Place Room Separation"
 msgstr "放置房间分隔"
 
-#: crates/ui-egui/src/site.rs:361
+#: crates/ui-egui/src/site.rs:364
 msgid "Place Site Component"
 msgstr ""
 
@@ -6703,7 +6703,7 @@ msgstr ""
 msgid "Plaster"
 msgstr "抹灰"
 
-#: crates/ui-egui/src/site.rs:257
+#: crates/ui-egui/src/site.rs:256
 msgid "Plates"
 msgstr ""
 
@@ -6957,11 +6957,11 @@ msgstr "属性 (PP)：显示或隐藏面板"
 msgid "Properties over the Project Browser, on the left, as at first"
 msgstr "“属性”在“项目浏览器”之上、位于左侧，与最初一样"
 
-#: crates/ui-egui/src/site.rs:480
+#: crates/ui-egui/src/site.rs:483
 msgid "Property Line"
 msgstr "建筑红线"
 
-#: crates/ui-egui/src/site.rs:481
+#: crates/ui-egui/src/site.rs:484
 msgid "Property Line (PL): sketch the plot's boundary, lines and arcs closed into a loop"
 msgstr ""
 
@@ -6990,7 +6990,7 @@ msgstr "将一个视图放到此图纸上：尚未上图纸的视图"
 msgid "Quadrant"
 msgstr "象限点"
 
-#: crates/core/src/render.rs:2912
+#: crates/core/src/render.rs:2916
 msgid "REDUNDANT"
 msgstr "冗余"
 
@@ -7408,7 +7408,7 @@ msgstr "旋转圆"
 msgid "Ribbon"
 msgstr "功能区"
 
-#: crates/ui-egui/src/site.rs:252
+#: crates/ui-egui/src/site.rs:251
 msgid "Ridge (°)"
 msgstr ""
 
@@ -7433,20 +7433,20 @@ msgid "Risers"
 msgstr "踢面"
 
 #: crates/ui-egui/src/site.rs:154
-#: crates/ui-egui/src/site.rs:464
+#: crates/ui-egui/src/site.rs:467
 msgid "Road"
 msgstr "道路"
 
-#: crates/ui-egui/src/site.rs:465
+#: crates/ui-egui/src/site.rs:468
 msgid "Road: sketch its path with lines and arcs; the Options Bar sets its use, width and lanes"
 msgstr ""
 
 #: crates/core/src/commands.rs:803
-#: crates/ui-egui/src/site.rs:250
+#: crates/ui-egui/src/site.rs:249
 msgid "Roof"
 msgstr "屋顶"
 
-#: crates/ui-egui/src/site.rs:251
+#: crates/ui-egui/src/site.rs:250
 msgid "Roof Pitch (°)"
 msgstr ""
 
@@ -7547,7 +7547,7 @@ msgstr "圆形"
 msgid "Row"
 msgstr ""
 
-#: crates/ui-egui/src/site.rs:255
+#: crates/ui-egui/src/site.rs:254
 msgid "Run"
 msgstr ""
 
@@ -8077,11 +8077,11 @@ msgstr "单扇门"
 msgid "Site"
 msgstr ""
 
-#: crates/ui-egui/src/site.rs:490
+#: crates/ui-egui/src/site.rs:493
 msgid "Site Component"
 msgstr "场地构件"
 
-#: crates/ui-egui/src/site.rs:492
+#: crates/ui-egui/src/site.rs:495
 msgid "Site Component: a tree, a bike rack or a play area where you click (Space turns it), or a hedge along a sketched path"
 msgstr ""
 
@@ -8341,7 +8341,7 @@ msgstr "拆分"
 
 #: crates/ui-egui/src/lib.rs:4469
 #: crates/ui-egui/src/sketch.rs:757
-#: crates/ui-egui/src/sketch.rs:1003
+#: crates/ui-egui/src/sketch.rs:1016
 msgid "Split Element"
 msgstr "拆分图元"
 
@@ -8471,7 +8471,7 @@ msgstr "钢材：箍筋钢种"
 msgid "Step in"
 msgstr "向内偏移"
 
-#: crates/ui-egui/src/site.rs:254
+#: crates/ui-egui/src/site.rs:253
 msgid "Steps"
 msgstr ""
 
@@ -8487,7 +8487,7 @@ msgstr "箍筋"
 msgid "Stone"
 msgstr ""
 
-#: crates/ui-egui/src/site.rs:247
+#: crates/ui-egui/src/site.rs:246
 msgid "Storeys"
 msgstr ""
 
@@ -8528,11 +8528,11 @@ msgstr "样式"
 msgid "Styles"
 msgstr "样式"
 
-#: crates/ui-egui/src/site.rs:456
+#: crates/ui-egui/src/site.rs:459
 msgid "Sub-divide"
 msgstr "拆分"
 
-#: crates/ui-egui/src/site.rs:458
+#: crates/ui-egui/src/site.rs:461
 msgid "Sub-divide / Graded Region: an area of the ground, of the Options Bar's type: paving, a terrace, a lawn, water, a stream, a pitch, a playground"
 msgstr ""
 
@@ -9322,11 +9322,11 @@ msgstr "上层，沿东向钢筋"
 msgid "Top, bars along north"
 msgstr "上层，沿北向钢筋"
 
-#: crates/ui-egui/src/site.rs:450
+#: crates/ui-egui/src/site.rs:453
 msgid "Toposolid"
 msgstr "地形实体"
 
-#: crates/ui-egui/src/site.rs:451
+#: crates/ui-egui/src/site.rs:454
 msgid "Toposolid (TS): sketch the ground's outline; its heights and contours are edited after"
 msgstr ""
 
@@ -9378,7 +9378,7 @@ msgstr "修剪/延伸单个图元：拾取边界线，然后在要保留的部�
 
 #: crates/core/src/commands.rs:1343
 #: crates/ui-egui/src/sketch.rs:741
-#: crates/ui-egui/src/sketch.rs:1005
+#: crates/ui-egui/src/sketch.rs:1018
 msgid "Trim/Extend to Corner"
 msgstr "修剪/延伸为角"
 
@@ -9471,7 +9471,7 @@ msgstr "类型："
 msgid "Types"
 msgstr "类型"
 
-#: crates/core/src/render.rs:3714
+#: crates/core/src/render.rs:3718
 msgid "UP"
 msgstr "上"
 
@@ -9551,16 +9551,16 @@ msgstr "取消隐藏图元 (EU)：恢复此视图中隐藏的所选图元"
 msgid "Unhide Elements"
 msgstr "取消隐藏图元"
 
-#: crates/ui-egui/src/site.rs:258
+#: crates/ui-egui/src/site.rs:257
 msgid "Unit Floors"
 msgstr ""
 
-#: crates/ui-egui/src/site.rs:256
+#: crates/ui-egui/src/site.rs:255
 msgid "Unit Type"
 msgstr ""
 
 #: crates/ui-egui/src/clouds.rs:62
-#: crates/ui-egui/src/site.rs:259
+#: crates/ui-egui/src/site.rs:258
 msgid "Units"
 msgstr "单位"
 
@@ -10190,7 +10190,7 @@ msgstr "缩小"
 msgid "Zoom to Fit"
 msgstr "缩放以适应"
 
-#: crates/ui-egui/src/site.rs:298
+#: crates/ui-egui/src/site.rs:301
 msgid "`{}` is not a count"
 msgstr ""
 
@@ -10213,7 +10213,7 @@ msgstr "`{}` 不是有效的高度"
 #: crates/ui-egui/src/properties.rs:576
 #: crates/ui-egui/src/properties.rs:2972
 #: crates/ui-egui/src/section_box.rs:94
-#: crates/ui-egui/src/site.rs:297
+#: crates/ui-egui/src/site.rs:300
 #: crates/ui-egui/src/workplane.rs:278
 msgid "`{}` is not a length"
 msgstr "`{}` 不是有效的长度"
@@ -10222,7 +10222,7 @@ msgstr "`{}` 不是有效的长度"
 #: crates/ui-egui/src/properties.rs:578
 #: crates/ui-egui/src/properties.rs:2975
 #: crates/ui-egui/src/properties.rs:2977
-#: crates/ui-egui/src/site.rs:300
+#: crates/ui-egui/src/site.rs:303
 msgid "`{}` is not a number"
 msgstr "`{}` 不是数字"
 
@@ -11994,3 +11994,6 @@ msgstr "上"
 #: crates/ui-egui/src/lib.rs:1203
 #~ msgid "Massing"
 #~ msgstr "体量建模"
+#: crates/ui-egui/src/site.rs:245
+#~ msgid "Built"
+#~ msgstr ""

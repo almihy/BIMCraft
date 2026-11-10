@@ -25,7 +25,7 @@ use crate::lang::{t, tf};
 use crate::properties::{combo, grid, group_header, number};
 use crate::sketch::Of;
 use crate::style::pal;
-use crate::{BimApp, Status, Tool, big_button, panel, small_button};
+use crate::{BimApp, Status, Tool, big_button, panel};
 
 /// The site tools.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -242,7 +242,6 @@ const PROP_NAMES: &[(&str, &str)] = &[
     ("gradient", msg!("Gradient (%)")),
     ("from_lane", msg!("From Lane")),
     ("label", msg!("Label")),
-    ("built", msg!("Built")),
     ("in", msg!("In")),
     ("storeys", msg!("Storeys")),
     ("attic", msg!("Attic")),
@@ -266,14 +265,18 @@ fn prop_name(key: &str) -> String {
 /// The props Properties edits: what the catalogue gives the kind that is one value (a length, a number, yes or no, text),
 /// not its points or paths (its grips and Edit Boundary / Edit Path), its phase (a row of its own) or what a reader keeps.
 fn editable(kind: &str) -> Vec<(String, String)> {
-    shapes::props_of(kind)
+    let mut props: Vec<(String, String)> = shapes::props_of(kind)
         .into_iter()
         .filter_map(|(k, v)| Some((k, v.as_str()?.to_string())))
         .filter(|(k, ty)| {
-            !matches!(k.as_str(), "phase" | "ref" | "fetched" | "made" | "solved")
+            !matches!(k.as_str(), "phase" | "ref" | "fetched" | "made" | "solved" | "built")
                 && matches!(ty.as_str(), "length" | "count" | "angle" | "percent" | "number" | "fraction" | "boolean" | "string")
         })
-        .collect()
+        .collect();
+    // In the order the labels are listed, what shapes it first (a lane's width and lanes); its label last.
+    let rank = |k: &str| if k == "label" { usize::MAX } else { PROP_NAMES.iter().position(|(n, _)| *n == k).unwrap_or(usize::MAX - 1) };
+    props.sort_by_key(|(k, _)| rank(k));
+    props
 }
 
 /// A prop as Properties shows it: a length in the project's units, yes or no, a number, text.
@@ -511,12 +514,9 @@ impl BimApp {
         for (name, row) in tools {
             panel(ui, name, |ui| {
                 for &(icon, label, tip, tool) in &row {
-                    // Road beside Sub-divide and Parking Area beside Parking Component, as Revit puts a tool's sibling.
-                    let small = matches!(tool, SiteTool::Road | SiteTool::ParkingArea);
-                    let on = self.site_on(tool);
-                    let clicked =
-                        if small { small_button(ui, icon, label, on, tip) } else { big_button(ui, icon, label, on, tip) }.clicked();
-                    if clicked {
+                    // Road beside Sub-divide and Parking Area beside Parking Component, each a big button named under its
+                    // icon, as the panels' other tools are.
+                    if big_button(ui, icon, label, self.site_on(tool), tip).clicked() {
                         if self.sketch.is_some() {
                             self.cancel_sketch();
                         }
