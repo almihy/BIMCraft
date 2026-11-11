@@ -678,6 +678,19 @@ pub(crate) fn paint(p: &Painter, at: Place, d: &Drawing, selected: &[Id], hovere
     );
 }
 
+/// The elements of `preview` drawn in the hover's colours over the display list, as Tab highlights a chain.
+fn paint_preview(p: &Painter, at: Place, d: &Drawing, preview: &[Id], thin: bool) {
+    let mut out = |shape| {
+        p.add(shape);
+    };
+    let none = HashSet::new();
+    for ((prim, owner), part) in d.prims.iter().zip(&d.owners).zip(&d.parts) {
+        if let Some(id) = owner.filter(|id| preview.contains(id)) {
+            paint_prim(&mut out, p.clip_rect(), at, (prim, Some(id), *part), &none, Some(id), thin, &mut [].iter());
+        }
+    }
+}
+
 /// Whether `prim` draws nothing inside `clip`, however it is drawn: all of it, past its widest line, to one side.
 fn outside(prim: &Prim, at: Place, thin: bool, clip: Rect) -> bool {
     let (mut lo, mut hi) = (Pos2::new(f32::INFINITY, f32::INFINITY), Pos2::new(f32::NEG_INFINITY, f32::NEG_INFINITY));
@@ -1797,6 +1810,10 @@ impl BimApp {
         if !kept {
             paint(&p, place, &d, &marked, painted_hover, self.thin, &pictures);
         }
+        // What Tab is highlighting, the chain of walls, in the hover's colours.
+        if !self.flow.preview.is_empty() {
+            paint_preview(&p, place, &d, &self.flow.preview, self.thin);
+        }
         // The working aids: where the project's 0, 0 is, and which view this is. On the screen only; no drawing is made of them.
         if self.show_origin {
             let (x, y) = view.px(P2(0.0, 0.0));
@@ -2155,7 +2172,11 @@ impl BimApp {
             }
             // A sketch tool with the sketch gone: nothing to draw into.
             Tool::SketchLine(_) | Tool::SketchPick => self.tool = Tool::Modify,
-            Tool::Modify => self.pick_up(self.click_set(hovered), mods),
+            Tool::Modify => {
+                self.pick_up(self.click_set(hovered), mods);
+                // What Tab highlighted is picked, or passed over: either way it is done.
+                self.flow.preview.clear();
+            }
             Tool::Door | Tool::Window => {
                 let door = matches!(self.tool, Tool::Door);
                 let cat = if door { "door" } else { "window" };

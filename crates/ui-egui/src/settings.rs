@@ -15,6 +15,7 @@ use bimcraft_i18n::msg;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use crate::canvas::navigation::Wheel;
 use egui::{Align, Color32, ComboBox, Context, Id as UiId, Layout, RichText, ScrollArea, ThemePreference, Ui, vec2};
 use serde_json::{Value, json};
 
@@ -116,6 +117,8 @@ pub struct Settings {
     /// The plans' origin marker, and the view's name in their corner: working aids on the screen.
     pub origin_marker: bool,
     pub view_name: bool,
+    /// What the mouse wheel does in a view: told from a trackpad by what it sends, or always zoom, or always pan.
+    pub mouse_wheel: Wheel,
     /// The shortcuts the user made (Keyboard Shortcuts): two-character key to the English name of an action.
     pub shortcuts: BTreeMap<String, String>,
     /// The system's title bar rather than the window's own, where the window can draw its own.
@@ -155,6 +158,7 @@ impl Settings {
             "grid_snapping": self.grid_snapping,
             "origin_marker": self.origin_marker,
             "view_name": self.view_name,
+            "mouse_wheel": self.mouse_wheel.code(),
             "shortcuts": self.shortcuts,
             "system_title_bar": self.system_title_bar,
             "agents": {"listen": self.agents_listen, "port": self.agents_port, "edit": self.agents_edit},
@@ -198,6 +202,7 @@ impl Settings {
             grid_snapping: v["grid_snapping"].as_bool().unwrap_or(base.grid_snapping),
             origin_marker: v["origin_marker"].as_bool().unwrap_or(base.origin_marker),
             view_name: v["view_name"].as_bool().unwrap_or(base.view_name),
+            mouse_wheel: v["mouse_wheel"].as_str().and_then(Wheel::from_code).unwrap_or(base.mouse_wheel),
             shortcuts: shortcuts_from(&v["shortcuts"], base.shortcuts),
             system_title_bar: v["system_title_bar"].as_bool().unwrap_or(base.system_title_bar),
             agents_listen: v["agents"]["listen"].as_bool().unwrap_or(base.agents_listen),
@@ -311,6 +316,7 @@ impl BimApp {
         self.scan_contrast = kept.high_contrast;
         self.grid_snapping = kept.grid_snapping;
         (self.show_origin, self.show_view_name) = (kept.origin_marker, kept.view_name);
+        self.canvas.nav.wheel = kept.mouse_wheel;
         self.custom_shortcuts = kept.shortcuts.clone();
         self.system_title_bar = kept.system_title_bar;
         (self.agents.listen, self.agents.port, self.agents.edit) = (kept.agents_listen, kept.agents_port, kept.agents_edit);
@@ -346,6 +352,7 @@ impl BimApp {
             grid_snapping: self.grid_snapping,
             origin_marker: self.show_origin,
             view_name: self.show_view_name,
+            mouse_wheel: self.canvas.nav.wheel,
             shortcuts: self.custom_shortcuts.clone(),
             system_title_bar: self.system_title_bar,
             agents_listen: self.agents.listen,
@@ -548,6 +555,20 @@ impl BimApp {
         }
         heading(ui, msg!("Palettes"));
         self.palette_switches(ui);
+        heading(ui, msg!("Mouse wheel"));
+        ui.horizontal(|ui| {
+            let tips = [
+                msg!("Tells a mouse's wheel from a trackpad's two-finger scroll as it turns: the wheel zooms, two fingers pan"),
+                msg!(
+                    "The wheel always zooms about the cursor, as Revit's does, and Shift and the wheel pans along. Choose it if a \
+                     smooth-scrolling mouse pans the view instead"
+                ),
+                msg!("The wheel always scrolls the view, as two fingers on a trackpad do"),
+            ];
+            for (wheel, tip) in Wheel::ALL.into_iter().zip(tips) {
+                ui.radio_value(&mut self.canvas.nav.wheel, wheel, t(wheel.label())).on_hover_text(t(tip));
+            }
+        });
         heading(ui, msg!("Plans"));
         ui.checkbox(&mut self.show_origin, t("Show the origin marker in plans")).on_hover_text(t(
             "A small marker at the project's 0, 0 with the directions of x (east) and y (north). It is drawn on the screen only: \

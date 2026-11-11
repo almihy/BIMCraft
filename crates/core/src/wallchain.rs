@@ -73,4 +73,25 @@ mod tests {
         assert_eq!(wall_chain(&s.model, all[1]), vec![all[1]]);
         assert!(wall_chain(&s.model, 424242).is_empty());
     }
+
+    #[test]
+    fn the_wall_chain_command_gives_the_agent_the_same_chain() {
+        let mut s = Session::new();
+        s.execute("wall", &json!({"points": [[0, 0], [8000, 0], [8000, 6000], [0, 6000]], "closed": true})).unwrap();
+        s.execute("wall", &json!({"points": [[20000, 0], [26000, 0]]})).unwrap();
+        let all = walls(&s);
+        let got = s.execute("wall_chain", &json!({"id": all[1]})).unwrap();
+        assert_eq!(got["id"], json!(all[1]));
+        assert_eq!(got["ids"], json!(all[..4]));
+        assert_eq!(got["count"], json!(4));
+        // A lone wall is its own chain; a wall that refuses joins is too.
+        assert_eq!(s.execute("wall_chain", &json!({"id": all[4]})).unwrap()["ids"], json!([all[4]]));
+        s.execute("modify", &json!({"ids": [all[0]], "join": false})).unwrap();
+        assert_eq!(s.execute("wall_chain", &json!({"id": all[0]})).unwrap()["ids"], json!([all[0]]));
+        // It reads and changes nothing, and what is no wall, or nothing, is refused with a reason.
+        let level = s.model.elements.iter().find(|(_, e)| e.category() == "level").map(|(id, _)| *id).unwrap();
+        for bad in [json!({"id": level}), json!({"id": 424242}), json!({}), json!({"id": all[0], "extra": 1})] {
+            assert!(s.execute("wall_chain", &bad).is_err(), "{bad}");
+        }
+    }
 }

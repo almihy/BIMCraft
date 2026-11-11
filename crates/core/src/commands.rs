@@ -1394,6 +1394,12 @@ other_files(
          to make one permanent, run `dimension` with its `dimension` params",
         temporary_dimensions,
     ),
+    other(
+        "wall_chain",
+        ui_msg!("Wall Chain"),
+        "{id} reads the walls that meet end to end with wall `id`, as Revit's Tab over a wall chains them, and changes nothing:          walls on one level whose ends meet, and the walls those meet in turn (a room's four walls, a run round a curve); a wall          that refuses joins (`join` false) stands alone. Returns {id, ids, count}: `ids` the chain in id order, `id` among them;          give `ids` to `move`, `copy`, `delete` or `modify` to work the whole run",
+        wall_chain,
+    ),
     edit(
         "move",
         ui_msg!("Move"),
@@ -13228,6 +13234,19 @@ fn dimension_value(s: &mut Session, p: &Value) -> R {
     }
     let said = json!({"id": id, "moved": moved, "by": hundredth(by)});
     Ok(if by.abs() > 1e-9 { pin::pinned_note(said, &before, &[moved]) } else { said })
+}
+
+/// A wall's chain ([`crate::wallchain::wall_chain`]), read and never kept.
+fn wall_chain(s: &mut Session, p: &Value) -> R {
+    let c = "wall_chain";
+    only(c, p, &["id"])?;
+    let m = &s.model;
+    let id = element_id(c, m, p.get("id").unwrap_or(&Value::Null))?;
+    if m.wall(id).is_none() {
+        return Err(bad(c, format!("{} {id} isn't a wall", m.elements.get(id).map_or("nothing", |e| e.category()))));
+    }
+    let ids = crate::wallchain::wall_chain(m, id);
+    Ok(json!({"id": id, "ids": ids, "count": ids.len()}))
 }
 
 /// A wall's temporary dimensions ([`crate::tempdims::wall`]), read and never kept.

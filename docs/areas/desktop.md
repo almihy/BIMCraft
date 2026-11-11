@@ -637,19 +637,25 @@ Ctrl+C (or Copy to Clipboard, the first row of the Modify panel's Paste list) ru
 
 ## Moving about, selecting and repeating
 
-`canvas/navigation.rs` is how a hand moves a plan, a section or a sheet (all three go through `Canvas::navigate`). The wheel's
-events are sorted by `hand_of` into a mouse's notches (100 or 120 browser pixels, whole lines, one way at a time) and a
-trackpad's (a gesture's start and end, both ways at once, anything else); the last one heard decides what `smooth_scroll_delta`
-means: a mouse zooms about the cursor (Shift and the wheel pans along), a trackpad pans, and a pinch (`Event::Zoom`, or Ctrl and
-the wheel, which egui turns into one) zooms either way. A mouse notch within 0.3 s of a trackpad's counts as the trackpad's. Where
-the two cannot be told apart (a Mac mouse's small pixel steps) it reads as a trackpad. `Nav::mode` is Pan (the left button drags
-the view, the canvas senses hover only so no tool sees the drag) or Region (Zoom Region: a box, then the view fills with it);
-both end with Esc or a tool. `Canvas::remember_now` keeps the view before a fit, a zoom button, a region, and the first of a run
-of wheel or pan steps; ZP (`previous`) gives the last back.
+`canvas/navigation.rs` is how a hand moves a plan, a section or a sheet (all three go through `Canvas::navigate`). The wheel is
+judged once for each gesture: the first wheel event after 0.3 s of quiet decides (`first_hand`), and the gesture's other events
+are the same hand's. A mouse's first event turns one way and is a notch (at least 50 pixels, whatever the browser's zoom, the
+system's lines to a notch and the display's scaling make of 100 or 120) or a whole number of lines; a trackpad's is a gesture's
+start or end, both ways at once, or small steps. What was judged decides what `smooth_scroll_delta` means: a mouse zooms about
+the cursor (Shift and the wheel pans along), a trackpad pans, and a pinch (`Event::Zoom`, or Ctrl and the wheel, which egui turns
+into one) zooms either way. Where the two cannot be told apart (a smooth wheel's small steps, a Mac mouse's) it reads as a
+trackpad: Settings > User Interface > Mouse wheel (`Wheel`, kept as `mouse_wheel`) is Auto, Zoom (Revit's way, always) or Pan
+(always). `Nav::mode` is Pan (the left button drags the view, the canvas senses hover only so no tool sees the drag) or Region
+(Zoom Region: a box dragged, or one corner clicked and then the other, then the view fills with it); both end with Esc or a tool.
+`Canvas::remember_now` keeps the view before a fit, a zoom button, a region, and the first of a run of wheel or pan steps; ZP
+(`previous`) gives the last back.
 
 `selecting.rs` holds `Flow`: `pending` is the Move, Copy, Rotate or Mirror asked for with nothing selected (the app is in Modify
 meanwhile, so picking, boxing and Tab are Modify's; Enter calls `set_tool` with it), `last` is the tool last started (Enter with
-none running, RR and the menu's Repeat start it again), and Tab's chain (`canvas/picking.rs`, over the core's
-`wallchain::wall_chain`). Arrow keys call `move` with a step of about three pixels at the view's zoom (`nudge_step`), ten times
+none running, RR and the menu's Repeat start it again; `remember_tool` leaves out the tools the app starts for a dialog), and
+`preview`, the chain Tab highlights (`canvas/picking.rs`, over the core's `wallchain::wall_chain`, which the agent reads as the
+`wall_chain` command). Tab only highlights, as Revit's does: it never touches the selection; a click on the chain selects it,
+Ctrl+click adds it, Shift+click takes it away (`click_set`, then `pick_up`), and the highlight goes when the cursor moves on to
+something else. Ctrl+A selects what the view shows but its own marks (sections, elevations, sheets, viewports, schedules). Arrow keys call `move` with a step of about three pixels at the view's zoom (`nudge_step`), ten times
 that with Shift. The status bar names the element under the cursor from `Canvas::hovered`; the cursor shape is asked for in
 `plan_cursor` and kept in `Nav::icon` for tests.

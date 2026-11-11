@@ -11,45 +11,26 @@ use super::navigation::Mode;
 use crate::{BimApp, Tool};
 
 impl BimApp {
-    /// Tab over the plan: step through what is under the cursor, a wall and then the walls joined to it, before the next
-    /// element; Shift+Tab goes the other way. The joined walls are selected while they are the step, and the selection from
-    /// before comes back when Tab goes on.
+    /// Tab over the plan, as Revit's: step through what is under the cursor, a wall and then the walls joined to it, before
+    /// the next element; Shift+Tab goes the other way. The joined walls are only highlighted (and named in the status bar):
+    /// a click selects them, Ctrl+click adds them and Shift+click takes them away; the selection is never touched.
     pub(crate) fn tab_step(&mut self, model: &Model, back: bool) {
         let n = self.canvas.under.len();
         if n == 0 {
             return;
         }
-        // Joined walls Tab picked and the selection has since left are no longer its.
-        let on = self.chain_selected();
-        if !on {
-            self.tab_forget();
-        }
         let chain = |i: usize| -> Vec<Id> {
             let found = self.canvas.under.get(i).map(|id| wall_chain(model, *id)).unwrap_or_default();
             if found.len() > 1 { found } else { Vec::new() }
         };
-        let cycle = self.canvas.cycle;
-        let (cycle, on) = match (back, on) {
-            (false, false) if !chain(cycle).is_empty() => (cycle, true),
-            (false, _) => ((cycle + 1) % n, false),
-            (true, true) => (cycle, false),
-            (true, false) => {
-                let before = (cycle + n - 1) % n;
-                (before, !chain(before).is_empty())
-            }
-        };
-        let joined = if on { chain(cycle) } else { Vec::new() };
+        // The steps are each element alone, and after a wall that has them, its chain: where Tab is now is one of them.
+        let steps: Vec<(usize, bool)> =
+            (0..n).flat_map(|i| [(i, false), (i, true)].into_iter().filter(|(i, on)| !on || !chain(*i).is_empty())).collect();
+        let here = (self.canvas.cycle.min(n - 1), !self.flow.preview.is_empty());
+        let at = steps.iter().position(|s| *s == here).unwrap_or(0);
+        let (cycle, on) = steps[if back { (at + steps.len() - 1) % steps.len() } else { (at + 1) % steps.len() }];
         self.canvas.cycle = cycle;
-        if on {
-            let prior = self.flow.chain.take().unwrap_or_else(|| self.selection.clone());
-            self.flow.chain = Some(prior);
-            self.selection = joined.clone();
-            self.flow.joined = joined;
-            self.raise_context();
-        } else if let Some(prior) = self.flow.chain.take() {
-            self.selection = prior;
-            self.flow.joined.clear();
-        }
+        self.flow.preview = if on { chain(cycle) } else { Vec::new() };
     }
 
     /// The cursor over the plan, in `view`: a crosshair for a tool that draws, a pointing hand over what a picking tool would

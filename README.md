@@ -589,6 +589,7 @@ for a headless server that opens the file and then only reads it.
 | `flip` | | `ids`: turns walls round about their location lines, their exterior side to the other side; their doors and windows stay where they are |
 | `modify` | | `id` (or `ids`, several in one step) and the fields to change; into a field that is an object, such as a level's `view_range` (`top`, `cut`, `bottom`, `depth`), they merge |
 | `move` | MV | `ids`, `by`; `end` to move one end of a wall, a run or a grid; a pinned element moves too, and `pinned` and `note` in the reply say so |
+| `wall_chain` | | `id`: the walls that meet end to end with that wall (what Tab over a wall highlights in the window): `{id, ids, count}`; reads, changes nothing |
 | `pin` | PN | `ids`: pin elements, Revit's Pin (any element; kept in the file; the desktop refuses to drag or move them) |
 | `unpin` | UP | `ids`: let pinned elements be moved again |
 | `copy` | CO | `ids`, `by` |
