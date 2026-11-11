@@ -157,3 +157,50 @@ fn an_array_of_a_level_is_refused_whole() {
     assert!(s.execute("array", &json!({"ids": [100002, level], "count": 3, "by": [0, 1000]})).is_err());
     assert_eq!(s.model.elements, before);
 }
+
+/// A beam along x from 0 to 4000 and a bar in it.
+fn beam_with_a_bar(s: &mut Session) -> (Id, Id) {
+    let beam = ids(&s.execute("beam", &json!({"points": [[0, 0], [4000, 0]]})).unwrap())[0];
+    let bar = s.execute("rebar", &json!({"points": [[50, 0, -40], [3950, 0, -40]], "diameter": 16, "host": beam})).unwrap();
+    let bar = bar["id"].as_u64().or_else(|| bar["ids"][0].as_u64()).unwrap() as Id;
+    (beam, bar)
+}
+
+fn host_of(s: &Session, bar: Id) -> Option<crate::model::Guid> {
+    match s.model.elements.get(bar) {
+        Some(Element::Rebar(b)) => b.host,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_copy_of_a_beam_and_its_bars_keeps_each_bar_on_the_beams_copy() {
+    let mut s = Session::new();
+    let (beam, bar) = beam_with_a_bar(&mut s);
+    let r = s.execute("copy", &json!({"ids": [beam, bar], "by": [0, 3000]})).unwrap();
+    let made = ids(&r);
+    let (new_beam, new_bar) = (
+        *made.iter().find(|id| s.model.elements.get(**id).is_some_and(|e| e.category() == "beam")).unwrap(),
+        *made.iter().find(|id| s.model.elements.get(**id).is_some_and(|e| e.category() == "rebar")).unwrap(),
+    );
+    assert_eq!(host_of(&s, new_bar), Some(s.model.guid(new_beam)), "the copied bar is in the copied beam");
+    assert_eq!(host_of(&s, bar), Some(s.model.guid(beam)), "the original bar stays in the original beam");
+}
+
+#[test]
+fn an_array_of_a_beam_and_its_bars_puts_each_members_bar_on_that_members_beam() {
+    let mut s = Session::new();
+    let (beam, bar) = beam_with_a_bar(&mut s);
+    let r = s.execute("array", &json!({"ids": [beam, bar], "count": 3, "by": [0, 3000]})).unwrap();
+    let made = ids(&r);
+    let of = |category: &str| -> Vec<Id> {
+        made.iter().copied().filter(|id| s.model.elements.get(*id).is_some_and(|e| e.category() == category)).collect()
+    };
+    let (beams, bars) = (of("beam"), of("rebar"));
+    assert_eq!((beams.len(), bars.len()), (2, 2), "{r}");
+    let hosts: Vec<_> = bars.iter().map(|b| host_of(&s, *b)).collect();
+    for b in &beams {
+        assert_eq!(hosts.iter().filter(|h| **h == Some(s.model.guid(*b))).count(), 1, "one bar in each new beam: {hosts:?}");
+    }
+    assert!(hosts.iter().all(|h| *h != Some(s.model.guid(beam))), "no new bar in the original beam");
+}

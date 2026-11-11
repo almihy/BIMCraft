@@ -2434,7 +2434,7 @@ impl BimApp {
                     return true;
                 }
                 Some("fillet") => {
-                    self.set_tool(Tool::DetailLine(Vec::new()));
+                    self.start_tool(Tool::DetailLine(Vec::new()));
                     self.set_shape(draw::Target::Detail, draw::Shape::Fillet);
                     return true;
                 }
@@ -2455,7 +2455,7 @@ impl BimApp {
                 _ => return false,
             },
         };
-        self.set_tool(tool);
+        self.start_tool(tool);
         true
     }
 
@@ -2539,7 +2539,7 @@ impl BimApp {
         {
             self.types.insert(e.category(), name.to_string());
         }
-        self.set_tool(tool);
+        self.start_tool(tool);
         // A structural floor's likeness is structural.
         self.floor_structural = matches!(picked.map(|(_, e)| e), Some(Element::Floor(f)) if f.structural);
     }
@@ -2625,6 +2625,14 @@ impl BimApp {
     pub(crate) fn painting(&self) -> Option<String> {
         let m = &self.session.model;
         Some(self.paint_material.clone()).filter(|n| m.materials.contains_key(n)).or_else(|| m.materials.keys().next().cloned())
+    }
+
+    /// Start `tool` as the person asked for it, from the ribbon, a shortcut or a menu: Repeat (Enter, RR) can start it again.
+    /// A tool the app starts for itself goes through [`set_tool`](Self::set_tool), which remembers nothing.
+    fn start_tool(&mut self, tool: Tool) {
+        self.flow.by_user = true;
+        self.set_tool(tool);
+        self.flow.by_user = false;
     }
 
     fn set_tool(&mut self, mut tool: Tool) {
@@ -2767,11 +2775,11 @@ impl BimApp {
                     msg!("Modify Sub Elements: select a point, a corner or an edge of the top, then type its height on the Options Bar or its label");
                 let active = self.tool == Tool::ModifySubElements;
                 if small_button(ui, Icon::ModifySubElements, "Modify Sub Elements", active, tip).clicked() {
-                    self.set_tool(Tool::ModifySubElements);
+                    self.start_tool(Tool::ModifySubElements);
                 }
                 let tip = msg!("Add Point: click on the top to raise or lower it there to the Options Bar's elevation");
                 if small_button(ui, Icon::AddPoint, "Add Point", self.tool == Tool::AddPoint, tip).clicked() {
-                    self.set_tool(Tool::AddPoint);
+                    self.start_tool(Tool::AddPoint);
                 }
                 // Convert Lines, as Revit's: on while Modify Sub Elements has folding lines selected.
                 let tip = msg!("Convert Lines: make the selected folding lines split lines, so the top keeps folding along them");
@@ -2784,7 +2792,7 @@ impl BimApp {
                 let tip = msg!("Add Split Line: click two points; the top folds along the line between them");
                 let active = matches!(self.tool, Tool::AddSplitLine(_));
                 if small_button(ui, Icon::AddSplitLine, "Add Split Line", active, tip).clicked() {
-                    self.set_tool(Tool::AddSplitLine(None));
+                    self.start_tool(Tool::AddSplitLine(None));
                 }
                 let tip = msg!("Reset Shape: take the points and split lines off, the top flat again");
                 if small_button(ui, Icon::ResetShape, "Reset Shape", false, tip).clicked() {
@@ -3769,7 +3777,7 @@ impl BimApp {
             if big_button(ui, Icon::Modify, "Modify", structure::same_tool(&self.tool, &Tool::Modify), msg!("Modify (MD): select elements"))
                 .clicked()
             {
-                self.set_tool(Tool::Modify);
+                self.start_tool(Tool::Modify);
             }
             if !self.selection.is_empty() {
                 let tip = msg!("Filter: keep some of the selection, by category or by the values of a parameter they all have");
@@ -3785,7 +3793,7 @@ impl BimApp {
             for (icon, label, tip, tool) in tools {
                 let active = structure::same_tool(&self.tool, tool);
                 if big_button(ui, *icon, label, active, tip).clicked() {
-                    self.set_tool(tool.clone());
+                    self.start_tool(tool.clone());
                 }
             }
         });
@@ -3796,7 +3804,7 @@ impl BimApp {
         let shown = !self.graphics_now().resolved(&self.session.model).categories.get("mass").is_some_and(|o| o.hidden);
         panel(ui, msg!("Conceptual Mass"), |ui| {
             if big_button(ui, Icon::Mass, "Mass", structure::same_tool(&self.tool, &Tool::Mass(Vec::new())), tip).clicked() {
-                self.set_tool(Tool::Mass(Vec::new()));
+                self.start_tool(Tool::Mass(Vec::new()));
             }
             let tip = msg!("Show Mass (MH): hides the masses in this view, or shows them again");
             if big_button(ui, Icon::Visibility, "Show Mass", shown, tip).clicked() {
@@ -3946,7 +3954,7 @@ impl BimApp {
             for (icon, label, tip, tool) in datum {
                 let active = structure::same_tool(&self.tool, tool);
                 if big_button(ui, *icon, label, active, tip).clicked() {
-                    self.set_tool(tool.clone());
+                    self.start_tool(tool.clone());
                 }
             }
             self.work_plane_set(ui);
@@ -4016,7 +4024,7 @@ impl BimApp {
         panel(ui, "Dimension", |ui| {
             for (icon, label, tip, tool) in &big {
                 if big_button(ui, *icon, label, structure::same_tool(&self.tool, tool), tip).clicked() {
-                    self.set_tool(tool.clone());
+                    self.start_tool(tool.clone());
                 }
             }
             ui.vertical(|ui| {
@@ -4026,7 +4034,7 @@ impl BimApp {
                         ui.spacing_mut().item_spacing.x = 1.0;
                         for (icon, label, tip, tool) in row {
                             if small_button(ui, *icon, label, structure::same_tool(&self.tool, tool), tip).clicked() {
-                                self.set_tool(tool.clone());
+                                self.start_tool(tool.clone());
                             }
                         }
                     });
@@ -4059,7 +4067,7 @@ impl BimApp {
             let tip =
                 msg!("Tag by Category (TG): click an element to tag it with its type, a door's or window's mark, or the field in Label");
             if big_button(ui, Icon::Tag, "Tag by Category", self.tool == Tool::Tag, tip).clicked() {
-                self.set_tool(Tool::Tag);
+                self.start_tool(Tool::Tag);
             }
             if big_button(ui, Icon::TagAll, "Tag All", false, "Tag every door and window in this view that has no tag").clicked() {
                 self.tag_all();
@@ -4158,15 +4166,15 @@ impl BimApp {
             });
             let tip = msg!("Section (CR): click its start, then its end; it looks to the left of the line");
             if big_button(ui, Icon::Section, "Section", matches!(self.tool, Tool::Section(_)), tip).clicked() {
-                self.set_tool(Tool::Section(None));
+                self.start_tool(Tool::Section(None));
             }
             let tip = msg!("Elevation: click beside the building, on the side to look at");
             if big_button(ui, Icon::Elevation, "Elevation", self.tool == Tool::Elevation, tip).clicked() {
-                self.set_tool(Tool::Elevation);
+                self.start_tool(Tool::Elevation);
             }
             let tip = msg!("Camera: click where its eye stands, then what it looks at: a 3D view in perspective from there");
             if big_button(ui, Icon::Camera, "Camera", matches!(self.tool, Tool::Camera(_)), tip).clicked() {
-                self.set_tool(Tool::Camera(None));
+                self.start_tool(Tool::Camera(None));
             }
             let r = big_button(ui, Icon::Schedule, "Schedules", false, "Make a schedule, or open one");
             ribbon::choices(ui, &r, false, |ui| {
@@ -4672,7 +4680,7 @@ impl BimApp {
                 }
                 let tip = msg!("Attach Top/Base: pick a roof or a floor for the walls' tops, or bases, to follow");
                 if big_button(ui, Icon::Attach, "Attach Top/Base", self.tool == Tool::Attach, tip).clicked() {
-                    self.set_tool(Tool::Attach);
+                    self.start_tool(Tool::Attach);
                 }
                 if big_button(ui, Icon::Detach, "Detach Top/Base", false, "Detach Top/Base: the walls' tops and bases their own again")
                     .clicked()
@@ -4689,7 +4697,7 @@ impl BimApp {
             panel(ui, msg!("Shape Editing"), |ui| {
                 let tip = msg!("Gable Edge: click an edge of a roof's footprint to stand it upright, a gable end; click again to slope it");
                 if big_button(ui, Icon::GableEdge, "Gable Edge", self.tool == Tool::GableEdge, tip).clicked() {
-                    self.set_tool(Tool::GableEdge);
+                    self.start_tool(Tool::GableEdge);
                 }
                 if self.selected_shapeable().is_some() {
                     self.shape_tools(ui, roof);
@@ -4703,7 +4711,7 @@ impl BimApp {
             panel(ui, "Shape Editing", |ui| {
                 let tip = msg!("Slope Arrow: click its tail, then its head; the floor rises toward the head at the Options Bar's slope");
                 if big_button(ui, Icon::SlopeArrow, "Slope Arrow", matches!(self.tool, Tool::SlopeArrow(_)), tip).clicked() {
-                    self.set_tool(Tool::SlopeArrow(None));
+                    self.start_tool(Tool::SlopeArrow(None));
                 }
                 self.shape_tools(ui, floor);
             });
@@ -4719,7 +4727,7 @@ impl BimApp {
                                 .is_some_and(|t| on(t, self.flow.pending.as_ref().unwrap_or(&self.tool)) && *t != Tool::Modify);
                             if ui.add_enabled_ui(*enabled, |ui| small_button(ui, *icon, label, active, tip)).inner.clicked() {
                                 match (tool, icon) {
-                                    (Some(t), _) => self.set_tool(t.clone()),
+                                    (Some(t), _) => self.start_tool(t.clone()),
                                     (None, Icon::Pin) => self.pin_selection(true),
                                     (None, Icon::Unpin) => self.pin_selection(false),
                                     (None, _) => self.delete(),
@@ -4738,17 +4746,17 @@ impl BimApp {
             let tip = msg!("Demolish (DW): click an element to take it down in the view's phase; click it again to take it back");
             let on = self.graphic_view().is_some();
             if ui.add_enabled_ui(on, |ui| big_button(ui, Icon::Demolish, "Demolish", self.tool == Tool::Demolish, tip)).inner.clicked() {
-                self.set_tool(Tool::Demolish);
+                self.start_tool(Tool::Demolish);
             }
         });
         panel(ui, msg!("Geometry"), |ui| {
             let tip = msg!("Paint (PT): lay a material, and its texture, over the face you click in the 3D view");
             if big_button(ui, Icon::Paint, "Paint", self.tool == Tool::Paint, tip).clicked() {
-                self.set_tool(Tool::Paint);
+                self.start_tool(Tool::Paint);
             }
             let tip = msg!("Remove Paint: take the paint off the face you click in the 3D view");
             if big_button(ui, Icon::Unpaint, "Remove Paint", self.tool == Tool::Unpaint, tip).clicked() {
-                self.set_tool(Tool::Unpaint);
+                self.start_tool(Tool::Unpaint);
             }
         });
         self.mode_panel(ui);

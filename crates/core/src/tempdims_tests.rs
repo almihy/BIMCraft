@@ -200,3 +200,32 @@ fn a_wall_is_measured_only_to_what_the_plan_shows() {
     run(&mut s, "modify", json!({"id": me, "params": {"Phase Created": "Existing", "Phase Demolished": "Existing"}}));
     assert!(to(&s).is_empty());
 }
+
+#[test]
+fn a_tall_walls_dimensions_in_the_plan_of_the_level_above_measure_what_that_plan_shows() {
+    let mut s = Session::new();
+    // A Level 1 wall 8000 tall, cut by Level 2's plan too; a Level 1 wall 3000 north, which that plan does not cut; and a
+    // Level 2 wall 5000 north, which the first plan does not show.
+    let tall = run(&mut s, "wall", json!({"points": [[0, 0], [8000, 0]], "height": 8000}))["ids"][0].as_u64().unwrap();
+    let low = run(&mut s, "wall", json!({"points": [[0, 3000], [8000, 3000]]}))["ids"][0].as_u64().unwrap();
+    let up = run(&mut s, "wall", json!({"points": [[0, 5000], [8000, 5000]], "level": "Level 2"}))["ids"][0].as_u64().unwrap();
+    let reads = |s: &mut Session, level: Option<&str>| {
+        let p = match level {
+            Some(l) => json!({"id": tall, "level": l}),
+            None => json!({"id": tall}),
+        };
+        let r = run(s, "temporary_dimensions", p);
+        r["dimensions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|d| (d["to"]["id"].as_u64().unwrap(), d["distance"].as_f64().unwrap()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(reads(&mut s, None), [(low, 3000.0)], "in its own level's plan");
+    assert_eq!(reads(&mut s, Some("Level 2")), [(up, 5000.0)], "in Level 2's plan");
+    // The window passes the plan it views: the same measure.
+    let level_2 = s.model.levels().into_iter().find(|(_, l)| l.name == "Level 2").map(|(id, _)| id).unwrap();
+    let d = tempdims::wall(&s.model, tall, level_2, Witness::default());
+    assert_eq!(d.iter().map(|d| (s.model.elements.id(d.to.id).unwrap(), d.distance)).collect::<Vec<_>>(), [(up, 5000.0)]);
+}

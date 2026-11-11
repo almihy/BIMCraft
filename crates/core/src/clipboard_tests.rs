@@ -616,3 +616,100 @@ fn a_door_copied_alone_and_pasted_to_a_level_with_a_wall_under_it_goes_in_that_w
     assert_eq!(copy.len(), 1, "{r}");
     assert_eq!(opening(&s, copy[0]).host, s.model.guid(new_wall));
 }
+
+#[test]
+fn a_mixed_paste_to_another_level_puts_the_grid_down_beside_in_the_same_step() {
+    let (mut s, levels, walls, _) = building();
+    let grid = run(&mut s, "grid", json!({"start": [-2000, -1000], "end": [-2000, 7000]}))["id"].as_u64().unwrap();
+    run(&mut s, "copy_to_clipboard", json!({"ids": [walls[0], grid]}));
+    let (grids, steps) = (count(&s, "grid"), s.history().len());
+    let r = run(&mut s, "paste", json!({"levels": [levels[1]], "by": [0, 10000]}));
+    // The wall comes to Level 2; the grid, which stands on no level, is put 10000 north beside its original, once.
+    assert_eq!(made_of(&s, &r, "wall").len(), 1, "{r}");
+    assert_eq!(count(&s, "grid"), grids + 1, "the grid was dropped: {r}");
+    let copy = made_of(&s, &r, "grid")[0];
+    let Some(Element::Grid(g)) = s.model.elements.get(copy) else { panic!("a grid") };
+    assert_eq!((g.start.0, g.start.1, g.end.1), (-2000.0, 9000.0, 17000.0));
+    assert!(!r["left_out"].to_string().contains("no level"), "{r}");
+    assert_eq!(s.history().len(), steps + 1, "one undo step");
+    // Two levels: still one grid.
+    let r = run(&mut s, "paste", json!({"levels": [levels[1], levels[2]], "by": [0, 20000]}));
+    assert_eq!(made_of(&s, &r, "grid").len(), 1, "{r}");
+    // A grid alone goes too; with no `by` it would lie on its original, so it is left out and the reply says so.
+    run(&mut s, "copy_to_clipboard", json!({"ids": [grid]}));
+    let r = run(&mut s, "paste", json!({"levels": [levels[1]], "by": [5000, 0]}));
+    assert_eq!(made_of(&s, &r, "grid").len(), 1, "{r}");
+    let e = s.execute("paste", &json!({"levels": [levels[1]]})).unwrap_err();
+    assert!(e.contains("stands on a level"), "{e}");
+}
+
+/// A window and a door in a wall at y = 10000 on Level 1, and a tall wall from Level 1 up past Level 2 along y = 0: the ids of
+/// the window and the door, and of the tall wall.
+fn tall_wall_below() -> (Session, [u64; 2], u64) {
+    let mut s = Session::new();
+    let far = ids(&run(&mut s, "wall", json!({"points": [[0, 10000], [8000, 10000]]}))["ids"])[0];
+    let window = run(&mut s, "window", json!({"wall": far, "offset": 4000, "sill": 900}))["id"].as_u64().unwrap();
+    let door = run(&mut s, "door", json!({"wall": far, "offset": 6500}))["id"].as_u64().unwrap();
+    let tall = ids(&run(&mut s, "wall", json!({"points": [[0, 0], [8000, 0]], "height": 8000}))["ids"])[0];
+    (s, [window, door], tall)
+}
+
+#[test]
+fn an_opening_pasted_to_a_level_goes_in_the_wall_based_on_that_level_not_a_lower_one_running_up_through_it() {
+    let (mut s, [window, door], tall) = tall_wall_below();
+    let upper = ids(&run(&mut s, "wall", json!({"points": [[0, 0], [8000, 0]], "level": "Level 2"}))["ids"])[0];
+    run(&mut s, "copy_to_clipboard", json!({"ids": [window, door]}));
+    let r = run(&mut s, "paste", json!({"levels": ["Level 2"], "by": [0, -10000]}));
+    for category in ["window", "door"] {
+        let copy = made_of(&s, &r, category);
+        assert_eq!(copy.len(), 1, "{category}: {r}");
+        let o = opening(&s, copy[0]);
+        assert_eq!(o.host, s.model.guid(upper), "{category} went in the wall of Level 2, not in wall {tall}: {r}");
+    }
+}
+
+#[test]
+fn a_window_pasted_into_a_lower_walls_run_keeps_its_height_above_the_level_it_was_pasted_to() {
+    let (mut s, [window, door], tall) = tall_wall_below();
+    run(&mut s, "copy_to_clipboard", json!({"ids": [window, door]}));
+    // Only the tall wall from Level 1 is there at Level 2's plan: the window's sill is measured from its base, so it is
+    // Level 2's 3000 and its 900 higher, and the door stands on Level 2's floor, which is 3000 up this wall.
+    let r = run(&mut s, "paste", json!({"levels": ["Level 2"], "by": [0, -10000]}));
+    let (w, d) = (opening(&s, made_of(&s, &r, "window")[0]), opening(&s, made_of(&s, &r, "door")[0]));
+    assert_eq!((w.host, w.sill), (s.model.guid(tall), 3900.0), "{r}");
+    assert_eq!((d.host, d.sill), (s.model.guid(tall), 3000.0), "{r}");
+    // Beside, on the same level, nothing changes.
+    let r = run(&mut s, "paste", json!({"ids": [window], "by": [0, -10000]}));
+    assert_eq!(opening(&s, made_of(&s, &r, "window")[0]).sill, 900.0);
+}
+
+#[test]
+fn an_opening_pasted_on_a_curved_wall_goes_in_it_at_the_arc_length() {
+    let (mut s, [window, _], _) = tall_wall_below();
+    let curved = ids(&run(&mut s, "wall", json!({"points": [[0, -20000], [8000, -20000]], "arc": 90}))["ids"])[0];
+    let (axis, length) = {
+        let w = wall(&s, curved);
+        (crate::walls::Axis::of(&w), crate::walls::Axis::of(&w).length())
+    };
+    let mid = axis.at(length / 2.0, 0.0);
+    run(&mut s, "copy_to_clipboard", json!({"ids": [window]}));
+    let r = run(&mut s, "paste", json!({"by": [mid.0 - 4000.0, mid.1 - 10000.0]}));
+    let o = opening(&s, made_of(&s, &r, "window")[0]);
+    assert_eq!(o.host, s.model.guid(curved), "{r}");
+    assert!((o.offset - length / 2.0).abs() < 1.0, "{} of {length}", o.offset);
+}
+
+#[test]
+fn an_opening_pasted_at_a_wall_join_goes_in_the_nearer_wall_and_stays_within_its_run() {
+    let (mut s, [window, _], _) = tall_wall_below();
+    let east = ids(&run(&mut s, "wall", json!({"points": [[20000, 0], [24000, 0]]}))["ids"])[0];
+    let north = ids(&run(&mut s, "wall", json!({"points": [[24000, 0], [24000, 4000]]}))["ids"])[0];
+    run(&mut s, "copy_to_clipboard", json!({"ids": [window]}));
+    // 150 off the south-east corner: 150 from the east wall's axis? No: (23900, 150) is 150 from it and 100 from the north wall's.
+    let r = run(&mut s, "paste", json!({"by": [23900.0 - 4000.0, 150.0 - 10000.0]}));
+    let o = opening(&s, made_of(&s, &r, "window")[0]);
+    assert_eq!(o.host, s.model.guid(north), "the nearer axis: {r}");
+    let width = s.model.opening_type(s.model.elements.get(made_of(&s, &r, "window")[0]).unwrap()).unwrap().width;
+    assert!(o.offset >= width / 2.0 - 1e-6 && o.offset <= 4000.0 - width / 2.0 + 1e-6, "kept within the wall's run: {}", o.offset);
+    let _ = east;
+}

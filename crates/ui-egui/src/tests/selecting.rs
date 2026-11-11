@@ -384,3 +384,60 @@ fn the_canvas_shows_the_tool_in_the_cursor() {
     h.run();
     assert_eq!(icon(&h), Some(CursorIcon::Crosshair), "and a crosshair over nothing");
 }
+
+#[test]
+fn a_press_and_drag_on_a_wall_of_the_highlighted_chain_moves_the_whole_chain() {
+    let mut h = app(&format!(
+        "{BOX}
+wall {{\"points\": [[20000, 0], [26000, 0]]}}"
+    ));
+    let all = wall_ids(&h);
+    let (room, lone) = (sorted(all[..4].to_vec()), all[4]);
+    let start = |h: &Harness<BimApp>, id: Id| h.state().session.model.wall(id).map(|w| w.start).unwrap();
+    let before: Vec<_> = room.iter().map(|id| start(&h, *id)).collect();
+    let on_room = h.state().screen(P2(4000.0, 0.0));
+    h.hover_at(on_room);
+    h.run();
+    key(&mut h, Key::Tab);
+    assert_eq!(sorted(h.state().flow.preview.clone()), room, "Tab highlights the walls of the room");
+    // Pressed on the highlighted wall and dragged north-east: all four walls go.
+    drag(&mut h, P2(4000.0, 0.0), P2(4000.0, -2000.0));
+    assert_eq!(sorted(h.state().selection.clone()), room, "{:?}", h.state().status);
+    for (id, was) in room.iter().zip(before) {
+        assert_eq!(start(&h, *id), P2(was.0, was.1 - 2000.0), "wall {id} went with the chain");
+    }
+    assert_eq!(start(&h, lone), P2(20000.0, 0.0), "the lone wall stays");
+    assert!(h.state().flow.preview.is_empty());
+    // Without Tab, a drag is one wall, as before.
+    click(&mut h, P2(23000.0, 0.0));
+    drag(&mut h, P2(23000.0, 0.0), P2(23000.0, 1000.0));
+    assert_eq!(h.state().selection, [lone]);
+}
+
+#[test]
+fn repeat_remembers_only_what_the_person_starts_from_a_shortcut_the_ribbon_or_a_menu() {
+    let mut h = app(BOX);
+    shortcut(&mut h, "WA");
+    key(&mut h, Key::Escape);
+    // What the app starts for itself, however the tool is named, is nobody's last command.
+    for tool in [
+        Tool::SketchLine(Vec::new()),
+        Tool::SketchPick,
+        Tool::Paste,
+        Tool::Vertex { delete: false },
+        Tool::AddPoint,
+        Tool::SlopeArrow(None),
+        Tool::Door,
+    ] {
+        h.state_mut().set_tool(tool);
+        h.state_mut().tool = Tool::Modify;
+        assert_eq!(h.state().flow.last, Some(Tool::Wall(Vec::new())), "the app's own start was remembered");
+    }
+    // What the person starts is: the ribbon's and the menus' start.
+    h.state_mut().start_tool(Tool::Vertex { delete: true });
+    assert_eq!(h.state().flow.last, Some(Tool::Vertex { delete: true }));
+    h.state_mut().tool = Tool::Modify;
+    shortcut(&mut h, "DR");
+    key(&mut h, Key::Escape);
+    assert_eq!(h.state().flow.last.as_ref().map(crate::selecting::tool_name), Some("Door"));
+}

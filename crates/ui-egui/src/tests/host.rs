@@ -420,3 +420,22 @@ fn a_page_holds_back_the_keys_the_editor_takes_and_leaves_the_rest_to_the_browse
     assert!(!takes("F5", false) && !takes("F11", false) && !takes("F12", false));
     assert!(!takes("Escape", false) && !takes("Enter", false));
 }
+
+#[test]
+fn select_by_ids_dialog_keeps_the_selection_on_a_mistyped_id_and_the_agents_selection_clears_it() {
+    let mut h = hosted(SAMPLE);
+    let wall = first_wall(&h);
+    h.state_mut().selection = vec![wall];
+    // The dialog's path, as Revit's: an error, and what was selected stays.
+    let found = h.state_mut().select_named("999999999", false, false);
+    assert!(found.ids.is_empty());
+    assert_eq!(h.state().selection, vec![wall]);
+    assert!(h.state().status.error, "{:?}", h.state().status);
+    // What only the library has is no element: said, and the selection stays too.
+    let ty = h.state().session.model.library.entries().next().map(|(id, _)| id).unwrap();
+    h.state_mut().select_named(&ty.to_string(), false, false);
+    assert_eq!(h.state().selection, vec![wall]);
+    // The agent asked for a selection of what it named: nothing found, nothing selected.
+    h.state_mut().host_select("999999999", false, false);
+    assert!(h.state().selection.is_empty());
+}
