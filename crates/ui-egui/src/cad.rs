@@ -48,9 +48,11 @@ impl CadBox {
 impl BimApp {
     /// Insert > Import CAD or Link CAD: the file the user picks, then the box for it.
     pub(crate) fn import_cad_dialog(&mut self, ctx: &Context, link: bool) {
-        let dialog = crate::dialog::Ask::new()
-            .add_filter(t("CAD drawings (DWG, DXF)"), &["dxf", "dwg"])
-            .set_title(t(if link { "Link CAD" } else { "Import CAD" }));
+        let dialog = crate::dialog::Ask::new().add_filter(t("CAD drawings (DWG, DXF)"), &["dxf", "dwg"]).set_title(t(if link {
+            "Link CAD"
+        } else {
+            "Import CAD"
+        }));
         self.ask_files(ctx, dialog, move |app, paths| {
             if let Some(path) = paths.into_iter().next() {
                 app.import_cad_path(path, link);

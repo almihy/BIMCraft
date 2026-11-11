@@ -1167,7 +1167,10 @@ impl BimApp {
         }
         let name = ed.name.trim().to_string();
         if made && save {
-            let dialog = crate::dialog::Ask::new().add_filter(t("BIMCraft family"), &["json"]).set_file_name(format!("{name}.json")).set_title(t("Save"));
+            let dialog = crate::dialog::Ask::new()
+                .add_filter(t("BIMCraft family"), &["json"])
+                .set_file_name(format!("{name}.json"))
+                .set_title(t("Save"));
             let family = name.clone();
             self.ask_file(ctx, dialog, true, move |app, path| {
                 app.run("family", json!({"name": family, "save": path.to_string_lossy()}));

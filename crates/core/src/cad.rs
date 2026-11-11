@@ -9,6 +9,8 @@ use std::sync::{Arc, OnceLock};
 use serde::{Deserialize, Serialize};
 
 use crate::dxf::{self, Color, Dxf, Entity, Shape};
+
+pub mod outlines;
 use crate::geom::P2;
 use crate::pen::Pen;
 use crate::render::Rgb;

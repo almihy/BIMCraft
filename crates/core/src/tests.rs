@@ -2504,8 +2504,44 @@ fn hostile_params_never_panic_or_break_the_model() {
         json!({"ids": [road, park, pad], "about": [0, 0], "angle": 45, "copy": true}),
         json!({"ids": [road, park, topo, pad], "axis": [[0, 0], [1000, 1000]]}),
     ];
-    let hostile: Vec<Value> =
-        hostile.into_iter().chain(detailing.into_iter().map(|(_, p)| p)).chain(slopes).chain(offsets).chain(grips).chain(site).collect();
+    // A CAD import of loose lines (a square of four, one across it, an arc and a text), last so that no id moves, and picks of
+    // its lines (Pick Lines: `cad_outlines`, and `cad` on wall, floor and the site's elements) that are hostile.
+    let dxf = "0\nSECTION\n2\nENTITIES\n\
+        0\nLINE\n8\nW\n10\n0\n20\n0\n11\n4000\n21\n0\n0\nLINE\n8\nW\n10\n4000\n20\n0\n11\n4000\n21\n4000\n\
+        0\nLINE\n8\nW\n10\n4000\n20\n4000\n11\n0\n21\n4000\n0\nLINE\n8\nW\n10\n0\n20\n4000\n11\n0\n21\n0\n\
+        0\nLINE\n8\nW\n10\n2000\n20\n0\n11\n2000\n21\n4000\n0\nARC\n8\nR\n10\n0\n20\n0\n40\n1e-300\n50\n0\n51\n1e300\n\
+        0\nTEXT\n8\nT\n10\n1000\n20\n1000\n40\n100\n1\nx\n0\nENDSEC\n0\nEOF\n";
+    let cad_path = std::env::temp_dir().join(format!("bimcraft-hostile-{}.dxf", std::process::id()));
+    std::fs::write(&cad_path, dxf).unwrap();
+    let cad = base
+        .execute("import_cad", &json!({"path": cad_path, "position": "origin", "at": [60000, 0]}))
+        .map_or(Value::Null, |r| r["id"].clone());
+    assert!(cad.is_u64(), "the sweep's base has a CAD import");
+    let picks = [
+        json!({"id": cad}),
+        json!({"id": cad, "layers": ["W"], "min_area": 1e300}),
+        json!({"id": cad, "entities": [-1, 1e300, "x"], "box": [[0, 0], [1e300, 0]]}),
+        json!({"id": cad, "entities": [0, 0, 0], "layers": "W", "box": [[1e300, 1e300], [-1e300, -1e300]], "min_area": -1}),
+        json!({"id": cad, "entities": vec![5; 200_000]}),
+        json!({"cad": {"id": cad}}),
+        json!({"cad": {"id": cad, "layers": ["W"]}, "height": 1e300, "level": "nowhere"}),
+        json!({"cad": {"id": cad, "entities": [0, 1, 2, 3]}, "offset": 1e300, "type": "x"}),
+        json!({"cad": {"id": cad, "entities": [5]}, "arc": 90}),
+        json!({"cad": {"id": cad, "box": [[0, 0], [0, 0]], "nope": 1}, "boundary": [[0, 0], [1, 0], [1, 1]]}),
+        json!({"cad": {"id": 100002, "entities": [0]}}),
+        json!({"cad": {"id": u64::MAX}, "points": [[0, 0], [1000, 0]]}),
+        json!({"cad": "x"}),
+        json!({"cad": {"id": cad, "entities": [6]}}),
+    ];
+    let hostile: Vec<Value> = hostile
+        .into_iter()
+        .chain(detailing.into_iter().map(|(_, p)| p))
+        .chain(slopes)
+        .chain(offsets)
+        .chain(grips)
+        .chain(site)
+        .chain(picks)
+        .collect();
     // Each command against each value, on a copy of the same session; the commands shared out between the cores.
     let cmds: Vec<_> = commands().iter().filter(|c| !matches!(c.id, "open" | "save")).collect();
     let threads = std::thread::available_parallelism().map_or(4, |n| n.get());

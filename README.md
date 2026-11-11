@@ -603,6 +603,7 @@ for a headless server that opens the file and then only reads it.
 | `cad_layers` | | `id`, `hide?`, `show?`, `view?`: an import's layers, hidden or shown everywhere or in one view |
 | `reload_cad` | | `cad` (a linked drawing's name): reads its file again, so every import of it shows what the file holds now |
 | `cad_query` | | `id`, `at`, `reach?` (100 mm): the entity of an import nearest a point: its layer, kind, colour and linetype |
+| `cad_outlines` | | `id`, `layers?`, `entities?`, `box?`, `min_area?` (mm²): the closed outlines an import's lines make, joined where they meet (each face, and the whole of a shape lines split), closed polylines, circles and hatch rings, each with its points, area, layer, entities, holes and the texts inside it; and the open chains left. `wall`, `floor`, `property_line`, `building_pad` and `toposolid` take the same pick as `cad` (Pick Lines) |
 
 A `level` can be given by name or id; without one, commands use the lowest level. `render {view}` draws a plan (with
 `ceiling: true`, its reflected ceiling plan), a section or an elevation by name, a sheet by number (a path ending .pdf prints it), or with `{3D}` (and `azimuth?`, `elevation?`) the 3D

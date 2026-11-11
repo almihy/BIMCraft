@@ -244,6 +244,11 @@ Every one checks its keys (a key it doesn't take is refused, naming the ones it 
 - `site_kinds {}`: the catalogue above (no undo step).
 - `property_line {points: [[x, y] or [x, y, bulge], …], level?, name?}` (PL): closed; given clockwise, it is run round
   the other way (each bulge moved to the piece it now starts and turned). Returns `id`, `area_m2`.
+- From a drawing: `property_line`, `toposolid` and `building_pad` take `cad: {id, entities?, layers?, box?}` instead of
+  `points` or `boundary`, a pick of a CAD import's lines; the outline is the one closed outline they make (the whole of a
+  building split by lines across it), on the import's level unless `level` says, and a pick making none or several is
+  refused, pointing to `cad_outlines` ([CAD import](cad-import.md#building-from-a-drawing-pick-lines)). A toposolid
+  from a drawing is flat: the DXF reader keeps no heights.
 - `toposolid {boundary, points?: [[x, y, z], …], contours?, type?, level?, offset?}` (TS): `points` the ground's
   heights over its level (shape points); `contours` mm apart (1000; 0 none); `type` a floor type (`Toposolid`, 1000 mm,
   made when the project hasn't one). Returns `id`, `area_m2`.
