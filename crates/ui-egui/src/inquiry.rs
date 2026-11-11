@@ -69,8 +69,9 @@ impl BimApp {
     }
 
     /// Select what `text` names (added to the selection with `add`), and with `show`, open the plan that shows it, zoomed
-    /// to it. What it found, and what named nothing, in the status box.
-    pub(crate) fn select_named(&mut self, text: &str, add: bool, show: bool) {
+    /// to it. What it found, and what named nothing, in the status box. Nothing found leaves what was selected when it is
+    /// added to, and clears it otherwise (the selection is what was asked for, and nothing is). Answers what it found.
+    pub(crate) fn select_named(&mut self, text: &str, add: bool, show: bool) -> inquiry::Found {
         let found = inquiry::find(&self.session.model, text);
         // What the library has (a type, a material) is no element to select: said by what it is and its name.
         let library: Vec<String> = found
@@ -80,8 +81,11 @@ impl BimApp {
             .map(|n| format!("{} {} ({})", t(&n.category), n.name, n.id))
             .collect();
         if found.ids.is_empty() && !library.is_empty() {
+            if !add {
+                self.selection.clear();
+            }
             self.status = Status { text: tf("In the library, not elements to select: {}", &[&library.join(", ")]), error: false };
-            return;
+            return found;
         }
         if found.ids.is_empty() {
             let text = if found.missing.is_empty() {
@@ -89,8 +93,11 @@ impl BimApp {
             } else {
                 tf("Nothing has that ID or GUID: {}", &[&found.missing.join(", ")])
             };
+            if !add {
+                self.selection.clear();
+            }
             self.status = Status { text, error: true };
-            return;
+            return found;
         }
         if !add {
             self.selection.clear();
@@ -109,6 +116,7 @@ impl BimApp {
             true => Status { text: tf("Selected {}.", &[&n]), error: false },
             false => Status { text: tf("Selected {}; nothing has these: {}", &[&n, &found.missing.join(", ")]), error: false },
         };
+        found
     }
 
     pub(crate) fn select_by_id_window(&mut self, ctx: &Context) {

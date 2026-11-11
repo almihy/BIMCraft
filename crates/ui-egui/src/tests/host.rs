@@ -263,7 +263,7 @@ fn the_page_reads_what_the_person_sees_the_selection_the_view_and_where_it_looks
     assert_eq!(c["view"]["name"], json!("Level 1"));
     assert_eq!(c["view"]["level"]["name"], json!("Level 1"));
     // The part of the plan on screen: a box round the house, in its own millimetres, with the zoom.
-    assert_eq!(c["camera"]["kind"], json!("plan"));
+    assert_eq!(c["camera"]["kind"], json!("floor plan"), "the view's kind");
     let (lo, hi) = (&c["camera"]["visible"]["min"], &c["camera"]["visible"]["max"]);
     assert!(lo[0].as_f64().unwrap() < 0.0 && hi[0].as_f64().unwrap() > 10000.0, "{c}");
     assert!(lo[1].as_f64().unwrap() < hi[1].as_f64().unwrap(), "north is up: {c}");
@@ -290,7 +290,7 @@ fn the_context_changes_with_the_selection_the_view_and_the_camera_and_not_while_
     h.run();
     let three = h.state().host_context();
     assert_eq!(three["view"]["kind"], json!("3D view"));
-    assert_eq!(three["camera"]["kind"], json!("3d"));
+    assert_eq!(three["camera"]["kind"], json!("3D view"));
     assert!(three["camera"]["target"].is_array());
     assert_ne!(h.state().host_context_key(), zoomed, "the view");
 }
@@ -324,6 +324,57 @@ fn the_agent_selects_what_it_means_by_id_or_guid_and_the_window_shows_it() {
     assert!(h.state().selection.is_empty());
     assert_eq!(r["selected"], json!(0));
     assert!(Arc::ptr_eq(&h.state().session.model, &model), "selecting changes nothing in the model");
+}
+
+#[test]
+fn a_selected_element_deleted_since_is_not_counted() {
+    let mut h = hosted(SAMPLE);
+    let wall = first_wall(&h);
+    h.state_mut().selection = vec![wall, 999_999_999];
+    let c = h.state().host_context();
+    assert_eq!(c["selection"].as_array().unwrap().len(), 1, "{c}");
+    assert_eq!(c["count"], json!(1), "what survives, not what the selection still names: {c}");
+}
+
+#[test]
+fn a_section_and_a_ceiling_plan_say_their_own_kind_in_their_camera() {
+    let mut h = hosted(SAMPLE);
+    let section = h.state().session.model.rare("section").into_iter().next().unwrap();
+    h.state_mut().host_open_view(&section.to_string(), false).unwrap();
+    h.run();
+    let c = h.state().host_context();
+    assert_eq!(c["view"]["kind"], json!("section"), "{c}");
+    assert_eq!(c["camera"]["kind"], json!("section"), "{c}");
+    h.state_mut().host_open_view("Level 2", true).unwrap();
+    h.run();
+    let c = h.state().host_context();
+    assert_eq!(c["camera"]["kind"], json!("ceiling plan"), "{c}");
+}
+
+#[test]
+fn a_selection_that_found_nothing_is_what_it_says_whatever_was_selected_before() {
+    let mut h = hosted(SAMPLE);
+    let wall = first_wall(&h);
+    h.state_mut().selection = vec![wall];
+    // Added to: what was selected stays, and the reply says so.
+    let r = h.state_mut().host_select("999999999", true, false);
+    assert_eq!(h.state().selection, vec![wall]);
+    assert_eq!(r["selected"], json!(1), "{r}");
+    assert_eq!(r["ids"], json!([]), "{r}");
+    assert_eq!(r["missing"], json!(["999999999"]), "{r}");
+    // In place of: nothing was found, so nothing is selected, and the reply says that and not the old count.
+    let r = h.state_mut().host_select("999999999", false, false);
+    assert!(h.state().selection.is_empty());
+    assert_eq!(r["selected"], json!(0), "{r}");
+    assert_eq!(r["missing"], json!(["999999999"]), "{r}");
+    // What only the library has is no element: said in `missing` too, and the selection is cleared all the same.
+    let ty = h.state().session.model.library.entries().next().map(|(id, _)| id).unwrap();
+    h.state_mut().selection = vec![wall];
+    let r = h.state_mut().host_select(&ty.to_string(), false, false);
+    assert!(h.state().selection.is_empty());
+    assert_eq!(r["selected"], json!(0), "{r}");
+    assert_eq!(r["ids"], json!([]), "{r}");
+    assert_eq!(r["missing"].as_array().unwrap().len(), 1, "the library entry: {r}");
 }
 
 #[test]
