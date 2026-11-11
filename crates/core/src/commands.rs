@@ -1150,14 +1150,21 @@ other_files(
         &[],
         "{category: wall|floor|ceiling|door|window|column|structuralcolumn|footing|roof|railing|beam|stripfooting|pipe|duct|conduit|\
          cabletray|wire|downconductor|groundconductor|cable, name, thickness? | width?, height?, sill?, operation? | width?, depth?, round?, \
-         material? | height?, spacing?} creates the type, or changes it everywhere it's used. A column's, a structural column's or \
+         material? | height?, spacing?, type_mark?, description?, manufacturer?, model?, fire_rating?, cost?, keynote?, assembly_code?, url?, type_comments?} creates the type, or changes it everywhere it's used. A column's, a structural column's or \
          a footing's type is a `width` by `depth`, or `round` (`width` across); a run's (a beam's, a pipe's, a cable tray's…) too, \
          made of a `material` of the library. A wall type may have `layers` [{function?: structure|\
          substrate|thermal|membrane|finish, material?, thickness}, …] from its exterior side in: it's as thick as they are, \
          its core from its first structure layer to its last, and a new `thickness` goes to its structure. A ceiling type may \
          have `grid`: its square tiles' width, mm, which reflected ceiling plans draw (0, none); a railing type, `height` (its \
          rail over what it runs along) and `spacing` (its balusters' centres, 0 for none). Floor, roof and ceiling types may \
-         have `layers` too, from the top down; a layer's `material` is one of the library's (see `material`)",
+         have `layers` too, from the top down; a layer's `material` is one of the library's (see `material`). Any type also has \
+         identity data, as Revit's Identity Data group in Type Properties, each optional and kept when not given (`\"\"` or null \
+         clears it): `type_mark` (names the type in schedules and tags: `D1`), `description`, `manufacturer`, `model`, \
+         `fire_rating`, `cost` (a number, in the project's currency), `keynote`, `assembly_code`, `url` and `type_comments`. \
+         Its elements read them as fields of those names in `elements` and `inspect` (`type_mark`…), in schedules (Type Mark, Fire \
+         Rating…) and in tags, and IFC carries them (Reference and FireRating in the element's `Pset_*Common`, Manufacturer and \
+         ModelLabel in `Pset_ManufacturerTypeInformation`, the rest in `BIMCraft_TypeData`). A family's types take theirs \
+         through `family`'s `identity`",
         edit_type,
     ),
     edit_files(
@@ -1257,7 +1264,9 @@ other_files(
          `Wall Thickness`, the wall's. Sizes are mm, or \
          formulas over its parameters as Revit's are: `Width / 2`, `if(Depth > 600, 4, 2)`, with + - * / ^, < > = <= >=, if, \
          and, or, not, min, max, abs, sqrt, round, roundup, rounddown, sin, cos, tan (degrees). A parameter is each type's, or \
-         with `instance` each component's. `types` merges into its types (a null takes one away); `parameters` and `forms` \
+         with `instance` each component's. `types` merges into its types (a null takes one away); `identity` {type: {type_mark?, description?, \
+         manufacturer?, model?, fire_rating?, cost?, keynote?, assembly_code?, url?, type_comments?}} sets a type's identity data \
+         as `type` does a category's (`\"\"` or null clears one); `parameters` and `forms` \
          replace its own; `material` is a material's name or a material parameter's; `visible` a yes/no parameter or formula. \
          `inspect` lists the families. A device's `connectors` say what it draws: one `power` connector at most (a second is \
          refused), `voltage` in volts, `load_va` in VA (a number or a formula over its parameters, so each type has its load; \
@@ -2561,9 +2570,14 @@ fn runs(extra: &mut Map<String, Value>, l: &stairs::Layout) {
     extra.insert("runs".into(), json!(runs));
 }
 
-/// The area of the rings together, mm².
-fn area(rings: &[Vec<P2>]) -> f64 {
-    rings.iter().map(|r| geom::area(r).abs()).sum()
+/// mm³ as m³, to the litre.
+pub fn m3(mm3: f64) -> f64 {
+    (mm3 / 1e6).round() / 1e3
+}
+
+/// mm as m, to the centimetre.
+fn m_of(mm: f64) -> f64 {
+    (mm / 10.0).round() / 100.0
 }
 
 fn hundredth(x: f64) -> f64 {
@@ -2740,6 +2754,10 @@ pub fn element_json_with(m: &Model, id: Id, rooms: &crate::rooms::Rooms) -> Valu
             extra.insert(key.into(), json!(g));
         }
     });
+    // Its type's identity data (Type Mark, Manufacturer…): what a schedule's and a tag's fields of that name read.
+    if let Some(identity) = m.type_identity(e) {
+        extra.extend(identity.set().map(|(k, v)| (k.to_string(), v)));
+    }
     // The room a component stands in, as Revit's Room parameter: by GUID, with its number and name for schedules and tags.
     if let Element::Component(c) = e
         && let Some(id) = rooms.room_at(c.level, c.at)
@@ -2789,6 +2807,10 @@ pub fn element_json_with(m: &Model, id: Id, rooms: &crate::rooms::Rooms) -> Valu
             if let Some(r) = axis.radius() {
                 extra.insert("radius".into(), json!(hundredth(r)));
             }
+            // One side's area and the volume, less the doors and windows in it, as Revit's wall Area and Volume.
+            let q = crate::quantities::wall(m, id, w, &crate::quantities::holes_in(m, id));
+            extra.insert("area_m2".into(), json!(m2(q.net_side)));
+            extra.insert("volume_m3".into(), json!(m3(q.net_volume)));
         }
         Element::Door(o) | Element::Window(o) => {
             if let (Some(t), Some(w)) = (m.opening_type(e), m.wall(o.host)) {
@@ -2877,9 +2899,13 @@ pub fn element_json_with(m: &Model, id: Id, rooms: &crate::rooms::Rooms) -> Valu
                 .flat_map(|(loops, p)| loops.iter().flatten().map(|q| p.at(*q)))
                 .fold(m.elevation(r.level) + r.offset, f64::max);
             let outline = m.roof_outline(r);
-            let courtyards: f64 = r.courtyards.iter().map(|c| geom::area(c).abs()).sum();
+            let q = crate::quantities::roof(m, r);
             extra.insert("ridge".into(), json!(hundredth(ridge)));
-            extra.insert("area_m2".into(), json!(m2(geom::area(&outline).abs() - courtyards)));
+            extra.insert("area_m2".into(), json!(m2(q.plan_area)));
+            // Its surface, as Revit's roof Area, and what it holds through its thickness.
+            extra.insert("surface_area_m2".into(), json!(m2(q.surface_area)));
+            extra.insert("volume_m3".into(), json!(m3(q.volume)));
+            extra.insert("perimeter_m".into(), json!(m_of(q.perimeter)));
             extra.insert("outline".into(), json!(outline.into_iter().map(micron).collect::<Vec<_>>()));
         }
         Element::Sheet(sh) => {
@@ -2935,11 +2961,12 @@ pub fn element_json_with(m: &Model, id: Id, rooms: &crate::rooms::Rooms) -> Valu
         }
         // Areas less the openings and shafts through them.
         Element::Floor(f) | Element::Toposolid(f) => {
-            let left: f64 = m.floor_slabs(f).iter().map(|(face, rise)| area(&m.less_shafts(face, *rise).0)).sum();
-            extra.insert("area_m2".into(), json!(m2(left)));
+            let q = crate::quantities::floor(m, f);
+            extra.insert("area_m2".into(), json!(m2(q.net_area)));
             extra.insert("thickness".into(), json!(m.types.floor.get(&f.type_name).map_or(0.0, |t| t.thickness)));
             // What it holds, less its openings and the shafts through it: under a variable layer, less where its top falls.
-            extra.insert("volume_m3".into(), json!((m.floor_volume(f) / 1e6).round() / 1e3));
+            extra.insert("volume_m3".into(), json!(m3(q.net_volume)));
+            extra.insert("perimeter_m".into(), json!(m_of(q.perimeter)));
             // How high its top is, at its lowest and its highest, its shape's points too.
             extra.insert("top".into(), top_range(m, f));
             // Where its top's model pattern starts and how far it's turned: shown at their defaults too, to be set by modify.
@@ -2947,8 +2974,10 @@ pub fn element_json_with(m: &Model, id: Id, rooms: &crate::rooms::Rooms) -> Valu
             extra.insert("pattern_angle".into(), json!(f.pattern_angle));
         }
         Element::Ceiling(cl) => {
-            let left: f64 = m.ceiling_slabs(cl).iter().map(|(face, rise)| area(&m.less_shafts(face, *rise).0)).sum();
-            extra.insert("area_m2".into(), json!(m2(left)));
+            let q = crate::quantities::ceiling(m, cl);
+            extra.insert("area_m2".into(), json!(m2(q.net_area)));
+            extra.insert("volume_m3".into(), json!(m3(q.volume)));
+            extra.insert("perimeter_m".into(), json!(m_of(q.perimeter)));
             if let Some(t) = m.types.ceiling.get(&cl.type_name) {
                 extra.insert("thickness".into(), json!(t.thickness));
                 extra.insert("grid".into(), json!(t.grid));
@@ -11157,7 +11186,7 @@ fn family(s: &mut Session, p: &Value) -> R {
         let name = p.get("name").filter(|v| !v.is_null()).cloned().or_else(|| fields.remove("name")).unwrap_or(json!(stem));
         // Only the family it holds: what a file says to rename or delete isn't for it to say.
         let mut family: Map<String, Value> =
-            ["category", "kind", "ifc", "parameters", "types", "forms", "symbols", "operation", "connectors"]
+            ["category", "kind", "ifc", "parameters", "types", "identity", "forms", "symbols", "operation", "connectors"]
                 .into_iter()
                 .filter_map(|k| fields.remove(k).map(|v| (k.to_string(), v)))
                 .collect();
@@ -11230,6 +11259,7 @@ fn family(s: &mut Session, p: &Value) -> R {
         "operation",
         "connectors",
         "types",
+        "identity",
         "rename",
         "form",
         "symbol",
@@ -11327,6 +11357,28 @@ fn family(s: &mut Session, p: &Value) -> R {
         merge(&mut types, v);
         f.types = serde_json::from_value(types).map_err(|e| field("types", e))?;
     }
+    // Each type's identity data (Type Mark, Manufacturer…), as `type` takes it for a category's types: `{type: {type_mark?, …}}`.
+    if let Some(v) = p.get("identity").filter(|v| !v.is_null()) {
+        let Value::Object(per) = v else {
+            return Err(bad(c, "`identity` is {type: {type_mark?, description?, manufacturer?, model?, fire_rating?, cost?, keynote?, assembly_code?, url?, type_comments?}}"));
+        };
+        for (ty, data) in per {
+            if !f.types.contains_key(ty) {
+                let names: Vec<&str> = f.types.keys().map(String::as_str).collect();
+                return Err(bad(c, format!("`identity`: there's no type `{ty}`{}", known_names(&names))));
+            }
+            let mut identity = f.identity.get(ty).cloned().unwrap_or_default();
+            identity.read(data).map_err(|e| bad(c, format!("`identity` of type `{ty}`: {e}")))?;
+            if identity.is_empty() {
+                f.identity.remove(ty);
+            } else {
+                f.identity.insert(ty.clone(), identity);
+            }
+        }
+    }
+    // A type that's gone takes its identity data with it.
+    let types = f.types.clone();
+    f.identity.retain(|t, _| types.contains_key(t));
     // Renaming, checked before the model is touched: onto a name another family has, refused.
     let rename = match string(c, &p, "rename")? {
         Some(to) => {
@@ -11735,17 +11787,20 @@ fn edit_type(s: &mut Session, p: &Value) -> R {
     let (thickness, width, height, sill) = (num(c, p, "thickness")?, num(c, p, "width")?, num(c, p, "height")?, num(c, p, "sill")?);
     let need = |what: &str| bad(c, format!("a new {cat} type needs `{what}`"));
     let m = s.model_mut();
+    // Its identity data: what the type holds, over which `p` gives under the keys of `crate::type_data::FIELDS`.
+    let mut identity = m.identity_of(&cat, &name).cloned().unwrap_or_default();
+    identity.read(p).map_err(|e| bad(c, e))?;
     let t = match cat.as_str() {
         "wall" => {
             let (thickness, layers) = layered(c, p, m.types.wall.get(&name).map(|t| (t.thickness, t.layers.as_slice())), thickness, &need)?;
-            let t = WallType { thickness, layers };
+            let t = WallType { thickness, layers, identity };
             m.types.wall.insert(name.clone(), t.clone());
             json!(t)
         }
         "floor" => {
             let (thickness, layers) =
                 layered(c, p, m.types.floor.get(&name).map(|t| (t.thickness, t.layers.as_slice())), thickness, &need)?;
-            let t = FloorType { thickness, layers };
+            let t = FloorType { thickness, layers, identity };
             m.types.floor.insert(name.clone(), t.clone());
             json!(t)
         }
@@ -11761,8 +11816,9 @@ fn edit_type(s: &mut Session, p: &Value) -> R {
                 height: height.or(old.as_ref().map(|t| t.height)).ok_or_else(|| need("height"))?,
                 sill: sill.or(old.as_ref().map(|t| t.sill)).unwrap_or(if cat == "window" { 900.0 } else { 0.0 }),
                 operation: op,
+                identity,
             };
-            map.insert(name.clone(), t);
+            map.insert(name.clone(), t.clone());
             json!(t)
         }
         "column" | "structuralcolumn" | "footing" => {
@@ -11778,7 +11834,7 @@ fn edit_type(s: &mut Session, p: &Value) -> R {
                 _ => flag(c, p, "round")?,
             };
             let depth = if round { width } else { num(c, p, "depth")?.or(old.as_ref().map(|t| t.depth)).unwrap_or(width) };
-            let t = ColumnType { width, depth, round };
+            let t = ColumnType { width, depth, round, identity };
             types.insert(name.clone(), t.clone());
             json!(t)
         }
@@ -11793,13 +11849,13 @@ fn edit_type(s: &mut Session, p: &Value) -> R {
             };
             let depth = if round { width } else { num(c, p, "depth")?.or(old.as_ref().map(|t| t.depth)).ok_or_else(|| need("depth"))? };
             let material = string(c, p, "material")?.or(old.map(|t| t.material)).unwrap_or_default();
-            let t = crate::model::RunType { width, depth, round, material };
+            let t = crate::model::RunType { width, depth, round, material, identity };
             types.insert(name.clone(), t.clone());
             json!(t)
         }
         "roof" => {
             let (thickness, layers) = layered(c, p, m.types.roof.get(&name).map(|t| (t.thickness, t.layers.as_slice())), thickness, &need)?;
-            let t = RoofType { thickness, layers };
+            let t = RoofType { thickness, layers, identity };
             m.types.roof.insert(name.clone(), t.clone());
             json!(t)
         }
@@ -11808,6 +11864,7 @@ fn edit_type(s: &mut Session, p: &Value) -> R {
             let t = RailingType {
                 height: height.or(old.as_ref().map(|t| t.height)).ok_or_else(|| need("height"))?,
                 spacing: num(c, p, "spacing")?.or(old.as_ref().map(|t| t.spacing)).unwrap_or(0.0),
+                identity,
             };
             m.types.railing.insert(name.clone(), t.clone());
             json!(t)
@@ -11815,7 +11872,7 @@ fn edit_type(s: &mut Session, p: &Value) -> R {
         "ceiling" => {
             let old = m.types.ceiling.get(&name).cloned();
             let (thickness, layers) = layered(c, p, old.as_ref().map(|t| (t.thickness, t.layers.as_slice())), thickness, &need)?;
-            let t = CeilingType { thickness, grid: num(c, p, "grid")?.or(old.as_ref().map(|t| t.grid)).unwrap_or(0.0), layers };
+            let t = CeilingType { thickness, grid: num(c, p, "grid")?.or(old.as_ref().map(|t| t.grid)).unwrap_or(0.0), layers, identity };
             m.types.ceiling.insert(name.clone(), t.clone());
             json!(t)
         }

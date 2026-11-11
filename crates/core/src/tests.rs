@@ -4842,7 +4842,7 @@ fn sliding_doors_and_windows_say_how_they_open_in_ifc_and_in_schedules() {
     );
     assert!(!typed.contains(".SLIDING_TO_RIGHT.") && typed.contains("IFCDOORTYPE"));
     let back = crate::import::ifc(typed.as_bytes(), "t").unwrap();
-    let patio = back.model.types.door.get("Patio").copied();
+    let patio = back.model.types.door.get("Patio").cloned();
     assert_eq!(patio.and_then(|k| k.operation), Some(Sliding), "{:?}", back.model.types.door);
     // A schedule says it in the project's language.
     let r =

@@ -2468,12 +2468,14 @@ impl Element {
 /// A wall type: how thick its walls are and, a compound one, its layers from the exterior side in,
 /// which make up that thickness. Its core runs from its first structure layer to its last (all of
 /// it, without one).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WallType {
     pub thickness: f64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub layers: Vec<Layer>,
+    #[serde(default, skip_serializing_if = "crate::type_data::TypeIdentity::is_empty")]
+    pub identity: crate::type_data::TypeIdentity,
 }
 
 /// A floor type: how thick its floors are and, a compound one, its layers from the top down.
@@ -2483,15 +2485,19 @@ pub struct FloorType {
     pub thickness: f64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub layers: Vec<Layer>,
+    #[serde(default, skip_serializing_if = "crate::type_data::TypeIdentity::is_empty")]
+    pub identity: crate::type_data::TypeIdentity,
 }
 
 /// A railing type: how high its rail stands, and how far apart its balusters are (0: none).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RailingType {
     pub height: f64,
     #[serde(default)]
     pub spacing: f64,
+    #[serde(default, skip_serializing_if = "crate::type_data::TypeIdentity::is_empty")]
+    pub identity: crate::type_data::TypeIdentity,
 }
 
 /// A ceiling type: how thick, and with `grid`, square tiles that wide, which its reflected ceiling
@@ -2504,16 +2510,20 @@ pub struct CeilingType {
     pub grid: f64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub layers: Vec<Layer>,
+    #[serde(default, skip_serializing_if = "crate::type_data::TypeIdentity::is_empty")]
+    pub identity: crate::type_data::TypeIdentity,
 }
 
 /// A column type: `width` by `depth`, or round, `width` across.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ColumnType {
     pub width: f64,
     pub depth: f64,
     #[serde(default)]
     pub round: bool,
+    #[serde(default, skip_serializing_if = "crate::type_data::TypeIdentity::is_empty")]
+    pub identity: crate::type_data::TypeIdentity,
 }
 
 /// A run's type: a section `width` across by `depth` deep, or round, `width` across; made of `material` (one of the
@@ -2527,6 +2537,8 @@ pub struct RunType {
     pub round: bool,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub material: String,
+    #[serde(default, skip_serializing_if = "crate::type_data::TypeIdentity::is_empty")]
+    pub identity: crate::type_data::TypeIdentity,
 }
 
 /// The categories whose elements are runs, as `Element::run` returns them.
@@ -2541,10 +2553,12 @@ pub struct RoofType {
     pub thickness: f64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub layers: Vec<Layer>,
+    #[serde(default, skip_serializing_if = "crate::type_data::TypeIdentity::is_empty")]
+    pub identity: crate::type_data::TypeIdentity,
 }
 
 /// A door or window type. `sill` is a window's default sill height; `operation`, how it opens, where it's said.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OpeningType {
     pub width: f64,
@@ -2553,6 +2567,8 @@ pub struct OpeningType {
     pub sill: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation: Option<Operation>,
+    #[serde(default, skip_serializing_if = "crate::type_data::TypeIdentity::is_empty")]
+    pub identity: crate::type_data::TypeIdentity,
 }
 
 /// How a door's or a window's leaves open, as IFC's door operation types name them; which jamb a
@@ -3102,7 +3118,7 @@ impl Model {
         }
         m.families = crate::family::library(language).into();
         for (n, t) in [("Generic - 200mm", 200.0), ("Interior - 100mm", 100.0)] {
-            m.types.wall.insert(n.into(), WallType { thickness: t, layers: Vec::new() });
+            m.types.wall.insert(n.into(), WallType { thickness: t, layers: Vec::new(), identity: Default::default() });
         }
         // An exterior wall's layers, outside in: brick, insulation, a block core, plaster.
         let layer = |function, material: &str, thickness| Layer {
@@ -3117,28 +3133,28 @@ impl Model {
             layer(Function::Structure, "Concrete block", 140.0),
             layer(Function::Finish, "Plaster", 10.0),
         ];
-        m.types.wall.insert("Exterior - 300mm".into(), WallType { thickness: 300.0, layers });
-        m.types.floor.insert("Generic - 200mm".into(), FloorType { thickness: 200.0, layers: Vec::new() });
+        m.types.wall.insert("Exterior - 300mm".into(), WallType { thickness: 300.0, layers, identity: Default::default() });
+        m.types.floor.insert("Generic - 200mm".into(), FloorType { thickness: 200.0, layers: Vec::new(), identity: Default::default() });
         for (n, w) in [("Single 900 x 2100", 900.0), ("Single 800 x 2100", 800.0)] {
-            m.types.door.insert(n.into(), OpeningType { width: w, height: 2100.0, sill: 0.0, operation: None });
+            m.types.door.insert(n.into(), OpeningType { width: w, height: 2100.0, sill: 0.0, operation: None, identity: Default::default() });
         }
         for (n, w, h, s) in [("Fixed 1200 x 1500", 1200.0, 1500.0, 900.0), ("Fixed 600 x 900", 600.0, 900.0, 1100.0)] {
-            m.types.window.insert(n.into(), OpeningType { width: w, height: h, sill: s, operation: None });
+            m.types.window.insert(n.into(), OpeningType { width: w, height: h, sill: s, operation: None, identity: Default::default() });
         }
-        m.types.column.insert("Rectangular 400 x 400".into(), ColumnType { width: 400.0, depth: 400.0, round: false });
-        m.types.column.insert("Round 300".into(), ColumnType { width: 300.0, depth: 300.0, round: true });
+        m.types.column.insert("Rectangular 400 x 400".into(), ColumnType { width: 400.0, depth: 400.0, round: false, identity: Default::default() });
+        m.types.column.insert("Round 300".into(), ColumnType { width: 300.0, depth: 300.0, round: true, identity: Default::default() });
         // The structure's: concrete columns, footings, beams and strip footings.
         for (n, w, d, round) in [
             ("Concrete 300 x 300", 300.0, 300.0, false),
             ("Concrete 200 x 500", 200.0, 500.0, false),
             ("Concrete Round 400", 400.0, 400.0, true),
         ] {
-            m.types.structural_column.insert(n.into(), ColumnType { width: w, depth: d, round });
+            m.types.structural_column.insert(n.into(), ColumnType { width: w, depth: d, round, identity: Default::default() });
         }
         for (n, w) in [("Footing 1200 x 1200", 1200.0), ("Footing 1500 x 1500", 1500.0)] {
-            m.types.footing.insert(n.into(), ColumnType { width: w, depth: w, round: false });
+            m.types.footing.insert(n.into(), ColumnType { width: w, depth: w, round: false, identity: Default::default() });
         }
-        let run = |width, depth, round, material: &str| RunType { width, depth, round, material: language.word(material).into() };
+        let run = |width, depth, round, material: &str| RunType { width, depth, round, material: language.word(material).into(), identity: Default::default() };
         let beams = [
             ("Beam 200 x 500", run(200.0, 500.0, false, "Concrete")),
             ("Beam 150 x 400", run(150.0, 400.0, false, "Concrete")),
@@ -3219,10 +3235,10 @@ impl Model {
             ("Wire 6", run(6.5, 6.5, true, "Copper")),
         ];
         m.types.runs.insert("wire".into(), wires.into_iter().map(|(n, t)| (n.to_string(), t)).collect());
-        m.types.roof.insert("Generic - 300mm".into(), RoofType { thickness: 300.0, layers: Vec::new() });
-        m.types.ceiling.insert("Generic - 20mm".into(), CeilingType { thickness: 20.0, grid: 0.0, layers: Vec::new() });
-        m.types.ceiling.insert("Tile 600 x 600".into(), CeilingType { thickness: 20.0, grid: 600.0, layers: Vec::new() });
-        m.types.railing.insert("Railing - 1000mm".into(), RailingType { height: 1000.0, spacing: 120.0 });
+        m.types.roof.insert("Generic - 300mm".into(), RoofType { thickness: 300.0, layers: Vec::new(), identity: Default::default() });
+        m.types.ceiling.insert("Generic - 20mm".into(), CeilingType { thickness: 20.0, grid: 0.0, layers: Vec::new(), identity: Default::default() });
+        m.types.ceiling.insert("Tile 600 x 600".into(), CeilingType { thickness: 20.0, grid: 600.0, layers: Vec::new(), identity: Default::default() });
+        m.types.railing.insert("Railing - 1000mm".into(), RailingType { height: 1000.0, spacing: 120.0, identity: Default::default() });
         let level = language.word("Level");
         m.insert(Element::Level(Level::new(format!("{level} 1"), 0.0)));
         m.insert(Element::Level(Level::new(format!("{level} 2"), 3000.0)));
@@ -3526,6 +3542,7 @@ impl Model {
         let mut m: Model = serde_json::from_value(v).map_err(|e| e.to_string())?;
         m.migrate();
         m.names_from_file();
+        m.renamed_clashing_parameters();
         Ok((m, left_out))
     }
 
@@ -3594,6 +3611,51 @@ impl Model {
         // file of 17 holds no title blocks, its sheets keeping the built-in one, no `join`, which reads as joining, as it always
         // did, and none of its dimensions measures `across`.
         self.format = FORMAT;
+    }
+
+    /// A project parameter named as a field its categories have of their own since (Area and Volume of walls, a type's Type Mark,
+    /// Fire Rating or Manufacturer…) is `Custom <name>` now, with its values and the schedules, filters and rules that name it:
+    /// [`Model::check`] refuses the clash, so a file from before the field reads as it was.
+    fn renamed_clashing_parameters(&mut self) {
+        let clashing: Vec<String> = self
+            .parameters
+            .iter()
+            .filter(|(n, p)| p.categories.iter().any(|c| crate::schedule::own_field(c, n)))
+            .map(|(n, _)| n.clone())
+            .collect();
+        for name in clashing {
+            let Some(param) = self.parameters.remove(&name) else { continue };
+            let mut to = format!("Custom {name}");
+            while self.parameters.contains_key(&to) || param.categories.iter().any(|c| crate::schedule::own_field(c, &to)) {
+                to.push_str(" 2");
+            }
+            self.library.renamed(&crate::library::Kind::Parameter, &name, &to);
+            for f in self.view_filters.values_mut().filter(|f| f.categories.iter().any(|k| param.categories.contains(k))) {
+                f.rules.iter_mut().filter(|r| r.field == name).for_each(|r| r.field = to.clone());
+            }
+            for e in self.elements.values_mut() {
+                if let Element::Schedule(sc) = e {
+                    if param.categories.contains(&crate::commands::category(&sc.of)) {
+                        let swap = |n: &mut String| {
+                            if *n == name {
+                                n.clone_from(&to);
+                            }
+                        };
+                        sc.fields.iter_mut().filter(|f| f.formula.is_none()).for_each(|f| swap(&mut f.name));
+                        sc.filters.iter_mut().for_each(|f| swap(&mut f.field));
+                        sc.sort.iter_mut().for_each(|s| swap(&mut s.field));
+                    }
+                    continue;
+                }
+                if param.categories.iter().any(|k| k == e.category())
+                    && let Some(params) = e.params_mut()
+                    && let Some(v) = params.remove(&name)
+                {
+                    params.insert(to.clone(), v);
+                }
+            }
+            self.parameters.insert(to, param);
+        }
     }
 
     /// Each dimension from before dimension types given the one its kind starts in.
@@ -4237,7 +4299,7 @@ impl Model {
         let is_door = matches!(e, Element::Door(_));
         let Some(name) = &o.family else {
             let types = if is_door { &self.types.door } else { &self.types.window };
-            return types.get(&o.type_name).copied().ok_or_else(|| {
+            return types.get(&o.type_name).cloned().ok_or_else(|| {
                 let names: Vec<&str> = types.keys().map(String::as_str).collect();
                 format!("type `{}` doesn't exist (there are: {})", o.type_name, names.join(", "))
             });
@@ -4262,6 +4324,7 @@ impl Model {
             height: need(crate::family::HEIGHT)?,
             sill: number(crate::family::SILL).unwrap_or(if is_door { 0.0 } else { 900.0 }),
             operation: f.operation,
+            identity: f.identity.get(&o.type_name).cloned().unwrap_or_default(),
         })
     }
 
@@ -6283,6 +6346,7 @@ impl Model {
         }
         graphics::check_project(self)?;
         phasing::check_project(self)?;
+        self.check_identity()?;
         for (cat, n, thickness, layers) in self.layered_types() {
             let who = format!("{cat} type `{n}`");
             size(&format!("{who} thickness"), thickness)?;

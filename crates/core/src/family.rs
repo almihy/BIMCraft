@@ -566,6 +566,9 @@ pub struct Family {
     pub parameters: Vec<Parameter>,
     #[serde(default)]
     pub types: BTreeMap<String, BTreeMap<String, Value>>,
+    /// Each type's identity data (Type Mark, Manufacturer…), by the type's name: only those that hold any.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub identity: BTreeMap<String, crate::type_data::TypeIdentity>,
     #[serde(default)]
     pub forms: Vec<Form>,
     /// What its plan draws besides its forms: lines, arcs, labels and dots of its own, in any category.

@@ -99,6 +99,7 @@ pub mod phasing;
 pub mod plumbing;
 #[cfg(test)]
 mod read_only_tests;
+pub mod quantities;
 pub mod rebar;
 #[cfg(test)]
 mod rebar_tests;
@@ -155,6 +156,9 @@ pub mod titleblock;
 mod titleblock_tests;
 pub mod triad;
 pub mod triangulation;
+pub mod type_data;
+#[cfg(test)]
+mod type_data_tests;
 pub mod units;
 pub mod view3d;
 #[cfg(test)]

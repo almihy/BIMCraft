@@ -758,6 +758,68 @@ fn function_name(f: Function) -> &'static str {
 /// A type's parameter as typed: its group, its field, its label, the text.
 type TypeField = (&'static str, &'static str, &'static str, String);
 
+/// A type's identity data as typed (Revit's Identity Data group): each field's key, its label and its text.
+type IdentityField = (&'static str, &'static str, String);
+
+/// The identity data's labels, by key, in the order Type Properties lists them.
+const IDENTITY_LABELS: [(&str, &str); 10] = [
+    ("type_mark", msg!("Type Mark")),
+    ("description", msg!("Description")),
+    ("manufacturer", msg!("Manufacturer")),
+    ("model", msg!("Model")),
+    ("fire_rating", msg!("Fire Rating")),
+    ("cost", msg!("Cost")),
+    ("keynote", msg!("Keynote")),
+    ("assembly_code", msg!("Assembly Code")),
+    ("url", msg!("URL")),
+    ("type_comments", msg!("Type Comments")),
+];
+
+/// `identity` as the dialog types it: each field's text, empty where it holds none.
+fn identity_fields(identity: Option<&bimcraft_core::type_data::TypeIdentity>) -> Vec<IdentityField> {
+    IDENTITY_LABELS
+        .iter()
+        .map(|(key, label)| {
+            let typed = identity
+                .and_then(|i| i.get(key))
+                .map(|v| match v {
+                    Value::String(s) => s,
+                    v => text(&v),
+                })
+                .unwrap_or_default();
+            (*key, *label, typed)
+        })
+        .collect()
+}
+
+/// The identity data as typed, for the `type` command: the fields that changed from `were` (all of them with `all`, as a copy
+/// has them), empty text and no cost clearing the field. Or why the cost isn't a number.
+fn identity_params(fields: &[IdentityField], were: &[IdentityField], all: bool) -> Result<serde_json::Map<String, Value>, String> {
+    let mut out = serde_json::Map::new();
+    for (key, label, typed) in fields {
+        let was = were.iter().find(|(k, ..)| k == key).map(|(.., t)| t.as_str());
+        if !all && was == Some(typed.as_str()) {
+            continue;
+        }
+        let typed = typed.trim();
+        let v = match (*key, typed.is_empty()) {
+            (_, true) => Value::Null,
+            ("cost", false) => json!(number(typed).ok_or_else(|| tf("{}: `{}` is not a number", &[t(label), typed]))?),
+            _ => json!(typed),
+        };
+        out.insert((*key).to_string(), v);
+    }
+    Ok(out)
+}
+
+/// The Identity Data group of a Type Properties table: a text row for each field.
+fn identity_group(tb: &mut typeprops::Table, fields: &mut [IdentityField]) {
+    tb.group("Identity Data");
+    for (_, label, typed) in fields.iter_mut() {
+        tb.text(t(label), typed, "");
+    }
+}
+
 /// The Type Properties dialog: a type of a category, and its parameters as typed; a layered
 /// type's layers, too.
 pub(crate) struct TypeDialog {
@@ -776,6 +838,9 @@ pub(crate) struct TypeDialog {
     layers_were: Vec<LayerRow>,
     /// A run type's section: whether it is round (then it has a diameter and no depth) and what it is made of ("" for nothing).
     shape: Option<(bool, String)>,
+    /// Its identity data, as typed and as it was: changed, they make the type's.
+    identity: Vec<IdentityField>,
+    identity_were: Vec<IdentityField>,
 }
 
 impl TypeDialog {
@@ -785,7 +850,20 @@ impl TypeDialog {
             let t = m.types.runs.get(category).and_then(|t| t.get(&name));
             (t.is_some_and(|t| t.round), t.map(|t| t.material.clone()).unwrap_or_default())
         });
-        TypeDialog { category, name, elements, fields, naming: Naming::None, error: None, layers_were: layers.clone(), layers, shape }
+        let identity = identity_fields(m.identity_of(category, &name));
+        TypeDialog {
+            category,
+            name,
+            elements,
+            fields,
+            naming: Naming::None,
+            error: None,
+            layers_were: layers.clone(),
+            layers,
+            shape,
+            identity_were: identity.clone(),
+            identity,
+        }
     }
 
     /// The dialog showing type `name` as the model has it now.
@@ -811,7 +889,7 @@ impl TypeDialog {
 
     /// The `type` command's parameters for the type as typed, or why they aren't lengths. Changed
     /// layers make the type, and how thick it is; `copy` sends them anyway, as a duplicate has them.
-    fn params(&self, name: &str, units: Units, copy: bool) -> Result<Value, String> {
+    fn params(&self, name: &str, units: Units, copy: bool, duplicate: bool) -> Result<Value, String> {
         let mut p = json!({"category": self.category, "name": name});
         let layered = copy || self.layers != self.layers_were;
         if layered {
@@ -834,6 +912,9 @@ impl TypeDialog {
         if let Some((round, material)) = &self.shape {
             p["round"] = json!(round);
             p["material"] = json!(material);
+        }
+        if let Some(o) = p.as_object_mut() {
+            o.extend(identity_params(&self.identity, &self.identity_were, duplicate)?);
         }
         Ok(p)
     }
@@ -2170,6 +2251,7 @@ impl BimApp {
                             tb.full(|ui| layer_editor(ui, &mut d.layers, model.units, &materials, (out, inward), variable));
                         }
                     }
+                    identity_group(tb, &mut d.identity);
                 });
                 typeprops::error(ui, d.error.as_deref());
             });
@@ -2196,7 +2278,7 @@ impl BimApp {
         }
         if create && let Some(Head::Duplicate(new)) = asked.clone() {
             let layered = !model.type_layers(d.category, &d.name).is_empty();
-            let made = match d.params(&new, model.units, layered) {
+            let made = match d.params(&new, model.units, layered, true) {
                 Ok(mut p) => {
                     // A duplicate is round, and made of a material, as the type it copies is.
                     let types = serde_json::to_value(&model.types).unwrap_or_default();
@@ -2220,7 +2302,7 @@ impl BimApp {
             }
         }
         if apply || ok {
-            let applied = match d.params(&d.name, model.units, false) {
+            let applied = match d.params(&d.name, model.units, false, false) {
                 Ok(p) => self.run_for_type("type", p, &mut d.error),
                 Err(e) => {
                     d.error = Some(e);
@@ -2561,6 +2643,9 @@ pub(crate) struct FamilyDialog {
     elements: Vec<Id>,
     /// Each type parameter: its name, what it holds, as typed, and whether a formula works it out.
     fields: Vec<(String, Holds, String, bool)>,
+    /// Its identity data, as typed and as it was.
+    identity: Vec<IdentityField>,
+    identity_were: Vec<IdentityField>,
     /// A new name being typed, for a duplicate or a rename.
     naming: Naming,
     /// What stopped OK, Apply, Duplicate or Rename.
@@ -2584,7 +2669,8 @@ impl FamilyDialog {
                 f.parameters.iter().filter(|p| !p.instance).map(|p| (p.name.clone(), p.kind, typed(p), p.formula.is_some())).collect()
             })
             .unwrap_or_default();
-        FamilyDialog { family, name, elements, fields, naming: Naming::None, error: None }
+        let identity = identity_fields(m.families.get(&family).and_then(|f| f.identity.get(&name)));
+        FamilyDialog { family, name, elements, fields, identity_were: identity.clone(), identity, naming: Naming::None, error: None }
     }
 
     /// The dialog showing type `name` as the model has it now.
@@ -2594,7 +2680,7 @@ impl FamilyDialog {
 
     /// The `family` command's parameters setting type `name` to the values as typed, or why they
     /// aren't what they hold.
-    fn params(&self, name: &str, units: Units) -> Result<Value, String> {
+    fn params(&self, name: &str, units: Units, copy: bool) -> Result<Value, String> {
         let mut set = serde_json::Map::new();
         for (key, kind, typed, _) in self.fields.iter().filter(|f| !f.3) {
             let v = match kind {
@@ -2605,7 +2691,12 @@ impl FamilyDialog {
             };
             set.insert(key.clone(), v);
         }
-        Ok(json!({"name": self.family, "types": {name: set}}))
+        let identity = identity_params(&self.identity, &self.identity_were, copy)?;
+        let mut p = json!({"name": self.family, "types": {name: set}});
+        if !identity.is_empty() {
+            p["identity"] = json!({name: identity});
+        }
+        Ok(p)
     }
 }
 
@@ -2653,6 +2744,7 @@ impl BimApp {
                             }
                         }
                     }
+                    identity_group(tb, &mut d.identity);
                 });
                 typeprops::error(ui, d.error.as_deref());
             });
@@ -2663,7 +2755,7 @@ impl BimApp {
         match asked {
             Some(Head::Switch(n)) => d.show(&model, n),
             Some(Head::Duplicate(new)) => {
-                let made = match d.params(&new, model.units) {
+                let made = match d.params(&new, model.units, true) {
                     Ok(p) => self.run_for_type("family", p, &mut d.error),
                     Err(e) => {
                         d.error = Some(e);
@@ -2686,7 +2778,7 @@ impl BimApp {
             None => {}
         }
         if apply || ok {
-            let applied = match d.params(&d.name, model.units) {
+            let applied = match d.params(&d.name, model.units, false) {
                 Ok(p) => self.run_for_type("family", p, &mut d.error),
                 Err(e) => {
                     d.error = Some(e);
@@ -2852,6 +2944,7 @@ impl BimApp {
                         let now = match (kind, f.value.as_f64()) {
                             (schedule::Kind::Length, Some(x)) => units.length(x),
                             (schedule::Kind::Area, Some(x)) => format!("{}", (units.area(x * 1e6).0 * 100.0).round() / 100.0),
+                            (schedule::Kind::Volume, Some(x)) => format!("{}", (units.volume(x * 1e9).0 * 100.0).round() / 100.0),
                             _ => text(&f.value),
                         };
                         // A field of its own width: a grid cell would only be as wide as the last frame's.
@@ -2929,10 +3022,11 @@ pub(crate) struct ScheduleDialog {
 }
 
 /// What a calculated field comes to, as Schedule Properties names it.
-const RESULTS: [(schedule::Kind, &str); 4] = [
+const RESULTS: [(schedule::Kind, &str); 5] = [
     (schedule::Kind::Number, "Number"),
     (schedule::Kind::Length, "Length"),
     (schedule::Kind::Area, "Area"),
+    (schedule::Kind::Volume, msg!("Volume")),
     (schedule::Kind::YesNo, "Yes/No"),
 ];
 
@@ -2973,6 +3067,9 @@ fn filter_value(kind: schedule::Kind, typed: &str, units: Units) -> Result<Value
         // Typed as the schedule shows it; kept in m².
         schedule::Kind::Area => {
             number(typed).map(|x| json!(x / units.area(1e6).0)).ok_or_else(|| tf("`{}` is not a number", &[typed.trim()]))
+        }
+        schedule::Kind::Volume => {
+            number(typed).map(|x| json!(x / units.volume(1e9).0)).ok_or_else(|| tf("`{}` is not a number", &[typed.trim()]))
         }
         _ => number(typed).map(|x| json!(x)).ok_or_else(|| tf("`{}` is not a number", &[typed.trim()])),
     }
@@ -3271,7 +3368,7 @@ impl BimApp {
                                     change = Some(json!({"fields": fields}));
                                 }
                                 ui.end_row();
-                                if matches!(kind, schedule::Kind::Number | schedule::Kind::Length | schedule::Kind::Area) {
+                                if matches!(kind, schedule::Kind::Number | schedule::Kind::Length | schedule::Kind::Area | schedule::Kind::Volume) {
                                     let l = ui.label(t("Calculate totals"));
                                     let mut on = fields[i].total;
                                     let r = ui.checkbox(&mut on, "");

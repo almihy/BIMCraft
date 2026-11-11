@@ -318,7 +318,7 @@ pub(super) fn property_line(s: &mut Session, p: &Value) -> R {
 /// The floor type `name`, made `thickness` thick when the project hasn't one of that name.
 fn floor_type(s: &mut Session, name: &str, thickness: f64) {
     if !s.model.types.floor.contains_key(name) {
-        s.model_mut().types.floor.insert(name.into(), FloorType { thickness, layers: Vec::new() });
+        s.model_mut().types.floor.insert(name.into(), FloorType { thickness, layers: Vec::new(), identity: Default::default() });
     }
 }
 

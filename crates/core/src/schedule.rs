@@ -23,7 +23,7 @@ use crate::rooms::Rooms;
 use crate::units::Units;
 
 /// What a field holds, and so how a schedule shows it and a formula reads it: text, a number, a
-/// length (mm), an area (m²), or yes or no (1 or 0 to a formula).
+/// length (mm), an area (m²), a volume (m³), or yes or no (1 or 0 to a formula).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
@@ -32,6 +32,7 @@ pub enum Kind {
     Number,
     Length,
     Area,
+    Volume,
     YesNo,
 }
 
@@ -171,6 +172,8 @@ enum From {
     Count,
     /// A yes or no in the element's JSON under a key (no where it has none).
     Flag(&'static str),
+    /// A number in the element's JSON under a key; none (not 0) where it has none: a type's cost.
+    Opt(&'static str),
     /// A value among the element's parameters, under the field's own name (its phases, its design option).
     Param,
     /// How a door or a window opens, in the project's language.
@@ -210,7 +213,39 @@ const DESIGN_OPTION: Own = ("Design Option", Kind::Text, From::Param);
 /// The room a component stands in (`room_number`, `room_name` in its JSON), as Revit's Room: Number and Room: Name.
 const ROOM_NUMBER: Own = (msg!("Room Number"), Kind::Text, From::Key("room_number"));
 const ROOM_NAME: Own = (msg!("Room Name"), Kind::Text, From::Key("room_name"));
-const VOLUME: Own = (msg!("Volume"), Kind::Number, From::Key("volume_m3"));
+const VOLUME: Own = (msg!("Volume"), Kind::Volume, From::Key("volume_m3"));
+/// A roof's area is its surface's: its plan area stretched by its slope, as Revit's.
+const AREA_SURFACE: Own = (msg!("Area"), Kind::Area, From::Key("surface_area_m2"));
+const PERIMETER: Own = (msg!("Perimeter"), Kind::Length, From::Metres("perimeter_m"));
+
+/// A type's identity data, as Revit's Identity Data group in Type Properties: the fields of every category whose elements
+/// are of a type, and of a multi-category schedule. They are not among a schedule's first fields unless it chooses them.
+const IDENTITY: &[Own] = &[
+    ("Type Mark", Kind::Text, From::Key("type_mark")),
+    ("Description", Kind::Text, From::Key("description")),
+    ("Manufacturer", Kind::Text, From::Key("manufacturer")),
+    ("Model", Kind::Text, From::Key("model")),
+    ("Fire Rating", Kind::Text, From::Key("fire_rating")),
+    ("Cost", Kind::Number, From::Opt("cost")),
+    ("Keynote", Kind::Text, From::Key("keynote")),
+    ("Assembly Code", Kind::Text, From::Key("assembly_code")),
+    ("URL", Kind::Text, From::Key("url")),
+    ("Type Comments", Kind::Text, From::Key("type_comments")),
+];
+
+/// The identity data fields category `cat` has: those of a category whose elements are of a type (a wall's, a door's, a
+/// beam's, a family component's), and of a multi-category schedule; none for the others.
+fn identity(cat: &str) -> &'static [Own] {
+    let typed = cat == MULTI
+        || matches!(cat, "wall" | "floor" | "roof" | "ceiling" | "door" | "window" | "column" | "structuralcolumn" | "footing" | "railing" | "component")
+        || crate::model::RUN_CATEGORIES.contains(&cat);
+    if typed { IDENTITY } else { &[] }
+}
+
+/// Every field of category `cat` that is its own: its table's, then its identity data.
+fn all_own(cat: &str) -> impl Iterator<Item = &'static Own> {
+    own(cat).1.iter().chain(identity(cat))
+}
 
 /// A multi-category schedule's category: a row for each element of the categories it lists (`Schedule::categories`),
 /// or of every built one (`built`) where it lists none.
@@ -282,16 +317,18 @@ const OWN: &[(&str, usize, &[Own])] = &[
             DESIGN_OPTION,
         ],
     ),
-    ("wall", 6, &[ID, TYPE, LEVEL, LENGTH, HEIGHT, THICKNESS, COUNT, PHASE_CREATED, PHASE_DEMOLISHED, DESIGN_OPTION]),
+    ("wall", 8, &[ID, TYPE, LEVEL, LENGTH, HEIGHT, THICKNESS, AREA, VOLUME, COUNT, PHASE_CREATED, PHASE_DEMOLISHED, DESIGN_OPTION]),
     (
         "floor",
-        5,
+        6,
         &[
             ID,
             TYPE,
             LEVEL,
             AREA,
             THICKNESS,
+            VOLUME,
+            PERIMETER,
             OFFSET,
             COUNT,
             (ui_msg!("Structural"), Kind::YesNo, From::Flag("structural")),
@@ -300,7 +337,7 @@ const OWN: &[(&str, usize, &[Own])] = &[
             DESIGN_OPTION,
         ],
     ),
-    ("ceiling", 5, &[ID, TYPE, LEVEL, OFFSET, AREA, THICKNESS, COUNT, PHASE_CREATED, PHASE_DEMOLISHED, DESIGN_OPTION]),
+    ("ceiling", 5, &[ID, TYPE, LEVEL, OFFSET, AREA, THICKNESS, PERIMETER, VOLUME, COUNT, PHASE_CREATED, PHASE_DEMOLISHED, DESIGN_OPTION]),
     (
         "roof",
         4,
@@ -311,6 +348,9 @@ const OWN: &[(&str, usize, &[Own])] = &[
             (msg!("Slope"), Kind::Number, From::Key("slope")),
             (msg!("Plan Area"), Kind::Area, From::Key("area_m2")),
             OFFSET,
+            AREA_SURFACE,
+            VOLUME,
+            PERIMETER,
             COUNT,
             PHASE_CREATED,
             PHASE_DEMOLISHED,
@@ -522,7 +562,7 @@ const OWN: &[(&str, usize, &[Own])] = &[
     (
         "toposolid",
         5,
-        &[ID, TYPE, LEVEL, AREA, THICKNESS, ("Volume", Kind::Number, From::Key("volume_m3")), COUNT, PHASE_CREATED, PHASE_DEMOLISHED],
+        &[ID, TYPE, LEVEL, AREA, THICKNESS, VOLUME, COUNT, PHASE_CREATED, PHASE_DEMOLISHED],
     ),
     (
         "buildingpad",
@@ -573,13 +613,13 @@ fn own(cat: &str) -> (usize, &'static [Own]) {
 
 /// Whether `name` is one of category `cat`'s own fields.
 pub fn own_field(cat: &str, name: &str) -> bool {
-    own(cat).1.iter().any(|(n, _, _)| *n == name)
+    all_own(cat).any(|(n, _, _)| *n == name)
 }
 
 /// Category `cat`'s fields, each once, with what it holds: its own, then the project parameters
 /// for it and, for components, the parameters of the model's families.
 pub fn fields(m: &Model, cat: &str) -> Vec<(String, Kind)> {
-    let mut out: Vec<(String, Kind)> = own(cat).1.iter().map(|(n, k, _)| (n.to_string(), *k)).collect();
+    let mut out: Vec<(String, Kind)> = all_own(cat).map(|(n, k, _)| (n.to_string(), *k)).collect();
     let mut seen: BTreeSet<String> = out.iter().map(|(n, _)| n.clone()).collect();
     let mut add = |n: &str, k: Kind| {
         if seen.insert(n.to_string()) {
@@ -651,6 +691,7 @@ fn holding(k: Kind) -> &'static str {
         Kind::Number => "a number",
         Kind::Length => "a length",
         Kind::Area => "an area",
+        Kind::Volume => "a volume",
         Kind::YesNo => "yes or no",
     }
 }
@@ -730,7 +771,7 @@ pub fn check(m: &Model, sc: &Schedule) -> Result<(), String> {
         follow(name, &formulas, &kinds, &unknown, &mut Vec::new(), &mut depths)?;
     }
     if let Some(f) =
-        fields.iter().find(|f| f.total && !matches!(kinds.get(f.name.as_str()), Some(Kind::Number | Kind::Length | Kind::Area)))
+        fields.iter().find(|f| f.total && !matches!(kinds.get(f.name.as_str()), Some(Kind::Number | Kind::Length | Kind::Area | Kind::Volume)))
     {
         let k = kinds.get(f.name.as_str()).copied().unwrap_or_default();
         return Err(format!("field `{}` holds {}; only numbers, lengths and areas total", f.name, holding(k)));
@@ -765,13 +806,14 @@ fn check_filter(flt: &Filter, kinds: &BTreeMap<&str, Kind>, unknown: &dyn Fn(&st
         },
         (_, Kind::Text, Value::String(s)) => s.chars().count() <= MAX_TEXT,
         (_, Kind::YesNo, Value::Bool(_)) => true,
-        (_, Kind::Number | Kind::Length | Kind::Area, v) => v.as_f64().is_some_and(|x| x.is_finite() && x.abs() <= MAX_COORD),
+        (_, Kind::Number | Kind::Length | Kind::Area | Kind::Volume, v) => v.as_f64().is_some_and(|x| x.is_finite() && x.abs() <= MAX_COORD),
         _ => false,
     };
     if !fits {
         let unit = match k {
             Kind::Length => " (mm)",
             Kind::Area => " (m²)",
+            Kind::Volume => " (m³)",
             _ => "",
         };
         return Err(format!("{who}: it compares {}{unit}, not {}", holding(k), flt.value));
@@ -909,7 +951,7 @@ impl Row<'_> {
     /// One of category `cat`'s fields, of its element.
     fn field_of(&self, cat: &str, name: &str) -> Value {
         let (m, j) = (self.m, &self.json);
-        if let Some((_, kind, from)) = own(cat).1.iter().find(|(n, _, _)| *n == name) {
+        if let Some((_, kind, from)) = all_own(cat).find(|(n, _, _)| *n == name) {
             let number = |v: Option<&Value>| v.and_then(Value::as_f64).unwrap_or(0.0);
             return match *from {
                 From::Key(k) if matches!(kind, Kind::Text) => match j.get(k) {
@@ -933,6 +975,7 @@ impl Row<'_> {
                     serde_json::json!(fine(path.windows(2).map(|w| w[0].dist(w[1])).sum::<f64>()))
                 }
                 From::Count => serde_json::json!(1.0),
+                From::Opt(k) => j.get(k).filter(|v| v.is_number()).cloned().unwrap_or(Value::Null),
                 From::Flag(k) => Value::Bool(j.get(k).and_then(Value::as_bool).unwrap_or(false)),
                 From::Operation => j
                     .get("operation")
@@ -975,8 +1018,7 @@ impl Row<'_> {
     /// Field `name`, holding `kind`, as its element's own category has it; else an area worked out from its sizes.
     fn shared(&self, name: &str, kind: Kind) -> Value {
         let cat = self.e.category();
-        let name = if (cat, name) == ("roof", "Area") { "Plan Area" } else { name };
-        if own(cat).1.iter().any(|(n, k, _)| *n == name && *k == kind) {
+        if all_own(cat).any(|(n, k, _)| *n == name && *k == kind) {
             return self.field_of(cat, name);
         }
         let by = |a: &str, b: &str| match (self.field_of(cat, a).as_f64(), self.field_of(cat, b).as_f64()) {
@@ -1207,10 +1249,11 @@ fn keeps(f: &Filter, v: &Value, kind: Option<Kind>, units: Units) -> bool {
     }
 }
 
-/// A column's heading as a schedule shows it in `units`: an area's says m² or ft².
+/// A column's heading as a schedule shows it in `units`: an area's says m² or ft², a volume's m³ or ft³.
 pub fn heading(units: Units, column: &Column) -> String {
     match column.kind {
         Kind::Area => format!(ui_msg!("{} ({})"), column.heading, units.area(0.0).1),
+        Kind::Volume => format!(ui_msg!("{} ({})"), column.heading, units.volume(0.0).1),
         _ => column.heading.clone(),
     }
 }
@@ -1223,6 +1266,7 @@ pub fn shown(units: Units, kind: Kind, v: &Value) -> String {
         (Value::Bool(b), _) => (if *b { msg!("Yes") } else { msg!("No") }).into(),
         (v, Kind::Length) if v.is_number() => units.length(v.as_f64().unwrap_or(0.0)),
         (v, Kind::Area) if v.is_number() => format!("{:.2}", units.area(v.as_f64().unwrap_or(0.0) * 1e6).0),
+        (v, Kind::Volume) if v.is_number() => format!("{:.2}", units.volume(v.as_f64().unwrap_or(0.0) * 1e9).0),
         (Value::Number(x), _) => format!("{}", (x.as_f64().unwrap_or(0.0) * 100.0).round() / 100.0 + 0.0),
         (v, _) => cell(v),
     }

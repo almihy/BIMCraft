@@ -264,7 +264,7 @@ mod tests {
         let level = m.guid(100000);
         let id = 200000;
         for round in [false, true] {
-            m.types.column.insert("Probe".into(), ColumnType { width: 600.0, depth: 250.0, round });
+            m.types.column.insert("Probe".into(), ColumnType { width: 600.0, depth: 250.0, round, identity: Default::default() });
             for angle in [0.0, 17.0, 90.0, -225.0] {
                 for at in [P2(0.0, 0.0), P2(1e9, -1e9)] {
                     m.elements.insert(
@@ -288,7 +288,7 @@ mod tests {
                 .runs
                 .entry("pipe".into())
                 .or_default()
-                .insert("Probe".into(), RunType { width: 400.0, depth: 180.0, round, material: String::new() });
+                .insert("Probe".into(), RunType { width: 400.0, depth: 180.0, round, material: String::new(), identity: Default::default() });
             for end in [P2(1000.0, 0.0), P2(-1000.0, 370.0), P2(0.0, 0.0), P2(0.5, 0.0), P2(1.01, 0.0)] {
                 for end_offset in [Some(10000.0), Some(-400.0), None] {
                     for justify in [Justify::Centre, Justify::Top, Justify::Bottom] {

@@ -1105,6 +1105,55 @@ fn the_type_selector_and_edit_type_change_types_as_in_revit() {
 }
 
 #[test]
+fn edit_type_has_an_identity_data_group_that_sets_the_types_type_mark_fire_rating_and_cost() {
+    let mut h = app(BOX);
+    let wall = ids(&h, "wall")[0];
+    click(&mut h, P2(4000.0, 0.0));
+    assert_eq!(h.state().selection, [wall]);
+    let name = h.state().session.model.types.wall.keys().next().cloned().unwrap();
+    press(&mut h, "Edit Type");
+    // The Construction group's layers take the room: fold it, as Revit's groups fold, to see the group below.
+    press(&mut h, "Construction");
+    for label in
+        ["Identity Data", "Type Mark", "Description", "Manufacturer", "Model", "Fire Rating", "Cost", "Keynote", "Assembly Code", "URL", "Type Comments"]
+    {
+        assert!(h.query_by_label(label).is_some(), "{label} is in Edit Type's Identity Data");
+    }
+    // A cost that isn't a number stops Apply, and nothing is set.
+    type_into(&mut h, "Type Mark", "W1");
+    type_into(&mut h, "Cost", "a lot");
+    press(&mut h, "Apply");
+    assert!(h.state().session.model.types.wall[&name].identity.is_empty(), "nothing applied");
+    assert!(h.query_by_label_contains("is not a number").is_some(), "it says why");
+    type_into(&mut h, "Cost", "120.5");
+    type_into(&mut h, "Fire Rating", "EI 60");
+    type_into(&mut h, "Manufacturer", "Acme");
+    press(&mut h, "OK");
+    let identity = h.state().session.model.types.wall[&name].identity.clone();
+    assert_eq!(
+        (identity.type_mark.as_str(), identity.fire_rating.as_str(), identity.manufacturer.as_str(), identity.cost),
+        ("W1", "EI 60", "Acme", Some(120.5))
+    );
+    // The wall's own fields read it, as a schedule and a tag do.
+    assert_eq!(field(&h, wall, "type_mark"), json!("W1"));
+    // Open again it shows what is held, and clearing a field clears it.
+    press(&mut h, "Edit Type");
+    press(&mut h, "Construction");
+    type_into(&mut h, "Fire Rating", "");
+    press(&mut h, "OK");
+    let identity = &h.state().session.model.types.wall[&name].identity;
+    assert!(identity.fire_rating.is_empty() && identity.type_mark == "W1", "{identity:?}");
+    // A duplicate has it too.
+    press(&mut h, "Edit Type");
+    press(&mut h, "Duplicate…");
+    type_into(&mut h, "New type", "Party - 250mm");
+    press(&mut h, "Create");
+    press(&mut h, "OK");
+    let copy = &h.state().session.model.types.wall["Party - 250mm"].identity;
+    assert!(copy.type_mark == "W1" && copy.manufacturer == "Acme", "{copy:?}");
+}
+
+#[test]
 fn the_options_bar_sets_the_wall_height_and_chain() {
     let mut h = app("");
     tool(&mut h, "Wall");
