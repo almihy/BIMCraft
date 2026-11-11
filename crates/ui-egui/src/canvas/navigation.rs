@@ -447,8 +447,7 @@ mod tests {
 
     #[test]
     fn the_setting_overrides_what_the_gesture_was_judged_to_be() {
-        let mut nav = Nav::default();
-        nav.hand = Hand::Mouse;
+        let mut nav = Nav { hand: Hand::Mouse, ..Nav::default() };
         assert_eq!((nav.wheel, nav.hand()), (Wheel::Auto, Hand::Mouse));
         nav.wheel = Wheel::Pan;
         assert_eq!(nav.hand(), Hand::Trackpad);
