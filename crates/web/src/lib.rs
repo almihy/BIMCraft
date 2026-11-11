@@ -138,7 +138,7 @@ impl Engine {
     }
 
     /// Takes in another copy's changes (`{"elements": {guid: json | null}, "project": {key: json | null}, "complete"?}`):
-    /// the model checked, and what would break it left out. Replies `{"taken": n, "refused": [{what, error}]}`.
+    /// the model checked, and what would break it left out. Replies `{"taken": n, "refused": [{what, error}], "fixes": {key: json text | null}}`: the `fixes` are what this copy tells the room that it did not hear (see `Merged::fixes`).
     pub fn apply_changes(&mut self, changes: &str) -> Result<String, JsError> {
         let c = bimcraft_core::sync::Changes::read(changes).map_err(err)?;
         let merged = self.s.merge(&c, &Default::default()).map_err(err)?;
