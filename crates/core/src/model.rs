@@ -3136,12 +3136,16 @@ impl Model {
         m.types.wall.insert("Exterior - 300mm".into(), WallType { thickness: 300.0, layers, identity: Default::default() });
         m.types.floor.insert("Generic - 200mm".into(), FloorType { thickness: 200.0, layers: Vec::new(), identity: Default::default() });
         for (n, w) in [("Single 900 x 2100", 900.0), ("Single 800 x 2100", 800.0)] {
-            m.types.door.insert(n.into(), OpeningType { width: w, height: 2100.0, sill: 0.0, operation: None, identity: Default::default() });
+            m.types
+                .door
+                .insert(n.into(), OpeningType { width: w, height: 2100.0, sill: 0.0, operation: None, identity: Default::default() });
         }
         for (n, w, h, s) in [("Fixed 1200 x 1500", 1200.0, 1500.0, 900.0), ("Fixed 600 x 900", 600.0, 900.0, 1100.0)] {
             m.types.window.insert(n.into(), OpeningType { width: w, height: h, sill: s, operation: None, identity: Default::default() });
         }
-        m.types.column.insert("Rectangular 400 x 400".into(), ColumnType { width: 400.0, depth: 400.0, round: false, identity: Default::default() });
+        m.types
+            .column
+            .insert("Rectangular 400 x 400".into(), ColumnType { width: 400.0, depth: 400.0, round: false, identity: Default::default() });
         m.types.column.insert("Round 300".into(), ColumnType { width: 300.0, depth: 300.0, round: true, identity: Default::default() });
         // The structure's: concrete columns, footings, beams and strip footings.
         for (n, w, d, round) in [
@@ -3154,7 +3158,13 @@ impl Model {
         for (n, w) in [("Footing 1200 x 1200", 1200.0), ("Footing 1500 x 1500", 1500.0)] {
             m.types.footing.insert(n.into(), ColumnType { width: w, depth: w, round: false, identity: Default::default() });
         }
-        let run = |width, depth, round, material: &str| RunType { width, depth, round, material: language.word(material).into(), identity: Default::default() };
+        let run = |width, depth, round, material: &str| RunType {
+            width,
+            depth,
+            round,
+            material: language.word(material).into(),
+            identity: Default::default(),
+        };
         let beams = [
             ("Beam 200 x 500", run(200.0, 500.0, false, "Concrete")),
             ("Beam 150 x 400", run(150.0, 400.0, false, "Concrete")),
@@ -3236,8 +3246,13 @@ impl Model {
         ];
         m.types.runs.insert("wire".into(), wires.into_iter().map(|(n, t)| (n.to_string(), t)).collect());
         m.types.roof.insert("Generic - 300mm".into(), RoofType { thickness: 300.0, layers: Vec::new(), identity: Default::default() });
-        m.types.ceiling.insert("Generic - 20mm".into(), CeilingType { thickness: 20.0, grid: 0.0, layers: Vec::new(), identity: Default::default() });
-        m.types.ceiling.insert("Tile 600 x 600".into(), CeilingType { thickness: 20.0, grid: 600.0, layers: Vec::new(), identity: Default::default() });
+        m.types
+            .ceiling
+            .insert("Generic - 20mm".into(), CeilingType { thickness: 20.0, grid: 0.0, layers: Vec::new(), identity: Default::default() });
+        m.types.ceiling.insert(
+            "Tile 600 x 600".into(),
+            CeilingType { thickness: 20.0, grid: 600.0, layers: Vec::new(), identity: Default::default() },
+        );
         m.types.railing.insert("Railing - 1000mm".into(), RailingType { height: 1000.0, spacing: 120.0, identity: Default::default() });
         let level = language.word("Level");
         m.insert(Element::Level(Level::new(format!("{level} 1"), 0.0)));

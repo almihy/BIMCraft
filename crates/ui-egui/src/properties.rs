@@ -3368,7 +3368,10 @@ impl BimApp {
                                     change = Some(json!({"fields": fields}));
                                 }
                                 ui.end_row();
-                                if matches!(kind, schedule::Kind::Number | schedule::Kind::Length | schedule::Kind::Area | schedule::Kind::Volume) {
+                                if matches!(
+                                    kind,
+                                    schedule::Kind::Number | schedule::Kind::Length | schedule::Kind::Area | schedule::Kind::Volume
+                                ) {
                                     let l = ui.label(t("Calculate totals"));
                                     let mut on = fields[i].total;
                                     let r = ui.checkbox(&mut on, "");

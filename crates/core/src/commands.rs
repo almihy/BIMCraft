@@ -11360,7 +11360,10 @@ fn family(s: &mut Session, p: &Value) -> R {
     // Each type's identity data (Type Mark, Manufacturer…), as `type` takes it for a category's types: `{type: {type_mark?, …}}`.
     if let Some(v) = p.get("identity").filter(|v| !v.is_null()) {
         let Value::Object(per) = v else {
-            return Err(bad(c, "`identity` is {type: {type_mark?, description?, manufacturer?, model?, fire_rating?, cost?, keynote?, assembly_code?, url?, type_comments?}}"));
+            return Err(bad(
+                c,
+                "`identity` is {type: {type_mark?, description?, manufacturer?, model?, fire_rating?, cost?, keynote?, assembly_code?, url?, type_comments?}}",
+            ));
         };
         for (ty, data) in per {
             if !f.types.contains_key(ty) {

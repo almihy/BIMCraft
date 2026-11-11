@@ -2564,7 +2564,12 @@ pub(crate) fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, S
         let same =
             |k: &RunType| k.round == found.round && (k.width - w).abs() < 0.05 && (k.depth - d).abs() < 0.05 && k.material == material;
         let types = m.types.runs.entry(category.to_string()).or_default();
-        let type_name = kind(types, &base, same, RunType { width: w, depth: d, round: found.round, material: material.clone(), identity: Default::default() });
+        let type_name = kind(
+            types,
+            &base,
+            same,
+            RunType { width: w, depth: d, round: found.round, material: material.clone(), identity: Default::default() },
+        );
         let height = |z: f64| ((z - elevation(level)) * 1000.0).round() / 1000.0 + 0.0;
         // The body is the centre line; the justification BIMCraft wrote puts the heights back on the line they were typed at.
         let justify = run_props.get(&id).and_then(|(j, _)| *j).unwrap_or(Justify::Centre);
@@ -2947,7 +2952,12 @@ pub(crate) fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, S
                 }
                 let base = named.clone().unwrap_or_else(|| format!("Imported - {}mm", num(h)));
                 Railing {
-                    type_name: kind(&mut m.types.railing, &base, |t| (t.height - h).abs() < 0.5, RailingType { height: h, spacing: 0.0, identity: Default::default() }),
+                    type_name: kind(
+                        &mut m.types.railing,
+                        &base,
+                        |t| (t.height - h).abs() < 0.5,
+                        RailingType { height: h, spacing: 0.0, identity: Default::default() },
+                    ),
                     ..on(side)
                 }
             }
@@ -2960,7 +2970,12 @@ pub(crate) fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, S
                     continue;
                 }
                 let base = named.clone().unwrap_or_else(|| format!("Imported - {}mm", num(h)));
-                let type_name = kind(&mut m.types.railing, &base, |t| (t.height - h).abs() < 0.5, RailingType { height: h, spacing: 0.0, identity: Default::default() });
+                let type_name = kind(
+                    &mut m.types.railing,
+                    &base,
+                    |t| (t.height - h).abs() < 0.5,
+                    RailingType { height: h, spacing: 0.0, identity: Default::default() },
+                );
                 let level = level_for(id, first[2] - h);
                 let path = axis.iter().map(|p| micron(r.flat(*p))).collect();
                 let base_offset = ((first[2] - h - elevation(level)) * 1000.0).round() / 1000.0 + 0.0;

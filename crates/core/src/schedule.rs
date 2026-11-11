@@ -238,7 +238,10 @@ const IDENTITY: &[Own] = &[
 /// beam's, a family component's), and of a multi-category schedule; none for the others.
 fn identity(cat: &str) -> &'static [Own] {
     let typed = cat == MULTI
-        || matches!(cat, "wall" | "floor" | "roof" | "ceiling" | "door" | "window" | "column" | "structuralcolumn" | "footing" | "railing" | "component")
+        || matches!(
+            cat,
+            "wall" | "floor" | "roof" | "ceiling" | "door" | "window" | "column" | "structuralcolumn" | "footing" | "railing" | "component"
+        )
         || crate::model::RUN_CATEGORIES.contains(&cat);
     if typed { IDENTITY } else { &[] }
 }
@@ -555,11 +558,7 @@ const OWN: &[(&str, usize, &[Own])] = &[
         ],
     ),
     ("propertyline", 4, &[ID, NAME, LEVEL, AREA, ("Perimeter", Kind::Length, From::Metres("perimeter_m")), COUNT]),
-    (
-        "toposolid",
-        5,
-        &[ID, TYPE, LEVEL, AREA, THICKNESS, VOLUME, COUNT, PHASE_CREATED, PHASE_DEMOLISHED],
-    ),
+    ("toposolid", 5, &[ID, TYPE, LEVEL, AREA, THICKNESS, VOLUME, COUNT, PHASE_CREATED, PHASE_DEMOLISHED]),
     (
         "buildingpad",
         5,
@@ -777,8 +776,9 @@ pub fn check(m: &Model, sc: &Schedule) -> Result<(), String> {
     for name in formulas.keys() {
         follow(name, &formulas, &kinds, &unknown, &mut Vec::new(), &mut depths)?;
     }
-    if let Some(f) =
-        fields.iter().find(|f| f.total && !matches!(kinds.get(f.name.as_str()), Some(Kind::Number | Kind::Length | Kind::Area | Kind::Volume)))
+    if let Some(f) = fields
+        .iter()
+        .find(|f| f.total && !matches!(kinds.get(f.name.as_str()), Some(Kind::Number | Kind::Length | Kind::Area | Kind::Volume)))
     {
         let k = kinds.get(f.name.as_str()).copied().unwrap_or_default();
         return Err(format!("field `{}` holds {}; only numbers, lengths, areas and volumes total", f.name, holding(k)));
@@ -813,7 +813,9 @@ fn check_filter(flt: &Filter, kinds: &BTreeMap<&str, Kind>, unknown: &dyn Fn(&st
         },
         (_, Kind::Text, Value::String(s)) => s.chars().count() <= MAX_TEXT,
         (_, Kind::YesNo, Value::Bool(_)) => true,
-        (_, Kind::Number | Kind::Length | Kind::Area | Kind::Volume, v) => v.as_f64().is_some_and(|x| x.is_finite() && x.abs() <= MAX_COORD),
+        (_, Kind::Number | Kind::Length | Kind::Area | Kind::Volume, v) => {
+            v.as_f64().is_some_and(|x| x.is_finite() && x.abs() <= MAX_COORD)
+        }
         _ => false,
     };
     if !fits {

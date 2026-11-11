@@ -97,9 +97,9 @@ pub mod pdf;
 pub mod pen;
 pub mod phasing;
 pub mod plumbing;
+pub mod quantities;
 #[cfg(test)]
 mod read_only_tests;
-pub mod quantities;
 pub mod rebar;
 #[cfg(test)]
 mod rebar_tests;

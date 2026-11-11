@@ -284,11 +284,10 @@ mod tests {
                     encloses_solids(&m, id);
                 }
             }
-            m.types
-                .runs
-                .entry("pipe".into())
-                .or_default()
-                .insert("Probe".into(), RunType { width: 400.0, depth: 180.0, round, material: String::new(), identity: Default::default() });
+            m.types.runs.entry("pipe".into()).or_default().insert(
+                "Probe".into(),
+                RunType { width: 400.0, depth: 180.0, round, material: String::new(), identity: Default::default() },
+            );
             for end in [P2(1000.0, 0.0), P2(-1000.0, 370.0), P2(0.0, 0.0), P2(0.5, 0.0), P2(1.01, 0.0)] {
                 for end_offset in [Some(10000.0), Some(-400.0), None] {
                     for justify in [Justify::Centre, Justify::Top, Justify::Bottom] {

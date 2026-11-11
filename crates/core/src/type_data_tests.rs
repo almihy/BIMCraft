@@ -125,17 +125,31 @@ fn a_types_elements_read_its_identity_data_as_schedule_fields_and_in_tags() {
     assert_eq!((j["type_mark"].as_str(), j["fire_rating"].as_str(), j["cost"].as_f64()), (Some("D1"), Some("EI 30"), Some(310.0)));
     assert!(crate::commands::element_json(&s.model, window).get("type_mark").is_none());
     // Fields of a door schedule, and of a multi-category one.
-    let r = run(&mut s, "schedule", json!({"name": "Door Schedule", "fields": ["Mark", "Type Mark", "Fire Rating", {"name": "Cost", "total": true}]}));
+    let r = run(
+        &mut s,
+        "schedule",
+        json!({"name": "Door Schedule", "fields": ["Mark", "Type Mark", "Fire Rating", {"name": "Cost", "total": true}]}),
+    );
     assert_eq!(r["columns"][1], "Type Mark", "{r}");
     assert_eq!(r["rows"][0][1], "D1");
     assert_eq!(r["rows"][0][2], "EI 30");
     assert_eq!(r["totals"][3], 310.0);
-    let r = run(&mut s, "schedule", json!({"name": "Everything", "category": "multicategory", "categories": ["wall", "door"], "fields": ["Category", "Type Mark", "Manufacturer"]}));
+    let r = run(
+        &mut s,
+        "schedule",
+        json!({"name": "Everything", "category": "multicategory", "categories": ["wall", "door"], "fields": ["Category", "Type Mark", "Manufacturer"]}),
+    );
     let rows: Vec<(String, String, String)> = r["rows"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|row| (row[0].as_str().unwrap_or_default().into(), row[1].as_str().unwrap_or_default().into(), row[2].as_str().unwrap_or_default().into()))
+        .map(|row| {
+            (
+                row[0].as_str().unwrap_or_default().into(),
+                row[1].as_str().unwrap_or_default().into(),
+                row[2].as_str().unwrap_or_default().into(),
+            )
+        })
         .collect();
     assert!(rows.contains(&("door".into(), "D1".into(), String::new())), "{rows:?}");
     assert!(rows.contains(&("wall".into(), "W1".into(), "Acme".into())), "{rows:?}");
@@ -144,13 +158,20 @@ fn a_types_elements_read_its_identity_data_as_schedule_fields_and_in_tags() {
     let t = tag["ids"][0].as_u64().unwrap_or_default();
     assert_eq!(crate::commands::element_json(&s.model, t)["text"], "D1", "{tag}");
     // Filtering and sorting by one.
-    let r = run(&mut s, "schedule", json!({"name": "Walls", "category": "wall", "fields": ["Id", "Type Mark"], "filters": [{"field": "Type Mark", "op": "equals", "value": "W1"}]}));
+    let r = run(
+        &mut s,
+        "schedule",
+        json!({"name": "Walls", "category": "wall", "fields": ["Id", "Type Mark"], "filters": [{"field": "Type Mark", "op": "equals", "value": "W1"}]}),
+    );
     assert_eq!(r["rows"].as_array().map(Vec::len), Some(walls.len()));
     // A project parameter of the same name takes a field's place in a schedule, as it did before the field.
     run(&mut s, "parameter", json!({"name": "Fire Rating", "categories": ["wall"], "kind": "number"}));
     run(&mut s, "modify", json!({"id": walls[0], "params": {"Fire Rating": 60}}));
     let r = run(&mut s, "schedule", json!({"name": "Walls again", "category": "wall", "fields": ["Id", "Fire Rating"]}));
-    assert!(r["rows"].as_array().unwrap().iter().any(|row| row[0].as_f64() == Some(walls[0] as f64) && row[1].as_f64() == Some(60.0)), "{r}");
+    assert!(
+        r["rows"].as_array().unwrap().iter().any(|row| row[0].as_f64() == Some(walls[0] as f64) && row[1].as_f64() == Some(60.0)),
+        "{r}"
+    );
 }
 
 #[test]
@@ -207,8 +228,12 @@ fn a_wall_schedule_has_area_and_volume_less_its_openings() {
     let rows = r["rows"].as_array().unwrap();
     assert_eq!(rows.len(), 4);
     // Rows come in the walls' order: the bottom wall holds the door and the window; the others, nothing.
-    let by_id: Vec<(f64, f64)> = rows.iter().map(|row| (row[a].as_f64().unwrap_or_default(), row[v].as_f64().unwrap_or_default())).collect();
-    assert!(by_id.iter().any(|&(area, volume)| (area - net).abs() < 0.006 && (volume - net * thick / 1e3).abs() < 0.006), "{by_id:?} vs {net}");
+    let by_id: Vec<(f64, f64)> =
+        rows.iter().map(|row| (row[a].as_f64().unwrap_or_default(), row[v].as_f64().unwrap_or_default())).collect();
+    assert!(
+        by_id.iter().any(|&(area, volume)| (area - net).abs() < 0.006 && (volume - net * thick / 1e3).abs() < 0.006),
+        "{by_id:?} vs {net}"
+    );
     let full = 6000.0 * height / 1e6;
     assert!(by_id.iter().any(|&(area, _)| (area - full).abs() < 0.006), "{by_id:?}");
     // One quantity function: the schedule's cells are the IFC's numbers, to the schedule's rounding.

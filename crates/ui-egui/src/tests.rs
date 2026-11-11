@@ -1114,9 +1114,19 @@ fn edit_type_has_an_identity_data_group_that_sets_the_types_type_mark_fire_ratin
     press(&mut h, "Edit Type");
     // The Construction group's layers take the room: fold it, as Revit's groups fold, to see the group below.
     press(&mut h, "Construction");
-    for label in
-        ["Identity Data", "Type Mark", "Description", "Manufacturer", "Model", "Fire Rating", "Cost", "Keynote", "Assembly Code", "URL", "Type Comments"]
-    {
+    for label in [
+        "Identity Data",
+        "Type Mark",
+        "Description",
+        "Manufacturer",
+        "Model",
+        "Fire Rating",
+        "Cost",
+        "Keynote",
+        "Assembly Code",
+        "URL",
+        "Type Comments",
+    ] {
         assert!(h.query_by_label(label).is_some(), "{label} is in Edit Type's Identity Data");
     }
     // A cost that isn't a number stops OK, and nothing is set.

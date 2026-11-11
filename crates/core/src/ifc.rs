@@ -754,7 +754,12 @@ fn member_quantities(width: f64, depth: f64, round: bool, length: f64) -> Vec<(&
 /// axis, its thickness and height, its side (length by height, m²) and that less the doors and windows in it (`holes`, as
 /// (width, height, sill), each cut to the wall's height), and both through its thickness (m³), its joins aside. A wall attached to
 /// a roof or a floor has no single height, so no `Height`; its sides and volumes are those of its pieces.
-fn wall_quantities(m: &Model, id: Id, wl: &crate::model::Wall, holes: &[crate::quantities::Hole]) -> Vec<(&'static str, &'static str, f64)> {
+fn wall_quantities(
+    m: &Model,
+    id: Id,
+    wl: &crate::model::Wall,
+    holes: &[crate::quantities::Hole],
+) -> Vec<(&'static str, &'static str, f64)> {
     let q = crate::quantities::wall(m, id, wl, holes);
     let mut values = vec![("Length", "LENGTH", q.length), ("Width", "LENGTH", q.width)];
     if let Some(height) = q.height {
@@ -976,7 +981,11 @@ pub fn export(m: &Model) -> String {
                         ("NetVolume", "VOLUME", q.net_volume / 1e9),
                     ]
                 } else {
-                    vec![("Width", "LENGTH", q.depth), ("GrossVolume", "VOLUME", q.gross_volume / 1e9), ("NetVolume", "VOLUME", q.net_volume / 1e9)]
+                    vec![
+                        ("Width", "LENGTH", q.depth),
+                        ("GrossVolume", "VOLUME", q.gross_volume / 1e9),
+                        ("NetVolume", "VOLUME", q.net_volume / 1e9),
+                    ]
                 };
                 w.quantities(ent, "Qto_SlabBaseQuantities", &values, id);
             }
@@ -997,11 +1006,8 @@ pub fn export(m: &Model) -> String {
                 w.typed("IFCCOVERINGTYPE", ".CEILING.", &c.type_name, ent);
                 hosts.insert(id, (ent, at, m.elevation(c.level)));
                 let q = crate::quantities::ceiling(m, c);
-                let values = [
-                    ("Width", "LENGTH", q.width),
-                    ("GrossArea", "AREA", q.gross_area / 1e6),
-                    ("NetArea", "AREA", q.net_area / 1e6),
-                ];
+                let values =
+                    [("Width", "LENGTH", q.width), ("GrossArea", "AREA", q.gross_area / 1e6), ("NetArea", "AREA", q.net_area / 1e6)];
                 w.quantities(ent, "Qto_CoveringBaseQuantities", &values, id);
             }
             Element::Room(r) => {
@@ -1770,7 +1776,13 @@ pub fn export(m: &Model) -> String {
         if !maker.is_empty() {
             w.define(ent, MAKER_SET, &maker, (MAKER, MAKER_DEFINES), id);
         }
-        for (k, v) in [("Description", &identity.description), ("Keynote", &identity.keynote), ("AssemblyCode", &identity.assembly_code), ("URL", &identity.url), ("TypeComments", &identity.type_comments)] {
+        for (k, v) in [
+            ("Description", &identity.description),
+            ("Keynote", &identity.keynote),
+            ("AssemblyCode", &identity.assembly_code),
+            ("URL", &identity.url),
+            ("TypeComments", &identity.type_comments),
+        ] {
             if !v.is_empty() {
                 rest.push(w.typed_text_property(k, "IFCTEXT", v));
             }
@@ -2953,17 +2965,26 @@ mod tests {
         // A wall's net side and volume, and a floor's net area and volume: the schedule's cells are the file's numbers.
         let q = quantities_of(&f, ifc_wall[0], "Qto_WallBaseQuantities");
         let j = json(walls[0]);
-        assert!(close(j["area_m2"].as_f64().unwrap(), q["NetSideArea"]) && close(j["volume_m3"].as_f64().unwrap(), q["NetVolume"]), "{j} {q:?}");
+        assert!(
+            close(j["area_m2"].as_f64().unwrap(), q["NetSideArea"]) && close(j["volume_m3"].as_f64().unwrap(), q["NetVolume"]),
+            "{j} {q:?}"
+        );
         let q = quantities_of(&f, ifc_floor, "Qto_SlabBaseQuantities");
         let j = json(floor);
-        assert!(close(j["area_m2"].as_f64().unwrap(), q["NetArea"]) && close(j["volume_m3"].as_f64().unwrap(), q["NetVolume"]), "{j} {q:?}");
+        assert!(
+            close(j["area_m2"].as_f64().unwrap(), q["NetArea"]) && close(j["volume_m3"].as_f64().unwrap(), q["NetVolume"]),
+            "{j} {q:?}"
+        );
         assert!(close(j["perimeter_m"].as_f64().unwrap() * 1000.0, q["Perimeter"]), "{j} {q:?}");
         let q = quantities_of(&f, of_kind(&f, "IFCCOVERING")[0], "Qto_CoveringBaseQuantities");
         let j = json(ceiling);
         assert!(close(j["area_m2"].as_f64().unwrap(), q["NetArea"]) && close(q["GrossArea"], 48.0), "{j} {q:?}");
         let q = quantities_of(&f, of_kind(&f, "IFCROOF")[0], "Qto_RoofBaseQuantities");
         let j = json(roof);
-        assert!(close(j["surface_area_m2"].as_f64().unwrap(), q["GrossArea"]) && close(j["area_m2"].as_f64().unwrap(), q["ProjectedArea"]), "{j} {q:?}");
+        assert!(
+            close(j["surface_area_m2"].as_f64().unwrap(), q["GrossArea"]) && close(j["area_m2"].as_f64().unwrap(), q["ProjectedArea"]),
+            "{j} {q:?}"
+        );
         assert!(q["GrossArea"] > q["ProjectedArea"], "{q:?}");
     }
 

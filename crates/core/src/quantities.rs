@@ -112,11 +112,8 @@ pub fn floor(m: &Model, f: &Floor) -> SlabQ {
     let level = m.floor_top(f).g == P2(0.0, 0.0) && f.shape.is_empty();
     let gross_area = geom::area(&f.boundary).abs();
     let net_area: f64 = m.floor_slabs(f).iter().map(|(face, rise)| plan_area(&m.less_shafts(face, *rise).0)).sum();
-    let gross_volume = if level {
-        gross_area * depth
-    } else {
-        m.shape_solid_over(f, &[]).map_or(gross_area * depth, |s| crate::model::volume(&s))
-    };
+    let gross_volume =
+        if level { gross_area * depth } else { m.shape_solid_over(f, &[]).map_or(gross_area * depth, |s| crate::model::volume(&s)) };
     SlabQ { depth, perimeter: geom::perimeter(&f.boundary), gross_area, net_area, gross_volume, net_volume: m.floor_volume(f), level }
 }
 
@@ -134,7 +131,13 @@ pub struct CoveringQ {
 pub fn ceiling(m: &Model, c: &Ceiling) -> CoveringQ {
     let net_area: f64 = m.ceiling_slabs(c).iter().map(|(face, rise)| plan_area(&m.less_shafts(face, *rise).0)).sum();
     let width = m.types.ceiling.get(&c.type_name).map_or(0.0, |t| t.thickness);
-    CoveringQ { width, perimeter: geom::perimeter(&c.boundary), gross_area: geom::area(&c.boundary).abs(), net_area, volume: net_area * width }
+    CoveringQ {
+        width,
+        perimeter: geom::perimeter(&c.boundary),
+        gross_area: geom::area(&c.boundary).abs(),
+        net_area,
+        volume: net_area * width,
+    }
 }
 
 /// What a roof measures.
