@@ -28,9 +28,12 @@ use crate::{BimApp, Sheet, icon_button};
 pub enum Palette {
     Properties,
     Browser,
+    /// The hosting page's checks of the model (`checks.rs`): offered only in a window a page hosts.
+    Checks,
 }
 
 impl Palette {
+    /// The palettes every window has; a hosted one has the Checks too ([`BimApp::palettes`]).
     pub const ALL: [Palette; 2] = [Palette::Properties, Palette::Browser];
 
     /// Its name: what its tab says (in the interface's language) and what the settings file keeps it as.
@@ -38,11 +41,12 @@ impl Palette {
         match self {
             Palette::Properties => "Properties",
             Palette::Browser => msg!("Project Browser"),
+            Palette::Checks => msg!("Checks"),
         }
     }
 
     fn named(name: &str) -> Option<Palette> {
-        Palette::ALL.into_iter().find(|p| p.name() == name)
+        [Palette::Properties, Palette::Browser, Palette::Checks].into_iter().find(|p| p.name() == name)
     }
 }
 
@@ -589,6 +593,7 @@ impl BimApp {
         match p {
             Palette::Properties => t(p.name()).to_string(),
             Palette::Browser => format!("{} · {}", t(p.name()), self.session.model.name),
+            Palette::Checks => t(p.name()).to_string(),
         }
     }
 
@@ -601,6 +606,7 @@ impl BimApp {
                 scroll.id_salt("properties").show(ui, |ui| Frame::new().inner_margin(8.0).show(ui, |ui| self.properties(ui)));
             }
             Palette::Browser => self.browser_palette(ui),
+            Palette::Checks => self.checks_palette(ui),
         }
     }
 

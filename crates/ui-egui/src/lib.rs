@@ -14,6 +14,7 @@ mod browser;
 mod cad;
 mod camera;
 mod canvas;
+mod checks;
 mod clouds;
 mod context;
 pub mod control;
@@ -524,6 +525,8 @@ pub struct BimApp {
     passive: bool,
     /// Where the palettes are, and what is being dragged.
     docking: dock::Docking,
+    /// The hosting page's checks of the model, which the Checks palette lists (`checks.rs`).
+    checks: checks::Checks,
     dragging: Option<dock::Drag>,
     /// What a drag may land on, as drawn this frame: each stack's title (the palette it shows, and whether it floats),
     /// the views' tab bar and its tabs, and the docked view's drawing, along whose edges palettes dock; and the pointer, last
@@ -1291,6 +1294,7 @@ impl BimApp {
             floating: Vec::new(),
             passive: false,
             docking: dock::Docking::default(),
+            checks: checks::Checks::default(),
             dragging: None,
             drop_headers: Vec::new(),
             tab_bar: Rect::NOTHING,
@@ -3214,6 +3218,7 @@ impl BimApp {
         (fresh.page_fonts, fresh.refont) = (self.page_fonts.take(), self.refont);
         fresh.theme_wanted = self.theme_wanted.take();
         fresh.docking = std::mem::take(&mut self.docking);
+        fresh.checks = std::mem::take(&mut self.checks);
         (fresh.settings_path, fresh.settings_kept) = (self.settings_path.take(), self.settings_kept.take());
         fresh.window = std::mem::take(&mut self.window);
         #[cfg(feature = "updater")]
@@ -4143,7 +4148,7 @@ impl BimApp {
             let tip = msg!("Show or hide the palettes, and pick the interface's language");
             let r = big_button(ui, Icon::Interface, "User Interface", false, tip);
             ribbon::choices(ui, &r, false, |ui| {
-                for p in dock::Palette::ALL {
+                for p in self.palettes() {
                     let mut on = self.docking.shown(p);
                     if ui.checkbox(&mut on, t(p.name())).changed() {
                         self.show_palette(p, on);
@@ -5134,6 +5139,8 @@ impl BimApp {
                 if funnel.on_hover_text(t("Filter Selection")).clicked() {
                     self.open_filter();
                 }
+                // The page's checks of the model, flagged and not: a click opens the Checks palette.
+                self.checks_badge(ui);
                 if let Some(p) = self.canvas.cursor {
                     let u = self.session.model.units;
                     ui.monospace(format!("x {}  y {}", u.with_unit(p.0), u.with_unit(p.1)));

@@ -19,7 +19,7 @@ use egui::{Align, Color32, ComboBox, Context, Id as UiId, Layout, RichText, Scro
 use serde_json::{Value, json};
 
 use crate::BimApp;
-use crate::dock::{Docking, Palette};
+use crate::dock::Docking;
 use crate::failed;
 use crate::lang::{Lang, t, tf};
 use crate::presets::{Preset, Scale, hidden_from_json, presets_from_json};
@@ -447,7 +447,7 @@ impl BimApp {
     /// A box for each palette, shown or closed, and the layout the window starts in: Settings > User Interface's, and the
     /// app bar's Palettes menu.
     pub(crate) fn palette_switches(&mut self, ui: &mut Ui) {
-        for p in Palette::ALL {
+        for p in self.palettes() {
             let mut on = self.docking.shown(p);
             if ui.checkbox(&mut on, t(p.name())).changed() {
                 self.show_palette(p, on);
@@ -455,7 +455,7 @@ impl BimApp {
         }
         let tip = msg!("Properties over the Project Browser, on the left, as at first");
         if ui.button(t("Reset Palette Layout")).on_hover_text(t(tip)).clicked() {
-            self.docking = Docking::default();
+            self.docking = self.first_docking();
         }
     }
 
