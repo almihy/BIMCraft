@@ -344,3 +344,275 @@ fn the_clipboard_knows_its_box_and_the_level_it_came_from() {
     assert_eq!(s.clipboard_extent(), Some([crate::geom::P2(0.0, 0.0), crate::geom::P2(8000.0, 6000.0)]));
     assert_eq!(s.clipboard_level(), Some(s.model.guid(levels[0])));
 }
+
+/// Level 1 (0), Level 2 (3000) and a Level 3 at 6000, and nothing above.
+fn three_levels() -> (Session, Vec<u64>) {
+    let mut s = Session::new();
+    let l3 = run(&mut s, "level", json!({"elevation": 6000}))["id"].as_u64().unwrap();
+    (s, vec![100_000, 100_001, l3])
+}
+
+fn made_of(s: &Session, r: &Value, category: &str) -> Vec<u64> {
+    ids(&r["ids"]).into_iter().filter(|id| s.model.elements.get(*id).is_some_and(|e| e.category() == category)).collect()
+}
+
+fn room_span(s: &Session, id: u64) -> (f64, f64) {
+    match s.model.elements.get(id) {
+        Some(Element::Room(r)) => s.model.room_span(r),
+        other => panic!("{id}: {other:?}"),
+    }
+}
+
+#[test]
+fn a_paste_says_where_it_goes_and_does_not_paste_in_place_when_it_is_not_told() {
+    let (mut s, _, walls, _) = building();
+    run(&mut s, "copy_to_clipboard", json!({"ids": [walls[0]]}));
+    let before = s.model.elements.len();
+    let e = s.execute("paste", &json!({})).unwrap_err();
+    assert!(e.contains("same_place") && e.contains("by"), "{e}");
+    assert_eq!(s.model.elements.len(), before);
+}
+
+#[test]
+fn a_room_pasted_where_there_is_no_level_for_its_top_keeps_its_top_above_its_bottom() {
+    // Rooms on Levels 1 and 3, each with no upper limit; the paste to Level 2 moves the Level 3 one up to 9000, where there is no level.
+    let (mut s, l) = three_levels();
+    let a = run(&mut s, "room", json!({"point": [1000, 1000], "level": l[0], "limit_offset": 2400}))["id"].as_u64().unwrap();
+    let b = run(&mut s, "room", json!({"point": [5000, 1000], "level": l[2], "limit_offset": 2400}))["id"].as_u64().unwrap();
+    run(&mut s, "copy_to_clipboard", json!({"ids": [a, b]}));
+    let r = run(&mut s, "paste", json!({"levels": [l[1]]}));
+    let rooms = made_of(&s, &r, "room");
+    assert_eq!(rooms.len(), 2);
+    let spans: Vec<(f64, f64)> = rooms.iter().map(|id| room_span(&s, *id)).collect();
+    assert!(spans.contains(&(3000.0, 5400.0)), "the Level 1 room, on Level 2: {spans:?}");
+    assert!(spans.contains(&(9000.0, 11400.0)), "the Level 3 room, 3000 up: {spans:?}");
+    assert!(r["notes"].to_string().contains("no level at 9000"), "{r}");
+}
+
+#[test]
+fn a_rooms_upper_limit_with_no_level_where_it_goes_becomes_its_limit_offset_and_the_room_still_lifts() {
+    let mut s = Session::new();
+    let l3 = run(&mut s, "level", json!({"elevation": 6000}))["id"].as_u64().unwrap();
+    let l4 = run(&mut s, "level", json!({"elevation": 12000}))["id"].as_u64().unwrap();
+    let a = run(&mut s, "room", json!({"point": [1000, 1000], "level": 100_000}))["id"].as_u64().unwrap();
+    let b = run(&mut s, "room", json!({"point": [5000, 1000], "level": l3, "top_level": l4, "limit_offset": -300}))["id"].as_u64().unwrap();
+    assert_eq!(room_span(&s, b), (6000.0, 11700.0));
+    run(&mut s, "copy_to_clipboard", json!({"ids": [a, b]}));
+    let r = run(&mut s, "paste", json!({"levels": [100_001]}));
+    let copy = made_of(&s, &r, "room").into_iter().find(|id| room_span(&s, *id).0 == 9000.0).expect("the Level 3 room, 3000 up");
+    assert_eq!(room_span(&s, copy), (9000.0, 14700.0), "its top moved with its bottom");
+}
+
+#[test]
+fn a_roof_joined_to_a_roof_copied_with_it_is_joined_to_its_copy_and_the_original_stays_joined_to_its_own() {
+    let (mut s, l) = three_levels();
+    let boundary = |x: i64| json!([[x, 0], [x + 4000, 0], [x + 4000, 4000], [x, 4000]]);
+    let a = run(&mut s, "roof", json!({"boundary": boundary(0), "level": l[1]}))["id"].as_u64().unwrap();
+    let b = run(&mut s, "roof", json!({"boundary": boundary(4000), "level": l[1], "join": a}))["id"].as_u64().unwrap();
+    let join_of = |s: &Session, id: u64| match s.model.elements.get(id) {
+        Some(Element::Roof(r)) => r.join,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(join_of(&s, b), Some(s.model.guid(a)));
+    run(&mut s, "copy_to_clipboard", json!({"ids": [a, b]}));
+    // Beside.
+    let r = run(&mut s, "paste", json!({"by": [0, 10000]}));
+    let roofs = made_of(&s, &r, "roof");
+    let copy_a = roofs.iter().copied().find(|id| join_of(&s, *id).is_none()).unwrap();
+    let copy_b = roofs.iter().copied().find(|id| join_of(&s, *id).is_some()).unwrap();
+    assert_eq!(join_of(&s, copy_b), Some(s.model.guid(copy_a)), "the copy is joined to the copy");
+    assert_eq!(join_of(&s, b), Some(s.model.guid(a)), "the original keeps its own");
+    // To a level.
+    let r = run(&mut s, "paste", json!({"levels": [l[2]]}));
+    let roofs = made_of(&s, &r, "roof");
+    let copy_a = roofs.iter().copied().find(|id| join_of(&s, *id).is_none()).unwrap();
+    let copy_b = roofs.iter().copied().find(|id| join_of(&s, *id).is_some()).unwrap();
+    assert_eq!(join_of(&s, copy_b), Some(s.model.guid(copy_a)));
+    assert!(!r["notes"].to_string().contains("joined"), "{r}");
+}
+
+#[test]
+fn what_has_no_level_at_the_new_height_and_no_offset_to_be_raised_by_is_left_out_and_not_set_too_low() {
+    let (mut s, l) = three_levels();
+    let wall = ids(&run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]], "level": l[0]}))["ids"])[0];
+    let stair = run(&mut s, "stair", json!({"start": [1000, 1000], "end": [1000, 2000], "level": l[2], "height": 3000, "railings": true}))
+        ["id"]
+        .as_u64()
+        .unwrap();
+    let ramp =
+        run(&mut s, "ramp", json!({"start": [5000, 1000], "end": [5000, 2000], "level": l[2], "height": 600}))["id"].as_u64().unwrap();
+    run(&mut s, "room_separator", json!({"points": [[0, 3000], [3000, 3000]], "level": l[2]}));
+    let sep = s.model.elements.iter().find(|(_, e)| e.category() == "roomseparator").map(|(id, _)| *id).unwrap();
+    assert_eq!(count(&s, "railing"), 2);
+    run(&mut s, "copy_to_clipboard", json!({"ids": [wall, stair, ramp, sep]}));
+    let (stairs, ramps, seps, rails) = (count(&s, "stair"), count(&s, "ramp"), count(&s, "roomseparator"), count(&s, "railing"));
+    let r = run(&mut s, "paste", json!({"levels": [l[1]]}));
+    // The wall comes to Level 2; the others would stand at 9000, where there is no level.
+    assert_eq!(made_of(&s, &r, "wall").len(), 1);
+    assert_eq!((count(&s, "stair"), count(&s, "ramp"), count(&s, "roomseparator"), count(&s, "railing")), (stairs, ramps, seps, rails));
+    let said = r["left_out"].to_string();
+    for what in [format!("stair {stair}"), format!("ramp {ramp}"), format!("roomseparator {sep}")] {
+        assert!(said.contains(&what) && said.contains("no level at 9000"), "{what}: {said}");
+    }
+    assert!(said.contains("railing"), "the stair's railings go with it: {said}");
+    // Pasted down to Level 1 they land on a level that is there.
+    let r = run(&mut s, "paste", json!({"levels": [l[0]]}));
+    assert_eq!(made_of(&s, &r, "stair").len(), 1, "{r}");
+}
+
+#[test]
+fn what_has_an_offset_is_raised_by_it_where_there_is_no_level_at_the_new_height() {
+    let (mut s, l) = three_levels();
+    let wall = ids(&run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]], "level": l[0]}))["ids"])[0];
+    let pad =
+        run(&mut s, "building_pad", json!({"boundary": [[0, 5000], [3000, 5000], [3000, 8000], [0, 8000]], "level": l[2], "offset": 200}))
+            ["id"]
+            .as_u64()
+            .unwrap();
+    let beam = ids(&run(&mut s, "beam", json!({"points": [[0, 10000], [4000, 10000]], "level": l[2]}))["ids"])[0];
+    let bar = run(&mut s, "rebar", json!({"points": [[50, 10000, -40], [3950, 10000, -40]], "diameter": 16, "host": beam}));
+    let bar = bar["id"].as_u64().or_else(|| bar["ids"][0].as_u64()).unwrap();
+    let scan = std::env::temp_dir().join(format!("bimcraft-clipboard-{}.xyz", std::process::id()));
+    std::fs::write(&scan, "0 0 0\n1 0 0\n").unwrap();
+    let cloud = run(&mut s, "point_cloud", json!({"path": scan.to_str().unwrap(), "name": "dot", "level": l[2], "offset": 100}));
+    let _ = std::fs::remove_file(&scan);
+    let cloud = cloud["id"].as_u64().unwrap();
+    run(&mut s, "copy_to_clipboard", json!({"ids": [wall, pad, beam, bar, cloud]}));
+    let r = run(&mut s, "paste", json!({"levels": [l[1]]}));
+    assert!(r["left_out"].as_array().unwrap().is_empty(), "{r}");
+    let pad = made_of(&s, &r, "buildingpad")[0];
+    match s.model.elements.get(pad) {
+        Some(Element::BuildingPad(p)) => assert_eq!((p.level, p.offset), (s.model.guid(l[2]), 3200.0), "3000 up on its own level"),
+        other => panic!("{other:?}"),
+    }
+    let bar = made_of(&s, &r, "rebar")[0];
+    match s.model.elements.get(bar) {
+        Some(Element::Rebar(b)) => assert_eq!(b.path.iter().map(|q| q[2]).collect::<Vec<_>>(), vec![2960.0, 2960.0]),
+        other => panic!("{other:?}"),
+    }
+    let cloud = made_of(&s, &r, "pointcloud")[0];
+    match s.model.elements.get(cloud) {
+        Some(Element::PointCloud(c)) => assert_eq!((c.level, c.offset), (s.model.guid(l[2]), 3100.0)),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_paste_of_what_stood_on_more_than_one_level_goes_from_the_lowest_and_keeps_the_gap() {
+    let (mut s, l) = three_levels();
+    let low = ids(&run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]], "level": l[0], "height": 2800}))["ids"])[0];
+    let high = ids(&run(&mut s, "wall", json!({"points": [[0, 5000], [4000, 5000]], "level": l[2], "height": 2800}))["ids"])[0];
+    run(&mut s, "copy_to_clipboard", json!({"ids": [low, high]}));
+    let r = run(&mut s, "paste", json!({"levels": [l[1]]}));
+    let made = made_of(&s, &r, "wall");
+    assert_eq!(made.len(), 2);
+    let new_low = made.iter().copied().find(|id| wall(&s, *id).start.1 == 0.0).unwrap();
+    let new_high = made.iter().copied().find(|id| wall(&s, *id).start.1 == 5000.0).unwrap();
+    assert_eq!((wall(&s, new_low).level, wall(&s, new_low).base_offset), (s.model.guid(l[1]), 0.0));
+    // Level 3 plus 3000 is 9000: no level there, so it stays on Level 3, 3000 up: the two keep their 6000 apart.
+    assert_eq!((wall(&s, new_high).level, wall(&s, new_high).base_offset), (s.model.guid(l[2]), 3000.0));
+    assert_eq!(s.model.base_z(&wall(&s, new_high)) - s.model.base_z(&wall(&s, new_low)), 6000.0);
+}
+
+#[test]
+fn a_wall_whose_top_level_is_let_go_keeps_its_offsets_in_its_height() {
+    let (mut s, levels, _, _) = building();
+    let w = ids(&run(
+        &mut s,
+        "wall",
+        json!({"points": [[0, 7000], [3000, 7000]], "level": levels[0], "top_level": levels[1], "base_offset": 50, "top_offset": -100}),
+    )["ids"])[0];
+    run(&mut s, "copy_to_clipboard", json!({"ids": [w]}));
+    // Level 5 (12000) has nothing above it.
+    let r = run(&mut s, "paste", json!({"levels": [levels[4]]}));
+    let new = wall(&s, made_of(&s, &r, "wall")[0]);
+    assert_eq!((new.level, new.top_level, new.base_offset, new.top_offset), (s.model.guid(levels[4]), None, 50.0, 0.0));
+    assert_eq!(new.height, 3000.0 - 100.0 - 50.0, "from its base to where its top was");
+    assert!(r["notes"].to_string().contains("unconnected"), "{r}");
+}
+
+#[test]
+fn columns_stairs_and_ramps_to_a_level_with_nothing_above_it_are_as_tall_as_they_were() {
+    let (mut s, levels, _, _) = building();
+    let column = run(&mut s, "column", json!({"at": [1000, 7000], "level": levels[0], "base_offset": 100}))["id"].as_u64().unwrap();
+    let stair = run(&mut s, "stair", json!({"start": [3000, 7000], "end": [3000, 8000], "level": levels[0]}))["id"].as_u64().unwrap();
+    let ramp = run(&mut s, "ramp", json!({"start": [6000, 7000], "end": [6000, 8000], "level": levels[0]}))["id"].as_u64().unwrap();
+    run(&mut s, "copy_to_clipboard", json!({"ids": [column, stair, ramp]}));
+    let r = run(&mut s, "paste", json!({"levels": [levels[4]]}));
+    let top = s.model.guid(levels[4]);
+    match s.model.elements.get(made_of(&s, &r, "column")[0]) {
+        Some(Element::Column(c)) => assert_eq!((c.level, c.top_level, c.height, c.base_offset), (top, None, 2900.0, 100.0)),
+        other => panic!("{other:?}"),
+    }
+    match s.model.elements.get(made_of(&s, &r, "stair")[0]) {
+        Some(Element::Stair(st)) => assert_eq!((st.level, st.top_level, st.height), (top, None, 3000.0)),
+        other => panic!("{other:?}"),
+    }
+    match s.model.elements.get(made_of(&s, &r, "ramp")[0]) {
+        Some(Element::Ramp(rp)) => assert_eq!((rp.level, rp.top_level, rp.height), (top, None, 3000.0)),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn floors_and_roofs_keep_their_offsets_to_another_level_and_gain_the_gap_where_there_is_no_level() {
+    let (mut s, l) = three_levels();
+    let square = json!([[0, 0], [4000, 0], [4000, 4000], [0, 4000]]);
+    let wall = ids(&run(&mut s, "wall", json!({"points": [[0, 20000], [1000, 20000]], "level": l[0]}))["ids"])[0];
+    let floor = run(&mut s, "floor", json!({"boundary": square, "level": l[0], "offset": -50}))["id"].as_u64().unwrap();
+    let roof = run(&mut s, "roof", json!({"boundary": square, "level": l[0], "offset": 120}))["id"].as_u64().unwrap();
+    let floor3 = run(&mut s, "floor", json!({"boundary": square, "level": l[2], "offset": -50}))["id"].as_u64().unwrap();
+    let roof3 = run(&mut s, "roof", json!({"boundary": square, "level": l[2], "offset": 120}))["id"].as_u64().unwrap();
+    run(&mut s, "copy_to_clipboard", json!({"ids": [wall, floor, roof, floor3, roof3]}));
+    let r = run(&mut s, "paste", json!({"levels": [l[1]]}));
+    let (floors, roofs) = (made_of(&s, &r, "floor"), made_of(&s, &r, "roof"));
+    let floor_at = |level: u64| {
+        floors.iter().find_map(|id| match s.model.elements.get(*id) {
+            Some(Element::Floor(f)) if f.level == s.model.guid(level) => Some(f.offset),
+            _ => None,
+        })
+    };
+    let roof_at = |level: u64| {
+        roofs.iter().find_map(|id| match s.model.elements.get(*id) {
+            Some(Element::Roof(f)) if f.level == s.model.guid(level) => Some(f.offset),
+            _ => None,
+        })
+    };
+    assert_eq!((floor_at(l[1]), roof_at(l[1])), (Some(-50.0), Some(120.0)), "Level 1's, on Level 2, as they were");
+    assert_eq!((floor_at(l[2]), roof_at(l[2])), (Some(2950.0), Some(3120.0)), "Level 3's, 3000 up: no level at 9000");
+}
+
+#[test]
+fn a_door_copied_alone_is_put_in_the_wall_it_lands_on_beside_it() {
+    let (mut s, _, walls, (door, window)) = building();
+    run(&mut s, "copy_to_clipboard", json!({"ids": [door, window]}));
+    // The door stood at (2000, 0) in the south wall, the window at (8000, 3000) in the east one. Pasted 4000 east, the door lands at
+    // (6000, 0), still in the south wall; the window at (12000, 3000), in no wall.
+    let r = run(&mut s, "paste", json!({"by": [4000, 0]}));
+    let copy = made_of(&s, &r, "door");
+    assert_eq!(copy.len(), 1, "{r}");
+    assert_eq!((opening(&s, copy[0]).host, opening(&s, copy[0]).offset), (s.model.guid(walls[0]), 6000.0));
+    assert_ne!(opening(&s, copy[0]).mark, opening(&s, door).mark);
+    assert!(made_of(&s, &r, "window").is_empty());
+    let said = r["left_out"].to_string();
+    assert!(said.contains(&format!("window {window}")) && said.contains("no wall"), "{r}");
+    // By (0, 6000) the door lands at (2000, 6000): in the wall on the far side.
+    let r = run(&mut s, "paste", json!({"ids": [door], "by": [0, 6000]}));
+    let copy = made_of(&s, &r, "door")[0];
+    assert_eq!((opening(&s, copy).host, opening(&s, copy).offset), (s.model.guid(walls[2]), 6000.0));
+    assert_eq!(opening(&s, door).host, s.model.guid(walls[0]), "the original stays");
+}
+
+#[test]
+fn a_door_copied_alone_and_pasted_to_a_level_with_a_wall_under_it_goes_in_that_wall() {
+    let (mut s, levels, walls, (door, _)) = building();
+    run(&mut s, "copy_to_clipboard", json!({"ids": [walls[0], door]}));
+    let up = run(&mut s, "paste", json!({"levels": [levels[1]]}));
+    let new_wall = made_of(&s, &up, "wall").into_iter().find(|w| wall(&s, *w).start.1 == 0.0 && wall(&s, *w).end.0 == 8000.0).unwrap();
+    // The door alone, to Level 2: the wall that is there takes it.
+    run(&mut s, "copy_to_clipboard", json!({"ids": [door]}));
+    let r = run(&mut s, "paste", json!({"levels": [levels[1]]}));
+    let copy = made_of(&s, &r, "door");
+    assert_eq!(copy.len(), 1, "{r}");
+    assert_eq!(opening(&s, copy[0]).host, s.model.guid(new_wall));
+}

@@ -167,3 +167,56 @@ fn the_paste_list_has_nothing_to_paste_until_something_is_copied_and_copies_the_
     press(&mut h, "Copy to Clipboard");
     assert_eq!(h.state().session.clipboard_ids().len(), 2);
 }
+
+fn grids(h: &Harness<BimApp>) -> Vec<(P2, P2)> {
+    let mut out: Vec<(P2, P2)> = h
+        .state()
+        .session
+        .model
+        .elements
+        .values()
+        .filter_map(|e| match e {
+            Element::Grid(g) => Some((g.start, g.end)),
+            _ => None,
+        })
+        .collect();
+    out.sort_by(|a, b| a.0.0.total_cmp(&b.0.0).then(a.0.1.total_cmp(&b.0.1)));
+    out
+}
+
+const GRIDS: &str = "grid {\"start\": [1000, -2000], \"end\": [1000, 4000]}\ngrid {\"start\": [3000, -2000], \"end\": [3000, 4000]}";
+
+#[test]
+fn grids_copied_and_pasted_by_a_click_make_new_grids_where_it_was_clicked() {
+    let mut h = app(GRIDS);
+    click(&mut h, P2(1000.0, 1000.0));
+    click_with(&mut h, P2(3000.0, 1000.0), Modifiers::COMMAND);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::C);
+    h.run();
+    assert_eq!(h.state().session.clipboard_ids().len(), 2, "{:?}", h.state().status.text);
+    key(&mut h, Key::Escape);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::V);
+    h.run();
+    assert_eq!(h.state().tool, Tool::Paste);
+    // Their middle is (2000, 1000); the click puts it at (7000, 1000).
+    click(&mut h, P2(7000.0, 1000.0));
+    assert_eq!(grids(&h).len(), 4, "two new grids: {:?}", h.state().status.text);
+    assert!(!h.state().status.error, "{:?}", h.state().status.text);
+    let xs: Vec<f64> = grids(&h).iter().map(|g| g.0.0).collect();
+    assert_eq!(xs, vec![1000.0, 3000.0, 6000.0, 8000.0]);
+    assert_eq!(h.state().selection.len(), 2, "what was pasted is selected");
+}
+
+#[test]
+fn a_wall_and_a_grid_copied_together_are_both_pasted_by_a_click_on_the_same_level() {
+    let mut h = app(&format!("{WALL}\ngrid {{\"start\": [1000, 2000], \"end\": [1000, 6000]}}"));
+    click(&mut h, P2(6000.0, 0.0));
+    click_with(&mut h, P2(1000.0, 5000.0), Modifiers::COMMAND);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::C);
+    h.run();
+    key(&mut h, Key::Escape);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::V);
+    h.run();
+    click(&mut h, P2(4000.0, -1500.0));
+    assert_eq!((walls(&h).len(), grids(&h).len()), (2, 2), "{:?}", h.state().status.text);
+}
