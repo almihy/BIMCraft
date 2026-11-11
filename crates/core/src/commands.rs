@@ -45,8 +45,8 @@ type R = Result<Value, String>;
 
 mod array;
 mod cad_pick;
-mod pin;
 pub(crate) mod clipboard;
+mod pin;
 mod site;
 use cad_pick::cad_outlines;
 use site::{building_pad, property_line, site as site_cmd, site_edit, site_figures, site_kinds, toposolid};

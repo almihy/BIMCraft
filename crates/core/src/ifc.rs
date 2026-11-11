@@ -2290,9 +2290,35 @@ mod tests {
         named.into_iter().next().unwrap()
     }
 
-    /// The properties of the set `name` that type object `t` (its attributes, from `type_object`) lists in its
-    /// `HasPropertySets`, as written, in the set's order; none when it has no such set.
-    fn type_set_of(f: &str, t: &[String], name: &str) -> Vec<String> {
+    /// An entity line's attributes, split at the commas outside strings and outside parentheses: a list is one attribute.
+    fn top_level_attributes(line: &str) -> Vec<String> {
+        let body = line.split_once('(').unwrap().1.strip_suffix(");").unwrap();
+        let (mut out, mut cur, mut quoted, mut depth) = (Vec::new(), String::new(), false, 0);
+        for c in body.chars() {
+            match c {
+                '\'' => {
+                    quoted = !quoted;
+                    cur.push(c);
+                }
+                '(' if !quoted => {
+                    depth += 1;
+                    cur.push(c);
+                }
+                ')' if !quoted => {
+                    depth -= 1;
+                    cur.push(c);
+                }
+                ',' if !quoted && depth == 0 => out.push(std::mem::take(&mut cur)),
+                _ => cur.push(c),
+            }
+        }
+        out.push(cur);
+        out
+    }
+
+    /// The properties of the set `name` that type object `t` (the line `type_object` found) lists in its `HasPropertySets`, as
+    /// written, in the set's order; none when it has no such set.
+    fn type_set_of(f: &str, t: &str, name: &str) -> Vec<String> {
         let entity = |n: &str| -> String {
             let line = f.lines().find(|l| l.starts_with(&format!("{n}="))).unwrap_or_else(|| panic!("no {n}"));
             line.to_string()
@@ -2300,16 +2326,20 @@ mod tests {
         let list = |a: &str| -> Vec<String> {
             a.trim_matches(|c| c == '(' || c == ')').split(',').filter(|x| !x.is_empty() && *x != "$").map(str::to_string).collect()
         };
-        for set in list(&t[5]) {
-            let attrs = attributes(&entity(&set));
+        for set in list(&top_level_attributes(t)[5]) {
+            let attrs = top_level_attributes(&entity(&set));
             if attrs[2] == format!("'{name}'") {
-                return list(&attrs[4])
-                    .iter()
-                    .map(|p| entity(p).split_once('=').unwrap().1.trim_end_matches(';').to_string())
-                    .collect();
+                return list(&attrs[4]).iter().map(|p| entity(p).split_once('=').unwrap().1.trim_end_matches(';').to_string()).collect();
             }
         }
         Vec::new()
+    }
+
+    /// The line of the one type object of `class` named `name`.
+    fn type_line(f: &str, class: &str, name: &str) -> String {
+        let named: Vec<String> = entities(f, class).into_iter().filter(|l| attributes(l.as_str())[2] == format!("'{name}'")).collect();
+        assert_eq!(named.len(), 1, "one {class} named {name}");
+        named.into_iter().next().unwrap()
     }
 
     /// The type name of the first element of `category` in the model: a door's, window's, ceiling's or roof's.
@@ -3086,10 +3116,13 @@ mod tests {
         let q = crate::quantities::wall(&m, walls[0]).unwrap();
         assert_eq!(q.height, None);
         assert!(q.gross_volume > 0.0 && (q.gross_side - q.gross_volume / q.width).abs() < 1e-6, "{q:?}");
-        // Under the floor's underside (3000 less its depth, 200 over the wall's inside half; the wall's outside half, past the floor's
-        // edge, stands to its own top, 3000): between 8000 x 2800 and 8000 x 3000 of side, a half and a half: 8000 x 2900.
-        let side = 8000.0 * 2900.0;
-        assert!((q.gross_side - side).abs() < 1.0 && (q.gross_volume - side * q.width).abs() < 200.0, "{q:?} {free:?}");
+        // Under the floor, which is 200 thick over a level 3000 up: its underside is 2800. The wall's inside half (y from 0 to 100) is
+        // under the floor and stands to 2800; its outside half (y from -100 to 0) is past the floor's edge and stands to its own
+        // top, 3000. Mitred at its corners the wall's plan is 810 000 mm² outside the floor's edge and 790 000 within (the
+        // trapezoids 8200 and 8000, 8000 and 7800 wide, 100 deep): 810 000 x 3000 + 790 000 x 2800 = 4.642e9 mm³, its side that
+        // through 200: 23.21 m².
+        let volume = 810_000.0 * 3000.0 + 790_000.0 * 2800.0;
+        assert!((q.gross_volume - volume).abs() < 1.0 && (q.gross_side - volume / 200.0).abs() < 1e-3, "{q:?} {free:?}");
         assert!(q.gross_side < free.gross_side, "{q:?} {free:?}");
     }
 
@@ -3119,7 +3152,7 @@ mod tests {
         let f = export(&s.model);
         // The identity data is the type's: it is on the type object, once, and no occurrence holds it.
         let wall_ent = of_kind(&f, "IFCWALL")[0];
-        let wall_type = type_object(&f, "IFCWALLTYPE", &wall);
+        let wall_type = type_line(&f, "IFCWALLTYPE", &wall);
         let common = type_set_of(&f, &wall_type, "Pset_WallCommon");
         assert!(common.contains(&"IFCPROPERTYSINGLEVALUE('Reference',$,IFCIDENTIFIER('W1'),$)".to_string()), "{common:?}");
         assert!(common.contains(&"IFCPROPERTYSINGLEVALUE('FireRating',$,IFCLABEL('EI 60'),$)".to_string()), "{common:?}");
@@ -3138,14 +3171,14 @@ mod tests {
             !set_of(&f, wall_ent, "Pset_WallCommon").iter().any(|p| p.contains("'Reference'") || p.contains("'FireRating'")),
             "nor in its common set"
         );
-        let door_type = type_object(&f, "IFCDOORTYPE", &type_name_of(&s, "door"));
+        let door_type = type_line(&f, "IFCDOORTYPE", &type_name_of(&s, "door"));
         let door_common = type_set_of(&f, &door_type, "Pset_DoorCommon");
         assert!(door_common.iter().any(|p| p.contains("'FireRating'") && p.contains("EI 30")), "{door_common:?}");
         assert!(door_common.iter().any(|p| p.contains("'Reference'") && p.contains("'D1'")), "{door_common:?}");
         // A family's component has no common set: its Type Mark and Fire Rating go in the BIMCraft set, on its type object.
         let component = entities(&f, "IFCFURNITURETYPE");
         assert_eq!(component.len(), 1);
-        let rest = type_set_of(&f, &attributes(&component[0]), TYPE_DATA_SET);
+        let rest = type_set_of(&f, &component[0], TYPE_DATA_SET);
         assert!(rest.iter().any(|p| p.contains("'Reference'") && p.contains("'C1'")), "{rest:?}");
         assert!(rest.iter().any(|p| p.contains("'FireRating'")), "{rest:?}");
         assert!(set_of(&f, of_kind(&f, "IFCFURNITURE")[0], TYPE_DATA_SET).is_empty());

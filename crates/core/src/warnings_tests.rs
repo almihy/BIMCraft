@@ -212,6 +212,38 @@ fn the_warnings_command_filters_and_refuses_what_it_does_not_know() {
     assert_eq!(i["warnings"].as_array().unwrap().len(), 2, "{i}");
 }
 
+#[test]
+fn two_types_of_one_category_sharing_a_type_mark_are_warned_of() {
+    let mut s = Session::new();
+    run(&mut s, "type", json!({"category": "wall", "name": "A", "thickness": 200, "type_mark": "W1"}));
+    assert!(listed(&mut s, "duplicate_type_mark").is_empty(), "one type holds the mark");
+    let r = run(&mut s, "type", json!({"category": "wall", "name": "B", "thickness": 150, "type_mark": "W1"}));
+    assert_eq!(new_rules(&r), ["duplicate_type_mark"], "{r}");
+    let warning = &r["new_warnings"][0];
+    let message = warning["message"].as_str().unwrap();
+    assert!(message.contains("`A`") && message.contains("`B`") && message.contains("`W1`") && message.contains("wall"), "{message}");
+    // About the types: their library GUIDs, which no element has.
+    assert_eq!(warning["guids"].as_array().unwrap().len(), 2, "{warning}");
+    assert_eq!(s.model.check(), Ok(()), "a warning, not a refusal");
+    // A type of another category with the mark, and types that hold none, are no duplicates.
+    let r = run(&mut s, "type", json!({"category": "floor", "name": "F", "thickness": 200, "type_mark": "W1"}));
+    assert!(new_rules(&r).is_empty(), "{r}");
+    run(&mut s, "type", json!({"category": "wall", "name": "C", "thickness": 100}));
+    run(&mut s, "type", json!({"category": "wall", "name": "D", "thickness": 100}));
+    assert_eq!(listed(&mut s, "duplicate_type_mark").len(), 1);
+    // A change to elements keeps it, and is not its news.
+    let r = run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]], "type": "A"}));
+    assert!(!new_rules(&r).contains(&"duplicate_type_mark".to_string()), "{r}");
+    assert_eq!(listed(&mut s, "duplicate_type_mark").len(), 1);
+    // A third type with the mark joins the one warning; a mark of its own takes a type out of it.
+    run(&mut s, "type", json!({"category": "wall", "name": "C", "type_mark": "W1"}));
+    let all = listed(&mut s, "duplicate_type_mark");
+    assert_eq!((all.len(), all[0]["guids"].as_array().unwrap().len()), (1, 3), "{all:?}");
+    run(&mut s, "type", json!({"category": "wall", "name": "C", "type_mark": "W3"}));
+    run(&mut s, "type", json!({"category": "wall", "name": "B", "type_mark": "W2"}));
+    assert!(listed(&mut s, "duplicate_type_mark").is_empty());
+}
+
 fn volume(tris: &[[P3; 3]]) -> f64 {
     tris.iter()
         .map(|[a, b, c]| a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0]))

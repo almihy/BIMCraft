@@ -317,7 +317,7 @@ fn read_as_volume(s: &Session) -> Model {
 }
 
 #[test]
-fn a_renamed_parameter_takes_its_tags_formulas_and_group_members_with_it() {
+fn a_renamed_parameter_takes_its_tags_and_formulas_with_it() {
     let mut s = Session::new();
     let walls = house(&mut s);
     run(&mut s, "parameter", json!({"name": "Sound Rating", "categories": ["wall"], "kind": "number"}));
@@ -333,12 +333,6 @@ fn a_renamed_parameter_takes_its_tags_formulas_and_group_members_with_it() {
                           {"name": "Double", "formula": "Sound Rating * 2"},
                           {"name": "Mixed", "formula": "max(Sound Rating Extra, Sound Rating) + Sound Rating Extra + 1e3"}]}),
     );
-    // A detail group holding a wall with the parameter set.
-    let mut member = s.model.elements.get(walls[1]).cloned().unwrap();
-    if let Some(params) = member.params_mut() {
-        params.insert("Sound Rating".into(), json!(50));
-    }
-    s.model_mut().detail_groups.insert("Group".into(), crate::groups::GroupType { members: vec![crate::groups::Member { id: 0, guid: Default::default(), element: member }] });
     let back = read_as_volume(&s);
     assert!(back.parameters.contains_key("Custom Volume") && !back.parameters.contains_key("Volume"));
     assert!(back.check().is_ok(), "{:?}", back.check());
@@ -351,9 +345,6 @@ fn a_renamed_parameter_takes_its_tags_formulas_and_group_members_with_it() {
     assert_eq!(sc.fields[2].formula.as_deref(), Some("Custom Volume * 2"));
     assert_eq!(sc.fields[3].formula.as_deref(), Some("max(Volume Extra, Custom Volume) + Volume Extra + 1e3"));
     assert!(crate::schedule::table(&back, sc).is_ok(), "{:?}", crate::schedule::table(&back, sc).err());
-    let group = &back.detail_groups["Group"].members[0].element;
-    let held = group.clone().params_mut().and_then(|p| p.get("Custom Volume").cloned());
-    assert_eq!(held, Some(json!(50)), "a group member's value moved with it");
     // A multi-category schedule's Area is the one its categories share, never a parameter: it keeps its name.
     run(&mut s, "schedule", json!({"name": "Everything", "category": "multicategory", "categories": ["wall"], "fields": ["Type", "Area"]}));
     let text = serde_json::to_string(&*s.model).unwrap().replace("Sound Rating", "Area");

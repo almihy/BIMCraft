@@ -236,8 +236,12 @@ fn a_flat_roof_less_a_shaft_through_it_is_its_area_less_the_shaft() {
     assert!(near(q.gross_surface_area, 48e6), "{q:?}");
     assert!(near(q.surface_area, 47e6) && near(q.plan_area, 47e6) && near(q.volume, 47e6 * 300.0), "{q:?}");
     // An opening of the roof's own is taken off the same way.
-    let with = run(&mut s, "roof", json!({"boundary": [[0, 8000], [8000, 8000], [8000, 14000], [0, 14000]], "overhang": 0, "slope": 0,
-        "type": "R", "openings": [[[1000, 9000], [3000, 9000], [3000, 10000], [1000, 10000]]]}))["id"]
+    let with = run(
+        &mut s,
+        "roof",
+        json!({"boundary": [[0, 8000], [8000, 8000], [8000, 14000], [0, 14000]], "overhang": 0, "slope": 0,
+        "type": "R", "openings": [[[1000, 9000], [3000, 9000], [3000, 10000], [1000, 10000]]]}),
+    )["id"]
         .as_u64()
         .unwrap_or_default();
     let q = roof_of(&s, with);

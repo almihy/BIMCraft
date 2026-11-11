@@ -45,7 +45,7 @@ there's no common set, a component's) in `BIMCraft_TypeData`. A project paramete
 name takes the field's place in schedules, as it did before the field: `Fire Rating` as a project parameter of doors, with
 a value for each door, still shows that. Area, Volume and Perimeter are fields of their own, which a project parameter can't be
 named: a file from before that holds one by such a name reads with it renamed `Custom <name>` (`Custom <name> 2` where that
-is taken), its values, tags' labels, schedules' fields, filters, sorts and formulas, view filters' rules and detail groups' members
+is taken), its values, tags' labels, schedules' fields, filters, sorts and formulas, view filters' rules
 renamed with it (`Model::renamed_clashing_parameters`; a multi-category schedule's fields are the shared ones, never a project's).
 
 A table goes to a file as CSV (`schedule::to_csv`, text a spreadsheet would read as a formula guarded with `'`) or, for a path

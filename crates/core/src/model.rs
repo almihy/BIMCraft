@@ -3656,7 +3656,7 @@ impl Model {
     /// A project parameter named as a field its categories have of their own since (Area, Volume or Perimeter of walls, floors,
     /// ceilings and roofs) is `Custom <name>` now (`Custom <name> 2` and on, where that is taken), with its values and what
     /// names it: the schedules' fields, filters, sorts and calculated fields' formulas, the view filters' rules, the tags'
-    /// labels, in the model and in the detail groups. [`Model::check`] refuses the clash, so a file from before the field reads as
+    /// labels. [`Model::check`] refuses the clash, so a file from before the field reads as
     /// it was. A multi-category schedule is left as it is: its fields are the ones its categories share, never a project's.
     fn renamed_clashing_parameters(&mut self) {
         let clashing: Vec<String> = self
@@ -3668,7 +3668,8 @@ impl Model {
             .collect();
         for name in clashing {
             let Some(param) = self.parameters.remove(&name) else { continue };
-            let taken = |m: &Model, to: &str| m.parameters.contains_key(to) || param.categories.iter().any(|c| crate::schedule::own_field(c, to));
+            let taken =
+                |m: &Model, to: &str| m.parameters.contains_key(to) || param.categories.iter().any(|c| crate::schedule::own_field(c, to));
             let base = format!("Custom {name}");
             let mut to = base.clone();
             let mut n = 2;
@@ -3721,9 +3722,6 @@ impl Model {
                     continue;
                 }
                 rename(e);
-            }
-            for g in self.detail_groups.values_mut() {
-                g.members.iter_mut().for_each(|member| rename(&mut member.element));
             }
             self.parameters.insert(to, param);
         }
