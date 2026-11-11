@@ -49,7 +49,7 @@ A head that rises past the wall's top is no warning: Revit lets it, and the wall
 ## The window
 
 The status bar shows a triangle and the count when there are warnings; a click opens Review Warnings, which Manage > Inquiry opens
-too. A row picked and Show (or a double click) selects the elements and opens their plan zoomed to them. Properties has a
+too. A row picked and Show selects the elements and opens their plan zoomed to them. Properties has a
 Warnings group for the selected elements (`crates/ui-egui/src/warnings.rs`).
 
 ## Adding a rule

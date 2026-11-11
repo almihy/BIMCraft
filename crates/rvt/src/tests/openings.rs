@@ -391,19 +391,20 @@ fn an_opening_is_measured_along_a_wall_that_starts_away_from_the_origin_in_eithe
 #[test]
 fn neighbours_that_overlap_by_more_than_a_tenth_of_the_narrower_are_not_fitted_whatever_the_wider_is() {
     // A 4 ft window from 10 ft and a 2 ft one from 13.7: 0.3 ft (91 mm) overlap, more than a tenth of the narrower (61 mm) and less
-    // than a tenth of the wider (122 mm). BIMCraft refuses overlapping openings, so one of them is dropped, none narrowed.
+    // than a tenth of the wider (122 mm). BIMCraft keeps overlapping openings as Revit does and warns of them, so both come in, none narrowed.
     let mut p = project(2024);
     p.recs.push(Rec::new(200, WINDOWS).at([10.0, -0.4, 3.0, 14.0, 0.4, 7.0], &[100, 601, 200]));
     p.recs.push(Rec::new(201, WINDOWS).at([13.7, -0.4, 3.0, 15.7, 0.4, 7.0], &[100, 601, 201]));
     let i = import(&p);
-    assert_eq!(openings(&i).len(), 1, "{:?}", i.skipped);
+    assert_eq!(openings(&i).len(), 2, "{:?}", i.skipped);
     assert!(!i.skipped.iter().any(|s| s.contains("narrowed")), "{:?}", i.skipped);
+    assert!(i.model.review().iter().any(|w| w.rule == "openings_overlap"), "{:?}", i.model.review());
     // The narrower first: a 2 ft window from 10 ft and a 4 ft one from 11.7, overlapping by the same 0.3 ft.
     let mut r = project(2024);
     r.recs.push(Rec::new(200, WINDOWS).at([10.0, -0.4, 3.0, 12.0, 0.4, 7.0], &[100, 601, 200]));
     r.recs.push(Rec::new(201, WINDOWS).at([11.7, -0.4, 3.0, 15.7, 0.4, 7.0], &[100, 601, 201]));
     let i = import(&r);
-    assert_eq!(openings(&i).len(), 1, "{:?}", i.skipped);
+    assert_eq!(openings(&i).len(), 2, "{:?}", i.skipped);
     assert!(!i.skipped.iter().any(|s| s.contains("narrowed")), "{:?}", i.skipped);
     // Half a tenth of the narrower is fitted: each gives up half.
     let mut q = project(2024);

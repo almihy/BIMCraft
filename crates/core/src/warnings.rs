@@ -146,7 +146,9 @@ impl Model {
         };
         let mut out: Vec<Warning> = prev
             .iter()
-            .filter(|w| w.rule != "device_no_connector" && !(rooms && room_rule(w)) && !twinned(w) && !w.elements.iter().any(|g| gone.contains(g)))
+            .filter(|w| {
+                w.rule != "device_no_connector" && !(rooms && room_rule(w)) && !twinned(w) && !w.elements.iter().any(|g| gone.contains(g))
+            })
             .cloned()
             .collect();
         compute(self, &scope, rooms, &mut out);

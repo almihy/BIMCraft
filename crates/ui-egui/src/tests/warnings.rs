@@ -42,22 +42,6 @@ fn the_status_bar_counts_the_warnings_and_opens_the_list_where_show_selects_and_
 }
 
 #[test]
-fn a_double_click_on_a_row_shows_it() {
-    let (mut h, _, doors) = crowded();
-    press(&mut h, "2 warnings");
-    let past = format!("door {} reaches", doors[2]);
-    let row = h.get_all_by_label_contains(&past).next().expect("the door past the end is listed").rect().center();
-    h.hover_at(row);
-    h.run();
-    for pressed in [true, false, true, false] {
-        h.event(button(row, pressed));
-    }
-    h.run();
-    assert!(h.state().warnings_dialog.is_none(), "the double click showed it");
-    assert_eq!(h.state().selection, [doors[2]]);
-}
-
-#[test]
 fn manages_review_warnings_opens_the_list_and_a_project_without_warnings_says_so() {
     let mut h = app(BOX);
     h.set_size(vec2(1800.0, 900.0));

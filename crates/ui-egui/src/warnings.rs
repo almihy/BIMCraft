@@ -128,9 +128,6 @@ impl BimApp {
                             if row.clicked() {
                                 picked = Some(i);
                             }
-                            if row.double_clicked() {
-                                show = Some(i);
-                            }
                         });
                     }
                 });

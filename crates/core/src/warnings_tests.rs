@@ -313,3 +313,36 @@ fn the_warnings_brought_up_to_date_are_those_of_the_whole_model_after_every_edit
     assert_eq!(*s.warnings(), s.model.review());
     assert!(matches!(s.model.elements.get(a), Some(Element::Door(_))));
 }
+
+/// What the warnings cost on the reference tower, next to the check an edit pays anyway: `cargo test -p bimcraft-core warnings_cost
+/// -- --ignored --nocapture`.
+#[test]
+#[ignore = "timing, not a check"]
+fn warnings_cost_on_the_reference_tower_next_to_the_check() {
+    use std::time::Instant;
+    let mut s = Session::new();
+    run(&mut s, "tower", json!({"storeys": 3}));
+    let started = Instant::now();
+    let all = s.model.review();
+    let full = started.elapsed();
+    let started = Instant::now();
+    s.model.check().unwrap();
+    let check = started.elapsed();
+    let column =
+        s.model.elements.iter().find(|(_, e)| matches!(e, Element::Column(_) | Element::StructuralColumn(_))).map(|(id, _)| *id).unwrap();
+    let before = s.model.clone();
+    let started = Instant::now();
+    let r = run(&mut s, "move", json!({"ids": [column], "by": [10, 0]}));
+    let edit = started.elapsed();
+    let started = Instant::now();
+    let now = s.model.review_since(&before, &all);
+    let since = started.elapsed();
+    eprintln!(
+        "tower, 3 storeys, {} elements, {} warnings: review {full:?}, check {check:?}, a move with its check and warnings {edit:?} \
+         (new: {}), review_since alone {since:?} ({} warnings)",
+        s.model.elements.len(),
+        all.len(),
+        r.get("new_warnings").map_or(0, |w| w.as_array().map_or(0, Vec::len)),
+        now.len()
+    );
+}
