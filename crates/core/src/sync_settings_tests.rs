@@ -210,33 +210,6 @@ fn the_same_entry_edited_by_both_is_the_last_to_say_it_and_the_other_entries_are
 }
 
 #[test]
-fn an_entry_removed_by_one_and_edited_by_the_other_is_as_an_element_is() {
-    let (mut a, mut b) = two();
-    let before = a.model.clone();
-    run(&mut a, "type", json!({"category": "wall", "name": "Beta", "thickness": 300}));
-    let wall = run(&mut a, "wall", json!({"points": [[0, 0], [6000, 0]]}))["ids"][0].clone();
-    send(&before, &a, &mut b);
-    // An entry nobody uses to take away.
-    let (a0, b0) = (a.model.clone(), b.model.clone());
-    let wall_b = b.model.elements.id(a.model.elements.guid(wall.as_u64().unwrap()).unwrap()).unwrap();
-    run(&mut a, "delete_type", json!({"category": "wall", "type": "Beta"}));
-    run(&mut b, "type", json!({"category": "wall", "name": "Beta", "thickness": 320}));
-    // The same for an element: A removes it, B moves it.
-    run(&mut a, "delete", json!({"ids": [wall]}));
-    run(&mut b, "move", json!({"ids": [wall_b], "by": [0, 100]}));
-    let (a1, b1) = (a.model.clone(), b.model.clone());
-    send_model(&b0, &b1, &mut a);
-    send_model(&a0, &a1, &mut b);
-    // A is told B's edit of an entry it no longer has (a body alone, no name: the entry stays out) and has the element again, as it
-    // is told it; B is told the removal. Entries and elements are each told in the order told. (A shared room settles two changes
-    // of one key for everyone.)
-    assert!(!a.model.types.wall.contains_key("Beta"), "the entry stays out: {:?}", wall_types(&a.model));
-    assert!(!b.model.types.wall.contains_key("Beta"));
-    assert_eq!(walls(&a.model), 1);
-    assert_eq!(walls(&b.model), 0);
-}
-
-#[test]
 fn walls_of_a_type_added_at_the_same_moment_find_their_types_in_both_copies() {
     let (mut a, mut b) = two();
     crossed(

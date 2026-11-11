@@ -36,6 +36,10 @@
 //! their GUIDs, in every copy alike. A copy that renamed one so tells the room (`fixes`), so that a copy made from the room
 //! later agrees.
 //!
+//! **An entry in use is not taken out** (as in Revit): [`crate::sync::Model::merged`] keeps an entry the changes take out that this
+//! copy's elements, or the changes' own, still name, and tells the room its keys again (`fixes`, from [`restoring`]). The changes
+//! that fail for one entry alone are refused alone ([`groups`]).
+//!
 //! A map of entries that is empty has no entry to send: it is one key of its own, `materials: {}`, so that a copy made from a
 //! whole room (`complete`) knows it is empty and not left out. Told as a change it is a no-op. So is a **whole map that has
 //! entries** (`materials: {…}`, entries by name without GUIDs): told as a change it is left alone; only a whole room
@@ -179,12 +183,61 @@ fn in_step(m: &Model) -> std::borrow::Cow<'_, Model> {
     std::borrow::Cow::Owned(x)
 }
 
+/// A copy of `m` with no elements, made without copying the elements' index (each push that changes a setting makes one). Every
+/// field is named, so that a field added to the model is a compile error here until it is said what a copy without elements has.
+fn without_elements(m: &Model) -> Model {
+    Model {
+        format: m.format,
+        name: m.name.clone(),
+        uid: m.uid,
+        units: m.units,
+        language: m.language,
+        room_area: m.room_area,
+        next_id: m.next_id,
+        types: m.types.clone(),
+        materials: m.materials.clone(),
+        images: m.images.clone(),
+        clouds: m.clouds.clone(),
+        cads: m.cads.clone(),
+        families: m.families.clone(),
+        parameters: m.parameters.clone(),
+        view_filters: m.view_filters.clone(),
+        view_templates: m.view_templates.clone(),
+        phases: m.phases.clone(),
+        phase_filters: m.phase_filters.clone(),
+        phase_overrides: m.phase_overrides.clone(),
+        option_sets: m.option_sets.clone(),
+        line_weights: m.line_weights.clone(),
+        standard: m.standard,
+        object_styles: m.object_styles.clone(),
+        line_patterns: m.line_patterns.clone(),
+        line_styles: m.line_styles.clone(),
+        fill_patterns: m.fill_patterns.clone(),
+        region_types: m.region_types.clone(),
+        text_types: m.text_types.clone(),
+        dimension_types: m.dimension_types.clone(),
+        detail_groups: m.detail_groups.clone(),
+        title_blocks: m.title_blocks.clone(),
+        site_figures: m.site_figures.clone(),
+        title_values: m.title_values.clone(),
+        reinforcement: m.reinforcement.clone(),
+        voltages: m.voltages.clone(),
+        distribution_systems: m.distribution_systems.clone(),
+        wire_types: m.wire_types.clone(),
+        georeference: m.georeference.clone(),
+        pinned: m.pinned.clone(),
+        elements: crate::ids::Elements::new(),
+        library: m.library.clone(),
+        loaded: std::collections::BTreeMap::new(),
+        derived: crate::derived::Derived::default(),
+    }
+}
+
 /// The project's settings as the file has them, by key: everything but what each copy has of its own, and what points at a
 /// library entry holding its GUID. A map of entries the file leaves out when it is empty or the default is there all the same
 /// (as the entries it has).
 pub fn settings(m: &Model) -> Result<Map<String, Value>, String> {
-    let mut bare = m.clone();
-    bare.elements = crate::ids::Elements::new();
+    let mut bare = without_elements(m);
     bare.refs_to_file();
     let Value::Object(mut out) = serde_json::to_value(&bare).map_err(|e| e.to_string())? else {
         return Err("a project is not an object".into());
@@ -391,7 +444,8 @@ pub(crate) struct Applied {
     /// Each entry that is named otherwise now (its kind, its name before, its name now): what in this copy points at it by
     /// name is to follow.
     pub renames: Vec<(Kind, String, String)>,
-    /// What this copy tells the room that it did not hear (the name of an entry it had to rename, see the module).
+    /// What this copy tells the room that it did not hear: the name of an entry it had to rename, a body left with no name (none: to
+    /// be taken out of the room). See the module.
     pub fixes: BTreeMap<String, Option<String>>,
 }
 
@@ -507,6 +561,8 @@ pub(crate) fn apply(
             }
         }
     }
+    // What this copy tells the room that it did not hear: the names of entries it had to rename, bodies left with no entry.
+    let mut fixes: BTreeMap<String, Option<String>> = BTreeMap::new();
     // The entries told by key.
     for ((path, guid), say) in said {
         let Some(kind) = say.kind else { continue };
@@ -528,8 +584,12 @@ pub(crate) fn apply(
                     }
                 } else {
                     // A body with no name for an entry this copy does not have is what is left of an entry taken out while another
-                    // copy changed it (a shared room keeps the changed key of the two): the entry stays out.
-                    let Some(name) = say.name else { continue };
+                    // copy changed it (a shared room keeps the changed key of the two): the entry stays out, and the body is taken out
+                    // of the room (a `fixes` entry that says none), or a copy that keeps the room has a difference it never ends.
+                    let Some(name) = say.name else {
+                        fixes.insert(entry_key(&path, guid, false), None);
+                        continue;
+                    };
                     if m.elements.contains_key(guid) {
                         return Err(format!("{guid} is an element's GUID"));
                     }
@@ -565,18 +625,19 @@ pub(crate) fn apply(
     for (i, h) in held.iter().enumerate() {
         groups.entry((h.kind.clone(), h.name.clone())).or_default().push(i);
     }
-    let mut fixes: BTreeMap<String, Option<String>> = BTreeMap::new();
     for ((kind, name), mut at) in groups {
         if at.len() < 2 {
             continue;
         }
         at.sort_by_key(|&i| held[i].guid);
+        // `Brick (2)` asked for twice is `Brick (3)` for the later, never `Brick (2) (2)`: the count is of the name without its own.
+        let base = without_count(&name);
         let mut n = 2;
         for &i in &at[1..] {
-            let mut candidate = format!("{name} ({n})");
+            let mut candidate = format!("{base} ({n})");
             while taken.contains(&(kind.clone(), candidate.clone())) {
                 n += 1;
-                candidate = format!("{name} ({n})");
+                candidate = format!("{base} ({n})");
             }
             taken.insert((kind.clone(), candidate.clone()));
             fixes.insert(entry_key(&held[i].path, held[i].guid, true), Some(Value::String(candidate.clone()).to_string()));
@@ -694,6 +755,70 @@ pub(crate) fn apply(
         }
     }
     Ok(Applied { library, renames, fixes })
+}
+
+/// `name` without a count at its end (` (2)`): what `Name (2)`, `Name (3)` are counts of.
+fn without_count(name: &str) -> &str {
+    let Some(open) = name.strip_suffix(')').and_then(|n| n.rfind(" (")) else { return name };
+    let count = &name[open + 2..name.len() - 1];
+    if open > 0 && !count.is_empty() && count.bytes().all(|b| b.is_ascii_digit()) { &name[..open] } else { name }
+}
+
+/// The entries of `m`'s library that a change of the settings may take out, with what each one is called, as a map of the settings
+/// holds it: an entry that is a map's, or one an entry owns, which goes with its owner (a family's type, a design option). Each
+/// as the entry that stands for it in the settings: its own GUID, or its owner's.
+pub(crate) fn standing_for(m: &Model, kind: &Kind, name: &str, guid: Guid) -> Option<Guid> {
+    if path_of(kind).is_some() {
+        return Some(guid);
+    }
+    let owner = match kind {
+        Kind::FamilyType | Kind::FamilyParameter => Kind::Family,
+        Kind::DesignOption => Kind::OptionSet,
+        _ => return None,
+    };
+    m.library.guid(&owner, name.split_once(": ")?.0)
+}
+
+/// What a copy tells the room to put an entry back that a change of the room took out, but this copy keeps (an entry that is
+/// in use): its body and its name, each by its key, as `m` says them now.
+pub(crate) fn restoring(m: &Model, guids: &BTreeSet<Guid>) -> Result<BTreeMap<String, Option<String>>, String> {
+    let all = flat(m)?;
+    let mut out = BTreeMap::new();
+    for g in guids {
+        let Some((_, e)) = m.library.by_guid(*g) else { continue };
+        let Some(path) = path_of(&e.kind) else { continue };
+        for name in [false, true] {
+            let k = entry_key(&path, *g, name);
+            if let Some(v) = all.get(&k) {
+                out.insert(k, Some(v.to_string()));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// `project` without what it tells of the entries `guids` (their bodies and names).
+pub(crate) fn without(project: &BTreeMap<String, Option<String>>, guids: &BTreeSet<Guid>) -> BTreeMap<String, Option<String>> {
+    project
+        .iter()
+        .filter(|(k, _)| !matches!(read_key(k), Ok(Told::Entry { guid, .. }) if guids.contains(&guid)))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
+}
+
+/// The keys of `project` that stand or fall together: an entry's body and name, each other key alone. A key that cannot be read is
+/// a group of its own, which then says what is wrong with it.
+pub(crate) fn groups(project: &BTreeMap<String, Option<String>>) -> Vec<Vec<String>> {
+    let mut by_entry: BTreeMap<(Vec<String>, Guid), Vec<String>> = BTreeMap::new();
+    let mut out: Vec<Vec<String>> = Vec::new();
+    for k in project.keys() {
+        match read_key(k) {
+            Ok(Told::Entry { path, guid, .. }) => by_entry.entry((path, guid)).or_default().push(k.clone()),
+            _ => out.push(vec![k.clone()]),
+        }
+    }
+    out.extend(by_entry.into_values());
+    out
 }
 
 /// The map held at `path` (the setting, and the groups of `types`), taken out of `map`, left empty.

@@ -400,7 +400,7 @@ impl WebApp {
     /// Takes in what the others changed (`{"elements": {guid: json | null}, "project": {key: json | null}, "complete"?}`;
     /// `complete`: everything the shared model holds, what it doesn't name being removed). The model is checked: what would
     /// break it is left out and named. This person's changes not taken yet stay as they are, to be sent; their undo stays
-    /// theirs. Replies `{"taken": n, "refused": [{what, error}], "fixes": {key: json text}}`: the `fixes` are what this copy tells the room that it did not hear (an entry it had to rename).
+    /// theirs. Replies `{"taken": n, "refused": [{what, error}], "fixes": {key: json text}}`: the `fixes` are what this copy tells the room that it did not hear (an entry it had to rename, one it kept because it is in use, a body to take out: none says to take the key out).
     pub fn apply_changes(&self, changes: &str) -> Result<String, JsValue> {
         let c = Changes::read(changes).map_err(err)?;
         let merged = {
