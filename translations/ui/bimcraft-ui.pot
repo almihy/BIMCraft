@@ -11751,3 +11751,11 @@ msgctxt "side"
 msgid "Top"
 msgstr ""
 
+
+#: crates/core/src/commands.rs
+msgid "Pin"
+msgstr ""
+
+#: crates/core/src/commands.rs
+msgid "Unpin"
+msgstr ""

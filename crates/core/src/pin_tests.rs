@@ -10,8 +10,10 @@ fn run(s: &mut Session, c: &str, p: Value) -> Value {
     s.execute(c, &p).unwrap_or_else(|e| panic!("{c} {p}: {e}"))
 }
 
+/// A 4000 mm wall, each one 3000 mm north of the last, so that none touches another.
 fn wall(s: &mut Session) -> u64 {
-    run(s, "wall", json!({"points": [[0, 0], [4000, 0]]}))["ids"][0].as_u64().unwrap()
+    let y = 3000 * s.model.elements.iter().filter(|(_, e)| e.category() == "wall").count();
+    run(s, "wall", json!({"points": [[0, y], [4000, y]]}))["ids"][0].as_u64().unwrap()
 }
 
 #[test]
@@ -151,7 +153,10 @@ fn a_grids_end_moves_alone_and_the_other_stays() {
 #[test]
 fn a_dimensions_number_moves_along_and_across_its_line_and_goes_back() {
     let mut s = Session::new();
-    let d = run(&mut s, "dimension", json!({"refs": [[0, 0], [4000, 0]], "at": [0, -1000]}))["id"].as_u64().unwrap();
+    // Two walls, each measured to at a point of its own centre line.
+    run(&mut s, "wall", json!({"points": [[0, 0], [0, 3000]]}));
+    run(&mut s, "wall", json!({"points": [[4000, 0], [4000, 3000]]}));
+    let d = run(&mut s, "dimension", json!({"refs": [[0, 1000], [4000, 1000]], "at": [0, -1000]}))["id"].as_u64().unwrap();
     let shifts = |s: &mut Session| run(s, "elements", json!({"category": "dimension"}))["elements"][0].get("text_shifts").cloned();
     assert_eq!(shifts(&mut s), None);
     let r = run(&mut s, "dimension_text_move", json!({"id": d, "along": 300, "across": -200}));

@@ -39,10 +39,7 @@ impl BimApp {
         }
         let text = match pinned.as_slice() {
             [one] => tf("element {} is pinned and stays where it is: Unpin (UP) frees it", &[&one.to_string()]),
-            many => tf(
-                "{} of the selected elements are pinned and stay where they are: Unpin (UP) frees them",
-                &[&many.len().to_string()],
-            ),
+            many => tf("{} of the selected elements are pinned and stay where they are: Unpin (UP) frees them", &[&many.len().to_string()]),
         };
         self.status = Status { text, error: true };
         true

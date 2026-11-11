@@ -11988,3 +11988,11 @@ msgstr "Superior"
 #: crates/ui-egui/src/dock.rs:43
 #~ msgid "Tools"
 #~ msgstr "Herramientas"
+
+#: crates/core/src/commands.rs
+msgid "Pin"
+msgstr "Fijar"
+
+#: crates/core/src/commands.rs
+msgid "Unpin"
+msgstr "Desfijar"

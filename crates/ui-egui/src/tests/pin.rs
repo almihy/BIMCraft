@@ -21,6 +21,8 @@ fn drag_holding(h: &mut Harness<BimApp>, from: P2, to: P2, mods: Modifiers) {
 }
 
 const ONE: &str = "column {\"at\": [2000, 2000]}";
+const TWO: &str = "column {\"at\": [2000, 2000]}
+column {\"at\": [6000, 3000]}";
 
 fn at(h: &Harness<BimApp>, id: Id) -> P2 {
     let v = field(h, id, "at");
@@ -29,16 +31,17 @@ fn at(h: &Harness<BimApp>, id: Id) -> P2 {
 
 #[test]
 fn a_dragged_element_snaps_as_the_move_tool_does() {
-    let mut h = app(&format!("{BOX}\n{ONE}"));
-    let col = ids(&h, "column")[0];
+    let mut h = app(&format!(
+        "{BOX}
+{TWO}"
+    ));
+    let (col, other) = (ids(&h, "column")[0], ids(&h, "column")[1]);
     // Near the south wall's middle (4000, 0), a few pixels off it: the middle, to the millimetre, not the nearest 10.
     drag(&mut h, P2(2000.0, 2000.0), P2(3990.0, 12.0));
     assert_eq!(at(&h, col), P2(4000.0, 0.0), "{:?}", h.state().status);
     // Far from anything it keeps to 10 mm, as before.
-    drag(&mut h, P2(4000.0, 0.0), P2(5003.0, 2103.0));
-    let p = at(&h, col);
-    assert!((p.0 - 5000.0).abs() <= 10.0 && (p.1 - 2100.0).abs() <= 10.0, "{p:?}");
-    assert_eq!((p.0 / 10.0).fract(), 0.0, "{p:?}");
+    drag(&mut h, P2(6000.0, 3000.0), P2(7003.0, 4103.0));
+    assert_eq!(at(&h, other), P2(7000.0, 4100.0));
 }
 
 #[test]
@@ -89,7 +92,7 @@ fn a_pinned_element_refuses_a_drag_and_the_tools_and_says_so() {
     assert_eq!(at(&h, col), P2(2000.0, 2000.0));
     // Move and Rotate refuse to begin.
     for letters in ["MV", "RO"] {
-        h.state_mut().status = Status::default();
+        h.state_mut().status = crate::Status::default();
         shortcut(&mut h, letters);
         assert_eq!(h.state().tool, Tool::Modify, "{letters}");
         assert!(h.state().status.text.contains("pinned"), "{letters}: {:?}", h.state().status);
@@ -109,7 +112,7 @@ fn the_pin_on_a_selected_element_unpins_it_and_the_drag_then_moves_it() {
     let col = ids(&h, "column")[0];
     click(&mut h, P2(2000.0, 2000.0));
     press(&mut h, "Pin");
-    assert!(h.state().session.model.is_pinned(col));
+    assert!(h.state().session.model.is_pinned(col), "{:?} {:?}", h.state().status, h.state().selection);
     h.run();
     press(&mut h, &format!("Unpin element {col}"));
     assert!(!h.state().session.model.is_pinned(col), "the pin icon unpinned it");
@@ -153,6 +156,7 @@ fn a_grids_end_is_a_grip_that_lengthens_it() {
     assert!((g.start.1 + 2500.0).abs() <= 20.0, "{:?}", g.start);
     // Pinned, it stays.
     shortcut(&mut h, "PN");
+    assert!(h.state().session.model.is_pinned(grid), "{:?}", h.state().status);
     let was = Arc::clone(&h.state().session.model);
     drag(&mut h, P2(-2000.0, 9000.0), P2(-2000.0, 9500.0));
     assert!(Arc::ptr_eq(&was, &h.state().session.model), "a pinned grid's end does not move");
@@ -161,16 +165,16 @@ fn a_grids_end_is_a_grip_that_lengthens_it() {
 
 #[test]
 fn a_dimensions_line_and_text_have_grips() {
-    let mut h = app(&format!("{BOX}\ndimension {{\"refs\": [[0, 0], [8000, 0]], \"at\": [0, -1500]}}"));
+    let mut h = app(&format!("{BOX}\ndimension {{\"refs\": [[0, 3000], [8000, 3000]], \"at\": [0, 3000]}}"));
     let dim = ids(&h, "dimension")[0];
-    click(&mut h, P2(4000.0, -1500.0));
+    click(&mut h, P2(4000.0, 3000.0));
     assert_eq!(h.state().selection, [dim]);
     // The line's grip drags the line square to itself: the offset changes, along the line it does not.
     let line = h.get_by_label(&format!("Dimension line of element {dim}")).rect().center();
     drag_screen(&mut h, line, line + vec2(0.0, 40.0), PointerButton::Primary);
     let now = field(&h, dim, "at");
     assert_eq!(now[0], json!(0.0), "{now}");
-    assert!(now[1].as_f64().unwrap() < -1500.0, "dragged down the screen, south: {now}");
+    assert!(now[1].as_f64().unwrap() < 3000.0, "dragged down the screen, south: {now}");
     // The number's grip moves the number.
     let text = h.get_by_label(&format!("Dimension text 1 of element {dim}")).rect().center();
     drag_screen(&mut h, text, text + vec2(40.0, 0.0), PointerButton::Primary);

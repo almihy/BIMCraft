@@ -2116,7 +2116,8 @@ impl BimApp {
         let &[id] = self.selection.as_slice() else { return (by, Some(f)) };
         let Some(Element::Door(o) | Element::Window(o)) = m.elements.get(id) else { return (by, Some(f)) };
         let Some(w) = m.wall(o.host).filter(|w| w.arc == 0.0) else { return (by, Some(f)) };
-        if !free {
+        // Only a snap to some point of the plan's own keeps the door off the middle: along its wall's line it goes there.
+        if !matches!(f.kind, Kind::Free | Kind::Angle | Kind::Nearest) {
             return (by, Some(f));
         }
         let u = (w.end - w.start).unit();
@@ -3188,7 +3189,9 @@ impl BimApp {
     fn gripped(&self) -> Option<Id> {
         let m = &self.session.model;
         match (self.selection.as_slice(), &self.tool) {
-            (&[id], Tool::Modify) if m.wall(id).is_some() || m.run_of(id).is_some() || matches!(m.elements.get(id), Some(Element::Grid(_))) => {
+            (&[id], Tool::Modify)
+                if m.wall(id).is_some() || m.run_of(id).is_some() || matches!(m.elements.get(id), Some(Element::Grid(_))) =>
+            {
                 Some(id)
             }
             _ => None,
