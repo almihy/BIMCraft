@@ -1,0 +1,142 @@
+# Arqiflow's fork only (almihy/BIMCraft): once a week, IPedrax/BIMCraft's new work is merged into a branch made from
+# arqiflow-web (the branch Arqiflow builds its engine from), checked to build for the browser, and offered as a pull
+# request into arqiflow-web for someone to look at and merge. Nothing reaches arqiflow-web by itself. When the merge
+# has conflicts, an issue says which files, for a person to resolve by hand (docs/handover-2026-11-09-bimcraft.md in
+# Arqiflow, "Taking in upstream again").
+#
+# It lives on main because GitHub runs scheduled workflows from the default branch only. The fork is public, so the
+# runs cost nothing.
+name: Arqiflow upstream
+
+on:
+  schedule:
+    - cron: "0 5 * * 1" # Mondays, 05:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: arqiflow-upstream
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: arqiflow-web
+          fetch-depth: 0
+
+      - name: Upstream's new work
+        id: new
+        run: |
+          git remote add upstream https://github.com/IPedrax/BIMCraft.git
+          git fetch --quiet upstream main
+          count="$(git rev-list --count HEAD..upstream/main)"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "branch=upstream-$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+          echo "Upstream has $count commit(s) arqiflow-web does not." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: An open pull request already?
+        id: open
+        if: steps.new.outputs.count != '0'
+        run: |
+          open="$(gh pr list --base arqiflow-web --state open --json headRefName --jq '[.[] | select(.headRefName | startswith("upstream-"))] | length')"
+          echo "open=$open" >> "$GITHUB_OUTPUT"
+          [ "$open" = "0" ] || echo "An upstream pull request is still open: merge or close it first." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Merge
+        id: merge
+        if: steps.new.outputs.count != '0' && steps.open.outputs.open == '0'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git switch -c "${{ steps.new.outputs.branch }}"
+          if git merge --no-edit upstream/main; then
+            echo "clean=true" >> "$GITHUB_OUTPUT"
+          else
+            git diff --name-only --diff-filter=U > conflicts.txt
+            git merge --abort
+            echo "clean=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Say the conflicts
+        if: steps.merge.outputs.clean == 'false'
+        run: |
+          {
+            echo "Merging IPedrax/BIMCraft's main (${{ steps.new.outputs.count }} new commits) into arqiflow-web has conflicts in:"
+            echo
+            sed 's/^/- `/; s/$/`/' conflicts.txt
+            echo
+            echo "Merge by hand: \`git fetch upstream && git merge upstream/main\` on arqiflow-web, then the checks in Arqiflow's docs/handover-2026-11-09-bimcraft.md."
+          } > body.md
+          gh issue create --title "Upstream merge has conflicts ($(date -u +%Y-%m-%d))" --body-file body.md
+          exit 1
+
+      - name: Calls that break in the browser
+        if: steps.merge.outputs.clean == 'true'
+        run: |
+          # The engine runs in a browser, where the clock, the process and native file dialogs are not there:
+          # Instant::now, SystemTime::now and rfd:: compile and then panic. New ones, outside tests, are listed.
+          git diff HEAD^1 HEAD -- '*.rs' ':!**/tests/**' ':!**/*_tests.rs' \
+            | grep -E '^\+' | grep -E 'Instant::now|SystemTime::now|rfd::' > browser.txt || true
+          echo "lines=$(wc -l < browser.txt)" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.merge.outputs.clean == 'true'
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.merge.outputs.clean == 'true'
+        with:
+          shared-key: arqiflow-wasm
+
+      - name: Builds for the browser
+        id: build
+        if: steps.merge.outputs.clean == 'true'
+        env:
+          RUSTFLAGS: --cfg getrandom_backend="wasm_js"
+        run: |
+          if cargo check -p bimcraft-web -p bimcraft-webapp --target wasm32-unknown-unknown 2> check.txt; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Offer it
+        if: steps.merge.outputs.clean == 'true'
+        run: |
+          git push origin "${{ steps.new.outputs.branch }}"
+          {
+            echo "IPedrax/BIMCraft's main, ${{ steps.new.outputs.count }} new commit(s), merged into arqiflow-web without conflicts."
+            echo
+            if [ "${{ steps.build.outputs.ok }}" = "true" ]; then
+              echo "- The browser crates (bimcraft-web, bimcraft-webapp) build for wasm32."
+            else
+              echo "- **The browser crates do not build for wasm32.** The end of cargo's output:"
+              echo; echo '```'; tail -40 check.txt; echo '```'
+            fi
+            if [ "$lines" != "0" ]; then
+              echo "- **New calls that panic in the browser** (Instant::now, SystemTime::now, rfd::), outside tests:"
+              echo; echo '```'; cat browser.txt; echo '```'
+            else
+              echo "- No new Instant::now, SystemTime::now or rfd:: outside tests."
+            fi
+            echo
+            echo "After merging: in Arqiflow, \`npm run engine:build\`, try the editor, and commit \`web/lib/engine\`."
+          } > body.md
+          title="Upstream: ${{ steps.new.outputs.count }} new commit(s) ($(date -u +%Y-%m-%d))"
+          # A pull request needs Settings > Actions > General > "Allow GitHub Actions to create and approve pull
+          # requests"; without it, an issue with the link to open one.
+          if ! gh pr create --base arqiflow-web --head "${{ steps.new.outputs.branch }}" --title "$title" --body-file body.md; then
+            { echo "Open the pull request: https://github.com/${{ github.repository }}/compare/arqiflow-web...${{ steps.new.outputs.branch }}?expand=1"; echo; cat body.md; } > issue.md
+            gh issue create --title "$title" --body-file issue.md
+          fi
