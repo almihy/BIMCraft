@@ -887,8 +887,8 @@ pub struct BimApp {
     /// The family and type the Component tool places, as picked, and how far it's turned, degrees.
     component: Option<(String, String)>,
     component_angle: f64,
-    /// What Space has flipped of the door or window about to be placed, `(hand, facing)`: facing is from the cursor's side of the wall.
-    place_flip: (bool, bool),
+    /// Whether Space has flipped the hand of the door about to be placed (its swing side is the cursor's side of the wall).
+    place_hand: bool,
     /// Whether Space has put the exterior side of the walls being drawn on the right of the way they are drawn.
     wall_flipped: bool,
     /// The Properties palette's folded groups.
@@ -1528,7 +1528,7 @@ impl BimApp {
             new_schedule: None,
             component: None,
             component_angle: 0.0,
-            place_flip: (false, false),
+            place_hand: false,
             wall_flipped: false,
             collapsed: BTreeSet::new(),
             view_rect: Rect::ZERO,
@@ -2131,8 +2131,8 @@ impl BimApp {
         if pressed(Modifiers::NONE, Key::Delete) {
             self.delete();
         }
-        // Space flips: what is selected, the door or window about to be placed, the wall about to be drawn.
-        if matches!(self.tool, Tool::Modify | Tool::Door | Tool::Window | Tool::Wall(_)) && pressed(Modifiers::NONE, Key::Space) {
+        // Space flips: what is selected, the hand of the door about to be placed, the wall about to be drawn.
+        if matches!(self.tool, Tool::Modify | Tool::Door | Tool::Wall(_)) && pressed(Modifiers::NONE, Key::Space) {
             self.flip_key();
         }
         self.reset_flips();

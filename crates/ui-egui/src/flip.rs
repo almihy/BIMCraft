@@ -1,8 +1,10 @@
-//! Revit's flip controls on the plan. A door or window selected alone shows two arrows beside it: across the wall (flip
-//! facing: its swing, or its face, to the wall's other side) and along it (flip hand: its hinge on the other jamb); a wall
-//! selected alone shows one across it on its exterior side. A click on an arrow is the `flip` command. Space does the same
-//! from the keyboard, and does it while a door, window or wall is being placed or drawn too: a door or window put down
-//! takes the side of the wall the cursor is on (`toward` of the `door` and `window` commands), and Space turns it from there.
+//! Revit's flip controls on the plan. A door selected alone shows two arrows beside it: across the wall (flip facing: its
+//! swing to the wall's other side) and along it (flip hand: its hinge on the other jamb); a window shows the first only (an
+//! ordinary Revit window has no hand); a wall selected alone shows one across it on its exterior side, along the wall from
+//! its middle so it never lies over the pin. A click on an arrow is the `flip` command. Space does the same from the keyboard
+//! on a selection. While a door is placed the cursor's side of the wall is its swing side (`toward` of the `door` command)
+//! and Space flips its hand, as Revit's; a window put down faces the cursor's side and Space has nothing to add; while a
+//! wall is drawn, Space puts its exterior side on the other side of the line. Flipping is not a move: a pinned element flips.
 
 use bimcraft_core::geom::P2;
 use bimcraft_core::model::{Element, Id, Model};
@@ -20,6 +22,8 @@ const REACH: f32 = 8.0;
 const BUTTON: f32 = 24.0;
 /// How far clear of the wall's face an arrow stands, in px.
 const CLEAR: f32 = 16.0;
+/// How far from a wall's middle, along it, the wall's arrow stands at least, in px: more than the pin's reach and the button's.
+const AWAY: f64 = 56.0;
 
 /// What a flip control turns.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,16 +90,22 @@ pub(crate) fn arrows(m: &Model, v: &View, origin: Pos2, selection: &[Id]) -> Vec
             let left = toward(c, axis.at(o.offset, centre + 100.0));
             let front = if o.flip_facing { -left } else { left };
             let here = screen(c);
-            vec![
-                // Across the wall, beside the opening, clear of its leaf.
-                Arrow { control: Control::Facing, id, at: here + along * (half_width as f32 + CLEAR), along: left },
-                // Along the wall, on the side the opening doesn't open to.
-                Arrow { control: Control::Hand, id, at: here - front * (thick as f32 / 2.0 + CLEAR), along },
-            ]
+            // Across the wall, beside the opening, clear of its leaf.
+            let mut arrows = vec![Arrow { control: Control::Facing, id, at: here + along * (half_width as f32 + CLEAR), along: left }];
+            // A door's hand, along the wall, on the side the door doesn't open to; an ordinary window has none.
+            if matches!(e, Element::Door(_)) {
+                arrows.push(Arrow { control: Control::Hand, id, at: here - front * (thick as f32 / 2.0 + CLEAR), along });
+            }
+            arrows
         }
         Some(Element::Wall(w)) => {
             let (axis, (ext, _)) = (Axis::of(w), walls::faces(m, w));
-            let s = axis.length() / 2.0;
+            // Toward the wall's start, clear of its middle, where the pin of a pinned wall is: a quarter of its length, and
+            // never nearer than `AWAY` px (the pin's icon and this button never overlap, whichever way the wall runs, so a wall
+            // too short on the screen has its arrow past its start).
+            let length = axis.length();
+            let away = (length * v.scale / 4.0).max(AWAY) / v.scale;
+            let s = length / 2.0 - away;
             let face = axis.at(s, ext);
             let left = toward(face, axis.at(s, ext + 100.0));
             vec![Arrow { control: Control::Wall, id, at: screen(face) + left * CLEAR, along: left }]
@@ -148,16 +158,17 @@ impl BimApp {
     }
 
     /// Space in Modify: the selected walls turn round, and one door or window, or a few, turn one step through their four
-    /// ways: facing, hand, facing, hand. Space while placing a door or window is the same step, taken before it is put down; while
-    /// a wall is drawn, it is the wall's exterior side. Whether Space was used.
+    /// ways: facing, hand, facing, hand. While a door is placed the cursor's side sets its swing, and Space flips its hand; a
+    /// window put down faces the cursor's side too and has no hand, so Space does nothing there; while a wall is drawn, Space is
+    /// the wall's exterior side. Whether Space was used.
     pub(crate) fn flip_key(&mut self) -> bool {
         match &self.tool {
             Tool::Modify => {
                 self.flip();
                 true
             }
-            Tool::Door | Tool::Window => {
-                self.place_flip = step(self.place_flip);
+            Tool::Door => {
+                self.place_hand = !self.place_hand;
                 true
             }
             Tool::Wall(_) => {
@@ -184,15 +195,11 @@ impl BimApp {
     }
 
     /// The `door` or `window` command's parameters with where the cursor is, for the side of the wall to open to, and
-    /// what Space has flipped so far.
+    /// (for a door) the hand Space has flipped.
     pub(crate) fn opening_flips(&self, mut params: Value, cursor: P2) -> Value {
         params["toward"] = json!([cursor.0, cursor.1]);
-        let (hand, facing) = self.place_flip;
-        if hand {
+        if self.place_hand && self.tool == Tool::Door {
             params["flip_hand"] = json!(true);
-        }
-        if facing {
-            params["flip_facing"] = json!(true);
         }
         params
     }
@@ -218,8 +225,8 @@ impl BimApp {
     /// A tool other than the ones Space flips before it puts something down has no flip waiting (Esc ends a tool without
     /// going through `set_tool`, so the frame checks).
     pub(crate) fn reset_flips(&mut self) {
-        if !matches!(self.tool, Tool::Door | Tool::Window) {
-            self.place_flip = (false, false);
+        if self.tool != Tool::Door {
+            self.place_hand = false;
         }
         if !matches!(self.tool, Tool::Wall(_)) {
             self.wall_flipped = false;

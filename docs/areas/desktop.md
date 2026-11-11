@@ -191,7 +191,7 @@ way a base point snaps), `BimApp::dragged` snaps the cursor from it with `snap_s
 a copy and does), Shift keeps it square, and a point with nothing to snap to is rounded to 10 mm. On release `drop_selection` runs `move`,
 or `copy` with Ctrl (the copy is selected). Pin (PN) and Unpin (UP) are commands (`pin`, `unpin`; the model keeps `pinned` by GUID, `pin.rs` here
 draws the pin on a selected pinned element, whose click unpins): a drag, a grip (refused at the press, with no preview), Move, Rotate or Mirror without Copy, a typed temporary dimension or angle, a length typed into a permanent dimension (it moves what the segment ends at, `Model::dimension_moves`), Align, Offset without Copy,
-an arrow-key nudge and a drag on a sheet of a pinned element run nothing and the status bar says it is pinned (`BimApp::refuse_pinned`, `refuse_pinned_ids`); the agent's commands still run and say what was pinned (`pinned`, `note`: `move`, `rotate`, `mirror`, `align`, `modify` of where that kind of element is (its ends, its `at` and `angle`, a re-sketched `boundary` or `sketch`, a door's `host` or `offset`; never a height or vertical offset), `offset` without `copy`, `corner`, `trim_extend`, `split`, `dimension_value`).
+an arrow-key nudge and a drag on a sheet of a pinned element run nothing and the status bar says it is pinned (`BimApp::refuse_pinned`, `refuse_pinned_ids`); the agent's commands still run and say what was pinned (`pinned`, `note`: `move`, `rotate`, `mirror`, `align`, `modify` of where that kind of element is (its ends, its `at` and `angle`, a re-sketched `boundary` or `sketch`, a door's `host` or `offset`; never a height or vertical offset), `offset` without `copy`, `corner`, `trim_extend`, `split`, `dimension_value`). Flip is not a move for pins: a pinned door or wall flips, as in Revit (a flipped wall's location line stays), so `flip` and its arrows and Space never ask `refuse_pinned`; do not add it.
 `dimgrips.rs`: the grips of a selected aligned or linear dimension, one on its line (`move`, square to the line) and one on each number
 (`dimension_text_move`; the numbers of continuous and ordinate strings).
 
@@ -299,13 +299,13 @@ type without layers as one band. A wall's run from its exterior face to its inte
 dashed where it runs (`walls::depth`, the core's own rule) and named under it; a click on the picture sets the line nearest it, through
 `modify`. A floor's, a roof's or a ceiling's run from the top down. Under it, for doors, which way they open (`opening_picker`): four plans of a door in
 its wall (as placed, hand flipped, facing flipped, both), the one the selected doors share lit, a click setting their `flip_hand` and
-`flip_facing` through `modify`. On the plan (`flip.rs`) a door or window selected alone has Revit's flip arrows: across the wall beside
-it, its facing, and along the wall on the side it doesn't open to, its hand; a wall selected alone has one across it on its exterior side.
+`flip_facing` through `modify`. On the plan (`flip.rs`) a door selected alone has Revit's flip arrows: across the wall beside
+it, its facing, and along the wall on the side it doesn't open to, its hand; a window has only the facing arrow (an ordinary Revit window has no hand); a wall selected alone has one across it on its exterior side, along the wall from its middle (a quarter of its length, at least 56 px) so it never lies over the wall's pin.
 A click is the `flip` command (`hand`, `facing`); the arrows are egui widgets labelled Flip facing, Flip hand and Flip exterior side. Space
 in Modify flips the selected walls and steps a selected door or window through its four ways (`flip::step`: facing, hand, facing, hand);
-with the Door or Window tool it takes that step before the opening is put down (`place_flip`, reset after each); with the Wall tool it
-draws the walls the other way round (`wall_flipped`, in `wall_params`: their exterior is to the left of the way they run) and the preview
-marks the exterior side. A door or window being placed is sent the cursor as `toward`, so it opens to the cursor's side of the wall. For rooms, their colour on plans (`room_colour`): swatches, No fill first, and any
+with the Door tool it flips the hand of the door about to be put down (`place_hand`, reset after each), as Revit's; the swing side is the cursor's, and a window's face is too, so Space with the Window tool does nothing; with the Wall tool it
+draws the walls the other way round (`wall_flipped`, in `wall_params`: their exterior is to the left of the way they run, and it stays on for the chain until Space again or the tool ends) and the preview
+marks the exterior side. A door or window being placed is sent the cursor as `toward`, so it opens to the cursor's side of the wall. A flip is not a move: a pinned door or wall is flipped like any other (Revit allows it, and a flipped wall's location line stays where it was), so `refuse_pinned` is never asked of a flip; do not add it. For rooms, their colour on plans (`room_colour`): swatches, No fill first, and any
 other colour; a pick sets the room's `colour` (`Room::colour`, red, green and blue, none for no fill), which plans draw as a fill of
 the room's region under its name (`render.rs`) and a file keeps (an optional field an older version leaves out, so no format step).
 For floors, their slope (`floor_slope`): a short section of the slab at its true angle from its slope arrow's tail, a dashed line
