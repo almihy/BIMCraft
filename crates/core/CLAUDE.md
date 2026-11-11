@@ -19,6 +19,7 @@ is in the root `CLAUDE.md`; the write-ups by area are in `docs/areas/`, which th
 - **A change to what a file holds** that an older version would misread (not just a field it can do without) bumps `FORMAT` and
   adds its step to `Model::migrate`. `Model::read` leaves out what this version doesn't know (`lenient.rs` walks a file as the
   types would read it); a new element category goes in `lenient::element` too (a test names any missing).
+- **A new setting that is a map of entries by name** (a new field of `Model`, like `text_types`) goes in `MAPS` in `sync_settings.rs`, so live editing sends each entry on its own (`materials/Concrete`) and two people adding entries at once keep both; `sync_settings_tests.rs` has the checks. Any other setting travels as one key, replaced whole.
 - **A session may only read** (`Session::read_only`: the agents a window lets only read, `mcp --read-only`). `execute` refuses there what
   replaces the project (`REPLACES`), undo and redo, and a command given the project's own file as `path` or `save`; whatever else
   changed the project, its history or the phase and option it makes things in is taken back and refused. So a new command needs
