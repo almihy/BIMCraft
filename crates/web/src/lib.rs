@@ -145,6 +145,21 @@ impl Engine {
         Ok(merged.to_json().to_string())
     }
 
+    /// How this engine tells another copy of a project its settings (`bimcraft_core::sync::FORMAT`): a room and a page whose
+    /// numbers differ do not edit together.
+    pub fn sync_format() -> u32 {
+        bimcraft_core::sync::FORMAT
+    }
+
+    /// What a room that keeps the settings `project` (`{key: json text}`, as the room holds them) does to be rid of the whole
+    /// maps of copies of an older format: `{key: json text | null}`, each whole map made entries (those the room has not) and
+    /// its key taken away. See `bimcraft_core::sync_settings`.
+    pub fn expand_settings(project: &str) -> Result<String, JsError> {
+        let project: std::collections::BTreeMap<String, String> = serde_json::from_str(project).map_err(err)?;
+        let out = bimcraft_core::sync::expand_settings(&project).map_err(err)?;
+        serde_json::to_string(&out).map_err(err)
+    }
+
     /// Opens a project from its JSON text.
     pub fn open_project(&mut self, text: &str) -> Result<String, JsError> {
         let (m, left_out) = bimcraft_core::model::Model::read(text).map_err(err)?;

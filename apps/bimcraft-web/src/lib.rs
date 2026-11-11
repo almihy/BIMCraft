@@ -16,6 +16,7 @@
 //! // Editing together (bimcraft_core::sync): changes keyed by GUID, to and from the others' copies.
 //! app.take_changes();       // what changed here since last taken: '{"elements": {guid: json | null}, "project": {...}}'
 //! app.apply_changes(json);  // the others' changes taken in, checked: '{"taken": n, "refused": [...]}'
+//! WebApp.sync_format();     // (static) the number a room and a page compare: they edit together only where it is the same
 //! app.history();            // this person's undo history, to keep across a reload (by GUID)
 //! app.restore_history(text);  // put back on the project opened again: '{"undo": n, "redo": n}'
 //! ```
@@ -409,12 +410,23 @@ impl WebApp {
             let mine: BTreeSet<Guid> = sync::changes(&sent, &now).map_err(err)?.elements.into_keys().collect();
             let merged = host.app.merge_remote(&c, &mine).map_err(err)?;
             // What was sent takes the same changes, so that what changed here since is still this person's alone.
-            let after = sent.with_changes(&merged.taken, &merged.ids).map(Arc::new).unwrap_or_else(|_| Arc::clone(&host.app.session.model));
+            // The rename notes are left out of what the baseline takes: a copy that moved an edit of an old name onto the new, or
+            // made an element follow a rename, still has that to send, and heals the room (bimcraft_core::sync_settings).
+            let after = sent
+                .with_changes(&merged.taken.without_notes(), &merged.ids)
+                .map(Arc::new)
+                .unwrap_or_else(|_| Arc::clone(&host.app.session.model));
             *self.sent.borrow_mut() = Some(after);
             merged
         };
         self.repaint();
         Ok(merged.to_json().to_string())
+    }
+
+    /// How this engine tells the others the settings of a project (`bimcraft_core::sync::FORMAT`): a room and a page whose
+    /// numbers differ do not edit together.
+    pub fn sync_format() -> u32 {
+        sync::FORMAT
     }
 
     /// This person's undo history, to keep outside the page so a reload keeps it (`bimcraft_core::sync::History`, JSON):
