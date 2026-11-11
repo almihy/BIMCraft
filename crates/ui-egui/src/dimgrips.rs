@@ -59,8 +59,10 @@ impl BimApp {
             };
             response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, name.clone()));
             let mut drawn = at;
+            // A pinned dimension's grips are not held: it is refused as the press is made, and no preview is drawn.
             if response.drag_started()
                 && let Some(o) = ui.input(|i| i.pointer.press_origin())
+                && !self.refuse_pinned_ids(&[id])
             {
                 ui.memory_mut(|mem| mem.data.insert_temp(held_key, model(o)));
             }

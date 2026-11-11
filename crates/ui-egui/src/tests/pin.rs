@@ -45,6 +45,20 @@ fn a_dragged_element_snaps_as_the_move_tool_does() {
 }
 
 #[test]
+fn a_dragged_element_pressed_a_few_pixels_off_its_centre_lands_exactly_on_the_snap() {
+    let mut h = app(&format!(
+        "{BOX}
+{ONE}"
+    ));
+    let col = ids(&h, "column")[0];
+    // Pressed 3 px beside the centre: the grab point is the centre's snap, so the centre goes onto the wall's middle exactly.
+    let a = h.state().screen(P2(2000.0, 2000.0)) + vec2(3.0, 2.0);
+    let b = h.state().screen(P2(4000.0, 0.0)) + vec2(2.0, -3.0);
+    drag_screen(&mut h, a, b, PointerButton::Primary);
+    assert_eq!(at(&h, col), P2(4000.0, 0.0), "{:?}", h.state().status);
+}
+
+#[test]
 fn a_dragged_element_does_not_snap_to_its_own_points() {
     let mut h = app(ONE);
     let col = ids(&h, "column")[0];
@@ -181,4 +195,114 @@ fn a_dimensions_line_and_text_have_grips() {
     let shifts = field(&h, dim, "text_shifts");
     assert!(shifts[0]["along"].as_f64().unwrap() > 0.0, "{shifts}");
     assert_eq!(h.state().session.history().last(), Some(&"Move Dimension Text"));
+}
+
+#[test]
+fn a_pinned_column_is_not_moved_by_a_typed_dimension_or_the_arrow_keys() {
+    let mut h = app(&format!("{BOX}\ncolumn {{\"at\": [3000, 2000]}}"));
+    let col = ids(&h, "column")[0];
+    click(&mut h, P2(3000.0, 2000.0));
+    shortcut(&mut h, "PN");
+    assert!(h.state().session.model.is_pinned(col), "{:?}", h.state().status);
+    let before = Arc::clone(&h.state().session.model);
+    h.state_mut().status = crate::Status::default();
+    retype_dimension(&mut h, "3000", "1000");
+    assert!(Arc::ptr_eq(&before, &h.state().session.model), "a typed dimension moved a pinned column");
+    assert!(h.state().status.error && h.state().status.text.contains("pinned"), "{:?}", h.state().status);
+    h.state_mut().status = crate::Status::default();
+    key(&mut h, Key::ArrowRight);
+    assert!(Arc::ptr_eq(&before, &h.state().session.model), "an arrow key moved a pinned column");
+    assert!(h.state().status.text.contains("pinned"), "{:?}", h.state().status);
+}
+
+#[test]
+fn a_pinned_wall_is_not_changed_by_its_length_its_angle_its_ends_align_or_offset() {
+    let mut h = app(&format!("{BOX}\nwall {{\"points\": [[1000, 2000], [5700, 2000]]}}"));
+    let inner = ids(&h, "wall")[4];
+    click(&mut h, P2(3000.0, 2000.0));
+    assert_eq!(h.state().selection, [inner]);
+    shortcut(&mut h, "PN");
+    assert!(h.state().session.model.is_pinned(inner), "{:?}", h.state().status);
+    let before = Arc::clone(&h.state().session.model);
+    let refused = |h: &Harness<BimApp>, what: &str| {
+        assert!(Arc::ptr_eq(&before, &h.state().session.model), "{what}: a pinned wall changed");
+        assert!(h.state().status.error && h.state().status.text.contains("pinned"), "{what}: {:?}", h.state().status);
+    };
+    // Its length, typed; its distance to a neighbour, typed.
+    h.state_mut().status = crate::Status::default();
+    retype_dimension(&mut h, "4700", "5000");
+    refused(&h, "length");
+    h.state_mut().status = crate::Status::default();
+    retype_dimension(&mut h, "2000", "1500");
+    refused(&h, "neighbour distance");
+    // Its angle, typed.
+    h.state_mut().status = crate::Status::default();
+    h.get_by_label_contains("Turn the wall about its start").click();
+    h.run();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    h.event(Event::Text("30".into()));
+    h.run();
+    key(&mut h, Key::Enter);
+    refused(&h, "angle");
+    // Dragging its end.
+    h.state_mut().status = crate::Status::default();
+    drag(&mut h, P2(5700.0, 2000.0), P2(5700.0, 3000.0));
+    refused(&h, "end grip");
+    // Align and Offset.
+    h.state_mut().status = crate::Status::default();
+    shortcut(&mut h, "AL");
+    click(&mut h, P2(4000.0, 6000.0));
+    click(&mut h, P2(3000.0, 2000.0));
+    refused(&h, "align");
+    key(&mut h, Key::Escape);
+    h.state_mut().status = crate::Status::default();
+    shortcut(&mut h, "OF");
+    h.state_mut().offset_copy = false;
+    click(&mut h, P2(3000.0, 2000.0));
+    refused(&h, "offset");
+}
+
+#[test]
+fn a_grids_end_slides_along_its_own_line_whichever_way_it_is_dragged() {
+    let mut h = app(&format!("{BOX}\ngrid {{\"start\": [-2000, -1000], \"end\": [-2000, 7000]}}"));
+    let grid = ids(&h, "grid")[0];
+    click(&mut h, P2(-2000.0, 3000.0));
+    assert_eq!(h.state().selection, [grid]);
+    // Dragged off its line, to the side and up: it goes up, and stays on the line.
+    drag(&mut h, P2(-2000.0, 7000.0), P2(-900.0, 9000.0));
+    let Some(Element::Grid(g)) = h.state().session.model.elements.get(grid) else { panic!("a grid") };
+    assert_eq!(g.start, P2(-2000.0, -1000.0), "the other end stays");
+    assert!(g.end.0 == -2000.0 && (g.end.1 - 9000.0).abs() <= 20.0, "still vertical, at x -2000: {:?}", g.end);
+    // Dragged square across its line, it does not turn.
+    let end = g.end;
+    drag(&mut h, end, P2(2000.0, end.1));
+    let Some(Element::Grid(g)) = h.state().session.model.elements.get(grid) else { panic!("a grid") };
+    assert_eq!(g.start.0, g.end.0, "{g:?}");
+}
+
+#[test]
+fn a_pinned_dimensions_grips_refuse_as_they_are_pressed() {
+    let mut h = app(&format!("{BOX}\ndimension {{\"refs\": [[0, 3000], [8000, 3000]], \"at\": [0, 3000]}}"));
+    let dim = ids(&h, "dimension")[0];
+    click(&mut h, P2(4000.0, 3000.0));
+    shortcut(&mut h, "PN");
+    assert!(h.state().session.model.is_pinned(dim), "{:?}", h.state().status);
+    let before = Arc::clone(&h.state().session.model);
+    h.state_mut().status = crate::Status::default();
+    let line = h.get_by_label(&format!("Dimension line of element {dim}")).rect().center();
+    h.hover_at(line);
+    h.run();
+    h.event(Event::PointerButton { pos: line, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+    h.run();
+    h.hover_at(line + vec2(0.0, 20.0));
+    h.run();
+    assert!(h.state().status.error && h.state().status.text.contains("pinned"), "said at the press: {:?}", h.state().status);
+    h.event(Event::PointerButton {
+        pos: line + vec2(0.0, 20.0),
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
+    h.run();
+    assert!(Arc::ptr_eq(&before, &h.state().session.model), "a pinned dimension did not move");
 }

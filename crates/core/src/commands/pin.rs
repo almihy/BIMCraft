@@ -52,7 +52,8 @@ pub(super) fn pinned_note(mut result: Value, before: &Model, ids: &[Id]) -> Valu
             "note".into(),
             json!(format!("{} {} pinned; it was changed anyway: `unpin` frees an element", noun(&pinned), verb(&pinned))),
         );
-        o.insert("pinned".into(), json!(pinned));
+        // An element's own reply (`modify` of one) already says `pinned: true`: that stays.
+        o.entry("pinned").or_insert_with(|| json!(pinned));
     }
     result
 }

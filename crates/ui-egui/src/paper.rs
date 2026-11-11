@@ -109,6 +109,7 @@ impl BimApp {
             && let Some(by) = std::mem::take(&mut self.paper.drag).and(by)
             && self.finish_drag()
             && (by.0 != 0.0 || by.1 != 0.0)
+            && !self.refuse_pinned()
         {
             self.run("move", serde_json::json!({"ids": self.selection, "by": [by.0, by.1]}));
         }

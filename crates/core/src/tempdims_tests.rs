@@ -161,3 +161,42 @@ fn the_temporary_dimensions_command_refuses_what_is_not_a_wall_and_what_it_canno
     assert!(s.execute("temporary_dimensions", &json!({"id": 100002, "level": "Level 2"})).is_ok());
     assert_eq!(s.model.elements, before.elements);
 }
+
+#[test]
+fn the_ready_made_dimension_of_the_command_is_in_the_plan_it_was_read_in() {
+    let mut s = Session::new();
+    run(&mut s, "wall", json!({"points": [[0, 0], [8000, 0]], "level": "Level 2"}));
+    run(&mut s, "wall", json!({"points": [[0, 3000], [8000, 3000]], "level": "Level 2"}));
+    let walls = s.model.elements.iter().filter(|(_, e)| matches!(e, crate::model::Element::Wall(_))).map(|(id, _)| *id).collect::<Vec<_>>();
+    // Read without a level: the wall's own, whichever that is.
+    let r = run(&mut s, "temporary_dimensions", json!({"id": walls[0]}));
+    let made = run(&mut s, "dimension", r["dimensions"][0]["dimension"].clone());
+    let Some(crate::model::Element::Dimension(d)) = s.model.elements.get(made["id"].as_u64().unwrap()) else { panic!("a dimension") };
+    let level_2 = s.model.levels().into_iter().find(|(_, l)| l.name == "Level 2").map(|(id, _)| id).unwrap();
+    assert_eq!(d.level, s.model.guid(level_2), "on Level 2, not the lowest level");
+    // Asked in a level by name, the ready-made params name it too.
+    let r = run(&mut s, "temporary_dimensions", json!({"id": walls[0], "level": "Level 2"}));
+    let made = run(&mut s, "dimension", r["dimensions"][0]["dimension"].clone());
+    let Some(crate::model::Element::Dimension(d)) = s.model.elements.get(made["id"].as_u64().unwrap()) else { panic!("a dimension") };
+    assert_eq!(d.level, s.model.guid(level_2));
+}
+
+#[test]
+fn a_wall_is_measured_only_to_what_the_plan_shows() {
+    let mut s = Session::new();
+    let me = wall_at(&mut s, [0.0, 0.0], [8000.0, 0.0]);
+    let gone = wall_at(&mut s, [0.0, 1000.0], [8000.0, 1000.0]);
+    let far = wall_at(&mut s, [0.0, 3000.0], [8000.0, 3000.0]);
+    let grid = run(&mut s, "grid", json!({"start": [0, 2000], "end": [8000, 2000]}))["id"].as_u64().unwrap();
+    let to = |s: &Session| dims(s, me, Witness::default()).into_iter().map(|(_, id, d)| (id, d)).collect::<Vec<_>>();
+    assert_eq!(to(&s), [(gone, 1000.0)]);
+    // Taken down in the first phase, the nearer wall isn't in the plan of the last: the next one is measured to.
+    run(&mut s, "modify", json!({"id": gone, "params": {"Phase Created": "Existing", "Phase Demolished": "Existing"}}));
+    assert_eq!(to(&s), [(grid, 2000.0)]);
+    // A grid the plan hides is not measured to either.
+    run(&mut s, "graphics", json!({"view": "Level 1", "categories": {"grids": {"hidden": true}}}));
+    assert_eq!(to(&s), [(far, 3000.0)]);
+    // And a wall the plan doesn't show has none.
+    run(&mut s, "modify", json!({"id": me, "params": {"Phase Created": "Existing", "Phase Demolished": "Existing"}}));
+    assert!(to(&s).is_empty());
+}

@@ -132,7 +132,7 @@ A selected column or component, and the Column and Component tools' sketches, sh
 line or grid east, north, west and south (`Model::clearances`, which finds them in the core; `standing_dimensions` draws them); a typed one runs
 `move` by the difference along that way.
 A selected straight wall shows, besides its length, the distance square to it, on each side, to the nearest parallel wall's centre line or grid that
-shares some of its run in its level's plan (`tempdims::wall` in the core, read by the agent through the `temporary_dimensions` command;
+shares some of its run in the plan on screen, and only what that plan shows (its view range, phase, design option and hidden categories: `tempdims::wall` in the core, read by the agent through the `temporary_dimensions` command, whose `dimension` params carry the plan's `level`;
 `canvas/wall_dims.rs` draws them). A typed one runs `move` on the wall by the difference toward that line. The dot where the dimension
 starts on the wall is Revit's witness-line grip: a click cycles the line it measures from, the centre line, the exterior face (`Face::Left`),
 the interior face (`Face::Right`), kept in egui's memory for the wall. The icon beside the number runs `dimension` between the same two
@@ -190,8 +190,8 @@ A drag of the selection (`Canvas::drag`, `Drag::Move`) snaps as the Move tool do
 way a base point snaps), `BimApp::dragged` snaps the cursor from it with `snap_skipping` (what is dragged attracts nothing; with Ctrl it is
 a copy and does), Shift keeps it square, and a point with nothing to snap to is rounded to 10 mm. On release `drop_selection` runs `move`,
 or `copy` with Ctrl (the copy is selected). Pin (PN) and Unpin (UP) are commands (`pin`, `unpin`; the model keeps `pinned` by GUID, `pin.rs` here
-draws the pin on a selected pinned element, whose click unpins): a drag, a grip, Move, Rotate or Mirror without Copy of a pinned element runs
-nothing and the status bar says it is pinned (`BimApp::refuse_pinned`); the agent's commands still run and say what was pinned.
+draws the pin on a selected pinned element, whose click unpins): a drag, a grip (refused at the press, with no preview), Move, Rotate or Mirror without Copy, a typed temporary dimension or angle, Align, Offset without Copy,
+an arrow-key nudge and a drag on a sheet of a pinned element run nothing and the status bar says it is pinned (`BimApp::refuse_pinned`, `refuse_pinned_ids`); the agent's commands still run and say what was pinned (`pinned`, `note`: `move`, `rotate`, `mirror`, `align`, `modify` of where it is, `offset` without `copy`, `corner`, `trim_extend`, `split`, `dimension_value`).
 `dimgrips.rs`: the grips of a selected aligned or linear dimension, one on its line (`move`, square to the line) and one on each number
 (`dimension_text_move`; the numbers of continuous and ordinate strings).
 

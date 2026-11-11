@@ -102,13 +102,13 @@ impl BimApp {
 
     /// Array's Options Bar.
     pub(crate) fn array_options(&mut self, ui: &mut Ui) {
-        if ui.selectable_label(!self.array.radial, t("Linear")).clicked() {
-            self.array.radial = false;
-        }
-        if ui.selectable_label(self.array.radial, t("Radial")).clicked() {
-            self.array.radial = true;
-            if let Tool::Array { start, .. } = &mut self.tool {
-                *start = None;
+        // Either way a half-made array starts again: a Linear's first point is no Radial's, nor a Place Centre pending.
+        let linear = ui.selectable_label(!self.array.radial, t("Linear")).clicked();
+        let radial = ui.selectable_label(self.array.radial, t("Radial")).clicked();
+        if linear || radial {
+            self.array.radial = radial;
+            if let Tool::Array { start, place, .. } = &mut self.tool {
+                (*start, *place) = (None, false);
             }
         }
         let l = ui.label(t("Number:"));

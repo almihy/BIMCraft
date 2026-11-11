@@ -192,3 +192,78 @@ fn a_dragged_element_does_not_snap_to_itself() {
     let without = snap_skipping(&s.model, 100000, at, reach, &[], false, &Snaps::default(), &[a]);
     assert_ne!(without.source, Some(a));
 }
+
+#[test]
+fn the_commands_that_change_where_a_pinned_element_is_say_it_was_pinned() {
+    let mut s = Session::new();
+    let said = |r: &Value, id: u64, what: &str| {
+        assert_eq!(r["pinned"], json!([id]), "{what}: {r}");
+        assert!(r["note"].as_str().is_some_and(|n| n.contains("pinned")), "{what}: {r}");
+    };
+    // Align turns and moves it; `modify` of its ends moves it too, but its height is no move.
+    let a = wall(&mut s);
+    run(&mut s, "pin", json!({"ids": [a]}));
+    let r = run(&mut s, "align", json!({"id": a, "reference": [[0, 100], [4000, 100]], "line": [[0, 0], [4000, 0]]}));
+    said(&r, a, "align");
+    let r = run(&mut s, "modify", json!({"id": a, "start": [0, 300]}));
+    assert!(r["note"].as_str().is_some_and(|n| n.contains("pinned")) && r["pinned"] == json!(true), "modify a wall's start: {r}");
+    let r = run(&mut s, "modify", json!({"id": a, "end": [4000, 300]}));
+    assert!(r["note"].as_str().is_some_and(|n| n.contains("pinned")), "modify a wall's end: {r}");
+    let r = run(&mut s, "modify", json!({"id": a, "height": 2800}));
+    assert!(r.get("note").is_none(), "a height is no move: {r}");
+    // A door slid along its wall.
+    let door = run(&mut s, "door", json!({"wall": a, "offset": 1000}))["id"].as_u64().unwrap();
+    run(&mut s, "pin", json!({"ids": [door]}));
+    let r = run(&mut s, "modify", json!({"id": door, "offset": 1500}));
+    assert!(r["note"].as_str().is_some_and(|n| n.contains("pinned")), "modify a door's offset: {r}");
+    // A detail line offset in place; its copy is free.
+    let line = run(&mut s, "detail_line", json!({"start": [0, 8000], "end": [4000, 8000]}))["id"].as_u64().unwrap();
+    run(&mut s, "pin", json!({"ids": [line]}));
+    let r = run(&mut s, "offset", json!({"id": line, "distance": 100, "toward": [0, 9000], "copy": true}));
+    assert!(r.get("pinned").is_none(), "{r}");
+    said(&run(&mut s, "offset", json!({"id": line, "distance": 100, "toward": [0, 9000], "copy": false})), line, "offset");
+    // Trimmed to a boundary, split, and trimmed to a corner.
+    let boundary = run(&mut s, "detail_line", json!({"start": [2000, 7000], "end": [2000, 9000]}))["id"].as_u64().unwrap();
+    let r = run(&mut s, "trim_extend", json!({"boundary": boundary, "ids": [line], "keep": [[500, 8100]]}));
+    said(&r, line, "trim_extend");
+    let w = run(&mut s, "wall", json!({"points": [[10000, 0], [10000, 3000]]}))["ids"][0].as_u64().unwrap();
+    let across = run(&mut s, "wall", json!({"points": [[9000, 4000], [12000, 4000]]}))["ids"][0].as_u64().unwrap();
+    run(&mut s, "pin", json!({"ids": [w]}));
+    said(&run(&mut s, "corner", json!({"ids": [w, across]})), w, "corner");
+    let r = run(&mut s, "split", json!({"id": w, "at": [10000, 2000]}));
+    said(&r, w, "split");
+}
+
+#[test]
+fn a_dimensions_typed_length_says_when_it_moved_a_pinned_wall() {
+    let mut s = Session::new();
+    run(&mut s, "wall", json!({"points": [[0, 0], [0, 3000]]}));
+    let far = run(&mut s, "wall", json!({"points": [[4000, 0], [4000, 3000]]}))["ids"][0].as_u64().unwrap();
+    let d = run(&mut s, "dimension", json!({"refs": [[0, 1000], [4000, 1000]], "at": [0, -1000]}))["id"].as_u64().unwrap();
+    run(&mut s, "pin", json!({"ids": [far]}));
+    let r = run(&mut s, "dimension_value", json!({"id": d, "value": 3000}));
+    assert_eq!(r["pinned"], json!([far]), "{r}");
+}
+
+#[test]
+fn a_baseline_dimensions_numbers_have_places_to_drag_them_from() {
+    let mut s = Session::new();
+    let line = |s: &mut Session, x: f64| run(s, "detail_line", json!({"start": [x, 0], "end": [x, 3000]}))["id"].as_u64().unwrap();
+    let (a, b, c) = (line(&mut s, 0.0), line(&mut s, 4000.0), line(&mut s, 8000.0));
+    run(&mut s, "dimension_type", json!({"name": "Baseline", "string": "baseline", "baseline_spacing": 10}));
+    let d = run(&mut s, "dimension", json!({"refs": [{"id": a}, {"id": b}, {"id": c}], "at": [2000, -2000], "type": "Baseline"}))["id"]
+        .as_u64()
+        .unwrap();
+    let Some(crate::model::Element::Dimension(dim)) = s.model.elements.get(d) else { panic!("a dimension") };
+    let spots = s.model.dimension_text_spots(dim);
+    assert_eq!(spots.len(), 2, "one number on each of its two lines");
+    // A mm of paper, in model mm, as the plan draws it.
+    let level = s.model.levels().first().map(|l| l.0).unwrap_or_default();
+    let drawn = crate::render::plan(&s.model, level, 800, 600);
+    let mm = f64::from(drawn.k) / drawn.view.scale * crate::sheet::DENSITY;
+    let (first, second) = (spots[0].1, spots[1].1);
+    assert!((first - crate::geom::P2(2000.0, -2000.0)).length() < 1e-6, "{first:?}: the middle of a to b, on the first line");
+    assert!((second - crate::geom::P2(6000.0, -2000.0 - 10.0 * mm)).length() < 1e-3, "{second:?}: the middle of b to c, a spacing out");
+    // A number moved by its spot is a number moved: the command takes the segment.
+    assert!(s.execute("dimension_text_move", &json!({"id": d, "segment": 1, "along": 100})).is_ok());
+}

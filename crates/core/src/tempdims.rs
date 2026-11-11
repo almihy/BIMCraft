@@ -78,19 +78,24 @@ pub struct TempDim {
     pub end: P2,
 }
 
-/// Wall `id`'s temporary dimensions in the plan of `level`: on each side the nearest line parallel to it (the centre line of
-/// another straight wall the plan cuts, or a grid) that stands clear of it and shares some of its run. None for anything
-/// but a straight wall, and for a side with no such line.
+/// Wall `id`'s temporary dimensions in the plan `level` (a level, or a plan view of one): on each side the nearest line
+/// parallel to it (the centre line of another straight wall the plan cuts, or a grid) that the plan shows (its phase, design
+/// option and hidden categories) and that stands clear of the wall and shares some of its run. None for anything but a
+/// straight wall, for a wall the plan doesn't show, and for a side with no such line.
 pub fn wall(m: &Model, id: impl Key, level: impl Key, witness: Witness) -> Vec<TempDim> {
     let (me, level) = (m.guid(id), m.guid(level));
     let Some(w) = m.wall(me).filter(|w| w.arc == 0.0 && w.start.dist(w.end) > TOL) else { return Vec::new() };
+    let look = crate::graphics::Look::of(m, level);
+    if !m.elements.id(me).is_some_and(|i| look.shows(i)) {
+        return Vec::new();
+    }
     let u = (w.end - w.start).unit();
     let along = |p: P2| (p - w.start).dot(u);
     // The lines it could end at, with how far each runs along the wall.
     let others: Vec<(Reference, (P2, P2))> = m
         .elements
         .with_guids()
-        .filter(|&(_, g, e)| g != me && matches!(e, Element::Grid(_) | Element::Wall(_)))
+        .filter(|&(i, g, e)| g != me && look.shows(i) && matches!(e, Element::Grid(_) | Element::Wall(_)))
         .filter(|&(_, _, e)| !matches!(e, Element::Wall(o) if o.arc != 0.0 || !m.cut_by(o, level)))
         .filter_map(|(_, g, _)| {
             let r = Reference::line(g, Face::Centre);
