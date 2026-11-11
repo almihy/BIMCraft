@@ -32,6 +32,14 @@
 //! // onWanted(["files/doc_2/House.ifc"]): the files the model's links read, which the page gives and then
 //! app.reload_links();
 //! ```
+//!
+//! The model's checks against the firm's rules and the client's brief are the page's (its server runs them after a save);
+//! the Checks palette lists them, flagged first, and asks the page to show a rule:
+//!
+//! ```js
+//! app.set_checks(checksJson);  // GET /api/proposals/{id}/checks's answer; null while they are being made again
+//! app.on_rule(ruleId => openRule(ruleId));  // Open Rule: the page shows the rule where the project's rules are kept
+//! ```
 #![cfg(target_arch = "wasm32")]
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
@@ -56,6 +64,8 @@ struct Host {
     on_save: Option<js_sys::Function>,
     on_change: Option<js_sys::Function>,
     files: Rc<RefCell<FileHooks>>,
+    /// Called with a rule's id when the person asks to see it (the Checks palette's Open Rule).
+    on_rule: Rc<RefCell<Option<js_sys::Function>>>,
 }
 
 /// What the page hears of files, and what it was last told.
@@ -109,6 +119,9 @@ impl eframe::App for Host {
             later(self.on_save.clone(), None);
         }
         self.tell_files();
+        if let Some(rule) = self.app.take_rule_request() {
+            later_with(self.on_rule.borrow().clone(), JsValue::from_str(&rule));
+        }
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
@@ -171,6 +184,10 @@ pub struct WebApp {
     /// The model as `take_changes` last gave it, with the others' changes since: what changed here since is this person's,
     /// not sent yet.
     sent: RefCell<Option<Arc<Model>>>,
+    /// The checks the page gave, kept for the start when given before it or while it is under way.
+    checks: Rc<RefCell<Option<String>>>,
+    /// What the page hears when the person asks to see a rule.
+    on_rule: Rc<RefCell<Option<js_sys::Function>>>,
 }
 
 #[wasm_bindgen]
@@ -186,6 +203,8 @@ impl WebApp {
             fonts: Rc::new(RefCell::new((None, None))),
             files: Rc::new(RefCell::new(FileHooks::default())),
             sent: RefCell::new(None),
+            checks: Rc::new(RefCell::new(None)),
+            on_rule: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -212,9 +231,10 @@ impl WebApp {
             on_save,
             on_change,
             files: Rc::clone(&self.files),
+            on_rule: Rc::clone(&self.on_rule),
         };
         let ctx = Rc::clone(&self.ctx);
-        let (look, fonts) = (Rc::clone(&self.look), Rc::clone(&self.fonts));
+        let (look, fonts, checks) = (Rc::clone(&self.look), Rc::clone(&self.fonts), Rc::clone(&self.checks));
         self.runner
             .start(
                 canvas,
@@ -228,6 +248,9 @@ impl WebApp {
                     }
                     let (sans, mono) = fonts.borrow().clone();
                     host.app.set_host_fonts(sans, mono);
+                    if let Some(json) = checks.borrow().as_deref() {
+                        let _ = host.app.set_checks(json);
+                    }
                     // The 3D view, and the plans' kept triangles, drawn on the card the page draws on (WebGPU; WebGL2 where
                     // there is none, which the 3D view can't use, so it is drawn on the processor there), as the desktop
                     // app does.
@@ -378,10 +401,11 @@ impl WebApp {
                 hover: colour("hover"),
                 context: colour("context"),
                 // Outlined controls and their corners, as the page draws its own: `"outlined": true`, `"radius": 6`.
-                controls: v.get("outlined").and_then(Value::as_bool).filter(|o| *o).map(|outlined| Controls {
-                    outlined,
-                    radius: v.get("radius").and_then(Value::as_u64).map_or(6, |r| r.min(12) as u8),
-                }),
+                controls: v
+                    .get("outlined")
+                    .and_then(Value::as_bool)
+                    .filter(|o| *o)
+                    .map(|outlined| Controls { outlined, radius: v.get("radius").and_then(Value::as_u64).map_or(6, |r| r.min(12) as u8) }),
             },
             compact: v.get("compact").and_then(Value::as_bool),
         };
@@ -401,6 +425,25 @@ impl WebApp {
             host.app.set_host_fonts(sans, mono);
         }
         self.repaint();
+    }
+
+    /// Gives the Checks palette the model's checks: the answer of Arqiflow's `GET /api/proposals/{id}/checks`
+    /// (`{results, integrity}`, and `error` when the page could not check), or null while they are being made again. Before
+    /// or after the start; after it, throws what is not checks.
+    pub fn set_checks(&self, checks: Option<String>) -> Result<(), JsValue> {
+        let json = checks.unwrap_or_default();
+        if let Some(mut host) = self.runner.app_mut::<Host>() {
+            host.app.set_checks(&json).map_err(err)?;
+        }
+        *self.checks.borrow_mut() = Some(json);
+        self.repaint();
+        Ok(())
+    }
+
+    /// What the page hears when the person asks to see a rule (the Checks palette's Open Rule): `on_rule(ruleId)`, once the
+    /// frame is over.
+    pub fn on_rule(&self, on_rule: Option<js_sys::Function>) {
+        *self.on_rule.borrow_mut() = on_rule;
     }
 
     /// What the page hears of files: `on_ask(askJson)` when the person wants a file, or where to save one; `on_written()` when

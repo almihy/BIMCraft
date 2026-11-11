@@ -417,6 +417,7 @@ impl BimApp {
         egui::Frame::new().inner_margin(egui::Margin { left: 12, right: 12, top: 10, bottom: 8 }).show(ui, |ui| {
             ui.set_width(ui.available_width());
             let (headline, state) = match (flags, report.rows.is_empty()) {
+                (_, true) if report.error.is_some() => (t("Not checked").to_string(), State::Unchecked),
                 (_, true) => (t("No rules to check").to_string(), State::Unchecked),
                 (0, false) => (t("No flags").to_string(), State::Passed),
                 (1, false) => (t("1 flag").to_string(), State::Failed),
@@ -428,14 +429,18 @@ impl BimApp {
                 mark(ui.painter(), r.center(), 8.0, state);
                 ui.label(RichText::new(&headline).font(crate::style::semibold(14.0)).color(pal().text));
             });
-            let sub = if report.rows.is_empty() {
+            let sub = if report.rows.is_empty() && report.error.is_some() {
+                String::new()
+            } else if report.rows.is_empty() {
                 t("No rules or client requirements apply to this project yet.").to_string()
             } else if flags == 0 {
                 tf("Every check passed: {} passed.", &[&passed.to_string()])
             } else {
                 tf("{} passed.", &[&passed.to_string()])
             };
-            ui.label(RichText::new(sub).color(pal().muted).size(12.0));
+            if !sub.is_empty() {
+                ui.label(RichText::new(sub).color(pal().muted).size(12.0));
+            }
             if let Some(e) = &report.error {
                 ui.label(RichText::new(e).color(pal().error).size(12.0));
             }
