@@ -14,7 +14,7 @@ use std::sync::Arc;
 use bimcraft_core::graphics::{Graphics, Group, Override};
 use bimcraft_core::model::{Element, Id, Model};
 use bimcraft_core::phasing::{self, PhaseFilter, Presentation, Status};
-use egui::{Align, Button, ComboBox, Context, Grid, Id as UiId, Layout, Popup, RichText, ScrollArea, TextEdit, Ui, vec2};
+use egui::{Align, Button, Context, Grid, Id as UiId, Layout, Popup, RichText, ScrollArea, TextEdit, Ui, vec2};
 use serde_json::{Value, json};
 
 use crate::BimApp;
@@ -219,7 +219,7 @@ impl BimApp {
         let unseen = self.active_option_unseen();
         let shown = RichText::new(active.clone().unwrap_or_else(|| main.clone()));
         let shown = if unseen { shown.color(pal().error) } else { shown };
-        let c = ComboBox::from_id_salt("active-option").selected_text(shown).width(190.0).show_ui(ui, |ui| {
+        let c = crate::icons::combo("active-option").selected_text(shown).width(190.0).show_ui(ui, |ui| {
             if ui.selectable_label(active.is_none(), &main).clicked() {
                 picked = Some(None);
             }
@@ -320,7 +320,7 @@ impl BimApp {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     let l = ui.label(t("Option set:"));
-                    let c = ComboBox::from_id_salt("option-set").selected_text(&d.set).width(220.0).show_ui(ui, |ui| {
+                    let c = crate::icons::combo("option-set").selected_text(&d.set).width(220.0).show_ui(ui, |ui| {
                         for n in model.option_sets.keys() {
                             if ui.selectable_label(*n == d.set, n).clicked() {
                                 pick = Some((n.clone(), String::new()));
@@ -449,14 +449,13 @@ impl BimApp {
             let label = ui.label(t("Phase"));
             let shown = g.phase.clone().or_else(|| model.phases.last().cloned()).unwrap_or_default();
             ui.add_enabled_ui(!follows, |ui| {
-                let c =
-                    ComboBox::from_id_salt((0, "phase")).selected_text(&shown).width(ui.available_width()).truncate().show_ui(ui, |ui| {
-                        for p in &model.phases {
-                            if ui.selectable_label(*p == shown, p).clicked() && g.phase.as_ref() != Some(p) {
-                                set = Some(json!({"view": view, "phase": p}));
-                            }
+                let c = crate::icons::combo((0, "phase")).selected_text(&shown).width(ui.available_width()).truncate().show_ui(ui, |ui| {
+                    for p in &model.phases {
+                        if ui.selectable_label(*p == shown, p).clicked() && g.phase.as_ref() != Some(p) {
+                            set = Some(json!({"view": view, "phase": p}));
                         }
-                    });
+                    }
+                });
                 c.response.labelled_by(label.id);
             });
             ui.end_row();
@@ -576,7 +575,7 @@ fn project_phasing(ui: &mut Ui, d: &mut PhasingDialog, m: &Model, run: &mut Pend
 fn phase_filters(ui: &mut Ui, d: &mut PhasingDialog, m: &Model, run: &mut Pending, pick: &mut Option<String>) {
     ui.horizontal(|ui| {
         let l = ui.label(t("Phase filter:"));
-        let c = ComboBox::from_id_salt("phase-filter-name").selected_text(&d.filter).width(260.0).show_ui(ui, |ui| {
+        let c = crate::icons::combo("phase-filter-name").selected_text(&d.filter).width(260.0).show_ui(ui, |ui| {
             for n in m.phase_filters.keys() {
                 if ui.selectable_label(*n == d.filter, n).clicked() {
                     *pick = Some(n.clone());
@@ -605,7 +604,7 @@ fn phase_filters(ui: &mut Ui, d: &mut PhasingDialog, m: &Model, run: &mut Pendin
         for s in Status::ALL {
             let l = ui.label(t(status_name(s)));
             let now = f.of(s);
-            let c = ComboBox::from_id_salt(("phase-filter-status", s.name())).selected_text(t(presentation_name(now))).width(200.0);
+            let c = crate::icons::combo(("phase-filter-status", s.name())).selected_text(t(presentation_name(now))).width(200.0);
             let c = c.show_ui(ui, |ui| {
                 for p in PRESENTATIONS {
                     if ui.selectable_label(p == now, t(presentation_name(p))).clicked() && p != now {

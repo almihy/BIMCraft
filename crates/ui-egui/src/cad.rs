@@ -7,7 +7,7 @@ use bimcraft_i18n::msg;
 
 use std::path::PathBuf;
 
-use egui::{Align, Button, Checkbox, ComboBox, Context, Grid, Id as UiId, Layout, RichText, TextEdit};
+use egui::{Align, Button, Checkbox, Context, Grid, Id as UiId, Layout, RichText, TextEdit};
 use serde_json::{Value, json};
 
 use crate::BimApp;
@@ -91,7 +91,7 @@ impl BimApp {
                     ui.end_row();
                     let l = ui.label(t("Colors"));
                     let now = COLORS.iter().find(|(k, _)| *k == b.colors).map_or("Preserve", |(_, n)| n);
-                    let c = ComboBox::from_id_salt("import-cad-colors").selected_text(t(now)).show_ui(ui, |ui| {
+                    let c = crate::icons::combo("import-cad-colors").selected_text(t(now)).show_ui(ui, |ui| {
                         for (k, n) in COLORS {
                             ui.selectable_value(&mut b.colors, k, t(n));
                         }
@@ -100,7 +100,7 @@ impl BimApp {
                     ui.end_row();
                     let l = ui.label(tc("cad", "Layers"));
                     let now = if b.all_layers { "All" } else { "Visible" };
-                    let c = ComboBox::from_id_salt("import-cad-layers").selected_text(t(now)).show_ui(ui, |ui| {
+                    let c = crate::icons::combo("import-cad-layers").selected_text(t(now)).show_ui(ui, |ui| {
                         ui.selectable_value(&mut b.all_layers, false, t("Visible"));
                         ui.selectable_value(&mut b.all_layers, true, t("All"));
                     });
@@ -108,7 +108,7 @@ impl BimApp {
                     ui.end_row();
                     let l = ui.label(t("Import units"));
                     let shown = |u: &str| if u == "auto" { t("Auto-Detect").to_string() } else { u.to_string() };
-                    let c = ComboBox::from_id_salt("import-cad-units").selected_text(shown(b.units)).show_ui(ui, |ui| {
+                    let c = crate::icons::combo("import-cad-units").selected_text(shown(b.units)).show_ui(ui, |ui| {
                         for u in UNITS {
                             ui.selectable_value(&mut b.units, u, shown(u));
                         }

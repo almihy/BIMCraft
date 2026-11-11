@@ -21,9 +21,8 @@ use bimcraft_core::schedule;
 use bimcraft_core::styles::ObjectStyle;
 use bimcraft_core::units::Units;
 use egui::{
-    Align, Align2, Button, Checkbox, Color32, ComboBox, Context, DragValue, FontId, Grid, Id as UiId, Layout, Painter, Rect, RichText,
-    ScrollArea, Sense, Shape, Slider, Stroke, StrokeKind, TextEdit, TextStyle, TextWrapMode, Ui, UiBuilder, WidgetInfo, WidgetType, pos2,
-    vec2,
+    Align, Align2, Button, Checkbox, Color32, Context, DragValue, FontId, Grid, Id as UiId, Layout, Painter, Rect, RichText, ScrollArea,
+    Sense, Shape, Slider, Stroke, StrokeKind, TextEdit, TextStyle, TextWrapMode, Ui, UiBuilder, WidgetInfo, WidgetType, pos2, vec2,
 };
 use serde_json::{Value, json};
 
@@ -442,7 +441,7 @@ impl BimApp {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     let l = ui.label(t("Filter:"));
-                    let c = ComboBox::from_id_salt("view-filter-name").selected_text(&d.picked).width(220.0).show_ui(ui, |ui| {
+                    let c = crate::icons::combo("view-filter-name").selected_text(&d.picked).width(220.0).show_ui(ui, |ui| {
                         for name in model.view_filters.keys() {
                             if ui.selectable_label(*name == d.picked, name).clicked() {
                                 picked = Some(name.clone());
@@ -1123,7 +1122,7 @@ fn filters(ui: &mut Ui, d: &mut VgDialog, model: &Model, shown: &Graphics, enabl
         let others: Vec<String> = model.view_filters.keys().filter(|n| !applied.contains(n)).cloned().collect();
         let label = ui.label(t("Add filter:"));
         let mut add = None;
-        let c = ComboBox::from_id_salt("vg-add-filter").selected_text(t("<Pick>")).width(180.0).show_ui(ui, |ui| {
+        let c = crate::icons::combo("vg-add-filter").selected_text(t("<Pick>")).width(180.0).show_ui(ui, |ui| {
             for n in &others {
                 if ui.selectable_label(false, n).clicked() {
                     add = Some(n.clone());
@@ -1251,7 +1250,7 @@ fn design_options(ui: &mut Ui, d: &mut VgDialog, model: &Model, shown: &Graphics
             let text = chosen.cloned().unwrap_or_else(|| primary.clone());
             let mut pick = None;
             ui.add_enabled_ui(enabled, |ui| {
-                let c = ComboBox::from_id_salt(("vg-option", set)).selected_text(text).width(220.0).show_ui(ui, |ui| {
+                let c = crate::icons::combo(("vg-option", set)).selected_text(text).width(220.0).show_ui(ui, |ui| {
                     if ui.selectable_label(chosen.is_none(), &primary).clicked() {
                         pick = Some(None);
                     }
@@ -1365,7 +1364,7 @@ fn line_rows(ui: &mut Ui, section: &str, s: &mut Style, weight: Pen) {
     }
     if let Some(w) = &mut s.weight {
         let name = format!("{}: {}", t(section), t("Line weight"));
-        let c = ComboBox::from_id_salt(("vg-weight", section)).selected_text(pen_name(*w)).width(110.0).show_ui(ui, |ui| {
+        let c = crate::icons::combo(("vg-weight", section)).selected_text(pen_name(*w)).width(110.0).show_ui(ui, |ui| {
             for each in (0..=MAX_PEN).map(Pen) {
                 ui.selectable_value(w, each, pen_name(each));
             }
@@ -1381,7 +1380,7 @@ fn line_rows(ui: &mut Ui, section: &str, s: &mut Style, weight: Pen) {
     }
     if let Some(k) = &mut s.dash {
         let name = format!("{}: {}", t(section), t("Line dash"));
-        let c = ComboBox::from_id_salt(("vg-dash", section)).selected_text(t(dash_name(*k))).width(110.0).show_ui(ui, |ui| {
+        let c = crate::icons::combo(("vg-dash", section)).selected_text(t(dash_name(*k))).width(110.0).show_ui(ui, |ui| {
             for each in [Dash::Solid, Dash::Dashed, Dash::Dotted] {
                 ui.selectable_value(k, each, t(dash_name(each)));
             }
@@ -1415,7 +1414,7 @@ fn pattern_rows(ui: &mut Ui, section: &str, s: &mut Style, model: &Model) {
             ui.horizontal(|ui| {
                 let name = format!("{}: {}", t(section), t(pattern_label));
                 let shown = layer.pattern.as_deref().unwrap_or(t("<None>"));
-                let c = ComboBox::from_id_salt(&name).selected_text(shown).width(170.0).show_ui(ui, |ui| {
+                let c = crate::icons::combo(&name).selected_text(shown).width(170.0).show_ui(ui, |ui| {
                     ui.selectable_value(&mut layer.pattern, None, t("<None>"));
                     for name in model.fill_patterns.keys() {
                         ui.selectable_value(&mut layer.pattern, Some(name.clone()), name);

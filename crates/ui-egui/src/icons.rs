@@ -1756,6 +1756,19 @@ pub fn paint_chevron(painter: &Painter, rect: Rect, ink: Color32) {
     painter.extend(chevron(rect, ink, painter.pixels_per_point()));
 }
 
+/// A drop-down's chevron `side` points across, centred on `center`.
+pub fn paint_chevron_at(painter: &Painter, center: Pos2, side: f32, ink: Color32) {
+    paint_chevron(painter, Rect::from_center_size(center, vec2(side, side)), ink);
+}
+
+/// A drop-down (egui's combo box) with the app's arrow: the chevron, in the muted lettering's colour. Every drop-down is made
+/// here, so all of them look alike (clippy.toml turns `ComboBox::from_id_salt` away elsewhere).
+#[allow(clippy::disallowed_methods)]
+pub fn combo(id_salt: impl egui::AsIdSalt) -> egui::ComboBox {
+    egui::ComboBox::from_id_salt(id_salt)
+        .icon(|ui, rect, _, _| paint_chevron_at(ui.painter(), rect.center(), 16.0, crate::style::pal().muted))
+}
+
 fn chevron(rect: Rect, ink: Color32, pixels_per_point: f32) -> Option<Shape> {
     let points = vec![pos2(6.0, 9.0), pos2(12.0, 15.0), pos2(18.0, 9.0)];
     stroked(vec![Outline { points, closed: false }], rect, ink, pixels_per_point)
@@ -2036,7 +2049,8 @@ mod tests {
 
     #[test]
     fn an_icon_is_set_on_the_screens_pixels() {
-        let at = |x: f32, y: f32, ppp: f32| mesh(shapes(Icon::Wall, Rect::from_min_size(pos2(x, y), vec2(19.0, 19.0)), Color32::WHITE, ppp));
+        let at =
+            |x: f32, y: f32, ppp: f32| mesh(shapes(Icon::Wall, Rect::from_min_size(pos2(x, y), vec2(19.0, 19.0)), Color32::WHITE, ppp));
         let same = |a: Mesh, b: Mesh| {
             a.vertices.len() == b.vertices.len() && a.vertices.iter().zip(&b.vertices).all(|(p, q)| p.pos.distance(q.pos) < 1e-4)
         };

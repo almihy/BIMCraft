@@ -204,7 +204,7 @@ impl BimApp {
                     ui.add_space(20.0);
                     let label = ui.label(t("Level"));
                     let shown = m.level(d.level).map(|l| l.name.clone()).unwrap_or_default();
-                    egui::ComboBox::from_id_salt("work-plane-level")
+                    crate::icons::combo("work-plane-level")
                         .selected_text(shown)
                         .show_ui(ui, |ui| {
                             for (id, l) in m.levels() {

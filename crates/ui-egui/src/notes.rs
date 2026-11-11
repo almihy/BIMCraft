@@ -13,8 +13,7 @@ use bimcraft_core::render::{self, Drawing};
 use bimcraft_core::text::{self, Format, Layout, Style, TextType};
 use bimcraft_i18n::msg;
 use egui::{
-    Button, ComboBox, Context, DragValue, Event, Id as UiId, Key, PointerButton, Pos2, Response, RichText, Shape, Stroke, TextEdit, Ui,
-    vec2,
+    Button, Context, DragValue, Event, Id as UiId, Key, PointerButton, Pos2, Response, RichText, Shape, Stroke, TextEdit, Ui, vec2,
 };
 use serde_json::{Value, json};
 
@@ -420,7 +419,7 @@ impl BimApp {
         let Some(mut e) = self.note_edit.take() else { return };
         let base = self.edited_type(&e).style();
         let l = ui.label(t("Type:"));
-        ComboBox::from_id_salt("note-type")
+        crate::icons::combo("note-type")
             .selected_text(&e.note.type_name)
             .show_ui(ui, |ui| {
                 for n in &names {
@@ -516,7 +515,7 @@ impl BimApp {
                     let font = &mut d.t.font;
                     let find = &mut d.find;
                     tb.row(t("Text Font"), |ui, l| {
-                        ComboBox::from_id_salt("text-type-font")
+                        crate::icons::combo("text-type-font")
                             .selected_text(font.as_str())
                             .width(ui.available_width())
                             .height(320.0)

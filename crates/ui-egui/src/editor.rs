@@ -17,8 +17,8 @@ use bimcraft_core::family::{
 use bimcraft_core::model::{Model, Operation};
 use bimcraft_core::view3d::{AZIMUTH, ELEVATION, Scene};
 use egui::{
-    Align, CollapsingHeader, Color32, ColorImage, ComboBox, Context, Grid, Id as UiId, Layout, PointerButton, Rect, RichText, ScrollArea,
-    Sense, Stroke, StrokeKind, TextEdit, TextureHandle, TextureOptions, Ui, WidgetInfo, WidgetType, pos2, vec2,
+    Align, CollapsingHeader, Color32, ColorImage, Context, Grid, Id as UiId, Layout, PointerButton, Rect, RichText, ScrollArea, Sense,
+    Stroke, StrokeKind, TextEdit, TextureHandle, TextureOptions, Ui, WidgetInfo, WidgetType, pos2, vec2,
 };
 use serde_json::{Value, json};
 
@@ -611,7 +611,7 @@ fn field(ui: &mut Ui, label: String, text: &mut String, width: f32) {
 fn pick(ui: &mut Ui, label: String, current: &str, options: &[String]) -> Option<String> {
     let mut picked = None;
     let shown = if current.is_empty() { t("(none)") } else { current };
-    let c = ComboBox::from_id_salt(&label).selected_text(shown).width(150.0).show_ui(ui, |ui| {
+    let c = crate::icons::combo(&label).selected_text(shown).width(150.0).show_ui(ui, |ui| {
         for o in options {
             if ui.selectable_label(o == current, if o.is_empty() { t("(none)") } else { o }).clicked() {
                 picked = Some(o.clone());
@@ -637,7 +637,7 @@ fn parameters_tab(ed: &mut FamilyEditor, ui: &mut Ui, materials: &[String]) {
             let n = i + 1;
             field(ui, format!("{} {n}", t("Parameter Name")), &mut p.name, 130.0);
             let kinds = [Holds::Length, Holds::Number, Holds::Angle, Holds::YesNo, Holds::Material];
-            ComboBox::from_id_salt(("fe-param-kind", i)).selected_text(t(kind_name(p.kind))).width(84.0).show_ui(ui, |ui| {
+            crate::icons::combo(("fe-param-kind", i)).selected_text(t(kind_name(p.kind))).width(84.0).show_ui(ui, |ui| {
                 for k in kinds {
                     ui.selectable_value(&mut p.kind, k, t(kind_name(k)));
                 }
@@ -750,7 +750,7 @@ fn form_fields(ui: &mut Ui, f: &mut FormText, i: usize, options: &[String]) {
             ui.end_row();
         } else {
             ui.label(t("Plane"));
-            ComboBox::from_id_salt(("fe-plane", i))
+            crate::icons::combo(("fe-plane", i))
                 .selected_text(t(planes.iter().find(|(p, _)| *p == f.plane).map_or("Plane XY", |(_, l)| l)))
                 .width(110.0)
                 .show_ui(ui, |ui| {
@@ -760,7 +760,7 @@ fn form_fields(ui: &mut Ui, f: &mut FormText, i: usize, options: &[String]) {
                 });
             ui.end_row();
             ui.label(t("Shape"));
-            ComboBox::from_id_salt(("fe-shape", i))
+            crate::icons::combo(("fe-shape", i))
                 .selected_text(if f.shape == Shape::Profile { t("Profile") } else { t("Circle") })
                 .width(110.0)
                 .show_ui(ui, |ui| {
@@ -1035,20 +1035,19 @@ impl BimApp {
                     let l = ui.label(t("Family name"));
                     ui.add_sized([220.0, ui.spacing().interact_size.y], TextEdit::singleline(&mut ed.name)).labelled_by(l.id);
                     let l = ui.label(t("Category"));
-                    let c =
-                        ComboBox::from_id_salt("fe-category").selected_text(category_label(ed.category)).width(150.0).show_ui(ui, |ui| {
-                            for c in CATEGORIES {
-                                if ui.selectable_label(ed.category == c, category_label(c)).clicked() {
-                                    ed.category = c;
-                                }
+                    let c = crate::icons::combo("fe-category").selected_text(category_label(ed.category)).width(150.0).show_ui(ui, |ui| {
+                        for c in CATEGORIES {
+                            if ui.selectable_label(ed.category == c, category_label(c)).clicked() {
+                                ed.category = c;
                             }
-                        });
+                        }
+                    });
                     c.response.labelled_by(l.id);
                     ui.end_row();
                     if ed.category.hosted() {
                         let l = ui.label(t("Operation"));
                         let shown = ed.operation.map_or(t("(none)"), |op| t(op.label()));
-                        let c = ComboBox::from_id_salt("fe-operation").selected_text(shown).width(220.0).show_ui(ui, |ui| {
+                        let c = crate::icons::combo("fe-operation").selected_text(shown).width(220.0).show_ui(ui, |ui| {
                             if ui.selectable_label(ed.operation.is_none(), t("(none)")).clicked() {
                                 ed.operation = None;
                             }

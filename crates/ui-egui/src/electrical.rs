@@ -8,7 +8,7 @@ use bimcraft_core::electrical::{EARTHINGS, MATERIALS, MAX_SIZES, MAX_SYSTEMS, MA
 use bimcraft_core::engine::Session;
 use bimcraft_core::model::Model;
 use bimcraft_i18n::msg;
-use egui::{Align, Button, ComboBox, Context, DragValue, Grid, Id as UiId, Layout, RichText, TextEdit, Ui, WidgetInfo, WidgetType};
+use egui::{Align, Button, Context, DragValue, Grid, Id as UiId, Layout, RichText, TextEdit, Ui, WidgetInfo, WidgetType};
 use serde_json::{Value, json};
 
 use crate::lang::{t, tf};
@@ -320,7 +320,7 @@ fn voltages_tab(ui: &mut Ui, d: &mut ElectricalDialog) {
 /// A combo box choosing one of the voltages (or none) for a system's line.
 fn voltage_combo(ui: &mut Ui, salt: (&str, u64), name: String, value: &mut Option<u64>, voltages: &[Row<Voltage>]) {
     let shown = value.and_then(|k| voltages.iter().find(|r| r.key == k)).map_or_else(|| NONE.to_string(), |r| r.name.clone());
-    let c = ComboBox::from_id_salt(salt).selected_text(shown).width(120.0).show_ui(ui, |ui| {
+    let c = crate::icons::combo(salt).selected_text(shown).width(120.0).show_ui(ui, |ui| {
         ui.selectable_value(value, None, NONE);
         for r in voltages {
             ui.selectable_value(value, Some(r.key), &r.name);
@@ -354,12 +354,11 @@ fn systems_tab(ui: &mut Ui, d: &mut ElectricalDialog) {
         for (i, r) in systems.iter_mut().enumerate() {
             let n = (i + 1).to_string();
             text_field(ui, &mut r.name, 150.0, tf("System {} name", &[&n]));
-            let c =
-                ComboBox::from_id_salt(("system-phases", r.key)).selected_text(r.value.phases.to_string()).width(48.0).show_ui(ui, |ui| {
-                    for p in 1..=3u8 {
-                        ui.selectable_value(&mut r.value.phases, p, p.to_string());
-                    }
-                });
+            let c = crate::icons::combo(("system-phases", r.key)).selected_text(r.value.phases.to_string()).width(48.0).show_ui(ui, |ui| {
+                for p in 1..=3u8 {
+                    ui.selectable_value(&mut r.value.phases, p, p.to_string());
+                }
+            });
             c.response.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, true, tf("System {} phases", &[&n])));
             let wires = ui.add(DragValue::new(&mut r.value.wires).range(2..=4).speed(0.1));
             wires.widget_info(|| WidgetInfo::labeled(WidgetType::DragValue, true, tf("System {} wires", &[&n])));
@@ -367,7 +366,7 @@ fn systems_tab(ui: &mut Ui, d: &mut ElectricalDialog) {
             voltage_combo(ui, ("system-ln", r.key), tf("System {} line to neutral", &[&n]), &mut r.value.l_n, voltages);
             voltage_combo(ui, ("system-lg", r.key), tf("System {} line to earth", &[&n]), &mut r.value.l_g, voltages);
             let shown = r.value.ground.clone().unwrap_or_else(|| NONE.to_string());
-            let c = ComboBox::from_id_salt(("system-ground", r.key)).selected_text(shown).width(80.0).show_ui(ui, |ui| {
+            let c = crate::icons::combo(("system-ground", r.key)).selected_text(shown).width(80.0).show_ui(ui, |ui| {
                 ui.selectable_value(&mut r.value.ground, None, NONE);
                 for g in EARTHINGS {
                     ui.selectable_value(&mut r.value.ground, Some(g.to_string()), g);
@@ -398,7 +397,7 @@ fn wires_tab(ui: &mut Ui, d: &mut ElectricalDialog) {
         let l = ui.label(t("Wire type:"));
         let shown = d.wires.get(d.wire).map(|r| r.name.clone()).unwrap_or_default();
         let wires: Vec<(usize, String)> = d.wires.iter().enumerate().map(|(i, r)| (i, r.name.clone())).collect();
-        let c = ComboBox::from_id_salt("electrical-wire").selected_text(shown).width(220.0).show_ui(ui, |ui| {
+        let c = crate::icons::combo("electrical-wire").selected_text(shown).width(220.0).show_ui(ui, |ui| {
             for (i, n) in &wires {
                 ui.selectable_value(&mut d.wire, *i, n);
             }
@@ -418,7 +417,7 @@ fn wires_tab(ui: &mut Ui, d: &mut ElectricalDialog) {
         text_field(ui, &mut r.name, 260.0, t("Wire type name").to_string());
         ui.end_row();
         ui.label(t("Material:"));
-        let c = ComboBox::from_id_salt("electrical-wire-material").selected_text(material_label(&r.value.material)).width(140.0).show_ui(
+        let c = crate::icons::combo("electrical-wire-material").selected_text(material_label(&r.value.material)).width(140.0).show_ui(
             ui,
             |ui| {
                 for (m, label) in MATERIAL_LABELS {

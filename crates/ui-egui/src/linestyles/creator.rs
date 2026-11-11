@@ -123,7 +123,7 @@ pub(super) fn window(ctx: &Context, d: &mut LineStylesDialog) {
                             ui.label(format!("{}.", i + 1));
                             let old = kind(s);
                             let mut next = old;
-                            let c = ComboBox::from_id_salt("kind").selected_text(t(KINDS[old])).width(110.0).show_ui(ui, |ui| {
+                            let c = crate::icons::combo("kind").selected_text(t(KINDS[old])).width(110.0).show_ui(ui, |ui| {
                                 for (k, n) in KINDS.iter().enumerate() {
                                     ui.selectable_value(&mut next, k, t(n));
                                 }

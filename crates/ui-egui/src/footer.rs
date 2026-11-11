@@ -13,8 +13,8 @@ use bimcraft_core::engine::Session;
 use bimcraft_core::graphics::{self, ANNOTATION, Detail, Group, MODEL, VisualStyle};
 use bimcraft_core::model::{Element, Id, Model};
 use egui::{
-    Color32, FontId, Frame, Key, Margin, Popup, Rect, Response, RichText, Sense, Shape, Stroke, StrokeKind, TextEdit, Ui, UiBuilder,
-    WidgetInfo, WidgetType, pos2, vec2,
+    Color32, FontId, Frame, Key, Margin, Popup, Rect, Response, RichText, Sense, Stroke, StrokeKind, TextEdit, Ui, UiBuilder, WidgetInfo,
+    WidgetType, pos2, vec2,
 };
 use serde_json::{Value, json};
 
@@ -74,7 +74,7 @@ pub(crate) fn menu_button(ui: &mut Ui, label: &str, shown: &str, tip: &str, set_
         let ink = if enabled { pal().text } else { pal().muted };
         p.galley(pos2(rect.left() + 8.0, rect.center().y - galley.size().y / 2.0), galley, ink);
         let c = pos2(rect.right() - 10.0, rect.center().y);
-        p.add(Shape::convex_polygon(vec![c + vec2(-3.5, -2.0), c + vec2(3.5, -2.0), c + vec2(0.0, 2.5)], pal().icon, Stroke::NONE));
+        crate::icons::paint_chevron_at(p, c, 16.0, pal().muted);
         match set_by {
             Some(template) => r.on_disabled_hover_text(controlled_note(template)),
             None => r.on_hover_text(tip),

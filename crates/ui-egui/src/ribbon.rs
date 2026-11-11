@@ -3,7 +3,7 @@
 
 use std::cell::{Cell, RefCell};
 
-use egui::{Align2, FontId, Id, Popup, Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2};
+use egui::{Align2, FontId, Id, Popup, Rect, Response, Sense, Stroke, StrokeKind, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2};
 
 use crate::lang::t;
 use crate::presets::Scale;
@@ -305,9 +305,9 @@ fn folded_button(ui: &mut Ui, name: &str) -> Response {
     r
 }
 
-/// A small caret pointing down, at `c`.
+/// A small chevron pointing down, at `c`: the drop-downs' arrow, a size smaller.
 fn caret(ui: &Ui, c: egui::Pos2, ink: egui::Color32) {
-    ui.painter().add(Shape::convex_polygon(vec![c + vec2(-3.0, -1.5), c + vec2(3.0, -1.5), c + vec2(0.0, 2.0)], ink, Stroke::NONE));
+    crate::icons::paint_chevron_at(ui.painter(), c, 12.0, ink);
 }
 
 #[cfg(test)]

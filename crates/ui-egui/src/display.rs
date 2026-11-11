@@ -6,7 +6,7 @@
 use bimcraft_core::graphics::VisualStyle;
 use bimcraft_core::model::Element;
 use bimcraft_core::view3d::{DisplayOptions, MAX_SILHOUETTE};
-use egui::{Align, Checkbox, ComboBox, Context, Id as UiId, Layout, RichText};
+use egui::{Align, Checkbox, Context, Id as UiId, Layout, RichText};
 use serde_json::json;
 
 use crate::lang::{t, tf};
@@ -59,7 +59,7 @@ impl BimApp {
                     .on_disabled_hover_text(t("Hidden Line and Wireframe always draw their edges"));
                 ui.horizontal(|ui| {
                     let l = ui.label(t("Silhouettes"));
-                    let c = ComboBox::from_id_salt("silhouettes").selected_text(width(d.options.silhouette)).show_ui(ui, |ui| {
+                    let c = crate::icons::combo("silhouettes").selected_text(width(d.options.silhouette)).show_ui(ui, |ui| {
                         for px in 0..=MAX_SILHOUETTE {
                             ui.selectable_value(&mut d.options.silhouette, px, width(px));
                         }

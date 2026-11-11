@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 
 use bimcraft_core::model::Id;
 use bimcraft_core::selection::{self, CATEGORY, Group};
-use egui::{Align, Button, ComboBox, Context, Grid, Id as UiId, Layout, RichText, ScrollArea};
+use egui::{Align, Button, Context, Grid, Id as UiId, Layout, RichText, ScrollArea};
 
 use crate::BimApp;
 use crate::lang::{category, t, tf};
@@ -70,7 +70,7 @@ impl BimApp {
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
                     ui.label(t("Filter by:"));
-                    ComboBox::from_id_salt("selection-filter-by").selected_text(t(&d.by)).width(220.0).show_ui(ui, |ui| {
+                    crate::icons::combo("selection-filter-by").selected_text(t(&d.by)).width(220.0).show_ui(ui, |ui| {
                         for f in &d.fields {
                             if ui.selectable_label(*f == d.by, t(f)).clicked() {
                                 by = Some(f.clone());

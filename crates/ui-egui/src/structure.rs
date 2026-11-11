@@ -7,7 +7,7 @@ use bimcraft_i18n::msg;
 use bimcraft_core::geom::P2;
 use bimcraft_core::model::{Element, Id, Justify, Model, TOL};
 use bimcraft_core::{runs_of, stood_of};
-use egui::{ComboBox, TextEdit, Ui};
+use egui::{TextEdit, Ui};
 use serde_json::{Value, json};
 
 use crate::DimMode;
@@ -135,7 +135,7 @@ impl BimApp {
         if category != "stripfooting" {
             let l = ui.label(t("Justification:"));
             let now = self.run_justify;
-            let c = ComboBox::from_id_salt("run-justify").selected_text(t(justify_name(now))).width(90.0).show_ui(ui, |ui| {
+            let c = crate::icons::combo("run-justify").selected_text(t(justify_name(now))).width(90.0).show_ui(ui, |ui| {
                 for j in [Justify::Top, Justify::Centre, Justify::Bottom] {
                     if ui.selectable_label(j == now, t(justify_name(j))).clicked() {
                         self.run_justify = j;
