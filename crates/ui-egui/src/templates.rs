@@ -14,8 +14,8 @@ use bimcraft_core::model::{Model, ViewRange};
 use bimcraft_i18n::msg;
 use egui::text::{CCursor, CCursorRange};
 use egui::{
-    Align, Button, Checkbox, ComboBox, Context, Frame, Id as UiId, Key, Label, Layout, Popup, Rect, RichText, ScrollArea, Sense, Stroke,
-    TextEdit, Ui, UiBuilder, WidgetInfo, WidgetType, pos2, vec2,
+    Align, Button, Checkbox, Context, Frame, Id as UiId, Key, Label, Layout, Popup, Rect, RichText, ScrollArea, Sense, Stroke, TextEdit,
+    Ui, UiBuilder, WidgetInfo, WidgetType, pos2, vec2,
 };
 use serde_json::{Value, json};
 
@@ -710,7 +710,7 @@ fn group_rows(rows: &mut Rows, g: Group, now: &mut ViewTemplate, m: &Model) -> O
             });
             rows.row(t("Phase"), None, |ui, l| {
                 let shown = gr.phase.clone().or_else(|| m.phases.last().cloned()).unwrap_or_default();
-                let c = ComboBox::from_id_salt((0, "template-phase")).selected_text(&shown).width(ui.available_width()).show_ui(ui, |ui| {
+                let c = crate::icons::combo((0, "template-phase")).selected_text(&shown).width(ui.available_width()).show_ui(ui, |ui| {
                     for p in &m.phases {
                         if ui.selectable_label(*p == shown, p).clicked() {
                             gr.phase = Some(p.clone());

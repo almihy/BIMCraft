@@ -36,9 +36,13 @@ fn run() -> Result<(), String> {
     frame.textures_delta.clear();
     let drawings: Vec<_> = icons::Icon::ALL
         .iter()
-        .map(|&icon| json!({"name": icon.name(), "regular": contours(icon, false), "compact": contours(icon, true)}))
+        .map(|&icon| {
+            // Where the drawing comes from: "lucide:<name>", or BIMCraft's own.
+            let source = icons::drawn(icon).map_or_else(|| "bimcraft".to_owned(), |d| format!("lucide:{}", d.name));
+            json!({"name": icon.name(), "source": source, "regular": contours(icon, false), "compact": contours(icon, true)})
+        })
         .collect();
-    let catalog = json!({"grid": 24, "stroke": icons::STROKE_WIDTH, "compact_max_size": 19, "icons": drawings});
+    let catalog = json!({"grid": 24, "stroke": icons::PEN, "min_stroke_pt": icons::MIN_PEN, "compact_max_size": 19, "icons": drawings});
     let file = directory.join("catalog.json");
     std::fs::write(&file, serde_json::to_vec_pretty(&catalog).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     println!("Exported {} icons to {}", icons::Icon::ALL.len(), file.display());

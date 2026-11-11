@@ -9,7 +9,7 @@ use bimcraft_core::dims::{Background, DimString, DimensionType, Read, Tick, Witn
 use bimcraft_core::model::{DimKind, Element, Id, Model};
 use bimcraft_core::units::Units;
 use bimcraft_i18n::msg;
-use egui::{ComboBox, Context, DragValue, Grid, Id as UiId, TextEdit};
+use egui::{Context, DragValue, Grid, Id as UiId, TextEdit};
 use serde_json::{Value, json};
 
 use crate::BimApp;
@@ -142,7 +142,7 @@ impl BimApp {
                     let font = &mut d.t.font;
                     let find = &mut d.find;
                     tb.row(t("Text Font"), |ui, l| {
-                        ComboBox::from_id_salt("dimension-type-font")
+                        crate::icons::combo("dimension-type-font")
                             .selected_text(font.as_str())
                             .width(ui.available_width())
                             .height(320.0)

@@ -101,9 +101,9 @@ use bimcraft_core::units::Units;
 use bimcraft_core::{element_json, render, schedule, stairs};
 use egui::containers::menu::{MenuButton, SubMenuButton};
 use egui::{
-    Align, Align2, Area, CentralPanel, Color32, ComboBox, Context, CornerRadius, Event, FontId, Frame, Grid, Id as UiId, Key,
-    KeyboardShortcut, Layout, Margin, Modifiers, Order, Panel, Popup, Pos2, Rect, Response, RichText, ScrollArea, Sense, Stroke,
-    StrokeKind, TextEdit, Ui, UiBuilder, ViewportCommand, WidgetInfo, WidgetType, pos2, vec2,
+    Align, Align2, Area, CentralPanel, Color32, Context, CornerRadius, Event, FontId, Frame, Grid, Id as UiId, Key, KeyboardShortcut,
+    Layout, Margin, Modifiers, Order, Panel, Popup, Pos2, Rect, Response, RichText, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, Ui,
+    UiBuilder, ViewportCommand, WidgetInfo, WidgetType, pos2, vec2,
 };
 use serde_json::{Value, json};
 
@@ -915,7 +915,7 @@ fn height_options(ui: &mut Ui, m: &Model, level: Id, top: &mut Option<Option<Id>
     let now = top.unwrap_or_else(|| above.first().map(|(id, _)| *id));
     let current = now.and_then(|id| m.level(id)).map_or(t("Unconnected"), |l| l.name.as_str());
     let label = ui.label(t("Height:"));
-    let combo = ComboBox::from_id_salt(salt).selected_text(current).width(130.0).show_ui(ui, |ui| {
+    let combo = crate::icons::combo(salt).selected_text(current).width(130.0).show_ui(ui, |ui| {
         for (id, name) in &above {
             if ui.selectable_label(now == Some(*id), *name).clicked() {
                 *top = Some(Some(*id));
@@ -2722,7 +2722,7 @@ impl BimApp {
     fn elevation_base(&mut self, ui: &mut Ui) {
         let l = ui.label(t("Elevation Base:"));
         let now = self.shape_base;
-        egui::ComboBox::from_id_salt("shape-elevation-base")
+        crate::icons::combo("shape-elevation-base")
             .selected_text(t(now.name()))
             .show_ui(ui, |ui| {
                 for b in crate::shape::Base::ALL {
@@ -3402,12 +3402,7 @@ impl BimApp {
             ui.painter().rect_filled(rect, 3.0, hover);
         }
         let ink = if names.is_empty() { icon.gamma_multiply(0.4) } else { icon };
-        let c = rect.center();
-        ui.painter().add(egui::Shape::convex_polygon(
-            vec![c + vec2(-3.0, -1.5), c + vec2(3.0, -1.5), c + vec2(0.0, 2.0)],
-            ink,
-            Stroke::NONE,
-        ));
+        icons::paint_chevron_at(ui.painter(), rect.center(), 12.0, ink);
         if names.is_empty() {
             return;
         }
@@ -4032,12 +4027,7 @@ impl BimApp {
             let dark = style::dark();
             let tip = msg!("Choose a theme, including a dark interface with a light canvas");
             let r = big_button(ui, Icon::Theme, "Dark Mode", dark, tip);
-            let at = r.rect.right_top() + vec2(-8.0, 9.0);
-            ui.painter().add(egui::Shape::convex_polygon(
-                vec![at + vec2(-3.0, -2.0), at + vec2(3.0, -2.0), at + vec2(0.0, 2.0)],
-                pal().icon,
-                Stroke::NONE,
-            ));
+            icons::paint_chevron_at(ui.painter(), r.rect.right_top() + vec2(-8.0, 9.0), 12.0, pal().muted);
             ribbon::choices(ui, &r, false, |ui| self.theme_choices(ui, true));
             // A plan's or a section's crop region: on to what it shows, or off.
             let view = match self.sheet {
@@ -4893,7 +4883,7 @@ impl BimApp {
         height_options(ui, &self.session.model, level, &mut self.wall_top, &mut self.wall_height, "wall-top");
         let l = ui.label(t("Location Line:"));
         let now = self.wall_location;
-        let c = ComboBox::from_id_salt("wall-location").selected_text(t(now.label())).width(150.0).show_ui(ui, |ui| {
+        let c = crate::icons::combo("wall-location").selected_text(t(now.label())).width(150.0).show_ui(ui, |ui| {
             for loc in Location::ALL {
                 if ui.selectable_label(loc == now, t(loc.label())).clicked() {
                     self.wall_location = loc;
@@ -5365,12 +5355,7 @@ impl BimApp {
             if r.has_focus() {
                 p.rect_stroke(at, 4.0, style::focus_ring(), StrokeKind::Inside);
             }
-            let c = at.center();
-            p.add(egui::Shape::convex_polygon(
-                vec![c + vec2(-4.0, -2.0), c + vec2(4.0, -2.0), c + vec2(0.0, 2.5)],
-                pal().icon,
-                Stroke::NONE,
-            ));
+            icons::paint_chevron_at(p, at.center(), 16.0, pal().muted);
             let r = r.on_hover_text(t("All open views"));
             // As wide as the longest name, and fixed: a menu's width would otherwise grow each frame.
             let size = |n: &String| ui.painter().layout_no_wrap(n.clone(), FontId::proportional(13.0), pal().text).size().x;

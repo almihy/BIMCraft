@@ -9,7 +9,7 @@ use bimcraft_core::graphics::MODEL;
 use bimcraft_core::model::Model;
 use bimcraft_core::pen::{MAX_PEN, Pen};
 use bimcraft_core::styles::{ObjectStyle, default_of};
-use egui::{Align, ComboBox, Context, Grid, Id as UiId, Layout, RichText, ScrollArea, Ui, WidgetInfo, WidgetType};
+use egui::{Align, Context, Grid, Id as UiId, Layout, RichText, ScrollArea, Ui, WidgetInfo, WidgetType};
 use serde_json::{Value, json};
 
 use crate::BimApp;
@@ -30,7 +30,7 @@ impl ObjectStylesDialog {
 
 /// A drop-down of the pens, named `name` for screen readers.
 fn pen_field(ui: &mut Ui, pen: &mut Pen, name: String) {
-    let c = ComboBox::from_id_salt(&name).selected_text(pen_name(*pen)).width(120.0).show_ui(ui, |ui| {
+    let c = crate::icons::combo(&name).selected_text(pen_name(*pen)).width(120.0).show_ui(ui, |ui| {
         for each in (0..=MAX_PEN).map(Pen) {
             ui.selectable_value(pen, each, pen_name(each));
         }

@@ -60,7 +60,7 @@ impl BimApp {
                     ui.add_sized([220.0, 20.0], TextEdit::singleline(&mut b.name)).labelled_by(l.id);
                     ui.end_row();
                     let l = ui.label(t("Units"));
-                    let c = egui::ComboBox::from_id_salt("point-cloud-units").selected_text(b.units).show_ui(ui, |ui| {
+                    let c = crate::icons::combo("point-cloud-units").selected_text(b.units).show_ui(ui, |ui| {
                         for u in UNITS {
                             ui.selectable_value(&mut b.units, u, u);
                         }

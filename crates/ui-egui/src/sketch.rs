@@ -886,7 +886,7 @@ impl BimApp {
         let invisible = t("<Invisible lines>").to_string();
         let shown = sk.region.1.clone().unwrap_or_else(|| invisible.clone());
         let was = sk.region.1.clone();
-        let c = egui::ComboBox::from_id_salt("region-lines").selected_text(shown).width(160.0).show_ui(ui, |ui| {
+        let c = crate::icons::combo("region-lines").selected_text(shown).width(160.0).show_ui(ui, |ui| {
             ui.selectable_value(&mut sk.region.1, None, &invisible);
             for n in m.line_styles.keys() {
                 ui.selectable_value(&mut sk.region.1, Some(n.clone()), n);

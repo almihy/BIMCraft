@@ -10,7 +10,7 @@ use bimcraft_core::geom::P2;
 use bimcraft_core::model::{Element, Model};
 use bimcraft_core::pen::{MAX_PEN, Pen};
 use bimcraft_core::titleblock::{self, Align as TextAlign, Field, Scope, Stroke, Text, TitleBlock};
-use egui::{Align, ComboBox, Context, DragValue, Grid, Id as UiId, Layout, RichText, ScrollArea, Sense, TextEdit, Ui, vec2};
+use egui::{Align, Context, DragValue, Grid, Id as UiId, Layout, RichText, ScrollArea, Sense, TextEdit, Ui, vec2};
 use serde_json::{Value, json};
 
 use crate::BimApp;
@@ -144,7 +144,7 @@ fn fields_tab(ui: &mut Ui, d: &mut TitleBlocksDialog) {
         for (i, f) in d.tb.fields.iter_mut().enumerate() {
             ui.add_sized([110.0, 20.0], TextEdit::singleline(&mut f.key));
             ui.add_sized([130.0, 20.0], TextEdit::singleline(&mut f.label));
-            ComboBox::from_id_salt(("title-field-scope", i))
+            crate::icons::combo(("title-field-scope", i))
                 .selected_text(t(if f.scope == Scope::Project { msg!("Project") } else { msg!("Sheet") }))
                 .width(80.0)
                 .show_ui(ui, |ui| {
@@ -232,7 +232,7 @@ fn texts_tab(ui: &mut Ui, d: &mut TitleBlocksDialog) {
                 TextAlign::Center => msg!("Center"),
                 TextAlign::Right => msg!("Right"),
             };
-            ComboBox::from_id_salt(("title-text-align", i)).selected_text(t(shown)).width(70.0).show_ui(ui, |ui| {
+            crate::icons::combo(("title-text-align", i)).selected_text(t(shown)).width(70.0).show_ui(ui, |ui| {
                 ui.selectable_value(&mut x.align, TextAlign::Left, t("Left"));
                 ui.selectable_value(&mut x.align, TextAlign::Center, t("Center"));
                 ui.selectable_value(&mut x.align, TextAlign::Right, t("Right"));
@@ -327,7 +327,7 @@ fn size_tab(ui: &mut Ui, d: &mut TitleBlocksDialog) {
         ui.end_row();
         ui.label(t("Font"));
         let fonts = bimcraft_core::text::families();
-        ComboBox::from_id_salt("title-block-font").selected_text(d.tb.font.clone()).width(220.0).show_ui(ui, |ui| {
+        crate::icons::combo("title-block-font").selected_text(d.tb.font.clone()).width(220.0).show_ui(ui, |ui| {
             ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
                 for f in &fonts {
                     ui.selectable_value(&mut d.tb.font, f.clone(), f);
@@ -460,7 +460,7 @@ fn selected_text(ui: &mut Ui, d: &mut TitleBlocksDialog) {
                 TextAlign::Center => msg!("Center"),
                 TextAlign::Right => msg!("Right"),
             };
-            ComboBox::from_id_salt("title-picked-align").selected_text(t(shown)).width(80.0).show_ui(ui, |ui| {
+            crate::icons::combo("title-picked-align").selected_text(t(shown)).width(80.0).show_ui(ui, |ui| {
                 ui.selectable_value(&mut x.align, TextAlign::Left, t("Left"));
                 ui.selectable_value(&mut x.align, TextAlign::Center, t("Center"));
                 ui.selectable_value(&mut x.align, TextAlign::Right, t("Right"));
@@ -473,7 +473,7 @@ fn selected_text(ui: &mut Ui, d: &mut TitleBlocksDialog) {
             ui.horizontal(|ui| {
                 ui.label(t("Field key"));
                 ui.add_sized([180.0, 20.0], TextEdit::singleline(&mut d.field_key));
-                ComboBox::from_id_salt("title-picked-scope")
+                crate::icons::combo("title-picked-scope")
                     .selected_text(t(if d.field_scope == Scope::Project { msg!("Project") } else { msg!("Sheet") }))
                     .width(80.0)
                     .show_ui(ui, |ui| {

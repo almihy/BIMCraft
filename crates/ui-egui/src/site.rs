@@ -17,7 +17,7 @@ use bimcraft_core::site::shapes::{self, Item};
 use bimcraft_core::sketch::{self as solver, SketchLine};
 use bimcraft_core::units::Units;
 use bimcraft_i18n::msg;
-use egui::{ComboBox, RichText, TextEdit, Ui};
+use egui::{RichText, TextEdit, Ui};
 use serde_json::{Value, json};
 
 use crate::icons::Icon;
@@ -531,7 +531,7 @@ impl BimApp {
     fn site_combo(ui: &mut Ui, salt: &str, label: &str, now: &'static str, keys: &[&'static str]) -> Option<&'static str> {
         let l = ui.label(t(label));
         let mut picked = None;
-        let c = ComboBox::from_id_salt(salt).selected_text(name(now)).width(130.0).show_ui(ui, |ui| {
+        let c = crate::icons::combo(salt).selected_text(name(now)).width(130.0).show_ui(ui, |ui| {
             for k in keys {
                 if ui.selectable_label(*k == now, name(k)).clicked() && *k != now {
                     picked = Some(*k);

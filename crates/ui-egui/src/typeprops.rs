@@ -81,7 +81,7 @@ pub(crate) fn head(
         ui.end_row();
 
         let l = ui.label(t("Type:"));
-        let c = egui::ComboBox::from_id_salt((salt, "type")).selected_text(current).width(field).height(320.0).show_ui(ui, |ui| {
+        let c = crate::icons::combo((salt, "type")).selected_text(current).width(field).height(320.0).show_ui(ui, |ui| {
             for n in names {
                 if ui.selectable_label(n == current, n).clicked() && n != current {
                     asked = Some(Head::Switch(n.clone()));

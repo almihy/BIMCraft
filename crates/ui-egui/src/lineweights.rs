@@ -8,7 +8,7 @@ use bimcraft_i18n::msg;
 use bimcraft_core::model::Model;
 use bimcraft_core::pen::{LineWeights, MAX_PEN, MAX_SCALES, ScalePens, WIDTH_RANGE};
 use bimcraft_core::units::Units;
-use egui::{Align, ComboBox, Context, DragValue, Grid, Id as UiId, Layout, RichText, ScrollArea, Ui, WidgetInfo, WidgetType};
+use egui::{Align, Context, DragValue, Grid, Id as UiId, Layout, RichText, ScrollArea, Ui, WidgetInfo, WidgetType};
 use serde_json::json;
 
 use crate::BimApp;
@@ -82,7 +82,7 @@ fn model_tab(ui: &mut Ui, d: &mut LineWeightsDialog, units: Units) {
         let full = d.draft.model.len() >= MAX_SCALES;
         let mut add = None;
         ui.add_enabled_ui(!full && !free.is_empty(), |ui| {
-            let c = ComboBox::from_id_salt("line-weights-add").selected_text("").width(160.0).show_ui(ui, |ui| {
+            let c = crate::icons::combo("line-weights-add").selected_text("").width(160.0).show_ui(ui, |ui| {
                 for n in &free {
                     if ui.selectable_label(false, units.scale(*n)).clicked() {
                         add = Some(*n);

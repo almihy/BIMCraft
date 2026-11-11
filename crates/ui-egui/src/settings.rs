@@ -15,7 +15,7 @@ use bimcraft_i18n::msg;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use egui::{Align, Color32, ComboBox, Context, Id as UiId, Layout, RichText, ScrollArea, ThemePreference, Ui, vec2};
+use egui::{Align, Color32, Context, Id as UiId, Layout, RichText, ScrollArea, ThemePreference, Ui, vec2};
 use serde_json::{Value, json};
 
 use crate::BimApp;
@@ -524,7 +524,7 @@ impl BimApp {
         // A hosted window speaks its page's language: the page decides it.
         if !self.hosted() {
             heading(ui, "Language");
-            ComboBox::from_id_salt("settings-language").selected_text(self.lang.label()).width(200.0).show_ui(ui, |ui| {
+            crate::icons::combo("settings-language").selected_text(self.lang.label()).width(200.0).show_ui(ui, |ui| {
                 for l in Lang::ALL {
                     if ui.selectable_label(self.lang == l, l.label()).clicked() {
                         self.set_lang(ctx, l);
@@ -600,7 +600,7 @@ impl BimApp {
             });
             ui.horizontal(|ui| {
                 ui.label(t("3D view resolution"));
-                ComboBox::from_id_salt("settings-3d")
+                crate::icons::combo("settings-3d")
                     .selected_text(t("Full"))
                     .show_index(ui, &mut quality, 2, |i| if i == 0 { t("Full") } else { t("Half") }.to_string());
             });
@@ -636,7 +636,7 @@ fn graphics_later(ui: &mut Ui) {
     ui.checkbox(&mut hover, t("Highlight what's under the cursor"));
     ui.horizontal(|ui| {
         ui.label(t("Background of the 3D view"));
-        ComboBox::from_id_salt("settings-ground")
+        crate::icons::combo("settings-ground")
             .selected_text(t("Plain"))
             .show_index(ui, &mut ground, 2, |i| if i == 0 { t("Plain") } else { t("Sky") }.to_string());
     });

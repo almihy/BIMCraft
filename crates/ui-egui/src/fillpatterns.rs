@@ -19,8 +19,8 @@ use bimcraft_core::geom::P2;
 use bimcraft_core::model::{Element, Id, Model};
 use bimcraft_core::render::{PAPER, Rgb};
 use egui::{
-    Align, Button, Color32, ComboBox, Context, DragValue, Grid, Id as UiId, Layout, RichText, ScrollArea, Sense, Shape, Stroke, TextEdit,
-    Ui, WidgetInfo, WidgetType, pos2, vec2,
+    Align, Button, Color32, Context, DragValue, Grid, Id as UiId, Layout, RichText, ScrollArea, Sense, Shape, Stroke, TextEdit, Ui,
+    WidgetInfo, WidgetType, pos2, vec2,
 };
 use serde_json::{Value, json};
 
@@ -355,7 +355,7 @@ pub(crate) fn paint_pattern(ui: &Ui, rect: egui::Rect, p: Option<&FillPattern>, 
 /// A drop-down of the patterns (or none), named `label`, `row` the one picked.
 fn pattern_pick(ui: &mut Ui, row: &mut Option<usize>, names: &[(usize, String)], label: String, width: f32) {
     let shown = row.and_then(|p| names.iter().find(|(i, _)| *i == p)).map_or_else(|| t("<None>").to_string(), |(_, n)| n.clone());
-    let c = ComboBox::from_id_salt(&label).selected_text(shown).width(width).show_ui(ui, |ui| {
+    let c = crate::icons::combo(&label).selected_text(shown).width(width).show_ui(ui, |ui| {
         ui.selectable_value(row, None, t("<None>"));
         for (p, n) in names {
             ui.selectable_value(row, Some(*p), n);
@@ -543,7 +543,7 @@ fn patterns_tab(ui: &mut Ui, d: &mut FillPatternsDialog, below: f32) -> Option<F
                 let label = tf("{}: Type", &[&who]);
                 let shown = t(if r.pattern.target == Target::Model { "Model" } else { "Drafting" });
                 let target = r.pattern.target;
-                let c = ComboBox::from_id_salt(("fill-target", i)).selected_text(shown).width(90.0).show_ui(ui, |ui| {
+                let c = crate::icons::combo(("fill-target", i)).selected_text(shown).width(90.0).show_ui(ui, |ui| {
                     ui.selectable_value(&mut r.pattern.target, Target::Drafting, t("Drafting"));
                     ui.selectable_value(&mut r.pattern.target, Target::Model, t("Model"));
                 });
