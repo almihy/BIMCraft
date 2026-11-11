@@ -52,6 +52,15 @@ preference back to the system's (and `keep_settings` would then write that over 
 the layout (Compact) only when the page asks for a different one than it last did, so a page that sends its look with every
 theme change wipes no choice the person made since (`tests/host.rs`).
 
+A hosting page also reads what the person sees and can point at things for its agent (`hostview.rs`, `tests/host.rs`): `host_context` is the
+selection (id, GUID, category, name), the active view (name, kind, a plan's level, a sheet's number) and the camera (a plan's, a
+section's or an elevation's visible rectangle in the view's own millimetres, the 3D view's azimuth, elevation and target);
+`host_context_key` is the cheap stand-in the web app (`apps/bimcraft-web`) compares each frame to tell the page, a quarter second after
+the last change, that it moved (`on_context`). `host_select` and `host_open_view` move the window only, as the person would (Select by
+ID with its zoom, the Project Browser's open): no command runs and the model does not change. `host::editor_takes_key` says which keys
+the editor takes while its canvas has the keyboard, and the web app keeps the browser from acting on them (Tab, Space, Backspace, Delete, arrows, Home/End/Page Up/Down, Ctrl+A,
+D, K, O, P, S, Y, Z, F1 to F4 and F6 to F10; never F5, F11, F12, or Ctrl+C, V, X, whose browser events carry the clipboard).
+
 Application dialogs use `popup.rs`: a shared modal frame with a draggable title bar and a corner × button. Each dialog keeps its own
 position while the application is open; dragging is constrained to the application window. The × button follows Cancel/Close, so it never
 applies a draft; so does Escape. A click beside a dialog, on the dimmed window behind it, does nothing: only its buttons, its × and Escape

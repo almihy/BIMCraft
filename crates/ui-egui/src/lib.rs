@@ -37,6 +37,7 @@ pub use gpu::limits_for;
 mod graphics;
 mod groups;
 pub mod host;
+pub mod hostview;
 pub mod icons;
 mod inquiry;
 pub mod lang;
