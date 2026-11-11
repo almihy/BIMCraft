@@ -378,12 +378,12 @@ pub fn outlines(icon: Icon, compact: bool) -> Vec<Outline> {
             if compact {
                 g.line(&[(4.0, 6.0), (20.0, 6.0)]);
                 g.line(&[(9.0, 6.0), (9.0, 3.0), (15.0, 3.0), (15.0, 6.0)]);
-                g.line(&[(6.0, 6.0), (7.0, 21.0), (17.0, 21.0), (18.0, 6.0)]);
+                g.rounded(&[(6.0, 6.0), (7.0, 21.0), (17.0, 21.0), (18.0, 6.0)], 2.0);
                 g.line(&[(12.0, 10.0), (12.0, 17.0)]);
             } else {
                 g.line(&[(4.0, 6.0), (20.0, 6.0)]);
                 g.line(&[(9.0, 6.0), (9.0, 3.0), (15.0, 3.0), (15.0, 6.0)]);
-                g.line(&[(6.0, 6.0), (7.0, 21.0), (17.0, 21.0), (18.0, 6.0)]);
+                g.rounded(&[(6.0, 6.0), (7.0, 21.0), (17.0, 21.0), (18.0, 6.0)], 2.0);
                 g.line(&[(10.0, 10.0), (10.0, 17.0)]);
                 g.line(&[(14.0, 10.0), (14.0, 17.0)]);
             }
@@ -412,7 +412,7 @@ pub fn outlines(icon: Icon, compact: bool) -> Vec<Outline> {
         Icon::Copy => {
             // Equal overlapping rectangles with hidden rear edges removed.
             g.closed(&[(8.0, 3.0), (20.0, 3.0), (20.0, 15.0), (8.0, 15.0)]);
-            g.line(&[(8.0, 9.0), (4.0, 9.0), (4.0, 21.0), (16.0, 21.0), (16.0, 15.0)]);
+            g.rounded(&[(8.0, 9.0), (4.0, 9.0), (4.0, 21.0), (16.0, 21.0), (16.0, 15.0)], 2.0);
         }
         Icon::Rotate => {
             // A circular arc with a tangential return arrow; no floating arrowhead.
@@ -1664,7 +1664,51 @@ pub fn outlines(icon: Icon, compact: bool) -> Vec<Outline> {
             g.line(&[(17.0, 19.0), (5.0, 19.0), (5.0, 7.0)]);
         }
     }
-    g.0
+    g.finish(SHARP.contains(&icon))
+}
+
+/// The icons whose boxes are building parts or drawn lines and regions (a wall's or slab's section, a window's frame, a room,
+/// a shaft, a line's weight, a fill pattern's region, a snap's marker): their corners stay square, as drawn. Every other icon's
+/// boxes have the app's softly rounded corners.
+const SHARP: &[Icon] = &[
+    Icon::Wall,
+    Icon::Door,
+    Icon::Window,
+    Icon::Room,
+    Icon::Shaft,
+    Icon::Mass,
+    Icon::Ceiling,
+    Icon::Flip,
+    Icon::Split,
+    Icon::Rebar,
+    Icon::InspectionBox,
+    Icon::BuildingPad,
+    Icon::ResetShape,
+    Icon::Dormer,
+    Icon::GableEdge,
+    Icon::PickFaces,
+    Icon::Subdivide,
+    Icon::AddSplitLine,
+    Icon::ConvertLines,
+    Icon::Linework,
+    Icon::LineWeights,
+    Icon::ObjectStyles,
+    Icon::FillPatterns,
+    Icon::MaskingRegion,
+    Icon::Snaps,
+];
+
+/// The radius of a box's rounded corners on the grid: lucide's 2 on a box 10 or more across, less on a smaller one (a fifth
+/// of its short side), so a small box never turns into a pill.
+fn corner_radius(w: f32, h: f32) -> f32 {
+    (w.min(h) * 0.2).min(2.0)
+}
+
+/// How far `p` is from the segment `a`–`b`.
+fn distance_to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
+    let ab = b - a;
+    let t = if ab.length_sq() > 0.0 { ((p - a).dot(ab) / ab.length_sq()).clamp(0.0, 1.0) } else { 0.0 };
+    p.distance(a + ab * t)
 }
 
 /// A hexagon about the middle, its corners `r` from it, two of them level with it.
@@ -1675,8 +1719,9 @@ fn hexagon(r: f32) -> [(f32, f32); 6] {
     })
 }
 
+/// An icon's outlines as they are drawn, and which of them are boxes (closed, axis-aligned rectangles).
 #[derive(Default)]
-struct Glyph(Vec<Outline>);
+struct Glyph(Vec<Outline>, Vec<usize>);
 
 impl Glyph {
     fn line(&mut self, points: &[(f32, f32)]) {
@@ -1684,6 +1729,14 @@ impl Glyph {
     }
 
     fn closed(&mut self, points: &[(f32, f32)]) {
+        let boxed = points.len() == 4
+            && (0..4).all(|i| {
+                let (a, b) = (points[i], points[(i + 1) % 4]);
+                (a.0 == b.0) != (a.1 == b.1)
+            });
+        if boxed {
+            self.1.push(self.0.len());
+        }
         self.0.push(Outline { points: points.iter().map(|&(x, y)| pos2(x, y)).collect(), closed: true });
     }
 
@@ -1722,6 +1775,78 @@ impl Glyph {
             })
             .collect();
         self.0.push(Outline { points, closed });
+    }
+
+    /// An open line whose bends are rounded to radius `r` (less where a leg is too short for it), as a box's corners are.
+    fn rounded(&mut self, points: &[(f32, f32)], r: f32) {
+        let p: Vec<Pos2> = points.iter().map(|&(x, y)| pos2(x, y)).collect();
+        let mut out = vec![p[0]];
+        for k in 1..p.len().saturating_sub(1) {
+            let (c, prev, next) = (p[k], p[k - 1], p[k + 1]);
+            let (u, v) = ((prev - c).normalized(), (next - c).normalized());
+            // Half the angle between the legs; the arc leaves each leg `reach` from the bend, at most half way along it.
+            let half = u.dot(v).clamp(-1.0, 1.0).acos() * 0.5;
+            let r = r.min((prev - c).length().min((next - c).length()) * 0.5 * half.tan());
+            let reach = r / half.tan();
+            let centre = c + (u + v).normalized() * (r / half.sin());
+            let (from, to) = ((c + u * reach - centre).angle(), (c + v * reach - centre).angle());
+            let mut sweep = to - from;
+            if sweep > std::f32::consts::PI {
+                sweep -= TAU;
+            } else if sweep < -std::f32::consts::PI {
+                sweep += TAU;
+            }
+            for step in 0..=8 {
+                out.push(centre + Vec2::angled(from + sweep * step as f32 / 8.0) * r);
+            }
+        }
+        out.push(p[p.len() - 1]);
+        self.0.push(Outline { points: out, closed: false });
+    }
+
+    /// The outlines, the boxes' corners rounded (`corner_radius`) unless `sharp`. A corner another outline comes near (a
+    /// line meeting it) stays square, so the two still join.
+    fn finish(mut self, sharp: bool) -> Vec<Outline> {
+        if sharp {
+            return self.0;
+        }
+        for &i in &self.1 {
+            let corners = self.0[i].points.clone();
+            let (min, max) = (Rect::from_points(&corners).min, Rect::from_points(&corners).max);
+            let r = corner_radius(max.x - min.x, max.y - min.y);
+            let near = |c: Pos2| {
+                self.0.iter().enumerate().filter(|&(j, _)| j != i).any(|(_, o)| {
+                    let n = o.points.len();
+                    let segments = if o.closed { n } else { n.saturating_sub(1) };
+                    (0..segments).any(|k| distance_to_segment(c, o.points[k], o.points[(k + 1) % n]) < r + 0.25)
+                        || o.points.iter().any(|p| p.distance(c) < r + 0.25)
+                })
+            };
+            let mut points = Vec::with_capacity(4 * 9);
+            for k in 0..4 {
+                let c = corners[k];
+                if near(c) {
+                    points.push(c);
+                    continue;
+                }
+                // Inward from the corner along both of its sides: the arc's centre, and its start and end angles.
+                let (prev, next) = (corners[(k + 3) % 4], corners[(k + 1) % 4]);
+                let (u, v) = ((prev - c).normalized(), (next - c).normalized());
+                let centre = c + (u + v) * r;
+                let (from, to) = ((-v).angle(), (-u).angle());
+                let mut sweep = to - from;
+                if sweep > std::f32::consts::PI {
+                    sweep -= TAU;
+                } else if sweep < -std::f32::consts::PI {
+                    sweep += TAU;
+                }
+                for step in 0..=8 {
+                    points.push(centre + Vec2::angled(from + sweep * step as f32 / 8.0) * r);
+                }
+            }
+            self.0[i].points = points;
+        }
+        self.0
     }
 
     fn cubic(&mut self, control: [(f32, f32); 4]) {
@@ -2045,6 +2170,28 @@ mod tests {
         g.circle((12.0, 12.0), 8.0);
         let m = mesh(stroked(g.0, rect, Color32::WHITE, 1.0).into_iter().collect());
         assert_eq!(m.vertices.len(), 2 * 128 * 3);
+    }
+
+    #[test]
+    fn boxes_have_the_apps_rounded_corners_but_building_parts_and_joined_corners_stay_square() {
+        // Copy's front sheet: each corner an arc of radius 2 (lucide's), none left at the box's corner.
+        let front = &outlines(Icon::Copy, false)[0];
+        assert_eq!(front.points.len(), 4 * 9);
+        assert!(!front.points.contains(&pos2(8.0, 3.0)));
+        let centre = pos2(10.0, 5.0);
+        assert!(front.points[..9].iter().all(|p| (p.distance(centre) - 2.0).abs() < 1e-4), "{:?}", &front.points[..9]);
+        // A small grip: a fifth of its side, so not a pill.
+        let grip = &outlines(Icon::Rectangle, false)[0];
+        assert!(grip.points.iter().all(|p| p.x >= 3.0 && p.y >= 3.0) && grip.points.len() == 36);
+        assert!((grip.points[0].distance(pos2(3.8, 3.8)) - 0.8).abs() < 1e-4);
+        // A wall's section stays square.
+        assert_eq!(outlines(Icon::Wall, false)[0].points.len(), 4);
+        // A corner a line meets stays square, so they still join.
+        let mut g = Glyph::default();
+        g.closed(&[(4.0, 4.0), (20.0, 4.0), (20.0, 20.0), (4.0, 20.0)]);
+        g.line(&[(20.0, 20.0), (22.0, 22.0)]);
+        let joined = g.finish(false);
+        assert!(joined[0].points.contains(&pos2(20.0, 20.0)) && !joined[0].points.contains(&pos2(4.0, 4.0)));
     }
 
     #[test]
