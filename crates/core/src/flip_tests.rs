@@ -3,7 +3,9 @@
 use serde_json::{Value, json};
 
 use crate::engine::Session;
+use crate::geom::P2;
 use crate::model::{Element, Id, Opening};
+use crate::walls::{self, Axis};
 
 fn run(s: &mut Session, c: &str, p: Value) -> Value {
     s.execute(c, &p).unwrap_or_else(|e| panic!("{c} {p}: {e}"))
@@ -77,4 +79,43 @@ fn a_door_or_window_asked_toward_a_point_faces_the_side_of_the_wall_it_is_on() {
     // Asked to flip too, it goes the other way from the point's side.
     assert!(facing(&mut s, "door", json!({"wall": w, "offset": 11000, "toward": [11000, 900], "flip_facing": true})));
     assert!(s.execute("door", &json!({"wall": w, "offset": 15000, "toward": "north"})).is_err());
+}
+
+#[test]
+fn a_facing_said_to_be_false_is_not_flipped_and_only_a_facing_left_out_defaults_to_flipping() {
+    let (mut s, _, door, _) = wall_with_openings();
+    // `facing: false` with no `hand` flips nothing.
+    run(&mut s, "flip", json!({"ids": [door], "facing": false}));
+    assert_eq!(flips(&s, door), (false, false));
+    run(&mut s, "flip", json!({"ids": [door], "facing": false, "hand": false}));
+    assert_eq!(flips(&s, door), (false, false));
+    // Left out, or null, it is the facing.
+    run(&mut s, "flip", json!({"ids": [door], "facing": null}));
+    assert_eq!(flips(&s, door), (false, true));
+    run(&mut s, "flip", json!({"ids": [door], "hand": false}));
+    assert_eq!(flips(&s, door), (false, false));
+    // The hand alone leaves the facing as it was.
+    run(&mut s, "flip", json!({"ids": [door], "hand": true}));
+    assert_eq!(flips(&s, door), (true, false));
+}
+
+#[test]
+fn toward_on_a_curved_wall_is_the_side_of_its_curve_at_the_door_not_of_its_chord() {
+    let mut s = Session::new();
+    let w = run(&mut s, "wall", json!({"points": [[0, 0], [10000, 0]], "arc": 90}))["ids"][0].as_u64().unwrap_or_default();
+    // Where the door goes, and which way the wall's left is there: the chord's left is north, the curve's here is not.
+    let (at, left) = match s.model.wall(w) {
+        Some(wall) => {
+            let axis = Axis::of(wall);
+            (axis.at(1000.0, walls::centre(&s.model, wall)), axis.tangent(1000.0).perp())
+        }
+        None => panic!("no wall {w}"),
+    };
+    let q = at + P2(-1000.0, 500.0);
+    assert!(q.1 > at.1 && (q - at).dot(left) < 0.0, "the point is on the chord's left and the curve's right");
+    let id = run(&mut s, "door", json!({"wall": w, "offset": 1000, "toward": [q.0, q.1]}))["id"].as_u64().unwrap_or_default();
+    assert!(opening(&s, id).flip_facing, "swings to the curve's right");
+    let q = at + left * 300.0;
+    let id = run(&mut s, "door", json!({"wall": w, "offset": 1000, "toward": [q.0, q.1]}))["id"].as_u64().unwrap_or_default();
+    assert!(!opening(&s, id).flip_facing, "swings to the curve's left");
 }

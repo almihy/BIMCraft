@@ -1339,7 +1339,7 @@ other_files(
         "{ids: [wall | door | window,…], hand?, facing?} turns walls round about their location lines, as Revit's flip arrows \
          do: their exterior sides go to the other side, their doors and windows stay where they are. A door or window in `ids` \
          is flipped on its own: `hand` puts its hinge on the other jamb, `facing` its swing (a window's face) to the wall's \
-         other side; with neither, its facing flips. `hand` and `facing` apply to the doors and windows listed, not to a wall's",
+         other side; with neither given, its facing flips (`facing: false` leaves it). `hand` and `facing` apply to the doors and windows listed, not to a wall's",
         flip,
     ),
     edit(
@@ -8073,7 +8073,8 @@ fn flip(s: &mut Session, p: &Value) -> R {
     let m = &s.model;
     let all = ids_param(c, m, p)?;
     let hand = flag(c, p, "hand")?;
-    let facing = flag(c, p, "facing")? || !hand;
+    // Only when `facing` is left out does a flip with no `hand` turn the facing: a `facing` said to be false is false.
+    let facing = if absent(p.get("facing")) { !hand } else { flag(c, p, "facing")? };
     let opening = |id: &Id| matches!(m.elements.get(*id), Some(Element::Door(_) | Element::Window(_)));
     if let Some(id) = all.iter().find(|id| m.wall(**id).is_none() && !opening(id)) {
         let what = m.elements.get(*id).map_or("element", Element::category);
