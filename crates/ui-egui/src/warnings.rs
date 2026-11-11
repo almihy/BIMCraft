@@ -138,7 +138,11 @@ impl BimApp {
             crate::popup::footer(ui, |ui| {
                 ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
                     close = ui.button(t("Close")).clicked();
-                    if ui.add_enabled(picked.is_some(), Button::new(t("Show"))).on_hover_text(t("Select what the warning is about and zoom to it")).clicked() {
+                    if ui
+                        .add_enabled(picked.is_some(), Button::new(t("Show")))
+                        .on_hover_text(t("Select what the warning is about and zoom to it"))
+                        .clicked()
+                    {
                         show = picked;
                     }
                 });

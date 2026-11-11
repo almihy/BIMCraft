@@ -14,13 +14,6 @@ fn run(s: &mut Session, id: &str, p: Value) -> Value {
     s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"))
 }
 
-fn fails(s: &mut Session, id: &str, p: Value) -> String {
-    let before = s.model.clone();
-    let e = s.execute(id, &p).expect_err(&format!("{id} {p} should fail"));
-    assert_eq!(*s.model, *before, "a refused {id} changes nothing");
-    e
-}
-
 fn element(s: &mut Session, id: Id) -> Value {
     let all = run(s, "elements", json!({}));
     all["elements"].as_array().unwrap().iter().find(|e| e["id"] == id).cloned().unwrap()
@@ -270,12 +263,14 @@ fn an_ifc_window_whose_sill_is_over_its_walls_top_comes_in_and_is_warned_of() {
             }
         })
         .collect::<Vec<_>>()
-        .join("
-");
+        .join(
+            "
+",
+        );
     let i = crate::import::ifc(file.as_bytes(), "x").unwrap();
     assert!(i.model.elements.values().any(|e| matches!(e, Element::Window(_))), "{:?}", i.skipped);
     let w = i.model.review();
     let note = w.iter().find(|w| w.rule == "opening_outside_height").unwrap();
-    assert!(note.message.contains("sill 30") && note.message.contains("20 mm"), "says the sill and the wall's height: {note:?}");
+    assert!(note.message.contains("sill, 30 mm") && note.message.contains("20 mm up"), "says the sill and the wall's height: {note:?}");
     assert!(note.message.contains("nothing of it is in the wall") && !note.message.contains("Revit"), "{note:?}");
 }

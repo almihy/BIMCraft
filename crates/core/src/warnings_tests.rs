@@ -80,7 +80,7 @@ fn what_would_break_the_model_is_still_refused() {
         ("door", json!({"wall": w, "offset": 1e300})),
         ("door", json!({"wall": w, "offset": 1000, "type": "No Such Door"})),
         ("wall", json!({"points": [[0, 0], [0.2, 0]]})),
-        ("modify", json!({"id": w, "height": -5})),
+        ("modify", json!({"id": w, "type": "No Such Wall Type"})),
     ] {
         assert!(s.execute(cmd, &p).is_err(), "{cmd} {p}");
         assert_eq!(*s.model, *before, "a refused {cmd} changes nothing");
@@ -233,7 +233,11 @@ fn awkward() -> (Session, Id) {
         ("window", 3500.0, -2000.0),
         ("window", 4500.0, -400.0),
     ] {
-        run(&mut s, cmd, json!({"wall": w, "offset": offset, "sill": sill, "type": if cmd == "window" { "Tall" } else { "Single 900 x 2100" }}));
+        run(
+            &mut s,
+            cmd,
+            json!({"wall": w, "offset": offset, "sill": sill, "type": if cmd == "window" { "Tall" } else { "Single 900 x 2100" }}),
+        );
     }
     (s, w)
 }
@@ -255,8 +259,8 @@ fn every_awkward_opening_is_listed_and_the_wall_keeps_between_its_base_and_top()
     assert!(lo >= -1e-6 && hi <= 1000.0 + 1e-6, "the wall runs from {lo} to {hi}");
     let whole = 6000.0 * 200.0 * 1000.0;
     // Cut: the doors (350 to 1650, 1300 wide) the wall's whole height, the window past the end (5400 to 6000, 600 wide, from
-    // 100 up), the window half under the base (4000 to 5000, its head at 400): and nothing for the two wholly over or under.
-    let cut = 1300.0 * 200.0 * 1000.0 + 600.0 * 200.0 * 900.0 + 1000.0 * 200.0 * 400.0;
+    // 100 to 900), the window half under the base (4000 to 5000, up to 400): and nothing for the two wholly over or under.
+    let cut = 1300.0 * 200.0 * 1000.0 + 600.0 * 200.0 * 800.0 + 1000.0 * 200.0 * 400.0;
     let held = volume(&tris);
     assert!((held - (whole - cut)).abs() < 1.0, "{held} against {}", whole - cut);
 }

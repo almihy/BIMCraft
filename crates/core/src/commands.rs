@@ -14828,7 +14828,9 @@ fn review_warnings(s: &mut Session, p: &Value) -> R {
     let hits: Vec<Value> = all
         .iter()
         .filter(|w| rule.as_deref().is_none_or(|r| w.rule == r))
-        .filter(|w| severity.as_deref().is_none_or(|v| serde_json::to_value(w.severity).ok().and_then(|x| x.as_str().map(|x| x == v)) == Some(true)))
+        .filter(|w| {
+            severity.as_deref().is_none_or(|v| serde_json::to_value(w.severity).ok().and_then(|x| x.as_str().map(|x| x == v)) == Some(true))
+        })
         .filter(|w| element.is_none_or(|g| w.elements.contains(&g)))
         .map(|w| w.json(m))
         .collect();

@@ -2,6 +2,7 @@
 //! is selected, driven as a user drives it.
 
 use super::*;
+use egui_kittest::kittest::NodeT;
 
 /// The box's four walls with two doors that overlap in the south one and a third past its end: the doors' ids.
 fn crowded() -> (Harness<'static, BimApp>, Vec<Id>, Vec<Id>) {
@@ -46,8 +47,11 @@ fn a_double_click_on_a_row_shows_it() {
     press(&mut h, "2 warnings");
     let past = format!("door {} reaches", doors[2]);
     let row = h.get_all_by_label_contains(&past).next().expect("the door past the end is listed").rect().center();
-    click_at(&mut h, row);
-    click_at(&mut h, row);
+    h.hover_at(row);
+    h.run();
+    for pressed in [true, false, true, false] {
+        h.event(button(row, pressed));
+    }
     h.run();
     assert!(h.state().warnings_dialog.is_none(), "the double click showed it");
     assert_eq!(h.state().selection, [doors[2]]);

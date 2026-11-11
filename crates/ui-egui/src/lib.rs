@@ -36,7 +36,6 @@ mod groups;
 pub mod host;
 pub mod icons;
 mod inquiry;
-mod warnings;
 pub mod lang;
 mod linestyles;
 mod lineweights;
@@ -84,6 +83,7 @@ mod typeprops;
 #[cfg(feature = "updater")]
 mod updates;
 mod view_worker;
+mod warnings;
 pub mod window;
 mod workplane;
 
@@ -4357,7 +4357,10 @@ impl BimApp {
             let tip = if n == 0 {
                 t(msg!("Review Warnings: what is questionable in the project without being wrong. There are none")).to_string()
             } else {
-                tf(msg!("Review Warnings: what is questionable in the project without being wrong, with Show to select it. There are {}"), &[&n.to_string()])
+                tf(
+                    msg!("Review Warnings: what is questionable in the project without being wrong, with Show to select it. There are {}"),
+                    &[&n.to_string()],
+                )
             };
             if big_button(ui, Icon::Warning, "Review Warnings", self.warnings_dialog.is_some(), &tip).clicked() {
                 self.open_warnings();

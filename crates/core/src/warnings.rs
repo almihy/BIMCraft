@@ -124,10 +124,7 @@ impl Model {
             return self.review();
         }
         let bounds = |e: &Element| {
-            matches!(
-                e,
-                Element::Wall(_) | Element::Room(_) | Element::RoomSeparator(_) | Element::Column(_) | Element::StructuralColumn(_)
-            )
+            matches!(e, Element::Wall(_) | Element::Room(_) | Element::RoomSeparator(_) | Element::Column(_) | Element::StructuralColumn(_))
         };
         let rooms = changed.iter().any(|id| both(*id).any(bounds));
         // What changed, and what points at it (an opening's wall's change is the opening's).
@@ -138,15 +135,21 @@ impl Model {
                 ids.extend(lookup.referrers(&g));
             }
         }
-        let gone: BTreeSet<Guid> =
-            ids.iter().filter_map(|id| self.elements.guid(*id).or_else(|| before.elements.guid(*id))).collect();
+        let gone: BTreeSet<Guid> = ids.iter().filter_map(|id| self.elements.guid(*id).or_else(|| before.elements.guid(*id))).collect();
         let room_rule = |w: &Warning| w.rule.starts_with("room_");
+        let scope = Scope { ids: Some(&ids), before: Some(before) };
+        // A group of twins grows or shrinks with one of its members' change, though the others are as they were.
+        let twins = twin_keys(self, &scope).unwrap_or_default();
+        let twinned = |w: &Warning| {
+            w.rule == "identical_instances"
+                && w.elements.iter().any(|g| self.elements.get(*g).and_then(|e| identity(self, e)).is_some_and(|k| twins.contains(&k)))
+        };
         let mut out: Vec<Warning> = prev
             .iter()
-            .filter(|w| w.rule != "device_no_connector" && !(rooms && room_rule(w)) && !w.elements.iter().any(|g| gone.contains(g)))
+            .filter(|w| w.rule != "device_no_connector" && !(rooms && room_rule(w)) && !twinned(w) && !w.elements.iter().any(|g| gone.contains(g)))
             .cloned()
             .collect();
-        compute(self, &Scope { ids: Some(&ids), before: Some(before) }, rooms, &mut out);
+        compute(self, &scope, rooms, &mut out);
         sort(self, &mut out);
         out
     }
@@ -233,7 +236,13 @@ fn openings(m: &Model, scope: &Scope, out: &mut Vec<Warning>) {
                 continue;
             }
             let Ok(t) = m.opening_dims(e) else { continue };
-            placed.push(Placed { id, start: o.offset - t.width / 2.0, end: o.offset + t.width / 2.0, sill: o.sill, head: o.sill + t.height });
+            placed.push(Placed {
+                id,
+                start: o.offset - t.width / 2.0,
+                end: o.offset + t.width / 2.0,
+                sill: o.sill,
+                head: o.sill + t.height,
+            });
             if !scope.takes(id) {
                 continue;
             }
@@ -243,7 +252,11 @@ fn openings(m: &Model, scope: &Scope, out: &mut Vec<Warning>) {
                 out.push(Warning::new(
                     "opening_past_wall",
                     Severity::Warning,
-                    format!("{who} is {} mm wide, wider than wall {wall_id}'s run, {} mm: shorten it or lengthen the wall", round(t.width), round(length)),
+                    format!(
+                        "{who} is {} mm wide, wider than wall {wall_id}'s run, {} mm: shorten it or lengthen the wall",
+                        round(t.width),
+                        round(length)
+                    ),
                     vec![m.guid(id)],
                 ));
             } else if a < -TOL || b > length + TOL {
@@ -269,8 +282,7 @@ fn openings(m: &Model, scope: &Scope, out: &mut Vec<Warning>) {
                     vec![m.guid(id)],
                 ));
             }
-            let top =
-                [a, o.offset, b].map(|s| walls::top_at(m, w, s)).into_iter().fold(f64::INFINITY, f64::min) - base;
+            let top = [a, o.offset, b].map(|s| walls::top_at(m, w, s)).into_iter().fold(f64::INFINITY, f64::min) - base;
             if o.sill > top - TOL {
                 out.push(Warning::new(
                     "opening_outside_height",
@@ -298,7 +310,11 @@ fn openings(m: &Model, scope: &Scope, out: &mut Vec<Warning>) {
                     out.push(Warning::new(
                         "openings_overlap",
                         Severity::Warning,
-                        format!("{} {low} and {} {high} overlap in wall {wall_id}: move one of them along the wall", cat(m, low), cat(m, high)),
+                        format!(
+                            "{} {low} and {} {high} overlap in wall {wall_id}: move one of them along the wall",
+                            cat(m, low),
+                            cat(m, high)
+                        ),
                         vec![m.guid(low), m.guid(high)],
                     ));
                     pairs += 1;
@@ -322,7 +338,9 @@ fn walls_and_grids(m: &Model, scope: &Scope, out: &mut Vec<Warning>) {
     let mut taken: Vec<Id> = Vec::new();
     match scope.ids {
         None => taken.extend(m.elements.iter().filter(|(_, e)| matches!(e, Element::Wall(_) | Element::Grid(_))).map(|(id, _)| *id)),
-        Some(ids) => taken.extend(ids.iter().copied().filter(|id| matches!(m.elements.get(*id), Some(Element::Wall(_) | Element::Grid(_))))),
+        Some(ids) => {
+            taken.extend(ids.iter().copied().filter(|id| matches!(m.elements.get(*id), Some(Element::Wall(_) | Element::Grid(_)))))
+        }
     }
     let off = |who: String, id: Id, d: P2, out: &mut Vec<Warning>| {
         let dev = off_axis(d);
@@ -472,16 +490,21 @@ fn identity(m: &Model, e: &Element) -> Option<String> {
     })
 }
 
+/// What the elements of `scope` are the same as, where one has twins: their identities now, and before the change.
+fn twin_keys(m: &Model, scope: &Scope) -> Option<BTreeSet<String>> {
+    scope.ids.map(|ids| {
+        let keys = |m: &Model| ids.iter().filter_map(|id| m.elements.get(*id).and_then(|e| identity(m, e))).collect::<Vec<_>>();
+        keys(m).into_iter().chain(scope.before.map(keys).unwrap_or_default()).collect()
+    })
+}
+
 /// Elements of one kind that are one another's twins: each group of them, when one is in `scope`.
 fn identical(m: &Model, scope: &Scope, out: &mut Vec<Warning>) {
     let looked_at = |e: &Element| {
         matches!(e, Element::Wall(_) | Element::Column(_) | Element::StructuralColumn(_) | Element::Footing(_) | Element::Component(_))
     };
     // With a scope, only the keys of what it holds are looked for, among the elements of the kinds that can be twins.
-    let wanted: Option<BTreeSet<String>> = scope.ids.map(|ids| {
-        let keys = |m: &Model| ids.iter().filter_map(|id| m.elements.get(*id).and_then(|e| identity(m, e))).collect::<Vec<_>>();
-        keys(m).into_iter().chain(scope.before.map(keys).unwrap_or_default()).collect()
-    });
+    let wanted = twin_keys(m, scope);
     if wanted.as_ref().is_some_and(BTreeSet::is_empty) {
         return;
     }
