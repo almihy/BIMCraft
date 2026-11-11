@@ -6125,55 +6125,9 @@ impl Model {
         Ok(())
     }
 
-    /// What is amiss in the model but doesn't make it wrong: soft issues, said so they can be fixed. `check` refuses a model;
-    /// these it accepts. A room the walls no longer close; a family of lighting, outlets or switches in use that holds no
-    /// connector, so its devices count as a load of zero (a family of plan symbols alone, a symbol set's, is no device).
-    pub fn warnings(&self) -> Vec<String> {
-        let rooms = crate::rooms::Rooms::new(self);
-        let mut out: Vec<String> = self
-            .elements
-            .iter()
-            .filter_map(|(id, e)| match e {
-                Element::Room(r) => match rooms.bound(r, self.room_area) {
-                    Ok(_) => None,
-                    Err(Unbound::NotEnclosed) => {
-                        Some(format!("room {id} ({} {}) is not enclosed: the walls around it no longer close", r.number, r.name))
-                    }
-                    Err(Unbound::Shared(other)) => Some(format!(
-                        "room {id} ({} {}) is in the space room {} has; two rooms can't share one, so it is unbounded: delete one, \
-                         or part them with a room separation line",
-                        r.number,
-                        r.name,
-                        self.shown(other)
-                    )),
-                },
-                _ => None,
-            })
-            .collect();
-        let mut bare: BTreeMap<&str, usize> = BTreeMap::new();
-        for e in self.elements.values() {
-            if let Element::Component(c) = e
-                && let Some(f) = self.families.get(&c.family)
-                && f.category.electrical_device()
-                && f.connectors.is_empty()
-                // A family of plan symbols alone (a symbol set's) is notation, not a device that draws a load.
-                && !(f.forms.is_empty() && !f.symbols.is_empty())
-            {
-                *bare.entry(c.family.as_str()).or_default() += 1;
-            }
-        }
-        out.extend(bare.into_iter().map(|(n, k)| {
-            format!(
-                "family `{n}` has no connector, so its {k} placed device{} count{} as a load of zero: give it one with `family` `connectors`",
-                if k == 1 { "" } else { "s" },
-                if k == 1 { "s" } else { "" }
-            )
-        }));
-        out
-    }
-
     /// Everything that must hold between commands: references resolve, geometry is finite and
-    /// not degenerate, doors and windows fit their walls and don't overlap.
+    /// not degenerate, sizes are in range. What is only questionable (doors that overlap or don't fit their wall, walls that
+    /// overlap, a room not enclosed) is a warning, not a refusal ([`Model::review`]).
     pub fn check(&self) -> Result<(), String> {
         if let Some(lw) = &self.line_weights {
             lw.check()?;
@@ -6411,20 +6365,6 @@ impl Model {
         if let Some(n) = t.view_names.intersection(&t.level_names).next() {
             return Err(format!("a view is named `{n}`, as a level is; name it otherwise"));
         }
-        for (host, v) in &t.spans {
-            // Openings share a wall's place only where they share its height too: one over the other is not an overlap, and a
-            // storefront wall with a window a storey is a wall whose windows overlap in plan alone.
-            for (i, a) in v.iter().enumerate() {
-                for b in v.iter().skip(i + 1) {
-                    if b.start > a.end + TOL {
-                        break;
-                    }
-                    if a.end > b.start + TOL && a.head > b.sill + TOL && b.head > a.sill + TOL {
-                        return Err(format!("{} {} and {} {} overlap in wall {host}", self.cat(a.id), a.id, self.cat(b.id), b.id));
-                    }
-                }
-            }
-        }
         Ok(())
     }
 
@@ -6504,21 +6444,6 @@ impl Model {
             }
             frontier = next;
         }
-        // The openings in the walls their openings are in: they're kept apart along a wall.
-        let hosts: BTreeSet<Guid> = affected
-            .iter()
-            .filter_map(|id| match self.elements.get(*id) {
-                Some(Element::Door(o) | Element::Window(o)) => Some(o.host),
-                _ => None,
-            })
-            .collect();
-        for host in &hosts {
-            for id in lookup.referrers(host) {
-                if matches!(self.elements.get(id), Some(Element::Door(o) | Element::Window(o)) if o.host == *host) {
-                    affected.insert(id);
-                }
-            }
-        }
         // A view, a sheet or a viewport: the drawing set's names, numbers and places are kept apart, so all of it is
         // checked, with the levels whose names the views' keep apart from theirs.
         let drawing_set = |e: &Element| crate::derived::DRAWING_SET.contains(&e.category());
@@ -6554,7 +6479,7 @@ impl Model {
 
     /// What [`Model::check`] asks of element `id`, `e`, keeping in `t` what it must hold in common with the others.
     fn check_element<'a>(&'a self, id: Id, e: &'a Element, t: &mut Tally<'a>) -> Result<(), String> {
-        let Tally { level_names, grid_names, link_names, view_names, twins, sheet_numbers, placed, spans, members_placed, shapes } = t;
+        let Tally { level_names, grid_names, link_names, view_names, twins, sheet_numbers, placed, members_placed, shapes } = t;
         let who = format!("{} {id}", e.category());
         let level_ok = |l: Guid| self.level(l).map(|_| ()).ok_or(format!("{who}: level {} doesn't exist", self.shown(l)));
         // A view annotation is drawn in: a plan, a section or an elevation, or with `sheets`, a sheet.
@@ -6809,37 +6734,6 @@ impl Model {
                 coord(&format!("{who} offset"), o.offset)?;
                 coord(&format!("{who} sill"), o.sill)?;
                 text(&who, "mark", &o.mark)?;
-                let (a, b) = (o.offset - t.width / 2.0, o.offset + t.width / 2.0);
-                let length = crate::walls::Axis::of(w).length();
-                if a < -TOL || b > length + TOL {
-                    return Err(format!(
-                        "{who}: {} mm wide at offset {} doesn't fit wall {}, {length} mm long",
-                        t.width,
-                        o.offset,
-                        self.shown(o.host)
-                    ));
-                }
-                // Its sill in the wall: on or over its base, and under its top all across it (which a roof it's attached to may
-                // raise). Its head may rise past the top, as Revit lets it: the wall is cut up to its top, a notch open there.
-                if o.sill < 0.0 {
-                    return Err(format!("{who}: sill {} is under wall {}'s base; give it a sill of 0 or more", o.sill, self.shown(o.host)));
-                }
-                let top =
-                    [a, o.offset, b].map(|s| crate::walls::top_at(self, w, s)).into_iter().fold(f64::INFINITY, f64::min) - self.own_base(w);
-                if o.sill > top - TOL {
-                    return Err(format!(
-                        "{who}: sill {} is at or over the top of wall {}, {} mm up from its base there, so nothing of it is in the \
-                         wall; lower its sill to {} or less, or raise the wall's top",
-                        o.sill,
-                        self.shown(o.host),
-                        (top * 100.0).round() / 100.0,
-                        ((top - TOL) * 100.0).round() / 100.0
-                    ));
-                }
-                let span = OpeningSpan { start: a, end: b, sill: o.sill, head: o.sill + t.height, id };
-                let list = spans.entry(o.host).or_default();
-                let at = list.partition_point(|held| held.start <= a);
-                list.insert(at, span);
             }
             Element::Room(r) => {
                 level_ok(r.level)?;
@@ -7669,8 +7563,6 @@ struct Tally<'a> {
     sheet_numbers: BTreeSet<&'a str>,
     /// Each view on a sheet: the sheet.
     placed: BTreeMap<Guid, Guid>,
-    /// Openings by host wall, in the order they start along it.
-    spans: BTreeMap<Guid, Vec<OpeningSpan>>,
     /// The members each view's detail groups and repeating details place.
     members_placed: BTreeMap<Guid, usize>,
     /// Whether components' shapes build, by family, type and values (as JSON).
@@ -8026,16 +7918,6 @@ fn pens_from_pixels(v: &mut serde_json::Value) {
         _ => {}
     }
 }
-/// A door's or a window's place in its wall: how far along it the opening runs, the sill and the head above
-/// the wall's own base, and which opening it is.
-struct OpeningSpan {
-    start: f64,
-    end: f64,
-    sill: f64,
-    head: f64,
-    id: Id,
-}
-
 /// Where the line from `from` through `end` reaches the centre line of a wall that `end` lies inside (within half the wall's
 /// thickness of that line), carrying on the way it points; `end` itself when it lies in no wall or is on a centre line already.
 fn to_centre(from: P2, end: P2, walls: &[(P2, P2, f64)]) -> P2 {
@@ -8207,28 +8089,33 @@ mod tests {
     }
 
     #[test]
-    fn check_refuses_doors_that_do_not_fit_their_wall() {
+    fn check_allows_a_door_that_does_not_fit_its_wall_and_warns() {
         let mut m = Model::new("t");
         let host = m.insert(wall(m.guid(100000), P2(0.0, 0.0), P2(5000.0, 0.0)));
-        m.insert(door(m.guid(host), 300.0));
-        let e = m.check().unwrap_err();
-        assert!(e.contains("fit"), "{e}");
+        let door = m.insert(door(m.guid(host), 300.0));
+        assert_eq!(m.check(), Ok(()), "a design judgment is a warning, not a refusal");
+        let w = m.review();
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert_eq!((w[0].rule, w[0].elements.clone()), ("opening_past_wall", vec![m.guid(door)]));
+        assert!(w[0].message.contains("past the start"), "{}", w[0].message);
     }
 
     #[test]
-    fn check_refuses_overlapping_openings() {
+    fn check_allows_overlapping_openings_and_warns() {
         let mut m = Model::new("t");
         let host = m.insert(wall(m.guid(100000), P2(0.0, 0.0), P2(5000.0, 0.0)));
         m.insert(door(m.guid(host), 1000.0));
         m.insert(door(m.guid(host), 2000.0));
-        assert_eq!(m.check(), Ok(()));
+        assert_eq!((m.check(), m.review()), (Ok(()), Vec::new()));
         m.insert(door(m.guid(host), 2600.0));
-        let e = m.check().unwrap_err();
-        assert!(e.contains("overlap"), "{e}");
+        assert_eq!(m.check(), Ok(()));
+        let w = m.review();
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(w[0].rule == "openings_overlap" && w[0].message.contains("overlap"), "{w:?}");
     }
 
     #[test]
-    fn check_allows_openings_stacked_in_one_wall_and_still_refuses_ones_side_by_side() {
+    fn openings_stacked_in_one_wall_do_not_overlap_and_ones_side_by_side_do() {
         // A wall six metres tall with a door and, over it, another: the Snowdon sample's storefront walls hold a window per
         // storey at the same place along the wall.
         let mut m = Model::new("t");
@@ -8242,10 +8129,10 @@ mod tests {
             o.sill = 2500.0;
         }
         m.insert(above);
-        assert_eq!(m.check(), Ok(()), "openings that share their place but not their height do not overlap");
+        assert_eq!((m.check(), m.review()), (Ok(()), Vec::new()), "openings that share their place but not their height do not overlap");
         m.insert(door(m.guid(host), 1000.0));
-        let e = m.check().unwrap_err();
-        assert!(e.contains("overlap"), "{e}");
+        assert_eq!(m.check(), Ok(()));
+        assert!(m.review().iter().any(|w| w.rule == "openings_overlap"));
     }
 
     #[test]

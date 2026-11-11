@@ -156,6 +156,7 @@ icon_names! {
     Options,
     SelectById,
     IdsOfSelection,
+    Warning,
     Demolish,
     Paint,
     Unpaint,
@@ -1337,6 +1338,12 @@ pub fn outlines(icon: Icon, compact: bool) -> Vec<Outline> {
             g.line(&[(13.0, 12.0), (18.0, 12.0)]);
             g.line(&[(13.0, 16.0), (16.0, 16.0)]);
             g.circle((8.0, 12.0), 1.5);
+        }
+        Icon::Warning => {
+            // A triangle with an exclamation mark: Revit's Review Warnings.
+            g.closed(&[(12.0, 3.5), (21.5, 20.0), (2.5, 20.0)]);
+            g.line(&[(12.0, 9.5), (12.0, 14.5)]);
+            g.line(&[(12.0, 17.0), (12.0, 17.6)]);
         }
         Icon::Demolish => {
             // A hammer with a handle perpendicular to its head and separate rubble marks.

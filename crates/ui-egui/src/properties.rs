@@ -1129,6 +1129,7 @@ impl BimApp {
         self.floor_slope(ui, &model);
         self.sketch_slope(ui);
         if !ids.is_empty() {
+            self.element_warnings(ui, &ids);
             self.parameters(ui, &model, &ids, rows);
             if let Subject::Element(id) = subject {
                 self.ties(ui, &model, id);

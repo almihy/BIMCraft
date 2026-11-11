@@ -5939,6 +5939,7 @@ mod typed;
 mod typeprops;
 mod view_controls;
 mod wall_dims;
+mod warnings;
 mod window;
 mod working3d;
 mod workplane;

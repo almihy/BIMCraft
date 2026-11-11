@@ -3569,16 +3569,21 @@ fn opening(d: &mut Drawing, m: &Model, e: &Element, o: &Opening, w: &Wall, cut: 
     }
     let (axis, (ext, int)) = (Axis::of(w), walls::faces(m, w));
     let (s0, s1) = (o.offset - t.width / 2.0, o.offset + t.width / 2.0);
+    // The gap is the wall's: where an opening reaches past the wall's end (a warning, not a refusal), only the part in it is cut.
+    let (g0, g1) = (s0.max(0.0), s1.min(axis.length()));
+    if g1 - g0 <= 0.0 {
+        return;
+    }
     // Clear a little past the faces too, where the outlines' outer halves are; along an arc, an arc.
     let past = 3.0 / d.view.scale;
-    let gap: Vec<P2> = axis.points(s0, s1, int - past).into_iter().chain(axis.points(s1, s0, ext + past)).collect();
+    let gap: Vec<P2> = axis.points(g0, g1, int - past).into_iter().chain(axis.points(g1, g0, ext + past)).collect();
     // The opening is the wall's: a hidden door or window leaves it, outlined, owned by no one.
     let owner = d.owner;
     if !shown {
         d.own(None);
     }
     d.fill(&[gap], PAPER);
-    for s in [s0, s1] {
+    for s in [g0, g1] {
         d.line(&[axis.at(s, int), axis.at(s, ext)], Pen::HEAVY, INK, false);
     }
     d.own(owner);

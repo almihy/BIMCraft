@@ -731,7 +731,7 @@ fn wall_quantities(m: &Model, wl: &crate::model::Wall, holes: &[(f64, f64, f64)]
     if wl.attach_top.is_none() && wl.attach_base.is_none() {
         let height = m.top_z(wl) - m.base_z(wl);
         let gross = length * height;
-        let cut: f64 = holes.iter().map(|&(wd, h, sill)| wd.min(length) * h.min(height - sill).max(0.0)).sum();
+        let cut: f64 = holes.iter().map(|&(wd, h, sill)| wd.min(length) * ((sill + h).min(height) - sill.max(0.0)).max(0.0)).sum();
         let net = (gross - cut).max(0.0);
         values.extend([
             ("Height", "LENGTH", height),

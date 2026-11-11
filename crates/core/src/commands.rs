@@ -1874,6 +1874,20 @@ other_files(
          (`library`), not its types, materials, families, parameters and images, which is most of the answer",
         inspect,
     ),
+    other(
+        "warnings",
+        "Review Warnings",
+        "{rule?, severity?: warning|note, element?} Revit's Review Warnings: what is questionable in the project \
+         without being wrong, each with a `rule`, a `severity`, a `message` saying what to change, and the `elements` \
+         it is about (ids, and `guids`). Rules: `openings_overlap` (doors or windows that overlap in a wall), \
+         `opening_past_wall` (wider than the wall's run or past its end), `opening_outside_height` (a sill under the \
+         wall's base or at or over its top), `walls_overlap`, `identical_instances` (the same element twice in one \
+         place), `wall_off_axis` (a wall or grid less than a degree off an axis), `room_not_enclosed`, \
+         `room_redundant`, `device_no_connector`. The project is never refused for these: every command that makes \
+         one returns it in its result as `new_warnings`. Filter by `rule`, `severity` or an `element` (id or GUID) it \
+         is about.",
+        review_warnings,
+    ),
     other_files(
         "render",
         "Render",
@@ -14948,6 +14962,41 @@ fn inspect(s: &mut Session, p: &Value) -> R {
     out["distribution_systems"] = json!(m.distribution_systems);
     out["wire_types"] = json!(m.wire_types);
     Ok(out)
+}
+
+fn review_warnings(s: &mut Session, p: &Value) -> R {
+    let c = "warnings";
+    only(c, p, &["rule", "severity", "element"])?;
+    let rule = string(c, p, "rule")?;
+    if let Some(r) = &rule
+        && !crate::warnings::RULES.iter().any(|(id, _)| id == r)
+    {
+        let all: Vec<&str> = crate::warnings::RULES.iter().map(|(id, _)| *id).collect();
+        return Err(bad(c, format!("there is no rule `{r}`; there are {}", all.join(", "))));
+    }
+    let severity = string(c, p, "severity")?;
+    if let Some(v) = &severity
+        && !["warning", "note"].contains(&v.as_str())
+    {
+        return Err(bad(c, format!("`severity` is warning or note, not `{v}`")));
+    }
+    let element = match p.get("element") {
+        v if absent(v) => None,
+        Some(v) => Some(s.model.guid(element_id(c, &s.model, v)?)),
+        None => None,
+    };
+    let all = s.warnings();
+    let m = &s.model;
+    let hits: Vec<Value> = all
+        .iter()
+        .filter(|w| rule.as_deref().is_none_or(|r| w.rule == r))
+        .filter(|w| {
+            severity.as_deref().is_none_or(|v| serde_json::to_value(w.severity).ok().and_then(|x| x.as_str().map(|x| x == v)) == Some(true))
+        })
+        .filter(|w| element.is_none_or(|g| w.elements.contains(&g)))
+        .map(|w| w.json(m))
+        .collect();
+    Ok(json!({"count": hits.len(), "of": all.len(), "warnings": hits}))
 }
 
 fn elements(s: &mut Session, p: &Value) -> R {

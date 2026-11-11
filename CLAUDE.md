@@ -23,7 +23,9 @@ and MCP server, and milestone 2, the egui desktop app, are done. What works and 
   lists it as `left_out`; a file of a newer `format` is refused. A change an older version would misread bumps `FORMAT` and
   adds a step to `Model::migrate`.
 - **Validate in one place.** Commands build elements; `Model::check` validates the whole model after each command and the
-  engine rolls back when it fails. New rules go there, with an error that says what to fix.
+  engine rolls back when it fails. New rules go there, with an error that says what to fix, but only for what would break the
+  model (a reference to nothing, a number out of range, a shape the geometry cannot build). A design judgment (openings that
+  overlap, a room not enclosed) is a warning, as Revit's: `warnings.rs`, [warnings](docs/areas/warnings.md).
 - **Clean-room.** Never copy Autodesk content: no families (`.rfa`), templates, icons, help text, or anything from inside
   `.rvt` files; a reader may read a user's file, it never bundles or extracts assets for the project. Formats come from
   public specifications (IFC4 is ISO 16739). A format with no public specification (Revit's `.rvt` and `.rfa`) may be read
