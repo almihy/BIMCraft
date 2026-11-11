@@ -45,8 +45,11 @@ An element's JSON carries its type's (`type_mark`…), so each is a schedule fie
 are of a type and for a multi-category schedule (not among the first fields unless chosen), and a tag's `label`. IFC writes the
 Type Mark as `Reference` and the Fire Rating as `FireRating` in the element's `Pset_*Common` where IFC has them there,
 Manufacturer and Model as `Pset_ManufacturerTypeInformation`'s `Manufacturer` and `ModelLabel`, and the rest (and those two where
-there's no common set, a component's) in `BIMCraft_TypeData`. A project parameter can't take one's name, so a file from before
-that holds one by such a name reads with it renamed `Custom <name>` (`Model::renamed_clashing_parameters`).
+there's no common set, a component's) in `BIMCraft_TypeData`. A project parameter (or, for components, a family's) of the same
+name takes the field's place in schedules, as it did before the field: `Fire Rating` as a project parameter of doors, with
+a value for each door, still shows that. Area, Volume and Perimeter are fields of their own, which a project parameter can't be
+named: a file from before that holds one by such a name reads with it renamed `Custom <name>`
+(`Model::renamed_clashing_parameters`).
 
 A table goes to a file as CSV (`schedule::to_csv`, text a spreadsheet would read as a formula guarded with `'`) or, for a path
 ending `.xlsx`, as a workbook of one sheet (`schedule::to_xlsx` over `xlsx.rs`, which writes the parts and the zip by hand on

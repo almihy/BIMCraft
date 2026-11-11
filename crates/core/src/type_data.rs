@@ -255,7 +255,7 @@ mod tests {
         assert!(t.read(&json!({"cost": "cheap"})).unwrap_err().contains("number"));
         assert!(t.read(&json!({"manufacturer": 4})).unwrap_err().contains("text"));
         assert!(t.read(&json!({"model": "a\nb"})).unwrap_err().contains("one line"));
-        assert!(t.read(&json!({"type_comments": "a\nb"})).is_ok());
+        assert!(TypeIdentity::default().read(&json!({"type_comments": "a\nb"})).is_ok());
         assert!(t.read(&json!({"keynote": "x".repeat(MAX_TEXT + 1)})).is_err());
     }
 }

@@ -1110,7 +1110,7 @@ fn edit_type_has_an_identity_data_group_that_sets_the_types_type_mark_fire_ratin
     let wall = ids(&h, "wall")[0];
     click(&mut h, P2(4000.0, 0.0));
     assert_eq!(h.state().selection, [wall]);
-    let name = h.state().session.model.types.wall.keys().next().cloned().unwrap();
+    let name = field(&h, wall, "type").as_str().map(String::from).unwrap_or_default();
     press(&mut h, "Edit Type");
     // The Construction group's layers take the room: fold it, as Revit's groups fold, to see the group below.
     press(&mut h, "Construction");
@@ -1119,12 +1119,12 @@ fn edit_type_has_an_identity_data_group_that_sets_the_types_type_mark_fire_ratin
     {
         assert!(h.query_by_label(label).is_some(), "{label} is in Edit Type's Identity Data");
     }
-    // A cost that isn't a number stops Apply, and nothing is set.
+    // A cost that isn't a number stops OK, and nothing is set.
     type_into(&mut h, "Type Mark", "W1");
     type_into(&mut h, "Cost", "a lot");
-    press(&mut h, "Apply");
+    press(&mut h, "OK");
     assert!(h.state().session.model.types.wall[&name].identity.is_empty(), "nothing applied");
-    assert!(h.query_by_label_contains("is not a number").is_some(), "it says why");
+    assert!(h.query_by_label_contains("is not a number").is_some(), "it says why, and the dialog stays");
     type_into(&mut h, "Cost", "120.5");
     type_into(&mut h, "Fire Rating", "EI 60");
     type_into(&mut h, "Manufacturer", "Acme");

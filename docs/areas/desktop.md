@@ -218,7 +218,9 @@ under group bars that fold, `Table::row` and its helpers for a field, a check bo
 `Table::full` for what spans both columns, a type's layers or a sample), then `foot` (what stopped it, and OK, Cancel and Apply). Each dialog keeps its
 state and its commands: the project's own types and a family's in `properties.rs` (`type`, `family`, and `rename_type` for Rename), text types in
 `notes.rs` (`text_type`, with `rename`), filled region types in `fillpatterns.rs`, where Duplicate and Rename change the draft OK applies and a
-pattern's … opens the Patterns tab. The dialogs are one width, and the table's body one height where the window has room, known from the first frame:
+pattern's … opens the Patterns tab. The project's own types and a family's end in an Identity Data group (`identity_group`: Type Mark,
+Description, Manufacturer, Model, Fire Rating, Cost, Keynote, Assembly Code, URL, Type Comments), which sends the fields changed (all of them
+for a Duplicate) as the `type` command's identity keys, or the `family` command's `identity`. The dialogs are one width, and the table's body one height where the window has room, known from the first frame:
 a body that fitted its rows grew over a few frames, and a click meant for one row landed on the next. A refusal is said in the dialog.
 
 The interface is Rev's, the ribbon tool its users know: the ribbon over the view, Properties over the Project Browser down the left

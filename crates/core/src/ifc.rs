@@ -2840,11 +2840,11 @@ mod tests {
         assert!(near(q["GrossArea"], 48.0) && near(q["NetArea"], 47.0) && near(q["Perimeter"], 28000.0), "{q:?}");
         assert!(near(q["NetVolume"], 47.0 * q["Width"] / 1e3), "{q:?}");
         dangling(&f);
-        // Attached to a roof or a floor, a wall has no single height: only its length and thickness.
+        // Attached to a roof or a floor, a wall has no single height: no `Height`, its sides and volumes its pieces.
         let mut attached = wl.clone();
         attached.attach_top = Some(m.guid(walls[1]));
         let names: Vec<&str> = wall_quantities(m, wall, &attached, &[]).iter().map(|(n, _, _)| *n).collect();
-        assert_eq!(names, ["Length", "Width"]);
+        assert_eq!(names, ["Length", "Width", "GrossSideArea", "NetSideArea", "GrossVolume", "NetVolume"]);
     }
 
     /// Every closed shell in `f` is closed: each edge of its faces, from one point to the next round a bound, is run once
@@ -2990,13 +2990,19 @@ mod tests {
         use crate::graphics::testing::{house, run};
         let mut s = Session::new();
         house(&mut s);
-        run(&mut s, "door", json!({"at": [2000, 0]}));
-        let wall = s.model.types.wall.keys().next().cloned().unwrap();
-        let door_type = s.model.types.door.keys().next().cloned().unwrap();
+        let door = run(&mut s, "door", json!({"at": [2000, 0]}))["id"].as_u64().unwrap();
+        let wall = s.model.elements.values().find_map(|e| if let Element::Wall(w) = e { Some(w.type_name.clone()) } else { None }).unwrap();
+        let (door_family, door_type) = match s.model.elements.get(door) {
+            Some(Element::Door(o)) => (o.family.clone(), o.type_name.clone()),
+            _ => panic!("no door"),
+        };
         let wall_data = json!({"category": "wall", "name": wall, "type_mark": "W1", "fire_rating": "EI 60", "manufacturer": "Acme",
             "model": "X-200", "description": "Brick", "cost": 120.5, "keynote": "04 21 13"});
         run(&mut s, "type", wall_data);
-        run(&mut s, "type", json!({"category": "door", "name": door_type, "type_mark": "D1", "fire_rating": "EI 30"}));
+        match door_family {
+            Some(f) => run(&mut s, "family", json!({"name": f, "identity": {door_type: {"type_mark": "D1", "fire_rating": "EI 30"}}})),
+            None => run(&mut s, "type", json!({"category": "door", "name": door_type, "type_mark": "D1", "fire_rating": "EI 30"})),
+        };
         let chair = json!({"name": "Chair", "category": "furniture", "parameters": [{"name": "Width", "kind": "length", "value": 500}],
             "types": {"A": {"Width": 500}}, "forms": [{"plane": "xy", "profile": [[0, 0], [500, 0], [500, 500], [0, 500]], "from": 0, "to": 400}],
             "identity": {"A": {"type_mark": "C1", "fire_rating": "none"}}});
@@ -3021,7 +3027,7 @@ mod tests {
         assert!(door_common.iter().any(|p| p.contains("'FireRating'") && p.contains("EI 30")), "{door_common:?}");
         assert!(door_common.iter().any(|p| p.contains("'Reference'") && p.contains("'D1'")), "{door_common:?}");
         // A family's component has no common set: its Type Mark and Fire Rating go in the BIMCraft set.
-        let component = of_kind(&f, "IFCFURNISHINGELEMENT").first().copied().or_else(|| of_kind(&f, "IFCBUILDINGELEMENTPROXY").last().copied()).unwrap();
+        let component = of_kind(&f, "IFCFURNITURE")[0];
         let rest = set_of(&f, component, TYPE_DATA_SET);
         assert!(rest.iter().any(|p| p.contains("'Reference'") && p.contains("'C1'")), "{rest:?}");
         assert!(rest.iter().any(|p| p.contains("'FireRating'")), "{rest:?}");

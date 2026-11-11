@@ -3613,13 +3613,14 @@ impl Model {
         self.format = FORMAT;
     }
 
-    /// A project parameter named as a field its categories have of their own since (Area and Volume of walls, a type's Type Mark,
-    /// Fire Rating or Manufacturer…) is `Custom <name>` now, with its values and the schedules, filters and rules that name it:
+    /// A project parameter named as a field its categories have of their own since (Area, Volume or Perimeter of walls, floors,
+    /// ceilings and roofs) is `Custom <name>` now, with its values and the schedules, filters and rules that name it:
     /// [`Model::check`] refuses the clash, so a file from before the field reads as it was.
     fn renamed_clashing_parameters(&mut self) {
         let clashing: Vec<String> = self
             .parameters
             .iter()
+            .filter(|(n, _)| !(crate::paint::reserved(n) || phasing::reserved(n) || crate::massing::reserved(n)))
             .filter(|(n, p)| p.categories.iter().any(|c| crate::schedule::own_field(c, n)))
             .map(|(n, _)| n.clone())
             .collect();

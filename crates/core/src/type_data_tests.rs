@@ -20,14 +20,14 @@ fn with_openings() -> (Session, Vec<u64>, u64, u64) {
     (s, walls, door, window)
 }
 
-fn first_type(s: &Session, category: &str) -> String {
-    s.model.type_names(category).first().map(|n| n.to_string()).unwrap_or_default()
+fn first_type(m: &Model, category: &str) -> String {
+    m.type_names(category).first().map(|n| n.to_string()).unwrap_or_default()
 }
 
 #[test]
 fn a_type_holds_identity_data_and_a_file_keeps_only_what_is_set() {
     let (mut s, ..) = with_openings();
-    let wall = first_type(&s, "wall");
+    let wall = first_type(&s.model, "wall");
     // Nothing set: nothing in the file, so a file from before reads the same.
     let before = serde_json::to_string(&*s.model).unwrap();
     assert!(!before.contains("type_mark") && !before.contains("identity"));
@@ -63,7 +63,7 @@ fn a_type_holds_identity_data_and_a_file_keeps_only_what_is_set() {
         ("railing", json!({})),
         ("beam", json!({})),
     ] {
-        let name = first_type(&s, category);
+        let name = first_type(&s.model, category);
         let mut p = json!({"category": category, "name": name, "type_mark": "T1", "manufacturer": "Acme"});
         if let (Some(p), Some(extra)) = (p.as_object_mut(), extra.as_object()) {
             p.extend(extra.clone());
@@ -86,7 +86,7 @@ fn a_type_holds_identity_data_and_a_file_keeps_only_what_is_set() {
 #[test]
 fn identity_data_that_cannot_be_held_is_refused() {
     let (mut s, ..) = with_openings();
-    let wall = first_type(&s, "wall");
+    let wall = first_type(&s.model, "wall");
     for (bad, says) in [
         (json!({"cost": -1}), "cost"),
         (json!({"cost": "cheap"}), "number"),
@@ -105,8 +105,21 @@ fn identity_data_that_cannot_be_held_is_refused() {
 #[test]
 fn a_types_elements_read_its_identity_data_as_schedule_fields_and_in_tags() {
     let (mut s, walls, door, window) = with_openings();
-    run(&mut s, "type", json!({"category": "door", "name": first_type(&s, "door"), "type_mark": "D1", "fire_rating": "EI 30", "cost": 310}));
-    run(&mut s, "type", json!({"category": "wall", "name": first_type(&s, "wall"), "type_mark": "W1", "manufacturer": "Acme"}));
+    let wall_type = match s.model.elements.get(walls[0]) {
+        Some(Element::Wall(w)) => w.type_name.clone(),
+        _ => panic!("no wall"),
+    };
+    // The door the tool places is of one of the project's own types or of a family's.
+    let (family, door_type) = match s.model.elements.get(door) {
+        Some(Element::Door(o)) => (o.family.clone(), o.type_name.clone()),
+        _ => panic!("no door"),
+    };
+    let data = json!({"type_mark": "D1", "fire_rating": "EI 30", "cost": 310});
+    match family {
+        Some(f) => run(&mut s, "family", json!({"name": f, "identity": {door_type: data}})),
+        None => run(&mut s, "type", json!({"category": "door", "name": door_type, "type_mark": "D1", "fire_rating": "EI 30", "cost": 310})),
+    };
+    run(&mut s, "type", json!({"category": "wall", "name": wall_type, "type_mark": "W1", "manufacturer": "Acme"}));
     // The element's JSON says it, for agents.
     let j = crate::commands::element_json(&s.model, door);
     assert_eq!((j["type_mark"].as_str(), j["fire_rating"].as_str(), j["cost"].as_f64()), (Some("D1"), Some("EI 30"), Some(310.0)));
@@ -133,9 +146,11 @@ fn a_types_elements_read_its_identity_data_as_schedule_fields_and_in_tags() {
     // Filtering and sorting by one.
     let r = run(&mut s, "schedule", json!({"name": "Walls", "category": "wall", "fields": ["Id", "Type Mark"], "filters": [{"field": "Type Mark", "op": "equals", "value": "W1"}]}));
     assert_eq!(r["rows"].as_array().map(Vec::len), Some(walls.len()));
-    // A parameter can't take the name of one.
-    let e = s.execute("parameter", &json!({"name": "Fire Rating", "categories": ["wall"]})).unwrap_err();
-    assert!(e.contains("of their own"), "{e}");
+    // A project parameter of the same name takes a field's place in a schedule, as it did before the field.
+    run(&mut s, "parameter", json!({"name": "Fire Rating", "categories": ["wall"], "kind": "number"}));
+    run(&mut s, "modify", json!({"id": walls[0], "params": {"Fire Rating": 60}}));
+    let r = run(&mut s, "schedule", json!({"name": "Walls again", "category": "wall", "fields": ["Id", "Fire Rating"]}));
+    assert!(r["rows"].as_array().unwrap().iter().any(|row| row[0].as_f64() == Some(walls[0] as f64) && row[1].as_f64() == Some(60.0)), "{r}");
 }
 
 #[test]
@@ -164,16 +179,17 @@ fn a_family_types_identity_data_follows_the_type_and_reaches_the_schedule() {
     run(&mut s, "rename_type", json!({"family": "Chair", "type": "A", "name": "Armless"}));
     assert_eq!(s.model.families["Chair"].identity["Armless"].manufacturer, "Ikea");
     assert!(!s.model.families["Chair"].identity.contains_key("A"));
-    run(&mut s, "family", json!({"name": "Chair", "identity": {"Armless": {"type_mark": ""}}}));
+    run(&mut s, "family", json!({"name": "Chair", "identity": {"Armless": {"type_mark": ""}, "B": {"model": "Plain"}}}));
     assert_eq!(s.model.families["Chair"].identity["Armless"].type_mark, "");
-    run(&mut s, "family", json!({"name": "Chair", "types": {"Armless": null}}));
-    assert!(s.model.families["Chair"].identity.is_empty());
+    run(&mut s, "family", json!({"name": "Chair", "types": {"B": null}}));
+    assert!(!s.model.families["Chair"].identity.contains_key("B"), "a type that goes takes its identity data");
 }
 
 #[test]
 fn a_wall_schedule_has_area_and_volume_less_its_openings() {
     let (mut s, walls, door, window) = with_openings();
-    let m = &s.model;
+    let model = std::sync::Arc::clone(&s.model);
+    let m = &*model;
     let Some(Element::Wall(wl)) = m.elements.get(walls[0]) else { panic!("no wall") };
     let (height, thick) = (m.top_z(wl) - m.base_z(wl), m.thickness(wl));
     let size = |id: u64| m.opening_type(m.elements.get(id).unwrap()).unwrap();
@@ -196,9 +212,9 @@ fn a_wall_schedule_has_area_and_volume_less_its_openings() {
     let full = 6000.0 * height / 1e6;
     assert!(by_id.iter().any(|&(area, _)| (area - full).abs() < 0.006), "{by_id:?}");
     // One quantity function: the schedule's cells are the IFC's numbers, to the schedule's rounding.
-    let q = crate::quantities::wall(&s.model, walls[0], wl, &crate::quantities::holes_in(&s.model, walls[0]));
+    let q = crate::quantities::wall(m, walls[0], wl, &crate::quantities::holes_in(m, walls[0]));
     assert!(near(q.net_side / 1e6, net) && near(q.net_volume / 1e9, net * thick / 1e3));
-    assert_eq!(q, crate::quantities::wall(&s.model, walls[0], wl, &crate::quantities::all_holes(&s.model)[&walls[0]]));
+    assert_eq!(q, crate::quantities::wall(m, walls[0], wl, &crate::quantities::all_holes(m)[&walls[0]]));
     // A wall's JSON says them, for agents.
     let j = crate::commands::element_json(&s.model, walls[0]);
     assert!((j["area_m2"].as_f64().unwrap_or_default() - net).abs() < 0.006, "{j}");
@@ -214,12 +230,13 @@ fn floors_ceilings_and_roofs_schedule_their_area_volume_and_perimeter() {
     run(&mut s, "ceiling", json!({"boundary": boundary, "openings": hole}));
     run(&mut s, "level", json!({"name": "Roof level", "elevation": 3000}));
     run(&mut s, "roof", json!({"boundary": boundary, "overhang": 0, "slope": 30}));
+    let model = std::sync::Arc::clone(&s.model);
     let thick = |category: &str| {
-        let n = first_type(&s, category);
+        let n = first_type(&model, category);
         match category {
-            "floor" => s.model.types.floor[&n].thickness,
-            "ceiling" => s.model.types.ceiling[&n].thickness,
-            _ => s.model.types.roof[&n].thickness,
+            "floor" => model.types.floor[&n].thickness,
+            "ceiling" => model.types.ceiling[&n].thickness,
+            _ => model.types.roof[&n].thickness,
         }
     };
     let r = run(&mut s, "schedule", json!({"name": "Floors", "category": "floor", "fields": ["Area", "Volume", "Perimeter"]}));
@@ -246,20 +263,20 @@ fn floors_ceilings_and_roofs_schedule_their_area_volume_and_perimeter() {
 fn a_parameter_a_file_names_as_a_field_that_is_new_is_renamed_not_refused() {
     let mut s = Session::new();
     house(&mut s);
-    // A file from before the Fire Rating field: a project parameter of that name for walls, one wall holding a value.
+    // A file from before the Volume field: a project parameter of that name for walls, one wall holding a value.
     run(&mut s, "parameter", json!({"name": "Sound Rating", "categories": ["wall"], "kind": "text"}));
     let id = s.model.elements.iter().find(|(_, e)| matches!(e, Element::Wall(_))).map(|(id, _)| *id).unwrap_or_default();
     run(&mut s, "modify", json!({"id": id, "params": {"Sound Rating": "45"}}));
     let mut v: Value = serde_json::to_value(&*s.model).unwrap();
     let rename = |v: &mut Value| {
-        let text = serde_json::to_string(v).unwrap().replace("Sound Rating", "Fire Rating");
+        let text = serde_json::to_string(v).unwrap().replace("Sound Rating", "Volume");
         *v = serde_json::from_str(&text).unwrap();
     };
     rename(&mut v);
     let (back, left_out) = Model::read(&v.to_string()).unwrap();
     assert!(left_out.is_empty(), "{left_out:?}");
-    assert!(back.parameters.contains_key("Custom Fire Rating") && !back.parameters.contains_key("Fire Rating"), "{:?}", back.parameters.keys());
+    assert!(back.parameters.contains_key("Custom Volume") && !back.parameters.contains_key("Volume"), "{:?}", back.parameters.keys());
     assert!(back.check().is_ok(), "{:?}", back.check());
-    let held = back.elements.values().filter_map(|e| e.params()).any(|p| p.get("Custom Fire Rating").and_then(Value::as_str) == Some("45"));
+    let held = back.elements.values().filter_map(|e| e.params()).any(|p| p.get("Custom Volume").and_then(Value::as_str) == Some("45"));
     assert!(held, "its value moved with it");
 }

@@ -219,7 +219,8 @@ const AREA_SURFACE: Own = (msg!("Area"), Kind::Area, From::Key("surface_area_m2"
 const PERIMETER: Own = (msg!("Perimeter"), Kind::Length, From::Metres("perimeter_m"));
 
 /// A type's identity data, as Revit's Identity Data group in Type Properties: the fields of every category whose elements
-/// are of a type, and of a multi-category schedule. They are not among a schedule's first fields unless it chooses them.
+/// are of a type, and of a multi-category schedule. They are not among a schedule's first fields unless it chooses them, and a
+/// project parameter or a family's parameter of the same name takes the place of one (they come after those in `fields`).
 const IDENTITY: &[Own] = &[
     ("Type Mark", Kind::Text, From::Key("type_mark")),
     ("Description", Kind::Text, From::Key("description")),
@@ -240,11 +241,6 @@ fn identity(cat: &str) -> &'static [Own] {
         || matches!(cat, "wall" | "floor" | "roof" | "ceiling" | "door" | "window" | "column" | "structuralcolumn" | "footing" | "railing" | "component")
         || crate::model::RUN_CATEGORIES.contains(&cat);
     if typed { IDENTITY } else { &[] }
-}
-
-/// Every field of category `cat` that is its own: its table's, then its identity data.
-fn all_own(cat: &str) -> impl Iterator<Item = &'static Own> {
-    own(cat).1.iter().chain(identity(cat))
 }
 
 /// A multi-category schedule's category: a row for each element of the categories it lists (`Schedule::categories`),
@@ -613,13 +609,18 @@ fn own(cat: &str) -> (usize, &'static [Own]) {
 
 /// Whether `name` is one of category `cat`'s own fields.
 pub fn own_field(cat: &str, name: &str) -> bool {
-    all_own(cat).any(|(n, _, _)| *n == name)
+    own(cat).1.iter().any(|(n, _, _)| *n == name)
 }
 
 /// Category `cat`'s fields, each once, with what it holds: its own, then the project parameters
-/// for it and, for components, the parameters of the model's families.
+/// for it and, for components, the parameters of the model's families, and then its type's identity data.
 pub fn fields(m: &Model, cat: &str) -> Vec<(String, Kind)> {
-    let mut out: Vec<(String, Kind)> = all_own(cat).map(|(n, k, _)| (n.to_string(), *k)).collect();
+    fields_with(m, cat, true)
+}
+
+/// [`fields`], with the identity data or without it: what a calculated field may not be named is what isn't identity data.
+fn fields_with(m: &Model, cat: &str, identity_data: bool) -> Vec<(String, Kind)> {
+    let mut out: Vec<(String, Kind)> = own(cat).1.iter().map(|(n, k, _)| (n.to_string(), *k)).collect();
     let mut seen: BTreeSet<String> = out.iter().map(|(n, _)| n.clone()).collect();
     let mut add = |n: &str, k: Kind| {
         if seen.insert(n.to_string()) {
@@ -649,6 +650,10 @@ pub fn fields(m: &Model, cat: &str) -> Vec<(String, Kind)> {
                 },
             );
         }
+    }
+    // The identity data, unless a project parameter or a family's parameter has its name.
+    for (n, k, _) in identity(cat).iter().filter(|_| identity_data) {
+        add(n, *k);
     }
     out
 }
@@ -723,6 +728,7 @@ pub fn check(m: &Model, sc: &Schedule) -> Result<(), String> {
         }
     }
     let available = fields(m, &cat);
+    let fixed: BTreeSet<String> = fields_with(m, &cat, false).into_iter().map(|(n, _)| n).collect();
     let mut kinds: BTreeMap<&str, Kind> = available.iter().map(|(n, k)| (n.as_str(), *k)).collect();
     let unknown = |n: &str| {
         let names: Vec<&str> = available.iter().map(|(n, _)| n.as_str()).collect();
@@ -750,7 +756,8 @@ pub fn check(m: &Model, sc: &Schedule) -> Result<(), String> {
                         f.name
                     ));
                 }
-                if kinds.contains_key(f.name.as_str()) {
+                // A calculated field may be named as an identity field, and takes its place.
+                if fixed.contains(f.name.as_str()) {
                     return Err(format!("calculated field `{}`: {cat}s have a field of that name; call it something else", f.name));
                 }
                 if f.kind == Some(Kind::Text) {
@@ -774,7 +781,7 @@ pub fn check(m: &Model, sc: &Schedule) -> Result<(), String> {
         fields.iter().find(|f| f.total && !matches!(kinds.get(f.name.as_str()), Some(Kind::Number | Kind::Length | Kind::Area | Kind::Volume)))
     {
         let k = kinds.get(f.name.as_str()).copied().unwrap_or_default();
-        return Err(format!("field `{}` holds {}; only numbers, lengths and areas total", f.name, holding(k)));
+        return Err(format!("field `{}` holds {}; only numbers, lengths, areas and volumes total", f.name, holding(k)));
     }
     for flt in &sc.filters {
         check_filter(flt, &kinds, &unknown)?;
@@ -951,7 +958,7 @@ impl Row<'_> {
     /// One of category `cat`'s fields, of its element.
     fn field_of(&self, cat: &str, name: &str) -> Value {
         let (m, j) = (self.m, &self.json);
-        if let Some((_, kind, from)) = all_own(cat).find(|(n, _, _)| *n == name) {
+        if let Some((_, kind, from)) = own(cat).1.iter().find(|(n, _, _)| *n == name) {
             let number = |v: Option<&Value>| v.and_then(Value::as_f64).unwrap_or(0.0);
             return match *from {
                 From::Key(k) if matches!(kind, Kind::Text) => match j.get(k) {
@@ -1012,13 +1019,24 @@ impl Row<'_> {
                 _ => v,
             };
         }
+        // Its type's identity data, read from the element's JSON.
+        if let Some((_, _, from)) = identity(cat).iter().find(|(n, _, _)| *n == name) {
+            return match *from {
+                From::Opt(k) => j.get(k).filter(|v| v.is_number()).cloned().unwrap_or(Value::Null),
+                From::Key(k) => match j.get(k) {
+                    Some(Value::String(s)) if !s.is_empty() => Value::String(s.clone()),
+                    _ => Value::Null,
+                },
+                _ => Value::Null,
+            };
+        }
         Value::Null
     }
 
     /// Field `name`, holding `kind`, as its element's own category has it; else an area worked out from its sizes.
     fn shared(&self, name: &str, kind: Kind) -> Value {
         let cat = self.e.category();
-        if all_own(cat).any(|(n, k, _)| *n == name && *k == kind) {
+        if own(cat).1.iter().any(|(n, k, _)| *n == name && *k == kind) {
             return self.field_of(cat, name);
         }
         let by = |a: &str, b: &str| match (self.field_of(cat, a).as_f64(), self.field_of(cat, b).as_f64()) {
@@ -1026,7 +1044,6 @@ impl Row<'_> {
             _ => Value::Null,
         };
         match (cat, name) {
-            ("wall", "Area") => by("Length", "Height"),
             ("door" | "window", "Area") => by("Width", "Height"),
             _ => Value::Null,
         }
@@ -1463,7 +1480,9 @@ mod tests {
             assert_eq!(wall[2], Value::Null, "a wall has a thickness, not a width");
             let (l, h) = (wall[4].as_f64().unwrap(), wall[3].as_f64().unwrap());
             assert!(l > 0.0 && h > 0.0, "{wall:?}");
-            assert_eq!(wall[5], json!(fine(l * h / 1e6)), "a wall's area is its length by its height");
+            // One side of it, less the doors and windows in it.
+            let gross = fine(l * h / 1e6);
+            assert!(wall[5].as_f64().unwrap() <= gross, "a wall's area is its length by its height, less its openings: {wall:?}");
         }
     }
 
