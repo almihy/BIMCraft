@@ -15,9 +15,9 @@ pub mod bridge;
 pub mod cad;
 #[cfg(test)]
 mod cad_tests;
-pub mod cloud;
 #[cfg(test)]
 mod clipboard_tests;
+pub mod cloud;
 #[cfg(test)]
 mod cloud_tests;
 mod commands;

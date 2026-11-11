@@ -183,7 +183,8 @@ fn paste_aligned_to_a_level_keeps_a_walls_base_offset_and_unconnected_height() {
 #[test]
 fn a_wall_attached_to_a_roof_that_was_not_copied_is_pasted_to_another_level_unattached_and_the_result_says_so() {
     let (mut s, levels, walls, _) = building();
-    let roof = run(&mut s, "roof", json!({"boundary": [[0, 0], [8000, 0], [8000, 6000], [0, 6000]], "level": levels[1]}))["id"].as_u64().unwrap();
+    let roof =
+        run(&mut s, "roof", json!({"boundary": [[0, 0], [8000, 0], [8000, 6000], [0, 6000]], "level": levels[1]}))["id"].as_u64().unwrap();
     run(&mut s, "modify", json!({"id": walls[0], "attach_top": roof}));
     assert!(wall(&s, walls[0]).attach_top.is_some());
     run(&mut s, "copy_to_clipboard", json!({"ids": [walls[0]]}));
@@ -197,7 +198,8 @@ fn a_wall_attached_to_a_roof_that_was_not_copied_is_pasted_to_another_level_unat
 #[test]
 fn a_wall_attached_to_a_roof_copied_with_it_is_attached_to_the_roofs_copy_on_every_level() {
     let (mut s, levels, walls, _) = building();
-    let roof = run(&mut s, "roof", json!({"boundary": [[0, 0], [8000, 0], [8000, 6000], [0, 6000]], "level": levels[1]}))["id"].as_u64().unwrap();
+    let roof =
+        run(&mut s, "roof", json!({"boundary": [[0, 0], [8000, 0], [8000, 6000], [0, 6000]], "level": levels[1]}))["id"].as_u64().unwrap();
     run(&mut s, "modify", json!({"id": walls[0], "attach_top": roof}));
     run(&mut s, "copy_to_clipboard", json!({"ids": [walls[0], roof]}));
     let r = run(&mut s, "paste", json!({"levels": [levels[2]]}));

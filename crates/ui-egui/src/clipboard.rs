@@ -9,10 +9,10 @@ use bimcraft_i18n::msg;
 use egui::{Align, Button, Context, Event, Id as UiId, Key, Layout, Modifiers, ScrollArea, Ui};
 use serde_json::{Value, json};
 
+use crate::icons::Icon;
 use crate::lang::{t, tf};
 use crate::popup::Modal;
 use crate::ribbon::{self, panel};
-use crate::icons::Icon;
 use crate::{BimApp, Status, Tool, big_button, list_row};
 
 /// The levels dialog of Paste Aligned to Selected Levels, or with `single` to a Picked Level: each level with its elevation, and
@@ -96,9 +96,8 @@ impl BimApp {
     /// Paste Aligned to Selected Levels (or, with `single`, to a Picked Level): the dialog of levels.
     pub(crate) fn open_paste_levels(&mut self, single: bool) {
         let levels = self.session.model.levels().into_iter().map(|(id, l)| (id, self.session.model.units.with_unit(l.elevation), false));
-        let levels: Vec<(Id, String, bool)> = levels
-            .map(|(id, z, on)| (id, format!("{} ({z})", self.session.model.level(id).map_or("", |l| l.name.as_str())), on))
-            .collect();
+        let levels: Vec<(Id, String, bool)> =
+            levels.map(|(id, z, on)| (id, format!("{} ({z})", self.session.model.level(id).map_or("", |l| l.name.as_str())), on)).collect();
         self.paste_levels = Some(PasteLevels { levels, single });
     }
 
@@ -175,7 +174,10 @@ impl BimApp {
     pub(crate) fn clipboard_panel(&mut self, ui: &mut Ui) {
         panel(ui, msg!("Clipboard"), |ui| {
             let tip = msg!("Copy to Clipboard (Ctrl+C): the selection, with the doors and windows in its walls");
-            if ui.add_enabled_ui(!self.selection.is_empty(), |ui| big_button(ui, Icon::Copy, "Copy to Clipboard", false, tip)).inner.clicked()
+            if ui
+                .add_enabled_ui(!self.selection.is_empty(), |ui| big_button(ui, Icon::Copy, "Copy to Clipboard", false, tip))
+                .inner
+                .clicked()
             {
                 self.copy_selection();
             }

@@ -394,7 +394,8 @@ impl Shift<'_> {
     /// A top level with no level at the height it would be moved to: the top is its height above the base, unconnected.
     fn retop(&self, e: &mut Element, label: &str, notes: &mut Vec<String>) {
         let z = |g: Guid| self.elevation(g);
-        let mut unconnected = |height: f64| notes.push(format!("{label}: no level at the height of its top, so it is unconnected, {height} mm tall"));
+        let mut unconnected =
+            |height: f64| notes.push(format!("{label}: no level at the height of its top, so it is unconnected, {height} mm tall"));
         match e {
             Element::Wall(Wall { level, top_level, height, base_offset, top_offset, .. }) => {
                 if let Some(t) = *top_level
