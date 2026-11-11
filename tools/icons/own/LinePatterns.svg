@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Arqiflow's own drawing for BIMCraft's LinePatterns icon, in lucide's style. -->
+  <path d="M3 6h18"/>
+  <path d="M3 12h6"/>
+  <path d="M12 12h.01"/>
+  <path d="M15 12h6"/>
+  <path d="M3 18h2"/>
+  <path d="M8.5 18h2"/>
+  <path d="M14 18h2"/>
+  <path d="M19.5 18h1.5"/>
+</svg>

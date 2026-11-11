@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Arqiflow's own drawing for BIMCraft's View3D icon, in lucide's style. -->
+  <path d="M3 21v-8l5-5 5 5v8z"/>
+  <path d="M13 21h8v-8l-5-5H8"/>
+</svg>

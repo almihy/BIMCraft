@@ -37,8 +37,14 @@ fn run() -> Result<(), String> {
     let drawings: Vec<_> = icons::Icon::ALL
         .iter()
         .map(|&icon| {
-            // Where the drawing comes from: "lucide:<name>", or BIMCraft's own.
-            let source = icons::drawn(icon).map_or_else(|| "bimcraft".to_owned(), |d| format!("lucide:{}", d.name));
+            // Where the drawing comes from: "lucide:<name>", "arqiflow:<file>" (tools/icons/own), or BIMCraft's own.
+            let source = icons::drawn(icon).map_or_else(
+                || "bimcraft".to_owned(),
+                |d| match d.origin {
+                    icons::Origin::Lucide => format!("lucide:{}", d.name),
+                    icons::Origin::Arqiflow => format!("arqiflow:{}", d.name),
+                },
+            );
             json!({"name": icon.name(), "source": source, "regular": contours(icon, false), "compact": contours(icon, true)})
         })
         .collect();

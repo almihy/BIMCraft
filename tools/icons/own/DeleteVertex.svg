@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Arqiflow's own drawing for BIMCraft's DeleteVertex icon, in lucide's style. -->
+  <path d="M3 21l7-8 4 4 7-8"/>
+  <circle cx="10" cy="13" r="2"/>
+  <path d="M3 5h6"/>
+</svg>

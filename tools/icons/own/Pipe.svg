@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Arqiflow's own drawing for BIMCraft's Pipe icon, in lucide's style. -->
+  <path d="M5 8h14"/>
+  <path d="M5 16h14"/>
+  <path d="M5 8a2 4 0 0 0 0 8"/>
+  <ellipse cx="19" cy="12" rx="2" ry="4"/>
+</svg>

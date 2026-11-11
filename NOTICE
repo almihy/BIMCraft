@@ -163,14 +163,22 @@ Reserved Font Name, so the fonts keep it. "IBM Plex" is a trademark of IBM Corp,
 The place the two files were obtained from was not recorded when they were added.
 
 ==============================================================================
-lucide, the desktop app's everyday icons
+lucide, and Arqiflow's own icons in its style
 ==============================================================================
 
-The desktop app draws its everyday actions (move, copy, delete, undo, search, settings, zoom and the like) from lucide's
+The desktop app draws its everyday actions (move, copy, delete, undo, search, settings, zoom and the like), and the
+things lucide has a familiar drawing for (a door opening, a tag, a paint bucket, a magnet, a server), from lucide's
 icons, version 1.55.0 (https://lucide.dev, https://github.com/lucide-icons/lucide). Which icons, and from which drawing,
-is in tools/icons/sources.json. The drawings were turned into outlines (points on the icons' 24 grid) by
-tools/icons/generate.mjs, which wrote crates/ui-egui/src/icons/drawn.rs; the app strokes those outlines in its own pen.
-No SVG file of lucide's is shipped.
+is in tools/icons/sources.json (an entry naming a lucide icon). The drawings were turned into outlines (points on the
+icons' 24 grid) by tools/icons/generate.mjs, which wrote crates/ui-egui/src/icons/drawn.rs; the app strokes those
+outlines in its own pen. No SVG file of lucide's is shipped.
+
+The rest of the icons (the building parts, the drafting symbols and the modelling tools) are Arqiflow's own drawings,
+made in lucide's style: the SVGs in tools/icons/own (an entry "own:<file>" in sources.json), part of this project and
+under its licence. A few of them are adapted from a lucide drawing (Create Group from "group", Mirror Draw Axis from
+"flip-vertical-2", Trim/Extend Multiple from "arrow-right-to-line", Remove Paint from "paint-bucket", Isolated Footing
+and IDs of Selection from "square-dashed", their small drawings from "group"); each of those SVGs names its lucide original in a
+comment, and lucide's licence below covers what was taken from it.
 
 lucide is under the ISC licence, and the lucide icons that come from Feather under the MIT licence. Its licence file
 reads:

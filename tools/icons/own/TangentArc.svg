@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Arqiflow's own drawing for BIMCraft's TangentArc icon, in lucide's style. -->
+  <circle cx="4" cy="20" r="2"/>
+  <circle cx="19" cy="9" r="2"/>
+  <path d="M6 20h5a8 8 0 0 0 8-8v-1"/>
+</svg>

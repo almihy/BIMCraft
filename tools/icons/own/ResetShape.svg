@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Arqiflow's own drawing for BIMCraft's ResetShape icon, in lucide's style. -->
+  <path d="M2 17l10-5 10 5-10 5z"/>
+  <path d="M7 9 4 6l3-3"/>
+  <path d="M4 6h10a3 3 0 0 1 0 6"/>
+</svg>

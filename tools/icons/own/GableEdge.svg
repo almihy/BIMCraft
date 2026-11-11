@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Arqiflow's own drawing for BIMCraft's GableEdge icon, in lucide's style. -->
+  <path d="M3 12V5h13l6 7z"/>
+  <path d="M3 12v8h16v-8"/>
+</svg>
