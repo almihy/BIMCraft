@@ -210,14 +210,14 @@ fn neighbours_that_overlap_a_little_are_narrowed_to_fit_and_ones_that_overlap_mu
     assert!((spans[0].1 - spans[1].0).abs() < 1e-6, "they meet: {spans:?}");
     assert!((spans[0].0 - (5.0 - 2.0) * 304.8).abs() < 1e-6 && (spans[1].1 - (8.8 + 2.0) * 304.8).abs() < 1e-6, "the outer edges stay");
     assert!(i.skipped.iter().any(|s| s.contains("2 openings") && s.contains("narrowed to fit")), "{:?}", i.skipped);
-    // Overlapping by 2 ft is not a few percent: one of them goes, and the import says why.
+    // Overlapping by 2 ft is not a few percent: both stay, as Revit keeps them, and the model warns they overlap.
     let mut q = project(2024);
     for (id, at) in [(201, 5.0), (202, 7.0)] {
         q.recs.push(Rec::new(id, WINDOWS).at([at - 2.0, -0.4, 3.0, at + 2.0, 0.4, 7.0], &[100, 601, u64::from(id)]));
     }
     let i = import(&q);
-    assert_eq!(openings(&i).len(), 1);
-    assert!(i.skipped.iter().any(|s| s.contains("overlap in wall")), "{:?}", i.skipped);
+    assert_eq!(openings(&i).len(), 2, "{:?}", i.skipped);
+    assert!(i.model.review().iter().any(|w| w.rule == "openings_overlap"), "{:?}", i.model.review());
 }
 
 #[test]

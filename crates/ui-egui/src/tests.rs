@@ -5932,6 +5932,7 @@ mod trim;
 mod typed;
 mod typeprops;
 mod view_controls;
+mod warnings;
 mod window;
 mod working3d;
 mod workplane;

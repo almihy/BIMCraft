@@ -8,6 +8,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use crate::model::{Element, Id, Model};
+use crate::warnings::Warning;
 
 pub type Run = fn(&mut Session, &Value) -> Result<Value, String>;
 
@@ -186,6 +187,8 @@ pub struct Session {
     /// outside a command copies it first, so a model still this one is one that passed, and the next command need only
     /// check what it changes ([`Model::check_changed`]).
     pub(crate) verified: Option<Arc<Model>>,
+    /// The warnings of the last model asked ([`Session::warnings`]), kept with it: the next are brought up to date from them.
+    warned: Option<(Arc<Model>, Arc<Vec<Warning>>)>,
 }
 
 impl Default for Session {
@@ -254,6 +257,7 @@ impl Session {
             read_only: None,
             dry_run: false,
             verified: None,
+            warned: None,
         }
     }
 
@@ -501,9 +505,10 @@ impl Session {
                 (self.phase, self.option) = session;
                 Err(e)
             }
-            Ok(v) => {
+            Ok(mut v) => {
                 self.verified = Some(Arc::clone(&self.model));
                 if cmd.undoable && !Arc::ptr_eq(&before, &self.model) {
+                    self.report_warnings(&before, &mut v);
                     let step = Step { checked: verified, ..Step::new(cmd.label, &before, &self.model) };
                     self.undo.push((step, before));
                     if self.undo.len() > UNDO_LIMIT {
@@ -513,6 +518,40 @@ impl Session {
                 }
                 Ok(v)
             }
+        }
+    }
+
+    /// The warnings of the model now ([`Model::review`]), the worst first. Kept with the model: asked again of the same one,
+    /// they cost nothing, and of one a command made, they are brought up to date from those before it.
+    pub fn warnings(&mut self) -> Arc<Vec<Warning>> {
+        if let Some((m, w)) = &self.warned
+            && Arc::ptr_eq(m, &self.model)
+        {
+            return Arc::clone(w);
+        }
+        let now = match &self.warned {
+            Some((old, prev)) => self.model.review_since(old, prev),
+            None => self.model.review(),
+        };
+        let now = Arc::new(now);
+        self.warned = Some((Arc::clone(&self.model), Arc::clone(&now)));
+        now
+    }
+
+    /// Adds to `result`, when it is an object, the warnings the command that made the model of `before` the one now made
+    /// (`new_warnings`): those that weren't there before it, so whoever made the change sees what it left questionable.
+    fn report_warnings(&mut self, before: &Arc<Model>, result: &mut Value) {
+        let prev = match &self.warned {
+            Some((m, w)) if Arc::ptr_eq(m, before) => Arc::clone(w),
+            _ => Arc::new(before.review()),
+        };
+        let now = Arc::new(self.model.review_since(before, &prev));
+        #[cfg(test)]
+        assert_eq!(*now, self.model.review(), "the warnings brought up to date differ from those of the whole model");
+        let fresh: Vec<Value> = Model::new_warnings(&now, &prev).into_iter().map(|w| w.json(&self.model)).collect();
+        self.warned = Some((Arc::clone(&self.model), now));
+        if let Some(o) = result.as_object_mut().filter(|_| !fresh.is_empty()) {
+            o.insert("new_warnings".into(), Value::Array(fresh));
         }
     }
 

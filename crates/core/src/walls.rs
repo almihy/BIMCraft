@@ -704,6 +704,21 @@ pub fn notches(m: &Model, id: Id) -> Vec<[P2; 2]> {
     out
 }
 
+/// `ring` cut by where the flat plane `flat` is above (`higher`) or below the planes of `bound` over it, each part with the
+/// plane that holds there: the flat one or `bound`'s. An opening's edge held to the wall's own base or top.
+fn within(ring: Vec<P2>, bound: &Bound, flat: Plane, higher: bool) -> Vec<(Vec<P2>, Plane)> {
+    let mut out = Vec::new();
+    for (piece, other) in bound.parts(ring) {
+        let d = |q: P2| if higher { flat.at(q) - other.at(q) } else { other.at(q) - flat.at(q) };
+        for (part, plane) in [(geom::clip(&piece, d), flat), (geom::clip(&piece, |q| -d(q)), other)] {
+            if part.len() >= 3 && geom::area(&part).abs() > 1e-6 {
+                out.push((part, plane));
+            }
+        }
+    }
+    out
+}
+
 /// A part of a wall's solid: a ring in plan, from a bottom plane up to a top one; of a curved wall,
 /// with its centre and its centre line's radius.
 #[derive(Debug, PartialEq)]
@@ -751,7 +766,7 @@ pub(crate) fn prisms_in(m: &Model, id: Id, openings: bool, index: Option<&Index>
     cuts.sort_by(f64::total_cmp);
     cuts.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
     let (start, end) = (cap_in(m, id, false, index), cap_in(m, id, true, index));
-    let (base, top) = bounds(m, w);
+    let (base, top_bound) = bounds(m, w);
     let curve = axis.centre().map(|c| (c, axis.at(0.0, (ext + int) / 2.0).dist(c)));
     let mut out = Vec::new();
     for pair in cuts.windows(2) {
@@ -769,14 +784,22 @@ pub(crate) fn prisms_in(m: &Model, id: Id, openings: bool, index: Option<&Index>
             ceilings.push(flat(g0));
             floors.push(flat(g1));
         }
-        ceilings.push(top.clone());
-        for (under, over) in floors.iter().zip(&ceilings) {
+        ceilings.push(top_bound.clone());
+        for (k, (under, over)) in floors.iter().zip(&ceilings).enumerate() {
             for (part, bottom) in under.parts(ring.clone()) {
-                for (part, top) in over.parts(part) {
-                    // Only where it has some height.
-                    let part = geom::clip(&part, |q| top.at(q) - bottom.at(q));
-                    if part.len() >= 3 && geom::area(&part).abs() > 1.0 {
-                        out.push(Prism { ring: part, bottom, top, curve });
+                // An opening's lower edge is no lower than the wall's base (one wholly under it cuts nothing), its upper edge no
+                // higher than the wall's top (one wholly over it, the same): the wall stays between its own planes.
+                let bottoms = if k > 0 { within(part, &base, bottom, true) } else { vec![(part, bottom)] };
+                for (part, bottom) in bottoms {
+                    for (part, top) in over.parts(part) {
+                        let tops = if k + 1 < ceilings.len() { within(part, &top_bound, top, false) } else { vec![(part, top)] };
+                        for (part, top) in tops {
+                            // Only where it has some height.
+                            let part = geom::clip(&part, |q| top.at(q) - bottom.at(q));
+                            if part.len() >= 3 && geom::area(&part).abs() > 1.0 {
+                                out.push(Prism { ring: part, bottom, top, curve });
+                            }
+                        }
                     }
                 }
             }

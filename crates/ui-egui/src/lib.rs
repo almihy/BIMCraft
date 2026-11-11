@@ -36,6 +36,7 @@ mod groups;
 pub mod host;
 pub mod icons;
 mod inquiry;
+mod warnings;
 pub mod lang;
 mod linestyles;
 mod lineweights;
@@ -848,6 +849,8 @@ pub struct BimApp {
     /// The Work Plane dialog's draft, while it's open or picking its points in the 3D view.
     work_plane: Option<workplane::Draft>,
     ids_of_selection: Option<inquiry::IdsOfSelection>,
+    /// Manage > Review Warnings, while open.
+    warnings_dialog: Option<warnings::WarningsDialog>,
     selection_filter: Option<filter::SelectionFilter>,
     /// What was last put on the clipboard.
     pub copied: Option<String>,
@@ -1485,6 +1488,7 @@ impl BimApp {
             select_by_id: None,
             work_plane: None,
             ids_of_selection: None,
+            warnings_dialog: None,
             selection_filter: None,
             copied: None,
             active_option: None,
@@ -1995,6 +1999,7 @@ impl BimApp {
             || self.select_by_id.is_some()
             || self.work_plane.as_ref().is_some_and(|d| d.picking.is_none())
             || self.ids_of_selection.is_some()
+            || self.warnings_dialog.is_some()
             || self.selection_filter.is_some()
             || self.settings_page.is_some()
             || self.plugins_open()
@@ -4348,6 +4353,15 @@ impl BimApp {
             {
                 self.open_ids_of_selection();
             }
+            let n = self.project_warnings().len();
+            let tip = if n == 0 {
+                t(msg!("Review Warnings: what is questionable in the project without being wrong. There are none")).to_string()
+            } else {
+                tf(msg!("Review Warnings: what is questionable in the project without being wrong, with Show to select it. There are {}"), &[&n.to_string()])
+            };
+            if big_button(ui, Icon::Warning, "Review Warnings", self.warnings_dialog.is_some(), &tip).clicked() {
+                self.open_warnings();
+            }
         });
         panel(ui, "Phasing", |ui| {
             let tip = msg!("Phasing (PH): the project's phases in order, the phase filters that show them, and how a filter draws each");
@@ -5109,6 +5123,8 @@ impl BimApp {
         ui.horizontal(|ui| {
             ui.label(RichText::new(t(self.prompt())).color(pal().muted));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                // What the project has to warn of, as Revit's Review Warnings counts it.
+                self.warnings_button(ui);
                 // How many elements are selected, by the selection filter, as Revit shows it.
                 // A click on it filters the selection, as Revit's does.
                 ui.label(format!(":{}", self.selection.len()));
@@ -5364,6 +5380,7 @@ impl BimApp {
         self.select_by_id_window(ctx);
         self.work_plane_window(ctx);
         self.ids_of_selection_window(ctx);
+        self.warnings_window(ctx);
         self.selection_filter_window(ctx);
         self.shortcuts_window(ctx);
         self.settings_window(ctx);

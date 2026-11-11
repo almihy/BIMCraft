@@ -1,6 +1,6 @@
 //! A door or window whose head rises past its wall's top, as Revit lets one (issue #215): the wall is cut up to its top, a
 //! notch open at the top, and the door or window keeps its full size; one whose sill is at or above the top, so that nothing of
-//! it would be in the wall, is refused.
+//! it would be in the wall, is allowed and warned of.
 
 use serde_json::{Value, json};
 
@@ -54,23 +54,30 @@ fn a_window_whose_head_passes_its_walls_top_is_made_and_keeps_its_size() {
 }
 
 #[test]
-fn an_opening_whose_sill_is_at_or_above_its_walls_top_is_refused_saying_what_to_do() {
+fn an_opening_whose_sill_is_at_or_above_its_walls_top_is_made_and_warned_of_saying_what_to_do() {
     let (mut s, wall, window) = low_wall();
     for sill in [1060.0, 1059.5, 1500.0] {
-        let e = fails(&mut s, "window", json!({"wall": wall, "offset": 1000, "type": "Tall", "sill": sill}));
-        assert!(e.contains("sill") && e.contains("top") && e.contains(&format!("wall {wall}")), "{sill}: {e}");
-        assert!(e.contains("lower") && e.contains("raise"), "says what to do: {e}");
-        assert!(e.contains("1060 mm up"), "says how high the wall is there: {e}");
-        assert!(e.contains("sill to 1059 or less"), "and the highest sill it takes: {e}");
+        let r = run(&mut s, "window", json!({"wall": wall, "offset": 1000, "type": "Tall", "sill": sill}));
+        let w = r["new_warnings"].as_array().unwrap_or_else(|| panic!("{sill}: {r}"));
+        assert_eq!(w.len(), 1, "{w:?}");
+        let said = w[0]["message"].as_str().unwrap();
+        assert!(said.contains("sill") && said.contains("top") && said.contains(&format!("wall {wall}")), "{sill}: {said}");
+        assert!(said.contains("lower") && said.contains("raise"), "says what to do: {said}");
+        assert!(said.contains("1060 mm up"), "says how high the wall is there: {said}");
+        assert_eq!((w[0]["rule"].as_str(), w[0]["elements"][0].as_u64()), (Some("opening_outside_height"), r["id"].as_u64()));
+        run(&mut s, "delete", json!({"ids": [r["id"]]}));
     }
-    // The same rule whichever moves: the window up, or the wall down under it.
-    let e = fails(&mut s, "modify", json!({"id": window, "sill": 1200}));
-    assert!(e.contains(&format!("window {window}")) && e.contains("lower"), "{e}");
-    let e = fails(&mut s, "modify", json!({"id": wall, "height": 20}));
-    assert!(e.contains(&format!("window {window}")) && e.contains("raise"), "{e}");
-    // Under its base, as before.
-    let e = fails(&mut s, "modify", json!({"id": window, "sill": -10}));
-    assert!(e.contains("sill") && e.contains("base"), "{e}");
+    // The same whichever moves: the window up, or the wall down under it.
+    let r = run(&mut s, "modify", json!({"id": window, "sill": 1200}));
+    assert_eq!(r["new_warnings"][0]["rule"], "opening_outside_height", "{r}");
+    run(&mut s, "modify", json!({"id": window, "sill": 30}));
+    let r = run(&mut s, "modify", json!({"id": wall, "height": 20}));
+    assert!(r["new_warnings"][0]["message"].as_str().unwrap().contains(&format!("window {window}")), "{r}");
+    // Under its base: a warning too.
+    run(&mut s, "modify", json!({"id": wall, "height": 1060}));
+    let r = run(&mut s, "modify", json!({"id": window, "sill": -10}));
+    assert!(r["new_warnings"][0]["message"].as_str().unwrap().contains("base"), "{r}");
+    assert_eq!(s.model.check(), Ok(()));
 }
 
 /// Whether `p` lies on triangle `t`, within half a millimetre of its plane.
@@ -250,7 +257,7 @@ fn an_ifc_with_a_window_past_its_walls_top_opens_with_it_and_saves_and_opens_aga
 }
 
 #[test]
-fn an_ifc_window_whose_sill_is_over_its_walls_top_is_left_out_naming_the_files_wall() {
+fn an_ifc_window_whose_sill_is_over_its_walls_top_comes_in_and_is_warned_of() {
     // The wall cut down to 20 mm in the file: the window's sill, 30, is over its top.
     let file = file_with_window(1100.0);
     let file: String = file
@@ -263,11 +270,12 @@ fn an_ifc_window_whose_sill_is_over_its_walls_top_is_left_out_naming_the_files_w
             }
         })
         .collect::<Vec<_>>()
-        .join("\n");
+        .join("
+");
     let i = crate::import::ifc(file.as_bytes(), "x").unwrap();
-    assert!(i.model.elements.values().all(|e| !matches!(e, Element::Window(_))), "{:?}", i.skipped);
-    let note = i.skipped.iter().find(|n| n.starts_with("IFCWINDOW")).unwrap();
-    assert!(note.contains("its wall IFCWALL #"), "names the file's wall, not BIMCraft's id for it: {note}");
-    assert!(note.contains("sill 30") && note.contains("20 mm"), "says the sill and the wall's height: {note}");
-    assert!(note.contains("nothing of it is in the wall") && !note.contains("Revit"), "says why, which isn't Revit's leave: {note}");
+    assert!(i.model.elements.values().any(|e| matches!(e, Element::Window(_))), "{:?}", i.skipped);
+    let w = i.model.review();
+    let note = w.iter().find(|w| w.rule == "opening_outside_height").unwrap();
+    assert!(note.message.contains("sill 30") && note.message.contains("20 mm"), "says the sill and the wall's height: {note:?}");
+    assert!(note.message.contains("nothing of it is in the wall") && !note.message.contains("Revit"), "{note:?}");
 }

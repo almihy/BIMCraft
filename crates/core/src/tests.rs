@@ -401,8 +401,8 @@ fn a_failed_command_changes_nothing() {
     let mut s = Session::new();
     let ids = house(&mut s);
     let before = s.model.clone();
-    let e = s.execute("door", &json!({"wall": ids[0], "offset": 100})).unwrap_err();
-    assert!(e.contains("fit"), "{e}");
+    let e = s.execute("door", &json!({"wall": ids[0], "offset": 1e300})).unwrap_err();
+    assert!(e.contains("offset"), "{e}");
     assert_eq!(*s.model, *before);
     // The first wall of this chain is fine, the second one has no length.
     assert!(s.execute("wall", &json!({"points": [[0, 0], [1000, 0], [1000, 0]]})).is_err());
@@ -722,7 +722,9 @@ fn move_and_copy_refuse_levels_and_what_breaks_the_model() {
     assert!(s.execute("move", &json!({"ids": [100000], "by": [10, 0]})).unwrap_err().contains("elevation"));
     assert!(s.execute("copy", &json!({"ids": [100000], "by": [10, 0]})).unwrap_err().contains("level"));
     let door = run(&mut s, "door", json!({"at": [2000, 0]}))["id"].as_u64().unwrap();
-    assert!(s.execute("copy", &json!({"ids": [door], "by": [300, 0]})).unwrap_err().contains("overlap"));
+    // A copy over the door is allowed, with a warning, as Revit's: two doors that overlap.
+    let r = run(&mut s, "copy", json!({"ids": [door], "by": [300, 0]}));
+    assert_eq!(r["new_warnings"][0]["rule"], "openings_overlap", "{r}");
     assert!(s.execute("move", &json!({"ids": [ids[0]], "by": [1e300, 0]})).is_err());
     assert!(s.execute("move", &json!({"ids": [ids[0]]})).unwrap_err().contains("by"));
 }

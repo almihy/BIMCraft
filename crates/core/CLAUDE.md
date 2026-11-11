@@ -9,7 +9,8 @@ is in the root `CLAUDE.md`; the write-ups by area are in `docs/areas/`, which th
 - **A feature is a command** (a new one, or a parameter of one): an id after Revit's tool name, a Revit-style shortcut, a params doc
   written for agents, a JSON `run`, in `commands.rs` (`ALL`). Its test drives it through `Session::execute`, as the CLI, scripts
   and MCP do. A command that makes an element returns what it made; one that changes the project goes through `Session::model_mut`.
-- **A rule on the model** is a check in `Model::check` (`model.rs`), with an error that says what to fix. The engine rolls back
+- **A rule on the model** is a check in `Model::check` (`model.rs`), with an error that says what to fix, only for what would break
+  the model; a design judgment is a warning in `warnings.rs` instead ([warnings](../../docs/areas/warnings.md)). The engine rolls back
   when it fails, so a command never needs its own undo. Several commands that are one action go in `Session::transaction`: all or
   nothing, and one undo step (`script_atomic` is a script in one; `script_dry_run` runs one and takes it back, and says what it
   would have made, changed and removed).
@@ -52,6 +53,7 @@ changes. A copy is a new element: a new id and a new GUID. IFC writes the GUID a
 |---|---|
 | Levels, walls, floors, roofs, ceilings, shafts, stairs | [levels, walls and roofs](../../docs/areas/levels-walls-roofs.md) |
 | Plans, sections, 3D, visibility and graphics, templates, scale and detail | [views and graphics](../../docs/areas/views-and-graphics.md), [performance](../../docs/performance.md) |
+| Warnings (Review Warnings), what is refused and what is only warned | [warnings](../../docs/areas/warnings.md) |
 | Schedules and project parameters | [schedules](../../docs/areas/schedules.md) |
 | Phases and design options | [phasing](../../docs/areas/phasing.md) |
 | Masses and what they make | [masses](../../docs/areas/massing.md) |
