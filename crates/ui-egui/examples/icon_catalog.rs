@@ -36,7 +36,14 @@ fn run() -> Result<(), String> {
     frame.textures_delta.clear();
     let drawings: Vec<_> = icons::Icon::ALL
         .iter()
-        .map(|&icon| json!({"name": icon.name(), "regular": contours(icon, false), "compact": contours(icon, true)}))
+        .map(|&icon| {
+            // Where the drawing comes from: "lucide:<name>", "tabler:<name>" or BIMCraft's own.
+            let source = icons::drawn(icon).map_or_else(
+                || "bimcraft".to_owned(),
+                |d| format!("{}:{}", if d.source == icons::Source::Lucide { "lucide" } else { "tabler" }, d.name),
+            );
+            json!({"name": icon.name(), "source": source, "regular": contours(icon, false), "compact": contours(icon, true)})
+        })
         .collect();
     let catalog = json!({"grid": 24, "stroke": icons::PEN, "min_stroke_pt": icons::MIN_PEN, "compact_max_size": 19, "icons": drawings});
     let file = directory.join("catalog.json");
