@@ -1,6 +1,7 @@
 //! Copy to Clipboard and Paste: Ctrl+C and Ctrl+V, the Paste list's aligned ways, and the levels dialog.
 
 use super::*;
+use egui_kittest::kittest::NodeT;
 
 /// A wall from (0, 0) to (8000, 0) with a door in it, on Level 1, in a project with Levels 1 and 2 (the new project's) and a
 /// Level 3 at 6000.
@@ -101,9 +102,8 @@ fn paste_aligned_to_selected_levels_asks_which_levels_and_pastes_to_each_at_the_
     paste_list(&mut h, "Aligned to Selected Levels…");
     assert!(h.state().paste_levels.is_some(), "the levels dialog");
     // OK waits for a level.
-    for name in ["Level 2", "Level 3"] {
-        let label = h.get_all_by_label_contains(name).next().map(|n| n.accesskit_node().id()).unwrap();
-        h.get_by(|n| Some(n.id()) == Some(label)).click();
+    for name in ["Level 2 (", "Level 3 ("] {
+        h.get_by_label_contains(name).click();
         h.run();
     }
     press(&mut h, "OK");
@@ -147,8 +147,7 @@ fn paste_aligned_to_a_picked_level_takes_one_level_from_the_list() {
     copy(&mut h);
     paste_list(&mut h, "Aligned to Picked Level…");
     assert!(h.state().paste_levels.is_some());
-    let label = h.get_all_by_label_contains("Level 3").next().map(|n| n.accesskit_node().id()).unwrap();
-    h.get_by(|n| Some(n.id()) == Some(label)).click();
+    h.get_by_label_contains("Level 3 (").click();
     h.run();
     press(&mut h, "OK");
     let g = h.state().session.model.guid(level(&h, "Level 3"));
@@ -161,6 +160,5 @@ fn the_paste_list_is_closed_while_nothing_is_copied() {
     topmost(&mut h, "Modify");
     assert!(h.state().session.clipboard_ids().is_empty());
     // Nothing to open: the button is disabled.
-    let node = h.get_by_label("Paste");
-    assert!(node.accesskit_node().is_disabled());
+    assert!(h.get_by_label("Paste").accesskit_node().is_disabled());
 }
