@@ -19,14 +19,14 @@ use crate::lang::{t, tf};
 use crate::style::pal;
 use crate::{BimApp, Sheet};
 
-/// How far a check's answer goes: broken (a hard rule, a soft one, a check that could not run), accepted by a person
-/// while broken, not checked automatically, or passing.
+/// How far a check's answer goes: broken (a hard rule, a soft one), accepted by a person while broken, not checked (its
+/// check could not run, or it has none), or passing. In the order the palette lists them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum State {
     Failed,
-    Crashed,
     Warning,
     Waived,
+    Crashed,
     Unchecked,
     Passed,
 }
@@ -43,17 +43,17 @@ impl State {
         }
     }
 
-    /// Whether it needs a person: what the status bar counts.
+    /// Whether it needs a person: a failed rule or a warning, what the status bar counts.
     pub fn flagged(self) -> bool {
-        matches!(self, State::Failed | State::Crashed | State::Warning)
+        matches!(self, State::Failed | State::Warning)
     }
 
     /// What its group is headed.
     fn group(self) -> &'static str {
         match self {
-            State::Failed | State::Crashed | State::Warning => "Flagged",
+            State::Failed | State::Warning => "Flagged",
             State::Waived => "Waived",
-            State::Unchecked => "Not checked",
+            State::Crashed | State::Unchecked => "Not checked",
             State::Passed => "Passed",
         }
     }
@@ -72,7 +72,7 @@ impl State {
 
     fn colour(self) -> Color32 {
         match self {
-            State::Failed | State::Crashed => pal().error,
+            State::Failed => pal().error,
             State::Warning => {
                 if pal().panel.r() < 128 {
                     Color32::from_rgb(0xF0, 0xB4, 0x29)
@@ -87,7 +87,7 @@ impl State {
                     Color32::from_rgb(0x1E, 0x88, 0x4B)
                 }
             }
-            State::Waived | State::Unchecked => pal().muted,
+            State::Waived | State::Crashed | State::Unchecked => pal().muted,
         }
     }
 }
@@ -127,6 +127,11 @@ impl Row {
         self.findings.first().map(|f| f.message.as_str()).filter(|m| !m.is_empty()).unwrap_or(&self.text)
     }
 
+    /// Whether a person may accept it as it is: a broken rule or design check, not the building code's, not the model's.
+    pub fn waivable(&self) -> bool {
+        self.state.flagged() && !matches!(self.scope.as_str(), "code" | "model") && !self.key.is_empty()
+    }
+
     /// Every element it names, each once.
     fn elements(&self) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
@@ -146,6 +151,10 @@ pub struct Report {
     pub rows: Vec<Row>,
     /// Why the page could not check the model, when it could not.
     pub error: Option<String>,
+    /// How many rules had a check that ran, when the page says.
+    pub checked: Option<u64>,
+    /// Rules that disagree on a value: what each says, and the one taken.
+    pub conflicts: Vec<String>,
 }
 
 /// Longest text a check's field keeps: a page's text is hostile.
@@ -221,7 +230,26 @@ impl Report {
         // Flagged first, failed before warnings; the rest in the page's order.
         rows.sort_by_key(|r| r.state);
         let error = Some(text(&v["error"])).filter(|e| !e.is_empty());
-        Ok(Report { rows, error })
+        let checked = v["summary"]["checked"].as_u64();
+        let number =
+            |v: &Value| v.as_f64().filter(|x| x.is_finite()).map(|x| format!("{}", (x * 1000.0).round() / 1000.0)).unwrap_or_default();
+        let conflicts = v["value_conflicts"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .take(MAX_FINDINGS)
+            .map(|c| {
+                let claims: Vec<String> = c["claims"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .take(20)
+                    .map(|k| tf("{} says {}", &[&text(&k["title"]), &number(&k["value"])]))
+                    .collect();
+                tf("{} is taken as {}: {}.", &[&text(&c["key"]), &number(&c["used"]), &claims.join("; ")])
+            })
+            .collect();
+        Ok(Report { rows, error, checked, conflicts })
     }
 
     /// How many need a person.
@@ -230,13 +258,30 @@ impl Report {
     }
 }
 
+/// What the person asked the page to do to a check: accept it as it is, with why, or take that back.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Waive {
+    Add { rule: String, reason: String },
+    Remove { rule: String },
+}
+
 /// The palette's state: the checks the page gave (none until it gives them: being checked), which rows show their detail,
-/// and the rule the person asked the page to open.
+/// the rule the person asked the page to open, a waiver asked for, the reason being written, and what the page last said
+/// of a waiver it could not make.
 #[derive(Default)]
 pub struct Checks {
     pub report: Option<Report>,
     pub open: std::collections::BTreeSet<String>,
     pub asked: Option<String>,
+    pub waive: Option<Waive>,
+    /// The row whose reason is being written, and the reason.
+    pub writing: Option<(String, String)>,
+    /// A waiver asked for and not answered yet: its rule.
+    pub waiting: Option<String>,
+    /// Why the page could not make or take back a waiver: its rule, and what the page said.
+    pub refused: Option<(String, String)>,
+    /// The reason's box takes the keys when it opens.
+    pub focus: bool,
 }
 
 /// What a scope is called.
@@ -298,6 +343,11 @@ impl BimApp {
         }
         let report = Report::read(json)?;
         self.checks.open.retain(|k| report.rows.iter().any(|r| &r.key == k));
+        // The checks again, after a waiver: it was made (or taken back).
+        self.checks.waiting = None;
+        if report.rows.iter().any(|r| self.checks.writing.as_ref().is_some_and(|(k, _)| k == &r.key) && !r.waivable()) {
+            self.checks.writing = None;
+        }
         self.checks.report = Some(report);
         Ok(())
     }
@@ -311,6 +361,18 @@ impl BimApp {
     /// rules are kept.
     pub fn take_rule_request(&mut self) -> Option<String> {
         self.checks.asked.take()
+    }
+
+    /// A waiver the person asked for since the last call: the page makes it (or takes it back) and checks again, or says why
+    /// it could not ([`BimApp::waive_refused`]).
+    pub fn take_waive_request(&mut self) -> Option<Waive> {
+        self.checks.waive.take()
+    }
+
+    /// The page could not make or take back the waiver of `rule`: `why`, as its server said, under the check.
+    pub fn waive_refused(&mut self, rule: &str, why: &str) {
+        self.checks.waiting = None;
+        self.checks.refused = Some((rule.to_string(), why.to_string()));
     }
 
     /// Whether the window offers the Checks palette: a page hosts it, and so checks the model.
@@ -327,11 +389,13 @@ impl BimApp {
         all
     }
 
-    /// The layout the window starts in: Revit's, and the Checks down the right side when a page hosts the window.
+    /// The layout the window starts in: Revit's, and when a page hosts the window, the Checks a tab beside the Project
+    /// Browser, which is in front (the right of the page is its agent's).
     pub(crate) fn first_docking(&self) -> crate::dock::Docking {
         let mut d = crate::dock::Docking::default();
         if self.offers_checks() {
-            d.put(Palette::Checks, crate::dock::Target::Side(crate::dock::Side::Right));
+            d.put(Palette::Checks, crate::dock::Target::With(Palette::Browser));
+            d.activate(Palette::Browser);
         }
         d
     }
@@ -454,6 +518,20 @@ impl BimApp {
             if let Some(e) = &report.error {
                 ui.label(RichText::new(e).color(pal().error).size(12.0));
             }
+            // As the studio's checks said: nothing verified, and rules that disagree on a value.
+            if report.checked == Some(0) && !report.rows.is_empty() {
+                notice(ui, t("No active rule has a check, so nothing was verified."));
+            }
+            if !report.conflicts.is_empty() {
+                let mut text = t("Rules disagree on a value. The highest-ranking rule wins:").to_string();
+                for c in &report.conflicts {
+                    text = format!(
+                        "{text}
+{c}"
+                    );
+                }
+                notice(ui, &text);
+            }
         });
         ui.separator();
         let scroll = egui::ScrollArea::vertical().auto_shrink([false, false]).min_scrolled_height(0.0).max_width(ui.available_width());
@@ -567,6 +645,7 @@ impl BimApp {
             if let Some((by, why)) = &row.waiver {
                 ui.label(RichText::new(tf("Waived by {}: {}", &[by.as_str(), why.as_str()])).size(12.0).color(pal().muted));
             }
+            self.waive_ui(ui, row);
             let mut meta = t(scope_word(&row.scope)).to_string();
             if !row.hard && !matches!(row.scope.as_str(), "design" | "model") {
                 meta = format!("{meta} · {}", t("Soft rule"));
@@ -584,6 +663,70 @@ impl BimApp {
             });
         });
     }
+}
+
+impl BimApp {
+    /// A broken check's Waive (a reason, one line, then the page makes it) and a waived one's Undo Waive; what the page said
+    /// when it could not.
+    fn waive_ui(&mut self, ui: &mut Ui, row: &Row) {
+        let key = &row.key;
+        if self.checks.waiting.as_ref() == Some(key) {
+            ui.label(RichText::new(t("Saving…")).size(12.0).color(pal().muted));
+        } else if row.waivable() {
+            match self.checks.writing.as_mut().filter(|(k, _)| k == key) {
+                Some((_, reason)) => {
+                    let label = ui.label(RichText::new(t("Reason")).size(12.0).color(pal().text));
+                    let edit = ui
+                        .add(egui::TextEdit::singleline(reason).desired_width(f32::INFINITY).hint_text(t("Why this is accepted as it is")));
+                    let edit = edit.labelled_by(label.id);
+                    if std::mem::take(&mut self.checks.focus) {
+                        edit.request_focus();
+                    }
+                    let ready = !reason.trim().is_empty();
+                    let entered = ready && edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    let reason = reason.trim().to_string();
+                    let (mut waive, mut cancel) = (entered, false);
+                    ui.horizontal(|ui| {
+                        waive |= ui.add_enabled(ready, egui::Button::new(t("Waive"))).clicked();
+                        cancel = ui.button(t("Cancel")).clicked();
+                    });
+                    if waive {
+                        self.checks.waive = Some(Waive::Add { rule: key.clone(), reason });
+                        self.checks.waiting = Some(key.clone());
+                        self.checks.writing = None;
+                        self.checks.refused = None;
+                    } else if cancel {
+                        self.checks.writing = None;
+                    }
+                }
+                None => {
+                    let tip = t("Accept it as it is, with a reason, recorded with your name");
+                    if icon_text_button(ui, Icon::Check, t("Waive")).on_hover_text(tip).clicked() {
+                        self.checks.writing = Some((key.clone(), String::new()));
+                        self.checks.focus = true;
+                        self.checks.refused = None;
+                    }
+                }
+            }
+        } else if row.state == State::Waived && row.waiver.is_some() && !key.is_empty() {
+            if icon_text_button(ui, Icon::Undo, t("Undo Waive")).on_hover_text(t("Flag it again")).clicked() {
+                self.checks.waive = Some(Waive::Remove { rule: key.clone() });
+                self.checks.waiting = Some(key.clone());
+                self.checks.refused = None;
+            }
+        }
+        if let Some((_, why)) = self.checks.refused.as_ref().filter(|(k, _)| k == key) {
+            ui.label(RichText::new(why).size(12.0).color(pal().error));
+        }
+    }
+}
+
+/// A note in the palette's head, in a band of its own.
+fn notice(ui: &mut Ui, text: &str) {
+    egui::Frame::new().fill(pal().hover_fill).corner_radius(4.0).inner_margin(8.0).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.label(RichText::new(text).size(12.0).color(pal().text));
+    });
 }
 
 /// A small button of an icon and a word.

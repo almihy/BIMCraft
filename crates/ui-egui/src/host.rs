@@ -25,6 +25,7 @@ use bimcraft_core::sync::{Changes, Merged};
 use egui::{Context, ThemePreference};
 use serde_json::Value;
 
+pub use crate::checks::Waive;
 pub use crate::dialog::FileRequest;
 pub use crate::style::{Controls, Skin};
 use crate::{BimApp, Pending};

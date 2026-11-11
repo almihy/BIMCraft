@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::dock::{Palette, Side};
+use egui_kittest::kittest::NodeT;
 
 fn hosted(script: &str) -> Harness<'static, BimApp> {
     let mut s = Session::new();
@@ -47,6 +48,20 @@ fn checks(far: Id) -> String {
     .to_string()
 }
 
+/// A click on what is named, scrolled into the palette's view first: the palette under Properties is short.
+fn tap(h: &mut Harness<BimApp>, label: &str) {
+    h.get_by_label(label).scroll_to_me();
+    h.run();
+    h.get_by_label(label).click();
+    h.run();
+}
+
+/// The Checks in front of their stack, as a click on the status bar's count puts them.
+fn front(h: &mut Harness<BimApp>) {
+    h.state_mut().docking.activate(Palette::Checks);
+    h.run();
+}
+
 fn docking<'a>(h: &'a Harness<'_, BimApp>) -> &'a crate::dock::Docking {
     &h.state().docking
 }
@@ -54,7 +69,11 @@ fn docking<'a>(h: &'a Harness<'_, BimApp>) -> &'a crate::dock::Docking {
 #[test]
 fn a_hosted_window_has_the_checks_palette_open_and_the_desktops_has_none() {
     let mut h = hosted(BOX);
-    assert_eq!(docking(&h).docked(Palette::Checks), Some(Side::Right), "open from the start, down the right side");
+    // A tab beside the Project Browser, on the left (the right of the page is its agent's), the Browser in front.
+    assert_eq!(docking(&h).docked(Palette::Checks), Some(Side::Left));
+    let stack = docking(&h).stack_of(Palette::Checks).unwrap().clone();
+    assert_eq!((stack.tabs.as_slice(), stack.shown()), ([Palette::Browser, Palette::Checks].as_slice(), Some(Palette::Browser)));
+    front(&mut h);
     assert!(h.query_by_label("Checking the model…").is_some(), "until the page gives its checks");
     assert!(h.query_all_by_label_contains("Checks:").next().is_none(), "no count before there are checks");
     // The desktop's window has no page to check its model: no palette, and none to switch on.
@@ -76,7 +95,7 @@ fn the_flags_come_first_and_a_click_on_one_selects_and_zooms_to_what_it_names() 
     let mut h = hosted(&two_levels());
     let far = *ids(&h, "wall").last().unwrap();
     h.state_mut().set_checks(&checks(far)).unwrap();
-    h.run();
+    front(&mut h);
     // Flagged first, failed before the warning, then waived, not checked and passed.
     let order: Vec<&str> = h.state().checks().unwrap().rows.iter().map(|r| r.title.as_str()).collect();
     assert_eq!(order, ["Bedroom area", "Parking can be driven to", "Balcony depth", "Daylight in living rooms", "Corridor width"]);
@@ -87,7 +106,7 @@ fn the_flags_come_first_and_a_click_on_one_selects_and_zooms_to_what_it_names() 
         s => panic!("{s:?}"),
     };
     // A click on the flag: the far wall selected, its level's plan open and zoomed to it.
-    press(&mut h, "Bedroom area — Failed");
+    tap(&mut h, "Bedroom area — Failed");
     assert_eq!(h.state().selection, [far]);
     assert!(matches!(h.state().sheet, Sheet::Plan(l) if l != level1), "Level 2's plan");
     h.run();
@@ -97,17 +116,17 @@ fn the_flags_come_first_and_a_click_on_one_selects_and_zooms_to_what_it_names() 
     assert!(h.query_by_label("Each bedroom is at least 12 m².").is_some());
     assert!(h.query_by_label("Client requirement").is_some());
     assert_eq!(h.state_mut().take_rule_request(), None);
-    press(&mut h, "Open Requirement");
+    tap(&mut h, "Open Requirement");
     assert_eq!(h.state_mut().take_rule_request().as_deref(), Some("kn_fail"));
     assert_eq!(h.state_mut().take_rule_request(), None, "once");
     // Arqiflow's own check has no rule in the project's setup to open; it names nothing to select, and the selection stays.
-    press(&mut h, "Bedroom area — Failed");
-    press(&mut h, "Parking can be driven to — Warning");
+    tap(&mut h, "Bedroom area — Failed");
+    tap(&mut h, "Parking can be driven to — Warning");
     assert!(h.query_by_label("Two stalls have no way out").is_some());
     assert!(h.query_by_label("Open Rule").is_none() && h.query_by_label("Open Requirement").is_none());
     assert_eq!(h.state().selection, [far]);
     // A waived rule says who accepted it and why.
-    press(&mut h, "Balcony depth — Waived");
+    tap(&mut h, "Balcony depth — Waived");
     assert!(h.query_by_label("Waived by Sara: The client asked for Juliet balconies").is_some());
 }
 
@@ -117,25 +136,23 @@ fn the_status_bars_count_opens_the_palette() {
     let far = *ids(&h, "wall").last().unwrap();
     h.state_mut().set_checks(&checks(far)).unwrap();
     h.run();
+    assert!(h.query_by_label("Bedroom area — Failed").is_none(), "behind the Project Browser");
+    press(&mut h, "Checks: 2 flags");
+    assert_eq!(docking(&h).stack_of(Palette::Checks).unwrap().shown(), Some(Palette::Checks), "the count brings them to the front");
+    assert!(h.query_by_label("Bedroom area — Failed").is_some());
     h.state_mut().show_palette(Palette::Checks, false);
     h.run();
     assert!(h.query_by_label("Bedroom area — Failed").is_none());
     press(&mut h, "Checks: 2 flags");
     assert!(docking(&h).shown(Palette::Checks));
     assert!(h.query_by_label("Bedroom area — Failed").is_some());
-    // Tabbed behind another palette, the count brings it to the front.
-    h.state_mut().docking.put(Palette::Checks, crate::dock::Target::With(Palette::Browser));
-    h.state_mut().docking.activate(Palette::Browser);
-    h.run();
-    press(&mut h, "Checks: 2 flags");
-    assert_eq!(docking(&h).stack_of(Palette::Checks).unwrap().shown(), Some(Palette::Checks));
 }
 
 #[test]
 fn no_rules_all_passing_and_new_checks_each_say_so() {
     let mut h = hosted(BOX);
     h.state_mut().set_checks(r#"{"results": [], "integrity": []}"#).unwrap();
-    h.run();
+    front(&mut h);
     assert!(h.query_by_label("No rules to check").is_some());
     assert!(h.query_by_label("No rules or client requirements apply to this project yet.").is_some());
     assert!(h.query_by_label("Checks: no flags").is_some());
@@ -149,11 +166,12 @@ fn no_rules_all_passing_and_new_checks_each_say_so() {
     assert!(h.query_by_label("Checks: no flags").is_some());
     // A problem in the model itself is a flag too, before the rules'; and the page checking again shows it is.
     let wall = ids(&h, "wall")[0];
+    front(&mut h);
     let broken = json!({"integrity": [{"message": "Two walls overlap", "elements": [format!("w{wall}")]}], "results": []});
     h.state_mut().set_checks(&broken.to_string()).unwrap();
     h.run();
     assert!(h.query_by_label("Checks: 1 flag").is_some());
-    press(&mut h, "Modelling problem — Failed");
+    tap(&mut h, "Modelling problem — Failed");
     assert_eq!(h.state().selection, [wall]);
     h.state_mut().set_checks("null").unwrap();
     h.run();
@@ -174,8 +192,8 @@ room {"point": [15000, 3000], "name": "Hall"}"#,
     let flag = json!({"results": [{"rule_id": "kn_1", "title": "Hall area", "scope": "client", "status": "fail",
         "findings": [{"message": "Too small", "elements": [format!("r{room}")]}]}]});
     h.state_mut().set_checks(&flag.to_string()).unwrap();
-    h.run();
-    press(&mut h, "Hall area — Failed");
+    front(&mut h);
+    tap(&mut h, "Hall area — Failed");
     assert_eq!(h.state().selection, [room]);
     h.run();
     let view = h.state().view_rect;
@@ -183,4 +201,74 @@ room {"point": [15000, 3000], "name": "Hall"}"#,
         let at = h.state().screen(corner);
         assert!(view.contains(at), "the room's corner {corner:?} in the view: {at:?} in {view:?}");
     }
+}
+
+#[test]
+fn only_failed_rules_and_warnings_are_counted() {
+    let mut h = hosted(BOX);
+    let some = json!({"results": [
+        {"rule_id": "a", "title": "Crashed", "scope": "company", "status": "error", "error": "Traceback", "findings": []},
+        {"rule_id": "b", "title": "Waived", "scope": "company", "status": "waived", "findings": [], "waiver": {"by": "A", "reason": "B"}},
+        {"rule_id": "c", "title": "Unchecked", "scope": "company", "status": "guidance", "findings": []},
+        {"rule_id": "d", "title": "Warned", "scope": "company", "status": "warn", "findings": []}
+    ]});
+    h.state_mut().set_checks(&some.to_string()).unwrap();
+    front(&mut h);
+    assert!(h.query_by_label("Checks: 1 flag").is_some() && h.query_by_label("1 flag").is_some());
+    let order: Vec<&str> = h.state().checks().unwrap().rows.iter().map(|r| r.title.as_str()).collect();
+    assert_eq!(order, ["Warned", "Waived", "Crashed", "Unchecked"], "a check that could not run is not checked, not a flag");
+}
+
+#[test]
+fn a_flag_is_waived_with_a_reason_through_the_page_and_a_waiver_undone() {
+    let mut h = hosted(&two_levels());
+    let far = *ids(&h, "wall").last().unwrap();
+    h.state_mut().set_checks(&checks(far)).unwrap();
+    front(&mut h);
+    tap(&mut h, "Bedroom area — Failed");
+    tap(&mut h, "Waive");
+    // The reason first: one line, needed.
+    assert!(h.get_by_role_and_label(Role::Button, "Waive").accesskit_node().is_disabled(), "no reason, no waiver");
+    type_into(&mut h, "Reason", "The client accepted a smaller second bedroom");
+    tap(&mut h, "Waive");
+    let asked = h.state_mut().take_waive_request();
+    assert_eq!(
+        asked,
+        Some(crate::checks::Waive::Add { rule: "kn_fail".into(), reason: "The client accepted a smaller second bedroom".into() })
+    );
+    assert!(h.query_by_label("Saving…").is_some());
+    // The server would not: its reason, under the check.
+    h.state_mut().waive_refused("kn_fail", "Only a project manager can waive a rule.");
+    h.run();
+    assert!(h.query_by_label("Only a project manager can waive a rule.").is_some());
+    // A building code's flag has no Waive.
+    let code = json!({"results": [{"rule_id": "k", "title": "Fire exit width", "scope": "code", "status": "fail", "findings": []}]});
+    h.state_mut().set_checks(&code.to_string()).unwrap();
+    h.run();
+    tap(&mut h, "Fire exit width — Failed");
+    assert!(h.query_by_label("Waive").is_none());
+    // A waived one: who and why, and Undo Waive.
+    tap(&mut h, "Fire exit width — Failed");
+    h.state_mut().set_checks(&checks(far)).unwrap();
+    h.run();
+    tap(&mut h, "Balcony depth — Waived");
+    assert!(h.query_by_label("Waived by Sara: The client asked for Juliet balconies").is_some());
+    tap(&mut h, "Undo Waive");
+    assert_eq!(h.state_mut().take_waive_request(), Some(crate::checks::Waive::Remove { rule: "kn_waived".into() }));
+}
+
+#[test]
+fn nothing_verified_and_rules_that_disagree_are_said() {
+    let mut h = hosted(BOX);
+    let c = json!({
+        "summary": {"checked": 0},
+        "value_conflicts": [{"key": "max_height", "used": 12, "claims": [
+            {"rule_id": "a", "title": "Zoning", "scope": "code", "value": 12}, {"rule_id": "b", "title": "Brief", "scope": "client", "value": 15}]}],
+        "results": [{"rule_id": "x", "title": "Daylight", "scope": "company", "status": "guidance", "findings": []}]
+    });
+    h.state_mut().set_checks(&c.to_string()).unwrap();
+    front(&mut h);
+    assert!(h.query_by_label("No active rule has a check, so nothing was verified.").is_some());
+    let text = "Rules disagree on a value. The highest-ranking rule wins:\nmax_height is taken as 12: Zoning says 12; Brief says 15.";
+    assert!(h.query_by_label(text).is_some());
 }

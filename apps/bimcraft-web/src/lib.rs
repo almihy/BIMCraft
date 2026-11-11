@@ -39,6 +39,8 @@
 //! ```js
 //! app.set_checks(checksJson);  // GET /api/proposals/{id}/checks's answer; null while they are being made again
 //! app.on_rule(ruleId => openRule(ruleId));  // Open Rule: the page shows the rule where the project's rules are kept
+//! app.on_waive(ask => waive(JSON.parse(ask)));  // {rule, reason}: accept a flag as it is; {rule, reason: null}: undo
+//! app.waive_refused(ruleId, why);  // the server would not: its reason, under the check (else set_checks again)
 //! ```
 #![cfg(target_arch = "wasm32")]
 use std::cell::{Cell, RefCell};
@@ -51,7 +53,7 @@ use bimcraft_core::ids::Guid;
 use bimcraft_core::model::Model;
 use bimcraft_core::sync::{self, Changes};
 use bimcraft_ui_egui::BimApp;
-use bimcraft_ui_egui::host::{Controls, HostLook, Skin};
+use bimcraft_ui_egui::host::{Controls, HostLook, Skin, Waive};
 use serde_json::Value;
 use wasm_bindgen::prelude::*;
 
@@ -66,6 +68,8 @@ struct Host {
     files: Rc<RefCell<FileHooks>>,
     /// Called with a rule's id when the person asks to see it (the Checks palette's Open Rule).
     on_rule: Rc<RefCell<Option<js_sys::Function>>>,
+    /// Called with `{rule, reason}` when the person waives a check, `reason` null to take a waiver back.
+    on_waive: Rc<RefCell<Option<js_sys::Function>>>,
 }
 
 /// What the page hears of files, and what it was last told.
@@ -121,6 +125,13 @@ impl eframe::App for Host {
         self.tell_files();
         if let Some(rule) = self.app.take_rule_request() {
             later_with(self.on_rule.borrow().clone(), JsValue::from_str(&rule));
+        }
+        if let Some(w) = self.app.take_waive_request() {
+            let ask = match w {
+                Waive::Add { rule, reason } => serde_json::json!({"rule": rule, "reason": reason}),
+                Waive::Remove { rule } => serde_json::json!({"rule": rule, "reason": null}),
+            };
+            later_with(self.on_waive.borrow().clone(), JsValue::from_str(&ask.to_string()));
         }
     }
 
@@ -188,6 +199,8 @@ pub struct WebApp {
     checks: Rc<RefCell<Option<String>>>,
     /// What the page hears when the person asks to see a rule.
     on_rule: Rc<RefCell<Option<js_sys::Function>>>,
+    /// What the page hears when the person waives a check, or takes a waiver back.
+    on_waive: Rc<RefCell<Option<js_sys::Function>>>,
 }
 
 #[wasm_bindgen]
@@ -205,6 +218,7 @@ impl WebApp {
             sent: RefCell::new(None),
             checks: Rc::new(RefCell::new(None)),
             on_rule: Rc::new(RefCell::new(None)),
+            on_waive: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -232,6 +246,7 @@ impl WebApp {
             on_change,
             files: Rc::clone(&self.files),
             on_rule: Rc::clone(&self.on_rule),
+            on_waive: Rc::clone(&self.on_waive),
         };
         let ctx = Rc::clone(&self.ctx);
         let (look, fonts, checks) = (Rc::clone(&self.look), Rc::clone(&self.fonts), Rc::clone(&self.checks));
@@ -444,6 +459,20 @@ impl WebApp {
     /// frame is over.
     pub fn on_rule(&self, on_rule: Option<js_sys::Function>) {
         *self.on_rule.borrow_mut() = on_rule;
+    }
+
+    /// What the page hears when the person waives a flagged check (a reason given) or takes a waiver back: `on_waive(askJson)`,
+    /// `{"rule": id, "reason": text}` or `{"rule": id, "reason": null}`, once the frame is over. The page asks its server, then
+    /// gives the checks again (`set_checks`), or says why it could not (`waive_refused`).
+    pub fn on_waive(&self, on_waive: Option<js_sys::Function>) {
+        *self.on_waive.borrow_mut() = on_waive;
+    }
+
+    /// The page could not make or take back the waiver of `rule`: `why` (its server's reason), shown under the check.
+    pub fn waive_refused(&self, rule: &str, why: &str) -> Result<(), JsValue> {
+        self.host()?.app.waive_refused(rule, why);
+        self.repaint();
+        Ok(())
     }
 
     /// What the page hears of files: `on_ask(askJson)` when the person wants a file, or where to save one; `on_written()` when
