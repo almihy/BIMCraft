@@ -105,3 +105,19 @@ fn a_grid_beside_a_wall_is_measured_to_like_a_wall() {
     retype_dimension(&mut h, "700", "1200");
     assert_eq!(walls(&h)[0], (P2(0.0, -500.0), P2(4000.0, -500.0)));
 }
+
+#[test]
+fn a_walls_temporary_dimensions_measure_to_what_the_plan_shows() {
+    let (mut h, inner) = with_inner_wall();
+    assert!(h.query_by_label("Temporary dimension 2000").is_some(), "to the south wall");
+    // The south wall taken down in the first phase isn't in this plan, so it isn't measured to.
+    let south = ids(&h, "wall")[0];
+    h.state_mut()
+        .session
+        .execute("modify", &json!({"id": south, "params": {"Phase Created": "Existing", "Phase Demolished": "Existing"}}))
+        .unwrap();
+    h.run();
+    assert_eq!(h.state().selection, [inner]);
+    assert!(h.query_by_label("Temporary dimension 2000").is_none(), "the demolished wall is no neighbour");
+    assert!(h.query_by_label("Temporary dimension 4000").is_some(), "the north wall still is");
+}

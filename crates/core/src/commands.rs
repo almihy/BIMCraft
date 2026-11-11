@@ -45,8 +45,8 @@ type R = Result<Value, String>;
 
 mod array;
 mod cad_pick;
-mod pin;
 pub(crate) mod clipboard;
+mod pin;
 mod site;
 use cad_pick::cad_outlines;
 use site::{building_pad, property_line, site as site_cmd, site_edit, site_figures, site_kinds, toposolid};
@@ -1359,7 +1359,7 @@ other_files(
          its size. Doors and windows slide along their host wall; they cannot turn independently. With `lock`, Revit's padlock: \
          the line and the reference (of element `to`, else whatever has a line along it) are kept on one line after every \
          command, as a locked dimension keeps its length; refused when that can't hold with the other locks. Returns {aligned, \
-         angle, by, line} (the picked line where it went), and the lock's id",
+         angle, by, line} (the picked line where it went), and the lock's id. A pinned element still moves, and the reply names it (`pinned`)",
         align_element,
     ),
     edit(
@@ -1375,7 +1375,14 @@ other_files(
     other(
         "temporary_dimensions",
         ui_msg!("Temporary Dimensions"),
-        "{id, level?, left?: centre|left|right, right?: centre|left|right} reads a wall's temporary dimensions, as Revit shows          them when it is selected, and changes nothing: on each side of a straight wall (`left` and `right` as the wall runs, its          exterior face on the left), how far it is, square to it, from the wall to the nearest parallel wall's centre line or          grid that shares some of its run in the plan of `level` (the wall's own by default). `left` and `right` say which line of          the wall each starts at: its centre line (the default), its exterior face (`left`) or its interior face (`right`).          Returns {id, length, dimensions: [{side, from: {id, face}, to: {id, face}, distance, toward: [x, y], at: [x, y],          dimension: {refs, at}}]}; to type a distance as a person does, `move` the wall by `toward` times (distance - wanted), and          to make one permanent, run `dimension` with its `dimension` params",
+        "{id, level?, left?: centre|left|right, right?: centre|left|right} reads a wall's temporary dimensions, as Revit shows \
+         them when it is selected, and changes nothing: on each side of a straight wall (`left` and `right` as the wall runs, its \
+         exterior face on the left), how far it is, square to it, from the wall to the nearest parallel wall's centre line or \
+         grid that shares some of its run in the plan of `level` (the wall's own by default). `left` and `right` say which line of \
+         the wall each starts at: its centre line (the default), its exterior face (`left`) or its interior face (`right`). \
+         Returns {id, length, dimensions: [{side, from: {id, face}, to: {id, face}, distance, toward: [x, y], at: [x, y], \
+         dimension: {refs, at, level}}]}; to type a distance as a person does, `move` the wall by `toward` times (distance - wanted), and \
+         to make one permanent, run `dimension` with its `dimension` params",
         temporary_dimensions,
     ),
     edit(
@@ -1391,14 +1398,18 @@ other_files(
         "pin",
         ui_msg!("Pin"),
         &["PN"],
-        "{ids: [id,…]} pins elements, as Revit's Pin: held where they are. The window refuses to drag, move or turn a pinned          element and says it is pinned; a command from a script or the agent still moves it, and what it returns says it was          pinned (`pinned`, `note`). Any element can be pinned, grids and levels by habit; a pinned element can still be          deleted. Pins are kept in the file. Returns {pinned, already}: those now pinned, and those that were",
+        "{ids: [id,…]} pins elements, as Revit's Pin: held where they are. The window refuses to drag, move or turn a pinned \
+         element and says it is pinned; a command from a script or the agent still moves it, and what it returns says it was \
+         pinned (`pinned`, `note`). Any element can be pinned, grids and levels by habit; a pinned element can still be \
+         deleted. Pins are kept in the file. Returns {pinned, already}: those now pinned, and those that were",
         pin::pin,
     ),
     edit(
         "unpin",
         ui_msg!("Unpin"),
         &["UP"],
-        "{ids: [id,…]} lets pinned elements be moved by the window again. Returns {unpinned, ids}: those that were pinned, and          those asked for",
+        "{ids: [id,…]} lets pinned elements be moved by the window again. Returns {unpinned, ids}: those that were pinned, and \
+         those asked for",
         pin::unpin,
     ),
     edit(
@@ -1438,9 +1449,13 @@ other_files(
     ),
     edit(
         "array",
-        msg!("Array"),
+        ui_msg!("Array"),
         &["AR"],
-        "{ids: [id,…], mode?: linear|radial (default linear), count?: members in all, the original among them (2 to 1000, default 2),          move_to?: second|last (default second)}; linear: `by` [dx, dy] or `from` and `to` [x, y] each; radial: `centre` [x, y] and          `angle` in degrees, counter-clockwise. With `second`, the distance or angle is between one member and the next; with `last`,          from the first to the last, shared out evenly (360 degrees shares the circle). Copies as `copy` and `rotate` do, with the          doors and windows of copied walls; returns the copies' ids, and `members`, each member's ids",
+        "{ids: [id,…], mode?: linear|radial (default linear), count?: members in all, the original among them (2 to 1000, default 2), \
+         move_to?: second|last (default second)}; linear: `by` [dx, dy] or `from` and `to` [x, y] each; radial: `centre` [x, y] and \
+         `angle` in degrees, counter-clockwise. With `second`, the distance or angle is between one member and the next; with `last`, \
+         from the first to the last, shared out evenly (360 degrees shares the circle). Copies as `copy` and `rotate` do, with the \
+         doors and windows of copied walls; returns the copies' ids, and `members`, each member's ids",
         array::array,
     ),
     edit(
@@ -12009,6 +12024,7 @@ fn modify(s: &mut Session, p: &Value) -> R {
     let fields = p.as_object().ok_or_else(|| bad(c, "params must be {id | ids, …fields}"))?;
     let m = &s.model;
     let ids = ids_param(c, m, p)?;
+    let before = Arc::clone(&s.model);
     let mut edited = Vec::new();
     let mut rescaled = Vec::new();
     // Footings the command changes itself, and the ones that follow their wall's base as it goes up or down.
@@ -12109,11 +12125,19 @@ fn modify(s: &mut Session, p: &Value) -> R {
     for (id, e) in edited {
         m.elements.insert(id, e);
     }
-    match (p.get("ids"), ids.as_slice()) {
-        (None, [one]) => Ok(element_json(&s.model, *one)),
-        _ => Ok(json!({"modified": ids})),
-    }
+    // Where a pinned element is changes only by these: a change of its type or its settings is no move.
+    let placed = LOCATION_FIELDS.iter().any(|k| fields.contains_key(*k));
+    let said = match (p.get("ids"), ids.as_slice()) {
+        (None, [one]) => element_json(&s.model, *one),
+        _ => json!({"modified": ids}),
+    };
+    Ok(if placed { pin::pinned_note(said, &before, &ids) } else { said })
 }
+
+/// The fields of an element that say where it is: `modify`ing one of a pinned element moves it, and the reply says it was
+/// pinned.
+const LOCATION_FIELDS: [&str; 11] =
+    ["start", "end", "points", "at", "offset", "arc", "boundary", "centre", "path", "pattern_origin", "origin"];
 
 fn match_properties(s: &mut Session, p: &Value) -> R {
     let c = "match_properties";
@@ -13023,6 +13047,7 @@ pub(crate) fn duplicate_mapped(c: &str, s: &mut Session, ids: &[Id], mo: &Motion
 
 fn align_element(s: &mut Session, p: &Value) -> R {
     let c = "align";
+    let before = Arc::clone(&s.model);
     let id = id_opt(c, p, "id")?.ok_or_else(|| bad(c, "`id` is required"))?;
     let line = |name| -> Result<Line, String> {
         match points(c, p, name)?.as_slice() {
@@ -13049,7 +13074,11 @@ fn align_element(s: &mut Session, p: &Value) -> R {
     let (reference, line) = (line("reference")?, line("line")?);
     let moved = (placement.map(line.0), placement.map(line.1));
     let lock = if flag(c, p, "lock")? { Some(alignment_lock(c, s, id, id_opt(c, p, "to")?, reference, moved)?) } else { None };
-    Ok(json!({"aligned": id, "angle": placement.angle, "by": placement.by, "line": [moved.0, moved.1], "lock": lock}))
+    Ok(pin::pinned_note(
+        json!({"aligned": id, "angle": placement.angle, "by": placement.by, "line": [moved.0, moved.1], "lock": lock}),
+        &before,
+        &[id],
+    ))
 }
 
 /// Align's padlock: element `id`'s reference along `moved`, and the reference of element `to` (else of whatever has one) along
@@ -13108,6 +13137,7 @@ fn dimension_value(s: &mut Session, p: &Value) -> R {
         return Err(bad(c, format!("dimension {id} isn't an aligned or a linear one: only their lengths are typed")));
     }
     let mut d = d.clone();
+    let before = Arc::clone(&s.model);
     let value = num(c, p, "value")?.ok_or_else(|| bad(c, "`value`, the length in mm, is required"))?;
     if !(value > TOL && value <= MAX_COORD) {
         return Err(bad(c, format!("`value` is a length above 0 and at most {MAX_COORD} mm, not {value}")));
@@ -13126,7 +13156,8 @@ fn dimension_value(s: &mut Session, p: &Value) -> R {
     if by.abs() > 1e-9 {
         move_by(s, moved, n * by)?;
     }
-    Ok(json!({"id": id, "moved": moved, "by": hundredth(by)}))
+    let said = json!({"id": id, "moved": moved, "by": hundredth(by)});
+    Ok(if by.abs() > 1e-9 { pin::pinned_note(said, &before, &[moved]) } else { said })
 }
 
 /// A wall's temporary dimensions ([`crate::tempdims::wall`]), read and never kept.
@@ -13139,7 +13170,13 @@ fn temporary_dimensions(s: &mut Session, p: &Value) -> R {
     let Some(w) = m.wall(id) else {
         return Err(bad(c, format!("{} {id} isn't a wall", m.elements.get(id).map_or("nothing", |e| e.category()))));
     };
-    let level = if absent(p.get("level")) { w.level } else { plan_param(c, m, p, "level")?.0 };
+    // The plan it is read in: the wall's level, or the level or plan view asked for (its view range is what the plan cuts).
+    let level = if absent(p.get("level")) {
+        w.level
+    } else {
+        let (level, view) = plan_param(c, m, p, "level")?;
+        view.unwrap_or(level)
+    };
     let face = |key: &str| -> Result<Face, String> {
         match string(c, p, key)?.as_deref() {
             None | Some("centre" | "center") => Ok(Face::Centre),
@@ -13158,7 +13195,7 @@ fn temporary_dimensions(s: &mut Session, p: &Value) -> R {
             json!({
                 "side": d.side.name(), "from": from, "to": to, "distance": hundredth(d.distance),
                 "toward": [hundredth(d.toward.0), hundredth(d.toward.1)], "at": at,
-                "dimension": {"refs": [from, to], "at": at},
+                "dimension": {"refs": [from, to], "at": at, "level": level},
             })
         })
         .collect();
@@ -13238,7 +13275,19 @@ fn mirror(s: &mut Session, p: &Value) -> R {
     Ok(pin::pinned_note(json!({"mirrored": ids}), &before, &ids))
 }
 
+/// `edit`'s reply for `p`, with a note when it changed an element of `p`'s `ids` (or `id`) that is pinned: it did the work
+/// all the same.
+fn noting_pins(s: &mut Session, p: &Value, edit: fn(&mut Session, &Value) -> R) -> R {
+    let before = Arc::clone(&s.model);
+    let ids = ids_param("pin", &before, p).unwrap_or_default();
+    Ok(pin::pinned_note(edit(s, p)?, &before, &ids))
+}
+
 fn corner(s: &mut Session, p: &Value) -> R {
+    noting_pins(s, p, corner_edit)
+}
+
+fn corner_edit(s: &mut Session, p: &Value) -> R {
     let c = "corner";
     let ids = ids_param(c, &s.model, p)?;
     let m = &s.model;
@@ -13290,6 +13339,10 @@ fn corner(s: &mut Session, p: &Value) -> R {
 }
 
 fn split(s: &mut Session, p: &Value) -> R {
+    noting_pins(s, p, split_edit)
+}
+
+fn split_edit(s: &mut Session, p: &Value) -> R {
     let c = "split";
     let m = &s.model;
     let id = id_opt(c, p, "id")?.ok_or_else(|| bad(c, "`id`, a wall or a detail line, is required"))?;
@@ -13427,6 +13480,7 @@ fn offset(s: &mut Session, p: &Value) -> R {
         .ok_or_else(|| bad(c, format!("a {} can't be offset by {d} mm (it would turn inside out, or fold over itself)", l.curve.kind())))?
         .map(micron);
     let copy = absent(p.get("copy")) || flag(c, p, "copy")?;
+    let before = Arc::clone(&s.model);
     let m = s.model_mut();
     let out = DetailLine { curve, ..l };
     if copy {
@@ -13434,7 +13488,7 @@ fn offset(s: &mut Session, p: &Value) -> R {
         Ok(json!({"id": new}))
     } else {
         m.elements.insert(id, Element::DetailLine(out));
-        Ok(json!({"id": id}))
+        Ok(pin::pinned_note(json!({"id": id}), &before, &[id]))
     }
 }
 
@@ -13450,6 +13504,10 @@ fn drawn_in_view(m: &Model, l: &DetailLine, boundary: Id) -> bool {
 }
 
 fn trim_extend(s: &mut Session, p: &Value) -> R {
+    noting_pins(s, p, trim_extend_edit)
+}
+
+fn trim_extend_edit(s: &mut Session, p: &Value) -> R {
     let c = "trim_extend";
     let m = &s.model;
     let boundary = id_opt(c, p, "boundary")?

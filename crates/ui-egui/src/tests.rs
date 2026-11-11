@@ -6845,3 +6845,23 @@ fn array_needs_a_selection_and_its_shortcut_starts_the_tool() {
     shortcut(&mut h, "AR");
     assert!(matches!(h.state().tool, Tool::Array { .. }), "{:?}", h.state().tool);
 }
+
+#[test]
+fn array_going_back_to_linear_forgets_the_radial_centre_to_place_and_a_first_point() {
+    let mut h = app(&format!("{BOX}\ndoor {{\"at\": [2000, 0]}}"));
+    click(&mut h, P2(2000.0, 0.0));
+    press(&mut h, "Array");
+    press(&mut h, "Radial");
+    press(&mut h, "Place Centre");
+    assert!(h.state().prompt().contains("centre of rotation"), "{}", h.state().prompt());
+    press(&mut h, "Linear");
+    assert!(matches!(h.state().tool, Tool::Array { place: false, start: None, .. }), "{:?}", h.state().tool);
+    assert!(h.state().prompt().contains("first point"), "{}", h.state().prompt());
+    // A first point of a linear array, then Radial: it is no angle's start, and Linear again starts afresh.
+    click(&mut h, P2(2000.0, 0.0));
+    assert!(matches!(h.state().tool, Tool::Array { start: Some(_), .. }));
+    press(&mut h, "Radial");
+    assert!(matches!(h.state().tool, Tool::Array { start: None, .. }), "{:?}", h.state().tool);
+    press(&mut h, "Linear");
+    assert!(matches!(h.state().tool, Tool::Array { start: None, place: false, .. }));
+}

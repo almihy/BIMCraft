@@ -188,7 +188,7 @@ impl BimApp {
             let n = small as f64 + BIGGER * big as f64;
             by = P2(by.0 + dx * n * step, by.1 + dy * n * step);
         }
-        if by.0 != 0.0 || by.1 != 0.0 {
+        if (by.0 != 0.0 || by.1 != 0.0) && !self.refuse_pinned() {
             self.run("move", json!({"ids": self.selection, "by": point(by)}));
         }
     }

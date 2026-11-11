@@ -5777,7 +5777,7 @@ impl Model {
             .collect()
     }
 
-    /// Where each number of an aligned or linear dimension of the continuous or ordinate string stands on its line, before
+    /// Where each number of an aligned or linear dimension of the continuous, baseline or ordinate string stands on its line, before
     /// any shift: `(segment, point)`, the points the grips on its numbers sit at. None for the other kinds, whose numbers stand
     /// by the view's scale.
     pub fn dimension_text_spots(&self, d: &Dimension) -> Vec<(usize, P2)> {
@@ -5789,7 +5789,15 @@ impl Model {
         match self.dimension_type(d).string {
             crate::dims::DimString::Continuous => cross.windows(2).enumerate().map(|(i, w)| (i, on((w[0].0 + w[1].0) / 2.0))).collect(),
             crate::dims::DimString::Ordinate => cross.iter().enumerate().map(|(i, c)| (i, on(c.0))).collect(),
-            crate::dims::DimString::Baseline => Vec::new(),
+            // Each number on its own line, the lines stepped away from what the dimension measures, a paper spacing apart
+            // (`render::dimensions` draws them so).
+            crate::dims::DimString::Baseline => {
+                let u = n.perp();
+                let mean = cross.iter().map(|(s, (a, b))| ((*a + *b) * 0.5 - on(*s)).dot(u)).sum::<f64>() / cross.len().max(1) as f64;
+                let away = if mean > 0.0 { -1.0 } else { 1.0 };
+                let spacing = self.dimension_type(d).baseline_spacing * crate::graphics::scale_of(self, d.view.unwrap_or(d.level)) * away;
+                cross.windows(2).enumerate().map(|(i, w)| (i, on((w[0].0 + w[1].0) / 2.0) + u * (i as f64 * spacing))).collect()
+            }
         }
     }
 

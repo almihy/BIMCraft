@@ -1712,7 +1712,7 @@ impl BimApp {
             self.canvas.drag = Some(match d.pick(o, PICK).filter(|_| self.flow.pending.is_none()) {
                 Some(id) => {
                     self.grab(id);
-                    Drag::Move(self.drag_base(&model, level, &view, o, mods))
+                    Drag::Move(self.drag_base(&model, level, &view, o))
                 }
                 None => Drag::Box(o),
             });
@@ -2088,10 +2088,11 @@ impl BimApp {
     }
 
     /// Where a drag of the selection starts from: the model point pressed, or the point of the plan's geometry it lies at (the
-    /// way a Move's base point snaps), so that moving that point onto another lands them together.
-    fn drag_base(&self, m: &Model, level: Id, v: &View, at: (f32, f32), mods: Modifiers) -> P2 {
-        let skip: &[Id] = if mods.command { &[] } else { &self.selection };
-        let f = self.snap_skipping(m, level, v, at, &[], false, skip);
+    /// way a Move's base point snaps), so that moving that point onto another lands them together. Nothing is left out: the
+    /// selection's own points are the ones grabbed (a column's centre pressed a few pixels off), and the end of the drag is
+    /// what leaves them out (`dragged`).
+    fn drag_base(&self, m: &Model, level: Id, v: &View, at: (f32, f32)) -> P2 {
+        let f = self.snap_skipping(m, level, v, at, &[], false, &[]);
         if matches!(f.kind, Kind::Free | Kind::Angle) { v.mm(at) } else { f.at }
     }
 
@@ -2296,6 +2297,10 @@ impl BimApp {
                 if let Some(id) = hovered {
                     self.run("split", json!({"id": id, "at": point(self.snap(m, level, v, at, &[], false).at)}));
                 }
+            }
+            // A pinned element is not offset in place; a copy of it is.
+            Tool::Offset if !self.offset_copy && hovered.is_some_and(|id| m.is_pinned(id)) => {
+                self.refuse_pinned_ids(&hovered.into_iter().collect::<Vec<_>>());
             }
             Tool::Offset => {
                 if let Some(id) = hovered.filter(|id| matches!(m.elements.get(*id), Some(Element::DetailLine(_)))) {
@@ -2956,6 +2961,9 @@ impl BimApp {
     /// Align's second pick: turn and move the element so its picked line lies on the reference.
     /// Its padlock is offered then, on the line where it went.
     fn align(&mut self, reference: (P2, P2), id: Id, line: (P2, P2)) {
+        if self.refuse_pinned_ids(&[id]) {
+            return;
+        }
         let to = match self.drawing.align_reference {
             Some(draw::Picked::Element(r)) => Some(r),
             _ => None,
@@ -2973,6 +2981,9 @@ impl BimApp {
     /// Align on a pattern: element `id`'s pattern moved across so its `line` lies on `reference`. The core says where the
     /// pattern then starts (`Model::align_pattern`); the window only sends that through `modify`.
     fn align_pattern(&mut self, m: &Model, reference: (P2, P2), id: Id, line: (P2, P2)) {
+        if self.refuse_pinned_ids(&[id]) {
+            return;
+        }
         match m.align_pattern(id, reference, line) {
             Ok(to) => {
                 if self.run("modify", json!({"id": id, "pattern_origin": point(to)})).is_some() {
@@ -3231,6 +3242,11 @@ impl BimApp {
     fn grip_target(&self, m: &Model, level: Id, v: &View, (ends, start): ((P2, P2), bool), q: (f32, f32), mods: Modifiers) -> (Found, P2) {
         let (mine, fixed) = if start { (ends.0, ends.1) } else { (ends.1, ends.0) };
         let found = self.snap(m, level, v, q, &[fixed], mods.shift);
+        // A grid's end slides along its own line, as Revit's: what it snaps to is projected onto the line.
+        if matches!(self.gripped().and_then(|id| m.elements.get(id)), Some(Element::Grid(_))) && fixed.dist(mine) > TOL {
+            let u = (mine - fixed).unit();
+            return (found, micron(fixed + u * (found.at - fixed).dot(u)));
+        }
         let at = if mods.command && fixed.dist(found.at) > TOL {
             micron(fixed + (found.at - fixed).unit() * mine.dist(fixed))
         } else {
@@ -3259,7 +3275,10 @@ impl BimApp {
                 .into_iter()
                 .filter(|(_, p)| near(*p) <= 8.0)
                 .min_by(|a, b| near(a.1).total_cmp(&near(b.1)));
-            if let Some((start, _)) = nearest {
+            // A pinned element's end is not dragged: no grip is held, so no preview of it moving is drawn.
+            if let Some((start, _)) = nearest
+                && !self.refuse_pinned_ids(&[id])
+            {
                 self.canvas.grip = Some((id, start));
             }
         }
@@ -3404,7 +3423,7 @@ impl BimApp {
                         by -= 360.0;
                     }
                     // The label reads to the hundredth: what it said, typed back, turns nothing.
-                    if by.abs() > 1e-9 && (deg - (angle * 100.0).round() / 100.0).abs() > 1e-9 {
+                    if by.abs() > 1e-9 && (deg - (angle * 100.0).round() / 100.0).abs() > 1e-9 && !self.refuse_pinned_ids(&[id]) {
                         let about = if start { w.start } else { w.end };
                         self.run("rotate", json!({"ids": [id], "about": point(about), "angle": by}));
                     }
@@ -3647,7 +3666,7 @@ impl BimApp {
                 // Its end moved along its chord: an arc keeps its turn, its length as typed.
                 Some((Some(len), _)) if len > 0.0 => {
                     let by = (w.end - w.start) * (len / length - 1.0);
-                    if by.length() > 1e-6 {
+                    if by.length() > 1e-6 && !self.refuse_pinned_ids(&[id]) {
                         self.run("move", json!({"ids": [id], "by": point(by), "end": "end"}));
                     }
                 }
@@ -3739,7 +3758,7 @@ impl BimApp {
             match typed.map(|t| (m.units.parse(&t), t)) {
                 Some((Some(len), _)) if (0.0..=end - start).contains(&len) => {
                     let offset = if n == 0 { start + len } else { end - len };
-                    if (offset - o.offset).abs() > 1e-6 {
+                    if (offset - o.offset).abs() > 1e-6 && !self.refuse_pinned_ids(&[id]) {
                         self.run("modify", json!({"id": id, "offset": offset}));
                     }
                 }
@@ -3760,7 +3779,7 @@ impl BimApp {
             match typed.map(|t| (m.units.parse(&t), t)) {
                 Some((Some(len), _)) if len >= 0.0 => {
                     let by = c.toward * (c.distance - len);
-                    if by.length() > 1e-6 {
+                    if by.length() > 1e-6 && !self.refuse_pinned_ids(&[id]) {
                         self.run("move", json!({"ids": [id], "by": point(by)}));
                     }
                 }

@@ -5130,7 +5130,7 @@ impl BimApp {
             Tool::Rotate { place: true, .. } => msg!("Click the centre of rotation."),
             Tool::Rotate { start: None, .. } => msg!("Click the start of the angle, or type an angle in the Options Bar."),
             Tool::Rotate { start: Some(_), .. } => msg!("Click the end of the angle. Esc cancels."),
-            Tool::Array { place: true, .. } => msg!("Click the centre of rotation."),
+            Tool::Array { place: true, .. } if self.array.radial => msg!("Click the centre of rotation."),
             Tool::Array { start: None, .. } if self.array.radial => {
                 msg!("Click the start of the angle, or type an angle in the Options Bar.")
             }

@@ -17,16 +17,19 @@ fn memory(wall: Id) -> egui::Id {
 impl BimApp {
     /// The selected wall's temporary dimensions to the nearest parallel walls and grids, beside the one that gives its length
     /// (`temporary_dimension`): each with its number (a click types another, and the wall moves so that distance is met),
-    /// the grip at its witness line, and the icon that makes it permanent. Dimensions go in the plan `key`.
+    /// the grip at its witness line, and the icon that makes it permanent. They are measured in the plan `key` (the walls and
+    /// grids it shows, cut at its view range) and go into it, whatever the wall's own level is.
     pub(super) fn wall_neighbour_dimensions(&mut self, ui: &mut Ui, m: &Model, v: &View, rect: Rect, key: Id) {
         let &[id] = self.selection.as_slice() else { return };
         if self.tool != Tool::Modify || self.canvas.drag.is_some() || self.canvas.grip.is_some() || self.drawing.grip.is_some() {
             return;
         }
-        let Some(w) = m.wall(id) else { return };
+        if m.wall(id).is_none() {
+            return;
+        }
         let witness: Witness = ui.ctx().data(|d| d.get_temp(memory(id))).unwrap_or_default();
         let p = ui.painter_at(rect);
-        for d in tempdims::wall(m, id, w.level, witness) {
+        for d in tempdims::wall(m, id, key, witness) {
             let n = if d.side == Side::Left { 1 } else { 2 };
             let (a, b) = (pos(rect.min, v.px(d.start)), pos(rect.min, v.px(d.end)));
             if a.distance(b) < 24.0 {
@@ -45,7 +48,7 @@ impl BimApp {
                 // The wall goes toward what it is measured to by what the distance is to shrink.
                 Some((Some(len), _)) if len >= 0.0 => {
                     let by = d.toward * (d.distance - len);
-                    if by.length() > 1e-6 {
+                    if by.length() > 1e-6 && !self.refuse_pinned_ids(&[id]) {
                         self.run("move", json!({"ids": [id], "by": point(by)}));
                     }
                 }

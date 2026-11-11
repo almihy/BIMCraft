@@ -33,7 +33,14 @@ impl BimApp {
 
     /// Whether the selection holds a pinned element, which is then not to be moved or turned: the status bar says so.
     pub(crate) fn refuse_pinned(&mut self) -> bool {
-        let pinned = self.pinned_selection();
+        let selection = self.selection.clone();
+        self.refuse_pinned_ids(&selection)
+    }
+
+    /// Whether `ids` hold a pinned element, which is then not to be changed in place (a typed dimension, an angle, Align, a
+    /// nudge, a drag on a sheet): the status bar says so.
+    pub(crate) fn refuse_pinned_ids(&mut self, ids: &[Id]) -> bool {
+        let pinned = self.session.model.pinned_among(ids);
         if pinned.is_empty() {
             return false;
         }
