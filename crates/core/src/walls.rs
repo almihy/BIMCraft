@@ -332,14 +332,19 @@ fn end_geometry(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> WallE
     }
     let node = if at_end { w.end } else { w.start };
     let limit = arms.iter().map(|a| a.thick).fold(0.0, f64::max);
-    // Where a face of this wall crosses a neighbour's facing face, near enough to the node either way; else its own
+    // Where a face of this wall crosses a neighbour's facing face, near enough to the corner either way; else its own
     // end. A crossing far along the wall is no corner at all: two walls meeting at a shallow angle cross metres in.
-    let meet = |face: P2, other: P2, other_way: P2| {
-        geom::line_intersection(face, face + me.way, other, other + other_way)
-            .filter(|c| (-limit..=limit).contains(&(*c - node).dot(me.way)))
+    // The corner is where the two centre lines cross (when that is near the node): walls standing on a face meet
+    // there, a thickness or more from their location lines' node, their far faces running on past it.
+    let meet = |face: P2, other: P2, near: &Arm| {
+        let corner = geom::line_intersection(me.centre, me.centre + me.way, near.centre, near.centre + near.way)
+            .filter(|c| c.dist(node) <= limit)
+            .unwrap_or(node);
+        geom::line_intersection(face, face + me.way, other, other + near.way)
+            .filter(|c| (-limit..=limit).contains(&(*c - corner).dot(me.way)))
             .unwrap_or(face)
     };
-    let (cw, ccw) = (meet(me.cw, prev.ccw, prev.way), meet(me.ccw, next.cw, next.way));
+    let (cw, ccw) = (meet(me.cw, prev.ccw, prev), meet(me.ccw, next.cw, next));
     WallEnd::plain(if through { vec![cw, ccw] } else { vec![cw, node, ccw] })
 }
 
