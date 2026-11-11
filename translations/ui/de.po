@@ -214,6 +214,10 @@ msgstr "Die Mittellinie einer Wand, sodass eine darauf gezeichnete Wand sie trif
 msgid "A {} needs a name."
 msgstr "{}: Es fehlt ein Name."
 
+#: crates/ui-egui/src/lib.rs:4507
+msgid "Array"
+msgstr "Anordnung"
+
 #: crates/core/src/sheet.rs:291
 msgid "AS INDICATED"
 msgstr ""

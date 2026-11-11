@@ -215,6 +215,10 @@ msgstr "O eixo central de uma parede, para que uma parede desenhada nele se enco
 msgid "A {} needs a name."
 msgstr "O nome não pode ficar vazio ({})."
 
+#: crates/ui-egui/src/lib.rs:4507
+msgid "Array"
+msgstr "Matriz"
+
 #: crates/core/src/sheet.rs:291
 msgid "AS INDICATED"
 msgstr "INDICADA"

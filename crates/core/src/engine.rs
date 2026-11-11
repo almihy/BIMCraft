@@ -146,7 +146,7 @@ pub const REPLACES: &[&str] = &["new", "open", "recover", "highrise", "tower"];
 pub const READ_ONLY: &str = "which is read-only for agents";
 
 /// The commands that copy what stands: a copy is made in the session's phase and isn't taken down with its original.
-const COPIES: [&str; 3] = ["copy", "mirror", "rotate"];
+const COPIES: [&str; 4] = ["copy", "mirror", "rotate", "array"];
 
 #[cfg_attr(test, derive(Clone))]
 pub struct Session {

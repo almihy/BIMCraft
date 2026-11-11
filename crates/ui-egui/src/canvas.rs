@@ -1214,7 +1214,8 @@ fn start_of(tool: &Tool) -> &[P2] {
         | Tool::Copy(start)
         | Tool::Section(start)
         | Tool::Measure(start)
-        | Tool::Run(_, start) => start.as_slice(),
+        | Tool::Run(_, start)
+        | Tool::Array { start, .. } => start.as_slice(),
         _ => &[],
     }
 }
@@ -2230,6 +2231,19 @@ impl BimApp {
                 let pt = self.snap_point(m, level, v, at, &chain, square);
                 self.place(level, pt);
             }
+            // Array: as Rotate for a radial one; for a linear one the two points of its distance.
+            &Tool::Array { centre, start, place } => {
+                if !self.array.radial {
+                    let chain: Vec<P2> = start.into_iter().collect();
+                    let pt = self.snap_point(m, level, v, at, &chain, mods.shift || self.constrain);
+                    return self.place(level, pt);
+                }
+                self.tool = match (place, start) {
+                    (true, _) => Tool::Array { centre: self.snap_point(m, level, v, at, &[], false), start: None, place: false },
+                    (false, None) => Tool::Array { centre, start: Some(v.mm(at)), place: false },
+                    (false, Some(from)) => return self.array_radial(centre, angle_between(centre, from, v.mm(at), self.snaps.angle)),
+                };
+            }
             &Tool::Rotate { centre, start, place } => {
                 self.tool = match (place, start) {
                     (true, _) => Tool::Rotate { centre: self.snap_point(m, level, v, at, &[], false), start: None, place: false },
@@ -3012,6 +3026,15 @@ impl BimApp {
         }
         if matches!(self.tool, Tool::DetailLine(_)) {
             return self.place_detail_line(level, p);
+        }
+        // Array's linear distance: the first point, then the second.
+        if let Tool::Array { start, .. } = &mut self.tool {
+            match start.take() {
+                None => *start = Some(p),
+                Some(from) if from.dist(p) > TOL => self.array_linear(from, p),
+                Some(from) => *start = Some(from),
+            }
+            return;
         }
         match &mut self.tool {
             // A line: each click after the first builds the wall from the one before it.
@@ -3851,6 +3874,8 @@ impl BimApp {
             | Tool::PatternCorner(None)
             | Tool::SlopeArrow(None)
             | Tool::Measure(_) => start_of(&self.tool),
+            // A linear array's distance from its first point; a radial one is drawn above.
+            Tool::Array { .. } if !self.array.radial => start_of(&self.tool),
             // The point a click would add, and its elevation.
             // The point a click would add, and how high above the level it would be.
             Tool::AddPoint => {
@@ -3923,6 +3948,24 @@ impl BimApp {
                     p.line_segment([c, cursor], stroke);
                     ghost(&turned(c, angle));
                     label(cursor, format!("{}°", (angle * 100.0).round() / 100.0));
+                }
+                return;
+            }
+            // Array about a point: the centre, the angle's arm, and the copies turned as the angle says.
+            &Tool::Array { centre, start, place } if self.array.radial => {
+                let at = if place { self.found(sc, q, &[], false) } else { centre };
+                let c = sc.screen(at);
+                p.circle_stroke(c, 5.0, stroke);
+                p.line_segment([c - vec2(8.0, 0.0), c + vec2(8.0, 0.0)], thin);
+                p.line_segment([c - vec2(0.0, 8.0), c + vec2(0.0, 8.0)], thin);
+                if let (Some(from), false) = (start, place) {
+                    let angle = angle_between(centre, from, v.mm(q), self.snaps.angle);
+                    p.line_segment([c, sc.screen(from)], thin);
+                    p.line_segment([c, cursor], stroke);
+                    for a in self.array_angles(angle) {
+                        ghost(&turned(c, a));
+                    }
+                    label(cursor, degrees(angle));
                 }
                 return;
             }
@@ -4226,7 +4269,7 @@ impl BimApp {
             }
             _ => return,
         };
-        let square = shift || (self.constrain && matches!(self.tool, Tool::Move(_) | Tool::Copy(_)));
+        let square = shift || (self.constrain && matches!(self.tool, Tool::Move(_) | Tool::Copy(_) | Tool::Array { .. }));
         // A shape other than a line: guided from its last point only, and its third point from none.
         let shape = self.shape();
         let shaped = self.target().is_some() && !matches!(shape, draw::Shape::Line | draw::Shape::Polyline);
@@ -4251,6 +4294,12 @@ impl BimApp {
         if let Tool::Move(Some(base)) | Tool::Copy(Some(base)) = &self.tool {
             let delta = sc.screen(next) - sc.screen(*base);
             ghost(&|pt| pt + delta);
+        }
+        // Every member of the array, the distance from its first point as far as the cursor is.
+        if let Tool::Array { start: Some(base), .. } = &self.tool {
+            for delta in self.array_offsets(sc.screen(next) - sc.screen(*base)) {
+                ghost(&|pt| pt + delta);
+            }
         }
         // A line's walls are built as it goes: only the next one is to come.
         // Walls, and detail lines a click, are made as they go: only the next one is still a preview.

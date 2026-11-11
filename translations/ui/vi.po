@@ -215,6 +215,10 @@ msgstr "Đường tim của tường, để tường vẽ trên đó gặp nó"
 msgid "A {} needs a name."
 msgstr "{} cần một tên."
 
+#: crates/ui-egui/src/lib.rs:4507
+msgid "Array"
+msgstr "Mảng"
+
 #: crates/core/src/sheet.rs:291
 msgid "AS INDICATED"
 msgstr ""

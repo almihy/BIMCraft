@@ -215,6 +215,10 @@ msgstr "牆的中心線，使繪製在其上的牆與之相接"
 msgid "A {} needs a name."
 msgstr "{}需要名稱。"
 
+#: crates/ui-egui/src/lib.rs:4507
+msgid "Array"
+msgstr "陣列"
+
 #: crates/core/src/sheet.rs:291
 msgid "AS INDICATED"
 msgstr ""

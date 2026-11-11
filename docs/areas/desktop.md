@@ -575,6 +575,18 @@ A double click on one of its numbers opens Dimension Text for that segment (`Dim
 a padlock under each segment and, over a string of two or more, EQ past its end (`dimension_constraints`): a click locks or unlocks, or makes
 it equal or not.
 
+## Array
+
+Array (AR, Modify) is the core's `array` command (`crates/core/src/commands/array.rs`) behind `Tool::Array` (`array.rs` in the
+desktop). The command makes member 1 to count-1 with `duplicate`, the machinery of `copy` and `rotate`, so doors and windows follow
+their copied walls, tags and dimensions follow what they measure, and it returns `ids` (all the copies) and `members` (each
+member's ids). `move_to: second` takes the distance or angle as the step between members, `last` as the span from the first to the last
+(a 360 degree span shares the circle: no copy lands on the original). `count` counts the original. The tool: Options Bar Linear or
+Radial, Number, Move To, Constrain; a linear array is two clicks through `snap_point`, a radial one is Rotate's two clicks or a typed
+angle, about the selection's middle or Place Centre. The preview draws up to 60 members as ghosts. **Not here:** Revit's "Group and
+Associate": an array's copies are independent elements. When model groups exist (step 4 of the Revit parity plan) the array makes its
+members into one group, with a `group: true` parameter.
+
 ## Background grids
 
 Each plan, section and elevation keeps its canvas grid in its `Graphics::background_grid`, saved with the project, copied

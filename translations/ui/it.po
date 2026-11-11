@@ -215,6 +215,10 @@ msgstr "L'asse di un muro, così un muro disegnato su di esso lo incontra"
 msgid "A {} needs a name."
 msgstr ""
 
+#: crates/ui-egui/src/lib.rs:4507
+msgid "Array"
+msgstr "Serie"
+
 #: crates/core/src/sheet.rs:291
 msgid "AS INDICATED"
 msgstr ""

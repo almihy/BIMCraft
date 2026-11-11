@@ -215,6 +215,10 @@ msgstr "La línea central de un muro, para que un muro dibujado sobre ella se en
 msgid "A {} needs a name."
 msgstr "Cada {} necesita un nombre."
 
+#: crates/ui-egui/src/lib.rs:4507
+msgid "Array"
+msgstr "Matriz"
+
 #: crates/core/src/sheet.rs:291
 msgid "AS INDICATED"
 msgstr ""

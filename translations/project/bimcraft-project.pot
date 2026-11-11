@@ -3,6 +3,10 @@
 msgid ""
 msgstr "Project-Id-Version: BIMCraft\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
+#: crates/core/src/commands.rs:1380
+msgid "Array"
+msgstr ""
+
 #: crates/core/src/sheet.rs:291
 msgid "AS INDICATED"
 msgstr ""

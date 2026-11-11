@@ -214,6 +214,10 @@ msgstr "Osa stěny, aby se stěna na ní kreslená napojila"
 msgid "A {} needs a name."
 msgstr "U položky ({}) chybí název."
 
+#: crates/ui-egui/src/lib.rs:4507
+msgid "Array"
+msgstr "Pole"
+
 #: crates/core/src/sheet.rs:291
 msgid "AS INDICATED"
 msgstr ""

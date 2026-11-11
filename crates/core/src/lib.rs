@@ -6,6 +6,8 @@ pub mod align;
 #[cfg(test)]
 mod align_tests;
 pub mod alignment;
+#[cfg(test)]
+mod array_tests;
 pub mod autosave;
 #[cfg(test)]
 mod autosave_tests;

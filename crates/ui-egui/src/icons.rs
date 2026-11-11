@@ -54,6 +54,7 @@ icon_names! {
     Move,
     Copy,
     Rotate,
+    Array,
     MirrorPick,
     MirrorDraw,
     Align,
@@ -424,6 +425,13 @@ pub fn outlines(icon: Icon, compact: bool) -> Vec<Outline> {
             // A circular arc with a tangential return arrow; no floating arrowhead.
             g.line(&[(1.5, 15.0), (4.0, 12.0), (6.5, 15.0)]);
             g.arc((12.0, 12.0), 8.0, -90.0, 180.0);
+        }
+        Icon::Array => {
+            // A row of three equal squares: the first stands, the others repeat it along a line.
+            g.closed(&[(2.0, 8.0), (8.0, 8.0), (8.0, 16.0), (2.0, 16.0)]);
+            g.closed(&[(9.0, 8.0), (15.0, 8.0), (15.0, 16.0), (9.0, 16.0)]);
+            g.closed(&[(16.0, 8.0), (22.0, 8.0), (22.0, 16.0), (16.0, 16.0)]);
+            g.line(&[(2.0, 20.0), (22.0, 20.0)]);
         }
         Icon::MirrorPick => {
             // Mirrored triangles around a dashed picked axis.
