@@ -424,6 +424,10 @@ impl Session {
                     }
                     m.forget_cad_layers(&unplaced);
                 }
+                // A pin goes with its element.
+                if self.model.has_stale_pins() {
+                    self.model_mut().forget_stale_pins();
+                }
                 // What a command was given by id points at the element's GUID; what it put in the library has an id and a GUID.
                 if verified {
                     self.model_mut().resolve_changed(&before);

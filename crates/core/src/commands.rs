@@ -44,6 +44,7 @@ use crate::{pdf, render, schedule, sheet, snap, stairs, view3d};
 type R = Result<Value, String>;
 
 mod cad_pick;
+mod pin;
 mod site;
 use cad_pick::cad_outlines;
 use site::{building_pad, property_line, site as site_cmd, site_edit, site_figures, site_kinds, toposolid};
@@ -973,6 +974,16 @@ other_files(
         dimension_text,
     ),
     edit(
+        "dimension_text_move",
+        "Move Dimension Text",
+        &[],
+        "{id, segment?, along?, across?, reset?: true} where a dimension's number stands, as dragging the grip on its text does \
+         in Revit: `segment` (counted from 0, default 0) is shifted `along` the dimension line (west to east or south to \
+         north) and `across` it, mm from where the dimension puts it (the shifts replace any earlier). Of aligned and linear \
+         dimensions. `reset` puts it back. Returns {id, segment, along, across}",
+        dimension_text_move,
+    ),
+    edit(
         "dimension_type",
         "Dimension Types",
         &[],
@@ -1364,8 +1375,23 @@ other_files(
         ui_msg!("Move"),
         &["MV"],
         "{ids: [id,…], by: [dx, dy], end?: start|end} moves elements in plan; walls joined to a moved wall stretch to stay \
-         joined, and doors and windows slide along their walls. With `end`, only that end of one wall or one run moves",
+         joined, and doors and windows slide along their walls. With `end`, only that end of one wall, one run or one grid \
+         moves. A pinned element still moves, and the reply names it (`pinned`)",
         move_elements,
+    ),
+    edit(
+        "pin",
+        ui_msg!("Pin"),
+        &["PN"],
+        "{ids: [id,…]} pins elements, as Revit's Pin: held where they are. The window refuses to drag, move or turn a pinned          element and says it is pinned; a command from a script or the agent still moves it, and what it returns says it was          pinned (`pinned`, `note`). Any element can be pinned, grids and levels by habit; a pinned element can still be          deleted. Pins are kept in the file. Returns {pinned, already}: those now pinned, and those that were",
+        pin::pin,
+    ),
+    edit(
+        "unpin",
+        ui_msg!("Unpin"),
+        &["UP"],
+        "{ids: [id,…]} lets pinned elements be moved by the window again. Returns {unpinned, ids}: those that were pinned, and          those asked for",
+        pin::unpin,
     ),
     edit(
         "copy",
@@ -2722,6 +2748,9 @@ pub fn element_json_with(m: &Model, id: Id, rooms: &crate::rooms::Rooms) -> Valu
     let mut extra = Map::new();
     extra.insert("id".into(), json!(id));
     extra.insert("guid".into(), json!(m.guid(id)));
+    if m.is_pinned(id) {
+        extra.insert("pinned".into(), json!(true));
+    }
     // Room Bounding, which a file leaves out while it is on.
     if let Element::Wall(Wall { room_bounding, .. })
     | Element::Column(Column { room_bounding, .. })
@@ -8780,6 +8809,7 @@ fn dimension(s: &mut Session, p: &Value) -> R {
         equal: false,
         locked: Vec::new(),
         alignment: false,
+        text_shifts: Vec::new(),
     };
     let values: Vec<f64> = m.dimension_values(&d).into_iter().map(hundredth).collect();
     let id = s.model_mut().insert(Element::Dimension(d));
@@ -8994,6 +9024,40 @@ fn dimension_constraint(s: &mut Session, p: &Value) -> R {
     }
     s.model_mut().elements.insert(id, Element::Dimension(d.clone()));
     Ok(json!({"id": id, "equal": d.equal, "locked": d.locked.iter().map(|l| l.segment).collect::<Vec<_>>()}))
+}
+
+fn dimension_text_move(s: &mut Session, p: &Value) -> R {
+    use crate::model::TextShift;
+    let c = "dimension_text_move";
+    only(c, p, &["id", "segment", "along", "across", "reset"])?;
+    let id = element_id(c, &s.model, p.get("id").unwrap_or(&Value::Null))?;
+    let Some(Element::Dimension(d)) = s.model.elements.get(id) else {
+        return Err(bad(c, format!("{} {id} isn't a dimension", s.model.elements.get(id).map_or("nothing", |e| e.category()))));
+    };
+    if !matches!(d.kind, DimKind::Aligned | DimKind::Linear) {
+        return Err(bad(c, "an aligned or a linear dimension's numbers move; the others' stand where their kind puts them"));
+    }
+    let mut d = d.clone();
+    let count = s.model.dimension_labels(&d).len();
+    let segment = match num(c, p, "segment")? {
+        None => 0,
+        Some(i) if i.fract() == 0.0 && i >= 0.0 && (i as usize) < count => i as usize,
+        Some(i) => return Err(bad(c, format!("dimension {id} has segments 0 to {}, not {i}", count.saturating_sub(1)))),
+    };
+    let reset = flag(c, p, "reset")?;
+    let (along, across) = if reset {
+        (0.0, 0.0)
+    } else {
+        let range = |key: &str| within(c, p, key, 0.0, -MAX_COORD, MAX_COORD);
+        (range("along")?, range("across")?)
+    };
+    d.text_shifts.retain(|t| t.segment != segment);
+    if along != 0.0 || across != 0.0 {
+        d.text_shifts.push(TextShift { segment, along, across });
+        d.text_shifts.sort_by_key(|t| t.segment);
+    }
+    s.model_mut().elements.insert(id, Element::Dimension(d));
+    Ok(json!({"id": id, "segment": segment, "along": along, "across": across}))
 }
 
 fn dimension_text(s: &mut Session, p: &Value) -> R {
@@ -12378,6 +12442,10 @@ fn relocate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion, end: Option<bool>
             Element::Door(o) | Element::Window(o) if moving_guids.contains(&o.host) => {}
             // Moving one end of a run: the other end stays where it was, as a wall's does.
             mut e => {
+                // A grid's end: the other stays, as a wall's does.
+                if let (Some(at_start), Element::Grid(g), Some(Element::Grid(old))) = (end, &mut e, m.elements.get(id)) {
+                    if at_start { g.end = old.end } else { g.start = old.start }
+                }
                 if let (Some(at_start), Some(me), Some(old)) = (end, e.run_mut(), m.run_of(id)) {
                     if at_start { me.end = old.end } else { me.start = old.start }
                 }
@@ -12959,6 +13027,7 @@ fn alignment_lock(c: &str, s: &mut Session, id: Id, to: Option<Guid>, reference:
         type_name: crate::dims::default_type(&m.dimension_types, DimKind::Aligned).cloned().unwrap_or_default(),
         locked: vec![crate::model::Lock { segment: 0, length: 0.0 }],
         alignment: true,
+        text_shifts: Vec::new(),
         ..Dimension::default()
     };
     Ok(s.model_mut().insert(Element::Dimension(d)))
@@ -13014,11 +13083,13 @@ fn move_elements(s: &mut Session, p: &Value) -> R {
         Some("end") => Some(false),
         Some(other) => return Err(bad(c, format!("`end` is `start` or `end`, not `{other}`"))),
     };
-    if end.is_some() && !matches!(ids.as_slice(), [one] if s.model.wall(*one).is_some() || s.model.run_of(*one).is_some()) {
-        return Err(bad(c, "`end` moves an end of one wall or one run; give `ids` one wall or one run"));
+    let grid = |id: Id| matches!(s.model.elements.get(id), Some(Element::Grid(_)));
+    if end.is_some() && !matches!(ids.as_slice(), [one] if s.model.wall(*one).is_some() || s.model.run_of(*one).is_some() || grid(*one)) {
+        return Err(bad(c, "`end` moves an end of one wall, one run or one grid; give `ids` one of them"));
     }
+    let before = Arc::clone(&s.model);
     relocate(c, s, &ids, &Motion { map: &|q| q + by, slide: Some(by), mirror: false }, end)?;
-    Ok(json!({"moved": ids}))
+    Ok(pin::pinned_note(json!({"moved": ids}), &before, &ids))
 }
 
 fn copy(s: &mut Session, p: &Value) -> R {
@@ -13042,8 +13113,9 @@ fn rotate(s: &mut Session, p: &Value) -> R {
     if flag(c, p, "copy")? {
         return duplicate(c, s, &ids, &mo);
     }
+    let before = Arc::clone(&s.model);
     relocate(c, s, &ids, &mo, None)?;
-    Ok(json!({"rotated": ids}))
+    Ok(pin::pinned_note(json!({"rotated": ids}), &before, &ids))
 }
 
 fn mirror(s: &mut Session, p: &Value) -> R {
@@ -13063,8 +13135,9 @@ fn mirror(s: &mut Session, p: &Value) -> R {
     if flag(c, p, "copy")? {
         return duplicate(c, s, &ids, &mo);
     }
+    let before = Arc::clone(&s.model);
     relocate(c, s, &ids, &mo, None)?;
-    Ok(json!({"mirrored": ids}))
+    Ok(pin::pinned_note(json!({"mirrored": ids}), &before, &ids))
 }
 
 fn corner(s: &mut Session, p: &Value) -> R {
@@ -13598,6 +13671,7 @@ fn purge(s: &mut Session, p: &Value) -> R {
 fn delete(s: &mut Session, p: &Value) -> R {
     #[cfg(test)]
     let mut twin = s.clone();
+    let before = Arc::clone(&s.model);
     let result = delete_indexed(s, p);
     #[cfg(test)]
     {
@@ -13605,7 +13679,11 @@ fn delete(s: &mut Session, p: &Value) -> R {
         assert_eq!(result, expected, "indexed deletion returned a different reply");
         assert_eq!(s.model, twin.model, "indexed deletion left a different model");
     }
-    result
+    // A pinned element goes too, as in Revit; the reply says it was pinned.
+    result.map(|r| {
+        let gone: Vec<Id> = r["deleted"].as_array().map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
+        pin::pinned_note(r, &before, &gone)
+    })
 }
 
 fn delete_indexed(s: &mut Session, p: &Value) -> R {

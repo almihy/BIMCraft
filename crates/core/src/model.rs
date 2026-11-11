@@ -1131,6 +1131,21 @@ pub struct Dimension {
     /// they meet and never on paper.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub alignment: bool,
+    /// Numbers dragged off where they stand (Revit's grip on a dimension's text), by segment.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub text_shifts: Vec<TextShift>,
+}
+
+/// Where segment `segment`'s number stands from where its dimension would put it, mm: `along` the dimension line (the way it
+/// measures, west to east or south to north) and `across` it (to the side its numbers are on).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TextShift {
+    pub segment: usize,
+    #[serde(default)]
+    pub along: f64,
+    #[serde(default)]
+    pub across: f64,
 }
 
 /// A dimension in a 3D view, as Revit's aligned dimension there: the distance between two points of the model, or square
@@ -1197,6 +1212,11 @@ impl SegmentText {
 }
 
 impl Dimension {
+    /// Segment `i`'s number's shift off its place: (along the line, across it), mm.
+    pub fn text_shift(&self, i: usize) -> (f64, f64) {
+        self.text_shifts.iter().find(|t| t.segment == i).map_or((0.0, 0.0), |t| (t.along, t.across))
+    }
+
     /// Segment `i`'s text `field` (prefix, suffix, above, below or replace): its own, else the dimension's.
     pub fn text(&self, i: usize, field: &str) -> &str {
         let own =
@@ -2970,6 +2990,10 @@ pub struct Model {
     /// opens the rest, so it took no `FORMAT` step.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub georeference: Option<Georeference>,
+    /// The elements that are pinned (Revit's Pin: held where they are), by GUID. A file from before leaves it out, and an
+    /// older BIMCraft opens the rest, so it took no `FORMAT` step.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub pinned: BTreeSet<Guid>,
     pub elements: Elements,
     /// The ids and GUIDs of the library: its types, materials, pictures, families, parameters, view filters and
     /// templates, phases, phase filters and design options.
@@ -3070,6 +3094,7 @@ impl Model {
             distribution_systems: crate::electrical::distribution_systems(),
             wire_types: crate::electrical::wire_types(),
             georeference: None,
+            pinned: BTreeSet::new(),
             elements: Elements::new(),
             library: crate::library::Library::default(),
             loaded: BTreeMap::new(),
@@ -5752,6 +5777,28 @@ impl Model {
             .collect()
     }
 
+    /// Where each number of an aligned or linear dimension of the continuous or ordinate string stands on its line, before
+    /// any shift: `(segment, point)`, the points the grips on its numbers sit at. None for the other kinds, whose numbers stand
+    /// by the view's scale.
+    pub fn dimension_text_spots(&self, d: &Dimension) -> Vec<(usize, P2)> {
+        if !matches!(d.kind, DimKind::Aligned | DimKind::Linear) {
+            return Vec::new();
+        }
+        let (n, cross) = self.crossings(d);
+        let on = |s: f64| d.at + n * s;
+        match self.dimension_type(d).string {
+            crate::dims::DimString::Continuous => cross.windows(2).enumerate().map(|(i, w)| (i, on((w[0].0 + w[1].0) / 2.0))).collect(),
+            crate::dims::DimString::Ordinate => cross.iter().enumerate().map(|(i, c)| (i, on(c.0))).collect(),
+            crate::dims::DimString::Baseline => Vec::new(),
+        }
+    }
+
+    /// The direction dimension `d` measures along and the one its numbers stand off its line toward, as its grips use them.
+    pub fn dimension_axes(&self, d: &Dimension) -> Option<(P2, P2)> {
+        let (n, cross) = self.crossings(d);
+        (!cross.is_empty()).then(|| (n, n.perp()))
+    }
+
     /// What number `i` of dimension `d` has over and under it.
     pub fn dimension_extra(&self, d: &Dimension, i: usize) -> (String, String) {
         (d.text(i, "above").to_string(), d.text(i, "below").to_string())
@@ -7542,6 +7589,7 @@ impl Model {
             distribution_systems,
             wire_types,
             georeference,
+            pinned,
             elements: _,
             library,
             loaded,
@@ -7584,6 +7632,7 @@ impl Model {
             && *distribution_systems == o.distribution_systems
             && *wire_types == o.wire_types
             && *georeference == o.georeference
+            && *pinned == o.pinned
             && *library == o.library
             && loaded.len() == o.loaded.len()
             && loaded.iter().zip(&o.loaded).all(|((a, x), (b, y))| a == b && Arc::ptr_eq(x, y))

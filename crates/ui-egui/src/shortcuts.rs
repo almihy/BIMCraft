@@ -93,6 +93,8 @@ pub const ACTIONS: &[&str] = &[
     "Shaded",
     "Project Units",
     "Delete",
+    "Pin",
+    "Unpin",
     "Show Mass",
     "Mass",
     "Toposolid",
@@ -352,6 +354,8 @@ impl BimApp {
                 self.open_units = true;
             }
             "Delete" => self.delete(),
+            "Pin" => self.pin_selection(true),
+            "Unpin" => self.pin_selection(false),
             // Revit's snap overrides, for the next point picked.
             "Snap to Endpoints" => self.snap_once = Some(Once::Only(Snap::Endpoint)),
             "Snap to Midpoints" => self.snap_once = Some(Once::Only(Snap::Midpoint)),

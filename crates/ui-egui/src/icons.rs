@@ -46,6 +46,8 @@ icon_names! {
     Properties,
     TypeProperties,
     Delete,
+    Pin,
+    Unpin,
     Filter,
     Close,
     Plan,
@@ -382,6 +384,14 @@ pub fn outlines(icon: Icon, compact: bool) -> Vec<Outline> {
                 g.line(&[(6.0, 6.0), (7.0, 21.0), (17.0, 21.0), (18.0, 6.0)]);
                 g.line(&[(10.0, 10.0), (10.0, 17.0)]);
                 g.line(&[(14.0, 10.0), (14.0, 17.0)]);
+            }
+        }
+        Icon::Pin | Icon::Unpin => {
+            // A push pin: its head, and its needle. Unpin crosses it out.
+            g.closed(&[(9.0, 3.0), (15.0, 3.0), (15.0, 9.0), (18.0, 13.0), (6.0, 13.0), (9.0, 9.0)]);
+            g.line(&[(12.0, 13.0), (12.0, 21.0)]);
+            if icon == Icon::Unpin {
+                g.line(&[(3.5, 3.5), (20.5, 20.5)]);
             }
         }
         Icon::Filter => {

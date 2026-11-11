@@ -1,0 +1,180 @@
+//! Pin and Unpin, dragging with snaps, Ctrl and Shift, and the grips on grids and dimensions, driven with real clicks and drags.
+
+use super::*;
+
+/// A drag on the plan between model points holding `mods` (Ctrl: copy; Shift: square), in steps, as a hand makes it.
+fn drag_holding(h: &mut Harness<BimApp>, from: P2, to: P2, mods: Modifiers) {
+    let (a, b) = (h.state().screen(from), h.state().screen(to));
+    h.event(Event::ModifiersChanged(mods));
+    h.hover_at(a);
+    h.run();
+    h.event(Event::PointerButton { pos: a, button: PointerButton::Primary, pressed: true, modifiers: mods });
+    h.run();
+    for t in [0.25, 0.5, 0.75, 1.0] {
+        h.hover_at(a + (b - a) * t);
+        h.run();
+    }
+    h.event(Event::PointerButton { pos: b, button: PointerButton::Primary, pressed: false, modifiers: mods });
+    h.run();
+    h.event(Event::ModifiersChanged(Modifiers::NONE));
+    h.run();
+}
+
+const ONE: &str = "column {\"at\": [2000, 2000]}";
+
+fn at(h: &Harness<BimApp>, id: Id) -> P2 {
+    let v = field(h, id, "at");
+    P2(v[0].as_f64().unwrap(), v[1].as_f64().unwrap())
+}
+
+#[test]
+fn a_dragged_element_snaps_as_the_move_tool_does() {
+    let mut h = app(&format!("{BOX}\n{ONE}"));
+    let col = ids(&h, "column")[0];
+    // Near the south wall's middle (4000, 0), a few pixels off it: the middle, to the millimetre, not the nearest 10.
+    drag(&mut h, P2(2000.0, 2000.0), P2(3990.0, 12.0));
+    assert_eq!(at(&h, col), P2(4000.0, 0.0), "{:?}", h.state().status);
+    // Far from anything it keeps to 10 mm, as before.
+    drag(&mut h, P2(4000.0, 0.0), P2(5003.0, 2103.0));
+    let p = at(&h, col);
+    assert!((p.0 - 5000.0).abs() <= 10.0 && (p.1 - 2100.0).abs() <= 10.0, "{p:?}");
+    assert_eq!((p.0 / 10.0).fract(), 0.0, "{p:?}");
+}
+
+#[test]
+fn a_dragged_element_does_not_snap_to_its_own_points() {
+    let mut h = app(ONE);
+    let col = ids(&h, "column")[0];
+    // Grabbed off its centre and moved a little: it moves by the hand's distance, not onto its own centre.
+    drag(&mut h, P2(2100.0, 2100.0), P2(2600.0, 2100.0));
+    assert_eq!(at(&h, col), P2(2500.0, 2000.0));
+}
+
+#[test]
+fn ctrl_drag_copies_and_selects_the_copy() {
+    let mut h = app(ONE);
+    let col = ids(&h, "column")[0];
+    drag_holding(&mut h, P2(2000.0, 2000.0), P2(5000.0, 2000.0), Modifiers::COMMAND);
+    let cols = ids(&h, "column");
+    assert_eq!(cols.len(), 2, "{:?}", h.state().status);
+    assert_eq!(at(&h, col), P2(2000.0, 2000.0), "the original stays");
+    let copy = cols.into_iter().find(|c| *c != col).unwrap();
+    assert_eq!(at(&h, copy), P2(5000.0, 2000.0));
+    assert_eq!(h.state().selection, [copy], "the copy is selected");
+    assert_eq!(h.state().session.history().last(), Some(&"Copy"));
+}
+
+#[test]
+fn shift_drag_keeps_the_move_square() {
+    let mut h = app(ONE);
+    let col = ids(&h, "column")[0];
+    drag_holding(&mut h, P2(2000.0, 2000.0), P2(5000.0, 2700.0), Modifiers::SHIFT);
+    assert_eq!(at(&h, col), P2(5000.0, 2000.0), "along x only: {:?}", h.state().status);
+    drag_holding(&mut h, P2(5000.0, 2000.0), P2(5600.0, 4000.0), Modifiers::SHIFT);
+    assert_eq!(at(&h, col), P2(5000.0, 4000.0), "along y only");
+}
+
+#[test]
+fn a_pinned_element_refuses_a_drag_and_the_tools_and_says_so() {
+    let mut h = app(ONE);
+    let col = ids(&h, "column")[0];
+    click(&mut h, P2(2000.0, 2000.0));
+    shortcut(&mut h, "PN");
+    assert!(h.state().session.model.is_pinned(col), "{:?}", h.state().status);
+    // A drag moves nothing and the status bar says it is pinned.
+    let before = Arc::clone(&h.state().session.model);
+    drag(&mut h, P2(2000.0, 2000.0), P2(3000.0, 2000.0));
+    assert!(Arc::ptr_eq(&before, &h.state().session.model), "no command ran");
+    assert!(h.state().status.error && h.state().status.text.contains("pinned"), "{:?}", h.state().status);
+    assert_eq!(at(&h, col), P2(2000.0, 2000.0));
+    // Move and Rotate refuse to begin.
+    for letters in ["MV", "RO"] {
+        h.state_mut().status = Status::default();
+        shortcut(&mut h, letters);
+        assert_eq!(h.state().tool, Tool::Modify, "{letters}");
+        assert!(h.state().status.text.contains("pinned"), "{letters}: {:?}", h.state().status);
+    }
+    // Copy is no move: it goes on.
+    shortcut(&mut h, "CO");
+    assert!(matches!(h.state().tool, Tool::Copy(_)));
+    key(&mut h, Key::Escape);
+    // A command from a script moves it all the same, and says so.
+    let r = h.state_mut().session.execute("move", &json!({"ids": [col], "by": [100, 0]})).unwrap();
+    assert_eq!(r["pinned"], json!([col]));
+}
+
+#[test]
+fn the_pin_on_a_selected_element_unpins_it_and_the_drag_then_moves_it() {
+    let mut h = app(ONE);
+    let col = ids(&h, "column")[0];
+    click(&mut h, P2(2000.0, 2000.0));
+    press(&mut h, "Pin");
+    assert!(h.state().session.model.is_pinned(col));
+    h.run();
+    press(&mut h, &format!("Unpin element {col}"));
+    assert!(!h.state().session.model.is_pinned(col), "the pin icon unpinned it");
+    drag(&mut h, P2(2000.0, 2000.0), P2(3000.0, 2000.0));
+    assert_eq!(at(&h, col), P2(3000.0, 2000.0));
+    // Pin and Unpin on the Modify panel, and by their shortcuts.
+    shortcut(&mut h, "PN");
+    assert!(h.state().session.model.is_pinned(col));
+    shortcut(&mut h, "UP");
+    assert!(!h.state().session.model.is_pinned(col));
+    press(&mut h, "Pin");
+    press(&mut h, "Unpin");
+    assert!(!h.state().session.model.is_pinned(col));
+}
+
+#[test]
+fn a_pin_shows_only_while_the_element_is_selected() {
+    let mut h = app(ONE);
+    let col = ids(&h, "column")[0];
+    h.state_mut().session.execute("pin", &json!({"ids": [col]})).unwrap();
+    h.run();
+    assert!(h.query_by_label(&format!("Unpin element {col}")).is_none(), "nothing selected, no pin icon");
+    click(&mut h, P2(2000.0, 2000.0));
+    assert!(h.query_by_label(&format!("Unpin element {col}")).is_some());
+}
+
+#[test]
+fn a_grids_end_is_a_grip_that_lengthens_it() {
+    let mut h = app(&format!("{BOX}\ngrid {{\"start\": [-2000, -1000], \"end\": [-2000, 7000]}}"));
+    let grid = ids(&h, "grid")[0];
+    click(&mut h, P2(-2000.0, 3000.0));
+    assert_eq!(h.state().selection, [grid]);
+    drag(&mut h, P2(-2000.0, 7000.0), P2(-2000.0, 9000.0));
+    let g = &h.state().session.model;
+    let Some(Element::Grid(g)) = g.elements.get(grid) else { panic!("a grid") };
+    assert_eq!(g.start, P2(-2000.0, -1000.0), "the other end stays");
+    assert!(g.end.0 == -2000.0 && (g.end.1 - 9000.0).abs() <= 20.0, "{:?}", g.end);
+    // The start end too.
+    drag(&mut h, P2(-2000.0, -1000.0), P2(-2000.0, -2500.0));
+    let Some(Element::Grid(g)) = h.state().session.model.elements.get(grid) else { panic!("a grid") };
+    assert!((g.start.1 + 2500.0).abs() <= 20.0, "{:?}", g.start);
+    // Pinned, it stays.
+    shortcut(&mut h, "PN");
+    let was = Arc::clone(&h.state().session.model);
+    drag(&mut h, P2(-2000.0, 9000.0), P2(-2000.0, 9500.0));
+    assert!(Arc::ptr_eq(&was, &h.state().session.model), "a pinned grid's end does not move");
+    assert!(h.state().status.text.contains("pinned"));
+}
+
+#[test]
+fn a_dimensions_line_and_text_have_grips() {
+    let mut h = app(&format!("{BOX}\ndimension {{\"refs\": [[0, 0], [8000, 0]], \"at\": [0, -1500]}}"));
+    let dim = ids(&h, "dimension")[0];
+    click(&mut h, P2(4000.0, -1500.0));
+    assert_eq!(h.state().selection, [dim]);
+    // The line's grip drags the line square to itself: the offset changes, along the line it does not.
+    let line = h.get_by_label(&format!("Dimension line of element {dim}")).rect().center();
+    drag_screen(&mut h, line, line + vec2(0.0, 40.0), PointerButton::Primary);
+    let now = field(&h, dim, "at");
+    assert_eq!(now[0], json!(0.0), "{now}");
+    assert!(now[1].as_f64().unwrap() < -1500.0, "dragged down the screen, south: {now}");
+    // The number's grip moves the number.
+    let text = h.get_by_label(&format!("Dimension text 1 of element {dim}")).rect().center();
+    drag_screen(&mut h, text, text + vec2(40.0, 0.0), PointerButton::Primary);
+    let shifts = field(&h, dim, "text_shifts");
+    assert!(shifts[0]["along"].as_f64().unwrap() > 0.0, "{shifts}");
+    assert_eq!(h.state().session.history().last(), Some(&"Move Dimension Text"));
+}

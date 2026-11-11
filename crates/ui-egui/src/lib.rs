@@ -18,6 +18,7 @@ mod clouds;
 mod context;
 pub mod control;
 mod dialog;
+mod dimgrips;
 mod dimtypes;
 mod display;
 mod dock;
@@ -47,6 +48,7 @@ mod objectstyles;
 mod orbit;
 mod paper;
 mod phasing;
+mod pin;
 #[cfg(feature = "plugins")]
 mod plugins;
 mod popup;
@@ -2304,6 +2306,14 @@ impl BimApp {
                 Some("room_separator") => Tool::RoomSeparator(None),
                 Some("level") => Tool::Level,
                 Some("grid") => Tool::Grid(None),
+                Some("pin") => {
+                    self.pin_selection(true);
+                    return true;
+                }
+                Some("unpin") => {
+                    self.pin_selection(false);
+                    return true;
+                }
                 Some("move") => Tool::Move(None),
                 Some("copy") => Tool::Copy(None),
                 Some("rotate") => Tool::Rotate { centre: P2(0.0, 0.0), start: None, place: false },
@@ -2583,6 +2593,16 @@ impl BimApp {
         );
         if edits && self.selection.is_empty() {
             self.status = Status { text: t("select what to move, copy, rotate or mirror first").into(), error: true };
+            return;
+        }
+        // A pinned element stays where it is: Unpin (UP) frees it.
+        let moves = match tool {
+            Tool::Move(_) => true,
+            Tool::Rotate { .. } => !self.rotate_copy,
+            Tool::Mirror { .. } => !self.mirror_copy,
+            _ => false,
+        };
+        if moves && self.refuse_pinned() {
             return;
         }
         if tool == Tool::Attach && self.selected_walls().is_empty() {
@@ -4606,6 +4626,17 @@ impl BimApp {
                         }
                     });
                 }
+                // Revit's Pin and Unpin, with the other small buttons of the Modify panel.
+                ui.horizontal(|ui| {
+                    let tip = msg!("Pin (PN): hold the selection where it is; it can't be dragged, moved or turned until it is unpinned");
+                    if ui.add_enabled_ui(some, |ui| small_button(ui, Icon::Pin, "Pin", false, tip)).inner.clicked() {
+                        self.pin_selection(true);
+                    }
+                    let tip = msg!("Unpin (UP): let the selected elements that are pinned be moved again");
+                    if ui.add_enabled_ui(some, |ui| small_button(ui, Icon::Unpin, "Unpin", false, tip)).inner.clicked() {
+                        self.pin_selection(false);
+                    }
+                });
             });
         });
         panel(ui, "Phasing", |ui| {

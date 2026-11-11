@@ -264,7 +264,7 @@ impl<'a> Scene<'a> {
 
     /// What `level`'s plan has within `window` mm of `p`, but for what `look` hides: a cheap look at
     /// each element's extent first, so a plan of thousands of walls costs a few microseconds a wall.
-    fn of(m: &'a Model, level: Id, p: P2, window: f64, look: &'a Look, skip: Option<Id>) -> Scene<'a> {
+    fn of(m: &'a Model, level: Id, p: P2, window: f64, look: &'a Look, skip: &[Id]) -> Scene<'a> {
         let mut s = Scene {
             points: Vec::new(),
             lines: Vec::new(),
@@ -286,7 +286,7 @@ impl<'a> Scene<'a> {
             });
             p.0 >= lo.0 - window && p.0 <= hi.0 + window && p.1 >= lo.1 - window && p.1 <= hi.1 + window
         };
-        for (&id, e) in m.elements.iter().filter(|(id, _)| look.shows(**id) && skip != Some(**id)) {
+        for (&id, e) in m.elements.iter().filter(|(id, _)| look.shows(**id) && !skip.contains(id)) {
             let of = Some(id);
             let ring = |pts: &[P2]| if near(pts) { pts.iter().map(|q| (*q, Kind::Endpoint, of)).collect::<Vec<_>>() } else { Vec::new() };
             match e {
@@ -662,8 +662,14 @@ fn rank(k: Kind) -> u8 {
 /// point at an angle, a wall's centre line, else the nearest 10 mm. `square` keeps the step from
 /// the last of `from` horizontal or vertical.
 pub fn snap(m: &Model, level: Id, p: P2, reach: Reach, from: &[P2], square: bool, o: &Snaps) -> Found {
+    snap_skipping(m, level, p, reach, from, square, o, &[])
+}
+
+/// [`snap`], but the elements `skip` names attract nothing: what is dragged must not snap to itself.
+#[allow(clippy::too_many_arguments)]
+pub fn snap_skipping(m: &Model, level: Id, p: P2, reach: Reach, from: &[P2], square: bool, o: &Snaps, skip: &[Id]) -> Found {
     let look = Look::of(m, level);
-    let scene = Scene::of(m, level, p, reach.point.max(reach.line) + MAX_HALF_THICKNESS, &look, None);
+    let scene = Scene::of(m, level, p, reach.point.max(reach.line) + MAX_HALF_THICKNESS, &look, skip);
     solve(scene, p, reach, from, square, o, false)
 }
 
@@ -686,7 +692,7 @@ thread_local! {
 pub fn in_sketch(m: &Model, sk: Sketch<'_>, p: P2, reach: Reach, from: &[P2], square: bool, o: &Snaps) -> Found {
     let look = Look::of(m, sk.view);
     let window = reach.point.max(reach.line) + MAX_HALF_THICKNESS;
-    let mut scene = Scene::of(m, sk.view, p, window, &look, sk.editing);
+    let mut scene = Scene::of(m, sk.view, p, window, &look, sk.editing.as_slice());
     // The edges of what the plan builds, as the plan draws it: a section has none of them.
     if m.plan_level(sk.view).is_some() {
         let level = m.guid(m.plan_level(sk.view).unwrap_or(sk.view));

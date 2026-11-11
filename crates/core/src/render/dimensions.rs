@@ -188,23 +188,28 @@ fn aligned(d: &mut Drawing, m: &Model, dim: &Dimension, ink: &Ink) {
             ink.tick(d, on(s, lw), u, &toward);
         }
     }
+    // A number dragged off its place stands where it was dragged to.
+    let shifted = |i: usize, at: P2| {
+        let (along, across) = dim.text_shift(i);
+        at + n * along + u * across
+    };
     match ink.t.string {
         DimString::Continuous => {
             for (i, (pair, label)) in cross.windows(2).zip(&labels).enumerate() {
                 let [(s0, _), (s1, _)] = pair else { continue };
-                ink.label(d, &m.dimension_extra(dim, i), label, on((s0 + s1) / 2.0, 0.0), n, u);
+                ink.label(d, &m.dimension_extra(dim, i), label, shifted(i, on((s0 + s1) / 2.0, 0.0)), n, u);
             }
         }
         DimString::Baseline => {
             for (k, (&(w, i, j), label)) in lines.iter().zip(&labels).enumerate() {
                 let (Some(&(s0, _)), Some(&(s1, _))) = (cross.get(i), cross.get(j)) else { continue };
                 let prev = cross.get(j.saturating_sub(1)).map_or(s0, |c| c.0);
-                ink.label(d, &m.dimension_extra(dim, k), label, on((prev + s1) / 2.0, w), n, u);
+                ink.label(d, &m.dimension_extra(dim, k), label, shifted(k, on((prev + s1) / 2.0, w)), n, u);
             }
         }
         DimString::Ordinate => {
             for (i, (&(s, _), label)) in cross.iter().zip(&labels).enumerate() {
-                ink.label(d, &m.dimension_extra(dim, i), label, on(s, 0.0), n, u);
+                ink.label(d, &m.dimension_extra(dim, i), label, shifted(i, on(s, 0.0)), n, u);
             }
         }
     }

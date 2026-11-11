@@ -108,6 +108,8 @@ mod reinforce_tests;
 pub mod render;
 pub mod reservoir;
 #[cfg(test)]
+mod pin_tests;
+#[cfg(test)]
 mod roof_slopes_tests;
 #[cfg(test)]
 mod room_area_tests;

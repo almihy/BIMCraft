@@ -396,6 +396,11 @@ impl Canvas {
         self.cursor.is_some()
     }
 
+    /// Whether a drag of the selection is under way.
+    pub(crate) fn dragging(&self) -> bool {
+        self.drag.is_some()
+    }
+
     /// Where the primary button went down, if it came up this frame within [`QUICK`] of that: a
     /// click, whatever the hand did between, and no drag it began is to be finished.
     pub(crate) fn quick_press(&self) -> Option<Pos2> {
@@ -1305,6 +1310,12 @@ impl BimApp {
     /// nearest 10 mm, as Manage > Snaps says. `square` keeps the step from the last horizontal or
     /// vertical.
     pub(crate) fn snap(&self, m: &Model, level: Id, v: &View, at: (f32, f32), from: &[P2], square: bool) -> Found {
+        self.snap_skipping(m, level, v, at, from, square, &[])
+    }
+
+    /// [`snap`](Self::snap), but what `skip` names attracts nothing: what is dragged does not snap to itself.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn snap_skipping(&self, m: &Model, level: Id, v: &View, at: (f32, f32), from: &[P2], square: bool, skip: &[Id]) -> Found {
         let reach = Reach { point: SNAP / v.scale, line: f64::from(PICK) / v.scale };
         let snaps = self.snaps_now();
         // A camera's mark is a symbol, not a set of snap points: anywhere on it lands on its eye.
@@ -1322,7 +1333,7 @@ impl BimApp {
                 };
                 snap::in_sketch(m, snap::Sketch { view, lines: &sk.lines, editing }, v.mm(at), reach, from, square, &snaps)
             }
-            None => snap::snap(m, view, v.mm(at), reach, from, square, &snaps),
+            None => snap::snap_skipping(m, view, v.mm(at), reach, from, square, &snaps, skip),
         };
         if matches!(found.kind, Kind::Free | Kind::Angle)
             && !square
@@ -1702,7 +1713,7 @@ impl BimApp {
             self.canvas.drag = Some(match d.pick(o, PICK) {
                 Some(id) => {
                     self.grab(id);
-                    Drag::Move(view.mm(o))
+                    Drag::Move(self.drag_base(&model, level, &view, o, mods))
                 }
                 None => Drag::Box(o),
             });
@@ -1713,12 +1724,7 @@ impl BimApp {
             && self.finish_drag()
         {
             match drag {
-                Drag::Move(from) => {
-                    let by = self.dragged(&model, &view, from, view.mm(q));
-                    if by.length() > 0.0 {
-                        self.run("move", json!({"ids": self.selection, "by": point(by)}));
-                    }
-                }
+                Drag::Move(from) => self.drop_selection(&model, level, &view, from, q, click_modifiers(ui)),
                 Drag::Box(from) => self.pick_up(d.in_box(from, q, q.0 < from.0), click_modifiers(ui)),
             }
         }
@@ -1840,9 +1846,19 @@ impl BimApp {
             }
         }
         match (self.canvas.drag, local) {
+            // A pinned element stays: nothing follows the cursor.
+            (Some(Drag::Move(_)), Some(_)) if !self.pinned_selection().is_empty() => {}
             (Some(Drag::Move(from)), Some(q)) => {
-                let (a, b) = (view.px(from), view.px(from + self.dragged(&model, &view, from, view.mm(q))));
+                let (by, found) = self.dragged(&model, level, &view, from, q, mods);
+                let (a, b) = (view.px(from), view.px(from + by));
                 ghost(&p, d.place, &d, &self.selection, &|q| q + vec2(b.0 - a.0, b.1 - a.1));
+                let scene = Scene { p: &p, m: &model, d: &d, place: d.place, level, key, v: &view };
+                if let Some(f) = found.filter(|f| !matches!(f.kind, Kind::Free | Kind::Angle)) {
+                    self.show_snap(&scene, &f);
+                }
+                if mods.command {
+                    tag(&p, pos(rect.min, q) + vec2(14.0, 18.0), Align2::LEFT_TOP, t("Copy"));
+                }
             }
             (Some(Drag::Box(from)), Some(q)) => p.extend(box_shapes(rect, from, q)),
             _ => {}
@@ -1872,6 +1888,8 @@ impl BimApp {
             }
         }
         self.grip_overlay(ui, &model, &view, rect, level, &d, d.place);
+        self.dimension_grips(ui, &model, &view, rect);
+        self.pin_overlay(ui, &model, &view, rect);
         self.site_grip_overlay(ui, &model, &view, rect, level);
         // Where the cursor snaps is worked out only while a grip is held to it.
         let cursor = self
@@ -2077,16 +2095,52 @@ impl BimApp {
         p
     }
 
-    /// How far dragging the selection from `from` to `to` moves it: a lone door or window slides to the middle of its
-    /// stretch of wall when it comes within `SNAP` px of it.
-    fn dragged(&self, m: &Model, v: &View, from: P2, to: P2) -> P2 {
-        let by = round(to - from);
-        let &[id] = self.selection.as_slice() else { return by };
-        let Some(Element::Door(o) | Element::Window(o)) = m.elements.get(id) else { return by };
-        let Some(w) = m.wall(o.host).filter(|w| w.arc == 0.0) else { return by };
+    /// Where a drag of the selection starts from: the model point pressed, or the point of the plan's geometry it lies at (the
+    /// way a Move's base point snaps), so that moving that point onto another lands them together.
+    fn drag_base(&self, m: &Model, level: Id, v: &View, at: (f32, f32), mods: Modifiers) -> P2 {
+        let skip: &[Id] = if mods.command { &[] } else { &self.selection };
+        let f = self.snap_skipping(m, level, v, at, &[], false, skip);
+        if matches!(f.kind, Kind::Free | Kind::Angle) { v.mm(at) } else { f.at }
+    }
+
+    /// How far dragging the selection from `base` to pixel `q` moves it, and what the cursor snapped to: as the Move tool,
+    /// the snaps of the plan (what is dragged is no snap of its own; with Ctrl it is a copy, and stays to snap to), Shift
+    /// keeping it square, else the nearest 10 mm. A lone door or window slides to the middle of its stretch of wall when it
+    /// comes within `SNAP` px of it.
+    fn dragged(&self, m: &Model, level: Id, v: &View, base: P2, q: (f32, f32), mods: Modifiers) -> (P2, Option<Found>) {
+        let skip: &[Id] = if mods.command { &[] } else { &self.selection };
+        let f = self.snap_skipping(m, level, v, q, &[base], mods.shift, skip);
+        let free = matches!(f.kind, Kind::Free | Kind::Angle);
+        let to = if free && !mods.shift { v.mm(q) } else { f.at };
+        let by = if free { round(to - base) } else { micron(to - base) };
+        let &[id] = self.selection.as_slice() else { return (by, Some(f)) };
+        let Some(Element::Door(o) | Element::Window(o)) = m.elements.get(id) else { return (by, Some(f)) };
+        let Some(w) = m.wall(o.host).filter(|w| w.arc == 0.0) else { return (by, Some(f)) };
+        if !free {
+            return (by, Some(f));
+        }
         let u = (w.end - w.start).unit();
         let moved = bimcraft_core::model::Opening { offset: o.offset + by.dot(u), ..o.clone() };
-        m.centred(&moved, SNAP / v.scale).map_or(by, |middle| by + u * (middle - moved.offset))
+        (m.centred(&moved, SNAP / v.scale).map_or(by, |middle| by + u * (middle - moved.offset)), Some(f))
+    }
+
+    /// A drag of the selection let go at pixel `q`: moved by what [`dragged`](Self::dragged) says, or copied with Ctrl, the copy
+    /// selected, as Revit's. A pinned element stays where it is, and the status bar says why.
+    fn drop_selection(&mut self, m: &Model, level: Id, v: &View, from: P2, q: (f32, f32), mods: Modifiers) {
+        if self.refuse_pinned() {
+            return;
+        }
+        let (by, _) = self.dragged(m, level, v, from, q, mods);
+        if by.length() <= 0.0 {
+            return;
+        }
+        if mods.command {
+            if let Some(made) = self.run("copy", json!({"ids": self.selection, "by": point(by)})) {
+                self.selection = made["ids"].as_array().map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
+            }
+        } else {
+            self.run("move", json!({"ids": self.selection, "by": point(by)}));
+        }
     }
 
     fn click(&mut self, m: &Model, (level, key): (Id, Id), v: &View, at: (f32, f32), hovered: Option<Id>, mods: Modifiers) {
@@ -2858,6 +2912,10 @@ impl BimApp {
     /// Rotate the selection about `centre` by `angle` degrees, counter-clockwise; with Copy, a
     /// turned copy.
     pub(crate) fn turn(&mut self, centre: P2, angle: f64) {
+        if !self.rotate_copy && self.refuse_pinned() {
+            self.tool = Tool::Modify;
+            return;
+        }
         let p = json!({"ids": self.selection, "about": point(centre), "angle": angle, "copy": self.rotate_copy});
         let made = self.run("rotate", p);
         self.edited(made, self.rotate_copy);
@@ -2866,6 +2924,10 @@ impl BimApp {
     /// Mirror the selection across the line through `a` and `b`; with Copy (Revit's default), a
     /// mirrored copy.
     fn reflect(&mut self, (a, b): (P2, P2)) {
+        if !self.mirror_copy && self.refuse_pinned() {
+            self.tool = Tool::Modify;
+            return;
+        }
         if a.dist(b) > TOL {
             let made = self.run("mirror", json!({"ids": self.selection, "axis": [point(a), point(b)], "copy": self.mirror_copy}));
             self.edited(made, self.mirror_copy);
@@ -3020,6 +3082,10 @@ impl BimApp {
     /// is selected afterwards; with Multiple, the tool goes on copying from the same base point.
     fn shift_selection(&mut self, from: P2, to: P2) {
         let copy = matches!(self.tool, Tool::Copy(_));
+        if !copy && self.refuse_pinned() {
+            self.tool = Tool::Modify;
+            return;
+        }
         let again = if copy { Tool::Copy(Some(from)) } else { Tool::Move(Some(from)) };
         if from.dist(to) <= TOL {
             self.tool = again;
@@ -3122,7 +3188,9 @@ impl BimApp {
     fn gripped(&self) -> Option<Id> {
         let m = &self.session.model;
         match (self.selection.as_slice(), &self.tool) {
-            (&[id], Tool::Modify) if m.wall(id).is_some() || m.run_of(id).is_some() => Some(id),
+            (&[id], Tool::Modify) if m.wall(id).is_some() || m.run_of(id).is_some() || matches!(m.elements.get(id), Some(Element::Grid(_))) => {
+                Some(id)
+            }
             _ => None,
         }
     }
@@ -3131,6 +3199,7 @@ impl BimApp {
     fn grip_ends(m: &Model, id: Id) -> Option<(P2, P2)> {
         match m.elements.get(id)? {
             Element::Wall(w) => Some((w.start, w.end)),
+            Element::Grid(g) => Some((g.start, g.end)),
             e => Some((e.run()?.start, e.run()?.end)),
         }
     }
@@ -3187,7 +3256,7 @@ impl BimApp {
                 let (_, to) = self.grip_target(&m, level, view, (ends, start), (q.x - rect.min.x, q.y - rect.min.y), mods);
                 self.snap_once = None;
                 let by = to - if start { ends.0 } else { ends.1 };
-                if by.length() > 1e-6 {
+                if by.length() > 1e-6 && !self.refuse_pinned() {
                     self.run("move", json!({"ids": [id], "by": point(by), "end": if start { "start" } else { "end" }}));
                 }
             }
@@ -3224,6 +3293,8 @@ impl BimApp {
                     let (left, right) = (axis.points(0.0, axis.length(), ext), axis.points(0.0, axis.length(), int));
                     left.into_iter().chain(right.into_iter().rev()).collect()
                 }
+                // A grid is a line.
+                None if matches!(m.elements.get(id), Some(Element::Grid(_))) => vec![moved_ends.0, moved_ends.1],
                 // A run's footprint across its axis, in the state it would take.
                 None => m
                     .elements

@@ -169,6 +169,16 @@ Enter places the point along it; a point lined up with a wall says which: "Lines
 grips (`grip_drag`): a drag runs `move` with `end`, Ctrl keeps the length; the angle beside each end runs `rotate` about it. A
 wall joined at the end that moves keeps its joint, which slides along the wall it meets, so lengths change. At a corner where
 a strip footing ends with it and another element also ends there, the footing's end goes with the wall's, as another wall's would.
+A selected grid's ends are grips too (`move` with `end`).
+
+A drag of the selection (`Canvas::drag`, `Drag::Move`) snaps as the Move tool does: `BimApp::drag_base` snaps the point pressed (the
+way a base point snaps), `BimApp::dragged` snaps the cursor from it with `snap_skipping` (what is dragged attracts nothing; with Ctrl it is
+a copy and does), Shift keeps it square, and a point with nothing to snap to is rounded to 10 mm. On release `drop_selection` runs `move`,
+or `copy` with Ctrl (the copy is selected). Pin (PN) and Unpin (UP) are commands (`pin`, `unpin`; the model keeps `pinned` by GUID, `pin.rs` here
+draws the pin on a selected pinned element, whose click unpins): a drag, a grip, Move, Rotate or Mirror without Copy of a pinned element runs
+nothing and the status bar says it is pinned (`BimApp::refuse_pinned`); the agent's commands still run and say what was pinned.
+`dimgrips.rs`: the grips of a selected aligned or linear dimension, one on its line (`move`, square to the line) and one on each number
+(`dimension_text_move`; the numbers of continuous and ordinate strings).
 
 A click is made where the button was, not where the hand has got to. egui reads a click's position, and what lay under it, from the
 pointer's last position in the frame, and counts two clicks in a frame as one, so a hand that moves on in the time between frames
