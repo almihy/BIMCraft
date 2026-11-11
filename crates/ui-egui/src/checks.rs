@@ -389,13 +389,12 @@ impl BimApp {
         all
     }
 
-    /// The layout the window starts in: Revit's, and when a page hosts the window, the Checks a tab beside the Project
-    /// Browser, which is in front (the right of the page is its agent's).
+    /// The layout the window starts in: Revit's, and when a page hosts the window, the Checks a sidebar of their own down
+    /// the right side, the whole height.
     pub(crate) fn first_docking(&self) -> crate::dock::Docking {
         let mut d = crate::dock::Docking::default();
         if self.offers_checks() {
-            d.put(Palette::Checks, crate::dock::Target::With(Palette::Browser));
-            d.activate(Palette::Browser);
+            d.put(Palette::Checks, crate::dock::Target::Side(crate::dock::Side::Right));
         }
         d
     }

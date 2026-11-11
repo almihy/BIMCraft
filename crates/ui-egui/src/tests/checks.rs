@@ -69,11 +69,11 @@ fn docking<'a>(h: &'a Harness<'_, BimApp>) -> &'a crate::dock::Docking {
 #[test]
 fn a_hosted_window_has_the_checks_palette_open_and_the_desktops_has_none() {
     let mut h = hosted(BOX);
-    // A tab beside the Project Browser, on the left (the right of the page is its agent's), the Browser in front.
-    assert_eq!(docking(&h).docked(Palette::Checks), Some(Side::Left));
-    let stack = docking(&h).stack_of(Palette::Checks).unwrap().clone();
-    assert_eq!((stack.tabs.as_slice(), stack.shown()), ([Palette::Browser, Palette::Checks].as_slice(), Some(Palette::Browser)));
-    front(&mut h);
+    // A sidebar of its own down the right side, the whole height: no tab of anything's, and nothing else there.
+    assert_eq!(docking(&h).docked(Palette::Checks), Some(Side::Right));
+    assert_eq!(docking(&h).side(Side::Right).len(), 1);
+    assert_eq!(docking(&h).stack_of(Palette::Checks).unwrap().tabs, [Palette::Checks]);
+    assert_eq!(docking(&h).stack_of(Palette::Browser).unwrap().tabs, [Palette::Browser], "the Project Browser as it was");
     assert!(h.query_by_label("Checking the model…").is_some(), "until the page gives its checks");
     assert!(h.query_all_by_label_contains("Checks:").next().is_none(), "no count before there are checks");
     // The desktop's window has no page to check its model: no palette, and none to switch on.
@@ -136,16 +136,19 @@ fn the_status_bars_count_opens_the_palette() {
     let far = *ids(&h, "wall").last().unwrap();
     h.state_mut().set_checks(&checks(far)).unwrap();
     h.run();
-    assert!(h.query_by_label("Bedroom area — Failed").is_none(), "behind the Project Browser");
+    assert!(h.query_by_label("Bedroom area — Failed").is_some(), "open from the start");
+    // Closed by its ×, the count opens it again where it was: its own sidebar on the right.
+    press(&mut h, "Close Checks");
+    assert!(!docking(&h).shown(Palette::Checks) && h.query_by_label("Bedroom area — Failed").is_none());
     press(&mut h, "Checks: 2 flags");
-    assert_eq!(docking(&h).stack_of(Palette::Checks).unwrap().shown(), Some(Palette::Checks), "the count brings them to the front");
+    assert_eq!(docking(&h).docked(Palette::Checks), Some(Side::Right));
     assert!(h.query_by_label("Bedroom area — Failed").is_some());
-    h.state_mut().show_palette(Palette::Checks, false);
+    // Tabbed behind another palette by the person, the count brings it to the front.
+    h.state_mut().docking.put(Palette::Checks, crate::dock::Target::With(Palette::Browser));
+    h.state_mut().docking.activate(Palette::Browser);
     h.run();
-    assert!(h.query_by_label("Bedroom area — Failed").is_none());
     press(&mut h, "Checks: 2 flags");
-    assert!(docking(&h).shown(Palette::Checks));
-    assert!(h.query_by_label("Bedroom area — Failed").is_some());
+    assert_eq!(docking(&h).stack_of(Palette::Checks).unwrap().shown(), Some(Palette::Checks));
 }
 
 #[test]
