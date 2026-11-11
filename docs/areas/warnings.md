@@ -34,15 +34,29 @@ A head that rises past the wall's top is no warning: Revit lets it, and the wall
 
 ## How it works
 
-- `Model::review()` works out every warning, the worst first. `Model::review_since(before, prev)` brings the warnings of a model
-  up to date from those of the model it was made of: the elements that changed, and what points at them, are looked at again;
-  rooms again when a wall, column, separator or room changed; a changed level, roof, floor or any setting is a full review.
-  The tests of every command assert it equals `review()` (`Session::report_warnings`).
-- `Session::warnings()` is the warnings of the model now, kept with it. `Session::execute` puts the ones a command made, those
-  that were not among the warnings before it, in its result as `new_warnings` (when the result is an object). Each is
-  `{rule, severity: warning|note, message, elements: [ids], guids: [..]}`.
+- `Model::review()` works out every warning, the worst first. `Model::reviewed_since(before, prev)` brings the warnings of a
+  model up to date from those of the model it was made of (`prev`, a `Review`: the warnings and what the rooms reach): the
+  elements that changed, and what points at them, are looked at again; a changed level, roof, floor or any setting is a full
+  review. `review_since(before, &[Warning])` is the same without the kept room reaches. The tests of every command assert the
+  answer equals `review()` (`Session::report_warnings`, `Review::assert_whole`).
+- What a change costs does not grow with the model. A change to a kind no rule looks at (a tag, a dimension, a view, a sheet, a
+  note, a schedule) returns the warnings as they were. Twins are found among the elements near the changed ones (a plan tile and
+  a height for a wall, a group and a height for a component, the few columns of a project), not among all. Device families are
+  looked through only when a component changed, and only the families of those that did. Rooms: each room's boundary is kept
+  with its warnings (`Reach`), and only the rooms a change reached are worked out again: those that changed themselves, and
+  those whose boundary meets where a wall, column or separation line stood or stands (in the model before the change and the
+  one after, grown by four wall thicknesses) at a height that wall or column spans. A room that is not enclosed, which has no
+  boundary to meet, is worked out again by any change on its level.
+- `Session::warnings()` is the warnings of the model now, kept with it. Kept on another model (after an undo, a redo, a change
+  another copy merged, a transaction taken back), they are brought up to date from that model's, never worked out whole again.
+  `Session::execute` puts the ones a command made, those that were not among the warnings before it, in its result as
+  `new_warnings` (when the result is an object). Each is `{rule, severity: warning|note, message, elements: [ids], guids: [..]}`.
+- A command made inside another (a script's lines, a transaction's, a plugin's) works out no warnings of its own: the
+  outermost says what the whole made, once. A script's are in its last result that is an object (`new_warnings`); a dry run's
+  are its `new_warnings`, structured as a command's. A transaction (the window's multi-command actions) works none out: they
+  are brought up to date when something asks.
 - The `warnings` command (`{rule?, severity?, element?}`) lists them all. `inspect` still lists their messages.
-- `Model::warnings()` (the messages) is what `inspect` and a dry run return.
+- `Model::warnings()` (the messages) is what `inspect` returns.
 - Downstream copes with the allowed states: `walls::prisms` keeps a wall between its own base and top however an opening's edges
   fall; the plan clips an opening's gap to the wall; IFC wall quantities clip each opening to the wall's height.
 
