@@ -65,6 +65,10 @@ pub const ACTIONS: &[&str] = &[
     "Mirror Pick Axis",
     "Mirror Draw Axis",
     "Zoom to Fit",
+    "Zoom Region",
+    "Previous Zoom",
+    "Zoom Out",
+    "Repeat Last Command",
     "Thin Lines",
     "Properties",
     "Project Browser",
@@ -317,6 +321,12 @@ impl BimApp {
             "Mirror Pick Axis" => self.set_tool(Tool::Mirror { draw: false, start: None }),
             "Mirror Draw Axis" => self.set_tool(Tool::Mirror { draw: true, start: None }),
             "Zoom to Fit" => self.fit(),
+            "Zoom Region" => self.zoom_region(),
+            "Previous Zoom" => self.previous_zoom(),
+            "Zoom Out" => self.zoom_view(0.5),
+            "Repeat Last Command" => {
+                self.repeat_last();
+            }
             "Thin Lines" => self.thin = !self.thin,
             "Create Similar" => self.create_similar(),
             "Properties" => self.toggle_properties(),

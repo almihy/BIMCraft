@@ -10,7 +10,7 @@ use bimcraft_core::geom::P2;
 use bimcraft_core::model::{Element, Id, Model, paper};
 use bimcraft_core::render::{Drawing, Prim, View};
 use bimcraft_core::sheet::{self, DENSITY};
-use egui::{Color32, ColorImage, PointerButton, Pos2, Rect, Sense, Stroke, StrokeKind, TextureHandle, TextureId, TextureOptions, Ui, vec2};
+use egui::{Color32, ColorImage, PointerButton, Pos2, Rect, Stroke, StrokeKind, TextureHandle, TextureId, TextureOptions, Ui, vec2};
 
 use crate::canvas::{PICK, Place, click_modifiers, paint};
 use crate::style::pal;
@@ -28,7 +28,7 @@ pub struct Papers {
 impl BimApp {
     /// Sheet `id`, filling `ui`.
     pub(crate) fn paper_view(&mut self, ui: &mut Ui, id: Id) {
-        let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::CLICK | Sense::DRAG);
+        let (rect, response) = ui.allocate_exact_size(ui.available_size(), self.canvas.sense());
         let model = Arc::clone(&self.session.model);
         let Some(size) = model.sheet(id).and_then(|s| paper(&s.size)) else { return };
         // The whole paper, 24 points clear of the edges.

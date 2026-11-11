@@ -18,17 +18,19 @@ use bimcraft_core::view3d::shape_snap_plan;
 use bimcraft_core::walls::{self, Axis};
 use bimcraft_core::{floor_outline, opening_of, roof_footprint};
 use egui::{
-    Align, Align2, Color32, ColorImage, Event, FontId, Key, Layout, Mesh, Modifiers, Painter, PointerButton, Pos2, Rect, Response, Sense,
-    Shape, Stroke, StrokeKind, TextEdit, TextureHandle, TextureId, TextureOptions, Ui, UiBuilder, Vec2, WidgetInfo, WidgetType, pos2, vec2,
+    Align, Align2, Color32, ColorImage, Event, FontId, Key, Mesh, Modifiers, Painter, PointerButton, Pos2, Rect, Response, Sense, Shape,
+    Stroke, StrokeKind, TextEdit, TextureHandle, TextureId, TextureOptions, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2,
 };
 use serde_json::{Value, json};
 
 use crate::draw;
-use crate::icons::Icon;
 use crate::lang::{t, tf};
 use crate::properties::number;
 use crate::style::{canvas_pal, pal};
-use crate::{BimApp, Sheet, Status, Tool, icon_button, top_params};
+use crate::{BimApp, Sheet, Status, Tool, top_params};
+
+pub(crate) mod navigation;
+mod picking;
 
 mod wall_dims;
 
@@ -55,7 +57,7 @@ struct Camera {
 
 /// A drag with the primary button.
 #[derive(Clone, Copy, Debug)]
-enum Drag {
+pub(crate) enum Drag {
     /// Moving the selection, from the model point first pressed.
     Move(P2),
     /// A selection box, from the pixel first pressed.
@@ -320,14 +322,16 @@ pub struct Canvas {
     pub cursor: Option<P2>,
     /// The model point a middle-button drag holds under the cursor.
     grab: Option<P2>,
-    drag: Option<Drag>,
+    pub(crate) drag: Option<Drag>,
     /// What's under the cursor, as `Drawing::pick_all` orders it, and how far Tab has gone.
-    under: Vec<Id>,
-    cycle: usize,
+    pub(crate) under: Vec<Id>,
+    pub(crate) cycle: usize,
+    /// What the cursor is over, for the status bar to name: what the tool in hand would take.
+    pub(crate) hovered: Option<Id>,
     /// A crop region's grip being dragged: the view, and which edge (see [`grips`]).
     crop_drag: Option<(Id, usize)>,
     /// A selected wall's end being dragged: the wall, and whether it's its start.
-    grip: Option<(Id, bool)>,
+    pub(crate) grip: Option<(Id, bool)>,
     /// A selected level's end being dragged in a section or an elevation: the level, and whether
     /// it's its far end.
     level_grip: Option<(Id, bool)>,
@@ -345,6 +349,8 @@ pub struct Canvas {
     /// change the address though they change neither count. shortcut: an address freed and taken again by a model of the same
     /// counts would hold stale guides until the next command; a revision counter on the model would close that.
     alignment_cache: RefCell<Option<AlignmentCache>>,
+    /// Pan, Zoom Region, Previous Zoom and what turns the wheel: see [`navigation`].
+    pub(crate) nav: navigation::Nav,
 }
 
 impl Default for Canvas {
@@ -360,6 +366,7 @@ impl Default for Canvas {
             drag: None,
             under: Vec::new(),
             cycle: 0,
+            hovered: None,
             crop_drag: None,
             grip: None,
             level_grip: None,
@@ -368,6 +375,7 @@ impl Default for Canvas {
             prior: None,
             found: Cell::new(None),
             alignment_cache: RefCell::new(None),
+            nav: navigation::Nav::default(),
         }
     }
 }
@@ -465,6 +473,7 @@ impl Canvas {
 
     /// Show all of `level` again, the next time it's drawn.
     pub fn fit(&mut self, level: Id) {
+        self.remember_now(level);
         self.cams.remove(&level);
     }
 
@@ -487,29 +496,10 @@ impl Canvas {
             let v = fit(rect.width().max(1.0) as u32, (rect.height() - self.room).max(1.0) as u32);
             Camera { scale: v.scale, cx: v.cx, cy: v.cy }
         });
-        let (hover, wheel, pinch, middle) = ui.input(|i| {
-            (
-                i.pointer.hover_pos().filter(|_| response.hovered()),
-                i.smooth_scroll_delta.y,
-                i.zoom_delta(),
-                (i.pointer.button_pressed(PointerButton::Middle), i.pointer.button_down(PointerButton::Middle)),
-            )
-        });
-        if let (Some(at), Some(v)) = (hover, self.view(id)) {
-            let at = at - rect.min;
-            // A wheel notch (about 50 points) zooms by a fifth.
-            let factor = (f64::from(wheel) * 0.004).exp() * f64::from(pinch);
-            if factor.is_finite() && factor != 1.0 {
-                self.hold(id, v.mm(at.into()), at, v.scale * factor.clamp(0.2, 5.0));
-            }
-            if middle.0 {
-                self.grab = Some(v.mm(at.into()));
-            }
-        }
-        match (self.grab, ui.input(|i| i.pointer.hover_pos()), self.view(id)) {
-            (Some(g), Some(at), Some(v)) if middle.1 => self.hold(id, g, at - rect.min, v.scale),
-            _ => self.grab = None,
-        }
+        // With Pan or Zoom Region on the canvas senses hovering only, which egui stops reporting once a button is down.
+        let hand = self.nav.mode != navigation::Mode::Off;
+        let hover = ui.input(|i| i.pointer.hover_pos()).filter(|_| response.hovered() || (hand && response.contains_pointer()));
+        self.handle(ui, rect, id, hover);
         Some((self.view(id)?, hover.map(|p| (p.x - rect.min.x, p.y - rect.min.y))))
     }
 
@@ -531,6 +521,7 @@ impl Canvas {
     /// Zoom by `factor` about the middle of the view.
     pub(crate) fn zoom(&mut self, level: Id, factor: f64) {
         if let Some(v) = self.view(level) {
+            self.remember_now(level);
             let mid = self.rect.size() / 2.0;
             self.hold(level, v.mm(mid.into()), mid, v.scale * factor);
         }
@@ -1172,7 +1163,7 @@ fn round(p: P2) -> P2 {
     P2((p.0 / 10.0).round() * 10.0, (p.1 / 10.0).round() * 10.0)
 }
 
-fn point(p: P2) -> Value {
+pub(crate) fn point(p: P2) -> Value {
     json!([p.0, p.1])
 }
 
@@ -1564,7 +1555,7 @@ impl BimApp {
     /// dimensioned, tagged and noted is in the plan itself.
     pub(crate) fn canvas(&mut self, ui: &mut Ui, key: Id) {
         // Clicks and drags; never the keyboard, which the shortcuts need.
-        let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::CLICK | Sense::DRAG);
+        let (rect, response) = ui.allocate_exact_size(ui.available_size(), self.canvas.sense());
         let model = self.view_model();
         let level = model.plan_level(key).unwrap_or(key);
         let up = matches!(self.sheet, Sheet::Ceiling(_));
@@ -1591,6 +1582,7 @@ impl BimApp {
         };
         if under != c.under {
             (c.under, c.cycle) = (under, 0);
+            self.tab_forget();
         }
         let tab = ui.input(|i| i.key_pressed(Key::Tab)) && local.is_some();
         if tab {
@@ -1601,8 +1593,10 @@ impl BimApp {
             });
         }
         let tabbed = std::mem::take(&mut self.tab_cycle) || tab;
-        if tabbed && !c.under.is_empty() {
-            c.cycle = (c.cycle + 1) % c.under.len();
+        if tabbed {
+            // Shift and Tab go back: from the app's hook, or from the key itself.
+            let back = std::mem::take(&mut self.flow.back) || (tab && ui.input(|i| i.modifiers.shift));
+            self.tab_step(&model, back);
         }
         // While a rectangle is drawn, Tab moves between its width and its height; a line's or a wall's, its length and its angle.
         if tabbed && (self.typed_fields() == 2 || self.line_angle_field()) {
@@ -1690,6 +1684,7 @@ impl BimApp {
             (_, Some(q)) => under_at(q),
             _ => None,
         };
+        self.canvas.hovered = hovered;
 
         // While a note is written here, the pointer is its editor's.
         let writing = self.writing_in(key);
@@ -1713,7 +1708,8 @@ impl BimApp {
         {
             let o = (o.x - rect.min.x, o.y - rect.min.y);
             self.canvas.prior = None;
-            self.canvas.drag = Some(match d.pick(o, PICK) {
+            // With a tool waiting for its elements a drag only boxes them.
+            self.canvas.drag = Some(match d.pick(o, PICK).filter(|_| self.flow.pending.is_none()) {
                 Some(id) => {
                     self.grab(id);
                     Drag::Move(self.drag_base(&model, level, &view, o, mods))
@@ -1906,6 +1902,8 @@ impl BimApp {
         self.wall_neighbour_dimensions(ui, &model, &view, rect, key);
         self.locks(ui, &model, &view, rect, key);
         self.context_menu(&response);
+        self.plan_cursor(ui, &view, local, hovered);
+        Self::keep_arrows(ui, &response);
         self.nav_bar(ui, rect, key);
     }
 
@@ -1943,22 +1941,12 @@ impl BimApp {
         }
     }
 
-    /// The navigation bar of view `id`, at its top right as in Revit: fit, zoom in, zoom out.
+    /// The navigation bar of view `id`, at its top right as in Revit: pan, zoom region, fit, zoom in, zoom out.
     pub(crate) fn nav_bar(&mut self, ui: &mut Ui, rect: Rect, id: Id) {
-        let bar = Rect::from_min_size(self.nav_corner(rect), vec2(32.0, 80.0));
+        let bar = Rect::from_min_size(self.nav_corner(rect), vec2(32.0, 134.0));
         ui.painter_at(rect).rect(bar, 6.0, pal().surface, Stroke::new(1.0, pal().border), StrokeKind::Inside);
-        ui.scope_builder(UiBuilder::new().max_rect(bar.shrink(3.0)).layout(Layout::top_down(Align::Center)), |ui| {
-            ui.spacing_mut().item_spacing.y = 2.0;
-            if icon_button(ui, Icon::Fit, "Zoom to Fit").clicked() {
-                self.canvas.fit(id);
-            }
-            if icon_button(ui, Icon::ZoomIn, "Zoom In").clicked() {
-                self.canvas.zoom(id, 1.25);
-            }
-            if icon_button(ui, Icon::ZoomOut, "Zoom Out").clicked() {
-                self.canvas.zoom(id, 0.8);
-            }
-        });
+        self.nav_buttons(ui, bar, id);
+        ui.painter_at(rect).extend(self.canvas.region_shapes(rect));
     }
 
     /// View `id`'s crop region over it, in `rect` through `view`: its outline, and with Modify, a
@@ -2166,7 +2154,7 @@ impl BimApp {
             }
             // A sketch tool with the sketch gone: nothing to draw into.
             Tool::SketchLine(_) | Tool::SketchPick => self.tool = Tool::Modify,
-            Tool::Modify => self.pick_up(hovered.into_iter().collect(), mods),
+            Tool::Modify => self.pick_up(self.click_set(hovered), mods),
             Tool::Door | Tool::Window => {
                 let door = matches!(self.tool, Tool::Door);
                 let cat = if door { "door" } else { "window" };

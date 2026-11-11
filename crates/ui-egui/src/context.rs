@@ -8,7 +8,7 @@ use bimcraft_i18n::msg;
 
 use egui::{Button, Response};
 
-use crate::lang::t;
+use crate::lang::{t, tf};
 use crate::{BimApp, Sheet, Tool};
 
 /// What an item of the menu does.
@@ -16,6 +16,10 @@ use crate::{BimApp, Sheet, Tool};
 pub(crate) enum Action {
     /// Esc: the tool's points, else the tool, else the selection.
     Cancel,
+    /// Enter, with no tool running: the last tool again.
+    Repeat,
+    /// Create Similar (CS): the tool that makes the selected element's kind, with its type.
+    CreateSimilar,
     /// Enter: a spline or a polyline made of the points clicked so far.
     Finish,
     /// Enter: the detail lines selected are a custom fill pattern's (Fill Patterns' New Pattern > Custom).
@@ -49,6 +53,8 @@ impl Action {
     pub(crate) fn label(self) -> &'static str {
         match self {
             Action::Cancel => "Cancel",
+            Action::Repeat => msg!("Repeat Last Command"),
+            Action::CreateSimilar => msg!("Create Similar"),
             Action::Finish => msg!("Finish Drawing"),
             Action::FinishPick => "Finish",
             Action::ZoomToFit => "Zoom to Fit",
@@ -75,6 +81,8 @@ impl Action {
     pub(crate) fn shortcut(self) -> Option<&'static str> {
         match self {
             Action::Cancel => Some("Esc"),
+            Action::Repeat => Some("RR"),
+            Action::CreateSimilar => Some("CS"),
             Action::Finish | Action::FinishPick => Some("Enter"),
             Action::ZoomToFit => Some("ZF"),
             Action::SelectAllInstances => Some("SA"),
@@ -93,11 +101,21 @@ impl Action {
 pub(crate) struct Item {
     pub action: Action,
     pub enabled: bool,
+    /// What Repeat repeats, in English: its label says "Repeat [Wall]".
+    pub of: Option<&'static str>,
 }
 
 impl Item {
     fn new(action: Action, enabled: bool) -> Item {
-        Item { action, enabled }
+        Item { action, enabled, of: None }
+    }
+
+    /// The item as its menu words it.
+    fn label(&self) -> String {
+        match self.of {
+            Some(of) if self.action == Action::Repeat => tf(msg!("Repeat [{}]"), &[t(of)]),
+            _ => t(self.action.label()).to_string(),
+        }
     }
 }
 
@@ -110,7 +128,7 @@ pub(crate) fn menu(response: &Response, groups: &[Vec<Item>], chosen: &mut Optio
                 ui.separator();
             }
             for item in group {
-                let mut button = Button::new(t(item.action.label()));
+                let mut button = Button::new(item.label());
                 if let Some(keys) = item.action.shortcut() {
                     button = button.shortcut_text(keys);
                 }
@@ -129,6 +147,10 @@ impl BimApp {
     pub(crate) fn context_items(&self) -> Vec<Vec<Item>> {
         let some = !self.selection.is_empty();
         let mut first = vec![Item::new(Action::Cancel, some || self.tool != Tool::Modify)];
+        // Revit's Repeat [last command], first of the menu while no tool runs.
+        if let Some(last) = self.flow.last.as_ref().filter(|_| self.tool == Tool::Modify && self.flow.pending.is_none()) {
+            first.insert(0, Item { of: Some(crate::selecting::tool_name(last)), ..Item::new(Action::Repeat, true) });
+        }
         if self.finishable() {
             first.insert(0, Item::new(Action::Finish, true));
         }
@@ -147,6 +169,7 @@ impl BimApp {
                 groups.push(vec![
                     Item::new(Action::EditType, self.type_subject().is_some()),
                     Item::new(Action::SelectAllInstances, true),
+                    Item::new(Action::CreateSimilar, self.selection.len() == 1),
                     Item::new(Action::Delete, true),
                 ]);
                 // Detail lines, regions and notes group; a group comes apart.
@@ -200,6 +223,10 @@ impl BimApp {
     pub(crate) fn act(&mut self, action: Action) {
         match action {
             Action::Cancel => self.escape(),
+            Action::Repeat => {
+                self.repeat_last();
+            }
+            Action::CreateSimilar => self.create_similar(),
             Action::Finish => self.finish_open_shape(),
             Action::FinishPick => self.finish_pattern_lines(),
             Action::ZoomToFit => self.fit(),

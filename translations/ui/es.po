@@ -12000,3 +12000,15 @@ msgstr "Fijar"
 #: crates/core/src/commands.rs
 msgid "Unpin"
 msgstr "Desfijar"
+
+#: crates/ui-egui/src/lib.rs
+msgid "Zoom Region"
+msgstr "Zoom por región"
+
+#: crates/ui-egui/src/lib.rs
+msgid "Previous Zoom"
+msgstr "Zoom anterior"
+
+#: crates/ui-egui/src/lib.rs
+msgid "Repeat Last Command"
+msgstr "Repetir último comando"

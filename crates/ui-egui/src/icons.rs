@@ -39,6 +39,8 @@ icon_names! {
     Fit,
     ZoomIn,
     ZoomOut,
+    Pan,
+    ZoomRegion,
     ThinLines,
     Schedule,
     CloseInactive,
@@ -335,6 +337,21 @@ pub fn outlines(icon: Icon, compact: bool) -> Vec<Outline> {
             g.line(&[(15.0, 15.0), (21.0, 21.0)]);
             g.line(&[(7.0, 10.0), (13.0, 10.0)]);
             g.circle((10.0, 10.0), 7.0);
+        }
+        Icon::Pan => {
+            // Four arrows out from the middle: the view goes where the hand does.
+            g.line(&[(12.0, 3.0), (12.0, 21.0)]);
+            g.line(&[(3.0, 12.0), (21.0, 12.0)]);
+            g.line(&[(9.0, 6.0), (12.0, 3.0), (15.0, 6.0)]);
+            g.line(&[(9.0, 18.0), (12.0, 21.0), (15.0, 18.0)]);
+            g.line(&[(6.0, 9.0), (3.0, 12.0), (6.0, 15.0)]);
+            g.line(&[(18.0, 9.0), (21.0, 12.0), (18.0, 15.0)]);
+        }
+        Icon::ZoomRegion => {
+            // A box to drag, and the glass that looks into it.
+            g.closed(&[(3.0, 3.0), (12.0, 3.0), (12.0, 12.0), (3.0, 12.0)]);
+            g.circle((14.0, 14.0), 5.0);
+            g.line(&[(17.5, 17.5), (21.0, 21.0)]);
         }
         Icon::ThinLines => {
             g.line(&[(3.0, 6.0), (21.0, 6.0)]);

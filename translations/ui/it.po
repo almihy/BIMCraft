@@ -11902,3 +11902,15 @@ msgstr ""
 #: crates/ui-egui/src/dock.rs:43
 #~ msgid "Tools"
 #~ msgstr "Strumenti"
+
+#: crates/ui-egui/src/lib.rs
+msgid "Zoom Region"
+msgstr "Zoom su area"
+
+#: crates/ui-egui/src/lib.rs
+msgid "Previous Zoom"
+msgstr "Zoom precedente"
+
+#: crates/ui-egui/src/lib.rs
+msgid "Repeat Last Command"
+msgstr "Ripeti ultimo comando"

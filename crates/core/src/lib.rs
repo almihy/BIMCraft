@@ -168,6 +168,7 @@ pub mod units;
 pub mod view3d;
 #[cfg(test)]
 mod wall_top_offset_tests;
+pub mod wallchain;
 pub mod walls;
 pub mod water;
 pub mod workplane;
