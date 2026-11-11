@@ -4631,9 +4631,8 @@ impl BimApp {
         self.mode_panel(ui);
     }
 
-    /// The Options Bar: the contextual tab's name, then the tool's options.
-    /// The Options Bar, while there's something on it (a contextual tab's name, a tool's options): a card floating over the
-    /// view's top left, so the view never moves when it comes and goes, and taking the clicks that land on it.
+    /// The Options Bar, while there's something on it (a contextual tab's name, a tool's options): a card floating centred at
+    /// the view's top, so the view never moves when it comes and goes, and taking the clicks that land on it.
     fn options_bar(&mut self, ctx: &Context) {
         if self.context().is_none() && matches!(self.tool, Tool::Modify) && self.note_edit.is_none() {
             self.options_rect = Rect::NOTHING;
@@ -4644,9 +4643,12 @@ impl BimApp {
         let frame = style::card([false; 4]).inner_margin(Margin::symmetric(10, 3));
         // Below the tabs where they float over the view.
         let top = view.top().max(self.tabs_foot - g + 4.0);
-        let shown = Area::new(UiId::new("options-bar")).order(Order::Middle).fixed_pos(pos2(view.left() + g, top + g)).show(ctx, |ui| {
-            // Kept short of the view's zoom buttons on the right, as far as its fields wrap (a drop-down doesn't).
-            ui.set_max_width((view.width() - 2.0 * g - 60.0).max(200.0));
+        let at = pos2(view.center().x, top + g);
+        let area = Area::new(UiId::new("options-bar")).order(Order::Middle).pivot(Align2::CENTER_TOP).fixed_pos(at);
+        let shown = area.show(ctx, |ui| {
+            // Centred, so kept as far from both sides as the view's zoom buttons are from the right, as far as its fields
+            // wrap (a drop-down doesn't).
+            ui.set_max_width((view.width() - 2.0 * (g + 60.0)).max(200.0));
             frame.show(ui, |ui| self.options(ui));
         });
         self.options_rect = shown.response.rect;
