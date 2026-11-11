@@ -735,6 +735,42 @@ fn a_column_pasted_brings_the_bars_it_holds() {
     assert!(matches!(s.model.elements.get(bar), Some(Element::Rebar(b)) if b.host == Some(s.model.guid(column))));
     // Pasted to another level, the bar goes up with its column.
     let upper = s.model.levels()[1].1.name.clone();
-    let r = run(&mut s, "paste", json!({"levels": [upper]}));
+    let r = run(&mut s, "paste", json!({"levels": [upper.clone()]}));
+    assert_eq!(made_of(&s, &r, "rebar").len(), 1, "{r}");
+    // The bar is on the upper level, on the column that was pasted there with it, and as high above the level as it was.
+    let (column, bar) = (made_of(&s, &r, "column")[0], made_of(&s, &r, "rebar")[0]);
+    let upper_level = s.model.guid(s.model.levels().iter().find(|(_, l)| l.name == upper).map(|(id, _)| *id).unwrap());
+    match (s.model.elements.get(bar), s.model.elements.get(column)) {
+        (Some(Element::Rebar(b)), Some(Element::Column(c))) => {
+            assert_eq!(b.host, Some(s.model.guid(column)), "on the column pasted with it");
+            assert_eq!(b.level, upper_level, "on the level pasted to");
+            assert_eq!(c.level, upper_level);
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_paste_has_the_bars_that_were_on_the_clipboard_when_copied_not_those_added_since() {
+    let mut s = Session::new();
+    let beam = ids(&run(&mut s, "beam", json!({"points": [[0, 0], [4000, 0]]}))["ids"])[0];
+    let first = run(&mut s, "rebar", json!({"points": [[50, 0, -40], [3950, 0, -40]], "diameter": 16, "host": beam}));
+    let first = first["id"].as_u64().or_else(|| first["ids"][0].as_u64()).unwrap();
+    let copied = run(&mut s, "copy_to_clipboard", json!({"ids": [beam]}));
+    assert_eq!(copied["count"], 2, "{copied}");
+    // A bar drawn after the copy is not on the clipboard.
+    run(&mut s, "rebar", json!({"points": [[50, 100, -40], [3950, 100, -40]], "diameter": 20, "host": beam}));
+    let r = run(&mut s, "paste", json!({"by": [0, 3000]}));
+    assert_eq!((made_of(&s, &r, "beam").len(), made_of(&s, &r, "rebar").len()), (1, 1), "only the bar that was copied: {r}");
+    let bar = made_of(&s, &r, "rebar")[0];
+    assert!(matches!(s.model.elements.get(bar), Some(Element::Rebar(b)) if b.diameter == 16.0));
+    // The same pasted to a level, and a bar that was deleted since is left out.
+    let r = run(&mut s, "paste", json!({"same_place": true}));
+    assert_eq!(made_of(&s, &r, "rebar").len(), 1, "{r}");
+    run(&mut s, "delete", json!({"ids": [first]}));
+    let r = run(&mut s, "paste", json!({"by": [0, 6000]}));
+    assert_eq!((made_of(&s, &r, "beam").len(), made_of(&s, &r, "rebar").len()), (1, 0), "{r}");
+    // A paste of ids that were not copied brings their bars as they are now.
+    let r = run(&mut s, "paste", json!({"ids": [beam], "by": [0, 9000]}));
     assert_eq!(made_of(&s, &r, "rebar").len(), 1, "{r}");
 }

@@ -23,8 +23,8 @@ grids, levels and links are found by; a door or window with no wall, or of a typ
 | `openings_overlap` | doors or windows that overlap in plan and in height in one wall | refused |
 | `opening_past_wall` | a door or window wider than its wall's run, or reaching past its start or end | refused |
 | `opening_outside_height` | a sill under the wall's base, or at or over its top (nothing of it in the wall) | refused |
-| `walls_overlap` | straight walls side by side whose bodies overlap along their length, and share a height (not walls that never stand together: options of one set, or a wall demolished by the phase the other is made in) | silent |
-| `identical_instances` | walls, columns, structural columns, footings or components that are the same in the same place (a group is one warning). Elements in different options of one design option set, and one a phase takes down with the one made in that phase, are no twins; a main-model element and an option's are, as are options of two sets | silent |
+| `walls_overlap` | straight walls side by side whose bodies overlap along their length, and share a height (not walls that never stand together: options of one set; phases are ignored, as Revit's are, so a demolished wall and its replacement in one place still warn) | silent |
+| `identical_instances` | walls, columns, structural columns, footings or components that are the same in the same place (a group is one warning). Elements in different options of one design option set are no twins; a main-model element and an option's are, as are options of two sets; so a group of one in option A, one in option B and one in the main model is two warnings (A with the main one, B with the main one), one for each maximal set that can stand together. Phases are ignored, as Revit's are | silent |
 | `wall_off_axis` | a straight wall or a grid more than 0.0001 and up to 1 degree off an axis (a note) | silent |
 | `room_not_enclosed` | a room the walls and room separation lines do not close round | `inspect` |
 | `room_redundant` | a room in the space an earlier room has | `inspect` |

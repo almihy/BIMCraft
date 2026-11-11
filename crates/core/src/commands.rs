@@ -13056,20 +13056,26 @@ fn duplicate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion) -> R {
 
 /// [`duplicate`], and which copy stands for each element copied (their GUIDs), for what has to point at the copies.
 pub(crate) fn duplicate_mapped(c: &str, s: &mut Session, ids: &[Id], mo: &Motion) -> Result<(Vec<Id>, BTreeMap<Guid, Guid>), String> {
-    let m = &s.model;
-    let heads: BTreeMap<Id, P2> = tag_heads(m, ids, mo).into_iter().collect();
     // A beam, a column, a footing or a floor copied brings its bars, as Revit's does: they are copied as the rest are, to where
     // the motion takes them, and stand on the copy of their host.
-    let mut ids: Vec<Id> = ids.to_vec();
+    let m = &s.model;
     let hosts_copied: BTreeSet<Guid> = ids.iter().map(|id| m.guid(*id)).collect();
     let once: BTreeSet<Id> = ids.iter().copied().collect();
-    ids.extend(
+    let mut all: Vec<Id> = ids.to_vec();
+    all.extend(
         m.elements
             .iter()
             .filter(|(id, e)| matches!(e, Element::Rebar(r) if r.host.is_some_and(|h| hosts_copied.contains(&h))) && !once.contains(*id))
             .map(|(&id, _)| id),
     );
-    let ids = ids.as_slice();
+    duplicate_exactly(c, s, &all, mo)
+}
+
+/// [`duplicate_mapped`] of just `ids` and what is hosted on them but the bars: the caller has the bars it means, as a paste has
+/// those that were on the clipboard when they were copied.
+pub(crate) fn duplicate_exactly(c: &str, s: &mut Session, ids: &[Id], mo: &Motion) -> Result<(Vec<Id>, BTreeMap<Guid, Guid>), String> {
+    let m = &s.model;
+    let heads: BTreeMap<Id, P2> = tag_heads(m, ids, mo).into_iter().collect();
     let copying: BTreeSet<Id> = ids.iter().copied().collect();
     let copying_guids: BTreeSet<Guid> = ids.iter().map(|id| m.guid(*id)).collect();
     let mut copies = Vec::new();

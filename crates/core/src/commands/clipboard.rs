@@ -12,7 +12,7 @@ use std::collections::BTreeSet;
 use serde_json::{Value, json};
 
 use super::{
-    Motion, R, absent, along, bad, duplicate_mapped, flag, ids_param, level_param, micron, next_number, off_centre, only, point_req,
+    Motion, R, absent, along, bad, duplicate_exactly, flag, ids_param, level_param, micron, next_number, off_centre, only, point_req,
 };
 use crate::engine::Session;
 use crate::geom::P2;
@@ -158,9 +158,15 @@ fn with_hosted(m: &Model, ids: &[Id]) -> Vec<Id> {
 
 /// What a paste can make of `ids`, which of them it does, and for each it leaves out why. `to_levels`: the paste is aligned to
 /// levels, which leaves out what belongs to a view (the annotation); what stands on no level (a grid, a section) is pasted
-/// once, beside, by `by`.
-fn sort_out(m: &Model, ids: &[Id], to_levels: bool) -> (Vec<Id>, Vec<String>) {
-    let all = with_hosted(m, ids);
+/// once, beside, by `by`. `expand`: what is hosted on `ids` now goes with them (a copy's, and a paste of `ids` that were not
+/// copied); a paste of the clipboard has what was hosted on them when they were copied, which is in `ids`.
+fn sort_out(m: &Model, ids: &[Id], to_levels: bool, expand: bool) -> (Vec<Id>, Vec<String>) {
+    let all = if expand {
+        with_hosted(m, ids)
+    } else {
+        let mut seen: BTreeSet<Id> = BTreeSet::new();
+        ids.iter().copied().filter(|id| seen.insert(*id)).collect()
+    };
     let guids: BTreeSet<Guid> = all.iter().map(|id| m.guid(*id)).collect();
     let (mut keep, mut left_out) = (Vec::new(), Vec::new());
     for id in all {
@@ -190,7 +196,7 @@ pub(super) fn copy_to_clipboard(s: &mut Session, p: &Value) -> R {
     let c = "copy_to_clipboard";
     only(c, p, &["ids", "id"])?;
     let ids = ids_param(c, &s.model, p)?;
-    let (keep, left_out) = sort_out(&s.model, &ids, false);
+    let (keep, left_out) = sort_out(&s.model, &ids, false, true);
     if keep.is_empty() {
         return Err(bad(c, format!("nothing to copy: {}", left_out.join("; "))));
     }
@@ -201,9 +207,9 @@ pub(super) fn copy_to_clipboard(s: &mut Session, p: &Value) -> R {
 }
 
 /// What a paste is given to place by: a clipboard's elements, or `ids`.
-fn source(c: &str, s: &Session, p: &Value) -> Result<(Vec<Id>, Vec<String>), String> {
+fn source(c: &str, s: &Session, p: &Value) -> Result<(Vec<Id>, Vec<String>, bool), String> {
     if !absent(p.get("ids")) || !absent(p.get("id")) {
-        return Ok((ids_param(c, &s.model, p)?, Vec::new()));
+        return Ok((ids_param(c, &s.model, p)?, Vec::new(), true));
     }
     let Some(clip) = &s.clipboard else {
         return Err(bad(c, "nothing to paste: copy elements first (copy_to_clipboard), or give `ids`"));
@@ -214,7 +220,7 @@ fn source(c: &str, s: &Session, p: &Value) -> Result<(Vec<Id>, Vec<String>), Str
     if ids.is_empty() {
         return Err(bad(c, "everything that was copied is gone from the project; copy again"));
     }
-    Ok((ids, left_out))
+    Ok((ids, left_out, false))
 }
 
 /// Revit's Paste (Ctrl+V) and its Aligned variants.
@@ -234,9 +240,9 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> R {
     if same && by_given {
         return Err(bad(c, "`same_place` is on top of the originals; `by` moves them from there: give one"));
     }
-    let (wanted, mut left_out) = source(c, s, p)?;
+    let (wanted, mut left_out, expand) = source(c, s, p)?;
     let by = if by_given { point_req(c, p, "by")? } else { P2(0.0, 0.0) };
-    let (ids, more) = sort_out(&s.model, &wanted, to_levels);
+    let (ids, more) = sort_out(&s.model, &wanted, to_levels, expand);
     left_out.extend(more);
     if ids.is_empty() {
         return Err(bad(c, format!("nothing to paste: {}", left_out.join("; "))));
@@ -259,7 +265,7 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> R {
         return paste_to_levels(c, s, &on_levels, &levelless, &loose, &targets, by, left_out);
     }
     let mo = Motion { map: &|q| micron(q + by), slide: Some(by), mirror: false };
-    let mut made = if rest.is_empty() { Vec::new() } else { duplicate_mapped(c, s, &rest, &mo)?.0 };
+    let mut made = if rest.is_empty() { Vec::new() } else { duplicate_exactly(c, s, &rest, &mo)?.0 };
     let (placed, skipped) = place_openings(s, &loose, by, None);
     made.extend(placed);
     left_out.extend(skipped);
@@ -413,7 +419,7 @@ fn paste_to_levels(
         let (mut made, copies) = if fit.is_empty() {
             (Vec::new(), BTreeSet::new())
         } else {
-            let (made, mapping) = duplicate_mapped(c, s, &fit, &sideways)?;
+            let (made, mapping) = duplicate_exactly(c, s, &fit, &sideways)?;
             (made, mapping.values().copied().collect::<BTreeSet<Guid>>())
         };
         let m = s.model_mut();
@@ -441,7 +447,7 @@ fn paste_to_levels(
     // The datum elements, once, beside: in the same command, so one undo takes them back with the rest.
     if !levelless.is_empty() {
         let sideways = Motion { map: &|q| micron(q + by), slide: Some(by), mirror: false };
-        let (made, _) = duplicate_mapped(c, s, levelless, &sideways)?;
+        let (made, _) = duplicate_exactly(c, s, levelless, &sideways)?;
         pasted.push(json!({"level": null, "name": null, "ids": made}));
         all.extend(made);
     }

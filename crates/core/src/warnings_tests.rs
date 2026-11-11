@@ -721,6 +721,52 @@ fn a_panic_working_out_the_warnings_refuses_the_command_and_leaves_the_session_a
 }
 
 #[test]
+fn a_panic_working_out_a_scripts_warnings_refuses_an_atomic_script_but_not_one_whose_lines_are_done() {
+    let (mut s, w) = awkward_house();
+    s.warnings();
+    let text = format!(
+        "door {{\"wall\": {w}, \"offset\": 4000}}
+door {{\"wall\": {w}, \"offset\": 4300}}"
+    );
+    let doors = |s: &Session| s.model.elements.iter().filter(|(_, e)| matches!(e, Element::Door(_))).count();
+    let before = doors(&s);
+    crate::engine::FORCED_PANIC.with(|f| f.set(Some("report")));
+    let out = s.script(&text).expect("the lines went through, so the script is not refused");
+    crate::engine::FORCED_PANIC.with(|f| f.set(None));
+    assert_eq!((out.len(), doors(&s)), (2, before + 2), "the lines are done and said");
+    assert!(out.iter().all(|r| r.get("new_warnings").is_none()), "{out:?}");
+    assert_eq!(s.nested, 0);
+    assert_eq!(*s.warnings(), s.model.review_whole());
+    // All or nothing: the same failure takes the lines back.
+    let kept = s.model.clone();
+    crate::engine::FORCED_PANIC.with(|f| f.set(Some("report")));
+    let e = s.script_atomic(&text.replace("4000", "5000").replace("4300", "5300")).unwrap_err();
+    crate::engine::FORCED_PANIC.with(|f| f.set(None));
+    assert!(e.contains("forced panic"), "{e}");
+    assert_eq!(*s.model, *kept);
+}
+
+#[test]
+fn a_transaction_works_out_no_warnings_and_a_panic_in_doing_so_cannot_refuse_it() {
+    let (mut s, w) = awkward_house();
+    s.warnings();
+    let made = reviews(|| {
+        s.transaction("Doors", |s| s.execute("door", &json!({"wall": w, "offset": 4000})).map(|_| ())).unwrap();
+    });
+    assert_eq!(made, (0, 0), "a transaction is not asked for its warnings");
+    crate::engine::FORCED_PANIC.with(|f| f.set(Some("report")));
+    let done = s.transaction("Doors", |s| s.execute("door", &json!({"wall": w, "offset": 5000})).map(|_| ()));
+    crate::engine::FORCED_PANIC.with(|f| f.set(None));
+    assert!(done.is_ok(), "{done:?}");
+    // Asked for, it does: one review brought up to date.
+    let asked = reviews(|| {
+        s.transaction_reporting("Doors", |s| s.execute("door", &json!({"wall": w, "offset": 5500})).map(|_| ())).unwrap();
+    });
+    assert!(asked.0 == 0 && asked.1 >= 1, "asked for, it brings the warnings up to date, never from nothing: {asked:?}");
+    assert_eq!(*s.warnings(), s.model.review_whole());
+}
+
+#[test]
 fn a_dry_run_leaves_the_kept_warnings_on_the_project_and_says_its_new_warnings_once() {
     let (mut s, w) = awkward_house();
     s.warnings();
@@ -898,7 +944,7 @@ fn elements_in_different_options_of_one_set_do_not_conflict_but_a_main_model_one
 }
 
 #[test]
-fn an_element_a_phase_takes_down_is_no_twin_of_the_one_made_in_that_phase() {
+fn phases_do_not_hide_identical_or_overlapping_elements() {
     let mut s = Session::new();
     run(&mut s, "phase", json!({"name": "New work"}));
     let old = wall(&mut s, [0.0, 0.0], [6000.0, 0.0]);
@@ -908,15 +954,37 @@ fn an_element_a_phase_takes_down_is_no_twin_of_the_one_made_in_that_phase() {
     assert!(r.get("new_warnings").is_none());
     assert_eq!(listed(&mut s, "identical_instances").len(), 1, "both stand in the first phase");
     run(&mut s, "modify", json!({"id": new, "params": {"Phase Created": "New work"}}));
-    assert!(listed(&mut s, "identical_instances").is_empty(), "the demolished one and its replacement stand together in no phase");
-    // Overlapping, not identical: the same. It was made in the first phase, so it stands with the old wall and the new one.
+    assert_eq!(
+        listed(&mut s, "identical_instances").len(),
+        1,
+        "Revit's warning ignores phases: a demolished wall and its replacement still warn"
+    );
     let longer = wall(&mut s, [3000.0, 0.0], [9000.0, 0.0]);
     assert_eq!(listed(&mut s, "walls_overlap").len(), 2, "{old} {new} {longer}");
     run(&mut s, "modify", json!({"id": longer, "params": {"Phase Created": "New work"}}));
-    let left = listed(&mut s, "walls_overlap");
-    assert_eq!(left.len(), 1, "the one demolished and the one made in that phase overlap in no phase: {left:?}");
-    assert!(ids(&left[0]["elements"]).contains(&new), "what is left is with the new wall: {left:?}");
-    run(&mut s, "undo", json!({}));
-    assert_eq!(listed(&mut s, "walls_overlap").len(), 2);
+    assert_eq!(listed(&mut s, "walls_overlap").len(), 2, "phases do not part overlapping walls");
+    assert_eq!(*s.warnings(), s.model.review_whole());
+}
+
+#[test]
+fn a_group_of_twins_in_two_options_and_the_main_model_is_a_warning_for_each_option_with_the_main_one() {
+    let mut s = Session::new();
+    run(&mut s, "option", json!({"set": "Entry", "options": ["A", "B"]}));
+    let a = id_of(&run(&mut s, "column", json!({"at": [1000, 1000]})));
+    run(&mut s, "modify", json!({"id": a, "params": {"Design Option": "Entry: A"}}));
+    let b = id_of(&run(&mut s, "column", json!({"at": [1000, 1000]})));
+    run(&mut s, "modify", json!({"id": b, "params": {"Design Option": "Entry: B"}}));
+    let c = id_of(&run(&mut s, "column", json!({"at": [1000, 1000]})));
+    let found = listed(&mut s, "identical_instances");
+    let mut sets: Vec<Vec<Id>> = found.iter().map(|w| ids(&w["elements"]).into_iter().collect()).collect();
+    for set in &mut sets {
+        set.sort_unstable();
+    }
+    sets.sort();
+    assert_eq!(sets, vec![vec![a, c], vec![b, c]], "A and B are never there together: {found:?}");
+    assert_eq!(*s.warnings(), s.model.review_whole());
+    // The same after a change to one of them, worked out from the warnings before.
+    run(&mut s, "modify", json!({"id": a, "params": {"Design Option": "Entry: B"}}));
+    assert_eq!(listed(&mut s, "identical_instances").len(), 1, "now a and b are in one option, with the main one's: one group");
     assert_eq!(*s.warnings(), s.model.review_whole());
 }

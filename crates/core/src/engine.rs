@@ -762,18 +762,20 @@ impl Session {
     /// `new_warnings`: a line does not pay for them.
     pub fn script(&mut self, text: &str) -> Result<Vec<Value>, String> {
         let report = self.nested == 0;
-        self.run_script(text, report)
+        self.run_script(text, report, false)
     }
 
     /// [`Session::script`] all or nothing: a line that fails takes back the lines before it, and one that goes through is
     /// one undo step, `Script`.
     pub fn script_atomic(&mut self, text: &str) -> Result<Vec<Value>, String> {
         let report = self.nested == 0;
-        self.transaction_in("Script", false, |s| s.run_script(text, report)).map(|(results, _)| results)
+        self.transaction_in("Script", false, |s| s.run_script(text, report, true)).map(|(results, _)| results)
     }
 
-    /// The lines of a script, none of them working out its warnings; with `report`, the script's as a whole in its result.
-    fn run_script(&mut self, text: &str, report: bool) -> Result<Vec<Value>, String> {
+    /// The lines of a script, none of them working out its warnings; with `report`, the script's as a whole in its result. A
+    /// failure working them out refuses an `atomic` script, which takes its lines back; of one that is not, whose lines are done
+    /// and stay so, it is logged and the results are given without them.
+    fn run_script(&mut self, text: &str, report: bool, atomic: bool) -> Result<Vec<Value>, String> {
         let (before, resets) = (Arc::clone(&self.model), self.resets);
         let ran = Nesting::enter(self).script_lines(text);
         let mut out = ran?;
@@ -783,7 +785,10 @@ impl Session {
             && !Arc::ptr_eq(&before, &self.model)
             && let Some(last) = out.iter_mut().rev().find(|v| v.is_object())
         {
-            self.report_warnings_guarded(&before, last)?;
+            match self.report_warnings_guarded(&before, last) {
+                Err(e) if !atomic => eprintln!("the script's lines are done; its warnings could not be worked out: {e}"),
+                other => other?,
+            }
         }
         Ok(out)
     }
@@ -817,7 +822,7 @@ impl Session {
         let kept = Kept::of(self);
         let read_only = self.read_only.take();
         let dry_run = std::mem::replace(&mut self.dry_run, true);
-        let result = self.transaction_in("Script", false, |s| s.run_script(text, false)).map(|(results, _)| results);
+        let result = self.transaction_in("Script", false, |s| s.run_script(text, false, true)).map(|(results, _)| results);
         let after = Arc::clone(&self.model);
         (self.read_only, self.dry_run) = (read_only, dry_run);
         // The project as it was, whatever the script did to it; what a dry run says is only what it would do.
@@ -866,7 +871,7 @@ impl Session {
     /// `open`) left the history it began, so what came after it stays the steps it was. The warnings it made are worked out
     /// when something asks ([`Session::transaction_reporting`] says them at its end).
     pub fn transaction<T>(&mut self, label: &str, f: impl FnOnce(&mut Session) -> Result<T, String>) -> Result<T, String> {
-        self.transaction_reporting(label, f).map(|(v, _)| v)
+        self.transaction_in(label, false, f).map(|(v, _)| v)
     }
 
     /// [`Session::transaction`], and with what it gives the warnings the whole made, those that weren't among the warnings before
