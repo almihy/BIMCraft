@@ -1,13 +1,17 @@
-//! The icons: monochrome, original BIMCraft artwork on a 24 × 24 grid. A single 1.5 pt pen is
-//! used at every display size; compact glyphs leave out secondary details at 19 pt and below. Shapes
+//! The icons: monochrome, original BIMCraft artwork on a 24 × 24 grid, drawn as the app's icons are: one pen per icon that
+//! grows with it (1.75 on the grid, never under 1.25 pt), round ends and corners, the icon set on the screen's pixels.
+//! Compact glyphs leave out secondary details at 19 pt and below. Shapes
 //! are centred in the smaller dimension of their allocation, including tall or wide rectangles. No
 //! fill, embedded colour or third-party assets are used. The `icon_catalog` example exports these
 //! outlines for review.
 
-use egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, pos2, vec2};
+use egui::{Color32, Mesh, Painter, Pos2, Rect, Shape, Vec2, pos2, vec2};
 use std::f32::consts::TAU;
 
-pub const STROKE_WIDTH: f32 = 1.5;
+/// The pen on the 24 pt grid: the app's icons' (lucide at 1.75), so an icon's lines thicken as it grows.
+pub const PEN: f32 = 1.75;
+/// The thinnest pen, in points, for the smallest icons.
+pub const MIN_PEN: f32 = 1.25;
 
 macro_rules! icon_names {
     ($($name:ident),* $(,)?) => {
@@ -1733,26 +1737,210 @@ impl Glyph {
     }
 }
 
-/// Fit an icon without distortion; keep one pen weight across all strokes.
-pub fn shapes(icon: Icon, rect: Rect, ink: Color32) -> Vec<Shape> {
+/// An icon fitted without distortion into `rect`, drawn in one pen (see `pen`) with round ends and corners, on a screen of
+/// `pixels_per_point`. Empty for a rectangle with no size.
+pub fn shapes(icon: Icon, rect: Rect, ink: Color32, pixels_per_point: f32) -> Vec<Shape> {
     let side = rect.width().min(rect.height());
-    if !side.is_finite() || side <= 0.0 || !rect.min.is_finite() || !rect.max.is_finite() {
+    if !side.is_finite() || side <= 0.0 {
         return Vec::new();
     }
-    let scale = side / 24.0;
-    let origin = rect.center() - vec2(side, side) * 0.5;
-    let stroke = Stroke::new(STROKE_WIDTH, ink);
-    outlines(icon, side <= 19.0)
-        .into_iter()
-        .map(|outline| {
-            let points = outline.points.into_iter().map(|p| origin + p.to_vec2() * scale).collect();
-            if outline.closed { Shape::closed_line(points, stroke) } else { Shape::line(points, stroke) }
-        })
-        .collect()
+    stroked(outlines(icon, side <= 19.0), rect, ink, pixels_per_point).into_iter().collect()
 }
 
 pub fn paint(painter: &Painter, icon: Icon, rect: Rect, ink: Color32) {
-    painter.extend(shapes(icon, rect, ink));
+    painter.extend(shapes(icon, rect, ink, painter.pixels_per_point()));
+}
+
+/// The arrow of a drop-down: a chevron pointing down (the app's), fitted into `rect` as an icon is, in the same pen.
+pub fn paint_chevron(painter: &Painter, rect: Rect, ink: Color32) {
+    painter.extend(chevron(rect, ink, painter.pixels_per_point()));
+}
+
+fn chevron(rect: Rect, ink: Color32, pixels_per_point: f32) -> Option<Shape> {
+    let points = vec![pos2(6.0, 9.0), pos2(12.0, 15.0), pos2(18.0, 9.0)];
+    stroked(vec![Outline { points, closed: false }], rect, ink, pixels_per_point)
+}
+
+/// The pen an icon `side` points across is drawn with: the app's (lucide's 1.75 on its 24 grid) scaled with the icon, so a big
+/// ribbon icon is not spindly and a small one not dense, and never under `MIN_PEN`, so the smallest stay legible.
+pub fn pen(side: f32) -> f32 {
+    (side * PEN / 24.0).max(MIN_PEN)
+}
+
+/// An icon's strokes, fitted without distortion into `rect` at its origin snapped to the screen's pixels (`pixels_per_point`),
+/// drawn as one mesh: one pen, round ends and round outside corners, as the app's icons are, and edges softened over a pixel.
+fn stroked(outlines: Vec<Outline>, rect: Rect, ink: Color32, pixels_per_point: f32) -> Option<Shape> {
+    let side = rect.width().min(rect.height());
+    if !side.is_finite() || side <= 0.0 || !rect.min.is_finite() || !rect.max.is_finite() {
+        return None;
+    }
+    let ppp = if pixels_per_point.is_finite() && pixels_per_point > 0.0 { pixels_per_point } else { 1.0 };
+    let scale = side / 24.0;
+    let origin = rect.center() - vec2(side, side) * 0.5;
+    let origin = pos2((origin.x * ppp).round() / ppp, (origin.y * ppp).round() / ppp);
+    let mut pen = Pen::new(pen(side), ink, 1.0 / ppp);
+    for outline in outlines {
+        let mut points: Vec<Pos2> = Vec::with_capacity(outline.points.len());
+        for p in outline.points {
+            let p = origin + p.to_vec2() * scale;
+            if points.last().is_none_or(|q| q.distance(p) > 1e-3) {
+                points.push(p);
+            }
+        }
+        if outline.closed && points.len() > 2 && points[0].distance(points[points.len() - 1]) <= 1e-3 {
+            points.pop();
+        }
+        pen.stroke(&points, outline.closed);
+    }
+    Some(Shape::mesh(pen.mesh))
+}
+
+/// Strokes polylines into a mesh with round caps and joins. Each side of a stroke is a run of rim points, each a point of the
+/// centre line and an offset from it (a unit normal, or longer for a mitred inside corner); the body is fanned from the centre
+/// line to the rim and a feather a pixel wide runs round the rim's outside.
+struct Pen {
+    mesh: Mesh,
+    /// Half the pen, less half the feather: the solid part. The feather straddles the pen's true edge.
+    core: f32,
+    edge: f32,
+    ink: Color32,
+}
+
+/// Turns gentler than this (a curve's facets) are mitred on both sides: one rim point, no arc.
+const GENTLE: f32 = 0.94; // cos 20°
+/// The largest step of a round cap or corner's arc.
+const ARC_STEP: f32 = std::f32::consts::FRAC_PI_6;
+
+impl Pen {
+    fn new(width: f32, ink: Color32, feather: f32) -> Self {
+        let half = width * 0.5;
+        // A pen thinner than a pixel is drawn a pixel wide and fainter, as egui draws thin lines.
+        let (core, ink) = if half > feather * 0.5 { (half - feather * 0.5, ink) } else { (0.0, ink.gamma_multiply(width / feather)) };
+        Pen { mesh: Mesh::default(), core, edge: core + feather, ink }
+    }
+
+    fn stroke(&mut self, points: &[Pos2], closed: bool) {
+        match (points.len(), closed) {
+            (0, _) => {}
+            (1, _) => {
+                // A dot: a full round cap.
+                let mut rim = Vec::new();
+                arc(&mut rim, points[0], vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0));
+                arc(&mut rim, points[0], vec2(-1.0, 0.0), vec2(1.0, 0.0), vec2(0.0, -1.0));
+                self.ring(&rim);
+            }
+            (_, true) if points.len() > 2 => {
+                let reversed: Vec<Pos2> = points.iter().rev().copied().collect();
+                let mut rim = Vec::new();
+                side(&mut rim, points, true, self.edge);
+                self.ring(&rim);
+                rim.clear();
+                side(&mut rim, &reversed, true, self.edge);
+                self.ring(&rim);
+            }
+            _ => {
+                let n = points.len();
+                let reversed: Vec<Pos2> = points.iter().rev().copied().collect();
+                let mut rim = Vec::new();
+                side(&mut rim, points, false, self.edge);
+                let end = (points[n - 1] - points[n - 2]).normalized();
+                arc(&mut rim, points[n - 1], end.rot90(), -end.rot90(), end);
+                side(&mut rim, &reversed, false, self.edge);
+                let start = (points[0] - points[1]).normalized();
+                arc(&mut rim, points[0], start.rot90(), -start.rot90(), start);
+                self.ring(&rim);
+            }
+        }
+    }
+
+    /// The body and feather of a closed run of rim points.
+    fn ring(&mut self, rim: &[(Pos2, Vec2)]) {
+        let m = rim.len();
+        if m < 2 {
+            return;
+        }
+        let mesh = &mut self.mesh;
+        let base = mesh.vertices.len() as u32;
+        mesh.reserve_vertices(m * 3);
+        mesh.reserve_triangles(m * 4);
+        for &(c, v) in rim {
+            mesh.colored_vertex(c, self.ink);
+            mesh.colored_vertex(c + v * self.core, self.ink);
+            mesh.colored_vertex(c + v * self.edge, Color32::TRANSPARENT);
+        }
+        for j in 0..m {
+            let k = (j + 1) % m;
+            let (a, b) = (base + 3 * j as u32, base + 3 * k as u32);
+            if rim[j] == rim[k] {
+                continue;
+            }
+            if rim[j].0 == rim[k].0 {
+                mesh.add_triangle(a, a + 1, b + 1);
+            } else {
+                mesh.add_triangle(a, b, b + 1);
+                mesh.add_triangle(a, b + 1, a + 1);
+            }
+            mesh.add_triangle(a + 1, a + 2, b + 2);
+            mesh.add_triangle(a + 1, b + 2, b + 1);
+        }
+    }
+}
+
+/// The rim points down the left of `points` (y down: the side a clockwise turn bends away from), corners included; a closed
+/// outline's from its first corner round to it, an open one's from its first point to its last.
+/// `reach` is how far the stroke reaches from its centre line.
+fn side(rim: &mut Vec<(Pos2, Vec2)>, points: &[Pos2], closed: bool, reach: f32) {
+    let n = points.len();
+    let dir = |i: usize| (points[(i + 1) % n] - points[i]).normalized();
+    let len = |i: usize| (points[(i + 1) % n] - points[i]).length();
+    if !closed {
+        rim.push((points[0], dir(0).rot90()));
+    }
+    let corners = if closed { 0..n } else { 1..n - 1 };
+    for k in corners {
+        let before = (k + n - 1) % n;
+        let (d0, d1) = (dir(before), dir(k));
+        let (a, b) = (d0.rot90(), d1.rot90());
+        let cos = a.dot(b);
+        let p = points[k];
+        if cos >= GENTLE {
+            rim.push((p, (a + b) / (1.0 + cos)));
+        } else if a.dot(d1) <= 1e-4 {
+            // The outside of the corner (both sides of a U-turn): rounded.
+            let via = if (a + b).length_sq() > 1e-6 { (a + b).normalized() } else { d0 };
+            arc(rim, p, a, b, via);
+        } else {
+            // The inside: mitred where both legs are long enough to meet, else folded under the other leg.
+            // How far along each leg the inside edges meet: the pen's reach times the tangent of half the turn.
+            let meet = reach * ((1.0 - cos) / (1.0 + cos)).max(0.0).sqrt();
+            if cos > -0.5 && meet <= len(before).min(len(k)) {
+                rim.push((p, (a + b) / (1.0 + cos)));
+            } else {
+                rim.push((p, a));
+                rim.push((p, b));
+            }
+        }
+    }
+    if !closed {
+        rim.push((points[n - 1], dir(n - 2).rot90()));
+    }
+}
+
+/// Rim points round `c` from unit offset `from` to `to` (both pushed), the way that passes `via`.
+fn arc(rim: &mut Vec<(Pos2, Vec2)>, c: Pos2, from: Vec2, to: Vec2, via: Vec2) {
+    let a0 = from.angle();
+    let mut sweep = to.angle() - a0;
+    // The sweep that passes `via`.
+    let towards = (via.angle() - a0).rem_euclid(TAU);
+    sweep = sweep.rem_euclid(TAU);
+    if towards > sweep {
+        sweep -= TAU;
+    }
+    // (A half turn is six steps, not seven by a rounding error.)
+    let steps = (sweep.abs() / ARC_STEP - 1e-3).ceil().max(1.0) as usize;
+    for i in 0..=steps {
+        rim.push((c, Vec2::angled(a0 + sweep * i as f32 / steps as f32)));
+    }
 }
 
 #[cfg(test)]
@@ -1775,22 +1963,98 @@ mod tests {
                 }
             }
             for size in [15.0, 18.0, 19.0, 22.0, 24.0, 48.0] {
-                for allocation in [vec2(size, size), vec2(size * 2.0, size), vec2(size, size * 2.0)] {
-                    let rect = Rect::from_min_size(pos2(37.0, 53.0), allocation);
-                    let paths = shapes(icon, rect, Color32::WHITE);
-                    assert!(!paths.is_empty());
-                    for shape in paths {
-                        let Shape::Path(path) = shape else {
-                            panic!("Only unfilled paths are allowed");
-                        };
-                        assert_eq!(path.stroke.width, STROKE_WIDTH, "{icon:?}");
-                        assert_eq!(path.fill, Color32::TRANSPARENT, "{icon:?}");
-                        let bounds = Rect::from_points(&path.points).expand(STROKE_WIDTH * 0.5);
-                        assert!(rect.contains_rect(bounds), "{icon:?} at {size}: {bounds:?}");
+                for ppp in [1.0, 1.5, 2.0] {
+                    for allocation in [vec2(size, size), vec2(size * 2.0, size), vec2(size, size * 2.0)] {
+                        let rect = Rect::from_min_size(pos2(37.3, 53.6), allocation);
+                        let mesh = mesh(shapes(icon, rect, Color32::WHITE, ppp));
+                        assert!(!mesh.indices.is_empty(), "{icon:?}");
+                        // One pen, no fill: every vertex is the ink or the feather that softens its edge.
+                        for v in &mesh.vertices {
+                            assert!(v.pos.is_finite(), "{icon:?}");
+                            assert!(v.color == Color32::WHITE || v.color == Color32::TRANSPARENT, "{icon:?}: {:?}", v.color);
+                        }
+                        // The ink stays in the allocation; setting the icon on the pixels moves it at most half a pixel.
+                        let ink = mesh.vertices.iter().filter(|v| v.color == Color32::WHITE).map(|v| v.pos);
+                        let bounds = Rect::from_points(&ink.collect::<Vec<_>>());
+                        assert!(rect.expand(0.5 / ppp).contains_rect(bounds), "{icon:?} at {size}: {bounds:?}");
                     }
                 }
             }
         }
+    }
+
+    fn mesh(shapes: Vec<Shape>) -> Mesh {
+        let [Shape::Mesh(mesh)] = shapes.as_slice() else {
+            panic!("an icon is one mesh: {} shapes", shapes.len());
+        };
+        (**mesh).clone()
+    }
+
+    /// The ink's extent of one horizontal stroke from (4, 12) to (20, 12) on the grid, drawn `side` points across.
+    fn stroke_extent(side: f32, ppp: f32) -> Rect {
+        let line = Outline { points: vec![pos2(4.0, 12.0), pos2(20.0, 12.0)], closed: false };
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(side, side));
+        let mesh = mesh(stroked(vec![line], rect, Color32::WHITE, ppp).into_iter().collect());
+        let ink: Vec<Pos2> = mesh.vertices.iter().filter(|v| v.color == Color32::WHITE).map(|v| v.pos).collect();
+        Rect::from_points(&ink)
+    }
+
+    #[test]
+    fn the_pen_grows_with_the_icon_as_the_apps_icons_do_and_never_thins_past_the_minimum() {
+        assert_eq!(pen(24.0), PEN);
+        assert_eq!(pen(48.0), PEN * 2.0);
+        assert_eq!(pen(26.0), 26.0 * PEN / 24.0);
+        assert_eq!(pen(16.0), MIN_PEN);
+        assert_eq!(pen(12.0), MIN_PEN);
+        for (side, ppp) in [(16.0, 1.0), (19.0, 1.0), (26.0, 1.0), (26.0, 2.0), (48.0, 1.5)] {
+            let extent = stroke_extent(side, ppp);
+            // The solid ink is the pen less the pixel its edge is softened over.
+            let solid = pen(side) - 1.0 / ppp;
+            assert!((extent.height() - solid).abs() < 1e-3, "{side} at {ppp}: {extent:?}");
+            // Round ends: the ink runs past each end of the line by half of it.
+            let ends = (vec2(4.0, 20.0) * side / 24.0, solid / 2.0);
+            assert!((extent.left() - (ends.0.x - ends.1)).abs() < 1e-3, "{side}: {extent:?}");
+            assert!((extent.right() - (ends.0.y + ends.1)).abs() < 1e-3, "{side}: {extent:?}");
+        }
+    }
+
+    #[test]
+    fn corners_are_rounded_outside_and_curves_stay_smooth_without_a_cap_at_every_facet() {
+        // A right-angled corner: the outside is an arc (several rim points about the corner), not one mitre point.
+        let corner = Outline { points: vec![pos2(4.0, 4.0), pos2(20.0, 4.0), pos2(20.0, 20.0)], closed: false };
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(24.0, 24.0));
+        let m = mesh(stroked(vec![corner], rect, Color32::WHITE, 1.0).into_iter().collect());
+        let at_corner = m.vertices.iter().filter(|v| v.color == Color32::WHITE && v.pos.distance(pos2(20.0, 4.0)) > 0.1);
+        let round = at_corner.filter(|v| (v.pos.distance(pos2(20.0, 4.0)) - (PEN - 1.0) / 2.0).abs() < 1e-3).count();
+        assert!(round >= 4, "{round} points on the corner's arc");
+        // A circle of 128 facets: one rim point a side per facet, no arcs.
+        let mut g = Glyph::default();
+        g.circle((12.0, 12.0), 8.0);
+        let m = mesh(stroked(g.0, rect, Color32::WHITE, 1.0).into_iter().collect());
+        assert_eq!(m.vertices.len(), 2 * 128 * 3);
+    }
+
+    #[test]
+    fn an_icon_is_set_on_the_screens_pixels() {
+        let at = |x: f32, y: f32, ppp: f32| mesh(shapes(Icon::Wall, Rect::from_min_size(pos2(x, y), vec2(19.0, 19.0)), Color32::WHITE, ppp));
+        let same = |a: Mesh, b: Mesh| {
+            a.vertices.len() == b.vertices.len() && a.vertices.iter().zip(&b.vertices).all(|(p, q)| p.pos.distance(q.pos) < 1e-4)
+        };
+        assert!(same(at(10.3, 20.7, 1.0), at(10.0, 21.0, 1.0)));
+        assert!(same(at(10.2, 20.6, 2.0), at(10.0, 20.5, 2.0)));
+    }
+
+    #[test]
+    fn the_drop_down_chevron_is_drawn_as_an_icon_in_the_same_pen() {
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(16.0, 16.0));
+        let m = mesh(chevron(rect, Color32::WHITE, 1.0).into_iter().collect());
+        let ink: Vec<Pos2> = m.vertices.iter().filter(|v| v.color == Color32::WHITE).map(|v| v.pos).collect();
+        let extent = Rect::from_points(&ink);
+        // lucide's chevron-down: 12 of the grid's 24 across and 6 down, in the pen of a 16 pt icon, with round ends.
+        let solid = pen(16.0) - 1.0;
+        // (The caps' arcs are faceted: within a few hundredths of a point of round.)
+        assert!((extent.width() - (8.0 + solid)).abs() < 0.05, "{extent:?}");
+        assert!((extent.center().x - 8.0).abs() < 1e-3, "{extent:?}");
     }
 
     #[test]
@@ -1803,7 +2067,7 @@ mod tests {
     #[test]
     fn invalid_allocations_are_ignored() {
         for size in [0.0, -1.0, f32::NAN, f32::INFINITY] {
-            assert!(shapes(Icon::Wall, Rect::from_min_size(Pos2::ZERO, vec2(size, size)), Color32::WHITE).is_empty());
+            assert!(shapes(Icon::Wall, Rect::from_min_size(Pos2::ZERO, vec2(size, size)), Color32::WHITE, 1.0).is_empty());
         }
     }
 }
