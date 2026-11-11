@@ -1792,7 +1792,8 @@ impl BimApp {
                 // Compact: a strip across the top of the view, the tabs standing on its foot (Revit's document tabs).
                 let strip = style::compact();
                 let frame = match strip {
-                    true => Frame::new().fill(style::tab_strip()).inner_margin(Margin { left: 4, right: 0, top: 4, bottom: 0 }),
+                    // No room over the tabs: they stand right under the ribbon.
+                    true => Frame::new().fill(style::tab_strip()).inner_margin(Margin { left: 4, right: 0, top: 0, bottom: 0 }),
                     false => Frame::new().inner_margin(Margin { left: g, right: g, top: g, bottom: 4 }),
                 };
                 Panel::top("view-tabs").frame(frame).show_separator_line(false).show(ui, |ui| {
