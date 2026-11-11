@@ -97,7 +97,7 @@ fn a_change_and_a_removal_come_across_and_settings_too() {
     run(&mut a, "units", json!({"length": "m"}));
     let c = sync::changes(&before, &a.model).unwrap();
     assert!(c.elements.values().any(Option::is_none), "the removal: {c:?}");
-    assert!(c.project.contains_key("types") && c.project.contains_key("units"), "{:?}", c.project.keys());
+    assert!(c.project.contains_key("types/wall/Party wall 250") && c.project.contains_key("units"), "{:?}", c.project.keys());
     let got = send(&before, &a, &mut b);
     assert!(got.refused.is_empty(), "{:?}", got.refused);
     assert_eq!(by_guid(&a.model), by_guid(&b.model));

@@ -108,7 +108,11 @@ fn two_people_adding_different_types_materials_and_text_types_at_once_both_keep_
         },
     );
     for m in [&a.model, &b.model] {
-        assert!(wall_types(m).contains(&"Brick 300".to_string()) && wall_types(m).contains(&"Block 200".to_string()), "{:?}", wall_types(m));
+        assert!(
+            wall_types(m).contains(&"Brick 300".to_string()) && wall_types(m).contains(&"Block 200".to_string()),
+            "{:?}",
+            wall_types(m)
+        );
         assert!(m.types.door.contains_key("Door 900"));
         assert!(m.materials.contains_key("Brick") && m.materials.contains_key("Block"));
         assert!(m.text_types.contains_key("Notes A") && m.text_types.contains_key("Notes B"));
@@ -142,6 +146,15 @@ fn editing_different_entries_at_once_keeps_both_edits() {
     assert_eq!(a.model.types, b.model.types);
 }
 
+/// `m` with Alpha's thickness set.
+fn b0_after(m: &Model, t: f64) -> Model {
+    let mut x = m.clone();
+    if let Some(w) = x.types.wall.get_mut("Alpha") {
+        w.thickness = t;
+    }
+    x
+}
+
 #[test]
 fn the_same_entry_edited_by_both_is_the_last_to_say_it_and_the_other_entries_are_not_touched() {
     let (mut a, mut b) = two();
@@ -152,11 +165,14 @@ fn the_same_entry_edited_by_both_is_the_last_to_say_it_and_the_other_entries_are
     let (a0, b0) = (a.model.clone(), b.model.clone());
     run(&mut a, "type", json!({"category": "wall", "name": "Alpha", "thickness": 250}));
     run(&mut b, "type", json!({"category": "wall", "name": "Alpha", "thickness": 260}));
-    // B's edit is the later one: A's reaches B first, and B's reaches A last.
+    // What each says is that entry alone.
+    let said = sync::changes(&a0, &a.model).unwrap();
+    assert_eq!(said.project.keys().map(String::as_str).collect::<Vec<_>>(), ["types/wall/Alpha"]);
+    // B says it later: a copy told both ends with the last it was told, whichever it is.
     send_model(&a0, &a.model.clone(), &mut b);
-    send_model(&b0, &b.model.clone(), &mut a);
-    assert_eq!(thickness(&a.model, "Alpha"), 260.0, "the last edit to reach a copy is the entry's");
-    assert_eq!(thickness(&b.model, "Alpha"), 260.0);
+    assert_eq!(thickness(&b.model, "Alpha"), 250.0, "B was told A's after its own");
+    send_model(&b0, &b0_after(&b0, 260.0), &mut a);
+    assert_eq!(thickness(&a.model, "Alpha"), 260.0, "A was told B's after its own");
     assert_eq!(thickness(&a.model, "Beta"), 300.0);
     assert_eq!(thickness(&b.model, "Beta"), 300.0);
 }
@@ -223,16 +239,20 @@ fn walls_of_a_type_added_at_the_same_moment_find_their_types_in_both_copies() {
 #[test]
 fn phases_added_at_the_same_moment_are_both_kept_in_one_order() {
     let (mut a, mut b) = two();
-    crossed(
-        &mut a,
-        &mut b,
-        |a| {
-            run(a, "phase", json!({"name": "Phase A"}));
-        },
-        |b| {
-            run(b, "phase", json!({"name": "Phase B"}));
-        },
-    );
+    // A shared room keeps one of the two lists (here A's, the later write): its copy is told B's phase and not B's order, the
+    // other is told both. Both phases are kept either way, and the copies end in one order.
+    let (a0, b0) = (a.model.clone(), b.model.clone());
+    run(&mut a, "phase", json!({"name": "Phase A"}));
+    run(&mut b, "phase", json!({"name": "Phase B"}));
+    let from_b = {
+        let mut c = sync::changes(&b0, &b.model).unwrap();
+        assert!(c.project.contains_key("phases/Phase B") && c.project.contains_key("phases"));
+        c.project.remove("phases");
+        c
+    };
+    let from_a = sync::changes(&a0, &a.model).unwrap();
+    assert!(a.merge(&from_b, &BTreeSet::new()).unwrap().refused.is_empty());
+    assert!(b.merge(&from_a, &BTreeSet::new()).unwrap().refused.is_empty());
     assert!(a.model.phases.contains(&"Phase A".to_string()) && a.model.phases.contains(&"Phase B".to_string()), "{:?}", a.model.phases);
     assert_eq!(a.model.phases, b.model.phases);
     assert_eq!(a.model.check(), Ok(()));
@@ -287,11 +307,13 @@ fn a_whole_room_makes_a_copy_say_every_entry_and_none_more() {
 fn a_map_emptied_stays_empty_in_a_whole_room() {
     let (mut a, mut b) = two();
     let mut m = (*a.model).clone();
+    m.line_styles.clear();
     m.line_patterns.clear();
     let all = sync::entries(&m).unwrap();
     assert!(all.project.contains_key("line_patterns"), "an empty map is a key of its own");
     assert!(!b.model.line_patterns.is_empty());
-    b.merge(&all, &BTreeSet::new()).unwrap();
+    let got = b.merge(&all, &BTreeSet::new()).unwrap();
+    assert!(got.refused.is_empty(), "{:?}", got.refused);
     assert!(b.model.line_patterns.is_empty());
     let _ = &mut a;
 }
