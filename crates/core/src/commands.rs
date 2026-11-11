@@ -43,7 +43,9 @@ use crate::{pdf, render, schedule, sheet, snap, stairs, view3d};
 
 type R = Result<Value, String>;
 
+mod cad_pick;
 mod site;
+use cad_pick::cad_outlines;
 use site::{building_pad, property_line, site as site_cmd, site_edit, site_figures, site_kinds, toposolid};
 
 const fn edit(id: &'static str, label: &'static str, aliases: &'static [&'static str], params: &'static str, run: Run) -> Command {
@@ -253,13 +255,33 @@ other_files(
          arc, point, text, hatch, block; `box` keeps what touches it (by its box), in model mm",
         cad_read,
     ),
+    other(
+        "cad_outlines",
+        "Pick Lines: Outlines",
+        "{id, layers?: [layer, …], entities?: [n, …], box?: [[x, y], [x, y]], min_area?} the closed outlines a CAD import's \
+         lines make, in the model's mm (to the hundredth), as Revit's Pick Lines finds them: its lines, arcs and open polylines \
+         joined where their ends meet (within 5 mm) or one ends on another, each face they enclose and, when lines across a \
+         shape split it, the whole shape too (`whole`: true); and each closed polyline, circle and ring of a hatch. The pick: \
+         the entities `entities` names (their index in the drawing, `n` as `cad_read` lists them), on `layers`, lying wholly \
+         inside `box` (model mm), each only when given; with neither `entities` nor `layers`, all the import shows. \
+         `min_area` (mm²) leaves smaller ones out. Each outline: `points` (counter-clockwise), `area` (mm², less its holes) \
+         and `area_m2`, `from` (lines, polyline, circle or hatch), `layer` (or `layers` when from several), `entities` (what \
+         made it), `labels` (the drawing's texts on any layer whose point lies inside it), and `holes` (clockwise: outlines \
+         inside it) when it has any. The same ring found twice (a hatch over the lines round it) is one. `open`: the runs of \
+         lines that close nothing, each `points` and `entities`. `wall`, `floor`, `property_line`, `building_pad` and \
+         `toposolid` take the same pick as `cad`",
+        cad_outlines,
+    ),
     edit(
         "wall",
         msg!("Wall"),
         &["WA"],
         "{points: [[x,y],…], closed?, type?, level?, top_level?, top_offset?, height?, base_offset?, arc?, location?, attach_top?, \
          attach_base?, room_bounding?} one wall per segment of its location line; up to the next level, or `height` mm tall (unconnected), or up \
-         to `top_level`, `top_offset` mm above it (0; negative, below it; the top must stay above the base). `arc`: degrees each turns from its start to its end, counter-clockwise (180, a half circle bulging to \
+         to `top_level`, `top_offset` mm above it (0; negative, below it; the top must stay above the base). With `cad` \
+         ({id, entities?, layers?, box?}, a pick of a CAD import's lines as `cad_outlines` takes it) instead of `points`, one \
+         wall along each line, arc and polyline segment picked (a circle, two halves), on the import's level unless `level` \
+         says, as Revit's Pick Lines; `skipped` counts what drew no line. `arc`: degrees each turns from its start to its end, counter-clockwise (180, a half circle bulging to \
          its right). `location`: the line of it the points are on: centre (the default), core-centre, exterior-finish, \
          interior-finish, exterior-core or interior-core; its exterior side is to the left of its start to its end, so walls \
          drawn clockwise face out. `attach_top`, `attach_base`: a roof or floor its top follows from below, or its base stands \
@@ -291,8 +313,10 @@ other_files(
         "floor",
         ui_msg!("Floor"),
         &[],
-        "{boundary?: [[x,y],…], openings?: [[[x,y],…],…] | sketch?: [[[x,y],[x,y]],…], level?, type?, offset?, slope?, arrow?: \
-         [[x,y],[x,y]], structural?} a slab (a structural one with `structural`, as Revit's Floor: Structural), its top at the level, or `offset` mm above it, open through `openings` (holes inside it, apart); no boundary = the outline \
+        "{boundary?: [[x,y],…], openings?: [[[x,y],…],…] | sketch?: [[[x,y],[x,y]],…] | cad?: {id, entities?, layers?, box?}, \
+         level?, type?, offset?, slope?, arrow?: [[x,y],[x,y]], structural?} a slab (with `cad`, its boundary and openings the \
+         one closed outline, and the holes in it, that the picked lines of a CAD import make, as `cad_outlines` finds them, on \
+         the import's level unless `level` says; a pick making none or several is refused): a slab (a structural one with `structural`, as Revit's Floor: Structural), its top at the level, or `offset` mm above it, open through `openings` (holes inside it, apart); no boundary = the outline \
          of the level's walls along their centre lines, open over each loop of them standing free inside, joined to none of \
          the outer ones and with no room in it (a courtyard). Sloped: its top rises `slope` degrees (negative, falls) along \
          the slope arrow, from its tail, where it's at the offset, toward its head. Its top's model pattern starts at \
@@ -478,9 +502,12 @@ other_files(
         "property_line",
         "Property Line",
         &["PL"],
-        "{points: [[x, y] or [x, y, bulge], …], level?, name?} Revit's Property Line: the plot's boundary through `points`, \
+        "{points: [[x, y] or [x, y, bulge], …] | cad: {id, entities?, layers?, box?}, level?, name?} Revit's Property Line: \
+         the plot's boundary through `points`, \
          closed (the last joins the first), an arc where a point gives the bulge of the piece from it to the next (DXF's: \
-         the tangent of a quarter of its angle, positive counter-clockwise). Drawn dash-dot in plan. Returns `id` and its \
+         the tangent of a quarter of its angle, positive counter-clockwise), or along the one closed outline a pick of a CAD \
+         import's lines makes (`cad`, as `cad_outlines` takes it; on the import's level unless `level` says). Drawn dash-dot \
+         in plan. Returns `id` and its \
          `area_m2`, its arcs' exactly",
         property_line,
     ),
@@ -488,10 +515,12 @@ other_files(
         "toposolid",
         "Toposolid",
         &["TS"],
-        "{boundary: [[x,y],…], points?: [[x, y, z], …], contours?, type?, level?, offset?} Revit's Toposolid: the ground, a \
+        "{boundary: [[x,y],…] | cad: {id, entities?, layers?, box?}, points?: [[x, y, z], …], contours?, type?, level?, \
+         offset?} Revit's Toposolid: the ground, a \
          slab along `boundary` its type's thickness deep (a floor type; `Toposolid`, 1000 mm, made when the project hasn't \
          one), its top `offset` over its level and shaped through `points`, each the ground's height there over the level (a \
-         survey's spot heights). Its plan draws its contours `contours` mm apart (1000; 0 none), every fifth heavier; the \
+         survey's spot heights); with `cad`, along the one closed outline a pick of a CAD import's lines makes, as \
+         `cad_outlines` takes it, on the import's level unless `level` says. Its plan draws its contours `contours` mm apart (1000; 0 none), every fifth heavier; the \
          Modify tools take it as a floor. Building pads cut it. Returns `id` and `area_m2`",
         toposolid,
     ),
@@ -499,7 +528,8 @@ other_files(
         "building_pad",
         "Building Pad",
         &["BP"],
-        "{boundary: [[x,y],…], type?, level?, offset?} Revit's Building Pad: a flat pad along `boundary`, its top `offset` \
+        "{boundary: [[x,y],…] | cad: {id, entities?, layers?, box?}, type?, level?, offset?} Revit's Building Pad: a flat pad \
+         along `boundary` (or the one closed outline a pick of a CAD import's lines makes, as `toposolid` takes it), its top `offset` \
          over its level, its type's thickness under that (a floor type; `Building Pad`, 300 mm, made when the project hasn't \
          one). It cuts the toposolid on its level it lies wholly inside: the toposolid's plan and 3D view leave a hole its \
          shape, its contours stopping at its edge and the ground round it as it was, and the pad is a slab in the hole at its \
@@ -7808,17 +7838,32 @@ fn wire_type(s: &mut Session, p: &Value) -> R {
 
 fn wall(s: &mut Session, p: &Value) -> R {
     let c = "wall";
-    let mut pts = points(c, p, "points")?;
-    if pts.len() < 2 {
-        return Err(bad(c, "`points` needs at least 2 points"));
-    }
-    if flag(c, p, "closed")?
-        && let Some(&first) = pts.first()
-    {
-        pts.push(first);
-    }
     let m = &s.model;
-    let level = level_param(c, m, p, "level")?;
+    // One wall each, from start to end and turning: along `points`, or along each line a pick of a CAD import takes.
+    let (segs, level, skipped): (Vec<(P2, P2, f64)>, Option<Guid>, usize) = match cad_pick::picked_segments(c, m, p)? {
+        Some((level, segs, skipped)) => (segs.into_iter().map(|g| (g.start, g.end, g.arc)).collect(), Some(level), skipped),
+        None => {
+            let mut pts = points(c, p, "points")?;
+            if pts.len() < 2 {
+                return Err(bad(c, "`points` needs at least 2 points"));
+            }
+            if flag(c, p, "closed")?
+                && let Some(&first) = pts.first()
+            {
+                pts.push(first);
+            }
+            let arc = num(c, p, "arc")?.unwrap_or(0.0);
+            let segs = pts.windows(2).filter_map(|w| match w {
+                [a, b] => Some((*a, *b, arc)),
+                _ => None,
+            });
+            (segs.collect(), None, 0)
+        }
+    };
+    let level = match level {
+        Some(l) if absent(p.get("level")) => l,
+        _ => level_param(c, m, p, "level")?,
+    };
     let type_name = type_param(c, p, m, "wall")?;
     let height = num(c, p, "height")?;
     let top_level = match p.get("top_level") {
@@ -7828,7 +7873,6 @@ fn wall(s: &mut Session, p: &Value) -> R {
     let base_offset = num(c, p, "base_offset")?.unwrap_or(0.0);
     let top_offset = num(c, p, "top_offset")?.unwrap_or(0.0);
     let height = height.unwrap_or(DEFAULT_HEIGHT);
-    let arc = num(c, p, "arc")?.unwrap_or(0.0);
     let location = match string(c, p, "location")? {
         Some(n) => Location::from_name(&n).ok_or_else(|| bad(c, location_names(&n)))?,
         None => Location::Centre,
@@ -7840,15 +7884,15 @@ fn wall(s: &mut Session, p: &Value) -> R {
         Some(_) => return Err(bad(c, "`room_bounding` is true or false")),
     };
     let m = s.model_mut();
-    let ids: Vec<Id> = pts
-        .windows(2)
-        .filter_map(|seg| match seg {
-            [a, b] => Some(m.insert(Element::Wall(Wall {
+    let ids: Vec<Id> = segs
+        .into_iter()
+        .map(|(start, end, arc)| {
+            m.insert(Element::Wall(Wall {
                 params: Default::default(),
                 type_name: type_name.clone(),
                 level,
-                start: *a,
-                end: *b,
+                start,
+                end,
                 top_level,
                 height,
                 base_offset,
@@ -7859,11 +7903,14 @@ fn wall(s: &mut Session, p: &Value) -> R {
                 attach_base,
                 room_bounding,
                 join: true,
-            }))),
-            _ => None,
+            }))
         })
         .collect();
-    Ok(json!({"ids": ids}))
+    let mut reply = json!({"ids": ids});
+    if skipped > 0 {
+        reply["skipped"] = json!(skipped);
+    }
+    Ok(reply)
 }
 
 fn location_names(n: &str) -> String {
@@ -8024,11 +8071,16 @@ fn build_opening(m: &Model, p: &Value, is_door: bool) -> Result<Opening, String>
 fn floor(s: &mut Session, p: &Value) -> R {
     let c = "floor";
     let m = &s.model;
-    let level = level_param(c, m, p, "level")?;
+    let picked = cad_pick::picked_outline(c, m, p, &["boundary", "sketch"])?;
+    let level = match &picked {
+        Some((l, ..)) if absent(p.get("level")) => *l,
+        _ => level_param(c, m, p, "level")?,
+    };
     let type_name = type_param(c, p, m, "floor")?;
-    let (mut boundary, openings, sketch) = match sketched(c, p, "openings", &[])? {
-        Some((r, lines)) => (r.outer, r.holes, lines),
-        None => {
+    let (mut boundary, openings, sketch) = match (picked, sketched(c, p, "openings", &[])?) {
+        (Some((_, outline, holes)), _) => (ring(outline), rings(c, p, "openings")?.unwrap_or(holes), Vec::new()),
+        (None, Some((r, lines))) => (r.outer, r.holes, lines),
+        (None, None) => {
             let (boundary, found) = match absent(p.get("boundary")) {
                 true => floor_outline(m, level)
                     .ok_or_else(|| bad(c, format!("no walls enclose an area on {}; give `boundary`", level_name(m, level))))?,

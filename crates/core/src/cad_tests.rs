@@ -818,3 +818,206 @@ fn read_takes_hostile_params_without_a_panic_or_a_change() {
     }
     assert!(s.model == before, "reading changes nothing");
 }
+
+// ---------- Pick Lines: outlines and elements from an import's lines ----------
+
+/// A site drawn in metres, as Revit exports one: a building of four loose lines on A-WALL with a fifth across it (entities 0
+/// to 4), its labels inside (an MTEXT of two lines, 5 and 6, and a TEXT, 7), a ground hatch on Toposolid (8), and a road of a
+/// line, an arc and a line on A-FLOR going nowhere (9 to 11).
+fn site_plan() -> String {
+    let walls: String = [((0.0, 0.0), (20.0, 0.0)), ((20.0, 0.0), (20.0, 10.0)), ((20.0, 10.0), (0.0, 10.0)), ((0.0, 10.0), (0.0, 0.0))]
+        .iter()
+        .map(|(a, b)| line("A-WALL", *a, *b))
+        .collect();
+    let across = line("A-WALL", (8.0, 0.0), (8.0, 10.0));
+    let label = pairs(&[(0, "MTEXT"), (8, "A-TEXT"), (10, "14"), (20, "6"), (40, "0.5"), (71, "1"), (1, "Residential A\\P428.64 m²")]);
+    let lobby = pairs(&[(0, "TEXT"), (8, "A-TEXT"), (10, "4"), (20, "5"), (40, "0.25"), (1, "Lobby")]);
+    let hatch = pairs(&[
+        (0, "HATCH"),
+        (8, "Toposolid"),
+        (2, "SOLID"),
+        (70, "1"),
+        (91, "1"),
+        (92, "2"),
+        (72, "0"),
+        (73, "1"),
+        (93, "4"),
+        (10, "30"),
+        (20, "0"),
+        (10, "40"),
+        (20, "0"),
+        (10, "40"),
+        (20, "8"),
+        (10, "30"),
+        (20, "8"),
+        (97, "0"),
+    ]);
+    let road = line("A-FLOR", (0.0, -5.0), (20.0, -5.0))
+        + &pairs(&[(0, "ARC"), (8, "A-FLOR"), (10, "20"), (20, "0"), (40, "5"), (50, "270"), (51, "360")])
+        + &line("A-FLOR", (25.0, 0.0), (25.0, 3.0));
+    let layers = [("A-WALL", "1", false), ("A-TEXT", "7", false), ("Toposolid", "3", false), ("A-FLOR", "8", false)];
+    dxf("6", &layers, &(walls + &across + &label + &lobby + &hatch + &road))
+}
+
+/// A point of the site plan (metres) in the model (mm): brought in turned 30° about [5000, 2000], its origin there.
+fn placed(x: f64, y: f64) -> [f64; 2] {
+    let (sin, cos) = 30f64.to_radians().sin_cos();
+    let (x, y) = (x * 1000.0, y * 1000.0);
+    [5000.0 + x * cos - y * sin, 2000.0 + x * sin + y * cos]
+}
+
+fn site_session(test: &str) -> (Session, u64) {
+    let mut s = Session::new();
+    let path = file(test, "site.dxf", &site_plan());
+    let r = run(&mut s, "import_cad", json!({"path": path, "position": "origin", "at": [5000, 2000], "angle": 30}));
+    (s, r["id"].as_u64().unwrap())
+}
+
+fn has_point(ring: &Value, want: [f64; 2]) -> bool {
+    ring.as_array()
+        .unwrap()
+        .iter()
+        .any(|p| (p[0].as_f64().unwrap() - want[0]).abs() < 0.02 && (p[1].as_f64().unwrap() - want[1]).abs() < 0.02)
+}
+
+fn by_area(r: &Value) -> Vec<Value> {
+    let mut v = r["outlines"].as_array().unwrap().clone();
+    v.sort_by(|a, b| b["area"].as_f64().unwrap().total_cmp(&a["area"].as_f64().unwrap()));
+    v
+}
+
+fn near2(v: &Value, p: [f64; 2]) -> bool {
+    (v[0].as_f64().unwrap() - p[0]).abs() < 1e-6 && (v[1].as_f64().unwrap() - p[1]).abs() < 1e-6
+}
+
+#[test]
+fn an_imports_lines_make_outlines_each_face_and_the_whole_with_the_labels_inside_in_model_coordinates() {
+    let (mut s, id) = site_session("outlines");
+    let r = run(&mut s, "cad_outlines", json!({"id": id, "layers": ["A-WALL"]}));
+    assert_eq!((r["id"].as_u64(), r["cad"].as_str()), (Some(id), Some("site")), "{r}");
+    let o = by_area(&r);
+    assert_eq!(o.len(), 3, "the whole and its two faces: {r}");
+    let areas: Vec<f64> = o.iter().map(|x| x["area"].as_f64().unwrap()).collect();
+    assert!(areas.iter().zip([200e6, 120e6, 80e6]).all(|(a, b)| (a - b).abs() < 1.0), "{areas:?}");
+    assert_eq!(o[0]["area_m2"], 200.0);
+    assert_eq!((o[0]["whole"].as_bool(), o[1]["whole"].as_bool()), (Some(true), None), "{r}");
+    for x in &o {
+        assert_eq!((x["from"].as_str(), x["layer"].as_str()), (Some("lines"), Some("A-WALL")), "{x}");
+    }
+    assert_eq!(o[0]["entities"], json!([0, 1, 2, 3, 4]));
+    assert_eq!(o[1]["entities"], json!([0, 1, 2, 4]));
+    assert_eq!(o[2]["entities"], json!([0, 2, 3, 4]));
+    // Placed: turned 30° about [5000, 2000], metres to mm, to the hundredth.
+    for corner in [(0.0, 0.0), (20.0, 0.0), (20.0, 10.0), (0.0, 10.0)] {
+        assert!(has_point(&o[0]["points"], placed(corner.0, corner.1)), "{corner:?} in {}", o[0]["points"]);
+    }
+    assert!(has_point(&o[2]["points"], placed(8.0, 10.0)) && !has_point(&o[2]["points"], placed(20.0, 0.0)));
+    let x = o[0]["points"][1][0].as_f64().unwrap();
+    assert_eq!((x * 100.0).round() / 100.0, x, "rounded to the hundredth");
+    // The texts inside each: the whole has all, each face its own; each line of an MTEXT is a label.
+    assert_eq!(o[0]["labels"], json!(["Residential A", "428.64 m²", "Lobby"]), "{r}");
+    assert_eq!(o[1]["labels"], json!(["Residential A", "428.64 m²"]));
+    assert_eq!(o[2]["labels"], json!(["Lobby"]));
+    assert_eq!(r["open"], json!([]));
+    // `min_area` (mm²) leaves the small face out.
+    let r = run(&mut s, "cad_outlines", json!({"id": id, "layers": ["A-WALL"], "min_area": 100e6}));
+    assert_eq!(by_area(&r).len(), 2, "{r}");
+}
+
+#[test]
+fn a_hatch_is_an_outline_and_lines_going_nowhere_are_open_chains_and_picks_narrow_by_entity_and_box() {
+    let (mut s, id) = site_session("open");
+    // Everything it shows: the building's three, the hatch, and the road open.
+    let r = run(&mut s, "cad_outlines", json!({"id": id}));
+    let o = by_area(&r);
+    assert_eq!(o.len(), 4, "{r}");
+    let hatch = o.iter().find(|x| x["from"] == "hatch").unwrap();
+    assert_eq!((hatch["area_m2"].as_f64(), hatch["layer"].as_str(), &hatch["entities"]), (Some(80.0), Some("Toposolid"), &json!([8])));
+    assert!(hatch["labels"].as_array().unwrap().is_empty());
+    let open = r["open"].as_array().unwrap();
+    assert_eq!(open.len(), 1, "{r}");
+    assert_eq!(open[0]["entities"], json!([9, 10, 11]));
+    let pts = open[0]["points"].as_array().unwrap();
+    let ends = json!([pts.first().unwrap(), pts.last().unwrap()]);
+    assert!(has_point(&ends, placed(0.0, -5.0)) && has_point(&ends, placed(25.0, 3.0)), "{ends}");
+    // By entity: the four outer lines alone make one outline.
+    let r = run(&mut s, "cad_outlines", json!({"id": id, "entities": [0, 1, 2, 3]}));
+    assert_eq!(by_area(&r).len(), 1, "{r}");
+    assert!((by_area(&r)[0]["area"].as_f64().unwrap() - 200e6).abs() < 1.0);
+    // By a box, model mm: only what lies wholly inside it, here the hatch.
+    let corners = [placed(29.0, -1.0), placed(41.0, -1.0), placed(41.0, 9.0), placed(29.0, 9.0)];
+    let lo = [corners.iter().map(|c| c[0]).fold(f64::MAX, f64::min), corners.iter().map(|c| c[1]).fold(f64::MAX, f64::min)];
+    let hi = [corners.iter().map(|c| c[0]).fold(f64::MIN, f64::max), corners.iter().map(|c| c[1]).fold(f64::MIN, f64::max)];
+    let r = run(&mut s, "cad_outlines", json!({"id": id, "box": [lo, hi]}));
+    let from: Vec<Value> = r["outlines"].as_array().unwrap().iter().map(|x| x["from"].clone()).collect();
+    assert_eq!(from, [json!("hatch")], "{r}");
+}
+
+#[test]
+fn a_property_line_a_floor_a_pad_and_a_toposolid_take_their_boundary_from_the_lines_picked() {
+    let (mut s, id) = site_session("boundary");
+    let r = run(&mut s, "property_line", json!({"cad": {"id": id, "layers": ["A-WALL"]}}));
+    assert_eq!(r["area_m2"], 200.0, "the whole of the building, not its faces: {r}");
+    let r = run(&mut s, "floor", json!({"cad": {"id": id, "entities": [0, 1, 2, 3, 4]}, "offset": 100}));
+    assert_eq!(r["area_m2"], 200.0, "{r}");
+    let f = s.model.elements.get(r["id"].as_u64().unwrap()).unwrap().clone();
+    let crate::model::Element::Floor(f) = f else { panic!("{f:?}") };
+    let corner = placed(20.0, 10.0);
+    assert!(f.boundary.iter().any(|p| (p.0 - corner[0]).abs() < 0.02 && (p.1 - corner[1]).abs() < 0.02), "{:?}", f.boundary);
+    assert_eq!(f.level, s.model.guid(s.model.levels()[0].0), "the import's level");
+    let r = run(&mut s, "floor", json!({"cad": {"id": id, "entities": [0, 2, 3, 4]}}));
+    assert_eq!(r["area_m2"], 80.0, "a face picked by its lines alone, what runs on past it left out: {r}");
+    let r = run(&mut s, "building_pad", json!({"cad": {"id": id, "layers": ["Toposolid"]}}));
+    assert_eq!(r["area_m2"], 80.0, "{r}");
+    let r = run(&mut s, "toposolid", json!({"cad": {"id": id, "layers": ["Toposolid"]}}));
+    assert_eq!(r["area_m2"], 80.0, "{r}");
+}
+
+#[test]
+fn a_pick_that_makes_no_outline_or_several_says_so_and_points_to_cad_outlines() {
+    let (mut s, id) = site_session("errors");
+    let e = fails(&mut s, "floor", json!({"cad": {"id": id, "layers": ["A-FLOR"]}}));
+    assert!(e.contains("no closed outline") && e.contains("cad_outlines"), "{e}");
+    let e = fails(&mut s, "property_line", json!({"cad": {"id": id, "entities": [0, 1, 2, 3, 8]}}));
+    assert!(e.contains("2 closed outlines") && e.contains("cad_outlines"), "{e}");
+    let e = fails(&mut s, "floor", json!({"cad": {"id": id, "layers": ["A-WALL"]}, "boundary": [[0, 0], [1, 0], [1, 1]]}));
+    assert!(e.contains("not both"), "{e}");
+    let e = fails(&mut s, "wall", json!({"cad": {"id": id}, "points": [[0, 0], [1000, 0]]}));
+    assert!(e.contains("not both"), "{e}");
+    let e = fails(&mut s, "cad_outlines", json!({"id": id, "entities": [99]}));
+    assert!(e.contains("no entity 99") && e.contains("it has 12"), "{e}");
+    let e = fails(&mut s, "floor", json!({"cad": {"id": id, "colour": 5}}));
+    assert!(e.contains("`colour`"), "{e}");
+    let e = fails(&mut s, "floor", json!({"cad": {"id": id, "layers": ["NOPE"]}}));
+    assert!(e.contains("no layer `NOPE`"), "{e}");
+    let level = s.model.levels()[0].0;
+    let e = fails(&mut s, "wall", json!({"cad": {"id": level}}));
+    assert!(e.contains("isn't a CAD import"), "{e}");
+    let e = fails(&mut s, "cad_outlines", json!({"id": id, "box": [[0, 0]]}));
+    assert!(e.contains("`box`"), "{e}");
+    let e = fails(&mut s, "cad_outlines", json!({"id": id, "min_area": -1}));
+    assert!(e.contains("`min_area`"), "{e}");
+    let e = fails(&mut s, "wall", json!({"cad": {"id": id, "layers": ["A-TEXT"]}}));
+    assert!(e.contains("no line"), "{e}");
+}
+
+#[test]
+fn walls_are_drawn_along_each_line_and_arc_picked_as_revits_pick_lines() {
+    let (mut s, id) = site_session("walls");
+    let r = run(&mut s, "wall", json!({"cad": {"id": id, "layers": ["A-WALL"]}, "height": 3000}));
+    assert_eq!(r["ids"].as_array().unwrap().len(), 5, "{r}");
+    let walls = run(&mut s, "elements", json!({"category": "wall"}));
+    let w = &walls["elements"][0];
+    assert!(near2(&w["start"], placed(0.0, 0.0)) && near2(&w["end"], placed(20.0, 0.0)), "{w}");
+    // The road's arc is a wall that turns as it does, round the drawn arc's centre.
+    let r = run(&mut s, "wall", json!({"cad": {"id": id, "entities": [10]}}));
+    let wid = r["ids"][0].as_u64().unwrap();
+    let arc = s.model.wall(wid).unwrap().clone();
+    assert!(near2(&json!([arc.start.0, arc.start.1]), placed(20.0, -5.0)) && near2(&json!([arc.end.0, arc.end.1]), placed(25.0, 0.0)));
+    assert!((arc.arc - 90.0).abs() < 1e-9, "{}", arc.arc);
+    let (c, radius, ..) = crate::walls::Axis::of(&arc).arc().unwrap();
+    assert!(near2(&json!([c.0, c.1]), placed(20.0, 0.0)) && (radius - 5000.0).abs() < 1e-6, "{c:?} {radius}");
+    // A text draws no line: it's counted, and walls go along the rest.
+    let r = run(&mut s, "wall", json!({"cad": {"id": id, "entities": [7, 9]}}));
+    assert_eq!((r["ids"].as_array().unwrap().len(), r["skipped"].as_u64()), (1, Some(1)), "{r}");
+}

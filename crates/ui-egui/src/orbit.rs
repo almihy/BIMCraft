@@ -251,8 +251,11 @@ pub struct Orbit {
     pub(crate) dim3: Vec<Ref3>,
     /// The model's box ([`Model::model_box`]) as the model shown last has it, which the work plane's patch stands by in every
     /// frame: found once for each model, for it builds every solid (a frame's worth and more of a large model in a browser).
-    model_box: std::sync::Mutex<Option<(Arc<Model>, Option<([f64; 3], [f64; 3])>)>>,
+    model_box: std::sync::Mutex<Option<ModelBox>>,
 }
+
+/// The model shown last and its box ([`Model::model_box`]).
+type ModelBox = (Arc<Model>, Option<([f64; 3], [f64; 3])>);
 
 /// A room as the 3D view draws it: its outline in plan (an unbounded one's square), swept from `bottom` to `top`.
 type RoomSolid = (Vec<P2>, f64, f64);

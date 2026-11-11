@@ -354,14 +354,15 @@ pub(crate) fn crossing(a: P2, b: P2, c: P2, d: P2) -> Option<f64> {
     (t > 0.0 && t < 1.0 && u > 0.0 && u < 1.0).then_some(t)
 }
 
-/// The segments cut wherever another one crosses them or ends on them.
-fn split(segs: &[(P2, P2)], tol: f64) -> Vec<(P2, P2)> {
+/// The segments cut wherever another one crosses them or ends on them, each piece with the index of the segment it was cut
+/// from.
+fn split(segs: &[(P2, P2)], tol: f64) -> Vec<(P2, P2, usize)> {
     let grid = SegGrid::new(segs, tol);
     split_among(segs, tol, |i| grid.near(i))
 }
 
 /// [`split`] with each segment's others those `others` gives (in any order, each once: the cuts are sorted).
-fn split_among(segs: &[(P2, P2)], tol: f64, others: impl Fn(usize) -> Vec<usize>) -> Vec<(P2, P2)> {
+fn split_among(segs: &[(P2, P2)], tol: f64, others: impl Fn(usize) -> Vec<usize>) -> Vec<(P2, P2, usize)> {
     let mut out = Vec::new();
     for (i, &(a, b)) in segs.iter().enumerate() {
         let mut ts = vec![0.0, 1.0];
@@ -381,7 +382,7 @@ fn split_among(segs: &[(P2, P2)], tol: f64, others: impl Fn(usize) -> Vec<usize>
         ts.sort_by(f64::total_cmp);
         let pts: Vec<P2> = ts.iter().map(|&t| a + (b - a) * t).collect();
         out.extend(pts.windows(2).filter_map(|w| match w {
-            [p, q] if p.dist(*q) > tol => Some((*p, *q)),
+            [p, q] if p.dist(*q) > tol => Some((*p, *q, i)),
             _ => None,
         }));
     }
@@ -457,44 +458,64 @@ pub(crate) fn faces_everywhere(segs: &[(P2, P2)], tol: f64) -> Vec<Vec<P2>> {
 
 /// The faces of the graph of `split` segments, ends closer than `tol` one node: the first node within `tol` of an end, in
 /// the order they were met, found among those of the grid cells round it.
-fn faces_of(split: Vec<(P2, P2)>, tol: f64) -> Vec<Vec<P2>> {
-    let mut nodes: Vec<P2> = Vec::new();
-    let cell = if tol > 0.0 { tol } else { 0.0 };
-    let key = |p: P2| ((p.0 / cell).floor() as i64, (p.1 / cell).floor() as i64);
-    let mut grid: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
-    let mut node = |p: P2| {
-        let found = if cell > 0.0 && p.is_finite() {
-            let (x, y) = key(p);
-            (x - 1..=x + 1)
-                .flat_map(|x| (y - 1..=y + 1).map(move |y| (x, y)))
-                .filter_map(|k| grid.get(&k))
-                .flatten()
-                .copied()
-                .filter(|&i| nodes.get(i).is_some_and(|q| q.dist(p) <= tol))
-                .min()
-        } else {
-            nodes.iter().position(|q| q.dist(p) <= tol)
-        };
-        match found {
-            Some(i) => i,
-            None => {
-                nodes.push(p);
-                if cell > 0.0 && p.is_finite() {
-                    grid.entry(key(p)).or_default().push(nodes.len() - 1);
+fn faces_of(split: Vec<(P2, P2, usize)>, tol: f64) -> Vec<Vec<P2>> {
+    let g = Graph::new(split, tol);
+    walk(&g.nodes, g.edges.keys().copied()).into_iter().map(|f| f.into_iter().map(|i| g.nodes[i]).collect()).collect()
+}
+
+/// The planar graph of split segments: its nodes, ends closer than `tol` one, and its edges (each pair of nodes once, the
+/// lower first), each with the index of the segment the first piece along it was cut from.
+struct Graph {
+    nodes: Vec<P2>,
+    edges: std::collections::BTreeMap<(usize, usize), usize>,
+}
+
+impl Graph {
+    fn new(split: Vec<(P2, P2, usize)>, tol: f64) -> Graph {
+        let mut nodes: Vec<P2> = Vec::new();
+        let cell = if tol > 0.0 { tol } else { 0.0 };
+        let key = |p: P2| ((p.0 / cell).floor() as i64, (p.1 / cell).floor() as i64);
+        let mut grid: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
+        let mut node = |p: P2| {
+            let found = if cell > 0.0 && p.is_finite() {
+                let (x, y) = key(p);
+                (x - 1..=x + 1)
+                    .flat_map(|x| (y - 1..=y + 1).map(move |y| (x, y)))
+                    .filter_map(|k| grid.get(&k))
+                    .flatten()
+                    .copied()
+                    .filter(|&i| nodes.get(i).is_some_and(|q| q.dist(p) <= tol))
+                    .min()
+            } else {
+                nodes.iter().position(|q| q.dist(p) <= tol)
+            };
+            match found {
+                Some(i) => i,
+                None => {
+                    nodes.push(p);
+                    if cell > 0.0 && p.is_finite() {
+                        grid.entry(key(p)).or_default().push(nodes.len() - 1);
+                    }
+                    nodes.len() - 1
                 }
-                nodes.len() - 1
+            }
+        };
+        let mut edges = std::collections::BTreeMap::new();
+        for (a, b, tag) in split {
+            let (i, j) = (node(a), node(b));
+            if i != j {
+                edges.entry((i.min(j), i.max(j))).or_insert(tag);
             }
         }
-    };
-    let mut edges = std::collections::BTreeSet::new();
-    for (a, b) in split {
-        let (i, j) = (node(a), node(b));
-        if i != j {
-            edges.insert((i.min(j), i.max(j)));
-        }
+        Graph { nodes, edges }
     }
+}
+
+/// The faces of a graph of `nodes` and `edges` (each pair of nodes once), as the nodes round each: each bounded face
+/// counter-clockwise, and the outline of each connected piece clockwise.
+fn walk(nodes: &[P2], edges: impl Iterator<Item = (usize, usize)> + Clone) -> Vec<Vec<usize>> {
     let mut around: Vec<Vec<usize>> = vec![Vec::new(); nodes.len()];
-    for &(i, j) in &edges {
+    for (i, j) in edges.clone() {
         around[i].push(j);
         around[j].push(i);
     }
@@ -509,12 +530,12 @@ fn faces_of(split: Vec<(P2, P2)>, tol: f64) -> Vec<Vec<P2>> {
     // clockwise of the one we arrived along.
     let mut seen = std::collections::BTreeSet::new();
     let mut out = Vec::new();
-    for &(i, j) in &edges {
+    for (i, j) in edges {
         for start in [(i, j), (j, i)] {
             let (mut u, mut v) = start;
             let mut face = Vec::new();
             while seen.insert((u, v)) {
-                face.push(nodes[u]);
+                face.push(u);
                 let list = &around[v];
                 let k = list.iter().position(|&w| w == u).unwrap_or(0);
                 let w = list[(k + list.len() - 1) % list.len()];
@@ -524,6 +545,104 @@ fn faces_of(split: Vec<(P2, P2)>, tol: f64) -> Vec<Vec<P2>> {
                 out.push(face);
             }
         }
+    }
+    out
+}
+
+/// What lines drawn any which way make, ends closer than `tol` joined and each cut where another crosses it or ends on it:
+/// the faces of each connected piece once its loose ends are taken off, and the loose ends as open chains. Each face and
+/// chain has the indices of the segments it runs along.
+#[derive(Debug, Default)]
+pub(crate) struct Arrangement {
+    /// Each face's ring, the segments along it and its piece: a bounded face counter-clockwise, a piece's outline clockwise.
+    pub faces: Vec<(Vec<P2>, Vec<usize>, usize)>,
+    /// Each run of lines going nowhere, from end to end, and the segments along it.
+    pub open: Vec<(Vec<P2>, Vec<usize>)>,
+}
+
+/// The [`Arrangement`] of `segs`.
+pub(crate) fn arrangement(segs: &[(P2, P2)], tol: f64) -> Arrangement {
+    let g = Graph::new(split(segs, tol), tol);
+    let n = g.nodes.len();
+    let mut adj: Vec<std::collections::BTreeSet<usize>> = vec![Default::default(); n];
+    for &(i, j) in g.edges.keys() {
+        adj[i].insert(j);
+        adj[j].insert(i);
+    }
+    // The loose ends, taken off one by one until every node left is on a loop.
+    let mut loose: Vec<(usize, usize)> = Vec::new();
+    let mut stack: Vec<usize> = (0..n).filter(|&i| adj[i].len() == 1).collect();
+    while let Some(i) = stack.pop() {
+        let Some(&j) = adj[i].iter().next().filter(|_| adj[i].len() == 1) else { continue };
+        adj[i].remove(&j);
+        adj[j].remove(&i);
+        loose.push((i.min(j), i.max(j)));
+        if adj[j].len() == 1 {
+            stack.push(j);
+        }
+    }
+    let kept: Vec<(usize, usize)> = g.edges.keys().copied().filter(|&(i, j)| adj[i].contains(&j)).collect();
+    // The connected pieces, by union-find.
+    let mut root: Vec<usize> = (0..n).collect();
+    fn find(root: &mut [usize], mut i: usize) -> usize {
+        while root[i] != i {
+            root[i] = root[root[i]];
+            i = root[i];
+        }
+        i
+    }
+    for &(i, j) in &kept {
+        let (a, b) = (find(&mut root, i), find(&mut root, j));
+        root[a.max(b)] = a.min(b);
+    }
+    let tag = |i: usize, j: usize| g.edges.get(&(i.min(j), i.max(j))).copied();
+    let mut out = Arrangement::default();
+    for face in walk(&g.nodes, kept.iter().copied()) {
+        let Some(&first) = face.first() else { continue };
+        let mut tags: Vec<usize> = face.iter().zip(face.iter().cycle().skip(1)).filter_map(|(&a, &b)| tag(a, b)).collect();
+        tags.sort_unstable();
+        tags.dedup();
+        let piece = find(&mut root, first);
+        out.faces.push((face.into_iter().map(|i| g.nodes[i]).collect(), tags, piece));
+    }
+    // The loose ends joined into chains: on from each end while it meets exactly one other loose end.
+    let mut at: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for (k, &(i, j)) in loose.iter().enumerate() {
+        at[i].push(k);
+        at[j].push(k);
+    }
+    let mut used = vec![false; loose.len()];
+    for k in 0..loose.len() {
+        if used[k] {
+            continue;
+        }
+        used[k] = true;
+        let (i, j) = loose[k];
+        let mut chain = std::collections::VecDeque::from([i, j]);
+        let mut edges = vec![k];
+        for forward in [true, false] {
+            loop {
+                let end = if forward { chain.back() } else { chain.front() };
+                let Some(&end) = end else { break };
+                let next = match at[end].as_slice() {
+                    [a, b] => [*a, *b].into_iter().find(|&e| !used[e]),
+                    _ => None,
+                };
+                let Some(e) = next else { break };
+                used[e] = true;
+                edges.push(e);
+                let (a, b) = loose[e];
+                if forward {
+                    chain.push_back(if a == end { b } else { a });
+                } else {
+                    chain.push_front(if a == end { b } else { a });
+                }
+            }
+        }
+        let mut tags: Vec<usize> = edges.iter().filter_map(|&e| loose.get(e).and_then(|&(a, b)| tag(a, b))).collect();
+        tags.sort_unstable();
+        tags.dedup();
+        out.open.push((chain.into_iter().map(|i| g.nodes[i]).collect(), tags));
     }
     out
 }
@@ -728,6 +847,28 @@ mod tests {
         segs.push((P2(-500.0, 2000.0), P2(6500.0, 2000.0)));
         let rooms: Vec<f64> = areas(&segs).into_iter().filter(|a| *a > 0.0).collect();
         assert_eq!(rooms, vec![4e6, 4e6, 8e6, 8e6]);
+    }
+
+    #[test]
+    fn an_arrangement_takes_loose_ends_off_as_open_chains_and_keeps_which_segments_each_face_runs_along() {
+        // A room split in two (segments 0 to 4), a stub off its corner turning once (5, 6), and a line on its own (7).
+        let mut segs = rect(0.0, 0.0, 6000.0, 4000.0);
+        segs.push((P2(2000.0, 0.0), P2(2000.0, 4000.0)));
+        segs.push((P2(6000.0, 4000.0), P2(8000.0, 4000.0)));
+        segs.push((P2(8000.0, 4000.0), P2(8000.0, 6000.0)));
+        segs.push((P2(20000.0, 0.0), P2(25000.0, 0.0)));
+        let a = arrangement(&segs, 1.0);
+        let mut bounded: Vec<(f64, Vec<usize>)> = a.faces.iter().filter(|f| area(&f.0) > 0.0).map(|f| (area(&f.0), f.1.clone())).collect();
+        bounded.sort_by(|x, y| x.0.total_cmp(&y.0));
+        assert_eq!(bounded, vec![(8e6, vec![0, 2, 3, 4]), (16e6, vec![0, 1, 2, 4])]);
+        let outlines: Vec<&(Vec<P2>, Vec<usize>, usize)> = a.faces.iter().filter(|f| area(&f.0) < 0.0).collect();
+        assert_eq!(outlines.len(), 1, "one piece");
+        assert!(a.faces.iter().all(|f| f.2 == outlines[0].2), "every face is of the one piece");
+        let mut open: Vec<Vec<usize>> = a.open.iter().map(|o| o.1.clone()).collect();
+        open.sort();
+        assert_eq!(open, vec![vec![5, 6], vec![7]]);
+        let stub = a.open.iter().find(|o| o.1 == vec![5, 6]).unwrap();
+        assert_eq!(stub.0.len(), 3, "a chain from end to end: {:?}", stub.0);
     }
 
     #[test]

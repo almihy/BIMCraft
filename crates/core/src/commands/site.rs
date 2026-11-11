@@ -287,9 +287,14 @@ fn bulged(c: &str, p: &Value, key: &str) -> Result<Vec<[f64; 3]>, String> {
 
 pub(super) fn property_line(s: &mut Session, p: &Value) -> R {
     let c = "property_line";
-    keys(c, p, &["points", "level", "name"])?;
-    let points = bulged(c, p, "points")?;
-    let level = level_param(c, &s.model, p, "level")?;
+    keys(c, p, &["points", "level", "name", "cad"])?;
+    let (points, level) = match super::cad_pick::picked_outline(c, &s.model, p, &["points"])? {
+        Some((level, outline, _)) => {
+            let level = if absent(p.get("level")) { level } else { level_param(c, &s.model, p, "level")? };
+            (outline.into_iter().map(|q| [q.0, q.1, 0.0]).collect(), level)
+        }
+        None => (bulged(c, p, "points")?, level_param(c, &s.model, p, "level")?),
+    };
     let mut pl = PropertyLine { name: string(c, p, "name")?.unwrap_or_default(), level, points, params: BTreeMap::new() };
     // Counter-clockwise, as the plan's areas run: reversed, each arc's bulge on the piece now before it, the other way.
     let ring: Vec<P2> = pl.points.iter().map(|q| P2(q[0], q[1])).collect();
@@ -340,11 +345,18 @@ fn ccw(mut r: Vec<P2>) -> Vec<P2> {
     r
 }
 
+/// `boundary`, counter-clockwise, or the outline a `cad` pick makes; and the level, the import's then unless `level` says.
+fn boundary_param(c: &str, m: &Model, p: &Value) -> Result<(Vec<P2>, crate::model::Guid), String> {
+    match super::cad_pick::picked_outline(c, m, p, &["boundary"])? {
+        Some((level, outline, _)) => Ok((ccw(outline), if absent(p.get("level")) { level } else { level_param(c, m, p, "level")? })),
+        None => Ok((ccw(points(c, p, "boundary")?), level_param(c, m, p, "level")?)),
+    }
+}
+
 pub(super) fn toposolid(s: &mut Session, p: &Value) -> R {
     let c = "toposolid";
-    keys(c, p, &["boundary", "points", "contours", "type", "level", "offset", "name"])?;
-    let boundary = ccw(points(c, p, "boundary")?);
-    let level = level_param(c, &s.model, p, "level")?;
+    keys(c, p, &["boundary", "points", "contours", "type", "level", "offset", "name", "cad"])?;
+    let (boundary, level) = boundary_param(c, &s.model, p)?;
     let offset = num(c, p, "offset")?.unwrap_or(0.0);
     let contours = num(c, p, "contours")?.unwrap_or(1000.0);
     if !(contours == 0.0 || contours >= MIN_CONTOURS) {
@@ -389,9 +401,8 @@ pub(super) fn toposolid(s: &mut Session, p: &Value) -> R {
 
 pub(super) fn building_pad(s: &mut Session, p: &Value) -> R {
     let c = "building_pad";
-    keys(c, p, &["boundary", "type", "level", "offset"])?;
-    let boundary = ccw(points(c, p, "boundary")?);
-    let level = level_param(c, &s.model, p, "level")?;
+    keys(c, p, &["boundary", "type", "level", "offset", "cad"])?;
+    let (boundary, level) = boundary_param(c, &s.model, p)?;
     let offset = num(c, p, "offset")?.unwrap_or(0.0);
     let type_name = type_param(c, s, p, "Building Pad", 300.0)?;
     let pad = BuildingPad { type_name, level, boundary, offset, params: BTreeMap::new() };

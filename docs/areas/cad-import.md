@@ -4,7 +4,7 @@ On the roadmap under 0.9 Interoperability, as Revit's Import CAD and Link CAD: a
 brought into a project and drawn under the model in the plans of a level, to trace walls over and to check against. A project
 holds each drawing once, an import element places it, plans draw and snap to it, and the desktop brings one in (Insert > Import
 CAD, Link CAD). A DWG comes in as the DXF it becomes (below); DXF export, exploding an import into detail lines (which waits on detail lines, issue #58), and
-images and PDFs as underlays are still to come.
+images and PDFs as underlays are still to come. Walls, floors and the site's elements are made from its lines (Pick Lines, below).
 
 ## The reader
 
@@ -86,8 +86,42 @@ The engine removes a drawing nothing places after each command, and forgets the 
   model space is one `block` item (`b`, its index in `Dxf::inserts`, its point, turn, scale, the corners of the box round
   what it placed in its own turned frame, and its range of `n`), unless `explode` lists its entities one by one.
   `cad::placed` and `cad::frame_corners` do the geometry.
+- `cad_outlines` lists the closed outlines an import's lines make, and `wall`, `floor`, `property_line`, `building_pad` and
+  `toposolid` take a pick of its lines as `cad` (below).
 - `move`, `rotate`, `copy` and `delete` take an import as any element; `mirror` is refused, since a drawing's text would read
   backwards; `modify` changes its level, `at`, `angle`, `scale` and `colors`.
+
+## Building from a drawing (Pick Lines)
+
+As Revit's Pick Lines, model elements are made from an import's lines rather than retyped (`cad/outlines.rs`, the commands
+in `commands/cad_pick.rs`). A pick, `{id, entities?, layers?, box?}`, takes the import's entities `entities` names (their
+index in `Dxf::entities`), on `layers`, lying wholly inside `box` (two corners, model mm), each only when given; with
+neither `entities` nor `layers`, everything the import shows. Everything is placed by `cad_place` and in model mm.
+
+- `cad_outlines {id, …the pick, min_area?}` (no undo step) lists the closed outlines the picked entities make. Lines,
+  arcs and open polylines are joined where their ends meet within `outlines::SNAP` (5 mm) or one ends on another, and
+  cut where they cross (`geom::arrangement`, the planar faces rooms are found with, with each face's segments kept);
+  loose ends going nowhere are taken off and listed as `open` chains (`points`, `entities`). Each face is an outline,
+  and when lines across a shape split it (a wall across a building) the whole shape is one too, marked `whole`. A closed
+  polyline, a circle and each ring of a hatch are outlines as they are (`from`: lines, polyline, circle, hatch). An
+  outline inside another is its hole (`holes`, clockwise); the same ring found twice, a hatch over the lines round it, is
+  one outline of both. Each has `points` (counter-clockwise, to the hundredth), `area` (mm², less its holes), `area_m2`,
+  `layer` (or `layers`), `entities` and `labels`: the drawing's texts, on any layer, whose point lies inside it (each
+  line of an MTEXT is one). An arc is drawn in chords of 5°, none shorter than four snaps. Caps: `MAX_PICKED` entities,
+  `MAX_SEGMENTS`, `MAX_RINGS` outlines, `MAX_LABELS` labels each; past them the pick is to be narrowed.
+- `floor`, `property_line`, `building_pad` and `toposolid` take the pick as `cad`, instead of `boundary` (or `points`,
+  `sketch`): their outline is the one outermost outline it makes, a floor's openings its holes. A pick making none says
+  how many open chains it left; one making several says how many, and to pick one with `entities` or `box` as
+  `cad_outlines` lists them. Their level is the import's unless `level` says.
+- `wall` takes it as `cad` instead of `points`: one wall along each line, arc (a wall's `arc`, its sweep), polyline
+  segment and half circle picked, with every other parameter of a wall; `skipped` counts what draws no line (a text, a
+  point, a hatch). A polyline's bulges are read as short straight pieces, so each is a wall of its own.
+
+The ground from the drawing (Revit's toposurface Create from Import) isn't built: the reader keeps every point in plan
+(`Shape` is 2D; a LINE's, a POINT's and a polyline's z, codes 30 and 38, are not read), so a survey's 3D points and
+contours have no heights here. It would need `dxf.rs` to keep z (an elevation on `Shape::Point`, `Line` and `Polyline`, or
+a list of 3D points per entity), and then `toposolid` would take a pick as its `points`; spot heights written as text
+(a TEXT of "123.45" by a point) could be read too, with a rule for which number belongs to which point.
 
 ## Drawing and snapping
 
