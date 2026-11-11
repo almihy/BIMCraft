@@ -145,7 +145,7 @@ fn no_rules_all_passing_and_new_checks_each_say_so() {
     ]});
     h.state_mut().set_checks(&passing.to_string()).unwrap();
     h.run();
-    assert!(h.query_by_label("No flags").is_some() && h.query_by_label("Every check passed: 2 passed.").is_some());
+    assert!(h.query_by_label("No flags").is_some() && h.query_by_label("Every check passed.").is_some());
     assert!(h.query_by_label("Checks: no flags").is_some());
     // A problem in the model itself is a flag too, before the rules'; and the page checking again shows it is.
     let wall = ids(&h, "wall")[0];

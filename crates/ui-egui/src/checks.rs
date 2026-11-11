@@ -443,8 +443,8 @@ impl BimApp {
                 String::new()
             } else if report.rows.is_empty() {
                 t("No rules or client requirements apply to this project yet.").to_string()
-            } else if flags == 0 {
-                tf("Every check passed: {} passed.", &[&passed.to_string()])
+            } else if passed == report.rows.len() {
+                t("Every check passed.").to_string()
             } else {
                 tf("{} passed.", &[&passed.to_string()])
             };
