@@ -5,6 +5,8 @@
 
 use bimcraft_core::tempdims::{self, Side, TempDim, Witness};
 
+use crate::icons::Icon;
+
 use super::*;
 
 /// Where each wall's choice of witness lines is kept, in egui's memory: it holds for as long as the wall is selected again.
