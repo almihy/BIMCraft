@@ -708,12 +708,14 @@ impl BimApp {
                     }
                 }
             }
-        } else if row.state == State::Waived && row.waiver.is_some() && !key.is_empty() {
-            if icon_text_button(ui, Icon::Undo, t("Undo Waive")).on_hover_text(t("Flag it again")).clicked() {
-                self.checks.waive = Some(Waive::Remove { rule: key.clone() });
-                self.checks.waiting = Some(key.clone());
-                self.checks.refused = None;
-            }
+        } else if row.state == State::Waived
+            && row.waiver.is_some()
+            && !key.is_empty()
+            && icon_text_button(ui, Icon::Undo, t("Undo Waive")).on_hover_text(t("Flag it again")).clicked()
+        {
+            self.checks.waive = Some(Waive::Remove { rule: key.clone() });
+            self.checks.waiting = Some(key.clone());
+            self.checks.refused = None;
         }
         if let Some((_, why)) = self.checks.refused.as_ref().filter(|(k, _)| k == key) {
             ui.label(RichText::new(why).size(12.0).color(pal().error));
