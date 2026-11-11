@@ -24,11 +24,17 @@ use serde_json::{Map, Value};
 use crate::engine::{Session, Step};
 use crate::ids::{Changed, Guid, Id};
 use crate::model::{Element, Model};
-use crate::sync_settings::{self, setting_of};
+use crate::sync_settings::{self, Note, RENAMES, setting_of};
 
 /// The keys of a project's file that are not settings to send: its elements, the id the next one takes, and the library's
 /// own ids and GUIDs, each copy's.
 pub(crate) const NOT_SETTINGS: [&str; 3] = ["elements", "next_id", "library"];
+
+/// How copies of a project tell each other its settings, a number a room and a page compare: a page whose engine says
+/// another is not the room's, and loads again. 1: each setting a whole key (a whole map, `types`); 2: each entry of a map on its
+/// own (`types/wall/Brick 300`), phases with their places, rename notes ([`crate::sync_settings`]). Raised when a copy of the
+/// older would misread what the newer tells.
+pub const FORMAT: u32 = 2;
 
 /// Most changes one call takes, and the longest JSON of one: what comes from another copy is hostile.
 pub const MAX_CHANGES: usize = 200_000;
@@ -61,7 +67,7 @@ impl Changes {
         if let Some(g) = c.elements.keys().find(|g| g.is_nil() || g.pending().is_some()) {
             return Err(format!("{g} is not an element's GUID"));
         }
-        if let Some(k) = c.project.keys().find(|k| NOT_SETTINGS.contains(&setting_of(k))) {
+        if let Some(k) = c.project.keys().find(|k| sync_settings::is_own(k)) {
             return Err(format!("`{k}` is each copy's own, not a setting to change"));
         }
         Ok(c)
@@ -70,6 +76,27 @@ impl Changes {
     pub fn to_json(&self) -> String {
         serde_json::to_string(self).unwrap_or_else(|_| "{}".into())
     }
+
+    /// These changes without the rename notes (`renames/…`, [`crate::sync_settings`]): what a model that is to be told what
+    /// changed is told. A copy that keeps what it last sent is told so, so that what it did with the notes (a late edit put on the
+    /// new name, an element made to follow the rename) is still its own change to send, and heals the room.
+    pub fn without_notes(&self) -> Changes {
+        Changes {
+            project: self.project.iter().filter(|(k, _)| setting_of(k) != RENAMES).map(|(k, v)| (k.clone(), v.clone())).collect(),
+            ..self.clone()
+        }
+    }
+
+    /// Only the rename notes of these changes: what taking in the elements is told, so that they follow a rename.
+    fn notes_only(&self) -> BTreeMap<String, Option<String>> {
+        self.project.iter().filter(|(k, _)| setting_of(k) == RENAMES).map(|(k, v)| (k.clone(), v.clone())).collect()
+    }
+}
+
+/// What a room that keeps the settings `project` (by key, as it holds them) puts in it to be rid of the whole maps of copies
+/// of an older [`FORMAT`]: each made entries and its key taken away. See [`crate::sync_settings`].
+pub fn expand_settings(project: &BTreeMap<String, String>) -> Result<BTreeMap<String, Option<String>>, String> {
+    sync_settings::expand(project)
 }
 
 /// Whether an element is this copy's own, never sent nor taken: a link made from a project's text.
@@ -99,8 +126,20 @@ pub fn entries(m: &Model) -> Result<Changes, String> {
     Ok(c)
 }
 
-/// What changed from `before` to `after`, by GUID and by setting.
+/// What changed from `before` to `after`, by GUID and by setting, with a note for each entry that was renamed (what the others
+/// take to follow it, see [`crate::sync_settings`]).
 pub fn changes(before: &Model, after: &Model) -> Result<Changes, String> {
+    let mut c = plain_changes(before, after)?;
+    if !c.project.is_empty() {
+        for (k, new) in sync_settings::renames(before, after) {
+            c.project.insert(format!("{RENAMES}/{k}"), Some(Value::String(new).to_string()));
+        }
+    }
+    Ok(c)
+}
+
+/// [`changes`] without the notes: what the undo history keeps.
+fn plain_changes(before: &Model, after: &Model) -> Result<Changes, String> {
     let mut c = Changes::default();
     let guids: BTreeSet<Guid> = match after.elements.changed_since(&before.elements) {
         Changed::Ids(ids) => ids.iter().flat_map(|id| [before.elements.guid(*id), after.elements.guid(*id)]).flatten().collect(),
@@ -164,7 +203,7 @@ impl Model {
         if !c.project.is_empty()
             && let Ok(mut all) = self.with_settings(c, false)
         {
-            let wanted = Changes { project: BTreeMap::new(), ..c.clone() };
+            let wanted = Changes { project: c.notes_only(), ..c.clone() };
             let mut got = Merged::default();
             let whole = all.take_elements(&wanted, keep, ids, &mut got).and_then(|()| {
                 all.sync_library();
@@ -188,7 +227,7 @@ impl Model {
                 self.clone()
             }
         };
-        let wanted = Changes { project: BTreeMap::new(), ..c.clone() };
+        let wanted = Changes { project: c.notes_only(), ..c.clone() };
         let mut all = base.clone();
         let mut got = Merged::default();
         let whole = all.take_elements(&wanted, keep, ids, &mut got).and_then(|()| {
@@ -214,7 +253,7 @@ impl Model {
             );
         }
         for (g, v) in each {
-            let one = Changes { elements: BTreeMap::from([(g, v)]), ..Changes::default() };
+            let one = Changes { elements: BTreeMap::from([(g, v)]), project: c.notes_only(), ..Changes::default() };
             let mut next = m.clone();
             let mut got = Merged::default();
             let tried = next.take_elements(&one, keep, ids, &mut got).and_then(|()| {
@@ -251,6 +290,7 @@ impl Model {
         let mut m: Model = serde_json::from_value(Value::Object(map)).map_err(|e| format!("the project's settings: {e}"))?;
         m.elements = self.elements.clone();
         m.loaded = self.loaded.clone();
+        m.follow(&sync_settings::notes(&c.project)?);
         m.sync_library();
         if check {
             m.check()?;
@@ -306,6 +346,8 @@ impl Model {
             }
             out.taken.elements.insert(*g, v.clone());
         }
+        // What the elements name that a rename note says is renamed, they name by the new name.
+        self.follow(&sync_settings::notes(&c.project)?);
         if c.complete {
             let gone: Vec<Guid> = self
                 .elements
@@ -331,11 +373,33 @@ impl Model {
         out
     }
 
+    /// What is named by the old name of each rename `notes` tell, where this model has no entry of the old name and has one of
+    /// the new, is named by the new: its elements' types, its types' materials, its views' templates… ([`Model::lib_refs_mut`]).
+    pub(crate) fn follow(&mut self, notes: &[Note]) {
+        if notes.is_empty() {
+            return;
+        }
+        let have: BTreeSet<(crate::library::Kind, String)> = self.library_names().into_iter().collect();
+        let moves: Vec<(crate::library::Kind, String, String)> = notes
+            .iter()
+            .filter_map(|n| Some((n.kind()?, n.old().to_string(), n.new.clone())))
+            .filter(|(kind, old, new)| !have.contains(&(kind.clone(), old.clone())) && have.contains(&(kind.clone(), new.clone())))
+            .collect();
+        if moves.is_empty() {
+            return;
+        }
+        self.lib_refs_mut(&mut |kind, name| {
+            if let Some((_, _, new)) = moves.iter().find(|(k, old, _)| k == kind && old == name) {
+                *name = new.clone();
+            }
+        });
+    }
+
     /// `c` taken in without a check: for a model of the history, or what a copy last sent, what [`Model::merged`] took of it
     /// for the model now.
     pub fn with_changes(&self, c: &Changes, ids: &BTreeMap<Guid, Id>) -> Result<Model, String> {
         let mut m = self.with_settings(c, false)?;
-        let elements = Changes { project: BTreeMap::new(), complete: false, ..c.clone() };
+        let elements = Changes { project: c.notes_only(), complete: false, ..c.clone() };
         m.take_elements(&elements, &BTreeSet::new(), ids, &mut Merged::default())?;
         m.sync_library();
         Ok(m)
@@ -431,7 +495,7 @@ impl Session {
         for (stack, out) in [(&self.undo, &mut h.undo), (&self.redo, &mut h.redo)] {
             let mut nearer: &Model = &self.model;
             for (step, m) in stack.iter().rev() {
-                let c = changes(nearer, m)?;
+                let c = plain_changes(nearer, m)?;
                 nearer = m;
                 if c.is_empty() {
                     continue;
@@ -471,7 +535,7 @@ impl Session {
         let mut own_steps = false;
         let mut nearer: &Model = &self.model;
         for (_, m) in self.undo.iter().rev() {
-            own_steps |= !changes(m, nearer)?.is_empty();
+            own_steps |= !plain_changes(m, nearer)?.is_empty();
             nearer = m;
         }
         let anchor = match self.undo.first() {
@@ -480,7 +544,7 @@ impl Session {
         };
         // That model as the history last knew it, where the history touches it, and what the others changed of that since.
         let base = Arc::new(anchor.with_changes(&h.now, &BTreeMap::new())?);
-        let since = changes(&base, &anchor)?;
+        let since = plain_changes(&base, &anchor)?;
         let since_ids: BTreeMap<Guid, Id> = since.elements.keys().filter_map(|g| anchor.elements.id(*g).map(|id| (*g, id))).collect();
         let mut built: [Vec<(Step, Arc<Model>)>; 2] = Default::default();
         for (which, kept) in [&h.undo, &h.redo].into_iter().enumerate() {

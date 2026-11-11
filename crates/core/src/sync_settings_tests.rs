@@ -237,40 +237,6 @@ fn walls_of_a_type_added_at_the_same_moment_find_their_types_in_both_copies() {
 }
 
 #[test]
-fn phases_added_at_the_same_moment_are_both_kept_in_one_order() {
-    let (mut a, mut b) = two();
-    // A shared room keeps one of the two lists (here A's, the later write): its copy is told B's phase and not B's order, the
-    // other is told both. Both phases are kept either way, and the copies end in one order.
-    let (a0, b0) = (a.model.clone(), b.model.clone());
-    run(&mut a, "phase", json!({"name": "Phase A"}));
-    run(&mut b, "phase", json!({"name": "Phase B"}));
-    let from_b = {
-        let mut c = sync::changes(&b0, &b.model).unwrap();
-        assert!(c.project.contains_key("phases/Phase B") && c.project.contains_key("phases"));
-        c.project.remove("phases");
-        c
-    };
-    let from_a = sync::changes(&a0, &a.model).unwrap();
-    assert!(a.merge(&from_b, &BTreeSet::new()).unwrap().refused.is_empty());
-    assert!(b.merge(&from_a, &BTreeSet::new()).unwrap().refused.is_empty());
-    assert!(a.model.phases.contains(&"Phase A".to_string()) && a.model.phases.contains(&"Phase B".to_string()), "{:?}", a.model.phases);
-    assert_eq!(a.model.phases, b.model.phases);
-    assert_eq!(a.model.check(), Ok(()));
-    // Deleting one is that entry alone, and the order of the rest stays.
-    let before = a.model.clone();
-    run(&mut a, "phase", json!({"name": "Phase A", "delete": true, "into": "New Construction"}));
-    send(&before, &a, &mut b);
-    assert_eq!(a.model.phases, b.model.phases);
-    assert!(!b.model.phases.contains(&"Phase A".to_string()) && b.model.phases.contains(&"Phase B".to_string()));
-    // A phase added in the middle takes its place there.
-    let before = a.model.clone();
-    run(&mut a, "phase", json!({"name": "Phase C", "before": "New Construction"}));
-    send(&before, &a, &mut b);
-    assert_eq!(a.model.phases, b.model.phases);
-    assert_eq!(b.model.phases.iter().position(|p| p == "Phase C"), a.model.phases.iter().position(|p| p == "Phase C"));
-}
-
-#[test]
 fn a_name_with_a_slash_or_a_percent_travels_and_comes_back_as_it_was() {
     let (mut a, mut b) = two();
     let before = a.model.clone();
@@ -292,7 +258,7 @@ fn a_whole_room_makes_a_copy_say_every_entry_and_none_more() {
     // B has an entry the room doesn't, which it would lose.
     run(&mut b, "type", json!({"category": "wall", "name": "Only in B", "thickness": 100}));
     let all = sync::entries(&a.model).unwrap();
-    assert!(all.complete && all.project.contains_key("types/wall/Brick 300") && all.project.contains_key("phases"));
+    assert!(all.complete && all.project.contains_key("types/wall/Brick 300") && all.project.contains_key("phases/Phase A"));
     let c = Changes::read(&all.to_json()).unwrap();
     let got = b.merge(&c, &BTreeSet::new()).unwrap();
     assert!(got.refused.is_empty(), "{:?}", got.refused);
@@ -319,25 +285,10 @@ fn a_map_emptied_stays_empty_in_a_whole_room() {
 }
 
 #[test]
-fn a_whole_map_from_before_this_puts_its_entries_in_and_takes_none_out() {
-    let (mut a, _) = two();
-    run(&mut a, "material", json!({"name": "Mine", "color": "#010101"}));
-    let mut other = a.model.materials.clone();
-    let theirs = other.get("Mine").cloned().unwrap();
-    other.clear();
-    other.insert("Theirs".to_string(), theirs);
-    let mut project = BTreeMap::new();
-    project.insert("materials".to_string(), Some(serde_json::to_string(&*other).unwrap()));
-    let got = a.merge(&Changes { project, ..Changes::default() }, &BTreeSet::new()).unwrap();
-    assert!(got.refused.is_empty(), "{:?}", got.refused);
-    assert!(a.model.materials.contains_key("Theirs") && a.model.materials.contains_key("Mine"));
-}
-
-#[test]
 fn hostile_setting_keys_are_refused_without_a_change() {
     let (mut a, _) = two();
     let before = a.model.clone();
-    for k in ["library/x", "elements/x", "next_id/1"] {
+    for k in ["library/x", "elements/x", "next_id/1", "library%2Fx", "elements%2Fx"] {
         let text = json!({"project": {k: "1"}}).to_string();
         assert!(Changes::read(&text).is_err(), "{k}");
     }
@@ -347,4 +298,291 @@ fn hostile_setting_keys_are_refused_without_a_change() {
         assert!(!got.refused.is_empty(), "{k} is refused");
     }
     assert!(a.model.same_settings(&before));
+}
+
+/// A third copy of the same project.
+fn third(a: &Session) -> Session {
+    let mut x = Session::new();
+    x.reset(Model::read(&a.model.to_json().unwrap()).unwrap().0, None);
+    x
+}
+
+/// `c` told to `to`, as a page sends it (read back strictly).
+fn told(c: &Changes, to: &mut Session) {
+    let got = to.merge(&Changes::read(&c.to_json()).unwrap(), &BTreeSet::new()).unwrap();
+    assert!(got.refused.is_empty(), "{:?}", got.refused);
+}
+
+/// `c` as a page tells it where it changes a phase: with every phase the room holds (`room`, its keys), so that the places are the
+/// room's and not the order the copy happens to have them in.
+fn told_with_the_room_phases(c: &Changes, room: &BTreeMap<String, Option<String>>, to: &mut Session) {
+    let mut c = c.clone();
+    for (k, v) in room.iter().filter(|(k, _)| k.starts_with("phases/")) {
+        c.project.entry(k.clone()).or_insert_with(|| v.clone());
+    }
+    told(&c, to);
+}
+
+#[test]
+fn phases_added_at_the_same_moment_end_in_one_order_whichever_order_they_are_told_in() {
+    let (mut a, mut b) = two();
+    let mut c = third(&a);
+    let base = a.model.clone();
+    run(&mut a, "phase", json!({"name": "Phase A"}));
+    run(&mut b, "phase", json!({"name": "Phase B"}));
+    run(&mut c, "phase", json!({"name": "Phase C"}));
+    let (ca, cb, cc) =
+        (sync::changes(&base, &a.model).unwrap(), sync::changes(&base, &b.model).unwrap(), sync::changes(&base, &c.model).unwrap());
+    // No list of the order is sent: each phase says its own place, so there is no list for the last writer to win.
+    assert!(!ca.project.contains_key("phases") && ca.project.contains_key("phases/Phase A"), "{:?}", ca.project.keys());
+    // What the room holds of the phases: the base's, and the three added. Each copy is told the other two, in an order of its own.
+    let mut room = sync::entries(&base).unwrap();
+    for x in [&ca, &cb, &cc] {
+        room.project.extend(x.project.clone());
+    }
+    let places = room.project.clone();
+    told_with_the_room_phases(&cc, &places, &mut a);
+    told_with_the_room_phases(&cb, &places, &mut a);
+    told_with_the_room_phases(&ca, &places, &mut b);
+    told_with_the_room_phases(&cc, &places, &mut b);
+    told_with_the_room_phases(&cb, &places, &mut c);
+    told_with_the_room_phases(&ca, &places, &mut c);
+    let want: Vec<String> = ["Existing", "New Construction", "Phase A", "Phase B", "Phase C"].map(String::from).to_vec();
+    assert_eq!(a.model.phases, want);
+    assert_eq!(b.model.phases, want);
+    assert_eq!(c.model.phases, want);
+    // And a copy made from the whole room (the base and the three's entries together) agrees.
+    let mut d = third(&a);
+    told(&room, &mut d);
+    assert_eq!(d.model.phases, want);
+    assert_eq!(a.model.check(), Ok(()));
+}
+
+#[test]
+fn deleting_a_phase_and_adding_one_in_the_middle_keep_the_order_of_the_rest() {
+    let (mut a, mut b) = two();
+    let before = a.model.clone();
+    run(&mut a, "phase", json!({"name": "Phase A"}));
+    run(&mut a, "phase", json!({"name": "Phase B"}));
+    send(&before, &a, &mut b);
+    assert_eq!(a.model.phases, b.model.phases);
+    // Deleting one is that entry alone, and the order of the rest stays.
+    let before = a.model.clone();
+    run(&mut a, "phase", json!({"name": "Phase A", "delete": true, "into": "New Construction"}));
+    send(&before, &a, &mut b);
+    assert_eq!(a.model.phases, b.model.phases);
+    assert!(!b.model.phases.contains(&"Phase A".to_string()) && b.model.phases.contains(&"Phase B".to_string()));
+    // A phase added in the middle takes its place there.
+    let before = a.model.clone();
+    run(&mut a, "phase", json!({"name": "Phase C", "before": "New Construction"}));
+    send(&before, &a, &mut b);
+    assert_eq!(a.model.phases, b.model.phases);
+    assert_eq!(b.model.phases.iter().position(|p| p == "Phase C"), Some(1));
+}
+
+/// The materials of `m` as an old page sent them: one whole map.
+fn whole_materials(m: &Model) -> Changes {
+    let mut project = BTreeMap::new();
+    project.insert("materials".to_string(), Some(serde_json::to_string(&m.materials).unwrap()));
+    Changes { project, ..Changes::default() }
+}
+
+#[test]
+fn an_old_whole_map_never_brings_a_deleted_entry_back_in_a_change() {
+    let (mut a, mut b) = two();
+    run(&mut a, "material", json!({"name": "Gone", "color": "#010101"}));
+    run(&mut a, "material", json!({"name": "Kept", "color": "#020202"}));
+    let old_page = whole_materials(&a.model);
+    send(&b.model.clone(), &a, &mut b);
+    let before = a.model.clone();
+    run(&mut a, "material", json!({"name": "Gone", "delete": true}));
+    send(&before, &a, &mut b);
+    assert!(!b.model.materials.contains_key("Gone"));
+    // A page still on the old engine put its whole map in the room: every copy, and the server at every save, is told it
+    // again; none of it takes an entry back.
+    for _ in 0..2 {
+        for s in [&mut a, &mut b] {
+            let got = s.merge(&old_page, &BTreeSet::new()).unwrap();
+            assert!(got.refused.is_empty(), "{:?}", got.refused);
+            assert!(!s.model.materials.contains_key("Gone") && s.model.materials.contains_key("Kept"));
+        }
+    }
+}
+
+#[test]
+fn an_old_whole_map_is_taken_in_a_whole_room_and_the_entries_told_overrule_it() {
+    let (mut a, mut b) = two();
+    run(&mut a, "material", json!({"name": "Mine", "color": "#010101"}));
+    let theirs = a.model.materials.get("Mine").cloned().unwrap();
+    let mut old = (*a.model).clone();
+    old.materials.insert("Theirs".to_string(), theirs.clone());
+    old.materials.insert("Mine".to_string(), theirs);
+    // The room: everything a copy says, but its materials are an old page's whole map, and an entry of its own that overrules it.
+    run(&mut a, "material", json!({"name": "Mine", "color": "#999999"}));
+    let mut room = sync::entries(&a.model).unwrap();
+    room.project.retain(|k, _| !k.starts_with("materials/"));
+    room.project.extend(whole_materials(&old).project);
+    room.project.insert("materials/Mine".into(), Some(serde_json::to_string(a.model.materials.get("Mine").unwrap()).unwrap()));
+    told(&room, &mut b);
+    assert!(b.model.materials.contains_key("Theirs") && b.model.materials.len() == old.materials.len());
+    assert_eq!(b.model.materials.get("Mine"), a.model.materials.get("Mine"), "the entry told is the later");
+}
+
+#[test]
+fn a_whole_map_is_made_entries_for_a_room_that_keeps_it_and_its_whole_key_goes() {
+    let (mut a, _) = two();
+    run(&mut a, "material", json!({"name": "Alpha", "color": "#010101"}));
+    run(&mut a, "type", json!({"category": "wall", "name": "Brick 300", "thickness": 300}));
+    let mut room: BTreeMap<String, String> = BTreeMap::new();
+    room.insert("materials".into(), serde_json::to_string(&a.model.materials).unwrap());
+    room.insert("types".into(), serde_json::to_string(&a.model.types).unwrap());
+    // An entry the room has says its own; a map with no entries and a single-valued setting are left alone.
+    room.insert("materials/Alpha".into(), "{}".into());
+    room.insert("line_patterns".into(), "{}".into());
+    room.insert("units".into(), "{}".into());
+    let out = crate::sync_settings::expand(&room).unwrap();
+    assert_eq!(out.get("materials"), Some(&None));
+    assert_eq!(out.get("types"), Some(&None));
+    assert!(out.get("types/wall/Brick 300").is_some_and(Option::is_some));
+    assert!(!out.contains_key("materials/Alpha"), "the entry the room has is not put over");
+    assert!(!out.contains_key("line_patterns") && !out.contains_key("units"));
+    // The entries it makes are what a copy takes as a change.
+    let project: BTreeMap<String, Option<String>> = out.into_iter().filter(|(_, v)| v.is_some()).collect();
+    let (mut b, _) = two();
+    told(&Changes { project, ..Changes::default() }, &mut b);
+    assert!(b.model.types.wall.contains_key("Brick 300"));
+}
+
+#[test]
+fn the_sync_format_is_a_number_a_room_and_a_page_compare() {
+    assert_eq!(sync::FORMAT, 2);
+}
+
+/// What a change says under `key`, a JSON text.
+fn said(c: &Changes, key: &str) -> Option<String> {
+    c.project.get(key).cloned().flatten()
+}
+
+#[test]
+fn a_rename_travels_with_a_note_naming_the_old_and_the_new() {
+    let (mut a, _) = two();
+    run(&mut a, "type", json!({"category": "wall", "name": "Old", "thickness": 200}));
+    run(&mut a, "material", json!({"name": "Clay", "color": "#aa5533"}));
+    let before = a.model.clone();
+    run(&mut a, "rename_type", json!({"category": "wall", "type": "Old", "name": "New"}));
+    run(&mut a, "material", json!({"name": "Clay", "rename": "Terracotta"}));
+    let c = sync::changes(&before, &a.model).unwrap();
+    assert_eq!(said(&c, "renames/types/wall/Old"), Some("\"New\"".into()), "{:?}", c.project.keys());
+    assert_eq!(said(&c, "renames/materials/Clay"), Some("\"Terracotta\"".into()));
+    // A type only removed and another only added are no rename.
+    let before = a.model.clone();
+    run(&mut a, "delete_type", json!({"category": "wall", "type": "New"}));
+    run(&mut a, "type", json!({"category": "wall", "name": "Else", "thickness": 100}));
+    let c = sync::changes(&before, &a.model).unwrap();
+    assert!(!c.project.keys().any(|k| k.starts_with("renames/")), "{:?}", c.project.keys());
+    // A model of the undo history is told what changed, not the notes (they are for the others' copies).
+    let mut with = Changes::default();
+    with.project.insert("renames/types/wall/Old".into(), Some("\"New\"".into()));
+    with.project.insert("types/wall/New".into(), Some("{}".into()));
+    assert_eq!(with.without_notes().project.keys().collect::<Vec<_>>(), ["types/wall/New"]);
+}
+
+#[test]
+fn a_rename_by_one_and_an_edit_of_the_old_name_by_another_end_as_one_entry_with_the_edit() {
+    let (mut a, mut b) = two();
+    let base = a.model.clone();
+    run(&mut a, "type", json!({"category": "wall", "name": "Old", "thickness": 200}));
+    send(&base, &a, &mut b);
+    let (a0, b0) = (a.model.clone(), b.model.clone());
+    run(&mut a, "rename_type", json!({"category": "wall", "type": "Old", "name": "New"}));
+    run(&mut b, "type", json!({"category": "wall", "name": "Old", "thickness": 260}));
+    let (from_a, from_b) = (sync::changes(&a0, &a.model).unwrap(), sync::changes(&b0, &b.model).unwrap());
+    let note = from_a.project["renames/types/wall/Old"].clone();
+    // The room has B's edit (an edit wins over a removal), A's New, and A's note. A is told B's edit (the note stands in the
+    // room); B is told what A did, and not the removal that its edit beat.
+    let mut to_a = Changes::default();
+    to_a.project.insert("types/wall/Old".into(), from_b.project["types/wall/Old"].clone());
+    to_a.project.insert("renames/types/wall/Old".into(), note.clone());
+    let mut to_b = Changes::default();
+    to_b.project.insert("types/wall/New".into(), from_a.project["types/wall/New"].clone());
+    to_b.project.insert("renames/types/wall/Old".into(), note.clone());
+    told(&to_a, &mut a);
+    told(&to_b, &mut b);
+    for m in [&a.model, &b.model] {
+        assert!(!m.types.wall.contains_key("Old"), "{:?}", wall_types(m));
+        assert_eq!(thickness(m, "New"), 260.0, "the edit lands on the new name");
+        assert_eq!(m.check(), Ok(()));
+    }
+    assert_eq!(a.model.types, b.model.types);
+    // A copy made from the whole room (Old with the edit, New, and the note) says the same.
+    let mut whole = sync::entries(&base).unwrap();
+    whole.project.remove("types/wall/Old");
+    whole.project.insert("types/wall/Old".into(), from_b.project["types/wall/Old"].clone());
+    whole.project.insert("types/wall/New".into(), from_a.project["types/wall/New"].clone());
+    whole.project.insert("renames/types/wall/Old".into(), note);
+    let mut d = third(&a);
+    told(&whole, &mut d);
+    assert_eq!(d.model.types, a.model.types);
+}
+
+#[test]
+fn an_element_of_the_old_name_placed_while_it_was_renamed_follows_the_rename_in_every_copy() {
+    let (mut a, mut b) = two();
+    let base = a.model.clone();
+    run(&mut a, "type", json!({"category": "wall", "name": "Old", "thickness": 200}));
+    send(&base, &a, &mut b);
+    let (a0, b0) = (a.model.clone(), b.model.clone());
+    run(&mut a, "rename_type", json!({"category": "wall", "type": "Old", "name": "New"}));
+    let wall = run(&mut b, "wall", json!({"points": [[0, 0], [6000, 0]], "type": "Old"}))["ids"][0].as_u64().unwrap();
+    let guid = b.model.elements.guid(wall).unwrap();
+    let from_a = sync::changes(&a0, &a.model).unwrap();
+    let from_b = sync::changes(&b0, &b.model).unwrap();
+    assert_eq!(from_b.elements.len(), 1);
+    // B has not seen the rename: its wall is its own change, not sent yet (`keep`), and the rename comes to it.
+    let got = b.merge(&from_a, &BTreeSet::from([guid])).unwrap();
+    assert!(got.refused.is_empty(), "the rename is taken and B's wall follows it: {:?}", got.refused);
+    // A is told the wall, and the note stands in the room.
+    let mut to_a = from_b.clone();
+    to_a.project.insert("renames/types/wall/Old".into(), from_a.project["renames/types/wall/Old"].clone());
+    let got = a.merge(&to_a, &BTreeSet::new()).unwrap();
+    assert!(got.refused.is_empty(), "A takes the wall: {:?}", got.refused);
+    for m in [&a.model, &b.model] {
+        assert_eq!(walls(m), 1, "the wall is in every copy");
+        let Some(Element::Wall(w)) = m.elements.get(guid) else { panic!("no wall") };
+        assert_eq!(w.type_name, "New");
+        assert!(!m.types.wall.contains_key("Old"));
+        assert_eq!(m.check(), Ok(()));
+    }
+    // What B sends next is its wall of the new name (the baseline was told the rename without its note).
+    let baseline = b0.with_changes(&from_a.without_notes(), &BTreeMap::new()).unwrap();
+    assert!(sync::changes(&baseline, &b.model).unwrap().elements.contains_key(&guid));
+}
+
+#[test]
+fn a_note_that_names_no_entry_is_refused_without_a_change() {
+    let (mut a, _) = two();
+    let before = a.model.clone();
+    for (k, v) in [
+        ("renames/units", json!("x")),
+        ("renames/types/wall", json!("x")),
+        ("renames/bogus/x", json!("x")),
+        ("renames/materials/Clay", json!(7)),
+    ] {
+        let c = Changes::read(&json!({"project": {k: v.to_string()}}).to_string()).unwrap();
+        assert!(!a.merge(&c, &BTreeSet::new()).unwrap().refused.is_empty(), "{k}");
+    }
+    assert!(a.model.same_settings(&before));
+}
+
+#[test]
+fn the_undo_history_keeps_a_rename_without_its_note() {
+    let (mut a, _) = two();
+    run(&mut a, "type", json!({"category": "wall", "name": "Old", "thickness": 200}));
+    run(&mut a, "rename_type", json!({"category": "wall", "type": "Old", "name": "New"}));
+    let h = a.kept_history().unwrap();
+    let keys: Vec<&String> = h.undo.iter().flat_map(|s| s.changes.project.keys()).chain(h.now.project.keys()).collect();
+    assert!(!keys.is_empty() && !keys.iter().any(|k| k.starts_with("renames/")), "{keys:?}");
+    // And it goes back on the project opened again.
+    let mut again = third(&a);
+    assert!(again.restore_history(&h).is_ok());
 }
