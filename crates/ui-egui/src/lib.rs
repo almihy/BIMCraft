@@ -2074,9 +2074,7 @@ impl BimApp {
         let enter = pressed(Modifiers::NONE, Key::Enter);
         if enter && (self.enter_for_pending() || self.enter_to_repeat()) {
             self.snap_once = None;
-        } else if enter
-            && let Some(level) = self.plan_level()
-        {
+        } else if enter && let Some(level) = self.plan_level() {
             // Enter places a typed length, else builds the wall chain.
             match (&self.tool, self.typed_length.is_empty() && self.drawing.other.is_empty()) {
                 _ if self.picking_pattern_lines() => self.finish_pattern_lines(),
@@ -4639,7 +4637,9 @@ impl BimApp {
                 for row in rows {
                     ui.horizontal(|ui| {
                         for (icon, label, tip, tool, enabled) in row {
-                            let active = tool.as_ref().is_some_and(|t| on(t, self.flow.pending.as_ref().unwrap_or(&self.tool)) && *t != Tool::Modify);
+                            let active = tool
+                                .as_ref()
+                                .is_some_and(|t| on(t, self.flow.pending.as_ref().unwrap_or(&self.tool)) && *t != Tool::Modify);
                             if ui.add_enabled_ui(*enabled, |ui| small_button(ui, *icon, label, active, tip)).inner.clicked() {
                                 match tool {
                                     Some(t) => self.set_tool(t.clone()),
@@ -5491,7 +5491,8 @@ impl eframe::App for BimApp {
         self.pace(&mut raw.events);
         if self.canvas.hovering() && !ctx.egui_wants_keyboard_input() {
             self.tab_cycle |= raw.events.iter().any(|e| matches!(e, Event::Key { key: Key::Tab, pressed: true, .. }));
-            self.flow.back |= raw.events.iter().any(|e| matches!(e, Event::Key { key: Key::Tab, pressed: true, modifiers, .. } if modifiers.shift));
+            self.flow.back |=
+                raw.events.iter().any(|e| matches!(e, Event::Key { key: Key::Tab, pressed: true, modifiers, .. } if modifiers.shift));
             raw.events.retain(|e| !matches!(e, Event::Key { key: Key::Tab, .. }));
         }
     }

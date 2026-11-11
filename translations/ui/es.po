@@ -11988,3 +11988,15 @@ msgstr "Superior"
 #: crates/ui-egui/src/dock.rs:43
 #~ msgid "Tools"
 #~ msgstr "Herramientas"
+
+#: crates/ui-egui/src/lib.rs
+msgid "Zoom Region"
+msgstr "Zoom por región"
+
+#: crates/ui-egui/src/lib.rs
+msgid "Previous Zoom"
+msgstr "Zoom anterior"
+
+#: crates/ui-egui/src/lib.rs
+msgid "Repeat Last Command"
+msgstr "Repetir último comando"

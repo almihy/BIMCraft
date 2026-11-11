@@ -11921,3 +11921,15 @@ msgstr "Horní"
 #: crates/ui-egui/src/dock.rs:43
 #~ msgid "Tools"
 #~ msgstr "Nástroje"
+
+#: crates/ui-egui/src/lib.rs
+msgid "Zoom Region"
+msgstr "Přiblížit oblast"
+
+#: crates/ui-egui/src/lib.rs
+msgid "Previous Zoom"
+msgstr "Předchozí zoom"
+
+#: crates/ui-egui/src/lib.rs
+msgid "Repeat Last Command"
+msgstr "Opakovat poslední příkaz"

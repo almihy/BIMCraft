@@ -18,8 +18,8 @@ use bimcraft_core::view3d::shape_snap_plan;
 use bimcraft_core::walls::{self, Axis};
 use bimcraft_core::{floor_outline, opening_of, roof_footprint};
 use egui::{
-    Align, Align2, Color32, ColorImage, Event, FontId, Key, Mesh, Modifiers, Painter, PointerButton, Pos2, Rect, Response, Sense,
-    Shape, Stroke, StrokeKind, TextEdit, TextureHandle, TextureId, TextureOptions, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2,
+    Align, Align2, Color32, ColorImage, Event, FontId, Key, Mesh, Modifiers, Painter, PointerButton, Pos2, Rect, Response, Sense, Shape,
+    Stroke, StrokeKind, TextEdit, TextureHandle, TextureId, TextureOptions, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2,
 };
 use serde_json::{Value, json};
 

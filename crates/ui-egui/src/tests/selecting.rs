@@ -142,7 +142,7 @@ door {"at": [5000, 0], "type": "Single 900 x 2100"}"#);
     h.run();
     let at = h.state().screen(P2(4000.0, 3000.0));
     assert_eq!(offered(&mut h, at, &["Create Similar"]), ["Create Similar"]);
-    h.state_mut().types.insert("door".into(), "something else".into());
+    h.state_mut().types.insert("door", "something else".into());
     choose_item(&mut h, "Create Similar");
     assert_eq!(h.state().tool, Tool::Door);
     assert_eq!(h.state().types.get("door"), Some(&ty), "with the type of the one selected");
@@ -225,7 +225,11 @@ fn the_arrow_keys_nudge_the_selection_a_step_that_follows_the_zoom_and_shift_tak
     let step = nudge_step(h.state().canvas.view(key_of(&h)).unwrap().scale);
     key(&mut h, Key::ArrowRight);
     let (b, _) = ends(&h);
-    assert!((b.0 - a.0 - step).abs() < 1e-6 && (b.1 - a.1).abs() < 1e-6, "a step right: {a:?} to {b:?}, step {step}, {:?}", h.state().status);
+    assert!(
+        (b.0 - a.0 - step).abs() < 1e-6 && (b.1 - a.1).abs() < 1e-6,
+        "a step right: {a:?} to {b:?}, step {step}, {:?}",
+        h.state().status
+    );
     key(&mut h, Key::ArrowUp);
     let (c, _) = ends(&h);
     assert!((c.1 - b.1 - step).abs() < 1e-6, "a step up (north): {b:?} to {c:?}");
