@@ -1262,7 +1262,7 @@ fn step_name(st: &engine::Step) -> String {
     named.unwrap_or_else(|| t(&st.label).to_string())
 }
 
-/// A tab, of the ribbon or of a view. Contextual tabs are green, as Revit's are.
+/// A tab of the ribbon. Contextual tabs are green, as Revit's are (a hosting page's accent where it gives one).
 fn tab_button(ui: &mut Ui, label: &str, active: bool, contextual: bool) -> Response {
     tab_button_with(ui, label, active, contextual, Sense::click(), 0.0)
 }
@@ -1277,7 +1277,7 @@ fn tab_button_with(ui: &mut Ui, label: &str, active: bool, contextual: bool, sen
     // A pill: the open tab in the accent's soft tint, a contextual one solid green when open and tinted green when not.
     let (fill, stroke, ink) = match (contextual, active, r.hovered()) {
         (true, true, _) => (pal().context, Stroke::NONE, pal().on_context),
-        (true, false, _) => (pal().context_fill, Stroke::new(1.0, pal().context.gamma_multiply(0.5)), pal().context),
+        (true, false, _) => (pal().context_fill, Stroke::new(1.0, pal().context.gamma_multiply(0.5)), pal().context_ink),
         (false, true, _) => (pal().select_fill, Stroke::NONE, pal().accent_ink),
         (false, false, true) => (pal().hover_fill, Stroke::NONE, pal().text),
         (false, false, false) => (Color32::TRANSPARENT, Stroke::NONE, pal().text),
@@ -1836,12 +1836,15 @@ impl BimApp {
             // A schedule's table keeps its rows clear of the tabs.
             let table = matches!(self.sheet, Sheet::Schedule(_) | Sheet::Table(_));
             if style::compact() || table {
-                Panel::top("view-tabs")
-                    .frame(Frame::new().inner_margin(Margin { left: g, right: g, top: g, bottom: 4 }))
-                    .show_separator_line(false)
-                    .show(ui, |ui| {
-                        self.view_tabs(ui);
-                    });
+                // Compact: a strip across the top of the view, the tabs standing on its foot (Revit's document tabs).
+                let strip = style::compact();
+                let frame = match strip {
+                    true => Frame::new().fill(style::tab_strip()).inner_margin(Margin { left: 4, right: 0, top: 4, bottom: 0 }),
+                    false => Frame::new().inner_margin(Margin { left: g, right: g, top: g, bottom: 4 }),
+                };
+                Panel::top("view-tabs").frame(frame).show_separator_line(false).show(ui, |ui| {
+                    self.view_tabs(ui, strip);
+                });
                 self.view_pane(ui, front);
                 self.tabs_foot = f32::NEG_INFINITY;
             } else {
@@ -1852,7 +1855,7 @@ impl BimApp {
                 let card = style::card([true, false, true, false]).inner_margin(Margin::same(2));
                 // A child that takes no room of the pane's: over the view, not after it.
                 let mut over = ui.new_child(UiBuilder::new().id_salt("view-tabs").max_rect(pane));
-                self.tabs_foot = card.show(&mut over, |ui| self.view_tabs(ui)).response.rect.bottom();
+                self.tabs_foot = card.show(&mut over, |ui| self.view_tabs(ui, false)).response.rect.bottom();
             }
             self.work = self.pane.with_min_y(self.pane.top().max(self.tabs_foot));
         });
@@ -5358,58 +5361,205 @@ impl BimApp {
 
     // ---------- the middle: view tabs, schedules ----------
 
-    /// The docked views' tabs: a click opens one, a drag moves it along the bar or, let go off it, floats it.
-    fn view_tabs(&mut self, ui: &mut Ui) {
+    /// The icon of a view's kind, before its name on its tab.
+    fn view_icon(&self, sheet: Sheet) -> Icon {
+        match sheet {
+            Sheet::Plan(_) => Icon::Plan,
+            Sheet::Ceiling(_) => Icon::Ceiling,
+            Sheet::View3D => Icon::View3D,
+            Sheet::Section(id) if matches!(self.session.model.elements.get(id), Some(Element::Elevation(_))) => Icon::Elevation,
+            Sheet::Section(_) => Icon::Section,
+            Sheet::Paper(_) => Icon::Sheet,
+            Sheet::Schedule(_) | Sheet::Table(_) => Icon::Schedule,
+        }
+    }
+
+    /// The docked views' tabs, as Revit's document tabs: rectangular, along the top of the view; the open one in the view's own
+    /// colour and joined to it, the others on the strip with a thin line between; each the view's kind's icon and its name, cut
+    /// short with an ellipsis, its × on the open tab and the one under the pointer. When they don't fit, the strip scrolls to the
+    /// open one and a drop-down at its end lists them all. A click opens one, a drag moves it along the bar or, let go off it,
+    /// floats it; a right-click floats or closes it. `strip`: across the whole width, on the strip's colour (the Compact layout);
+    /// otherwise as wide as the tabs, on the card they float on.
+    fn view_tabs(&mut self, ui: &mut Ui, strip: bool) {
+        use egui::scroll_area::ScrollBarVisibility;
+        use egui::text::{LayoutJob, TextWrapping};
+        const TAB: f32 = 28.0;
+        const MORE: f32 = 28.0;
         self.tab_rects.clear();
-        let mut closed = None;
-        let bar = ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 0.0;
-            for sheet in self.views.clone() {
+        let many = self.views.len() > 1;
+        let front = self.front;
+        let font = FontId::proportional(12.5);
+        let tabs: Vec<(Sheet, String, Icon, Arc<egui::Galley>, f32)> = self
+            .views
+            .clone()
+            .into_iter()
+            .map(|sheet| {
                 // A ceiling plan's tab says so: its level's plan has the level's name too.
                 let name = if matches!(sheet, Sheet::Ceiling(_)) { self.view_title(sheet) } else { self.view_name(sheet) };
-                let many = self.views.len() > 1;
-                let r = tab_button_with(ui, &name, sheet == self.front, false, Sense::click_and_drag(), if many { 18.0 } else { 0.0 });
-                self.tab_rects.push((sheet, r.rect));
-                // The × is part of the tab, at its right end.
-                if many {
-                    let x = Rect::from_center_size(pos2(r.rect.right() - 16.0, r.rect.center().y), vec2(16.0, 16.0));
-                    let label = tf("Close {}", &[&name]);
-                    let c = ui.interact(x, ui.id().with(("close view", sheet)), Sense::click());
-                    c.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &label));
-                    if c.hovered() {
-                        ui.painter().rect_filled(x, 3.0, pal().hover_fill);
-                    }
-                    let ink = if c.hovered() || sheet == self.front { pal().text } else { pal().muted };
-                    let d = 3.5;
-                    for (a, b) in [(vec2(-d, -d), vec2(d, d)), (vec2(-d, d), vec2(d, -d))] {
-                        ui.painter().line_segment([x.center() + a, x.center() + b], Stroke::new(1.2, ink));
-                    }
-                    if c.clicked() {
-                        closed = Some(sheet);
-                    }
-                }
-                if r.clicked() {
-                    self.open_sheet(sheet);
-                }
-                if r.drag_started() {
-                    self.dragging = Some(dock::Drag::View(sheet));
-                }
-                r.context_menu(|ui| {
-                    if ui.add_enabled(many, egui::Button::new(t("Float"))).clicked() {
-                        let at = self.view_rect.left_top() + vec2(60.0, 60.0);
-                        self.float_view(sheet, at);
-                    }
-                    if ui.add_enabled(many, egui::Button::new(t("Close"))).clicked() {
-                        self.close_view(sheet);
+                let mut job = LayoutJob::simple_singleline(name.clone(), font.clone(), Color32::PLACEHOLDER);
+                job.wrap = TextWrapping { max_width: 170.0, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+                let galley = ui.painter().layout_job(job);
+                let width = (10.0 + 14.0 + 6.0 + galley.size().x + if many { 26.0 } else { 12.0 }).ceil();
+                (sheet, name, self.view_icon(sheet), galley, width)
+            })
+            .collect();
+        let total: f32 = tabs.iter().map(|t| t.4).sum();
+        let room = ui.available_width();
+        let over = total > room;
+        let more = if over { MORE } else { 0.0 };
+        let (bar, _) = ui.allocate_exact_size(vec2(if strip { room } else { (total + more).min(room) }, TAB), Sense::hover());
+        let shown = Rect::from_min_size(bar.min, vec2(bar.width() - more, TAB));
+        // The open view's tab is scrolled to when it becomes the open one.
+        let key = ui.id().with("view-tabs-front");
+        let newly = ui.ctx().data_mut(|d| {
+            let was = d.get_temp::<Sheet>(key);
+            d.insert_temp(key, front);
+            was != Some(front)
+        });
+        let mut closed = None;
+        let mut opened = None;
+        let mut child = ui.new_child(UiBuilder::new().max_rect(shown).layout(Layout::top_down(Align::Min)));
+        child.set_clip_rect(shown.intersect(ui.clip_rect()));
+        let border = Stroke::new(1.0, pal().border);
+        // On the strip, the open tab is the view's colour, which it runs into; floating on a card, the field's.
+        let view = if strip { self.backdrop() } else { pal().surface };
+        ScrollArea::horizontal()
+            .id_salt("view-tabs-scroll")
+            .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
+            .max_width(shown.width())
+            .show(&mut child, |ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                ui.horizontal(|ui| {
+                    let active_at = tabs.iter().position(|t| t.0 == front);
+                    for (i, (sheet, name, icon, galley, width)) in tabs.iter().enumerate() {
+                        let (sheet, active) = (*sheet, *sheet == front);
+                        let (rect, r) = ui.allocate_exact_size(vec2(*width, TAB), Sense::click_and_drag());
+                        r.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, active, name));
+                        self.tab_rects.push((sheet, rect));
+                        if active && newly {
+                            r.scroll_to_me(None);
+                        }
+                        let under = ui.rect_contains_pointer(rect);
+                        let p = ui.painter();
+                        if active {
+                            // In the view's colour, its edges a hairline but for its foot, where it runs into the view.
+                            p.rect_filled(rect, 0.0, view);
+                            let (l, rt, top) = (rect.left() + 0.5, rect.right() - 0.5, rect.top() + 0.5);
+                            p.line_segment([pos2(l, rect.bottom()), pos2(l, top)], border);
+                            p.line_segment([pos2(l, top), pos2(rt, top)], border);
+                            p.line_segment([pos2(rt, top), pos2(rt, rect.bottom())], border);
+                        } else if under {
+                            p.rect_filled(rect.shrink2(vec2(1.0, 3.0)), 4.0, pal().hover_fill);
+                        } else if active_at != Some(i + 1) && i + 1 < tabs.len() {
+                            // A thin line before the next tab, unless that is the open one.
+                            let x = rect.right() - 0.5;
+                            p.line_segment([pos2(x, rect.top() + 8.0), pos2(x, rect.bottom() - 8.0)], border);
+                        }
+                        if r.has_focus() {
+                            p.rect_stroke(rect.shrink(1.0), 4.0, style::focus_ring(), StrokeKind::Inside);
+                        }
+                        let ink = if active || under { pal().text } else { pal().muted };
+                        let at = Rect::from_center_size(pos2(rect.left() + 17.0, rect.center().y), vec2(14.0, 14.0));
+                        icons::paint(p, *icon, at, if active { pal().icon } else { ink });
+                        p.galley(pos2(rect.left() + 30.0, rect.center().y - galley.size().y / 2.0), Arc::clone(galley), ink);
+                        // The × is part of the tab, at its right end: drawn on the open tab and the one under the pointer.
+                        if many {
+                            let x = Rect::from_center_size(pos2(rect.right() - 14.0, rect.center().y), vec2(16.0, 16.0));
+                            let label = tf("Close {}", &[name]);
+                            let c = ui.interact(x, ui.id().with(("close view", sheet)), Sense::click());
+                            c.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &label));
+                            if active || under || c.has_focus() {
+                                let p = ui.painter();
+                                if c.hovered() {
+                                    p.rect_filled(x, 3.0, if active { pal().hover_fill } else { pal().panel });
+                                }
+                                let ink = if c.hovered() { pal().text } else { pal().muted };
+                                let d = 3.5;
+                                for (a, b) in [(vec2(-d, -d), vec2(d, d)), (vec2(-d, d), vec2(d, -d))] {
+                                    p.line_segment([x.center() + a, x.center() + b], Stroke::new(1.2, ink));
+                                }
+                            }
+                            if c.clicked() {
+                                closed = Some(sheet);
+                            }
+                        }
+                        if r.clicked() {
+                            opened = Some(sheet);
+                        }
+                        if r.drag_started() {
+                            self.dragging = Some(dock::Drag::View(sheet));
+                        }
+                        r.context_menu(|ui| {
+                            if ui.add_enabled(many, egui::Button::new(t("Float"))).clicked() {
+                                let at = self.view_rect.left_top() + vec2(60.0, 60.0);
+                                self.float_view(sheet, at);
+                            }
+                            if ui.add_enabled(many, egui::Button::new(t("Close"))).clicked() {
+                                self.close_view(sheet);
+                            }
+                        });
                     }
                 });
-                ui.add_space(2.0);
+            });
+        // The strip's foot, a hairline but under the open tab, which runs into the view.
+        if strip {
+            let y = bar.bottom() - 0.5;
+            let open = self.tab_rects.iter().find(|(s, _)| *s == front).map(|(_, r)| r.intersect(shown)).filter(|r| r.width() > 0.0);
+            let p = ui.painter();
+            match open {
+                Some(o) => {
+                    p.hline(bar.left()..=o.left() + 0.5, y, border);
+                    p.hline(o.right() - 0.5..=bar.right(), y, border);
+                }
+                None => {
+                    p.hline(bar.x_range(), y, border);
+                }
             }
-        });
+        }
+        // When they don't all fit: every open view, from a drop-down at the strip's end.
+        if over {
+            let at = Rect::from_min_size(pos2(bar.right() - MORE, bar.top()), vec2(MORE, TAB)).shrink2(vec2(2.0, 3.0));
+            let r = ui.interact(at, ui.id().with("all open views"), Sense::click());
+            r.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, t("All open views")));
+            let p = ui.painter();
+            if r.hovered() {
+                p.rect_filled(at, 4.0, pal().hover_fill);
+            }
+            if r.has_focus() {
+                p.rect_stroke(at, 4.0, style::focus_ring(), StrokeKind::Inside);
+            }
+            let c = at.center();
+            p.add(egui::Shape::convex_polygon(vec![c + vec2(-4.0, -2.0), c + vec2(4.0, -2.0), c + vec2(0.0, 2.5)], pal().icon, Stroke::NONE));
+            let r = r.on_hover_text(t("All open views"));
+            // As wide as the longest name, and fixed: a menu's width would otherwise grow each frame.
+            let size = |n: &String| ui.painter().layout_no_wrap(n.clone(), FontId::proportional(13.0), pal().text).size().x;
+            let wide = tabs.iter().map(|t| size(&t.1)).fold(0.0, f32::max) + 44.0;
+            Popup::menu(&r).show(|ui| {
+                for (sheet, name, icon, _, _) in &tabs {
+                    let (rect, b) = ui.allocate_exact_size(vec2(wide.max(180.0), 24.0), Sense::click());
+                    b.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, *sheet == front, name));
+                    let p = ui.painter();
+                    if b.hovered() {
+                        p.rect_filled(rect, 4.0, pal().hover_fill);
+                    } else if *sheet == front {
+                        p.rect_filled(rect, 4.0, pal().select_fill);
+                    }
+                    icons::paint(p, *icon, Rect::from_center_size(pos2(rect.left() + 13.0, rect.center().y), vec2(14.0, 14.0)), pal().icon);
+                    p.text(pos2(rect.left() + 28.0, rect.center().y), Align2::LEFT_CENTER, name, FontId::proportional(13.0), pal().text);
+                    if b.clicked() {
+                        opened = Some(*sheet);
+                        ui.close();
+                    }
+                }
+            });
+        }
+        if let Some(sheet) = opened {
+            self.open_sheet(sheet);
+        }
         if let Some(sheet) = closed {
             self.close_view(sheet);
         }
-        self.tab_bar = bar.response.rect.with_max_x(ui.max_rect().right());
+        self.tab_bar = bar.with_max_x(ui.max_rect().right());
     }
 
     /// The schedule on screen: the project's, by id, and as it is (one every project has may be

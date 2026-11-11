@@ -38,9 +38,11 @@ pub struct Palette {
     pub control: Color32,
     pub border: Color32,
     pub error: Color32,
-    /// Revit's contextual tabs (Modify | …) stand out in green.
+    /// Revit's contextual tabs (Modify | …) stand out in green (a hosting page's accent, `Skin::context`).
     pub context: Color32,
     pub context_fill: Color32,
+    /// Lettering of a contextual tab that is not open, on `context_fill`.
+    pub context_ink: Color32,
     /// Lettering on `context`, the open contextual tab's fill.
     pub on_context: Color32,
     /// What fields and popups sit on.
@@ -76,6 +78,7 @@ pub const LIGHT: Palette = Palette {
     error: rgb(0xCC2020),
     context: rgb(0x15803D),
     context_fill: rgb(0xDCFCE7),
+    context_ink: rgb(0x15803D),
     on_context: rgb(0xFFFFFF),
     surface: rgb(0xFFFFFF),
     desk: rgb(0xD4D4D4),
@@ -106,6 +109,7 @@ pub const DARK: Palette = Palette {
     error: rgb(0xF87171),
     context: rgb(0x4ADE80),
     context_fill: rgb(0x14341F),
+    context_ink: rgb(0x4ADE80),
     on_context: rgb(0x0F1F16),
     surface: rgb(0x1E2229),
     desk: rgb(0x2A2E35),
@@ -133,6 +137,7 @@ pub const DRACULA: Palette = Palette {
     error: rgb(0xFF7B7B),
     context: rgb(0x50FA7B),
     context_fill: rgb(0x1F3A2A),
+    context_ink: rgb(0x50FA7B),
     on_context: rgb(0x13151C),
     surface: rgb(0x21222C),
     desk: rgb(0x1E1F29),
@@ -249,7 +254,8 @@ pub fn palette(dark: bool, look: Look) -> Palette {
 }
 
 /// The colours a page that holds the window (`host.rs`) dresses it in, over the rest of the look, so it reads as part of that
-/// page: its top bar, its borders, its dimmer lettering, its bands and its fields. What is read on them is stepped until it reads.
+/// page: its top bar, its borders, its dimmer lettering, its bands and its fields, the outline of its controls, the wash of what
+/// is hovered, and the colour of its contextual tabs. What is read on them is stepped until it reads.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Skin {
     pub app_bar: Option<[u8; 3]>,
@@ -258,6 +264,32 @@ pub struct Skin {
     pub muted: Option<[u8; 3]>,
     pub bar: Option<[u8; 3]>,
     pub surface: Option<[u8; 3]>,
+    /// The outline of a field, a drop-down or a button, where it differs from the hairlines between cards.
+    pub input: Option<[u8; 3]>,
+    /// What a hovered row, button or menu item is washed in.
+    pub hover: Option<[u8; 3]>,
+    /// The contextual tabs' colour (Modify | …), in place of Revit's green.
+    pub context: Option<[u8; 3]>,
+    /// The controls drawn as the page draws its own ([`Controls`]); none, the window's.
+    pub controls: Option<Controls>,
+}
+
+/// How buttons, fields and drop-downs are drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Controls {
+    /// Outlined on the field's colour (`surface`), rather than filled grey: a button, a field, a drop-down; the outline is
+    /// `Skin::input`, and stays as it is on hover, which washes the control in `Skin::hover`.
+    pub outlined: bool,
+    /// The corners of a control, a tab and a hovered row; a card's, a menu's and a dialog's follow (`radii`).
+    pub radius: u8,
+}
+
+/// The corners: of a control, of a card or a menu, and of a dialog, for `skin`.
+pub fn radii(skin: &Skin) -> (u8, u8, u8) {
+    match skin.controls {
+        Some(c) => (c.radius, c.radius + 2, c.radius + 4),
+        None => (4, CARD_RADIUS, WINDOW_RADIUS),
+    }
 }
 
 impl Skin {
@@ -273,18 +305,47 @@ impl Skin {
             surface: self.surface.map_or(p.surface, rgb),
             ..p
         };
+        if self.controls.is_some_and(|c| c.outlined) {
+            // A control is the field's colour, outlined: what is read on it is read on `control`.
+            q.control = q.surface;
+        }
+        if let Some(c) = self.context {
+            // The open tab solid in it, its lettering black or white; a tab not open a tint of it, lettered in it as far as reads.
+            let c = rgb(c);
+            q.context = c;
+            q.on_context = ink_on(c);
+            q.context_fill = step(mix(q.panel, c, 0.14), q.panel, &[ink_on(q.panel)], 4.5);
+            q.context_ink = step(c, ink_on(q.context_fill), &[q.context_fill], 4.5);
+        }
         if let Some(c) = self.muted {
             q.muted = step(rgb(c), ink_on(q.panel), &[q.panel, q.bar, q.surface, q.hover_fill], 4.5);
         }
         q.text = step(q.text, ink_on(q.panel), &grounds(&q), 4.5);
+        if let Some(c) = self.hover {
+            // A wash the text still reads on.
+            q.hover_fill = step(rgb(c), q.panel, &[q.text], 4.5);
+            q.text = step(q.text, ink_on(q.panel), &grounds(&q), 4.5);
+        }
         if self.app_bar.is_some() || self.app_bar_text.is_some() {
             let bar = self.app_bar.map_or(p.app_bar, rgb);
             let ink = ink_on(bar);
-            let hover = mix(bar, ink, 0.08);
+            // On a bar the cards' colour, a hovered button is washed as on the cards.
+            let hover = if self.hover.is_some() && bar == q.panel { q.hover_fill } else { mix(bar, ink, 0.08) };
             let text = step(self.app_bar_text.map_or(p.app_bar_text, rgb), ink, &[bar, hover], 4.5);
             let muted = step(mix(text, bar, 0.3), text, &[bar, hover], 4.5);
             (q.app_bar, q.app_bar_hover, q.app_bar_text, q.app_bar_muted) = (bar, hover, text, muted);
         }
+        // The page's own controls pick in a soft wash of its accent, as its selected rows are, not the window's deeper tint.
+        if self.controls.is_some() {
+            let light = ink_on(q.panel) == Color32::BLACK;
+            q.select_fill = mix(q.panel, q.accent, if light { 0.12 } else { 0.22 });
+        }
+        // The accent's ink and the select tint read on the grounds as they are now.
+        let select_fill = step(q.select_fill, q.panel, &[q.text], 4.5);
+        let on = [q.panel, q.bar, q.surface, q.hover_fill, select_fill, q.control];
+        q.select_fill = select_fill;
+        q.accent_ink = step(q.accent_ink, q.text, &on, 4.5);
+        q.muted = step(q.muted, ink_on(q.panel), &[q.panel, q.bar, q.surface, q.hover_fill], 4.5);
         q
     }
 }
@@ -323,6 +384,7 @@ fn with_ground(p: Palette, ground: Color32) -> Palette {
         ..p
     };
     q.context = step(p.context, ink, &[q.context_fill], 4.5);
+    q.context_ink = q.context;
     q.on_context = ink_on(q.context);
     let on = grounds(&q);
     (q.muted, q.icon, q.error) = (step(p.muted, ink, &on, 4.5), step(p.icon, ink, &on, 3.0), step(p.error, ink, &on, 4.5));
@@ -499,6 +561,11 @@ pub fn card(outer: [bool; 4]) -> Frame {
     if compact() { frame } else { frame.corner_radius(CARD_RADIUS).shadow(card_shadow()) }
 }
 
+/// The strip the views' tabs stand on, a step off the cards toward the lettering: the open tab is the view's own colour.
+pub fn tab_strip() -> Color32 {
+    mix(pal().panel, pal().text, if dark() { 0.06 } else { 0.045 })
+}
+
 /// A card's shadow: close and soft.
 pub fn card_shadow() -> Shadow {
     Shadow { offset: [0, 2], blur: 8, spread: 0, color: pal().shadow }
@@ -634,15 +701,16 @@ fn visuals(ctx: &Context, look: Look) {
             v.extreme_bg_color = pal.surface;
             v.faint_bg_color = pal.bar;
             v.window_stroke = Stroke::new(1.0, pal.border);
-            v.window_corner_radius = CornerRadius::same(WINDOW_RADIUS);
-            v.menu_corner_radius = CornerRadius::same(WINDOW_RADIUS);
+            let (control, menu, window) = radii(&look.skin);
+            v.window_corner_radius = CornerRadius::same(window);
+            v.menu_corner_radius = CornerRadius::same(menu);
             v.window_shadow = Shadow { offset: [0, 10], blur: 32, spread: 0, color: pal.shadow };
             v.popup_shadow = Shadow { offset: [0, 8], blur: 24, spread: 0, color: pal.shadow };
             v.hyperlink_color = pal.accent;
             v.selection.bg_fill = pal.select_fill;
             v.selection.stroke = Stroke::new(1.0, pal.accent);
             v.text_cursor.stroke = Stroke::new(2.0, pal.accent);
-            let radius = CornerRadius::same(4);
+            let radius = CornerRadius::same(control);
             for w in
                 [&mut v.widgets.noninteractive, &mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open]
             {
@@ -661,6 +729,25 @@ fn visuals(ctx: &Context, look: Look) {
             v.widgets.active.bg_stroke = Stroke::new(1.0, pal.accent);
             v.widgets.active.fg_stroke = Stroke::new(1.0, pal.text);
             v.widgets.open.weak_bg_fill = pal.select_fill;
+            if look.skin.controls.is_some_and(|c| c.outlined) {
+                // As the page's own: a control on the field's colour in a quiet outline that hover only washes, never rings in
+                // blue; a pressed or open one a step deeper; the field in focus ringed in the accent.
+                let rgb = |[r, g, b]: [u8; 3]| Color32::from_rgb(r, g, b);
+                let outline = Stroke::new(1.0, look.skin.input.map_or(pal.border, rgb));
+                v.widgets.inactive.bg_fill = pal.surface;
+                v.widgets.inactive.bg_stroke = outline;
+                v.widgets.hovered.bg_fill = pal.hover_fill;
+                v.widgets.hovered.bg_stroke = outline;
+                v.widgets.active.weak_bg_fill = pal.hover_fill;
+                v.widgets.active.bg_fill = pal.hover_fill;
+                v.widgets.active.bg_stroke = outline;
+                v.widgets.open.weak_bg_fill = pal.hover_fill;
+                v.widgets.open.bg_fill = pal.hover_fill;
+                v.widgets.open.bg_stroke = outline;
+                v.widgets.open.fg_stroke = Stroke::new(1.0, pal.text);
+                v.window_shadow = Shadow { offset: [0, 8], blur: 24, spread: 0, color: pal.shadow.gamma_multiply(0.7) };
+                v.popup_shadow = Shadow { offset: [0, 4], blur: 12, spread: 0, color: pal.shadow.gamma_multiply(0.7) };
+            }
         });
     }
 }
@@ -710,6 +797,37 @@ mod tests {
                 }
             }
         }
+        // A hosting page's look (Arqiflow's, light and dark), and the same with the worst accents and hover washes: its cards,
+        // bar, borders, fields, control outlines, hover wash and its accent on the contextual tabs, the controls outlined.
+        let controls = Some(Controls { outlined: true, radius: 6 });
+        let arqiflow = |dark: bool, accent: [u8; 3], hover: Option<[u8; 3]>| {
+            let (panel, text, muted, border, input, wash, surface) = if dark {
+                ([23, 28, 37], [230, 233, 240], [152, 162, 179], [42, 49, 64], [57, 66, 84], [35, 42, 57], [33, 39, 52])
+            } else {
+                ([255, 255, 255], [16, 24, 40], [93, 107, 130], [228, 231, 236], [208, 213, 221], [239, 242, 247], [255, 255, 255])
+            };
+            let skin = Skin {
+                app_bar: Some(panel),
+                app_bar_text: Some(text),
+                border: Some(border),
+                muted: Some(muted),
+                bar: Some(panel),
+                surface: Some(surface),
+                input: Some(input),
+                hover: Some(hover.unwrap_or(wash)),
+                context: Some(accent),
+                controls,
+            };
+            Look { panel_colour: Some(panel), text_colour: Some(text), accent: Some(accent), skin, ..Look::default() }
+        };
+        for dark in [false, true] {
+            for accent in [[43, 80, 216], [255, 255, 0], [0, 17, 51], [128, 128, 128], [255, 0, 0]] {
+                for hover in [None, Some([119, 119, 119]), Some([255, 255, 255]), Some([0, 0, 0])] {
+                    let name = format!("hosted, accent {accent:?}, hover {hover:?}, dark {dark}");
+                    looks.push((name, palette(dark, arqiflow(dark, accent, hover)), dark));
+                }
+            }
+        }
         for (theme, p, dark) in &looks {
             DARK_ON.with(|d| d.set(*dark));
             CURRENT.with(|c| c.set(*p));
@@ -734,7 +852,7 @@ mod tests {
             }
             rows.extend([
                 ("lettering on the open contextual tab", p.on_context, p.context, 4.5),
-                ("an inactive contextual tab's lettering", p.context, p.context_fill, 4.5),
+                ("an inactive contextual tab's lettering", p.context_ink, p.context_fill, 4.5),
                 ("a caption button's focus ring and glyph", p.app_bar_text, p.app_bar_hover, 3.0),
                 ("Close's focus ring and glyph", Color32::WHITE, crate::titlebar::CLOSE_HOVER, 3.0),
             ]);
