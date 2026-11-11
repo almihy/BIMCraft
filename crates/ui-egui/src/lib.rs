@@ -5022,10 +5022,14 @@ impl BimApp {
             Tool::Rotate { start: None, .. } => msg!("Click the start of the angle, or type an angle in the Options Bar."),
             Tool::Rotate { start: Some(_), .. } => msg!("Click the end of the angle. Esc cancels."),
             Tool::Array { place: true, .. } => msg!("Click the centre of rotation."),
-            Tool::Array { start: None, .. } if self.array.radial => msg!("Click the start of the angle, or type an angle in the Options Bar."),
+            Tool::Array { start: None, .. } if self.array.radial => {
+                msg!("Click the start of the angle, or type an angle in the Options Bar.")
+            }
             Tool::Array { start: Some(_), .. } if self.array.radial => msg!("Click the end of the angle. Esc cancels."),
             Tool::Array { start: None, .. } => msg!("Click the first point of the array's distance."),
-            Tool::Array { start: Some(_), .. } => msg!("Click the second point: how far the second member, or the last, goes. Esc cancels."),
+            Tool::Array { start: Some(_), .. } => {
+                msg!("Click the second point: how far the second member, or the last, goes. Esc cancels.")
+            }
             Tool::Mirror { draw: false, .. } => msg!("Pick a wall or grid to mirror across."),
             Tool::Mirror { draw: true, start: None } => msg!("Click the start of the mirror axis."),
             Tool::Mirror { draw: true, start: Some(_) } => msg!("Click the end of the mirror axis."),

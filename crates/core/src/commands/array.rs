@@ -31,7 +31,10 @@ pub(super) fn array(s: &mut Session, p: &Value) -> R {
         return Err(bad(c, format!("`count` is the members in all, the original among them: 2 to {MAX_MEMBERS}, not {count}")));
     }
     if ids.len().saturating_mul(count - 1) > MAX_MADE {
-        return Err(bad(c, format!("{} elements in {count} members make more than {MAX_MADE} elements; array fewer, or fewer times", ids.len())));
+        return Err(bad(
+            c,
+            format!("{} elements in {count} members make more than {MAX_MADE} elements; array fewer, or fewer times", ids.len()),
+        ));
     }
     let move_to = match string(c, p, "move_to")?.as_deref() {
         None | Some("second") => MoveTo::Second,
@@ -82,7 +85,9 @@ pub(super) fn array(s: &mut Session, p: &Value) -> R {
         let by = match (point_opt(c, p, "by")?, point_opt(c, p, "from")?, point_opt(c, p, "to")?) {
             (Some(by), None, None) => by,
             (None, Some(from), Some(to)) => to - from,
-            (None, None, None) => return Err(bad(c, "`by` [dx, dy], or `from` and `to`, the two points the distance runs between, is required")),
+            (None, None, None) => {
+                return Err(bad(c, "`by` [dx, dy], or `from` and `to`, the two points the distance runs between, is required"));
+            }
             _ => return Err(bad(c, "give `by` [dx, dy], or `from` and `to`, not a mix")),
         };
         if by.length() <= crate::model::TOL {

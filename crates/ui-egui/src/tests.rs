@@ -6775,8 +6775,7 @@ mod background_grid;
 
 #[test]
 fn array_linear_makes_the_numbered_members_a_distance_apart_and_selects_them_all() {
-    let mut h = app(&format!("{BOX}
-door {{\"at\": [2000, 0]}}"));
+    let mut h = app(&format!("{BOX}\ndoor {{\"at\": [2000, 0]}}"));
     let door = ids(&h, "door")[0];
     click(&mut h, P2(2000.0, 0.0));
     press(&mut h, "Array");
@@ -6793,8 +6792,7 @@ door {{\"at\": [2000, 0]}}"));
 
 #[test]
 fn array_move_to_last_spreads_the_members_over_the_distance() {
-    let mut h = app(&format!("{BOX}
-door {{\"at\": [2000, 0]}}"));
+    let mut h = app(&format!("{BOX}\ndoor {{\"at\": [2000, 0]}}"));
     click(&mut h, P2(2000.0, 0.0));
     press(&mut h, "Array");
     type_into(&mut h, "Number:", "4");
@@ -6808,8 +6806,7 @@ door {{\"at\": [2000, 0]}}"));
 
 #[test]
 fn array_radial_turns_copies_about_the_placed_centre() {
-    let mut h = app(&format!("{BOX}
-column {{\"at\": [2000, 1000]}}"));
+    let mut h = app(&format!("{BOX}\ncolumn {{\"at\": [2000, 1000]}}"));
     click(&mut h, P2(2000.0, 1000.0));
     press(&mut h, "Array");
     press(&mut h, "Radial");
@@ -6833,12 +6830,10 @@ column {{\"at\": [2000, 1000]}}"));
 
 #[test]
 fn array_needs_a_selection_and_its_shortcut_starts_the_tool() {
-    let mut h = app(&format!("{BOX}
-door {{\"at\": [2000, 0]}}"));
+    let mut h = app(&format!("{BOX}\ndoor {{\"at\": [2000, 0]}}"));
     shortcut(&mut h, "AR");
     assert!(!matches!(h.state().tool, Tool::Array { .. }), "nothing is selected to array");
     click(&mut h, P2(2000.0, 0.0));
     shortcut(&mut h, "AR");
     assert!(matches!(h.state().tool, Tool::Array { .. }), "{:?}", h.state().tool);
 }
-

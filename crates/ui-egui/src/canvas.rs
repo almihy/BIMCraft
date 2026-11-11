@@ -3792,12 +3792,13 @@ impl BimApp {
             | Tool::Run(_, None)
             | Tool::Move(_)
             | Tool::Copy(_)
-            | Tool::Array { .. }
             | Tool::Section(None)
             | Tool::Shaft(None)
             | Tool::PatternCorner(None)
             | Tool::SlopeArrow(None)
             | Tool::Measure(_) => start_of(&self.tool),
+            // A linear array's distance from its first point; a radial one is drawn above.
+            Tool::Array { .. } if !self.array.radial => start_of(&self.tool),
             // The point a click would add, and its elevation.
             // The point a click would add, and how high above the level it would be.
             Tool::AddPoint => {
