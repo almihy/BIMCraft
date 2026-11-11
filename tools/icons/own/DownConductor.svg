@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Arqiflow's own drawing for BIMCraft's DownConductor icon, in lucide's style. -->
+  <path d="M12 3v17"/>
+  <path d="m8 16 4 4 4-4"/>
+  <path d="M9 7h6"/>
+  <path d="M9 11h6"/>
+</svg>

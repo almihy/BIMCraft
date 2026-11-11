@@ -3,7 +3,7 @@
 
 use bimcraft_core::model::Model;
 use bimcraft_core::standards::TechnicalStandard;
-use egui::{Align, ComboBox, Context, Grid, Id as UiId, Layout, RichText, ScrollArea, Ui, WidgetInfo, WidgetType};
+use egui::{Align, Context, Grid, Id as UiId, Layout, RichText, ScrollArea, Ui, WidgetInfo, WidgetType};
 
 use crate::popup::{self, Modal};
 use serde_json::json;
@@ -280,7 +280,7 @@ impl BimApp {
             ui.horizontal(|ui| {
                 ui.label(RichText::new(t("Standard Preset:")).strong());
                 let cur = d.selected;
-                let c = ComboBox::from_id_salt("standards-selector")
+                let c = crate::icons::combo("standards-selector")
                     .selected_text(t(cur.label()))
                     .width(280.0)
                     .show_ui(ui, |ui| {

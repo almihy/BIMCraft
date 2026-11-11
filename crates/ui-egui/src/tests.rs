@@ -5934,6 +5934,7 @@ mod align;
 mod autosave;
 mod browser;
 mod cad;
+mod checks;
 mod chinese;
 mod clipboard;
 mod clouds;

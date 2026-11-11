@@ -12,9 +12,7 @@ use bimcraft_core::engine::Session;
 use bimcraft_core::lines::{LinePattern, LineStyle, SOLID, Segment};
 use bimcraft_core::model::Model;
 use bimcraft_core::pen::{MAX_PEN, Pen};
-use egui::{
-    Align, Button, ComboBox, Context, Grid, Id as UiId, Layout, RichText, ScrollArea, Sense, TextEdit, Ui, WidgetInfo, WidgetType, vec2,
-};
+use egui::{Align, Button, Context, Grid, Id as UiId, Layout, RichText, ScrollArea, Sense, TextEdit, Ui, WidgetInfo, WidgetType, vec2};
 use serde_json::{Value, json};
 
 use crate::graphics::pen_name;
@@ -116,7 +114,7 @@ fn fresh(base: &str, taken: &[&str]) -> String {
 
 /// A drop-down of the pens, named `name` for screen readers.
 fn pen_field(ui: &mut Ui, pen: &mut Pen, name: String) {
-    let c = ComboBox::from_id_salt(&name).selected_text(pen_name(*pen)).width(120.0).show_ui(ui, |ui| {
+    let c = crate::icons::combo(&name).selected_text(pen_name(*pen)).width(120.0).show_ui(ui, |ui| {
         for each in (0..=MAX_PEN).map(Pen) {
             ui.selectable_value(pen, each, pen_name(each));
         }
@@ -166,7 +164,7 @@ fn styles_tab(ui: &mut Ui, d: &mut LineStylesDialog, below: f32) {
                 let shown =
                     s.pattern.and_then(|p| names.iter().find(|(i, _)| *i == p)).map_or_else(|| t(SOLID).to_string(), |(_, n)| n.clone());
                 let label = tf("{}: Pattern", &[&who]);
-                let c = ComboBox::from_id_salt(("line-style-pattern", i)).selected_text(shown).width(140.0).show_ui(ui, |ui| {
+                let c = crate::icons::combo(("line-style-pattern", i)).selected_text(shown).width(140.0).show_ui(ui, |ui| {
                     ui.selectable_value(&mut s.pattern, None, t(SOLID));
                     for (p, n) in &names {
                         ui.selectable_value(&mut s.pattern, Some(*p), n);
@@ -362,7 +360,7 @@ impl BimApp {
             self.linework_style = if m.line_styles.contains_key(&wide) { wide } else { INVISIBLE.to_string() };
         }
         let l = ui.label(t("Line Style:"));
-        let c = ComboBox::from_id_salt("linework-style").selected_text(t(&self.linework_style)).width(160.0).show_ui(ui, |ui| {
+        let c = crate::icons::combo("linework-style").selected_text(t(&self.linework_style)).width(160.0).show_ui(ui, |ui| {
             for n in &options {
                 ui.selectable_value(&mut self.linework_style, n.clone(), t(n));
             }
@@ -378,7 +376,7 @@ impl BimApp {
             self.line_style = bimcraft_core::lines::default_style(&m.line_styles, m.language).cloned().unwrap_or_default();
         }
         let l = ui.label(t("Line Style:"));
-        let c = ComboBox::from_id_salt("detail-line-style").selected_text(&self.line_style).width(160.0).show_ui(ui, |ui| {
+        let c = crate::icons::combo("detail-line-style").selected_text(&self.line_style).width(160.0).show_ui(ui, |ui| {
             for n in m.line_styles.keys() {
                 ui.selectable_value(&mut self.line_style, n.clone(), n);
             }

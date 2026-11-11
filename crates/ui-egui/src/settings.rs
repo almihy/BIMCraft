@@ -16,11 +16,11 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::canvas::navigation::Wheel;
-use egui::{Align, Color32, ComboBox, Context, Id as UiId, Layout, RichText, ScrollArea, ThemePreference, Ui, vec2};
+use egui::{Align, Color32, Context, Id as UiId, Layout, RichText, ScrollArea, ThemePreference, Ui, vec2};
 use serde_json::{Value, json};
 
 use crate::BimApp;
-use crate::dock::{Docking, Palette};
+use crate::dock::Docking;
 use crate::failed;
 use crate::lang::{Lang, t, tf};
 use crate::presets::{Preset, Scale, hidden_from_json, presets_from_json};
@@ -454,7 +454,7 @@ impl BimApp {
     /// A box for each palette, shown or closed, and the layout the window starts in: Settings > User Interface's, and the
     /// app bar's Palettes menu.
     pub(crate) fn palette_switches(&mut self, ui: &mut Ui) {
-        for p in Palette::ALL {
+        for p in self.palettes() {
             let mut on = self.docking.shown(p);
             if ui.checkbox(&mut on, t(p.name())).changed() {
                 self.show_palette(p, on);
@@ -462,7 +462,7 @@ impl BimApp {
         }
         let tip = msg!("Properties over the Project Browser, on the left, as at first");
         if ui.button(t("Reset Palette Layout")).on_hover_text(t(tip)).clicked() {
-            self.docking = Docking::default();
+            self.docking = self.first_docking();
         }
     }
 
@@ -531,7 +531,7 @@ impl BimApp {
         // A hosted window speaks its page's language: the page decides it.
         if !self.hosted() {
             heading(ui, "Language");
-            ComboBox::from_id_salt("settings-language").selected_text(self.lang.label()).width(200.0).show_ui(ui, |ui| {
+            crate::icons::combo("settings-language").selected_text(self.lang.label()).width(200.0).show_ui(ui, |ui| {
                 for l in Lang::ALL {
                     if ui.selectable_label(self.lang == l, l.label()).clicked() {
                         self.set_lang(ctx, l);
@@ -622,7 +622,7 @@ impl BimApp {
             });
             ui.horizontal(|ui| {
                 ui.label(t("3D view resolution"));
-                ComboBox::from_id_salt("settings-3d")
+                crate::icons::combo("settings-3d")
                     .selected_text(t("Full"))
                     .show_index(ui, &mut quality, 2, |i| if i == 0 { t("Full") } else { t("Half") }.to_string());
             });
@@ -658,7 +658,7 @@ fn graphics_later(ui: &mut Ui) {
     ui.checkbox(&mut hover, t("Highlight what's under the cursor"));
     ui.horizontal(|ui| {
         ui.label(t("Background of the 3D view"));
-        ComboBox::from_id_salt("settings-ground")
+        crate::icons::combo("settings-ground")
             .selected_text(t("Plain"))
             .show_index(ui, &mut ground, 2, |i| if i == 0 { t("Plain") } else { t("Sky") }.to_string());
     });

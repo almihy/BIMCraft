@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Arqiflow's own drawing for BIMCraft's BuildingPad icon, in lucide's style. -->
+  <path d="M2 10h4v8h12v-8h4"/>
+  <path d="M6 14h12"/>
+</svg>

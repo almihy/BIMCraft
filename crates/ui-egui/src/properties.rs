@@ -20,8 +20,8 @@ use bimcraft_core::snap::Kind as Snap;
 use bimcraft_core::texture::{Kind as TextureKind, Texture};
 use bimcraft_core::units::Units;
 use egui::{
-    Align, Align2, Button, Checkbox, ComboBox, Context, FontId, Frame, Grid, Id as UiId, Key, Layout, Margin, Popup, Rect, RichText,
-    ScrollArea, Sense, Shape, Slider, Stroke, StrokeKind, TextEdit, TextureHandle, Ui, WidgetInfo, WidgetType, pos2, vec2,
+    Align, Align2, Button, Checkbox, Context, FontId, Frame, Grid, Id as UiId, Key, Layout, Margin, Popup, Rect, RichText, ScrollArea,
+    Sense, Shape, Slider, Stroke, StrokeKind, TextEdit, TextureHandle, Ui, WidgetInfo, WidgetType, pos2, vec2,
 };
 use serde_json::{Value, json};
 
@@ -597,7 +597,7 @@ fn parse(kind: Kind, s: &str, units: Units) -> Result<Value, String> {
 /// A drop-down of `options`, named by `label`; the one picked, if it changed.
 pub(crate) fn combo(ui: &mut Ui, salt: (Id, &str), label: UiId, current: &str, options: &[String]) -> Option<String> {
     let mut picked = None;
-    let c = ComboBox::from_id_salt(salt).selected_text(current).width(ui.available_width()).truncate().show_ui(ui, |ui| {
+    let c = crate::icons::combo(salt).selected_text(current).width(ui.available_width()).truncate().show_ui(ui, |ui| {
         for o in options {
             if ui.selectable_label(o == current, o).clicked() && o != current {
                 picked = Some(o.clone());
@@ -1186,7 +1186,7 @@ impl BimApp {
                 if categories.len() > 1 {
                     let all = tf("Multiple Categories ({})", &[&self.selection.len().to_string()]);
                     let mut pick = None;
-                    ComboBox::from_id_salt("properties-filter").selected_text(&filter).width(ui.available_width()).show_ui(ui, |ui| {
+                    crate::icons::combo("properties-filter").selected_text(&filter).width(ui.available_width()).show_ui(ui, |ui| {
                         if ui.selectable_label(self.palette_filter.is_none(), &all).clicked() {
                             pick = Some(None);
                         }
@@ -1204,7 +1204,6 @@ impl BimApp {
             });
         });
         ui.add_space(4.0);
-        self.layer_picture(ui, &model);
         self.opening_picker(ui, &model);
         self.room_colour(ui, &model);
         self.floor_slope(ui, &model);
@@ -1249,62 +1248,6 @@ impl BimApp {
         }
         ui.add_space(8.0);
         ui.with_layout(Layout::right_to_left(Align::Min), apply);
-    }
-
-    /// The layers of the type the palette shows, drawn to their thicknesses in their materials' colours: a wall's from its exterior
-    /// face to its interior one with its location line, where a click sets the line nearest it; a floor's, a roof's or a ceiling's
-    /// from the top down. Without layers, a type is one layer of its thickness.
-    fn layer_picture(&mut self, ui: &mut Ui, model: &Model) {
-        let Some((category, name, ids)) = self.type_subject() else { return };
-        let Some((.., thickness, layers)) = model.layered_types().find(|(c, n, ..)| *c == category && *n == name) else { return };
-        if !LAYERED.contains(&category) || thickness.is_nan() || thickness <= 0.0 {
-            return;
-        }
-        let colour = |l: &Layer| model.materials.get(&l.material).map(|m| egui::Color32::from_rgb(m.color[0], m.color[1], m.color[2]));
-        let bands: Vec<(egui::Color32, f64)> = match layers {
-            [] => vec![(pal().control, thickness)],
-            layers => layers.iter().map(|l| (colour(l).unwrap_or(pal().control), l.thickness)).collect(),
-        };
-        let wall = category == "wall";
-        let sense = if wall && !ids.is_empty() { Sense::click() } else { Sense::hover() };
-        let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), if wall { 40.0 } else { 64.0 }), sense);
-        let label = t(if wall { msg!("Wall layers") } else { msg!("Layers, top down") });
-        r.widget_info(|| WidgetInfo::labeled(if wall { WidgetType::Button } else { WidgetType::Label }, true, label));
-        let p = ui.painter();
-        let ink = Stroke::new(1.0, pal().icon);
-        let mut at = 0.0;
-        for (fill, t) in &bands {
-            let (a, b) = ((at / thickness) as f32, ((at + t) / thickness) as f32);
-            let band = match wall {
-                true => Rect::from_x_y_ranges(rect.left() + a * rect.width()..=rect.left() + b * rect.width(), rect.y_range()),
-                false => Rect::from_x_y_ranges(rect.x_range(), rect.top() + a * rect.height()..=rect.top() + b * rect.height()),
-            };
-            p.rect(band, 0.0, *fill, ink, StrokeKind::Inside);
-            at += t;
-        }
-        if !wall {
-            return;
-        }
-        // The line the selected walls share, dashed where it runs; a click puts it at the line nearest.
-        let depth = |loc: Location| bimcraft_core::walls::depth(thickness, layers, loc);
-        let x = |d: f64| rect.left() + (d / thickness) as f32 * rect.width();
-        let json = self.elements_json(model, &ids);
-        let shared: Vec<Location> = json.iter().map(|j| j["location"].as_str().and_then(Location::from_name).unwrap_or_default()).collect();
-        if let Some(&loc) = shared.first().filter(|l| shared.iter().all(|m| m == *l)) {
-            let line = [pos2(x(depth(loc)), rect.top() - 3.0), pos2(x(depth(loc)), rect.bottom() + 3.0)];
-            p.extend(Shape::dashed_line(&line, Stroke::new(2.0, pal().accent_ink), 4.0, 3.0));
-            ui.label(RichText::new(tf("Location line: {}", &[t(loc.label())])).color(pal().muted));
-        }
-        let r = r.on_hover_text(t("Click where the location line should run"));
-        if r.clicked()
-            && let Some(at) = r.interact_pointer_pos()
-        {
-            let d = f64::from((at.x - rect.left()) / rect.width()) * thickness;
-            let near = Location::ALL.into_iter().min_by(|a, b| (depth(*a) - d).abs().total_cmp(&(depth(*b) - d).abs()));
-            if let Some(loc) = near {
-                self.run("modify", json!({"ids": ids, "location": loc.name()}));
-            }
-        }
     }
 
     /// Which way the doors the palette shows open, as four plans of a door in its wall: as placed, its hand flipped, its facing
@@ -1587,7 +1530,7 @@ impl BimApp {
         }
         if enabled {
             let c = egui::pos2(rect.right() - 14.0, rect.center().y);
-            p.add(Shape::convex_polygon(vec![c + vec2(-4.0, -2.0), c + vec2(4.0, -2.0), c + vec2(0.0, 3.0)], pal().icon, Stroke::NONE));
+            crate::icons::paint_chevron_at(p, c, 16.0, pal().muted);
         }
         if r.has_focus() {
             p.rect_stroke(rect, 3.0, crate::style::focus_ring(), StrokeKind::Inside);
@@ -2109,7 +2052,7 @@ impl BimApp {
                 _ => chosen.clone(),
             };
             let r =
-                ComboBox::from_id_salt(("sheet-title-block-pick", id)).selected_text(shown).width(ui.available_width()).show_ui(ui, |ui| {
+                crate::icons::combo(("sheet-title-block-pick", id)).selected_text(shown).width(ui.available_width()).show_ui(ui, |ui| {
                     ui.selectable_value(&mut chosen, String::new(), built_in);
                     // No border, title box or folding marks, for one drawn on the sheet itself.
                     ui.selectable_value(&mut chosen, bimcraft_core::titleblock::NONE.to_string(), none);
@@ -2349,7 +2292,7 @@ impl BimApp {
                 Grid::new("material-head").num_columns(2).spacing(vec2(12.0, 6.0)).show(ui, |ui| {
                     let l = ui.label(t("Material:"));
                     ui.horizontal(|ui| {
-                        let c = ComboBox::from_id_salt("material-name").selected_text(&d.picked).width(200.0).show_ui(ui, |ui| {
+                        let c = crate::icons::combo("material-name").selected_text(&d.picked).width(200.0).show_ui(ui, |ui| {
                             for name in model.materials.keys() {
                                 if ui.selectable_label(*name == d.picked, name).clicked() {
                                     picked = Some(name.clone());
@@ -2403,7 +2346,7 @@ impl BimApp {
                         for (key, label, now, fill) in cut {
                             let l = ui.label(t(label));
                             let shown = fill.clone().unwrap_or_else(|| t(pattern_name(now)).to_string());
-                            let c = ComboBox::from_id_salt(("material-pattern", key)).selected_text(shown).width(160.0).show_ui(ui, |ui| {
+                            let c = crate::icons::combo(("material-pattern", key)).selected_text(shown).width(160.0).show_ui(ui, |ui| {
                                 for (p, name) in PATTERNS {
                                     if ui.selectable_label(fill.is_none() && p == now, t(name)).clicked() {
                                         run = Some(json!({"name": d.picked, key: p}));
@@ -2433,7 +2376,7 @@ impl BimApp {
                         let l = ui.label(t("Texture"));
                         let now = m.texture.as_ref().map(|x| x.kind);
                         let shown = now.map_or(t("None"), |k| t(texture_name(k)));
-                        let c = ComboBox::from_id_salt("material-texture").selected_text(shown).width(160.0).show_ui(ui, |ui| {
+                        let c = crate::icons::combo("material-texture").selected_text(shown).width(160.0).show_ui(ui, |ui| {
                             if ui.selectable_label(now.is_none(), t("None")).clicked() {
                                 run = Some(json!({"name": d.picked, "texture": null}));
                             }
@@ -2572,7 +2515,7 @@ fn layer_editor(ui: &mut Ui, layers: &mut Vec<LayerRow>, units: Units, materials
         ui.end_row();
         let last = layers.len().saturating_sub(1);
         for (k, (f, mat, typed, var)) in layers.iter_mut().enumerate() {
-            let c = ComboBox::from_id_salt(("layer-function", k)).selected_text(t(function_name(*f))).width(110.0).show_ui(ui, |ui| {
+            let c = crate::icons::combo(("layer-function", k)).selected_text(t(function_name(*f))).width(110.0).show_ui(ui, |ui| {
                 for (g, n) in FUNCTIONS {
                     if ui.selectable_label(*f == g, t(n)).clicked() {
                         *f = g;
@@ -2582,7 +2525,7 @@ fn layer_editor(ui: &mut Ui, layers: &mut Vec<LayerRow>, units: Units, materials
             c.response.labelled_by(function.id);
             let none = t("(none)");
             let shown = if mat.is_empty() { none } else { mat.as_str() };
-            let c = ComboBox::from_id_salt(("layer-material", k)).selected_text(shown).width(150.0).show_ui(ui, |ui| {
+            let c = crate::icons::combo(("layer-material", k)).selected_text(shown).width(150.0).show_ui(ui, |ui| {
                 if ui.selectable_label(mat.is_empty(), none).clicked() {
                     mat.clear();
                 }
@@ -2841,7 +2784,7 @@ impl BimApp {
                 ui.horizontal(|ui| {
                     let label = ui.label(t("Angle steps"));
                     let now = if s.angle >= 1.0 { format!("{}°", s.angle) } else { t("Off").to_string() };
-                    let c = ComboBox::from_id_salt("snap-angle").selected_text(now).width(110.0).show_ui(ui, |ui| {
+                    let c = crate::icons::combo("snap-angle").selected_text(now).width(110.0).show_ui(ui, |ui| {
                         for step in ANGLE_STEPS {
                             let name = if step >= 1.0 { format!("{step}°") } else { t("Off").to_string() };
                             ui.selectable_value(&mut s.angle, step, name);
@@ -2898,7 +2841,7 @@ impl BimApp {
                 let kind = kind_of(&f.field);
                 // Each row's caption names its field, its comparison and its value.
                 let caption = ui.label(t(if i == 0 { msg!("Filter by:") } else { msg!("And:") }));
-                let c = ComboBox::from_id_salt(("filter-field", i)).selected_text(t(&f.field)).width(170.0).show_ui(ui, |ui| {
+                let c = crate::icons::combo(("filter-field", i)).selected_text(t(&f.field)).width(170.0).show_ui(ui, |ui| {
                     for n in names {
                         if ui.selectable_label(*n == f.field, t(n)).clicked() && *n != f.field {
                             (f.field, f.op, f.value) = (n.clone(), Op::HasValue, Value::Null);
@@ -2908,7 +2851,7 @@ impl BimApp {
                 });
                 c.response.labelled_by(caption.id);
                 let now = OPS.iter().find(|(op, _)| *op == f.op).map_or(msg!("equals"), |(_, n)| n);
-                let c = ComboBox::from_id_salt(("filter-op", i)).selected_text(t(now)).width(190.0).show_ui(ui, |ui| {
+                let c = crate::icons::combo(("filter-op", i)).selected_text(t(now)).width(190.0).show_ui(ui, |ui| {
                     for (op, label) in ops(kind) {
                         if ui.selectable_label(op == f.op, t(label)).clicked() && op != f.op {
                             f.op = op;
@@ -2931,7 +2874,7 @@ impl BimApp {
                     }
                     (_, schedule::Kind::YesNo) => {
                         let now = if f.value.as_bool().unwrap_or(true) { "Yes" } else { "No" };
-                        let c = ComboBox::from_id_salt(("filter-yes", i)).selected_text(t(now)).width(120.0).show_ui(ui, |ui| {
+                        let c = crate::icons::combo(("filter-yes", i)).selected_text(t(now)).width(120.0).show_ui(ui, |ui| {
                             for (b, label) in [(true, "Yes"), (false, "No")] {
                                 if ui.selectable_label(f.value.as_bool() == Some(b), t(label)).clicked() {
                                     f.value = json!(b);
@@ -3098,7 +3041,7 @@ impl BimApp {
                 Grid::new("parameter-head").num_columns(2).spacing(vec2(12.0, 6.0)).show(ui, |ui| {
                     let l = ui.label(t("Parameter:"));
                     ui.horizontal(|ui| {
-                        let c = ComboBox::from_id_salt("parameter-name").selected_text(&d.picked).width(200.0).show_ui(ui, |ui| {
+                        let c = crate::icons::combo("parameter-name").selected_text(&d.picked).width(200.0).show_ui(ui, |ui| {
                             for name in model.parameters.keys() {
                                 if ui.selectable_label(*name == d.picked, name).clicked() {
                                     picked = Some(name.clone());
@@ -3134,7 +3077,7 @@ impl BimApp {
                             ui.end_row();
                             let l = ui.label(t("Type of Parameter"));
                             let now = KINDS.iter().find(|(k, _)| *k == p.kind).map_or("Text", |(_, n)| n);
-                            let c = ComboBox::from_id_salt("parameter-kind").selected_text(t(now)).width(160.0).show_ui(ui, |ui| {
+                            let c = crate::icons::combo("parameter-kind").selected_text(t(now)).width(160.0).show_ui(ui, |ui| {
                                 for (k, label) in KINDS {
                                     if ui.selectable_label(k == p.kind, t(label)).clicked() && k != p.kind {
                                         run = Some(json!({"name": d.picked, "kind": k}));
@@ -3404,7 +3347,7 @@ impl BimApp {
                                 ui.end_row();
                                 let l = ui.label(t("Type"));
                                 let now = RESULTS.iter().find(|(k, _)| k == kind).map_or("Number", |(_, n)| n);
-                                let c = ComboBox::from_id_salt("calculated-kind").selected_text(t(now)).width(160.0).show_ui(ui, |ui| {
+                                let c = crate::icons::combo("calculated-kind").selected_text(t(now)).width(160.0).show_ui(ui, |ui| {
                                     for (k, label) in RESULTS {
                                         ui.selectable_value(kind, k, t(label));
                                     }
@@ -3447,18 +3390,17 @@ impl BimApp {
                             let mut gone = None;
                             for (i, s) in sort.iter_mut().enumerate() {
                                 let caption = ui.label(t(if i == 0 { msg!("Sort by:") } else { msg!("Then by:") }));
-                                let c =
-                                    ComboBox::from_id_salt(("sort-field", i)).selected_text(t(&s.field)).width(170.0).show_ui(ui, |ui| {
-                                        for n in &names {
-                                            if ui.selectable_label(*n == s.field, t(n)).clicked() && *n != s.field {
-                                                s.field = n.clone();
-                                                edited = true;
-                                            }
+                                let c = crate::icons::combo(("sort-field", i)).selected_text(t(&s.field)).width(170.0).show_ui(ui, |ui| {
+                                    for n in &names {
+                                        if ui.selectable_label(*n == s.field, t(n)).clicked() && *n != s.field {
+                                            s.field = n.clone();
+                                            edited = true;
                                         }
-                                    });
+                                    }
+                                });
                                 c.response.labelled_by(caption.id);
                                 let now = if s.descending { msg!("Descending") } else { msg!("Ascending") };
-                                let c = ComboBox::from_id_salt(("sort-way", i)).selected_text(t(now)).width(120.0).show_ui(ui, |ui| {
+                                let c = crate::icons::combo(("sort-way", i)).selected_text(t(now)).width(120.0).show_ui(ui, |ui| {
                                     for (down, label) in [(false, "Ascending"), (true, "Descending")] {
                                         if ui.selectable_label(s.descending == down, t(label)).clicked() && s.descending != down {
                                             s.descending = down;

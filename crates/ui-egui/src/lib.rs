@@ -15,6 +15,7 @@ mod browser;
 mod cad;
 mod camera;
 mod canvas;
+mod checks;
 mod clipboard;
 mod clouds;
 mod context;
@@ -108,9 +109,9 @@ use bimcraft_core::units::Units;
 use bimcraft_core::{element_json, render, schedule, stairs};
 use egui::containers::menu::{MenuButton, SubMenuButton};
 use egui::{
-    Align, Align2, Area, CentralPanel, Color32, ComboBox, Context, CornerRadius, Event, FontId, Frame, Grid, Id as UiId, Key,
-    KeyboardShortcut, Layout, Margin, Modifiers, Order, Panel, Popup, Pos2, Rect, Response, RichText, ScrollArea, Sense, Stroke,
-    StrokeKind, TextEdit, Ui, UiBuilder, ViewportCommand, WidgetInfo, WidgetType, pos2, vec2,
+    Align, Align2, Area, CentralPanel, Color32, Context, CornerRadius, Event, FontId, Frame, Grid, Id as UiId, Key, KeyboardShortcut,
+    Layout, Margin, Modifiers, Order, Panel, Popup, Pos2, Rect, Response, RichText, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, Ui,
+    UiBuilder, ViewportCommand, WidgetInfo, WidgetType, pos2, vec2,
 };
 use serde_json::{Value, json};
 
@@ -551,6 +552,8 @@ pub struct BimApp {
     passive: bool,
     /// Where the palettes are, and what is being dragged.
     docking: dock::Docking,
+    /// The hosting page's checks of the model, which the Checks palette lists (`checks.rs`).
+    checks: checks::Checks,
     dragging: Option<dock::Drag>,
     /// What a drag may land on, as drawn this frame: each stack's title (the palette it shows, and whether it floats),
     /// the views' tab bar and its tabs, and the docked view's drawing, along whose edges palettes dock; and the pointer, last
@@ -953,7 +956,7 @@ fn height_options(ui: &mut Ui, m: &Model, level: Id, top: &mut Option<Option<Id>
     let now = top.unwrap_or_else(|| above.first().map(|(id, _)| *id));
     let current = now.and_then(|id| m.level(id)).map_or(t("Unconnected"), |l| l.name.as_str());
     let label = ui.label(t("Height:"));
-    let combo = ComboBox::from_id_salt(salt).selected_text(current).width(130.0).show_ui(ui, |ui| {
+    let combo = crate::icons::combo(salt).selected_text(current).width(130.0).show_ui(ui, |ui| {
         for (id, name) in &above {
             if ui.selectable_label(now == Some(*id), *name).clicked() {
                 *top = Some(Some(*id));
@@ -1332,6 +1335,7 @@ impl BimApp {
             floating: Vec::new(),
             passive: false,
             docking: dock::Docking::default(),
+            checks: checks::Checks::default(),
             dragging: None,
             drop_headers: Vec::new(),
             tab_bar: Rect::NOTHING,
@@ -1839,7 +1843,8 @@ impl BimApp {
                 // Compact: a strip across the top of the view, the tabs standing on its foot (Revit's document tabs).
                 let strip = style::compact();
                 let frame = match strip {
-                    true => Frame::new().fill(style::tab_strip()).inner_margin(Margin { left: 4, right: 0, top: 4, bottom: 0 }),
+                    // No room over the tabs: they stand right under the ribbon.
+                    true => Frame::new().fill(style::tab_strip()).inner_margin(Margin { left: 4, right: 0, top: 0, bottom: 0 }),
                     false => Frame::new().inner_margin(Margin { left: g, right: g, top: g, bottom: 4 }),
                 };
                 Panel::top("view-tabs").frame(frame).show_separator_line(false).show(ui, |ui| {
@@ -2830,7 +2835,7 @@ impl BimApp {
     fn elevation_base(&mut self, ui: &mut Ui) {
         let l = ui.label(t("Elevation Base:"));
         let now = self.shape_base;
-        egui::ComboBox::from_id_salt("shape-elevation-base")
+        crate::icons::combo("shape-elevation-base")
             .selected_text(t(now.name()))
             .show_ui(ui, |ui| {
                 for b in crate::shape::Base::ALL {
@@ -3341,6 +3346,7 @@ impl BimApp {
         (fresh.page_fonts, fresh.refont) = (self.page_fonts.take(), self.refont);
         fresh.theme_wanted = self.theme_wanted.take();
         fresh.docking = std::mem::take(&mut self.docking);
+        fresh.checks = std::mem::take(&mut self.checks);
         (fresh.settings_path, fresh.settings_kept) = (self.settings_path.take(), self.settings_kept.take());
         fresh.window = std::mem::take(&mut self.window);
         #[cfg(feature = "updater")]
@@ -3524,12 +3530,7 @@ impl BimApp {
             ui.painter().rect_filled(rect, 3.0, hover);
         }
         let ink = if names.is_empty() { icon.gamma_multiply(0.4) } else { icon };
-        let c = rect.center();
-        ui.painter().add(egui::Shape::convex_polygon(
-            vec![c + vec2(-3.0, -1.5), c + vec2(3.0, -1.5), c + vec2(0.0, 2.0)],
-            ink,
-            Stroke::NONE,
-        ));
+        icons::paint_chevron_at(ui.painter(), rect.center(), 12.0, ink);
         if names.is_empty() {
             return;
         }
@@ -4154,12 +4155,7 @@ impl BimApp {
             let dark = style::dark();
             let tip = msg!("Choose a theme, including a dark interface with a light canvas");
             let r = big_button(ui, Icon::Theme, "Dark Mode", dark, tip);
-            let at = r.rect.right_top() + vec2(-8.0, 9.0);
-            ui.painter().add(egui::Shape::convex_polygon(
-                vec![at + vec2(-3.0, -2.0), at + vec2(3.0, -2.0), at + vec2(0.0, 2.0)],
-                pal().icon,
-                Stroke::NONE,
-            ));
+            icons::paint_chevron_at(ui.painter(), r.rect.right_top() + vec2(-8.0, 9.0), 12.0, pal().muted);
             ribbon::choices(ui, &r, false, |ui| self.theme_choices(ui, true));
             // A plan's or a section's crop region: on to what it shows, or off.
             let view = match self.sheet {
@@ -4270,7 +4266,7 @@ impl BimApp {
             let tip = msg!("Show or hide the palettes, and pick the interface's language");
             let r = big_button(ui, Icon::Interface, "User Interface", false, tip);
             ribbon::choices(ui, &r, false, |ui| {
-                for p in dock::Palette::ALL {
+                for p in self.palettes() {
                     let mut on = self.docking.shown(p);
                     if ui.checkbox(&mut on, t(p.name())).changed() {
                         self.show_palette(p, on);
@@ -4793,9 +4789,8 @@ impl BimApp {
         self.mode_panel(ui);
     }
 
-    /// The Options Bar: the contextual tab's name, then the tool's options.
-    /// The Options Bar, while there's something on it (a contextual tab's name, a tool's options): a card floating over the
-    /// view's top left, so the view never moves when it comes and goes, and taking the clicks that land on it.
+    /// The Options Bar, while there's something on it (a contextual tab's name, a tool's options): a card floating centred at
+    /// the view's top, so the view never moves when it comes and goes, and taking the clicks that land on it.
     fn options_bar(&mut self, ctx: &Context) {
         if self.context().is_none() && matches!(self.tool, Tool::Modify) && self.note_edit.is_none() {
             self.options_rect = Rect::NOTHING;
@@ -4806,9 +4801,12 @@ impl BimApp {
         let frame = style::card([false; 4]).inner_margin(Margin::symmetric(10, 3));
         // Below the tabs where they float over the view.
         let top = view.top().max(self.tabs_foot - g + 4.0);
-        let shown = Area::new(UiId::new("options-bar")).order(Order::Middle).fixed_pos(pos2(view.left() + g, top + g)).show(ctx, |ui| {
-            // Kept short of the view's zoom buttons on the right, as far as its fields wrap (a drop-down doesn't).
-            ui.set_max_width((view.width() - 2.0 * g - 60.0).max(200.0));
+        let at = pos2(view.center().x, top + g);
+        let area = Area::new(UiId::new("options-bar")).order(Order::Middle).pivot(Align2::CENTER_TOP).fixed_pos(at);
+        let shown = area.show(ctx, |ui| {
+            // Centred, so kept as far from both sides as the view's zoom buttons are from the right, as far as its fields
+            // wrap (a drop-down doesn't).
+            ui.set_max_width((view.width() - 2.0 * (g + 60.0)).max(200.0));
             frame.show(ui, |ui| self.options(ui));
         });
         self.options_rect = shown.response.rect;
@@ -4828,201 +4826,212 @@ impl BimApp {
         // Wrapped: in a narrow view (the window's least) the bar takes a second line rather than run over the zoom buttons.
         ui.horizontal_wrapped(|ui| {
             ui.set_min_height(24.0);
-            if let Some(name) = self.context() {
+            let rule = self.context().map(|name| {
                 // Painted: the tab already names it for screen readers.
                 let font = FontId::proportional(13.0);
                 let size = ui.painter().layout_no_wrap(name.clone(), font.clone(), pal().text).size();
                 let (r, _) = ui.allocate_exact_size(size, Sense::hover());
                 ui.painter().text(r.left_center(), Align2::LEFT_CENTER, name, font, pal().text);
-                ui.separator();
+                ui.allocate_exact_size(vec2(1.0, 18.0), Sense::hover()).0
+            });
+            let before = ui.min_rect();
+            self.tool_options(ui);
+            // The rule parts the name from the tool's options; a tool with none (Place Door) leaves the name on its own.
+            if let Some(r) = rule
+                && ui.min_rect() != before
+            {
+                ui.painter().vline(r.center().x, r.y_range(), ui.visuals().widgets.noninteractive.bg_stroke);
             }
-            if self.note_edit.is_some() {
-                self.note_options(ui);
-                return;
-            }
-            if let Some(sketch::Of::Site { tool, .. }) = self.sketch.as_ref().map(|s| s.of) {
-                self.site_options(ui, tool);
-            }
-            if self.sketch.is_some() {
-                self.sketch_options(ui);
-                match self.tool {
-                    Tool::SketchLine(_) => self.shape_options(ui),
-                    Tool::Offset => self.offset_options(ui),
-                    _ => {}
-                }
-                return;
-            }
+        });
+    }
+
+    /// The tool's own options on the Options Bar, after its name.
+    fn tool_options(&mut self, ui: &mut Ui) {
+        if self.note_edit.is_some() {
+            self.note_options(ui);
+            return;
+        }
+        if let Some(sketch::Of::Site { tool, .. }) = self.sketch.as_ref().map(|s| s.of) {
+            self.site_options(ui, tool);
+        }
+        if self.sketch.is_some() {
+            self.sketch_options(ui);
             match self.tool {
-                Tool::Wall(_) => self.wall_options(ui),
-                Tool::Linework => self.linework_options(ui),
-                Tool::DetailGroup => self.group_options(ui),
-                Tool::RepeatingDetail(_) => {
-                    self.group_options(ui);
-                    let l = ui.label(t("Spacing:"));
-                    ui.add(egui::TextEdit::singleline(&mut self.repeat_spacing).desired_width(70.0)).labelled_by(l.id);
-                }
-                Tool::Paint => {
-                    let label = ui.label(t("Material:"));
-                    let names: Vec<String> = self.session.model.materials.keys().cloned().collect();
-                    let now = self.painting().unwrap_or_default();
-                    if let Some(n) = properties::combo(ui, (0, "paint-material"), label.id, &now, &names) {
-                        self.paint_material = n;
-                    }
-                }
-                Tool::Column => {
-                    if let Some(level) = self.plan_level() {
-                        height_options(ui, &self.session.model, level, &mut self.column_top, &mut self.column_height, "column-top");
-                    }
-                }
-                Tool::Run(category, _) => self.run_options(ui, category),
-                Tool::Stand(category) => self.stand_options(ui, category),
-                Tool::Shaft(_) => {
-                    if let Some(level) = self.plan_level() {
-                        height_options(ui, &self.session.model, level, &mut self.shaft_top, &mut self.shaft_height, "shaft-top");
-                    }
-                }
-                Tool::Mass(_) => {
-                    if let Some(level) = self.plan_level() {
-                        height_options(ui, &self.session.model, level, &mut self.mass_top, &mut self.mass_height, "mass-top");
-                    }
-                }
-                Tool::Site(t) => self.site_options(ui, t),
-                Tool::Ceiling => {
-                    let l = ui.label(t("Height Offset:"));
-                    let hint = self.session.model.units.name();
-                    ui.add(TextEdit::singleline(&mut self.ceiling_height).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
-                }
-                Tool::Camera(_) => {
-                    let hint = self.session.model.units.name();
-                    let l = ui.label(t("Eye Height:"));
-                    ui.add(TextEdit::singleline(&mut self.camera_eye_height).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
-                    let l = ui.label(t("Target Height:"));
-                    ui.add(TextEdit::singleline(&mut self.camera_target_height).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
-                    let l = ui.label(t("Lens:"));
-                    ui.add(TextEdit::singleline(&mut self.camera_lens).desired_width(48.0).hint_text("mm")).labelled_by(l.id);
-                }
-                Tool::SlopeArrow(_) => {
-                    let l = ui.label(t("Slope:"));
-                    ui.add(TextEdit::singleline(&mut self.floor_slope).desired_width(48.0).hint_text("°")).labelled_by(l.id);
-                }
-                // Add Point along the surface as it is, an offset over it; or Absolute, an elevation above the level.
-                Tool::AddPoint => {
-                    ui.radio_value(&mut self.shape_along, true, t("Along Surface"));
-                    ui.radio_value(&mut self.shape_along, false, t("Absolute"));
-                    let hint = self.session.model.units.name();
-                    if self.shape_along {
-                        let l = ui.label(t("Offset from Surface:"));
-                        ui.add(TextEdit::singleline(&mut self.shape_offset).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
-                    } else {
-                        let l = ui.label(t("Elevation:"));
-                        ui.add(TextEdit::singleline(&mut self.shape_z).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
-                        self.elevation_base(ui);
-                    }
-                }
-                Tool::ModifySubElements => {
-                    let l = ui.label(t("Elevation:"));
-                    let hint = self.session.model.units.name();
-                    let field = ui.add(TextEdit::singleline(&mut self.shape_z).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
-                    // Under Modify Sub Elements, Enter sets the selection to it.
-                    if self.tool == Tool::ModifySubElements && field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                        self.shape_apply();
-                    }
-                    self.elevation_base(ui);
-                }
-                Tool::Stair(_) => {
-                    let l = ui.label(t("Width:"));
-                    let hint = self.session.model.units.name();
-                    ui.add(TextEdit::singleline(&mut self.stair_width).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
-                    ui.checkbox(&mut self.railings, t("Railings"));
-                }
-                Tool::Ramp(_) => {
-                    if let Some(level) = self.plan_level() {
-                        height_options(ui, &self.session.model, level, &mut self.ramp_top, &mut self.ramp_height, "ramp-top");
-                    }
-                    let hint = self.session.model.units.name();
-                    let l = ui.label(t("Width:"));
-                    ui.add(TextEdit::singleline(&mut self.ramp_width).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
-                    let l = ui.label(t("Slope:"));
-                    ui.add(TextEdit::singleline(&mut self.ramp_slope).desired_width(48.0).hint_text("%")).labelled_by(l.id);
-                    ui.checkbox(&mut self.railings, t("Railings"));
-                }
-                Tool::Roof => {
-                    let l = ui.label(t("Slope:"));
-                    ui.add(TextEdit::singleline(&mut self.roof_slope).desired_width(48.0).hint_text("°")).labelled_by(l.id);
-                    let l = ui.label(t("Overhang:"));
-                    let hint = self.session.model.units.name();
-                    ui.add(TextEdit::singleline(&mut self.roof_overhang).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
-                    ui.checkbox(&mut self.roof_gable, t("Gable"));
-                }
-                Tool::ExtrusionRoof(_) => {
-                    let l = ui.label(t("Slope:"));
-                    ui.add(TextEdit::singleline(&mut self.roof_slope).desired_width(48.0).hint_text("°")).labelled_by(l.id);
-                    ui.checkbox(&mut self.roof_shed, t("Shed"));
-                }
-                Tool::Dormer => {
-                    let hint = self.session.model.units.name();
-                    let l = ui.label(t("Width:"));
-                    ui.add(TextEdit::singleline(&mut self.dormer_width).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
-                    let l = ui.label(t("Height:"));
-                    ui.add(TextEdit::singleline(&mut self.dormer_height).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
-                    let l = ui.label(t("Slope:"));
-                    ui.add(TextEdit::singleline(&mut self.roof_slope).desired_width(48.0).hint_text("°")).labelled_by(l.id);
-                    ui.checkbox(&mut self.dormer_window, t("Window"));
-                }
-                Tool::Level => self.level_options(ui),
-                Tool::Move(_) => {
-                    ui.checkbox(&mut self.constrain, t("Constrain"));
-                }
-                Tool::Copy(_) => {
-                    ui.checkbox(&mut self.constrain, t("Constrain"));
-                    ui.checkbox(&mut self.multiple, t("Multiple"));
-                }
-                Tool::Rotate { .. } => self.rotate_options(ui),
-                Tool::Array { .. } => self.array_options(ui),
-                Tool::Mirror { .. } => {
-                    ui.checkbox(&mut self.mirror_copy, t("Copy"));
-                }
-                Tool::Tag => {
-                    ui.checkbox(&mut self.tag_leader, t("Leader"));
-                    let l = ui.label(t("Label:"));
-                    ui.add(TextEdit::singleline(&mut self.tag_label).desired_width(160.0).hint_text(t("a field, such as Type or Height")))
-                        .labelled_by(l.id);
-                }
-                Tool::DetailLine(_) => self.line_style_options(ui),
-                // Between endpoints: as the cursor lies, aligned, horizontal or vertical (Space steps them).
-                Tool::Dimension(mode, _) => {
-                    ui.label(t("Place:"));
-                    for (m, label) in [
-                        (DimMode::Auto, msg!("Auto")),
-                        (DimMode::Aligned, msg!("Aligned")),
-                        (DimMode::Horizontal, msg!("Horizontal")),
-                        (DimMode::Vertical, msg!("Vertical")),
-                    ] {
-                        if ui.selectable_label(mode == m, t(label)).clicked()
-                            && let Tool::Dimension(now, _) = &mut self.tool
-                        {
-                            *now = m;
-                        }
-                    }
-                }
-                Tool::Text => {
-                    let l = ui.label(t("Text:"));
-                    ui.add(TextEdit::singleline(&mut self.note_text).desired_width(240.0).hint_text(t("what the note says")))
-                        .labelled_by(l.id);
-                }
-                Tool::Attach => {
-                    ui.label(t("Attach Wall:"));
-                    if ui.selectable_label(!self.attach_base, t("Top")).clicked() {
-                        self.attach_base = false;
-                    }
-                    if ui.selectable_label(self.attach_base, t("Base")).clicked() {
-                        self.attach_base = true;
-                    }
-                }
+                Tool::SketchLine(_) => self.shape_options(ui),
                 Tool::Offset => self.offset_options(ui),
                 _ => {}
             }
-        });
+            return;
+        }
+        match self.tool {
+            Tool::Wall(_) => self.wall_options(ui),
+            Tool::Linework => self.linework_options(ui),
+            Tool::DetailGroup => self.group_options(ui),
+            Tool::RepeatingDetail(_) => {
+                self.group_options(ui);
+                let l = ui.label(t("Spacing:"));
+                ui.add(egui::TextEdit::singleline(&mut self.repeat_spacing).desired_width(70.0)).labelled_by(l.id);
+            }
+            Tool::Paint => {
+                let label = ui.label(t("Material:"));
+                let names: Vec<String> = self.session.model.materials.keys().cloned().collect();
+                let now = self.painting().unwrap_or_default();
+                if let Some(n) = properties::combo(ui, (0, "paint-material"), label.id, &now, &names) {
+                    self.paint_material = n;
+                }
+            }
+            Tool::Column => {
+                if let Some(level) = self.plan_level() {
+                    height_options(ui, &self.session.model, level, &mut self.column_top, &mut self.column_height, "column-top");
+                }
+            }
+            Tool::Run(category, _) => self.run_options(ui, category),
+            Tool::Stand(category) => self.stand_options(ui, category),
+            Tool::Shaft(_) => {
+                if let Some(level) = self.plan_level() {
+                    height_options(ui, &self.session.model, level, &mut self.shaft_top, &mut self.shaft_height, "shaft-top");
+                }
+            }
+            Tool::Mass(_) => {
+                if let Some(level) = self.plan_level() {
+                    height_options(ui, &self.session.model, level, &mut self.mass_top, &mut self.mass_height, "mass-top");
+                }
+            }
+            Tool::Site(t) => self.site_options(ui, t),
+            Tool::Ceiling => {
+                let l = ui.label(t("Height Offset:"));
+                let hint = self.session.model.units.name();
+                ui.add(TextEdit::singleline(&mut self.ceiling_height).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
+            }
+            Tool::Camera(_) => {
+                let hint = self.session.model.units.name();
+                let l = ui.label(t("Eye Height:"));
+                ui.add(TextEdit::singleline(&mut self.camera_eye_height).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
+                let l = ui.label(t("Target Height:"));
+                ui.add(TextEdit::singleline(&mut self.camera_target_height).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
+                let l = ui.label(t("Lens:"));
+                ui.add(TextEdit::singleline(&mut self.camera_lens).desired_width(48.0).hint_text("mm")).labelled_by(l.id);
+            }
+            Tool::SlopeArrow(_) => {
+                let l = ui.label(t("Slope:"));
+                ui.add(TextEdit::singleline(&mut self.floor_slope).desired_width(48.0).hint_text("°")).labelled_by(l.id);
+            }
+            // Add Point along the surface as it is, an offset over it; or Absolute, an elevation above the level.
+            Tool::AddPoint => {
+                ui.radio_value(&mut self.shape_along, true, t("Along Surface"));
+                ui.radio_value(&mut self.shape_along, false, t("Absolute"));
+                let hint = self.session.model.units.name();
+                if self.shape_along {
+                    let l = ui.label(t("Offset from Surface:"));
+                    ui.add(TextEdit::singleline(&mut self.shape_offset).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
+                } else {
+                    let l = ui.label(t("Elevation:"));
+                    ui.add(TextEdit::singleline(&mut self.shape_z).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
+                    self.elevation_base(ui);
+                }
+            }
+            Tool::ModifySubElements => {
+                let l = ui.label(t("Elevation:"));
+                let hint = self.session.model.units.name();
+                let field = ui.add(TextEdit::singleline(&mut self.shape_z).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
+                // Under Modify Sub Elements, Enter sets the selection to it.
+                if self.tool == Tool::ModifySubElements && field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                    self.shape_apply();
+                }
+                self.elevation_base(ui);
+            }
+            Tool::Stair(_) => {
+                let l = ui.label(t("Width:"));
+                let hint = self.session.model.units.name();
+                ui.add(TextEdit::singleline(&mut self.stair_width).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
+                ui.checkbox(&mut self.railings, t("Railings"));
+            }
+            Tool::Ramp(_) => {
+                if let Some(level) = self.plan_level() {
+                    height_options(ui, &self.session.model, level, &mut self.ramp_top, &mut self.ramp_height, "ramp-top");
+                }
+                let hint = self.session.model.units.name();
+                let l = ui.label(t("Width:"));
+                ui.add(TextEdit::singleline(&mut self.ramp_width).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
+                let l = ui.label(t("Slope:"));
+                ui.add(TextEdit::singleline(&mut self.ramp_slope).desired_width(48.0).hint_text("%")).labelled_by(l.id);
+                ui.checkbox(&mut self.railings, t("Railings"));
+            }
+            Tool::Roof => {
+                let l = ui.label(t("Slope:"));
+                ui.add(TextEdit::singleline(&mut self.roof_slope).desired_width(48.0).hint_text("°")).labelled_by(l.id);
+                let l = ui.label(t("Overhang:"));
+                let hint = self.session.model.units.name();
+                ui.add(TextEdit::singleline(&mut self.roof_overhang).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
+                ui.checkbox(&mut self.roof_gable, t("Gable"));
+            }
+            Tool::ExtrusionRoof(_) => {
+                let l = ui.label(t("Slope:"));
+                ui.add(TextEdit::singleline(&mut self.roof_slope).desired_width(48.0).hint_text("°")).labelled_by(l.id);
+                ui.checkbox(&mut self.roof_shed, t("Shed"));
+            }
+            Tool::Dormer => {
+                let hint = self.session.model.units.name();
+                let l = ui.label(t("Width:"));
+                ui.add(TextEdit::singleline(&mut self.dormer_width).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
+                let l = ui.label(t("Height:"));
+                ui.add(TextEdit::singleline(&mut self.dormer_height).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
+                let l = ui.label(t("Slope:"));
+                ui.add(TextEdit::singleline(&mut self.roof_slope).desired_width(48.0).hint_text("°")).labelled_by(l.id);
+                ui.checkbox(&mut self.dormer_window, t("Window"));
+            }
+            Tool::Level => self.level_options(ui),
+            Tool::Move(_) => {
+                ui.checkbox(&mut self.constrain, t("Constrain"));
+            }
+            Tool::Copy(_) => {
+                ui.checkbox(&mut self.constrain, t("Constrain"));
+                ui.checkbox(&mut self.multiple, t("Multiple"));
+            }
+            Tool::Rotate { .. } => self.rotate_options(ui),
+            Tool::Array { .. } => self.array_options(ui),
+            Tool::Mirror { .. } => {
+                ui.checkbox(&mut self.mirror_copy, t("Copy"));
+            }
+            Tool::Tag => {
+                ui.checkbox(&mut self.tag_leader, t("Leader"));
+                let l = ui.label(t("Label:"));
+                ui.add(TextEdit::singleline(&mut self.tag_label).desired_width(160.0).hint_text(t("a field, such as Type or Height")))
+                    .labelled_by(l.id);
+            }
+            Tool::DetailLine(_) => self.line_style_options(ui),
+            // Between endpoints: as the cursor lies, aligned, horizontal or vertical (Space steps them).
+            Tool::Dimension(mode, _) => {
+                ui.label(t("Place:"));
+                for (m, label) in [
+                    (DimMode::Auto, msg!("Auto")),
+                    (DimMode::Aligned, msg!("Aligned")),
+                    (DimMode::Horizontal, msg!("Horizontal")),
+                    (DimMode::Vertical, msg!("Vertical")),
+                ] {
+                    if ui.selectable_label(mode == m, t(label)).clicked()
+                        && let Tool::Dimension(now, _) = &mut self.tool
+                    {
+                        *now = m;
+                    }
+                }
+            }
+            Tool::Text => {
+                let l = ui.label(t("Text:"));
+                ui.add(TextEdit::singleline(&mut self.note_text).desired_width(240.0).hint_text(t("what the note says"))).labelled_by(l.id);
+            }
+            Tool::Attach => {
+                ui.label(t("Attach Wall:"));
+                if ui.selectable_label(!self.attach_base, t("Top")).clicked() {
+                    self.attach_base = false;
+                }
+                if ui.selectable_label(self.attach_base, t("Base")).clicked() {
+                    self.attach_base = true;
+                }
+            }
+            Tool::Offset => self.offset_options(ui),
+            _ => {}
+        }
     }
 
     /// Offset's Options Bar: the distance, and Copy.
@@ -5038,7 +5047,7 @@ impl BimApp {
         height_options(ui, &self.session.model, level, &mut self.wall_top, &mut self.wall_height, "wall-top");
         let l = ui.label(t("Location Line:"));
         let now = self.wall_location;
-        let c = ComboBox::from_id_salt("wall-location").selected_text(t(now.label())).width(150.0).show_ui(ui, |ui| {
+        let c = crate::icons::combo("wall-location").selected_text(t(now.label())).width(150.0).show_ui(ui, |ui| {
             for loc in Location::ALL {
                 if ui.selectable_label(loc == now, t(loc.label())).clicked() {
                     self.wall_location = loc;
@@ -5300,6 +5309,8 @@ impl BimApp {
                 if funnel.on_hover_text(t("Filter Selection")).clicked() {
                     self.open_filter();
                 }
+                // The page's checks of the model, flagged and not: a click opens the Checks palette.
+                self.checks_badge(ui);
                 if let Some(p) = self.canvas.cursor {
                     let u = self.session.model.units;
                     ui.monospace(format!("x {}  y {}", u.with_unit(p.0), u.with_unit(p.1)));
@@ -5528,8 +5539,7 @@ impl BimApp {
             if r.has_focus() {
                 p.rect_stroke(at, 4.0, style::focus_ring(), StrokeKind::Inside);
             }
-            let c = at.center();
-            p.add(egui::Shape::convex_polygon(vec![c + vec2(-4.0, -2.0), c + vec2(4.0, -2.0), c + vec2(0.0, 2.5)], pal().icon, Stroke::NONE));
+            icons::paint_chevron_at(p, at.center(), 16.0, pal().muted);
             let r = r.on_hover_text(t("All open views"));
             // As wide as the longest name, and fixed: a menu's width would otherwise grow each frame.
             let size = |n: &String| ui.painter().layout_no_wrap(n.clone(), FontId::proportional(13.0), pal().text).size().x;

@@ -49,6 +49,16 @@
 //! // onWanted(["files/doc_2/House.ifc"]): the files the model's links read, which the page gives and then
 //! app.reload_links();
 //! ```
+//!
+//! The model's checks against the firm's rules and the client's brief are the page's (its server runs them after a save);
+//! the Checks palette lists them, flagged first, and asks the page to show a rule:
+//!
+//! ```js
+//! app.set_checks(checksJson);  // GET /api/proposals/{id}/checks's answer; null while they are being made again
+//! app.on_rule(ruleId => openRule(ruleId));  // Open Rule: the page shows the rule where the project's rules are kept
+//! app.on_waive(ask => waive(JSON.parse(ask)));  // {rule, reason}: accept a flag as it is; {rule, reason: null}: undo
+//! app.waive_refused(ruleId, why);  // the server would not: its reason, under the check (else set_checks again)
+//! ```
 #![cfg(target_arch = "wasm32")]
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
@@ -60,7 +70,7 @@ use bimcraft_core::ids::Guid;
 use bimcraft_core::model::Model;
 use bimcraft_core::sync::{self, Changes};
 use bimcraft_ui_egui::BimApp;
-use bimcraft_ui_egui::host::{Controls, HostLook, Skin, editor_takes_key};
+use bimcraft_ui_egui::host::{Controls, HostLook, Skin, Waive, editor_takes_key};
 use bimcraft_ui_egui::hostview::ContextKey;
 use serde_json::Value;
 use wasm_bindgen::JsCast;
@@ -79,6 +89,10 @@ struct Host {
     on_context: Rc<RefCell<Option<js_sys::Function>>>,
     context_seen: ContextKey,
     context_since: Option<f64>,
+    /// Called with a rule's id when the person asks to see it (the Checks palette's Open Rule).
+    on_rule: Rc<RefCell<Option<js_sys::Function>>>,
+    /// Called with `{rule, reason}` when the person waives a check, `reason` null to take a waiver back.
+    on_waive: Rc<RefCell<Option<js_sys::Function>>>,
 }
 
 /// How long what the person sees must hold still before the page is told it changed, seconds: a pan or a zoom is one change.
@@ -154,6 +168,16 @@ impl eframe::App for Host {
         }
         self.tell_files();
         self.tell_context(ui);
+        if let Some(rule) = self.app.take_rule_request() {
+            later_with(self.on_rule.borrow().clone(), JsValue::from_str(&rule));
+        }
+        if let Some(w) = self.app.take_waive_request() {
+            let ask = match w {
+                Waive::Add { rule, reason } => serde_json::json!({"rule": rule, "reason": reason}),
+                Waive::Remove { rule } => serde_json::json!({"rule": rule, "reason": null}),
+            };
+            later_with(self.on_waive.borrow().clone(), JsValue::from_str(&ask.to_string()));
+        }
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
@@ -223,6 +247,12 @@ pub struct WebApp {
     /// The model as `take_changes` last gave it, with the others' changes since: what changed here since is this person's,
     /// not sent yet.
     sent: RefCell<Option<Arc<Model>>>,
+    /// The checks the page gave, kept for the start when given before it or while it is under way.
+    checks: Rc<RefCell<Option<String>>>,
+    /// What the page hears when the person asks to see a rule.
+    on_rule: Rc<RefCell<Option<js_sys::Function>>>,
+    /// What the page hears when the person waives a check, or takes a waiver back.
+    on_waive: Rc<RefCell<Option<js_sys::Function>>>,
 }
 
 #[wasm_bindgen]
@@ -240,6 +270,9 @@ impl WebApp {
             on_context: Rc::new(RefCell::new(None)),
             keys: RefCell::new(None),
             sent: RefCell::new(None),
+            checks: Rc::new(RefCell::new(None)),
+            on_rule: Rc::new(RefCell::new(None)),
+            on_waive: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -269,10 +302,12 @@ impl WebApp {
             on_context: Rc::clone(&self.on_context),
             context_seen: ContextKey::default(),
             context_since: None,
+            on_rule: Rc::clone(&self.on_rule),
+            on_waive: Rc::clone(&self.on_waive),
         };
         self.hold_editor_keys(&canvas)?;
         let ctx = Rc::clone(&self.ctx);
-        let (look, fonts) = (Rc::clone(&self.look), Rc::clone(&self.fonts));
+        let (look, fonts, checks) = (Rc::clone(&self.look), Rc::clone(&self.fonts), Rc::clone(&self.checks));
         self.runner
             .start(
                 canvas,
@@ -286,6 +321,9 @@ impl WebApp {
                     }
                     let (sans, mono) = fonts.borrow().clone();
                     host.app.set_host_fonts(sans, mono);
+                    if let Some(json) = checks.borrow().as_deref() {
+                        let _ = host.app.set_checks(json);
+                    }
                     // The 3D view, and the plans' kept triangles, drawn on the card the page draws on (WebGPU; WebGL2 where
                     // there is none, which the 3D view can't use, so it is drawn on the processor there), as the desktop
                     // app does.
@@ -464,10 +502,11 @@ impl WebApp {
                 hover: colour("hover"),
                 context: colour("context"),
                 // Outlined controls and their corners, as the page draws its own: `"outlined": true`, `"radius": 6`.
-                controls: v.get("outlined").and_then(Value::as_bool).filter(|o| *o).map(|outlined| Controls {
-                    outlined,
-                    radius: v.get("radius").and_then(Value::as_u64).map_or(6, |r| r.min(12) as u8),
-                }),
+                controls: v
+                    .get("outlined")
+                    .and_then(Value::as_bool)
+                    .filter(|o| *o)
+                    .map(|outlined| Controls { outlined, radius: v.get("radius").and_then(Value::as_u64).map_or(6, |r| r.min(12) as u8) }),
             },
             compact: v.get("compact").and_then(Value::as_bool),
         };
@@ -487,6 +526,39 @@ impl WebApp {
             host.app.set_host_fonts(sans, mono);
         }
         self.repaint();
+    }
+
+    /// Gives the Checks palette the model's checks: the answer of Arqiflow's `GET /api/proposals/{id}/checks`
+    /// (`{results, integrity}`, and `error` when the page could not check), or null while they are being made again. Before
+    /// or after the start; after it, throws what is not checks.
+    pub fn set_checks(&self, checks: Option<String>) -> Result<(), JsValue> {
+        let json = checks.unwrap_or_default();
+        if let Some(mut host) = self.runner.app_mut::<Host>() {
+            host.app.set_checks(&json).map_err(err)?;
+        }
+        *self.checks.borrow_mut() = Some(json);
+        self.repaint();
+        Ok(())
+    }
+
+    /// What the page hears when the person asks to see a rule (the Checks palette's Open Rule): `on_rule(ruleId)`, once the
+    /// frame is over.
+    pub fn on_rule(&self, on_rule: Option<js_sys::Function>) {
+        *self.on_rule.borrow_mut() = on_rule;
+    }
+
+    /// What the page hears when the person waives a flagged check (a reason given) or takes a waiver back: `on_waive(askJson)`,
+    /// `{"rule": id, "reason": text}` or `{"rule": id, "reason": null}`, once the frame is over. The page asks its server, then
+    /// gives the checks again (`set_checks`), or says why it could not (`waive_refused`).
+    pub fn on_waive(&self, on_waive: Option<js_sys::Function>) {
+        *self.on_waive.borrow_mut() = on_waive;
+    }
+
+    /// The page could not make or take back the waiver of `rule`: `why` (its server's reason), shown under the check.
+    pub fn waive_refused(&self, rule: &str, why: &str) -> Result<(), JsValue> {
+        self.host()?.app.waive_refused(rule, why);
+        self.repaint();
+        Ok(())
     }
 
     /// What the page hears of files: `on_ask(askJson)` when the person wants a file, or where to save one; `on_written()` when

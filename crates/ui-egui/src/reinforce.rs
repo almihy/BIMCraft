@@ -9,7 +9,7 @@ use bimcraft_i18n::msg;
 
 use bimcraft_core::model::{Element, Id};
 use bimcraft_core::units::Units;
-use egui::{Align, ComboBox, Context, Id as UiId, Layout, RichText, TextEdit, Ui, WidgetInfo, WidgetType};
+use egui::{Align, Context, Id as UiId, Layout, RichText, TextEdit, Ui, WidgetInfo, WidgetType};
 use serde_json::{Value, json};
 
 use crate::lang::{category, t, tf};
@@ -454,7 +454,7 @@ impl BimApp {
             ui.separator();
             ui.horizontal_wrapped(|ui| {
                 let l = ui.label(t("Preset:"));
-                let c = ComboBox::from_id_salt("reinforce-preset").selected_text(d.preset.as_str()).width(180.0).show_ui(ui, |ui| {
+                let c = crate::icons::combo("reinforce-preset").selected_text(d.preset.as_str()).width(180.0).show_ui(ui, |ui| {
                     for n in &names {
                         if ui.selectable_label(*n == d.preset, n).clicked() {
                             chosen = Some(n.clone());
@@ -502,7 +502,7 @@ impl BimApp {
                     let l = ui.label(t("Standard"));
                     let now = d.values.get("check").cloned().unwrap_or_default();
                     let shown = if now.is_empty() { t("None").to_string() } else { now.clone() };
-                    let c = ComboBox::from_id_salt("reinforce-check").selected_text(shown).width(110.0).show_ui(ui, |ui| {
+                    let c = crate::icons::combo("reinforce-check").selected_text(shown).width(110.0).show_ui(ui, |ui| {
                         if ui.selectable_label(now.is_empty(), t("None")).clicked() {
                             d.values.insert("check", String::new());
                         }

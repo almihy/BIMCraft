@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Arqiflow's drawing for BIMCraft's TrimMultiple icon, adapted from lucide's "arrow-right-to-line" (lucide.dev, ISC licence; see NOTICE). -->
+  <path d="M20 3v18"/>
+  <path d="M3 7h12"/>
+  <path d="m12 4 3 3-3 3"/>
+  <path d="M3 17h12"/>
+  <path d="m12 14 3 3-3 3"/>
+</svg>

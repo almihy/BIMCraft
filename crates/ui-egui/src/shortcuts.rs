@@ -7,7 +7,7 @@ use std::path::Path;
 
 use bimcraft_core::geom::P2;
 use bimcraft_core::snap::Kind as Snap;
-use egui::{Align, ComboBox, Context, Grid, Id as UiId, Layout, RichText, ScrollArea, TextEdit, vec2};
+use egui::{Align, Context, Grid, Id as UiId, Layout, RichText, ScrollArea, TextEdit, vec2};
 
 use crate::graphics;
 use crate::lang::{Lang, t, tf, translated_in};
@@ -462,7 +462,7 @@ impl BimApp {
 
                             ui.label(t("Command / Tool:"));
                             let current_action = self.shortcuts_dialog.new_action.clone();
-                            ComboBox::from_id_salt("new_shortcut_action").selected_text(t(&current_action)).show_ui(ui, |ui| {
+                            crate::icons::combo("new_shortcut_action").selected_text(t(&current_action)).show_ui(ui, |ui| {
                                 for &act in ACTIONS {
                                     ui.selectable_value(&mut self.shortcuts_dialog.new_action, act.to_string(), t(act));
                                 }

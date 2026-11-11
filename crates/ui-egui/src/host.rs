@@ -10,6 +10,10 @@
 //! ([`BimApp::answer_file_request`]). Export asks it where to save, the same way, and what is written waits for the page to
 //! take it ([`BimApp::take_written`]). A model the project links is read from the page too: [`BimApp::files_wanted`] names
 //! the files its links read that are not read yet, and [`BimApp::reload_links`] reads them once the page gave them.
+//!
+//! The page checks the model against its firm's rules and its client's brief: it gives the checks to the Checks palette
+//! ([`BimApp::set_checks`], `checks.rs`), open from the start, and shows a rule the person asks for
+//! ([`BimApp::take_rule_request`]).
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -21,6 +25,7 @@ use bimcraft_core::sync::{Changes, Merged};
 use egui::{Context, ThemePreference};
 use serde_json::Value;
 
+pub use crate::checks::Waive;
 pub use crate::dialog::FileRequest;
 pub use crate::style::{Controls, Skin};
 use crate::{BimApp, Pending};
@@ -46,6 +51,8 @@ impl BimApp {
     pub fn hosted_on(session: Session) -> BimApp {
         let mut app = BimApp::new(session);
         app.hosted = true;
+        // The page checks the model against the firm's rules and the brief: the Checks palette is open from the start.
+        app.docking = app.first_docking();
         // What it writes (Export) is the page's to keep, not a file on this computer's disk.
         app.session.files.keep_writes = true;
         app

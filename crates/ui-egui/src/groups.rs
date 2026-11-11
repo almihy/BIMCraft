@@ -6,7 +6,7 @@ use std::sync::Arc;
 use bimcraft_core::geom::P2;
 use bimcraft_core::groups::{DetailGroup, RepeatingDetail};
 use bimcraft_core::model::{Element, Id, Model};
-use egui::{ComboBox, Ui, WidgetInfo, WidgetType};
+use egui::{Ui, WidgetInfo, WidgetType};
 use serde_json::json;
 
 use crate::lang::{t, tf};
@@ -64,7 +64,7 @@ impl BimApp {
         let now = self.placing_group().unwrap_or_default();
         let l = ui.label(t("Group:"));
         let mut chosen = now.clone();
-        let c = ComboBox::from_id_salt("detail-group-type").selected_text(&now).width(160.0).show_ui(ui, |ui| {
+        let c = crate::icons::combo("detail-group-type").selected_text(&now).width(160.0).show_ui(ui, |ui| {
             for n in m.detail_groups.keys() {
                 ui.selectable_value(&mut chosen, n.clone(), n);
             }
