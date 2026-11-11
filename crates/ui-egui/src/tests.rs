@@ -1233,7 +1233,7 @@ fn typing_a_length_puts_the_next_point_that_far_toward_the_cursor() {
 fn a_selected_walls_temporary_dimension_sets_its_length() {
     let mut h = app(BOX);
     click(&mut h, P2(4000.0, 0.0));
-    h.get_by_label_contains("Temporary dimension").click();
+    h.get_by_label("Temporary dimension 8000").click();
     h.run();
     h.key_press_modifiers(Modifiers::COMMAND, Key::A);
     h.event(Event::Text("9000".into()));
@@ -5932,6 +5932,7 @@ mod trim;
 mod typed;
 mod typeprops;
 mod view_controls;
+mod wall_dims;
 mod window;
 mod working3d;
 mod workplane;

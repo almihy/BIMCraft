@@ -122,6 +122,12 @@ door or window lands on it (`Model::centred`): the click sends that `offset`, th
 A selected column or component, and the Column and Component tools' sketches, show up to four: how far it stands from the nearest wall centre
 line or grid east, north, west and south (`Model::clearances`, which finds them in the core; `standing_dimensions` draws them); a typed one runs
 `move` by the difference along that way.
+A selected straight wall shows, besides its length, the distance square to it, on each side, to the nearest parallel wall's centre line or grid that
+shares some of its run in its level's plan (`tempdims::wall` in the core, read by the agent through the `temporary_dimensions` command;
+`canvas/wall_dims.rs` draws them). A typed one runs `move` on the wall by the difference toward that line. The dot where the dimension
+starts on the wall is Revit's witness-line grip: a click cycles the line it measures from, the centre line, the exterior face (`Face::Left`),
+the interior face (`Face::Right`), kept in egui's memory for the wall. The icon beside the number runs `dimension` between the same two
+lines, at the middle of the stretch they share.
 
 Align (AL) highlights the exact edge or axis under the cursor before either pick, leaving the selected reference as an
 extended dashed line. It searches the candidates under the pointer for a usable line rather than letting annotation mask

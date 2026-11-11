@@ -30,6 +30,8 @@ use crate::properties::number;
 use crate::style::{canvas_pal, pal};
 use crate::{BimApp, Sheet, Status, Tool, icon_button, top_params};
 
+mod wall_dims;
+
 /// How near the cursor an element is picked, in px.
 pub(crate) const PICK: f32 = 6.0;
 /// How near the cursor a click snaps to a wall's end or a point of the chain, in px.
@@ -1882,6 +1884,7 @@ impl BimApp {
         self.line_grip_overlay(&ui.painter_at(rect), rect, &view, cursor);
         self.shape_overlay(ui, &model, &view, rect, level);
         self.temporary_dimension(ui, &model, &view, rect);
+        self.wall_neighbour_dimensions(ui, &model, &view, rect, key);
         self.locks(ui, &model, &view, rect, key);
         self.context_menu(&response);
         self.nav_bar(ui, rect, key);
