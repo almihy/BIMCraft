@@ -1123,7 +1123,6 @@ impl BimApp {
             });
         });
         ui.add_space(4.0);
-        self.layer_picture(ui, &model);
         self.opening_picker(ui, &model);
         self.room_colour(ui, &model);
         self.floor_slope(ui, &model);
@@ -1167,62 +1166,6 @@ impl BimApp {
         }
         ui.add_space(8.0);
         ui.with_layout(Layout::right_to_left(Align::Min), apply);
-    }
-
-    /// The layers of the type the palette shows, drawn to their thicknesses in their materials' colours: a wall's from its exterior
-    /// face to its interior one with its location line, where a click sets the line nearest it; a floor's, a roof's or a ceiling's
-    /// from the top down. Without layers, a type is one layer of its thickness.
-    fn layer_picture(&mut self, ui: &mut Ui, model: &Model) {
-        let Some((category, name, ids)) = self.type_subject() else { return };
-        let Some((.., thickness, layers)) = model.layered_types().find(|(c, n, ..)| *c == category && *n == name) else { return };
-        if !LAYERED.contains(&category) || thickness.is_nan() || thickness <= 0.0 {
-            return;
-        }
-        let colour = |l: &Layer| model.materials.get(&l.material).map(|m| egui::Color32::from_rgb(m.color[0], m.color[1], m.color[2]));
-        let bands: Vec<(egui::Color32, f64)> = match layers {
-            [] => vec![(pal().control, thickness)],
-            layers => layers.iter().map(|l| (colour(l).unwrap_or(pal().control), l.thickness)).collect(),
-        };
-        let wall = category == "wall";
-        let sense = if wall && !ids.is_empty() { Sense::click() } else { Sense::hover() };
-        let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), if wall { 40.0 } else { 64.0 }), sense);
-        let label = t(if wall { msg!("Wall layers") } else { msg!("Layers, top down") });
-        r.widget_info(|| WidgetInfo::labeled(if wall { WidgetType::Button } else { WidgetType::Label }, true, label));
-        let p = ui.painter();
-        let ink = Stroke::new(1.0, pal().icon);
-        let mut at = 0.0;
-        for (fill, t) in &bands {
-            let (a, b) = ((at / thickness) as f32, ((at + t) / thickness) as f32);
-            let band = match wall {
-                true => Rect::from_x_y_ranges(rect.left() + a * rect.width()..=rect.left() + b * rect.width(), rect.y_range()),
-                false => Rect::from_x_y_ranges(rect.x_range(), rect.top() + a * rect.height()..=rect.top() + b * rect.height()),
-            };
-            p.rect(band, 0.0, *fill, ink, StrokeKind::Inside);
-            at += t;
-        }
-        if !wall {
-            return;
-        }
-        // The line the selected walls share, dashed where it runs; a click puts it at the line nearest.
-        let depth = |loc: Location| bimcraft_core::walls::depth(thickness, layers, loc);
-        let x = |d: f64| rect.left() + (d / thickness) as f32 * rect.width();
-        let json = self.elements_json(model, &ids);
-        let shared: Vec<Location> = json.iter().map(|j| j["location"].as_str().and_then(Location::from_name).unwrap_or_default()).collect();
-        if let Some(&loc) = shared.first().filter(|l| shared.iter().all(|m| m == *l)) {
-            let line = [pos2(x(depth(loc)), rect.top() - 3.0), pos2(x(depth(loc)), rect.bottom() + 3.0)];
-            p.extend(Shape::dashed_line(&line, Stroke::new(2.0, pal().accent_ink), 4.0, 3.0));
-            ui.label(RichText::new(tf("Location line: {}", &[t(loc.label())])).color(pal().muted));
-        }
-        let r = r.on_hover_text(t("Click where the location line should run"));
-        if r.clicked()
-            && let Some(at) = r.interact_pointer_pos()
-        {
-            let d = f64::from((at.x - rect.left()) / rect.width()) * thickness;
-            let near = Location::ALL.into_iter().min_by(|a, b| (depth(*a) - d).abs().total_cmp(&(depth(*b) - d).abs()));
-            if let Some(loc) = near {
-                self.run("modify", json!({"ids": ids, "location": loc.name()}));
-            }
-        }
     }
 
     /// Which way the doors the palette shows open, as four plans of a door in its wall: as placed, its hand flipped, its facing
