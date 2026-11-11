@@ -598,49 +598,6 @@ fn marked(ui: &Ui, label: &str, words: &[String]) -> egui::WidgetText {
     job.into()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_word_matches_anywhere_case_aside_and_marks_each_place() {
-        assert_eq!(spans("Level 1", "lev"), Some(vec![(0, 3)]));
-        assert_eq!(spans("Level 1", "EL"), Some(vec![(3, 5)]));
-        assert_eq!(spans("Levels", "e"), Some(vec![(1, 2), (3, 4)]), "every place");
-        assert_eq!(spans("Level 1", "x"), None);
-    }
-
-    #[test]
-    fn a_star_is_any_run_and_a_question_mark_any_one() {
-        assert_eq!(spans("Level 12", "l*1"), Some(vec![(0, 7)]), "as short as it can");
-        assert_eq!(spans("Level 12", "level ?2"), Some(vec![(0, 8)]));
-        assert_eq!(spans("Level 2", "level ?2"), None, "? is one character, not none");
-        assert_eq!(spans("Door", "*"), Some(vec![]), "matches, with nothing to mark");
-        assert_eq!(spans("A101 - Plans", "a1?1"), Some(vec![(0, 4)]));
-    }
-
-    #[test]
-    fn spans_are_in_bytes_whatever_the_letters() {
-        let text = "Nível 1";
-        let hit = spans(text, "vel").unwrap_or_default();
-        assert_eq!(hit.iter().map(|(a, b)| &text[*a..*b]).collect::<Vec<_>>(), ["vel"]);
-        assert_eq!(spans("ÉLÉVATION", "élé"), Some(vec![(0, 5)]));
-    }
-
-    #[test]
-    fn a_group_shows_for_words_it_or_what_is_in_it_matches() {
-        let tree = Node::group(
-            "Ceiling Plans",
-            true,
-            vec![Node::leaf("Level 1", Act::Open(Sheet::View3D), false), Node::leaf("Level 2", Act::Open(Sheet::View3D), false)],
-        );
-        assert!(tree.shows(&words("ceiling 2")), "the group the one word, an entry the other");
-        assert!(tree.shows(&words("ceil*")));
-        assert!(!tree.shows(&words("floor 2")));
-        assert!(tree.kids[1].shows(&words("2")) && !tree.kids[0].shows(&words("2")));
-    }
-}
-
 impl BimApp {
     /// Delete on a type or a family in the Project Browser, as Revit's: with no instance it is deleted; with some, a warning says how
     /// many will be deleted with it (OK or Cancel).
@@ -683,5 +640,48 @@ impl BimApp {
         } else if cancel || r.should_close() {
             self.delete_type = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_word_matches_anywhere_case_aside_and_marks_each_place() {
+        assert_eq!(spans("Level 1", "lev"), Some(vec![(0, 3)]));
+        assert_eq!(spans("Level 1", "EL"), Some(vec![(3, 5)]));
+        assert_eq!(spans("Levels", "e"), Some(vec![(1, 2), (3, 4)]), "every place");
+        assert_eq!(spans("Level 1", "x"), None);
+    }
+
+    #[test]
+    fn a_star_is_any_run_and_a_question_mark_any_one() {
+        assert_eq!(spans("Level 12", "l*1"), Some(vec![(0, 7)]), "as short as it can");
+        assert_eq!(spans("Level 12", "level ?2"), Some(vec![(0, 8)]));
+        assert_eq!(spans("Level 2", "level ?2"), None, "? is one character, not none");
+        assert_eq!(spans("Door", "*"), Some(vec![]), "matches, with nothing to mark");
+        assert_eq!(spans("A101 - Plans", "a1?1"), Some(vec![(0, 4)]));
+    }
+
+    #[test]
+    fn spans_are_in_bytes_whatever_the_letters() {
+        let text = "Nível 1";
+        let hit = spans(text, "vel").unwrap_or_default();
+        assert_eq!(hit.iter().map(|(a, b)| &text[*a..*b]).collect::<Vec<_>>(), ["vel"]);
+        assert_eq!(spans("ÉLÉVATION", "élé"), Some(vec![(0, 5)]));
+    }
+
+    #[test]
+    fn a_group_shows_for_words_it_or_what_is_in_it_matches() {
+        let tree = Node::group(
+            "Ceiling Plans",
+            true,
+            vec![Node::leaf("Level 1", Act::Open(Sheet::View3D), false), Node::leaf("Level 2", Act::Open(Sheet::View3D), false)],
+        );
+        assert!(tree.shows(&words("ceiling 2")), "the group the one word, an entry the other");
+        assert!(tree.shows(&words("ceil*")));
+        assert!(!tree.shows(&words("floor 2")));
+        assert!(tree.kids[1].shows(&words("2")) && !tree.kids[0].shows(&words("2")));
     }
 }

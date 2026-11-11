@@ -59,8 +59,8 @@ impl BimApp {
         }
         let revit = if turning { t("Can't rotate pinned element.") } else { t("Can't move pinned element.") };
         let text = match pinned.as_slice() {
-            [one] => tf("{} Element {} is pinned: Unpin (UP) frees it", &[&revit, &one.to_string()]),
-            many => tf("{} {} of the selected elements are pinned: Unpin (UP) frees them", &[&revit, &many.len().to_string()]),
+            [one] => tf("{} Element {} is pinned: Unpin (UP) frees it", &[revit, &one.to_string()]),
+            many => tf("{} {} of the selected elements are pinned: Unpin (UP) frees them", &[revit, &many.len().to_string()]),
         };
         self.status = Status { text, error: true };
         true
