@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-  <!-- Arqiflow's own drawing for BIMCraft's Roof icon, in lucide's style. -->
-  <path d="M2 12l6-7h8l6 7z"/>
-  <path d="M5 12v8h14v-8"/>
+  <!-- Arqiflow's own drawing for BIMCraft's Roof icon, in lucide's style: a hipped roof seen from above a corner. -->
+  <path d="M2 13 9 9l6-3 7 6-11 6z"/>
+  <path d="M9 9l2 9"/>
 </svg>
