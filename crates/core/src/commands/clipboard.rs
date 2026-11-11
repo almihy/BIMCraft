@@ -11,7 +11,9 @@ use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
 
-use super::{Motion, R, absent, bad, duplicate_mapped, flag, ids_param, level_param, micron, next_number, only, point_req, wall_at};
+use super::{
+    Motion, R, absent, along, bad, duplicate_mapped, flag, ids_param, level_param, micron, next_number, off_centre, only, point_req,
+};
 use crate::engine::Session;
 use crate::geom::P2;
 use crate::model::{Element, Guid, Id, MAX_POINTS, Model, TOL, Wall, run_arm};
@@ -248,7 +250,9 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> R {
             rest.iter().partition(|id| s.model.elements.get(**id).is_some_and(|e| s.model.level_of(e).is_none()));
         // With no `by` a copy would lie on its original: it is left out, and the reply says so.
         if !by_given {
-            left_out.extend(levelless.drain(..).map(|id| format!("{}: it stands on no level; give `by` to paste it beside", named(&s.model, id))));
+            left_out.extend(
+                levelless.drain(..).map(|id| format!("{}: it stands on no level; give `by` to paste it beside", named(&s.model, id))),
+            );
         }
         return paste_to_levels(c, s, &on_levels, &levelless, &loose, &targets, by, left_out);
     }
@@ -286,13 +290,14 @@ fn place_openings(s: &mut Session, loose: &[Id], by: P2, level: Option<Guid>) ->
             continue;
         };
         let here = micron(Axis::of(old).at(o.offset, 0.0) + by);
-        let Some((host, offset)) = wall_at(m, level.unwrap_or(old.level), here) else {
+        let width = m.opening_dims(e).map_or(0.0, |t| t.width);
+        let Some((host, offset, sill)) = host_for_opening(m, level, old, o.sill, here, width) else {
             left_out.push(format!("{label}: no wall at [{}, {}] to hold it: a door or window goes only in a wall", here.0, here.1));
             continue;
         };
         let door = matches!(e, Element::Door(_));
         let mut copy = o.clone();
-        (copy.host, copy.offset) = (host, offset);
+        (copy.host, copy.offset, copy.sill) = (host, offset, sill);
         copy.mark = next_number(m.elements.values().filter_map(|e| match e {
             Element::Door(o) if door => Some(o.mark.as_str()),
             Element::Window(o) if !door => Some(o.mark.as_str()),
@@ -305,6 +310,41 @@ fn place_openings(s: &mut Session, loose: &[Id], by: P2, level: Option<Guid>) ->
         made.push(s.model_mut().insert(copy));
     }
     (made, left_out)
+}
+
+/// How well a wall suits a pasted opening, the smaller the better: on another level than the plan's, how far its axis is, how far
+/// the opening overhangs its run, and the axis distance again, finer.
+type Rank = (bool, i64, i64, i64);
+
+/// The wall a copy of a door or window of `old` (its sill `sill` above that wall's base) goes in when it falls at `at`, `width`
+/// wide, in the plan of `level` (else of the old wall's level): how far along it, and its sill there. Of the walls the plan
+/// cuts that `at` lies in, one on the plan's own level before one from a level below that runs up through it, then the one
+/// whose axis is nearest (at a join, the one the opening fits in), the opening kept within its run where it can be. The sill is
+/// measured from that wall's base, so the opening is as high above the level as it was above its own.
+fn host_for_opening(m: &Model, level: Option<Guid>, old: &Wall, sill: f64, at: P2, width: f64) -> Option<(Guid, f64, f64)> {
+    let plan = level.unwrap_or(old.level);
+    let half = width.max(0.0) / 2.0;
+    let mut best: Option<(Rank, Guid, &Wall, f64)> = None;
+    for (_, id, e) in m.elements.with_guids() {
+        let Element::Wall(w) = e else { continue };
+        let d = off_centre(m, w, at);
+        if !m.cut_by(w, plan) || d > m.thickness(w) / 2.0 + 100.0 {
+            continue;
+        }
+        let (s, length) = (along(w, at), Axis::of(w).length());
+        let overshoot = (half - s).max(0.0) + (s + half - length).max(0.0);
+        let key = (w.level != plan, (d * 1000.0).round() as i64, (overshoot * 1000.0).round() as i64, (d * 1e6).round() as i64);
+        if best.as_ref().is_none_or(|(k, ..)| key < *k) {
+            best = Some((key, id, w, s));
+        }
+    }
+    let (_, id, w, s) = best?;
+    let length = Axis::of(w).length();
+    let offset = if length >= width { s.clamp(half, length - half) } else { length / 2.0 };
+    // Its bottom as high above the plan's level as it was above its old wall's own, whatever level this wall is based on.
+    let was_above = m.own_base(old) + sill - m.elevation(old.level);
+    let sill = (m.elevation(plan) + was_above - m.own_base(w)).max(0.0);
+    Some((id, offset, sill))
 }
 
 /// The levels `levels` (each a level, a plan view or a name) or `view` name, as GUIDs, each once.

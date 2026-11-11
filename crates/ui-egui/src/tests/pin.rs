@@ -331,3 +331,39 @@ fn a_pinned_wall_is_not_moved_by_a_length_typed_into_a_permanent_dimension() {
 const TWO_WALLS_AND_DIMENSION: &str = r#"wall {"points": [[0, 0], [0, 4000]]}
 wall {"points": [[2000, 0], [2000, 4000]]}
 dimension {"refs": [[0, 2000], [2000, 2000]], "at": [1000, -1000]}"#;
+
+#[test]
+fn a_pinned_viewport_refuses_a_drag_on_its_sheet_and_says_so() {
+    let mut h = app_at(BOX, 0.05);
+    press(&mut h, "View");
+    press(&mut h, "Sheet");
+    press(&mut h, "View");
+    press(&mut h, "Place View");
+    press(&mut h, "Floor Plan: Level 1");
+    let vp = ids(&h, "viewport")[0];
+    h.state_mut().selection = vec![vp];
+    shortcut(&mut h, "PN");
+    assert!(h.state().session.model.is_pinned(vp), "{:?}", h.state().status);
+    let at = field(&h, vp, "at");
+    let (x, y) = (at[0].as_f64().unwrap(), at[1].as_f64().unwrap());
+    let before = Arc::clone(&h.state().session.model);
+    h.state_mut().status = crate::Status::default();
+    drag(&mut h, P2(x, y), P2(x + 40.0, y));
+    assert_eq!(field(&h, vp, "at"), json!([x, y]), "the viewport stayed");
+    assert!(Arc::ptr_eq(&before, &h.state().session.model));
+    assert!(h.state().status.error && h.state().status.text.contains("pinned"), "{:?}", h.state().status);
+}
+
+#[test]
+fn a_pinned_doors_temporary_dimension_refuses_a_typed_offset_and_says_so() {
+    let mut h = app(&format!("{BOX}\ndoor {{\"at\": [2000, 0]}}"));
+    let door = ids(&h, "door")[0];
+    click(&mut h, P2(2000.0, 0.0));
+    shortcut(&mut h, "PN");
+    assert!(h.state().session.model.is_pinned(door), "{:?}", h.state().status);
+    let before = Arc::clone(&h.state().session.model);
+    h.state_mut().status = crate::Status::default();
+    retype_dimension(&mut h, "1900", "2400");
+    assert!(Arc::ptr_eq(&before, &h.state().session.model), "a pinned door slid along its wall");
+    assert!(h.state().status.error && h.state().status.text.contains("pinned"), "{:?}", h.state().status);
+}

@@ -6927,3 +6927,22 @@ fn array_going_back_to_linear_forgets_the_radial_centre_to_place_and_a_first_poi
     press(&mut h, "Linear");
     assert!(matches!(h.state().tool, Tool::Array { start: None, place: false, .. }));
 }
+
+#[test]
+fn a_tall_walls_temporary_dimensions_in_the_plan_above_measure_what_that_plan_shows() {
+    let mut h = app("wall {\"points\": [[0, 0], [8000, 0]], \"height\": 8000}
+wall {\"points\": [[0, 3000], [8000, 3000]]}
+wall {\"points\": [[0, 5000], [8000, 5000]], \"level\": \"Level 2\"}");
+    let tall = ids(&h, "wall")[0];
+    // In Level 1's plan, the nearer wall: 3000 north.
+    click(&mut h, P2(4000.0, 0.0));
+    assert_eq!(h.state().selection, [tall]);
+    assert!(h.query_by_label("Temporary dimension 3000").is_some());
+    // In Level 2's plan the same wall is cut, and measured to the wall that plan shows: 5000 north.
+    h.state_mut().open_sheet(Sheet::Plan(100_001));
+    h.run();
+    h.state_mut().selection = vec![tall];
+    h.run();
+    assert!(h.query_by_label("Temporary dimension 3000").is_none(), "the Level 1 wall is not cut in this plan");
+    assert!(h.query_by_label("Temporary dimension 5000").is_some());
+}

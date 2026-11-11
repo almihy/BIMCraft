@@ -156,6 +156,10 @@ impl BimApp {
         }
         // Answered from what was done: what was selected, and what named no element (what is in the library is no element).
         let found = self.select_named(text, add, show);
+        // Asked of for the agent, the selection is what it asked for, and nothing is: it clears when nothing was found.
+        if !add && found.ids.is_empty() {
+            self.selection.clear();
+        }
         let m = &self.session.model;
         let library = found.library.iter().filter_map(|id| inquiry::names(m, *id)).map(|n| format!("{} ({})", n.name, n.id));
         let missing: Vec<String> = found.missing.iter().cloned().chain(library).collect();

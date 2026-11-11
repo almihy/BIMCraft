@@ -230,10 +230,13 @@ fn a_wall_and_a_grid_copied_together_are_both_pasted_by_a_click_on_another_level
     h.run();
     key(&mut h, Key::Escape);
     let l2 = level(&h, "Level 2");
-    h.state_mut().sheet = Sheet::Plan(l2);
+    h.state_mut().open_sheet(Sheet::Plan(l2));
+    h.state_mut().canvas.show(l2, P2(-1000.0, -3000.0), P2(9000.0, 7000.0));
+    h.run();
     h.run();
     h.key_press_modifiers(Modifiers::COMMAND, Key::V);
     h.run();
+    assert_eq!(h.state().tool, Tool::Paste, "{:?}", h.state().status);
     click(&mut h, P2(4000.0, -1500.0));
     let g = h.state().session.model.guid(l2);
     let on_l2 = ids(&h, "wall").into_iter().filter(|id| h.state().session.model.wall(*id).is_some_and(|w| w.level == g)).count();

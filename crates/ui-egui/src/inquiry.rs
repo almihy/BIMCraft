@@ -69,8 +69,9 @@ impl BimApp {
     }
 
     /// Select what `text` names (added to the selection with `add`), and with `show`, open the plan that shows it, zoomed
-    /// to it. What it found, and what named nothing, in the status box. Nothing found leaves what was selected when it is
-    /// added to, and clears it otherwise (the selection is what was asked for, and nothing is). Answers what it found.
+    /// to it. What it found, and what named nothing, in the status box. Nothing found leaves what was selected, as Revit's
+    /// Select by ID shows an error and keeps the selection (the agent's `host_select` clears it, since there the selection is
+    /// what was asked for). Answers what it found.
     pub(crate) fn select_named(&mut self, text: &str, add: bool, show: bool) -> inquiry::Found {
         let found = inquiry::find(&self.session.model, text);
         // What the library has (a type, a material) is no element to select: said by what it is and its name.
@@ -81,9 +82,6 @@ impl BimApp {
             .map(|n| format!("{} {} ({})", t(&n.category), n.name, n.id))
             .collect();
         if found.ids.is_empty() && !library.is_empty() {
-            if !add {
-                self.selection.clear();
-            }
             self.status = Status { text: tf("In the library, not elements to select: {}", &[&library.join(", ")]), error: false };
             return found;
         }
@@ -93,9 +91,6 @@ impl BimApp {
             } else {
                 tf("Nothing has that ID or GUID: {}", &[&found.missing.join(", ")])
             };
-            if !add {
-                self.selection.clear();
-            }
             self.status = Status { text, error: true };
             return found;
         }
