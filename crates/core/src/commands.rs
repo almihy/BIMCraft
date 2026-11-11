@@ -1175,9 +1175,10 @@ other_files(
          clears it): `type_mark` (names the type in schedules and tags: `D1`), `description`, `manufacturer`, `model`, \
          `fire_rating`, `cost` (a number, in the project's currency), `keynote`, `assembly_code`, `url` and `type_comments`. \
          Its elements read them as fields of those names in `elements` and `inspect` (`type_mark`…), in schedules (Type Mark, Fire \
-         Rating…) and in tags, and IFC carries them (Reference and FireRating in the element's `Pset_*Common`, Manufacturer and \
-         ModelLabel in `Pset_ManufacturerTypeInformation`, the rest in `BIMCraft_TypeData`). A family's types take theirs \
-         through `family`'s `identity`",
+         Rating…) and in tags, and IFC carries them on the type object (Reference and FireRating in its `Pset_*Common`, Manufacturer and \
+         ModelLabel in `Pset_ManufacturerTypeInformation`, the rest in `BIMCraft_TypeData`; an element with no type object holds \
+         them itself). A new type starts with none, so send the identity data you want it to have: only the desktop's Duplicate \
+         copies a type's. A family's types take theirs through `family`'s `identity`",
         edit_type,
     ),
     edit_files(
@@ -1917,7 +1918,8 @@ other_files(
          `opening_past_wall` (wider than the wall's run or past its end), `opening_outside_height` (a sill under the \
          wall's base or at or over its top), `walls_overlap`, `identical_instances` (the same element twice in one \
          place), `wall_off_axis` (a wall or grid less than a degree off an axis), `room_not_enclosed`, \
-         `room_redundant`, `device_no_connector`. The project is never refused for these: every command that makes \
+         `room_redundant`, `device_no_connector`, `duplicate_type_mark` (types of one category sharing a Type Mark; its \
+         `elements` are empty, the types' library GUIDs are its `guids`). The project is never refused for these: every command that makes \
          one returns it in its result as `new_warnings`. Filter by `rule`, `severity` or an `element` (id or GUID) it \
          is about.",
         review_warnings,
@@ -2919,9 +2921,10 @@ pub fn element_json_with(m: &Model, id: Id, rooms: &crate::rooms::Rooms) -> Valu
                 extra.insert("radius".into(), json!(hundredth(r)));
             }
             // One side's area and the volume, less the doors and windows in it, as Revit's wall Area and Volume.
-            let q = crate::quantities::wall(m, id, w, &crate::quantities::holes_in(m, id));
-            extra.insert("area_m2".into(), json!(m2(q.net_side)));
-            extra.insert("volume_m3".into(), json!(m3(q.net_volume)));
+            if let Some(q) = crate::quantities::wall(m, id) {
+                extra.insert("area_m2".into(), json!(m2(q.net_side)));
+                extra.insert("volume_m3".into(), json!(m3(q.net_volume)));
+            }
         }
         Element::Door(o) | Element::Window(o) => {
             if let (Some(t), Some(w)) = (m.opening_type(e), m.wall(o.host)) {

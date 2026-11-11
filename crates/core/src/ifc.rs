@@ -13,7 +13,7 @@ use bimcraft_i18n::ui_msg;
 
 pub mod classes;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
 use crate::family::ConnectorKind;
@@ -269,6 +269,17 @@ struct TypeBuild {
     predefined: String,
     occurrences: Vec<u64>,
     usages: BTreeMap<u8, Vec<u64>>,
+    /// The property sets (entities) the type object holds as its `HasPropertySets`: its identity data.
+    sets: Vec<u64>,
+}
+
+/// What a type object's GlobalIds are made from: its class, its name and its member, so the same on every export.
+fn type_hash(class: &str, name: &str, member: &Option<Member>) -> u64 {
+    let member_text = member.as_ref().map(|x| format!("{x:?}")).unwrap_or_default();
+    name.bytes()
+        .chain(class.bytes())
+        .chain(member_text.bytes())
+        .fold(0xCBF2_9CE4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01B3))
 }
 
 /// The cardinal point (IFC4's `IfcCardinalPointReference`) a beam is placed by: its `justify` line, the top (8), the middle (5)
@@ -319,8 +330,13 @@ impl Step {
 
     /// A property set `name` of `props` for `ent`; its GlobalIds from `(set, relation)` and `key`.
     fn define(&mut self, ent: u64, name: &str, props: &[u64], (set, relation): (u64, u64), key: u64) {
-        let set = self.add(format!("IFCPROPERTYSET({},$,{},$,({}))", self.guid(set, key), s(name), refs(props)));
+        let set = self.property_set(name, props, set, key);
         self.add(format!("IFCRELDEFINESBYPROPERTIES({},$,$,$,(#{ent}),#{set})", self.guid(relation, key)));
+    }
+
+    /// A property set `name` of `props`, its GlobalId from `set` and `key`: what a type object lists in its `HasPropertySets`.
+    fn property_set(&mut self, name: &str, props: &[u64], set: u64, key: u64) -> u64 {
+        self.add(format!("IFCPROPERTYSET({},$,{},$,({}))", self.guid(set, key), s(name), refs(props)))
     }
 
     /// Says `ent` is an occurrence of the type object `class` (with its `predefined` type) named `name`.
@@ -351,6 +367,7 @@ impl Step {
             predefined: predefined.to_string(),
             occurrences: Vec::new(),
             usages: BTreeMap::new(),
+            sets: Vec::new(),
         });
         if build.predefined != predefined {
             build.predefined = ".NOTDEFINED.".into();
@@ -363,16 +380,13 @@ impl Step {
     /// its occurrences use, one for each cardinal point. All the GlobalIds come from the class, the name and the member, so they
     /// are the same on every export.
     fn write_types(&mut self, m: &Model) {
-        for ((class, before, after, name, member), TypeBuild { predefined, occurrences, usages }) in std::mem::take(&mut self.typed) {
-            let member_text = member.as_ref().map(|x| format!("{x:?}")).unwrap_or_default();
-            let key = name
-                .bytes()
-                .chain(class.bytes())
-                .chain(member_text.bytes())
-                .fold(0xCBF2_9CE4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01B3));
-            // Six attributes after the name (description to element type), then `before`, the predefined type and `after`.
+        for ((class, before, after, name, member), TypeBuild { predefined, occurrences, usages, sets }) in std::mem::take(&mut self.typed) {
+            let key = type_hash(&class, &name, &member);
+            // Six attributes after the name (description to element type): its description and applicable occurrence, then its
+            // property sets, representation maps, tag and element type; then `before`, the predefined type and `after`.
+            let has = if sets.is_empty() { "$".to_string() } else { format!("({})", refs(&sets)) };
             let predefined = if predefined.is_empty() { predefined } else { format!(",{predefined}") };
-            let kind = self.add(format!("{class}({},$,{},$,$,$,$,$,${before}{predefined}{after})", self.guid(TYPES, key), s(&name)));
+            let kind = self.add(format!("{class}({},$,{},$,$,{has},$,$,${before}{predefined}{after})", self.guid(TYPES, key), s(&name)));
             self.add(format!("IFCRELDEFINESBYTYPE({},$,$,$,({}),#{kind})", self.guid(TYPE_DEFINES, key), refs(&occurrences)));
             let Some((section, material)) = member else { continue };
             let profile = self.section_profile(section);
@@ -751,16 +765,11 @@ fn member_quantities(width: f64, depth: f64, round: bool, length: f64) -> Vec<(&
 }
 
 /// What a wall measures, for its `Qto_WallBaseQuantities` (`quantities::wall`, which schedules read too): its length along its
-/// axis, its thickness and height, its side (length by height, m²) and that less the doors and windows in it (`holes`, as
-/// (width, height, sill), each cut to the wall's height), and both through its thickness (m³), its joins aside. A wall attached to
-/// a roof or a floor has no single height, so no `Height`; its sides and volumes are those of its pieces.
-fn wall_quantities(
-    m: &Model,
-    id: Id,
-    wl: &crate::model::Wall,
-    holes: &[crate::quantities::Hole],
-) -> Vec<(&'static str, &'static str, f64)> {
-    let q = crate::quantities::wall(m, id, wl, holes);
+/// location line, its thickness and height, the area of one side (the middle of its thickness) and that less the doors and
+/// windows in it, and both through its thickness (m³), from the wall's own solid: its corners counted once, its openings where they
+/// are. A wall attached to a roof or a floor has no single height, so no `Height`; its sides and volumes are those of its pieces.
+fn wall_quantities(m: &Model, id: Id) -> Vec<(&'static str, &'static str, f64)> {
+    let Some(q) = crate::quantities::wall(m, id) else { return Vec::new() };
     let mut values = vec![("Length", "LENGTH", q.length), ("Width", "LENGTH", q.width)];
     if let Some(height) = q.height {
         values.push(("Height", "LENGTH", height));
@@ -865,8 +874,6 @@ pub fn export(m: &Model) -> String {
     let mut bars: Vec<(Guid, Option<Id>, u64)> = Vec::new();
     // The runs in each system, by its name, for the IfcSystem they are assigned to.
     let mut systems: BTreeMap<&str, Vec<u64>> = BTreeMap::new();
-    // The doors and windows in each wall as (width, height, sill), for what its sides measure less them.
-    let holes = crate::quantities::all_holes(m);
     for (&id, e) in &m.elements {
         match e {
             Element::Wall(wl) => {
@@ -914,7 +921,7 @@ pub fn export(m: &Model) -> String {
                 products.insert(id, ent);
                 placed.insert(id, (ent, at));
                 w.typed("IFCWALLTYPE", ".STANDARD.", &wl.type_name, ent);
-                let values = wall_quantities(m, id, wl, holes.get(&id).map_or(&[][..], |h| h.as_slice()));
+                let values = wall_quantities(m, id);
                 w.quantities(ent, "Qto_WallBaseQuantities", &values, id);
             }
             Element::Floor(f) | Element::Toposolid(f) => {
@@ -1428,10 +1435,11 @@ pub fn export(m: &Model) -> String {
                 let flat = r.extrusion.is_none() && r.slope == 0.0;
                 w.typed("IFCROOFTYPE", if flat { ".FLAT_ROOF." } else { ".NOTDEFINED." }, &r.type_name, ent);
                 hosts.insert(id, (ent, at, m.elevation(r.level)));
-                // Its top's surface, and what it covers in plan (`quantities::roof`, which schedules read too).
+                // Its top's surface before and after its openings and the shafts through it, and what it covers in plan (`quantities::roof`,
+                // which schedules read too).
                 let q = crate::quantities::roof(m, r);
                 let values = [
-                    ("GrossArea", "AREA", q.surface_area / 1e6),
+                    ("GrossArea", "AREA", q.gross_surface_area / 1e6),
                     ("NetArea", "AREA", q.surface_area / 1e6),
                     ("ProjectedArea", "AREA", q.plan_area / 1e6),
                 ];
@@ -1749,11 +1757,19 @@ pub fn export(m: &Model) -> String {
             w.common.entry(id).or_insert((ent, pset, Vec::new())).2.push(p);
         }
     }
-    // Each element's type identity data: its Type Mark as `Reference` and its Fire Rating as `FireRating` in its `Pset_*Common`
-    // where IFC has them; its manufacturer and model in `Pset_ManufacturerTypeInformation`; the rest in `BIMCraft_TypeData`.
+    // Each type's identity data: its Type Mark as `Reference` and its Fire Rating as `FireRating` in its `Pset_*Common` where IFC
+    // has them; its manufacturer and model in `Pset_ManufacturerTypeInformation`; the rest in `BIMCraft_TypeData`. They are the
+    // type's, so they go on the type object (IFC4's `HasPropertySets`, as Revit's exporter does) once for all its occurrences;
+    // an element with no type object holds them itself.
+    let type_of: BTreeMap<u64, TypeKey> = w.typed.iter().flat_map(|(k, b)| b.occurrences.iter().map(move |o| (*o, k.clone()))).collect();
+    let mut written: BTreeSet<&TypeKey> = BTreeSet::new();
     for (&id, &ent) in &products {
         let Some(e) = m.elements.get(id) else { continue };
         let Some(identity) = m.type_identity(e).filter(|i| !i.is_empty()) else { continue };
+        let own_type = type_of.get(&ent);
+        if own_type.is_some_and(|k| !written.insert(k)) {
+            continue;
+        }
         let common = common_pset(e);
         let mut common_props = Vec::new();
         let mut rest = Vec::new();
@@ -1765,17 +1781,11 @@ pub fn export(m: &Model) -> String {
             let p = w.typed_text_property("FireRating", "IFCLABEL", &identity.fire_rating);
             if common.is_some_and(has_fire_rating) { common_props.push(p) } else { rest.push(p) }
         }
-        if let Some(pset) = common.filter(|_| !common_props.is_empty()) {
-            w.common.entry(id).or_insert((ent, pset, Vec::new())).2.extend(common_props);
-        }
         let maker: Vec<u64> = [("Manufacturer", &identity.manufacturer), ("ModelLabel", &identity.model)]
             .into_iter()
             .filter(|(_, v)| !v.is_empty())
             .map(|(k, v)| w.typed_text_property(k, "IFCLABEL", v))
             .collect();
-        if !maker.is_empty() {
-            w.define(ent, MAKER_SET, &maker, (MAKER, MAKER_DEFINES), id);
-        }
         for (k, v) in [
             ("Description", &identity.description),
             ("Keynote", &identity.keynote),
@@ -1790,8 +1800,26 @@ pub fn export(m: &Model) -> String {
         if let Some(cost) = identity.cost {
             rest.push(w.add(format!("IFCPROPERTYSINGLEVALUE('Cost',$,IFCMONETARYMEASURE({}),$)", real(cost))));
         }
-        if !rest.is_empty() {
-            w.define(ent, TYPE_DATA_SET, &rest, (TYPE_DATA, TYPE_DATA_DEFINES), id);
+        let sets = [
+            (common.unwrap_or_default(), common_props, (COMMON, COMMON_DEFINES)),
+            (MAKER_SET, maker, (MAKER, MAKER_DEFINES)),
+            (TYPE_DATA_SET, rest, (TYPE_DATA, TYPE_DATA_DEFINES)),
+        ];
+        for (index, (name, props, roles)) in sets.into_iter().enumerate() {
+            if props.is_empty() {
+                continue;
+            }
+            match own_type {
+                Some(k) => {
+                    let set = w.property_set(name, &props, roles.0, type_hash(&k.0, &k.3, &k.4));
+                    if let Some(build) = w.typed.get_mut(k) {
+                        build.sets.push(set);
+                    }
+                }
+                // What an occurrence holds in its common set is one set, with what else it says.
+                None if index == 0 => w.common.entry(id).or_insert((ent, name, Vec::new())).2.extend(props),
+                None => w.define(ent, name, &props, roles, id),
+            }
         }
     }
     for (id, (ent, pset, props)) in std::mem::take(&mut w.common) {
@@ -2258,6 +2286,58 @@ mod tests {
     fn type_object(f: &str, class: &str, name: &str) -> Vec<String> {
         let named: Vec<Vec<String>> =
             entities(f, class).iter().map(|l| attributes(l.as_str())).filter(|a| a[2] == format!("'{name}'")).collect();
+        assert_eq!(named.len(), 1, "one {class} named {name}");
+        named.into_iter().next().unwrap()
+    }
+
+    /// An entity line's attributes, split at the commas outside strings and outside parentheses: a list is one attribute.
+    fn top_level_attributes(line: &str) -> Vec<String> {
+        let body = line.split_once('(').unwrap().1.strip_suffix(");").unwrap();
+        let (mut out, mut cur, mut quoted, mut depth) = (Vec::new(), String::new(), false, 0);
+        for c in body.chars() {
+            match c {
+                '\'' => {
+                    quoted = !quoted;
+                    cur.push(c);
+                }
+                '(' if !quoted => {
+                    depth += 1;
+                    cur.push(c);
+                }
+                ')' if !quoted => {
+                    depth -= 1;
+                    cur.push(c);
+                }
+                ',' if !quoted && depth == 0 => out.push(std::mem::take(&mut cur)),
+                _ => cur.push(c),
+            }
+        }
+        out.push(cur);
+        out
+    }
+
+    /// The properties of the set `name` that type object `t` (the line `type_object` found) lists in its `HasPropertySets`, as
+    /// written, in the set's order; none when it has no such set.
+    fn type_set_of(f: &str, t: &str, name: &str) -> Vec<String> {
+        let entity = |n: &str| -> String {
+            let line = f.lines().find(|l| l.starts_with(&format!("{n}="))).unwrap_or_else(|| panic!("no {n}"));
+            line.to_string()
+        };
+        let list = |a: &str| -> Vec<String> {
+            a.trim_matches(|c| c == '(' || c == ')').split(',').filter(|x| !x.is_empty() && *x != "$").map(str::to_string).collect()
+        };
+        for set in list(&top_level_attributes(t)[5]) {
+            let attrs = top_level_attributes(&entity(&set));
+            if attrs[2] == format!("'{name}'") {
+                return list(&attrs[4]).iter().map(|p| entity(p).split_once('=').unwrap().1.trim_end_matches(';').to_string()).collect();
+            }
+        }
+        Vec::new()
+    }
+
+    /// The line of the one type object of `class` named `name`.
+    fn type_line(f: &str, class: &str, name: &str) -> String {
+        let named: Vec<String> = entities(f, class).into_iter().filter(|l| attributes(l.as_str())[2] == format!("'{name}'")).collect();
         assert_eq!(named.len(), 1, "one {class} named {name}");
         named.into_iter().next().unwrap()
     }
@@ -2816,11 +2896,13 @@ mod tests {
         let walls = house(&mut s);
         let door = run(&mut s, "door", json!({"at": [2000, 0]}))["id"].as_u64().unwrap();
         let window = run(&mut s, "window", json!({"at": [4000, 0]}))["id"].as_u64().unwrap();
-        run(
+        let floor = run(
             &mut s,
             "floor",
             json!({"boundary": [[0, 0], [8000, 0], [8000, 6000], [0, 6000]], "openings": [[[1000, 1000], [2000, 1000], [2000, 2000], [1000, 2000]]]}),
-        );
+        )["id"]
+            .as_u64()
+            .unwrap();
         let f = export(&s.model);
         let near = |a: f64, b: f64| (a - b).abs() < 1e-6 * b.abs().max(1.0);
         let (m, wall) = (&s.model, walls[0]);
@@ -2853,9 +2935,12 @@ mod tests {
         assert!(near(q["NetVolume"], 47.0 * q["Width"] / 1e3), "{q:?}");
         dangling(&f);
         // Attached to a roof or a floor, a wall has no single height: no `Height`, its sides and volumes its pieces.
-        let mut attached = wl.clone();
-        attached.attach_top = Some(m.guid(walls[1]));
-        let names: Vec<&str> = wall_quantities(m, wall, &attached, &[]).iter().map(|(n, _, _)| *n).collect();
+        let mut attached = (**m).clone();
+        let guid = m.guid(floor);
+        if let Some(Element::Wall(w)) = attached.elements.get_mut(wall) {
+            w.attach_top = Some(guid);
+        }
+        let names: Vec<&str> = wall_quantities(&attached, wall).iter().map(|(n, _, _)| *n).collect();
         assert_eq!(names, ["Length", "Width", "GrossSideArea", "NetSideArea", "GrossVolume", "NetVolume"]);
     }
 
@@ -2982,10 +3067,36 @@ mod tests {
         let q = quantities_of(&f, of_kind(&f, "IFCROOF")[0], "Qto_RoofBaseQuantities");
         let j = json(roof);
         assert!(
-            close(j["surface_area_m2"].as_f64().unwrap(), q["GrossArea"]) && close(j["area_m2"].as_f64().unwrap(), q["ProjectedArea"]),
+            close(j["surface_area_m2"].as_f64().unwrap(), q["NetArea"]) && close(j["area_m2"].as_f64().unwrap(), q["ProjectedArea"]),
             "{j} {q:?}"
         );
         assert!(q["GrossArea"] > q["ProjectedArea"], "{q:?}");
+    }
+
+    #[test]
+    fn a_roofs_net_area_leaves_out_what_the_shafts_and_openings_take_and_its_gross_area_does_not() {
+        use crate::graphics::testing::run;
+        let mut s = Session::new();
+        run(&mut s, "type", json!({"category": "roof", "name": "R", "thickness": 300}));
+        run(&mut s, "level", json!({"name": "Roof level", "elevation": 3000}));
+        let boundary = json!([[0, 0], [8000, 0], [8000, 6000], [0, 6000]]);
+        // A flat roof of 48 m², a shaft of 1 m² through it, an opening of its own of 2 m².
+        run(
+            &mut s,
+            "roof",
+            json!({"boundary": boundary, "overhang": 0, "slope": 0, "type": "R", "openings": [[[5000, 1000], [7000, 1000], [7000, 2000], [5000, 2000]]]}),
+        );
+        run(&mut s, "shaft", json!({"boundary": [[1000, 1000], [2000, 1000], [2000, 2000], [1000, 2000]], "height": 4000}));
+        let f = export(&s.model);
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-6 * b.abs().max(1.0);
+        let q = quantities_of(&f, of_kind(&f, "IFCROOF")[0], "Qto_RoofBaseQuantities");
+        assert!(near(q["GrossArea"], 48.0) && near(q["NetArea"], 45.0) && near(q["ProjectedArea"], 45.0), "{q:?}");
+        let id = s.model.elements.iter().find(|(_, e)| matches!(e, Element::Roof(_))).map(|(id, _)| *id).unwrap();
+        let j = crate::commands::element_json(&s.model, id);
+        assert!(
+            (j["surface_area_m2"].as_f64().unwrap() - 45.0).abs() < 0.006 && (j["volume_m3"].as_f64().unwrap() - 13.5).abs() < 0.006,
+            "{j}"
+        );
     }
 
     #[test]
@@ -2996,14 +3107,23 @@ mod tests {
         let level = run(&mut s, "level", json!({"name": "Upper", "elevation": 3000}))["id"].as_u64().unwrap();
         let boundary = json!([[0, 0], [8000, 0], [8000, 6000], [0, 6000]]);
         let floor = run(&mut s, "floor", json!({"boundary": boundary, "level": level}))["id"].as_u64().unwrap();
-        let Some(Element::Wall(wl)) = s.model.elements.get(walls[0]) else { panic!("no wall") };
-        let free = crate::quantities::wall(&s.model, walls[0], wl, &[]);
-        let mut attached = wl.clone();
-        attached.attach_top = Some(s.model.guid(floor));
-        let q = crate::quantities::wall(&s.model, walls[0], &attached, &[]);
+        let free = crate::quantities::wall(&s.model, walls[0]).unwrap();
+        let mut m = (*s.model).clone();
+        let guid = m.guid(floor);
+        if let Some(Element::Wall(wl)) = m.elements.get_mut(walls[0]) {
+            wl.attach_top = Some(guid);
+        }
+        let q = crate::quantities::wall(&m, walls[0]).unwrap();
         assert_eq!(q.height, None);
         assert!(q.gross_volume > 0.0 && (q.gross_side - q.gross_volume / q.width).abs() < 1e-6, "{q:?}");
-        assert!(q.gross_side <= free.gross_side * 1.2 && q.gross_side >= free.gross_side * 0.8, "{q:?} {free:?}");
+        // Under the floor, which is 200 thick over a level 3000 up: its underside is 2800. The wall's inside half (y from 0 to 100) is
+        // under the floor and stands to 2800; its outside half (y from -100 to 0) is past the floor's edge and stands to its own
+        // top, 3000. Mitred at its corners the wall's plan is 810 000 mm² outside the floor's edge and 790 000 within (the
+        // trapezoids 8200 and 8000, 8000 and 7800 wide, 100 deep): 810 000 x 3000 + 790 000 x 2800 = 4.642e9 mm³, its side that
+        // through 200: 23.21 m².
+        let volume = 810_000.0 * 3000.0 + 790_000.0 * 2800.0;
+        assert!((q.gross_volume - volume).abs() < 1.0 && (q.gross_side - volume / 200.0).abs() < 1e-3, "{q:?} {free:?}");
+        assert!(q.gross_side < free.gross_side, "{q:?} {free:?}");
     }
 
     #[test]
@@ -3030,28 +3150,38 @@ mod tests {
         run(&mut s, "family", chair);
         run(&mut s, "component", json!({"family": "Chair", "type": "A", "at": [1000, 1000]}));
         let f = export(&s.model);
+        // The identity data is the type's: it is on the type object, once, and no occurrence holds it.
         let wall_ent = of_kind(&f, "IFCWALL")[0];
-        let common = set_of(&f, wall_ent, "Pset_WallCommon");
+        let wall_type = type_line(&f, "IFCWALLTYPE", &wall);
+        let common = type_set_of(&f, &wall_type, "Pset_WallCommon");
         assert!(common.contains(&"IFCPROPERTYSINGLEVALUE('Reference',$,IFCIDENTIFIER('W1'),$)".to_string()), "{common:?}");
         assert!(common.contains(&"IFCPROPERTYSINGLEVALUE('FireRating',$,IFCLABEL('EI 60'),$)".to_string()), "{common:?}");
-        let maker = set_of(&f, wall_ent, MAKER_SET);
+        let maker = type_set_of(&f, &wall_type, MAKER_SET);
         assert_eq!(
             maker,
             ["IFCPROPERTYSINGLEVALUE('Manufacturer',$,IFCLABEL('Acme'),$)", "IFCPROPERTYSINGLEVALUE('ModelLabel',$,IFCLABEL('X-200'),$)"]
         );
-        let rest = set_of(&f, wall_ent, TYPE_DATA_SET);
+        let rest = type_set_of(&f, &wall_type, TYPE_DATA_SET);
         for want in ["'Description',$,IFCTEXT('Brick')", "'Keynote',$,IFCTEXT('04 21 13')", "'Cost',$,IFCMONETARYMEASURE(120.5)"] {
             assert!(rest.iter().any(|p| p.contains(want)), "{want} in {rest:?}");
         }
         assert!(!rest.iter().any(|p| p.contains("Reference") || p.contains("FireRating")), "those are in the common set: {rest:?}");
-        let door_common = set_of(&f, of_kind(&f, "IFCDOOR")[0], "Pset_DoorCommon");
+        assert!(set_of(&f, wall_ent, MAKER_SET).is_empty() && set_of(&f, wall_ent, TYPE_DATA_SET).is_empty(), "no occurrence holds them");
+        assert!(
+            !set_of(&f, wall_ent, "Pset_WallCommon").iter().any(|p| p.contains("'Reference'") || p.contains("'FireRating'")),
+            "nor in its common set"
+        );
+        let door_type = type_line(&f, "IFCDOORTYPE", &type_name_of(&s, "door"));
+        let door_common = type_set_of(&f, &door_type, "Pset_DoorCommon");
         assert!(door_common.iter().any(|p| p.contains("'FireRating'") && p.contains("EI 30")), "{door_common:?}");
         assert!(door_common.iter().any(|p| p.contains("'Reference'") && p.contains("'D1'")), "{door_common:?}");
-        // A family's component has no common set: its Type Mark and Fire Rating go in the BIMCraft set.
-        let component = of_kind(&f, "IFCFURNITURE")[0];
-        let rest = set_of(&f, component, TYPE_DATA_SET);
+        // A family's component has no common set: its Type Mark and Fire Rating go in the BIMCraft set, on its type object.
+        let component = entities(&f, "IFCFURNITURETYPE");
+        assert_eq!(component.len(), 1);
+        let rest = type_set_of(&f, &component[0], TYPE_DATA_SET);
         assert!(rest.iter().any(|p| p.contains("'Reference'") && p.contains("'C1'")), "{rest:?}");
         assert!(rest.iter().any(|p| p.contains("'FireRating'")), "{rest:?}");
+        assert!(set_of(&f, of_kind(&f, "IFCFURNITURE")[0], TYPE_DATA_SET).is_empty());
         dangling(&f);
     }
 }

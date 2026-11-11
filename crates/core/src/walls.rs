@@ -729,6 +729,20 @@ pub struct Prism {
     pub curve: Option<(P2, f64)>,
 }
 
+/// `gaps` (an opening's lower and upper edge, each) as the stretches they cover together: sorted, and joined where they touch or
+/// overlap, so that one inside another (a window in a door's span) leaves the door's and nothing between.
+fn merged(mut gaps: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
+    gaps.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let mut out: Vec<(f64, f64)> = Vec::new();
+    for (g0, g1) in gaps {
+        match out.last_mut() {
+            Some(last) if g0 <= last.1 => last.1 = last.1.max(g1),
+            _ => out.push((g0, g1)),
+        }
+    }
+    out
+}
+
 /// Wall `id` as prisms: its outline cut across where its doors and windows start and end (with
 /// `openings`) and along an arc into short straight pieces, each piece from its base up to its
 /// top less the openings over it, cut where what it's attached to changes plane.
@@ -749,7 +763,7 @@ pub(crate) fn prisms_in(m: &Model, id: Id, openings: bool, index: Option<&Index>
     } else {
         match index {
             Some(index) => Box::new(index.openings(guid).iter().filter_map(|id| m.elements.get(*id))),
-            None => Box::new(m.elements.values()),
+            None => Box::new(m.lookup().referrers(&guid).filter_map(|id| m.elements.get(id)).collect::<Vec<_>>().into_iter()),
         }
     };
     let holes: Vec<((f64, f64), (f64, f64))> = candidates
@@ -775,8 +789,7 @@ pub(crate) fn prisms_in(m: &Model, id: Id, openings: bool, index: Option<&Index>
         ring.extend(if b >= len { end.clone() } else { vec![axis.at(b, ext), axis.at(b, int)] });
         // Up from its base to its top, past the openings over its middle.
         let mid = (a + b) / 2.0;
-        let mut gaps: Vec<(f64, f64)> = holes.iter().filter(|((s0, s1), _)| *s0 <= mid && mid <= *s1).map(|(_, z)| *z).collect();
-        gaps.sort_by(|x, y| x.0.total_cmp(&y.0));
+        let gaps = merged(holes.iter().filter(|((s0, s1), _)| *s0 <= mid && mid <= *s1).map(|(_, z)| *z).collect());
         let flat = |z: f64| Bound { regions: Vec::new(), own: z };
         let mut floors: Vec<Bound> = vec![base.clone()];
         let mut ceilings: Vec<Bound> = Vec::new();

@@ -29,6 +29,7 @@ grids, levels and links are found by; a door or window with no wall, or of a typ
 | `room_not_enclosed` | a room the walls and room separation lines do not close round | `inspect` |
 | `room_redundant` | a room in the space an earlier room has | `inspect` |
 | `device_no_connector` | a family of lighting, outlets or switches in use with no connector, counted as a load of zero | `inspect` |
+| `duplicate_type_mark` | types of one category (a door family's and the project's door types count as one) that share a non-empty Type Mark; about the types, by their library GUIDs, so `elements` is empty and Show has nothing to select | silent |
 
 A head that rises past the wall's top is no warning: Revit lets it, and the wall is notched.
 
@@ -44,7 +45,8 @@ A head that rises past the wall's top is no warning: Revit lets it, and the wall
 - The `warnings` command (`{rule?, severity?, element?}`) lists them all. `inspect` still lists their messages.
 - `Model::warnings()` (the messages) is what `inspect` and a dry run return.
 - Downstream copes with the allowed states: `walls::prisms` keeps a wall between its own base and top however an opening's edges
-  fall; the plan clips an opening's gap to the wall; IFC wall quantities clip each opening to the wall's height.
+  fall (openings that overlap or sit inside one another cut once); the plan clips an opening's gap to the wall; wall quantities
+  (`quantities::wall`) are those of that solid, so an opening past the wall's end or under its base cuts only what is in it.
 
 ## The window
 

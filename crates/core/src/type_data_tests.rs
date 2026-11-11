@@ -239,9 +239,8 @@ fn a_wall_schedule_has_area_and_volume_less_its_openings() {
     let full = 6000.0 * height / 1e6;
     assert!(by_id.iter().any(|&(area, _)| (area - full).abs() < 0.006), "{by_id:?}");
     // One quantity function: the schedule's cells are the IFC's numbers, to the schedule's rounding.
-    let q = crate::quantities::wall(m, walls[0], wl, &crate::quantities::holes_in(m, walls[0]));
+    let q = crate::quantities::wall(m, walls[0]).unwrap_or_else(|| panic!("a wall"));
     assert!(near(q.net_side / 1e6, net) && near(q.net_volume / 1e9, net * thick / 1e3));
-    assert_eq!(q, crate::quantities::wall(m, walls[0], wl, &crate::quantities::all_holes(m)[&walls[0]]));
     // A wall's JSON says them, for agents.
     let j = crate::commands::element_json(&s.model, walls[0]);
     assert!((j["area_m2"].as_f64().unwrap_or_default() - net).abs() < 0.006, "{j}");
@@ -306,4 +305,67 @@ fn a_parameter_a_file_names_as_a_field_that_is_new_is_renamed_not_refused() {
     assert!(back.check().is_ok(), "{:?}", back.check());
     let held = back.elements.values().filter_map(|e| e.params()).any(|p| p.get("Custom Volume").and_then(Value::as_str) == Some("45"));
     assert!(held, "its value moved with it");
+}
+
+/// A file from before the Volume field, where `Sound Rating` was a number parameter of walls named `Volume`: `s`'s model written,
+/// that name changed in it, and read.
+fn read_as_volume(s: &Session) -> Model {
+    let text = serde_json::to_string(&*s.model).unwrap().replace("Sound Rating", "Volume");
+    let (back, left_out) = Model::read(&text).unwrap();
+    assert!(left_out.is_empty(), "{left_out:?}");
+    back
+}
+
+#[test]
+fn a_renamed_parameter_takes_its_tags_and_formulas_with_it() {
+    let mut s = Session::new();
+    let walls = house(&mut s);
+    run(&mut s, "parameter", json!({"name": "Sound Rating", "categories": ["wall"], "kind": "number"}));
+    run(&mut s, "parameter", json!({"name": "Sound Rating Extra", "categories": ["wall"], "kind": "number"}));
+    run(&mut s, "modify", json!({"id": walls[0], "params": {"Sound Rating": 45, "Sound Rating Extra": 3}}));
+    run(&mut s, "tag", json!({"ids": [walls[0]], "label": "Sound Rating"}));
+    run(
+        &mut s,
+        "schedule",
+        json!({"name": "Acoustics", "category": "wall", "filters": [{"field": "Sound Rating", "op": "greater", "value": 30}],
+               "sort": [{"field": "Sound Rating"}],
+               "fields": ["Sound Rating", "Sound Rating Extra",
+                          {"name": "Double", "formula": "Sound Rating * 2"},
+                          {"name": "Mixed", "formula": "max(Sound Rating Extra, Sound Rating) + Sound Rating Extra + 1e3"}]}),
+    );
+    let back = read_as_volume(&s);
+    assert!(back.parameters.contains_key("Custom Volume") && !back.parameters.contains_key("Volume"));
+    assert!(back.check().is_ok(), "{:?}", back.check());
+    let tag = back.elements.values().find_map(|e| if let Element::Tag(t) = e { Some(t.label.clone()) } else { None });
+    assert_eq!(tag, Some(Some("Custom Volume".to_string())), "a tag shows the parameter by its new name");
+    let Some(Element::Schedule(sc)) = back.elements.values().find(|e| matches!(e, Element::Schedule(_))) else { panic!("no schedule") };
+    assert_eq!(sc.fields[0].name, "Custom Volume");
+    assert_eq!((sc.filters[0].field.as_str(), sc.sort[0].field.as_str()), ("Custom Volume", "Custom Volume"));
+    // Its calculated fields read it by the new name, and not the parameter whose name starts with the old one.
+    assert_eq!(sc.fields[2].formula.as_deref(), Some("Custom Volume * 2"));
+    assert_eq!(sc.fields[3].formula.as_deref(), Some("max(Volume Extra, Custom Volume) + Volume Extra + 1e3"));
+    assert!(crate::schedule::table(&back, sc).is_ok(), "{:?}", crate::schedule::table(&back, sc).err());
+    // A multi-category schedule's Area is the one its categories share, never a parameter: it keeps its name.
+    run(&mut s, "schedule", json!({"name": "Everything", "category": "multicategory", "categories": ["wall"], "fields": ["Type", "Area"]}));
+    let text = serde_json::to_string(&*s.model).unwrap().replace("Sound Rating", "Area");
+    let (back, _) = Model::read(&text).unwrap();
+    assert!(back.parameters.contains_key("Custom Area"));
+    let Some(Element::Schedule(sc)) = back.elements.values().find(|e| matches!(e, Element::Schedule(sc) if sc.name == "Everything")) else {
+        panic!("no schedule")
+    };
+    assert_eq!(sc.fields.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["Type", "Area"]);
+    assert!(back.check().is_ok(), "{:?}", back.check());
+}
+
+#[test]
+fn a_parameter_renamed_where_the_new_name_is_taken_counts_up() {
+    let mut s = Session::new();
+    house(&mut s);
+    for name in ["Sound Rating", "Custom Volume", "Custom Volume 2"] {
+        run(&mut s, "parameter", json!({"name": name, "categories": ["wall"], "kind": "number"}));
+    }
+    let back = read_as_volume(&s);
+    let names: Vec<&str> = back.parameters.keys().map(String::as_str).collect();
+    assert!(names.contains(&"Custom Volume 3") && !names.contains(&"Custom Volume 2 2") && !names.contains(&"Volume"), "{names:?}");
+    assert!(back.check().is_ok(), "{:?}", back.check());
 }
