@@ -1925,6 +1925,7 @@ impl BimApp {
         self.grip_overlay(ui, &model, &view, rect, level, &d, d.place);
         self.dimension_grips(ui, &model, &view, rect);
         self.pin_overlay(ui, &model, &view, rect);
+        self.flip_overlay(ui, &model, &view, rect, self.canvas.drag.is_some());
         self.site_grip_overlay(ui, &model, &view, rect, level);
         // Where the cursor snaps is worked out only while a grip is held to it.
         let cursor = self
@@ -2199,8 +2200,10 @@ impl BimApp {
             Tool::Door | Tool::Window => {
                 let door = matches!(self.tool, Tool::Door);
                 let cat = if door { "door" } else { "window" };
-                let p = centred_opening(m, v, self.typed(cat, json!({"at": point(round(v.mm(at))), "level": level})), door);
+                let typed = self.typed(cat, json!({"at": point(round(v.mm(at))), "level": level}));
+                let p = centred_opening(m, v, self.opening_flips(typed, v.mm(at)), door);
                 self.run(cat, p);
+                self.place_flip = (false, false);
             }
             Tool::Room => {
                 self.run("room", json!({"point": point(round(v.mm(at))), "level": level}));
@@ -3231,6 +3234,9 @@ impl BimApp {
 
     /// The Wall tool's params for walls through `points`: the type and the Options Bar's location line and height.
     pub(crate) fn wall_params(&mut self, level: Id, points: &[P2], closed: bool, arc: f64) -> Option<Value> {
+        // Space put their exterior side on the other side: drawn the other way round, which is what the side follows.
+        let (points, arc): (Vec<P2>, f64) =
+            if self.wall_flipped { (points.iter().rev().copied().collect(), -arc + 0.0) } else { (points.to_vec(), arc) };
         let mut p = json!({
             "points": points.iter().map(|q| point(*q)).collect::<Vec<_>>(), "level": level, "closed": closed,
             "arc": arc, "location": self.wall_location.name(),
@@ -4194,6 +4200,7 @@ impl BimApp {
             Tool::Door | Tool::Window => {
                 let door = matches!(self.tool, Tool::Door);
                 let params = self.typed(if door { "door" } else { "window" }, json!({"at": point(round(v.mm(q))), "level": level}));
+                let params = self.opening_flips(params, v.mm(q));
                 if let Ok(e) = opening_of(m, &centred_opening(m, v, params, door), door) {
                     sketched(&e);
                     if let Element::Door(o) | Element::Window(o) = &e {
@@ -4398,6 +4405,9 @@ impl BimApp {
         // The ruler along the new line, and an arc at the corner it turns from the line before.
         if let Some(&last) = chain.last() {
             p.extend(ruler_shapes(sc, last, next));
+            if matches!(self.tool, Tool::Wall(_)) {
+                self.exterior_mark(p, sc.screen(last), sc.screen(next));
+            }
             if let [.., prev, l] = chain
                 && let Some(a) = corner_arc(sc, *prev, *l, next)
             {

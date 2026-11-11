@@ -296,8 +296,9 @@ other_files(
         "door",
         ui_msg!("Door"),
         &["DR"],
-        "{at: [x,y] | wall: id, offset?, type?, family?, level?, mark?, flip_facing?, flip_hand?} in the wall under `at`, \
-         or in `wall` centred `offset` mm from its start; with `family`, a door family's `type` (its first by default), \
+        "{at: [x,y] | wall: id, offset?, type?, family?, level?, mark?, toward?, flip_facing?, flip_hand?} in the wall under `at`, \
+         or in `wall` centred `offset` mm from its start; `toward` [x,y]: the door swings to the side of the wall that point is \
+         on (the desktop sends the cursor), and `flip_facing` then flips it from there; with `family`, a door family's `type` (its first by default), \
          which sizes the opening and draws the door; it may rise past a low wall's top, as Revit lets it",
         door,
     )
@@ -306,7 +307,7 @@ other_files(
         "window",
         "Window",
         &["WN"],
-        "{at: [x,y] | wall: id, offset?, sill?, type?, family?, level?, mark?, flip_facing?} like door; `sill` defaults to the \
+        "{at: [x,y] | wall: id, offset?, sill?, type?, family?, level?, mark?, toward?, flip_facing?, flip_hand?} like door; `sill` defaults to the \
          type's (a family's `Sill Height`) and must be under the wall's top, while its head may rise past the top, as Revit \
          lets it (the wall is notched up to its top)",
         window,
@@ -1335,8 +1336,10 @@ other_files(
         "flip",
         "Flip",
         &[],
-        "{ids: [wall,…]} turns walls round about their location lines, as Revit's flip arrows do: their exterior sides go to the \
-         other side, their doors and windows stay where they are",
+        "{ids: [wall | door | window,…], hand?, facing?} turns walls round about their location lines, as Revit's flip arrows \
+         do: their exterior sides go to the other side, their doors and windows stay where they are. A door or window in `ids` \
+         is flipped on its own: `hand` puts its hinge on the other jamb, `facing` its swing (a window's face) to the wall's \
+         other side; with neither, its facing flips. `hand` and `facing` apply to the doors and windows listed, not to a wall's",
         flip,
     ),
     edit(
@@ -8068,10 +8071,15 @@ fn location_names(n: &str) -> String {
 fn flip(s: &mut Session, p: &Value) -> R {
     let c = "flip";
     let m = &s.model;
-    let ids = ids_param(c, m, p)?;
-    if let Some(id) = ids.iter().find(|id| m.wall(**id).is_none()) {
-        return Err(bad(c, format!("{} {id} isn't a wall", m.elements.get(id).map_or("element", Element::category))));
+    let all = ids_param(c, m, p)?;
+    let hand = flag(c, p, "hand")?;
+    let facing = flag(c, p, "facing")? || !hand;
+    let opening = |id: &Id| matches!(m.elements.get(*id), Some(Element::Door(_) | Element::Window(_)));
+    if let Some(id) = all.iter().find(|id| m.wall(**id).is_none() && !opening(id)) {
+        let what = m.elements.get(*id).map_or("element", Element::category);
+        return Err(bad(c, format!("{what} {id} isn't a wall, a door or a window")));
     }
+    let (ids, openings): (Vec<Id>, Vec<Id>) = all.iter().partition(|id| m.wall(**id).is_some());
     let m = s.model_mut();
     let lengths: BTreeMap<Guid, f64> = ids.iter().filter_map(|id| Some((m.guid(*id), Axis::of(m.wall(*id)?).length()))).collect();
     for (id, e) in m.elements.iter_mut() {
@@ -8085,6 +8093,13 @@ fn flip(s: &mut Session, p: &Value) -> R {
                 (o.flip_facing, o.flip_hand) = (!o.flip_facing, !o.flip_hand);
             }
             _ => {}
+        }
+    }
+    // The doors and windows asked for come after their walls, so one listed with its wall is flipped as asked on top of it.
+    for id in &openings {
+        if let Some(Element::Door(o) | Element::Window(o)) = m.elements.get_mut(*id) {
+            o.flip_hand ^= hand;
+            o.flip_facing ^= facing;
         }
     }
     let hosts: BTreeMap<Guid, Guid> = m
@@ -8110,7 +8125,7 @@ fn flip(s: &mut Session, p: &Value) -> R {
             }
         }
     }
-    Ok(json!({"flipped": ids}))
+    Ok(json!({"flipped": all}))
 }
 
 fn door(s: &mut Session, p: &Value) -> R {
@@ -8199,6 +8214,14 @@ fn build_opening(m: &Model, p: &Value, is_door: bool) -> Result<Opening, String>
             _ => None,
         })),
     };
+    // `toward`: a point on the side of the wall the door should swing to, or the window face, as Revit's follows the cursor.
+    let toward_right = match (point_opt(c, p, "toward")?, m.wall(host)) {
+        (Some(q), Some(w)) => {
+            let axis = Axis::of(w);
+            (q - axis.at(offset, walls::centre(m, w))).dot(axis.tangent(offset).perp()) < 0.0
+        }
+        _ => false,
+    };
     let o = Opening {
         params: Default::default(),
         family,
@@ -8207,7 +8230,7 @@ fn build_opening(m: &Model, p: &Value, is_door: bool) -> Result<Opening, String>
         offset,
         sill,
         mark,
-        flip_facing: flag(c, p, "flip_facing")?,
+        flip_facing: flag(c, p, "flip_facing")? ^ toward_right,
         flip_hand: flag(c, p, "flip_hand")?,
     };
     Ok(o)

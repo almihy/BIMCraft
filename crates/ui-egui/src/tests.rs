@@ -5947,6 +5947,7 @@ mod draw;
 mod electrical;
 mod fills;
 mod filter;
+mod flip;
 mod fonts;
 mod gpu;
 mod graphics;
