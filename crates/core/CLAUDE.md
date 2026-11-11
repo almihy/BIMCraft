@@ -20,7 +20,7 @@ is in the root `CLAUDE.md`; the write-ups by area are in `docs/areas/`, which th
 - **A change to what a file holds** that an older version would misread (not just a field it can do without) bumps `FORMAT` and
   adds its step to `Model::migrate`. `Model::read` leaves out what this version doesn't know (`lenient.rs` walks a file as the
   types would read it); a new element category goes in `lenient::element` too (a test names any missing).
-- **A new setting that is a map of entries by name** (a new field of `Model`, like `text_types`) goes in `MAPS` in `sync_settings.rs`, so live editing sends each entry on its own (`materials/Concrete`) and two people adding entries at once keep both; `sync_settings_tests.rs` has the checks. Any other setting travels as one key, replaced whole. A map's entries have a library kind (`named_kinds`), so a rename that calls `Library::renamed` travels with a note (`renames/…`) and the others' late edits and elements follow it; a change to how settings are told that an older copy would misread raises `sync::FORMAT`.
+- **A new setting that is a map of entries by name** (a new field of `Model`, like `text_types`) goes in `MAPS` in `sync_settings.rs`, so live editing sends each entry on its own, by its library GUID (`materials/<guid>`, its name apart in `materials/<guid>/name`), and two people adding entries at once keep both; a map of a fixed vocabulary (no library entry) goes in `FIXED` too. Its entries have a library kind (`named_kinds`), whose GUIDs are the project's, shared by every copy: a rename (`Library::renamed`) is a change of the name key alone. Any other setting travels as one key, replaced whole. A change to how things are told that an older copy would misread raises `sync::FORMAT`. [Editing together](../../docs/areas/sync.md) has the design; `sync_settings_tests.rs` the checks.
 - **A session may only read** (`Session::read_only`: the agents a window lets only read, `mcp --read-only`). `execute` refuses there what
   replaces the project (`REPLACES`), undo and redo, and a command given the project's own file as `path` or `save`; whatever else
   changed the project, its history or the phase and option it makes things in is taken back and refused. So a new command needs
@@ -57,6 +57,7 @@ changes. A copy is a new element: a new id and a new GUID. IFC writes the GUID a
 | Warnings (Review Warnings), what is refused and what is only warned | [warnings](../../docs/areas/warnings.md) |
 | Schedules and project parameters | [schedules](../../docs/areas/schedules.md) |
 | Phases and design options | [phasing](../../docs/areas/phasing.md) |
+| Editing together: what travels between copies, renames, library GUIDs | [sync](../../docs/areas/sync.md) |
 | Masses and what they make | [masses](../../docs/areas/massing.md) |
 | Families, forms, materials, textures, paint, favorites | [families](../../docs/areas/families.md) |
 | Beams, columns, footings, pipes, conduits, fixtures | [structure and MEP](../../docs/areas/structure-and-mep.md), [disciplines](../../docs/disciplines.md) |
