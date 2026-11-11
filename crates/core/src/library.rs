@@ -635,6 +635,21 @@ impl Model {
         uses
     }
 
+    /// The elements that are of entry `name` of `kind` (a type of a category, a family or one of a family's types): its
+    /// instances, in id order. Deleting the type deletes these.
+    pub fn instances_of(&self, kind: &Kind, name: &str) -> Vec<crate::model::Id> {
+        let mut found = Vec::new();
+        for (id, e) in &self.elements {
+            let mut e = e.clone();
+            let mut hit = false;
+            e.lib_refs_mut(&mut |k, n| hit |= k == kind && n == name);
+            if hit {
+                found.push(*id);
+            }
+        }
+        found
+    }
+
     /// Takes entry `name` of `kind` out of the project: false where there is none, or where it isn't one a project can lose
     /// (a phase, a parameter, an option: they have commands of their own).
     pub fn remove_entry(&mut self, kind: &Kind, name: &str) -> bool {

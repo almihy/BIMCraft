@@ -1,7 +1,7 @@
-//! Moving about a plan, a section or a sheet, for a laptop as much as for a mouse. The wheel zooms about the cursor, as it
-//! always did; a trackpad's two-finger scroll pans and its pinch (Ctrl and the wheel, in a browser) zooms. A wheel and a
-//! trackpad are told apart once for each gesture, by its first event ([`first_hand`]), unless Settings > User Interface says
-//! what the wheel does ([`Wheel`]). The navigation bar's Pan is the hand: while it is on, the left
+//! Moving about a plan, a section or a sheet. The wheel always zooms about the cursor, as Revit's does (Settings > User
+//! Interface > Mouse wheel: [`Wheel`]); Auto, a choice for a laptop, tells a trackpad's two-finger scroll, which then pans, from
+//! a mouse's notches by the first event of each gesture ([`first_hand`]), and Pan always scrolls. A pinch (Ctrl and the wheel,
+//! in a browser) zooms in every setting. The navigation bar's Pan is the hand: while it is on, the left
 //! button drags the view about. Zoom Region (ZR) zooms to a box dragged, Previous Zoom (ZP) goes back to where the view was
 //! before its last zoom or pan, and Zoom to Fit (ZF, ZE) is the view's own. Zoom Region takes a box dragged, or one corner
 //! clicked and then the other, as Revit's does.
@@ -54,12 +54,12 @@ pub(crate) enum Hand {
     Trackpad,
 }
 
-/// What the mouse wheel does (Settings > User Interface): Auto tells a mouse from a trackpad by what it sends, Zoom is
-/// Revit's way always (the wheel zooms), Pan scrolls the view always.
+/// What the mouse wheel does (Settings > User Interface): Zoom is Revit's way (the wheel always zooms) and the default, Auto
+/// tells a mouse from a trackpad by what it sends, Pan scrolls the view always.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Wheel {
-    #[default]
     Auto,
+    #[default]
     Zoom,
     Pan,
 }
@@ -448,7 +448,12 @@ mod tests {
     #[test]
     fn the_setting_overrides_what_the_gesture_was_judged_to_be() {
         let mut nav = Nav { hand: Hand::Mouse, ..Nav::default() };
-        assert_eq!((nav.wheel, nav.hand()), (Wheel::Auto, Hand::Mouse));
+        assert_eq!((nav.wheel, nav.hand()), (Wheel::Zoom, Hand::Mouse), "the default is Revit's: the wheel zooms");
+        nav.hand = Hand::Trackpad;
+        assert_eq!(nav.hand(), Hand::Mouse, "whatever the gesture looked like");
+        nav.wheel = Wheel::Auto;
+        assert_eq!(nav.hand(), Hand::Trackpad, "Auto goes by the gesture");
+        nav.hand = Hand::Mouse;
         nav.wheel = Wheel::Pan;
         assert_eq!(nav.hand(), Hand::Trackpad);
         nav.hand = Hand::Trackpad;

@@ -42,17 +42,15 @@ server saves the room by what differs from the stored model: it would open the e
 
 ## An entry in use is not taken out
 
-A type (or a material, a template, a phase...) that something names is kept when changes take it out: **in use wins over taking
-out**. This is for the race, not the usual way. In Revit, deleting a type that is in use deletes the elements of it too, after a
-warning; here the command that deletes a type (`delete_type`) refuses while something names it, the choice made for this editor, and
-the person changes or deletes what uses it first. But two people work at once: the wall of that type may be placed while the taking
-out is on its way. When changes take an entry out that a copy still names (a wall this copy placed meanwhile, one the changes
-themselves bring, a type here made of the material), `Model::merged` keeps the entry. It leaves the taking out out of
-`Merged::taken`, names the entry in `Merged::kept` (`{entry, kind, name, uses}`: `wall type`, `Beta`, `walls`) and returns its body and
-name keys, as this copy has them, in `Merged::fixes`. The page (and Arqiflow's server, for what the agent and the room change) puts
-the keys in the room, so the copy that took the type out hears the type again, and every copy ends with the type and the wall,
-nothing lost. What a kept entry names is kept with it (a few rounds, until nothing more is). A family's type or a design option that
-is in use keeps its owner's entry.
+On one copy, `delete_type` does what Revit's Delete does: a type with instances is deleted with them (the window warns with their
+number first). This is for the race between copies: an entry that something *another copy* names is not taken out, **in use wins
+over taking out**, so a wall one copy placed of a type while another deleted it is not lost (a material, a template, a phase… too).
+When changes take an entry out that a copy still names (a wall this copy placed meanwhile is of the type; a type here is made of
+the material; the changes themselves bring a wall of it), `Model::merged` keeps the entry. It leaves the taking out out of
+`Merged::taken`, names it in `Merged::kept` (`{entry, kind, name, uses}`: `wall type`, `Beta`, `walls`), and returns the entry's body and name keys, as this copy has them, in `Merged::fixes`. The page (and Arqiflow's
+server, for what the agent and the room change) puts them in the room, so the copy that took the type out hears the type again,
+and every copy ends with the type and the wall, nothing lost. What a kept entry names is kept with it (a few rounds, until
+nothing more is). A family's type or a design option that is in use keeps its owner's entry.
 
 What counts as naming: the elements this copy sends (its own text links never count, they are never sent), the elements the changes
 bring, this copy's own changes not sent yet (they will be sent, so the room then holds the entry and what names it, and nothing

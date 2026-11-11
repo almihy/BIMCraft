@@ -253,6 +253,30 @@ fn a_type_taken_out_by_one_while_another_placed_a_wall_of_it_ends_in_every_copy_
 }
 
 #[test]
+fn a_type_deleted_with_its_wall_while_another_placed_a_new_wall_of_it_keeps_the_type_and_the_new_wall_only() {
+    // Revit's Delete on a type in use takes its instances with it; a wall the other copy placed meanwhile is one the deleting
+    // copy never saw, so in use still wins over taking out for it, and the wall that was deleted stays deleted.
+    let (mut a, mut b, mut room, beta) = both_have_beta();
+    let old = a.run("wall", json!({"points": [[0, 8000], [6000, 8000]], "type": "Beta"}))["ids"][0].as_u64().unwrap();
+    let old = a.model().elements.guid(old).unwrap();
+    a.push(&mut room);
+    b.pull_all(&mut room);
+    assert!(b.model().elements.contains_key(old));
+    let gone = a.run("delete_type", json!({"category": "wall", "type": "Beta"}));
+    assert_eq!(gone["instances"], 1);
+    let wall = b.run("wall", json!({"points": [[0, 0], [6000, 0]], "type": "Beta"}))["ids"][0].as_u64().unwrap();
+    let wall = b.model().elements.guid(wall).unwrap();
+    a.push(&mut room);
+    b.push(&mut room);
+    a.pull_all(&mut room);
+    b.pull_all(&mut room);
+    a.pull_all(&mut room);
+    settle(&mut [&mut a, &mut b], &mut room);
+    assert_beta_and_the_wall_everywhere(&[&a, &b], &room, beta, wall);
+    assert!(!a.model().elements.contains_key(old) && !b.model().elements.contains_key(old), "the deleted wall stays deleted");
+}
+
+#[test]
 fn a_type_taken_out_by_one_while_another_placed_a_wall_of_it_ends_the_same_whichever_order_each_hears_it_in() {
     let (mut a, mut b, mut room, beta) = both_have_beta();
     a.run("delete_type", json!({"category": "wall", "type": "Beta"}));

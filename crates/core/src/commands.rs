@@ -1372,7 +1372,7 @@ other_files(
          its size. Doors and windows slide along their host wall; they cannot turn independently. With `lock`, Revit's padlock: \
          the line and the reference (of element `to`, else whatever has a line along it) are kept on one line after every \
          command, as a locked dimension keeps its length; refused when that can't hold with the other locks. Returns {aligned, \
-         angle, by, line} (the picked line where it went), and the lock's id. A pinned element still moves, and the reply names it (`pinned`)",
+         angle, by, line} (the picked line where it went), and the lock's id. A pinned element is not moved (Revit's \"Can't move pinned element.\"): `unpin` it first",
         align_element,
     ),
     edit(
@@ -1410,24 +1410,27 @@ other_files(
         &["MV"],
         "{ids: [id,…], by: [dx, dy], end?: start|end} moves elements in plan; walls joined to a moved wall stretch to stay \
          joined, and doors and windows slide along their walls. With `end`, only that end of one wall, one run or one grid \
-         moves. A pinned element still moves, and the reply names it (`pinned`)",
+         moves. A pinned element is not moved (Revit's \"Can't move pinned element.\"): `unpin` it first",
         move_elements,
     ),
     edit(
         "pin",
         ui_msg!("Pin"),
         &["PN"],
-        "{ids: [id,…]} pins elements, as Revit's Pin: held where they are. The window refuses to drag, move or turn a pinned \
-         element and says it is pinned; a command from a script or the agent still moves it, and what it returns says it was \
-         pinned (`pinned`, `note`). Any element can be pinned, grids and levels by habit; a pinned element can still be \
-         deleted. Pins are kept in the file. Returns {pinned, already}: those now pinned, and those that were",
+        "{ids: [id,…]} pins elements, as Revit's Pin: held where they are. A pinned element is not moved, turned, aligned, \
+         offset, trimmed, split, deleted or given a new place by `modify`, by the window or by a command (the agent acts for \
+         the person, who has the same limit): the error says \"Can't move pinned element.\" or \"Pinned objects were not \
+         deleted.\" and names the ids; `unpin` them first. Copies, arrays, pastes and a move, rotate or mirror with `copy` of \
+         a pinned element are free, and its type, settings and height can be changed. Deleting a host deletes the pinned doors \
+         and windows in it, with a note. Any element can be pinned, grids and levels by habit. Pins are kept in the file. \
+         Returns {pinned, already}: those now pinned, and those that were",
         pin::pin,
     ),
     edit(
         "unpin",
         ui_msg!("Unpin"),
         &["UP"],
-        "{ids: [id,…]} lets pinned elements be moved by the window again. Returns {unpinned, ids}: those that were pinned, and \
+        "{ids: [id,…]} lets pinned elements be moved, turned and deleted again. Returns {unpinned, ids}: those that were pinned, and \
          those asked for",
         pin::unpin,
     ),
@@ -1583,7 +1586,8 @@ other_files(
         "delete",
         "Delete",
         &["DE"],
-        "{ids: [id,…]} deleting a wall deletes its doors and windows, deleting those their tags; a view takes its notes and \
+        "{ids: [id,…]} a pinned element is refused (\"Pinned objects were not deleted. To delete them, unpin them before using \
+         Delete.\"; the error names them): `unpin` it or leave it out. Deleting a wall deletes its doors and windows, deleting those their tags; a view takes its notes and \
          spot elevations, and what a spot elevation reads takes it; dimensions lose what's deleted",
         delete,
     ),
@@ -1789,8 +1793,10 @@ other_files(
         &[],
         "{category?: wall|floor|door|window|column|roof|ceiling|railing|…, family?, type?} deletes a type of a category \
          (`category` and `type`), a family (`family`) or one of a family's types (`family` and `type`), as Revit's Delete on one \
-         in the Project Browser does; refused while an element uses it (it says how many), and for the last type of a \
-         category or of a family",
+         in the Project Browser does: the elements of that type go with it (and what hangs on them: a wall's doors and \
+         windows); the window warns with their number first, which `dry_run: true` gives without deleting anything. Refused \
+         for the last type of a category or of a family. Returns {deleted: {kind, name}, instances: how many elements were of \
+         it, elements: every id deleted}; with `dry_run`, {dry_run, would_delete: {kind, name}, instances, ids: those of it}",
         delete_type,
     ),
     edit(
@@ -12123,7 +12129,14 @@ fn modify(s: &mut Session, p: &Value) -> R {
     let fields = p.as_object().ok_or_else(|| bad(c, "params must be {id | ids, …fields}"))?;
     let m = &s.model;
     let ids = ids_param(c, m, p)?;
-    let before = Arc::clone(&s.model);
+    // Where a pinned element is changes only by what says where that kind of element is: a change of its type, its settings
+    // or its height is no move, and the element stays editable.
+    let placed: Vec<Id> = ids
+        .iter()
+        .copied()
+        .filter(|id| m.elements.get(*id).is_some_and(|e| location_fields(e).iter().any(|k| fields.contains_key(*k))))
+        .collect();
+    pin::refuse_pinned(c, m, &placed, pin::Held::Move)?;
     let mut edited = Vec::new();
     let mut rescaled = Vec::new();
     // Footings the command changes itself, and the ones that follow their wall's base as it goes up or down.
@@ -12224,22 +12237,15 @@ fn modify(s: &mut Session, p: &Value) -> R {
     for (id, e) in edited {
         m.elements.insert(id, e);
     }
-    // Where a pinned element is changes only by what says where that kind of element is: a change of its type, its settings
-    // or its height is no move.
-    let placed: Vec<Id> = ids
-        .iter()
-        .copied()
-        .filter(|id| before.elements.get(*id).is_some_and(|e| location_fields(e).iter().any(|k| fields.contains_key(*k))))
-        .collect();
     let said = match (p.get("ids"), ids.as_slice()) {
         (None, [one]) => element_json(&s.model, *one),
         _ => json!({"modified": ids}),
     };
-    Ok(if placed.is_empty() { said } else { pin::pinned_note(said, &before, &placed) })
+    Ok(said)
 }
 
 /// The fields of an element that say where it is in plan (or, for a level, how high): `modify`ing one of a pinned element's
-/// moves it, and the reply says it was pinned. A vertical offset (a floor's, a run's, a component's) or a link's file `path` is
+/// moves it, which a pinned element refuses. A vertical offset (a floor's, a run's, a component's) or a link's file `path` is
 /// no place; an element turned (`angle`), re-sketched (`sketch`, `boundary`) or put in another host (`host`) has moved.
 fn location_fields(e: &Element) -> &'static [&'static str] {
     use Element as E;
@@ -12640,6 +12646,8 @@ fn host_line(was: P2, candidates: impl IntoIterator<Item = Id>, line_of: impl Fn
 /// joined, and doors and windows in walls that changed keep their place or go with their wall.
 /// With `end` (`Some(true)` the start, `Some(false)` the end), only that end of one wall or one run goes.
 fn relocate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion, end: Option<bool>) -> Result<(), String> {
+    // A pinned element is held where it is, as in Revit.
+    pin::refuse_pinned(c, &s.model, ids, if c == "rotate" { pin::Held::Rotate } else { pin::Held::Move })?;
     let m = &s.model;
     // The walls, and what points at each: found among those, not every element.
     let lookup = m.lookup();
@@ -13214,7 +13222,6 @@ pub(crate) fn duplicate_exactly(c: &str, s: &mut Session, ids: &[Id], mo: &Motio
 
 fn align_element(s: &mut Session, p: &Value) -> R {
     let c = "align";
-    let before = Arc::clone(&s.model);
     let id = id_opt(c, p, "id")?.ok_or_else(|| bad(c, "`id` is required"))?;
     let line = |name| -> Result<Line, String> {
         match points(c, p, name)?.as_slice() {
@@ -13241,11 +13248,7 @@ fn align_element(s: &mut Session, p: &Value) -> R {
     let (reference, line) = (line("reference")?, line("line")?);
     let moved = (placement.map(line.0), placement.map(line.1));
     let lock = if flag(c, p, "lock")? { Some(alignment_lock(c, s, id, id_opt(c, p, "to")?, reference, moved)?) } else { None };
-    Ok(pin::pinned_note(
-        json!({"aligned": id, "angle": placement.angle, "by": placement.by, "line": [moved.0, moved.1], "lock": lock}),
-        &before,
-        &[id],
-    ))
+    Ok(json!({"aligned": id, "angle": placement.angle, "by": placement.by, "line": [moved.0, moved.1], "lock": lock}))
 }
 
 /// Align's padlock: element `id`'s reference along `moved`, and the reference of element `to` (else of whatever has one) along
@@ -13304,7 +13307,6 @@ fn dimension_value(s: &mut Session, p: &Value) -> R {
         return Err(bad(c, format!("dimension {id} isn't an aligned or a linear one: only their lengths are typed")));
     }
     let mut d = d.clone();
-    let before = Arc::clone(&s.model);
     let value = num(c, p, "value")?.ok_or_else(|| bad(c, "`value`, the length in mm, is required"))?;
     if !(value > TOL && value <= MAX_COORD) {
         return Err(bad(c, format!("`value` is a length above 0 and at most {MAX_COORD} mm, not {value}")));
@@ -13316,6 +13318,10 @@ fn dimension_value(s: &mut Session, p: &Value) -> R {
     };
     let by = value - (to - from);
     let moved = s.model.dimension_moves(id, segment).ok_or_else(|| bad(c, "what it measures to is gone"))?;
+    // The number is typed by moving what it measures to; a pinned element is not moved.
+    if by.abs() > 1e-9 {
+        pin::refuse_pinned(c, &s.model, &[moved], pin::Held::Move)?;
+    }
     if let Some(l) = d.locked.iter_mut().find(|l| l.segment == segment) {
         l.length = value;
         s.model_mut().elements.insert(id, Element::Dimension(d));
@@ -13323,8 +13329,7 @@ fn dimension_value(s: &mut Session, p: &Value) -> R {
     if by.abs() > 1e-9 {
         move_by(s, moved, n * by)?;
     }
-    let said = json!({"id": id, "moved": moved, "by": hundredth(by)});
-    Ok(if by.abs() > 1e-9 { pin::pinned_note(said, &before, &[moved]) } else { said })
+    Ok(json!({"id": id, "moved": moved, "by": hundredth(by)}))
 }
 
 impl Model {
@@ -13413,9 +13418,8 @@ fn move_elements(s: &mut Session, p: &Value) -> R {
     if end.is_some() && !matches!(ids.as_slice(), [one] if s.model.wall(*one).is_some() || s.model.run_of(*one).is_some() || grid(*one)) {
         return Err(bad(c, "`end` moves an end of one wall, one run or one grid; give `ids` one of them"));
     }
-    let before = Arc::clone(&s.model);
     relocate(c, s, &ids, &Motion { map: &|q| q + by, slide: Some(by), mirror: false }, end)?;
-    Ok(pin::pinned_note(json!({"moved": ids}), &before, &ids))
+    Ok(json!({"moved": ids}))
 }
 
 fn copy(s: &mut Session, p: &Value) -> R {
@@ -13439,9 +13443,8 @@ fn rotate(s: &mut Session, p: &Value) -> R {
     if flag(c, p, "copy")? {
         return duplicate(c, s, &ids, &mo);
     }
-    let before = Arc::clone(&s.model);
     relocate(c, s, &ids, &mo, None)?;
-    Ok(pin::pinned_note(json!({"rotated": ids}), &before, &ids))
+    Ok(json!({"rotated": ids}))
 }
 
 fn mirror(s: &mut Session, p: &Value) -> R {
@@ -13461,29 +13464,17 @@ fn mirror(s: &mut Session, p: &Value) -> R {
     if flag(c, p, "copy")? {
         return duplicate(c, s, &ids, &mo);
     }
-    let before = Arc::clone(&s.model);
     relocate(c, s, &ids, &mo, None)?;
-    Ok(pin::pinned_note(json!({"mirrored": ids}), &before, &ids))
-}
-
-/// `edit`'s reply for `p`, with a note when it changed an element of `p`'s `ids` (or `id`) that is pinned: it did the work
-/// all the same.
-fn noting_pins(s: &mut Session, p: &Value, edit: fn(&mut Session, &Value) -> R) -> R {
-    let before = Arc::clone(&s.model);
-    let ids = ids_param("pin", &before, p).unwrap_or_default();
-    Ok(pin::pinned_note(edit(s, p)?, &before, &ids))
+    Ok(json!({"mirrored": ids}))
 }
 
 fn corner(s: &mut Session, p: &Value) -> R {
-    noting_pins(s, p, corner_edit)
-}
-
-fn corner_edit(s: &mut Session, p: &Value) -> R {
     let c = "corner";
     let ids = ids_param(c, &s.model, p)?;
     let m = &s.model;
     let [a, b] = ids.as_slice() else { return Err(bad(c, "`ids` takes two walls")) };
     if let (Some(Element::DetailLine(la)), Some(Element::DetailLine(lb))) = (m.elements.get(*a), m.elements.get(*b)) {
+        pin::refuse_pinned(c, m, &ids, pin::Held::Move)?;
         if la.view != lb.view {
             return Err(bad(c, format!("detail lines {a} and {b} are in different views; trim lines of one view")));
         }
@@ -13530,12 +13521,9 @@ fn corner_edit(s: &mut Session, p: &Value) -> R {
 }
 
 fn split(s: &mut Session, p: &Value) -> R {
-    noting_pins(s, p, split_edit)
-}
-
-fn split_edit(s: &mut Session, p: &Value) -> R {
     let c = "split";
     let m = &s.model;
+    pin::refuse_pinned(c, m, &ids_param(c, m, p).unwrap_or_default(), pin::Held::Move)?;
     let id = id_opt(c, p, "id")?.ok_or_else(|| bad(c, "`id`, a wall or a detail line, is required"))?;
     if let Some(lid) = m.elements.id(id)
         && let Some(Element::DetailLine(l)) = m.elements.get(lid)
@@ -13671,7 +13659,9 @@ fn offset(s: &mut Session, p: &Value) -> R {
         .ok_or_else(|| bad(c, format!("a {} can't be offset by {d} mm (it would turn inside out, or fold over itself)", l.curve.kind())))?
         .map(micron);
     let copy = absent(p.get("copy")) || flag(c, p, "copy")?;
-    let before = Arc::clone(&s.model);
+    if !copy {
+        pin::refuse_pinned(c, &s.model, &[id], pin::Held::Move)?;
+    }
     let m = s.model_mut();
     let out = DetailLine { curve, ..l };
     if copy {
@@ -13679,7 +13669,7 @@ fn offset(s: &mut Session, p: &Value) -> R {
         Ok(json!({"id": new}))
     } else {
         m.elements.insert(id, Element::DetailLine(out));
-        Ok(pin::pinned_note(json!({"id": id}), &before, &[id]))
+        Ok(json!({"id": id}))
     }
 }
 
@@ -13695,10 +13685,6 @@ fn drawn_in_view(m: &Model, l: &DetailLine, boundary: Id) -> bool {
 }
 
 fn trim_extend(s: &mut Session, p: &Value) -> R {
-    noting_pins(s, p, trim_extend_edit)
-}
-
-fn trim_extend_edit(s: &mut Session, p: &Value) -> R {
     let c = "trim_extend";
     let m = &s.model;
     let boundary = id_opt(c, p, "boundary")?
@@ -13706,6 +13692,7 @@ fn trim_extend_edit(s: &mut Session, p: &Value) -> R {
         .ok_or_else(|| bad(c, "`boundary`, a line to trim or extend to, is required"))?;
     let edge = crate::draw::element_curve(m, boundary).ok_or_else(|| bad(c, format!("{boundary} has no line to trim or extend to")))?;
     let ids = ids_param(c, m, p)?;
+    pin::refuse_pinned(c, m, &ids, pin::Held::Move)?;
     let keep = points(c, p, "keep")?;
     if keep.len() != ids.len() {
         return Err(bad(c, format!("`keep` gives a point on each line to keep: {} for {} lines", keep.len(), ids.len())));
@@ -13759,6 +13746,7 @@ fn fillet(s: &mut Session, p: &Value) -> R {
     let c = "fillet";
     let m = &s.model;
     let ids = ids_param(c, m, p)?;
+    pin::refuse_pinned(c, m, &ids, pin::Held::Move)?;
     let &[a, b] = ids.as_slice() else { return Err(bad(c, "`ids` is two detail lines")) };
     // Two straight walls: cut back, and an arc wall like the first between them.
     if let (Some(wa), Some(wb)) = (m.wall(a).cloned(), m.wall(b).cloned()) {
@@ -13927,13 +13915,6 @@ fn delete_type(s: &mut Session, p: &Value) -> R {
     let m = &s.model;
     let (kind, name) = entry_of(c, m, p)?;
     let label = kind.label();
-    let used = m.library_uses().get(&(kind.clone(), name.clone())).copied().unwrap_or(0);
-    if used > 0 {
-        return Err(bad(
-            c,
-            format!("{label} `{name}` is used {used} time{}: change or delete what uses it first", if used == 1 { "" } else { "s" }),
-        ));
-    }
     match &kind {
         LibKind::Type(cat) if m.type_names(cat).len() <= 1 => {
             return Err(bad(c, format!("`{name}` is the last {label}: a {cat} needs one; make another first")));
@@ -13943,8 +13924,22 @@ fn delete_type(s: &mut Session, p: &Value) -> R {
         }
         _ => {}
     }
+    // Revit deletes a type with its instances (the window warns first, with their number): what hangs on them goes too.
+    let instances = m.instances_of(&kind, &name);
+    // Revit warns before it deletes them, with their number: the window asks first, with `dry_run`.
+    if flag(c, p, "dry_run")? {
+        return Ok(json!({"dry_run": true, "would_delete": {"kind": label, "name": name}, "instances": instances.len(), "ids": instances}));
+    }
+    let before = Arc::clone(&s.model);
+    let mut deleted = Vec::new();
+    if !instances.is_empty() {
+        let r = delete_indexed(s, &json!({"ids": instances}))?;
+        deleted = r["deleted"].as_array().cloned().unwrap_or_default();
+    }
     s.model_mut().remove_entry(&kind, &name);
-    Ok(json!({"deleted": {"kind": label, "name": name}}))
+    let gone: Vec<Id> = deleted.iter().filter_map(Value::as_u64).collect();
+    let said = json!({"deleted": {"kind": label, "name": name}, "instances": instances.len(), "elements": gone});
+    Ok(pin::hosted_pins_deleted(said, &before, &gone, &[]))
 }
 
 fn rename_type(s: &mut Session, p: &Value) -> R {
@@ -14016,6 +14011,9 @@ fn purge(s: &mut Session, p: &Value) -> R {
 }
 
 fn delete(s: &mut Session, p: &Value) -> R {
+    // A pinned element is not deleted until it is unpinned, as in Revit; what goes with a host it hangs on does go.
+    let asked = ids_param("delete", &s.model, p)?;
+    pin::refuse_pinned("delete", &s.model, &asked, pin::Held::Delete)?;
     #[cfg(test)]
     let mut twin = s.clone();
     let before = Arc::clone(&s.model);
@@ -14026,10 +14024,9 @@ fn delete(s: &mut Session, p: &Value) -> R {
         assert_eq!(result, expected, "indexed deletion returned a different reply");
         assert_eq!(s.model, twin.model, "indexed deletion left a different model");
     }
-    // A pinned element goes too, as in Revit; the reply says it was pinned.
     result.map(|r| {
         let gone: Vec<Id> = r["deleted"].as_array().map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
-        pin::pinned_note(r, &before, &gone)
+        pin::hosted_pins_deleted(r, &before, &gone, &asked)
     })
 }
 

@@ -107,13 +107,13 @@ fn enter_with_no_tool_running_repeats_the_last_one_and_so_does_rr() {
     key(&mut h, Key::Enter);
     assert_eq!(h.state().tool, Tool::Wall(Vec::new()));
     key(&mut h, Key::Escape);
-    // RR is the same, and the last tool is the last one started.
+    // RC is the same, and the last tool is the last one started.
     shortcut(&mut h, "DR");
     key(&mut h, Key::Escape);
     shortcut(&mut h, "WN");
     key(&mut h, Key::Escape);
     assert_eq!(h.state().tool, Tool::Modify);
-    shortcut(&mut h, "RR");
+    shortcut(&mut h, "RC");
     assert_eq!(h.state().tool, Tool::Window);
 }
 

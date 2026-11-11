@@ -163,6 +163,8 @@ pub enum Tool {
     Copy(Option<P2>),
     /// Paste what was copied: outlined at the cursor, put down by a click.
     Paste,
+    /// Paste Aligned to Picked Level: in an elevation or a section, a click on a level line pastes what was copied onto it.
+    PasteLevel,
     /// Rotate the selection about `centre`: the start of the angle, once clicked; with `place`, the
     /// next click moves the centre.
     Rotate {
@@ -415,7 +417,7 @@ type Buttons<'a> = &'a [(Icon, &'a str, &'a str, Option<Tool>, bool)];
 
 /// The desktop's own two-letter shortcuts, which [`BimApp::shortcut`] takes before the commands'
 /// aliases, and what Keyboard Shortcuts (KS) calls them.
-const SHORTCUTS: [(&str, &str); 59] = [
+const SHORTCUTS: [(&str, &str); 63] = [
     ("3D", "3D View"),
     ("MD", "Modify"),
     ("SB", "Floor: Structural"),
@@ -428,10 +430,14 @@ const SHORTCUTS: [(&str, &str); 59] = [
     ("ZF", "Zoom to Fit"),
     ("ZE", "Zoom to Fit"),
     ("ZA", "Zoom to Fit"),
+    ("ZX", "Zoom to Fit"),
     ("ZR", msg!("Zoom Region")),
+    ("ZZ", msg!("Zoom Region")),
     ("ZP", msg!("Previous Zoom")),
+    ("ZC", msg!("Previous Zoom")),
     ("ZO", msg!("Zoom Out")),
-    ("RR", msg!("Repeat Last Command")),
+    ("ZV", msg!("Zoom Out")),
+    ("RC", msg!("Repeat Last Command")),
     ("TL", "Thin Lines"),
     ("CS", msg!("Create Similar")),
     ("PP", "Properties"),
@@ -876,8 +882,10 @@ pub struct BimApp {
     /// Manage > Review Warnings, while open.
     warnings_dialog: Option<warnings::WarningsDialog>,
     selection_filter: Option<filter::SelectionFilter>,
-    /// Paste Aligned to Selected Levels (or a Picked Level): the levels dialog, while open.
+    /// Paste Aligned to Selected Levels: the levels dialog, while open.
     paste_levels: Option<clipboard::PasteLevels>,
+    /// Delete on a type with instances in the Project Browser: Revit's warning with their number, while open.
+    delete_type: Option<browser::DeleteType>,
     /// What was last put on the clipboard.
     pub copied: Option<String>,
     active_option: Option<String>,
@@ -1523,6 +1531,7 @@ impl BimApp {
             warnings_dialog: None,
             selection_filter: None,
             paste_levels: None,
+            delete_type: None,
             copied: None,
             active_option: None,
             new_schedule: None,
@@ -1593,6 +1602,7 @@ impl BimApp {
             | Tool::Move(_)
             | Tool::Copy(_)
             | Tool::Paste
+            | Tool::PasteLevel
             | Tool::Rotate { .. }
             | Tool::Array { .. }
             | Tool::Mirror { .. }
@@ -2204,23 +2214,23 @@ impl BimApp {
             "OF" => Tool::Offset,
             "DW" => Tool::Demolish,
             "LW" => Tool::Linework,
-            "ZF" | "ZE" | "ZA" => {
+            "ZF" | "ZE" | "ZA" | "ZX" => {
                 self.fit();
                 return true;
             }
-            "ZR" => {
+            "ZR" | "ZZ" => {
                 self.zoom_region();
                 return true;
             }
-            "ZP" => {
+            "ZP" | "ZC" => {
                 self.previous_zoom();
                 return true;
             }
-            "ZO" => {
+            "ZO" | "ZV" => {
                 self.zoom_view(0.5);
                 return true;
             }
-            "RR" => {
+            "RC" => {
                 self.repeat_last();
                 return true;
             }
@@ -2636,7 +2646,7 @@ impl BimApp {
         Some(self.paint_material.clone()).filter(|n| m.materials.contains_key(n)).or_else(|| m.materials.keys().next().cloned())
     }
 
-    /// Start `tool` as the person asked for it, from the ribbon, a shortcut or a menu: Repeat (Enter, RR) can start it again.
+    /// Start `tool` as the person asked for it, from the ribbon, a shortcut or a menu: Repeat (Enter, RC) can start it again.
     /// A tool the app starts for itself goes through [`set_tool`](Self::set_tool), which remembers nothing.
     fn start_tool(&mut self, tool: Tool) {
         self.flow.by_user = true;
@@ -2682,7 +2692,8 @@ impl BimApp {
             Tool::Mirror { .. } => !self.mirror_copy,
             _ => false,
         };
-        if moves && self.refuse_pinned() {
+        let refused = if matches!(tool, Tool::Rotate { .. }) { self.refuse_pinned_turning() } else { self.refuse_pinned() };
+        if moves && refused {
             return;
         }
         self.remember_tool(&tool);
@@ -3009,7 +3020,7 @@ impl BimApp {
             return;
         }
         if !self.selection.is_empty() {
-            self.run("delete", json!({"ids": self.selection}));
+            self.delete_selection();
         }
     }
 
@@ -5151,6 +5162,7 @@ impl BimApp {
             Tool::Move(Some(_)) => msg!("Click where the base point goes, or type a distance and press Enter. Esc cancels."),
             Tool::Copy(Some(_)) => msg!("Click where the copy's base point goes, or type a distance and press Enter. Esc cancels."),
             Tool::Paste => msg!("Click where to paste what was copied. Esc cancels."),
+            Tool::PasteLevel => msg!("Click a level line to paste what was copied onto that level. Esc cancels."),
             Tool::Rotate { place: true, .. } => msg!("Click the centre of rotation."),
             Tool::Rotate { start: None, .. } => msg!("Click the start of the angle, or type an angle in the Options Bar."),
             Tool::Rotate { start: Some(_), .. } => msg!("Click the end of the angle. Esc cancels."),
@@ -5538,6 +5550,7 @@ impl BimApp {
         self.warnings_window(ctx);
         self.selection_filter_window(ctx);
         self.paste_levels_window(ctx);
+        self.delete_type_window(ctx);
         self.shortcuts_window(ctx);
         self.settings_window(ctx);
         #[cfg(feature = "plugins")]

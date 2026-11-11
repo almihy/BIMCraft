@@ -1,7 +1,8 @@
 //! Copy to Clipboard and Paste, as Revit's: Ctrl+C puts the selection on the clipboard (the session's, in the core: no OS
 //! clipboard), Ctrl+V holds what was copied at the cursor, outlined, until a click puts it there (snapping as every tool does),
 //! and the Paste list (the Modify panel's) has the aligned ways: to Selected Levels (a list of levels to tick), to the Current View,
-//! to a Picked Level and to the Same Place. The commands are the core's `copy_to_clipboard` and `paste`.
+//! to a Picked Level (in an elevation or a section, a click on a level line) and to the Same Place. The commands are the core's
+//! `copy_to_clipboard` and `paste`.
 
 use bimcraft_core::geom::P2;
 use bimcraft_core::model::Id;
@@ -15,11 +16,9 @@ use crate::popup::Modal;
 use crate::ribbon;
 use crate::{BimApp, Status, Tool, list_row, small_button};
 
-/// The levels dialog of Paste Aligned to Selected Levels, or with `single` to a Picked Level: each level with its elevation, and
-/// whether it is ticked.
+/// The levels dialog of Paste Aligned to Selected Levels: each level with its elevation, and whether it is ticked.
 pub(crate) struct PasteLevels {
     levels: Vec<(Id, String, bool)>,
-    single: bool,
 }
 
 impl BimApp {
@@ -94,50 +93,61 @@ impl BimApp {
         true
     }
 
-    /// Paste Aligned to Selected Levels (or, with `single`, to a Picked Level): the dialog of levels.
-    pub(crate) fn open_paste_levels(&mut self, single: bool) {
+    /// Paste Aligned to Picked Level: in an elevation or a section, a click on a level line pastes there, as Revit's does.
+    pub(crate) fn begin_paste_to_picked_level(&mut self) {
+        if !matches!(self.sheet, crate::Sheet::Section(_)) {
+            let text = t("open an elevation or a section to pick a level line");
+            self.status = Status { text: text.into(), error: true };
+        } else if self.session.clipboard_ids().is_empty() {
+            self.status = Status { text: t("nothing to paste: select elements and copy them first").into(), error: true };
+        } else {
+            self.set_tool(Tool::PasteLevel);
+        }
+    }
+
+    /// A click in an elevation or a section with Paste Aligned to Picked Level: `found` is what was under it. A level line pastes at
+    /// the same place on that level; anything else says so, and the tool goes on.
+    pub(crate) fn paste_to_picked_level(&mut self, found: Option<Id>) {
+        match found.filter(|id| self.session.model.level(*id).is_some()) {
+            Some(level) => {
+                if self.paste(json!({"levels": [level]})) {
+                    self.tool = Tool::Modify;
+                }
+            }
+            None => self.status = Status { text: t("click a level line").into(), error: true },
+        }
+    }
+
+    /// Paste Aligned to Selected Levels: the dialog of levels.
+    pub(crate) fn open_paste_levels(&mut self) {
         let levels = self.session.model.levels().into_iter().map(|(id, l)| (id, self.session.model.units.with_unit(l.elevation), false));
         let levels: Vec<(Id, String, bool)> =
             levels.map(|(id, z, on)| (id, format!("{} ({z})", self.session.model.level(id).map_or("", |l| l.name.as_str())), on)).collect();
-        self.paste_levels = Some(PasteLevels { levels, single });
+        self.paste_levels = Some(PasteLevels { levels });
     }
 
     /// The levels dialog, while it is open.
     pub(crate) fn paste_levels_window(&mut self, ctx: &Context) {
         let Some(d) = self.paste_levels.as_mut() else { return };
         let (mut ok, mut close) = (false, false);
-        let title = if d.single { t("Pick Level") } else { t("Select Levels") };
-        let r = Modal::new(UiId::new("paste-levels"), title).width(340.0).show(ctx, |ui| {
+        let r = Modal::new(UiId::new("paste-levels"), t("Select Levels")).width(340.0).show(ctx, |ui| {
             crate::popup::body(ui, |ui| {
                 ui.add_space(6.0);
-                ui.label(t(if d.single { "Paste to the level:" } else { "Paste to the levels:" }));
+                ui.label(t("Paste to the levels:"));
                 ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                    let single = d.single;
-                    let mut picked = None;
-                    for (i, (_, name, on)) in d.levels.iter_mut().enumerate().rev() {
-                        if single {
-                            if ui.radio(*on, name.as_str()).clicked() {
-                                picked = Some(i);
-                            }
-                        } else {
-                            ui.checkbox(on, name.as_str());
-                        }
-                    }
-                    if let Some(i) = picked {
-                        d.levels.iter_mut().enumerate().for_each(|(j, l)| l.2 = i == j);
+                    for (_, name, on) in d.levels.iter_mut().rev() {
+                        ui.checkbox(on, name.as_str());
                     }
                 });
-                if !d.single {
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        if ui.button(t("Check All")).clicked() {
-                            d.levels.iter_mut().for_each(|l| l.2 = true);
-                        }
-                        if ui.button(t("Check None")).clicked() {
-                            d.levels.iter_mut().for_each(|l| l.2 = false);
-                        }
-                    });
-                }
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if ui.button(t("Check All")).clicked() {
+                        d.levels.iter_mut().for_each(|l| l.2 = true);
+                    }
+                    if ui.button(t("Check None")).clicked() {
+                        d.levels.iter_mut().for_each(|l| l.2 = false);
+                    }
+                });
             });
             crate::popup::footer(ui, |ui| {
                 ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
@@ -193,15 +203,22 @@ impl BimApp {
                 }
                 let tip = msg!("Aligned to Selected Levels: at the same place on each level ticked, its heights moved with the level");
                 if list_row(ui, Icon::Paste, "Aligned to Selected Levels…", false, tip).clicked() {
-                    self.open_paste_levels(false);
+                    self.open_paste_levels();
                 }
-                let tip = msg!("Aligned to Current View: at the same place, on the level of the plan on screen");
-                if list_row(ui, Icon::Paste, "Aligned to Current View", false, tip).clicked() {
+                // As in Revit, the view must be a different one from the view the elements were copied in.
+                let tip = msg!(
+                    "Aligned to Current View: at the same place, on the level of the plan on screen, which is not the one copied from"
+                );
+                let copied_here = self.plan_level().is_some_and(|l| self.session.clipboard_level() == Some(self.session.model.guid(l)));
+                if ui.add_enabled_ui(!copied_here, |ui| list_row(ui, Icon::Paste, "Aligned to Current View", false, tip)).inner.clicked() {
                     self.paste_aligned(Aligned::CurrentView);
                 }
-                let tip = msg!("Aligned to Picked Level: at the same place, on the level picked from the list");
-                if list_row(ui, Icon::Paste, "Aligned to Picked Level…", false, tip).clicked() {
-                    self.open_paste_levels(true);
+                // As in Revit, a level is picked by its line in an elevation or a section.
+                let tip =
+                    msg!("Aligned to Picked Level: at the same place, on the level whose line is clicked in an elevation or a section");
+                let in_section = matches!(self.sheet, crate::Sheet::Section(_));
+                if ui.add_enabled_ui(in_section, |ui| list_row(ui, Icon::Paste, "Aligned to Picked Level", false, tip)).inner.clicked() {
+                    self.begin_paste_to_picked_level();
                 }
                 let tip = msg!("Aligned to Same Place: on top of what was copied");
                 if list_row(ui, Icon::Paste, "Aligned to Same Place", false, tip).clicked() {

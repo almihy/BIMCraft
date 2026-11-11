@@ -29,17 +29,23 @@ fn chair(s: &mut Session) {
 }
 
 #[test]
-fn an_unused_type_is_deleted_and_a_used_one_is_refused_with_how_many_use_it() {
+fn an_unused_type_is_deleted_and_a_used_one_goes_with_its_instances() {
     let mut s = walls();
     run(&mut s, "type", json!({"category": "wall", "name": "Spare 100", "thickness": 100}));
     assert!(wall_types(&s).contains(&"Spare 100".to_string()));
     let r = run(&mut s, "delete_type", json!({"category": "wall", "type": "Spare 100"}));
     assert_eq!(r["deleted"], json!({"kind": "wall type", "name": "Spare 100"}));
     assert!(!wall_types(&s).contains(&"Spare 100".to_string()));
-    // The wall's own type is used once.
-    let used = s.model.elements.values().find_map(|e| if let Element::Wall(w) = e { Some(w.type_name.clone()) } else { None }).unwrap();
-    let e = s.execute("delete_type", &json!({"category": "wall", "type": used})).unwrap_err();
-    assert!(e.contains("is used 1 time"), "{e}");
+    assert_eq!((r["instances"].clone(), r["elements"].clone()), (json!(0), json!([])));
+    // The wall's own type is used once: as in Revit, deleting it deletes the wall, and the reply says what went.
+    let (wall, used) =
+        s.model.elements.iter().find_map(|(id, e)| if let Element::Wall(w) = e { Some((*id, w.type_name.clone())) } else { None }).unwrap();
+    let r = run(&mut s, "delete_type", json!({"category": "wall", "type": used}));
+    assert_eq!(r["deleted"], json!({"kind": "wall type", "name": used}));
+    assert_eq!((r["instances"].clone(), r["elements"].clone()), (json!(1), json!([wall])), "{r}");
+    assert!(!wall_types(&s).contains(&used) && s.model.elements.get(wall).is_none());
+    run(&mut s, "undo", json!({}));
+    assert!(wall_types(&s).contains(&used) && s.model.elements.get(wall).is_some(), "one undo brings the wall and its type back");
     let e = s.execute("delete_type", &json!({"category": "wall", "type": "No such"})).unwrap_err();
     assert!(e.contains("no wall type") && e.contains("there are:"), "{e}");
     let e = s.execute("delete_type", &json!({"category": "wall"})).unwrap_err();
@@ -93,13 +99,40 @@ fn a_family_keeps_its_used_type_and_goes_when_none_of_it_is_used() {
         r["removed"].as_array().unwrap().iter().filter(|e| e["kind"] == "family type").filter_map(|e| e["name"].as_str()).collect();
     assert!(gone.contains(&"Chair: Large") && !gone.contains(&"Chair: Small"), "{gone:?}");
     assert_eq!(s.model.families["Chair"].types.keys().collect::<Vec<_>>(), ["Small"], "the type in use is the one left");
-    // The family is used, so it stays; delete the component and it goes with its types.
-    let e = s.execute("delete_type", &json!({"family": "Chair"})).unwrap_err();
-    assert!(e.contains("is used"), "{e}");
-    run(&mut s, "delete", json!({"ids": [component]}));
-    let r = run(&mut s, "purge", json!({}));
-    assert!(r["removed"].as_array().unwrap().iter().any(|e| e["kind"] == "family" && e["name"] == "Chair"));
-    assert!(!s.model.families.contains_key("Chair"));
+    // The family is used, so purge keeps it; deleting it, as Revit's Delete does, takes the component with it.
+    let r = run(&mut s, "delete_type", json!({"family": "Chair"}));
+    assert_eq!((r["instances"].clone(), r["elements"].clone()), (json!(1), json!([component])), "{r}");
+    assert!(!s.model.families.contains_key("Chair") && s.model.elements.get(component).is_none());
+}
+
+#[test]
+fn deleting_a_type_takes_what_hangs_on_its_instances_and_counts_only_the_instances() {
+    let mut s = Session::new();
+    run(&mut s, "type", json!({"category": "wall", "name": "Brick 200", "thickness": 200}));
+    run(&mut s, "type", json!({"category": "wall", "name": "Spare 100", "thickness": 100}));
+    let walls: Vec<u64> = [3000, 6000]
+        .iter()
+        .map(|y| run(&mut s, "wall", json!({"points": [[0, y], [4000, y]], "type": "Brick 200"}))["ids"][0].as_u64().unwrap())
+        .collect();
+    let door = run(&mut s, "door", json!({"wall": walls[0], "offset": 1000}))["id"].as_u64().unwrap();
+    let r = run(&mut s, "delete_type", json!({"category": "wall", "type": "Brick 200"}));
+    assert_eq!(r["instances"], 2, "the doors and windows are not instances of the wall type: {r}");
+    let gone: Vec<u64> = r["elements"].as_array().unwrap().iter().filter_map(|v| v.as_u64()).collect();
+    assert!(gone.contains(&walls[0]) && gone.contains(&walls[1]) && gone.contains(&door), "{r}");
+    assert!(s.model.elements.get(door).is_none());
+}
+
+#[test]
+fn deleting_a_type_does_not_stop_at_a_pinned_instance() {
+    // Revit deletes a type's instances whatever pins them; the reply says the pinned ones went.
+    let mut s = Session::new();
+    run(&mut s, "type", json!({"category": "wall", "name": "Brick 200", "thickness": 200}));
+    run(&mut s, "type", json!({"category": "wall", "name": "Spare 100", "thickness": 100}));
+    let wall = run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]], "type": "Brick 200"}))["ids"][0].as_u64().unwrap();
+    run(&mut s, "pin", json!({"ids": [wall]}));
+    let r = run(&mut s, "delete_type", json!({"category": "wall", "type": "Brick 200"}));
+    assert_eq!(r["elements"], json!([wall]), "{r}");
+    assert!(s.model.pinned_ids().is_empty());
 }
 
 #[test]
@@ -169,4 +202,20 @@ fn rename_type_renames_a_type_or_a_family_type_and_what_uses_it_follows() {
     assert!(matches!(s.model.elements.get(c), Some(Element::Component(x)) if x.type_name == "Child"));
     run(&mut s, "undo", json!({}));
     assert!(s.model.families["Chair"].types.contains_key("Small"));
+}
+
+#[test]
+fn a_dry_run_of_delete_type_counts_the_instances_and_changes_nothing() {
+    let mut s = walls();
+    run(&mut s, "type", json!({"category": "wall", "name": "Spare 100", "thickness": 100}));
+    let (wall, used) =
+        s.model.elements.iter().find_map(|(id, e)| if let Element::Wall(w) = e { Some((*id, w.type_name.clone())) } else { None }).unwrap();
+    let steps = s.history().len();
+    let r = run(&mut s, "delete_type", json!({"category": "wall", "type": used, "dry_run": true}));
+    assert_eq!(r["dry_run"], true);
+    assert_eq!((r["instances"].clone(), r["ids"].clone()), (json!(1), json!([wall])), "{r}");
+    assert_eq!(r["would_delete"], json!({"kind": "wall type", "name": used}));
+    assert!(wall_types(&s).contains(&used) && s.model.elements.get(wall).is_some());
+    assert_eq!(s.history().len(), steps, "nothing to undo");
+    assert_eq!(run(&mut s, "delete_type", json!({"category": "wall", "type": "Spare 100", "dry_run": true}))["instances"], 0);
 }
