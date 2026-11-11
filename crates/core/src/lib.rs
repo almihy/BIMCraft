@@ -96,6 +96,8 @@ pub mod pat;
 pub mod pdf;
 pub mod pen;
 pub mod phasing;
+#[cfg(test)]
+mod pin_tests;
 pub mod plumbing;
 #[cfg(test)]
 mod read_only_tests;
@@ -107,8 +109,6 @@ pub mod reinforce;
 mod reinforce_tests;
 pub mod render;
 pub mod reservoir;
-#[cfg(test)]
-mod pin_tests;
 #[cfg(test)]
 mod roof_slopes_tests;
 #[cfg(test)]

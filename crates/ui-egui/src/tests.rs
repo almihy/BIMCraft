@@ -2806,6 +2806,8 @@ fn nothing_a_translated_interface_shows_is_left_in_english() {
         h.query_all(By::new())
             .filter_map(|n| n.accesskit_node().label().or_else(|| n.accesskit_node().value()))
             .filter(|s| crate::lang::translated_in(l, s).is_some_and(|x| x != s))
+            // Two letters a tool lists as its shortcut are keys, not words: Unpin's UP is also Stairs' word for climbing.
+            .filter(|s| !crate::shortcuts().iter().any(|(keys, _)| keys == s))
             .collect()
     };
     let extra = r#"parameter {"name": "Finish Height", "kind": "length", "categories": ["wall"]}

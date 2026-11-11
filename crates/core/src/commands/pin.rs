@@ -48,7 +48,10 @@ pub(super) fn pinned_note(mut result: Value, before: &Model, ids: &[Id]) -> Valu
         return result;
     }
     if let Some(o) = result.as_object_mut() {
-        o.insert("note".into(), json!(format!("{} {} pinned; it was changed anyway: `unpin` frees an element", noun(&pinned), verb(&pinned))));
+        o.insert(
+            "note".into(),
+            json!(format!("{} {} pinned; it was changed anyway: `unpin` frees an element", noun(&pinned), verb(&pinned))),
+        );
         o.insert("pinned".into(), json!(pinned));
     }
     result
