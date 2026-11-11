@@ -1,18 +1,17 @@
 #!/usr/bin/env node
-// Writes crates/ui-egui/src/icons/drawn.rs: the icons BIMCraft draws from lucide (ISC) and Tabler Icons (MIT), as outlines
-// on the 24 grid that go through the same pen as BIMCraft's own drawings (icons.rs). Nothing of the SVGs is kept at run
-// time: each path, circle, rect, line, polyline, polygon and ellipse is flattened here into points, curves and arcs in
-// steps of at most 2.8 degrees (as icons.rs's own arcs).
+// Writes crates/ui-egui/src/icons/drawn.rs: the icons BIMCraft draws from lucide (ISC), the Arqiflow app's icons, as
+// outlines on the 24 grid that go through the same pen as BIMCraft's own drawings (icons.rs). Nothing of the SVGs is kept
+// at run time: each path, circle, rect, line, polyline, polygon and ellipse is flattened here into points, curves and arcs
+// in steps of at most 2.8 degrees (as icons.rs's own arcs).
 //
-// Which icon comes from where is in sources.json ("icons": an Icon's name, then "lucide:<name>" or "tabler:<name>"), with
-// the versions the drawings were taken from. To update or change the mapping:
+// Which icon is drawn from which lucide icon is in sources.json ("icons": an Icon's name, then lucide's name), with the
+// lucide version the drawings were taken from. To update lucide or change the mapping:
 //
-//   cd tools/icons && npm install --no-save lucide-static@<version> @tabler/icons@<version>
+//   cd tools/icons && npm install --no-save lucide-static@<version>
 //   node tools/icons/generate.mjs            (from the repository's root)
 //
-// then set the versions in sources.json and NOTICE to the ones installed. Either lucide-static or lucide-react will do
-// (the same drawings); other places to read the packages from can be given: --lucide <package dir> --tabler <package dir>.
-// --compare also writes the "compare" candidates (a review aid, not committed).
+// then set the version in sources.json and NOTICE to the one installed. lucide-static or lucide-react will do (the same
+// drawings); another place to read the package from can be given: --lucide <package dir>.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -27,7 +26,6 @@ const arg = (name) => {
 };
 const config = JSON.parse(readFileSync(join(here, "sources.json"), "utf8"));
 const out = resolve(root, arg("--out") ?? "crates/ui-egui/src/icons/drawn.rs");
-const compare = args.includes("--compare");
 
 function packageDir(flag, names) {
   const given = arg(flag);
@@ -40,13 +38,9 @@ function packageDir(flag, names) {
 }
 
 const lucideDir = packageDir("--lucide", [config.lucide.package, config.lucide.also]);
-const tablerDir = packageDir("--tabler", [config.tabler.package]);
-const version = (dir) => JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).version;
-const versions = { lucide: version(lucideDir), tabler: version(tablerDir) };
-for (const source of ["lucide", "tabler"]) {
-  if (versions[source] !== config[source].version) {
-    throw new Error(`${source} is ${versions[source]}, sources.json says ${config[source].version}: update sources.json (and NOTICE)`);
-  }
+const lucideVersion = JSON.parse(readFileSync(join(lucideDir, "package.json"), "utf8")).version;
+if (lucideVersion !== config.lucide.version) {
+  throw new Error(`lucide is ${lucideVersion}, sources.json says ${config.lucide.version}: update sources.json (and NOTICE)`);
 }
 
 // ---- Reading the drawings: a list of [element, attributes].
@@ -74,12 +68,6 @@ function lucide(name) {
   const data = js.match(/const __iconData = (\{[\s\S]*?\n\});/);
   if (!data) throw new Error(`lucide ${name}: no icon data`);
   return new Function(`return ${data[1]}`)().node.map(([kind, attrs]) => [kind, attrs]);
-}
-
-function tabler(name) {
-  const elements = svgElements(readFileSync(join(tablerDir, "icons/outline", `${name}.svg`), "utf8"));
-  // Each Tabler icon opens with an invisible 24 × 24 frame (stroke="none").
-  return elements.filter(([, a]) => a.stroke !== "none" && a.fill !== "currentColor");
 }
 
 // ---- Flattening into outlines: { points: [[x, y]…], closed }.
@@ -319,11 +307,8 @@ function tidy(o) {
   return { points: pts.length >= 2 ? pts : [pts[0], [pts[0][0] + 0.01, pts[0][1]]], closed: closed && pts.length > 2 };
 }
 
-function drawing(ref) {
-  const [source, name] = ref.split(":");
-  const elements = source === "lucide" ? lucide(name) : source === "tabler" ? tabler(name) : null;
-  if (!elements) throw new Error(`${ref}: the source is lucide or tabler`);
-  return { source, name, outlines: elements.flatMap(elementOutlines).map(tidy) };
+function drawing(name) {
+  return { name, outlines: lucide(name).flatMap(elementOutlines).map(tidy) };
 }
 
 // ---- The Rust.
@@ -334,39 +319,30 @@ const n = (v) => {
 };
 const constName = (s) => s.replace(/[^a-zA-Z0-9]+/g, "_").toUpperCase();
 const drawn = (constant, d) =>
-  `static ${constant}: Drawn = Drawn {\n    source: Source::${d.source === "lucide" ? "Lucide" : "Tabler"},\n    name: "${d.name}",\n    outlines: &[\n` +
+  `static ${constant}: Drawn = Drawn {\n    name: "${d.name}",\n    outlines: &[\n` +
   d.outlines.map((o) => `        (${o.closed}, &[${o.points.map(([x, y]) => `[${n(x)}, ${n(y)}]`).join(", ")}]),\n`).join("") +
   `    ],\n};\n`;
 
-const mapped = Object.entries(config.icons).map(([icon, ref]) => [icon, drawing(ref)]);
-let rust = `// @generated by tools/icons/generate.mjs from sources.json: lucide ${versions.lucide} (ISC) and Tabler Icons ${versions.tabler}
-// (MIT), their notices in NOTICE. Do not edit: change sources.json and run \`node tools/icons/generate.mjs\`.
+const mapped = Object.entries(config.icons).map(([icon, name]) => [icon, drawing(name)]);
+let rust = `// @generated by tools/icons/generate.mjs from sources.json: lucide ${lucideVersion} (ISC; its notice is in NOTICE).
+// Do not edit: change sources.json and run \`node tools/icons/generate.mjs\`.
 
-//! The icons drawn from lucide's and Tabler's drawings, as outlines on the 24 grid.
+//! The icons drawn from lucide's drawings (the Arqiflow app's icons), as outlines on the 24 grid.
 #![allow(clippy::approx_constant)] // A point at 3.14 is a point, not π.
 
 use super::Icon;
 
-/// Where a drawing comes from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Source {
-    Lucide,
-    Tabler,
-}
-
-/// A drawing taken from lucide or Tabler: its name there, and its outlines (closed or not, and the points on the 24 grid).
+/// A drawing taken from lucide: its name there, and its outlines (closed or not, and the points on the 24 grid).
 #[derive(Debug)]
 pub struct Drawn {
-    pub source: Source,
     pub name: &'static str,
     pub outlines: &'static [(bool, &'static [[f32; 2]])],
 }
 
-/// The versions the drawings were taken from.
-pub const LUCIDE_VERSION: &str = "${versions.lucide}";
-pub const TABLER_VERSION: &str = "${versions.tabler}";
+/// The lucide version the drawings were taken from.
+pub const LUCIDE_VERSION: &str = "${lucideVersion}";
 
-/// The drawing \`icon\` is drawn from, if it is not BIMCraft's own.
+/// The lucide drawing \`icon\` is drawn from, if it is not BIMCraft's own.
 pub fn drawn(icon: Icon) -> Option<&'static Drawn> {
     match icon {
 ${mapped.map(([icon]) => `        Icon::${icon} => Some(&${constName(icon)}),\n`).join("")}        _ => None,
@@ -374,11 +350,5 @@ ${mapped.map(([icon]) => `        Icon::${icon} => Some(&${constName(icon)}),\n`
 }
 `;
 for (const [icon, d] of mapped) rust += "\n" + drawn(constName(icon), d);
-if (compare) {
-  const candidates = Object.entries(config.compare).flatMap(([icon, refs]) => refs.map((ref) => [icon, ref, drawing(ref)]));
-  rust += `\n/// Candidates for review (generate.mjs --compare): the icon, and a drawing it might be drawn from.\npub static CANDIDATES: &[(Icon, &Drawn)] = &[\n`;
-  rust += candidates.map(([icon, ref]) => `    (Icon::${icon}, &C_${constName(ref)}_${constName(icon)}),\n`).join("") + "];\n";
-  for (const [icon, ref, d] of candidates) rust += "\n" + drawn(`C_${constName(ref)}_${constName(icon)}`, d);
-}
 writeFileSync(out, rust);
-console.log(`${out}: ${mapped.length} icons from lucide ${versions.lucide} and Tabler ${versions.tabler}${compare ? ", with candidates" : ""}`);
+console.log(`${out}: ${mapped.length} icons from lucide ${lucideVersion}`);

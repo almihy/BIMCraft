@@ -37,11 +37,8 @@ fn run() -> Result<(), String> {
     let drawings: Vec<_> = icons::Icon::ALL
         .iter()
         .map(|&icon| {
-            // Where the drawing comes from: "lucide:<name>", "tabler:<name>" or BIMCraft's own.
-            let source = icons::drawn(icon).map_or_else(
-                || "bimcraft".to_owned(),
-                |d| format!("{}:{}", if d.source == icons::Source::Lucide { "lucide" } else { "tabler" }, d.name),
-            );
+            // Where the drawing comes from: "lucide:<name>", or BIMCraft's own.
+            let source = icons::drawn(icon).map_or_else(|| "bimcraft".to_owned(), |d| format!("lucide:{}", d.name));
             json!({"name": icon.name(), "source": source, "regular": contours(icon, false), "compact": contours(icon, true)})
         })
         .collect();
