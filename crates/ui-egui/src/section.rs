@@ -10,7 +10,7 @@ use bimcraft_core::geom::P2;
 use bimcraft_core::model::{Id, Model};
 use bimcraft_core::render::{self, Rgb, View};
 use bimcraft_core::view3d::{Image, MAX_SIDE};
-use egui::{Color32, ColorImage, Context, Rect, Sense, TextureHandle, TextureOptions, Ui, pos2};
+use egui::{Color32, ColorImage, Context, Rect, TextureHandle, TextureOptions, Ui, pos2};
 use serde_json::json;
 
 use crate::canvas::{PICK, Place, click_modifiers, color, paint};
@@ -218,7 +218,7 @@ impl Cut {
 impl BimApp {
     /// Section or elevation `id`, filling `ui`.
     pub(crate) fn section_view(&mut self, ui: &mut Ui, id: Id) {
-        let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::CLICK | Sense::DRAG);
+        let (rect, response) = ui.allocate_exact_size(ui.available_size(), self.canvas.sense());
         let model = self.view_model();
         let ground = color(render::PAPER);
         let grid_background = self.background_grid().shown();

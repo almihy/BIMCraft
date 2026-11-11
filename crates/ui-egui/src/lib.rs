@@ -62,6 +62,7 @@ mod ribbon;
 mod section;
 mod section_box;
 mod section_worker;
+mod selecting;
 pub mod settings;
 mod shape;
 pub mod shortcuts;
@@ -398,7 +399,7 @@ type Buttons<'a> = &'a [(Icon, &'a str, &'a str, Option<Tool>, bool)];
 
 /// The desktop's own two-letter shortcuts, which [`BimApp::shortcut`] takes before the commands'
 /// aliases, and what Keyboard Shortcuts (KS) calls them.
-const SHORTCUTS: [(&str, &str); 55] = [
+const SHORTCUTS: [(&str, &str); 59] = [
     ("3D", "3D View"),
     ("MD", "Modify"),
     ("SB", "Floor: Structural"),
@@ -411,6 +412,10 @@ const SHORTCUTS: [(&str, &str); 55] = [
     ("ZF", "Zoom to Fit"),
     ("ZE", "Zoom to Fit"),
     ("ZA", "Zoom to Fit"),
+    ("ZR", msg!("Zoom Region")),
+    ("ZP", msg!("Previous Zoom")),
+    ("ZO", msg!("Zoom Out")),
+    ("RR", msg!("Repeat Last Command")),
     ("TL", "Thin Lines"),
     ("CS", msg!("Create Similar")),
     ("PP", "Properties"),
@@ -746,6 +751,8 @@ pub struct BimApp {
     measured: Option<(P2, P2)>,
     /// Tab pressed over the plan, taken from egui's focus keys: cycle what's under the cursor.
     tab_cycle: bool,
+    /// What the hand picks and repeats: a tool waiting for its elements, the last tool, Tab's chain (`selecting.rs`).
+    flow: selecting::Flow,
     /// What a window handed over that `pace` kept back for the frames after the one it came in.
     held: Vec<Event>,
     /// The Keyboard Shortcuts dialog is open (KS); the Manage tab drops its Project Units menu open
@@ -1418,6 +1425,7 @@ impl BimApp {
             cad_dialog: None,
             cad_box: None,
             tab_cycle: false,
+            flow: selecting::Flow::default(),
             held: Vec::new(),
             show_shortcuts: false,
             custom_shortcuts: BTreeMap::new(),
@@ -2044,6 +2052,10 @@ impl BimApp {
         if pressed(Modifiers::COMMAND, Key::D) {
             self.toggle_home();
         }
+        if self.tool == Tool::Modify && pressed(Modifiers::COMMAND, Key::A) {
+            self.select_all();
+        }
+        self.nudge(ctx);
         if self.sketch.is_some() {
             // While sketching, Ctrl+Z takes back a line; the model's steps wait until Finish or Cancel.
             if pressed(Modifiers::COMMAND, Key::Z) {
@@ -2058,10 +2070,14 @@ impl BimApp {
         if pressed(Modifiers::NONE, Key::Escape) && !self.cancel_pattern_pick() {
             self.escape();
         }
-        // Enter places a typed length, else builds the wall chain.
-        if pressed(Modifiers::NONE, Key::Enter)
+        // Enter starts the tool waiting for its elements, or repeats the last tool when none is running.
+        let enter = pressed(Modifiers::NONE, Key::Enter);
+        if enter && (self.enter_for_pending() || self.enter_to_repeat()) {
+            self.snap_once = None;
+        } else if enter
             && let Some(level) = self.plan_level()
         {
+            // Enter places a typed length, else builds the wall chain.
             match (&self.tool, self.typed_length.is_empty() && self.drawing.other.is_empty()) {
                 _ if self.picking_pattern_lines() => self.finish_pattern_lines(),
                 (Tool::Railing(_), true) => self.finish_railing(level),
@@ -2153,6 +2169,22 @@ impl BimApp {
             "LW" => Tool::Linework,
             "ZF" | "ZE" | "ZA" => {
                 self.fit();
+                return true;
+            }
+            "ZR" => {
+                self.zoom_region();
+                return true;
+            }
+            "ZP" => {
+                self.previous_zoom();
+                return true;
+            }
+            "ZO" => {
+                self.zoom_view(0.5);
+                return true;
+            }
+            "RR" => {
+                self.repeat_last();
                 return true;
             }
             "TL" => {
@@ -2581,9 +2613,16 @@ impl BimApp {
                 | Tool::Demolish
                 | Tool::Linework
         );
+        // A tool of the hand's own ends Pan and Zoom Region, and one asked for before its elements waits for them (Enter).
+        self.end_navigation();
+        self.flow.pending = None;
         if edits && self.selection.is_empty() {
-            self.status = Status { text: t("select what to move, copy, rotate or mirror first").into(), error: true };
+            self.flow.last = Some(tool.clone());
+            self.ask_selection_for(tool);
             return;
+        }
+        if tool != Tool::Modify {
+            self.flow.last = Some(tool.clone());
         }
         if tool == Tool::Attach && self.selected_walls().is_empty() {
             self.status = Status { text: t("select the walls to attach first").into(), error: true };
@@ -2821,6 +2860,10 @@ impl BimApp {
     fn escape(&mut self) {
         // Pick in View goes back to its dialog.
         if self.stop_work_plane_pick() {
+            return;
+        }
+        // Pan and Zoom Region end first, then a tool waiting for its elements.
+        if self.end_navigation() || self.flow.pending.take().is_some() {
             return;
         }
         self.typed.clear();
@@ -4418,7 +4461,7 @@ impl BimApp {
                 }
             });
         }
-        // Revit's Modify panel: small buttons in rows. Those taking the selection need one.
+        // Revit's Modify panel: small buttons in rows. Those taking the selection ask for it when there is none.
         let some = !self.selection.is_empty();
         // The button lit while its tool is on (the two Mirrors told apart by how they take the axis).
         let on = |t: &Tool, other: &Tool| match (t, other) {
@@ -4446,14 +4489,14 @@ impl BimApp {
                     "Mirror Pick Axis",
                     msg!("Mirror, Pick Axis (MM): pick a wall or grid to mirror across"),
                     Some(Tool::Mirror { draw: false, start: None }),
-                    some,
+                    true,
                 ),
                 (
                     Icon::MirrorDraw,
                     "Mirror Draw Axis",
                     msg!("Mirror, Draw Axis (DM): click the axis's two ends"),
                     Some(Tool::Mirror { draw: true, start: None }),
-                    some,
+                    true,
                 ),
                 (
                     Icon::Split,
@@ -4478,14 +4521,14 @@ impl BimApp {
                 ),
             ],
             &[
-                (Icon::Move, "Move", msg!("Move (MV): click a base point, then where it goes"), Some(Tool::Move(None)), some),
-                (Icon::Copy, "Copy", msg!("Copy (CO): click a base point, then where the copy goes"), Some(Tool::Copy(None)), some),
+                (Icon::Move, "Move", msg!("Move (MV): click a base point, then where it goes"), Some(Tool::Move(None)), true),
+                (Icon::Copy, "Copy", msg!("Copy (CO): click a base point, then where the copy goes"), Some(Tool::Copy(None)), true),
                 (
                     Icon::Rotate,
                     "Rotate",
                     msg!("Rotate (RO): click the angle's start, then its end"),
                     Some(Tool::Rotate { centre: P2(0.0, 0.0), start: None, place: false }),
-                    some,
+                    true,
                 ),
                 (
                     Icon::Trim,
@@ -4596,7 +4639,7 @@ impl BimApp {
                 for row in rows {
                     ui.horizontal(|ui| {
                         for (icon, label, tip, tool, enabled) in row {
-                            let active = tool.as_ref().is_some_and(|t| on(t, &self.tool) && *t != Tool::Modify);
+                            let active = tool.as_ref().is_some_and(|t| on(t, self.flow.pending.as_ref().unwrap_or(&self.tool)) && *t != Tool::Modify);
                             if ui.add_enabled_ui(*enabled, |ui| small_button(ui, *icon, label, active, tip)).inner.clicked() {
                                 match tool {
                                     Some(t) => self.set_tool(t.clone()),
@@ -4935,6 +4978,9 @@ impl BimApp {
         if self.picking_pattern_lines() {
             return msg!("Select fill pattern lines then press Enter");
         }
+        if let Some(prompt) = self.selection_prompt() {
+            return prompt;
+        }
         match self.tool {
             Tool::PatternCorner(None) => return msg!("Click on Bottom Left Corner"),
             Tool::PatternCorner(Some(_)) => return msg!("Click on Top Right Corner"),
@@ -5121,6 +5167,10 @@ impl BimApp {
                 if let Some(p) = self.canvas.cursor {
                     let u = self.session.model.units;
                     ui.monospace(format!("x {}  y {}", u.with_unit(p.0), u.with_unit(p.1)));
+                }
+                // What is under the cursor, as Revit's status bar names it.
+                if let Some(words) = self.hover_text() {
+                    ui.label(RichText::new(words).color(pal().text));
                 }
                 if let Some(note) = self.snap_note() {
                     ui.label(RichText::new(note).color(pal().accent_ink));
@@ -5441,6 +5491,7 @@ impl eframe::App for BimApp {
         self.pace(&mut raw.events);
         if self.canvas.hovering() && !ctx.egui_wants_keyboard_input() {
             self.tab_cycle |= raw.events.iter().any(|e| matches!(e, Event::Key { key: Key::Tab, pressed: true, .. }));
+            self.flow.back |= raw.events.iter().any(|e| matches!(e, Event::Key { key: Key::Tab, pressed: true, modifiers, .. } if modifiers.shift));
             raw.events.retain(|e| !matches!(e, Event::Key { key: Key::Tab, .. }));
         }
     }

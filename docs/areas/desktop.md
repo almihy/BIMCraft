@@ -591,3 +591,22 @@ there is nothing to snap to. Show grids only controls display: snapping can rema
 constraints keep priority; grid snapping replaces the free-point fallback and automatic angle guides. Sections and
 elevations snap annotation placement in their local horizontal/height coordinates. Model validation rejects invalid
 spacing, divisions, pens or rotation, and commands roll back the whole edit.
+
+## Moving about, selecting and repeating
+
+`canvas/navigation.rs` is how a hand moves a plan, a section or a sheet (all three go through `Canvas::navigate`). The wheel's
+events are sorted by `hand_of` into a mouse's notches (100 or 120 browser pixels, whole lines, one way at a time) and a
+trackpad's (a gesture's start and end, both ways at once, anything else); the last one heard decides what `smooth_scroll_delta`
+means: a mouse zooms about the cursor (Shift and the wheel pans along), a trackpad pans, and a pinch (`Event::Zoom`, or Ctrl and
+the wheel, which egui turns into one) zooms either way. A mouse notch within 0.3 s of a trackpad's counts as the trackpad's. Where
+the two cannot be told apart (a Mac mouse's small pixel steps) it reads as a trackpad. `Nav::mode` is Pan (the left button drags
+the view, the canvas senses hover only so no tool sees the drag) or Region (Zoom Region: a box, then the view fills with it);
+both end with Esc or a tool. `Canvas::remember_now` keeps the view before a fit, a zoom button, a region, and the first of a run
+of wheel or pan steps; ZP (`previous`) gives the last back.
+
+`selecting.rs` holds `Flow`: `pending` is the Move, Copy, Rotate or Mirror asked for with nothing selected (the app is in Modify
+meanwhile, so picking, boxing and Tab are Modify's; Enter calls `set_tool` with it), `last` is the tool last started (Enter with
+none running, RR and the menu's Repeat start it again), and Tab's chain (`canvas/picking.rs`, over the core's
+`wallchain::wall_chain`). Arrow keys call `move` with a step of about three pixels at the view's zoom (`nudge_step`), ten times
+that with Shift. The status bar names the element under the cursor from `Canvas::hovered`; the cursor shape is asked for in
+`plan_cursor` and kept in `Nav::icon` for tests.
