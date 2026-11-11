@@ -1370,6 +1370,12 @@ other_files(
          locks hold, or it is refused. Returns {id, moved, by}",
         dimension_value,
     ),
+    other(
+        "temporary_dimensions",
+        ui_msg!("Temporary Dimensions"),
+        "{id, level?, left?: centre|left|right, right?: centre|left|right} reads a wall's temporary dimensions, as Revit shows          them when it is selected, and changes nothing: on each side of a straight wall (`left` and `right` as the wall runs, its          exterior face on the left), how far it is, square to it, from the wall to the nearest parallel wall's centre line or          grid that shares some of its run in the plan of `level` (the wall's own by default). `left` and `right` say which line of          the wall each starts at: its centre line (the default), its exterior face (`left`) or its interior face (`right`).          Returns {id, length, dimensions: [{side, from: {id, face}, to: {id, face}, distance, toward: [x, y], at: [x, y],          dimension: {refs, at}}]}; to type a distance as a person does, `move` the wall by `toward` times (distance - wanted), and          to make one permanent, run `dimension` with its `dimension` params",
+        temporary_dimensions,
+    ),
     edit(
         "move",
         ui_msg!("Move"),
@@ -13065,6 +13071,42 @@ fn dimension_value(s: &mut Session, p: &Value) -> R {
         move_by(s, moved, n * by)?;
     }
     Ok(json!({"id": id, "moved": moved, "by": hundredth(by)}))
+}
+
+/// A wall's temporary dimensions ([`crate::tempdims::wall`]), read and never kept.
+fn temporary_dimensions(s: &mut Session, p: &Value) -> R {
+    use crate::tempdims::{self, Witness};
+    let c = "temporary_dimensions";
+    only(c, p, &["id", "level", "left", "right"])?;
+    let m = &s.model;
+    let id = element_id(c, m, p.get("id").unwrap_or(&Value::Null))?;
+    let Some(w) = m.wall(id) else {
+        return Err(bad(c, format!("{} {id} isn't a wall", m.elements.get(id).map_or("nothing", |e| e.category()))));
+    };
+    let level = if absent(p.get("level")) { w.level } else { plan_param(c, m, p, "level")?.0 };
+    let face = |key: &str| -> Result<Face, String> {
+        match string(c, p, key)?.as_deref() {
+            None | Some("centre" | "center") => Ok(Face::Centre),
+            Some("left") => Ok(Face::Left),
+            Some("right") => Ok(Face::Right),
+            Some(f) => Err(bad(c, format!("`{key}` is centre, left or right, not `{f}`"))),
+        }
+    };
+    let witness = Witness { left: face("left")?, right: face("right")? };
+    let named = |r: &Reference| json!({"id": m.elements.id(r.id), "face": r.face});
+    let dimensions: Vec<Value> = tempdims::wall(m, id, level, witness)
+        .into_iter()
+        .map(|d| {
+            let (from, to) = (named(&d.from), named(&d.to));
+            let at = [hundredth(d.start.0), hundredth(d.start.1)];
+            json!({
+                "side": d.side.name(), "from": from, "to": to, "distance": hundredth(d.distance),
+                "toward": [hundredth(d.toward.0), hundredth(d.toward.1)], "at": at,
+                "dimension": {"refs": [from, to], "at": at},
+            })
+        })
+        .collect();
+    Ok(json!({"id": id, "length": hundredth(Axis::of(w).length()), "dimensions": dimensions}))
 }
 
 /// Element `id` moved `by` in plan, as `move` moves it: what keeps a dimension's constraints.

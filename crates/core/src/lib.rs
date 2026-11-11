@@ -149,6 +149,9 @@ pub mod symbol_set;
 pub mod sync;
 #[cfg(test)]
 mod sync_tests;
+pub mod tempdims;
+#[cfg(test)]
+mod tempdims_tests;
 pub mod text;
 pub mod texture;
 mod timber;
