@@ -10,6 +10,10 @@
 //! ([`BimApp::answer_file_request`]). Export asks it where to save, the same way, and what is written waits for the page to
 //! take it ([`BimApp::take_written`]). A model the project links is read from the page too: [`BimApp::files_wanted`] names
 //! the files its links read that are not read yet, and [`BimApp::reload_links`] reads them once the page gave them.
+//!
+//! The page checks the model against its firm's rules and its client's brief: it gives the checks to the Checks palette
+//! ([`BimApp::set_checks`], `checks.rs`), open from the start, and shows a rule the person asks for
+//! ([`BimApp::take_rule_request`]).
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
