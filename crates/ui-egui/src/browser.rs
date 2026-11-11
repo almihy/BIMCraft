@@ -297,7 +297,7 @@ impl BimApp {
             Some(Act::Open3D(id)) => self.open_3d(id),
             Some(Act::Place(family, ty)) => {
                 self.component = Some((family, ty));
-                self.set_tool(Tool::Component);
+                self.start_tool(Tool::Component);
             }
             Some(Act::Duplicate(view, mode)) => self.duplicate_view_of(view, mode),
             Some(Act::Delete(ids)) => {

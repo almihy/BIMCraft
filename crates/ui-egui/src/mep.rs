@@ -169,7 +169,7 @@ impl BimApp {
     fn buttons(&mut self, ui: &mut Ui, tools: &[(Icon, &str, &str, Tool)]) {
         for (icon, label, tip, tool) in tools {
             if big_button(ui, *icon, label, same_tool(&self.tool, tool), tip).clicked() {
-                self.set_tool(tool.clone());
+                self.start_tool(tool.clone());
             }
         }
     }

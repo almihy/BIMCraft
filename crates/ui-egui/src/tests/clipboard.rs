@@ -220,3 +220,26 @@ fn a_wall_and_a_grid_copied_together_are_both_pasted_by_a_click_on_the_same_leve
     click(&mut h, P2(4000.0, -1500.0));
     assert_eq!((walls(&h).len(), grids(&h).len()), (2, 2), "{:?}", h.state().status.text);
 }
+
+#[test]
+fn a_wall_and_a_grid_copied_together_are_both_pasted_by_a_click_on_another_levels_plan() {
+    let mut h = app(&format!("{WALL}\ngrid {{\"start\": [1000, 2000], \"end\": [1000, 6000]}}"));
+    click(&mut h, P2(6000.0, 0.0));
+    click_with(&mut h, P2(1000.0, 5000.0), Modifiers::COMMAND);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::C);
+    h.run();
+    key(&mut h, Key::Escape);
+    let l2 = level(&h, "Level 2");
+    h.state_mut().sheet = Sheet::Plan(l2);
+    h.run();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::V);
+    h.run();
+    click(&mut h, P2(4000.0, -1500.0));
+    let g = h.state().session.model.guid(l2);
+    let on_l2 = ids(&h, "wall").into_iter().filter(|id| h.state().session.model.wall(*id).is_some_and(|w| w.level == g)).count();
+    assert_eq!((on_l2, grids(&h).len()), (1, 2), "the wall came to Level 2 and the grid beside: {:?}", h.state().status.text);
+    // One undo takes both back.
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run();
+    assert_eq!((walls(&h).len(), grids(&h).len()), (1, 1));
+}

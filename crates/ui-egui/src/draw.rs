@@ -657,19 +657,19 @@ impl BimApp {
             );
             let plain = self.drawing.insulation.is_none() && self.drawing.cloud.is_none();
             if crate::big_button(ui, Icon::Line, "Detail Line", drawing && plain, tip).clicked() {
-                self.set_tool(Tool::DetailLine(Vec::new()));
+                self.start_tool(Tool::DetailLine(Vec::new()));
                 (self.drawing.insulation, self.drawing.cloud) = (None, None);
             }
             let tip = msg!("Insulation: batt insulation drawn along each line, its width on the Options Bar");
             if crate::big_button(ui, Icon::Insulation, "Insulation", drawing && self.drawing.insulation.is_some(), tip).clicked() {
-                self.set_tool(Tool::DetailLine(Vec::new()));
+                self.start_tool(Tool::DetailLine(Vec::new()));
                 (self.drawing.insulation, self.drawing.cloud) = (Some("100".into()), None);
             }
             let tip = msg!(
                 "Revision Cloud: a cloud round what changed, of the revision on the Options Bar; a rectangle by default, any shape from the Draw panel"
             );
             if crate::big_button(ui, Icon::RevisionCloud, "Revision Cloud", drawing && self.drawing.cloud.is_some(), tip).clicked() {
-                self.set_tool(Tool::DetailLine(Vec::new()));
+                self.start_tool(Tool::DetailLine(Vec::new()));
                 (self.drawing.insulation, self.drawing.cloud) = (None, Some(("500".into(), String::new())));
                 self.drawing.detail = Shape::Rectangle;
             }
@@ -677,12 +677,12 @@ impl BimApp {
             crate::stacked(ui, |ui| {
                 let tip = msg!("Detail Group: click to place the group on the Options Bar");
                 if crate::stacked_button(ui, Icon::DetailGroup, msg!("Detail Group"), self.tool == Tool::DetailGroup, tip).clicked() {
-                    self.set_tool(Tool::DetailGroup);
+                    self.start_tool(Tool::DetailGroup);
                 }
                 let tip = msg!("Repeating Detail: click its start and end; the group on the Options Bar repeats along it every spacing");
                 let on = matches!(self.tool, Tool::RepeatingDetail(_));
                 if crate::stacked_button(ui, Icon::RepeatingDetail, msg!("Repeating Detail"), on, tip).clicked() {
-                    self.set_tool(Tool::RepeatingDetail(None));
+                    self.start_tool(Tool::RepeatingDetail(None));
                 }
                 let tip = msg!("Create Group (GP): the selected detail lines, filled regions and text made one detail group");
                 if crate::stacked_button(ui, Icon::CreateGroup, "Create Group", false, tip).clicked() {
@@ -1081,7 +1081,7 @@ impl BimApp {
         ] {
             let on = self.tool == Tool::Vertex { delete };
             if crate::big_button(ui, icon, label, on, tip).clicked() {
-                self.set_tool(Tool::Vertex { delete });
+                self.start_tool(Tool::Vertex { delete });
             }
         }
         let spline = |c: Option<Curve>| matches!(c, Some(Curve::Spline { .. } | Curve::Fit { .. }));

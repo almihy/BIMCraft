@@ -1458,7 +1458,9 @@ other_files(
          that level alone (Aligned to Current View). Doors and windows go with their walls, a copied stair brings its \
          railings, bars go on the copy of their host, a roof joined to a roof copied with it is joined to its copy, a \
          door or window copied without its wall goes in the wall it lands on (on the level pasted to), and each copy has \
-         an id and a GUID of its own. What cannot go the way it was is made as near as can be, and `notes` says how (a \
+         an id and a GUID of its own. What stands on no level (a grid, a section, a link) has none to move to: with `levels` or \
+         `view` it is pasted once, `by` from where it was, in the same step (and left out when there is no `by`). \
+         What cannot go the way it was is made as near as can be, and `notes` says how (a \
          wall's top with no level at the height it moves to is unconnected, a wall's attachment to a roof not copied is \
          let go, a room with no walls round it up there is unbounded); `left_out` says what was not pasted and why (an \
          annotation belongs to its view; a stair, a ramp, a CAD import, a site element or a room separation line where no \
@@ -12195,19 +12197,63 @@ fn modify(s: &mut Session, p: &Value) -> R {
     for (id, e) in edited {
         m.elements.insert(id, e);
     }
-    // Where a pinned element is changes only by these: a change of its type or its settings is no move.
-    let placed = LOCATION_FIELDS.iter().any(|k| fields.contains_key(*k));
+    // Where a pinned element is changes only by what says where that kind of element is: a change of its type, its settings
+    // or its height is no move.
+    let placed: Vec<Id> = ids
+        .iter()
+        .copied()
+        .filter(|id| before.elements.get(*id).is_some_and(|e| location_fields(e).iter().any(|k| fields.contains_key(*k))))
+        .collect();
     let said = match (p.get("ids"), ids.as_slice()) {
         (None, [one]) => element_json(&s.model, *one),
         _ => json!({"modified": ids}),
     };
-    Ok(if placed { pin::pinned_note(said, &before, &ids) } else { said })
+    Ok(if placed.is_empty() { said } else { pin::pinned_note(said, &before, &placed) })
 }
 
-/// The fields of an element that say where it is: `modify`ing one of a pinned element moves it, and the reply says it was
-/// pinned.
-const LOCATION_FIELDS: [&str; 11] =
-    ["start", "end", "points", "at", "offset", "arc", "boundary", "centre", "path", "pattern_origin", "origin"];
+/// The fields of an element that say where it is in plan (or, for a level, how high): `modify`ing one of a pinned element's
+/// moves it, and the reply says it was pinned. A vertical offset (a floor's, a run's, a component's) or a link's file `path` is
+/// no place; an element turned (`angle`), re-sketched (`sketch`, `boundary`) or put in another host (`host`) has moved.
+fn location_fields(e: &Element) -> &'static [&'static str] {
+    use Element as E;
+    match e {
+        E::Level(_) => &["elevation"],
+        E::Grid(_) | E::RoomSeparator(_) | E::Section(_) | E::Elevation(_) => &["start", "end"],
+        E::Wall(_) => &["start", "end", "arc"],
+        E::Floor(_) | E::Toposolid(_) => &["boundary", "sketch", "pattern_origin"],
+        E::Ceiling(_) | E::Shaft(_) | E::Mass(_) | E::BuildingPad(_) => &["boundary", "sketch"],
+        E::Roof(_) => &["boundary", "sketch", "extrusion", "courtyards"],
+        E::Door(_) | E::Window(_) => &["host", "offset"],
+        E::Room(_) => &["point"],
+        E::Dimension(_) | E::Dimension3D(_) => &["at", "refs"],
+        E::Tag(_) => &["host", "offset"],
+        E::Viewport(_) => &["at"],
+        E::Column(_) | E::StructuralColumn(_) | E::Footing(_) | E::Component(_) | E::Text(_) | E::PointCloud(_) => &["at", "angle"],
+        E::Link(_) => &["at", "angle"],
+        E::CadImport(_) => &["at", "origin", "angle"],
+        E::DetailGroup(_) => &["at", "angle"],
+        E::Beam(_)
+        | E::StripFooting(_)
+        | E::Pipe(_)
+        | E::Duct(_)
+        | E::Conduit(_)
+        | E::CableTray(_)
+        | E::Wire(_)
+        | E::DownConductor(_)
+        | E::GroundConductor(_)
+        | E::Cable(_)
+        | E::RepeatingDetail(_) => &["start", "end"],
+        E::Rebar(_) => &["path", "host"],
+        E::Railing(_) => &["path", "host"],
+        E::Stair(_) | E::Ramp(_) => &["start", "angle"],
+        E::Spot(_) => &["at", "host"],
+        E::DetailLine(_) => &["curve"],
+        E::FilledRegion(_) => &["sketch", "pattern_origin"],
+        E::Site(_) => &["outline", "layout"],
+        E::PropertyLine(_) => &["points"],
+        E::Sheet(_) | E::Schedule(_) | E::View3D(_) | E::PlanView(_) => &[],
+    }
+}
 
 fn match_properties(s: &mut Session, p: &Value) -> R {
     let c = "match_properties";
@@ -13220,11 +13266,11 @@ fn dimension_value(s: &mut Session, p: &Value) -> R {
     }
     let (n, st) = s.model.stations(&d);
     let segment = count_opt(c, p, "segment", 0)?;
-    let (Some((from, ..)), Some((to, _, r))) = (st.get(segment), st.get(segment + 1)) else {
+    let (Some((from, ..)), Some((to, _, _))) = (st.get(segment), st.get(segment + 1)) else {
         return Err(bad(c, format!("dimension {id} has segments 0 to {}, not {segment}", st.len().saturating_sub(2))));
     };
     let by = value - (to - from);
-    let moved = s.model.elements.id(r.id).ok_or_else(|| bad(c, "what it measures to is gone"))?;
+    let moved = s.model.dimension_moves(id, segment).ok_or_else(|| bad(c, "what it measures to is gone"))?;
     if let Some(l) = d.locked.iter_mut().find(|l| l.segment == segment) {
         l.length = value;
         s.model_mut().elements.insert(id, Element::Dimension(d));
@@ -13234,6 +13280,17 @@ fn dimension_value(s: &mut Session, p: &Value) -> R {
     }
     let said = json!({"id": id, "moved": moved, "by": hundredth(by)});
     Ok(if by.abs() > 1e-9 { pin::pinned_note(said, &before, &[moved]) } else { said })
+}
+
+impl Model {
+    /// The element `dimension_value` moves when a length is typed into segment `segment` of dimension `id`: what the segment ends at
+    /// (its second reference). The window asks it to refuse a typed length that would move a pinned element, as Revit does.
+    pub fn dimension_moves(&self, id: Id, segment: usize) -> Option<Id> {
+        let Some(Element::Dimension(d)) = self.elements.get(id) else { return None };
+        let (_, st) = self.stations(d);
+        let (_, _, r) = st.get(segment + 1)?;
+        self.elements.id(r.id)
+    }
 }
 
 /// A wall's chain ([`crate::wallchain::wall_chain`]), read and never kept.

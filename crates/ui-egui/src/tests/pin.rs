@@ -306,3 +306,28 @@ fn a_pinned_dimensions_grips_refuse_as_they_are_pressed() {
     h.run();
     assert!(Arc::ptr_eq(&before, &h.state().session.model), "a pinned dimension did not move");
 }
+
+#[test]
+fn a_pinned_wall_is_not_moved_by_a_length_typed_into_a_permanent_dimension() {
+    let mut h = app(TWO_WALLS_AND_DIMENSION);
+    let (dim, walls) = (ids(&h, "dimension")[0], ids(&h, "wall"));
+    click(&mut h, P2(2000.0, 2000.0));
+    shortcut(&mut h, "PN");
+    assert!(h.state().session.model.is_pinned(walls[1]), "{:?}", h.state().status);
+    h.state_mut().selection = vec![dim];
+    h.run();
+    let before = Arc::clone(&h.state().session.model);
+    h.state_mut().status = crate::Status::default();
+    h.get_by_label("Dimension 2000").click();
+    h.run();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    h.event(Event::Text("3000".into()));
+    h.run();
+    key(&mut h, Key::Enter);
+    assert!(Arc::ptr_eq(&before, &h.state().session.model), "a pinned wall moved: {:?}", h.state().status);
+    assert!(h.state().status.error && h.state().status.text.contains("pinned"), "{:?}", h.state().status);
+}
+
+const TWO_WALLS_AND_DIMENSION: &str = r#"wall {"points": [[0, 0], [0, 4000]]}
+wall {"points": [[2000, 0], [2000, 4000]]}
+dimension {"refs": [[0, 2000], [2000, 2000]], "at": [1000, -1000]}"#;

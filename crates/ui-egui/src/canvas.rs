@@ -342,6 +342,9 @@ pub struct Canvas {
     lifted: Option<(Pos2, bool)>,
     /// The selection a drag from an element replaced, for a drag that turns out a click.
     prior: Option<Vec<Id>>,
+    /// The chain Tab was highlighting when the primary button went down on one of its walls, with the wall: a drag from that wall
+    /// takes the whole chain, as a click does. The highlight goes as the cursor moves off the wall, so the press keeps it.
+    pressed_chain: Option<(Id, Vec<Id>)>,
     /// What the last point a tool previewed snapped to this frame, if one did.
     pub(crate) found: Cell<Option<Found>>,
     /// The cached alignment service (see [`AlignmentCache`]). A command gives the
@@ -373,6 +376,7 @@ impl Default for Canvas {
             press: None,
             lifted: None,
             prior: None,
+            pressed_chain: None,
             found: Cell::new(None),
             alignment_cache: RefCell::new(None),
             nav: navigation::Nav::default(),
@@ -1300,6 +1304,13 @@ impl BimApp {
         }
     }
 
+    /// A drag has begun on a set of elements (a chain of walls): they are selected, and the selection they replace is kept
+    /// for [`BimApp::finish_drag`].
+    pub(crate) fn grab_all(&mut self, ids: Vec<Id>) {
+        self.canvas.prior = Some(std::mem::replace(&mut self.selection, ids));
+        self.raise_context();
+    }
+
     /// A drag has stopped: whether it is to be finished (moved, boxed). It isn't if the hand was
     /// clicking on the move, and then the selection the drag's start replaced comes back, for the
     /// click to pick from.
@@ -1708,6 +1719,9 @@ impl BimApp {
         self.line_grip_drag(ui, &response, rect, &view, level);
         let dragged = self.shape_grip_drag(ui, &response, rect, &view, level) || dragged;
         let dragged = self.site_grip_drag(ui, &response, rect, &view, level) || dragged;
+        if ui.input(|i| i.pointer.primary_pressed()) {
+            self.canvas.pressed_chain = hovered.filter(|id| self.flow.preview.contains(id)).map(|id| (id, self.click_set(Some(id))));
+        }
         // A drag from an element moves the selection; from empty floor, it draws a selection box.
         if response.drag_started_by(PointerButton::Primary)
             && self.tool == Tool::Modify
@@ -1724,7 +1738,11 @@ impl BimApp {
             // With a tool waiting for its elements a drag only boxes them.
             self.canvas.drag = Some(match d.pick(o, PICK).filter(|_| self.flow.pending.is_none()) {
                 Some(id) => {
-                    self.grab(id);
+                    // From a wall of the chain Tab highlighted, the whole chain is what is dragged, as Revit's.
+                    match self.canvas.pressed_chain.take().filter(|(wall, _)| *wall == id) {
+                        Some((_, chain)) => self.grab_all(chain),
+                        None => self.grab(id),
+                    }
                     Drag::Move(self.drag_base(&model, level, &view, o))
                 }
                 None => Drag::Box(o),
@@ -1735,6 +1753,7 @@ impl BimApp {
             && let (Some(drag), Some(q)) = (self.canvas.drag.take(), at)
             && self.finish_drag()
         {
+            self.flow.preview.clear();
             match drag {
                 Drag::Move(from) => self.drop_selection(&model, level, &view, from, q, click_modifiers(ui)),
                 Drag::Box(from) => self.pick_up(d.in_box(from, q, q.0 < from.0), click_modifiers(ui)),
@@ -3543,7 +3562,11 @@ impl BimApp {
                 let Some(Some(typed)) = self.number_field(ui, at, (id, i), &label, bimcraft_i18n::msg!("Dimension {}")) else { continue };
                 match m.units.parse(&typed) {
                     Some(value) => {
-                        self.run("dimension_value", json!({"id": id, "segment": i, "value": value}));
+                        // What the segment ends at moves, so a pinned one refuses, as in Revit.
+                        let moved = m.dimension_moves(id, i).into_iter().collect::<Vec<_>>();
+                        if !self.refuse_pinned_ids(&moved) {
+                            self.run("dimension_value", json!({"id": id, "segment": i, "value": value}));
+                        }
                     }
                     None => self.status = Status { text: tf("`{}` is not a length", &[typed.trim()]), error: true },
                 }

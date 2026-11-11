@@ -616,3 +616,29 @@ fn a_door_copied_alone_and_pasted_to_a_level_with_a_wall_under_it_goes_in_that_w
     assert_eq!(copy.len(), 1, "{r}");
     assert_eq!(opening(&s, copy[0]).host, s.model.guid(new_wall));
 }
+
+#[test]
+fn a_mixed_paste_to_another_level_puts_the_grid_down_beside_in_the_same_step() {
+    let (mut s, levels, walls, _) = building();
+    let grid = run(&mut s, "grid", json!({"start": [-2000, -1000], "end": [-2000, 7000]}))["id"].as_u64().unwrap();
+    run(&mut s, "copy_to_clipboard", json!({"ids": [walls[0], grid]}));
+    let (grids, steps) = (count(&s, "grid"), s.history().len());
+    let r = run(&mut s, "paste", json!({"levels": [levels[1]], "by": [0, 10000]}));
+    // The wall comes to Level 2; the grid, which stands on no level, is put 10000 north beside its original, once.
+    assert_eq!(made_of(&s, &r, "wall").len(), 1, "{r}");
+    assert_eq!(count(&s, "grid"), grids + 1, "the grid was dropped: {r}");
+    let copy = made_of(&s, &r, "grid")[0];
+    let Some(Element::Grid(g)) = s.model.elements.get(copy) else { panic!("a grid") };
+    assert_eq!((g.start.0, g.start.1, g.end.1), (-2000.0, 9000.0, 17000.0));
+    assert!(!r["left_out"].to_string().contains("no level"), "{r}");
+    assert_eq!(s.history().len(), steps + 1, "one undo step");
+    // Two levels: still one grid.
+    let r = run(&mut s, "paste", json!({"levels": [levels[1], levels[2]], "by": [0, 20000]}));
+    assert_eq!(made_of(&s, &r, "grid").len(), 1, "{r}");
+    // A grid alone goes too; with no `by` it would lie on its original, so it is left out and the reply says so.
+    run(&mut s, "copy_to_clipboard", json!({"ids": [grid]}));
+    let r = run(&mut s, "paste", json!({"levels": [levels[1]], "by": [5000, 0]}));
+    assert_eq!(made_of(&s, &r, "grid").len(), 1, "{r}");
+    let e = s.execute("paste", &json!({"levels": [levels[1]]})).unwrap_err();
+    assert!(e.contains("no level"), "{e}");
+}

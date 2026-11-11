@@ -153,7 +153,8 @@ fn with_hosted(m: &Model, ids: &[Id]) -> Vec<Id> {
 }
 
 /// What a paste can make of `ids`, which of them it does, and for each it leaves out why. `to_levels`: the paste is aligned to
-/// levels, which takes only what stands on a level.
+/// levels, which leaves out what belongs to a view (the annotation); what stands on no level (a grid, a section) is pasted
+/// once, beside, by `by`.
 fn sort_out(m: &Model, ids: &[Id], to_levels: bool) -> (Vec<Id>, Vec<String>) {
     let all = with_hosted(m, ids);
     let guids: BTreeSet<Guid> = all.iter().map(|id| m.guid(*id)).collect();
@@ -169,7 +170,6 @@ fn sort_out(m: &Model, ids: &[Id], to_levels: bool) -> (Vec<Id>, Vec<String>) {
             Element::Rebar(r) if r.host.is_some_and(|h| !guids.contains(&h)) => {
                 Some("it goes only with the element it reinforces; copy that too".to_string())
             }
-            _ if to_levels && m.level_of(e).is_none() => Some("it stands on no level".to_string()),
             _ => None,
         };
         match why {
@@ -242,7 +242,15 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> R {
     let rest: Vec<Id> = ids.iter().copied().filter(|id| !loose.contains(id)).collect();
     if to_levels {
         let targets = target_levels(c, &s.model, p)?;
-        return paste_to_levels(c, s, &rest, &loose, &targets, by, left_out);
+        // What stands on no level (grids, sections, links) has none to be moved to: it is pasted once, by `by`, as Revit's
+        // paste to another level also puts down the datum elements it was given.
+        let (mut levelless, on_levels): (Vec<Id>, Vec<Id>) =
+            rest.iter().partition(|id| s.model.elements.get(**id).is_some_and(|e| s.model.level_of(e).is_none()));
+        // With no `by` a copy would lie on its original: it is left out, and the reply says so.
+        if !by_given {
+            left_out.extend(levelless.drain(..).map(|id| format!("{}: it stands on no level; give `by` to paste it beside", named(&s.model, id))));
+        }
+        return paste_to_levels(c, s, &on_levels, &levelless, &loose, &targets, by, left_out);
     }
     let mo = Motion { map: &|q| micron(q + by), slide: Some(by), mirror: false };
     let mut made = if rest.is_empty() { Vec::new() } else { duplicate_mapped(c, s, &rest, &mo)?.0 };
@@ -323,7 +331,17 @@ fn target_levels(c: &str, m: &Model, p: &Value) -> Result<Vec<Guid>, String> {
 
 /// Paste Aligned to Selected Levels: copies of `ids` for each of `targets`, at the same place in plan, and `loose` (doors and
 /// windows without their wall) in the walls they land on there.
-fn paste_to_levels(c: &str, s: &mut Session, ids: &[Id], loose: &[Id], targets: &[Guid], by: P2, mut left_out: Vec<String>) -> R {
+#[allow(clippy::too_many_arguments)]
+fn paste_to_levels(
+    c: &str,
+    s: &mut Session,
+    ids: &[Id],
+    levelless: &[Id],
+    loose: &[Id],
+    targets: &[Guid],
+    by: P2,
+    mut left_out: Vec<String>,
+) -> R {
     let table: Vec<(Guid, f64)> = s.model.levels().into_iter().map(|(id, l)| (s.model.guid(id), l.elevation)).collect();
     let elevation = |g: Guid| table.iter().find(|(l, _)| *l == g).map(|(_, z)| *z);
     // The level the copied elements stand on, or the lowest of them where they stand on several: what the paste is aligned from.
@@ -333,11 +351,14 @@ fn paste_to_levels(c: &str, s: &mut Session, ids: &[Id], loose: &[Id], targets: 
         .filter_map(|id| s.model.elements.get(*id).and_then(|e| s.model.level_of(e)))
         .filter_map(|g| elevation(g).map(|z| (g, z)))
         .min_by(|a, b| a.1.total_cmp(&b.1))
-        .map(|(g, _)| g)
-        .ok_or_else(|| bad(c, "none of what was copied stands on a level"))?;
-    let from_z = elevation(from).unwrap_or_default();
+        .map(|(g, _)| g);
+    if from.is_none() && levelless.is_empty() {
+        return Err(bad(c, "none of what was copied stands on a level"));
+    }
+    let from_z = from.and_then(elevation).unwrap_or_default();
     let (mut all, mut pasted, mut notes) = (Vec::new(), Vec::new(), Vec::new());
     for &target in targets {
+        let Some(from) = from else { break };
         let Some(target_z) = elevation(target) else {
             notes.push(format!("level {} is not in the project, so nothing was pasted to it", s.model.shown(target)));
             continue;
@@ -373,6 +394,13 @@ fn paste_to_levels(c: &str, s: &mut Session, ids: &[Id], loose: &[Id], targets: 
         say_once(&mut left_out, skipped);
         let name = s.model.elements.id(target).and_then(|l| s.model.level(l)).map(|l| l.name.clone());
         pasted.push(json!({"level": s.model.elements.id(target), "name": name, "ids": made}));
+        all.extend(made);
+    }
+    // The datum elements, once, beside: in the same command, so one undo takes them back with the rest.
+    if !levelless.is_empty() {
+        let sideways = Motion { map: &|q| micron(q + by), slide: Some(by), mirror: false };
+        let (made, _) = duplicate_mapped(c, s, levelless, &sideways)?;
+        pasted.push(json!({"level": null, "name": null, "ids": made}));
         all.extend(made);
     }
     if all.is_empty() {

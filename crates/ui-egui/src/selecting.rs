@@ -36,6 +36,8 @@ pub(crate) struct Flow {
     pub(crate) pending: Option<Tool>,
     /// The tool last started, which Enter and RR start again.
     pub(crate) last: Option<Tool>,
+    /// The tool being started is one the person asked for (see `start_tool`): the only kind Repeat remembers.
+    pub(crate) by_user: bool,
     /// Shift was held for the Tab that came this frame.
     pub(crate) back: bool,
     /// What Tab is highlighting under the cursor: the walls joined to the one it is on. Nothing is selected by it, as in
@@ -86,7 +88,7 @@ pub(crate) fn tool_name(tool: &Tool) -> &'static str {
 /// also starts tools of its own, to take a pick for a dialog (Fill Patterns' tile corners), and those have no command to repeat:
 /// Enter would start them without their dialog.
 fn repeatable(tool: &Tool) -> bool {
-    !matches!(tool, Tool::Modify | Tool::PatternCorner(_))
+    !matches!(tool, Tool::Modify | Tool::PatternCorner(_) | Tool::SketchLine(_) | Tool::SketchPick | Tool::Paste)
 }
 
 /// Whether `e` is a view or a mark of one (a section or elevation line, a sheet, a viewport, a schedule, a camera, a plan view):
@@ -170,9 +172,10 @@ impl BimApp {
         }
     }
 
-    /// Remember `tool` as the last one started, for Enter, RR and the menu to repeat, when it is one the user started.
+    /// Remember `tool` as the last one started, for Enter, RR and the menu to repeat, when it is one the user started: from the
+    /// ribbon, a shortcut or a menu (`start_tool`). What the app starts for itself is nobody's last command.
     pub(crate) fn remember_tool(&mut self, tool: &Tool) {
-        if repeatable(tool) {
+        if self.flow.by_user && repeatable(tool) {
             self.flow.last = Some(tool.clone());
         }
     }

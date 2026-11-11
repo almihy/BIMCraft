@@ -267,3 +267,35 @@ fn a_baseline_dimensions_numbers_have_places_to_drag_them_from() {
     // A number moved by its spot is a number moved: the command takes the segment.
     assert!(s.execute("dimension_text_move", &json!({"id": d, "segment": 1, "along": 100})).is_ok());
 }
+
+#[test]
+fn a_dimensions_typed_length_names_the_element_it_would_move_so_the_window_can_refuse() {
+    let mut s = Session::new();
+    let near = run(&mut s, "wall", json!({"points": [[0, 0], [0, 3000]]}))["ids"][0].as_u64().unwrap();
+    let far = run(&mut s, "wall", json!({"points": [[4000, 0], [4000, 3000]]}))["ids"][0].as_u64().unwrap();
+    let d = run(&mut s, "dimension", json!({"refs": [[0, 1000], [4000, 1000]], "at": [0, -1000]}))["id"].as_u64().unwrap();
+    assert_eq!(s.model.dimension_moves(d, 0), Some(far));
+    assert_ne!(s.model.dimension_moves(d, 0), Some(near));
+    assert_eq!(s.model.dimension_moves(d, 1), None, "no such segment");
+    assert_eq!(s.model.dimension_moves(near, 0), None, "not a dimension");
+}
+
+#[test]
+fn modify_says_a_pinned_element_was_moved_by_what_places_that_kind_and_not_by_its_height() {
+    let mut s = Session::new();
+    let noted = |r: &Value| r["note"].as_str().is_some_and(|n| n.contains("pinned"));
+    // A column turned has moved; its height has not.
+    let col = run(&mut s, "column", json!({"at": [1000, 1000]}))["id"].as_u64().unwrap();
+    run(&mut s, "pin", json!({"ids": [col]}));
+    let r = run(&mut s, "modify", json!({"id": col, "angle": 30}));
+    assert!(noted(&r), "a turned column: {r}");
+    let r = run(&mut s, "modify", json!({"id": col, "height": 2500}));
+    assert!(!noted(&r), "a column's height: {r}");
+    // A floor re-sketched has moved; its vertical offset has not.
+    let floor = run(&mut s, "floor", json!({"boundary": [[0, 5000], [4000, 5000], [4000, 9000], [0, 9000]]}))["id"].as_u64().unwrap();
+    run(&mut s, "pin", json!({"ids": [floor]}));
+    let r = run(&mut s, "modify", json!({"id": floor, "offset": 150}));
+    assert!(!noted(&r), "a floor's height offset: {r}");
+    let r = run(&mut s, "modify", json!({"id": floor, "boundary": [[0, 5000], [5000, 5000], [5000, 9000], [0, 9000]]}));
+    assert!(noted(&r), "a re-sketched floor: {r}");
+}
