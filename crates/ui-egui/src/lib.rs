@@ -28,6 +28,7 @@ mod favorites;
 mod fillpatterns;
 mod filter;
 mod find;
+mod flip;
 mod footer;
 mod gpu;
 pub use gpu::limits_for;
@@ -858,6 +859,10 @@ pub struct BimApp {
     /// The family and type the Component tool places, as picked, and how far it's turned, degrees.
     component: Option<(String, String)>,
     component_angle: f64,
+    /// What Space has flipped of the door or window about to be placed, `(hand, facing)`: facing is from the cursor's side of the wall.
+    place_flip: (bool, bool),
+    /// Whether Space has put the exterior side of the walls being drawn on the right of the way they are drawn.
+    wall_flipped: bool,
     /// The Properties palette's folded groups.
     collapsed: BTreeSet<&'static str>,
     /// Where views show, last frame.
@@ -1491,6 +1496,8 @@ impl BimApp {
             new_schedule: None,
             component: None,
             component_angle: 0.0,
+            place_flip: (false, false),
+            wall_flipped: false,
             collapsed: BTreeSet::new(),
             view_rect: Rect::ZERO,
             pane: Rect::ZERO,
@@ -2080,9 +2087,11 @@ impl BimApp {
         if pressed(Modifiers::NONE, Key::Delete) {
             self.delete();
         }
-        if self.tool == Tool::Modify && pressed(Modifiers::NONE, Key::Space) {
-            self.flip();
+        // Space flips: what is selected, the door or window about to be placed, the wall about to be drawn.
+        if matches!(self.tool, Tool::Modify | Tool::Door | Tool::Window | Tool::Wall(_)) && pressed(Modifiers::NONE, Key::Space) {
+            self.flip_key();
         }
+        self.reset_flips();
         // Space steps the Dimension tool's lay: Auto, Aligned, Horizontal, Vertical.
         if let Tool::Dimension(mode, _) = &mut self.tool
             && pressed(Modifiers::NONE, Key::Space)
@@ -2745,11 +2754,19 @@ impl BimApp {
         }
     }
 
-    /// The selected walls turned round about their location lines: Revit's flip arrows, or Space.
-    fn flip(&mut self) {
+    /// The selected walls turned round about their location lines, and the selected doors and windows a step through their
+    /// four ways: Revit's flip arrows, or Space.
+    pub(crate) fn flip(&mut self) {
         let walls = self.selected_walls();
-        if !walls.is_empty() {
-            self.run("flip", json!({"ids": walls}));
+        match (walls.is_empty(), self.opening_step()) {
+            (true, None) => {}
+            (false, None) => {
+                self.run("flip", json!({"ids": walls}));
+            }
+            (_, Some((ids, hand, facing))) => {
+                let ids: Vec<Id> = walls.into_iter().chain(ids).collect();
+                self.run("flip", json!({"ids": ids, "hand": hand, "facing": facing}));
+            }
         }
     }
 

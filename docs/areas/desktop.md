@@ -272,7 +272,13 @@ type without layers as one band. A wall's run from its exterior face to its inte
 dashed where it runs (`walls::depth`, the core's own rule) and named under it; a click on the picture sets the line nearest it, through
 `modify`. A floor's, a roof's or a ceiling's run from the top down. Under it, for doors, which way they open (`opening_picker`): four plans of a door in
 its wall (as placed, hand flipped, facing flipped, both), the one the selected doors share lit, a click setting their `flip_hand` and
-`flip_facing` through `modify`. For rooms, their colour on plans (`room_colour`): swatches, No fill first, and any
+`flip_facing` through `modify`. On the plan (`flip.rs`) a door or window selected alone has Revit's flip arrows: across the wall beside
+it, its facing, and along the wall on the side it doesn't open to, its hand; a wall selected alone has one across it on its exterior side.
+A click is the `flip` command (`hand`, `facing`); the arrows are egui widgets labelled Flip facing, Flip hand and Flip exterior side. Space
+in Modify flips the selected walls and steps a selected door or window through its four ways (`flip::step`: facing, hand, facing, hand);
+with the Door or Window tool it takes that step before the opening is put down (`place_flip`, reset after each); with the Wall tool it
+draws the walls the other way round (`wall_flipped`, in `wall_params`: their exterior is to the left of the way they run) and the preview
+marks the exterior side. A door or window being placed is sent the cursor as `toward`, so it opens to the cursor's side of the wall. For rooms, their colour on plans (`room_colour`): swatches, No fill first, and any
 other colour; a pick sets the room's `colour` (`Room::colour`, red, green and blue, none for no fill), which plans draw as a fill of
 the room's region under its name (`render.rs`) and a file keeps (an optional field an older version leaves out, so no format step).
 For floors, their slope (`floor_slope`): a short section of the slab at its true angle from its slope arrow's tail, a dashed line
