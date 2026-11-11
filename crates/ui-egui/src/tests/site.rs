@@ -70,12 +70,12 @@ fn building_pad_and_property_line_sketch_their_outlines() {
     assert_eq!(bp.boundary.len(), 4);
 
     site_tool(&mut h, "Property Line");
-    sketch_loop(&mut h, &[P2(-1000.0, -1000.0), P2(9000.0, -1000.0), P2(4000.0, 7000.0)]);
+    sketch_loop(&mut h, &[P2(-1000.0, -1000.0), P2(9000.0, -1000.0), P2(4000.0, 6500.0)]);
     press(&mut h, "Finish Edit Mode");
     let [pl] = ids(&h, "propertyline")[..] else { panic!("one property line: {:?}", h.state().status) };
     let Some(Element::PropertyLine(line)) = h.state().session.model.elements.get(pl) else { panic!() };
     assert_eq!(line.points.len(), 3);
-    assert!((line.area() - 4.0e7).abs() < 1.0, "{}", line.area());
+    assert!((line.area() - 3.75e7).abs() < 1.0, "{}", line.area());
     // Properties: its area and perimeter.
     assert!(h.query_all_by_label("Perimeter").next().is_some());
 }
@@ -122,7 +122,7 @@ fn road_sketches_its_path_with_the_options_bars_use_width_and_lanes() {
     type_into(&mut h, "Lanes:", "2");
     click(&mut h, P2(-4000.0, 3000.0));
     click(&mut h, P2(4000.0, 3000.0));
-    click(&mut h, P2(8000.0, 7000.0));
+    click(&mut h, P2(8000.0, 6500.0));
     // While it is drawn, the road its lines make is drawn under them.
     assert!(h.state().site_sketch_ghost(&h.state().session.model).is_some(), "a preview of the road");
     press(&mut h, "Finish Edit Mode");

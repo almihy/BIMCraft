@@ -2015,7 +2015,7 @@ fn the_elevation_tool_looks_at_the_building_from_where_it_is_clicked() {
     let mut h = app(BOX);
     press(&mut h, "View");
     press(&mut h, "Elevation");
-    click(&mut h, P2(4000.0, 7000.0));
+    click(&mut h, P2(4000.0, 6500.0));
     let made = ids(&h, "elevation");
     assert_eq!((field(&h, made[0], "name"), field(&h, made[0], "looking")), (json!("North"), json!([0.0, -1.0])));
     assert!(h.query_by_label("Elevations (Building Elevation)").is_some());
