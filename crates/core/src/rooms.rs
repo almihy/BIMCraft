@@ -34,6 +34,9 @@ pub struct Rooms<'a> {
     placed: RefCell<HashMap<Guid, Placed<'a>>>,
     /// Each room's boundary at the walls' centre lines, once found: what [`Rooms::room_at`] asks of every room of a level.
     centre: RefCell<HashMap<Id, Option<Region>>>,
+    /// Where the lines are looked for, when only those near one place are: the box `[x0, y0, x1, y1]` the loop must lie in,
+    /// and the walls, separation lines and column faces that meet it grown by the second.
+    window: Option<([f64; 4], f64)>,
 }
 
 impl<'a> Rooms<'a> {
@@ -44,7 +47,38 @@ impl<'a> Rooms<'a> {
             plans: RefCell::new(HashMap::new()),
             placed: RefCell::new(HashMap::new()),
             centre: RefCell::new(HashMap::new()),
+            window: None,
         }
+    }
+
+    /// Rooms found among the lines near `window` alone (those that meet it grown by `pad`), for [`Rooms::loop_near`].
+    pub fn within(m: &'a Model, window: [f64; 4], pad: f64) -> Self {
+        Rooms { window: Some((window, pad)), ..Rooms::new(m) }
+    }
+
+    /// Whether a box meets the window grown by its pad (any box does, with no window).
+    fn near(&self, b: [f64; 4]) -> bool {
+        self.window.is_none_or(|(w, pad)| b[0] <= w[2] + pad && b[2] >= w[0] - pad && b[1] <= w[3] + pad && b[3] >= w[1] - pad)
+    }
+
+    /// Whether wall `id` may touch the window.
+    fn wall_near(&self, id: Id) -> bool {
+        self.window.is_none() || self.m.wall(id).and_then(|w| walls::reach(self.m, w)).is_none_or(|b| self.near(b))
+    }
+
+    /// Room `r`'s loop, as [`Rooms::loop_at`] finds it, among the lines near the window alone, and whether its point is in a
+    /// room-bounding wall's body. `None` when that cannot be said: there is no window, the room is frozen, or no loop closes
+    /// round its point within the window. Where the loop lies wholly in the window nothing outside it could change it.
+    pub fn loop_near(&self, r: &Room, at: RoomArea) -> Option<(Region, bool)> {
+        let (window, _) = self.window?;
+        if r.kept.is_some() {
+            return None;
+        }
+        let plan = self.plan(r.level, at);
+        let g = geom::region_in(&plan.faces, r.point, TOL)?;
+        let inside =
+            g.outer.iter().all(|p| p.0 >= window[0] - TOL && p.0 <= window[2] + TOL && p.1 >= window[1] - TOL && p.1 <= window[3] + TOL);
+        inside.then(|| (g, plan.walls.iter().any(|(_, ring)| geom::contains(ring, r.point))))
     }
 
     fn plan(&self, level: Guid, at: RoomArea) -> Rc<Plan> {
@@ -59,23 +93,33 @@ impl<'a> Rooms<'a> {
             None => Some(self.index.get_or_init(|| Index::new(m))),
         };
         let walls: Vec<(Id, Vec<P2>)> = match at {
-            RoomArea::Finish => m.bounding_walls(&level, true).map(|id| (id, walls::outline_in(m, id, index))).collect(),
+            RoomArea::Finish => {
+                m.bounding_walls(&level, true).filter(|id| self.wall_near(*id)).map(|id| (id, walls::outline_in(m, id, index))).collect()
+            }
             RoomArea::Centre => Vec::new(),
         };
         let lines = match at {
             RoomArea::Finish => {
                 let mut lines: Vec<(P2, P2)> = walls.iter().flat_map(|(_, ring)| geom::ring_edges(ring)).collect();
-                lines.extend(m.separators(level));
+                lines.extend(
+                    m.separators(level).into_iter().filter(|(a, b)| self.near([a.0.min(b.0), a.1.min(b.1), a.0.max(b.0), a.1.max(b.1)])),
+                );
                 lines
             }
             // (Room-bounding columns' faces are among them.)
+            RoomArea::Centre if self.window.is_some() => m.room_lines_near(level, index, &|id| self.wall_near(id), &|b| self.near(b)),
             RoomArea::Centre => m.room_lines_in(level, at, index),
         };
         let lines = match at {
             RoomArea::Finish => {
                 let mut lines = lines;
                 for o in m.bounding_columns(level) {
-                    lines.extend(geom::ring_edges(&o));
+                    let b = o.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, p| {
+                        [b[0].min(p.0), b[1].min(p.1), b[2].max(p.0), b[3].max(p.1)]
+                    });
+                    if self.near(b) {
+                        lines.extend(geom::ring_edges(&o));
+                    }
                 }
                 lines
             }

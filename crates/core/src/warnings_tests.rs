@@ -346,35 +346,229 @@ fn the_warnings_brought_up_to_date_are_those_of_the_whole_model_after_every_edit
     assert!(matches!(s.model.elements.get(a), Some(Element::Door(_))));
 }
 
-/// What the warnings cost on the reference tower, next to the check an edit pays anyway: `cargo test -p bimcraft-core warnings_cost
-/// -- --ignored --nocapture`.
+/// How many whole reviews and how many reviews brought up to date `f` made, and how many rooms it worked out.
+fn counts(f: impl FnOnce()) -> (usize, usize, usize) {
+    let was = crate::warnings::REVIEWS.with(std::cell::Cell::get);
+    f();
+    let now = crate::warnings::REVIEWS.with(std::cell::Cell::get);
+    (now.0 - was.0, now.1 - was.1, now.2 - was.2)
+}
+
+/// [`counts`] without the rooms.
+fn reviews(f: impl FnOnce()) -> (usize, usize) {
+    let (whole, since, _) = counts(f);
+    (whole, since)
+}
+
+/// A wall with two doors that overlap and a room, so that there are warnings to keep.
+fn awkward_house() -> (Session, Id) {
+    let mut s = Session::new();
+    let w = wall(&mut s, [0.0, 0.0], [6000.0, 0.0]);
+    run(&mut s, "door", json!({"wall": w, "offset": 1000}));
+    run(&mut s, "door", json!({"wall": w, "offset": 1300}));
+    (s, w)
+}
+
+#[test]
+fn after_an_undo_the_next_command_does_not_review_the_whole_model() {
+    let (mut s, w) = awkward_house();
+    run(&mut s, "door", json!({"wall": w, "offset": 4000}));
+    run(&mut s, "undo", json!({}));
+    let (whole, _) = reviews(|| {
+        run(&mut s, "move", json!({"ids": [w], "by": [0, 10]}));
+    });
+    assert_eq!(whole, 0, "the kept warnings are of the model before the undo, a step from this one");
+    assert_eq!(*s.warnings(), s.model.review_whole());
+    // And an undo and a redo, then the next command.
+    run(&mut s, "undo", json!({}));
+    run(&mut s, "redo", json!({}));
+    let (whole, _) = reviews(|| {
+        run(&mut s, "door", json!({"wall": w, "offset": 5000}));
+    });
+    assert_eq!(whole, 0);
+    assert_eq!(*s.warnings(), s.model.review_whole());
+}
+
+#[test]
+fn after_a_change_another_copy_made_the_next_command_does_not_review_the_whole_model() {
+    let (mut a, w) = awkward_house();
+    let mut b = Session::new();
+    b.reset((*a.model).clone(), None);
+    b.warnings();
+    let before = a.model.clone();
+    let door = id_of(&run(&mut a, "door", json!({"wall": w, "offset": 4500})));
+    let changes = crate::sync::changes(&before, &a.model).unwrap();
+    // `b` had its own command last, so its kept warnings are of the model it had.
+    run(&mut b, "move", json!({"ids": [w], "by": [0, 10]}));
+    let before_move = b.model.clone();
+    assert!(b.merge(&changes, &std::collections::BTreeSet::new()).unwrap().refused.is_empty());
+    assert!(b.model.elements.get(door).is_some(), "the door came in");
+    let (whole, _) = reviews(|| {
+        run(&mut b, "move", json!({"ids": [w], "by": [0, 10]}));
+    });
+    assert_eq!(whole, 0, "a merge leaves the kept warnings on the model before it");
+    assert_eq!(*b.warnings(), b.model.review_whole());
+    let _ = before_move;
+}
+
+#[test]
+fn after_a_transaction_taken_back_the_next_command_does_not_review_the_whole_model() {
+    let (mut s, w) = awkward_house();
+    let r = s.transaction("Try", |s| {
+        s.execute("door", &json!({"wall": w, "offset": 4000}))?;
+        Err::<(), String>("no".into())
+    });
+    assert!(r.is_err());
+    let (whole, _) = reviews(|| {
+        run(&mut s, "move", json!({"ids": [w], "by": [0, 10]}));
+    });
+    assert_eq!(whole, 0);
+}
+
+#[test]
+fn a_script_works_out_its_warnings_once_and_says_them_in_its_last_result() {
+    let mut s = Session::new();
+    let w = wall(&mut s, [0.0, 0.0], [6000.0, 0.0]);
+    s.warnings();
+    let script = |a: u32, b: u32| {
+        format!(
+            "door {{\"wall\": {w}, \"offset\": {a}}}
+door {{\"wall\": {w}, \"offset\": {b}}}
+wall {{\"points\": [[0, 5000], [6000, 5000]]}}
+             door {{\"wall\": {w}, \"offset\": 4500}}"
+        )
+    };
+    let text = script(1000, 1300);
+    let mut out = Vec::new();
+    let (whole, since) = reviews(|| out = s.script(&text).unwrap());
+    assert_eq!((whole, since), (0, 1), "not one for each of the four lines");
+    assert_eq!(out.len(), 4);
+    assert!(out[..3].iter().all(|r| r.get("new_warnings").is_none()), "{out:?}");
+    assert_eq!(out[3]["new_warnings"][0]["rule"], "openings_overlap", "{}", out[3]);
+    assert_eq!(*s.warnings(), s.model.review_whole());
+    // All or nothing, and a dry run, the same.
+    let (whole, since) = reviews(|| out = s.script_atomic(&script(2500, 3000)).unwrap());
+    assert_eq!((whole, since), (0, 1));
+    assert_eq!(out.len(), 4);
+}
+
+#[test]
+fn a_dry_run_says_its_new_warnings_as_a_command_does_and_works_them_out_once() {
+    let (mut s, w) = awkward_house();
+    s.warnings();
+    let text = format!(
+        "door {{\"wall\": {w}, \"offset\": 1100}}
+door {{\"wall\": {w}, \"offset\": 5000}}
+move {{\"ids\": [{w}], \"by\": [0, 5]}}"
+    );
+    let mut r = Value::Null;
+    let (whole, since) = reviews(|| r = s.script_dry_run(&text).unwrap());
+    assert_eq!(whole, 0, "{r}");
+    assert!(since <= 4, "the script's once, and the answer's: {since}");
+    let new = r["new_warnings"].as_array().unwrap();
+    assert!(!new.is_empty() && new.iter().all(|w| w["rule"].is_string() && w["guids"].is_array()), "{r}");
+    assert!(r.get("warnings").is_none(), "{r}");
+}
+
+/// The small tower of two storeys in a session: rooms on each, in a layout of every kind of room.
+fn small_tower() -> Session {
+    let mut s = Session::new();
+    run(&mut s, "tower", json!({"storeys": 2, "plate": "small"}));
+    s
+}
+
+#[test]
+fn a_change_works_out_only_the_rooms_it_reached() {
+    let mut s = small_tower();
+    let all = s.model.elements.values().filter(|e| matches!(e, Element::Room(_))).count();
+    assert!(all > 20, "{all} rooms");
+    s.warnings();
+    let column = s.model.elements.iter().find(|(_, e)| matches!(e, Element::Column(_) | Element::StructuralColumn(_))).map(|(id, _)| *id);
+    let wall = s.model.elements.iter().find(|(_, e)| matches!(e, Element::Wall(_))).map(|(id, _)| *id).unwrap();
+    for id in column.into_iter().chain([wall]) {
+        let (whole, _, judged) = counts(|| {
+            run(&mut s, "move", json!({"ids": [id], "by": [20, 0]}));
+        });
+        assert_eq!(whole, 0);
+        assert!(judged < all / 3, "moving {id} worked out {judged} of {all} rooms");
+        // (Each command held the rooms' reach to the whole model's, as every command does in a test.)
+    }
+}
+
+#[test]
+fn what_the_rooms_reach_stays_true_through_every_kind_of_edit() {
+    let mut s = small_tower();
+    s.warnings();
+    let pick =
+        |s: &Session, f: &dyn Fn(&Element) -> bool| s.model.elements.iter().filter(|(_, e)| f(e)).map(|(id, _)| *id).collect::<Vec<Id>>();
+    let walls = pick(&s, &|e| matches!(e, Element::Wall(_)));
+    let rooms = pick(&s, &|e| matches!(e, Element::Room(_)));
+    let at = s.model.elements.values().find_map(|e| if let Element::Room(r) = e { Some(r.point) } else { None }).unwrap();
+    // Each edit's warnings are held to the whole model's by the session.
+    for i in [0, walls.len() / 3, walls.len() / 2, walls.len() - 1] {
+        run(&mut s, "move", json!({"ids": [walls[i]], "by": [0, 700]}));
+        run(&mut s, "move", json!({"ids": [walls[i]], "by": [0, -700]}));
+    }
+    run(&mut s, "modify", json!({"id": rooms[1], "name": "Renamed"}));
+    run(&mut s, "move", json!({"ids": [rooms[2]], "by": [300, 300]}));
+    // Two rooms in one space, a separation line through it, a room taken away, a wall deleted and brought back.
+    run(&mut s, "room", json!({"point": [at.0 + 5.0, at.1 + 5.0]}));
+    run(&mut s, "delete", json!({"ids": [walls[walls.len() / 2]]}));
+    run(&mut s, "undo", json!({}));
+    run(&mut s, "delete", json!({"ids": [rooms[3]]}));
+    run(&mut s, "undo", json!({}));
+    run(&mut s, "copy", json!({"ids": [walls[3]], "by": [0, 0]}));
+    run(&mut s, "undo", json!({}));
+    run(&mut s, "redo", json!({}));
+    assert_eq!(*s.warnings(), s.model.review_whole());
+}
+
+/// What the warnings cost on the reference tower, next to the check an edit pays anyway: `cargo test --release -p bimcraft-core
+/// warnings_cost -- --ignored --nocapture`. Each edit's warnings are brought up to date from those before it, the median of
+/// seven, as `Session::report_warnings` does after every command (whose own time, here, holds the oracles the test build adds).
 #[test]
 #[ignore = "timing, not a check"]
 fn warnings_cost_on_the_reference_tower_next_to_the_check() {
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
+    fn median(mut v: Vec<Duration>) -> Duration {
+        v.sort();
+        v[v.len() / 2]
+    }
     let mut s = Session::new();
     run(&mut s, "tower", json!({"storeys": 3}));
     let started = Instant::now();
-    let all = s.model.review();
+    let mut kept = s.model.reviewed();
     let full = started.elapsed();
     let started = Instant::now();
     s.model.check().unwrap();
     let check = started.elapsed();
-    let column =
-        s.model.elements.iter().find(|(_, e)| matches!(e, Element::Column(_) | Element::StructuralColumn(_))).map(|(id, _)| *id).unwrap();
-    let before = s.model.clone();
-    let started = Instant::now();
-    let r = run(&mut s, "move", json!({"ids": [column], "by": [10, 0]}));
-    let edit = started.elapsed();
-    let started = Instant::now();
-    let now = s.model.review_since(&before, &all);
-    let since = started.elapsed();
+    let first = |s: &Session, f: &dyn Fn(&Element) -> bool| s.model.elements.iter().find(|(_, e)| f(e)).map(|(id, _)| *id).unwrap();
+    let column = first(&s, &|e| matches!(e, Element::Column(_) | Element::StructuralColumn(_)));
+    let wall = first(&s, &|e| matches!(e, Element::Wall(_)));
+    let door = first(&s, &|e| matches!(e, Element::Door(_)));
+    let component = first(&s, &|e| matches!(e, Element::Component(_)));
     eprintln!(
-        "tower, 3 storeys, {} elements, {} warnings: review {full:?}, check {check:?}, a move with its check and warnings {edit:?} \
-         (new: {}), review_since alone {since:?} ({} warnings)",
+        "tower, 3 storeys, {} elements, {} warnings: whole review {full:?}, check {check:?}",
         s.model.elements.len(),
-        all.len(),
-        r.get("new_warnings").map_or(0, |w| w.as_array().map_or(0, Vec::len)),
-        now.len()
+        kept.warnings.len()
     );
+    for (what, id) in [("a column", column), ("a wall", wall), ("a door", door), ("a component", component)] {
+        let mut times = Vec::new();
+        let mut warnings = 0;
+        for i in 0..7 {
+            let before = s.model.clone();
+            let by = if i % 2 == 0 { [10, 0] } else { [-10, 0] };
+            let moved = s.execute("move", &json!({"ids": [id], "by": by}));
+            if moved.is_err() {
+                break;
+            }
+            let started = Instant::now();
+            kept = s.model.reviewed_since(&before, &kept);
+            times.push(started.elapsed());
+            warnings = kept.warnings.len();
+        }
+        if !times.is_empty() {
+            eprintln!("  moving {what}: warnings brought up to date {:?} ({warnings} warnings)", median(times));
+        }
+    }
 }

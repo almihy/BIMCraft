@@ -410,7 +410,9 @@ impl Session {
     /// Takes in another copy's changes ([`Model::merged`]): the model checked, what would break it refused and named. The
     /// elements of `keep` stay as they are (this copy's own changes not sent yet). The undo history stays this copy's: each
     /// model it goes back to is brought what was taken, so undo and redo take back and put back this copy's own commands
-    /// alone. A model of the history the changes can't be brought to ends the history there.
+    /// alone. A model of the history the changes can't be brought to ends the history there. The warnings kept stay with the model
+    /// they were worked out for: the next command or request brings them up to date from it, by what the changes touched
+    /// ([`Session::warnings`]), never from nothing.
     pub fn merge(&mut self, c: &Changes, keep: &BTreeSet<Guid>) -> Result<Merged, String> {
         let (model, merged) = self.model.merged(c, keep, &BTreeMap::new())?;
         if merged.taken.is_empty() {

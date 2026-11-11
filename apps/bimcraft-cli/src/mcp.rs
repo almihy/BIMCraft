@@ -44,7 +44,7 @@ undo history, replace it or write over its file is refused.";
 
 /// Where the tools run: on a session of the server's own, or on a window's.
 enum Backend {
-    Own(Session),
+    Own(Box<Session>),
     Window(Window),
 }
 
@@ -75,7 +75,7 @@ impl Backend {
     /// The server's own session, for what replaces a project: a window's is the user's, and is started and opened in the window.
     fn own(&mut self) -> Result<&mut Session, String> {
         match self {
-            Backend::Own(s) => Ok(s),
+            Backend::Own(s) => Ok(&mut **s),
             Backend::Window(_) => Err("that would replace the project the window has open, which is the user's: an agent never starts \
                  or opens a project in a window; the user does, with File > New and File > Open (or run `bimcraft-cli mcp` without \
                  --connect for a project of the agent's own)"
@@ -122,10 +122,10 @@ fn tools() -> Value {
         {"name": "execute", "description": "Run any BIMCraft command with JSON params, e.g. wall {points: [[0,0],[5000,0]]}, door {at: [2500, 0]}, \
             room {point: [x, y], name}, modify {id, …fields}, delete {ids}, undo. list_commands shows them all with their parameters.",
          "inputSchema": {"type": "object", "properties": {"command": {"type": "string"}, "params": {"type": "object"}}, "required": ["command"]}},
-        {"name": "script", "description": "Run several commands, one per line: `wall {\"points\": [[0,0],[4000,0]]}`. Stops at the first failing line and names it; the lines before it stay done, each its own undo step. \
+        {"name": "script", "description": "Run several commands, one per line: `wall {\"points\": [[0,0],[4000,0]]}`. Stops at the first failing line and names it; the lines before it stay done, each its own undo step. The warnings the whole script made are in the last result as `new_warnings`: a line does not work them out. \
             With `atomic`, all or nothing: a failing line takes back the lines before it, and a script that goes through is one undo step. \
             With `dry_run`, tried all or nothing and taken back: the reply lists what it would make, change and remove (`made`, `changed`, `removed`, by id and category), \
-            whether it would change anything else (`other_changes`) and the model's `warnings` after it, and nothing of it stays. A dry run refuses a line that names a file or would save, undo, redo or replace the project, and a `favorite` other than `list`, which would use the user's favorites file.",
+            whether it would change anything else (`other_changes`) and the warnings it would make, those the model has not now (`new_warnings`, as a command's result gives them), and nothing of it stays. A dry run refuses a line that names a file or would save, undo, redo or replace the project, and a `favorite` other than `list`, which would use the user's favorites file.",
          "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}, "atomic": {"type": "boolean"}, "dry_run": {"type": "boolean"}}, "required": ["text"]}},
         {"name": "list_commands", "description": "Every command with its id, label, Revit-style shortcut, parameters and the menu it sits in (`menu`, null when the interface has no place for it). `filter` matches part of an id, label or shortcut.",
          "inputSchema": {"type": "object", "properties": {"filter": {"type": "string"}}}},
@@ -152,7 +152,7 @@ impl Server {
         session.dwg = crate::dwg_reader();
         let plugins = crate::load_plugins(&mut session);
         let seen = plugins.log().len();
-        Server { backend: Backend::Own(session), plugins: Some(plugins), seen }
+        Server { backend: Backend::Own(Box::new(session)), plugins: Some(plugins), seen }
     }
 
     /// A server whose tools work on the project `window` has open.

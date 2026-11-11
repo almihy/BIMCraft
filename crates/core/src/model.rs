@@ -6013,7 +6013,7 @@ impl Model {
 
     /// [`Model::bounding_lines`], the walls' joins found through `index`, or among every wall without one.
     pub(crate) fn bounding_lines_in(&self, level: impl Key, index: Option<&walls::Index>) -> Vec<(P2, P2)> {
-        let walls = self.wall_segments(&level, index, true);
+        let walls = self.wall_segments(&level, index, true, &|_| true);
         let mut lines: Vec<(P2, P2)> = walls.iter().map(|&(a, b, _)| (a, b)).collect();
         lines.extend(self.separators(level).into_iter().map(|(a, b)| (to_centre(b, a, &walls), to_centre(a, b, &walls))));
         lines
@@ -6021,7 +6021,7 @@ impl Model {
 
     /// Centre lines of the walls that bound the rooms of `level`, arcs as chords.
     pub fn wall_lines(&self, level: impl Key) -> Vec<(P2, P2)> {
-        self.wall_segments(&level, Some(&walls::Index::new(self)), false).into_iter().map(|(a, b, _)| (a, b)).collect()
+        self.wall_segments(&level, Some(&walls::Index::new(self)), false, &|_| true).into_iter().map(|(a, b, _)| (a, b)).collect()
     }
 
     /// The walls that bound the rooms of `level` (with `rooms`, those whose Room Bounding is on), by id.
@@ -6035,10 +6035,41 @@ impl Model {
         candidates.filter(move |&id| self.wall(id).is_some_and(|w| self.bounding(w, level) && (!rooms || w.room_bounding)))
     }
 
+    /// [`Model::room_lines_in`] at the walls' centre lines, of the walls `wall` keeps and the separation lines and column faces
+    /// whose boxes `near` keeps: what rooms near some place are found among, without the rest of the level's.
+    pub(crate) fn room_lines_near(
+        &self,
+        level: Guid,
+        index: Option<&walls::Index>,
+        wall: &dyn Fn(Id) -> bool,
+        near: &dyn Fn([f64; 4]) -> bool,
+    ) -> Vec<(P2, P2)> {
+        let walls = self.wall_segments(&level, index, true, wall);
+        let mut lines: Vec<(P2, P2)> = walls.iter().map(|&(a, b, _)| (a, b)).collect();
+        let boxed = |points: &[P2]| {
+            points.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, p| {
+                [b[0].min(p.0), b[1].min(p.1), b[2].max(p.0), b[3].max(p.1)]
+            })
+        };
+        lines.extend(
+            self.separators(level)
+                .into_iter()
+                .filter(|(a, b)| near(boxed(&[*a, *b])))
+                .map(|(a, b)| (to_centre(b, a, &walls), to_centre(a, b, &walls))),
+        );
+        for o in self.bounding_columns(level) {
+            if near(boxed(&o)) {
+                lines.extend(geom::ring_edges(&o));
+            }
+        }
+        lines
+    }
+
     /// The segments of [`Model::wall_lines`], each with half its wall's thickness.
     /// With `rooms`, of the walls whose Room Bounding is on.
-    fn wall_segments(&self, level: &impl Key, index: Option<&walls::Index>, rooms: bool) -> Vec<(P2, P2, f64)> {
+    fn wall_segments(&self, level: &impl Key, index: Option<&walls::Index>, rooms: bool, keep: &dyn Fn(Id) -> bool) -> Vec<(P2, P2, f64)> {
         self.bounding_walls(level, rooms)
+            .filter(|id| keep(*id))
             .filter_map(|id| Some((id, self.thickness(self.wall(id)?) / 2.0)))
             .flat_map(|(id, half)| {
                 let line = walls::centre_line_in(self, id, index);

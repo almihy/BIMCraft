@@ -11,13 +11,14 @@
 //! change. [`Model::review`] works out all of them; [`Model::review_since`] brings a model's up to date from those of the
 //! model it was made of, working out again only what the change reached. Tests hold the two to the same answer.
 
-use crate::geom::P2;
+use crate::geom::{self, P2, Region};
 use crate::ids::{Changed, Guid, Id};
 use crate::model::{Element, Model, TOL, Unbound};
 use crate::walls::{self, Axis};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Arc;
 
 /// How much a warning matters. Revit lists them all as warnings; a note is one that changes nothing a person would see or
 /// measure (an element a hair off axis).
@@ -101,13 +102,107 @@ impl Scope<'_> {
     }
 }
 
+/// What a room's boundary reaches, as it was when the room's warnings were last worked out.
+#[derive(Clone, Debug, PartialEq)]
+enum Reach {
+    /// The loop of lines round its point, and the islands in it.
+    Region(Region),
+    /// Not enclosed, or in a wall: no loop to say where a change would matter, so a change on its level counts.
+    Everywhere,
+    /// A frozen room: it keeps the boundary it has, whatever the walls do.
+    Fixed,
+}
+
+impl Reach {
+    /// The same reach, the loop's corners the same to the tolerance, whichever corner it starts at (found among other lines it may).
+    #[cfg(test)]
+    fn same_as(&self, o: &Reach) -> bool {
+        fn ring(a: &[P2], b: &[P2]) -> bool {
+            a.len() == b.len() && (0..b.len()).any(|k| a.iter().enumerate().all(|(i, p)| p.dist(b[(i + k) % b.len()]) <= 10.0 * TOL))
+        }
+        match (self, o) {
+            (Reach::Region(a), Reach::Region(b)) => {
+                ring(&a.outer, &b.outer) && a.holes.len() == b.holes.len() && a.holes.iter().all(|h| b.holes.iter().any(|k| ring(h, k)))
+            }
+            (Reach::Everywhere, Reach::Everywhere) | (Reach::Fixed, Reach::Fixed) => true,
+            _ => false,
+        }
+    }
+}
+
+/// What each room of a model reaches, so that after a change only the rooms it reached are looked at again.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct RoomReach {
+    /// Whether every room of the model is in it: else a change may have reached any.
+    whole: bool,
+    rooms: HashMap<Id, Reach>,
+}
+
+/// The warnings of a model, the worst first, and what is kept with them to bring them up to date from after a change.
+#[derive(Clone, Debug, Default)]
+pub struct Review {
+    pub warnings: Arc<Vec<Warning>>,
+    rooms: Arc<RoomReach>,
+}
+
+// How many times, in this thread, the whole model was reviewed, how many times a review was brought up to date, and how many
+// rooms were worked out: what tests hold the engine to (a remote change, an undo or a script is not a reason to review everything
+// again, nor a wall moved in one room a reason to look at every room).
+#[cfg(test)]
+thread_local! {
+    pub(crate) static REVIEWS: std::cell::Cell<(usize, usize, usize)> = const { std::cell::Cell::new((0, 0, 0)) };
+}
+
+impl Review {
+    /// Tests hold what is kept to what the whole model makes: the same warnings, and, where the rooms are all kept, the same
+    /// reach for each.
+    #[cfg(test)]
+    pub(crate) fn assert_whole(&self, m: &Model) {
+        // (What the check itself works out is not counted.)
+        let counted = REVIEWS.with(std::cell::Cell::get);
+        let whole = m.whole();
+        REVIEWS.with(|c| c.set(counted));
+        assert_eq!(*self.warnings, *whole.warnings, "the warnings brought up to date differ from those of the whole model");
+        if self.rooms.whole {
+            let (a, b) = (&self.rooms.rooms, &whole.rooms.rooms);
+            assert_eq!(a.len(), b.len(), "the rooms kept differ from the whole model's");
+            for (id, reach) in a {
+                assert!(
+                    b.get(id).is_some_and(|w| reach.same_as(w)),
+                    "room {id}: what it reaches, brought up to date, is {reach:?}, not {:?}",
+                    b.get(id)
+                );
+            }
+        }
+    }
+}
+
 impl Model {
     /// Every warning of the model, the worst first, then by rule and element.
     pub fn review(&self) -> Vec<Warning> {
+        self.reviewed().warnings.to_vec()
+    }
+
+    /// [`Model::review`], with what brings it up to date after a change.
+    pub fn reviewed(&self) -> Review {
+        #[cfg(test)]
+        REVIEWS.with(|c| c.set((c.get().0 + 1, c.get().1, c.get().2)));
+        self.whole()
+    }
+
+    /// [`Model::review`], not counted: what the tests hold the answers of [`Model::review_since`] to.
+    #[cfg(test)]
+    pub(crate) fn review_whole(&self) -> Vec<Warning> {
+        self.whole().warnings.to_vec()
+    }
+
+    fn whole(&self) -> Review {
         let mut out = Vec::new();
-        compute(self, &Scope { ids: None, before: None }, true, &mut out);
+        let mut reach = RoomReach { whole: true, ..RoomReach::default() };
+        compute(self, &Scope { ids: None, before: None }, None, &mut out);
+        room_pass(self, None, &mut reach, &mut out);
         sort(self, &mut out);
-        out
+        Review { warnings: Arc::new(out), rooms: Arc::new(reach) }
     }
 
     /// [`Model::review`] of this model, which a command made of `before`, whose warnings `prev` are: those about what changed
@@ -115,14 +210,23 @@ impl Model {
     /// it is where what changed reaches the whole project (a level, a roof or a floor a wall is attached to, a type or any
     /// setting) or isn't known.
     pub fn review_since(&self, before: &Model, prev: &[Warning]) -> Vec<Warning> {
-        let Changed::Ids(changed) = self.changed_since(before) else { return self.review() };
+        let prev = Review { warnings: Arc::new(prev.to_vec()), rooms: Arc::default() };
+        self.reviewed_since(before, &prev).warnings.to_vec()
+    }
+
+    /// [`Model::review_since`], with what the rooms reach kept too, so that only the rooms a change reached are worked out
+    /// again: a wall moved in one room is no work for the others, nor for those of another level it does not reach.
+    pub fn reviewed_since(&self, before: &Model, prev: &Review) -> Review {
+        #[cfg(test)]
+        REVIEWS.with(|c| c.set((c.get().0, c.get().1 + 1, c.get().2)));
+        let Changed::Ids(changed) = self.changed_since(before) else { return self.reviewed() };
         if changed.is_empty() {
-            return prev.to_vec();
+            return prev.clone();
         }
         let both = |id: Id| [self, before].into_iter().filter_map(move |m| m.elements.get(id));
         let reaches_all = |e: &Element| matches!(e, Element::Level(_) | Element::Roof(_) | Element::Floor(_) | Element::Toposolid(_));
         if changed.iter().any(|id| both(*id).any(reaches_all)) {
-            return self.review();
+            return self.reviewed();
         }
         let bounds = |e: &Element| {
             matches!(e, Element::Wall(_) | Element::Room(_) | Element::RoomSeparator(_) | Element::Column(_) | Element::StructuralColumn(_))
@@ -136,8 +240,25 @@ impl Model {
                 ids.extend(lookup.referrers(&g));
             }
         }
+        // A change to nothing a rule looks at (a tag, a dimension, a view, a sheet, a note, a schedule) leaves the warnings as they were.
+        if !ids.iter().any(|id| both(*id).any(watched)) {
+            return prev.clone();
+        }
+        // The families of the components that changed: a family's warning is about all its devices, so they are worked out again.
+        let families: BTreeSet<&str> = ids
+            .iter()
+            .flat_map(|id| both(*id))
+            .filter_map(|e| if let Element::Component(c) = e { Some(c.family.as_str()) } else { None })
+            .collect();
         let gone: BTreeSet<Guid> = ids.iter().filter_map(|id| self.elements.guid(*id).or_else(|| before.elements.guid(*id))).collect();
-        let room_rule = |w: &Warning| w.rule.starts_with("room_");
+        // The rooms the change reached (none, or all when that is not known), whose warnings are worked out again.
+        let reached = if rooms { rooms_reached(self, before, &ids, &prev.rooms) } else { Some(BTreeMap::new()) };
+        let of_room = |w: &Warning| {
+            w.rule.starts_with("room_")
+                && reached
+                    .as_ref()
+                    .is_none_or(|r| w.elements.first().and_then(|g| self.elements.id(*g)).is_none_or(|id| r.contains_key(&id)))
+        };
         let scope = Scope { ids: Some(&ids), before: Some(before) };
         // A group of twins grows or shrinks with one of its members' change, though the others are as they were.
         let twins = twin_keys(self, &scope).unwrap_or_default();
@@ -146,15 +267,23 @@ impl Model {
                 && w.elements.iter().any(|g| self.elements.get(*g).and_then(|e| identity(self, e)).is_some_and(|k| twins.contains(&k)))
         };
         let mut out: Vec<Warning> = prev
+            .warnings
             .iter()
             .filter(|w| {
-                w.rule != "device_no_connector" && !(rooms && room_rule(w)) && !twinned(w) && !w.elements.iter().any(|g| gone.contains(g))
+                !(w.rule == "device_no_connector" && families.contains(w.key.as_str()))
+                    && !of_room(w)
+                    && !twinned(w)
+                    && !w.elements.iter().any(|g| gone.contains(g))
             })
             .cloned()
             .collect();
-        compute(self, &scope, rooms, &mut out);
+        compute(self, &scope, Some(&families), &mut out);
+        let mut reach = if rooms { (*prev.rooms).clone() } else { RoomReach::default() };
+        if rooms {
+            room_pass(self, reached.as_ref(), &mut reach, &mut out);
+        }
         sort(self, &mut out);
-        out
+        Review { warnings: Arc::new(out), rooms: if rooms { Arc::new(reach) } else { Arc::clone(&prev.rooms) } }
     }
 
     /// What the warnings are now that were not among `prev`: those of the same rule about other elements.
@@ -175,16 +304,31 @@ fn sort(m: &Model, out: &mut [Warning]) {
     out.sort_by_cached_key(|w| (w.severity, w.rule, ids(w), w.key.clone()));
 }
 
-/// The warnings about `scope`'s elements, with (`rooms`) those about rooms, added to `out`.
-fn compute(m: &Model, scope: &Scope, rooms: bool, out: &mut Vec<Warning>) {
+/// The kinds of element some rule looks at: a change to any other leaves every warning as it was.
+fn watched(e: &Element) -> bool {
+    matches!(
+        e,
+        Element::Wall(_)
+            | Element::Grid(_)
+            | Element::Door(_)
+            | Element::Window(_)
+            | Element::Column(_)
+            | Element::StructuralColumn(_)
+            | Element::Footing(_)
+            | Element::Component(_)
+            | Element::Room(_)
+            | Element::RoomSeparator(_)
+    )
+}
+
+/// The warnings about `scope`'s elements, and (`families`) about the families of devices named (all of them, when none is),
+/// added to `out`. The rooms' are [`room_pass`].
+fn compute(m: &Model, scope: &Scope, families: Option<&BTreeSet<&str>>, out: &mut Vec<Warning>) {
     openings(m, scope, out);
     walls_and_grids(m, scope, out);
     identical(m, scope, out);
-    if rooms {
-        room_warnings(m, out);
-    }
-    devices(m, out);
-    // Types are settings: a change to one is a full review, and a change to elements keeps these warnings.
+    devices(m, families, out);
+    // Types are settings: a change to one is a full review (`changed_since` is not `Ids`), and a change to elements keeps these.
     if scope.ids.is_none() {
         duplicate_type_marks(m, out);
     }
@@ -505,28 +649,89 @@ fn twin_keys(m: &Model, scope: &Scope) -> Option<BTreeSet<String>> {
     })
 }
 
+/// Whether elements of this kind can be one another's twins.
+fn twin_kind(e: &Element) -> bool {
+    matches!(e, Element::Wall(_) | Element::Column(_) | Element::StructuralColumn(_) | Element::Footing(_) | Element::Component(_))
+}
+
+/// The elements that may be `e`'s twins in `m`, `e` itself among them: the elements of its kind where it stands, found by what the
+/// model keeps (a plan tile and a height for a wall, the kind's few for a column, a group and a height for a component), not among
+/// every element. Every twin is among them; others may be.
+fn twin_candidates(m: &Model, lookup: &crate::derived::Lookup, e: &Element) -> Vec<Id> {
+    match e {
+        Element::Wall(w) => {
+            // A wall attached to what is over or under it has heights of the model's, which a twin of its own may not share.
+            let (lo, hi) = if w.attach_base.is_some() || w.attach_top.is_some() {
+                (f64::NEG_INFINITY, f64::INFINITY)
+            } else {
+                (m.base_z(w), m.top_z(w))
+            };
+            lookup.walls_near_at(&[(crate::derived::axis_box(w), lo, hi)], 2.0 * TOL).into_iter().collect()
+        }
+        // The few columns of a project, and a footing among the elements a plan finds no other way: those at its point.
+        Element::Column(c) | Element::StructuralColumn(c) => {
+            let at = point(c.at);
+            let found = lookup.rare("column").chain(lookup.rare("structuralcolumn"));
+            found
+                .filter(|id| matches!(m.elements.get(*id), Some(Element::Column(o) | Element::StructuralColumn(o)) if point(o.at) == at))
+                .collect()
+        }
+        Element::Footing(c) => {
+            let at = point(c.at);
+            lookup.other().filter(|id| matches!(m.elements.get(*id), Some(Element::Footing(o)) if point(o.at) == at)).collect()
+        }
+        Element::Component(c) => {
+            let base = m.elevation(c.level) + c.offset;
+            lookup.group_between(&crate::derived::component_group(c), base, base).into_iter().collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
 /// Elements of one kind that are one another's twins: each group of them, when one is in `scope`.
 fn identical(m: &Model, scope: &Scope, out: &mut Vec<Warning>) {
-    let looked_at = |e: &Element| {
-        matches!(e, Element::Wall(_) | Element::Column(_) | Element::StructuralColumn(_) | Element::Footing(_) | Element::Component(_))
-    };
-    // With a scope, only the keys of what it holds are looked for, among the elements of the kinds that can be twins.
+    // With a scope, only the keys of what it holds are looked for, among the elements of the kinds that can be twins, and of
+    // those only where the scope's elements stand (now, and before the change).
     let wanted = twin_keys(m, scope);
     if wanted.as_ref().is_some_and(BTreeSet::is_empty) {
         return;
     }
     let mut groups: HashMap<String, Vec<Id>> = HashMap::new();
-    for (id, e) in m.elements.iter().filter(|(_, e)| looked_at(e)) {
+    let mut take = |id: Id, e: &Element| {
         if let Some(key) = identity(m, e)
             && wanted.as_ref().is_none_or(|w| w.contains(&key))
         {
-            groups.entry(key).or_default().push(*id);
+            groups.entry(key).or_default().push(id);
+        }
+    };
+    match scope.ids {
+        None => {
+            for (id, e) in m.elements.iter().filter(|(_, e)| twin_kind(e)) {
+                take(*id, e);
+            }
+        }
+        Some(ids) => {
+            let lookup = m.lookup();
+            let mut near: BTreeSet<Id> = BTreeSet::new();
+            for id in ids {
+                for model in [Some(m), scope.before].into_iter().flatten() {
+                    if let Some(e) = model.elements.get(*id).filter(|e| twin_kind(e)) {
+                        near.extend(twin_candidates(m, &lookup, e));
+                    }
+                }
+            }
+            for id in near {
+                if let Some(e) = m.elements.get(id).filter(|e| twin_kind(e)) {
+                    take(id, e);
+                }
+            }
         }
     }
-    for (_, ids) in groups {
+    for (_, mut ids) in groups {
         if ids.len() < 2 {
             continue;
         }
+        ids.sort_unstable();
         let what = cat(m, ids[0]);
         let list = ids.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
         out.push(Warning::new(
@@ -538,18 +743,79 @@ fn identical(m: &Model, scope: &Scope, out: &mut Vec<Warning>) {
     }
 }
 
-/// The rooms the walls don't close round, and those in a space another room has.
-fn room_warnings(m: &Model, out: &mut Vec<Warning>) {
+/// How far past a change, mm, a room's boundary may be changed by it: a wall's faces, and the ends of the walls joined to it.
+fn reach_pad(m: &Model) -> f64 {
+    (4.0 * m.types.wall.values().map(|t| t.thickness.abs()).fold(0.0, f64::max)).max(1000.0)
+}
+
+/// The rooms the walls don't close round, and those in a space another room has: those of `only` (each with the window its
+/// boundary can be looked for in, when it has one), or all of them. What each room's boundary reaches is kept in `reach`, for
+/// the next change to tell which rooms it reached.
+fn room_pass(m: &Model, only: Option<&BTreeMap<Id, Option<[f64; 4]>>>, reach: &mut RoomReach, out: &mut Vec<Warning>) {
+    if only.is_none() {
+        reach.rooms.clear();
+        reach.whole = true;
+    }
+    // A room that is no more is no more reached.
+    reach.rooms.retain(|id, _| matches!(m.elements.get(*id), Some(Element::Room(_))));
+    let pad = reach_pad(m);
     let rooms = crate::rooms::Rooms::new(m);
+    // The other rooms of the model, by id: those that may have the space a room is in (the rooms there were and those the change
+    // brought, whatever their ids).
+    let mut others: Vec<Id> = reach.rooms.keys().copied().chain(only.into_iter().flat_map(|o| o.keys().copied())).collect();
+    others.sort_unstable();
+    others.dedup();
+    let mut found: Vec<(Id, Reach, Result<(), Unbound>)> = Vec::new();
     for (id, e) in m.elements.iter() {
         let Element::Room(r) = e else { continue };
-        match rooms.bound(r, m.room_area) {
-            Ok(_) => {}
+        let window = match only {
+            None => None,
+            Some(o) => match o.get(id) {
+                None => continue,
+                Some(w) => *w,
+            },
+        };
+        #[cfg(test)]
+        REVIEWS.with(|c| c.set((c.get().0, c.get().1, c.get().2 + 1)));
+        // Among the lines near where the room was and where the change put them, when that is known; else among the level's.
+        let near = window.and_then(|w| {
+            let (g, in_wall) = crate::rooms::Rooms::within(m, w, pad).loop_near(r, m.room_area)?;
+            let verdict = if in_wall {
+                Err(Unbound::NotEnclosed)
+            } else {
+                match shares(m, &others, *id, r, &g) {
+                    Some(other) => Err(Unbound::Shared(other)),
+                    None => Ok(()),
+                }
+            };
+            let reach = if in_wall { Reach::Everywhere } else { Reach::Region(g) };
+            Some((reach, verdict))
+        });
+        let (now, verdict) = near.unwrap_or_else(|| {
+            let bound = rooms.bound(r, m.room_area);
+            let reach = if r.kept.is_some() {
+                Reach::Fixed
+            } else {
+                match &bound {
+                    Ok(g) => Reach::Region(g.clone()),
+                    Err(Unbound::Shared(_)) => rooms.loop_at(r.level, m.room_area, r.point).map_or(Reach::Everywhere, Reach::Region),
+                    Err(Unbound::NotEnclosed) => Reach::Everywhere,
+                }
+            };
+            (reach, bound.map(|_| ()))
+        });
+        found.push((*id, now, verdict));
+    }
+    for (id, now, verdict) in found {
+        reach.rooms.insert(id, now);
+        let Some(Element::Room(r)) = m.elements.get(id) else { continue };
+        match verdict {
+            Ok(()) => {}
             Err(Unbound::NotEnclosed) => out.push(Warning::new(
                 "room_not_enclosed",
                 Severity::Warning,
                 format!("room {id} ({} {}) is not enclosed: the walls around it no longer close", r.number, r.name),
-                vec![m.guid(*id)],
+                vec![m.guid(id)],
             )),
             Err(Unbound::Shared(other)) => out.push(Warning::new(
                 "room_redundant",
@@ -561,27 +827,191 @@ fn room_warnings(m: &Model, out: &mut Vec<Warning>) {
                     r.name,
                     m.shown(other)
                 ),
-                vec![m.guid(*id), m.guid(other)],
+                vec![m.guid(id), m.guid(other)],
             )),
         }
     }
 }
 
-/// The families of lighting, outlets or switches in use that hold no connector, so their devices count as a load of zero (a
-/// family of plan symbols alone, a symbol set's, is no device). One warning for each family, about its placed devices.
-fn devices(m: &Model, out: &mut Vec<Warning>) {
-    let mut bare: BTreeMap<&str, Vec<Id>> = BTreeMap::new();
-    for (id, e) in m.elements.iter() {
-        if let Element::Component(c) = e
-            && let Some(f) = m.families.get(&c.family)
-            && f.category.electrical_device()
-            && f.connectors.is_empty()
-            && !(f.forms.is_empty() && !f.symbols.is_empty())
-        {
-            bare.entry(c.family.as_str()).or_default().push(*id);
+/// The room placed before room `id` (of a lower id) on its level whose point lies in `g`: the one that has the space.
+/// (Of `others`, the rooms there were, and the rooms there are now among them: a room the change made is of a higher id.)
+fn shares(m: &Model, others: &[Id], id: Id, r: &crate::model::Room, g: &Region) -> Option<Id> {
+    others.iter().copied().filter(|o| *o < id).find(
+        |o| matches!(m.elements.get(*o), Some(Element::Room(x)) if m.same(x.level, r.level) && crate::model::region_holds(g, x.point)),
+    )
+}
+
+/// Something that changed which bounds rooms: where it stood, in the model it was in, and what it was.
+struct Mover<'a> {
+    model: &'a Model,
+    e: &'a Element,
+    /// The box in plan the change may have touched: the element's own, grown.
+    near: [f64; 4],
+}
+
+impl Mover<'_> {
+    /// Whether it may bound the rooms of `level`, whose rooms are cut at height `z`: a wall or a column that spans it, a
+    /// separation line or a room of the level.
+    fn bounds(&self, m: &Model, level: Guid, z: f64) -> bool {
+        match self.e {
+            Element::Wall(w) => self.model.spans(w, z),
+            Element::Column(c) | Element::StructuralColumn(c) => self.model.column_spans(c, z),
+            Element::RoomSeparator(s) => m.same(s.level, level),
+            Element::Room(r) => m.same(r.level, level),
+            _ => false,
         }
     }
-    for (name, ids) in bare {
+}
+
+/// The rooms a change reached: those that changed themselves, and those whose boundary, as it was, meets what changed (in the
+/// model before it and in the model now) and may be bounded by it. Each with the box its boundary can be looked for in (that
+/// boundary's and where the change stood), none for a room with no boundary to go by. `None` when that cannot be said (the rooms
+/// kept are not all of them, or something that changed has no shape to look for), and then every room is looked at again.
+fn rooms_reached(m: &Model, before: &Model, ids: &BTreeSet<Id>, kept: &RoomReach) -> Option<BTreeMap<Id, Option<[f64; 4]>>> {
+    if !kept.whole {
+        return None;
+    }
+    let pad = reach_pad(m);
+    let grown = |b: [f64; 4]| [b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad];
+    let mut movers: Vec<Mover<'_>> = Vec::new();
+    let mut reached: BTreeMap<Id, Option<[f64; 4]>> = BTreeMap::new();
+    for id in ids {
+        for model in [m, before] {
+            let Some(e) = model.elements.get(*id) else { continue };
+            let near = match e {
+                Element::Wall(w) => walls::reach(model, w)?,
+                Element::Column(_) | Element::StructuralColumn(_) => {
+                    let ring = model.column_outline(e);
+                    if ring.is_empty() {
+                        return None;
+                    }
+                    ring_box(&ring)
+                }
+                Element::RoomSeparator(s) => ring_box(&[s.start, s.end]),
+                Element::Room(r) => {
+                    if std::ptr::eq(model, m) {
+                        reached.insert(*id, None);
+                    }
+                    ring_box(&[r.point])
+                }
+                _ => continue,
+            };
+            movers.push(Mover { model, e, near: grown(near) });
+        }
+    }
+    for (id, reach) in &kept.rooms {
+        if reached.contains_key(id) {
+            continue;
+        }
+        let Some(Element::Room(r)) = m.elements.get(*id) else { continue };
+        let z = m.elevation(r.level) + m.level(r.level).map_or(crate::model::CUT_HEIGHT, |l| l.computation_height);
+        let on_level = |c: &&Mover<'_>| c.bounds(m, r.level, z);
+        match reach {
+            Reach::Fixed => {}
+            Reach::Everywhere => {
+                if movers.iter().any(|c| on_level(&c)) {
+                    reached.insert(*id, None);
+                }
+            }
+            Reach::Region(g) => {
+                let mut window = ring_box(&g.outer);
+                let mut hit = false;
+                for c in movers.iter().filter(on_level).filter(|c| region_meets(&c.near, g)) {
+                    hit = true;
+                    window = [window[0].min(c.near[0]), window[1].min(c.near[1]), window[2].max(c.near[2]), window[3].max(c.near[3])];
+                }
+                if hit {
+                    // Where the room's point is is in it too.
+                    window = [window[0].min(r.point.0), window[1].min(r.point.1), window[2].max(r.point.0), window[3].max(r.point.1)];
+                    reached.insert(*id, Some(window));
+                }
+            }
+        }
+    }
+    Some(reached)
+}
+
+/// The box `[x0, y0, x1, y1]` round some points.
+fn ring_box(points: &[P2]) -> [f64; 4] {
+    let pad = 2.0 * TOL;
+    points.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, p| {
+        [b[0].min(p.0 - pad), b[1].min(p.1 - pad), b[2].max(p.0 + pad), b[3].max(p.1 + pad)]
+    })
+}
+
+/// Whether the box meets the region: its outer ring or an island's crosses it, or it lies wholly in the region and not in an island.
+fn region_meets(b: &[f64; 4], g: &Region) -> bool {
+    if g.outer.is_empty() {
+        return true;
+    }
+    let outer = ring_box(&g.outer);
+    if b[0] > outer[2] || b[2] < outer[0] || b[1] > outer[3] || b[3] < outer[1] {
+        return false;
+    }
+    for ring in std::iter::once(&g.outer).chain(g.holes.iter()) {
+        if geom::ring_edges(ring).any(|(p, q)| segment_meets(b, p, q)) {
+            return true;
+        }
+    }
+    // No ring crosses the box: it is wholly inside the region, wholly in an island, or wholly outside it.
+    let corner = P2(b[0], b[1]);
+    geom::contains(&g.outer, corner) && !g.holes.iter().any(|h| geom::contains(h, corner))
+}
+
+/// Whether the segment from `p` to `q` meets the box (Liang and Barsky's clipping).
+fn segment_meets(b: &[f64; 4], p: P2, q: P2) -> bool {
+    let d = (q.0 - p.0, q.1 - p.1);
+    let (mut lo, mut hi) = (0.0_f64, 1.0_f64);
+    for (dir, room) in [(-d.0, p.0 - b[0]), (d.0, b[2] - p.0), (-d.1, p.1 - b[1]), (d.1, b[3] - p.1)] {
+        if dir == 0.0 {
+            if room < 0.0 {
+                return false;
+            }
+        } else {
+            let t = room / dir;
+            if dir < 0.0 {
+                if t > hi {
+                    return false;
+                }
+                lo = lo.max(t);
+            } else {
+                if t < lo {
+                    return false;
+                }
+                hi = hi.min(t);
+            }
+        }
+    }
+    true
+}
+
+/// The families of lighting, outlets or switches in use that hold no connector, so their devices count as a load of zero (a
+/// family of plan symbols alone, a symbol set's, is no device). One warning for each family, about its placed devices; with
+/// `only`, of those families alone. Most projects have no such family, and then nothing is looked through.
+fn devices(m: &Model, only: Option<&BTreeSet<&str>>, out: &mut Vec<Warning>) {
+    let bare: BTreeSet<&str> = m
+        .families
+        .iter()
+        .filter(|(name, f)| {
+            only.is_none_or(|o| o.contains(name.as_str()))
+                && f.category.electrical_device()
+                && f.connectors.is_empty()
+                && !(f.forms.is_empty() && !f.symbols.is_empty())
+        })
+        .map(|(name, _)| name.as_str())
+        .collect();
+    if bare.is_empty() {
+        return;
+    }
+    let mut placed: BTreeMap<&str, Vec<Id>> = BTreeMap::new();
+    for (id, e) in m.elements.iter() {
+        if let Element::Component(c) = e
+            && let Some(name) = bare.get(c.family.as_str()).copied()
+        {
+            placed.entry(name).or_default().push(*id);
+        }
+    }
+    for (name, ids) in placed {
         let k = ids.len();
         let mut w = Warning::new(
             "device_no_connector",

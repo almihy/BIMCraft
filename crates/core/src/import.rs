@@ -3512,26 +3512,6 @@ pub(crate) fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, S
         let Err(error) = m.check() else { break };
         let id = culprit(&error).filter(|id| from.contains_key(id)).ok_or_else(|| error.clone())?;
         let why = error.split_once(": ").map_or(error.as_str(), |(_, why)| why);
-        // A door or a window whose sill is at or over its wall's top (one only rising past the top comes in, as Revit lets
-        // it): said with the file's wall, not BIMCraft's id for it, and its height there.
-        let why = match m.elements.get(id) {
-            Some(e @ (Element::Door(o) | Element::Window(o))) if why.starts_with("sill ") && why.contains(" top ") => {
-                match (m.wall(o.host), m.opening_dims(e)) {
-                    (Some(w), Ok(t)) => {
-                        let along = [o.offset - t.width / 2.0, o.offset, o.offset + t.width / 2.0];
-                        let top = along.map(|s| crate::walls::top_at(&m, w, s)).into_iter().fold(f64::INFINITY, f64::min);
-                        let wall = m.elements.id(o.host).and_then(|k| from.get(&k)).cloned().unwrap_or_default();
-                        format!(
-                            "sill {} is at or over the top of its wall {wall}, {} mm high there, so nothing of it is in the wall",
-                            num(o.sill),
-                            num(top - m.own_base(w))
-                        )
-                    }
-                    _ => why.to_string(),
-                }
-            }
-            _ => why.to_string(),
-        };
         skipped.push(format!("{}: {why}", from.get(&id).cloned().unwrap_or_default()));
         let gone = m.guid(id);
         m.elements.remove(id);

@@ -110,13 +110,17 @@ fn elevation_in(elements: &Elements, level: Guid) -> f64 {
     }
 }
 
+/// The group a component is banded in: its family, type, mirroring and values.
+pub(crate) fn component_group(c: &crate::model::Component) -> Group {
+    let params = serde_json::to_string(&c.params).unwrap_or_default();
+    Group::Component { family: c.family.clone(), type_name: c.type_name.clone(), mirrored: c.mirrored, params }
+}
+
 /// The group and own heights of an element banded by height; none for another, or a run too steep.
 fn banding(elements: &Elements, e: &Element) -> Option<(Group, f64, f64)> {
     if let Element::Component(c) = e {
-        let params = serde_json::to_string(&c.params).unwrap_or_default();
-        let group = Group::Component { family: c.family.clone(), type_name: c.type_name.clone(), mirrored: c.mirrored, params };
         let base = elevation_in(elements, c.level) + c.offset;
-        return Some((group, base, base));
+        return Some((component_group(c), base, base));
     }
     let r = e.run()?;
     let base = elevation_in(elements, r.level);
