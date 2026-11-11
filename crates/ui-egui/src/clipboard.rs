@@ -52,7 +52,8 @@ impl BimApp {
         let Some(anchor) = self.session.clipboard_anchor() else { return };
         let m = &self.session.model;
         let mut params = json!({"by": [at.0 - anchor.0, at.1 - anchor.1]});
-        if self.session.clipboard_level() != Some(m.guid(level)) {
+        // Only what stands on a level, and on another than this plan's, is moved to it: grids, sections and the like stand on none.
+        if self.session.clipboard_level().is_some_and(|from| from != m.guid(level)) {
             params["levels"] = json!([level]);
         }
         if self.paste(params) {

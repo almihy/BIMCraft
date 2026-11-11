@@ -1441,19 +1441,23 @@ other_files(
         "paste",
         "Paste",
         &[],
-        "{ids?: [id,…], by?: [dx, dy], same_place?: true, levels?: [level,…], view?} Ctrl+V: new elements, as copies, from the \
-         clipboard (or `ids`, elements of the project, with no copy first). Give one way to place them: `by`, `same_place`, \
-         `levels` or `view`; the last two may go with a `by`, so what lands on a level is also moved in plan, as a click does. \
-         `by` puts them that far from the originals; `same_place` on top of them (Revit's Aligned to Same Place); `levels` (by \
-         name, id or GUID) on each level named, at the same place in plan, what stood on the lowest level copied now standing \
-         on that level and the rest the same distance higher, tops and what is measured from a level (a top level, a room's \
-         upper limit) moved with them (Aligned to Selected Levels; one level is Aligned to a Picked Level); `view`, a level's \
-         plan or a plan view, is that level alone (Aligned to Current View). Doors and windows go with their walls, a copied \
-         stair brings its railings, bars go on the copy of their host, and each copy has an id and a GUID of its own. What \
-         cannot go the way it was is made as near as can be, and `notes` says how (a wall's top with no level at the height it \
-         moves to is unconnected, a wall's attachment to a roof not copied is let go, a room with no walls round it up there is \
-         unbounded); `left_out` says what was not pasted and why (an annotation belongs to its view, a door goes only in its \
-         wall). Returns {ids, pasted: [{level?, name?, ids}], notes, left_out}",
+        "{ids?: [id,…], by?: [dx, dy], same_place?: true, levels?: [level,…], view?} Ctrl+V: new elements, as copies, \
+         from the clipboard (or `ids`, elements of the project, with no copy first). Give one way to place them: `by`, \
+         `same_place`, `levels` or `view`; the last two may go with a `by`, so what lands on a level is also moved in \
+         plan, as a click does; a paste with none of them is refused. `by` puts them that far from the originals; \
+         `same_place` on top of them (Revit's Aligned to Same Place); `levels` (by name, id or GUID) on each level named, \
+         at the same place in plan, what stood on the lowest level copied now standing on that level and the rest the \
+         same distance higher, tops and what is measured from a level (a top level, a room's upper limit) moved with them \
+         (Aligned to Selected Levels; one level is Aligned to a Picked Level); `view`, a level's plan or a plan view, is \
+         that level alone (Aligned to Current View). Doors and windows go with their walls, a copied stair brings its \
+         railings, bars go on the copy of their host, a roof joined to a roof copied with it is joined to its copy, a \
+         door or window copied without its wall goes in the wall it lands on (on the level pasted to), and each copy has \
+         an id and a GUID of its own. What cannot go the way it was is made as near as can be, and `notes` says how (a \
+         wall's top with no level at the height it moves to is unconnected, a wall's attachment to a roof not copied is \
+         let go, a room with no walls round it up there is unbounded); `left_out` says what was not pasted and why (an \
+         annotation belongs to its view; a stair, a ramp, a CAD import, a site element or a room separation line where no \
+         level stands at the height it would move to, as they have no offset to be raised by; a door or window that falls \
+         on no wall). Returns {ids, pasted: [{level?, name?, ids}], notes, left_out}",
         clipboard::paste,
     ),
     edit(
@@ -13070,12 +13074,18 @@ pub(crate) fn duplicate_mapped(c: &str, s: &mut Session, ids: &[Id], mo: &Motion
         hosts.insert(m.guid(from), m.guid(id));
         made.push(id);
     }
-    // Copied walls attached to roofs or floors copied with them attach to the copies.
+    // What points at another element copied with it points at that element's copy: walls attached to roofs or floors, roofs joined
+    // to roofs, bars in what they reinforce.
     for id in &made {
-        if let Some(Element::Wall(w)) = m.elements.get_mut(id) {
-            for at in [&mut w.attach_top, &mut w.attach_base] {
-                *at = at.map(|a| hosts.get(&a).copied().unwrap_or(a));
+        match m.elements.get_mut(id) {
+            Some(Element::Wall(w)) => {
+                for at in [&mut w.attach_top, &mut w.attach_base] {
+                    *at = at.map(|a| hosts.get(&a).copied().unwrap_or(a));
+                }
             }
+            Some(Element::Roof(r)) => r.join = r.join.map(|j| hosts.get(&j).copied().unwrap_or(j)),
+            Some(Element::Rebar(r)) => r.host = r.host.map(|h| hosts.get(&h).copied().unwrap_or(h)),
+            _ => {}
         }
     }
     for (from, mut e) in notes {

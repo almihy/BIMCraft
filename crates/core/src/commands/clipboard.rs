@@ -7,14 +7,15 @@
 //! it measures from a level measured from the level there. What cannot go the way it was is pasted as near as can be, and the
 //! reply says what it did (`notes`) and what it left out (`left_out`).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
 
-use super::{Motion, R, absent, bad, duplicate_mapped, flag, ids_param, level_param, micron, only, point_req};
+use super::{Motion, R, absent, bad, duplicate_mapped, flag, ids_param, level_param, micron, next_number, only, point_req, wall_at};
 use crate::engine::Session;
 use crate::geom::P2;
 use crate::model::{Element, Guid, Id, MAX_POINTS, Model, TOL, Wall, run_arm};
+use crate::walls::Axis;
 
 /// What was copied: the GUIDs of its elements, in the order they were copied.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -162,9 +163,6 @@ fn sort_out(m: &Model, ids: &[Id], to_levels: bool) -> (Vec<Id>, Vec<String>) {
         let why = match e {
             _ if !pasteable(e) => Some(format!("{} is made, not copied", e.category())),
             _ if to_levels && annotation(e) => Some("it belongs to its view, not to a level".to_string()),
-            Element::Door(o) | Element::Window(o) if to_levels && !guids.contains(&o.host) => {
-                Some("it goes only in its wall; copy the wall too".to_string())
-            }
             Element::Railing(r) if r.host.is_some_and(|h| !guids.contains(&h)) => {
                 Some("it goes only with its stair or ramp; copy that too".to_string())
             }
@@ -221,6 +219,9 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> R {
     only(c, p, &["ids", "id", "by", "levels", "view", "same_place"])?;
     let to_levels = !absent(p.get("levels")) || !absent(p.get("view"));
     let (same, by_given) = (flag(c, p, "same_place")?, !absent(p.get("by")));
+    if !same && !by_given && !to_levels {
+        return Err(bad(c, "say where to paste: `by` (beside), `levels` or `view` (aligned to levels), or `same_place`"));
+    }
     if usize::from(same) + usize::from(by_given && !to_levels) + usize::from(to_levels) > 1
         || (!absent(p.get("levels")) && !absent(p.get("view")))
     {
@@ -236,14 +237,66 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> R {
     if ids.is_empty() {
         return Err(bad(c, format!("nothing to paste: {}", left_out.join("; "))));
     }
+    // A door or window copied without its wall goes in the wall it lands on, as Revit's.
+    let loose = loose_openings(&s.model, &ids);
+    let rest: Vec<Id> = ids.iter().copied().filter(|id| !loose.contains(id)).collect();
     if to_levels {
         let targets = target_levels(c, &s.model, p)?;
-        return paste_to_levels(c, s, &ids, &targets, by, left_out);
+        return paste_to_levels(c, s, &rest, &loose, &targets, by, left_out);
     }
     let mo = Motion { map: &|q| micron(q + by), slide: Some(by), mirror: false };
-    let (made, mapping) = duplicate_mapped(c, s, &ids, &mo)?;
-    keep_rebar_on_copies(s, &made, &mapping);
+    let mut made = if rest.is_empty() { Vec::new() } else { duplicate_mapped(c, s, &rest, &mo)?.0 };
+    let (placed, skipped) = place_openings(s, &loose, by, None);
+    made.extend(placed);
+    left_out.extend(skipped);
+    if made.is_empty() {
+        return Err(bad(c, format!("nothing to paste: {}", left_out.join("; "))));
+    }
     Ok(json!({"ids": made, "pasted": [{"ids": made}], "notes": [], "left_out": left_out}))
+}
+
+/// The doors and windows among `ids` whose wall is not among them.
+fn loose_openings(m: &Model, ids: &[Id]) -> Vec<Id> {
+    let guids: BTreeSet<Guid> = ids.iter().map(|id| m.guid(*id)).collect();
+    ids.iter()
+        .copied()
+        .filter(|id| matches!(m.elements.get(*id), Some(Element::Door(o) | Element::Window(o)) if !guids.contains(&o.host)))
+        .collect()
+}
+
+/// A copy of each of `loose`, doors and windows without their wall, in the wall that is where it falls (`by` from where it
+/// was) on `level`, or on the level of its old wall: Revit puts a pasted door in the wall it lands on. Each has its own mark;
+/// one that falls on no wall is left out, and the reason is said.
+fn place_openings(s: &mut Session, loose: &[Id], by: P2, level: Option<Guid>) -> (Vec<Id>, Vec<String>) {
+    let (mut made, mut left_out) = (Vec::new(), Vec::new());
+    for &id in loose {
+        let m = &s.model;
+        let label = named(m, id);
+        let Some(e @ (Element::Door(o) | Element::Window(o))) = m.elements.get(id) else { continue };
+        let Some(old) = m.wall(o.host) else {
+            left_out.push(format!("{label}: its wall is no longer in the project"));
+            continue;
+        };
+        let here = micron(Axis::of(old).at(o.offset, 0.0) + by);
+        let Some((host, offset)) = wall_at(m, level.unwrap_or(old.level), here) else {
+            left_out.push(format!("{label}: no wall at [{}, {}] to hold it: a door or window goes only in a wall", here.0, here.1));
+            continue;
+        };
+        let door = matches!(e, Element::Door(_));
+        let mut copy = o.clone();
+        (copy.host, copy.offset) = (host, offset);
+        copy.mark = next_number(m.elements.values().filter_map(|e| match e {
+            Element::Door(o) if door => Some(o.mark.as_str()),
+            Element::Window(o) if !door => Some(o.mark.as_str()),
+            _ => None,
+        }));
+        let mut copy = if door { Element::Door(copy) } else { Element::Window(copy) };
+        if let Some(params) = copy.params_mut() {
+            crate::massing::detach(params);
+        }
+        made.push(s.model_mut().insert(copy));
+    }
+    (made, left_out)
 }
 
 /// The levels `levels` (each a level, a plan view or a name) or `view` name, as GUIDs, each once.
@@ -268,23 +321,15 @@ fn target_levels(c: &str, m: &Model, p: &Value) -> Result<Vec<Guid>, String> {
     Ok(out)
 }
 
-/// The bars among `made` are on their host's copy.
-fn keep_rebar_on_copies(s: &mut Session, made: &[Id], mapping: &BTreeMap<Guid, Guid>) {
-    let m = s.model_mut();
-    for id in made {
-        if let Some(Element::Rebar(r)) = m.elements.get_mut(*id) {
-            r.host = r.host.map(|h| mapping.get(&h).copied().unwrap_or(h));
-        }
-    }
-}
-
-/// Paste Aligned to Selected Levels: copies of `ids` for each of `targets`, at the same place in plan.
-fn paste_to_levels(c: &str, s: &mut Session, ids: &[Id], targets: &[Guid], by: P2, left_out: Vec<String>) -> R {
+/// Paste Aligned to Selected Levels: copies of `ids` for each of `targets`, at the same place in plan, and `loose` (doors and
+/// windows without their wall) in the walls they land on there.
+fn paste_to_levels(c: &str, s: &mut Session, ids: &[Id], loose: &[Id], targets: &[Guid], by: P2, mut left_out: Vec<String>) -> R {
     let table: Vec<(Guid, f64)> = s.model.levels().into_iter().map(|(id, l)| (s.model.guid(id), l.elevation)).collect();
     let elevation = |g: Guid| table.iter().find(|(l, _)| *l == g).map(|(_, z)| *z);
     // The level the copied elements stand on, or the lowest of them where they stand on several: what the paste is aligned from.
     let from = ids
         .iter()
+        .chain(loose)
         .filter_map(|id| s.model.elements.get(*id).and_then(|e| s.model.level_of(e)))
         .filter_map(|g| elevation(g).map(|z| (g, z)))
         .min_by(|a, b| a.1.total_cmp(&b.1))
@@ -293,12 +338,21 @@ fn paste_to_levels(c: &str, s: &mut Session, ids: &[Id], targets: &[Guid], by: P
     let from_z = elevation(from).unwrap_or_default();
     let (mut all, mut pasted, mut notes) = (Vec::new(), Vec::new(), Vec::new());
     for &target in targets {
-        let Some(target_z) = elevation(target) else { continue };
+        let Some(target_z) = elevation(target) else {
+            notes.push(format!("level {} is not in the project, so nothing was pasted to it", s.model.shown(target)));
+            continue;
+        };
         let shift = Shift { table: &table, from, to: target, by: target_z - from_z };
+        // What cannot stand at this height, for want of a level there and an offset to raise it by, is left out.
+        let (fit, skipped) = shift.placeable(&s.model, ids);
+        say_once(&mut left_out, skipped);
         let sideways = Motion { map: &|q| micron(q + by), slide: Some(by), mirror: false };
-        let (made, mapping) = duplicate_mapped(c, s, ids, &sideways)?;
-        keep_rebar_on_copies(s, &made, &mapping);
-        let copies: BTreeSet<Guid> = mapping.values().copied().collect();
+        let (mut made, copies) = if fit.is_empty() {
+            (Vec::new(), BTreeSet::new())
+        } else {
+            let (made, mapping) = duplicate_mapped(c, s, &fit, &sideways)?;
+            (made, mapping.values().copied().collect::<BTreeSet<Guid>>())
+        };
         let m = s.model_mut();
         for &id in &made {
             let Some(e) = m.elements.get_mut(id) else { continue };
@@ -314,11 +368,27 @@ fn paste_to_levels(c: &str, s: &mut Session, ids: &[Id], targets: &[Guid], by: P
                 notes.push(format!("room {id} is not enclosed on {level}: copy its walls too"));
             }
         }
+        let (placed, skipped) = place_openings(s, loose, by, Some(target));
+        made.extend(placed);
+        say_once(&mut left_out, skipped);
         let name = s.model.elements.id(target).and_then(|l| s.model.level(l)).map(|l| l.name.clone());
         pasted.push(json!({"level": s.model.elements.id(target), "name": name, "ids": made}));
         all.extend(made);
     }
+    if all.is_empty() {
+        let said: Vec<String> = left_out.iter().chain(&notes).cloned().collect();
+        return Err(bad(c, format!("nothing to paste: {}", said.join("; "))));
+    }
     Ok(json!({"ids": all, "pasted": pasted, "notes": notes, "left_out": left_out}))
+}
+
+/// `more` added to `said`, those it does not say already.
+fn say_once(said: &mut Vec<String>, more: Vec<String>) {
+    for line in more {
+        if !said.contains(&line) {
+            said.push(line);
+        }
+    }
 }
 
 /// Moving what stood on level `from` to level `to`, `by` mm up: which level each level it measures from becomes.
@@ -343,11 +413,8 @@ impl Shift<'_> {
         self.table.iter().find(|(_, lz)| (lz - z).abs() <= TOL).map(|(l, _)| *l)
     }
 
-    /// `e`, a new copy, moved up the way the paste goes. What it can't keep it says in `notes`; `copies` are the elements this
-    /// paste made.
-    fn apply(&self, e: &mut Element, label: &str, copies: &BTreeSet<Guid>, notes: &mut Vec<String>) {
-        self.retop(e, label, notes);
-        // Every level it measures from, now the one that stands where it did, moved.
+    /// Every level `e` measures from, now the one that stands where it did, moved. The levels with none there are the result.
+    fn relevel(&self, e: &mut Element) -> Vec<Guid> {
         let mut missing: Vec<Guid> = Vec::new();
         e.refs_mut(&mut |g| {
             if self.elevation(*g).is_some() {
@@ -357,6 +424,43 @@ impl Shift<'_> {
                 }
             }
         });
+        missing
+    }
+
+    /// Of `ids`, the ones a paste can put at this height, and why it leaves out each of the others: an element that has to
+    /// measure from a level where there is none, and has no offset to be raised by (a stair, a ramp, a CAD import, a site
+    /// element, a room separation line), would stand too low by the levels' difference. What is left out takes its railings with it.
+    fn placeable(&self, m: &Model, ids: &[Id]) -> (Vec<Id>, Vec<String>) {
+        let (mut left_out, mut dropped) = (Vec::new(), BTreeSet::new());
+        for &id in ids {
+            let Some(e) = m.elements.get(id) else { continue };
+            let mut probe = e.clone();
+            self.retop(&mut probe, "", &mut Vec::new());
+            if let Some(g) = self.relevel(&mut probe).first()
+                && !raise(&mut probe, 0.0)
+            {
+                let z = self.elevation(*g).map_or(0.0, |z| z + self.by);
+                left_out.push(format!("{}: no level at {z} mm, and it has no offset to raise it by", named(m, id)));
+                dropped.insert(id);
+            }
+        }
+        let guids: BTreeSet<Guid> = dropped.iter().map(|id| m.guid(*id)).collect();
+        for &id in ids {
+            if let Some(Element::Railing(r)) = m.elements.get(id)
+                && r.host.is_some_and(|h| guids.contains(&h))
+            {
+                left_out.push(format!("{}: it goes with its stair or ramp, which is left out", named(m, id)));
+                dropped.insert(id);
+            }
+        }
+        (ids.iter().copied().filter(|id| !dropped.contains(id)).collect(), left_out)
+    }
+
+    /// `e`, a new copy, moved up the way the paste goes. What it can't keep it says in `notes`; `copies` are the elements this
+    /// paste made.
+    fn apply(&self, e: &mut Element, label: &str, copies: &BTreeSet<Guid>, notes: &mut Vec<String>) {
+        self.retop(e, label, notes);
+        let missing = self.relevel(e);
         if !missing.is_empty() {
             let z = missing.first().and_then(|g| self.elevation(*g)).map_or(0.0, |z| z + self.by);
             if raise(e, self.by) {
@@ -457,7 +561,16 @@ fn raise(e: &mut Element, dz: f64) -> bool {
         | Element::Column(crate::model::Column { base_offset, .. })
         | Element::StructuralColumn(crate::model::Column { base_offset, .. })
         | Element::Footing(crate::model::Column { base_offset, .. }) => *base_offset += dz,
-        Element::Room(r) => r.base_offset += dz,
+        // Its top as well: with no upper limit it is measured from its own level.
+        Element::Room(r) => {
+            r.base_offset += dz;
+            if r.top_level.is_none() {
+                r.limit_offset += dz;
+            }
+        }
+        Element::PointCloud(pc) => pc.offset += dz,
+        Element::BuildingPad(bp) => bp.offset += dz,
+        Element::Rebar(rb) => rb.path.iter_mut().for_each(|q| q[2] += dz),
         Element::Floor(f) | Element::Toposolid(f) => f.offset += dz,
         Element::Ceiling(cl) => cl.offset += dz,
         Element::Roof(r) => r.offset += dz,
