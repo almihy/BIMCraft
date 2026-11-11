@@ -95,7 +95,9 @@ fn identity_data_that_cannot_be_held_is_refused() {
         (json!({"url": "x".repeat(2000)}), "characters"),
     ] {
         let mut p = json!({"category": "wall", "name": wall});
-        p.as_object_mut().map(|o| o.extend(bad.as_object().cloned().unwrap_or_default()));
+        if let Some(o) = p.as_object_mut() {
+            o.extend(bad.as_object().cloned().unwrap_or_default());
+        }
         let e = s.execute("type", &p).unwrap_err();
         assert!(e.contains(says), "{bad}: {e}");
     }
