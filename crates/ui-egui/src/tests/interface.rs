@@ -74,6 +74,17 @@ fn file_is_on_the_app_bar_over_the_ribbon_and_the_options_bar_floats_over_the_vi
     assert_eq!(ids(&h, "wall").len(), 4);
 }
 
+#[test]
+fn a_tool_with_no_options_shows_its_name_alone_on_the_options_bar() {
+    let mut h = app(BOX);
+    tool(&mut h, "Door");
+    let bar = h.state().options_rect;
+    assert_eq!(h.state().context().as_deref(), Some("Modify | Place Door"));
+    assert!(bar.is_positive(), "the bar names the tool: {bar:?}");
+    // "Modify | Place Door" at 13 px is about 120 px: the name and the frame's margins, nothing after it.
+    assert!(bar.width() < 160.0, "only the name: {bar:?}");
+}
+
 /// The bands in the bar's colour the window drew as tall as a ribbon panel's name.
 fn name_bands(h: &Harness<BimApp>) -> usize {
     fn walk(s: &Shape, out: &mut usize) {
