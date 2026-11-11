@@ -233,7 +233,7 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
                         &mut cx.model.types.floor,
                         &base,
                         |k| (k.thickness - typ.thickness).abs() < 0.05 && k.layers == typ.layers,
-                        FloorType { thickness: typ.thickness, layers: typ.layers.clone() },
+                        FloorType { thickness: typ.thickness, layers: typ.layers.clone(), identity: Default::default() },
                     )
                 })
                 .clone()
@@ -277,7 +277,7 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
                         &mut cx.model.types.ceiling,
                         &base,
                         |k| (k.thickness - typ.thickness).abs() < 0.05 && k.layers == typ.layers && k.grid == 0.0,
-                        CeilingType { thickness: typ.thickness, grid: 0.0, layers: typ.layers.clone() },
+                        CeilingType { thickness: typ.thickness, grid: 0.0, layers: typ.layers.clone(), identity: Default::default() },
                     )
                 })
                 .clone()
