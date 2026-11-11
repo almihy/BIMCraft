@@ -122,6 +122,58 @@ fn the_page_dresses_the_window_in_its_colours() {
     assert_eq!(crate::style::pal().panel, egui::Color32::from_rgb(23, 28, 37));
 }
 
+/// The page's controls: outlined on its field colour in its input's outline, washed in its hover colour, with its corners; its
+/// accent on the contextual tabs in place of Revit's green, the edit mode's marks keeping the drawing's green.
+#[test]
+fn the_page_draws_the_controls_and_contextual_tabs_as_its_own() {
+    use crate::style::Controls;
+    let mut h = hosted(BOX);
+    let look = HostLook {
+        dark: false,
+        panel: Some([255, 255, 255]),
+        text: Some([16, 24, 40]),
+        accent: Some([43, 80, 216]),
+        skin: Skin {
+            border: Some([228, 231, 236]),
+            surface: Some([255, 255, 255]),
+            input: Some([208, 213, 221]),
+            hover: Some([239, 242, 247]),
+            context: Some([43, 80, 216]),
+            controls: Some(Controls { outlined: true, radius: 6 }),
+            ..Skin::default()
+        },
+        compact: Some(true),
+        ..HostLook::default()
+    };
+    h.state_mut().set_host_look(look);
+    h.run();
+    let p = crate::style::pal();
+    let rgb = egui::Color32::from_rgb;
+    assert_eq!(p.context, rgb(43, 80, 216), "the open contextual tab in the accent");
+    assert_eq!(p.on_context, egui::Color32::WHITE);
+    assert_eq!(p.hover_fill, rgb(239, 242, 247));
+    let style = h.ctx.style_of(egui::Theme::Light);
+    let w = &style.visuals.widgets;
+    assert_eq!(w.inactive.weak_bg_fill, rgb(255, 255, 255), "a control on the field's colour");
+    assert_eq!(w.inactive.bg_stroke.color, rgb(208, 213, 221), "outlined in the input's colour");
+    assert_eq!(w.hovered.bg_stroke.color, rgb(208, 213, 221), "hover only washes it");
+    assert_eq!(w.hovered.weak_bg_fill, rgb(239, 242, 247));
+    assert_eq!(w.inactive.corner_radius, egui::CornerRadius::same(6));
+    assert_eq!(style.visuals.menu_corner_radius, egui::CornerRadius::same(8));
+    assert_eq!(crate::style::canvas_pal().context, crate::style::CANVAS_LIGHT.context, "the drawing keeps its green");
+}
+
+/// Not hosted, the window keeps its own controls: filled, 4 px corners, green contextual tabs.
+#[test]
+fn the_desktop_keeps_its_own_controls() {
+    let mut h = app(BOX);
+    h.run();
+    let style = h.ctx.style_of(egui::Theme::Light);
+    assert_eq!(style.visuals.widgets.inactive.corner_radius, egui::CornerRadius::same(4));
+    assert_eq!(style.visuals.widgets.inactive.weak_bg_fill, crate::style::LIGHT.control);
+    assert_eq!(crate::style::pal().context, crate::style::LIGHT.context);
+}
+
 #[test]
 fn the_pages_look_changes_only_what_it_sends_and_keeps_the_persons_own_choices() {
     let mut h = hosted(BOX);

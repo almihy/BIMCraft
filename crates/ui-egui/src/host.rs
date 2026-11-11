@@ -22,7 +22,7 @@ use egui::{Context, ThemePreference};
 use serde_json::Value;
 
 pub use crate::dialog::FileRequest;
-pub use crate::style::Skin;
+pub use crate::style::{Controls, Skin};
 use crate::{BimApp, Pending};
 
 /// The hosting page's look: light or dark, and its colours, `[r, g, b]`.

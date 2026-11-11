@@ -43,7 +43,7 @@ use bimcraft_core::ids::Guid;
 use bimcraft_core::model::Model;
 use bimcraft_core::sync::{self, Changes};
 use bimcraft_ui_egui::BimApp;
-use bimcraft_ui_egui::host::{HostLook, Skin};
+use bimcraft_ui_egui::host::{Controls, HostLook, Skin};
 use serde_json::Value;
 use wasm_bindgen::prelude::*;
 
@@ -355,7 +355,9 @@ impl WebApp {
     }
 
     /// Dresses the interface in the page's look: `{"dark": bool, "compact": bool}` and colours as `"#rrggbb"`: `panel`, `text`,
-    /// `accent`, `canvas`, `app_bar`, `app_bar_text`, `border`, `muted`, `bar`, `surface`. Any left out keeps BIMCraft's own.
+    /// `accent`, `canvas`, `app_bar`, `app_bar_text`, `border`, `muted`, `bar`, `surface`, `input` (a control's outline), `hover`
+    /// (the wash of what is hovered), `context` (the contextual tabs, Revit's green); `"outlined": true` draws the controls as
+    /// the page's (outlined, hover a wash), their corners `"radius"` px (6 if not said). Any left out keeps BIMCraft's own.
     pub fn set_theme(&self, theme: &str) -> Result<(), JsValue> {
         let v: Value = serde_json::from_str(theme).map_err(err)?;
         let colour = |key: &str| v.get(key).and_then(Value::as_str).and_then(hex);
@@ -372,6 +374,14 @@ impl WebApp {
                 muted: colour("muted"),
                 bar: colour("bar"),
                 surface: colour("surface"),
+                input: colour("input"),
+                hover: colour("hover"),
+                context: colour("context"),
+                // Outlined controls and their corners, as the page draws its own: `"outlined": true`, `"radius": 6`.
+                controls: v.get("outlined").and_then(Value::as_bool).filter(|o| *o).map(|outlined| Controls {
+                    outlined,
+                    radius: v.get("radius").and_then(Value::as_u64).map_or(6, |r| r.min(12) as u8),
+                }),
             },
             compact: v.get("compact").and_then(Value::as_bool),
         };

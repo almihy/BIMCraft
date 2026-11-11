@@ -160,7 +160,8 @@ pub(crate) fn marks(m: &Model, f: &Floor) -> Marks {
 /// accent.
 pub(crate) fn draw_marks(p: &Painter, marks: &Marks, to: impl Fn(P3) -> Pos2, picked: &[Sub], lit: Option<Sub>) {
     let seg = |[a, b]: [P3; 2]| Some([to(a), to(b)]).filter(|[a, b]| a.is_finite() && b.is_finite());
-    let green = pal().context;
+    // The drawing's green, on its paper: a hosting page's contextual tabs may be another colour.
+    let green = crate::style::canvas_pal().context;
     for e in marks.creases.iter().filter_map(|e| seg(*e)) {
         p.line_segment(e, Stroke::new(1.0, pal().muted));
     }
