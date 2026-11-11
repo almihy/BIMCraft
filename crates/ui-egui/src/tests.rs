@@ -1149,7 +1149,10 @@ fn edit_type_has_an_identity_data_group_that_sets_the_types_type_mark_fire_ratin
     // Open again it shows what is held, and clearing a field clears it.
     press(&mut h, "Edit Type");
     press(&mut h, "Construction");
-    type_into(&mut h, "Fire Rating", "");
+    h.get_by_label("Fire Rating").focus();
+    h.run();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    key(&mut h, Key::Backspace);
     press(&mut h, "OK");
     let identity = &h.state().session.model.types.wall[&name].identity;
     assert!(identity.fire_rating.is_empty() && identity.type_mark == "W1", "{identity:?}");
