@@ -162,3 +162,25 @@ fn no_rules_all_passing_and_new_checks_each_say_so() {
     assert!(h.state_mut().set_checks("[1, 2]").is_err() && h.state_mut().set_checks("{").is_err());
     assert!(h.state_mut().set_checks(r#"{"results": [{"status": 7, "findings": "x"}, 3], "extra": true}"#).is_ok());
 }
+
+#[test]
+fn a_flag_on_a_room_shows_the_whole_room_not_only_its_tag() {
+    // A long room: 30 m by 6 m, its tag in the middle.
+    let mut h = hosted(
+        r#"wall {"points": [[0,0],[30000,0],[30000,6000],[0,6000]], "closed": true}
+room {"point": [15000, 3000], "name": "Hall"}"#,
+    );
+    let room = ids(&h, "room")[0];
+    let flag = json!({"results": [{"rule_id": "kn_1", "title": "Hall area", "scope": "client", "status": "fail",
+        "findings": [{"message": "Too small", "elements": [format!("r{room}")]}]}]});
+    h.state_mut().set_checks(&flag.to_string()).unwrap();
+    h.run();
+    press(&mut h, "Hall area — Failed");
+    assert_eq!(h.state().selection, [room]);
+    h.run();
+    let view = h.state().view_rect;
+    for corner in [P2(500.0, 500.0), P2(29500.0, 5500.0)] {
+        let at = h.state().screen(corner);
+        assert!(view.contains(at), "the room's corner {corner:?} in the view: {at:?} in {view:?}");
+    }
+}

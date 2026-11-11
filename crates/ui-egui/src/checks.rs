@@ -6,6 +6,7 @@
 //! ([`BimApp::take_rule_request`]). The status bar counts the flags; a click there opens the palette. A window no page hosts
 //! has no checks and no palette.
 
+use bimcraft_core::geom::P2;
 use bimcraft_core::inquiry;
 use bimcraft_core::model::Id;
 use egui::text::{LayoutJob, TextWrapping};
@@ -368,7 +369,16 @@ impl BimApp {
             return false;
         }
         self.selection = ids.clone();
-        if let Some((level, [lo, hi])) = inquiry::shown(&self.session.model, &ids) {
+        if let Some((level, [mut lo, mut hi])) = inquiry::shown(&self.session.model, &ids) {
+            // A room is drawn as its tag: the view takes in the whole of what it covers.
+            let m = &self.session.model;
+            for id in &ids {
+                if let Some(bimcraft_core::model::Element::Room(r)) = m.elements.get(*id) {
+                    for p in m.room_outline(r).0 {
+                        (lo, hi) = (P2(lo.0.min(p.0), lo.1.min(p.1)), P2(hi.0.max(p.0), hi.1.max(p.1)));
+                    }
+                }
+            }
             self.open_sheet(Sheet::Plan(level));
             self.canvas.show(level, lo, hi);
         }
