@@ -22,12 +22,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::engine::{Session, Step};
-use crate::ids::{Changed, Elements, Guid, Id};
+use crate::ids::{Changed, Guid, Id};
 use crate::model::{Element, Model};
+use crate::sync_settings::{self, setting_of};
 
 /// The keys of a project's file that are not settings to send: its elements, the id the next one takes, and the library's
 /// own ids and GUIDs, each copy's.
-const NOT_SETTINGS: [&str; 3] = ["elements", "next_id", "library"];
+pub(crate) const NOT_SETTINGS: [&str; 3] = ["elements", "next_id", "library"];
 
 /// Most changes one call takes, and the longest JSON of one: what comes from another copy is hostile.
 pub const MAX_CHANGES: usize = 200_000;
@@ -60,7 +61,7 @@ impl Changes {
         if let Some(g) = c.elements.keys().find(|g| g.is_nil() || g.pending().is_some()) {
             return Err(format!("{g} is not an element's GUID"));
         }
-        if let Some(k) = c.project.keys().find(|k| NOT_SETTINGS.contains(&k.as_str())) {
+        if let Some(k) = c.project.keys().find(|k| NOT_SETTINGS.contains(&setting_of(k))) {
             return Err(format!("`{k}` is each copy's own, not a setting to change"));
         }
         Ok(c)
@@ -81,19 +82,6 @@ fn element_text(e: &Element) -> Result<String, String> {
     serde_json::to_string(e).map_err(|e| e.to_string())
 }
 
-/// The project's settings as the file has them, by key: everything but [`NOT_SETTINGS`].
-fn settings(m: &Model) -> Result<Map<String, Value>, String> {
-    let mut bare = m.clone();
-    bare.elements = Elements::new();
-    let Value::Object(mut out) = serde_json::to_value(&bare).map_err(|e| e.to_string())? else {
-        return Err("a project is not an object".into());
-    };
-    for k in NOT_SETTINGS {
-        out.remove(k);
-    }
-    Ok(out)
-}
-
 /// Everything in `m`, as changes that make a copy say it (`complete`).
 pub fn entries(m: &Model) -> Result<Changes, String> {
     let mut c = Changes { complete: true, ..Changes::default() };
@@ -105,7 +93,7 @@ pub fn entries(m: &Model) -> Result<Changes, String> {
             c.elements.insert(g, Some(element_text(e)?));
         }
     }
-    for (k, v) in settings(m)? {
+    for (k, v) in sync_settings::flat(m)? {
         c.project.insert(k, Some(v.to_string()));
     }
     Ok(c)
@@ -134,7 +122,7 @@ pub fn changes(before: &Model, after: &Model) -> Result<Changes, String> {
         }
     }
     if !before.same_settings(after) {
-        let (a, b) = (settings(before)?, settings(after)?);
+        let (a, b) = (sync_settings::flat(before)?, sync_settings::flat(after)?);
         for k in a.keys().chain(b.keys()).collect::<BTreeSet<_>>() {
             if a.get(k) != b.get(k) {
                 c.project.insert(k.clone(), b.get(k).map(Value::to_string));
@@ -255,21 +243,8 @@ impl Model {
         if c.project.is_empty() {
             return Ok(self.clone());
         }
-        let mut map = settings(self)?;
-        if c.complete {
-            map.retain(|k, _| c.project.contains_key(k));
-        }
-        for (k, v) in &c.project {
-            match v {
-                Some(text) if text.len() >= MAX_ENTRY => return Err(format!("`{k}` is too large ({} bytes)", text.len())),
-                Some(text) => {
-                    map.insert(k.clone(), serde_json::from_str(text).map_err(|e| format!("`{k}`: {e}"))?);
-                }
-                None => {
-                    map.remove(k);
-                }
-            }
-        }
+        let mut map = sync_settings::settings(self)?;
+        sync_settings::apply(&mut map, &c.project, c.complete)?;
         map.insert("elements".into(), Value::Object(Map::new()));
         map.insert("next_id".into(), serde_json::json!(self.next_id));
         map.insert("library".into(), serde_json::to_value(&self.library).map_err(|e| e.to_string())?);
@@ -474,7 +449,7 @@ impl Session {
             h.now.elements.insert(g, e.map(element_text).transpose()?);
         }
         if !touched.is_empty() {
-            let now = settings(&self.model)?;
+            let now = sync_settings::flat(&self.model)?;
             for k in touched {
                 let v = now.get(&k).map(Value::to_string);
                 h.now.project.insert(k, v);

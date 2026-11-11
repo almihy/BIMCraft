@@ -145,6 +145,9 @@ pub mod storm;
 pub mod styles;
 pub mod symbol_set;
 pub mod sync;
+mod sync_settings;
+#[cfg(test)]
+mod sync_settings_tests;
 #[cfg(test)]
 mod sync_tests;
 pub mod text;
