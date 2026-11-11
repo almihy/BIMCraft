@@ -20,6 +20,6 @@ js-sys = "0.3"
 serde_json = { workspace = true }
 wasm-bindgen = "=0.2.129"
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["HtmlCanvasElement", "Document", "Window"] }
+web-sys = { version = "0.3", features = ["HtmlCanvasElement", "Document", "Window", "KeyboardEvent", "EventTarget", "Event"] }
 getrandom = { workspace = true, features = ["wasm_js"] }
 getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }

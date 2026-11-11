@@ -243,3 +243,129 @@ fn export_in_a_hosted_window_asks_the_page_where_and_leaves_what_it_wrote_for_th
     assert!(String::from_utf8_lossy(&written[0].1).starts_with("ISO-10303-21"));
     assert!(!h.state().has_written(), "taken");
 }
+
+fn first_wall(h: &Harness<BimApp>) -> Id {
+    h.state().session.model.elements.iter().find(|(_, e)| matches!(e, Element::Wall(_))).map(|(id, _)| *id).unwrap()
+}
+
+#[test]
+fn the_page_reads_what_the_person_sees_the_selection_the_view_and_where_it_looks() {
+    let mut h = hosted(SAMPLE);
+    let wall = first_wall(&h);
+    h.state_mut().selection = vec![wall];
+    h.run();
+    let c = h.state().host_context();
+    assert_eq!(c["count"], json!(1));
+    assert_eq!(c["selection"][0]["id"], json!(wall));
+    assert_eq!(c["selection"][0]["category"], json!("wall"));
+    assert_eq!(c["selection"][0]["guid"], json!(h.state().session.model.elements.guid(wall).unwrap().to_string()));
+    assert_eq!(c["view"]["kind"], json!("floor plan"));
+    assert_eq!(c["view"]["name"], json!("Level 1"));
+    assert_eq!(c["view"]["level"]["name"], json!("Level 1"));
+    // The part of the plan on screen: a box round the house, in its own millimetres, with the zoom.
+    assert_eq!(c["camera"]["kind"], json!("plan"));
+    let (lo, hi) = (&c["camera"]["visible"]["min"], &c["camera"]["visible"]["max"]);
+    assert!(lo[0].as_f64().unwrap() < 0.0 && hi[0].as_f64().unwrap() > 10000.0, "{c}");
+    assert!(lo[1].as_f64().unwrap() < hi[1].as_f64().unwrap(), "north is up: {c}");
+    assert!(c["camera"]["scale"].as_f64().unwrap() > 0.0);
+}
+
+#[test]
+fn the_context_changes_with_the_selection_the_view_and_the_camera_and_not_while_nothing_moves() {
+    let mut h = hosted(SAMPLE);
+    h.run();
+    let at_rest = h.state().host_context_key();
+    h.run();
+    assert_eq!(h.state().host_context_key(), at_rest, "nothing moved");
+    let wall = first_wall(&h);
+    h.state_mut().selection = vec![wall];
+    let picked = h.state().host_context_key();
+    assert_ne!(picked, at_rest, "the selection");
+    let level = h.state().plan_key().unwrap();
+    h.state_mut().canvas.zoom(level, 2.0);
+    h.run();
+    let zoomed = h.state().host_context_key();
+    assert_ne!(zoomed, picked, "the camera");
+    h.state_mut().open_3d(None);
+    h.run();
+    let three = h.state().host_context();
+    assert_eq!(three["view"]["kind"], json!("3D view"));
+    assert_eq!(three["camera"]["kind"], json!("3d"));
+    assert!(three["camera"]["target"].is_array());
+    assert_ne!(h.state().host_context_key(), zoomed, "the view");
+}
+
+#[test]
+fn the_agent_selects_what_it_means_by_id_or_guid_and_the_window_shows_it() {
+    let mut h = hosted(SAMPLE);
+    let model = Arc::clone(&h.state().session.model);
+    let wall = first_wall(&h);
+    let guid = h.state().session.model.elements.guid(wall).unwrap().to_string();
+    let r = h.state_mut().host_select(&format!("{wall} {guid} 999999999 not-an-id"), false, false);
+    assert_eq!(h.state().selection, vec![wall], "the id and its GUID are one element; what names nothing is left");
+    assert_eq!(r["ids"], json!([wall]));
+    assert_eq!(r["missing"].as_array().unwrap().len(), 2, "{r}");
+    h.run();
+    // In place of what was selected, unless added.
+    let other =
+        h.state().session.model.elements.iter().find(|(id, e)| matches!(e, Element::Door(_)) && **id != wall).map(|(id, _)| *id).unwrap();
+    h.state_mut().host_select(&other.to_string(), false, false);
+    assert_eq!(h.state().selection, vec![other]);
+    h.state_mut().host_select(&wall.to_string(), true, false);
+    assert_eq!(h.state().selection, vec![other, wall]);
+    // Shown: the plan that has it opens.
+    h.state_mut().open_3d(None);
+    h.run();
+    h.state_mut().host_select(&wall.to_string(), false, true);
+    h.run();
+    assert!(matches!(h.state().sheet, Sheet::Plan(_)), "the plan opened over the 3D view");
+    // Nothing clears it.
+    let r = h.state_mut().host_select("", false, false);
+    assert!(h.state().selection.is_empty());
+    assert_eq!(r["selected"], json!(0));
+    assert!(Arc::ptr_eq(&h.state().session.model, &model), "selecting changes nothing in the model");
+}
+
+#[test]
+fn the_agent_opens_a_view_by_its_name_number_or_id() {
+    let mut h = hosted(SAMPLE);
+    let model = Arc::clone(&h.state().session.model);
+    let c = h.state_mut().host_open_view("3d", false).unwrap();
+    h.run();
+    assert_eq!(h.state().sheet, Sheet::View3D);
+    assert_eq!(c["view"]["kind"], json!("3D view"));
+    let c = h.state_mut().host_open_view("level 2", true).unwrap();
+    assert!(matches!(h.state().sheet, Sheet::Ceiling(_)), "{c}");
+    assert_eq!(c["view"]["kind"], json!("ceiling plan"));
+    assert_eq!(c["view"]["name"], json!("Level 2"));
+    let c = h.state_mut().host_open_view("Level 2", false).unwrap();
+    assert_eq!(c["view"]["kind"], json!("floor plan"));
+    let section = h.state().session.model.rare("section").into_iter().next().unwrap();
+    let c = h.state_mut().host_open_view(&section.to_string(), false).unwrap();
+    assert_eq!(c["view"]["kind"], json!("section"), "{c}");
+    let c = h.state_mut().host_open_view("A101", false).unwrap();
+    assert_eq!(c["view"]["kind"], json!("sheet"), "{c}");
+    assert!(c["view"]["number"].is_string());
+    assert_eq!(c["camera"], Value::Null, "a sheet has no camera");
+    let e = h.state_mut().host_open_view("No such view", false).unwrap_err();
+    assert!(e.contains("No view is named `No such view`") && e.contains("Level 1"), "{e}");
+    h.run();
+    assert!(Arc::ptr_eq(&h.state().session.model, &model), "opening views changes nothing in the model");
+}
+
+#[test]
+fn a_page_holds_back_the_keys_the_editor_takes_and_leaves_the_rest_to_the_browser() {
+    use crate::host::editor_takes_key as takes;
+    for k in ["Tab", " ", "Backspace", "Delete", "ArrowLeft", "ArrowDown", "Home", "PageUp", "F1", "F8", "F10"] {
+        assert!(takes(k, false), "{k}");
+    }
+    for k in ["a", "A", "d", "z", "y", "s", "k", ","] {
+        assert!(takes(k, true), "Ctrl+{k}");
+        assert!(!takes(k, false), "{k} alone is typed");
+    }
+    for k in ["c", "v", "x", "r", "w", "t", "l", "F5", "F11", "F12", "Escape", "Enter"] {
+        assert!(!takes(k, true), "Ctrl+{k} stays the browser's");
+    }
+    assert!(!takes("F5", false) && !takes("F11", false) && !takes("F12", false));
+    assert!(!takes("Escape", false) && !takes("Enter", false));
+}

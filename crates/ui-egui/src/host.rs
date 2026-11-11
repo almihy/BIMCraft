@@ -183,3 +183,20 @@ impl BimApp {
         }
     }
 }
+
+/// Whether a key pressed while the window's canvas has the keyboard is the editor's, so the page must stop the browser acting on
+/// it too: `key` is the browser's `KeyboardEvent.key` ("Tab", " ", "Delete", "F8", "d"), `command` whether Ctrl or Cmd is down.
+/// With any modifiers: Tab, Space, Backspace, Delete, the arrows (Alt with one is the browser's back and forward), Home, End,
+/// Page Up and Page Down, which would move focus, scroll the page or go back, and the function keys the editor and the browser
+/// both use, F1 to F4 and F6 to F10. With Ctrl or Cmd: A (select all), D (bookmark; the editor's Home), K, O, P, S, Y, Z, `,` and 1.
+/// Never F5 (reload), F11 (full screen), F12 (the developer tools), Escape, or Ctrl or Cmd with C, V and X: the browser's own
+/// copy, paste and cut events carry the clipboard, and the window handles those. The window sees only what its canvas has: a text
+/// field of the page's own has its keys.
+pub fn editor_takes_key(key: &str, command: bool) -> bool {
+    match key {
+        "Tab" | " " | "Spacebar" | "Backspace" | "Delete" | "Home" | "End" | "PageUp" | "PageDown" => true,
+        "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" => true,
+        "F1" | "F2" | "F3" | "F4" | "F6" | "F7" | "F8" | "F9" | "F10" => true,
+        k => command && matches!(k.to_ascii_lowercase().as_str(), "a" | "d" | "k" | "o" | "p" | "s" | "y" | "z" | "," | "1"),
+    }
+}

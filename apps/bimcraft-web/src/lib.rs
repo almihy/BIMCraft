@@ -20,6 +20,22 @@
 //! app.restore_history(text);  // put back on the project opened again: '{"undo": n, "redo": n}'
 //! ```
 //!
+//! What the person sees, for the page's agent (`bimcraft_ui_egui::hostview`), and a way for the agent to show what it means:
+//!
+//! ```js
+//! app.on_context(onContext);  // called a quarter second after the last change of the selection, the active view or where it
+//!                             // looks (and once at the start); then ask `context`
+//! app.context();              // '{"selection": [{id, guid, category, name}], "count": n, "view": {id, name, kind, level?, number?},
+//!                             //   "camera": {kind: "plan", scale, centre, visible: {min, max}} | {kind: "3d", azimuth, elevation,
+//!                             //   target, scale, lens} | null}'
+//! app.select("100123 100124", false, true);  // select by id, GUID or IFC GlobalId (add: to the selection; show: open the plan, zoomed to them)
+//! app.open_view("Level 2", false);           // open a view by name, number or id (a level's name: its plan; true: its ceiling plan)
+//! ```
+//!
+//! While its canvas has the keyboard, the keys the editor takes (Tab, Space, Backspace, Delete, the arrows, Ctrl+A, Ctrl+D, Ctrl+Z,
+//! Ctrl+Y, Ctrl+S, F-keys) are kept from the browser (`bimcraft_ui_egui::host::editor_takes_key`); Ctrl+C, V and X reach the
+//! window as the browser's copy, paste and cut events; a text field of the page's own is not the canvas and keeps its keys.
+//!
 //! Its files are the page's (`bimcraft_ui_egui::host`). Open, Link, Import CAD, Point Cloud and Export ask the page:
 //!
 //! ```js
@@ -43,8 +59,10 @@ use bimcraft_core::ids::Guid;
 use bimcraft_core::model::Model;
 use bimcraft_core::sync::{self, Changes};
 use bimcraft_ui_egui::BimApp;
-use bimcraft_ui_egui::host::{HostLook, Skin};
+use bimcraft_ui_egui::host::{HostLook, Skin, editor_takes_key};
+use bimcraft_ui_egui::hostview::ContextKey;
 use serde_json::Value;
+use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
 /// The interface and what the page hears from it: a change to the model, Save, and its files.
@@ -56,7 +74,14 @@ struct Host {
     on_save: Option<js_sys::Function>,
     on_change: Option<js_sys::Function>,
     files: Rc<RefCell<FileHooks>>,
+    /// What the page hears of what the person sees, what that was last, and since when it has held still (egui's clock).
+    on_context: Rc<RefCell<Option<js_sys::Function>>>,
+    context_seen: ContextKey,
+    context_since: Option<f64>,
 }
+
+/// How long what the person sees must hold still before the page is told it changed, seconds: a pan or a zoom is one change.
+const CONTEXT_AFTER: f64 = 0.25;
 
 /// What the page hears of files, and what it was last told.
 #[derive(Default)]
@@ -71,6 +96,24 @@ struct FileHooks {
 }
 
 impl Host {
+    /// After a frame: tells the page, once what the person sees has held still for a moment, that it changed.
+    fn tell_context(&mut self, ui: &egui::Ui) {
+        let key = self.app.host_context_key();
+        let now = ui.input(|i| i.time);
+        if key != self.context_seen {
+            self.context_seen = key;
+            self.context_since = Some(now);
+        }
+        let Some(since) = self.context_since else { return };
+        let wait = CONTEXT_AFTER - (now - since);
+        if wait > 0.0 {
+            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(wait + 0.01));
+        } else {
+            self.context_since = None;
+            later(self.on_context.borrow().clone(), None);
+        }
+    }
+
     /// After a frame: tells the page of a new ask for a file, of files written for it, and of files its links want.
     fn tell_files(&mut self) {
         let mut hooks = self.files.borrow_mut();
@@ -109,6 +152,7 @@ impl eframe::App for Host {
             later(self.on_save.clone(), None);
         }
         self.tell_files();
+        self.tell_context(ui);
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
@@ -155,6 +199,9 @@ pub fn sample_project() -> Result<String, JsValue> {
 /// The page's fonts: the bytes of its sans and of its monospace.
 type PageFonts = (Option<Vec<u8>>, Option<Vec<u8>>);
 
+/// The canvas the editor's keys are held on, and the listener that holds them.
+type KeyHold = (web_sys::HtmlCanvasElement, Closure<dyn FnMut(web_sys::KeyboardEvent)>);
+
 #[wasm_bindgen]
 pub struct WebApp {
     runner: eframe::WebRunner,
@@ -168,6 +215,10 @@ pub struct WebApp {
     fonts: Rc<RefCell<PageFonts>>,
     /// What the page hears of files, set before the start or after it.
     files: Rc<RefCell<FileHooks>>,
+    /// What the page hears of what the person sees, set before the start or after it.
+    on_context: Rc<RefCell<Option<js_sys::Function>>>,
+    /// The canvas the editor's keys are held on, and the listener that holds them (taken off when the interface is stopped).
+    keys: RefCell<Option<KeyHold>>,
     /// The model as `take_changes` last gave it, with the others' changes since: what changed here since is this person's,
     /// not sent yet.
     sent: RefCell<Option<Arc<Model>>>,
@@ -185,6 +236,8 @@ impl WebApp {
             look: Rc::new(RefCell::new(None)),
             fonts: Rc::new(RefCell::new((None, None))),
             files: Rc::new(RefCell::new(FileHooks::default())),
+            on_context: Rc::new(RefCell::new(None)),
+            keys: RefCell::new(None),
             sent: RefCell::new(None),
         }
     }
@@ -212,7 +265,11 @@ impl WebApp {
             on_save,
             on_change,
             files: Rc::clone(&self.files),
+            on_context: Rc::clone(&self.on_context),
+            context_seen: ContextKey::default(),
+            context_since: None,
         };
+        self.hold_editor_keys(&canvas)?;
         let ctx = Rc::clone(&self.ctx);
         let (look, fonts) = (Rc::clone(&self.look), Rc::clone(&self.fonts));
         self.runner
@@ -238,6 +295,28 @@ impl WebApp {
                 }),
             )
             .await
+    }
+
+    /// Keeps the browser from acting on the keys the editor takes while the canvas has the keyboard (`editor_takes_key`): Tab,
+    /// Space, Backspace, Delete, the arrows, Ctrl+A, Ctrl+D (a bookmark), Ctrl+Z, Ctrl+Y, Ctrl+S, the function keys. The listener
+    /// is on the canvas, so it sees only what the canvas has: the page's own text fields (the agent's box) keep their keys, and
+    /// what is typed in a field of the window's own goes through the window's text input, not here.
+    fn hold_editor_keys(&self, canvas: &web_sys::HtmlCanvasElement) -> Result<(), JsValue> {
+        self.release_editor_keys();
+        let hold = Closure::wrap(Box::new(move |e: web_sys::KeyboardEvent| {
+            if !e.is_composing() && editor_takes_key(&e.key(), e.ctrl_key() || e.meta_key()) {
+                e.prevent_default();
+            }
+        }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
+        canvas.add_event_listener_with_callback("keydown", hold.as_ref().unchecked_ref())?;
+        *self.keys.borrow_mut() = Some((canvas.clone(), hold));
+        Ok(())
+    }
+
+    fn release_editor_keys(&self) {
+        if let Some((canvas, hold)) = self.keys.borrow_mut().take() {
+            let _ = canvas.remove_event_listener_with_callback("keydown", hold.as_ref().unchecked_ref());
+        }
     }
 
     /// The interface, between frames; an error once it has crashed, or before it started.
@@ -463,6 +542,39 @@ impl WebApp {
         reply.map(|v| v.to_string()).map_err(err)
     }
 
+    /// What the page hears of what the person sees: `on_context()` once it has held still for a quarter of a second after a
+    /// change of the selection, the active view or where it looks (and once at the start), after the frame; the page then
+    /// asks `context`. None stops it. Before or after the start.
+    pub fn on_context(&self, on_context: Option<js_sys::Function>) {
+        *self.on_context.borrow_mut() = on_context;
+        self.repaint();
+    }
+
+    /// What the person sees now, as JSON: `{"selection": [{id, guid, category, name}], "count", "view": {id, name, kind, level?,
+    /// number?}, "camera": ...}`: the elements selected (the first 500; `count` says how many), the active view, and the part of
+    /// it on screen (`visible`, in the view's own millimetres, and its `scale` in pixels a millimetre) or, in 3D, where it looks.
+    pub fn context(&self) -> Result<String, JsValue> {
+        Ok(self.host()?.app.host_context().to_string())
+    }
+
+    /// Selects what `ids` names (ids, GUIDs or IFC GlobalIds, apart by spaces or commas) in the window, as the person would pick
+    /// them: in place of what was selected, or added to it with `add`; empty, none. With `show` the plan that shows them opens,
+    /// zoomed to them. No command runs and the model does not change. Replies `{"selected", "ids", "missing"}`.
+    pub fn select(&self, ids: &str, add: bool, show: bool) -> Result<String, JsValue> {
+        let reply = self.host()?.app.host_select(ids, add, show);
+        self.repaint();
+        Ok(reply.to_string())
+    }
+
+    /// Opens a view in the window, as the person opens it from the Project Browser: by a level's name (its floor plan; with
+    /// `ceiling`, its ceiling plan), a plan view's, section's, elevation's or schedule's name, a sheet's number, `3D`, or an id.
+    /// Replies with the context that follows, or throws, naming the views there are.
+    pub fn open_view(&self, view: &str, ceiling: bool) -> Result<String, JsValue> {
+        let reply = self.host()?.app.host_open_view(view, ceiling).map_err(err);
+        self.repaint();
+        reply.map(|v| v.to_string())
+    }
+
     /// Whether the interface crashed: the page then starts it again from the last saved model.
     pub fn has_panicked(&self) -> bool {
         self.runner.has_panicked()
@@ -470,6 +582,7 @@ impl WebApp {
 
     /// Stops the interface and lets go of its canvas.
     pub fn destroy(&self) {
+        self.release_editor_keys();
         self.runner.destroy();
     }
 }
