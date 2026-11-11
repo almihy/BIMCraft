@@ -575,10 +575,13 @@ fn moving_one_end_of_a_run_stretches_it_and_leaves_the_other_end_put() {
     // `end` refuses two elements, and an element that is neither a wall nor a run.
     let other = run(&mut s, "beam", json!({"points": [[0, 2000], [4000, 2000]], "offset": 2800}))["ids"][0].as_u64().unwrap();
     let e = s.execute("move", &json!({"ids": [beam, other], "by": [10, 0], "end": "start"})).unwrap_err();
-    assert!(e.contains("one wall or one run"), "{e}");
+    assert!(e.contains("one wall, one run or one grid"), "{e}");
+    let column = run(&mut s, "column", json!({"at": [9000, 9000]}))["id"].as_u64().unwrap();
+    let e = s.execute("move", &json!({"ids": [column], "by": [10, 0], "end": "start"})).unwrap_err();
+    assert!(e.contains("one wall, one run or one grid"), "{e}");
+    // A grid is one of them: its end goes.
     let grid = run(&mut s, "grid", json!({"start": [0, -1000], "end": [0, 7000]}))["id"].as_u64().unwrap();
-    let e = s.execute("move", &json!({"ids": [grid], "by": [10, 0], "end": "start"})).unwrap_err();
-    assert!(e.contains("one wall or one run"), "{e}");
+    assert!(s.execute("move", &json!({"ids": [grid], "by": [10, 0], "end": "start"})).is_ok());
 }
 
 #[test]

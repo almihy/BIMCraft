@@ -192,8 +192,61 @@ pub struct Session {
     /// The warnings of the last model asked ([`Session::warnings`]), kept with it: the next are brought up to date from them.
     warned: Option<Box<(Arc<Model>, Review)>>,
     /// How many commands, scripts and transactions are under way, one inside another. A command made inside another (a script's
-    /// lines, a transaction's) does not work out its warnings: the one outermost says what the whole made, once.
-    nested: u8,
+    /// lines, a transaction's) does not work out its warnings: the one outermost says what the whole made, once. Raised only
+    /// through [`Nesting`], which lowers it again however the work ends.
+    pub(crate) nested: u8,
+    /// Tests only: the warnings of the model after the last command made inside another, brought up to date from those after the
+    /// one before it, one command at a time, and held to the whole model's: what the outermost's look at the end can't check.
+    #[cfg(test)]
+    shadow: Option<Box<(Arc<Model>, Review)>>,
+    /// Tests only: how many times that was looked at.
+    #[cfg(test)]
+    pub(crate) shadowed: usize,
+}
+
+/// One more command, script or transaction under way ([`Session::nested`]), until it is dropped: a panic that comes out of the
+/// work leaves the count as it was, so the next command is the outermost it is.
+struct Nesting<'a>(&'a mut Session);
+
+impl<'a> Nesting<'a> {
+    fn enter(s: &'a mut Session) -> Nesting<'a> {
+        s.nested = s.nested.saturating_add(1);
+        Nesting(s)
+    }
+}
+
+impl std::ops::Deref for Nesting<'_> {
+    type Target = Session;
+    fn deref(&self) -> &Session {
+        self.0
+    }
+}
+
+impl std::ops::DerefMut for Nesting<'_> {
+    fn deref_mut(&mut self) -> &mut Session {
+        self.0
+    }
+}
+
+impl Drop for Nesting<'_> {
+    fn drop(&mut self) {
+        self.0.nested = self.0.nested.saturating_sub(1);
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests only: where the next call of [`forced_panic`] with that name panics, to hold what a panic leaves behind to account.
+    pub(crate) static FORCED_PANIC: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
+}
+
+/// Tests only: panics here when [`FORCED_PANIC`] names `at`, once.
+#[cfg(test)]
+fn forced_panic(at: &'static str) {
+    if FORCED_PANIC.with(|f| f.get()) == Some(at) {
+        FORCED_PANIC.with(|f| f.set(None));
+        panic!("forced panic at {at}");
+    }
 }
 
 impl Default for Session {
@@ -265,6 +318,10 @@ impl Session {
             clipboard: None,
             warned: None,
             nested: 0,
+            #[cfg(test)]
+            shadow: None,
+            #[cfg(test)]
+            shadowed: 0,
         }
     }
 
@@ -281,6 +338,10 @@ impl Session {
         self.clipboard = None;
         self.resets += 1;
         self.warned = None;
+        #[cfg(test)]
+        {
+            self.shadow = None;
+        }
         self.undo.clear();
         self.redo.clear();
     }
@@ -404,13 +465,16 @@ impl Session {
         let verified = self.verified.as_ref().is_some_and(|v| Arc::ptr_eq(v, &before));
         let (run, first_new, session) = (cmd.run, self.model.next_id, (self.phase.clone(), self.option.clone()));
         let outermost = self.nested == 0;
-        self.nested = self.nested.saturating_add(1);
-        let ran = catch_unwind(AssertUnwindSafe(|| run(self, params)));
-        self.nested = self.nested.saturating_sub(1);
+        let ran = {
+            let mut nest = Nesting::enter(self);
+            catch_unwind(AssertUnwindSafe(|| run(&mut nest, params)))
+        };
         let result = ran.unwrap_or_else(|p| Err(format!("internal error in `{}`: {}", cmd.id, panic_text(p.as_ref())))).and_then(|v| {
             if Arc::ptr_eq(&before, &self.model) {
                 return Ok(v);
             }
+            #[cfg(test)]
+            forced_panic("post");
             // Back to a model that passed (undo, redo): it is as it was then.
             if self.verified.as_ref().is_some_and(|v| Arc::ptr_eq(v, &self.model)) {
                 #[cfg(test)]
@@ -521,10 +585,21 @@ impl Session {
                 Err(e)
             }
             Ok(mut v) => {
+                let changed = cmd.undoable && !Arc::ptr_eq(&before, &self.model);
+                // The warnings are looked at before the command is kept: a panic there refuses it, as one in the command does.
+                if changed
+                    && outermost
+                    && let Err(e) = self.report_warnings_guarded(&before, &mut v)
+                {
+                    self.model = before;
+                    (self.phase, self.option) = session;
+                    return Err(e);
+                }
                 self.verified = Some(Arc::clone(&self.model));
-                if cmd.undoable && !Arc::ptr_eq(&before, &self.model) {
-                    if outermost {
-                        self.report_warnings(&before, &mut v);
+                if changed {
+                    #[cfg(test)]
+                    if !outermost {
+                        self.shadow_review(&before);
                     }
                     let step = Step { checked: verified, ..Step::new(cmd.label, &before, &self.model) };
                     self.undo.push((step, before));
@@ -559,18 +634,50 @@ impl Session {
         }
     }
 
-    /// Adds to `result`, when it is an object, the warnings the command that made the model of `before` the one now made
-    /// (`new_warnings`): those that weren't there before it, so whoever made the change sees what it left questionable.
-    fn report_warnings(&mut self, before: &Arc<Model>, result: &mut Value) {
+    /// The warnings the change from `before` to the model now made, those that weren't among the warnings before it, as a
+    /// command's result gives them. The warnings of the model now are kept.
+    fn fresh_warnings(&mut self, before: &Arc<Model>) -> Vec<Value> {
+        #[cfg(test)]
+        forced_panic("report");
         let prev = self.review_of(before);
         let now = self.model.reviewed_since(before, &prev);
         #[cfg(test)]
         now.assert_whole(&self.model);
         let fresh: Vec<Value> = Model::new_warnings(&now.warnings, &prev.warnings).into_iter().map(|w| w.json(&self.model)).collect();
         self.warned = Some(Box::new((Arc::clone(&self.model), now)));
-        if let Some(o) = result.as_object_mut().filter(|_| !fresh.is_empty()) {
-            o.insert("new_warnings".into(), Value::Array(fresh));
-        }
+        fresh
+    }
+
+    /// The warnings the command that made the model of `before` the one now made, added to `result`, when it is an object, as
+    /// `new_warnings`: those that weren't there before it, so whoever made the change sees what it left questionable. A panic in
+    /// it is an error that refuses the command: working them out is never what crashes it.
+    fn report_warnings_guarded(&mut self, before: &Arc<Model>, result: &mut Value) -> Result<(), String> {
+        let fresh = self.fresh_warnings_guarded(before)?;
+        insert_warnings(result, fresh);
+        Ok(())
+    }
+
+    /// [`Session::fresh_warnings`], a panic in it an error.
+    fn fresh_warnings_guarded(&mut self, before: &Arc<Model>) -> Result<Vec<Value>, String> {
+        catch_unwind(AssertUnwindSafe(|| self.fresh_warnings(before)))
+            .map_err(|p| format!("internal error working out the warnings: {}", panic_text(p.as_ref())))
+    }
+
+    /// Tests only: the warnings after a command made inside another, brought up to date from those after the command before it
+    /// and held to those of the whole model, as the outermost's are after each command of its own. (What this works out is no
+    /// part of what the tests count.)
+    #[cfg(test)]
+    fn shadow_review(&mut self, before: &Arc<Model>) {
+        let counted = crate::warnings::REVIEWS.with(std::cell::Cell::get);
+        let prev = match self.shadow.take() {
+            Some(kept) if Arc::ptr_eq(&kept.0, before) => kept.1,
+            _ => before.whole_review(),
+        };
+        let now = self.model.reviewed_since(before, &prev);
+        now.assert_whole(&self.model);
+        self.shadowed += 1;
+        crate::warnings::REVIEWS.with(|c| c.set(counted));
+        self.shadow = Some(Box::new((Arc::clone(&self.model), now)));
     }
 
     /// [`Session::execute`] of a command a plugin registered. The plugin's closure runs the function in its
@@ -581,16 +688,23 @@ impl Session {
         let before = Arc::clone(&self.model);
         let verified = self.verified.clone();
         let (undo, redo, session) = (self.undo.clone(), self.redo.clone(), (self.phase.clone(), self.option.clone()));
-        self.nested = self.nested.saturating_add(1);
-        let ran = catch_unwind(AssertUnwindSafe(|| (cmd.run)(self, params)));
-        self.nested = self.nested.saturating_sub(1);
-        let result = ran.unwrap_or_else(|p| Err(format!("internal error in `{name}`: {}", panic_text(p.as_ref())))).and_then(|v| {
+        let outermost = self.nested == 0;
+        let ran = {
+            let mut nest = Nesting::enter(self);
+            catch_unwind(AssertUnwindSafe(|| (cmd.run)(&mut nest, params)))
+        };
+        let result = ran.unwrap_or_else(|p| Err(format!("internal error in `{name}`: {}", panic_text(p.as_ref())))).and_then(|mut v| {
             if Arc::ptr_eq(&before, &self.model) {
                 return Ok(v);
             }
             self.model_mut().resolve();
             self.model_mut().sync_library();
-            self.model.check().map(|()| v)
+            self.model.check()?;
+            // What the plugin made questionable, said once, as a script's or a command's are: its own commands said none.
+            if outermost {
+                self.report_warnings_guarded(&before, &mut v)?;
+            }
+            Ok(v)
         });
         match result {
             Err(e) => {
@@ -646,15 +760,13 @@ impl Session {
     /// one undo step, `Script`.
     pub fn script_atomic(&mut self, text: &str) -> Result<Vec<Value>, String> {
         let report = self.nested == 0;
-        self.transaction("Script", |s| s.run_script(text, report))
+        self.transaction_in("Script", false, |s| s.run_script(text, report)).map(|(results, _)| results)
     }
 
     /// The lines of a script, none of them working out its warnings; with `report`, the script's as a whole in its result.
     fn run_script(&mut self, text: &str, report: bool) -> Result<Vec<Value>, String> {
         let (before, resets) = (Arc::clone(&self.model), self.resets);
-        self.nested = self.nested.saturating_add(1);
-        let ran = self.script_lines(text);
-        self.nested = self.nested.saturating_sub(1);
+        let ran = Nesting::enter(self).script_lines(text);
         let mut out = ran?;
         // A script that replaced the project (`open`, `new`) made no change to a project that was there before it.
         if report
@@ -662,7 +774,7 @@ impl Session {
             && !Arc::ptr_eq(&before, &self.model)
             && let Some(last) = out.iter_mut().rev().find(|v| v.is_object())
         {
-            self.report_warnings(&before, last);
+            self.report_warnings_guarded(&before, last)?;
         }
         Ok(out)
     }
@@ -696,7 +808,7 @@ impl Session {
         let kept = Kept::of(self);
         let read_only = self.read_only.take();
         let dry_run = std::mem::replace(&mut self.dry_run, true);
-        let result = self.script_atomic(text);
+        let result = self.transaction_in("Script", false, |s| s.run_script(text, false)).map(|(results, _)| results);
         let after = Arc::clone(&self.model);
         (self.read_only, self.dry_run) = (read_only, dry_run);
         // The project as it was, whatever the script did to it; what a dry run says is only what it would do.
@@ -742,24 +854,55 @@ impl Session {
     /// Run `f` as one undo step named `label`, all or nothing: when it fails, the model, the path, the session's phase
     /// and option and the undo and redo history are as they were before it. Inside, undo reaches back no further than
     /// its start. Files a command wrote meanwhile (`save`, `export`) stay written, and one that replaced the project (`new`,
-    /// `open`) left the history it began, so what came after it stays the steps it was.
+    /// `open`) left the history it began, so what came after it stays the steps it was. The warnings it made are worked out
+    /// when something asks ([`Session::transaction_reporting`] says them at its end).
     pub fn transaction<T>(&mut self, label: &str, f: impl FnOnce(&mut Session) -> Result<T, String>) -> Result<T, String> {
+        self.transaction_reporting(label, f).map(|(v, _)| v)
+    }
+
+    /// [`Session::transaction`], and with what it gives the warnings the whole made, those that weren't among the warnings before
+    /// it, each as a command's result gives them (`new_warnings`): `f`'s commands say none of their own. None are given for a
+    /// transaction inside another command, script or transaction, whose outermost says them, nor for one that replaced the
+    /// project.
+    pub fn transaction_reporting<T>(
+        &mut self,
+        label: &str,
+        f: impl FnOnce(&mut Session) -> Result<T, String>,
+    ) -> Result<(T, Vec<Value>), String> {
+        self.transaction_in(label, true, f)
+    }
+
+    /// [`Session::transaction_reporting`], which says its warnings only when `report`.
+    fn transaction_in<T>(
+        &mut self,
+        label: &str,
+        report: bool,
+        f: impl FnOnce(&mut Session) -> Result<T, String>,
+    ) -> Result<(T, Vec<Value>), String> {
         let before = Arc::clone(&self.model);
         let checked = self.verified.as_ref().is_some_and(|v| Arc::ptr_eq(v, &before));
         let (path, phase, option) = (self.path.clone(), self.phase.clone(), self.option.clone());
         let (mut undo, redo, resets) = (std::mem::take(&mut self.undo), std::mem::take(&mut self.redo), self.resets);
-        self.nested = self.nested.saturating_add(1);
-        let ran = catch_unwind(AssertUnwindSafe(|| f(self)));
-        self.nested = self.nested.saturating_sub(1);
+        let outermost = report && self.nested == 0;
+        let ran = {
+            let mut nest = Nesting::enter(self);
+            catch_unwind(AssertUnwindSafe(|| f(&mut nest)))
+        };
         let result = ran.unwrap_or_else(|p| Err(format!("internal error in `{label}`: {}", panic_text(p.as_ref()))));
+        // What the whole made questionable, unless it replaced the project, which made no change to the one that was there.
+        let result = result.and_then(|v| {
+            let reported = outermost && self.resets == resets && !Arc::ptr_eq(&before, &self.model);
+            let fresh = if reported { self.fresh_warnings_guarded(&before)? } else { Vec::new() };
+            Ok((v, fresh))
+        });
         match result {
             Err(e) => {
                 (self.model, self.path, self.phase, self.option) = (before, path, phase, option);
                 (self.undo, self.redo) = (undo, redo);
                 Err(e)
             }
-            Ok(v) if self.resets != resets => Ok(v),
-            Ok(v) => {
+            Ok(done) if self.resets != resets => Ok(done),
+            Ok(done) => {
                 // Only an undoable command made a step; one that changed nothing, or only the view of it, makes none here either.
                 if self.undo.is_empty() {
                     self.redo = redo;
@@ -771,7 +914,7 @@ impl Session {
                     self.redo.clear();
                 }
                 self.undo = undo;
-                Ok(v)
+                Ok(done)
             }
         }
     }
@@ -868,6 +1011,8 @@ struct Kept {
     undo: Vec<(Step, Arc<Model>)>,
     redo: Vec<(Step, Arc<Model>)>,
     resets: usize,
+    /// The warnings the session kept, of the model it kept: a try that worked out the warnings of another leaves them as they were.
+    warned: Option<Box<(Arc<Model>, Review)>>,
 }
 
 impl Kept {
@@ -881,6 +1026,7 @@ impl Kept {
             undo: s.undo.clone(),
             redo: s.redo.clone(),
             resets: s.resets,
+            warned: s.warned.clone(),
         }
     }
 
@@ -892,6 +1038,7 @@ impl Kept {
             && (s.undo.len() == self.undo.len() && s.redo.len() == self.redo.len());
         (s.model, s.verified, s.path, s.phase, s.option) = (self.model, self.verified, self.path, self.phase, self.option);
         (s.undo, s.redo, s.resets) = (self.undo, self.redo, self.resets);
+        s.warned = self.warned;
         if same { Ok(()) } else { Err(()) }
     }
 }
@@ -924,6 +1071,14 @@ fn named(m: &Model, params: &Value) -> Option<Value> {
     let mut changed = false;
     walk(m, &mut v, &mut changed);
     changed.then_some(v)
+}
+
+/// `fresh` (what [`Session::transaction_reporting`] gives) as the `new_warnings` of `result`, when it is an object and there are
+/// some: how a batch of commands says its warnings in its last result.
+pub fn insert_warnings(result: &mut Value, fresh: Vec<Value>) {
+    if let Some(o) = result.as_object_mut().filter(|_| !fresh.is_empty()) {
+        o.insert("new_warnings".into(), Value::Array(fresh));
+    }
 }
 
 fn panic_text(p: &(dyn std::any::Any + Send)) -> String {

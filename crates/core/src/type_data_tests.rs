@@ -369,3 +369,40 @@ fn a_parameter_renamed_where_the_new_name_is_taken_counts_up() {
     assert!(names.contains(&"Custom Volume 3") && !names.contains(&"Custom Volume 2 2") && !names.contains(&"Volume"), "{names:?}");
     assert!(back.check().is_ok(), "{:?}", back.check());
 }
+
+#[test]
+fn a_calculated_field_named_as_a_field_the_category_has_since_is_renamed_where_the_file_is_read() {
+    let mut s = Session::new();
+    let walls = house(&mut s);
+    run(&mut s, "parameter", json!({"name": "Sound Rating", "categories": ["wall"], "kind": "number"}));
+    run(&mut s, "modify", json!({"id": walls[0], "params": {"Sound Rating": 45}}));
+    run(
+        &mut s,
+        "schedule",
+        json!({"name": "Acoustics", "category": "wall", "filters": [{"field": "Wall Vol", "op": "greater", "value": 30}],
+               "sort": [{"field": "Wall Vol"}],
+               "fields": ["Sound Rating", {"name": "Wall Vol", "formula": "Sound Rating * 2"},
+                          {"name": "Twice", "formula": "Wall Vol * 2 + Sound Rating"}]}),
+    );
+    // The file of a version from before walls had a Volume of their own: a calculated field of that name.
+    let text = serde_json::to_string(&*s.model).unwrap().replace("Wall Vol", "Volume");
+    let (back, left_out) = Model::read(&text).unwrap();
+    assert!(left_out.is_empty(), "{left_out:?}");
+    assert!(back.check().is_ok(), "{:?}", back.check());
+    let Some(Element::Schedule(sc)) = back.elements.values().find(|e| matches!(e, Element::Schedule(_))) else { panic!("no schedule") };
+    assert_eq!(sc.fields[1].name, "Custom Volume");
+    assert_eq!(sc.fields[1].heading.as_deref(), Some("Volume"), "its column is headed as it was");
+    assert_eq!(sc.fields[2].formula.as_deref(), Some("Custom Volume * 2 + Sound Rating"), "the others read it by its new name");
+    assert_eq!((sc.filters[0].field.as_str(), sc.sort[0].field.as_str()), ("Custom Volume", "Custom Volume"));
+    assert!(crate::schedule::table(&back, sc).is_ok(), "{:?}", crate::schedule::table(&back, sc).err());
+    // Where the new name is taken, it counts up.
+    let mut t = Session::new();
+    t.reset((*s.model).clone(), None);
+    run(&mut t, "parameter", json!({"name": "Custom Volume", "categories": ["wall"], "kind": "number"}));
+    run(&mut t, "parameter", json!({"name": "Custom Volume 2", "categories": ["wall"], "kind": "number"}));
+    let text = serde_json::to_string(&*t.model).unwrap().replace("Wall Vol", "Volume");
+    let (back, _) = Model::read(&text).unwrap();
+    assert!(back.check().is_ok(), "{:?}", back.check());
+    let Some(Element::Schedule(sc)) = back.elements.values().find(|e| matches!(e, Element::Schedule(_))) else { panic!("no schedule") };
+    assert_eq!(sc.fields[1].name, "Custom Volume 3");
+}

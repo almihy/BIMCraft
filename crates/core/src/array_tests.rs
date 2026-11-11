@@ -204,3 +204,45 @@ fn an_array_of_a_beam_and_its_bars_puts_each_members_bar_on_that_members_beam() 
     }
     assert!(hosts.iter().all(|h| *h != Some(s.model.guid(beam))), "no new bar in the original beam");
 }
+
+#[test]
+fn a_copy_of_a_beam_alone_brings_its_bars_to_stand_on_the_copy() {
+    let mut s = Session::new();
+    let (beam, bar) = beam_with_a_bar(&mut s);
+    let r = s.execute("copy", &json!({"ids": [beam], "by": [0, 3000]})).unwrap();
+    let made = ids(&r);
+    assert_eq!(made.len(), 2, "the beam and its bar: {r}");
+    let new_beam = *made.iter().find(|id| s.model.elements.get(**id).is_some_and(|e| e.category() == "beam")).unwrap();
+    let new_bar = *made.iter().find(|id| s.model.elements.get(**id).is_some_and(|e| e.category() == "rebar")).unwrap();
+    assert_eq!(host_of(&s, new_bar), Some(s.model.guid(new_beam)));
+    assert_eq!(host_of(&s, bar), Some(s.model.guid(beam)), "the original's stays");
+    // The bar went where the beam went: 3000 along y.
+    match s.model.elements.get(new_bar) {
+        Some(Element::Rebar(b)) => assert!(b.path.iter().all(|q| (q[1] - 3000.0).abs() < 0.01), "{:?}", b.path),
+        other => panic!("{other:?}"),
+    }
+    // Given both, the bar is copied once.
+    let r = s.execute("copy", &json!({"ids": [beam, bar], "by": [0, 6000]})).unwrap();
+    assert_eq!(ids(&r).len(), 2, "{r}");
+    // A mirror brings them too.
+    let r = s.execute("mirror", &json!({"ids": [beam], "axis": [[0, 10000], [4000, 10000]], "copy": true})).unwrap();
+    assert_eq!(ids(&r).len(), 2, "{r}");
+    assert!(s.model.check().is_ok());
+}
+
+#[test]
+fn an_array_of_a_beam_alone_brings_each_members_bars() {
+    let mut s = Session::new();
+    let (beam, _) = beam_with_a_bar(&mut s);
+    let r = s.execute("array", &json!({"ids": [beam], "count": 3, "by": [0, 3000]})).unwrap();
+    let made = ids(&r);
+    let of = |category: &str| -> Vec<Id> {
+        made.iter().copied().filter(|id| s.model.elements.get(*id).is_some_and(|e| e.category() == category)).collect()
+    };
+    let (beams, bars) = (of("beam"), of("rebar"));
+    assert_eq!((beams.len(), bars.len()), (2, 2), "{r}");
+    let hosts: Vec<_> = bars.iter().map(|b| host_of(&s, *b)).collect();
+    for b in &beams {
+        assert_eq!(hosts.iter().filter(|h| **h == Some(s.model.guid(*b))).count(), 1, "one bar in each new beam: {hosts:?}");
+    }
+}

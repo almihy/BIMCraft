@@ -772,11 +772,16 @@ impl BimApp {
             [one] => return self.run(command, one.clone()).into_iter().collect(),
             _ => {}
         }
-        let done =
-            self.session.transaction(label, |s| params.iter().map(|p| s.execute(command, p)).collect::<Result<Vec<Value>, String>>());
+        let done = self
+            .session
+            .transaction_reporting(label, |s| params.iter().map(|p| s.execute(command, p)).collect::<Result<Vec<Value>, String>>());
         match done {
-            Ok(v) => {
+            Ok((mut v, fresh)) => {
                 self.status = Status::default();
+                // What the whole made questionable is in the last result, as a single command's is in its own.
+                if let Some(last) = v.iter_mut().rev().find(|r| r.is_object()) {
+                    bimcraft_core::engine::insert_warnings(last, fresh);
+                }
                 v
             }
             Err(e) => {

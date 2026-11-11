@@ -170,6 +170,8 @@ impl Model {
             },
             Element::Wall(w) => t.wall.get(&w.type_name).map(|x| &x.identity),
             Element::Floor(f) | Element::Toposolid(f) => t.floor.get(&f.type_name).map(|x| &x.identity),
+            // A building pad is of a floor type (`building_pad`).
+            Element::BuildingPad(bp) => t.floor.get(&bp.type_name).map(|x| &x.identity),
             Element::Roof(r) => t.roof.get(&r.type_name).map(|x| &x.identity),
             Element::Ceiling(c) => t.ceiling.get(&c.type_name).map(|x| &x.identity),
             Element::Railing(r) => t.railing.get(&r.type_name).map(|x| &x.identity),

@@ -23,8 +23,8 @@ grids, levels and links are found by; a door or window with no wall, or of a typ
 | `openings_overlap` | doors or windows that overlap in plan and in height in one wall | refused |
 | `opening_past_wall` | a door or window wider than its wall's run, or reaching past its start or end | refused |
 | `opening_outside_height` | a sill under the wall's base, or at or over its top (nothing of it in the wall) | refused |
-| `walls_overlap` | straight walls side by side whose bodies overlap along their length, and share a height | silent |
-| `identical_instances` | walls, columns, structural columns, footings or components that are the same in the same place (a group is one warning) | silent |
+| `walls_overlap` | straight walls side by side whose bodies overlap along their length, and share a height (not walls that never stand together: options of one set, or a wall demolished by the phase the other is made in) | silent |
+| `identical_instances` | walls, columns, structural columns, footings or components that are the same in the same place (a group is one warning). Elements in different options of one design option set, and one a phase takes down with the one made in that phase, are no twins; a main-model element and an option's are, as are options of two sets | silent |
 | `wall_off_axis` | a straight wall or a grid more than 0.0001 and up to 1 degree off an axis (a note) | silent |
 | `room_not_enclosed` | a room the walls and room separation lines do not close round | `inspect` |
 | `room_redundant` | a room in the space an earlier room has | `inspect` |
@@ -53,9 +53,16 @@ A head that rises past the wall's top is no warning: Revit lets it, and the wall
   `Session::execute` puts the ones a command made, those that were not among the warnings before it, in its result as
   `new_warnings` (when the result is an object). Each is `{rule, severity: warning|note, message, elements: [ids], guids: [..]}`.
 - A command made inside another (a script's lines, a transaction's, a plugin's) works out no warnings of its own: the
-  outermost says what the whole made, once. A script's are in its last result that is an object (`new_warnings`); a dry run's
-  are its `new_warnings`, structured as a command's. A transaction (the window's multi-command actions) works none out: they
-  are brought up to date when something asks.
+  outermost says what the whole made, once. A script's are in its last result that is an object (`new_warnings`); so are a
+  plugin command's, in its own result; a transaction's come back from `Session::transaction_reporting` as a list, each as a
+  command's result gives them (the window's multi-command actions, `run_all`, add them to their last result; `transaction` is
+  the same without them). A dry run's are its `new_warnings`, structured as a command's, said once at its top level: the
+  lines say none, and the warnings the session keeps stay those of the project, not of the model the dry run tried. A panic
+  while the warnings are worked out refuses the command (an error naming it, the model as it was), as one in the command
+  does, and leaves nothing under way: `Session::nested` is raised through a guard that lowers it however the work ends.
+- Tests hold the warnings of every command made inside another to the whole model's too (`Session::shadow_review`, a
+  test-only copy of the warnings kept one command at a time), so a script line, a transaction's command or a plugin's is as
+  checked as a command of its own.
 - The `warnings` command (`{rule?, severity?, element?}`) lists them all. `inspect` still lists their messages.
 - `Model::warnings()` (the messages) is what `inspect` returns.
 - Downstream copes with the allowed states: `walls::prisms` keeps a wall between its own base and top however an opening's edges

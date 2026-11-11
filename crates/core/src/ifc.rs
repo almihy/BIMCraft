@@ -227,6 +227,9 @@ struct Step {
     common: BTreeMap<Id, (u64, &'static str, Vec<u64>)>,
     /// The occurrences of each type object, by its key (see `TypeKey`). Written once at the end.
     typed: BTreeMap<TypeKey, TypeBuild>,
+    /// The category of the element being written, which its type object's key holds: two kinds of element that name a type alike
+    /// (a floor type and a building pad type, both `Generic`, both slab types) are two type objects.
+    kind: &'static str,
     /// The profile definition of each section written, shared by the material profile set of the type that has it and the bodies of
     /// its occurrences.
     sections: BTreeMap<Section, u64>,
@@ -260,8 +263,10 @@ impl Section {
 type Member = (Section, String);
 
 /// A type object's key: its IFC class, what comes ahead of and after its predefined type (each with its comma), its name and, for
-/// a beam's, column's or footing's, its member (two types of one name and two sections are two type objects).
-type TypeKey = (String, String, String, String, Option<Member>);
+/// a beam's, column's or footing's, its member (two types of one name and two sections are two type objects), and the category of
+/// the elements that have it (two kinds of element with types of one class and name are two type objects, each with the identity
+/// data of its own type).
+type TypeKey = (String, String, String, String, Option<Member>, &'static str);
 
 /// A type object as the export builds it: the predefined type its occurrences share, their ids, and which of them use its
 /// material profile set by each cardinal point.
@@ -348,14 +353,14 @@ impl Step {
     /// furniture type's assembly place comes before; a door's operation after). Occurrences whose predefined types differ make
     /// their type's NOTDEFINED: a roof type is flat only when every roof of it is. An empty `predefined` is a class that has none.
     fn typed_with(&mut self, class: &str, before: &str, predefined: &str, after: &str, name: &str, ent: u64) {
-        let key = (class.to_string(), before.to_string(), after.to_string(), name.to_string(), None);
+        let key = (class.to_string(), before.to_string(), after.to_string(), name.to_string(), None, self.kind);
         self.build(key, predefined).occurrences.push(ent);
     }
 
     /// As `typed`, for a beam, a column or a footing: its type holds `member` (its section and material) as a material profile
     /// set, and `ent` uses that set, placed by `cardinal` (an `IfcCardinalPointReference`).
     fn typed_member(&mut self, class: &str, predefined: &str, name: &str, member: Member, cardinal: u8, ent: u64) {
-        let key = (class.to_string(), String::new(), String::new(), name.to_string(), Some(member));
+        let key = (class.to_string(), String::new(), String::new(), name.to_string(), Some(member), self.kind);
         let build = self.build(key, predefined);
         build.occurrences.push(ent);
         build.usages.entry(cardinal).or_default().push(ent);
@@ -375,13 +380,32 @@ impl Step {
         build
     }
 
+    /// What each type object's GlobalIds are made from ([`type_hash`]). Of two type objects that would share it (the same class and
+    /// name, of two kinds of element) the later in the key's order takes the kind in too, so no two share a GlobalId, and every
+    /// export of a project without such a pair is as it was.
+    fn type_ids(&self) -> BTreeMap<TypeKey, u64> {
+        let mut used: BTreeSet<u64> = BTreeSet::new();
+        let mut out = BTreeMap::new();
+        for k in self.typed.keys() {
+            let mut key = type_hash(&k.0, &k.3, &k.4);
+            if !used.insert(key) {
+                key = k.5.bytes().fold(key, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01B3));
+                used.insert(key);
+            }
+            out.insert(k.clone(), key);
+        }
+        out
+    }
+
     /// Writes each type object once, with its `IfcRelDefinesByType` to its occurrences and, for a beam's, column's or footing's,
     /// its material profile set (one `IfcMaterialProfile`: its material and its section) with the `IfcMaterialProfileSetUsage`
     /// its occurrences use, one for each cardinal point. All the GlobalIds come from the class, the name and the member, so they
     /// are the same on every export.
     fn write_types(&mut self, m: &Model) {
-        for ((class, before, after, name, member), TypeBuild { predefined, occurrences, usages, sets }) in std::mem::take(&mut self.typed) {
-            let key = type_hash(&class, &name, &member);
+        let keys = self.type_ids();
+        for (tkey, TypeBuild { predefined, occurrences, usages, sets }) in std::mem::take(&mut self.typed) {
+            let key = keys.get(&tkey).copied().unwrap_or_default();
+            let (class, before, after, name, member, _) = tkey;
             // Six attributes after the name (description to element type): its description and applicable occurrence, then its
             // property sets, representation maps, tag and element type; then `before`, the predefined type and `after`.
             let has = if sets.is_empty() { "$".to_string() } else { format!("({})", refs(&sets)) };
@@ -798,6 +822,7 @@ pub fn export(m: &Model) -> String {
         materials: BTreeMap::new(),
         common: BTreeMap::new(),
         typed: BTreeMap::new(),
+        kind: "",
         sections: BTreeMap::new(),
     };
     let origin = w.add("IFCCARTESIANPOINT((0.,0.,0.))");
@@ -875,6 +900,7 @@ pub fn export(m: &Model) -> String {
     // The runs in each system, by its name, for the IfcSystem they are assigned to.
     let mut systems: BTreeMap<&str, Vec<u64>> = BTreeMap::new();
     for (&id, e) in &m.elements {
+        w.kind = e.category();
         match e {
             Element::Wall(wl) => {
                 let Some(&(_, storey)) = storeys.get(&wl.level) else { continue };
@@ -1763,6 +1789,7 @@ pub fn export(m: &Model) -> String {
     // an element with no type object holds them itself.
     let type_of: BTreeMap<u64, TypeKey> = w.typed.iter().flat_map(|(k, b)| b.occurrences.iter().map(move |o| (*o, k.clone()))).collect();
     let mut written: BTreeSet<&TypeKey> = BTreeSet::new();
+    let type_ids = w.type_ids();
     for (&id, &ent) in &products {
         let Some(e) = m.elements.get(id) else { continue };
         let Some(identity) = m.type_identity(e).filter(|i| !i.is_empty()) else { continue };
@@ -1811,7 +1838,7 @@ pub fn export(m: &Model) -> String {
             }
             match own_type {
                 Some(k) => {
-                    let set = w.property_set(name, &props, roles.0, type_hash(&k.0, &k.3, &k.4));
+                    let set = w.property_set(name, &props, roles.0, type_ids.get(k).copied().unwrap_or_default());
                     if let Some(build) = w.typed.get_mut(k) {
                         build.sets.push(set);
                     }
@@ -3182,6 +3209,43 @@ mod tests {
         assert!(rest.iter().any(|p| p.contains("'Reference'") && p.contains("'C1'")), "{rest:?}");
         assert!(rest.iter().any(|p| p.contains("'FireRating'")), "{rest:?}");
         assert!(set_of(&f, of_kind(&f, "IFCFURNITURE")[0], TYPE_DATA_SET).is_empty());
+        dangling(&f);
+    }
+
+    #[test]
+    fn a_floor_type_and_a_building_pad_type_of_one_name_are_two_type_objects_each_with_its_data() {
+        use crate::graphics::testing::run;
+        let mut s = Session::new();
+        run(&mut s, "type", json!({"category": "floor", "name": "Generic", "thickness": 200, "type_mark": "F1", "manufacturer": "Acme"}));
+        run(&mut s, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]], "type": "Generic"}));
+        run(&mut s, "building_pad", json!({"boundary": [[10000, 0], [14000, 0], [14000, 4000], [10000, 4000]], "type": "Generic"}));
+        let f = export(&s.model);
+        let types = entities(&f, "IFCSLABTYPE");
+        assert_eq!(types.len(), 2, "a slab type for each kind of element: {types:?}");
+        let predefined: BTreeSet<String> = types.iter().map(|l| top_level_attributes(l)[9].clone()).collect();
+        assert_eq!(
+            predefined,
+            [".BASESLAB.".to_string(), ".FLOOR.".to_string()].into(),
+            "neither is made NOTDEFINED by the other: {types:?}"
+        );
+        let guids: BTreeSet<String> = types.iter().map(|l| top_level_attributes(l)[0].clone()).collect();
+        assert_eq!(guids.len(), 2, "each has a GlobalId of its own");
+        for t in &types {
+            // (A slab has its common set; a pad, which has none, holds it in the BIMCraft set.)
+            let mut mark = type_set_of(&f, t, "Pset_SlabCommon");
+            mark.extend(type_set_of(&f, t, TYPE_DATA_SET));
+            assert!(mark.iter().any(|p| p.contains("'Reference'") && p.contains("'F1'")), "each holds the type's data: {t}: {mark:?}");
+            let maker = type_set_of(&f, t, MAKER_SET);
+            assert!(maker.iter().any(|p| p.contains("Acme")), "{maker:?}");
+        }
+        // A project with one of them exports as it did: the GlobalId has no kind in it.
+        let mut t = Session::new();
+        run(&mut t, "type", json!({"category": "floor", "name": "Generic", "thickness": 200}));
+        run(&mut t, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]], "type": "Generic"}));
+        let alone = entities(&export(&t.model), "IFCSLABTYPE");
+        let plain = type_hash("IFCSLABTYPE", "Generic", &None);
+        assert_eq!(alone.len(), 1);
+        assert_eq!(top_level_attributes(&alone[0])[0], super::s(&guid(t.model.uid, TYPES, plain)), "{}", alone[0]);
         dangling(&f);
     }
 }

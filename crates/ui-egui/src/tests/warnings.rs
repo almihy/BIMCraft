@@ -76,3 +76,15 @@ fn a_selected_element_with_a_warning_shows_it_in_properties_and_one_without_show
     h.run();
     h.get_by_label("1 warning");
 }
+
+#[test]
+fn a_batch_of_commands_from_the_window_says_the_warnings_it_made_in_its_last_result() {
+    let mut h = app_at(BOX, 0.05);
+    let mut walls = ids(&h, "wall");
+    walls.sort_unstable();
+    let params: Vec<Value> = [2000.0, 2300.0].iter().map(|at| json!({"wall": walls[0], "offset": at})).collect();
+    let results = h.state_mut().run_all("Doors", "door", params);
+    assert_eq!(results.len(), 2);
+    assert!(results[0].get("new_warnings").is_none(), "{:?}", results[0]);
+    assert_eq!(results[1]["new_warnings"][0]["rule"], "openings_overlap", "{:?}", results[1]);
+}
