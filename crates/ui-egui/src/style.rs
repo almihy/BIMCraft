@@ -335,6 +335,11 @@ impl Skin {
             let muted = step(mix(text, bar, 0.3), text, &[bar, hover], 4.5);
             (q.app_bar, q.app_bar_hover, q.app_bar_text, q.app_bar_muted) = (bar, hover, text, muted);
         }
+        // The page's own controls pick in a soft wash of its accent, as its selected rows are, not the window's deeper tint.
+        if self.controls.is_some() {
+            let light = ink_on(q.panel) == Color32::BLACK;
+            q.select_fill = mix(q.panel, q.accent, if light { 0.12 } else { 0.22 });
+        }
         // The accent's ink and the select tint read on the grounds as they are now.
         let select_fill = step(q.select_fill, q.panel, &[q.text], 4.5);
         let on = [q.panel, q.bar, q.surface, q.hover_fill, select_fill, q.control];
