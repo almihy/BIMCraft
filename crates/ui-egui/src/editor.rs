@@ -353,6 +353,8 @@ pub(crate) struct FamilyEditor {
     ifc: Option<IfcClass>,
     /// How a door's or a window's leaves open; none, not said.
     operation: Option<Operation>,
+    /// Each type's identity data (Type Mark…), as the family has it: Type Properties sets it, and the editor keeps it as it is.
+    identity: BTreeMap<String, bimcraft_core::type_data::TypeIdentity>,
     tab: Tab,
     /// The type shown in Types and on the preview.
     picked: usize,
@@ -394,6 +396,7 @@ impl FamilyEditor {
             kind: f.kind.clone(),
             ifc: f.ifc.clone(),
             operation: f.operation,
+            identity: f.identity.clone(),
             tab: Tab::Parameters,
             picked: 0,
             look: (AZIMUTH, ELEVATION),
@@ -446,6 +449,8 @@ impl FamilyEditor {
         let forms = self.forms.iter().map(FormText::form).collect::<Result<_, _>>()?;
         let symbols = self.symbols.iter().map(SymbolText::symbol).collect::<Result<_, _>>()?;
         let operation = self.operation.filter(|_| self.category.hosted());
+        // Each type's identity data stays with the type, and goes with it.
+        let identity = self.identity.iter().filter(|(t, _)| types.contains_key(*t)).map(|(t, i)| (t.clone(), i.clone())).collect();
         Ok(Family {
             category: self.category,
             // A kind the category it now is has no row for goes with the change of category.
@@ -453,6 +458,7 @@ impl FamilyEditor {
             ifc: self.ifc.clone(),
             parameters,
             types,
+            identity,
             forms,
             symbols,
             operation,

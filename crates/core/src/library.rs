@@ -630,9 +630,12 @@ impl Model {
                 _ => false,
             },
             Kind::Family => self.families.remove(name).is_some(),
-            Kind::FamilyType => {
-                name.split_once(": ").is_some_and(|(f, t)| self.families.get_mut(f).is_some_and(|fam| fam.types.remove(t).is_some()))
-            }
+            Kind::FamilyType => name.split_once(": ").is_some_and(|(f, t)| {
+                self.families.get_mut(f).is_some_and(|fam| {
+                    fam.identity.remove(t);
+                    fam.types.remove(t).is_some()
+                })
+            }),
             Kind::Material => self.materials.remove(name).is_some(),
             Kind::Picture => self.images.remove(name).is_some(),
             Kind::ViewFilter => self.view_filters.remove(name).is_some(),
@@ -671,7 +674,10 @@ impl Model {
                 _ => false,
             },
             Kind::FamilyType => match (from.split_once(": "), to.split_once(": ")) {
-                (Some((f, old)), Some((g, new))) if f == g => self.families.get_mut(f).is_some_and(|fam| mv(&mut fam.types, old, new)),
+                (Some((f, old)), Some((g, new))) if f == g => self.families.get_mut(f).is_some_and(|fam| {
+                    mv(&mut fam.identity, old, new);
+                    mv(&mut fam.types, old, new)
+                }),
                 _ => false,
             },
             _ => false,

@@ -57,7 +57,7 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
                         &mut cx.model.types.roof,
                         &base,
                         |k| (k.thickness - typ.thickness).abs() < 0.05 && k.layers == typ.layers,
-                        RoofType { thickness: typ.thickness, layers: typ.layers.clone() },
+                        RoofType { thickness: typ.thickness, layers: typ.layers.clone(), identity: Default::default() },
                     )
                 })
                 .clone()

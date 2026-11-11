@@ -620,7 +620,7 @@ mod tests {
     }
 
     fn rect(width: f64, depth: f64) -> RunType {
-        RunType { width, depth, round: false, material: String::new() }
+        RunType { width, depth, round: false, material: String::new(), identity: Default::default() }
     }
 
     fn volume(tris: &[[P3; 3]]) -> f64 {
@@ -694,7 +694,7 @@ mod tests {
     #[test]
     fn a_round_run_is_a_closed_tube_turned_out() {
         let (m, level) = model();
-        let round = RunType { width: 200.0, depth: 200.0, round: true, material: String::new() };
+        let round = RunType { width: 200.0, depth: 200.0, round: true, material: String::new(), identity: Default::default() };
         // From a point off the origin, where a cap turned the wrong way doesn't cancel in the volume.
         let from = P2(1000.0, -2000.0);
         for (by, end_offset) in

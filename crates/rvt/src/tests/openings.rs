@@ -305,7 +305,7 @@ fn the_doors_and_windows_of_the_architectural_sample_are_those_of_rvt_rss_export
                 differed += 1;
                 continue;
             }
-            let t = if theirs.door { i.model.types.door[&o.type_name] } else { i.model.types.window[&o.type_name] };
+            let t = if theirs.door { &i.model.types.door[&o.type_name] } else { &i.model.types.window[&o.type_name] };
             let along_x = (host.end.1 - host.start.1).abs() < 0.01;
             let (lo, hi) = if along_x { (theirs.cut[0], theirs.cut[3]) } else { (theirs.cut[1], theirs.cut[4]) };
             let (from_start, sign) = if along_x {

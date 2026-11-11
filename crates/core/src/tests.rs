@@ -2038,6 +2038,8 @@ fn hostile_params_never_panic_or_break_the_model() {
         json!({"crs": "EPSG:31983", "eastings": 1e300, "rotation": "x", "scale": -1, "clear": "yes", "map_zone": 5}),
         json!({"crs": "EPSG:31983", "northings": 1e12, "height": -1e12, "rotation": 359, "scale": 1e-300, "description": "a\nb"}),
         json!({"category": "wall", "name": "", "thickness": -5}),
+        json!({"category": "wall", "name": "Odd", "thickness": 100, "type_mark": [], "cost": 1e300, "model": "a\nb", "url": {"x": 1}}),
+        json!({"name": "Odd", "identity": {"A": {"type_mark": 5}}, "types": {"A": {}}}),
         json!({"category": "window", "name": "W", "width": 1e12, "height": 1}),
         json!({"boundary": [[0, 0], [1, 0], [0, 0]]}),
         json!({"start": [0, 0], "end": [0, 0]}),
@@ -4858,7 +4860,7 @@ fn sliding_doors_and_windows_say_how_they_open_in_ifc_and_in_schedules() {
     );
     assert!(!typed.contains(".SLIDING_TO_RIGHT.") && typed.contains("IFCDOORTYPE"));
     let back = crate::import::ifc(typed.as_bytes(), "t").unwrap();
-    let patio = back.model.types.door.get("Patio").copied();
+    let patio = back.model.types.door.get("Patio").cloned();
     assert_eq!(patio.and_then(|k| k.operation), Some(Sliding), "{:?}", back.model.types.door);
     // A schedule says it in the project's language.
     let r =
@@ -5337,7 +5339,7 @@ fn a_schedule_of_mass_floors_gives_each_masses_floor_area_and_volume_on_each_lev
     // Another, 7.5 m tall from Level 1: its last floor is only half a storey of volume.
     run(&mut s, "mass", json!({"boundary": [[20000, 0], [25000, 0], [25000, 4000], [20000, 4000]], "height": 7500, "name": "Annex"}));
     let r = run(&mut s, "schedule", json!({"category": "massfloors", "sort": ["Mass", "Level"]}));
-    assert_eq!(r["columns"], json!(["Mass", "Level", "Area (m²)", "Perimeter", "Volume"]));
+    assert_eq!(r["columns"], json!(["Mass", "Level", "Area (m²)", "Perimeter", "Volume (m³)"]));
     assert_eq!(
         r["rows"],
         json!([

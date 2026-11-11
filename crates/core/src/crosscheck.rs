@@ -148,7 +148,7 @@ pub fn describe(m: &Model) -> Value {
 }
 
 /// What this model works out of the quantities [`describe`]'s tool reports: each room's area, perimeter and volume (0 where
-/// it isn't enclosed), whether it is, and its unbounded height (its upper limit and offsets'), each wall's length along its centre line and how many doors and windows it holds,
+/// it isn't enclosed), whether it is, and its unbounded height (its upper limit and offsets'), each wall's length along its centre line, its net side area and volume and how many doors and windows it holds,
 /// each floor's area (less its openings and the shafts through it) and volume.
 pub fn ours(m: &Model) -> Vec<Row> {
     let rooms = Rooms::new(m);
@@ -174,6 +174,10 @@ pub fn ours(m: &Model) -> Vec<Row> {
             Element::Wall(w) => {
                 rows.push(Row::new("wall", id, "length_m", centre_line(m, w).3 / 1e3));
                 rows.push(Row::new("wall", id, "openings", hosted.get(&g).copied().unwrap_or(0) as f64));
+                // One side's area and the volume, less the doors and windows in it: what a schedule's Area and Volume show.
+                let q = crate::quantities::wall(m, id, w, &crate::quantities::holes_in(m, id));
+                rows.push(Row::new("wall", id, "area_m2", q.net_side / 1e6));
+                rows.push(Row::new("wall", id, "volume_m3", q.net_volume / 1e9));
             }
             Element::Floor(f) => {
                 let thickness = m.types.floor.get(&f.type_name).map_or(0.0, |t| t.thickness);

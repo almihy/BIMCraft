@@ -69,6 +69,10 @@ const CONNECTOR: u64 = 55;
 const CONNECTOR_DEFINES: u64 = 56;
 const TYPE_MATERIALS: u64 = 57;
 const USAGE_MATERIALS: u64 = 58;
+const MAKER: u64 = 59;
+const MAKER_DEFINES: u64 = 60;
+const TYPE_DATA: u64 = 61;
+const TYPE_DATA_DEFINES: u64 = 62;
 
 /// The property set an element's values of the project's parameters go in.
 pub const PARAMETERS: &str = "Project Parameters";
@@ -89,6 +93,14 @@ pub const PROPERTY_LINE: &str = "PropertyLine";
 /// The property set what a placed device's connector says that IFC's `Pset_ElectricalDeviceCommon` has no property for goes
 /// in: its load in VA (in all, and `LoadVAPhase1`… for each phase), its system and its classification.
 pub const CONNECTOR_SET: &str = "BIMCraft_Connector";
+
+/// The property set of a type's identity data (`type_data`) that has no property in IFC's `Pset_*Common` or
+/// `Pset_ManufacturerTypeInformation`: its Description, Keynote, Assembly Code, URL, Cost and Type Comments, and its Type Mark
+/// and Fire Rating where the element's own common set has no property for them.
+pub const TYPE_DATA_SET: &str = "BIMCraft_TypeData";
+
+/// The property set IFC4 has for who made a product and which of theirs it is: `Manufacturer` and `ModelLabel`.
+pub const MAKER_SET: &str = "Pset_ManufacturerTypeInformation";
 
 /// The property set an element's phase and design option go in; on the project, its phases and design option sets.
 pub const PHASING: &str = "BIMCraft_Phasing";
@@ -298,6 +310,11 @@ impl Step {
     fn text_property(&mut self, name: &str, note: Option<&str>, value: &str) -> u64 {
         let note = note.map_or_else(|| "$".to_string(), s);
         self.add(format!("IFCPROPERTYSINGLEVALUE({},{note},IFCTEXT({}),$)", s(name), s(value)))
+    }
+
+    /// A property of `kind` (`IFCLABEL`, `IFCIDENTIFIER`, `IFCTEXT`) holding text.
+    fn typed_text_property(&mut self, name: &str, kind: &str, value: &str) -> u64 {
+        self.add(format!("IFCPROPERTYSINGLEVALUE({},$,{kind}({}),$)", s(name), s(value)))
     }
 
     /// A property set `name` of `props` for `ent`; its GlobalIds from `(set, relation)` and `key`.
@@ -684,6 +701,23 @@ fn common_pset(e: &Element) -> Option<&'static str> {
     })
 }
 
+/// Whether IFC's `Pset_*Common` named `pset` has a `FireRating`.
+fn has_fire_rating(pset: &str) -> bool {
+    matches!(
+        pset,
+        "Pset_WallCommon"
+            | "Pset_SlabCommon"
+            | "Pset_RoofCommon"
+            | "Pset_CoveringCommon"
+            | "Pset_DoorCommon"
+            | "Pset_WindowCommon"
+            | "Pset_ColumnCommon"
+            | "Pset_BeamCommon"
+            | "Pset_StairCommon"
+            | "Pset_RampCommon"
+    )
+}
+
 /// What the work does to an element, in IFC's words for `Pset_*Common.Status`.
 fn ifc_status(m: &Model, e: &Element) -> Option<&'static str> {
     e.params()?;
@@ -695,11 +729,6 @@ fn ifc_status(m: &Model, e: &Element) -> Option<&'static str> {
         None if created == 0 => "EXISTING",
         None => "NEW",
     })
-}
-
-/// The length round a closed ring, mm.
-fn perimeter(ring: &[P2]) -> f64 {
-    ring.iter().zip(ring.iter().cycle().skip(1)).map(|(a, b)| a.dist(*b)).sum()
 }
 
 /// What a beam or a column measures, for its `Qto_BeamBaseQuantities` or `Qto_ColumnBaseQuantities`: its length (a column's
@@ -721,26 +750,27 @@ fn member_quantities(width: f64, depth: f64, round: bool, length: f64) -> Vec<(&
     ]
 }
 
-/// What a wall measures, for its `Qto_WallBaseQuantities`: its length along its axis, its thickness and height, its side
-/// (length by height, m²) and that less the doors and windows in it (`holes`, as (width, height, sill), each cut to the
-/// wall's height), and both through its thickness (m³), its joins aside. A wall attached to a roof or a floor has no single
-/// height, so only its length and thickness.
-fn wall_quantities(m: &Model, wl: &crate::model::Wall, holes: &[(f64, f64, f64)]) -> Vec<(&'static str, &'static str, f64)> {
-    let (length, width) = (Axis::of(wl).length(), m.thickness(wl));
-    let mut values = vec![("Length", "LENGTH", length), ("Width", "LENGTH", width)];
-    if wl.attach_top.is_none() && wl.attach_base.is_none() {
-        let height = m.top_z(wl) - m.base_z(wl);
-        let gross = length * height;
-        let cut: f64 = holes.iter().map(|&(wd, h, sill)| wd.min(length) * ((sill + h).min(height) - sill.max(0.0)).max(0.0)).sum();
-        let net = (gross - cut).max(0.0);
-        values.extend([
-            ("Height", "LENGTH", height),
-            ("GrossSideArea", "AREA", gross / 1e6),
-            ("NetSideArea", "AREA", net / 1e6),
-            ("GrossVolume", "VOLUME", gross * width / 1e9),
-            ("NetVolume", "VOLUME", net * width / 1e9),
-        ]);
+/// What a wall measures, for its `Qto_WallBaseQuantities` (`quantities::wall`, which schedules read too): its length along its
+/// axis, its thickness and height, its side (length by height, m²) and that less the doors and windows in it (`holes`, as
+/// (width, height, sill), each cut to the wall's height), and both through its thickness (m³), its joins aside. A wall attached to
+/// a roof or a floor has no single height, so no `Height`; its sides and volumes are those of its pieces.
+fn wall_quantities(
+    m: &Model,
+    id: Id,
+    wl: &crate::model::Wall,
+    holes: &[crate::quantities::Hole],
+) -> Vec<(&'static str, &'static str, f64)> {
+    let q = crate::quantities::wall(m, id, wl, holes);
+    let mut values = vec![("Length", "LENGTH", q.length), ("Width", "LENGTH", q.width)];
+    if let Some(height) = q.height {
+        values.push(("Height", "LENGTH", height));
     }
+    values.extend([
+        ("GrossSideArea", "AREA", q.gross_side / 1e6),
+        ("NetSideArea", "AREA", q.net_side / 1e6),
+        ("GrossVolume", "VOLUME", q.gross_volume / 1e9),
+        ("NetVolume", "VOLUME", q.net_volume / 1e9),
+    ]);
     values
 }
 
@@ -836,14 +866,7 @@ pub fn export(m: &Model) -> String {
     // The runs in each system, by its name, for the IfcSystem they are assigned to.
     let mut systems: BTreeMap<&str, Vec<u64>> = BTreeMap::new();
     // The doors and windows in each wall as (width, height, sill), for what its sides measure less them.
-    let mut holes: BTreeMap<Id, Vec<(f64, f64, f64)>> = BTreeMap::new();
-    for e in m.elements.values() {
-        if let Element::Door(o) | Element::Window(o) = e
-            && let (Some(t), Some(host)) = (m.opening_type(e), m.elements.id(o.host))
-        {
-            holes.entry(host).or_default().push((t.width, t.height, o.sill));
-        }
-    }
+    let holes = crate::quantities::all_holes(m);
     for (&id, e) in &m.elements {
         match e {
             Element::Wall(wl) => {
@@ -891,7 +914,7 @@ pub fn export(m: &Model) -> String {
                 products.insert(id, ent);
                 placed.insert(id, (ent, at));
                 w.typed("IFCWALLTYPE", ".STANDARD.", &wl.type_name, ent);
-                let values = wall_quantities(m, wl, holes.get(&id).map_or(&[][..], |h| h.as_slice()));
+                let values = wall_quantities(m, id, wl, holes.get(&id).map_or(&[][..], |h| h.as_slice()));
                 w.quantities(ent, "Qto_WallBaseQuantities", &values, id);
             }
             Element::Floor(f) | Element::Toposolid(f) => {
@@ -944,29 +967,25 @@ pub fn export(m: &Model) -> String {
                 if f.structural {
                     w.load_bearing(ent, "Pset_SlabCommon", id);
                 }
-                // A level slab measures as its outline less its openings, through its depth; a sloped or shaped one has no
-                // one plan area to give, so its depth, and its volumes: its plan through its depth plumb, as its underside
-                // follows its top.
-                let gross = geom::area(&f.boundary).abs();
-                let net = gross - f.openings.iter().map(|o| geom::area(o).abs()).sum::<f64>();
-                let values = if level {
+                // A level slab measures as its outline less its openings and the shafts through it, through its depth; a
+                // sloped or shaped one has no one plan area to give, so its depth, and its volumes: its plan through its depth
+                // plumb, as its underside follows its top (`quantities::floor`, which schedules read too).
+                let q = crate::quantities::floor(m, f);
+                let values = if q.level {
                     vec![
-                        ("Width", "LENGTH", depth),
-                        ("Perimeter", "LENGTH", perimeter(&f.boundary)),
-                        ("GrossArea", "AREA", geom::area(&f.boundary).abs() / 1e6),
-                        ("NetArea", "AREA", net / 1e6),
-                        ("GrossVolume", "VOLUME", geom::area(&f.boundary).abs() * depth / 1e9),
-                        ("NetVolume", "VOLUME", net * depth / 1e9),
+                        ("Width", "LENGTH", q.depth),
+                        ("Perimeter", "LENGTH", q.perimeter),
+                        ("GrossArea", "AREA", q.gross_area / 1e6),
+                        ("NetArea", "AREA", q.net_area / 1e6),
+                        ("GrossVolume", "VOLUME", q.gross_volume / 1e9),
+                        ("NetVolume", "VOLUME", q.net_volume / 1e9),
                     ]
                 } else {
-                    // A shaped one's, its solid's: under a variable layer its underside is level, so its depth isn't one.
-                    let (gross, net) = match &solid {
-                        Some(solid) => {
-                            (m.shape_solid_over(f, &[]).map_or(gross * depth, |s| crate::model::volume(&s)), crate::model::volume(solid))
-                        }
-                        None => (gross * depth, net * depth),
-                    };
-                    vec![("Width", "LENGTH", depth), ("GrossVolume", "VOLUME", gross / 1e9), ("NetVolume", "VOLUME", net / 1e9)]
+                    vec![
+                        ("Width", "LENGTH", q.depth),
+                        ("GrossVolume", "VOLUME", q.gross_volume / 1e9),
+                        ("NetVolume", "VOLUME", q.net_volume / 1e9),
+                    ]
                 };
                 w.quantities(ent, "Qto_SlabBaseQuantities", &values, id);
             }
@@ -986,6 +1005,10 @@ pub fn export(m: &Model) -> String {
                 products.insert(id, ent);
                 w.typed("IFCCOVERINGTYPE", ".CEILING.", &c.type_name, ent);
                 hosts.insert(id, (ent, at, m.elevation(c.level)));
+                let q = crate::quantities::ceiling(m, c);
+                let values =
+                    [("Width", "LENGTH", q.width), ("GrossArea", "AREA", q.gross_area / 1e6), ("NetArea", "AREA", q.net_area / 1e6)];
+                w.quantities(ent, "Qto_CoveringBaseQuantities", &values, id);
             }
             Element::Room(r) => {
                 let Some(&(_, storey)) = storeys.get(&r.level) else { continue };
@@ -1405,6 +1428,14 @@ pub fn export(m: &Model) -> String {
                 let flat = r.extrusion.is_none() && r.slope == 0.0;
                 w.typed("IFCROOFTYPE", if flat { ".FLAT_ROOF." } else { ".NOTDEFINED." }, &r.type_name, ent);
                 hosts.insert(id, (ent, at, m.elevation(r.level)));
+                // Its top's surface, and what it covers in plan (`quantities::roof`, which schedules read too).
+                let q = crate::quantities::roof(m, r);
+                let values = [
+                    ("GrossArea", "AREA", q.surface_area / 1e6),
+                    ("NetArea", "AREA", q.surface_area / 1e6),
+                    ("ProjectedArea", "AREA", q.plan_area / 1e6),
+                ];
+                w.quantities(ent, "Qto_RoofBaseQuantities", &values, id);
             }
             _ => {}
         }
@@ -1716,6 +1747,51 @@ pub fn export(m: &Model) -> String {
             let Some(status) = ifc_status(m, e) else { continue };
             let p = w.add(format!("IFCPROPERTYENUMERATEDVALUE('Status',$,(IFCLABEL('{status}')),$)"));
             w.common.entry(id).or_insert((ent, pset, Vec::new())).2.push(p);
+        }
+    }
+    // Each element's type identity data: its Type Mark as `Reference` and its Fire Rating as `FireRating` in its `Pset_*Common`
+    // where IFC has them; its manufacturer and model in `Pset_ManufacturerTypeInformation`; the rest in `BIMCraft_TypeData`.
+    for (&id, &ent) in &products {
+        let Some(e) = m.elements.get(id) else { continue };
+        let Some(identity) = m.type_identity(e).filter(|i| !i.is_empty()) else { continue };
+        let common = common_pset(e);
+        let mut common_props = Vec::new();
+        let mut rest = Vec::new();
+        if !identity.type_mark.is_empty() {
+            let p = w.typed_text_property("Reference", "IFCIDENTIFIER", &identity.type_mark);
+            if common.is_some() { common_props.push(p) } else { rest.push(p) }
+        }
+        if !identity.fire_rating.is_empty() {
+            let p = w.typed_text_property("FireRating", "IFCLABEL", &identity.fire_rating);
+            if common.is_some_and(has_fire_rating) { common_props.push(p) } else { rest.push(p) }
+        }
+        if let Some(pset) = common.filter(|_| !common_props.is_empty()) {
+            w.common.entry(id).or_insert((ent, pset, Vec::new())).2.extend(common_props);
+        }
+        let maker: Vec<u64> = [("Manufacturer", &identity.manufacturer), ("ModelLabel", &identity.model)]
+            .into_iter()
+            .filter(|(_, v)| !v.is_empty())
+            .map(|(k, v)| w.typed_text_property(k, "IFCLABEL", v))
+            .collect();
+        if !maker.is_empty() {
+            w.define(ent, MAKER_SET, &maker, (MAKER, MAKER_DEFINES), id);
+        }
+        for (k, v) in [
+            ("Description", &identity.description),
+            ("Keynote", &identity.keynote),
+            ("AssemblyCode", &identity.assembly_code),
+            ("URL", &identity.url),
+            ("TypeComments", &identity.type_comments),
+        ] {
+            if !v.is_empty() {
+                rest.push(w.typed_text_property(k, "IFCTEXT", v));
+            }
+        }
+        if let Some(cost) = identity.cost {
+            rest.push(w.add(format!("IFCPROPERTYSINGLEVALUE('Cost',$,IFCMONETARYMEASURE({}),$)", real(cost))));
+        }
+        if !rest.is_empty() {
+            w.define(ent, TYPE_DATA_SET, &rest, (TYPE_DATA, TYPE_DATA_DEFINES), id);
         }
     }
     for (id, (ent, pset, props)) in std::mem::take(&mut w.common) {
@@ -2776,11 +2852,11 @@ mod tests {
         assert!(near(q["GrossArea"], 48.0) && near(q["NetArea"], 47.0) && near(q["Perimeter"], 28000.0), "{q:?}");
         assert!(near(q["NetVolume"], 47.0 * q["Width"] / 1e3), "{q:?}");
         dangling(&f);
-        // Attached to a roof or a floor, a wall has no single height: only its length and thickness.
+        // Attached to a roof or a floor, a wall has no single height: no `Height`, its sides and volumes its pieces.
         let mut attached = wl.clone();
         attached.attach_top = Some(m.guid(walls[1]));
-        let names: Vec<&str> = wall_quantities(m, &attached, &[]).iter().map(|(n, _, _)| *n).collect();
-        assert_eq!(names, ["Length", "Width"]);
+        let names: Vec<&str> = wall_quantities(m, wall, &attached, &[]).iter().map(|(n, _, _)| *n).collect();
+        assert_eq!(names, ["Length", "Width", "GrossSideArea", "NetSideArea", "GrossVolume", "NetVolume"]);
     }
 
     /// Every closed shell in `f` is closed: each edge of its faces, from one point to the next round a bound, is run once
@@ -2866,5 +2942,116 @@ mod tests {
         assert!((q["NetVolume"] - want).abs() < 1e-6 && (q["GrossVolume"] - want).abs() < 1e-6, "{q:?}");
         // Every corner of its underside is at -270 mm.
         assert!(text.contains("IFCCARTESIANPOINT((0.,0.,-270.))") && !text.contains("IFCCARTESIANPOINT((4000.,3000.,-300.))"));
+    }
+
+    #[test]
+    fn schedules_and_ifc_read_their_quantities_from_one_place() {
+        use crate::graphics::testing::{house, run};
+        let mut s = Session::new();
+        let walls = house(&mut s);
+        run(&mut s, "door", json!({"at": [2000, 0]}));
+        run(&mut s, "window", json!({"at": [4000, 0]}));
+        let boundary = json!([[0, 0], [8000, 0], [8000, 6000], [0, 6000]]);
+        let hole = json!([[[1000, 1000], [2000, 1000], [2000, 2000], [1000, 2000]]]);
+        let floor = run(&mut s, "floor", json!({"boundary": boundary, "openings": hole}))["id"].as_u64().unwrap();
+        let ceiling = run(&mut s, "ceiling", json!({"boundary": boundary, "openings": hole}))["id"].as_u64().unwrap();
+        run(&mut s, "level", json!({"name": "Roof level", "elevation": 3000}));
+        let roof = run(&mut s, "roof", json!({"boundary": boundary, "overhang": 0, "slope": 30}))["id"].as_u64().unwrap();
+        let f = export(&s.model);
+        let m = &s.model;
+        let json = |id: u64| crate::commands::element_json(m, id);
+        let close = |a: f64, b: f64| (a - b).abs() < 0.006;
+        let (ifc_wall, ifc_floor) = (of_kind(&f, "IFCWALL"), *of_kind(&f, "IFCSLAB").last().unwrap());
+        // A wall's net side and volume, and a floor's net area and volume: the schedule's cells are the file's numbers.
+        let q = quantities_of(&f, ifc_wall[0], "Qto_WallBaseQuantities");
+        let j = json(walls[0]);
+        assert!(
+            close(j["area_m2"].as_f64().unwrap(), q["NetSideArea"]) && close(j["volume_m3"].as_f64().unwrap(), q["NetVolume"]),
+            "{j} {q:?}"
+        );
+        let q = quantities_of(&f, ifc_floor, "Qto_SlabBaseQuantities");
+        let j = json(floor);
+        assert!(
+            close(j["area_m2"].as_f64().unwrap(), q["NetArea"]) && close(j["volume_m3"].as_f64().unwrap(), q["NetVolume"]),
+            "{j} {q:?}"
+        );
+        assert!(close(j["perimeter_m"].as_f64().unwrap() * 1000.0, q["Perimeter"]), "{j} {q:?}");
+        let q = quantities_of(&f, of_kind(&f, "IFCCOVERING")[0], "Qto_CoveringBaseQuantities");
+        let j = json(ceiling);
+        assert!(close(j["area_m2"].as_f64().unwrap(), q["NetArea"]) && close(q["GrossArea"], 48.0), "{j} {q:?}");
+        let q = quantities_of(&f, of_kind(&f, "IFCROOF")[0], "Qto_RoofBaseQuantities");
+        let j = json(roof);
+        assert!(
+            close(j["surface_area_m2"].as_f64().unwrap(), q["GrossArea"]) && close(j["area_m2"].as_f64().unwrap(), q["ProjectedArea"]),
+            "{j} {q:?}"
+        );
+        assert!(q["GrossArea"] > q["ProjectedArea"], "{q:?}");
+    }
+
+    #[test]
+    fn a_wall_attached_to_a_floor_above_still_measures_its_side_and_volume() {
+        use crate::graphics::testing::{house, run};
+        let mut s = Session::new();
+        let walls = house(&mut s);
+        let level = run(&mut s, "level", json!({"name": "Upper", "elevation": 3000}))["id"].as_u64().unwrap();
+        let boundary = json!([[0, 0], [8000, 0], [8000, 6000], [0, 6000]]);
+        let floor = run(&mut s, "floor", json!({"boundary": boundary, "level": level}))["id"].as_u64().unwrap();
+        let Some(Element::Wall(wl)) = s.model.elements.get(walls[0]) else { panic!("no wall") };
+        let free = crate::quantities::wall(&s.model, walls[0], wl, &[]);
+        let mut attached = wl.clone();
+        attached.attach_top = Some(s.model.guid(floor));
+        let q = crate::quantities::wall(&s.model, walls[0], &attached, &[]);
+        assert_eq!(q.height, None);
+        assert!(q.gross_volume > 0.0 && (q.gross_side - q.gross_volume / q.width).abs() < 1e-6, "{q:?}");
+        assert!(q.gross_side <= free.gross_side * 1.2 && q.gross_side >= free.gross_side * 0.8, "{q:?} {free:?}");
+    }
+
+    #[test]
+    fn identity_data_goes_out_as_the_property_sets_ifc_has_for_it() {
+        use crate::graphics::testing::{house, run};
+        let mut s = Session::new();
+        house(&mut s);
+        let door = run(&mut s, "door", json!({"at": [2000, 0]}))["id"].as_u64().unwrap();
+        let wall = s.model.elements.values().find_map(|e| if let Element::Wall(w) = e { Some(w.type_name.clone()) } else { None }).unwrap();
+        let (door_family, door_type) = match s.model.elements.get(door) {
+            Some(Element::Door(o)) => (o.family.clone(), o.type_name.clone()),
+            _ => panic!("no door"),
+        };
+        let wall_data = json!({"category": "wall", "name": wall, "type_mark": "W1", "fire_rating": "EI 60", "manufacturer": "Acme",
+            "model": "X-200", "description": "Brick", "cost": 120.5, "keynote": "04 21 13"});
+        run(&mut s, "type", wall_data);
+        match door_family {
+            Some(f) => run(&mut s, "family", json!({"name": f, "identity": {door_type: {"type_mark": "D1", "fire_rating": "EI 30"}}})),
+            None => run(&mut s, "type", json!({"category": "door", "name": door_type, "type_mark": "D1", "fire_rating": "EI 30"})),
+        };
+        let chair = json!({"name": "Chair", "category": "furniture", "parameters": [{"name": "Width", "kind": "length", "value": 500}],
+            "types": {"A": {"Width": 500}}, "forms": [{"plane": "xy", "profile": [[0, 0], [500, 0], [500, 500], [0, 500]], "from": 0, "to": 400}],
+            "identity": {"A": {"type_mark": "C1", "fire_rating": "none"}}});
+        run(&mut s, "family", chair);
+        run(&mut s, "component", json!({"family": "Chair", "type": "A", "at": [1000, 1000]}));
+        let f = export(&s.model);
+        let wall_ent = of_kind(&f, "IFCWALL")[0];
+        let common = set_of(&f, wall_ent, "Pset_WallCommon");
+        assert!(common.contains(&"IFCPROPERTYSINGLEVALUE('Reference',$,IFCIDENTIFIER('W1'),$)".to_string()), "{common:?}");
+        assert!(common.contains(&"IFCPROPERTYSINGLEVALUE('FireRating',$,IFCLABEL('EI 60'),$)".to_string()), "{common:?}");
+        let maker = set_of(&f, wall_ent, MAKER_SET);
+        assert_eq!(
+            maker,
+            ["IFCPROPERTYSINGLEVALUE('Manufacturer',$,IFCLABEL('Acme'),$)", "IFCPROPERTYSINGLEVALUE('ModelLabel',$,IFCLABEL('X-200'),$)"]
+        );
+        let rest = set_of(&f, wall_ent, TYPE_DATA_SET);
+        for want in ["'Description',$,IFCTEXT('Brick')", "'Keynote',$,IFCTEXT('04 21 13')", "'Cost',$,IFCMONETARYMEASURE(120.5)"] {
+            assert!(rest.iter().any(|p| p.contains(want)), "{want} in {rest:?}");
+        }
+        assert!(!rest.iter().any(|p| p.contains("Reference") || p.contains("FireRating")), "those are in the common set: {rest:?}");
+        let door_common = set_of(&f, of_kind(&f, "IFCDOOR")[0], "Pset_DoorCommon");
+        assert!(door_common.iter().any(|p| p.contains("'FireRating'") && p.contains("EI 30")), "{door_common:?}");
+        assert!(door_common.iter().any(|p| p.contains("'Reference'") && p.contains("'D1'")), "{door_common:?}");
+        // A family's component has no common set: its Type Mark and Fire Rating go in the BIMCraft set.
+        let component = of_kind(&f, "IFCFURNITURE")[0];
+        let rest = set_of(&f, component, TYPE_DATA_SET);
+        assert!(rest.iter().any(|p| p.contains("'Reference'") && p.contains("'C1'")), "{rest:?}");
+        assert!(rest.iter().any(|p| p.contains("'FireRating'")), "{rest:?}");
+        dangling(&f);
     }
 }

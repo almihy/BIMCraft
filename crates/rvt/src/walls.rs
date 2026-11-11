@@ -315,7 +315,7 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
                         &mut cx.model.types.wall,
                         &base,
                         |k| (k.thickness - typ.thickness).abs() < 0.05 && k.layers == typ.layers,
-                        WallType { thickness: typ.thickness, layers: typ.layers.clone() },
+                        WallType { thickness: typ.thickness, layers: typ.layers.clone(), identity: Default::default() },
                     );
                     made.insert(key, n.clone());
                     n

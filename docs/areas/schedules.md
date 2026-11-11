@@ -19,9 +19,38 @@ A multi-category schedule (`of: "multicategory"`, `schedule::MULTI`, as Revit's 
 element of the categories it lists (`Schedule::categories`; none, every built one, `schedule::built`: not rooms, levels and
 masses) and the fields they share (`SHARED`): Category (the element's, as elements name theirs), Family, Type, Level, Count,
 Width, Height, Length, Thickness and Area, each its own category's field of that name where it has one holding the same and
-empty where not (an area worked out for walls, length by height, and doors and windows, width by height; a roof's plan
-area), and Material, its type's structure layer's (or its thickest's), a run's type's or a family's first material
+empty where not (a wall's area is its own, one side less its openings, and a door's or window's is its width by its height; a
+roof's is its surface's), and Material, its type's structure layer's (or its thickest's), a run's type's or a family's first material
 parameter's. Its filters, sorting, grouping, totals and calculated fields are any schedule's; only it lists categories.
+## Quantities and type identity data
+
+**Area, Volume and Perimeter** are fields of the walls', floors', ceilings' and roofs' schedules, as Revit's (Area and Volume are
+among a wall schedule's and a floor schedule's first fields). All of them come from `quantities.rs`, which IFC's
+`Qto_*BaseQuantities` read too, so a schedule and an exported file never differ: a wall's Area is one side of it less the doors
+and windows in it (cut to the wall's height) and its Volume that through its thickness, joins aside (a wall attached to a roof or
+a floor has no one height: its pieces' volume and, through its thickness, its side); a floor's and a ceiling's Area is its outline
+less its openings and the shafts through it, its Volume that through its thickness (under a variable layer, less where its top
+falls), its Perimeter round its outline; a roof's Area is its surface (each slope's plan stretched by its slope; `Plan Area` is
+the footprint, courtyards left out), its Volume that through its thickness. A field of volumes (`Kind::Volume`, m³ or ft³ by
+`Units::volume`) is summed, filtered and charted as an area is; its heading says the unit. `elements` gives them as `area_m2`,
+`volume_m3` and `perimeter_m` (a roof's surface as `surface_area_m2`).
+
+**Type identity data** (`type_data.rs`: Type Mark, Description, Manufacturer, Model, Fire Rating, Cost, Keynote, Assembly Code, URL
+and Type Comments, as Revit's Identity Data) is held by every library type (`identity` on a wall, floor, roof, ceiling, door,
+window, column, railing or run type; a family's types in `Family::identity`, by type name), optional and written to a file only
+where set, so a file from before reads as it was (a stair, a ramp and the types that aren't elements' have none). The `type`
+command sets it (`type_mark`, `description`, `manufacturer`, `model`, `fire_rating`, `cost`, `keynote`, `assembly_code`, `url`,
+`type_comments`; `""` or null clears one), `family`'s `identity` a family type's, and Edit Type's Identity Data group either.
+An element's JSON carries its type's (`type_mark`…), so each is a schedule field of that name for every category whose elements
+are of a type and for a multi-category schedule (not among the first fields unless chosen), and a tag's `label`. IFC writes the
+Type Mark as `Reference` and the Fire Rating as `FireRating` in the element's `Pset_*Common` where IFC has them there,
+Manufacturer and Model as `Pset_ManufacturerTypeInformation`'s `Manufacturer` and `ModelLabel`, and the rest (and those two where
+there's no common set, a component's) in `BIMCraft_TypeData`. A project parameter (or, for components, a family's) of the same
+name takes the field's place in schedules, as it did before the field: `Fire Rating` as a project parameter of doors, with
+a value for each door, still shows that. Area, Volume and Perimeter are fields of their own, which a project parameter can't be
+named: a file from before that holds one by such a name reads with it renamed `Custom <name>`
+(`Model::renamed_clashing_parameters`).
+
 A table goes to a file as CSV (`schedule::to_csv`, text a spreadsheet would read as a formula guarded with `'`) or, for a path
 ending `.xlsx`, as a workbook of one sheet (`schedule::to_xlsx` over `xlsx.rs`, which writes the parts and the zip by hand on
 `flate2`): headings in bold, numbers as numbers so they sum, text as inline strings, which a spreadsheet never takes for a formula.
@@ -35,8 +64,9 @@ by our element ids, and `compare_crosscheck` (and the test `the_small_tower_has_
 table of the small two-storey tower is committed) compares them quantity by quantity within `crosscheck::tolerance`.
 Compared: each room's area, perimeter, whether it is enclosed, its unbounded height and its volume, each wall's length
 along its centre line and its doors and windows, each floor's area less its openings and shafts, and its volume. Revit
-reports more (a wall's area and volume) than we work out yet: those come back as `only_theirs`, the list of what is still
-to do. Where the two define a quantity differently, the difference goes here, with the rule the comparison applies.
+reports more than we work out yet: those come back as `only_theirs`, the list of what is still to do. A wall's net side area
+and volume are worked out now (`quantities.rs`, as a schedule shows them); how Revit's agree, where it takes a join off, is for
+the comparison to show. Where the two define a quantity differently, the difference goes here, with the rule the comparison applies.
 
 - A room's volume is its area times its unbounded height (from its level and base offset up to its upper limit and limit
   offset), which is Revit's while nothing under its top bounds it. Revit also stops a room's volume at a room-bounding

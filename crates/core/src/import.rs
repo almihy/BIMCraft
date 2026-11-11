@@ -1870,7 +1870,7 @@ pub(crate) fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, S
                 &mut m.types.wall,
                 &base,
                 |k| (k.thickness - t).abs() < 0.05 && k.layers == layers,
-                WallType { thickness: t, layers: layers.clone() },
+                WallType { thickness: t, layers: layers.clone(), identity: Default::default() },
             );
             let on = |x: P2| micron(c + (x - c).unit() * ((r0 + r1) / 2.0));
             let arc = (arc * 1e6).round() / 1e6;
@@ -1918,7 +1918,7 @@ pub(crate) fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, S
             &mut m.types.wall,
             &base,
             |k| (k.thickness - t).abs() < 0.05 && k.layers == layers,
-            WallType { thickness: t, layers: layers.clone() },
+            WallType { thickness: t, layers: layers.clone(), identity: Default::default() },
         );
         raw.push(RawWall {
             ifc: id,
@@ -2029,7 +2029,7 @@ pub(crate) fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, S
                 &mut m.types.floor,
                 &base,
                 |k| (k.thickness - t).abs() < 0.05 && k.layers == layers,
-                FloorType { thickness: t, layers: layers.clone() },
+                FloorType { thickness: t, layers: layers.clone(), identity: Default::default() },
             );
             let level = level_near(high).unwrap_or_else(|| level_for(id, high));
             let shape = crate::model::Shape {
@@ -2091,7 +2091,7 @@ pub(crate) fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, S
             &mut m.types.floor,
             &base,
             |k| (k.thickness - t).abs() < 0.05 && k.layers == layers,
-            FloorType { thickness: t, layers: layers.clone() },
+            FloorType { thickness: t, layers: layers.clone(), identity: Default::default() },
         );
         let z = top.at(tail);
         let level = level_near(z).unwrap_or_else(|| level_for(id, z));
@@ -2138,7 +2138,7 @@ pub(crate) fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, S
             &mut m.types.ceiling,
             &base,
             |k| (k.thickness - t).abs() < 0.05 && k.layers == layers,
-            CeilingType { thickness: t, grid: 0.0, layers: layers.clone() },
+            CeilingType { thickness: t, grid: 0.0, layers: layers.clone(), identity: Default::default() },
         );
         let level = level_for(id, z0);
         let boundary = ring.into_iter().map(|p| micron(r.flat([p.0, p.1, 0.0]))).collect();
@@ -2207,7 +2207,7 @@ pub(crate) fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, S
                     &mut m.types.roof,
                     &base,
                     |k| (k.thickness - t).abs() < 0.05 && k.layers == layers,
-                    RoofType { thickness: t, layers: layers.clone() },
+                    RoofType { thickness: t, layers: layers.clone(), identity: Default::default() },
                 );
                 let level = level_near(high - t).unwrap_or_else(|| level_for(id, high - t));
                 let tidy_ring = |h: Vec<P2>| tidy(&h.into_iter().map(flat).collect::<Vec<P2>>());
@@ -2263,7 +2263,7 @@ pub(crate) fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, S
                     &mut m.types.roof,
                     &base,
                     |k| (k.thickness - t).abs() < 0.05 && k.layers == layers,
-                    RoofType { thickness: t, layers: layers.clone() },
+                    RoofType { thickness: t, layers: layers.clone(), identity: Default::default() },
                 );
                 let pitched = rd.slope > 0.0;
                 let level = if pitched { level_for(id, rd.z) } else { level_near(rd.z).unwrap_or_else(|| level_for(id, rd.z)) };
@@ -2482,7 +2482,7 @@ pub(crate) fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, S
         } else {
             &mut m.types.column
         };
-        let type_name = kind(types, &base, same, ColumnType { width: w, depth: d, round });
+        let type_name = kind(types, &base, same, ColumnType { width: w, depth: d, round, identity: Default::default() });
         let level = level_for(id, z0);
         let (top_level, height) = if footing { (None, z1 - z0) } else { topped(level, z0, z1) };
         let angle = if round { 0.0 } else { (u.1.atan2(u.0).to_degrees() * 1e6).round() / 1e6 };
@@ -2564,7 +2564,12 @@ pub(crate) fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, S
         let same =
             |k: &RunType| k.round == found.round && (k.width - w).abs() < 0.05 && (k.depth - d).abs() < 0.05 && k.material == material;
         let types = m.types.runs.entry(category.to_string()).or_default();
-        let type_name = kind(types, &base, same, RunType { width: w, depth: d, round: found.round, material: material.clone() });
+        let type_name = kind(
+            types,
+            &base,
+            same,
+            RunType { width: w, depth: d, round: found.round, material: material.clone(), identity: Default::default() },
+        );
         let height = |z: f64| ((z - elevation(level)) * 1000.0).round() / 1000.0 + 0.0;
         // The body is the centre line; the justification BIMCraft wrote puts the heights back on the line they were typed at.
         let justify = run_props.get(&id).and_then(|(j, _)| *j).unwrap_or(Justify::Centre);
@@ -2947,7 +2952,12 @@ pub(crate) fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, S
                 }
                 let base = named.clone().unwrap_or_else(|| format!("Imported - {}mm", num(h)));
                 Railing {
-                    type_name: kind(&mut m.types.railing, &base, |t| (t.height - h).abs() < 0.5, RailingType { height: h, spacing: 0.0 }),
+                    type_name: kind(
+                        &mut m.types.railing,
+                        &base,
+                        |t| (t.height - h).abs() < 0.5,
+                        RailingType { height: h, spacing: 0.0, identity: Default::default() },
+                    ),
                     ..on(side)
                 }
             }
@@ -2960,7 +2970,12 @@ pub(crate) fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, S
                     continue;
                 }
                 let base = named.clone().unwrap_or_else(|| format!("Imported - {}mm", num(h)));
-                let type_name = kind(&mut m.types.railing, &base, |t| (t.height - h).abs() < 0.5, RailingType { height: h, spacing: 0.0 });
+                let type_name = kind(
+                    &mut m.types.railing,
+                    &base,
+                    |t| (t.height - h).abs() < 0.5,
+                    RailingType { height: h, spacing: 0.0, identity: Default::default() },
+                );
                 let level = level_for(id, first[2] - h);
                 let path = axis.iter().map(|p| micron(r.flat(*p))).collect();
                 let base_offset = ((first[2] - h - elevation(level)) * 1000.0).round() / 1000.0 + 0.0;
@@ -3105,7 +3120,7 @@ pub(crate) fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, S
             .and_then(crate::model::Operation::from_ifc_door);
         let operation = operated.map(|(op, _)| op);
         let same = |k: &OpeningType| (k.width - width).abs() < 0.05 && (k.height - height).abs() < 0.05 && k.operation == operation;
-        let new = OpeningType { width, height, sill: if is_door { 0.0 } else { sill }, operation };
+        let new = OpeningType { width, height, sill: if is_door { 0.0 } else { sill }, operation, identity: Default::default() };
         let types = if is_door { &mut m.types.door } else { &mut m.types.window };
         let type_name = kind(types, &base_name, same, new);
         let mark = tags.remove(&id).unwrap_or_else(|| {
