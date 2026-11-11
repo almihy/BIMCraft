@@ -6772,3 +6772,73 @@ fn room_area_computation_is_set_from_manage_and_undone() {
 }
 
 mod background_grid;
+
+#[test]
+fn array_linear_makes_the_numbered_members_a_distance_apart_and_selects_them_all() {
+    let mut h = app(&format!("{BOX}
+door {{\"at\": [2000, 0]}}"));
+    let door = ids(&h, "door")[0];
+    click(&mut h, P2(2000.0, 0.0));
+    press(&mut h, "Array");
+    type_into(&mut h, "Number:", "4");
+    click(&mut h, P2(2000.0, 0.0));
+    click(&mut h, P2(3000.0, 0.0));
+    let mut at: Vec<f64> = ids(&h, "door").into_iter().map(|d| field(&h, d, "at")[0].as_f64().unwrap()).collect();
+    at.sort_by(f64::total_cmp);
+    assert_eq!(at, [2000.0, 3000.0, 4000.0, 5000.0]);
+    assert_eq!(h.state().selection.len(), 4, "the original and its copies are selected");
+    assert!(h.state().selection.contains(&door));
+    assert!(matches!(h.state().tool, Tool::Modify));
+}
+
+#[test]
+fn array_move_to_last_spreads_the_members_over_the_distance() {
+    let mut h = app(&format!("{BOX}
+door {{\"at\": [2000, 0]}}"));
+    click(&mut h, P2(2000.0, 0.0));
+    press(&mut h, "Array");
+    type_into(&mut h, "Number:", "4");
+    press(&mut h, "Last");
+    click(&mut h, P2(2000.0, 0.0));
+    click(&mut h, P2(5000.0, 0.0));
+    let mut at: Vec<f64> = ids(&h, "door").into_iter().map(|d| field(&h, d, "at")[0].as_f64().unwrap()).collect();
+    at.sort_by(f64::total_cmp);
+    assert_eq!(at, [2000.0, 3000.0, 4000.0, 5000.0]);
+}
+
+#[test]
+fn array_radial_turns_copies_about_the_placed_centre() {
+    let mut h = app(&format!("{BOX}
+column {{\"at\": [2000, 1000]}}"));
+    click(&mut h, P2(2000.0, 1000.0));
+    press(&mut h, "Array");
+    press(&mut h, "Radial");
+    type_into(&mut h, "Number:", "3");
+    press(&mut h, "Place Centre");
+    click(&mut h, P2(0.0, 0.0));
+    // Two clicks make the angle: from east to north, a quarter turn.
+    click(&mut h, P2(1000.0, 0.0));
+    click(&mut h, P2(0.0, 1000.0));
+    let at: Vec<P2> = ids(&h, "column")
+        .into_iter()
+        .map(|c| {
+            let a = field(&h, c, "at");
+            P2(a[0].as_f64().unwrap(), a[1].as_f64().unwrap())
+        })
+        .collect();
+    assert_eq!(at.len(), 3);
+    assert!(at.iter().any(|q| q.dist(P2(-1000.0, 2000.0)) < 0.01), "{at:?}");
+    assert!(at.iter().any(|q| q.dist(P2(-2000.0, -1000.0)) < 0.01), "{at:?}");
+}
+
+#[test]
+fn array_needs_a_selection_and_its_shortcut_starts_the_tool() {
+    let mut h = app(&format!("{BOX}
+door {{\"at\": [2000, 0]}}"));
+    shortcut(&mut h, "AR");
+    assert!(!matches!(h.state().tool, Tool::Array { .. }), "nothing is selected to array");
+    click(&mut h, P2(2000.0, 0.0));
+    shortcut(&mut h, "AR");
+    assert!(matches!(h.state().tool, Tool::Array { .. }), "{:?}", h.state().tool);
+}
+

@@ -82,7 +82,7 @@ The goal is the editing tools a working architect reaches for every hour.
 
 | Item | Size |
 |---|---|
-| Arrays, linear and radial, optionally kept as a group | M |
+| Arrays, linear and radial: done (`array`, AR); left: keeping one as a model group (with model groups below) | M |
 | Groups (model groups) with group types, edit group, and exclude a member | L |
 | Pin and unpin; a selection filter; match type properties | S |
 | Locked and equal dimension constraints: done (`constraints.rs`: padlocks and EQ on aligned and linear dimensions, kept after every command); left: dimensions bound to parameters (labels) | M |

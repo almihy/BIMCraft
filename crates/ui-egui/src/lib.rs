@@ -9,6 +9,7 @@ use crate::popup::Modal;
 
 use bimcraft_i18n::msg;
 
+mod array;
 mod background_grid;
 mod browser;
 mod cad;
@@ -156,6 +157,13 @@ pub enum Tool {
     /// Rotate the selection about `centre`: the start of the angle, once clicked; with `place`, the
     /// next click moves the centre.
     Rotate {
+        centre: P2,
+        start: Option<P2>,
+        place: bool,
+    },
+    /// Array the selection (Linear: `start` is the first point once clicked; Radial: as Rotate, about `centre`, `start` the
+    /// angle's start, and with `place` the next click moves the centre).
+    Array {
         centre: P2,
         start: Option<P2>,
         place: bool,
@@ -683,6 +691,8 @@ pub struct BimApp {
     /// The Options Bar's Rotate angle, Copy for Rotate and for Mirror, and Offset distance and Copy.
     angle: String,
     rotate_copy: bool,
+    /// Array's Options Bar.
+    array: array::Options,
     mirror_copy: bool,
     offset: String,
     offset_copy: bool,
@@ -1387,6 +1397,7 @@ impl BimApp {
             multiple: false,
             angle: String::new(),
             rotate_copy: false,
+            array: array::Options::default(),
             mirror_copy: true,
             offset: units.length(1000.0),
             offset_copy: true,
@@ -1554,6 +1565,7 @@ impl BimApp {
             | Tool::Move(_)
             | Tool::Copy(_)
             | Tool::Rotate { .. }
+            | Tool::Array { .. }
             | Tool::Mirror { .. }
             | Tool::Align(_)
             | Tool::Trim(_)
@@ -2307,6 +2319,7 @@ impl BimApp {
                 Some("move") => Tool::Move(None),
                 Some("copy") => Tool::Copy(None),
                 Some("rotate") => Tool::Rotate { centre: P2(0.0, 0.0), start: None, place: false },
+                Some("array") => Self::new_array(),
                 Some("corner") => Tool::Trim(None),
                 Some("split") => Tool::Split,
                 Some("linework") => Tool::Linework,
@@ -2569,7 +2582,7 @@ impl BimApp {
             self.open_sheet(Sheet::View3D);
         }
         // Move, Copy, Rotate and Mirror take the selection; Align, Trim, Split and Offset pick walls, Demolish anything.
-        let edits = matches!(tool, Tool::Move(_) | Tool::Copy(_) | Tool::Rotate { .. } | Tool::Mirror { .. });
+        let edits = matches!(tool, Tool::Move(_) | Tool::Copy(_) | Tool::Rotate { .. } | Tool::Array { .. } | Tool::Mirror { .. });
         let picks = matches!(
             tool,
             Tool::Align(_)
@@ -2582,7 +2595,7 @@ impl BimApp {
                 | Tool::Linework
         );
         if edits && self.selection.is_empty() {
-            self.status = Status { text: t("select what to move, copy, rotate or mirror first").into(), error: true };
+            self.status = Status { text: t("select what to move, copy, rotate, array or mirror first").into(), error: true };
             return;
         }
         if tool == Tool::Attach && self.selected_walls().is_empty() {
@@ -2602,7 +2615,7 @@ impl BimApp {
             self.shape_picked.clear();
             self.shape_z.clear();
         }
-        if let Tool::Rotate { centre, .. } = &mut tool
+        if let Tool::Rotate { centre, .. } | Tool::Array { centre, .. } = &mut tool
             && let Some(middle) = self.middle()
         {
             *centre = middle;
@@ -2796,6 +2809,7 @@ impl BimApp {
             | Tool::Section(start)
             | Tool::SlopeArrow(start)
             | Tool::AddSplitLine(start) => *start,
+            Tool::Array { start, .. } if !self.array.radial => *start,
             Tool::Stair(pts) | Tool::Ramp(pts) | Tool::Railing(pts) | Tool::Mass(pts) | Tool::DetailLine(pts) | Tool::SketchLine(pts) => {
                 pts.last().copied()
             }
@@ -2987,6 +3001,7 @@ impl BimApp {
             | Tool::DetailLine(pts) => pts.clear(),
             Tool::Move(_)
             | Tool::Copy(_)
+            | Tool::Array { .. }
             | Tool::SlopeArrow(_)
             | Tool::ModifySubElements
             | Tool::AddPoint
@@ -4488,6 +4503,13 @@ impl BimApp {
                     some,
                 ),
                 (
+                    Icon::Array,
+                    "Array",
+                    msg!("Array (AR): repeat the selection along a line or about a point"),
+                    Some(Self::new_array()),
+                    some,
+                ),
+                (
                     Icon::Trim,
                     "Trim/Extend to Corner",
                     msg!("Trim/Extend to Corner (TR): pick two walls or two lines, on the parts to keep"),
@@ -4813,6 +4835,7 @@ impl BimApp {
                     ui.checkbox(&mut self.multiple, t("Multiple"));
                 }
                 Tool::Rotate { .. } => self.rotate_options(ui),
+                Tool::Array { .. } => self.array_options(ui),
                 Tool::Mirror { .. } => {
                     ui.checkbox(&mut self.mirror_copy, t("Copy"));
                 }
@@ -4998,6 +5021,11 @@ impl BimApp {
             Tool::Rotate { place: true, .. } => msg!("Click the centre of rotation."),
             Tool::Rotate { start: None, .. } => msg!("Click the start of the angle, or type an angle in the Options Bar."),
             Tool::Rotate { start: Some(_), .. } => msg!("Click the end of the angle. Esc cancels."),
+            Tool::Array { place: true, .. } => msg!("Click the centre of rotation."),
+            Tool::Array { start: None, .. } if self.array.radial => msg!("Click the start of the angle, or type an angle in the Options Bar."),
+            Tool::Array { start: Some(_), .. } if self.array.radial => msg!("Click the end of the angle. Esc cancels."),
+            Tool::Array { start: None, .. } => msg!("Click the first point of the array's distance."),
+            Tool::Array { start: Some(_), .. } => msg!("Click the second point: how far the second member, or the last, goes. Esc cancels."),
             Tool::Mirror { draw: false, .. } => msg!("Pick a wall or grid to mirror across."),
             Tool::Mirror { draw: true, start: None } => msg!("Click the start of the mirror axis."),
             Tool::Mirror { draw: true, start: Some(_) } => msg!("Click the end of the mirror axis."),

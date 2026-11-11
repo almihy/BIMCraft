@@ -43,6 +43,7 @@ use crate::{pdf, render, schedule, sheet, snap, stairs, view3d};
 
 type R = Result<Value, String>;
 
+mod array;
 mod cad_pick;
 mod site;
 use cad_pick::cad_outlines;
@@ -1373,6 +1374,13 @@ other_files(
         &["CO"],
         "{ids: [id,…], by: [dx, dy]} copies elements, with the doors and windows of copied walls; returns the copies' ids",
         copy,
+    ),
+    edit(
+        "array",
+        msg!("Array"),
+        &["AR"],
+        "{ids: [id,…], mode?: linear|radial (default linear), count?: members in all, the original among them (2 to 1000, default 2),          move_to?: second|last (default second)}; linear: `by` [dx, dy] or `from` and `to` [x, y] each; radial: `centre` [x, y] and          `angle` in degrees, counter-clockwise. With `second`, the distance or angle is between one member and the next; with `last`,          from the first to the last, shared out evenly (360 degrees shares the circle). Copies as `copy` and `rotate` do, with the          doors and windows of copied walls; returns the copies' ids, and `members`, each member's ids",
+        array::array,
     ),
     edit(
         "rotate",
