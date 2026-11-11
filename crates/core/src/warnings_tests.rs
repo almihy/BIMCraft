@@ -724,8 +724,10 @@ fn a_panic_working_out_the_warnings_refuses_the_command_and_leaves_the_session_a
 fn a_panic_working_out_a_scripts_warnings_refuses_an_atomic_script_but_not_one_whose_lines_are_done() {
     let (mut s, w) = awkward_house();
     s.warnings();
-    let text = format!("door {{\"wall\": {w}, \"offset\": 4000}}
-door {{\"wall\": {w}, \"offset\": 4300}}");
+    let text = format!(
+        "door {{\"wall\": {w}, \"offset\": 4000}}
+door {{\"wall\": {w}, \"offset\": 4300}}"
+    );
     let doors = |s: &Session| s.model.elements.iter().filter(|(_, e)| matches!(e, Element::Door(_))).count();
     let before = doors(&s);
     crate::engine::FORCED_PANIC.with(|f| f.set(Some("report")));
@@ -952,7 +954,11 @@ fn phases_do_not_hide_identical_or_overlapping_elements() {
     assert!(r.get("new_warnings").is_none());
     assert_eq!(listed(&mut s, "identical_instances").len(), 1, "both stand in the first phase");
     run(&mut s, "modify", json!({"id": new, "params": {"Phase Created": "New work"}}));
-    assert_eq!(listed(&mut s, "identical_instances").len(), 1, "Revit's warning ignores phases: a demolished wall and its replacement still warn");
+    assert_eq!(
+        listed(&mut s, "identical_instances").len(),
+        1,
+        "Revit's warning ignores phases: a demolished wall and its replacement still warn"
+    );
     let longer = wall(&mut s, [3000.0, 0.0], [9000.0, 0.0]);
     assert_eq!(listed(&mut s, "walls_overlap").len(), 2, "{old} {new} {longer}");
     run(&mut s, "modify", json!({"id": longer, "params": {"Phase Created": "New work"}}));

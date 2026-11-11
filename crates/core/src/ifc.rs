@@ -270,8 +270,25 @@ type Member = (Section, String);
 /// before a building pad for `IFCSLABTYPE`, a column before a structural column for `IFCCOLUMNTYPE`); a kind not here comes after
 /// these, by name. A fixed order, so it does not change with what else a project holds.
 const KIND_PRIORITY: &[&str] = &[
-    "wall", "floor", "ceiling", "roof", "column", "structuralcolumn", "footing", "beam", "door", "window", "stair", "ramp", "railing",
-    "component", "pipe", "duct", "conduit", "cabletray", "buildingpad",
+    "wall",
+    "floor",
+    "ceiling",
+    "roof",
+    "column",
+    "structuralcolumn",
+    "footing",
+    "beam",
+    "door",
+    "window",
+    "stair",
+    "ramp",
+    "railing",
+    "component",
+    "pipe",
+    "duct",
+    "conduit",
+    "cabletray",
+    "buildingpad",
 ];
 
 type TypeKey = (String, String, String, String, Option<Member>, &'static str);
@@ -3296,7 +3313,11 @@ mod tests {
         // A door type named as a family's `Family:Type`, and a component of such a family written as a door too: two type
         // objects of one class and name, of two kinds of element.
         let form = json!([{"profile": [[0, 0], [100, 0], [100, 100], [0, 100]], "from": 0, "to": 100}]);
-        run(&mut s, "family", json!({"name": "P", "category": "generic", "types": {"T": {}}, "forms": form, "ifc": {"class": "IFCDOOR", "predefined": "DOOR"}}));
+        run(
+            &mut s,
+            "family",
+            json!({"name": "P", "category": "generic", "types": {"T": {}}, "forms": form, "ifc": {"class": "IFCDOOR", "predefined": "DOOR"}}),
+        );
         run(&mut s, "type", json!({"category": "door", "name": "P:T", "width": 900, "height": 2100}));
         run(&mut s, "door", json!({"at": [2000, 0], "type": "P:T"}));
         // The component is the last element written before the doors: its kind is what a door's type used to be keyed by.
