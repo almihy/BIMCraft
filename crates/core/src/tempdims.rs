@@ -72,7 +72,8 @@ pub struct TempDim {
     pub distance: f64,
     /// The way from the wall to the other line: a unit vector square to the wall.
     pub toward: P2,
-    /// Where it starts on the wall's line: the middle of the stretch both lines share, and where it ends, `distance` on.
+    /// Where it starts on the wall's line: a third (left) or two thirds (right) of the way along the stretch both lines share,
+    /// and where it ends, `distance` on.
     pub start: P2,
     pub end: P2,
 }
@@ -109,11 +110,14 @@ pub fn wall(m: &Model, id: impl Key, level: impl Key, witness: Witness) -> Vec<T
                 let distance = (a - fa).dot(toward);
                 let (lo, hi) = (along(a).min(along(b)).max(f_lo), along(a).max(along(b)).min(f_hi));
                 // Clear of the wall's own line, and over some of its length.
-                (distance > TOL && hi - lo > TOL).then_some((to, distance, (lo + hi) / 2.0))
+                (distance > TOL && hi - lo > TOL).then_some((to, distance, lo, hi))
             })
             .min_by(|x, y| x.1.total_cmp(&y.1));
-        if let Some((to, distance, middle)) = nearest {
-            let start = fa + u * (middle - along(fa));
+        if let Some((to, distance, lo, hi)) = nearest {
+            // A third of the way along what the two share for the left, two thirds for the right, so that the two don't
+            // meet at one point of the wall, nor at its middle, where its length is.
+            let share = if side == Side::Left { 1.0 } else { 2.0 };
+            let start = fa + u * (lo + (hi - lo) * share / 3.0 - along(fa));
             out.push(TempDim { side, from, to, distance, toward, start, end: start + toward * distance });
         }
     }

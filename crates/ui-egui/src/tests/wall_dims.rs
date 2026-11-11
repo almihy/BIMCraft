@@ -93,8 +93,8 @@ fn a_wall_with_no_wall_or_grid_beside_it_has_only_its_length() {
     click(&mut h, P2(2000.0, 0.0));
     assert_eq!(h.state().selection.len(), 1);
     assert!(h.query_by_label("Temporary dimension 4000").is_some());
-    assert_eq!(h.get_all_by_label(WITNESS).count(), 0);
-    assert_eq!(h.get_all_by_label(PERMANENT).count(), 0);
+    assert_eq!(h.query_all_by_label(WITNESS).count(), 0);
+    assert_eq!(h.query_all_by_label(PERMANENT).count(), 0);
 }
 
 #[test]

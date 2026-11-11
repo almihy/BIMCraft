@@ -57,7 +57,11 @@ impl BimApp {
     /// centre line, then its exterior face, then its interior face, and round again.
     fn witness_grip(&mut self, ui: &mut Ui, id: Id, d: &TempDim, at: Pos2, witness: Witness) {
         let name = t("Witness line: centre line, exterior face or interior face");
-        let r = ui.interact(Rect::from_center_size(at, vec2(12.0, 12.0)), ui.id().with(("witness grip", id, d.side == Side::Left)), Sense::click());
+        let r = ui.interact(
+            Rect::from_center_size(at, vec2(12.0, 12.0)),
+            ui.id().with(("witness grip", id, d.side == Side::Left)),
+            Sense::click(),
+        );
         r.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, name));
         let ink = if r.hovered() { pal().hover } else { pal().accent };
         ui.painter().circle_filled(at, 4.5, pal().surface);
@@ -74,7 +78,11 @@ impl BimApp {
     /// lines, where it stands.
     fn make_permanent(&mut self, ui: &mut Ui, key: Id, d: &TempDim, at: Pos2) {
         let name = t("Make this temporary dimension permanent");
-        let r = ui.interact(Rect::from_center_size(at, vec2(20.0, 20.0)), ui.id().with(("make permanent", d.side == Side::Left)), Sense::click());
+        let r = ui.interact(
+            Rect::from_center_size(at, vec2(20.0, 20.0)),
+            ui.id().with(("make permanent", d.side == Side::Left)),
+            Sense::click(),
+        );
         r.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, name));
         let ink = if r.hovered() { pal().hover } else { pal().accent };
         ui.painter().rect_filled(r.rect, 3.0, pal().surface);

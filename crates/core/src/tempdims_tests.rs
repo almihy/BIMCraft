@@ -27,18 +27,18 @@ fn dims(s: &Session, id: u64, witness: Witness) -> Vec<(Side, u64, f64)> {
 fn a_wall_measures_to_the_nearest_parallel_wall_on_each_side() {
     let mut s = Session::new();
     house(&mut s);
-    let inner = wall_at(&mut s, [1000.0, 2000.0], [5000.0, 2000.0]);
+    let inner = wall_at(&mut s, [1000.0, 2000.0], [5500.0, 2000.0]);
     // The inner wall, running east: the north wall is 4000 off on its left, the south wall 2000 on its right.
     assert_eq!(dims(&s, inner, Witness::default()), [(Side::Left, 100004, 4000.0), (Side::Right, 100002, 2000.0)]);
     // The south wall sees the inner wall, nearer than the north one, and nothing on its other side.
     assert_eq!(dims(&s, 100002, Witness::default()), [(Side::Left, inner, 2000.0)]);
     // The east wall runs across the others, so only the west wall is parallel to it.
     assert_eq!(dims(&s, 100003, Witness::default()), [(Side::Left, 100005, 8000.0)]);
-    // Its line goes square to the wall, through the middle of what both share.
+    // Each goes square to the wall, a third and two thirds of the way along what it shares with the walls it measures to.
     let level = s.model.wall(inner).unwrap().level;
     let d = tempdims::wall(&s.model, inner, level, Witness::default());
-    assert_eq!((d[0].start, d[0].end, d[0].toward), (P2(3000.0, 2000.0), P2(3000.0, 6000.0), P2(0.0, 1.0)));
-    assert_eq!((d[1].start, d[1].end, d[1].toward), (P2(3000.0, 2000.0), P2(3000.0, 0.0), P2(0.0, -1.0)));
+    assert_eq!((d[0].start, d[0].end, d[0].toward), (P2(2500.0, 2000.0), P2(2500.0, 6000.0), P2(0.0, 1.0)));
+    assert_eq!((d[1].start, d[1].end, d[1].toward), (P2(4000.0, 2000.0), P2(4000.0, 0.0), P2(0.0, -1.0)));
 }
 
 #[test]
@@ -93,7 +93,7 @@ fn an_angled_wall_is_measured_square_to_itself() {
 fn the_witness_line_cycles_from_the_centre_to_the_exterior_face_to_the_interior_face() {
     let mut s = Session::new();
     house(&mut s);
-    let inner = wall_at(&mut s, [1000.0, 2000.0], [5000.0, 2000.0]);
+    let inner = wall_at(&mut s, [1000.0, 2000.0], [5500.0, 2000.0]);
     let half = s.model.thickness(s.model.wall(inner).unwrap()) / 2.0;
     let mut witness = Witness::default();
     assert_eq!(dims(&s, inner, witness)[0].2, 4000.0);
@@ -115,14 +115,17 @@ fn the_witness_line_cycles_from_the_centre_to_the_exterior_face_to_the_interior_
 fn the_temporary_dimensions_command_reads_them_for_the_agent_and_changes_nothing() {
     let mut s = Session::new();
     house(&mut s);
-    let inner = wall_at(&mut s, [1000.0, 2000.0], [5000.0, 2000.0]);
+    let inner = wall_at(&mut s, [1000.0, 2000.0], [5500.0, 2000.0]);
     let before = s.model.clone();
     let r = run(&mut s, "temporary_dimensions", json!({"id": inner}));
     assert_eq!(s.model.elements, before.elements);
-    assert_eq!(r["length"], 4000.0);
+    assert_eq!(r["length"], 4500.0);
     let ds = r["dimensions"].as_array().unwrap();
     assert_eq!(ds.len(), 2);
-    assert_eq!((ds[0]["side"].as_str(), ds[0]["to"]["id"].as_u64(), ds[0]["distance"].as_f64()), (Some("left"), Some(100004), Some(4000.0)));
+    assert_eq!(
+        (ds[0]["side"].as_str(), ds[0]["to"]["id"].as_u64(), ds[0]["distance"].as_f64()),
+        (Some("left"), Some(100004), Some(4000.0))
+    );
     assert_eq!(ds[1]["toward"], json!([0.0, -1.0]));
     // The ready-made params of a permanent dimension make one that reads what the temporary one did.
     let made = run(&mut s, "dimension", ds[0]["dimension"].clone());
