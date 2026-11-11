@@ -649,11 +649,11 @@ mod tests {
     #[test]
     fn a_file_binds_only_two_character_keys_to_actions_it_names_and_that_are_free() {
         let mut app = BimApp::new(Session::new());
-        let text = "ZW - Wall\n**ZZ** \u{2013} Parede\nSB - Floor\nFT = Wall\nQ - Door\nABC - Door\nOU - ou\nZY: Wall with a long note\n";
+        let text = "ZW - Wall\n**QJ** \u{2013} Parede\nSB - Floor\nFT = Wall\nQ - Door\nABC - Door\nOU - ou\nZY: Wall with a long note\n";
         assert_eq!(app.add_shortcuts(parse_shortcuts_file(text)), (2, 6));
         // SB and FT are Floor: Structural and Filters already; the others are no key or no action.
         assert_eq!(app.custom_shortcuts.get("ZW").map(String::as_str), Some("Wall"));
-        assert_eq!(app.custom_shortcuts.get("ZZ").map(String::as_str), Some("Wall"));
+        assert_eq!(app.custom_shortcuts.get("QJ").map(String::as_str), Some("Wall"));
         assert_eq!(app.custom_shortcuts.len(), 2);
         // The same file again adds the same two and nothing else.
         assert_eq!(app.add_shortcuts(parse_shortcuts_file(text)), (2, 6));
@@ -696,16 +696,16 @@ mod tests {
         let no_conflict = find_conflict("WA", "Wall", &app);
         assert!(no_conflict.is_none());
 
-        // Unused key "ZZ" has no conflict
-        let no_conflict_new = find_conflict("ZZ", "Wall", &app);
+        // Unused key "QJ" has no conflict
+        let no_conflict_new = find_conflict("QJ", "Wall", &app);
         assert!(no_conflict_new.is_none());
     }
 
     #[test]
     fn custom_shortcut_execution_works() {
         let mut app = BimApp::new(Session::new());
-        app.custom_shortcuts.insert("ZZ".to_string(), "Wall".to_string());
-        app.typed = "ZZ".to_string();
+        app.custom_shortcuts.insert("QJ".to_string(), "Wall".to_string());
+        app.typed = "QJ".to_string();
         assert!(app.shortcut());
         assert!(matches!(app.tool, Tool::Wall(_)));
     }

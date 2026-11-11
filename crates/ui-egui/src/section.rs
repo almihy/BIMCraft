@@ -400,6 +400,7 @@ impl BimApp {
                     self.demolish(id);
                 }
             }
+            (Some(q), Tool::PasteLevel) => self.paste_to_picked_level(pick(&self.cut, &d, q)),
             (Some(q), Tool::Text) => self.write_note(id, at(q)),
             (Some(q), Tool::Spot) => {
                 self.run("spot", json!({"at": [at(q).0, at(q).1], "view": id}));

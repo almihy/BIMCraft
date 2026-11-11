@@ -557,15 +557,16 @@ impl BimApp {
         self.palette_switches(ui);
         heading(ui, msg!("Mouse wheel"));
         ui.horizontal(|ui| {
+            // Zoom first, as it is Revit's and the default.
             let tips = [
-                msg!("Tells a mouse's wheel from a trackpad's two-finger scroll as it turns: the wheel zooms, two fingers pan"),
                 msg!(
-                    "The wheel always zooms about the cursor, as Revit's does, and Shift and the wheel pans along. Choose it if a \
-                     smooth-scrolling mouse pans the view instead"
+                    "The wheel always zooms about the cursor, as Revit's does, and Shift and the wheel pans along. Two fingers on a \
+                     trackpad zoom too"
                 ),
+                msg!("Tells a mouse's wheel from a trackpad's two-finger scroll as it turns: the wheel zooms, two fingers pan"),
                 msg!("The wheel always scrolls the view, as two fingers on a trackpad do"),
             ];
-            for (wheel, tip) in Wheel::ALL.into_iter().zip(tips) {
+            for (wheel, tip) in [Wheel::Zoom, Wheel::Auto, Wheel::Pan].into_iter().zip(tips) {
                 ui.radio_value(&mut self.canvas.nav.wheel, wheel, t(wheel.label())).on_hover_text(t(tip));
             }
         });

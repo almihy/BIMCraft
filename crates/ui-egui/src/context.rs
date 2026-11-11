@@ -81,7 +81,7 @@ impl Action {
     pub(crate) fn shortcut(self) -> Option<&'static str> {
         match self {
             Action::Cancel => Some("Esc"),
-            Action::Repeat => Some("RR"),
+            Action::Repeat => Some("RC"),
             Action::CreateSimilar => Some("CS"),
             Action::Finish | Action::FinishPick => Some("Enter"),
             Action::ZoomToFit => Some("ZF"),

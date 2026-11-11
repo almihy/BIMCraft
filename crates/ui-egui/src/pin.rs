@@ -1,6 +1,8 @@
 //! Pin and Unpin on the desktop, as Revit's: Pin (PN) and Unpin (UP) on the Modify panel, a pin on what is pinned and selected
-//! (a click on it unpins), and a drag, Move, Rotate or Mirror of a pinned element that does nothing but say it is pinned. The core
-//! keeps the pins and the commands from scripts and the agent are not stopped by them (`bimcraft_core`'s `pin`).
+//! (a click on it unpins), and a drag, Move, Rotate or Mirror of a pinned element that does nothing but say, in Revit's words,
+//! "Can't move pinned element." The core keeps the pins and refuses the same for the commands the agent sends (`bimcraft_core`'s
+//! `pin`); the window says it before it asks, as Revit does. Delete does what it can: the elements that are not pinned go, and
+//! the status says "Pinned objects were not deleted. To delete them, unpin them before using Delete."
 
 use bimcraft_core::geom::P2;
 use bimcraft_core::model::{Element, Id, Model};
@@ -37,19 +39,49 @@ impl BimApp {
         self.refuse_pinned_ids(&selection)
     }
 
-    /// Whether `ids` hold a pinned element, which is then not to be changed in place (a typed dimension, an angle, Align, a
-    /// nudge, a drag on a sheet): the status bar says so.
+    /// Whether `ids` hold a pinned element, which is then not to be changed in place (a typed dimension, Align, a nudge, a drag
+    /// on a sheet): the status bar says "Can't move pinned element."
     pub(crate) fn refuse_pinned_ids(&mut self, ids: &[Id]) -> bool {
+        self.refuse_pinned_as(ids, false)
+    }
+
+    /// Whether the selection holds a pinned element, which is then not to be turned: "Can't rotate pinned element."
+    pub(crate) fn refuse_pinned_turning(&mut self) -> bool {
+        let selection = self.selection.clone();
+        self.refuse_pinned_as(&selection, true)
+    }
+
+    /// `refuse_pinned_ids`, saying "rotate" for a turn.
+    pub(crate) fn refuse_pinned_as(&mut self, ids: &[Id], turning: bool) -> bool {
         let pinned = self.session.model.pinned_among(ids);
         if pinned.is_empty() {
             return false;
         }
+        let revit = if turning { t("Can't rotate pinned element.") } else { t("Can't move pinned element.") };
         let text = match pinned.as_slice() {
-            [one] => tf("element {} is pinned and stays where it is: Unpin (UP) frees it", &[&one.to_string()]),
-            many => tf("{} of the selected elements are pinned and stay where they are: Unpin (UP) frees them", &[&many.len().to_string()]),
+            [one] => tf("{} Element {} is pinned: Unpin (UP) frees it", &[&revit, &one.to_string()]),
+            many => tf("{} {} of the selected elements are pinned: Unpin (UP) frees them", &[&revit, &many.len().to_string()]),
         };
         self.status = Status { text, error: true };
         true
+    }
+
+    /// Delete (the key, the ribbon and the menus), as Revit's: what is not pinned is deleted, and a pinned element is not, with
+    /// Revit's words for it.
+    pub(crate) fn delete_selection(&mut self) {
+        let pinned = self.pinned_selection();
+        let free: Vec<Id> = self.selection.iter().copied().filter(|id| !pinned.contains(id)).collect();
+        if !free.is_empty() {
+            let Some(reply) = self.run("delete", json!({"ids": free})) else { return };
+            // A pinned door or window that went with its wall: Revit warns of it.
+            if let Some(note) = reply["note"].as_str() {
+                self.status = Status { text: note.to_string(), error: false };
+            }
+        }
+        if !pinned.is_empty() {
+            let text = t("Pinned objects were not deleted. To delete them, unpin them before using Delete.").to_string();
+            self.status = Status { text, error: true };
+        }
     }
 
     /// Pin (PN) or Unpin (UP) the selection.

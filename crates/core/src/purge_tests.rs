@@ -38,12 +38,8 @@ fn an_unused_type_is_deleted_and_a_used_one_goes_with_its_instances() {
     assert!(!wall_types(&s).contains(&"Spare 100".to_string()));
     assert_eq!((r["instances"].clone(), r["elements"].clone()), (json!(0), json!([])));
     // The wall's own type is used once: as in Revit, deleting it deletes the wall, and the reply says what went.
-    let (wall, used) = s
-        .model
-        .elements
-        .iter()
-        .find_map(|(id, e)| if let Element::Wall(w) = e { Some((*id, w.type_name.clone())) } else { None })
-        .unwrap();
+    let (wall, used) =
+        s.model.elements.iter().find_map(|(id, e)| if let Element::Wall(w) = e { Some((*id, w.type_name.clone())) } else { None }).unwrap();
     let r = run(&mut s, "delete_type", json!({"category": "wall", "type": used}));
     assert_eq!(r["deleted"], json!({"kind": "wall type", "name": used}));
     assert_eq!((r["instances"].clone(), r["elements"].clone()), (json!(1), json!([wall])), "{r}");
@@ -212,12 +208,8 @@ fn rename_type_renames_a_type_or_a_family_type_and_what_uses_it_follows() {
 fn a_dry_run_of_delete_type_counts_the_instances_and_changes_nothing() {
     let mut s = walls();
     run(&mut s, "type", json!({"category": "wall", "name": "Spare 100", "thickness": 100}));
-    let (wall, used) = s
-        .model
-        .elements
-        .iter()
-        .find_map(|(id, e)| if let Element::Wall(w) = e { Some((*id, w.type_name.clone())) } else { None })
-        .unwrap();
+    let (wall, used) =
+        s.model.elements.iter().find_map(|(id, e)| if let Element::Wall(w) = e { Some((*id, w.type_name.clone())) } else { None }).unwrap();
     let steps = s.history().len();
     let r = run(&mut s, "delete_type", json!({"category": "wall", "type": used, "dry_run": true}));
     assert_eq!(r["dry_run"], true);

@@ -72,12 +72,28 @@ fn the_browsers_families_list_the_systems_types_and_a_right_click_deletes_an_unu
     let mut h = with_spare_types();
     press(&mut h, "List Families");
     type_into(&mut h, FIND, "generic - 200");
-    // A type in use is refused, saying so.
+    // A type in use: Revit's warning says how many instances go with it, and Cancel leaves it all as it was.
+    let walls = ids(&h, "wall").len();
+    assert!(walls > 1);
     in_browser(&h, "Generic - 200mm").click_secondary();
     h.run();
     press(&mut h, "Delete");
-    assert!(h.state().status.error && h.state().status.text.contains("is used"), "{}", h.state().status.text);
-    assert!(h.state().session.model.types.wall.contains_key("Generic - 200mm"));
+    assert!(h.state().delete_type.is_some(), "{}", h.state().status.text);
+    assert!(h.query_by_label(&format!("{walls} instances of Generic - 200mm will be deleted with it. Delete anyway?")).is_some());
+    press(&mut h, "Cancel");
+    assert!(h.state().delete_type.is_none());
+    assert!(h.state().session.model.types.wall.contains_key("Generic - 200mm") && ids(&h, "wall").len() == walls);
+    // OK deletes the type and its instances, in one step; Undo brings them all back.
+    in_browser(&h, "Generic - 200mm").click_secondary();
+    h.run();
+    press(&mut h, "Delete");
+    let steps = h.state().session.history().len();
+    press(&mut h, "OK");
+    assert!(!h.state().session.model.types.wall.contains_key("Generic - 200mm") && ids(&h, "wall").is_empty());
+    assert_eq!(h.state().session.history().len(), steps + 1);
+    h.state_mut().session.execute("undo", &json!({})).unwrap();
+    assert!(h.state().session.model.types.wall.contains_key("Generic - 200mm") && ids(&h, "wall").len() == walls);
+    h.run();
     type_into(&mut h, FIND, "spare");
     in_browser(&h, "Spare 100").click_secondary();
     h.run();

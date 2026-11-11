@@ -35,9 +35,39 @@ fn over_plan(h: &mut Harness<BimApp>) -> Pos2 {
     at
 }
 
+/// The window's wheel as a laptop has it: the trackpad told from the mouse (Settings > Mouse wheel > Auto).
+fn auto(h: &mut Harness<BimApp>) {
+    h.state_mut().canvas.nav.wheel = crate::canvas::navigation::Wheel::Auto;
+}
+
+#[test]
+fn the_wheel_zooms_by_default_as_revits_does_whatever_it_sends() {
+    use crate::canvas::navigation::Wheel;
+    let mut h = app(BOX);
+    assert_eq!(h.state().canvas.nav.wheel, Wheel::Zoom);
+    let p = P2(4000.0, 3000.0);
+    let at = over_plan(&mut h);
+    // A smooth wheel's small steps, a trackpad's two-finger scroll and a notch: all zoom, about the cursor, and none pans.
+    for delta in [vec2(0.0, 15.0), vec2(0.0, 120.0), vec2(0.0, -40.0)] {
+        let before = camera(&h).0;
+        gesture(&mut h, MouseWheelUnit::Point, &[delta], Modifiers::NONE);
+        let now = camera(&h).0;
+        assert!((now > before) == (delta.y > 0.0) && (now - before).abs() > 1e-9, "{delta:?}: {before} to {now}");
+        assert!((h.state().screen(p) - at).length() < 1.5, "{delta:?}: about the cursor, not a pan");
+    }
+    // A settings file that says nothing of it starts a window with the same.
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("settings.json");
+    std::fs::write(&file, "{}").unwrap();
+    let mut again = app(BOX);
+    again.state_mut().use_settings(file);
+    assert_eq!(again.state().canvas.nav.wheel, Wheel::Zoom);
+}
+
 #[test]
 fn a_trackpads_two_finger_scroll_pans_the_plan_and_a_mouse_wheel_still_zooms() {
     let mut h = app(BOX);
+    auto(&mut h);
     let p = P2(4000.0, 3000.0);
     let at = over_plan(&mut h);
     let (scale, _) = camera(&h);
@@ -218,7 +248,22 @@ fn zoom_out_by_half_and_the_shortcuts_are_in_the_list() {
     let (scale, _) = camera(&h);
     shortcut(&mut h, "ZO");
     assert!((camera(&h).0 / scale - 0.5).abs() < 1e-9);
-    for (keys, name) in [("ZR", "Zoom Region"), ("ZP", "Previous Zoom"), ("ZO", "Zoom Out"), ("RR", "Repeat Last Command")] {
+    // Revit's own keys: ZR and ZZ, ZP and ZC, ZO and ZV, ZE, ZF and ZX; Repeat Last Command is RC.
+    shortcut(&mut h, "ZV");
+    assert!((camera(&h).0 / scale - 0.25).abs() < 1e-9, "ZV zooms out by half too");
+    shortcut(&mut h, "ZC");
+    assert!((camera(&h).0 / scale - 0.5).abs() < 1e-9, "ZC is Previous Zoom");
+    shortcut(&mut h, "ZX");
+    assert!((camera(&h).0 / scale - 1.0).abs() < 0.05, "ZX fits as ZF does: {}", camera(&h).0 / scale);
+    for (keys, name) in [
+        ("ZR", "Zoom Region"),
+        ("ZZ", "Zoom Region"),
+        ("ZP", "Previous Zoom"),
+        ("ZC", "Previous Zoom"),
+        ("ZO", "Zoom Out"),
+        ("ZV", "Zoom Out"),
+        ("RC", "Repeat Last Command"),
+    ] {
         assert!(crate::shortcuts::ACTIONS.contains(&name), "{name}");
         assert!(crate::shortcuts().iter().any(|(k, _)| *k == keys), "{keys}");
     }
@@ -270,6 +315,7 @@ fn gesture(h: &mut Harness<BimApp>, unit: MouseWheelUnit, deltas: &[egui::Vec2],
 #[test]
 fn every_browsers_notch_zooms_and_a_two_finger_scroll_pans() {
     let mut h = app(BOX);
+    auto(&mut h);
     let p = P2(4000.0, 3000.0);
     let at = over_plan(&mut h);
     // What browsers send for one notch: 100 and 120; at 110 % and 90 % browser zoom; five lines to a notch under Windows;
@@ -317,6 +363,7 @@ fn mouse_wheel_in_settings_makes_the_wheel_always_zoom_or_always_pan() {
     h.state_mut().use_settings(file.clone());
     let p = P2(4000.0, 3000.0);
     over_plan(&mut h);
+    auto(&mut h);
     // A smooth wheel's small steps look like a trackpad's: Auto pans.
     let scale = camera(&h).0;
     gesture(&mut h, MouseWheelUnit::Point, &[vec2(0.0, 15.0), vec2(0.0, 15.0)], Modifiers::NONE);

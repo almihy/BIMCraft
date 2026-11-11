@@ -2277,6 +2277,10 @@ impl BimApp {
                 let pt = self.snap_point(m, level, v, at, &[], mods.shift);
                 self.place_paste(level, pt);
             }
+            // A level is picked by its line in an elevation or a section; a plan has none.
+            Tool::PasteLevel => {
+                self.status = Status { text: t("open an elevation or a section to pick a level line").into(), error: true };
+            }
             &Tool::Rotate { centre, start, place } => {
                 self.tool = match (place, start) {
                     (true, _) => Tool::Rotate { centre: self.snap_point(m, level, v, at, &[], false), start: None, place: false },
@@ -2967,7 +2971,7 @@ impl BimApp {
     /// Rotate the selection about `centre` by `angle` degrees, counter-clockwise; with Copy, a
     /// turned copy.
     pub(crate) fn turn(&mut self, centre: P2, angle: f64) {
-        if !self.rotate_copy && self.refuse_pinned() {
+        if !self.rotate_copy && self.refuse_pinned_turning() {
             self.tool = Tool::Modify;
             return;
         }
@@ -3463,7 +3467,7 @@ impl BimApp {
                         by -= 360.0;
                     }
                     // The label reads to the hundredth: what it said, typed back, turns nothing.
-                    if by.abs() > 1e-9 && (deg - (angle * 100.0).round() / 100.0).abs() > 1e-9 && !self.refuse_pinned_ids(&[id]) {
+                    if by.abs() > 1e-9 && (deg - (angle * 100.0).round() / 100.0).abs() > 1e-9 && !self.refuse_pinned_as(&[id], true) {
                         let about = if start { w.start } else { w.end };
                         self.run("rotate", json!({"ids": [id], "about": point(about), "angle": by}));
                     }

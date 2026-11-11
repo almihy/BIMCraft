@@ -141,17 +141,43 @@ fn paste_aligned_to_same_place_makes_the_copies_on_top_of_the_originals() {
     assert_eq!(walls(&h)[0], walls(&h)[1]);
 }
 
+/// A section along the wall, cutting it: points run along its line from its start at x = -1000, and up from Level 1.
+const SECTION: &str = "section {\"start\": [-1000, 0], \"end\": [9000, 0]}";
+
 #[test]
-fn paste_aligned_to_a_picked_level_takes_one_level_from_the_list() {
-    let mut h = app(WALL);
+fn paste_aligned_to_a_picked_level_is_a_click_on_a_level_line_in_a_section() {
+    let mut h = app(&format!(
+        "{WALL}
+{SECTION}"
+    ));
     copy(&mut h);
-    paste_list(&mut h, "Aligned to Picked Level…");
-    assert!(h.state().paste_levels.is_some());
-    h.get_by_label_contains("Level 3 (").click();
-    h.run();
-    press(&mut h, "OK");
+    // In a plan the item waits: a level is picked by its line in an elevation or a section, and there is no list.
+    topmost(&mut h, "Modify");
+    press(&mut h, "Paste");
+    assert!(h.get_by_label("Aligned to Picked Level").accesskit_node().is_disabled(), "not in a plan");
+    key(&mut h, Key::Escape);
+    browse(&mut h, "Section 1");
+    paste_list(&mut h, "Aligned to Picked Level");
+    assert_eq!(h.state().tool, Tool::PasteLevel);
+    assert!(h.state().paste_levels.is_none(), "no dialog of levels: the line is the pick");
+    // A click on empty paper is not a level: it says so, and the tool waits for one.
+    click(&mut h, P2(5000.0, 4500.0));
+    assert!(h.state().status.error, "{:?}", h.state().status);
+    assert_eq!(h.state().tool, Tool::PasteLevel);
+    assert_eq!(walls(&h).len(), 1);
+    // Level 3's line, at 6000, above the wall: the copy goes there at the same place in plan.
+    click(&mut h, P2(5000.0, 6000.0));
+    assert_eq!(h.state().tool, Tool::Modify, "one click pastes: {:?}, selected {:?}", h.state().status, h.state().selection);
     let g = h.state().session.model.guid(level(&h, "Level 3"));
-    assert_eq!(ids(&h, "wall").into_iter().filter(|id| h.state().session.model.wall(*id).is_some_and(|w| w.level == g)).count(), 1);
+    let on: Vec<Id> = ids(&h, "wall").into_iter().filter(|id| h.state().session.model.wall(*id).is_some_and(|w| w.level == g)).collect();
+    assert_eq!(on.len(), 1, "{:?}", h.state().status);
+    let w = h.state().session.model.wall(on[0]).unwrap().clone();
+    assert_eq!((w.start, w.end), (P2(0.0, 0.0), P2(8000.0, 0.0)), "the same place in plan");
+    assert_eq!(ids(&h, "door").len(), 2, "its door went with it");
+    // Escape leaves the tool without pasting.
+    paste_list(&mut h, "Aligned to Picked Level");
+    key(&mut h, Key::Escape);
+    assert_eq!((h.state().tool.clone(), walls(&h).len()), (Tool::Modify, 2));
 }
 
 #[test]
@@ -245,4 +271,22 @@ fn a_wall_and_a_grid_copied_together_are_both_pasted_by_a_click_on_another_level
     h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     h.run();
     assert_eq!((walls(&h).len(), grids(&h).len()), (1, 1));
+}
+
+#[test]
+fn paste_aligned_to_current_view_is_not_offered_in_the_view_the_elements_were_copied_in() {
+    let mut h = app(WALL);
+    copy(&mut h);
+    // Revit: "The view must be different from the view where the elements were cut or copied."
+    topmost(&mut h, "Modify");
+    press(&mut h, "Paste");
+    assert!(h.get_by_label("Aligned to Current View").accesskit_node().is_disabled(), "the plan it was copied in");
+    assert!(!h.get_by_label("Aligned to Same Place").accesskit_node().is_disabled());
+    key(&mut h, Key::Escape);
+    let l2 = level(&h, "Level 2");
+    h.state_mut().sheet = Sheet::Plan(l2);
+    h.run();
+    topmost(&mut h, "Modify");
+    press(&mut h, "Paste");
+    assert!(!h.get_by_label("Aligned to Current View").accesskit_node().is_disabled(), "another plan");
 }

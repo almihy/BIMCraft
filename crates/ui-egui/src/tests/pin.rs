@@ -115,9 +115,45 @@ fn a_pinned_element_refuses_a_drag_and_the_tools_and_says_so() {
     shortcut(&mut h, "CO");
     assert!(matches!(h.state().tool, Tool::Copy(_)));
     key(&mut h, Key::Escape);
-    // A command from a script moves it all the same, and says so.
-    let r = h.state_mut().session.execute("move", &json!({"ids": [col], "by": [100, 0]})).unwrap();
-    assert_eq!(r["pinned"], json!([col]));
+    // The agent's command is refused as the window's drag is, in Revit's words, and says how to free it.
+    let e = h.state_mut().session.execute("move", &json!({"ids": [col], "by": [100, 0]})).unwrap_err();
+    assert!(e.contains("Can't move pinned element.") && e.contains("`unpin`"), "{e}");
+    assert_eq!(at(&h, col), P2(2000.0, 2000.0));
+}
+
+#[test]
+fn a_pinned_element_is_not_turned_and_the_status_says_rotate() {
+    let mut h = app(ONE);
+    click(&mut h, P2(2000.0, 2000.0));
+    shortcut(&mut h, "PN");
+    h.state_mut().status = crate::Status::default();
+    shortcut(&mut h, "RO");
+    assert!(h.state().status.text.contains("Can't rotate pinned element."), "{:?}", h.state().status);
+}
+
+#[test]
+fn delete_takes_what_is_not_pinned_and_says_what_it_left() {
+    let mut h = app(TWO);
+    let (a, b) = (ids(&h, "column")[0], ids(&h, "column")[1]);
+    h.state_mut().session.execute("pin", &json!({"ids": [a]})).unwrap();
+    h.state_mut().selection = vec![a, b];
+    h.run();
+    key(&mut h, Key::Delete);
+    assert_eq!(ids(&h, "column"), [a], "the free column went, the pinned one stayed");
+    let status = &h.state().status;
+    assert!(
+        status.error && status.text.contains("Pinned objects were not deleted. To delete them, unpin them before using Delete."),
+        "{status:?}"
+    );
+    // Alone, a pinned element is refused whole, and Unpin then lets it go.
+    h.state_mut().selection = vec![a];
+    h.run();
+    key(&mut h, Key::Delete);
+    assert_eq!(ids(&h, "column"), [a]);
+    assert!(h.state().status.text.contains("Pinned objects were not deleted"), "{:?}", h.state().status);
+    shortcut(&mut h, "UP");
+    key(&mut h, Key::Delete);
+    assert!(ids(&h, "column").is_empty());
 }
 
 #[test]

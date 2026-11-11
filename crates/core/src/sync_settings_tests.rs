@@ -776,3 +776,21 @@ fn the_undo_history_keeps_a_rename_and_goes_back_on_the_project_opened_again() {
     run(&mut again, "undo", json!({}));
     assert!(again.model.types.wall.contains_key("Old") && !again.model.types.wall.contains_key("New"));
 }
+
+#[test]
+fn a_type_deleted_with_its_instances_goes_from_the_other_copy_with_them() {
+    let (mut a, mut b) = two();
+    let base = a.model.clone();
+    run(&mut a, "type", json!({"category": "wall", "name": "Brick", "thickness": 200}));
+    let wall = run(&mut a, "wall", json!({"points": [[0, 0], [6000, 0]], "type": "Brick"}))["ids"][0].as_u64().unwrap();
+    send(&base, &a, &mut b);
+    assert_eq!((walls(&a.model), walls(&b.model)), (1, 1));
+    // Revit's Delete on a type in use: the type and its wall go, in one change that the other copy takes whole.
+    let before = a.model.clone();
+    let r = run(&mut a, "delete_type", json!({"category": "wall", "type": "Brick"}));
+    assert_eq!(r["elements"], json!([wall]));
+    send(&before, &a, &mut b);
+    assert_eq!((walls(&b.model), wall_types(&b.model).contains(&"Brick".to_string())), (0, false), "the wall and its type, both gone");
+    assert_eq!(by_guid(&a.model), by_guid(&b.model));
+    assert_eq!(b.model.check(), Ok(()));
+}

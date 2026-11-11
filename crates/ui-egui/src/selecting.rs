@@ -1,5 +1,5 @@
 //! How a hand picks and repeats, as Revit's does: Move, Copy, Rotate and Mirror started with nothing selected ask for the
-//! elements and go on at Enter; Enter with no tool running repeats the last one (RR is the same); Tab over a wall selects the
+//! elements and go on at Enter; Enter with no tool running repeats the last one (RC is the same); Tab over a wall selects the
 //! walls joined to it and Shift+Tab goes back; Ctrl+A selects what the view shows; the arrow keys nudge the selection; the
 //! status bar names what is under the cursor; and the canvas shows the tool in the cursor.
 
@@ -34,7 +34,7 @@ const BIGGER: f64 = 10.0;
 pub(crate) struct Flow {
     /// The tool Enter is waiting to start: it was asked for with nothing selected.
     pub(crate) pending: Option<Tool>,
-    /// The tool last started, which Enter and RR start again.
+    /// The tool last started, which Enter and RC start again.
     pub(crate) last: Option<Tool>,
     /// The tool being started is one the person asked for (see `start_tool`): the only kind Repeat remembers.
     pub(crate) by_user: bool,
@@ -88,7 +88,7 @@ pub(crate) fn tool_name(tool: &Tool) -> &'static str {
 /// also starts tools of its own, to take a pick for a dialog (Fill Patterns' tile corners), and those have no command to repeat:
 /// Enter would start them without their dialog.
 fn repeatable(tool: &Tool) -> bool {
-    !matches!(tool, Tool::Modify | Tool::PatternCorner(_) | Tool::SketchLine(_) | Tool::SketchPick | Tool::Paste)
+    !matches!(tool, Tool::Modify | Tool::PatternCorner(_) | Tool::SketchLine(_) | Tool::SketchPick | Tool::Paste | Tool::PasteLevel)
 }
 
 /// Whether `e` is a view or a mark of one (a section or elevation line, a sheet, a viewport, a schedule, a camera, a plan view):
@@ -161,7 +161,7 @@ impl BimApp {
         self.idle() && self.repeat_last()
     }
 
-    /// Repeat the last tool started (Enter, RR, and the right-click menu's Repeat). Whether there was one.
+    /// Repeat the last tool started (Enter, RC, and the right-click menu's Repeat). Whether there was one.
     pub(crate) fn repeat_last(&mut self) -> bool {
         match self.flow.last.clone() {
             Some(tool) => {
@@ -172,7 +172,7 @@ impl BimApp {
         }
     }
 
-    /// Remember `tool` as the last one started, for Enter, RR and the menu to repeat, when it is one the user started: from the
+    /// Remember `tool` as the last one started, for Enter, RC and the menu to repeat, when it is one the user started: from the
     /// ribbon, a shortcut or a menu (`start_tool`). What the app starts for itself is nobody's last command.
     pub(crate) fn remember_tool(&mut self, tool: &Tool) {
         if self.flow.by_user && repeatable(tool) {

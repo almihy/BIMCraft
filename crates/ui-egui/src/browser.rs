@@ -7,7 +7,11 @@
 use bimcraft_i18n::msg;
 
 use egui::text::{LayoutJob, TextFormat};
-use egui::{Align, CollapsingHeader, Layout, Rect, Sense, Stroke, StrokeKind, TextEdit, TextStyle, Ui, WidgetInfo, WidgetType, vec2};
+use egui::{
+    Align, CollapsingHeader, Context, Id as UiId, Layout, Rect, Sense, Stroke, StrokeKind, TextEdit, TextStyle, Ui, WidgetInfo, WidgetType,
+    vec2,
+};
+use serde_json::{Value, json};
 
 use bimcraft_core::model::{Element, Id};
 use bimcraft_core::schedule;
@@ -19,6 +23,16 @@ use crate::{BimApp, SCHEDULES, Sheet, Tool, icon_button};
 
 /// How long a search may be, in characters.
 pub const MAX_FIND: usize = 64;
+
+/// The warning Revit shows before it deletes a type that has instances: how many go with it, and OK or Cancel.
+pub(crate) struct DeleteType {
+    /// `delete_type`'s params for it.
+    params: Value,
+    /// What it is called in the warning: its name.
+    name: String,
+    /// How many elements of it will be deleted.
+    instances: usize,
+}
 
 /// What the Project Browser keeps to.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -303,6 +317,7 @@ impl BimApp {
             Some(Act::Delete(ids)) => {
                 self.run("delete", serde_json::json!({"ids": ids}));
             }
+            Some(Act::Do("delete_type", params)) => self.delete_type_asking(params),
             Some(Act::Do(command, params)) => {
                 self.run(command, params);
             }
@@ -623,5 +638,50 @@ mod tests {
         assert!(tree.shows(&words("ceil*")));
         assert!(!tree.shows(&words("floor 2")));
         assert!(tree.kids[1].shows(&words("2")) && !tree.kids[0].shows(&words("2")));
+    }
+}
+
+impl BimApp {
+    /// Delete on a type or a family in the Project Browser, as Revit's: with no instance it is deleted; with some, a warning says how
+    /// many will be deleted with it (OK or Cancel).
+    fn delete_type_asking(&mut self, params: Value) {
+        let mut ask = params.clone();
+        ask["dry_run"] = json!(true);
+        let Some(reply) = self.run("delete_type", ask) else { return };
+        let instances = reply["instances"].as_u64().unwrap_or_default() as usize;
+        if instances == 0 {
+            self.run("delete_type", params);
+            return;
+        }
+        let name = reply["would_delete"]["name"].as_str().unwrap_or_default().to_string();
+        self.delete_type = Some(DeleteType { params, name, instances });
+    }
+
+    /// The warning, while it is open.
+    pub(crate) fn delete_type_window(&mut self, ctx: &Context) {
+        let Some(d) = self.delete_type.as_ref() else { return };
+        let (mut ok, mut cancel) = (false, false);
+        let text = if d.instances == 1 {
+            tf("1 instance of {} will be deleted with it. Delete anyway?", &[&d.name])
+        } else {
+            tf("{} instances of {} will be deleted with it. Delete anyway?", &[&d.instances.to_string(), &d.name])
+        };
+        let r = crate::popup::Modal::new(UiId::new("delete-type"), t("Warning")).width(380.0).show(ctx, |ui| {
+            crate::popup::body(ui, |ui| {
+                ui.add_space(6.0);
+                ui.label(text);
+            });
+            crate::popup::footer(ui, |ui| {
+                ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                    cancel = ui.button(t("Cancel")).clicked();
+                    ok = ui.button(t("OK")).clicked();
+                });
+            });
+        });
+        if ok && let Some(d) = self.delete_type.take() {
+            self.run("delete_type", d.params);
+        } else if cancel || r.should_close() {
+            self.delete_type = None;
+        }
     }
 }
