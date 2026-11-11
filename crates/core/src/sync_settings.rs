@@ -36,9 +36,10 @@
 //! their GUIDs, in every copy alike. A copy that renamed one so tells the room (`fixes`), so that a copy made from the room
 //! later agrees.
 //!
-//! **An entry in use is not taken out** (as in Revit): [`crate::sync::Model::merged`] keeps an entry the changes take out that this
-//! copy's elements, or the changes' own, still name, and tells the room its keys again (`fixes`, from [`restoring`]). The changes
-//! that fail for one entry alone are refused alone ([`groups`]).
+//! **An entry in use is not taken out** (the race of a taking out and work that uses the entry, `docs/areas/sync.md`):
+//! [`crate::sync::Model::merged`] keeps an entry the changes take out that this copy's elements, or the changes' own, still name,
+//! and tells the room its keys again (`fixes`, from [`restoring`]). The changes that fail for one entry alone are refused alone
+//! ([`groups`]).
 //!
 //! A map of entries that is empty has no entry to send: it is one key of its own, `materials: {}`, so that a copy made from a
 //! whole room (`complete`) knows it is empty and not left out. Told as a change it is a no-op. So is a **whole map that has
@@ -185,7 +186,7 @@ fn in_step(m: &Model) -> std::borrow::Cow<'_, Model> {
 
 /// A copy of `m` with no elements, made without copying the elements' index (each push that changes a setting makes one). Every
 /// field is named, so that a field added to the model is a compile error here until it is said what a copy without elements has.
-fn without_elements(m: &Model) -> Model {
+pub(crate) fn without_elements(m: &Model) -> Model {
     Model {
         format: m.format,
         name: m.name.clone(),

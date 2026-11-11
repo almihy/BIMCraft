@@ -42,18 +42,39 @@ server saves the room by what differs from the stored model: it would open the e
 
 ## An entry in use is not taken out
 
-As in Revit, a type (or a material, a template, a phase…) that something names cannot be taken out: **in use wins over taking out**.
-When changes take an entry out that a copy still names (a wall this copy placed meanwhile is of the type; a type here is made of
-the material; the changes themselves bring a wall of it), `Model::merged` keeps the entry. It leaves the taking out out of
-`Merged::taken`, and returns the entry's body and name keys, as this copy has them, in `Merged::fixes`. The page (and Arqiflow's
-server, for what the agent and the room change) puts them in the room, so the copy that took the type out hears the type again,
-and every copy ends with the type and the wall, nothing lost. What a kept entry names is kept with it (a few rounds, until
-nothing more is). A family's type or a design option that is in use keeps its owner's entry.
+A type (or a material, a template, a phase...) that something names is kept when changes take it out: **in use wins over taking
+out**. This is for the race, not the usual way. In Revit, deleting a type that is in use deletes the elements of it too, after a
+warning; here the command that deletes a type (`delete_type`) refuses while something names it, the choice made for this editor, and
+the person changes or deletes what uses it first. But two people work at once: the wall of that type may be placed while the taking
+out is on its way. When changes take an entry out that a copy still names (a wall this copy placed meanwhile, one the changes
+themselves bring, a type here made of the material), `Model::merged` keeps the entry. It leaves the taking out out of
+`Merged::taken`, names the entry in `Merged::kept` (`{entry, kind, name, uses}`: `wall type`, `Beta`, `walls`) and returns its body and
+name keys, as this copy has them, in `Merged::fixes`. The page (and Arqiflow's server, for what the agent and the room change) puts
+the keys in the room, so the copy that took the type out hears the type again, and every copy ends with the type and the wall,
+nothing lost. What a kept entry names is kept with it (a few rounds, until nothing more is). A family's type or a design option that
+is in use keeps its owner's entry.
 
-An element refused because the model would not pass with it (the wall of a type this copy has not heard of yet, when the wall came
-before the type) waits in the session (`Session::waiting`) and is offered again with the next change of the settings, so the order
-the changes come in does not matter: the copy that took the type out hears the wall first and the type after, and places the wall.
-The wall that waits is in `Merged::refused` once, not again each time it is offered.
+What counts as naming: the elements this copy sends (its own text links never count, they are never sent), the elements the changes
+bring, this copy's own changes not sent yet (they will be sent, so the room then holds the entry and what names it, and nothing
+loops), and other entries (a type's layers, a view's template).
+
+Who is told: Arqiflow's page shows `kept` as a notice ("Wall type Beta was kept: walls in the model use it."), and the page of the
+one who took the entry out, which hears its two keys come back, says the same without `uses` ("it is in use"). Nothing is refused.
+
+## Elements that wait
+
+An element that names a library entry this copy has not heard of yet (the wall came before its type) is not refused: it waits in the
+session (`Session::waiting`; settings: `waiting_project`), in `Merged::waiting` and nowhere else. Only that error waits (the check
+that names what an element holds that the library has not); any other (a door whose wall is gone) is refused as ever.
+
+When the library changes (an entry made, renamed, taken out, or a whole room), the waiting are offered again, **as a batch of their
+own after the changes that came**, so that one that still cannot be taken holds nothing else back. Changes that touch no library entry
+do not offer them again. The order the changes come in does not matter: the copy that took the type out hears the wall first and the
+type after, and places the wall.
+
+Each waiting item is offered again at most 20 times (`WAITING_TRIES`); then it is given up on and named in `Merged::refused` once. The
+queue holds at most 10,000 elements and 10,000 settings and 8 MiB of JSON together; an item that does not fit is named the same way.
+What the room says of a key (or of an element) later is what counts: it replaces what waited for it.
 
 ## One key that cannot apply
 
@@ -62,7 +83,7 @@ refused alone, named by its key, and the rest of the batch is taken (`Settled::t
 until each one that does not is alone). Only a whole room (`complete`), which replaces everything, is taken whole or not at all.
 
 A page offline for any time, or an element that arrives after a rename, needs nothing: the element names the entry by GUID. An
-element naming an entry that was taken out meanwhile is refused by the model's check, and stays in the room.
+element naming an entry that was taken out meanwhile waits (above) and stays in the room.
 
 ## Two entries, one name
 
@@ -75,7 +96,10 @@ the room later agrees (identical writes by every copy; there is nothing to loop 
 ## Changes made outside a room
 
 The server's agent changes the stored project, not a page's model. What it did is `Engine.changes(before, after)` (`crates/web`, a host op of Arqiflow's engine host): the engine's own `sync::changes`, so the agent's library changes (a type, a rename) travel exactly as a page's do, with no second comparison written elsewhere. What the server keeps of a room is the same `merge`: what
-it settles (`fixes`: a type in use that the room took out, a body left with no name) it tells the open room, as a page does.
+it settles (`fixes`: a type in use that the room took out, a body left with no name) it tells the open room, as a page does, but a key
+only if the room still holds what the server's save saw of it (`bim_live.say`): a copy may have edited the entry in the moment since,
+and a fix made from the old body would write over that edit, or bring back what a copy took out meanwhile. A key dropped for that is
+logged, and the room says what the others made.
 
 ## Phases
 
@@ -93,4 +117,6 @@ Rename notes, `expand` and `follow(notes)` are gone; a page of another format is
 meanwhile, a copy offline across a rename, two copies making one name, an old file read twice, the undo history across a rename.
 `sync_room_tests.rs` puts a room between the copies (the last write of a key stands; each copy keeps what it last sent and heard,
 as Arqiflow's page does) and takes the changes in different orders: a type taken out while a wall of it is placed (and the server's
-copy), a type taken out while another edits it, a bad key in a batch, a body left with no name, `Brick (2)` asked for twice.
+copy; three copies and the server, with a wall that waits for a type that never comes), a type taken out while another edits it,
+a bad key in a batch, a body left with no name, `Brick (2)` asked for twice, and the waiting queue (not refused, offered again only when
+the library changes, given up on after 20 tries, held to 8 MiB).

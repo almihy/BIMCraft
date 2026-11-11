@@ -228,13 +228,21 @@ fn a_type_taken_out_by_one_while_another_placed_a_wall_of_it_ends_in_every_copy_
     let wall = b.model().elements.guid(wall).unwrap();
     a.push(&mut room);
     b.push(&mut room);
-    // A hears B's wall: its type is gone here, so the wall cannot be taken yet.
+    // A hears B's wall: its type is gone here, so the wall cannot be taken yet. It is not refused: it waits for the type.
     let got = a.pull_all(&mut room);
-    assert_eq!(got.refused.len(), 1, "{:?}", got.refused);
+    assert!(got.refused.is_empty(), "a waiting wall is not a refused one: {:?}", got.refused);
+    assert!(got.waiting.contains(&wall) && a.s.waiting.contains_key(&wall));
     assert!(!a.model().elements.contains_key(wall));
-    // B hears A's taking out: its wall is of the type, so the type stays, and B tells the room so.
+    // B hears A's taking out: its wall is of the type, so the type stays, and B tells the room so; the one who took it out is told why.
     let got = b.pull_all(&mut room);
     assert!(got.refused.is_empty(), "nothing is refused: {:?}", got.refused);
+    assert_eq!(got.kept.len(), 1, "{:?}", got.kept);
+    assert_eq!(
+        (got.kept[0].kind.as_str(), got.kept[0].name.as_str(), got.kept[0].uses.clone()),
+        ("wall type", "Beta", vec!["walls".to_string()])
+    );
+    assert_eq!(got.kept[0].entry, beta);
+    assert_eq!(got.to_json()["kept"][0], json!({"entry": beta.to_string(), "kind": "wall type", "name": "Beta", "uses": ["walls"]}));
     assert!(b.model().types.wall.contains_key("Beta"));
     assert_eq!(got.fixes.len(), 2, "its body and its name: {:?}", got.fixes.keys());
     assert!(got.taken.project.is_empty(), "the taking out is not taken: {:?}", got.taken.project.keys());
@@ -417,4 +425,140 @@ fn two_entries_asking_for_a_name_that_already_has_a_count_become_the_next_count_
     }
     same(a.model(), b.model());
     same(b.model(), c.model());
+}
+
+/// A wall that names a type by GUID, as it goes to a room, and the GUID of that type; the type is in no copy of `two()`.
+fn wall_of_a_type_nobody_has() -> (Guid, String, Guid) {
+    let (mut a, _, _) = two();
+    let before = Arc::clone(&a.s.model);
+    a.run("type", json!({"category": "wall", "name": "Ghost", "thickness": 250}));
+    a.run("wall", json!({"points": [[0, 0], [6000, 0]], "type": "Ghost"}));
+    let ghost = a.model().library.guid(&wall_type(), "Ghost").unwrap();
+    let c = sync::changes(&before, a.model()).unwrap();
+    let (g, text) = c.elements.into_iter().next().unwrap();
+    (g, text.unwrap(), ghost)
+}
+
+fn a_new_material(a: &mut Copy, b: &mut Copy, room: &mut Held, name: &str) -> Merged {
+    a.run("material", json!({"name": name, "color": "#aa5533"}));
+    a.push(room);
+    b.pull_all(room)
+}
+
+fn count_walls(m: &Model) -> usize {
+    m.elements.values().filter(|e| matches!(e, Element::Wall(_))).count()
+}
+
+#[test]
+fn a_wall_of_a_type_that_never_comes_waits_and_is_given_up_on_after_twenty_changes_to_the_library_and_said_once() {
+    let (mut a, mut b, mut room) = two();
+    let (wall, text, _) = wall_of_a_type_nobody_has();
+    room.elements.insert(wall, text);
+    let got = b.pull_all(&mut room);
+    assert!(got.refused.is_empty(), "it waits, it is not refused: {:?}", got.refused);
+    assert_eq!(b.s.waiting.get(&wall).map(|w| w.tried), Some(0));
+    let mut said = 0;
+    for i in 1..=25u32 {
+        let got = a_new_material(&mut a, &mut b, &mut room, &format!("Clay {i}"));
+        said += got.refused.len();
+        if i < 20 {
+            assert!(got.refused.is_empty(), "{i}: {:?}", got.refused);
+            assert_eq!(b.s.waiting.get(&wall).map(|w| w.tried), Some(i), "tried once more each time the library changes");
+        }
+    }
+    assert_eq!(said, 1, "given up on once, and said");
+    assert!(b.s.waiting.is_empty());
+    assert!(!b.model().elements.contains_key(wall));
+}
+
+#[test]
+fn an_element_refused_for_something_other_than_a_missing_entry_is_refused_not_kept_waiting() {
+    let (mut a, mut b, mut room) = two();
+    let wall = a.run("wall", json!({"points": [[0, 0], [6000, 0]]}))["ids"][0].as_u64().unwrap();
+    let before = Arc::clone(&a.s.model);
+    a.run("door", json!({"wall": wall, "offset": 3000}));
+    // Only the door comes, to a copy that has no wall for it: nothing in the library is missing, the model would break.
+    let c = sync::changes(&before, a.model()).unwrap();
+    for (g, t) in c.elements.iter().filter(|(_, t)| t.as_deref().is_some_and(|t| t.contains("\"door\""))) {
+        room.elements.insert(*g, t.clone().unwrap());
+    }
+    assert_eq!(room.elements.len(), 1 + Held::of(b.model()).elements.len(), "the door and nothing of the wall");
+    let got = b.pull_all(&mut room);
+    assert_eq!(got.refused.len(), 1, "{:?}", got.refused);
+    assert!(b.s.waiting.is_empty() && got.waiting.is_empty());
+}
+
+#[test]
+fn what_waits_is_offered_again_only_when_the_library_changes_and_apart_from_the_changes_that_came() {
+    let (mut a, mut b, mut room) = two();
+    let (junk, text, _) = wall_of_a_type_nobody_has();
+    room.elements.insert(junk, text);
+    b.pull_all(&mut room);
+    // A wall comes and the library is the same: nothing waiting is offered again.
+    a.run("wall", json!({"points": [[0, 5000], [6000, 5000]]}));
+    a.push(&mut room);
+    let got = b.pull_all(&mut room);
+    assert!(got.refused.is_empty() && !got.taken.elements.is_empty(), "{:?}", got.refused);
+    assert_eq!(b.s.waiting.get(&junk).map(|w| w.tried), Some(0), "not offered again: the library did not change");
+    // A material and a wall come together: the wall is taken, the waiting one still fails on its own and refuses nothing.
+    a.run("material", json!({"name": "Pigeon grey", "color": "#99bbcc"}));
+    a.run("wall", json!({"points": [[0, 9000], [6000, 9000]]}));
+    a.push(&mut room);
+    let got = b.pull_all(&mut room);
+    assert!(got.refused.is_empty(), "{:?}", got.refused);
+    assert_eq!(count_walls(b.model()), 2);
+    assert_eq!(b.s.waiting.get(&junk).map(|w| w.tried), Some(1), "offered again once, apart from the batch");
+    assert_eq!(b.model().check(), Ok(()));
+}
+
+#[test]
+fn what_waits_is_held_to_a_number_of_bytes_and_what_does_not_fit_is_said() {
+    let (_, mut b, mut room) = two();
+    let (_, text, ghost) = wall_of_a_type_nobody_has();
+    for i in 0..9 {
+        let long = format!("{i}{}", "x".repeat(1 << 20));
+        room.elements.insert(Guid::new(), text.replace(&ghost.to_string(), &long));
+    }
+    let got = b.pull_all(&mut room);
+    let held = b.s.waiting.len();
+    assert!((5..9).contains(&held), "about eight MiB wait: {held}");
+    assert_eq!(got.refused.len(), 9 - held, "what did not fit is said: {:?}", got.refused.iter().map(|r| &r.1).collect::<Vec<_>>());
+    assert!(got.refused.iter().all(|(_, why)| why.contains("too many changes are waiting")), "{:?}", got.refused);
+}
+
+#[test]
+fn three_copies_and_the_server_end_alike_when_one_takes_a_type_out_another_places_a_wall_of_it_and_a_wall_waits_for_a_type_that_never_comes()
+ {
+    let (mut a, mut b, mut room, beta) = both_have_beta();
+    let text = a.model().to_json().unwrap();
+    let open = |t: &str| {
+        let mut x = Session::new();
+        x.reset(Model::read(t).unwrap().0, None);
+        x
+    };
+    let mut c = Copy::new(open(&text), &room);
+    let mut server = Copy::new(open(&text), &room);
+    let (junk, junk_text, _) = wall_of_a_type_nobody_has();
+    a.run("delete_type", json!({"category": "wall", "type": "Beta"}));
+    let wall = b.run("wall", json!({"points": [[0, 0], [6000, 0]], "type": "Beta"}))["ids"][0].as_u64().unwrap();
+    let wall = b.model().elements.guid(wall).unwrap();
+    a.push(&mut room);
+    room.elements.insert(junk, junk_text);
+    // B hears the taking out before it has sent its wall: the wall is its own change not sent yet, and it keeps the type for it.
+    let got = b.pull_all(&mut room);
+    assert!(b.model().types.wall.contains_key("Beta") && got.kept.len() == 1 && got.refused.is_empty(), "{:?} {:?}", got.kept, got.refused);
+    b.push(&mut room);
+    let mut refused = Vec::new();
+    for _ in 0..6 {
+        for x in [&mut a, &mut b, &mut c, &mut server] {
+            refused.extend(x.pull_all(&mut room).refused);
+            x.push(&mut room);
+        }
+    }
+    assert!(refused.is_empty(), "nothing is refused on the way, what waits is not refused: {refused:?}");
+    assert_beta_and_the_wall_everywhere(&[&a, &b, &c, &server], &room, beta, wall);
+    for x in [&a, &b, &c, &server] {
+        assert!(!x.model().elements.contains_key(junk), "the wall that waits is in none");
+        assert!(x.s.waiting.contains_key(&junk), "and waits in each");
+    }
 }
