@@ -266,6 +266,14 @@ type Member = (Section, String);
 /// a beam's, column's or footing's, its member (two types of one name and two sections are two type objects), and the category of
 /// the elements that have it (two kinds of element with types of one class and name are two type objects, each with the identity
 /// data of its own type).
+/// The kinds of element, first the one that keeps the plain GlobalId of a type object when two kinds name theirs alike (a floor
+/// before a building pad for `IFCSLABTYPE`, a column before a structural column for `IFCCOLUMNTYPE`); a kind not here comes after
+/// these, by name. A fixed order, so it does not change with what else a project holds.
+const KIND_PRIORITY: &[&str] = &[
+    "wall", "floor", "ceiling", "roof", "column", "structuralcolumn", "footing", "beam", "door", "window", "stair", "ramp", "railing",
+    "component", "pipe", "duct", "conduit", "cabletray", "buildingpad",
+];
+
 type TypeKey = (String, String, String, String, Option<Member>, &'static str);
 
 /// A type object as the export builds it: the predefined type its occurrences share, their ids, and which of them use its
@@ -380,13 +388,18 @@ impl Step {
         build
     }
 
-    /// What each type object's GlobalIds are made from ([`type_hash`]). Of two type objects that would share it (the same class and
-    /// name, of two kinds of element) the later in the key's order takes the kind in too, so no two share a GlobalId, and every
-    /// export of a project without such a pair is as it was.
+    /// What each type object's GlobalIds are made from ([`type_hash`]). Of type objects that would share it (the same class and
+    /// name, of two kinds of element) the one whose kind comes first in [`KIND_PRIORITY`] keeps it and each of the others takes
+    /// its kind in too, so no two share a GlobalId. Which keeps it does not depend on what else is in the project, so adding a
+    /// building pad of floor type `Generic` leaves the floor type's GlobalId as it was, and every export of a project without
+    /// such a pair is as it was.
     fn type_ids(&self) -> BTreeMap<TypeKey, u64> {
+        let rank = |kind: &str| KIND_PRIORITY.iter().position(|k| *k == kind).unwrap_or(KIND_PRIORITY.len());
+        let mut keys: Vec<&TypeKey> = self.typed.keys().collect();
+        keys.sort_by(|a, b| rank(a.5).cmp(&rank(b.5)).then_with(|| a.5.cmp(b.5)).then_with(|| a.cmp(b)));
         let mut used: BTreeSet<u64> = BTreeSet::new();
         let mut out = BTreeMap::new();
-        for k in self.typed.keys() {
+        for k in keys {
             let mut key = type_hash(&k.0, &k.3, &k.4);
             if !used.insert(key) {
                 key = k.5.bytes().fold(key, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01B3));
@@ -1527,6 +1540,7 @@ pub fn export(m: &Model) -> String {
     }
     for (&id, e) in &m.elements {
         let (Element::Door(o) | Element::Window(o)) = e else { continue };
+        w.kind = e.category();
         let (Some(t), Some(wl), Some(&(wall, wall_at))) =
             (m.opening_type(e), m.wall(o.host), m.elements.id(o.host).and_then(|h| placed.get(&h)))
         else {
@@ -3247,5 +3261,48 @@ mod tests {
         assert_eq!(alone.len(), 1);
         assert_eq!(top_level_attributes(&alone[0])[0], super::s(&guid(t.model.uid, TYPES, plain)), "{}", alone[0]);
         dangling(&f);
+    }
+
+    #[test]
+    fn a_type_object_keeps_its_global_id_when_another_kind_of_element_names_its_type_alike_later() {
+        use crate::graphics::testing::run;
+        let mut s = Session::new();
+        run(&mut s, "type", json!({"category": "floor", "name": "Generic", "thickness": 200}));
+        run(&mut s, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]], "type": "Generic"}));
+        let before = entities(&export(&s.model), "IFCSLABTYPE");
+        assert_eq!(before.len(), 1);
+        let guid_before = top_level_attributes(&before[0])[0].clone();
+        run(&mut s, "building_pad", json!({"boundary": [[10000, 0], [14000, 0], [14000, 4000], [10000, 4000]], "type": "Generic"}));
+        let after = entities(&export(&s.model), "IFCSLABTYPE");
+        assert_eq!(after.len(), 2, "{after:?}");
+        let floor = after.iter().find(|l| top_level_attributes(l)[9] == ".FLOOR.").expect("the floor's type");
+        assert_eq!(top_level_attributes(floor)[0], guid_before, "the floor type's GlobalId is not changed by a pad of its name");
+        assert_eq!(guid_before, super::s(&guid(s.model.uid, TYPES, type_hash("IFCSLABTYPE", "Generic", &None))));
+        // The same whichever was made first: the floor keeps the plain one.
+        let mut t = Session::new();
+        run(&mut t, "type", json!({"category": "floor", "name": "Generic", "thickness": 200}));
+        run(&mut t, "building_pad", json!({"boundary": [[10000, 0], [14000, 0], [14000, 4000], [10000, 4000]], "type": "Generic"}));
+        run(&mut t, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]], "type": "Generic"}));
+        let both = entities(&export(&t.model), "IFCSLABTYPE");
+        let floor = both.iter().find(|l| top_level_attributes(l)[9] == ".FLOOR.").expect("the floor's type");
+        assert_eq!(top_level_attributes(floor)[0], super::s(&guid(t.model.uid, TYPES, type_hash("IFCSLABTYPE", "Generic", &None))));
+    }
+
+    #[test]
+    fn a_door_type_is_of_its_door_not_of_the_last_element_written_before_it() {
+        use crate::graphics::testing::{house, run};
+        let mut s = Session::new();
+        house(&mut s);
+        // A door type named as a family's `Family:Type`, and a component of such a family written as a door too: two type
+        // objects of one class and name, of two kinds of element.
+        let form = json!([{"profile": [[0, 0], [100, 0], [100, 100], [0, 100]], "from": 0, "to": 100}]);
+        run(&mut s, "family", json!({"name": "P", "category": "generic", "types": {"T": {}}, "forms": form, "ifc": {"class": "IFCDOOR", "predefined": "DOOR"}}));
+        run(&mut s, "type", json!({"category": "door", "name": "P:T", "width": 900, "height": 2100}));
+        run(&mut s, "door", json!({"at": [2000, 0], "type": "P:T"}));
+        // The component is the last element written before the doors: its kind is what a door's type used to be keyed by.
+        run(&mut s, "component", json!({"family": "P", "type": "T", "at": [20000, 20000]}));
+        let types = entities(&export(&s.model), "IFCDOORTYPE");
+        let guids: BTreeSet<String> = types.iter().map(|l| top_level_attributes(l)[0].clone()).collect();
+        assert_eq!((types.len(), guids.len()), (2, 2), "a type object for the door and one for the component: {types:?}");
     }
 }

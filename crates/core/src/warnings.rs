@@ -342,27 +342,59 @@ fn compute(m: &Model, scope: &Scope, families: Option<&BTreeSet<&str>>, out: &mu
 }
 
 /// Whether two elements can conflict, as Revit's warnings take it: not when they are in different options of one design option set
-/// (only one is ever there), and not when one is taken down by the phase the other is made in or before (a wall demolished and
-/// the wall that replaces it stand together in no phase). A main-model element and one in an option do conflict, as do options of
-/// different sets. Where a phase is not given, an element is made in the first phase and is never demolished.
+/// (only one is ever there). A main-model element and one in an option do conflict, as do options of different sets. Phases play
+/// no part: Revit's identical-instances and overlap warnings ignore them, so a wall demolished and the wall that replaces it, in
+/// the same place, still warn.
 fn coexist(m: &Model, a: &Element, b: &Element) -> bool {
-    use crate::phasing::{CREATED, DEMOLISHED, OPTION, index, value};
-    if let (Some((set_a, option_a)), Some((set_b, option_b))) =
-        (value(m, a, OPTION).and_then(|v| v.split_once(": ")), value(m, b, OPTION).and_then(|v| v.split_once(": ")))
-        && set_a == set_b
-        && option_a != option_b
-    {
-        return false;
+    use crate::phasing::{OPTION, value};
+    !matches!(
+        (value(m, a, OPTION).and_then(|v| v.split_once(": ")), value(m, b, OPTION).and_then(|v| v.split_once(": "))),
+        (Some((set_a, option_a)), Some((set_b, option_b))) if set_a == set_b && option_a != option_b
+    )
+}
+
+/// The maximal sets of `ids` (sorted) whose members all coexist with one another, of two or more, each sorted. Elements in
+/// different options of one set are never together, so a group of one in each option of a set and one in the main model is
+/// two sets (each option's with the main model's), not one.
+fn coexisting_sets(m: &Model, ids: &[Id]) -> Vec<Vec<Id>> {
+    let n = ids.len();
+    let ok: Vec<Vec<bool>> = (0..n)
+        .map(|i| {
+            (0..n)
+                .map(|j| i != j && matches!((m.elements.get(ids[i]), m.elements.get(ids[j])), (Some(x), Some(y)) if coexist(m, x, y)))
+                .collect()
+        })
+        .collect();
+    // Bron-Kerbosch with a pivot.
+    fn grow(ok: &[Vec<bool>], r: &mut Vec<usize>, p: Vec<usize>, x: Vec<usize>, found: &mut Vec<Vec<usize>>) {
+        if p.is_empty() {
+            if x.is_empty() {
+                found.push(r.clone());
+            }
+            return;
+        }
+        let pivot = p.iter().chain(x.iter()).copied().max_by_key(|u| p.iter().filter(|v| ok[*u][**v]).count()).unwrap_or(p[0]);
+        let (mut p, mut x) = (p, x);
+        for v in p.clone().into_iter().filter(|v| !ok[pivot][*v]) {
+            r.push(v);
+            grow(ok, r, p.iter().copied().filter(|u| ok[v][*u]).collect(), x.iter().copied().filter(|u| ok[v][*u]).collect(), found);
+            r.pop();
+            p.retain(|u| *u != v);
+            x.push(v);
+        }
     }
-    // The phases an element stands in: from the one it is made in up to, not through, the one that takes it down.
-    let span = |e: &Element| -> (usize, usize) {
-        (
-            value(m, e, CREATED).and_then(|n| index(m, n)).unwrap_or(0),
-            value(m, e, DEMOLISHED).and_then(|n| index(m, n)).unwrap_or(usize::MAX),
-        )
-    };
-    let ((made, down), (made_b, down_b)) = (span(a), span(b));
-    made < down_b && made_b < down
+    let mut found = Vec::new();
+    grow(&ok, &mut Vec::new(), (0..n).collect(), Vec::new(), &mut found);
+    let mut sets: Vec<Vec<Id>> = found
+        .into_iter()
+        .filter(|c| c.len() >= 2)
+        .map(|mut c| {
+            c.sort_unstable();
+            c.into_iter().map(|i| ids[i]).collect()
+        })
+        .collect();
+    sets.sort();
+    sets
 }
 
 fn cat(m: &Model, id: Id) -> &'static str {
@@ -765,25 +797,19 @@ fn identical(m: &Model, scope: &Scope, out: &mut Vec<Warning>) {
         }
     }
     for (_, mut ids) in groups {
-        // Those with a twin they can conflict with: elements in other options of one set, or the one a phase takes down before
-        // the other is made, are no twins of it.
+        // Each set of twins that can all be in the model together: elements in other options of one set are no twins of one
+        // another, though each may be one of a main-model element's.
         ids.sort_unstable();
-        let with_twin = |id: Id| {
-            let Some(e) = m.elements.get(id) else { return false };
-            ids.iter().any(|o| *o != id && m.elements.get(*o).is_some_and(|x| coexist(m, e, x)))
-        };
-        let ids: Vec<Id> = ids.iter().copied().filter(|id| with_twin(*id)).collect();
-        if ids.len() < 2 {
-            continue;
+        for set in coexisting_sets(m, &ids) {
+            let what = cat(m, set[0]);
+            let list = set.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
+            out.push(Warning::new(
+                "identical_instances",
+                Severity::Warning,
+                format!("{what}s {list} are identical and in the same place: delete the extra{}", if set.len() > 2 { "s" } else { "" }),
+                set.iter().map(|id| m.guid(*id)).collect(),
+            ));
         }
-        let what = cat(m, ids[0]);
-        let list = ids.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
-        out.push(Warning::new(
-            "identical_instances",
-            Severity::Warning,
-            format!("{what}s {list} are identical and in the same place: delete the extra{}", if ids.len() > 2 { "s" } else { "" }),
-            ids.iter().map(|id| m.guid(*id)).collect(),
-        ));
     }
 }
 

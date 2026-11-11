@@ -227,6 +227,21 @@ fn a_copy_of_a_beam_alone_brings_its_bars_to_stand_on_the_copy() {
     // A mirror brings them too.
     let r = s.execute("mirror", &json!({"ids": [beam], "axis": [[0, 10000], [4000, 10000]], "copy": true})).unwrap();
     assert_eq!(ids(&r).len(), 2, "{r}");
+    // The mirrored bar lies where the mirrored beam does: across the axis (y 10000), 20000 along y, its x and z kept, and on it.
+    let mirrored_bar = *ids(&r).iter().find(|id| s.model.elements.get(**id).is_some_and(|e| e.category() == "rebar")).unwrap() as Id;
+    let mirrored_beam = *ids(&r).iter().find(|id| s.model.elements.get(**id).is_some_and(|e| e.category() == "beam")).unwrap() as Id;
+    match s.model.elements.get(mirrored_bar) {
+        Some(Element::Rebar(b)) => {
+            let xy: Vec<(f64, f64)> = b.path.iter().map(|q| (q[0], q[1])).collect();
+            assert_eq!(xy.len(), 2);
+            for (got, want) in xy.iter().zip([(50.0, 20000.0), (3950.0, 20000.0)]) {
+                assert!((got.0 - want.0).abs() < 0.01 && (got.1 - want.1).abs() < 0.01, "{xy:?}");
+            }
+            assert!(b.path.iter().all(|q| (q[2] + 40.0).abs() < 0.01), "{:?}", b.path);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(host_of(&s, mirrored_bar), Some(s.model.guid(mirrored_beam)));
     assert!(s.model.check().is_ok());
 }
 
