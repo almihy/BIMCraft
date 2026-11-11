@@ -1,6 +1,7 @@
-//! Pin and Unpin, as Revit's: a pinned element is held where it is. The window refuses to drag, move or turn it and says
-//! so; a command from a script or the agent still works, and what it returns says the element was pinned. A project keeps
-//! its pins by the elements' GUIDs, so they survive a renumbering and go when their element does.
+//! Pin and Unpin, as Revit's: a pinned element is held where it is. It cannot be moved, turned or deleted, by the window or by a
+//! command (the agent acts for the person, who has the same limit): the refusal is Revit's own words and names `unpin`. A copy of
+//! a pinned element is free. A project keeps its pins by the elements' GUIDs, so they survive a renumbering and go when their
+//! element does.
 
 use serde_json::{Value, json};
 
@@ -40,33 +41,46 @@ impl Model {
     }
 }
 
-/// `result` (an object) with `pinned`, the ids among `ids` that were pinned, and a note saying what that means: nothing when
-/// none were. A command done to a pinned element is done; the person is told.
-pub(super) fn pinned_note(mut result: Value, before: &Model, ids: &[Id]) -> Value {
-    let pinned = before.pinned_among(ids);
+/// What a command refused to do to a pinned element: Revit's own failures say "Can't move pinned element." and "Can't rotate
+/// pinned element."; and "Pinned objects were not deleted. To delete them, unpin them before using Delete.".
+#[derive(Clone, Copy)]
+pub(super) enum Held {
+    Move,
+    Rotate,
+    Delete,
+}
+
+/// `Ok` when none of `ids` is pinned, else Revit's refusal for `what`, naming the pinned elements and the command that frees them.
+/// The agent acts for a person, who cannot move, turn or delete a pinned element in Revit either.
+pub(super) fn refuse_pinned(c: &str, m: &Model, ids: &[Id], what: Held) -> Result<(), String> {
+    let pinned = m.pinned_among(ids);
     if pinned.is_empty() {
+        return Ok(());
+    }
+    let revit = match what {
+        Held::Move => "Can't move pinned element.",
+        Held::Rotate => "Can't rotate pinned element.",
+        Held::Delete => "Pinned objects were not deleted. To delete them, unpin them before using Delete.",
+    };
+    let list = pinned.iter().map(Id::to_string).collect::<Vec<_>>().join(", ");
+    Err(format!(
+        "{c}: {revit} Pinned: {list}. Run `unpin` with `ids: [{list}]` first{}.",
+        if matches!(what, Held::Delete) { ", or leave them out of `ids`" } else { "" },
+    ))
+}
+
+/// `result` (an object) with `pinned`, those of `gone` that were pinned and went with their host (Revit warns "Some pinned objects
+/// were deleted because their parent or host object was deleted."), and a note saying so. Nothing when none did.
+pub(super) fn hosted_pins_deleted(mut result: Value, before: &Model, gone: &[Id], asked: &[Id]) -> Value {
+    let went: Vec<Id> = before.pinned_among(gone).into_iter().filter(|id| !asked.contains(id)).collect();
+    if went.is_empty() {
         return result;
     }
     if let Some(o) = result.as_object_mut() {
-        o.insert(
-            "note".into(),
-            json!(format!("{} {} pinned; it was changed anyway: `unpin` frees an element", noun(&pinned), verb(&pinned))),
-        );
-        // An element's own reply (`modify` of one) already says `pinned: true`: that stays.
-        o.entry("pinned").or_insert_with(|| json!(pinned));
+        o.insert("pinned".into(), json!(went));
+        o.insert("note".into(), json!("Some pinned objects were deleted because their parent or host object was deleted."));
     }
     result
-}
-
-fn noun(ids: &[Id]) -> String {
-    match ids {
-        [one] => format!("element {one}"),
-        _ => format!("elements {}", ids.iter().map(Id::to_string).collect::<Vec<_>>().join(", ")),
-    }
-}
-
-fn verb(ids: &[Id]) -> &'static str {
-    if ids.len() == 1 { "was" } else { "were" }
 }
 
 pub(super) fn pin(s: &mut Session, p: &Value) -> R {

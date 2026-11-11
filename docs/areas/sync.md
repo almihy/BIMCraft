@@ -42,7 +42,9 @@ server saves the room by what differs from the stored model: it would open the e
 
 ## An entry in use is not taken out
 
-As in Revit, a type (or a material, a template, a phase…) that something names cannot be taken out: **in use wins over taking out**.
+On one copy, `delete_type` does what Revit's Delete does: a type with instances is deleted with them (the window warns with their
+number first). This is for the race between copies: an entry that something *another copy* names is not taken out, **in use wins
+over taking out**, so a wall one copy placed of a type while another deleted it is not lost (a material, a template, a phase… too).
 When changes take an entry out that a copy still names (a wall this copy placed meanwhile is of the type; a type here is made of
 the material; the changes themselves bring a wall of it), `Model::merged` keeps the entry. It leaves the taking out out of
 `Merged::taken`, and returns the entry's body and name keys, as this copy has them, in `Merged::fixes`. The page (and Arqiflow's

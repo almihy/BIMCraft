@@ -1,5 +1,6 @@
-//! Pin and Unpin, as Revit's: a pin is kept in the file and goes with its element; a command from a script or the agent
-//! still moves a pinned element and says it was pinned (the window is what refuses, see the desktop's tests).
+//! Pin and Unpin, as Revit's: a pin is kept in the file and goes with its element; a pinned element is not moved, turned or
+//! deleted, by the window or by a command (Revit's own words: "Can't move pinned element.", "Pinned objects were not deleted."),
+//! and its copy is free.
 
 use serde_json::{Value, json};
 
@@ -54,28 +55,31 @@ fn pin_refuses_what_is_not_there_and_what_it_does_not_take() {
     assert!(s.model.pinned_ids().is_empty());
 }
 
+/// What the model holds, to see that a refused command changed nothing.
+fn snapshot(s: &Session) -> String {
+    serde_json::to_string(&*s.model).unwrap()
+}
+
 #[test]
-fn a_command_moves_a_pinned_element_and_says_it_was_pinned() {
+fn a_command_does_not_move_or_turn_a_pinned_element_and_says_what_to_do() {
     let mut s = Session::new();
     let (a, b) = (wall(&mut s), wall(&mut s));
     run(&mut s, "pin", json!({"ids": [a]}));
-    for (command, p, key) in [
-        ("move", json!({"ids": [a, b], "by": [0, 500]}), "moved"),
-        ("rotate", json!({"ids": [a], "about": [0, 0], "angle": 90}), "rotated"),
-        ("mirror", json!({"ids": [a], "axis": [[0, 0], [0, 1000]]}), "mirrored"),
+    let held = snapshot(&s);
+    for (command, p, revit) in [
+        ("move", json!({"ids": [a, b], "by": [0, 500]}), "Can't move pinned element."),
+        ("rotate", json!({"ids": [a], "about": [0, 0], "angle": 90}), "Can't rotate pinned element."),
+        ("mirror", json!({"ids": [a], "axis": [[0, 0], [0, 1000]]}), "Can't move pinned element."),
     ] {
-        let r = run(&mut s, command, p);
-        assert_eq!(r["pinned"], json!([a]), "{command}");
-        assert!(r["note"].as_str().is_some_and(|n| n.contains("pinned") && n.contains(&a.to_string())), "{command}: {r}");
-        assert!(r.get(key).is_some(), "{command} did what it does: {r}");
+        let e = s.execute(command, &p).unwrap_err();
+        assert!(e.contains(revit) && e.contains(&a.to_string()) && e.contains("`unpin`"), "{command}: {e}");
+        assert_eq!(snapshot(&s), held, "{command} changed the model, with the free wall too");
     }
-    // The pinned wall did move.
-    let at = run(&mut s, "elements", json!({"category": "wall"}));
-    assert_ne!(at["elements"][0]["start"], json!([0.0, 0.0]));
-    // Free, it says nothing.
+    // Free, it moves and says nothing.
     run(&mut s, "unpin", json!({"ids": [a]}));
     let r = run(&mut s, "move", json!({"ids": [a], "by": [0, 500]}));
     assert!(r.get("pinned").is_none() && r.get("note").is_none(), "{r}");
+    assert_eq!(run(&mut s, "elements", json!({"category": "wall"}))["elements"][0]["start"], json!([0.0, 500.0]));
 }
 
 #[test]
@@ -87,24 +91,47 @@ fn a_copy_of_a_pinned_element_is_free() {
     assert!(made.get("pinned").is_none());
     let copy = made["ids"][0].as_u64().unwrap();
     assert!(!s.model.is_pinned(copy) && s.model.is_pinned(a));
+    // Turned or mirrored with a copy, the original stays pinned and where it was.
+    run(&mut s, "rotate", json!({"ids": [a], "about": [0, 0], "angle": 90, "copy": true}));
+    run(&mut s, "mirror", json!({"ids": [a], "axis": [[0, 0], [0, 1000]], "copy": true}));
+    assert!(s.model.is_pinned(a));
+    assert_eq!(s.model.elements.iter().filter(|(_, e)| e.category() == "wall").count(), 4);
 }
 
 #[test]
-fn a_pinned_element_can_be_deleted_and_the_pin_goes_with_it() {
+fn a_pinned_element_is_not_deleted_until_it_is_unpinned() {
     let mut s = Session::new();
-    let (a, b) = (wall(&mut s), wall(&mut s));
+    let (a, b, c) = (wall(&mut s), wall(&mut s), wall(&mut s));
     run(&mut s, "pin", json!({"ids": [a, b]}));
-    let r = run(&mut s, "delete", json!({"ids": [a]}));
-    assert_eq!(r["deleted"], json!([a]));
-    assert_eq!(r["pinned"], json!([a]), "it says the element was pinned");
+    let held = snapshot(&s);
+    let e = s.execute("delete", &json!({"ids": [a]})).unwrap_err();
+    assert!(e.contains("Pinned objects were not deleted. To delete them, unpin them before using Delete."), "{e}");
+    assert!(e.contains(&a.to_string()) && e.contains("`unpin`"), "{e}");
+    assert_eq!(snapshot(&s), held);
+    // A mixed selection is refused whole: the agent says which to leave out.
+    let e = s.execute("delete", &json!({"ids": [a, c]})).unwrap_err();
+    assert!(e.contains("Pinned objects were not deleted"), "{e}");
+    assert_eq!(snapshot(&s), held, "the free wall stays too");
+    // The free one alone goes.
+    assert_eq!(run(&mut s, "delete", json!({"ids": [c]}))["deleted"], json!([c]));
+    // Unpinned, the pinned one goes and its pin with it.
+    run(&mut s, "unpin", json!({"ids": [a]}));
+    assert_eq!(run(&mut s, "delete", json!({"ids": [a]}))["deleted"], json!([a]));
     assert_eq!(s.model.pinned_ids(), [b]);
     assert!(s.model.pinned.len() == 1, "no pin left for what is gone");
-    // Undo brings the element back, pinned.
-    run(&mut s, "undo", json!({}));
-    assert_eq!(s.model.pinned_ids(), [a, b]);
-    // A free element's delete says nothing.
-    run(&mut s, "unpin", json!({"ids": [a]}));
-    assert!(run(&mut s, "delete", json!({"ids": [a]})).get("pinned").is_none());
+}
+
+#[test]
+fn a_pinned_door_goes_with_its_deleted_wall_and_the_reply_says_so() {
+    let mut s = Session::new();
+    let w = wall(&mut s);
+    let door = run(&mut s, "door", json!({"wall": w, "offset": 1000}))["id"].as_u64().unwrap();
+    run(&mut s, "pin", json!({"ids": [door]}));
+    assert!(s.execute("delete", &json!({"ids": [door]})).is_err());
+    let r = run(&mut s, "delete", json!({"ids": [w]}));
+    assert_eq!(r["pinned"], json!([door]), "{r}");
+    assert!(r["note"].as_str().is_some_and(|n| n.contains("deleted because their parent or host")), "{r}");
+    assert!(s.model.pinned_ids().is_empty());
 }
 
 #[test]
@@ -131,8 +158,11 @@ fn grids_and_levels_can_be_pinned() {
     let mut both = vec![grid, level];
     both.sort_unstable();
     assert_eq!(s.model.pinned_ids(), both);
-    let r = run(&mut s, "move", json!({"ids": [grid], "by": [100, 0]}));
-    assert_eq!(r["pinned"], json!([grid]));
+    assert!(s.execute("move", &json!({"ids": [grid], "by": [100, 0]})).unwrap_err().contains("Can't move pinned element."));
+    // A grid's end is a move of the grid.
+    assert!(s.execute("move", &json!({"ids": [grid], "by": [0, 100], "end": "end"})).is_err());
+    assert!(s.execute("modify", &json!({"id": level, "elevation": 500})).is_err());
+    assert!(s.execute("delete", &json!({"ids": [level]})).is_err());
 }
 
 #[test]
@@ -194,55 +224,56 @@ fn a_dragged_element_does_not_snap_to_itself() {
 }
 
 #[test]
-fn the_commands_that_change_where_a_pinned_element_is_say_it_was_pinned() {
+fn the_commands_that_change_where_a_pinned_element_is_refuse_it() {
     let mut s = Session::new();
-    let said = |r: &Value, id: u64, what: &str| {
-        assert_eq!(r["pinned"], json!([id]), "{what}: {r}");
-        assert!(r["note"].as_str().is_some_and(|n| n.contains("pinned")), "{what}: {r}");
+    let refused = |s: &mut Session, command: &str, p: Value| {
+        let held = snapshot(s);
+        let e = s.execute(command, &p).unwrap_err();
+        assert!(e.contains("pinned") && e.contains("`unpin`"), "{command}: {e}");
+        assert_eq!(snapshot(s), held, "{command} changed the model");
     };
     // Align turns and moves it; `modify` of its ends moves it too, but its height is no move.
     let a = wall(&mut s);
     run(&mut s, "pin", json!({"ids": [a]}));
-    let r = run(&mut s, "align", json!({"id": a, "reference": [[0, 100], [4000, 100]], "line": [[0, 0], [4000, 0]]}));
-    said(&r, a, "align");
-    let r = run(&mut s, "modify", json!({"id": a, "start": [0, 300]}));
-    assert!(r["note"].as_str().is_some_and(|n| n.contains("pinned")) && r["pinned"] == json!(true), "modify a wall's start: {r}");
-    let r = run(&mut s, "modify", json!({"id": a, "end": [4000, 300]}));
-    assert!(r["note"].as_str().is_some_and(|n| n.contains("pinned")), "modify a wall's end: {r}");
+    refused(&mut s, "align", json!({"id": a, "reference": [[0, 100], [4000, 100]], "line": [[0, 0], [4000, 0]]}));
+    refused(&mut s, "modify", json!({"id": a, "start": [0, 300]}));
+    refused(&mut s, "modify", json!({"id": a, "end": [4000, 300]}));
     let r = run(&mut s, "modify", json!({"id": a, "height": 2800}));
     assert!(r.get("note").is_none(), "a height is no move: {r}");
     // A door slid along its wall.
     let door = run(&mut s, "door", json!({"wall": a, "offset": 1000}))["id"].as_u64().unwrap();
     run(&mut s, "pin", json!({"ids": [door]}));
-    let r = run(&mut s, "modify", json!({"id": door, "offset": 1500}));
-    assert!(r["note"].as_str().is_some_and(|n| n.contains("pinned")), "modify a door's offset: {r}");
+    refused(&mut s, "modify", json!({"id": door, "offset": 1500}));
     // A detail line offset in place; its copy is free.
     let line = run(&mut s, "detail_line", json!({"start": [0, 8000], "end": [4000, 8000]}))["id"].as_u64().unwrap();
     run(&mut s, "pin", json!({"ids": [line]}));
     let r = run(&mut s, "offset", json!({"id": line, "distance": 100, "toward": [0, 9000], "copy": true}));
     assert!(r.get("pinned").is_none(), "{r}");
-    said(&run(&mut s, "offset", json!({"id": line, "distance": 100, "toward": [0, 9000], "copy": false})), line, "offset");
-    // Trimmed to a boundary, split, and trimmed to a corner.
+    refused(&mut s, "offset", json!({"id": line, "distance": 100, "toward": [0, 9000], "copy": false}));
+    // Trimmed to a boundary, split, trimmed to a corner, filleted.
     let boundary = run(&mut s, "detail_line", json!({"start": [2000, 7000], "end": [2000, 9000]}))["id"].as_u64().unwrap();
-    let r = run(&mut s, "trim_extend", json!({"boundary": boundary, "ids": [line], "keep": [[500, 8100]]}));
-    said(&r, line, "trim_extend");
+    refused(&mut s, "trim_extend", json!({"boundary": boundary, "ids": [line], "keep": [[500, 8100]]}));
     let w = run(&mut s, "wall", json!({"points": [[10000, 0], [10000, 3000]]}))["ids"][0].as_u64().unwrap();
     let across = run(&mut s, "wall", json!({"points": [[9000, 4000], [12000, 4000]]}))["ids"][0].as_u64().unwrap();
     run(&mut s, "pin", json!({"ids": [w]}));
-    said(&run(&mut s, "corner", json!({"ids": [w, across]})), w, "corner");
-    let r = run(&mut s, "split", json!({"id": w, "at": [10000, 2000]}));
-    said(&r, w, "split");
+    refused(&mut s, "corner", json!({"ids": [w, across]}));
+    refused(&mut s, "split", json!({"id": w, "at": [10000, 2000]}));
+    refused(&mut s, "fillet", json!({"ids": [w, across], "radius": 500}));
 }
 
 #[test]
-fn a_dimensions_typed_length_says_when_it_moved_a_pinned_wall() {
+fn a_dimensions_typed_length_does_not_move_a_pinned_wall() {
     let mut s = Session::new();
     run(&mut s, "wall", json!({"points": [[0, 0], [0, 3000]]}));
     let far = run(&mut s, "wall", json!({"points": [[4000, 0], [4000, 3000]]}))["ids"][0].as_u64().unwrap();
     let d = run(&mut s, "dimension", json!({"refs": [[0, 1000], [4000, 1000]], "at": [0, -1000]}))["id"].as_u64().unwrap();
     run(&mut s, "pin", json!({"ids": [far]}));
-    let r = run(&mut s, "dimension_value", json!({"id": d, "value": 3000}));
-    assert_eq!(r["pinned"], json!([far]), "{r}");
+    let held = snapshot(&s);
+    let e = s.execute("dimension_value", &json!({"id": d, "value": 3000})).unwrap_err();
+    assert!(e.contains("Can't move pinned element.") && e.contains(&far.to_string()), "{e}");
+    assert_eq!(snapshot(&s), held);
+    // The value it already has moves nothing, so nothing is refused.
+    assert!(s.execute("dimension_value", &json!({"id": d, "value": 4000})).is_ok());
 }
 
 #[test]
@@ -281,21 +312,17 @@ fn a_dimensions_typed_length_names_the_element_it_would_move_so_the_window_can_r
 }
 
 #[test]
-fn modify_says_a_pinned_element_was_moved_by_what_places_that_kind_and_not_by_its_height() {
+fn modify_refuses_what_places_a_pinned_element_and_not_its_height() {
     let mut s = Session::new();
-    let noted = |r: &Value| r["note"].as_str().is_some_and(|n| n.contains("pinned"));
+    let refused = |r: Result<Value, String>| r.is_err_and(|e| e.contains("Can't move pinned element."));
     // A column turned has moved; its height has not.
     let col = run(&mut s, "column", json!({"at": [1000, 1000]}))["id"].as_u64().unwrap();
     run(&mut s, "pin", json!({"ids": [col]}));
-    let r = run(&mut s, "modify", json!({"id": col, "angle": 30}));
-    assert!(noted(&r), "a turned column: {r}");
-    let r = run(&mut s, "modify", json!({"id": col, "height": 2500}));
-    assert!(!noted(&r), "a column's height: {r}");
+    assert!(refused(s.execute("modify", &json!({"id": col, "angle": 30}))));
+    assert!(s.execute("modify", &json!({"id": col, "height": 2500})).is_ok(), "a column's height");
     // A floor re-sketched has moved; its vertical offset has not.
     let floor = run(&mut s, "floor", json!({"boundary": [[0, 5000], [4000, 5000], [4000, 9000], [0, 9000]]}))["id"].as_u64().unwrap();
     run(&mut s, "pin", json!({"ids": [floor]}));
-    let r = run(&mut s, "modify", json!({"id": floor, "offset": 150}));
-    assert!(!noted(&r), "a floor's height offset: {r}");
-    let r = run(&mut s, "modify", json!({"id": floor, "boundary": [[0, 5000], [5000, 5000], [5000, 9000], [0, 9000]]}));
-    assert!(noted(&r), "a re-sketched floor: {r}");
+    assert!(s.execute("modify", &json!({"id": floor, "offset": 150})).is_ok(), "a floor's height offset");
+    assert!(refused(s.execute("modify", &json!({"id": floor, "boundary": [[0, 5000], [5000, 5000], [5000, 9000], [0, 9000]]}))));
 }
