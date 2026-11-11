@@ -190,7 +190,7 @@ pub struct Session {
     /// What Copy to Clipboard took, which Paste makes again (`commands/clipboard.rs`). Not the model's: undo does not touch it.
     pub(crate) clipboard: Option<crate::commands::clipboard::Clipboard>,
     /// The warnings of the last model asked ([`Session::warnings`]), kept with it: the next are brought up to date from them.
-    warned: Option<(Arc<Model>, Review)>,
+    warned: Option<Box<(Arc<Model>, Review)>>,
     /// How many commands, scripts and transactions are under way, one inside another. A command made inside another (a script's
     /// lines, a transaction's) does not work out its warnings: the one outermost says what the whole made, once.
     nested: u32,
@@ -280,6 +280,7 @@ impl Session {
         (self.phase, self.option) = (None, None);
         self.clipboard = None;
         self.resets += 1;
+        self.warned = None;
         self.undo.clear();
         self.redo.clear();
     }
@@ -406,114 +407,112 @@ impl Session {
         self.nested += 1;
         let ran = catch_unwind(AssertUnwindSafe(|| run(self, params)));
         self.nested = self.nested.saturating_sub(1);
-        let result = ran
-            .unwrap_or_else(|p| Err(format!("internal error in `{}`: {}", cmd.id, panic_text(p.as_ref()))))
-            .and_then(|v| {
-                if Arc::ptr_eq(&before, &self.model) {
-                    return Ok(v);
-                }
-                // Back to a model that passed (undo, redo): it is as it was then.
-                if self.verified.as_ref().is_some_and(|v| Arc::ptr_eq(v, &self.model)) {
-                    #[cfg(test)]
-                    assert_eq!(self.model.check(), Ok(()), "`{}` went back to a model that doesn't pass", cmd.id);
-                    return Ok(v);
-                }
-                // A command that splits what stands keeps its phase; one that makes something makes it in the session's;
-                // undo, redo and the commands that replace the project make nothing.
-                if cmd.undoable && cmd.id != "split" {
-                    self.stamp(first_new, COPIES.contains(&cmd.id));
-                }
-                // A scan goes with the last point cloud that placed it.
-                let unplaced = self.model.unplaced_clouds();
-                if !unplaced.is_empty() {
-                    let m = self.model_mut();
-                    for name in unplaced {
-                        m.clouds.remove(&name);
-                    }
-                }
-                // A CAD drawing, with the last import.
-                let unplaced = self.model.unplaced_cads();
-                if !unplaced.is_empty() {
-                    let m = self.model_mut();
-                    for name in &unplaced {
-                        m.cads.remove(name);
-                    }
-                    m.forget_cad_layers(&unplaced);
-                }
-                // A pin goes with its element.
-                if self.model.has_stale_pins() {
-                    self.model_mut().forget_stale_pins();
-                }
-                // What a command was given by id points at the element's GUID; what it put in the library has an id and a GUID.
-                if verified {
-                    self.model_mut().resolve_changed(&before);
-                } else {
-                    self.model_mut().resolve();
-                }
-                // A library in step needs nothing; after a verified model, what the command changed says whether it is.
-                let in_step = if verified { self.model.library_in_step_since(&before) } else { self.model.library_in_step() };
+        let result = ran.unwrap_or_else(|p| Err(format!("internal error in `{}`: {}", cmd.id, panic_text(p.as_ref())))).and_then(|v| {
+            if Arc::ptr_eq(&before, &self.model) {
+                return Ok(v);
+            }
+            // Back to a model that passed (undo, redo): it is as it was then.
+            if self.verified.as_ref().is_some_and(|v| Arc::ptr_eq(v, &self.model)) {
                 #[cfg(test)]
-                if verified {
-                    assert_eq!(in_step, self.model.library_in_step(), "library_in_step_since differs after `{}` {params}", cmd.id);
+                assert_eq!(self.model.check(), Ok(()), "`{}` went back to a model that doesn't pass", cmd.id);
+                return Ok(v);
+            }
+            // A command that splits what stands keeps its phase; one that makes something makes it in the session's;
+            // undo, redo and the commands that replace the project make nothing.
+            if cmd.undoable && cmd.id != "split" {
+                self.stamp(first_new, COPIES.contains(&cmd.id));
+            }
+            // A scan goes with the last point cloud that placed it.
+            let unplaced = self.model.unplaced_clouds();
+            if !unplaced.is_empty() {
+                let m = self.model_mut();
+                for name in unplaced {
+                    m.clouds.remove(&name);
                 }
-                if !in_step {
-                    // After a verified model, what the command changed is synced; else (or when more than elements
-                    // changed) the whole library.
+            }
+            // A CAD drawing, with the last import.
+            let unplaced = self.model.unplaced_cads();
+            if !unplaced.is_empty() {
+                let m = self.model_mut();
+                for name in &unplaced {
+                    m.cads.remove(name);
+                }
+                m.forget_cad_layers(&unplaced);
+            }
+            // A pin goes with its element.
+            if self.model.has_stale_pins() {
+                self.model_mut().forget_stale_pins();
+            }
+            // What a command was given by id points at the element's GUID; what it put in the library has an id and a GUID.
+            if verified {
+                self.model_mut().resolve_changed(&before);
+            } else {
+                self.model_mut().resolve();
+            }
+            // A library in step needs nothing; after a verified model, what the command changed says whether it is.
+            let in_step = if verified { self.model.library_in_step_since(&before) } else { self.model.library_in_step() };
+            #[cfg(test)]
+            if verified {
+                assert_eq!(in_step, self.model.library_in_step(), "library_in_step_since differs after `{}` {params}", cmd.id);
+            }
+            if !in_step {
+                // After a verified model, what the command changed is synced; else (or when more than elements
+                // changed) the whole library.
+                #[cfg(test)]
+                let oracle = verified.then(|| sync_oracle(&self.model, &before));
+                if !(verified && self.model_mut().sync_since(&before)) {
+                    self.model_mut().sync_library();
+                }
+                #[cfg(test)]
+                if let Some(Some((incremental, whole))) = oracle {
+                    assert!(
+                        incremental.elements.iter().eq(whole.elements.iter()) && incremental.library.parts().eq(whole.library.parts()),
+                        "the library synced by what `{}` changed isn't as the whole sync makes it",
+                        cmd.id
+                    );
+                    assert!(self.model.library_in_step(), "the library isn't in step after `{}`", cmd.id);
+                }
+            }
+            // A room frozen keeps the boundary it has now; one thawed lets it go. After a verified model, only a room the
+            // command changed can be either.
+            let unsettled = |e: &Element| matches!(e, Element::Room(r) if r.frozen != r.kept.is_some());
+            let unsettled = match (verified, self.model.changed_since(&before)) {
+                (true, crate::ids::Changed::Ids(ids)) => ids.iter().any(|id| self.model.elements.get(*id).is_some_and(unsettled)),
+                _ => self.model.elements.values().any(unsettled),
+            };
+            if unsettled {
+                self.model_mut().keep_rooms();
+            }
+            // The site's shapes worked out again where what they are drawn from changed (masterplan.rs): a site element
+            // moved, a lane that meets it, a car park round what it keeps clear of.
+            if cmd.undoable && !crate::masterplan::SHAPES_ITSELF.contains(&cmd.id) {
+                crate::masterplan::keep(self, &before);
+            }
+            // Locked and equal dimensions moved what they measure to as the command moved it.
+            if cmd.undoable {
+                crate::constraints::keep(self, &before)?;
+            }
+            // What was made or changed must be as a sketch of it solves too (an outline that is simple), which a file
+            // from before may break; Insert from File brings in what it finds.
+            // (Before the check, which would name a bow tie of no area by that, not by what to redraw.)
+            let edited = if cmd.undoable && cmd.id != "insert" { self.model.check_edits(&before, cmd.id, params) } else { Ok(()) };
+            edited
+                .and_then(|()| {
                     #[cfg(test)]
-                    let oracle = verified.then(|| sync_oracle(&self.model, &before));
-                    if !(verified && self.model_mut().sync_since(&before)) {
-                        self.model_mut().sync_library();
+                    {
+                        self.checks += 1;
                     }
+                    let checked = if verified { self.model.check_changed(&before) } else { self.model.check() };
+                    // Tests hold the two to the same answer after every command they run.
                     #[cfg(test)]
-                    if let Some(Some((incremental, whole))) = oracle {
-                        assert!(
-                            incremental.elements.iter().eq(whole.elements.iter()) && incremental.library.parts().eq(whole.library.parts()),
-                            "the library synced by what `{}` changed isn't as the whole sync makes it",
-                            cmd.id
-                        );
-                        assert!(self.model.library_in_step(), "the library isn't in step after `{}`", cmd.id);
+                    if verified {
+                        let full = self.model.check();
+                        assert_eq!(checked, full, "check_changed differs from check after `{}` {params}", cmd.id);
                     }
-                }
-                // A room frozen keeps the boundary it has now; one thawed lets it go. After a verified model, only a room the
-                // command changed can be either.
-                let unsettled = |e: &Element| matches!(e, Element::Room(r) if r.frozen != r.kept.is_some());
-                let unsettled = match (verified, self.model.changed_since(&before)) {
-                    (true, crate::ids::Changed::Ids(ids)) => ids.iter().any(|id| self.model.elements.get(*id).is_some_and(unsettled)),
-                    _ => self.model.elements.values().any(unsettled),
-                };
-                if unsettled {
-                    self.model_mut().keep_rooms();
-                }
-                // The site's shapes worked out again where what they are drawn from changed (masterplan.rs): a site element
-                // moved, a lane that meets it, a car park round what it keeps clear of.
-                if cmd.undoable && !crate::masterplan::SHAPES_ITSELF.contains(&cmd.id) {
-                    crate::masterplan::keep(self, &before);
-                }
-                // Locked and equal dimensions moved what they measure to as the command moved it.
-                if cmd.undoable {
-                    crate::constraints::keep(self, &before)?;
-                }
-                // What was made or changed must be as a sketch of it solves too (an outline that is simple), which a file
-                // from before may break; Insert from File brings in what it finds.
-                // (Before the check, which would name a bow tie of no area by that, not by what to redraw.)
-                let edited = if cmd.undoable && cmd.id != "insert" { self.model.check_edits(&before, cmd.id, params) } else { Ok(()) };
-                edited
-                    .and_then(|()| {
-                        #[cfg(test)]
-                        {
-                            self.checks += 1;
-                        }
-                        let checked = if verified { self.model.check_changed(&before) } else { self.model.check() };
-                        // Tests hold the two to the same answer after every command they run.
-                        #[cfg(test)]
-                        if verified {
-                            let full = self.model.check();
-                            assert_eq!(checked, full, "check_changed differs from check after `{}` {params}", cmd.id);
-                        }
-                        checked
-                    })
-                    .map(|()| v)
-            });
+                    checked
+                })
+                .map(|()| v)
+        });
         match result {
             Err(e) => {
                 // A refused command changes nothing: not the model, nor the phase and the option it asked the session for.
@@ -545,7 +544,7 @@ impl Session {
         let model = Arc::clone(&self.model);
         let now = self.review_of(&model);
         let warnings = Arc::clone(&now.warnings);
-        self.warned = Some((model, now));
+        self.warned = Some(Box::new((model, now)));
         warnings
     }
 
@@ -553,7 +552,7 @@ impl Session {
     /// date from (an undo, a redo, a change another copy made, a transaction taken back: each leaves the kept warnings on
     /// another model, which is near this one, so only what differs is looked at again). Whole only when nothing is kept.
     fn review_of(&self, model: &Arc<Model>) -> Review {
-        match &self.warned {
+        match self.warned.as_deref() {
             Some((m, r)) if Arc::ptr_eq(m, model) => r.clone(),
             Some((old, prev)) => model.reviewed_since(old, prev),
             None => model.reviewed(),
@@ -568,7 +567,7 @@ impl Session {
         #[cfg(test)]
         now.assert_whole(&self.model);
         let fresh: Vec<Value> = Model::new_warnings(&now.warnings, &prev.warnings).into_iter().map(|w| w.json(&self.model)).collect();
-        self.warned = Some((Arc::clone(&self.model), now));
+        self.warned = Some(Box::new((Arc::clone(&self.model), now)));
         if let Some(o) = result.as_object_mut().filter(|_| !fresh.is_empty()) {
             o.insert("new_warnings".into(), Value::Array(fresh));
         }
@@ -585,16 +584,14 @@ impl Session {
         self.nested += 1;
         let ran = catch_unwind(AssertUnwindSafe(|| (cmd.run)(self, params)));
         self.nested = self.nested.saturating_sub(1);
-        let result = ran
-            .unwrap_or_else(|p| Err(format!("internal error in `{name}`: {}", panic_text(p.as_ref()))))
-            .and_then(|v| {
-                if Arc::ptr_eq(&before, &self.model) {
-                    return Ok(v);
-                }
-                self.model_mut().resolve();
-                self.model_mut().sync_library();
-                self.model.check().map(|()| v)
-            });
+        let result = ran.unwrap_or_else(|p| Err(format!("internal error in `{name}`: {}", panic_text(p.as_ref())))).and_then(|v| {
+            if Arc::ptr_eq(&before, &self.model) {
+                return Ok(v);
+            }
+            self.model_mut().resolve();
+            self.model_mut().sync_library();
+            self.model.check().map(|()| v)
+        });
         match result {
             Err(e) => {
                 (self.model, self.phase, self.option) = (before, session.0, session.1);
@@ -660,10 +657,12 @@ impl Session {
         self.nested = self.nested.saturating_sub(1);
         let mut out = ran?;
         // A script that replaced the project (`open`, `new`) made no change to a project that was there before it.
-        if report && self.resets == resets && !Arc::ptr_eq(&before, &self.model) {
-            if let Some(last) = out.iter_mut().rev().find(|v| v.is_object()) {
-                self.report_warnings(&before, last);
-            }
+        if report
+            && self.resets == resets
+            && !Arc::ptr_eq(&before, &self.model)
+            && let Some(last) = out.iter_mut().rev().find(|v| v.is_object())
+        {
+            self.report_warnings(&before, last);
         }
         Ok(out)
     }

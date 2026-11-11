@@ -51,10 +51,7 @@ fn a_dry_run_says_what_a_script_would_do_and_leaves_the_project_as_it_was() {
     assert_eq!(r["removed"][0]["guid"], json!(s.model.elements.guid(wall).unwrap()), "what goes is named by its GUID too");
     // What the model would have that it has not now, as a command's result gives them: structured, not their messages.
     let warnings = r["new_warnings"].as_array().unwrap();
-    assert!(
-        warnings.iter().any(|w| w["rule"] == "room_not_enclosed" && w["message"].as_str().unwrap().contains("not enclosed")),
-        "{r}"
-    );
+    assert!(warnings.iter().any(|w| w["rule"] == "room_not_enclosed" && w["message"].as_str().unwrap().contains("not enclosed")), "{r}");
     assert!(warnings[0]["guids"].is_array() && warnings[0]["elements"].is_array(), "{r}");
     // Nothing of it stays: the very model, the history, and the next id.
     assert!(Arc::ptr_eq(&s.model, &model));
