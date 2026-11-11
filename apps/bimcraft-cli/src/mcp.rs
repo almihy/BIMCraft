@@ -44,7 +44,7 @@ undo history, replace it or write over its file is refused.";
 
 /// Where the tools run: on a session of the server's own, or on a window's.
 enum Backend {
-    Own(Session),
+    Own(Box<Session>),
     Window(Window),
 }
 
@@ -75,7 +75,7 @@ impl Backend {
     /// The server's own session, for what replaces a project: a window's is the user's, and is started and opened in the window.
     fn own(&mut self) -> Result<&mut Session, String> {
         match self {
-            Backend::Own(s) => Ok(s),
+            Backend::Own(s) => Ok(&mut **s),
             Backend::Window(_) => Err("that would replace the project the window has open, which is the user's: an agent never starts \
                  or opens a project in a window; the user does, with File > New and File > Open (or run `bimcraft-cli mcp` without \
                  --connect for a project of the agent's own)"
@@ -152,7 +152,7 @@ impl Server {
         session.dwg = crate::dwg_reader();
         let plugins = crate::load_plugins(&mut session);
         let seen = plugins.log().len();
-        Server { backend: Backend::Own(session), plugins: Some(plugins), seen }
+        Server { backend: Backend::Own(Box::new(session)), plugins: Some(plugins), seen }
     }
 
     /// A server whose tools work on the project `window` has open.

@@ -193,7 +193,7 @@ pub struct Session {
     warned: Option<Box<(Arc<Model>, Review)>>,
     /// How many commands, scripts and transactions are under way, one inside another. A command made inside another (a script's
     /// lines, a transaction's) does not work out its warnings: the one outermost says what the whole made, once.
-    nested: u32,
+    nested: u8,
 }
 
 impl Default for Session {
@@ -404,7 +404,7 @@ impl Session {
         let verified = self.verified.as_ref().is_some_and(|v| Arc::ptr_eq(v, &before));
         let (run, first_new, session) = (cmd.run, self.model.next_id, (self.phase.clone(), self.option.clone()));
         let outermost = self.nested == 0;
-        self.nested += 1;
+        self.nested = self.nested.saturating_add(1);
         let ran = catch_unwind(AssertUnwindSafe(|| run(self, params)));
         self.nested = self.nested.saturating_sub(1);
         let result = ran.unwrap_or_else(|p| Err(format!("internal error in `{}`: {}", cmd.id, panic_text(p.as_ref())))).and_then(|v| {
@@ -581,7 +581,7 @@ impl Session {
         let before = Arc::clone(&self.model);
         let verified = self.verified.clone();
         let (undo, redo, session) = (self.undo.clone(), self.redo.clone(), (self.phase.clone(), self.option.clone()));
-        self.nested += 1;
+        self.nested = self.nested.saturating_add(1);
         let ran = catch_unwind(AssertUnwindSafe(|| (cmd.run)(self, params)));
         self.nested = self.nested.saturating_sub(1);
         let result = ran.unwrap_or_else(|p| Err(format!("internal error in `{name}`: {}", panic_text(p.as_ref())))).and_then(|v| {
@@ -652,7 +652,7 @@ impl Session {
     /// The lines of a script, none of them working out its warnings; with `report`, the script's as a whole in its result.
     fn run_script(&mut self, text: &str, report: bool) -> Result<Vec<Value>, String> {
         let (before, resets) = (Arc::clone(&self.model), self.resets);
-        self.nested += 1;
+        self.nested = self.nested.saturating_add(1);
         let ran = self.script_lines(text);
         self.nested = self.nested.saturating_sub(1);
         let mut out = ran?;
@@ -748,7 +748,7 @@ impl Session {
         let checked = self.verified.as_ref().is_some_and(|v| Arc::ptr_eq(v, &before));
         let (path, phase, option) = (self.path.clone(), self.phase.clone(), self.option.clone());
         let (mut undo, redo, resets) = (std::mem::take(&mut self.undo), std::mem::take(&mut self.redo), self.resets);
-        self.nested += 1;
+        self.nested = self.nested.saturating_add(1);
         let ran = catch_unwind(AssertUnwindSafe(|| f(self)));
         self.nested = self.nested.saturating_sub(1);
         let result = ran.unwrap_or_else(|p| Err(format!("internal error in `{label}`: {}", panic_text(p.as_ref()))));
