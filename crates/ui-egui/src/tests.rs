@@ -5873,6 +5873,7 @@ mod autosave;
 mod browser;
 mod cad;
 mod chinese;
+mod clipboard;
 mod clouds;
 mod control;
 mod dialog;
