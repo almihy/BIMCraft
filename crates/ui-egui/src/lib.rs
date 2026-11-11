@@ -17,6 +17,7 @@ mod canvas;
 mod clouds;
 mod context;
 pub mod control;
+mod clipboard;
 mod dialog;
 mod dimtypes;
 mod display;
@@ -153,6 +154,8 @@ pub enum Tool {
     Move(Option<P2>),
     /// Copy the selection: its base point, once clicked.
     Copy(Option<P2>),
+    /// Paste what was copied: outlined at the cursor, put down by a click.
+    Paste,
     /// Rotate the selection about `centre`: the start of the angle, once clicked; with `place`, the
     /// next click moves the centre.
     Rotate {
@@ -849,6 +852,8 @@ pub struct BimApp {
     work_plane: Option<workplane::Draft>,
     ids_of_selection: Option<inquiry::IdsOfSelection>,
     selection_filter: Option<filter::SelectionFilter>,
+    /// Paste Aligned to Selected Levels (or a Picked Level): the levels dialog, while open.
+    paste_levels: Option<clipboard::PasteLevels>,
     /// What was last put on the clipboard.
     pub copied: Option<String>,
     active_option: Option<String>,
@@ -1486,6 +1491,7 @@ impl BimApp {
             work_plane: None,
             ids_of_selection: None,
             selection_filter: None,
+            paste_levels: None,
             copied: None,
             active_option: None,
             new_schedule: None,
@@ -1553,6 +1559,7 @@ impl BimApp {
             Tool::Modify
             | Tool::Move(_)
             | Tool::Copy(_)
+            | Tool::Paste
             | Tool::Rotate { .. }
             | Tool::Mirror { .. }
             | Tool::Align(_)
@@ -1996,6 +2003,7 @@ impl BimApp {
             || self.work_plane.as_ref().is_some_and(|d| d.picking.is_none())
             || self.ids_of_selection.is_some()
             || self.selection_filter.is_some()
+            || self.paste_levels.is_some()
             || self.settings_page.is_some()
             || self.plugins_open()
             || self.find.is_some()
@@ -2041,6 +2049,8 @@ impl BimApp {
         if ctx.egui_wants_keyboard_input() {
             return;
         }
+        // Ctrl+C and Ctrl+V: the clipboard of the model's elements.
+        self.clipboard_keys(ctx);
         if pressed(Modifiers::COMMAND, Key::D) {
             self.toggle_home();
         }
@@ -4365,6 +4375,9 @@ impl BimApp {
 
     fn modify_tab(&mut self, ui: &mut Ui) {
         self.select_panel(ui);
+        if self.sketch.is_none() {
+            self.clipboard_panel(ui);
+        }
         if self.sketch.is_some() {
             self.sketch_draw(ui);
             self.walls_outline_panel(ui);
@@ -4995,6 +5008,7 @@ impl BimApp {
             Tool::Move(None) | Tool::Copy(None) => msg!("Click a base point to measure from."),
             Tool::Move(Some(_)) => msg!("Click where the base point goes, or type a distance and press Enter. Esc cancels."),
             Tool::Copy(Some(_)) => msg!("Click where the copy's base point goes, or type a distance and press Enter. Esc cancels."),
+            Tool::Paste => msg!("Click where to paste what was copied. Esc cancels."),
             Tool::Rotate { place: true, .. } => msg!("Click the centre of rotation."),
             Tool::Rotate { start: None, .. } => msg!("Click the start of the angle, or type an angle in the Options Bar."),
             Tool::Rotate { start: Some(_), .. } => msg!("Click the end of the angle. Esc cancels."),
@@ -5365,6 +5379,7 @@ impl BimApp {
         self.work_plane_window(ctx);
         self.ids_of_selection_window(ctx);
         self.selection_filter_window(ctx);
+        self.paste_levels_window(ctx);
         self.shortcuts_window(ctx);
         self.settings_window(ctx);
         #[cfg(feature = "plugins")]

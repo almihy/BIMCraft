@@ -51,6 +51,7 @@ icon_names! {
     Plan,
     Move,
     Copy,
+    Paste,
     Rotate,
     MirrorPick,
     MirrorDraw,
@@ -409,6 +410,13 @@ pub fn outlines(icon: Icon, compact: bool) -> Vec<Outline> {
             // Equal overlapping rectangles with hidden rear edges removed.
             g.closed(&[(8.0, 3.0), (20.0, 3.0), (20.0, 15.0), (8.0, 15.0)]);
             g.line(&[(8.0, 9.0), (4.0, 9.0), (4.0, 21.0), (16.0, 21.0), (16.0, 15.0)]);
+        }
+        Icon::Paste => {
+            // A board with its clip, and the lines of a sheet on it.
+            g.line(&[(8.0, 5.0), (5.0, 5.0), (5.0, 21.0), (19.0, 21.0), (19.0, 5.0), (16.0, 5.0)]);
+            g.closed(&[(8.0, 3.0), (16.0, 3.0), (16.0, 7.0), (8.0, 7.0)]);
+            g.line(&[(9.0, 12.0), (15.0, 12.0)]);
+            g.line(&[(9.0, 16.0), (15.0, 16.0)]);
         }
         Icon::Rotate => {
             // A circular arc with a tangential return arrow; no floating arrowhead.

@@ -2172,6 +2172,10 @@ impl BimApp {
                 let pt = self.snap_point(m, level, v, at, &chain, square);
                 self.place(level, pt);
             }
+            Tool::Paste => {
+                let pt = self.snap_point(m, level, v, at, &[], mods.shift);
+                self.place_paste(level, pt);
+            }
             &Tool::Rotate { centre, start, place } => {
                 self.tool = match (place, start) {
                     (true, _) => Tool::Rotate { centre: self.snap_point(m, level, v, at, &[], false), start: None, place: false },
@@ -3678,6 +3682,15 @@ impl BimApp {
         }
     }
 
+    /// Paste's outline: what was copied with its middle at `to`, drawn where the plan has it and boxed all round.
+    fn paste_ghost(&self, sc: &Scene, to: P2) {
+        let (Some(anchor), Some([lo, hi])) = (self.session.clipboard_anchor(), self.session.clipboard_extent()) else { return };
+        let (by, delta) = (to - anchor, sc.screen(to) - sc.screen(anchor));
+        ghost(sc.p, sc.place, sc.d, &self.session.clipboard_ids(), &|pt| pt + delta);
+        let corners: Vec<Pos2> = [lo, P2(hi.0, lo.1), hi, P2(lo.0, hi.1), lo].iter().map(|q| sc.screen(*q + by)).collect();
+        sc.p.extend(Shape::dashed_line(&corners, Stroke::new(1.0, pal().accent), 8.0, 4.0));
+    }
+
     /// What the tool would do at pixel `q`: a chain's next segment, the room a click would bound,
     /// where a move, turn or mirror puts the selection, the line Align or Offset would use.
     fn preview(&self, sc: &Scene, q: (f32, f32), hovered: Option<Id>, shift: bool) {
@@ -3709,6 +3722,11 @@ impl BimApp {
                 chain.as_slice()
             }
             Tool::SketchPick => &[],
+            // What was copied, where a click would put it.
+            Tool::Paste => {
+                self.paste_ghost(sc, self.found(sc, q, &[], shift));
+                return;
+            }
             // The group a click would place.
             Tool::DetailGroup => {
                 if let Some(e) = self.group_at(m, key, self.found(sc, q, &[], false)) {

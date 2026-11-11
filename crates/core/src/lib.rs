@@ -17,6 +17,8 @@ pub mod cad;
 mod cad_tests;
 pub mod cloud;
 #[cfg(test)]
+mod clipboard_tests;
+#[cfg(test)]
 mod cloud_tests;
 mod commands;
 mod component_geometry;

@@ -186,6 +186,8 @@ pub struct Session {
     /// outside a command copies it first, so a model still this one is one that passed, and the next command need only
     /// check what it changes ([`Model::check_changed`]).
     pub(crate) verified: Option<Arc<Model>>,
+    /// What Copy to Clipboard took, which Paste makes again (`commands/clipboard.rs`). Not the model's: undo does not touch it.
+    pub(crate) clipboard: Option<crate::commands::clipboard::Clipboard>,
 }
 
 impl Default for Session {
@@ -254,6 +256,7 @@ impl Session {
             read_only: None,
             dry_run: false,
             verified: None,
+            clipboard: None,
         }
     }
 
@@ -267,6 +270,7 @@ impl Session {
         self.model = Arc::new(model);
         self.path = path;
         (self.phase, self.option) = (None, None);
+        self.clipboard = None;
         self.resets += 1;
         self.undo.clear();
         self.redo.clear();

@@ -44,6 +44,7 @@ use crate::{pdf, render, schedule, sheet, snap, stairs, view3d};
 type R = Result<Value, String>;
 
 mod cad_pick;
+pub(crate) mod clipboard;
 mod site;
 use cad_pick::cad_outlines;
 use site::{building_pad, property_line, site as site_cmd, site_edit, site_figures, site_kinds, toposolid};
@@ -1373,6 +1374,34 @@ other_files(
         &["CO"],
         "{ids: [id,…], by: [dx, dy]} copies elements, with the doors and windows of copied walls; returns the copies' ids",
         copy,
+    ),
+    other(
+        "copy_to_clipboard",
+        "Copy to Clipboard",
+        "{ids: [id,…]} Ctrl+C: puts the elements on the session's clipboard, with the doors and windows in the walls among them \
+         and the railings of the stairs and ramps among them (`paste` makes them again). It stays until the next copy or a new \
+         project; what is changed meanwhile is pasted as it is then. Returns {ids, count, anchor: the middle of what was copied \
+         in plan, left_out}",
+        clipboard::copy_to_clipboard,
+    ),
+    edit(
+        "paste",
+        "Paste",
+        &[],
+        "{ids?: [id,…], by?: [dx, dy], same_place?: true, levels?: [level,…], view?} Ctrl+V: new elements, as copies, from the \
+         clipboard (or `ids`, elements of the project, with no copy first). Give one way to place them: `by`, `same_place`, \
+         `levels` or `view`; the last two may go with a `by`, so what lands on a level is also moved in plan, as a click does. \
+         `by` puts them that far from the originals; `same_place` on top of them (Revit's Aligned to Same Place); `levels` (by \
+         name, id or GUID) on each level named, at the same place in plan, what stood on the lowest level copied now standing \
+         on that level and the rest the same distance higher, tops and what is measured from a level (a top level, a room's \
+         upper limit) moved with them (Aligned to Selected Levels; one level is Aligned to a Picked Level); `view`, a level's \
+         plan or a plan view, is that level alone (Aligned to Current View). Doors and windows go with their walls, a copied \
+         stair brings its railings, bars go on the copy of their host, and each copy has an id and a GUID of its own. What \
+         cannot go the way it was is made as near as can be, and `notes` says how (a wall's top with no level at the height it \
+         moves to is unconnected, a wall's attachment to a roof not copied is let go, a room with no walls round it up there is \
+         unbounded); `left_out` says what was not pasted and why (an annotation belongs to its view, a door goes only in its \
+         wall). Returns {ids, pasted: [{level?, name?, ids}], notes, left_out}",
+        clipboard::paste,
     ),
     edit(
         "rotate",
@@ -12783,6 +12812,11 @@ fn relocate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion, end: Option<bool>
 /// Copies of elements taken by `mo`, with the doors and windows of copied walls; the copies' ids.
 /// Copied dimensions and tags go onto the copies of what they measure and name, where there are.
 fn duplicate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion) -> R {
+    duplicate_mapped(c, s, ids, mo).map(|(made, _)| json!({"ids": made}))
+}
+
+/// [`duplicate`], and which copy stands for each element copied (their GUIDs), for what has to point at the copies.
+pub(crate) fn duplicate_mapped(c: &str, s: &mut Session, ids: &[Id], mo: &Motion) -> Result<(Vec<Id>, BTreeMap<Guid, Guid>), String> {
     let m = &s.model;
     let copying: BTreeSet<Id> = ids.iter().copied().collect();
     let copying_guids: BTreeSet<Guid> = ids.iter().map(|id| m.guid(*id)).collect();
@@ -12888,7 +12922,7 @@ fn duplicate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion) -> R {
         }
         made.push(id);
     }
-    Ok(json!({"ids": made}))
+    Ok((made, hosts))
 }
 
 fn align_element(s: &mut Session, p: &Value) -> R {
