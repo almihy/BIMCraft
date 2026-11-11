@@ -193,9 +193,9 @@ pub struct Session {
     warned: Option<Box<(Arc<Model>, Review)>>,
     /// Elements another copy told that the model would not take as they were (a wall of a type not heard of yet), by GUID with their
     /// JSON: offered again when the settings change ([`Session::merge`]).
-    pub(crate) waiting: std::collections::BTreeMap<crate::ids::Guid, String>,
+    pub(crate) waiting: std::collections::BTreeMap<crate::ids::Guid, crate::sync::Wait>,
     /// The same for settings (a type made of a material not heard of yet), by key with their JSON.
-    pub(crate) waiting_project: std::collections::BTreeMap<String, String>,
+    pub(crate) waiting_project: std::collections::BTreeMap<String, crate::sync::Wait>,
     /// How many commands, scripts and transactions are under way, one inside another. A command made inside another (a script's
     /// lines, a transaction's) does not work out its warnings: the one outermost says what the whole made, once. Raised only
     /// through [`Nesting`], which lowers it again however the work ends.
