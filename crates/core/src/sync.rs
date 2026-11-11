@@ -25,6 +25,7 @@ use serde_json::{Map, Value};
 
 use crate::engine::{Session, Step};
 use crate::ids::{Changed, Guid, Id};
+use crate::library::Kind;
 use crate::model::{Element, Model};
 use crate::sync_settings;
 
@@ -42,6 +43,8 @@ pub const FORMAT: u32 = 3;
 /// Most changes one call takes, and the longest JSON of one: what comes from another copy is hostile.
 pub const MAX_CHANGES: usize = 200_000;
 pub const MAX_ENTRY: usize = 64 << 20;
+/// Most elements a session keeps waiting for the settings they need.
+const WAITING_AT_MOST: usize = 10_000;
 
 /// Changes to a project, keyed by GUID (elements) and by the file's keys (settings): see the module.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -169,9 +172,16 @@ pub struct Merged {
     pub refused: Vec<(String, String)>,
     /// The id each element new here was given.
     pub ids: BTreeMap<Guid, Id>,
-    /// What this copy tells the room that it did not hear: the keys (`.../name`) of entries it had to rename, two having asked for
-    /// one name ([`crate::sync_settings`]), and their names now.
+    /// What this copy tells the room that it did not hear, key by key (none: the key is to be taken out): the names of entries it
+    /// had to rename, two having asked for one name; the body and name of an entry it kept, though the room took it out, because it
+    /// is in use here; a body left with no name, to take out ([`crate::sync_settings`], `docs/areas/sync.md`).
     pub fixes: BTreeMap<String, Option<String>>,
+    /// The elements refused because the model would not pass with them (a wall of a type this copy has not heard of yet): a session
+    /// offers them again when the settings change ([`Session::merge`]).
+    pub waiting: BTreeSet<Guid>,
+    /// The same for the settings: the keys of an entry refused because the model would not pass with it (a type made of a material
+    /// not heard of yet), with their JSON.
+    pub waiting_project: BTreeMap<String, String>,
 }
 
 impl Merged {
@@ -185,12 +195,68 @@ impl Merged {
     }
 }
 
+/// The settings of changes taken in entry by entry ([`Model::merged`]).
+struct Settled {
+    model: Model,
+    /// The keys taken.
+    project: BTreeMap<String, Option<String>>,
+    fixes: BTreeMap<String, Option<String>>,
+    /// The keys of an entry that could not be taken, each with why.
+    refused: Vec<(String, String)>,
+    /// Those of them that are only refused for the model's check, which more settings may pass (a type made of a material not heard
+    /// of yet); an entry that is not an entry's at all never waits.
+    waiting: BTreeSet<String>,
+}
+
+impl Settled {
+    fn new(model: Model) -> Settled {
+        Settled { model, project: BTreeMap::new(), fixes: BTreeMap::new(), refused: Vec::new(), waiting: BTreeSet::new() }
+    }
+
+    /// Takes `groups` of keys (those of `all`, by key) into the model, together where they pass the check, else halved, until
+    /// each one that does not is alone and refused.
+    fn take(&mut self, groups: &[&[String]], all: &BTreeMap<String, Option<String>>) {
+        let project: BTreeMap<String, Option<String>> =
+            groups.iter().flat_map(|g| g.iter()).filter_map(|k| all.get(k).map(|v| (k.clone(), v.clone()))).collect();
+        if project.is_empty() {
+            return;
+        }
+        match self.model.with_settings(&Changes { project: project.clone(), ..Changes::default() }, true) {
+            Ok((m, fixes)) => {
+                self.model = m;
+                self.project.extend(project);
+                self.fixes.extend(fixes);
+            }
+            Err(e) if groups.len() == 1 => {
+                self.refused.extend(groups[0].iter().map(|k| (k.clone(), e.clone())));
+                if self.model.with_settings(&Changes { project, ..Changes::default() }, false).is_ok() {
+                    self.waiting.extend(groups[0].iter().cloned());
+                }
+            }
+            Err(_) => {
+                let (left, right) = groups.split_at(groups.len() / 2);
+                self.take(left, all);
+                self.take(right, all);
+            }
+        }
+    }
+}
+
 impl Model {
     /// This model with `c` taken in, checked. What would break the model is left out and named (`refused`), the rest taken.
     /// `keep` names the GUIDs whose elements stay as they are here (this copy's own changes, not sent yet). `ids` are the
     /// ids to give new elements where they are free (those another model of the same history gave them).
+    ///
+    /// An entry the changes take out that something here still names (a type of a wall this copy placed meanwhile) is kept, as in
+    /// Revit a type in use cannot be taken out: it is not in `taken`, and its body and name are in `fixes`, which the copy tells the
+    /// room, so that every copy ends with it and nothing is lost. A change of one entry that does not apply is refused alone.
     pub fn merged(&self, c: &Changes, keep: &BTreeSet<Guid>, ids: &BTreeMap<Guid, Id>) -> Result<(Model, Merged), String> {
         let mut out = Merged::default();
+        let (kept, told) = self.keeping_in_use(c, keep, ids);
+        let c: &Changes = &told;
+        if !kept.is_empty() {
+            out.fixes = sync_settings::restoring(self, &kept)?;
+        }
         // Settings and elements together first: another project opened in a copy (an .rvt, an .ifc) changes both, its
         // types and the walls of those types, and neither passes the check without the other.
         if !c.project.is_empty()
@@ -204,17 +270,31 @@ impl Model {
             if whole.is_ok() && got.refused.is_empty() {
                 out.taken = Changes { elements: got.taken.elements, project: c.project.clone(), complete: c.complete };
                 out.ids = got.ids;
-                out.fixes = fixes;
+                out.fixes.extend(fixes);
                 return Ok((all, out));
             }
         }
-        // The settings first, all or none: the elements are checked against them.
+        // The settings first: all, or each entry on its own where one would break the model; the elements are checked against them.
         let base = match self.with_settings(c, true) {
             Ok((m, fixes)) => {
                 out.taken.project = c.project.clone();
                 out.taken.complete = c.complete;
-                out.fixes = fixes;
+                out.fixes.extend(fixes);
                 m
+            }
+            Err(_) if !c.complete => {
+                let mut by = Settled::new(self.clone());
+                let groups = sync_settings::groups(&c.project);
+                by.take(&groups.iter().map(Vec::as_slice).collect::<Vec<_>>(), &c.project);
+                out.taken.project = by.project;
+                out.fixes.extend(by.fixes);
+                for k in &by.waiting {
+                    if let Some(Some(text)) = c.project.get(k) {
+                        out.waiting_project.insert(k.clone(), text.clone());
+                    }
+                }
+                out.refused.extend(by.refused);
+                by.model
             }
             Err(e) => {
                 out.refused.push(("the project's settings".into(), e));
@@ -246,7 +326,7 @@ impl Model {
             );
         }
         for (g, v) in each {
-            let one = Changes { elements: BTreeMap::from([(g, v)]), ..Changes::default() };
+            let one = Changes { elements: BTreeMap::from([(g, v.clone())]), ..Changes::default() };
             let mut next = m.clone();
             let mut got = Merged::default();
             let tried = next.take_elements(&one, keep, ids, &mut got).and_then(|()| {
@@ -263,10 +343,73 @@ impl Model {
                     out.refused.extend(got.refused);
                     m = next;
                 }
-                Err(e) => out.refused.push((g.to_string(), e)),
+                Err(e) => {
+                    if v.is_some() {
+                        out.waiting.insert(g);
+                    }
+                    out.refused.push((g.to_string(), e));
+                }
             }
         }
         Ok((m, out))
+    }
+
+    /// `c` without what it takes out of the library that this copy still uses, and those entries' GUIDs: a type some element here
+    /// (or one the changes bring) is of, a material a type here is made of. What a kept entry names is kept with it, so it goes on
+    /// until nothing more is.
+    fn keeping_in_use<'a>(
+        &self,
+        c: &'a Changes,
+        keep: &BTreeSet<Guid>,
+        ids: &BTreeMap<Guid, Id>,
+    ) -> (BTreeSet<Guid>, std::borrow::Cow<'a, Changes>) {
+        let mut kept = BTreeSet::new();
+        let mut now = std::borrow::Cow::Borrowed(c);
+        for _ in 0..8 {
+            if now.complete || !now.project.values().any(Option::is_none) {
+                break;
+            }
+            let Ok((mut all, _)) = self.with_settings(&now, false) else { break };
+            if all.take_elements(&now, keep, ids, &mut Merged::default()).is_err() {
+                break;
+            }
+            let used = self.removed_in_use(&all);
+            if used.is_empty() {
+                break;
+            }
+            kept.extend(used.iter().copied());
+            now = std::borrow::Cow::Owned(Changes {
+                elements: now.elements.clone(),
+                project: sync_settings::without(&now.project, &used),
+                complete: now.complete,
+            });
+        }
+        (kept, now)
+    }
+
+    /// The entries of this model's library that `all` (this model with changes taken in) has not, but names: the GUIDs of what
+    /// stands for them in the settings (their owner's, for a family's type).
+    fn removed_in_use(&self, all: &Model) -> BTreeSet<Guid> {
+        let gone: Vec<(Kind, String, Guid, Guid)> = self
+            .library
+            .entries()
+            .filter(|(_, e)| all.library.by_guid(e.guid).is_none())
+            .filter_map(|(_, e)| {
+                Some((e.kind.clone(), e.name.clone(), e.guid, sync_settings::standing_for(self, &e.kind, &e.name, e.guid)?))
+            })
+            .collect();
+        if gone.is_empty() {
+            return BTreeSet::new();
+        }
+        // What names an entry that is not there: by its old name (what this copy holds), or by its GUID (what the changes bring).
+        let uses = all.library_uses();
+        gone.into_iter()
+            .filter(|(kind, name, guid, _)| {
+                let named = |n: &String| uses.contains_key(&(kind.clone(), n.clone()));
+                (all.library.id(kind, name).is_none() && named(name)) || named(&guid.to_string())
+            })
+            .map(|(_, _, _, stands)| stands)
+            .collect()
     }
 
     /// This model with the settings `c` changes, each copy's own kept: the entries it tells put in, renamed or taken out by GUID,
@@ -401,8 +544,63 @@ impl Session {
     /// elements of `keep` stay as they are (this copy's own changes not sent yet). The undo history stays this copy's: each
     /// model it goes back to is brought what was taken, so undo and redo take back and put back this copy's own commands
     /// alone. A model of the history the changes can't be brought to ends the history there.
+    ///
+    /// An element the model would not take yet (a wall of a type another copy has not told this one of) waits: when the settings
+    /// change, it is offered again with them, so that the order the changes came in does not matter.
     pub fn merge(&mut self, c: &Changes, keep: &BTreeSet<Guid>) -> Result<Merged, String> {
-        let (model, merged) = self.model.merged(c, keep, &BTreeMap::new())?;
+        let mut again: BTreeSet<String> = BTreeSet::new();
+        let offered;
+        let waits = !self.waiting.is_empty() || !self.waiting_project.is_empty();
+        let c = if waits && (c.complete || !c.project.is_empty()) {
+            let mut told = c.clone();
+            if c.complete {
+                self.waiting.clear();
+                self.waiting_project.clear();
+            }
+            for (g, text) in &self.waiting {
+                if !told.elements.contains_key(g) {
+                    told.elements.insert(*g, Some(text.clone()));
+                    again.insert(g.to_string());
+                }
+            }
+            for (k, text) in &self.waiting_project {
+                if !told.project.contains_key(k) {
+                    told.project.insert(k.clone(), Some(text.clone()));
+                    again.insert(k.clone());
+                }
+            }
+            offered = told;
+            &offered
+        } else {
+            c
+        };
+        let (model, mut merged) = self.model.merged(c, keep, &BTreeMap::new())?;
+        for (g, v) in &c.elements {
+            if v.is_none() {
+                self.waiting.remove(g);
+            }
+        }
+        for g in merged.taken.elements.keys() {
+            self.waiting.remove(g);
+        }
+        for g in &merged.waiting {
+            if let Some(Some(text)) = c.elements.get(g)
+                && (self.waiting.len() < WAITING_AT_MOST || self.waiting.contains_key(g))
+            {
+                self.waiting.insert(*g, text.clone());
+            }
+        }
+        // A key told again is what the room says now: what waited for it is no longer what the room says.
+        for k in c.project.keys() {
+            self.waiting_project.remove(k);
+        }
+        for (k, text) in &merged.waiting_project {
+            if self.waiting_project.len() < WAITING_AT_MOST || self.waiting_project.contains_key(k) {
+                self.waiting_project.insert(k.clone(), text.clone());
+            }
+        }
+        // What was only offered again, and still waits, says nothing new.
+        merged.refused.retain(|(what, _)| !again.contains(what));
         if merged.taken.is_empty() {
             return Ok(merged);
         }

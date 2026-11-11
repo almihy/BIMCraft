@@ -191,6 +191,11 @@ pub struct Session {
     pub(crate) clipboard: Option<crate::commands::clipboard::Clipboard>,
     /// The warnings of the last model asked ([`Session::warnings`]), kept with it: the next are brought up to date from them.
     warned: Option<(Arc<Model>, Arc<Vec<Warning>>)>,
+    /// Elements another copy told that the model would not take as they were (a wall of a type not heard of yet), by GUID with their
+    /// JSON: offered again when the settings change ([`Session::merge`]).
+    pub(crate) waiting: std::collections::BTreeMap<crate::ids::Guid, String>,
+    /// The same for settings (a type made of a material not heard of yet), by key with their JSON.
+    pub(crate) waiting_project: std::collections::BTreeMap<String, String>,
 }
 
 impl Default for Session {
@@ -261,6 +266,8 @@ impl Session {
             verified: None,
             clipboard: None,
             warned: None,
+            waiting: std::collections::BTreeMap::new(),
+            waiting_project: std::collections::BTreeMap::new(),
         }
     }
 
@@ -275,6 +282,8 @@ impl Session {
         self.path = path;
         (self.phase, self.option) = (None, None);
         self.clipboard = None;
+        self.waiting.clear();
+        self.waiting_project.clear();
         self.resets += 1;
         self.undo.clear();
         self.redo.clear();
