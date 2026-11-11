@@ -713,3 +713,28 @@ fn an_opening_pasted_at_a_wall_join_goes_in_the_nearer_wall_and_stays_within_its
     assert!(o.offset >= width / 2.0 - 1e-6 && o.offset <= 4000.0 - width / 2.0 + 1e-6, "kept within the wall's run: {}", o.offset);
     let _ = east;
 }
+
+#[test]
+fn a_column_pasted_brings_the_bars_it_holds() {
+    let mut s = Session::new();
+    let column = run(&mut s, "column", json!({"at": [1000, 1000]}))["id"].as_u64().unwrap();
+    let bar = run(&mut s, "rebar", json!({"points": [[1000, 1000, 100], [1000, 1000, 2900]], "diameter": 12, "host": column}));
+    let bar = bar["id"].as_u64().or_else(|| bar["ids"][0].as_u64()).unwrap();
+    let copied = run(&mut s, "copy_to_clipboard", json!({"ids": [column]}));
+    assert_eq!(copied["count"], 2, "the column and its bar: {copied}");
+    let r = run(&mut s, "paste", json!({"by": [0, 5000]}));
+    let (columns, bars) = (made_of(&s, &r, "column"), made_of(&s, &r, "rebar"));
+    assert_eq!((columns.len(), bars.len()), (1, 1), "{r}");
+    match s.model.elements.get(bars[0]) {
+        Some(Element::Rebar(b)) => {
+            assert_eq!(b.host, Some(s.model.guid(columns[0])), "on the pasted column");
+            assert!(b.path.iter().all(|q| (q[1] - 6000.0).abs() < 0.01), "{:?}", b.path);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(matches!(s.model.elements.get(bar), Some(Element::Rebar(b)) if b.host == Some(s.model.guid(column))));
+    // Pasted to another level, the bar goes up with its column.
+    let upper = s.model.levels()[1].1.name.clone();
+    let r = run(&mut s, "paste", json!({"levels": [upper]}));
+    assert_eq!(made_of(&s, &r, "rebar").len(), 1, "{r}");
+}

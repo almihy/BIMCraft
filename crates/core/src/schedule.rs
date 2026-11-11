@@ -611,6 +611,11 @@ pub fn own_field(cat: &str, name: &str) -> bool {
     own(cat).1.iter().any(|(n, _, _)| *n == name)
 }
 
+/// The names a calculated field of a `cat` schedule may not take: the category's fields but its type's identity data.
+pub(crate) fn fixed_fields(m: &Model, cat: &str) -> BTreeSet<String> {
+    fields_with(m, cat, false).into_iter().map(|(n, _)| n).collect()
+}
+
 /// Category `cat`'s fields, each once, with what it holds: its own, then the project parameters
 /// for it and, for components, the parameters of the model's families, and then its type's identity data.
 pub fn fields(m: &Model, cat: &str) -> Vec<(String, Kind)> {

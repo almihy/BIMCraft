@@ -135,7 +135,8 @@ fn named(m: &Model, id: Id) -> String {
     format!("{} {id}", m.elements.get(id).map_or("element", Element::category))
 }
 
-/// `ids` and what goes with them (the doors and windows in walls among them, the railings of stairs and ramps among them),
+/// `ids` and what goes with them (the doors and windows in walls among them, the railings of stairs and ramps, the bars of what they
+/// reinforce),
 /// each once, and the elements that are gone.
 fn with_hosted(m: &Model, ids: &[Id]) -> Vec<Id> {
     let mut seen: BTreeSet<Id> = BTreeSet::new();
@@ -145,6 +146,7 @@ fn with_hosted(m: &Model, ids: &[Id]) -> Vec<Id> {
         let goes = match e {
             Element::Door(o) | Element::Window(o) => guids.contains(&o.host),
             Element::Railing(r) => r.host.is_some_and(|h| guids.contains(&h)),
+            Element::Rebar(r) => r.host.is_some_and(|h| guids.contains(&h)),
             _ => false,
         };
         if goes && seen.insert(id) {

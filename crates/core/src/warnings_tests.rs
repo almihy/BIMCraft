@@ -572,3 +572,351 @@ fn warnings_cost_on_the_reference_tower_next_to_the_check() {
         }
     }
 }
+
+// ---- Every command made inside another, a transaction or a plugin is held to the whole model's warnings too ----
+
+/// A square of four walls on `level` with a room in it.
+fn square(s: &mut Session, level: &str, at: f64) -> [Id; 4] {
+    let points = json!([[at, at], [at + 4000.0, at], [at + 4000.0, at + 4000.0], [at, at + 4000.0], [at, at]]);
+    let made = run(s, "wall", json!({"points": points, "level": level}));
+    let walls = made["ids"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap()).collect::<Vec<_>>();
+    run(s, "room", json!({"point": [at + 2000.0, at + 2000.0], "level": level, "name": "Hall"}));
+    [walls[0], walls[1], walls[2], walls[3]]
+}
+
+#[test]
+fn what_a_script_line_leaves_is_held_to_the_whole_model_as_a_command_is() {
+    let mut s = Session::new();
+    let w = wall(&mut s, [0.0, 0.0], [6000.0, 0.0]);
+    s.shadowed = 0;
+    let text = format!(
+        "door {{\"wall\": {w}, \"offset\": 1000}}
+door {{\"wall\": {w}, \"offset\": 1300}}
+wall {{\"points\": [[0, 5000], [6000, 5000]]}}"
+    );
+    s.script(&text).unwrap();
+    assert_eq!(s.shadowed, 3, "each of the lines");
+    // A transaction's commands, an all-or-nothing script's and a dry run's, the same.
+    s.transaction("Two", |s| {
+        s.execute("door", &json!({"wall": w, "offset": 4000}))?;
+        s.execute("door", &json!({"wall": w, "offset": 4200})).map(|_| ())
+    })
+    .unwrap();
+    assert_eq!(s.shadowed, 5, "a transaction's");
+    s.script_atomic(&text).unwrap();
+    assert_eq!(s.shadowed, 8, "an atomic script's");
+    s.script_dry_run(&text).unwrap();
+    assert_eq!(s.shadowed, 11, "a dry run's");
+    // A plugin's command: the commands it runs.
+    let plugin = crate::engine::ExternalCommand {
+        id: "plug_in".into(),
+        label: "Plug".into(),
+        aliases: Vec::new(),
+        params: "{}".into(),
+        menu: None,
+        plugin: "test".into(),
+        run: std::sync::Arc::new(move |s: &mut Session, _: &Value| {
+            s.transaction("Plug", |s| s.execute("door", &json!({"wall": w, "offset": 2500})))
+        }),
+    };
+    s.register(plugin).unwrap();
+    run(&mut s, "plug_in", json!({}));
+    assert_eq!(s.shadowed, 12, "a plugin's");
+}
+
+#[test]
+fn a_transaction_says_the_warnings_it_made_at_its_end_and_its_commands_say_none() {
+    let (mut s, w) = awkward_house();
+    s.warnings();
+    let mut inside = Vec::new();
+    let (_, new) = s
+        .transaction_reporting("Doors", |s| {
+            inside.push(s.execute("door", &json!({"wall": w, "offset": 4000}))?);
+            inside.push(s.execute("door", &json!({"wall": w, "offset": 4300}))?);
+            Ok(())
+        })
+        .unwrap();
+    assert!(inside.iter().all(|r| r.get("new_warnings").is_none()), "{inside:?}");
+    let rules: Vec<&str> = new.iter().map(|w| w["rule"].as_str().unwrap()).collect();
+    assert_eq!(rules, ["openings_overlap"], "{new:?}");
+    assert_eq!(new[0]["guids"].as_array().unwrap().len(), 2);
+    assert_eq!(*s.warnings(), s.model.review_whole());
+    // Nothing made, nothing said; one that fails says nothing and changes nothing.
+    let (_, new) = s.transaction_reporting("Nothing", |_| Ok(())).unwrap();
+    assert!(new.is_empty());
+    let kept = s.model.clone();
+    let failed = s.transaction_reporting::<()>("Fails", |s| {
+        s.execute("door", &json!({"wall": w, "offset": 5000}))?;
+        Err("no".into())
+    });
+    assert!(failed.is_err());
+    assert_eq!(*s.model, *kept);
+}
+
+#[test]
+fn a_plugins_command_says_the_warnings_it_made_in_its_result() {
+    let (mut s, w) = awkward_house();
+    s.warnings();
+    let plugin = crate::engine::ExternalCommand {
+        id: "two_doors".into(),
+        label: "Two doors".into(),
+        aliases: Vec::new(),
+        params: "{}".into(),
+        menu: None,
+        plugin: "test".into(),
+        run: std::sync::Arc::new(move |s: &mut Session, _: &Value| {
+            s.transaction("Two doors", |s| {
+                s.execute("door", &json!({"wall": w, "offset": 4000}))?;
+                s.execute("door", &json!({"wall": w, "offset": 4300}))
+            })
+        }),
+    };
+    s.register(plugin).unwrap();
+    let r = run(&mut s, "two_doors", json!({}));
+    assert_eq!(new_rules(&r), ["openings_overlap"], "{r}");
+    assert_eq!(*s.warnings(), s.model.review_whole());
+    // The same plugin's command run in a script: the script says them, once.
+    let out = s.script("two_doors").unwrap();
+    assert_eq!(out.iter().filter(|r| r.get("new_warnings").is_some()).count(), 1, "{out:?}");
+    assert_eq!(*s.warnings(), s.model.review_whole());
+}
+
+#[test]
+fn a_panic_after_a_script_line_leaves_the_next_command_the_outermost_it_is() {
+    let (mut s, w) = awkward_house();
+    s.warnings();
+    let text = format!("door {{\"wall\": {w}, \"offset\": 4000}}\ndoor {{\"wall\": {w}, \"offset\": 4100}}");
+    crate::engine::FORCED_PANIC.with(|f| f.set(Some("post")));
+    let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| s.script(&text)));
+    crate::engine::FORCED_PANIC.with(|f| f.set(None));
+    assert!(ran.is_err(), "the panic came out of the script");
+    assert_eq!(s.nested, 0, "what the script began is not left under way");
+    let r = run(&mut s, "door", json!({"wall": w, "offset": 5000}));
+    let _ = r;
+    let r = run(&mut s, "door", json!({"wall": w, "offset": 5100}));
+    assert_eq!(new_rules(&r), ["openings_overlap"], "the command says its warnings: {r}");
+}
+
+#[test]
+fn a_panic_working_out_the_warnings_refuses_the_command_and_leaves_the_session_as_it_was() {
+    let (mut s, w) = awkward_house();
+    s.warnings();
+    let before = s.model.clone();
+    let steps = s.history().len();
+    crate::engine::FORCED_PANIC.with(|f| f.set(Some("report")));
+    let e = s.execute("door", &json!({"wall": w, "offset": 4000})).unwrap_err();
+    crate::engine::FORCED_PANIC.with(|f| f.set(None));
+    assert!(e.contains("warnings") && e.contains("forced panic"), "{e}");
+    assert_eq!((*s.model == *before, s.history().len(), s.nested), (true, steps, 0));
+    // And the next works, its warnings as they should be.
+    let r = run(&mut s, "door", json!({"wall": w, "offset": 4000}));
+    assert!(r.get("id").is_some());
+    assert_eq!(*s.warnings(), s.model.review_whole());
+    // The same at the end of a transaction.
+    crate::engine::FORCED_PANIC.with(|f| f.set(Some("report")));
+    let e = s.transaction_reporting("Doors", |s| s.execute("door", &json!({"wall": w, "offset": 5000})).map(|_| ())).unwrap_err();
+    crate::engine::FORCED_PANIC.with(|f| f.set(None));
+    assert!(e.contains("forced panic"), "{e}");
+    assert_eq!(s.nested, 0);
+}
+
+#[test]
+fn a_dry_run_leaves_the_kept_warnings_on_the_project_and_says_its_new_warnings_once() {
+    let (mut s, w) = awkward_house();
+    s.warnings();
+    let text = format!("door {{\"wall\": {w}, \"offset\": 4000}}\ndoor {{\"wall\": {w}, \"offset\": 4200}}");
+    let r = s.script_dry_run(&text).unwrap();
+    assert_eq!(r["new_warnings"].as_array().unwrap().len(), 1, "{r}");
+    let lines = r["results"].as_array().unwrap();
+    assert!(lines.iter().all(|l| l.get("new_warnings").is_none()), "not again in the last line's result: {lines:?}");
+    // The warnings kept are the project's: asking costs nothing.
+    let (whole, since) = reviews(|| {
+        s.warnings();
+    });
+    assert_eq!((whole, since), (0, 0), "the dry run left the kept warnings on its hypothetical model");
+}
+
+#[test]
+fn a_wall_or_column_moved_to_another_level_is_worked_out_where_it_went_and_where_it_was() {
+    let mut s = Session::new();
+    let levels: Vec<String> = s.model.levels().iter().map(|(_, l)| l.name.clone()).collect();
+    let (low, high) = (levels[0].clone(), levels[1].clone());
+    let first = |r: &Value| r["ids"][0].as_u64().unwrap();
+    run(&mut s, "wall", json!({"points": [[0, 0], [6000, 0]], "level": low, "height": 3000}));
+    let b = first(&run(&mut s, "wall", json!({"points": [[0, 0], [6000, 0]], "level": high, "height": 3000})));
+    assert!(s.warnings().is_empty());
+    let r = run(&mut s, "modify", json!({"id": b, "level": low}));
+    assert!(new_rules(&r).contains(&"identical_instances".to_string()), "{r}");
+    let r = run(&mut s, "modify", json!({"id": b, "level": high}));
+    assert!(r.get("new_warnings").is_none(), "{r}");
+    assert!(s.warnings().is_empty());
+    // A room on the lower level, whose wall the other one then replaces.
+    let walls = square(&mut s, &low, 20_000.0);
+    let top = first(&run(&mut s, "wall", json!({"points": [[20000, 20000], [24000, 20000]], "level": high})));
+    run(&mut s, "modify", json!({"id": top, "level": low}));
+    run(&mut s, "delete", json!({"ids": [walls[0]]}));
+    run(&mut s, "undo", json!({}));
+    // Columns: the same.
+    let c1 = id_of(&run(&mut s, "column", json!({"at": [1000, 1000], "level": low, "height": 3000})));
+    let c2 = id_of(&run(&mut s, "column", json!({"at": [1000, 1000], "level": high, "height": 3000})));
+    let r = run(&mut s, "modify", json!({"id": c2, "level": low}));
+    assert!(new_rules(&r).contains(&"identical_instances".to_string()), "{r}");
+    assert_eq!(listed(&mut s, "identical_instances").iter().filter(|w| ids(&w["elements"]).contains(&c1)).count(), 1);
+    run(&mut s, "modify", json!({"id": c2, "level": high}));
+    assert!(listed(&mut s, "identical_instances").iter().all(|w| !ids(&w["elements"]).contains(&c1)));
+    assert_eq!(*s.warnings(), s.model.review_whole());
+}
+
+#[test]
+fn a_component_changing_family_is_worked_out_in_both_families() {
+    let mut s = Session::new();
+    run(&mut s, "family", json!({"name": "Plain", "types": {"T": {}}}));
+    run(&mut s, "family", json!({"name": "Same", "types": {"T": {}}}));
+    run(&mut s, "family", json!({"name": "Bare", "category": "outlet", "types": {"T": {}}}));
+    let a = id_of(&run(&mut s, "component", json!({"family": "Plain", "type": "T", "at": [1000, 1000]})));
+    let b = id_of(&run(&mut s, "component", json!({"family": "Same", "type": "T", "at": [1000, 1000]})));
+    assert!(listed(&mut s, "identical_instances").is_empty());
+    let r = run(&mut s, "modify", json!({"id": b, "family": "Plain"}));
+    assert!(new_rules(&r).contains(&"identical_instances".to_string()), "{r}");
+    run(&mut s, "modify", json!({"id": b, "family": "Same"}));
+    assert!(listed(&mut s, "identical_instances").is_empty());
+    // To a family of devices with no connector, and back.
+    let r = run(&mut s, "modify", json!({"id": a, "family": "Bare"}));
+    assert!(new_rules(&r).contains(&"device_no_connector".to_string()), "{r}");
+    run(&mut s, "modify", json!({"id": a, "family": "Plain"}));
+    assert!(listed(&mut s, "device_no_connector").is_empty());
+}
+
+#[test]
+fn a_wall_spanning_several_levels_bounds_the_rooms_of_each() {
+    let mut s = Session::new();
+    run(&mut s, "level", json!({"name": "Third", "elevation": 6000}));
+    let levels: Vec<String> = s.model.levels().iter().map(|(_, l)| l.name.clone()).collect();
+    let (low, mid) = (levels[0].clone(), levels[1].clone());
+    let walls = square(&mut s, &low, 0.0);
+    square(&mut s, &mid, 0.0);
+    assert!(s.warnings().iter().all(|w| !w.rule.starts_with("room_")), "{:?}", s.warnings());
+    // A wall as tall as two storeys over the one side of both rooms: it replaces the walls there, and bounds both.
+    run(&mut s, "delete", json!({"ids": [walls[0]]}));
+    let tall = run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]], "level": low, "height": 6000}))["ids"][0].as_u64().unwrap();
+    run(&mut s, "modify", json!({"id": tall, "height": 2000}));
+    run(&mut s, "modify", json!({"id": tall, "height": 6000}));
+    run(&mut s, "move", json!({"ids": [tall], "by": [0, 300]}));
+    run(&mut s, "undo", json!({}));
+    run(&mut s, "delete", json!({"ids": [tall]}));
+    run(&mut s, "undo", json!({}));
+    assert_eq!(*s.warnings(), s.model.review_whole());
+}
+
+#[test]
+fn room_separators_close_rooms_and_their_changes_are_worked_out() {
+    let mut s = Session::new();
+    run(&mut s, "wall", json!({"points": [[0, 0], [8000, 0], [8000, 4000], [0, 4000], [0, 0]]}));
+    run(&mut s, "room", json!({"point": [2000, 2000], "name": "Left"}));
+    run(&mut s, "room", json!({"point": [6000, 2000], "name": "Right"}));
+    assert_eq!(listed(&mut s, "room_redundant").len(), 1, "two rooms in one space");
+    let sep = run(&mut s, "room_separator", json!({"points": [[4000, 0], [4000, 4000]]}))["ids"][0].as_u64().unwrap();
+    assert!(listed(&mut s, "room_redundant").is_empty(), "the line parts them");
+    run(&mut s, "move", json!({"ids": [sep], "by": [1000, 0]}));
+    assert!(listed(&mut s, "room_redundant").is_empty(), "still between the two points");
+    run(&mut s, "move", json!({"ids": [sep], "by": [-1000, 0]}));
+    run(&mut s, "delete", json!({"ids": [sep]}));
+    assert_eq!(listed(&mut s, "room_redundant").len(), 1);
+    run(&mut s, "undo", json!({}));
+    assert!(listed(&mut s, "room_redundant").is_empty());
+    // A line that only part-closes a space leaves its room open.
+    run(&mut s, "wall", json!({"points": [[10000, 0], [14000, 0], [14000, 4000]]}));
+    run(&mut s, "room", json!({"point": [12000, 2000], "name": "Open"}));
+    run(&mut s, "room_separator", json!({"points": [[14000, 4000], [10000, 4000]]}));
+    assert_eq!(listed(&mut s, "room_not_enclosed").len(), 1);
+    run(&mut s, "room_separator", json!({"points": [[10000, 4000], [10000, 0]]}));
+    assert!(listed(&mut s, "room_not_enclosed").is_empty());
+}
+
+#[test]
+fn a_rooms_area_from_the_finish_faces_is_worked_out_on_the_incremental_path() {
+    let mut s = Session::new();
+    run(&mut s, "room_area", json!({"at": "finish"}));
+    let walls = square(&mut s, "Level 1", 0.0);
+    square(&mut s, "Level 1", 6000.0);
+    // A wall moved into the room's point puts it in the wall's body: not enclosed there, at the finish faces.
+    run(&mut s, "move", json!({"ids": [walls[3]], "by": [2000, 0]}));
+    run(&mut s, "move", json!({"ids": [walls[3]], "by": [-2000, 0]}));
+    run(&mut s, "room_area", json!({"at": "centre"}));
+    run(&mut s, "room_area", json!({"at": "finish"}));
+    run(&mut s, "delete", json!({"ids": [walls[1]]}));
+    run(&mut s, "undo", json!({}));
+    assert_eq!(*s.warnings(), s.model.review_whole());
+}
+
+#[test]
+fn a_change_merged_then_undone_is_worked_out_from_the_model_it_was_made_of() {
+    let (mut a, w) = awkward_house();
+    let mut b = Session::new();
+    b.reset((*a.model).clone(), None);
+    b.warnings();
+    let before = a.model.clone();
+    run(&mut a, "door", json!({"wall": w, "offset": 4500}));
+    let changes = crate::sync::changes(&before, &a.model).unwrap();
+    run(&mut b, "door", json!({"wall": w, "offset": 2000}));
+    assert!(b.merge(&changes, &std::collections::BTreeSet::new()).unwrap().refused.is_empty());
+    run(&mut b, "undo", json!({}));
+    run(&mut b, "door", json!({"wall": w, "offset": 4600}));
+    run(&mut b, "undo", json!({}));
+    run(&mut b, "redo", json!({}));
+    assert_eq!(*b.warnings(), b.model.review_whole());
+}
+
+#[test]
+fn elements_in_different_options_of_one_set_do_not_conflict_but_a_main_model_one_and_other_sets_do() {
+    let mut s = Session::new();
+    run(&mut s, "option", json!({"set": "Entry", "options": ["A", "B"]}));
+    run(&mut s, "option", json!({"set": "Roof", "options": ["X", "Y"]}));
+    let a = id_of(&run(&mut s, "column", json!({"at": [1000, 1000]})));
+    run(&mut s, "modify", json!({"id": a, "params": {"Design Option": "Entry: A"}}));
+    let b = id_of(&run(&mut s, "column", json!({"at": [1000, 1000]})));
+    assert!(listed(&mut s, "identical_instances").len() == 1, "one in an option, one in the main model: both are there");
+    let r = run(&mut s, "modify", json!({"id": b, "params": {"Design Option": "Entry: B"}}));
+    assert!(r.get("new_warnings").is_none(), "{r}");
+    assert!(listed(&mut s, "identical_instances").is_empty(), "options of one set are never there together");
+    let r = run(&mut s, "modify", json!({"id": b, "params": {"Design Option": "Roof: X"}}));
+    assert_eq!(new_rules(&r), ["identical_instances"], "options of two sets are: {r}");
+    run(&mut s, "modify", json!({"id": b, "params": {"Design Option": "Entry: B"}}));
+    assert!(listed(&mut s, "identical_instances").is_empty());
+    // Walls that overlap, and doors that overlap in a wall.
+    let w1 = wall(&mut s, [0.0, 3000.0], [6000.0, 3000.0]);
+    let w2 = wall(&mut s, [3000.0, 3000.0], [9000.0, 3000.0]);
+    assert_eq!(listed(&mut s, "walls_overlap").len(), 1);
+    run(&mut s, "modify", json!({"id": w1, "params": {"Design Option": "Entry: A"}}));
+    run(&mut s, "modify", json!({"id": w2, "params": {"Design Option": "Entry: B"}}));
+    assert!(listed(&mut s, "walls_overlap").is_empty());
+    let d1 = id_of(&run(&mut s, "door", json!({"wall": w1, "offset": 1500})));
+    let d2 = id_of(&run(&mut s, "door", json!({"wall": w1, "offset": 1800})));
+    assert_eq!(listed(&mut s, "openings_overlap").len(), 1);
+    run(&mut s, "modify", json!({"id": d1, "params": {"Design Option": "Entry: B"}}));
+    assert!(listed(&mut s, "openings_overlap").is_empty(), "{d2}");
+}
+
+#[test]
+fn an_element_a_phase_takes_down_is_no_twin_of_the_one_made_in_that_phase() {
+    let mut s = Session::new();
+    run(&mut s, "phase", json!({"name": "New work"}));
+    let old = wall(&mut s, [0.0, 0.0], [6000.0, 0.0]);
+    let new = wall(&mut s, [0.0, 0.0], [6000.0, 0.0]);
+    assert_eq!(listed(&mut s, "identical_instances").len(), 1);
+    let r = run(&mut s, "modify", json!({"id": old, "params": {"Phase Demolished": "New work"}}));
+    assert!(r.get("new_warnings").is_none());
+    assert_eq!(listed(&mut s, "identical_instances").len(), 1, "both stand in the first phase");
+    run(&mut s, "modify", json!({"id": new, "params": {"Phase Created": "New work"}}));
+    assert!(listed(&mut s, "identical_instances").is_empty(), "the demolished one and its replacement stand together in no phase");
+    // Overlapping, not identical: the same. It was made in the first phase, so it stands with the old wall and the new one.
+    let longer = wall(&mut s, [3000.0, 0.0], [9000.0, 0.0]);
+    assert_eq!(listed(&mut s, "walls_overlap").len(), 2, "{old} {new} {longer}");
+    run(&mut s, "modify", json!({"id": longer, "params": {"Phase Created": "New work"}}));
+    let left = listed(&mut s, "walls_overlap");
+    assert_eq!(left.len(), 1, "the one demolished and the one made in that phase overlap in no phase: {left:?}");
+    assert!(ids(&left[0]["elements"]).contains(&new), "what is left is with the new wall: {left:?}");
+    run(&mut s, "undo", json!({}));
+    assert_eq!(listed(&mut s, "walls_overlap").len(), 2);
+    assert_eq!(*s.warnings(), s.model.review_whole());
+}

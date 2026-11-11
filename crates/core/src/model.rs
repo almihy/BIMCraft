@@ -3583,6 +3583,7 @@ impl Model {
         m.migrate();
         m.names_from_file();
         m.renamed_clashing_parameters();
+        m.renamed_clashing_calculated_fields();
         Ok((m, left_out))
     }
 
@@ -3724,6 +3725,51 @@ impl Model {
                 rename(e);
             }
             self.parameters.insert(to, param);
+        }
+    }
+
+    /// A calculated field of a schedule named as a field its category has of its own since (Area, Volume or Perimeter of walls,
+    /// floors, ceilings and roofs) is `Custom <name>` now (`Custom <name> 2` and on, where that is taken), as a project parameter
+    /// is ([`Model::renamed_clashing_parameters`]): [`schedule::check`] refuses a calculated field named after one of its
+    /// category's own, so a file from before the field reads as it was. The other fields' formulas, the filters and the sorts
+    /// read it by its new name, and its column keeps the heading it had.
+    fn renamed_clashing_calculated_fields(&mut self) {
+        let categories: BTreeSet<String> = self
+            .elements
+            .values()
+            .filter_map(|e| if let Element::Schedule(sc) = e { Some(crate::commands::category(&sc.of)) } else { None })
+            .collect();
+        let fixed: BTreeMap<String, BTreeSet<String>> =
+            categories.into_iter().map(|c| (c.clone(), crate::schedule::fixed_fields(self, &c))).collect();
+        for e in self.elements.values_mut() {
+            let Element::Schedule(sc) = e else { continue };
+            let Some(fixed) = fixed.get(&crate::commands::category(&sc.of)) else { continue };
+            let mut taken: BTreeSet<String> = fixed.iter().cloned().chain(sc.fields.iter().map(|f| f.name.clone())).collect();
+            let mut renames: Vec<(String, String)> = Vec::new();
+            for f in sc.fields.iter().filter(|f| f.formula.is_some() && fixed.contains(&f.name)) {
+                let base = format!("Custom {}", f.name);
+                let mut to = base.clone();
+                let mut n = 2;
+                while taken.contains(&to) {
+                    to = format!("{base} {n}");
+                    n += 1;
+                }
+                taken.insert(to.clone());
+                renames.push((f.name.clone(), to));
+            }
+            for (from, to) in renames {
+                for f in sc.fields.iter_mut() {
+                    if f.formula.is_some() && f.name == from {
+                        f.heading.get_or_insert_with(|| from.clone());
+                        f.name.clone_from(&to);
+                    }
+                    if let Some(formula) = &mut f.formula {
+                        *formula = crate::family::rename_in_formula(formula, &from, &to);
+                    }
+                }
+                sc.filters.iter_mut().filter(|f| f.field == from).for_each(|f| f.field.clone_from(&to));
+                sc.sort.iter_mut().filter(|s| s.field == from).for_each(|s| s.field.clone_from(&to));
+            }
         }
     }
 

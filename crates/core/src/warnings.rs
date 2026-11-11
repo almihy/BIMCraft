@@ -196,6 +196,12 @@ impl Model {
         self.whole().warnings.to_vec()
     }
 
+    /// [`Model::review`] with what brings it up to date, not counted: the tests' own look at a model.
+    #[cfg(test)]
+    pub(crate) fn whole_review(&self) -> Review {
+        self.whole()
+    }
+
     fn whole(&self) -> Review {
         let mut out = Vec::new();
         let mut reach = RoomReach { whole: true, ..RoomReach::default() };
@@ -231,7 +237,6 @@ impl Model {
         let bounds = |e: &Element| {
             matches!(e, Element::Wall(_) | Element::Room(_) | Element::RoomSeparator(_) | Element::Column(_) | Element::StructuralColumn(_))
         };
-        let rooms = changed.iter().any(|id| both(*id).any(bounds));
         // What changed, and what points at it (an opening's wall's change is the opening's).
         let lookup = self.lookup();
         let mut ids = changed.clone();
@@ -240,6 +245,8 @@ impl Model {
                 ids.extend(lookup.referrers(&g));
             }
         }
+        // The rooms are looked at again when what changed bounds them, or what points at what changed does.
+        let rooms = ids.iter().any(|id| both(*id).any(bounds));
         // A change to nothing a rule looks at (a tag, a dimension, a view, a sheet, a note, a schedule) leaves the warnings as they were.
         if !ids.iter().any(|id| both(*id).any(watched)) {
             return prev.clone();
@@ -332,6 +339,30 @@ fn compute(m: &Model, scope: &Scope, families: Option<&BTreeSet<&str>>, out: &mu
     if scope.ids.is_none() {
         duplicate_type_marks(m, out);
     }
+}
+
+/// Whether two elements can conflict, as Revit's warnings take it: not when they are in different options of one design option set
+/// (only one is ever there), and not when one is taken down by the phase the other is made in or before (a wall demolished and
+/// the wall that replaces it stand together in no phase). A main-model element and one in an option do conflict, as do options of
+/// different sets. Where a phase is not given, an element is made in the first phase and is never demolished.
+fn coexist(m: &Model, a: &Element, b: &Element) -> bool {
+    use crate::phasing::{CREATED, DEMOLISHED, OPTION, index, value};
+    if let (Some((set_a, option_a)), Some((set_b, option_b))) =
+        (value(m, a, OPTION).and_then(|v| v.split_once(": ")), value(m, b, OPTION).and_then(|v| v.split_once(": ")))
+        && set_a == set_b
+        && option_a != option_b
+    {
+        return false;
+    }
+    // The phases an element stands in: from the one it is made in up to, not through, the one that takes it down.
+    let span = |e: &Element| -> (usize, usize) {
+        (
+            value(m, e, CREATED).and_then(|n| index(m, n)).unwrap_or(0),
+            value(m, e, DEMOLISHED).and_then(|n| index(m, n)).unwrap_or(usize::MAX),
+        )
+    };
+    let ((made, down), (made_b, down_b)) = (span(a), span(b));
+    made < down_b && made_b < down
 }
 
 fn cat(m: &Model, id: Id) -> &'static str {
@@ -456,7 +487,12 @@ fn openings(m: &Model, scope: &Scope, out: &mut Vec<Warning>) {
                 if b.start > a.end + TOL {
                     break;
                 }
-                if a.end > b.start + TOL && a.head > b.sill + TOL && b.head > a.sill + TOL && (scope.takes(a.id) || scope.takes(b.id)) {
+                if a.end > b.start + TOL
+                    && a.head > b.sill + TOL
+                    && b.head > a.sill + TOL
+                    && (scope.takes(a.id) || scope.takes(b.id))
+                    && matches!((m.elements.get(a.id), m.elements.get(b.id)), (Some(x), Some(y)) if coexist(m, x, y))
+                {
                     let (low, high) = if a.id < b.id { (a.id, b.id) } else { (b.id, a.id) };
                     out.push(Warning::new(
                         "openings_overlap",
@@ -531,6 +567,7 @@ fn walls_and_grids(m: &Model, scope: &Scope, out: &mut Vec<Warning>) {
                     let Some(second) = centre_line(m, v) else { continue };
                     if let Some(along) = overlap_of(&line, m.thickness(w), &second, m.thickness(v))
                         && !same_wall(m, w, v)
+                        && matches!((m.elements.get(id), m.elements.get(other)), (Some(x), Some(y)) if coexist(m, x, y))
                     {
                         let (low, high) = if id < other { (id, other) } else { (other, id) };
                         out.push(Warning::new(
@@ -728,10 +765,17 @@ fn identical(m: &Model, scope: &Scope, out: &mut Vec<Warning>) {
         }
     }
     for (_, mut ids) in groups {
+        // Those with a twin they can conflict with: elements in other options of one set, or the one a phase takes down before
+        // the other is made, are no twins of it.
+        ids.sort_unstable();
+        let with_twin = |id: Id| {
+            let Some(e) = m.elements.get(id) else { return false };
+            ids.iter().any(|o| *o != id && m.elements.get(*o).is_some_and(|x| coexist(m, e, x)))
+        };
+        let ids: Vec<Id> = ids.iter().copied().filter(|id| with_twin(*id)).collect();
         if ids.len() < 2 {
             continue;
         }
-        ids.sort_unstable();
         let what = cat(m, ids[0]);
         let list = ids.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
         out.push(Warning::new(
