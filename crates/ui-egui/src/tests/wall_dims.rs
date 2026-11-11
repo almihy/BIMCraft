@@ -53,18 +53,18 @@ fn the_witness_lines_grip_cycles_the_wall_through_its_centre_and_its_two_faces()
     let grips = |h: &Harness<BimApp>| h.get_all_by_label(WITNESS).count();
     assert_eq!(grips(&h), 2, "one on each side");
     // The first grip is on the left, the north side: the exterior face is nearer the north wall by half of 200 mm.
-    h.get_all_by_label(WITNESS).next().map(|g| g.click());
+    h.get_all_by_label(WITNESS).next().unwrap().click();
     h.run();
     assert!(h.query_by_label("Temporary dimension 3900").is_some(), "to the exterior face");
     assert!(h.query_by_label("Temporary dimension 2000").is_some(), "the other side keeps its own");
-    h.get_all_by_label(WITNESS).next().map(|g| g.click());
+    h.get_all_by_label(WITNESS).next().unwrap().click();
     h.run();
     assert!(h.query_by_label("Temporary dimension 4100").is_some(), "to the interior face");
-    h.get_all_by_label(WITNESS).next().map(|g| g.click());
+    h.get_all_by_label(WITNESS).next().unwrap().click();
     h.run();
     assert!(h.query_by_label("Temporary dimension 4000").is_some(), "back to the centre line");
     // Typed from a face, the wall moves so that the face is that far off.
-    h.get_all_by_label(WITNESS).next().map(|g| g.click());
+    h.get_all_by_label(WITNESS).next().unwrap().click();
     h.run();
     retype_dimension(&mut h, "3900", "3000");
     assert_eq!(start(&h, ids(&h, "wall")[4]), P2(1000.0, 2900.0));
@@ -74,7 +74,7 @@ fn the_witness_lines_grip_cycles_the_wall_through_its_centre_and_its_two_faces()
 fn make_permanent_lays_the_temporary_dimension_as_a_dimension_of_the_plan() {
     let (mut h, inner) = with_inner_wall();
     assert!(ids(&h, "dimension").is_empty());
-    h.get_all_by_label(PERMANENT).next().map(|g| g.click());
+    h.get_all_by_label(PERMANENT).next().unwrap().click();
     h.run();
     let dims = ids(&h, "dimension");
     assert_eq!(dims.len(), 1);
