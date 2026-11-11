@@ -5348,9 +5348,12 @@ impl BimApp {
             let c = at.center();
             p.add(egui::Shape::convex_polygon(vec![c + vec2(-4.0, -2.0), c + vec2(4.0, -2.0), c + vec2(0.0, 2.5)], pal().icon, Stroke::NONE));
             let r = r.on_hover_text(t("All open views"));
+            // As wide as the longest name, and fixed: a menu's width would otherwise grow each frame.
+            let size = |n: &String| ui.painter().layout_no_wrap(n.clone(), FontId::proportional(13.0), pal().text).size().x;
+            let wide = tabs.iter().map(|t| size(&t.1)).fold(0.0, f32::max) + 44.0;
             Popup::menu(&r).show(|ui| {
                 for (sheet, name, icon, _, _) in &tabs {
-                    let (rect, b) = ui.allocate_exact_size(vec2(ui.available_width().max(200.0), 24.0), Sense::click());
+                    let (rect, b) = ui.allocate_exact_size(vec2(wide.max(180.0), 24.0), Sense::click());
                     b.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, *sheet == front, name));
                     let p = ui.painter();
                     if b.hovered() {
