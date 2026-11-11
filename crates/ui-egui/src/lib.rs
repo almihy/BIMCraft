@@ -4375,9 +4375,6 @@ impl BimApp {
 
     fn modify_tab(&mut self, ui: &mut Ui) {
         self.select_panel(ui);
-        if self.sketch.is_none() {
-            self.clipboard_panel(ui);
-        }
         if self.sketch.is_some() {
             self.sketch_draw(ui);
             self.walls_outline_panel(ui);
@@ -4606,7 +4603,7 @@ impl BimApp {
         panel(ui, "Modify", |ui| {
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
-                for row in rows {
+                for (n, row) in rows.into_iter().enumerate() {
                     ui.horizontal(|ui| {
                         for (icon, label, tip, tool, enabled) in row {
                             let active = tool.as_ref().is_some_and(|t| on(t, &self.tool) && *t != Tool::Modify);
@@ -4616,6 +4613,10 @@ impl BimApp {
                                     None => self.delete(),
                                 }
                             }
+                        }
+                        // Copy to Clipboard and Paste end the second, shorter row.
+                        if n == 1 {
+                            self.clipboard_buttons(ui);
                         }
                     });
                 }

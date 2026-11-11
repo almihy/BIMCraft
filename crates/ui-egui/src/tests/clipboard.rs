@@ -155,10 +155,15 @@ fn paste_aligned_to_a_picked_level_takes_one_level_from_the_list() {
 }
 
 #[test]
-fn the_paste_list_is_closed_while_nothing_is_copied() {
+fn the_paste_list_has_nothing_to_paste_until_something_is_copied_and_copies_the_selection_from_its_first_row() {
     let mut h = app(WALL);
     topmost(&mut h, "Modify");
-    assert!(h.state().session.clipboard_ids().is_empty());
-    // Nothing to open: the button is disabled.
-    assert!(h.get_by_label("Paste").accesskit_node().is_disabled());
+    press(&mut h, "Paste");
+    assert!(h.get_by_label("Aligned to Same Place").accesskit_node().is_disabled(), "nothing copied");
+    assert!(h.get_by_label("Copy to Clipboard").accesskit_node().is_disabled(), "nothing selected");
+    key(&mut h, Key::Escape);
+    click(&mut h, P2(6000.0, 0.0));
+    press(&mut h, "Paste");
+    press(&mut h, "Copy to Clipboard");
+    assert_eq!(h.state().session.clipboard_ids().len(), 2);
 }

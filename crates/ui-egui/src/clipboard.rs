@@ -1,6 +1,6 @@
 //! Copy to Clipboard and Paste, as Revit's: Ctrl+C puts the selection on the clipboard (the session's, in the core: no OS
 //! clipboard), Ctrl+V holds what was copied at the cursor, outlined, until a click puts it there (snapping as every tool does),
-//! and the Clipboard panel's Paste list has the aligned ways: to Selected Levels (a list of levels to tick), to the Current View,
+//! and the Paste list (the Modify panel's) has the aligned ways: to Selected Levels (a list of levels to tick), to the Current View,
 //! to a Picked Level and to the Same Place. The commands are the core's `copy_to_clipboard` and `paste`.
 
 use bimcraft_core::geom::P2;
@@ -12,8 +12,8 @@ use serde_json::{Value, json};
 use crate::icons::Icon;
 use crate::lang::{t, tf};
 use crate::popup::Modal;
-use crate::ribbon::{self, panel};
-use crate::{BimApp, Status, Tool, big_button, list_row};
+use crate::ribbon;
+use crate::{BimApp, Status, Tool, list_row, small_button};
 
 /// The levels dialog of Paste Aligned to Selected Levels, or with `single` to a Picked Level: each level with its elevation, and
 /// whether it is ticked.
@@ -170,23 +170,22 @@ impl BimApp {
         copy || paste
     }
 
-    /// The Modify tab's Clipboard panel: Copy to Clipboard, and Paste with its list.
-    pub(crate) fn clipboard_panel(&mut self, ui: &mut Ui) {
-        panel(ui, msg!("Clipboard"), |ui| {
+    /// The Modify panel's Paste button and its list: Copy to Clipboard, Paste from Clipboard and the aligned ways. One button in the
+    /// panel's second row, which is the shorter, so it costs the ribbon no width.
+    pub(crate) fn clipboard_buttons(&mut self, ui: &mut Ui) {
+        let tip = msg!("Paste (Ctrl+V): what was copied, placed by a click; the list copies the selection and has the aligned ways");
+        let r = small_button(ui, Icon::Paste, "Paste", self.tool == Tool::Paste, tip);
+        ribbon::choices(ui, &r, false, |ui| {
+            ui.set_width(230.0);
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let selected = !self.selection.is_empty();
             let tip = msg!("Copy to Clipboard (Ctrl+C): the selection, with the doors and windows in its walls");
-            if ui
-                .add_enabled_ui(!self.selection.is_empty(), |ui| big_button(ui, Icon::Copy, "Copy to Clipboard", false, tip))
-                .inner
-                .clicked()
-            {
+            if ui.add_enabled_ui(selected, |ui| list_row(ui, Icon::Copy, "Copy to Clipboard", false, tip)).inner.clicked() {
                 self.copy_selection();
             }
+            ui.separator();
             let held = !self.session.clipboard_ids().is_empty();
-            let tip = msg!("Paste (Ctrl+V): what was copied, placed by a click; the list has the aligned ways");
-            let r = ui.add_enabled_ui(held, |ui| big_button(ui, Icon::Paste, "Paste", self.tool == Tool::Paste, tip)).inner;
-            ribbon::choices(ui, &r, false, |ui| {
-                ui.set_width(230.0);
-                ui.spacing_mut().item_spacing.y = 0.0;
+            ui.add_enabled_ui(held, |ui| {
                 let tip = msg!("Paste from Clipboard (Ctrl+V): what was copied, placed by a click");
                 if list_row(ui, Icon::Paste, "Paste from Clipboard", false, tip).clicked() {
                     self.begin_paste();
