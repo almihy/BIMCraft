@@ -118,6 +118,30 @@ fn enter_with_no_tool_running_repeats_the_last_one_and_so_does_rr() {
 }
 
 #[test]
+fn repeat_remembers_only_the_tools_the_user_started() {
+    let mut h = app(BOX);
+    // A tool the app starts for a dialog is nobody's last command: with nothing before it there is nothing to repeat.
+    h.state_mut().set_tool(Tool::PatternCorner(None));
+    key(&mut h, Key::Escape);
+    assert_eq!(h.state().tool, Tool::Modify);
+    key(&mut h, Key::Enter);
+    assert_eq!(h.state().tool, Tool::Modify, "Enter has nothing to repeat");
+    let at = h.state().screen(P2(4000.0, 3000.0));
+    assert!(offered(&mut h, at, &["Repeat ["]).is_empty());
+    key(&mut h, Key::Escape);
+    // After a wall, the app's own tool leaves Repeat at the wall, in Enter and in the menu.
+    shortcut(&mut h, "WA");
+    key(&mut h, Key::Escape);
+    h.state_mut().set_tool(Tool::PatternCorner(None));
+    key(&mut h, Key::Escape);
+    key(&mut h, Key::Escape);
+    assert_eq!(offered(&mut h, at, &["Repeat [Wall]"]), ["Repeat [Wall]"]);
+    key(&mut h, Key::Escape);
+    key(&mut h, Key::Enter);
+    assert_eq!(h.state().tool, Tool::Wall(Vec::new()), "Enter repeats the wall");
+}
+
+#[test]
 fn the_right_click_menu_offers_repeat_and_create_similar() {
     let mut h = app(BOX);
     let at = h.state().screen(P2(4000.0, 3000.0));
@@ -157,41 +181,74 @@ door {"at": [5000, 0], "type": "Single 900 x 2100"}"#);
     assert!(!similar.enabled, "one element at a time");
 }
 
+fn sorted(mut v: Vec<Id>) -> Vec<Id> {
+    v.sort_unstable();
+    v
+}
+
 #[test]
-fn tab_over_a_wall_selects_the_walls_joined_to_it_and_shift_tab_goes_back() {
-    let mut h = app(&format!("{BOX}\nwall {{\"points\": [[20000, 0], [26000, 0]]}}"));
+fn tab_over_a_wall_only_highlights_its_chain_and_a_click_selects_it() {
+    let mut h = app(&format!(
+        "{BOX}
+wall {{\"points\": [[20000, 0], [26000, 0]]}}"
+    ));
     let all = wall_ids(&h);
     assert_eq!(all.len(), 5);
-    let mut room: Vec<Id> = all[..4].to_vec();
-    room.sort_unstable();
+    let (room, lone) = (sorted(all[..4].to_vec()), all[4]);
+    // Something is selected already: Tab leaves it alone.
+    click(&mut h, P2(23000.0, 0.0));
+    assert_eq!(h.state().selection, [lone]);
     let on_room = h.state().screen(P2(4000.0, 0.0));
     h.hover_at(on_room);
     h.run();
     key(&mut h, Key::Tab);
-    let mut got = h.state().selection.clone();
-    got.sort_unstable();
-    assert_eq!(got, room, "Tab selected the walls of the room");
-    // Tab again goes on to what else is under the cursor: here only the wall, so the chain gives way to it, selection as before.
+    assert_eq!(sorted(h.state().flow.preview.clone()), room, "Tab highlights the walls of the room");
+    assert_eq!(h.state().selection, [lone], "and selects nothing");
+    assert_eq!(h.state_mut().hover_text().as_deref(), Some("Chain of walls"), "the status bar names the chain");
+    // Tab again goes on to what else is under the cursor: here only the wall, so the highlight goes, the selection as it was.
     key(&mut h, Key::Tab);
-    assert!(h.state().selection.is_empty(), "the selection from before comes back: {:?}", h.state().selection);
-    // Shift+Tab goes back into the chain.
+    assert!(h.state().flow.preview.is_empty());
+    assert_eq!(h.state().selection, [lone]);
+    assert_ne!(h.state_mut().hover_text().as_deref(), Some("Chain of walls"));
+    // Shift+Tab goes back to the chain.
     h.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
     h.run();
-    let mut got = h.state().selection.clone();
-    got.sort_unstable();
-    assert_eq!(got, room, "Shift+Tab came back to the chain");
-    // A click on the wall then keeps the chain, as Revit's does.
-    click(&mut h, P2(4000.0, 0.0));
-    let mut got = h.state().selection.clone();
-    got.sort_unstable();
-    assert_eq!(got, room, "the click took the chain");
-    // A lone wall has no chain: Tab leaves it to the next thing under the cursor.
-    key(&mut h, Key::Escape);
-    let lone = h.state().screen(P2(23000.0, 0.0));
-    h.hover_at(lone);
+    assert_eq!(sorted(h.state().flow.preview.clone()), room, "Shift+Tab came back to the chain");
+    // Moving off the walls drops the highlight and leaves the selection.
+    let away = h.state().screen(P2(4000.0, 3000.0));
+    h.hover_at(away);
+    h.run();
+    assert!(h.state().flow.preview.is_empty(), "the highlight went with the cursor");
+    assert_eq!(h.state().selection, [lone]);
+    // A click on the highlighted chain selects it, and the highlight is done.
+    h.hover_at(on_room);
     h.run();
     key(&mut h, Key::Tab);
-    assert!(h.state().selection.is_empty(), "nothing to chain: {:?}", h.state().selection);
+    click(&mut h, P2(4000.0, 0.0));
+    assert_eq!(sorted(h.state().selection.clone()), room, "the click took the chain");
+    assert!(h.state().flow.preview.is_empty());
+    // Ctrl+click adds the chain to what is selected; Shift+click takes it away.
+    click(&mut h, P2(23000.0, 0.0));
+    h.hover_at(on_room);
+    h.run();
+    key(&mut h, Key::Tab);
+    click_with(&mut h, P2(4000.0, 0.0), Modifiers::COMMAND);
+    let mut both = room.clone();
+    both.push(lone);
+    assert_eq!(sorted(h.state().selection.clone()), sorted(both), "Ctrl+click added the chain");
+    h.hover_at(on_room);
+    h.run();
+    key(&mut h, Key::Tab);
+    click_with(&mut h, P2(4000.0, 0.0), Modifiers::SHIFT);
+    assert_eq!(h.state().selection, [lone], "Shift+click took the chain off");
+    // Without Tab a click is one wall, as before; a lone wall has no chain, and Tab leaves it to what is next.
+    click(&mut h, P2(4000.0, 0.0));
+    assert_eq!(h.state().selection.len(), 1);
+    let lone_at = h.state().screen(P2(23000.0, 0.0));
+    h.hover_at(lone_at);
+    h.run();
+    key(&mut h, Key::Tab);
+    assert!(h.state().flow.preview.is_empty(), "nothing to chain: {:?}", h.state().flow.preview);
 }
 
 #[test]
@@ -209,6 +266,23 @@ fn ctrl_a_selects_everything_the_view_shows() {
     assert!(h.state().selection.is_empty());
     h.state_mut().selection = vec![walls[0]];
     h.run();
+}
+
+#[test]
+fn ctrl_a_leaves_out_the_views_marks_so_delete_cannot_take_a_view_with_it() {
+    let mut h = app(&format!("{BOX}\nsection {{\"start\": [-1000, 3000], \"end\": [9000, 3000]}}\nelevation {{\"at\": [4000, 3000]}}"));
+    let marks = [ids(&h, "section"), ids(&h, "elevation")].concat();
+    assert!(!marks.is_empty(), "the plan has marks to leave out");
+    let walls = wall_ids(&h);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    h.run();
+    let got = h.state().selection.clone();
+    assert!(walls.iter().all(|w| got.contains(w)), "the walls are in {got:?}");
+    assert!(marks.iter().all(|m| !got.contains(m)), "no section or elevation mark is in {got:?}");
+    // Delete then takes the model's elements and no view.
+    key(&mut h, Key::Delete);
+    assert!(wall_ids(&h).is_empty());
+    assert!(marks.iter().all(|m| h.state().session.model.elements.contains_key(m)), "the views are still there");
 }
 
 #[test]

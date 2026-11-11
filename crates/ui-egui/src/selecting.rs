@@ -19,6 +19,9 @@ use crate::{BimApp, Tool};
 /// What the status bar says while Move, Copy, Rotate or Mirror waits for its elements.
 const SELECT_FIRST: &str = msg!("Select elements, then press Enter");
 
+/// What the status bar says while Tab highlights a chain of walls.
+const CHAIN: &str = msg!("Chain of walls");
+
 /// How far an arrow key nudges, in px on screen: the step is this much of the view at its zoom, so a nudge looks the same
 /// zoomed in or out.
 const NUDGE: f64 = 3.0;
@@ -35,10 +38,9 @@ pub(crate) struct Flow {
     pub(crate) last: Option<Tool>,
     /// Shift was held for the Tab that came this frame.
     pub(crate) back: bool,
-    /// Tab has selected the walls joined to the one it is on; the selection from before, to give back at the next Tab.
-    pub(crate) chain: Option<Vec<Id>>,
-    /// The walls Tab selected, in id order: it is theirs while the selection is still exactly them.
-    pub(crate) joined: Vec<Id>,
+    /// What Tab is highlighting under the cursor: the walls joined to the one it is on. Nothing is selected by it, as in
+    /// Revit: a click selects it, Ctrl+click adds it and Shift+click takes it away.
+    pub(crate) preview: Vec<Id>,
     /// What the status bar names under the cursor: the element, the model it was read from (an address), and the words.
     named: Option<(Id, usize, String)>,
 }
@@ -80,6 +82,28 @@ pub(crate) fn tool_name(tool: &Tool) -> &'static str {
     }
 }
 
+/// Whether Repeat may start `tool` again. The tools the user starts (from the ribbon, a shortcut or a menu) are commands; the app
+/// also starts tools of its own, to take a pick for a dialog (Fill Patterns' tile corners), and those have no command to repeat:
+/// Enter would start them without their dialog.
+fn repeatable(tool: &Tool) -> bool {
+    !matches!(tool, Tool::Modify | Tool::PatternCorner(_))
+}
+
+/// Whether `e` is a view or a mark of one (a section or elevation line, a sheet, a viewport, a schedule, a camera, a plan view):
+/// something the plan shows that Ctrl+A leaves alone, since Delete would take a view away with it.
+fn view_mark(e: &Element) -> bool {
+    matches!(
+        e,
+        Element::Section(_)
+            | Element::Elevation(_)
+            | Element::Sheet(_)
+            | Element::Viewport(_)
+            | Element::Schedule(_)
+            | Element::View3D(_)
+            | Element::PlanView(_)
+    )
+}
+
 /// The nudge for an arrow key at `scale` px per mm: a few pixels of the view as a round number of mm (1, 2 or 5 of a power of
 /// ten), never less than a millimetre.
 pub(crate) fn nudge_step(scale: f64) -> f64 {
@@ -96,7 +120,7 @@ impl BimApp {
     pub(crate) fn ask_selection_for(&mut self, tool: Tool) {
         self.tool = Tool::Modify;
         self.flow.pending = Some(tool);
-        self.flow.chain = None;
+        self.flow.preview.clear();
         self.typed.clear();
         self.clear_typed();
         self.forget_picks();
@@ -146,9 +170,17 @@ impl BimApp {
         }
     }
 
-    /// Ctrl+A: everything the open view shows, selected.
+    /// Remember `tool` as the last one started, for Enter, RR and the menu to repeat, when it is one the user started.
+    pub(crate) fn remember_tool(&mut self, tool: &Tool) {
+        if repeatable(tool) {
+            self.flow.last = Some(tool.clone());
+        }
+    }
+
+    /// Ctrl+A: the model's elements and annotation the open view shows, selected: not the views' own marks.
     pub(crate) fn select_all(&mut self) {
-        let found: Vec<Id> = self.shown().into_iter().collect();
+        let model = Arc::clone(&self.session.model);
+        let found: Vec<Id> = self.shown().into_iter().filter(|id| model.elements.get(*id).is_some_and(|e| !view_mark(e))).collect();
         if !found.is_empty() {
             self.pick_up(found, Modifiers::NONE);
         }
@@ -193,23 +225,16 @@ impl BimApp {
         }
     }
 
-    /// Forget the joined walls Tab selected: the cursor has gone on to something else.
+    /// Forget the chain Tab highlighted: the cursor has gone on to something else.
     pub(crate) fn tab_forget(&mut self) {
-        self.flow.chain = None;
-        self.flow.joined.clear();
+        self.flow.preview.clear();
     }
 
-    /// Whether the selection is still the joined walls Tab picked.
-    pub(crate) fn chain_selected(&self) -> bool {
-        let mut now = self.selection.clone();
-        now.sort_unstable();
-        self.flow.chain.is_some() && !self.flow.joined.is_empty() && now == self.flow.joined
-    }
-
-    /// What a click on the element under the cursor, `hovered`, selects: it, or the walls joined to it while Tab has them.
+    /// What a click on the element under the cursor, `hovered`, picks: it, or the chain Tab is highlighting when it is part
+    /// of it.
     pub(crate) fn click_set(&self, hovered: Option<Id>) -> Vec<Id> {
         match hovered {
-            Some(id) if self.chain_selected() && self.flow.joined.contains(&id) => self.selection.clone(),
+            Some(id) if self.flow.preview.contains(&id) => self.flow.preview.clone(),
             Some(id) => vec![id],
             None => Vec::new(),
         }
@@ -218,6 +243,9 @@ impl BimApp {
     /// What the status bar says of the element under the cursor, as Revit's: "Walls : Basic Wall : Generic - 200mm".
     pub(crate) fn hover_text(&mut self) -> Option<String> {
         let id = self.canvas.hovered?;
+        if self.flow.preview.contains(&id) {
+            return Some(t(CHAIN).to_string());
+        }
         let model = Arc::clone(&self.session.model);
         let key = Arc::as_ptr(&model) as usize;
         if let Some((known, at, words)) = &self.flow.named

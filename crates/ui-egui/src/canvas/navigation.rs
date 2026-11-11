@@ -1,12 +1,15 @@
 //! Moving about a plan, a section or a sheet, for a laptop as much as for a mouse. The wheel zooms about the cursor, as it
 //! always did; a trackpad's two-finger scroll pans and its pinch (Ctrl and the wheel, in a browser) zooms. A wheel and a
-//! trackpad are told apart by what they send ([`hand_of`]). The navigation bar's Pan is the hand: while it is on, the left
+//! trackpad are told apart once for each gesture, by its first event ([`first_hand`]), unless Settings > User Interface says
+//! what the wheel does ([`Wheel`]). The navigation bar's Pan is the hand: while it is on, the left
 //! button drags the view about. Zoom Region (ZR) zooms to a box dragged, Previous Zoom (ZP) goes back to where the view was
-//! before its last zoom or pan, and Zoom to Fit (ZF, ZE) is the view's own.
+//! before its last zoom or pan, and Zoom to Fit (ZF, ZE) is the view's own. Zoom Region takes a box dragged, or one corner
+//! clicked and then the other, as Revit's does.
 //!
 //! A drag with the middle button pans in every mode, as before.
 
 use bimcraft_core::model::Id;
+use bimcraft_i18n::msg;
 use egui::{CursorIcon, Event, MouseWheelUnit, PointerButton, Pos2, Rect, Sense, Shape, TouchPhase, Ui, UiBuilder, Vec2, vec2};
 
 use super::{Camera, Canvas, MAX_COORD, SCALE, box_shapes};
@@ -21,8 +24,13 @@ const HISTORY: usize = 32;
 /// A pan or zoom that starts this long after the last one is a new step of Previous Zoom, not a continuation of it, seconds.
 const GESTURE: f64 = 0.5;
 
-/// A wheel event this soon after a trackpad's is the trackpad's, seconds: a flick ends with events that look like a notch.
-const SETTLE: f64 = 0.3;
+/// A wheel gesture goes on while its events come this close together, seconds: the first event after a quiet this long
+/// decides whether it is a mouse's or a trackpad's, and the rest of the gesture is the same hand's.
+const QUIET: f64 = 0.3;
+
+/// A single-axis wheel event of at least this many pixels, of any size, is a notch of a mouse: browsers send a notch as 100,
+/// 120, 90.9 (zoomed out), 166.7 (five lines to a notch), or a multiple, and a trackpad's first events are far smaller.
+const NOTCH: f32 = 50.0;
 
 /// A box dragged for Zoom Region smaller than this (px) is a click, not a box.
 const BOX: f32 = 6.0;
@@ -46,31 +54,66 @@ pub(crate) enum Hand {
     Trackpad,
 }
 
-/// Whether `v` is a mouse notch in browser pixels: 100 or 120 (Windows, Linux), or several at once when the wheel spins fast.
-fn notch(v: f32) -> bool {
-    let a = v.abs();
-    a >= 100.0 && [100.0_f32, 120.0].iter().any(|n| (a / n - (a / n).round()).abs() < 0.01)
+/// What the mouse wheel does (Settings > User Interface): Auto tells a mouse from a trackpad by what it sends, Zoom is
+/// Revit's way always (the wheel zooms), Pan scrolls the view always.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Wheel {
+    #[default]
+    Auto,
+    Zoom,
+    Pan,
 }
 
-/// Whether `v` is a whole number of lines: a mouse's notch in a window or a browser that counts lines.
+impl Wheel {
+    pub const ALL: [Wheel; 3] = [Wheel::Auto, Wheel::Zoom, Wheel::Pan];
+
+    /// The name in the settings file.
+    pub fn code(self) -> &'static str {
+        match self {
+            Wheel::Auto => "auto",
+            Wheel::Zoom => "zoom",
+            Wheel::Pan => "pan",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<Wheel> {
+        Self::ALL.into_iter().find(|w| w.code() == code)
+    }
+
+    /// The label in Settings.
+    pub fn label(self) -> &'static str {
+        match self {
+            Wheel::Auto => msg!("Auto"),
+            Wheel::Zoom => msg!("Zoom"),
+            Wheel::Pan => msg!("Pan"),
+        }
+    }
+}
+
+/// Whether the first event of a wheel gesture is a whole number of lines: a mouse's notch in a window that counts lines.
 fn lines(v: f32) -> bool {
     v != 0.0 && (v - v.round()).abs() < 1e-3
 }
 
-/// What sent one wheel event. A trackpad is the only thing that reports a gesture's start and end, scrolls both ways at once,
-/// or scrolls in pixels that are not a notch (a notch being 100 or 120 of them, or whole lines); a mouse's wheel turns one
-/// notch at a time, one way. Where the two cannot be told apart (a Mac's mouse wheel reports small pixel steps, as a trackpad
-/// does) it reads as a trackpad.
-pub(crate) fn hand_of(unit: MouseWheelUnit, delta: Vec2, phase: TouchPhase) -> Hand {
+/// What sent the first event of a wheel gesture. A trackpad is the only thing that reports a gesture's start and end, scrolls
+/// both ways at once, or begins with small pixel steps; a mouse's wheel turns one way and begins with a notch, at least
+/// [`NOTCH`] pixels whatever the browser's zoom, the system's lines to a notch and the display's scaling make of 100, or whole
+/// lines. Where the two cannot be told apart (a smooth wheel's small first steps, a Mac mouse's) it reads as a trackpad:
+/// Settings > User Interface > Mouse wheel > Zoom is for those.
+pub(crate) fn first_hand(unit: MouseWheelUnit, delta: Vec2, phase: TouchPhase) -> Hand {
     if phase != TouchPhase::Move {
         return Hand::Trackpad;
     }
+    if !delta.is_finite() {
+        return Hand::Mouse;
+    }
     let one_way = delta.x == 0.0 || delta.y == 0.0;
     let along = if delta.x == 0.0 { delta.y } else { delta.x };
-    let mouse = match unit {
-        MouseWheelUnit::Point => !delta.is_finite() || delta.abs().max_elem() > 5000.0 || (one_way && notch(along)),
-        MouseWheelUnit::Line | MouseWheelUnit::Page => !delta.is_finite() || (one_way && lines(along)),
-    };
+    let mouse = one_way
+        && match unit {
+            MouseWheelUnit::Point => along.abs() >= NOTCH,
+            MouseWheelUnit::Line | MouseWheelUnit::Page => lines(along),
+        };
     if mouse { Hand::Mouse } else { Hand::Trackpad }
 }
 
@@ -78,12 +121,16 @@ pub(crate) fn hand_of(unit: MouseWheelUnit, delta: Vec2, phase: TouchPhase) -> H
 #[derive(Default)]
 pub(crate) struct Nav {
     pub(crate) mode: Mode,
-    /// What the wheel was last heard to be.
+    /// What the wheel's gesture in hand was judged to be, by its first event.
     pub(crate) hand: Hand,
-    /// When a trackpad was last heard, seconds.
+    /// What the user says the wheel does (Settings).
+    pub(crate) wheel: Wheel,
+    /// When a wheel event was last heard, seconds.
     heard: Option<f64>,
     /// Zoom Region's box, once begun: where it began and where the hand is, on screen.
     region: Option<(Pos2, Pos2)>,
+    /// Zoom Region's first corner was clicked, not dragged from: the box stays open and the next click is its other corner.
+    armed: bool,
     /// The views the view had before its last pans and zooms, by level, the latest last.
     history: Vec<(Id, Camera)>,
     /// When the last pan or zoom by hand or wheel went on, seconds.
@@ -108,21 +155,28 @@ impl Nav {
                 .collect()
         });
         for (unit, delta, phase) in events {
-            match hand_of(unit, delta, phase) {
-                Hand::Trackpad => {
-                    self.hand = Hand::Trackpad;
-                    self.heard = Some(now);
-                }
-                Hand::Mouse if self.heard.is_none_or(|t| now - t > SETTLE) => self.hand = Hand::Mouse,
-                Hand::Mouse => {}
+            // The first event after a quiet decides the whole gesture: a flick's tail and a smooth wheel's small steps are
+            // what the first one was.
+            if self.heard.is_none_or(|t| now - t > QUIET) {
+                self.hand = first_hand(unit, delta, phase);
             }
+            self.heard = Some(now);
+        }
+    }
+
+    /// What is turning the wheel: the setting's word, or the gesture's first event's.
+    fn hand(&self) -> Hand {
+        match self.wheel {
+            Wheel::Auto => self.hand,
+            Wheel::Zoom => Hand::Mouse,
+            Wheel::Pan => Hand::Trackpad,
         }
     }
 
     /// The scroll of this frame as what it does: how much to zoom (the wheel's, in points), and how far to pan (points). A
     /// trackpad's scroll pans both ways; a wheel zooms, and Shift and the wheel pans along.
     fn split(&self, scroll: Vec2) -> (f32, Vec2) {
-        let (zoom, pan) = match self.hand {
+        let (zoom, pan) = match self.hand() {
             Hand::Trackpad => (0.0, scroll),
             Hand::Mouse => (scroll.y, vec2(scroll.x, 0.0)),
         };
@@ -232,7 +286,7 @@ impl Canvas {
                     self.grab = Some(v.mm(at.into()));
                 }
             }
-            if mode == Mode::Region && primary.0 {
+            if mode == Mode::Region && primary.0 && !self.nav.armed {
                 self.nav.region = Some((screen, screen));
             }
         }
@@ -244,12 +298,17 @@ impl Canvas {
         if let Some((from, _)) = self.nav.region {
             let to = latest.unwrap_or(from);
             self.nav.region = Some((from, to));
-            if released {
+            let far = (to - from).abs().max_elem() >= BOX;
+            // As Revit's: drag a box, or click one corner and then the other. A release under a few pixels of its press is
+            // a click, and leaves the box open for the second corner.
+            let done = if self.nav.armed { primary.0 && far } else { released && far };
+            if done {
                 self.nav.region = None;
-                if (to - from).abs().max_elem() >= BOX {
-                    self.zoom_box(id, from - rect.min, to - rect.min);
-                    self.nav.mode = Mode::Off;
-                }
+                self.nav.armed = false;
+                self.zoom_box(id, from - rect.min, to - rect.min);
+                self.nav.mode = Mode::Off;
+            } else if released && !self.nav.armed {
+                self.nav.armed = true;
             }
         }
         if hover.is_some() {
@@ -321,6 +380,7 @@ impl BimApp {
         let nav = &mut self.canvas.nav;
         nav.mode = if nav.mode == Mode::Pan { Mode::Off } else { Mode::Pan };
         nav.region = None;
+        nav.armed = false;
     }
 
     /// Zoom Region (ZR): drag a box on the view and it fills the view.
@@ -328,6 +388,7 @@ impl BimApp {
         let nav = &mut self.canvas.nav;
         nav.mode = if nav.mode == Mode::Region { Mode::Off } else { Mode::Region };
         nav.region = None;
+        nav.armed = false;
     }
 
     /// Previous Zoom (ZP): the view as it was before its last zoom or pan.
@@ -347,6 +408,7 @@ impl BimApp {
     pub(crate) fn end_navigation(&mut self) -> bool {
         let nav = &mut self.canvas.nav;
         nav.region = None;
+        nav.armed = false;
         std::mem::replace(&mut nav.mode, Mode::Off) != Mode::Off
     }
 }
@@ -358,26 +420,44 @@ mod tests {
     const MOVE: TouchPhase = TouchPhase::Move;
 
     #[test]
-    fn a_wheel_turning_notch_by_notch_is_a_mouse_and_a_trackpads_scroll_is_not() {
+    fn a_notch_of_any_browser_or_system_is_a_mouse_and_a_trackpads_small_first_steps_are_not() {
         let point = MouseWheelUnit::Point;
-        // The notches of Windows and Linux browsers, and several at once.
-        for dy in [120.0, -120.0, 100.0, -300.0, 360.0] {
-            assert_eq!(hand_of(point, vec2(0.0, dy), MOVE), Hand::Mouse, "{dy}");
+        // What browsers send for a notch: Windows and Linux's 100 and 120; at 110 % and 90 % zoom (90.9, 111.1); five lines to a
+        // notch (166.7); display scaling (150 %: 80 and 180); several notches at once; a notch along (Shift and the wheel).
+        for dy in [100.0, 120.0, 90.909, 111.111, 166.67, 80.0, 180.0, 53.7, -120.0, -300.0, 360.0] {
+            assert_eq!(first_hand(point, vec2(0.0, dy), MOVE), Hand::Mouse, "{dy}");
         }
-        // Shift and the wheel: a notch along.
-        assert_eq!(hand_of(point, vec2(120.0, 0.0), MOVE), Hand::Mouse);
+        assert_eq!(first_hand(point, vec2(120.0, 0.0), MOVE), Hand::Mouse);
         // A mouse that counts lines.
-        assert_eq!(hand_of(MouseWheelUnit::Line, vec2(0.0, -3.0), MOVE), Hand::Mouse);
-        // A trackpad: small steps, both ways at once, a precision touchpad's fractions of a line, any gesture's start.
-        for d in [vec2(0.0, 7.0), vec2(0.0, -33.5), vec2(12.0, 40.0), vec2(-3.0, 0.0), vec2(0.0, 130.0)] {
-            assert_eq!(hand_of(point, d, MOVE), Hand::Trackpad, "{d:?}");
+        for lines in [3.0, -3.0, 1.0, 5.0] {
+            assert_eq!(first_hand(MouseWheelUnit::Line, vec2(0.0, lines), MOVE), Hand::Mouse, "{lines}");
         }
-        assert_eq!(hand_of(MouseWheelUnit::Line, vec2(0.0, 0.2), MOVE), Hand::Trackpad);
-        assert_eq!(hand_of(MouseWheelUnit::Line, vec2(0.5, 1.0), MOVE), Hand::Trackpad);
-        assert_eq!(hand_of(point, vec2(0.0, 120.0), TouchPhase::Start), Hand::Trackpad);
-        assert_eq!(hand_of(point, vec2(0.0, 120.0), TouchPhase::End), Hand::Trackpad);
+        // A trackpad: small steps, both ways at once, a precision touchpad's fractions of a line, any gesture's start and end.
+        for d in [vec2(0.0, 7.0), vec2(0.0, -33.5), vec2(12.0, 40.0), vec2(-3.0, 0.0), vec2(0.0, 49.0), vec2(80.0, 120.0)] {
+            assert_eq!(first_hand(point, d, MOVE), Hand::Trackpad, "{d:?}");
+        }
+        assert_eq!(first_hand(MouseWheelUnit::Line, vec2(0.0, 0.2), MOVE), Hand::Trackpad);
+        assert_eq!(first_hand(MouseWheelUnit::Line, vec2(0.5, 1.0), MOVE), Hand::Trackpad);
+        assert_eq!(first_hand(point, vec2(0.0, 120.0), TouchPhase::Start), Hand::Trackpad);
+        assert_eq!(first_hand(point, vec2(0.0, 120.0), TouchPhase::End), Hand::Trackpad);
         // Nonsense is no hand: it zooms as a notch does, and the view clamps it.
-        assert_eq!(hand_of(point, vec2(0.0, 1e30), MOVE), Hand::Mouse);
-        assert_eq!(hand_of(point, vec2(0.0, f32::NAN), MOVE), Hand::Mouse);
+        assert_eq!(first_hand(point, vec2(0.0, 1e30), MOVE), Hand::Mouse);
+        assert_eq!(first_hand(point, vec2(0.0, f32::NAN), MOVE), Hand::Mouse);
+    }
+
+    #[test]
+    fn the_setting_overrides_what_the_gesture_was_judged_to_be() {
+        let mut nav = Nav::default();
+        nav.hand = Hand::Mouse;
+        assert_eq!((nav.wheel, nav.hand()), (Wheel::Auto, Hand::Mouse));
+        nav.wheel = Wheel::Pan;
+        assert_eq!(nav.hand(), Hand::Trackpad);
+        nav.hand = Hand::Trackpad;
+        nav.wheel = Wheel::Zoom;
+        assert_eq!(nav.hand(), Hand::Mouse);
+        for w in Wheel::ALL {
+            assert_eq!(Wheel::from_code(w.code()), Some(w));
+        }
+        assert_eq!(Wheel::from_code("nonsense"), None);
     }
 }

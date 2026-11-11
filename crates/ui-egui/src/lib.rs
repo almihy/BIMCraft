@@ -2654,7 +2654,7 @@ impl BimApp {
         self.end_navigation();
         self.flow.pending = None;
         if edits && self.selection.is_empty() {
-            self.flow.last = Some(tool.clone());
+            self.remember_tool(&tool);
             self.ask_selection_for(tool);
             return;
         }
@@ -2668,9 +2668,7 @@ impl BimApp {
         if moves && self.refuse_pinned() {
             return;
         }
-        if tool != Tool::Modify {
-            self.flow.last = Some(tool.clone());
-        }
+        self.remember_tool(&tool);
         if tool == Tool::Attach && self.selected_walls().is_empty() {
             self.status = Status { text: t("select the walls to attach first").into(), error: true };
             return;
@@ -3296,6 +3294,7 @@ impl BimApp {
         fresh.scan_contrast = self.scan_contrast;
         fresh.grid_snapping = self.grid_snapping;
         (fresh.show_origin, fresh.show_view_name) = (self.show_origin, self.show_view_name);
+        fresh.canvas.nav.wheel = self.canvas.nav.wheel;
         fresh.custom_shortcuts = std::mem::take(&mut self.custom_shortcuts);
         (fresh.light_canvas, fresh.scheme, fresh.accent) = (self.light_canvas, self.scheme, self.accent);
         (fresh.panel_colour, fresh.canvas_colour, fresh.text_colour) = (self.panel_colour, self.canvas_colour, self.text_colour);

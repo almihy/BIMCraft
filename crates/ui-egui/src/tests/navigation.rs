@@ -223,3 +223,136 @@ fn zoom_out_by_half_and_the_shortcuts_are_in_the_list() {
         assert!(crate::shortcuts().iter().any(|(k, _)| *k == keys), "{keys}");
     }
 }
+
+#[test]
+fn zoom_region_takes_one_corner_clicked_and_then_the_other() {
+    let mut h = app(BOX);
+    let (scale, _) = camera(&h);
+    shortcut(&mut h, "ZR");
+    let (lo, hi) = (P2(-500.0, -500.0), P2(1500.0, 1000.0));
+    let (a, b) = (h.state().screen(lo), h.state().screen(hi));
+    // The first click leaves the box open, and it follows the cursor.
+    click_at(&mut h, a);
+    assert_eq!(h.state().canvas.nav.mode, Mode::Region, "one click is not a box");
+    h.hover_at(b);
+    h.run();
+    assert!(!h.state().canvas.region_shapes(egui::Rect::EVERYTHING).is_empty(), "the box is drawn to the cursor");
+    // A second click at the same spot is no box either.
+    click_at(&mut h, a);
+    assert_eq!(h.state().canvas.nav.mode, Mode::Region);
+    // The click at the far corner finishes it.
+    click_at(&mut h, b);
+    assert_eq!(h.state().canvas.nav.mode, Mode::Off, "the second corner ends Zoom Region");
+    let (now, mid) = camera(&h);
+    assert!(now > scale * 3.0 && mid.dist(P2(500.0, 250.0)) < 5.0, "zoomed to the box: {now} {mid:?}");
+    assert!(h.state().selection.is_empty(), "and nothing was selected");
+    // Esc between the corners drops the first one: the next ZR starts afresh.
+    shortcut(&mut h, "ZP");
+    shortcut(&mut h, "ZR");
+    click_at(&mut h, a);
+    key(&mut h, Key::Escape);
+    assert_eq!(h.state().canvas.nav.mode, Mode::Off);
+    shortcut(&mut h, "ZR");
+    click_at(&mut h, b);
+    assert_eq!(h.state().canvas.nav.mode, Mode::Region, "the old corner is forgotten: this click is a first corner");
+}
+
+/// A wheel gesture's events as they come in one frame, then a quiet.
+fn gesture(h: &mut Harness<BimApp>, unit: MouseWheelUnit, deltas: &[egui::Vec2], modifiers: Modifiers) {
+    rest(h);
+    for delta in deltas {
+        h.event(Event::MouseWheel { unit, delta: *delta, phase: TouchPhase::Move, modifiers });
+    }
+    h.run();
+    rest(h);
+}
+
+#[test]
+fn every_browsers_notch_zooms_and_a_two_finger_scroll_pans() {
+    let mut h = app(BOX);
+    let p = P2(4000.0, 3000.0);
+    let at = over_plan(&mut h);
+    // What browsers send for one notch: 100 and 120; at 110 % and 90 % browser zoom; five lines to a notch under Windows;
+    // two and a half; a notch counted in lines.
+    for (unit, dy) in [
+        (MouseWheelUnit::Point, 100.0),
+        (MouseWheelUnit::Point, 120.0),
+        (MouseWheelUnit::Point, 90.909),
+        (MouseWheelUnit::Point, 111.111),
+        (MouseWheelUnit::Point, 166.67),
+        (MouseWheelUnit::Point, 80.0),
+        (MouseWheelUnit::Line, 3.0),
+    ] {
+        let (before, _) = camera(&h);
+        gesture(&mut h, unit, &[vec2(0.0, dy)], Modifiers::NONE);
+        let (now, _) = camera(&h);
+        assert!(now > before * 1.05, "{unit:?} {dy}: the notch zoomed ({before} to {now})");
+        assert!((h.state().screen(p) - at).length() < 1.5, "{dy}: about the cursor, not a pan");
+    }
+    // A fast wheel: several notches at once, then smaller ones within the same gesture, all zoom.
+    let before = camera(&h).0;
+    gesture(&mut h, MouseWheelUnit::Point, &[vec2(0.0, -240.0), vec2(0.0, -20.0), vec2(0.0, -30.0)], Modifiers::NONE);
+    assert!(camera(&h).0 < before, "spinning back zoomed out");
+    assert!((h.state().screen(p) - at).length() < 1.5, "and never panned");
+    // A trackpad: both ways at once, or small steps first, pans; a big step in the middle of its gesture is still its own.
+    let scale = camera(&h).0;
+    gesture(&mut h, MouseWheelUnit::Point, &[vec2(-30.0, 40.0)], Modifiers::NONE);
+    let moved = h.state().screen(p) - at;
+    assert!((moved - vec2(-30.0, 40.0)).length() < 1.5, "two fingers panned: {moved:?}");
+    let at = h.state().screen(p);
+    gesture(&mut h, MouseWheelUnit::Point, &[vec2(0.0, 6.5), vec2(0.0, 7.5), vec2(0.0, 110.0)], Modifiers::NONE);
+    let moved = h.state().screen(p) - at;
+    assert!((moved - vec2(0.0, 124.0)).length() < 2.0, "small steps first: a pan all through ({moved:?})");
+    assert!((camera(&h).0 - scale).abs() < 1e-12, "and no zoom");
+    // A pinch zooms whatever the hand.
+    gesture(&mut h, MouseWheelUnit::Point, &[vec2(0.0, 12.0)], Modifiers::COMMAND);
+    assert!(camera(&h).0 > scale, "ctrl and the wheel zoomed");
+}
+
+#[test]
+fn mouse_wheel_in_settings_makes_the_wheel_always_zoom_or_always_pan() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("settings.json");
+    let mut h = app(BOX);
+    h.state_mut().use_settings(file.clone());
+    let p = P2(4000.0, 3000.0);
+    over_plan(&mut h);
+    // A smooth wheel's small steps look like a trackpad's: Auto pans.
+    let scale = camera(&h).0;
+    gesture(&mut h, MouseWheelUnit::Point, &[vec2(0.0, 15.0), vec2(0.0, 15.0)], Modifiers::NONE);
+    assert!((camera(&h).0 - scale).abs() < 1e-12, "Auto read small steps as a trackpad");
+    // Settings > User Interface > Mouse wheel > Zoom: Revit's way.
+    h.state_mut().settings_page = Some(crate::settings::Page::Interface);
+    h.run();
+    h.get_by_role_and_label(Role::RadioButton, "Zoom").scroll_to_me();
+    h.run();
+    pick(&mut h, Role::RadioButton, "Zoom");
+    assert_eq!(h.state().canvas.nav.wheel, crate::canvas::navigation::Wheel::Zoom);
+    press(&mut h, "Close");
+    over_plan(&mut h);
+    let before = h.state().screen(p);
+    gesture(&mut h, MouseWheelUnit::Point, &[vec2(0.0, 15.0), vec2(0.0, 15.0)], Modifiers::NONE);
+    assert!(camera(&h).0 > scale, "the small steps zoomed");
+    assert!((h.state().screen(p) - before).length() < 1.5);
+    // A trackpad's two-finger scroll zooms too, along its up and down.
+    let before = camera(&h).0;
+    gesture(&mut h, MouseWheelUnit::Point, &[vec2(-30.0, 40.0)], Modifiers::NONE);
+    assert!(camera(&h).0 > before);
+    // The file keeps it, and the next window starts with it.
+    let kept: Value = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!(kept["mouse_wheel"], "zoom");
+    let mut again = app(BOX);
+    again.state_mut().use_settings(file);
+    assert_eq!(again.state().canvas.nav.wheel, crate::canvas::navigation::Wheel::Zoom);
+    // Pan: even a notch scrolls.
+    h.state_mut().canvas.nav.wheel = crate::canvas::navigation::Wheel::Pan;
+    let (scale, at) = (camera(&h).0, h.state().screen(p));
+    gesture(&mut h, MouseWheelUnit::Point, &[vec2(0.0, 120.0)], Modifiers::NONE);
+    assert!((camera(&h).0 - scale).abs() < 1e-12, "no zoom");
+    assert!((h.state().screen(p) - at).length() > 20.0, "the view scrolled");
+    // A pinch zooms in every setting.
+    let before = camera(&h).0;
+    h.event(Event::Zoom(1.5));
+    h.run();
+    assert!(camera(&h).0 > before * 1.4);
+}
