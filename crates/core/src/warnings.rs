@@ -80,6 +80,7 @@ pub const RULES: &[(&str, &str)] = &[
     ("room_not_enclosed", "a room the walls and separation lines do not close round"),
     ("room_redundant", "a room in a space another room has"),
     ("device_no_connector", "a family of devices with no connector, counted as a load of zero"),
+    ("duplicate_type_mark", "types of one category that share a Type Mark"),
 ];
 
 /// The most overlapping pairs one wall's openings list: a wall of thousands of doors on one spot is one problem.
@@ -183,6 +184,10 @@ fn compute(m: &Model, scope: &Scope, rooms: bool, out: &mut Vec<Warning>) {
         room_warnings(m, out);
     }
     devices(m, out);
+    // Types are settings: a change to one is a full review, and a change to elements keeps these warnings.
+    if scope.ids.is_none() {
+        duplicate_type_marks(m, out);
+    }
 }
 
 fn cat(m: &Model, id: Id) -> &'static str {
@@ -591,5 +596,45 @@ fn devices(m: &Model, out: &mut Vec<Warning>) {
         // About the family: placing one more device of it is no new warning.
         w.key = name.to_string();
         out.push(w);
+    }
+}
+
+/// Types of one category that share a non-empty Type Mark (Revit's "Elements have duplicate 'Type Mark' values"): a mark names one
+/// type, so a schedule or a tag that reads it names two. One warning for each mark, about those types (by their library GUIDs: a
+/// type is no element of the plan, so Show has nothing to select). A project's types and a family's are of one category when
+/// both are doors, both windows, or both of one component category. Only types change it, and a changed type is a changed
+/// setting, a full review: a review of a change to elements keeps the warnings it had.
+fn duplicate_type_marks(m: &Model, out: &mut Vec<Warning>) {
+    use crate::library::Kind;
+    let mut marked: BTreeMap<(String, String), Vec<(Guid, String)>> = BTreeMap::new();
+    for (_, entry) in m.library.entries() {
+        let (category, label, mark) = match &entry.kind {
+            Kind::Type(category) => {
+                let Some(identity) = m.identity_of(category, &entry.name) else { continue };
+                (category.clone(), entry.name.clone(), identity.type_mark.clone())
+            }
+            Kind::FamilyType => {
+                let Some((name, ty)) = entry.name.split_once(": ") else { continue };
+                let Some(family) = m.families.get(name) else { continue };
+                let Some(identity) = family.identity.get(ty) else { continue };
+                (format!("{:?}", family.category).to_lowercase(), entry.name.clone(), identity.type_mark.clone())
+            }
+            _ => continue,
+        };
+        if !mark.is_empty() {
+            marked.entry((category, mark)).or_default().push((entry.guid, label));
+        }
+    }
+    for ((category, mark), types) in marked {
+        if types.len() < 2 {
+            continue;
+        }
+        let names = types.iter().map(|(_, label)| format!("`{label}`")).collect::<Vec<_>>().join(", ");
+        out.push(Warning::new(
+            "duplicate_type_mark",
+            Severity::Warning,
+            format!("{category} types {names} have the same Type Mark, `{mark}`: give each its own, so a mark names one type"),
+            types.iter().map(|(guid, _)| *guid).collect(),
+        ));
     }
 }

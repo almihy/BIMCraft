@@ -105,6 +105,8 @@ mod pin_tests;
 pub mod plumbing;
 pub mod quantities;
 #[cfg(test)]
+mod quantities_tests;
+#[cfg(test)]
 mod read_only_tests;
 pub mod rebar;
 #[cfg(test)]

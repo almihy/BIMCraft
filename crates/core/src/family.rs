@@ -1001,6 +1001,47 @@ pub fn names(formula: &str) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
+/// `formula` with each read of the name `from` read as `to`: a name as `Reader` reads one (letters, digits, `_` and spaces from a
+/// letter, but not one a `(` follows, which is a function), so `Area` is not `Area Total` or `area_2`, and a number's exponent
+/// (`1e6`) is no name. The rest of it as it was.
+pub fn rename_in_formula(formula: &str, from: &str, to: &str) -> String {
+    let chars: Vec<char> = formula.chars().collect();
+    let (mut out, mut at) = (String::new(), 0);
+    while let Some(&c) = chars.get(at) {
+        if c.is_ascii_digit() || c == '.' {
+            // A number, its exponent too.
+            let start = at;
+            while chars.get(at).is_some_and(|c| c.is_ascii_digit() || *c == '.') {
+                at += 1;
+            }
+            if chars.get(at).is_some_and(|c| matches!(c, 'e' | 'E')) {
+                let sign = usize::from(chars.get(at + 1).is_some_and(|c| matches!(c, '+' | '-')));
+                if chars.get(at + 1 + sign).is_some_and(char::is_ascii_digit) {
+                    at += 1 + sign;
+                    while chars.get(at).is_some_and(char::is_ascii_digit) {
+                        at += 1;
+                    }
+                }
+            }
+            out.extend(chars.get(start..at).unwrap_or_default());
+        } else if c.is_alphabetic() || c == '_' {
+            let start = at;
+            while chars.get(at).is_some_and(|c| c.is_alphanumeric() || *c == '_' || *c == ' ') {
+                at += 1;
+            }
+            let run: String = chars.get(start..at).unwrap_or_default().iter().collect();
+            let (name, spaces) = (run.trim_end(), &run[run.trim_end().len()..]);
+            let call = chars.get(at) == Some(&'(');
+            out.push_str(if name == from && !call { to } else { name });
+            out.push_str(spaces);
+        } else {
+            out.push(c);
+            at += 1;
+        }
+    }
+    out
+}
+
 /// `formula` worked out, its parameters' values from `get`: numbers, lengths in mm and angles in
 /// degrees; a comparison is 1 when it holds, else 0.
 pub fn eval(formula: &str, get: &mut dyn FnMut(&str) -> Result<f64, String>) -> Result<f64, String> {

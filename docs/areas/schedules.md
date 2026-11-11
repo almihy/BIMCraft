@@ -26,12 +26,7 @@ parameter's. Its filters, sorting, grouping, totals and calculated fields are an
 
 **Area, Volume and Perimeter** are fields of the walls', floors', ceilings' and roofs' schedules, as Revit's (Area and Volume are
 among a wall schedule's and a floor schedule's first fields). All of them come from `quantities.rs`, which IFC's
-`Qto_*BaseQuantities` read too, so a schedule and an exported file never differ: a wall's Area is one side of it less the doors
-and windows in it (cut to the wall's height) and its Volume that through its thickness, joins aside (a wall attached to a roof or
-a floor has no one height: its pieces' volume and, through its thickness, its side); a floor's and a ceiling's Area is its outline
-less its openings and the shafts through it, its Volume that through its thickness (under a variable layer, less where its top
-falls), its Perimeter round its outline; a roof's Area is its surface (each slope's plan stretched by its slope; `Plan Area` is
-the footprint, courtyards left out), its Volume that through its thickness. A field of volumes (`Kind::Volume`, m³ or ft³ by
+`Qto_*BaseQuantities` read too, so a schedule and an exported file never differ: a wall's numbers are those of its own solid (`walls::prisms`: each opening where it really is, held to the wall, overlapping ones cut once, the top where the wall is attached, its arc, its corners counted once): its Volume is the solid's, its Area the area of the middle of its thickness (its volume through its thickness: a straight wall's length by its height, a curved one's along its own middle, not its location line) less the openings; a floor's Area is its top's (a sloped one's stretched by its slope) less its openings and the shafts through it, its Volume its solid's (plumb depth through its plan; under a variable layer, less where its top falls), its Perimeter round its outline only (openings' edges not counted); a ceiling's Area is its outline less its openings and the shafts, its Volume that through its thickness; a roof's Area is its surface (each slope's plan stretched by its slope) less its openings and the shafts through it (the IFC `GrossArea` is before them), its Volume its solid's (a shaped flat roof's is its plan through its thickness plumb; `Plan Area` is the footprint less courtyards, openings and shafts). A field of volumes (`Kind::Volume`, m³ or ft³ by
 `Units::volume`) is summed, filtered and charted as an area is; its heading says the unit. `elements` gives them as `area_m2`,
 `volume_m3` and `perimeter_m` (a roof's surface as `surface_area_m2`).
 
@@ -42,14 +37,16 @@ where set, so a file from before reads as it was (a stair, a ramp and the types 
 command sets it (`type_mark`, `description`, `manufacturer`, `model`, `fire_rating`, `cost`, `keynote`, `assembly_code`, `url`,
 `type_comments`; `""` or null clears one), `family`'s `identity` a family type's, and Edit Type's Identity Data group either.
 An element's JSON carries its type's (`type_mark`…), so each is a schedule field of that name for every category whose elements
-are of a type and for a multi-category schedule (not among the first fields unless chosen), and a tag's `label`. IFC writes the
-Type Mark as `Reference` and the Fire Rating as `FireRating` in the element's `Pset_*Common` where IFC has them there,
+are of a type and for a multi-category schedule (not among the first fields unless chosen), and a tag's `label`. IFC writes it on
+the type object (`HasPropertySets`, once for all the elements of the type; an element with no type object holds it): the
+Type Mark as `Reference` and the Fire Rating as `FireRating` in its `Pset_*Common` where IFC has them there,
 Manufacturer and Model as `Pset_ManufacturerTypeInformation`'s `Manufacturer` and `ModelLabel`, and the rest (and those two where
 there's no common set, a component's) in `BIMCraft_TypeData`. A project parameter (or, for components, a family's) of the same
 name takes the field's place in schedules, as it did before the field: `Fire Rating` as a project parameter of doors, with
 a value for each door, still shows that. Area, Volume and Perimeter are fields of their own, which a project parameter can't be
-named: a file from before that holds one by such a name reads with it renamed `Custom <name>`
-(`Model::renamed_clashing_parameters`).
+named: a file from before that holds one by such a name reads with it renamed `Custom <name>` (`Custom <name> 2` where that
+is taken), its values, tags' labels, schedules' fields, filters, sorts and formulas, view filters' rules and detail groups' members
+renamed with it (`Model::renamed_clashing_parameters`; a multi-category schedule's fields are the shared ones, never a project's).
 
 A table goes to a file as CSV (`schedule::to_csv`, text a spreadsheet would read as a formula guarded with `'`) or, for a path
 ending `.xlsx`, as a workbook of one sheet (`schedule::to_xlsx` over `xlsx.rs`, which writes the parts and the zip by hand on

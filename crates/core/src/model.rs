@@ -3654,8 +3654,10 @@ impl Model {
     }
 
     /// A project parameter named as a field its categories have of their own since (Area, Volume or Perimeter of walls, floors,
-    /// ceilings and roofs) is `Custom <name>` now, with its values and the schedules, filters and rules that name it:
-    /// [`Model::check`] refuses the clash, so a file from before the field reads as it was.
+    /// ceilings and roofs) is `Custom <name>` now (`Custom <name> 2` and on, where that is taken), with its values and what
+    /// names it: the schedules' fields, filters, sorts and calculated fields' formulas, the view filters' rules, the tags'
+    /// labels, in the model and in the detail groups. [`Model::check`] refuses the clash, so a file from before the field reads as
+    /// it was. A multi-category schedule is left as it is: its fields are the ones its categories share, never a project's.
     fn renamed_clashing_parameters(&mut self) {
         let clashing: Vec<String> = self
             .parameters
@@ -3666,14 +3668,39 @@ impl Model {
             .collect();
         for name in clashing {
             let Some(param) = self.parameters.remove(&name) else { continue };
-            let mut to = format!("Custom {name}");
-            while self.parameters.contains_key(&to) || param.categories.iter().any(|c| crate::schedule::own_field(c, &to)) {
-                to.push_str(" 2");
+            let taken = |m: &Model, to: &str| m.parameters.contains_key(to) || param.categories.iter().any(|c| crate::schedule::own_field(c, to));
+            let base = format!("Custom {name}");
+            let mut to = base.clone();
+            let mut n = 2;
+            while taken(self, &to) {
+                to = format!("{base} {n}");
+                n += 1;
             }
             self.library.renamed(&crate::library::Kind::Parameter, &name, &to);
             for f in self.view_filters.values_mut().filter(|f| f.categories.iter().any(|k| param.categories.contains(k))) {
                 f.rules.iter_mut().filter(|r| r.field == name).for_each(|r| r.field = to.clone());
             }
+            // What the parameter is on: elements of its categories, and the tags that show it on them.
+            let hosts: BTreeSet<Guid> = self
+                .elements
+                .with_guids()
+                .filter(|(_, _, e)| param.categories.iter().any(|k| k == e.category()))
+                .map(|(_, g, _)| g)
+                .collect();
+            let rename = |e: &mut Element| {
+                if param.categories.iter().any(|k| k == e.category())
+                    && let Some(params) = e.params_mut()
+                    && let Some(v) = params.remove(&name)
+                {
+                    params.insert(to.clone(), v);
+                }
+                if let Element::Tag(t) = e
+                    && hosts.contains(&t.host)
+                    && t.label.as_deref() == Some(name.as_str())
+                {
+                    t.label = Some(to.clone());
+                }
+            };
             for e in self.elements.values_mut() {
                 if let Element::Schedule(sc) = e {
                     if param.categories.contains(&crate::commands::category(&sc.of)) {
@@ -3683,17 +3710,20 @@ impl Model {
                             }
                         };
                         sc.fields.iter_mut().filter(|f| f.formula.is_none()).for_each(|f| swap(&mut f.name));
+                        for f in sc.fields.iter_mut() {
+                            if let Some(formula) = &mut f.formula {
+                                *formula = crate::family::rename_in_formula(formula, &name, &to);
+                            }
+                        }
                         sc.filters.iter_mut().for_each(|f| swap(&mut f.field));
                         sc.sort.iter_mut().for_each(|s| swap(&mut s.field));
                     }
                     continue;
                 }
-                if param.categories.iter().any(|k| k == e.category())
-                    && let Some(params) = e.params_mut()
-                    && let Some(v) = params.remove(&name)
-                {
-                    params.insert(to.clone(), v);
-                }
+                rename(e);
+            }
+            for g in self.detail_groups.values_mut() {
+                g.members.iter_mut().for_each(|member| rename(&mut member.element));
             }
             self.parameters.insert(to, param);
         }
