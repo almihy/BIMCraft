@@ -231,6 +231,28 @@ other_files(
          colour, linetype and weight, as Revit's Query",
         cad_query,
     ),
+    other(
+        "cad_read",
+        "Read CAD",
+        "{id, layers?: [name, …], kinds?: [kind, …], box?: [[x0, y0], [x1, y1]], start?, limit?, explode?} what a CAD import's \
+         drawing holds, as it lies in the model: every coordinate in model mm (placed, scaled and turned as the import is), to the \
+         hundredth; every layer read, hidden or not. With none of `layers`, `kinds`, `box` or `start`, a summary: {id, cad, unit, \
+         extents: [[x0, y0], [x1, y1]] (of its bulk), entities (how many), layers: [{name, shown, kinds: {kind: count}}] (those \
+         with entities, most first; `block` counts the blocks placed on it, whose entities count by their own kinds), blocks: \
+         [{name, count, size: [w, h]}] (most placed first; the size of the first placement in its own frame), texts: [{n, text, \
+         layer, at, height}] (the first 300) and texts_total}. Otherwise the entities that match, in the file's order, a page at \
+         a time: {id, cad, total, start, next (the `start` of the next page, null at the end), items}; `limit` items a page (500 \
+         unless given, up to 5000; a page also ends after 200000 points). Items: {n, kind: line, layer, points: [[x, y], [x, y]]}, \
+         {n, kind: polyline, layer, points, closed}, {n, kind: circle, layer, c, r}, {n, kind: arc, layer, c, r, start, end} \
+         (degrees counter-clockwise in the model, from `start` in [0, 360) to `end`), {n, kind: point, layer, at}, {n, kind: \
+         text, layer, text, at, height, angle}, {n, kind: hatch, layer, rings, solid}. A block placed in model space is one \
+         item, {kind: block, b, name, layer, at, angle, scale: [sx, sy], corners (the four corners of the box round what it \
+         placed, in its own turned frame), entities: [first n, end n)}, unless `explode: true`, which lists its entities one by \
+         one instead (each matched by its own layer and kind). `n` is the entity's index in the drawing and `b` the \
+         placement's: they stay the same for the drawing. `layers` by name, any case; `kinds` among line, polyline, circle, \
+         arc, point, text, hatch, block; `box` keeps what touches it (by its box), in model mm",
+        cad_read,
+    ),
     edit(
         "wall",
         msg!("Wall"),
@@ -7126,6 +7148,248 @@ fn cad_query(s: &mut Session, p: &Value) -> R {
         "id": id, "found": true, "kind": crate::cad::kind(&e.shape), "layer": e.layer, "color": color,
         "linetype": linetype, "weight": e.weight, "distance": hundredth(d),
     }))
+}
+
+/// The kinds `cad_read` names and filters by: those of [`crate::cad::kind`], and a block placed.
+const READ_KINDS: [&str; 8] = ["line", "polyline", "circle", "arc", "point", "text", "hatch", "block"];
+/// What `cad_read` lists at most in one page, and lists unless told.
+const READ_LIMIT: usize = 5000;
+const READ_DEFAULT: usize = 500;
+/// The points one page of `cad_read` holds before it stops early, its `next` the item after: a page of large hatches stays
+/// readable.
+const READ_POINTS: usize = 200_000;
+/// The texts a summary of `cad_read` lists.
+const READ_TEXTS: usize = 300;
+
+/// A length or a coordinate as `cad_read` gives it: mm to the hundredth, never -0.
+fn read_mm(x: f64) -> f64 {
+    hundredth(x) + 0.0
+}
+
+fn read_point(p: P2) -> Value {
+    json!([read_mm(p.0), read_mm(p.1)])
+}
+
+/// An entity as `cad_read` lists it: its index in the drawing, kind, layer and shape, placed in the model.
+fn read_item(n: usize, layer: &str, shape: &crate::dxf::Shape) -> Value {
+    use crate::dxf::Shape;
+    let pts = |v: &[P2]| Value::Array(v.iter().map(|p| read_point(*p)).collect());
+    let mut item = json!({"n": n, "kind": crate::cad::kind(shape), "layer": layer});
+    let more = match shape {
+        Shape::Line(a, b) => json!({"points": [read_point(*a), read_point(*b)]}),
+        Shape::Polyline { pts: v, closed } => json!({"points": pts(v), "closed": closed}),
+        Shape::Circle { c, r } => json!({"c": read_point(*c), "r": read_mm(*r)}),
+        Shape::Arc { c, r, start, end } => json!({"c": read_point(*c), "r": read_mm(*r), "start": read_mm(*start), "end": read_mm(*end)}),
+        Shape::Point(at) => json!({"at": read_point(*at)}),
+        Shape::Text { at, height, angle, text, .. } => {
+            json!({"text": text, "at": read_point(*at), "height": read_mm(*height), "angle": read_mm(*angle)})
+        }
+        Shape::Fill { rings, solid } => json!({"rings": rings.iter().map(|r| pts(r)).collect::<Vec<_>>(), "solid": solid}),
+    };
+    if let (Some(item), Value::Object(more)) = (item.as_object_mut(), more) {
+        item.extend(more);
+    }
+    item
+}
+
+/// How many points an entity holds, as a page of `cad_read` counts them.
+fn read_points(shape: &crate::dxf::Shape) -> usize {
+    use crate::dxf::Shape;
+    match shape {
+        Shape::Polyline { pts, .. } => pts.len(),
+        Shape::Fill { rings, .. } => rings.iter().map(Vec::len).sum(),
+        Shape::Line(..) => 2,
+        _ => 1,
+    }
+}
+
+/// A block placed by model space, as `cad_read` gives it: its turn in the model, and the box round what it placed in its own
+/// turned frame.
+struct ReadBlock {
+    angle: f64,
+    corners: Option<[P2; 4]>,
+}
+
+fn read_block(cad: &Cad, ci: &CadImport, ins: &crate::dxf::Insert) -> ReadBlock {
+    let angle = (ins.angle + ci.angle).rem_euclid(360.0);
+    let shapes = cad.dxf().entities.get(ins.entities.clone()).unwrap_or_default().iter().map(|e| crate::cad::placed(&e.shape, ci));
+    ReadBlock { angle, corners: crate::cad::frame_corners(shapes, angle) }
+}
+
+/// Whether two boxes touch.
+fn touches(a: [P2; 2], b: [P2; 2]) -> bool {
+    a[0].0 <= b[1].0 && b[0].0 <= a[1].0 && a[0].1 <= b[1].1 && b[0].1 <= a[1].1
+}
+
+/// What a CAD import's drawing holds, as it lies in the model: a summary of it, or the entities that match, a page at a time.
+fn cad_read(s: &mut Session, p: &Value) -> R {
+    let c = "cad_read";
+    only(c, p, &["id", "layers", "kinds", "box", "start", "limit", "explode"])?;
+    let m = &s.model;
+    let (id, ci) = cad_import(c, m, p)?;
+    let cad = m.cads.get(&ci.cad).ok_or_else(|| bad(c, format!("the project holds no CAD drawing named `{}`", ci.cad)))?;
+    let dxf = cad.dxf();
+    let layers: Option<BTreeSet<&str>> = match p.get("layers") {
+        v if absent(v) => None,
+        Some(Value::Array(a)) if a.len() <= crate::model::MAX_HIDDEN => {
+            let mut keep = BTreeSet::new();
+            for v in a {
+                let n = v.as_str().ok_or_else(|| bad(c, format!("`layers` lists layers by name, not {v}")))?.to_lowercase();
+                let found: Vec<&str> = dxf.layers.iter().filter(|l| l.name.to_lowercase() == n).map(|l| l.name.as_str()).collect();
+                if found.is_empty() {
+                    let names: Vec<&str> = dxf.layers.iter().take(50).map(|l| l.name.as_str()).collect();
+                    let more = if dxf.layers.len() > 50 { ", …" } else { "" };
+                    let given: String = v.as_str().unwrap_or("").chars().take(200).collect();
+                    return Err(bad(c, format!("the drawing has no layer `{given}` (it has: {}{more})", names.join(", "))));
+                }
+                keep.extend(found);
+            }
+            Some(keep)
+        }
+        Some(v) => return Err(bad(c, format!("`layers` is a list of layer names, of up to {}, not {v}", crate::model::MAX_HIDDEN))),
+        None => None,
+    };
+    let kinds: Option<BTreeSet<&str>> = match p.get("kinds") {
+        v if absent(v) => None,
+        Some(Value::Array(a)) if a.len() <= READ_KINDS.len() * 100 => Some(
+            a.iter()
+                .map(|v| {
+                    v.as_str()
+                        .and_then(|k| READ_KINDS.iter().find(|n| n.eq_ignore_ascii_case(k.trim())).copied())
+                        .ok_or_else(|| bad(c, format!("`kinds` are among {}, not {v}", READ_KINDS.join(", "))))
+                })
+                .collect::<Result<_, _>>()?,
+        ),
+        Some(v) => return Err(bad(c, format!("`kinds` is a list of kinds among {}, not {v}", READ_KINDS.join(", ")))),
+        None => None,
+    };
+    let area = match p.get("box") {
+        v if absent(v) => None,
+        Some(v) => match v.as_array().map(Vec::as_slice) {
+            Some([a, b]) => match (point(a), point(b)) {
+                (Some(a), Some(b)) => Some([P2(a.0.min(b.0), a.1.min(b.1)), P2(a.0.max(b.0), a.1.max(b.1))]),
+                _ => return Err(bad(c, format!("`box` is two corners [[x0, y0], [x1, y1]] in mm, not {v}"))),
+            },
+            _ => return Err(bad(c, format!("`box` is two corners [[x0, y0], [x1, y1]] in mm, not {v}"))),
+        },
+        None => None,
+    };
+    let start = (!absent(p.get("start"))).then(|| count_opt(c, p, "start", 0)).transpose()?;
+    let limit = count_opt(c, p, "limit", READ_DEFAULT)?;
+    if !(1..=READ_LIMIT).contains(&limit) {
+        return Err(bad(c, format!("`limit` is how many to list, from 1 to {READ_LIMIT}, not {limit}")));
+    }
+    let explode = flag(c, p, "explode")?;
+    if layers.is_none() && kinds.is_none() && area.is_none() && start.is_none() {
+        return Ok(cad_read_summary(id, cad, ci, m.cad_box(id)));
+    }
+    let start = start.unwrap_or(0);
+    let layer_ok = |l: &str| layers.as_ref().is_none_or(|k| k.contains(l));
+    let kind_ok = |k: &str| kinds.as_ref().is_none_or(|ks| ks.contains(k));
+    // The placements, by the first entity each placed, when they're listed whole.
+    let blocks: BTreeMap<usize, (usize, &crate::dxf::Insert)> =
+        if explode { BTreeMap::new() } else { dxf.inserts.iter().enumerate().map(|(b, i)| (i.entities.start, (b, i))).collect() };
+    let (mut total, mut items, mut held) = (0_usize, Vec::new(), 0_usize);
+    let mut n = 0;
+    while let Some(e) = dxf.entities.get(n) {
+        if let Some((b, ins)) = blocks.get(&n) {
+            n = ins.entities.end.max(n + 1);
+            if !layer_ok(&ins.layer) || !kind_ok("block") {
+                continue;
+            }
+            let rb = read_block(cad, ci, ins);
+            if let Some(area) = area {
+                let Some(corners) = rb.corners else { continue };
+                if !crate::dxf::union(corners.map(|q| [q, q])).is_some_and(|bx| touches(bx, area)) {
+                    continue;
+                }
+            }
+            if total >= start && items.len() < limit && held < READ_POINTS {
+                let place = crate::model::cad_place(ci);
+                items.push(json!({
+                    "kind": "block", "b": b, "name": ins.name, "layer": ins.layer, "at": read_point(place(ins.at)),
+                    "angle": read_mm(rb.angle), "scale": ins.scale,
+                    "corners": rb.corners.map_or_else(Vec::new, |q| q.iter().map(|p| read_point(*p)).collect()),
+                    "entities": [ins.entities.start, ins.entities.end],
+                }));
+                held += 5;
+            }
+            total += 1;
+            continue;
+        }
+        let here = n;
+        n += 1;
+        if !layer_ok(&e.layer) || !kind_ok(crate::cad::kind(&e.shape)) {
+            continue;
+        }
+        let shown = total >= start && items.len() < limit && held < READ_POINTS;
+        if area.is_some() || shown {
+            let shape = crate::cad::placed(&e.shape, ci);
+            if area.is_some_and(|a| !touches(shape.bounds(), a)) {
+                continue;
+            }
+            if shown {
+                held += read_points(&shape);
+                items.push(read_item(here, &e.layer, &shape));
+            }
+        }
+        total += 1;
+    }
+    let next = start.saturating_add(items.len());
+    let next = if next < total { json!(next) } else { Value::Null };
+    Ok(json!({"id": id, "cad": ci.cad, "total": total, "start": start, "next": next, "items": items}))
+}
+
+/// `cad_read` without a filter: what a drawing holds, by layer, block and text, in the model.
+fn cad_read_summary(id: Id, cad: &Cad, ci: &CadImport, extents: Option<[P2; 2]>) -> Value {
+    let dxf = cad.dxf();
+    let mut per: BTreeMap<&str, (usize, BTreeMap<&str, usize>)> = BTreeMap::new();
+    for e in &dxf.entities {
+        let (count, kinds) = per.entry(e.layer.as_str()).or_default();
+        *count += 1;
+        *kinds.entry(crate::cad::kind(&e.shape)).or_default() += 1;
+    }
+    for ins in &dxf.inserts {
+        *per.entry(ins.layer.as_str()).or_default().1.entry("block").or_default() += 1;
+    }
+    // The layer table's order, then any other a placement names; most entities first.
+    let mut order: Vec<&str> = dxf.layers.iter().map(|l| l.name.as_str()).filter(|n| per.contains_key(n)).collect();
+    order.extend(per.keys().copied().filter(|n| dxf.layer(n).is_none()));
+    order.sort_by_key(|n| std::cmp::Reverse(per.get(n).map_or(0, |(count, _)| *count)));
+    let layers: Vec<Value> = order
+        .iter()
+        .filter_map(|n| per.get(n).map(|(_, kinds)| json!({"name": n, "shown": !ci.hidden.contains(*n), "kinds": kinds})))
+        .collect();
+    let mut blocks: BTreeMap<&str, (usize, &crate::dxf::Insert)> = BTreeMap::new();
+    for ins in &dxf.inserts {
+        blocks.entry(ins.name.as_str()).or_insert((0, ins)).0 += 1;
+    }
+    let mut blocks: Vec<(&str, usize, &crate::dxf::Insert)> = blocks.into_iter().map(|(n, (count, first))| (n, count, first)).collect();
+    blocks.sort_by_key(|b| std::cmp::Reverse(b.1));
+    let blocks: Vec<Value> = blocks
+        .iter()
+        .map(|(name, count, first)| {
+            let size = read_block(cad, ci, first).corners.map_or([0.0, 0.0], |[a, b, c, _]| [read_mm(a.dist(b)), read_mm(b.dist(c))]);
+            json!({"name": name, "count": count, "size": size})
+        })
+        .collect();
+    let texts: Vec<(usize, &crate::dxf::Entity)> =
+        dxf.entities.iter().enumerate().filter(|(_, e)| matches!(e.shape, crate::dxf::Shape::Text { .. })).collect();
+    let listed: Vec<Value> = texts
+        .iter()
+        .take(READ_TEXTS)
+        .filter_map(|(n, e)| match crate::cad::placed(&e.shape, ci) {
+            crate::dxf::Shape::Text { at, height, text, .. } => {
+                Some(json!({"n": n, "text": text, "layer": e.layer, "at": read_point(at), "height": read_mm(height)}))
+            }
+            _ => None,
+        })
+        .collect();
+    json!({
+        "id": id, "cad": ci.cad, "unit": dxf.unit,
+        "extents": extents.map(|[a, b]| [read_point(a), read_point(b)]),
+        "entities": dxf.entities.len(), "layers": layers, "blocks": blocks, "texts": listed, "texts_total": texts.len(),
+    })
 }
 
 fn grid(s: &mut Session, p: &Value) -> R {

@@ -767,12 +767,14 @@ fn late() -> Option<String> {
     {
         let mut first = None;
         LATE.with(|late| {
-            late.borrow_mut().retain_mut(|popped| match popped.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())) {
-                std::task::Poll::Ready(e) => {
-                    first = first.take().or(e.map(|e| e.to_string()));
-                    false
+            late.borrow_mut().retain_mut(|popped| {
+                match popped.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())) {
+                    std::task::Poll::Ready(e) => {
+                        first = first.take().or(e.map(|e| e.to_string()));
+                        false
+                    }
+                    std::task::Poll::Pending => true,
                 }
-                std::task::Poll::Pending => true,
             });
         });
         first

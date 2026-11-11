@@ -40,6 +40,11 @@ fn pairs(list: &[(i32, &str)]) -> String {
 
 /// A DXF of `units` ($INSUNITS) with these layers (name, colour, off) and entities.
 fn dxf(units: &str, layers: &[(&str, &str, bool)], entities: &str) -> String {
+    dxf_blocks(units, layers, "", entities)
+}
+
+/// [`dxf`] with a BLOCKS section holding `blocks`.
+fn dxf_blocks(units: &str, layers: &[(&str, &str, bool)], blocks: &str, entities: &str) -> String {
     let header = pairs(&[(9, "$INSUNITS"), (70, units)]);
     let mut table = pairs(&[(0, "TABLE"), (2, "LAYER")]);
     for (name, color, off) in layers {
@@ -47,8 +52,9 @@ fn dxf(units: &str, layers: &[(&str, &str, bool)], entities: &str) -> String {
         table += &pairs(&[(0, "LAYER"), (2, name), (70, "0"), (62, &color), (6, "Continuous")]);
     }
     table += &pairs(&[(0, "ENDTAB")]);
+    let blocks = if blocks.is_empty() { String::new() } else { format!("0\nSECTION\n2\nBLOCKS\n{blocks}0\nENDSEC\n") };
     format!(
-        "0\nSECTION\n2\nHEADER\n{header}0\nENDSEC\n0\nSECTION\n2\nTABLES\n{table}0\nENDSEC\n0\nSECTION\n2\nENTITIES\n{entities}0\nENDSEC\n0\nEOF\n"
+        "0\nSECTION\n2\nHEADER\n{header}0\nENDSEC\n0\nSECTION\n2\nTABLES\n{table}0\nENDSEC\n{blocks}0\nSECTION\n2\nENTITIES\n{entities}0\nENDSEC\n0\nEOF\n"
     )
 }
 
@@ -609,4 +615,206 @@ fn a_plan_fits_to_its_imports_as_to_the_rest_it_shows() {
     assert!(render::plan_shows(&t.model, one).is_empty());
     assert!(!render::plan_shows(&t.model, other_t).is_empty());
     assert!(!render::plan_shows(&s.model, other).is_empty());
+}
+
+/// A site in metres: a building of 4 loose lines on A-WALL, its label (an MTEXT) on A-AREA-IDEN, its solid hatch on
+/// A-AREA-PATT, a parking bay (a block of 4 lines on layer 0) placed twice on C-PRKG, once turned a quarter, and a kerb's arc on
+/// A-FLOR, which its file has off. Entities 0 to 3 are the walls, 4 the label, 5 the hatch, 6 to 9 and 10 to 13 the bays, 14
+/// the arc.
+fn site() -> String {
+    let walls: String = [((0.0, 0.0), (10.0, 0.0)), ((10.0, 0.0), (10.0, 6.0)), ((10.0, 6.0), (0.0, 6.0)), ((0.0, 6.0), (0.0, 0.0))]
+        .iter()
+        .map(|(a, b)| line("A-WALL", *a, *b))
+        .collect();
+    let label = pairs(&[(0, "MTEXT"), (8, "A-AREA-IDEN"), (10, "5"), (20, "3"), (40, "0.5"), (71, "7"), (1, "Residential A")]);
+    let mut hatch = pairs(&[(0, "HATCH"), (8, "A-AREA-PATT"), (2, "SOLID"), (70, "1"), (91, "1"), (92, "2"), (72, "0"), (73, "1")]);
+    hatch += &pairs(&[(93, "4"), (10, "0"), (20, "0"), (10, "10"), (20, "0"), (10, "10"), (20, "6"), (10, "0"), (20, "6"), (97, "0")]);
+    let bay: String = [((0.0, 0.0), (2.5, 0.0)), ((2.5, 0.0), (2.5, 5.0)), ((2.5, 5.0), (0.0, 5.0)), ((0.0, 5.0), (0.0, 0.0))]
+        .iter()
+        .map(|(a, b)| line("0", *a, *b))
+        .collect();
+    let blocks = pairs(&[(0, "BLOCK"), (8, "0"), (2, "BAY"), (70, "0"), (10, "0"), (20, "0")]) + &bay + &pairs(&[(0, "ENDBLK")]);
+    let bays = pairs(&[(0, "INSERT"), (8, "C-PRKG"), (2, "BAY"), (10, "20"), (20, "0")])
+        + &pairs(&[(0, "INSERT"), (8, "C-PRKG"), (2, "BAY"), (10, "30"), (20, "0"), (50, "90")]);
+    let kerb = pairs(&[(0, "ARC"), (8, "A-FLOR"), (10, "15"), (20, "10"), (40, "2"), (50, "0"), (51, "90")]);
+    let layers = [
+        ("0", "7", false),
+        ("A-WALL", "1", false),
+        ("A-AREA-IDEN", "7", false),
+        ("A-AREA-PATT", "8", false),
+        ("C-PRKG", "3", false),
+        ("A-FLOR", "4", true),
+    ];
+    dxf_blocks("6", &layers, &blocks, &(walls + &label + &hatch + &bays + &kerb))
+}
+
+/// The site brought in in metres, its origin on (1000, 2000), turned a quarter: a point (x, y) of it is at
+/// (1000 - 1000 y, 2000 + 1000 x) in the model.
+fn read_site(test: &str) -> (Session, u64) {
+    let mut s = Session::new();
+    let r =
+        run(&mut s, "import_cad", json!({"path": file(test, "site.dxf", &site()), "position": "origin", "at": [1000, 2000], "angle": 90}));
+    let id = r["id"].as_u64().unwrap();
+    (s, id)
+}
+
+/// The items of a read, an entity by its `n` and a block by `b` and its number.
+fn ns(r: &Value) -> Vec<Value> {
+    r["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| if i["kind"] == "block" { json!(format!("b{}", i["b"])) } else { i["n"].clone() })
+        .collect()
+}
+
+#[test]
+fn read_without_a_filter_sums_up_the_drawing_in_the_model() {
+    let (mut s, id) = read_site("read-sum");
+    let r = run(&mut s, "cad_read", json!({"id": id}));
+    assert_eq!(
+        (r["id"].as_u64(), r["cad"].as_str(), r["unit"].as_str(), r["entities"].as_u64()),
+        (Some(id), Some("site"), Some("m"), Some(15)),
+        "{r}"
+    );
+    // Its extents: the bulk, turned and placed.
+    assert_eq!(r["extents"], json!([[-11000.0, 2000.0], [1000.0, 32000.0]]), "{r}");
+    // The layers that have entities, most first; a block's placements counted as `block` besides its entities.
+    assert_eq!(
+        r["layers"],
+        json!([
+            {"name": "C-PRKG", "shown": true, "kinds": {"line": 8, "block": 2}},
+            {"name": "A-WALL", "shown": true, "kinds": {"line": 4}},
+            {"name": "A-AREA-IDEN", "shown": true, "kinds": {"text": 1}},
+            {"name": "A-AREA-PATT", "shown": true, "kinds": {"hatch": 1}},
+            {"name": "A-FLOR", "shown": false, "kinds": {"arc": 1}},
+        ]),
+        "{r}"
+    );
+    assert_eq!(r["blocks"], json!([{"name": "BAY", "count": 2, "size": [2500.0, 5000.0]}]));
+    assert_eq!(r["texts"], json!([{"n": 4, "text": "Residential A", "layer": "A-AREA-IDEN", "at": [-2000.0, 7000.0], "height": 500.0}]));
+    assert_eq!(r["texts_total"], 1);
+}
+
+#[test]
+fn read_lists_what_matches_in_model_millimetres_a_block_as_one_item_unless_exploded() {
+    let (mut s, id) = read_site("read-list");
+    // Everything, in file order: each bay one block item.
+    let r = run(&mut s, "cad_read", json!({"id": id, "start": 0}));
+    assert_eq!((r["total"].as_u64(), r["start"].as_u64(), &r["next"]), (Some(9), Some(0), &Value::Null), "{r}");
+    assert_eq!(ns(&r), [json!(0), json!(1), json!(2), json!(3), json!(4), json!(5), json!("b0"), json!("b1"), json!(14)]);
+    let items = &r["items"];
+    assert_eq!(items[0], json!({"n": 0, "kind": "line", "layer": "A-WALL", "points": [[1000.0, 2000.0], [1000.0, 12000.0]]}));
+    assert_eq!(
+        items[4],
+        json!({"n": 4, "kind": "text", "layer": "A-AREA-IDEN", "text": "Residential A", "at": [-2000.0, 7000.0], "height": 500.0, "angle": 90.0})
+    );
+    assert_eq!(
+        items[5],
+        json!({"n": 5, "kind": "hatch", "layer": "A-AREA-PATT", "solid": true,
+               "rings": [[[1000.0, 2000.0], [1000.0, 12000.0], [-5000.0, 12000.0], [-5000.0, 2000.0]]]})
+    );
+    assert_eq!(
+        items[6],
+        json!({"kind": "block", "b": 0, "name": "BAY", "layer": "C-PRKG", "at": [1000.0, 22000.0], "angle": 90.0, "scale": [1.0, 1.0],
+               "corners": [[1000.0, 22000.0], [1000.0, 24500.0], [-4000.0, 24500.0], [-4000.0, 22000.0]], "entities": [6, 10]})
+    );
+    // The bay turned a quarter in the file, a half in the model: its box in its own frame, from its base.
+    assert_eq!(
+        items[7],
+        json!({"kind": "block", "b": 1, "name": "BAY", "layer": "C-PRKG", "at": [1000.0, 32000.0], "angle": 180.0, "scale": [1.0, 1.0],
+               "corners": [[1000.0, 32000.0], [-1500.0, 32000.0], [-1500.0, 27000.0], [1000.0, 27000.0]], "entities": [10, 14]})
+    );
+    assert_eq!(
+        items[8],
+        json!({"n": 14, "kind": "arc", "layer": "A-FLOR", "c": [-9000.0, 17000.0], "r": 2000.0, "start": 90.0, "end": 180.0})
+    );
+    // Exploded, the bays' lines one by one, on their insert's layer.
+    let r = run(&mut s, "cad_read", json!({"id": id, "start": 0, "explode": true}));
+    assert_eq!(r["total"], 15, "{r}");
+    assert_eq!(r["items"][10], json!({"n": 10, "kind": "line", "layer": "C-PRKG", "points": [[1000.0, 32000.0], [-1500.0, 32000.0]]}));
+    // `n` is the drawing's: what the project holds names the same entity.
+    let held = &s.model.cads["site"].dxf().entities;
+    assert!(matches!(held[10].shape, crate::dxf::Shape::Line(..)) && held[14].layer == "A-FLOR");
+}
+
+#[test]
+fn read_filters_by_layer_kind_and_box_and_pages_with_next() {
+    let (mut s, id) = read_site("read-filter");
+    let r = run(&mut s, "cad_read", json!({"id": id, "layers": ["a-wall"]}));
+    assert_eq!((ns(&r), &r["next"]), (vec![json!(0), json!(1), json!(2), json!(3)], &Value::Null), "case aside: {r}");
+    let r = run(&mut s, "cad_read", json!({"id": id, "kinds": ["line"]}));
+    assert_eq!(r["total"], 4, "a block's lines come in its block item: {r}");
+    let r = run(&mut s, "cad_read", json!({"id": id, "kinds": ["line"], "explode": true}));
+    assert_eq!(r["total"], 12, "{r}");
+    let r = run(&mut s, "cad_read", json!({"id": id, "kinds": ["block"]}));
+    assert_eq!(ns(&r), [json!("b0"), json!("b1")]);
+    let r = run(&mut s, "cad_read", json!({"id": id, "kinds": ["block"], "explode": true}));
+    assert_eq!(r["total"], 0, "exploded, there are no block items: {r}");
+    let r = run(&mut s, "cad_read", json!({"id": id, "layers": ["C-PRKG", "A-FLOR"], "kinds": ["arc", "block"]}));
+    assert_eq!(ns(&r), [json!("b0"), json!("b1"), json!(14)]);
+    // What touches a box, in model mm (its corners either way round): the arc by its sweep; the south wall, the west one and the
+    // hatch; a block by its box.
+    let r = run(&mut s, "cad_read", json!({"id": id, "box": [[-8000, 16000], [-9500, 17500]]}));
+    assert_eq!(ns(&r), [json!(14)], "{r}");
+    let r = run(&mut s, "cad_read", json!({"id": id, "box": [[0, 0], [2000, 3000]]}));
+    assert_eq!(ns(&r), [json!(0), json!(3), json!(5)], "{r}");
+    let r = run(&mut s, "cad_read", json!({"id": id, "box": [[0, 23000], [100, 23100]]}));
+    assert_eq!(ns(&r), [json!("b0")], "{r}");
+    // Pages.
+    let r = run(&mut s, "cad_read", json!({"id": id, "start": 0, "limit": 4}));
+    assert_eq!((ns(&r).len(), r["next"].as_u64(), r["total"].as_u64()), (4, Some(4), Some(9)), "{r}");
+    let r = run(&mut s, "cad_read", json!({"id": id, "start": 8, "limit": 4}));
+    assert_eq!((ns(&r), &r["next"]), (vec![json!(14)], &Value::Null), "{r}");
+    let r = run(&mut s, "cad_read", json!({"id": id, "start": 100}));
+    assert_eq!((r["items"].as_array().map(Vec::len), &r["next"], r["total"].as_u64()), (Some(0), &Value::Null, Some(9)));
+    // `limit` alone still sums up.
+    assert!(run(&mut s, "cad_read", json!({"id": id, "limit": 3})).get("blocks").is_some());
+    for (p, says) in [
+        (json!({"id": id, "layers": ["NOPE"]}), "no layer `NOPE` (it has: 0, A-WALL"),
+        (json!({"id": id, "layers": "A-WALL"}), "`layers`"),
+        (json!({"id": id, "layers": [5]}), "`layers`"),
+        (json!({"id": id, "kinds": ["spline"]}), "line, polyline, circle, arc, point, text, hatch, block"),
+        (json!({"id": id, "kinds": "line"}), "`kinds`"),
+        (json!({"id": id, "box": [[0, 0]]}), "`box`"),
+        (json!({"id": id, "box": [[0, 0], [1e300, 0]]}), "`box`"),
+        (json!({"id": id, "start": -1}), "`start`"),
+        (json!({"id": id, "start": 0.5}), "`start`"),
+        (json!({"id": id, "limit": 0}), "`limit`"),
+        (json!({"id": id, "limit": 5001}), "`limit`"),
+        (json!({"id": id, "explode": "yes"}), "`explode`"),
+        (json!({"id": id, "layer": ["A-WALL"]}), "`layer` isn't one of its parameters"),
+        (json!({}), "`id`"),
+        (json!({"id": 100000}), "isn't a CAD import"),
+    ] {
+        let e = fails(&mut s, "cad_read", p.clone());
+        assert!(e.starts_with("cad_read: ") && e.contains(says), "{p}: {e}");
+    }
+}
+
+#[test]
+fn read_takes_hostile_params_without_a_panic_or_a_change() {
+    let (mut s, id) = read_site("read-hostile");
+    let before = s.model.clone();
+    for p in [
+        json!(null),
+        json!([]),
+        json!("x"),
+        json!({"id": u64::MAX}),
+        json!({"id": id, "start": u64::MAX, "limit": 5000}),
+        json!({"id": id, "start": 1e300}),
+        json!({"id": id, "limit": f64::MAX}),
+        json!({"id": id, "limit": -1}),
+        json!({"id": id, "box": [[f64::MAX, 0], [0, 0]]}),
+        json!({"id": id, "box": [[1, 1], [1, 1]]}),
+        json!({"id": id, "box": "x", "kinds": [null], "layers": [[]]}),
+        json!({"id": id, "layers": vec!["A-WALL"; 100_000]}),
+        json!({"id": id, "kinds": vec!["line"; 100_000]}),
+        json!({"id": id, "layers": ["x".repeat(100_000)]}),
+        json!({"id": id, "explode": true, "start": 0, "limit": 1}),
+    ] {
+        let _ = s.execute("cad_read", &p);
+        assert_eq!(s.model.check(), Ok(()));
+    }
+    assert!(s.model == before, "reading changes nothing");
 }

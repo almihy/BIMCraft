@@ -17,8 +17,11 @@ drawing's own units: LINE, LWPOLYLINE and POLYLINE (bulges become arcs; a 3D mes
 ELLIPSE (as a polyline), SPLINE (its fit points, else its control points), POINT, TEXT and MTEXT (its formatting codes taken
 out, aligned as the file says), SOLID and TRACE, and HATCH (its boundary loops, solid or patterned; a patterned one is drawn as a
 pale fill of its colour, since its pattern isn't kept). An INSERT places its block's entities, scaled, turned and arrayed, up to
-`MAX_DEPTH` blocks deep; an entity on layer 0 of a block takes the insert's layer, and one by block its colour. DIMENSION draws
-its anonymous block. What the reader doesn't know (3DFACE, a viewport, an image, a proxy) is counted by kind in
+`MAX_DEPTH` blocks deep; an entity on layer 0 of a block takes the insert's layer, and one by block its colour. Each placement
+by model space (one for each cell of an array) is kept in `Dxf::inserts` as an `Insert`: the block's name, the INSERT's layer,
+its insertion point (through the extrusion's mirror, when it has one), its turn in [0, 360), its scale, and the range of
+`Dxf::entities` it placed, nested blocks included; a placement that placed nothing is not kept. DIMENSION draws
+its anonymous block, which is no placement. What the reader doesn't know (3DFACE, a viewport, an image, a proxy) is counted by kind in
 `Dxf::left_out`, and the command lists it. The text itself is read as UTF-8 where it is, and else by the code page the header names in
 `$DWGCODEPAGE`: the East Asian pages and the Windows ones decode through `encoding_rs`, and a page without a decoder here (the DOS
 ones) reads as Latin-1, as it always has.
@@ -74,6 +77,15 @@ The engine removes a drawing nothing places after each command, and forgets the 
 - `reload_cad` reads a linked drawing's file again; opening a project does so for each (`cads_not_reloaded` names those whose
   file is gone, which keep what they had).
 - `cad_query` names the entity nearest a point: its layer, kind, colour and linetype (Revit's Query).
+- `cad_read` gives an agent the drawing's raw contents as they lie in the model (mm, through `cad_place` and the import's
+  angle, to the hundredth), every layer read whether shown or not. Without `layers`, `kinds`, `box` or `start` it sums the
+  drawing up: its extents, its layers with their kinds counted (`block` counting the placements on a layer), its blocks by
+  how often they're placed with their size, and the first 300 texts. With any of them it lists what matches in file order, a
+  page at a time (`start`, `limit` up to 5000, `next`; a page also ends after 200,000 points): lines, polylines, circles,
+  arcs, points, texts and hatches, each with `n`, its index in `Dxf::entities`, which stays the drawing's. A block placed in
+  model space is one `block` item (`b`, its index in `Dxf::inserts`, its point, turn, scale, the corners of the box round
+  what it placed in its own turned frame, and its range of `n`), unless `explode` lists its entities one by one.
+  `cad::placed` and `cad::frame_corners` do the geometry.
 - `move`, `rotate`, `copy` and `delete` take an import as any element; `mirror` is refused, since a drawing's text would read
   backwards; `modify` changes its level, `at`, `angle`, `scale` and `colors`.
 

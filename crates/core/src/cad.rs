@@ -211,6 +211,46 @@ pub fn paths(shape: &Shape) -> Vec<(Vec<P2>, bool)> {
     }
 }
 
+/// `shape` through a similarity: `f` takes its points, which turns them `turn` degrees and scales them `k` times; circles stay
+/// circles, an arc's start comes into [0, 360) with its sweep kept, a text's angle turns.
+fn similar(shape: &Shape, f: impl Fn(P2) -> P2, turn: f64, k: f64) -> Shape {
+    let ring = |r: &Vec<P2>| r.iter().map(|p| f(*p)).collect::<Vec<P2>>();
+    match shape {
+        Shape::Line(a, b) => Shape::Line(f(*a), f(*b)),
+        Shape::Polyline { pts, closed } => Shape::Polyline { pts: ring(pts), closed: *closed },
+        Shape::Circle { c, r } => Shape::Circle { c: f(*c), r: r * k },
+        Shape::Arc { c, r, start, end } => {
+            let s = (start + turn).rem_euclid(360.0);
+            Shape::Arc { c: f(*c), r: r * k, start: s, end: s + (end - start) }
+        }
+        Shape::Point(p) => Shape::Point(f(*p)),
+        Shape::Text { at, height, angle, text, align, tag } => Shape::Text {
+            at: f(*at),
+            height: height * k,
+            angle: (angle + turn).rem_euclid(360.0),
+            text: text.clone(),
+            align: *align,
+            tag: tag.clone(),
+        },
+        Shape::Fill { rings, solid } => Shape::Fill { rings: rings.iter().map(ring).collect(), solid: *solid },
+    }
+}
+
+/// A shape of a placed drawing as it lies in the model, mm: through [`crate::model::cad_place`], turned by the import's angle.
+pub fn placed(shape: &Shape, ci: &crate::model::CadImport) -> Shape {
+    similar(shape, crate::model::cad_place(ci), ci.angle, ci.scale)
+}
+
+/// The box round `shapes` in a frame turned `angle` degrees: its four corners (its low corner first, counter-clockwise in that
+/// frame), back in the shapes' own coordinates. A block placed is boxed in its own turned frame this way.
+pub fn frame_corners(shapes: impl IntoIterator<Item = Shape>, angle: f64) -> Option<[P2; 4]> {
+    let (sin, cos) = angle.to_radians().sin_cos();
+    let unturn = move |p: P2| P2(p.0 * cos + p.1 * sin, -p.0 * sin + p.1 * cos);
+    let turn = |p: P2| P2(p.0 * cos - p.1 * sin, p.0 * sin + p.1 * cos);
+    let [lo, hi] = dxf::union(shapes.into_iter().map(|s| similar(&s, unturn, -angle, 1.0).bounds()))?;
+    Some([lo, P2(hi.0, lo.1), hi, P2(lo.0, hi.1)].map(turn))
+}
+
 /// What kind of entity a shape came from, as Query names it.
 pub fn kind(shape: &Shape) -> &'static str {
     match shape {

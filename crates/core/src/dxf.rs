@@ -221,6 +221,24 @@ pub struct Entity {
     pub shape: Shape,
 }
 
+/// A block placed in model space by an INSERT (one for each cell of its array): what it placed is `entities`, a range of
+/// [`Dxf::entities`], blocks nested in it included. A DIMENSION's block is no placement.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Insert {
+    /// The block's name.
+    pub name: String,
+    /// The INSERT's layer.
+    pub layer: String,
+    /// Its insertion point, drawing units, where the block's base lands.
+    pub at: P2,
+    /// Its turn, degrees counter-clockwise from east, in [0, 360).
+    pub angle: f64,
+    /// Its scale along the block's x and y, as the file says.
+    pub scale: [f64; 2],
+    /// The entities it placed.
+    pub entities: std::ops::Range<usize>,
+}
+
 /// A DXF file read: what it draws, in its own unit.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Dxf {
@@ -237,6 +255,8 @@ pub struct Dxf {
     /// `$LTSCALE`: what every linetype's dashes are multiplied by.
     pub ltscale: f64,
     pub entities: Vec<Entity>,
+    /// The blocks model space places, in file order: each placement that placed any entity.
+    pub inserts: Vec<Insert>,
     /// `$EXTMIN` and `$EXTMAX`, the drawing's extents as the file says them.
     pub extents: Option<[P2; 2]>,
     /// What was left out, by what it was, each with its count: kinds of entity the reader doesn't draw, paper space,
@@ -558,7 +578,7 @@ impl<'a> Reader<'a> {
             (Some(lo), Some(hi)) if lo.0 <= hi.0 && lo.1 <= hi.1 => Some([lo, hi]),
             _ => None,
         };
-        let mut out = Out { entities: Vec::new(), left_out: BTreeMap::new(), work: 0 };
+        let mut out = Out { entities: Vec::new(), inserts: Vec::new(), left_out: BTreeMap::new(), work: 0 };
         self.place(&mut out, &ents, Xf::ID, None, 0)?;
         let mut layers = std::mem::take(&mut self.layers);
         for e in &out.entities {
@@ -581,6 +601,7 @@ impl<'a> Reader<'a> {
             linetypes: std::mem::take(&mut self.linetypes),
             ltscale,
             entities: out.entities,
+            inserts: out.inserts,
             extents,
             left_out: out.left_out,
         })
@@ -781,6 +802,7 @@ struct Inherit<'b> {
 
 struct Out {
     entities: Vec<Entity>,
+    inserts: Vec<Insert>,
     left_out: BTreeMap<String, usize>,
     work: usize,
 }
@@ -978,11 +1000,25 @@ impl<'a> Reader<'a> {
         let (cols, rows) = (e.int(70)?.unwrap_or(1).clamp(1, MAX_ARRAY as i64), e.int(71)?.unwrap_or(1).clamp(1, MAX_ARRAY as i64));
         let (dx, dy) = (e.num(44)?.unwrap_or(0.0), e.num(45)?.unwrap_or(0.0));
         let (ex, ey) = (P2(turn.cos(), turn.sin()), P2(-turn.sin(), turn.cos()));
+        // Through the extrusion's mirror, which is all that is above a placement in model space, the turn is mirrored too.
+        let degrees = e.num(50)?.unwrap_or(0.0);
+        let angle = if xf.x.0 < 0.0 { 180.0 - degrees } else { degrees }.rem_euclid(360.0);
         for row in 0..rows {
             for col in 0..cols {
                 let o = at + ex * (dx * col as f64) + ey * (dy * row as f64);
                 let local = Xf { o, x: ex * sx, y: ey * sy };
+                let first = out.entities.len();
                 self.block(out, name, style, xf.then(local), depth)?;
+                if depth == 0 && out.entities.len() > first {
+                    out.inserts.push(Insert {
+                        name: name.chars().take(MAX_CHARS).collect(),
+                        layer: style.layer.clone(),
+                        at: xf.at(o),
+                        angle,
+                        scale: [sx, sy],
+                        entities: first..out.entities.len(),
+                    });
+                }
             }
         }
         Ok(())
@@ -1867,6 +1903,103 @@ mod tests {
         let based = pairs(&[(0, "BLOCK"), (2, "B"), (10, "5"), (20, "5"), (0, "POINT"), (10, "5"), (20, "5"), (0, "ENDBLK")]);
         let d = read_text(&file("", "", &based, &pairs(&[(0, "INSERT"), (2, "B"), (10, "1"), (20, "2")]))).unwrap();
         assert_eq!(shapes(&d), [&Shape::Point(P2(1.0, 2.0))]);
+    }
+
+    #[test]
+    fn each_placement_of_a_block_in_model_space_is_kept_with_the_entities_it_placed() {
+        let blocks = pairs(&[
+            (0, "BLOCK"),
+            (2, "MARK"),
+            (10, "0"),
+            (20, "0"),
+            (0, "POINT"),
+            (10, "0"),
+            (20, "0"),
+            (0, "ENDBLK"),
+            (0, "BLOCK"),
+            (2, "BAY"),
+            (10, "0"),
+            (20, "0"),
+            (0, "LINE"),
+            (10, "0"),
+            (20, "0"),
+            (11, "2.5"),
+            (21, "0"),
+            (0, "LINE"),
+            (10, "2.5"),
+            (20, "0"),
+            (11, "2.5"),
+            (21, "5"),
+            (0, "INSERT"),
+            (2, "MARK"),
+            (10, "1"),
+            (20, "1"),
+            (0, "ENDBLK"),
+            (0, "BLOCK"),
+            (2, "*D1"),
+            (10, "0"),
+            (20, "0"),
+            (0, "LINE"),
+            (10, "0"),
+            (20, "0"),
+            (11, "1"),
+            (21, "0"),
+            (0, "ENDBLK"),
+        ]);
+        let entities = pairs(&[
+            (0, "LINE"),
+            (8, "A"),
+            (10, "0"),
+            (20, "0"),
+            (11, "1"),
+            (21, "0"),
+            (0, "INSERT"),
+            (8, "PARK"),
+            (2, "BAY"),
+            (10, "10"),
+            (20, "0"),
+            // Turned a quarter, twice the size, two columns 10 apart along its turned x.
+            (0, "INSERT"),
+            (8, "PARK"),
+            (2, "BAY"),
+            (10, "20"),
+            (20, "0"),
+            (41, "2"),
+            (42, "2"),
+            (50, "90"),
+            (70, "2"),
+            (44, "10"),
+            (0, "INSERT"),
+            (2, "NOWHERE"),
+            (10, "0"),
+            (20, "0"),
+            (0, "DIMENSION"),
+            (2, "*D1"),
+            (0, "LINE"),
+            (10, "0"),
+            (20, "0"),
+            (11, "1"),
+            (21, "0"),
+        ]);
+        let d = read_text(&file("", "", &blocks, &entities)).unwrap();
+        // The line, three bays of three (the nested mark is its bay's), the dimension's line, the line.
+        assert_eq!(d.entities.len(), 1 + 3 * 3 + 1 + 1, "{:?}", d.entities);
+        let got: Vec<_> =
+            d.inserts.iter().map(|i| (i.name.as_str(), i.layer.as_str(), i.at, i.angle, i.scale, i.entities.clone())).collect();
+        assert_eq!(
+            got,
+            [
+                ("BAY", "PARK", P2(10.0, 0.0), 0.0, [1.0, 1.0], 1..4),
+                ("BAY", "PARK", P2(20.0, 0.0), 90.0, [2.0, 2.0], 4..7),
+                ("BAY", "PARK", P2(20.0 + 10.0 * 90f64.to_radians().cos(), 10.0), 90.0, [2.0, 2.0], 7..10),
+            ],
+            "a block not defined and a dimension's block are no placements"
+        );
+        assert!(d.entities[1..10].iter().all(|e| e.layer == "PARK"));
+        // An insertion point read through the extrusion's mirror: x the other way, the turn mirrored.
+        let mirrored = pairs(&[(0, "INSERT"), (2, "BAY"), (10, "10"), (20, "0"), (50, "30"), (230, "-1")]);
+        let d = read_text(&file("", "", &blocks, &mirrored)).unwrap();
+        assert_eq!((d.inserts[0].at, d.inserts[0].angle), (P2(-10.0, 0.0), 150.0));
     }
 
     #[test]
