@@ -19,7 +19,6 @@ use std::sync::Arc;
 use crate::commands::{micron, next_number, tidy};
 use crate::family::{Category, Expr, Family, Form, IfcClass, MAX_TRIANGLES, Parameter};
 use crate::geom::{self, P2};
-use crate::library::Kind;
 use crate::model::{
     Ceiling, CeilingType, Column, ColumnType, Component, Element, Extrusion, FIRST_ID, Floor, FloorType, Function, Grid, Guid, Id, Justify,
     Landing, Layer, Level, MAX_COORD, MAX_LAYERS, MAX_POINTS, MAX_PROJECT_PARAMETERS, MAX_TEXT, Mass, Model, Opening, OpeningType,
@@ -3486,12 +3485,7 @@ pub(crate) fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, S
     // The library's GUIDs too, the file makes: the same file reads the same every time.
     m.library = crate::library::Library::default();
     m.forget_parts();
-    m.sync_library_with(&mut |_, kind, name| {
-        let n = format!("{}/{name}", kind.map_or_else(|| "part".to_string(), Kind::to_string))
-            .bytes()
-            .fold(0xCBF2_9CE4_8422_2325_u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01B3));
-        Guid::seeded(seed, n)
-    });
+    m.sync_library_with(&mut |_, kind, name| crate::library::stable_guid(seed, kind, name));
     // What breaks a rule is left out, with the rule; a wall takes its doors and windows along.
     for _ in 0..=m.elements.len() {
         let Err(error) = m.check() else { break };

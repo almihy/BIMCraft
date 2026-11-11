@@ -400,7 +400,7 @@ impl WebApp {
     /// Takes in what the others changed (`{"elements": {guid: json | null}, "project": {key: json | null}, "complete"?}`;
     /// `complete`: everything the shared model holds, what it doesn't name being removed). The model is checked: what would
     /// break it is left out and named. This person's changes not taken yet stay as they are, to be sent; their undo stays
-    /// theirs. Replies `{"taken": n, "refused": [{what, error}]}`.
+    /// theirs. Replies `{"taken": n, "refused": [{what, error}], "fixes": {key: json text}}`: the `fixes` are what this copy tells the room that it did not hear (an entry it had to rename).
     pub fn apply_changes(&self, changes: &str) -> Result<String, JsValue> {
         let c = Changes::read(changes).map_err(err)?;
         let merged = {
@@ -410,12 +410,7 @@ impl WebApp {
             let mine: BTreeSet<Guid> = sync::changes(&sent, &now).map_err(err)?.elements.into_keys().collect();
             let merged = host.app.merge_remote(&c, &mine).map_err(err)?;
             // What was sent takes the same changes, so that what changed here since is still this person's alone.
-            // The rename notes are left out of what the baseline takes: a copy that moved an edit of an old name onto the new, or
-            // made an element follow a rename, still has that to send, and heals the room (bimcraft_core::sync_settings).
-            let after = sent
-                .with_changes(&merged.taken.without_notes(), &merged.ids)
-                .map(Arc::new)
-                .unwrap_or_else(|_| Arc::clone(&host.app.session.model));
+            let after = sent.with_changes(&merged.taken, &merged.ids).map(Arc::new).unwrap_or_else(|_| Arc::clone(&host.app.session.model));
             *self.sent.borrow_mut() = Some(after);
             merged
         };

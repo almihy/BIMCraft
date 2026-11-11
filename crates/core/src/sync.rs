@@ -8,9 +8,11 @@
 //! - `project`: each changed setting of the project (its types, materials, families, units, …) by its key in the file,
 //!   as its JSON, or none where the file leaves it out now.
 //!
-//! The ids, `next_id` and the library's own ids and GUIDs stay each copy's: the library is made again from the names
-//! ([`Model::sync_library`]). A link made from a project's text (`link {text}`, the site Arqiflow links under the building)
-//! is each copy's own too, made again from its text where it is shown, so it is never sent nor taken.
+//! The ids and `next_id` stay each copy's. The library's GUIDs are the project's, as an element's are: each entry of it is
+//! told by its GUID, so a rename is a change to its name alone, and an element, which points at its type and the rest by GUID as
+//! a file does, says the same whatever they are called (`docs/areas/sync.md`). A link made from a project's text (`link {text}`,
+//! the site Arqiflow links under the building) is each copy's own, made again from its text where it is shown, so it is never
+//! sent nor taken.
 //!
 //! [`Model::merged`] takes changes in and checks the model; [`Session::merge`] does it for an open session, keeping its
 //! undo history its own: each model it goes back to is brought the same changes, so undo takes back this copy's own
@@ -24,17 +26,18 @@ use serde_json::{Map, Value};
 use crate::engine::{Session, Step};
 use crate::ids::{Changed, Guid, Id};
 use crate::model::{Element, Model};
-use crate::sync_settings::{self, Note, RENAMES, setting_of};
+use crate::sync_settings;
 
 /// The keys of a project's file that are not settings to send: its elements, the id the next one takes, and the library's
-/// own ids and GUIDs, each copy's.
+/// ids (its entries' GUIDs travel with the entries), each copy's.
 pub(crate) const NOT_SETTINGS: [&str; 3] = ["elements", "next_id", "library"];
 
-/// How copies of a project tell each other its settings, a number a room and a page compare: a page whose engine says
-/// another is not the room's, and loads again. 1: each setting a whole key (a whole map, `types`); 2: each entry of a map on its
-/// own (`types/wall/Brick 300`), phases with their places, rename notes ([`crate::sync_settings`]). Raised when a copy of the
-/// older would misread what the newer tells.
-pub const FORMAT: u32 = 2;
+/// How copies of a project tell each other what it holds, a number a room and a page compare: a page whose engine says
+/// another is not the room's, and loads again. 1: each setting a whole key (a whole map, `types`); 3: each entry of a map on
+/// its own, by its GUID, with its name apart (`types/wall/<guid>`, `types/wall/<guid>/name`), phases with their places, and the
+/// elements and entries pointing at entries by GUID ([`crate::sync_settings`]). Raised when a copy of the older would misread
+/// what the newer tells.
+pub const FORMAT: u32 = 3;
 
 /// Most changes one call takes, and the longest JSON of one: what comes from another copy is hostile.
 pub const MAX_CHANGES: usize = 200_000;
@@ -76,27 +79,6 @@ impl Changes {
     pub fn to_json(&self) -> String {
         serde_json::to_string(self).unwrap_or_else(|_| "{}".into())
     }
-
-    /// These changes without the rename notes (`renames/…`, [`crate::sync_settings`]): what a model that is to be told what
-    /// changed is told. A copy that keeps what it last sent is told so, so that what it did with the notes (a late edit put on the
-    /// new name, an element made to follow the rename) is still its own change to send, and heals the room.
-    pub fn without_notes(&self) -> Changes {
-        Changes {
-            project: self.project.iter().filter(|(k, _)| setting_of(k) != RENAMES).map(|(k, v)| (k.clone(), v.clone())).collect(),
-            ..self.clone()
-        }
-    }
-
-    /// Only the rename notes of these changes: what taking in the elements is told, so that they follow a rename.
-    fn notes_only(&self) -> BTreeMap<String, Option<String>> {
-        self.project.iter().filter(|(k, _)| setting_of(k) == RENAMES).map(|(k, v)| (k.clone(), v.clone())).collect()
-    }
-}
-
-/// What a room that keeps the settings `project` (by key, as it holds them) puts in it to be rid of the whole maps of copies
-/// of an older [`FORMAT`]: each made entries and its key taken away. See [`crate::sync_settings`].
-pub fn expand_settings(project: &BTreeMap<String, String>) -> Result<BTreeMap<String, Option<String>>, String> {
-    sync_settings::expand(project)
 }
 
 /// Whether an element is this copy's own, never sent nor taken: a link made from a project's text.
@@ -104,9 +86,10 @@ pub fn own(e: &Element) -> bool {
     matches!(e, Element::Link(l) if l.path.starts_with(crate::link::FROM_TEXT))
 }
 
-/// An element as it is sent: its JSON.
-fn element_text(e: &Element) -> Result<String, String> {
-    serde_json::to_string(e).map_err(|e| e.to_string())
+/// An element as it is sent: its JSON as a file holds it, what it points at in the library by GUID
+/// ([`Model::element_to_file`]), so that renaming an entry changes nothing an element says.
+fn element_text(m: &Model, e: &Element) -> Result<String, String> {
+    serde_json::to_string(&m.element_to_file(e)).map_err(|e| e.to_string())
 }
 
 /// Everything in `m`, as changes that make a copy say it (`complete`).
@@ -117,7 +100,7 @@ pub fn entries(m: &Model) -> Result<Changes, String> {
             continue;
         }
         if let Some(g) = m.elements.guid(*id) {
-            c.elements.insert(g, Some(element_text(e)?));
+            c.elements.insert(g, Some(element_text(m, e)?));
         }
     }
     for (k, v) in sync_settings::flat(m)? {
@@ -126,24 +109,29 @@ pub fn entries(m: &Model) -> Result<Changes, String> {
     Ok(c)
 }
 
-/// What changed from `before` to `after`, by GUID and by setting, with a note for each entry that was renamed (what the others
-/// take to follow it, see [`crate::sync_settings`]).
-pub fn changes(before: &Model, after: &Model) -> Result<Changes, String> {
-    let mut c = plain_changes(before, after)?;
-    if !c.project.is_empty() {
-        for (k, new) in sync_settings::renames(before, after) {
-            c.project.insert(format!("{RENAMES}/{k}"), Some(Value::String(new).to_string()));
-        }
-    }
-    Ok(c)
+/// Whether the library has other entries in `after` than in `before`, by GUID, kind and name (its ids are each copy's).
+fn library_changed(before: &Model, after: &Model) -> bool {
+    before.library.len() != after.library.len()
+        || before.library.entries().any(|(_, e)| after.library.by_guid(e.guid).is_none_or(|(_, x)| x.kind != e.kind || x.name != e.name))
 }
 
-/// [`changes`] without the notes: what the undo history keeps.
-fn plain_changes(before: &Model, after: &Model) -> Result<Changes, String> {
+/// Whether an entry of the library is another in `after` than `before` under one name (taken out and made again): what points at
+/// it by name says the same in a model, and not in a file.
+fn library_remapped(before: &Model, after: &Model) -> bool {
+    library_changed(before, after)
+        && before.library.entries().any(|(_, e)| after.library.guid(&e.kind, &e.name).is_some_and(|g| g != e.guid))
+}
+
+/// What changed from `before` to `after`, by GUID and by setting. An element that says the same (a rename of what it points at
+/// changes its names here, not its text) is not a change.
+pub fn changes(before: &Model, after: &Model) -> Result<Changes, String> {
     let mut c = Changes::default();
+    let remapped = library_remapped(before, after);
     let guids: BTreeSet<Guid> = match after.elements.changed_since(&before.elements) {
-        Changed::Ids(ids) => ids.iter().flat_map(|id| [before.elements.guid(*id), after.elements.guid(*id)]).flatten().collect(),
-        Changed::All => {
+        Changed::Ids(ids) if !remapped => {
+            ids.iter().flat_map(|id| [before.elements.guid(*id), after.elements.guid(*id)]).flatten().collect()
+        }
+        _ => {
             let mut all: BTreeSet<Guid> = BTreeSet::new();
             for m in [before, after] {
                 all.extend(m.elements.keys().filter_map(|id| m.elements.guid(*id)));
@@ -153,14 +141,15 @@ fn plain_changes(before: &Model, after: &Model) -> Result<Changes, String> {
     };
     for g in guids {
         let (was, now) = (before.elements.get(g), after.elements.get(g));
-        if was.is_some_and(own) || now.is_some_and(own) {
+        if was.is_some_and(own) || now.is_some_and(own) || (was == now && !remapped) {
             continue;
         }
-        if was != now {
-            c.elements.insert(g, now.map(element_text).transpose()?);
+        let (a, b) = (was.map(|e| element_text(before, e)).transpose()?, now.map(|e| element_text(after, e)).transpose()?);
+        if a != b {
+            c.elements.insert(g, b);
         }
     }
-    if !before.same_settings(after) {
+    if !before.same_settings(after) || library_changed(before, after) {
         let (a, b) = (sync_settings::flat(before)?, sync_settings::flat(after)?);
         for k in a.keys().chain(b.keys()).collect::<BTreeSet<_>>() {
             if a.get(k) != b.get(k) {
@@ -180,6 +169,9 @@ pub struct Merged {
     pub refused: Vec<(String, String)>,
     /// The id each element new here was given.
     pub ids: BTreeMap<Guid, Id>,
+    /// What this copy tells the room that it did not hear: the keys (`.../name`) of entries it had to rename, two having asked for
+    /// one name ([`crate::sync_settings`]), and their names now.
+    pub fixes: BTreeMap<String, Option<String>>,
 }
 
 impl Merged {
@@ -188,6 +180,7 @@ impl Merged {
         serde_json::json!({
             "taken": self.taken.elements.len() + self.taken.project.len(),
             "refused": self.refused.iter().map(|(what, why)| serde_json::json!({"what": what, "error": why})).collect::<Vec<_>>(),
+            "fixes": self.fixes,
         })
     }
 }
@@ -201,25 +194,26 @@ impl Model {
         // Settings and elements together first: another project opened in a copy (an .rvt, an .ifc) changes both, its
         // types and the walls of those types, and neither passes the check without the other.
         if !c.project.is_empty()
-            && let Ok(mut all) = self.with_settings(c, false)
+            && let Ok((mut all, fixes)) = self.with_settings(c, false)
         {
-            let wanted = Changes { project: c.notes_only(), ..c.clone() };
             let mut got = Merged::default();
-            let whole = all.take_elements(&wanted, keep, ids, &mut got).and_then(|()| {
-                all.sync_library();
+            let whole = all.take_elements(c, keep, ids, &mut got).and_then(|()| {
+                all.sync_library_stable();
                 all.check()
             });
             if whole.is_ok() && got.refused.is_empty() {
                 out.taken = Changes { elements: got.taken.elements, project: c.project.clone(), complete: c.complete };
                 out.ids = got.ids;
+                out.fixes = fixes;
                 return Ok((all, out));
             }
         }
         // The settings first, all or none: the elements are checked against them.
         let base = match self.with_settings(c, true) {
-            Ok(m) => {
+            Ok((m, fixes)) => {
                 out.taken.project = c.project.clone();
                 out.taken.complete = c.complete;
+                out.fixes = fixes;
                 m
             }
             Err(e) => {
@@ -227,11 +221,10 @@ impl Model {
                 self.clone()
             }
         };
-        let wanted = Changes { project: c.notes_only(), ..c.clone() };
         let mut all = base.clone();
         let mut got = Merged::default();
-        let whole = all.take_elements(&wanted, keep, ids, &mut got).and_then(|()| {
-            all.sync_library();
+        let whole = all.take_elements(c, keep, ids, &mut got).and_then(|()| {
+            all.sync_library_stable();
             all.check_changed(self)
         });
         if whole.is_ok() && got.refused.is_empty() {
@@ -253,14 +246,14 @@ impl Model {
             );
         }
         for (g, v) in each {
-            let one = Changes { elements: BTreeMap::from([(g, v)]), project: c.notes_only(), ..Changes::default() };
+            let one = Changes { elements: BTreeMap::from([(g, v)]), ..Changes::default() };
             let mut next = m.clone();
             let mut got = Merged::default();
             let tried = next.take_elements(&one, keep, ids, &mut got).and_then(|()| {
                 if got.taken.elements.is_empty() {
                     return Ok(());
                 }
-                next.sync_library();
+                next.sync_library_stable();
                 next.check_changed(&m)
             });
             match tried {
@@ -276,26 +269,45 @@ impl Model {
         Ok((m, out))
     }
 
-    /// This model with the settings `c` changes, each copy's own kept: the library made again from the names, and checked
-    /// when `check` says.
-    fn with_settings(&self, c: &Changes, check: bool) -> Result<Model, String> {
+    /// This model with the settings `c` changes, each copy's own kept: the entries it tells put in, renamed or taken out by GUID,
+    /// and what in this copy points at an entry by name (its elements) following the renames; checked when `check` says. With what
+    /// this copy tells the room that it did not hear ([`Merged::fixes`]).
+    fn with_settings(&self, c: &Changes, check: bool) -> Result<(Model, BTreeMap<String, Option<String>>), String> {
         if c.project.is_empty() {
-            return Ok(self.clone());
+            return Ok((self.clone(), BTreeMap::new()));
         }
         let mut map = sync_settings::settings(self)?;
-        sync_settings::apply(&mut map, &c.project, c.complete)?;
+        let done = sync_settings::apply(self, &mut map, &c.project, c.complete)?;
         map.insert("elements".into(), Value::Object(Map::new()));
         map.insert("next_id".into(), serde_json::json!(self.next_id));
-        map.insert("library".into(), serde_json::to_value(&self.library).map_err(|e| e.to_string())?);
+        map.insert("library".into(), serde_json::to_value(&done.library).map_err(|e| e.to_string())?);
         let mut m: Model = serde_json::from_value(Value::Object(map)).map_err(|e| format!("the project's settings: {e}"))?;
+        // The settings point at entries by GUID, as a file does: named again by the library they now have.
+        m.refs_from_file();
         m.elements = self.elements.clone();
         m.loaded = self.loaded.clone();
-        m.follow(&sync_settings::notes(&c.project)?);
-        m.sync_library();
+        if !done.renames.is_empty() {
+            m.follow(self);
+        }
+        m.sync_library_stable();
         if check {
             m.check()?;
         }
-        Ok(m)
+        Ok((m, done.fixes))
+    }
+
+    /// What in this model is named by what `was` (the model it was made of) called an entry that is called otherwise now is named
+    /// by the new name: each element, through the file form it has in `was` (by GUID) and again in this model.
+    fn follow(&mut self, was: &Model) {
+        let ids: Vec<Id> = self.elements.keys().copied().collect();
+        for id in ids {
+            let Some(e) = self.elements.get(id) else { continue };
+            let mut f = was.element_to_file(e);
+            self.element_from_file(&mut f);
+            if f != *e {
+                self.elements.insert(id, f);
+            }
+        }
     }
 
     /// The elements `c` changes, put in or taken out by GUID, unchecked; and with `complete`, those it doesn't name taken
@@ -307,7 +319,7 @@ impl Model {
             }
             match v {
                 Some(text) => {
-                    let e: Element = match (text.len() < MAX_ENTRY).then(|| serde_json::from_str::<Element>(text)) {
+                    let mut e: Element = match (text.len() < MAX_ENTRY).then(|| serde_json::from_str::<Element>(text)) {
                         Some(Ok(e)) => e,
                         Some(Err(e)) => {
                             out.refused.push((g.to_string(), format!("not an element: {e}")));
@@ -321,6 +333,8 @@ impl Model {
                     if own(&e) {
                         continue;
                     }
+                    // What it points at by GUID is named by this model's library.
+                    self.element_from_file(&mut e);
                     match self.elements.id(*g) {
                         Some(id) => {
                             if self.elements.get(id) != Some(&e) {
@@ -346,8 +360,6 @@ impl Model {
             }
             out.taken.elements.insert(*g, v.clone());
         }
-        // What the elements name that a rename note says is renamed, they name by the new name.
-        self.follow(&sync_settings::notes(&c.project)?);
         if c.complete {
             let gone: Vec<Guid> = self
                 .elements
@@ -373,35 +385,13 @@ impl Model {
         out
     }
 
-    /// What is named by the old name of each rename `notes` tell, where this model has no entry of the old name and has one of
-    /// the new, is named by the new: its elements' types, its types' materials, its views' templates… ([`Model::lib_refs_mut`]).
-    pub(crate) fn follow(&mut self, notes: &[Note]) {
-        if notes.is_empty() {
-            return;
-        }
-        let have: BTreeSet<(crate::library::Kind, String)> = self.library_names().into_iter().collect();
-        let moves: Vec<(crate::library::Kind, String, String)> = notes
-            .iter()
-            .filter_map(|n| Some((n.kind()?, n.old().to_string(), n.new.clone())))
-            .filter(|(kind, old, new)| !have.contains(&(kind.clone(), old.clone())) && have.contains(&(kind.clone(), new.clone())))
-            .collect();
-        if moves.is_empty() {
-            return;
-        }
-        self.lib_refs_mut(&mut |kind, name| {
-            if let Some((_, _, new)) = moves.iter().find(|(k, old, _)| k == kind && old == name) {
-                *name = new.clone();
-            }
-        });
-    }
-
     /// `c` taken in without a check: for a model of the history, or what a copy last sent, what [`Model::merged`] took of it
     /// for the model now.
     pub fn with_changes(&self, c: &Changes, ids: &BTreeMap<Guid, Id>) -> Result<Model, String> {
-        let mut m = self.with_settings(c, false)?;
-        let elements = Changes { project: c.notes_only(), complete: false, ..c.clone() };
+        let (mut m, _) = self.with_settings(c, false)?;
+        let elements = Changes { project: BTreeMap::new(), complete: false, ..c.clone() };
         m.take_elements(&elements, &BTreeSet::new(), ids, &mut Merged::default())?;
-        m.sync_library();
+        m.sync_library_stable();
         Ok(m)
     }
 }
@@ -495,7 +485,7 @@ impl Session {
         for (stack, out) in [(&self.undo, &mut h.undo), (&self.redo, &mut h.redo)] {
             let mut nearer: &Model = &self.model;
             for (step, m) in stack.iter().rev() {
-                let c = plain_changes(nearer, m)?;
+                let c = changes(nearer, m)?;
                 nearer = m;
                 if c.is_empty() {
                     continue;
@@ -510,7 +500,7 @@ impl Session {
         }
         for g in elements {
             let e = self.model.elements.get(g).filter(|e| !own(e));
-            h.now.elements.insert(g, e.map(element_text).transpose()?);
+            h.now.elements.insert(g, e.map(|e| element_text(&self.model, e)).transpose()?);
         }
         if !touched.is_empty() {
             let now = sync_settings::flat(&self.model)?;
@@ -535,7 +525,7 @@ impl Session {
         let mut own_steps = false;
         let mut nearer: &Model = &self.model;
         for (_, m) in self.undo.iter().rev() {
-            own_steps |= !plain_changes(m, nearer)?.is_empty();
+            own_steps |= !changes(m, nearer)?.is_empty();
             nearer = m;
         }
         let anchor = match self.undo.first() {
@@ -544,7 +534,7 @@ impl Session {
         };
         // That model as the history last knew it, where the history touches it, and what the others changed of that since.
         let base = Arc::new(anchor.with_changes(&h.now, &BTreeMap::new())?);
-        let since = plain_changes(&base, &anchor)?;
+        let since = changes(&base, &anchor)?;
         let since_ids: BTreeMap<Guid, Id> = since.elements.keys().filter_map(|g| anchor.elements.id(*g).map(|id| (*g, id))).collect();
         let mut built: [Vec<(Step, Arc<Model>)>; 2] = Default::default();
         for (which, kept) in [&h.undo, &h.redo].into_iter().enumerate() {

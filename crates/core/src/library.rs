@@ -100,7 +100,7 @@ impl Kind {
         }
     }
 
-    fn parse(s: &str) -> Option<Kind> {
+    pub(crate) fn parse(s: &str) -> Option<Kind> {
         Some(match s {
             "material" => Kind::Material,
             "picture" => Kind::Picture,
@@ -549,6 +549,31 @@ impl Library {
             e.name = new.to_string();
             self.by_name.insert((kind.clone(), new.to_string()), id);
         }
+    }
+
+    /// This library's parts and held ids, with `entries` for its entries: each with its id, or none, and then an id is made for
+    /// it (counting down below the lowest this library has held, to one `free` says nothing else has). What live editing makes
+    /// of the library when it renames, adds and takes entries away together. An error where two have an id, a name or a GUID.
+    pub(crate) fn rebuilt(&self, entries: Vec<(Option<Id>, Entry)>, free: &dyn Fn(Id) -> bool) -> Result<Library, String> {
+        let mut out = Library { parts: self.parts.clone(), lowest: self.lowest, ..Library::default() };
+        let mut made = Vec::new();
+        for (id, e) in entries {
+            match id {
+                Some(id) => out.insert(id, e)?,
+                None => made.push(e),
+            }
+        }
+        for e in made {
+            let mut id = out.lowest_id().map_or(LAST_ID, |f| f.saturating_sub(1));
+            while id > 0 && (!free(id) || out.taken(id)) {
+                id -= 1;
+            }
+            if id == 0 {
+                return Err("the library has no id left for an entry".into());
+            }
+            out.insert(id, e)?;
+        }
+        Ok(out)
     }
 
     /// The design options of set `old` are of set `new` now.
@@ -1520,37 +1545,58 @@ impl Model {
     fn rekey_family_params(&mut self, key: &dyn Fn(&str, &str) -> Option<String>, material: &dyn Fn(&str) -> Option<String>) {
         let families = &self.families;
         for e in self.elements.values_mut() {
-            let Some((family, _)) = e.family() else { continue };
-            let Some(fam) = families.get(family) else { continue };
-            let family = family.to_string();
-            let Some(params) = e.params_mut() else { continue };
-            let names: Vec<String> = params.keys().cloned().collect();
-            for n in names {
-                let Some(k) = key(&family, &n) else { continue };
-                let Some(mut v) = params.remove(&n) else { continue };
-                // The parameter, by its name: the one given, or the one the key is.
-                let named = fam.parameters.iter().find(|p| p.name == n || p.name == k);
-                if let (Some(p), Value::String(m)) = (named, &mut v)
-                    && p.kind == crate::family::Kind::Material
-                    && let Some(to) = material(m)
-                {
-                    *m = to;
-                }
-                params.insert(k, v);
-            }
+            rekey_family_params_of(e, families, key, material);
         }
     }
 
     /// Each element's values of project parameters, keyed by what `key` makes of each parameter's name.
     fn rekey_params(&mut self, key: &dyn Fn(&str) -> Option<String>) {
-        for params in self.elements.values_mut().filter_map(crate::model::Element::params_mut) {
-            let names: Vec<String> = params.keys().filter(|k| key(k).is_some()).cloned().collect();
-            for n in names {
-                if let (Some(v), Some(k)) = (params.remove(&n), key(&n)) {
-                    params.insert(k, v);
-                }
-            }
+        for e in self.elements.values_mut() {
+            rekey_params_of(e, key);
         }
+    }
+
+    /// `e` as a file holds it: every name of a library entry its GUID, and its values of project parameters keyed by theirs
+    /// (what [`Model::to_json`] does to every element), the entries named by this model's library. Live editing sends an
+    /// element so, so that a rename of what it points at changes nothing it says.
+    pub fn element_to_file(&self, e: &Element) -> Element {
+        let mut e = e.clone();
+        let lib = &self.library;
+        rekey_family_params_of(
+            &mut e,
+            &self.families,
+            &|family, n| lib.guid(&Kind::FamilyParameter, &format!("{family}: {n}")).map(|g| g.to_string()),
+            &|name| lib.guid(&Kind::Material, name).map(|g| g.to_string()),
+        );
+        e.lib_refs_mut(&mut |kind, name| {
+            if let Some(g) = lib.guid(kind, name) {
+                *name = g.to_string();
+            }
+        });
+        rekey_params_of(&mut e, &|n| lib.guid(&Kind::Parameter, n).map(|g| g.to_string()));
+        e
+    }
+
+    /// `e` as a file holds it, named again by this model's library and families: [`Model::element_to_file`] undone. What a
+    /// GUID names that this model has no entry for is left as it is.
+    pub fn element_from_file(&self, e: &mut Element) {
+        let lib = &self.library;
+        let name = |kind: &Kind, text: &str| {
+            let (_, x) = lib.by_guid(Guid::parse(text).filter(|g| g.pending().is_none())?)?;
+            (x.kind == *kind).then(|| x.name.clone())
+        };
+        e.lib_refs_mut(&mut |kind, text| {
+            if let Some(n) = name(kind, text) {
+                *text = n;
+            }
+        });
+        rekey_params_of(e, &|k| name(&Kind::Parameter, k));
+        rekey_family_params_of(
+            e,
+            &self.families,
+            &|family, k| name(&Kind::FamilyParameter, k).and_then(|n| n.strip_prefix(&format!("{family}: ")).map(String::from)),
+            &|m| name(&Kind::Material, m),
+        );
     }
 
     /// The project as a file holds it: every name of a library entry its GUID, and the values of project parameters
@@ -1558,22 +1604,29 @@ impl Model {
     pub fn to_json(&self) -> Result<String, String> {
         let mut m = self.clone();
         m.sync_library();
-        let lib = m.library.clone();
+        m.refs_to_file();
+        serde_json::to_string_pretty(&m).map_err(|e| e.to_string())
+    }
+
+    /// Every name this model holds of a library entry (its elements', its types', its views'…) its GUID, and the values of
+    /// project parameters keyed by theirs: its library names them.
+    pub(crate) fn refs_to_file(&mut self) {
+        let lib = self.library.clone();
         // While the families have their names: their instance parameters' values, by the parameters' GUIDs.
-        m.rekey_family_params(&|family, n| lib.guid(&Kind::FamilyParameter, &format!("{family}: {n}")).map(|g| g.to_string()), &|name| {
-            lib.guid(&Kind::Material, name).map(|g| g.to_string())
-        });
-        m.lib_refs_mut(&mut |kind, name| {
+        self.rekey_family_params(
+            &|family, n| lib.guid(&Kind::FamilyParameter, &format!("{family}: {n}")).map(|g| g.to_string()),
+            &|name| lib.guid(&Kind::Material, name).map(|g| g.to_string()),
+        );
+        self.lib_refs_mut(&mut |kind, name| {
             if let Some(g) = lib.guid(kind, name) {
                 *name = g.to_string();
             }
         });
-        m.rekey_params(&|n| lib.guid(&Kind::Parameter, n).map(|g| g.to_string()));
-        serde_json::to_string_pretty(&m).map_err(|e| e.to_string())
+        self.rekey_params(&|n| lib.guid(&Kind::Parameter, n).map(|g| g.to_string()));
     }
 
-    /// What a file's GUIDs name, named again, and what has no id and GUID given them: what [`Model::to_json`] did, undone.
-    pub(crate) fn names_from_file(&mut self) {
+    /// What a file's GUIDs name, named again: what [`Model::refs_to_file`] did, undone.
+    pub(crate) fn refs_from_file(&mut self) {
         let lib = self.library.clone();
         let name = |kind: &Kind, text: &str| {
             let (_, e) = lib.by_guid(Guid::parse(text).filter(|g| g.pending().is_none())?)?;
@@ -1589,7 +1642,68 @@ impl Model {
             &|family, k| name(&Kind::FamilyParameter, k).and_then(|n| n.strip_prefix(&format!("{family}: ")).map(String::from)),
             &|m| name(&Kind::Material, m),
         );
-        self.sync_library();
+    }
+
+    /// What a file's GUIDs name, named again, and what has no id and GUID given them ([`Model::sync_library_stable`]).
+    pub(crate) fn names_from_file(&mut self) {
+        self.refs_from_file();
+        self.sync_library_stable();
+    }
+
+    /// [`Model::sync_library`], each entry (and part) with no GUID given the one this project makes of its kind and name
+    /// ([`stable_guid`]), the same in every copy of it: a file that holds none (from before the library, or before a kind of
+    /// entry), read in two places, gives the same GUIDs in both, and so do two copies that make an entry at once.
+    pub(crate) fn sync_library_stable(&mut self) {
+        let seed = self.uid;
+        self.sync_library_with(&mut |_, kind, name| stable_guid(seed, kind, name));
+    }
+}
+
+/// The GUID a project of `seed` (its `uid`) makes of an entry of `kind` named `name` (a part when `kind` is none), where a
+/// file gives it none: the same every time, as an element's GUID from an IFC file is (`import.rs`).
+pub fn stable_guid(seed: u64, kind: Option<&Kind>, name: &str) -> Guid {
+    let n = format!("{}/{name}", kind.map_or_else(|| "part".to_string(), Kind::to_string))
+        .bytes()
+        .fold(0xCBF2_9CE4_8422_2325_u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01B3));
+    Guid::seeded(seed, n)
+}
+
+/// An element's values of its family's instance parameters, keyed by what `key` makes of `family: parameter`; a material
+/// parameter's value, by what `material` makes of it.
+fn rekey_family_params_of(
+    e: &mut Element,
+    families: &BTreeMap<String, crate::family::Family>,
+    key: &dyn Fn(&str, &str) -> Option<String>,
+    material: &dyn Fn(&str) -> Option<String>,
+) {
+    let Some((family, _)) = e.family() else { return };
+    let Some(fam) = families.get(family) else { return };
+    let family = family.to_string();
+    let Some(params) = e.params_mut() else { return };
+    let names: Vec<String> = params.keys().cloned().collect();
+    for n in names {
+        let Some(k) = key(&family, &n) else { continue };
+        let Some(mut v) = params.remove(&n) else { continue };
+        // The parameter, by its name: the one given, or the one the key is.
+        let named = fam.parameters.iter().find(|p| p.name == n || p.name == k);
+        if let (Some(p), Value::String(m)) = (named, &mut v)
+            && p.kind == crate::family::Kind::Material
+            && let Some(to) = material(m)
+        {
+            *m = to;
+        }
+        params.insert(k, v);
+    }
+}
+
+/// An element's values of project parameters, keyed by what `key` makes of each parameter's name.
+fn rekey_params_of(e: &mut Element, key: &dyn Fn(&str) -> Option<String>) {
+    let Some(params) = e.params_mut() else { return };
+    let names: Vec<String> = params.keys().filter(|k| key(k).is_some()).cloned().collect();
+    for n in names {
+        if let (Some(v), Some(k)) = (params.remove(&n), key(&n)) {
+            params.insert(k, v);
+        }
     }
 }
 

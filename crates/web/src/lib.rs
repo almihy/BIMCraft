@@ -151,13 +151,13 @@ impl Engine {
         bimcraft_core::sync::FORMAT
     }
 
-    /// What a room that keeps the settings `project` (`{key: json text}`, as the room holds them) does to be rid of the whole
-    /// maps of copies of an older format: `{key: json text | null}`, each whole map made entries (those the room has not) and
-    /// its key taken away. See `bimcraft_core::sync_settings`.
-    pub fn expand_settings(project: &str) -> Result<String, JsError> {
-        let project: std::collections::BTreeMap<String, String> = serde_json::from_str(project).map_err(err)?;
-        let out = bimcraft_core::sync::expand_settings(&project).map_err(err)?;
-        serde_json::to_string(&out).map_err(err)
+    /// What changed from the project `before` (its .bimcraft JSON) to `after`, as another copy is told it: the engine's
+    /// `sync::changes`, `{"elements": {guid: json | null}, "project": {key: json | null}}`. A change made outside the room (the
+    /// agent's, a save over the API) travels exactly as a page's own does.
+    pub fn changes(before: &str, after: &str) -> Result<String, JsError> {
+        let (before, _) = bimcraft_core::model::Model::read(before).map_err(err)?;
+        let (after, _) = bimcraft_core::model::Model::read(after).map_err(err)?;
+        bimcraft_core::sync::changes(&before, &after).map(|c| c.to_json()).map_err(err)
     }
 
     /// Opens a project from its JSON text.

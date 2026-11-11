@@ -35,6 +35,8 @@ new library when it is read.
 Name and body are separate keys so that a rename and an edit of one entry made at the same moment both stand: a shared room keeps
 the last write of each key. (An element, and an entry's body, are replaced whole: last write wins per element and per entry body.)
 
+An entry taken out by one copy while another changes its body leaves a body with no name in a shared room: a copy that has no such entry makes none from it (the entry stays out; a rename of an entry taken out is dropped the same way).
+
 A page offline for any time, or an element that arrives after a rename, needs nothing: the element names the entry by GUID. An
 element naming an entry that was taken out meanwhile is refused by the model's check, and stays in the room.
 
@@ -44,6 +46,10 @@ Two copies making a type of one name at once make two entries of two GUIDs. Of t
 first by GUID keeps it, and the others become `Name (2)`, `Name (3)` in the order of their GUIDs, in every copy alike. A copy
 that had to rename an entry returns the key in `Merged::fixes`, and Arqiflow's page puts it in the room, so that a copy made from
 the room later agrees (identical writes by every copy; there is nothing to loop over once the room says it).
+
+## Changes made outside a room
+
+The server's agent changes the stored project, not a page's model. What it did is `Engine.changes(before, after)` (`crates/web`, a host op of Arqiflow's engine host): the engine's own `sync::changes`, so the agent's library changes (a type, a rename) travel exactly as a page's do, with no second comparison written elsewhere.
 
 ## Phases
 
