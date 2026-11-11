@@ -489,7 +489,9 @@ impl Canvas {
             let v = fit(rect.width().max(1.0) as u32, (rect.height() - self.room).max(1.0) as u32);
             Camera { scale: v.scale, cx: v.cx, cy: v.cy }
         });
-        let hover = ui.input(|i| i.pointer.hover_pos()).filter(|_| response.hovered());
+        // With Pan or Zoom Region on the canvas senses hovering only, which egui stops reporting once a button is down.
+        let hand = self.nav.mode != navigation::Mode::Off;
+        let hover = ui.input(|i| i.pointer.hover_pos()).filter(|_| response.hovered() || (hand && response.contains_pointer()));
         self.handle(ui, rect, id, hover);
         Some((self.view(id)?, hover.map(|p| (p.x - rect.min.x, p.y - rect.min.y))))
     }

@@ -70,10 +70,9 @@ fn a_tool_that_waits_for_its_elements_takes_a_box_and_does_not_drag_what_is_unde
     assert_eq!(h.state().selection, [south(&h)]);
     key(&mut h, Key::Enter);
     assert_eq!(h.state().tool, Tool::Move(None));
-    // The ribbon has the buttons on without a selection, and shows the tool waiting as the one lit.
     let mut h = app(BOX);
-    press(&mut h, "Move");
-    assert!(h.state().flow.pending.is_some(), "the Move button starts it too");
+    shortcut(&mut h, "MV");
+    assert!(h.state().flow.pending.is_some());
     key(&mut h, Key::Escape);
     assert!(h.state().flow.pending.is_none() && h.state().tool == Tool::Modify, "Esc ends it");
     // With no tool running, Enter repeats the last one: Move asks again.
@@ -214,9 +213,10 @@ fn ctrl_a_selects_everything_the_view_shows() {
 
 #[test]
 fn the_arrow_keys_nudge_the_selection_a_step_that_follows_the_zoom_and_shift_takes_ten() {
-    let mut h = app(BOX);
-    let wall = south(&h);
+    let mut h = app(r#"wall {"points": [[0,0],[8000,0]]}"#);
+    let wall = wall_ids(&h)[0];
     click(&mut h, P2(4000.0, 0.0));
+    assert_eq!(h.state().selection, [wall]);
     let ends = |h: &Harness<BimApp>| match h.state().session.model.elements.get(wall) {
         Some(Element::Wall(w)) => (w.start, w.end),
         _ => panic!("no wall"),
@@ -225,7 +225,7 @@ fn the_arrow_keys_nudge_the_selection_a_step_that_follows_the_zoom_and_shift_tak
     let step = nudge_step(h.state().canvas.view(key_of(&h)).unwrap().scale);
     key(&mut h, Key::ArrowRight);
     let (b, _) = ends(&h);
-    assert!((b.0 - a.0 - step).abs() < 1e-6 && (b.1 - a.1).abs() < 1e-6, "a step to the right: {a:?} to {b:?}, step {step}");
+    assert!((b.0 - a.0 - step).abs() < 1e-6 && (b.1 - a.1).abs() < 1e-6, "a step right: {a:?} to {b:?}, step {step}, {:?}", h.state().status);
     key(&mut h, Key::ArrowUp);
     let (c, _) = ends(&h);
     assert!((c.1 - b.1 - step).abs() < 1e-6, "a step up (north): {b:?} to {c:?}");
