@@ -82,6 +82,7 @@ mod image_tests;
 pub mod import;
 pub mod inquiry;
 pub mod insert;
+pub mod json;
 pub mod language;
 pub mod lenient;
 pub mod library;
@@ -197,10 +198,8 @@ pub mod workplane;
 mod workplane_tests;
 pub mod xlsx;
 
-pub use commands::{
-    command_of, element_json, element_json_bare, element_json_with, floor_outline, opening_of, roof_footprint, run_category_of, runs_of,
-    stood_of,
-};
+pub use commands::{command_of, floor_outline, opening_of, roof_footprint, run_category_of, runs_of, stood_of};
+pub use json::{element_json, element_json_bare, element_json_with};
 
 #[cfg(test)]
 mod connector_tests;

@@ -365,7 +365,7 @@ fn a_doors_name_and_a_tag_of_its_mark_never_look_for_its_rooms() {
     let crate::model::Element::Tag(t) = s.model.elements.get(tag).cloned().unwrap() else { panic!() };
     assert_eq!(s.model.tag_text(&t), "D7");
     assert_eq!(crate::inquiry::names(&s.model, door).map(|n| n.name), Some("Single 900 x 2100".into()));
-    assert_eq!(crate::commands::element_json_bare(&s.model, door)["mark"], json!("D7"));
+    assert_eq!(crate::json::element_json_bare(&s.model, door)["mark"], json!("D7"));
     crate::render::plan(&s.model, 100000, 4000, 3000);
     assert_eq!(crate::rooms::openings_looked_up(), before, "no room looked for");
     // What asks for them finds them.

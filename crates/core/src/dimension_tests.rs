@@ -26,7 +26,7 @@ fn house(s: &mut Session) -> Vec<Id> {
 }
 
 fn values(s: &mut Session, id: Id) -> Value {
-    crate::commands::element_json(&s.model, id)["values"].clone()
+    crate::json::element_json(&s.model, id)["values"].clone()
 }
 
 #[test]
@@ -44,7 +44,7 @@ fn a_dimension_measures_between_two_endpoints_aligned_horizontal_or_vertical() {
     // Without an orientation, a linear one runs as `at` says: past the points' east or west, vertical; else horizontal.
     let auto = run(&mut s, "dimension", json!({"kind": "linear", "refs": [from, to], "at": [11000, 3000]}));
     assert_eq!(auto["values"], json!([6000.0]));
-    assert_eq!(crate::commands::element_json(&s.model, id_of(&auto))["orient"], json!("vertical"));
+    assert_eq!(crate::json::element_json(&s.model, id_of(&auto))["orient"], json!("vertical"));
     let auto = run(&mut s, "dimension", json!({"kind": "linear", "refs": [from, to], "at": [4000, -2000]}));
     assert_eq!(auto["values"], json!([8000.0]));
     // The east wall moves east: all of them follow.
@@ -67,7 +67,7 @@ fn an_endpoint_is_found_near_a_point_a_wall_face_ending_at_its_corner() {
         json!({"refs": [{"endpoint": [3010, 3990]}, {"endpoint": [8090, -90]}], "kind": "linear", "orient": "horizontal", "at": [5000, -3000]}),
     );
     assert_eq!(d["values"], json!([5100.0]));
-    let refs = crate::commands::element_json(&s.model, id_of(&d))["refs"].clone();
+    let refs = crate::json::element_json(&s.model, id_of(&d))["refs"].clone();
     assert_eq!(refs[0], json!({"id": s.model.guid(a), "face": "centre", "point": "end"}));
     let corner = &refs[1];
     assert!(corner["point"].is_string() && corner["face"] != json!("centre"), "a face's end: {corner}");
@@ -255,10 +255,10 @@ fn a_project_starts_with_dimension_types_and_a_dimension_takes_its_kind_s() {
     assert!(listed["types"][crate::dims::DIAGONAL]["tick"] == "diagonal", "{listed}");
     assert!(listed["types"][crate::dims::ARROW]["tick"] == "arrow", "{listed}");
     let d = id_of(&run(&mut s, "dimension", json!({"refs": [{"id": w[1]}, {"id": w[3]}], "at": [4000, 3000]})));
-    assert_eq!(crate::commands::element_json(&s.model, d)["type"], json!(crate::dims::DIAGONAL));
+    assert_eq!(crate::json::element_json(&s.model, d)["type"], json!(crate::dims::DIAGONAL));
     let col = id_of(&run(&mut s, "column", json!({"at": [4000, 3000], "type": "Round 300"})));
     let r = id_of(&run(&mut s, "dimension", json!({"kind": "radial", "refs": [{"id": col}], "at": [4500, 3500]})));
-    assert_eq!(crate::commands::element_json(&s.model, r)["type"], json!(crate::dims::ARROW));
+    assert_eq!(crate::json::element_json(&s.model, r)["type"], json!(crate::dims::ARROW));
     // Made like another, its own values; renamed, what is of it follows; deleted only once nothing is.
     let made = run(
         &mut s,
@@ -267,9 +267,9 @@ fn a_project_starts_with_dimension_types_and_a_dimension_takes_its_kind_s() {
     );
     assert_eq!(made["type"]["tick"], json!("dot"));
     run(&mut s, "modify", json!({"id": d, "type": "Site"}));
-    assert_eq!(crate::commands::element_json(&s.model, d)["labels"], json!(["8.000"]));
+    assert_eq!(crate::json::element_json(&s.model, d)["labels"], json!(["8.000"]));
     run(&mut s, "dimension_type", json!({"name": "Site", "rename": "Survey"}));
-    assert_eq!(crate::commands::element_json(&s.model, d)["type"], json!("Survey"));
+    assert_eq!(crate::json::element_json(&s.model, d)["type"], json!("Survey"));
     let e = err(&mut s, "dimension_type", json!({"name": "Survey", "delete": true}));
     assert!(e.contains(&d.to_string()), "{e}");
     let e = err(&mut s, "dimension_type", json!({"name": "Survey", "tick_size": -1}));
@@ -288,28 +288,28 @@ fn a_dimension_s_own_text_goes_round_its_value_or_replaces_it() {
         "dimension",
         json!({"refs": [{"id": w[3]}, {"id": grid}, {"id": w[1]}], "at": [0, -1000], "prefix": "(", "suffix": ")", "above": "TYP.", "below": "CL"}),
     ));
-    let shown = crate::commands::element_json(&s.model, d);
+    let shown = crate::json::element_json(&s.model, d);
     assert_eq!(shown["labels"], json!(["(4000)", "(4000)"]));
     assert_eq!((shown["above"].clone(), shown["below"].clone()), (json!("TYP."), json!("CL")));
     // Equal segments show EQ, Revit's Equality Display.
     run(&mut s, "modify", json!({"id": d, "equality": true}));
-    assert_eq!(crate::commands::element_json(&s.model, d)["labels"], json!(["EQ", "EQ"]));
+    assert_eq!(crate::json::element_json(&s.model, d)["labels"], json!(["EQ", "EQ"]));
     run(&mut s, "modify", json!({"id": d, "equality": false, "replace": "VARIES"}));
-    assert_eq!(crate::commands::element_json(&s.model, d)["labels"], json!(["VARIES", "VARIES"]));
+    assert_eq!(crate::json::element_json(&s.model, d)["labels"], json!(["VARIES", "VARIES"]));
     let e = err(&mut s, "modify", json!({"id": d, "prefix": "a\nb"}));
     assert!(e.contains("prefix"), "{e}");
     // A radius and a diameter say what they are, as their type's symbols.
     let col = id_of(&run(&mut s, "column", json!({"at": [2000, 3000], "type": "Round 300"})));
     let r = id_of(&run(&mut s, "dimension", json!({"kind": "radial", "refs": [{"id": col}], "at": [2500, 3500]})));
-    assert_eq!(crate::commands::element_json(&s.model, r)["labels"], json!(["R 150"]));
+    assert_eq!(crate::json::element_json(&s.model, r)["labels"], json!(["R 150"]));
     let r = id_of(&run(&mut s, "dimension", json!({"kind": "diameter", "refs": [{"id": col}], "at": [2500, 3500]})));
-    assert_eq!(crate::commands::element_json(&s.model, r)["labels"], json!(["Ø 300"]));
+    assert_eq!(crate::json::element_json(&s.model, r)["labels"], json!(["Ø 300"]));
     // Baseline and ordinate strings show what each witness line is from the first.
     run(&mut s, "dimension_type", json!({"name": "Ordinate", "string": "ordinate"}));
     run(&mut s, "modify", json!({"id": d, "replace": "", "prefix": "", "suffix": "", "type": "Ordinate"}));
-    assert_eq!(crate::commands::element_json(&s.model, d)["labels"], json!(["0", "4000", "8000"]));
+    assert_eq!(crate::json::element_json(&s.model, d)["labels"], json!(["0", "4000", "8000"]));
     run(&mut s, "dimension_type", json!({"name": "Ordinate", "string": "baseline"}));
-    assert_eq!(crate::commands::element_json(&s.model, d)["labels"], json!(["4000", "8000"]));
+    assert_eq!(crate::json::element_json(&s.model, d)["labels"], json!(["4000", "8000"]));
 }
 
 #[test]
@@ -403,7 +403,7 @@ fn a_segment_of_a_dimension_has_text_of_its_own_over_the_dimension_s() {
     let d = id_of(&run(&mut s, "dimension", json!({"refs": [{"id": w[3]}, {"id": g}, {"id": w[1]}], "at": [0, -1000], "suffix": " mm"})));
     // The second segment, west to east: its own prefix, text under it, and the dimension's suffix still.
     run(&mut s, "dimension_text", json!({"id": d, "segment": 1, "prefix": "~", "below": "CLEAR"}));
-    let shown = crate::commands::element_json(&s.model, d);
+    let shown = crate::json::element_json(&s.model, d);
     assert_eq!(shown["labels"], json!(["2000 mm", "~6000 mm"]));
     let dim = match s.model.elements.get(d) {
         Some(crate::model::Element::Dimension(x)) => x.clone(),
@@ -412,12 +412,12 @@ fn a_segment_of_a_dimension_has_text_of_its_own_over_the_dimension_s() {
     assert_eq!(s.model.dimension_extra(&dim, 1), ("".to_string(), "CLEAR".to_string()));
     // Its replacement replaces it alone; the whole dimension's, without `segment`.
     run(&mut s, "dimension_text", json!({"id": d, "segment": 0, "replace": "VARIES"}));
-    assert_eq!(crate::commands::element_json(&s.model, d)["labels"], json!(["VARIES", "~6000 mm"]));
+    assert_eq!(crate::json::element_json(&s.model, d)["labels"], json!(["VARIES", "~6000 mm"]));
     run(&mut s, "dimension_text", json!({"id": d, "suffix": ""}));
-    assert_eq!(crate::commands::element_json(&s.model, d)["labels"], json!(["VARIES", "~6000"]));
+    assert_eq!(crate::json::element_json(&s.model, d)["labels"], json!(["VARIES", "~6000"]));
     // Cleared, a segment's text goes.
     run(&mut s, "dimension_text", json!({"id": d, "segment": 0, "replace": ""}));
-    assert_eq!(crate::commands::element_json(&s.model, d)["texts"].as_array().map(Vec::len), Some(1));
+    assert_eq!(crate::json::element_json(&s.model, d)["texts"].as_array().map(Vec::len), Some(1));
     // Which segment a point is over: what a double click on a number edits.
     assert_eq!(
         (
@@ -535,7 +535,7 @@ fn a_column_running_up_through_a_plan_is_dimensioned_on_it_as_the_plan_draws_it(
     // A point on each one's face finds it on Level 2's plan: the east face of the tall one, the west face of its own.
     let d = run(&mut s, "dimension", on(json!([[3150, 3050], [6850, 5050]])));
     assert_eq!(d["values"], json!([3700.0]));
-    let refs = crate::commands::element_json(&s.model, id_of(&d))["refs"].clone();
+    let refs = crate::json::element_json(&s.model, id_of(&d))["refs"].clone();
     let (tall, own) = (s.model.guid(tall), s.model.guid(own));
     assert_eq!(refs, json!([{"id": tall, "face": "end"}, {"id": own, "face": "start"}]));
     // A corner of it, as an endpoint.
@@ -598,5 +598,5 @@ fn a_project_with_a_dimension_across_a_column_is_saved_in_format_18_and_opens_as
     assert!(file["format"].as_u64().is_some_and(|f| f >= 18), "{}", file["format"]);
     let (m, left_out) = Model::read(&file.to_string()).unwrap_or_else(|e| panic!("{e}"));
     assert!(left_out.is_empty(), "{left_out:?}");
-    assert_eq!(crate::commands::element_json(&m, d)["values"], json!([4000.0]));
+    assert_eq!(crate::json::element_json(&m, d)["values"], json!([4000.0]));
 }

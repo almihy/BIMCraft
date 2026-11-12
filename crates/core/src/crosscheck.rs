@@ -325,7 +325,7 @@ mod tests {
         let rooms = Rooms::new(&m);
         let mut n = 0;
         for (id, _, e) in m.elements.with_guids() {
-            let shown = crate::commands::element_json_with(&m, id, &rooms);
+            let shown = crate::json::element_json_with(&m, id, &rooms);
             let of = |q: &str| rows.iter().find(|r| r.id == id && r.quantity == q).map(|r| r.value);
             match e {
                 Element::Room(_) => {

@@ -61,7 +61,7 @@ fn a_detail_line_takes_every_shape_and_is_drawn_and_saved_as_that_shape() {
         let c = curve(&s, id);
         assert_eq!(c.kind(), *kind, "{p}");
         // What a front end reads of it: its shape and its length.
-        let got = crate::commands::element_json(&s.model, id);
+        let got = crate::json::element_json(&s.model, id);
         assert_eq!(got["shape"], json!(kind), "{got}");
         assert!((got["length"].as_f64().unwrap_or_default() - c.length()).abs() < 0.01, "{got}");
         // Drawn through its own points.
@@ -520,7 +520,7 @@ fn dimensions_measure_to_straight_detail_lines_and_radial_ones_to_their_circles_
     let b = line(&mut s, json!({"start": [2500, 0], "end": [2500, 3000]}));
     let d = run(&mut s, "dimension", json!({"refs": [{"id": a}, {"id": b}], "at": [1000, 4000]}));
     let id = d["id"].as_u64().unwrap_or_default();
-    let shown = crate::commands::element_json(&s.model, id);
+    let shown = crate::json::element_json(&s.model, id);
     assert!(shown.to_string().contains("2500"), "{shown}");
     // Its ends too: from the end of one to the end of the other, across.
     let c = line(&mut s, json!({"start": [0, 5000], "end": [1000, 5000]}));

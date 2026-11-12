@@ -3103,7 +3103,7 @@ mod tests {
         let roof = run(&mut s, "roof", json!({"boundary": boundary, "overhang": 0, "slope": 30}))["id"].as_u64().unwrap();
         let f = export(&s.model);
         let m = &s.model;
-        let json = |id: u64| crate::commands::element_json(m, id);
+        let json = |id: u64| crate::json::element_json(m, id);
         let close = |a: f64, b: f64| (a - b).abs() < 0.006;
         let (ifc_wall, ifc_floor) = (of_kind(&f, "IFCWALL"), *of_kind(&f, "IFCSLAB").last().unwrap());
         // A wall's net side and volume, and a floor's net area and volume: the schedule's cells are the file's numbers.
@@ -3151,7 +3151,7 @@ mod tests {
         let q = quantities_of(&f, of_kind(&f, "IFCROOF")[0], "Qto_RoofBaseQuantities");
         assert!(near(q["GrossArea"], 48.0) && near(q["NetArea"], 45.0) && near(q["ProjectedArea"], 45.0), "{q:?}");
         let id = s.model.elements.iter().find(|(_, e)| matches!(e, Element::Roof(_))).map(|(id, _)| *id).unwrap();
-        let j = crate::commands::element_json(&s.model, id);
+        let j = crate::json::element_json(&s.model, id);
         assert!(
             (j["surface_area_m2"].as_f64().unwrap() - 45.0).abs() < 0.006 && (j["volume_m3"].as_f64().unwrap() - 13.5).abs() < 0.006,
             "{j}"

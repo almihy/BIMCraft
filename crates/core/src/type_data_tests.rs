@@ -123,9 +123,9 @@ fn a_types_elements_read_its_identity_data_as_schedule_fields_and_in_tags() {
     };
     run(&mut s, "type", json!({"category": "wall", "name": wall_type, "type_mark": "W1", "manufacturer": "Acme"}));
     // The element's JSON says it, for agents.
-    let j = crate::commands::element_json(&s.model, door);
+    let j = crate::json::element_json(&s.model, door);
     assert_eq!((j["type_mark"].as_str(), j["fire_rating"].as_str(), j["cost"].as_f64()), (Some("D1"), Some("EI 30"), Some(310.0)));
-    assert!(crate::commands::element_json(&s.model, window).get("type_mark").is_none());
+    assert!(crate::json::element_json(&s.model, window).get("type_mark").is_none());
     // Fields of a door schedule, and of a multi-category one.
     let r = run(
         &mut s,
@@ -158,7 +158,7 @@ fn a_types_elements_read_its_identity_data_as_schedule_fields_and_in_tags() {
     // A tag shows one, as it shows a door's mark.
     let tag = run(&mut s, "tag", json!({"ids": [door], "label": "Type Mark"}));
     let t = tag["ids"][0].as_u64().unwrap_or_default();
-    assert_eq!(crate::commands::element_json(&s.model, t)["text"], "D1", "{tag}");
+    assert_eq!(crate::json::element_json(&s.model, t)["text"], "D1", "{tag}");
     // Filtering and sorting by one.
     let r = run(
         &mut s,
@@ -191,7 +191,7 @@ fn a_family_types_identity_data_follows_the_type_and_reaches_the_schedule() {
     let e = s.execute("family", &json!({"name": "Chair", "identity": {"Nope": {"type_mark": "x"}}})).unwrap_err();
     assert!(e.contains("no type `Nope`"), "{e}");
     let id = run(&mut s, "component", json!({"family": "Chair", "type": "A", "at": [1000, 1000]}))["id"].as_u64().unwrap_or_default();
-    let j = crate::commands::element_json(&s.model, id);
+    let j = crate::json::element_json(&s.model, id);
     assert_eq!((j["type_mark"].as_str(), j["manufacturer"].as_str()), (Some("C1"), Some("Ikea")), "{j}");
     let r = run(&mut s, "schedule", json!({"name": "Chairs", "category": "component", "fields": ["Type", "Type Mark", "Manufacturer"]}));
     assert_eq!(r["rows"], json!([["A", "C1", "Ikea"]]), "{r}");
@@ -242,7 +242,7 @@ fn a_wall_schedule_has_area_and_volume_less_its_openings() {
     let q = crate::quantities::wall(m, walls[0]).unwrap_or_else(|| panic!("a wall"));
     assert!(near(q.net_side / 1e6, net) && near(q.net_volume / 1e9, net * thick / 1e3));
     // A wall's JSON says them, for agents.
-    let j = crate::commands::element_json(&s.model, walls[0]);
+    let j = crate::json::element_json(&s.model, walls[0]);
     assert!((j["area_m2"].as_f64().unwrap_or_default() - net).abs() < 0.006, "{j}");
 }
 

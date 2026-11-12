@@ -14,8 +14,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::commands::{element_json_bare, element_json_with};
 use crate::family::{self, MAX_FORMULA};
+use crate::json::{element_json_bare, element_json_with};
 use crate::language::Language;
 use crate::model::category;
 use crate::model::{Element, Id, MAX_COORD, MAX_TEXT, Model, ParameterKind, Schedule};

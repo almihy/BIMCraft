@@ -856,7 +856,7 @@ fn a_shaped_slab_exported_and_imported_comes_back_with_its_points_and_creases() 
     for q in [P2(4000.0, 3000.0), P2(6000.0, 1000.0), P2(0.0, 0.0), P2(8000.0, 6000.0), P2(2000.0, 4500.0), P2(7000.0, 500.0)] {
         assert!(near(height(&i.model, &back, q), height(&s.model, &was, q)), "at {q:?}");
     }
-    let shape = crate::commands::element_json(&i.model, id);
+    let shape = crate::json::element_json(&i.model, id);
     assert_eq!(shape["top"], element(&mut s, f)["top"], "{shape}");
     assert_eq!(back.shape.points.len(), 2, "{:?}", back.shape);
     assert!(
