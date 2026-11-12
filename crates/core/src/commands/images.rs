@@ -58,7 +58,12 @@ fn page_read(c: &str, s: &Session, path: &str, page: usize, dpi: u32) -> Result<
         return Ok(std::sync::Arc::clone(r));
     }
     if s.pdf.elsewhere {
-        return Err(bad(c, format!("{path}: here a PDF is read apart from the editor, so it can't take the editor down; bring it in with Insert > Import PDF")));
+        return Err(bad(
+            c,
+            format!(
+                "{path}: here a PDF is read apart from the editor, so it can't take the editor down; bring it in with Insert > Import PDF"
+            ),
+        ));
     }
     let (bytes, _) = read_file(c, s, path)?;
     raster::read_pdf(bytes, page, dpi).map(std::sync::Arc::new).map_err(|e| bad(c, format!("{path}: {e}")))
@@ -237,7 +242,8 @@ fn place(c: &str, s: &mut Session, p: &Value, name: &str, new: Option<ImageType>
         Some(l) => DrawLayer::from_name(&l).ok_or_else(|| bad(c, format!("`layer` is background or foreground, not {l}")))?,
     };
     // In front of the view's other images.
-    let order = images_in(m, m.guid(view)).iter().filter_map(|id| image(m, *id)).map(|im| im.order).max().map_or(0, |o| o.saturating_add(1));
+    let order =
+        images_in(m, m.guid(view)).iter().filter_map(|id| image(m, *id)).map(|im| im.order).max().map_or(0, |o| o.saturating_add(1));
     let im = ImageInstance {
         order,
         type_name: name.to_string(),
@@ -281,7 +287,12 @@ pub(super) fn pdf_pages(s: &mut Session, p: &Value) -> R {
     let outline = match s.pdf.outlines.get(&pdf_key(s, &path)) {
         Some(o) => o.clone(),
         None if s.pdf.elsewhere => {
-            return Err(bad(c, format!("{path}: here a PDF is read apart from the editor, so it can't take the editor down; open it with Insert > Import PDF")));
+            return Err(bad(
+                c,
+                format!(
+                    "{path}: here a PDF is read apart from the editor, so it can't take the editor down; open it with Insert > Import PDF"
+                ),
+            ));
         }
         None => {
             let (bytes, _) = read_file(c, s, &path)?;
@@ -446,7 +457,8 @@ fn image(m: &Model, id: Id) -> Option<&ImageInstance> {
 
 /// The images placed in view `view`, back to front: by their draw order, then as they came in.
 pub(crate) fn images_in(m: &Model, view: crate::model::Guid) -> Vec<Id> {
-    let mut ids: Vec<(i32, Id)> = m.rare("image").into_iter().filter_map(|id| image(m, id).filter(|im| im.view == view).map(|im| (im.order, id))).collect();
+    let mut ids: Vec<(i32, Id)> =
+        m.rare("image").into_iter().filter_map(|id| image(m, id).filter(|im| im.view == view).map(|im| (im.order, id))).collect();
     ids.sort_unstable();
     ids.into_iter().map(|(_, id)| id).collect()
 }
@@ -466,7 +478,9 @@ pub(super) fn arrange(s: &mut Session, p: &Value) -> R {
                     views.push(im.view);
                 }
             }
-            Some(other) => return Err(bad(c, format!("{} {id} isn't an image: Arrange orders the images and PDFs of a view", other.category()))),
+            Some(other) => {
+                return Err(bad(c, format!("{} {id} isn't an image: Arrange orders the images and PDFs of a view", other.category())));
+            }
             None => return Err(bad(c, format!("no element {id}"))),
         }
     }

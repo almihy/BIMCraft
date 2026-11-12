@@ -345,7 +345,8 @@ fn a_mirrored_pdf_shows_its_pixels_where_its_lines_are() {
     let plan = plan_at(&s, 0.2);
     let dark = |q: [f64; 2]| {
         let (x, y) = ((200.0 + q[0] / 5.0) as u32, (200.0 - q[1] / 5.0) as u32);
-        (x - 1..=x + 1).any(|x| (y - 1..=y + 1).any(|y| plan.pixel(x, y).is_some_and(|c| c.red() < 128 && c.green() < 128 && c.blue() < 128)))
+        (x - 1..=x + 1)
+            .any(|x| (y - 1..=y + 1).any(|y| plan.pixel(x, y).is_some_and(|c| c.red() < 128 && c.green() < 128 && c.blue() < 128)))
     };
     assert!(dark(mid), "the leaf's pixels are where its line is");
     assert!(!dark([mid[0] + 60.0, mid[1] + 60.0]), "and not off it");
@@ -353,7 +354,8 @@ fn a_mirrored_pdf_shows_its_pixels_where_its_lines_are() {
 
 #[test]
 fn a_file_that_isnt_a_pdf_bimcraft_reads_is_refused_and_the_model_is_as_it_was() {
-    let mut s = with_file("bad.pdf", b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 9 0 R >> endobj trailer << /Root 1 0 R >> %%EOF".to_vec());
+    let mut s =
+        with_file("bad.pdf", b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 9 0 R >> endobj trailer << /Root 1 0 R >> %%EOF".to_vec());
     s.files.give("junk.pdf", (0..20_000_u32).map(|i| (i.wrapping_mul(2_654_435_761) >> 24) as u8).collect());
     for path in ["bad.pdf", "junk.pdf"] {
         let e = fails(&mut s, "import_pdf", json!({"path": path}));
@@ -449,7 +451,10 @@ fn an_image_whose_size_resolution_or_scale_is_wrong_is_refused_on_opening() {
 
 #[test]
 fn the_image_commands_help_is_one_line_each_and_names_the_commands_there_are() {
-    for c in crate::commands::ALL.iter().filter(|c| ["import_pdf", "import_image", "pdf_pages", "scale_elements", "manage_images", "arrange"].contains(&c.id)) {
+    for c in crate::commands::ALL
+        .iter()
+        .filter(|c| ["import_pdf", "import_image", "pdf_pages", "scale_elements", "manage_images", "arrange"].contains(&c.id))
+    {
         assert!(!c.params.contains("  "), "`{}`'s help runs spaces together: {}", c.id, c.params);
     }
     let doc = |id: &str| crate::commands::ALL.iter().find(|c| c.id == id).unwrap().params;

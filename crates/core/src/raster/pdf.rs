@@ -822,8 +822,8 @@ mod tests {
     fn a_crop_box_is_the_page_and_what_lies_off_it_is_left_out() {
         // A page 200 points a side cropped to its middle 100: the line across it is cut at the crop, the one below it gone.
         let content = "0 0 0 RG 4 w 0 100 m 200 100 l S 10 10 m 40 10 l S";
-        let d = Document::open(sample_pdf(&[SamplePage { crop: Some([50.0, 50.0, 150.0, 150.0]), ..page(content, [200.0; 2]) }], ""))
-            .unwrap();
+        let d =
+            Document::open(sample_pdf(&[SamplePage { crop: Some([50.0, 50.0, 150.0, 150.0]), ..page(content, [200.0; 2]) }], "")).unwrap();
         let [w, h] = d.size(1).unwrap();
         assert!((w - 100.0 * MM_PER_PT).abs() < 1e-6 && (h - w).abs() < 1e-6, "{w} {h}");
         let v = d.vectors(1).unwrap();
@@ -835,7 +835,8 @@ mod tests {
 
     #[test]
     fn a_user_unit_makes_the_page_and_its_lines_bigger() {
-        let d = Document::open(sample_pdf(&[SamplePage { user_unit: Some(2.0), ..page("4 w 0 50 m 100 50 l S", [100.0; 2]) }], "")).unwrap();
+        let d =
+            Document::open(sample_pdf(&[SamplePage { user_unit: Some(2.0), ..page("4 w 0 50 m 100 50 l S", [100.0; 2]) }], "")).unwrap();
         let [w, h] = d.size(1).unwrap();
         assert!((w - 200.0 * MM_PER_PT).abs() < 1e-6 && (h - w).abs() < 1e-6, "{w} {h}");
         let v = d.vectors(1).unwrap();
@@ -859,7 +860,9 @@ mod tests {
         assert!(near(whole[0][0], 0.0) && near(whole[1][0], 200.0 * k), "{whole:?}");
         assert_eq!(v.fills.len(), 1, "{v:?}");
         let ring = &v.fills[0].pts;
-        assert!(ring.iter().all(|q| q[0] >= 20.0 * k - 1e-6 && q[0] <= 80.0 * k + 1e-6 && q[1] >= 20.0 * k - 1e-6 && q[1] <= 80.0 * k + 1e-6));
+        assert!(
+            ring.iter().all(|q| q[0] >= 20.0 * k - 1e-6 && q[0] <= 80.0 * k + 1e-6 && q[1] >= 20.0 * k - 1e-6 && q[1] <= 80.0 * k + 1e-6)
+        );
         let xs: Vec<f64> = ring.iter().map(|q| q[0]).collect();
         assert!(xs.iter().any(|x| near(*x, 20.0 * k)) && xs.iter().any(|x| near(*x, 80.0 * k)), "{ring:?}");
     }
@@ -885,7 +888,9 @@ mod tests {
         let selfish = sample_pdf(&[page("/X1 Do", [200.0; 2])], "0 0 m 10 10 l S /X1 Do");
         let d = Document::open(selfish).unwrap();
         assert!(d.vectors(1).is_ok() && d.render(1, 72.0).is_ok());
-        let junk: String = (0..4000_u32).map(|i| char::from(b"q Q cm m l c re W n S f BT ET Tj 9e9 -1 [ ] ( ) < > /X1 Do"[(i * 7919 % 51) as usize])).collect();
+        let junk: String = (0..4000_u32)
+            .map(|i| char::from(b"q Q cm m l c re W n S f BT ET Tj 9e9 -1 [ ] ( ) < > /X1 Do"[(i * 7919 % 51) as usize]))
+            .collect();
         let d = Document::open(sample_pdf(&[page(&junk, [200.0; 2])], "")).unwrap();
         assert!(d.vectors(1).is_ok() && d.render(1, 72.0).is_ok());
         let odd = "99999999999999999999 0 0 -0.000000000000001 1e400 nan cm 0 0 m 1 1 l S 1 0 0 0 0 0 cm 0 0 m 5 5 l S";

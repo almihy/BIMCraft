@@ -132,7 +132,8 @@ fn walls_drawn_over_a_pdf_snap_to_its_lines() {
 fn the_arrange_panel_orders_the_views_images_and_leaves_their_draw_layer_be() {
     let mut h = with_pdf();
     let first = placed(&mut h);
-    let second = h.state_mut().session.execute("import_pdf", &json!({"image": "WC.pdf", "at": [6000, 3000]})).unwrap()["id"].as_u64().unwrap();
+    let second =
+        h.state_mut().session.execute("import_pdf", &json!({"image": "WC.pdf", "at": [6000, 3000]})).unwrap()["id"].as_u64().unwrap();
     let order = |h: &Harness<BimApp>| {
         let mut all = images(h);
         all.sort_by_key(|(id, im)| (im.order, *id));

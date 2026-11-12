@@ -42,7 +42,6 @@ pub mod host;
 pub mod hostview;
 pub mod icons;
 mod images;
-mod pdfread;
 mod inquiry;
 pub mod lang;
 mod linestyles;
@@ -54,6 +53,7 @@ mod notes;
 mod objectstyles;
 mod orbit;
 mod paper;
+mod pdfread;
 mod phasing;
 mod pin;
 #[cfg(feature = "plugins")]

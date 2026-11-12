@@ -480,7 +480,10 @@ impl ImageType {
         let lines = read.dxf.as_ref().and_then(|dxf| match Cad::new(source, None, dxf.clone()) {
             Ok(cad) => Some(cad),
             Err(e) => {
-                notes.push(format!("page {}'s lines couldn't be kept ({e}): it shows as a picture only, with nothing to snap to", read.page));
+                notes.push(format!(
+                    "page {}'s lines couldn't be kept ({e}): it shows as a picture only, with nothing to snap to",
+                    read.page
+                ));
                 None
             }
         });
@@ -633,23 +636,11 @@ impl PdfRead {
         let finest = RESOLUTIONS.iter().copied().max().unwrap_or(600);
         let sized = size.iter().all(|s| s.is_finite() && *s >= MIN_SIDE && *s <= crate::model::MAX_COORD);
         let scaled = scale.is_none_or(|k| k.is_finite() && k > 0.0 && k <= MAX_SCALE);
-        if !(sized && scaled && (1..=finest).contains(&head.dpi) && (1..=head.pages).contains(&head.page) && head.pages <= pdf::MAX_PAGES)
-        {
+        if !(sized && scaled && (1..=finest).contains(&head.dpi) && (1..=head.pages).contains(&head.page) && head.pages <= pdf::MAX_PAGES) {
             return Err("the page read says what no page is".into());
         }
         let notes = head.notes.into_iter().take(16).map(|n| n.chars().take(MAX_TEXT).collect()).collect();
-        Ok(PdfRead {
-            pages: head.pages,
-            page: head.page,
-            dpi: head.dpi,
-            size,
-            scale,
-            png: Arc::new(png),
-            px,
-            dxf,
-            notes,
-            level: None,
-        })
+        Ok(PdfRead { pages: head.pages, page: head.page, dpi: head.dpi, size, scale, png: Arc::new(png), px, dxf, notes, level: None })
     }
 }
 
@@ -674,7 +665,7 @@ pub fn read_pdf(bytes: Vec<u8>, page: usize, dpi: u32) -> Result<PdfRead, String
         ));
     }
     // The page's pixels in the channels they need, taken straight from what hayro drew, which is then let go.
-    let level = doc.render_into(page, dots, |w, h, rgba| Level::from_rgba(w, h, rgba))?;
+    let level = doc.render_into(page, dots, Level::from_rgba)?;
     let (w, h) = (level.w, level.h);
     too_big(w, h)?;
     let png = encode(&level)?;
@@ -939,7 +930,7 @@ mod tests {
     fn what_a_project_holds_of_images_stays_within_what_a_browser_saves() {
         // Its PNG in base64, and room for the rest of the project, within Chrome's longest string.
         const LONGEST: usize = (1 << 29) - 24;
-        assert!(MAX_HELD / 3 * 4 + (64 << 20) < LONGEST);
+        const { assert!(MAX_HELD / 3 * 4 + (64 << 20) < LONGEST) };
     }
 
     #[test]

@@ -2625,8 +2625,14 @@ fn cad_imports(d: &mut Drawing, m: &Model, key: crate::ids::Guid, level: crate::
 /// that `look` shows (all on a sheet, which has none), each drawn over its corners in the view's terms.
 pub(crate) fn images(d: &mut Drawing, m: &Model, key: Guid, layer: crate::raster::DrawLayer, look: Option<&Look>) {
     // Back to front, as Arrange orders them.
-    let mut ids: Vec<(i32, Id)> =
-        m.rare("image").into_iter().filter_map(|id| match m.elements.get(id) { Some(Element::Image(im)) => Some((im.order, id)), _ => None }).collect();
+    let mut ids: Vec<(i32, Id)> = m
+        .rare("image")
+        .into_iter()
+        .filter_map(|id| match m.elements.get(id) {
+            Some(Element::Image(im)) => Some((im.order, id)),
+            _ => None,
+        })
+        .collect();
     ids.sort_unstable();
     for (_, id) in ids {
         let Some(e @ Element::Image(im)) = m.elements.get(id) else { continue };
