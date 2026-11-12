@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::commands::{category, element_json_with};
+use crate::commands::{category, element_json_bare, element_json_with};
 use crate::family::{self, MAX_FORMULA};
 use crate::language::Language;
 use crate::model::{Element, Id, MAX_COORD, MAX_TEXT, Model, ParameterKind, Schedule};
@@ -638,6 +638,15 @@ fn own(cat: &str) -> (usize, &'static [Own]) {
     OWN.iter().chain(MORE).chain(std::iter::once(&SHARED)).find(|(c, _, _)| *c == cat).map_or((0, &[][..]), |(_, n, f)| (*n, *f))
 }
 
+/// Whether field `name` of category `cat` is found among the rooms of its element's level: a door's or window's From Room and
+/// To Room, a component's room, and what isn't the category's own or a project parameter (a formula may read them).
+fn reads_rooms(m: &Model, cat: &str, name: &str) -> bool {
+    match own(cat).1.iter().find(|(n, _, _)| *n == name) {
+        Some((_, _, from)) => matches!(from, From::Of(..) | From::Key("room_number" | "room_name")),
+        None => !m.parameters.contains_key(name),
+    }
+}
+
 /// Whether `name` is one of category `cat`'s own fields.
 pub fn own_field(cat: &str, name: &str) -> bool {
     own(cat).1.iter().any(|(n, _, _)| *n == name)
@@ -707,7 +716,9 @@ pub fn field_text_with(m: &Model, id: impl crate::ids::Key, name: &str, rooms: &
     let cat = e.category();
     let kind = fields(m, cat).into_iter().find(|(n, _)| n == name)?.1;
     let formulas = BTreeMap::new();
-    let mut row = Row { m, e, cat, json: element_json_with(m, id, rooms), formulas: &formulas, done: BTreeMap::new() };
+    // What a tag shows of a door (its mark, its type) wants nothing found among the rooms; its From Room does.
+    let json = if reads_rooms(m, cat, name) { element_json_with(m, id, rooms) } else { element_json_bare(m, id) };
+    let mut row = Row { m, e, cat, json, formulas: &formulas, done: BTreeMap::new() };
     match row.get(name) {
         Value::Null => None,
         v => Some(shown(m.units, kind, &v)),

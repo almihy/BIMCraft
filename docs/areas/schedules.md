@@ -16,7 +16,9 @@ read and never stored (`Rooms::room_at`): the room whose boundary at the walls' 
 component's point on its level, so an outlet on a wall's face is in the room on that side whatever the project measures rooms
 at. `element_json` gives it as `room` (the room's GUID), `room_number` and `room_name`; a component outside every room has none.
 A door's or window's From Room: Number, From Room: Name, To Room: Number and To Room: Name are Revit's, found the same way either
-side of its wall (`Rooms::from_to`, read from `from_room` and `to_room` in its JSON by `From::Of`; [families](families.md)).
+side of its wall (`Rooms::from_to`, read from `from_room` and `to_room` in its JSON by `From::Of`; [families](families.md)):
+set as it was placed and kept through its flips, of the project's last phase. A tag's text (`field_text_with`) finds an
+element's rooms only for a field that reads them (`reads_rooms`).
 A multi-category schedule (`of: "multicategory"`, `schedule::MULTI`, as Revit's Multi-Category Schedule) has a row for each
 element of the categories it lists (`Schedule::categories`; none, every built one, `schedule::built`: not rooms, levels and
 masses) and the fields they share (`SHARED`): Category (the element's, as elements name theirs), Family, Type, Level, Count,

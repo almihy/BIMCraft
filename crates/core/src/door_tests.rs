@@ -328,3 +328,20 @@ fn from_and_to_room_are_the_rooms_of_the_projects_last_phase_as_revits() {
     assert_eq!(e["shares_space_with"], json!(bath), "{e}");
 }
 
+#[test]
+fn a_doors_name_and_a_tag_of_its_mark_never_look_for_its_rooms() {
+    let mut s = Session::new();
+    rooms(&mut s);
+    let door = id_of(&run(&mut s, "door", json!({"at": [2000, 0], "mark": "D7"})));
+    let tag = run(&mut s, "tag", json!({"ids": [door]}))["ids"][0].as_u64().unwrap();
+    let before = crate::rooms::openings_looked_up();
+    let crate::model::Element::Tag(t) = s.model.elements.get(tag).cloned().unwrap() else { panic!() };
+    assert_eq!(s.model.tag_text(&t), "D7");
+    assert_eq!(crate::inquiry::names(&s.model, door).map(|n| n.name), Some("Single 900 x 2100".into()));
+    assert_eq!(crate::commands::element_json_bare(&s.model, door)["mark"], json!("D7"));
+    crate::render::plan(&s.model, 100000, 4000, 3000);
+    assert_eq!(crate::rooms::openings_looked_up(), before, "no room looked for");
+    // What asks for them finds them.
+    assert_eq!(crate::schedule::field_text(&s.model, door, "To Room: Name").as_deref(), Some("WC"));
+    assert!(crate::rooms::openings_looked_up() > before);
+}
