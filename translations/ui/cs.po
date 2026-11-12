@@ -234,7 +234,7 @@ msgstr "Osa stěny, aby se stěna na ní kreslená napojila"
 msgid "A {} needs a name."
 msgstr "U položky ({}) chybí název."
 
-#: crates/core/src/sheet.rs:291
+#: crates/model/src/sheet.rs:292
 msgid "AS INDICATED"
 msgstr ""
 
@@ -527,7 +527,7 @@ msgstr "Agenti: připojeno {}, jen pro čtení"
 msgid "Aggressiveness class"
 msgstr "Třída agresivity"
 
-#: crates/core/src/fixtures.rs:397
+#: crates/model/src/fixtures.rs:397
 msgid "Air Terminal"
 msgstr "Vyústka"
 
@@ -543,7 +543,7 @@ msgstr "Jímače"
 msgid "Aisle"
 msgstr ""
 
-#: crates/core/src/commands.rs:1469
+#: crates/core/src/commands.rs:1478
 #: crates/ui-egui/src/editor.rs:966
 #: crates/ui-egui/src/lib.rs:445
 #: crates/ui-egui/src/selecting.rs:81
@@ -565,7 +565,7 @@ msgstr "Zarovnání čar probíhá podle toho, co ukazuje půdorys: ve 3D pohled
 msgid "Aligned"
 msgstr "Zarovnaná"
 
-#: crates/core/src/commands.rs:983
+#: crates/core/src/commands.rs:992
 #: crates/ui-egui/src/selecting.rs:85
 msgid "Aligned Dimension"
 msgstr "Zarovnaná kóta"
@@ -574,7 +574,7 @@ msgstr "Zarovnaná kóta"
 msgid "Aligned Dimension (DI): pick parallel wall faces, wall ends, doors, windows or grids, or endpoints, then click where the dimension line goes"
 msgstr "Zarovnaná kóta (DI): vyberte rovnoběžné líce stěn, konce stěn, dveře, okna nebo modulové osy, případně koncové body, a potom klikněte do místa kótovací čáry"
 
-#: crates/core/src/commands.rs:1010
+#: crates/core/src/commands.rs:1019
 msgid "Aligned Dimension in 3D"
 msgstr "Zarovnaná kóta ve 3D"
 
@@ -692,7 +692,7 @@ msgstr ""
 msgid "And:"
 msgstr "A:"
 
-#: crates/core/src/snap.rs:71
+#: crates/model/src/snap.rs:71
 #: crates/ui-egui/src/reinforce.rs:83
 msgid "Angle"
 msgstr "Úhel"
@@ -725,7 +725,7 @@ msgstr "Úhlová kóta: vyberte dvě protínající se čáry a potom klikněte 
 msgid "Annotate"
 msgstr "Poznámka"
 
-#: crates/core/src/snap.rs:70
+#: crates/model/src/snap.rs:70
 msgid "Annotation Anchor"
 msgstr ""
 
@@ -802,9 +802,9 @@ msgstr "Délka oblouku:"
 msgid "Architecture"
 msgstr "Architektura"
 
-#: crates/core/src/schedule.rs:199
-#: crates/core/src/schedule.rs:225
-#: crates/core/src/schedule.rs:274
+#: crates/model/src/schedule.rs:200
+#: crates/model/src/schedule.rs:226
+#: crates/model/src/schedule.rs:275
 #: crates/ui-egui/src/site.rs:601
 #: crates/ui-egui/src/site.rs:1009
 msgid "Area"
@@ -814,7 +814,7 @@ msgstr "Plocha"
 msgid "Area per Stall"
 msgstr ""
 
-#: crates/core/src/family.rs:2115
+#: crates/model/src/family.rs:2115
 msgid "Arm Width"
 msgstr "Šířka područky"
 
@@ -822,7 +822,7 @@ msgstr "Šířka područky"
 msgid "Arrange"
 msgstr ""
 
-#: crates/core/src/commands.rs:1596
+#: crates/core/src/commands.rs:1605
 msgid "Array"
 msgstr "Pole"
 
@@ -866,11 +866,11 @@ msgstr "Přiřadit šablonu pohledu"
 msgid "Associated Level"
 msgstr "Přidružené podlaží"
 
-#: crates/core/src/model.rs:3174
+#: crates/model/src/model.rs:3173
 msgid "At wall centre line"
 msgstr "V ose stěny"
 
-#: crates/core/src/model.rs:3175
+#: crates/model/src/model.rs:3174
 msgid "At wall finish"
 msgstr "Na povrchové úpravě stěny"
 
@@ -918,7 +918,7 @@ msgstr ""
 msgid "Auto-Detect"
 msgstr "Automaticky detekovat"
 
-#: crates/core/src/commands.rs:113
+#: crates/core/src/commands.rs:122
 msgid "Autosave"
 msgstr "Automatické ukládání"
 
@@ -1059,7 +1059,7 @@ msgstr "Pruty"
 msgid "Base"
 msgstr "Základna"
 
-#: crates/core/src/family.rs:2159
+#: crates/model/src/family.rs:2159
 msgid "Base Cabinet"
 msgstr "Spodní skříňka"
 
@@ -1107,7 +1107,7 @@ msgstr ""
 msgid "Basketball"
 msgstr ""
 
-#: crates/core/src/family.rs:2213
+#: crates/model/src/family.rs:2213
 msgid "Bathtub"
 msgstr "Vana"
 
@@ -1119,7 +1119,7 @@ msgstr ""
 msgid "Bay Width"
 msgstr ""
 
-#: crates/core/src/commands.rs:825
+#: crates/core/src/commands.rs:834
 msgid "Beam"
 msgstr "Průvlak"
 
@@ -1127,7 +1127,7 @@ msgstr "Průvlak"
 msgid "Beam (BM): click its start and its end; a chain of clicks makes a beam for each step"
 msgstr "Průvlak (BM): klikněte na jeho počátek a konec; řetězec kliknutí vytvoří průvlak pro každý krok"
 
-#: crates/core/src/family.rs:2100
+#: crates/model/src/family.rs:2100
 msgid "Bed"
 msgstr "Postel"
 
@@ -1216,11 +1216,11 @@ msgstr "Čára hranice: načrtněte půdorysnou stopu střechy na podlaží vý�
 msgid "Boundary Line: sketch the shaft opening's outline"
 msgstr "Čára hranice: načrtněte obrys šachtového otvoru"
 
-#: crates/core/src/model.rs:3500
+#: crates/model/src/model.rs:3499
 msgid "Brick"
 msgstr "Cihla"
 
-#: crates/core/src/fills.rs:416
+#: crates/model/src/fills.rs:416
 msgid "Brick 225 x 75"
 msgstr "Cihla 225 x 75"
 
@@ -1288,7 +1288,7 @@ msgstr ""
 msgid "By View"
 msgstr "Podle pohledu"
 
-#: crates/core/src/library.rs:79
+#: crates/model/src/library.rs:79
 msgid "CAD drawing"
 msgstr "Výkres CAD"
 
@@ -1297,7 +1297,7 @@ msgstr "Výkres CAD"
 msgid "CAD drawings (DWG, DXF)"
 msgstr "Výkresy CAD (DWG, DXF)"
 
-#: crates/core/src/commands.rs:873
+#: crates/core/src/commands.rs:882
 msgid "Cable Tray"
 msgstr "Kabelový žlab"
 
@@ -1305,7 +1305,7 @@ msgstr "Kabelový žlab"
 msgid "Cable Tray (CT): click its start and its end; a chain of clicks makes a tray for each step"
 msgstr "Kabelový žlab (CT): klikněte na jeho počátek a konec; řetězec kliknutí vytvoří žlab pro každý krok"
 
-#: crates/core/src/commands.rs:907
+#: crates/core/src/commands.rs:916
 msgid "Cabling"
 msgstr "Kabeláž"
 
@@ -1331,7 +1331,7 @@ msgstr "Vypočítaná hodnota…"
 msgid "Came in: {}"
 msgstr "Importováno: {}"
 
-#: crates/core/src/commands.rs:2169
+#: crates/core/src/commands.rs:2178
 #: crates/ui-egui/src/camera.rs:148
 #: crates/ui-egui/src/camera.rs:209
 #: crates/ui-egui/src/lib.rs:4385
@@ -1362,7 +1362,7 @@ msgstr ""
 #: crates/ui-egui/src/clipboard.rs:174
 #: crates/ui-egui/src/clipboard.rs:212
 #: crates/ui-egui/src/clouds.rs:87
-#: crates/ui-egui/src/context.rs:500
+#: crates/ui-egui/src/context.rs:505
 #: crates/ui-egui/src/dimtypes.rs:319
 #: crates/ui-egui/src/display.rs:81
 #: crates/ui-egui/src/editor.rs:1138
@@ -1426,7 +1426,7 @@ msgstr ""
 msgid "Cars"
 msgstr ""
 
-#: crates/core/src/family.rs:2398
+#: crates/model/src/family.rs:2398
 msgid "Casement Window"
 msgstr "Křídlové okno"
 
@@ -1443,7 +1443,7 @@ msgstr "Kategorie"
 msgid "Categories not overridden are drawn as Object Styles sets them."
 msgstr "Kategorie bez přepsání se vykreslují podle nastavení ve Stylech objektů."
 
-#: crates/core/src/schedule.rs:265
+#: crates/model/src/schedule.rs:266
 #: crates/ui-egui/src/editor.rs:1043
 #: crates/ui-egui/src/objectstyles.rs:55
 #: crates/ui-egui/src/properties.rs:2091
@@ -1459,12 +1459,12 @@ msgstr "Hledat název kategorie:"
 msgid "Category:"
 msgstr "Kategorie:"
 
-#: crates/core/src/commands.rs:428
+#: crates/core/src/commands.rs:437
 #: crates/ui-egui/src/selecting.rs:97
 msgid "Ceiling"
 msgstr "Podhled"
 
-#: crates/core/src/fixtures.rs:309
+#: crates/model/src/fixtures.rs:309
 msgid "Ceiling Luminaire"
 msgstr "Stropní svítidlo"
 
@@ -1500,7 +1500,7 @@ msgstr "Značky středu"
 msgid "Center of Core"
 msgstr ""
 
-#: crates/core/src/draw.rs:109
+#: crates/model/src/draw.rs:109
 msgid "Center-ends Arc"
 msgstr "Oblouk se středem a koncovými body"
 
@@ -1517,21 +1517,21 @@ msgstr "Vystředěno v přerušení kótovací čáry"
 msgid "Centerlines"
 msgstr ""
 
-#: crates/core/src/units.rs:51
+#: crates/geom/src/units.rs:51
 msgid "Centimetres"
 msgstr "Centimetry"
 
-#: crates/core/src/lines.rs:182
+#: crates/model/src/lines.rs:182
 #: crates/ui-egui/src/editor.rs:942
 #: crates/ui-egui/src/editor.rs:969
 msgid "Centre"
 msgstr "Osa"
 
-#: crates/core/src/lines.rs:207
+#: crates/model/src/lines.rs:207
 msgid "Centre Lines"
 msgstr "Osové čáry"
 
-#: crates/core/src/model.rs:3508
+#: crates/model/src/model.rs:3507
 msgid "Ceramic tile"
 msgstr "Keramická dlažba"
 
@@ -1545,7 +1545,7 @@ msgstr "Řetězec"
 msgid "Chain of walls"
 msgstr ""
 
-#: crates/core/src/family.rs:2085
+#: crates/model/src/family.rs:2085
 msgid "Chair"
 msgstr "Židle"
 
@@ -1638,7 +1638,7 @@ msgstr "Kružnice: klikněte na její střed a potom na bod na ní (nebo pouze n
 msgid "Circulation"
 msgstr "Komunikace"
 
-#: crates/core/src/draw.rs:106
+#: crates/model/src/draw.rs:106
 msgid "Circumscribed Polygon"
 msgstr "Popsaný mnohoúhelník"
 
@@ -2252,7 +2252,7 @@ msgstr "Zavřít {}"
 msgid "Closed polyline, {} points"
 msgstr ""
 
-#: crates/core/src/graphics.rs:237
+#: crates/model/src/graphics.rs:233
 msgid "Coarse"
 msgstr "Hrubý"
 
@@ -2274,7 +2274,7 @@ msgstr "Barva"
 msgid "Colour on plans"
 msgstr "Barva v půdorysech"
 
-#: crates/core/src/commands.rs:799
+#: crates/core/src/commands.rs:808
 #: crates/ui-egui/src/selecting.rs:90
 msgid "Column"
 msgstr "Sloup"
@@ -2324,7 +2324,7 @@ msgstr "Kompaktní"
 msgid "Comparison"
 msgstr "Porovnání"
 
-#: crates/core/src/commands.rs:1420
+#: crates/core/src/commands.rs:1429
 #: crates/ui-egui/src/selecting.rs:91
 msgid "Component"
 msgstr "Komponenta"
@@ -2349,16 +2349,16 @@ msgstr "Výška výpočtu"
 msgid "Conceptual Mass"
 msgstr "Koncepční objem"
 
-#: crates/core/src/family.rs:2024
+#: crates/model/src/family.rs:2024
 #: crates/ui-egui/src/site.rs:176
 msgid "Concrete"
 msgstr "Beton"
 
-#: crates/core/src/model.rs:3502
+#: crates/model/src/model.rs:3501
 msgid "Concrete block"
 msgstr "Betonová tvárnice"
 
-#: crates/core/src/commands.rs:865
+#: crates/core/src/commands.rs:874
 msgid "Conduit"
 msgstr "Trubka elektroinstalace"
 
@@ -2449,11 +2449,11 @@ msgstr "Zkopírováno {} globálních ID IFC."
 msgid "Copied {} rows, tab-separated."
 msgstr "Zkopírováno {} řádků oddělených tabulátory."
 
-#: crates/core/src/model.rs:3516
+#: crates/model/src/model.rs:3515
 msgid "Copper"
 msgstr "Měď"
 
-#: crates/core/src/commands.rs:1555
+#: crates/core/src/commands.rs:1564
 #: crates/ui-egui/src/canvas.rs:2006
 #: crates/ui-egui/src/inquiry.rs:179
 #: crates/ui-egui/src/lib.rs:5241
@@ -2496,15 +2496,15 @@ msgstr "Kopírovat jeho ID, GUID a globální ID IFC"
 msgid "Copy to Clipboard (Ctrl+C): the selection, with the doors and windows in its walls"
 msgstr ""
 
-#: crates/core/src/model.rs:401
+#: crates/model/src/model.rs:398
 msgid "Core Centreline"
 msgstr "Osa nosné části"
 
-#: crates/core/src/model.rs:404
+#: crates/model/src/model.rs:401
 msgid "Core Face: Exterior"
 msgstr "Nosná vrstva: vnější"
 
-#: crates/core/src/model.rs:405
+#: crates/model/src/model.rs:402
 msgid "Core Face: Interior"
 msgstr "Nosná vrstva: vnitřní"
 
@@ -2560,7 +2560,7 @@ msgstr "Nepodařilo se otevřít {}: {}"
 msgid "Couldn't save the setting: {}"
 msgstr "Nastavení se nepodařilo uložit: {}"
 
-#: crates/core/src/schedule.rs:211
+#: crates/model/src/schedule.rs:212
 #: crates/ui-egui/src/filter.rs:84
 #: crates/ui-egui/src/linestyles/creator.rs:178
 #: crates/ui-egui/src/reinforce.rs:50
@@ -2692,7 +2692,7 @@ msgstr "Oříznout pohled: zobrazit pouze oblast oříznutí; přetáhněte jej�
 msgid "Cross-Section"
 msgstr "Průřez"
 
-#: crates/core/src/fills.rs:409
+#: crates/model/src/fills.rs:409
 #: crates/ui-egui/src/properties.rs:700
 msgid "Crosshatch"
 msgstr "Křížové šrafování"
@@ -2750,7 +2750,7 @@ msgstr "Rovina řezu"
 msgid "Cylinder"
 msgstr "Válec"
 
-#: crates/core/src/render.rs:3852
+#: crates/model/src/render.rs:3741
 msgid "DN"
 msgstr "DOLŮ"
 
@@ -2766,11 +2766,11 @@ msgstr "Tmavý režim"
 msgid "Dark UI, Light Canvas"
 msgstr "Tmavé rozhraní, světlá kreslicí plocha"
 
-#: crates/core/src/lines.rs:177
+#: crates/model/src/lines.rs:177
 msgid "Dash"
 msgstr "Čárkovaná"
 
-#: crates/core/src/lines.rs:180
+#: crates/model/src/lines.rs:180
 msgid "Dash Dot"
 msgstr "Čerchovaná"
 
@@ -2782,7 +2782,7 @@ msgstr "Čárkovaná"
 msgid "Data"
 msgstr "Data"
 
-#: crates/core/src/fixtures.rs:455
+#: crates/model/src/fixtures.rs:455
 msgid "Data Outlet"
 msgstr "Datová zásuvka"
 
@@ -2914,11 +2914,11 @@ msgstr "Zbourané"
 msgid "Demolition"
 msgstr "Demolice"
 
-#: crates/core/src/commands.rs:10815
+#: crates/core/src/commands.rs:10286
 msgid "Dependent"
 msgstr "Závislý"
 
-#: crates/core/src/family.rs:2022
+#: crates/model/src/family.rs:2022
 #: crates/ui-egui/src/properties.rs:485
 #: crates/ui-egui/src/properties.rs:486
 #: crates/ui-egui/src/site.rs:222
@@ -2947,7 +2947,7 @@ msgstr "Varianty návrhu"
 msgid "Design Options (DO): sets of options for a part of the design, and the one new elements are made in"
 msgstr "Varianty návrhu (DO): sady variant pro část návrhu a varianta, ve které se vytvářejí nové prvky"
 
-#: crates/core/src/family.rs:2131
+#: crates/model/src/family.rs:2131
 msgid "Desk"
 msgstr "Pracovní stůl"
 
@@ -3003,19 +3003,19 @@ msgstr "Zařízení (DV): zásuvka nebo vypínač v místě kliknutí na stěnu;
 msgid "Diagonal"
 msgstr "Úhlopříčka"
 
-#: crates/core/src/fills.rs:408
+#: crates/model/src/fills.rs:408
 msgid "Diagonal Crosshatch"
 msgstr "Úhlopříčné křížové šrafování"
 
-#: crates/core/src/fills.rs:407
+#: crates/model/src/fills.rs:407
 msgid "Diagonal Down"
 msgstr "Úhlopříčně dolů"
 
-#: crates/core/src/fills.rs:406
+#: crates/model/src/fills.rs:406
 msgid "Diagonal Up"
 msgstr "Úhlopříčně nahoru"
 
-#: crates/core/src/fixtures.rs:207
+#: crates/model/src/fixtures.rs:207
 #: crates/ui-egui/src/lib.rs:4203
 #: crates/ui-egui/src/reinforce.rs:51
 #: crates/ui-egui/src/reinforce.rs:59
@@ -3066,7 +3066,7 @@ msgstr "Text kóty"
 msgid "Dimension Text Placement:"
 msgstr "Umístění textu kóty:"
 
-#: crates/core/src/commands.rs:1481
+#: crates/core/src/commands.rs:1490
 msgid "Dimension Value"
 msgstr "Hodnota kóty"
 
@@ -3115,7 +3115,7 @@ msgstr "Zahodit"
 msgid "Dismiss"
 msgstr "Zavřít"
 
-#: crates/core/src/fixtures.rs:289
+#: crates/model/src/fixtures.rs:289
 msgid "Distribution Board"
 msgstr "Rozváděč"
 
@@ -3161,7 +3161,7 @@ msgstr "Hotovo"
 msgid "Done Editing Tools"
 msgstr "Dokončit úpravu nástrojů"
 
-#: crates/core/src/commands.rs:386
+#: crates/core/src/commands.rs:395
 #: crates/ui-egui/src/selecting.rs:71
 msgid "Door"
 msgstr "Dveře"
@@ -3170,7 +3170,7 @@ msgstr "Dveře"
 msgid "Door (DR): click a wall"
 msgstr "Dveře (DR): klikněte na stěnu"
 
-#: crates/core/src/schedule.rs:120
+#: crates/model/src/schedule.rs:121
 msgid "Door Schedule"
 msgstr "Výkaz dveří"
 
@@ -3178,7 +3178,7 @@ msgstr "Výkaz dveří"
 msgid "Doors and Windows"
 msgstr ""
 
-#: crates/core/src/commands.rs:972
+#: crates/core/src/commands.rs:981
 msgid "Dormer"
 msgstr "Vikýř"
 
@@ -3186,7 +3186,7 @@ msgstr "Vikýř"
 msgid "Dormer: click a roof's slope where its front wall goes; the roof opens under it"
 msgstr "Vikýř: klikněte na střešní rovinu v místě čelní stěny; střecha se pod ní otevře"
 
-#: crates/core/src/lines.rs:179
+#: crates/model/src/lines.rs:179
 #: crates/ui-egui/src/dimtypes.rs:121
 #: crates/ui-egui/src/editor.rs:931
 msgid "Dot"
@@ -3196,15 +3196,15 @@ msgstr "Tečkovaná"
 msgid "Dotted"
 msgstr "Tečkovaná"
 
-#: crates/core/src/family.rs:2307
+#: crates/model/src/family.rs:2307
 msgid "Double Door"
 msgstr "Dvoukřídlé dveře"
 
-#: crates/core/src/model.rs:3005
+#: crates/model/src/model.rs:3004
 msgid "Double Sliding"
 msgstr "Dvoukřídlé posuvné"
 
-#: crates/core/src/model.rs:3003
+#: crates/model/src/model.rs:3002
 msgid "Double Swing"
 msgstr "Dvoukřídlé otočné"
 
@@ -3217,7 +3217,7 @@ msgstr "Dvojité kliknutí na název karty udělá totéž; kliknutí na kartu p
 msgid "Down"
 msgstr "Dolů"
 
-#: crates/core/src/commands.rs:889
+#: crates/core/src/commands.rs:898
 msgid "Down Conductor"
 msgstr "Svod hromosvodu"
 
@@ -3274,7 +3274,7 @@ msgstr "Výkres"
 msgid "Drawing…"
 msgstr "Kreslení…"
 
-#: crates/core/src/commands.rs:854
+#: crates/core/src/commands.rs:863
 msgid "Duct"
 msgstr "Vzduchovod"
 
@@ -3342,7 +3342,7 @@ msgstr "Tloušťka jednotlivých per na papíře v mm v pohledech každého mě�
 msgid "Earthing"
 msgstr "Uzemnění"
 
-#: crates/core/src/commands.rs:898
+#: crates/core/src/commands.rs:907
 msgid "Earthing Conductor"
 msgstr "Zemnicí vodič"
 
@@ -3350,7 +3350,7 @@ msgstr "Zemnicí vodič"
 msgid "Earthing Conductor (GC): click its start and its end; a chain of clicks makes the ring or the mesh, under the level"
 msgstr "Zemnicí vodič (GC): klikněte na začátek a konec; řetězec kliknutí vytvoří obvodové vedení nebo mříž pod podlažím"
 
-#: crates/core/src/fixtures.rs:410
+#: crates/model/src/fixtures.rs:410
 msgid "Earthing Electrode"
 msgstr "Zemnicí elektroda"
 
@@ -3362,7 +3362,7 @@ msgstr "Zemnič (EG): zemnicí tyč zaražená pod úroveň v místě kliknutí;
 msgid "Earthing Electrodes"
 msgstr "Zemniče"
 
-#: crates/core/src/model.rs:2293
+#: crates/model/src/model.rs:2290
 msgid "East"
 msgstr "Východ"
 
@@ -3442,7 +3442,7 @@ msgstr "Úpravy"
 msgid "Edit…"
 msgstr "Upravit…"
 
-#: crates/core/src/fixtures.rs:230
+#: crates/model/src/fixtures.rs:230
 msgid "Elbow 90"
 msgstr "Koleno 90°"
 
@@ -3450,7 +3450,7 @@ msgstr "Koleno 90°"
 msgid "Electrical"
 msgstr "Elektroinstalace"
 
-#: crates/core/src/graphics.rs:942
+#: crates/model/src/graphics.rs:938
 msgid "Electrical Ceiling"
 msgstr ""
 
@@ -3462,11 +3462,11 @@ msgstr "Elektrická zařízení"
 msgid "Electrical Equipment (EE): a distribution board, where you click on the wall; Space turns it"
 msgstr "Elektrické zařízení (EE): rozvaděč v místě kliknutí na stěnu; Mezerník prvek otočí"
 
-#: crates/core/src/graphics.rs:941
+#: crates/model/src/graphics.rs:937
 msgid "Electrical Lighting"
 msgstr ""
 
-#: crates/core/src/graphics.rs:940
+#: crates/model/src/graphics.rs:936
 msgid "Electrical Power"
 msgstr ""
 
@@ -3479,7 +3479,7 @@ msgstr "Elektrotechnická nastavení"
 msgid "Electrical Settings: the voltages, distribution systems and wire types circuits and panels refer to; sections in mm²"
 msgstr "Elektrotechnická nastavení: napětí, rozvodné soustavy a typy vodičů, na které se odkazují obvody a rozváděče; průřezy v mm²"
 
-#: crates/core/src/commands.rs:2556
+#: crates/core/src/commands.rs:2565
 #: crates/ui-egui/src/context.rs:87
 msgid "Elements"
 msgstr "Prvky"
@@ -3519,7 +3519,7 @@ msgstr "Nárys: {}"
 msgid "Elevations (Building Elevation)"
 msgstr "Pohledy (Nárys budovy)"
 
-#: crates/core/src/draw.rs:114
+#: crates/model/src/draw.rs:114
 msgid "Ellipse"
 msgstr "Elipsa"
 
@@ -3558,7 +3558,7 @@ msgstr "Délka koncové zóny"
 msgid "End zone spacing"
 msgstr "Rozteč v koncové zóně"
 
-#: crates/core/src/snap.rs:61
+#: crates/model/src/snap.rs:61
 msgid "Endpoint"
 msgstr "Koncový bod"
 
@@ -3612,7 +3612,7 @@ msgstr "Každý pohled je na výkresu."
 msgid "Everything the project has, as its categories draw it"
 msgstr "Vše, co projekt obsahuje, tak, jak to kreslí jeho kategorie"
 
-#: crates/core/src/phasing.rs:117
+#: crates/model/src/phasing.rs:117
 #: crates/ui-egui/src/site.rs:167
 msgid "Existing"
 msgstr "Stávající"
@@ -3670,7 +3670,7 @@ msgstr "Začátek vysunutí"
 msgid "Eye Height:"
 msgstr "Výška oka:"
 
-#: crates/core/src/family.rs:2024
+#: crates/model/src/family.rs:2024
 msgid "Fabric"
 msgstr "Textilie"
 
@@ -3695,7 +3695,7 @@ msgstr "Rodiny"
 msgid "Families of parallel lines: drafting ones mm on paper, the same at any scale; model ones mm in the building."
 msgstr "Skupiny rovnoběžných čar: výkresové v mm na papíře, stejné v libovolném měřítku; modelové v mm v budově."
 
-#: crates/core/src/schedule.rs:197
+#: crates/model/src/schedule.rs:198
 msgid "Family"
 msgstr "Rodina"
 
@@ -3732,11 +3732,11 @@ msgstr "Oblíbené: materiály a rodiny uchovávané pro každý projekt; kliknu
 msgid "Favorites…"
 msgstr "Oblíbené…"
 
-#: crates/core/src/units.rs:54
+#: crates/geom/src/units.rs:54
 msgid "Feet"
 msgstr "Stopy"
 
-#: crates/core/src/units.rs:55
+#: crates/geom/src/units.rs:55
 msgid "Feet and inches"
 msgstr "Stopy a palce"
 
@@ -3806,7 +3806,7 @@ msgstr "Vyplněná oblast (FR): načrtněte v tomto pohledu oblast vyplněnou vz
 msgid "Filled region"
 msgstr "Vyplněná oblast"
 
-#: crates/core/src/commands.rs:1669
+#: crates/core/src/commands.rs:1678
 msgid "Fillet Arc"
 msgstr "Zaoblovací oblouk"
 
@@ -3879,11 +3879,11 @@ msgstr "Najde {}."
 msgid "Finds {}; nothing has these: {}"
 msgstr "Najde {}; žádný prvek nemá tyto vlastnosti: {}"
 
-#: crates/core/src/graphics.rs:239
+#: crates/model/src/graphics.rs:235
 msgid "Fine"
 msgstr "Jemná"
 
-#: crates/core/src/import.rs:1364
+#: crates/model/src/import.rs:1365
 #: crates/ui-egui/src/notes.rs:450
 #: crates/ui-egui/src/properties.rs:764
 msgid "Finish"
@@ -3901,11 +3901,11 @@ msgstr "Dokončit režim úprav"
 msgid "Finish Edit Mode: the lines, closed into loops, become the outline and its holes"
 msgstr "Dokončit režim úprav: čáry uzavřené do smyček vytvoří obrys a jeho otvory"
 
-#: crates/core/src/model.rs:402
+#: crates/model/src/model.rs:399
 msgid "Finish Face: Exterior"
 msgstr "Líc povrchové úpravy: Exteriér"
 
-#: crates/core/src/model.rs:403
+#: crates/model/src/model.rs:400
 msgid "Finish Face: Interior"
 msgstr "Líc povrchové úpravy: Interiér"
 
@@ -3933,11 +3933,11 @@ msgstr ""
 msgid "Five-a-side"
 msgstr ""
 
-#: crates/core/src/model.rs:3007
+#: crates/model/src/model.rs:3006
 msgid "Fixed"
 msgstr "Pevné"
 
-#: crates/core/src/family.rs:2375
+#: crates/model/src/family.rs:2375
 msgid "Fixed Window"
 msgstr "Fixní okno"
 
@@ -3965,7 +3965,7 @@ msgstr "Převrátit"
 msgid "Flip (Space): the walls' exterior sides go to the other side of their location lines"
 msgstr "Převrátit (Mezerník): vnější strany stěn přejdou na druhou stranu jejich čar umístění"
 
-#: crates/core/src/commands.rs:1441
+#: crates/core/src/commands.rs:1450
 #: crates/ui-egui/src/context.rs:110
 msgid "Flip From/To Room"
 msgstr ""
@@ -3992,13 +3992,13 @@ msgstr "Uvolnit"
 msgid "Floating"
 msgstr "Plovoucí"
 
-#: crates/core/src/commands.rs:410
+#: crates/core/src/commands.rs:419
 #: crates/ui-egui/src/selecting.rs:96
 #: crates/ui-egui/src/selecting.rs:293
 msgid "Floor"
 msgstr "Podlaha"
 
-#: crates/core/src/fixtures.rs:186
+#: crates/model/src/fixtures.rs:186
 msgid "Floor Drain"
 msgstr "Podlahová vpusť"
 
@@ -4019,11 +4019,11 @@ msgstr "Půdorys: {}"
 msgid "Floor Plans"
 msgstr "Půdorysy"
 
-#: crates/core/src/schedule.rs:123
+#: crates/model/src/schedule.rs:124
 msgid "Floor Schedule"
 msgstr "Výkaz podlah"
 
-#: crates/core/src/commands.rs:658
+#: crates/core/src/commands.rs:667
 msgid "Floor by Face"
 msgstr "Podlaha podle plochy"
 
@@ -4063,7 +4063,7 @@ msgstr ""
 msgid "Folder for new projects"
 msgstr "Složka pro nové projekty"
 
-#: crates/core/src/model.rs:3006
+#: crates/model/src/model.rs:3005
 msgid "Folding"
 msgstr "Skládací"
 
@@ -4168,15 +4168,15 @@ msgstr "Vzorec"
 msgid "Foundation"
 msgstr "Základy"
 
-#: crates/core/src/family.rs:2247
+#: crates/model/src/family.rs:2247
 msgid "Frame Depth"
 msgstr "Hloubka rámu"
 
-#: crates/core/src/family.rs:2249
+#: crates/model/src/family.rs:2249
 msgid "Frame Material"
 msgstr "Materiál rámu"
 
-#: crates/core/src/family.rs:2247
+#: crates/model/src/family.rs:2247
 msgid "Frame Width"
 msgstr "Šířka rámu"
 
@@ -4200,11 +4200,11 @@ msgstr ""
 msgid "From Room"
 msgstr ""
 
-#: crates/core/src/schedule.rs:221
+#: crates/model/src/schedule.rs:222
 msgid "From Room: Name"
 msgstr ""
 
-#: crates/core/src/schedule.rs:220
+#: crates/model/src/schedule.rs:221
 msgid "From Room: Number"
 msgstr ""
 
@@ -4261,7 +4261,7 @@ msgstr "Mezera od prvku"
 msgid "Garden"
 msgstr ""
 
-#: crates/core/src/fixtures.rs:256
+#: crates/model/src/fixtures.rs:256
 msgid "Gate Valve"
 msgstr "Šoupátko"
 
@@ -4273,11 +4273,11 @@ msgstr "Obecný"
 msgid "Geometry"
 msgstr "Geometrie"
 
-#: crates/core/src/family.rs:2249
+#: crates/model/src/family.rs:2249
 msgid "Glass"
 msgstr "Sklo"
 
-#: crates/ui-egui/src/context.rs:486
+#: crates/ui-egui/src/context.rs:491
 msgid "Go To View"
 msgstr ""
 
@@ -4333,7 +4333,7 @@ msgstr ""
 msgid "Gravel"
 msgstr ""
 
-#: crates/core/src/commands.rs:186
+#: crates/core/src/commands.rs:195
 #: crates/ui-egui/src/selecting.rs:76
 msgid "Grid"
 msgstr "Modulová osa"
@@ -4359,7 +4359,7 @@ msgstr "Přichytávání k mřížce"
 msgid "Grids start at 0, 0 in each view and rotate together."
 msgstr "Mřížky začínají v každém pohledu v bodě 0, 0 a otáčejí se společně."
 
-#: crates/core/src/schedule.rs:558
+#: crates/model/src/schedule.rs:559
 msgid "Gross Floor Area"
 msgstr "Hrubá podlažní plocha"
 
@@ -4371,11 +4371,11 @@ msgstr "Skupina"
 msgid "Group:"
 msgstr "Skupina:"
 
-#: crates/core/src/model.rs:3507
+#: crates/model/src/model.rs:3506
 msgid "Gypsum board"
 msgstr "Sádrokarton"
 
-#: crates/core/src/lines.rs:202
+#: crates/model/src/lines.rs:202
 #: crates/ui-egui/src/graphics.rs:1340
 msgid "Hairline"
 msgstr "Vlasová čára"
@@ -4394,7 +4394,7 @@ msgstr "Polotón"
 msgid "Hard"
 msgstr ""
 
-#: crates/core/src/family.rs:2093
+#: crates/model/src/family.rs:2093
 msgid "Headboard Height"
 msgstr "Výška čela"
 
@@ -4406,7 +4406,7 @@ msgstr "Záhlaví"
 msgid "Hedge"
 msgstr ""
 
-#: crates/core/src/family.rs:198
+#: crates/model/src/family.rs:198
 #: crates/ui-egui/src/editor.rs:949
 #: crates/ui-egui/src/properties.rs:483
 #: crates/ui-egui/src/properties.rs:484
@@ -4434,11 +4434,11 @@ msgstr "Výška:"
 msgid "Held by Dimensions"
 msgstr "Držené kótami"
 
-#: crates/core/src/lines.rs:181
+#: crates/model/src/lines.rs:181
 msgid "Hidden"
 msgstr "Skrytá"
 
-#: crates/core/src/graphics.rs:267
+#: crates/model/src/graphics.rs:263
 msgid "Hidden Line"
 msgstr "Skryté čáry"
 
@@ -4446,7 +4446,7 @@ msgstr "Skryté čáry"
 msgid "Hidden Line and Wireframe always draw their edges"
 msgstr "Skryté čáry a Drátový model vždy kreslí své hrany"
 
-#: crates/core/src/lines.rs:206
+#: crates/model/src/lines.rs:206
 msgid "Hidden Lines"
 msgstr "Skryté čáry"
 
@@ -4514,7 +4514,7 @@ msgstr "Výchozí pohled"
 msgid "Hook"
 msgstr "Hák"
 
-#: crates/core/src/fills.rs:410
+#: crates/model/src/fills.rs:410
 #: crates/ui-egui/src/lib.rs:5256
 #: crates/ui-egui/src/properties.rs:701
 msgid "Horizontal"
@@ -4691,7 +4691,7 @@ msgstr "Pouze v tomto půdorysu, nikoli ve všech půdorysech daného podlaží"
 msgid "Inactive (flat storage)"
 msgstr "Vypnuto (ukládání naplocho)"
 
-#: crates/core/src/units.rs:53
+#: crates/geom/src/units.rs:53
 msgid "Inches"
 msgstr "Palce"
 
@@ -4703,7 +4703,7 @@ msgstr "Zahrnout"
 msgid "Inquiry"
 msgstr "Dotaz"
 
-#: crates/core/src/draw.rs:105
+#: crates/model/src/draw.rs:105
 msgid "Inscribed Polygon"
 msgstr "Vepsaný mnohoúhelník"
 
@@ -4727,7 +4727,7 @@ msgstr "Vložit před"
 msgid "Insert Layer"
 msgstr "Vložit vrstvu"
 
-#: crates/core/src/fixtures.rs:420
+#: crates/model/src/fixtures.rs:420
 msgid "Inspection Box"
 msgstr "Revizní šachta"
 
@@ -4747,7 +4747,7 @@ msgstr "Instalace aplikace BIMCraft {}…"
 msgid "Instance"
 msgstr "Instance"
 
-#: crates/core/src/import.rs:1363
+#: crates/model/src/import.rs:1364
 #: crates/ui-egui/src/draw.rs:664
 msgid "Insulation"
 msgstr "Tepelná izolace"
@@ -4768,7 +4768,7 @@ msgstr "Tepelná izolace: měkká izolace kreslená podél každé čáry, ší�
 msgid "Interface scale"
 msgstr "Měřítko rozhraní"
 
-#: crates/core/src/snap.rs:63
+#: crates/model/src/snap.rs:63
 msgid "Intersection"
 msgstr "Průsečík"
 
@@ -4788,7 +4788,7 @@ msgstr "Izolovat kategorii (IC)"
 msgid "Isolate Element (HI)"
 msgstr "Izolovat prvek (HI)"
 
-#: crates/core/src/commands.rs:817
+#: crates/core/src/commands.rs:826
 msgid "Isolated Footing"
 msgstr "Základová patka"
 
@@ -4900,7 +4900,7 @@ msgstr ""
 msgid "Kind"
 msgstr "Druh"
 
-#: crates/core/src/fixtures.rs:134
+#: crates/model/src/fixtures.rs:134
 msgid "Kitchen Sink"
 msgstr "Kuchyňský dřez"
 
@@ -4984,11 +4984,11 @@ msgstr "Odkazovací čára"
 msgid "Leader/Border Offset"
 msgstr "Odsazení odkazu/rámečku"
 
-#: crates/core/src/family.rs:2249
+#: crates/model/src/family.rs:2249
 msgid "Leaf Material"
 msgstr "Materiál křídla"
 
-#: crates/core/src/family.rs:2247
+#: crates/model/src/family.rs:2247
 msgid "Leaf Thickness"
 msgstr "Tloušťka křídla"
 
@@ -5014,7 +5014,7 @@ msgstr ""
 msgid "Left out: {}"
 msgstr "Vynecháno: {}"
 
-#: crates/core/src/family.rs:2023
+#: crates/model/src/family.rs:2023
 msgid "Leg Width"
 msgstr "Šířka nohy"
 
@@ -5026,7 +5026,7 @@ msgstr "Legendy"
 msgid "Legends are coming in a later version."
 msgstr "Legendy budou k dispozici v novější verzi."
 
-#: crates/core/src/family.rs:2022
+#: crates/model/src/family.rs:2022
 #: crates/ui-egui/src/linestyles/creator.rs:136
 #: crates/ui-egui/src/site.rs:215
 msgid "Length"
@@ -5048,7 +5048,7 @@ msgstr "Objektiv:"
 msgid "Let agents work on this project"
 msgstr "Nechat agenty pracovat na tomto projektu"
 
-#: crates/core/src/commands.rs:178
+#: crates/core/src/commands.rs:187
 #: crates/ui-egui/src/selecting.rs:75
 #: crates/ui-egui/src/shape.rs:101
 #: crates/ui-egui/src/workplane.rs:205
@@ -5072,7 +5072,7 @@ msgstr "Výška podlaží"
 msgid "Level Marker Symbol:"
 msgstr "Symbol značky podlaží:"
 
-#: crates/core/src/schedule.rs:124
+#: crates/model/src/schedule.rs:125
 msgid "Level Schedule"
 msgstr "Výkaz podlaží"
 
@@ -5277,7 +5277,7 @@ msgstr "Výpis {}"
 msgid "Listening on 127.0.0.1, port {}: agents connect with bimcraft-cli mcp --connect {}"
 msgstr "Naslouchá na 127.0.0.1, port {}: agenti se připojují příkazem bimcraft-cli mcp --connect {}"
 
-#: crates/core/src/fixtures.rs:280
+#: crates/model/src/fixtures.rs:280
 msgid "Load"
 msgstr "Zatížení"
 
@@ -5356,7 +5356,7 @@ msgstr "Zamknutý segment {}"
 msgid "Log"
 msgstr ""
 
-#: crates/core/src/lines.rs:178
+#: crates/model/src/lines.rs:178
 msgid "Long Dash"
 msgstr "Dlouhá čárkovaná"
 
@@ -5440,7 +5440,7 @@ msgstr ""
 msgid "Manufacturer"
 msgstr ""
 
-#: crates/core/src/model.rs:1900
+#: crates/model/src/model.rs:1897
 msgid "Mark"
 msgstr "Označení"
 
@@ -5448,7 +5448,7 @@ msgstr "Označení"
 msgid "Markings"
 msgstr ""
 
-#: crates/core/src/fills.rs:396
+#: crates/model/src/fills.rs:396
 #: crates/ui-egui/src/fillpatterns.rs:479
 msgid "Masking"
 msgstr "Maskovací"
@@ -5469,7 +5469,7 @@ msgstr "Objem"
 msgid "Mass (MS): click the corners of the footprint; Enter, or the first corner again, finishes; Esc cancels"
 msgstr "Objem (MS): klikněte na rohy obrysu; Enter nebo opakované kliknutí na první roh akci dokončí; Esc ji zruší"
 
-#: crates/core/src/commands.rs:637
+#: crates/core/src/commands.rs:646
 msgid "Mass Floors"
 msgstr "Podlaží objemu"
 
@@ -5485,7 +5485,7 @@ msgstr "Objem a pozemek"
 msgid "Masterplan"
 msgstr ""
 
-#: crates/core/src/commands.rs:1461
+#: crates/core/src/commands.rs:1470
 msgid "Match Properties"
 msgstr "Shoda vlastností"
 
@@ -5497,7 +5497,7 @@ msgstr "Shoda vlastností: vybrán zdrojový typ '{}'. Vyberte cílové prvky a 
 msgid "Matched properties: applied type '{}' to {} element(s)"
 msgstr "Shoda vlastností: použit typ '{}' na {} prvek (prvky)"
 
-#: crates/core/src/schedule.rs:275
+#: crates/model/src/schedule.rs:276
 #: crates/ui-egui/src/editor.rs:811
 #: crates/ui-egui/src/properties.rs:2158
 #: crates/ui-egui/src/properties.rs:2274
@@ -5550,7 +5550,7 @@ msgstr "Maximální výška stupně"
 msgid "Meadow"
 msgstr ""
 
-#: crates/core/src/commands.rs:2270
+#: crates/core/src/commands.rs:2279
 #: crates/ui-egui/src/selecting.rs:99
 msgid "Measure"
 msgstr "Změřit"
@@ -5563,15 +5563,15 @@ msgstr "Změřit (ME): klikněte na dva body; jejich délka a úhel se zobrazí 
 msgid "Median"
 msgstr ""
 
-#: crates/core/src/graphics.rs:238
+#: crates/model/src/graphics.rs:234
 msgid "Medium"
 msgstr "Střední"
 
-#: crates/core/src/lines.rs:204
+#: crates/model/src/lines.rs:204
 msgid "Medium Lines"
 msgstr "Střední čáry"
 
-#: crates/core/src/import.rs:1366
+#: crates/model/src/import.rs:1367
 #: crates/ui-egui/src/properties.rs:763
 msgid "Membrane"
 msgstr "Hydroizolační fólie"
@@ -5589,11 +5589,11 @@ msgstr "Síť podél hloubky"
 msgid "Mesh along width"
 msgstr "Síť podél šířky"
 
-#: crates/core/src/family.rs:2249
+#: crates/model/src/family.rs:2249
 msgid "Metal"
 msgstr "Kov"
 
-#: crates/core/src/units.rs:52
+#: crates/geom/src/units.rs:52
 msgid "Metres"
 msgstr "Metry"
 
@@ -5601,11 +5601,11 @@ msgstr "Metry"
 msgid "Middle of the text"
 msgstr "Střed textu"
 
-#: crates/core/src/snap.rs:62
+#: crates/model/src/snap.rs:62
 msgid "Midpoint"
 msgstr "Polovina"
 
-#: crates/core/src/units.rs:50
+#: crates/geom/src/units.rs:50
 msgid "Millimetres"
 msgstr "Milimetry"
 
@@ -5727,7 +5727,7 @@ msgstr "Upravit dílčí prvky: vyberte bod, roh nebo hranu horního líce a pot
 msgid "Modify Wall"
 msgstr "Upravit stěnu"
 
-#: crates/core/src/fixtures.rs:278
+#: crates/model/src/fixtures.rs:278
 msgid "Mounting Height"
 msgstr "Montážní výška"
 
@@ -5735,7 +5735,7 @@ msgstr "Montážní výška"
 msgid "Mouse wheel"
 msgstr ""
 
-#: crates/core/src/commands.rs:1525
+#: crates/core/src/commands.rs:1534
 #: crates/ui-egui/src/selecting.rs:77
 msgid "Move"
 msgstr "Přesunout"
@@ -5811,11 +5811,11 @@ msgstr "NBR 17068: přesah 2 až 3 mm"
 msgid "NBR 6492: Target in plan (±0.00), equilateral triangle in section"
 msgstr "NBR 6492: terč v půdorysu (±0,00), rovnostranný trojúhelník v řezu"
 
-#: crates/core/src/render.rs:2989
+#: crates/model/src/render.rs:2878
 msgid "NOT ENCLOSED"
 msgstr "NEUZAVŘENÝ OBVOD"
 
-#: crates/core/src/model.rs:1901
+#: crates/model/src/model.rs:1898
 #: crates/ui-egui/src/cad.rs:89
 #: crates/ui-egui/src/clouds.rs:59
 #: crates/ui-egui/src/electrical.rs:298
@@ -5842,7 +5842,7 @@ msgstr "Název:"
 msgid "Natural"
 msgstr ""
 
-#: crates/core/src/snap.rs:68
+#: crates/model/src/snap.rs:68
 msgid "Nearest"
 msgstr "Nejbližší"
 
@@ -5854,7 +5854,7 @@ msgstr "Nejbližší"
 msgid "New"
 msgstr "Nový"
 
-#: crates/core/src/phasing.rs:117
+#: crates/model/src/phasing.rs:117
 msgid "New Construction"
 msgstr "Nová výstavba"
 
@@ -5944,7 +5944,7 @@ msgstr "Nový {}"
 msgid "Next Pan/Zoom"
 msgstr ""
 
-#: crates/core/src/schedule.rs:1337
+#: crates/model/src/schedule.rs:1338
 msgid "No"
 msgstr "Ne"
 
@@ -6054,7 +6054,7 @@ msgstr "Jmenovitá výška textu:"
 msgid "None"
 msgstr "Žádný"
 
-#: crates/core/src/model.rs:2291
+#: crates/model/src/model.rs:2288
 msgid "North"
 msgstr "Sever"
 
@@ -6136,7 +6136,7 @@ msgstr "Nic nebylo vynecháno."
 msgid "Nothing yet."
 msgstr ""
 
-#: crates/core/src/schedule.rs:292
+#: crates/model/src/schedule.rs:293
 msgid "Number"
 msgstr "Číslo"
 
@@ -6191,7 +6191,7 @@ msgstr "Styly objektů: pero, kterým se jednotlivé kategorie vykreslují, v po
 msgid "Object Styles…"
 msgstr "Styly objektů…"
 
-#: crates/core/src/schedule.rs:297
+#: crates/model/src/schedule.rs:298
 #: crates/ui-egui/src/properties.rs:170
 msgid "Occupancy"
 msgstr ""
@@ -6213,7 +6213,7 @@ msgstr "Vypnuto: žádný agent se k tomuto oknu nedostane"
 msgid "Office"
 msgstr ""
 
-#: crates/core/src/schedule.rs:206
+#: crates/model/src/schedule.rs:207
 #: crates/ui-egui/src/linestyles/creator.rs:76
 #: crates/ui-egui/src/selecting.rs:84
 #: crates/ui-egui/src/sketch.rs:762
@@ -6289,7 +6289,7 @@ msgstr ""
 msgid "Open Rule"
 msgstr ""
 
-#: crates/ui-egui/src/context.rs:501
+#: crates/ui-egui/src/context.rs:506
 msgid "Open View"
 msgstr ""
 
@@ -6347,7 +6347,7 @@ msgstr "Otevře stránku vydání na GitHubu. Tato verze se nemůže sama aktual
 msgid "Open…"
 msgstr "Otevřít…"
 
-#: crates/core/src/schedule.rs:208
+#: crates/model/src/schedule.rs:209
 #: crates/ui-egui/src/editor.rs:1054
 msgid "Operation"
 msgstr "Způsob otevírání"
@@ -6404,7 +6404,7 @@ msgstr "Ostatní okraje (horní, pravý, dolní):"
 msgid "Out"
 msgstr "Výstup"
 
-#: crates/core/src/fixtures.rs:347
+#: crates/model/src/fixtures.rs:347
 msgid "Outlet"
 msgstr "Zásuvka"
 
@@ -6428,7 +6428,7 @@ msgstr ""
 msgid "Overhang:"
 msgstr "Přesah:"
 
-#: crates/core/src/lines.rs:208
+#: crates/model/src/lines.rs:208
 msgid "Overhead Lines"
 msgstr "Promítnuté horní obrysy"
 
@@ -6469,7 +6469,7 @@ msgstr ""
 msgid "PNG image"
 msgstr "Obrázek PNG"
 
-#: crates/core/src/fixtures.rs:208
+#: crates/model/src/fixtures.rs:208
 msgid "PVC"
 msgstr "PVC"
 
@@ -6583,7 +6583,7 @@ msgstr ""
 msgid "Parking Stall"
 msgstr ""
 
-#: crates/core/src/draw.rs:115
+#: crates/model/src/draw.rs:115
 msgid "Partial Ellipse"
 msgstr "Částečná elipsa"
 
@@ -6611,7 +6611,7 @@ msgstr ""
 msgid "Paste to the views:"
 msgstr ""
 
-#: crates/core/src/fixtures.rs:474
+#: crates/model/src/fixtures.rs:474
 msgid "Patch Panel"
 msgstr "Patch panel"
 
@@ -6689,12 +6689,12 @@ msgstr "Pero {} na {}"
 msgid "Performance"
 msgstr "Výkon"
 
-#: crates/core/src/schedule.rs:226
-#: crates/core/src/schedule.rs:296
+#: crates/model/src/schedule.rs:227
+#: crates/model/src/schedule.rs:297
 msgid "Perimeter"
 msgstr "Obvod"
 
-#: crates/core/src/snap.rs:65
+#: crates/model/src/snap.rs:65
 msgid "Perpendicular"
 msgstr "Kolmý"
 
@@ -6730,7 +6730,7 @@ msgstr "Fáze demolice"
 msgid "Phase Filter"
 msgstr "Filtr fází"
 
-#: crates/core/src/ifc.rs:1916
+#: crates/model/src/ifc.rs:1916
 msgid "Phase Filters"
 msgstr "Filtry fází"
 
@@ -6767,7 +6767,7 @@ msgstr ""
 msgid "Pick Again"
 msgstr "Vybrat znovu"
 
-#: crates/core/src/draw.rs:118
+#: crates/model/src/draw.rs:118
 msgid "Pick Faces"
 msgstr "Vybrat plochy"
 
@@ -6779,7 +6779,7 @@ msgstr "Vybrat plochy: klikněte na plochu objemu"
 msgid "Pick Faces: click a face of a mass for a wall on it, as tall as the mass"
 msgstr "Vybrat plochy: klikněte na plochu objemu pro vytvoření stěny na ní o výšce objemu"
 
-#: crates/core/src/draw.rs:117
+#: crates/model/src/draw.rs:117
 msgid "Pick Lines"
 msgstr "Vybrat čáry"
 
@@ -6951,7 +6951,7 @@ msgstr "Obrázky"
 msgid "Picture…"
 msgstr "Obrázek…"
 
-#: crates/core/src/commands.rs:1534
+#: crates/core/src/commands.rs:1543
 msgid "Pin"
 msgstr ""
 
@@ -6967,7 +6967,7 @@ msgstr ""
 msgid "Pinned: click to unpin"
 msgstr ""
 
-#: crates/core/src/commands.rs:843
+#: crates/core/src/commands.rs:852
 msgid "Pipe"
 msgstr "Potrubí"
 
@@ -7204,7 +7204,7 @@ msgstr "Jednobarevné"
 msgid "Plan"
 msgstr "Půdorys"
 
-#: crates/core/src/schedule.rs:380
+#: crates/model/src/schedule.rs:381
 msgid "Plan Area"
 msgstr "Plocha v půdorysu"
 
@@ -7240,7 +7240,7 @@ msgstr "Půdorysy"
 msgid "Planting"
 msgstr ""
 
-#: crates/core/src/fixtures.rs:279
+#: crates/model/src/fixtures.rs:279
 msgid "Plaster"
 msgstr "Omítka"
 
@@ -7312,7 +7312,7 @@ msgstr "Najeďte na stěnu nebo čáru: odsazení směřuje na stranu kurzoru. K
 msgid "Points"
 msgstr "Body"
 
-#: crates/core/src/draw.rs:116
+#: crates/model/src/draw.rs:116
 msgid "Polyline"
 msgstr "Křivka"
 
@@ -7328,7 +7328,7 @@ msgstr "Křivka: souvislá čára procházející každým kliknutým bodem; kl�
 msgid "Pond"
 msgstr ""
 
-#: crates/core/src/family.rs:2024
+#: crates/model/src/family.rs:2024
 msgid "Porcelain"
 msgstr "Porcelán"
 
@@ -7540,15 +7540,15 @@ msgstr "Vyčištěno {} nepoužitých položek."
 msgid "Put a view on this sheet: one not on a sheet yet"
 msgstr "Umístit pohled na tento výkres: pohled, který dosud není na žádném výkresu"
 
-#: crates/core/src/snap.rs:66
+#: crates/model/src/snap.rs:66
 msgid "Quadrant"
 msgstr "Kvadrant"
 
-#: crates/core/src/render.rs:2989
+#: crates/model/src/render.rs:2878
 msgid "REDUNDANT"
 msgstr "NADBYTEČNÁ"
 
-#: crates/core/src/family.rs:106
+#: crates/model/src/family.rs:106
 msgid "Rack"
 msgstr "Datový rozvaděč (Rack)"
 
@@ -7584,7 +7584,7 @@ msgstr "Symbol poloměru"
 msgid "Radius:"
 msgstr "Poloměr:"
 
-#: crates/core/src/commands.rs:940
+#: crates/core/src/commands.rs:949
 #: crates/ui-egui/src/selecting.rs:94
 msgid "Railing"
 msgstr "Zábradlí"
@@ -7598,7 +7598,7 @@ msgstr "Zábradlí: klikněte na schodiště nebo rampu pro zábradlí po obou s
 msgid "Railings"
 msgstr "Zábradlí"
 
-#: crates/core/src/commands.rs:929
+#: crates/core/src/commands.rs:938
 #: crates/ui-egui/src/selecting.rs:93
 #: crates/ui-egui/src/site.rs:122
 msgid "Ramp"
@@ -7640,7 +7640,7 @@ msgstr "Nedávné"
 msgid "Recent Commands"
 msgstr ""
 
-#: crates/core/src/fixtures.rs:324
+#: crates/model/src/fixtures.rs:324
 msgid "Recessed Luminaire"
 msgstr "Zápustné svítidlo"
 
@@ -7668,7 +7668,7 @@ msgstr "Nalezena záchranná kopie"
 msgid "Recovery copy: {}"
 msgstr "Záchranná kopie: {}"
 
-#: crates/core/src/draw.rs:104
+#: crates/model/src/draw.rs:104
 msgid "Rectangle"
 msgstr "Obdélník"
 
@@ -7701,7 +7701,7 @@ msgstr "Znovu {} kroků"
 msgid "Redraw views in the background"
 msgstr "Překreslovat pohledy na pozadí"
 
-#: crates/core/src/graphics.rs:131
+#: crates/model/src/graphics.rs:127
 msgid "Reference"
 msgstr "Reference"
 
@@ -8036,11 +8036,11 @@ msgstr "Vpravo"
 msgid "Rill"
 msgstr ""
 
-#: crates/core/src/schedule.rs:519
+#: crates/model/src/schedule.rs:520
 msgid "Riser Height"
 msgstr "Výška stupně"
 
-#: crates/core/src/schedule.rs:518
+#: crates/model/src/schedule.rs:519
 msgid "Risers"
 msgstr "Počet stupňů"
 
@@ -8053,7 +8053,7 @@ msgstr "Silnice"
 msgid "Road: sketch its path with lines and arcs; the Options Bar sets its use, width and lanes"
 msgstr ""
 
-#: crates/core/src/commands.rs:951
+#: crates/core/src/commands.rs:960
 #: crates/ui-egui/src/selecting.rs:95
 #: crates/ui-egui/src/site.rs:249
 msgid "Roof"
@@ -8071,7 +8071,7 @@ msgstr "Střecha vysunutím"
 msgid "Roof by Extrusion: click a line's start and end, then how far across it's swept; its profile rises from the line"
 msgstr "Střecha vysunutím: klikněte na začátek a konec čáry a poté na vzdálenost vytažení; její profil vychází z čáry"
 
-#: crates/core/src/commands.rs:666
+#: crates/core/src/commands.rs:675
 msgid "Roof by Face"
 msgstr "Střecha podle plochy"
 
@@ -8083,7 +8083,7 @@ msgstr "Střecha podle plochy (RB): střecha na horních plochách vybraných ob
 msgid "Roof by Footprint: click inside the walls to roof them, on the level above"
 msgstr "Střecha půdorysem: klikněte uvnitř stěn pro jejich zastřešení v podlaží nad nimi"
 
-#: crates/core/src/model.rs:3509
+#: crates/model/src/model.rs:3508
 msgid "Roof tiles"
 msgstr "Střešní tašky"
 
@@ -8091,7 +8091,7 @@ msgstr "Střešní tašky"
 msgid "Roof's slope"
 msgstr "Sklon střechy"
 
-#: crates/core/src/commands.rs:694
+#: crates/core/src/commands.rs:703
 #: crates/ui-egui/src/selecting.rs:73
 msgid "Room"
 msgstr "Místnost"
@@ -8117,19 +8117,19 @@ msgstr "Výpočet plochy místností: kde se plochy místností měří; nyní {
 msgid "Room Bounding"
 msgstr "Ohraničení místnosti"
 
-#: crates/core/src/schedule.rs:217
+#: crates/model/src/schedule.rs:218
 msgid "Room Name"
 msgstr ""
 
-#: crates/core/src/schedule.rs:216
+#: crates/model/src/schedule.rs:217
 msgid "Room Number"
 msgstr ""
 
-#: crates/core/src/schedule.rs:119
+#: crates/model/src/schedule.rs:120
 msgid "Room Schedule"
 msgstr "Výkaz místností"
 
-#: crates/core/src/graphics.rs:132
+#: crates/model/src/graphics.rs:128
 msgid "Room Separation Lines"
 msgstr "Oddělovací čáry místností"
 
@@ -8145,7 +8145,7 @@ msgstr "Oddělovač místností: čáry, které místnosti ohraničují stejně 
 msgid "Rose"
 msgstr "Růže"
 
-#: crates/core/src/commands.rs:1607
+#: crates/core/src/commands.rs:1616
 #: crates/ui-egui/src/selecting.rs:79
 msgid "Rotate"
 msgstr "Otočit"
@@ -8190,11 +8190,11 @@ msgstr ""
 msgid "Runs the plugin's command"
 msgstr ""
 
-#: crates/core/src/sheet.rs:280
+#: crates/model/src/sheet.rs:281
 msgid "SCALE"
 msgstr "MĚŘÍTKO"
 
-#: crates/core/src/sheet.rs:282
+#: crates/model/src/sheet.rs:283
 msgid "SCALE AS INDICATED"
 msgstr "MĚŘÍTKO DLE VÝKRESŮ"
 
@@ -8230,7 +8230,7 @@ msgstr "Vzorek"
 msgid "Sample Project"
 msgstr "Ukázkový projekt"
 
-#: crates/core/src/fills.rs:413
+#: crates/model/src/fills.rs:413
 #: crates/ui-egui/src/properties.rs:1279
 #: crates/ui-egui/src/site.rs:182
 msgid "Sand"
@@ -8309,7 +8309,7 @@ msgstr "Měřítko: velikost papíru odpovídající tomuto pohledu, 1 : n model
 msgid "Scan"
 msgstr "Sken"
 
-#: crates/core/src/commands.rs:2074
+#: crates/core/src/commands.rs:2083
 msgid "Schedule"
 msgstr "Výkaz"
 
@@ -8343,7 +8343,7 @@ msgstr "Výkazy/množství (vše)"
 msgid "Scope"
 msgstr ""
 
-#: crates/core/src/model.rs:3505
+#: crates/model/src/model.rs:3504
 msgid "Screed"
 msgstr "Potěr"
 
@@ -8365,7 +8365,7 @@ msgstr "Hledat v Prohlížeči projektu"
 msgid "Search…"
 msgstr "Hledat…"
 
-#: crates/core/src/family.rs:2023
+#: crates/model/src/family.rs:2023
 msgid "Seat Height"
 msgstr "Výška sedáku"
 
@@ -8563,7 +8563,7 @@ msgstr "Nastavení"
 msgid "Settings…"
 msgstr "Nastavení…"
 
-#: crates/core/src/graphics.rs:266
+#: crates/model/src/graphics.rs:262
 msgid "Shaded"
 msgstr "Stínovaný"
 
@@ -8649,7 +8649,7 @@ msgstr "Klávesové zkratky"
 msgid "Show"
 msgstr ""
 
-#: crates/core/src/phasing.rs:129
+#: crates/model/src/phasing.rs:129
 msgid "Show All"
 msgstr "Zobrazit vše"
 
@@ -8669,7 +8669,7 @@ msgstr ""
 msgid "Show Centre"
 msgstr "Zobrazit střed"
 
-#: crates/core/src/phasing.rs:130
+#: crates/model/src/phasing.rs:130
 msgid "Show Complete"
 msgstr "Zobrazit dokončené"
 
@@ -8689,15 +8689,15 @@ msgstr "Zobrazit objem"
 msgid "Show Mass (MH): hides the masses in this view, or shows them again"
 msgstr "Zobrazit objem (MH): skryje objemy v tomto pohledu nebo je znovu zobrazí"
 
-#: crates/core/src/phasing.rs:131
+#: crates/model/src/phasing.rs:131
 msgid "Show New"
 msgstr "Zobrazit nové"
 
-#: crates/core/src/phasing.rs:132
+#: crates/model/src/phasing.rs:132
 msgid "Show Previous + Demolished"
 msgstr "Zobrazit předchozí + bourané"
 
-#: crates/core/src/phasing.rs:133
+#: crates/model/src/phasing.rs:133
 msgid "Show Previous + New"
 msgstr "Zobrazit předchozí + nové"
 
@@ -8738,7 +8738,7 @@ msgstr "Zobrazit název pohledu v rohu půdorysů"
 msgid "Show: open the plan they are in, zoomed to them"
 msgstr "Zobrazit: otevřít půdorys, ve kterém se nacházejí, se zvětšením na ně"
 
-#: crates/core/src/fixtures.rs:157
+#: crates/model/src/fixtures.rs:157
 msgid "Shower"
 msgstr "Sprcha"
 
@@ -8763,11 +8763,11 @@ msgstr "Strany:"
 msgid "Silhouettes"
 msgstr "Siluety"
 
-#: crates/core/src/schedule.rs:336
+#: crates/model/src/schedule.rs:337
 msgid "Sill"
 msgstr "Parapet"
 
-#: crates/core/src/family.rs:199
+#: crates/model/src/family.rs:199
 msgid "Sill Height"
 msgstr "Výška parapetu"
 
@@ -8775,7 +8775,7 @@ msgstr "Výška parapetu"
 msgid "Simple Lines"
 msgstr "Jednoduché čáry"
 
-#: crates/core/src/family.rs:2285
+#: crates/model/src/family.rs:2285
 msgid "Single Door"
 msgstr "Jednokřídlé dveře"
 
@@ -8843,19 +8843,19 @@ msgstr "Přeskočit tuto verzi"
 msgid "Sky"
 msgstr "Obloha"
 
-#: crates/core/src/model.rs:3004
+#: crates/model/src/model.rs:3003
 msgid "Sliding"
 msgstr "Posuvné"
 
-#: crates/core/src/family.rs:2334
+#: crates/model/src/family.rs:2334
 msgid "Sliding Door"
 msgstr "Posuvné dveře"
 
-#: crates/core/src/family.rs:2429
+#: crates/model/src/family.rs:2429
 msgid "Sliding Window"
 msgstr "Posuvné okno"
 
-#: crates/core/src/schedule.rs:379
+#: crates/model/src/schedule.rs:380
 #: crates/ui-egui/src/properties.rs:1332
 #: crates/ui-egui/src/properties.rs:1394
 #: crates/ui-egui/src/reinforce.rs:111
@@ -8951,7 +8951,7 @@ msgstr "Přichycení vypnuto (další bod)"
 msgid "Snaps: what a picked point sticks to (ends, middles, crossings, centres, perpendiculars), and the angles it steps by; SE, SM, SI, SC, SP and SN take one alone for the next point, SO none"
 msgstr "Přichycení: k čemu se vybraný bod přichytí (konce, polovice, průsečíky, středy, kolmice) a úhlové přírůstky; SE, SM, SI, SC, SP a SN nastaví jedno přichycení pro další bod, SO žádné"
 
-#: crates/core/src/family.rs:2117
+#: crates/model/src/family.rs:2117
 msgid "Sofa"
 msgstr "Pohovka"
 
@@ -8967,7 +8967,7 @@ msgstr "Měkké stíny v místech, kde se plochy stýkají ve vnitřním koutě"
 msgid "Solid"
 msgstr "Plné těleso"
 
-#: crates/core/src/fills.rs:395
+#: crates/model/src/fills.rs:395
 msgid "Solid Black"
 msgstr "Plná černá"
 
@@ -8976,7 +8976,7 @@ msgstr "Plná černá"
 msgid "Solid Fill"
 msgstr "Plná výplň"
 
-#: crates/core/src/fills.rs:393
+#: crates/model/src/fills.rs:393
 msgid "Solid fill"
 msgstr "Plná výplň"
 
@@ -8992,7 +8992,7 @@ msgstr "Řazení/seskupování"
 msgid "Source code on GitHub"
 msgstr "Zdrojový kód na GitHubu"
 
-#: crates/core/src/model.rs:2292
+#: crates/model/src/model.rs:2289
 msgid "South"
 msgstr "Jih"
 
@@ -9029,11 +9029,11 @@ msgstr "Rozteč:"
 msgid "Species"
 msgstr ""
 
-#: crates/core/src/draw.rs:112
+#: crates/model/src/draw.rs:112
 msgid "Spline"
 msgstr "Křivka spline"
 
-#: crates/core/src/draw.rs:113
+#: crates/model/src/draw.rs:113
 msgid "Spline Through Points"
 msgstr "Křivka spline procházející body"
 
@@ -9045,7 +9045,7 @@ msgstr "Křivka spline procházející body: klikněte na body, kterými prochá
 msgid "Spline: click its control points; Enter finishes it"
 msgstr "Křivka spline: klikněte na její řídicí body; klávesa Enter ji dokončí"
 
-#: crates/core/src/commands.rs:1649
+#: crates/core/src/commands.rs:1658
 msgid "Split"
 msgstr "Rozdělit"
 
@@ -9065,7 +9065,7 @@ msgstr "Rozdělit prvek (SL): klikněte na stěnu nebo čáru v místě rozděle
 msgid "Split between the line's ends."
 msgstr "Rozdělit mezi koncovými body čáry."
 
-#: crates/core/src/commands.rs:1103
+#: crates/core/src/commands.rs:1112
 msgid "Spot Elevation"
 msgstr "Výšková kóta"
 
@@ -9073,7 +9073,7 @@ msgstr "Výšková kóta"
 msgid "Spot Elevation (EL): click a floor, a roof or a stair; in a section, a point"
 msgstr "Výšková kóta (EL): klikněte na podlahu, střechu nebo schodiště; v řezu na bod"
 
-#: crates/core/src/commands.rs:1112
+#: crates/core/src/commands.rs:1121
 #: crates/ui-egui/src/lib.rs:1724
 #: crates/ui-egui/src/lib.rs:4221
 msgid "Spot Slope"
@@ -9091,7 +9091,7 @@ msgstr ""
 msgid "Square Grid"
 msgstr "Čtvercová mřížka"
 
-#: crates/core/src/commands.rs:916
+#: crates/core/src/commands.rs:925
 #: crates/ui-egui/src/selecting.rs:92
 msgid "Stair"
 msgstr "Schodiště"
@@ -9148,7 +9148,7 @@ msgstr "Začátek"
 msgid "Start Level Offset"
 msgstr "Odsazení počátečního podlaží"
 
-#: crates/core/src/draw.rs:108
+#: crates/model/src/draw.rs:108
 msgid "Start-End-Radius Arc"
 msgstr "Oblouk počátek-konec-poloměr"
 
@@ -9211,11 +9211,11 @@ msgstr "Přímý"
 msgid "Stream"
 msgstr ""
 
-#: crates/core/src/schedule.rs:365
+#: crates/model/src/schedule.rs:366
 msgid "Structural"
 msgstr "Konstrukční"
 
-#: crates/core/src/commands.rs:808
+#: crates/core/src/commands.rs:817
 msgid "Structural Column"
 msgstr "Konstrukční sloup"
 
@@ -9269,7 +9269,7 @@ msgstr "Dělení podmřížky Y"
 msgid "Subgrid pen"
 msgstr "Pero podmřížky"
 
-#: crates/core/src/import.rs:1365
+#: crates/model/src/import.rs:1366
 #: crates/ui-egui/src/properties.rs:761
 msgid "Substrate"
 msgstr "Podkladní vrstva"
@@ -9310,11 +9310,11 @@ msgstr "Povrch, {}°"
 msgid "Survey"
 msgstr ""
 
-#: crates/core/src/model.rs:3002
+#: crates/model/src/model.rs:3001
 msgid "Swing"
 msgstr "Otočné"
 
-#: crates/core/src/fixtures.rs:372
+#: crates/model/src/fixtures.rs:372
 msgid "Switch"
 msgstr "Vypínač"
 
@@ -9367,7 +9367,7 @@ msgstr "Symboly jsou to, co půdorys z rodiny kreslí kromě jejích tvarů: č�
 msgid "Synthetic"
 msgstr ""
 
-#: crates/core/src/schedule.rs:205
+#: crates/model/src/schedule.rs:206
 msgid "System"
 msgstr "Systém"
 
@@ -9410,7 +9410,7 @@ msgstr "Soustava {}: vodiče"
 msgid "Tab with {}"
 msgstr "Karta s {}"
 
-#: crates/core/src/family.rs:2064
+#: crates/model/src/family.rs:2064
 msgid "Table"
 msgstr "Stůl"
 
@@ -9451,11 +9451,11 @@ msgstr "Odstraní položky, které se v projektu nepoužívají. V každé kateg
 msgid "Takes up a shaped top's falls: one layer at most"
 msgstr "Přebírá spády tvarovaného horního líce: nejvýše jedna vrstva"
 
-#: crates/core/src/snap.rs:67
+#: crates/model/src/snap.rs:67
 msgid "Tangent"
 msgstr "Tečna"
 
-#: crates/core/src/draw.rs:110
+#: crates/model/src/draw.rs:110
 msgid "Tangent End Arc"
 msgstr "Oblouk tečný ke konci"
 
@@ -9488,7 +9488,7 @@ msgstr "Technické normy"
 msgid "Technical Standards: configure drawing standards (NBR, ISO, ANSI, EU); now {}"
 msgstr "Technické normy: nastavení norem výkresů (NBR, ISO, ANSI, EU); nyní {}"
 
-#: crates/core/src/fixtures.rs:241
+#: crates/model/src/fixtures.rs:241
 msgid "Tee"
 msgstr "T-kus"
 
@@ -9504,12 +9504,12 @@ msgstr "Teplota:"
 msgid "Temporary"
 msgstr "Dočasné"
 
-#: crates/core/src/commands.rs:1508
+#: crates/core/src/commands.rs:1517
 #: crates/ui-egui/src/tempdimprops.rs:55
 msgid "Temporary Dimension Properties"
 msgstr ""
 
-#: crates/core/src/commands.rs:1491
+#: crates/core/src/commands.rs:1500
 msgid "Temporary Dimensions"
 msgstr ""
 
@@ -9553,7 +9553,7 @@ msgstr ""
 msgid "Terrace"
 msgstr ""
 
-#: crates/core/src/commands.rs:1022
+#: crates/core/src/commands.rs:1031
 #: crates/ui-egui/src/editor.rs:930
 #: crates/ui-egui/src/editor.rs:963
 #: crates/ui-egui/src/notes.rs:502
@@ -9846,7 +9846,7 @@ msgstr "Tepelná vrstva"
 msgid "These patterns to a PAT file, but the solid ones"
 msgstr "Tyto vzory do souboru PAT, kromě plných"
 
-#: crates/core/src/family.rs:2023
+#: crates/model/src/family.rs:2023
 #: crates/ui-egui/src/properties.rs:483
 #: crates/ui-egui/src/properties.rs:487
 #: crates/ui-egui/src/properties.rs:488
@@ -9859,7 +9859,7 @@ msgstr "Tloušťka"
 msgid "Thickness:"
 msgstr "Tloušťka:"
 
-#: crates/core/src/lines.rs:194
+#: crates/model/src/lines.rs:194
 #: crates/ui-egui/src/lib.rs:4322
 msgid "Thin Lines"
 msgstr "Tenké čáry"
@@ -9913,7 +9913,7 @@ msgstr "V jednom bodě se setkávají tři nebo více čar ({}): smyčka musí k
 msgid "Three points, {}°"
 msgstr "Tři body, {}°"
 
-#: crates/core/src/fixtures.rs:359
+#: crates/model/src/fixtures.rs:359
 msgid "Three-Phase Outlet"
 msgstr "Třífázová zásuvka"
 
@@ -9941,7 +9941,7 @@ msgstr "Spony"
 msgid "Tile"
 msgstr "Dlaždice"
 
-#: crates/core/src/fills.rs:422
+#: crates/model/src/fills.rs:422
 msgid "Tile 300"
 msgstr "Dlažba 300"
 
@@ -9961,11 +9961,11 @@ msgstr "Šířka dlaždice"
 msgid "Tilt Correction Vertical"
 msgstr ""
 
-#: crates/core/src/family.rs:2024
+#: crates/model/src/family.rs:2024
 msgid "Timber"
 msgstr "Dřevo"
 
-#: crates/core/src/schedule.rs:615
+#: crates/model/src/schedule.rs:616
 msgid "Title"
 msgstr "Název"
 
@@ -10012,11 +10012,11 @@ msgstr ""
 msgid "To Room"
 msgstr ""
 
-#: crates/core/src/schedule.rs:223
+#: crates/model/src/schedule.rs:224
 msgid "To Room: Name"
 msgstr ""
 
-#: crates/core/src/schedule.rs:222
+#: crates/model/src/schedule.rs:223
 msgid "To Room: Number"
 msgstr ""
 
@@ -10109,7 +10109,7 @@ msgstr "Průhlednost"
 msgid "Transparent"
 msgstr "Průhledné"
 
-#: crates/core/src/schedule.rs:520
+#: crates/model/src/schedule.rs:521
 msgid "Tread"
 msgstr "Šířka stupně"
 
@@ -10137,7 +10137,7 @@ msgstr "Oříznout/prodloužit jeden prvek"
 msgid "Trim/Extend Single Element: pick the line to trim or extend to, then the line to change, on the part to keep"
 msgstr "Oříznout/prodloužit jeden prvek: vyberte hraniční čáru a poté čáru k úpravě na části, kterou chcete zachovat"
 
-#: crates/core/src/commands.rs:1623
+#: crates/core/src/commands.rs:1632
 #: crates/ui-egui/src/selecting.rs:82
 #: crates/ui-egui/src/sketch.rs:745
 #: crates/ui-egui/src/sketch.rs:1019
@@ -10169,7 +10169,7 @@ msgstr ""
 msgid "Two-Point Perspective: verticals stay vertical however the camera looks up or down (Auto Vertical Tilt Correction)"
 msgstr ""
 
-#: crates/core/src/model.rs:1902
+#: crates/model/src/model.rs:1899
 #: crates/ui-egui/src/editor.rs:690
 #: crates/ui-egui/src/editor.rs:696
 #: crates/ui-egui/src/properties.rs:3317
@@ -10249,7 +10249,7 @@ msgstr "Typ:"
 msgid "Types"
 msgstr "Typy"
 
-#: crates/core/src/render.rs:3852
+#: crates/model/src/render.rs:3741
 msgid "UP"
 msgstr "NAHORU"
 
@@ -10257,7 +10257,7 @@ msgstr "NAHORU"
 msgid "URL"
 msgstr ""
 
-#: crates/core/src/schedule.rs:299
+#: crates/model/src/schedule.rs:300
 #: crates/ui-egui/src/properties.rs:166
 msgid "Unbounded Height"
 msgstr "Neohraničená výška"
@@ -10362,11 +10362,11 @@ msgstr "Formát jednotek"
 msgid "Unlock alignment"
 msgstr "Odemknout zarovnání"
 
-#: crates/core/src/commands.rs:10956
+#: crates/core/src/commands.rs:10427
 msgid "Unnamed"
 msgstr "Nepojmenovaný"
 
-#: crates/core/src/commands.rs:1547
+#: crates/core/src/commands.rs:1556
 msgid "Unpin"
 msgstr ""
 
@@ -10407,7 +10407,7 @@ msgstr "Nahoru, potom vpravo"
 msgid "Update now"
 msgstr "Aktualizovat nyní"
 
-#: crates/core/src/commands.rs:674
+#: crates/core/src/commands.rs:683
 msgid "Update to Face"
 msgstr "Aktualizovat podle plochy"
 
@@ -10475,7 +10475,7 @@ msgstr "Proměnná"
 msgid "Version {}"
 msgstr "Verze {}"
 
-#: crates/core/src/fills.rs:411
+#: crates/model/src/fills.rs:411
 #: crates/ui-egui/src/lib.rs:5257
 #: crates/ui-egui/src/properties.rs:702
 msgid "Vertical"
@@ -10617,7 +10617,7 @@ msgstr "Vizuální styl"
 msgid "Visual Style: how the 3D view draws surfaces: Shaded, Hidden Line (WF, HL and SD set them) or Wireframe"
 msgstr "Vizuální styl: jak 3D pohled vykresluje povrchy: Stínovaný, Skryté čáry (klávesové zkratky WF, HL a SD) nebo Drátový model"
 
-#: crates/core/src/fixtures.rs:464
+#: crates/model/src/fixtures.rs:464
 msgid "Voice Outlet"
 msgstr "Telefonní zásuvka"
 
@@ -10657,7 +10657,7 @@ msgstr "Napětí {}: jmenovité"
 msgid "Voltages"
 msgstr "Napětí"
 
-#: crates/core/src/schedule.rs:218
+#: crates/model/src/schedule.rs:219
 #: crates/ui-egui/src/properties.rs:2942
 msgid "Volume"
 msgstr "Objem"
@@ -10666,7 +10666,7 @@ msgstr "Objem"
 msgid "Volume (m³)"
 msgstr "Objem (m³)"
 
-#: crates/core/src/family.rs:2173
+#: crates/model/src/family.rs:2173
 msgid "WC"
 msgstr "WC"
 
@@ -10691,7 +10691,7 @@ msgstr ""
 msgid "Walk is for a camera view in perspective"
 msgstr ""
 
-#: crates/core/src/commands.rs:369
+#: crates/core/src/commands.rs:378
 #: crates/ui-egui/src/selecting.rs:70
 msgid "Wall"
 msgstr "Stěna"
@@ -10700,15 +10700,15 @@ msgstr "Stěna"
 msgid "Wall (WA): each click builds a wall; Enter or Esc ends the chain"
 msgstr "Stěna (WA): každé kliknutí vytvoří stěnu; klávesa Enter nebo Esc ukončí řetězec"
 
-#: crates/core/src/model.rs:400
+#: crates/model/src/model.rs:397
 msgid "Wall Centreline"
 msgstr "Osa stěny"
 
-#: crates/core/src/commands.rs:1519
+#: crates/core/src/commands.rs:1528
 msgid "Wall Chain"
 msgstr ""
 
-#: crates/core/src/commands.rs:835
+#: crates/core/src/commands.rs:844
 msgid "Wall Footing"
 msgstr "Základový pás"
 
@@ -10716,11 +10716,11 @@ msgstr "Základový pás"
 msgid "Wall Footing (FW): click its start and its end, or a chain of clicks, under a wall"
 msgstr "Základový pás (FW): klikněte na jeho začátek a konec, nebo na řetězec bodů pod stěnou"
 
-#: crates/core/src/schedule.rs:122
+#: crates/model/src/schedule.rs:123
 msgid "Wall Schedule"
 msgstr "Výkaz stěn"
 
-#: crates/core/src/commands.rs:649
+#: crates/core/src/commands.rs:658
 msgid "Wall by Face"
 msgstr "Stěna podle plochy"
 
@@ -10741,7 +10741,7 @@ msgstr "Obrys stěn"
 msgid "Walls' Outline: the outline the level's walls enclose, along their centre lines, as sketch lines to edit"
 msgstr "Obrys stěn: obrys, který stěny podlaží uzavírají, podél jejich os, jako čáry náčrtu k úpravě"
 
-#: crates/core/src/family.rs:2145
+#: crates/model/src/family.rs:2145
 msgid "Wardrobe"
 msgstr "Šatní skříň"
 
@@ -10754,7 +10754,7 @@ msgstr ""
 msgid "Warnings"
 msgstr ""
 
-#: crates/core/src/family.rs:2192
+#: crates/model/src/family.rs:2192
 msgid "Washbasin"
 msgstr "Umyvadlo"
 
@@ -10770,11 +10770,11 @@ msgstr ""
 msgid "Wave"
 msgstr "Vlna"
 
-#: crates/core/src/schedule.rs:435
+#: crates/model/src/schedule.rs:436
 msgid "Weight"
 msgstr "Hmotnost"
 
-#: crates/core/src/model.rs:2294
+#: crates/model/src/model.rs:2291
 msgid "West"
 msgstr "Západ"
 
@@ -10842,12 +10842,12 @@ msgstr "Kde se kříží dvě stěny nebo modulové osy"
 msgid "Why this is accepted as it is"
 msgstr ""
 
-#: crates/core/src/lines.rs:205
+#: crates/model/src/lines.rs:205
 #: crates/ui-egui/src/linestyles.rs:359
 msgid "Wide Lines"
 msgstr "Tlusté čáry"
 
-#: crates/core/src/family.rs:197
+#: crates/model/src/family.rs:197
 #: crates/ui-egui/src/lineweights.rs:112
 #: crates/ui-egui/src/properties.rs:481
 #: crates/ui-egui/src/properties.rs:483
@@ -10887,7 +10887,7 @@ msgstr "Okno"
 msgid "Window (WN): click a wall"
 msgstr "Okno (WN): klikněte na stěnu"
 
-#: crates/core/src/schedule.rs:121
+#: crates/model/src/schedule.rs:122
 msgid "Window Schedule"
 msgstr "Výkaz oken"
 
@@ -10895,7 +10895,7 @@ msgstr "Výkaz oken"
 msgid "Windows"
 msgstr "Okna"
 
-#: crates/core/src/commands.rs:881
+#: crates/core/src/commands.rs:890
 msgid "Wire"
 msgstr "Vodič"
 
@@ -10931,7 +10931,7 @@ msgstr "Název typu vodiče"
 msgid "Wire type:"
 msgstr "Typ vodiče:"
 
-#: crates/core/src/graphics.rs:268
+#: crates/model/src/graphics.rs:264
 msgid "Wireframe"
 msgstr "Drátový model"
 
@@ -10997,7 +10997,7 @@ msgstr "Pracovní rovina zpět na podlaží"
 msgid "Work plane square to the {} axis"
 msgstr "Pracovní rovina kolmá k ose {}"
 
-#: crates/core/src/family.rs:2157
+#: crates/model/src/family.rs:2157
 msgid "Worktop"
 msgstr "Pracovní deska"
 
@@ -11009,7 +11009,7 @@ msgstr "X"
 msgid "Y"
 msgstr "Y"
 
-#: crates/core/src/schedule.rs:1337
+#: crates/model/src/schedule.rs:1338
 msgid "Yes"
 msgstr "Ano"
 
@@ -11198,7 +11198,7 @@ msgstr "ve směru její normály: nahoru od podlaží, ven od povrchu"
 msgid "aluminium"
 msgstr "hliník"
 
-#: crates/core/src/curves.rs:125
+#: crates/model/src/curves.rs:125
 msgid "arc"
 msgstr "oblouk"
 
@@ -11226,7 +11226,7 @@ msgstr "začíná na"
 msgid "ceiling: `{}` is not a height"
 msgstr "podhled: `{}` není platná výška"
 
-#: crates/core/src/curves.rs:131
+#: crates/model/src/curves.rs:131
 msgid "circle"
 msgstr "kružnice"
 
@@ -11266,11 +11266,11 @@ msgstr "roh {}: každý roh je `x, y`"
 msgid "cuts the forms listed above it"
 msgstr "vyřezává tvary uvedené nad ním"
 
-#: crates/core/src/library.rs:88
+#: crates/model/src/library.rs:88
 msgid "design option"
 msgstr "možnost návrhu"
 
-#: crates/core/src/library.rs:87
+#: crates/model/src/library.rs:87
 msgid "design option set"
 msgstr "sada možností návrhu"
 
@@ -11310,7 +11310,7 @@ msgstr ""
 msgid "east"
 msgstr "východ"
 
-#: crates/core/src/curves.rs:132
+#: crates/model/src/curves.rs:132
 msgid "ellipse"
 msgstr "elipsa"
 
@@ -11342,7 +11342,7 @@ msgstr "směřuje nahoru"
 msgid "facing {}, {}° from level"
 msgstr "směřuje na {}, {}° od vodorovné roviny"
 
-#: crates/core/src/library.rs:81
+#: crates/model/src/library.rs:81
 msgid "family"
 msgstr "rodina"
 
@@ -11350,7 +11350,7 @@ msgstr "rodina"
 msgid "fck (MPa)"
 msgstr "fck (MPa)"
 
-#: crates/core/src/curves.rs:135
+#: crates/model/src/curves.rs:135
 msgid "fitted spline"
 msgstr "proložená křivka spline"
 
@@ -11370,7 +11370,7 @@ msgstr "má hodnotu"
 msgid "has no value"
 msgstr "nemá hodnotu"
 
-#: crates/core/src/library.rs:80
+#: crates/model/src/library.rs:80
 msgid "image"
 msgstr ""
 
@@ -11394,7 +11394,7 @@ msgstr "je menší nebo rovno"
 msgid "level: `{}` is not an elevation"
 msgstr "podlaží: `{}` není platná výšková kóta"
 
-#: crates/core/src/curves.rs:127
+#: crates/model/src/curves.rs:127
 msgid "line"
 msgstr "čára"
 
@@ -11402,7 +11402,7 @@ msgstr "čára"
 msgid "mass: {}"
 msgstr "objem: {}"
 
-#: crates/core/src/library.rs:76
+#: crates/model/src/library.rs:76
 msgid "material"
 msgstr "materiál"
 
@@ -11459,27 +11459,27 @@ msgstr ""
 msgid "open an elevation or a section to pick a level line"
 msgstr ""
 
-#: crates/core/src/library.rs:82
+#: crates/model/src/library.rs:82
 msgid "parameter"
 msgstr "parametr"
 
-#: crates/core/src/curves.rs:133
+#: crates/model/src/curves.rs:133
 msgid "partial ellipse"
 msgstr "částečná elipsa"
 
-#: crates/core/src/library.rs:85
+#: crates/model/src/library.rs:85
 msgid "phase"
 msgstr "fáze"
 
-#: crates/core/src/library.rs:86
+#: crates/model/src/library.rs:86
 msgid "phase filter"
 msgstr "filtr fází"
 
-#: crates/core/src/library.rs:77
+#: crates/model/src/library.rs:77
 msgid "picture"
 msgstr "obrázek"
 
-#: crates/core/src/curves.rs:130
+#: crates/model/src/curves.rs:130
 msgid "polyline"
 msgstr "křivka"
 
@@ -11575,7 +11575,7 @@ msgstr "jihovýchod"
 msgid "south-west"
 msgstr "jihozápad"
 
-#: crates/core/src/curves.rs:134
+#: crates/model/src/curves.rs:134
 msgid "spline"
 msgstr "křivka spline"
 
@@ -11642,11 +11642,11 @@ msgstr "dva typy mají název `{}`"
 msgid "type the elevation first"
 msgstr "nejprve zadejte výšku"
 
-#: crates/core/src/graphics.rs:965
+#: crates/model/src/graphics.rs:961
 msgid "view filter"
 msgstr "filtr pohledu"
 
-#: crates/core/src/graphics.rs:969
+#: crates/model/src/graphics.rs:965
 msgid "view template"
 msgstr "šablona pohledu"
 
@@ -11698,8 +11698,8 @@ msgstr "{} (nenačteno)"
 msgid "{} (primary)"
 msgstr "{} (hlavní)"
 
-#: crates/core/src/schedule.rs:1326
-#: crates/core/src/schedule.rs:1327
+#: crates/model/src/schedule.rs:1327
+#: crates/model/src/schedule.rs:1328
 msgid "{} ({})"
 msgstr "{} ({})"
 
@@ -12758,32 +12758,32 @@ msgctxt "category-plural"
 msgid "Wires"
 msgstr "Vodiče"
 
-#: crates/core/src/triad.rs:114
+#: crates/model/src/triad.rs:115
 msgctxt "side"
 msgid "Back"
 msgstr "Zadní"
 
-#: crates/core/src/triad.rs:112
+#: crates/model/src/triad.rs:113
 msgctxt "side"
 msgid "Bottom"
 msgstr "Dolní"
 
-#: crates/core/src/triad.rs:113
+#: crates/model/src/triad.rs:114
 msgctxt "side"
 msgid "Front"
 msgstr "Přední"
 
-#: crates/core/src/triad.rs:115
+#: crates/model/src/triad.rs:116
 msgctxt "side"
 msgid "Left"
 msgstr "Levý"
 
-#: crates/core/src/triad.rs:116
+#: crates/model/src/triad.rs:117
 msgctxt "side"
 msgid "Right"
 msgstr "Pravý"
 
-#: crates/core/src/triad.rs:111
+#: crates/model/src/triad.rs:112
 msgctxt "side"
 msgid "Top"
 msgstr "Horní"
