@@ -542,7 +542,7 @@ fn project_file(test: &str, n: usize) -> Value {
 fn a_file_of_format_4_that_holds_scans_opens_as_this_builds_format() {
     // Builds before 5 saved scans as format 4 (PRs 61 to 72); those files open, and are this build's format once read.
     let mut file = project_file("format4", 2);
-    assert_eq!(file["format"], crate::model::FORMAT);
+    assert_eq!(file["format"], crate::model::FORMAT_WITHOUT_IMAGES);
     file["format"] = json!(4);
     let (m, left_out) = crate::model::Model::read(&file.to_string()).unwrap();
     assert_eq!((m.format, m.clouds.len(), left_out.len()), (crate::model::FORMAT, 2, 0));

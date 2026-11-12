@@ -285,10 +285,34 @@ pub fn kind(shape: &Shape) -> &'static str {
     }
 }
 
-/// How far a shape is from `p`, drawing units: from its lines, a point or a text's point; 0 inside a fill.
-fn distance(shape: &Shape, p: P2) -> f64 {
+/// The entity of a placed drawing nearest `at` in plan within `reach` mm, of those it shows, and how far it is, mm.
+pub fn nearest<'c>(cad: &'c Cad, ci: &crate::model::CadImport, at: P2, reach: f64) -> Option<(&'c Entity, f64)> {
+    let q = crate::model::cad_unplace(ci, at);
+    // Mm of plan a unit of the drawing is, along its x and its y: a stretched image's lines are more one way than the other.
+    let (kx, ky) = (ci.scale.abs(), (ci.scale * ci.stretch).abs());
+    if !(kx > 0.0 && ky > 0.0) {
+        return None;
+    }
+    let (rx, ry) = (reach / kx, reach / ky);
+    let to_plan = |p: P2| P2(p.0 * kx, p.1 * ky);
+    cad.dxf()
+        .entities
+        .iter()
+        .filter(|e| cad.shows(e, &ci.hidden))
+        .filter(|e| {
+            let [lo, hi] = e.shape.bounds();
+            q.0 >= lo.0 - rx && q.0 <= hi.0 + rx && q.1 >= lo.1 - ry && q.1 <= hi.1 + ry
+        })
+        .map(|e| (e, distance_scaled(&e.shape, q, &to_plan)))
+        .filter(|(_, d)| *d <= reach)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+}
+
+/// How far point `p` is from `shape` (both in the drawing's units) once `scale` takes them to plan mm, along each axis.
+fn distance_scaled(shape: &Shape, p: P2, scale: &impl Fn(P2) -> P2) -> f64 {
+    let at = scale(p);
     match shape {
-        Shape::Point(q) | Shape::Text { at: q, .. } => q.dist(p),
+        Shape::Point(q) | Shape::Text { at: q, .. } => scale(*q).dist(at),
         Shape::Fill { rings, .. } if rings.iter().filter(|r| crate::geom::contains(r, p)).count() % 2 == 1 => 0.0,
         _ => paths(shape)
             .iter()
@@ -296,28 +320,9 @@ fn distance(shape: &Shape, p: P2) -> f64 {
                 let close = (*closed).then(|| pts.last().copied().zip(pts.first().copied())).flatten();
                 pts.windows(2).filter_map(|w| Some((*w.first()?, *w.get(1)?))).chain(close).collect::<Vec<_>>()
             })
-            .map(|(a, b)| crate::geom::dist_to_segment(p, a, b))
+            .map(|(a, b)| crate::geom::dist_to_segment(at, scale(a), scale(b)))
             .fold(f64::INFINITY, f64::min),
     }
-}
-
-/// The entity of a placed drawing nearest `at` in plan within `reach` mm, of those it shows, and how far it is, mm.
-pub fn nearest<'c>(cad: &'c Cad, ci: &crate::model::CadImport, at: P2, reach: f64) -> Option<(&'c Entity, f64)> {
-    let q = crate::model::cad_unplace(ci, at);
-    let k = ci.scale.min(ci.scale * ci.stretch.abs());
-    let reach = reach / k;
-    cad.dxf()
-        .entities
-        .iter()
-        .filter(|e| cad.shows(e, &ci.hidden))
-        .filter(|e| {
-            let [lo, hi] = e.shape.bounds();
-            q.0 >= lo.0 - reach && q.0 <= hi.0 + reach && q.1 >= lo.1 - reach && q.1 <= hi.1 + reach
-        })
-        .map(|e| (e, distance(&e.shape, q)))
-        .filter(|(_, d)| *d <= reach)
-        .min_by(|a, b| a.1.total_cmp(&b.1))
-        .map(|(e, d)| (e, d * k))
 }
 
 /// The box round a drawing's bulk, and how many of its entities lie far from it: past [`FAR`] times the span of the middle

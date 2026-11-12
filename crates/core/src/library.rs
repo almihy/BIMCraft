@@ -1634,7 +1634,15 @@ impl Model {
         let mut m = self.clone();
         m.sync_library();
         m.refs_to_file();
+        m.format = self.written_format();
         serde_json::to_string_pretty(&m).map_err(|e| e.to_string())
+    }
+
+    /// The format its file is written in: the oldest that holds all it has. [`crate::model::FORMAT`] when it holds images,
+    /// else [`crate::model::FORMAT_WITHOUT_IMAGES`], which nothing of format 20 changed, so an older build opens it.
+    pub fn written_format(&self) -> u32 {
+        let images = !self.image_types.is_empty() || !self.rare("image").is_empty();
+        if images { crate::model::FORMAT } else { crate::model::FORMAT_WITHOUT_IMAGES }
     }
 
     /// Every name this model holds of a library entry (its elements', its types', its views'…) its GUID, and the values of
@@ -1859,7 +1867,7 @@ template {"name": "Plans", "from": 100000}"#,
         let m = &s.model;
         let g = |kind: Kind, name: &str| json!(m.library.guid(&kind, name).unwrap().to_string());
         let file: Value = serde_json::from_str(&m.to_json().unwrap()).unwrap();
-        assert_eq!(file["format"], crate::model::FORMAT);
+        assert_eq!(file["format"], crate::model::FORMAT_WITHOUT_IMAGES);
         let wall = &file["elements"][w.to_string()];
         assert_eq!(wall["type"], g(Kind::Type("wall".into()), "Exterior - 300mm"));
         let params = wall["params"].as_object().unwrap();

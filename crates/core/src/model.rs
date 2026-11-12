@@ -123,6 +123,8 @@ pub const MIN_CONTOURS: f64 = 50.0;
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
 pub const FORMAT: u32 = 20;
+/// The format a project with no images is written in, so a build that reads up to 19 opens it ([`Model::written_format`]).
+pub const FORMAT_WITHOUT_IMAGES: u32 = 19;
 /// How far past the model a level reaches without an extent of its own, mm.
 pub const LEVEL_PAST: f64 = 1000.0;
 

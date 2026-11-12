@@ -492,6 +492,7 @@ dependencies = [
  "i_overlay",
  "image",
  "js-sys",
+ "png 0.18.1",
  "rayon",
  "serde",
  "serde_json",

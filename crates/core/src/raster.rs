@@ -6,6 +6,7 @@
 
 pub mod pdf;
 
+use std::collections::BTreeMap;
 use std::io::Cursor;
 use std::sync::{Arc, OnceLock};
 
@@ -18,8 +19,9 @@ use crate::render::{Drawing, Prim};
 
 /// Images one project may hold.
 pub const MAX_TYPES: usize = 256;
-/// The most bytes of PNG a project's images may hold among them.
-pub const MAX_HELD: usize = 1 << 30;
+/// The most bytes of PNG a project's images may hold among them: in base64, a third more, they and the rest of the project
+/// stay within the longest text a browser holds (Chrome's is 2^29 - 24 characters), which a project saved there is.
+pub const MAX_HELD: usize = 256 << 20;
 /// The largest file Import PDF or Insert > Image reads, bytes.
 pub const MAX_FILE: usize = 256 << 20;
 /// The most pixels one image may have: a page at a resolution that would have more is read at the finest that fits.
@@ -29,6 +31,8 @@ pub const RESOLUTIONS: [u32; 4] = [72, 150, 300, 600];
 pub const DEFAULT_DPI: u32 = 150;
 /// The resolution a picture (not a PDF) is taken at, as Revit takes every raster image: 72 dpi.
 pub const PICTURE_DPI: u32 = 72;
+/// The most a stated scale or a placed image's scale may be, 1 : this.
+pub const MAX_SCALE: f64 = 1e6;
 /// The smallest and largest an image may be placed, mm in its view's terms.
 pub const MIN_SIDE: f64 = 0.01;
 /// The most pixels a view draws of one image.
@@ -77,7 +81,8 @@ fn is_true(b: &bool) -> bool {
 /// section's along and up, a sheet's paper mm), its middle on `at`, `width` by `height`, turned `angle` degrees
 /// counter-clockwise about its middle and, `mirrored`, flipped top for bottom in its own frame (so turned and flipped, the mirror
 /// image of it across any line). `lock` keeps its proportions as it's sized
-/// (Revit's Lock Proportions); `snaps` lets what's drawn over it snap to a PDF's lines (Enable Snaps); `layer` is its Draw Layer.
+/// (Revit's Lock Proportions); `snaps` lets what's drawn over it snap to a PDF's lines (Enable Snaps); `layer` is its Draw Layer,
+/// and `order` its place in the draw order of its view's images, back to front (Revit's Arrange), within its layer.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ImageInstance {
@@ -97,6 +102,12 @@ pub struct ImageInstance {
     pub snaps: bool,
     #[serde(default, skip_serializing_if = "is_background")]
     pub layer: DrawLayer,
+    #[serde(default, skip_serializing_if = "is_first")]
+    pub order: i32,
+}
+
+fn is_first(o: &i32) -> bool {
+    *o == 0
 }
 
 impl ImageInstance {
@@ -187,7 +198,7 @@ impl PartialEq for ImageType {
     }
 }
 
-/// The decoded pixels, RGBA, and their levels, each half the one before, made when first drawn.
+/// The decoded pixels and their levels, each half the one before, made when first drawn (or when the image comes in).
 struct Pixels {
     levels: Vec<Level>,
 }
@@ -206,36 +217,71 @@ impl Pixels {
     }
 }
 
+/// Pixels `w` by `h`, row by row, each `ch` bytes: grey (1), RGB (3) or RGBA (4), as little as they need: a drawing's
+/// page, grey, holds a quarter of what RGBA would.
 struct Level {
     w: u32,
     h: u32,
-    rgba: Vec<u8>,
+    ch: usize,
+    px: Vec<u8>,
 }
 
 impl Level {
+    /// RGBA pixels as the fewest channels that hold them: grey when every pixel is opaque and grey, RGB when opaque.
+    fn from_rgba(w: u32, h: u32, rgba: &[u8]) -> Level {
+        let px = rgba.as_chunks::<4>().0;
+        let opaque = px.iter().all(|p| p[3] == 255);
+        let grey = opaque && px.iter().all(|p| p[0] == p[1] && p[1] == p[2]);
+        let (ch, px) = if grey {
+            (1, px.iter().map(|p| p[0]).collect())
+        } else if opaque {
+            (3, px.iter().flat_map(|p| [p[0], p[1], p[2]]).collect())
+        } else {
+            (4, rgba.to_vec())
+        };
+        Level { w, h, ch, px }
+    }
+
+    /// Its pixel at (`x`, `y`), RGBA; white past its sides.
+    fn at(&self, x: u32, y: u32) -> [u8; 4] {
+        let i = (y.min(self.h.saturating_sub(1)) as usize * self.w as usize + x.min(self.w.saturating_sub(1)) as usize) * self.ch;
+        match (self.ch, self.px.get(i..i + self.ch)) {
+            (1, Some(&[g])) => [g, g, g, 255],
+            (3, Some(&[r, g, b])) => [r, g, b, 255],
+            (4, Some(&[r, g, b, a])) => [r, g, b, a],
+            _ => [255; 4],
+        }
+    }
+
+    /// All of it as RGBA.
+    fn rgba(&self) -> Vec<u8> {
+        (0..self.h).flat_map(|y| (0..self.w).map(move |x| (x, y))).flat_map(|(x, y)| self.at(x, y)).collect()
+    }
+
     /// Half its size: each pixel the darkest of the four it covers when `keep_lines` (a drawing's lines stay as it zooms out),
     /// else their mean.
     fn halved(&self, keep_lines: bool) -> Level {
         let (w, h) = ((self.w / 2).max(1), (self.h / 2).max(1));
-        let mut rgba = Vec::with_capacity(w as usize * h as usize * 4);
+        let ch = self.ch;
+        let mut px = Vec::with_capacity(w as usize * h as usize * ch);
         let at = |x: u32, y: u32| {
-            let i = (y.min(self.h - 1) as usize * self.w as usize + x.min(self.w - 1) as usize) * 4;
-            self.rgba.get(i..i + 4).map_or([255; 4], |p| [p[0], p[1], p[2], p[3]])
+            let i = (y.min(self.h - 1) as usize * self.w as usize + x.min(self.w - 1) as usize) * ch;
+            self.px.get(i..i + ch).unwrap_or(&[])
         };
         for y in 0..h {
             for x in 0..w {
                 let four = [at(2 * x, 2 * y), at(2 * x + 1, 2 * y), at(2 * x, 2 * y + 1), at(2 * x + 1, 2 * y + 1)];
                 if keep_lines {
-                    let dark = four.iter().min_by_key(|p| u32::from(p[0]) + u32::from(p[1]) + u32::from(p[2])).copied().unwrap_or([255; 4]);
-                    rgba.extend(dark);
+                    let dark = four.iter().min_by_key(|p| p.iter().take(3).map(|c| u32::from(*c)).sum::<u32>()).copied().unwrap_or(&[]);
+                    px.extend((0..ch).map(|c| dark.get(c).copied().unwrap_or(255)));
                 } else {
-                    for c in 0..4 {
-                        rgba.push((four.iter().map(|p| u32::from(p[c])).sum::<u32>() / 4) as u8);
+                    for c in 0..ch {
+                        px.push((four.iter().map(|p| u32::from(p.get(c).copied().unwrap_or(255))).sum::<u32>() / 4) as u8);
                     }
                 }
             }
         }
-        Level { w, h, rgba }
+        Level { w, h, ch, px }
     }
 }
 
@@ -273,6 +319,23 @@ impl Serialize for ImageType {
 impl<'de> Deserialize<'de> for ImageType {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<ImageType, D::Error> {
         let f = ImageFile::deserialize(d)?;
+        let bad = |what: String| -> D::Error { <D::Error as serde::de::Error>::custom(format!("image `{}`: {what}", f.source)) };
+        if !f.size.iter().all(|s| s.is_finite() && *s >= MIN_SIDE && *s <= crate::model::MAX_COORD) {
+            return Err(bad(format!(
+                "its size, {:?} mm, isn't one an image can have: each side from {MIN_SIDE} to {} mm",
+                f.size,
+                crate::model::MAX_COORD
+            )));
+        }
+        let finest = RESOLUTIONS.iter().copied().max().unwrap_or(600);
+        if !(1..=finest).contains(&f.dpi) {
+            return Err(bad(format!("its resolution, {} dpi, isn't one an image can have: from 1 to {finest} dpi", f.dpi)));
+        }
+        if let Some(k) = f.scale
+            && !(k.is_finite() && k > 0.0 && k <= MAX_SCALE)
+        {
+            return Err(bad(format!("the scale its page states, 1 : {k}, isn't one: from above 0 to {MAX_SCALE}")));
+        }
         let png = crate::texture::unbase64(&f.png).ok_or_else(|| serde::de::Error::custom("an image's pixels aren't base64"))?;
         let px = png_size(&png).map_err(|e| serde::de::Error::custom(format!("image `{}`: {e}", f.source)))?;
         Ok(ImageType {
@@ -307,33 +370,45 @@ fn too_big(w: u32, h: u32) -> Result<(), String> {
     Ok(())
 }
 
-/// RGBA pixels as a PNG: grey, or colour without alpha, when that is all they are.
-fn encode(w: u32, h: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
-    use image::ImageEncoder as _;
-    let px = rgba.as_chunks::<4>().0;
-    let opaque = px.iter().all(|p| p[3] == 255);
-    let grey = opaque && px.iter().all(|p| p[0] == p[1] && p[1] == p[2]);
+/// Pixels as a PNG, in their own channels, row by row (no copy of them is made).
+fn encode(l: &Level) -> Result<Vec<u8>, String> {
+    use std::io::Write as _;
     let mut out = Vec::new();
-    let encoder = image::codecs::png::PngEncoder::new_with_quality(
-        &mut out,
-        image::codecs::png::CompressionType::Fast,
-        image::codecs::png::FilterType::Adaptive,
-    );
-    let r = if grey {
-        let g: Vec<u8> = px.iter().map(|p| p[0]).collect();
-        encoder.write_image(&g, w, h, image::ExtendedColorType::L8)
-    } else if opaque {
-        let rgb: Vec<u8> = px.iter().flat_map(|p| [p[0], p[1], p[2]]).collect();
-        encoder.write_image(&rgb, w, h, image::ExtendedColorType::Rgb8)
-    } else {
-        encoder.write_image(rgba, w, h, image::ExtendedColorType::Rgba8)
-    };
-    r.map_err(|e| e.to_string())?;
+    let mut e = png::Encoder::new(&mut out, l.w, l.h);
+    e.set_color(match l.ch {
+        1 => png::ColorType::Grayscale,
+        3 => png::ColorType::Rgb,
+        _ => png::ColorType::Rgba,
+    });
+    e.set_depth(png::BitDepth::Eight);
+    e.set_compression(png::Compression::Fast);
+    e.set_filter(png::Filter::Adaptive);
+    let mut w = e.write_header().map_err(|e| e.to_string())?;
+    {
+        let mut rows = w.stream_writer().map_err(|e| e.to_string())?;
+        let row = l.w as usize * l.ch;
+        for r in l.px.chunks(row.max(1)) {
+            rows.write_all(r).map_err(|e| e.to_string())?;
+        }
+        rows.finish().map_err(|e| e.to_string())?;
+    }
+    w.finish().map_err(|e| e.to_string())?;
     Ok(out)
 }
 
-/// The pixels of a PNG, JPEG or BMP file, RGBA, held to [`MAX_PIXELS`] before they're decoded.
-fn decode(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
+/// A PNG's pixels, in its channels (grey, RGB or RGBA: other kinds as RGBA).
+fn unpng(png: &[u8]) -> Option<Level> {
+    let img = image::load_from_memory_with_format(png, image::ImageFormat::Png).ok()?;
+    let (w, h) = (img.width(), img.height());
+    Some(match img {
+        image::DynamicImage::ImageLuma8(g) => Level { w, h, ch: 1, px: g.into_raw() },
+        image::DynamicImage::ImageRgb8(c) => Level { w, h, ch: 3, px: c.into_raw() },
+        other => Level { w, h, ch: 4, px: other.into_rgba8().into_raw() },
+    })
+}
+
+/// The pixels of a PNG, JPEG or BMP file, held to [`MAX_PIXELS`] before they're decoded.
+fn decode(bytes: &[u8]) -> Result<Level, String> {
     if bytes.len() > MAX_FILE {
         return Err(format!("it's {} bytes; up to {MAX_FILE}", bytes.len()));
     }
@@ -354,8 +429,15 @@ fn decode(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
     limits.max_alloc = Some(MAX_PIXELS * 8);
     reader.limits(limits);
     let img = reader.decode().map_err(|e| format!("it can't be read: {e}"))?;
-    let rgba = img.into_rgba8();
-    Ok((rgba.width(), rgba.height(), rgba.into_raw()))
+    let (w, h) = (img.width(), img.height());
+    Ok(match img {
+        image::DynamicImage::ImageLuma8(g) => Level { w, h, ch: 1, px: g.into_raw() },
+        image::DynamicImage::ImageRgb8(c) => Level { w, h, ch: 3, px: c.into_raw() },
+        other => {
+            let rgba = other.into_rgba8();
+            Level::from_rgba(w, h, rgba.as_raw())
+        }
+    })
 }
 
 /// The size a picture comes in at, mm (72 dpi, as Revit takes one), read from its header: where a front end outlines it
@@ -375,8 +457,9 @@ pub fn picture_size(bytes: &[u8]) -> Result<[f64; 2], String> {
 impl ImageType {
     /// A picture, Insert > Image: a PNG, JPEG or BMP file's `bytes`, known by `source`, taken at 72 dpi as Revit takes one.
     pub fn picture(source: &str, bytes: &[u8]) -> Result<ImageType, String> {
-        let (w, h, rgba) = decode(bytes)?;
-        let png = encode(w, h, &rgba)?;
+        let level = decode(bytes)?;
+        let png = encode(&level)?;
+        let (w, h) = (level.w, level.h);
         let mm = 25.4 / f64::from(PICTURE_DPI);
         Ok(ImageType {
             source: source.chars().take(MAX_TEXT).collect(),
@@ -386,57 +469,34 @@ impl ImageType {
             scale: None,
             png: Arc::new(png),
             px: (w, h),
-            pixels: Arc::new(OnceLock::from(Some(Arc::new(Pixels::new(Level { w, h, rgba }, false))))),
+            pixels: Arc::new(OnceLock::from(Some(Arc::new(Pixels::new(level, false))))),
             lines: None,
         })
     }
 
-    /// Page `page` (from 1) of a PDF file's `bytes`, known by `source`, rasterised at `dpi` (or the finest under it that
-    /// keeps it within [`MAX_PIXELS`], said in the notes), with what it draws as vectors. Returns it and notes on what was
-    /// left out.
-    pub fn pdf(source: &str, bytes: Vec<u8>, page: usize, dpi: u32) -> Result<(ImageType, Vec<String>), String> {
-        if bytes.len() > MAX_FILE {
-            return Err(format!("it's {} bytes; up to {MAX_FILE}", bytes.len()));
-        }
-        let doc = pdf::Document::open(bytes)?;
-        let size = doc.size(page)?;
-        let mut notes = Vec::new();
-        let [w_in, h_in] = size.map(|s| s / 25.4);
-        let fits = (MAX_PIXELS as f64 / (w_in * h_in).max(1e-9)).sqrt().floor();
-        let mut dots = f64::from(dpi);
-        if dots * w_in > 65_535.0 || dots * h_in > 65_535.0 || (dots * w_in) * (dots * h_in) > MAX_PIXELS as f64 {
-            dots = fits.min((65_535.0 / w_in.max(h_in)).floor()).max(1.0);
-            notes.push(format!(
-                "page {page} is {:.0} × {:.0} mm: at {dpi} dpi it would be more than {MAX_PIXELS} pixels, so it came in at {dots} dpi",
-                size[0], size[1]
-            ));
-        }
-        let (w, h, rgba) = doc.render(page, dots)?;
-        too_big(w, h)?;
-        let png = encode(w, h, &rgba)?;
-        let vectors = doc.vectors(page)?;
-        if vectors.left_out > 0 {
-            notes.push(format!(
-                "page {page} draws more than {} points of lines: {} of its paths were left out of the lines it snaps to",
-                pdf::MAX_SEGMENTS,
-                vectors.left_out
-            ));
-        }
-        let lines = if vectors.is_empty() { None } else { Cad::new(source, None, vectors.dxf()).ok() };
-        Ok((
-            ImageType {
-                source: source.chars().take(MAX_TEXT).collect(),
-                page: u32::try_from(page).ok(),
-                dpi: dots as u32,
-                size,
-                scale: doc.scale(page),
-                png: Arc::new(png),
-                px: (w, h),
-                pixels: Arc::new(OnceLock::from(Some(Arc::new(Pixels::new(Level { w, h, rgba }, true))))),
-                lines,
-            },
-            notes,
-        ))
+    /// A page read from a PDF ([`read_pdf`], here or apart), known by `source`; and notes on what was left out of it.
+    pub fn from_pdf(source: &str, read: &PdfRead) -> (ImageType, Vec<String>) {
+        let mut notes = read.notes.clone();
+        let lines = read.dxf.as_ref().and_then(|dxf| match Cad::new(source, None, dxf.clone()) {
+            Ok(cad) => Some(cad),
+            Err(e) => {
+                notes.push(format!("page {}'s lines couldn't be kept ({e}): it shows as a picture only, with nothing to snap to", read.page));
+                None
+            }
+        });
+        let pixels = read.level.clone().map_or_else(Arc::default, |l| Arc::new(OnceLock::from(Some(l))));
+        let t = ImageType {
+            source: source.chars().take(MAX_TEXT).collect(),
+            page: u32::try_from(read.page).ok(),
+            dpi: read.dpi,
+            size: read.size,
+            scale: read.scale,
+            png: Arc::clone(&read.png),
+            px: read.px,
+            pixels,
+            lines,
+        };
+        (t, notes)
     }
 
     /// The file it came from.
@@ -485,20 +545,267 @@ impl ImageType {
 
     /// Its pixels and their levels, decoded the first time they're asked for; none when its PNG can't be read.
     fn levels(&self) -> Option<Arc<Pixels>> {
-        self.pixels
-            .get_or_init(|| {
-                let img = image::load_from_memory_with_format(&self.png, image::ImageFormat::Png).ok()?.into_rgba8();
-                let (w, h) = (img.width(), img.height());
-                Some(Arc::new(Pixels::new(Level { w, h, rgba: img.into_raw() }, self.page.is_some())))
-            })
-            .clone()
+        self.pixels.get_or_init(|| Some(Arc::new(Pixels::new(unpng(&self.png)?, self.page.is_some())))).clone()
     }
 
     /// A small picture of it, no side over `side` px: its width, height and RGBA (Manage Images, the box that places it).
     pub fn thumbnail(&self, side: u32) -> Option<(u32, u32, Vec<u8>)> {
         let p = self.levels()?;
         let l = p.levels.iter().find(|l| l.w <= side && l.h <= side).or(p.levels.last())?;
-        Some((l.w, l.h, l.rgba.clone()))
+        Some((l.w, l.h, l.rgba()))
+    }
+}
+
+/// A page of a PDF read for Import PDF ([`read_pdf`]): which page of how many, the resolution it came in at, its size on
+/// paper, mm, the scale it states, its pixels as a PNG (and, read here, decoded), its vectors as a DXF and notes on what was
+/// left out. It holds nothing of the file it came from, so it may be read apart (in a worker of the browser of its own) and
+/// handed over as bytes ([`PdfRead::to_bytes`]).
+#[derive(Clone)]
+pub struct PdfRead {
+    pub pages: usize,
+    pub page: usize,
+    pub dpi: u32,
+    pub size: [f64; 2],
+    pub scale: Option<f64>,
+    png: Arc<Vec<u8>>,
+    px: (u32, u32),
+    dxf: Option<Vec<u8>>,
+    pub notes: Vec<String>,
+    /// Its pixels, when it was read here: the image needn't decode its PNG again.
+    level: Option<Arc<Pixels>>,
+}
+
+impl std::fmt::Debug for PdfRead {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PdfRead(page {} of {}, {} x {} px)", self.page, self.pages, self.px.0, self.px.1)
+    }
+}
+
+/// What [`PdfRead::to_bytes`] writes ahead of its PNG and its DXF.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReadHead {
+    pages: usize,
+    page: usize,
+    dpi: u32,
+    /// The size's and the scale's numbers by their bits, so they come over exactly.
+    size: [u64; 2],
+    scale: Option<u64>,
+    png: usize,
+    dxf: Option<usize>,
+    notes: Vec<String>,
+}
+
+impl PdfRead {
+    /// Itself as bytes, to hand over from where it was read: the length of a JSON head (4 bytes, little-endian), the head,
+    /// the PNG and the DXF.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let head = ReadHead {
+            pages: self.pages,
+            page: self.page,
+            dpi: self.dpi,
+            size: self.size.map(f64::to_bits),
+            scale: self.scale.map(f64::to_bits),
+            png: self.png.len(),
+            dxf: self.dxf.as_ref().map(Vec::len),
+            notes: self.notes.clone(),
+        };
+        let head = serde_json::to_vec(&head).unwrap_or_default();
+        let mut out = Vec::with_capacity(4 + head.len() + self.png.len() + self.dxf.as_ref().map_or(0, Vec::len));
+        out.extend((head.len() as u32).to_le_bytes());
+        out.extend(head);
+        out.extend(self.png.iter());
+        out.extend(self.dxf.iter().flatten());
+        out
+    }
+
+    /// What [`PdfRead::to_bytes`] wrote, checked as a file is: what came from elsewhere is hostile.
+    pub fn from_bytes(bytes: &[u8]) -> Result<PdfRead, String> {
+        let at = |from: usize, len: usize| {
+            from.checked_add(len).and_then(|to| bytes.get(from..to)).ok_or_else(|| "the page read isn't whole".to_string())
+        };
+        let n = u32::from_le_bytes(<[u8; 4]>::try_from(at(0, 4)?).map_err(|e| e.to_string())?) as usize;
+        let head: ReadHead = serde_json::from_slice(at(4, n)?).map_err(|e| e.to_string())?;
+        let png = at(4 + n, head.png)?.to_vec();
+        let dxf = head.dxf.map(|d| at(4 + n + head.png, d).map(<[u8]>::to_vec)).transpose()?;
+        let px = png_size(&png)?;
+        let (size, scale) = (head.size.map(f64::from_bits), head.scale.map(f64::from_bits));
+        let finest = RESOLUTIONS.iter().copied().max().unwrap_or(600);
+        let sized = size.iter().all(|s| s.is_finite() && *s >= MIN_SIDE && *s <= crate::model::MAX_COORD);
+        let scaled = scale.is_none_or(|k| k.is_finite() && k > 0.0 && k <= MAX_SCALE);
+        if !(sized && scaled && (1..=finest).contains(&head.dpi) && (1..=head.pages).contains(&head.page) && head.pages <= pdf::MAX_PAGES)
+        {
+            return Err("the page read says what no page is".into());
+        }
+        let notes = head.notes.into_iter().take(16).map(|n| n.chars().take(MAX_TEXT).collect()).collect();
+        Ok(PdfRead {
+            pages: head.pages,
+            page: head.page,
+            dpi: head.dpi,
+            size,
+            scale,
+            png: Arc::new(png),
+            px,
+            dxf,
+            notes,
+            level: None,
+        })
+    }
+}
+
+/// Page `page` (from 1) of a PDF file's `bytes` read for Import PDF: rasterised at `dpi` (or the finest under it that keeps
+/// it within [`MAX_PIXELS`], said in its notes), with what it draws as vectors. This is where a hostile file is read: in the
+/// browser, only ever in a worker of its own ([`run_pdf_job`]).
+pub fn read_pdf(bytes: Vec<u8>, page: usize, dpi: u32) -> Result<PdfRead, String> {
+    if bytes.len() > MAX_FILE {
+        return Err(format!("it's {} bytes; up to {MAX_FILE}", bytes.len()));
+    }
+    let doc = pdf::Document::open(bytes)?;
+    let size = doc.size(page)?;
+    let mut notes = Vec::new();
+    let [w_in, h_in] = size.map(|s| s / 25.4);
+    let fits = (MAX_PIXELS as f64 / (w_in * h_in).max(1e-9)).sqrt().floor();
+    let mut dots = f64::from(dpi);
+    if dots * w_in > 65_535.0 || dots * h_in > 65_535.0 || (dots * w_in) * (dots * h_in) > MAX_PIXELS as f64 {
+        dots = fits.min((65_535.0 / w_in.max(h_in)).floor()).max(1.0);
+        notes.push(format!(
+            "page {page} is {:.0} × {:.0} mm: at {dpi} dpi it would be more than {MAX_PIXELS} pixels, so it came in at {dots} dpi",
+            size[0], size[1]
+        ));
+    }
+    // The page's pixels in the channels they need, taken straight from what hayro drew, which is then let go.
+    let level = doc.render_into(page, dots, |w, h, rgba| Level::from_rgba(w, h, rgba))?;
+    let (w, h) = (level.w, level.h);
+    too_big(w, h)?;
+    let png = encode(&level)?;
+    let vectors = doc.vectors(page)?;
+    if vectors.left_out > 0 {
+        notes.push(format!(
+            "page {page} draws more than its lines can hold ({} points, or curves past the work a page may take): {} of its paths were left out of the lines it snaps to",
+            pdf::MAX_SEGMENTS,
+            vectors.left_out
+        ));
+    }
+    if !vectors.cmaps.is_empty() {
+        notes.push(format!(
+            "page {page}'s text is set in character maps BIMCraft doesn't hold ({}): its Chinese, Japanese or Korean text is missing from its lines and may show wrongly",
+            vectors.cmaps.join(", ")
+        ));
+    }
+    Ok(PdfRead {
+        pages: doc.pages(),
+        page,
+        dpi: dots as u32,
+        size,
+        scale: doc.scale(page),
+        png: Arc::new(png),
+        px: (w, h),
+        dxf: (!vectors.is_empty()).then(|| vectors.dxf()),
+        notes,
+        level: Some(Arc::new(Pixels::new(level, true))),
+    })
+}
+
+/// A PDF file's pages, as Import PDF's box and `pdf_pages` list them: how many it has, and each one's size, mm, and the
+/// scale it states.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PdfOutline {
+    pub pages: usize,
+    pub list: Vec<PdfPage>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PdfPage {
+    pub size: [f64; 2],
+    pub scale: Option<f64>,
+}
+
+/// A PDF file's pages ([`PdfOutline`]), from its `bytes`.
+pub fn pdf_outline(bytes: Vec<u8>) -> Result<PdfOutline, String> {
+    if bytes.len() > MAX_FILE {
+        return Err(format!("it's {} bytes; up to {MAX_FILE}", bytes.len()));
+    }
+    let doc = pdf::Document::open(bytes)?;
+    let list = (1..=doc.pages()).map(|n| PdfPage { size: doc.size(n).unwrap_or([0.0, 0.0]), scale: doc.scale(n) }).collect();
+    Ok(PdfOutline { pages: doc.pages(), list })
+}
+
+/// What is asked of a PDF file where it is read apart from the editor: its pages, a page's thumbnail no side over `side`
+/// px, or a page read for import at a resolution.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "job", rename_all = "lowercase", deny_unknown_fields)]
+pub enum PdfJob {
+    Outline,
+    Thumbnail { page: usize, side: u32 },
+    Page { page: usize, dpi: u32 },
+}
+
+/// Does `job` on a PDF file's `bytes`, giving its answer as bytes: a [`PdfOutline`] as JSON, a thumbnail as its width and
+/// height (4 bytes each, little-endian) and its RGBA, or a [`PdfRead`] as [`PdfRead::to_bytes`]. A panic in the reader
+/// is an error where panics unwind (a thread of the window's); in the browser, where they don't, this runs in a worker of
+/// its own, which an abort ends without the editor.
+pub fn run_pdf_job(job: &PdfJob, bytes: Vec<u8>) -> Result<Vec<u8>, String> {
+    let run = || -> Result<Vec<u8>, String> {
+        match *job {
+            PdfJob::Outline => serde_json::to_vec(&pdf_outline(bytes)?).map_err(|e| e.to_string()),
+            PdfJob::Thumbnail { page, side } => {
+                if bytes.len() > MAX_FILE {
+                    return Err(format!("it's {} bytes; up to {MAX_FILE}", bytes.len()));
+                }
+                let doc = pdf::Document::open(bytes)?;
+                let [w, h] = doc.size(page)?;
+                let dpi = (f64::from(side.clamp(8, 1024)) / (w.max(h) / 25.4).max(1e-3)).clamp(1.0, 72.0);
+                let (w, h, rgba) = doc.render(page, dpi)?;
+                let mut out = Vec::with_capacity(8 + rgba.len());
+                out.extend(w.to_le_bytes());
+                out.extend(h.to_le_bytes());
+                out.extend(rgba);
+                Ok(out)
+            }
+            PdfJob::Page { page, dpi } => Ok(read_pdf(bytes, page, dpi)?.to_bytes()),
+        }
+    };
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)).unwrap_or_else(|_| Err("it isn't a PDF BIMCraft can read".into()))
+}
+
+/// A thumbnail [`run_pdf_job`] gave: its width, height and RGBA, checked.
+pub fn thumbnail_from_bytes(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
+    let word = |i: usize| bytes.get(i..i + 4).and_then(|b| <[u8; 4]>::try_from(b).ok()).map(u32::from_le_bytes);
+    let (Some(w), Some(h)) = (word(0), word(4)) else { return Err("the thumbnail isn't whole".into()) };
+    let rgba = bytes.get(8..).unwrap_or_default();
+    if w == 0 || h == 0 || w > 4096 || h > 4096 || rgba.len() != w as usize * h as usize * 4 {
+        return Err("the thumbnail isn't whole".into());
+    }
+    Ok((w, h, rgba.to_vec()))
+}
+
+/// The PDF pages a session takes from elsewhere instead of reading the file (`import_pdf`, `pdf_pages`): those the window
+/// read apart from the engine, by the file's path, and whether it may read one itself. A session in the browser's editor
+/// may not ([`PdfReads::elsewhere`]): a hostile file read there would end the editor, so it is read in a worker of its own.
+#[derive(Clone, Debug, Default)]
+pub struct PdfReads {
+    /// Whether every PDF must be read elsewhere and given ([`crate::engine::Session::give_pdf_page`]) before a command
+    /// takes it.
+    pub elsewhere: bool,
+    pub(crate) outlines: BTreeMap<String, PdfOutline>,
+    pub(crate) pages: BTreeMap<(String, usize, u32), Arc<PdfRead>>,
+}
+
+impl PdfReads {
+    /// Lets go of what was given of the file at `key`, or of every file when none.
+    pub fn forget(&mut self, key: Option<&str>) {
+        match key {
+            Some(k) => {
+                self.outlines.remove(k);
+                self.pages.retain(|(p, _, _), _| p != k);
+            }
+            None => {
+                self.outlines.clear();
+                self.pages.clear();
+            }
+        }
     }
 }
 
@@ -546,11 +853,10 @@ pub(crate) fn draw(d: &mut Drawing, t: &ImageType, corners: [(f64, f64); 4]) {
             if !(0.0..1.0).contains(&u) || !(0.0..1.0).contains(&v) {
                 continue;
             }
-            let (sx, sy) = ((u * f64::from(l.w)) as usize, (v * f64::from(l.h)) as usize);
-            let from = (sy * l.w as usize + sx) * 4;
+            let (sx, sy) = ((u * f64::from(l.w)) as u32, (v * f64::from(l.h)) as u32);
             let to = (y as usize * pw as usize + x as usize) * 4;
-            if let (Some(src), Some(dst)) = (l.rgba.get(from..from + 4), rgba.get_mut(to..to + 4)) {
-                dst.copy_from_slice(src);
+            if let Some(dst) = rgba.get_mut(to..to + 4) {
+                dst.copy_from_slice(&l.at(sx, sy));
             }
         }
     }
@@ -563,7 +869,77 @@ mod tests {
 
     fn png(w: u32, h: u32, f: impl Fn(u32, u32) -> [u8; 4]) -> Vec<u8> {
         let rgba: Vec<u8> = (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).flat_map(|(x, y)| f(x, y)).collect();
-        encode(w, h, &rgba).unwrap()
+        encode(&Level::from_rgba(w, h, &rgba)).unwrap()
+    }
+
+    /// A one-page PDF 100 points a side with a black line across it.
+    fn page() -> Vec<u8> {
+        pdf::sample("0 0 0 RG 2 w 10 50 m 90 50 l S", [100.0, 100.0], Some((0.035_277_8, "m")))
+    }
+
+    #[test]
+    fn a_page_whose_lines_cant_be_kept_says_so() {
+        let mut read = read_pdf(page(), 1, 72).unwrap();
+        assert!(read.dxf.is_some());
+        read.dxf = Some(b"0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF\n".to_vec());
+        let (t, notes) = ImageType::from_pdf("p.pdf", &read);
+        assert!(t.lines().is_none());
+        assert!(notes.iter().any(|n| n.contains("lines couldn't be kept")), "{notes:?}");
+    }
+
+    #[test]
+    fn a_drawings_grey_page_holds_a_byte_a_pixel() {
+        let read = read_pdf(page(), 1, 72).unwrap();
+        let p = read.level.clone().unwrap();
+        assert_eq!((p.levels[0].ch, p.levels[0].px.len()), (1, 100 * 100), "grey");
+        // Its PNG is grey too, and decoded again it is the same.
+        let (t, _) = ImageType::from_pdf("p.pdf", &PdfRead { level: None, ..read });
+        let again = t.levels().unwrap();
+        assert_eq!((again.levels[0].ch, &again.levels[0].px), (1, &p.levels[0].px));
+        assert_eq!(again.levels[0].at(50, 50), [0, 0, 0, 255], "the line, in the middle");
+        assert_eq!(again.levels[0].at(50, 20), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn a_page_read_apart_comes_over_whole_and_broken_bytes_are_refused() {
+        let read = read_pdf(page(), 1, 150).unwrap();
+        let bytes = read.to_bytes();
+        let back = PdfRead::from_bytes(&bytes).unwrap();
+        assert_eq!((back.pages, back.page, back.dpi, back.size, back.scale), (1, 1, 150, read.size, read.scale));
+        let (a, _) = ImageType::from_pdf("p.pdf", &read);
+        let (b, _) = ImageType::from_pdf("p.pdf", &back);
+        assert_eq!(a, b);
+        for cut in [0, 3, 10, bytes.len() / 2, bytes.len() - 1] {
+            assert!(PdfRead::from_bytes(&bytes[..cut]).is_err(), "cut at {cut}");
+        }
+        let mut lying = bytes.clone();
+        let n = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+        let head = String::from_utf8(bytes[4..4 + n].to_vec()).unwrap().replace("\"dpi\":150", "\"dpi\":0");
+        lying.splice(4..4 + n, head.bytes());
+        lying.splice(0..4, (head.len() as u32).to_le_bytes());
+        assert!(PdfRead::from_bytes(&lying).is_err());
+    }
+
+    #[test]
+    fn the_jobs_done_apart_give_the_pages_a_thumbnail_and_a_page() {
+        let outline: PdfOutline = serde_json::from_slice(&run_pdf_job(&PdfJob::Outline, page()).unwrap()).unwrap();
+        assert_eq!(outline.pages, 1);
+        assert!((outline.list[0].scale.unwrap() - 100.0).abs() < 0.01);
+        let (w, h, rgba) = thumbnail_from_bytes(&run_pdf_job(&PdfJob::Thumbnail { page: 1, side: 50 }, page()).unwrap()).unwrap();
+        assert!(w <= 50 && h <= 50 && rgba.len() == (w * h * 4) as usize);
+        let read = PdfRead::from_bytes(&run_pdf_job(&PdfJob::Page { page: 1, dpi: 72 }, page()).unwrap()).unwrap();
+        assert_eq!(read.px, (100, 100));
+        assert!(run_pdf_job(&PdfJob::Page { page: 2, dpi: 72 }, page()).unwrap_err().contains("no page 2"));
+        assert!(run_pdf_job(&PdfJob::Outline, b"junk".to_vec()).is_err());
+        let job: PdfJob = serde_json::from_str(r#"{"job": "page", "page": 1, "dpi": 300}"#).unwrap();
+        assert_eq!(job, PdfJob::Page { page: 1, dpi: 300 });
+    }
+
+    #[test]
+    fn what_a_project_holds_of_images_stays_within_what_a_browser_saves() {
+        // Its PNG in base64, and room for the rest of the project, within Chrome's longest string.
+        const LONGEST: usize = (1 << 29) - 24;
+        assert!(MAX_HELD / 3 * 4 + (64 << 20) < LONGEST);
     }
 
     #[test]

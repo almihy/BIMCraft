@@ -46,6 +46,45 @@ fn default_name(path: &str, page: Option<(usize, usize)>) -> String {
     }
 }
 
+/// The key a PDF read apart is given and taken by: the file's path as the commands read it.
+fn pdf_key(s: &Session, path: &str) -> String {
+    beside(s, path).to_string_lossy().into_owned()
+}
+
+/// Page `page` of the PDF at `path` read at `dpi`: as given, read apart ([`Session::give_pdf_page`]), else read here, unless
+/// the session may not read one itself (the browser's editor).
+fn page_read(c: &str, s: &Session, path: &str, page: usize, dpi: u32) -> Result<std::sync::Arc<raster::PdfRead>, String> {
+    if let Some(r) = s.pdf.pages.get(&(pdf_key(s, path), page, dpi)) {
+        return Ok(std::sync::Arc::clone(r));
+    }
+    if s.pdf.elsewhere {
+        return Err(bad(c, format!("{path}: here a PDF is read apart from the editor, so it can't take the editor down; bring it in with Insert > Import PDF")));
+    }
+    let (bytes, _) = read_file(c, s, path)?;
+    raster::read_pdf(bytes, page, dpi).map(std::sync::Arc::new).map_err(|e| bad(c, format!("{path}: {e}")))
+}
+
+impl Session {
+    /// Gives the session page `page` of the PDF at `path` (as `import_pdf` names it) read at `dpi` elsewhere: `import_pdf`
+    /// takes it instead of reading the file, until it is let go ([`Session::forget_pdf`]).
+    pub fn give_pdf_page(&mut self, path: &str, page: usize, dpi: u32, read: raster::PdfRead) {
+        let key = pdf_key(self, path);
+        self.pdf.pages.insert((key, page, dpi), std::sync::Arc::new(read));
+    }
+
+    /// Gives the session the pages of the PDF at `path`, read elsewhere: `pdf_pages` says them.
+    pub fn give_pdf_outline(&mut self, path: &str, outline: raster::PdfOutline) {
+        let key = pdf_key(self, path);
+        self.pdf.outlines.insert(key, outline);
+    }
+
+    /// Lets go of what was given of the PDF at `path`, or of every PDF when none.
+    pub fn forget_pdf(&mut self, path: Option<&str>) {
+        let key = path.map(|p| pdf_key(self, p));
+        self.pdf.forget(key.as_deref());
+    }
+}
+
 /// An image the project holds, by name, for `image`.
 fn held<'m>(c: &str, m: &'m Model, name: &str) -> Result<&'m ImageType, String> {
     m.image_types.get(name).ok_or_else(|| {
@@ -86,9 +125,10 @@ pub(super) fn import_pdf(s: &mut Session, p: &Value) -> R {
                     return Err(bad(c, format!("`resolution` is one of {} dpi, as Revit offers, not {r}", all.join(", "))));
                 }
             };
-            let (bytes, source) = read_file(c, s, &path)?;
-            let pages = raster::pdf::Document::open(bytes.clone()).map_err(|e| bad(c, format!("{path}: {e}")))?.pages();
-            let (t, notes) = ImageType::pdf(&source, bytes, page, dpi).map_err(|e| bad(c, format!("{path}: {e}")))?;
+            let read = page_read(c, s, &path, page, dpi)?;
+            let source: String = Path::new(&path).file_name().map_or_else(|| path.clone(), |f| f.to_string_lossy().into_owned());
+            let pages = read.pages;
+            let (t, notes) = ImageType::from_pdf(&source, &read);
             let name = match string(c, p, "name")? {
                 Some(n) if n.trim().is_empty() => return Err(bad(c, "an image needs a `name`")),
                 Some(n) => n,
@@ -161,15 +201,16 @@ fn place(c: &str, s: &mut Session, p: &Value, name: &str, new: Option<ImageType>
         None => held(c, m, name)?.clone(),
     };
     let stated = t.stated_scale();
-    // The scale it comes in at: on a sheet, its paper's; in a model view, the one given, else the page's own, else its paper's.
+    // The scale it comes in at, as Revit brings one in: on a sheet, its paper's; in a model view, the one given, else the
+    // view's (the scale a page states is read, not taken: `stated_scale` says it).
     let scale = match num(c, p, "scale")? {
         Some(_) if sheet => return Err(bad(c, "on a sheet an image is the size of its paper; give a `width` to size it")),
-        Some(k) if k.is_finite() && (1e-6..=1e6).contains(&k) => k,
+        Some(k) if k.is_finite() && (1e-6..=raster::MAX_SCALE).contains(&k) => k,
         Some(k) => {
             return Err(bad(c, format!("`scale` is how many mm of the model a mm of the image stands for (100 at 1 : 100), not {k}")));
         }
         None if sheet => 1.0,
-        None => stated.unwrap_or(1.0),
+        None => crate::graphics::scale_of(m, view),
     };
     let [w0, h0] = t.size();
     let (mut width, mut height) = (w0 * scale, h0 * scale);
@@ -195,7 +236,10 @@ fn place(c: &str, s: &mut Session, p: &Value, name: &str, new: Option<ImageType>
         None => DrawLayer::Background,
         Some(l) => DrawLayer::from_name(&l).ok_or_else(|| bad(c, format!("`layer` is background or foreground, not {l}")))?,
     };
+    // In front of the view's other images.
+    let order = images_in(m, m.guid(view)).iter().filter_map(|id| image(m, *id)).map(|im| im.order).max().map_or(0, |o| o.saturating_add(1));
     let im = ImageInstance {
+        order,
         type_name: name.to_string(),
         view: m.guid(view),
         at,
@@ -233,16 +277,25 @@ pub(super) fn pdf_pages(s: &mut Session, p: &Value) -> R {
     let c = "pdf_pages";
     only(c, p, &["path"])?;
     let path = string(c, p, "path")?.ok_or_else(|| bad(c, "`path`, a PDF file, is required"))?;
-    let (bytes, source) = read_file(c, s, &path)?;
-    let doc = raster::pdf::Document::open(bytes).map_err(|e| bad(c, format!("{path}: {e}")))?;
-    let pages: Vec<Value> = (1..=doc.pages())
+    let source: String = Path::new(&path).file_name().map_or_else(|| path.clone(), |f| f.to_string_lossy().into_owned());
+    let outline = match s.pdf.outlines.get(&pdf_key(s, &path)) {
+        Some(o) => o.clone(),
+        None if s.pdf.elsewhere => {
+            return Err(bad(c, format!("{path}: here a PDF is read apart from the editor, so it can't take the editor down; open it with Insert > Import PDF")));
+        }
+        None => {
+            let (bytes, _) = read_file(c, s, &path)?;
+            raster::pdf_outline(bytes).map_err(|e| bad(c, format!("{path}: {e}")))?
+        }
+    };
+    let pages: Vec<Value> = outline
+        .list
+        .iter()
+        .enumerate()
         .take(1000)
-        .map(|n| {
-            let size = doc.size(n).map_or([0.0, 0.0], |s| s.map(read_mm));
-            json!({"page": n, "size": size, "stated_scale": doc.scale(n)})
-        })
+        .map(|(i, pg)| json!({"page": i + 1, "size": pg.size.map(read_mm), "stated_scale": pg.scale}))
         .collect();
-    Ok(json!({"source": source, "pages": doc.pages(), "list": pages}))
+    Ok(json!({"source": source, "pages": outline.pages, "list": pages}))
 }
 
 /// The image instances of image `name`.
@@ -350,7 +403,8 @@ pub(super) fn scale_elements(s: &mut Session, p: &Value) -> R {
         _ => {
             return Err(bad(
                 c,
-                "give `factor`, or the reference `from` [x, y] and either `to` [x, y] or `length` mm: what the length from                  `origin` to `from` becomes",
+                "give `factor`, or the reference `from` [x, y] and either `to` [x, y] or `length` mm: what the length from \
+                 `origin` to `from` becomes",
             ));
         }
     };
@@ -380,4 +434,98 @@ pub(super) fn scale_elements(s: &mut Session, p: &Value) -> R {
         m.elements.insert(id, e);
     }
     Ok(json!({"scaled": ids, "factor": factor}))
+}
+
+/// Image `id`, if it is one.
+fn image(m: &Model, id: Id) -> Option<&ImageInstance> {
+    match m.elements.get(id) {
+        Some(Element::Image(im)) => Some(im),
+        _ => None,
+    }
+}
+
+/// The images placed in view `view`, back to front: by their draw order, then as they came in.
+pub(crate) fn images_in(m: &Model, view: crate::model::Guid) -> Vec<Id> {
+    let mut ids: Vec<(i32, Id)> = m.rare("image").into_iter().filter_map(|id| image(m, id).filter(|im| im.view == view).map(|im| (im.order, id))).collect();
+    ids.sort_unstable();
+    ids.into_iter().map(|(_, id)| id).collect()
+}
+
+/// Revit's Arrange for images: Bring to Front, Bring Forward, Send Backward and Send to Back, their draw order among the
+/// images of their view.
+pub(super) fn arrange(s: &mut Session, p: &Value) -> R {
+    let c = "arrange";
+    only(c, p, &["ids", "to"])?;
+    let m = &s.model;
+    let ids = super::ids_param(c, m, p)?;
+    let mut views: Vec<crate::model::Guid> = Vec::new();
+    for &id in &ids {
+        match m.elements.get(id) {
+            Some(Element::Image(im)) => {
+                if !views.contains(&im.view) {
+                    views.push(im.view);
+                }
+            }
+            Some(other) => return Err(bad(c, format!("{} {id} isn't an image: Arrange orders the images and PDFs of a view", other.category()))),
+            None => return Err(bad(c, format!("no element {id}"))),
+        }
+    }
+    let to = match string(c, p, "to")? {
+        None => None,
+        Some(t) => match t.trim().to_ascii_lowercase().as_str() {
+            v @ ("front" | "forward" | "backward" | "back") => Some(v.to_string()),
+            _ => return Err(bad(c, format!("`to` is front, forward, backward or back, not {t}"))),
+        },
+    };
+    let picked = |id: &Id| ids.contains(id);
+    let mut changed: Vec<(Id, ImageInstance)> = Vec::new();
+    let mut first = Vec::new();
+    for (n, view) in views.iter().enumerate() {
+        let mut order = images_in(m, *view);
+        match to.as_deref() {
+            Some("front") => {
+                let (mut moved, mut rest): (Vec<Id>, Vec<Id>) = order.iter().copied().partition(|id| picked(id));
+                rest.append(&mut moved);
+                order = rest;
+            }
+            Some("back") => {
+                let (mut moved, mut rest): (Vec<Id>, Vec<Id>) = order.iter().copied().partition(|id| picked(id));
+                moved.append(&mut rest);
+                order = moved;
+            }
+            Some("forward") => {
+                for i in (0..order.len().saturating_sub(1)).rev() {
+                    if picked(&order[i]) && !picked(&order[i + 1]) {
+                        order.swap(i, i + 1);
+                    }
+                }
+            }
+            Some("backward") => {
+                for i in 1..order.len() {
+                    if picked(&order[i]) && !picked(&order[i - 1]) {
+                        order.swap(i - 1, i);
+                    }
+                }
+            }
+            _ => {}
+        }
+        for (k, id) in order.iter().enumerate() {
+            let k = i32::try_from(k).unwrap_or(i32::MAX);
+            if let Some(im) = image(m, *id)
+                && im.order != k
+            {
+                changed.push((*id, ImageInstance { order: k, ..im.clone() }));
+            }
+        }
+        if n == 0 {
+            first = order;
+        }
+    }
+    if !changed.is_empty() {
+        let mm = s.model_mut();
+        for (id, im) in changed {
+            mm.elements.insert(id, Element::Image(im));
+        }
+    }
+    Ok(json!({"order": first}))
 }

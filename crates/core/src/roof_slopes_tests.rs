@@ -153,7 +153,7 @@ fn a_roof_with_slopes_is_saved_and_opened_in_the_current_format() {
     let mut s = Session::new();
     let id = run(&mut s, "roof", json!({"boundary": rect(), "slope": 30, "slopes": [30, 45, 30, 45]}))["id"].as_u64().unwrap();
     let mut v: Value = serde_json::from_str(&s.model.to_json().unwrap()).unwrap();
-    assert_eq!(v["format"], crate::model::FORMAT);
+    assert_eq!(v["format"], crate::model::FORMAT_WITHOUT_IMAGES);
     let guid = s.model.guid(id).to_string();
     let saved = v["elements"].as_object().unwrap().values().find(|e| e["guid"] == json!(guid)).unwrap().clone();
     assert_eq!(saved["slopes"], json!([30.0, 45.0, 30.0, 45.0]));

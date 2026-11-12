@@ -216,7 +216,24 @@ other_files(
         "import_pdf",
         "Import PDF",
         &[],
-        "{path | image, name?, page?: 1, resolution?: 72|150|300|600, view?, level?, at?: [x, y], scale?, width?, angle?, layer?}          Revit's Insert > Import PDF: page `page` (from 1) of a PDF file (`path`; not password-protected) rasterised at          `resolution` dpi (150 unless given; a page that would pass 36 million pixels comes in at the finest that fits, said in          `notes`), or an image the project holds placed again (`image`, its name, Revit's Place Instance), as an image instance          in one view only: `view` (a plan or ceiling plan, a section, an elevation or a sheet, by name, id or GUID; a sheet by its          number), else the plan of `level`. `at` is where its middle goes, in the view's terms (plan mm; a section's along and up;          a sheet's paper mm), the origin unless given (a sheet's middle). Its size: on a sheet, its paper's; in a model view, its          paper times `scale` (mm of the model a mm of paper stands for: 100 at 1 : 100), else the scale the page states (its          viewport's measure, `stated_scale`), else its paper's, as Revit brings it in; `width` sizes it instead, its height in          proportion. `angle` turns it about its middle, degrees; `layer`: background (the default, behind the model) or          foreground. Its vector lines and texts are kept (`lines` counts them): `cad_read`, `cad_query` and `cad_outlines` read          them as an import's (by the image's `id`), placed where the image shows them, and `wall`, `floor`… take them as a          `cad` pick in a plan; walls drawn over it snap to them. Named for its file (and page, of a file of more), unless          `name`; a name taken gets a number. Returns {id, image, source, page, stated_scale, dpi, pixels, size (its paper, mm),          width, height, scale, corners (top left, top right, bottom right, bottom left), lines, notes}",
+        "{path | image, name?, page?: 1, resolution?: 72|150|300|600, view?, level?, at?: [x, y], scale?, width?, angle?, layer?} \
+         Revit's Insert > Import PDF: page `page` (from 1) of a PDF file (`path`; not password-protected) rasterised at \
+         `resolution` dpi (150 unless given; a page that would pass 36 million pixels comes in at the finest that fits, said in \
+         `notes`), or an image the project holds placed again (`image`, its name, Revit's Place Instance), as an image instance \
+         in one view only: `view` (a plan or ceiling plan, a section, an elevation or a sheet, by name, id or GUID; a sheet by its \
+         number), else the plan of `level`. `at` is where its middle goes, in the view's terms (plan mm; a section's along and up; \
+         a sheet's paper mm), the origin unless given (a sheet's middle). Its size, as Revit brings it in: on a sheet, its paper's; \
+         in a model view, its paper at the view's scale (a 200 mm page in a 1 : 50 plan is 10 m), or at `scale` when given (mm \
+         of the model a mm of paper stands for, 100 at 1 : 100). The scale the page states (its viewport's measure, \
+         `stated_scale`, also read by `pdf_pages`) is not taken unless given as `scale`: give it to bring the page in at true \
+         size, or scale it after with `scale_elements` by a dimension it shows. `width` sizes it instead, its height in \
+         proportion. `angle` turns it about its middle, degrees; `layer`: background (the default, behind the model) or \
+         foreground; it comes in front of the view's other images (`arrange` orders them). Its vector lines and texts are kept \
+         (`lines` counts them): `cad_read`, `cad_query` and `cad_outlines` read them as an import's (by the image's `id`), \
+         placed where the image shows them, and `wall`, `floor`… take them as a `cad` pick in a plan; walls drawn over it snap \
+         to them. Named for its file (and page, of a file of more), unless `name`; a name taken gets a number. Returns {id, \
+         image, source, page, stated_scale, dpi, pixels, size (its paper, mm), width, height, scale, corners (top left, top \
+         right, bottom right, bottom left), lines, notes}",
         images::import_pdf,
         Files::Read,
     )
@@ -225,7 +242,15 @@ other_files(
         "import_image",
         "Image",
         &[],
-        "{path | image, name?, view?, level?, at?: [x, y], scale?, width?, height?, angle?, layer?} Revit's Insert > Image: a PNG,          JPEG or BMP file (`path`) taken at 72 dpi, as Revit takes every raster image (so a picture 720 px wide is 254 mm), or an          image the project holds placed again (`image`), as an image instance in one view only, as `import_pdf` places one:          `view`, `at` its middle, `scale` times its size, or `width` and `height` (one alone keeps its proportions), `angle`,          `layer`. Returns {id, image, source, dpi, pixels, size, width, height, scale, corners}. Once placed, `modify` sets its          `width`, `height` (with `lock` true, Lock Proportions, one sizes the other), `horizontal_scale`, `vertical_scale`,          `at`, `angle`, `lock`, `snaps` (Enable Snaps) and `layer` (Draw Layer); `move`, `rotate`, `mirror`, `copy`, `pin`,          `delete` and `scale_by_reference` take it as any element",
+        "{path | image, name?, view?, level?, at?: [x, y], scale?, width?, height?, angle?, layer?} Revit's Insert > Image: a \
+         PNG, JPEG or BMP file (`path`) taken at 72 dpi, as Revit takes every raster image (so a picture 720 px wide is 254 mm \
+         of paper), or an image the project holds placed again (`image`), as an image instance in one view only, as \
+         `import_pdf` places one: `view`, `at` its middle, its paper at the view's scale (254 m in a 1 : 1000 site plan) or at \
+         `scale`, or `width` and `height` (one alone keeps its proportions), `angle`, `layer`. Returns {id, image, source, dpi, \
+         pixels, size, width, height, scale, corners}. Once placed, `modify` sets its `width`, `height` (with `lock` true, Lock \
+         Proportions, one sizes the other), `horizontal_scale`, `vertical_scale`, `at`, `angle`, `lock`, `snaps` (Enable \
+         Snaps) and `layer` (Draw Layer); `arrange` orders it among the view's images; `move`, `rotate`, `mirror`, `copy`, \
+         `pin`, `delete` and `scale_elements` take it as any element",
         images::import_image,
         Files::Read,
     )
@@ -233,7 +258,9 @@ other_files(
     other_files(
         "pdf_pages",
         "PDF Pages",
-        "{path} a PDF file's pages, before `import_pdf` takes one: {source, pages, list: [{page, size: [w, h] mm, stated_scale}]}",
+        "{path} a PDF file's pages, before `import_pdf` takes one: {source, pages, list: [{page, size: [w, h] mm, \
+         stated_scale}]}; `stated_scale` is what a page says one mm of it stands for (its viewport's measure, 100 at 1 : 100), \
+         none when it doesn't say: give it to `import_pdf` as `scale` to bring the page in at true size",
         images::pdf_pages,
         Files::Read,
     ),
@@ -241,17 +268,37 @@ other_files(
         "scale_elements",
         "Scale",
         &["RE"],
-        "{ids: [id, …], origin: [x, y], factor? | from?: [x, y] with to?: [x, y] or length?} Revit's Scale: images, PDFs and          CAD imports made `factor` times their size about `origin`, which stays where it is; or graphically, by two reference          points: the length from `origin` to `from` becomes `length` mm, or reaches `to`. To bring a PDF to true size, give          `origin` and `from` at the two ends of a dimension it shows and the `length` it says. Points in the view's terms          (plan mm). A pinned element is not scaled. Returns {scaled, factor}",
+        "{ids: [id, …], origin: [x, y], factor? | from?: [x, y] with to?: [x, y] or length?} Scale (RE), as Revit's, for \
+         images, PDFs and CAD imports only (other elements are refused): made `factor` times their size about `origin`, which \
+         stays where it is; or graphically, by two reference points: the length from `origin` to `from` becomes `length` mm, \
+         or reaches `to`. To bring a PDF to true size, give `origin` and `from` at the two ends of a dimension it shows and the \
+         `length` it says. Points in the view's terms (plan mm). A pinned element is not scaled. Returns {scaled, factor}",
         images::scale_elements,
     ),
     edit(
         "manage_images",
         "Manage Images",
         &[],
-        "{delete?: [name, …]} Revit's Manage > Manage Images: the images and PDF pages the project holds, {images: [{name,          source, kind: pdf|image, page, dpi, pixels, size, stated_scale, lines, instances: [id, …]}]}; `delete` removes those          named and every instance of them (`deleted`, `removed`). `import_pdf` or `import_image` with `image` places one again",
+        "{delete?: [name, …]} Revit's Manage > Manage Images: the images and PDF pages the project holds, {images: [{name, \
+         source, kind: pdf|image, page, dpi, pixels, size, stated_scale, lines, instances: [id, …]}]}; `delete` removes those \
+         named and every instance of them (`deleted`, `removed`). `import_pdf` or `import_image` with `image` places one again",
         images::manage_images,
     )
     .menu("Manage > Manage Images"),
+    edit(
+        "arrange",
+        "Arrange",
+        &[],
+        "{ids: [id, …], to?: front|forward|backward|back} Revit's Arrange panel for raster images and PDFs (Bring to Front, \
+         Bring Forward, Send Backward, Send to Back): the draw order of the images in a view among themselves, as details \
+         have theirs. `front` puts those given in front of every other image of their view, `back` behind them all, \
+         `forward` and `backward` one step. It leaves their Draw Layer be (`modify` `layer`: background, behind the model, \
+         or foreground, in front of it), which comes first: an image in the foreground draws in front of one in the \
+         background whatever their order. Without `to`, it only says the order. Returns {order: [id, …], the images of the \
+         first one's view, back to front}",
+        images::arrange,
+    )
+    .menu("Modify > Arrange"),
     edit(
         "cad_layers",
         "CAD Layers",
