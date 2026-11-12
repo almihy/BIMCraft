@@ -6856,6 +6856,14 @@ fn menu_order(h: &Harness<BimApp>) -> Vec<Vec<&'static str>> {
 const ZOOMS: [&str; 5] = ["Zoom In Region", "Zoom Out (2x)", "Zoom To Fit", "Previous Pan/Zoom", "Next Pan/Zoom"];
 
 #[test]
+fn a_submenu_is_marked_with_a_glyph_the_interfaces_own_font_draws() {
+    // egui's own mark, "⏵", is in egui's symbol face only, which a page's build leaves out: Hide in View showed "?" there.
+    let h = app(BOX);
+    assert!(h.ctx.fonts_mut(|f| f.has_glyphs(&egui::FontId::proportional(13.0), crate::context::SUBMENU_ARROW)));
+    assert_ne!(crate::context::SUBMENU_ARROW, egui::containers::menu::SubMenuButton::RIGHT_ARROW);
+}
+
+#[test]
 fn a_right_click_in_a_plan_opens_revits_menu_of_what_the_view_and_the_selection_can_do() {
     let mut h = app(BOX);
     // Nothing selected: Revit's menu on empty space.

@@ -172,7 +172,9 @@ pub(crate) fn menu(response: &Response, groups: &[Vec<Item>], chosen: &mut Optio
                 let subs = &group[at..end];
                 let any = subs.iter().any(|x| x.enabled);
                 ui.add_enabled_ui(any, |ui| {
-                    ui.menu_button(t(parent), |ui| {
+                    // egui marks a submenu with "⏵", which the page's fonts (Plex, without egui's symbol face) draw as a box:
+                    // Plex's own "›" stands in for it.
+                    egui::containers::menu::SubMenuButton::from_button(Button::new(t(parent)).right_text(SUBMENU_ARROW)).ui(ui, |ui| {
                         for sub in subs {
                             item_button(ui, sub, chosen);
                         }
@@ -183,6 +185,9 @@ pub(crate) fn menu(response: &Response, groups: &[Vec<Item>], chosen: &mut Optio
         }
     });
 }
+
+/// What marks an item that opens a submenu: a glyph the interface's own font has.
+pub(crate) const SUBMENU_ARROW: &str = "›";
 
 /// One item as a button of the open menu; a click puts its action in `chosen` and closes the menu. Revit's menu shows no
 /// keys beside its items; a palette's is ticked while it shows.
