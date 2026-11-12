@@ -4,9 +4,9 @@
 //! square hole as advanced B-reps, a quarter disk whose arc is a rational B-spline. A B-rep with a B-spline surface is left out
 //! with a note that says so, and so is a body past the faces an item may take. Written by hand.
 
+use crate::geom::v3::{P3, cross, dot};
 use crate::import::{Imported, ifc};
 use crate::model::{Element, Model};
-use crate::view3d::{P3, cross, dot};
 
 /// An IFC4 file's text in millimetres and radians, entity by entity: proxies in one storey, each a body of the items given.
 pub(crate) struct G {

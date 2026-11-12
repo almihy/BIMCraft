@@ -7,11 +7,12 @@
 
 use crate::dims::Tick;
 use crate::font;
+use crate::geom::v3::{P3, add, dot, mul, sub, unit};
 use crate::graphics::Look;
 use crate::ids::Key;
 use crate::model::{Dimension3D, Element, Id, Model, Ref3};
 use crate::render::Rgb;
-use crate::view3d::{Camera, Image, P3, add, dot, mul, sub, unit};
+use crate::view3d::{Camera, Image};
 
 /// Pixels a millimetre of paper takes on a screen of 96 dots an inch: how big a dimension's ticks and number are on screen.
 pub const SCREEN: f64 = 96.0 / 25.4;

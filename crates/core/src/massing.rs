@@ -7,9 +7,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::Value;
 
+use crate::geom::v3::P3;
 use crate::geom::{self, P2};
 use crate::model::{Element, Guid, Id, Mass, Model};
-use crate::view3d::P3;
 
 pub const FLOOR: &str = "Mass Floor";
 pub const FACE: &str = "Mass Face";

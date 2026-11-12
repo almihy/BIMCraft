@@ -1997,7 +1997,7 @@ fn a_mirrored_component_is_its_familys_mirror_image() {
             .component_local_pieces(c)
             .iter()
             .flat_map(|p| &p.tris)
-            .map(|[a, b, c]| crate::view3d::dot(*a, crate::view3d::cross(*b, *c)) / 6.0)
+            .map(|[a, b, c]| crate::geom::v3::dot(*a, crate::geom::v3::cross(*b, *c)) / 6.0)
             .sum()
     };
     let chair = run(&mut s, "component", json!({"family": "Chair", "at": [0, 0]}))["id"].as_u64().unwrap();
@@ -4794,7 +4794,7 @@ fn a_family_door_flipped_either_way_keeps_its_forms_turned_out_and_the_same_size
     let volumes = |s: &Session| -> Vec<f64> {
         let (pieces, _) = s.model.opening_local(&s.model.elements[&100006]).unwrap();
         let sixth = |p: &crate::family::Piece| {
-            p.tris.iter().map(|[a, b, c]| crate::view3d::dot(*a, crate::view3d::cross(*b, *c))).sum::<f64>() / 6.0
+            p.tris.iter().map(|[a, b, c]| crate::geom::v3::dot(*a, crate::geom::v3::cross(*b, *c))).sum::<f64>() / 6.0
         };
         pieces.iter().map(sixth).collect()
     };

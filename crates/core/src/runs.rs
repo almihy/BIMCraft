@@ -3,9 +3,9 @@
 //! tube it makes in 3D. It knows no category but for the table that gives its IFC class and the defaults it takes (may it stand,
 //! where its heights are); the plan, the section, the 3D view, the snaps and IFC ask it.
 
+use crate::geom::v3::{P3, cross, mul, sub, unit};
 use crate::geom::{self, P2};
 use crate::model::{Element, Id, Justify, MAX_SLOPE, Model, Run, RunType, TOL, Wall, heading};
-use crate::view3d::{P3, cross, mul, sub, unit};
 use crate::walls::{self, Axis, Plane};
 
 /// Sides a round run's tube is drawn with.
@@ -625,7 +625,7 @@ mod tests {
 
     fn volume(tris: &[[P3; 3]]) -> f64 {
         // The divergence theorem: the sum of the signed volumes of the tetrahedra to the origin; positive if turned out.
-        tris.iter().map(|[a, b, c]| crate::view3d::dot(*a, crate::view3d::cross(*b, *c)) / 6.0).sum()
+        tris.iter().map(|[a, b, c]| crate::geom::v3::dot(*a, crate::geom::v3::cross(*b, *c)) / 6.0).sum()
     }
 
     #[test]

@@ -24,10 +24,10 @@ use std::f64::consts::{PI, TAU};
 use super::{Frame, Reader, enumeration, indices, list, newell, orthonormal, real, reference, refs};
 use crate::family::MAX_TRIANGLES;
 use crate::geom::P2;
+use crate::geom::v3::{P3, add, cross, dot, mul, sub, unit};
 use crate::model::{MAX_COORD, MAX_POINTS, TOL};
 use crate::step::{Entity, V};
 use crate::triangulation;
-use crate::view3d::{P3, add, cross, dot, mul, sub, unit};
 use crate::walls;
 
 /// The most faces one representation item builds: as many as a family's mesh holds triangles.

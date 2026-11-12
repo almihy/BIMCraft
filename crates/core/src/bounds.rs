@@ -3,9 +3,9 @@
 //! be retained by callers, never interpreted as empty or outside a query.
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::geom::v3::P3;
 use crate::ids::{Id, Revision};
 use crate::model::Model;
-use crate::view3d::P3;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Bounds {
@@ -191,9 +191,9 @@ pub(crate) fn primitive(m: &Model, id: Id) -> Bounds {
         }
         if g.round {
             // The exact same basis as tube(), but bound all angles without triangles.
-            let d = crate::view3d::unit(crate::view3d::sub(g.b, g.a));
-            let u = if g.vertical() { [1.0, 0.0, 0.0] } else { crate::view3d::unit([-d[1], d[0], 0.0]) };
-            let v = crate::view3d::cross(d, u);
+            let d = crate::geom::v3::unit(crate::geom::v3::sub(g.b, g.a));
+            let u = if g.vertical() { [1.0, 0.0, 0.0] } else { crate::geom::v3::unit([-d[1], d[0], 0.0]) };
+            let v = crate::geom::v3::cross(d, u);
             let reach: P3 = std::array::from_fn(|i| (u[i].abs() + v[i].abs()) * (g.width / 2.0));
             return padded(
                 [g.a, g.b].into_iter().flat_map(|p| [std::array::from_fn(|i| p[i] - reach[i]), std::array::from_fn(|i| p[i] + reach[i])]),

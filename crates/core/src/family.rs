@@ -15,8 +15,8 @@ use serde_json::Value;
 use crate::csg;
 use crate::font;
 use crate::geom::P2;
+use crate::geom::v3::{P3, add, cross, mul};
 use crate::model::{MAX_COORD, MAX_TEXT};
-use crate::view3d::{P3, add, cross, mul};
 
 mod bounds;
 mod validate;
@@ -2579,7 +2579,7 @@ mod tests {
     /// A closed surface's volume: the triangles' signed tetrahedra from the origin, positive while
     /// they face out.
     fn volume(tris: &[[P3; 3]]) -> f64 {
-        tris.iter().map(|[a, b, c]| crate::view3d::dot(*a, crate::view3d::cross(*b, *c)) / 6.0).sum::<f64>()
+        tris.iter().map(|[a, b, c]| crate::geom::v3::dot(*a, crate::geom::v3::cross(*b, *c)) / 6.0).sum::<f64>()
     }
 
     #[test]

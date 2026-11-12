@@ -6,8 +6,8 @@
 use std::f64::consts::PI;
 
 use super::{Bar, Cover, Frame, along};
+use crate::geom::v3::P3;
 use crate::model::TOL;
-use crate::view3d::P3;
 
 /// What the check is told besides the bars: the environmental aggressiveness class (1 to 4: I to IV) and the concrete's `fck` in MPa.
 pub struct Norm {

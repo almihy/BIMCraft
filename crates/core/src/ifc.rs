@@ -20,10 +20,10 @@ use crate::family::ConnectorKind;
 use crate::geom::{self, P2};
 use serde_json::Value;
 
+use crate::geom::v3::P3;
 use crate::model::{Element, Function, Guid, Id, Layer, Model, Operation, ParameterKind, Railing, RoomArea, heading, mix};
 use crate::phasing;
 use crate::stairs;
-use crate::view3d::P3;
 use crate::walls::{self, Axis};
 
 // What a GlobalId is for, so each one stays the same from export to export.
@@ -1192,8 +1192,8 @@ pub fn export(m: &Model) -> String {
                 } else {
                     w.rectangle(P2(0.0, 0.0), P2(g.width, g.depth))
                 };
-                let axis = crate::view3d::unit(crate::view3d::sub(g.b, g.a));
-                let across = if g.vertical() { [1.0, 0.0, 0.0] } else { crate::view3d::unit([-axis[1], axis[0], 0.0]) };
+                let axis = crate::geom::v3::unit(crate::geom::v3::sub(g.b, g.a));
+                let across = if g.vertical() { [1.0, 0.0, 0.0] } else { crate::geom::v3::unit([-axis[1], axis[0], 0.0]) };
                 let along = w.aim(axis, across);
                 let shape = w.body_along(profile, along, g.length());
                 let ent = w.add(format!(

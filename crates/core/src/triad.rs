@@ -5,7 +5,8 @@
 
 use bimcraft_i18n::ui_msg;
 
-use crate::view3d::{Camera, P3, dot};
+use crate::geom::v3::{P3, dot};
+use crate::view3d::Camera;
 use crate::workplane::{Frame, Surface};
 
 /// How far the camera turns up or down: it never looks straight along z (`Camera::orbit`), so the top and bottom views stand one

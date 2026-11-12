@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use crate::commands::{micron, next_number, tidy};
 use crate::family::{Category, Expr, Family, Form, IfcClass, MAX_TRIANGLES, Parameter};
+use crate::geom::v3::{P3, add, cross, dot, mul, sub, unit};
 use crate::geom::{self, P2};
 use crate::model::{
     Ceiling, CeilingType, Column, ColumnType, Component, Element, Extrusion, FIRST_ID, Floor, FloorType, Function, Grid, Guid, Id, Justify,
@@ -28,7 +29,6 @@ use crate::model::{
 use crate::phasing;
 use crate::stairs;
 use crate::step::{self, Entity, File, V};
-use crate::view3d::{P3, add, cross, dot, mul, sub, unit};
 use crate::walls::{self, Axis, Plane};
 use serde_json::json;
 
@@ -466,7 +466,7 @@ struct Found {
 /// with `width` level and `depth` square to that; round where the section's corners are many and all as far out. An axis that
 /// stands has its width along east. None for too few points.
 fn run_in(pts: &[P3], axis: Option<P3>) -> Option<Found> {
-    use crate::view3d::{add, cross, dot, mul, sub, unit};
+    use crate::geom::v3::{add, cross, dot, mul, sub, unit};
     if pts.len() < 4 {
         return None;
     }

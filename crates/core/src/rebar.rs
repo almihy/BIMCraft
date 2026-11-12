@@ -1,9 +1,9 @@
 //! Reinforcing bars: what a bar bent along its points weighs and measures, and the tubes it makes in 3D. A bar knows no host; the
 //! model checks it, and the commands, IFC and the schedules ask this for its lengths.
 
+use crate::geom::v3::{P3, sub};
 use crate::model::TOL;
 use crate::runs::Geom;
-use crate::view3d::{P3, sub};
 
 /// Steel's density, kg per m³.
 pub const STEEL: f64 = 7850.0;

@@ -15,8 +15,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::geom::P2;
+use crate::geom::v3::{P3, add, cross, dot, mul, sub, unit};
 use crate::model::{Guid, Id, MAX_COORD, Model, TOL};
-use crate::view3d::{Camera, P3, add, cross, dot, mul, sub, unit};
+use crate::view3d::Camera;
 use crate::walls::Plane;
 
 /// A 3D view's work plane: on `level`, through three `points`, or on a `surface` picked on the model; `offset` mm off it,

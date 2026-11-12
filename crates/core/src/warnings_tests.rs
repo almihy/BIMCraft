@@ -4,9 +4,10 @@
 use serde_json::{Value, json};
 
 use crate::engine::Session;
+use crate::geom::v3::P3;
 use crate::model::{Element, Id};
 use crate::render;
-use crate::view3d::{P3, Scene};
+use crate::view3d::Scene;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"))

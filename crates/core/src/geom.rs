@@ -1,5 +1,7 @@
 //! Plan geometry in millimetres: points, rings, and the planar faces that walls enclose.
 
+pub mod v3;
+
 use std::ops::{Add, Mul, Sub};
 
 use serde::{Deserialize, Serialize};
