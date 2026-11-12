@@ -313,3 +313,28 @@ fn scale_takes_an_origin_and_two_reference_points_or_a_length_typed() {
     let im = images(&h)[0].1.clone();
     assert!((im.width - 20_000.0).abs() < 20.0, "{im:?}");
 }
+
+#[test]
+fn imported_categories_hides_a_pdfs_layers_in_the_view() {
+    // A plan on two layers, Walls and Notes, given to the window as a page hosting it gives a file.
+    let content = "/OC /L0 BDC 0 0 0 RG 2 w 10 10 m 190 10 l S EMC /OC /L1 BDC BT /F1 12 Tf 20 100 Td (Kitchen) Tj ET EMC";
+    let pdf = bimcraft_core::raster::pdf::sample_layered(content, [200.0, 200.0], &[("Walls", false), ("Notes", false)]);
+    let mut h = app(BOX);
+    h.state_mut().session.files.give("files/plan.pdf", pdf);
+    h.state_mut().session.execute("import_pdf", &json!({"path": "files/plan.pdf", "view": 100000})).unwrap();
+    assert_eq!(images(&h).len(), 1);
+    key(&mut h, Key::Escape);
+    shortcut(&mut h, "VV");
+    press(&mut h, "Imported Categories");
+    // Its layers, under the PDF's name: Notes cleared hides it in this view.
+    pick(&mut h, Role::CheckBox, "Notes");
+    press(&mut h, "OK");
+    let g = plan_graphics(&h, 100000);
+    assert_eq!(g.pdf_layers.get("plan.pdf").map(|l| l.iter().cloned().collect::<Vec<_>>()), Some(vec!["Notes".to_string()]));
+    // Shown again.
+    shortcut(&mut h, "VV");
+    press(&mut h, "Imported Categories");
+    pick(&mut h, Role::CheckBox, "Notes");
+    press(&mut h, "OK");
+    assert!(plan_graphics(&h, 100000).pdf_layers.is_empty());
+}

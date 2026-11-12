@@ -54,6 +54,8 @@ enum Pick {
 /// dialog's draft of it: no Elements tab, and OK hands the draft back rather than running a command.
 pub(crate) struct VgDialog {
     view: Value,
+    /// The view it is open on, by GUID: what its PDFs are placed in. None for a template.
+    key: Option<Guid>,
     template: Option<String>,
     title: String,
     own: Graphics,
@@ -160,6 +162,7 @@ impl VgDialog {
         draft.split_component();
         VgDialog {
             view: Value::Null,
+            key: None,
             title: tf("View Template: {}", &[&name]),
             template: Some(name),
             own: graphics,
@@ -226,8 +229,14 @@ impl BimApp {
         // What an older project says of `component` is split among the family categories, which are the rows now.
         let mut draft = own.clone();
         draft.split_component();
+        let key = match self.sheet {
+            Sheet::Plan(id) | Sheet::Ceiling(id) | Sheet::Section(id) => Some(self.session.model.guid(id)),
+            Sheet::View3D => self.active_3d().map(|id| self.session.model.guid(id)),
+            _ => None,
+        };
         self.vg_dialog = Some(VgDialog {
             view,
+            key,
             template: None,
             title: self.view_title(self.sheet),
             draft,
@@ -669,6 +678,7 @@ fn patch(d: &VgDialog, followed: &BTreeSet<Group>) -> Option<Value> {
     put("elements", json!(d.own.elements), json!(d.draft.elements), false);
     put("options", json!(d.own.options), json!(d.draft.options), followed.contains(&Group::Options));
     put("layers", json!(d.own.layers), json!(d.draft.layers), false);
+    put("pdf_layers", json!(d.own.pdf_layers), json!(d.draft.pdf_layers), false);
     if !followed.contains(&Group::Filters) && d.own.filters != d.draft.filters {
         p.insert("filters".into(), json!(d.draft.filters));
     }
@@ -1227,31 +1237,68 @@ fn elements(ui: &mut Ui, d: &mut VgDialog, model: &Model, selection: &[Id]) {
     });
 }
 
-/// The Imported Categories tab's layers: for each CAD drawing of the project, a check box for each of its layers, cleared
-/// for those this view hides (Revit's layers under each drawing's row).
+/// The PDF pages placed in view `key` that are drawn from their lines, by image: those whose layers the view shows and hides.
+pub(crate) fn pdfs_in(model: &Model, key: Option<Guid>) -> Vec<(String, Vec<String>)> {
+    let Some(key) = key else { return Vec::new() };
+    let mut names: BTreeSet<&str> = BTreeSet::new();
+    for id in model.rare("image") {
+        if let Some(e @ Element::Image(im)) = model.elements.get(id)
+            && (im.view == key || model.annotation_in(e, key))
+        {
+            names.insert(im.type_name.as_str());
+        }
+    }
+    names
+        .into_iter()
+        .filter_map(|n| {
+            let layers = model.image_types.get(n)?.layers();
+            (!layers.is_empty()).then(|| (n.to_string(), layers.into_iter().map(str::to_string).collect()))
+        })
+        .collect()
+}
+
+/// A drawing's layers, each a check box cleared for those `hidden` holds of it (by the drawing's name): Revit's layers under
+/// each import's row.
+fn layer_boxes(ui: &mut Ui, hidden: &mut std::collections::BTreeMap<String, BTreeSet<String>>, name: &str, layers: &[String]) {
+    for layer in layers {
+        let mut on = !hidden.get(name).is_some_and(|l| l.contains(layer));
+        if ui.checkbox(&mut on, layer).changed() {
+            let set = hidden.entry(name.to_string()).or_default();
+            if on {
+                set.remove(layer);
+            } else {
+                set.insert(layer.clone());
+            }
+            if set.is_empty() {
+                hidden.remove(name);
+            }
+        }
+    }
+}
+
+/// The Imported Categories tab's layers: for each CAD drawing of the project, and each PDF placed in the view, a check box for
+/// each of its layers, cleared for those this view hides (Revit's layers under each drawing's row).
 fn imported_layers(ui: &mut Ui, d: &mut VgDialog, model: &Model) {
-    if model.cads.is_empty() {
-        ui.label(RichText::new(t("The project has no CAD drawings: Insert > Import CAD brings one in.")).color(pal().muted));
+    let pdfs = pdfs_in(model, d.key);
+    if model.cads.is_empty() && pdfs.is_empty() {
+        ui.label(
+            RichText::new(t("The project has no CAD drawings and this view no PDFs: Insert > Import CAD or Import PDF brings one in."))
+                .color(pal().muted),
+        );
         return;
     }
     ui.label(RichText::new(t("Layers this view shows of each drawing")).strong());
-    ScrollArea::vertical().max_height(150.0).auto_shrink([false, true]).id_salt("vg-layers").show(ui, |ui| {
+    let one = model.cads.len() + pdfs.len() == 1;
+    ScrollArea::vertical().max_height(220.0).auto_shrink([false, true]).id_salt("vg-layers").show(ui, |ui| {
         for (name, cad) in &model.cads {
-            egui::CollapsingHeader::new(name).id_salt(("vg-cad", name)).default_open(model.cads.len() == 1).show(ui, |ui| {
-                for layer in &cad.dxf().layers {
-                    let mut on = !d.draft.layers.get(name).is_some_and(|l| l.contains(&layer.name));
-                    if ui.checkbox(&mut on, &layer.name).changed() {
-                        let hidden = d.draft.layers.entry(name.clone()).or_default();
-                        if on {
-                            hidden.remove(&layer.name);
-                        } else {
-                            hidden.insert(layer.name.clone());
-                        }
-                        if hidden.is_empty() {
-                            d.draft.layers.remove(name);
-                        }
-                    }
-                }
+            egui::CollapsingHeader::new(name).id_salt(("vg-cad", name)).default_open(one).show(ui, |ui| {
+                let layers: Vec<String> = cad.dxf().layers.iter().map(|l| l.name.clone()).collect();
+                layer_boxes(ui, &mut d.draft.layers, name, &layers);
+            });
+        }
+        for (name, layers) in &pdfs {
+            egui::CollapsingHeader::new(name).id_salt(("vg-pdf", name)).default_open(one).show(ui, |ui| {
+                layer_boxes(ui, &mut d.draft.pdf_layers, name, layers);
             });
         }
     });

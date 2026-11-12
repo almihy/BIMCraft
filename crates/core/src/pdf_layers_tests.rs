@@ -44,9 +44,8 @@ fn plan(s: &Session) -> tiny_skia::Pixmap {
 fn has(p: &tiny_skia::Pixmap, x: u32, y: u32, want: [u8; 3]) -> bool {
     (x - 2..=x + 2).any(|x| {
         (y - 2..=y + 2).any(|y| {
-            p.pixel(x, y).is_some_and(|c| {
-                [c.red(), c.green(), c.blue()].iter().zip(want).all(|(a, b)| (i32::from(*a) - i32::from(b)).abs() < 60)
-            })
+            p.pixel(x, y)
+                .is_some_and(|c| [c.red(), c.green(), c.blue()].iter().zip(want).all(|(a, b)| (i32::from(*a) - i32::from(b)).abs() < 60))
         })
     })
 }
@@ -138,7 +137,8 @@ fn a_pdfs_layers_are_kept_in_the_file_and_forgotten_with_the_image() {
 
 #[test]
 fn a_picture_has_no_layers_to_hide() {
-    let mut s = with_file("scan.pdf", sample("q 200 0 0 200 0 0 cm BI /W 2 /H 2 /CS /G /BPC 8 /F /AHx ID 00FF00FF> EI Q", [200.0; 2], None));
+    let mut s =
+        with_file("scan.pdf", sample("q 200 0 0 200 0 0 cm BI /W 2 /H 2 /CS /G /BPC 8 /F /AHx ID 00FF00FF> EI Q", [200.0; 2], None));
     let r = run(&mut s, "import_pdf", json!({"path": "scan.pdf"}));
     assert!(r.get("layers").is_none(), "{r}");
     let e = fails(&mut s, "cad_layers", json!({"id": r["id"]}));

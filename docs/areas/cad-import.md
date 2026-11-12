@@ -186,6 +186,45 @@ its scans and CAD imports, its foreground ones before its regions; a section dra
 cleared where its picture shows the model (`behind_model`); a sheet under and over its views. It picks where nothing else
 drawn near does (`Part::Picture`).
 
+### A PDF's layers
+
+Revit takes a PDF only as a picture and controls layers only for DWG (Visibility/Graphics > Imported Categories); here a PDF's
+layers work as a DWG import's do. `pdf::Document` reads a file's optional content groups (`/OCProperties /OCGs`, their names,
+and which its default configuration has off), and the vectors device (`Collect`) follows the page's marked content: each
+stroke, fill and text records the layer it is drawn on (`Run::layer`, `Text::layer`). An `/OC` sequence inside another is on
+its own group (the innermost wins); an OCMD is on its first group (of `/OCGs`, else of its visibility expression `/VE`);
+what is drawn on no group is on `No layer`. A form XObject's own `/OC` isn't seen by the device (hayro keeps it to itself),
+so what it draws is on the layer round it. hayro skips what a group the file has off draws, so the vectors are read from the
+file with one more revision appended (`Document::all_on`: a catalog with no optional content, as an incremental update
+writes one); an encrypted file isn't revised (its key would be needed), so what its off layers draw is left out, said in the
+notes. A page of a file with no layers has its lines grouped by colour and weight instead (`colour_name`, the nearest of a
+few plain names: `Black 0.35`, `Red hairline`, `Grey fill`, `Black text`, `Pattern fill`). The DXF (`Vectors::dxf`) keeps
+the page's order of drawing (`seq`: a fill, as one HATCH of all its rings, before its own stroke; a white mask over the lines
+under it), each stroke's dash as a linetype (`DASH_<dash>_<gap>`, hundredths of a mm) and width, solid fills as solid
+hatches, and the file's off layers off. A letter with no Unicode is kept as its outline, filled; a Type 3 font's are counted
+(`unlettered`).
+
+A page with lines is drawn from them (`ImageType::drawn`): its pixels are then only its raster images, painted on white by
+the `Pictures` device (each image's and stencil's nearest pixel, inside the box round each clip, no more than
+`MAX_PAINTED` pixels), with a small picture of the whole page (`thumb`, `THUMB` px a side) for Manage Images, and the notes
+say how many pictures stay in the background, showing and hiding with the PDF and not by layer. A page whose lines can't hold
+all it draws (paths left out past the caps, text in a character map not held, Type 3 letters) keeps the picture of it all, and
+its layers can't be shown and hidden (`cad_layers` says so); a page with no lines (a scan) is its picture, as before.
+`render::images` draws a drawn page's picture, then its lines through `cad_drawing` (the same code as an import's) at
+`Part::Picture`, so it still picks only where nothing else does, leaving out the layers the image hides everywhere
+(`ImageInstance::hidden`) and those its view hides (`Graphics::pdf_layers`, by the image's name, a library reference of kind
+`image`; `Look::hidden_pdf_layers`). Text is lettered as a DWG's is. A project with a drawn page is written as format 21; one
+with images but none, 20.
+
+Commands: `import_pdf` lists the page's `layers` and hides those the file has off (as `import_cad` with its visible layers);
+`cad_layers` takes the image's `id` (hide and show wherever it shows, or with `view` in that view only); `graphics` takes
+`pdf_layers` (`{image: [layer, …] | null}`) as it takes `layers`; `cad_read` with `layers` gives one layer's lines and
+words; `manage_images` lists each image's layers and, deleting one, forgets the layers views hid of it. In the desktop,
+Visibility/Graphics' Imported Categories lists under the CAD drawings each PDF placed in the view, a check box for each of
+its layers (`pdfs_in`, `layer_boxes` in `crates/ui-egui/src/graphics.rs`). As for a DWG, a view template doesn't carry a
+drawing's layers (they are a view's own), and there is no Query or right-click hide by layer in the window (an agent has
+`cad_query`).
+
 A PDF's lines are placed where the image shows them by `ImageInstance::lines_placed`, an import of the image's `Cad` (with
 `CadImport::stretch` when its sides are scaled apart, and turned half round and flipped when mirrored), so everything an
 import has works on them by the image's id: `cad_read`, `cad_query`, `cad_outlines`, the `cad` pick of `wall`, `floor` and
