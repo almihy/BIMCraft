@@ -10,10 +10,10 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use crate::commands::{Motion, transformed};
 use crate::geom::P2;
 use crate::ids::{Id, LINKED};
 use crate::model::{Element, Model};
+use crate::motion::{Motion, transformed};
 
 /// The start of the `path` of a link made from a project's text (`link {text}`): `text:` and its name. No file is read for
 /// it; a front end that keeps the project elsewhere (Arqiflow's site) links it again from its text.

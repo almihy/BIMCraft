@@ -93,6 +93,7 @@ pub mod masterplan;
 #[cfg(test)]
 mod masterplan_tests;
 pub mod model;
+pub mod motion;
 pub mod nbr5410;
 pub mod network;
 #[cfg(test)]

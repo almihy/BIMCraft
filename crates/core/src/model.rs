@@ -8720,6 +8720,18 @@ pub fn next_number<'a>(taken: impl Iterator<Item = &'a str>) -> String {
     }
 }
 
+/// The longest an error message is, in characters: a message that repeats what it was given (a list of a hundred thousand ids)
+/// is cut, and says by how much.
+pub const MAX_MESSAGE: usize = 2000;
+
+pub fn bad(cmd: &str, msg: impl std::fmt::Display) -> String {
+    let text = format!("{cmd}: {msg}");
+    match text.char_indices().nth(MAX_MESSAGE) {
+        Some((cut, _)) => format!("{}… ({} more characters)", &text[..cut], text[cut..].chars().count()),
+        None => text,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

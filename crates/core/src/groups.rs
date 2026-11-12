@@ -83,12 +83,12 @@ pub fn placing(at: P2, angle: f64, mirrored: bool) -> impl Fn(P2) -> P2 {
 pub fn placed(m: &crate::model::Model, g: &DetailGroup) -> Vec<Element> {
     let Some(t) = m.detail_groups.get(&g.type_name) else { return Vec::new() };
     let f = placing(g.at, g.angle, g.mirrored);
-    let mo = crate::commands::Motion { map: &f, slide: None, mirror: g.mirrored };
+    let mo = crate::motion::Motion { map: &f, slide: None, mirror: g.mirrored };
     let none = std::collections::BTreeSet::new();
     t.members
         .iter()
         .filter_map(|x| {
-            let mut e = crate::commands::transform("detail group", m, x.element.clone(), 0, &mo, &none).ok()?;
+            let mut e = crate::motion::transform("detail group", m, x.element.clone(), 0, &mo, &none).ok()?;
             set_view(&mut e, g.view);
             // A mirror leaves a note reading the way it did (`transform`), but the group's own turn still turns it.
             if let (Element::Text(n), Element::Text(was), true) = (&mut e, &x.element, g.mirrored) {

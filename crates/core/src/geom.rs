@@ -702,6 +702,11 @@ pub fn tidy(ring: &[P2]) -> Vec<P2> {
     ring
 }
 
+/// Degrees to a billionth, so a quarter turn reads 90.
+pub fn degrees(a: f64) -> f64 {
+    (a * 1e9).round() / 1e9
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
