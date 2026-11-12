@@ -50,6 +50,17 @@
 //! app.reload_links();
 //! ```
 //!
+//! A PDF is never read in the editor's own WebAssembly instance, where a panic aborts: a hostile file would end the editor.
+//! Import PDF asks the page to read it apart, in a Web Worker of its own that loads this same module and calls `pdf_job`;
+//! if the worker dies, only it is lost, and the page answers with an error the editor shows:
+//!
+//! ```js
+//! app.on_pdf(onRead);  // onRead({id, path, job}, bytes): run it in the worker, then
+//! // in the worker: import init, { pdf_job } from "./bimcraft_webapp.js"; await init(...); pdf_job(JSON.stringify(job), bytes)
+//! app.answer_pdf(id, answerBytes, null);         // what pdf_job gave
+//! app.answer_pdf(id, null, "the reader stopped"); // it threw, the worker died or took too long
+//! ```
+//!
 //! The model's checks against the firm's rules and the client's brief are the page's (its server runs them after a save);
 //! the Checks palette lists them, flagged first, and asks the page to show a rule:
 //!
@@ -93,6 +104,8 @@ struct Host {
     on_rule: Rc<RefCell<Option<js_sys::Function>>>,
     /// Called with `{rule, reason}` when the person waives a check, `reason` null to take a waiver back.
     on_waive: Rc<RefCell<Option<js_sys::Function>>>,
+    /// Called with `({id, path, job}, bytes)` to read a PDF apart, in the page's worker.
+    on_pdf: Rc<RefCell<Option<js_sys::Function>>>,
 }
 
 /// How long what the person sees must hold still before the page is told it changed, seconds: a pan or a zoom is one change.
@@ -155,6 +168,26 @@ impl Host {
     }
 }
 
+impl Host {
+    /// After a frame: hands the page each ask to read a PDF apart. With no one to read it, the ask is answered with an
+    /// error at once: the editor never reads one itself.
+    fn tell_pdf(&mut self) {
+        for r in self.app.take_pdf_requests() {
+            let Some(f) = self.on_pdf.borrow().clone() else {
+                self.app.answer_pdf_request(r.id, Err("this page reads no PDF files".into()));
+                continue;
+            };
+            let job: Value = serde_json::from_str(&r.job).unwrap_or(Value::Null);
+            let ask = serde_json::json!({"id": r.id, "path": r.path, "job": job}).to_string();
+            let bytes = js_sys::Uint8Array::from(r.bytes.as_slice());
+            wasm_bindgen_futures::spawn_local(async move {
+                let ask = js_sys::JSON::parse(&ask).unwrap_or(JsValue::NULL);
+                let _ = f.call2(&JsValue::NULL, &ask, &bytes);
+            });
+        }
+    }
+}
+
 impl eframe::App for Host {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.app.ui(ui, frame);
@@ -167,6 +200,7 @@ impl eframe::App for Host {
             later(self.on_save.clone(), None);
         }
         self.tell_files();
+        self.tell_pdf();
         self.tell_context(ui);
         if let Some(rule) = self.app.take_rule_request() {
             later_with(self.on_rule.borrow().clone(), JsValue::from_str(&rule));
@@ -213,6 +247,15 @@ fn err(e: impl std::fmt::Display) -> JsValue {
     JsValue::from_str(&e.to_string())
 }
 
+/// Does a PDF job (`{"job": "outline"}`, `{"job": "thumbnail", "page", "side"}` or `{"job": "page", "page", "dpi"}`) on a
+/// file's `bytes`, its answer as bytes for `WebApp.answer_pdf`: what the page's worker calls, in an instance of this module
+/// of its own (a panic there aborts only the worker).
+#[wasm_bindgen]
+pub fn pdf_job(job: &str, bytes: Vec<u8>) -> Result<Vec<u8>, JsValue> {
+    let job: bimcraft_core::raster::PdfJob = serde_json::from_str(job).map_err(err)?;
+    bimcraft_core::raster::run_pdf_job(&job, bytes).map_err(err)
+}
+
 /// BIMCraft's sample house as a project file, to start on.
 #[wasm_bindgen]
 pub fn sample_project() -> Result<String, JsValue> {
@@ -253,6 +296,8 @@ pub struct WebApp {
     on_rule: Rc<RefCell<Option<js_sys::Function>>>,
     /// What the page hears when the person waives a check, or takes a waiver back.
     on_waive: Rc<RefCell<Option<js_sys::Function>>>,
+    /// What the page is asked to read a PDF apart with.
+    on_pdf: Rc<RefCell<Option<js_sys::Function>>>,
 }
 
 #[wasm_bindgen]
@@ -273,6 +318,7 @@ impl WebApp {
             checks: Rc::new(RefCell::new(None)),
             on_rule: Rc::new(RefCell::new(None)),
             on_waive: Rc::new(RefCell::new(None)),
+            on_pdf: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -304,6 +350,7 @@ impl WebApp {
             context_since: None,
             on_rule: Rc::clone(&self.on_rule),
             on_waive: Rc::clone(&self.on_waive),
+            on_pdf: Rc::clone(&self.on_pdf),
         };
         self.hold_editor_keys(&canvas)?;
         let ctx = Rc::clone(&self.ctx);
@@ -570,6 +617,26 @@ impl WebApp {
         hooks.wanted.clear();
         drop(hooks);
         self.repaint();
+    }
+
+    /// How the page reads a PDF apart from the editor: `on_read({id, path, job}, bytes)` runs `pdf_job(JSON.stringify(job),
+    /// bytes)` in a Web Worker of its own and answers with `answer_pdf`. Until it is set, Import PDF says the file can't be
+    /// read.
+    pub fn on_pdf(&self, on_read: Option<js_sys::Function>) {
+        *self.on_pdf.borrow_mut() = on_read;
+        self.repaint();
+    }
+
+    /// Answers the ask to read a PDF `id`: what `pdf_job` gave (`bytes`), or why there is nothing (`error`: it threw, or its
+    /// worker died or took too long).
+    pub fn answer_pdf(&self, id: f64, bytes: Option<Vec<u8>>, error: Option<String>) -> Result<(), JsValue> {
+        let answer = match bytes {
+            Some(b) if error.is_none() => Ok(b),
+            _ => Err(error.unwrap_or_else(|| "the reader gave nothing".into())),
+        };
+        self.host()?.app.answer_pdf_request(id as u64, answer);
+        self.repaint();
+        Ok(())
     }
 
     /// The ask for a file open now, as `on_ask` gave it; null when there is none.
