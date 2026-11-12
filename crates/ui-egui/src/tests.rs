@@ -7010,3 +7010,15 @@ wall {\"points\": [[0, 5000], [8000, 5000]], \"level\": \"Level 2\"}");
     assert!(h.query_by_label("Temporary dimension 3000").is_none(), "the Level 1 wall is not cut in this plan");
     assert!(h.query_by_label("Temporary dimension 5000").is_some());
 }
+
+#[test]
+fn a_doors_from_room_and_to_room_show_under_phasing_in_properties() {
+    let mut h = app(&format!("{BOX}\nroom {{\"point\": [4000, 3000], \"name\": \"WC\", \"number\": \"1\"}}\ndoor {{\"at\": [2000, 0]}}"));
+    let door = ids(&h, "door")[0];
+    h.state_mut().selection = vec![door];
+    h.run();
+    // The south wall runs east: the door swings to its left, into the room; it opens from outside.
+    h.get_by_label("From Room");
+    h.get_by_label("To Room");
+    h.get_by_label("WC 1");
+}
