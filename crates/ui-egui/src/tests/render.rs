@@ -97,3 +97,19 @@ fn the_desktops_window_offers_no_render() {
     press(&mut d, "View");
     assert!(d.query_all_by_label_contains("Presentation").next().is_none() && d.query_by_label("Render").is_none());
 }
+
+#[test]
+fn render_is_named_in_every_interface_language() {
+    let words = [
+        "Presentation",
+        "Render",
+        "Render…",
+        "Render: a picture of this 3D view or camera, made by the renderer of the page the model is kept in",
+    ];
+    for lang in crate::lang::Lang::ALL.into_iter().filter(|l| *l != crate::lang::Lang::English) {
+        for english in words {
+            assert!(crate::lang::translated_in(lang, english).is_some(), "{english:?} has no {} word", lang.code());
+        }
+    }
+    assert_eq!(crate::lang::translated_in(crate::lang::Lang::German, "Render…"), Some("Rendern…"));
+}
