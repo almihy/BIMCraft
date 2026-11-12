@@ -68,6 +68,8 @@ pub enum Part {
     Pattern,
     /// Stroke-like pattern graphics: filled dots and font outlines take line colour overrides.
     LinePattern,
+    /// A raster image or a PDF page placed in the view: it picks where nothing drawn near is picked instead.
+    Picture,
 }
 
 impl Part {
@@ -486,7 +488,12 @@ impl Drawing {
         for (order, (prim, owner)) in self.prims.iter().zip(&self.owners).enumerate() {
             // What a link builds is drawn and snapped to, never picked.
             let Some(id) = owner.filter(|id| !crate::link::is_linked(*id)) else { continue };
+            let picture = self.parts.get(order) == Some(&Part::Picture);
             let d = match prim {
+                // An image underlay gives way to whatever else is near, as Revit's does.
+                Prim::Image { at, width, height, rgba, .. } if picture => {
+                    drawn_near(p, (*at, *width, *height), rgba, tol).max(f64::from(tol))
+                }
                 Prim::Fill { rings, .. } => {
                     let rings: Vec<Vec<P2>> = rings.iter().map(|r| ring(r)).collect();
                     if rings.iter().filter(|r| geom::contains(r, p)).count() % 2 == 1 {
@@ -2009,6 +2016,7 @@ impl SectionOverlay {
             pattern_styles: b.pattern_styles.clone(),
         };
         if let Some(image) = picture {
+            behind_model(&mut d, m, image);
             d.picture(m, self.id, image);
         }
         section_finish_cancellable(m, self.id, d, cancelled)
@@ -2020,6 +2028,7 @@ fn section_in(m: &Model, work: &SectionWork, id: impl Key, view: View, k: f32, n
     let mut d = section_base(m, work, id, view, k, n);
     let Some(id) = m.elements.id(id) else { return d };
     if let Some(image) = picture {
+        behind_model(&mut d, m, image);
         d.picture(m, id, image);
     }
     section_finish(m, id, d)
@@ -2046,6 +2055,8 @@ fn section_base_cancellable(
     let Some(v) = m.section(id) else { return Some(d) };
     let look = Look::of(m, id);
     d.pattern_styles = look.pattern_styles();
+    // Its images on the background layer, under all of it; where its picture shows the model they're cleared.
+    images(&mut d, m, m.guid(id), crate::raster::DrawLayer::Background, Some(&look));
     let u = (v.end - v.start).unit();
     let (first, last) = span(m, work, v, &look, cancelled)?;
     // Each element's cut pieces, filled as one so where they meet (a roof's slopes at its ridge)
@@ -2361,6 +2372,8 @@ fn section_finish_cancellable(m: &Model, id: Id, mut d: Drawing, cancelled: &(dy
     }
     let Some(v) = m.section(id) else { return Some(d) };
     let (lookup, look, view) = (m.lookup(), Look::of(m, id), d.view);
+    // Its images on the foreground layer, over the model.
+    images(&mut d, m, m.guid(id), crate::raster::DrawLayer::Foreground, Some(&look));
     // What is drawn in it, from what points at it: its regions, notes, details and spot elevations.
     let own: Vec<(Id, &Element)> =
         lookup.referrers(&m.guid(id)).filter(|id| look.shows(*id)).filter_map(|id| Some((id, m.elements.get(id)?))).collect();
@@ -2608,6 +2621,62 @@ fn cad_imports(d: &mut Drawing, m: &Model, key: crate::ids::Guid, level: crate::
     d.own(None);
 }
 
+/// The images placed in view `key` (a plan, with a dependent view's parent's, a section, an elevation or a sheet) on `layer`
+/// that `look` shows (all on a sheet, which has none), each drawn over its corners in the view's terms.
+pub(crate) fn images(d: &mut Drawing, m: &Model, key: Guid, layer: crate::raster::DrawLayer, look: Option<&Look>) {
+    // Back to front, as Arrange orders them.
+    let mut ids: Vec<(i32, Id)> = m
+        .rare("image")
+        .into_iter()
+        .filter_map(|id| match m.elements.get(id) {
+            Some(Element::Image(im)) => Some((im.order, id)),
+            _ => None,
+        })
+        .collect();
+    ids.sort_unstable();
+    for (_, id) in ids {
+        let Some(e @ Element::Image(im)) = m.elements.get(id) else { continue };
+        if im.layer != layer || !(im.view == key || m.annotation_in(e, key)) || look.is_some_and(|l| !l.shows(id)) {
+            continue;
+        }
+        let Some(t) = m.image_types.get(&im.type_name) else { continue };
+        let corners = im.corners().map(|q| {
+            let (x, y) = d.view.px(q);
+            (f64::from(x), f64::from(y))
+        });
+        d.own(Some(id));
+        let part = std::mem::replace(&mut d.part, Part::Picture);
+        crate::raster::draw(d, t, corners);
+        d.part = part;
+    }
+    d.own(None);
+}
+
+/// Clears the pixels of the background images in `d` that lie where `picture` (a section's, over the same view) shows the
+/// model: behind it, as Revit draws an image on the background layer.
+fn behind_model(d: &mut Drawing, m: &Model, picture: &Image) {
+    let view = d.view;
+    let (rx, ry) = (f64::from(picture.width) / f64::from(view.width.max(1)), f64::from(picture.height) / f64::from(view.height.max(1)));
+    for ((prim, owner), part) in d.prims.iter_mut().zip(&d.owners).zip(&d.parts) {
+        let back = owner.and_then(|id| match m.elements.get(id) {
+            Some(Element::Image(im)) => Some(im.layer == crate::raster::DrawLayer::Background),
+            _ => None,
+        });
+        if *part != Part::Picture || back != Some(true) {
+            continue;
+        }
+        if let Prim::Image { at, width, rgba, .. } = prim {
+            let (w, ax, ay) = (*width as usize, f64::from(at.0), f64::from(at.1));
+            for (i, px) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                let (x, y) = (ax + (i % w) as f64 + 0.5, ay + (i / w) as f64 + 0.5);
+                if picture.covered(x * rx, y * ry) {
+                    px[3] = 0;
+                }
+            }
+        }
+    }
+}
+
 /// A channel of a colour most of the way to the paper: a patterned hatch's fill.
 fn pale(v: u8) -> u8 {
     v + (255 - v) / 4 * 3
@@ -2664,6 +2733,8 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, t
         scans(&mut d, m, &range, &look);
         cad_imports(&mut d, m, key, level, &look);
     }
+    // Its images on the background layer, behind the model.
+    images(&mut d, m, key, crate::raster::DrawLayer::Background, Some(&look));
     // Floors whose tops it sees, from the cut plane down to the view depth: their outlines and their
     // openings', the holes shafts cut in them, and a sloped one's slope arrow. The ground first (toposolids, as their
     // building pads cut them), then the site's elements on it (`render/site.rs`), then the building's floors.
@@ -3007,6 +3078,8 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, t
             _ => {}
         }
     }
+    // Its images on the foreground layer, in front of the model.
+    images(&mut d, m, key, crate::raster::DrawLayer::Foreground, Some(&look));
     d.model_under_regions(None);
     // Regions replace model backgrounds; non-masking ones retain the visible model foreground.
     for (&id, e) in all().filter(|_| !up).filter(|(id, _)| shown(**id)) {

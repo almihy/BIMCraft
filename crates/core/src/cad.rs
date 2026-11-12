@@ -239,8 +239,27 @@ fn similar(shape: &Shape, f: impl Fn(P2) -> P2, turn: f64, k: f64) -> Shape {
 }
 
 /// A shape of a placed drawing as it lies in the model, mm: through [`crate::model::cad_place`], turned by the import's angle.
+/// A stretched one (an image's lines) is no similarity: its circles and arcs come out as the polylines they become.
 pub fn placed(shape: &Shape, ci: &crate::model::CadImport) -> Shape {
-    similar(shape, crate::model::cad_place(ci), ci.angle, ci.scale)
+    if ci.stretch == 1.0 {
+        return similar(shape, crate::model::cad_place(ci), ci.angle, ci.scale);
+    }
+    let f = crate::model::cad_place(ci);
+    match shape {
+        Shape::Circle { .. } | Shape::Arc { .. } => {
+            let mut runs = paths(shape);
+            let (pts, closed) = runs.pop().unwrap_or_default();
+            Shape::Polyline { pts: pts.into_iter().map(f).collect(), closed }
+        }
+        Shape::Text { at, height, angle, text, align, tag } => {
+            // Its baseline turned as the page is, its height as its up stretches.
+            let (sin, cos) = angle.to_radians().sin_cos();
+            let (o, along, up) = (f(*at), f(*at + P2(cos, sin)), f(*at + P2(-sin, cos)));
+            let turn = (along.1 - o.1).atan2(along.0 - o.0).to_degrees().rem_euclid(360.0);
+            Shape::Text { at: o, height: height * up.dist(o), angle: turn, text: text.clone(), align: *align, tag: tag.clone() }
+        }
+        other => similar(other, f, ci.angle, ci.scale),
+    }
 }
 
 /// The box round `shapes` in a frame turned `angle` degrees: its four corners (its low corner first, counter-clockwise in that
@@ -266,10 +285,34 @@ pub fn kind(shape: &Shape) -> &'static str {
     }
 }
 
-/// How far a shape is from `p`, drawing units: from its lines, a point or a text's point; 0 inside a fill.
-fn distance(shape: &Shape, p: P2) -> f64 {
+/// The entity of a placed drawing nearest `at` in plan within `reach` mm, of those it shows, and how far it is, mm.
+pub fn nearest<'c>(cad: &'c Cad, ci: &crate::model::CadImport, at: P2, reach: f64) -> Option<(&'c Entity, f64)> {
+    let q = crate::model::cad_unplace(ci, at);
+    // Mm of plan a unit of the drawing is, along its x and its y: a stretched image's lines are more one way than the other.
+    let (kx, ky) = (ci.scale.abs(), (ci.scale * ci.stretch).abs());
+    if !(kx > 0.0 && ky > 0.0) {
+        return None;
+    }
+    let (rx, ry) = (reach / kx, reach / ky);
+    let to_plan = |p: P2| P2(p.0 * kx, p.1 * ky);
+    cad.dxf()
+        .entities
+        .iter()
+        .filter(|e| cad.shows(e, &ci.hidden))
+        .filter(|e| {
+            let [lo, hi] = e.shape.bounds();
+            q.0 >= lo.0 - rx && q.0 <= hi.0 + rx && q.1 >= lo.1 - ry && q.1 <= hi.1 + ry
+        })
+        .map(|e| (e, distance_scaled(&e.shape, q, &to_plan)))
+        .filter(|(_, d)| *d <= reach)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+}
+
+/// How far point `p` is from `shape` (both in the drawing's units) once `scale` takes them to plan mm, along each axis.
+fn distance_scaled(shape: &Shape, p: P2, scale: &impl Fn(P2) -> P2) -> f64 {
+    let at = scale(p);
     match shape {
-        Shape::Point(q) | Shape::Text { at: q, .. } => q.dist(p),
+        Shape::Point(q) | Shape::Text { at: q, .. } => scale(*q).dist(at),
         Shape::Fill { rings, .. } if rings.iter().filter(|r| crate::geom::contains(r, p)).count() % 2 == 1 => 0.0,
         _ => paths(shape)
             .iter()
@@ -277,27 +320,9 @@ fn distance(shape: &Shape, p: P2) -> f64 {
                 let close = (*closed).then(|| pts.last().copied().zip(pts.first().copied())).flatten();
                 pts.windows(2).filter_map(|w| Some((*w.first()?, *w.get(1)?))).chain(close).collect::<Vec<_>>()
             })
-            .map(|(a, b)| crate::geom::dist_to_segment(p, a, b))
+            .map(|(a, b)| crate::geom::dist_to_segment(at, scale(a), scale(b)))
             .fold(f64::INFINITY, f64::min),
     }
-}
-
-/// The entity of a placed drawing nearest `at` in plan within `reach` mm, of those it shows, and how far it is, mm.
-pub fn nearest<'c>(cad: &'c Cad, ci: &crate::model::CadImport, at: P2, reach: f64) -> Option<(&'c Entity, f64)> {
-    let q = crate::model::cad_unplace(ci, at);
-    let reach = reach / ci.scale;
-    cad.dxf()
-        .entities
-        .iter()
-        .filter(|e| cad.shows(e, &ci.hidden))
-        .filter(|e| {
-            let [lo, hi] = e.shape.bounds();
-            q.0 >= lo.0 - reach && q.0 <= hi.0 + reach && q.1 >= lo.1 - reach && q.1 <= hi.1 + reach
-        })
-        .map(|e| (e, distance(&e.shape, q)))
-        .filter(|(_, d)| *d <= reach)
-        .min_by(|a, b| a.1.total_cmp(&b.1))
-        .map(|(e, d)| (e, d * ci.scale))
 }
 
 /// The box round a drawing's bulk, and how many of its entities lie far from it: past [`FAR`] times the span of the middle

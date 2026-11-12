@@ -261,7 +261,7 @@ fn a_drawing_is_saved_with_the_project_and_opens_as_it_was_and_insert_brings_it(
     run(&mut s, "save", json!({"path": project}));
     let text = std::fs::read_to_string(&project).unwrap();
     let saved: Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(saved["format"], json!(crate::model::FORMAT));
+    assert_eq!(saved["format"], json!(crate::model::PREVIOUS_FORMAT));
     assert!(saved["cads"]["plan"]["dxf"].is_string() && saved["cads"]["plan"]["source"] == "plan.dxf", "{}", saved["cads"]);
     assert!(saved["library"].to_string().contains("\"cad\""), "the drawing is a library entry: {}", saved["library"]);
     let mut t = Session::new();

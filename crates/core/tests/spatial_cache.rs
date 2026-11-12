@@ -90,6 +90,7 @@ fn section_framing_refreshes_after_cad_data_changes_without_element_edits() {
         at: P2(0.0, 0.0),
         origin: P2(0.0, 0.0),
         scale: 1.0,
+        stretch: 1.0,
         angle: 0.0,
         view: None,
         hidden: Default::default(),

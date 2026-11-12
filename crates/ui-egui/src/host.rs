@@ -31,6 +31,7 @@ use serde_json::Value;
 
 pub use crate::checks::Waive;
 pub use crate::dialog::FileRequest;
+pub use crate::pdfread::PdfRequest;
 pub use crate::style::{Controls, Skin};
 use crate::{BimApp, Pending};
 
@@ -69,6 +70,9 @@ impl BimApp {
         app.docking = app.first_docking();
         // What it writes (Export) is the page's to keep, not a file on this computer's disk.
         app.session.files.keep_writes = true;
+        // A PDF is read by the page, in a worker of its own: a hostile file read here would end the editor in the browser,
+        // where a panic aborts.
+        app.session.pdf.elsewhere = true;
         app
     }
 

@@ -6126,8 +6126,8 @@ fn a_format_5_file_that_holds_elements_and_scans_migrates_to_the_current_format_
     file["format"] = json!(5);
     let (m, left_out) = Model::read(&file.to_string()).unwrap();
     assert_eq!((m.format, m.clouds.len(), left_out.len(), m.elements.len()), (FORMAT, 1, 0, s.model.elements.len()));
-    // Written again, it says the current format.
-    assert_eq!(serde_json::from_str::<serde_json::Value>(&m.to_json().unwrap()).unwrap()["format"], FORMAT);
+    // Written again, it says the oldest format that holds it: no images, and its doors' rooms from their swing, so 19.
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&m.to_json().unwrap()).unwrap()["format"], crate::model::PREVIOUS_FORMAT);
     // A file of 6 (detailing, no CAD drawings) opens as the current format likewise.
     file["format"] = json!(6);
     let (m, left_out) = Model::read(&file.to_string()).unwrap();

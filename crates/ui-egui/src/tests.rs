@@ -6227,6 +6227,7 @@ mod gpu;
 mod graphics;
 mod groups;
 mod host;
+mod images;
 mod inspector;
 mod interface;
 mod korean;

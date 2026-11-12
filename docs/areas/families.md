@@ -41,7 +41,8 @@ left, or flipped its right. Its From Room and To Room are Revit's: set as it is 
 swings to or a window faces (its exterior, so a window faced out of a house has its room as From Room), and kept on the
 element (`Opening::to_room_side`, the side of its wall) through `flip`, a wall's flip and `modify`, as Revit's do not
 follow a flip; `flip_from_to_room` (Revit's Flip From/To Room, on the right-click menu too) swaps them. A file of format
-19 has them from the swing, once, as it is read. `Rooms::from_to` finds the rooms on those sides (looked for `ROOM_PROBE`
+19 has them from the swing, once, as it is read, and a project is written as 20 only when some door's or window's
+To Room is not where its swing would put it (or it holds images: `Model::written_format`), so an older build opens the rest. `Rooms::from_to` finds the rooms on those sides (looked for `ROOM_PROBE`
 past the faces at the middle, and on past any room-bounding wall alongside, a lining, as far again past its far face:
 `Rooms::past_walls`), and `Rooms::swings_into` the room a door opens into now; both among the rooms standing in the
 project's last phase, as Revit's FamilyInstance.FromRoom (`Rooms::room_in_last_phase`; a room stands from its Phase Created

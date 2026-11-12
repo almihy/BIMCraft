@@ -2015,6 +2015,7 @@ impl BimApp {
         }
         self.grip_overlay(ui, &model, &view, rect, level, &d, d.place);
         self.dimension_grips(ui, &model, &view, rect);
+        self.image_grips(ui, &model, &view, rect);
         self.pin_overlay(ui, &model, &view, rect);
         self.flip_overlay(ui, &model, &view, rect, self.canvas.drag.is_some());
         self.site_grip_overlay(ui, &model, &view, rect, level);
@@ -2575,6 +2576,11 @@ impl BimApp {
             }
             Tool::Text => self.write_note(key, round(v.mm(at))),
             Tool::DetailGroup => self.place_group(key, self.snap(m, level, v, at, &[], false).at),
+            Tool::PlaceImage => self.place_image(key, self.snap(m, level, v, at, &[], false).at),
+            Tool::Scale(pts) => {
+                let from = pts.clone();
+                self.scale_click(self.snap(m, level, v, at, &from, false).at);
+            }
             &Tool::RepeatingDetail(start) => {
                 let p = self.snap(m, level, v, at, start.as_slice(), mods.shift).at;
                 match start {
@@ -4003,6 +4009,13 @@ impl BimApp {
                 chain.as_slice()
             }
             Tool::SketchPick => &[],
+            // The image being placed, its extents crossed round the cursor.
+            Tool::PlaceImage => {
+                self.image_ghost(p, origin, v, key, self.found(sc, q, &[], false));
+                return;
+            }
+            // Scale's origin and references, a line from the last to the cursor.
+            Tool::Scale(pts) => pts.as_slice(),
             // What was copied, where a click would put it.
             Tool::Paste => {
                 self.paste_ghost(sc, self.found(sc, q, &[], shift));

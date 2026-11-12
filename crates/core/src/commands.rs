@@ -46,6 +46,7 @@ type R = Result<Value, String>;
 mod array;
 mod cad_pick;
 pub(crate) mod clipboard;
+mod images;
 mod pin;
 mod site;
 use cad_pick::cad_outlines;
@@ -211,6 +212,93 @@ other_files(
         import_cad,
         Files::Read,
     ),
+    edit_files(
+        "import_pdf",
+        "Import PDF",
+        &[],
+        "{path | image, name?, page?: 1, resolution?: 72|150|300|600, view?, level?, at?: [x, y], scale?, width?, angle?, layer?} \
+         Revit's Insert > Import PDF: page `page` (from 1) of a PDF file (`path`; not password-protected) rasterised at \
+         `resolution` dpi (150 unless given; a page that would pass 36 million pixels comes in at the finest that fits, said in \
+         `notes`), or an image the project holds placed again (`image`, its name, Revit's Place Instance), as an image instance \
+         in one view only: `view` (a plan or ceiling plan, a section, an elevation or a sheet, by name, id or GUID; a sheet by its \
+         number), else the plan of `level`. `at` is where its middle goes, in the view's terms (plan mm; a section's along and up; \
+         a sheet's paper mm), the origin unless given (a sheet's middle). Its size, as Revit brings it in: on a sheet, its paper's; \
+         in a model view, its paper at the view's scale (a 200 mm page in a 1 : 50 plan is 10 m), or at `scale` when given (mm \
+         of the model a mm of paper stands for, 100 at 1 : 100). The scale the page states (its viewport's measure, \
+         `stated_scale`, also read by `pdf_pages`) is not taken unless given as `scale`: give it to bring the page in at true \
+         size, or scale it after with `scale_elements` by a dimension it shows. `width` sizes it instead, its height in \
+         proportion. `angle` turns it about its middle, degrees; `layer`: background (the default, behind the model) or \
+         foreground; it comes in front of the view's other images (`arrange` orders them). Its vector lines and texts are kept \
+         (`lines` counts them): `cad_read`, `cad_query` and `cad_outlines` read them as an import's (by the image's `id`), \
+         placed where the image shows them, and `wall`, `floor`… take them as a `cad` pick in a plan; walls drawn over it snap \
+         to them. Named for its file (and page, of a file of more), unless `name`; a name taken gets a number. Returns {id, \
+         image, source, page, stated_scale, dpi, pixels, size (its paper, mm), width, height, scale, corners (top left, top \
+         right, bottom right, bottom left), lines, notes}",
+        images::import_pdf,
+        Files::Read,
+    )
+    .menu("Insert > Import PDF"),
+    edit_files(
+        "import_image",
+        "Image",
+        &[],
+        "{path | image, name?, view?, level?, at?: [x, y], scale?, width?, height?, angle?, layer?} Revit's Insert > Image: a \
+         PNG, JPEG or BMP file (`path`) taken at 72 dpi, as Revit takes every raster image (so a picture 720 px wide is 254 mm \
+         of paper), or an image the project holds placed again (`image`), as an image instance in one view only, as \
+         `import_pdf` places one: `view`, `at` its middle, its paper at the view's scale (254 m in a 1 : 1000 site plan) or at \
+         `scale`, or `width` and `height` (one alone keeps its proportions), `angle`, `layer`. Returns {id, image, source, dpi, \
+         pixels, size, width, height, scale, corners}. Once placed, `modify` sets its `width`, `height` (with `lock` true, Lock \
+         Proportions, one sizes the other), `horizontal_scale`, `vertical_scale`, `at`, `angle`, `lock`, `snaps` (Enable \
+         Snaps) and `layer` (Draw Layer); `arrange` orders it among the view's images; `move`, `rotate`, `mirror`, `copy`, \
+         `pin`, `delete` and `scale_elements` take it as any element",
+        images::import_image,
+        Files::Read,
+    )
+    .menu("Insert > Image"),
+    other_files(
+        "pdf_pages",
+        "PDF Pages",
+        "{path} a PDF file's pages, before `import_pdf` takes one: {source, pages, list: [{page, size: [w, h] mm, \
+         stated_scale}]}; `stated_scale` is what a page says one mm of it stands for (its viewport's measure, 100 at 1 : 100), \
+         none when it doesn't say: give it to `import_pdf` as `scale` to bring the page in at true size",
+        images::pdf_pages,
+        Files::Read,
+    ),
+    edit(
+        "scale_elements",
+        "Scale",
+        &["RE"],
+        "{ids: [id, …], origin: [x, y], factor? | from?: [x, y] with to?: [x, y] or length?} Scale (RE), as Revit's, for \
+         images, PDFs and CAD imports only (other elements are refused): made `factor` times their size about `origin`, which \
+         stays where it is; or graphically, by two reference points: the length from `origin` to `from` becomes `length` mm, \
+         or reaches `to`. To bring a PDF to true size, give `origin` and `from` at the two ends of a dimension it shows and the \
+         `length` it says. Points in the view's terms (plan mm). A pinned element is not scaled. Returns {scaled, factor}",
+        images::scale_elements,
+    ),
+    edit(
+        "manage_images",
+        "Manage Images",
+        &[],
+        "{delete?: [name, …]} Revit's Manage > Manage Images: the images and PDF pages the project holds, {images: [{name, \
+         source, kind: pdf|image, page, dpi, pixels, size, stated_scale, lines, instances: [id, …]}]}; `delete` removes those \
+         named and every instance of them (`deleted`, `removed`). `import_pdf` or `import_image` with `image` places one again",
+        images::manage_images,
+    )
+    .menu("Manage > Manage Images"),
+    edit(
+        "arrange",
+        "Arrange",
+        &[],
+        "{ids: [id, …], to?: front|forward|backward|back} Revit's Arrange panel for raster images and PDFs (Bring to Front, \
+         Bring Forward, Send Backward, Send to Back): the draw order of the images in a view among themselves, as details \
+         have theirs. `front` puts those given in front of every other image of their view, `back` behind them all, \
+         `forward` and `backward` one step. It leaves their Draw Layer be (`modify` `layer`: background, behind the model, \
+         or foreground, in front of it), which comes first: an image in the foreground draws in front of one in the \
+         background whatever their order. Without `to`, it only says the order. Returns {order: [id, …], the images of the \
+         first one's view, back to front}",
+        images::arrange,
+    )
+    .menu("Modify > Arrange"),
     edit(
         "cad_layers",
         "CAD Layers",
@@ -2947,6 +3035,16 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>) -> Value {
         }
         Element::RoomSeparator(rs) => {
             extra.insert("length".into(), json!(hundredth(rs.start.dist(rs.end))));
+        }
+        Element::Image(im) => {
+            if let Some(t) = m.image_types.get(&im.type_name) {
+                let [sx, sy] = im.scales(t);
+                extra.insert("source".into(), json!(t.source()));
+                extra.insert("horizontal_scale".into(), json!((sx * 1e6).round() / 1e6));
+                extra.insert("vertical_scale".into(), json!((sy * 1e6).round() / 1e6));
+                extra.insert("lines".into(), json!(t.lines().map_or(0, |c| c.dxf().entities.len())));
+            }
+            extra.insert("corners".into(), json!(im.corners().map(read_point)));
         }
         Element::Rebar(rb) => {
             let length = rebar::length(&rb.path);
@@ -7095,15 +7193,39 @@ fn read_dxf_file(s: &Session, path: &str) -> Result<(Vec<u8>, Vec<String>), Stri
     s.files.given.read(&full).map(|bytes| (bytes, Vec::new())).map_err(|e| format!("{}: {e}", full.display()))
 }
 
-/// The CAD import `id` names, by id or GUID.
-fn cad_import<'m>(c: &str, m: &'m Model, p: &Value) -> Result<(Id, &'m CadImport), String> {
+/// The CAD import `id` names, by id or GUID, and its drawing; or an image of a PDF page, its lines placed as an import's
+/// where it shows them (in mm of its view, on its plan's level).
+fn cad_import(c: &str, m: &Model, p: &Value) -> Result<(Id, CadImport, Cad), String> {
     let v = p.get("id").filter(|v| !v.is_null()).ok_or_else(|| bad(c, "`id`, a CAD import's id or GUID, is required"))?;
     let id = element_id(c, m, v)?;
     match m.elements.get(id) {
-        Some(Element::CadImport(ci)) => Ok((id, ci)),
-        Some(e) => Err(bad(c, format!("{} {id} isn't a CAD import", e.category()))),
+        Some(Element::CadImport(ci)) => {
+            let cad = m.cads.get(&ci.cad).ok_or_else(|| bad(c, format!("the project holds no CAD drawing named `{}`", ci.cad)))?;
+            Ok((id, ci.clone(), cad.clone()))
+        }
+        Some(Element::Image(im)) => {
+            let t =
+                m.image_types.get(&im.type_name).ok_or_else(|| bad(c, format!("the project holds no image named `{}`", im.type_name)))?;
+            let level = m.plan_level(im.view).map_or(im.view, |l| m.guid(l));
+            let (cad, mut ci) = im.lines_placed(t, level).ok_or_else(|| {
+                bad(c, format!("image {id} has no vector lines to read: it is a picture, or a PDF page that is one picture (a scan)"))
+            })?;
+            ci.cad = im.type_name.clone();
+            Ok((id, ci, cad))
+        }
+        Some(e) => Err(bad(c, format!("{} {id} isn't a CAD import or a PDF", e.category()))),
         None => Err(bad(c, format!("no element {id}"))),
     }
+}
+
+/// The box round what a CAD import or a PDF's lines draw, as placed.
+fn placed_box(cad: &Cad, ci: &CadImport) -> Option<[P2; 2]> {
+    let [lo, hi] = cad.bulk()?;
+    let place = crate::model::cad_place(ci);
+    crate::dxf::union([lo, P2(hi.0, lo.1), hi, P2(lo.0, hi.1)].map(|p| {
+        let q = place(p);
+        [q, q]
+    }))
 }
 
 /// `key`, a list of a drawing's layer names, each one it has.
@@ -7270,7 +7392,8 @@ fn import_cad(s: &mut Session, p: &Value) -> R {
     if new {
         m.cads.insert(name.clone(), cad);
     }
-    let id = m.insert(Element::CadImport(CadImport { cad: name.clone(), level, at, origin, scale, angle, view, hidden, colors }));
+    let id =
+        m.insert(Element::CadImport(CadImport { cad: name.clone(), level, at, origin, scale, stretch: 1.0, angle, view, hidden, colors }));
     let extents = m.cad_box(id);
     let mut reply = json!({
         "id": id, "cad": name, "source": source, "unit": unit, "scale": scale, "entities": entities, "layers": layers,
@@ -7292,8 +7415,11 @@ fn import_cad(s: &mut Session, p: &Value) -> R {
 fn cad_layers(s: &mut Session, p: &Value) -> R {
     let c = "cad_layers";
     let m = &s.model;
-    let (id, ci) = cad_import(c, m, p)?;
-    let cad = m.cads.get(&ci.cad).ok_or_else(|| bad(c, format!("the project holds no CAD drawing named `{}`", ci.cad)))?.clone();
+    let (id, ci, cad) = cad_import(c, m, p)?;
+    if matches!(m.elements.get(id), Some(Element::Image(_))) {
+        return Err(bad(c, format!("{id} is an image: its lines have no layers to hide; `modify` its `snaps` to stop them snapping")));
+    }
+    let ci = &ci;
     let (hide, show) = (layer_list(c, p, "hide", &cad)?, layer_list(c, p, "show", &cad)?);
     if let Some(both) = hide.iter().find(|h| show.contains(h)) {
         return Err(bad(c, format!("layer `{both}` is in `hide` and in `show`; give it in one")));
@@ -7388,13 +7514,13 @@ fn relink_cads(s: &mut Session) -> Vec<Value> {
 fn cad_query(s: &mut Session, p: &Value) -> R {
     let c = "cad_query";
     let m = &s.model;
-    let (id, ci) = cad_import(c, m, p)?;
+    let (id, ci, cad) = cad_import(c, m, p)?;
+    let (ci, cad) = (&ci, &cad);
     let at = point_req(c, p, "at")?;
     let reach = num(c, p, "reach")?.unwrap_or(100.0);
     if reach <= 0.0 {
         return Err(bad(c, format!("`reach` is how far from `at` to look, mm, above 0, not {reach}")));
     }
-    let cad = m.cads.get(&ci.cad).ok_or_else(|| bad(c, format!("the project holds no CAD drawing named `{}`", ci.cad)))?;
     let Some((e, d)) = crate::cad::nearest(cad, ci, at, reach) else { return Ok(json!({"id": id, "found": false})) };
     let color = cad.color(e, Colors::Preserve).map(|c| json!([c.0, c.1, c.2]));
     let linetype = e.linetype.clone().or_else(|| cad.dxf().layer(&e.layer).map(|l| l.linetype.clone()));
@@ -7480,8 +7606,8 @@ fn cad_read(s: &mut Session, p: &Value) -> R {
     let c = "cad_read";
     only(c, p, &["id", "layers", "kinds", "box", "start", "limit", "explode"])?;
     let m = &s.model;
-    let (id, ci) = cad_import(c, m, p)?;
-    let cad = m.cads.get(&ci.cad).ok_or_else(|| bad(c, format!("the project holds no CAD drawing named `{}`", ci.cad)))?;
+    let (id, ci, cad) = cad_import(c, m, p)?;
+    let (ci, cad) = (&ci, &cad);
     let dxf = cad.dxf();
     let layers: Option<BTreeSet<&str>> = match p.get("layers") {
         v if absent(v) => None,
@@ -7535,7 +7661,7 @@ fn cad_read(s: &mut Session, p: &Value) -> R {
     }
     let explode = flag(c, p, "explode")?;
     if layers.is_none() && kinds.is_none() && area.is_none() && start.is_none() {
-        return Ok(cad_read_summary(id, cad, ci, m.cad_box(id)));
+        return Ok(cad_read_summary(id, cad, ci, placed_box(cad, ci)));
     }
     let start = start.unwrap_or(0);
     let layer_ok = |l: &str| layers.as_ref().is_none_or(|k| k.contains(l));
@@ -12268,6 +12394,14 @@ fn modify(s: &mut Session, p: &Value) -> R {
         let e = m.elements.get(id).ok_or_else(|| bad(c, format!("no element {id}")))?;
         let mut v = serde_json::to_value(e).map_err(|e| bad(c, e))?;
         let obj = v.as_object_mut().ok_or_else(|| bad(c, format!("element {id} can't be edited")))?;
+        let sized;
+        let fields = match e {
+            Element::Image(im) => {
+                sized = images::sized(c, m, im, fields)?;
+                &sized
+            }
+            _ => fields,
+        };
         for (k, val) in fields {
             let val = match k.as_str() {
                 "id" | "ids" => continue,
@@ -12385,6 +12519,7 @@ fn location_fields(e: &Element) -> &'static [&'static str] {
         E::Column(_) | E::StructuralColumn(_) | E::Footing(_) | E::Component(_) | E::Text(_) | E::PointCloud(_) => &["at", "angle"],
         E::Link(_) => &["at", "angle"],
         E::CadImport(_) => &["at", "origin", "angle"],
+        E::Image(_) => &["at", "angle", "mirrored"],
         E::DetailGroup(_) => &["at", "angle"],
         E::Beam(_)
         | E::StripFooting(_)
@@ -12512,6 +12647,11 @@ pub(crate) fn transform(c: &str, m: &Model, mut e: Element, id: Id, mo: &Motion,
                 ));
             }
             (ci.at, ci.angle) = turned(f, ci.at, ci.angle);
+        }
+        // A mirror image is the picture flipped.
+        Element::Image(im) => {
+            (im.at, im.angle) = turned(f, im.at, im.angle);
+            im.mirrored ^= mo.mirror;
         }
         Element::PointCloud(pc) => {
             if mo.mirror {
@@ -14223,6 +14363,7 @@ fn delete_indexed(s: &mut Session, p: &Value) -> R {
                 Some(Element::RepeatingDetail(r)) => gone.contains(&r.view),
                 Some(Element::Spot(sp)) => gone.contains(&sp.view) || sp.host.is_some_and(|h| gone.contains(&h)),
                 Some(Element::CadImport(ci)) => ci.view.is_some_and(|v| gone.contains(&v)),
+                Some(Element::Image(im)) => gone.contains(&im.view),
                 _ => false,
             };
             if hosted {
@@ -14346,6 +14487,7 @@ fn delete_from_scratch(s: &mut Session, p: &Value) -> R {
                         Element::Spot(sp) => gone.contains(&sp.view) || sp.host.is_some_and(|h| gone.contains(&h)),
                         // An import in one view only goes with it.
                         Element::CadImport(ci) => ci.view.is_some_and(|v| gone.contains(&v)),
+                        Element::Image(im) => gone.contains(&im.view),
                         _ => false,
                     }
             })

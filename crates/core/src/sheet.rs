@@ -328,6 +328,9 @@ pub fn draw(m: &Model, id: impl Key) -> Option<Drawing> {
     let scaled: Vec<&Viewport> =
         views.iter().filter(|(_, v)| !matches!(m.elements.get(v.view), Some(Element::Schedule(_)))).map(|(_, v)| *v).collect();
     title_block(&mut d, m, id, paper, &scaled);
+    // Its images on the background layer, under its views.
+    render::images(&mut d, m, guid, crate::raster::DrawLayer::Background, None);
+    d.own(m.elements.id(id));
     let mut scene = None;
     let work = Work::new();
     for (vid, vp) in views {
@@ -393,6 +396,8 @@ pub fn draw(m: &Model, id: impl Key) -> Option<Drawing> {
         d.line(&[P2(x, corner.1 - 8.0), P2(x + line, corner.1 - 8.0)], Pen::MEDIUM, INK, false);
         left(&mut d, &m.units.scale(vp.scale), P2(x, corner.1 - 11.0), 2.0);
     }
+    // Its images on the foreground layer, over its views.
+    render::images(&mut d, m, guid, crate::raster::DrawLayer::Foreground, None);
     for &(nid, e) in &on {
         if let Element::FilledRegion(r) = e
             && r.view == guid

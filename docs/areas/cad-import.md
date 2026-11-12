@@ -3,8 +3,8 @@
 On the roadmap under 0.9 Interoperability, as Revit's Import CAD and Link CAD: a consultant's or a surveyor's DXF drawing
 brought into a project and drawn under the model in the plans of a level, to trace walls over and to check against. A project
 holds each drawing once, an import element places it, plans draw and snap to it, and the desktop brings one in (Insert > Import
-CAD, Link CAD). A DWG comes in as the DXF it becomes (below); DXF export, exploding an import into detail lines (which waits on detail lines, issue #58), and
-images and PDFs as underlays are still to come. Walls, floors and the site's elements are made from its lines (Pick Lines, below).
+CAD, Link CAD). A DWG comes in as the DXF it becomes (below); DXF export and exploding an import into detail lines (which waits on detail lines, issue #58) are
+still to come. Images and PDF pages come in as Revit's raster images (below). Walls, floors and the site's elements are made from its lines (Pick Lines, below).
 
 ## The reader
 
@@ -145,3 +145,77 @@ and whether it's for the current view only; it runs `import_cad` on the plan on 
 the box open with the reason when a file can't come in. The Properties palette shows an import's drawing, file, unit, counts,
 level, position, angle and scale, and a drop-down for its colours. Visibility/Graphics has an Imported Categories tab: the
 category's row, and under each drawing of the project a check box for each of its layers, cleared for those the view hides. A right click on linked drawings selected offers Reload CAD, which runs `reload_cad` for each.
+
+## Images and PDFs
+
+As Revit's Insert > Import PDF (2020) and Image, with Snap to PDF (2022). `raster.rs` holds them; `raster/pdf.rs` reads a
+PDF through hayro (pure Rust, Apache-2.0 OR MIT, so the browser's engine reads one too; its stand-ins for the 14 standard
+fonts are PDFium's, BSD, in NOTICE): a page's size (turned, its `/UserUnit` taken in), its pixels at a resolution, the scale
+its viewport's measure states (`/VP` with a rectilinear `/Measure`, the real length of a point), and what it draws as
+vectors: each stroked path (curves in chords of 0.05 mm), the outline of each fill, and each text it shows, in mm of the
+paper from its bottom left. Only what shows is kept: what lies on the page (its crop box, as the picture has it) and inside
+the clipping paths it sets (the box round each, within the one before), cut where it leaves them (strokes by Liang and
+Barsky, fills' outlines by Sutherland and Hodgman). A hostile file can't hold the read up: a path whose control points lie
+off the clip is dropped before it is worked, a curve far bigger than the page is halved until its parts near the page are
+found (the rest become chords the clip drops), and the chords a page's curves may become (`MAX_WORK`), the points a path
+(`MAX_PATH_POINTS`) and a page (`MAX_SEGMENTS`) may keep are capped; past them paths are left out with a note. Text set in a
+character map BIMCraft doesn't hold (the CJK CMaps, left out of the build) is named in a note.
+
+A project holds each image once, by name, as an `ImageType` in `Model::image_types` (a library entry of kind `image`; Manage
+Images lists them): the file's name, the page and the resolution, its size in mm (a PDF's page; a picture's at 72 dpi, as
+Revit takes every raster image), the scale the page states, its pixels as a PNG (grey when they are) and a PDF's vectors as a
+`Cad` (a DXF in mm written of them: strokes on layer `Lines` in their colour and width, fills' outlines on `Fills`, texts on
+`Text`; a DXF that can't be read back is said in the notes). The PDF itself is not kept. `MAX_PIXELS` (36 million) caps an
+image: a page that would pass it at the resolution asked comes in at the finest that fits, said in the notes. Its pixels are
+held in the channels they need (grey, RGB or RGBA), so a drawing's grey page holds a byte a pixel, encoded to PNG row by row
+and decoded again only when first drawn. `MAX_TYPES` images and `MAX_HELD` (256 MB) of PNG among them are the most a project
+holds: in base64, with the rest of the project, within the longest text a browser holds, which a project saved there is. A
+file's image is checked as it opens (its size, resolution and stated scale), and one that says what no image is refuses the
+file with what is wrong. An image stays when nothing places it, as Revit's does, until Manage Images deletes it. A project
+with no images is written as format 19, so a build from before images opens it; one with images is format 20 (as is one
+whose doors keep their From and To Room against their swing: [families](families.md)).
+
+An `Element::Image` (`ImageInstance`, category `image`, Revit's Raster Images) places one in one view, as annotation is: a
+plan (and its dependent views; a level's ceiling plan shares its plan's annotation), a section, an elevation or a sheet, in
+the view's terms. It holds its middle `at`, `width` and `height`, `angle`, `mirrored`, `lock` (Lock Proportions), `snaps`
+(Enable Snaps), `layer` (Draw Layer: background, behind the model, or foreground, in front of it; annotation draws over
+both) and `order`, its place among its view's images (Revit's Arrange: "the draw order of raster images and PDF files can be
+controlled in the same manner as detail elements"), which counts within its layer; a new one comes in front. `render::images` draws it (`raster::draw`: the image's nearest pixel at the level of its pyramid that is about the
+view's, a PDF's levels keeping the darkest pixel so lines stay as it zooms out); a plan draws its background images after
+its scans and CAD imports, its foreground ones before its regions; a section draws them first and last, its background ones
+cleared where its picture shows the model (`behind_model`); a sheet under and over its views. It picks where nothing else
+drawn near does (`Part::Picture`).
+
+A PDF's lines are placed where the image shows them by `ImageInstance::lines_placed`, an import of the image's `Cad` (with
+`CadImport::stretch` when its sides are scaled apart, and turned half round and flipped when mirrored), so everything an
+import has works on them by the image's id: `cad_read`, `cad_query`, `cad_outlines`, the `cad` pick of `wall`, `floor` and
+the rest (an image in a plan only), Align, and snapping (`snap.rs`, while `snaps`).
+
+Commands (`commands/images.rs`): `import_pdf` and `import_image` (a file by `path`, or a held image by `image`, Revit's Place
+Instance; in `view` at `at`), `pdf_pages`, `manage_images` (`delete`), `arrange` (Bring to Front, Bring Forward, Send Backward,
+Send to Back), and `scale_elements` (Scale, RE, as Revit's for images, PDFs and CAD imports only: a factor, or two reference
+points and a length). In a model view an image comes in at its paper times the view's scale, as Revit brings one in (its
+help: set "the view scale to match the PDF before you place it", and scale it after by its Horizontal Scale or Scale); the
+scale a page states is read, not taken (`stated_scale`, and `pdf_pages`), so the agent or the person gives it as `scale` to
+bring the page in at true size. On a sheet it is its paper's size. `modify` takes `horizontal_scale` and `vertical_scale`, and sizes the other side in proportion
+while `lock` is on (`images::sized`). `move`, `rotate`, `mirror`, `copy`, `pin` and `delete` take an image as any element.
+
+A PDF is read where a hostile one can't take the editor down. A command reads it in its session (`raster::read_pdf`) unless
+the session was given the page read elsewhere (`Session::give_pdf_page`, `give_pdf_outline`: a `PdfRead` holds the page's
+PNG, its DXF and its notes, and comes over as bytes, checked as a file is); a session with `pdf.elsewhere` never reads one
+itself. The window reads every PDF apart (`crates/ui-egui/src/pdfread.rs`, jobs of `raster::run_pdf_job`: the pages, a
+thumbnail, a page): on the desktop in a thread of its own, where a panic is caught; in a page Arqiflow hosts (the browser,
+where a panic aborts the WebAssembly instance) by the page, in a Web Worker with an instance of its own that calls the
+build's `pdf_job` (`take_pdf_requests`, `answer_pdf_request`; `apps/bimcraft-web`'s `on_pdf` and `answer_pdf`), so a worker
+that dies is lost alone and the window says the file could not be read. On the server, each session's engine runs in a
+worker thread of its own already.
+
+The desktop (`crates/ui-egui/src/images.rs`): Insert > Import PDF asks for a file (up to `MAX_FILE`), then a box of its pages'
+thumbnails (read one at a time), Page to Import, Resolution (72, 150, 300 or 600 DPI, 150 to start) and Page Size; OK reads
+the page apart while it follows the cursor, and a click before it is read places it once it is. Insert > Image asks for a
+picture. Either follows the cursor (`Tool::PlaceImage`), its extents crossed corner to corner, until a click places it in the
+plan, section, elevation or sheet on screen, selected. A selected image shows its frame and four corner grips (`image_grips`,
+in every 2D canvas): a drag scales it about the corner across, in proportion while locked. The Arrange panel (an image
+selected) has Bring to Front, Bring Forward, Send Backward and Send to Back; Insert > Manage Images lists the images with their count, Place Instance and
+Delete. Properties shows Width, Height, Horizontal and Vertical Scale, Lock Proportions, Enable Snaps and Draw Layer. In a
+page Arqiflow hosts, the file dialogs ask the page (`dialog.rs`), which gives the PDF or picture as bytes under a name.

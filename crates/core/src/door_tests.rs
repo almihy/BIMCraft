@@ -307,6 +307,32 @@ fn a_door_from_before_from_and_to_room_were_kept_has_them_from_its_swing() {
 }
 
 #[test]
+fn a_project_is_written_as_format_20_only_when_a_doors_rooms_are_not_where_its_swing_puts_them() {
+    use crate::model::{FORMAT, Model, PREVIOUS_FORMAT};
+    let mut s = Session::new();
+    rooms(&mut s);
+    let door = id_of(&run(&mut s, "door", json!({"at": [6000, 0]})));
+    let format = |s: &Session| serde_json::from_str::<Value>(&s.model.to_json().unwrap()).unwrap()["format"].clone();
+    // Its To Room where it swings: a build that reads up to 19 gives it back from the swing, so 19 holds it.
+    assert_eq!(format(&s), json!(PREVIOUS_FORMAT));
+    let (m, left_out) = Model::read(&s.model.to_json().unwrap()).unwrap();
+    assert!(left_out.is_empty(), "{left_out:?}");
+    let rooms_of = |m: &Model| match m.elements.get(door) {
+        Some(crate::model::Element::Door(o)) => o.to_room_side,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(rooms_of(&m), rooms_of(&s.model));
+    // Flipped, it keeps its rooms against its swing: only 20 holds that, and it reads back as it was.
+    run(&mut s, "flip", json!({"ids": [door]}));
+    assert_eq!(format(&s), json!(FORMAT));
+    let (m, _) = Model::read(&s.model.to_json().unwrap()).unwrap();
+    assert_eq!(rooms_of(&m), rooms_of(&s.model));
+    // Its rooms flipped back to its swing, 19 again.
+    run(&mut s, "flip_from_to_room", json!({"ids": [door]}));
+    assert_eq!(format(&s), json!(PREVIOUS_FORMAT));
+}
+
+#[test]
 fn from_and_to_room_are_the_rooms_of_the_projects_last_phase_as_revits() {
     let mut s = Session::new();
     let walls = rooms(&mut s);

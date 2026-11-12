@@ -75,6 +75,8 @@ mod ifc_generic_tests;
 mod ifc_geometry_tests;
 #[cfg(test)]
 mod ifc_member_tests;
+#[cfg(test)]
+mod image_tests;
 pub mod import;
 pub mod inquiry;
 pub mod insert;
@@ -106,6 +108,7 @@ pub mod plumbing;
 pub mod quantities;
 #[cfg(test)]
 mod quantities_tests;
+pub mod raster;
 #[cfg(test)]
 mod read_only_tests;
 pub mod rebar;

@@ -3,7 +3,7 @@
 use std::io::Read as _;
 
 use bimcraft_core::engine::Session;
-use bimcraft_core::model::FORMAT;
+use bimcraft_core::model::PREVIOUS_FORMAT;
 use flate2::read::ZlibDecoder;
 use serde_json::{Value, json};
 
@@ -94,7 +94,7 @@ fn no_title_block_keeps_viewports_and_sheet_annotations_and_round_trips() {
     let file = dir.path().join("sheet.bimcraft");
     session.execute("save", &json!({"path": file})).unwrap();
     let stored: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
-    assert_eq!(stored["format"], FORMAT);
+    assert_eq!(stored["format"], PREVIOUS_FORMAT, "no images and no door kept against its swing: an older build opens it");
     assert_eq!(stored["elements"][id.to_string()]["title_block"], "none");
     let mut reopened = Session::new();
     let opened = reopened.execute("open", &json!({"path": file})).unwrap();

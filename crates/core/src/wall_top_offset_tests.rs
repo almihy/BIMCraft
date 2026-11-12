@@ -116,7 +116,7 @@ fn a_walls_ifc_solid_is_as_tall_as_its_offset_top_and_the_offset_is_saved_only_w
     assert_eq!(solids.iter().filter(|l| l.ends_with(",3000.);")).count(), 1, "{solids:?}");
     // In the project file: the offset where there is one, the wall to Level 2 as before where there is not.
     let file: Value = serde_json::from_str(&s.model.to_json().unwrap()).unwrap();
-    assert_eq!(file["format"], crate::model::FORMAT);
+    assert_eq!(file["format"], crate::model::PREVIOUS_FORMAT);
     let saved = |id: u64| {
         let guid = s.model.guid(id).to_string();
         file["elements"].as_object().unwrap().values().find(|e| e["guid"] == json!(guid)).unwrap().clone()

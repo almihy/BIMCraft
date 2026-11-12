@@ -101,6 +101,23 @@ fn element_lines(m: &Model, e: &Element) -> Vec<Line> {
                 .map(|(a, b)| (place(a), place(b)))
                 .collect()
         }
+        // Its edges, and a PDF's lines.
+        Element::Image(im) => {
+            let c = im.corners();
+            let mut out = path(&c, true);
+            if let Some((cad, ci)) = m.image_types.get(&im.type_name).and_then(|t| im.lines_placed(t, im.view)) {
+                let place = crate::model::cad_place(&ci);
+                out.extend(
+                    cad.dxf()
+                        .entities
+                        .iter()
+                        .flat_map(|e| crate::cad::paths(&e.shape))
+                        .flat_map(|(pts, closed)| path(&pts, closed))
+                        .map(|(a, b)| (place(a), place(b))),
+                );
+            }
+            out
+        }
         // These have stable references above, or no location in a plan.
         Element::Wall(_)
         | Element::Door(_)

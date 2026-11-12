@@ -34,6 +34,8 @@ pub enum Kind {
     Cloud,
     /// A CAD drawing imports place.
     Cad,
+    /// A raster image or a PDF page image instances place (Revit's image type).
+    Image,
     Family,
     Parameter,
     ViewFilter,
@@ -75,6 +77,7 @@ impl Kind {
             Kind::Picture => ui_msg!("picture").into(),
             Kind::Cloud => "scan".into(),
             Kind::Cad => ui_msg!("CAD drawing").into(),
+            Kind::Image => ui_msg!("image").into(),
             Kind::Family => ui_msg!("family").into(),
             Kind::Parameter => ui_msg!("parameter").into(),
             Kind::ViewFilter => "view filter".into(),
@@ -106,6 +109,7 @@ impl Kind {
             "picture" => Kind::Picture,
             "cloud" => Kind::Cloud,
             "cad" => Kind::Cad,
+            "image" => Kind::Image,
             "family" => Kind::Family,
             "parameter" => Kind::Parameter,
             "view-filter" => Kind::ViewFilter,
@@ -141,6 +145,7 @@ impl fmt::Display for Kind {
             Kind::Picture => f.write_str("picture"),
             Kind::Cloud => f.write_str("cloud"),
             Kind::Cad => f.write_str("cad"),
+            Kind::Image => f.write_str("image"),
             Kind::Family => f.write_str("family"),
             Kind::Parameter => f.write_str("parameter"),
             Kind::ViewFilter => f.write_str("view-filter"),
@@ -678,6 +683,7 @@ impl Model {
             }),
             Kind::Material => self.materials.remove(name).is_some(),
             Kind::Picture => self.images.remove(name).is_some(),
+            Kind::Image => self.image_types.remove(name).is_some(),
             Kind::ViewFilter => self.view_filters.remove(name).is_some(),
             Kind::ViewTemplate => self.view_templates.remove(name).is_some(),
             Kind::TitleBlock => self.title_blocks.remove(name).is_some(),
@@ -812,6 +818,7 @@ impl Model {
         add(Kind::Picture, &mut self.images.keys());
         add(Kind::Cloud, &mut self.clouds.keys());
         add(Kind::Cad, &mut self.cads.keys());
+        add(Kind::Image, &mut self.image_types.keys());
         add(Kind::Family, &mut self.families.keys());
         add(Kind::Parameter, &mut self.parameters.keys());
         add(Kind::ViewFilter, &mut self.view_filters.keys());
@@ -1457,6 +1464,7 @@ impl crate::model::Element {
                 }
             }
             Element::CadImport(ci) => f(&Kind::Cad, &mut ci.cad),
+            Element::Image(im) => f(&Kind::Image, &mut im.type_name),
             Element::Text(n) => f(&Kind::TextType, &mut n.type_name),
             Element::Dimension(d) => f(&Kind::DimensionType, &mut d.type_name),
             Element::Dimension3D(d) => f(&Kind::DimensionType, &mut d.type_name),
@@ -1626,7 +1634,22 @@ impl Model {
         let mut m = self.clone();
         m.sync_library();
         m.refs_to_file();
+        m.format = self.written_format();
         serde_json::to_string_pretty(&m).map_err(|e| e.to_string())
+    }
+
+    /// The format its file is written in: the oldest that holds all it has. [`crate::model::FORMAT`] when it holds images, or
+    /// a door or a window whose To Room is not on the side it swings to or faces (flipped since it was placed, or its rooms
+    /// flipped), which a file of 19 would give it back from its swing; else [`crate::model::PREVIOUS_FORMAT`], so an older
+    /// build opens it.
+    pub fn written_format(&self) -> u32 {
+        use crate::model::Element;
+        let images = !self.image_types.is_empty() || !self.rare("image").is_empty();
+        let rooms_kept = self.elements.values().any(|e| match e {
+            Element::Door(o) | Element::Window(o) => o.to_room_side != o.swing_side(),
+            _ => false,
+        });
+        if images || rooms_kept { crate::model::FORMAT } else { crate::model::PREVIOUS_FORMAT }
     }
 
     /// Every name this model holds of a library entry (its elements', its types', its views'…) its GUID, and the values of
@@ -1851,7 +1874,7 @@ template {"name": "Plans", "from": 100000}"#,
         let m = &s.model;
         let g = |kind: Kind, name: &str| json!(m.library.guid(&kind, name).unwrap().to_string());
         let file: Value = serde_json::from_str(&m.to_json().unwrap()).unwrap();
-        assert_eq!(file["format"], crate::model::FORMAT);
+        assert_eq!(file["format"], crate::model::PREVIOUS_FORMAT);
         let wall = &file["elements"][w.to_string()];
         assert_eq!(wall["type"], g(Kind::Type("wall".into()), "Exterior - 300mm"));
         let params = wall["params"].as_object().unwrap();

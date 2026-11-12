@@ -402,6 +402,19 @@ fn rows(category: &str) -> &'static [Row] {
             ("Other", "scale", "Scale", Number),
             ("Graphics", "colors", "Colors", Choice(&[("preserve", "Preserve"), ("invert", "Invert"), ("black", "Black and White")])),
         ],
+        "image" => &[
+            ("Dimensions", "width", "Width", Length),
+            ("Dimensions", "height", "Height", Length),
+            ("Dimensions", "horizontal_scale", msg!("Horizontal Scale"), Number),
+            ("Dimensions", "vertical_scale", msg!("Vertical Scale"), Number),
+            ("Dimensions", "lock", msg!("Lock Proportions"), Flag),
+            ("Dimensions", "snaps", msg!("Enable Snaps"), Flag),
+            ("Identity Data", "type", msg!("Image"), Shown),
+            ("Identity Data", "source", msg!("Loaded from file"), Shown),
+            ("Other", "layer", msg!("Draw Layer"), Choice(&[("background", msg!("Background")), ("foreground", msg!("Foreground"))])),
+            ("Other", "at", msg!("Position"), Point),
+            ("Other", "angle", "Angle", Number),
+        ],
         "link" => &[
             ("Identity Data", "name", "Name", Text),
             ("Identity Data", "path", "File", Shown),
@@ -526,6 +539,7 @@ fn icon(category: &str) -> Icon {
         "view3d" => Icon::View3D,
         "pointcloud" => Icon::PointCloud,
         "cadimport" => Icon::ImportCad,
+        "image" => Icon::InsertImage,
         _ => Icon::Plan,
     }
 }
