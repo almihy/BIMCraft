@@ -438,7 +438,7 @@ fn select_all_instances_in_a_camera_view_takes_only_what_that_view_shows() {
     let walls = ids(&h, "wall");
     assert!(walls.len() >= 2);
     h.state_mut().selection = vec![walls[0]];
-    h.state_mut().act(Action::HideElement);
+    h.state_mut().act(Action::HideElements);
     h.run();
     assert!(!bimcraft_core::graphics::Look::of(&h.state().session.model, id).shows(walls[0]), "hidden in the camera view");
     h.state_mut().selection = vec![walls[1]];

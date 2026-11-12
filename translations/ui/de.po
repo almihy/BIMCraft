@@ -866,11 +866,11 @@ msgstr "Ansichtsvorlage zuweisen"
 msgid "Associated Level"
 msgstr "Zugeordnetes Geschoss"
 
-#: crates/core/src/model.rs:3177
+#: crates/core/src/model.rs:3174
 msgid "At wall centre line"
 msgstr "An Wandmittellinie"
 
-#: crates/core/src/model.rs:3178
+#: crates/core/src/model.rs:3175
 msgid "At wall finish"
 msgstr "An Wandoberfläche"
 
@@ -1216,7 +1216,7 @@ msgstr "Begrenzungslinie: Grundriss des Dachs im Geschoss darüber und darin lie
 msgid "Boundary Line: sketch the shaft opening's outline"
 msgstr "Begrenzungslinie: Umriss des Schachtdurchbruchs skizzieren"
 
-#: crates/core/src/model.rs:3503
+#: crates/core/src/model.rs:3500
 msgid "Brick"
 msgstr "Ziegel"
 
@@ -1531,7 +1531,7 @@ msgstr "Mittelpunkt"
 msgid "Centre Lines"
 msgstr "Mittellinien"
 
-#: crates/core/src/model.rs:3511
+#: crates/core/src/model.rs:3508
 msgid "Ceramic tile"
 msgstr "Keramikfliese"
 
@@ -2354,7 +2354,7 @@ msgstr "Konzeptioneller Volumenkörper"
 msgid "Concrete"
 msgstr "Beton"
 
-#: crates/core/src/model.rs:3505
+#: crates/core/src/model.rs:3502
 msgid "Concrete block"
 msgstr "Betonblock"
 
@@ -2449,7 +2449,7 @@ msgstr "{} IFC GlobalIds kopiert."
 msgid "Copied {} rows, tab-separated."
 msgstr "{} Zeilen kopiert, tabgetrennt."
 
-#: crates/core/src/model.rs:3519
+#: crates/core/src/model.rs:3516
 msgid "Copper"
 msgstr "Kupfer"
 
@@ -3200,11 +3200,11 @@ msgstr "Gepunktet"
 msgid "Double Door"
 msgstr "Zweiflügelige Tür"
 
-#: crates/core/src/model.rs:3008
+#: crates/core/src/model.rs:3005
 msgid "Double Sliding"
 msgstr "Doppelt schiebend"
 
-#: crates/core/src/model.rs:3006
+#: crates/core/src/model.rs:3003
 msgid "Double Swing"
 msgstr "Doppelt aufschlagend"
 
@@ -3362,7 +3362,7 @@ msgstr "Erdungselektrode (EG): ein Stab, der vom Geschoss aus dort eingetrieben 
 msgid "Earthing Electrodes"
 msgstr "Erdungselektroden"
 
-#: crates/core/src/model.rs:2296
+#: crates/core/src/model.rs:2293
 msgid "East"
 msgstr "Osten"
 
@@ -3933,7 +3933,7 @@ msgstr ""
 msgid "Five-a-side"
 msgstr ""
 
-#: crates/core/src/model.rs:3010
+#: crates/core/src/model.rs:3007
 msgid "Fixed"
 msgstr "Fest"
 
@@ -4063,7 +4063,7 @@ msgstr ""
 msgid "Folder for new projects"
 msgstr "Ordner für neue Projekte"
 
-#: crates/core/src/model.rs:3009
+#: crates/core/src/model.rs:3006
 msgid "Folding"
 msgstr "Falt-"
 
@@ -4371,7 +4371,7 @@ msgstr "Gruppe"
 msgid "Group:"
 msgstr "Gruppe:"
 
-#: crates/core/src/model.rs:3510
+#: crates/core/src/model.rs:3507
 msgid "Gypsum board"
 msgstr "Gipskartonplatte"
 
@@ -5440,7 +5440,7 @@ msgstr ""
 msgid "Manufacturer"
 msgstr ""
 
-#: crates/core/src/model.rs:1903
+#: crates/core/src/model.rs:1900
 msgid "Mark"
 msgstr "Markierung"
 
@@ -5815,7 +5815,7 @@ msgstr "NBR 6492: Zielmarke im Plan (±0.00), gleichseitiges Dreieck im Schnitt"
 msgid "NOT ENCLOSED"
 msgstr "NICHT UMSCHLOSSEN"
 
-#: crates/core/src/model.rs:1904
+#: crates/core/src/model.rs:1901
 #: crates/ui-egui/src/cad.rs:89
 #: crates/ui-egui/src/clouds.rs:59
 #: crates/ui-egui/src/electrical.rs:298
@@ -6054,7 +6054,7 @@ msgstr "Nominelle Texthöhe:"
 msgid "None"
 msgstr "Keine"
 
-#: crates/core/src/model.rs:2294
+#: crates/core/src/model.rs:2291
 msgid "North"
 msgstr "Norden"
 
@@ -8083,7 +8083,7 @@ msgstr "Dach über Fläche (RB): ein Dach auf den oberen Flächen der ausgewähl
 msgid "Roof by Footprint: click inside the walls to roof them, on the level above"
 msgstr "Dach über Grundriss: innerhalb der Wände anklicken, um sie im Geschoss darüber zu überdachen"
 
-#: crates/core/src/model.rs:3512
+#: crates/core/src/model.rs:3509
 msgid "Roof tiles"
 msgstr "Dachziegel"
 
@@ -8343,7 +8343,7 @@ msgstr "Tabellen/Mengen (alle)"
 msgid "Scope"
 msgstr ""
 
-#: crates/core/src/model.rs:3508
+#: crates/core/src/model.rs:3505
 msgid "Screed"
 msgstr "Estrich"
 
@@ -8843,7 +8843,7 @@ msgstr "Diese Version überspringen"
 msgid "Sky"
 msgstr "Himmel"
 
-#: crates/core/src/model.rs:3007
+#: crates/core/src/model.rs:3004
 msgid "Sliding"
 msgstr "Schiebe-"
 
@@ -8992,7 +8992,7 @@ msgstr "Sortieren/Gruppieren"
 msgid "Source code on GitHub"
 msgstr "Quellcode auf GitHub"
 
-#: crates/core/src/model.rs:2295
+#: crates/core/src/model.rs:2292
 msgid "South"
 msgstr "Süden"
 
@@ -9310,7 +9310,7 @@ msgstr "Fläche, {}°"
 msgid "Survey"
 msgstr ""
 
-#: crates/core/src/model.rs:3005
+#: crates/core/src/model.rs:3002
 msgid "Swing"
 msgstr "Aufschlagrichtung"
 
@@ -10169,7 +10169,7 @@ msgstr ""
 msgid "Two-Point Perspective: verticals stay vertical however the camera looks up or down (Auto Vertical Tilt Correction)"
 msgstr ""
 
-#: crates/core/src/model.rs:1905
+#: crates/core/src/model.rs:1902
 #: crates/ui-egui/src/editor.rs:690
 #: crates/ui-egui/src/editor.rs:696
 #: crates/ui-egui/src/properties.rs:3317
@@ -10774,7 +10774,7 @@ msgstr "Welle"
 msgid "Weight"
 msgstr "Gewicht"
 
-#: crates/core/src/model.rs:2297
+#: crates/core/src/model.rs:2294
 msgid "West"
 msgstr "Westen"
 

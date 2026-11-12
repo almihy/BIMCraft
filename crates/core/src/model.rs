@@ -1775,9 +1775,6 @@ fn film() -> f64 {
 fn is_film(v: &f64) -> bool {
     *v == film()
 }
-fn is_one(v: &f64) -> bool {
-    *v == 1.0
-}
 fn f_number() -> f64 {
     8.0
 }
