@@ -392,8 +392,8 @@ impl Cloud {
                 stations: self.stations.clone(),
                 origin: self.origin,
                 read: self.read,
-                points: crate::commands::base64(&deflate(&points)),
-                colours: colours.map(|c| crate::commands::base64(&deflate(&c))),
+                points: crate::files::base64(&deflate(&points)),
+                colours: colours.map(|c| crate::files::base64(&deflate(&c))),
             }
         })
     }
@@ -1316,10 +1316,10 @@ mod tests {
             f[key] = v;
             serde_json::from_value::<Cloud>(f)
         };
-        let packed = |bytes: &[u8]| serde_json::Value::from(crate::commands::base64(&deflate(bytes)));
+        let packed = |bytes: &[u8]| serde_json::Value::from(crate::files::base64(&deflate(bytes)));
         for (key, v, says) in [
             ("points", "!!!".into(), "base64"),
-            ("points", crate::commands::base64(b"not zlib").into(), "zlib"),
+            ("points", crate::files::base64(b"not zlib").into(), "zlib"),
             ("points", packed(&[0; 13]), "cut short"),
             ("points", packed(&[]), "points"),
             ("points", packed(&[f32::NAN.to_le_bytes(), [0; 4], [0; 4], [0; 4], [0; 4], [0; 4]].concat()), "past"),
@@ -1335,7 +1335,7 @@ mod tests {
             assert!(e.contains(says), "{key}: {e}");
         }
         // Data that unpacks past what a cloud may hold stops at it.
-        let e = inflate(&crate::commands::base64(&deflate(&vec![0; 1000])), 999).unwrap_err();
+        let e = inflate(&crate::files::base64(&deflate(&vec![0; 1000])), 999).unwrap_err();
         assert!(e.contains("more than 999"), "{e}");
     }
 

@@ -243,7 +243,7 @@ impl TryFrom<PictureFile> for Picture {
 
 impl Serialize for Picture {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        PictureFile { name: self.name.clone(), png: crate::commands::base64(&self.png) }.serialize(s)
+        PictureFile { name: self.name.clone(), png: crate::files::base64(&self.png) }.serialize(s)
     }
 }
 
@@ -761,7 +761,7 @@ mod tests {
     #[test]
     fn base64_reads_what_the_replies_write() {
         for bytes in [vec![], vec![0], vec![0, 1], vec![0, 1, 2], (0..=255).collect::<Vec<u8>>()] {
-            assert_eq!(unbase64(&crate::commands::base64(&bytes)), Some(bytes));
+            assert_eq!(unbase64(&crate::files::base64(&bytes)), Some(bytes));
         }
         assert_eq!(unbase64("AB!D"), None);
     }

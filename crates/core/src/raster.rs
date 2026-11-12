@@ -310,7 +310,7 @@ impl Serialize for ImageType {
             dpi: self.dpi,
             size: self.size,
             scale: self.scale,
-            png: crate::commands::base64(&self.png),
+            png: crate::files::base64(&self.png),
             lines: self.lines.clone(),
         }
         .serialize(s)

@@ -290,7 +290,7 @@ fn a_file_of_5_opens_and_what_a_file_holds_of_a_drawing_is_checked_as_it_is_read
     for (data, says) in [
         (json!("!!!"), "base64"),
         (json!("aGVsbG8="), "zlib"),
-        (json!(crate::commands::base64(&crate::cloud::deflate(b"0\nEOF\n"))), "ENTITIES"),
+        (json!(crate::files::base64(&crate::cloud::deflate(b"0\nEOF\n"))), "ENTITIES"),
     ] {
         let mut bad = good.clone();
         bad["cads"]["plan"]["dxf"] = data;

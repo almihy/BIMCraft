@@ -2851,7 +2851,7 @@ fn schedules_and_the_3d_view_go_on_sheets() {
 
 #[test]
 fn base64_matches_the_standard_vectors() {
-    use crate::commands::base64;
+    use crate::files::base64;
     assert_eq!([base64(b""), base64(b"M"), base64(b"Ma"), base64(b"Man")], ["", "TQ==", "TWE=", "TWFu"]);
 }
 

@@ -4667,7 +4667,7 @@ pub fn svg(d: &Drawing) -> String {
                     r#"<image x="{}" y="{}" width="{width}" height="{height}" href="data:image/png;base64,{}"/>"#,
                     at.0,
                     at.1,
-                    crate::commands::base64(&png)
+                    crate::files::base64(&png)
                 ),
                 None => Ok(()),
             },

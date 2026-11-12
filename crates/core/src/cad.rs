@@ -155,7 +155,7 @@ impl Cad {
         self.packed.get_or_init(|| CadFile {
             source: self.source.clone(),
             path: self.path.clone(),
-            dxf: crate::commands::base64(&crate::cloud::deflate(&self.bytes)),
+            dxf: crate::files::base64(&crate::cloud::deflate(&self.bytes)),
         })
     }
 
