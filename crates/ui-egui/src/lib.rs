@@ -548,6 +548,8 @@ pub struct BimApp {
     /// The selected elements, in the order they were picked.
     pub selection: Vec<Id>,
     pub status: Status,
+    /// The interface's own zoom (egui's zoom factor) on top of the system's scale, read each frame: Zoom Sheet Size takes it out.
+    pub(crate) ui_zoom: f32,
     /// The interface's language: English unless told otherwise (the app asks the environment).
     pub lang: Lang,
     /// Where a font with Chinese glyphs comes from, when the window is put in Chinese.
@@ -912,8 +914,9 @@ pub struct BimApp {
     /// The family and type the Component tool places, as picked, and how far it's turned, degrees.
     component: Option<(String, String)>,
     component_angle: f64,
-    /// Whether Space has flipped the hand of the door about to be placed (its swing side is the cursor's side of the wall).
-    place_hand: bool,
+    /// The hand and facing Space has stepped the doors or windows being placed to, on top of the cursor's side of the wall; the
+    /// next one put down keeps them.
+    place_flip: flip::PlaceFlip,
     /// Whether Space has put the exterior side of the walls being drawn on the right of the way they are drawn.
     wall_flipped: bool,
     /// The Properties palette's folded groups.
@@ -1344,6 +1347,7 @@ impl BimApp {
             tool: Tool::Modify,
             selection: Vec::new(),
             status: Status::default(),
+            ui_zoom: 1.0,
             views: vec![first],
             front: first,
             floating: Vec::new(),
@@ -1558,7 +1562,7 @@ impl BimApp {
             new_schedule: None,
             component: None,
             component_angle: 0.0,
-            place_hand: false,
+            place_flip: flip::PlaceFlip::default(),
             wall_flipped: false,
             collapsed: BTreeSet::new(),
             view_rect: Rect::ZERO,
@@ -1740,6 +1744,7 @@ impl BimApp {
     /// The whole window.
     pub fn show(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
+        self.ui_zoom = ctx.zoom_factor();
         // What `pace` held is for the next frame, which a window with nothing new to say won't run.
         if !self.held.is_empty() {
             ctx.request_repaint();
@@ -2166,8 +2171,8 @@ impl BimApp {
         if pressed(Modifiers::NONE, Key::Delete) {
             self.delete();
         }
-        // Space flips: what is selected, the hand of the door about to be placed, the wall about to be drawn.
-        if matches!(self.tool, Tool::Modify | Tool::Door | Tool::Wall(_)) && pressed(Modifiers::NONE, Key::Space) {
+        // Space flips: what is selected, the door or window about to be placed, the wall about to be drawn.
+        if matches!(self.tool, Tool::Modify | Tool::Door | Tool::Window | Tool::Wall(_)) && pressed(Modifiers::NONE, Key::Space) {
             self.flip_key();
         }
         self.reset_flips();
@@ -3092,12 +3097,23 @@ impl BimApp {
         }
     }
 
-    /// Zoom Sheet Size (ZS): a sheet at its actual size, a millimetre of paper as long on the screen as a millimetre is (96 points
-    /// to the inch, the unit egui draws in), about its middle. Only a sheet has a size.
+    /// Zoom Sheet Size (ZS), as Revit's: the view at the size it prints, a millimetre of paper as long on the screen as a
+    /// millimetre is, about its middle. A sheet is its paper; a plan, a ceiling plan, a section or an elevation is printed at
+    /// its own scale (1 : n), so a metre of it is 1000 / n mm of paper. A screen is taken at 96 points to the inch, the unit
+    /// egui draws in at the system's scale; the interface's own zoom on top of that is taken out, so the size is the physical
+    /// one however large the interface is drawn.
     pub(crate) fn zoom_sheet_size(&mut self) {
+        let mm = 96.0 / 25.4 / f64::from(self.ui_zoom.max(0.01));
+        let m = &self.session.model;
         match self.sheet {
-            Sheet::Paper(id) => self.canvas.set_scale(id, 96.0 / 25.4),
-            _ => self.status = Status { text: t("Zoom Sheet Size: open a sheet").into(), error: true },
+            Sheet::Paper(id) => self.canvas.set_scale(id, mm),
+            Sheet::Plan(id) | Sheet::Ceiling(id) | Sheet::Section(id) => {
+                let n = bimcraft_core::graphics::scale_of(m, id).max(1.0);
+                self.canvas.set_scale(id, mm / n);
+            }
+            Sheet::View3D | Sheet::Schedule(_) | Sheet::Table(_) => {
+                self.status = Status { text: t("Zoom Sheet Size: not in this view").into(), error: true }
+            }
         }
     }
 
@@ -4400,8 +4416,8 @@ impl BimApp {
             }
             // What annotation draws with: pens, line styles and patterns, fill patterns; one button that lists them.
             let open = self.line_weights_dialog.is_some() || self.line_styles_dialog.is_some() || self.fill_patterns_dialog.is_some();
-            let tip = msg!("Annotation Settings: line weights, line styles, line patterns, fill patterns and temporary dimensions");
-            let r = big_button(ui, Icon::AnnotationSettings, "Annotation Settings", open, tip);
+            let tip = msg!("Additional Settings: line weights, line styles, line patterns, fill patterns and temporary dimensions");
+            let r = big_button(ui, Icon::AnnotationSettings, "Additional Settings", open, tip);
             ribbon::choices(ui, &r, false, |ui| {
                 // As wide as its longest name, not the window.
                 ui.set_width(200.0);

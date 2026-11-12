@@ -186,19 +186,17 @@ impl BimApp {
     /// can (zooming, but not in a schedule).
     pub(crate) fn context_items(&self) -> Vec<Vec<Item>> {
         let some = !self.selection.is_empty();
+        // Revit's order: Cancel, then Repeat [last command] and Recent Commands (the five last used, newest first) while
+        // no tool runs.
         let mut first = vec![Item::new(Action::Cancel, some || self.tool != Tool::Modify)];
-        // Revit's Repeat [last command], first of the menu while no tool runs.
-        if let Some(last) = self.flow.last.as_ref().filter(|_| self.tool == Tool::Modify && self.flow.pending.is_none()) {
-            first.insert(0, Item { of: Some(crate::selecting::tool_name(last)), ..Item::new(Action::Repeat, true) });
-        }
-        // Recent Commands beside it: up to five of the commands last used, newest first.
         if self.tool == Tool::Modify && self.flow.pending.is_none() {
+            if let Some(last) = self.flow.last.as_ref() {
+                first.push(Item { of: Some(crate::selecting::tool_name(last)), ..Item::new(Action::Repeat, true) });
+            }
             let recent = self.flow.recent.iter().take(crate::selecting::RECENT).enumerate();
-            let items: Vec<Item> = recent
-                .map(|(i, tool)| Item { of: Some(crate::selecting::tool_name(tool)), ..Item::new(Action::Recent(i as u8), true) })
-                .collect();
-            let at = first.iter().position(|i| i.action == Action::Cancel).unwrap_or(first.len());
-            first.splice(at..at, items);
+            first.extend(
+                recent.map(|(i, tool)| Item { of: Some(crate::selecting::tool_name(tool)), ..Item::new(Action::Recent(i as u8), true) }),
+            );
         }
         if self.finishable() {
             first.insert(0, Item::new(Action::Finish, true));

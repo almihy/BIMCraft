@@ -45,12 +45,12 @@ fn press(h: &mut Harness<BimApp>, label: &str) {
     h.run();
 }
 
-/// One of Manage > Annotation Settings' dialogs (Line Weights, Line Styles, Line Patterns, Fill Patterns), from its list.
+/// One of Manage > Additional Settings' dialogs (Line Weights, Line Styles, Line Patterns, Fill Patterns), from its list.
 fn annotation(h: &mut Harness<BimApp>, item: &str) {
-    if h.query_by_label("Annotation Settings").is_none() {
+    if h.query_by_label("Additional Settings").is_none() {
         press(h, "Manage");
     }
-    press(h, "Annotation Settings");
+    press(h, "Additional Settings");
     press(h, item);
 }
 
@@ -326,7 +326,7 @@ fn clicking_the_plan_selects_the_element_drawn_nearest_the_cursor() {
     let door = find(&h, |e| matches!(e, Element::Door(o) if o.mark == "1"));
     click(&mut h, P2(2000.0, 0.0));
     assert_eq!(h.state().selection, [door]);
-    assert!(h.query_by_label("Flip Facing").is_some(), "the palette shows the door's properties");
+    assert!(h.query_by_label("Host Wall").is_some(), "the palette shows the door's properties");
     assert!(h.query_by_label("Modify | Doors").is_some(), "the selection's contextual tab");
     click(&mut h, P2(3000.0, 1000.0));
     assert!(h.state().selection.is_empty(), "empty floor selects nothing");
@@ -873,14 +873,26 @@ sheet {{\"name\": \"Plans\"}}"
     h.state_mut().canvas.zoom(l2, 2.0);
     shortcut(&mut h, "ZF");
     assert!(h.state().canvas.has_view(l2), "Zoom to Fit leaves the other views as they are");
-    // ZS: on a sheet, a millimetre of paper is a millimetre on the screen; elsewhere it says so and does nothing.
+    // ZS, in any view: the size it prints at. A plan at its scale, 1 : n: a metre of it is 1000 / n mm of paper, and a
+    // millimetre of paper is a millimetre on the screen.
+    let n = bimcraft_core::graphics::scale_of(&h.state().session.model, l1);
     shortcut(&mut h, "ZS");
-    assert!(h.state().status.error, "{:?}", h.state().status);
+    assert!(!h.state().status.error, "{:?}", h.state().status);
+    let scale = h.state().canvas.view(l1).map(|v| v.scale).unwrap_or_default();
+    assert!((scale - 96.0 / 25.4 / n).abs() < 1e-9, "{scale} at 1 : {n}");
+    // A sheet is its paper.
     h.state_mut().open_sheet(Sheet::Paper(sheet));
     h.run();
     shortcut(&mut h, "ZS");
     let scale = h.state().canvas.view(sheet).map(|v| v.scale).unwrap_or_default();
     assert!((scale - 96.0 / 25.4).abs() < 1e-6, "{scale}");
+    // With the interface drawn larger (its own zoom over the system's), a millimetre is still a millimetre of glass.
+    h.ctx.set_zoom_factor(1.5);
+    h.run();
+    shortcut(&mut h, "ZS");
+    let scale = h.state().canvas.view(sheet).map(|v| v.scale).unwrap_or_default();
+    assert!((scale - 96.0 / 25.4 / 1.5).abs() < 1e-6, "{scale}");
+    h.ctx.set_zoom_factor(1.0);
 }
 
 #[test]
@@ -1730,10 +1742,13 @@ fn properties_edit_every_selected_element_in_one_step() {
     click_with(&mut h, P2(4500.0, 4000.0), Modifiers::COMMAND);
     assert!(h.query_by_label("Doors (2)").is_some());
     let steps = h.state().session.history().len();
-    // The row is below the palette's fold in this window; screen readers click it all the same.
-    h.get_by_label("Flip Hand").click_accesskit();
+    // The row is below the palette's fold in this window; screen readers type into it all the same.
+    h.get_by_role_and_label(Role::TextInput, "Mark").focus();
     h.run();
-    assert_eq!((field(&h, one, "flip_hand"), field(&h, two, "flip_hand")), (json!(true), json!(true)));
+    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    h.get_by_role_and_label(Role::TextInput, "Mark").type_text("D9");
+    key(&mut h, Key::Enter);
+    assert_eq!((field(&h, one, "mark"), field(&h, two, "mark")), (json!("D9"), json!("D9")));
     assert_eq!(h.state().session.history().len(), steps + 1);
 }
 
@@ -3091,10 +3106,10 @@ mass {"boundary": [[1000, 1000], [3000, 1000], [3000, 2000], [1000, 2000]], "nam
         press(&mut h, tr("Linework"));
         missed.extend(english(&h, l));
         key(&mut h, Key::Escape);
-        // Manage > Annotation Settings' list; Fill Patterns, with a pattern's families and New Pattern's choices; Line Styles on
+        // Manage > Additional Settings' list; Fill Patterns, with a pattern's families and New Pattern's choices; Line Styles on
         // both tabs; Edit Type of a region being sketched.
         press(&mut h, tr("Manage"));
-        press(&mut h, tr("Annotation Settings"));
+        press(&mut h, tr("Additional Settings"));
         missed.extend(english(&h, l));
         press(&mut h, tr("Fill Patterns"));
         missed.extend(english(&h, l));
@@ -3104,7 +3119,7 @@ mass {"boundary": [[1000, 1000], [3000, 1000], [3000, 2000], [1000, 2000]], "nam
         missed.extend(english(&h, l));
         press(&mut h, tr("New Pattern"));
         press(&mut h, tr("Cancel"));
-        press(&mut h, tr("Annotation Settings"));
+        press(&mut h, tr("Additional Settings"));
         press(&mut h, tr("Line Styles"));
         missed.extend(english(&h, l));
         topmost(&mut h, tr("Patterns"));

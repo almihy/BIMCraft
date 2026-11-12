@@ -373,7 +373,7 @@ other_files(
          holes (a floor's or a ceiling's openings, a roof's courtyards; a shaft has none) as a sketch, all at once (see \
          `sketch`); a roof's gable edges stay gables where the new footprint has the same edge. Without `sketch`, gives the \
          outline and holes it has now, as the lines to edit. The outline must be simple, as `floor` says; a line that \
-         crosses itself is found as two that cross are. A pinned element is refused (Revit greys the button): `unpin` it first",
+         crosses itself is found as two that cross are. A pinned element's outline is given but not redrawn (\"Can't move pinned element.\"): `unpin` it first",
         edit_boundary,
     ),
     edit(
@@ -898,7 +898,8 @@ other_files(
          of `at`; radial: a round column's, curved wall's, circle's or arc's radius, toward `at`; diameter: the same \
          across, through its centre; arc_length: how long a curved wall's centre line or face, or an arc, is along it \
          (all of it, or with two point refs after it, between them), its line an arc through `at`. A ref is {id, face?}: a wall's centre (the default), left or right face (of its \
-         start-to-end direction), start or end; a door's or window's centre, or its jamb toward its wall's start or end; \
+         start-to-end direction), `corecentre`, `coreleft` or `coreright` (its core's centre line, exterior face or interior face: the core runs \
+         from its first structure layer to its last, and a wall with no core of its own refuses these), start or end; a door's or window's centre, or its jamb toward its wall's start or end; \
          a column's or structural column's centre line along its angle (the default; west to east at angle 0), `across`, \
          its centre line square to that (south to north), its left or right face (of its angle's direction: north or \
          south), or its start or end cap (west or east); a round column has only its two centre lines (radial: its edge); \
@@ -1339,7 +1340,7 @@ other_files(
         "{ids: [wall | door | window,…], hand?, facing?, step?} turns walls round about their location lines, as Revit's flip arrows \
          do: their exterior sides go to the other side, their doors and windows stay where they are. A door or window in `ids` \
          is flipped on its own: `hand` puts its hinge on the other jamb, `facing` its swing (a window's face) to the wall's \
-         other side; with neither given, its facing flips (`facing: false` leaves it). `hand` and `facing` apply to the doors and windows listed, not to a wall's. `step: true` is Revit's Space: each door listed takes one step through its four ways          (facing, hand, facing back, hand back) from its own state, and each window turns its facing only (a window has no hand); not with `hand` or `facing`",
+         other side; with neither given, its facing flips (`facing: false` leaves it). `hand` and `facing` apply to the doors and windows listed, not to a wall's. `step: true` is Revit's Space: each door listed takes one step through its four ways          (facing, hand, facing back, hand back) from its own state, and each window as a door; not with `hand` or `facing`",
         flip,
     ),
     edit(
@@ -1394,7 +1395,7 @@ other_files(
          the plan of `level` (the wall's own by default). Which lines they measure are the project's \
          (`temporary_dimension_settings`: centre lines, faces, the core's centre or the core's faces) unless `left` and `right` \
          say which line of the wall each side starts at (the witness line's dot): `centre`, `left` (its exterior face), `right` (its \
-         interior face), `core-centre`, `core-left` or `core-right` (a wall with no core of its own measures its centre line or \
+         interior face), `corecentre`, `coreleft` or `coreright` (a wall with no core of its own measures its centre line or \
          face instead), and `to_left` and `to_right` ({id, face}, the other witness line moved to another reference: any line of \
          a parallel wall the plan shows, or a grid's). Returns {id, length, core, settings: {walls, openings}, dimensions: [{side, \
          from: {id, face}, to: {id, face}, distance, toward: [x, y], at: [x, y], dimension: {refs, at, level}}]}; to type a \
@@ -1487,7 +1488,7 @@ other_files(
          let go, a room with no walls round it up there is unbounded); `left_out` says what was not pasted and why (an \
          annotation belongs to its view; a stair, a ramp, a CAD import, a site element or a room separation line where no \
          level stands at the height it would move to, as they have no offset to be raised by; a door or window that falls \
-         on no wall). `views` (by name, id, GUID or a sheet's number) is Revit's Aligned to Selected Views: the annotation copied (dimensions,          tags, notes, detail lines, filled regions, detail groups, spot elevations) is put at the same place in each view given          that is of the kind it was copied in (a plan for a plan, a section for a section, a sheet for a sheet); a dimension or          tag goes only into plans of its own level; a model element among them goes to the level of each plan given, as `levels`          does, and is left out of any other kind of view. `views` goes with no other way to place, only `by`.          Returns {ids, pasted: [{level?, view?, name?, ids}], notes, left_out}",
+         on no wall). `views` (by name, id, GUID or a sheet's number) is Revit's Aligned to Selected Views: the annotation copied (dimensions,          tags, notes, detail lines, filled regions, detail groups, spot elevations) is put at the same place in each view given          that is of the kind it was copied in (a plan for a plan, a section for a section parallel to it, a sheet for a sheet); a dimension or          tag goes only into plans of its own level; a model element among them goes to the level of each plan given, as `levels`          does (not to its own level: `left_out` says so), and is left out of any other kind of view; with no annotation among what \n         is pasted it is refused, as Revit offers Selected Views only for view-specific elements: paste model elements to `levels`. \n         `views` goes with no other way to place, only `by`.          Returns {ids, pasted: [{level?, view?, name?, ids}], notes, left_out}",
         clipboard::paste,
     ),
     edit(
@@ -8124,15 +8125,14 @@ fn flip(s: &mut Session, p: &Value) -> R {
     // The doors and windows asked for come after their walls, so one listed with its wall is flipped as asked on top of it.
     for id in &openings {
         match m.elements.get_mut(*id) {
-            // Space: a door goes one step on from where it is, a window turns its facing and has no hand.
-            Some(Element::Door(o)) if stepping => {
+            // Space: a door or a window goes one step on from where it is.
+            Some(Element::Door(o) | Element::Window(o)) if stepping => {
                 if o.flip_hand == o.flip_facing {
                     o.flip_facing = !o.flip_facing;
                 } else {
                     o.flip_hand = !o.flip_hand;
                 }
             }
-            Some(Element::Window(o)) if stepping => o.flip_facing = !o.flip_facing,
             Some(Element::Door(o) | Element::Window(o)) => {
                 o.flip_hand ^= hand;
                 o.flip_facing ^= facing;
@@ -10021,8 +10021,10 @@ fn edit_boundary(s: &mut Session, p: &Value) -> R {
     let m = &s.model;
     let id = id_opt(c, p, "id")?.ok_or_else(|| bad(c, "`id`, the floor, ceiling, roof or shaft to edit, is required"))?;
     let e = m.elements.get(id).cloned().ok_or_else(|| bad(c, format!("no element {id}")))?;
-    // Revit greys Edit Boundary for a pinned element: its closest failure is the move's, a re-sketch moving the outline.
-    if let Some(own) = m.elements.id(id) {
+    // A pinned element's outline is read as any other's; a re-sketch moves it, so it is refused with the move's failure
+    // (Revit documents no wording of its own for this).
+    let resketch = ["sketch", "boundary", "openings", "holes"].iter().any(|k| !absent(p.get(*k)));
+    if let (true, Some(own)) = (resketch, m.elements.id(id)) {
         pin::refuse_pinned(c, m, &[own], pin::Held::Move)?;
     }
     if let Element::Roof(Roof { extrusion: Some(_), .. }) = e {
@@ -13414,10 +13416,10 @@ fn temporary_dimensions(s: &mut Session, p: &Value) -> R {
             Some("centre" | "center") => Ok(Some(Face::Centre)),
             Some("left") => Ok(Some(Face::Left)),
             Some("right") => Ok(Some(Face::Right)),
-            Some("core-centre" | "core-center") => Ok(Some(Face::CoreCentre)),
-            Some("core-left") => Ok(Some(Face::CoreLeft)),
-            Some("core-right") => Ok(Some(Face::CoreRight)),
-            Some(f) => Err(bad(c, format!("`{key}` is centre, left, right, core-centre, core-left or core-right, not `{f}`"))),
+            Some("corecentre") => Ok(Some(Face::CoreCentre)),
+            Some("coreleft") => Ok(Some(Face::CoreLeft)),
+            Some("coreright") => Ok(Some(Face::CoreRight)),
+            Some(f) => Err(bad(c, format!("`{key}` is centre, left, right, corecentre, coreleft or coreright, not `{f}`"))),
         }
     };
     let target = |key: &str| -> Result<Option<Reference>, String> {

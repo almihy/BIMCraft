@@ -886,3 +886,31 @@ fn views_is_its_own_way_to_place_and_must_name_views() {
         assert!(s.execute("paste", &p).is_err(), "{p}");
     }
 }
+
+#[test]
+fn selected_views_is_offered_for_annotation_only_and_a_sections_only_to_the_sections_parallel_to_it() {
+    let (mut s, _, walls, _) = building();
+    run(&mut s, "duplicate_view", json!({"view": "Level 1"}));
+    // Model elements alone: Revit offers Aligned to Selected Levels, not Selected Views; the command says so.
+    run(&mut s, "copy_to_clipboard", json!({"ids": [walls[0]]}));
+    assert!(s.clipboard_paste_views().is_empty());
+    let e = s.execute("paste", &json!({"views": ["Level 2"]})).unwrap_err();
+    assert!(e.contains("`levels`"), "{e}");
+    // A note in a section: only the sections parallel to it, either way round.
+    run(&mut s, "section", json!({"start": [-1000, 3000], "end": [9000, 3000]}));
+    run(&mut s, "section", json!({"start": [9000, 5000], "end": [-1000, 5000]}));
+    run(&mut s, "section", json!({"start": [4000, -1000], "end": [4000, 9000]}));
+    let note = run(&mut s, "text", json!({"text": "In section", "at": [100, 100], "view": "Section 1"}))["id"].as_u64().unwrap();
+    run(&mut s, "copy_to_clipboard", json!({"ids": [note]}));
+    let offered: Vec<String> = s.clipboard_paste_views().into_iter().map(|(_, n)| n).collect();
+    assert_eq!(offered, ["Section 2"], "{offered:?}");
+    let e = s.execute("paste", &json!({"views": ["Section 3"]})).unwrap_err();
+    assert!(e.contains("Section 3") && e.contains("not parallel"), "{e}");
+    // A model element whose only plan is of its own level is not pasted onto itself, and the reply says why.
+    let plan_note = run(&mut s, "text", json!({"text": "Plan", "at": [100, 100]}))["id"].as_u64().unwrap();
+    run(&mut s, "copy_to_clipboard", json!({"ids": [walls[0], plan_note]}));
+    let r = run(&mut s, "paste", json!({"views": ["Level 1 Copy 1"]}));
+    assert_eq!(ids(&r["ids"]).len(), 1, "only the note: {r}");
+    let said = r["left_out"].to_string();
+    assert!(said.contains(&format!("wall {}", walls[0])) && said.contains("already"), "{r}");
+}

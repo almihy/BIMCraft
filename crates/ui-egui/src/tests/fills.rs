@@ -532,7 +532,7 @@ fn a_pattern_made_of_lines_is_redefined_from_lines_picked_again_keeping_its_name
 fn the_annotation_settings_list_and_the_fill_patterns_window_are_no_wider_than_what_they_hold() {
     let mut h = app(BOX);
     press(&mut h, "Manage");
-    press(&mut h, "Annotation Settings");
+    press(&mut h, "Additional Settings");
     assert!(h.get_by_label("Fill Patterns").rect().width() <= 220.0, "{:?}", h.get_by_label("Fill Patterns").rect());
     press(&mut h, "Fill Patterns");
     let r = h.ctx.memory(|m| m.area_rect(egui::Id::new("fill-patterns"))).unwrap();

@@ -1,27 +1,24 @@
-//! The pictures in Properties: which way a door opens, a room's colour, a floor's slope.
+//! The pictures in Properties: a room's colour, a floor's slope.
 
 use super::*;
 
 #[test]
-fn which_way_a_door_opens_is_picked_from_four_pictures() {
-    let script = format!("{BOX}\ndoor {{\"at\": [2000, 0]}}");
+fn a_doors_properties_have_no_flip_rows_or_pictures_as_revits_have_none() {
+    // Revit flips a door with the arrows on the plan (and Space); its Properties have no Flip Hand, Flip Facing or pictures of it.
+    let script = format!(
+        "{BOX}
+door {{\"at\": [2000, 0]}}
+window {{\"at\": [5000, 0]}}"
+    );
     let mut h = app(&script);
-    let door = ids(&h, "door")[0];
-    h.state_mut().selection = vec![door];
-    h.run();
-    let flips = |h: &Harness<BimApp>| {
-        let on = |key: &str| field(h, door, key).as_bool().unwrap_or(false);
-        (on("flip_hand"), on("flip_facing"))
-    };
-    h.get_by_role_and_label(Role::RadioButton, "Flipped both").click();
-    h.run();
-    assert_eq!(flips(&h), (true, true));
-    h.get_by_role_and_label(Role::RadioButton, "Flipped facing").click();
-    h.run();
-    assert_eq!(flips(&h), (false, true));
-    h.get_by_role_and_label(Role::RadioButton, "As placed").click();
-    h.run();
-    assert_eq!(flips(&h), (false, false));
+    for id in [ids(&h, "door")[0], ids(&h, "window")[0]] {
+        h.state_mut().selection = vec![id];
+        h.run();
+        assert!(h.query_by_label("Host Wall").is_some(), "the palette shows its properties");
+        for label in ["Flip Hand", "Flip Facing", "As placed", "Flipped hand", "Flipped facing", "Flipped both", "Opens"] {
+            assert!(h.query_by_label(label).is_none(), "{label}");
+        }
+    }
 }
 
 #[test]

@@ -127,6 +127,9 @@ pub(crate) struct Nav {
     pub(crate) wheel: Wheel,
     /// When a wheel event was last heard, seconds.
     heard: Option<f64>,
+    /// Whether Shift was held on the wheel's last turn: egui hands such a turn over as a sideways one, which the scroll still
+    /// smooths out over the frames after it.
+    shifted: bool,
     /// Zoom Region's box, once begun: where it began and where the hand is, on screen.
     region: Option<(Pos2, Pos2)>,
     /// Zoom Region's first corner was clicked, not dragged from: the box stays open and the next click is its other corner.
@@ -142,19 +145,20 @@ pub(crate) struct Nav {
 impl Nav {
     /// Listen to this frame's wheel events and note what is turning the wheel.
     fn hear(&mut self, ui: &Ui, now: f64) {
-        let events: Vec<(MouseWheelUnit, Vec2, TouchPhase)> = ui.input(|i| {
+        let events: Vec<(MouseWheelUnit, Vec2, TouchPhase, bool)> = ui.input(|i| {
             i.events
                 .iter()
                 .filter_map(|e| match e {
                     // With Ctrl the wheel is a zoom, whichever hand it is.
                     Event::MouseWheel { unit, delta, phase, modifiers } if !modifiers.command && !modifiers.ctrl => {
-                        Some((*unit, *delta, *phase))
+                        Some((*unit, *delta, *phase, modifiers.shift))
                     }
                     _ => None,
                 })
                 .collect()
         });
-        for (unit, delta, phase) in events {
+        for (unit, delta, phase, shift) in events {
+            self.shifted = shift;
             // The first event after a quiet decides the whole gesture: a flick's tail and a smooth wheel's small steps are
             // what the first one was.
             if self.heard.is_none_or(|t| now - t > QUIET) {
@@ -174,10 +178,12 @@ impl Nav {
     }
 
     /// The scroll of this frame as what it does: how much to zoom (the wheel's, in points), and how far to pan (points). A
-    /// trackpad's scroll pans both ways; a wheel zooms, and Shift and the wheel pans along.
-    fn split(&self, scroll: Vec2) -> (f32, Vec2) {
+    /// trackpad's scroll pans both ways; a wheel zooms, and a tilt of it pans along. With Shift held the wheel zooms just the
+    /// same, as Revit's does (egui hands a Shifted turn over as a sideways one: it is taken back).
+    fn split(&self, scroll: Vec2, shift: bool) -> (f32, Vec2) {
         let (zoom, pan) = match self.hand() {
             Hand::Trackpad => (0.0, scroll),
+            Hand::Mouse if shift => (scroll.x + scroll.y, Vec2::ZERO),
             Hand::Mouse => (scroll.y, vec2(scroll.x, 0.0)),
         };
         let pan = if pan.is_finite() { pan.clamp(vec2(-3000.0, -3000.0), vec2(3000.0, 3000.0)) } else { Vec2::ZERO };
@@ -266,7 +272,7 @@ impl Canvas {
                 i.pointer.button_released(PointerButton::Primary),
             )
         });
-        let (wheel, pan) = self.nav.split(scroll);
+        let (wheel, pan) = self.nav.split(scroll, self.nav.shifted);
         let mode = self.nav.mode;
         if let (Some(screen), Some(v)) = (hover, self.view(id)) {
             let at = screen - rect.min;

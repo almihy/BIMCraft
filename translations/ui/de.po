@@ -214,6 +214,14 @@ msgstr "Die Mittellinie einer Wand, sodass eine darauf gezeichnete Wand sie trif
 msgid "A {} needs a name."
 msgstr "{}: Es fehlt ein Name."
 
+#: crates/ui-egui/src/lib.rs:4404
+msgid "Additional Settings"
+msgstr "Weitere Einstellungen"
+
+#: crates/ui-egui/src/lib.rs:4403
+msgid "Additional Settings: line weights, line styles, line patterns, fill patterns and temporary dimensions"
+msgstr "Weitere Einstellungen: Linienstärken, Linienstile, Linienmuster, Füllmuster und temporäre Bemaßungen"
+
 #: crates/ui-egui/src/lib.rs:4507
 msgid "Array"
 msgstr "Anordnung"
@@ -680,14 +688,6 @@ msgstr "Linienstärken für Beschriftungen"
 #: crates/ui-egui/src/standards.rs:106
 msgid "Annotation Pens (mm on paper):"
 msgstr "Beschriftungsstifte (mm auf Papier):"
-
-#: crates/ui-egui/src/lib.rs:4138
-msgid "Annotation Settings"
-msgstr "Beschriftungseinstellungen"
-
-#: crates/ui-egui/src/lib.rs:4137
-msgid "Annotation Settings: line weights, line styles, line patterns and fill patterns"
-msgstr "Beschriftungseinstellungen: Linienstärken, Linienstile, Linienmuster und Füllmuster"
 
 #: crates/ui-egui/src/lineweights.rs:116
 msgid "Annotation pen {}"

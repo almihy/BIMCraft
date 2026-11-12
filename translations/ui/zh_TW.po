@@ -215,6 +215,14 @@ msgstr "牆的中心線，使繪製在其上的牆與之相接"
 msgid "A {} needs a name."
 msgstr "{}需要名稱。"
 
+#: crates/ui-egui/src/lib.rs:4404
+msgid "Additional Settings"
+msgstr "其他設定"
+
+#: crates/ui-egui/src/lib.rs:4403
+msgid "Additional Settings: line weights, line styles, line patterns, fill patterns and temporary dimensions"
+msgstr "其他設定：線寬、線樣式、線型圖案、填充樣式和臨時尺寸標註"
+
 #: crates/ui-egui/src/lib.rs:4507
 msgid "Array"
 msgstr "陣列"
@@ -681,14 +689,6 @@ msgstr "註釋線寬"
 #: crates/ui-egui/src/standards.rs:106
 msgid "Annotation Pens (mm on paper):"
 msgstr "標注用筆 (圖紙毫米):"
-
-#: crates/ui-egui/src/lib.rs:4138
-msgid "Annotation Settings"
-msgstr "註釋設置"
-
-#: crates/ui-egui/src/lib.rs:4137
-msgid "Annotation Settings: line weights, line styles, line patterns and fill patterns"
-msgstr "註釋設置：線寬、線樣式、線型圖案和填充樣式"
 
 #: crates/ui-egui/src/lineweights.rs:116
 msgid "Annotation pen {}"

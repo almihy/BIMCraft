@@ -302,6 +302,14 @@ fn paste_aligned_to_selected_views_lists_the_views_of_the_kind_copied_in_and_pas
     press(&mut h, "Paste");
     assert!(is_disabled(&h, Role::Button, "Aligned to Selected Views…"));
     key(&mut h, Key::Escape);
+    // A wall copied: model elements go to levels (Selected Levels), so Selected Views stays greyed, as Revit's.
+    h.state_mut().selection = vec![ids(&h, "wall")[0]];
+    h.key_press_modifiers(Modifiers::COMMAND, Key::C);
+    h.run();
+    press(&mut h, "Paste");
+    assert!(is_disabled(&h, Role::Button, "Aligned to Selected Views…"));
+    assert!(!is_disabled(&h, Role::Button, "Aligned to Selected Levels…"));
+    key(&mut h, Key::Escape);
     h.state_mut().selection = vec![note];
     h.key_press_modifiers(Modifiers::COMMAND, Key::C);
     h.run();

@@ -76,7 +76,7 @@ impl LineStylesDialog {
         LineStylesDialog { tab: 0, styles, patterns, gone, creator: None, error: None, held }
     }
 
-    /// Open on the Patterns tab, as Manage > Annotation Settings > Line Patterns does.
+    /// Open on the Patterns tab, as Manage > Additional Settings > Line Patterns does.
     pub(crate) fn patterns(m: &Model) -> LineStylesDialog {
         LineStylesDialog { tab: 1, ..Self::new(m) }
     }

@@ -215,6 +215,14 @@ msgstr "Đường tim của tường, để tường vẽ trên đó gặp nó"
 msgid "A {} needs a name."
 msgstr "{} cần một tên."
 
+#: crates/ui-egui/src/lib.rs:4404
+msgid "Additional Settings"
+msgstr "Cài đặt bổ sung"
+
+#: crates/ui-egui/src/lib.rs:4403
+msgid "Additional Settings: line weights, line styles, line patterns, fill patterns and temporary dimensions"
+msgstr "Cài đặt bổ sung: độ dày nét, kiểu nét, mẫu nét, mẫu tô và kích thước tạm thời"
+
 #: crates/ui-egui/src/lib.rs:4507
 msgid "Array"
 msgstr "Mảng"
@@ -681,14 +689,6 @@ msgstr "Độ dày nét chú giải"
 #: crates/ui-egui/src/standards.rs:106
 msgid "Annotation Pens (mm on paper):"
 msgstr "Bút chú giải (mm trên giấy):"
-
-#: crates/ui-egui/src/lib.rs:4138
-msgid "Annotation Settings"
-msgstr "Cài đặt chú giải"
-
-#: crates/ui-egui/src/lib.rs:4137
-msgid "Annotation Settings: line weights, line styles, line patterns and fill patterns"
-msgstr "Cài đặt chú giải: độ dày nét, kiểu nét, mẫu nét và mẫu tô"
 
 #: crates/ui-egui/src/lineweights.rs:116
 msgid "Annotation pen {}"

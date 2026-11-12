@@ -1,4 +1,4 @@
-//! Manage > Annotation Settings > Fill Patterns, as Revit's dialog: the project's fill patterns (families of lines, drafting
+//! Manage > Additional Settings > Fill Patterns, as Revit's dialog: the project's fill patterns (families of lines, drafting
 //! or model), a draft applied as one undo step (OK and Apply), or dropped (Cancel). A pattern of whole lines (Simple Lines) is
 //! edited line by line with Edit Lines: each one's angle, origin and spacing. A custom one is made of lines drawn in a plan, as pyRevit's Make Pattern makes one: New Pattern > Custom hides the dialog,
 //! the detail lines are picked (Enter, or the right-click menu's Finish), then the tile's two corners, and the dialog comes

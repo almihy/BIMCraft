@@ -2220,7 +2220,6 @@ impl BimApp {
                 let typed = self.typed(cat, json!({"at": point(round(v.mm(at))), "level": level}));
                 let p = centred_opening(m, v, self.opening_flips(typed, v.mm(at)), door);
                 self.run(cat, p);
-                self.place_hand = false;
             }
             Tool::Room => {
                 self.run("room", json!({"point": point(round(v.mm(at))), "level": level}));

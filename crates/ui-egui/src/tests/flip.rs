@@ -1,5 +1,5 @@
 //! Revit's flip controls: the arrows beside a selected door, window or wall, and Space while one is selected, a door or window
-//! is placed or a wall is drawn; a door put down opens to the side of the wall the cursor is on.
+//! is placed or a wall is drawn; a door or window put down faces the side of the wall the cursor is on.
 
 use super::*;
 
@@ -37,14 +37,16 @@ fn a_selected_door_shows_two_arrows_and_a_click_on_one_flips_what_it_says() {
 }
 
 #[test]
-fn a_selected_window_has_only_the_facing_arrow_and_a_wall_has_one_on_its_exterior_side() {
+fn a_selected_window_has_both_arrows_as_a_door_and_a_wall_has_one_on_its_exterior_side() {
     let mut h = app(WITH_DOOR);
     let window = ids(&h, "window")[0];
     click(&mut h, P2(5000.0, 0.0));
     assert_eq!(h.state().selection, [window]);
-    assert!(h.query_by_label("Flip hand").is_none(), "an ordinary window has no hand");
     arrow(&mut h, "Flip facing");
     assert_eq!(flips(&h, window), (false, true));
+    arrow(&mut h, "Flip hand");
+    assert_eq!(flips(&h, window), (true, true));
+    assert_eq!(h.state().selection, [window], "the arrows' clicks are no picks");
     // A wall: its arrow turns it about its location line.
     let south = ids(&h, "wall")[0];
     click(&mut h, P2(7000.0, 0.0));
@@ -180,40 +182,45 @@ fn a_door_put_down_opens_to_the_side_of_the_wall_the_cursor_is_on() {
 }
 
 #[test]
-fn space_while_placing_a_door_flips_its_hand_and_leaves_the_swing_to_the_cursors_side() {
+fn space_while_placing_a_door_flips_its_hand_the_next_door_keeps_it_and_the_cursors_side_is_its_facing() {
     let mut h = app(BOX);
     shortcut(&mut h, "DR");
     key(&mut h, Key::Space);
+    // The cursor north of the south wall (its left): facing as placed; Space: the hand.
     click(&mut h, P2(2000.0, 40.0));
-    assert_eq!(flips(&h, ids(&h, "door")[0]), (true, false), "the hand; the cursor's side, north, sets the swing");
-    // The next is as the cursor says; with Space and the cursor on the south, the hand and the swing both.
-    click(&mut h, P2(3000.0, 40.0));
-    key(&mut h, Key::Space);
+    // The next door keeps the hand; the cursor on the south side turns the facing.
     click(&mut h, P2(4000.0, -40.0));
-    // Two Spaces are none.
+    // Space again: the hand back.
     key(&mut h, Key::Space);
-    key(&mut h, Key::Space);
-    click(&mut h, P2(5000.0, 40.0));
-    let doors = ids(&h, "door");
-    assert_eq!(doors.len(), 4);
-    assert_eq!((flips(&h, doors[1]), flips(&h, doors[2]), flips(&h, doors[3])), ((false, false), (true, true), (false, false)));
+    click(&mut h, P2(6000.0, 40.0));
+    let got: Vec<(bool, bool)> = ids(&h, "door").iter().map(|d| flips(&h, *d)).collect();
+    assert_eq!(got, [(true, false), (true, true), (false, false)]);
 }
 
 #[test]
-fn space_while_placing_a_window_adds_nothing_to_the_cursors_side_and_leaving_the_door_tool_forgets_the_hand() {
+fn a_window_being_placed_faces_the_cursors_side_of_the_wall_and_space_flips_its_hand_for_the_next_ones_too() {
     let mut h = app(BOX);
     shortcut(&mut h, "WN");
+    // The cursor moved across the wall and back: the side it ends on is the facing.
+    for (y, x) in [(40.0, 1500.0), (-40.0, 3000.0)] {
+        h.hover_at(h.state().screen(P2(x, -y)));
+        h.run();
+        h.hover_at(h.state().screen(P2(x, y)));
+        h.run();
+        click(&mut h, P2(x, y));
+    }
     key(&mut h, Key::Space);
-    click(&mut h, P2(2000.0, 40.0));
-    click(&mut h, P2(4000.0, -40.0));
-    let windows = ids(&h, "window");
-    assert_eq!((flips(&h, windows[0]), flips(&h, windows[1])), ((false, false), (false, true)), "the cursor's side alone");
+    click(&mut h, P2(4500.0, 40.0));
+    click(&mut h, P2(6000.0, -40.0));
+    let got: Vec<(bool, bool)> = ids(&h, "window").iter().map(|w| flips(&h, *w)).collect();
+    assert_eq!(got, [(false, false), (false, true), (true, false), (true, true)]);
+    // Leaving the tool forgets the hand.
     key(&mut h, Key::Escape);
     shortcut(&mut h, "DR");
     key(&mut h, Key::Space);
     key(&mut h, Key::Escape);
     shortcut(&mut h, "DR");
-    click(&mut h, P2(6000.0, 40.0));
+    click(&mut h, P2(7200.0, 40.0));
     assert_eq!(flips(&h, ids(&h, "door")[0]), (false, false), "Esc ended the flip");
 }
 
@@ -238,17 +245,17 @@ fn space_while_drawing_a_wall_puts_its_exterior_side_on_the_other_side() {
 }
 
 #[test]
-fn space_turns_a_windows_facing_only_and_each_selected_opening_steps_from_its_own_state() {
+fn space_steps_a_selected_window_as_a_door_and_each_selected_opening_from_its_own_state() {
     let mut h = app(WITH_DOOR);
     let (door, window) = (ids(&h, "door")[0], ids(&h, "window")[0]);
-    // A window alone: it has no hand, so every press flips its facing.
+    // A window alone: the four ways, as a door's.
     click(&mut h, P2(5000.0, 0.0));
     let mut seen = Vec::new();
     for _ in 0..4 {
         key(&mut h, Key::Space);
         seen.push(flips(&h, window));
     }
-    assert_eq!(seen, [(false, true), (false, false), (false, true), (false, false)]);
+    assert_eq!(seen, [(false, true), (true, true), (true, false), (false, false)]);
     // The door ahead of the window by a step: each goes on from its own state.
     click(&mut h, P2(2000.0, 0.0));
     key(&mut h, Key::Space);
@@ -258,5 +265,5 @@ fn space_turns_a_windows_facing_only_and_each_selected_opening_steps_from_its_ow
     key(&mut h, Key::Space);
     assert_eq!((flips(&h, door), flips(&h, window)), ((true, true), (false, true)));
     key(&mut h, Key::Space);
-    assert_eq!((flips(&h, door), flips(&h, window)), ((true, false), (false, false)));
+    assert_eq!((flips(&h, door), flips(&h, window)), ((true, false), (true, true)));
 }

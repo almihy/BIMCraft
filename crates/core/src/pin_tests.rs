@@ -358,18 +358,18 @@ fn modify_refuses_what_places_a_pinned_element_and_not_its_height() {
 }
 
 #[test]
-fn edit_boundary_is_refused_for_a_pinned_element_as_revit_greys_the_button() {
-    // Revit greys Edit Boundary for a pinned floor, ceiling or roof; its closest failure is "Can't move pinned element."
-    // (BuiltInFailures.EditingFailures.CannotMoveLocked), since a re-sketch moves the element's outline.
+fn a_pinned_elements_outline_is_read_but_not_resketched() {
+    // A re-sketch moves a pinned floor's outline, so it fails as a move does: "Can't move pinned element."
+    // (BuiltInFailures.EditingFailures.CannotMoveLocked); only reading the outline goes through.
     let mut s = Session::new();
     let floor = run(&mut s, "floor", json!({"boundary": [[0, 5000], [4000, 5000], [4000, 9000], [0, 9000]]}))["id"].as_u64().unwrap();
     let before = run(&mut s, "edit_boundary", json!({"id": floor}));
     run(&mut s, "pin", json!({"ids": [floor]}));
     let held = snapshot(&s);
-    for p in [json!({"id": floor}), json!({"id": floor, "sketch": before["sketch"]})] {
-        let e = s.execute("edit_boundary", &p).unwrap_err();
-        assert!(e.contains("Can't move pinned element.") && e.contains("`unpin`"), "{e}");
-    }
+    let e = s.execute("edit_boundary", &json!({"id": floor, "sketch": before["sketch"]})).unwrap_err();
+    assert!(e.contains("Can't move pinned element.") && e.contains("`unpin`"), "{e}");
+    // Reading its outline changes nothing, so a pinned element's is read as any other's.
+    assert_eq!(run(&mut s, "edit_boundary", json!({"id": floor}))["sketch"], before["sketch"]);
     assert_eq!(snapshot(&s), held);
     run(&mut s, "unpin", json!({"ids": [floor]}));
     run(&mut s, "edit_boundary", json!({"id": floor, "sketch": before["sketch"]}));

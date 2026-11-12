@@ -215,6 +215,14 @@ msgstr ""
 msgid "A {} needs a name."
 msgstr ""
 
+#: crates/ui-egui/src/lib.rs:4404
+msgid "Additional Settings"
+msgstr ""
+
+#: crates/ui-egui/src/lib.rs:4403
+msgid "Additional Settings: line weights, line styles, line patterns, fill patterns and temporary dimensions"
+msgstr ""
+
 #: crates/ui-egui/src/lib.rs:4507
 msgid "Array"
 msgstr ""
@@ -680,14 +688,6 @@ msgstr ""
 
 #: crates/ui-egui/src/standards.rs:106
 msgid "Annotation Pens (mm on paper):"
-msgstr ""
-
-#: crates/ui-egui/src/lib.rs:4138
-msgid "Annotation Settings"
-msgstr ""
-
-#: crates/ui-egui/src/lib.rs:4137
-msgid "Annotation Settings: line weights, line styles, line patterns and fill patterns"
 msgstr ""
 
 #: crates/ui-egui/src/lineweights.rs:116

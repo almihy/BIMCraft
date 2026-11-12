@@ -794,3 +794,22 @@ fn a_type_deleted_with_its_instances_goes_from_the_other_copy_with_them() {
     assert_eq!(by_guid(&a.model), by_guid(&b.model));
     assert_eq!(b.model.check(), Ok(()));
 }
+
+#[test]
+fn the_temporary_dimension_settings_reach_the_other_copy_live_and_a_reset_takes_the_key_away() {
+    let (mut a, mut b) = two();
+    let before = a.model.clone();
+    run(&mut a, "temporary_dimension_settings", json!({"walls": "faces", "openings": "openings"}));
+    let c = sync::changes(&before, &a.model).unwrap();
+    assert!(c.project.get("temporary_dimensions").is_some_and(Option::is_some), "{:?}", c.project.keys());
+    send(&before, &a, &mut b);
+    assert_eq!(b.model.temporary_dimensions, a.model.temporary_dimensions);
+    assert_eq!(run(&mut b, "temporary_dimension_settings", json!({})), json!({"walls": "faces", "openings": "openings"}));
+    // Back to the project's defaults: the file leaves them out, so the key goes, and the other copy is back to them too.
+    let before = a.model.clone();
+    run(&mut a, "temporary_dimension_settings", json!({"walls": "centerlines", "openings": "centerlines"}));
+    let c = sync::changes(&before, &a.model).unwrap();
+    assert_eq!(c.project.get("temporary_dimensions"), Some(&None), "{:?}", c.project);
+    send(&before, &a, &mut b);
+    assert!(b.model.temporary_dimensions.is_default());
+}

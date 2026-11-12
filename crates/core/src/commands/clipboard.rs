@@ -82,22 +82,44 @@ impl Session {
 }
 
 impl Session {
-    /// The views Paste Aligned to Selected Views offers: those of the kind the clipboard's annotation was copied in (plans when it
-    /// holds none), except the views it was copied in, by id with the name the Select Views dialog shows.
+    /// The views Paste Aligned to Selected Views offers: those of the kind the clipboard's annotation was copied in (a section's
+    /// or an elevation's only those parallel to it, as Revit's), except the views it was copied in, by id with the name the Select
+    /// Views dialog shows. None while the clipboard holds no annotation: Revit offers it only for view-specific elements, and
+    /// Aligned to Selected Levels for model elements.
     pub fn clipboard_paste_views(&self) -> Vec<(Id, String)> {
         let m = &self.model;
-        let from: Vec<Guid> = self.clipboard_ids().into_iter().filter_map(|id| m.elements.get(id).and_then(|e| view_of(m, e))).collect();
-        let kind = from.iter().find_map(|g| view_kind(m, *g)).unwrap_or("plan");
+        let from: Vec<Guid> = self
+            .clipboard_ids()
+            .into_iter()
+            .filter_map(|id| m.elements.get(id).filter(|e| annotation(e)).and_then(|e| view_of(m, e)))
+            .collect();
+        let Some(kind) = from.iter().find_map(|g| view_kind(m, *g)) else { return Vec::new() };
         let sheets = m.sheets();
         m.views()
             .into_iter()
             .chain(sheets)
-            .filter(|id| view_kind(m, m.guid(*id)) == Some(kind) && !from.contains(&m.guid(*id)))
+            .filter(|id| {
+                let g = m.guid(*id);
+                view_kind(m, g) == Some(kind) && !from.contains(&g) && from.iter().all(|f| parallel(m, *f, g))
+            })
             .map(|id| {
                 let name = m.view_name(id).map(String::from).or_else(|| m.sheet(id).map(|sh| format!("{} - {}", sh.number, sh.name)));
                 (id, name.unwrap_or_default())
             })
             .collect()
+    }
+}
+
+/// Whether views `a` and `b` lie in parallel planes: two sections' or elevations' lines run the same way (either way round).
+/// Any other pair is: a plan's is level, a sheet is paper.
+fn parallel(m: &Model, a: Guid, b: Guid) -> bool {
+    let line = |g: Guid| match m.elements.get(g) {
+        Some(Element::Section(v) | Element::Elevation(v)) => Some((v.end - v.start).unit()),
+        _ => None,
+    };
+    match (line(a), line(b)) {
+        (Some(p), Some(q)) => (p.0 * q.1 - p.1 * q.0).abs() <= 1e-6,
+        _ => true,
     }
 }
 
@@ -393,6 +415,12 @@ fn paste_to_views(c: &str, s: &mut Session, p: &Value) -> R {
     let (ids, more) = sort_out(&s.model, &wanted, false, expand);
     left_out.extend(more);
     let (notes_ids, model_ids): (Vec<Id>, Vec<Id>) = ids.iter().partition(|id| s.model.elements.get(**id).is_some_and(annotation));
+    if notes_ids.is_empty() {
+        // Revit offers it only for view-specific elements; model elements go to levels.
+        let mut why = vec!["`views` pastes annotation (dimensions, tags, notes, detail lines, regions, details), and none was given: paste model elements to `levels`".to_string()];
+        why.extend(left_out);
+        return Err(bad(c, format!("nothing to paste: {}", why.join("; "))));
+    }
     let (mut all, mut pasted, mut notes) = (Vec::new(), Vec::new(), Vec::new());
     for &target in &targets {
         let m = &s.model;
@@ -408,6 +436,8 @@ fn paste_to_views(c: &str, s: &mut Session, p: &Value) -> R {
                 Some(format!("it is in {shown} already"))
             } else if from_kind != Some(kind) {
                 Some(format!("it is in a {}, and {shown} is a {kind}", from_kind.unwrap_or("view")))
+            } else if from.is_some_and(|f| !parallel(m, f, target)) {
+                Some(format!("{shown} is not parallel to the {kind} it is in, so it would not lie in its plane"))
             } else if matches!(e, Element::Dimension(_) | Element::Tag(_)) && target_level.is_some() && target_level != m.level_of(e) {
                 Some(format!("it measures or tags what stands on its own level, and {shown} is a plan of another"))
             } else {
@@ -449,6 +479,11 @@ fn paste_to_views(c: &str, s: &mut Session, p: &Value) -> R {
         for &t in &targets {
             match m.plan_level(t).map(|l| m.guid(l)) {
                 Some(l) if Some(l) != from && !levels.contains(&l) => levels.push(l),
+                Some(l) if Some(l) == from => {
+                    let (name, level) = (m.view_name(t).unwrap_or("it"), m.shown(l));
+                    let on = model_ids.iter().map(|id| format!("{} to {name}: it stands on {level} already", named(m, *id))).collect();
+                    say_once(&mut left_out, on);
+                }
                 Some(_) => {}
                 None => {
                     let name = m.view_name(t).unwrap_or("it");
@@ -474,7 +509,10 @@ fn paste_to_views(c: &str, s: &mut Session, p: &Value) -> R {
         }
     }
     if all.is_empty() {
-        let said: Vec<String> = left_out.iter().chain(&notes).cloned().collect();
+        let mut said: Vec<String> = left_out.iter().chain(&notes).cloned().collect();
+        if said.is_empty() {
+            said.push("none of it fits the views named".into());
+        }
         return Err(bad(c, format!("nothing to paste: {}", said.join("; "))));
     }
     Ok(json!({"ids": all, "pasted": pasted, "notes": notes, "left_out": left_out}))

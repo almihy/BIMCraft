@@ -90,12 +90,23 @@ fn a_trackpads_two_finger_scroll_pans_the_plan_and_a_mouse_wheel_still_zooms() {
     wheel(&mut h, MouseWheelUnit::Point, vec2(0.0, 120.0), Modifiers::NONE);
     rest(&mut h);
     assert!(camera(&h).0 > scale * 1.2, "the notch zoomed in");
-    // Shift and the wheel pan along, as a mouse has no other way to.
-    let before = h.state().screen(p);
-    rest(&mut h);
-    wheel(&mut h, MouseWheelUnit::Point, vec2(120.0, 0.0), Modifiers::SHIFT);
-    rest(&mut h);
-    assert!((h.state().screen(p).x - before.x).abs() > 20.0, "a horizontal turn panned");
+}
+
+#[test]
+fn shift_and_the_wheel_do_what_the_wheel_does_alone() {
+    // Revit gives Shift nothing to do with the wheel: a notch zooms about the cursor all the same, and nothing pans.
+    let p = P2(4000.0, 3000.0);
+    let mut turned = Vec::new();
+    for modifiers in [Modifiers::NONE, Modifiers::SHIFT] {
+        let mut h = app(BOX);
+        let at = over_plan(&mut h);
+        let (scale, _) = camera(&h);
+        wheel(&mut h, MouseWheelUnit::Point, vec2(0.0, 120.0), modifiers);
+        rest(&mut h);
+        assert!((h.state().screen(p) - at).length() < 1.5, "{modifiers:?}: about the cursor, no pan");
+        turned.push(camera(&h).0 / scale);
+    }
+    assert!(turned[0] > 1.2 && (turned[0] - turned[1]).abs() < 1e-9, "{turned:?}");
 }
 
 #[test]

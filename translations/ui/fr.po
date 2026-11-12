@@ -215,6 +215,14 @@ msgstr "L'axe d'un mur, pour qu'un mur dessiné dessus le rejoigne"
 msgid "A {} needs a name."
 msgstr "Chaque {} doit avoir un nom."
 
+#: crates/ui-egui/src/lib.rs:4404
+msgid "Additional Settings"
+msgstr "Paramètres supplémentaires"
+
+#: crates/ui-egui/src/lib.rs:4403
+msgid "Additional Settings: line weights, line styles, line patterns, fill patterns and temporary dimensions"
+msgstr "Paramètres supplémentaires : épaisseurs, styles et motifs de ligne, motifs de remplissage et cotes temporaires"
+
 #: crates/ui-egui/src/lib.rs:4507
 msgid "Array"
 msgstr "Réseau"
@@ -681,14 +689,6 @@ msgstr "Épaisseurs de ligne d'annotation"
 #: crates/ui-egui/src/standards.rs:106
 msgid "Annotation Pens (mm on paper):"
 msgstr "Plumes d'annotation (mm sur papier):"
-
-#: crates/ui-egui/src/lib.rs:4138
-msgid "Annotation Settings"
-msgstr "Paramètres d'annotation"
-
-#: crates/ui-egui/src/lib.rs:4137
-msgid "Annotation Settings: line weights, line styles, line patterns and fill patterns"
-msgstr "Paramètres d'annotation : épaisseurs, styles et motifs de ligne, et motifs de remplissage"
 
 #: crates/ui-egui/src/lineweights.rs:116
 msgid "Annotation pen {}"

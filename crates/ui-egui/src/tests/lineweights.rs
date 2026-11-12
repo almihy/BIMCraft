@@ -58,7 +58,7 @@ fn a_project_in_feet_and_inches_lists_its_line_weights_by_the_architects_scales(
 fn annotation_settings_lists_the_line_and_fill_dialogs_and_line_patterns_opens_on_the_patterns() {
     let mut h = app(BOX);
     press(&mut h, "Manage");
-    press(&mut h, "Annotation Settings");
+    press(&mut h, "Additional Settings");
     for item in ["Line Weights", "Line Styles", "Line Patterns", "Fill Patterns"] {
         assert!(h.query_by_label(item).is_some(), "{item} is in the list");
     }

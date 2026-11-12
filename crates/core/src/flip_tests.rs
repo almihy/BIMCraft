@@ -121,22 +121,45 @@ fn toward_on_a_curved_wall_is_the_side_of_its_curve_at_the_door_not_of_its_chord
 }
 
 #[test]
-fn flip_step_takes_each_door_through_its_four_ways_from_its_own_state_and_a_window_only_its_facing() {
+fn flip_step_takes_each_door_and_window_through_its_four_ways_from_its_own_state() {
     let (mut s, w, door, window) = wall_with_openings();
     let door2 = run(&mut s, "door", json!({"wall": w, "offset": 3000}))["id"].as_u64().unwrap_or_default();
     // The second door is a step ahead of the first.
     run(&mut s, "flip", json!({"ids": [door2]}));
     assert_eq!((flips(&s, door), flips(&s, door2)), ((false, false), (false, true)));
     run(&mut s, "flip", json!({"ids": [door, door2, window], "step": true}));
-    // Each stepped from its own state: (false,false) -> facing; (false,true) -> hand; a window's facing only.
+    // Each stepped from its own state: (false,false) -> facing; (false,true) -> hand; a window as a door.
     assert_eq!((flips(&s, door), flips(&s, door2), flips(&s, window)), ((false, true), (true, true), (false, true)));
     run(&mut s, "flip", json!({"ids": [door, door2, window], "step": true}));
-    assert_eq!((flips(&s, door), flips(&s, door2), flips(&s, window)), ((true, true), (true, false), (false, false)));
-    // A window never takes a hand, whatever its state: four presses toggle its facing four times.
+    assert_eq!((flips(&s, door), flips(&s, door2), flips(&s, window)), ((true, true), (true, false), (true, true)));
+    // A window goes round the same four ways: facing, hand, facing back, hand back.
+    let mut seen = Vec::new();
     for _ in 0..4 {
         run(&mut s, "flip", json!({"ids": [window], "step": true}));
+        seen.push(flips(&s, window));
     }
-    assert_eq!(flips(&s, window), (false, false));
+    assert_eq!(seen, [(true, false), (false, false), (false, true), (true, true)]);
     // `step` is the whole instruction: `hand` and `facing` beside it are refused.
     assert!(s.execute("flip", &json!({"ids": [door], "step": true, "hand": true})).is_err());
+}
+
+#[test]
+fn a_family_windows_hand_mirrors_it_on_the_plan_in_3d_and_in_ifc() {
+    let mut s = Session::new();
+    let w = run(&mut s, "wall", json!({"points": [[0, 0], [6000, 0]]}))["ids"][0].as_u64().unwrap_or_default();
+    let window = run(&mut s, "window", json!({"wall": w, "offset": 3000, "family": "Casement Window"}))["id"].as_u64().unwrap_or_default();
+    let shape = |s: &Session| {
+        let e = s.model.elements.get(window).cloned().unwrap_or_else(|| panic!("no window"));
+        let (pieces, marks) = s.model.opening_local(&e).unwrap_or_else(|| panic!("a family's window builds"));
+        format!("{:?} {:?}", pieces.iter().map(|p| &p.outline).collect::<Vec<_>>(), marks)
+    };
+    let ifc = |s: &Session| crate::ifc::export(&s.model);
+    let (before, before_ifc) = (shape(&s), ifc(&s));
+    run(&mut s, "flip", json!({"ids": [window], "hand": true}));
+    assert!(flips(&s, window).0);
+    assert_ne!(shape(&s), before, "its sash on the other jamb");
+    assert_ne!(ifc(&s), before_ifc, "the exported body mirrored too");
+    // And it is kept in the file.
+    let back = crate::model::Model::read(&s.model.to_json().unwrap()).unwrap().0;
+    assert!(matches!(back.elements.get(window), Some(Element::Window(o)) if o.flip_hand));
 }

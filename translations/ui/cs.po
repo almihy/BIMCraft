@@ -214,6 +214,14 @@ msgstr "Osa stěny, aby se stěna na ní kreslená napojila"
 msgid "A {} needs a name."
 msgstr "U položky ({}) chybí název."
 
+#: crates/ui-egui/src/lib.rs:4404
+msgid "Additional Settings"
+msgstr "Další nastavení"
+
+#: crates/ui-egui/src/lib.rs:4403
+msgid "Additional Settings: line weights, line styles, line patterns, fill patterns and temporary dimensions"
+msgstr "Další nastavení: tloušťky čar, styly čar, vzory čar, vzory výplně a dočasné kóty"
+
 #: crates/ui-egui/src/lib.rs:4507
 msgid "Array"
 msgstr "Pole"
@@ -680,14 +688,6 @@ msgstr "Tloušťky čar poznámek"
 #: crates/ui-egui/src/standards.rs:106
 msgid "Annotation Pens (mm on paper):"
 msgstr "Pera poznámek (mm na papíře):"
-
-#: crates/ui-egui/src/lib.rs:4138
-msgid "Annotation Settings"
-msgstr "Nastavení poznámek"
-
-#: crates/ui-egui/src/lib.rs:4137
-msgid "Annotation Settings: line weights, line styles, line patterns and fill patterns"
-msgstr "Nastavení poznámek: tloušťky čar, styly čar, vzory čar a vzory výplně"
 
 #: crates/ui-egui/src/lineweights.rs:116
 msgid "Annotation pen {}"

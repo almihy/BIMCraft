@@ -145,12 +145,16 @@ fn delete_takes_what_is_not_pinned_and_says_what_it_left() {
         status.error && status.text.contains("Pinned objects were not deleted. To delete them, unpin them before using delete."),
         "{status:?}"
     );
-    // Alone, a pinned element is refused whole, and Unpin then lets it go.
+    assert!(h.state().selection.is_empty(), "nothing is left selected, the pinned one neither");
+    // Alone, a pinned element is refused whole, and nothing stays selected; Unpin then lets it go.
     h.state_mut().selection = vec![a];
     h.run();
     key(&mut h, Key::Delete);
     assert_eq!(ids(&h, "column"), [a]);
     assert!(h.state().status.text.contains("Pinned objects were not deleted"), "{:?}", h.state().status);
+    assert!(h.state().selection.is_empty());
+    h.state_mut().selection = vec![a];
+    h.run();
     shortcut(&mut h, "UP");
     key(&mut h, Key::Delete);
     assert!(ids(&h, "column").is_empty());

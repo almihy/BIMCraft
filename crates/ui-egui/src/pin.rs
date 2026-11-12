@@ -81,6 +81,8 @@ impl BimApp {
         if !pinned.is_empty() {
             let text = t("Pinned objects were not deleted. To delete them, unpin them before using delete.").to_string();
             self.status = Status { text, error: true };
+            // As Revit leaves it: nothing selected, the pinned ones neither.
+            self.selection.clear();
         }
     }
 

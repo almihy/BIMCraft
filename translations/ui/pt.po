@@ -215,6 +215,14 @@ msgstr "O eixo central de uma parede, para que uma parede desenhada nele se enco
 msgid "A {} needs a name."
 msgstr "O nome não pode ficar vazio ({})."
 
+#: crates/ui-egui/src/lib.rs:4404
+msgid "Additional Settings"
+msgstr "Configurações adicionais"
+
+#: crates/ui-egui/src/lib.rs:4403
+msgid "Additional Settings: line weights, line styles, line patterns, fill patterns and temporary dimensions"
+msgstr "Configurações adicionais: espessuras, estilos e padrões de linha, padrões de preenchimento e cotas temporárias"
+
 #: crates/ui-egui/src/lib.rs:4507
 msgid "Array"
 msgstr "Matriz"
@@ -681,14 +689,6 @@ msgstr "Espessuras de linha de anotação"
 #: crates/ui-egui/src/standards.rs:106
 msgid "Annotation Pens (mm on paper):"
 msgstr "Penas de anotação (mm no papel):"
-
-#: crates/ui-egui/src/lib.rs:4138
-msgid "Annotation Settings"
-msgstr "Configurações de anotação"
-
-#: crates/ui-egui/src/lib.rs:4137
-msgid "Annotation Settings: line weights, line styles, line patterns and fill patterns"
-msgstr "Configurações de anotação: espessuras, estilos e padrões de linha e padrões de preenchimento"
 
 #: crates/ui-egui/src/lineweights.rs:116
 msgid "Annotation pen {}"

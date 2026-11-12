@@ -466,6 +466,10 @@ fn the_right_click_menu_lists_the_last_five_commands_beside_repeat_newest_first(
     }
     let names: Vec<&str> = h.state().flow.recent.iter().map(crate::selecting::tool_name).collect();
     assert_eq!(names, ["Wall", "Grid", "Level", "Room", "Window"], "{names:?}");
+    // Revit's order: Cancel, Repeat [last], Recent Commands, then the rest.
+    use crate::context::Action;
+    let first: Vec<Action> = h.state().context_items()[0].iter().map(|i| i.action).collect();
+    assert_eq!(first[..3], [Action::Cancel, Action::Repeat, Action::Recent(0)], "{first:?}");
     assert_eq!(offered(&mut h, at, &["Repeat [Wall]", "Recent Commands"]), ["Repeat [Wall]", "Recent Commands"]);
     // The submenu opens on the item and lists them.
     h.get_all_by(|n| n.label().is_some_and(|x| x.starts_with("Recent Commands"))).last().unwrap().click();

@@ -215,6 +215,14 @@ msgstr "De hartlijn van een muur, zodat een muur die erop getekend wordt er op a
 msgid "A {} needs a name."
 msgstr "Een {} heeft een naam nodig."
 
+#: crates/ui-egui/src/lib.rs:4404
+msgid "Additional Settings"
+msgstr "Aanvullende instellingen"
+
+#: crates/ui-egui/src/lib.rs:4403
+msgid "Additional Settings: line weights, line styles, line patterns, fill patterns and temporary dimensions"
+msgstr "Aanvullende instellingen: lijndiktes, lijnstijlen, lijnpatronen, vulpatronen en tijdelijke maten"
+
 #: crates/ui-egui/src/lib.rs:4507
 msgid "Array"
 msgstr "Reeks"
@@ -681,14 +689,6 @@ msgstr "Lijndiktes van annotaties"
 #: crates/ui-egui/src/standards.rs:106
 msgid "Annotation Pens (mm on paper):"
 msgstr "Annotatiepennen (mm op papier):"
-
-#: crates/ui-egui/src/lib.rs:4138
-msgid "Annotation Settings"
-msgstr "Annotatie-instellingen"
-
-#: crates/ui-egui/src/lib.rs:4137
-msgid "Annotation Settings: line weights, line styles, line patterns and fill patterns"
-msgstr "Annotatie-instellingen: lijndiktes, lijnstijlen, lijnpatronen en vulpatronen"
 
 #: crates/ui-egui/src/lineweights.rs:116
 msgid "Annotation pen {}"

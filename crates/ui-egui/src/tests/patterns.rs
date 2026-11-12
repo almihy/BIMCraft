@@ -20,7 +20,7 @@ fn said(h: &Harness<BimApp>, text: &str) -> bool {
     h.query_all_by_label_contains(text).count() > 0
 }
 
-/// Manage > Annotation Settings > Fill Patterns: the patterns, all the dialog shows there.
+/// Manage > Additional Settings > Fill Patterns: the patterns, all the dialog shows there.
 fn fill_patterns(h: &mut Harness<BimApp>) {
     annotation(h, "Fill Patterns");
 }
