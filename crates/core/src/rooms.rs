@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::geom::{self, P2, Region};
-use crate::model::{Element, Guid, Id, Model, Room, RoomArea, TOL, Unbound, region_holds};
+use crate::model::{Element, Guid, Id, Model, ROOM_PROBE, Room, RoomArea, TOL, Unbound, region_holds};
 use crate::phasing;
 use crate::walls::{self, Index};
 
@@ -63,6 +63,8 @@ pub struct Rooms<'a> {
     placed: RefCell<HashMap<Guid, Placed<'a>>>,
     /// Each room's boundary at the walls' centre lines, once found: what [`Rooms::room_at`] asks of every room of a level.
     centre: RefCell<HashMap<Id, Option<Region>>>,
+    /// Each level's room-bounding walls, once found: what a door's rooms are looked for past ([`Rooms::past_walls`]).
+    bounding: RefCell<HashMap<Guid, Rc<Vec<Id>>>>,
     /// Where the lines are looked for, when only those near one place are: the box `[x0, y0, x1, y1]` the loop must lie in,
     /// and the walls, separation lines and column faces that meet it grown by the second.
     window: Option<([f64; 4], f64)>,
@@ -76,6 +78,7 @@ impl<'a> Rooms<'a> {
             plans: RefCell::new(HashMap::new()),
             placed: RefCell::new(HashMap::new()),
             centre: RefCell::new(HashMap::new()),
+            bounding: RefCell::new(HashMap::new()),
             window: None,
         }
     }
@@ -207,9 +210,10 @@ impl<'a> Rooms<'a> {
     pub fn from_to(&self, e: &Element) -> Option<(Option<Id>, Option<Id>)> {
         let (Element::Door(o) | Element::Window(o)) = e else { return None };
         LOOKED_UP.with(|n| n.set(n.get() + 1));
-        let level = self.m.wall(o.host)?.level;
+        let w = self.m.wall(o.host)?;
         let (from, to) = self.m.opening_sides(e)?;
-        Some((self.room_in_last_phase(level, from), self.room_in_last_phase(level, to)))
+        let found = |p: P2| self.room_in_last_phase(w.level, self.past_walls(o.host, w, o.offset, p));
+        Some((found(from), found(to)))
     }
 
     /// [`Rooms::room_at`] among the rooms standing in the project's last phase ([`standing`]): what a door's or window's
@@ -232,8 +236,46 @@ impl<'a> Rooms<'a> {
     pub fn swings_into(&self, e: &Element) -> Option<Option<Id>> {
         let Element::Door(o) = e else { return None };
         LOOKED_UP.with(|n| n.set(n.get() + 1));
-        let level = self.m.wall(o.host)?.level;
-        Some(self.room_in_last_phase(level, self.m.swing_point(e)?))
+        let w = self.m.wall(o.host)?;
+        let p = self.past_walls(o.host, w, o.offset, self.m.swing_point(e)?);
+        Some(self.room_in_last_phase(w.level, p))
+    }
+
+    /// Point `p`, a door's or window's room looked for past the face of its wall `w` (of GUID `host`) at `along`, taken on
+    /// out of every other room-bounding wall of its level it lies in and the probe on past that one's far face: a lining
+    /// wall built against the door's wall, however thick, is not the room beyond it. Straight out from `w`, up to 10 m.
+    fn past_walls(&self, host: Guid, w: &crate::model::Wall, along: f64, p: P2) -> P2 {
+        let out = (p - walls::Axis::of(w).at(along, 0.0)).unit();
+        let ids = self.bounding(w.level);
+        let host = self.m.elements.id(host);
+        let inside = |q: P2| {
+            ids.iter().filter(|id| Some(**id) != host).filter_map(|id| self.m.wall(*id)).any(|o| {
+                let a = walls::Axis::of(o);
+                let (s, off) = a.project(q);
+                let (left, right) = walls::faces(self.m, o);
+                a.at(s, off).dist(q) < 0.5 && right - TOL < off && off < left + TOL
+            })
+        };
+        let (step, mut left) = (ROOM_PROBE / 10.0, 1000);
+        let mut q = p;
+        while inside(q) && left > 0 {
+            while inside(q) && left > 0 {
+                q = q + out * step;
+                left -= 1;
+            }
+            q = q + out * ROOM_PROBE;
+        }
+        q
+    }
+
+    /// The room-bounding walls of `level`, found once.
+    fn bounding(&self, level: Guid) -> Rc<Vec<Id>> {
+        if let Some(ids) = self.bounding.borrow().get(&level) {
+            return Rc::clone(ids);
+        }
+        let ids: Rc<Vec<Id>> = Rc::new(self.m.bounding_walls(&level, true).collect());
+        self.bounding.borrow_mut().insert(level, Rc::clone(&ids));
+        ids
     }
 
     /// Room `r`'s (of id `id`) boundary at the walls' centre lines, found once.

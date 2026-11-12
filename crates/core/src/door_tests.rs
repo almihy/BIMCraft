@@ -345,3 +345,16 @@ fn a_doors_name_and_a_tag_of_its_mark_never_look_for_its_rooms() {
     assert_eq!(crate::schedule::field_text(&s.model, door, "To Room: Name").as_deref(), Some("WC"));
     assert!(crate::rooms::openings_looked_up() > before);
 }
+
+#[test]
+fn a_doors_rooms_are_found_past_a_lining_wall_alongside_its_own() {
+    let mut s = Session::new();
+    let walls = rooms(&mut s);
+    // A 300 mm wall against the dividing wall's east face, from its face out: its centre line 250 mm from the dividing
+    // wall's, past where the rooms were looked for.
+    let t = s.model.thickness(s.model.wall(s.model.guid(walls[4])).unwrap());
+    let x = 4000.0 + t / 2.0 + 150.0;
+    run(&mut s, "wall", json!({"points": [[x, 0], [x, 6000]], "type": "Exterior - 300mm"}));
+    let door = id_of(&run(&mut s, "door", json!({"wall": walls[4], "offset": 3000, "flip_facing": true})));
+    assert_eq!(between(&s, door), named(Some("WC"), Some("Hall"), Some("Hall")));
+}

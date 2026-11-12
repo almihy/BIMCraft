@@ -906,12 +906,10 @@ fn room_pass(m: &Model, only: Option<&BTreeMap<Id, Option<[f64; 4]>>>, reach: &m
 /// The room placed before room `id` (of a lower id) on its level whose point lies in `g`: the one that has the space.
 /// (Of `others`, the rooms there were, and the rooms there are now among them: a room the change made is of a higher id.)
 fn shares(m: &Model, others: &[Id], id: Id, r: &crate::model::Room, g: &Region) -> Option<Id> {
-    others.iter().copied().filter(|o| *o < id).find(
-        |o| {
-            matches!(m.elements.get(*o), Some(Element::Room(x)) if m.same(x.level, r.level)
+    others.iter().copied().filter(|o| *o < id).find(|o| {
+        matches!(m.elements.get(*o), Some(Element::Room(x)) if m.same(x.level, r.level)
                 && crate::rooms::share_a_phase(m, x, r) && crate::model::region_holds(g, x.point))
-        },
-    )
+    })
 }
 
 /// Something that changed which bounds rooms: where it stood, in the model it was in, and what it was.
