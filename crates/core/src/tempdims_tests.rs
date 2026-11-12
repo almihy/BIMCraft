@@ -378,7 +378,7 @@ fn a_far_witness_line_can_be_moved_to_another_parallel_reference_and_the_setting
 fn the_command_reads_the_witness_lines_a_person_set_and_a_core_is_a_line_a_dimension_can_measure_to() {
     let mut s = Session::new();
     let (a, b) = cored(&mut s);
-    let r = run(&mut s, "temporary_dimensions", json!({"id": a, "left": "core-left"}));
+    let r = run(&mut s, "temporary_dimensions", json!({"id": a, "left": "coreleft"}));
     assert_eq!(r["core"], true);
     assert_eq!((r["dimensions"][0]["from"]["face"].as_str(), r["dimensions"][0]["distance"].as_f64()), (Some("coreleft"), Some(4000.0)));
     assert_eq!(r["settings"], json!({"walls": "centerlines", "openings": "centerlines"}));
@@ -387,7 +387,7 @@ fn the_command_reads_the_witness_lines_a_person_set_and_a_core_is_a_line_a_dimen
     assert_eq!(r["dimensions"][0]["to"]["face"], "left");
     assert_eq!(r["dimensions"][0]["distance"].as_f64(), Some(4150.0));
     // Its ready-made dimension measures to the core as it says.
-    let r = run(&mut s, "temporary_dimensions", json!({"id": a, "left": "core-right", "right": "centre"}));
+    let r = run(&mut s, "temporary_dimensions", json!({"id": a, "left": "coreright", "right": "centre"}));
     let made = run(&mut s, "dimension", r["dimensions"][0]["dimension"].clone());
     assert_eq!(made["values"], json!([4140.0]), "{made}");
     // A wall with no core of its own has none to measure to; a misspelt line or reference is refused.
@@ -395,6 +395,10 @@ fn the_command_reads_the_witness_lines_a_person_set_and_a_core_is_a_line_a_dimen
     let before = s.model.elements.clone();
     let e = s.execute("dimension", &json!({"refs": [{"id": plain, "face": "corecentre"}, {"id": a}], "at": [100, 5000]})).unwrap_err();
     assert!(e.contains("no core"), "{e}");
+    // One spelling everywhere: the one the reply prints and a dimension's refs take.
+    for p in [json!({"id": a, "left": "core-left"}), json!({"id": a, "right": "core-centre"}), json!({"id": a, "left": "core-center"})] {
+        assert!(s.execute("temporary_dimensions", &p).is_err(), "{p}");
+    }
     for p in [json!({"id": a, "left": "core"}), json!({"id": a, "to_left": 3}), json!({"id": a, "to_left": {"id": b, "face": "up"}})] {
         assert!(s.execute("temporary_dimensions", &p).is_err(), "{p}");
     }
