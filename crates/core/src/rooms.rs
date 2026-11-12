@@ -171,14 +171,22 @@ impl<'a> Rooms<'a> {
     }
 
     /// The rooms door or window `e` is between, as Revit's From Room and To Room: the room on each side of its wall at its
-    /// middle ([`Model::opening_sides`], [`Rooms::room_at`]), from, then to; none on a side outside every room. A door's
-    /// To Room is the room it swings into, a window's the one on the side it faces, its exterior, as Revit's. None for anything
-    /// else.
+    /// middle ([`Model::opening_sides`], [`Rooms::room_at`]), on the sides its `to_room_side` says (set as it was placed: a
+    /// door's To Room the room it swung into, a window's the one it faced, its exterior), from, then to; none on a side
+    /// outside every room. None for anything else.
     pub fn from_to(&self, e: &Element) -> Option<(Option<Id>, Option<Id>)> {
         let (Element::Door(o) | Element::Window(o)) = e else { return None };
         let level = self.m.wall(o.host)?.level;
         let (from, to) = self.m.opening_sides(e)?;
         Some((self.room_at(level, from), self.room_at(level, to)))
+    }
+
+    /// The room door `e` opens into now, on the side of its wall it swings to, whatever its From Room and To Room say
+    /// ([`Model::swing_point`]). None for a window.
+    pub fn swings_into(&self, e: &Element) -> Option<Option<Id>> {
+        let Element::Door(o) = e else { return None };
+        let level = self.m.wall(o.host)?.level;
+        Some(self.room_at(level, self.m.swing_point(e)?))
     }
 
     /// Room `r`'s (of id `id`) boundary at the walls' centre lines, found once.

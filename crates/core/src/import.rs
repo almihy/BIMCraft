@@ -3139,6 +3139,7 @@ pub(crate) fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, S
             mark,
             flip_facing: false,
             flip_hand,
+            to_room_side: crate::model::Side::Left,
         };
         let oid = m.insert(if is_door { Element::Door(op) } else { Element::Window(op) });
         from.insert(oid, who(id));

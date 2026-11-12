@@ -300,7 +300,7 @@ other_files(
          or in `wall` centred `offset` mm from its start; `toward` [x,y]: the door swings to the side of the wall that point is \
          on (the desktop sends the cursor), and `flip_facing` then flips it from there; without it, it swings to the wall's \
          left (start to end), `flip_facing` to its right, hinged on the jamb toward the wall's start, `flip_hand` its end \
-         (`elements` says back its `to_room`, the room it swings into, its `hinge` and `swing`); with `family`, a door family's `type` (its first by default), \
+         (`elements` says back its `to_room`, the room it swings into as it is placed, kept through its flips as Revit's, \n         `swings_into`, its `hinge` and `swing`); with `family`, a door family's `type` (its first by default), \
          which sizes the opening and draws the door; it may rise past a low wall's top, as Revit lets it",
         door,
     )
@@ -1342,8 +1342,15 @@ other_files(
         "{ids: [wall | door | window,…], hand?, facing?, step?} turns walls round about their location lines, as Revit's flip arrows \
          do: their exterior sides go to the other side, their doors and windows stay where they are. A door or window in `ids` \
          is flipped on its own: `hand` puts its hinge on the other jamb, `facing` its swing (a window's face) to the wall's \
-         other side; with neither given, its facing flips (`facing: false` leaves it). `hand` and `facing` apply to the doors and windows listed, not to a wall's. `step: true` is Revit's Space: each door listed takes one step through its four ways          (facing, hand, facing back, hand back) from its own state, and each window as a door; not with `hand` or `facing`",
+         other side; with neither given, its facing flips (`facing: false` leaves it). `hand` and `facing` apply to the doors and windows listed, not to a wall's. `step: true` is Revit's Space: each door listed takes one step through its four ways          (facing, hand, facing back, hand back) from its own state, and each window as a door; not with `hand` or `facing`.          A door's or window's From Room and To Room stay as they were, as Revit's: `flip_from_to_room` swaps them",
         flip,
+    ),
+    edit(
+        "flip_from_to_room",
+        ui_msg!("Flip From/To Room"),
+        &[],
+        "{ids: [door | window,…]} swaps the From Room and To Room of each door and window listed, as Revit's Flip From/To          Room: each is set when it is placed (a door's To Room the room it swings into, a window's the one it faces) and          keeps to its sides of the wall through `flip`, so a door flipped to swing the other way still has its rooms as          placed until this swaps them. Its swing and hand don't change; `elements` says the rooms back as `from_room` and          `to_room`, and a door's `swings_into`, the room it opens into now",
+        flip_from_to_room,
     ),
     edit(
         "modify",
@@ -2468,7 +2475,7 @@ other_files(
         ui_msg!("Elements"),
         "{category?, level?, limit?, offset?} elements with their `id` (six digits, what commands take) and `guid` (made once, \
          never changed), fields and derived values (length, height, area_m2…); what an element points at (its level, host, \
-         view…) it holds by GUID. A door or window has `from_room` and `to_room`, as Revit's From Room and To Room: the room          on each side of its wall ({id, guid, number, name}; null outside every room); a door's `to_room` is the room it          swings into, a window's the one on the side it faces, its exterior, as Revit's (a window faced out has its room as `from_room`). A door also has `swing` (left or right:          the side of its wall, looking from the wall's start to its end, it swings to), `hinge` ([x, y]: its hinged jamb on          the face it swings to, as plans draw it; a double door's toward the wall's start, a sliding or folding one's the          jamb it slides or folds toward) and, of a project's own type, its leaf's `thickness`. Check these after placing          a door with `flip_facing` and `flip_hand`. Wherever a command takes an element, its id or its GUID will do",
+         view…) it holds by GUID. A door or window has `from_room` and `to_room`, as Revit's From Room and To Room: the room          on each side of its wall ({id, guid, number, name}; null outside every room, or a room not in the project's last          phase), on the sides its `to_room_side` (left or right of its wall, start to end) says. They are set as it is          placed (a door's To Room the room it swings into; a window's the one it faces, its exterior, as Revit's, so a window          faced out has its room as `from_room`) and keep to their sides through `flip`, as Revit's; `flip_from_to_room`          swaps them. A door also has `swings_into` (the room it opens into now, whatever its From and To Room say), `swing`          (left or right: the side of its wall, looking from the wall's start to its end, it swings to), `hinge` ([x, y]: its          hinged jamb on the face it swings to, as plans draw it; a double door's toward the wall's start, a sliding or          folding one's the jamb it slides or folds toward) and, of a project's own type, its leaf's `thickness`. Check          these after placing a door with `flip_facing` and `flip_hand`. Wherever a command takes an element, its id or its          GUID will do",
         elements,
     ),
 ];
@@ -2871,6 +2878,17 @@ pub fn element_json(m: &Model, id: Id) -> Value {
 
 /// [`element_json`], a room's boundary found among `rooms`: what one look at many elements shares.
 pub fn element_json_with(m: &Model, id: Id, rooms: &crate::rooms::Rooms) -> Value {
+    json_of(m, id, Some(rooms))
+}
+
+/// [`element_json`] less what is found among the rooms of its level: a component's room, a door's or window's From Room,
+/// To Room and the room it swings into. What wants an element's name, type or mark, often (the status bar, a tag that
+/// shows no room, IDs of Selection), and not its rooms; a room's own boundary and a tag's text are still found.
+pub fn element_json_bare(m: &Model, id: Id) -> Value {
+    json_of(m, id, None)
+}
+
+fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>) -> Value {
     let Some(e) = m.elements.get(id) else { return Value::Null };
     let mut extra = Map::new();
     extra.insert("id".into(), json!(id));
@@ -2901,7 +2919,7 @@ pub fn element_json_with(m: &Model, id: Id, rooms: &crate::rooms::Rooms) -> Valu
         extra.extend(identity.set().map(|(k, v)| (k.to_string(), v)));
     }
     // The room a component stands in, as Revit's Room parameter: by GUID, with its number and name for schedules and tags.
-    if let Element::Component(c) = e
+    if let (Element::Component(c), Some(rooms)) = (e, rooms)
         && let Some(id) = rooms.room_at(c.level, c.at)
         && let Some(Element::Room(r)) = m.elements.get(id)
     {
@@ -2964,15 +2982,21 @@ pub fn element_json_with(m: &Model, id: Id, rooms: &crate::rooms::Rooms) -> Valu
                 }
                 extra.insert("level".into(), json!(w.level));
                 extra.insert("at".into(), json!(m.anchor(id)));
-                // The rooms either side, as Revit's From Room and To Room (a door's To Room, the one it swings into), and a
-                // door's hinge and the side of its wall it swings to: what its flips mean, said back.
-                if let Some((from, to)) = rooms.from_to(e) {
-                    let room = |id: Option<Id>| match id.and_then(|id| m.elements.get(id).map(|r| (id, r))) {
-                        Some((id, Element::Room(r))) => json!({"id": id, "guid": m.guid(id), "number": r.number, "name": r.name}),
-                        _ => Value::Null,
-                    };
-                    extra.insert("from_room".into(), room(from));
-                    extra.insert("to_room".into(), room(to));
+                // The rooms either side, as Revit's From Room and To Room (set as it was placed: a door's To Room, the one it
+                // swung into), the room a door swings into now, and its hinge and the side of its wall it swings to: what its
+                // flips mean, said back.
+                let room = |id: Option<Id>| match id.and_then(|id| m.elements.get(id).map(|r| (id, r))) {
+                    Some((id, Element::Room(r))) => json!({"id": id, "guid": m.guid(id), "number": r.number, "name": r.name}),
+                    _ => Value::Null,
+                };
+                if let Some(rooms) = rooms {
+                    if let Some((from, to)) = rooms.from_to(e) {
+                        extra.insert("from_room".into(), room(from));
+                        extra.insert("to_room".into(), room(to));
+                    }
+                    if let Some(into) = rooms.swings_into(e) {
+                        extra.insert("swings_into".into(), room(into));
+                    }
                 }
                 if let Element::Door(_) = e {
                     if let Some(h) = m.door_hinge(e) {
@@ -3098,7 +3122,8 @@ pub fn element_json_with(m: &Model, id: Id, rooms: &crate::rooms::Rooms) -> Valu
             extra.insert("looking".into(), json!([l.0 + 0.0, l.1 + 0.0]));
         }
         Element::Tag(t) => {
-            extra.insert("text".into(), json!(m.tag_text_with(t, rooms)));
+            let text = rooms.map_or_else(|| m.tag_text(t), |rooms| m.tag_text_with(t, rooms));
+            extra.insert("text".into(), json!(text));
             extra.insert("level".into(), json!(m.level_of(e)));
             extra.insert("at".into(), json!(m.anchor(t.host).map(|a| a + t.offset)));
         }
@@ -3162,7 +3187,10 @@ pub fn element_json_with(m: &Model, id: Id, rooms: &crate::rooms::Rooms) -> Valu
             extra.insert("levels".into(), json!(m.mass_slices(ms).iter().map(|(l, _, _)| *l).collect::<Vec<Id>>()));
         }
         Element::Room(r) => {
-            let bound = rooms.bound(r, m.room_area);
+            let bound = match rooms {
+                Some(rooms) => rooms.bound(r, m.room_area),
+                None => crate::rooms::Rooms::new(m).bound(r, m.room_area),
+            };
             if let Err(Unbound::Shared(other)) = bound {
                 extra.insert("shares_space_with".into(), json!(other));
             }
@@ -8111,6 +8139,25 @@ fn location_names(n: &str) -> String {
     format!("`location` is one of {}, not `{n}`", names.join(", "))
 }
 
+/// Doors' and windows' From Room and To Room swapped, as Revit's Flip From/To Room: what side of its wall each one's To Room
+/// is on, nothing else. Not a move: a pinned one is flipped too.
+fn flip_from_to_room(s: &mut Session, p: &Value) -> R {
+    let c = "flip_from_to_room";
+    let m = &s.model;
+    let ids = ids_param(c, m, p)?;
+    if let Some(id) = ids.iter().find(|id| !matches!(m.elements.get(**id), Some(Element::Door(_) | Element::Window(_)))) {
+        let what = m.elements.get(*id).map_or("element", Element::category);
+        return Err(bad(c, format!("{what} {id} isn't a door or a window")));
+    }
+    let m = s.model_mut();
+    for id in &ids {
+        if let Some(Element::Door(o) | Element::Window(o)) = m.elements.get_mut(*id) {
+            o.to_room_side = o.to_room_side.other();
+        }
+    }
+    Ok(json!({"ids": ids}))
+}
+
 /// Walls turned round about their location lines: they run the other way, so their exterior sides
 /// go to the other side; their doors and windows stay where they are, swinging and hinged as they were.
 fn flip(s: &mut Session, p: &Value) -> R {
@@ -8141,6 +8188,8 @@ fn flip(s: &mut Session, p: &Value) -> R {
             Element::Door(o) | Element::Window(o) if lengths.contains_key(&o.host) => {
                 o.offset = lengths.get(&o.host).copied().unwrap_or_default() - o.offset;
                 (o.flip_facing, o.flip_hand) = (!o.flip_facing, !o.flip_hand);
+                // Its From Room and To Room stay where they are too: the wall's left and right swap.
+                o.to_room_side = o.to_room_side.other();
             }
             _ => {}
         }
@@ -8293,8 +8342,10 @@ fn build_opening(m: &Model, p: &Value, is_door: bool) -> Result<Opening, String>
         mark,
         flip_facing: flag(c, p, "flip_facing")? ^ toward_right,
         flip_hand: flag(c, p, "flip_hand")?,
+        to_room_side: Side::Left,
     };
-    Ok(o)
+    // Its To Room, as Revit's, on the side it swings to or faces as it is placed, and kept there through its flips.
+    Ok(Opening { to_room_side: o.swing_side(), ..o })
 }
 
 fn floor(s: &mut Session, p: &Value) -> R {

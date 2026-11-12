@@ -191,7 +191,7 @@ mod workplane_tests;
 pub mod xlsx;
 
 pub use commands::{
-    command_of, element_json, element_json_with, floor_outline, opening_of, roof_footprint, run_category_of, runs_of, stood_of,
+    command_of, element_json, element_json_bare, element_json_with, floor_outline, opening_of, roof_footprint, run_category_of, runs_of, stood_of,
 };
 
 #[cfg(test)]

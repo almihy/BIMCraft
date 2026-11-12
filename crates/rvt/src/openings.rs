@@ -256,6 +256,7 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
             mark: String::new(),
             flip_facing: false,
             flip_hand: false,
+            to_room_side: bimcraft_core::model::Side::Left,
             params: Default::default(),
         };
         if p.clamped {

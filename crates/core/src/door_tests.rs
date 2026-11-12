@@ -237,3 +237,71 @@ fn a_door_schedule_lists_from_room_and_to_room() {
     let r = run(&mut s, "schedule", json!({"name": "Doors by room", "category": "doors", "fields": fields, "sort": ["Mark"]}));
     assert_eq!(r["rows"], json!([["D1", "2", "Hall", "1", "WC"], ["D2", "2", "Hall", null, null]]), "{r}");
 }
+
+/// A door's or window's From Room, To Room and the room it swings into, by name.
+fn between(s: &Session, id: Id) -> (Option<String>, Option<String>, Option<String>) {
+    let e = crate::element_json(&s.model, id);
+    let name = |k: &str| room_name(&e[k]).map(String::from);
+    (name("from_room"), name("to_room"), name("swings_into"))
+}
+
+fn named(a: Option<&str>, b: Option<&str>, c: Option<&str>) -> (Option<String>, Option<String>, Option<String>) {
+    (a.map(String::from), b.map(String::from), c.map(String::from))
+}
+
+#[test]
+fn a_doors_from_and_to_room_are_set_as_it_is_placed_and_kept_through_its_flips_as_revits() {
+    let mut s = Session::new();
+    let walls = rooms(&mut s);
+    let door = id_of(&run(&mut s, "door", json!({"wall": walls[4], "offset": 3000})));
+    // Placed swinging into the WC, the dividing wall's left.
+    assert_eq!(between(&s, door), named(Some("Hall"), Some("WC"), Some("WC")));
+    // Flipped to swing into the Hall: its rooms stay as placed, as Revit's; what it swings into is said apart.
+    run(&mut s, "flip", json!({"ids": [door]}));
+    assert_eq!(between(&s, door), named(Some("Hall"), Some("WC"), Some("Hall")));
+    run(&mut s, "modify", json!({"id": door, "flip_facing": false}));
+    assert_eq!(between(&s, door), named(Some("Hall"), Some("WC"), Some("WC")));
+    // Flip From/To Room swaps them, and nothing else.
+    let before = s.model.elements.get(door).cloned();
+    run(&mut s, "flip_from_to_room", json!({"ids": [door]}));
+    assert_eq!(between(&s, door), named(Some("WC"), Some("Hall"), Some("WC")));
+    match (before, s.model.elements.get(door)) {
+        (Some(crate::model::Element::Door(a)), Some(crate::model::Element::Door(b))) => {
+            assert_eq!((a.flip_facing, a.flip_hand, a.offset), (b.flip_facing, b.flip_hand, b.offset));
+        }
+        other => panic!("{other:?}"),
+    }
+    // Its wall turned round: the door stays where it is, and so do its rooms.
+    run(&mut s, "flip", json!({"ids": [walls[4]]}));
+    assert_eq!(between(&s, door), named(Some("WC"), Some("Hall"), Some("WC")));
+    // Undone, as any command.
+    run(&mut s, "undo", json!({}));
+    run(&mut s, "undo", json!({}));
+    assert_eq!(between(&s, door), named(Some("Hall"), Some("WC"), Some("WC")));
+    // A window's too; anything else is refused.
+    let w = id_of(&run(&mut s, "window", json!({"at": [2000, 6000]})));
+    let (from, to, _) = between(&s, w);
+    run(&mut s, "flip_from_to_room", json!({"ids": [w]}));
+    assert_eq!(between(&s, w), (to, from, None));
+    let e = s.execute("flip_from_to_room", &json!({"ids": [walls[0]]})).unwrap_err();
+    assert!(e.contains("isn't a door or a window"), "{e}");
+}
+
+#[test]
+fn a_door_from_before_from_and_to_room_were_kept_has_them_from_its_swing() {
+    let mut s = Session::new();
+    rooms(&mut s);
+    let door = id_of(&run(&mut s, "door", json!({"at": [6000, 0], "flip_facing": true})));
+    let mut v = serde_json::to_value(&s.model).unwrap();
+    v["format"] = json!(19);
+    let e = v["elements"][door.to_string()].as_object_mut().unwrap();
+    assert!(e.remove("to_room_side").is_some(), "kept in the file: {e:?}");
+    let (m, left_out) = crate::model::Model::read(&v.to_string()).unwrap();
+    assert!(left_out.is_empty(), "{left_out:?}");
+    // It swung out of the house, to the south wall's right: its To Room is outside, its From Room the Hall.
+    match m.elements.get(door) {
+        Some(crate::model::Element::Door(o)) => assert_eq!(o.to_room_side, crate::model::Side::Right),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(m.format, crate::model::FORMAT);
+}

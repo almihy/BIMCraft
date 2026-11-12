@@ -34,14 +34,17 @@ in the door's cut pen, a swinging leaf open square to the wall with its arc in t
 window, and a family's forms and symbols, are only their gap at coarse); a double door's two leaves from both jambs, a
 sliding one's leaf in front of a fixed one, a double sliding one's two meeting in the wall's middle, a folding one's two
 panels half folded toward the hinged jamb, a fixed one shut in the wall's middle. 3D views and IFC build the leaf shut, as
-thick. Which way it is turned is `Model::opening_way`, which the plan and the rooms either side both read: a door swings to
-its wall's left (start to end) or, flipped facing, its right, hinged toward the wall's start or, flipped hand, its end; a
-window faces the wall's left, or flipped its right. `Rooms::from_to` gives the rooms either side as Revit's From Room and To
-Room (looked for `ROOM_PROBE` past the faces at the middle; a door's To Room is the one it swings into, a window's the one
-it faces, its exterior, as Revit's: faced out, its room is its From Room), `element_json` says them as `from_room` and `to_room` ({id, guid, number, name}, null
-outside) with a door's `hinge` (`Model::door_hinge`) and `swing` (left or right), Properties shows them read only under
-Phasing, and door and window schedules have From Room: Number, From Room: Name, To Room: Number and To Room: Name. Revit's
-Flip From/To Room is left out: the flips already decide it. A
+thick. Which way it is turned is `Model::opening_way`, which the plan reads: a door swings to its wall's left (start to
+end) or, flipped facing, its right, hinged toward the wall's start or, flipped hand, its end; a window faces the wall's
+left, or flipped its right. Its From Room and To Room are Revit's: set as it is placed, the To Room on the side a door
+swings to or a window faces (its exterior, so a window faced out of a house has its room as From Room), and kept on the
+element (`Opening::to_room_side`, the side of its wall) through `flip`, a wall's flip and `modify`, as Revit's do not
+follow a flip; `flip_from_to_room` (Revit's Flip From/To Room, on the right-click menu too) swaps them. A file of format
+19 has them from the swing, once, as it is read. `Rooms::from_to` finds the rooms on those sides (looked for `ROOM_PROBE`
+past the faces at the middle), and `Rooms::swings_into` the room a door opens into now; `element_json` says them as
+`from_room`, `to_room` and `swings_into` ({id, guid, number, name}, null outside) with a door's `hinge`
+(`Model::door_hinge`) and `swing` (left or right), Properties shows From Room and To Room read only under Phasing, and
+door and window schedules have From Room: Number, From Room: Name, To Room: Number and To Room: Name. A
 window's panel operation (`IfcWindowPanelProperties`, a sliding sash) needs an `IfcWindowType`, which the export doesn't write yet.
 What BIMCraft has no element for comes in from IFC as a component of a generic family that remembers the class it came in as
 (`Family::ifc`, an `IfcClass`: `{"class": "IFCPLATE", "predefined": "CURTAIN_PANEL"}`): a covering that is no ceiling, a curtain
