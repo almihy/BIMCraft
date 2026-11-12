@@ -542,6 +542,10 @@ pub struct Graphics {
     /// The layers of each CAD drawing it hides, by the drawing's name: Revit's Imported Categories, layer by layer.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub layers: BTreeMap<String, BTreeSet<String>>,
+    /// The layers of each PDF page's lines it hides, by the image's name: listed with the CAD drawings' in Imported
+    /// Categories, and shown and hidden as theirs are.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub pdf_layers: BTreeMap<String, BTreeSet<String>>,
 }
 
 /// An edge of `element` as the view draws it, from `from` to `to` (mm in the view's terms), in line style `style` instead
@@ -711,7 +715,14 @@ impl Graphics {
                 crate::model::MAX_HIDDEN
             ));
         }
-        for (cad, layers) in &self.layers {
+        if self.pdf_layers.len() > crate::raster::MAX_TYPES || self.pdf_layers.values().any(|l| l.len() > crate::model::MAX_HIDDEN) {
+            return Err(format!(
+                "it hides layers of more than {} PDF pages, or more than {} of one",
+                crate::raster::MAX_TYPES,
+                crate::model::MAX_HIDDEN
+            ));
+        }
+        for (cad, layers) in self.layers.iter().chain(&self.pdf_layers) {
             if let Some(n) = std::iter::once(cad).chain(layers).find(|n| n.chars().count() > crate::model::MAX_TEXT) {
                 return Err(format!("the layer or drawing `{n}` is longer than {} characters", crate::model::MAX_TEXT));
             }
@@ -1037,6 +1048,8 @@ pub struct Look {
     hidden: BTreeSet<Id>,
     /// The layers of each CAD drawing it hides, by the drawing's name.
     layers: BTreeMap<String, BTreeSet<String>>,
+    /// The layers of each PDF page's lines it hides, by the image's name.
+    pdf_layers: BTreeMap<String, BTreeSet<String>>,
     paint: BTreeMap<Id, Override>,
     style: VisualStyle,
     /// The section box a 3D view is cut to, its min and max corners, while it's on.
@@ -1103,7 +1116,7 @@ impl Look {
     /// (a room's area) makes redraws slow.
     pub fn with(m: &Model, own: &Graphics) -> Look {
         let g = own.resolved(m);
-        let mut look = Look { style: g.style, layers: own.layers.clone(), ..Look::default() };
+        let mut look = Look { style: g.style, layers: own.layers.clone(), pdf_layers: own.pdf_layers.clone(), ..Look::default() };
         // Nothing to look for: no graphics of its own, and nothing in the project phased or in an option.
         let linked = m.elements.keys().next_back().is_some_and(|id| crate::link::is_linked(*id));
         if own.draws_as_is() && !linked && !crate::phasing::any(m) && m.rare("mass").is_empty() {
@@ -1182,6 +1195,11 @@ impl Look {
     /// The layers of the CAD drawing `cad` the view hides.
     pub fn hidden_layers(&self, cad: &str) -> Option<&BTreeSet<String>> {
         self.layers.get(cad)
+    }
+
+    /// The layers of the lines of the PDF page `image` the view hides.
+    pub fn hidden_pdf_layers(&self, image: &str) -> Option<&BTreeSet<String>> {
+        self.pdf_layers.get(image)
     }
 
     /// Whether the view draws element `id`.

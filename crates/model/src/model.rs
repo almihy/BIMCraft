@@ -69,7 +69,12 @@ pub const CEILING_HEIGHT: f64 = 2600.0;
 pub const MAX_SLOPE: f64 = 75.0;
 /// The closest a floor's contours may be drawn, mm: a site's are a metre or half a metre apart.
 pub const MIN_CONTOURS: f64 = 50.0;
-/// The version of the project file this build writes, and the newest it reads. 20: a door or a window keeps the side of its
+/// The version of the project file this build writes, and the newest it reads. 21: a page of a PDF may be drawn from its
+/// lines, layer by layer, over a picture of only its raster images (an image's `drawn`, with a small picture of the whole page,
+/// `thumb`); an image may hide layers of its lines (`hidden`) and a view's graphics hide them in that view (`pdf_layers`).
+/// Nothing in a file of 20 changes (its pages stay pictures of the whole page), but a build that reads up to 20 would leave
+/// `drawn` out as a field it doesn't know and draw such a page as its raster images alone, its lines missing, not say "saved
+/// by a newer BIMCraft". A project with no page drawn so is written as 20 ([`IMAGES_FORMAT`]) or 19. 20: a door or a window keeps the side of its
 /// wall its To Room is on (`to_room_side`), set as it is placed and kept through its flips, as Revit's From Room and To Room;
 /// a file of 19 has it from the side each swings to or faces, once, as it is read, and a build that reads up to 19 would leave
 /// it out and take it from the swing, so a door flipped since it was placed would say its rooms the other way round. A project
@@ -122,7 +127,10 @@ pub const MIN_CONTOURS: f64 = 50.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 20;
+pub const FORMAT: u32 = 21;
+/// The format a project is written in when it holds images, or a door's or a window's To Room kept against its swing, but no
+/// page of a PDF drawn from its lines ([`Model::written_format`]).
+pub const IMAGES_FORMAT: u32 = 20;
 /// The format a project is written in when it needs nothing of [`FORMAT`]'s (no images, and every door's and window's To Room
 /// on the side it swings to or faces), so a build that reads up to 19 opens it ([`Model::written_format`]).
 pub const PREVIOUS_FORMAT: u32 = 19;
@@ -4477,6 +4485,14 @@ impl Model {
         }
     }
 
+    /// Forgets the layers views and templates hide of the PDF pages `gone` (images the project no longer holds).
+    pub fn forget_pdf_layers(&mut self, gone: &[String]) {
+        let views = self.elements.values_mut().filter_map(graphics::graphics_mut);
+        for g in views.chain(self.view_templates.values_mut().map(|t| &mut t.graphics)) {
+            g.pdf_layers.retain(|image, _| !gone.contains(image));
+        }
+    }
+
     /// The CAD drawings no import places.
     pub fn unplaced_cads(&self) -> Vec<String> {
         if self.cads.is_empty() {
@@ -7632,6 +7648,12 @@ impl Model {
                             crate::raster::MIN_SIDE
                         ));
                     }
+                }
+                if im.hidden.len() > MAX_HIDDEN {
+                    return Err(format!("{who}: it hides {} layers; up to {MAX_HIDDEN}", im.hidden.len()));
+                }
+                for layer in &im.hidden {
+                    text(&format!("{who} hidden layer"), "name", layer)?;
                 }
             }
             Element::CadImport(ci) => {

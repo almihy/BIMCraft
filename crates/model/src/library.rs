@@ -1379,6 +1379,13 @@ fn graphics_refs(g: &mut crate::graphics::Graphics, f: &mut dyn FnMut(&Kind, &mu
             (cad, layers)
         })
         .collect();
+    g.pdf_layers = std::mem::take(&mut g.pdf_layers)
+        .into_iter()
+        .map(|(mut image, layers)| {
+            f(&Kind::Image, &mut image);
+            (image, layers)
+        })
+        .collect();
 }
 
 /// A component's (or a family door's) family and its type of it, each given to `f`: the type as `family: type`, or as the
@@ -1641,18 +1648,22 @@ impl Model {
         serde_json::to_string_pretty(&m).map_err(|e| e.to_string())
     }
 
-    /// The format its file is written in: the oldest that holds all it has. [`crate::model::FORMAT`] when it holds images, or
-    /// a door or a window whose To Room is not on the side it swings to or faces (flipped since it was placed, or its rooms
-    /// flipped), which a file of 19 would give it back from its swing; else [`crate::model::PREVIOUS_FORMAT`], so an older
-    /// build opens it.
+    /// The format its file is written in: the oldest that holds all it has. [`crate::model::FORMAT`] when a page of a PDF it
+    /// holds is drawn from its lines, which a file of 20 would draw as its raster images alone; else
+    /// [`crate::model::IMAGES_FORMAT`] when it holds images, or a door or a window whose To Room is not on the side it swings
+    /// to or faces (flipped since it was placed, or its rooms flipped), which a file of 19 would give it back from its swing;
+    /// else [`crate::model::PREVIOUS_FORMAT`], so an older build opens it.
     pub fn written_format(&self) -> u32 {
         use crate::model::Element;
+        if self.image_types.values().any(crate::raster::ImageType::drawn) {
+            return crate::model::FORMAT;
+        }
         let images = !self.image_types.is_empty() || !self.rare("image").is_empty();
         let rooms_kept = self.elements.values().any(|e| match e {
             Element::Door(o) | Element::Window(o) => o.to_room_side != o.swing_side(),
             _ => false,
         });
-        if images || rooms_kept { crate::model::FORMAT } else { crate::model::PREVIOUS_FORMAT }
+        if images || rooms_kept { crate::model::IMAGES_FORMAT } else { crate::model::PREVIOUS_FORMAT }
     }
 
     /// Every name this model holds of a library entry (its elements', its types', its views'…) its GUID, and the values of

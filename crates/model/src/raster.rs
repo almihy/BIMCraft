@@ -1,12 +1,13 @@
 //! Raster images: Revit's Insert > Image and Import PDF. A project holds each picture once, as an [`ImageType`] (Revit's image
 //! type, listed by Manage Images): its pixels, kept as a PNG, and, for a page of a PDF, the lines and texts it draws as
-//! vectors, held as a drawing ([`crate::cad::Cad`]) so they snap and an agent reads them as an imported DXF's. The PDF itself
-//! is not kept. An [`ImageInstance`] element places one in one view (a plan, a ceiling plan, a section, an elevation or a
+//! vectors, held as a drawing ([`crate::cad::Cad`]) on the PDF's layers, so they snap, an agent reads them and a view shows
+//! and hides them layer by layer as an imported DWG's. A page with lines is drawn from them, over a picture of what they
+//! can't draw (its raster images); one with none is its picture. The PDF itself is not kept. An [`ImageInstance`] element places one in one view (a plan, a ceiling plan, a section, an elevation or a
 //! sheet, in the view's own terms), its middle on `at`, `width` by `height`, turned, behind the model or in front of it.
 
 pub mod pdf;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Cursor;
 use std::sync::{Arc, OnceLock};
 
@@ -38,6 +39,9 @@ pub const MAX_SCALE: f64 = 1e6;
 pub const MIN_SIDE: f64 = 0.01;
 /// The most pixels a view draws of one image.
 const MAX_DRAWN: u64 = 64_000_000;
+/// The longest side of the small picture a page drawn from its lines keeps of the whole of it, px (Manage Images, the box
+/// that places it).
+pub const THUMB: u32 = 256;
 
 /// Where an image draws in its view, Revit's Draw Layer: behind the model (Background, as it comes in), or in front of it
 /// (Foreground). Annotation draws over both.
@@ -83,7 +87,8 @@ fn is_true(b: &bool) -> bool {
 /// counter-clockwise about its middle and, `mirrored`, flipped top for bottom in its own frame (so turned and flipped, the mirror
 /// image of it across any line). `lock` keeps its proportions as it's sized
 /// (Revit's Lock Proportions); `snaps` lets what's drawn over it snap to a PDF's lines (Enable Snaps); `layer` is its Draw Layer,
-/// and `order` its place in the draw order of its view's images, back to front (Revit's Arrange), within its layer.
+/// and `order` its place in the draw order of its view's images, back to front (Revit's Arrange), within its layer. `hidden`
+/// names the layers of a PDF's lines it hides wherever it shows (a view's Visibility/Graphics hides more, in that view).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ImageInstance {
@@ -105,6 +110,8 @@ pub struct ImageInstance {
     pub layer: DrawLayer,
     #[serde(default, skip_serializing_if = "is_first")]
     pub order: i32,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub hidden: BTreeSet<String>,
 }
 
 fn is_first(o: &i32) -> bool {
@@ -157,7 +164,7 @@ impl ImageInstance {
             stretch,
             angle,
             view: Some(self.view),
-            hidden: Default::default(),
+            hidden: self.hidden.clone(),
             colors: Default::default(),
         };
         Some((cad, ci))
@@ -179,6 +186,11 @@ pub struct ImageType {
     px: (u32, u32),
     pixels: Arc<OnceLock<Option<Arc<Pixels>>>>,
     lines: Option<Cad>,
+    /// Whether it is drawn from its lines, over its pixels (then only the page's raster images, on white), so a view shows
+    /// and hides it layer by layer; else its pixels are all of it.
+    drawn: bool,
+    /// A small picture of the whole of a page drawn from its lines, as a PNG.
+    thumb: Option<Arc<Vec<u8>>>,
 }
 
 impl std::fmt::Debug for ImageType {
@@ -196,6 +208,8 @@ impl PartialEq for ImageType {
             && self.scale == o.scale
             && (Arc::ptr_eq(&self.png, &o.png) || self.png == o.png)
             && self.lines == o.lines
+            && self.drawn == o.drawn
+            && self.thumb == o.thumb
     }
 }
 
@@ -300,6 +314,10 @@ struct ImageFile {
     png: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     lines: Option<Cad>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    drawn: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    thumb: Option<String>,
 }
 
 impl Serialize for ImageType {
@@ -312,6 +330,8 @@ impl Serialize for ImageType {
             scale: self.scale,
             png: crate::files::base64(&self.png),
             lines: self.lines.clone(),
+            drawn: self.drawn,
+            thumb: self.thumb.as_ref().map(|t| crate::files::base64(t)),
         }
         .serialize(s)
     }
@@ -339,6 +359,20 @@ impl<'de> Deserialize<'de> for ImageType {
         }
         let png = crate::texture::unbase64(&f.png).ok_or_else(|| serde::de::Error::custom("an image's pixels aren't base64"))?;
         let px = png_size(&png).map_err(|e| serde::de::Error::custom(format!("image `{}`: {e}", f.source)))?;
+        let thumb = match &f.thumb {
+            Some(t) => {
+                let t = crate::texture::unbase64(t).ok_or_else(|| serde::de::Error::custom("an image's thumbnail isn't base64"))?;
+                let (w, h) = png_size(&t).map_err(|e| serde::de::Error::custom(format!("image `{}`'s thumbnail: {e}", f.source)))?;
+                if w > THUMB || h > THUMB {
+                    return Err(bad(format!("its thumbnail is {w} by {h} px; one is up to {THUMB} a side")));
+                }
+                Some(Arc::new(t))
+            }
+            None => None,
+        };
+        if f.drawn && f.lines.is_none() {
+            return Err(bad("it is drawn from its lines, but has none".into()));
+        }
         Ok(ImageType {
             source: f.source,
             page: f.page,
@@ -349,6 +383,8 @@ impl<'de> Deserialize<'de> for ImageType {
             px,
             pixels: Arc::default(),
             lines: f.lines,
+            drawn: f.drawn,
+            thumb,
         })
     }
 }
@@ -472,6 +508,8 @@ impl ImageType {
             px: (w, h),
             pixels: Arc::new(OnceLock::from(Some(Arc::new(Pixels::new(level, false))))),
             lines: None,
+            drawn: false,
+            thumb: None,
         })
     }
 
@@ -489,6 +527,7 @@ impl ImageType {
             }
         });
         let pixels = read.level.clone().map_or_else(Arc::default, |l| Arc::new(OnceLock::from(Some(l))));
+        let drawn = read.drawn && lines.is_some();
         let t = ImageType {
             source: source.chars().take(MAX_TEXT).collect(),
             page: u32::try_from(read.page).ok(),
@@ -499,6 +538,8 @@ impl ImageType {
             px: read.px,
             pixels,
             lines,
+            drawn,
+            thumb: if drawn { read.thumb.clone() } else { None },
         };
         (t, notes)
     }
@@ -538,6 +579,20 @@ impl ImageType {
         self.lines.as_ref()
     }
 
+    /// Whether it is drawn from its lines, layer by layer, over its pixels (a page's raster images only): a page of a PDF
+    /// that has lines. Else its pixels are all of it, and its lines are only snapped to and read.
+    pub fn drawn(&self) -> bool {
+        self.drawn
+    }
+
+    /// The layers of its lines, when it is drawn from them: those a view shows and hides.
+    pub fn layers(&self) -> Vec<&str> {
+        match (&self.lines, self.drawn) {
+            (Some(cad), true) => cad.dxf().layers.iter().map(|l| l.name.as_str()).collect(),
+            _ => Vec::new(),
+        }
+    }
+
     /// Bytes of PNG it holds.
     pub fn len(&self) -> usize {
         self.png.len()
@@ -554,6 +609,12 @@ impl ImageType {
 
     /// A small picture of it, no side over `side` px: its width, height and RGBA (Manage Images, the box that places it).
     pub fn thumbnail(&self, side: u32) -> Option<(u32, u32, Vec<u8>)> {
+        if let Some(png) = &self.thumb {
+            let l = unpng(png)?;
+            let base = Pixels::new(l, true);
+            let l = base.levels.iter().find(|l| l.w <= side && l.h <= side).or(base.levels.last())?;
+            return Some((l.w, l.h, l.rgba()));
+        }
         let p = self.levels()?;
         let l = p.levels.iter().find(|l| l.w <= side && l.h <= side).or(p.levels.last())?;
         Some((l.w, l.h, l.rgba()))
@@ -575,6 +636,10 @@ pub struct PdfRead {
     px: (u32, u32),
     dxf: Option<Vec<u8>>,
     pub notes: Vec<String>,
+    /// Whether the page is drawn from its lines (its PNG then holds only its raster images), and a small picture of the
+    /// whole of it.
+    drawn: bool,
+    thumb: Option<Arc<Vec<u8>>>,
     /// Its pixels, when it was read here: the image needn't decode its PNG again.
     level: Option<Arc<Pixels>>,
 }
@@ -598,6 +663,8 @@ struct ReadHead {
     png: usize,
     dxf: Option<usize>,
     notes: Vec<String>,
+    drawn: bool,
+    thumb: Option<usize>,
 }
 
 impl PdfRead {
@@ -613,6 +680,8 @@ impl PdfRead {
             png: self.png.len(),
             dxf: self.dxf.as_ref().map(Vec::len),
             notes: self.notes.clone(),
+            drawn: self.drawn,
+            thumb: self.thumb.as_ref().map(|t| t.len()),
         };
         let head = serde_json::to_vec(&head).unwrap_or_default();
         let mut out = Vec::with_capacity(4 + head.len() + self.png.len() + self.dxf.as_ref().map_or(0, Vec::len));
@@ -620,6 +689,7 @@ impl PdfRead {
         out.extend(head);
         out.extend(self.png.iter());
         out.extend(self.dxf.iter().flatten());
+        out.extend(self.thumb.iter().flat_map(|t| t.iter()));
         out
     }
 
@@ -632,6 +702,17 @@ impl PdfRead {
         let head: ReadHead = serde_json::from_slice(at(4, n)?).map_err(|e| e.to_string())?;
         let png = at(4 + n, head.png)?.to_vec();
         let dxf = head.dxf.map(|d| at(4 + n + head.png, d).map(<[u8]>::to_vec)).transpose()?;
+        let after = 4 + n + head.png + head.dxf.unwrap_or(0);
+        let thumb = head.thumb.map(|t| at(after, t).map(<[u8]>::to_vec)).transpose()?;
+        if let Some(t) = &thumb {
+            let (w, h) = png_size(t)?;
+            if w > THUMB || h > THUMB {
+                return Err("the page read says what no page is".into());
+            }
+        }
+        if head.drawn && dxf.is_none() {
+            return Err("the page read says what no page is".into());
+        }
         let px = png_size(&png)?;
         let (size, scale) = (head.size.map(f64::from_bits), head.scale.map(f64::from_bits));
         let finest = RESOLUTIONS.iter().copied().max().unwrap_or(600);
@@ -641,13 +722,29 @@ impl PdfRead {
             return Err("the page read says what no page is".into());
         }
         let notes = head.notes.into_iter().take(16).map(|n| n.chars().take(MAX_TEXT).collect()).collect();
-        Ok(PdfRead { pages: head.pages, page: head.page, dpi: head.dpi, size, scale, png: Arc::new(png), px, dxf, notes, level: None })
+        Ok(PdfRead {
+            pages: head.pages,
+            page: head.page,
+            dpi: head.dpi,
+            size,
+            scale,
+            png: Arc::new(png),
+            px,
+            dxf,
+            notes,
+            drawn: head.drawn,
+            thumb: thumb.map(Arc::new),
+            level: None,
+        })
     }
 }
 
 /// Page `page` (from 1) of a PDF file's `bytes` read for Import PDF: rasterised at `dpi` (or the finest under it that keeps
-/// it within [`MAX_PIXELS`], said in its notes), with what it draws as vectors. This is where a hostile file is read: in the
-/// browser, only ever in a worker of its own ([`run_pdf_job`]).
+/// it within [`MAX_PIXELS`], said in its notes), with what it draws as vectors on its layers. A page with lines is drawn from
+/// them: its pixels are then its raster images only, on white, with a small picture of the whole of it; a page whose lines
+/// can't hold all it draws (past what a page may keep, text in a character map BIMCraft doesn't hold, letters only a
+/// picture holds) keeps the picture of it all, said in the notes. This is where a hostile file is read: in the browser, only
+/// ever in a worker of its own ([`run_pdf_job`]).
 pub fn read_pdf(bytes: Vec<u8>, page: usize, dpi: u32) -> Result<PdfRead, String> {
     if bytes.len() > MAX_FILE {
         return Err(format!("it's {} bytes; up to {MAX_FILE}", bytes.len()));
@@ -665,12 +762,54 @@ pub fn read_pdf(bytes: Vec<u8>, page: usize, dpi: u32) -> Result<PdfRead, String
             size[0], size[1]
         ));
     }
-    // The page's pixels in the channels they need, taken straight from what hayro drew, which is then let go.
-    let level = doc.render_into(page, dots, Level::from_rgba)?;
+    let vectors = doc.vectors(page)?;
+    // Drawn from its lines when they hold all it draws but its raster images.
+    let whole = vectors.left_out == 0 && vectors.cmaps.is_empty() && vectors.unlettered == 0;
+    let drawn = !vectors.is_empty() && whole;
+    // The page's pixels in the channels they need, taken straight from what hayro drew, which is then let go: of a page
+    // drawn from its lines, its raster images only.
+    let (level, pictures) =
+        if drawn { doc.pictures_into(page, dots, Level::from_rgba)? } else { (doc.render_into(page, dots, Level::from_rgba)?, 0) };
     let (w, h) = (level.w, level.h);
     too_big(w, h)?;
     let png = encode(&level)?;
-    let vectors = doc.vectors(page)?;
+    let thumb = if drawn {
+        let [wi, hi] = size.map(|s| s / 25.4);
+        let small = (f64::from(THUMB) / wi.max(hi).max(1e-3)).clamp(1.0, 72.0);
+        let t = doc.render_into(page, small, |w, h, rgba| {
+            let l = Level::from_rgba(w, h, rgba);
+            let p = Pixels::new(l, true);
+            p.levels.into_iter().find(|l| l.w <= THUMB && l.h <= THUMB).map(|l| encode(&l))
+        })?;
+        t.transpose()?.map(Arc::new)
+    } else {
+        None
+    };
+    if pictures > 0 {
+        notes.push(format!(
+            "page {page} has {pictures} picture{} in it (raster images): {} in the background picture, under its lines, and \
+             show and hide with the PDF, not by layer",
+            if pictures == 1 { "" } else { "s" },
+            if pictures == 1 { "it stays" } else { "they stay" }
+        ));
+    }
+    if !vectors.is_empty() && !whole {
+        notes.push(format!(
+            "page {page} shows as a picture of the whole page, so its layers can't be shown and hidden one by one (its lines don't \
+             hold all it draws)"
+        ));
+    }
+    if vectors.unlettered > 0 {
+        notes.push(format!(
+            "page {page} has {} letters drawn in a Type 3 font with no text behind them: they show in the picture only",
+            vectors.unlettered
+        ));
+    }
+    if vectors.off_unread {
+        notes.push(format!(
+            "page {page}'s file is encrypted, so the layers it has off couldn't be read: what they draw is left out of its lines"
+        ));
+    }
     if vectors.left_out > 0 {
         notes.push(format!(
             "page {page} draws more than its lines can hold ({} points, or curves past the work a page may take): {} of its paths were left out of the lines it snaps to",
@@ -694,6 +833,8 @@ pub fn read_pdf(bytes: Vec<u8>, page: usize, dpi: u32) -> Result<PdfRead, String
         px: (w, h),
         dxf: (!vectors.is_empty()).then(|| vectors.dxf()),
         notes,
+        drawn,
+        thumb,
         level: Some(Arc::new(Pixels::new(level, true))),
     })
 }
@@ -890,8 +1031,31 @@ mod tests {
         let (t, _) = ImageType::from_pdf("p.pdf", &PdfRead { level: None, ..read });
         let again = t.levels().unwrap();
         assert_eq!((again.levels[0].ch, &again.levels[0].px), (1, &p.levels[0].px));
-        assert_eq!(again.levels[0].at(50, 50), [0, 0, 0, 255], "the line, in the middle");
         assert_eq!(again.levels[0].at(50, 20), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn a_page_with_lines_is_drawn_from_them_over_a_picture_of_what_they_cant_draw() {
+        let read = read_pdf(page(), 1, 72).unwrap();
+        assert!(read.drawn && read.thumb.is_some());
+        let (t, notes) = ImageType::from_pdf("p.pdf", &read);
+        assert!(t.drawn() && notes.is_empty(), "{notes:?}");
+        assert_eq!(t.layers(), ["Black 0.71"]);
+        // Its picture has no line: its lines draw it. Its thumbnail is of the whole page, the line in it.
+        assert_eq!(t.levels().unwrap().levels[0].at(50, 50), [255, 255, 255, 255]);
+        let (w, h, px) = t.thumbnail(64).unwrap();
+        let dark = (0..(w * h) as usize).any(|i| px[i * 4] < 100);
+        assert!(dark, "the thumbnail shows the line");
+        // It comes over whole, and is written and read back with what it holds.
+        let back = PdfRead::from_bytes(&read.to_bytes()).unwrap();
+        assert!(back.drawn && back.thumb == read.thumb);
+        let file: ImageType = serde_json::from_value(serde_json::to_value(&t).unwrap()).unwrap();
+        assert_eq!(file, t);
+        assert!(file.drawn() && file.thumbnail(64).is_some());
+        // A scan, all picture, keeps its picture whole and isn't drawn from lines.
+        let scan = pdf::sample("q 100 0 0 100 0 0 cm BI /W 2 /H 2 /CS /G /BPC 8 /F /AHx ID 00FF00FF> EI Q", [100.0, 100.0], None);
+        let read = read_pdf(scan, 1, 72).unwrap();
+        assert!(!read.drawn && read.thumb.is_none() && read.dxf.is_none());
     }
 
     #[test]
