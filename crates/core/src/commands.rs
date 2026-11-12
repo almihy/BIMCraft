@@ -12666,17 +12666,6 @@ fn dimension_value(s: &mut Session, p: &Value) -> R {
     Ok(json!({"id": id, "moved": moved, "by": hundredth(by)}))
 }
 
-impl Model {
-    /// The element `dimension_value` moves when a length is typed into segment `segment` of dimension `id`: what the segment ends at
-    /// (its second reference). The window asks it to refuse a typed length that would move a pinned element, as Revit does.
-    pub fn dimension_moves(&self, id: Id, segment: usize) -> Option<Id> {
-        let Some(Element::Dimension(d)) = self.elements.get(id) else { return None };
-        let (_, st) = self.stations(d);
-        let (_, _, r) = st.get(segment + 1)?;
-        self.elements.id(r.id)
-    }
-}
-
 /// A wall's chain ([`crate::wallchain::wall_chain`]), read and never kept.
 fn wall_chain(s: &mut Session, p: &Value) -> R {
     let c = "wall_chain";

@@ -160,7 +160,7 @@ fn sources(directory: &Path, paths: &mut BTreeSet<PathBuf>) -> Result<(), String
 }
 
 /// The engine's crates, under `bimcraft-core`: their messages are the project's, and the interface's markers among them.
-pub const ENGINE: &[&str] = &["crates/core/src", "crates/geom/src", "crates/mep-calc/src"];
+pub const ENGINE: &[&str] = &["crates/core/src", "crates/geom/src", "crates/mep-calc/src", "crates/model/src"];
 
 pub fn extract(root: &Path, domain: &str) -> Result<Document, String> {
     let directories: &[&str] = match domain {

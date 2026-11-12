@@ -28,7 +28,7 @@ Preserve the full-computation oracle. Distinguish exact-preserving optimizations
 
 **Observed:** `SectionWork::new` still prepares geometry and bounds across the model. A BVH built after that preparation accelerates visibility but leaves the expensive model-wide preparation intact.
 
-References: [SectionWork](../crates/core/src/render.rs), [solids_and_extremes](../crates/core/src/view3d.rs).
+References: [SectionWork](../crates/model/src/render.rs), [solids_and_extremes](../crates/model/src/view3d.rs).
 
 Introduce separate cached products:
 
@@ -50,7 +50,7 @@ Cache keys must account for everything the result reads: host geometry, neighbou
 
 **Audit target:** `SectionWork::is_of` checks only `m.elements.state()`, although prepared geometry depends on library definitions too. The desktop currently rebuilds on model-pointer changes, which provides protection there. The reusable core API deserves a library-only edit regression test before broadening cache reuse.
 
-References: [SectionWork::is_of and section_picture_and_over_with](../crates/core/src/render.rs), [element state](../crates/core/src/ids.rs), [derived lookup](../crates/core/src/derived.rs).
+References: [SectionWork::is_of and section_picture_and_over_with](../crates/model/src/render.rs), [element state](../crates/model/src/ids.rs), [derived lookup](../crates/model/src/derived.rs).
 
 Record empty spatial queries as dependencies. A room that previously found no wall in a tile must invalidate when a wall is inserted there. Moves must invalidate dependencies around both old and new locations.
 
@@ -89,7 +89,7 @@ Keep the displayed image and picking data from the same generation. A click must
 
 **Observed:** a triangle BVH already exists for GPU picking. Extend the architecture rather than introducing unrelated acceleration systems for every feature.
 
-Reference: [Mesh and Bvh](../crates/core/src/view3d/gpu.rs).
+Reference: [Mesh and Bvh](../crates/model/src/view3d/gpu.rs).
 
 Recommended structure:
 
@@ -107,7 +107,7 @@ Keep existing XY tiles for local wall and room queries where they work well. One
 
 **Observed:** front-to-back batched occluders already exist in `Scene::section`; the checklist lags the implementation.
 
-Reference: [Scene::section and Tiles](../crates/core/src/view3d.rs).
+Reference: [Scene::section and Tiles](../crates/model/src/view3d.rs).
 
 Next candidates:
 
@@ -128,7 +128,7 @@ Occluder approximations must never fill openings. Uncertain visibility must reta
 
 **Observed:** `solids_and_extremes` already runs in parallel, but creates a new `Components` cache for each 256-element chunk. Repeated families can therefore be regenerated across chunks.
 
-References: [solids_and_extremes](../crates/core/src/view3d.rs), [Components and its keys](../crates/core/src/component_geometry.rs).
+References: [solids_and_extremes](../crates/model/src/view3d.rs), [Components and its keys](../crates/model/src/component_geometry.rs).
 
 Build or lazily share immutable prototypes by unique geometry key. Concurrent requests for the same prototype should share one computation.
 
@@ -146,7 +146,7 @@ Measure allocations, bytes copied, and memory bandwidth alongside CPU time. More
 
 **Observed:** a GPU renderer already exists and has strong documented warm-frame results. The structural opportunity is preparing and uploading the scene after changes.
 
-References: [GPU Mesh](../crates/core/src/view3d/gpu.rs), [desktop GPU renderer](../crates/ui-egui/src/gpu.rs), [orbit scene lifecycle](../crates/ui-egui/src/orbit.rs), [measurements](performance.md).
+References: [GPU Mesh](../crates/model/src/view3d/gpu.rs), [desktop GPU renderer](../crates/ui-egui/src/gpu.rs), [orbit scene lifecycle](../crates/ui-egui/src/orbit.rs), [measurements](performance.md).
 
 The mesh currently holds expanded triangle vertices. Add prototype geometry buffers, instance transforms, and independently replaceable geometry chunks.
 
@@ -160,7 +160,7 @@ Optional screen-space tessellation/LOD can help pipes, fittings, and repeated eq
 
 The plan lookup is already close to storey-local cost. The next gain is avoiding regeneration and processing of all drawing primitives whenever a view changes.
 
-References: [drawing generation](../crates/core/src/render.rs), [region compositing](../crates/core/src/render/regions.rs), [canvas](../crates/ui-egui/src/canvas.rs).
+References: [drawing generation](../crates/model/src/render.rs), [region compositing](../crates/model/src/render/regions.rs), [canvas](../crates/ui-egui/src/canvas.rs).
 
 Cache model-space geometry separately from paper-space text, symbols, line weights, and scale-sensitive detail. Spatially index drawing fragments for painting, picking, snapping, and region overlap.
 
@@ -188,13 +188,13 @@ Raster depth can accelerate candidate selection, but screen-resolution survivors
 
 **Additional correctness constraint:** preserve cross-element coplanarity semantics when parallelizing plane processing. The current global `planes` function merges coplanar triangles across elements. Purely local plane IDs could introduce seams.
 
-Reference: [planes](../crates/core/src/view3d.rs).
+Reference: [planes](../crates/model/src/view3d.rs).
 
 ## 11. Clarify sharing for sheets and shadows
 
 **Sheets:** share geometry, dependencies, and acceleration structures across viewports. Visibility remains viewport-specific. One elevation's culled scene cannot generally serve another elevation. Sharing the union is valid but may lose much of the culling benefit.
 
-Reference: [sheet rendering and shared SectionWork](../crates/core/src/sheet.rs).
+Reference: [sheet rendering and shared SectionWork](../crates/model/src/sheet.rs).
 
 **Shadows:** share acceleration structures, but query shadow casters independently. An object invisible to the camera may cast a visible shadow. Camera-survivor geometry alone is insufficient.
 

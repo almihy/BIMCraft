@@ -1,6 +1,10 @@
 # bimcraft-core
 
-The model, the commands, and everything that draws or exports it: plans, the 3D scene, sheets, schedules, IFC. It has no UI
+The commands and the Session that runs them, the top of the engine. The model and everything that draws or exports it (plans,
+the 3D scene, sheets, schedules, IFC) are `bimcraft-model`'s ([notes](../model/CLAUDE.md)), the geometry under it
+`bimcraft-geom`'s and the MEP sums `bimcraft-mep-calc`'s; the core re-exports each of their modules under its old path, so
+`crate::model` here and `bimcraft_core::render` in a front end still name them, and what this file says of `model.rs` or
+`lenient.rs` holds there. It has no UI
 toolkit (a rule in the root `CLAUDE.md`), so a front end is a thin shell over [`Session`](src/engine.rs). The map of the modules
 is in the root `CLAUDE.md`; the write-ups by area are in `docs/areas/`, which this file points at by task.
 

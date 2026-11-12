@@ -6,7 +6,7 @@ use std::f64::consts::PI;
 use serde_json::json;
 
 use crate::engine::Session;
-use crate::graphics::testing::run;
+use crate::model_tests::graphics_testing::run;
 use crate::quantities::{self, WallQ};
 
 fn near(a: f64, b: f64) -> bool {

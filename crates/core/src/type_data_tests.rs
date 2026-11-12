@@ -4,8 +4,8 @@
 use serde_json::{Value, json};
 
 use crate::engine::Session;
-use crate::graphics::testing::{house, run};
 use crate::model::{Element, Model};
+use crate::model_tests::graphics_testing::{house, run};
 
 fn near(a: f64, b: f64) -> bool {
     (a - b).abs() < 1e-6 * b.abs().max(1.0)

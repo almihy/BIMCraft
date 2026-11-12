@@ -2,7 +2,7 @@
 
 Revit lets a person do what is questionable and lists it in Review Warnings; it refuses only what it cannot build. BIMCraft is
 the same: `Model::check` (`model.rs`) refuses what would break the model, and a design judgment is a **warning**
-(`crates/core/src/warnings.rs`), kept for as long as it stands, told to whoever made the change, and listed on request.
+(`crates/model/src/warnings.rs`), kept for as long as it stands, told to whoever made the change, and listed on request.
 
 ## What is refused and what is warned
 

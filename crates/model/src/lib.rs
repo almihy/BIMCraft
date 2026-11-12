@@ -1,0 +1,85 @@
+//! BIMCraft's building model and everything that reads it: the elements, their types, families and the library
+//! (`model`, `ids`, `library`), what each element is in plan and 3D, the views drawn from it (`render`, `view3d`, `sheet`,
+//! `pdf`, `gltf`), the schedules, IFC export and import, and the site. The commands that change it and the Session that runs
+//! them are `bimcraft-core`'s, which re-exports each module here under its old path. Nothing here knows about a UI.
+
+// The crates under the model, by the paths its modules have always named them by (`crate::geom`, `crate::units`).
+pub use bimcraft_geom::{csg, files, font, geom, ifc_classes, language, prim, shared, skeleton, step, triangulation, units, xlsx};
+pub use bimcraft_mep_calc::{conduit, demand, dps, dr, drainage, hydrant, loads, nbr5410, plumbing, reservoir, storm, water};
+
+pub mod alignment;
+pub mod background_grid;
+pub mod bounds;
+pub mod cad;
+pub mod camera;
+pub mod cloud;
+pub mod component_geometry;
+pub mod constraints;
+pub mod crosscheck;
+pub mod curves;
+pub mod derived;
+pub mod dims;
+pub mod dims3d;
+pub mod draw;
+pub mod dxf;
+pub mod electrical;
+pub mod falls;
+pub mod family;
+pub mod favorites;
+pub mod fills;
+pub mod fixtures;
+pub mod gltf;
+pub mod glue;
+pub mod graphics;
+pub mod groups;
+pub mod ids;
+pub mod ifc;
+pub mod import;
+pub mod inquiry;
+pub mod insert;
+pub mod json;
+pub mod lenient;
+pub mod library;
+pub mod lines;
+pub mod link;
+pub mod massing;
+pub mod masterplan;
+pub mod merge;
+pub mod model;
+pub mod motion;
+pub mod network;
+pub mod paint;
+pub mod pat;
+pub mod pdf;
+pub mod pen;
+pub mod phasing;
+pub mod quantities;
+pub mod raster;
+pub mod rebar;
+pub mod reinforce;
+pub mod render;
+pub mod rooms;
+pub mod runs;
+pub mod schedule;
+pub mod selection;
+pub mod sheet;
+pub mod site;
+pub mod sketch;
+pub mod snap;
+pub mod stairs;
+pub mod standards;
+pub mod styles;
+pub mod symbol_set;
+pub mod sync_settings;
+pub mod tempdims;
+pub mod text;
+pub mod texture;
+pub mod timber;
+pub mod titleblock;
+pub mod triad;
+pub mod type_data;
+pub mod view3d;
+pub mod wallchain;
+pub mod walls;
+pub mod warnings;
+pub mod workplane;

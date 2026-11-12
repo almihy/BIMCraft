@@ -10,6 +10,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+bimcraft-model = { workspace = true }
 bimcraft-mep-calc = { workspace = true }
 bimcraft-geom = { workspace = true }
 bimcraft-i18n = { workspace = true }
@@ -34,4 +35,5 @@ image = { workspace = true }
 js-sys = "0.3"
 
 [dev-dependencies]
+bimcraft-model = { workspace = true, features = ["testing"] }
 bimcraft-geom = { workspace = true, features = ["testing"] }

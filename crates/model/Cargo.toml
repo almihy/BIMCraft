@@ -1,0 +1,39 @@
+[package]
+name = "bimcraft-model"
+description = "BIMCraft's building model and what it is drawn and exported as: elements, types, families, plans, sections, the 3D view, sheets, IFC"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bimcraft-i18n = { workspace = true }
+bimcraft-geom = { workspace = true }
+bimcraft-mep-calc = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tiny-skia = { workspace = true }
+flate2 = { workspace = true }
+zune-jpeg = { workspace = true }
+encoding_rs = { workspace = true }
+getrandom = { workspace = true }
+rayon = { workspace = true }
+ttf-parser = { workspace = true }
+i_overlay = { workspace = true }
+hayro = { workspace = true }
+png = "0.18"
+image = { workspace = true }
+
+# The browser's clock (Rust's std has none there): today's date on a title block.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[features]
+# Helpers the tests of the crates above use.
+testing = []

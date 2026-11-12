@@ -7,39 +7,7 @@ use serde_json::{Value, json};
 
 use super::{R, ids_param, only};
 use crate::engine::Session;
-use crate::model::{Id, Key, Model};
-
-impl Model {
-    /// Whether element `id` is pinned.
-    pub fn is_pinned(&self, id: impl Key) -> bool {
-        !self.pinned.is_empty() && self.elements.guid(id).is_some_and(|g| self.pinned.contains(&g))
-    }
-
-    /// Those of `ids` that are pinned, in the order given.
-    pub fn pinned_among(&self, ids: &[Id]) -> Vec<Id> {
-        ids.iter().copied().filter(|id| self.is_pinned(*id)).collect()
-    }
-
-    /// Every pinned element, by id.
-    pub fn pinned_ids(&self) -> Vec<Id> {
-        let mut ids: Vec<Id> = self.pinned.iter().filter_map(|g| self.elements.id(*g)).collect();
-        ids.sort_unstable();
-        ids
-    }
-
-    /// Whether a pin names an element that is gone.
-    pub(crate) fn has_stale_pins(&self) -> bool {
-        self.pinned.iter().any(|g| !self.elements.contains_key(*g))
-    }
-
-    /// The pins of elements that are gone, let go.
-    pub(crate) fn forget_stale_pins(&mut self) {
-        let gone: Vec<_> = self.pinned.iter().filter(|g| !self.elements.contains_key(**g)).copied().collect();
-        for g in gone {
-            self.pinned.remove(&g);
-        }
-    }
-}
+use crate::model::{Id, Model};
 
 /// What a command refused to do to a pinned element: Revit's own failures say "Can't move pinned element." and "Can't rotate
 /// pinned element."; and "Pinned objects were not deleted. To delete them, unpin them before using delete.".

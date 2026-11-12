@@ -1,0 +1,1083 @@
+//! `graphics`'s tests that drive the Session (moved out of `graphics.rs`).
+
+use serde_json::{Value, json};
+
+use crate::engine::Session;
+use crate::geom::P2;
+use crate::graphics::Look;
+use crate::model::Element;
+use crate::model_tests::graphics_testing::*;
+use crate::prim::{POCHE, Prim, Rgb};
+use crate::render::{self, Drawing};
+
+#[test]
+fn a_category_hidden_in_a_view_is_left_out_of_that_view_only() {
+    let mut s = Session::new();
+    let walls = house(&mut s);
+    let room = run(&mut s, "room", json!({"point": [4000, 3000], "name": "Living"}))["id"].as_u64().unwrap();
+    let grid = run(&mut s, "grid", json!({"start": [-1000, 3000], "end": [9000, 3000]}))["id"].as_u64().unwrap();
+    assert!(!owned(&plan(&s, 100000), room).is_empty() && !owned(&plan(&s, 100000), grid).is_empty());
+    let r = run(&mut s, "graphics", json!({"view": "Level 1", "hide": ["rooms", "Grids"]}));
+    assert_eq!(r["hidden"], json!(["grid", "room"]));
+    let d = plan(&s, 100000);
+    assert!(owned(&d, room).is_empty(), "the room's tag is gone");
+    assert!(owned(&d, grid).is_empty(), "so is the grid");
+    assert!(!owned(&d, walls[0]).is_empty(), "the walls stay");
+    // Level 2's plan is its own view: its grids are still there.
+    assert!(!owned(&plan(&s, 100001), grid).is_empty());
+    let r = run(&mut s, "graphics", json!({"view": 100000, "show": ["room"]}));
+    assert_eq!(r["hidden"], json!(["grid"]));
+    assert!(!owned(&plan(&s, 100000), room).is_empty());
+    // Walls hidden leave no poché behind: the fill under their joins goes with them.
+    let view = plan(&s, 100000).view;
+    run(&mut s, "graphics", json!({"view": 100000, "hide": ["walls"]}));
+    assert_eq!(pixel(&render::draw(&s.model, 100000, view), P2(4000.0, 0.0)), PAPER);
+}
+
+#[test]
+fn an_element_hidden_in_a_view_leaves_the_rest_as_it_was() {
+    let mut s = Session::new();
+    let walls = house(&mut s);
+    assert_eq!(pixel(&plan(&s, 100000), P2(4000.0, 0.0)), POCHE);
+    let r = run(&mut s, "graphics", json!({"view": "Level 1", "hide_elements": [walls[0]]}));
+    assert_eq!(r["hidden_elements"], json!([walls[0]]));
+    let d = plan(&s, 100000);
+    assert!(owned(&d, walls[0]).is_empty());
+    assert_eq!(pixel(&d, P2(4000.0, 0.0)), PAPER, "no poché where it was");
+    assert_eq!(pixel(&d, P2(8000.0, 3000.0)), POCHE, "the east wall is still cut");
+    // Its other views still draw it; hidden or not, it's still in the model and still joins.
+    assert!(!owned(&plan(&s, 100001), walls[0]).is_empty() || run(&mut s, "elements", json!({"category": "walls"}))["count"] == 4);
+    run(&mut s, "graphics", json!({"view": "Level 1", "show_elements": [walls[0]]}));
+    assert_eq!(pixel(&plan(&s, 100000), P2(4000.0, 0.0)), POCHE);
+}
+
+#[test]
+fn show_and_show_elements_unhide_in_view_what_hide_and_hide_elements_hid() {
+    // Revit's Unhide in View: Elements and Category are `graphics` with `show_elements` and `show`, as Hide in View is
+    // with `hide_elements` and `hide`.
+    let mut s = Session::new();
+    let walls = house(&mut s);
+    run(&mut s, "graphics", json!({"view": 100000, "hide_elements": [walls[0], walls[1]], "hide": ["walls"]}));
+    let r = run(&mut s, "graphics", json!({"view": 100000, "show_elements": [walls[0]]}));
+    assert_eq!(r["hidden_elements"], json!([walls[1]]), "one element back, the other still hidden");
+    let r = run(&mut s, "graphics", json!({"view": 100000, "show": ["walls"], "show_elements": [walls[1]]}));
+    assert_eq!((r["hidden"].clone(), r["hidden_elements"].clone()), (json!([]), json!([])));
+    assert!(!owned(&plan(&s, 100000), walls[0]).is_empty() && !owned(&plan(&s, 100000), walls[1]).is_empty());
+}
+
+#[test]
+fn cut_and_projection_lines_take_their_own_overrides_in_a_view_alone() {
+    let mut s = Session::new();
+    let walls = house(&mut s);
+    // Low enough to lie under the cut plane: seen from it, in projection.
+    let low = run(&mut s, "wall", json!({"points": [[1000, 1000], [3000, 1000]], "height": 1000}))["ids"][0].as_u64().unwrap();
+    let up = run(&mut s, "wall", json!({"points": [[0, 0], [2000, 0]], "level": "Level 2", "height": 2500}))["ids"][0].as_u64().unwrap();
+    let d = plan(&s, 100000);
+    assert!(lines(&d, walls[0]).contains(&(10, Rgb(25, 25, 25), None)));
+    assert!(lines(&d, low).contains(&(4, Rgb(25, 25, 25), None)));
+    run(
+        &mut s,
+        "graphics",
+        json!({"view": "Level 1", "categories": {"walls": {
+            "cut": {"color": [200, 0, 0], "weight": 6},
+            "projection": {"color": "#0000c8", "weight": 3, "dash": "dashed"}}}}),
+    );
+    let d = plan(&s, 100000);
+    assert!(lines(&d, walls[0]).contains(&(6, RED, None)), "{:?}", lines(&d, walls[0]));
+    assert!(lines(&d, low).contains(&(3, Rgb(0, 0, 200), Some(vec![10.0, 5.0]))), "{:?}", lines(&d, low));
+    // Another view keeps its own look.
+    assert!(lines(&plan(&s, 100001), up).contains(&(10, Rgb(25, 25, 25), None)));
+    // An override merges into the last, and null takes a field back.
+    run(&mut s, "graphics", json!({"view": 100000, "categories": {"walls": {"cut": {"weight": 2}}}}));
+    assert!(lines(&plan(&s, 100000), walls[0]).contains(&(2, RED, None)), "the colour is kept");
+    let r = run(&mut s, "graphics", json!({"view": 100000, "categories": {"walls": {"cut": {"color": null}}}}));
+    assert_eq!(r["categories"]["wall"]["cut"], json!({"weight": 2}));
+    assert!(lines(&plan(&s, 100000), walls[0]).contains(&(2, Rgb(25, 25, 25), None)));
+    run(&mut s, "graphics", json!({"view": 100000, "categories": {"walls": null}}));
+    assert!(lines(&plan(&s, 100000), walls[0]).contains(&(10, Rgb(25, 25, 25), None)));
+}
+
+#[test]
+fn an_element_override_beats_its_categorys_and_fills_take_their_own_colour() {
+    let mut s = Session::new();
+    let walls = house(&mut s);
+    run(&mut s, "graphics", json!({"view": 100000, "categories": {"walls": {"cut": {"fill": [220, 160, 40]}}}}));
+    let d = plan(&s, 100000);
+    assert_eq!(pixel(&d, P2(4000.0, 0.0)), Rgb(220, 160, 40));
+    assert_eq!(pixel(&d, P2(8000.0, 3000.0)), Rgb(220, 160, 40));
+    run(
+        &mut s,
+        "graphics",
+        json!({"view": 100000, "elements": {walls[0].to_string(): {"cut": {"fill": [10, 120, 200], "color": [0, 200, 0]}}}}),
+    );
+    let d = plan(&s, 100000);
+    assert_eq!(pixel(&d, P2(4000.0, 0.0)), Rgb(10, 120, 200), "the wall's own");
+    assert_eq!(pixel(&d, P2(8000.0, 3000.0)), Rgb(220, 160, 40), "the others' category's");
+    assert!(lines(&d, walls[0]).iter().any(|l| l.1 == Rgb(0, 200, 0)));
+    assert!(lines(&d, walls[1]).iter().all(|l| l.1 != Rgb(0, 200, 0)));
+    // The walls joined are filled together in each colour, so no seam of the usual grey shows.
+    let union = |color: Rgb| {
+        d.prims.iter().zip(&d.owners).filter(|(p, o)| o.is_none() && matches!(p, Prim::Fill { color: c, .. } if *c == color)).count()
+    };
+    assert_eq!((union(POCHE), union(Rgb(10, 120, 200)), union(Rgb(220, 160, 40))), (0, 1, 1));
+}
+
+#[test]
+fn halftone_draws_a_category_halfway_to_the_paper() {
+    let mut s = Session::new();
+    let walls = house(&mut s);
+    run(&mut s, "graphics", json!({"view": 100000, "categories": {"walls": {"halftone": true}}}));
+    let d = plan(&s, 100000);
+    let half = |c: u8| c + (255 - c) / 2;
+    assert_eq!(pixel(&d, P2(4000.0, 0.0)), Rgb(half(POCHE.0), half(POCHE.1), half(POCHE.2)));
+    assert!(lines(&d, walls[0]).contains(&(10, Rgb(half(25), half(25), half(25)), None)));
+}
+
+#[test]
+fn the_3d_view_hides_and_paints_by_category() {
+    let mut s = Session::new();
+    house(&mut s);
+    let shown = |pm: &tiny_skia::Pixmap| painted(pm, |r, g, b| (r, g, b) != (255, 255, 255));
+    assert!(shown(&picture(&mut s, "{3D}", "a")) > 500);
+    let r = run(&mut s, "graphics", json!({"view": "{3D}", "categories": {"walls": {"projection": {"fill": [255, 0, 0]}}}}));
+    assert_eq!(r["name"], "{3D}");
+    let red = |pm: &tiny_skia::Pixmap| painted(pm, |r, g, b| r > 120 && g < 40 && b < 40);
+    assert!(red(&picture(&mut s, "{3D}", "b")) > 500, "walls in red");
+    run(&mut s, "graphics", json!({"view": "{3D}", "hide": ["walls"]}));
+    assert!(shown(&picture(&mut s, "{3D}", "c")) > 0, "the levels' planes");
+    run(&mut s, "graphics", json!({"view": "{3D}", "hide": ["walls", "levels"]}));
+    assert_eq!(shown(&picture(&mut s, "{3D}", "d")), 0, "nothing else to see");
+    // The placed 3D view is that same view; the plan is its own.
+    assert!(!owned(&plan(&s, 100000), 100002).is_empty());
+}
+
+#[test]
+fn hiding_a_category_leaves_every_one_of_its_elements_out_of_plans_ceiling_plans_and_sections() {
+    let mut s = Session::new();
+    s.script(crate::sample::SAMPLE).unwrap();
+    s.script(
+        r#"column {"at": [5000, 1000]}
+           stair {"start": [1000, 1000], "end": [3500, 1000], "railings": true}
+           ramp {"start": [1000, 2500], "angle": 0, "height": 500}
+           shaft {"boundary": [[7000, 5000], [7800, 5000], [7800, 5800], [7000, 5800]]}
+           detail_line {"points": [[1000, 4800], [3000, 4800]]}
+           filled_region {"type": "Diagonal Up", "sketch": [[[500, 4900], [2500, 4900]], [[2500, 4900], [2500, 5600]], [[2500, 5600], [500, 5600]], [[500, 5600], [500, 4900]]]}"#,
+    )
+    .unwrap();
+    let ids = |s: &mut Session, category: &str| -> Vec<u64> {
+        run(s, "elements", json!({"category": category}))["elements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["id"].as_u64().unwrap())
+            .collect()
+    };
+    let section = ids(&mut s, "sections")[0];
+    let elevation = ids(&mut s, "elevations")[0];
+    // Every drawing of the model there is, but the 3D view's.
+    let drawings = |s: &Session| -> Vec<Drawing> {
+        let view = render::section_fit(&s.model, section, 800, 600);
+        let wide = render::section_fit(&s.model, elevation, 800, 600);
+        vec![
+            plan(s, 100000),
+            plan(s, 100001),
+            render::ceiling_plan(&s.model, 100000, 1600, 1000),
+            render::section(&s.model, section, view),
+            render::section(&s.model, elevation, wide),
+        ]
+    };
+    let drawn = |s: &Session, ids: &[u64]| {
+        let all = drawings(s);
+        ids.iter().filter(|id| all.iter().any(|d| !owned(d, **id).is_empty())).count()
+    };
+    for category in crate::graphics::MODEL.iter().chain(&crate::graphics::ANNOTATION) {
+        let of = ids(&mut s, category);
+        if of.is_empty() {
+            continue;
+        }
+        let before = drawn(&s, &of);
+        run(&mut s, "graphics", json!({"view": 100000, "hide": [category]}));
+        run(&mut s, "graphics", json!({"view": 100001, "hide": [category]}));
+        run(&mut s, "graphics", json!({"view": section, "hide": [category]}));
+        run(&mut s, "graphics", json!({"view": elevation, "hide": [category]}));
+        // The level's ceiling plan is its plan's view.
+        assert_eq!(drawn(&s, &of), 0, "{category}: {before} drawn before, and some still are");
+        run(&mut s, "graphics", json!({"view": 100000, "reset": true}));
+        run(&mut s, "graphics", json!({"view": 100001, "reset": true}));
+        run(&mut s, "graphics", json!({"view": section, "reset": true}));
+        run(&mut s, "graphics", json!({"view": elevation, "reset": true}));
+        // Nothing in the setup is left undrawn, or the test would prove nothing.
+        assert!(drawn(&s, &of) > 0, "{category} isn't drawn in any of them");
+    }
+}
+
+#[test]
+fn hiding_doors_and_windows_leaves_their_openings_in_the_wall() {
+    let mut s = Session::new();
+    house(&mut s);
+    let door = run(&mut s, "door", json!({"at": [2000, 0]}))["id"].as_u64().unwrap();
+    let window = run(&mut s, "window", json!({"at": [8000, 3000]}))["id"].as_u64().unwrap();
+    let view = plan(&s, 100000).view;
+    let clear = |s: &Session| {
+        let d = render::draw(&s.model, 100000, view);
+        // Between a window's glass lines, which run along its wall's centre line and its faces.
+        (pixel(&d, P2(2000.0, 0.0)) == PAPER, pixel(&d, P2(7950.0, 3000.0)) == PAPER, owned(&d, door).len(), owned(&d, window).len())
+    };
+    let (c0, c1, doors, windows) = clear(&s);
+    assert!(c0 && c1 && doors > 0 && windows > 0, "open to begin with");
+    run(&mut s, "graphics", json!({"view": 100000, "hide": ["doors", "windows"]}));
+    assert_eq!(clear(&s), (true, true, 0, 0), "the openings stay, the doors and windows are gone");
+    run(&mut s, "graphics", json!({"view": 100000, "show": ["doors", "windows"], "hide_elements": [door]}));
+    let (c0, c1, doors, windows) = clear(&s);
+    assert!(c0 && c1 && doors == 0 && windows > 0);
+    // What is left of a hidden door isn't its own: nothing of it can be picked or painted.
+    run(&mut s, "graphics", json!({"view": 100000, "categories": {"doors": {"cut": {"fill": [200, 0, 0]}}}}));
+    assert_eq!(pixel(&render::draw(&s.model, 100000, view), P2(2000.0, 0.0)), PAPER);
+}
+
+#[test]
+fn a_doors_swing_is_projection_and_the_rest_of_it_is_cut() {
+    let mut s = Session::new();
+    house(&mut s);
+    let door = run(&mut s, "door", json!({"at": [2000, 0]}))["id"].as_u64().unwrap();
+    run(
+        &mut s,
+        "graphics",
+        json!({"view": 100000, "categories": {"doors": {"projection": {"color": [0, 0, 200]}, "cut": {"color": [200, 0, 0]}}}}),
+    );
+    let l = lines(&plan(&s, 100000), door);
+    let blue = Rgb(0, 0, 200);
+    assert!(l.iter().any(|x| x.1 == blue && x.0 == 4), "its swing: {l:?}");
+    assert!(l.iter().any(|x| x.1 == RED && x.0 == 7), "its jambs: {l:?}");
+    assert!(l.iter().all(|x| x.1 == blue || x.1 == RED));
+}
+
+#[test]
+fn a_template_called_by_name_alone_is_read_never_made() {
+    let mut s = Session::new();
+    house(&mut s);
+    let before = s.model.clone();
+    let e = s.execute("template", &json!({"name": "Nope"})).unwrap_err();
+    assert!(e.contains("Nope"), "{e}");
+    assert_eq!(*s.model, *before);
+    run(&mut s, "graphics", json!({"view": 100000, "hide": ["rooms"]}));
+    run(&mut s, "template", json!({"name": "T", "from": 100000}));
+    let steps = s.history().len();
+    let r = run(&mut s, "template", json!({"name": "T"}));
+    assert_eq!(r["hidden"], json!(["room"]));
+    assert_eq!(s.history().len(), steps, "reading is no step");
+}
+
+#[test]
+fn a_view_stops_following_a_template_and_changes_what_it_controlled_in_one_call() {
+    let mut s = Session::new();
+    house(&mut s);
+    run(&mut s, "template", json!({"name": "T", "from": 100000, "controls": ["categories"]}));
+    run(&mut s, "graphics", json!({"view": 100001, "template": "T"}));
+    let e = s.execute("graphics", &json!({"view": 100001, "hide": ["rooms"]})).unwrap_err();
+    assert!(e.contains("`T`"), "{e}");
+    let r = run(&mut s, "graphics", json!({"view": 100001, "template": null, "hide": ["rooms"]}));
+    assert_eq!((r["template"].clone(), r["hidden"].clone()), (Value::Null, json!(["room"])));
+    // Following one that controls them while changing them is the same mistake, made in one go.
+    let e = s.execute("graphics", &json!({"view": 100001, "template": "T", "hide": ["grids"]})).unwrap_err();
+    assert!(e.contains("`T`"), "{e}");
+}
+
+#[test]
+fn a_call_that_changes_nothing_makes_nothing_and_leaves_no_undo_step() {
+    let mut s = Session::new();
+    house(&mut s);
+    let (before, steps) = (s.model.clone(), s.history().len());
+    for p in [
+        json!({"view": "{3D}", "reset": false}),
+        json!({"view": "{3D}", "show": ["walls"]}),
+        json!({"view": "{3D}", "hide_elements": []}),
+        json!({"view": 100000, "show": ["walls"]}),
+        json!({"view": 100000, "reset": true}),
+        json!({"view": 100000, "categories": {}}),
+        json!({"view": 100000}),
+    ] {
+        run(&mut s, "graphics", p);
+    }
+    assert!(s.model.default_3d().is_none(), "no {{3D}} view made for nothing");
+    assert_eq!((*s.model == *before, s.history().len()), (true, steps));
+    run(&mut s, "graphics", json!({"view": "{3D}", "hide": ["walls"]}));
+    assert!(s.model.default_3d().is_some());
+    assert_eq!(s.history().len(), steps + 1);
+}
+
+#[test]
+fn modify_leaves_a_view_what_its_template_controls() {
+    let mut s = Session::new();
+    house(&mut s);
+    run(&mut s, "filter", json!({"name": "F", "categories": ["walls"]}));
+    run(&mut s, "template", json!({"name": "T", "from": 100000}));
+    run(&mut s, "graphics", json!({"view": 100001, "template": "T"}));
+    let before = s.model.clone();
+    let mut bad = |p: Value, says: &str| {
+        let e = s.execute("modify", &json!({"id": 100001, "graphics": p})).unwrap_err();
+        assert!(e.contains(says), "{p}: {e}");
+    };
+    bad(json!({"categories": {"room": {"hidden": true}}}), "`T`");
+    bad(json!({"filters": [{"filter": "F"}]}), "`T`");
+    let e = s.execute("modify", &json!({"id": 100001, "view_range": {"cut": 1500}})).unwrap_err();
+    assert!(e.contains("`T`") && e.contains("view range"), "{e}");
+    assert_eq!(*s.model, *before);
+    // Its name, and what the template leaves be: free.
+    run(&mut s, "modify", json!({"id": 100001, "name": "Second"}));
+    run(&mut s, "modify", json!({"id": 100001, "graphics": {"elements": {"100002": {"hidden": true}}}}));
+    run(&mut s, "template", json!({"name": "T", "controls": ["filters"]}));
+    run(&mut s, "modify", json!({"id": 100001, "view_range": {"cut": 1500}}));
+    run(&mut s, "modify", json!({"id": 100001, "graphics": {"categories": {"room": {"hidden": true}}}}));
+    // Unfollowing and changing it together is allowed, as with `graphics`.
+    run(&mut s, "template", json!({"name": "T", "controls": ["categories", "range"]}));
+    run(&mut s, "modify", json!({"id": 100001, "graphics": {"template": null}, "view_range": {"cut": 1700}}));
+    assert_eq!(s.model.plan_range(100001).cut, 3000.0 + 1700.0);
+}
+
+#[test]
+fn a_cut_weight_leaves_the_thin_lines_between_a_walls_layers_thin() {
+    let mut s = Session::new();
+    let walls = house(&mut s);
+    run(&mut s, "modify", json!({"ids": [walls[0], walls[1]], "type": "Exterior - 300mm"}));
+    let section = run(&mut s, "section", json!({"start": [-1000, 3000], "end": [9000, 3000]}))["id"].as_u64().unwrap();
+    run(&mut s, "graphics", json!({"view": 100000, "categories": {"walls": {"cut": {"weight": 8, "dash": "dashed"}}}}));
+    run(&mut s, "graphics", json!({"view": section, "categories": {"walls": {"cut": {"weight": 8}}}}));
+    let thin = (4, Rgb(25, 25, 25), None);
+    let d = plan(&s, 100000);
+    assert!(lines(&d, walls[0]).contains(&(8, Rgb(25, 25, 25), Some(vec![10.0, 5.0]))), "the outline");
+    assert!(lines(&d, walls[0]).contains(&thin), "the layers' lines");
+    let view = render::section_fit(&s.model, section, 800, 600);
+    let d = render::section(&s.model, section, view);
+    assert!(lines(&d, walls[1]).iter().any(|l| l.0 == 8));
+    assert!(lines(&d, walls[1]).contains(&thin), "the layers' lines, in a section");
+}
+
+#[test]
+fn deleting_an_element_takes_its_overrides_from_every_view() {
+    let mut s = Session::new();
+    let walls = house(&mut s);
+    let section = run(&mut s, "section", json!({"start": [-1000, 3000], "end": [9000, 3000]}))["id"].as_u64().unwrap();
+    run(&mut s, "graphics", json!({"view": 100000, "hide_elements": [walls[0]]}));
+    run(
+        &mut s,
+        "graphics",
+        json!({"view": section, "elements": {walls[0].to_string(): {"halftone": true}, walls[1].to_string(): {"halftone": true}}}),
+    );
+    run(&mut s, "graphics", json!({"view": "{3D}", "hide_elements": [walls[0], walls[2]]}));
+    run(&mut s, "delete", json!({"ids": [walls[0]]}));
+    let held = |s: &Session, view: u64| match crate::graphics::graphics_of(&s.model, view) {
+        Some(g) => g.elements.keys().map(|k| s.model.elements.id(k).unwrap()).collect::<Vec<_>>(),
+        _ => panic!("no view {view}"),
+    };
+    let three_d = s.model.default_3d().unwrap();
+    assert_eq!((held(&s, 100000), held(&s, section), held(&s, three_d)), (vec![], vec![walls[1]], vec![walls[2]]));
+    run(&mut s, "undo", json!({}));
+    assert_eq!(held(&s, 100000), [walls[0]], "undone with it");
+}
+
+#[test]
+fn a_pick_snaps_to_what_the_view_draws_and_nothing_else() {
+    use crate::snap::{Kind, Reach, Snaps, snap};
+    let mut s = Session::new();
+    let walls = house(&mut s);
+    let grid = run(&mut s, "grid", json!({"start": [-1000, 3000], "end": [9000, 3000]}))["id"].as_u64().unwrap();
+    let reach = Reach { point: 40.0, line: 20.0 };
+    let kind = |s: &Session, at: P2| snap(&s.model, 100000, at, reach, &[], false, &Snaps::default()).kind;
+    let (grid_end, corner) = (P2(-995.0, 3005.0), P2(5.0, 5.0));
+    assert_eq!((kind(&s, grid_end), kind(&s, corner)), (Kind::Endpoint, Kind::Endpoint));
+    run(&mut s, "graphics", json!({"view": 100000, "hide": ["grids"]}));
+    assert_ne!(kind(&s, grid_end), Kind::Endpoint, "the grid isn't there to snap to");
+    assert_eq!(kind(&s, corner), Kind::Endpoint);
+    run(&mut s, "graphics", json!({"view": 100000, "show": ["grids"], "hide_elements": [walls[0], walls[3]]}));
+    assert_eq!(kind(&s, grid_end), Kind::Endpoint);
+    assert_ne!(kind(&s, corner), Kind::Endpoint, "nor are the walls that met there");
+    // Another view's snaps are its own.
+    run(&mut s, "graphics", json!({"view": 100001, "hide": ["grids"]}));
+    assert_eq!(kind(&s, grid_end), Kind::Endpoint);
+    let _ = grid;
+}
+
+#[test]
+fn tag_all_leaves_out_what_the_plan_hides() {
+    let mut s = Session::new();
+    house(&mut s);
+    let door = run(&mut s, "door", json!({"at": [2000, 0]}))["id"].as_u64().unwrap();
+    let window = run(&mut s, "window", json!({"at": [8000, 3000]}))["id"].as_u64().unwrap();
+    run(&mut s, "graphics", json!({"view": 100000, "hide": ["windows"]}));
+    let tagged = |s: &mut Session| -> Vec<u64> {
+        let r = run(s, "tag", json!({}));
+        let ids: Vec<u64> = r["ids"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap()).collect();
+        ids.iter()
+            .filter_map(|t| match s.model.elements.get(t) {
+                Some(Element::Tag(x)) => s.model.elements.id(x.host),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(tagged(&mut s), [door], "the window is hidden here");
+    run(&mut s, "undo", json!({}));
+    run(&mut s, "graphics", json!({"view": 100000, "show": ["windows"], "hide_elements": [door]}));
+    assert_eq!(tagged(&mut s), [window]);
+    run(&mut s, "undo", json!({}));
+    run(&mut s, "graphics", json!({"view": 100000, "hide": ["doors", "windows"]}));
+    let e = s.execute("tag", &json!({})).unwrap_err();
+    assert!(e.contains("nothing to tag"), "{e}");
+    // Asked for by name, a hidden one is tagged all the same: it is a deliberate request.
+    run(&mut s, "tag", json!({"ids": [door]}));
+}
+
+#[test]
+fn views_are_framed_to_what_they_show() {
+    use crate::view3d::{self, Scene};
+    let mut s = Session::new();
+    house(&mut s);
+    // A column well above the walls: what a section, a 3D view and a sheet's 3D view frame.
+    run(&mut s, "column", json!({"at": [4000, 3000], "height": 9000}));
+    let section = run(&mut s, "section", json!({"start": [-1000, 3000], "end": [9000, 3000]}))["id"].as_u64().unwrap();
+    let framed = |s: &Session| {
+        let scene = Scene::new(&s.model);
+        let look = Look::of_3d(&s.model);
+        (
+            render::section_fit(&s.model, section, 800, 600),
+            scene.fit_in(-45.0, 30.0, 400, 300, &look),
+            view3d::camera_in(&s.model, -45.0, 30.0, 0.05, 20.0, &look),
+        )
+    };
+    let all = framed(&s);
+    run(&mut s, "graphics", json!({"view": "{3D}", "hide": ["columns"]}));
+    run(&mut s, "graphics", json!({"view": section, "hide": ["columns"]}));
+    let some = framed(&s);
+    assert_ne!(all.0, some.0, "a section's frame");
+    assert_ne!(all.1, some.1, "a 3D view's fit");
+    assert_ne!((all.2.width, all.2.height), (some.2.width, some.2.height), "a sheet's 3D view");
+    run(&mut s, "graphics", json!({"view": "{3D}", "show": ["columns"]}));
+    run(&mut s, "graphics", json!({"view": section, "show": ["columns"]}));
+    assert_eq!(framed(&s).0, all.0);
+}
+
+#[test]
+fn a_wall_under_the_cut_plane_is_hidden_with_the_others() {
+    let mut s = Session::new();
+    house(&mut s);
+    let low = run(&mut s, "wall", json!({"points": [[1000, 1000], [3000, 1000]], "height": 1000}))["ids"][0].as_u64().unwrap();
+    assert!(!owned(&plan(&s, 100000), low).is_empty());
+    run(&mut s, "graphics", json!({"view": 100000, "hide_elements": [low]}));
+    assert!(owned(&plan(&s, 100000), low).is_empty());
+    run(&mut s, "graphics", json!({"view": 100000, "show_elements": [low], "hide": ["walls"]}));
+    assert!(owned(&plan(&s, 100000), low).is_empty());
+}
+
+#[test]
+fn a_3d_view_on_a_sheet_is_drawn_as_its_view_says() {
+    let mut s = Session::new();
+    house(&mut s);
+    run(&mut s, "sheet", json!({"name": "Views"}));
+    run(&mut s, "place", json!({"sheet": "A101", "view": "{3D}", "scale": 200}));
+    let (sheet, vp) = (100006, 100008);
+    let shaded = |s: &Session| {
+        let d = crate::sheet::draw(&s.model, sheet).unwrap();
+        let pm = tiny_skia::Pixmap::decode_png(&render::png(&d).unwrap()).unwrap();
+        let (frame, (ox, oy)) = crate::sheet::frame(&s.model, vp).unwrap();
+        (0..frame.width)
+            .flat_map(|x| (0..frame.height).map(move |y| (x, y)))
+            .filter_map(|(x, y)| pm.pixel(ox as u32 + x, oy as u32 + y))
+            .filter(|c| (c.red(), c.green(), c.blue()) != (255, 255, 255))
+            .count()
+    };
+    assert!(shaded(&s) > 100);
+    run(&mut s, "graphics", json!({"view": "{3D}", "hide": ["walls"]}));
+    assert_eq!(shaded(&s), 0);
+}
+
+#[test]
+fn a_3d_view_sees_through_what_it_makes_transparent_and_can_still_pick_it() {
+    let mut s = Session::new();
+    let walls = house(&mut s);
+    run(&mut s, "floor", json!({}));
+    let scene = crate::view3d::Scene::new(&s.model);
+    let cam = scene.fit(-45.0, 50.0, 320, 240);
+    let render = |s: &mut Session, walls_as: Value| {
+        run(s, "graphics", json!({"view": "{3D}", "reset": true, "categories": {"walls": walls_as}}));
+        let look = Look::of_3d(&s.model);
+        scene.render_in(&cam, &[], &look)
+    };
+    let solid = render(&mut s, json!({"halftone": false}));
+    let gone = render(&mut s, json!({"hidden": true}));
+    let clear = render(&mut s, json!({"transparency": 100}));
+    let half = render(&mut s, json!({"transparency": 50}));
+    assert_eq!(clear.rgba, gone.rgba, "all the way through, it is as if it were hidden");
+    assert_ne!(solid.rgba, gone.rgba);
+    // Halfway, a pixel the wall covers is between the wall's and what lies behind it.
+    let luma =
+        |img: &crate::view3d::Image, i: usize| img.rgba.get(i * 4..i * 4 + 3).map_or(0, |c| c.iter().map(|v| u32::from(*v)).sum::<u32>());
+    let covered: Vec<usize> = (0..320 * 240).filter(|i| luma(&solid, *i) != luma(&gone, *i)).collect();
+    assert!(covered.len() > 300);
+    let between = covered.iter().filter(|i| {
+        let (a, b, m) = (luma(&solid, **i), luma(&gone, **i), luma(&half, **i));
+        m >= a.min(b) && m <= a.max(b)
+    });
+    assert!(between.count() * 10 > covered.len() * 9, "most of them");
+    assert!(covered.iter().any(|i| luma(&half, *i) != luma(&solid, *i) && luma(&half, *i) != luma(&gone, *i)));
+    // The wall is still what a click on it picks, seen through or not; hidden, it is not.
+    let at = covered.iter().copied().find(|i| solid.pick((i % 320) as f64, (i / 320) as f64) == Some(walls[0])).unwrap();
+    let (x, y) = ((at % 320) as f64, (at / 320) as f64);
+    assert_eq!(half.pick(x, y), Some(walls[0]));
+    assert_eq!(clear.pick(x, y), Some(walls[0]));
+    assert_ne!(gone.pick(x, y), Some(walls[0]));
+    // A section's hidden line does not see through anything.
+    let section = run(&mut s, "section", json!({"start": [-1000, 3000], "end": [9000, 3000]}))["id"].as_u64().unwrap();
+    run(&mut s, "graphics", json!({"view": section, "categories": {"walls": {"transparency": 100}}}));
+    let view = render::section_fit(&s.model, section, 800, 600);
+    let d = render::section(&s.model, section, view);
+    assert!(!owned(&d, walls[1]).is_empty());
+}
+
+#[test]
+fn a_projections_line_colour_draws_the_edges_in_3d_and_beyond_a_sections_line() {
+    let mut s = Session::new();
+    let walls = house(&mut s);
+    let section = run(&mut s, "section", json!({"start": [-1000, 3000], "end": [9000, 3000]}))["id"].as_u64().unwrap();
+    let exactly = |pm: &tiny_skia::Pixmap, c: Rgb| painted(pm, |r, g, b| (r, g, b) == (c.0, c.1, c.2));
+    let beyond = |s: &Session, c: Rgb| {
+        let view = render::section_fit(&s.model, section, 800, 600);
+        let pm = tiny_skia::Pixmap::decode_png(&render::section_png(&s.model, section, view).unwrap()).unwrap();
+        exactly(&pm, c)
+    };
+    let edge = Rgb(48, 48, 48);
+    let (edges3d, edges_section) = (exactly(&picture(&mut s, "{3D}", "e0"), edge), beyond(&s, edge));
+    assert!(edges3d > 100 && edges_section > 20, "{edges3d} {edges_section}");
+    run(&mut s, "graphics", json!({"view": "{3D}", "categories": {"walls": {"projection": {"color": [200, 0, 0]}}}}));
+    run(&mut s, "graphics", json!({"view": section, "categories": {"walls": {"projection": {"color": [200, 0, 0]}}}}));
+    assert!(exactly(&picture(&mut s, "{3D}", "e1"), RED) > 100, "3D edges in red");
+    assert!(beyond(&s, RED) > 20, "a section's lines beyond its line");
+    assert_eq!(exactly(&picture(&mut s, "{3D}", "e2"), edge), 0);
+    // Halftone lightens them, and an element's own colour beats its category's.
+    run(&mut s, "graphics", json!({"view": section, "categories": {"walls": {"projection": {"color": null}, "halftone": true}}}));
+    let light = Rgb(48 + (255 - 48) / 2, 48 + (255 - 48) / 2, 48 + (255 - 48) / 2);
+    assert!(beyond(&s, light) > 20);
+    // The north wall, all of it beyond the line.
+    run(&mut s, "graphics", json!({"view": section, "elements": {walls[2].to_string(): {"projection": {"color": [0, 0, 200]}}}}));
+    let half = |c: u8| c + (255 - c) / 2;
+    assert!(beyond(&s, Rgb(half(0), half(0), half(200))) > 5, "its own colour, in the category's halftone");
+}
+
+#[test]
+fn a_selected_element_seen_through_shows_its_tint() {
+    use crate::view3d::{Image, Scene};
+    let mut s = Session::new();
+    let walls = house(&mut s);
+    run(&mut s, "floor", json!({}));
+    run(&mut s, "graphics", json!({"view": "{3D}", "categories": {"walls": {"transparency": 100}}}));
+    let scene = Scene::new(&s.model);
+    let cam = scene.fit(-45.0, 50.0, 320, 240);
+    let look = Look::of(&s.model, s.model.default_3d().unwrap());
+    let plain = scene.render_in(&cam, &[], &look);
+    let tinted = scene.render_in(&cam, &[(walls[0], Rgb(37, 99, 235))], &look);
+    let differing = |a: &Image, b: &Image| a.rgba.chunks(4).zip(b.rgba.chunks(4)).filter(|(x, y)| x != y).count();
+    assert!(differing(&plain, &tinted) > 100, "a selected wall you can see through still shows it: {}", differing(&plain, &tinted));
+    let other = scene.render_in(&cam, &[(walls[1], Rgb(37, 99, 235))], &look);
+    assert!(differing(&tinted, &other) > 100, "each its own");
+}
+
+#[test]
+fn a_section_leaves_out_what_its_view_hides() {
+    let mut s = Session::new();
+    let walls = house(&mut s);
+    let section = run(&mut s, "section", json!({"start": [-1000, 3000], "end": [9000, 3000]}))["id"].as_u64().unwrap();
+    let view = render::section_fit(&s.model, section, 800, 600);
+    let d = render::section(&s.model, section, view);
+    assert!(!owned(&d, walls[1]).is_empty() && d.prims.iter().any(|p| matches!(p, Prim::Fill { color, .. } if *color == POCHE)));
+    run(&mut s, "graphics", json!({"view": section, "hide": ["walls"]}));
+    let d = render::section(&s.model, section, view);
+    assert!(owned(&d, walls[1]).is_empty() && owned(&d, walls[3]).is_empty());
+    assert!(!d.prims.iter().any(|p| matches!(p, Prim::Fill { color, .. } if *color == POCHE)), "no poché left over");
+    // And the picture beyond the line: nothing of the walls.
+    let png = render::section_png(&s.model, section, view).unwrap();
+    let pm = tiny_skia::Pixmap::decode_png(&png).unwrap();
+    let dark = painted(&pm, |r, g, b| r < 100 && g < 100 && b < 100);
+    assert!(dark < 3000, "{dark}: levels and a title, no walls");
+    // A cut line weight of its own.
+    run(&mut s, "graphics", json!({"view": section, "show": ["walls"], "categories": {"walls": {"cut": {"weight": 7}}}}));
+    let d = render::section(&s.model, section, view);
+    assert!(lines(&d, walls[1]).iter().any(|l| l.0 == 7));
+}
+
+#[test]
+fn a_sheet_prints_its_views_as_they_look() {
+    let mut s = Session::new();
+    let walls = house(&mut s);
+    run(&mut s, "sheet", json!({"name": "Plans"}));
+    run(&mut s, "place", json!({"sheet": "A101", "view": "Level 1"}));
+    let (sheet, vp) = (100006, 100007);
+    let at = |s: &Session, p: P2| {
+        let (v, (ox, oy)) = crate::sheet::frame(&s.model, vp).unwrap();
+        let (x, y) = v.px(p);
+        (x + ox, y + oy)
+    };
+    let colour = |s: &Session| {
+        let d = crate::sheet::draw(&s.model, sheet).unwrap();
+        let pm = tiny_skia::Pixmap::decode_png(&render::png(&d).unwrap()).unwrap();
+        let (x, y) = at(s, P2(4000.0, 0.0));
+        let c = pm.pixel(x as u32, y as u32).unwrap();
+        Rgb(c.red(), c.green(), c.blue())
+    };
+    assert_eq!(colour(&s), POCHE);
+    run(&mut s, "graphics", json!({"view": 100000, "hide_elements": [walls[0]]}));
+    assert_eq!(colour(&s), PAPER);
+}
+
+#[test]
+fn a_file_from_before_pens_opens_with_each_weight_the_nearest_pen() {
+    let mut s = Session::new();
+    house(&mut s);
+    run(&mut s, "filter", json!({"name": "Long", "categories": ["walls"]}));
+    run(
+        &mut s,
+        "graphics",
+        json!({"view": 100000, "categories": {"walls": {"cut": {"weight": 7}, "projection": {"weight": 3}}},
+               "filters": [{"filter": "Long", "cut": {"weight": 10}}]}),
+    );
+    let now = s.model.to_json().unwrap();
+    // Saved before pens, the same weights were pixels of a sheet's drawing, 5 to the mm.
+    fn as_pixels(v: &mut Value) {
+        match v {
+            Value::Object(o) => {
+                for (k, v) in o.iter_mut() {
+                    match (k.as_str(), v.as_u64()) {
+                        ("weight", Some(7)) => *v = json!(1.25),
+                        ("weight", Some(3)) => *v = json!(0.75),
+                        ("weight", Some(10)) => *v = json!(1.75),
+                        _ => as_pixels(v),
+                    }
+                }
+            }
+            Value::Array(a) => a.iter_mut().for_each(as_pixels),
+            _ => {}
+        }
+    }
+    let mut old: Value = serde_json::from_str(&now).unwrap();
+    old["format"] = json!(3);
+    as_pixels(&mut old);
+    let (m, left_out) = crate::model::Model::read(&old.to_string()).unwrap();
+    assert!(left_out.is_empty(), "{left_out:?}");
+    assert_eq!(m.to_json().unwrap(), now);
+}
+
+#[test]
+fn graphics_that_make_no_sense_are_refused_saying_what_to_fix() {
+    let mut s = Session::new();
+    let walls = house(&mut s);
+    run(&mut s, "sheet", json!({"name": "Plans"}));
+    let before = s.model.clone();
+    let mut bad = |p: Value, says: &str| {
+        let e = s.execute("graphics", &p).unwrap_err();
+        assert!(e.contains(says), "{p}: {e}");
+    };
+    bad(json!({"hide": ["balloons"]}), "balloons");
+    bad(json!({"view": "nowhere"}), "nowhere");
+    bad(json!({"hide_elements": [9999]}), "9999");
+    bad(json!({"hide_elements": [100006]}), "sheet");
+    bad(json!({"categories": {"walls": {"cut": {"weight": 17}}}}), "a pen, a whole number from 0 (a hairline) to 16, not 17");
+    bad(json!({"categories": {"walls": {"cut": {"weight": 2.5}}}}), "weight");
+    bad(json!({"categories": {"walls": {"cut": {"weight": -1}}}}), "weight");
+    bad(json!({"categories": {"walls": {"projection": {"weight": "heavy"}}}}), "heavy");
+    bad(json!({"categories": {"walls": {"transparency": 101}}}), "transparency");
+    bad(json!({"categories": {"walls": {"projection": {"dash": "wavy"}}}}), "wavy");
+    bad(json!({"categories": {"walls": {"projection": {"color": [300, 0, 0]}}}}), "300");
+    bad(json!({"categories": {"walls": {"projection": {"colour": [3, 0, 0]}}}}), "colour");
+    bad(json!({"categories": {"balloons": {"halftone": true}}}), "balloons");
+    bad(json!({"elements": {"abc": {"halftone": true}}}), "abc");
+    bad(json!({"elements": {"9999": {"halftone": true}}}), "9999");
+    bad(json!({"filters": [{"filter": "Nope"}]}), "Nope");
+    bad(json!({"template": "Nope"}), "Nope");
+    bad(json!({"hide": "walls"}), "hide");
+    assert_eq!(*s.model, *before, "a refused command changes nothing");
+    // Walls are drawn; levels in sections and grids and so on are categories too; sheets aren't.
+    assert!(s.execute("graphics", &json!({"hide": ["sheets"]})).is_err());
+    let _ = walls;
+}
+
+#[test]
+fn a_view_filter_picks_elements_by_rules_and_a_view_draws_them_its_own_way() {
+    let mut s = Session::new();
+    let walls = house(&mut s);
+    run(&mut s, "modify", json!({"id": walls[0], "type": "Interior - 100mm"}));
+    let r = run(
+        &mut s,
+        "filter",
+        json!({"name": "Interior", "categories": ["walls"], "rules": [{"field": "Type", "op": "equals", "value": "Interior - 100mm"}]}),
+    );
+    assert_eq!((r["categories"].clone(), r["matches"].clone()), (json!(["wall"]), json!([walls[0]])));
+    run(
+        &mut s,
+        "graphics",
+        json!({"view": 100000, "filters": [{"filter": "Interior", "cut": {"color": [200, 0, 0], "fill": [250, 220, 220]}}]}),
+    );
+    let d = plan(&s, 100000);
+    assert!(lines(&d, walls[0]).iter().any(|l| l.1 == RED), "{:?}", lines(&d, walls[0]));
+    assert!(lines(&d, walls[1]).iter().all(|l| l.1 != RED));
+    assert_eq!(pixel(&d, P2(4000.0, 0.0)), Rgb(250, 220, 220));
+    // Another view draws it as it always did.
+    assert!(lines(&plan(&s, 100001), walls[0]).iter().all(|l| l.1 != RED));
+    // Hidden by the filter alone.
+    let view = plan(&s, 100000).view;
+    run(&mut s, "graphics", json!({"view": 100000, "filters": [{"filter": "Interior", "hidden": true}]}));
+    let d = render::draw(&s.model, 100000, view);
+    assert!(owned(&d, walls[0]).is_empty() && !owned(&d, walls[1]).is_empty());
+    assert_eq!(pixel(&d, P2(4000.0, 0.0)), PAPER);
+    // A project parameter, as a schedule's filters read it; the filter follows the model.
+    run(&mut s, "parameter", json!({"name": "Fire Rating", "kind": "number", "categories": ["walls"]}));
+    run(&mut s, "modify", json!({"id": walls[1], "params": {"Fire Rating": 2}}));
+    let r = run(
+        &mut s,
+        "filter",
+        json!({"name": "Rated", "categories": ["wall"], "rules": [{"field": "Fire Rating", "op": "greater-or-equal", "value": 1}]}),
+    );
+    assert_eq!(r["matches"], json!([walls[1]]));
+    run(&mut s, "parameter", json!({"name": "Fire Rating", "rename": "Fire Class"}));
+    let r = run(&mut s, "filter", json!({"name": "Rated"}));
+    assert_eq!(
+        (r["rules"][0]["field"].as_str(), r["matches"].clone()),
+        (Some("Fire Class"), json!([walls[1]])),
+        "the rule follows the rename"
+    );
+    // Not a filter without its rules: one with none picks every element of its categories.
+    let r = run(&mut s, "filter", json!({"name": "Walls", "categories": ["walls"]}));
+    assert_eq!(r["matches"].as_array().unwrap().len(), 4);
+    // The parameter is in use: it stays until the filter lets go of it.
+    let e = s.execute("parameter", &json!({"name": "Fire Class", "delete": true})).unwrap_err();
+    assert!(e.contains("Rated"), "{e}");
+    run(&mut s, "filter", json!({"name": "Rated", "delete": true}));
+    run(&mut s, "parameter", json!({"name": "Fire Class", "delete": true}));
+}
+
+#[test]
+fn filters_apply_in_order_the_first_prevailing_and_an_elements_own_beats_them() {
+    let mut s = Session::new();
+    let walls = house(&mut s);
+    for (name, op, value) in [("A", "equals", "Generic - 200mm"), ("B", "contains", "200")] {
+        run(&mut s, "filter", json!({"name": name, "categories": ["walls"], "rules": [{"field": "Type", "op": op, "value": value}]}));
+    }
+    let first = json!({"filter": "A", "cut": {"color": [200, 0, 0]}});
+    let second = json!({"filter": "B", "cut": {"color": [0, 200, 0], "weight": 3}});
+    run(&mut s, "graphics", json!({"view": 100000, "filters": [first, second]}));
+    let d = plan(&s, 100000);
+    assert!(lines(&d, walls[0]).contains(&(3, RED, None)), "the first one's colour, the second's weight: {:?}", lines(&d, walls[0]));
+    run(&mut s, "graphics", json!({"view": 100000, "filters": [second, first]}));
+    assert!(lines(&plan(&s, 100000), walls[0]).contains(&(3, Rgb(0, 200, 0), None)));
+    run(&mut s, "graphics", json!({"view": 100000, "elements": {walls[0].to_string(): {"cut": {"color": [0, 0, 200]}}}}));
+    assert!(lines(&plan(&s, 100000), walls[0]).contains(&(3, Rgb(0, 0, 200), None)), "its own colour, the filters' weight");
+    // The category's override is the weakest, and a filter that hides hides, whatever the others do.
+    run(&mut s, "graphics", json!({"view": 100000, "categories": {"walls": {"cut": {"color": [9, 9, 9], "dash": "dotted"}}}}));
+    let lines = lines(&plan(&s, 100000), walls[1]);
+    assert!(lines.contains(&(3, Rgb(0, 200, 0), Some(vec![2.0, 4.0]))), "{lines:?}");
+    run(&mut s, "graphics", json!({"view": 100000, "filters": [first, {"filter": "B", "hidden": true}]}));
+    assert!(owned(&plan(&s, 100000), walls[1]).is_empty());
+    // A filter applies once, and in a section as in a plan.
+    let e = s.execute("graphics", &json!({"filters": [first, first]})).unwrap_err();
+    assert!(e.contains("twice"), "{e}");
+}
+
+#[test]
+fn view_filters_must_make_sense_and_when_one_goes_the_views_stop_applying_it() {
+    let mut s = Session::new();
+    let walls = house(&mut s);
+    let section = run(&mut s, "section", json!({"start": [-1000, 3000], "end": [9000, 3000]}))["id"].as_u64().unwrap();
+    let mut bad = |p: Value, says: &str| {
+        let e = s.execute("filter", &p).unwrap_err();
+        assert!(e.contains(says), "{p}: {e}");
+    };
+    bad(json!({"categories": ["walls"]}), "name");
+    bad(json!({"name": "X"}), "categories");
+    bad(json!({"name": "X", "categories": []}), "categories");
+    bad(json!({"name": "X", "categories": ["balloons"]}), "balloons");
+    bad(json!({"name": "X", "categories": ["walls"], "rules": [{"field": "Nope", "op": "equals", "value": 1}]}), "Nope");
+    bad(json!({"name": "X", "categories": ["walls", "rooms"], "rules": [{"field": "Type", "op": "equals", "value": "a"}]}), "Type");
+    bad(json!({"name": "X", "categories": ["walls"], "rules": [{"field": "Length", "op": "contains", "value": "a"}]}), "Length");
+    bad(json!({"name": "X", "categories": ["walls"], "rules": [{"field": "Length", "op": "greater", "value": "long"}]}), "Length");
+    bad(json!({"name": "X", "categories": ["walls"], "rules": "all"}), "rules");
+    bad(json!({"name": "Nope", "delete": true}), "Nope");
+    run(&mut s, "filter", json!({"name": "Long", "categories": ["walls"], "rules": [{"field": "Length", "op": "greater", "value": 7000}]}));
+    let long = run(&mut s, "filter", json!({"name": "Long"}));
+    assert_eq!(long["matches"], json!([walls[0], walls[2]]), "read back by name alone");
+    for view in [json!(100000), json!(section)] {
+        run(&mut s, "graphics", json!({"view": view, "filters": [{"filter": "Long", "hidden": true}]}));
+    }
+    assert!(owned(&plan(&s, 100000), walls[0]).is_empty());
+    let r = run(&mut s, "filter", json!({"name": "Long", "delete": true}));
+    assert_eq!(r["deleted"], true);
+    assert!(!owned(&plan(&s, 100000), walls[0]).is_empty(), "no longer applied");
+    assert_eq!(run(&mut s, "graphics", json!({"view": section}))["filters"], json!([]));
+    let e = s.execute("graphics", &json!({"filters": [{"filter": "Long"}]})).unwrap_err();
+    assert!(e.contains("Long"), "{e}");
+}
+
+#[test]
+fn a_view_template_holds_a_views_settings_for_other_views_to_follow() {
+    let mut s = Session::new();
+    house(&mut s);
+    let up = run(&mut s, "wall", json!({"points": [[0, 0], [2000, 0]], "level": "Level 2", "height": 2500}))["ids"][0].as_u64().unwrap();
+    let grid = run(&mut s, "grid", json!({"start": [-1000, 3000], "end": [9000, 3000]}))["id"].as_u64().unwrap();
+    run(&mut s, "graphics", json!({"view": 100000, "hide": ["grids"], "categories": {"walls": {"cut": {"color": [200, 0, 0]}}}}));
+    let r = run(&mut s, "template", json!({"name": "Presentation", "from": "Level 1"}));
+    assert_eq!(r["controls"], json!(["categories", "filters", "range", "phase", "options", "scale", "detail", "style", "background_grid"]));
+    assert_eq!((r["hidden"].clone(), r["categories"]["wall"]["cut"]["color"].clone()), (json!(["grid"]), json!([200, 0, 0])));
+    assert!(!owned(&plan(&s, 100001), grid).is_empty() && lines(&plan(&s, 100001), up).iter().all(|l| l.1 != RED));
+    run(&mut s, "graphics", json!({"view": "Level 2", "template": "Presentation"}));
+    assert!(owned(&plan(&s, 100001), grid).is_empty(), "its grids are hidden by the template");
+    assert!(lines(&plan(&s, 100001), up).iter().any(|l| l.1 == RED), "its walls are red by it");
+    // Reading the view tells what is in force, and what controls it.
+    let r = run(&mut s, "graphics", json!({"view": "Level 2"}));
+    assert_eq!(
+        (r["template"].clone(), r["hidden"].clone(), r["controlled"].clone()),
+        (
+            json!("Presentation"),
+            json!(["grid"]),
+            json!(["categories", "filters", "range", "phase", "options", "scale", "detail", "style", "background_grid"])
+        )
+    );
+    // Change the template, and its views follow; the view it came from doesn't.
+    run(&mut s, "template", json!({"name": "Presentation", "categories": {"walls": {"cut": {"color": [0, 0, 200]}}}}));
+    assert!(lines(&plan(&s, 100001), up).iter().any(|l| l.1 == Rgb(0, 0, 200)));
+    assert!(lines(&plan(&s, 100000), 100002).iter().any(|l| l.1 == RED));
+    // What a template controls isn't the view's to change.
+    let e = s.execute("graphics", &json!({"view": 100001, "hide": ["rooms"]})).unwrap_err();
+    assert!(e.contains("Presentation"), "{e}");
+    // It can control some of it: here its filters alone, and the view's categories are its own again.
+    run(&mut s, "template", json!({"name": "Presentation", "controls": ["filters"]}));
+    assert!(!owned(&plan(&s, 100001), grid).is_empty() && lines(&plan(&s, 100001), up).iter().all(|l| l.1 != RED));
+    run(&mut s, "graphics", json!({"view": 100001, "hide": ["rooms"]}));
+    assert_eq!(run(&mut s, "graphics", json!({"view": 100001}))["hidden"], json!(["room"]));
+    // Following no more, a view has its own settings again.
+    run(&mut s, "template", json!({"name": "Presentation", "controls": ["categories"]}));
+    assert!(run(&mut s, "graphics", json!({"view": 100001, "template": null}))["template"].is_null());
+    assert_eq!(run(&mut s, "graphics", json!({"view": 100001}))["hidden"], json!(["room"]));
+}
+
+#[test]
+fn a_template_is_for_a_kind_of_view_and_is_copied_and_renamed_as_revits_are() {
+    let mut s = Session::new();
+    house(&mut s);
+    // Made from a view, it is for views of its kind; made from nothing, for the kind it says, or any.
+    assert_eq!(run(&mut s, "template", json!({"name": "Plans", "from": "Level 1"}))["kind"], "plan");
+    run(&mut s, "graphics", json!({"view": "{3D}", "hide": ["levels"]}));
+    assert_eq!(run(&mut s, "template", json!({"name": "Shaded", "from": "{3D}"}))["kind"], "3d");
+    assert_eq!(run(&mut s, "template", json!({"name": "Cuts", "kind": "section", "detail": "fine"}))["kind"], "section");
+    assert!(run(&mut s, "template", json!({"name": "Any", "controls": ["scale"]}))["kind"].is_null());
+    let e = s.execute("template", &json!({"name": "Cuts", "kind": "sheet"})).unwrap_err();
+    assert!(e.contains("plan, section or 3d"), "{e}");
+    // Duplicate: a new one like another, everything it holds, under its own name.
+    run(&mut s, "graphics", json!({"view": "Level 2", "template": "Plans"}));
+    let copy = run(&mut s, "template", json!({"name": "Plans 2", "like": "Plans", "detail": "coarse"}));
+    assert_eq!((copy["kind"].clone(), copy["detail"].clone(), copy["views"].clone()), (json!("plan"), json!("coarse"), json!([])));
+    assert_eq!(s.model.view_templates["Plans 2"].controls, s.model.view_templates["Plans"].controls);
+    let e = s.execute("template", &json!({"name": "Plans 3", "like": "Nope"})).unwrap_err();
+    assert!(e.contains("Nope"), "{e}");
+    // Rename: the views following it follow it under its new name.
+    let r = run(&mut s, "template", json!({"name": "Plans", "rename": "Working Plans"}));
+    assert_eq!((r["name"].clone(), r["views"].clone()), (json!("Working Plans"), json!([100001])));
+    assert!(!s.model.view_templates.contains_key("Plans"));
+    assert_eq!(run(&mut s, "graphics", json!({"view": "Level 2"}))["template"], "Working Plans");
+    let e = s.execute("template", &json!({"name": "Working Plans", "rename": "Shaded"})).unwrap_err();
+    assert!(e.contains("already"), "{e}");
+    // It survives a file.
+    let (back, left_out) = crate::model::Model::read(&s.model.to_json().unwrap()).unwrap();
+    assert!(left_out.is_empty(), "{left_out:?}");
+    assert_eq!(back.view_templates["Shaded"].kind, Some(crate::graphics::ViewKind::ThreeD));
+}
+
+#[test]
+fn a_template_controls_a_plans_view_range_and_a_3d_views_settings() {
+    let mut s = Session::new();
+    house(&mut s);
+    let r = run(&mut s, "template", json!({"name": "Low cut", "view_range": {"cut": 500, "top": 2000}, "controls": ["range"]}));
+    assert_eq!(r["view_range"], json!({"top": 2000.0, "cut": 500.0, "bottom": 0.0, "depth": 0.0}));
+    // The level's own range isn't in force while the template controls it, and stays what it was.
+    run(&mut s, "modify", json!({"id": 100001, "view_range": {"cut": 1500}}));
+    run(&mut s, "graphics", json!({"view": 100001, "template": "Low cut"}));
+    let cut = |s: &Session, level| s.model.plan_range(level).cut;
+    assert_eq!((cut(&s, 100000), cut(&s, 100001)), (1200.0, 3500.0));
+    let e = s.execute("modify", &json!({"id": 100001, "view_range": {"cut": 1800}})).unwrap_err();
+    assert!(e.contains("`Low cut`"), "{e}");
+    run(&mut s, "graphics", json!({"view": 100001, "template": null}));
+    assert_eq!(cut(&s, 100001), 4500.0);
+    // A 3D view follows one as a plan does.
+    run(&mut s, "graphics", json!({"view": "{3D}", "hide": ["walls", "levels"]}));
+    run(&mut s, "template", json!({"name": "Walls out", "from": "{3D}"}));
+    run(&mut s, "sheet", json!({"name": "Views"}));
+    run(&mut s, "place", json!({"sheet": "A101", "view": "{3D}", "scale": 200}));
+    run(&mut s, "graphics", json!({"view": "{3D}", "reset": true, "template": "Walls out"}));
+    let pm = picture(&mut s, "{3D}", "t");
+    assert_eq!(painted(&pm, |r, g, b| (r, g, b) != (255, 255, 255)), 0);
+}
+
+#[test]
+fn a_template_controls_the_scale_detail_level_and_visual_style_of_the_views_that_follow_it() {
+    use crate::graphics::{Detail, VisualStyle};
+    use crate::prim::View;
+    let mut s = Session::new();
+    run(&mut s, "wall", json!({"points": [[0, 0], [8000, 0], [8000, 6000], [0, 6000]], "closed": true, "type": "Exterior - 300mm"}));
+    // Level 2 is held at 1 : 100, coarse; a template made from it says so, and controls every group.
+    run(&mut s, "scale", json!({"view": 100001, "scale": 100}));
+    run(&mut s, "detail", json!({"view": 100001, "detail": "coarse"}));
+    let r = run(&mut s, "template", json!({"name": "Plans", "from": 100001}));
+    assert_eq!((r["scale"].clone(), r["detail"].clone(), r["visual_style"].clone()), (json!(100.0), json!("coarse"), json!("shaded")));
+    for group in ["scale", "detail", "style"] {
+        assert!(r["controls"].as_array().unwrap().contains(&json!(group)), "{group}: {r}");
+    }
+    // Level 1 follows it: its annotation and its detail are the template's, its own settings stay as they were.
+    run(&mut s, "scale", json!({"view": 100000, "scale": 50}));
+    let view = View { scale: 0.1, cx: 4000.0, cy: 3000.0, width: 1000, height: 800 };
+    let k = |s: &Session| render::annotation(&s.model, 100000, view);
+    let layered = |s: &Session| render::draw(&s.model, 100000, view).prims.len();
+    let (alone, fine) = (k(&s), layered(&s));
+    run(&mut s, "graphics", json!({"view": 100000, "template": "Plans"}));
+    assert_eq!((alone, k(&s)), (1.0, 2.0), "1 : 100 at a tenth of a pixel to the mm is twice 1 : 50");
+    assert!(layered(&s) < fine, "coarse draws less");
+    let own = run(&mut s, "scale", json!({"view": 100000}));
+    assert_eq!(own["scale"], 100.0, "it says what is in force");
+    assert!(matches!(&s.model.elements[&100000], Element::Level(l) if l.graphics.scale == Some(50.0) && l.graphics.detail == Detail::Fine));
+    // It can't set what the template controls, and says so as the other groups do; nothing changes.
+    let before = s.model.clone();
+    for (id, p, says) in [
+        ("scale", json!({"view": 100000, "scale": 20}), "scale"),
+        ("detail", json!({"view": 100000, "detail": "medium"}), "detail level"),
+        ("modify", json!({"id": 100000, "graphics": {"scale": 20}}), "scale"),
+        ("modify", json!({"id": 100000, "graphics": {"detail": "medium"}}), "detail level"),
+        ("modify", json!({"id": 100000, "graphics": {"style": "wireframe"}}), "visual style"),
+    ] {
+        let e = s.execute(id, &p).unwrap_err();
+        assert!(e.contains("`Plans`") && e.contains(says) && e.contains("template: null"), "{p}: {e}");
+    }
+    assert_eq!(*s.model, *before);
+    // Asking is fine, and so is what it leaves be: a template that controls only the scale leaves the detail level.
+    run(&mut s, "template", json!({"name": "Plans", "controls": ["scale"]}));
+    run(&mut s, "detail", json!({"view": 100000, "detail": "medium"}));
+    assert_eq!(k(&s), 2.0);
+    assert!(s.execute("scale", &json!({"view": 100000, "scale": 20})).is_err());
+    // The template's own are set on it, and the views that follow it take the change at once.
+    run(&mut s, "template", json!({"name": "Plans", "scale": 200, "detail": "fine", "visual_style": "wireframe"}));
+    assert_eq!(k(&s), 4.0);
+    let r = run(&mut s, "template", json!({"name": "Plans", "scale": 50}));
+    assert_eq!((r["scale"].clone(), k(&s)), (json!(50.0), 1.0));
+    for mut p in [
+        json!({"scale": null}),
+        json!({"scale": 0}),
+        json!({"scale": 1e9}),
+        json!({"scale": "1:50"}),
+        json!({"detail": "huge"}),
+        json!({"visual_style": "pretty"}),
+    ] {
+        p["name"] = json!("Plans");
+        assert!(s.execute("template", &p).is_err(), "{p}");
+    }
+    // Followed, it can't be set; unfollowed, it can, and its own settings are what count.
+    run(&mut s, "template", json!({"name": "Plans", "scale": 100, "controls": ["scale", "detail"]}));
+    let e = s.execute("scale", &json!({"view": 100000, "scale": 50})).unwrap_err();
+    assert!(e.contains("`Plans`"), "{e}");
+    run(&mut s, "graphics", json!({"view": 100000, "template": null}));
+    run(&mut s, "scale", json!({"view": 100000, "scale": 50}));
+    assert_eq!(k(&s), 1.0, "1 : 50 at a tenth of a pixel to the mm is what is on screen");
+    // A 3D view follows the visual style: wireframe in force while its own is shaded.
+    run(&mut s, "visual_style", json!({"style": "wireframe"}));
+    run(&mut s, "template", json!({"name": "Wire", "from": "{3D}"}));
+    run(&mut s, "graphics", json!({"view": "{3D}", "reset": true, "template": "Wire"}));
+    assert_eq!(Look::of_3d(&s.model).style(), VisualStyle::Wireframe);
+    assert!(matches!(&s.model.elements[&s.model.default_3d().unwrap()], Element::View3D(v) if v.graphics.style == VisualStyle::Shaded));
+    let e = s.execute("visual_style", &json!({"style": "hidden_line"})).unwrap_err();
+    assert!(e.contains("`Wire`") && e.contains("visual style"), "{e}");
+    run(&mut s, "template", json!({"name": "Wire", "visual_style": "hidden_line"}));
+    assert_eq!(Look::of_3d(&s.model).style(), VisualStyle::HiddenLine);
+    // A template that doesn't control a group lets the view keep its own.
+    run(&mut s, "template", json!({"name": "Wire", "controls": ["categories"]}));
+    assert_eq!(Look::of_3d(&s.model).style(), VisualStyle::Shaded);
+    run(&mut s, "visual_style", json!({"style": "hidden_line"}));
+    assert_eq!(Look::of_3d(&s.model).style(), VisualStyle::HiddenLine);
+}
+
+#[test]
+fn templates_must_make_sense_and_when_one_goes_its_views_keep_their_own_settings() {
+    let mut s = Session::new();
+    house(&mut s);
+    run(&mut s, "sheet", json!({"name": "Plans"}));
+    let mut bad = |p: Value, says: &str| {
+        let e = s.execute("template", &p).unwrap_err();
+        assert!(e.contains(says), "{p}: {e}");
+    };
+    bad(json!({"from": "Level 1"}), "name");
+    bad(json!({"name": "T", "from": "nowhere"}), "nowhere");
+    bad(json!({"name": "T", "from": 100006}), "sheet");
+    bad(json!({"name": "T", "controls": ["layout"]}), "layout");
+    bad(json!({"name": "T", "controls": "all"}), "controls");
+    bad(json!({"name": "T", "view_range": {"cut": -5, "bottom": 10}}), "view range");
+    bad(json!({"name": "T", "view_range": [1]}), "view_range");
+    bad(json!({"name": "T", "hide_elements": [100002]}), "elements");
+    bad(json!({"name": "T", "elements": {"100002": {"halftone": true}}}), "elements");
+    bad(json!({"name": "T", "template": "U"}), "template");
+    bad(json!({"name": "T", "hide": ["balloons"]}), "balloons");
+    bad(json!({"name": "Nope", "delete": true}), "Nope");
+    run(&mut s, "graphics", json!({"view": 100000, "hide": ["rooms"]}));
+    run(&mut s, "template", json!({"name": "T", "from": 100000}));
+    run(&mut s, "graphics", json!({"view": 100001, "template": "T"}));
+    let r = run(&mut s, "template", json!({"name": "T", "delete": true}));
+    assert_eq!(r["deleted"], true);
+    let g = run(&mut s, "graphics", json!({"view": 100001}));
+    assert!(g["template"].is_null() && g["controlled"] == json!([]));
+    assert_eq!(run(&mut s, "graphics", json!({"view": 100000}))["hidden"], json!(["room"]), "a view's own settings stay");
+    let e = s.execute("graphics", &json!({"view": 100001, "template": "T"})).unwrap_err();
+    assert!(e.contains('T'), "{e}");
+}
+
+#[test]
+fn modify_reaches_a_views_graphics_and_the_model_checks_what_it_leaves() {
+    let mut s = Session::new();
+    house(&mut s);
+    let room = run(&mut s, "room", json!({"point": [4000, 3000], "name": "Living"}))["id"].as_u64().unwrap();
+    run(&mut s, "modify", json!({"id": 100000, "graphics": {"categories": {"room": {"hidden": true}}}}));
+    assert!(owned(&plan(&s, 100000), room).is_empty());
+    let before = s.model.clone();
+    for (patch, says) in [
+        (json!({"categories": {"balloon": {"hidden": true}}}), "balloon"),
+        (json!({"categories": {"wall": {"cut": {"weight": 500}}}}), "weight"),
+        (json!({"categories": {"wall": {"transparency": 120}}}), "transparency"),
+        (json!({"filters": [{"filter": "Nope"}]}), "Nope"),
+        (json!({"template": "Nope"}), "Nope"),
+        (json!({"elements": {"x": {"hidden": true}}}), "x"),
+    ] {
+        let e = s.execute("modify", &json!({"id": 100000, "graphics": patch})).unwrap_err();
+        assert!(e.contains(says), "{patch}: {e}");
+    }
+    assert_eq!(*s.model, *before, "a refused modify changes nothing");
+    // And the way back: null takes the override away, and what's left is a plan as it was.
+    run(&mut s, "modify", json!({"id": 100000, "graphics": {"categories": {"room": null}}}));
+    assert!(!owned(&plan(&s, 100000), room).is_empty());
+    assert!(plan_graphics_default(&s));
+}
+
+fn plan_graphics_default(s: &Session) -> bool {
+    matches!(s.model.elements.get(100000), Some(Element::Level(l)) if l.graphics.is_default())
+}
+
+#[test]
+fn a_views_graphics_are_saved_with_the_project_and_read_back() {
+    let mut s = Session::new();
+    house(&mut s);
+    run(
+        &mut s,
+        "graphics",
+        json!({"view": 100000, "hide": ["rooms"], "hide_elements": [100002], "categories": {"walls": {"cut": {"fill": [1, 2, 3], "weight": 5}}}}),
+    );
+    let path = std::env::temp_dir().join(format!("bimcraft-gfx-{}.bimcraft", std::process::id()));
+    run(&mut s, "save", json!({"path": path.to_str().unwrap()}));
+    let mut t = Session::new();
+    run(&mut t, "open", json!({"path": path.to_str().unwrap()}));
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(t.model, s.model);
+    let Some(Element::Level(l)) = t.model.elements.get(100000) else { panic!("level") };
+    assert!(l.graphics.hides("room") && l.graphics.elements.get(&t.model.guid(100002)).is_some_and(|o| o.hidden));
+    // Reading a view's settings changes nothing.
+    let r = run(&mut t, "graphics", json!({"view": 100000}));
+    assert_eq!(r["hidden"], json!(["room"]));
+    assert_eq!(r["categories"]["wall"]["cut"], json!({"fill": [1, 2, 3], "weight": 5}));
+}

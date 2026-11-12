@@ -333,7 +333,13 @@ fn a_file_is_hashed_as_it_is_checked_before_it_runs() {
 #[test]
 fn only_the_desktop_app_can_reach_the_network() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    for manifest in ["crates/core/Cargo.toml", "crates/geom/Cargo.toml", "crates/mep-calc/Cargo.toml", "apps/bimcraft-cli/Cargo.toml"] {
+    for manifest in [
+        "crates/core/Cargo.toml",
+        "crates/geom/Cargo.toml",
+        "crates/mep-calc/Cargo.toml",
+        "crates/model/Cargo.toml",
+        "apps/bimcraft-cli/Cargo.toml",
+    ] {
         let text = std::fs::read_to_string(root.join(manifest)).unwrap();
         for dep in ["bimcraft-update", "ureq", "rustls", "reqwest", "hyper"] {
             assert!(!text.contains(dep), "{manifest} depends on {dep}: the core, the CLI and the MCP server never phone home");

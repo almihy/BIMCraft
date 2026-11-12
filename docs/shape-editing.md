@@ -72,7 +72,7 @@ Status, on the branch `mod-16-shape-editing` (raised upstream as IPedrax/BIMCraf
   closed Brep; `ci/ifc-coverage.txt` has both kinds) and the check (tests `a_roofs_variable_layer_*`,
   `a_section_shows_a_roofs_insulation_*`, `a_roof_point_that_would_leave_its_insulation_*`).
 - **Phase 5**, the extras, is built:
-  - **`falls`** (`crates/core/src/falls.rs`): a floor's or flat roof's shape from its drains and the least fall. Each
+  - **`falls`** (`crates/model/src/falls.rs`): a floor's or flat roof's shape from its drains and the least fall. Each
     drain takes the part of the outline nearer it than any other; where two parts meet a ridge runs at the top's height;
     from each drain a valley runs to each corner of its part; each drain goes down as far as the fall takes its farthest
     corner, to the tenth of a millimetre down. Every plane then falls at least as asked toward a drain, its lowest corner,
