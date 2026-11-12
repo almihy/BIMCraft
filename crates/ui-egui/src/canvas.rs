@@ -3379,6 +3379,17 @@ impl BimApp {
         }
     }
 
+    /// The selected wall or run whose end grip is at screen point `at`, in a plan: where Revit's menu offers its join.
+    pub(crate) fn end_under(&self, at: Pos2) -> Option<Id> {
+        if !matches!(self.sheet, Sheet::Plan(_) | Sheet::Ceiling(_)) {
+            return None;
+        }
+        let m = &self.session.model;
+        let id = self.gripped().filter(|id| m.wall(*id).is_some() || m.run_of(*id).is_some())?;
+        let (a, b) = Self::grip_ends(m, id)?;
+        [a, b].into_iter().any(|e| self.screen(e).distance(at) <= GRIP_REACH / 2.0 + 2.0).then_some(id)
+    }
+
     /// The ends of the element whose ends are grips, `(start, end)`: a wall's or a run's line.
     fn grip_ends(m: &Model, id: Id) -> Option<(P2, P2)> {
         match m.elements.get(id)? {

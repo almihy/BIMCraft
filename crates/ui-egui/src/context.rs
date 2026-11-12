@@ -18,27 +18,33 @@ pub(crate) enum Action {
     Cancel,
     /// Enter, with no tool running: the last tool again.
     Repeat,
+    /// Recent Commands: the nth of the commands last used, newest first.
+    Recent(u8),
+    /// Select Previous: the selection before the last one, back.
+    SelectPrevious,
     /// Create Similar (CS): the tool that makes the selected element's kind, with its type.
     CreateSimilar,
     /// Enter: a spline or a polyline made of the points clicked so far.
     Finish,
     /// Enter: the detail lines selected are a custom fill pattern's (Fill Patterns' New Pattern > Custom).
     FinishPick,
-    ZoomToFit,
-    ZoomIn,
-    ZoomOut,
-    /// The 3D view's default orientation.
-    HomeView,
-    EditType,
-    /// Select All Instances > Visible in View (SA): what the view shows of the selected elements' types.
+    /// Hide in View > Elements (EH), > Category (VH), > By Filter… (Visibility/Graphics' Filters tab).
+    HideElements,
+    HideCategory,
+    HideByFilter,
+    /// Override Graphics in View > By Element… (EO), > By Category…, > By Filter….
+    OverrideElement,
+    OverrideCategory,
+    OverrideFilter,
+    /// Unhide in View > Elements (EU), > Category (VU): in Reveal Hidden Elements mode, for what the view hides.
+    UnhideElements,
+    UnhideCategory,
+    /// Edit Family: the selected component's family in the Family Editor.
+    EditFamily,
+    /// Select All Instances > Visible in View: what the view shows of the selected elements' types.
     SelectAllInstances,
     /// Select All Instances > In Entire Project: every element of the selected elements' types.
     SelectAllInstancesProject,
-    /// Recent Commands: the nth of the commands last used, newest first.
-    Recent(u8),
-    HideElement,
-    HideCategory,
-    OverrideGraphics,
     CreateGroup,
     Ungroup,
     Delete,
@@ -46,9 +52,21 @@ pub(crate) enum Action {
     ReloadCad,
     /// The camera selected in a plan: open its 3D view.
     OpenView,
-    /// The 3D view's Work Plane dialog.
-    WorkPlane,
-    /// The selected walls' and runs' joins refused (Revit's Disallow Join), or taken up again.
+    /// Find Referring Views: the views showing this one's marker, in Go To View.
+    FindReferringViews,
+    /// Zoom In Region (ZR): a box dragged fills the view.
+    ZoomInRegion,
+    /// Zoom Out (2x) (ZO): half as close.
+    ZoomOut,
+    /// Zoom To Fit (ZF).
+    ZoomToFit,
+    /// Previous Pan/Zoom (ZP) and Next Pan/Zoom.
+    PreviousZoom,
+    NextZoom,
+    /// Browsers > Project Browser, and Properties: the palettes shown or hidden.
+    ProjectBrowser,
+    Properties,
+    /// Disallow Join and Allow Join, on a selected wall's or run's end: its joins refused, or taken up again.
     DisallowJoin,
     AllowJoin,
 }
@@ -59,54 +77,47 @@ impl Action {
         match self {
             Action::Cancel => "Cancel",
             Action::Repeat => msg!("Repeat Last Command"),
+            Action::Recent(_) => "Recent",
+            Action::SelectPrevious => msg!("Select Previous"),
             Action::CreateSimilar => msg!("Create Similar"),
             Action::Finish => msg!("Finish Drawing"),
             Action::FinishPick => "Finish",
-            Action::ZoomToFit => "Zoom to Fit",
-            Action::ZoomIn => "Zoom In",
-            Action::ZoomOut => "Zoom Out",
-            Action::HomeView => "Home View",
-            Action::EditType => "Edit Type",
+            Action::HideElements | Action::UnhideElements => msg!("Elements"),
+            Action::HideCategory | Action::UnhideCategory => "Category",
+            Action::HideByFilter | Action::OverrideFilter => msg!("By Filter…"),
+            Action::OverrideElement => msg!("By Element…"),
+            Action::OverrideCategory => msg!("By Category…"),
+            Action::EditFamily => "Edit Family",
             Action::SelectAllInstances => msg!("Visible in View"),
             Action::SelectAllInstancesProject => msg!("In Entire Project"),
-            Action::Recent(_) => "Recent",
-            Action::HideElement => "Hide Element",
-            Action::HideCategory => "Hide Category",
-            Action::OverrideGraphics => "Override Graphics",
             Action::CreateGroup => msg!("Create Group"),
             Action::Ungroup => msg!("Ungroup"),
             Action::Delete => "Delete",
             Action::ReloadCad => msg!("Reload CAD"),
             Action::OpenView => msg!("Open Camera View"),
-            Action::WorkPlane => msg!("Set Work Plane…"),
+            Action::FindReferringViews => msg!("Find Referring Views"),
+            Action::ZoomInRegion => msg!("Zoom In Region"),
+            Action::ZoomOut => msg!("Zoom Out (2x)"),
+            Action::ZoomToFit => msg!("Zoom To Fit"),
+            Action::PreviousZoom => msg!("Previous Pan/Zoom"),
+            Action::NextZoom => msg!("Next Pan/Zoom"),
+            Action::ProjectBrowser => "Project Browser",
+            Action::Properties => "Properties",
             Action::DisallowJoin => msg!("Disallow Join"),
             Action::AllowJoin => msg!("Allow Join"),
         }
     }
 
-    /// The submenu it belongs to, as Revit's menu holds Select All Instances and Recent Commands.
+    /// The submenu it belongs to, as Revit's menu holds Hide in View, Override Graphics in View, Unhide in View, Select All
+    /// Instances, Recent Commands and Browsers.
     pub(crate) fn parent(self) -> Option<&'static str> {
         match self {
+            Action::HideElements | Action::HideCategory | Action::HideByFilter => Some(msg!("Hide in View")),
+            Action::OverrideElement | Action::OverrideCategory | Action::OverrideFilter => Some(msg!("Override Graphics in View")),
+            Action::UnhideElements | Action::UnhideCategory => Some(msg!("Unhide in View")),
             Action::SelectAllInstances | Action::SelectAllInstancesProject => Some(msg!("Select All Instances")),
             Action::Recent(_) => Some(msg!("Recent Commands")),
-            _ => None,
-        }
-    }
-
-    /// The keys that do the same, shown beside it.
-    pub(crate) fn shortcut(self) -> Option<&'static str> {
-        match self {
-            Action::Cancel => Some("Esc"),
-            Action::Repeat => Some("RC"),
-            Action::CreateSimilar => Some("CS"),
-            Action::Finish | Action::FinishPick => Some("Enter"),
-            Action::ZoomToFit => Some("ZF"),
-            Action::SelectAllInstances => Some("SA"),
-            Action::HideElement => Some("EH"),
-            Action::HideCategory => Some("VH"),
-            Action::CreateGroup => Some("GP"),
-            Action::Ungroup => Some("UG"),
-            Action::Delete => Some("Del"),
+            Action::ProjectBrowser => Some(msg!("Browsers")),
             _ => None,
         }
     }
@@ -119,11 +130,13 @@ pub(crate) struct Item {
     pub enabled: bool,
     /// What Repeat repeats, in English: its label says "Repeat [Wall]".
     pub of: Option<&'static str>,
+    /// A palette's item is ticked while it shows (Project Browser, Properties).
+    pub checked: Option<bool>,
 }
 
 impl Item {
     fn new(action: Action, enabled: bool) -> Item {
-        Item { action, enabled, of: None }
+        Item { action, enabled, of: None, checked: None }
     }
 
     /// The item as its menu words it.
@@ -151,7 +164,7 @@ pub(crate) fn menu(response: &Response, groups: &[Vec<Item>], chosen: &mut Optio
                     at += 1;
                     continue;
                 };
-                // Items of one parent are its submenu, as Revit's Select All Instances and Recent Commands are.
+                // Items of one parent are its submenu, as Revit's Hide in View and Recent Commands are.
                 let end = group[at..].iter().position(|x| x.action.parent() != Some(parent)).map_or(group.len(), |n| at + n);
                 let subs = &group[at..end];
                 let any = subs.iter().any(|x| x.enabled);
@@ -168,12 +181,10 @@ pub(crate) fn menu(response: &Response, groups: &[Vec<Item>], chosen: &mut Optio
     });
 }
 
-/// One item as a button of the open menu; a click puts its action in `chosen` and closes the menu.
+/// One item as a button of the open menu; a click puts its action in `chosen` and closes the menu. Revit's menu shows no
+/// keys beside its items; a palette's is ticked while it shows.
 fn item_button(ui: &mut egui::Ui, item: &Item, chosen: &mut Option<Action>) {
-    let mut button = Button::new(item.label());
-    if let Some(keys) = item.action.shortcut() {
-        button = button.shortcut_text(keys);
-    }
+    let button = Button::new(item.label()).selected(item.checked == Some(true));
     if ui.add_enabled(item.enabled, button).clicked() {
         *chosen = Some(item.action);
         ui.close_kind(egui::UiKind::Menu);
@@ -181,13 +192,20 @@ fn item_button(ui: &mut egui::Ui, item: &Item, chosen: &mut Option<Action>) {
     }
 }
 
+/// Go To View, as Find Referring Views opens it: the views that show the active one's marker, one to open.
+pub(crate) struct GoToView {
+    pub(crate) views: Vec<(Sheet, String)>,
+    pub(crate) picked: usize,
+}
+
 impl BimApp {
-    /// What the menu offers now, in groups: cancelling; what the selection can do; what the view
-    /// can (zooming, but not in a schedule).
+    /// What the menu offers now, in groups, in Revit's order: cancelling and repeating; a wall's joins, on its end; what the
+    /// selection does in the view; selecting and deleting; the view's own (referring views, zooming; not in a schedule);
+    /// the palettes.
     pub(crate) fn context_items(&self) -> Vec<Vec<Item>> {
         let some = !self.selection.is_empty();
         // Revit's order: Cancel, then Repeat [last command] and Recent Commands (the five last used, newest first) while
-        // no tool runs.
+        // no tool runs, then Select Previous.
         let mut first = vec![Item::new(Action::Cancel, some || self.tool != Tool::Modify)];
         if self.tool == Tool::Modify && self.flow.pending.is_none() {
             if let Some(last) = self.flow.last.as_ref() {
@@ -198,6 +216,7 @@ impl BimApp {
                 recent.map(|(i, tool)| Item { of: Some(crate::selecting::tool_name(tool)), ..Item::new(Action::Recent(i as u8), true) }),
             );
         }
+        first.push(Item::new(Action::SelectPrevious, !self.previous_selection().is_empty()));
         if self.finishable() {
             first.insert(0, Item::new(Action::Finish, true));
         }
@@ -207,63 +226,82 @@ impl BimApp {
         let mut groups = vec![first];
         if some {
             let m = &self.session.model;
+            // Revit offers Disallow Join or Allow Join on a selected wall's end, where the join is.
+            let join = self.menu_end.filter(|id| self.selection.contains(id)).and_then(|id| match m.elements.get(id) {
+                Some(bimcraft_core::model::Element::Wall(w)) => Some(w.join),
+                Some(e) => e.run().map(|r| r.join),
+                None => None,
+            });
+            if let Some(join) = join {
+                groups.push(vec![Item::new(if join { Action::DisallowJoin } else { Action::AllowJoin }, true)]);
+            }
             // A camera picked in a plan: open its 3D view, or delete it.
             let camera =
                 matches!(self.selection.as_slice(), [id] if matches!(m.elements.get(id), Some(bimcraft_core::model::Element::View3D(_))));
             if camera {
-                groups.push(vec![Item::new(Action::OpenView, true), Item::new(Action::Delete, true)]);
+                groups.push(vec![Item::new(Action::OpenView, true)]);
             } else {
-                groups.push(vec![
-                    Item::new(Action::EditType, self.type_subject().is_some()),
-                    Item::new(Action::SelectAllInstances, true),
-                    Item::new(Action::SelectAllInstancesProject, true),
-                    Item::new(Action::CreateSimilar, self.selection.len() == 1),
-                    Item::new(Action::Delete, true),
-                ]);
+                let mut view = Vec::new();
+                // What the view on screen hides and paints; in Reveal Hidden Elements mode, what it hides comes back.
+                if self.graphic_view().is_some() {
+                    let (elements, categories) = if self.revealing() { self.hidden_selection() } else { Default::default() };
+                    if elements.is_empty() && categories.is_empty() {
+                        view.extend([
+                            Item::new(Action::HideElements, true),
+                            Item::new(Action::HideCategory, true),
+                            Item::new(Action::HideByFilter, true),
+                        ]);
+                    } else {
+                        view.extend([
+                            Item::new(Action::UnhideElements, !elements.is_empty()),
+                            Item::new(Action::UnhideCategory, !categories.is_empty()),
+                        ]);
+                    }
+                    view.extend([
+                        Item::new(Action::OverrideElement, true),
+                        Item::new(Action::OverrideCategory, true),
+                        Item::new(Action::OverrideFilter, true),
+                    ]);
+                }
+                view.push(Item::new(Action::CreateSimilar, self.selection.len() == 1));
+                // A loadable family's: system families (walls, floors) have no family to edit.
+                if self.family_in_hand().is_some() {
+                    view.push(Item::new(Action::EditFamily, true));
+                }
+                groups.push(view);
                 // Detail lines, regions and notes group; a group comes apart.
                 let groupable = self.selection.iter().all(|id| m.elements.get(*id).is_some_and(bimcraft_core::groups::holds));
                 if groupable || self.group_selected() {
                     groups.push(vec![Item::new(Action::CreateGroup, groupable), Item::new(Action::Ungroup, self.group_selected())]);
                 }
             }
-            // Walls and runs mitre against what they meet; any of them may refuse (Revit's Disallow
-            // Join). Each item is offered when some selected element would change by taking it.
-            let joins: Vec<bool> = self
-                .selection
-                .iter()
-                .filter_map(|id| match m.elements.get(*id) {
-                    Some(bimcraft_core::model::Element::Wall(w)) => Some(w.join),
-                    Some(e) => e.run().map(|r| r.join),
-                    _ => None,
-                })
-                .collect();
             if !self.linked_cads().is_empty() {
                 groups.push(vec![Item::new(Action::ReloadCad, true)]);
             }
-            // What the view on screen hides and paints.
-            if self.graphic_view().is_some() && !camera {
-                groups.push(vec![
-                    Item::new(Action::HideElement, true),
-                    Item::new(Action::HideCategory, true),
-                    Item::new(Action::OverrideGraphics, true),
-                ]);
-            }
-            if !joins.is_empty() {
-                groups.push(vec![
-                    Item::new(Action::DisallowJoin, joins.iter().any(|j| *j)),
-                    Item::new(Action::AllowJoin, joins.iter().any(|j| !*j)),
-                ]);
-            }
+            let mut select = if camera {
+                Vec::new()
+            } else {
+                vec![Item::new(Action::SelectAllInstances, true), Item::new(Action::SelectAllInstancesProject, true)]
+            };
+            select.push(Item::new(Action::Delete, true));
+            groups.push(select);
         }
-        let zoom = vec![Item::new(Action::ZoomToFit, true), Item::new(Action::ZoomIn, true), Item::new(Action::ZoomOut, true)];
-        match self.sheet {
-            Sheet::Plan(_) | Sheet::Ceiling(_) | Sheet::Section(_) | Sheet::Paper(_) => groups.push(zoom),
-            Sheet::View3D => {
-                groups.push(vec![Item::new(Action::WorkPlane, self.sketch.is_none())]);
-                groups.push([vec![Item::new(Action::HomeView, true)], zoom].concat());
-            }
-            Sheet::Schedule(_) | Sheet::Table(_) => {}
+        let flat = matches!(self.sheet, Sheet::Plan(_) | Sheet::Ceiling(_) | Sheet::Section(_) | Sheet::Paper(_));
+        if !matches!(self.sheet, Sheet::Schedule(_) | Sheet::Table(_)) {
+            groups.push(vec![Item::new(Action::FindReferringViews, !self.referring_views().is_empty())]);
+            let (back, ahead) = self.pan_zoom_steps();
+            groups.push(vec![
+                Item::new(Action::ZoomInRegion, flat),
+                Item::new(Action::ZoomOut, true),
+                Item::new(Action::ZoomToFit, true),
+                Item::new(Action::PreviousZoom, back),
+                Item::new(Action::NextZoom, ahead),
+            ]);
         }
+        groups.push(vec![
+            Item { checked: Some(self.docking.shown(crate::dock::Palette::Browser)), ..Item::new(Action::ProjectBrowser, true) },
+            Item { checked: Some(self.docking.shown(crate::dock::Palette::Properties)), ..Item::new(Action::Properties, true) },
+        ]);
         groups
     }
 
@@ -274,24 +312,28 @@ impl BimApp {
             Action::Repeat => {
                 self.repeat_last();
             }
+            Action::Recent(i) => self.repeat_recent(usize::from(i)),
+            Action::SelectPrevious => self.select_previous(),
             Action::CreateSimilar => self.create_similar(),
             Action::Finish => self.finish_open_shape(),
             Action::FinishPick => self.finish_pattern_lines(),
-            Action::ZoomToFit => self.fit(),
-            Action::ZoomIn => self.zoom_view(1.25),
-            Action::ZoomOut => self.zoom_view(0.8),
-            Action::HomeView => self.home3d(),
-            Action::EditType => self.edit_type(),
+            Action::HideElements => self.hide_selection(false),
+            Action::HideCategory => self.hide_selection(true),
+            Action::HideByFilter | Action::OverrideFilter => self.open_graphics(crate::graphics::FILTERS_TAB),
+            Action::OverrideElement => self.override_selection(),
+            Action::OverrideCategory => self.override_selection_category(),
+            Action::UnhideElements => self.unhide_selection(false),
+            Action::UnhideCategory => self.unhide_selection(true),
+            Action::EditFamily => {
+                if let Some(f) = self.family_in_hand() {
+                    self.edit_family(&f);
+                }
+            }
             Action::SelectAllInstances => self.select_all_instances(),
             Action::SelectAllInstancesProject => self.select_all_instances_in_project(),
-            Action::Recent(i) => self.repeat_recent(usize::from(i)),
-            Action::HideElement => self.hide_selection(false),
-            Action::HideCategory => self.hide_selection(true),
-            Action::OverrideGraphics => self.override_selection(),
             Action::CreateGroup => self.create_group(),
             Action::Ungroup => self.ungroup(),
             Action::Delete => self.delete(),
-            Action::WorkPlane => self.open_work_plane(),
             Action::ReloadCad => {
                 for cad in self.linked_cads() {
                     self.run("reload_cad", serde_json::json!({"cad": cad}));
@@ -302,8 +344,115 @@ impl BimApp {
                     self.open_3d(Some(id));
                 }
             }
+            Action::FindReferringViews => {
+                let views = self.referring_views();
+                if !views.is_empty() {
+                    self.go_to_view = Some(GoToView { views, picked: 0 });
+                }
+            }
+            Action::ZoomInRegion => self.zoom_region(),
+            Action::ZoomOut => self.zoom_view(0.5),
+            Action::ZoomToFit => self.fit(),
+            Action::PreviousZoom => self.previous_zoom(),
+            Action::NextZoom => self.next_zoom(),
+            Action::ProjectBrowser => self.toggle_browser(),
+            Action::Properties => self.toggle_properties(),
             Action::DisallowJoin => self.set_joins(false),
             Action::AllowJoin => self.set_joins(true),
+        }
+    }
+
+    /// The selection before the last one, as Select Previous brings it back: what of it is still there.
+    pub(crate) fn previous_selection(&self) -> Vec<bimcraft_core::model::Id> {
+        let m = &self.session.model;
+        self.selection_before.iter().copied().filter(|id| m.elements.get(*id).is_some()).collect()
+    }
+
+    /// Keep the selection a change replaces, for Select Previous. Once a frame.
+    pub(crate) fn note_selection(&mut self) {
+        if self.selection != self.selection_seen {
+            let seen = std::mem::replace(&mut self.selection_seen, self.selection.clone());
+            if !seen.is_empty() {
+                self.selection_before = seen;
+            }
+        }
+    }
+
+    /// Select Previous: the selection before this one, again.
+    fn select_previous(&mut self) {
+        let before = self.previous_selection();
+        if !before.is_empty() {
+            self.selection = before;
+            self.raise_context();
+        }
+    }
+
+    /// Whether the view on screen has a pan or zoom to go back to, and one to go forward to again.
+    fn pan_zoom_steps(&self) -> (bool, bool) {
+        match self.sheet {
+            Sheet::Plan(id) | Sheet::Ceiling(id) | Sheet::Section(id) | Sheet::Paper(id) => self.canvas.steps(id),
+            _ => (false, false),
+        }
+    }
+
+    /// The views that show the active view's marker, as Find Referring Views lists them: the plans a section's or an
+    /// elevation's line shows on, the plan a camera stands on.
+    pub(crate) fn referring_views(&self) -> Vec<(Sheet, String)> {
+        use bimcraft_core::model::Element;
+        let m = &self.session.model;
+        let id = match self.sheet {
+            Sheet::Section(id) => id,
+            Sheet::View3D => match self.active_3d() {
+                Some(id) => id,
+                None => return Vec::new(),
+            },
+            _ => return Vec::new(),
+        };
+        let mut plans: Vec<bimcraft_core::model::Id> = Vec::new();
+        for (level, e) in m.elements.iter() {
+            if matches!(e, Element::Level(_)) {
+                plans.push(*level);
+                plans.extend(m.plan_views(*level).into_iter().map(|(v, _)| v));
+            }
+        }
+        let shows = |plan: bimcraft_core::model::Id| match m.elements.get(id) {
+            Some(Element::Section(_) | Element::Elevation(_)) => bimcraft_core::graphics::Look::of(m, plan).shows(id),
+            Some(Element::View3D(v)) => {
+                let level = m.plan_view(plan).map_or(Some(plan), |p| m.elements.id(p.level));
+                v.camera.is_some_and(|c| level.is_some() && m.camera_level(c.eye[2]) == level)
+            }
+            _ => false,
+        };
+        plans.into_iter().filter(|p| shows(*p)).map(|p| (Sheet::Plan(p), self.view_title(Sheet::Plan(p)))).collect()
+    }
+
+    /// Go To View, while it's open: the referring views, one picked, opened with Open View.
+    pub(crate) fn go_to_view_window(&mut self, ctx: &egui::Context) {
+        let Some(mut d) = self.go_to_view.take() else { return };
+        let (mut open, mut close) = (false, false);
+        let r = crate::popup::Modal::new(egui::Id::new("go-to-view"), t("Go To View")).width(380.0).show(ctx, |ui| {
+            crate::popup::body(ui, |ui| {
+                for (i, (_, name)) in d.views.iter().enumerate() {
+                    let r = ui.selectable_label(d.picked == i, name);
+                    if r.clicked() {
+                        d.picked = i;
+                    }
+                    if r.double_clicked() {
+                        open = true;
+                    }
+                }
+            });
+            crate::popup::footer(ui, |ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                    close = ui.button(t("Cancel")).clicked();
+                    open |= ui.button(t("Open View")).clicked();
+                });
+            });
+        });
+        if open && let Some((sheet, _)) = d.views.get(d.picked) {
+            self.open_sheet(*sheet);
+        } else if !close && !r.should_close() {
+            self.go_to_view = Some(d);
         }
     }
 
@@ -344,8 +493,12 @@ impl BimApp {
         names
     }
 
-    /// The menu on a view's `response`, doing what's chosen from it.
+    /// The menu on a view's `response`, doing what's chosen from it. A right click on a selected wall's or run's end grip
+    /// offers its join.
     pub(crate) fn context_menu(&mut self, response: &Response) {
+        if response.secondary_clicked() {
+            self.menu_end = response.interact_pointer_pos().and_then(|at| self.end_under(at));
+        }
         let groups = self.context_items();
         let mut chosen = None;
         menu(response, &groups, &mut chosen);

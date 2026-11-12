@@ -284,6 +284,19 @@ impl BimApp {
         }
     }
 
+    /// Override Graphics in View, By Category: Visibility/Graphics on the tab of the selection's category, with that row
+    /// picked to give it its override.
+    pub(crate) fn override_selection_category(&mut self) {
+        let m = Arc::clone(&self.session.model);
+        let category =
+            self.drawn_selection(&m).first().and_then(|id| m.elements.get(id)).map(|e| bimcraft_core::graphics::category_of(&m, e));
+        let tab = usize::from(category.is_some_and(|c| ANNOTATION.contains(&c)));
+        self.open_graphics(tab);
+        if let (Some(d), Some(c)) = (&mut self.vg_dialog, category) {
+            d.pick = Some(Pick::Category(c.to_string()));
+        }
+    }
+
     /// What of the selection the active view hides: the elements hidden one by one, and the categories hidden whole. Only
     /// Reveal Hidden Elements lets anything hidden be picked, so this is what Unhide Element and Unhide Category offer.
     pub(crate) fn hidden_selection(&self) -> (Vec<Id>, Vec<&'static str>) {

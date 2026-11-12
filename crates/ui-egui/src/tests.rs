@@ -4704,6 +4704,11 @@ fn framed(h: &Harness<BimApp>) -> bool {
     h.output().shapes.iter().any(|c| matches!(&c.shape, egui::Shape::Rect(r) if r.stroke.color == egui::Color32::from_rgb(0, 190, 220)))
 }
 
+/// Whether Revit's magenta frame round a view in Reveal Hidden Elements mode was painted.
+fn reveal_framed(h: &Harness<BimApp>) -> bool {
+    h.output().shapes.iter().any(|c| matches!(&c.shape, egui::Shape::Rect(r) if r.stroke.color == egui::Color32::from_rgb(255, 0, 255)))
+}
+
 /// Whether the bar's button named `label` is lit.
 fn lit(h: &Harness<BimApp>, label: &str) -> bool {
     use egui_kittest::kittest::NodeT;
@@ -4816,27 +4821,27 @@ fn a_3d_view_following_a_template_shows_its_visual_style_greyed_out() {
 #[test]
 fn a_view_that_hides_isolates_or_reveals_wears_a_frame_and_lights_the_bar_and_says_so() {
     let mut h = app(BOX);
-    let note = |h: &Harness<BimApp>| painted_text(h).into_iter().find(|t| t.contains("(HR resets)") || t.contains("Revealing"));
-    assert!(!framed(&h) && !lit(&h, "Temporary Hide/Isolate") && !lit(&h, "Reveal Hidden Elements") && note(&h).is_none());
+    // Revit's note, in the view's top left corner inside the frame.
+    let note = |h: &Harness<BimApp>| painted_text(h).into_iter().find(|t| t == "Temporary Hide/Isolate" || t == "Reveal Hidden Elements");
+    assert!(!framed(&h) && !reveal_framed(&h) && !lit(&h, "Temporary Hide/Isolate") && !lit(&h, "Reveal Hidden Elements"));
+    assert!(note(&h).is_none());
     click(&mut h, P2(5000.0, 0.0));
     shortcut(&mut h, "HH");
     assert!(framed(&h) && lit(&h, "Temporary Hide/Isolate") && !lit(&h, "Reveal Hidden Elements"));
-    assert_eq!(note(&h).as_deref(), Some("Temporary Hide/Isolate (HR resets)"));
-    // Revealing too: still hiding, and it says so.
+    assert_eq!(note(&h).as_deref(), Some("Temporary Hide/Isolate"));
+    // Revealing too: Revit's magenta frame and its note, while still hiding for now.
     shortcut(&mut h, "RH");
-    assert!(framed(&h) && lit(&h, "Reveal Hidden Elements"));
-    assert_eq!(note(&h).as_deref(), Some("Temporary Hide/Isolate (HR resets)"));
+    assert!(reveal_framed(&h) && !framed(&h) && lit(&h, "Reveal Hidden Elements") && lit(&h, "Temporary Hide/Isolate"));
+    assert_eq!(note(&h).as_deref(), Some("Reveal Hidden Elements"));
+    // Reset Temporary Hide/Isolate is for what is hidden for now: Reveal Hidden Elements is a mode of its own and stays.
     shortcut(&mut h, "HR");
-    assert!(!framed(&h) && !lit(&h, "Temporary Hide/Isolate") && !lit(&h, "Reveal Hidden Elements") && note(&h).is_none());
-    // Only revealing: framed, and the button's Reset takes it off.
-    shortcut(&mut h, "RH");
-    assert!(framed(&h) && lit(&h, "Reveal Hidden Elements") && !lit(&h, "Temporary Hide/Isolate"));
-    assert_eq!(note(&h).as_deref(), Some("Revealing hidden elements (HR resets)"));
+    assert!(reveal_framed(&h) && !lit(&h, "Temporary Hide/Isolate") && lit(&h, "Reveal Hidden Elements"));
     press(&mut h, "Temporary Hide/Isolate");
-    assert!(!is_disabled(&h, Role::Button, "Reset Temporary Hide/Isolate (HR)"), "there is something to reset");
-    assert!(is_disabled(&h, Role::Button, "Apply Hide/Isolate to View"), "but nothing to apply");
-    press(&mut h, "Reset Temporary Hide/Isolate (HR)");
-    assert!(!framed(&h) && h.state().temporary().is_none());
+    assert!(is_disabled(&h, Role::Button, "Reset Temporary Hide/Isolate (HR)"), "nothing hidden for now");
+    key(&mut h, Key::Escape);
+    // The bulb again leaves the mode.
+    press(&mut h, "Reveal Hidden Elements");
+    assert!(!framed(&h) && !reveal_framed(&h) && !lit(&h, "Reveal Hidden Elements") && note(&h).is_none());
 }
 
 #[test]
@@ -4957,23 +4962,63 @@ fn reveal_hidden_elements_shows_what_the_view_hides_for_good_and_apply_makes_a_h
 }
 
 #[test]
+fn reveal_hidden_elements_mode_has_its_contextual_tab_with_the_reveal_hidden_panel() {
+    let mut h = app(BOX);
+    // Wide enough for the Reveal Hidden panel's buttons to stand in the ribbon, not folded into a list.
+    h.set_size(vec2(1800.0, 900.0));
+    h.run();
+    let walls = ids(&h, "wall");
+    click(&mut h, P2(4000.0, 0.0));
+    shortcut(&mut h, "EH");
+    assert!(h.query_by_label("Modify | Reveal Hidden Elements").is_none());
+    // The bulb: Revit's contextual tab comes up, with nothing selected, and its panel's Unhide buttons wait for a selection.
+    press(&mut h, "Reveal Hidden Elements");
+    assert!(h.query_by_label("Modify | Reveal Hidden Elements").is_some());
+    assert_eq!(h.state().tab, crate::Tab::Context);
+    assert!(is_disabled(&h, Role::Button, "Unhide Element") && is_disabled(&h, Role::Button, "Unhide Category"));
+    // What the view shows anyway is halftone; what it hides is magenta.
+    let model = h.state_mut().view_model();
+    let g = bimcraft_core::graphics::graphics_of(&model, 100000).cloned().unwrap_or_default();
+    assert_eq!(
+        g.elements.get(&gid(&h, walls[0])).and_then(|o| o.projection.color),
+        Some([255, 0, 255]),
+        "{:?}",
+        plan_graphics(&h, 100000).elements
+    );
+    assert!(g.elements[&gid(&h, walls[1])].halftone && !g.elements[&gid(&h, walls[0])].halftone);
+    // The hidden wall, picked: the selection's tab holds the panel, Unhide Element on.
+    click(&mut h, P2(4000.0, 0.0));
+    assert_eq!(h.state().selection, [walls[0]]);
+    assert!(h.query_by_label("Modify | Walls").is_some());
+    assert!(!is_disabled(&h, Role::Button, "Unhide Element") && is_disabled(&h, Role::Button, "Unhide Category"));
+    // Toggle Reveal Hidden Elements Mode leaves the mode, and its tab goes with it.
+    key(&mut h, Key::Escape);
+    press(&mut h, "Toggle Reveal Hidden Elements Mode");
+    assert!(h.query_by_label("Modify | Reveal Hidden Elements").is_none() && !lit(&h, "Reveal Hidden Elements"));
+    assert!(!plan_shows(&mut h, walls[0]), "hidden again");
+}
+
+#[test]
 fn unhide_element_and_unhide_category_bring_back_what_the_selection_hides_while_revealing() {
     let mut h = app(BOX);
+    // Wide enough for the Reveal Hidden panel's buttons to stand in the ribbon, not folded into a list.
+    h.set_size(vec2(1800.0, 900.0));
+    h.run();
     let walls = ids(&h, "wall");
     // A wall hidden for good can't be picked, and offers nothing to unhide.
     click(&mut h, P2(4000.0, 0.0));
     shortcut(&mut h, "EH");
     assert!(h.query_by_label("Unhide Element").is_none());
-    // Revealing draws it in magenta, and it can be picked: its panel then offers Unhide Element, not Unhide Category (its
-    // category isn't hidden).
+    // Revealing draws it in magenta, and it can be picked: Unhide Element is on, not Unhide Category (its category isn't
+    // hidden).
     shortcut(&mut h, "RH");
     click(&mut h, P2(4000.0, 0.0));
     assert_eq!(h.state().selection, [walls[0]]);
-    assert!(h.query_by_label("Unhide Element").is_some() && h.query_by_label("Unhide Category").is_none());
+    assert!(!is_disabled(&h, Role::Button, "Unhide Element") && is_disabled(&h, Role::Button, "Unhide Category"));
     press(&mut h, "Unhide Element");
     assert!(plan_graphics(&h, 100000).elements.is_empty(), "no entry for what's visible and plain");
     assert_eq!(h.state().selection, [walls[0]], "it stays selected: it is still there");
-    assert!(h.query_by_label("Unhide Element").is_none(), "nothing the selection hides is left");
+    assert!(is_disabled(&h, Role::Button, "Unhide Element"), "nothing the selection hides is left");
     // EU on a selection that hides something unhides it, with no dialog; hidden again, and picked, then EU does it too.
     click(&mut h, P2(8000.0, 3000.0));
     shortcut(&mut h, "EH");
@@ -4985,7 +5030,7 @@ fn unhide_element_and_unhide_category_bring_back_what_the_selection_hides_while_
     shortcut(&mut h, "VH");
     assert!(plan_graphics(&h, 100000).hides("wall"));
     click(&mut h, P2(0.0, 3000.0));
-    assert!(h.query_by_label("Unhide Category").is_some());
+    assert!(!is_disabled(&h, Role::Button, "Unhide Category"));
     press(&mut h, "Unhide Category");
     assert!(!plan_graphics(&h, 100000).hides("wall"));
     shortcut(&mut h, "VH");
@@ -4996,6 +5041,36 @@ fn unhide_element_and_unhide_category_bring_back_what_the_selection_hides_while_
     shortcut(&mut h, "VU");
     assert!(h.state().status.text.contains("Reveal Hidden Elements"), "{:?}", h.state().status);
     key(&mut h, Key::Escape);
+}
+
+#[test]
+fn a_right_click_on_a_hidden_element_while_revealing_unhides_it_in_view() {
+    let mut h = app(BOX);
+    let walls = ids(&h, "wall");
+    click(&mut h, P2(4000.0, 0.0));
+    shortcut(&mut h, "EH");
+    shortcut(&mut h, "RH");
+    // The hidden wall, picked where Reveal Hidden Elements draws it, and right-clicked there: Unhide in View, not Hide in View.
+    click(&mut h, P2(4000.0, 0.0));
+    assert_eq!(h.state().selection, [walls[0]]);
+    let at = h.state().screen(P2(4000.0, 0.0));
+    assert_eq!(offered(&mut h, at, &["Unhide in View", "Hide in View"]), ["Unhide in View"]);
+    choose_item(&mut h, "Unhide in View");
+    assert!(!is_disabled(&h, Role::Button, "Elements") && is_disabled(&h, Role::Button, "Category"));
+    choose_item(&mut h, "Elements");
+    assert!(plan_graphics(&h, 100000).elements.is_empty(), "back in the view");
+    assert_eq!(h.state().selection, [walls[0]], "and still selected");
+    // Shown now: the menu hides it again.
+    assert_eq!(offered(&mut h, at, &["Unhide in View", "Hide in View"]), ["Hide in View"]);
+    key(&mut h, Key::Escape);
+    // A category hidden: Unhide in View > Category brings it all back.
+    shortcut(&mut h, "VH");
+    click(&mut h, P2(0.0, 3000.0));
+    let at = h.state().screen(P2(0.0, 3000.0));
+    right_click_at(&mut h, at);
+    choose_item(&mut h, "Unhide in View");
+    choose_item(&mut h, "Category");
+    assert!(!plan_graphics(&h, 100000).hides("wall"));
 }
 
 #[test]
@@ -6596,64 +6671,138 @@ fn choose_item(h: &mut Harness<BimApp>, label: &str) {
     h.run();
 }
 
-const MENU: [&str; 8] = ["Cancel", "Zoom to Fit", "Zoom In", "Home View", "Edit Type", "Select All Instances", "Hide Element", "Delete"];
+/// The menu's top level, group by group, as `context_items` gives it: each item by its label, a submenu by its name.
+fn menu_order(h: &Harness<BimApp>) -> Vec<Vec<&'static str>> {
+    let mut groups = Vec::new();
+    for g in h.state().context_items() {
+        let mut out: Vec<&'static str> = Vec::new();
+        for i in g {
+            let label = i.action.parent().unwrap_or(i.action.label());
+            if out.last() != Some(&label) {
+                out.push(label);
+            }
+        }
+        if !out.is_empty() {
+            groups.push(out);
+        }
+    }
+    groups
+}
+
+/// Revit's zooming, in the menu of every view but a schedule.
+const ZOOMS: [&str; 5] = ["Zoom In Region", "Zoom Out (2x)", "Zoom To Fit", "Previous Pan/Zoom", "Next Pan/Zoom"];
 
 #[test]
-fn a_right_click_in_a_plan_opens_a_menu_of_what_the_view_and_the_selection_can_do() {
+fn a_right_click_in_a_plan_opens_revits_menu_of_what_the_view_and_the_selection_can_do() {
     let mut h = app(BOX);
-    // Nothing selected: the view's own items, not the selection's.
+    // Nothing selected: Revit's menu on empty space.
+    let order = menu_order(&h);
+    assert_eq!(order, [vec!["Cancel", "Select Previous"], vec!["Find Referring Views"], ZOOMS.to_vec(), vec!["Browsers", "Properties"]]);
     let at = h.state().screen(P2(4000.0, 3000.0));
-    assert_eq!(offered(&mut h, at, &MENU), ["Cancel", "Zoom to Fit", "Zoom In"]);
-    // Zoom In zooms about the view's middle, and the menu closes.
-    let before = h.state().screen(P2(0.0, 0.0));
-    choose_item(&mut h, "Zoom In");
-    assert_ne!(h.state().screen(P2(0.0, 0.0)), before);
-    assert_eq!(h.query_all_by_label("Zoom Out").count(), 1, "the menu closed: only the navigation bar's");
-    // A wall selected: Edit Type opens its type's properties.
+    assert_eq!(offered(&mut h, at, &["Zoom Out (2x)", "Zoom In Region", "Browsers"]), ["Zoom Out (2x)", "Zoom In Region", "Browsers"]);
+    // Zoom Out (2x) halves how large the plan is drawn, and the menu closes.
+    let size = |h: &Harness<BimApp>| h.state().screen(P2(1000.0, 0.0)).x - h.state().screen(P2(0.0, 0.0)).x;
+    let before = size(&h);
+    choose_item(&mut h, "Zoom Out (2x)");
+    assert!((size(&h) * 2.0 - before).abs() < 0.01, "{} then {}", before, size(&h));
+    assert!(h.query_by_label("Zoom In Region").is_none(), "the menu closed");
+    // Previous Pan/Zoom takes it back; Next Pan/Zoom forward again.
+    let at = h.state().screen(P2(4000.0, 3000.0));
+    right_click_at(&mut h, at);
+    choose_item(&mut h, "Previous Pan/Zoom");
+    assert!((size(&h) - before).abs() < 0.01);
+    right_click_at(&mut h, at);
+    choose_item(&mut h, "Next Pan/Zoom");
+    assert!((size(&h) * 2.0 - before).abs() < 0.01, "forward again");
+    // A wall selected: Hide in View and Override Graphics in View, Create Similar, Select All Instances and Delete. No Edit Type:
+    // Revit's is in Properties.
     let south = find(&h, |e| matches!(e, Element::Wall(w) if w.start == P2(0.0, 0.0)));
     click(&mut h, P2(4000.0, 0.0));
     assert_eq!(h.state().selection, [south]);
-    let at = h.state().screen(P2(4000.0, 3000.0));
     assert_eq!(
-        offered(&mut h, at, &MENU),
-        ["Cancel", "Zoom to Fit", "Zoom In", "Edit Type", "Select All Instances", "Hide Element", "Delete"]
+        menu_order(&h),
+        [
+            vec!["Cancel", "Select Previous"],
+            vec!["Hide in View", "Override Graphics in View", "Create Similar"],
+            vec!["Select All Instances", "Delete"],
+            vec!["Find Referring Views"],
+            ZOOMS.to_vec(),
+            vec!["Browsers", "Properties"],
+        ]
     );
-    choose_item(&mut h, "Edit Type");
-    assert!(h.state().type_dialog.is_some(), "Type Properties is open");
+    // Hide in View > Elements, at the wall.
+    let at = h.state().screen(P2(4000.0, 0.0));
+    right_click_at(&mut h, at);
     assert_eq!(h.state().selection, [south], "a right click leaves the selection as it was");
+    choose_item(&mut h, "Hide in View");
+    for item in ["Elements", "Category", "By Filter…"] {
+        assert!(h.query_by_label(item).is_some(), "{item}");
+    }
+    choose_item(&mut h, "Elements");
+    assert!(plan_graphics(&h, 100000).elements[&gid(&h, south)].hidden, "hidden in the view");
+    assert!(h.state().selection.is_empty());
+    // Select Previous brings back the selection it replaced.
+    let at = h.state().screen(P2(4000.0, 3000.0));
+    right_click_at(&mut h, at);
+    choose_item(&mut h, "Select Previous");
+    assert_eq!(h.state().selection, [south]);
+    // Override Graphics in View > By Category… opens Visibility/Graphics; > By Filter… too.
+    right_click_at(&mut h, at);
+    choose_item(&mut h, "Override Graphics in View");
+    for item in ["By Element…", "By Category…", "By Filter…"] {
+        assert!(h.query_by_label(item).is_some(), "{item}");
+    }
+    choose_item(&mut h, "By Category…");
+    assert!(h.state().vg_dialog.is_some(), "Visibility/Graphics, on the walls' row");
+    key(&mut h, Key::Escape);
 }
 
 #[test]
-fn a_wall_or_a_run_selected_offers_to_refuse_or_take_up_its_joins() {
+fn a_component_selected_offers_edit_family_and_a_system_family_does_not() {
+    let mut h = app(&format!(
+        "{BOX}
+component {{\"family\": \"Table\", \"type\": \"1600 x 900\", \"at\": [3000, 3000]}}"
+    ));
+    let table = find(&h, |e| matches!(e, Element::Component(_)));
+    click(&mut h, P2(3800.0, 3000.0));
+    assert_eq!(h.state().selection, [table]);
+    assert!(menu_order(&h)[1].contains(&"Edit Family"), "{:?}", menu_order(&h));
+    let at = h.state().screen(P2(4000.0, 3000.0));
+    right_click_at(&mut h, at);
+    choose_item(&mut h, "Edit Family");
+    assert!(h.state().family_editor.is_some(), "the door's family in the Family Editor");
+    let mut h = app(BOX);
+    click(&mut h, P2(4000.0, 0.0));
+    assert!(!menu_order(&h).iter().flatten().any(|l| *l == "Edit Family"), "a wall's family is a system one");
+}
+
+#[test]
+fn a_right_click_on_a_wall_or_a_runs_end_offers_to_refuse_or_take_up_its_join() {
     let mut h = app(r#"strip_footing {"points": [[0, 0], [4000, 0]]}"#);
     let footing = ids(&h, "stripfooting")[0];
     let joined = |h: &Harness<BimApp>| h.state().session.model.run_of(footing).unwrap().join;
     click(&mut h, P2(2000.0, 0.0));
     assert_eq!(h.state().selection, [footing]);
-    let at = h.state().screen(P2(2000.0, 2000.0));
-    let items = offered(&mut h, at, &["Disallow Join", "Allow Join"]);
-    assert!(items.contains(&"Disallow Join") && items.contains(&"Allow Join"), "{items:?}");
-    assert!(joined(&h));
+    // Not on its body: Revit offers the join on the end, where it is.
+    let at = h.state().screen(P2(2000.0, 0.0));
+    assert!(offered(&mut h, at, &["Disallow Join", "Allow Join"]).is_empty());
+    key(&mut h, Key::Escape);
+    let end = h.state().screen(P2(4000.0, 0.0));
+    assert_eq!(offered(&mut h, end, &["Disallow Join", "Allow Join"]), ["Disallow Join"]);
     // Refused: the flag holds on the element, written only when it is off.
     choose_item(&mut h, "Disallow Join");
     assert!(!joined(&h), "the joins are refused");
     assert_eq!(field(&h, footing, "join"), json!(false));
     // Taken up again.
-    let at = h.state().screen(P2(2000.0, 2000.0));
-    offered(&mut h, at, &["Disallow Join", "Allow Join"]);
+    assert_eq!(offered(&mut h, end, &["Disallow Join", "Allow Join"]), ["Allow Join"]);
     choose_item(&mut h, "Allow Join");
     assert!(joined(&h), "the joins are back");
     assert_eq!(field(&h, footing, "join"), serde_json::Value::Null, "joining is written nowhere");
-    // A wall offers it too; a room offers nothing.
-    let mut h2 = app(&format!("{BOX}\nroom {{\"point\": [4000, 3000]}}"));
+    // A wall's end offers it too.
+    let mut h2 = app(BOX);
     click(&mut h2, P2(4000.0, 0.0));
-    let at = h2.state().screen(P2(4000.0, 3000.0));
-    assert!(offered(&mut h2, at, &["Disallow Join"]).contains(&"Disallow Join"));
-    let room = ids(&h2, "room")[0];
-    h2.state_mut().selection = vec![room];
-    h2.run();
-    let at = h2.state().screen(P2(4000.0, 3000.0));
-    assert!(offered(&mut h2, at, &["Disallow Join", "Allow Join"]).is_empty());
+    let end = h2.state().screen(P2(8000.0, 0.0));
+    assert!(offered(&mut h2, end, &["Disallow Join"]).contains(&"Disallow Join"));
 }
 
 #[test]
@@ -6661,22 +6810,32 @@ fn every_view_has_the_right_click_menu() {
     let mut h = app(&format!(
         "{BOX}\nsection {{\"start\": [-1000, 3000], \"end\": [9000, 3000]}}\nroom {{\"point\": [4000, 3000], \"name\": \"Hall\"}}"
     ));
-    // The 3D view: Home View among its items.
+    // The 3D view: Revit's menu, with no Home View (the ViewCube's) or Set Work Plane (the ribbon's).
     press(&mut h, "Default 3D View");
     let at = h.state().orbit.rect.center();
-    assert_eq!(offered(&mut h, at, &MENU), ["Cancel", "Zoom to Fit", "Zoom In", "Home View"]);
+    assert_eq!(offered(&mut h, at, &["Cancel", "Zoom Out (2x)", "Home View", "Set Work Plane"]), ["Cancel", "Zoom Out (2x)"]);
     key(&mut h, Key::Escape);
-    // A section.
+    // A section: the plans showing its line are its referring views; Go To View opens one.
     browse(&mut h, "Section 1");
     let at = h.state().screen(P2(5000.0, 1500.0));
-    assert_eq!(offered(&mut h, at, &MENU), ["Cancel", "Zoom to Fit", "Zoom In"]);
-    key(&mut h, Key::Escape);
+    assert_eq!(
+        offered(&mut h, at, &["Cancel", "Zoom Out (2x)", "Find Referring Views"]),
+        ["Cancel", "Zoom Out (2x)", "Find Referring Views"]
+    );
+    assert!(h.state().context_items().iter().flatten().any(|i| i.action == Action::FindReferringViews && i.enabled));
+    choose_item(&mut h, "Find Referring Views");
+    assert!(h.query_by_label("Floor Plan: Level 1").is_some(), "Go To View lists the plan");
+    press(&mut h, "Open View");
+    assert_eq!(h.state().sheet, Sheet::Plan(100000));
     // A schedule: no zooming; its row's room selected, deleted from the menu.
     browse(&mut h, "Room Schedule");
     h.get_by_label("Hall").click();
     h.run();
     let at = h.get_by_label("Hall").rect().center();
-    assert_eq!(offered(&mut h, at, &MENU), ["Cancel", "Edit Type", "Select All Instances", "Delete"]);
+    assert_eq!(
+        offered(&mut h, at, &["Cancel", "Zoom Out (2x)", "Select All Instances", "Delete"]),
+        ["Cancel", "Select All Instances", "Delete"]
+    );
     choose_item(&mut h, "Delete");
     assert!(ids(&h, "room").is_empty());
 }

@@ -343,7 +343,7 @@ link again; a test clicks one with `click_accesskit`, since a wall's rows run be
 Properties' filter. With a selection of several categories, the line under the Type Selector is a drop-down of them, as Revit's is
 (`BimApp::selection_categories`): Multiple Categories first, then each category with its count. One picked is what the palette shows
 and edits, the selection staying as it is: `BimApp::palette_ids` is the selection narrowed to it, and the palette's subject, the Type
-Selector, Edit Type (from the palette, the ribbon or the right-click menu) and every edit the palette sends read it, never the selection.
+Selector, Edit Type (from the palette or the ribbon; Revit's right-click menu has none) and every edit the palette sends read it, never the selection.
 `palette_filter` keeps the selection it was picked for, so a new selection starts it over.
 What the palette reads of its elements, `element_json`, it reads several times a frame (the Type Selector, the rows, a family's
 parameters), and a component's says the room it stands in, which costs its level's room boundaries: `BimApp::elements_json` keeps
@@ -419,7 +419,7 @@ Align, which lines up with what a plan shows, says so. A view edge-on to the pla
 Work planes in 3D (`workplane.rs`; the core's in [views and graphics](views-and-graphics.md)). The plane has a patch of its own in
 the view, as ArchiCAD's: a small square of it (`work_plane_ring`, the same size on screen at any zoom), by the model's south-west corner
 on a level plane and about the point it was set through on another, lit with the plane's name under the cursor, that a click in Modify
-opens the dialog from; so do the 3D view's right-click menu (Set Work Plane…, `Action::WorkPlane`) and the Architecture tab's Set, in
+opens the dialog from; so does the Architecture tab's Set (Revit's right-click menu has no Set Work Plane), in
 its Datum panel. The 3D view's control bar has Work Plane, a `footer::menu_button` showing the plane (a level's name, `Surface, 90°` or
 `Three points, 14°`, and `+ offset` when moved), which opens its dialog (`workplane::Draft`). It sets the plane three ways (`By`): Pick
 from list, a level; Pick a surface, with Pick Surface; Pick three points, with Pick Points; and one Offset for each, along the plane's
@@ -463,9 +463,26 @@ Floor goes into sketch mode at once, in a plan as in 3D, as Revit's does (`set_t
 (`walls_outline_panel`), which puts the outline the level's walls enclose, and its courtyards, in the sketch as lines to edit
 (`floor_outline`): what the tool's one click inside the walls made before.
 
-Unhide. Only Reveal Hidden Elements lets what a view hides be picked, so the Modify tab's View panel offers Unhide Element and Unhide Category (EU, VU) for a selection
-`BimApp::hidden_selection` finds the active view hiding: the elements hidden one by one, and the categories hidden whole. They run `graphics` with `show_elements` or `show`
-(`unhide_selection`), the selection stays, and with nothing of it hidden EU opens the Elements tab as before and VU says so.
+Reveal Hidden Elements (RH, the view control bar's bulb; `footer.rs`) is Revit's mode: the view wears a magenta frame with
+"Reveal Hidden Elements" in its top left corner (a temporary hide's frame is cyan, "Temporary Hide/Isolate"), what it hides is drawn
+magenta and can be picked, and the rest is halftone (`shadowed` gives each shown element a halftone override in the view's copy). The
+mode is not a temporary hide: Reset Temporary Hide/Isolate (HR) leaves it on. While it is on, the contextual tab is Modify | Reveal
+Hidden Elements with nothing selected (`context`), and the Modify tab, whatever is selected, has the Reveal Hidden panel
+(`reveal_hidden_panel`): Unhide Element (EU) and Unhide Category (VU), on only for what `BimApp::hidden_selection` finds the view
+hiding of the selection (the elements hidden one by one, the categories hidden whole), and Toggle Reveal Hidden Elements Mode. They
+run `graphics` with `show_elements` or `show` (`unhide_selection`); the selection stays, and with nothing of it hidden EU opens the
+Elements tab as before and VU says so. The right-click menu offers the same as Unhide in View > Elements / Category in place of
+Hide in View while a hidden element is selected in the mode.
+
+The right-click menu (`context.rs`) is Revit's, in its order: Cancel, Repeat [last], Recent Commands, Select Previous (the
+selection a change replaced, `note_selection`); Disallow Join or Allow Join when the right click lands on a selected wall's or
+run's end grip (`end_under`; the flag is the element's, both ends alike, where Revit's is each end's); Hide in View > Elements /
+Category / By Filter…, Override Graphics in View > By Element… / By Category… / By Filter… (the last two open Visibility/Graphics
+on the category's row and on Filters), Create Similar and, for a loadable family's element, Edit Family; Select All Instances and
+Delete; Find Referring Views (Go To View: the plans a section's line or a camera stands on); Zoom In Region, Zoom Out (2x), Zoom
+To Fit, Previous Pan/Zoom and Next Pan/Zoom (`Canvas::next`, from what Previous went back from); Browsers > Project Browser and
+Properties, ticked while they show. It shows no keys beside its items, as Revit's shows none. Revit's menu has no Edit Type, Set
+Work Plane or Home View; the window's Create Group, Ungroup, Reload CAD and Open Camera View stay as groups of their own.
 
 Filter. While something is selected, every tab's Select panel has Filter, and the funnel by the status bar's count opens it too
 (`filter.rs`): Revit's Filter, the selection counted by category, each checked to keep or cleared to leave out, with Check All,
