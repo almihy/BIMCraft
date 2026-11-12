@@ -788,9 +788,10 @@ pub fn read_pdf(bytes: Vec<u8>, page: usize, dpi: u32) -> Result<PdfRead, String
     if pictures > 0 {
         notes.push(format!(
             "page {page} has {pictures} picture{} in it (raster images): {} in the background picture, under its lines, and \
-             show and hide with the PDF, not by layer",
+             {} with the PDF, not by layer",
             if pictures == 1 { "" } else { "s" },
-            if pictures == 1 { "it stays" } else { "they stay" }
+            if pictures == 1 { "it stays" } else { "they stay" },
+            if pictures == 1 { "shows and hides" } else { "show and hide" }
         ));
     }
     if !vectors.is_empty() && !whole {

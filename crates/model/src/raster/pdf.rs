@@ -344,7 +344,7 @@ impl std::fmt::Write for Bytes<'_> {
 /// read as Latin-1 (they differ only in a few marks).
 fn text_string(b: &[u8]) -> String {
     if let Some(rest) = b.strip_prefix(&[0xFE, 0xFF]) {
-        let units: Vec<u16> = rest.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+        let units: Vec<u16> = rest.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes(*c)).collect();
         String::from_utf16_lossy(&units)
     } else if let Some(rest) = b.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
         String::from_utf8_lossy(rest).into_owned()
@@ -830,10 +830,10 @@ impl<'a> Device<'a> for Collect {
         if text.is_empty() {
             return;
         }
-        // A glyph's space is an em a side: its height is the em's, placed.
+        // A glyph's space is a thousand units an em (hayro's outlines are in them): its height is the em's, placed.
         let t = props.transform * first.transform();
         let origin = t * Point::ORIGIN;
-        let up = t * Point::new(0.0, 1.0) - origin;
+        let up = t * Point::new(0.0, 1000.0) - origin;
         let along = t * Point::new(1.0, 0.0) - origin;
         // Capitals stand about seven tenths of an em.
         let height = up.hypot() * 0.7;
@@ -1022,6 +1022,10 @@ fn layer_name(name: &str, i: usize) -> String {
     if n.is_empty() { format!("Layer {}", i + 1) } else { n }
 }
 
+/// Which layer of a drawing an item goes on: from the file's layer it is on, and its plain name of colour and weight.
+trait LayerOf: Fn(Option<usize>, &str) -> String {}
+impl<F: Fn(Option<usize>, &str) -> String> LayerOf for F {}
+
 /// What a page draws, item by item, in the order it draws it: a fill (its rings), a stroke or a text.
 enum Item<'v> {
     Fill(Vec<&'v Run>),
@@ -1043,7 +1047,7 @@ impl Vectors {
     /// The layer each run and text goes on in its drawing: the file's layer it is on (those it draws on no layer on
     /// [`NO_LAYER`]), or, for a page of a file with no layers, a layer of its own colour and weight ("Black 0.35", "Red
     /// hairline", "Grey fill", "Black text"). With the names, in order, and whether each is off.
-    fn layer_names(&self) -> (Vec<(String, bool)>, impl Fn(Option<usize>, &str) -> String + '_) {
+    fn layer_names(&self) -> (Vec<(String, bool)>, impl LayerOf + '_) {
         let layered = self.layered();
         let mut names: Vec<String> = Vec::new();
         let mut own: BTreeMap<usize, String> = BTreeMap::new();
@@ -1369,6 +1373,8 @@ mod tests {
         assert!((s.width - 2.0 * MM_PER_PT).abs() < 1e-6);
         assert_eq!(v.texts.len(), 1, "{v:?}");
         assert_eq!(v.texts[0].text, "WC 1");
+        // 12 points of letter: an em of 4.23 mm, its capitals seven tenths of it.
+        assert!((v.texts[0].height - 12.0 * MM_PER_PT * 0.7).abs() < 1e-6, "{:?}", v.texts[0]);
         assert!(near(v.texts[0].at, [80.0 * MM_PER_PT, 180.0 * MM_PER_PT]), "{:?}", v.texts[0]);
     }
 

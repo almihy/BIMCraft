@@ -75,7 +75,7 @@ fn a_pdf_page_comes_in_at_the_scale_it_states_with_its_lines_where_it_shows_them
     let summary = run(&mut s, "cad_read", json!({"id": id}));
     assert_eq!(summary["texts"][0]["text"], "WC", "{summary}");
     // The room it outlines, with its label, as Pick Lines finds it.
-    let outlines = run(&mut s, "cad_outlines", json!({"id": id, "layers": ["Lines"]}));
+    let outlines = run(&mut s, "cad_outlines", json!({"id": id, "layers": ["Black 0.30"]}));
     let room = outlines["outlines"].as_array().unwrap().iter().find(|o| o["labels"] == json!(["WC"])).expect("the WC");
     assert!((room["area_m2"].as_f64().unwrap() - 24.0).abs() < 0.01, "{room}");
     // And the walls go on its lines.

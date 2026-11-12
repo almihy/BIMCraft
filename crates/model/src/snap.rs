@@ -301,7 +301,7 @@ impl<'a> Scene<'a> {
                 // A PDF's lines, Revit's Enable Snaps: their ends, middles and crossings, and the lines themselves.
                 Element::Image(im) if im.snaps && m.annotation_in(e, view) => {
                     if let Some((cad, ci)) = m.image_types.get(&im.type_name).and_then(|t| im.lines_placed(t, im.view)) {
-                        cad_scene(&mut s, &cad, &ci, p, window, None, id);
+                        cad_scene(&mut s, &cad, &ci, p, window, look.hidden_pdf_layers(&im.type_name), id);
                     }
                 }
                 // The rest is a plan's: a section has none of it.
