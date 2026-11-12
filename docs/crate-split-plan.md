@@ -122,7 +122,9 @@ across core, model, geom and mep-calc, as before the split; ui-egui's 1008) and 
    warnings, the model's half of sync as `merge`), so the commands came apart from the rest first, which is the change
    most edits make. Session-driven tests of its modules are the core's `model_tests/`; the counters and self-checks inside
    the model are on in every debug build (`selfcheck`: a fast path held to its twin, compiled out of release builds),
-   so the model builds alike for `cargo build`, clippy and every crate's tests.
+   and `bimcraft-workspace-hack` asks for every feature the workspace turns on in the model's dependencies, so the model
+   builds alike for `cargo build`, `cargo test` of any crate or of the workspace, and clippy, and switching rebuilds
+   nothing (on Windows, where it was measured; Linux and macOS may want their own lines in it).
 6. `bimcraft-icons`: the Icon list and the generated drawings.
 
 Left: step 4, splitting render (with view3d, sheet and titleblock drawing, pdf, gltf), site and IFC out of
