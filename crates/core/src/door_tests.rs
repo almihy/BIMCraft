@@ -211,17 +211,20 @@ fn a_door_in_an_outside_wall_opens_from_or_to_outside() {
 }
 
 #[test]
-fn a_windows_to_room_is_the_side_away_from_the_face_it_faces() {
+fn a_windows_to_room_is_the_side_it_faces_its_exterior_as_revits() {
     let mut s = Session::new();
     rooms(&mut s);
-    // It faces the south wall's left (the north), so its To Room is to the south: outside.
+    // Revit gives a window's To Room on its exterior side, the side it faces, and its From Room on the other: a window in
+    // an outside wall faced out schedules its room as From Room. This one faces the south wall's left (the north, the
+    // WC), so its To Room is the WC and its From Room outside.
     let w = id_of(&run(&mut s, "window", json!({"at": [2000, 0]})));
     let e = crate::element_json(&s.model, w);
-    assert_eq!((e["to_room"].clone(), room_name(&e["from_room"])), (Value::Null, Some("WC")), "{e}");
+    assert_eq!((room_name(&e["to_room"]), e["from_room"].clone()), (Some("WC"), Value::Null), "{e}");
     assert!(e.get("hinge").is_none() && e.get("swing").is_none());
+    // Faced out (flipped, to the south): its room is its From Room.
     let w = id_of(&run(&mut s, "window", json!({"at": [6000, 0], "flip_facing": true})));
     let e = crate::element_json(&s.model, w);
-    assert_eq!((room_name(&e["to_room"]), e["from_room"].clone()), (Some("Hall"), Value::Null), "{e}");
+    assert_eq!((e["to_room"].clone(), room_name(&e["from_room"])), (Value::Null, Some("Hall")), "{e}");
 }
 
 #[test]

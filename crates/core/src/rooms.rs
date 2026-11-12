@@ -172,7 +172,7 @@ impl<'a> Rooms<'a> {
 
     /// The rooms door or window `e` is between, as Revit's From Room and To Room: the room on each side of its wall at its
     /// middle ([`Model::opening_sides`], [`Rooms::room_at`]), from, then to; none on a side outside every room. A door's
-    /// To Room is the room it swings into, a window's the one on the side away from the face it faces. None for anything
+    /// To Room is the room it swings into, a window's the one on the side it faces, its exterior, as Revit's. None for anything
     /// else.
     pub fn from_to(&self, e: &Element) -> Option<(Option<Id>, Option<Id>)> {
         let (Element::Door(o) | Element::Window(o)) = e else { return None };

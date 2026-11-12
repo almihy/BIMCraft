@@ -38,7 +38,7 @@ thick. Which way it is turned is `Model::opening_way`, which the plan and the ro
 its wall's left (start to end) or, flipped facing, its right, hinged toward the wall's start or, flipped hand, its end; a
 window faces the wall's left, or flipped its right. `Rooms::from_to` gives the rooms either side as Revit's From Room and To
 Room (looked for `ROOM_PROBE` past the faces at the middle; a door's To Room is the one it swings into, a window's the one
-away from the face it faces), `element_json` says them as `from_room` and `to_room` ({id, guid, number, name}, null
+it faces, its exterior, as Revit's: faced out, its room is its From Room), `element_json` says them as `from_room` and `to_room` ({id, guid, number, name}, null
 outside) with a door's `hinge` (`Model::door_hinge`) and `swing` (left or right), Properties shows them read only under
 Phasing, and door and window schedules have From Room: Number, From Room: Name, To Room: Number and To Room: Name. Revit's
 Flip From/To Room is left out: the flips already decide it. A

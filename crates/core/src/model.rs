@@ -5485,7 +5485,7 @@ impl Model {
     }
 
     /// Which way door or window `e` is turned in its wall: the side its To Room is on (a door's, the one it swings to; a
-    /// window's, the one away from the face it faces, its interior), and the jamb it is hinged on, as plans draw it. A door
+    /// window's, the one it faces, its exterior, as Revit's), and the jamb it is hinged on, as plans draw it. A door
     /// swings to its wall's left (start to end, the exterior side), or flipped facing to its right, and is hinged on the
     /// jamb toward the wall's start, or flipped hand toward its end; a window faces its wall's left, or flipped its right.
     /// None for an element that isn't a door or a window, or whose wall or type is missing.
@@ -5493,7 +5493,7 @@ impl Model {
         let (Element::Door(o) | Element::Window(o)) = e else { return None };
         let (w, t) = (self.wall(o.host)?, self.opening_type(e)?);
         let (ext, int) = walls::faces(self, w);
-        let left = o.flip_facing == matches!(e, Element::Window(_));
+        let left = !o.flip_facing;
         let (s0, s1) = (o.offset - t.width / 2.0, o.offset + t.width / 2.0);
         let (hinge, free) = if o.flip_hand { (s1, s0) } else { (s0, s1) };
         Some(OpeningWay {
