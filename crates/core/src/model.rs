@@ -1475,7 +1475,7 @@ pub struct Schedule {
 impl Schedule {
     /// The category it's of, as elements name theirs: `room`.
     pub fn category(&self) -> String {
-        crate::commands::category(&self.of)
+        crate::model::category(&self.of)
     }
 }
 
@@ -4093,7 +4093,7 @@ impl Model {
             };
             for e in self.elements.values_mut() {
                 if let Element::Schedule(sc) = e {
-                    if param.categories.contains(&crate::commands::category(&sc.of)) {
+                    if param.categories.contains(&crate::model::category(&sc.of)) {
                         let swap = |n: &mut String| {
                             if *n == name {
                                 n.clone_from(&to);
@@ -4125,13 +4125,13 @@ impl Model {
         let categories: BTreeSet<String> = self
             .elements
             .values()
-            .filter_map(|e| if let Element::Schedule(sc) = e { Some(crate::commands::category(&sc.of)) } else { None })
+            .filter_map(|e| if let Element::Schedule(sc) = e { Some(crate::model::category(&sc.of)) } else { None })
             .collect();
         let fixed: BTreeMap<String, BTreeSet<String>> =
             categories.into_iter().map(|c| (c.clone(), crate::schedule::fixed_fields(self, &c))).collect();
         for e in self.elements.values_mut() {
             let Element::Schedule(sc) = e else { continue };
-            let Some(fixed) = fixed.get(&crate::commands::category(&sc.of)) else { continue };
+            let Some(fixed) = fixed.get(&crate::model::category(&sc.of)) else { continue };
             let mut taken: BTreeSet<String> = fixed.iter().cloned().chain(sc.fields.iter().map(|f| f.name.clone())).collect();
             let mut renames: Vec<(String, String)> = Vec::new();
             for f in sc.fields.iter().filter(|f| f.formula.is_some() && fixed.contains(&f.name)) {
@@ -4271,7 +4271,7 @@ impl Model {
             return Err("align: the lines aren't parallel".into());
         }
         let across = (reference.1 - reference.0).unit().perp();
-        Ok(crate::commands::micron(origin + across * (reference.0 - line.0).dot(across)))
+        Ok(crate::geom::micron(origin + across * (reference.0 - line.0).dot(across)))
     }
 
     /// Element `k` as messages name it: its id, or, when the project hasn't it, what `k` is.
@@ -4367,9 +4367,7 @@ impl Model {
             });
         }
         match bounds {
-            Some((lo, hi)) => {
-                [crate::commands::micron(lo - P2(LEVEL_PAST, LEVEL_PAST)), crate::commands::micron(hi + P2(LEVEL_PAST, LEVEL_PAST))]
-            }
+            Some((lo, hi)) => [crate::geom::micron(lo - P2(LEVEL_PAST, LEVEL_PAST)), crate::geom::micron(hi + P2(LEVEL_PAST, LEVEL_PAST))],
             None => [P2(-10_000.0, -10_000.0), P2(10_000.0, 10_000.0)],
         }
     }
@@ -4402,7 +4400,7 @@ impl Model {
             _ => P2(0.0, hi.1 + by),
         };
         let [a, b] = geom::move_edge(extent, k, edge);
-        Some([crate::commands::micron(a), crate::commands::micron(b)])
+        Some([crate::geom::micron(a), crate::geom::micron(b)])
     }
 
     /// Levels from lowest to highest.
@@ -4728,7 +4726,7 @@ impl Model {
         fn names<T>(m: &BTreeMap<String, T>) -> Vec<&str> {
             m.keys().map(String::as_str).collect()
         }
-        match crate::commands::category(category).as_str() {
+        match crate::model::category(category).as_str() {
             "region" => names(&self.region_types),
             "text" => names(&self.text_types),
             "dimension" => names(&self.dimension_types),
@@ -4750,7 +4748,7 @@ impl Model {
     /// The type a new element of `category` gets when none is named: the one a new model starts
     /// with, else the first by name.
     pub fn default_type(&self, category: &str) -> Option<&str> {
-        let preferred = match crate::commands::category(category).as_str() {
+        let preferred = match crate::model::category(category).as_str() {
             "region" => return fills::default_region_type(&self.region_types, self.language).map(String::as_str),
             "text" => return crate::text::default_type(&self.text_types).map(String::as_str),
             "dimension" => return crate::dims::default_type(&self.dimension_types, DimKind::Aligned).map(String::as_str),
@@ -4781,7 +4779,7 @@ impl Model {
     /// The family and type a new door or window gets in an interface that places families: the project's single door or fixed window
     /// at their usual size, else its first family of the category and that family's first type.
     pub fn default_family(&self, category: &str) -> Option<(&str, &str)> {
-        let (kind, usual, size) = match crate::commands::category(category).as_str() {
+        let (kind, usual, size) = match crate::model::category(category).as_str() {
             "door" => (crate::family::Category::Door, "Single Door", "900 x 2100"),
             "window" => (crate::family::Category::Window, "Fixed Window", "1200 x 1500"),
             _ => return None,
@@ -8650,6 +8648,76 @@ fn to_centre(from: P2, end: P2, walls: &[(P2, P2, f64)]) -> P2 {
         })
         .min_by(f64::total_cmp)
         .map_or(end, |d| end + way * d)
+}
+
+/// `walls` → `wall`: categories in any case, singular or plural.
+pub fn category(s: &str) -> String {
+    // `structural column` and `structural_column` are `structuralcolumn`.
+    let s: String = s.to_ascii_lowercase().chars().filter(char::is_ascii_alphanumeric).collect();
+    // `mass` and `switch` end in the plural's letter, and an accessory's plural isn't made by it.
+    match s.as_str() {
+        "mass" | "masses" => "mass".into(),
+        "switch" | "switches" => "switch".into(),
+        "pipeaccessory" | "pipeaccessories" => "pipeaccessory".into(),
+        _ => s.trim_end_matches('s').to_string(),
+    }
+}
+
+/// `"#rrggbb"`, or `[r, g, b]`, each 0 to 255.
+pub fn colour(v: &serde_json::Value) -> Option<[u8; 3]> {
+    match v {
+        serde_json::Value::String(hex) => {
+            let hex = hex.strip_prefix('#').filter(|h| h.len() == 6 && h.is_ascii())?;
+            let byte = |i: usize| hex.get(i..i + 2).and_then(|b| u8::from_str_radix(b, 16).ok());
+            Some([byte(0)?, byte(2)?, byte(4)?])
+        }
+        serde_json::Value::Array(a) => match a.as_slice() {
+            [r, g, b] => {
+                let byte = |x: &serde_json::Value| x.as_u64().and_then(|x| u8::try_from(x).ok());
+                Some([byte(r)?, byte(g)?, byte(b)?])
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The next in the series `taken` is numbered in: one past its largest number, "1" when there is none.
+/// A series is plain numbers ("1", "2") or numbers after a prefix ("P1", "P2", "J-01"); a prefix
+/// counts as a series once two marks share it and they outnumber the plain numbers, so a lone "D2"
+/// among numbered doors stays an exception. Zero padding is kept ("P09" → "P10"), and the result
+/// is never one already taken. A mark longer than a name may be (`MAX_TEXT`) is no part of a series.
+pub fn next_number<'a>(taken: impl Iterator<Item = &'a str>) -> String {
+    let taken: Vec<&str> = taken.map(str::trim).collect();
+    // Each series by its prefix: how many marks it has, its largest number and the width its zero-padded ones keep.
+    let mut series: BTreeMap<&str, (usize, u64, usize)> = BTreeMap::new();
+    for t in taken.iter().filter(|t| t.len() <= MAX_TEXT) {
+        let digits = t.len() - t.trim_end_matches(|c: char| c.is_ascii_digit()).len();
+        let (prefix, number) = t.split_at(t.len() - digits);
+        let Ok(n) = number.parse::<u64>() else { continue };
+        let s = series.entry(prefix).or_insert((0, 0, 0));
+        s.0 += 1;
+        s.1 = s.1.max(n);
+        if number.len() > 1 && number.starts_with('0') {
+            s.2 = s.2.max(digits);
+        }
+    }
+    let plain = series.get("").map_or(0, |s| s.0);
+    let (prefix, (_, last, width)) = series
+        .iter()
+        .filter(|(p, s)| p.is_empty() || (s.0 >= 2 && s.0 > plain))
+        .max_by_key(|(p, s)| (s.0, s.1, std::cmp::Reverse(**p)))
+        .map_or(("", (0, 0, 0)), |(p, s)| (*p, *s));
+    // A mark longer than a name may be starts no series, so no width passes MAX_TEXT; this keeps it so.
+    let width = if prefix.is_empty() { 0 } else { width.min(MAX_TEXT) };
+    let mut n = last;
+    loop {
+        n = n.saturating_add(1);
+        let next = format!("{prefix}{n:0width$}");
+        if !taken.contains(&next.as_str()) || n == u64::MAX {
+            return next;
+        }
+    }
 }
 
 #[cfg(test)]

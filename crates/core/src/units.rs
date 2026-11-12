@@ -233,6 +233,11 @@ fn inches(s: &str) -> Option<f64> {
     }
 }
 
+/// mm² as m², to the hundredth.
+pub fn m2(mm2: f64) -> f64 {
+    (mm2 / 1e4).round() / 100.0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -14,9 +14,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::commands::{category, element_json_bare, element_json_with};
+use crate::commands::{element_json_bare, element_json_with};
 use crate::family::{self, MAX_FORMULA};
 use crate::language::Language;
+use crate::model::category;
 use crate::model::{Element, Id, MAX_COORD, MAX_TEXT, Model, ParameterKind, Schedule};
 use crate::phasing;
 use crate::rooms::Rooms;
@@ -1172,7 +1173,7 @@ fn sources<'a>(m: &'a Model, sc: &Schedule, cat: &str) -> Vec<(Id, &'a Element, 
                 id,
                 e,
                 serde_json::json!({
-                    "id": id, "mass": ms.name, "level": level, "area_m2": crate::commands::m2(area),
+                    "id": id, "mass": ms.name, "level": level, "area_m2": crate::units::m2(area),
                     "perimeter_m": (perimeter / 10.0).round() / 100.0, "volume_m3": (m.mass_volume(ms, z, z + up) / 1e7).round() / 100.0,
                 }),
             ));

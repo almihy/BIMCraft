@@ -16,10 +16,11 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::f64::consts::PI;
 use std::sync::Arc;
 
-use crate::commands::{micron, next_number, tidy};
 use crate::family::{Category, Expr, Family, Form, IfcClass, MAX_TRIANGLES, Parameter};
 use crate::geom::v3::{P3, add, cross, dot, mul, sub, unit};
 use crate::geom::{self, P2};
+use crate::geom::{micron, tidy};
+use crate::model::next_number;
 use crate::model::{
     Ceiling, CeilingType, Column, ColumnType, Component, Element, Extrusion, FIRST_ID, Floor, FloorType, Function, Grid, Guid, Id, Justify,
     Landing, Layer, Level, MAX_COORD, MAX_LAYERS, MAX_POINTS, MAX_PROJECT_PARAMETERS, MAX_TEXT, Mass, Model, Opening, OpeningType,

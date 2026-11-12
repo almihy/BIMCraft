@@ -317,7 +317,7 @@ mod rgb {
         if v.is_null() {
             return Ok(None);
         }
-        crate::commands::colour(&v)
+        crate::model::colour(&v)
             .map(Some)
             .ok_or_else(|| serde::de::Error::custom(format!("{v} isn't a colour: [r, g, b], each 0 to 255, or \"#rrggbb\"")))
     }

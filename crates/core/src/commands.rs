@@ -51,6 +51,9 @@ mod images;
 mod pin;
 mod site;
 pub use crate::files::base64;
+pub(crate) use crate::geom::{micron, tidy};
+pub(crate) use crate::model::{category, colour, next_number};
+pub use crate::units::m2;
 use cad_pick::cad_outlines;
 use site::{building_pad, property_line, site as site_cmd, site_edit, site_figures, site_kinds, toposolid};
 
@@ -2771,25 +2774,7 @@ fn type_param(c: &str, p: &Value, m: &Model, category: &str) -> Result<String, S
     }
 }
 
-/// `walls` → `wall`: categories in any case, singular or plural.
-pub(crate) fn category(s: &str) -> String {
-    // `structural column` and `structural_column` are `structuralcolumn`.
-    let s: String = s.to_ascii_lowercase().chars().filter(char::is_ascii_alphanumeric).collect();
-    // `mass` and `switch` end in the plural's letter, and an accessory's plural isn't made by it.
-    match s.as_str() {
-        "mass" | "masses" => "mass".into(),
-        "switch" | "switches" => "switch".into(),
-        "pipeaccessory" | "pipeaccessories" => "pipeaccessory".into(),
-        _ => s.trim_end_matches('s').to_string(),
-    }
-}
-
 // ---------- derived values ----------
-
-/// mm² as m², to the hundredth.
-pub fn m2(mm2: f64) -> f64 {
-    (mm2 / 1e4).round() / 100.0
-}
 
 /// A stair's or a ramp's runs, each from its foot to its top, and where its last one ends.
 fn runs(extra: &mut Map<String, Value>, l: &stairs::Layout) {
@@ -2882,54 +2867,6 @@ pub fn floor_outline(m: &Model, level: impl Key) -> Option<(Vec<P2>, Vec<Vec<P2>
     // Courtyards: the outermost loops, outdoors.
     let courtyards = (0..loops.len()).filter(|&a| !nested(a) && !indoors.contains(&a)).map(|a| tidy(loops[a])).collect();
     Some((outer.iter().rev().copied().collect(), courtyards))
-}
-
-/// A ring by its corners, to the micron, from its south-west corner.
-pub(crate) fn tidy(ring: &[P2]) -> Vec<P2> {
-    let mut ring: Vec<P2> = geom::corners(ring).into_iter().map(micron).collect();
-    let south_west =
-        ring.iter().enumerate().min_by(|(_, a), (_, b)| (a.1, a.0).partial_cmp(&(b.1, b.0)).unwrap_or(std::cmp::Ordering::Equal));
-    let first = south_west.map_or(0, |(i, _)| i);
-    ring.rotate_left(first);
-    ring
-}
-
-/// The next in the series `taken` is numbered in: one past its largest number, "1" when there is none.
-/// A series is plain numbers ("1", "2") or numbers after a prefix ("P1", "P2", "J-01"); a prefix
-/// counts as a series once two marks share it and they outnumber the plain numbers, so a lone "D2"
-/// among numbered doors stays an exception. Zero padding is kept ("P09" → "P10"), and the result
-/// is never one already taken. A mark longer than a name may be (`MAX_TEXT`) is no part of a series.
-pub(crate) fn next_number<'a>(taken: impl Iterator<Item = &'a str>) -> String {
-    let taken: Vec<&str> = taken.map(str::trim).collect();
-    // Each series by its prefix: how many marks it has, its largest number and the width its zero-padded ones keep.
-    let mut series: BTreeMap<&str, (usize, u64, usize)> = BTreeMap::new();
-    for t in taken.iter().filter(|t| t.len() <= MAX_TEXT) {
-        let digits = t.len() - t.trim_end_matches(|c: char| c.is_ascii_digit()).len();
-        let (prefix, number) = t.split_at(t.len() - digits);
-        let Ok(n) = number.parse::<u64>() else { continue };
-        let s = series.entry(prefix).or_insert((0, 0, 0));
-        s.0 += 1;
-        s.1 = s.1.max(n);
-        if number.len() > 1 && number.starts_with('0') {
-            s.2 = s.2.max(digits);
-        }
-    }
-    let plain = series.get("").map_or(0, |s| s.0);
-    let (prefix, (_, last, width)) = series
-        .iter()
-        .filter(|(p, s)| p.is_empty() || (s.0 >= 2 && s.0 > plain))
-        .max_by_key(|(p, s)| (s.0, s.1, std::cmp::Reverse(**p)))
-        .map_or(("", (0, 0, 0)), |(p, s)| (*p, *s));
-    // A mark longer than a name may be starts no series, so no width passes MAX_TEXT; this keeps it so.
-    let width = if prefix.is_empty() { 0 } else { width.min(MAX_TEXT) };
-    let mut n = last;
-    loop {
-        n = n.saturating_add(1);
-        let next = format!("{prefix}{n:0width$}");
-        if !taken.contains(&next.as_str()) || n == u64::MAX {
-            return next;
-        }
-    }
 }
 
 /// Revit-style grid naming: the letter after the last grid's letter, else the next number.
@@ -12104,25 +12041,6 @@ fn values_json(v: BTreeMap<String, crate::family::Val>) -> Value {
     )
 }
 
-/// `"#rrggbb"`, or `[r, g, b]`, each 0 to 255.
-pub(crate) fn colour(v: &Value) -> Option<[u8; 3]> {
-    match v {
-        Value::String(hex) => {
-            let hex = hex.strip_prefix('#').filter(|h| h.len() == 6 && h.is_ascii())?;
-            let byte = |i: usize| hex.get(i..i + 2).and_then(|b| u8::from_str_radix(b, 16).ok());
-            Some([byte(0)?, byte(2)?, byte(4)?])
-        }
-        Value::Array(a) => match a.as_slice() {
-            [r, g, b] => {
-                let byte = |x: &Value| x.as_u64().and_then(|x| u8::try_from(x).ok());
-                Some([byte(r)?, byte(g)?, byte(b)?])
-            }
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
 fn edit_type(s: &mut Session, p: &Value) -> R {
     let c = "type";
     let cat = category(&string(c, p, "category")?.ok_or_else(|| bad(c, "`category` is required: wall, floor, ceiling, door or window"))?);
@@ -12507,12 +12425,6 @@ fn merge(into: &mut Value, patch: &Value) {
             }
         }
     }
-}
-
-/// `p` to the micron: what a point meant to be exact is, without float noise.
-pub(crate) fn micron(p: P2) -> P2 {
-    // `+ 0.0`: no `-0` in files.
-    P2((p.0 * 1e3).round() / 1e3 + 0.0, (p.1 * 1e3).round() / 1e3 + 0.0)
 }
 
 /// How a command takes elements: through `map`, a translation, a turn or a mirror. A translation

@@ -686,6 +686,22 @@ pub fn region_in(all: &[Vec<P2>], p: P2, tol: f64) -> Option<Region> {
     Some(Region { outer: outer.clone(), holes })
 }
 
+/// `p` to the micron: what a point meant to be exact is, without float noise.
+pub fn micron(p: P2) -> P2 {
+    // `+ 0.0`: no `-0` in files.
+    P2((p.0 * 1e3).round() / 1e3 + 0.0, (p.1 * 1e3).round() / 1e3 + 0.0)
+}
+
+/// A ring by its corners, to the micron, from its south-west corner.
+pub fn tidy(ring: &[P2]) -> Vec<P2> {
+    let mut ring: Vec<P2> = corners(ring).into_iter().map(micron).collect();
+    let south_west =
+        ring.iter().enumerate().min_by(|(_, a), (_, b)| (a.1, a.0).partial_cmp(&(b.1, b.0)).unwrap_or(std::cmp::Ordering::Equal));
+    let first = south_west.map_or(0, |(i, _)| i);
+    ring.rotate_left(first);
+    ring
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

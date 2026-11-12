@@ -24,11 +24,11 @@ pub fn unknown<'de, T: de::Deserialize<'de>>(v: &Value) -> Vec<String> {
 
 /// The keys of an element's JSON (its `category`, and `guid`, taken out) that its kind doesn't have; none for a category
 /// this BIMCraft doesn't know, which the strict reading refuses.
-pub fn element(category: &str, v: &Value) -> Vec<String> {
+pub fn element(kind: &str, v: &Value) -> Vec<String> {
     use crate::model::*;
     macro_rules! kinds {
         ($($name:literal => $t:ty),* $(,)?) => {
-            match category {
+            match kind {
                 $($name => unknown::<$t>(v),)*
                 _ => Vec::new(),
             }

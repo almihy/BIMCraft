@@ -210,6 +210,6 @@ impl Placement {
     pub(crate) fn map(&self, q: P2) -> P2 {
         let (s, c) = self.angle.to_radians().sin_cos();
         let d = q - self.about;
-        crate::commands::micron(self.about + P2(d.0 * c - d.1 * s, d.0 * s + d.1 * c) + self.by)
+        crate::geom::micron(self.about + P2(d.0 * c - d.1 * s, d.0 * s + d.1 * c) + self.by)
     }
 }

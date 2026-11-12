@@ -3469,7 +3469,7 @@ fn ifc_files_from_other_tools_come_in_measured_from_their_geometry() {
 
 #[test]
 fn marks_number_on_in_the_series_they_are_in() {
-    use crate::commands::next_number;
+    use crate::model::next_number;
     let next = |taken: &[&str]| next_number(taken.iter().copied());
     assert_eq!(next(&[]), "1");
     assert_eq!(next(&["1", "2", "7"]), "8");
@@ -3488,8 +3488,8 @@ fn marks_number_on_in_the_series_they_are_in() {
 
 #[test]
 fn a_tag_of_a_long_run_of_zeros_starts_no_series_and_pads_no_further_than_a_name_goes() {
-    use crate::commands::next_number;
     use crate::model::MAX_TEXT;
+    use crate::model::next_number;
     // A hostile file's tags, `P`, zeros and a number, longer than any name: ignored, not padded to.
     let hostile = [format!("P{}1", "0".repeat(MAX_TEXT)), format!("P{}2", "0".repeat(MAX_TEXT))];
     assert_eq!(next_number(hostile.iter().map(String::as_str)), "1");
