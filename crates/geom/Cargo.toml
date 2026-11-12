@@ -1,0 +1,23 @@
+[package]
+name = "bimcraft-geom"
+description = "BIMCraft's geometry and plain helpers: plan and 3D maths, triangulation, straight skeletons, solids, units, files"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# Helpers the tests of the crates above use.
+testing = []
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+bimcraft-i18n = { workspace = true }
+flate2 = { workspace = true }
+
+[build-dependencies]
+bimcraft-i18n = { workspace = true, features = ["catalog"] }

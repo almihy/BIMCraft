@@ -16,7 +16,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use crate::geom::{self, P2};
-use crate::model::{MAX_COORD, TOL};
+use crate::geom::{MAX_COORD, TOL};
 
 /// How far across a region may be, mm: past about 19 km the in-circle sum no longer fits in 128 bits.
 pub const MAX_ACROSS: f64 = 10_000_000.0;
@@ -907,7 +907,7 @@ mod tests {
     }
 
     /// How far a corner may move as corners within `TOL` become one: mm.
-    const TOL_TEST: f64 = crate::model::TOL;
+    const TOL_TEST: f64 = crate::geom::TOL;
 
     /// The corners a line runs through once triangulated, in order: the corner each end became, and every corner within
     /// `TOL` of the line between them, which bends it.

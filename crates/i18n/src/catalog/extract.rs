@@ -159,16 +159,23 @@ fn sources(directory: &Path, paths: &mut BTreeSet<PathBuf>) -> Result<(), String
     Ok(())
 }
 
+/// The engine's crates, under `bimcraft-core`: their messages are the project's, and the interface's markers among them.
+pub const ENGINE: &[&str] = &["crates/core/src", "crates/geom/src"];
+
 pub fn extract(root: &Path, domain: &str) -> Result<Document, String> {
-    let directory = match domain {
-        "ui" => "crates/ui-egui/src",
-        "project" => "crates/core/src",
+    let directories: &[&str] = match domain {
+        "ui" => &["crates/ui-egui/src"],
+        "project" => ENGINE,
         _ => return Err(format!("unknown domain {domain:?}")),
     };
     let mut paths = BTreeSet::new();
-    sources(&root.join(directory), &mut paths)?;
+    for directory in directories {
+        sources(&root.join(directory), &mut paths)?;
+    }
     if domain == "ui" {
-        sources(&root.join("crates/core/src"), &mut paths)?;
+        for directory in ENGINE {
+            sources(&root.join(directory), &mut paths)?;
+        }
         sources(&root.join("apps/bimcraft/src"), &mut paths)?;
     }
     let mut entries = Entries::new();
@@ -176,7 +183,7 @@ pub fn extract(root: &Path, domain: &str) -> Result<Document, String> {
         let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
         let syntax = syn::parse_file(&text).map_err(|e| format!("{}: {e}", path.display()))?;
         let relative = path.strip_prefix(root).map_err(|e| e.to_string())?.to_string_lossy().replace('\\', "/");
-        let markers_only = !relative.starts_with(directory);
+        let markers_only = !directories.iter().any(|d| relative.starts_with(d));
         let mut extractor =
             Extractor { entries: &mut entries, path: relative, lines: text.lines().collect(), ui: domain == "ui", markers_only };
         extractor.visit_file(&syntax);

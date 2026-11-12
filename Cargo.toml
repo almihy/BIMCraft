@@ -14,6 +14,7 @@ getrandom = "0.3"
 tempfile = "3"
 rayon = "1.12"
 bimcraft-core = { path = "crates/core" }
+bimcraft-geom = { path = "crates/geom" }
 bimcraft-plugin = { path = "crates/plugin" }
 bimcraft-i18n = { path = "crates/i18n", default-features = false }
 serde = { version = "1", features = ["derive", "rc"] }
@@ -79,6 +80,8 @@ debug = "line-tables-only"
 # The 3D view renders in software: build the core optimised in debug builds too, so it orbits smoothly. At 1, not 2: 1
 # compiles it much faster and its tests run about as fast.
 [profile.dev.package.bimcraft-core]
+opt-level = 1
+[profile.dev.package.bimcraft-geom]
 opt-level = 1
 # Every dependency too (tiny-skia's rasterising, i_overlay's booleans, egui under the desktop's tests): built once, then
 # shared through the compiler cache, so it costs nothing per change.

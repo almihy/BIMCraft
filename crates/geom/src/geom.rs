@@ -6,6 +6,11 @@ use std::ops::{Add, Mul, Sub};
 
 use serde::{Deserialize, Serialize};
 
+/// Wall ends closer than this join, in mm.
+pub const TOL: f64 = 1.0;
+/// Coordinates and lengths beyond 1000 km are refused.
+pub const MAX_COORD: f64 = 1e9;
+
 /// A plan point or vector in millimetres (x east, y north), written as `[x, y]`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct P2(pub f64, pub f64);
@@ -345,7 +350,7 @@ pub fn line_intersection(a: P2, b: P2, c: P2, d: P2) -> Option<P2> {
 }
 
 /// Where `a`→`b` properly crosses `c`→`d`, as a parameter along `a`→`b` strictly inside (0, 1).
-pub(crate) fn crossing(a: P2, b: P2, c: P2, d: P2) -> Option<f64> {
+pub fn crossing(a: P2, b: P2, c: P2, d: P2) -> Option<f64> {
     let (r, s) = (b - a, d - c);
     let den = r.cross(s);
     if den.abs() <= 1e-12 * r.length() * s.length() {
@@ -454,7 +459,7 @@ pub fn faces(segs: &[(P2, P2)], tol: f64) -> Vec<Vec<P2>> {
 
 /// [`faces`], the segments cut by every other: its twin, which tests hold it to.
 #[cfg(test)]
-pub(crate) fn faces_everywhere(segs: &[(P2, P2)], tol: f64) -> Vec<Vec<P2>> {
+pub fn faces_everywhere(segs: &[(P2, P2)], tol: f64) -> Vec<Vec<P2>> {
     faces_of(split_among(segs, tol, |_| (0..segs.len()).collect()), tol)
 }
 
@@ -555,7 +560,7 @@ fn walk(nodes: &[P2], edges: impl Iterator<Item = (usize, usize)> + Clone) -> Ve
 /// the faces of each connected piece once its loose ends are taken off, and the loose ends as open chains. Each face and
 /// chain has the indices of the segments it runs along.
 #[derive(Debug, Default)]
-pub(crate) struct Arrangement {
+pub struct Arrangement {
     /// Each face's ring, the segments along it and its piece: a bounded face counter-clockwise, a piece's outline clockwise.
     pub faces: Vec<(Vec<P2>, Vec<usize>, usize)>,
     /// Each run of lines going nowhere, from end to end, and the segments along it.
@@ -563,7 +568,7 @@ pub(crate) struct Arrangement {
 }
 
 /// The [`Arrangement`] of `segs`.
-pub(crate) fn arrangement(segs: &[(P2, P2)], tol: f64) -> Arrangement {
+pub fn arrangement(segs: &[(P2, P2)], tol: f64) -> Arrangement {
     let g = Graph::new(split(segs, tol), tol);
     let n = g.nodes.len();
     let mut adj: Vec<std::collections::BTreeSet<usize>> = vec![Default::default(); n];

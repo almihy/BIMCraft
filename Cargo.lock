@@ -484,6 +484,7 @@ dependencies = [
 name = "bimcraft-core"
 version = "0.11.0"
 dependencies = [
+ "bimcraft-geom",
  "bimcraft-i18n",
  "encoding_rs",
  "flate2",
@@ -508,6 +509,16 @@ version = "0.11.0"
 dependencies = [
  "acadrust",
  "bimcraft-core",
+]
+
+[[package]]
+name = "bimcraft-geom"
+version = "0.11.0"
+dependencies = [
+ "bimcraft-i18n",
+ "flate2",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

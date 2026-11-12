@@ -43,10 +43,7 @@ pub const MIN_SECTION_BOX: f64 = 10.0;
 pub const CUT_HEIGHT: f64 = 1200.0;
 /// A text note's capitals, on paper, unless told otherwise: mm.
 pub const NOTE_SIZE: f64 = 2.5;
-/// Wall ends closer than this join, in mm.
-pub const TOL: f64 = 1.0;
-/// Coordinates and lengths beyond 1000 km are refused.
-pub const MAX_COORD: f64 = 1e9;
+pub use crate::geom::{MAX_COORD, TOL};
 /// Height of a wall or room with no level above it.
 pub const DEFAULT_HEIGHT: f64 = 3000.0;
 /// A stair's tallest riser, its treads' depth and its width, unless told otherwise, in mm.

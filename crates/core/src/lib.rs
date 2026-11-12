@@ -2,6 +2,8 @@
 //! rendered to SVG and PNG, sections, elevations, the 3D view, sheets printed to PDF, schedules
 //! and IFC4 export. Nothing here knows about a UI.
 
+use bimcraft_geom::{csg, font};
+pub use bimcraft_geom::{files, geom, ifc_classes, language, prim, shared, skeleton, step, triangulation, units, xlsx};
 pub mod align;
 #[cfg(test)]
 mod align_tests;
@@ -28,7 +30,6 @@ mod component_geometry;
 pub mod conduit;
 mod constraints;
 pub mod crosscheck;
-mod csg;
 pub mod curves;
 pub mod demand;
 pub mod derived;
@@ -50,13 +51,10 @@ pub mod engine;
 pub mod falls;
 pub mod family;
 pub mod favorites;
-pub mod files;
 #[cfg(test)]
 mod files_tests;
 pub mod fills;
 mod fixtures;
-mod font;
-pub mod geom;
 #[cfg(test)]
 mod georef_tests;
 pub mod gltf;
@@ -68,7 +66,6 @@ pub mod groups;
 pub mod hydrant;
 pub mod ids;
 pub mod ifc;
-pub mod ifc_classes;
 #[cfg(test)]
 mod ifc_colour_tests;
 #[cfg(test)]
@@ -83,7 +80,6 @@ pub mod import;
 pub mod inquiry;
 pub mod insert;
 pub mod json;
-pub mod language;
 pub mod lenient;
 pub mod library;
 pub mod lines;
@@ -109,7 +105,6 @@ pub mod phasing;
 #[cfg(test)]
 mod pin_tests;
 pub mod plumbing;
-pub mod prim;
 pub mod quantities;
 #[cfg(test)]
 mod quantities_tests;
@@ -147,17 +142,14 @@ mod section_box_tests;
 pub mod selection;
 #[cfg(test)]
 mod shape_tests;
-pub mod shared;
 pub mod sheet;
 pub mod site;
 #[cfg(test)]
 mod site_plan_tests;
-pub mod skeleton;
 pub mod sketch;
 pub mod snap;
 pub mod stairs;
 pub mod standards;
-pub mod step;
 pub mod storm;
 pub mod styles;
 pub mod symbol_set;
@@ -179,11 +171,9 @@ pub mod titleblock;
 #[cfg(test)]
 mod titleblock_tests;
 pub mod triad;
-pub mod triangulation;
 pub mod type_data;
 #[cfg(test)]
 mod type_data_tests;
-pub mod units;
 pub mod view3d;
 #[cfg(test)]
 mod wall_top_offset_tests;
@@ -196,7 +186,6 @@ pub mod water;
 pub mod workplane;
 #[cfg(test)]
 mod workplane_tests;
-pub mod xlsx;
 
 pub use commands::{command_of, floor_outline, opening_of, roof_footprint, run_category_of, runs_of, stood_of};
 pub use json::{element_json, element_json_bare, element_json_with};
