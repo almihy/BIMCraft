@@ -68,6 +68,7 @@ pub mod groups;
 pub mod hydrant;
 pub mod ids;
 pub mod ifc;
+pub mod ifc_classes;
 #[cfg(test)]
 mod ifc_colour_tests;
 #[cfg(test)]

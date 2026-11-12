@@ -11,7 +11,7 @@
 
 use bimcraft_i18n::ui_msg;
 
-pub mod classes;
+pub use crate::ifc_classes as classes;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;

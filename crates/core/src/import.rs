@@ -3249,9 +3249,9 @@ pub(crate) fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, S
         out
     };
     let remember = |id: u64, x: &Entity| {
-        let known = crate::ifc::classes::class(&x.name);
-        let at = known.and_then(|c| crate::ifc::classes::predefined_at(c.1, 8)).unwrap_or(8);
-        let type_at = known.and_then(|c| c.2).and_then(|a| crate::ifc::classes::predefined_at(a, 9)).unwrap_or(9);
+        let known = crate::ifc_classes::class(&x.name);
+        let at = known.and_then(|c| crate::ifc_classes::predefined_at(c.1, 8)).unwrap_or(8);
+        let type_at = known.and_then(|c| c.2).and_then(|a| crate::ifc_classes::predefined_at(a, 9)).unwrap_or(9);
         let own = enumeration(x.args.get(at));
         let of_type = l.typed.get(&id).and_then(|t| e(*t)).and_then(|t| enumeration(t.args.get(type_at)));
         let predefined = own.filter(|p| *p != "NOTDEFINED").or(of_type).filter(|p| *p != "NOTDEFINED").map(String::from);

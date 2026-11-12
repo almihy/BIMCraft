@@ -1220,10 +1220,10 @@ impl Family {
     pub fn ifc(&self) -> (Cow<'static, str>, Cow<'static, str>, Option<Cow<'static, str>>) {
         if let Some(m) = self.remembered() {
             let object = m.object_type.clone().map(Cow::Owned);
-            return match crate::ifc::classes::class(&m.class) {
+            return match crate::ifc_classes::class(&m.class) {
                 Some(c) if c.3.is_empty() => (c.0.into(), "".into(), object),
                 Some(c) => {
-                    let p = m.predefined.as_deref().filter(|p| crate::ifc::classes::takes(c, p)).unwrap_or("NOTDEFINED");
+                    let p = m.predefined.as_deref().filter(|p| crate::ifc_classes::takes(c, p)).unwrap_or("NOTDEFINED");
                     (c.0.into(), format!(".{p}.").into(), object)
                 }
                 None => ("IFCBUILDINGELEMENTPROXY".into(), ".USERDEFINED.".into(), Some(object.unwrap_or_else(|| m.class.clone().into()))),
