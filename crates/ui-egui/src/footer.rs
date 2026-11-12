@@ -381,6 +381,7 @@ impl BimApp {
                                 }
                             });
                             self.work_plane_button(ui);
+                            self.camera_bar(ui);
                             ui.separator();
                         }
                         _ => {}

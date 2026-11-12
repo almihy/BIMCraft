@@ -471,7 +471,13 @@ impl BimApp {
                 three.extend(m.elements.iter().filter_map(|(id, e)| match e {
                     Element::View3D(v) if v.name != "{3D}" => {
                         let leaf = Node::leaf(&v.name, Act::Open3D(Some(*id)), active == Some(*id));
-                        Some(leaf.with_menu(vec![("Delete", Act::Delete(vec![*id]))]))
+                        // Show Camera, as Revit's: the camera selected, so every plan, section and elevation shows its eye,
+                        // its view cone and its target, with their grips.
+                        let menu = match v.camera {
+                            Some(_) => vec![(msg!("Show Camera"), Act::Select(*id)), ("Delete", Act::Delete(vec![*id]))],
+                            None => vec![("Delete", Act::Delete(vec![*id]))],
+                        };
+                        Some(leaf.with_menu(menu))
                     }
                     _ => None,
                 }));

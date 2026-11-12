@@ -1805,6 +1805,7 @@ impl BimApp {
         self.line_grip_drag(ui, &response, rect, &view, level);
         let dragged = self.shape_grip_drag(ui, &response, rect, &view, level) || dragged;
         let dragged = self.site_grip_drag(ui, &response, rect, &view, level) || dragged;
+        let dragged = self.camera_grip_drag(ui, &response, rect, &view, level) || dragged;
         let on_control = self.canvas.controls.pressed();
         if ui.input(|i| i.pointer.primary_pressed()) && !on_control {
             self.canvas.pressed_chain = hovered.filter(|id| self.flow.preview.contains(id)).map(|id| (id, self.click_set(Some(id))));
@@ -1819,6 +1820,7 @@ impl BimApp {
             && self.canvas.grip.is_none()
             && self.drawing.grip.is_none()
             && self.site_grip.is_none()
+            && self.camera_grip.is_none()
             && let Some(o) = ui.input(|i| i.pointer.press_origin())
         {
             let o = (o.x - rect.min.x, o.y - rect.min.y);
@@ -2018,6 +2020,7 @@ impl BimApp {
         self.pin_overlay(ui, &model, &view, rect);
         self.flip_overlay(ui, &model, &view, rect, self.canvas.drag.is_some());
         self.site_grip_overlay(ui, &model, &view, rect, level);
+        self.camera_grip_overlay(ui, &model, &view, rect, level);
         // Where the cursor snaps is worked out only while a grip is held to it.
         let cursor = self
             .drawing

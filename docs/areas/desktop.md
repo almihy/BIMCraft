@@ -384,6 +384,28 @@ Length runs `perspective` with its `lens`; Eye Elevation is the camera's on scre
 (`Scene::fit_from`). Picking, Modify, the level grips and the section box grips work in perspective as they do parallel; a grip or an edge of
 the box behind the eye isn't drawn.
 
+A camera view's Properties (`camera.rs`) are Revit's Camera group (Projection Mode, Eye Elevation, Target Elevation, Camera
+Position, read-only) then 3ds Max's rollouts: Basic (Targeted, Target Distance), Physical Camera (Film/Sensor, Width, Focal
+Length and Field of View each driving the other, Zoom, Aperture, Focus, Focus Distance, Enable Depth of Field), Exposure,
+Perspective Control (Lens Shift, Tilt Correction, Auto Vertical Tilt Correction), Clipping (Clip Manually, Near and Far Clip)
+and Output Size (Preset, Width, Height, Image Aspect, Lock Image Aspect). Each field runs `camera` when it is typed, as the rest
+of the palette does. A selected camera (picked on a plan, or the Project Browser's Show Camera) shows its cone on the plan
+(`camgrips.rs`): grips at the eye (moves it, the target staying), the target (aims it; a Free camera has none), the far line's
+middle (Clip Manually on, the far plane there) and each side's middle (the field of view), one `camera` when let go.
+
+Framing a shot (`fly.rs`). In a camera view in perspective, holding the right button flies as Enscape does: the pointer looks
+about the eye (`Camera::look`), W and S go forward and back, A and D sideways, Q and E down and up (`Camera::walk`), Shift four
+times as fast, the wheel the speed; letting go after a flight opens no menu. Walk (Shift+W, Revit's SteeringWheels shortcut, or
+the view bar) flies the same without the right button, the left looking, until Esc. While it flies the keys are the flight's,
+never a shortcut's: `keys` returns before the two-letter shortcuts, so WA is the Wall tool whenever the view isn't flying. Keep
+Eye Height walks level. Safe Frame (Shift+F, on for a camera view) fits the image's Output Size in the view, what lies outside
+dimmed, the lens across its width; Rule of Thirds draws its thirds. Two-Point Perspective on the bar is Auto Vertical Tilt
+Correction. The picture is drawn through `Camera::physical` and the hand moves the bare camera, so a flight written back keeps
+the eye and target; a gesture (a drag, a wheel turn, a flight) is written back once it settles, one undo step. A view without a
+camera writes `view_orientation` the same way, only after the hand moved it, so opening a view makes no undo step. The 3D view
+draws and picks with the view's own look (`orbit::look_of`): a camera view's Visibility/Graphics and section box are its own,
+and its mesh is made again for it.
+
 The section box (`section_box.rs`). The 3D view's Properties have an Extents group: Section Box, a checkbox, and while it's on the
 West, East, South, North, Bottom and Top faces as lengths in the project's units; BX turns it on or off (opening the 3D view). They run
 `section_box`. In the view, `orbit.rs` draws the box's edges and, in Modify, an arrow on each face pointing out along its axis (a square

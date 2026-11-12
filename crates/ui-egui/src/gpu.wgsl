@@ -40,6 +40,9 @@ struct Globals {
     // The section box from the mesh's origin: its least corner (w: 1 where there is one) and its greatest.
     cut_lo: vec4<f32>,
     cut_hi: vec4<f32>,
+    // Where the aim shows from the middle of the picture (a lens shift, as the core's `Camera::shift`): xy px right and
+    // down, zw the same in clip space.
+    shift: vec4<f32>,
 }
 
 // A point `d` from the aim in clip space: parallel, or seen from the eye.
@@ -49,9 +52,9 @@ fn to_clip(d: vec3<f32>) -> vec4<f32> {
     let z = dot(d, g.back.xyz);
     if g.lens.x > 0.0 {
         let ahead = g.lens.y - z;
-        return vec4<f32>(x * g.right.w, y * g.up.w, g.lens.z * ahead + g.lens.w, ahead);
+        return vec4<f32>(x * g.right.w + g.shift.z * ahead, y * g.up.w + g.shift.w * ahead, g.lens.z * ahead + g.lens.w, ahead);
     }
-    return vec4<f32>(x * g.right.w, y * g.up.w, 0.5 + z * g.back.w, 1.0);
+    return vec4<f32>(x * g.right.w + g.shift.z, y * g.up.w + g.shift.w, 0.5 + z * g.back.w, 1.0);
 }
 
 struct Owner {
@@ -531,14 +534,14 @@ fn to_pixel(p: vec3<f32>) -> vec3<f32> {
         let ahead = g.lens.y - dot(d, g.back.xyz);
         let k = g.lens.x / ahead;
         return vec3<f32>(
-            g.size.x * 0.5 + dot(d, g.right.xyz) * k,
-            g.size.y * 0.5 - dot(d, g.up.xyz) * k,
+            g.size.x * 0.5 + g.shift.x + dot(d, g.right.xyz) * k,
+            g.size.y * 0.5 + g.shift.y - dot(d, g.up.xyz) * k,
             g.lens.z + g.lens.w / ahead,
         );
     }
     return vec3<f32>(
-        g.size.x * 0.5 + dot(d, g.right.xyz) * g.aim.w,
-        g.size.y * 0.5 - dot(d, g.up.xyz) * g.aim.w,
+        g.size.x * 0.5 + g.shift.x + dot(d, g.right.xyz) * g.aim.w,
+        g.size.y * 0.5 + g.shift.y - dot(d, g.up.xyz) * g.aim.w,
         0.5 + dot(d, g.back.xyz) * g.back.w,
     );
 }

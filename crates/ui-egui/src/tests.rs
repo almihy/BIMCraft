@@ -2159,7 +2159,7 @@ fn a_camera_views_mark_on_the_plan_edits_its_camera_in_properties() {
     topmost(&mut h, "Level 1");
     click(&mut h, P2(-1000.0, 3000.0));
     assert_eq!(h.state().selection, vec![id]);
-    for label in ["View Name", "Eye", "Target", "Focal Length"] {
+    for label in ["View Name", "Eye Elevation", "Target Elevation", "Focal Length"] {
         assert!(h.query_by_label(label).is_some(), "Properties shows {label}");
     }
     assert!(h.query_by_label("Azimuth (°)").is_none(), "a camera view has no azimuth to edit");
@@ -2170,23 +2170,24 @@ fn a_camera_views_mark_on_the_plan_edits_its_camera_in_properties() {
     h.run();
     assert_eq!(field(&h, id, "perspective")["lens"], json!(50.0));
     assert_eq!(field(&h, id, "camera")["eye"], json!([-1000.0, 3000.0, 1600.0]));
-    // Eye and Target are points in the project's units (mm here).
-    type_into(&mut h, "Eye", "-2000, 3000, 2500");
+    // Eye Elevation and Target Elevation are heights in the project's units (mm here), as Revit's; the points move on the
+    // plan, by their grips.
+    type_into(&mut h, "Eye Elevation", "2500");
     h.key_press(Key::Enter);
     h.run();
-    assert_eq!(field(&h, id, "camera")["eye"], json!([-2000.0, 3000.0, 2500.0]));
+    assert_eq!(field(&h, id, "camera")["eye"], json!([-1000.0, 3000.0, 2500.0]));
     assert_eq!(field(&h, id, "camera")["target"], json!([4000.0, 3000.0, 1200.0]));
-    type_into(&mut h, "Target", "4000, 2000, 1500");
+    type_into(&mut h, "Target Elevation", "1500");
     h.key_press(Key::Enter);
     h.run();
-    assert_eq!(field(&h, id, "camera")["target"], json!([4000.0, 2000.0, 1500.0]));
+    assert_eq!(field(&h, id, "camera")["target"], json!([4000.0, 3000.0, 1500.0]));
     // Its name: the view keeps its id, and the old name is gone.
     type_into(&mut h, "View Name", "Camera West");
     h.key_press(Key::Enter);
     h.run();
     assert_eq!((field(&h, id, "name"), ids(&h, "view3d")), (json!("Camera West"), made));
-    // The mark stood where its eye was: it has moved with it, and picks there.
-    click(&mut h, P2(-2000.0, 3000.0));
+    // The mark stands at its eye, and picks there.
+    click(&mut h, P2(-1000.0, 3000.0));
     assert_eq!(h.state().selection, vec![id]);
     // Opened, the same panel shows the same values; changing one there updates the camera on screen and is not written back
     // over by the settled hand.
@@ -2195,22 +2196,26 @@ fn a_camera_views_mark_on_the_plan_edits_its_camera_in_properties() {
     h.state_mut().act(Action::OpenView);
     h.run();
     assert_eq!((h.state().sheet, h.state().active_3d()), (Sheet::View3D, Some(id)));
-    assert!(h.query_by_label("Eye").is_some() && h.query_by_label("Target").is_some());
-    type_into(&mut h, "Eye", "-3000, 3000, 2400");
+    assert!(h.query_by_label("Eye Elevation").is_some() && h.query_by_label("Target Elevation").is_some());
+    type_into(&mut h, "Eye Elevation", "2400");
     h.key_press(Key::Enter);
     h.run();
     h.run();
     h.run();
-    assert_eq!(field(&h, id, "camera")["eye"], json!([-3000.0, 3000.0, 2400.0]), "the settled hand didn't write the old eye back");
-    assert_eq!(field(&h, id, "camera")["target"], json!([4000.0, 2000.0, 1500.0]));
+    assert_eq!(field(&h, id, "camera")["eye"], json!([-1000.0, 3000.0, 2400.0]), "the settled hand didn't write the old eye back");
+    assert_eq!(field(&h, id, "camera")["target"], json!([4000.0, 3000.0, 1500.0]));
     let eye = h.state().orbit.camera.unwrap().eye().unwrap();
-    assert!(eye.iter().zip([-3000.0, 3000.0, 2400.0]).all(|(a, b)| (a - b).abs() < 0.1), "the picture stands at the new eye: {eye:?}");
+    assert!(eye.iter().zip([-1000.0, 3000.0, 2400.0]).all(|(a, b)| (a - b).abs() < 0.1), "the picture stands at the new eye: {eye:?}");
     type_into(&mut h, "Focal Length", "80");
     h.key_press(Key::Enter);
     h.run();
     h.run();
     assert_eq!(field(&h, id, "perspective")["lens"], json!(80.0));
-    assert_eq!(h.state().orbit.camera.unwrap().lens, Some(80.0), "the picture is seen through the new lens");
+    // Through the new lens, across the safe frame's width: as the 35 mm film is to the frame, so the view's lens to the view.
+    let seen = h.state().orbit.camera.unwrap().lens.unwrap();
+    let r = h.state().orbit.rect;
+    let frame = crate::fly::safe_frame(r, 1920.0 / 1080.0);
+    assert!((seen - 80.0 * f64::from(r.width() / frame.width())).abs() < 0.5, "the picture is seen through the new lens: {seen}");
 }
 
 #[test]
@@ -5995,6 +6000,7 @@ mod align;
 mod autosave;
 mod browser;
 mod cad;
+mod cameras;
 mod canvas_controls;
 mod checks;
 mod chinese;

@@ -14,6 +14,7 @@ mod background_grid;
 mod browser;
 mod cad;
 mod camera;
+mod camgrips;
 mod canvas;
 mod checks;
 mod clipboard;
@@ -33,6 +34,7 @@ mod fillpatterns;
 mod filter;
 mod find;
 mod flip;
+mod fly;
 mod footer;
 mod gpu;
 pub use gpu::limits_for;
@@ -706,6 +708,10 @@ pub struct BimApp {
     site: site::SiteChoices,
     site_ghost: site::GhostCache,
     site_grip: Option<(&'static str, usize)>,
+    /// A selected camera's grip being dragged on a plan (`camgrips.rs`): the camera view, and which grip.
+    camera_grip: Option<(Id, usize)>,
+    /// A selected camera's eye (0) or target (1) being raised or lowered in a section or elevation.
+    camera_section_grip: Option<(Id, usize)>,
     /// The Camera tool's eye and target heights over the plan's level, and its lens, as typed.
     camera_eye_height: String,
     camera_target_height: String,
@@ -1440,6 +1446,8 @@ impl BimApp {
             site: site::SiteChoices::default(),
             site_ghost: Default::default(),
             site_grip: None,
+            camera_grip: None,
+            camera_section_grip: None,
             camera_eye_height: units.length(1600.0),
             camera_target_height: units.length(1200.0),
             camera_lens: "35".into(),
@@ -2101,6 +2109,28 @@ impl BimApp {
             return;
         }
         let pressed = |m: Modifiers, k: Key| ctx.input_mut(|i| i.consume_key(m, k));
+        // A camera view's own keys: Shift+W walks (Revit's SteeringWheels shortcut), Shift+F shows the safe frame (3ds Max's).
+        // While it flies (the right button held, or walking) W, A, S, D, Q and E are the flight's, never a shortcut's: so
+        // typing WA still places a wall whenever the view isn't flying.
+        if self.sheet == Sheet::View3D && !ctx.egui_wants_keyboard_input() {
+            if pressed(Modifiers::SHIFT, Key::W) {
+                self.toggle_walk();
+                self.typed.clear();
+                return;
+            }
+            if pressed(Modifiers::SHIFT, Key::F) {
+                self.orbit.safe_frame = !self.orbit.safe_frame;
+                self.typed.clear();
+                return;
+            }
+            if self.orbit.fly.is_some() || self.orbit.walk {
+                if self.orbit.walk && pressed(Modifiers::NONE, Key::Escape) {
+                    self.orbit.walk = false;
+                }
+                self.typed.clear();
+                return;
+            }
+        }
         if pressed(Modifiers::COMMAND | Modifiers::SHIFT, Key::S) {
             self.save_as(ctx, None);
         } else if pressed(Modifiers::COMMAND, Key::S) {
