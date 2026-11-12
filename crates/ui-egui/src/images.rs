@@ -1,5 +1,5 @@
 //! Raster images and PDFs, as Revit's: Insert > Import PDF asks for a file, then a box for its page (thumbnails, Page to
-//! Import) and its resolution; Insert > Image asks for a picture. Either then follows the cursor as its extents crossed by
+//! Import) and its resolution, the file read apart from the window (`pdfread.rs`); Insert > Image asks for a picture. Either then follows the cursor as its extents crossed by
 //! two lines until a click places it in the view on screen (`import_pdf`, `import_image`). A selected image shows its frame
 //! and a grip at each corner, which a drag scales (its proportions kept while Lock Proportions is on); Manage > Manage
 //! Images lists the project's images, places one again and deletes them.
@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use bimcraft_core::geom::P2;
 use bimcraft_core::model::{Element, Id, Model};
-use bimcraft_core::raster::{self, pdf::Document};
+use bimcraft_core::raster::{self, PdfJob, PdfOutline};
 use bimcraft_core::render::View;
 use egui::{
     Align, Button, Color32, Context, Grid, Id as UiId, Layout, Painter, Pos2, Rect, RichText, Sense, Shape, Stroke, StrokeKind,
@@ -26,28 +26,31 @@ const THUMB: u32 = 96;
 /// The most pages the box shows thumbnails of; past them, a page is picked by its number.
 const THUMBS: usize = 60;
 
-/// Import PDF's box: the file, its pages' sizes and stated scales, the page picked and the resolution, and the thumbnails
-/// made so far (one a frame).
+/// Import PDF's box: the file, its pages' sizes and stated scales once read, the page picked and the resolution, and the
+/// thumbnails made so far (one at a time, read apart like the rest: `pdfread.rs`).
 pub(crate) struct PdfBox {
     path: PathBuf,
-    doc: Option<Document>,
-    sizes: Vec<[f64; 2]>,
-    scales: Vec<Option<f64>>,
+    /// Its pages, once read; the read under way until then.
+    outline: Option<PdfOutline>,
+    outline_job: Option<u64>,
+    thumbs: Vec<Option<TextureHandle>>,
+    thumb_job: Option<u64>,
     page: usize,
     page_text: String,
     dpi: u32,
-    thumbs: Vec<Option<TextureHandle>>,
     error: Option<String>,
 }
 
 /// An image being placed: the command that places it, its params but the view and the point, and its size where it
-/// comes in, mm of paper (and the scale its page states, which a model view takes).
+/// comes in, mm of paper. A PDF's page is read apart once its box is OK'd: `read` is that read while it is under way, and
+/// a click made before it is done (`click`, the view and the point) places it when it is.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Placing {
     command: &'static str,
     params: Value,
     size: [f64; 2],
-    stated: Option<f64>,
+    read: Option<u64>,
+    click: Option<(Id, P2)>,
 }
 
 impl BimApp {
@@ -65,27 +68,47 @@ impl BimApp {
         self.ask_file(ctx, ask, false, |app, path| app.import_image_path(path));
     }
 
-    /// Opens Import PDF's box for the file at `path`.
+    /// Opens Import PDF's box for the file at `path`, its pages read apart.
     pub(crate) fn import_pdf_path(&mut self, path: PathBuf) {
-        let read = self.session.files.given.read(&path).map_err(|e| e.to_string()).and_then(Document::open);
-        let (doc, error) = match read {
-            Ok(d) => (Some(d), None),
+        let (outline_job, error) = match self.ask_pdf(None, &path, PdfJob::Outline) {
+            Ok(id) => (Some(id), None),
             Err(e) => (None, Some(e)),
         };
-        let n = doc.as_ref().map_or(0, Document::pages);
-        let sizes = (1..=n).map(|p| doc.as_ref().and_then(|d| d.size(p).ok()).unwrap_or([0.0, 0.0])).collect();
-        let scales = (1..=n).map(|p| doc.as_ref().and_then(|d| d.scale(p))).collect();
-        self.pdf_box =
-            Some(PdfBox { path, doc, sizes, scales, page: 1, page_text: "1".into(), dpi: raster::DEFAULT_DPI, thumbs: Vec::new(), error });
+        self.pdf_box = Some(PdfBox {
+            path,
+            outline: None,
+            outline_job,
+            thumbs: Vec::new(),
+            thumb_job: None,
+            page: 1,
+            page_text: "1".into(),
+            dpi: raster::DEFAULT_DPI,
+            error,
+        });
     }
 
     /// The picture at `path` follows the cursor, to be placed by a click.
     pub(crate) fn import_image_path(&mut self, path: PathBuf) {
-        let size = self.session.files.given.read(&path).map_err(|e| e.to_string()).and_then(|b| raster::picture_size(&b));
+        let given = &self.session.files.given;
+        let size = given
+            .size(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|len| {
+                if len > raster::MAX_FILE as u64 {
+                    Err(format!("it is {len} bytes; a file to import is up to {}", raster::MAX_FILE))
+                } else {
+                    given.read(&path).map_err(|e| e.to_string())
+                }
+            })
+            .and_then(|b| raster::picture_size(&b));
         match size {
-            Ok(size) => {
-                self.start_placing(Placing { command: "import_image", params: json!({"path": path.to_string_lossy()}), size, stated: None })
-            }
+            Ok(size) => self.start_placing(Placing {
+                command: "import_image",
+                params: json!({"path": path.to_string_lossy()}),
+                size,
+                read: None,
+                click: None,
+            }),
             Err(e) => {
                 let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                 self.status = crate::Status { text: format!("{name}: {e}"), error: true };
@@ -107,26 +130,84 @@ impl BimApp {
     pub(crate) fn place_instance(&mut self, name: &str) {
         let Some(t) = self.session.model.image_types.get(name) else { return };
         let command = if t.page().is_some() { "import_pdf" } else { "import_image" };
-        let (size, stated) = (t.size(), t.stated_scale());
-        self.start_placing(Placing { command, params: json!({"image": name}), size, stated });
+        let size = t.size();
+        self.start_placing(Placing { command, params: json!({"image": name}), size, read: None, click: None });
+    }
+
+    /// Once a frame: takes in what the PDF reads answered, for the box (its pages, a thumbnail) and for the page being
+    /// placed (given to the session, and placed if it was clicked already). A read that failed says why.
+    pub(crate) fn take_pdf_answers(&mut self, ctx: &Context) {
+        for (id, job, answer) in self.pdf_answers() {
+            if let Some(b) = self.pdf_box.as_mut() {
+                let name = b.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                if b.outline_job == Some(id) {
+                    b.outline_job = None;
+                    match answer.and_then(|bytes| serde_json::from_slice::<PdfOutline>(&bytes).map_err(|e| e.to_string())) {
+                        Ok(o) if o.pages > 0 && o.list.len() == o.pages => {
+                            let path = b.path.to_string_lossy().into_owned();
+                            b.outline = Some(o.clone());
+                            self.session.give_pdf_outline(&path, o);
+                        }
+                        Ok(_) => b.error = Some(crate::pdfread::could_not_read(&name, "it has no pages")),
+                        Err(e) => b.error = Some(crate::pdfread::could_not_read(&name, &e)),
+                    }
+                    continue;
+                }
+                if b.thumb_job == Some(id) {
+                    b.thumb_job = None;
+                    let tex = answer.and_then(|bytes| raster::thumbnail_from_bytes(&bytes)).ok().map(|(w, h, rgba)| {
+                        let img = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba);
+                        ctx.load_texture(format!("pdf page {}", b.thumbs.len() + 1), img, TextureOptions::LINEAR)
+                    });
+                    b.thumbs.push(tex);
+                    continue;
+                }
+            }
+            let Some(pl) = self.placing.as_mut().filter(|pl| pl.read == Some(id)) else { continue };
+            pl.read = None;
+            let click = pl.click.take();
+            let path = pl.params["path"].as_str().unwrap_or_default().to_string();
+            let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            match (answer.and_then(|bytes| raster::PdfRead::from_bytes(&bytes)), job) {
+                (Ok(read), PdfJob::Page { page, dpi }) => {
+                    self.session.give_pdf_page(&path, page, dpi, read);
+                    if let Some((view, at)) = click {
+                        self.place_image(view, at);
+                    }
+                }
+                (Ok(_), _) => {}
+                (Err(e), _) => {
+                    self.placing = None;
+                    self.session.forget_pdf(Some(&path));
+                    self.status = crate::Status { text: crate::pdfread::could_not_read(&name, &e), error: true };
+                    self.start_tool(Tool::Modify);
+                }
+            }
+        }
     }
 
     pub(crate) fn import_pdf_window(&mut self, ctx: &Context) {
-        let Some(b) = self.pdf_box.as_mut() else { return };
-        // One page's thumbnail a frame, so a long file doesn't hold the window.
-        if let Some(doc) = &b.doc
-            && b.thumbs.len() < b.sizes.len().min(THUMBS)
+        self.take_pdf_answers(ctx);
+        let Some(b) = self.pdf_box.as_ref() else { return };
+        // One page's thumbnail at a time, so a long file doesn't hold the reader.
+        let next = b.thumbs.len() + 1;
+        if b.thumb_job.is_none()
+            && b.error.is_none()
+            && let Some(o) = &b.outline
+            && next <= o.pages.min(THUMBS)
         {
-            let n = b.thumbs.len() + 1;
-            let [w, h] = b.sizes.get(n - 1).copied().unwrap_or([1.0, 1.0]);
-            let dpi = (f64::from(THUMB) / (w.max(h) / 25.4).max(1e-3)).clamp(1.0, 72.0);
-            let tex = doc.render(n, dpi).ok().map(|(w, h, rgba)| {
-                let img = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba);
-                ctx.load_texture(format!("pdf page {n}"), img, TextureOptions::LINEAR)
-            });
-            b.thumbs.push(tex);
-            ctx.request_repaint();
+            let path = b.path.clone();
+            let asked = self.ask_pdf(Some(ctx), &path, PdfJob::Thumbnail { page: next, side: THUMB });
+            if let Some(b) = self.pdf_box.as_mut() {
+                match asked {
+                    Ok(id) => b.thumb_job = Some(id),
+                    Err(_) => b.thumbs.push(None),
+                }
+            }
         }
+        let Some(b) = self.pdf_box.as_mut() else { return };
+        let sizes: Vec<[f64; 2]> = b.outline.as_ref().map(|o| o.list.iter().map(|p| p.size).collect()).unwrap_or_default();
+        let scales: Vec<Option<f64>> = b.outline.as_ref().map(|o| o.list.iter().map(|p| p.scale).collect()).unwrap_or_default();
         let (mut ok, mut close) = (false, false);
         let r = Modal::new(UiId::new("import-pdf"), t("Import PDF")).width(520.0).show(ctx, |ui| {
             crate::popup::body(ui, |ui| {
@@ -137,6 +218,10 @@ impl BimApp {
                     ui.label(file);
                     ui.end_row();
                 });
+                if b.outline.is_none() && b.error.is_none() {
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(t("Reading the file…")).color(pal().muted));
+                }
                 if !b.thumbs.is_empty() {
                     ui.add_space(6.0);
                     egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
@@ -178,7 +263,7 @@ impl BimApp {
                     let l = ui.label(t("Page to Import"));
                     if ui.add_sized([80.0, 20.0], egui::TextEdit::singleline(&mut b.page_text)).labelled_by(l.id).changed()
                         && let Ok(n) = b.page_text.trim().parse::<usize>()
-                        && (1..=b.sizes.len()).contains(&n)
+                        && (1..=sizes.len()).contains(&n)
                     {
                         b.page = n;
                     }
@@ -191,11 +276,12 @@ impl BimApp {
                     });
                     c.response.labelled_by(l.id);
                     ui.end_row();
-                    ui.label(t("Page Size"));
-                    let [w, h] = b.sizes.get(b.page - 1).copied().unwrap_or([0.0, 0.0]);
-                    ui.label(format!("{w:.0} × {h:.0} mm"));
-                    ui.end_row();
-                    if let Some(k) = b.scales.get(b.page - 1).copied().flatten() {
+                    if let Some([w, h]) = sizes.get(b.page - 1) {
+                        ui.label(t("Page Size"));
+                        ui.label(format!("{w:.0} × {h:.0} mm"));
+                        ui.end_row();
+                    }
+                    if let Some(k) = scales.get(b.page - 1).copied().flatten() {
                         ui.label(t("Scale"));
                         ui.label(format!("1 : {}", (k * 100.0).round() / 100.0));
                         ui.end_row();
@@ -209,30 +295,48 @@ impl BimApp {
             crate::popup::footer(ui, |ui| {
                 ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
                     close = ui.button(t("Cancel")).clicked();
-                    ok = ui.add_enabled(b.doc.is_some(), Button::new(t("OK"))).clicked();
+                    ok = ui.add_enabled(b.outline.is_some(), Button::new(t("OK"))).clicked();
                 });
             });
         });
         if ok {
-            let size = b.sizes.get(b.page - 1).copied().unwrap_or([0.0, 0.0]);
-            let stated = b.scales.get(b.page - 1).copied().flatten();
-            let params = json!({"path": b.path.to_string_lossy(), "page": b.page, "resolution": b.dpi});
+            let (path, page, dpi) = (b.path.clone(), b.page, b.dpi);
+            let size = sizes.get(page - 1).copied().unwrap_or([0.0, 0.0]);
+            let params = json!({"path": path.to_string_lossy(), "page": page, "resolution": dpi});
             self.pdf_box = None;
-            self.start_placing(Placing { command: "import_pdf", params, size, stated });
+            match self.ask_pdf(Some(ctx), &path, PdfJob::Page { page, dpi }) {
+                Ok(id) => self.start_placing(Placing { command: "import_pdf", params, size, read: Some(id), click: None }),
+                Err(e) => {
+                    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    self.status = crate::Status { text: crate::pdfread::could_not_read(&name, &e), error: true };
+                }
+            }
         } else if close || r.should_close() {
+            let path = b.path.to_string_lossy().into_owned();
             self.pdf_box = None;
+            self.session.forget_pdf(Some(&path));
         }
     }
 
     /// The image being placed, its middle at `at` in view `view` (a plan, a section or elevation, a sheet): placed, selected,
-    /// and Modify again. A refusal says why on the status bar and keeps the tool.
+    /// and Modify again. A refusal says why on the status bar and keeps the tool. A page still being read is placed once it
+    /// is.
     pub(crate) fn place_image(&mut self, view: Id, at: P2) {
-        let Some(pl) = self.placing.clone() else { return };
+        let Some(pl) = self.placing.as_mut() else { return };
+        if pl.read.is_some() {
+            pl.click = Some((view, at));
+            self.status = crate::Status { text: t("Reading the page…").into(), error: false };
+            return;
+        }
+        let pl = pl.clone();
         let mut p = pl.params.clone();
         p["view"] = json!(view);
         p["at"] = json!([at.0, at.1]);
         if let Some(v) = self.run(pl.command, p) {
             self.placing = None;
+            if let Some(path) = pl.params["path"].as_str() {
+                self.session.forget_pdf(Some(path));
+            }
             self.selection = v["id"].as_u64().into_iter().collect();
             let notes: Vec<&str> = v["notes"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
             if !notes.is_empty() {
@@ -242,12 +346,12 @@ impl BimApp {
         }
     }
 
-    /// The size the image being placed comes in at in view `view`, mm of its terms: its paper's on a sheet, else times the
-    /// scale its page states.
+    /// The size the image being placed comes in at in view `view`, mm of its terms, as Revit brings it in: its paper's on a
+    /// sheet, else at the view's scale.
     fn placing_size(&self, view: Id) -> Option<[f64; 2]> {
         let pl = self.placing.as_ref()?;
-        let sheet = self.session.model.sheet(view).is_some();
-        let k = if sheet { 1.0 } else { pl.stated.unwrap_or(1.0) };
+        let m = &self.session.model;
+        let k = if m.sheet(view).is_some() { 1.0 } else { bimcraft_core::graphics::scale_of(m, view) };
         Some(pl.size.map(|s| s * k))
     }
 
@@ -313,11 +417,12 @@ impl BimApp {
         }
     }
 
-    /// Bring to Front and Send to Back, the Arrange panel of the images selected: their Draw Layer.
-    pub(crate) fn arrange(&mut self, front: bool) {
+    /// Revit's Arrange panel for the images selected: Bring to Front, Bring Forward, Send Backward or Send to Back (`to`),
+    /// their draw order among their view's images.
+    pub(crate) fn arrange(&mut self, to: &str) {
         let ids = self.selected_images();
         if !ids.is_empty() {
-            self.run("modify", json!({"ids": ids, "layer": if front { "foreground" } else { "background" }}));
+            self.run("arrange", json!({"ids": ids, "to": to}));
         }
     }
 

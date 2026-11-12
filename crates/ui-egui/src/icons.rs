@@ -165,6 +165,8 @@ icon_names! {
     InsertImage,
     ManageImages,
     BringToFront,
+    BringForward,
+    SendBackward,
     SendToBack,
     Scale,
     Parameters,
@@ -1304,6 +1306,18 @@ pub fn own(icon: Icon, compact: bool) -> Vec<Outline> {
             // Two sheets overlapping.
             g.closed(&[(3.0, 3.0), (13.0, 3.0), (13.0, 13.0), (3.0, 13.0)]);
             g.closed(&[(11.0, 11.0), (21.0, 11.0), (21.0, 21.0), (11.0, 21.0)]);
+        }
+        Icon::BringForward | Icon::SendBackward => {
+            // Two sheets overlapping, and the step up or down.
+            g.closed(&[(3.0, 9.0), (13.0, 9.0), (13.0, 19.0), (3.0, 19.0)]);
+            g.line(&[(13.0, 13.0), (17.0, 13.0), (17.0, 21.0), (9.0, 21.0), (9.0, 19.0)]);
+            if icon == Icon::BringForward {
+                g.line(&[(17.0, 9.0), (17.0, 3.0)]);
+                g.line(&[(14.5, 5.5), (17.0, 3.0), (19.5, 5.5)]);
+            } else {
+                g.line(&[(19.0, 3.0), (19.0, 9.0)]);
+                g.line(&[(16.5, 6.5), (19.0, 9.0), (21.5, 6.5)]);
+            }
         }
         Icon::Scale => {
             // A box and its corner pulled out.

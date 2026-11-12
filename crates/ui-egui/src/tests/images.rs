@@ -1,8 +1,10 @@
 //! Import PDF and Image in the window, driven as a user drives them: the box picks the page and resolution, the page follows
 //! the cursor and a click places it, a corner dragged scales it in proportion, walls drawn over it snap to its lines, the
-//! Arrange panel brings it to the front, and Manage Images places it again.
+//! Arrange panel orders the view's images, and Manage Images places it again. The file is read apart from the window: in a
+//! thread here, and in a hosting page by the page, whose reader may stop without the window.
 
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use bimcraft_core::raster::DrawLayer;
 use bimcraft_core::raster::pdf::sample;
@@ -34,13 +36,24 @@ fn close(a: P2, b: P2, mm: f64) -> bool {
     a.dist(b) <= mm
 }
 
-/// The PDF placed by its box and a click at (4000, 3000): the room, 6 by 4 m at its stated 1 : 100, from (2000, 1500) to
+/// Frames run until the PDF reads asked for are answered (they are read in threads of their own).
+fn settle(h: &mut Harness<BimApp>) {
+    let start = Instant::now();
+    h.run();
+    while h.state().pdf_reading() {
+        assert!(start.elapsed() < Duration::from_secs(60), "a PDF read never came back");
+        std::thread::sleep(Duration::from_millis(5));
+        h.run();
+    }
+    h.run();
+}
+
+/// The PDF placed by its box and a click at (4000, 3000): the room, 6 by 4 m at the plan's 1 : 100, from (2000, 1500) to
 /// (8000, 5500).
 fn placed(h: &mut Harness<BimApp>) -> Id {
     h.state_mut().import_pdf_path(PathBuf::from("files/WC.pdf"));
-    // Its thumbnail is made a frame after the box opens.
-    h.run();
-    h.run();
+    // Its pages and their thumbnails are read apart, one at a time.
+    settle(h);
     assert!(h.state().pdf_box.is_some(), "the box is open: {:?}", h.state().status.text);
     assert!(h.query_by_label("Page to Import").is_some(), "Revit's box");
     assert_eq!(combo_value(h, "Resolution"), "150 DPI");
@@ -49,6 +62,8 @@ fn placed(h: &mut Harness<BimApp>) -> Id {
     press(h, "OK");
     assert_eq!(h.state().tool, Tool::PlaceImage, "it follows the cursor");
     click(h, P2(4000.0, 3000.0));
+    // A click before its page is read places it once it is.
+    settle(h);
     let all = images(h);
     assert_eq!(all.len(), 1, "a click placed it");
     all[0].0
@@ -62,7 +77,7 @@ fn import_pdf_picks_a_page_and_a_resolution_and_a_click_places_it_at_true_size()
     let id = placed(&mut h);
     let im = images(&h)[0].1.clone();
     assert!(close(im.at, P2(4000.0, 3000.0), 30.0), "its middle where it was clicked: {:?}", im.at);
-    assert!((im.width - 20_000.0).abs() < 0.01 && (im.height - 15_000.0).abs() < 0.01, "1 : 100, as the page says: {im:?}");
+    assert!((im.width - 20_000.0).abs() < 0.01 && (im.height - 15_000.0).abs() < 0.01, "its paper at the plan's 1 : 100: {im:?}");
     assert_eq!(h.state().selection, vec![id], "selected, as Revit leaves it");
     assert_eq!(h.state().tool, Tool::Modify);
     let t = &h.state().session.model.image_types["WC.pdf"];
@@ -114,15 +129,126 @@ fn walls_drawn_over_a_pdf_snap_to_its_lines() {
 }
 
 #[test]
-fn bring_to_front_and_send_to_back_set_its_draw_layer() {
+fn the_arrange_panel_orders_the_views_images_and_leaves_their_draw_layer_be() {
     let mut h = with_pdf();
-    let id = placed(&mut h);
-    h.state_mut().selection = vec![id];
+    let first = placed(&mut h);
+    let second = h.state_mut().session.execute("import_pdf", &json!({"image": "WC.pdf", "at": [6000, 3000]})).unwrap()["id"].as_u64().unwrap();
+    let order = |h: &Harness<BimApp>| {
+        let mut all = images(h);
+        all.sort_by_key(|(id, im)| (im.order, *id));
+        all.iter().map(|(id, _)| *id).collect::<Vec<_>>()
+    };
+    assert_eq!(order(&h), vec![first, second], "the one placed last in front");
+    h.state_mut().selection = vec![second];
     h.run();
-    press(&mut h, "Bring to Front");
-    assert_eq!(images(&h)[0].1.layer, DrawLayer::Foreground);
+    for button in ["Bring to Front", "Bring Forward", "Send Backward", "Send to Back"] {
+        assert!(h.query_by_label(button).is_some(), "{button}, as Revit's Arrange panel has");
+    }
     press(&mut h, "Send to Back");
-    assert_eq!(images(&h)[0].1.layer, DrawLayer::Background);
+    assert_eq!(order(&h), vec![second, first]);
+    press(&mut h, "Bring Forward");
+    assert_eq!(order(&h), vec![first, second]);
+    press(&mut h, "Send Backward");
+    assert_eq!(order(&h), vec![second, first]);
+    press(&mut h, "Bring to Front");
+    assert_eq!(order(&h), vec![first, second]);
+    assert!(images(&h).iter().all(|(_, im)| im.layer == DrawLayer::Background), "Draw Layer is Properties', not Arrange's");
+}
+
+#[test]
+fn a_pdf_too_large_to_import_is_refused_before_it_is_read() {
+    let mut h = app(BOX);
+    h.state_mut().session.files.give("files/Huge.pdf", vec![b' '; bimcraft_core::raster::MAX_FILE + 1]);
+    h.state_mut().import_pdf_path(PathBuf::from("files/Huge.pdf"));
+    h.run();
+    assert!(!h.state().pdf_reading(), "nothing is read");
+    assert!(h.query_by_label_contains("a file to import is up to").is_some(), "the box says why");
+}
+
+/// A window inside a page, on the plan of a room's walls, with the PDF given to it, as the page gives one.
+fn hosted_with_pdf() -> Harness<'static, BimApp> {
+    let mut s = Session::new();
+    s.script(BOX).unwrap();
+    s.files.give("files/WC.pdf", consultant());
+    let app = BimApp::hosted_on(s);
+    let mut h = Harness::builder()
+        .with_size([1280.0, 800.0])
+        .with_max_steps(32)
+        .with_step_dt(0.25)
+        .build_ui_state(|ui, app: &mut BimApp| app.show(ui), app);
+    h.run();
+    h
+}
+
+/// Plays the hosting page: each ask the window made, done in a reader apart (`run_pdf_job`, as the page's worker does).
+fn page_reads(h: &mut Harness<BimApp>) -> usize {
+    let asks = h.state_mut().take_pdf_requests();
+    let n = asks.len();
+    for ask in asks {
+        let job: bimcraft_core::raster::PdfJob = serde_json::from_str(&ask.job).unwrap();
+        let answer = bimcraft_core::raster::run_pdf_job(&job, ask.bytes);
+        h.state_mut().answer_pdf_request(ask.id, answer);
+    }
+    h.run();
+    n
+}
+
+#[test]
+fn in_a_hosting_page_the_page_reads_the_pdf_and_the_window_never_does() {
+    let mut h = hosted_with_pdf();
+    // Asked from the page's side, the engine won't read a PDF itself.
+    let e = h.state_mut().session.execute("import_pdf", &json!({"path": "files/WC.pdf"})).unwrap_err();
+    assert!(e.contains("read apart from the editor"), "{e}");
+    h.state_mut().import_pdf_path(PathBuf::from("files/WC.pdf"));
+    h.run();
+    let asks = h.state_mut().take_pdf_requests();
+    assert_eq!(asks.len(), 1, "its pages, asked of the page");
+    assert_eq!((asks[0].path.as_str(), asks[0].job.as_str()), ("files/WC.pdf", r#"{"job":"outline"}"#));
+    assert_eq!(asks[0].bytes, consultant(), "with the file's bytes");
+    let job: bimcraft_core::raster::PdfJob = serde_json::from_str(&asks[0].job).unwrap();
+    h.state_mut().answer_pdf_request(asks[0].id, bimcraft_core::raster::run_pdf_job(&job, asks[0].bytes.clone()));
+    h.run();
+    assert!(h.query_by_label("200 × 150 mm").is_some(), "its page size, as the page read it");
+    // Its thumbnail, then the page itself once the box is OK'd; a click places it.
+    while page_reads(&mut h) > 0 {}
+    assert!(h.query_by_label("Page 1").is_some());
+    press(&mut h, "OK");
+    click(&mut h, P2(4000.0, 3000.0));
+    assert!(images(&h).is_empty(), "not until the page is read");
+    assert_eq!(page_reads(&mut h), 1);
+    let all = images(&h);
+    assert_eq!(all.len(), 1, "placed where it was clicked once the page came back");
+    assert!(close(all[0].1.at, P2(4000.0, 3000.0), 30.0));
+    assert_eq!(h.state().session.model.image_types["WC.pdf"].lines().map(|l| l.dxf().entities.len()), Some(1));
+}
+
+#[test]
+fn in_a_hosting_page_a_reader_that_stopped_leaves_the_window_saying_the_file_could_not_be_read() {
+    let mut h = hosted_with_pdf();
+    h.state_mut().import_pdf_path(PathBuf::from("files/WC.pdf"));
+    h.run();
+    let asks = h.state_mut().take_pdf_requests();
+    // The page's worker died on it (a panic aborted its instance): the page says so.
+    h.state_mut().answer_pdf_request(asks[0].id, Err("the reader stopped on it".into()));
+    h.run();
+    assert!(h.query_by_label_contains("WC.pdf could not be read: the reader stopped on it").is_some());
+    assert!(!h.state().pdf_reading());
+    press(&mut h, "Cancel");
+    assert!(h.state().pdf_box.is_none());
+    // The window goes on: a wall is drawn.
+    h.state_mut().session.execute("wall", &json!({"points": [[0, 0], [3000, 0]]})).unwrap();
+    // And a page that stops while it is being placed ends the placing, saying why.
+    h.state_mut().import_pdf_path(PathBuf::from("files/WC.pdf"));
+    h.run();
+    while page_reads(&mut h) > 0 {}
+    press(&mut h, "OK");
+    let asks = h.state_mut().take_pdf_requests();
+    assert_eq!(asks.len(), 1);
+    h.state_mut().answer_pdf_request(asks[0].id, Err("the reader stopped on it".into()));
+    h.run();
+    assert_eq!(h.state().tool, Tool::Modify);
+    assert!(h.state().status.error && h.state().status.text.contains("could not be read"), "{:?}", h.state().status.text);
+    assert!(images(&h).is_empty());
 }
 
 #[test]
@@ -158,7 +284,7 @@ fn an_image_comes_in_by_a_click_at_72_dpi() {
     assert_eq!(h.state().tool, Tool::PlaceImage);
     click(&mut h, P2(4000.0, 3000.0));
     let im = images(&h)[0].1.clone();
-    assert!((im.width - 254.0).abs() < 1e-6 && (im.height - 127.0).abs() < 1e-6, "{im:?}");
+    assert!((im.width - 25_400.0).abs() < 1e-6 && (im.height - 12_700.0).abs() < 1e-6, "254 mm at the plan's 1 : 100: {im:?}");
 }
 
 #[test]

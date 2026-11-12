@@ -42,6 +42,7 @@ pub mod host;
 pub mod hostview;
 pub mod icons;
 mod images;
+mod pdfread;
 mod inquiry;
 pub mod lang;
 mod linestyles;
@@ -787,6 +788,8 @@ pub struct BimApp {
     pdf_box: Option<images::PdfBox>,
     /// The image being placed by a click (Tool::PlaceImage).
     placing: Option<images::Placing>,
+    /// The PDF files being read apart from the window, and their answers (`pdfread.rs`).
+    pdf_reader: pdfread::PdfReader,
     /// Manage Images is open, and the image picked in it.
     images_window: bool,
     images_picked: Option<String>,
@@ -1502,6 +1505,7 @@ impl BimApp {
             image_dialog: None,
             pdf_box: None,
             placing: None,
+            pdf_reader: Default::default(),
             images_window: false,
             images_picked: None,
             scale_length: String::new(),
@@ -4826,16 +4830,24 @@ impl BimApp {
                 self.vertex_buttons(ui);
             });
         }
-        // Images selected: Revit's Arrange panel, their Draw Layer.
+        // Images selected: Revit's Arrange panel, their draw order among the view's images (Draw Layer is in Properties).
         if !self.selected_images().is_empty() && self.tool == Tool::Modify {
             panel(ui, msg!("Arrange"), |ui| {
-                let tip = msg!("Bring to Front: the image draws in front of the model (Draw Layer: Foreground)");
+                let tip = msg!("Bring to Front: the images selected draw in front of every other image in the view");
                 if big_button(ui, Icon::BringToFront, "Bring to Front", false, tip).clicked() {
-                    self.arrange(true);
+                    self.arrange("front");
                 }
-                let tip = msg!("Send to Back: the image draws behind the model (Draw Layer: Background)");
+                let tip = msg!("Bring Forward: the images selected move one step closer to the front of the view's images");
+                if big_button(ui, Icon::BringForward, "Bring Forward", false, tip).clicked() {
+                    self.arrange("forward");
+                }
+                let tip = msg!("Send Backward: the images selected move one step closer to the back of the view's images");
+                if big_button(ui, Icon::SendBackward, "Send Backward", false, tip).clicked() {
+                    self.arrange("backward");
+                }
+                let tip = msg!("Send to Back: the images selected draw behind every other image in the view");
                 if big_button(ui, Icon::SendToBack, "Send to Back", false, tip).clicked() {
-                    self.arrange(false);
+                    self.arrange("back");
                 }
             });
         }
