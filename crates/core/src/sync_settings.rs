@@ -54,11 +54,12 @@ use crate::library::{Entry, Kind, Library};
 use crate::model::Model;
 
 /// The settings that are a map of entries by name.
-const MAPS: [&str; 26] = [
+const MAPS: [&str; 27] = [
     "materials",
     "images",
     "clouds",
     "cads",
+    "image_types",
     "families",
     "parameters",
     "view_filters",
@@ -200,6 +201,7 @@ pub(crate) fn without_elements(m: &Model) -> Model {
         images: m.images.clone(),
         clouds: m.clouds.clone(),
         cads: m.cads.clone(),
+        image_types: m.image_types.clone(),
         families: m.families.clone(),
         parameters: m.parameters.clone(),
         view_filters: m.view_filters.clone(),
@@ -851,12 +853,13 @@ fn put_object(map: &mut Map<String, Value>, path: &[String], entries: Map<String
 }
 
 /// The settings that are a map of entries, and what each entry is in the library.
-fn named_kinds() -> [(&'static str, Kind); 23] {
+fn named_kinds() -> [(&'static str, Kind); 24] {
     [
         ("materials", Kind::Material),
         ("images", Kind::Picture),
         ("clouds", Kind::Cloud),
         ("cads", Kind::Cad),
+        ("image_types", Kind::Image),
         ("families", Kind::Family),
         ("parameters", Kind::Parameter),
         ("view_filters", Kind::ViewFilter),

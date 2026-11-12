@@ -34,6 +34,8 @@ pub enum Kind {
     Cloud,
     /// A CAD drawing imports place.
     Cad,
+    /// A raster image or a PDF page image instances place (Revit's image type).
+    Image,
     Family,
     Parameter,
     ViewFilter,
@@ -75,6 +77,7 @@ impl Kind {
             Kind::Picture => ui_msg!("picture").into(),
             Kind::Cloud => "scan".into(),
             Kind::Cad => ui_msg!("CAD drawing").into(),
+            Kind::Image => ui_msg!("image").into(),
             Kind::Family => ui_msg!("family").into(),
             Kind::Parameter => ui_msg!("parameter").into(),
             Kind::ViewFilter => "view filter".into(),
@@ -106,6 +109,7 @@ impl Kind {
             "picture" => Kind::Picture,
             "cloud" => Kind::Cloud,
             "cad" => Kind::Cad,
+            "image" => Kind::Image,
             "family" => Kind::Family,
             "parameter" => Kind::Parameter,
             "view-filter" => Kind::ViewFilter,
@@ -141,6 +145,7 @@ impl fmt::Display for Kind {
             Kind::Picture => f.write_str("picture"),
             Kind::Cloud => f.write_str("cloud"),
             Kind::Cad => f.write_str("cad"),
+            Kind::Image => f.write_str("image"),
             Kind::Family => f.write_str("family"),
             Kind::Parameter => f.write_str("parameter"),
             Kind::ViewFilter => f.write_str("view-filter"),
@@ -678,6 +683,7 @@ impl Model {
             }),
             Kind::Material => self.materials.remove(name).is_some(),
             Kind::Picture => self.images.remove(name).is_some(),
+            Kind::Image => self.image_types.remove(name).is_some(),
             Kind::ViewFilter => self.view_filters.remove(name).is_some(),
             Kind::ViewTemplate => self.view_templates.remove(name).is_some(),
             Kind::TitleBlock => self.title_blocks.remove(name).is_some(),
@@ -812,6 +818,7 @@ impl Model {
         add(Kind::Picture, &mut self.images.keys());
         add(Kind::Cloud, &mut self.clouds.keys());
         add(Kind::Cad, &mut self.cads.keys());
+        add(Kind::Image, &mut self.image_types.keys());
         add(Kind::Family, &mut self.families.keys());
         add(Kind::Parameter, &mut self.parameters.keys());
         add(Kind::ViewFilter, &mut self.view_filters.keys());
@@ -1457,6 +1464,7 @@ impl crate::model::Element {
                 }
             }
             Element::CadImport(ci) => f(&Kind::Cad, &mut ci.cad),
+            Element::Image(im) => f(&Kind::Image, &mut im.type_name),
             Element::Text(n) => f(&Kind::TextType, &mut n.type_name),
             Element::Dimension(d) => f(&Kind::DimensionType, &mut d.type_name),
             Element::Dimension3D(d) => f(&Kind::DimensionType, &mut d.type_name),

@@ -108,6 +108,9 @@ pub mod quantities;
 mod quantities_tests;
 #[cfg(test)]
 mod read_only_tests;
+pub mod raster;
+#[cfg(test)]
+mod image_tests;
 pub mod rebar;
 #[cfg(test)]
 mod rebar_tests;

@@ -72,7 +72,10 @@ pub const CEILING_HEIGHT: f64 = 2600.0;
 pub const MAX_SLOPE: f64 = 75.0;
 /// The closest a floor's contours may be drawn, mm: a site's are a metre or half a metre apart.
 pub const MIN_CONTOURS: f64 = 50.0;
-/// The version of the project file this build writes, and the newest it reads. 18: a family's connector may be a `pipe`,
+/// The version of the project file this build writes, and the newest it reads. 20: a project may hold images and PDF pages
+/// (`image_types`, library entries of kind `image`) and the `image` element places one in a view; nothing in a file of 19
+/// changes, but a build that reads up to 19 would refuse one of 20 on opening (a category it doesn't know), not say "saved by
+/// a newer BIMCraft". 18: a family's connector may be a `pipe`,
 /// `data` or `earthing` one, with no `system` (a pipe's `domain`, `flow`, `size`), and any may have a place (`at`, `direction`);
 /// the starter fixtures and fittings have them; a project may hold title blocks of its own (`title_blocks`, library entries of
 /// kind `title-block`) and its values of their fields (`title_values`), and a sheet may name one (`title_block`) and hold its
@@ -119,7 +122,7 @@ pub const MIN_CONTOURS: f64 = 50.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 19;
+pub const FORMAT: u32 = 20;
 /// How far past the model a level reaches without an extent of its own, mm.
 pub const LEVEL_PAST: f64 = 1000.0;
 
@@ -1341,7 +1344,9 @@ pub struct PointCloud {
 /// A CAD drawing placed, Revit's import: the project's `cad`, its point `origin` (in its own units) on `at` on `level`, each of
 /// its units `scale` mm, turned `angle` degrees (counter-clockwise) about `at`. With a `view`, only that plan shows it (Revit's
 /// Current view only); without, every plan of its level does. `hidden` are layers it doesn't show in any view, and `colors`
-/// says how it draws its colours. It holds no `params`: phases and paint don't reach it.
+/// says how it draws its colours. It holds no `params`: phases and paint don't reach it. `stretch` is how many times its y is
+/// scaled more than its x (negative, flipped): 1 for every import; an image's lines, placed as an import, may be stretched
+/// (`raster::ImageInstance::lines_placed`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CadImport {
@@ -1351,6 +1356,8 @@ pub struct CadImport {
     #[serde(default, skip_serializing_if = "is_origin")]
     pub origin: P2,
     pub scale: f64,
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub stretch: f64,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub angle: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1364,9 +1371,9 @@ pub struct CadImport {
 /// Where a placed drawing's point `p`, in its own units, is in plan, mm.
 pub fn cad_place(ci: &CadImport) -> impl Fn(P2) -> P2 + use<> {
     let (sin, cos) = ci.angle.to_radians().sin_cos();
-    let (at, origin, k) = (ci.at, ci.origin, ci.scale);
+    let (at, origin, k, ky) = (ci.at, ci.origin, ci.scale, ci.scale * ci.stretch);
     move |p: P2| {
-        let (x, y) = ((p.0 - origin.0) * k, (p.1 - origin.1) * k);
+        let (x, y) = ((p.0 - origin.0) * k, (p.1 - origin.1) * ky);
         P2(at.0 + x * cos - y * sin, at.1 + x * sin + y * cos)
     }
 }
@@ -1375,7 +1382,11 @@ pub fn cad_place(ci: &CadImport) -> impl Fn(P2) -> P2 + use<> {
 pub fn cad_unplace(ci: &CadImport, q: P2) -> P2 {
     let (sin, cos) = ci.angle.to_radians().sin_cos();
     let (x, y) = (q.0 - ci.at.0, q.1 - ci.at.1);
-    P2(ci.origin.0 + (x * cos + y * sin) / ci.scale, ci.origin.1 + (-x * sin + y * cos) / ci.scale)
+    P2(ci.origin.0 + (x * cos + y * sin) / ci.scale, ci.origin.1 + (-x * sin + y * cos) / (ci.scale * ci.stretch))
+}
+
+fn is_one(x: &f64) -> bool {
+    *x == 1.0
 }
 
 /// The most layers an import may hide, and a drawing's mm to its unit at most and at least.
@@ -2173,6 +2184,7 @@ macro_rules! visit_refs {
                 f(& $($m)? ci.level);
                 if let Some(g) = & $($m)? ci.view { f(g) }
             }
+            Element::Image(im) => f(& $($m)? im.view),
             Element::RoomSeparator(rs) => f(& $($m)? rs.level),
             Element::Rebar(rb) => {
                 f(& $($m)? rb.level);
@@ -2250,6 +2262,8 @@ pub enum Element {
     PointCloud(PointCloud),
     /// A CAD drawing placed in the model.
     CadImport(CadImport),
+    /// A raster image or a PDF page placed in one view; of Revit's Raster Images.
+    Image(crate::raster::ImageInstance),
     /// An element of the site and masterplan: a lane, a lawn, a pond, a tree, a car park… (`masterplan.rs`).
     Site(Box<crate::masterplan::Site>),
     /// Revit's Property Line: the plot's boundary.
@@ -2448,6 +2462,7 @@ impl Element {
             Element::Link(_) => "link",
             Element::PointCloud(_) => "pointcloud",
             Element::CadImport(_) => "cadimport",
+            Element::Image(_) => "image",
             Element::Schedule(_) => "schedule",
             Element::View3D(_) => "view3d",
             Element::PlanView(_) => "planview",
@@ -2933,6 +2948,9 @@ pub struct Model {
     /// The CAD drawings its imports place, by name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty", deserialize_with = "crate::cad::deserialize_cads")]
     pub cads: BTreeMap<String, Cad>,
+    /// Its raster images and PDF pages (Manage Images), by name: what image instances place.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub image_types: BTreeMap<String, crate::raster::ImageType>,
     /// Its families, by name: what components place.
     #[serde(default)]
     pub families: Shared<BTreeMap<String, Family>>,
@@ -3099,6 +3117,7 @@ impl Model {
             images: BTreeMap::new(),
             clouds: BTreeMap::new(),
             cads: BTreeMap::new(),
+            image_types: BTreeMap::new(),
             families: BTreeMap::new().into(),
             parameters: BTreeMap::new(),
             view_filters: BTreeMap::new(),
@@ -4338,6 +4357,7 @@ impl Model {
             | Element::Spot(Spot { view, .. })
             | Element::DetailLine(DetailLine { view, .. })
             | Element::FilledRegion(FilledRegion { view, .. })
+            | Element::Image(crate::raster::ImageInstance { view, .. })
             | Element::DetailGroup(DetailGroup { view, .. })
             | Element::RepeatingDetail(RepeatingDetail { view, .. }) => Some(*view),
             _ => None,
@@ -4560,6 +4580,7 @@ impl Model {
             | Element::Spot(Spot { view, .. })
             | Element::DetailLine(DetailLine { view, .. })
             | Element::FilledRegion(FilledRegion { view, .. })
+            | Element::Image(crate::raster::ImageInstance { view, .. })
             | Element::DetailGroup(DetailGroup { view, .. })
             | Element::RepeatingDetail(RepeatingDetail { view, .. }) => self.plan_level(*view).map(|l| self.guid(l)),
             // A plan view stands on its level: it goes with it.
@@ -6455,6 +6476,16 @@ impl Model {
         for name in self.clouds.keys() {
             text(&format!("scan `{name}`"), "name", name)?;
         }
+        if self.image_types.len() > crate::raster::MAX_TYPES {
+            return Err(format!("the project has {} images; it holds up to {}", self.image_types.len(), crate::raster::MAX_TYPES));
+        }
+        let held: usize = self.image_types.values().map(crate::raster::ImageType::len).sum();
+        if held > crate::raster::MAX_HELD {
+            return Err(format!("the project's images hold {held} bytes; it holds up to {}", crate::raster::MAX_HELD));
+        }
+        for name in self.image_types.keys() {
+            text(&format!("image `{name}`"), "name", name)?;
+        }
         if self.cads.len() > crate::cad::MAX_CADS {
             return Err(format!("the project has {} CAD drawings; it holds up to {}", self.cads.len(), crate::cad::MAX_CADS));
         }
@@ -7179,6 +7210,22 @@ impl Model {
                 coord(&format!("{who} offset"), pc.offset)?;
                 coord(&format!("{who} angle"), pc.angle)?;
             }
+            Element::Image(im) => {
+                view_ok(im.view, true)?;
+                if !self.image_types.contains_key(&im.type_name) {
+                    return Err(format!("{who}: the project holds no image named `{}` (manage_images lists them)", im.type_name));
+                }
+                point(&format!("{who} at"), im.at)?;
+                coord(&format!("{who} angle"), im.angle)?;
+                for (side, v) in [("width", im.width), ("height", im.height)] {
+                    if !(v.is_finite() && (crate::raster::MIN_SIDE..=MAX_COORD).contains(&v)) {
+                        return Err(format!(
+                            "{who}: a {side} of {v} mm isn't one an image can have; give one from {} to {MAX_COORD} mm",
+                            crate::raster::MIN_SIDE
+                        ));
+                    }
+                }
+            }
             Element::CadImport(ci) => {
                 if !self.cads.contains_key(&ci.cad) {
                     return Err(format!("{who}: the project holds no CAD drawing named `{}`", ci.cad));
@@ -7186,6 +7233,9 @@ impl Model {
                 level_ok(ci.level)?;
                 point(&format!("{who} at"), ci.at)?;
                 coord(&format!("{who} angle"), ci.angle)?;
+                if ci.stretch != 1.0 {
+                    return Err(format!("{who}: an import is scaled alike both ways; its `stretch` is 1, not {}", ci.stretch));
+                }
                 if !(ci.origin.is_finite()
                     && ci.origin.0.abs() <= crate::dxf::MAX_FILE_COORD
                     && ci.origin.1.abs() <= crate::dxf::MAX_FILE_COORD)
@@ -7688,6 +7738,7 @@ impl Model {
             images,
             clouds,
             cads,
+            image_types,
             families,
             parameters,
             view_filters,
@@ -7732,6 +7783,7 @@ impl Model {
             && *images == o.images
             && *clouds == o.clouds
             && *cads == o.cads
+            && *image_types == o.image_types
             && *families == o.families
             && *parameters == o.parameters
             && *view_filters == o.view_filters

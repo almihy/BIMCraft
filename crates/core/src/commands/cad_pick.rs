@@ -20,7 +20,7 @@ pub(super) struct Picked {
     pub level: Guid,
     pub found: outlines::Found,
     pub labels: Vec<Vec<String>>,
-    pub cad: String,
+    pub cad: crate::cad::Cad,
     pub id: crate::model::Id,
 }
 
@@ -28,9 +28,8 @@ pub(super) struct Picked {
 type Boundary = (Guid, Vec<P2>, Vec<Vec<P2>>);
 
 /// The pick `v` gives (`{id, entities?, layers?, box?}`), on the import `id` names: the entities it takes.
-fn pick(c: &str, m: &Model, v: &Value) -> Result<(crate::model::Id, Guid, String, Vec<usize>), String> {
-    let (id, ci) = cad_import(c, m, v)?;
-    let cad = m.cads.get(&ci.cad).ok_or_else(|| bad(c, format!("the project holds no CAD drawing named `{}`", ci.cad)))?;
+fn pick(c: &str, m: &Model, v: &Value) -> Result<(crate::model::Id, crate::model::CadImport, crate::cad::Cad, Vec<usize>), String> {
+    let (id, ci, cad) = cad_import(c, m, v)?;
     let count = cad.dxf().entities.len();
     let entities = match v.get("entities") {
         e if absent(e) => None,
@@ -50,7 +49,7 @@ fn pick(c: &str, m: &Model, v: &Value) -> Result<(crate::model::Id, Guid, String
     };
     let layers = match v.get("layers") {
         l if absent(l) => None,
-        _ => Some(layer_list(c, v, "layers", cad)?.into_iter().collect::<BTreeSet<String>>()),
+        _ => Some(layer_list(c, v, "layers", &cad)?.into_iter().collect::<BTreeSet<String>>()),
     };
     let window = match v.get("box") {
         b if absent(b) => None,
@@ -64,20 +63,27 @@ fn pick(c: &str, m: &Model, v: &Value) -> Result<(crate::model::Id, Guid, String
         Some(_) => return Err(bad(c, "`box` is two corners [[x, y], [x, y]] in mm")),
         None => None,
     };
-    let picked = outlines::picked(cad, ci, &Pick { entities, layers, window });
-    Ok((id, ci.level, ci.cad.clone(), picked))
+    let picked = outlines::picked(&cad, &ci, &Pick { entities, layers, window });
+    Ok((id, ci, cad, picked))
 }
 
 /// The closed outlines the pick `v` makes.
 fn found(c: &str, m: &Model, v: &Value) -> Result<Picked, String> {
-    let (id, level, name, chosen) = pick(c, m, v)?;
-    let (cad, ci) = match (m.cads.get(&name), m.elements.get(id)) {
-        (Some(cad), Some(crate::model::Element::CadImport(ci))) => (cad, ci),
-        _ => return Err(bad(c, format!("the project holds no CAD drawing named `{name}`"))),
-    };
-    let found = outlines::outlines(cad, ci, &chosen).map_err(|e| bad(c, e))?;
-    let labels = outlines::labels(cad, ci, &found.outlines);
-    Ok(Picked { level, found, labels, cad: name, id })
+    let (id, ci, cad, chosen) = pick(c, m, v)?;
+    let found = outlines::outlines(&cad, &ci, &chosen).map_err(|e| bad(c, e))?;
+    let labels = outlines::labels(&cad, &ci, &found.outlines);
+    Ok(Picked { level: ci.level, found, labels, cad, id })
+}
+
+/// Refuses a pick of an image placed in other than a plan: the model is built from a plan's lines.
+fn on_a_plan(c: &str, m: &Model, id: crate::model::Id) -> Result<(), String> {
+    match m.elements.get(id) {
+        Some(crate::model::Element::Image(im)) if m.plan_level(im.view).is_none() => Err(bad(
+            c,
+            format!("image {id} is in {}, not a plan: the model is built from the lines of an image in a plan", super::view_title(m, im.view)),
+        )),
+        _ => Ok(()),
+    }
 }
 
 /// `cad`, the pick an element command takes: an object of [`PICK_KEYS`], if given.
@@ -111,6 +117,7 @@ pub(super) fn picked_outline(c: &str, m: &Model, p: &Value, instead: &[&str]) ->
     let Some(v) = pick_param(c, p)? else { return Ok(None) };
     not_with(c, p, instead)?;
     let picked = found(c, m, v)?;
+    on_a_plan(c, m, picked.id)?;
     let top: Vec<&Outline> = picked.found.outlines.iter().filter(|o| o.depth == 0 && !o.face).collect();
     match top.as_slice() {
         [one] => Ok(Some((
@@ -141,11 +148,10 @@ pub(super) fn picked_outline(c: &str, m: &Model, p: &Value, instead: &[&str]) ->
 pub(super) fn picked_segments(c: &str, m: &Model, p: &Value) -> Result<Option<(Guid, Vec<Segment>, usize)>, String> {
     let Some(v) = pick_param(c, p)? else { return Ok(None) };
     not_with(c, p, &["points", "closed", "arc"])?;
-    let (id, level, name, chosen) = pick(c, m, v)?;
-    let (Some(cad), Some(crate::model::Element::CadImport(ci))) = (m.cads.get(&name), m.elements.get(id)) else {
-        return Err(bad(c, format!("the project holds no CAD drawing named `{name}`")));
-    };
-    let (segs, skipped) = outlines::segments(cad, ci, &chosen);
+    let (id, ci, cad, chosen) = pick(c, m, v)?;
+    on_a_plan(c, m, id)?;
+    let level = ci.level;
+    let (segs, skipped) = outlines::segments(&cad, &ci, &chosen);
     let segs: Vec<Segment> = segs.into_iter().filter(|s| s.start.dist(s.end) > outlines::SNAP).collect();
     if segs.is_empty() {
         return Err(bad(c, format!("the pick takes {} entities and no line or arc among them to draw a wall along", chosen.len())));
@@ -174,8 +180,8 @@ pub(super) fn cad_outlines(s: &mut Session, p: &Value) -> R {
     };
     let m = &s.model;
     let picked = found(c, m, p)?;
-    let ents = m.cads.get(&picked.cad).map(|cad| &cad.dxf().entities);
-    let layer_of = |n: &usize| ents.and_then(|e| e.get(*n)).map(|e| e.layer.clone());
+    let ents = &picked.cad.dxf().entities;
+    let layer_of = |n: &usize| ents.get(*n).map(|e| e.layer.clone());
     let ring = |r: &[P2]| json!(r.iter().map(|q| [hundredth(q.0), hundredth(q.1)]).collect::<Vec<_>>());
     let rows: Vec<Value> = picked
         .found

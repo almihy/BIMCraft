@@ -141,6 +141,7 @@ const MAX_BANDS: i64 = 64;
 pub const RARE: &[&str] = &[
     "pointcloud",
     "cadimport",
+    "image",
     "mass",
     "link",
     "column",

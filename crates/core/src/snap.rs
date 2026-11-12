@@ -297,6 +297,12 @@ impl<'a> Scene<'a> {
                     }
                 }
                 Element::DetailLine(l) if m.annotation_in(e, view) => s.curve(&l.curve, p, window, of),
+                // A PDF's lines, Revit's Enable Snaps: their ends, middles and crossings, and the lines themselves.
+                Element::Image(im) if im.snaps && m.annotation_in(e, view) => {
+                    if let Some((cad, ci)) = m.image_types.get(&im.type_name).and_then(|t| im.lines_placed(t, im.view)) {
+                        cad_scene(&mut s, &cad, &ci, p, window, None, id);
+                    }
+                }
                 // The rest is a plan's: a section has none of it.
                 _ if !plan => {}
                 // Annotation's anchors: where it is placed, and the points its leader or dimension line reaches.
@@ -434,7 +440,11 @@ impl<'a> Scene<'a> {
                 Element::Stair(st) if st.level == level && near(&[st.start]) => s.points.push((st.start, Kind::Endpoint, of)),
                 Element::Ramp(r) if r.level == level && near(&[r.start]) => s.points.push((r.start, Kind::Endpoint, of)),
                 Element::Railing(r) if r.level == level => s.points.extend(ring(&r.path)),
-                Element::CadImport(ci) if ci.level == level => cad_scene(&mut s, m, ci, p, window, look, id),
+                Element::CadImport(ci) if ci.level == level => {
+                    if let Some(cad) = m.cads.get(&ci.cad) {
+                        cad_scene(&mut s, cad, ci, p, window, look.hidden_layers(&ci.cad), id);
+                    }
+                }
                 _ => {}
             }
         }
@@ -444,10 +454,18 @@ impl<'a> Scene<'a> {
 
 /// What of a CAD import lies within `window` mm of `p`, of the layers it and the view show: its lines' ends and middles, its
 /// arcs' and circles' centres, and its straight segments, so a wall can be traced over it. They are the import's, `id`.
-fn cad_scene(s: &mut Scene, m: &Model, ci: &crate::model::CadImport, p: P2, window: f64, look: &Look, id: Id) {
+/// `in_view` are the layers the view hides of it.
+fn cad_scene(
+    s: &mut Scene,
+    cad: &crate::cad::Cad,
+    ci: &crate::model::CadImport,
+    p: P2,
+    window: f64,
+    in_view: Option<&std::collections::BTreeSet<String>>,
+    id: Id,
+) {
     use crate::dxf::Shape;
     let of = Some(id);
-    let Some(cad) = m.cads.get(&ci.cad) else { return };
     let place = crate::model::cad_place(ci);
     // The window in the drawing's own units: the box round its corners, turned back.
     let corners = [P2(-1.0, -1.0), P2(1.0, -1.0), P2(1.0, 1.0), P2(-1.0, 1.0)].map(|k| {
@@ -455,7 +473,6 @@ fn cad_scene(s: &mut Scene, m: &Model, ci: &crate::model::CadImport, p: P2, wind
         [q, q]
     });
     let Some([lo, hi]) = crate::dxf::union(corners) else { return };
-    let in_view = look.hidden_layers(&ci.cad);
     let near = |b: [P2; 2]| b[0].0 <= hi.0 && b[1].0 >= lo.0 && b[0].1 <= hi.1 && b[1].1 >= lo.1;
     for e in &cad.dxf().entities {
         if !cad.shows(e, &ci.hidden) || in_view.is_some_and(|h| h.contains(&e.layer)) || !near(e.shape.bounds()) {
