@@ -697,7 +697,7 @@ pub struct Sketch<'a> {
     pub editing: Option<Id>,
 }
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(debug_assertions)]
 thread_local! {
     /// The outlines [`in_sketch`] has built on this thread: the tests assert on it, not on time, which varies with the load of
     /// the machine.
@@ -736,7 +736,7 @@ pub fn in_sketch(m: &Model, sk: Sketch<'_>, p: P2, reach: Reach, from: &[P2], sq
         // One index for all of them, so each wall's joins are found among the walls its height meets.
         let index = near.iter().any(|(_, id)| matches!(m.elements.get(*id), Some(Element::Wall(_)))).then(|| crate::walls::Index::new(m));
         for (_, id) in near {
-            #[cfg(any(test, feature = "testing"))]
+            #[cfg(debug_assertions)]
             BUILT.with(|n| n.set(n.get() + 1));
             match m.elements.get(id) {
                 Some(Element::Wall(_)) => scene.polyline(&crate::walls::outline_in(m, id, index.as_ref()), true, Some(id)),

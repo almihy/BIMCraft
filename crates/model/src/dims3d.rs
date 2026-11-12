@@ -93,12 +93,13 @@ pub fn marks(m: &Model, view: impl Key, cam: &Camera, look: &Look, mm: f64) -> V
     // A dimension points at its view: the view's referrers, in the order of their ids, are its dimensions and more.
     let lookup = m.lookup();
     let found: Vec<Id> = lookup.referrers(&g).filter_map(|id| mine(id, m.elements.get(id)?)).collect();
-    #[cfg(test)]
-    assert_eq!(
-        found,
-        m.elements.iter().filter_map(|(id, e)| mine(*id, e)).collect::<Vec<_>>(),
-        "a 3D view's dimensions, from the lookup, aren't every one in it"
-    );
+    if crate::selfcheck::on(crate::selfcheck::Check::Dims3d) {
+        assert_eq!(
+            found,
+            m.elements.iter().filter_map(|(id, e)| mine(*id, e)).collect::<Vec<_>>(),
+            "a 3D view's dimensions, from the lookup, aren't every one in it"
+        );
+    }
     found
         .into_iter()
         .filter_map(|id| match m.elements.get(id) {

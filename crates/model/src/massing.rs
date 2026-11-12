@@ -140,7 +140,7 @@ pub fn forget(m: &mut Model, gone: &BTreeSet<Guid>) {
 }
 
 /// Original whole-model cleanup, retained as the deletion oracle.
-#[cfg(any(test, feature = "testing"))]
+#[cfg(debug_assertions)]
 pub fn forget_from_scratch(m: &mut Model, gone: &BTreeSet<Guid>) {
     for params in m.elements.values_mut().filter_map(Element::params_mut) {
         for key in [FLOOR, FACE] {

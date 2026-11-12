@@ -199,6 +199,8 @@ fn dwg_child(_: &[String]) -> Option<ExitCode> {
 }
 
 fn main() -> ExitCode {
+    // A debug build runs as fast as a release one: the model's self-checks are its tests' (`selfcheck`).
+    bimcraft_core::selfcheck::off();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Some(code) = dwg_child(&args) {
         return code;

@@ -256,8 +256,9 @@ impl<'a> Components<'a> {
         let place = |p: [f64; 3]| [c.at.0 + p[0] * cos - p[1] * sin, c.at.1 + p[0] * sin + p[1] * cos, base + p[2]];
         let outlines: Vec<P2> =
             self.local(c).iter().flat_map(|pc| pc.outline.iter().map(|q| place([q.0, q.1, 0.0])).map(|p| P2(p[0], p[1]))).collect();
-        #[cfg(test)]
-        assert_eq!(outlines, self.model.component_pieces(c).into_iter().flat_map(|p| p.outline).collect::<Vec<_>>());
+        if crate::selfcheck::on(crate::selfcheck::Check::ComponentOutline) {
+            assert_eq!(outlines, self.model.component_pieces(c).into_iter().flat_map(|p| p.outline).collect::<Vec<_>>());
+        }
         outlines
     }
 

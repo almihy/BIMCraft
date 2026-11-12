@@ -121,16 +121,17 @@ impl Model {
             .referrers(&g)
             .filter(|id| matches!(self.elements.get(*id), Some(Element::Dimension(d)) if constrained(d) && holds(d)))
             .collect();
-        #[cfg(test)]
-        assert_eq!(
-            held,
-            self.elements
-                .iter()
-                .filter(|(_, e)| matches!(e, Element::Dimension(d) if constrained(d) && holds(d)))
-                .map(|(id, _)| *id)
-                .collect::<Vec<_>>(),
-            "the dimensions holding an element, from the lookup, aren't every one that does"
-        );
+        if crate::selfcheck::on(crate::selfcheck::Check::HeldBy) {
+            assert_eq!(
+                held,
+                self.elements
+                    .iter()
+                    .filter(|(_, e)| matches!(e, Element::Dimension(d) if constrained(d) && holds(d)))
+                    .map(|(id, _)| *id)
+                    .collect::<Vec<_>>(),
+                "the dimensions holding an element, from the lookup, aren't every one that does"
+            );
+        }
         held
     }
 }

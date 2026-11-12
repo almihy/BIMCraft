@@ -45,6 +45,8 @@ fn control_port(mut args: Vec<String>) -> Result<(Vec<String>, Option<u16>), Str
 }
 
 fn main() -> ExitCode {
+    // A debug build runs as fast as a release one: the model's self-checks are its tests' (`selfcheck`).
+    bimcraft_core::selfcheck::off();
     // An update runs the installer from a copy of this program, once the app has exited: nothing else here applies to it.
     if let Some(finish) = bimcraft_update::install::parse(std::env::args_os().skip(1)) {
         return bimcraft_update::install::run(&finish);

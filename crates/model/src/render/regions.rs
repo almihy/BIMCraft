@@ -108,7 +108,7 @@ pub(super) fn wanted(m: &Model, view: Id) -> bool {
     })
 }
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(debug_assertions)]
 thread_local! {
     /// What drawing regions has cost on this thread, in steps: the points of rings a line was cut by, of polygons a fill was.
     /// The tests assert on it, not on time, which varies with the load of the machine.
@@ -119,18 +119,21 @@ thread_local! {
     pub static MOST: std::cell::Cell<usize> = const { std::cell::Cell::new(MAX_RUNS) };
 }
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(debug_assertions)]
 fn spend(n: usize) {
     SPENT.with(|s| s.set(s.get().saturating_add(n)));
 }
 
 /// `f` done without counting what it spends or the pictures it draws: a twin that tests run beside the work they count.
-#[cfg(any(test, feature = "testing"))]
 pub fn uncounted<T>(f: impl FnOnce() -> T) -> T {
+    #[cfg(debug_assertions)]
     let (spent, pictures) = (SPENT.with(std::cell::Cell::get), PICTURES.with(std::cell::Cell::get));
     let out = f();
-    SPENT.with(|s| s.set(spent));
-    PICTURES.with(|p| p.set(pictures));
+    #[cfg(debug_assertions)]
+    {
+        SPENT.with(|s| s.set(spent));
+        PICTURES.with(|p| p.set(pictures));
+    }
     out
 }
 
@@ -208,8 +211,7 @@ pub(super) fn foreground(d: &mut Drawing, m: &Model, rings: &[Vec<P2>]) {
         })
         .collect();
     // Its twin, which tests hold it to: every ink clipped, the same lines and fills in the same order.
-    #[cfg(test)]
-    {
+    if crate::selfcheck::on(crate::selfcheck::Check::RegionInk) {
         let every: Vec<Vec<(f32, f32)>> = uncounted(|| {
             ink.iter().zip(strokes).flat_map(|(ink, stroke)| area.clip(&ink.prim, view, *stroke)).map(|p| p.points()).collect()
         });
@@ -236,9 +238,9 @@ fn runs(image: &Image, view: View) -> (Vec<Prim>, bool) {
     // Columns from and to, rows from and to, colour.
     type Run = (u32, u32, u32, u32, Rgb);
     let (rx, ry) = (image.width as f32 / view.width.max(1) as f32, image.height as f32 / view.height.max(1) as f32);
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(debug_assertions)]
     let most = MOST.with(std::cell::Cell::get);
-    #[cfg(not(any(test, feature = "testing")))]
+    #[cfg(not(debug_assertions))]
     let most = MAX_RUNS;
     let mut found: Vec<Run> = Vec::new();
     let (mut above, mut cut): (Vec<usize>, bool) = (Vec::new(), false);
@@ -334,7 +336,7 @@ fn visible(d: &Drawing, m: &Model, picture: Option<(Vec<Prim>, bool)>) -> (Vec<I
     let (picture, cut) = match (picture, d.regions.section) {
         (Some(runs), _) => runs,
         (None, Some(section)) => {
-            #[cfg(any(test, feature = "testing"))]
+            #[cfg(debug_assertions)]
             PICTURES.with(|n| n.set(n.get() + 1));
             section_image(m, &Scene::new(m), section, d.view, &[]).map(|image| runs(&image, d.view)).unwrap_or_default()
         }
@@ -441,7 +443,7 @@ fn outside(prim: &Prim, view: View, rings: &[Vec<P2>], boxes: &[Option<Extent>])
     struct Outside<'a>(Vec<&'a Vec<P2>>);
     impl Keep for Outside<'_> {
         fn spans(&self, a: P2, u: P2, len: f64) -> Vec<(f64, f64)> {
-            #[cfg(any(test, feature = "testing"))]
+            #[cfg(debug_assertions)]
             spend(self.0.iter().map(|r| r.len()).sum());
             let over = self.0.iter().flat_map(|r| view3d::crossings(r, a, u)).map(|(lo, hi)| (lo.max(0.0), hi.min(len)));
             gaps(joined(over.filter(|(lo, hi)| hi - lo > EPS).collect()), len)
@@ -464,7 +466,7 @@ fn outside(prim: &Prim, view: View, rings: &[Vec<P2>], boxes: &[Option<Extent>])
             let source: Vec<Vec<P2>> = source.iter().map(|r| r.iter().map(|p| view.mm(*p)).collect()).collect();
             fill(
                 rings.iter().fold(source, |pieces, r| {
-                    #[cfg(any(test, feature = "testing"))]
+                    #[cfg(debug_assertions)]
                     spend(pieces.iter().map(Vec::len).sum::<usize>() + r.len());
                     walls::minus(&pieces, r)
                 }),
@@ -657,7 +659,7 @@ impl<'a> Area<'a> {
                 for r in source.iter().flat_map(|r| walls::convex_pieces(r)) {
                     let Some(rb) = bounds(&r) else { continue };
                     parts.extend(clips.iter().filter(|(_, cb)| overlap(rb, *cb)).filter_map(|(c, _)| {
-                        #[cfg(any(test, feature = "testing"))]
+                        #[cfg(debug_assertions)]
                         spend(r.len() + c.len());
                         walls::split(r.clone(), c).0
                     }));
@@ -667,7 +669,7 @@ impl<'a> Area<'a> {
                         .into_iter()
                         .flat_map(|p| match bounds(&p) {
                             Some(b) if overlap(b, (mask.lo, mask.hi)) => {
-                                #[cfg(any(test, feature = "testing"))]
+                                #[cfg(debug_assertions)]
                                 spend(p.len() + mask.ring.len());
                                 walls::split(p, &mask.ring).1
                             }
@@ -685,7 +687,7 @@ impl<'a> Area<'a> {
     fn pieces(&self) -> &[(Vec<P2>, Extent)] {
         self.pieces.get_or_init(|| {
             let (outline, holes) = self.rings.split_first().map_or((&[][..], &[][..]), |(o, h)| (o.as_slice(), h));
-            #[cfg(any(test, feature = "testing"))]
+            #[cfg(debug_assertions)]
             spend(self.rings.iter().map(Vec::len).sum());
             let cut = holes.iter().fold(walls::convex_pieces(outline), |ps, hole| walls::minus(&ps, hole));
             cut.into_iter().filter_map(|p| Some((bounds(&p)?, p))).map(|(b, p)| (p, b)).collect()
@@ -709,7 +711,7 @@ impl Keep for Within<'_> {
             return Vec::new();
         }
         let near: Vec<&Vec<P2>> = area.rings.iter().zip(&area.boxes).filter(|(_, bx)| overlap(reach, **bx)).map(|(r, _)| r).collect();
-        #[cfg(any(test, feature = "testing"))]
+        #[cfg(debug_assertions)]
         spend(near.iter().map(|r| r.len()).sum());
         // Inside an odd number of rings: between the crossings of their edges, paired off; a vertex on the line counts as
         // just under it.
@@ -737,7 +739,7 @@ impl Keep for Within<'_> {
             .iter()
             .filter(|mk| overlap(seg, (mk.lo, mk.hi)))
             .flat_map(|mk| {
-                #[cfg(any(test, feature = "testing"))]
+                #[cfg(debug_assertions)]
                 spend(mk.ring.len());
                 view3d::crossings(&mk.ring, a, u)
             })

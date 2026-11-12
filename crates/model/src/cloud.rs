@@ -214,7 +214,7 @@ impl PartialEq for Cloud {
     }
 }
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(debug_assertions)]
 thread_local! {
     /// The points [`Cloud::nearest`] has looked at on this thread: the tests assert on it, not on time, which varies with the
     /// load of the machine.
@@ -365,7 +365,7 @@ impl Cloud {
         for x in x0..=x1 {
             for y in y0..=y1 {
                 for &i in grid.cells.get(&(x, y)).into_iter().flatten() {
-                    #[cfg(any(test, feature = "testing"))]
+                    #[cfg(debug_assertions)]
                     LOOKED.with(|n| n.set(n.get() + 1));
                     let Some(&p) = self.points.get(i as usize) else { continue };
                     let d = (f64::from(p[0]) - at[0]).hypot(f64::from(p[1]) - at[1]);

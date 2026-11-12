@@ -62,6 +62,7 @@ pub mod rooms;
 pub mod runs;
 pub mod schedule;
 pub mod selection;
+pub mod selfcheck;
 pub mod sheet;
 pub mod site;
 pub mod sketch;

@@ -10,8 +10,8 @@ pub use bimcraft_model::{
     alignment, background_grid, bounds, cad, camera, cloud, crosscheck, curves, derived, dims, dims3d, draw, dxf, electrical, falls,
     family, favorites, fills, gltf, glue, graphics, groups, ids, ifc, import, inquiry, insert, json, lenient, library, lines, link,
     massing, masterplan, merge, model, motion, network, paint, pat, pdf, pen, phasing, quantities, raster, rebar, reinforce, render, rooms,
-    runs, schedule, selection, sheet, site, sketch, snap, stairs, standards, styles, symbol_set, tempdims, text, texture, titleblock,
-    triad, type_data, view3d, wallchain, walls, warnings, workplane,
+    runs, schedule, selection, selfcheck, sheet, site, sketch, snap, stairs, standards, styles, symbol_set, tempdims, text, texture,
+    titleblock, triad, type_data, view3d, wallchain, walls, warnings, workplane,
 };
 use bimcraft_model::{constraints, sync_settings, timber};
 // What only the tests here name by its old path.
@@ -93,6 +93,8 @@ mod run_join_tests;
 pub mod sample;
 #[cfg(test)]
 mod section_box_tests;
+#[cfg(test)]
+mod selfcheck_tests;
 #[cfg(test)]
 mod shape_tests;
 #[cfg(test)]

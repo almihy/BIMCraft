@@ -543,8 +543,7 @@ fn plan_elements<'a>(
     let candidates = found.iter().filter_map(|id| Some((*id, m.elements.get(*id)?)));
     let shown: Vec<(Id, &Element)> = plan_filter(m, key, level, r, components, candidates);
     // Its twin, which tests hold it to: every element of the model, each asked the same.
-    #[cfg(test)]
-    {
+    if crate::selfcheck::on(crate::selfcheck::Check::PlanElements) {
         let every = plan_filter(m, key, level, r, components, m.elements.iter().map(|(id, e)| (*id, e)));
         assert!(
             every.iter().map(|(id, _)| id).eq(shown.iter().map(|(id, _)| id)),
@@ -813,8 +812,9 @@ fn cut_edges(outlines: &[(Id, Vec<P2>)], reach: f64) -> Vec<(Id, Vec<Vec<P2>>)> 
     for (i, (id, o)) in outlines.iter().enumerate() {
         let found = grid.near(i);
         // Its twin, which tests hold it to: every outline asked.
-        #[cfg(test)]
-        assert_eq!(found, (0..outlines.len()).filter(|&j| near(i, j)).collect::<Vec<_>>(), "the outlines near outline {i}");
+        if crate::selfcheck::on(crate::selfcheck::Check::NearOutlines) {
+            assert_eq!(found, (0..outlines.len()).filter(|&j| near(i, j)).collect::<Vec<_>>(), "the outlines near outline {i}");
+        }
         let others: Vec<&[P2]> = found.into_iter().filter(|&j| near(i, j)).map(|j| outlines[j].1.as_slice()).collect();
         if others.is_empty() {
             let mut ring = o.clone();
@@ -917,8 +917,9 @@ fn turn_corners(runs: &mut [(Id, Vec<Vec<P2>>)], reach: f64) {
             }
             _ => (0..ends.len()).find(matches),
         };
-        #[cfg(test)]
-        assert_eq!(first, (0..ends.len()).find(|i| matches(i)), "the end a run carries on along");
+        if crate::selfcheck::on(crate::selfcheck::Check::RunEnd) {
+            assert_eq!(first, (0..ends.len()).find(|i| matches(i)), "the end a run carries on along");
+        }
         first.and_then(|i| ends.get(i)).map(|(p, q)| {
             let len = p.dist(*q);
             *p + (*q - *p) * (reach.min(len) / len)
@@ -967,11 +968,12 @@ pub fn plan_shows(m: &Model, plan: impl Key) -> Vec<P2> {
     let key = m.guid(plan);
     let shows = plan_shows_among(m, key, true);
     // Its twin, which tests hold it to, as [`draw_plan`]'s.
-    #[cfg(test)]
-    assert!(
-        shows == regions::uncounted(|| plan_shows_among(m, key, false)),
-        "a plan shows other things among the elements that may show in it"
-    );
+    if crate::selfcheck::on(crate::selfcheck::Check::PlanShows) {
+        assert!(
+            shows == regions::uncounted(|| plan_shows_among(m, key, false)),
+            "a plan shows other things among the elements that may show in it"
+        );
+    }
     shows
 }
 
@@ -1167,18 +1169,19 @@ fn section_walls<'a>(
     let near = lookup.walls_near([a.0.min(b.0), a.1.min(b.1), a.0.max(b.0), a.1.max(b.1)], grow);
     let walls: Vec<(Id, &crate::model::Wall)> = near.into_iter().filter_map(|id| Some((id, m.wall(id)?))).collect();
     // Its twin, which tests hold it to: no other wall's layer lines cross the line there.
-    #[cfg(test)]
-    for (&id, e) in &m.elements {
-        if let Element::Wall(_) = e
-            && !walls.iter().any(|(w, _)| *w == id)
-        {
-            for line in walls::layer_lines(m, id) {
-                for seg in line.windows(2) {
-                    let &[p, q] = seg else { continue };
-                    let crosses = geom::line_intersection(v.start, v.end, p, q)
-                        .filter(|x| geom::dist_to_segment(*x, p, q) < 1e-6)
-                        .is_some_and(|x| (first - 1e-6..=last + 1e-6).contains(&(x - v.start).dot(u)));
-                    assert!(!crosses, "wall {id}'s layers cross the section's line, and it isn't among the walls near it");
+    if crate::selfcheck::on(crate::selfcheck::Check::SectionWalls) {
+        for (&id, e) in &m.elements {
+            if let Element::Wall(_) = e
+                && !walls.iter().any(|(w, _)| *w == id)
+            {
+                for line in walls::layer_lines(m, id) {
+                    for seg in line.windows(2) {
+                        let &[p, q] = seg else { continue };
+                        let crosses = geom::line_intersection(v.start, v.end, p, q)
+                            .filter(|x| geom::dist_to_segment(*x, p, q) < 1e-6)
+                            .is_some_and(|x| (first - 1e-6..=last + 1e-6).contains(&(x - v.start).dot(u)));
+                        assert!(!crosses, "wall {id}'s layers cross the section's line, and it isn't among the walls near it");
+                    }
                 }
             }
         }
@@ -1512,8 +1515,9 @@ impl SectionWork {
             m.model_extent_of([P2(x0, y0), P2(x1, y1)].into_iter().filter(|_| x0 <= x1 && y0 <= y1))
         };
         // Its twin, which tests hold it to: of every solid's corners.
-        #[cfg(test)]
-        assert_eq!(extent, m.model_extent(), "the model's extent from the components' farthest points");
+        if crate::selfcheck::on(crate::selfcheck::Check::ModelExtent) {
+            assert_eq!(extent, m.model_extent(), "the model's extent from the components' farthest points");
+        }
         Some(*self.extent.get_or_init(|| extent))
     }
 }
@@ -1526,8 +1530,9 @@ fn heights(m: &Model, w: &SectionWork, look: &Look, cancelled: &(dyn Fn() -> boo
     };
     let found = if w.deferred.is_empty() { of(&mut w.heights(look)) } else { w.deferred_heights(m, look, cancelled)? };
     // Its twin, which tests hold it to: of every solid the look shows.
-    #[cfg(test)]
-    assert_eq!(found, of(&mut view3d::solids(m).iter().filter(|s| look.shows(s.owner())).map(|s| s.heights())), "a view's heights");
+    if crate::selfcheck::on(crate::selfcheck::Check::ViewHeights) {
+        assert_eq!(found, of(&mut view3d::solids(m).iter().filter(|s| look.shows(s.owner())).map(|s| s.heights())), "a view's heights");
+    }
     Some(found)
 }
 
@@ -1564,8 +1569,7 @@ pub fn span(m: &Model, w: &SectionWork, v: &Section, look: &Look, cancelled: &(d
     // Nothing shown, nothing found: no reach of its own.
     let solids = [least, most].into_iter().filter(|_| least <= most);
     // Its twin, which tests hold it to: every corner of every solid the look shows, as far along the line.
-    #[cfg(test)]
-    {
+    if crate::selfcheck::on(crate::selfcheck::Check::ViewReach) {
         let fold = |xs: &mut dyn Iterator<Item = f64>| xs.fold((f64::MAX, f64::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)));
         let every = view3d::solids(m);
         let all = fold(&mut every.iter().filter(|s| look.shows(s.owner())).flat_map(|s| s.corners()).map(|p| along(P2(p[0], p[1]))));
@@ -1805,10 +1809,13 @@ pub fn section_picture_in(m: &Model, w: &SectionWork, id: impl Key, view: View, 
     let look = Look::of(m, id);
     let picture = Scene::section(m, (&w.solids, &w.ranges, &w.placed, &w.boxes), &cam, &clip, &look).cut_in(&cam, &clip, tints, &look);
     // Its twin, which tests hold it to: the picture of the whole scene.
-    #[cfg(any(test, feature = "testing"))]
-    #[allow(clippy::panic)]
-    if let Err(e) = picture.same_as(&Scene::new(m).cut_in(&cam, &clip, tints, &look)) {
-        panic!("a section's picture from what can show in it isn't the whole scene's: {e}");
+    if crate::selfcheck::on(crate::selfcheck::Check::SectionPicture)
+        && let Err(e) = picture.same_as(&Scene::new(m).cut_in(&cam, &clip, tints, &look))
+    {
+        #[allow(clippy::panic)]
+        {
+            panic!("a section's picture from what can show in it isn't the whole scene's: {e}");
+        }
     }
     Some(picture)
 }
@@ -1967,12 +1974,13 @@ fn section_base_cancellable(
         })
     };
     // Its twin, which tests hold it to: what is left out cuts nothing.
-    #[cfg(test)]
-    for s in solids.iter().filter(|s| one_side(s.owner())) {
-        if cancelled() {
-            return None;
+    if crate::selfcheck::on(crate::selfcheck::Check::OneSide) {
+        for s in solids.iter().filter(|s| one_side(s.owner())) {
+            if cancelled() {
+                return None;
+            }
+            assert!(s.cuts(v.start + u * first, u, last - first).is_empty(), "{} is cut by a line it lies all on one side of", s.owner());
         }
-        assert!(s.cuts(v.start + u * first, u, last - first).is_empty(), "{} is cut by a line it lies all on one side of", s.owner());
     }
     for s in solids.iter().filter(|s| !matches!(m.elements.get(s.owner()), Some(Element::Mass(_))) && !one_side(s.owner())) {
         if cancelled() {
@@ -1992,7 +2000,9 @@ fn section_base_cancellable(
             continue;
         }
         let Some(e) = m.elements.get(*id).filter(|e| e.run().is_some()) else { continue };
-        if cfg!(not(test)) && one_side(*id) {
+        // Its twin, which tests hold it to: what is left out cuts nothing, so it is made and cut all the same.
+        let twin = crate::selfcheck::on(crate::selfcheck::Check::OneSideLazy);
+        if !twin && one_side(*id) {
             continue;
         }
         if cancelled() {
@@ -2000,9 +2010,9 @@ fn section_base_cancellable(
         }
         for s in view3d::lazy_solids(m, *id, e, &mut lazy) {
             let rings = s.cuts(v.start + u * first, u, last - first);
-            // Its twin, which tests hold it to: what is left out cuts nothing.
-            #[cfg(test)]
-            assert!(!one_side(*id) || rings.is_empty(), "{id} is cut by a line it lies all on one side of");
+            if twin {
+                assert!(!one_side(*id) || rings.is_empty(), "{id} is cut by a line it lies all on one side of");
+            }
             for ring in rings {
                 cuts.entry(*id).or_default().push(ring.into_iter().map(|q| P2(q.0 + first, q.1)).collect());
             }
@@ -2580,8 +2590,7 @@ fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, ti
     let key = m.guid(plan);
     let d = draw_plan_among(m, key, view, up, k, n, titled, true);
     // Its twin, which tests hold it to: every element looked at, the walls joined through an index of every wall.
-    #[cfg(test)]
-    {
+    if crate::selfcheck::on(crate::selfcheck::Check::DrawPlan) {
         let every = regions::uncounted(|| draw_plan_among(m, key, view, up, k, n, titled, false));
         let same = d.prims.len() == every.prims.len()
             && d.owners == every.owners

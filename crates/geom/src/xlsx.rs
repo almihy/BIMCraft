@@ -171,7 +171,7 @@ const STYLES: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 
 /// The parts of a zip by name, inflated; and checked against the CRC each header gives. For tests, here and in the crates
 /// above (the `testing` feature).
-#[cfg(any(test, feature = "testing"))]
+#[cfg(debug_assertions)]
 #[doc(hidden)]
 #[allow(clippy::unwrap_used)]
 pub fn unzip(b: &[u8]) -> std::collections::BTreeMap<String, String> {

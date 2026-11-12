@@ -33,7 +33,3 @@ js-sys = "0.3"
 
 [dev-dependencies]
 tempfile = { workspace = true }
-
-[features]
-# Helpers the tests of the crates above use.
-testing = []

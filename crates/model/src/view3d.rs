@@ -253,7 +253,7 @@ impl Solid {
         }
     }
 
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(debug_assertions)]
     pub fn color(&self) -> Rgb {
         match self {
             Solid::Box { color, .. } | Solid::Slab { color, .. } | Solid::Prism { color, .. } | Solid::Mesh { color, .. } => *color,
@@ -1068,7 +1068,7 @@ fn over(layer: u32, outer: u32) -> u32 {
 }
 
 /// The model's solids split into their material layers, used by the layer oracle tests.
-#[cfg(any(test, feature = "testing"))]
+#[cfg(debug_assertions)]
 pub fn shaded(m: &Model) -> Vec<Solid> {
     solids(m).into_iter().flat_map(|s| layered(m, s)).collect()
 }
@@ -2261,7 +2261,7 @@ impl Scene {
         }
     }
 
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(debug_assertions)]
     pub fn raster_reference(
         &self,
         (cam, clip, cut): (&Camera, Option<&Clip>, Option<&Boxed>),
@@ -3677,7 +3677,6 @@ impl Image {
     }
 
     /// Whether it is `other` to the pixel: its colours, and what each pixel picks, its face, and whether it's covered.
-    #[cfg(any(test, feature = "testing"))]
     pub fn same_as(&self, other: &Image) -> Result<(), String> {
         if (self.width, self.height) != (other.width, other.height) {
             return Err(format!("{}x{} against {}x{}", self.width, self.height, other.width, other.height));

@@ -20,4 +20,5 @@ on another BIMCraft crate but `bimcraft-i18n`.
   `ifc_classes.rs`: IFC4's element classes, which a generic family from IFC goes back out as
   ([families](../../docs/areas/families.md)).
 
-Helpers that only tests use, here and in the crates above, sit behind the `testing` feature (`xlsx::unzip`).
+Helpers that only tests use, here and in the crates above, are `#[cfg(debug_assertions)]` (`xlsx::unzip`): a debug build is
+the same whichever crate's tests or build asks for it, and a release build leaves them out.

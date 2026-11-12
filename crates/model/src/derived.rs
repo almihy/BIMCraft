@@ -557,7 +557,7 @@ impl Lookup {
     }
 
     /// Whether it shares chunks with `other`: whether one was brought up to date from the other.
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(debug_assertions)]
     pub fn shares(&self, other: &Lookup) -> bool {
         self.refs.iter().any(|(k, c)| other.refs.get(k).is_some_and(|d| Arc::ptr_eq(c, d)))
     }

@@ -4289,12 +4289,13 @@ impl Model {
         let Some(g) = self.elements.guid(k) else { return Vec::new() };
         // What points at it, as the lookup keeps it, in the order of their ids.
         let found: Vec<Id> = self.lookup().referrers(&g).collect();
-        #[cfg(test)]
-        assert_eq!(
-            found,
-            self.elements.iter().filter(|(_, e)| e.refs().contains(&g)).map(|(id, _)| *id).collect::<Vec<_>>(),
-            "what points at an element, from the lookup, isn't every element that does"
-        );
+        if crate::selfcheck::on(crate::selfcheck::Check::Referring) {
+            assert_eq!(
+                found,
+                self.elements.iter().filter(|(_, e)| e.refs().contains(&g)).map(|(id, _)| *id).collect::<Vec<_>>(),
+                "what points at an element, from the lookup, isn't every element that does"
+            );
+        }
         found
     }
 
@@ -5572,8 +5573,7 @@ impl Model {
             }
         }
         // Its twin, which tests hold it to: every shaft asked of the geometry.
-        #[cfg(test)]
-        {
+        if crate::selfcheck::on(crate::selfcheck::Check::Shafts) {
             let (mut all, mut through) = (vec![face.iter().map(|p| P2(p[0], p[1])).collect::<Vec<P2>>()], Vec::new());
             for id in self.rare("shaft") {
                 let Some(Element::Shaft(sh)) = self.elements.get(id) else { continue };
@@ -5724,8 +5724,7 @@ impl Model {
     pub fn on_sheet(&self, sheet: impl Key) -> Vec<Id> {
         let g = self.guid(sheet);
         let ids: Vec<Id> = self.lookup().referrers(&g).collect();
-        #[cfg(test)]
-        {
+        if crate::selfcheck::on(crate::selfcheck::Check::OnSheet) {
             let every: Vec<Id> = self.elements.iter().filter(|(_, e)| e.refs().contains(&g)).map(|(id, _)| *id).collect();
             assert_eq!(ids, every, "what is on sheet {g}");
         }
@@ -7141,7 +7140,7 @@ impl Model {
 
     /// [`Model::check`], where [`Model::check_changed`] can't tell what an edit reaches; tests count how often.
     fn check_all(&self) -> Result<(), String> {
-        #[cfg(any(test, feature = "testing"))]
+        #[cfg(debug_assertions)]
         FALLBACKS.with(|n| n.set(n.get() + 1));
         self.check()
     }
@@ -8299,7 +8298,7 @@ impl Model {
     }
 }
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(debug_assertions)]
 thread_local! {
     /// How many times this thread's [`Model::check_changed`] checked the whole model.
     pub static FALLBACKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };

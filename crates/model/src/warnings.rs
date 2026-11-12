@@ -115,7 +115,7 @@ enum Reach {
 
 impl Reach {
     /// The same reach, the loop's corners the same to the tolerance, whichever corner it starts at (found among other lines it may).
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(debug_assertions)]
     fn same_as(&self, o: &Reach) -> bool {
         fn ring(a: &[P2], b: &[P2]) -> bool {
             a.len() == b.len() && (0..b.len()).any(|k| a.iter().enumerate().all(|(i, p)| p.dist(b[(i + k) % b.len()]) <= 10.0 * TOL))
@@ -148,7 +148,7 @@ pub struct Review {
 // How many times, in this thread, the whole model was reviewed, how many times a review was brought up to date, and how many
 // rooms were worked out: what tests hold the engine to (a remote change, an undo or a script is not a reason to review everything
 // again, nor a wall moved in one room a reason to look at every room).
-#[cfg(any(test, feature = "testing"))]
+#[cfg(debug_assertions)]
 thread_local! {
     pub static REVIEWS: std::cell::Cell<(usize, usize, usize)> = const { std::cell::Cell::new((0, 0, 0)) };
 }
@@ -156,7 +156,7 @@ thread_local! {
 impl Review {
     /// Tests hold what is kept to what the whole model makes: the same warnings, and, where the rooms are all kept, the same
     /// reach for each.
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(debug_assertions)]
     pub fn assert_whole(&self, m: &Model) {
         // (What the check itself works out is not counted.)
         let counted = REVIEWS.with(std::cell::Cell::get);
@@ -185,19 +185,19 @@ impl Model {
 
     /// [`Model::review`], with what brings it up to date after a change.
     pub fn reviewed(&self) -> Review {
-        #[cfg(any(test, feature = "testing"))]
+        #[cfg(debug_assertions)]
         REVIEWS.with(|c| c.set((c.get().0 + 1, c.get().1, c.get().2)));
         self.whole()
     }
 
     /// [`Model::review`], not counted: what the tests hold the answers of [`Model::review_since`] to.
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(debug_assertions)]
     pub fn review_whole(&self) -> Vec<Warning> {
         self.whole().warnings.to_vec()
     }
 
     /// [`Model::review`] with what brings it up to date, not counted: the tests' own look at a model.
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(debug_assertions)]
     pub fn whole_review(&self) -> Review {
         self.whole()
     }
@@ -223,7 +223,7 @@ impl Model {
     /// [`Model::review_since`], with what the rooms reach kept too, so that only the rooms a change reached are worked out
     /// again: a wall moved in one room is no work for the others, nor for those of another level it does not reach.
     pub fn reviewed_since(&self, before: &Model, prev: &Review) -> Review {
-        #[cfg(any(test, feature = "testing"))]
+        #[cfg(debug_assertions)]
         REVIEWS.with(|c| c.set((c.get().0, c.get().1 + 1, c.get().2)));
         let Changed::Ids(changed) = self.changed_since(before) else { return self.reviewed() };
         if changed.is_empty() {
@@ -845,7 +845,7 @@ fn room_pass(m: &Model, only: Option<&BTreeMap<Id, Option<[f64; 4]>>>, reach: &m
                 Some(w) => *w,
             },
         };
-        #[cfg(any(test, feature = "testing"))]
+        #[cfg(debug_assertions)]
         REVIEWS.with(|c| c.set((c.get().0, c.get().1, c.get().2 + 1)));
         // Among the lines near where the room was and where the change put them, when that is known; else among the level's.
         let near = window.and_then(|w| {

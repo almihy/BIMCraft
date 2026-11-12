@@ -11,8 +11,12 @@ goes (a command, a rule in `Model::check`, ids and GUIDs) is in [crates/core/CLA
 - **Tests.** A module's tests that need only the model stay with it. Those that drive the Session live in the core's
   `src/model_tests/`, one file per module (`render.rs`, `view3d_update.rs`), and reach the module's items through its
   public paths; an item only they need is `pub` and `#[doc(hidden)]` in spirit, not part of the engine's command API.
-- **The `testing` feature** (the core's tests turn it on) keeps what tests count and check in the model's code when the
-  core's tests run: the counters (`warnings::REVIEWS`, `cloud::LOOKED`, `model::FALLBACKS`, `render::regions::SPENT`) and
-  the twins a cheap path is held to (`Image::same_as`, `Review::assert_whole`). Use `#[cfg(any(test, feature = "testing"))]`
-  for anything a core test reads.
+- **Self-checks and counters are debug builds'.** A fast path held to its twin (every element asked instead of the lookup's,
+  the whole scene drawn) is `if selfcheck::on(Check::X) { ... }` (`selfcheck.rs`): compiled into every debug build and run
+  by every crate's tests, a constant `false` in release builds (the browser's among them); the desktop and the command
+  line call `selfcheck::off()` first, so their debug builds run at the fast paths' speed. A new twin adds a `Check`, and the
+  core's `selfcheck_tests` fails until a model built by commands reaches it. What tests count and the helpers only they
+  read (`warnings::REVIEWS`, `cloud::LOOKED`, `model::FALLBACKS`, `render::regions::SPENT`, `Review::assert_whole`) are
+  `#[cfg(debug_assertions)]`, never `cfg(test)` (which the crates above don't see) or a feature (which would build this
+  crate differently for each command).
 - `data/` holds the starter electrical settings and the AREI symbols; `testdata/` a texture's JPEG.

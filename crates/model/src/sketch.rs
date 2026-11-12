@@ -301,14 +301,14 @@ impl Profile {
     }
 }
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(debug_assertions)]
 thread_local! {
     /// What the sketches solved on this thread have taken, in steps: the pieces they were cut into, the pairs of pieces looked at,
     /// the points of loops looked into. The hostile tests assert on it, as time varies with the load of the machine.
     pub static SPENT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(debug_assertions)]
 fn spent(n: usize) {
     SPENT.with(|s| s.set(s.get().saturating_add(n)));
 }
@@ -398,7 +398,7 @@ pub fn solve(lines: &[SketchLine]) -> Result<Profile, Vec<Problem>> {
         }
         found.len() <= MAX_PROBLEMS
     });
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(debug_assertions)]
     spent(pieces.len() + work);
     let Ok(walked) = walked else { return Err(vec![Problem::TooMany { count: work, what: "steps" }]) };
     problems.extend(found.into_values().map(|(_, _, problem)| problem));
@@ -496,12 +496,12 @@ pub fn solve(lines: &[SketchLine]) -> Result<Profile, Vec<Problem>> {
             steps <= MAX_NEST
         });
         if steps > MAX_NEST {
-            #[cfg(any(test, feature = "testing"))]
+            #[cfg(debug_assertions)]
             spent(steps);
             return Err(vec![Problem::TooMany { count: steps, what: "loops" }]);
         }
     }
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(debug_assertions)]
     spent(steps);
     let mut regions: Vec<Region> = Vec::new();
     let mut region_of = vec![usize::MAX; loops.len()];
@@ -865,7 +865,7 @@ impl Welder {
         for x in cx - 1..=cx + 1 {
             for y in cy - 1..=cy + 1 {
                 for &n in self.cells.get(&(x, y)).into_iter().flatten() {
-                    #[cfg(any(test, feature = "testing"))]
+                    #[cfg(debug_assertions)]
                     spent(1);
                     if found.is_none_or(|f| n < f) && self.points[n].dist(p) <= TOL {
                         found = Some(n);

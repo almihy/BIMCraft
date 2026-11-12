@@ -270,7 +270,7 @@ pub fn strokes(p: &FillPattern, rings: &[Vec<P2>], k: f64, window: (P2, P2), max
                             s += len;
                         }
                         r += 1.0;
-                        #[cfg(any(test, feature = "testing"))]
+                        #[cfg(debug_assertions)]
                         done(dashes.len());
                         work = work.saturating_add(dashes.len());
                         if out.len() > max || work > MAX_WORK {
@@ -291,14 +291,14 @@ pub fn strokes(p: &FillPattern, rings: &[Vec<P2>], k: f64, window: (P2, P2), max
 /// The most work (an edge tried against a line, a dash stepped over) one pattern may ask of a drawing, however dense it is.
 pub const MAX_WORK: usize = 5_000_000;
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(debug_assertions)]
 thread_local! {
     /// What [`strokes`] has done on this thread: the edges tried against a line, the dashes stepped over. The tests assert on it,
     /// not on time, which varies with the load of the machine.
     pub static DONE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-#[cfg(any(test, feature = "testing"))]
+#[cfg(debug_assertions)]
 fn done(n: usize) {
     DONE.with(|d| d.set(d.get().saturating_add(n)));
 }
@@ -322,7 +322,7 @@ fn reach(base: P2, u: P2, lo: P2, hi: P2) -> Option<(f64, f64)> {
 /// Where the line through `base` along unit `u` (`n` square to it) is inside `rings`, as runs along it from `base`: it
 /// crosses a ring's edge where the edge's ends lie on either side, and between each two crossings it's in or out by turns.
 fn spans(rings: &[Vec<P2>], base: P2, u: P2, n: P2) -> Vec<(f64, f64)> {
-    #[cfg(any(test, feature = "testing"))]
+    #[cfg(debug_assertions)]
     done(rings.iter().map(Vec::len).sum());
     let mut ts: Vec<f64> = Vec::new();
     for (a, b) in rings.iter().flat_map(|r| geom::ring_edges(r)) {

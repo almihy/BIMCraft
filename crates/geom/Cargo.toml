@@ -9,10 +9,6 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
-[features]
-# Helpers the tests of the crates above use.
-testing = []
-
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
