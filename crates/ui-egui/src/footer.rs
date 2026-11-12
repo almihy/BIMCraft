@@ -42,7 +42,7 @@ pub(crate) struct Temp {
 }
 
 impl Temp {
-    fn hides(&self) -> bool {
+    pub(crate) fn hides(&self) -> bool {
         !self.elements.is_empty() || !self.categories.is_empty()
     }
 }
@@ -93,6 +93,32 @@ const REVEALED: &str = "#FF00FF";
 /// on white paper and on the dark canvas, and apart from the model's black lines.
 pub(crate) const HIGH_CONTRAST: [u8; 3] = [220, 20, 60];
 
+/// `m` with view `id` holding as its own the categories and filters its view template sets, and following a copy of the
+/// template for the rest. What a view hides or reveals for now is drawing alone, which Revit does in a view whatever
+/// template it follows; the project's view, and its template, are left as they are.
+fn own_categories_and_filters(m: &mut Model, id: Id) {
+    let Some(name) = graphics::graphics_of(m, id).and_then(|g| g.template.clone()) else { return };
+    let Some(mut template) = m.view_templates.get(&name).cloned() else { return };
+    let (categories, filters) = (template.controls.remove(&Group::Categories), template.controls.remove(&Group::Filters));
+    if !categories && !filters {
+        return;
+    }
+    let mut copy = format!("{name} ");
+    while m.view_templates.contains_key(&copy) {
+        copy.push(' ');
+    }
+    let source = m.plan_source(id);
+    let Some(g) = m.elements.get_mut(source).and_then(graphics::graphics_mut) else { return };
+    if categories {
+        g.categories = template.graphics.categories.clone();
+    }
+    if filters {
+        g.filters = template.graphics.filters.clone();
+    }
+    g.template = Some(copy.clone());
+    m.view_templates.insert(copy, template);
+}
+
 /// `base` with the graphics of the view `sheet` changed as `temp` says. `three_d` is the 3D view on screen (a camera view
 /// by id, or none for the default `{3D}`).
 fn shadowed(base: &Arc<Model>, sheet: Sheet, three_d: Option<Id>, temp: &Temp) -> Result<Arc<Model>, String> {
@@ -106,38 +132,69 @@ fn shadowed(base: &Arc<Model>, sheet: Sheet, three_d: Option<Id>, temp: &Temp) -
         Sheet::View3D => (three_d.map_or_else(|| json!("{3D}"), |id| json!(id)), three_d.or_else(|| base.default_3d())),
         Sheet::Paper(_) | Sheet::Schedule(_) | Sheet::Table(_) => return Ok(Arc::clone(base)),
     };
-    let drawn = |id: &Id| base.elements.get(id).is_some_and(|e| graphics::drawn(e.category()));
+    let mut model = (**base).clone();
+    if let Some(id) = id {
+        own_categories_and_filters(&mut model, id);
+    }
+    let m = &model;
+    let drawn = |id: &Id| m.elements.get(id).is_some_and(|e| graphics::drawn(e.category()));
     let mut p = json!({
         "view": view,
         "hide_elements": temp.elements.iter().copied().filter(drawn).collect::<Vec<_>>(),
     });
-    // An empty list is still asking for categories, which a view template that controls them refuses.
     if !temp.categories.is_empty() {
         p["hide"] = json!(temp.categories);
     }
     if temp.reveal
-        && let Some(own) = id.and_then(|id| graphics::graphics_of(base, id))
+        && let Some(g) = id.and_then(|id| graphics::graphics_of(m, id))
     {
-        let g = own.resolved(base);
-        let cats: Vec<&str> = g.categories.iter().filter(|(_, o)| o.hidden).map(|(c, _)| c.as_str()).collect();
-        let els: Vec<Id> =
-            g.elements.iter().filter(|(_, o)| o.hidden).filter_map(|(g, _)| base.elements.id(g)).filter(|i| drawn(i)).collect();
-        // Each of them, and each element of a category hidden, in magenta.
+        // What the view hides for now stays hidden: the mode reveals what it hides for good.
+        let for_now = |i: &Id, e: &Element| temp.elements.contains(i) || temp.categories.contains(graphics::category_of(m, e));
+        let cats: Vec<&str> =
+            g.categories.iter().filter(|(c, o)| o.hidden && !temp.categories.contains(*c)).map(|(c, _)| c.as_str()).collect();
+        let els: Vec<Id> = g
+            .elements
+            .iter()
+            .filter(|(_, o)| o.hidden)
+            .filter_map(|(g, _)| m.elements.id(g))
+            .filter(|i| drawn(i) && !temp.elements.contains(i))
+            .collect();
+        // Each of them, each element of a category hidden, and each a filter hides, in magenta.
         let paint = json!({"projection": {"color": REVEALED}, "cut": {"color": REVEALED}});
         // Hidden with its own category, or with `component`, which an older project may say of all of them.
         let hidden_whole = |e: &Element| {
-            let c = graphics::category_of(base, e);
+            let c = graphics::category_of(m, e);
             cats.contains(&c) || (graphics::COMPONENTS.contains(&c) && cats.contains(&graphics::COMPONENT))
         };
-        let by_category = base.elements.iter().filter(|(_, e)| hidden_whole(e)).map(|(i, _)| *i);
+        let by_category = m.elements.iter().filter(|(_, e)| hidden_whole(e)).map(|(i, _)| *i);
+        let filtering: Vec<&graphics::Applied> = g.filters.iter().filter(|a| a.over.hidden).collect();
+        let by_filter: BTreeSet<Id> = filtering.iter().filter_map(|a| m.view_filters.get(&a.filter)).flat_map(|f| f.matching(m)).collect();
         if !cats.is_empty() {
             p["show"] = json!(cats);
         }
         p["show_elements"] = json!(els);
-        let revealed: BTreeSet<Id> = els.iter().copied().chain(by_category).collect();
+        if !filtering.is_empty() {
+            let shown: Vec<graphics::Applied> = g
+                .filters
+                .iter()
+                .map(|a| {
+                    let mut a = a.clone();
+                    a.over.hidden = false;
+                    a
+                })
+                .collect();
+            p["filters"] = serde_json::to_value(shown).map_err(|e| e.to_string())?;
+        }
+        let revealed: BTreeSet<Id> = els
+            .iter()
+            .copied()
+            .chain(by_category)
+            .chain(by_filter)
+            .filter(|i| drawn(i) && m.elements.get(i).is_some_and(|e| !for_now(i, e)))
+            .collect();
         // What the view shows anyway is drawn halftone, as Revit's mode does, so what it hides stands out.
         let halftone = json!({"halftone": true});
-        let shown = base.elements.iter().map(|(i, _)| *i).filter(|i| drawn(i) && !revealed.contains(i));
+        let shown = m.elements.iter().map(|(i, _)| *i).filter(|i| drawn(i) && !revealed.contains(i));
         p["elements"] = revealed
             .iter()
             .map(|i| (i.to_string(), paint.clone()))
@@ -146,7 +203,7 @@ fn shadowed(base: &Arc<Model>, sheet: Sheet, three_d: Option<Id>, temp: &Temp) -
             .into();
     }
     let mut s = Session::new();
-    s.reset((**base).clone(), None);
+    s.reset(model, None);
     if temp.hides() || temp.reveal {
         s.execute("graphics", &p)?;
     }
@@ -261,7 +318,7 @@ impl BimApp {
     }
 
     /// Reveal Hidden Elements (RH), the view control bar's bulb, and Toggle Reveal Hidden Elements Mode: what the view hides for
-    /// good is drawn in magenta, the rest halftone, and the ribbon shows the Reveal Hidden panel; again, and it is hidden again.
+    /// good is drawn in magenta, the rest halftone, and the ribbon shows the Reveal Hidden Elements panel; again, and it is hidden again.
     pub(crate) fn temp_reveal(&mut self) {
         if self.graphic_view().is_some() {
             let t = self.temporary.entry(self.sheet).or_default();

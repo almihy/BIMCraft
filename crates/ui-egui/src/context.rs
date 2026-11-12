@@ -226,14 +226,32 @@ impl BimApp {
         let mut groups = vec![first];
         if some {
             let m = &self.session.model;
-            // Revit offers Disallow Join or Allow Join on a selected wall's end, where the join is.
-            let join = self.menu_end.filter(|id| self.selection.contains(id)).and_then(|id| match m.elements.get(id) {
+            // Revit offers Disallow Join or Allow Join on a selected wall's end, where the join is: in a plan, on its end grip;
+            // in a section or the 3D view, which draw no end grips yet, on the walls and runs selected. A schedule has none.
+            let join_of = |id: &bimcraft_core::model::Id| match m.elements.get(*id) {
                 Some(bimcraft_core::model::Element::Wall(w)) => Some(w.join),
                 Some(e) => e.run().map(|r| r.join),
                 None => None,
-            });
-            if let Some(join) = join {
-                groups.push(vec![Item::new(if join { Action::DisallowJoin } else { Action::AllowJoin }, true)]);
+            };
+            let joins: Vec<bool> = match self.sheet {
+                Sheet::Plan(_) | Sheet::Ceiling(_) => self
+                    .menu_end
+                    .filter(|(sheet, id)| *sheet == self.sheet && self.selection.contains(id))
+                    .and_then(|(_, id)| join_of(&id))
+                    .into_iter()
+                    .collect(),
+                Sheet::Section(_) | Sheet::View3D => self.selection.iter().filter_map(join_of).collect(),
+                Sheet::Paper(_) | Sheet::Schedule(_) | Sheet::Table(_) => Vec::new(),
+            };
+            let mut join = Vec::new();
+            if joins.iter().any(|j| *j) {
+                join.push(Item::new(Action::DisallowJoin, true));
+            }
+            if joins.iter().any(|j| !*j) {
+                join.push(Item::new(Action::AllowJoin, true));
+            }
+            if !join.is_empty() {
+                groups.push(join);
             }
             // A camera picked in a plan: open its 3D view, or delete it.
             let camera =
@@ -242,16 +260,19 @@ impl BimApp {
                 groups.push(vec![Item::new(Action::OpenView, true)]);
             } else {
                 let mut view = Vec::new();
-                // What the view on screen hides and paints; in Reveal Hidden Elements mode, what it hides comes back.
+                // What the view on screen hides and paints; in Reveal Hidden Elements mode, what it hides comes back, and
+                // what of the selection it shows can still be hidden.
                 if self.graphic_view().is_some() {
                     let (elements, categories) = if self.revealing() { self.hidden_selection() } else { Default::default() };
-                    if elements.is_empty() && categories.is_empty() {
+                    let hidden = !elements.is_empty() || !categories.is_empty();
+                    if !hidden || self.selection_partly_shown() {
                         view.extend([
                             Item::new(Action::HideElements, true),
                             Item::new(Action::HideCategory, true),
                             Item::new(Action::HideByFilter, true),
                         ]);
-                    } else {
+                    }
+                    if hidden {
                         view.extend([
                             Item::new(Action::UnhideElements, !elements.is_empty()),
                             Item::new(Action::UnhideCategory, !categories.is_empty()),
@@ -371,6 +392,8 @@ impl BimApp {
     /// Keep the selection a change replaces, for Select Previous. Once a frame.
     pub(crate) fn note_selection(&mut self) {
         if self.selection != self.selection_seen {
+            // The end a right click landed on is the old selection's.
+            self.menu_end = None;
             let seen = std::mem::replace(&mut self.selection_seen, self.selection.clone());
             if !seen.is_empty() {
                 self.selection_before = seen;
@@ -395,8 +418,8 @@ impl BimApp {
         }
     }
 
-    /// The views that show the active view's marker, as Find Referring Views lists them: the plans a section's or an
-    /// elevation's line shows on, the plan a camera stands on.
+    /// The views that show the active view's marker, as Find Referring Views lists them: the floor and ceiling plans a
+    /// section's or an elevation's line shows on, the plan a camera stands on.
     pub(crate) fn referring_views(&self) -> Vec<(Sheet, String)> {
         use bimcraft_core::model::Element;
         let m = &self.session.model;
@@ -423,7 +446,11 @@ impl BimApp {
             }
             _ => false,
         };
-        plans.into_iter().filter(|p| shows(*p)).map(|p| (Sheet::Plan(p), self.view_title(Sheet::Plan(p)))).collect()
+        let plans: Vec<bimcraft_core::model::Id> = plans.into_iter().filter(|p| shows(*p)).collect();
+        // A section's or an elevation's line is drawn in ceiling plans too, which have their floor plans' graphics.
+        let ceilings = matches!(m.elements.get(id), Some(Element::Section(_) | Element::Elevation(_)));
+        let sheets = plans.iter().map(|p| Sheet::Plan(*p)).chain(plans.iter().filter(|_| ceilings).map(|p| Sheet::Ceiling(*p)));
+        sheets.map(|s| (s, self.view_title(s))).collect()
     }
 
     /// Go To View, while it's open: the referring views, one picked, opened with Open View.
@@ -497,7 +524,7 @@ impl BimApp {
     /// offers its join.
     pub(crate) fn context_menu(&mut self, response: &Response) {
         if response.secondary_clicked() {
-            self.menu_end = response.interact_pointer_pos().and_then(|at| self.end_under(at));
+            self.menu_end = response.interact_pointer_pos().and_then(|at| self.end_under(at)).map(|id| (self.sheet, id));
         }
         let groups = self.context_items();
         let mut chosen = None;

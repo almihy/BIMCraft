@@ -298,20 +298,29 @@ impl BimApp {
     }
 
     /// What of the selection the active view hides: the elements hidden one by one, and the categories hidden whole. Only
-    /// Reveal Hidden Elements lets anything hidden be picked, so this is what Unhide Element and Unhide Category offer.
+    /// Reveal Hidden Elements lets anything hidden be picked, so this is what Unhide Element and Unhide Category offer. A
+    /// category a view template hides isn't the view's to bring back, as Revit greys out Unhide Category for it.
     pub(crate) fn hidden_selection(&self) -> (Vec<Id>, Vec<&'static str>) {
         let (m, g) = (&self.session.model, self.graphics_shown());
+        let own_categories = self.controlled_by(Group::Categories).is_none();
         let (mut elements, mut categories) = (Vec::new(), BTreeSet::new());
         for (id, e) in self.selection.iter().filter_map(|id| Some((*id, m.elements.get(id)?))) {
             if g.elements.get(&m.guid(id)).is_some_and(|o| o.hidden) {
                 elements.push(id);
             }
             // A luminaire is hidden with Lighting, or with Components, which an older project may say of all of them.
-            if let Some(by) = g.hidden_by(bimcraft_core::graphics::category_of(m, e)) {
+            if own_categories && let Some(by) = g.hidden_by(bimcraft_core::graphics::category_of(m, e)) {
                 categories.insert(by);
             }
         }
         (elements, categories.into_iter().collect())
+    }
+
+    /// Whether the active view shows some of the selection when it isn't revealing what it hides: what Hide in View is for.
+    pub(crate) fn selection_partly_shown(&self) -> bool {
+        let m = &self.session.model;
+        let look = bimcraft_core::graphics::Look::with(m, &self.graphics_now());
+        self.selection.iter().any(|id| look.shows(*id))
     }
 
     /// Unhide Element (EU) and Unhide Category (VU): what the selection hides in the view comes back. It stays selected.
