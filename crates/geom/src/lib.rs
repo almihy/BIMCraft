@@ -2,8 +2,10 @@
 //! skeleton, solids cut from solids, STEP and XLSX writing, units and a project's language, the files a session reads and
 //! writes, drawing primitives, our own lettering and IFC4's class list. Nothing here knows about the model.
 
+#[doc(hidden)]
 pub mod csg;
 pub mod files;
+#[doc(hidden)]
 pub mod font;
 pub mod geom;
 pub mod ifc_classes;

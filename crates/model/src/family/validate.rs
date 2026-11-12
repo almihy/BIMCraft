@@ -11,7 +11,7 @@ use super::{DEFAULT_WALL, Expr, Family, HEIGHT, MAX_FORMULA, Val, WALL, WIDTH, n
 /// formulas read over its own parameters, [`Family::check`]'s own findings (a family that builds,
 /// its materials in the library, its types setting parameters it has), and what its forms' boxes
 /// say about a door's or a window's opening and its wall.
-pub fn problems(f: &Family, has_material: &dyn Fn(&str) -> bool) -> (Vec<String>, Vec<String>) {
+pub(crate) fn problems(f: &Family, has_material: &dyn Fn(&str) -> bool) -> (Vec<String>, Vec<String>) {
     let mut errors = Vec::new();
     formulas(f, &mut errors);
     if let Err(e) = f.check(has_material) {

@@ -49,6 +49,7 @@ fn standing(m: &Model, r: &Room) -> (usize, usize) {
 
 /// Whether rooms `a` and `b` stand in a phase together ([`standing`]): only then may one have the other's space, as Revit's
 /// redundant rooms are of one phase.
+#[doc(hidden)]
 pub fn share_a_phase(m: &Model, a: &Room, b: &Room) -> bool {
     let ((a0, a1), (b0, b1)) = (standing(m, a), standing(m, b));
     a0 < b1 && b0 < a1
@@ -304,7 +305,7 @@ impl<'a> Rooms<'a> {
     }
 
     /// The rooms on `level`, in order of id: what points at it, from the lookup when it is made, else among every element.
-    pub fn placed(&self, level: Guid) -> Placed<'a> {
+    fn placed(&self, level: Guid) -> Placed<'a> {
         if let Some(rooms) = self.placed.borrow().get(&level) {
             return Rc::clone(rooms);
         }

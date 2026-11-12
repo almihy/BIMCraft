@@ -21,6 +21,7 @@ const STEP: f64 = 10.0;
 const MAX_NEAR: usize = 64;
 /// The most walls' outlines, floors' and ceilings' edges a sketch is snapped to: the nearest. A wall's outline joins it to
 /// the walls it meets, which costs the walls there are.
+#[doc(hidden)]
 pub const MAX_OUTLINES: usize = 24;
 /// How far past its centre line a wall's face may lie and still be taken for the cursor's, mm: a
 /// thicker wall isn't snapped to from farther than the reach plus this.
@@ -538,7 +539,7 @@ fn cloud_point(m: &Model, level: Id, p: P2, reach: f64, look: &Look) -> Option<P
 
 /// A round curve's centre and its quadrants: a circle's or an ellipse's four points along its axes (those a partial one
 /// passes), an arc's centre and the quadrants it passes.
-pub fn rounds(c: &Curve) -> Vec<(P2, Kind)> {
+pub(crate) fn rounds(c: &Curve) -> Vec<(P2, Kind)> {
     let on = |q: P2| c.nearest(q).1 < 1e-6;
     match c {
         Curve::Circle { centre, radius } => {
@@ -632,7 +633,7 @@ fn ray_hit(l: P2, u: P2, a: P2, b: P2) -> Option<P2> {
 
 /// The angles, degrees, a direction from the last of `from` snaps to, every `inc`: from east, and
 /// from the line before the last point.
-pub fn rays(from: &[P2], inc: f64) -> Vec<f64> {
+fn rays(from: &[P2], inc: f64) -> Vec<f64> {
     // As many as it takes to come round: the last short of 360° where the step doesn't divide it.
     let n = (360.0 / inc - 1e-9).ceil().min(360.0) as usize;
     let mut out: Vec<f64> = (0..n).map(|k| k as f64 * inc).collect();
@@ -701,6 +702,7 @@ pub struct Sketch<'a> {
 thread_local! {
     /// The outlines [`in_sketch`] has built on this thread: the tests assert on it, not on time, which varies with the load of
     /// the machine.
+    #[doc(hidden)]
     pub static BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 

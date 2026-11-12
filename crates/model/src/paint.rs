@@ -27,7 +27,7 @@ pub fn faces(category: &str) -> &'static [&'static str] {
 }
 
 /// What an element's paint says, if `key` is where it's held: faces it has, each a material of the library.
-pub fn check_value(m: &Model, who: &str, key: &str, v: &Value, e: &Element) -> Option<Result<(), String>> {
+pub(crate) fn check_value(m: &Model, who: &str, key: &str, v: &Value, e: &Element) -> Option<Result<(), String>> {
     (key == KEY).then(|| {
         let Some(painted) = v.as_object() else { return Err(format!("{who}: `{KEY}` is {{face: material}}, not {v}")) };
         let faces = faces(e.category());

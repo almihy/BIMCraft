@@ -158,7 +158,7 @@ fn indices(v: Option<&V>) -> Vec<usize> {
 }
 
 /// `text` cut to what a name may hold.
-pub fn clip(text: &str) -> String {
+fn clip(text: &str) -> String {
     text.trim().chars().take(MAX_TEXT).collect()
 }
 
@@ -444,6 +444,7 @@ fn inside(ring: &[P2]) -> Option<P2> {
 }
 
 /// The least and the most of `xs`.
+#[doc(hidden)]
 pub fn span(xs: impl Iterator<Item = f64>) -> Option<(f64, f64)> {
     xs.fold(None, |s: Option<(f64, f64)>, x| Some(s.map_or((x, x), |(lo, hi)| (lo.min(x), hi.max(x)))))
 }
@@ -546,7 +547,7 @@ struct Reader<'a> {
 }
 
 impl<'a> Reader<'a> {
-    pub fn new(f: &'a File, mm: f64, rad: f64, shift: P2) -> Reader<'a> {
+    fn new(f: &'a File, mm: f64, rad: f64, shift: P2) -> Reader<'a> {
         Reader { f, mm, rad, shift, why: Cell::new(None), unread: RefCell::new(HashMap::new()) }
     }
 
@@ -1656,6 +1657,7 @@ const SLABS: &[&str] = &["IFCSLAB", "IFCSLABSTANDARDCASE", "IFCSLABELEMENTEDCASE
 const COLUMNS: &[&str] = &["IFCCOLUMN", "IFCCOLUMNSTANDARDCASE"];
 
 /// The seed a file's own GUIDs are made from: the same text reads the same every time.
+#[doc(hidden)]
 pub fn seed(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xCBF2_9CE4_8422_2325_u64, |h, b| (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01B3))
 }
@@ -1668,6 +1670,7 @@ pub fn ifc(bytes: &[u8], name: &str) -> Result<Imported, String> {
 
 /// What `ifc` does, from a file already parsed: `seed` is the hash of the text it was parsed from,
 /// which names the elements the file leaves unnamed.
+#[doc(hidden)]
 pub fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, String> {
     if !file.schema.starts_with("IFC") {
         let schema = if file.schema.is_empty() { "no schema" } else { &file.schema };

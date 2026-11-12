@@ -350,6 +350,7 @@ pub fn line_intersection(a: P2, b: P2, c: P2, d: P2) -> Option<P2> {
 }
 
 /// Where `a`→`b` properly crosses `c`→`d`, as a parameter along `a`→`b` strictly inside (0, 1).
+#[doc(hidden)]
 pub fn crossing(a: P2, b: P2, c: P2, d: P2) -> Option<f64> {
     let (r, s) = (b - a, d - c);
     let den = r.cross(s);
@@ -459,7 +460,7 @@ pub fn faces(segs: &[(P2, P2)], tol: f64) -> Vec<Vec<P2>> {
 
 /// [`faces`], the segments cut by every other: its twin, which tests hold it to.
 #[cfg(test)]
-pub fn faces_everywhere(segs: &[(P2, P2)], tol: f64) -> Vec<Vec<P2>> {
+pub(crate) fn faces_everywhere(segs: &[(P2, P2)], tol: f64) -> Vec<Vec<P2>> {
     faces_of(split_among(segs, tol, |_| (0..segs.len()).collect()), tol)
 }
 
@@ -560,6 +561,7 @@ fn walk(nodes: &[P2], edges: impl Iterator<Item = (usize, usize)> + Clone) -> Ve
 /// the faces of each connected piece once its loose ends are taken off, and the loose ends as open chains. Each face and
 /// chain has the indices of the segments it runs along.
 #[derive(Debug, Default)]
+#[doc(hidden)]
 pub struct Arrangement {
     /// Each face's ring, the segments along it and its piece: a bounded face counter-clockwise, a piece's outline clockwise.
     pub faces: Vec<(Vec<P2>, Vec<usize>, usize)>,
@@ -568,6 +570,7 @@ pub struct Arrangement {
 }
 
 /// The [`Arrangement`] of `segs`.
+#[doc(hidden)]
 pub fn arrangement(segs: &[(P2, P2)], tol: f64) -> Arrangement {
     let g = Graph::new(split(segs, tol), tol);
     let n = g.nodes.len();

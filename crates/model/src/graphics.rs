@@ -409,7 +409,7 @@ pub struct Override {
 }
 
 impl Override {
-    pub fn check_patterns(&self, m: &Model) -> Result<(), String> {
+    pub(crate) fn check_patterns(&self, m: &Model) -> Result<(), String> {
         for s in [&self.projection, &self.cut] {
             for name in [&s.foreground, &s.background].into_iter().flatten().filter_map(|p| p.pattern.as_ref()) {
                 if !m.fill_patterns.contains_key(name) {
@@ -420,7 +420,7 @@ impl Override {
         Ok(())
     }
 
-    pub fn patterns_mut(&mut self) -> impl Iterator<Item = &mut String> {
+    pub(crate) fn patterns_mut(&mut self) -> impl Iterator<Item = &mut String> {
         [&mut self.projection, &mut self.cut]
             .into_iter()
             .flat_map(|s| [&mut s.foreground, &mut s.background])
@@ -444,7 +444,7 @@ impl Override {
         }
     }
 
-    pub fn check(&self, who: &str) -> Result<(), String> {
+    pub(crate) fn check(&self, who: &str) -> Result<(), String> {
         self.projection.check(&format!("{who} projection"))?;
         self.cut.check(&format!("{who} cut"))?;
         if self.transparency > 100 {
@@ -943,7 +943,7 @@ pub fn starter_templates(language: Language) -> BTreeMap<String, ViewTemplate> {
 }
 
 /// Whether the project's view filters and view templates are sound.
-pub fn check_project(m: &Model) -> Result<(), String> {
+pub(crate) fn check_project(m: &Model) -> Result<(), String> {
     if m.view_filters.len() > MAX_FILTERS {
         return Err(format!("the project has {} view filters; it holds up to {MAX_FILTERS}", m.view_filters.len()));
     }
@@ -1053,13 +1053,13 @@ fn halftone(c: Rgb) -> Rgb {
 
 impl Look {
     /// The resolved fill layers for the renderer, after category, filter and element precedence.
-    pub fn pattern_style(&self, id: Id, cut: bool) -> Option<&Style> {
+    pub(crate) fn pattern_style(&self, id: Id, cut: bool) -> Option<&Style> {
         let o = self.paint.get(&id)?;
         let s = if cut { &o.cut } else { &o.projection };
         (s.foreground.is_some() || s.background.is_some()).then_some(s)
     }
 
-    pub fn pattern_styles(&self) -> BTreeMap<Id, [Style; 2]> {
+    pub(crate) fn pattern_styles(&self) -> BTreeMap<Id, [Style; 2]> {
         self.paint
             .iter()
             .filter(|(id, _)| self.pattern_style(**id, false).is_some() || self.pattern_style(**id, true).is_some())

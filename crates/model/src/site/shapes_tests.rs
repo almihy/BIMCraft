@@ -26,7 +26,7 @@ fn rings_of_geojson(g: &Value) -> Vec<Ring> {
     }
 }
 
-pub fn edges(rings: &[Ring]) -> Vec<(Xy, Xy)> {
+fn edges(rings: &[Ring]) -> Vec<(Xy, Xy)> {
     rings.iter().flat_map(|r| (0..r.len()).map(move |i| (r[i], r[(i + 1) % r.len()]))).collect()
 }
 

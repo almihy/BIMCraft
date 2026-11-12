@@ -97,7 +97,7 @@ impl DistributionSystem {
         [&self.l_l, &self.l_n, &self.l_g].into_iter().flatten()
     }
 
-    pub fn voltages_mut(&mut self) -> impl Iterator<Item = &mut String> {
+    pub(crate) fn voltages_mut(&mut self) -> impl Iterator<Item = &mut String> {
         [&mut self.l_l, &mut self.l_n, &mut self.l_g].into_iter().flatten()
     }
 
@@ -286,7 +286,7 @@ pub fn start_wire(units: Units) -> &'static str {
 }
 
 /// The settings are within what the project may hold, and a system names voltages it has.
-pub fn check(m: &Model) -> Result<(), String> {
+pub(crate) fn check(m: &Model) -> Result<(), String> {
     for (what, n, most) in [
         ("voltages", m.voltages.len(), MAX_VOLTAGES),
         ("distribution systems", m.distribution_systems.len(), MAX_SYSTEMS),

@@ -35,7 +35,7 @@ pub fn insert(to: &mut Model, from: &Model, ids: &[Id]) -> Result<Inserted, Stri
 
 /// [`insert`], where with `linked` every element comes in under an id from [`LINKED`] up, which is how a view tells it from
 /// the project's own.
-pub fn insert_as(to: &mut Model, from: &Model, ids: &[Id], linked: bool) -> Result<Inserted, String> {
+pub(crate) fn insert_as(to: &mut Model, from: &Model, ids: &[Id], linked: bool) -> Result<Inserted, String> {
     if linked {
         to.next_id = to.next_id.max(LINKED);
     }

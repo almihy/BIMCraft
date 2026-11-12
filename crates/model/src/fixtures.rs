@@ -65,7 +65,7 @@ fn power(load_va: Value, power_factor: f64, classification: &str) -> Value {
 
 /// A pipe connector of `domain` (`cold`, `hot`, `waste`…) and `flow`, at `at` in the family's axes, facing `direction` (the way
 /// its pipe leaves it), of nominal diameter `dn` mm.
-pub fn pipe(domain: &str, flow: &str, at: [Value; 3], direction: [f64; 3], dn: f64) -> Value {
+pub(crate) fn pipe(domain: &str, flow: &str, at: [Value; 3], direction: [f64; 3], dn: f64) -> Value {
     json!({"kind": "pipe", "domain": domain, "flow": flow, "at": at, "direction": direction, "size": dn})
 }
 

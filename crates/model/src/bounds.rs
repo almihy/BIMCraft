@@ -36,14 +36,14 @@ enum Shape {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Key {
+pub(crate) struct Key {
     own: Option<Revision>,
     levels: [Option<Revision>; 2],
     shape: Shape,
 }
 
 impl Key {
-    pub fn of(m: &Model, id: Id) -> Self {
+    pub(crate) fn of(m: &Model, id: Id) -> Self {
         let mut key = Self { own: m.elements.revision(id), levels: [None; 2], shape: Shape::Other };
         let Some(e) = m.elements.get(id) else { return key };
         if let Some(c) = e.column() {
@@ -62,7 +62,7 @@ impl Key {
     }
 }
 
-pub struct Entry {
+struct Entry {
     key: Key,
     value: Bounds,
     used: u64,
@@ -172,7 +172,7 @@ impl BoundsCache {
     }
 }
 
-pub fn primitive(m: &Model, id: Id) -> Bounds {
+pub(crate) fn primitive(m: &Model, id: Id) -> Bounds {
     let Some(e) = m.elements.get(id) else { return Bounds::Empty };
     if let Some(c) = e.column() {
         let Some(t) = m.column_type(e) else { return Bounds::Unknown };
@@ -212,7 +212,7 @@ pub fn primitive(m: &Model, id: Id) -> Bounds {
     Bounds::Unknown
 }
 
-pub fn place_component(m: &Model, c: &crate::model::Component, bounds: [P3; 2]) -> Bounds {
+pub(crate) fn place_component(m: &Model, c: &crate::model::Component, bounds: [P3; 2]) -> Bounds {
     let (sin, cos) = c.angle.to_radians().sin_cos();
     let base = m.elevation(c.level) + c.offset;
     padded((0..8).map(|k| {
@@ -222,7 +222,7 @@ pub fn place_component(m: &Model, c: &crate::model::Component, bounds: [P3; 2]) 
     }))
 }
 
-pub fn padded(points: impl Iterator<Item = P3>) -> Bounds {
+pub(crate) fn padded(points: impl Iterator<Item = P3>) -> Bounds {
     let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
     for p in points {
         if !p.iter().all(|v| v.is_finite()) {

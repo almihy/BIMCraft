@@ -25,7 +25,7 @@ pub const FIRST_ID: Id = 100_000;
 /// Where the ids of linked elements begin, in the model the views draw ([`crate::link::seen`]): past any a project makes.
 pub const LINKED: Id = 100_000_000;
 
-pub mod revisions;
+mod revisions;
 use revisions::Revised;
 pub use revisions::{Revision, RevisionSnapshot};
 

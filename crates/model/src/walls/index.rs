@@ -16,15 +16,15 @@ const MAX_TILES: i64 = 4096;
 /// A tile's elements by how low they begin, and the tallest's height: of a tower's, what a wall can reach is its own
 /// storeys, not the 100 stacked in the tile.
 #[derive(Default)]
-pub struct Tile {
-    pub items: Vec<(f64, Id)>,
-    pub tallest: f64,
+struct Tile {
+    items: Vec<(f64, Id)>,
+    tallest: f64,
 }
 
 impl Tile {
     /// Those that may overlap `lo` to `hi`: more, near the ends, as the caller still asks each. Numbers that aren't finite
     /// leave the search wider, never narrower.
-    pub fn may_overlap(&self, lo: f64, hi: f64) -> impl Iterator<Item = Id> + '_ {
+    fn may_overlap(&self, lo: f64, hi: f64) -> impl Iterator<Item = Id> + '_ {
         // A wall's top is its bottom and its height, rounded: a margin well past what the rounding moves.
         let floor = lo - self.tallest - 1.0 - 1e-6 * lo.abs();
         let start = self.items.partition_point(|(bottom, _)| *bottom < floor);
@@ -33,6 +33,7 @@ impl Tile {
     }
 }
 
+#[doc(hidden)]
 pub struct Index {
     spans: BTreeMap<Id, (f64, f64)>,
     hosts: BTreeMap<Guid, Vec<Id>>,
@@ -48,6 +49,7 @@ pub struct Index {
 }
 
 impl Index {
+    #[doc(hidden)]
     pub fn new(m: &Model) -> Self {
         let mut index = Self {
             spans: BTreeMap::new(),
@@ -117,7 +119,7 @@ impl Index {
 
     /// The walls that may meet wall `id` at `node`, one of its ends: those that overlap it in height and whose bodies reach
     /// the node's tile, by id. Every wall that ends there or that the node lies in is among them.
-    pub fn neighbours_at(&self, id: Id, node: P2) -> Vec<Id> {
+    pub(crate) fn neighbours_at(&self, id: Id, node: P2) -> Vec<Id> {
         let Some(&(lo, hi)) = self.spans.get(&id) else { return Vec::new() };
         let mut ids = self.everywhere.clone();
         if node.0.is_finite() && node.1.is_finite() {
@@ -133,13 +135,14 @@ impl Index {
         ids
     }
 
-    pub fn openings(&self, host: Guid) -> &[Id] {
+    pub(crate) fn openings(&self, host: Guid) -> &[Id] {
         self.hosts.get(&host).map_or(&[], Vec::as_slice)
     }
 
     /// The runs that may meet at `node` (a point in plan) at heights `lo` to `hi`: those whose bodies reach the node's
     /// tile and whose heights overlap `lo` to `hi` the way two runs' must ([`crate::walls::stacked`]), by id. Every run
     /// ending there or with the node in its body is among them.
+    #[doc(hidden)]
     pub fn runs_near(&self, node: P2, lo: f64, hi: f64) -> Vec<Id> {
         let mut ids = self.run_everywhere.clone();
         if node.0.is_finite() && node.1.is_finite() {
@@ -157,6 +160,7 @@ impl Index {
 
     /// The runs whose bodies reach the box `[x0, y0, x1, y1]`, grown by `grow` mm, at heights `lo` to `hi`, by
     /// id: what a run staying put asks of the runs a command took, to stretch to the joins they had.
+    #[doc(hidden)]
     pub fn runs_near_box(&self, b: [f64; 4], grow: f64, lo: f64, hi: f64) -> Vec<Id> {
         let grown = [b[0] - grow, b[1] - grow, b[2] + grow, b[3] + grow];
         let tiled = (grown.iter().all(|v| v.is_finite() && v.abs() < 1e12)).then(|| {
@@ -185,7 +189,7 @@ impl Index {
 }
 
 /// The plan box a wall's body lies in, grown by twice the tolerance: [x0, y0, x1, y1]. An arc's whole circle's.
-pub fn reach(m: &Model, w: &crate::model::Wall) -> Option<[f64; 4]> {
+pub(crate) fn reach(m: &Model, w: &crate::model::Wall) -> Option<[f64; 4]> {
     let axis = super::Axis::of(w);
     let (ext, int) = super::faces(m, w);
     let grow = ext.abs().max(int.abs()) + 2.0 * TOL;

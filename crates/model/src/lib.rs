@@ -13,7 +13,9 @@ pub mod bounds;
 pub mod cad;
 pub mod camera;
 pub mod cloud;
+#[doc(hidden)]
 pub mod component_geometry;
+#[doc(hidden)]
 pub mod constraints;
 pub mod crosscheck;
 pub mod curves;
@@ -27,6 +29,7 @@ pub mod falls;
 pub mod family;
 pub mod favorites;
 pub mod fills;
+#[doc(hidden)]
 pub mod fixtures;
 pub mod gltf;
 pub mod glue;
@@ -71,10 +74,12 @@ pub mod stairs;
 pub mod standards;
 pub mod styles;
 pub mod symbol_set;
+#[doc(hidden)]
 pub mod sync_settings;
 pub mod tempdims;
 pub mod text;
 pub mod texture;
+#[doc(hidden)]
 pub mod timber;
 pub mod titleblock;
 pub mod triad;

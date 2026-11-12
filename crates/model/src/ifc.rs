@@ -61,6 +61,7 @@ const LOFTED: u64 = 47;
 const LOFTED_DEFINES: u64 = 48;
 const QUANTITIES: u64 = 49;
 const QUANTITY_DEFINES: u64 = 50;
+#[doc(hidden)]
 pub const TYPES: u64 = 51;
 const TYPE_DEFINES: u64 = 52;
 const DEVICE: u64 = 53;
@@ -124,6 +125,7 @@ fn shape_of(landings: &[crate::model::Landing], kind: &str) -> String {
 
 /// A STEP string literal: `'` doubled, `\` doubled, anything outside printable ASCII as `\X2\…\X0\`
 /// (UCS-2), or past it as `\X4\…\X0\` (UCS-4).
+#[doc(hidden)]
 pub fn s(text: &str) -> String {
     let mut out = String::from("'");
     for c in text.chars() {
@@ -144,6 +146,7 @@ pub fn s(text: &str) -> String {
 }
 
 /// A STEP real: always with a decimal point.
+#[doc(hidden)]
 pub fn real(x: f64) -> String {
     let x = if x.is_finite() && x != 0.0 { x } else { 0.0 };
     format!("{x:.6}").trim_end_matches('0').to_string()
@@ -159,6 +162,7 @@ fn ratio(x: f64) -> String {
 const DIGITS: &[u8; 64] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$";
 
 /// A 22-character IFC GlobalId, the same for the same model, role and element on every export.
+#[doc(hidden)]
 pub fn guid(uid: u64, role: u64, id: u64) -> String {
     let hi = mix(uid ^ mix(role.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ id));
     let lo = mix(hi ^ id.rotate_left(17) ^ role);
@@ -193,7 +197,7 @@ fn fold(g: Guid) -> u64 {
 }
 
 /// UTC date and time of a Unix time, ISO 8601.
-pub fn utc(secs: u64) -> String {
+fn utc(secs: u64) -> String {
     // Days to civil date: Howard Hinnant's algorithm.
     let z = (secs / 86_400) as i64 + 719_468;
     let (era, doe) = (z.div_euclid(146_097), z.rem_euclid(146_097));
@@ -238,6 +242,7 @@ struct Step {
 /// A member's section as its type gives it: `width` and `depth` in mm (a round section is `width` across, so its depth is
 /// its width), kept as bits so a section can key a map.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[doc(hidden)]
 pub struct Section {
     width: u64,
     depth: u64,
@@ -245,7 +250,7 @@ pub struct Section {
 }
 
 impl Section {
-    pub fn new(width: f64, depth: f64, round: bool) -> Section {
+    fn new(width: f64, depth: f64, round: bool) -> Section {
         Section { width: width.to_bits(), depth: if round { width } else { depth }.to_bits(), round }
     }
 
@@ -304,6 +309,7 @@ struct TypeBuild {
 }
 
 /// What a type object's GlobalIds are made from: its class, its name and its member, so the same on every export.
+#[doc(hidden)]
 pub fn type_hash(class: &str, name: &str, member: &Option<Member>) -> u64 {
     let member_text = member.as_ref().map(|x| format!("{x:?}")).unwrap_or_default();
     name.bytes()
@@ -822,6 +828,7 @@ fn member_quantities(width: f64, depth: f64, round: bool, length: f64) -> Vec<(&
 /// location line, its thickness and height, the area of one side (the middle of its thickness) and that less the doors and
 /// windows in it, and both through its thickness (m³), from the wall's own solid: its corners counted once, its openings where they
 /// are. A wall attached to a roof or a floor has no single height, so no `Height`; its sides and volumes are those of its pieces.
+#[doc(hidden)]
 pub fn wall_quantities(m: &Model, id: Id) -> Vec<(&'static str, &'static str, f64)> {
     let Some(q) = crate::quantities::wall(m, id) else { return Vec::new() };
     let mut values = vec![("Length", "LENGTH", q.length), ("Width", "LENGTH", q.width)];

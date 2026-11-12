@@ -7,7 +7,7 @@ use super::*;
 use crate::dims::{Background, DimString, DimensionType, Read, Tick, Witness};
 
 /// A dimension, of its kind.
-pub fn dimension(d: &mut Drawing, m: &Model, dim: &Dimension) {
+pub(super) fn dimension(d: &mut Drawing, m: &Model, dim: &Dimension) {
     // Align's lock is shown by a front end, never drawn.
     if dim.alignment {
         return;

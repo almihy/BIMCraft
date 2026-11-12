@@ -174,6 +174,7 @@ const STYLES: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 #[cfg(debug_assertions)]
 #[doc(hidden)]
 #[allow(clippy::unwrap_used)]
+#[doc(hidden)]
 pub fn unzip(b: &[u8]) -> std::collections::BTreeMap<String, String> {
     use std::io::Read;
     let u16_at = |i: usize| u16::from_le_bytes([b[i], b[i + 1]]) as usize;

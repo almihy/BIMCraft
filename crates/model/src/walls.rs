@@ -8,8 +8,11 @@
 use std::f64::consts::{PI, TAU};
 
 mod compound;
+#[doc(hidden)]
 pub mod index;
-pub use index::{Index, reach};
+#[doc(hidden)]
+pub use index::Index;
+pub(crate) use index::reach;
 
 use crate::geom::{self, P2};
 use crate::model::{Element, Function, Guid, Id, Layer, Location, Model, TOL, Wall};
@@ -230,19 +233,19 @@ pub fn stacked(m: &Model, a: &Wall, b: &Wall) -> bool {
 /// on the clockwise side, and which wall's end it is (`id`, `at_end`). A run's arm at its end is one too ([`crate::runs`]),
 /// naming no wall: its `id` is 0, below every element's.
 #[derive(Default)]
-pub struct Arm {
-    pub id: Id,
-    pub at_end: bool,
-    pub mine: bool,
-    pub way: P2,
-    pub ccw: P2,
-    pub cw: P2,
-    pub centre: P2,
-    pub thick: f64,
+pub(crate) struct Arm {
+    pub(crate) id: Id,
+    pub(crate) at_end: bool,
+    pub(crate) mine: bool,
+    pub(crate) way: P2,
+    pub(crate) ccw: P2,
+    pub(crate) cw: P2,
+    pub(crate) centre: P2,
+    pub(crate) thick: f64,
 }
 
 /// Wall `w` leaving the node at its start, or with `at_end`, at its end.
-pub fn arm(m: &Model, id: Id, w: &Wall, at_end: bool, mine: bool) -> Arm {
+pub(crate) fn arm(m: &Model, id: Id, w: &Wall, at_end: bool, mine: bool) -> Arm {
     let axis = Axis::of(w);
     let (ext, int) = faces(m, w);
     let s = if at_end { axis.length() } else { 0.0 };
@@ -319,6 +322,7 @@ pub fn cap(m: &Model, id: Id, at_end: bool) -> Vec<P2> {
     cap_in(m, id, at_end, None)
 }
 
+#[doc(hidden)]
 pub fn cap_in(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> Vec<P2> {
     end_geometry(m, id, at_end, index).outline
 }
@@ -375,6 +379,7 @@ pub fn centre_line(m: &Model, id: Id) -> Vec<P2> {
 }
 
 /// [`centre_line`], its joins found through `index` when there is one.
+#[doc(hidden)]
 pub fn centre_line_in(m: &Model, id: Id, index: Option<&Index>) -> Vec<P2> {
     let Some(w) = m.wall(id) else { return Vec::new() };
     let axis = Axis::of(w);
@@ -401,6 +406,7 @@ pub fn outline(m: &Model, id: Id) -> Vec<P2> {
     outline_in(m, id, None)
 }
 
+#[doc(hidden)]
 pub fn outline_in(m: &Model, id: Id, index: Option<&Index>) -> Vec<P2> {
     let Some(w) = m.wall(id) else { return Vec::new() };
     let axis = Axis::of(w);
@@ -438,23 +444,24 @@ pub fn layer_lines(m: &Model, id: Id) -> Vec<Vec<P2>> {
     layer_lines_in(m, id, None)
 }
 
+#[doc(hidden)]
 pub fn layer_lines_in(m: &Model, id: Id, index: Option<&Index>) -> Vec<Vec<P2>> {
     layer_geometry(m, id, index).lines
 }
 
 #[derive(Default)]
-pub struct LayerGeometry {
-    pub lines: Vec<Vec<P2>>,
+pub(crate) struct LayerGeometry {
+    pub(crate) lines: Vec<Vec<P2>>,
     // A core can reach beyond the finish beside it at either end.
     butt: [Option<compound::Butt>; 2],
 }
 
 impl LayerGeometry {
-    pub fn joined(&self) -> bool {
+    pub(crate) fn joined(&self) -> bool {
         self.butt.iter().any(Option::is_some)
     }
 
-    pub fn band(&self, k: usize) -> Vec<P2> {
+    pub(crate) fn band(&self, k: usize) -> Vec<P2> {
         let a = &self.lines[k];
         let b = &self.lines[k + 1];
         let mut ring: Vec<_> = a.iter().chain(b.iter().rev()).copied().collect();
@@ -470,7 +477,7 @@ impl LayerGeometry {
         ring
     }
 
-    pub fn interfaces(&self) -> impl Iterator<Item = &[P2]> {
+    pub(crate) fn interfaces(&self) -> impl Iterator<Item = &[P2]> {
         self.lines
             .iter()
             .skip(1)
@@ -480,7 +487,7 @@ impl LayerGeometry {
     }
 }
 
-pub fn layer_geometry(m: &Model, id: Id, index: Option<&Index>) -> LayerGeometry {
+pub(crate) fn layer_geometry(m: &Model, id: Id, index: Option<&Index>) -> LayerGeometry {
     let Some(w) = m.wall(id) else { return LayerGeometry::default() };
     let axis = Axis::of(w);
     let len = axis.length();
@@ -541,7 +548,7 @@ impl Plane {
 /// or floor it's attached to, that one's plane there (each of a roof's slopes over its own part of
 /// the plan, in convex pieces), and outside it still `own`.
 #[derive(Clone)]
-pub struct Bound {
+struct Bound {
     regions: Vec<(Vec<P2>, Plane)>,
     own: f64,
 }
@@ -609,7 +616,7 @@ impl Bound {
 }
 
 /// A polygon as convex pieces, each counter-clockwise: itself when it's convex, else its triangles.
-pub fn convex_pieces(ring: &[P2]) -> Vec<Vec<P2>> {
+pub(crate) fn convex_pieces(ring: &[P2]) -> Vec<Vec<P2>> {
     if ring.len() < 3 {
         return Vec::new();
     }
@@ -626,12 +633,13 @@ pub fn convex_pieces(ring: &[P2]) -> Vec<Vec<P2>> {
 thread_local! {
     /// The polygons cut by [`split`] on this thread: the tests of what is drawn assert on it, not on time, which varies with the
     /// load of the machine.
+    #[doc(hidden)]
     pub static SPLITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// `ring` cut by the convex counter-clockwise `piece`: the part inside it (if any), and the parts
 /// outside, apart. A repeated point of the piece's is no edge to cut by.
-pub fn split(ring: Vec<P2>, piece: &[P2]) -> (Option<Vec<P2>>, Vec<Vec<P2>>) {
+pub(crate) fn split(ring: Vec<P2>, piece: &[P2]) -> (Option<Vec<P2>>, Vec<Vec<P2>>) {
     #[cfg(debug_assertions)]
     SPLITS.with(|n| n.set(n.get() + 1));
     let big = |r: &Vec<P2>| r.len() >= 3 && geom::area(r).abs() > 1.0;
@@ -649,7 +657,7 @@ pub fn split(ring: Vec<P2>, piece: &[P2]) -> (Option<Vec<P2>>, Vec<Vec<P2>>) {
 }
 
 /// What's left of `rings` outside `hole`: convex pieces, counter-clockwise.
-pub fn minus(rings: &[Vec<P2>], hole: &[P2]) -> Vec<Vec<P2>> {
+pub(crate) fn minus(rings: &[Vec<P2>], hole: &[P2]) -> Vec<Vec<P2>> {
     // The box round a ring: a piece clear of the hole's piece's box is left whole, without cutting it (a big concave ring and
     // a big concave hole make hundreds of pieces each, and cutting each by each is cubic).
     let extent = |ring: &[P2]| {
@@ -684,7 +692,7 @@ pub fn underside(m: &Model, id: Id, q: P2) -> Option<f64> {
 }
 
 /// A wall's base and top: what it's attached to, or a level plane.
-pub fn bounds(m: &Model, w: &Wall) -> (Bound, Bound) {
+fn bounds(m: &Model, w: &Wall) -> (Bound, Bound) {
     (Bound::of(m, w.attach_base, true, m.own_base(w)), Bound::of(m, w.attach_top, false, m.own_top(w)))
 }
 
@@ -775,6 +783,7 @@ pub fn prisms(m: &Model, id: Id, openings: bool) -> Vec<Prism> {
     prisms_in(m, id, openings, None)
 }
 
+#[doc(hidden)]
 pub fn prisms_in(m: &Model, id: Id, openings: bool, index: Option<&Index>) -> Vec<Prism> {
     let Some(w) = m.wall(id) else { return Vec::new() };
     let guid = m.guid(id);

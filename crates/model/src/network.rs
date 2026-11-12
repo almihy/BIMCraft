@@ -115,7 +115,7 @@ fn along(p: [f64; 3], a: [f64; 3], b: [f64; 3]) -> (f64, f64) {
 struct Sets(Vec<usize>);
 
 impl Sets {
-    pub fn new(n: usize) -> Sets {
+    fn new(n: usize) -> Sets {
         Sets((0..n).collect())
     }
     fn find(&mut self, mut i: usize) -> usize {

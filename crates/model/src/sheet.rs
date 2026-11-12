@@ -25,7 +25,9 @@ const INK: Rgb = Rgb(25, 25, 25);
 const CELL_TEXT: f32 = 12.5;
 const TITLE_TEXT: f32 = 17.5;
 /// A schedule's rows and its title's, and the room either side of a cell's text, px.
+#[doc(hidden)]
 pub const ROW: f32 = 30.0;
+#[doc(hidden)]
 pub const TITLE_ROW: f32 = 45.0;
 const PAD: f32 = 10.0;
 
@@ -200,13 +202,18 @@ fn title_block(d: &mut Drawing, m: &Model, id: impl Key, paper: P2, views: &[&Vi
 
 /// A schedule's table: its headings; its rows' cells as shown, its totals' last; each column's
 /// width, px; and whether it has totals.
+#[doc(hidden)]
 pub struct Table {
+    #[doc(hidden)]
     pub headings: Vec<String>,
+    #[doc(hidden)]
     pub rows: Vec<Vec<String>>,
     widths: Vec<f32>,
+    #[doc(hidden)]
     pub totals: bool,
 }
 
+#[doc(hidden)]
 pub fn table_of(m: &Model, sc: &Schedule) -> Table {
     let t = schedule::table(m, sc).unwrap_or(schedule::Table { columns: Vec::new(), rows: Vec::new(), ids: Vec::new(), totals: None });
     let said = |c: &schedule::Column, v: &serde_json::Value| {

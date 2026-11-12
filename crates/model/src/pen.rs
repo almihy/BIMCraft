@@ -31,6 +31,7 @@ pub const MAX_PEN: u8 = 16;
 /// Each pen's width on paper at 1 : 100, mm, from pen 0 (a hairline, no width of its own) up: our own steps, fine where
 /// drawings mostly are, so what's seen ([`Pen::PROJECTION`]) is 0.18 mm and what's cut ([`Pen::CUT`]) 0.35 mm, then
 /// widening to two millimetres for the heaviest.
+#[doc(hidden)]
 pub const WIDTHS: [f64; MAX_PEN as usize + 1] =
     [0.0, 0.10, 0.13, 0.15, 0.18, 0.20, 0.22, 0.25, 0.28, 0.30, 0.35, 0.40, 0.50, 0.70, 1.00, 1.40, 2.00];
 

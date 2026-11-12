@@ -15,6 +15,7 @@ use crate::pen::{MAX_PEN, Pen};
 
 /// The pen a drawing draws a line in that is its category's, cut or in projection as the line's part is: not a pen a file
 /// or a command can give (past [`MAX_PEN`]), only a mark for [`Model::object_style`] to replace.
+#[doc(hidden)]
 pub const BY_CATEGORY: Pen = Pen(u8::MAX);
 
 /// A category's pens: its lines in projection, and where a view cuts it.

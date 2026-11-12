@@ -319,6 +319,7 @@ type Found = Option<(f32, Hit, Option<[P3; 3]>)>;
 /// What the search for [`Found`] holds while it runs: with its place in the scene, so the first of as near ones wins.
 type Candidate = Option<(f32, usize, Hit, Option<[P3; 3]>)>;
 
+#[doc(hidden)]
 pub struct Bvh {
     nodes: Vec<Node>,
     order: Vec<usize>,
@@ -360,7 +361,9 @@ pub struct Mesh {
     pub cube_planes: u32,
     /// Each shape's box, in its axes.
     shape_boxes: Vec<(P3, P3)>,
+    #[doc(hidden)]
     pub group_spheres: Vec<(P3, f64)>,
+    #[doc(hidden)]
     pub copy_spheres: Vec<(P3, f64)>,
     cells: Vec<Cell>,
     /// The section box the view is cut to, least corner and greatest, in the model: what picks, the marks and a card's pixels keep.
@@ -377,10 +380,11 @@ pub struct Mesh {
     levels: Vec<(Id, String, [P3; 4])>,
     level_colors: BTreeMap<Id, Rgb>,
     tris: Vec<Tri>,
+    #[doc(hidden)]
     pub bvh: OnceLock<Bvh>,
 }
 
-pub fn bounds<'a>(points: impl Iterator<Item = &'a P3>) -> Option<(P3, P3)> {
+fn bounds<'a>(points: impl Iterator<Item = &'a P3>) -> Option<(P3, P3)> {
     points.fold(None, |b, p| {
         let (lo, hi) = b.unwrap_or((*p, *p));
         Some((std::array::from_fn(|i| lo[i].min(p[i])), std::array::from_fn(|i| hi[i].max(p[i]))))
@@ -999,6 +1003,7 @@ impl Mesh {
 
     /// How far ahead of the camera the nearest of a sphere (from the origin) is: from the eye in perspective, else from the
     /// front of what the view reaches.
+    #[doc(hidden)]
     pub fn nearness(&self, cam: &Camera, (middle, reach): (P3, f64)) -> f64 {
         let view = self.view(cam);
         let (back, target) = (view.back.map(f64::from), view.target.map(f64::from));

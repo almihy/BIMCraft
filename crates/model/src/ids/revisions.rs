@@ -99,7 +99,7 @@ pub struct Revised<'a, I> {
     epoch: Revision,
 }
 impl<'a, I> Revised<'a, I> {
-    pub fn new(inner: I, revisions: &'a mut RevisionSnapshot) -> Self {
+    pub(super) fn new(inner: I, revisions: &'a mut RevisionSnapshot) -> Self {
         Self { inner, revisions, epoch: Revision::fresh() }
     }
 }

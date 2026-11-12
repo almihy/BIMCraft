@@ -362,7 +362,7 @@ pub struct RoadIn {
 
 type Box4 = [f64; 4];
 
-pub fn box_of(line: &[Xy], pad: f64) -> Box4 {
+fn box_of(line: &[Xy], pad: f64) -> Box4 {
     let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
     for q in line {
         b = [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])];

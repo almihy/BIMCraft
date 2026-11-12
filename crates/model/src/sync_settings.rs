@@ -187,7 +187,7 @@ fn in_step(m: &Model) -> std::borrow::Cow<'_, Model> {
 
 /// A copy of `m` with no elements, made without copying the elements' index (each push that changes a setting makes one). Every
 /// field is named, so that a field added to the model is a compile error here until it is said what a copy without elements has.
-pub fn without_elements(m: &Model) -> Model {
+pub(crate) fn without_elements(m: &Model) -> Model {
     Model {
         format: m.format,
         name: m.name.clone(),
@@ -442,7 +442,7 @@ struct Held {
 }
 
 /// What taking changes into the settings made of the library.
-pub struct Applied {
+pub(crate) struct Applied {
     /// The library as it is now: entries put in, renamed and taken out.
     pub library: Library,
     /// Each entry that is named otherwise now (its kind, its name before, its name now): what in this copy points at it by
@@ -457,7 +457,7 @@ pub struct Applied {
 /// or out on its own, by GUID. `m` is the model they are taken into (its library and its ids). With `complete` it says everything
 /// there is: a setting it names nothing of is left out, and a map of entries has only those it names. A whole map with entries
 /// is taken only then (see the module).
-pub fn apply(
+pub(crate) fn apply(
     m: &Model,
     map: &mut Map<String, Value>,
     project: &BTreeMap<String, Option<String>>,
@@ -771,7 +771,7 @@ fn without_count(name: &str) -> &str {
 /// The entries of `m`'s library that a change of the settings may take out, with what each one is called, as a map of the settings
 /// holds it: an entry that is a map's, or one an entry owns, which goes with its owner (a family's type, a design option). Each
 /// as the entry that stands for it in the settings: its own GUID, or its owner's.
-pub fn standing_for(m: &Model, kind: &Kind, name: &str, guid: Guid) -> Option<Guid> {
+pub(crate) fn standing_for(m: &Model, kind: &Kind, name: &str, guid: Guid) -> Option<Guid> {
     if path_of(kind).is_some() {
         return Some(guid);
     }
@@ -785,7 +785,7 @@ pub fn standing_for(m: &Model, kind: &Kind, name: &str, guid: Guid) -> Option<Gu
 
 /// What a copy tells the room to put an entry back that a change of the room took out, but this copy keeps (an entry that is
 /// in use): its body and its name, each by its key, as `m` says them now.
-pub fn restoring(m: &Model, guids: &BTreeSet<Guid>) -> Result<BTreeMap<String, Option<String>>, String> {
+pub(crate) fn restoring(m: &Model, guids: &BTreeSet<Guid>) -> Result<BTreeMap<String, Option<String>>, String> {
     let all = flat(m)?;
     let mut out = BTreeMap::new();
     for g in guids {
@@ -802,7 +802,7 @@ pub fn restoring(m: &Model, guids: &BTreeSet<Guid>) -> Result<BTreeMap<String, O
 }
 
 /// `project` without what it tells of the entries `guids` (their bodies and names).
-pub fn without(project: &BTreeMap<String, Option<String>>, guids: &BTreeSet<Guid>) -> BTreeMap<String, Option<String>> {
+pub(crate) fn without(project: &BTreeMap<String, Option<String>>, guids: &BTreeSet<Guid>) -> BTreeMap<String, Option<String>> {
     project
         .iter()
         .filter(|(k, _)| !matches!(read_key(k), Ok(Told::Entry { guid, .. }) if guids.contains(&guid)))
@@ -812,7 +812,7 @@ pub fn without(project: &BTreeMap<String, Option<String>>, guids: &BTreeSet<Guid
 
 /// The keys of `project` that stand or fall together: an entry's body and name, each other key alone. A key that cannot be read is
 /// a group of its own, which then says what is wrong with it.
-pub fn groups(project: &BTreeMap<String, Option<String>>) -> Vec<Vec<String>> {
+pub(crate) fn groups(project: &BTreeMap<String, Option<String>>) -> Vec<Vec<String>> {
     let mut by_entry: BTreeMap<(Vec<String>, Guid), Vec<String>> = BTreeMap::new();
     let mut out: Vec<Vec<String>> = Vec::new();
     for k in project.keys() {

@@ -133,6 +133,33 @@ move up; `graphics::dress` and `raster::draw` take a `Drawing`; `titleblock` and
 drawing; `inquiry` calls `ifc::compress`. Step 5 beyond what moved already: the core's `*_tests.rs` that test one crate's
 code alone could move down to it.
 
+### Visibility, and what step 4 has to cut
+
+Every item the split had widened was put back to what it was in the core (`pub(crate)`, `pub(super)` or private) and
+made `pub` again only where the compiler asked for it. Of the 425 so widened, 37 are reached by the code of the crates
+above (the core's commands and engine: `phasing`'s phase and option edits, `glue`'s footings, `walls::Index`,
+`import::seed` and `from_step`, `render::plan_shows` and `section_heights`, `raster::PdfReads`, the `constraints`,
+`sync_settings` and `timber` modules; geom's `csg`, `font`, `arrangement`, `crossing`), and about 150 only by the core's
+tests that drive the Session (most of them `view3d`'s: `Solid`, `PreparedSolids`, `solids_in`; `component_geometry`'s,
+`sheet::Table`). Both kinds are `#[doc(hidden)]`: internals, not the model's API. The counters and helpers only tests
+read are, besides, `#[cfg(debug_assertions)]`. With the rest `pub(crate)` again, the dead-code lint sees them; it found
+nothing unused.
+
+What the future crates' code (not their tests) names of each other, today:
+
+| From | To | What |
+| --- | --- | --- |
+| model | render | `view3d::{solids, tops_at, Surface, Camera}` (`Model::model_extent`, `level_extent`, `roof_at`, `spot_*`), `dims3d::length`, `render::Drawing` (`graphics::dress`), `sheet::{DENSITY, size, title_values}`, `titleblock::{TitleBlock, Scope, NONE, check_values}`, `dxf::{Dxf, Entity, Shape, Color, read, union, arc_points, MAX_BYTES, MAX_FILE_COORD}`, `raster::{ImageInstance, ImageType, MAX_HELD, MAX_TYPES, MIN_SIDE}`, `background_grid::BackgroundGrid` |
+| model | site | `masterplan::{Site, PropertyLine, BuildingPad, MassSite, check_site, check_property_line, check_mass_site, transform_props}`, `site::Poly` |
+| render | site | `masterplan::{Site, PropertyLine, BuildingPad, solids, plan_colours, road_colours, surface_colour}`, `site::{Poly, shapes}` |
+| render | ifc | `ifc::{compress, expand}` (`inquiry`) |
+| ifc | site | `masterplan::solids` |
+
+IFC needs nothing of render: its 3D is its own and `masterplan::solids`. So: the site's element types and checks
+(`masterplan`'s data) stay in the model, its shapes and solids (`site`, `masterplan`'s geometry) become `bimcraft-site`
+under render and ifc; `compress`/`expand` (an IFC GUID as text) go down beside `ids`, and the model-to-render column is the knot the
+table above names (the element solids, `Drawing`, the data halves of `sheet`, `titleblock`, `dxf` and `raster`).
+
 Measured with `cargo test -p bimcraft-core -p bimcraft-ui-egui --no-run --timings`, target on the Dev Drive, sccache
 warm for the dependencies, nothing else building; a one-line change is a new item at the end of the file:
 

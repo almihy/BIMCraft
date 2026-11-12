@@ -422,7 +422,7 @@ struct Pairs<'a> {
 }
 
 impl<'a> Pairs<'a> {
-    pub fn new(text: &'a str) -> Pairs<'a> {
+    fn new(text: &'a str) -> Pairs<'a> {
         Pairs { lines: text.split('\n'), line: 0, peeked: None }
     }
 
@@ -1082,7 +1082,7 @@ fn arc(c: P2, r: f64, start: f64, end: f64) -> Shape {
 }
 
 /// Points along the arc from `start` through `sweep` degrees (counter-clockwise when positive), both ends included.
-pub fn arc_points(c: P2, r: f64, start: f64, sweep: f64) -> Vec<P2> {
+pub(crate) fn arc_points(c: P2, r: f64, start: f64, sweep: f64) -> Vec<P2> {
     let n = ((sweep.abs() / 360.0 * CURVE_STEPS as f64).ceil() as usize).clamp(2, CURVE_STEPS);
     (0..=n)
         .map(|i| {

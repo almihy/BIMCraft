@@ -337,7 +337,7 @@ fn is_yes(b: &bool) -> bool {
     *b
 }
 
-pub fn is_zero(x: &f64) -> bool {
+pub(crate) fn is_zero(x: &f64) -> bool {
     *x == 0.0
 }
 
@@ -1728,7 +1728,7 @@ impl Physical {
     }
 
     /// What is wrong with it, for `Model::check`: numbers out of their range.
-    pub fn check(&self, who: &str) -> Result<(), String> {
+    pub(crate) fn check(&self, who: &str) -> Result<(), String> {
         let within = |what: &str, v: f64, lo: f64, hi: f64| {
             if v.is_finite() && (lo..=hi).contains(&v) {
                 Ok(())
@@ -2338,7 +2338,7 @@ pub const MIN_PAPER: f64 = 100.0;
 pub const MAX_PAPER: f64 = 1219.2;
 
 /// The ISO aliases also name their bare format in margins and folding marks.
-pub fn paper_name(size: &str) -> String {
+pub(crate) fn paper_name(size: &str) -> String {
     let upper = size.trim().to_ascii_uppercase();
     let iso = upper.strip_prefix("ISO").map(str::trim_start).unwrap_or(&upper);
     if matches!(iso, "A0" | "A1" | "A2" | "A3" | "A4" | "B1" | "B2" | "B3" | "B4") { iso.into() } else { upper }
@@ -4213,6 +4213,7 @@ impl Model {
 
     /// [`Model::resolve`] of a model made from `before`, which passed [`Model::check`], so held no id for a GUID: only what
     /// changed since (what a command changed, what an undo brought back) can hold one.
+    #[doc(hidden)]
     pub fn resolve_changed(&mut self, before: &Model) {
         let among = match self.elements.touched() {
             Some(touched) => Some(touched),
@@ -4348,7 +4349,7 @@ impl Model {
 
     /// [`Model::model_extent`], of `corners`, in plan: those of [`crate::view3d::solids`] of this model, or the points
     /// that may be farthest among them.
-    pub fn model_extent_of(&self, corners: impl Iterator<Item = P2>) -> [P2; 2] {
+    pub(crate) fn model_extent_of(&self, corners: impl Iterator<Item = P2>) -> [P2; 2] {
         // The grids, scans and drawings, in the order of their ids, from the lookup.
         let lookup = self.lookup();
         let others: BTreeSet<Id> = lookup.grids().chain(lookup.rare("pointcloud")).chain(lookup.rare("cadimport")).collect();
@@ -4546,7 +4547,7 @@ impl Model {
     }
 
     /// Whether column `c` (a structural one, a footing) spans height `z`: from its bottom, `z` or below, to its top, above.
-    pub fn column_spans(&self, c: &Column, z: f64) -> bool {
+    pub(crate) fn column_spans(&self, c: &Column, z: f64) -> bool {
         let (bottom, top) = self.span(c.level, c.base_offset, c.top_level, c.height);
         bottom <= z && z < top
     }
@@ -4581,7 +4582,7 @@ impl Model {
     }
 
     /// Whether the wall spans height `z`.
-    pub fn spans(&self, w: &Wall, z: f64) -> bool {
+    pub(crate) fn spans(&self, w: &Wall, z: f64) -> bool {
         self.base_z(w) <= z && z < self.top_z(w)
     }
 
@@ -5595,7 +5596,7 @@ impl Model {
     }
 
     /// Every shaft's span and plan box, as [`Model::less_shafts`] asks of them, by id.
-    pub fn shaft_table(&self) -> Vec<crate::derived::ShaftReach> {
+    pub(crate) fn shaft_table(&self) -> Vec<crate::derived::ShaftReach> {
         let mut table = Vec::new();
         for id in self.rare("shaft") {
             let Some(Element::Shaft(sh)) = self.elements.get(id) else { continue };
@@ -6514,7 +6515,7 @@ impl Model {
     }
 
     /// [`Model::bounding_lines`], the walls' joins found through `index`, or among every wall without one.
-    pub fn bounding_lines_in(&self, level: impl Key, index: Option<&walls::Index>) -> Vec<(P2, P2)> {
+    pub(crate) fn bounding_lines_in(&self, level: impl Key, index: Option<&walls::Index>) -> Vec<(P2, P2)> {
         let walls = self.wall_segments(&level, index, true, &|_| true);
         let mut lines: Vec<(P2, P2)> = walls.iter().map(|&(a, b, _)| (a, b)).collect();
         lines.extend(self.separators(level).into_iter().map(|(a, b)| (to_centre(b, a, &walls), to_centre(a, b, &walls))));
@@ -6528,7 +6529,7 @@ impl Model {
 
     /// The walls that bound the rooms of `level` (with `rooms`, those whose Room Bounding is on), by id.
     /// (Those whose heights reach the rooms' height, from the lookup when it is made; else among every element.)
-    pub fn bounding_walls<'a>(&'a self, level: &'a impl Key, rooms: bool) -> impl Iterator<Item = Id> + 'a {
+    pub(crate) fn bounding_walls<'a>(&'a self, level: &'a impl Key, rooms: bool) -> impl Iterator<Item = Id> + 'a {
         let up = self.level(level).map_or(CUT_HEIGHT, |l| l.computation_height);
         let candidates: Box<dyn Iterator<Item = Id> + 'a> = match self.derived.made(&self.elements) {
             Some(look) => Box::new(look.walls_at(self.elevation(level) + up).into_iter()),
@@ -6539,7 +6540,7 @@ impl Model {
 
     /// [`Model::room_lines_in`] at the walls' centre lines, of the walls `wall` keeps and the separation lines and column faces
     /// whose boxes `near` keeps: what rooms near some place are found among, without the rest of the level's.
-    pub fn room_lines_near(
+    pub(crate) fn room_lines_near(
         &self,
         level: Guid,
         index: Option<&walls::Index>,
@@ -6587,7 +6588,7 @@ impl Model {
     }
 
     /// [`Model::face_lines`] (with `rooms`, of the walls whose Room Bounding is on), the walls' joins found through `index`.
-    pub fn face_lines_in(&self, level: impl Key, index: Option<&walls::Index>, rooms: bool) -> Vec<(P2, P2)> {
+    pub(crate) fn face_lines_in(&self, level: impl Key, index: Option<&walls::Index>, rooms: bool) -> Vec<(P2, P2)> {
         self.bounding_walls(&level, rooms)
             .flat_map(|id| geom::ring_edges(&walls::outline_in(self, id, index)).collect::<Vec<_>>())
             .collect()
@@ -6691,6 +6692,7 @@ impl Model {
     }
 
     /// [`Model::room_lines`], the walls' joins found through `index`, or among every wall without one.
+    #[doc(hidden)]
     pub fn room_lines_in(&self, level: impl Key, at: RoomArea, index: Option<&walls::Index>) -> Vec<(P2, P2)> {
         let level = self.guid(level);
         let mut lines = match at {
@@ -8149,6 +8151,7 @@ impl Model {
 
     /// Whether everything but the elements and the ids still to give is the same in both. Every field is named, so a new
     /// one must say how it compares.
+    #[doc(hidden)]
     pub fn same_settings(&self, o: &Model) -> bool {
         let Model {
             format,
@@ -8301,6 +8304,7 @@ impl Model {
 #[cfg(debug_assertions)]
 thread_local! {
     /// How many times this thread's [`Model::check_changed`] checked the whole model.
+    #[doc(hidden)]
     pub static FALLBACKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
@@ -8358,7 +8362,7 @@ fn camera_ok(who: &str, cam: &ViewCamera) -> Result<(), String> {
 
 /// Whether `r` is a view range that makes sense: usable numbers running top ≥ cut plane ≥ bottom ≥
 /// view depth.
-pub fn range_ok(who: &str, r: &ViewRange) -> Result<(), String> {
+pub(crate) fn range_ok(who: &str, r: &ViewRange) -> Result<(), String> {
     for (what, v) in [("cut", r.cut), ("bottom", r.bottom), ("depth", r.depth)].into_iter().chain(r.top.map(|t| ("top", t))) {
         coord(&format!("{who} view range {what}"), v)?;
     }
@@ -8455,7 +8459,7 @@ fn ccw(ring: &[P2]) -> Vec<P2> {
 /// is, or convex pieces once a hole cuts it: the triangles round the holes (`triangulation::constrained`); or, where that
 /// refuses them or its triangles miss some of the area (a hole over or along the outline's edge), the outline cut by each
 /// hole in turn, which leaves thousands of slivers round finely curved ones.
-pub fn solid(loops: &[Vec<P2>], holes: &[Vec<P2>]) -> Vec<Vec<P2>> {
+pub(crate) fn solid(loops: &[Vec<P2>], holes: &[Vec<P2>]) -> Vec<Vec<P2>> {
     let Some((outline, inner)) = loops.split_first() else { return Vec::new() };
     let cuts: Vec<Vec<P2>> = inner.iter().chain(holes).cloned().collect();
     if cuts.is_empty() {

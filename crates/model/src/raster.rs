@@ -206,7 +206,7 @@ struct Pixels {
 
 impl Pixels {
     /// `base` and each level under it, down to a pixel.
-    pub fn new(base: Level, keep_lines: bool) -> Pixels {
+    fn new(base: Level, keep_lines: bool) -> Pixels {
         let mut levels = vec![base];
         while let Some(last) = levels.last()
             && (last.w > 1 || last.h > 1)
@@ -781,7 +781,9 @@ pub struct PdfReads {
     /// Whether every PDF must be read elsewhere and given ([`crate::engine::Session::give_pdf_page`]) before a command
     /// takes it.
     pub elsewhere: bool,
+    #[doc(hidden)]
     pub outlines: BTreeMap<String, PdfOutline>,
+    #[doc(hidden)]
     pub pages: BTreeMap<(String, usize, u32), Arc<PdfRead>>,
 }
 
@@ -803,7 +805,7 @@ impl PdfReads {
 
 /// Draws image `t` on `d` over the pixels `corners` (the picture's top left, top right, bottom right and bottom left, px of
 /// `d`), as far as they lie in it: one picture, each of its pixels the image's nearest at the level that is about its size.
-pub fn draw(d: &mut Drawing, t: &ImageType, corners: [(f64, f64); 4]) {
+pub(crate) fn draw(d: &mut Drawing, t: &ImageType, corners: [(f64, f64); 4]) {
     let Some(p) = t.levels() else { return };
     let Some(base) = p.levels.first() else { return };
     let (vw, vh) = (f64::from(d.view.width), f64::from(d.view.height));

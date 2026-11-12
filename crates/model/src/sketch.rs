@@ -305,6 +305,7 @@ impl Profile {
 thread_local! {
     /// What the sketches solved on this thread have taken, in steps: the pieces they were cut into, the pairs of pieces looked at,
     /// the points of loops looked into. The hostile tests assert on it, as time varies with the load of the machine.
+    #[doc(hidden)]
     pub static SPENT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
@@ -780,7 +781,7 @@ fn instead(m: &Model, e: &Element, params: &serde_json::Value, name: &str) -> St
 
 /// The most corners [`was_as_bad`] compares in one [`Model::check_edits`], so a file of thousands of bad outlines can't make a
 /// command take long: past it an outline is judged as the new one it is.
-pub const MAX_COMPARED: usize = 4_000_000;
+const MAX_COMPARED: usize = 4_000_000;
 
 /// The elements of `before` that `params` names in `ids` or `id`, by id or GUID: what a copy is made of.
 fn given(before: &Model, params: &serde_json::Value) -> Vec<Id> {
@@ -807,7 +808,7 @@ fn was_as_bad(before: &Model, given: &[Id], id: Id, e: &Element, ring: &[P2], wo
 
 /// Whether ring `b` is ring `a` moved, turned or mirrored: the same edge lengths and turns between them, from some corner of
 /// it and either way round. `work` counts the corners compared and stops it at [`MAX_COMPARED`].
-pub fn congruent(a: &[P2], b: &[P2], work: &mut usize) -> bool {
+fn congruent(a: &[P2], b: &[P2], work: &mut usize) -> bool {
     let n = a.len();
     if n != b.len() || n < 3 || *work > MAX_COMPARED {
         return false;
@@ -907,7 +908,7 @@ fn overlap(a: &[f64; 4], b: &[f64; 4]) -> bool {
 }
 
 impl Boxes {
-    pub fn new(boxes: Vec<[f64; 4]>) -> Boxes {
+    fn new(boxes: Vec<[f64; 4]>) -> Boxes {
         let mut order: Vec<usize> = (0..boxes.len()).collect();
         let mut nodes = Vec::new();
         if !boxes.is_empty() {

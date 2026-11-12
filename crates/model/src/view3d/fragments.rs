@@ -21,7 +21,9 @@ pub struct FragmentStats {
     pub retained_bytes: usize,
 }
 
+#[doc(hidden)]
 pub struct Fragment {
+    #[doc(hidden)]
     pub solids: Vec<Arc<Solid>>,
     points: Option<Vec<P3>>,
     bounds: Option<[P3; 2]>,
@@ -55,6 +57,7 @@ impl Fragment {
         bytes
     }
 
+    #[doc(hidden)]
     pub fn placed(&self, m: &Model, e: &Element) -> impl Iterator<Item = Prepared> + '_ {
         // Appearance is deliberately absent from the geometry key. Material ordinals
         // are resolved afresh too, so adding an earlier texture cannot leave stale ids.
@@ -66,8 +69,10 @@ impl Fragment {
     }
 }
 
+#[doc(hidden)]
 pub struct Entry {
     key: Key,
+    #[doc(hidden)]
     pub fragment: Arc<Fragment>,
     used: u64,
     bytes: usize,
@@ -84,6 +89,7 @@ const ROOT_BYTES: usize = 12 * (std::mem::size_of::<Entry>() + std::mem::size_of
 pub struct SectionCache {
     budget: usize,
     clock: u64,
+    #[doc(hidden)]
     pub entries: BTreeMap<Id, Entry>,
     order: BTreeSet<(u64, Id)>,
     stats: FragmentStats,

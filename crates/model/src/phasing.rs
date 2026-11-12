@@ -230,7 +230,7 @@ fn named(who: &str, n: &str) -> Result<(), String> {
 }
 
 /// Whether the project's phases, phase filters, overrides and option sets are sound.
-pub fn check_project(m: &Model) -> Result<(), String> {
+pub(crate) fn check_project(m: &Model) -> Result<(), String> {
     if m.phases.is_empty() || m.phases.len() > MAX_PHASES {
         return Err(format!("a project has 1 to {MAX_PHASES} phases, not {}", m.phases.len()));
     }
@@ -288,7 +288,7 @@ pub fn option_exists(m: &Model, value: &str) -> bool {
 }
 
 /// Whether `v`, the value of built-in parameter `key`, is one the project has; none for another key.
-pub fn check_value(m: &Model, who: &str, key: &str, v: &Value) -> Option<Result<(), String>> {
+pub(crate) fn check_value(m: &Model, who: &str, key: &str, v: &Value) -> Option<Result<(), String>> {
     let text = v.as_str();
     Some(match key {
         CREATED | DEMOLISHED => match text {
@@ -304,7 +304,7 @@ pub fn check_value(m: &Model, who: &str, key: &str, v: &Value) -> Option<Result<
 }
 
 /// Whether the elements' phases are in order: nothing taken down before it was made.
-pub fn check_order(m: &Model, who: &str, e: &Element) -> Result<(), String> {
+pub(crate) fn check_order(m: &Model, who: &str, e: &Element) -> Result<(), String> {
     let created = value(m, e, CREATED).and_then(|n| index(m, n)).unwrap_or(0);
     if let Some(d) = value(m, e, DEMOLISHED).and_then(|n| index(m, n))
         && d < created
@@ -315,6 +315,7 @@ pub fn check_order(m: &Model, who: &str, e: &Element) -> Result<(), String> {
 }
 
 /// Every element holding built-in parameter `key` with value `value`.
+#[doc(hidden)]
 pub fn holders(m: &Model, key: &str, value: &str) -> Vec<Id> {
     m.elements
         .iter()
@@ -324,6 +325,7 @@ pub fn holders(m: &Model, key: &str, value: &str) -> Vec<Id> {
 }
 
 /// Name the first phase in what was made in it, which holds no value: before another comes first, or it goes.
+#[doc(hidden)]
 pub fn pin_first(m: &mut Model) {
     let Some(first) = m.phases.first().cloned() else { return };
     // A door or window follows its wall, which is named here too.
@@ -342,6 +344,7 @@ pub fn pin_first(m: &mut Model) {
 
 /// Whether anything holds phase `name`: an element made or taken down in it (the first phase holds what has no value),
 /// a view or a template showing it, or the session.
+#[doc(hidden)]
 pub fn holds_phase(m: &Model, session: Option<&str>, name: &str) -> bool {
     session == Some(name)
         || !holders(m, CREATED, name).is_empty()
@@ -354,6 +357,7 @@ pub fn holds_phase(m: &Model, session: Option<&str>, name: &str) -> bool {
 
 /// What was made, taken down and shown in phase `from` is now `to`'s (phase `from` is already out of the list or renamed):
 /// the elements, the views and the templates. Nothing is taken down before it was made.
+#[doc(hidden)]
 pub fn move_phase(m: &mut Model, from: &str, to: Option<&str>) {
     let Some(to) = to else { return };
     for key in [CREATED, DEMOLISHED] {
@@ -409,6 +413,7 @@ fn rename_in_rules(m: &mut Model, field: &str, old: &str, new: &str) {
 }
 
 /// Option `option` of set `set` is gone: no view or template chooses it.
+#[doc(hidden)]
 pub fn forget_option(m: &mut Model, set: &str, option: &str) {
     let forget = |g: &mut Graphics| {
         if g.options.get(set).is_some_and(|o| o == option) {
@@ -420,6 +425,7 @@ pub fn forget_option(m: &mut Model, set: &str, option: &str) {
 }
 
 /// Option `old` of set `set` is `new` now: in the set, in the elements in it and in the views that choose it.
+#[doc(hidden)]
 pub fn rename_option(m: &mut Model, set: &str, old: &str, new: &str) {
     m.library.renamed(&crate::library::Kind::DesignOption, &format!("{set}: {old}"), &format!("{set}: {new}"));
     if let Some(s) = m.option_sets.get_mut(set) {
@@ -446,6 +452,7 @@ pub fn rename_option(m: &mut Model, set: &str, old: &str, new: &str) {
 }
 
 /// Set `old` is `new` now: its options, the elements in them and the views that choose among them.
+#[doc(hidden)]
 pub fn rename_set(m: &mut Model, old: &str, new: &str) {
     m.library.set_renamed(old, new);
     let Some(s) = m.option_sets.remove(old) else { return };
@@ -470,6 +477,7 @@ pub fn rename_set(m: &mut Model, old: &str, new: &str) {
 }
 
 /// Set `set` is gone: no view chooses among its options.
+#[doc(hidden)]
 pub fn forget_set(m: &mut Model, set: &str) {
     m.elements.values_mut().filter_map(crate::graphics::graphics_mut).for_each(|g| {
         g.options.remove(set);

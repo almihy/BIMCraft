@@ -103,7 +103,7 @@ impl Kind {
         }
     }
 
-    pub fn parse(s: &str) -> Option<Kind> {
+    pub(crate) fn parse(s: &str) -> Option<Kind> {
         Some(match s {
             "material" => Kind::Material,
             "picture" => Kind::Picture,
@@ -559,7 +559,7 @@ impl Library {
     /// This library's parts and held ids, with `entries` for its entries: each with its id, or none, and then an id is made for
     /// it (counting down below the lowest this library has held, to one `free` says nothing else has). What live editing makes
     /// of the library when it renames, adds and takes entries away together. An error where two have an id, a name or a GUID.
-    pub fn rebuilt(&self, entries: Vec<(Option<Id>, Entry)>, free: &dyn Fn(Id) -> bool) -> Result<Library, String> {
+    pub(crate) fn rebuilt(&self, entries: Vec<(Option<Id>, Entry)>, free: &dyn Fn(Id) -> bool) -> Result<Library, String> {
         let mut out = Library { parts: self.parts.clone(), lowest: self.lowest, ..Library::default() };
         let mut made = Vec::new();
         for (id, e) in entries {
@@ -1104,6 +1104,7 @@ impl Model {
     /// GUIDs as [`Model::sync_library_with`]'s `guid` makes them), and the parts of what it took away or redrew forgotten,
     /// without a walk through every element. False, having changed nothing, where more than elements changed: then the
     /// whole sync is the caller's to do.
+    #[doc(hidden)]
     pub fn sync_since_with(&mut self, before: &Model, guid: &mut dyn FnMut(&Model, Option<&Kind>, &str) -> Guid) -> bool {
         let crate::ids::Changed::Ids(changed) = self.changed_since(before) else { return false };
         if self.library.parts != before.library.parts {
@@ -1233,6 +1234,7 @@ impl Model {
     }
 
     /// [`Model::sync_since_with`], new GUIDs fresh.
+    #[doc(hidden)]
     pub fn sync_since(&mut self, before: &Model) -> bool {
         self.sync_since_with(before, &mut |m: &Model, _: Option<&Kind>, _: &str| m.elements.fresh())
     }
@@ -1278,6 +1280,7 @@ impl Model {
     }
 
     /// Every part's id and GUID taken away, for [`Model::sync_library_with`] to give them anew.
+    #[doc(hidden)]
     pub fn forget_parts(&mut self) {
         let t = &mut *self.types;
         let layers = t
@@ -1654,7 +1657,7 @@ impl Model {
 
     /// Every name this model holds of a library entry (its elements', its types', its views'…) its GUID, and the values of
     /// project parameters keyed by theirs: its library names them.
-    pub fn refs_to_file(&mut self) {
+    pub(crate) fn refs_to_file(&mut self) {
         let lib = self.library.clone();
         // While the families have their names: their instance parameters' values, by the parameters' GUIDs.
         self.rekey_family_params(
@@ -1670,7 +1673,7 @@ impl Model {
     }
 
     /// What a file's GUIDs name, named again: what [`Model::refs_to_file`] did, undone.
-    pub fn refs_from_file(&mut self) {
+    pub(crate) fn refs_from_file(&mut self) {
         let lib = self.library.clone();
         let name = |kind: &Kind, text: &str| {
             let (_, e) = lib.by_guid(Guid::parse(text).filter(|g| g.pending().is_none())?)?;
@@ -1689,7 +1692,7 @@ impl Model {
     }
 
     /// What a file's GUIDs name, named again, and what has no id and GUID given them ([`Model::sync_library_stable`]).
-    pub fn names_from_file(&mut self) {
+    pub(crate) fn names_from_file(&mut self) {
         self.refs_from_file();
         self.sync_library_stable();
     }
@@ -1697,7 +1700,7 @@ impl Model {
     /// [`Model::sync_library`], each entry (and part) with no GUID given the one this project makes of its kind and name
     /// ([`stable_guid`]), the same in every copy of it: a file that holds none (from before the library, or before a kind of
     /// entry), read in two places, gives the same GUIDs in both, and so do two copies that make an entry at once.
-    pub fn sync_library_stable(&mut self) {
+    pub(crate) fn sync_library_stable(&mut self) {
         let seed = self.uid;
         self.sync_library_with(&mut |_, kind, name| stable_guid(seed, kind, name));
     }

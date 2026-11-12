@@ -215,7 +215,7 @@ pub(super) fn site(d: &mut Drawing, id: Id, s: &Site) {
     d.own(None);
 }
 
-pub fn bounds(polys: &[Poly]) -> Option<(P2, P2)> {
+fn bounds(polys: &[Poly]) -> Option<(P2, P2)> {
     let mut it = polys.iter().flat_map(|p| p.outer.iter().copied());
     let first = it.next()?;
     Some(it.fold((first, first), |(lo, hi), q| (P2(lo.0.min(q.0), lo.1.min(q.1)), P2(hi.0.max(q.0), hi.1.max(q.1)))))

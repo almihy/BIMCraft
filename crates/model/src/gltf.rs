@@ -35,7 +35,7 @@ pub struct Export {
 }
 
 /// Whether a scene of `n` triangles can be written, and if not, why.
-pub fn check_count(n: usize) -> Result<(), String> {
+fn check_count(n: usize) -> Result<(), String> {
     if n == 0 {
         return Err(
             "the default 3D view shows nothing to export: draw something, or show again what Visibility/Graphics hides there".into()

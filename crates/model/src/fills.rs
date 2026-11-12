@@ -295,7 +295,7 @@ pub const MAX_WORK: usize = 5_000_000;
 thread_local! {
     /// What [`strokes`] has done on this thread: the edges tried against a line, the dashes stepped over. The tests assert on it,
     /// not on time, which varies with the load of the machine.
-    pub static DONE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static DONE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(debug_assertions)]

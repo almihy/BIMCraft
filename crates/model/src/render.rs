@@ -35,23 +35,26 @@ pub use crate::view3d::{FragmentStats, SectionCache};
 use crate::walls::{self, Axis};
 use crate::{font, massing, sheet, stairs};
 
-pub mod dimensions;
+mod dimensions;
 use dimensions::dimension;
+#[doc(hidden)]
 pub mod regions;
 mod site;
 
+#[doc(hidden)]
 pub const INK: Rgb = Rgb(25, 25, 25);
 const FAINT: Rgb = Rgb(120, 120, 120);
 const GRID: Rgb = Rgb(60, 100, 150);
 /// A mass's outline, dashed.
 const MASS: Rgb = Rgb(88, 112, 168);
 /// Room for grid bubbles and the view title around the drawing, px.
+#[doc(hidden)]
 pub const MARGIN: f64 = 70.0;
 const BUBBLE: f32 = 11.0;
 
 impl Drawing {
     /// Whether primitive `i`'s corners are mitred ([`Part::mitred`]).
-    pub fn mitred(&self, i: usize) -> bool {
+    pub(crate) fn mitred(&self, i: usize) -> bool {
         self.parts.get(i).is_none_or(|p| p.mitred())
     }
 }
@@ -117,11 +120,12 @@ pub struct Drawing {
     /// What it could not draw as asked, in English (a fill pattern too dense for the view): for a front end to say.
     pub notes: Vec<String>,
     /// What the pens draw in this view, mm on paper: the project's line weights at its scale.
-    pub weights: Weights,
+    pub(crate) weights: Weights,
     /// The element being drawn now, and the part of it.
     owner: Option<Id>,
-    pub part: Part,
+    pub(crate) part: Part,
     /// How big annotation is drawn, times the pixels it is drawn in: see [`annotation`].
+    #[doc(hidden)]
     pub k: f32,
     /// How many times [`sheet::DENSITY`] pixels a mm of the paper the view stands for is, so the pens' size: `k`, not
     /// clamped ([`paper_of`]).
@@ -152,27 +156,27 @@ impl Drawing {
         }
     }
     /// Finish the model layer before view-specific regions and annotation are drawn.
-    pub fn model_under_regions(&mut self, section: Option<Id>) {
+    pub(crate) fn model_under_regions(&mut self, section: Option<Id>) {
         self.linked_under();
         self.regions = regions::Layers::new(self.prims.len(), section);
     }
     /// The picture the section drawn under the regions is over, which they keep the ink of: given by whoever has it, else drawn
     /// when a region first wants it.
-    pub fn picture(&mut self, m: &Model, section: Id, image: &Image) {
+    pub(crate) fn picture(&mut self, m: &Model, section: Id, image: &Image) {
         if regions::wanted(m, section) {
             self.regions.picture(image, self.view);
         }
     }
 
     /// What the primitives pushed next draw.
-    pub fn own(&mut self, owner: Option<Id>) {
+    pub(crate) fn own(&mut self, owner: Option<Id>) {
         self.owner = owner;
     }
     /// The part of their element the primitives pushed next draw.
-    pub fn part(&mut self, part: Part) {
+    pub(crate) fn part(&mut self, part: Part) {
         self.part = part;
     }
-    pub fn push(&mut self, p: Prim) {
+    pub(crate) fn push(&mut self, p: Prim) {
         self.push_pen(p, None);
     }
     fn push_pen(&mut self, p: Prim, pen: Option<Pen>) {
@@ -182,7 +186,7 @@ impl Drawing {
         self.pens.push(pen);
     }
     /// A line through pixels `pts` in `pen`, `dash`ed if it says.
-    pub fn stroke(&mut self, pts: Vec<(f32, f32)>, pen: Pen, color: Rgb, dash: Option<Vec<f32>>, closed: bool) {
+    pub(crate) fn stroke(&mut self, pts: Vec<(f32, f32)>, pen: Pen, color: Rgb, dash: Option<Vec<f32>>, closed: bool) {
         let width = self.width(pen);
         self.push_pen(Prim::Line { pts, width, color, dash, closed }, Some(pen));
     }
@@ -207,7 +211,7 @@ impl Drawing {
 
     /// Each line's width as its pen draws it in this view, as annotation where `annotation` says its owner is, else as
     /// the model: the last step of drawing a view, once its overrides have set their pens.
-    pub fn weigh(&mut self, annotation: impl Fn(Option<Id>) -> bool) {
+    pub(crate) fn weigh(&mut self, annotation: impl Fn(Option<Id>) -> bool) {
         let (weights, k) = (self.weights, self.paper);
         for ((prim, owner), pen) in self.prims.iter_mut().zip(&self.owners).zip(&self.pens) {
             let Some(pen) = pen else { continue };
@@ -235,7 +239,7 @@ impl Drawing {
         }
     }
     /// What a link builds, first, so what the project draws lies over it: each kept in the order it was drawn in.
-    pub fn linked_under(&mut self) {
+    pub(crate) fn linked_under(&mut self) {
         let under = |o: &Option<Id>| o.is_some_and(crate::link::is_linked);
         if !self.owners.iter().any(under) {
             return;
@@ -258,7 +262,7 @@ impl Drawing {
     }
     /// Each line marked [`BY_CATEGORY`] in the pen its owner's object style gives, cut or in projection as its part is: before
     /// a view's overrides set theirs.
-    pub fn by_category(&mut self, style: impl Fn(Option<Id>) -> ObjectStyle) {
+    pub(crate) fn by_category(&mut self, style: impl Fn(Option<Id>) -> ObjectStyle) {
         for ((pen, owner), part) in self.pens.iter_mut().zip(&self.owners).zip(&self.parts) {
             if *pen == Some(BY_CATEGORY) {
                 let st = style(*owner);
@@ -267,7 +271,7 @@ impl Drawing {
         }
     }
     /// `rings` filled, each turned the same way round, so where they overlap or meet they fill as one.
-    pub fn fill(&mut self, rings: &[Vec<P2>], color: Rgb) {
+    pub(crate) fn fill(&mut self, rings: &[Vec<P2>], color: Rgb) {
         if rings.is_empty() {
             return;
         }
@@ -282,17 +286,18 @@ impl Drawing {
         self.push(Prim::Fill { rings, color });
     }
     /// `pts` joined in `pen`, as wide as it is on the paper the view stands for.
-    pub fn line(&mut self, pts: &[P2], pen: Pen, color: Rgb, closed: bool) {
+    pub(crate) fn line(&mut self, pts: &[P2], pen: Pen, color: Rgb, closed: bool) {
         let pts = pts.iter().map(|p| self.view.px(*p)).collect();
         self.stroke(pts, pen, color, None, closed);
     }
     /// [`Drawing::line`], dashed.
-    pub fn dashed(&mut self, pts: &[P2], pen: Pen, color: Rgb, closed: bool) {
+    pub(crate) fn dashed(&mut self, pts: &[P2], pen: Pen, color: Rgb, closed: bool) {
         let pts = pts.iter().map(|p| self.view.px(*p)).collect();
         self.stroke(pts, pen, color, Some(vec![10.0, 5.0]), closed);
     }
     /// How many pixels wide `pen` draws here as the model: 0 for a hairline, which every painter draws as thin as it
     /// can. [`Drawing::weigh`] sizes annotation's at the end.
+    #[doc(hidden)]
     pub fn width(&self, pen: Pen) -> f32 {
         (self.weights.mm(pen, false) * sheet::DENSITY) as f32 * self.paper
     }
@@ -316,13 +321,13 @@ impl Drawing {
     }
 
     /// `text` centred on `at` px, capitals `height` px tall.
-    pub fn text(&mut self, text: &str, at: (f32, f32), height: f32, color: Rgb) {
+    pub(crate) fn text(&mut self, text: &str, at: (f32, f32), height: f32, color: Rgb) {
         self.text_turned(text, at, height, 0.0, color);
     }
 
     /// What's drawn cropped to the box from pixel `lo` to `hi`, but for the primitives of the
     /// elements `keep` takes.
-    pub fn crop(&mut self, lo: (f32, f32), hi: (f32, f32), keep: impl Fn(Option<Id>) -> bool) {
+    pub(crate) fn crop(&mut self, lo: (f32, f32), hi: (f32, f32), keep: impl Fn(Option<Id>) -> bool) {
         let (prims, owners, parts) = (std::mem::take(&mut self.prims), std::mem::take(&mut self.owners), std::mem::take(&mut self.parts));
         let pens = std::mem::take(&mut self.pens);
         for (((prim, owner), part), pen) in prims.into_iter().zip(owners).zip(parts).zip(pens) {
@@ -337,7 +342,7 @@ impl Drawing {
 
     /// `text` centred on `(x, y)` px, capitals `height` px tall, turned `angle` radians clockwise
     /// on screen (y runs down).
-    pub fn text_turned(&mut self, text: &str, (x, y): (f32, f32), height: f32, angle: f32, color: Rgb) {
+    pub(crate) fn text_turned(&mut self, text: &str, (x, y): (f32, f32), height: f32, angle: f32, color: Rgb) {
         let (s, c) = angle.sin_cos();
         let w = font::width(text, height);
         let part = std::mem::replace(&mut self.part, Part::Text);
@@ -475,6 +480,7 @@ fn cut_outlines(m: &Model, elements: &[(Id, &Element)], z: f64, look: &Look, ind
 /// What a column (a structural one, a footing) or a run (a beam, a strip footing) `id` of `e` takes in plan, and the
 /// heights it reaches: its outline, its bottom and its top. A run's outline is its joined one, through `index`, as a
 /// wall's is in a plan.
+#[doc(hidden)]
 pub fn stands(m: &Model, id: Id, e: &Element, index: Option<&walls::Index>) -> Option<(Vec<P2>, f64, f64)> {
     if let Some(col) = e.column() {
         let (bottom, top) = m.span(col.level, col.base_offset, col.top_level, col.height);
@@ -727,7 +733,7 @@ impl<'a> BoxGrid<'a> {
     /// The most cells one box goes in.
     const MAX_CELLS: i64 = 256;
 
-    pub fn new(boxes: &'a [(P2, P2)], past: f64) -> BoxGrid<'a> {
+    fn new(boxes: &'a [(P2, P2)], past: f64) -> BoxGrid<'a> {
         // Cells about as big as a box is, by the median of their larger sides.
         let mut sides: Vec<f64> =
             boxes.iter().map(|(lo, hi)| (hi.0 - lo.0).max(hi.1 - lo.1)).filter(|s| s.is_finite() && *s >= 0.0).collect();
@@ -948,7 +954,7 @@ pub fn plan(m: &Model, level: impl Key, width: u32, height: u32) -> Drawing {
 
 /// What a plan of `level` takes on paper: all it shows, or cropped, its crop region and the grids'
 /// ends at its edges.
-pub fn plan_extent(m: &Model, level: impl Key) -> Vec<P2> {
+pub(crate) fn plan_extent(m: &Model, level: impl Key) -> Vec<P2> {
     match m.shown_crop(level) {
         None => plan_shows(m, level),
         Some([lo, hi]) => {
@@ -964,6 +970,7 @@ pub fn plan_extent(m: &Model, level: impl Key) -> Vec<P2> {
 
 /// Everything a plan of `level` shows, uncropped: its walls, floors, rooms, dimensions, tags,
 /// notes and spot elevations, the grids, the marks of the sections and elevations, and its CAD imports.
+#[doc(hidden)]
 pub fn plan_shows(m: &Model, plan: impl Key) -> Vec<P2> {
     let key = m.guid(plan);
     let shows = plan_shows_among(m, key, true);
@@ -1270,8 +1277,10 @@ pub struct SectionWork {
     of: GeometryKey,
     solids: view3d::PreparedSolids,
     ranges: std::collections::HashMap<Id, std::ops::Range<usize>>,
+    #[doc(hidden)]
     pub placed: Vec<(Id, Vec<[f64; 3]>)>,
     /// Each element's box (as `placed` lists them, by id).
+    #[doc(hidden)]
     pub boxes: Vec<Option<[[f64; 3]; 2]>>,
     extent: std::sync::OnceLock<[P2; 2]>,
     /// Beside `placed`, by place, not by id: a framing query asks of every element, and a hash each would cost more than
@@ -1344,7 +1353,7 @@ impl SectionWork {
         }
     }
 
-    pub fn from_prepared_cancellable(
+    pub(crate) fn from_prepared_cancellable(
         m: &Model,
         (solids, placed, boxes): view3d::PreparedMade,
         cancelled: &(dyn Fn() -> bool + Sync),
@@ -1384,6 +1393,7 @@ impl SectionWork {
     }
 
     /// The box of element `id`: `placed` lists elements as the model does, by id. None tells a caller nothing of where it is.
+    #[doc(hidden)]
     pub fn box_of(&self, id: Id) -> Option<&[[f64; 3]; 2]> {
         let at = self.placed.binary_search_by_key(&id, |(id, _)| *id).ok()?;
         self.boxes.get(at)?.as_ref()
@@ -1550,6 +1560,7 @@ pub fn crop_region(m: &Model, id: impl Key) -> Option<[P2; 2]> {
 
 /// The heights section or elevation `id` would crop to: all of the model's, as far as its grids
 /// reach past them.
+#[doc(hidden)]
 pub fn section_heights(m: &Model, id: impl Key) -> [f64; 2] {
     let (lo, hi) = heights(m, &SectionWork::new(m), &Look::of(m, id), &|| false).unwrap_or((0.0, 3000.0));
     [lo - GRID_PAST, hi + GRID_PAST]
@@ -1558,7 +1569,7 @@ pub fn section_heights(m: &Model, id: impl Key) -> [f64; 2] {
 /// How far along its line, from its start, section or elevation `v` shows: cropped, from its start
 /// to its end; else as far as anything it shows reaches (what lies beyond its line, its levels and
 /// its grids), and its line.
-pub fn span(m: &Model, w: &SectionWork, v: &Section, look: &Look, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<(f64, f64)> {
+fn span(m: &Model, w: &SectionWork, v: &Section, look: &Look, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<(f64, f64)> {
     let len = v.start.dist(v.end);
     if v.crop.is_some() {
         return Some((0.0, len));
@@ -1688,7 +1699,7 @@ pub fn section_fit_cancellable(
 /// What section or elevation `id` shows, along its line and up, at `scale` px per mm, its annotation `k` times the size it is
 /// laid out at: from its start to its end, past its lowest and highest heights, with room past the end for the widest
 /// level name.
-pub fn section_extent(m: &Model, w: &SectionWork, id: impl Key, scale: f64, k: f32) -> Option<[P2; 2]> {
+pub(crate) fn section_extent(m: &Model, w: &SectionWork, id: impl Key, scale: f64, k: f32) -> Option<[P2; 2]> {
     let [lo, hi] = section_bare(m, w, id, &|| false)?;
     Some([lo, P2(hi.0 + f64::from(k * level_names(m)) / scale, hi.1)])
 }
@@ -1804,7 +1815,7 @@ pub fn section_picture_cancellable(
 }
 
 /// [`section_picture`], of `w`'s solids and points.
-pub fn section_picture_in(m: &Model, w: &SectionWork, id: impl Key, view: View, tints: &[(Id, Rgb)]) -> Option<Image> {
+pub(crate) fn section_picture_in(m: &Model, w: &SectionWork, id: impl Key, view: View, tints: &[(Id, Rgb)]) -> Option<Image> {
     let (cam, clip) = section_camera(m, id, view)?;
     let look = Look::of(m, id);
     let picture = Scene::section(m, (&w.solids, &w.ranges, &w.placed, &w.boxes), &cam, &clip, &look).cut_in(&cam, &clip, tints, &look);
@@ -1845,7 +1856,7 @@ pub fn section_at_over(m: &Model, id: impl Key, view: View, k: f32, picture: &Im
 }
 
 /// [`section_at_over`], of `w`'s solids and points.
-pub fn section_at_over_in(m: &Model, w: &SectionWork, id: impl Key, view: View, k: f32, picture: &Image) -> Drawing {
+pub(crate) fn section_at_over_in(m: &Model, w: &SectionWork, id: impl Key, view: View, k: f32, picture: &Image) -> Drawing {
     section_in(m, w, id, view, k, f64::from(k) * sheet::DENSITY / view.scale, Some(picture))
 }
 
@@ -2524,7 +2535,7 @@ fn cad_imports(d: &mut Drawing, m: &Model, key: crate::ids::Guid, level: crate::
 
 /// The images placed in view `key` (a plan, with a dependent view's parent's, a section, an elevation or a sheet) on `layer`
 /// that `look` shows (all on a sheet, which has none), each drawn over its corners in the view's terms.
-pub fn images(d: &mut Drawing, m: &Model, key: Guid, layer: crate::raster::DrawLayer, look: Option<&Look>) {
+pub(crate) fn images(d: &mut Drawing, m: &Model, key: Guid, layer: crate::raster::DrawLayer, look: Option<&Look>) {
     // Back to front, as Arrange orders them.
     let mut ids: Vec<(i32, Id)> = m
         .rare("image")
@@ -3443,14 +3454,14 @@ fn ceiling(d: &mut Drawing, m: &Model, c: &Ceiling) {
 }
 
 /// The corners of the box around `ring`.
-pub fn bounds(ring: &[P2]) -> Option<(P2, P2)> {
+fn bounds(ring: &[P2]) -> Option<(P2, P2)> {
     let first = *ring.first()?;
     Some(ring.iter().fold((first, first), |(lo, hi), p| (P2(lo.0.min(p.0), lo.1.min(p.1)), P2(hi.0.max(p.0), hi.1.max(p.1)))))
 }
 
 /// The part of the segment from `p` to `q` inside the box from `lo` to `hi` (Liang-Barsky); its
 /// ends as they were where they're inside.
-pub fn clip(p: P2, q: P2, lo: P2, hi: P2) -> Option<(P2, P2)> {
+pub(crate) fn clip(p: P2, q: P2, lo: P2, hi: P2) -> Option<(P2, P2)> {
     let d = q - p;
     let (mut t0, mut t1) = (0.0f64, 1.0f64);
     for (pk, qk) in [(-d.0, p.0 - lo.0), (d.0, hi.0 - p.0), (-d.1, p.1 - lo.1), (d.1, hi.1 - p.1)] {
@@ -3866,7 +3877,7 @@ fn override_patterns(d: &mut Drawing, m: &Model, pieces: &[Vec<P2>], cut: bool, 
 /// A filled region: over the paper where its type masks, its background pattern, then its foreground, each in its colour
 /// (a solid one filled, a drafting one's lengths mm on the view's paper, a model one's mm), then its boundary's lines in
 /// their style, unless it has none. A sketch that doesn't close draws nothing.
-pub fn filled_region(d: &mut Drawing, m: &Model, r: &FilledRegion) {
+pub(crate) fn filled_region(d: &mut Drawing, m: &Model, r: &FilledRegion) {
     let Some(t) = m.region_types.get(&r.type_name) else { return };
     let Ok(profile) = crate::sketch::solve(&r.sketch) else { return };
     let part = std::mem::replace(&mut d.part, Part::Pattern);
@@ -3915,7 +3926,7 @@ pub fn filled_region(d: &mut Drawing, m: &Model, r: &FilledRegion) {
 
 /// A detail line, in its style's pen, colour and pattern: its dashes as long on the paper the view stands for as the
 /// pattern says, solid where they'd be too small to see.
-pub fn detail_line(d: &mut Drawing, m: &Model, l: &DetailLine) {
+pub(crate) fn detail_line(d: &mut Drawing, m: &Model, l: &DetailLine) {
     let Some(st) = m.line_styles.get(&l.style) else { return };
     // A closed one is stroked as a ring, so its dashes and its corner run on round its first point.
     let closed = l.curve.is_closed() && l.insulation.is_none();
@@ -4166,7 +4177,7 @@ fn keep(d: &mut Drawing, prim: Prim, owner: Option<Id>, part: Part, pen: Option<
 }
 
 /// A detail group's members where it puts them: its regions under its lines and notes.
-pub fn detail_group(d: &mut Drawing, m: &Model, g: &crate::groups::DetailGroup) {
+pub(crate) fn detail_group(d: &mut Drawing, m: &Model, g: &crate::groups::DetailGroup) {
     let members = crate::groups::placed(m, g);
     for e in &members {
         if let Element::FilledRegion(r) = e {
@@ -4224,7 +4235,7 @@ impl Drawing {
 
 /// A text note: its lines down from its top left corner in its type's lettering, turned as it is, its border when its
 /// type has one, and its leader with an arrow at its end.
-pub fn note(d: &mut Drawing, m: &Model, n: &Note) {
+pub(crate) fn note(d: &mut Drawing, m: &Model, n: &Note) {
     let t = m.text_types.get(&n.type_name).cloned().unwrap_or_default();
     let layout = note_layout(m, n);
     let frame = d.note_frame(n);
@@ -4247,7 +4258,7 @@ pub fn note(d: &mut Drawing, m: &Model, n: &Note) {
 }
 
 /// `layout` lettered where `frame` puts it, in `color`: a note's text, or a title block's.
-pub fn lettering(d: &mut Drawing, layout: &crate::text::Layout, frame: NoteFrame, color: Rgb) {
+pub(crate) fn lettering(d: &mut Drawing, layout: &crate::text::Layout, frame: NoteFrame, color: Rgb) {
     let f = |(x, y): (f32, f32)| frame.px((f64::from(x), f64::from(y)));
     let k = frame.k;
     let part = std::mem::replace(&mut d.part, Part::Text);
@@ -4271,7 +4282,7 @@ pub fn lettering(d: &mut Drawing, layout: &crate::text::Layout, frame: NoteFrame
 }
 
 /// Where lettering with its top left at paper point `top_left`, turned `angle` degrees counter-clockwise, lands in `d`.
-pub fn frame_at(d: &Drawing, top_left: P2, angle: f64) -> NoteFrame {
+pub(crate) fn frame_at(d: &Drawing, top_left: P2, angle: f64) -> NoteFrame {
     NoteFrame { at: d.view.px(top_left), k: d.px(sheet::DENSITY as f32), angle: -(angle.to_radians() as f32) }
 }
 
@@ -4318,7 +4329,7 @@ fn slope_mark(d: &mut Drawing, at: P2, read: Option<(f64, Option<P2>)>) {
 }
 
 /// A height as a spot elevation reads it, signed: ±0, +3000, -600, +9'-10 1/8".
-pub fn height(units: Units, z: f64) -> String {
+fn height(units: Units, z: f64) -> String {
     let shown = units.length(z);
     match shown.strip_prefix('-') {
         Some(_) => shown,
@@ -4631,7 +4642,7 @@ fn hex(c: Rgb) -> String {
 }
 
 /// A dash's lengths, a space between each: as SVG's `stroke-dasharray` and PDF's `d` take them.
-pub fn spaced(dash: &[f32]) -> String {
+pub(crate) fn spaced(dash: &[f32]) -> String {
     dash.iter().map(f32::to_string).collect::<Vec<_>>().join(" ")
 }
 

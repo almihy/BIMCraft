@@ -380,7 +380,7 @@ impl<'de> Deserialize<'de> for Cad {
 
 /// A project file's drawings (`Model::cads`), read no further than a project may hold: the entry past [`MAX_CADS`] is refused
 /// before it's unpacked, and each is unpacked to no more than what the others leave of [`MAX_HELD`].
-pub fn deserialize_cads<'de, D: serde::Deserializer<'de>>(d: D) -> Result<std::collections::BTreeMap<String, Cad>, D::Error> {
+pub(crate) fn deserialize_cads<'de, D: serde::Deserializer<'de>>(d: D) -> Result<std::collections::BTreeMap<String, Cad>, D::Error> {
     use serde::de::{Error, MapAccess, Visitor};
     struct Cads;
     impl<'de> Visitor<'de> for Cads {

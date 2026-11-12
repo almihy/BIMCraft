@@ -173,7 +173,7 @@ impl Geom {
 
     /// Where [`unit_tube`] goes to be this run's, as `owner`'s copy of the `shape`th shape: its line along the tube's x, the
     /// radius along y and z, round its line from east (from the north, upright).
-    pub fn tube_place(&self, owner: crate::model::Id, shape: usize) -> crate::component_geometry::ComponentInstance {
+    pub(crate) fn tube_place(&self, owner: crate::model::Id, shape: usize) -> crate::component_geometry::ComponentInstance {
         let (d, r) = (unit(sub(self.b, self.a)), self.width / 2.0);
         let e1 = if self.vertical() { [1.0, 0.0, 0.0] } else { unit([-d[1], d[0], 0.0]) };
         let e2 = cross(d, e1);
@@ -190,6 +190,7 @@ fn overlapped(a: (f64, f64), b: (f64, f64)) -> bool {
 
 /// Whether a run lies flat along the plan — from the run itself, what [`joinable`] says of its worked-out
 /// geometry: upright it would be a column's stance and `end_offset` would make it slope.
+#[doc(hidden)]
 pub fn flat(r: &Run) -> bool {
     r.start.dist(r.end) > TOL && (r.end_offset.unwrap_or(r.offset) - r.offset).abs() <= TOL
 }
@@ -197,7 +198,7 @@ pub fn flat(r: &Run) -> bool {
 /// Whether `g` lies flat along the plan: upright it is a column's section, and with an `end_offset` its heights
 /// change along it, so neither can mitre against anything (they draw as they did). A round run joins as its plan
 /// outline shows it — its body is cut by the same planes as the outline (see [`tube_at`]).
-pub fn joinable(g: &Geom) -> bool {
+pub(crate) fn joinable(g: &Geom) -> bool {
     !g.vertical() && (g.b[2] - g.a[2]).abs() <= TOL
 }
 
@@ -399,7 +400,7 @@ pub fn outline(m: &Model, id: Id) -> Vec<P2> {
 }
 
 /// [`outline`], its joins found through `index` when there is one.
-pub fn outline_in(m: &Model, id: Id, index: Option<&walls::Index>) -> Vec<P2> {
+pub(crate) fn outline_in(m: &Model, id: Id, index: Option<&walls::Index>) -> Vec<P2> {
     let Some(e) = m.elements.get(id) else { return Vec::new() };
     let Some(g) = m.run_geom(e) else { return Vec::new() };
     if !joinable(&g) {
@@ -434,7 +435,7 @@ fn plain(g: &Geom, at_end: bool, cap: &[P2]) -> bool {
 /// flat, or where the cap is its plain square end — the tube already ends there, and stays the one shape a view
 /// shares between round runs of a material. The same plane twice (a mitre of equal widths, whose cap is one
 /// straight line through the node) is taken once.
-pub fn end_cuts(m: &Model, id: Id, at_end: bool, g: &Geom, index: Option<&walls::Index>) -> Option<Vec<(P2, P2, P2)>> {
+pub(crate) fn end_cuts(m: &Model, id: Id, at_end: bool, g: &Geom, index: Option<&walls::Index>) -> Option<Vec<(P2, P2, P2)>> {
     if !joinable(g) {
         return None;
     }
@@ -465,7 +466,7 @@ pub fn end_cuts(m: &Model, id: Id, at_end: bool, g: &Geom, index: Option<&walls:
 /// `tris` (a round run's tube, its first `caps` its flat end faces) cut by the planes of `cuts` — (p0, p1,
 /// inside) — the side `inside` lies on kept, each cut open filled back flat: the body ends where the outline
 /// says, so plan and 3D never show different joints. The flat faces stay first, for `caps` to count them.
-pub fn clip_tube(tris: Vec<[P3; 3]>, caps: usize, cuts: &[(P2, P2, P2)]) -> (Vec<[P3; 3]>, usize) {
+pub(crate) fn clip_tube(tris: Vec<[P3; 3]>, caps: usize, cuts: &[(P2, P2, P2)]) -> (Vec<[P3; 3]>, usize) {
     /// On the plane, or near enough for a point of it: coordinates run to 1e9 mm, where the rounding of a
     /// crossing is still far below anything the model holds.
     const EPS: f64 = 1e-6;

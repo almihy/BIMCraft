@@ -16,7 +16,7 @@ struct Path {
     total: f64,
 }
 impl Path {
-    pub fn new(pts: &[(f32, f32)]) -> Self {
+    fn new(pts: &[(f32, f32)]) -> Self {
         let pts: Vec<P2> = pts.iter().filter(|(x, y)| x.is_finite() && y.is_finite()).map(|&(x, y)| P2(x as f64, y as f64)).collect();
         let mut along = vec![0.0];
         for w in pts.windows(2) {
@@ -53,7 +53,7 @@ impl Path {
         let p = p + normal * by;
         (p.0 as f32, p.1 as f32)
     }
-    pub fn span(&self, a: f64, b: f64, by: f64) -> Vec<(f32, f32)> {
+    fn span(&self, a: f64, b: f64, by: f64) -> Vec<(f32, f32)> {
         let mut out = vec![self.offset(a, by)];
         let first = self.along.partition_point(|s| *s <= a);
         let last = self.along.partition_point(|s| *s < b);
@@ -66,7 +66,7 @@ impl Path {
 }
 
 /// A graphic and whether the line pen sizes it (including a dot's filled disk).
-pub struct Graphic {
+pub(crate) struct Graphic {
     pub prim: Prim,
     pub weighted: bool,
 }
@@ -79,7 +79,7 @@ impl LinePattern {
         self.geometry(pts, px_per_mm, width, color).into_iter().map(|g| g.prim).collect()
     }
 
-    pub fn geometry(&self, pts: &[(f32, f32)], px_per_mm: f32, width: f32, color: Rgb) -> Vec<Graphic> {
+    pub(crate) fn geometry(&self, pts: &[(f32, f32)], px_per_mm: f32, width: f32, color: Rgb) -> Vec<Graphic> {
         if pts.len() < 2 || !px_per_mm.is_finite() || px_per_mm <= 0.0 {
             return Vec::new();
         }

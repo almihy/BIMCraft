@@ -138,7 +138,7 @@ fn euclid(a: i64, b: i64) -> (i64, i64, i64) {
 }
 
 /// The part of the piece from `a` to `b` inside the box from `lo` to `hi` (Liang and Barsky's), if any.
-pub fn clip([a, b]: [P2; 2], lo: P2, hi: P2) -> Option<[P2; 2]> {
+fn clip([a, b]: [P2; 2], lo: P2, hi: P2) -> Option<[P2; 2]> {
     let d = b - a;
     let (mut t0, mut t1) = (0.0_f64, 1.0_f64);
     for (p, q) in [(-d.0, a.0 - lo.0), (d.0, hi.0 - a.0), (-d.1, a.1 - lo.1), (d.1, hi.1 - a.1)] {

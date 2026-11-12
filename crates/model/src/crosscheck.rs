@@ -35,7 +35,7 @@ pub struct Row {
 }
 
 impl Row {
-    pub fn new(kind: &str, id: Id, quantity: &str, value: f64) -> Row {
+    fn new(kind: &str, id: Id, quantity: &str, value: f64) -> Row {
         Row { kind: kind.into(), id, quantity: quantity.into(), value }
     }
 }

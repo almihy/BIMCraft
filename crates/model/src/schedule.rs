@@ -654,7 +654,7 @@ pub fn own_field(cat: &str, name: &str) -> bool {
 }
 
 /// The names a calculated field of a `cat` schedule may not take: the category's fields but its type's identity data.
-pub fn fixed_fields(m: &Model, cat: &str) -> BTreeSet<String> {
+pub(crate) fn fixed_fields(m: &Model, cat: &str) -> BTreeSet<String> {
     fields_with(m, cat, false).into_iter().map(|(n, _)| n).collect()
 }
 
@@ -1140,6 +1140,7 @@ impl Row<'_> {
 }
 
 /// `x` to the millionth, so sums and formulas come out as written.
+#[doc(hidden)]
 pub fn fine(x: f64) -> f64 {
     let r = (x * 1e6).round() / 1e6 + 0.0;
     if r.is_finite() { r } else { x }
@@ -1288,7 +1289,7 @@ fn sum<'a>(values: impl Iterator<Item = &'a Value>) -> Value {
 /// Whether filter `f` keeps a value `v` of a field holding `kind`: text in any case; numbers as the
 /// schedule shows them in `units` (two that show the same are equal); no value only for
 /// `has-no-value` and the filters saying "not".
-pub fn keeps(f: &Filter, v: &Value, kind: Option<Kind>, units: Units) -> bool {
+fn keeps(f: &Filter, v: &Value, kind: Option<Kind>, units: Units) -> bool {
     let empty = v.is_null() || v.as_str() == Some("");
     let text = |v: &Value| cell(v).to_lowercase();
     let (a, b) = (text(v), text(&f.value));

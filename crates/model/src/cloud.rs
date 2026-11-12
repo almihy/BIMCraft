@@ -218,6 +218,7 @@ impl PartialEq for Cloud {
 thread_local! {
     /// The points [`Cloud::nearest`] has looked at on this thread: the tests assert on it, not on time, which varies with the
     /// load of the machine.
+    #[doc(hidden)]
     pub static LOOKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
@@ -333,11 +334,11 @@ impl Cloud {
     }
 
     /// Its points, shared: what a view keeps of it without copying them.
-    pub fn shared_points(&self) -> Arc<Vec<[f32; 3]>> {
+    pub(crate) fn shared_points(&self) -> Arc<Vec<[f32; 3]>> {
         Arc::clone(&self.points)
     }
 
-    pub fn shared_colours(&self) -> Option<Arc<Vec<[u8; 3]>>> {
+    pub(crate) fn shared_colours(&self) -> Option<Arc<Vec<[u8; 3]>>> {
         self.colours.clone()
     }
 
@@ -414,6 +415,7 @@ struct CloudFile {
     colours: Option<String>,
 }
 
+#[doc(hidden)]
 pub fn deflate(bytes: &[u8]) -> Vec<u8> {
     let mut z = ZlibEncoder::new(Vec::new(), Compression::fast());
     // Writing to a Vec doesn't fail.
@@ -427,7 +429,7 @@ fn inflate(text: &str, most: usize) -> Result<Vec<u8>, String> {
 }
 
 /// [`inflate`] of `what`'s data, saying whose it is when it isn't what it should be.
-pub fn inflate_of(what: &str, text: &str, most: usize) -> Result<Vec<u8>, String> {
+pub(crate) fn inflate_of(what: &str, text: &str, most: usize) -> Result<Vec<u8>, String> {
     let packed = crate::texture::unbase64(text).ok_or_else(|| format!("{what}'s data isn't base64"))?;
     let mut out = Vec::new();
     ZlibDecoder::new(packed.as_slice())
@@ -476,7 +478,7 @@ impl<'de> Deserialize<'de> for Cloud {
 /// A project file's scans (`Model::clouds`), read no further than a project may hold: the entry past [`MAX_CLOUDS`] is
 /// refused before its data is unpacked, and so is the one that would take the points past [`MAX_CLOUD_POINTS`], since
 /// unpacking is where the memory goes (a few kilobytes of zeros inflate to tens of megabytes) and `Model::check` only runs after.
-pub fn deserialize_scans<'de, D: serde::Deserializer<'de>>(d: D) -> Result<std::collections::BTreeMap<String, Cloud>, D::Error> {
+pub(crate) fn deserialize_scans<'de, D: serde::Deserializer<'de>>(d: D) -> Result<std::collections::BTreeMap<String, Cloud>, D::Error> {
     scans_within(d, MAX_CLOUDS, MAX_CLOUD_POINTS)
 }
 
@@ -773,7 +775,7 @@ impl Num {
 }
 
 /// An element of a PLY header: its name, how many, and its properties (a list has none of a fixed size).
-pub struct Element {
+struct Element {
     name: String,
     count: usize,
     props: Vec<(String, Option<Num>)>,

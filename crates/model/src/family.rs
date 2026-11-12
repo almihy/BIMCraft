@@ -18,7 +18,7 @@ use crate::geom::P2;
 use crate::geom::v3::{P3, add, cross, mul};
 use crate::model::{MAX_COORD, MAX_TEXT};
 
-pub mod bounds;
+mod bounds;
 mod validate;
 
 /// What a family is: how IFC names its components; a door or a window is hosted in a wall, which
@@ -1083,7 +1083,7 @@ pub fn nameable(name: &str) -> bool {
 }
 
 /// A stored value read as parameter `p` holds it.
-pub fn read(p: &Parameter, v: &Value) -> Result<Val, String> {
+pub(crate) fn read(p: &Parameter, v: &Value) -> Result<Val, String> {
     let bad = |what: &str| format!("parameter `{}` holds {what}, not {v}", p.name);
     match p.kind {
         Kind::Material => match v {

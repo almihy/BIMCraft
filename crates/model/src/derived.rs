@@ -26,6 +26,7 @@ pub struct Lookup {
     /// Each element's references, by chunk of ids.
     refs: BTreeMap<Id, Arc<BTreeMap<Id, Vec<Guid>>>>,
     /// What points at each GUID, by bucket of GUIDs.
+    #[doc(hidden)]
     pub referrers: BTreeMap<u16, Arc<HashMap<Guid, BTreeSet<Id>>>>,
     /// The walls.
     walls: Arc<BTreeSet<Id>>,
@@ -45,6 +46,7 @@ pub struct Lookup {
     /// The tiled walls by band of height, wherever they are in plan (band [`ANY`]: those whose heights aren't known).
     bands: BTreeMap<i64, Arc<BTreeSet<Id>>>,
     /// The elements of the kinds a project has few of ([`RARE`]), by category.
+    #[doc(hidden)]
     pub rare: BTreeMap<&'static str, Arc<BTreeSet<Id>>>,
     /// The elements phased, or in a design option: with a value of a name [`crate::phasing::reserved`] keeps.
     phased: Arc<BTreeSet<Id>>,
@@ -111,7 +113,7 @@ fn elevation_in(elements: &Elements, level: Guid) -> f64 {
 }
 
 /// The group a component is banded in: its family, type, mirroring and values.
-pub fn component_group(c: &crate::model::Component) -> Group {
+pub(crate) fn component_group(c: &crate::model::Component) -> Group {
     let params = serde_json::to_string(&c.params).unwrap_or_default();
     Group::Component { family: c.family.clone(), type_name: c.type_name.clone(), mirrored: c.mirrored, params }
 }
@@ -215,6 +217,7 @@ fn tiles_of(b: [f64; 4]) -> Option<[i64; 4]> {
 }
 
 /// A wall's location line's box: its ends', or an arc's circle's.
+#[doc(hidden)]
 pub fn axis_box(w: &crate::model::Wall) -> [f64; 4] {
     match crate::walls::Axis::of(w).arc() {
         Some((c, r, _, _)) => [c.0 - r, c.1 - r, c.0 + r, c.1 + r],
@@ -233,6 +236,7 @@ impl Lookup {
     }
 
     /// This one, of the elements `before` was of, brought up to `elements` where `ids` changed.
+    #[doc(hidden)]
     pub fn updated(&self, elements: &Elements, ids: &BTreeSet<Id>) -> Lookup {
         if ids.iter().any(|id| self.levels.contains(id) || matches!(elements.get(*id), Some(Element::Level(_)))) {
             return Lookup::of(elements);
@@ -558,6 +562,7 @@ impl Lookup {
 
     /// Whether it shares chunks with `other`: whether one was brought up to date from the other.
     #[cfg(debug_assertions)]
+    #[doc(hidden)]
     pub fn shares(&self, other: &Lookup) -> bool {
         self.refs.iter().any(|(k, c)| other.refs.get(k).is_some_and(|d| Arc::ptr_eq(c, d)))
     }

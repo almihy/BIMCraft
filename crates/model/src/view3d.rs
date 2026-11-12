@@ -42,7 +42,7 @@ pub const MAX_SIDE: u32 = 4096;
 /// Where faces meet.
 pub const EDGE: Rgb = Rgb(48, 48, 48);
 /// What a level's plane is outlined in.
-pub const DATUM: Rgb = Rgb(60, 100, 150);
+const DATUM: Rgb = Rgb(60, 100, 150);
 const WALL: Rgb = Rgb(236, 236, 232);
 const SLAB: Rgb = Rgb(214, 214, 210);
 const DOOR: Rgb = Rgb(198, 168, 128);
@@ -78,14 +78,19 @@ const AMBIENT_DARK: f64 = 0.6;
 /// curved surfaces: a wall's outside or inside, a component's by its first triangle's place in the
 /// scene), so the facets read as one.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[doc(hidden)]
 pub struct Tri {
+    #[doc(hidden)]
     pub p: [P3; 3],
+    #[doc(hidden)]
     pub owner: Id,
+    #[doc(hidden)]
     pub color: Rgb,
     /// The skin of its material ([`skin`]): in the low 24 bits the texture over its colour, one more than where the material
     /// is in the library, 0 for none; in the high 8, how see-through the material is, percent.
+    #[doc(hidden)]
     pub tex: u32,
-    pub curve: Option<(Id, usize)>,
+    curve: Option<(Id, usize)>,
 }
 
 /// The bits of a skin that hold the texture.
@@ -93,6 +98,7 @@ const TEXTURE: u32 = 0x00ff_ffff;
 
 impl Tri {
     /// The texture over its colour, 0 for none.
+    #[doc(hidden)]
     pub fn texture(&self) -> u32 {
         self.tex & TEXTURE
     }
@@ -104,7 +110,7 @@ impl Tri {
 
     /// How see-through it is in `look`: as much as its material, or the view makes it, whichever is more. A view's own
     /// override counts only where it changes the picture.
-    pub fn alpha(&self, look: &Look) -> u8 {
+    pub(crate) fn alpha(&self, look: &Look) -> u8 {
         let view = if look.is_plain() { 0 } else { look.transparency(self.owner) };
         self.clearness().max(view)
     }
@@ -112,6 +118,7 @@ impl Tri {
 
 /// A wall's plan frame: its start, along it, and square to it.
 #[derive(Clone, Copy)]
+#[doc(hidden)]
 pub struct Frame {
     o: P2,
     u: P2,
@@ -149,6 +156,7 @@ impl Frame {
 /// (a component's form, which sections show and don't cut; a round run's tube, convex, which they do, as `cut` says): a round
 /// one's sides, past `caps`, are one curved surface; any other's facets that turn little where they meet are ([`facets`]).
 #[derive(Clone)]
+#[doc(hidden)]
 pub enum Solid {
     Box { owner: Id, color: Rgb, tex: u32, frame: Frame, a: (f64, f64), c: (f64, f64), z: (f64, f64) },
     Slab { owner: Id, color: Rgb, tex: u32, face: Vec<P3>, rise: f64 },
@@ -159,6 +167,7 @@ pub enum Solid {
 /// Retained geometry with per-snapshot appearance. Copying prepared work shares
 /// triangle/outline storage; applying paint happens only when making a scene.
 #[derive(Clone)]
+#[doc(hidden)]
 pub enum Prepared {
     Owned(Solid),
     Shared { geometry: Arc<Solid>, paint: Option<(Rgb, u32)> },
@@ -181,6 +190,7 @@ impl std::ops::Deref for Prepared {
 }
 
 impl Prepared {
+    #[doc(hidden)]
     pub fn painted(&self) -> Solid {
         let mut solid = (**self).clone();
         if let Self::Shared { paint: Some((color, tex)), .. } = self {
@@ -197,6 +207,7 @@ impl Prepared {
 
 /// Preserve the uncached renderer's original contiguous storage. Cached preparation
 /// may mix owned and shared geometry without converting the full oracle's buffer.
+#[doc(hidden)]
 pub enum PreparedSolids {
     Owned(Vec<Solid>),
     Cached(Vec<Prepared>),
@@ -217,25 +228,27 @@ impl PreparedSolids {
         }
     }
 
+    #[doc(hidden)]
     pub fn iter(&self) -> impl Iterator<Item = &Solid> {
         self.in_range(0..self.len())
     }
 
-    pub fn in_range(&self, range: std::ops::Range<usize>) -> impl Iterator<Item = &Solid> {
+    pub(crate) fn in_range(&self, range: std::ops::Range<usize>) -> impl Iterator<Item = &Solid> {
         let (owned, cached) = self.slices(range);
         owned.iter().chain(cached.iter().map(|s| &**s))
     }
 
-    pub fn painted(&self, range: std::ops::Range<usize>) -> impl Iterator<Item = Solid> {
+    fn painted(&self, range: std::ops::Range<usize>) -> impl Iterator<Item = Solid> {
         let (owned, cached) = self.slices(range);
         owned.iter().cloned().chain(cached.iter().map(Prepared::painted))
     }
 }
 
-pub mod fragments;
+mod fragments;
+#[doc(hidden)]
 pub mod update;
 pub use fragments::{FragmentStats, SectionCache};
-pub type PreparedMade = (Vec<Prepared>, Vec<(Id, Vec<P3>)>, Vec<Option<[P3; 2]>>);
+pub(crate) type PreparedMade = (Vec<Prepared>, Vec<(Id, Vec<P3>)>, Vec<Option<[P3; 2]>>);
 
 /// A level slab: `ring` from `z.0` up to `z.1`.
 fn slab(owner: Id, color: Rgb, ring: &[P2], z: (f64, f64)) -> Solid {
@@ -247,6 +260,7 @@ fn plan(face: &[P3]) -> Vec<P2> {
 }
 
 impl Solid {
+    #[doc(hidden)]
     pub fn owner(&self) -> Id {
         match self {
             Solid::Box { owner, .. } | Solid::Slab { owner, .. } | Solid::Prism { owner, .. } | Solid::Mesh { owner, .. } => *owner,
@@ -254,6 +268,7 @@ impl Solid {
     }
 
     #[cfg(debug_assertions)]
+    #[doc(hidden)]
     pub fn color(&self) -> Rgb {
         match self {
             Solid::Box { color, .. } | Solid::Slab { color, .. } | Solid::Prism { color, .. } | Solid::Mesh { color, .. } => *color,
@@ -261,6 +276,7 @@ impl Solid {
     }
 
     /// From its bottom to its top.
+    #[doc(hidden)]
     pub fn heights(&self) -> (f64, f64) {
         match self {
             Solid::Box { z, .. } => *z,
@@ -276,7 +292,7 @@ impl Solid {
     }
 
     /// Its bottom and top over plan point `q`.
-    pub fn z_at(&self, q: P2) -> (f64, f64) {
+    pub(crate) fn z_at(&self, q: P2) -> (f64, f64) {
         match self {
             Solid::Box { z, .. } => *z,
             Solid::Slab { face, rise, .. } => {
@@ -305,7 +321,7 @@ impl Solid {
     }
 
     /// Whether plan point `q` lies within its footprint.
-    pub fn over(&self, q: P2) -> bool {
+    pub(crate) fn over(&self, q: P2) -> bool {
         match self {
             Solid::Box { frame, a, c, .. } => {
                 let (s, t) = ((q - frame.o).dot(frame.u), (q - frame.o).dot(frame.n));
@@ -318,7 +334,7 @@ impl Solid {
     }
 
     /// Its corners.
-    pub fn corners(&self) -> Vec<P3> {
+    pub(crate) fn corners(&self) -> Vec<P3> {
         let mut out = Vec::new();
         match self {
             Solid::Box { frame, a, c, z, .. } => {
@@ -337,7 +353,7 @@ impl Solid {
     }
 
     /// The stretches of the line from `p` along unit `u` that lie over it, as distances from `p`.
-    pub fn across(&self, p: P2, u: P2) -> Vec<(f64, f64)> {
+    pub(crate) fn across(&self, p: P2, u: P2) -> Vec<(f64, f64)> {
         match self {
             Solid::Box { frame, a, c, .. } => {
                 // Where the line lies between the box's sides, a pair of them at a time.
@@ -364,7 +380,7 @@ impl Solid {
     /// The rings a section along unit `u` from `p`, `len` long, cuts it into, as (along, up) in mm: where it lies over the
     /// line, level or along a sloped face; a convex mesh that `cut` allows is cut by the plane through the line, where its
     /// edges cross it (a tube across is its ring, an ellipse if it is oblique).
-    pub fn cuts(&self, p: P2, u: P2, len: f64) -> Vec<Vec<P2>> {
+    pub(crate) fn cuts(&self, p: P2, u: P2, len: f64) -> Vec<Vec<P2>> {
         if let Solid::Mesh { tris, cut: true, .. } = self {
             let side = |q: P3| (P2(q[0], q[1]) - p).dot(u.perp());
             let at = |q: P3| P2((P2(q[0], q[1]) - p).dot(u), q[2]);
@@ -393,6 +409,7 @@ impl Solid {
             .collect()
     }
 
+    #[doc(hidden)]
     pub fn tris(&self, out: &mut Vec<Tri>) {
         match self {
             Solid::Box { owner, color, tex, frame, a, c, z } => frame.cuboid(out, *owner, (*color, *tex), *a, *c, *z),
@@ -443,7 +460,7 @@ const SMOOTH: f64 = 20.0;
 /// The curved surfaces a mesh's triangles make: those that share an edge and turn less than
 /// [`SMOOTH`] degrees there are one. Each triangle's surface is its first triangle's index; none
 /// for a flat face (`planes` finds those by their plane) or a triangle alone.
-pub fn facets(tris: &[[P3; 3]]) -> Vec<Option<usize>> {
+fn facets(tris: &[[P3; 3]]) -> Vec<Option<usize>> {
     /// The first triangle of `i`'s surface, as `up` links them, shortening the way as it goes.
     fn first(up: &mut [usize], mut i: usize) -> usize {
         while let Some(&p) = up.get(i)
@@ -493,7 +510,7 @@ pub fn facets(tris: &[[P3; 3]]) -> Vec<Option<usize>> {
 /// facets: the unit normals of that surface's triangles that meet at a corner, averaged by the angle
 /// each makes there (so a quad cut into two triangles weighs the same at every corner). A crease keeps
 /// its step: only a surface's own triangles are averaged. None for the rest, flat faces among them.
-pub fn corner_normals(tris: &[Tri]) -> Vec<Option<Arc<[P3; 3]>>> {
+fn corner_normals(tris: &[Tri]) -> Vec<Option<Arc<[P3; 3]>>> {
     let face = |t: &Tri| unit(cross(sub(t.p[1], t.p[0]), sub(t.p[2], t.p[0])));
     // A corner of a surface, to a micron: its triangles' own corners are a file's roundings of it.
     let at = |key: (Id, usize), p: P3| (key, p.map(|x| (x * 1e3).round() as i64));
@@ -525,7 +542,7 @@ pub fn corner_normals(tris: &[Tri]) -> Vec<Option<Arc<[P3; 3]>>> {
 
 /// The stretches of the line from `p` along unit `u` that lie over `ring`, as distances from `p`:
 /// where it crosses the ring's edges, paired off, in and out.
-pub fn crossings(ring: &[P2], p: P2, u: P2) -> Vec<(f64, f64)> {
+pub(crate) fn crossings(ring: &[P2], p: P2, u: P2) -> Vec<(f64, f64)> {
     // ponytail: a line through a corner it only touches unpairs the rest; nudge it if slabs show gaps.
     let mut cross: Vec<f64> = geom::ring_edges(ring)
         .filter_map(|(a, b)| {
@@ -555,6 +572,7 @@ fn slabs(out: &mut Vec<Solid>, m: &Model, owner: Id, color: Rgb, face: Vec<P3>, 
 
 /// The model's solids: walls cut around their openings, door leaves and glass, floor slabs and
 /// ceilings, columns, stairs' steps and roofs' slopes.
+#[doc(hidden)]
 pub fn solids(m: &Model) -> Vec<Solid> {
     solids_cancellable(m, &|| false).unwrap_or_default()
 }
@@ -584,16 +602,18 @@ fn solids_cancellable(m: &Model, cancelled: &(dyn Fn() -> bool + Sync)) -> Optio
 }
 
 /// What [`solids_and_extremes`] makes: the solids, each element's farthest points and its box.
+#[doc(hidden)]
 pub type Made = (Vec<Solid>, Vec<(Id, Vec<P3>)>, Vec<Option<[P3; 2]>>);
 
 /// [`solids`] but the components', and each element's [`extremes`] (a component's from
 /// [`crate::component_geometry::Components::extremes`], placed): the points that may be farthest any way. What a section's
 /// frame and cut ask of the model, without the components' triangles (a section never cuts one).
+#[doc(hidden)]
 pub fn solids_and_extremes(m: &Model) -> Made {
     solids_and_extremes_cancellable(m, &|| false).unwrap_or_default()
 }
 
-pub fn solids_and_extremes_cancellable(m: &Model, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Made> {
+pub(crate) fn solids_and_extremes_cancellable(m: &Model, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Made> {
     if cancelled() {
         return None;
     }
@@ -648,7 +668,7 @@ pub fn solids_and_extremes_cancellable(m: &Model, cancelled: &(dyn Fn() -> bool 
 /// As the full preparation oracle, but supported components supply conservative
 /// boxes and empty point slots, marked in the list beside `placed`. Their exact
 /// extrema can be resolved by the work.
-pub fn solids_and_extremes_deferred(m: &Model, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<(Made, Vec<bool>)> {
+pub(crate) fn solids_and_extremes_deferred(m: &Model, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<(Made, Vec<bool>)> {
     if cancelled() {
         return None;
     }
@@ -735,23 +755,25 @@ fn lazy_run_box(m: &Model, id: Id, e: &Element) -> Option<[P3; 2]> {
 }
 
 /// The solids of an element whose preparation was deferred: a round run reads no wall, and a component no wall index.
-pub fn lazy_solids(m: &Model, id: Id, e: &Element, components: &mut crate::component_geometry::Components) -> Vec<Solid> {
+pub(crate) fn lazy_solids(m: &Model, id: Id, e: &Element, components: &mut crate::component_geometry::Components) -> Vec<Solid> {
     solids_in_with(m, &[(id, e)], None, components)
 }
 
 /// The points that may be farthest of an element whose preparation was deferred, as preparing it would have found them.
-pub fn lazy_points(m: &Model, id: Id, e: &Element, components: &mut crate::component_geometry::Components) -> Vec<P3> {
+pub(crate) fn lazy_points(m: &Model, id: Id, e: &Element, components: &mut crate::component_geometry::Components) -> Vec<P3> {
     match e {
         Element::Component(c) => components.extremes(c),
         _ => extremes(lazy_solids(m, id, e, components).iter().flat_map(Solid::corners)),
     }
 }
 
+#[doc(hidden)]
 pub fn solids_in(m: &Model, elements: &[(Id, &Element)], index: Option<&walls::Index>) -> Vec<Solid> {
     solids_in_with(m, elements, index, &mut crate::component_geometry::Components::new(m))
 }
 
 /// [`solids_in`], its families' geometry from `components`.
+#[doc(hidden)]
 pub fn solids_in_with(
     m: &Model,
     elements: &[(Id, &Element)],
@@ -978,7 +1000,7 @@ fn prism(out: &mut Vec<Tri>, owner: Id, (color, tex): (Rgb, u32), face: &[P3], r
 
 /// Each triangle's plane, as an index the triangles lying in it (within half a millimetre) share;
 /// the facets of one curved surface (a curved wall's face, a mesh's curve) share one too.
-pub fn planes(tris: &[Tri]) -> Vec<usize> {
+fn planes(tris: &[Tri]) -> Vec<usize> {
     let mut table = PlaneTable::default();
     tris.iter().map(|t| table.assign(t)).collect()
 }
@@ -1044,7 +1066,7 @@ impl PlaneTable {
 
 /// Each element's curved surfaces numbered in the order its triangles meet them, so what names a curve depends on the element
 /// alone, never on where its triangles are in the scene: `tris` is one element's.
-pub fn local_curves(tris: &mut [Tri]) {
+fn local_curves(tris: &mut [Tri]) {
     let mut seen: HashMap<usize, usize> = HashMap::new();
     for t in tris {
         if let Some((owner, k)) = t.curve {
@@ -1069,11 +1091,12 @@ fn over(layer: u32, outer: u32) -> u32 {
 
 /// The model's solids split into their material layers, used by the layer oracle tests.
 #[cfg(debug_assertions)]
+#[doc(hidden)]
 pub fn shaded(m: &Model) -> Vec<Solid> {
     solids(m).into_iter().flat_map(|s| layered(m, s)).collect()
 }
 
-pub fn layered(m: &Model, s: Solid) -> Vec<Solid> {
+fn layered(m: &Model, s: Solid) -> Vec<Solid> {
     let layers = match m.elements.get(s.owner()) {
         Some(Element::Wall(w)) => m.type_layers("wall", &w.type_name),
         Some(Element::Floor(f) | Element::Toposolid(f)) => m.type_layers("floor", &f.type_name),
@@ -1163,7 +1186,7 @@ pub fn layered(m: &Model, s: Solid) -> Vec<Solid> {
 
 /// Paint laid on the faces of elements: each triangle on a painted face takes the material it's painted, its colour and its
 /// texture, in place of what its type is made of.
-pub fn painted(m: &Model, tris: &mut [Tri], faces: &[&'static str]) {
+fn painted(m: &Model, tris: &mut [Tri], faces: &[&'static str]) {
     let owners: BTreeSet<Id> = tris.iter().map(|t| t.owner).collect();
     let paints: HashMap<Id, &serde_json::Map<String, serde_json::Value>> =
         owners.into_iter().filter_map(|id| Some((id, m.elements.get(id)?.params()?.get(paint::KEY)?.as_object()?))).collect();
@@ -1181,29 +1204,40 @@ pub fn painted(m: &Model, tris: &mut [Tri], faces: &[&'static str]) {
 /// The model as triangles, each with its plane, and its corner normals where it's a curve's: what
 /// every picture of it is drawn from.
 pub struct Scene {
+    #[doc(hidden)]
     pub tris: Vec<Tri>,
+    #[doc(hidden)]
     pub planes: Vec<usize>,
+    #[doc(hidden)]
     pub smooth: Vec<Option<Arc<[P3; 3]>>>,
     /// Each triangle's face, as paint names them: `exterior`, `interior`, `top`, `bottom`, `all`, or none.
+    #[doc(hidden)]
     pub faces: Arc<Vec<&'static str>>,
     /// Each texture the scene uses, by id. A textured triangle lies across its plane as [`basis`] says.
+    #[doc(hidden)]
     pub skins: Vec<Option<Sampler>>,
     /// The edges a wireframe draws, found when one is first asked for.
     edges: OnceLock<Vec<(usize, [P3; 2])>>,
     /// The masses, which a section's picture leaves out: it outlines where its line cuts them.
+    #[doc(hidden)]
     pub masses: BTreeSet<Id>,
     /// Each level's plane: its name, and the corners of its extent at its elevation.
+    #[doc(hidden)]
     pub levels: Vec<(Id, String, [P3; 4])>,
     /// The scans point clouds place, drawn as dots over the surfaces.
+    #[doc(hidden)]
     pub scans: Vec<Scan>,
     /// The components whose triangles are a shape of [`Scene::shapes`] placed, exactly: where in `tris` the copy starts, and
     /// how it is placed. A card draws each shape once and places it for each copy.
+    #[doc(hidden)]
     pub placements: Vec<(usize, crate::component_geometry::ComponentInstance)>,
     /// Each component shape's triangles in its family's own axes, in the order a copy's are in `tris`.
+    #[doc(hidden)]
     pub shapes: Vec<Vec<[P3; 3]>>,
     /// What each shape is the shape of, so a copy an edit makes finds its own.
     shape_keys: HashMap<ShapeKey, usize>,
     /// Each element's run of triangles and the box round them, in the elements' order: what an edit replaces.
+    #[doc(hidden)]
     pub spans: Vec<Span>,
     /// What numbered the planes, so an edit numbers its triangles' among them.
     table: PlaneTable,
@@ -1211,8 +1245,11 @@ pub struct Scene {
 
 /// An element's triangles in a scene: where they are in its `tris`, and the box round them.
 #[derive(Clone, Debug, PartialEq)]
+#[doc(hidden)]
 pub struct Span {
+    #[doc(hidden)]
     pub id: Id,
+    #[doc(hidden)]
     pub at: std::ops::Range<usize>,
     bounds: [P3; 2],
 }
@@ -1220,7 +1257,7 @@ pub struct Span {
 /// What a shape of a scene is the shape of: a family's type, mirrored or not, with the values its family evaluates; or the
 /// tube the round runs of a material are.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum ShapeKey {
+enum ShapeKey {
     Family(crate::component_geometry::Key),
     Tube(String),
 }
@@ -1239,6 +1276,7 @@ fn spans_of(tris: &[Tri]) -> Vec<Span> {
 }
 
 /// A triangle of the scene as a file takes it ([`Scene::facets`]).
+#[doc(hidden)]
 pub struct Facet {
     pub owner: Id,
     pub corners: [P3; 3],
@@ -1252,6 +1290,7 @@ pub struct Facet {
 }
 
 /// A scan as a point cloud places it: its points and colours (shared with the model's), and where they go.
+#[doc(hidden)]
 pub struct Scan {
     owner: Id,
     points: Arc<Vec<[f32; 3]>>,
@@ -1260,6 +1299,7 @@ pub struct Scan {
     at: P3,
     turn: (f64, f64),
     /// The corners of the box round its points in the model, for fitting the view to it.
+    #[doc(hidden)]
     pub corners: [P3; 8],
 }
 
@@ -1316,15 +1356,15 @@ pub fn scene_kept(before: &Model, after: &Model, view: Option<Id>) -> bool {
 pub const DRAWN: usize = 2_000_000;
 
 /// How wide a point is drawn, px.
-pub const DOT: usize = 2;
+pub(crate) const DOT: usize = 2;
 
 /// Which of `total` points a picture draws: every one of so many.
-pub fn every(total: usize) -> usize {
+pub(crate) fn every(total: usize) -> usize {
     total.div_ceil(DRAWN).max(1)
 }
 
 /// How an element's triangles name their faces.
-pub enum Rule {
+enum Rule {
     /// A wall's: its exterior is to the left of its start to its end.
     Wall(Axis),
     /// A floor's, a roof's or a ceiling's: facing up or down.
@@ -1486,11 +1526,12 @@ impl Scene {
     ///
     /// Every pixel of its picture is what the whole scene's is: what is left out was behind, and the rest are drawn in the
     /// order they are in the whole scene.
+    #[doc(hidden)]
     pub fn section(m: &Model, work: Work<'_>, cam: &Camera, clip: &Clip, look: &Look) -> Scene {
         Self::section_cancellable(m, work, cam, clip, look, &|| false).unwrap_or_else(|| Self::bare(Vec::new()))
     }
 
-    pub fn section_cancellable(
+    pub(crate) fn section_cancellable(
         m: &Model,
         (solids, ranges, placed, boxes): Work<'_>,
         cam: &Camera,
@@ -1647,7 +1688,7 @@ impl Scene {
 }
 
 /// The samplers of the textures among `tris` that `skins` hasn't yet.
-pub fn skins_for(m: &Model, skins: &mut [Option<Sampler>], tris: &[Tri]) {
+fn skins_for(m: &Model, skins: &mut [Option<Sampler>], tris: &[Tri]) {
     let used: BTreeSet<u32> = tris.iter().map(Tri::texture).filter(|t| *t > 0).collect();
     for id in used {
         let found = m.materials.values().nth(id as usize - 1);
@@ -1661,7 +1702,7 @@ pub fn skins_for(m: &Model, skins: &mut [Option<Sampler>], tris: &[Tri]) {
 /// level with no extent of its own spans the model's ([`Model::model_extent`]), found from the boxes round each element's
 /// triangles, `spans`, which hold the corners of its solids.
 #[allow(clippy::type_complexity)]
-pub fn whole_model(m: &Model, spans: &[Span]) -> (BTreeSet<Id>, Vec<(Id, String, [P3; 4])>, Vec<Scan>) {
+fn whole_model(m: &Model, spans: &[Span]) -> (BTreeSet<Id>, Vec<(Id, String, [P3; 4])>, Vec<Scan>) {
     let masses = m.elements.iter().filter(|(_, e)| matches!(e, Element::Mass(_))).map(|(id, _)| *id).collect();
     let default = std::cell::OnceCell::new();
     let extent = || m.model_extent_of(spans.iter().flat_map(|s| [P2(s.bounds[0][0], s.bounds[0][1]), P2(s.bounds[1][0], s.bounds[1][1])]));
@@ -1751,14 +1792,14 @@ fn in_order<T: Sync, U: Send>(items: &[T], f: impl Fn(&T) -> U + Sync) -> Vec<U>
 
 /// What a section's scene is made of, as `render::SectionWork` holds it: the model's solids but the components', where each
 /// element's are among them, and each element's farthest points ([`extremes`]).
-pub type Work<'a> = (&'a PreparedSolids, &'a HashMap<Id, std::ops::Range<usize>>, &'a [(Id, Vec<P3>)], &'a [Option<[P3; 2]>]);
+pub(crate) type Work<'a> = (&'a PreparedSolids, &'a HashMap<Id, std::ops::Range<usize>>, &'a [(Id, Vec<P3>)], &'a [Option<[P3; 2]>]);
 
 /// An element, the box round it (none where it isn't known) and where its solids are in the list (a component's are made
 /// only when it shows).
 type Boxed3 = (Id, Option<[P3; 2]>, std::ops::Range<usize>);
 
 /// The box round `points`, lowest corner and highest; none for no points.
-pub fn bounds(points: impl Iterator<Item = P3>) -> Option<[P3; 2]> {
+fn bounds(points: impl Iterator<Item = P3>) -> Option<[P3; 2]> {
     points.fold(None, |b, p| {
         Some(match b {
             None => [p, p],
@@ -1866,7 +1907,7 @@ impl Tiles {
 }
 
 /// Each paintable element's rule for naming the faces of its triangles, of `owners`.
-pub fn rules_of(m: &Model, owners: impl Iterator<Item = Id>) -> HashMap<Id, Rule> {
+fn rules_of(m: &Model, owners: impl Iterator<Item = Id>) -> HashMap<Id, Rule> {
     let mut rules = HashMap::new();
     for id in owners {
         if rules.contains_key(&id) {
@@ -1904,6 +1945,7 @@ fn scans_of(m: &Model) -> Vec<Scan> {
 
 impl Scene {
     /// How many triangles `look` shows: the number [`facets`](Self::facets) yields.
+    #[doc(hidden)]
     pub fn shown(&self, look: &Look) -> usize {
         let plain = look.is_plain();
         self.tris.iter().filter(|t| plain || look.shows(t.owner)).count()
@@ -1911,6 +1953,7 @@ impl Scene {
 
     /// The triangles `look` shows, in the scene's order and as a picture shades them, for a file to hold: what the card's mesh
     /// is made of, less the textures and the edges.
+    #[doc(hidden)]
     pub fn facets<'a>(&'a self, look: &'a Look) -> impl Iterator<Item = Facet> + 'a {
         let plain = look.is_plain();
         self.tris.iter().enumerate().filter(move |(_, t)| plain || look.shows(t.owner)).map(move |(i, t)| {
@@ -2128,6 +2171,7 @@ impl Scene {
     /// The triangles `keep` takes, drawn into `into`'s depths and hits: the nearest at each pixel of a
     /// `size` picture through `cam`; with `front`, only where they are nearer than its depths. Where
     /// `lights` says how lit a triangle's corners are (a curve's), its pixels take the blend of the three.
+    #[doc(hidden)]
     pub fn raster(
         &self,
         (cam, clip, cut): (&Camera, Option<&Clip>, Option<&Boxed>),
@@ -2262,6 +2306,7 @@ impl Scene {
     }
 
     #[cfg(debug_assertions)]
+    #[doc(hidden)]
     pub fn raster_reference(
         &self,
         (cam, clip, cut): (&Camera, Option<&Clip>, Option<&Boxed>),
@@ -2325,11 +2370,13 @@ impl Scene {
 
     /// The edges of the model's surfaces: where two meet at an angle (not in one plane, nor one curve) and where one ends,
     /// each as the triangle it is an edge of and its ends, in the order of their triangles.
+    #[doc(hidden)]
     pub fn edges(&self) -> &[(usize, [P3; 2])] {
         self.edges_cancellable(&|| false).unwrap_or_default()
     }
 
     /// [`edges`](Self::edges), abandoned for a superseded view: none then, and nothing kept, so the next to ask finds them.
+    #[doc(hidden)]
     pub fn edges_cancellable(&self, cancelled: &dyn Fn() -> bool) -> Option<&[(usize, [P3; 2])]> {
         if let Some(edges) = self.edges.get() {
             return Some(edges);
@@ -2489,7 +2536,7 @@ impl Scene {
         self.picture_cancellable(cam, clip, tints, look, &|| false)
     }
 
-    pub fn picture_cancellable(
+    pub(crate) fn picture_cancellable(
         &self,
         cam: &Camera,
         clip: Option<&Clip>,
@@ -2782,7 +2829,7 @@ pub struct LevelMarks {
 /// The marks of each of `levels` that `color` gives a colour (and whether it is selected: all four edges, not the far two).
 /// Unselected, the two edges nearer the camera are left out, as in Revit. The head goes past the far edges' right end:
 /// its name lettered.
-pub fn level_marks(levels: &[(Id, String, [P3; 4])], cam: &Camera, color: &dyn Fn(Id) -> Option<(Rgb, bool)>) -> Vec<LevelMarks> {
+fn level_marks(levels: &[(Id, String, [P3; 4])], cam: &Camera, color: &dyn Fn(Id) -> Option<(Rgb, bool)>) -> Vec<LevelMarks> {
     let mut marks = Vec::new();
     for ((id, _, corners), head) in levels.iter().zip(heads(levels, cam)) {
         let Some((color, selected)) = color(*id) else { continue };
@@ -2864,6 +2911,7 @@ pub struct Clip {
 /// A 3D view's section box as `cam` sees it: what of a pixel's depth, or of the model, it keeps. In a parallel view, the
 /// model point a pixel shows at a depth is the same sum for every pixel; in perspective, that sum gives the point on the plane
 /// through the target, and the point is along the line from the eye through it.
+#[doc(hidden)]
 pub struct Boxed {
     lo: P3,
     hi: P3,
@@ -2877,7 +2925,7 @@ pub struct Boxed {
 }
 
 impl Boxed {
-    pub fn new(cam: &Camera, (lo, hi): (P3, P3)) -> Boxed {
+    fn new(cam: &Camera, (lo, hi): (P3, P3)) -> Boxed {
         let (back, right, up) = cam.axes();
         let k = 1.0 / cam.scale.max(1e-12);
         let (w, h) = cam.middle();
@@ -2913,7 +2961,7 @@ impl Boxed {
 }
 
 /// What a section box from `lo` to `hi` keeps of `levels`: those whose plane lies within its height, cut to its sides.
-pub fn levels_in(levels: &[(Id, String, [P3; 4])], (lo, hi): (P3, P3)) -> Vec<(Id, String, [P3; 4])> {
+fn levels_in(levels: &[(Id, String, [P3; 4])], (lo, hi): (P3, P3)) -> Vec<(Id, String, [P3; 4])> {
     levels
         .iter()
         .filter(|(.., c)| (lo[2]..=hi[2]).contains(&c[0][2]))
@@ -3068,6 +3116,7 @@ pub fn as_left(v: &crate::model::View3D, width: u32, height: u32) -> Option<Came
 }
 
 /// Each element's top over plan point `p`: the highest top of its solids standing over it.
+#[doc(hidden)]
 pub fn tops_at(m: &Model, p: P2) -> BTreeMap<Id, f64> {
     let mut tops = BTreeMap::new();
     for s in solids(m).iter().filter(|s| s.over(p)) {
@@ -3191,7 +3240,7 @@ pub struct Camera {
 
 /// A camera's projection, its axes worked out once for the many points of a picture.
 #[derive(Clone, Copy)]
-pub struct Projector {
+pub(crate) struct Projector {
     back: P3,
     right: P3,
     up: P3,
@@ -3201,12 +3250,12 @@ pub struct Projector {
     /// In perspective: the focal length in px, and how far the eye is from the target, mm.
     eye: Option<(f64, f64)>,
     /// In perspective with clipping planes: the nearness ([`Projector::at`]'s third) of the near plane and of the far one.
-    pub clip: Option<(f64, f64)>,
+    pub(crate) clip: Option<(f64, f64)>,
 }
 
 impl Projector {
     /// Whether nearness `z` lies outside the camera's clipping planes, nearer than the near one or further than the far one.
-    pub fn clipped(&self, z: f64) -> bool {
+    pub(crate) fn clipped(&self, z: f64) -> bool {
         self.clip.is_some_and(|(near, far)| z > near || z < far)
     }
 
@@ -3265,12 +3314,13 @@ impl Projector {
 }
 
 /// The points weights `w` give on triangle `p`'s corners.
-pub fn weighed(p: &[P3; 3], w: &[P3; 3]) -> [P3; 3] {
+pub(crate) fn weighed(p: &[P3; 3], w: &[P3; 3]) -> [P3; 3] {
     w.map(|w| std::array::from_fn(|i| w[0] * p[0][i] + w[1] * p[1][i] + w[2] * p[2][i]))
 }
 
 impl Camera {
     /// Toward the camera, and the picture's right and up, in the model.
+    #[doc(hidden)]
     pub fn axes(&self) -> (P3, P3, P3) {
         let (a, e) = (self.azimuth.to_radians(), self.elevation.clamp(-89.0, 89.0).to_radians());
         let back = [e.cos() * a.cos(), e.cos() * a.sin(), e.sin()];
@@ -3278,7 +3328,7 @@ impl Camera {
         (back, right, cross(back, right))
     }
 
-    pub fn projector(&self) -> Projector {
+    pub(crate) fn projector(&self) -> Projector {
         let (back, right, up) = self.axes();
         let eye = self.focal().zip(self.eye_distance());
         let middle = self.middle();
@@ -3628,14 +3678,15 @@ pub struct Image {
     pub rgba: Vec<u8>,
     /// Each pixel's triangle (`u32::MAX` for none), how near the camera the opaque surface there is (none in a wireframe),
     /// and each triangle's element.
+    #[doc(hidden)]
     pub hit: Arc<Vec<u32>>,
-    pub depth: Arc<Vec<f32>>,
-    pub owners: Arc<Vec<Id>>,
-    pub faces: Arc<Vec<&'static str>>,
-    pub section_paint: Option<Arc<SectionPaint>>,
+    depth: Arc<Vec<f32>>,
+    owners: Arc<Vec<Id>>,
+    faces: Arc<Vec<&'static str>>,
+    section_paint: Option<Arc<SectionPaint>>,
 }
 
-pub struct SectionPaint {
+struct SectionPaint {
     base: Vec<u8>,
     edges: Vec<bool>,
 }
@@ -3671,12 +3722,13 @@ impl Image {
         true
     }
 
-    pub fn index(&self, x: f64, y: f64) -> Option<usize> {
+    fn index(&self, x: f64, y: f64) -> Option<usize> {
         let (w, h) = (f64::from(self.width), f64::from(self.height));
         (x >= 0.0 && y >= 0.0 && x < w && y < h).then(|| y as usize * self.width as usize + x as usize)
     }
 
     /// Whether it is `other` to the pixel: its colours, and what each pixel picks, its face, and whether it's covered.
+    #[doc(hidden)]
     pub fn same_as(&self, other: &Image) -> Result<(), String> {
         if (self.width, self.height) != (other.width, other.height) {
             return Err(format!("{}x{} against {}x{}", self.width, self.height, other.width, other.height));
@@ -3935,7 +3987,7 @@ pub struct Surface {
 }
 
 /// Where the line of sight through pixel `at` meets the plane of triangle `p`, element `id`'s: in perspective, in front of the eye.
-pub fn surface_of(cam: &Camera, at: (f64, f64), id: Id, p: &[P3; 3]) -> Option<Surface> {
+pub(crate) fn surface_of(cam: &Camera, at: (f64, f64), id: Id, p: &[P3; 3]) -> Option<Surface> {
     let n = unit(cross(sub(p[1], p[0]), sub(p[2], p[0])));
     let on = cam.unproject(at);
     let eye = cam.eye();
@@ -3950,7 +4002,7 @@ pub fn surface_of(cam: &Camera, at: (f64, f64), id: Id, p: &[P3; 3]) -> Option<S
 }
 
 /// Where the line of sight through pixel `at` meets level `id`'s plane, of `levels` (each a level, its name and its plane's corners).
-pub fn on_level(levels: &[(Id, String, [P3; 4])], cam: &Camera, at: (f64, f64), id: Id) -> Option<Surface> {
+pub(crate) fn on_level(levels: &[(Id, String, [P3; 4])], cam: &Camera, at: (f64, f64), id: Id) -> Option<Surface> {
     let (.., c) = levels.iter().find(|(l, ..)| *l == id)?;
     surface_of(cam, at, id, &[c[0], c[1], c[2]])
 }

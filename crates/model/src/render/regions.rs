@@ -49,7 +49,7 @@ impl Grid {
     }
 
     /// Box `k` of `boxes` in the cells it reaches; none, in none.
-    pub fn new(boxes: &[Option<Extent>]) -> Grid {
+    fn new(boxes: &[Option<Extent>]) -> Grid {
         let mut g = Grid::default();
         for (k, b) in boxes.iter().enumerate() {
             let Some(b) = b else { continue };
@@ -87,7 +87,7 @@ impl Layers {
         self.end
     }
 
-    pub fn new(end: usize, section: Option<Id>) -> Self {
+    pub(super) fn new(end: usize, section: Option<Id>) -> Self {
         Self { on: true, end, section, ..Self::default() }
     }
 
@@ -112,10 +112,13 @@ pub(super) fn wanted(m: &Model, view: Id) -> bool {
 thread_local! {
     /// What drawing regions has cost on this thread, in steps: the points of rings a line was cut by, of polygons a fill was.
     /// The tests assert on it, not on time, which varies with the load of the machine.
+    #[doc(hidden)]
     pub static SPENT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     /// The pictures of sections drawn on this thread.
+    #[doc(hidden)]
     pub static PICTURES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     /// The most runs of ink [`runs`] keeps on this thread, which a test sets low to reach the cap with a small picture.
+    #[doc(hidden)]
     pub static MOST: std::cell::Cell<usize> = const { std::cell::Cell::new(MAX_RUNS) };
 }
 
@@ -125,7 +128,7 @@ fn spend(n: usize) {
 }
 
 /// `f` done without counting what it spends or the pictures it draws: a twin that tests run beside the work they count.
-pub fn uncounted<T>(f: impl FnOnce() -> T) -> T {
+pub(super) fn uncounted<T>(f: impl FnOnce() -> T) -> T {
     #[cfg(debug_assertions)]
     let (spent, pictures) = (SPENT.with(std::cell::Cell::get), PICTURES.with(std::cell::Cell::get));
     let out = f();
@@ -145,7 +148,7 @@ struct Ink {
 }
 
 /// A convex piece of a masking region, and the box round it.
-pub struct Mask {
+struct Mask {
     ring: Vec<P2>,
     lo: P2,
     hi: P2,
@@ -224,6 +227,7 @@ pub(super) fn foreground(d: &mut Drawing, m: &Model, rings: &[Vec<P2>]) {
 }
 
 /// The most runs of ink [`runs`] keeps of one picture.
+#[doc(hidden)]
 pub const MAX_RUNS: usize = 250_000;
 
 /// The widest run of ink that [`runs`] joins to the one above it: a line the width of a pen, which a round cap leaves a pixel
@@ -617,7 +621,7 @@ fn reach(prim: &Prim, view: View, stroke: f32) -> Option<Extent> {
 
 /// The area a region keeps ink in: its rings (the outline and its holes: inside an odd number of them), less the masks
 /// drawn before it.
-pub struct Area<'a> {
+struct Area<'a> {
     rings: &'a [Vec<P2>],
     boxes: Vec<(P2, P2)>,
     masks: &'a [Mask],
@@ -628,7 +632,7 @@ pub struct Area<'a> {
 }
 
 impl<'a> Area<'a> {
-    pub fn new(rings: &'a [Vec<P2>], masks: &'a [Mask]) -> Option<Self> {
+    fn new(rings: &'a [Vec<P2>], masks: &'a [Mask]) -> Option<Self> {
         let boxes: Vec<(P2, P2)> = rings.iter().filter_map(|r| bounds(r)).collect();
         let first = *boxes.first()?;
         let (lo, hi) = boxes.iter().fold(first, |(lo, hi), (a, b)| (P2(lo.0.min(a.0), lo.1.min(a.1)), P2(hi.0.max(b.0), hi.1.max(b.1))));
@@ -636,7 +640,7 @@ impl<'a> Area<'a> {
     }
 
     /// The part of `prim` in the area, its lines `stroke` px wide (a hairline is a pixel) and so reaching half that far out.
-    pub fn clip(&self, prim: &Prim, view: View, stroke: f32) -> Vec<Prim> {
+    fn clip(&self, prim: &Prim, view: View, stroke: f32) -> Vec<Prim> {
         match prim {
             Prim::Line { .. } => {
                 let grow = f64::from(stroke.max(1.0)) / 2.0 / view.scale;

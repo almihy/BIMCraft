@@ -393,7 +393,7 @@ type Runs = Vec<(Vec<[f64; 2]>, bool)>;
 
 impl Collect {
     /// The box what's drawn now is clipped to.
-    pub fn clip(&self) -> Rect {
+    fn clip(&self) -> Rect {
         self.clips.last().copied().unwrap_or(Rect::ZERO)
     }
 

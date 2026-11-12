@@ -45,7 +45,7 @@ pub struct Warning {
 }
 
 impl Warning {
-    pub fn new(rule: &'static str, severity: Severity, message: String, elements: Vec<Guid>) -> Warning {
+    fn new(rule: &'static str, severity: Severity, message: String, elements: Vec<Guid>) -> Warning {
         let mut key: Vec<Guid> = elements.clone();
         key.sort_unstable();
         let key = key.iter().map(ToString::to_string).collect::<Vec<_>>().join(",");
@@ -150,6 +150,7 @@ pub struct Review {
 // again, nor a wall moved in one room a reason to look at every room).
 #[cfg(debug_assertions)]
 thread_local! {
+    #[doc(hidden)]
     pub static REVIEWS: std::cell::Cell<(usize, usize, usize)> = const { std::cell::Cell::new((0, 0, 0)) };
 }
 
@@ -157,6 +158,7 @@ impl Review {
     /// Tests hold what is kept to what the whole model makes: the same warnings, and, where the rooms are all kept, the same
     /// reach for each.
     #[cfg(debug_assertions)]
+    #[doc(hidden)]
     pub fn assert_whole(&self, m: &Model) {
         // (What the check itself works out is not counted.)
         let counted = REVIEWS.with(std::cell::Cell::get);
@@ -192,12 +194,14 @@ impl Model {
 
     /// [`Model::review`], not counted: what the tests hold the answers of [`Model::review_since`] to.
     #[cfg(debug_assertions)]
+    #[doc(hidden)]
     pub fn review_whole(&self) -> Vec<Warning> {
         self.whole().warnings.to_vec()
     }
 
     /// [`Model::review`] with what brings it up to date, not counted: the tests' own look at a model.
     #[cfg(debug_assertions)]
+    #[doc(hidden)]
     pub fn whole_review(&self) -> Review {
         self.whole()
     }
@@ -923,7 +927,7 @@ struct Mover<'a> {
 impl Mover<'_> {
     /// Whether it may bound the rooms of `level`, whose rooms are cut at height `z`: a wall or a column that spans it, a
     /// separation line or a room of the level.
-    pub fn bounds(&self, m: &Model, level: Guid, z: f64) -> bool {
+    fn bounds(&self, m: &Model, level: Guid, z: f64) -> bool {
         match self.e {
             Element::Wall(w) => self.model.spans(w, z),
             Element::Column(c) | Element::StructuralColumn(c) => self.model.column_spans(c, z),

@@ -65,7 +65,7 @@ pub fn refs(params: &BTreeMap<String, Value>) -> Vec<Guid> {
 }
 
 /// What an element's mark says, if `key` is where one is held: a mass of the project, and the level or the face of it.
-pub fn check_value(m: &Model, who: &str, key: &str, v: &Value, e: &Element) -> Option<Result<(), String>> {
+pub(crate) fn check_value(m: &Model, who: &str, key: &str, v: &Value, e: &Element) -> Option<Result<(), String>> {
     reserved(key).then(|| {
         let shape = if key == FLOOR { "{mass, level}" } else { "{mass, face}" };
         let wrong = || format!("{who}: `{key}` is {shape}, not {v}");
@@ -141,6 +141,7 @@ pub fn forget(m: &mut Model, gone: &BTreeSet<Guid>) {
 
 /// Original whole-model cleanup, retained as the deletion oracle.
 #[cfg(debug_assertions)]
+#[doc(hidden)]
 pub fn forget_from_scratch(m: &mut Model, gone: &BTreeSet<Guid>) {
     for params in m.elements.values_mut().filter_map(Element::params_mut) {
         for key in [FLOOR, FACE] {

@@ -189,7 +189,7 @@ struct Args {
 }
 
 impl Args {
-    pub fn new(p: &Value) -> Result<Args, String> {
+    fn new(p: &Value) -> Result<Args, String> {
         let mut map = p.as_object().cloned().ok_or("reinforce: the parameters must be an object")?;
         map.remove("host");
         map.remove("hosts");
@@ -1069,7 +1069,7 @@ fn slab(fl: &crate::model::Floor, plane: &Plane, base: f64, thick: f64, x: &Comm
 }
 
 /// The least and the most of `xs`.
-pub fn span(xs: impl Iterator<Item = f64>) -> Option<(f64, f64)> {
+fn span(xs: impl Iterator<Item = f64>) -> Option<(f64, f64)> {
     xs.fold(None, |s: Option<(f64, f64)>, x| Some(s.map_or((x, x), |(lo, hi)| (lo.min(x), hi.max(x)))))
 }
 

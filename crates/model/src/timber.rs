@@ -123,6 +123,7 @@ fn touching_wall(m: &Model, id: Id, w: &Wall) -> Option<Id> {
     })
 }
 
+#[doc(hidden)]
 pub fn query(m: &crate::model::Model, params: &Value) -> Result<Value, String> {
     let rule: Request = serde_json::from_value(params.clone()).map_err(|e| format!("timber_framing: {e}"))?;
     if [rule.spacing, rule.thickness, rule.depth, rule.header_height].iter().any(|&v| !v.is_finite() || v <= EPS || v > MAX_COORD)

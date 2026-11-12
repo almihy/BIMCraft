@@ -397,6 +397,7 @@ pub fn cloud(c: &Curve, arc: f64) -> Vec<crate::geom::P2> {
 
 /// How many scallops of about `arc` fit a span of `len`: at least one, and at most `most + 1`, so a hostile length or arc never
 /// sizes the list of cuts (a circle 5e8 mm across asked 16.8 GB of them).
+#[doc(hidden)]
 pub fn scallops(len: f64, arc: f64, most: usize) -> usize {
     ((len / arc).round().max(1.0) as usize).min(most + 1)
 }

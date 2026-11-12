@@ -23,7 +23,7 @@ use crate::model::{Element, Id, Model};
 const REACH: f64 = 10.0;
 
 /// Past this share of the elements made again, the whole scene is made instead.
-pub const MOST: usize = 4;
+const MOST: usize = 4;
 
 /// The rounds of making again before the whole scene is made instead: a chain of joins this long is a whole model's.
 const ROUNDS: usize = 64;
@@ -44,6 +44,7 @@ impl Scene {
     }
 
     /// The elements of `after` whose triangles an edit from `before` changed, each made again.
+    #[doc(hidden)]
     pub fn made_again(&self, before: &Model, after: &Model, cancelled: &(dyn Fn() -> bool + Sync)) -> Made {
         let Changed::Ids(changed) = after.changed_since(before) else { return Made::Whole };
         // Numbers past a card's planes and copies would need the whole scene numbered again.
@@ -201,6 +202,7 @@ impl Scene {
     }
 
     /// Where element `id`'s triangles are.
+    #[doc(hidden)]
     pub fn span(&self, id: Id) -> Option<&Span> {
         let k = self.spans.binary_search_by_key(&id, |s| s.id).ok()?;
         self.spans.get(k)
@@ -268,6 +270,7 @@ impl<'a> Reach<'a> {
 }
 
 /// What making again found.
+#[doc(hidden)]
 pub enum Made {
     Some(HashMap<Id, Vec<Tri>>),
     Whole,
@@ -395,6 +398,6 @@ fn copy_of(
 }
 
 /// Whether `own` is `local` placed by `copy`, to the last bit.
-pub fn placed(local: &[[P3; 3]], copy: &ComponentInstance, own: &[Tri]) -> bool {
+fn placed(local: &[[P3; 3]], copy: &ComponentInstance, own: &[Tri]) -> bool {
     !local.is_empty() && local.len() == own.len() && local.iter().zip(own).all(|(l, t)| l.map(|q| copy.place(q)) == t.p)
 }

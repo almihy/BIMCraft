@@ -10,12 +10,12 @@ use crate::model::{Id, Justify, Model, Run, TOL, Wall};
 
 /// Whether `r` lies flat: not upright, and with no `end_offset` to slope it — a footing sloping end to end has no
 /// flat top to meet a wall with.
-pub fn level(r: &Run) -> bool {
+pub(crate) fn level(r: &Run) -> bool {
     r.start.dist(r.end) > TOL && r.end_offset.is_none_or(|e| (e - r.offset).abs() <= TOL)
 }
 
 /// The height of the top of run `r`'s section, of type `type_name` in `category` of `m`.
-pub fn top(m: &Model, r: &Run, category: &str) -> Option<f64> {
+pub(crate) fn top(m: &Model, r: &Run, category: &str) -> Option<f64> {
     let t = m.types.runs.get(category)?.get(&r.type_name)?;
     let base = m.elevation(r.level) + r.offset;
     Some(match r.justify {
@@ -43,6 +43,7 @@ fn off_line(p: P2, a: P2, b: P2) -> f64 {
 /// Whether footing `f` of `category` lies under straight wall `w` and touches it: their lines run the same way and
 /// bear on one another, their stretches in plan meet (the footing really lies under the wall), and the footing's
 /// top is the wall's base — each within the model's tolerance.
+#[doc(hidden)]
 pub fn holds(m: &Model, w: &Wall, f: &Run, category: &str) -> bool {
     if !level(f) || w.arc != 0.0 {
         return false;
@@ -67,12 +68,14 @@ pub fn holds(m: &Model, w: &Wall, f: &Run, category: &str) -> bool {
 }
 
 /// `r` with each of its ends put through `f`, and the heights of its ends kept.
+#[doc(hidden)]
 pub fn mapped(r: &Run, f: impl Fn(P2) -> P2) -> Run {
     Run { start: f(r.start), end: f(r.end), ..r.clone() }
 }
 
 /// `r` moved so that the top of its section sits on `base`, of a type in `category` of `m`: its level kept and its
 /// `offset` set for its `justify`, so that the top is exactly there.
+#[doc(hidden)]
 pub fn on_base(m: &Model, r: &Run, category: &str, base: f64) -> Option<Run> {
     let t = m.types.runs.get(category)?.get(&r.type_name)?;
     let shift = match r.justify {
@@ -87,11 +90,13 @@ pub fn on_base(m: &Model, r: &Run, category: &str, base: f64) -> Option<Run> {
 thread_local! {
     /// The walls [`wall_of`] has looked at on this thread: the tests assert on it, not on time, which varies with the load of
     /// the machine.
+    #[doc(hidden)]
     pub static LOOKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// The wall footing `id` is glued to, if it is glued to one: the nearest wall, where several stacked walls lie under
 /// the same footing, whose line is the footing's and whose base the footing's top meets.
+#[doc(hidden)]
 pub fn wall_of(m: &Model, id: Id) -> Option<Id> {
     let e = m.elements.get(id)?;
     let (Some(f), category) = (e.run(), e.category()) else { return None };
@@ -117,6 +122,7 @@ pub fn wall_of(m: &Model, id: Id) -> Option<Id> {
 
 /// Every strip footing glued to one of the walls `walls`, by its id and the wall's: the footings a command that
 /// changes those walls must take along.
+#[doc(hidden)]
 pub fn footings_of(m: &Model, walls: &[Id]) -> Vec<(Id, Id)> {
     let mut out = Vec::new();
     for id in m.elements.keys().copied().collect::<Vec<_>>() {

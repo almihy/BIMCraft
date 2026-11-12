@@ -23,6 +23,7 @@ type Picture = (u32, u32, Vec<u8>, Option<Vec<u8>>);
 
 /// A page's content stream: the drawing's pixels mapped onto `paper` mm in points, y up; and its
 /// pictures, RGB and the alpha of one not all there, in the order the stream names them (`/Im0`, `/Im1`…).
+#[doc(hidden)]
 pub fn contents(d: &Drawing, paper: P2) -> (String, Vec<Picture>) {
     let k = 72.0 / 25.4 / d.view.scale;
     let mut s = format!("{k:.6} 0 0 {:.6} 0 {:.3} cm 1 J 0 j\n", -k, paper.1 * 72.0 / 25.4);
