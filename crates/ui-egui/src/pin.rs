@@ -81,7 +81,10 @@ impl BimApp {
             }
         }
         if !pinned.is_empty() {
-            warned.push(t("Pinned objects were not deleted. To delete them, unpin them before using delete.").to_string());
+            // Only of what is still there: a pinned door that went with its deleted wall is the note's, not this.
+            if pinned.iter().any(|id| self.session.model.elements.get(*id).is_some()) {
+                warned.push(t("Pinned objects were not deleted. To delete them, unpin them before using delete.").to_string());
+            }
             // As Revit leaves it: nothing selected, the pinned ones neither.
             self.selection.clear();
         }

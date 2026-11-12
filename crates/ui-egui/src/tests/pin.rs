@@ -177,7 +177,7 @@ door {{\"at\": [2000, 0]}}"
     assert!(!ids(&h, "wall").contains(&south), "the wall went");
     let warned = h.state().warned.join(" ");
     assert!(warned.contains("deleted because their parent or host object was deleted"), "{warned}");
-    assert!(warned.contains("Pinned objects were not deleted."), "{warned}");
+    assert!(!warned.contains("Pinned objects were not deleted."), "nothing pinned was kept, so it says only that it went: {warned}");
     assert!(h.state().status.text.is_empty(), "no error: {:?}", h.state().status);
     assert!(h.query_by_label("Warning").is_some() && h.query_by_label("Error").is_none());
     assert!(h.state().selection.is_empty());
