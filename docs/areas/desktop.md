@@ -387,22 +387,30 @@ the box behind the eye isn't drawn.
 A camera view's Properties (`camera.rs`) are Revit's Camera group (Projection Mode, Eye Elevation, Target Elevation, Camera
 Position, read-only) then 3ds Max's rollouts: Basic (Targeted, Target Distance), Physical Camera (Film/Sensor, Width, Focal
 Length and Field of View each driving the other, Zoom, Aperture, Focus, Focus Distance, Enable Depth of Field), Exposure,
-Perspective Control (Lens Shift, Tilt Correction, Auto Vertical Tilt Correction), Clipping (Clip Manually, Near and Far Clip)
+Perspective Control (Lens Shift, Tilt Correction Vertical, greyed while Auto Vertical Tilt Correction sets it or the camera
+is orthographic), Clipping (Clip Manually, Near and Far Clip)
 and Output Size (Preset, Width, Height, Image Aspect, Lock Image Aspect). Each field runs `camera` when it is typed, as the rest
-of the palette does. A selected camera (picked on a plan, or the Project Browser's Show Camera) shows its cone on the plan
-(`camgrips.rs`): grips at the eye (moves it, the target staying), the target (aims it; a Free camera has none), the far line's
+of the palette does. A plan shows a camera only while its view is selected (the Project Browser's Show Camera, or the view
+picked there), as Revit does: `render::draw` draws no cameras, and the canvas draws `render::camera_marks` of the selected
+ones over the plan (`Shown::marks`, picked first). A selected camera shows its cone on the plan (`camgrips.rs`): grips at the eye (moves it, the target staying), the target (aims it; a Free camera has none), the far line's
 middle (Clip Manually on, the far plane there) and each side's middle (the field of view), one `camera` when let go.
 
 Framing a shot (`fly.rs`). In a camera view in perspective, holding the right button flies as Enscape does: the pointer looks
 about the eye (`Camera::look`), W and S go forward and back, A and D sideways, Q and E down and up (`Camera::walk`), Shift four
 times as fast, the wheel the speed; letting go after a flight opens no menu. Walk (Shift+W, Revit's SteeringWheels shortcut, or
 the view bar) flies the same without the right button, the left looking, until Esc. While it flies the keys are the flight's,
-never a shortcut's: `keys` returns before the two-letter shortcuts, so WA is the Wall tool whenever the view isn't flying. Keep
-Eye Height walks level. Safe Frame (Shift+F, on for a camera view) fits the image's Output Size in the view, what lies outside
+never a two-letter shortcut's (WA is the Wall tool whenever the view isn't flying), and every other shortcut works as ever:
+Ctrl+S, Ctrl+Z, Delete. Shift+W toggles Walk when pressed afresh (a held key's repeats don't) and not while the right button
+flies, where Shift and W are a faster forward. A key held with Ctrl or Alt, or typed in a text field, moves nothing
+(`orbit::flight_keys_down`). Keep
+Eye Height walks level. Safe Frame (Shift+F) is on by default in a camera view, the owner's aim being the perfect shot: it fits the image's Output Size in the view, what lies outside
 dimmed, the lens across its width; Rule of Thirds draws its thirds. Two-Point Perspective on the bar is Auto Vertical Tilt
 Correction. The picture is drawn through `Camera::physical` and the hand moves the bare camera, so a flight written back keeps
-the eye and target; a gesture (a drag, a wheel turn, a flight) is written back once it settles, one undo step. A view without a
-camera writes `view_orientation` the same way, only after the hand moved it, so opening a view makes no undo step. The 3D view
+the eye and target; every pick, grip and drag in the view goes by the camera the picture is drawn through (`Orbit::seen`), so a
+lens shift or a tilt moves them with the picture. A gesture (a drag, a wheel turn, a flight) is written back once it settles
+and only when the hand moved the view, with `view_orientation`, which is no undo step: Revit's navigation isn't on the undo
+stack, the view is saved with the project and marks it changed, and undo leaves every view where it was turned (`Step::turned`).
+Opening a view writes nothing. The 3D view
 draws and picks with the view's own look (`orbit::look_of`): a camera view's Visibility/Graphics and section box are its own,
 and its mesh is made again for it.
 

@@ -67,6 +67,7 @@ fn show_camera_in_the_browser_selects_the_camera_so_the_plan_shows_its_cone() {
     }
     press(&mut h, "Show Camera");
     assert_eq!(h.state().selection, vec![id]);
+    assert!(h.query_by_label("Rotate").is_some(), "its Modify tab is up, as Revit's");
 }
 
 #[test]
@@ -157,6 +158,7 @@ fn holding_the_right_button_flies_with_wasd_and_typing_wa_still_makes_a_wall_els
     let (mut h, id) = placed();
     assert_eq!(h.state().sheet, Sheet::View3D);
     let before = cam(&h, id);
+    let undo = h.state().session.history().len();
     let middle = h.state().orbit.rect.center();
     h.hover_at(middle);
     h.run();
@@ -185,10 +187,9 @@ fn holding_the_right_button_flies_with_wasd_and_typing_wa_still_makes_a_wall_els
     let way = |c: &bimcraft_core::model::ViewCamera| (c.target[1] - c.eye[1]).atan2(c.target[0] - c.eye[0]);
     assert!(way(&after) < way(&before) - 0.05, "it turned right");
     assert!(h.state().tool == Tool::Modify, "the W typed while flying was no shortcut");
-    assert!(h.query_by_label("Show Camera").is_none(), "letting go after a flight opens no menu");
-    // One undo step for the flight.
-    shortcut_undo(&mut h);
-    assert!(same_point(cam(&h, id).eye, before.eye), "undone at once");
+    assert!(!egui::Popup::is_any_open(&h.ctx), "letting go after a flight opens no menu");
+    // Navigation is no undo step, as Revit's.
+    assert_eq!(h.state().session.history().len(), undo, "no undo step for the flight");
     // Not flying, WA is the Wall tool as ever.
     shortcut(&mut h, "WA");
     assert!(matches!(h.state().tool, Tool::Wall(_)), "{:?}", h.state().tool);
@@ -211,7 +212,7 @@ fn walk_toggles_with_shift_w_and_the_safe_frame_with_shift_f() {
 }
 
 #[test]
-fn every_3d_view_keeps_where_it_is_left_as_one_undo_step_a_gesture() {
+fn every_3d_view_keeps_where_it_is_left_and_navigating_makes_no_undo_step() {
     let mut h = app(BOX);
     press(&mut h, "Default 3D View");
     let undo = h.state().session.history().len();
@@ -225,7 +226,8 @@ fn every_3d_view_keeps_where_it_is_left_as_one_undo_step_a_gesture() {
     };
     assert!(v.framing.is_some(), "where it was left is kept");
     assert!((v.azimuth - bimcraft_core::view3d::AZIMUTH).abs() > 1.0, "turned: {}", v.azimuth);
-    assert_eq!(h.state().session.history().len(), undo + 1, "one undo step for the drag");
+    assert_eq!(h.state().session.history().len(), undo, "no undo step for the drag, as Revit's navigation");
+    assert!(h.state().dirty(), "but the project is changed: the view is saved with it");
     // Rendered by the core, it is the view the person left.
     let r = h.state_mut().session.execute("view_orientation", &json!({"view": "{3D}"})).unwrap();
     assert_eq!(r["azimuth"].as_f64(), Some(v.azimuth));
@@ -249,4 +251,272 @@ fn in_a_section_the_eye_and_the_target_are_raised_by_their_grips() {
     drag(&mut h, P2(7000.0, 1200.0), P2(7000.0, 900.0));
     assert!((cam(&h, id).target[2] - 900.0).abs() < 20.0, "{:?}", cam(&h, id).target);
     assert!(same_point([cam(&h, id).eye[0], cam(&h, id).eye[1], 0.0], [-1000.0, 3000.0, 0.0]), "only heights change there");
+}
+
+/// A key's press or release over the view: `repeat` for the presses a held key repeats.
+fn key_event(h: &mut Harness<BimApp>, key: Key, pressed: bool, repeat: bool, modifiers: Modifiers) {
+    h.event(Event::Key { key, physical_key: None, pressed, repeat, modifiers });
+}
+
+fn right_button(h: &mut Harness<BimApp>, pos: Pos2, pressed: bool) {
+    h.event(Event::PointerButton { pos, button: PointerButton::Secondary, pressed, modifiers: Modifiers::NONE });
+}
+
+#[test]
+fn shift_w_while_the_right_button_flies_is_the_flight_s_and_a_held_shift_w_toggles_walk_once() {
+    let (mut h, _) = placed();
+    let middle = h.state().orbit.rect.center();
+    h.hover_at(middle);
+    h.run();
+    right_button(&mut h, middle, true);
+    h.run();
+    // Shift and W held while the right button flies: forward, faster; Walk stays off.
+    key_event(&mut h, Key::W, true, false, Modifiers::SHIFT);
+    h.step();
+    key_event(&mut h, Key::W, true, true, Modifiers::SHIFT);
+    h.step();
+    key_event(&mut h, Key::W, false, false, Modifiers::SHIFT);
+    h.step();
+    assert!(!h.state().orbit.walk, "Shift+W in a flight is no Walk");
+    right_button(&mut h, middle, false);
+    h.run();
+    // Not flying, Shift+W held down turns Walk on once: its repeats don't turn it off again.
+    key_event(&mut h, Key::W, true, false, Modifiers::SHIFT);
+    h.step();
+    for _ in 0..3 {
+        key_event(&mut h, Key::W, true, true, Modifiers::SHIFT);
+        h.step();
+    }
+    key_event(&mut h, Key::W, false, false, Modifiers::SHIFT);
+    h.run();
+    assert!(h.state().orbit.walk, "one press, one toggle");
+}
+
+#[test]
+fn walking_ctrl_s_ctrl_z_and_delete_still_work_and_ctrl_held_moves_nothing() {
+    let (mut h, id) = placed();
+    h.key_press_modifiers(Modifiers::SHIFT, Key::W);
+    h.run();
+    assert!(h.state().orbit.walk);
+    // Ctrl+S saves: a project never saved asks where.
+    h.key_press_modifiers(Modifiers::COMMAND, Key::S);
+    h.run();
+    assert!(crate::dialog::BEGUN.with(|b| b.borrow_mut().pop()).is_some(), "Ctrl+S while walking saves");
+    assert!(h.state().orbit.walk, "and the walk goes on");
+    // A key held with Ctrl is a shortcut's, not a step.
+    let before = cam(&h, id);
+    h.event(Event::ModifiersChanged(Modifiers::COMMAND));
+    key_event(&mut h, Key::A, true, false, Modifiers::COMMAND);
+    for _ in 0..4 {
+        h.step();
+    }
+    key_event(&mut h, Key::A, false, false, Modifiers::COMMAND);
+    h.event(Event::ModifiersChanged(Modifiers::NONE));
+    h.run();
+    assert!(same_point(cam(&h, id).eye, before.eye), "Ctrl+A moved the camera: {:?}", cam(&h, id).eye);
+    // Delete deletes what is selected, and Ctrl+Z brings it back.
+    let wall = ids(&h, "wall")[0];
+    h.state_mut().selection = vec![wall];
+    key(&mut h, Key::Delete);
+    assert!(h.state().session.model.elements.get(wall).is_none(), "Delete while walking deletes");
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run();
+    assert!(h.state().session.model.elements.get(wall).is_some(), "Ctrl+Z while walking undoes");
+}
+
+#[test]
+fn walking_the_keys_typed_in_a_text_field_are_the_field_s_and_move_nothing() {
+    let (mut h, id) = placed();
+    h.key_press_modifiers(Modifiers::SHIFT, Key::W);
+    h.run();
+    assert!(h.state().orbit.walk);
+    let before = cam(&h, id);
+    h.get_by_label("Target Distance").focus();
+    h.run();
+    key_event(&mut h, Key::W, true, false, Modifiers::NONE);
+    h.event(Event::Text("w".into()));
+    for _ in 0..4 {
+        h.step();
+    }
+    key_event(&mut h, Key::W, false, false, Modifiers::NONE);
+    h.run();
+    assert!(same_point(cam(&h, id).eye, before.eye), "typing in a field walked the camera: {:?}", cam(&h, id).eye);
+}
+
+/// What a camera view's physical settings are, as the model holds them.
+fn physical(h: &Harness<BimApp>, id: Id) -> bimcraft_core::model::Physical {
+    cam(h, id).physical
+}
+
+#[test]
+fn with_a_lens_shift_a_section_box_s_grip_is_found_where_the_picture_draws_it() {
+    let (mut h, id) = placed();
+    // The safe frame off: the film is the view's width.
+    h.key_press_modifiers(Modifiers::SHIFT, Key::F);
+    h.run();
+    let s = &mut h.state_mut().session;
+    s.execute("section_box", &json!({"view": id, "min": [0.0, 0.0, 0.0], "max": [4000.0, 6000.0, 3000.0]})).unwrap();
+    s.execute("camera", &json!({"view": id, "shift": [0.0, 30.0]})).unwrap();
+    h.run();
+    h.run();
+    let (rect, ppp) = (h.state().orbit.rect, h.ctx.pixels_per_point());
+    let bare = h.state().orbit.camera.unwrap();
+    let seen = bare.physical(&physical(&h, id), bare.target, f64::from(bare.width));
+    let b = bimcraft_core::graphics::Look::of(&h.state().session.model, id).section_box().unwrap();
+    let on = |c: &bimcraft_core::view3d::Camera, p: [f64; 3]| {
+        let (x, y, _) = c.project(p);
+        rect.min + vec2(x as f32 / ppp, y as f32 / ppp)
+    };
+    let grips = bimcraft_core::view3d::box_grips(b);
+    let (k, at) = grips
+        .iter()
+        .enumerate()
+        .map(|(k, g)| (k, on(&seen, *g)))
+        .find(|(k, at)| rect.shrink(20.0).contains(*at) && on(&bare, grips[*k]).distance(*at) > 40.0)
+        .expect("a grip the shift moves, in the view");
+    h.hover_at(at);
+    h.run();
+    assert_eq!(h.state().orbit.hot_grip, Some(k), "the grip under the pointer is the one drawn there");
+}
+
+#[test]
+fn opening_a_steep_camera_view_changes_nothing() {
+    let mut h = app(BOX);
+    let r = h.state_mut().session.execute("camera", &json!({"eye": [2000.0, 3000.0, 30000.0], "target": [2050.0, 3000.0, 0.0]})).unwrap();
+    let id = r["id"].as_u64().unwrap();
+    let (model, undo) = (Arc::clone(&h.state().session.model), h.state().session.history().len());
+    h.state_mut().open_3d(Some(id));
+    for _ in 0..4 {
+        h.run();
+    }
+    assert!(Arc::ptr_eq(&model, &h.state().session.model), "opening a view writes nothing back: {:?}", cam(&h, id));
+    assert_eq!(h.state().session.history().len(), undo, "and makes no undo step");
+}
+
+#[test]
+fn a_flight_is_kept_with_the_view_and_no_undo_step_as_revit_s_navigation() {
+    let (mut h, id) = placed();
+    let undo = h.state().session.history().len();
+    let before = cam(&h, id);
+    let middle = h.state().orbit.rect.center();
+    h.hover_at(middle);
+    h.run();
+    right_button(&mut h, middle, true);
+    h.run();
+    key_event(&mut h, Key::W, true, false, Modifiers::NONE);
+    for _ in 0..4 {
+        h.step();
+    }
+    key_event(&mut h, Key::W, false, false, Modifiers::NONE);
+    h.step();
+    right_button(&mut h, middle, false);
+    h.run();
+    let flown = cam(&h, id);
+    assert!(!same_point(flown.eye, before.eye), "it flew");
+    assert!(h.state().dirty(), "the project is changed");
+    assert_eq!(h.state().session.history().len(), undo, "navigation is no undo step");
+    // Undo takes back the last edit (the camera placed), not the flight.
+    assert!(!egui::Popup::is_any_open(&h.ctx), "letting go after a flight opens no menu");
+}
+
+#[test]
+fn a_right_click_without_a_flight_opens_the_view_s_menu() {
+    let (mut h, _) = placed();
+    let middle = h.state().orbit.rect.center();
+    h.hover_at(middle);
+    h.run();
+    right_button(&mut h, middle, true);
+    h.run();
+    right_button(&mut h, middle, false);
+    h.run();
+    assert!(h.query_by_label("Zoom to Fit").is_some(), "the canvas's own menu opens");
+}
+
+#[test]
+fn select_all_instances_in_a_camera_view_takes_only_what_that_view_shows() {
+    let (mut h, id) = placed();
+    let walls = ids(&h, "wall");
+    assert!(walls.len() >= 2);
+    h.state_mut().selection = vec![walls[0]];
+    h.state_mut().act(Action::HideElement);
+    h.run();
+    assert!(!bimcraft_core::graphics::Look::of(&h.state().session.model, id).shows(walls[0]), "hidden in the camera view");
+    h.state_mut().selection = vec![walls[1]];
+    h.state_mut().act(Action::SelectAllInstances);
+    h.run();
+    assert!(!h.state().selection.contains(&walls[0]), "what the camera view hides isn't taken: {:?}", h.state().selection);
+    assert!(h.state().selection.contains(&walls[1]));
+}
+
+#[test]
+fn a_camera_shows_on_the_plan_only_while_its_view_is_selected() {
+    let (mut h, id) = placed();
+    topmost(&mut h, "Level 1");
+    h.state_mut().selection.clear();
+    h.run();
+    // Not selected, it isn't drawn and a click where its eye is picks nothing.
+    click(&mut h, P2(-1000.0, 3000.0));
+    assert!(h.state().selection.is_empty(), "a hidden camera is not picked: {:?}", h.state().selection);
+    let shown = h.state().canvas.drawing.shown_drawing().unwrap();
+    assert!(!shown.owners.iter().flatten().any(|o| *o == id), "not drawn while not selected");
+    // Selected (Show Camera), its mark is there and picks.
+    h.state_mut().selection = vec![id];
+    h.run();
+    click(&mut h, P2(-1000.0, 3000.0));
+    assert_eq!(h.state().selection, vec![id], "its mark picks while shown");
+}
+
+#[test]
+fn the_field_of_view_spans_the_safe_frame_and_the_window_draws_what_render_makes() {
+    let (mut h, id) = placed();
+    h.state_mut().session.execute("camera", &json!({"view": id, "shift": [5.0, 8.0], "tilt": 0.2})).unwrap();
+    h.run();
+    h.run();
+    assert!(h.state().orbit.safe_frame);
+    let (rect, ppp) = (h.state().orbit.rect, h.ctx.pixels_per_point());
+    let c = cam(&h, id);
+    let frame = crate::fly::safe_frame(rect, c.physical.aspect());
+    let seen = h.state().orbit.seen.expect("the camera the picture is drawn through");
+    let px = |p: [f64; 3]| {
+        let (x, y, _) = seen.project(p);
+        (rect.min.x + x as f32 / ppp, rect.min.y + y as f32 / ppp)
+    };
+    // `render` of the view at its output size, and the window's picture, scaled from the frame: the same points.
+    let v = match h.state().session.model.elements.get(id) {
+        Some(Element::View3D(v)) => v.clone(),
+        _ => panic!(),
+    };
+    let [ow, oh] = c.physical.output;
+    let rendered = bimcraft_core::view3d::as_left(&v, ow, oh).unwrap();
+    for p in [[0.0, 0.0, 0.0], [4000.0, 6000.0, 3000.0], [2000.0, 1000.0, 2500.0], c.target] {
+        let (x, y) = px(p);
+        let (fx, fy) = ((x - frame.min.x) / frame.width() * ow as f32, (y - frame.min.y) / frame.height() * oh as f32);
+        let (rx, ry, _) = rendered.project(p);
+        assert!((f64::from(fx) - rx).abs() < 2.0 && (f64::from(fy) - ry).abs() < 2.0, "{p:?}: window {fx} {fy}, render {rx} {ry}");
+    }
+    // Without shift or tilt, the field of view's edge at the target lands on the frame's edge.
+    h.state_mut().session.execute("camera", &json!({"view": id, "shift": [0.0, 0.0], "tilt": 0.0})).unwrap();
+    h.run();
+    h.run();
+    let seen = h.state().orbit.seen.unwrap();
+    let c = cam(&h, id);
+    let fov = bimcraft_core::view3d::field_of_view(lens(&h, id), &c.physical).to_radians();
+    let d = c.target_distance();
+    let way = [(c.target[0] - c.eye[0]) / d, (c.target[1] - c.eye[1]) / d];
+    let right = [way[1], -way[0]];
+    let edge = [c.target[0] + right[0] * d * (fov / 2.0).tan(), c.target[1] + right[1] * d * (fov / 2.0).tan(), c.target[2]];
+    let (x, ..) = seen.project(edge);
+    let x = rect.min.x + x as f32 / ppp;
+    assert!((x - frame.max.x).abs() < 1.5, "the field of view's edge {x} is the frame's {}", frame.max.x);
+}
+
+#[test]
+fn with_auto_vertical_tilt_the_vertical_tilt_correction_shows_as_set_for_it_and_there_is_no_horizontal() {
+    use egui_kittest::kittest::NodeT;
+    let (mut h, id) = placed();
+    assert!(h.query_by_label("Tilt Correction Horizontal").is_none(), "only the vertical tilt correction is applied, so only it shows");
+    h.get_by_role_and_label(Role::CheckBox, "Auto Vertical Tilt Correction").click_accesskit();
+    h.run();
+    assert!(physical(&h, id).auto_tilt);
+    assert!(h.get_by_label("Tilt Correction Vertical").accesskit_node().is_disabled(), "greyed: Auto sets it");
 }

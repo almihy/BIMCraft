@@ -14,15 +14,22 @@ use crate::BimApp;
 use crate::canvas::GRIP_REACH;
 use crate::style::pal;
 
-/// The selected camera views: their id, camera and focal length.
-fn selected_cameras(m: &Model, selection: &[Id]) -> Vec<(Id, ViewCamera, f64)> {
+/// The selected camera views: their id, camera, focal length and whether they are in perspective.
+fn selected_cameras(m: &Model, selection: &[Id]) -> Vec<(Id, ViewCamera, f64, bool)> {
     selection
         .iter()
         .filter_map(|id| match m.elements.get(*id) {
-            Some(Element::View3D(v)) => Some((*id, v.camera?, v.perspective.map_or(bimcraft_core::view3d::LENS, |p| p.lens))),
+            Some(Element::View3D(v)) => {
+                Some((*id, v.camera?, v.perspective.map_or(bimcraft_core::view3d::LENS, |p| p.lens), v.lens().is_some()))
+            }
             _ => None,
         })
         .collect()
+}
+
+/// The camera views among `selection`: the cameras a plan shows (Revit shows one only while its view is selected).
+pub(crate) fn shown_cameras(m: &Model, selection: &[Id]) -> Vec<Id> {
+    selected_cameras(m, selection).into_iter().map(|(id, ..)| id).collect()
 }
 
 /// A cone's grips in the order `render::camera_grip` takes them: eye, target, far clip, left side, right side. A Free
@@ -64,6 +71,13 @@ fn at(rect: Rect, view: &View, q: P2) -> Pos2 {
 }
 
 impl BimApp {
+    /// Show Camera, as Revit's: camera view `id` selected, so every plan, section and elevation shows its eye, cone and
+    /// target with their grips, and its Modify tab up.
+    pub(crate) fn show_camera(&mut self, id: Id) {
+        self.selection = vec![id];
+        self.raise_context();
+    }
+
     /// A drag from a grip of a selected camera: held while it is dragged, then one `camera` where it is let go, the point
     /// snapped as any grip's. Whether it took the release, which is then no click.
     pub(crate) fn camera_grip_drag(&mut self, ui: &Ui, response: &Response, rect: Rect, view: &View, level: Id) -> bool {
@@ -74,7 +88,7 @@ impl BimApp {
             return false;
         }
         let cones: Vec<(Id, ViewCamera, f64, Cone)> =
-            cams.into_iter().filter_map(|(id, c, l)| Some((id, c, l, render::cone_of(&c, l)?))).collect();
+            cams.into_iter().filter_map(|(id, c, l, on)| Some((id, c, l, render::cone_of(&c, l, on)?))).collect();
         for (_, c, _, cone) in &cones {
             for (_, g) in grips(cone, c.physical.targeted) {
                 self.control_rect(ui, Rect::from_center_size(at(rect, view, g), vec2(GRIP_REACH, GRIP_REACH)));
@@ -129,14 +143,14 @@ impl BimApp {
         }
         let p = ui.painter_at(rect);
         let cursor = self.camera_grip.and_then(|_| ui.input(|i| i.pointer.latest_pos()));
-        for (id, cam, lens) in cams {
+        for (id, cam, lens, on) in cams {
             let (cam, lens) = match (self.camera_grip, cursor) {
                 (Some((held, which)), Some(q)) if held == id => {
                     moved(&cam, lens, which, self.camera_grip_point(m, level, view, rect, which, q))
                 }
                 _ => (cam, lens),
             };
-            let Some(cone) = render::cone_of(&cam, lens) else { continue };
+            let Some(cone) = render::cone_of(&cam, lens, on) else { continue };
             draw_cone(&p, rect, view, &cone, cam.physical.targeted, self.camera_grip.filter(|g| g.0 == id).map(|g| g.1));
         }
     }
@@ -191,7 +205,7 @@ impl BimApp {
         let along = |p: [f64; 3]| (P2(p[0], p[1]) - sv.start).dot(u);
         let at = |s: f64, z: f64| self::at(rect, view, P2(s, z));
         let points: Vec<(Id, usize, f64, f64)> =
-            cams.iter().flat_map(|(id, c, _)| [(*id, 0, along(c.eye), c.eye[2]), (*id, 1, along(c.target), c.target[2])]).collect();
+            cams.iter().flat_map(|(id, c, ..)| [(*id, 0, along(c.eye), c.eye[2]), (*id, 1, along(c.target), c.target[2])]).collect();
         for (.., s, z) in &points {
             self.control_rect(ui, Rect::from_center_size(at(*s, *z), vec2(GRIP_REACH, GRIP_REACH)));
         }
@@ -221,7 +235,7 @@ impl BimApp {
         }
         let accent = pal().accent;
         let mut shapes = Vec::new();
-        for (id, cam, _) in &cams {
+        for (id, cam, ..) in &cams {
             let eye = at(along(cam.eye), height(*id, 0, cam.eye[2]));
             let target = at(along(cam.target), height(*id, 1, cam.target[2]));
             shapes.push(egui::Shape::line_segment([eye, target], Stroke::new(1.5, accent)));

@@ -321,19 +321,28 @@ impl BimApp {
                         put("shift", json!(both));
                     }
                 }
-                let tilt = [ph.tilt[0], ph.vertical_tilt()];
-                for (k, (name, key)) in
-                    [("Tilt Correction Horizontal", "camera.tilt_h"), ("Tilt Correction Vertical", "camera.tilt_v")].into_iter().enumerate()
-                {
-                    if let Some(v) = self.number_row(ui, id, name, key, shown(tilt[k], 3), "") {
-                        let mut both = ph.tilt;
-                        both[k] = v;
-                        put("tilt", json!(both));
+                // 3ds Max's Tilt Correction Vertical, a slope; Auto sets it (shown greyed, as 3ds Max's), and an orthographic
+                // camera, whose verticals are vertical already, takes none.
+                let label = ui.label(t("Tilt Correction Vertical"));
+                let free = on && !ph.auto_tilt;
+                let typed =
+                    ui.add_enabled_ui(free, |ui| self.field(ui, id, "camera.tilt_v", shown(cam.vertical_tilt(), 3), label.id, "")).inner;
+                ui.end_row();
+                if let Some(typed) = typed {
+                    match number(&typed, "") {
+                        Some(v) => put("tilt", json!(v)),
+                        None => self.status = crate::Status { text: crate::lang::tf("`{}` is not a number", &[typed.trim()]), error: true },
                     }
                 }
-                if let Some(v) = Self::tick(ui, "Auto Vertical Tilt Correction", ph.auto_tilt) {
-                    put("auto_tilt", json!(v));
+                let label = ui.label(t("Auto Vertical Tilt Correction"));
+                let mut auto = ph.auto_tilt;
+                let r = ui.add_enabled(on, egui::Checkbox::without_text(&mut auto));
+                let named = t("Auto Vertical Tilt Correction").to_string();
+                r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, on, auto, &named));
+                if r.labelled_by(label.id).changed() {
+                    put("auto_tilt", json!(auto));
                 }
+                ui.end_row();
             });
         }
         if self.rollout(ui, CLIPPING) {

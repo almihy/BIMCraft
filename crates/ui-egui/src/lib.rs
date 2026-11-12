@@ -2112,9 +2112,21 @@ impl BimApp {
         // A camera view's own keys: Shift+W walks (Revit's SteeringWheels shortcut), Shift+F shows the safe frame (3ds Max's).
         // While it flies (the right button held, or walking) W, A, S, D, Q and E are the flight's, never a shortcut's: so
         // typing WA still places a wall whenever the view isn't flying.
+        // Every other shortcut (Ctrl+S, Ctrl+Z, Delete…) works while it flies; only the letters typed are the flight's.
+        let flight = self.sheet == Sheet::View3D && !ctx.egui_wants_keyboard_input() && (self.orbit.fly.is_some() || self.orbit.walk);
         if self.sheet == Sheet::View3D && !ctx.egui_wants_keyboard_input() {
+            // Shift+W pressed afresh (a held key's repeats are none): while the right button flies, Shift and W are the flight's
+            // (forward, faster), so it toggles Walk only when the view isn't flying that way.
+            let fresh = ctx.input(|i| {
+                i.events.iter().any(|e| {
+                    matches!(e, Event::Key { key: Key::W, pressed: true, repeat: false, modifiers, .. }
+                        if modifiers.matches_logically(Modifiers::SHIFT) && !modifiers.command && !modifiers.alt)
+                })
+            });
             if pressed(Modifiers::SHIFT, Key::W) {
-                self.toggle_walk();
+                if fresh && self.orbit.fly.is_none() {
+                    self.toggle_walk();
+                }
                 self.typed.clear();
                 return;
             }
@@ -2123,10 +2135,8 @@ impl BimApp {
                 self.typed.clear();
                 return;
             }
-            if self.orbit.fly.is_some() || self.orbit.walk {
-                if self.orbit.walk && pressed(Modifiers::NONE, Key::Escape) {
-                    self.orbit.walk = false;
-                }
+            if self.orbit.walk && pressed(Modifiers::NONE, Key::Escape) {
+                self.orbit.walk = false;
                 self.typed.clear();
                 return;
             }
@@ -2237,6 +2247,10 @@ impl BimApp {
         // after it (feet, inches, fractions, a unit) is the length's until Enter; letters before
         // one are shortcuts.
         let mut shortcut = String::new();
+        if flight {
+            self.typed.clear();
+            return;
+        }
         for ch in typed.chars() {
             let listening = self.base().is_some() || self.filleting();
             if listening && (ch.is_ascii_digit() || ch == '.' || !self.typed_length.is_empty()) {
@@ -2711,9 +2725,9 @@ impl BimApp {
                 let seen = render::section_picture(&m, id, view, &[]).map(|i| i.shows()).unwrap_or_default();
                 owners(render::section(&m, id, view)).into_iter().chain(seen).collect()
             }
-            // The whole model, but for what the default 3D view hides.
+            // The whole model, but for what the 3D view on screen hides (a camera view's own Visibility/Graphics).
             Sheet::View3D => {
-                let look = bimcraft_core::graphics::Look::of_3d(&m);
+                let look = crate::orbit::look_of(&m, self.active_3d());
                 m.elements.keys().copied().filter(|id| look.shows(*id)).collect()
             }
             Sheet::Paper(_) | Sheet::Schedule(_) | Sheet::Table(_) => BTreeSet::new(),

@@ -324,6 +324,7 @@ impl BimApp {
             Some(Act::Pick(category, name)) => {
                 self.types.insert(category, name);
             }
+            Some(Act::Select(id)) if crate::camgrips::shown_cameras(&self.session.model, &[id]) == [id] => self.show_camera(id),
             Some(Act::Select(id)) => self.selection = vec![id],
             _ => {}
         }

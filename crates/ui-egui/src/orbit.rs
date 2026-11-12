@@ -61,6 +61,16 @@ pub(crate) fn look_of(m: &Model, view: Option<Id>) -> Look {
     }
 }
 
+/// Which of a flight's keys (W, S, A, D, Q, E) are held: none while a text field has the keyboard (`typing`), or with Ctrl,
+/// Cmd or Alt held, whose keys are shortcuts (Ctrl+S, Ctrl+D…), never a move.
+pub(crate) fn flight_keys_down(i: &egui::InputState, typing: bool) -> [bool; 6] {
+    use egui::Key;
+    if typing || i.modifiers.command || i.modifiers.ctrl || i.modifiers.alt {
+        return [false; 6];
+    }
+    [Key::W, Key::S, Key::A, Key::D, Key::Q, Key::E].map(|k| i.key_down(k))
+}
+
 struct SceneJob {
     /// The 3D view it is drawn as (its look): none for the default.
     view: Option<Id>,
@@ -221,6 +231,9 @@ pub struct Orbit {
     /// Flying through a camera view (`fly.rs`): the right button held over it, whether it has moved the camera since, and how
     /// fast it flies, mm a second.
     pub(crate) fly: Option<bool>,
+    /// The camera the picture was drawn through last (the hand's, through the camera view's perspective control): what
+    /// every pick and grip in the view goes by.
+    pub(crate) seen: Option<Camera>,
     /// A view without a camera as it was last stood from the model (its id, azimuth, elevation and where it was left): a
     /// difference means it changed elsewhere (a command, undo), so the picture stands from the model anew.
     left: Option<(Option<Id>, f64, f64, Option<bimcraft_core::model::Framing>)>,
@@ -314,6 +327,7 @@ impl Default for Orbit {
             mesh_view: None,
             requested_view: None,
             fly: None,
+            seen: None,
             left: None,
             handled: false,
             fly_speed: crate::fly::SPEED,
@@ -494,9 +508,9 @@ impl Orbit {
     /// A model that differs from the last only in its section box, or in what the scene doesn't draw (a camera view's camera
     /// written back, a 3D dimension), has its scene and its mesh: a box is asked of them as they are drawn and picked, so there
     /// is nothing to make again, or to wait for.
-    fn keep_for_a_new_box(&mut self, model: &Arc<Model>) {
+    fn keep_for_a_new_box(&mut self, model: &Arc<Model>, view: Option<Id>) {
         let Some((before, scene)) = &self.scene else { return };
-        if Arc::ptr_eq(before, model) || !bimcraft_core::view3d::scene_kept(before, model) {
+        if Arc::ptr_eq(before, model) || !bimcraft_core::view3d::scene_kept(before, model, view) {
             return;
         }
         let scene = Arc::clone(scene);
@@ -859,13 +873,19 @@ impl BimApp {
         let safe_rect = stored.filter(|_| self.orbit.safe_frame).map(|c| crate::fly::safe_frame(rect, c.physical.aspect()));
         let film = safe_rect.map_or(f64::from(w), |f| f64::from(f.width() * ppp).max(1.0));
         let through = stored
-            .map(|c| bimcraft_core::view3d::full_frame(focal.unwrap_or(bimcraft_core::view3d::LENS), &c.physical) * f64::from(w) / film);
+            .map(|c| bimcraft_core::view3d::full_frame(focal.unwrap_or(bimcraft_core::view3d::LENS), &c.physical) * film / f64::from(w));
         let seen = match (stored, lens) {
             (Some(_), Some(_)) => through,
             (Some(_), None) => None,
             _ => lens,
         };
         let physical = stored.map(|c| c.physical);
+        // The camera the picture is drawn through, of the one the hand moves: a camera view's perspective control and
+        // clipping. Every pick, grip and drag in the view goes by it, as the picture does.
+        let seen_of = |c: Camera| match physical {
+            Some(ph) => c.physical(&ph, c.target, film),
+            None => c,
+        };
         let thirds = self.orbit.thirds;
         // Flying: the right button held over a camera view in perspective, or its Walk on: what the keys and the pointer do
         // there is the flight's (`fly.rs`), and the wheel sets its speed.
@@ -934,7 +954,7 @@ impl BimApp {
             o.left = left_now;
             o.handled = false;
         }
-        o.keep_for_a_new_box(&model);
+        o.keep_for_a_new_box(&model, active);
         if !o.scene.as_ref().is_some_and(|(m, _)| Arc::ptr_eq(m, &model))
             && let Some(gpu) = &mut self.card.gpu
         {
@@ -963,7 +983,7 @@ impl BimApp {
             let factor = (f64::from(wheel) * 0.004).exp() * f64::from(pinch);
             if factor.is_finite() && factor != 1.0 {
                 let factor = factor.clamp(0.2, 5.0);
-                cam = match surface(&o.picker, &cam, at) {
+                cam = match surface(&o.picker, &seen_of(cam), at) {
                     Some(s) => cam.zoom_about(factor, s.at),
                     None => cam.zoom(factor, px(at)),
                 };
@@ -973,6 +993,7 @@ impl BimApp {
             cam = crate::spacemouse::navigate(cam, motion, frame);
             ui.ctx().request_repaint();
         }
+        let pick = seen_of(cam);
         // A level selected alone has a grip at the middle of each edge of its plane: a drag from one
         // moves that edge over the plane, rather than turning the view.
         let level = match selection.as_slice() {
@@ -982,7 +1003,8 @@ impl BimApp {
         if let Some((id, z, extent)) = level
             && response.drag_started_by(PointerButton::Primary)
             && let Some(origin) = ui.input(|i| i.pointer.press_origin())
-            && let Some(k) = geom::edge_grips(extent).iter().position(|g| on_screen(&cam, rect, ppp, [g.0, g.1, z]).distance(origin) <= 8.0)
+            && let Some(k) =
+                geom::edge_grips(extent).iter().position(|g| on_screen(&pick, rect, ppp, [g.0, g.1, z]).distance(origin) <= 8.0)
         {
             o.grip = Some((id, k));
         }
@@ -991,7 +1013,7 @@ impl BimApp {
         }
         // Where the held grip's edge is now: over the level's plane, under the pointer, to 10 mm.
         let regripped = match (level, o.grip, latest) {
-            (Some((_, z, extent)), Some((_, k)), Some(now)) => cam.on_plane(px(now), z).map(|p| {
+            (Some((_, z, extent)), Some((_, k)), Some(now)) => pick.on_plane(px(now), z).map(|p| {
                 let round = |v: f64| (v / 10.0).round() * 10.0;
                 geom::move_edge(extent, k, P2(round(p[0]), round(p[1])))
             }),
@@ -1013,7 +1035,7 @@ impl BimApp {
             && !held
             && response.drag_started_by(PointerButton::Primary)
             && let Some(origin) = ui.input(|i| i.pointer.press_origin())
-            && let Some(k) = crate::section_box::grip_at(b, origin, |p| on_screen(&cam, rect, ppp, p))
+            && let Some(k) = crate::section_box::grip_at(b, origin, |p| on_screen(&pick, rect, ppp, p))
         {
             o.boxing = Some((k, origin));
         }
@@ -1023,7 +1045,7 @@ impl BimApp {
         let reboxed = match (boxed, o.boxing, latest) {
             (Some(b), Some((k, from)), Some(now)) => {
                 let grip = box_grips(b).get(k).copied().unwrap_or_default();
-                Some(move_box_face(b, k, cam.along(k / 2, grip, px(from), px(now)).unwrap_or(0.0)))
+                Some(move_box_face(b, k, pick.along(k / 2, grip, px(from), px(now)).unwrap_or(0.0)))
             }
             _ => None,
         };
@@ -1037,7 +1059,7 @@ impl BimApp {
         // The grip under the pointer shows it: a press there moves that face, not the view.
         o.hot_grip = boxed
             .filter(|_| modify && o.grip.is_none() && o.boxing.is_none() && o.drag.is_none())
-            .and_then(|b| crate::section_box::grip_at(b, hover?, |p| on_screen(&cam, rect, ppp, p)));
+            .and_then(|b| crate::section_box::grip_at(b, hover?, |p| on_screen(&pick, rect, ppp, p)));
         // A drag from a grip of the floor being shaped raises or lowers that point or corner, to the millimetre; the command
         // runs when the drag ends.
         if lifting
@@ -1046,11 +1068,11 @@ impl BimApp {
             && response.drag_started_by(PointerButton::Primary)
             && let Some(origin) = ui.input(|i| i.pointer.press_origin())
         {
-            let off = |p: &P3| on_screen(&cam, rect, ppp, *p).distance(origin);
+            let off = |p: &P3| on_screen(&pick, rect, ppp, *p).distance(origin);
             // A selected point's or edge's ▲ or ▼ takes all of it; else the grip there.
             let arrows = picked.iter().find_map(|s| {
                 let at = anchor(&s.ends())?;
-                let c = on_screen(&cam, rect, ppp, at);
+                let c = on_screen(&pick, rect, ppp, at);
                 let near = [c + vec2(-12.0, -9.0), c + vec2(-12.0, 9.0)].iter().any(|g| g.distance(origin) <= 9.0);
                 near.then(|| (s.ends(), at, origin))
             });
@@ -1067,7 +1089,7 @@ impl BimApp {
         }
         let lift_held = o.lift.is_some();
         let lifted_by = match (&o.lift, latest) {
-            (Some((_, at, from)), Some(now)) => cam.along(2, *at, px(*from), px(now)).map(f64::round),
+            (Some((_, at, from)), Some(now)) => pick.along(2, *at, px(*from), px(now)).map(f64::round),
             _ => None,
         };
         // While it's dragged, the floor as it would be with those points or corners there.
@@ -1100,7 +1122,7 @@ impl BimApp {
                 o.select = Some(origin);
             } else if (primary && !flying) || response.dragged_by(PointerButton::Middle) {
                 let orbit = primary || shift;
-                let pivot = orbit.then(|| surface(&o.picker, &cam, origin)).flatten().map(|s| s.at);
+                let pivot = orbit.then(|| surface(&o.picker, &pick, origin)).flatten().map(|s| s.at);
                 o.drag = Some((orbit, origin, pivot));
                 o.before = Some(cam);
             }
@@ -1133,11 +1155,12 @@ impl BimApp {
             cam = bimcraft_core::triad::turned(cam, end);
         }
         // Flying: the pointer looks about the eye while the right button is held (the left, while walking), W and S go
-        // forward and back, A and D sideways, Q and E down and up, Shift four times as fast.
+        // forward and back, A and D sideways, Q and E down and up, Shift four times as fast. The keys are a text field's
+        // while one is typed in, and a shortcut's with Ctrl or Alt.
+        let typing = ui.ctx().egui_wants_keyboard_input();
         if flying {
             let (delta, keys, fast, dt, primary) = ui.input(|i| {
-                use egui::Key;
-                let keys = [Key::W, Key::S, Key::A, Key::D, Key::Q, Key::E].map(|k| i.key_down(k));
+                let keys = flight_keys_down(i, typing);
                 (i.pointer.delta(), keys, i.modifiers.shift, f64::from(i.stable_dt).min(0.1), i.pointer.primary_down())
             });
             let looking = o.fly.is_some() || (o.walk && primary && response.is_pointer_button_down_on());
@@ -1162,11 +1185,8 @@ impl BimApp {
         }
         o.camera = Some(cam);
         // The hand, the wheel, the 3D mouse and a flight have let the camera be: a camera view's position is written back then
-        // (below), one undo step for each.
-        let flight_keys = flying
-            && ui.input(|i| {
-                [egui::Key::W, egui::Key::S, egui::Key::A, egui::Key::D, egui::Key::Q, egui::Key::E].iter().any(|k| i.key_down(*k))
-            });
+        // (below), no undo step.
+        let flight_keys = flying && ui.input(|i| flight_keys_down(i, typing).iter().any(|k| *k));
         let settled = o.drag.is_none()
             && wheel == 0.0
             && pinch == 1.0
@@ -1176,10 +1196,8 @@ impl BimApp {
             && !(o.walk && ui.input(|i| i.pointer.primary_down()));
         // The camera the hand moves, and the one the picture is drawn through: its perspective control and clipping.
         let bare = cam;
-        let cam = match physical {
-            Some(ph) => bare.physical(&ph, bare.target, film),
-            None => bare,
-        };
+        let cam = seen_of(bare);
+        o.seen = Some(cam);
         // A box let go: what it picks, as the picture is now.
         let boxed_ids = selected_box
             .filter(|_| sketch_z.is_none())
@@ -1700,11 +1718,14 @@ impl BimApp {
             Some(Ask::Level) => self.triad_level(),
             _ => {}
         }
-        // A camera view remembers where the hand, the wheel and the 3D mouse left it: once they let it be, its eye and target are written
-        // back, so leaving the view and returning comes back to the same place (and Properties shows them). A view drawn
-        // beside the active one (a floating window) writes nothing: the hand is working in the active view.
+        // A camera view remembers where the hand, the wheel and the 3D mouse left it: once they let it be, its eye and target are
+        // written back (`view_orientation`, no undo step, as Revit's navigation), so leaving the view and returning comes back
+        // to the same place (and Properties shows them). Only what the hand moved is written: opening a view, which stands it
+        // where its camera is (a steep one a little off it), writes nothing. A view drawn beside the active one (a floating
+        // window) writes nothing: the hand is working in the active view.
         if settled
             && !self.passive
+            && self.orbit.handled
             && matches!(three_d, Some((Some(_), _)))
             && let Some(eye) = bare.eye().or_else(|| stored.map(|c| crate::fly::eye_of_parallel(&bare, c.target_distance())))
             && let Some(id) = active
@@ -1718,13 +1739,13 @@ impl BimApp {
             let near = |a: [f64; 3], b: [f64; 3]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 0.01);
             if !stored.is_some_and(|c| near(c.eye, eye) && near(c.target, cam.target))
                 && let Some(was) = stored
-                && self.run("camera", json!({"view": id, "eye": eye, "target": cam.target})).is_some()
+                && self.run("view_orientation", json!({"view": id, "eye": eye, "target": cam.target})).is_some()
             {
                 // What the model holds now is what the picture shows.
                 self.orbit.built = Some((id, ViewCamera { eye, target: cam.target, ..was }, focal));
             }
         } else if settled && !self.passive && stored.is_none() && self.orbit.handled {
-            // Every other 3D view keeps where it was left too, as Revit's do: one undo step for each turn, pan or zoom.
+            // Every other 3D view keeps where it was left too, as Revit's do; navigating is no undo step.
             self.orbit.handled = false;
             let across = f64::from(bare.width.max(1)) / bare.scale.max(1e-9);
             let p = json!({"view": self.view3d_param(), "azimuth": bare.azimuth, "elevation": bare.elevation, "target": bare.target, "across": across});

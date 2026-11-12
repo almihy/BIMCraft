@@ -129,7 +129,8 @@ impl crate::BimApp {
         }
         let tip =
             msg!("Two-Point Perspective: verticals stay vertical however the camera looks up or down (Auto Vertical Tilt Correction)");
-        if crate::small_button(ui, Icon::Level, "Two-Point Perspective", cam.physical.auto_tilt, tip).clicked() {
+        // In perspective only: an orthographic camera's verticals stand vertical already.
+        if perspective && crate::small_button(ui, Icon::Level, "Two-Point Perspective", cam.physical.auto_tilt, tip).clicked() {
             self.run("camera", serde_json::json!({"view": id, "auto_tilt": !cam.physical.auto_tilt}));
             self.orbit.camera = None;
             self.orbit.built = None;

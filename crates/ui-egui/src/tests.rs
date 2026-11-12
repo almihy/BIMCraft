@@ -2113,8 +2113,11 @@ fn the_camera_tool_makes_a_perspective_3d_view_from_an_eye_and_a_target() {
     h.run();
     assert_eq!(field(&h, made[0], "perspective")["lens"], json!(50.0));
     assert_eq!(ids(&h, "view3d"), made, "the same view, relensed");
-    // The camera shows on its level's plan: clicking its mark selects it, and the menu opens its view.
+    // The camera shows on its level's plan while its view is selected (the browser's Show Camera), as Revit's: its mark
+    // picks it there, and the menu opens its view.
     topmost(&mut h, "Level 1");
+    h.state_mut().selection = vec![made[0]];
+    h.run();
     click(&mut h, P2(-1000.0, 3000.0));
     assert_eq!(h.state().selection, vec![made[0]], "its mark is picked on the plan");
     // Dragging the mark on the plan moves the camera as a whole, each point keeping its height.
@@ -2155,8 +2158,11 @@ fn a_camera_views_mark_on_the_plan_edits_its_camera_in_properties() {
     let made = ids(&h, "view3d");
     assert_eq!(made.len(), 1);
     let id = made[0];
-    // On its level's plan its mark picks the view, and Properties shows the camera itself, not a dead azimuth or elevation.
+    // Selected, it shows on its level's plan, its mark picks the view, and Properties shows the camera itself, not a dead
+    // azimuth or elevation.
     topmost(&mut h, "Level 1");
+    h.state_mut().selection = vec![id];
+    h.run();
     click(&mut h, P2(-1000.0, 3000.0));
     assert_eq!(h.state().selection, vec![id]);
     for label in ["View Name", "Eye Elevation", "Target Elevation", "Focal Length"] {
@@ -2215,7 +2221,7 @@ fn a_camera_views_mark_on_the_plan_edits_its_camera_in_properties() {
     let seen = h.state().orbit.camera.unwrap().lens.unwrap();
     let r = h.state().orbit.rect;
     let frame = crate::fly::safe_frame(r, 1920.0 / 1080.0);
-    assert!((seen - 80.0 * f64::from(r.width() / frame.width())).abs() < 0.5, "the picture is seen through the new lens: {seen}");
+    assert!((seen - 80.0 * f64::from(frame.width() / r.width())).abs() < 0.5, "the picture is seen through the new lens: {seen}");
 }
 
 #[test]
@@ -2232,6 +2238,8 @@ fn a_camera_view_follows_its_mark_dragged_on_the_plan() {
     topmost(&mut h, "Level 1");
     assert_eq!(h.state().sheet, Sheet::Plan(100000));
     assert_eq!(h.state().active_3d(), Some(id), "the camera view is still the one the 3D tab holds");
+    h.state_mut().selection = vec![id];
+    h.run();
     click(&mut h, P2(-1000.0, 3000.0));
     assert_eq!(h.state().selection, vec![id]);
     let from = h.state().screen(P2(-1000.0, 3000.0));
@@ -2265,6 +2273,8 @@ fn a_camera_view_in_a_window_of_its_own_follows_its_mark_dragged_on_the_plan() {
     h.run();
     topmost(&mut h, "Level 1");
     assert_eq!(h.state().sheet, Sheet::Plan(100000));
+    h.state_mut().selection = vec![id];
+    h.run();
     click(&mut h, P2(-1000.0, 3000.0));
     let from = h.state().screen(P2(-1000.0, 3000.0));
     drag_screen(&mut h, from, from + vec2(80.0, 0.0), PointerButton::Primary);
@@ -3305,6 +3315,9 @@ fn rotate_turns_a_component_about_its_own_point() {
 fn rotate_turns_a_camera_about_its_eye_by_default() {
     let mut h = app(&format!("{BOX}\ncamera {{\"eye\": [5000, 5000, 1500], \"target\": [6000, 5000, 1200]}}"));
     let camera = ids(&h, "view3d")[0];
+    // Selected in the browser (Show Camera): the plan shows it, and a click on its mark keeps it.
+    h.state_mut().show_camera(camera);
+    h.run();
     click(&mut h, P2(5000.0, 5000.0));
     assert_eq!(h.state().selection, [camera]);
     press(&mut h, "Rotate");
@@ -3319,6 +3332,8 @@ fn rotate_turns_a_camera_about_its_eye_by_default() {
 fn rotating_a_camera_about_its_eye_keeps_the_eye_and_turns_the_target() {
     let mut h = app(&format!("{BOX}\ncamera {{\"eye\": [5000, 5000, 1500], \"target\": [6000, 5000, 1200]}}"));
     let camera = ids(&h, "view3d")[0];
+    h.state_mut().show_camera(camera);
+    h.run();
     click(&mut h, P2(5000.0, 5000.0));
     press(&mut h, "Rotate");
     click(&mut h, P2(6000.0, 5000.0));
@@ -3359,7 +3374,11 @@ fn rotate_centre_snaps_to_a_notes_anchor() {
 #[test]
 fn a_click_on_a_cameras_mark_takes_its_eye() {
     let mut h = app(&format!("{BOX}\ncamera {{\"eye\": [5000, 5000, 1500], \"target\": [6000, 5000, 1200]}}"));
+    // Selected with the wall, so the plan shows it (Revit shows a camera only while its view is selected).
+    let camera = ids(&h, "view3d")[0];
     click(&mut h, P2(4000.0, 0.0));
+    h.state_mut().selection.push(camera);
+    h.run();
     press(&mut h, "Rotate");
     press(&mut h, "Place Centre");
     // The body stands behind the eye, against the way the camera looks: ten pixels west of it.
