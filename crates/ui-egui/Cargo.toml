@@ -53,6 +53,7 @@ hidapi = { version = "2.6.7", default-features = false, features = ["windows-nat
 [dev-dependencies]
 tempfile = { workspace = true }
 egui_kittest = { workspace = true }
+image = { workspace = true }
 bimcraft-update = { workspace = true, features = ["testing"] }
 
 [build-dependencies]

@@ -247,7 +247,7 @@ fn an_image_goes_in_a_section_and_not_in_a_3d_view() {
     assert_eq!(e["view"], s.model.guid(section.as_u64().unwrap()).to_string());
     let d = crate::render::section(&s.model, section.as_u64().unwrap(), crate::render::section_fit(&s.model, section.as_u64().unwrap(), 400, 300));
     assert!(d.owners.contains(&r["id"].as_u64()), "the section draws it");
-    let v3 = run(&mut s, "view3d", json!({"name": "Mine"}))["id"].clone();
+    let v3 = run(&mut s, "camera", json!({"eye": [10000, -10000, 5000], "target": [0, 0, 0], "name": "Mine"}))["id"].clone();
     let e = fails(&mut s, "import_image", json!({"image": "site.png", "view": v3}));
     assert!(e.contains("2D view") || e.contains("isn't a plan"), "{e}");
 }

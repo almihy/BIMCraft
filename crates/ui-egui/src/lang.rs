@@ -318,6 +318,7 @@ pub fn category(category: &str, several: bool) -> String {
         "link" => (msg!("category", "Linked Model"), msg!("category-plural", "Linked Models")),
         "pointcloud" => (msg!("category", "Point Cloud"), msg!("category-plural", "Point Clouds")),
         "cadimport" => (msg!("category", "CAD Import"), msg!("category-plural", "CAD Imports")),
+        "image" => (msg!("category", "Raster Image"), msg!("category-plural", "Raster Images")),
         "multicategory" => (msg!("category", "Multi-Category"), msg!("category-plural", "Multi-Category")),
         other => return other.to_string(),
     };

@@ -161,6 +161,12 @@ icon_names! {
     PointCloud,
     ImportCad,
     LinkCad,
+    ImportPdf,
+    InsertImage,
+    ManageImages,
+    BringToFront,
+    SendToBack,
+    Scale,
     Parameters,
     Measure,
     Snaps,
@@ -1280,6 +1286,30 @@ pub fn own(icon: Icon, compact: bool) -> Vec<Outline> {
             g.line(&[(15.0, 3.0), (15.0, 8.0), (20.0, 8.0)]);
             g.closed(&[(7.0, 11.0), (17.0, 11.0), (17.0, 18.0), (7.0, 18.0)]);
             g.line(&[(12.0, 11.0), (12.0, 14.5)]);
+        }
+        Icon::ImportPdf => {
+            // A page, its corner folded, with lines of text.
+            g.closed(&[(5.0, 3.0), (15.0, 3.0), (19.0, 7.0), (19.0, 21.0), (5.0, 21.0)]);
+            g.line(&[(15.0, 3.0), (15.0, 7.0), (19.0, 7.0)]);
+            g.line(&[(8.0, 12.0), (16.0, 12.0)]);
+            g.line(&[(8.0, 16.0), (14.0, 16.0)]);
+        }
+        Icon::InsertImage | Icon::ManageImages => {
+            // A picture's frame, a hill and the sun.
+            g.closed(&[(3.0, 5.0), (21.0, 5.0), (21.0, 19.0), (3.0, 19.0)]);
+            g.line(&[(3.0, 16.0), (9.0, 11.0), (14.0, 15.0), (17.0, 13.0), (21.0, 16.0)]);
+            g.circle((16.0, 9.0), 1.5);
+        }
+        Icon::BringToFront | Icon::SendToBack => {
+            // Two sheets overlapping.
+            g.closed(&[(3.0, 3.0), (13.0, 3.0), (13.0, 13.0), (3.0, 13.0)]);
+            g.closed(&[(11.0, 11.0), (21.0, 11.0), (21.0, 21.0), (11.0, 21.0)]);
+        }
+        Icon::Scale => {
+            // A box and its corner pulled out.
+            g.closed(&[(3.0, 11.0), (13.0, 11.0), (13.0, 21.0), (3.0, 21.0)]);
+            g.line(&[(13.0, 11.0), (21.0, 3.0)]);
+            g.line(&[(15.0, 3.0), (21.0, 3.0), (21.0, 9.0)]);
         }
         Icon::LinkCad => {
             // The drawing's sheet, and a chain's link through its foot.

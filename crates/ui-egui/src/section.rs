@@ -372,6 +372,10 @@ impl BimApp {
         self.cut.image = held;
         p.extend(boxed);
         p.extend(datum);
+        self.image_grips(ui, &model, &view, rect);
+        if let Some(q) = ui.input(|i| i.pointer.hover_pos()).filter(|q| rect.contains(*q)) {
+            self.image_ghost(&p, rect.min, &view, id, view.mm((q.x - rect.min.x, q.y - rect.min.y)));
+        }
         let clicked = self.clicked_at(&response).map(|at| (at.x - rect.min.x, at.y - rect.min.y));
         // Along the line and up, to the nearest 10 mm.
         let grid = self.background_grid();
@@ -402,6 +406,8 @@ impl BimApp {
             }
             (Some(q), Tool::PasteLevel) => self.paste_to_picked_level(pick(&self.cut, &d, q)),
             (Some(q), Tool::Text) => self.write_note(id, at(q)),
+            (Some(q), Tool::PlaceImage) => self.place_image(id, at(q)),
+            (Some(q), Tool::Scale(_)) => self.scale_click(at(q)),
             (Some(q), Tool::Spot) => {
                 self.run("spot", json!({"at": [at(q).0, at(q).1], "view": id}));
             }

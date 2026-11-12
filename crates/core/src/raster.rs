@@ -75,7 +75,8 @@ fn is_true(b: &bool) -> bool {
 
 /// An image placed, Revit's image instance: the project's image `type_name`, in view `view` (in its own terms: plan mm, a
 /// section's along and up, a sheet's paper mm), its middle on `at`, `width` by `height`, turned `angle` degrees
-/// counter-clockwise about its middle and, `mirrored`, flipped left for right. `lock` keeps its proportions as it's sized
+/// counter-clockwise about its middle and, `mirrored`, flipped top for bottom in its own frame (so turned and flipped, the mirror
+/// image of it across any line). `lock` keeps its proportions as it's sized
 /// (Revit's Lock Proportions); `snaps` lets what's drawn over it snap to a PDF's lines (Enable Snaps); `layer` is its Draw Layer.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -104,8 +105,10 @@ impl ImageInstance {
         let (sin, cos) = self.angle.to_radians().sin_cos();
         let (x, y) = (P2(cos, sin), P2(-sin, cos));
         let (hw, hh) = (self.width / 2.0, self.height / 2.0);
+        // A mirror image is flipped top for bottom in its own frame, as a detail group's is: across any line, its turn
+        // (`commands::turned`) and the flip make the picture's mirror image.
         let side = if self.mirrored { -1.0 } else { 1.0 };
-        let at = |u: f64, v: f64| self.at + x * (u * hw * side) + y * (v * hh);
+        let at = |u: f64, v: f64| self.at + x * (u * hw) + y * (v * hh * side);
         [at(-1.0, 1.0), at(1.0, 1.0), at(1.0, -1.0), at(-1.0, -1.0)]
     }
 
@@ -131,8 +134,8 @@ impl ImageInstance {
         let [w, h] = t.size();
         let k = self.width / w;
         let stretch = (self.height / h) / k;
-        // A mirror image is the page flipped top for bottom, turned half round.
-        let (angle, stretch) = if self.mirrored { ((self.angle + 180.0).rem_euclid(360.0), -stretch) } else { (self.angle, stretch) };
+        // A mirror image is the page flipped top for bottom.
+        let (angle, stretch) = (self.angle, if self.mirrored { -stretch } else { stretch });
         let ci = crate::model::CadImport {
             cad: String::new(),
             level,

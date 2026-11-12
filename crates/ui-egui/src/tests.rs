@@ -5995,6 +5995,7 @@ mod align;
 mod autosave;
 mod browser;
 mod cad;
+mod images;
 mod canvas_controls;
 mod checks;
 mod chinese;

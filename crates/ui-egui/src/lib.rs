@@ -38,6 +38,7 @@ mod gpu;
 pub use gpu::limits_for;
 mod graphics;
 mod groups;
+mod images;
 pub mod host;
 pub mod hostview;
 pub mod icons;
@@ -165,6 +166,11 @@ pub enum Tool {
     Copy(Option<P2>),
     /// Paste what was copied: outlined at the cursor, put down by a click.
     Paste,
+    /// Import PDF or Image: the image (`BimApp::placing`) follows the cursor, crossed, until a click places it.
+    PlaceImage,
+    /// Revit's Scale (RE), graphical: the origin, then the first reference point, once clicked; the second reference point,
+    /// or the length typed in the Options Bar, scales the selected images and imports.
+    Scale(Vec<P2>),
     /// Paste Aligned to Picked Level: in an elevation or a section, a click on a level line pastes what was copied onto it.
     PasteLevel,
     /// Move Witness Line: a click on the line a temporary dimension's witness line goes to, `far` for the one at the other end,
@@ -775,6 +781,17 @@ pub struct BimApp {
     cad_dialog: Option<bool>,
     /// Bringing a CAD drawing in: the box, while it's open.
     cad_box: Option<cad::CadBox>,
+    /// Insert > Import PDF (true) or Image (false) was pressed: its file dialog opens this frame.
+    image_dialog: Option<bool>,
+    /// Import PDF's box, while it's open.
+    pdf_box: Option<images::PdfBox>,
+    /// The image being placed by a click (Tool::PlaceImage).
+    placing: Option<images::Placing>,
+    /// Manage Images is open, and the image picked in it.
+    images_window: bool,
+    images_picked: Option<String>,
+    /// Scale's Options Bar: the length the first reference becomes, as typed.
+    scale_length: String,
     /// A selected element's temporary dimension being typed: the element, which of its dimensions (a wall has one, a
     /// door or window two: from its wall's start, from its end), the length so far.
     dim_edit: Option<(Id, usize, String)>,
@@ -1482,6 +1499,12 @@ impl BimApp {
             cloud_box: None,
             cad_dialog: None,
             cad_box: None,
+            image_dialog: None,
+            pdf_box: None,
+            placing: None,
+            images_window: false,
+            images_picked: None,
+            scale_length: String::new(),
             tab_cycle: false,
             flow: selecting::Flow::default(),
             held: Vec::new(),
@@ -1662,6 +1685,8 @@ impl BimApp {
             Tool::Grid(_) => Some(msg!("Place Grid")),
             Tool::Dimension(..) | Tool::Angular(_) | Tool::Round(..) => Some(msg!("Place Dimensions")),
             Tool::Text => Some(msg!("Place Text")),
+            Tool::PlaceImage => Some(msg!("Place Image")),
+            Tool::Scale(_) => Some("Scale"),
             Tool::DetailGroup => Some(msg!("Place Detail Group")),
             Tool::RepeatingDetail(_) => Some(msg!("Place Repeating Detail")),
             Tool::DetailLine(_) if self.drawing.insulation.is_some() => Some(msg!("Place Insulation")),
@@ -2715,7 +2740,8 @@ impl BimApp {
             self.open_sheet(Sheet::View3D);
         }
         // Move, Copy, Rotate and Mirror take the selection; Align, Trim, Split and Offset pick walls, Demolish anything.
-        let edits = matches!(tool, Tool::Move(_) | Tool::Copy(_) | Tool::Rotate { .. } | Tool::Array { .. } | Tool::Mirror { .. });
+        let edits =
+            matches!(tool, Tool::Move(_) | Tool::Copy(_) | Tool::Rotate { .. } | Tool::Array { .. } | Tool::Mirror { .. } | Tool::Scale(_));
         let picks = matches!(
             tool,
             Tool::Align(_)
@@ -4390,6 +4416,22 @@ impl BimApp {
             if big_button(ui, Icon::ImportCad, "Import CAD", self.cad_box.as_ref().is_some_and(|b| !b.linked()), tip).clicked() {
                 self.cad_dialog = Some(false);
             }
+            let tip = msg!(
+                "Import PDF: a page of a PDF placed in the view, at the resolution you pick, its vector lines snapped to as you trace over it"
+            );
+            let placing_pdf = self.pdf_box.is_some() || (self.tool == Tool::PlaceImage && self.placing_command() == Some("import_pdf"));
+            if big_button(ui, Icon::ImportPdf, "Import PDF", placing_pdf, tip).clicked() {
+                self.image_dialog = Some(true);
+            }
+            let tip = msg!("Image: a picture (PNG, JPEG or BMP) placed in the view, behind the model");
+            let placing_image = self.tool == Tool::PlaceImage && self.placing_command() == Some("import_image");
+            if big_button(ui, Icon::InsertImage, "Image", placing_image, tip).clicked() {
+                self.image_dialog = Some(false);
+            }
+            let tip = msg!("Manage Images: the images and PDFs the project holds; place one again, or delete it");
+            if big_button(ui, Icon::ManageImages, "Manage Images", self.images_window, tip).clicked() {
+                self.images_window = true;
+            }
         });
     }
 
@@ -4688,6 +4730,13 @@ impl BimApp {
                     true,
                 ),
                 (
+                    Icon::Scale,
+                    "Scale",
+                    msg!("Scale (RE): images, PDFs and CAD imports, by an origin and two reference points, or a length typed"),
+                    Some(Tool::Scale(Vec::new())),
+                    self.scalable_selected(),
+                ),
+                (
                     Icon::TrimSingle,
                     msg!("Trim/Extend Single Element"),
                     msg!("Trim/Extend Single Element: pick the line to trim or extend to, then the line to change, on the part to keep"),
@@ -4775,6 +4824,19 @@ impl BimApp {
                     self.explode_polyline();
                 }
                 self.vertex_buttons(ui);
+            });
+        }
+        // Images selected: Revit's Arrange panel, their Draw Layer.
+        if !self.selected_images().is_empty() && self.tool == Tool::Modify {
+            panel(ui, msg!("Arrange"), |ui| {
+                let tip = msg!("Bring to Front: the image draws in front of the model (Draw Layer: Foreground)");
+                if big_button(ui, Icon::BringToFront, "Bring to Front", false, tip).clicked() {
+                    self.arrange(true);
+                }
+                let tip = msg!("Send to Back: the image draws behind the model (Draw Layer: Background)");
+                if big_button(ui, Icon::SendToBack, "Send to Back", false, tip).clicked() {
+                    self.arrange(false);
+                }
             });
         }
         // Walls selected: Revit's Modify Wall panel.
@@ -4947,6 +5009,7 @@ impl BimApp {
             Tool::Wall(_) => self.wall_options(ui),
             Tool::Linework => self.linework_options(ui),
             Tool::DetailGroup => self.group_options(ui),
+            Tool::Scale(_) => self.scale_options(ui),
             Tool::RepeatingDetail(_) => {
                 self.group_options(ui);
                 let l = ui.label(t("Spacing:"));
@@ -5254,6 +5317,10 @@ impl BimApp {
             Tool::Move(Some(_)) => msg!("Click where the base point goes, or type a distance and press Enter. Esc cancels."),
             Tool::Copy(Some(_)) => msg!("Click where the copy's base point goes, or type a distance and press Enter. Esc cancels."),
             Tool::Paste => msg!("Click where to paste what was copied. Esc cancels."),
+            Tool::PlaceImage => msg!("Click where the image's middle goes. Esc cancels."),
+            Tool::Scale(pts) if pts.is_empty() => msg!("Click the origin: the point that stays where it is."),
+            Tool::Scale(pts) if pts.len() == 1 => msg!("Click the first reference point: the end of a length you know."),
+            Tool::Scale(_) => msg!("Click the second reference point, or type the length in the Options Bar and press Enter."),
             Tool::PasteLevel => msg!("Click a level line to paste what was copied onto that level. Esc cancels."),
             Tool::MoveWitness { .. } => msg!("Click the line the witness line goes to. Esc cancels."),
             Tool::Rotate { place: true, .. } => msg!("Click the centre of rotation."),
@@ -5811,6 +5878,13 @@ impl BimApp {
             self.import_cad_dialog(ctx, link);
         }
         self.import_cad_window(ctx);
+        match self.image_dialog.take() {
+            Some(true) => self.import_pdf_dialog(ctx),
+            Some(false) => self.import_image_dialog(ctx),
+            None => {}
+        }
+        self.import_pdf_window(ctx);
+        self.manage_images_window(ctx);
         self.select_by_id_window(ctx);
         self.work_plane_window(ctx);
         self.ids_of_selection_window(ctx);

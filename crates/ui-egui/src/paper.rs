@@ -72,7 +72,7 @@ impl BimApp {
         if response.drag_started_by(PointerButton::Primary)
             && modify
             && let Some(o) = ui.input(|i| i.pointer.press_origin())
-            && let Some(vp) = pick(o).filter(|v| matches!(model.elements.get(v), Some(Element::Viewport(_) | Element::Text(_))))
+            && let Some(vp) = pick(o).filter(|v| matches!(model.elements.get(v), Some(Element::Viewport(_) | Element::Text(_) | Element::Image(_))))
         {
             papers.drag = Some(view.mm((o.x - rect.min.x, o.y - rect.min.y)));
             self.grab(vp);
@@ -113,6 +113,10 @@ impl BimApp {
         {
             self.run("move", serde_json::json!({"ids": self.selection, "by": [by.0, by.1]}));
         }
+        self.image_grips(ui, &model, &view, rect);
+        if let Some(q) = ui.input(|i| i.pointer.hover_pos()).filter(|q| rect.contains(*q)) {
+            self.image_ghost(&p, rect.min, &view, id, view.mm((q.x - rect.min.x, q.y - rect.min.y)));
+        }
         // A double click on a view opens it; a click selects.
         let view_of = |id: Id| match model.elements.get(id) {
             Some(Element::Viewport(v)) => match model.elements.get(v.view) {
@@ -150,6 +154,11 @@ impl BimApp {
             match pick(q) {
                 found if modify => self.pick_up(found.into_iter().collect(), click_modifiers(ui)),
                 // Notes in paper mm, to the half millimetre.
+                _ if matches!(self.tool, Tool::Scale(_)) => self.scale_click(view.mm((q.x - rect.min.x, q.y - rect.min.y))),
+                _ if self.tool == Tool::PlaceImage => {
+                    let p = view.mm((q.x - rect.min.x, q.y - rect.min.y));
+                    self.place_image(id, P2((p.0 * 2.0).round() / 2.0, (p.1 * 2.0).round() / 2.0));
+                }
                 _ if self.tool == Tool::Text => {
                     let p = view.mm((q.x - rect.min.x, q.y - rect.min.y));
                     self.write_note(id, P2((p.0 * 2.0).round() / 2.0, (p.1 * 2.0).round() / 2.0));
