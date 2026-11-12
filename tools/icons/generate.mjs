@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Writes crates/ui-egui/src/icons/drawn.rs: the icons' drawings as outlines on the 24 grid, which go through the same pen as
+// Writes crates/icons/src/drawn.rs: the icons' drawings as outlines on the 24 grid, which go through the same pen as
 // BIMCraft's own drawings (icons.rs). A drawing is lucide's (ISC), the Arqiflow app's icons, or Arqiflow's own: an SVG in
 // tools/icons/own drawn to lucide's rules (one adapted from a lucide drawing names it in a comment). Nothing of the SVGs is
 // kept at run time: each path, circle, rect, line, polyline, polygon and ellipse is flattened here into points, curves and
@@ -29,7 +29,7 @@ const arg = (name) => {
   return i >= 0 ? args[i + 1] : undefined;
 };
 const config = JSON.parse(readFileSync(join(here, "sources.json"), "utf8"));
-const out = resolve(root, arg("--out") ?? "crates/ui-egui/src/icons/drawn.rs");
+const out = resolve(root, arg("--out") ?? "crates/icons/src/drawn.rs");
 
 function packageDir(flag, names) {
   const given = arg(flag);

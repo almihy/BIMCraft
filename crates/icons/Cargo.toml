@@ -1,0 +1,10 @@
+[package]
+name = "bimcraft-icons"
+description = "BIMCraft's icons as data: the Icon list and their outlines on the 24 grid (lucide's and Arqiflow's own)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true

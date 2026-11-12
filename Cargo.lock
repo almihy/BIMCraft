@@ -533,6 +533,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "bimcraft-icons"
+version = "0.11.0"
+
+[[package]]
 name = "bimcraft-mep-calc"
 version = "0.11.0"
 dependencies = [
@@ -600,6 +604,7 @@ version = "0.11.0"
 dependencies = [
  "bimcraft-core",
  "bimcraft-i18n",
+ "bimcraft-icons",
  "bimcraft-plugin",
  "bimcraft-update",
  "bytemuck",

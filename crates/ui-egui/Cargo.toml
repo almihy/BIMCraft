@@ -27,6 +27,7 @@ egui-fonts = ["egui/default_fonts"]
 all-languages = []
 
 [dependencies]
+bimcraft-icons = { workspace = true }
 bimcraft-i18n = { workspace = true }
 bimcraft-core = { workspace = true }
 bimcraft-plugin = { workspace = true, optional = true }
