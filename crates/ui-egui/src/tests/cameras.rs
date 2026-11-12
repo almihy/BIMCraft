@@ -173,7 +173,12 @@ fn holding_the_right_button_flies_with_wasd_and_typing_wa_still_makes_a_wall_els
     // The pointer moved right with the button held: it turns right, about the eye.
     h.hover_at(middle + vec2(40.0, 0.0));
     h.step();
-    h.event(Event::PointerButton { pos: middle + vec2(40.0, 0.0), button: PointerButton::Secondary, pressed: false, modifiers: Modifiers::NONE });
+    h.event(Event::PointerButton {
+        pos: middle + vec2(40.0, 0.0),
+        button: PointerButton::Secondary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
     h.run();
     let after = cam(&h, id);
     assert!(after.eye[0] > before.eye[0] + 100.0, "it flew forward: {:?} -> {:?}", before.eye, after.eye);

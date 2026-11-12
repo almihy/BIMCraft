@@ -131,7 +131,9 @@ impl BimApp {
         let cursor = self.camera_grip.and_then(|_| ui.input(|i| i.pointer.latest_pos()));
         for (id, cam, lens) in cams {
             let (cam, lens) = match (self.camera_grip, cursor) {
-                (Some((held, which)), Some(q)) if held == id => moved(&cam, lens, which, self.camera_grip_point(m, level, view, rect, which, q)),
+                (Some((held, which)), Some(q)) if held == id => {
+                    moved(&cam, lens, which, self.camera_grip_point(m, level, view, rect, which, q))
+                }
                 _ => (cam, lens),
             };
             let Some(cone) = render::cone_of(&cam, lens) else { continue };

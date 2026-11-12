@@ -857,7 +857,16 @@ impl Mesh {
             Perspective { focal: focal as f32, eye: eye as f32, a: (-near / (far - near)) as f32, b: b as f32 }
         });
         let shift = cam.shift.map(|v| v as f32);
-        View { right: f(right), up: f(up), back: f(back), target: f(target), scale: cam.scale as f32, depth: depth as f32, perspective, shift }
+        View {
+            right: f(right),
+            up: f(up),
+            back: f(back),
+            target: f(target),
+            scale: cam.scale as f32,
+            depth: depth as f32,
+            perspective,
+            shift,
+        }
     }
 
     /// What a card draws of the mesh through `cam`: every group and copy but those wholly past one side of what the picture
@@ -878,7 +887,8 @@ impl Mesh {
         // Each side of the clip volume as a plane: a point `d` from the aim is past it where d·n > k.
         let (r, u) = (mul(right, sx), mul(up, sy));
         // The lens's shift in clip space, which moves the picture's sides as the shader's `to_clip` does.
-        let (hx, hy) = (2.0 * f64::from(view.shift[0]) / f64::from(cam.width.max(1)), -2.0 * f64::from(view.shift[1]) / f64::from(cam.height.max(1)));
+        let (hx, hy) =
+            (2.0 * f64::from(view.shift[0]) / f64::from(cam.width.max(1)), -2.0 * f64::from(view.shift[1]) / f64::from(cam.height.max(1)));
         let planes: Vec<(P3, f64)> = match view.perspective {
             // Across, past the eye's sight: x + shift·w > w, with w how far ahead of the eye; in depth, nearer than the near
             // plane (a·ahead + b > ahead) or beyond the far one (a·ahead + b < 0).
@@ -894,7 +904,14 @@ impl Mesh {
             }
             None => {
                 let depth = f64::from(view.depth);
-                vec![(r, 1.0 - hx), (mul(r, -1.0), 1.0 + hx), (u, 1.0 - hy), (mul(u, -1.0), 1.0 + hy), (back, depth), (mul(back, -1.0), depth)]
+                vec![
+                    (r, 1.0 - hx),
+                    (mul(r, -1.0), 1.0 + hx),
+                    (u, 1.0 - hy),
+                    (mul(u, -1.0), 1.0 + hy),
+                    (back, depth),
+                    (mul(back, -1.0), depth),
+                ]
             }
         };
         let mut planes = planes;

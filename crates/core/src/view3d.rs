@@ -2290,7 +2290,8 @@ impl Scene {
                         let z = wa * a.2 + wb * b.2 + wc * c.2;
                         if clip.is_some_and(|k| {
                             z > k.near || k.far.is_some_and(|f| z < k.near - f) || x < k.x.0 || x > k.x.1 || y < k.y.0 || y > k.y.1
-                        }) || project.clipped(z) || cut.is_some_and(|k| !k.keeps(x, y, z))
+                        }) || project.clipped(z)
+                            || cut.is_some_and(|k| !k.keeps(x, y, z))
                         {
                             continue;
                         }
@@ -2372,7 +2373,8 @@ impl Scene {
                     let z = wa * a.2 + wb * b.2 + wc * c.2;
                     if clip.is_some_and(|k| {
                         z > k.near || k.far.is_some_and(|f| z < k.near - f) || x < k.x.0 || x > k.x.1 || y < k.y.0 || y > k.y.1
-                    }) || cam.projector().clipped(z) || cut.is_some_and(|k| !k.keeps(x, y, z))
+                    }) || cam.projector().clipped(z)
+                        || cut.is_some_and(|k| !k.keeps(x, y, z))
                     {
                         continue;
                     }
@@ -3094,7 +3096,17 @@ pub fn camera(m: &Model, azimuth: f64, elevation: f64, scale: f64, room: f64) ->
 
 /// [`camera`] for what `look` shows of the model.
 pub fn camera_in(m: &Model, azimuth: f64, elevation: f64, scale: f64, room: f64, look: &Look) -> Camera {
-    let mut cam = Camera { azimuth, elevation: elevation.clamp(-89.0, 89.0), scale, target: [0.0; 3], width: 1, height: 1, lens: None, shift: [0.0; 2], clip: None };
+    let mut cam = Camera {
+        azimuth,
+        elevation: elevation.clamp(-89.0, 89.0),
+        scale,
+        target: [0.0; 3],
+        width: 1,
+        height: 1,
+        lens: None,
+        shift: [0.0; 2],
+        clip: None,
+    };
     let pts: Vec<P3> = solids(m).iter().filter(|s| look.shows(s.owner())).flat_map(Solid::corners).collect();
     if let Some((target, w, h)) = extent(&cam, &pts) {
         let side = |d: f64| (d * scale + 2.0 * room).ceil().clamp(1.0, f64::from(MAX_SIDE)) as u32;

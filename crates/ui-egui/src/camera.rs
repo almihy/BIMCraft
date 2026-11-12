@@ -136,7 +136,15 @@ impl BimApp {
     }
 
     /// A view without a camera: its name, Projection, Focal Length and the eye's height on screen.
-    fn default_camera_properties(&mut self, ui: &mut Ui, view: Option<Id>, name: Option<String>, lens: Option<f64>, is_default: bool, units: Units) {
+    fn default_camera_properties(
+        &mut self,
+        ui: &mut Ui,
+        view: Option<Id>,
+        name: Option<String>,
+        lens: Option<f64>,
+        is_default: bool,
+        units: Units,
+    ) {
         if !self.rollout(ui, msg!("Camera")) {
             return;
         }
@@ -165,7 +173,9 @@ impl BimApp {
             {
                 set = Some(json!({"lens": mm}));
             }
-            if is_default && let Some(mm) = self.length_row(ui, widget, "Eye Elevation", "camera.eye", eye_elevation.unwrap_or_default(), units) {
+            if is_default
+                && let Some(mm) = self.length_row(ui, widget, "Eye Elevation", "camera.eye", eye_elevation.unwrap_or_default(), units)
+            {
                 raise = Some(mm);
             }
         });
@@ -287,7 +297,8 @@ impl BimApp {
                             match shutter_typed(&typed) {
                                 Some(s) => put("shutter", json!(s)),
                                 None => {
-                                    self.status = crate::Status { text: crate::lang::tf("`{}` is not a shutter speed", &[typed.trim()]), error: true }
+                                    self.status =
+                                        crate::Status { text: crate::lang::tf("`{}` is not a shutter speed", &[typed.trim()]), error: true }
                                 }
                             }
                         }
@@ -301,7 +312,9 @@ impl BimApp {
         }
         if self.rollout(ui, PERSPECTIVE_CONTROL) {
             crate::properties::grid(ui, "camera-perspective", |ui| {
-                for (k, (name, key)) in [("Lens Shift Horizontal", "camera.shift_h"), ("Lens Shift Vertical", "camera.shift_v")].into_iter().enumerate() {
+                for (k, (name, key)) in
+                    [("Lens Shift Horizontal", "camera.shift_h"), ("Lens Shift Vertical", "camera.shift_v")].into_iter().enumerate()
+                {
                     if let Some(v) = self.number_row(ui, id, name, key, format!("{} %", shown(ph.shift[k], 2)), "%") {
                         let mut both = ph.shift;
                         both[k] = v;
@@ -309,7 +322,9 @@ impl BimApp {
                     }
                 }
                 let tilt = [ph.tilt[0], ph.vertical_tilt()];
-                for (k, (name, key)) in [("Tilt Correction Horizontal", "camera.tilt_h"), ("Tilt Correction Vertical", "camera.tilt_v")].into_iter().enumerate() {
+                for (k, (name, key)) in
+                    [("Tilt Correction Horizontal", "camera.tilt_h"), ("Tilt Correction Vertical", "camera.tilt_v")].into_iter().enumerate()
+                {
                     if let Some(v) = self.number_row(ui, id, name, key, shown(tilt[k], 3), "") {
                         let mut both = ph.tilt;
                         both[k] = v;

@@ -1549,8 +1549,13 @@ impl ViewCamera {
 }
 
 /// The film widths 3ds Max's Physical Camera offers, mm, by the preset's name.
-pub const FILM_PRESETS: [(&str, f64); 5] =
-    [("35mm (Full Frame)", 36.0), ("APS-C (Canon)", 22.3), ("APS-C (Nikon, Sony, etc.)", 23.7), ("APS-H (Canon)", 27.9), ("Four Thirds", 17.3)];
+pub const FILM_PRESETS: [(&str, f64); 5] = [
+    ("35mm (Full Frame)", 36.0),
+    ("APS-C (Canon)", 22.3),
+    ("APS-C (Nikon, Sony, etc.)", 23.7),
+    ("APS-H (Canon)", 27.9),
+    ("Four Thirds", 17.3),
+];
 
 /// A camera's physical settings, as 3ds Max's Physical Camera rollouts hold them: Basic (target or free), Physical Camera
 /// (film, zoom, aperture, focus), Exposure, Perspective Control (lens shift, tilt correction), Clipping, and the image it
@@ -7572,7 +7577,10 @@ impl Model {
                         coord(&format!("{who} framing target {axis}"), x)?;
                     }
                     if !(f.across.is_finite() && f.across > 1.0 && f.across <= MAX_COORD) {
-                        return Err(format!("{who}: its picture takes in {} mm across; it is above 1 mm and at most {MAX_COORD}", f.across));
+                        return Err(format!(
+                            "{who}: its picture takes in {} mm across; it is above 1 mm and at most {MAX_COORD}",
+                            f.across
+                        ));
                     }
                 }
                 if !(v.azimuth.is_finite() && v.elevation.is_finite()) {

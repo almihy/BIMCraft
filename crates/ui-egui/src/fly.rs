@@ -150,7 +150,8 @@ impl crate::BimApp {
         if self.orbit.safe_frame && crate::small_button(ui, Icon::Grid, "Rule of Thirds", self.orbit.thirds, tip).clicked() {
             self.orbit.thirds = !self.orbit.thirds;
         }
-        let tip = msg!("Two-Point Perspective: verticals stay vertical however the camera looks up or down (Auto Vertical Tilt Correction)");
+        let tip =
+            msg!("Two-Point Perspective: verticals stay vertical however the camera looks up or down (Auto Vertical Tilt Correction)");
         if crate::small_button(ui, Icon::Level, "Two-Point Perspective", cam.physical.auto_tilt, tip).clicked() {
             self.run("camera", serde_json::json!({"view": id, "auto_tilt": !cam.physical.auto_tilt}));
             self.orbit.camera = None;

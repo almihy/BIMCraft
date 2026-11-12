@@ -130,7 +130,17 @@ fn a_sloped_floors_sketch_lies_on_its_top_and_the_camera_finds_points_on_a_slope
     let Some(Element::Floor(fl)) = s.model.elements.get(id) else { panic!() };
     assert_eq!(s.model.sketch_plane(id), Some(s.model.floor_top(fl)));
     let plane = s.model.floor_top(fl);
-    let cam = Camera { azimuth: -60.0, elevation: 35.0, scale: 0.1, target: [2000.0, 2000.0, 0.0], width: 800, height: 600, lens: None, shift: [0.0; 2], clip: None };
+    let cam = Camera {
+        azimuth: -60.0,
+        elevation: 35.0,
+        scale: 0.1,
+        target: [2000.0, 2000.0, 0.0],
+        width: 800,
+        height: 600,
+        lens: None,
+        shift: [0.0; 2],
+        clip: None,
+    };
     let q = [1500.0, 2500.0, plane.at(P2(1500.0, 2500.0))];
     let (x, y, _) = cam.project(q);
     let back = cam.on_slope((x, y), plane).unwrap();
@@ -142,7 +152,17 @@ fn the_3d_pictures_say_where_on_the_model_a_pixel_shows() {
     let mut s = Session::new();
     run(&mut s, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]], "offset": 0}));
     let scene = Scene::new(&s.model);
-    let cam = Camera { azimuth: -60.0, elevation: 35.0, scale: 0.1, target: [2000.0, 2000.0, 0.0], width: 800, height: 600, lens: None, shift: [0.0; 2], clip: None };
+    let cam = Camera {
+        azimuth: -60.0,
+        elevation: 35.0,
+        scale: 0.1,
+        target: [2000.0, 2000.0, 0.0],
+        width: 800,
+        height: 600,
+        lens: None,
+        shift: [0.0; 2],
+        clip: None,
+    };
     let q = [1500.0, 2500.0, 0.0];
     let (x, y, _) = cam.project(q);
     let image = scene.render_in(&cam, &[], &Look::of_3d(&s.model));
@@ -164,7 +184,17 @@ fn the_3d_view_finds_the_face_under_a_pixel_and_the_corner_seen_nearest_it() {
     let scene = Scene::new(&s.model);
     let look = Look::of_3d(&s.model);
     // From the south-east, above: the wall's south face.
-    let cam = Camera { azimuth: -60.0, elevation: 30.0, scale: 0.1, target: [2000.0, 0.0, 1500.0], width: 800, height: 600, lens: None, shift: [0.0; 2], clip: None };
+    let cam = Camera {
+        azimuth: -60.0,
+        elevation: 30.0,
+        scale: 0.1,
+        target: [2000.0, 0.0, 1500.0],
+        width: 800,
+        height: 600,
+        lens: None,
+        shift: [0.0; 2],
+        clip: None,
+    };
     let (x, y, _) = cam.project([2000.0, -half, 1500.0]);
     let face = scene.face_at(&cam, (x, y), &look).expect("the wall's face");
     assert!(near(face.normal, [0.0, -1.0, 0.0], 1e-9), "{face:?}");

@@ -269,7 +269,17 @@ mod tests {
     use super::*;
 
     fn camera() -> Camera {
-        Camera { azimuth: -90.0, elevation: 30.0, scale: 0.1, target: [0.0; 3], width: 800, height: 600, lens: None, shift: [0.0; 2], clip: None }
+        Camera {
+            azimuth: -90.0,
+            elevation: 30.0,
+            scale: 0.1,
+            target: [0.0; 3],
+            width: 800,
+            height: 600,
+            lens: None,
+            shift: [0.0; 2],
+            clip: None,
+        }
     }
 
     /// A 3Dconnexion report: its id, then little-endian i16s.

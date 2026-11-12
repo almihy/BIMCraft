@@ -28,7 +28,8 @@ fn looking(h: &Harness<BimApp>) -> (f64, f64) {
 /// The camera as the 3D view first has it, for the next click to start from: the view keeps where it was left, so it is
 /// turned back and fitted again.
 fn home(h: &mut Harness<BimApp>) {
-    let back = json!({"view": "{3D}", "fitted": true, "azimuth": bimcraft_core::view3d::AZIMUTH, "elevation": bimcraft_core::view3d::ELEVATION});
+    let back =
+        json!({"view": "{3D}", "fitted": true, "azimuth": bimcraft_core::view3d::AZIMUTH, "elevation": bimcraft_core::view3d::ELEVATION});
     h.state_mut().session.execute("view_orientation", &back).unwrap();
     h.state_mut().orbit.camera = None;
     h.run();

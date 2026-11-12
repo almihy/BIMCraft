@@ -252,7 +252,12 @@ pub(super) fn camera(s: &mut Session, p: &Value) -> R {
         None => {}
         Some("target") => ph.iso = None,
         Some("manual") => ph.iso = Some(ph.iso.unwrap_or(100.0)),
-        Some(other) => return Err(bad(c, format!("`exposure` is \"target\" (by `ev`) or \"manual\" (by `iso`, `shutter` and `f_number`), not `{other}`"))),
+        Some(other) => {
+            return Err(bad(
+                c,
+                format!("`exposure` is \"target\" (by `ev`) or \"manual\" (by `iso`, `shutter` and `f_number`), not `{other}`"),
+            ));
+        }
     }
     if let Some(sh) = pair(c, p, "shift", "[horizontal, vertical] % of the film's width")? {
         ph.shift = sh;
@@ -288,7 +293,12 @@ pub(super) fn camera(s: &mut Session, p: &Value) -> R {
         v if absent(v) => {}
         Some(v) => {
             let side = |x: &Value| x.as_f64().filter(|n| n.fract() == 0.0 && (16.0..=f64::from(MAX_OUTPUT)).contains(n));
-            let what = || bad(c, format!("`output` is [width, height] in px, each 16 to {MAX_OUTPUT} (one may be null with the aspect locked), not {v}"));
+            let what = || {
+                bad(
+                    c,
+                    format!("`output` is [width, height] in px, each 16 to {MAX_OUTPUT} (one may be null with the aspect locked), not {v}"),
+                )
+            };
             let [w, h] = match v.as_array().map(Vec::as_slice) {
                 Some([w, h]) => [w, h],
                 _ => return Err(what()),
@@ -296,8 +306,12 @@ pub(super) fn camera(s: &mut Session, p: &Value) -> R {
             let aspect = ph.aspect();
             ph.output = match (side(w), side(h)) {
                 (Some(w), Some(h)) => [w as u32, h as u32],
-                (Some(w), None) if h.is_null() && ph.aspect_locked => [w as u32, (w / aspect).round().clamp(16.0, f64::from(MAX_OUTPUT)) as u32],
-                (None, Some(h)) if w.is_null() && ph.aspect_locked => [(h * aspect).round().clamp(16.0, f64::from(MAX_OUTPUT)) as u32, h as u32],
+                (Some(w), None) if h.is_null() && ph.aspect_locked => {
+                    [w as u32, (w / aspect).round().clamp(16.0, f64::from(MAX_OUTPUT)) as u32]
+                }
+                (None, Some(h)) if w.is_null() && ph.aspect_locked => {
+                    [(h * aspect).round().clamp(16.0, f64::from(MAX_OUTPUT)) as u32, h as u32]
+                }
                 _ => return Err(what()),
             };
         }
@@ -610,9 +624,8 @@ mod tests {
         let mut s = Session::new();
         s.execute("floor", &json!({"boundary": [[-3000.0, 3000.0], [3000.0, 3000.0], [3000.0, 9000.0], [-3000.0, 9000.0]]})).unwrap();
         s.execute("camera", &json!({"eye": [0.0, -5000.0, 1600.0], "target": [0.0, 6000.0, 0.0]})).unwrap();
-        let picture = |s: &mut Session| {
-            s.execute("render", &json!({"view": "Camera 1", "width": 200, "height": 150})).unwrap()["pngBase64"].clone()
-        };
+        let picture =
+            |s: &mut Session| s.execute("render", &json!({"view": "Camera 1", "width": 200, "height": 150})).unwrap()["pngBase64"].clone();
         let whole = picture(&mut s);
         s.execute("camera", &json!({"view": "Camera 1", "clip": true, "far": 20000})).unwrap();
         assert_eq!(picture(&mut s), whole, "the far plane past the floor cuts nothing");
@@ -628,8 +641,11 @@ mod tests {
     fn a_misspelled_setting_is_refused_and_the_settings_are_saved() {
         let mut s = placed();
         assert!(s.execute("camera", &json!({"view": "Camera 1", "focal": 50})).is_err());
-        s.execute("camera", &json!({"view": "Camera 1", "f_number": 4, "auto_tilt": true, "output": [1000, 1000], "clip": true, "far": 9000}))
-            .unwrap();
+        s.execute(
+            "camera",
+            &json!({"view": "Camera 1", "f_number": 4, "auto_tilt": true, "output": [1000, 1000], "clip": true, "far": 9000}),
+        )
+        .unwrap();
         let text = s.model.to_json().unwrap();
         let reopened = crate::model::Model::read(&text).unwrap().0;
         let again = reopened
@@ -672,7 +688,10 @@ mod orientation_tests {
         assert_eq!(r["fitted"].as_bool(), Some(true));
         let before = r["revision"].clone();
         let r = s
-            .execute("view_orientation", &json!({"view": "{3D}", "azimuth": 30, "elevation": 20, "target": [3000.0, 2000.0, 0.0], "across": 9000}))
+            .execute(
+                "view_orientation",
+                &json!({"view": "{3D}", "azimuth": 30, "elevation": 20, "target": [3000.0, 2000.0, 0.0], "across": 9000}),
+            )
             .unwrap();
         assert_eq!((r["azimuth"].as_f64(), r["across"].as_f64(), r["fitted"].as_bool()), (Some(30.0), Some(9000.0), Some(false)));
         assert_ne!(r["revision"], before, "the revision follows the orientation");

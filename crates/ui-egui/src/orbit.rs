@@ -928,7 +928,8 @@ impl BimApp {
             } else if let Some((_, azimuth, elevation, Some(f))) = left_now {
                 // Where it was left, at this picture's size.
                 let scale = (f64::from(w.max(1)) / f.across.max(1e-6)).clamp(1e-6, 50.0);
-                o.camera = Some(Camera { azimuth, elevation, scale, target: f.target, width: w, height: h, lens, shift: [0.0; 2], clip: None });
+                o.camera =
+                    Some(Camera { azimuth, elevation, scale, target: f.target, width: w, height: h, lens, shift: [0.0; 2], clip: None });
             }
             o.left = left_now;
             o.handled = false;
@@ -1154,14 +1155,24 @@ impl BimApp {
                 *moved = true;
             }
         }
-        if Some(cam) != o.camera.map(|c| c.sized(w, h, seen)) && (o.drag.is_some() || wheel != 0.0 || pinch != 1.0 || device.is_some() || asked.is_some() || flying) {
+        if Some(cam) != o.camera.map(|c| c.sized(w, h, seen))
+            && (o.drag.is_some() || wheel != 0.0 || pinch != 1.0 || device.is_some() || asked.is_some() || flying)
+        {
             o.handled = true;
         }
         o.camera = Some(cam);
         // The hand, the wheel, the 3D mouse and a flight have let the camera be: a camera view's position is written back then
         // (below), one undo step for each.
-        let flight_keys = flying && ui.input(|i| [egui::Key::W, egui::Key::S, egui::Key::A, egui::Key::D, egui::Key::Q, egui::Key::E].iter().any(|k| i.key_down(*k)));
-        let settled = o.drag.is_none() && wheel == 0.0 && pinch == 1.0 && device.is_none() && o.fly.is_none() && !flight_keys
+        let flight_keys = flying
+            && ui.input(|i| {
+                [egui::Key::W, egui::Key::S, egui::Key::A, egui::Key::D, egui::Key::Q, egui::Key::E].iter().any(|k| i.key_down(*k))
+            });
+        let settled = o.drag.is_none()
+            && wheel == 0.0
+            && pinch == 1.0
+            && device.is_none()
+            && o.fly.is_none()
+            && !flight_keys
             && !(o.walk && ui.input(|i| i.pointer.primary_down()));
         // The camera the hand moves, and the one the picture is drawn through: its perspective control and clipping.
         let bare = cam;
