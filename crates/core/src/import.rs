@@ -3119,7 +3119,7 @@ pub(crate) fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, S
             .and_then(crate::model::Operation::from_ifc_door);
         let operation = operated.map(|(op, _)| op);
         let same = |k: &OpeningType| (k.width - width).abs() < 0.05 && (k.height - height).abs() < 0.05 && k.operation == operation;
-        let new = OpeningType { width, height, sill: if is_door { 0.0 } else { sill }, operation, identity: Default::default() };
+        let new = OpeningType { width, height, sill: if is_door { 0.0 } else { sill }, operation, ..Default::default() };
         let types = if is_door { &mut m.types.door } else { &mut m.types.window };
         let type_name = kind(types, &base_name, same, new);
         let mark = tags.remove(&id).unwrap_or_else(|| {

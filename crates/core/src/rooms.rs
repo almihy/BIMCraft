@@ -170,6 +170,17 @@ impl<'a> Rooms<'a> {
         rooms.iter().find(|(id, r)| self.centre_of(*id, r).is_some_and(|g| region_holds(&g, p))).map(|(id, _)| *id)
     }
 
+    /// The rooms door or window `e` is between, as Revit's From Room and To Room: the room on each side of its wall at its
+    /// middle ([`Model::opening_sides`], [`Rooms::room_at`]), from, then to; none on a side outside every room. A door's
+    /// To Room is the room it swings into, a window's the one on the side away from the face it faces. None for anything
+    /// else.
+    pub fn from_to(&self, e: &Element) -> Option<(Option<Id>, Option<Id>)> {
+        let (Element::Door(o) | Element::Window(o)) = e else { return None };
+        let level = self.m.wall(o.host)?.level;
+        let (from, to) = self.m.opening_sides(e)?;
+        Some((self.room_at(level, from), self.room_at(level, to)))
+    }
+
     /// Room `r`'s (of id `id`) boundary at the walls' centre lines, found once.
     fn centre_of(&self, id: Id, r: &Room) -> Option<Region> {
         if let Some(g) = self.centre.borrow().get(&id) {

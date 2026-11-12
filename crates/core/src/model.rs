@@ -2598,8 +2598,39 @@ pub struct OpeningType {
     pub sill: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation: Option<Operation>,
+    /// A door's leaf, how thick it is: Revit's Thickness of a door type; none, [`DOOR_THICKNESS`]. A window's has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thickness: Option<f64>,
     #[serde(default, skip_serializing_if = "crate::type_data::TypeIdentity::is_empty")]
     pub identity: crate::type_data::TypeIdentity,
+}
+
+/// How far past its wall's faces a door's or window's From Room and To Room are looked for ([`Model::opening_sides`]).
+pub const ROOM_PROBE: f64 = 100.0;
+
+/// Which way a door or a window is turned in its wall ([`Model::opening_way`]): lengths along its wall's location line
+/// and across it, to its left.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OpeningWay {
+    /// The side its To Room is on: 1 its wall's left, -1 its right.
+    pub to: f64,
+    /// How far to the left of its wall's location line the face on that side lies.
+    pub face: f64,
+    /// And the face on its other side, its From Room's.
+    pub back: f64,
+    /// Along its wall, its hinged jamb (or the one it slides or folds toward), and the other.
+    pub hinge: f64,
+    pub free: f64,
+}
+
+/// How thick a door's leaf is where its type says nothing: Revit's out-of-the-box Single-Flush's Thickness, 50 mm.
+pub const DOOR_THICKNESS: f64 = 50.0;
+
+impl OpeningType {
+    /// Its leaf's thickness: its own, or [`DOOR_THICKNESS`].
+    pub fn leaf(&self) -> f64 {
+        self.thickness.unwrap_or(DOOR_THICKNESS)
+    }
 }
 
 /// How a door's or a window's leaves open, as IFC's door operation types name them; which jamb a
@@ -3179,10 +3210,10 @@ impl Model {
         for (n, w) in [("Single 900 x 2100", 900.0), ("Single 800 x 2100", 800.0)] {
             m.types
                 .door
-                .insert(n.into(), OpeningType { width: w, height: 2100.0, sill: 0.0, operation: None, identity: Default::default() });
+                .insert(n.into(), OpeningType { width: w, height: 2100.0, ..Default::default() });
         }
         for (n, w, h, s) in [("Fixed 1200 x 1500", 1200.0, 1500.0, 900.0), ("Fixed 600 x 900", 600.0, 900.0, 1100.0)] {
-            m.types.window.insert(n.into(), OpeningType { width: w, height: h, sill: s, operation: None, identity: Default::default() });
+            m.types.window.insert(n.into(), OpeningType { width: w, height: h, sill: s, ..Default::default() });
         }
         m.types
             .column
@@ -4457,6 +4488,7 @@ impl Model {
             height: need(crate::family::HEIGHT)?,
             sill: number(crate::family::SILL).unwrap_or(if is_door { 0.0 } else { 900.0 }),
             operation: f.operation,
+            thickness: None,
             identity: f.identity.get(&o.type_name).cloned().unwrap_or_default(),
         })
     }
@@ -5454,6 +5486,44 @@ impl Model {
         P2(p.0 + 0.0, p.1 + 0.0)
     }
 
+    /// Which way door or window `e` is turned in its wall: the side its To Room is on (a door's, the one it swings to; a
+    /// window's, the one away from the face it faces, its interior), and the jamb it is hinged on, as plans draw it. A door
+    /// swings to its wall's left (start to end, the exterior side), or flipped facing to its right, and is hinged on the
+    /// jamb toward the wall's start, or flipped hand toward its end; a window faces its wall's left, or flipped its right.
+    /// None for an element that isn't a door or a window, or whose wall or type is missing.
+    pub fn opening_way(&self, e: &Element) -> Option<OpeningWay> {
+        let (Element::Door(o) | Element::Window(o)) = e else { return None };
+        let (w, t) = (self.wall(o.host)?, self.opening_type(e)?);
+        let (ext, int) = walls::faces(self, w);
+        let left = o.flip_facing == matches!(e, Element::Window(_));
+        let (s0, s1) = (o.offset - t.width / 2.0, o.offset + t.width / 2.0);
+        let (hinge, free) = if o.flip_hand { (s1, s0) } else { (s0, s1) };
+        Some(OpeningWay {
+            to: if left { 1.0 } else { -1.0 },
+            face: if left { ext } else { int },
+            back: if left { int } else { ext },
+            hinge,
+            free,
+        })
+    }
+
+    /// The points either side of door or window `e`, a little past its wall's faces at its middle, that the rooms it
+    /// is between are found at, as Revit's From Room and To Room: from, then to ([`Model::opening_way`]).
+    pub fn opening_sides(&self, e: &Element) -> Option<(P2, P2)> {
+        let (Element::Door(o) | Element::Window(o)) = e else { return None };
+        let (way, axis) = (self.opening_way(e)?, walls::Axis::of(self.wall(o.host)?));
+        Some((axis.at(o.offset, way.back - way.to * ROOM_PROBE), axis.at(o.offset, way.face + way.to * ROOM_PROBE)))
+    }
+
+    /// Where door `e` is hinged: its hinged jamb, on the face of the wall it swings to (a double door's, the one toward its
+    /// wall's start unless flipped hand, its other leaf's at the other jamb; a sliding or folding one's, the jamb it slides
+    /// or folds toward). None for a window, or a door whose wall or type is missing ([`Model::opening_way`]).
+    pub fn door_hinge(&self, e: &Element) -> Option<P2> {
+        let Element::Door(o) = e else { return None };
+        let (way, axis) = (self.opening_way(e)?, walls::Axis::of(self.wall(o.host)?));
+        Some(axis.at(way.hinge, way.face))
+    }
+
     fn wall_of(&self, opening: impl Key) -> Option<&Wall> {
         match self.elements.get(opening) {
             Some(Element::Door(o) | Element::Window(o)) => self.wall(o.host),
@@ -6437,6 +6507,9 @@ impl Model {
                 size(&format!("{cat} type `{n}` width"), t.width)?;
                 size(&format!("{cat} type `{n}` height"), t.height)?;
                 coord(&format!("{cat} type `{n}` sill"), t.sill)?;
+                if let Some(x) = t.thickness {
+                    size(&format!("{cat} type `{n}` thickness"), x)?;
+                }
             }
         }
         if self.images.len() > MAX_IMAGES {

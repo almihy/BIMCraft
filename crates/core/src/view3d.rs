@@ -999,7 +999,8 @@ fn solids_in_with(
                 }
             }
             // Of a family: each form in its material's colour, shown beyond a section's line and never cut, as a
-            // component's are. Else a door's leaf or a window's glass: a 50 mm panel in the middle of the wall, square to it.
+            // component's are. Else a door's leaf, as thick as its type says (`OpeningType::leaf`), or a window's glass, a 50 mm
+            // panel: in the middle of the wall, shut, square to it.
             Element::Door(o) | Element::Window(o) => {
                 if o.family.is_some() {
                     let fallback = if matches!(e, Element::Door(_)) { DOOR } else { GLASS };
@@ -1023,7 +1024,8 @@ fn solids_in_with(
                     let u = axis.tangent(o.offset);
                     let frame = Frame { o: axis.at(o.offset, walls::centre(m, w)), u, n: u.perp() };
                     let a = (-t.width / 2.0, t.width / 2.0);
-                    out.push(Solid::Box { owner: id, color, tex, frame, a, c: (-25.0, 25.0), z: (z, z + t.height) });
+                    let half = if matches!(e, Element::Door(_)) { t.leaf() / 2.0 } else { 25.0 };
+                    out.push(Solid::Box { owner: id, color, tex, frame, a, c: (-half, half), z: (z, z + t.height) });
                 }
             }
             _ => {}

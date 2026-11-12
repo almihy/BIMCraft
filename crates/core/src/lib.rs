@@ -201,6 +201,8 @@ mod detail_tests;
 #[cfg(test)]
 mod dimension_tests;
 #[cfg(test)]
+mod door_tests;
+#[cfg(test)]
 mod flip_tests;
 #[cfg(test)]
 mod line_tests;

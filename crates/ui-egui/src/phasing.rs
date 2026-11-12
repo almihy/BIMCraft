@@ -491,6 +491,19 @@ impl BimApp {
             return;
         }
         let mut change: Option<(&str, Value)> = None;
+        // A door's or window's From Room and To Room, read only, as Revit's: the rooms either side, a door's To Room the one
+        // it swings into; several, where they share them.
+        let between = || {
+            let rooms = bimcraft_core::rooms::Rooms::new(model);
+            let said = |r: Option<Id>| match r.and_then(|r| model.elements.get(r)) {
+                Some(Element::Room(r)) => format!("{} {}", r.name, r.number).trim().to_string(),
+                _ => none.clone(),
+            };
+            let each: Vec<(String, String)> = held.iter().map(|e| rooms.from_to(e).map(|(f, t)| (said(f), said(t)))).collect::<Option<_>>()?;
+            let first = each.first()?.clone();
+            each.iter().all(|x| *x == first).then_some(first)
+        };
+        let between = between();
         crate::properties::grid(ui, ("phasing-parameters", id), |ui| {
             let label = ui.label(t("Phase Created"));
             // Written out even for the first phase: a door with none follows its wall.
@@ -511,6 +524,14 @@ impl BimApp {
                 if let Some(p) = combo(ui, (id, "design-option"), label.id, &option, &options) {
                     change = Some((phasing::OPTION, if p == main { Value::Null } else { json!(p) }));
                 }
+                ui.end_row();
+            }
+            if let Some((from, to)) = &between {
+                ui.label(t("From Room"));
+                ui.label(from);
+                ui.end_row();
+                ui.label(t("To Room"));
+                ui.label(to);
                 ui.end_row();
             }
         });

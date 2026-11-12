@@ -178,6 +178,8 @@ enum From {
     Param,
     /// How a door or a window opens, in the project's language.
     Operation,
+    /// A text under a key of an object in the element's JSON: a door's `to_room`'s `name`.
+    Of(&'static str, &'static str),
     /// Its element's category, as elements name theirs: `wall`.
     Category,
     /// What its element is made of: its type's structure layer's material (or its thickest's), a run's type's, or a
@@ -214,6 +216,11 @@ const DESIGN_OPTION: Own = ("Design Option", Kind::Text, From::Param);
 const ROOM_NUMBER: Own = (msg!("Room Number"), Kind::Text, From::Key("room_number"));
 const ROOM_NAME: Own = (msg!("Room Name"), Kind::Text, From::Key("room_name"));
 const VOLUME: Own = (msg!("Volume"), Kind::Volume, From::Key("volume_m3"));
+/// The rooms a door or window is between (`from_room`, `to_room` in its JSON), as Revit's From Room and To Room fields.
+const FROM_ROOM_NUMBER: Own = (msg!("From Room: Number"), Kind::Text, From::Of("from_room", "number"));
+const FROM_ROOM_NAME: Own = (msg!("From Room: Name"), Kind::Text, From::Of("from_room", "name"));
+const TO_ROOM_NUMBER: Own = (msg!("To Room: Number"), Kind::Text, From::Of("to_room", "number"));
+const TO_ROOM_NAME: Own = (msg!("To Room: Name"), Kind::Text, From::Of("to_room", "name"));
 /// A roof's area is its surface's: its plan area stretched by its slope, as Revit's.
 const AREA_SURFACE: Own = (msg!("Area"), Kind::Area, From::Key("surface_area_m2"));
 const PERIMETER: Own = (msg!("Perimeter"), Kind::Length, From::Metres("perimeter_m"));
@@ -296,7 +303,28 @@ const OWN: &[(&str, usize, &[Own])] = &[
             DESIGN_OPTION,
         ],
     ),
-    ("door", 6, &[MARK, TYPE, WIDTH, HEIGHT, LEVEL, HOST, FAMILY, OPERATION, COUNT, PHASE_CREATED, PHASE_DEMOLISHED, DESIGN_OPTION]),
+    (
+        "door",
+        6,
+        &[
+            MARK,
+            TYPE,
+            WIDTH,
+            HEIGHT,
+            LEVEL,
+            HOST,
+            FAMILY,
+            OPERATION,
+            COUNT,
+            PHASE_CREATED,
+            PHASE_DEMOLISHED,
+            DESIGN_OPTION,
+            FROM_ROOM_NUMBER,
+            FROM_ROOM_NAME,
+            TO_ROOM_NUMBER,
+            TO_ROOM_NAME,
+        ],
+    ),
     (
         "window",
         7,
@@ -314,6 +342,10 @@ const OWN: &[(&str, usize, &[Own])] = &[
             PHASE_CREATED,
             PHASE_DEMOLISHED,
             DESIGN_OPTION,
+            FROM_ROOM_NUMBER,
+            FROM_ROOM_NAME,
+            TO_ROOM_NUMBER,
+            TO_ROOM_NAME,
         ],
     ),
     ("wall", 8, &[ID, TYPE, LEVEL, LENGTH, HEIGHT, THICKNESS, AREA, VOLUME, COUNT, PHASE_CREATED, PHASE_DEMOLISHED, DESIGN_OPTION]),
@@ -991,6 +1023,10 @@ impl Row<'_> {
                 From::Count => serde_json::json!(1.0),
                 From::Opt(k) => j.get(k).filter(|v| v.is_number()).cloned().unwrap_or(Value::Null),
                 From::Flag(k) => Value::Bool(j.get(k).and_then(Value::as_bool).unwrap_or(false)),
+                From::Of(k, field) => match j.get(k).and_then(|o| o.get(field)) {
+                    Some(Value::String(s)) if !s.is_empty() => Value::String(s.clone()),
+                    _ => Value::Null,
+                },
                 From::Operation => j
                     .get("operation")
                     .and_then(Value::as_str)

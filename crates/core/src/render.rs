@@ -24,6 +24,7 @@ use crate::graphics::{Detail, Look, scale_of};
 use crate::model::Guid;
 use crate::model::{
     CEILING_CUT, Ceiling, DetailLine, DimKind, Dimension, Element, FilledRegion, Floor, Function, Id, Key, Layer, Model, Note, Opening,
+    OpeningWay, Operation,
     Pattern, PlanRange, Railing, Ramp, Roof, Section, Shaft, Stair, TOL, Tag, View3D, Wall,
 };
 use crate::pen::{Pen, Weights};
@@ -3587,7 +3588,9 @@ fn opening(d: &mut Drawing, m: &Model, e: &Element, o: &Opening, w: &Wall, cut: 
         d.line(&[axis.at(s, int), axis.at(s, ext)], Pen::HEAVY, INK, false);
     }
     d.own(owner);
-    if !shown || d.detail == Detail::Coarse {
+    // At coarse, a window is its gap, as are a family's forms and symbols; a door of the project's own type still shows
+    // its leaf and swing, as Revit's Single-Flush draws its panel and Plan Swing at every detail level.
+    if !shown || (d.detail == Detail::Coarse && (o.family.is_some() || !matches!(e, Element::Door(_)))) {
         return;
     }
     // Of a family: the forms the cut plane passes through, outlined, and the lines of its symbols (a door's swing).
@@ -3601,23 +3604,78 @@ fn opening(d: &mut Drawing, m: &Model, e: &Element, o: &Opening, w: &Wall, cut: 
         return;
     }
     if matches!(e, Element::Door(_)) {
-        // Swinging to the wall's left (its exterior side), or flipped, its right; hung on the jamb
-        // toward its start, or flipped, its end.
-        let side = if o.flip_facing { int } else { ext };
-        let (hinge, free) = if o.flip_hand { (s1, s0) } else { (s0, s1) };
-        let pivot = axis.at(hinge, side);
-        let out = axis.tangent(hinge).perp() * if o.flip_facing { -1.0 } else { 1.0 };
-        let shut = axis.at(free, side);
-        let open = pivot + out * pivot.dist(shut);
-        d.line(&[pivot, open], BY_CATEGORY, INK, false);
-        // What the leaf sweeps is seen, not cut.
-        d.part(Part::Projection);
-        d.line(&arc(pivot, open, shut, 24), BY_CATEGORY, INK, false);
-        d.part(Part::Cut);
+        if let Some(way) = m.opening_way(e) {
+            door_leaves(d, &axis, &way, t.operation.unwrap_or(Operation::Swing), t.leaf());
+        }
     } else {
         for across in [int, (ext + int) / 2.0, ext] {
             d.line(&axis.points(s0, s1, across), Pen::PROJECTION, INK, false);
         }
+    }
+}
+
+/// A door's leaves in plan, as Revit's door families draw them (`way`: [`Model::opening_way`]; `thick`: the leaf's
+/// thickness): each leaf a panel, outlined in the door's cut pen, and a swinging leaf open square to its wall on the face it
+/// swings to, with the arc its free edge sweeps, seen, in the projection pen (Plan Swing). One leaf swings from its hinged
+/// jamb; a double door's two from both jambs, meeting in the middle; a sliding one's leaf lies on the side it slides on,
+/// past a fixed one on the other side; a double sliding door's two meet in the middle of the wall; a folding one's two
+/// panels fold toward the hinged jamb, half open; a fixed one is a panel in the middle of the wall, shut.
+fn door_leaves(d: &mut Drawing, axis: &Axis, way: &OpeningWay, op: Operation, thick: f64) {
+    let (hinge, free) = (way.hinge, way.free);
+    let mid = (hinge + free) / 2.0;
+    let toward = (free - hinge).signum();
+    let centre = (way.face + way.back) / 2.0;
+    // A panel lying along the wall, from `a` to `b` along it and from `off0` to `off1` across.
+    let along = |d: &mut Drawing, a: f64, b: f64, off0: f64, off1: f64| {
+        let ring: Vec<P2> = axis.points(a, b, off0).into_iter().chain(axis.points(b, a, off1)).collect();
+        d.line(&ring, BY_CATEGORY, INK, true);
+    };
+    // A panel from `a` to `b`, `thick` to its left.
+    let panel = |d: &mut Drawing, a: P2, b: P2, side: f64| {
+        let n = (b - a).unit().perp() * (thick * side);
+        d.line(&[a, b, b + n, a + n], BY_CATEGORY, INK, true);
+    };
+    // A leaf hinged at `at` along the wall, its free edge at `to`: open square to the wall, inside the opening, and the arc.
+    let swing = |d: &mut Drawing, at: f64, to: f64| {
+        let (pivot, shut) = (axis.at(at, way.face), axis.at(to, way.face));
+        let (u, out) = (axis.tangent(at) * (to - at).signum(), axis.tangent(at).perp() * way.to);
+        let open = pivot + out * pivot.dist(shut);
+        d.line(&[pivot, open, open + u * thick, pivot + u * thick], BY_CATEGORY, INK, true);
+        // What the leaf sweeps is seen, not cut.
+        d.part(Part::Projection);
+        d.line(&arc(pivot, open, shut, 24), BY_CATEGORY, INK, false);
+        d.part(Part::Cut);
+    };
+    match op {
+        Operation::Swing => swing(d, hinge, free),
+        Operation::DoubleSwing => {
+            swing(d, hinge, mid);
+            swing(d, free, mid);
+        }
+        Operation::Sliding => {
+            // The sliding leaf on the face it opens to, over the free half and past the middle by a leaf; the fixed
+            // one behind it over the hinged half.
+            along(d, mid - toward * thick, free, centre, centre + way.to * thick);
+            along(d, hinge, mid + toward * thick, centre - way.to * thick, centre);
+        }
+        Operation::DoubleSliding => {
+            along(d, hinge, mid, centre - thick / 2.0, centre + thick / 2.0);
+            along(d, mid, free, centre - thick / 2.0, centre + thick / 2.0);
+        }
+        Operation::Folding => {
+            // Two panels, each half the opening, folded 45° out from the hinged jamb on the face it opens to.
+            let (pivot, u) = (axis.at(hinge, way.face), axis.tangent(hinge) * toward);
+            let out = axis.tangent(hinge).perp() * way.to;
+            let half = (free - hinge).abs() / 2.0;
+            let k = std::f64::consts::FRAC_1_SQRT_2;
+            let knee = pivot + (u + out) * (k * half);
+            let end = knee + (u - out) * (k * half);
+            // Each panel's thickness inside the fold, toward the wall.
+            let side = |a: P2, b: P2| if (b - a).perp().dot(out) > 0.0 { -1.0 } else { 1.0 };
+            panel(d, pivot, knee, side(pivot, knee));
+            panel(d, knee, end, side(knee, end));
+        }
+        Operation::Fixed => along(d, hinge, free, centre - thick / 2.0, centre + thick / 2.0),
     }
 }
 
@@ -5435,7 +5493,8 @@ mod tests {
         s.execute("detail", &serde_json::json!({"view": 100000, "detail": "coarse"})).unwrap();
         let (coarse, door, window, floor) = all(&s);
         assert_eq!((coarse, floor), ((0, 0), 0), "one poché");
-        assert!(door < fine_door && window < fine_window, "an opening is its gap and jambs: {door} {window}");
+        // A window is its gap and jambs; a door keeps its leaf and swing, as Revit's door families do at every level.
+        assert!(door == fine_door && window < fine_window, "a window is its gap and jambs, a door all of it: {door} {window}");
         assert!(door >= 3 && window >= 3, "which are still there");
         // The ceiling plan is the same level's.
         assert!(drawn_by(&ceiling_plan(&s.model, 100000, 800, 600), 100002) > 0);

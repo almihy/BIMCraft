@@ -1,0 +1,238 @@
+//! Doors in plan as Revit's door families draw them (a leaf a panel of its type's thickness, its swing, each way of
+//! opening), and which way a door opens said back: its From Room and To Room, its hinge and its swing, checked against
+//! the plan it draws.
+
+use serde_json::{Value, json};
+
+use crate::engine::Session;
+use crate::geom::P2;
+use crate::model::Id;
+use crate::render::{self, Drawing, Prim};
+
+fn run(s: &mut Session, c: &str, p: Value) -> Value {
+    s.execute(c, &p).unwrap_or_else(|e| panic!("{c} {p}: {e}"))
+}
+
+fn id_of(v: &Value) -> Id {
+    v["id"].as_u64().unwrap_or_else(|| panic!("no id in {v}"))
+}
+
+/// An 8 x 6 m box of walls (south, east, north, west, drawn anticlockwise), split by a wall at x 4000 drawn north, and
+/// two rooms: WC to the west, Hall to the east. The ids of the walls, the dividing one last.
+fn rooms(s: &mut Session) -> Vec<Id> {
+    let r = run(s, "wall", json!({"points": [[0, 0], [8000, 0], [8000, 6000], [0, 6000]], "closed": true}));
+    let mut ids: Vec<Id> = r["ids"].as_array().map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
+    let mid = run(s, "wall", json!({"points": [[4000, 0], [4000, 6000]]}));
+    ids.push(mid["ids"][0].as_u64().unwrap_or_default());
+    run(s, "room", json!({"point": [2000, 3000], "name": "WC", "number": "1"}));
+    run(s, "room", json!({"point": [6000, 3000], "name": "Hall", "number": "2"}));
+    ids
+}
+
+fn plan(s: &Session) -> Drawing {
+    render::plan(&s.model, 100000, 4000, 3000)
+}
+
+/// The outlined panels `id` draws, in model mm.
+fn panels(d: &Drawing, id: Id) -> Vec<Vec<P2>> {
+    d.prims
+        .iter()
+        .zip(&d.owners)
+        .filter_map(|(p, o)| match p {
+            Prim::Line { pts, closed: true, .. } if *o == Some(id) => Some(pts.iter().map(|q| d.view.mm(*q)).collect()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The arcs `id` draws (open lines of more than two points), in model mm.
+fn arcs(d: &Drawing, id: Id) -> Vec<Vec<P2>> {
+    d.prims
+        .iter()
+        .zip(&d.owners)
+        .filter_map(|(p, o)| match p {
+            Prim::Line { pts, closed: false, .. } if *o == Some(id) && pts.len() > 2 => {
+                Some(pts.iter().map(|q| d.view.mm(*q)).collect())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// A panel's two side lengths, the shorter first.
+fn sides(ring: &[P2]) -> (f64, f64) {
+    let (a, b) = (ring[0].dist(ring[1]), ring[1].dist(ring[2]));
+    (a.min(b), a.max(b))
+}
+
+fn near(a: f64, b: f64) -> bool {
+    (a - b).abs() < 1.0
+}
+
+#[test]
+fn a_doors_leaf_is_drawn_as_a_panel_of_revits_default_thickness_with_its_swing() {
+    let mut s = Session::new();
+    rooms(&mut s);
+    let door = id_of(&run(&mut s, "door", json!({"at": [2000, 0], "type": "Single 900 x 2100"})));
+    let d = plan(&s);
+    let p = panels(&d, door);
+    assert_eq!(p.len(), 1, "one leaf, a closed panel: {p:?}");
+    assert_eq!(p[0].len(), 4);
+    let (thin, long) = sides(&p[0]);
+    assert!(near(thin, 50.0) && near(long, 900.0), "a 50 mm leaf as wide as the door: {thin} x {long}");
+    assert_eq!(arcs(&d, door).len(), 1, "its swing");
+    assert_eq!(crate::element_json(&s.model, door)["thickness"], json!(50.0));
+}
+
+#[test]
+fn a_door_types_thickness_is_its_leafs_in_plan_3d_and_ifc() {
+    let mut s = Session::new();
+    rooms(&mut s);
+    run(&mut s, "type", json!({"category": "door", "name": "Thick", "width": 1000, "height": 2100, "thickness": 40}));
+    let door = id_of(&run(&mut s, "door", json!({"at": [2000, 0], "type": "Thick"})));
+    let (thin, long) = sides(&panels(&plan(&s), door)[0]);
+    assert!(near(thin, 40.0) && near(long, 1000.0), "{thin} x {long}");
+    assert_eq!(s.model.types.door["Thick"].thickness, Some(40.0));
+    // Changing the type's width keeps its thickness.
+    run(&mut s, "type", json!({"category": "door", "name": "Thick", "width": 1100}));
+    assert_eq!(s.model.types.door["Thick"].thickness, Some(40.0));
+    // In 3D, a box 40 thick.
+    let scene = crate::view3d::solids(&s.model);
+    let leaf = scene.iter().find_map(|x| match x {
+        crate::view3d::Solid::Box { owner, c, .. } if *owner == door => Some(*c),
+        _ => None,
+    });
+    assert_eq!(leaf, Some((-20.0, 20.0)));
+    // In IFC, the door's panel profile 40 across.
+    let ifc = crate::ifc::export(&s.model);
+    assert!(ifc.contains(",1100.,40.)"), "a 1100 x 40 rectangle profile");
+    // A window has no leaf to be thick.
+    let e = s.execute("type", &json!({"category": "window", "name": "W", "width": 1000, "height": 1000, "thickness": 40})).unwrap_err();
+    assert!(e.contains("thickness"), "{e}");
+}
+
+#[test]
+fn every_way_of_opening_draws_its_own_leaves() {
+    let mut s = Session::new();
+    rooms(&mut s);
+    // (operation, panels, arcs, each panel's length along or open)
+    let cases = [
+        ("swing", 1, 1, vec![1200.0]),
+        ("double-swing", 2, 2, vec![600.0, 600.0]),
+        ("sliding", 2, 0, vec![650.0, 650.0]),
+        ("double-sliding", 2, 0, vec![600.0, 600.0]),
+        ("folding", 2, 0, vec![600.0, 600.0]),
+        ("fixed", 1, 0, vec![1200.0]),
+    ];
+    for (i, (op, n, arcs_n, lengths)) in cases.iter().enumerate() {
+        let name = format!("T {op}");
+        run(&mut s, "type", json!({"category": "door", "name": name, "width": 1200, "height": 2100, "operation": op}));
+        let door = id_of(&run(&mut s, "door", json!({"at": [1000 + 1500 * i as i64 % 3000, if i < 2 { 0 } else { 6000 }], "type": name})));
+        let d = plan(&s);
+        let p = panels(&d, door);
+        assert_eq!(p.len(), *n, "{op}: {p:?}");
+        assert_eq!(arcs(&d, door).len(), *arcs_n, "{op}");
+        let mut got: Vec<f64> = p.iter().map(|r| sides(r).1).collect();
+        got.sort_by(f64::total_cmp);
+        assert!(got.iter().zip(lengths).all(|(a, b)| near(*a, *b)), "{op}: {got:?}");
+        assert!(p.iter().all(|r| near(sides(r).0, 50.0)), "{op}: 50 thick");
+        run(&mut s, "delete", json!({"ids": [door]}));
+    }
+}
+
+#[test]
+fn a_doors_leaf_and_swing_show_at_coarse_as_revits_do() {
+    let mut s = Session::new();
+    rooms(&mut s);
+    let door = id_of(&run(&mut s, "door", json!({"at": [2000, 0]})));
+    let window = id_of(&run(&mut s, "window", json!({"at": [6000, 0]})));
+    run(&mut s, "detail", json!({"view": 100000, "detail": "coarse"}));
+    let d = plan(&s);
+    assert_eq!((panels(&d, door).len(), arcs(&d, door).len()), (1, 1));
+    // A window at coarse is its gap and jambs only.
+    let glass = d.prims.iter().zip(&d.owners).filter(|(p, o)| **o == Some(window) && matches!(p, Prim::Line { pts, .. } if pts.len() == 2));
+    assert_eq!(glass.count(), 2, "its two jambs");
+}
+
+/// The room named `name`'s JSON, or null.
+fn room_name(v: &Value) -> Option<&str> {
+    v["name"].as_str()
+}
+
+#[test]
+fn a_door_says_which_room_it_opens_into_and_where_its_hinge_is_as_the_plan_draws_it() {
+    let mut s = Session::new();
+    let walls = rooms(&mut s);
+    let mid = walls[4];
+    // The dividing wall runs north, so its left is the west, the WC.
+    for (ff, fh) in [(false, false), (true, false), (false, true), (true, true)] {
+        let door = id_of(&run(
+            &mut s,
+            "door",
+            json!({"wall": mid, "offset": 3000, "type": "Single 900 x 2100", "flip_facing": ff, "flip_hand": fh}),
+        ));
+        let e = crate::element_json(&s.model, door);
+        let (into, from) = if ff { ("Hall", "WC") } else { ("WC", "Hall") };
+        assert_eq!((room_name(&e["to_room"]), room_name(&e["from_room"])), (Some(into), Some(from)), "flips {ff} {fh}: {e}");
+        assert_eq!(e["swing"], json!(if ff { "right" } else { "left" }));
+        let t = s.model.thickness(s.model.wall(s.model.guid(mid)).unwrap());
+        let x = if ff { 4000.0 + t / 2.0 } else { 4000.0 - t / 2.0 };
+        let y = if fh { 3450.0 } else { 2550.0 };
+        assert_eq!(e["hinge"], json!([x, y]), "flips {ff} {fh}");
+        // The plan agrees: its leaf is hung at the hinge, and its arc sweeps through the room it says it opens into.
+        let d = plan(&s);
+        let leaf = &panels(&d, door)[0];
+        let hinge = P2(x, y);
+        assert!(leaf.iter().any(|q| q.dist(hinge) < 1.0), "the leaf at the hinge {hinge:?}: {leaf:?}");
+        let arc = &arcs(&d, door)[0];
+        let swept = arc[arc.len() / 2];
+        let rooms = crate::rooms::Rooms::new(&s.model);
+        let level = s.model.levels()[0].0;
+        let at = rooms.room_at(s.model.guid(level), swept).and_then(|r| s.model.elements.get(r).cloned());
+        assert!(matches!(at, Some(crate::model::Element::Room(r)) if r.name == into), "the arc at {swept:?} in {into}");
+        run(&mut s, "delete", json!({"ids": [door]}));
+    }
+}
+
+#[test]
+fn a_door_in_an_outside_wall_opens_from_or_to_outside() {
+    let mut s = Session::new();
+    rooms(&mut s);
+    // The south wall runs east, so its left is the north: in the house, the WC.
+    let door = id_of(&run(&mut s, "door", json!({"at": [2000, 0]})));
+    let e = crate::element_json(&s.model, door);
+    assert_eq!((room_name(&e["to_room"]), e["from_room"].clone()), (Some("WC"), Value::Null), "{e}");
+    let flipped = id_of(&run(&mut s, "door", json!({"at": [6000, 0], "flip_facing": true})));
+    let e = crate::element_json(&s.model, flipped);
+    assert_eq!((e["to_room"].clone(), room_name(&e["from_room"])), (Value::Null, Some("Hall")), "{e}");
+    // `elements` says the same.
+    let all = run(&mut s, "elements", json!({"category": "doors"}));
+    let row = all["elements"].as_array().unwrap().iter().find(|r| r["id"] == json!(door)).unwrap().clone();
+    assert_eq!(row["to_room"]["number"], json!("1"));
+    assert!(row["to_room"]["id"].is_u64() && row["to_room"]["guid"].is_string());
+}
+
+#[test]
+fn a_windows_to_room_is_the_side_away_from_the_face_it_faces() {
+    let mut s = Session::new();
+    rooms(&mut s);
+    // It faces the south wall's left (the north), so its To Room is to the south: outside.
+    let w = id_of(&run(&mut s, "window", json!({"at": [2000, 0]})));
+    let e = crate::element_json(&s.model, w);
+    assert_eq!((e["to_room"].clone(), room_name(&e["from_room"])), (Value::Null, Some("WC")), "{e}");
+    assert!(e.get("hinge").is_none() && e.get("swing").is_none());
+    let w = id_of(&run(&mut s, "window", json!({"at": [6000, 0], "flip_facing": true})));
+    let e = crate::element_json(&s.model, w);
+    assert_eq!((room_name(&e["to_room"]), e["from_room"].clone()), (Some("Hall"), Value::Null), "{e}");
+}
+
+#[test]
+fn a_door_schedule_lists_from_room_and_to_room() {
+    let mut s = Session::new();
+    let walls = rooms(&mut s);
+    run(&mut s, "door", json!({"wall": walls[4], "offset": 3000, "mark": "D1"}));
+    run(&mut s, "door", json!({"at": [6000, 0], "mark": "D2", "flip_facing": true}));
+    let fields = ["Mark", "From Room: Number", "From Room: Name", "To Room: Number", "To Room: Name"];
+    let r = run(&mut s, "schedule", json!({"name": "Doors by room", "category": "doors", "fields": fields, "sort": ["Mark"]}));
+    assert_eq!(r["rows"], json!([["D1", "2", "Hall", "1", "WC"], ["D2", "2", "Hall", null, null]]), "{r}");
+}

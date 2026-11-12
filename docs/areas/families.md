@@ -27,7 +27,21 @@ How a door or a window opens is its family's `operation` (`model::Operation`: sw
 folding, fixed), or for one of the project's own types the type's (`OpeningType::operation`); none, a door swings. IFC writes
 it as the door's `OperationType` (`Operation::ifc_door`, its side from `flip_hand`: `SLIDING_TO_RIGHT`) and a window's
 `PartitioningType` (two leaves, `DOUBLE_PANEL_VERTICAL`); the import reads a door's back, or its `IfcDoorType`'s (IFC4) or
-`IfcDoorStyle`'s (IFC2x3), onto the type it makes. Schedules have it as the `Operation` field, in the project's language. A
+`IfcDoorStyle`'s (IFC2x3), onto the type it makes. Schedules have it as the `Operation` field, in the project's language.
+A door of the project's own type is drawn in plan as Revit's door families draw theirs (`render::door_leaves`): each leaf a
+panel as thick as the type's `thickness` (Revit's Thickness; none, `DOOR_THICKNESS`, 50 mm as the Single-Flush's), outlined
+in the door's cut pen, a swinging leaf open square to the wall with its arc in the projection pen, at every detail level (a
+window, and a family's forms and symbols, are only their gap at coarse); a double door's two leaves from both jambs, a
+sliding one's leaf in front of a fixed one, a double sliding one's two meeting in the wall's middle, a folding one's two
+panels half folded toward the hinged jamb, a fixed one shut in the wall's middle. 3D views and IFC build the leaf shut, as
+thick. Which way it is turned is `Model::opening_way`, which the plan and the rooms either side both read: a door swings to
+its wall's left (start to end) or, flipped facing, its right, hinged toward the wall's start or, flipped hand, its end; a
+window faces the wall's left, or flipped its right. `Rooms::from_to` gives the rooms either side as Revit's From Room and To
+Room (looked for `ROOM_PROBE` past the faces at the middle; a door's To Room is the one it swings into, a window's the one
+away from the face it faces), `element_json` says them as `from_room` and `to_room` ({id, guid, number, name}, null
+outside) with a door's `hinge` (`Model::door_hinge`) and `swing` (left or right), Properties shows them read only under
+Phasing, and door and window schedules have From Room: Number, From Room: Name, To Room: Number and To Room: Name. Revit's
+Flip From/To Room is left out: the flips already decide it. A
 window's panel operation (`IfcWindowPanelProperties`, a sliding sash) needs an `IfcWindowType`, which the export doesn't write yet.
 What BIMCraft has no element for comes in from IFC as a component of a generic family that remembers the class it came in as
 (`Family::ifc`, an `IfcClass`: `{"class": "IFCPLATE", "predefined": "CURTAIN_PANEL"}`): a covering that is no ceiling, a curtain
