@@ -46,6 +46,8 @@ const SCALE: (f64, f64) = (1e-6, 50.0);
 /// click is over in a tenth of a second or so, and a drag that means to move something takes longer.
 // ponytail: one number for every hand; make it a setting if it needs tuning.
 const QUICK: f64 = 0.2;
+/// A grip's reach either way of its middle, doubled: a press within it takes the grip (px).
+pub(crate) const GRIP_REACH: f32 = 16.0;
 
 /// A level's view: px per mm and the model point at the canvas centre.
 #[derive(Clone, Copy, Debug)]
@@ -354,6 +356,53 @@ pub struct Canvas {
     alignment_cache: RefCell<Option<AlignmentCache>>,
     /// Pan, Zoom Region, Previous Zoom and what turns the wheel: see [`navigation`].
     pub(crate) nav: navigation::Nav,
+    /// The controls drawn over the views (see [`Controls`]): a press on one is the control's, never the view's.
+    pub(crate) controls: Controls,
+}
+
+/// The controls drawn over a view, where the pointer goes before it goes to the view, as Revit's do: the selection's flip
+/// arrows, pins, temporary dimensions' numbers, witness dots and Make Permanent, padlocks and EQ, a wall's angles, grips, and
+/// the navigation bar. A press on one is that control's: the view under it picks nothing, draws no box and moves nothing,
+/// and the selection stays. A control drawn as an egui widget goes through [`BimApp::control`], which senses its clicks and
+/// drags so that egui gives them to it alone; a grip the view's own drag works is noted with [`BimApp::control_rect`]. A
+/// press is tested against the controls of the pass before, where they were on the screen when the hand pressed, as egui
+/// tests its widgets.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Controls {
+    /// The pass `now` is of.
+    pass: u64,
+    /// Where the controls of this pass are, on the screen.
+    now: Vec<Rect>,
+    /// Those of the pass before.
+    shown: Vec<Rect>,
+    /// Whether the primary button last went down on one.
+    pressed: bool,
+}
+
+impl Controls {
+    /// A new pass begun: what was noted becomes what is shown.
+    fn turn(&mut self, pass: u64) {
+        if pass != self.pass {
+            self.shown = std::mem::take(&mut self.now);
+            self.pass = pass;
+        }
+    }
+
+    /// A control at `r` in pass `pass`.
+    pub(crate) fn add(&mut self, pass: u64, r: Rect) {
+        self.turn(pass);
+        self.now.push(r);
+    }
+
+    /// Whether a control was drawn at `at`.
+    pub(crate) fn over(&self, at: Pos2) -> bool {
+        self.shown.iter().any(|r| r.contains(at))
+    }
+
+    /// Whether the primary button last went down on a control: what it does then is the control's.
+    pub(crate) fn pressed(&self) -> bool {
+        self.pressed
+    }
 }
 
 impl Default for Canvas {
@@ -380,6 +429,7 @@ impl Default for Canvas {
             found: Cell::new(None),
             alignment_cache: RefCell::new(None),
             nav: navigation::Nav::default(),
+            controls: Controls::default(),
         }
     }
 }
@@ -444,6 +494,10 @@ impl Canvas {
     /// when, and on a release, whether it came up within [`QUICK`].
     pub(crate) fn track(&mut self, ui: &Ui, response: &Response) {
         let (pressed, released, now) = ui.input(|i| (i.pointer.primary_pressed(), i.pointer.primary_released(), i.time));
+        self.controls.turn(ui.ctx().cumulative_pass_nr());
+        if pressed {
+            self.controls.pressed = ui.input(|i| i.pointer.press_origin()).is_some_and(|at| self.controls.over(at));
+        }
         if pressed && response.is_pointer_button_down_on() {
             self.press = ui.input(|i| i.pointer.press_origin()).map(|at| (at, now));
         }
@@ -1301,14 +1355,27 @@ impl BimApp {
     /// every other tool, since fast drawing clicks on the move and no tool has a use for a drag,
     /// and for Modify when the button came up quickly ([`QUICK`]).
     pub(crate) fn clicked_at(&self, response: &Response) -> Option<Pos2> {
-        // A view drawn as it is takes no clicks: the first makes it the active view.
-        if self.passive {
+        // A view drawn as it is takes no clicks: the first makes it the active view. A click on a control is the control's.
+        if self.passive || self.canvas.controls.pressed() {
             return None;
         }
         if response.clicked() {
             return response.interact_pointer_pos();
         }
         self.canvas.lifted.filter(|(_, quick)| *quick || self.tool != Tool::Modify || self.sketch.is_some()).map(|(at, _)| at)
+    }
+
+    /// A control over a view at `r` (see [`Controls`]): it senses clicks and drags, so egui gives the pointer to it and not
+    /// to the view under it, and a press on it is no pick, box or move.
+    pub(crate) fn control(&mut self, ui: &Ui, r: Rect, id: egui::Id) -> Response {
+        self.control_rect(ui, r);
+        ui.interact(r, id, Sense::click_and_drag())
+    }
+
+    /// A grip at `r` that the view's own drag works (a wall's end, a detail line's handle, a crop region's edge): a press on
+    /// it is the grip's, and a click on it, as Revit's, does nothing.
+    pub(crate) fn control_rect(&mut self, ui: &Ui, r: Rect) {
+        self.canvas.controls.add(ui.ctx().cumulative_pass_nr(), r);
     }
 
     /// A drag has begun on `id`: it is selected, and the selection it replaces is kept for
@@ -1606,6 +1673,8 @@ impl BimApp {
         let shape = self.shape();
         let pipeline = self.card.canvas();
         let look = crate::retained::Look::now(ui.ctx(), &ui.painter_at(rect), rect.min, self.writing(), self.thin);
+        // Over a control, the control is what the cursor is on: nothing under it is lit or taken.
+        let picking = local.filter(|q| !self.canvas.controls.over(pos(rect.min, *q)));
         let c = &mut self.canvas;
         c.cursor = local.map(|q| view.mm(q));
         let d = match &pipeline {
@@ -1617,7 +1686,7 @@ impl BimApp {
         // What's under the cursor; Tab steps through it. (Without the app's input hook, as in
         // tests, egui moved the keyboard to a widget on that Tab: give it back.)
         let sketching = self.sketch.is_some();
-        let under = match (&self.tool, local) {
+        let under = match (&self.tool, picking) {
             (Tool::Modify, Some(q)) if !sketching => d.pick_all(q, PICK),
             _ => Vec::new(),
         };
@@ -1720,7 +1789,7 @@ impl BimApp {
             }
             _ => None,
         };
-        let hovered = match (&tool, local) {
+        let hovered = match (&tool, picking) {
             (Tool::Modify, Some(_)) => c.under.get(c.cycle).copied(),
             (_, Some(q)) => under_at(q),
             _ => None,
@@ -1736,7 +1805,8 @@ impl BimApp {
         self.line_grip_drag(ui, &response, rect, &view, level);
         let dragged = self.shape_grip_drag(ui, &response, rect, &view, level) || dragged;
         let dragged = self.site_grip_drag(ui, &response, rect, &view, level) || dragged;
-        if ui.input(|i| i.pointer.primary_pressed()) {
+        let on_control = self.canvas.controls.pressed();
+        if ui.input(|i| i.pointer.primary_pressed()) && !on_control {
             self.canvas.pressed_chain = hovered.filter(|id| self.flow.preview.contains(id)).map(|id| (id, self.click_set(Some(id))));
         }
         // A drag from an element moves the selection; from empty floor, it draws a selection box.
@@ -1744,6 +1814,7 @@ impl BimApp {
             && self.tool == Tool::Modify
             && !sketching
             && !writing
+            && !on_control
             && self.canvas.crop_drag.is_none()
             && self.canvas.grip.is_none()
             && self.drawing.grip.is_none()
@@ -1778,6 +1849,7 @@ impl BimApp {
         }
         // A double click on a section's or an elevation's mark opens its view, as in Revit; on a note, writes in it.
         if response.double_clicked()
+            && !on_control
             && let Some(id) = hovered.filter(|id| model.section(*id).is_some())
         {
             self.open_sheet(Sheet::Section(id));
@@ -1785,12 +1857,14 @@ impl BimApp {
         }
         // A double click on a camera's mark opens its 3D view.
         if response.double_clicked()
+            && !on_control
             && let Some(id) = hovered.filter(|id| matches!(model.elements.get(*id), Some(Element::View3D(_))))
         {
             self.open_3d(Some(id));
             return;
         }
         if response.double_clicked()
+            && !on_control
             && !writing
             && let Some(id) = hovered.filter(|id| crate::notes::is_note(&model, *id))
         {
@@ -1799,6 +1873,7 @@ impl BimApp {
         }
         // On a dimension, its text: the number under the cursor's, as Revit's Dimension Text.
         if response.double_clicked()
+            && !on_control
             && !writing
             && let (Some(q), Some(Element::Dimension(dim))) = (local, hovered.and_then(|id| model.elements.get(id)))
             && let Some(id) = hovered
@@ -1808,8 +1883,7 @@ impl BimApp {
             return;
         }
         // A click on a shape point's height label is the label's.
-        let on_label = |at: &Pos2| self.shape_label_rects.iter().any(|r| r.contains(*at));
-        if let Some(at) = self.clicked_at(&response).filter(|at| !dragged && !writing && !on_label(at)) {
+        if let Some(at) = self.clicked_at(&response).filter(|_| !dragged && !writing) {
             let q = (at.x - rect.min.x, at.y - rect.min.y);
             // What lay under the press, which the hand may have left by the time the button came up.
             let found = if Some(q) == local { hovered } else { under_at(q) };
@@ -1818,7 +1892,7 @@ impl BimApp {
             self.snap_once = None;
         }
         // A double click ends a spline or a polyline at the point clicked, as Enter does.
-        if response.double_clicked() && !dragged && !writing && self.finishable() {
+        if response.double_clicked() && !on_control && !dragged && !writing && self.finishable() {
             self.finish_open_shape();
         }
 
@@ -1975,6 +2049,7 @@ impl BimApp {
         let local = |p: Pos2| (p.x - rect.min.x, p.y - rect.min.y);
         if response.drag_started_by(PointerButton::Primary)
             && self.tool == Tool::Modify
+            && !self.canvas.controls.pressed()
             && self.canvas.crop_drag.is_none()
             && self.canvas.level_grip.is_none()
             && let Some(o) = ui.input(|i| i.pointer.press_origin()).map(local)
@@ -1998,6 +2073,7 @@ impl BimApp {
     /// The navigation bar of view `id`, at its top right as in Revit: pan, zoom region, fit, zoom in, zoom out.
     pub(crate) fn nav_bar(&mut self, ui: &mut Ui, rect: Rect, id: Id) {
         let bar = Rect::from_min_size(self.nav_corner(rect), vec2(32.0, 134.0));
+        self.control_rect(ui, bar);
         ui.painter_at(rect).rect(bar, 6.0, pal().surface, Stroke::new(1.0, pal().border), StrokeKind::Inside);
         self.nav_buttons(ui, bar, id);
         ui.painter_at(rect).extend(self.canvas.region_shapes(rect));
@@ -2010,6 +2086,11 @@ impl BimApp {
         let Some(region) = render::crop_region(&self.session.model, id) else { return Vec::new() };
         let at = |p: P2| pos(rect.min, view.px(p));
         let modify = self.tool == Tool::Modify;
+        if modify {
+            for g in geom::edge_grips(region) {
+                self.control_rect(ui, Rect::from_center_size(at(g), vec2(GRIP_REACH, GRIP_REACH)));
+            }
+        }
         if modify
             && response.drag_started_by(PointerButton::Primary)
             && let Some(o) = ui.input(|i| i.pointer.press_origin())
@@ -2071,6 +2152,9 @@ impl BimApp {
             return Vec::new();
         };
         let at = |along: f64| pos(rect.min, view.px(P2(along, z)));
+        for e in [a, b] {
+            self.control_rect(ui, Rect::from_center_size(at(e), vec2(GRIP_REACH, GRIP_REACH)));
+        }
         if response.drag_started_by(PointerButton::Primary)
             && let Some(o) = ui.input(|i| i.pointer.press_origin())
             && let Some(far) = [(false, a), (true, b)].into_iter().find(|(_, e)| at(*e).distance(o) <= 8.0).map(|(far, _)| far)
@@ -3381,6 +3465,9 @@ impl BimApp {
             return;
         };
         let Some(ends) = Self::grip_ends(m, id) else { return };
+        for e in [ends.0, ends.1] {
+            self.control_rect(ui, Rect::from_center_size(pos(rect.min, v.px(e)), vec2(GRIP_REACH, GRIP_REACH)));
+        }
         let wall = m.wall(id).cloned();
         let p = ui.painter_at(rect);
         let at = |q: P2| pos(rect.min, v.px(q));
@@ -3467,7 +3554,7 @@ impl BimApp {
                     }
                 }
                 _ => {
-                    let r = ui.interact(at, field, Sense::click());
+                    let r = self.control(ui, at, field);
                     let which = t(if start { "start" } else { "end" });
                     r.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, tf("Turn the wall about its {}: {}", &[which, &text])));
                     p.rect_filled(at, 2.0, pal().surface);
@@ -3523,6 +3610,8 @@ impl BimApp {
                 }
             }
             _ => {
+                // Clicks only: a dimension's text grip may lie under its number, and the drag is the grip's.
+                self.control_rect(ui, at);
                 let r = ui.interact(at, field.with("number"), Sense::click());
                 r.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, tf(name, &[text])));
                 ui.painter().rect_filled(at, 2.0, pal().surface);
@@ -3561,7 +3650,7 @@ impl BimApp {
             let [(s0, _), (s1, _)] = pair else { continue };
             let at = on((s0 + s1) / 2.0) + side * 14.0;
             let locked = d.locked.iter().any(|l| l.segment == i);
-            let r = ui.interact(Rect::from_center_size(at, vec2(16.0, 18.0)), ui.id().with(("dimension lock", id, i)), Sense::click());
+            let r = self.control(ui, Rect::from_center_size(at, vec2(16.0, 18.0)), ui.id().with(("dimension lock", id, i)));
             let name = tf("Lock segment {}", &[&(i + 1).to_string()]);
             r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, locked, name.clone()));
             let ink = if r.hovered() {
@@ -3602,7 +3691,7 @@ impl BimApp {
         }
         if cross.len() > 2 {
             let at = on(last.max(first)) + along * 22.0;
-            let r = ui.interact(Rect::from_center_size(at, vec2(26.0, 18.0)), ui.id().with(("dimension equal", id)), Sense::click());
+            let r = self.control(ui, Rect::from_center_size(at, vec2(26.0, 18.0)), ui.id().with(("dimension equal", id)));
             r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, d.equal, t("Equal")));
             let ink = if r.hovered() {
                 pal().hover
@@ -3641,7 +3730,7 @@ impl BimApp {
             }
             if d.alignment {
                 let at = screen(d.at) + vec2(12.0, -12.0);
-                let r = ui.interact(Rect::from_center_size(at, vec2(16.0, 18.0)), ui.id().with(("alignment lock", id)), Sense::click());
+                let r = self.control(ui, Rect::from_center_size(at, vec2(16.0, 18.0)), ui.id().with(("alignment lock", id)));
                 r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, true, t("Unlock alignment")));
                 padlock(&p, at, true, if r.hovered() { pal().hover } else { pal().accent });
                 if r.clicked() {
@@ -3668,7 +3757,7 @@ impl BimApp {
         // Align's offer, while its tool is on.
         let Some(lock) = self.drawing.align_lock.filter(|_| matches!(self.tool, Tool::Align(_))) else { return };
         let at = screen((lock.line.0 + lock.line.1) * 0.5) + vec2(12.0, -12.0);
-        let r = ui.interact(Rect::from_center_size(at, vec2(16.0, 18.0)), ui.id().with("align lock"), Sense::click());
+        let r = self.control(ui, Rect::from_center_size(at, vec2(16.0, 18.0)), ui.id().with("align lock"));
         r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, false, t("Lock alignment")));
         padlock(&p, at, false, if r.hovered() { pal().hover } else { pal().accent });
         if r.clicked() {
@@ -4466,6 +4555,9 @@ impl BimApp {
             return false;
         }
         let local = |q: Pos2| (q.x - rect.min.x, q.y - rect.min.y);
+        for g in &grips {
+            self.control_rect(ui, Rect::from_center_size(pos(rect.min, view.px(g.2)), vec2(GRIP_REACH, GRIP_REACH)));
+        }
         if response.drag_started_by(PointerButton::Primary)
             && let Some(o) = ui.input(|i| i.pointer.press_origin())
         {
@@ -4564,7 +4656,6 @@ impl BimApp {
     /// While a floor is shaped, each of its points' heights beside it, as the Options Bar's Elevation reads them (relative,
     /// or with Absolute above the level); under Modify Sub Elements, a grip on each, the one held at the cursor.
     pub(crate) fn shape_overlay(&mut self, ui: &mut Ui, m: &Model, view: &bimcraft_core::render::View, rect: Rect, level: Id) {
-        self.shape_label_rects.clear();
         let Some(f) = self.shaping().and_then(|id| m.shapeable(id).ok()) else {
             self.shape_label_edit = None;
             self.shape_picked.clear();
@@ -4618,7 +4709,7 @@ impl BimApp {
                 tag(&p, c + vec2(8.0, -8.0), Align2::LEFT_BOTTOM, text);
             } else {
                 let r = self.shape_label(ui, at(q) + vec2(8.0, -8.0), q, &ends, &text);
-                self.shape_label_rects.push(r);
+                self.control_rect(ui, r);
             }
         }
     }

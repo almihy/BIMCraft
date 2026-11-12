@@ -693,8 +693,6 @@ pub struct BimApp {
     pub(crate) shape_picked: Vec<crate::shape::Sub>,
     /// A shape point's height label clicked into a field: the point, and what's typed.
     pub(crate) shape_label_edit: Option<(P2, String)>,
-    /// Where the plan drew the shape's height labels, last frame: a click there is the label's, not the tool's.
-    pub(crate) shape_label_rects: Vec<egui::Rect>,
     shaft_top: Option<Option<Id>>,
     shaft_height: String,
     /// The Mass tool's top, as the Shaft tool's.
@@ -1431,7 +1429,6 @@ impl BimApp {
             shape_preview: None,
             shape_label_edit: None,
             shape_picked: Vec::new(),
-            shape_label_rects: Vec::new(),
             shaft_top: None,
             shaft_height: units.length(3000.0),
             mass_top: None,

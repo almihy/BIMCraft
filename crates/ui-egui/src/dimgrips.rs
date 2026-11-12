@@ -5,7 +5,7 @@
 use bimcraft_core::geom::P2;
 use bimcraft_core::model::{DimKind, Dimension, Element, Id, Model};
 use bimcraft_core::render::View;
-use egui::{Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, WidgetInfo, WidgetType, pos2, vec2};
+use egui::{Pos2, Rect, Shape, Stroke, StrokeKind, Ui, WidgetInfo, WidgetType, pos2, vec2};
 use serde_json::json;
 
 use crate::lang::tf;
@@ -52,7 +52,7 @@ impl BimApp {
         for (grip, at) in grips {
             let r = Rect::from_center_size(at, vec2(12.0, 12.0));
             let key = ui.id().with(("dimension grip", id, format!("{grip:?}")));
-            let response = ui.interact(r, key, Sense::drag());
+            let response = self.control(ui, r, key);
             let name = match grip {
                 Grip::Line => tf("Dimension line of element {}", &[&id.to_string()]),
                 Grip::Text(i) => tf("Dimension text {} of element {}", &[&(i + 1).to_string(), &id.to_string()]),

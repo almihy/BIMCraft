@@ -1169,6 +1169,9 @@ impl BimApp {
             let (x, y) = view.px(p);
             rect.min + vec2(x, y)
         };
+        for h in c.handles() {
+            self.control_rect(ui, Rect::from_center_size(at(h), vec2(crate::canvas::GRIP_REACH, crate::canvas::GRIP_REACH)));
+        }
         if response.drag_started_by(PointerButton::Primary)
             && let Some(o) = ui.input(|i| i.pointer.press_origin())
         {

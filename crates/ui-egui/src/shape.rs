@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 
 use bimcraft_core::geom;
 use bimcraft_core::view3d::{P3, shape_handles};
-use egui::{Align, Align2, FontId, Key, Painter, Pos2, Rect, Sense, Stroke, TextEdit, Ui, WidgetInfo, WidgetType, vec2};
+use egui::{Align, Align2, FontId, Key, Painter, Pos2, Rect, Stroke, TextEdit, Ui, WidgetInfo, WidgetType, vec2};
 
 use crate::lang::{t, tf};
 use crate::style::pal;
@@ -351,7 +351,7 @@ impl BimApp {
                 }
             }
             _ => {
-                let r = ui.interact(at, field, Sense::click());
+                let r = self.control(ui, at, field);
                 r.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, tf("Point height {}", &[text])));
                 let p = ui.painter();
                 p.rect_filled(at, 2.0, if r.hovered() { pal().accent } else { pal().surface.gamma_multiply(0.85) });

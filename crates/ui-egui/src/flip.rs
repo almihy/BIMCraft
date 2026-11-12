@@ -10,7 +10,7 @@ use bimcraft_core::geom::P2;
 use bimcraft_core::model::{Element, Id, Model};
 use bimcraft_core::render::View;
 use bimcraft_core::walls::{self, Axis};
-use egui::{Align2, Painter, Pos2, Rect, Sense, Shape, Stroke, Ui, Vec2, WidgetInfo, WidgetType, vec2};
+use egui::{Align2, Painter, Pos2, Rect, Shape, Stroke, Ui, Vec2, WidgetInfo, WidgetType, vec2};
 use serde_json::{Value, json};
 
 use crate::lang::t;
@@ -137,11 +137,7 @@ impl BimApp {
         let p = ui.painter_at(rect);
         let mut clicked = None;
         for a in arrows(m, v, rect.min, &self.selection) {
-            let r = ui.interact(
-                Rect::from_center_size(a.at, vec2(BUTTON, BUTTON)),
-                ui.id().with(("flip", a.control as u8, a.id)),
-                Sense::click(),
-            );
+            let r = self.control(ui, Rect::from_center_size(a.at, vec2(BUTTON, BUTTON)), ui.id().with(("flip", a.control as u8, a.id)));
             let label = a.label();
             r.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &label));
             arrow_shapes(&p, a.at, a.along, r.hovered());

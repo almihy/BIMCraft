@@ -6,7 +6,7 @@
 
 use bimcraft_core::geom::P2;
 use bimcraft_core::model::{Element, Id, Model};
-use egui::{Align2, Rect, Sense, Ui, WidgetInfo, WidgetType, pos2, vec2};
+use egui::{Align2, Rect, Ui, WidgetInfo, WidgetType, pos2, vec2};
 use serde_json::json;
 
 use crate::icons::Icon;
@@ -108,7 +108,7 @@ impl BimApp {
             let (x, y) = v.px(spot);
             let at = pos2(rect.min.x + x, rect.min.y + y) + vec2(14.0, -14.0);
             let r = Rect::from_center_size(at, vec2(20.0, 20.0));
-            let response = ui.interact(r, ui.id().with(("pin", id)), Sense::click());
+            let response = self.control(ui, r, ui.id().with(("pin", id)));
             let name = tf("Unpin element {}", &[&id.to_string()]);
             response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, name.clone()));
             let ink = if response.hovered() { pal().hover } else { pal().accent };

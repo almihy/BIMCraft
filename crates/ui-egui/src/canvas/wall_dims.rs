@@ -121,11 +121,7 @@ impl BimApp {
         core: bool,
     ) {
         let name = t(if far { FAR } else { NEAR });
-        let r = ui.interact(
-            Rect::from_center_size(at, vec2(12.0, 12.0)),
-            ui.id().with(("witness grip", id, d.side == Side::Left, far)),
-            Sense::click_and_drag(),
-        );
+        let r = self.control(ui, Rect::from_center_size(at, vec2(12.0, 12.0)), ui.id().with(("witness grip", id, d.side == Side::Left, far)));
         r.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, name));
         let ink = if r.hovered() || r.dragged() { pal().hover } else { pal().accent };
         ui.painter().circle_filled(at, 4.5, pal().surface);
@@ -197,11 +193,7 @@ impl BimApp {
     /// lines, where it stands.
     fn make_permanent(&mut self, ui: &mut Ui, key: Id, d: &TempDim, at: Pos2) {
         let name = t("Make this temporary dimension permanent");
-        let r = ui.interact(
-            Rect::from_center_size(at, vec2(20.0, 20.0)),
-            ui.id().with(("make permanent", d.side == Side::Left)),
-            Sense::click(),
-        );
+        let r = self.control(ui, Rect::from_center_size(at, vec2(20.0, 20.0)), ui.id().with(("make permanent", d.side == Side::Left)));
         r.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, name));
         let ink = if r.hovered() { pal().hover } else { pal().accent };
         ui.painter().rect_filled(r.rect, 3.0, pal().surface);

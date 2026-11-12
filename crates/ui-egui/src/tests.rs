@@ -2065,6 +2065,8 @@ fn the_section_tool_draws_a_section_whose_view_opens_from_the_browser_or_a_doubl
     // Back on the plan, a double click on the section's line opens it again.
     topmost(&mut h, "Level 1");
     assert_eq!(h.state().sheet, Sheet::Plan(100000));
+    // With nothing selected: the west wall's temporary dimension would lie over the line, and take the click.
+    h.state_mut().selection.clear();
     double_click(&mut h, P2(-500.0, 3000.0));
     assert_eq!(h.state().sheet, Sheet::Section(section[0]));
 }
@@ -5993,6 +5995,7 @@ mod align;
 mod autosave;
 mod browser;
 mod cad;
+mod canvas_controls;
 mod checks;
 mod chinese;
 mod clipboard;
