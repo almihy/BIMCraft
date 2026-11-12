@@ -59,6 +59,14 @@
 //! app.on_waive(ask => waive(JSON.parse(ask)));  // {rule, reason}: accept a flag as it is; {rule, reason: null}: undo
 //! app.waive_refused(ruleId, why);  // the server would not: its reason, under the check (else set_checks again)
 //! ```
+//!
+//! The page renders (Arqiflow's Render dialog, through Arqina): the Project Browser's Render… on a 3D view or camera, and the
+//! View tab's Render, ask it to render that view:
+//!
+//! ```js
+//! app.on_render(ask => openRender(JSON.parse(ask)));  // {view: name ("{3D}" for the default), id, guid (null for a {3D} not
+//!                                                     //  made yet), camera: whether it is a camera's}
+//! ```
 #![cfg(target_arch = "wasm32")]
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
@@ -93,6 +101,8 @@ struct Host {
     on_rule: Rc<RefCell<Option<js_sys::Function>>>,
     /// Called with `{rule, reason}` when the person waives a check, `reason` null to take a waiver back.
     on_waive: Rc<RefCell<Option<js_sys::Function>>>,
+    /// Called with `{view, id, guid, camera}` when the person asks to render a 3D view.
+    on_render: Rc<RefCell<Option<js_sys::Function>>>,
 }
 
 /// How long what the person sees must hold still before the page is told it changed, seconds: a pan or a zoom is one change.
@@ -178,6 +188,10 @@ impl eframe::App for Host {
             };
             later_with(self.on_waive.borrow().clone(), JsValue::from_str(&ask.to_string()));
         }
+        if let Some(r) = self.app.take_render_request() {
+            let ask = serde_json::json!({"view": r.view, "id": r.id, "guid": r.guid, "camera": r.camera});
+            later_with(self.on_render.borrow().clone(), JsValue::from_str(&ask.to_string()));
+        }
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
@@ -253,6 +267,8 @@ pub struct WebApp {
     on_rule: Rc<RefCell<Option<js_sys::Function>>>,
     /// What the page hears when the person waives a check, or takes a waiver back.
     on_waive: Rc<RefCell<Option<js_sys::Function>>>,
+    /// What the page hears when the person asks to render a 3D view.
+    on_render: Rc<RefCell<Option<js_sys::Function>>>,
 }
 
 #[wasm_bindgen]
@@ -273,6 +289,7 @@ impl WebApp {
             checks: Rc::new(RefCell::new(None)),
             on_rule: Rc::new(RefCell::new(None)),
             on_waive: Rc::new(RefCell::new(None)),
+            on_render: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -304,6 +321,7 @@ impl WebApp {
             context_since: None,
             on_rule: Rc::clone(&self.on_rule),
             on_waive: Rc::clone(&self.on_waive),
+            on_render: Rc::clone(&self.on_render),
         };
         self.hold_editor_keys(&canvas)?;
         let ctx = Rc::clone(&self.ctx);
@@ -552,6 +570,13 @@ impl WebApp {
     /// gives the checks again (`set_checks`), or says why it could not (`waive_refused`).
     pub fn on_waive(&self, on_waive: Option<js_sys::Function>) {
         *self.on_waive.borrow_mut() = on_waive;
+    }
+
+    /// What the page hears when the person asks to render a 3D view or camera (the Project Browser's Render…, the View tab's
+    /// Render): `on_render(askJson)`, `{"view": name, "id": id, "guid": guid, "camera": bool}` (`id` and `guid` null for a
+    /// default `{3D}` not made yet), once the frame is over. The page opens its Render dialog for that view.
+    pub fn on_render(&self, on_render: Option<js_sys::Function>) {
+        *self.on_render.borrow_mut() = on_render;
     }
 
     /// The page could not make or take back the waiver of `rule`: `why` (its server's reason), shown under the check.

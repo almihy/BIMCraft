@@ -101,6 +101,8 @@ enum Act {
     Pick(&'static str, String),
     /// A link: it is the selection, for Properties.
     Select(Id),
+    /// A 3D view's Render…: the hosting page renders it (none for the default `{3D}`, made or not).
+    Render(Option<Id>),
 }
 
 /// An entry of the tree, or a group of them.
@@ -325,6 +327,7 @@ impl BimApp {
                 self.types.insert(category, name);
             }
             Some(Act::Select(id)) => self.selection = vec![id],
+            Some(Act::Render(view)) => self.ask_host_to_render(ui.ctx(), view),
             _ => {}
         }
     }
@@ -463,15 +466,20 @@ impl BimApp {
             Node::group(t("3D Views"), true, {
                 // Every 3D view: the default `{3D}` (made when first changed; shown even before it exists), then each
                 // camera view. Opening one stands the 3D tab where its camera looks from.
+                // A hosted window's page renders: each has Render… (`host.rs`).
                 let active = self.active_3d();
-                let mut three: Vec<Node> = vec![match m.default_3d() {
-                    Some(id) => Node::leaf("{3D}", Act::Open3D(Some(id)), active == Some(id)),
-                    None => Node::leaf("{3D}", Act::Open3D(None), active.is_none()),
-                }];
+                let render = |view: Option<Id>| self.offers_render().then_some((msg!("Render…"), Act::Render(view)));
+                let mut three: Vec<Node> = vec![
+                    match m.default_3d() {
+                        Some(id) => Node::leaf("{3D}", Act::Open3D(Some(id)), active == Some(id)),
+                        None => Node::leaf("{3D}", Act::Open3D(None), active.is_none()),
+                    }
+                    .with_menu(render(m.default_3d()).into_iter().collect()),
+                ];
                 three.extend(m.elements.iter().filter_map(|(id, e)| match e {
                     Element::View3D(v) if v.name != "{3D}" => {
                         let leaf = Node::leaf(&v.name, Act::Open3D(Some(*id)), active == Some(*id));
-                        Some(leaf.with_menu(vec![("Delete", Act::Delete(vec![*id]))]))
+                        Some(leaf.with_menu(render(Some(*id)).into_iter().chain([("Delete", Act::Delete(vec![*id]))]).collect()))
                     }
                     _ => None,
                 }));

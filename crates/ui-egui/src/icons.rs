@@ -85,6 +85,7 @@ icon_names! {
     Section,
     Elevation,
     Camera,
+    Render,
     Sheet,
     PlaceView,
     Column,
@@ -685,6 +686,20 @@ pub fn own(icon: Icon, compact: bool) -> Vec<Outline> {
             g.closed(&[(3.0, 8.0), (7.5, 8.0), (9.5, 4.5), (14.5, 4.5), (16.5, 8.0), (21.0, 8.0), (21.0, 19.0), (3.0, 19.0)]);
             g.circle((12.0, 13.75), 3.6);
             g.circle((12.0, 13.75), 1.6);
+        }
+        Icon::Render => {
+            // A wand with sparkles, as the page's renderer is shown (lucide's wand-sparkles): the wand along the
+            // diagonal, its tip's mark, and the sparkles round it.
+            g.closed(&[(18.6, 2.4), (20.4, 2.4), (21.6, 3.6), (21.6, 5.4), (5.4, 21.6), (3.6, 21.6), (2.4, 20.4), (2.4, 18.6)]);
+            g.line(&[(14.0, 7.0), (17.0, 10.0)]);
+            g.line(&[(5.0, 6.0), (5.0, 10.0)]);
+            g.line(&[(3.0, 8.0), (7.0, 8.0)]);
+            g.line(&[(19.0, 14.0), (19.0, 18.0)]);
+            g.line(&[(17.0, 16.0), (21.0, 16.0)]);
+            if !compact {
+                g.line(&[(10.0, 2.0), (10.0, 4.0)]);
+                g.line(&[(9.0, 3.0), (11.0, 3.0)]);
+            }
         }
         Icon::Sheet => {
             // A drawing sheet and title block; shared edges are drawn once.

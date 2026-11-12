@@ -14,13 +14,17 @@
 //! The page checks the model against its firm's rules and its client's brief: it gives the checks to the Checks palette
 //! ([`BimApp::set_checks`], `checks.rs`), open from the start, and shows a rule the person asks for
 //! ([`BimApp::take_rule_request`]).
+//!
+//! The page renders too, with its own renderer (Arqiflow's Render dialog, through Arqina): the Project Browser's Render… on a
+//! 3D view or camera, and the View tab's Render (Revit's View > Presentation > Render), ask the page to render that view
+//! ([`BimApp::take_render_request`]). The window draws nothing of its own for it; a window no page hosts offers neither.
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use bimcraft_core::engine::Session;
 use bimcraft_core::ids::Guid;
-use bimcraft_core::model::{Element, Model};
+use bimcraft_core::model::{Element, Id, Model};
 use bimcraft_core::sync::{Changes, Merged};
 use egui::{Context, ThemePreference};
 use serde_json::Value;
@@ -29,6 +33,16 @@ pub use crate::checks::Waive;
 pub use crate::dialog::FileRequest;
 pub use crate::style::{Controls, Skin};
 use crate::{BimApp, Pending};
+
+/// A 3D view the person asked the page to render: its name (`{3D}` for the default), its id and GUID (none for a default
+/// `{3D}` not made yet), and whether it is a camera's (an eye and a target of its own).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RenderRequest {
+    pub view: String,
+    pub id: Option<Id>,
+    pub guid: Option<Guid>,
+    pub camera: bool,
+}
 
 /// The hosting page's look: light or dark, and its colours, `[r, g, b]`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -73,6 +87,33 @@ impl BimApp {
     /// Whether Save was asked for since the last call: Ctrl+S, the quick access bar's Save, File > Save.
     pub fn take_save_request(&mut self) -> bool {
         std::mem::take(&mut self.save_asked)
+    }
+
+    /// Whether the window offers Render: a page hosts it, and renders with its own renderer.
+    pub(crate) fn offers_render(&self) -> bool {
+        self.hosted
+    }
+
+    /// Render, as the page does it: the 3D view `view` (the default `{3D}` when none, made or not) asked for here, taken by
+    /// the page after the frame, which opens its Render dialog for it.
+    pub(crate) fn ask_host_to_render(&mut self, ctx: &Context, view: Option<Id>) {
+        let m = &self.session.model;
+        let view = view.or_else(|| m.default_3d());
+        let held = view.and_then(|id| match m.elements.get(id) {
+            Some(Element::View3D(v)) => Some((id, v.name.clone(), v.camera.is_some())),
+            _ => None,
+        });
+        self.render_asked = Some(match held {
+            Some((id, name, camera)) => RenderRequest { view: name, id: Some(id), guid: m.elements.guid(id), camera },
+            None => RenderRequest { view: "{3D}".into(), id: None, guid: None, camera: false },
+        });
+        ctx.request_repaint();
+    }
+
+    /// The 3D view the person asked to render since the last call (the Project Browser's Render…, the View tab's Render): the
+    /// page opens its Render dialog for it.
+    pub fn take_render_request(&mut self) -> Option<RenderRequest> {
+        self.render_asked.take()
     }
 
     /// The model the page saved: it is no longer unsaved, unless it changed since.

@@ -964,6 +964,9 @@ pub struct BimApp {
     skin: style::Skin,
     /// Save was asked for while hosted: the page takes it ([`BimApp::take_save_request`]).
     save_asked: bool,
+    /// A 3D view the person asked to render while hosted: the page takes it and opens its Render dialog
+    /// ([`BimApp::take_render_request`]).
+    render_asked: Option<host::RenderRequest>,
 }
 
 /// The Options Bar's Height: up to a level above the plan's `level` (by default the next one up),
@@ -1588,6 +1591,7 @@ impl BimApp {
             hosted: false,
             skin: style::Skin::default(),
             save_asked: false,
+            render_asked: None,
         }
     }
 
@@ -4248,6 +4252,18 @@ impl BimApp {
                 self.run("crop", if cropped { json!({"view": id, "region": null}) } else { json!({"view": id}) });
             }
         });
+        // Revit's Presentation: Render, of the 3D view in front. A hosted window's page renders it (`host.rs`); a window no
+        // page hosts has no renderer to ask.
+        if self.offers_render() {
+            panel(ui, msg!("Presentation"), |ui| {
+                let tip = msg!("Render: a picture of this 3D view or camera, made by the renderer of the page the model is kept in");
+                let on = self.sheet == Sheet::View3D;
+                if ui.add_enabled_ui(on, |ui| big_button(ui, Icon::Render, "Render", false, tip)).inner.clicked() {
+                    let view = self.active_3d();
+                    self.ask_host_to_render(ui.ctx(), view);
+                }
+            });
+        }
         panel(ui, "Create", |ui| {
             if big_button(ui, Icon::View3D, "3D View", self.sheet == Sheet::View3D, "Open the default 3D view").clicked() {
                 self.open_3d(None);
