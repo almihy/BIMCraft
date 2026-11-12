@@ -1538,6 +1538,17 @@ impl ViewCamera {
         self.physical.focus.unwrap_or_else(|| self.target_distance())
     }
 
+    /// The vertical tilt correction it is seen with, 3ds Max's slope ([`Physical::tilt`]): with Auto Vertical Tilt
+    /// Correction, the slope it looks up at, as `Camera::physical` works it out of the way it looks.
+    pub fn vertical_tilt(&self) -> f64 {
+        if !self.physical.auto_tilt {
+            return self.physical.tilt;
+        }
+        let across = (self.target[0] - self.eye[0]).hypot(self.target[1] - self.eye[1]);
+        let up = self.target[2] - self.eye[2];
+        (up / across.max(1e-9)).clamp(-MAX_TILT, MAX_TILT)
+    }
+
     /// The exposure value it is seen at: the one set (Target), else worked from ISO, shutter and aperture (Manual), as
     /// EV = log2(N² / t) − log2(ISO / 100).
     pub fn exposure_value(&self) -> f64 {
@@ -1596,11 +1607,15 @@ pub struct Physical {
     /// turning the camera.
     #[serde(default, skip_serializing_if = "is_zero2")]
     pub shift: [f64; 2],
-    /// Tilt Correction, horizontal and vertical: how much of the camera's turn (0 to 1) the film is turned back from, the
-    /// lens shifted to keep what it looks at in the middle. Vertical 1 keeps verticals vertical (two-point perspective).
-    #[serde(default, skip_serializing_if = "is_zero2")]
-    pub tilt: [f64; 2],
-    /// Auto Vertical Tilt Correction: the vertical tilt correction kept at 1, so verticals stay vertical however it looks.
+    /// Tilt Correction Vertical, 3ds Max's: the film plane tilted back by this slope about its horizontal middle, as
+    /// `IPhysicalCamera::GetTiltCorrection` applies it (a ray's target on the focus plane moved back by its height × the
+    /// slope, its height divided by √(1 + slope²)), what it looks at staying in the middle. The slope the camera looks up at
+    /// (negative looking down) keeps verticals vertical: a two-point perspective. In perspective only: an orthographic
+    /// camera's verticals are vertical already. (3ds Max's horizontal tilt is not held: this camera has no roll or skew to
+    /// draw it with.)
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub tilt: f64,
+    /// Auto Vertical Tilt Correction: the vertical tilt correction set to the slope the camera looks at, however it looks.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub auto_tilt: bool,
     /// Clip Manually: the near and far clipping planes, mm in front of the eye, while `clip_on`. Revit's Far Clip is the
@@ -1632,7 +1647,7 @@ impl Default for Physical {
             iso: None,
             shutter: shutter(),
             shift: [0.0; 2],
-            tilt: [0.0; 2],
+            tilt: 0.0,
             auto_tilt: false,
             clip_on: false,
             near: 0.0,
@@ -1642,6 +1657,9 @@ impl Default for Physical {
         }
     }
 }
+
+/// The steepest vertical tilt correction a camera takes, as a slope (about 89°).
+pub const MAX_TILT: f64 = 57.0;
 
 /// The largest image a camera renders, px a side.
 pub const MAX_OUTPUT: u32 = 16_384;
@@ -1660,11 +1678,6 @@ pub const OUTPUT_PRESETS: [(&str, u32, u32); 7] = [
 impl Physical {
     pub fn is_default(&self) -> bool {
         *self == Physical::default()
-    }
-
-    /// The vertical tilt correction it is seen with: 1 with Auto Vertical Tilt Correction on.
-    pub fn vertical_tilt(&self) -> f64 {
-        if self.auto_tilt { 1.0 } else { self.tilt[1] }
     }
 
     /// The image's aspect, width over height.
@@ -1700,9 +1713,7 @@ impl Physical {
         for (what, v) in [("horizontal lens shift (%)", self.shift[0]), ("vertical lens shift (%)", self.shift[1])] {
             within(what, v, -100.0, 100.0)?;
         }
-        for (what, v) in [("horizontal tilt correction", self.tilt[0]), ("vertical tilt correction", self.tilt[1])] {
-            within(what, v, 0.0, 1.0)?;
-        }
+        within("vertical tilt correction (a slope)", self.tilt, -MAX_TILT, MAX_TILT)?;
         within("near clipping plane (mm)", self.near, 0.0, crate::model::MAX_COORD)?;
         within("far clipping plane (mm)", self.far, 1.0, crate::model::MAX_COORD)?;
         if self.far <= self.near {
@@ -1771,10 +1782,27 @@ pub struct Perspective {
     pub on: bool,
 }
 
+/// Where a 3D view stands, as navigating it leaves it: its azimuth and elevation, where it was left, and its camera's eye and
+/// target.
+pub type Navigation = (f64, f64, Option<Framing>, Option<([f64; 3], [f64; 3])>);
+
 impl View3D {
     /// The lens it is seen through while it's in perspective; none while it's parallel.
     pub fn lens(&self) -> Option<f64> {
         self.perspective.filter(|p| p.on).map(|p| p.lens)
+    }
+
+    /// Where it stands, as orbiting, panning, zooming and flying leave it: never an undo step, as in Revit.
+    pub fn navigation(&self) -> Navigation {
+        (self.azimuth, self.elevation, self.framing, self.camera.map(|c| (c.eye, c.target)))
+    }
+
+    /// Stood where `other` stands ([`navigation`](Self::navigation)), all else as it is: a camera keeps its own settings.
+    pub fn navigate_as(&mut self, other: &View3D) {
+        (self.azimuth, self.elevation, self.framing) = (other.azimuth, other.elevation, other.framing);
+        if let (Some(c), Some(o)) = (&mut self.camera, other.camera) {
+            (c.eye, c.target) = (o.eye, o.target);
+        }
     }
 
     /// The default 3D view, `{3D}`, as it is before anything changes it.
@@ -7564,11 +7592,16 @@ impl Model {
                 if let Some(b) = &v.section_box {
                     section_box_ok(&who, b)?;
                 }
-                if let Some(p) = &v.perspective
-                    && !(crate::view3d::MIN_LENS..=crate::view3d::MAX_LENS).contains(&p.lens)
-                {
-                    let (lo, hi) = (crate::view3d::MIN_LENS, crate::view3d::MAX_LENS);
-                    return Err(format!("{who}: a {} mm lens is no camera's; a perspective's lens is {lo} to {hi} mm", p.lens));
+                if let Some(p) = &v.perspective {
+                    // A camera's lens is held to its 35 mm equivalent (its field of view), whatever its film.
+                    match &v.camera {
+                        Some(cam) => crate::view3d::lens_ok(p.lens, &cam.physical).map_err(|e| format!("{who}: {e}"))?,
+                        None if !(crate::view3d::MIN_LENS..=crate::view3d::MAX_LENS).contains(&p.lens) => {
+                            let (lo, hi) = (crate::view3d::MIN_LENS, crate::view3d::MAX_LENS);
+                            return Err(format!("{who}: a {} mm lens is no camera's; a perspective's lens is {lo} to {hi} mm", p.lens));
+                        }
+                        None => {}
+                    }
                 }
                 if let Some(cam) = &v.camera {
                     camera_ok(&who, cam)?;

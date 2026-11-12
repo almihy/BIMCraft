@@ -48,21 +48,25 @@ const KEYS: [&str; 30] = [
 pub(super) const DOC: &str = "{view?: a 3D view's name or id, name?, eye?: [x, y, z], target?: [x, y, z], eye_elevation?: mm, \
      target_elevation?: mm, target_distance?: mm, targeted?: true | false, projection?: \"perspective\" | \"orthographic\", lens?: \
      mm, fov?: degrees, film?: mm, film_preset?: name, zoom?, f_number?, depth_of_field?: true | false, focus?: mm | \"target\", \
-     exposure?: \"target\" | \"manual\", ev?, iso?, shutter?: s, shift?: [h, v] %, tilt?: [h, v], auto_tilt?: true | false, clip?: \
+     exposure?: \"target\" | \"manual\", ev?, iso?, shutter?: s, shift?: [h, v] %, tilt?: slope, auto_tilt?: true | false, clip?: \
      true | false, near?: mm, far?: mm, output?: [w, h] px, output_preset?: name, aspect_locked?: true | false} a 3D camera: Revit's \
      Camera tool places it, 3ds Max's Physical Camera holds its settings. With `eye` (where it stands, mm) and `target` (what it \
      looks at) and no `view` it makes a new perspective view named `name` or by number (\"Camera 1\"…). With `view` it changes \
      that 3D view's camera (`{3D}` may be given one; a view without a camera needs both points): what is left out stays. \
      `eye_elevation` and `target_elevation` (Revit's) raise or lower each; `target_distance` moves the target along the way it \
      looks. `targeted` false is a Free camera (no target to drag; the target is only how far it focuses). `projection` \
-     orthographic sees it parallel. The lens: `lens`, the focal length (mm, 10 to 600; 35 for a new camera), or `fov`, the \
-     horizontal field of view in degrees, each setting the other across `film`, the sensor's width (mm; or `film_preset`: \
+     orthographic sees it parallel. The lens: `lens`, the focal length (mm; 35 for a new camera), or `fov`, the horizontal field \
+     of view in degrees, each setting the other across `film`, the sensor's width (mm; or `film_preset`: \
      \"35mm (Full Frame)\" 36, \"APS-C (Canon)\" 22.3, \"APS-C (Nikon, Sony, etc.)\" 23.7, \"APS-H (Canon)\" 27.9, \"Four \
-     Thirds\" 17.3), and `zoom` (over 1 narrows it). `f_number` is the aperture, `depth_of_field` blurs away from `focus` (mm \
+     Thirds\" 17.3), and `zoom` (over 1 narrows it). Whatever the film, the lens is 10 to 600 mm as 35 mm film has it (`lens × zoom × 36 / film`), \
+     a field of view of 3.4° to 121.9°: a small sensor goes as wide as a full frame, and a lens past that is refused. \
+     `f_number` is the aperture, `depth_of_field` blurs away from `focus` (mm \
      from the eye, or \"target\" for the target's distance). `exposure` target uses `ev`; manual uses `iso`, `shutter` and \
      `f_number` (giving `iso` makes it manual). Perspective Control: `shift`, the lens shift right and up as % of the film's \
-     width (-100 to 100); `tilt`, the tilt correction (0 to 1; vertical 1 keeps verticals vertical); `auto_tilt` keeps the \
-     vertical at 1, a two-point perspective. Clipping: `clip` on cuts away what is nearer than `near` or further than `far` (mm \
+     width (-100 to 100); `tilt`, 3ds Max's Tilt Correction Vertical: the film plane tilted by that slope (0 for none; \
+     the slope the camera looks up at, negative looking down, keeps verticals vertical), what it looks at staying in the \
+     middle; `auto_tilt` sets it to that slope however the camera looks, a two-point perspective. In perspective only: an \
+     orthographic camera's verticals are vertical already, and it neither tilts nor clips. Clipping: `clip` on cuts away what is nearer than `near` or further than `far` (mm \
      from the eye; Revit's Far Clip). `output` is the image it renders, [width, height] px (16 to 16384), or `output_preset` \
      (\"HD 720\", \"Full HD 1080\", \"4K UHD\", \"A4 landscape\", \"A3 landscape\", \"A4 portrait\", \"Square\"); with \
      `aspect_locked` on a single side given keeps the aspect. With `view` alone it reads the camera back: every setting, the \
@@ -127,7 +131,7 @@ pub(crate) fn read(id: Option<crate::model::Id>, name: &str, cam: Option<&ViewCa
         "iso": ph.iso,
         "shutter": ph.shutter,
         "shift": ph.shift,
-        "tilt": [ph.tilt[0], ph.vertical_tilt()],
+        "tilt": cam.vertical_tilt(),
         "auto_tilt": ph.auto_tilt,
         "clip": ph.clip_on,
         "near": ph.near,
@@ -262,7 +266,7 @@ pub(super) fn camera(s: &mut Session, p: &Value) -> R {
     if let Some(sh) = pair(c, p, "shift", "[horizontal, vertical] % of the film's width")? {
         ph.shift = sh;
     }
-    if let Some(t) = pair(c, p, "tilt", "[horizontal, vertical], each 0 to 1")? {
+    if let Some(t) = num(c, p, "tilt")? {
         ph.tilt = t;
     }
     if let Some(a) = yes_no(c, p, "auto_tilt")? {
@@ -326,10 +330,8 @@ pub(super) fn camera(s: &mut Session, p: &Value) -> R {
         }
         lens = (view3d::lens_for(fov, &ph) * 1000.0).round() / 1000.0;
     }
-    if !(view3d::MIN_LENS..=view3d::MAX_LENS).contains(&lens) {
-        let (lo, hi) = (view3d::MIN_LENS, view3d::MAX_LENS);
-        return Err(bad(c, format!("a {lens} mm lens is no camera's; a camera's focal length is {lo} to {hi} mm")));
-    }
+    // Held to its 35 mm equivalent, whatever the film: the one range the cone, the window and `render` all see through.
+    view3d::lens_ok(lens, &ph).map_err(|e| bad(c, e))?;
     let on = match string(c, p, "projection")?.as_deref().map(str::to_ascii_lowercase).as_deref() {
         None => was.is_none_or(|w| w.on) || kept.is_none(),
         Some("perspective") => true,
@@ -366,7 +368,10 @@ pub(super) fn camera(s: &mut Session, p: &Value) -> R {
 }
 
 /// What its params doc says, for agents.
-pub(super) const ORIENTATION_DOC: &str = "{view?: a 3D view's name or id ({3D} unless given), azimuth?: degrees, elevation?: degrees,      target?: [x, y, z], across?: mm, fitted?: true} where a 3D view stands, as Revit's views keep their orientation: seen from      `azimuth` degrees round from east (counter-clockwise) and `elevation` degrees up, the model point `target` in the middle of      its picture and `across` mm of the model taking up its width there (through its lens in perspective). The window writes it      back as the view is turned, panned or zoomed, so `render` of the view draws what the person sees. `fitted` true forgets where      it was left, so it is fitted over the model again. A camera view stands where its camera is (`camera`). With `view` alone (or      nothing) it reads back everything the view's picture depends on: its orientation, its camera (eye, target, lens and the rest,      or null), its section box, its visual style, and `revision`, a number that changes whenever any of them or its      Visibility/Graphics does, so a render made at one revision is out of date at another";
+pub(super) const ORIENTATION_DOC: &str = "{view?: a 3D view's name or id ({3D} unless given), azimuth?: degrees, elevation?: degrees,      target?: [x, y, z], across?: mm, fitted?: true, eye?: [x, y, z]} where a 3D view stands, as Revit's views keep their orientation: seen from      `azimuth` degrees round from east (counter-clockwise) and `elevation` degrees up, the model point `target` in the middle of      its picture and `across` mm of the model taking up its width there (through its lens in perspective). The window writes it      back as the view is turned, panned or zoomed, so `render` of the view draws what the person sees. `fitted` true forgets where      it was left, so it is fitted over the model again. A camera view stands where its camera is: \
+     given `eye` and `target`, its camera stands there and looks there, the rest of it as it was (the window writes a flight \
+     back so). Navigating is no undo step, as in Revit: the view is kept with the project, and undo leaves it where it was \
+     turned; a camera's settings and its grips (`camera`) are undone as ever. With `view` alone (or      nothing) it reads back everything the view's picture depends on: its orientation, its camera (eye, target, lens and the rest,      or null), its section box, its visual style, and `revision`, a number that changes whenever any of them or its      Visibility/Graphics does, so a render made at one revision is out of date at another";
 
 /// A short, stable number for `text`: FNV-1a, 64 bits.
 fn fnv(text: &str) -> u64 {
@@ -375,7 +380,7 @@ fn fnv(text: &str) -> u64 {
 
 pub(super) fn view_orientation(s: &mut Session, p: &Value) -> R {
     let c = "view_orientation";
-    only(c, p, &["view", "azimuth", "elevation", "target", "across", "fitted"])?;
+    only(c, p, &["view", "azimuth", "elevation", "target", "across", "fitted", "eye"])?;
     let m = &s.model;
     let default = absent(p.get("view"))
         || matches!(p.get("view"), Some(Value::String(n)) if n.eq_ignore_ascii_case("{3D}") || n.eq_ignore_ascii_case("3D"));
@@ -402,6 +407,36 @@ pub(super) fn view_orientation(s: &mut Session, p: &Value) -> R {
         Some(f) => return Err(bad(c, format!("`fitted` must be true or false, got {f}"))),
         None => false,
     };
+    let eye = match p.get("eye") {
+        e if absent(e) => None,
+        Some(e) => Some(point3(e).ok_or_else(|| bad(c, format!("`eye` must be a point [x, y, z] in mm, got {e}")))?),
+        None => None,
+    };
+    // A camera view: where its eye stands and what it looks at, nothing else of it.
+    let camera = v.and_then(|id| match m.elements.get(id) {
+        Some(Element::View3D(v3)) => v3.camera,
+        _ => None,
+    });
+    if let Some(was) = camera {
+        if azimuth.is_some() || elevation.is_some() || across.is_some() || fitted {
+            return Err(bad(c, "a camera view stands where its camera is: give its `eye` and `target`"));
+        }
+        if eye.is_some() || target.is_some() {
+            let (eye, target) = (eye.unwrap_or(was.eye), target.unwrap_or(was.target));
+            if (0..3).map(|k| (eye[k] - target[k]).powi(2)).sum::<f64>().sqrt() <= TOL {
+                return Err(bad(c, "the eye is on the target; give the camera two points a little apart"));
+            }
+            let id = v.unwrap_or_default();
+            if let Some(Element::View3D(v3)) = s.model_mut().elements.get_mut(id)
+                && let Some(cam) = &mut v3.camera
+            {
+                (cam.eye, cam.target) = (eye, target);
+            }
+            return Ok(orientation_of(&s.model, Some(id)));
+        }
+    } else if eye.is_some() {
+        return Err(bad(c, "only a camera view has an eye; this one stands by `azimuth`, `elevation`, `target` and `across`"));
+    }
     let setting = azimuth.is_some() || elevation.is_some() || across.is_some() || target.is_some() || fitted;
     if setting {
         if elevation.is_some_and(|e| !(-90.0..=90.0).contains(&e)) {
@@ -607,7 +642,7 @@ mod tests {
         assert!((x - 200.0).abs() < 1e-6 && (y - 150.0).abs() < 1e-6, "the target stays in the middle: {x} {y}");
         let eye = upright.eye().unwrap();
         assert!((0..3).all(|k| (eye[k] - cam.eye[k]).abs() < 1e-6), "the eye stays: {eye:?}");
-        assert_eq!(read(&mut s)["tilt"], json!([0.0, 1.0]));
+        assert_eq!(read(&mut s)["tilt"].as_f64(), Some(6400.0 / 10000.0), "Auto: the slope it looks up at");
         // A lens shift of 10% up moves the picture 10% of its width up the film: what shows moves down.
         s.execute("camera", &json!({"view": "Camera 1", "shift": [0, 10]})).unwrap();
         let shifted = Camera::through(&cam_of(&s), 35.0, true, 400, 300);
@@ -615,6 +650,7 @@ mod tests {
         assert!((y2 - (150.0 + 40.0)).abs() < 1e-6, "{y2}");
         assert!(s.execute("camera", &json!({"view": "Camera 1", "shift": [0, 400]})).is_err());
         assert!(s.execute("camera", &json!({"view": "Camera 1", "tilt": [0, 2]})).is_err());
+        assert!(s.execute("camera", &json!({"view": "Camera 1", "tilt": 90})).is_err(), "steeper than a camera turns");
     }
 
     /// Clipping as 3ds Max's Clip Manually, which is Revit's Far Clip too: what lies past the far plane is cut away from the
@@ -658,6 +694,142 @@ mod tests {
             .unwrap();
         assert_eq!(again, cam_of(&s));
         assert_eq!((again.physical.f_number, again.physical.auto_tilt, again.physical.far), (4.0, true, 9000.0));
+    }
+}
+
+#[cfg(test)]
+mod review_tests {
+    use serde_json::json;
+
+    use crate::engine::Session;
+    use crate::model::{Element, View3D};
+    use crate::view3d::Camera;
+
+    fn view(s: &Session, name: &str) -> View3D {
+        s.model
+            .elements
+            .iter()
+            .find_map(|(_, e)| match e {
+                Element::View3D(v) if v.name == name => Some(v.clone()),
+                _ => None,
+            })
+            .unwrap()
+    }
+
+    /// The limits are on the lens as a 35 mm camera's (the field of view), whatever the film: a small sensor goes as wide as
+    /// a full frame does, and a long lens on it is refused where it would be past 600 mm on 35 mm film, with a message
+    /// saying so, never clamped in one place and not in another.
+    #[test]
+    fn a_lens_s_limits_are_its_35_mm_equivalent_s() {
+        let mut s = Session::new();
+        s.execute("camera", &json!({"eye": [0.0, -10000.0, 1600.0], "target": [0.0, 0.0, 1600.0], "film_preset": "Four Thirds"})).unwrap();
+        // 8 mm on Four Thirds sees as 16.6 mm does on 35 mm film: wide, and allowed.
+        let r = s.execute("camera", &json!({"view": "Camera 1", "lens": 8})).unwrap();
+        assert_eq!(r["lens"].as_f64(), Some(8.0), "{r}");
+        // 300 mm there is 624 mm on 35 mm film: refused, saying what it is.
+        let e = s.execute("camera", &json!({"view": "Camera 1", "lens": 300})).unwrap_err();
+        assert!(e.contains("35 mm") && e.contains("600"), "{e}");
+        // The same for a field of view out of the range, and for a zoom that would take it past.
+        assert!(s.execute("camera", &json!({"view": "Camera 1", "fov": 150})).is_err());
+        s.execute("camera", &json!({"view": "Camera 1", "lens": 250})).unwrap();
+        assert!(s.execute("camera", &json!({"view": "Camera 1", "zoom": 2})).is_err());
+        // What is allowed draws as the cone says: render's field of view is the camera's.
+        s.execute("camera", &json!({"view": "Camera 1", "film_preset": "35mm (Full Frame)", "lens": 600, "zoom": 1})).unwrap();
+        let v = view(&s, "Camera 1");
+        let cam = Camera::through(&v.camera.unwrap(), 600.0, true, 400, 300);
+        let fov = crate::view3d::field_of_view(600.0, &v.camera.unwrap().physical).to_radians();
+        let (x, ..) = cam.project([10000.0 * (fov / 2.0).tan(), 0.0, 1600.0]);
+        assert!((x - 400.0).abs() < 0.5, "{x}");
+    }
+
+    /// Tilt Correction is 3ds Max's: the film plane tilted by that slope, as `IPhysicalCamera::GetTiltCorrection` applies
+    /// it (the ray's target on the focus plane moved back by y × tilt, its height divided by √(1 + tilt²)). Auto Vertical
+    /// Tilt Correction sets it to what aligns the perspective with the Z axis: the slope the camera looks up at.
+    #[test]
+    fn tilt_correction_is_3ds_max_s_slope_and_auto_sets_it_to_the_camera_s() {
+        let mut s = Session::new();
+        s.execute("camera", &json!({"eye": [0.0, -10000.0, 1600.0], "target": [0.0, 0.0, 6600.0]})).unwrap();
+        let r = s.execute("camera", &json!({"view": "Camera 1", "auto_tilt": true})).unwrap();
+        assert!((r["tilt"].as_f64().unwrap() - 0.5).abs() < 1e-9, "looking up 5000 in 10000 is a slope of 0.5: {r}");
+        s.execute("camera", &json!({"view": "Camera 1", "auto_tilt": false, "tilt": 0.3})).unwrap();
+        let v = view(&s, "Camera 1");
+        let vc = v.camera.unwrap();
+        let (w, h) = (400u32, 300u32);
+        let seen = Camera::through(&vc, 35.0, true, w, h);
+        // 3ds Max's ray, by hand: the untilted camera's axes, its focal length in px.
+        let bare = Camera::bare(&vc, 35.0, true, w, h);
+        let (back, right, up) = bare.axes();
+        let f = f64::from(w) * 35.0 / crate::view3d::FILM;
+        let t: f64 = 0.3;
+        for p in [[3000.0, 0.0, 0.0], [-2000.0, 4000.0, 9000.0], [500.0, -3000.0, 2000.0]] {
+            let d: [f64; 3] = std::array::from_fn(|k| p[k] - vc.eye[k]);
+            let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+            let (wx, wy, wz) = (dot(d, right), dot(d, up), dot(d, back));
+            // W = λ (x, Y, -f - Y t): λ from the depth, then the film's height y = Y √(1 + t²).
+            let lambda = -(wz + wy * t) / f;
+            let (x, y) = (wx / lambda, wy / lambda * (1.0 + t * t).sqrt());
+            let (px, py, _) = seen.project(p);
+            assert!(
+                (px - (f64::from(w) / 2.0 + x)).abs() < 1e-6 && (py - (f64::from(h) / 2.0 - y)).abs() < 1e-6,
+                "{p:?}: {px} {py} vs {x} {y}"
+            );
+        }
+        assert!(s.execute("camera", &json!({"view": "Camera 1", "tilt": [0, 1]})).is_err(), "one value: the vertical");
+    }
+
+    /// An orthographic camera's verticals stand vertical already: its tilt correction is left alone (greyed in Properties),
+    /// and its cone on the plan shows no far clip, which only a perspective camera has.
+    #[test]
+    fn an_orthographic_camera_takes_no_tilt_correction_and_shows_no_far_clip() {
+        let mut s = Session::new();
+        s.execute("camera", &json!({"eye": [0.0, -10000.0, 9000.0], "target": [0.0, 0.0, 0.0], "projection": "orthographic"})).unwrap();
+        let plain = Camera::through(&view(&s, "Camera 1").camera.unwrap(), 35.0, false, 400, 300);
+        s.execute("camera", &json!({"view": "Camera 1", "auto_tilt": true, "clip": true, "far": 5000})).unwrap();
+        let v = view(&s, "Camera 1");
+        let tilted = Camera::through(&v.camera.unwrap(), 35.0, false, 400, 300);
+        assert_eq!(Camera { clip: None, ..tilted }, Camera { clip: None, ..plain }, "the same picture");
+        assert!(!crate::render::camera_cone(&v).unwrap().clipped, "no far clip drawn");
+    }
+
+    /// With the tilt corrected the far clip plane stands upright, as far in front of the eye as it says: the cone on the plan
+    /// reaches that far, which is what it clips.
+    #[test]
+    fn with_the_tilt_corrected_the_cone_reaches_as_far_as_the_far_plane_clips() {
+        let mut s = Session::new();
+        s.execute("camera", &json!({"eye": [0.0, -10000.0, 11600.0], "target": [0.0, 0.0, 1600.0], "clip": true, "far": 8000})).unwrap();
+        let tilted = crate::render::camera_cone(&view(&s, "Camera 1")).unwrap();
+        assert!((tilted.reach - 8000.0 * std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-6, "looking down 45°: {}", tilted.reach);
+        s.execute("camera", &json!({"view": "Camera 1", "auto_tilt": true})).unwrap();
+        let upright = crate::render::camera_cone(&view(&s, "Camera 1")).unwrap();
+        assert!((upright.reach - 8000.0).abs() < 1e-6, "{}", upright.reach);
+    }
+
+    /// Navigation is not on the undo stack, as Revit's: a view's orientation written back makes no undo step, the project is
+    /// changed, and undoing an edit made before leaves the view where it was turned to.
+    #[test]
+    fn a_view_s_orientation_is_no_undo_step_and_undo_leaves_it_where_it_was_turned() {
+        let mut s = Session::new();
+        s.execute("wall", &json!({"points": [[0.0, 0.0], [6000.0, 0.0]]})).unwrap();
+        s.execute("camera", &json!({"eye": [0.0, -10000.0, 1600.0], "target": [0.0, 0.0, 1600.0]})).unwrap();
+        s.execute("wall", &json!({"points": [[0.0, 3000.0], [6000.0, 3000.0]]})).unwrap();
+        let steps = s.history().len();
+        let before = std::sync::Arc::clone(&s.model);
+        let p = json!({"view": "{3D}", "azimuth": 30, "elevation": 20, "target": [3000.0, 2000.0, 0.0], "across": 9000});
+        s.execute("view_orientation", &p).unwrap();
+        s.execute("view_orientation", &json!({"view": "Camera 1", "eye": [500.0, -9000.0, 1600.0], "target": [500.0, 0.0, 1500.0]}))
+            .unwrap();
+        assert_eq!(s.history().len(), steps, "no undo step");
+        assert!(!std::sync::Arc::ptr_eq(&before, &s.model), "the project changed");
+        s.execute("undo", &json!({})).unwrap();
+        assert_eq!(s.model.elements.values().filter(|e| e.category() == "wall").count(), 1, "the wall undone");
+        assert_eq!(view(&s, "{3D}").framing.map(|f| f.across), Some(9000.0), "the default view stays where it was turned");
+        assert_eq!(view(&s, "Camera 1").camera.unwrap().eye, [500.0, -9000.0, 1600.0], "the camera stays where it flew");
+        s.execute("redo", &json!({})).unwrap();
+        assert_eq!(view(&s, "Camera 1").camera.unwrap().eye, [500.0, -9000.0, 1600.0]);
+        // A camera's own settings changed in Properties, or by the agent, are undone as ever.
+        s.execute("camera", &json!({"view": "Camera 1", "eye_elevation": 2500})).unwrap();
+        s.execute("undo", &json!({})).unwrap();
+        assert_eq!(view(&s, "Camera 1").camera.unwrap().eye[2], 1600.0);
     }
 }
 

@@ -100,7 +100,7 @@ fn a_camera_written_back_or_a_3d_dimension_leaves_the_scene_as_it_was_and_a_wall
     let step = |s: &mut Session, id: &str, p: Value| {
         let before = s.model.clone();
         run(s, id, p);
-        kept(&before, &s.model)
+        kept(&before, &s.model, None)
     };
     assert!(step(&mut s, "camera", json!({"eye": [-5000, -5000, 1700], "target": [1500, 0, 1000], "name": "Corner"})), "a camera view");
     // Its eye and target written back, as the 3D view does once the hand lets it be.
@@ -112,6 +112,25 @@ fn a_camera_written_back_or_a_3d_dimension_leaves_the_scene_as_it_was_and_a_wall
     assert!(step(&mut s, "section_box", json!({"on": true})), "the default view's box");
     assert!(!step(&mut s, "wall", json!({"points": [[0, 2000], [3000, 2000]]})), "a wall");
     assert!(!step(&mut s, "visual_style", json!({"style": "hidden_line"})), "the default view's style");
+}
+
+#[test]
+fn a_camera_view_s_own_look_changed_is_a_new_scene_for_it_and_none_for_the_default_view() {
+    use crate::view3d::scene_kept as kept;
+    let mut s = Session::new();
+    run(&mut s, "wall", json!({"points": [[0, 0], [3000, 0]]}));
+    let r = run(&mut s, "camera", json!({"eye": [-5000, -5000, 1700], "target": [1500, 0, 1000], "name": "Corner"}));
+    let corner = r["id"].as_u64().unwrap();
+    let before = s.model.clone();
+    run(&mut s, "visual_style", json!({"view": "Corner", "style": "wireframe"}));
+    assert!(!kept(&before, &s.model, Some(corner)), "the camera view's own style: its mesh is made again");
+    assert!(kept(&before, &s.model, None), "the default view looks as it did");
+    let before = s.model.clone();
+    run(&mut s, "graphics", json!({"view": "Corner", "categories": {"walls": {"hidden": true}}}));
+    assert!(!kept(&before, &s.model, Some(corner)), "what the camera view hides");
+    let before = s.model.clone();
+    run(&mut s, "section_box", json!({"view": "Corner", "on": true}));
+    assert!(kept(&before, &s.model, Some(corner)), "its own section box is asked of the scene as it is drawn");
 }
 
 #[test]

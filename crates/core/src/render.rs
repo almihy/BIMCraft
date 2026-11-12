@@ -3049,10 +3049,7 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, t
             // A section's line is cropped as a line is.
             Element::Section(v) => section_mark(&mut d, v),
             Element::Elevation(v) if inside(v.start + (v.end - v.start) * 0.5) => elevation_mark(&mut d, v),
-            // A camera stands on its level's plan: a symbol at its eye, and a line to what it looks at.
-            Element::View3D(v) if !up && v.camera.is_some_and(|c| m.camera_level(c.eye[2]) == m.elements.id(level)) => {
-                camera_mark(&mut d, v)
-            }
+            // A camera isn't drawn on a plan, as Revit's: only while its view is selected (`camera_marks`).
             _ => {}
         }
     }
@@ -4395,6 +4392,27 @@ fn grid(d: &mut Drawing, start: P2, end: P2, name: &str) {
     }
 }
 
+/// The cameras of the 3D views `shown` (those selected: Revit shows a camera on a plan only then, or with Show Camera) that
+/// stand on plan `plan`'s level, as `view` draws it: each one's symbol at its eye, its line to what it looks at and its name,
+/// the view as each one's owner, for a front end to draw over the plan and pick.
+pub fn camera_marks(m: &Model, plan: impl Key, view: View, shown: &[Id]) -> Drawing {
+    let level = m.plan_level(plan).map_or_else(|| m.elements.id(plan), Some);
+    let n = scale_of(m, plan);
+    let mut d = Drawing::new(view);
+    (d.k, d.paper, d.weights) = (annotation(m, plan, view), paper_of(n, view.scale), m.line_weights().at(n));
+    for id in shown {
+        if let Some(Element::View3D(v)) = m.elements.get(*id)
+            && v.camera.is_some_and(|c| m.camera_level(c.eye[2]) == level)
+        {
+            d.owner = Some(*id);
+            camera_mark(&mut d, v);
+        }
+    }
+    d.owner = None;
+    d.weigh(|_| true);
+    d
+}
+
 /// A camera's symbol in plan, at its eye: a little body pointing the way it looks, a line to what it looks at, and its name
 /// behind it. Drawn as a section's or an elevation's mark is (the symbol grows with the view's annotation).
 fn camera_mark(d: &mut Drawing, v: &View3D) {
@@ -4466,15 +4484,19 @@ fn plan_way(cam: &crate::model::ViewCamera) -> Option<(P2, f64)> {
 pub fn camera_cone(v: &View3D) -> Option<Cone> {
     let cam = v.camera?;
     let lens = v.perspective.map_or(crate::view3d::LENS, |p| p.lens);
-    cone_of(&cam, lens)
+    cone_of(&cam, lens, v.lens().is_some())
 }
 
-/// [`camera_cone`] for camera `cam` through focal length `lens`.
-pub fn cone_of(cam: &crate::model::ViewCamera, lens: f64) -> Option<Cone> {
+/// [`camera_cone`] for camera `cam` through focal length `lens`, in `perspective` or orthographic. Its far clip (in
+/// perspective only, which alone clips) is a plane square to the way the picture looks: with the tilt corrected, the way
+/// turned by it (upright for a two-point perspective), so the cone reaches as far on the plan as the plane cuts.
+pub fn cone_of(cam: &crate::model::ViewCamera, lens: f64, perspective: bool) -> Option<Cone> {
     let (way, cos) = plan_way(cam)?;
     let eye = P2(cam.eye[0], cam.eye[1]);
     let target = P2(cam.target[0], cam.target[1]);
-    let reach = if cam.physical.clip_on { cam.physical.far * cos } else { eye.dist(target) * 1.25 };
+    let clipped = cam.physical.clip_on && perspective;
+    let pitch = cos.clamp(-1.0, 1.0).acos().copysign(cam.target[2] - cam.eye[2]) - cam.vertical_tilt().atan();
+    let reach = if clipped { cam.physical.far * pitch.clamp(-1.55, 1.55).cos() } else { eye.dist(target) * 1.25 };
     let half = (crate::view3d::field_of_view(lens, &cam.physical) / 2.0).to_radians();
     let side = |k: f64| {
         let (c, s) = (half.cos(), half.sin() * k);
@@ -4484,7 +4506,7 @@ pub fn cone_of(cam: &crate::model::ViewCamera, lens: f64) -> Option<Cone> {
     let (far_left, far_right) = (side(1.0), side(-1.0));
     let far = eye + way * reach;
     let mid = |a: P2| eye + (a - eye) * 0.5;
-    Some(Cone { eye, target, far_left, far_right, far, sides: [mid(far_left), mid(far_right)], reach, clipped: cam.physical.clip_on })
+    Some(Cone { eye, target, far_left, far_right, far, sides: [mid(far_left), mid(far_right)], reach, clipped })
 }
 
 /// Where a camera's grip, dragged to plan point `to`, puts it, as the `camera` command's params: the eye (`which` 0, its
@@ -4504,7 +4526,9 @@ pub fn camera_grip(cam: &crate::model::ViewCamera, which: usize, to: P2) -> Opti
             let d = to - eye;
             let along = d.dot(way);
             let off = (way.0 * d.1 - way.1 * d.0).abs();
-            (along > TOL).then(|| serde_json::json!({"fov": (2.0 * off.atan2(along).to_degrees()).clamp(1.0, 170.0)}))
+            // Within what a camera's lens sees ([`fov_limits`](crate::view3d::fov_limits)), as far as the drag goes.
+            let (narrow, wide) = crate::view3d::fov_limits();
+            (along > TOL).then(|| serde_json::json!({"fov": (2.0 * off.atan2(along).to_degrees()).clamp(narrow + 1e-3, wide - 1e-3)}))
         }
         _ => None,
     }
@@ -4519,13 +4543,13 @@ pub fn cone_lines(c: &Cone) -> [[P2; 2]; 4] {
 /// The eye of the nearest camera whose mark (body, lens or name) the cursor at pixel `at` is over, so that a click on
 /// the mark lands on the camera's eye, never on a corner of its symbol. None off a camera's mark. The body, lens and
 /// name sizes are those `render::camera_mark` draws with.
-pub fn camera_at(m: &Model, level: Id, v: &View, at: (f32, f32)) -> Option<(Id, P2)> {
+pub fn camera_at(m: &Model, level: Id, v: &View, at: (f32, f32), shown: &[Id]) -> Option<(Id, P2)> {
     let (x, y) = at;
     let plan = m.plan_level(level).unwrap_or(level);
-    m.elements
+    shown
         .iter()
-        .filter_map(|(&id, e)| {
-            let Element::View3D(view) = e else { return None };
+        .filter_map(|&id| {
+            let Some(Element::View3D(view)) = m.elements.get(id) else { return None };
             let c = view.camera?;
             if m.camera_level(c.eye[2]) != Some(plan) {
                 return None;

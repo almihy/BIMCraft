@@ -2067,7 +2067,8 @@ other_files(
         graphic_display_options,
     ),
     edit("camera", ui_msg!("Camera"), &[], camera::DOC, camera::camera),
-    edit("view_orientation", "View Orientation", &[], camera::ORIENTATION_DOC, camera::view_orientation),
+    // Navigation, as Revit's, is no undo step: the view is kept with the project, and undo leaves it where it was turned.
+    other("view_orientation", "View Orientation", camera::ORIENTATION_DOC, camera::view_orientation),
     edit(
         "work_plane",
         "Work Plane",

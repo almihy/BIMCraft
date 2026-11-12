@@ -1374,15 +1374,20 @@ pub fn differs_only_in_section_box(before: &Model, after: &Model) -> bool {
         && Look::of_3d(before).with_section_box(None) == Look::of_3d(after).with_section_box(None)
 }
 
-/// Whether the 3D view draws `after` from the scene and the mesh it made of `before`: what changed is only what neither reads
-/// (3D views and the dimensions in them: a camera view's eye and target written back as the hand lets it be, a camera view
-/// made, a 3D dimension placed), and the default 3D view looks as it did but for its section box, which a picture asks of
-/// them as it is drawn.
-pub fn scene_kept(before: &Model, after: &Model) -> bool {
+/// Whether 3D view `view` (none: the default `{3D}`) draws `after` from the scene and the mesh it made of `before`: what
+/// changed is only what neither reads (3D views and the dimensions in them: a camera view's eye and target written back as
+/// the hand lets it be, a camera view made, a 3D dimension placed), and that view looks as it did (its own Visibility/
+/// Graphics and visual style, a camera view's being its own) but for its section box, which a picture asks of them as it is
+/// drawn.
+pub fn scene_kept(before: &Model, after: &Model, view: Option<Id>) -> bool {
     let crate::ids::Changed::Ids(changed) = after.changed_since(before) else { return false };
     let unseen = |m: &Model, id: Id| m.elements.get(id).is_none_or(|e| matches!(e, Element::View3D(_) | Element::Dimension3D(_)));
+    let look = |m: &Model| match view.filter(|id| matches!(m.elements.get(*id), Some(Element::View3D(_)))) {
+        Some(id) => Look::of(m, id),
+        None => Look::of_3d(m),
+    };
     changed.iter().all(|id| unseen(before, *id) && unseen(after, *id))
-        && Look::of_3d(before).with_section_box(None) == Look::of_3d(after).with_section_box(None)
+        && look(before).with_section_box(None) == look(after).with_section_box(None)
 }
 
 /// The most points a picture draws, as Revit's density does: past it, every so many of each scan's.
@@ -3244,6 +3249,32 @@ pub fn field_of_view(lens: f64, p: &crate::model::Physical) -> f64 {
     2.0 * (p.film / (2.0 * lens.max(1e-6) * p.zoom.max(1e-6))).atan().to_degrees()
 }
 
+/// The field of view a 35 mm lens of `lens` mm sees, degrees across its 36 mm film.
+pub fn fov_of_35mm(lens: f64) -> f64 {
+    2.0 * (FILM / (2.0 * lens.max(1e-6))).atan().to_degrees()
+}
+
+/// The narrowest and widest field of view a camera has, degrees: its 35 mm equivalent's limits ([`MIN_LENS`] to
+/// [`MAX_LENS`]), the same on any film.
+pub fn fov_limits() -> (f64, f64) {
+    (fov_of_35mm(MAX_LENS), fov_of_35mm(MIN_LENS))
+}
+
+/// Whether focal length `lens` on `p`'s film at its zoom is a lens a camera has: its 35 mm equivalent ([`full_frame`]) from
+/// [`MIN_LENS`] to [`MAX_LENS`], so a small sensor goes as wide as a full frame. What is wrong, else, for a person to read.
+pub fn lens_ok(lens: f64, p: &crate::model::Physical) -> Result<(), String> {
+    let eq = full_frame(lens, p);
+    if lens.is_finite() && lens > 0.0 && (MIN_LENS..=MAX_LENS).contains(&eq) {
+        return Ok(());
+    }
+    let ((narrow, wide), (lo, hi)) = (fov_limits(), (MIN_LENS, MAX_LENS));
+    let zoom = if p.zoom == 1.0 { String::new() } else { format!(" at zoom {}", p.zoom) };
+    Err(format!(
+        "a {lens} mm lens on {} mm film{zoom} sees as a {eq:.1} mm lens does on 35 mm film; a camera's lens is {lo} to {hi} mm as          35 mm film has it (a field of view of {narrow:.1}° to {wide:.1}°)",
+        p.film
+    ))
+}
+
 /// The focal length that gives field of view `fov` degrees across `p`'s film at its zoom.
 pub fn lens_for(fov: f64, p: &crate::model::Physical) -> f64 {
     p.film / (2.0 * p.zoom.max(1e-6) * (fov.clamp(0.1, 179.0).to_radians() / 2.0).tan())
@@ -3440,7 +3471,9 @@ impl Camera {
     /// `target` — the render path for a camera view. Its azimuth and elevation are the direction from the eye to the
     /// target, as [`axes`](Self::axes) reads them.
     pub fn at(eye: P3, target: P3, lens: f64, width: u32, height: u32) -> Camera {
-        let lens = lens.clamp(MIN_LENS, MAX_LENS);
+        // Never clamped to a camera's range here: a camera's lens is checked where it is set (`lens_ok`), and the window sees
+        // through a longer one when its safe frame is narrower than the view.
+        let lens = if lens.is_finite() && lens > 0.0 { lens } else { LENS };
         let back = sub(eye, target);
         let d = dot(back, back).sqrt().max(1e-9);
         let back = mul(back, 1.0 / d);
@@ -3468,25 +3501,29 @@ impl Camera {
     }
 
     /// This camera (standing as [`at`](Self::at) stands it, `target` in the middle) seen through `p`'s perspective control
-    /// and clipping, as 3ds Max's Physical Camera: the film turned back toward upright by its vertical tilt correction (1:
-    /// verticals stay vertical) with the lens shifted to keep `target` in the middle, then shifted by its Lens Shift (% of
-    /// the film's width, `film` px of the picture); its clipping planes while Clip Manually is on. The eye stays where it
-    /// stands.
+    /// and clipping, as 3ds Max's Physical Camera. In perspective its film plane is tilted by its vertical tilt correction, a
+    /// slope `t` ([`Physical::tilt`](crate::model::Physical::tilt); with Auto, the slope this camera looks up at), as
+    /// `IPhysicalCamera::GetTiltCorrection` applies it: a ray's target on the focus plane moved back by its height × `t`, its
+    /// height divided by √(1 + t²). That plane, seen from the eye, is a camera turned down by atan `t` about its horizontal
+    /// axis, its focal length cos(atan `t`) as long, and `target` (the film's middle) kept in the middle by a lens shift; a
+    /// slope of the camera's own keeps verticals vertical. Then the picture moves by its Lens Shift (% of the film's width,
+    /// `film` px of the picture), and its clipping planes cut while Clip Manually is on. An orthographic camera takes neither
+    /// tilt nor clipping: its verticals stand vertical already. The eye stays where it stands.
     pub fn physical(self, p: &crate::model::Physical, target: P3, film: f64) -> Camera {
-        let tilt = p.vertical_tilt().clamp(0.0, 1.0);
         let mut cam = self;
-        if tilt > 0.0 && self.elevation.abs() > 1e-9 {
-            let elevation = self.elevation * (1.0 - tilt);
-            match self.eye() {
-                // In perspective the eye stays: the film turns about it, its middle a target as far along the turned axis.
-                Some(eye) => {
-                    let d = self.eye_distance().unwrap_or(1.0);
-                    let turned = Camera { elevation, ..self };
-                    let (back, ..) = turned.axes();
-                    cam = Camera { target: sub(eye, mul(back, d)), ..turned };
-                }
-                None => cam = Camera { elevation, ..self },
-            }
+        let slope = if p.auto_tilt { -self.elevation.clamp(-89.0, 89.0).to_radians().tan() } else { p.tilt };
+        if let (Some(eye), Some(d), Some(lens)) = (self.eye(), self.eye_distance(), self.lens)
+            && slope.is_finite()
+            && slope != 0.0
+        {
+            let turn = slope.atan();
+            let k = turn.cos();
+            let elevation = (self.elevation + turn.to_degrees()).clamp(-89.0, 89.0);
+            // The eye stays: the film turns about it, its middle a target as far along the turned axis, its focal length
+            // shorter by the turn (the scale with it, so the eye stands as far back).
+            let turned = Camera { elevation, lens: Some(lens * k), scale: self.scale * k, ..self };
+            let (back, ..) = turned.axes();
+            cam = Camera { target: sub(eye, mul(back, d)), ..turned };
             // Where `target` falls now, moved back to the middle.
             let (x, y, _) = cam.project(target);
             let (mx, my) = cam.middle();
@@ -4972,26 +5009,27 @@ mod tests {
         assert!(s.execute("render", &json!({"view": "Camera 1", "width": 5})).is_ok());
     }
 
-    /// A camera stands on its level's plan: its mark is drawn there and picks as the view; another level's plan doesn't show it.
+    /// A camera stands on its level's plan, drawn there only while its view is selected, as Revit's (`render::camera_marks`):
+    /// the plan itself never draws it, its mark picks as the view, and another level's plan doesn't show it.
     #[test]
-    fn a_camera_shows_on_its_levels_plan_and_a_pick_there_finds_it() {
+    fn a_camera_shows_on_its_levels_plan_while_selected_and_a_pick_there_finds_it() {
         use serde_json::json;
         let mut s = house();
         let r = s.execute("camera", &json!({"eye": [12000.0, 3000.0, 1600.0], "target": [4000.0, 3000.0, 1200.0]})).unwrap();
         let id = r["id"].as_u64().unwrap();
         let d = crate::render::plan(&s.model, 100000, 900, 700);
-        assert!(d.owners.iter().flatten().any(|o| *o == id), "its mark is on Level 1's plan");
-        assert_eq!(d.pick(d.view.px(P2(12000.0, 3000.0)), 8.0), Some(id), "a pick at its eye finds the view");
+        assert!(!d.owners.iter().flatten().any(|o| *o == id), "a plan doesn't draw a camera of itself");
+        let marks = crate::render::camera_marks(&s.model, 100000, d.view, &[id]);
+        assert!(marks.owners.iter().flatten().any(|o| *o == id), "its mark is on Level 1's plan while shown");
+        assert_eq!(marks.pick(d.view.px(P2(12000.0, 3000.0)), 8.0), Some(id), "a pick at its eye finds the view");
+        assert!(crate::render::camera_marks(&s.model, 100000, d.view, &[]).prims.is_empty(), "none while none is selected");
         // Level 2's plan doesn't show it: the camera stands on Level 1.
         let up = crate::render::plan(&s.model, 100001, 900, 700);
-        assert!(!up.owners.iter().flatten().any(|o| *o == id), "not on another level's plan");
+        assert!(crate::render::camera_marks(&s.model, 100001, up.view, &[id]).prims.is_empty(), "not on another level's plan");
         // Raised through Level 2's mark, it stands on Level 2's plan at once: the level follows the eye.
         s.execute("camera", &json!({"view": "Camera 1", "eye": [12000.0, 3000.0, 4000.0]})).unwrap();
-        assert!(!crate::render::plan(&s.model, 100000, 900, 700).owners.iter().flatten().any(|o| *o == id), "gone from Level 1");
-        assert!(
-            crate::render::plan(&s.model, 100001, 900, 700).owners.iter().flatten().any(|o| *o == id),
-            "its mark follows its eye to Level 2"
-        );
+        assert!(crate::render::camera_marks(&s.model, 100000, d.view, &[id]).prims.is_empty(), "gone from Level 1");
+        assert!(!crate::render::camera_marks(&s.model, 100001, up.view, &[id]).prims.is_empty(), "its mark follows its eye to Level 2");
     }
 
     /// Moving or mirroring a camera's mark on the plan takes the camera as a whole (each point keeping its height); a view
