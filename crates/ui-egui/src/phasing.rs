@@ -499,7 +499,8 @@ impl BimApp {
                 Some(Element::Room(r)) => format!("{} {}", r.name, r.number).trim().to_string(),
                 _ => none.clone(),
             };
-            let each: Vec<(String, String)> = held.iter().map(|e| rooms.from_to(e).map(|(f, t)| (said(f), said(t)))).collect::<Option<_>>()?;
+            let each: Vec<(String, String)> =
+                held.iter().map(|e| rooms.from_to(e).map(|(f, t)| (said(f), said(t)))).collect::<Option<_>>()?;
             let first = each.first()?.clone();
             each.iter().all(|x| *x == first).then_some(first)
         };

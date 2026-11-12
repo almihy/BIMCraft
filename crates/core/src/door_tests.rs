@@ -51,9 +51,7 @@ fn arcs(d: &Drawing, id: Id) -> Vec<Vec<P2>> {
         .iter()
         .zip(&d.owners)
         .filter_map(|(p, o)| match p {
-            Prim::Line { pts, closed: false, .. } if *o == Some(id) && pts.len() > 2 => {
-                Some(pts.iter().map(|q| d.view.mm(*q)).collect())
-            }
+            Prim::Line { pts, closed: false, .. } if *o == Some(id) && pts.len() > 2 => Some(pts.iter().map(|q| d.view.mm(*q)).collect()),
             _ => None,
         })
         .collect()

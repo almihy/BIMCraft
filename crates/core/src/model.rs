@@ -3208,9 +3208,7 @@ impl Model {
         m.types.wall.insert("Exterior - 300mm".into(), WallType { thickness: 300.0, layers, identity: Default::default() });
         m.types.floor.insert("Generic - 200mm".into(), FloorType { thickness: 200.0, layers: Vec::new(), identity: Default::default() });
         for (n, w) in [("Single 900 x 2100", 900.0), ("Single 800 x 2100", 800.0)] {
-            m.types
-                .door
-                .insert(n.into(), OpeningType { width: w, height: 2100.0, ..Default::default() });
+            m.types.door.insert(n.into(), OpeningType { width: w, height: 2100.0, ..Default::default() });
         }
         for (n, w, h, s) in [("Fixed 1200 x 1500", 1200.0, 1500.0, 900.0), ("Fixed 600 x 900", 600.0, 900.0, 1100.0)] {
             m.types.window.insert(n.into(), OpeningType { width: w, height: h, sill: s, ..Default::default() });
