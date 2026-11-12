@@ -6551,8 +6551,14 @@ impl Model {
                 size(&format!("{cat} type `{n}` width"), t.width)?;
                 size(&format!("{cat} type `{n}` height"), t.height)?;
                 coord(&format!("{cat} type `{n}` sill"), t.sill)?;
-                if let Some(x) = t.thickness {
-                    size(&format!("{cat} type `{n}` thickness"), x)?;
+                match t.thickness {
+                    Some(_) if cat == "window" => {
+                        return Err(format!(
+                            "window type `{n}` has a `thickness`: a window type has none, its glass sits in the middle of its wall"
+                        ));
+                    }
+                    Some(x) => size(&format!("{cat} type `{n}` thickness"), x)?,
+                    None => {}
                 }
             }
         }

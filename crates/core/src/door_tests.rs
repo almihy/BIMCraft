@@ -440,3 +440,21 @@ fn a_door_in_a_curved_wall_or_off_its_location_line_says_its_rooms_and_hinge_as_
         }
     }
 }
+
+#[test]
+fn a_door_types_thickness_clears_back_to_revits_and_no_window_type_holds_one() {
+    let mut s = Session::new();
+    rooms(&mut s);
+    run(&mut s, "type", json!({"category": "door", "name": "Thick", "width": 1000, "height": 2100, "thickness": 40}));
+    run(&mut s, "type", json!({"category": "door", "name": "Thick", "thickness": null}));
+    assert_eq!(s.model.types.door["Thick"].thickness, None);
+    let door = id_of(&run(&mut s, "door", json!({"at": [2000, 0], "type": "Thick"})));
+    assert_eq!(crate::element_json(&s.model, door)["thickness"], json!(50.0));
+    // A window type's thickness is refused wherever it comes from: a command, or a file.
+    let mut m = (*s.model).clone();
+    if let Some(t) = m.types.window.values_mut().next() {
+        t.thickness = Some(40.0);
+    }
+    let e = m.check().unwrap_err();
+    assert!(e.contains("window type") && e.contains("thickness"), "{e}");
+}

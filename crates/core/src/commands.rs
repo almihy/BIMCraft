@@ -1170,7 +1170,8 @@ other_files(
          cabletray|wire|downconductor|groundconductor|cable, name, thickness? | width?, height?, sill?, operation?, thickness? | width?, depth?, round?, \
          material? | height?, spacing?, type_mark?, description?, manufacturer?, model?, fire_rating?, cost?, keynote?, assembly_code?, url?, type_comments?} creates the type, or changes it everywhere it's used. A column's, a structural column's or \
          a footing's type is a `width` by `depth`, or `round` (`width` across); a run's (a beam's, a pipe's, a cable tray's…) too, \
-         made of a `material` of the library. A door type's `thickness` is its leaf's, as Revit's door Thickness (none, 50 mm as          Revit's Single-Flush), which plans draw the leaf as and 3D views and IFC build; a window type has none. A wall type may have `layers` [{function?: structure|\
+         made of a `material` of the library. A door type's `thickness` is its leaf's, as Revit's door Thickness (none, or `null` to clear it, 50 mm as Revit's \
+         Single-Flush), which plans draw the leaf as and 3D views and IFC build; a window type has none. A wall type may have `layers` [{function?: structure|\
          substrate|thermal|membrane|finish, material?, thickness}, …] from its exterior side in: it's as thick as they are, \
          its core from its first structure layer to its last, and a new `thickness` goes to its structure. A ceiling type may \
          have `grid`: its square tiles' width, mm, which reflected ceiling plans draw (0, none); a railing type, `height` (its \
@@ -12107,16 +12108,18 @@ fn edit_type(s: &mut Session, p: &Value) -> R {
                 Some(name) => operation(c, &name)?,
                 None => old.as_ref().and_then(|t| t.operation),
             };
-            // A door's leaf, Revit's Thickness of a door type; a window has none.
-            if cat == "window" && thickness.is_some() {
-                return Err(bad(c, "a window type has no `thickness`: its glass sits in the middle of its wall"));
-            }
+            // A door's leaf, Revit's Thickness of a door type; `thickness: null` clears it back to Revit's Single-Flush's. A
+            // window has none, which `Model::check` refuses.
+            let leaf = match p.get("thickness") {
+                Some(Value::Null) => None,
+                _ => thickness.or(old.as_ref().and_then(|t| t.thickness)),
+            };
             let t = OpeningType {
                 width: width.or(old.as_ref().map(|t| t.width)).ok_or_else(|| need("width"))?,
                 height: height.or(old.as_ref().map(|t| t.height)).ok_or_else(|| need("height"))?,
                 sill: sill.or(old.as_ref().map(|t| t.sill)).unwrap_or(if cat == "window" { 900.0 } else { 0.0 }),
                 operation: op,
-                thickness: thickness.or(old.as_ref().and_then(|t| t.thickness)),
+                thickness: leaf,
                 identity,
             };
             map.insert(name.clone(), t.clone());

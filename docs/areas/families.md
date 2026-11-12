@@ -29,7 +29,8 @@ it as the door's `OperationType` (`Operation::ifc_door`, its side from `flip_han
 `PartitioningType` (two leaves, `DOUBLE_PANEL_VERTICAL`); the import reads a door's back, or its `IfcDoorType`'s (IFC4) or
 `IfcDoorStyle`'s (IFC2x3), onto the type it makes. Schedules have it as the `Operation` field, in the project's language.
 A door of the project's own type is drawn in plan as Revit's door families draw theirs (`render::door_leaves`): each leaf a
-panel as thick as the type's `thickness` (Revit's Thickness; none, `DOOR_THICKNESS`, 50 mm as the Single-Flush's), outlined
+panel as thick as the type's `thickness` (Revit's Thickness; none, or `null` given to `type`, `DOOR_THICKNESS`, 50 mm as the
+Single-Flush's; `Model::check` refuses one on a window type, from a command or a file), outlined
 in the door's cut pen, a swinging leaf open square to the wall with its arc in the projection pen, at every detail level (a
 window, and a family's forms and symbols, are only their gap at coarse); a double door's two leaves from both jambs, a
 sliding one's leaf in front of a fixed one, a double sliding one's two meeting in the wall's middle, a folding one's two
@@ -41,7 +42,12 @@ swings to or a window faces (its exterior, so a window faced out of a house has 
 element (`Opening::to_room_side`, the side of its wall) through `flip`, a wall's flip and `modify`, as Revit's do not
 follow a flip; `flip_from_to_room` (Revit's Flip From/To Room, on the right-click menu too) swaps them. A file of format
 19 has them from the swing, once, as it is read. `Rooms::from_to` finds the rooms on those sides (looked for `ROOM_PROBE`
-past the faces at the middle), and `Rooms::swings_into` the room a door opens into now; `element_json` says them as
+past the faces at the middle, and on past any room-bounding wall alongside, a lining, as far again past its far face:
+`Rooms::past_walls`), and `Rooms::swings_into` the room a door opens into now; both among the rooms standing in the
+project's last phase, as Revit's FamilyInstance.FromRoom (`Rooms::room_in_last_phase`; a room stands from its Phase Created
+up to its Phase Demolished, and only rooms standing in a phase together share a space, `rooms::share_a_phase`). Revit's
+per-phase lookup (FromRoom[phase]) has no command yet. What wants an element's name, type or mark (the status bar, IDs of
+Selection, a tag of its mark) reads `element_json_bare`, which finds none of its rooms; `element_json` says them as
 `from_room`, `to_room` and `swings_into` ({id, guid, number, name}, null outside) with a door's `hinge`
 (`Model::door_hinge`) and `swing` (left or right), Properties shows From Room and To Room read only under Phasing, and
 door and window schedules have From Room: Number, From Room: Name, To Room: Number and To Room: Name. A
