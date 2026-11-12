@@ -358,3 +358,85 @@ fn a_doors_rooms_are_found_past_a_lining_wall_alongside_its_own() {
     let door = id_of(&run(&mut s, "door", json!({"wall": walls[4], "offset": 3000, "flip_facing": true})));
     assert_eq!(between(&s, door), named(Some("WC"), Some("Hall"), Some("Hall")));
 }
+
+/// Panels' points, rounded to the millimetre and sorted: a drawing to compare with another.
+fn shape(panels: &[Vec<P2>]) -> Vec<(i64, i64)> {
+    let mut v: Vec<(i64, i64)> = panels.iter().flatten().map(|p| (p.0.round() as i64, p.1.round() as i64)).collect();
+    v.sort_unstable();
+    v
+}
+
+#[test]
+fn every_way_of_opening_lies_on_the_side_it_opens_to_and_mirrors_with_its_flips() {
+    let mut s = Session::new();
+    let walls = rooms(&mut s);
+    // In the south wall (along y 0, its left the north), centred at x 2000: 1200 wide, hinged toward the west jamb.
+    let t = s.model.thickness(s.model.wall(s.model.guid(walls[0])).unwrap());
+    for op in ["swing", "double-swing", "sliding", "double-sliding", "folding", "fixed"] {
+        let name = format!("M {op}");
+        run(&mut s, "type", json!({"category": "door", "name": name, "width": 1200, "height": 2100, "operation": op}));
+        let draw = |s: &mut Session, ff: bool, fh: bool| {
+            let door = id_of(&run(s, "door", json!({"at": [2000, 0], "type": name, "flip_facing": ff, "flip_hand": fh})));
+            let p = panels(&plan(s), door);
+            run(s, "delete", json!({"ids": [door]}));
+            p
+        };
+        let plain = draw(&mut s, false, false);
+        // Flipped hand, it is its mirror image across the door's middle; flipped facing, across the wall's centre line.
+        let across_middle: Vec<Vec<P2>> = plain.iter().map(|r| r.iter().map(|p| P2(4000.0 - p.0, p.1)).collect()).collect();
+        assert_eq!(shape(&draw(&mut s, false, true)), shape(&across_middle), "{op}: flip hand");
+        let across_wall: Vec<Vec<P2>> = plain.iter().map(|r| r.iter().map(|p| P2(p.0, -p.1)).collect()).collect();
+        assert_eq!(shape(&draw(&mut s, true, false)), shape(&across_wall), "{op}: flip facing");
+        let ys: Vec<f64> = plain.iter().flatten().map(|p| p.1).collect();
+        let (lo, hi) = (ys.iter().copied().fold(f64::INFINITY, f64::min), ys.iter().copied().fold(f64::NEG_INFINITY, f64::max));
+        match op {
+            // Open, out of the wall into the room it swings to, never into the wall or behind it.
+            "swing" | "double-swing" => assert!(lo > t / 2.0 - 1.0 && hi > 500.0, "{op}: {lo} to {hi}"),
+            // Folded out to the north, its knee well past the face.
+            "folding" => assert!(hi > t / 2.0 + 300.0 && lo > -1.0, "{op}: {lo} to {hi}"),
+            // The sliding leaf over the free (east) half on the north of the middle, the fixed one on the south.
+            "sliding" => {
+                let east = plain.iter().find(|r| r.iter().any(|p| near(p.0, 2600.0))).unwrap();
+                let west = plain.iter().find(|r| r.iter().any(|p| near(p.0, 1400.0))).unwrap();
+                assert!(east.iter().all(|p| p.1 > -1.0) && west.iter().all(|p| p.1 < 1.0), "{op}: {plain:?}");
+            }
+            // In the wall, shut.
+            _ => assert!(lo > -t / 2.0 && hi < t / 2.0, "{op}: {lo} to {hi}"),
+        }
+    }
+}
+
+#[test]
+fn a_door_in_a_curved_wall_or_off_its_location_line_says_its_rooms_and_hinge_as_the_plan_draws_them() {
+    // A compound wall drawn on its exterior finish face, and a curved one bulging east; each splits the box.
+    for (wall, offset) in [
+        (json!({"points": [[4000, 0], [4000, 6000]], "type": "Exterior - 300mm", "location": "exterior-finish"}), 3000.0),
+        (json!({"points": [[4000, 0], [4000, 6000]], "arc": 90}), 3000.0),
+    ] {
+        let mut s = Session::new();
+        let r = run(&mut s, "wall", json!({"points": [[0, 0], [8000, 0], [8000, 6000], [0, 6000]], "closed": true}));
+        assert!(r["ids"].is_array());
+        let mid = run(&mut s, "wall", wall.clone())["ids"][0].as_u64().unwrap();
+        run(&mut s, "room", json!({"point": [1000, 3000], "name": "WC", "number": "1"}));
+        run(&mut s, "room", json!({"point": [7000, 3000], "name": "Hall", "number": "2"}));
+        for (ff, fh) in [(false, false), (true, true)] {
+            let door = id_of(&run(&mut s, "door", json!({"wall": mid, "offset": offset, "flip_facing": ff, "flip_hand": fh})));
+            let into = if ff { "Hall" } else { "WC" };
+            let other = if ff { "WC" } else { "Hall" };
+            assert_eq!(between(&s, door), named(Some(other), Some(into), Some(into)), "{wall} flips {ff} {fh}");
+            // The hinge lies on the face it swings to, at a jamb, and the drawn leaf hangs there.
+            let e = crate::element_json(&s.model, door);
+            let hinge = P2(e["hinge"][0].as_f64().unwrap(), e["hinge"][1].as_f64().unwrap());
+            let w = s.model.wall(s.model.guid(mid)).unwrap();
+            let (left, right) = crate::walls::faces(&s.model, w);
+            let axis = crate::walls::Axis::of(w);
+            let (along, off) = axis.project(hinge);
+            assert!(near(off, if ff { right } else { left }), "{wall}: on the face it swings to: {off}");
+            assert!(near((along - offset).abs(), 450.0), "{wall}: at a jamb: {along}");
+            assert!(near(along, if fh { offset + 450.0 } else { offset - 450.0 }), "{wall}: its hand");
+            let leaf = &panels(&plan(&s), door)[0];
+            assert!(leaf.iter().any(|q| q.dist(hinge) < 1.0), "{wall}: the leaf at {hinge:?}: {leaf:?}");
+            run(&mut s, "delete", json!({"ids": [door]}));
+        }
+    }
+}
