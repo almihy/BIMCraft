@@ -317,7 +317,10 @@ fn rendering_ifc_and_schedules_cope_with_every_awkward_opening() {
     assert!(render::section_png(&s.model, elevation, view).is_ok());
     let ifc = crate::ifc::export(&s.model);
     assert!(ifc.contains("IFCOPENINGELEMENT"));
-    assert!(!ifc.contains("NaN") && !ifc.contains("inf"), "numbers stay numbers");
+    // A number written as NaN or inf, not those letters inside a GlobalId (base 64 of a random GUID, so "inf" turns up in
+    // one now and then).
+    let words = ifc.split(|c: char| !(c.is_ascii_alphanumeric() || c == '$' || c == '_'));
+    assert!(!words.into_iter().any(|w| w == "NaN" || w == "inf"), "numbers stay numbers");
     for category in ["door", "window", "wall"] {
         run(&mut s, "schedule", json!({"category": category}));
     }
