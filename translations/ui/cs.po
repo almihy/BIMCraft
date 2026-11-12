@@ -63,17 +63,17 @@ msgstr ""
 msgid "3D"
 msgstr "3D"
 
-#: crates/ui-egui/src/lib.rs:3887
+#: crates/ui-egui/src/lib.rs:3889
 msgid "3D Scene as glTF…"
 msgstr "3D scéna jako glTF…"
 
 #: crates/ui-egui/src/browser.rs:412
-#: crates/ui-egui/src/lib.rs:4267
+#: crates/ui-egui/src/lib.rs:4269
 #: crates/ui-egui/src/properties.rs:1462
 msgid "3D View"
 msgstr "3D pohled"
 
-#: crates/ui-egui/src/lib.rs:3250
+#: crates/ui-egui/src/lib.rs:3252
 msgid "3D View: {3D}"
 msgstr "3D pohled: {3D}"
 
@@ -105,9 +105,9 @@ msgstr "<Neviditelné čáry>"
 #: crates/ui-egui/src/display.rs:25
 #: crates/ui-egui/src/fillpatterns.rs:357
 #: crates/ui-egui/src/fillpatterns.rs:359
-#: crates/ui-egui/src/graphics.rs:622
-#: crates/ui-egui/src/graphics.rs:1429
-#: crates/ui-egui/src/graphics.rs:1431
+#: crates/ui-egui/src/graphics.rs:631
+#: crates/ui-egui/src/graphics.rs:1438
+#: crates/ui-egui/src/graphics.rs:1440
 #: crates/ui-egui/src/phasing.rs:439
 #: crates/ui-egui/src/phasing.rs:480
 #: crates/ui-egui/src/templates.rs:214
@@ -120,7 +120,7 @@ msgstr "<Žádný>"
 msgid "<None>: the view follows no template, and its settings are its own."
 msgstr "<Žádný>: pohled se neřídí žádnou šablonou a jeho nastavení je vlastní."
 
-#: crates/ui-egui/src/graphics.rs:1138
+#: crates/ui-egui/src/graphics.rs:1147
 msgid "<Pick>"
 msgstr "<Vybrat>"
 
@@ -152,7 +152,7 @@ msgstr "Směr od posledního bodu se přichytává k násobkům tohoto úhlu od 
 msgid "A door or a window needs lengths named Width and Height; its formulas can read Wall Thickness, the wall's."
 msgstr "Dveře nebo okno vyžadují délky s názvy Šířka a Výška; jejich vzorce mohou číst Tloušťku stěny dané stěny."
 
-#: crates/ui-egui/src/graphics.rs:1145
+#: crates/ui-egui/src/graphics.rs:1154
 msgid "A filter is made in View > Filters"
 msgstr "Filtr se vytváří v nabídce Pohled > Filtry"
 
@@ -176,7 +176,7 @@ msgstr "Smyčka neuzavírá žádnou plochu."
 msgid "A loop needs three lines: click a point that isn't the start."
 msgstr "Smyčka vyžaduje tři čáry: klikněte na bod, který není počátkem."
 
-#: crates/ui-egui/src/lib.rs:4315
+#: crates/ui-egui/src/lib.rs:4317
 msgid "A new sheet, with a title block"
 msgstr "Nový výkres s rozpiskou"
 
@@ -218,7 +218,7 @@ msgstr "Malá značka v bodě 0, 0 projektu se směry x (východ) a y (sever). K
 msgid "A text names a field as {KEY}. A project field has one value for every sheet; a sheet field, each sheet's own, filled in under Properties. The automatic fields need no definition:"
 msgstr ""
 
-#: crates/ui-egui/src/graphics.rs:580
+#: crates/ui-egui/src/graphics.rs:589
 msgid "A view always has a scale"
 msgstr "Pohled má vždy měřítko"
 
@@ -264,7 +264,7 @@ msgstr ""
 msgid "Above:"
 msgstr "Nad:"
 
-#: crates/ui-egui/src/lib.rs:5031
+#: crates/ui-egui/src/lib.rs:5033
 msgid "Absolute"
 msgstr "Absolutní"
 
@@ -375,11 +375,11 @@ msgstr "Přidat variantu"
 msgid "Add Parameter"
 msgstr "Přidat parametr"
 
-#: crates/ui-egui/src/lib.rs:2866
+#: crates/ui-egui/src/lib.rs:2868
 msgid "Add Point"
 msgstr "Přidat bod"
 
-#: crates/ui-egui/src/lib.rs:2865
+#: crates/ui-egui/src/lib.rs:2867
 msgid "Add Point: click on the top to raise or lower it there to the Options Bar's elevation"
 msgstr "Přidat bod: kliknutím na horní líc jej v daném místě zvednete nebo snížíte na výšku z panelu Možnosti"
 
@@ -399,7 +399,7 @@ msgstr "Přidat měřítko:"
 msgid "Add Segment"
 msgstr "Přidat segment"
 
-#: crates/ui-egui/src/graphics.rs:1204
+#: crates/ui-egui/src/graphics.rs:1213
 msgid "Add Selected"
 msgstr "Přidat vybrané"
 
@@ -416,11 +416,11 @@ msgstr "Přidat velikost"
 msgid "Add Sort"
 msgstr "Přidat řazení"
 
-#: crates/ui-egui/src/lib.rs:2879
+#: crates/ui-egui/src/lib.rs:2881
 msgid "Add Split Line"
 msgstr "Přidat dělicí čáru"
 
-#: crates/ui-egui/src/lib.rs:2877
+#: crates/ui-egui/src/lib.rs:2879
 msgid "Add Split Line: click two points; the top folds along the line between them"
 msgstr "Přidat dělicí čáru: klikněte na dva body; horní líc se zalomí podél čáry mezi nimi"
 
@@ -458,7 +458,7 @@ msgstr "Přidat typ vodiče"
 msgid "Add at End"
 msgstr "Přidat na konec"
 
-#: crates/ui-egui/src/graphics.rs:1136
+#: crates/ui-egui/src/graphics.rs:1145
 msgid "Add filter:"
 msgstr "Přidat filtr:"
 
@@ -483,11 +483,11 @@ msgstr "Přidat do výběru"
 msgid "Added {} to the project"
 msgstr "Do projektu bylo přidáno {}"
 
-#: crates/ui-egui/src/lib.rs:4437
+#: crates/ui-egui/src/lib.rs:4439
 msgid "Additional Settings"
 msgstr "Další nastavení"
 
-#: crates/ui-egui/src/lib.rs:4436
+#: crates/ui-egui/src/lib.rs:4438
 msgid "Additional Settings: line weights, line styles, line patterns, fill patterns and temporary dimensions"
 msgstr "Další nastavení: tloušťky čar, styly čar, vzory čar, vzory výplně a dočasné kóty"
 
@@ -551,7 +551,7 @@ msgstr ""
 msgid "Align"
 msgstr "Zarovnat"
 
-#: crates/ui-egui/src/lib.rs:4680
+#: crates/ui-egui/src/lib.rs:4682
 #: crates/ui-egui/src/sketch.rs:742
 msgid "Align (AL): pick a reference line, then what to line up with it"
 msgstr "Zarovnat (AL): vyberte referenční čáru a potom prvek k zarovnání"
@@ -560,8 +560,8 @@ msgstr "Zarovnat (AL): vyberte referenční čáru a potom prvek k zarovnání"
 msgid "Align lines up with what a plan shows: in the 3D view, drag a line's end or draw it again."
 msgstr "Zarovnání čar probíhá podle toho, co ukazuje půdorys: ve 3D pohledu přetáhněte konec čáry nebo ji nakreslete znovu."
 
-#: crates/ui-egui/src/lib.rs:4090
-#: crates/ui-egui/src/lib.rs:5117
+#: crates/ui-egui/src/lib.rs:4092
+#: crates/ui-egui/src/lib.rs:5119
 msgid "Aligned"
 msgstr "Zarovnaná"
 
@@ -570,7 +570,7 @@ msgstr "Zarovnaná"
 msgid "Aligned Dimension"
 msgstr "Zarovnaná kóta"
 
-#: crates/ui-egui/src/lib.rs:4092
+#: crates/ui-egui/src/lib.rs:4094
 msgid "Aligned Dimension (DI): pick parallel wall faces, wall ends, doors, windows or grids, or endpoints, then click where the dimension line goes"
 msgstr "Zarovnaná kóta (DI): vyberte rovnoběžné líce stěn, konce stěn, dveře, okna nebo modulové osy, případně koncové body, a potom klikněte do místa kótovací čáry"
 
@@ -607,11 +607,11 @@ msgstr ""
 msgid "Alignment Guides"
 msgstr "Vodítka zarovnání"
 
-#: crates/ui-egui/src/lib.rs:1995
+#: crates/ui-egui/src/lib.rs:1996
 msgid "Alignment guides off"
 msgstr "Vodítka zarovnání vypnuta"
 
-#: crates/ui-egui/src/lib.rs:1995
+#: crates/ui-egui/src/lib.rs:1996
 msgid "Alignment guides on"
 msgstr "Vodítka zarovnání zapnuta"
 
@@ -621,8 +621,8 @@ msgstr "Vodítka zarovnání zapnuta"
 msgid "All"
 msgstr "Vše"
 
-#: crates/ui-egui/src/lib.rs:5670
-#: crates/ui-egui/src/lib.rs:5679
+#: crates/ui-egui/src/lib.rs:5672
+#: crates/ui-egui/src/lib.rs:5681
 msgid "All open views"
 msgstr ""
 
@@ -642,7 +642,7 @@ msgstr ""
 msgid "Allowed"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:5030
+#: crates/ui-egui/src/lib.rs:5032
 msgid "Along Surface"
 msgstr "Podél povrchu"
 
@@ -708,20 +708,20 @@ msgid "Angle steps"
 msgstr "Kroky úhlu"
 
 #: crates/ui-egui/src/array.rs:127
-#: crates/ui-egui/src/lib.rs:5175
+#: crates/ui-egui/src/lib.rs:5177
 #: crates/ui-egui/src/site.rs:611
 msgid "Angle:"
 msgstr "Úhel:"
 
-#: crates/ui-egui/src/lib.rs:4110
+#: crates/ui-egui/src/lib.rs:4112
 msgid "Angular"
 msgstr "Úhlová"
 
-#: crates/ui-egui/src/lib.rs:4111
+#: crates/ui-egui/src/lib.rs:4113
 msgid "Angular Dimension: pick two lines that meet, then click where the arc goes"
 msgstr "Úhlová kóta: vyberte dvě protínající se čáry a potom klikněte do místa oblouku"
 
-#: crates/ui-egui/src/lib.rs:1335
+#: crates/ui-egui/src/lib.rs:1336
 msgid "Annotate"
 msgstr "Poznámka"
 
@@ -749,7 +749,7 @@ msgstr "Pero poznámek {}"
 msgid "Another colour"
 msgstr "Jiná barva"
 
-#: crates/ui-egui/src/footer.rs:476
+#: crates/ui-egui/src/footer.rs:533
 #: crates/ui-egui/src/properties.rs:2755
 msgid "Applies to all views; snaps to the active view's enabled main grid or subgrid, even when hidden"
 msgstr "Platí pro všechny pohledy; přichytává se k zapnuté hlavní mřížce nebo podmřížce aktivního pohledu, i když je skrytá"
@@ -758,7 +758,7 @@ msgstr "Platí pro všechny pohledy; přichytává se k zapnuté hlavní mříž
 #: crates/ui-egui/src/display.rs:80
 #: crates/ui-egui/src/editor.rs:1139
 #: crates/ui-egui/src/electrical.rs:500
-#: crates/ui-egui/src/graphics.rs:402
+#: crates/ui-egui/src/graphics.rs:411
 #: crates/ui-egui/src/linestyles.rs:304
 #: crates/ui-egui/src/lineweights.rs:150
 #: crates/ui-egui/src/objectstyles.rs:78
@@ -769,7 +769,7 @@ msgstr "Platí pro všechny pohledy; přichytává se k zapnuté hlavní mříž
 msgid "Apply"
 msgstr "Použít"
 
-#: crates/ui-egui/src/footer.rs:443
+#: crates/ui-egui/src/footer.rs:500
 msgid "Apply Hide/Isolate to View"
 msgstr "Použít skrytí/izolování na pohled"
 
@@ -785,12 +785,12 @@ msgstr ""
 msgid "Arc"
 msgstr "Oblouk"
 
-#: crates/ui-egui/src/lib.rs:4128
+#: crates/ui-egui/src/lib.rs:4130
 #: crates/ui-egui/src/properties.rs:261
 msgid "Arc Length"
 msgstr "Délka oblouku"
 
-#: crates/ui-egui/src/lib.rs:4129
+#: crates/ui-egui/src/lib.rs:4131
 msgid "Arc Length Dimension: pick a curved wall or an arc, then click where the dimension's arc goes"
 msgstr "Kóta délky oblouku: vyberte zakřivenou stěnu nebo oblouk a potom klikněte do místa oblouku kóty"
 
@@ -798,7 +798,7 @@ msgstr "Kóta délky oblouku: vyberte zakřivenou stěnu nebo oblouk a potom kli
 msgid "Arc Length:"
 msgstr "Délka oblouku:"
 
-#: crates/ui-egui/src/lib.rs:1328
+#: crates/ui-egui/src/lib.rs:1329
 msgid "Architecture"
 msgstr "Architektura"
 
@@ -822,7 +822,7 @@ msgstr "Šířka područky"
 msgid "Array"
 msgstr "Pole"
 
-#: crates/ui-egui/src/lib.rs:4740
+#: crates/ui-egui/src/lib.rs:4742
 msgid "Array (AR): repeat the selection along a line or about a point"
 msgstr ""
 
@@ -870,15 +870,15 @@ msgstr "V ose stěny"
 msgid "At wall finish"
 msgstr "Na povrchové úpravě stěny"
 
-#: crates/ui-egui/src/lib.rs:4818
+#: crates/ui-egui/src/lib.rs:4820
 msgid "Attach Top/Base"
 msgstr "Připojit horní část/základnu"
 
-#: crates/ui-egui/src/lib.rs:4817
+#: crates/ui-egui/src/lib.rs:4819
 msgid "Attach Top/Base: pick a roof or a floor for the walls' tops, or bases, to follow"
 msgstr "Připojit horní část/základnu: vyberte střechu nebo podlahu, kterou mají horní části nebo základny stěn sledovat"
 
-#: crates/ui-egui/src/lib.rs:5133
+#: crates/ui-egui/src/lib.rs:5135
 msgid "Attach Wall:"
 msgstr "Připojit stěnu:"
 
@@ -891,7 +891,7 @@ msgid "Attic"
 msgstr ""
 
 #: crates/ui-egui/src/canvas/navigation.rs:86
-#: crates/ui-egui/src/lib.rs:5116
+#: crates/ui-egui/src/lib.rs:5118
 msgid "Auto"
 msgstr "Auto"
 
@@ -939,11 +939,11 @@ msgstr "Aplikaci BIMCraft se nepodařilo spustit"
 
 #: crates/ui-egui/src/editor.rs:1145
 #: crates/ui-egui/src/editor.rs:1176
-#: crates/ui-egui/src/lib.rs:4782
+#: crates/ui-egui/src/lib.rs:4784
 msgid "BIMCraft family"
 msgstr "Rodina BIMCraft"
 
-#: crates/ui-egui/src/lib.rs:3344
+#: crates/ui-egui/src/lib.rs:3346
 msgid "BIMCraft project"
 msgstr "Projekt BIMCraft"
 
@@ -951,7 +951,7 @@ msgstr "Projekt BIMCraft"
 msgid "BIMCraft project or IFC"
 msgstr "Projekt BIMCraft nebo IFC"
 
-#: crates/ui-egui/src/lib.rs:3518
+#: crates/ui-egui/src/lib.rs:3520
 #: crates/ui-egui/src/links.rs:18
 msgid "BIMCraft project, IFC or Revit"
 msgstr "Projekt BIMCraft, IFC nebo Revit"
@@ -1009,9 +1009,9 @@ msgid "Background Color"
 msgstr "Barva pozadí"
 
 #: crates/ui-egui/src/background_grid.rs:98
-#: crates/ui-egui/src/footer.rs:457
+#: crates/ui-egui/src/footer.rs:514
 #: crates/ui-egui/src/graphics.rs:124
-#: crates/ui-egui/src/graphics.rs:609
+#: crates/ui-egui/src/graphics.rs:618
 #: crates/ui-egui/src/templates.rs:701
 msgid "Background Grids"
 msgstr "Mřížky na pozadí"
@@ -1042,7 +1042,7 @@ msgstr ""
 msgid "Bars"
 msgstr "Pruty"
 
-#: crates/ui-egui/src/lib.rs:5137
+#: crates/ui-egui/src/lib.rs:5139
 msgid "Base"
 msgstr "Základna"
 
@@ -1211,7 +1211,7 @@ msgstr "Cihla 225 x 75"
 msgid "Browsers"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:3994
+#: crates/ui-egui/src/lib.rs:3996
 msgid "Build"
 msgstr "Sestavit"
 
@@ -1251,7 +1251,7 @@ msgstr ""
 msgid "By Filter…"
 msgstr ""
 
-#: crates/ui-egui/src/graphics.rs:922
+#: crates/ui-egui/src/graphics.rs:931
 msgid "By View"
 msgstr "Podle pohledu"
 
@@ -1300,12 +1300,12 @@ msgstr "Importováno: {}"
 
 #: crates/core/src/commands.rs:2071
 #: crates/ui-egui/src/camera.rs:38
-#: crates/ui-egui/src/lib.rs:4292
+#: crates/ui-egui/src/lib.rs:4294
 #: crates/ui-egui/src/properties.rs:286
 msgid "Camera"
 msgstr "Kamera"
 
-#: crates/ui-egui/src/lib.rs:4291
+#: crates/ui-egui/src/lib.rs:4293
 msgid "Camera: click where its eye stands, then what it looks at: a 3D view in perspective from there"
 msgstr "Kamera: klikněte na místo, kde stojí její oko, a potom na to, na co se dívá: odtud vznikne perspektivní 3D pohled"
 
@@ -1324,14 +1324,14 @@ msgstr ""
 #: crates/ui-egui/src/clipboard.rs:174
 #: crates/ui-egui/src/clipboard.rs:212
 #: crates/ui-egui/src/clouds.rs:87
-#: crates/ui-egui/src/context.rs:447
+#: crates/ui-egui/src/context.rs:474
 #: crates/ui-egui/src/dimtypes.rs:319
 #: crates/ui-egui/src/display.rs:81
 #: crates/ui-egui/src/editor.rs:1138
 #: crates/ui-egui/src/electrical.rs:501
 #: crates/ui-egui/src/filter.rs:115
-#: crates/ui-egui/src/graphics.rs:403
-#: crates/ui-egui/src/graphics.rs:1025
+#: crates/ui-egui/src/graphics.rs:412
+#: crates/ui-egui/src/graphics.rs:1034
 #: crates/ui-egui/src/inquiry.rs:146
 #: crates/ui-egui/src/linestyles.rs:305
 #: crates/ui-egui/src/lineweights.rs:151
@@ -1395,12 +1395,12 @@ msgstr "Křídlové okno"
 msgid "Casework"
 msgstr "Vestavěný nábytek"
 
-#: crates/ui-egui/src/graphics.rs:479
+#: crates/ui-egui/src/graphics.rs:488
 #: crates/ui-egui/src/properties.rs:3035
 msgid "Categories"
 msgstr "Kategorie"
 
-#: crates/ui-egui/src/graphics.rs:1109
+#: crates/ui-egui/src/graphics.rs:1118
 msgid "Categories not overridden are drawn as Object Styles sets them."
 msgstr "Kategorie bez přepsání se vykreslují podle nastavení ve Stylech objektů."
 
@@ -1412,7 +1412,7 @@ msgstr "Kategorie bez přepsání se vykreslují podle nastavení ve Stylech obj
 msgid "Category"
 msgstr "Kategorie"
 
-#: crates/ui-egui/src/graphics.rs:1059
+#: crates/ui-egui/src/graphics.rs:1068
 msgid "Category name search:"
 msgstr "Hledat název kategorie:"
 
@@ -1438,7 +1438,7 @@ msgstr "Půdorys podhledu"
 msgid "Ceiling Plans"
 msgstr "Půdorysy podhledů"
 
-#: crates/ui-egui/src/lib.rs:4011
+#: crates/ui-egui/src/lib.rs:4013
 msgid "Ceiling: click inside a room for a ceiling out to its walls"
 msgstr "Podhled: klikněte uvnitř místnosti pro vytvoření podhledu k jejím stěnám"
 
@@ -1496,7 +1496,7 @@ msgstr "Osové čáry"
 msgid "Ceramic tile"
 msgstr "Keramická dlažba"
 
-#: crates/ui-egui/src/lib.rs:5168
+#: crates/ui-egui/src/lib.rs:5170
 #: crates/ui-egui/src/linestyles.rs:388
 #: crates/ui-egui/src/structure.rs:152
 msgid "Chain"
@@ -1578,7 +1578,7 @@ msgstr ""
 msgid "Checks: {} flags"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4245
+#: crates/ui-egui/src/lib.rs:4247
 msgid "Choose a theme, including a dark interface with a light canvas"
 msgstr "Zvolte motiv včetně tmavého rozhraní se světlou kreslicí plochou"
 
@@ -1595,7 +1595,7 @@ msgstr "Střed a poloměr kružnice"
 msgid "Circle: click its centre, then a point on it (or only its centre, with Radius)"
 msgstr "Kružnice: klikněte na její střed a potom na bod na ní (nebo pouze na střed při zadaném poloměru)"
 
-#: crates/ui-egui/src/lib.rs:4016
+#: crates/ui-egui/src/lib.rs:4018
 msgid "Circulation"
 msgstr "Komunikace"
 
@@ -1607,7 +1607,7 @@ msgstr "Popsaný mnohoúhelník"
 msgid "Circumscribed Polygon: click its centre, then the middle of a side; Sides on the Options Bar"
 msgstr "Popsaný mnohoúhelník: klikněte na jeho střed a potom na střed strany; počet stran nastavte na panelu Možnosti"
 
-#: crates/ui-egui/src/graphics.rs:1011
+#: crates/ui-egui/src/graphics.rs:1020
 msgid "Clear Overrides"
 msgstr "Vymazat přepsání"
 
@@ -1623,7 +1623,7 @@ msgstr "Vymazat hledání"
 msgid "Clearance"
 msgstr "Světlá vzdálenost"
 
-#: crates/ui-egui/src/lib.rs:5282
+#: crates/ui-egui/src/lib.rs:5284
 msgid "Click a base point to measure from."
 msgstr "Klikněte na základní bod, od kterého chcete měřit."
 
@@ -1631,7 +1631,7 @@ msgstr "Klikněte na základní bod, od kterého chcete měřit."
 msgid "Click a corner of the rectangle."
 msgstr "Klikněte na roh obdélníku."
 
-#: crates/ui-egui/src/lib.rs:5381
+#: crates/ui-egui/src/lib.rs:5383
 msgid "Click a corner of the shaft opening."
 msgstr "Klikněte na roh šachtového otvoru."
 
@@ -1643,19 +1643,19 @@ msgstr "Klikněte na plochu objemu: vytvoří se na ní stěna."
 msgid "Click a face of the model for the work plane. Esc goes back to the dialog."
 msgstr "Klikněte na plochu modelu pro pracovní rovinu. Klávesou Esc se vrátíte do dialogu."
 
-#: crates/ui-egui/src/lib.rs:5321
+#: crates/ui-egui/src/lib.rs:5323
 msgid "Click a face to paint it with the material in the Options Bar; the 3D view orbits as ever."
 msgstr "Klikněte na plochu, kterou chcete pokrýt materiálem z panelu Možnosti; 3D pohled lze stále otáčet."
 
-#: crates/ui-egui/src/lib.rs:5346
+#: crates/ui-egui/src/lib.rs:5348
 msgid "Click a floor or a roof: the spot slope reads how steeply its top falls there, and which way."
 msgstr "Klikněte na podlahu nebo střechu: kóta sklonu odečte, jak strmě její horní líc v daném místě klesá a kterým směrem."
 
-#: crates/ui-egui/src/lib.rs:5345
+#: crates/ui-egui/src/lib.rs:5347
 msgid "Click a floor, a roof, a stair or a wall: the spot elevation reads the height of its top there."
 msgstr "Klikněte na podlahu, střechu, schodiště nebo stěnu: výšková kóta odečte výšku jejich horního povrchu v daném místě."
 
-#: crates/ui-egui/src/lib.rs:5286
+#: crates/ui-egui/src/lib.rs:5288
 msgid "Click a level line to paste what was copied onto that level. Esc cancels."
 msgstr ""
 
@@ -1663,7 +1663,7 @@ msgstr ""
 msgid "Click a line, a wall or a grid to draw along it."
 msgstr "Klikněte na čáru, stěnu nebo osnovu a kreslete podél ní."
 
-#: crates/ui-egui/src/lib.rs:5322
+#: crates/ui-egui/src/lib.rs:5324
 msgid "Click a painted face to take its paint off."
 msgstr "Kliknutím na pokrytou plochu odstraníte nátěr."
 
@@ -1675,31 +1675,31 @@ msgstr "Klikněte na bod na kružnici. Klávesa Esc operaci zruší."
 msgid "Click a point the arc passes through. Esc cancels."
 msgstr "Klikněte na bod, kterým oblouk prochází. Klávesa Esc operaci zruší."
 
-#: crates/ui-egui/src/lib.rs:5248
+#: crates/ui-egui/src/lib.rs:5250
 msgid "Click a point to mark its height."
 msgstr "Klikněte na bod pro označení jeho výšky."
 
-#: crates/ui-egui/src/lib.rs:5254
+#: crates/ui-egui/src/lib.rs:5256
 msgid "Click a point, a corner or an edge to select it (Shift adds), then type its height or drag its arrows; Delete removes it."
 msgstr "Kliknutím na bod, roh nebo hranu jej vyberete (klávesa Shift přidává do výběru), poté zadejte jeho výšku nebo přetáhněte jeho šipky; klávesa Delete jej odstraní."
 
-#: crates/ui-egui/src/lib.rs:5394
+#: crates/ui-egui/src/lib.rs:5396
 msgid "Click a point, a corner or an edge to select it (Shift adds), then type its height; drag a point to move it; Delete removes it."
 msgstr "Kliknutím na bod, roh nebo hranu jej vyberete (klávesa Shift přidává do výběru), poté zadejte jeho výšku; tažením bod přesunete; klávesa Delete jej odstraní."
 
-#: crates/ui-egui/src/lib.rs:5312
+#: crates/ui-egui/src/lib.rs:5314
 msgid "Click a polyline or a spline where a vertex goes."
 msgstr "Klikněte na křivku nebo spline v místě, kam chcete umístit vrchol."
 
-#: crates/ui-egui/src/lib.rs:5313
+#: crates/ui-egui/src/lib.rs:5315
 msgid "Click a polyline's corner or a spline's point to take it out."
 msgstr "Kliknutím na roh křivky nebo bod spline vrchol odstraníte."
 
-#: crates/ui-egui/src/lib.rs:5377
+#: crates/ui-egui/src/lib.rs:5379
 msgid "Click a roof's slope where the dormer's front wall goes, across the slope."
 msgstr "Klikněte na sklon střechy napříč sklonem v místě, kde bude stát přední stěna vikýře."
 
-#: crates/ui-egui/src/lib.rs:5369
+#: crates/ui-egui/src/lib.rs:5371
 msgid "Click a stair or a ramp for a railing down each side, or the start of a path."
 msgstr "Klikněte na schodiště nebo rampu pro umístění zábradlí po obou stranách, případně na počátek trasy."
 
@@ -1711,19 +1711,19 @@ msgstr ""
 msgid "Click a text to pick it"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:5237
+#: crates/ui-egui/src/lib.rs:5239
 msgid "Click a view on the sheet to select it, drag it to move it, double-click it to open it."
 msgstr "Kliknutím vyberte pohled na výkrese, přetažením jej posuňte, dvojitým kliknutím jej otevřete."
 
-#: crates/ui-egui/src/lib.rs:5314
+#: crates/ui-egui/src/lib.rs:5316
 msgid "Click a wall or a line where to split it."
 msgstr "Klikněte na stěnu nebo čáru v místě, kde ji chcete rozdělit."
 
-#: crates/ui-egui/src/lib.rs:5274
+#: crates/ui-egui/src/lib.rs:5276
 msgid "Click a wall to place the door."
 msgstr "Kliknutím na stěnu umístíte dveře."
 
-#: crates/ui-egui/src/lib.rs:5275
+#: crates/ui-egui/src/lib.rs:5277
 msgid "Click a wall to place the window."
 msgstr "Kliknutím na stěnu umístíte okno."
 
@@ -1731,31 +1731,31 @@ msgstr "Kliknutím na stěnu umístíte okno."
 msgid "Click a wall: a boundary line along it."
 msgstr "Klikněte na stěnu: vytvoří se čára hranice podél ní."
 
-#: crates/ui-egui/src/lib.rs:5378
+#: crates/ui-egui/src/lib.rs:5380
 msgid "Click an edge of a roof's footprint: it stands upright, a gable end; click it again to slope it."
 msgstr "Klikněte na hranu půdorysu střechy: vytvoří se svislý štít; dalším kliknutím obnovíte sklon."
 
-#: crates/ui-egui/src/lib.rs:5317
+#: crates/ui-egui/src/lib.rs:5319
 msgid "Click an edge to draw it in the line style in the Options Bar; <By Category> puts it back."
 msgstr "Klikněte na hranu pro vykreslení ve stylu čáry z panelu Možnosti; volba <Podle kategorie> vrátí výchozí zobrazení."
 
-#: crates/ui-egui/src/lib.rs:5333
+#: crates/ui-egui/src/lib.rs:5335
 msgid "Click an element to tag it with its type, a door's or window's with its mark, or with the field in Label."
 msgstr "Klikněte na prvek pro jeho označení popiskou s typem, u dveří a oken se značkou, nebo s polem v Popisce."
 
-#: crates/ui-egui/src/lib.rs:5316
+#: crates/ui-egui/src/lib.rs:5318
 msgid "Click an element to take it down in the view's phase; click it again to take it back."
 msgstr "Klikněte na prvek pro jeho demolici ve fázi pohledu; dalším kliknutím demolici zrušíte."
 
-#: crates/ui-egui/src/lib.rs:5349
+#: crates/ui-egui/src/lib.rs:5351
 msgid "Click beside the building: the elevation looks at the side you click by."
 msgstr "Klikněte vedle budovy: pohled bude směřovat ke straně, u které kliknete."
 
-#: crates/ui-egui/src/lib.rs:5310
+#: crates/ui-egui/src/lib.rs:5312
 msgid "Click each line to trim or extend to it, on the part to keep; Esc picks another boundary."
 msgstr "Klikněte na jednotlivé čáry na straně, kterou chcete zachovat, pro oříznutí nebo prodloužení k nim; klávesa Esc vybere jinou hranici."
 
-#: crates/ui-egui/src/lib.rs:5376
+#: crates/ui-egui/src/lib.rs:5378
 msgid "Click how far across the roof is swept, to either side of the line. Esc cancels."
 msgstr "Klikněte, jak daleko na obě strany od čáry má být střecha vysunuta. Klávesa Esc operaci zruší."
 
@@ -1767,27 +1767,27 @@ msgstr "Klikněte pro určení prohnutí na příslušné straně. Klávesa Esc 
 msgid "Click how far its other axis reaches. Esc cancels."
 msgstr "Klikněte pro určení dosahu druhé osy. Klávesa Esc operaci zruší."
 
-#: crates/ui-egui/src/lib.rs:5380
+#: crates/ui-egui/src/lib.rs:5382
 msgid "Click inside a room: a ceiling out to its walls' faces, as high as the Options Bar says."
 msgstr "Klikněte uvnitř místnosti: vytvoří se podhled k lícím stěn ve výšce zadané na panelu Možnosti."
 
-#: crates/ui-egui/src/lib.rs:5379
+#: crates/ui-egui/src/lib.rs:5381
 msgid "Click inside the walls to floor them: the slab runs under their outline, its top at the level."
 msgstr "Klikněte dovnitř mezi stěny pro vytvoření podlahy: deska bude vytvořena pod jejich obrysem s horním lícem v úrovni podlaží."
 
-#: crates/ui-egui/src/lib.rs:5371
+#: crates/ui-egui/src/lib.rs:5373
 msgid "Click inside the walls to roof them, on the level above: the overhang runs past their faces."
 msgstr "Klikněte dovnitř mezi stěny pro vytvoření střechy na podlaží výše: přesah bude přesahovat jejich líce."
 
-#: crates/ui-egui/src/lib.rs:5276
+#: crates/ui-egui/src/lib.rs:5278
 msgid "Click inside walls to place a room; the outline shows the room you'd get."
 msgstr "Klikněte dovnitř mezi stěny pro umístění místnosti; obrys znázorňuje výslednou místnost."
 
-#: crates/ui-egui/src/lib.rs:5332
+#: crates/ui-egui/src/lib.rs:5334
 msgid "Click its end: its length and angle read beside it. Esc cancels."
 msgstr "Klikněte na její konec: délka a úhel se zobrazují vedle ní. Klávesa Esc operaci zruší."
 
-#: crates/ui-egui/src/lib.rs:5391
+#: crates/ui-egui/src/lib.rs:5393
 msgid "Click its head: the floor rises toward it at the Options Bar's slope. Esc cancels."
 msgstr "Klikněte na její šipku: podlaha stoupá směrem k ní se sklonem z panelu Možnosti. Klávesa Esc operaci zruší."
 
@@ -1799,12 +1799,12 @@ msgstr "Klikněte na její další řídicí bod; klávesa Enter operaci dokonč
 msgid "Click its next point; Enter finishes it, the first point again closes it. Esc cancels."
 msgstr "Klikněte na její další bod; klávesa Enter operaci dokončí, opětovné kliknutí na počáteční bod ji uzavře. Klávesa Esc operaci zruší."
 
-#: crates/ui-egui/src/lib.rs:5226
-#: crates/ui-egui/src/lib.rs:5403
+#: crates/ui-egui/src/lib.rs:5228
+#: crates/ui-egui/src/lib.rs:5405
 msgid "Click on Bottom Left Corner"
 msgstr "Klikněte na levý dolní roh"
 
-#: crates/ui-egui/src/lib.rs:5227
+#: crates/ui-egui/src/lib.rs:5229
 msgid "Click on Top Right Corner"
 msgstr "Klikněte na pravý horní roh"
 
@@ -1812,7 +1812,7 @@ msgstr "Klikněte na pravý horní roh"
 msgid "Click on the model: a point of its surface."
 msgstr "Klikněte na model: bod na jeho povrchu."
 
-#: crates/ui-egui/src/lib.rs:5398
+#: crates/ui-egui/src/lib.rs:5400
 msgid "Click on the top: a point there, the Options Bar's offset over the surface, or at its Absolute elevation."
 msgstr "Klikněte na horní líc: bod v daném místě, s odsazením z panelu Možnosti nad povrchem, nebo na jeho absolutní výšce."
 
@@ -1824,8 +1824,8 @@ msgstr "Klikněte na jeden konec její osy."
 msgid "Click the arc's centre."
 msgstr "Klikněte na střed oblouku."
 
-#: crates/ui-egui/src/lib.rs:5288
-#: crates/ui-egui/src/lib.rs:5291
+#: crates/ui-egui/src/lib.rs:5290
+#: crates/ui-egui/src/lib.rs:5293
 msgid "Click the centre of rotation."
 msgstr "Klikněte na střed otáčení."
 
@@ -1845,12 +1845,12 @@ msgstr "Klikněte na konec čáry: oblouk na ni tečně naváže ve směru čár
 msgid "Click the end of its first axis."
 msgstr "Klikněte na konec její první osy."
 
-#: crates/ui-egui/src/lib.rs:5290
-#: crates/ui-egui/src/lib.rs:5295
+#: crates/ui-egui/src/lib.rs:5292
+#: crates/ui-egui/src/lib.rs:5297
 msgid "Click the end of the angle. Esc cancels."
 msgstr "Klikněte na koncový bod úhlu. Klávesa Esc operaci zruší."
 
-#: crates/ui-egui/src/lib.rs:5302
+#: crates/ui-egui/src/lib.rs:5304
 msgid "Click the end of the mirror axis."
 msgstr "Klikněte na konec osy zrcadlení."
 
@@ -1858,11 +1858,11 @@ msgstr "Klikněte na konec osy zrcadlení."
 msgid "Click the end of the run. Esc stops the chain."
 msgstr "Klikněte na konec ramene. Klávesa Esc ukončí řetězení."
 
-#: crates/ui-egui/src/lib.rs:5385
+#: crates/ui-egui/src/lib.rs:5387
 msgid "Click the first corner of the mass's footprint."
 msgstr "Klikněte na první roh půdorysu objemu."
 
-#: crates/ui-egui/src/lib.rs:5296
+#: crates/ui-egui/src/lib.rs:5298
 msgid "Click the first point of the array's distance."
 msgstr ""
 
@@ -1870,19 +1870,19 @@ msgstr ""
 msgid "Click the first point the spline passes through."
 msgstr "Klikněte na první bod, kterým spline prochází."
 
-#: crates/ui-egui/src/lib.rs:5386
+#: crates/ui-egui/src/lib.rs:5388
 msgid "Click the footprint's next corner. Esc cancels."
 msgstr "Klikněte na další roh půdorysu. Klávesa Esc operaci zruší."
 
-#: crates/ui-egui/src/lib.rs:5287
+#: crates/ui-egui/src/lib.rs:5289
 msgid "Click the line the witness line goes to. Esc cancels."
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:5308
+#: crates/ui-egui/src/lib.rs:5310
 msgid "Click the line to trim or extend to it, on the part to keep."
 msgstr "Klikněte na čáru na části, kterou chcete zachovat, pro oříznutí nebo prodloužení k ní."
 
-#: crates/ui-egui/src/lib.rs:5374
+#: crates/ui-egui/src/lib.rs:5376
 msgid "Click the line's end: the profile rises from it at the Options Bar's slope."
 msgstr "Klikněte na konec čáry: profil od něj stoupá se sklonem z panelu Možnosti."
 
@@ -1890,11 +1890,11 @@ msgstr "Klikněte na konec čáry: profil od něj stoupá se sklonem z panelu Mo
 msgid "Click the line's end; the next starts there. The first point again closes the loop; Esc stops."
 msgstr "Klikněte na konec čáry; další čára začne v tomto místě. První bod smyčku uzavře; klávesa Esc operaci ukončí."
 
-#: crates/ui-egui/src/lib.rs:5278
+#: crates/ui-egui/src/lib.rs:5280
 msgid "Click the line's next point; each click places a line. Esc ends the chain."
 msgstr "Klikněte na další bod čáry; každé kliknutí vytvoří čáru. Klávesa Esc řetězec ukončí."
 
-#: crates/ui-egui/src/lib.rs:5387
+#: crates/ui-egui/src/lib.rs:5389
 msgid "Click the next corner; Enter, or the first corner again, finishes the mass. Esc cancels."
 msgstr "Klikněte na další roh; klávesa Enter nebo opětovné kliknutí na první roh objem dokončí. Klávesa Esc operaci zruší."
 
@@ -1906,7 +1906,7 @@ msgstr "Klikněte na další bod, kterým prochází; klávesa Enter operaci dok
 msgid "Click the opposite corner. Esc cancels."
 msgstr "Klikněte na protilehlý roh. Klávesa Esc operaci zruší."
 
-#: crates/ui-egui/src/lib.rs:5383
+#: crates/ui-egui/src/lib.rs:5385
 msgid "Click the opposite corner: the shaft cuts the floors, ceilings and roofs up to its top. Esc cancels."
 msgstr "Klikněte na protilehlý roh: šachta vyřízne podlahy, podhledy a střechy až ke své horní úrovni. Klávesa Esc operaci zruší."
 
@@ -1914,7 +1914,7 @@ msgstr "Klikněte na protilehlý roh: šachta vyřízne podlahy, podhledy a stř
 msgid "Click the other end."
 msgstr "Klikněte na druhý konec."
 
-#: crates/ui-egui/src/lib.rs:5370
+#: crates/ui-egui/src/lib.rs:5372
 msgid "Click the path's next point. Enter finishes, Esc cancels."
 msgstr "Klikněte na další bod trasy. Klávesa Enter operaci dokončí, klávesa Esc ji zruší."
 
@@ -1922,27 +1922,27 @@ msgstr "Klikněte na další bod trasy. Klávesa Enter operaci dokončí, kláve
 msgid "Click the path's next point; Finish Edit Mode when it is drawn, or Esc to start another line."
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:5331
+#: crates/ui-egui/src/lib.rs:5333
 msgid "Click the ruler's start: points snap as they do drawing."
 msgstr "Klikněte na počátek měřítka: body se přichytávají stejně jako při kreslení."
 
-#: crates/ui-egui/src/lib.rs:5298
+#: crates/ui-egui/src/lib.rs:5300
 msgid "Click the second point: how far the second member, or the last, goes. Esc cancels."
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:5348
+#: crates/ui-egui/src/lib.rs:5350
 msgid "Click the section's end."
 msgstr "Klikněte na koncový bod řezu."
 
-#: crates/ui-egui/src/lib.rs:5347
+#: crates/ui-egui/src/lib.rs:5349
 msgid "Click the section's start: it looks to the left of the line you draw."
 msgstr "Klikněte na počáteční bod řezu: pohled směřuje vlevo od kreslené čáry."
 
-#: crates/ui-egui/src/lib.rs:5277
+#: crates/ui-egui/src/lib.rs:5279
 msgid "Click the separation line's start."
 msgstr "Klikněte na počátek oddělovací čáry."
 
-#: crates/ui-egui/src/lib.rs:5390
+#: crates/ui-egui/src/lib.rs:5392
 msgid "Click the slope arrow's tail: where the floor's top stays at its height offset."
 msgstr "Klikněte na počátek šipky sklonu: kde horní líc podlahy zůstává na svém výškovém odsazení."
 
@@ -1950,16 +1950,16 @@ msgstr "Klikněte na počátek šipky sklonu: kde horní líc podlahy zůstává
 msgid "Click the spline's first control point."
 msgstr "Klikněte na první řídicí bod spline."
 
-#: crates/ui-egui/src/lib.rs:5289
-#: crates/ui-egui/src/lib.rs:5293
+#: crates/ui-egui/src/lib.rs:5291
+#: crates/ui-egui/src/lib.rs:5295
 msgid "Click the start of the angle, or type an angle in the Options Bar."
 msgstr "Klikněte na počátek úhlu nebo zadejte úhel na panelu Možnosti."
 
-#: crates/ui-egui/src/lib.rs:5372
+#: crates/ui-egui/src/lib.rs:5374
 msgid "Click the start of the line the roof's profile runs along."
 msgstr "Klikněte na počátek čáry, podél které probíhá profil střechy."
 
-#: crates/ui-egui/src/lib.rs:5301
+#: crates/ui-egui/src/lib.rs:5303
 msgid "Click the start of the mirror axis."
 msgstr "Klikněte na počátek osy zrcadlení."
 
@@ -1979,19 +1979,19 @@ msgstr "Klikněte na druhý bod pracovní roviny."
 msgid "Click the work plane's third point."
 msgstr "Klikněte na třetí bod pracovní roviny."
 
-#: crates/ui-egui/src/lib.rs:5271
+#: crates/ui-egui/src/lib.rs:5273
 msgid "Click to build the wall to the next point. Enter or Esc ends the chain, Shift keeps it square."
 msgstr "Kliknutím vytvoříte stěnu k dalšímu bodu. Klávesa Enter nebo Esc ukončí řetězení, klávesa Shift zachová kolmost."
 
-#: crates/ui-egui/src/lib.rs:5281
+#: crates/ui-egui/src/lib.rs:5283
 msgid "Click to enter the grid's end point."
 msgstr "Kliknutím zadejte koncový bod osnovy."
 
-#: crates/ui-egui/src/lib.rs:5280
+#: crates/ui-egui/src/lib.rs:5282
 msgid "Click to enter the grid's start point."
 msgstr "Kliknutím zadejte počáteční bod osnovy."
 
-#: crates/ui-egui/src/lib.rs:5270
+#: crates/ui-egui/src/lib.rs:5272
 msgid "Click to enter the wall's start point."
 msgstr "Kliknutím zadejte počáteční bod stěny."
 
@@ -1999,7 +1999,7 @@ msgstr "Kliknutím zadejte počáteční bod stěny."
 msgid "Click to pick the text, drag to move it"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:5352
+#: crates/ui-egui/src/lib.rs:5354
 msgid "Click to place a column, as high as the Options Bar says."
 msgstr "Kliknutím umístíte sloup s výškou zadanou na panelu Možnosti."
 
@@ -2011,15 +2011,15 @@ msgstr "Kliknutím umístíte konstrukční sloup s výškou zadanou na panelu M
 msgid "Click to place an isolated footing: its top at the Options Bar's offset, as thick as it says."
 msgstr "Kliknutím umístíte samostatnou základovou patku: horní líc s odsazením z panelu Možnosti a tloušťkou tamtéž zadanou."
 
-#: crates/ui-egui/src/lib.rs:5240
+#: crates/ui-egui/src/lib.rs:5242
 msgid "Click to select what the view cuts or sees; the middle button pans, the wheel zooms."
 msgstr "Kliknutím vyberete prvky, které pohled protíná nebo zobrazuje; prostřední tlačítko posouvá pohled, kolečko přibližuje."
 
-#: crates/ui-egui/src/lib.rs:5269
+#: crates/ui-egui/src/lib.rs:5271
 msgid "Click to select, Tab for what's underneath, Ctrl adds, Shift takes away; drag to box or to move."
 msgstr "Kliknutím vyberete prvek, klávesa Tab prochází překryté prvky, Ctrl přidává do výběru, Shift odebírá; tažením vyberete oknem nebo přesunete."
 
-#: crates/ui-egui/src/lib.rs:5233
+#: crates/ui-egui/src/lib.rs:5235
 msgid "Click to select, drag a box to select several. Shift and the middle button orbit, the middle button pans, the wheel zooms."
 msgstr "Kliknutím vyberete prvek, tažením oknem vyberete více prvků. Shift s prostředním tlačítkem otáčí pohled, prostřední tlačítko jej posouvá, kolečko přibližuje."
 
@@ -2027,7 +2027,7 @@ msgstr "Kliknutím vyberete prvek, tažením oknem vyberete více prvků. Shift 
 msgid "Click to size the arc. Esc cancels."
 msgstr "Kliknutím určíte velikost oblouku. Klávesa Esc operaci zruší."
 
-#: crates/ui-egui/src/lib.rs:5351
+#: crates/ui-egui/src/lib.rs:5353
 msgid "Click what the camera looks at; its eye and target heights are the Options Bar's."
 msgstr "Klikněte na to, na co se kamera dívá; výšky oka a cíle jsou z panelu Možnosti."
 
@@ -2035,23 +2035,23 @@ msgstr "Klikněte na to, na co se kamera dívá; výšky oka a cíle jsou z pane
 msgid "Click where a corner goes. Esc cancels."
 msgstr "Klikněte do místa rohu. Klávesa Esc operaci zruší."
 
-#: crates/ui-egui/src/lib.rs:5320
+#: crates/ui-egui/src/lib.rs:5322
 msgid "Click where it ends: the group repeats along the line every spacing."
 msgstr "Klikněte na místo ukončení: skupina se opakuje podél čáry v zadaných roztečích."
 
-#: crates/ui-egui/src/lib.rs:5401
+#: crates/ui-egui/src/lib.rs:5403
 msgid "Click where it ends: the top folds along it. Esc cancels."
 msgstr "Klikněte do místa jejího konce: horní líc se podél ní zalomí. Klávesa Esc operaci zruší."
 
-#: crates/ui-egui/src/lib.rs:5355
+#: crates/ui-egui/src/lib.rs:5357
 msgid "Click where it goes; Space turns it a quarter turn."
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:5358
+#: crates/ui-egui/src/lib.rs:5360
 msgid "Click where its run ends: past its last riser, one run to the level above; short of it, a landing. Esc cancels."
 msgstr "Klikněte na místo ukončení ramene: za poslední podstupnicí vznikne jedno rameno do podlaží výše; před ní vznikne podesta. Klávesa Esc operaci zruší."
 
-#: crates/ui-egui/src/lib.rs:5363
+#: crates/ui-egui/src/lib.rs:5365
 msgid "Click where its run ends: past its top, one run, as high as the Options Bar says; short of it, a landing. Esc cancels."
 msgstr "Klikněte na místo ukončení ramene: za horní hranou vznikne jedno rameno do výšky z panelu Možnosti; před ní vznikne podesta. Klávesa Esc operaci zruší."
 
@@ -2067,7 +2067,7 @@ msgstr "Klikněte do místa, kde oblouk končí."
 msgid "Click where the arc ends. Esc cancels."
 msgstr "Klikněte do místa, kde oblouk končí. Klávesa Esc operaci zruší."
 
-#: crates/ui-egui/src/lib.rs:5335
+#: crates/ui-egui/src/lib.rs:5337
 msgid "Click where the arc goes: the angle on that side. Esc cancels."
 msgstr "Klikněte do místa oblouku: úhel na dané straně. Klávesa Esc operaci zruší."
 
@@ -2075,39 +2075,39 @@ msgstr "Klikněte do místa oblouku: úhel na dané straně. Klávesa Esc operac
 msgid "Click where the arc starts."
 msgstr "Klikněte do místa, kde oblouk začíná."
 
-#: crates/ui-egui/src/lib.rs:5283
+#: crates/ui-egui/src/lib.rs:5285
 msgid "Click where the base point goes, or type a distance and press Enter. Esc cancels."
 msgstr "Klikněte do místa základního bodu nebo zadejte vzdálenost a stiskněte Enter. Klávesa Esc operaci zruší."
 
-#: crates/ui-egui/src/lib.rs:5350
+#: crates/ui-egui/src/lib.rs:5352
 msgid "Click where the camera's eye stands: it looks at the point you click next."
 msgstr "Klikněte na místo, kde stojí oko kamery: dívá se na bod, na který kliknete následně."
 
-#: crates/ui-egui/src/lib.rs:5354
+#: crates/ui-egui/src/lib.rs:5356
 msgid "Click where the component goes; Space turns it a quarter turn."
 msgstr "Klikněte do místa umístění komponenty; Mezerník ji otočí o čtvrt otáčky."
 
-#: crates/ui-egui/src/lib.rs:5284
+#: crates/ui-egui/src/lib.rs:5286
 msgid "Click where the copy's base point goes, or type a distance and press Enter. Esc cancels."
 msgstr "Klikněte do místa základního bodu kopie nebo zadejte vzdálenost a stiskněte Enter. Klávesa Esc operaci zruší."
 
-#: crates/ui-egui/src/lib.rs:5388
+#: crates/ui-egui/src/lib.rs:5390
 msgid "Click where the detail line starts."
 msgstr "Klikněte do místa, kde začíná čára detailu."
 
-#: crates/ui-egui/src/lib.rs:5342
+#: crates/ui-egui/src/lib.rs:5344
 msgid "Click where the diameter goes. Esc cancels."
 msgstr "Klikněte do místa průměru. Klávesa Esc operaci zruší."
 
-#: crates/ui-egui/src/lib.rs:5340
+#: crates/ui-egui/src/lib.rs:5342
 msgid "Click where the dimension's arc goes, or pick two points on the arc to measure between. Esc cancels."
 msgstr "Klikněte do místa oblouku kóty nebo vyberte dva body na oblouku, mezi kterými se má měřit. Klávesa Esc operaci zruší."
 
-#: crates/ui-egui/src/lib.rs:5318
+#: crates/ui-egui/src/lib.rs:5320
 msgid "Click where the group's origin goes."
 msgstr "Klikněte do místa počátku skupiny."
 
-#: crates/ui-egui/src/lib.rs:5402
+#: crates/ui-egui/src/lib.rs:5404
 msgid "Click where the line starts."
 msgstr "Klikněte do místa, kde začíná čára."
 
@@ -2119,27 +2119,27 @@ msgstr "Klikněte do místa středu strany. Klávesa Esc operaci zruší."
 msgid "Click where the polyline starts."
 msgstr "Klikněte do místa, kde začíná křivka."
 
-#: crates/ui-egui/src/lib.rs:5343
+#: crates/ui-egui/src/lib.rs:5345
 msgid "Click where the radius goes. Esc cancels."
 msgstr "Klikněte do místa poloměru. Klávesa Esc operaci zruší."
 
-#: crates/ui-egui/src/lib.rs:5360
+#: crates/ui-egui/src/lib.rs:5362
 msgid "Click where the ramp starts: the middle of its foot."
 msgstr "Klikněte do místa nástupu rampy: střed její paty."
 
-#: crates/ui-egui/src/lib.rs:5319
+#: crates/ui-egui/src/lib.rs:5321
 msgid "Click where the repeating detail starts."
 msgstr "Klikněte do místa, kde začíná opakovaný detail."
 
-#: crates/ui-egui/src/lib.rs:5400
+#: crates/ui-egui/src/lib.rs:5402
 msgid "Click where the split line starts: a point, a corner or an edge of the top."
 msgstr "Klikněte do místa, kde začíná dělicí čára: bod, roh nebo hrana horního líce."
 
-#: crates/ui-egui/src/lib.rs:5356
+#: crates/ui-egui/src/lib.rs:5358
 msgid "Click where the stair starts: the middle of its first riser."
 msgstr "Klikněte do místa nástupu schodiště: střed první podstupnice."
 
-#: crates/ui-egui/src/lib.rs:5285
+#: crates/ui-egui/src/lib.rs:5287
 msgid "Click where to paste what was copied. Esc cancels."
 msgstr ""
 
@@ -2147,14 +2147,14 @@ msgstr ""
 msgid "Click which way it climbs: its risers take it up to the level above. Esc cancels."
 msgstr "Klikněte pro směr stoupání: podstupnice vyvedou rameno do podlaží výše. Klávesa Esc operaci zruší."
 
-#: crates/ui-egui/src/lib.rs:5367
+#: crates/ui-egui/src/lib.rs:5369
 msgid "Click which way the next run goes from the landing: on, left, right, or back beside it."
 msgstr "Klikněte pro určení směru dalšího ramene z podesty: rovně, vlevo, vpravo nebo zpět vedle něj."
 
 #: crates/ui-egui/src/favorites.rs:179
-#: crates/ui-egui/src/graphics.rs:524
+#: crates/ui-egui/src/graphics.rs:533
 #: crates/ui-egui/src/inquiry.rs:206
-#: crates/ui-egui/src/lib.rs:5644
+#: crates/ui-egui/src/lib.rs:5646
 #: crates/ui-egui/src/phasing.rs:278
 #: crates/ui-egui/src/phasing.rs:400
 #: crates/ui-egui/src/plugins.rs:267
@@ -2171,7 +2171,7 @@ msgstr "Klikněte pro určení směru dalšího ramene z podesty: rovně, vlevo,
 msgid "Close"
 msgstr "Zavřít"
 
-#: crates/ui-egui/src/lib.rs:4350
+#: crates/ui-egui/src/lib.rs:4352
 msgid "Close Inactive"
 msgstr "Zavřít neaktivní"
 
@@ -2179,13 +2179,13 @@ msgstr "Zavřít neaktivní"
 msgid "Close dialog"
 msgstr "Zavřít dialog"
 
-#: crates/ui-egui/src/lib.rs:4350
+#: crates/ui-egui/src/lib.rs:4352
 msgid "Close every view but this one"
 msgstr "Zavřít všechny pohledy kromě tohoto"
 
 #: crates/ui-egui/src/dock.rs:560
 #: crates/ui-egui/src/dock.rs:687
-#: crates/ui-egui/src/lib.rs:5615
+#: crates/ui-egui/src/lib.rs:5617
 msgid "Close {}"
 msgstr "Zavřít {}"
 
@@ -2220,7 +2220,7 @@ msgstr "Barva v půdorysech"
 msgid "Column"
 msgstr "Sloup"
 
-#: crates/ui-egui/src/lib.rs:3999
+#: crates/ui-egui/src/lib.rs:4001
 msgid "Column (CL): click where it stands"
 msgstr "Sloup (CL): klikněte do místa umístění"
 
@@ -2270,7 +2270,7 @@ msgstr "Porovnání"
 msgid "Component"
 msgstr "Komponenta"
 
-#: crates/ui-egui/src/lib.rs:4000
+#: crates/ui-egui/src/lib.rs:4002
 msgid "Component (CM): a family's type, where you click; Space turns it"
 msgstr "Komponenta (CM): typ rodiny v místě kliknutí; Mezerník jej otočí"
 
@@ -2286,7 +2286,7 @@ msgstr ""
 msgid "Computation Height"
 msgstr "Výška výpočtu"
 
-#: crates/ui-egui/src/lib.rs:3926
+#: crates/ui-egui/src/lib.rs:3928
 msgid "Conceptual Mass"
 msgstr "Koncepční objem"
 
@@ -2324,8 +2324,8 @@ msgid "Connectors are where the family joins a system: what an electrical device
 msgstr ""
 
 #: crates/ui-egui/src/array.rs:124
-#: crates/ui-egui/src/lib.rs:5094
-#: crates/ui-egui/src/lib.rs:5097
+#: crates/ui-egui/src/lib.rs:5096
+#: crates/ui-egui/src/lib.rs:5099
 msgid "Constrain"
 msgstr "Omezit"
 
@@ -2349,11 +2349,11 @@ msgstr ""
 msgid "Control port"
 msgstr "Řídicí port"
 
-#: crates/ui-egui/src/lib.rs:2872
+#: crates/ui-egui/src/lib.rs:2874
 msgid "Convert Lines"
 msgstr "Převést čáry"
 
-#: crates/ui-egui/src/lib.rs:2870
+#: crates/ui-egui/src/lib.rs:2872
 msgid "Convert Lines: make the selected folding lines split lines, so the top keeps folding along them"
 msgstr "Převést čáry: vybrané zlomové čáry se změní na dělicí čáry, takže se horní líc podél nich dál zalamuje"
 
@@ -2397,15 +2397,15 @@ msgstr "Měď"
 #: crates/core/src/commands.rs:1455
 #: crates/ui-egui/src/canvas.rs:1986
 #: crates/ui-egui/src/inquiry.rs:179
-#: crates/ui-egui/src/lib.rs:5103
-#: crates/ui-egui/src/lib.rs:5151
-#: crates/ui-egui/src/lib.rs:5188
+#: crates/ui-egui/src/lib.rs:5105
+#: crates/ui-egui/src/lib.rs:5153
+#: crates/ui-egui/src/lib.rs:5190
 #: crates/ui-egui/src/plugins.rs:268
 #: crates/ui-egui/src/selecting.rs:78
 msgid "Copy"
 msgstr "Kopie"
 
-#: crates/ui-egui/src/lib.rs:4729
+#: crates/ui-egui/src/lib.rs:4731
 msgid "Copy (CO): click a base point, then where the copy goes"
 msgstr "Kopírovat (CO): klikněte na základní bod a potom na místo, kam se má kopie umístit"
 
@@ -2518,7 +2518,7 @@ msgstr ""
 msgid "Cover"
 msgstr "Krytí"
 
-#: crates/ui-egui/src/lib.rs:5196
+#: crates/ui-egui/src/lib.rs:5198
 #: crates/ui-egui/src/templates.rs:497
 #: crates/ui-egui/src/typeprops.rs:100
 msgid "Create"
@@ -2528,7 +2528,7 @@ msgstr "Vytvořit"
 msgid "Create Ceiling Boundary"
 msgstr "Vytvořit hranici podhledu"
 
-#: crates/ui-egui/src/lib.rs:1696
+#: crates/ui-egui/src/lib.rs:1697
 msgid "Create Extrusion Roof"
 msgstr "Vytvořit střechu vysunutím"
 
@@ -2536,7 +2536,7 @@ msgstr "Vytvořit střechu vysunutím"
 msgid "Create Filled Region Boundary"
 msgstr "Vytvořit hranici vyplněné oblasti"
 
-#: crates/ui-egui/src/lib.rs:1698
+#: crates/ui-egui/src/lib.rs:1699
 msgid "Create Floor"
 msgstr "Vytvořit podlahu"
 
@@ -2556,7 +2556,7 @@ msgstr "Vytvořit skupinu (GP): vybrané čáry detailu, vyplněné oblasti a te
 msgid "Create Masking Region Boundary"
 msgstr "Vytvořit hranici maskovací oblasti"
 
-#: crates/ui-egui/src/lib.rs:1701
+#: crates/ui-egui/src/lib.rs:1702
 msgid "Create Mass"
 msgstr "Vytvořit objem"
 
@@ -2572,11 +2572,11 @@ msgstr ""
 msgid "Create Property Line"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:1694
+#: crates/ui-egui/src/lib.rs:1695
 msgid "Create Railing Path"
 msgstr "Vytvořit trasu zábradlí"
 
-#: crates/ui-egui/src/lib.rs:1693
+#: crates/ui-egui/src/lib.rs:1694
 msgid "Create Ramp"
 msgstr "Vytvořit rampu"
 
@@ -2584,11 +2584,11 @@ msgstr "Vytvořit rampu"
 msgid "Create Road Path"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:1695
+#: crates/ui-egui/src/lib.rs:1696
 msgid "Create Roof Footprint"
 msgstr "Vytvořit půdorysnou stopu střechy"
 
-#: crates/ui-egui/src/lib.rs:1700
+#: crates/ui-egui/src/lib.rs:1701
 msgid "Create Shaft Opening"
 msgstr "Vytvořit šachtový otvor"
 
@@ -2601,7 +2601,7 @@ msgstr "Vytvořit náčrt šachtového otvoru"
 msgid "Create Similar"
 msgstr "Vytvořit podobný"
 
-#: crates/ui-egui/src/lib.rs:1692
+#: crates/ui-egui/src/lib.rs:1693
 msgid "Create Stair"
 msgstr "Vytvořit schodiště"
 
@@ -2613,15 +2613,15 @@ msgstr ""
 msgid "Create Toposolid"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:1286
+#: crates/ui-egui/src/lib.rs:1287
 msgid "Create {}"
 msgstr "Vytvořit {}"
 
-#: crates/ui-egui/src/lib.rs:4260
+#: crates/ui-egui/src/lib.rs:4262
 msgid "Crop View"
 msgstr "Oříznout pohled"
 
-#: crates/ui-egui/src/lib.rs:4259
+#: crates/ui-egui/src/lib.rs:4261
 msgid "Crop View: show only the crop region; drag its edges by their grips"
 msgstr "Oříznout pohled: zobrazit pouze oblast oříznutí; přetáhněte její hrany pomocí uzlů"
 
@@ -2651,7 +2651,7 @@ msgid "Curve preview"
 msgstr "Náhled křivky"
 
 #: crates/ui-egui/src/fillpatterns.rs:612
-#: crates/ui-egui/src/footer.rs:328
+#: crates/ui-egui/src/footer.rs:385
 msgid "Custom"
 msgstr "Vlastní"
 
@@ -2661,7 +2661,7 @@ msgstr "Vlastní"
 msgid "Cut"
 msgstr "Řez"
 
-#: crates/ui-egui/src/graphics.rs:734
+#: crates/ui-egui/src/graphics.rs:743
 msgid "Cut Lines"
 msgstr "Čáry řezu"
 
@@ -2669,7 +2669,7 @@ msgstr "Čáry řezu"
 msgid "Cut Pattern"
 msgstr "Vzor řezu"
 
-#: crates/ui-egui/src/graphics.rs:735
+#: crates/ui-egui/src/graphics.rs:744
 msgid "Cut Patterns"
 msgstr "Vzory řezu"
 
@@ -2694,7 +2694,7 @@ msgstr "DOLŮ"
 msgid "Dark"
 msgstr "Tmavý"
 
-#: crates/ui-egui/src/lib.rs:4246
+#: crates/ui-egui/src/lib.rs:4248
 msgid "Dark Mode"
 msgstr "Tmavý režim"
 
@@ -2710,11 +2710,11 @@ msgstr "Čárkovaná"
 msgid "Dash Dot"
 msgstr "Čerchovaná"
 
-#: crates/ui-egui/src/graphics.rs:1463
+#: crates/ui-egui/src/graphics.rs:1472
 msgid "Dashed"
 msgstr "Čárkovaná"
 
-#: crates/ui-egui/src/lib.rs:1333
+#: crates/ui-egui/src/lib.rs:1334
 msgid "Data"
 msgstr "Data"
 
@@ -2730,7 +2730,7 @@ msgstr "Datová zásuvka (DT): datový bod v místě kliknutí na stěně; Mezer
 msgid "Data Outlets"
 msgstr "Datové zásuvky"
 
-#: crates/ui-egui/src/lib.rs:4074
+#: crates/ui-egui/src/lib.rs:4076
 msgid "Datum"
 msgstr "Základní prvky"
 
@@ -2742,7 +2742,7 @@ msgstr "Desetinná místa"
 msgid "Default"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:3567
+#: crates/ui-egui/src/lib.rs:3569
 msgid "Default 3D View"
 msgstr "Výchozí 3D pohled"
 
@@ -2764,7 +2764,7 @@ msgstr "Výchozí tloušťka"
 #: crates/ui-egui/src/electrical.rs:279
 #: crates/ui-egui/src/fillpatterns.rs:398
 #: crates/ui-egui/src/fillpatterns.rs:581
-#: crates/ui-egui/src/graphics.rs:471
+#: crates/ui-egui/src/graphics.rs:480
 #: crates/ui-egui/src/linestyles/creator.rs:170
 #: crates/ui-egui/src/linestyles.rs:174
 #: crates/ui-egui/src/linestyles.rs:209
@@ -2779,7 +2779,7 @@ msgstr "Výchozí tloušťka"
 msgid "Delete"
 msgstr "Odstranit"
 
-#: crates/ui-egui/src/lib.rs:4768
+#: crates/ui-egui/src/lib.rs:4770
 msgid "Delete (DE) the selection"
 msgstr "Odstranit (DE) výběr"
 
@@ -2827,16 +2827,16 @@ msgstr "Odstranit soustavu {}"
 msgid "Delete voltage {}"
 msgstr "Odstranit napětí {}"
 
-#: crates/ui-egui/src/lib.rs:1287
+#: crates/ui-egui/src/lib.rs:1288
 #: crates/ui-egui/src/lineweights.rs:56
 msgid "Delete {}"
 msgstr "Odstranit {}"
 
-#: crates/ui-egui/src/lib.rs:4884
+#: crates/ui-egui/src/lib.rs:4886
 msgid "Demolish"
 msgstr "Zbourat"
 
-#: crates/ui-egui/src/lib.rs:4882
+#: crates/ui-egui/src/lib.rs:4884
 msgid "Demolish (DW): click an element to take it down in the view's phase; click it again to take it back"
 msgstr "Zbourat (DW): klikněte na prvek, který chcete zbourat ve fázi pohledu; dalším kliknutím bourání zrušíte"
 
@@ -2872,13 +2872,13 @@ msgstr ""
 msgid "Design Option"
 msgstr "Varianta návrhu"
 
-#: crates/ui-egui/src/lib.rs:4593
+#: crates/ui-egui/src/lib.rs:4595
 #: crates/ui-egui/src/phasing.rs:318
 #: crates/ui-egui/src/templates.rs:699
 msgid "Design Options"
 msgstr "Varianty návrhu"
 
-#: crates/ui-egui/src/lib.rs:4592
+#: crates/ui-egui/src/lib.rs:4594
 msgid "Design Options (DO): sets of options for a part of the design, and the one new elements are made in"
 msgstr "Varianty návrhu (DO): sady variant pro část návrhu a varianta, ve které se vytvářejí nové prvky"
 
@@ -2886,11 +2886,11 @@ msgstr "Varianty návrhu (DO): sady variant pro část návrhu a varianta, ve kt
 msgid "Desk"
 msgstr "Pracovní stůl"
 
-#: crates/ui-egui/src/lib.rs:4821
+#: crates/ui-egui/src/lib.rs:4823
 msgid "Detach Top/Base"
 msgstr "Odpojit horní část / základnu"
 
-#: crates/ui-egui/src/lib.rs:4821
+#: crates/ui-egui/src/lib.rs:4823
 msgid "Detach Top/Base: the walls' tops and bases their own again"
 msgstr "Odpojit horní část / základnu: horní část a základna stěn se vrátí do původního stavu"
 
@@ -2906,13 +2906,13 @@ msgstr "Skupina detailu"
 msgid "Detail Group: click to place the group on the Options Bar"
 msgstr "Skupina detailu: kliknutím umístíte skupinu z panelu možností"
 
-#: crates/ui-egui/src/graphics.rs:588
-#: crates/ui-egui/src/graphics.rs:839
+#: crates/ui-egui/src/graphics.rs:597
+#: crates/ui-egui/src/graphics.rs:848
 #: crates/ui-egui/src/templates.rs:682
 msgid "Detail Level"
 msgstr "Úroveň detailu"
 
-#: crates/ui-egui/src/footer.rs:342
+#: crates/ui-egui/src/footer.rs:399
 msgid "Detail Level: Coarse draws what is cut in one poché, Medium adds the layers and the symbols of openings, Fine the patterns"
 msgstr "Úroveň detailu: Hrubá vykreslí řez v plné výplni, Střední přidá vrstvy a symboly otvorů, Jemná vzory"
 
@@ -2951,7 +2951,7 @@ msgid "Diagonal Up"
 msgstr "Úhlopříčně nahoru"
 
 #: crates/core/src/fixtures.rs:207
-#: crates/ui-egui/src/lib.rs:4122
+#: crates/ui-egui/src/lib.rs:4124
 #: crates/ui-egui/src/reinforce.rs:51
 #: crates/ui-egui/src/reinforce.rs:59
 #: crates/ui-egui/src/reinforce.rs:66
@@ -2968,7 +2968,7 @@ msgstr "Úhlopříčně nahoru"
 msgid "Diameter"
 msgstr "Průměr"
 
-#: crates/ui-egui/src/lib.rs:4123
+#: crates/ui-egui/src/lib.rs:4125
 msgid "Diameter Dimension: pick a round column, a curved wall, a circle or an arc, then click where it goes"
 msgstr "Kóta průměru: vyberte kruhový sloup, zakřivenou stěnu, kružnici nebo oblouk a potom klikněte do místa kóty"
 
@@ -3046,7 +3046,7 @@ msgstr ""
 msgid "Discard"
 msgstr "Zahodit"
 
-#: crates/ui-egui/src/lib.rs:5482
+#: crates/ui-egui/src/lib.rs:5484
 msgid "Dismiss"
 msgstr "Zavřít"
 
@@ -3083,12 +3083,12 @@ msgstr "Ukotvit v pohledech"
 msgid "Dock {}"
 msgstr "Ukotvit {}"
 
-#: crates/ui-egui/src/lib.rs:5882
+#: crates/ui-egui/src/lib.rs:5884
 msgid "Don't Save"
 msgstr "Neukládat"
 
 #: crates/ui-egui/src/fillpatterns.rs:413
-#: crates/ui-egui/src/lib.rs:3724
+#: crates/ui-egui/src/lib.rs:3726
 msgid "Done"
 msgstr "Hotovo"
 
@@ -3101,7 +3101,7 @@ msgstr "Dokončit úpravu nástrojů"
 msgid "Door"
 msgstr "Dveře"
 
-#: crates/ui-egui/src/lib.rs:3997
+#: crates/ui-egui/src/lib.rs:3999
 msgid "Door (DR): click a wall"
 msgstr "Dveře (DR): klikněte na stěnu"
 
@@ -3117,7 +3117,7 @@ msgstr ""
 msgid "Dormer"
 msgstr "Vikýř"
 
-#: crates/ui-egui/src/lib.rs:4064
+#: crates/ui-egui/src/lib.rs:4066
 msgid "Dormer: click a roof's slope where its front wall goes; the roof opens under it"
 msgstr "Vikýř: klikněte na střešní rovinu v místě čelní stěny; střecha se pod ní otevře"
 
@@ -3127,7 +3127,7 @@ msgstr "Vikýř: klikněte na střešní rovinu v místě čelní stěny; střec
 msgid "Dot"
 msgstr "Tečkovaná"
 
-#: crates/ui-egui/src/graphics.rs:1464
+#: crates/ui-egui/src/graphics.rs:1473
 msgid "Dotted"
 msgstr "Tečkovaná"
 
@@ -3147,7 +3147,7 @@ msgstr "Dvoukřídlé otočné"
 msgid "Double-clicking a tab's name does the same; a click on a tab then shows its tools until one is picked"
 msgstr "Dvojité kliknutí na název karty udělá totéž; kliknutí na kartu pak zobrazí její nástroje, dokud některý nevyberete"
 
-#: crates/ui-egui/src/graphics.rs:1168
+#: crates/ui-egui/src/graphics.rs:1177
 #: crates/ui-egui/src/linestyles/creator.rs:166
 msgid "Down"
 msgstr "Dolů"
@@ -3218,15 +3218,15 @@ msgstr "Duplikovat"
 msgid "Duplicate Type"
 msgstr "Duplikovat typ"
 
-#: crates/ui-egui/src/lib.rs:4273
+#: crates/ui-egui/src/lib.rs:4275
 msgid "Duplicate View"
 msgstr "Duplikovat pohled"
 
-#: crates/ui-egui/src/lib.rs:4271
+#: crates/ui-egui/src/lib.rs:4273
 msgid "Duplicate View (DP): a new plan of this level with its own annotation; with detailing, it starts with this plan's; as a dependent, it follows this plan's range and graphics"
 msgstr "Duplikovat pohled (DP): nový půdorys tohoto podlaží s vlastními popiskami; s detaily začíná s popiskami tohoto půdorysu; jako závislý přebírá rozsah a grafiku tohoto půdorysu"
 
-#: crates/ui-egui/src/lib.rs:4204
+#: crates/ui-egui/src/lib.rs:4206
 msgid "Duplicate View: open a plan first"
 msgstr "Duplikovat pohled: nejprve otevřete půdorys"
 
@@ -3301,7 +3301,7 @@ msgstr "Východ"
 msgid "Edit"
 msgstr "Upravit"
 
-#: crates/ui-egui/src/graphics.rs:611
+#: crates/ui-egui/src/graphics.rs:620
 msgid "Edit Background Grids"
 msgstr "Upravit mřížky na pozadí"
 
@@ -3309,11 +3309,11 @@ msgstr "Upravit mřížky na pozadí"
 msgid "Edit Boundary"
 msgstr "Upravit obrys"
 
-#: crates/ui-egui/src/lib.rs:4552
+#: crates/ui-egui/src/lib.rs:4554
 msgid "Edit Family"
 msgstr "Upravit rodinu"
 
-#: crates/ui-egui/src/lib.rs:4550
+#: crates/ui-egui/src/lib.rs:4552
 msgid "Edit Family: the family of what is selected, or of the component being placed"
 msgstr "Upravit rodinu: rodina vybraného prvku nebo právě umísťované komponenty"
 
@@ -3351,11 +3351,11 @@ msgstr "Upravit nástroje"
 msgid "Edit Type"
 msgstr "Upravit typ"
 
-#: crates/ui-egui/src/lib.rs:4643
+#: crates/ui-egui/src/lib.rs:4645
 msgid "Edit the type"
 msgstr "Upravit typ"
 
-#: crates/ui-egui/src/graphics.rs:633
+#: crates/ui-egui/src/graphics.rs:642
 #: crates/ui-egui/src/properties.rs:2073
 #: crates/ui-egui/src/templates.rs:657
 msgid "Edit {}"
@@ -3365,8 +3365,8 @@ msgstr "Upravit {}"
 msgid "Editing"
 msgstr "Úpravy"
 
-#: crates/ui-egui/src/graphics.rs:610
-#: crates/ui-egui/src/graphics.rs:632
+#: crates/ui-egui/src/graphics.rs:619
+#: crates/ui-egui/src/graphics.rs:641
 #: crates/ui-egui/src/properties.rs:2071
 #: crates/ui-egui/src/templates.rs:659
 msgid "Edit…"
@@ -3376,7 +3376,7 @@ msgstr "Upravit…"
 msgid "Elbow 90"
 msgstr "Koleno 90°"
 
-#: crates/ui-egui/src/lib.rs:1331
+#: crates/ui-egui/src/lib.rs:1332
 msgid "Electrical"
 msgstr "Elektroinstalace"
 
@@ -3401,11 +3401,11 @@ msgid "Electrical Power"
 msgstr ""
 
 #: crates/ui-egui/src/electrical.rs:477
-#: crates/ui-egui/src/lib.rs:4479
+#: crates/ui-egui/src/lib.rs:4481
 msgid "Electrical Settings"
 msgstr "Elektrotechnická nastavení"
 
-#: crates/ui-egui/src/lib.rs:4477
+#: crates/ui-egui/src/lib.rs:4479
 msgid "Electrical Settings: the voltages, distribution systems and wire types circuits and panels refer to; sections in mm²"
 msgstr "Elektrotechnická nastavení: napětí, rozvodné soustavy a typy vodičů, na které se odkazují obvody a rozváděče; průřezy v mm²"
 
@@ -3414,8 +3414,8 @@ msgstr "Elektrotechnická nastavení: napětí, rozvodné soustavy a typy vodič
 msgid "Elements"
 msgstr "Prvky"
 
-#: crates/ui-egui/src/lib.rs:4288
-#: crates/ui-egui/src/lib.rs:5192
+#: crates/ui-egui/src/lib.rs:4290
+#: crates/ui-egui/src/lib.rs:5194
 #: crates/ui-egui/src/selecting.rs:89
 msgid "Elevation"
 msgstr "Pohled"
@@ -3424,7 +3424,7 @@ msgstr "Pohled"
 msgid "Elevation (°)"
 msgstr "Výškový úhel (°)"
 
-#: crates/ui-egui/src/lib.rs:2893
+#: crates/ui-egui/src/lib.rs:2895
 msgid "Elevation Base:"
 msgstr "Základ výšky:"
 
@@ -3432,16 +3432,16 @@ msgstr "Základ výšky:"
 msgid "Elevation/Section"
 msgstr "Pohled/Řez"
 
-#: crates/ui-egui/src/lib.rs:5037
-#: crates/ui-egui/src/lib.rs:5043
+#: crates/ui-egui/src/lib.rs:5039
+#: crates/ui-egui/src/lib.rs:5045
 msgid "Elevation:"
 msgstr "Výška:"
 
-#: crates/ui-egui/src/lib.rs:4287
+#: crates/ui-egui/src/lib.rs:4289
 msgid "Elevation: click beside the building, on the side to look at"
 msgstr "Nárys: klikněte vedle budovy na stranu, ze které se chcete dívat"
 
-#: crates/ui-egui/src/lib.rs:3241
+#: crates/ui-egui/src/lib.rs:3243
 msgid "Elevation: {}"
 msgstr "Nárys: {}"
 
@@ -3521,7 +3521,7 @@ msgstr "Text rovnosti"
 msgid "Equipment"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:5459
+#: crates/ui-egui/src/lib.rs:5461
 #: crates/ui-egui/src/plugins.rs:423
 msgid "Error"
 msgstr "Chyba"
@@ -3530,7 +3530,7 @@ msgstr "Chyba"
 msgid "Every check passed."
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4334
+#: crates/ui-egui/src/lib.rs:4336
 msgid "Every view is on a sheet."
 msgstr "Každý pohled je na výkresu."
 
@@ -3543,24 +3543,24 @@ msgstr "Vše, co projekt obsahuje, tak, jak to kreslí jeho kategorie"
 msgid "Existing"
 msgstr "Stávající"
 
-#: crates/ui-egui/src/lib.rs:3867
+#: crates/ui-egui/src/lib.rs:3869
 msgid "Exit"
 msgstr "Ukončit"
 
-#: crates/ui-egui/src/lib.rs:3716
+#: crates/ui-egui/src/lib.rs:3718
 msgid "Expand the Ribbon"
 msgstr "Rozbalit pás karet"
 
-#: crates/ui-egui/src/lib.rs:4803
+#: crates/ui-egui/src/lib.rs:4805
 msgid "Explode Polyline"
 msgstr "Rozložit křivku"
 
-#: crates/ui-egui/src/lib.rs:4802
+#: crates/ui-egui/src/lib.rs:4804
 msgid "Explode Polyline (EX): a polyline taken apart into a line or an arc for each segment"
 msgstr "Rozložit křivku (EX): rozdělení křivky na jednotlivé úsečky nebo oblouky pro každý segment"
 
 #: crates/ui-egui/src/fillpatterns.rs:769
-#: crates/ui-egui/src/lib.rs:3874
+#: crates/ui-egui/src/lib.rs:3876
 msgid "Export"
 msgstr "Exportovat"
 
@@ -3596,7 +3596,7 @@ msgstr "Oko"
 msgid "Eye Elevation"
 msgstr "Výška oka"
 
-#: crates/ui-egui/src/lib.rs:5017
+#: crates/ui-egui/src/lib.rs:5019
 msgid "Eye Height:"
 msgstr "Výška oka:"
 
@@ -3650,11 +3650,11 @@ msgid "Faster for large models. If the card fails, the 3D view is drawn on the p
 msgstr "Rychlejší pro velké modely. Při selhání grafické karty se 3D pohled vykresluje procesorem"
 
 #: crates/ui-egui/src/favorites.rs:112
-#: crates/ui-egui/src/lib.rs:4418
+#: crates/ui-egui/src/lib.rs:4420
 msgid "Favorites"
 msgstr "Oblíbené"
 
-#: crates/ui-egui/src/lib.rs:4417
+#: crates/ui-egui/src/lib.rs:4419
 msgid "Favorites: the materials and families you keep for every project; add one to this project with a click"
 msgstr "Oblíbené: materiály a rodiny uchovávané pro každý projekt; kliknutím přidejte položku do tohoto projektu"
 
@@ -3683,7 +3683,7 @@ msgstr ""
 msgid "Fields"
 msgstr "Pole"
 
-#: crates/ui-egui/src/lib.rs:3546
+#: crates/ui-egui/src/lib.rs:3548
 msgid "File"
 msgstr "Soubor"
 
@@ -3699,11 +3699,11 @@ msgstr "Soubory"
 msgid "Fill Patterns"
 msgstr "Vzory výplně"
 
-#: crates/ui-egui/src/lib.rs:4454
+#: crates/ui-egui/src/lib.rs:4456
 msgid "Fill Patterns: the patterns filled regions and materials fill with, simple or made from lines drawn"
 msgstr "Vzory výplně: vzory, kterými se vyplňují vyplněné oblasti a materiály, jednoduché nebo vytvořené z nakreslených čar"
 
-#: crates/ui-egui/src/graphics.rs:1410
+#: crates/ui-egui/src/graphics.rs:1419
 msgid "Fill color"
 msgstr "Barva výplně"
 
@@ -3745,17 +3745,17 @@ msgid "Fills"
 msgstr ""
 
 #: crates/ui-egui/src/filter.rs:68
-#: crates/ui-egui/src/graphics.rs:467
-#: crates/ui-egui/src/lib.rs:3905
+#: crates/ui-egui/src/graphics.rs:476
+#: crates/ui-egui/src/lib.rs:3907
 msgid "Filter"
 msgstr "Filtr"
 
-#: crates/ui-egui/src/graphics.rs:496
+#: crates/ui-egui/src/graphics.rs:505
 msgid "Filter Rules"
 msgstr "Pravidla filtru"
 
-#: crates/ui-egui/src/lib.rs:5418
-#: crates/ui-egui/src/lib.rs:5419
+#: crates/ui-egui/src/lib.rs:5420
+#: crates/ui-egui/src/lib.rs:5421
 msgid "Filter Selection"
 msgstr "Filtrovat výběr"
 
@@ -3764,24 +3764,24 @@ msgstr "Filtrovat výběr"
 msgid "Filter by:"
 msgstr "Filtrovat podle:"
 
-#: crates/ui-egui/src/graphics.rs:456
+#: crates/ui-egui/src/graphics.rs:465
 msgid "Filter:"
 msgstr "Filtr:"
 
-#: crates/ui-egui/src/lib.rs:3904
+#: crates/ui-egui/src/lib.rs:3906
 msgid "Filter: keep some of the selection, by category or by the values of a parameter they all have"
 msgstr "Filtr: ponechte část výběru podle kategorie nebo podle společných hodnot parametrů"
 
-#: crates/ui-egui/src/graphics.rs:452
-#: crates/ui-egui/src/lib.rs:4234
+#: crates/ui-egui/src/graphics.rs:461
+#: crates/ui-egui/src/lib.rs:4236
 msgid "Filters"
 msgstr "Filtry"
 
-#: crates/ui-egui/src/lib.rs:4233
+#: crates/ui-egui/src/lib.rs:4235
 msgid "Filters (FT): rules that pick out elements for a view to hide or draw another way"
 msgstr "Filtry (FT): pravidla pro výběr prvků, které se v pohledu skryjí nebo vykreslí odlišně"
 
-#: crates/ui-egui/src/lib.rs:3576
+#: crates/ui-egui/src/lib.rs:3578
 msgid "Find"
 msgstr "Najít"
 
@@ -3883,11 +3883,11 @@ msgstr "Rovná"
 msgid "Flat: it has no slope arrow. Draw one from where its top stays toward where it rises."
 msgstr "Rovná: nemá šipku sklonu. Nakreslete ji z místa, kde horní líc zůstává na místě, směrem k místu, kde stoupá."
 
-#: crates/ui-egui/src/lib.rs:4814
+#: crates/ui-egui/src/lib.rs:4816
 msgid "Flip"
 msgstr "Převrátit"
 
-#: crates/ui-egui/src/lib.rs:4813
+#: crates/ui-egui/src/lib.rs:4815
 msgid "Flip (Space): the walls' exterior sides go to the other side of their location lines"
 msgstr "Převrátit (Mezerník): vnější strany stěn přejdou na druhou stranu jejich čar umístění"
 
@@ -3905,7 +3905,7 @@ msgstr ""
 
 #: crates/ui-egui/src/dock.rs:586
 #: crates/ui-egui/src/dock.rs:830
-#: crates/ui-egui/src/lib.rs:5640
+#: crates/ui-egui/src/lib.rs:5642
 msgid "Float"
 msgstr "Uvolnit"
 
@@ -3931,8 +3931,8 @@ msgstr ""
 msgid "Floor Plan"
 msgstr "Půdorys"
 
-#: crates/ui-egui/src/lib.rs:3236
-#: crates/ui-egui/src/lib.rs:3237
+#: crates/ui-egui/src/lib.rs:3238
+#: crates/ui-egui/src/lib.rs:3239
 msgid "Floor Plan: {}"
 msgstr "Půdorys: {}"
 
@@ -3948,7 +3948,7 @@ msgstr "Výkaz podlah"
 msgid "Floor by Face"
 msgstr "Podlaha podle plochy"
 
-#: crates/ui-egui/src/lib.rs:3946
+#: crates/ui-egui/src/lib.rs:3948
 msgid "Floor by Face (FB): a floor on the selected masses' top faces"
 msgstr "Podlaha podle plochy (FB): podlaha na horních plochách vybraných objemů"
 
@@ -3968,7 +3968,7 @@ msgstr "Podlaha: Konstrukční"
 msgid "Floor: Structural (SB): click inside the walls to floor them with a slab that carries load"
 msgstr "Podlaha: Konstrukční (SB): klikněte dovnitř stěn a vytvořte pod nimi nosnou desku"
 
-#: crates/ui-egui/src/lib.rs:4010
+#: crates/ui-egui/src/lib.rs:4012
 msgid "Floor: click inside the walls to floor them"
 msgstr "Podlaha: kliknutím dovnitř stěn pod ně vytvoříte podlahu"
 
@@ -3976,7 +3976,7 @@ msgstr "Podlaha: kliknutím dovnitř stěn pod ně vytvoříte podlahu"
 msgid "Focal Length"
 msgstr "Ohnisková vzdálenost"
 
-#: crates/ui-egui/src/graphics.rs:873
+#: crates/ui-egui/src/graphics.rs:882
 msgid "Fold"
 msgstr "Sbalit"
 
@@ -4142,15 +4142,15 @@ msgstr ""
 msgid "GUID"
 msgstr "GUID"
 
-#: crates/ui-egui/src/lib.rs:5075
+#: crates/ui-egui/src/lib.rs:5077
 msgid "Gable"
 msgstr "Štít"
 
-#: crates/ui-egui/src/lib.rs:4835
+#: crates/ui-egui/src/lib.rs:4837
 msgid "Gable Edge"
 msgstr "Štítová hrana"
 
-#: crates/ui-egui/src/lib.rs:4834
+#: crates/ui-egui/src/lib.rs:4836
 msgid "Gable Edge: click an edge of a roof's footprint to stand it upright, a gable end; click again to slope it"
 msgstr "Štítová hrana: klikněte na hranu obrysu střechy pro vytvoření svislého štítu; dalším kliknutím obnovíte sklon"
 
@@ -4178,7 +4178,7 @@ msgstr "Šoupátko"
 msgid "Generic"
 msgstr "Obecný"
 
-#: crates/ui-egui/src/lib.rs:4888
+#: crates/ui-egui/src/lib.rs:4890
 msgid "Geometry"
 msgstr "Geometrie"
 
@@ -4186,7 +4186,7 @@ msgstr "Geometrie"
 msgid "Glass"
 msgstr "Sklo"
 
-#: crates/ui-egui/src/context.rs:433
+#: crates/ui-egui/src/context.rs:460
 msgid "Go To View"
 msgstr ""
 
@@ -4206,7 +4206,7 @@ msgstr ""
 msgid "Graphic Display Options"
 msgstr "Možnosti grafického zobrazení"
 
-#: crates/ui-egui/src/footer.rs:402
+#: crates/ui-egui/src/footer.rs:459
 msgid "Graphic Display Options..."
 msgstr "Možnosti grafického zobrazení..."
 
@@ -4218,7 +4218,7 @@ msgstr "Grafická přepsání"
 msgid "Graphic segments in mm on paper, repeating along the centerline."
 msgstr "Grafické segmenty v mm na papíře, opakující se podél osy."
 
-#: crates/ui-egui/src/graphics.rs:549
+#: crates/ui-egui/src/graphics.rs:558
 msgid "Graphics"
 msgstr "Grafika"
 
@@ -4247,7 +4247,7 @@ msgstr ""
 msgid "Grid"
 msgstr "Modulová osa"
 
-#: crates/ui-egui/src/lib.rs:4072
+#: crates/ui-egui/src/lib.rs:4074
 msgid "Grid (GR): click its two ends"
 msgstr "Modulová osa (GR): klikněte na oba její konce"
 
@@ -4255,11 +4255,11 @@ msgstr "Modulová osa (GR): klikněte na oba její konce"
 msgid "Grid rotation"
 msgstr "Otočení mřížky"
 
-#: crates/ui-egui/src/footer.rs:469
+#: crates/ui-egui/src/footer.rs:526
 msgid "Grid settings…"
 msgstr "Nastavení mřížky…"
 
-#: crates/ui-egui/src/footer.rs:475
+#: crates/ui-egui/src/footer.rs:532
 #: crates/ui-egui/src/properties.rs:2754
 msgid "Grid snapping"
 msgstr "Přichytávání k mřížce"
@@ -4285,7 +4285,7 @@ msgid "Gypsum board"
 msgstr "Sádrokarton"
 
 #: crates/core/src/lines.rs:202
-#: crates/ui-egui/src/graphics.rs:1331
+#: crates/ui-egui/src/graphics.rs:1340
 msgid "Hairline"
 msgstr "Vlasová čára"
 
@@ -4293,9 +4293,9 @@ msgstr "Vlasová čára"
 msgid "Half"
 msgstr "Polovina"
 
-#: crates/ui-egui/src/graphics.rs:835
-#: crates/ui-egui/src/graphics.rs:912
-#: crates/ui-egui/src/graphics.rs:1312
+#: crates/ui-egui/src/graphics.rs:844
+#: crates/ui-egui/src/graphics.rs:921
+#: crates/ui-egui/src/graphics.rs:1321
 msgid "Halftone"
 msgstr "Polotón"
 
@@ -4329,13 +4329,13 @@ msgstr "Výška"
 msgid "Height Offset From Level"
 msgstr "Výškové odsazení od podlaží"
 
-#: crates/ui-egui/src/lib.rs:5011
+#: crates/ui-egui/src/lib.rs:5013
 #: crates/ui-egui/src/site.rs:605
 msgid "Height Offset:"
 msgstr "Výškové odsazení:"
 
-#: crates/ui-egui/src/lib.rs:983
-#: crates/ui-egui/src/lib.rs:5086
+#: crates/ui-egui/src/lib.rs:984
+#: crates/ui-egui/src/lib.rs:5088
 msgid "Height:"
 msgstr "Výška:"
 
@@ -4359,27 +4359,27 @@ msgstr "Skryté čáry a Drátový model vždy kreslí své hrany"
 msgid "Hidden Lines"
 msgstr "Skryté čáry"
 
-#: crates/ui-egui/src/lib.rs:4658
+#: crates/ui-egui/src/lib.rs:4660
 msgid "Hide Category"
 msgstr "Skrýt kategorii"
 
-#: crates/ui-egui/src/footer.rs:431
+#: crates/ui-egui/src/footer.rs:488
 msgid "Hide Category (HC)"
 msgstr "Skrýt kategorii (HC)"
 
-#: crates/ui-egui/src/lib.rs:4657
+#: crates/ui-egui/src/lib.rs:4659
 msgid "Hide Category (VH): leave every category the selection is of out of this view"
 msgstr "Skrýt kategorii (VH): vynechá z tohoto pohledu všechny kategorie, do kterých výběr patří"
 
-#: crates/ui-egui/src/lib.rs:4654
+#: crates/ui-egui/src/lib.rs:4656
 msgid "Hide Element"
 msgstr "Skrýt prvek"
 
-#: crates/ui-egui/src/lib.rs:4653
+#: crates/ui-egui/src/lib.rs:4655
 msgid "Hide Element (EH): leave the selected elements out of this view"
 msgstr "Skrýt prvek (EH): vynechá vybrané prvky z tohoto pohledu"
 
-#: crates/ui-egui/src/footer.rs:430
+#: crates/ui-egui/src/footer.rs:487
 msgid "Hide Element (HH)"
 msgstr "Skrýt prvek (HH)"
 
@@ -4387,11 +4387,11 @@ msgstr "Skrýt prvek (HH)"
 msgid "Hide in View"
 msgstr ""
 
-#: crates/ui-egui/src/footer.rs:499
+#: crates/ui-egui/src/footer.rs:556
 msgid "High Contrast Point Clouds"
 msgstr "Vysoký kontrast mračen bodů"
 
-#: crates/ui-egui/src/footer.rs:494
+#: crates/ui-egui/src/footer.rs:551
 msgid "High Contrast Point Clouds: draw this view's scans in one strong colour, so what they show reads; again for their own colours. A scan given a colour of its own in Visibility/Graphics keeps it."
 msgstr "Vysoký kontrast mračen bodů: vykreslí skeny v tomto pohledu jednou výraznou barvou pro lepší čitelnost; dalším kliknutím vrátí původní barvy. Sken s vlastní barvou nastavenou ve Viditelnosti/Zobrazení si ji zachová."
 
@@ -4403,7 +4403,7 @@ msgstr "Barva vysokého kontrastu"
 msgid "Highlight what's under the cursor"
 msgstr "Zvýraznit prvek pod kurzorem"
 
-#: crates/ui-egui/src/lib.rs:3543
+#: crates/ui-egui/src/lib.rs:3545
 msgid "Home"
 msgstr "Domů"
 
@@ -4424,7 +4424,7 @@ msgid "Hook"
 msgstr "Hák"
 
 #: crates/core/src/fills.rs:410
-#: crates/ui-egui/src/lib.rs:5118
+#: crates/ui-egui/src/lib.rs:5120
 #: crates/ui-egui/src/properties.rs:685
 msgid "Horizontal"
 msgstr "Vodorovná"
@@ -4458,7 +4458,7 @@ msgid "ID"
 msgstr "ID"
 
 #: crates/ui-egui/src/inquiry.rs:163
-#: crates/ui-egui/src/lib.rs:4566
+#: crates/ui-egui/src/lib.rs:4568
 msgid "IDs of Selection"
 msgstr "ID výběru"
 
@@ -4482,7 +4482,7 @@ msgstr "ID, GUID nebo IFC GlobalId, libovolný počet:"
 msgid "IFC GlobalId"
 msgstr "IFC GlobalId"
 
-#: crates/ui-egui/src/lib.rs:3875
+#: crates/ui-egui/src/lib.rs:3877
 msgid "IFC…"
 msgstr "IFC…"
 
@@ -4502,20 +4502,20 @@ msgstr "ISO 7200: 180 mm"
 msgid "Identity Data"
 msgstr "Identifikační údaje"
 
-#: crates/ui-egui/src/lib.rs:5878
+#: crates/ui-egui/src/lib.rs:5880
 msgid "If you don't, the changes since it was last saved are lost."
 msgstr "Pokud tak neučiníte, změny od posledního uložení budou ztraceny."
 
 #: crates/ui-egui/src/fillpatterns.rs:764
-#: crates/ui-egui/src/lib.rs:4401
+#: crates/ui-egui/src/lib.rs:4403
 msgid "Import"
 msgstr "Importovat"
 
-#: crates/ui-egui/src/lib.rs:4405
+#: crates/ui-egui/src/lib.rs:4407
 msgid "Import CAD"
 msgstr "Importovat CAD"
 
-#: crates/ui-egui/src/lib.rs:4403
+#: crates/ui-egui/src/lib.rs:4405
 msgid "Import CAD: a DWG or DXF drawing brought into the project, drawn under the model in the plans of a level, its layers, colours and linetypes kept, and snapped to"
 msgstr "Importovat CAD: výkres DWG nebo DXF vložený do projektu, vykreslený pod modelem v půdorysech podlaží, se zachovanými vrstvami, barvami a typy čar a s možností uchopování"
 
@@ -4572,7 +4572,7 @@ msgstr "Palce"
 msgid "Include"
 msgstr "Zahrnout"
 
-#: crates/ui-egui/src/lib.rs:4558
+#: crates/ui-egui/src/lib.rs:4560
 msgid "Inquiry"
 msgstr "Dotaz"
 
@@ -4584,7 +4584,7 @@ msgstr "Vepsaný mnohoúhelník"
 msgid "Inscribed Polygon: click its centre, then a corner; Sides on the Options Bar"
 msgstr "Vepsaný mnohoúhelník: klikněte na střed a potom na vrchol; počet stran zadejte na panelu možností"
 
-#: crates/ui-egui/src/lib.rs:1334
+#: crates/ui-egui/src/lib.rs:1335
 msgid "Insert"
 msgstr "Vložit"
 
@@ -4645,7 +4645,7 @@ msgstr "Měřítko rozhraní"
 msgid "Intersection"
 msgstr "Průsečík"
 
-#: crates/ui-egui/src/graphics.rs:1041
+#: crates/ui-egui/src/graphics.rs:1050
 msgid "Invert"
 msgstr "Invertovat"
 
@@ -4653,11 +4653,11 @@ msgstr "Invertovat"
 msgid "Island Every"
 msgstr ""
 
-#: crates/ui-egui/src/footer.rs:433
+#: crates/ui-egui/src/footer.rs:490
 msgid "Isolate Category (IC)"
 msgstr "Izolovat kategorii (IC)"
 
-#: crates/ui-egui/src/footer.rs:432
+#: crates/ui-egui/src/footer.rs:489
 msgid "Isolate Element (HI)"
 msgstr "Izolovat prvek (HI)"
 
@@ -4711,11 +4711,11 @@ msgstr "Normy čar JIS Z 8310 / JIS A 0150:"
 msgid "Jog"
 msgstr "Lomení"
 
-#: crates/ui-egui/src/lib.rs:4799
+#: crates/ui-egui/src/lib.rs:4801
 msgid "Join into Polyline"
 msgstr "Spojit do křivky"
 
-#: crates/ui-egui/src/lib.rs:4798
+#: crates/ui-egui/src/lib.rs:4800
 msgid "Join into Polyline (PJ): the lines selected, meeting end to end, become one polyline"
 msgstr "Spojit do křivky (PJ): vybrané čáry navazující na sebe koncovými body se spojí do jedné křivky"
 
@@ -4752,7 +4752,7 @@ msgstr ""
 msgid "Keyboard Shortcuts"
 msgstr "Klávesové zkratky"
 
-#: crates/ui-egui/src/lib.rs:4507
+#: crates/ui-egui/src/lib.rs:4509
 msgid "Keyboard Shortcuts (KS): customize, edit, and load shortcut keys"
 msgstr "Klávesové zkratky (KS): přizpůsobení, úprava a načtení klávesových zkratek"
 
@@ -4775,7 +4775,7 @@ msgstr "Kuchyňský dřez"
 msgid "Label"
 msgstr "Označení"
 
-#: crates/ui-egui/src/lib.rs:5107
+#: crates/ui-egui/src/lib.rs:5109
 msgid "Label:"
 msgstr "Popisek:"
 
@@ -4803,7 +4803,7 @@ msgstr ""
 msgid "Lanes:"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4367
+#: crates/ui-egui/src/lib.rs:4369
 msgid "Language"
 msgstr "Jazyk"
 
@@ -4829,7 +4829,7 @@ msgstr ""
 msgid "Layers"
 msgstr "Vrstvy"
 
-#: crates/ui-egui/src/graphics.rs:1228
+#: crates/ui-egui/src/graphics.rs:1237
 msgid "Layers this view shows of each drawing"
 msgstr "Vrstvy jednotlivých výkresů zobrazené v tomto pohledu"
 
@@ -4837,7 +4837,7 @@ msgstr "Vrstvy jednotlivých výkresů zobrazené v tomto pohledu"
 msgid "Layout"
 msgstr "Rozvržení"
 
-#: crates/ui-egui/src/lib.rs:5106
+#: crates/ui-egui/src/lib.rs:5108
 msgid "Leader"
 msgstr "Odkaz"
 
@@ -4901,7 +4901,7 @@ msgstr "Délka"
 msgid "Lengths and sizes are mm on paper. The centerline defines geometry and dimensions."
 msgstr "Délky a rozměry jsou v mm na papíře. Osa určuje geometrii a kóty."
 
-#: crates/ui-egui/src/lib.rs:5021
+#: crates/ui-egui/src/lib.rs:5023
 msgid "Lens:"
 msgstr "Objektiv:"
 
@@ -4916,7 +4916,7 @@ msgstr "Nechat agenty pracovat na tomto projektu"
 msgid "Level"
 msgstr "Podlaží"
 
-#: crates/ui-egui/src/lib.rs:4071
+#: crates/ui-egui/src/lib.rs:4073
 msgid "Level (LL): a new level at an elevation"
 msgstr "Podlaží (LL): nové podlaží v dané výškové úrovni"
 
@@ -4953,7 +4953,7 @@ msgstr "Osvětlovací těleso"
 msgid "Lighting Fixture (LF): a luminaire, where you click, hung from the slab; Space turns it"
 msgstr "Osvětlovací těleso (LF): svítidlo v místě kliknutí, zavěšené pod deskou; Mezerník prvek otočí"
 
-#: crates/ui-egui/src/lib.rs:1332
+#: crates/ui-egui/src/lib.rs:1333
 msgid "Lightning Protection"
 msgstr "Ochrana před bleskem"
 
@@ -4969,7 +4969,7 @@ msgstr "Odsazení hranice"
 msgid "Line"
 msgstr "Čára"
 
-#: crates/ui-egui/src/graphics.rs:742
+#: crates/ui-egui/src/graphics.rs:751
 msgid "Line Graphics"
 msgstr "Grafika čar"
 
@@ -4977,7 +4977,7 @@ msgstr "Grafika čar"
 msgid "Line Pattern Creator"
 msgstr "Tvůrce vzorů čar"
 
-#: crates/ui-egui/src/lib.rs:4450
+#: crates/ui-egui/src/lib.rs:4452
 msgid "Line Patterns: the dashes, dots, spaces and shapes lines are drawn with"
 msgstr "Vzory čar: čárky, tečky, mezery a tvary, kterými se čáry kreslí"
 
@@ -4997,7 +4997,7 @@ msgstr "Styl čáry:"
 msgid "Line Styles"
 msgstr "Styly čar"
 
-#: crates/ui-egui/src/lib.rs:4446
+#: crates/ui-egui/src/lib.rs:4448
 msgid "Line Styles: the pen, colour and line pattern detail lines draw in"
 msgstr "Styly čar: pero, barva a vzor čáry, kterými se kreslí čáry detailu"
 
@@ -5014,15 +5014,15 @@ msgstr "Tloušťka čáry"
 msgid "Line Weights"
 msgstr "Tloušťky čar"
 
-#: crates/ui-egui/src/lib.rs:4442
+#: crates/ui-egui/src/lib.rs:4444
 msgid "Line Weights: what each pen draws on paper, the model's at each scale and the annotation's at any"
 msgstr "Tloušťky čar: stopa jednotlivých per na papíře, pro model v každém měřítku a pro poznámky v libovolném"
 
-#: crates/ui-egui/src/graphics.rs:1373
+#: crates/ui-egui/src/graphics.rs:1382
 msgid "Line color"
 msgstr "Barva čáry"
 
-#: crates/ui-egui/src/graphics.rs:1395
+#: crates/ui-egui/src/graphics.rs:1404
 msgid "Line dash"
 msgstr "Čárka čáry"
 
@@ -5038,7 +5038,7 @@ msgstr "Mezi fázemi"
 msgid "Line to neutral"
 msgstr "Fáze – střední vodič"
 
-#: crates/ui-egui/src/graphics.rs:1379
+#: crates/ui-egui/src/graphics.rs:1388
 msgid "Line weight"
 msgstr "Tloušťka čáry"
 
@@ -5051,15 +5051,15 @@ msgid "Line: a line between each two points clicked"
 msgstr "Čára: úsečka mezi každými dvěma body kliknutí"
 
 #: crates/ui-egui/src/array.rs:106
-#: crates/ui-egui/src/lib.rs:4099
+#: crates/ui-egui/src/lib.rs:4101
 msgid "Linear"
 msgstr "Lineární"
 
-#: crates/ui-egui/src/lib.rs:4101
+#: crates/ui-egui/src/lib.rs:4103
 msgid "Linear Dimension: pick endpoints (wall ends and corners, line ends, grid ends), then click where it goes: horizontal or vertical as the cursor lies"
 msgstr "Lineární kóta: vyberte koncové body (konce a rohy stěn, konce čar, konce modulových os) a potom klikněte do místa kóty: vodorovně nebo svisle podle polohy kurzoru"
 
-#: crates/ui-egui/src/graphics.rs:722
+#: crates/ui-egui/src/graphics.rs:731
 #: crates/ui-egui/src/titleblocks.rs:22
 msgid "Lines"
 msgstr "Čáry"
@@ -5080,41 +5080,41 @@ msgstr "Čáry se překrývají ({}): jedna leží na druhé nebo je čára nakr
 msgid "Lines up with wall {}"
 msgstr "Zarovnáno se stěnou {}"
 
-#: crates/ui-egui/src/lib.rs:4714
+#: crates/ui-egui/src/lib.rs:4716
 msgid "Linework"
 msgstr "Čárová grafika"
 
-#: crates/ui-egui/src/lib.rs:4715
+#: crates/ui-egui/src/lib.rs:4717
 msgid "Linework (LW): click an edge to draw it in another line style, or hide it, in this view only"
 msgstr "Čárová grafika (LW): kliknutím na hranu ji vykreslíte v jiném stylu čáry nebo ji skryjete, pouze v tomto pohledu"
 
-#: crates/ui-egui/src/lib.rs:4381
+#: crates/ui-egui/src/lib.rs:4383
 msgid "Link"
 msgstr "Připojit"
 
-#: crates/ui-egui/src/lib.rs:4397
+#: crates/ui-egui/src/lib.rs:4399
 msgid "Link CAD"
 msgstr "Připojit CAD"
 
-#: crates/ui-egui/src/lib.rs:4395
+#: crates/ui-egui/src/lib.rs:4397
 msgid "Link CAD: a DWG or DXF drawing shown in the plans of a level, read again from its file on Reload and when the project opens"
 msgstr "Připojit CAD: výkres DWG nebo DXF zobrazený v půdorysech podlaží, znovu načtený ze souboru při volbě Znovu načíst a při otevření projektu"
 
-#: crates/ui-egui/src/lib.rs:4385
-#: crates/ui-egui/src/lib.rs:4536
+#: crates/ui-egui/src/lib.rs:4387
+#: crates/ui-egui/src/lib.rs:4538
 #: crates/ui-egui/src/links.rs:22
 msgid "Link Model"
 msgstr "Připojit model"
 
-#: crates/ui-egui/src/lib.rs:4383
+#: crates/ui-egui/src/lib.rs:4385
 msgid "Link Model (LK): another project, a BIMCraft file or an IFC, shown in this one as a reference that can't be edited: halftone in the plans, the sections and the 3D view, and snapped to"
 msgstr "Připojit model (LK): jiný projekt, soubor BIMCraft nebo IFC, zobrazený v tomto projektu jako needitovatelná reference: v polotónu v půdorysech, řezech a 3D pohledu, s možností uchopování"
 
-#: crates/ui-egui/src/footer.rs:418
+#: crates/ui-egui/src/footer.rs:475
 msgid "Linked 3D View"
 msgstr "Propojený 3D pohled"
 
-#: crates/ui-egui/src/footer.rs:415
+#: crates/ui-egui/src/footer.rs:472
 msgid "Linked 3D View: the 3D view beside this plan, cut to its level and to what it shows as it pans or changes level; again to put the 3D view back as it was"
 msgstr "Propojený 3D pohled: 3D pohled vedle tohoto půdorysu, oříznutý na jeho podlaží a na to, co zobrazuje, při posunu nebo změně podlaží; dalším kliknutím vrátíte 3D pohled do původního stavu"
 
@@ -5126,7 +5126,7 @@ msgstr "Připojený soubor"
 msgid "Linked Models"
 msgstr "Připojené modely"
 
-#: crates/ui-egui/src/lib.rs:4534
+#: crates/ui-egui/src/lib.rs:4536
 msgid "Links"
 msgstr "Připojení"
 
@@ -5151,12 +5151,12 @@ msgid "Load AREI Symbols: the Belgian AREI/RGIE's plan symbols (Table 2.23) as f
 msgstr "Načíst symboly AREI: půdorysné symboly belgického předpisu AREI/RGIE (tabulka 2.23) jako rodiny pojmenované v jazyce projektu; opětovné načtení nic nezmění"
 
 #: crates/ui-egui/src/editor.rs:1145
-#: crates/ui-egui/src/lib.rs:4781
-#: crates/ui-egui/src/lib.rs:4782
+#: crates/ui-egui/src/lib.rs:4783
+#: crates/ui-egui/src/lib.rs:4784
 msgid "Load Family"
 msgstr "Načíst rodinu"
 
-#: crates/ui-egui/src/lib.rs:4780
+#: crates/ui-egui/src/lib.rs:4782
 msgid "Load Family: a family saved as a .json file, BIMCraft's own"
 msgstr "Načíst rodinu: rodina uložená ve formátu .json, nativním pro BIMCraft"
 
@@ -5189,7 +5189,7 @@ msgstr "Umístění"
 msgid "Location Line"
 msgstr "Čára umístění"
 
-#: crates/ui-egui/src/lib.rs:5157
+#: crates/ui-egui/src/lib.rs:5159
 msgid "Location Line:"
 msgstr "Čára umístění:"
 
@@ -5223,7 +5223,7 @@ msgid "Main Model"
 msgstr "Hlavní model"
 
 #: crates/ui-egui/src/background_grid.rs:145
-#: crates/ui-egui/src/footer.rs:467
+#: crates/ui-egui/src/footer.rs:524
 msgid "Main grid"
 msgstr "Hlavní mřížka"
 
@@ -5256,7 +5256,7 @@ msgstr "Nastavit jako primární"
 msgid "Make Text"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4295
+#: crates/ui-egui/src/lib.rs:4297
 msgid "Make a schedule, or open one"
 msgstr "Vytvořte výkaz nebo nějaký otevřete"
 
@@ -5268,7 +5268,7 @@ msgstr ""
 msgid "Make this temporary dimension permanent"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:1338
+#: crates/ui-egui/src/lib.rs:1339
 msgid "Manage"
 msgstr "Spravovat"
 
@@ -5301,11 +5301,11 @@ msgstr "Maskovací oblast"
 msgid "Masking Region: sketch an area that hides what's under it, in this view"
 msgstr "Maskovací oblast: načrtněte v tomto pohledu oblast, která skryje prvky pod sebou"
 
-#: crates/ui-egui/src/lib.rs:3927
+#: crates/ui-egui/src/lib.rs:3929
 msgid "Mass"
 msgstr "Objem"
 
-#: crates/ui-egui/src/lib.rs:3924
+#: crates/ui-egui/src/lib.rs:3926
 msgid "Mass (MS): click the corners of the footprint; Enter, or the first corner again, finishes; Esc cancels"
 msgstr "Objem (MS): klikněte na rohy obrysu; Enter nebo opakované kliknutí na první roh akci dokončí; Esc ji zruší"
 
@@ -5313,11 +5313,11 @@ msgstr "Objem (MS): klikněte na rohy obrysu; Enter nebo opakované kliknutí na
 msgid "Mass Floors"
 msgstr "Podlaží objemu"
 
-#: crates/ui-egui/src/lib.rs:3939
+#: crates/ui-egui/src/lib.rs:3941
 msgid "Mass Floors (MF): a floor at each level the selected masses cross"
 msgstr "Podlaží objemu (MF): podlaží v každé úrovni, kterou vybrané objemy protínají"
 
-#: crates/ui-egui/src/lib.rs:1336
+#: crates/ui-egui/src/lib.rs:1337
 msgid "Massing & Site"
 msgstr "Objem a pozemek"
 
@@ -5329,11 +5329,11 @@ msgstr ""
 msgid "Match Properties"
 msgstr "Shoda vlastností"
 
-#: crates/ui-egui/src/lib.rs:2671
+#: crates/ui-egui/src/lib.rs:2673
 msgid "Match Properties: source type '{}' selected. Select target elements and press MA again."
 msgstr "Shoda vlastností: vybrán zdrojový typ '{}'. Vyberte cílové prvky a znovu stiskněte klávesy MA."
 
-#: crates/ui-egui/src/lib.rs:2677
+#: crates/ui-egui/src/lib.rs:2679
 msgid "Matched properties: applied type '{}' to {} element(s)"
 msgstr "Shoda vlastností: použit typ '{}' na {} prvek (prvky)"
 
@@ -5346,12 +5346,12 @@ msgid "Material"
 msgstr "Materiál"
 
 #: crates/ui-egui/src/electrical.rs:419
-#: crates/ui-egui/src/lib.rs:4985
+#: crates/ui-egui/src/lib.rs:4987
 #: crates/ui-egui/src/properties.rs:2237
 msgid "Material:"
 msgstr "Materiál:"
 
-#: crates/ui-egui/src/lib.rs:4414
+#: crates/ui-egui/src/lib.rs:4416
 #: crates/ui-egui/src/properties.rs:2233
 msgid "Materials"
 msgstr "Materiály"
@@ -5362,7 +5362,7 @@ msgstr "Materiály"
 msgid "Materials and Finishes"
 msgstr "Materiály a povrchové úpravy"
 
-#: crates/ui-egui/src/lib.rs:4413
+#: crates/ui-egui/src/lib.rs:4415
 msgid "Materials: the project's library, each material's colour in 3D and the patterns its cut and its surfaces show"
 msgstr "Materiály: knihovna projektu, barva každého materiálu ve 3D a vzory řezu a povrchu"
 
@@ -5395,7 +5395,7 @@ msgstr ""
 msgid "Measure"
 msgstr "Změřit"
 
-#: crates/ui-egui/src/lib.rs:4183
+#: crates/ui-egui/src/lib.rs:4185
 msgid "Measure (ME): click two points; their length and angle read beside the ruler between them"
 msgstr "Změřit (ME): klikněte na dva body; jejich délka a úhel se zobrazí vedle pravítka mezi nimi"
 
@@ -5461,7 +5461,7 @@ msgstr "Minimapa pohledu"
 msgid "Minimize"
 msgstr "Minimalizovat"
 
-#: crates/ui-egui/src/lib.rs:3718
+#: crates/ui-egui/src/lib.rs:3720
 msgid "Minimize the Ribbon"
 msgstr "Minimalizovat pás karet"
 
@@ -5485,11 +5485,11 @@ msgstr "Zrcadlit – nakreslit osu"
 msgid "Mirror Pick Axis"
 msgstr "Zrcadlit – vybrat osu"
 
-#: crates/ui-egui/src/lib.rs:4701
+#: crates/ui-egui/src/lib.rs:4703
 msgid "Mirror, Draw Axis (DM): click the axis's two ends"
 msgstr "Zrcadlit, nakreslit osu (DM): klikněte na oba konce osy"
 
-#: crates/ui-egui/src/lib.rs:4694
+#: crates/ui-egui/src/lib.rs:4696
 msgid "Mirror, Pick Axis (MM): pick a wall or grid to mirror across"
 msgstr "Zrcadlit, vybrat osu (MM): vyberte stěnu nebo osu, podle které chcete zrcadlit"
 
@@ -5501,7 +5501,7 @@ msgstr "Zrcadleno"
 msgid "Mixed Use"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4779
+#: crates/ui-egui/src/lib.rs:4781
 msgid "Mode"
 msgstr "Režim"
 
@@ -5526,7 +5526,7 @@ msgstr "Tloušťky čar modelu"
 msgid "Model Site"
 msgstr "Modelovat pozemek"
 
-#: crates/ui-egui/src/lib.rs:3936
+#: crates/ui-egui/src/lib.rs:3938
 msgid "Model by Face"
 msgstr "Model podle plochy"
 
@@ -5534,20 +5534,20 @@ msgstr "Model podle plochy"
 msgid "Modelling problem"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:1636
-#: crates/ui-egui/src/lib.rs:1705
-#: crates/ui-egui/src/lib.rs:1711
-#: crates/ui-egui/src/lib.rs:1713
+#: crates/ui-egui/src/lib.rs:1637
+#: crates/ui-egui/src/lib.rs:1706
+#: crates/ui-egui/src/lib.rs:1712
 #: crates/ui-egui/src/lib.rs:1714
-#: crates/ui-egui/src/lib.rs:3898
+#: crates/ui-egui/src/lib.rs:1715
+#: crates/ui-egui/src/lib.rs:3900
 msgid "Modify"
 msgstr "Upravit"
 
-#: crates/ui-egui/src/lib.rs:3898
+#: crates/ui-egui/src/lib.rs:3900
 msgid "Modify (MD): select elements"
 msgstr "Upravit (MD): vyberte prvky"
 
-#: crates/ui-egui/src/lib.rs:4796
+#: crates/ui-egui/src/lib.rs:4798
 msgid "Modify Lines"
 msgstr "Upravit čáry"
 
@@ -5555,15 +5555,15 @@ msgstr "Upravit čáry"
 msgid "Modify Site"
 msgstr "Upravit pozemek"
 
-#: crates/ui-egui/src/lib.rs:2862
+#: crates/ui-egui/src/lib.rs:2864
 msgid "Modify Sub Elements"
 msgstr "Upravit dílčí prvky"
 
-#: crates/ui-egui/src/lib.rs:2860
+#: crates/ui-egui/src/lib.rs:2862
 msgid "Modify Sub Elements: select a point, a corner or an edge of the top, then type its height on the Options Bar or its label"
 msgstr "Upravit dílčí prvky: vyberte bod, roh nebo hranu horního líce a poté zadejte jeho výšku na panelu Možnosti nebo v jeho popisce"
 
-#: crates/ui-egui/src/lib.rs:4812
+#: crates/ui-egui/src/lib.rs:4814
 msgid "Modify Wall"
 msgstr "Upravit stěnu"
 
@@ -5580,7 +5580,7 @@ msgstr ""
 msgid "Move"
 msgstr "Přesunout"
 
-#: crates/ui-egui/src/lib.rs:4728
+#: crates/ui-egui/src/lib.rs:4730
 msgid "Move (MV): click a base point, then where it goes"
 msgstr "Přesunout (MV): klikněte na základní bod a poté na cílové místo"
 
@@ -5602,7 +5602,7 @@ msgstr "Posunout nahoru"
 msgid "Move Witness Line"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:1714
+#: crates/ui-egui/src/lib.rs:1715
 msgid "Multi-Select"
 msgstr "Vícenásobný výběr"
 
@@ -5610,7 +5610,7 @@ msgstr "Vícenásobný výběr"
 msgid "Multi-sport"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:5098
+#: crates/ui-egui/src/lib.rs:5100
 msgid "Multiple"
 msgstr "Vícenásobný"
 
@@ -5660,7 +5660,7 @@ msgstr "NEUZAVŘENÝ OBVOD"
 #: crates/ui-egui/src/clouds.rs:59
 #: crates/ui-egui/src/electrical.rs:298
 #: crates/ui-egui/src/electrical.rs:344
-#: crates/ui-egui/src/lib.rs:5194
+#: crates/ui-egui/src/lib.rs:5196
 #: crates/ui-egui/src/properties.rs:2263
 #: crates/ui-egui/src/properties.rs:3015
 #: crates/ui-egui/src/properties.rs:3289
@@ -5686,7 +5686,7 @@ msgstr ""
 msgid "Nearest"
 msgstr "Nejbližší"
 
-#: crates/ui-egui/src/graphics.rs:465
+#: crates/ui-egui/src/graphics.rs:474
 #: crates/ui-egui/src/properties.rs:2247
 #: crates/ui-egui/src/properties.rs:2996
 #: crates/ui-egui/src/site.rs:166
@@ -5703,11 +5703,11 @@ msgid "New Distribution System"
 msgstr "Nová rozvodná soustava"
 
 #: crates/ui-egui/src/editor.rs:424
-#: crates/ui-egui/src/lib.rs:4542
+#: crates/ui-egui/src/lib.rs:4544
 msgid "New Family"
 msgstr "Nová rodina"
 
-#: crates/ui-egui/src/lib.rs:4541
+#: crates/ui-egui/src/lib.rs:4543
 msgid "New Family: start a family of your own, of a category, to edit its parameters, types and forms"
 msgstr "Nová rodina: vytvořte vlastní rodinu dané kategorie a upravte její parametry, typy a tvary"
 
@@ -5796,7 +5796,7 @@ msgstr "Bez oříznutí"
 msgid "No active rule has a check, so nothing was verified."
 msgstr ""
 
-#: crates/ui-egui/src/graphics.rs:1101
+#: crates/ui-egui/src/graphics.rs:1110
 msgid "No category has that name."
 msgstr "Žádná kategorie nemá tento název."
 
@@ -5804,7 +5804,7 @@ msgstr "Žádná kategorie nemá tento název."
 msgid "No design option sets yet: New Set makes one."
 msgstr "Dosud žádné sady možností návrhu: tlačítkem Nová sada ji vytvoříte."
 
-#: crates/ui-egui/src/graphics.rs:1195
+#: crates/ui-egui/src/graphics.rs:1204
 msgid "No element is hidden or overridden here: select some and Add Selected."
 msgstr "Zde není žádný prvek skrytý ani přepsaný: vyberte prvky a klikněte na Přidat vybrané."
 
@@ -5820,11 +5820,11 @@ msgstr "Dosud žádné oblíbené materiály: uložte nějaký z nabídky Správ
 msgid "No fill"
 msgstr "Bez výplně"
 
-#: crates/ui-egui/src/graphics.rs:1130
+#: crates/ui-egui/src/graphics.rs:1139
 msgid "No filters applied."
 msgstr "Nejsou použity žádné filtry."
 
-#: crates/ui-egui/src/graphics.rs:519
+#: crates/ui-egui/src/graphics.rs:528
 msgid "No filters yet: New makes one."
 msgstr "Dosud žádné filtry: tlačítkem Nový vytvoříte nový."
 
@@ -5848,7 +5848,7 @@ msgstr "Dosud žádné parametry projektu: tlačítkem Nový vytvoříte nový."
 msgid "No recent projects yet"
 msgstr "Dosud žádné nedávné projekty"
 
-#: crates/ui-egui/src/lib.rs:5743
+#: crates/ui-egui/src/lib.rs:5745
 msgid "No rows yet: the {} is empty."
 msgstr "Dosud žádné řádky: {} je prázdný."
 
@@ -5926,7 +5926,7 @@ msgstr "Nenalezeno"
 msgid "Not on this system: drawn with {}"
 msgstr "Není v tomto systému: vykresleno pomocí {}"
 
-#: crates/ui-egui/src/lib.rs:5461
+#: crates/ui-egui/src/lib.rs:5463
 msgid "Note"
 msgstr "Poznámka"
 
@@ -5963,7 +5963,7 @@ msgstr "Vše se používá."
 msgid "Nothing matches the search."
 msgstr "Hledání neodpovídá žádný výsledek."
 
-#: crates/ui-egui/src/graphics.rs:322
+#: crates/ui-egui/src/graphics.rs:331
 msgid "Nothing selected is hidden in this view. Reveal Hidden Elements (RH) draws what is, to select it."
 msgstr "Žádný z vybraných prvků není v tomto pohledu skrytý. Funkce Zobrazit skryté prvky (RH) vykreslí skryté prvky, abyste je mohli vybrat."
 
@@ -5995,8 +5995,8 @@ msgstr ""
 #: crates/ui-egui/src/editor.rs:1137
 #: crates/ui-egui/src/electrical.rs:502
 #: crates/ui-egui/src/filter.rs:116
-#: crates/ui-egui/src/graphics.rs:404
-#: crates/ui-egui/src/graphics.rs:1026
+#: crates/ui-egui/src/graphics.rs:413
+#: crates/ui-egui/src/graphics.rs:1035
 #: crates/ui-egui/src/inquiry.rs:147
 #: crates/ui-egui/src/linestyles.rs:306
 #: crates/ui-egui/src/lineweights.rs:152
@@ -6021,11 +6021,11 @@ msgstr "Uchopení objektů"
 msgid "Object Styles"
 msgstr "Styly objektů"
 
-#: crates/ui-egui/src/lib.rs:4484
+#: crates/ui-egui/src/lib.rs:4486
 msgid "Object Styles: the pen each category draws in, seen and cut, in every view"
 msgstr "Styly objektů: pero, kterým se jednotlivé kategorie vykreslují, v pohledu i v řezu, v každém pohledu"
 
-#: crates/ui-egui/src/graphics.rs:1110
+#: crates/ui-egui/src/graphics.rs:1119
 msgid "Object Styles…"
 msgstr "Styly objektů…"
 
@@ -6060,17 +6060,17 @@ msgstr ""
 msgid "Offset"
 msgstr "Odsazení"
 
-#: crates/ui-egui/src/lib.rs:4687
+#: crates/ui-egui/src/lib.rs:4689
 #: crates/ui-egui/src/sketch.rs:762
 msgid "Offset (OF): pick a wall or a line; a copy goes to the cursor's side"
 msgstr "Odsazení (OF): vyberte stěnu nebo čáru; kopie se umístí na stranu kurzoru"
 
-#: crates/ui-egui/src/lib.rs:5034
+#: crates/ui-egui/src/lib.rs:5036
 msgid "Offset from Surface:"
 msgstr "Odsazení od povrchu:"
 
 #: crates/ui-egui/src/draw.rs:350
-#: crates/ui-egui/src/lib.rs:5148
+#: crates/ui-egui/src/lib.rs:5150
 #: crates/ui-egui/src/structure.rs:146
 msgid "Offset:"
 msgstr "Odsazení:"
@@ -6092,8 +6092,8 @@ msgstr "Vrchol lze přidat pouze ke křivce nebo splajnu; úsečka si zachováv�
 msgid "Opaque"
 msgstr "Neprůhledné"
 
-#: crates/ui-egui/src/lib.rs:3519
-#: crates/ui-egui/src/lib.rs:3548
+#: crates/ui-egui/src/lib.rs:3521
+#: crates/ui-egui/src/lib.rs:3550
 #: crates/ui-egui/src/start.rs:376
 msgid "Open"
 msgstr "Otevřít"
@@ -6106,7 +6106,7 @@ msgstr "Otevřená šipka"
 msgid "Open Camera View"
 msgstr "Otevřít pohled kamery"
 
-#: crates/ui-egui/src/lib.rs:3832
+#: crates/ui-egui/src/lib.rs:3834
 msgid "Open IFC or Revit Model…"
 msgstr ""
 
@@ -6127,7 +6127,7 @@ msgstr ""
 msgid "Open Rule"
 msgstr ""
 
-#: crates/ui-egui/src/context.rs:448
+#: crates/ui-egui/src/context.rs:475
 msgid "Open View"
 msgstr ""
 
@@ -6147,7 +6147,7 @@ msgstr "Otevřít výkaz"
 msgid "Open a view of the kind ({}) to make a template from it."
 msgstr "Otevřete pohled tohoto druhu ({}), ze kterého chcete vytvořit šablonu."
 
-#: crates/ui-egui/src/lib.rs:4267
+#: crates/ui-egui/src/lib.rs:4269
 msgid "Open the default 3D view"
 msgstr "Otevřít výchozí 3D pohled"
 
@@ -6159,7 +6159,7 @@ msgstr "Při spuštění otevřít poslední projekt"
 msgid "Opened from {}: {}, {} left out."
 msgstr "Otevřeno z {}: {}, {} vynecháno."
 
-#: crates/ui-egui/src/lib.rs:4053
+#: crates/ui-egui/src/lib.rs:4055
 #: crates/ui-egui/src/revit.rs:211
 msgid "Opening"
 msgstr "Otvor"
@@ -6181,7 +6181,7 @@ msgstr "Otevře řídicí port hned a při každém spuštění aplikace BIMCraf
 msgid "Opens the release page on GitHub. This copy can't update itself."
 msgstr "Otevře stránku vydání na GitHubu. Tato verze se nemůže sama aktualizovat."
 
-#: crates/ui-egui/src/lib.rs:3845
+#: crates/ui-egui/src/lib.rs:3847
 msgid "Open…"
 msgstr "Otevřít…"
 
@@ -6254,7 +6254,7 @@ msgstr "Zásuvky a zařízení"
 msgid "Overhang"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:5072
+#: crates/ui-egui/src/lib.rs:5074
 msgid "Overhang:"
 msgstr "Přesah:"
 
@@ -6271,7 +6271,7 @@ msgstr "Přepsáno"
 msgid "Override Formatting"
 msgstr "Přepsat formátování"
 
-#: crates/ui-egui/src/lib.rs:4662
+#: crates/ui-egui/src/lib.rs:4664
 msgid "Override Graphics"
 msgstr "Přepsat zobrazení"
 
@@ -6279,7 +6279,7 @@ msgstr "Přepsat zobrazení"
 msgid "Override Graphics by Element"
 msgstr "Přepsat zobrazení podle prvku"
 
-#: crates/ui-egui/src/lib.rs:4661
+#: crates/ui-egui/src/lib.rs:4663
 msgid "Override Graphics by Element (EO): draw the selected elements their own way in this view"
 msgstr "Přepsat zobrazení podle prvku (EO): vykreslit vybrané prvky v tomto pohledu vlastním způsobem"
 
@@ -6287,11 +6287,11 @@ msgstr "Přepsat zobrazení podle prvku (EO): vykreslit vybrané prvky v tomto p
 msgid "Override Graphics in View"
 msgstr ""
 
-#: crates/ui-egui/src/graphics.rs:891
+#: crates/ui-egui/src/graphics.rs:900
 msgid "Override…"
 msgstr "Přepsat…"
 
-#: crates/ui-egui/src/lib.rs:3879
+#: crates/ui-egui/src/lib.rs:3881
 msgid "PNG image"
 msgstr "Obrázek PNG"
 
@@ -6303,15 +6303,15 @@ msgstr "PVC"
 msgid "Padel"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4890
+#: crates/ui-egui/src/lib.rs:4892
 msgid "Paint"
 msgstr "Pomalovat"
 
-#: crates/ui-egui/src/lib.rs:4889
+#: crates/ui-egui/src/lib.rs:4891
 msgid "Paint (PT): lay a material, and its texture, over the face you click in the 3D view"
 msgstr "Pomalovat (PT): nanést materiál a jeho texturu na plochu, na kterou kliknete ve 3D pohledu"
 
-#: crates/ui-egui/src/lib.rs:3593
+#: crates/ui-egui/src/lib.rs:3595
 #: crates/ui-egui/src/settings.rs:556
 msgid "Palettes"
 msgstr "Palety"
@@ -6447,7 +6447,7 @@ msgstr "Vzor"
 msgid "Pattern Angle (°)"
 msgstr "Úhel vzoru (°)"
 
-#: crates/ui-egui/src/graphics.rs:743
+#: crates/ui-egui/src/graphics.rs:752
 msgid "Pattern Graphics"
 msgstr "Grafika vzoru"
 
@@ -6459,11 +6459,11 @@ msgstr "Název vzoru"
 msgid "Pattern preview"
 msgstr "Náhled vzoru"
 
-#: crates/ui-egui/src/graphics.rs:723
+#: crates/ui-egui/src/graphics.rs:732
 msgid "Patterns"
 msgstr "Vzory"
 
-#: crates/ui-egui/src/graphics.rs:1003
+#: crates/ui-egui/src/graphics.rs:1012
 msgid "Patterns appear in plans, ceiling plans, section cuts and filled regions."
 msgstr "Vzory se zobrazují v půdorysech, půdorysech podhledů, řezech a vyplněných oblastech."
 
@@ -6559,12 +6559,12 @@ msgstr "Fáze"
 msgid "Phases, in order:"
 msgstr "Fáze, v pořadí:"
 
-#: crates/ui-egui/src/lib.rs:4587
+#: crates/ui-egui/src/lib.rs:4589
 #: crates/ui-egui/src/phasing.rs:258
 msgid "Phasing"
 msgstr "Fázování"
 
-#: crates/ui-egui/src/lib.rs:4586
+#: crates/ui-egui/src/lib.rs:4588
 msgid "Phasing (PH): the project's phases in order, the phase filters that show them, and how a filter draws each"
 msgstr "Fázování (PH): fáze projektu v pořadí, filtry fází, které je zobrazují, a způsob zobrazení jednotlivých fází filtrem"
 
@@ -6620,7 +6620,7 @@ msgstr "Vybrat stěny: hraniční čára podél každé kliknuté stěny"
 msgid "Pick a corner, an edge or a face of the model to dimension."
 msgstr "Vyberte roh, hranu nebo plochu modelu pro vytvoření kóty."
 
-#: crates/ui-egui/src/lib.rs:5336
+#: crates/ui-egui/src/lib.rs:5338
 msgid "Pick a curved wall or an arc."
 msgstr "Vyberte zakřivenou stěnu nebo oblouk."
 
@@ -6628,19 +6628,19 @@ msgstr "Vyberte zakřivenou stěnu nebo oblouk."
 msgid "Pick a highlighted model edge or sketch line as the alignment reference."
 msgstr "Vyberte zvýrazněnou hranu modelu nebo čáru náčrtu jako referenci zarovnání."
 
-#: crates/ui-egui/src/lib.rs:5303
+#: crates/ui-egui/src/lib.rs:5305
 msgid "Pick a reference edge or centre line; the line under the cursor is highlighted."
 msgstr "Vyberte referenční hranu nebo osu; čára pod kurzorem je zvýrazněna."
 
-#: crates/ui-egui/src/lib.rs:5272
+#: crates/ui-egui/src/lib.rs:5274
 msgid "Pick a roof or a floor: the selected walls' bases stand on it."
 msgstr "Vyberte střechu nebo podlahu: základny vybraných stěn na ní budou spočívat."
 
-#: crates/ui-egui/src/lib.rs:5273
+#: crates/ui-egui/src/lib.rs:5275
 msgid "Pick a roof or a floor: the selected walls' tops follow its underside."
 msgstr "Vyberte střechu nebo podlahu: horní hrany vybraných stěn budou sledovat její spodní líc."
 
-#: crates/ui-egui/src/lib.rs:5337
+#: crates/ui-egui/src/lib.rs:5339
 msgid "Pick a round column, a curved wall, a circle or an arc."
 msgstr "Vyberte kruhový sloup, zakřivenou stěnu, kružnici nebo oblouk."
 
@@ -6660,15 +6660,15 @@ msgstr "Vybrat povrch"
 msgid "Pick a surface first: Pick Surface, then a click on a face of the model."
 msgstr "Nejprve vyberte povrch: Vybrat povrch a poté klikněte na plochu modelu."
 
-#: crates/ui-egui/src/lib.rs:5324
+#: crates/ui-egui/src/lib.rs:5326
 msgid "Pick a wall face, centre line or end, a door, a window, a grid, or an endpoint to measure from."
 msgstr "Vyberte líc, osu nebo konec stěny, dveře, okno, modulovou osu nebo koncový bod, od kterého se má měřit."
 
-#: crates/ui-egui/src/lib.rs:5300
+#: crates/ui-egui/src/lib.rs:5302
 msgid "Pick a wall or grid to mirror across."
 msgstr "Vyberte stěnu nebo osnovu, podle které se má zrcadlit."
 
-#: crates/ui-egui/src/lib.rs:5334
+#: crates/ui-egui/src/lib.rs:5336
 msgid "Pick a wall, a grid or another line; then one that meets it."
 msgstr "Vyberte stěnu, osnovu nebo jinou čáru; poté čáru, která se s ní protíná."
 
@@ -6676,7 +6676,7 @@ msgstr "Vyberte stěnu, osnovu nebo jinou čáru; poté čáru, která se s ní 
 msgid "Pick from list"
 msgstr "Vybrat ze seznamu"
 
-#: crates/ui-egui/src/lib.rs:5328
+#: crates/ui-egui/src/lib.rs:5330
 msgid "Pick more references, or click away from them where the dimension line goes; Space steps Auto, Aligned, Horizontal, Vertical. Esc cancels."
 msgstr "Vyberte další reference nebo klikněte mimo ně do místa kótovací čáry; Mezerník přepíná mezi volbami Auto, Zarovnaná, Vodorovná a Svislá. Klávesa Esc operaci zruší."
 
@@ -6688,7 +6688,7 @@ msgstr "Vybírejte čáry náčrtu (okno vybere více čar); tažením konce vyb
 msgid "Pick sketch lines (a box picks several); drag a picked line's end to move it; Delete removes them. Finish Edit Mode when every loop is closed."
 msgstr "Vyberte čáry náčrtu (výběrovým rámečkem i více najednou); tažením konce vybrané čáry ji posunete; klávesa Delete ji smaže. Po uzavření všech smyček dokončete režim úprav."
 
-#: crates/ui-egui/src/lib.rs:5304
+#: crates/ui-egui/src/lib.rs:5306
 msgid "Pick the element's highlighted edge to move and turn onto the reference."
 msgstr "Vyberte zvýrazněnou hranu prvku pro posun a otočení k referenci."
 
@@ -6700,7 +6700,7 @@ msgstr "Vyberte první čáru k zaoblení."
 msgid "Pick the first sketch line, on the part to keep."
 msgstr "Vyberte první čáru náčrtu na části, kterou chcete zachovat."
 
-#: crates/ui-egui/src/lib.rs:5305
+#: crates/ui-egui/src/lib.rs:5307
 msgid "Pick the first wall or line, on the part to keep."
 msgstr "Vyberte první stěnu nebo čáru na části, kterou chcete zachovat."
 
@@ -6708,7 +6708,7 @@ msgstr "Vyberte první stěnu nebo čáru na části, kterou chcete zachovat."
 msgid "Pick the highlighted sketch line to move and turn onto the reference; joined ends follow."
 msgstr "Vyberte zvýrazněnou čáru náčrtu pro posun a otočení k referenci; připojené konce ji následují."
 
-#: crates/ui-egui/src/lib.rs:5307
+#: crates/ui-egui/src/lib.rs:5309
 msgid "Pick the line to trim or extend to: a line, a wall or a grid."
 msgstr "Vyberte čáru, ke které se má oříznout nebo prodloužit: čáru, stěnu nebo osnovu."
 
@@ -6716,7 +6716,7 @@ msgstr "Vyberte čáru, ke které se má oříznout nebo prodloužit: čáru, st
 msgid "Pick the lines and the tile's corners again: the pattern keeps its name"
 msgstr "Znovu vyberte čáry a rohy dlaždice: vzor si ponechá svůj název"
 
-#: crates/ui-egui/src/lib.rs:5326
+#: crates/ui-egui/src/lib.rs:5328
 msgid "Pick the next reference or endpoint."
 msgstr "Vyberte další referenci nebo koncový bod."
 
@@ -6724,7 +6724,7 @@ msgstr "Vyberte další referenci nebo koncový bod."
 msgid "Pick the second line."
 msgstr "Vyberte druhou čáru."
 
-#: crates/ui-egui/src/lib.rs:5338
+#: crates/ui-egui/src/lib.rs:5340
 msgid "Pick the second point on the arc. Esc cancels."
 msgstr "Vyberte druhý bod na oblouku. Klávesa Esc operaci zruší."
 
@@ -6732,7 +6732,7 @@ msgstr "Vyberte druhý bod na oblouku. Klávesa Esc operaci zruší."
 msgid "Pick the second sketch line, on the part to keep."
 msgstr "Vyberte druhou čáru náčrtu na části, kterou chcete zachovat."
 
-#: crates/ui-egui/src/lib.rs:5306
+#: crates/ui-egui/src/lib.rs:5308
 msgid "Pick the second wall or line, on the part to keep."
 msgstr "Vyberte druhou stěnu nebo čáru na části, kterou chcete zachovat."
 
@@ -6760,7 +6760,7 @@ msgstr "Obrázek…"
 msgid "Pin"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4763
+#: crates/ui-egui/src/lib.rs:4765
 msgid "Pin (PN): hold the selection where it is; it can't be dragged, moved or turned until it is unpinned"
 msgstr ""
 
@@ -6816,21 +6816,21 @@ msgstr "Umístit kabelový žlab"
 msgid "Place Cabling"
 msgstr "Umístit kabeláž"
 
-#: crates/ui-egui/src/lib.rs:1699
+#: crates/ui-egui/src/lib.rs:1700
 msgid "Place Ceiling"
 msgstr "Umístit podhled"
 
 #: crates/ui-egui/src/array.rs:135
-#: crates/ui-egui/src/lib.rs:5183
+#: crates/ui-egui/src/lib.rs:5185
 msgid "Place Centre"
 msgstr "Umístit střed"
 
-#: crates/ui-egui/src/lib.rs:1688
+#: crates/ui-egui/src/lib.rs:1689
 #: crates/ui-egui/src/orbit.rs:701
 msgid "Place Column"
 msgstr "Umístit sloup"
 
-#: crates/ui-egui/src/lib.rs:1690
+#: crates/ui-egui/src/lib.rs:1691
 #: crates/ui-egui/src/orbit.rs:703
 msgid "Place Component"
 msgstr "Umístit komponentu"
@@ -6843,11 +6843,11 @@ msgstr "Umístit trubku elektroinstalace"
 msgid "Place Data Outlet"
 msgstr "Umístit datovou zásuvku"
 
-#: crates/ui-egui/src/lib.rs:1676
+#: crates/ui-egui/src/lib.rs:1677
 msgid "Place Detail Group"
 msgstr "Umístit skupinu detailu"
 
-#: crates/ui-egui/src/lib.rs:1680
+#: crates/ui-egui/src/lib.rs:1681
 msgid "Place Detail Lines"
 msgstr "Umístit čáry detailu"
 
@@ -6855,11 +6855,11 @@ msgstr "Umístit čáry detailu"
 msgid "Place Device"
 msgstr "Umístit zařízení"
 
-#: crates/ui-egui/src/lib.rs:1674
+#: crates/ui-egui/src/lib.rs:1675
 msgid "Place Dimensions"
 msgstr "Umístit kóty"
 
-#: crates/ui-egui/src/lib.rs:1668
+#: crates/ui-egui/src/lib.rs:1669
 msgid "Place Door"
 msgstr "Umístit dveře"
 
@@ -6883,7 +6883,7 @@ msgstr "Umístit zemnicí elektrodu"
 msgid "Place Electrical Equipment"
 msgstr "Umístit elektrické zařízení"
 
-#: crates/ui-egui/src/lib.rs:1673
+#: crates/ui-egui/src/lib.rs:1674
 msgid "Place Grid"
 msgstr "Umístit osnovu"
 
@@ -6891,7 +6891,7 @@ msgstr "Umístit osnovu"
 msgid "Place Inspection Box"
 msgstr "Umístit revizní skříňku"
 
-#: crates/ui-egui/src/lib.rs:1678
+#: crates/ui-egui/src/lib.rs:1679
 msgid "Place Insulation"
 msgstr "Umístit tepelnou izolaci"
 
@@ -6899,7 +6899,7 @@ msgstr "Umístit tepelnou izolaci"
 msgid "Place Isolated Footing"
 msgstr "Umístit základovou patku"
 
-#: crates/ui-egui/src/lib.rs:1672
+#: crates/ui-egui/src/lib.rs:1673
 msgid "Place Level"
 msgstr "Umístit podlaží"
 
@@ -6935,19 +6935,19 @@ msgstr "Umístit zařizovací předmět"
 msgid "Place Rack"
 msgstr "Umístit rozvaděč"
 
-#: crates/ui-egui/src/lib.rs:1677
+#: crates/ui-egui/src/lib.rs:1678
 msgid "Place Repeating Detail"
 msgstr "Umístit opakovaný detail"
 
-#: crates/ui-egui/src/lib.rs:1679
+#: crates/ui-egui/src/lib.rs:1680
 msgid "Place Revision Cloud"
 msgstr "Umístit revizní obláček"
 
-#: crates/ui-egui/src/lib.rs:1670
+#: crates/ui-egui/src/lib.rs:1671
 msgid "Place Room"
 msgstr "Umístit místnost"
 
-#: crates/ui-egui/src/lib.rs:1671
+#: crates/ui-egui/src/lib.rs:1672
 msgid "Place Room Separation"
 msgstr "Umístit oddělovač místností"
 
@@ -6959,11 +6959,11 @@ msgstr ""
 msgid "Place Structural Column"
 msgstr "Umístit konstrukční sloup"
 
-#: crates/ui-egui/src/lib.rs:1675
+#: crates/ui-egui/src/lib.rs:1676
 msgid "Place Text"
 msgstr "Umístit text"
 
-#: crates/ui-egui/src/lib.rs:4329
+#: crates/ui-egui/src/lib.rs:4331
 msgid "Place View"
 msgstr "Umístit pohled"
 
@@ -6971,7 +6971,7 @@ msgstr "Umístit pohled"
 msgid "Place Voice Outlet"
 msgstr "Umístit telefonní zásuvku"
 
-#: crates/ui-egui/src/lib.rs:1665
+#: crates/ui-egui/src/lib.rs:1666
 #: crates/ui-egui/src/orbit.rs:700
 msgid "Place Wall"
 msgstr "Umístit stěnu"
@@ -6980,7 +6980,7 @@ msgstr "Umístit stěnu"
 msgid "Place Wall Footing"
 msgstr "Umístit základový pás"
 
-#: crates/ui-egui/src/lib.rs:1669
+#: crates/ui-egui/src/lib.rs:1670
 msgid "Place Window"
 msgstr "Umístit okno"
 
@@ -6988,7 +6988,7 @@ msgstr "Umístit okno"
 msgid "Place Wire"
 msgstr "Umístit vodič"
 
-#: crates/ui-egui/src/lib.rs:5114
+#: crates/ui-egui/src/lib.rs:5116
 msgid "Place:"
 msgstr "Umístění:"
 
@@ -7005,7 +7005,7 @@ msgstr "Půdorys"
 msgid "Plan Area"
 msgstr "Plocha v půdorysu"
 
-#: crates/ui-egui/src/lib.rs:3881
+#: crates/ui-egui/src/lib.rs:3883
 msgid "Plan as SVG…"
 msgstr "Půdorys jako SVG…"
 
@@ -7053,17 +7053,17 @@ msgstr ""
 msgid "Playground"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4426
+#: crates/ui-egui/src/lib.rs:4428
 #: crates/ui-egui/src/plugins.rs:161
 #: crates/ui-egui/src/plugins.rs:301
 msgid "Plugins"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4424
+#: crates/ui-egui/src/lib.rs:4426
 msgid "Plugins: the WASM extensions in your plugin folder, what became of each, their log, and switching them on and off"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:1330
+#: crates/ui-egui/src/lib.rs:1331
 msgid "Plumbing"
 msgstr "Zdravotechnika"
 
@@ -7085,11 +7085,11 @@ msgstr "Zařizovací předměty"
 
 #: crates/ui-egui/src/clouds.rs:36
 #: crates/ui-egui/src/clouds.rs:49
-#: crates/ui-egui/src/lib.rs:4391
+#: crates/ui-egui/src/lib.rs:4393
 msgid "Point Cloud"
 msgstr "Mračno bodů"
 
-#: crates/ui-egui/src/lib.rs:4389
+#: crates/ui-egui/src/lib.rs:4391
 msgid "Point Cloud: laser scans (PTS, XYZ, PLY, LAS or E57) brought into the project, one file or a survey's stations as one scan, drawn in the 3D view, plans and sections and snapped to"
 msgstr "Mračno bodů: laserové skeny (PTS, XYZ, PLY, LAS nebo E57) načtené do projektu, jeden soubor nebo měřické stanice jako jeden sken, zobrazené ve 3D pohledu, půdorysech i řezech s možností uchopení"
 
@@ -7101,7 +7101,7 @@ msgstr "Mračna bodů"
 msgid "Point height {}"
 msgstr "Výška bodu {}"
 
-#: crates/ui-egui/src/lib.rs:5315
+#: crates/ui-egui/src/lib.rs:5317
 msgid "Point to a wall or a line: the offset goes to the cursor's side. Click to place it."
 msgstr "Najeďte na stěnu nebo čáru: odsazení směřuje na stranu kurzoru. Kliknutím umístěte."
 
@@ -7176,7 +7176,7 @@ msgid "Presets"
 msgstr "Předvolby"
 
 #: crates/ui-egui/src/editor.rs:1104
-#: crates/ui-egui/src/graphics.rs:1444
+#: crates/ui-egui/src/graphics.rs:1453
 #: crates/ui-egui/src/linestyles/creator.rs:104
 msgid "Preview"
 msgstr "Náhled"
@@ -7198,7 +7198,7 @@ msgstr ""
 msgid "Previous Zoom"
 msgstr "Předchozí zoom"
 
-#: crates/ui-egui/src/graphics.rs:1261
+#: crates/ui-egui/src/graphics.rs:1270
 msgid "Primary ({})"
 msgstr "Primární ({})"
 
@@ -7219,20 +7219,20 @@ msgstr "Projekt"
 msgid "Project Browser"
 msgstr "Prohlížeč projektu"
 
-#: crates/ui-egui/src/lib.rs:4525
+#: crates/ui-egui/src/lib.rs:4527
 msgid "Project Language"
 msgstr "Jazyk projektu"
 
-#: crates/ui-egui/src/lib.rs:4524
+#: crates/ui-egui/src/lib.rs:4526
 msgid "Project Language: what the drawings say and how new things are named; now {}"
 msgstr "Jazyk projektu: jazyk popisů výkresů a pojmenování nových prvků; aktuálně {}"
 
-#: crates/ui-egui/src/lib.rs:4431
+#: crates/ui-egui/src/lib.rs:4433
 #: crates/ui-egui/src/properties.rs:2982
 msgid "Project Parameters"
 msgstr "Parametry projektu"
 
-#: crates/ui-egui/src/lib.rs:4430
+#: crates/ui-egui/src/lib.rs:4432
 msgid "Project Parameters: values of your own each element of their categories holds, for schedules and IFC"
 msgstr "Parametry projektu: vlastní hodnoty, které obsahují jednotlivé prvky daných kategorií, pro výkazy a IFC"
 
@@ -7240,11 +7240,11 @@ msgstr "Parametry projektu: vlastní hodnoty, které obsahují jednotlivé prvky
 msgid "Project Phasing"
 msgstr "Fázování projektu"
 
-#: crates/ui-egui/src/lib.rs:4496
+#: crates/ui-egui/src/lib.rs:4498
 msgid "Project Units"
 msgstr "Jednotky projektu"
 
-#: crates/ui-egui/src/lib.rs:4495
+#: crates/ui-egui/src/lib.rs:4497
 msgid "Project Units (UN): how lengths show and read; now {}"
 msgstr "Jednotky projektu (UN): způsob zobrazení a odečítání délek; aktuálně {}"
 
@@ -7267,7 +7267,7 @@ msgstr "Měřítko projektu:"
 msgid "Projection"
 msgstr "Průmět"
 
-#: crates/ui-egui/src/graphics.rs:731
+#: crates/ui-egui/src/graphics.rs:740
 msgid "Projection Lines"
 msgstr "Čáry průmětu"
 
@@ -7275,7 +7275,7 @@ msgstr "Čáry průmětu"
 msgid "Projection Method:"
 msgstr "Způsob promítání:"
 
-#: crates/ui-egui/src/graphics.rs:732
+#: crates/ui-egui/src/graphics.rs:741
 msgid "Projection Patterns"
 msgstr "Vzory průmětu"
 
@@ -7283,7 +7283,7 @@ msgstr "Vzory průmětu"
 msgid "Projection Pen"
 msgstr "Pero průmětu"
 
-#: crates/ui-egui/src/graphics.rs:816
+#: crates/ui-egui/src/graphics.rs:825
 msgid "Projection/Surface"
 msgstr "Průmět/povrch"
 
@@ -7291,11 +7291,11 @@ msgstr "Průmět/povrch"
 msgid "Promenade"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4638
+#: crates/ui-egui/src/lib.rs:4640
 msgid "Properties"
 msgstr "Vlastnosti"
 
-#: crates/ui-egui/src/lib.rs:4638
+#: crates/ui-egui/src/lib.rs:4640
 msgid "Properties (PP): show or hide the palette"
 msgstr "Vlastnosti (PP): zobrazit nebo skrýt paletu"
 
@@ -7311,12 +7311,12 @@ msgstr "Hranice pozemku"
 msgid "Property Line (PL): sketch the plot's boundary, lines and arcs closed into a loop"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4468
+#: crates/ui-egui/src/lib.rs:4470
 #: crates/ui-egui/src/purge.rs:48
 msgid "Purge Unused"
 msgstr "Vyčistit nepoužité"
 
-#: crates/ui-egui/src/lib.rs:4466
+#: crates/ui-egui/src/lib.rs:4468
 msgid "Purge Unused (PU): take out the types, families and the rest nothing in the project uses; each category keeps a type"
 msgstr "Vyčistit nepoužité (PU): odebrat typy, rodiny a ostatní položky, které se v projektu nikde nepoužívají; v každé kategorii zůstane jeden typ"
 
@@ -7328,7 +7328,7 @@ msgstr "Vyčistit {}"
 msgid "Purged {} unused."
 msgstr "Vyčištěno {} nepoužitých položek."
 
-#: crates/ui-egui/src/lib.rs:4328
+#: crates/ui-egui/src/lib.rs:4330
 msgid "Put a view on this sheet: one not on a sheet yet"
 msgstr "Umístit pohled na tento výkres: pohled, který dosud není na žádném výkresu"
 
@@ -7353,11 +7353,11 @@ msgid "Racks"
 msgstr "Rozvaděče"
 
 #: crates/ui-egui/src/array.rs:107
-#: crates/ui-egui/src/lib.rs:4116
+#: crates/ui-egui/src/lib.rs:4118
 msgid "Radial"
 msgstr "Poloměrová"
 
-#: crates/ui-egui/src/lib.rs:4117
+#: crates/ui-egui/src/lib.rs:4119
 msgid "Radial Dimension: pick a round column, a curved wall, a circle or an arc, then click where the radius goes"
 msgstr "Radiální kóta: vyberte kruhový sloup, zakřivenou stěnu, kružnici nebo oblouk a potom klikněte do místa poloměru"
 
@@ -7381,12 +7381,12 @@ msgstr "Poloměr:"
 msgid "Railing"
 msgstr "Zábradlí"
 
-#: crates/ui-egui/src/lib.rs:4033
+#: crates/ui-egui/src/lib.rs:4035
 msgid "Railing: click a stair or a ramp for one down each side, or click a path and press Enter"
 msgstr "Zábradlí: klikněte na schodiště nebo rampu pro zábradlí po obou stranách, nebo klikněte na trasu a stiskněte Enter"
 
-#: crates/ui-egui/src/lib.rs:5056
-#: crates/ui-egui/src/lib.rs:5067
+#: crates/ui-egui/src/lib.rs:5058
+#: crates/ui-egui/src/lib.rs:5069
 msgid "Railings"
 msgstr "Zábradlí"
 
@@ -7400,7 +7400,7 @@ msgstr "Rampa"
 msgid "Ramp Slope"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4027
+#: crates/ui-egui/src/lib.rs:4029
 msgid "Ramp: click where it starts, then where its run ends; a landing turns it"
 msgstr "Rampa: klikněte na začátek a poté na konec ramene; podesta jej zalomí"
 
@@ -7432,7 +7432,7 @@ msgstr "Zápustné svítidlo"
 msgid "Recover"
 msgstr "Obnovit"
 
-#: crates/ui-egui/src/lib.rs:3855
+#: crates/ui-egui/src/lib.rs:3857
 msgid "Recover Autosave…"
 msgstr "Obnovit automatické uložení…"
 
@@ -7465,19 +7465,19 @@ msgstr "Obdélník: čtyři čáry mezi dvěma protilehlými rohy"
 msgid "Redefine"
 msgstr "Předefinovat"
 
-#: crates/ui-egui/src/lib.rs:3561
+#: crates/ui-egui/src/lib.rs:3563
 msgid "Redo"
 msgstr "Znovu"
 
-#: crates/ui-egui/src/lib.rs:3615
+#: crates/ui-egui/src/lib.rs:3617
 msgid "Redo History"
 msgstr "Historie opakování"
 
-#: crates/ui-egui/src/lib.rs:3658
+#: crates/ui-egui/src/lib.rs:3660
 msgid "Redo {}"
 msgstr "Znovu {}"
 
-#: crates/ui-egui/src/lib.rs:3657
+#: crates/ui-egui/src/lib.rs:3659
 msgid "Redo {} steps"
 msgstr "Znovu {} kroků"
 
@@ -7540,8 +7540,8 @@ msgstr "Znovu načíst CAD"
 
 #: crates/ui-egui/src/favorites.rs:142
 #: crates/ui-egui/src/favorites.rs:165
-#: crates/ui-egui/src/graphics.rs:1156
-#: crates/ui-egui/src/graphics.rs:1211
+#: crates/ui-egui/src/graphics.rs:1165
+#: crates/ui-egui/src/graphics.rs:1220
 #: crates/ui-egui/src/properties.rs:2854
 #: crates/ui-egui/src/properties.rs:3201
 #: crates/ui-egui/src/properties.rs:3356
@@ -7556,11 +7556,11 @@ msgstr "Odebrat"
 msgid "Remove Bars"
 msgstr "Odebrat pruty"
 
-#: crates/ui-egui/src/lib.rs:4894
+#: crates/ui-egui/src/lib.rs:4896
 msgid "Remove Paint"
 msgstr "Odebrat pomalování"
 
-#: crates/ui-egui/src/lib.rs:4893
+#: crates/ui-egui/src/lib.rs:4895
 msgid "Remove Paint: take the paint off the face you click in the 3D view"
 msgstr "Odebrat pomalování: odstraní materiál z plochy, na kterou kliknete ve 3D pohledu"
 
@@ -7649,7 +7649,7 @@ msgstr "Nahradit textem:"
 msgid "Replace imported by same name"
 msgstr "Nahradit importované se stejným názvem"
 
-#: crates/ui-egui/src/graphics.rs:1320
+#: crates/ui-egui/src/graphics.rs:1329
 #: crates/ui-egui/src/lineweights.rs:146
 #: crates/ui-egui/src/objectstyles.rs:72
 msgid "Reset"
@@ -7675,11 +7675,11 @@ msgstr "Obnovit rozvržení palet"
 msgid "Reset Panels"
 msgstr "Obnovit panely"
 
-#: crates/ui-egui/src/lib.rs:2883
+#: crates/ui-egui/src/lib.rs:2885
 msgid "Reset Shape"
 msgstr "Obnovit tvar"
 
-#: crates/ui-egui/src/lib.rs:2882
+#: crates/ui-egui/src/lib.rs:2884
 msgid "Reset Shape: take the points and split lines off, the top flat again"
 msgstr "Obnovit tvar: odstraní body a dělicí čáry, horní líc je opět rovný"
 
@@ -7687,7 +7687,7 @@ msgstr "Obnovit tvar: odstraní body a dělicí čáry, horní líc je opět rov
 msgid "Reset Temporary Hide/Isolate"
 msgstr "Obnovit dočasné skrytí/izolování"
 
-#: crates/ui-egui/src/footer.rs:446
+#: crates/ui-egui/src/footer.rs:503
 msgid "Reset Temporary Hide/Isolate (HR)"
 msgstr "Obnovit dočasné skrytí/izolování (HR)"
 
@@ -7724,29 +7724,25 @@ msgstr "Obnovit dolů"
 msgid "Retail"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4605
-msgid "Reveal Hidden"
-msgstr ""
-
-#: crates/ui-egui/src/footer.rs:485
-#: crates/ui-egui/src/lib.rs:1711
+#: crates/ui-egui/src/footer.rs:542
+#: crates/ui-egui/src/lib.rs:1712
 msgid "Reveal Hidden Elements"
 msgstr "Zobrazit skryté prvky"
 
-#: crates/ui-egui/src/footer.rs:484
+#: crates/ui-egui/src/footer.rs:541
 msgid "Reveal Hidden Elements (RH): draw what this view hides in magenta, to select and unhide it; again to leave"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4581
+#: crates/ui-egui/src/lib.rs:4583
 #: crates/ui-egui/src/warnings.rs:108
 msgid "Review Warnings"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4577
+#: crates/ui-egui/src/lib.rs:4579
 msgid "Review Warnings: what is questionable in the project without being wrong, with Show to select it. There are {}"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4574
+#: crates/ui-egui/src/lib.rs:4576
 msgid "Review Warnings: what is questionable in the project without being wrong. There are none"
 msgstr ""
 
@@ -7835,11 +7831,11 @@ msgstr "Střecha"
 msgid "Roof Pitch (°)"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4004
+#: crates/ui-egui/src/lib.rs:4006
 msgid "Roof by Extrusion"
 msgstr "Střecha vysunutím"
 
-#: crates/ui-egui/src/lib.rs:4006
+#: crates/ui-egui/src/lib.rs:4008
 msgid "Roof by Extrusion: click a line's start and end, then how far across it's swept; its profile rises from the line"
 msgstr "Střecha vysunutím: klikněte na začátek a konec čáry a poté na vzdálenost vytažení; její profil vychází z čáry"
 
@@ -7847,11 +7843,11 @@ msgstr "Střecha vysunutím: klikněte na začátek a konec čáry a poté na vz
 msgid "Roof by Face"
 msgstr "Střecha podle plochy"
 
-#: crates/ui-egui/src/lib.rs:3947
+#: crates/ui-egui/src/lib.rs:3949
 msgid "Roof by Face (RB): a roof on the selected masses' top faces"
 msgstr "Střecha podle plochy (RB): střecha na horních plochách vybraných objemů"
 
-#: crates/ui-egui/src/lib.rs:4001
+#: crates/ui-egui/src/lib.rs:4003
 msgid "Roof by Footprint: click inside the walls to roof them, on the level above"
 msgstr "Střecha půdorysem: klikněte uvnitř stěn pro jejich zastřešení v podlaží nad nimi"
 
@@ -7868,19 +7864,19 @@ msgstr "Sklon střechy"
 msgid "Room"
 msgstr "Místnost"
 
-#: crates/ui-egui/src/lib.rs:4040
+#: crates/ui-egui/src/lib.rs:4042
 msgid "Room & Area"
 msgstr "Místnost a plocha"
 
-#: crates/ui-egui/src/lib.rs:4042
+#: crates/ui-egui/src/lib.rs:4044
 msgid "Room (RM): click inside walls"
 msgstr "Místnost (RM): klikněte uvnitř stěn"
 
-#: crates/ui-egui/src/lib.rs:4514
+#: crates/ui-egui/src/lib.rs:4516
 msgid "Room Area Computation"
 msgstr "Výpočet plochy místností"
 
-#: crates/ui-egui/src/lib.rs:4513
+#: crates/ui-egui/src/lib.rs:4515
 msgid "Room Area Computation: where room areas are measured; now {}"
 msgstr "Výpočet plochy místností: kde se plochy místností měří; nyní {}"
 
@@ -7909,7 +7905,7 @@ msgstr "Oddělovací čáry místností"
 msgid "Room Separator"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4046
+#: crates/ui-egui/src/lib.rs:4048
 msgid "Room Separator: lines that bound rooms as walls do, to split an open space; click from point to point"
 msgstr "Oddělovač místností: čáry, které místnosti ohraničují stejně jako stěny a rozdělují otevřený prostor; klikejte od bodu k bodu"
 
@@ -7922,7 +7918,7 @@ msgstr "Růže"
 msgid "Rotate"
 msgstr "Otočit"
 
-#: crates/ui-egui/src/lib.rs:4733
+#: crates/ui-egui/src/lib.rs:4735
 msgid "Rotate (RO): click the angle's start, then its end"
 msgstr "Otočit (RO): klikněte na počáteční úhel a poté na koncový úhel"
 
@@ -7962,7 +7958,7 @@ msgstr "MĚŘÍTKO"
 msgid "SCALE AS INDICATED"
 msgstr "MĚŘÍTKO DLE VÝKRESŮ"
 
-#: crates/ui-egui/src/lib.rs:3882
+#: crates/ui-egui/src/lib.rs:3884
 msgid "SVG drawing"
 msgstr "Výkres SVG"
 
@@ -7993,12 +7989,12 @@ msgid "Sand"
 msgstr "Písek"
 
 #: crates/ui-egui/src/editor.rs:1178
-#: crates/ui-egui/src/lib.rs:3551
+#: crates/ui-egui/src/lib.rs:3553
 #: crates/ui-egui/src/shortcuts.rs:565
 msgid "Save"
 msgstr "Uložit"
 
-#: crates/ui-egui/src/lib.rs:3852
+#: crates/ui-egui/src/lib.rs:3854
 msgid "Save As…"
 msgstr "Uložit jako…"
 
@@ -8027,7 +8023,7 @@ msgstr "Uložit jako"
 msgid "Save as:"
 msgstr "Uložit jako:"
 
-#: crates/ui-egui/src/lib.rs:5876
+#: crates/ui-egui/src/lib.rs:5878
 msgid "Save changes to {}?"
 msgstr "Uložit změny v {}?"
 
@@ -8044,15 +8040,15 @@ msgstr "Položka {} byla uložena do vašich oblíbených"
 msgid "Saving…"
 msgstr ""
 
-#: crates/ui-egui/src/footer.rs:314
+#: crates/ui-egui/src/footer.rs:371
 msgid "Scale"
 msgstr "Měřítko"
 
-#: crates/ui-egui/src/graphics.rs:575
+#: crates/ui-egui/src/graphics.rs:584
 msgid "Scale Value 1:"
 msgstr "Hodnota měřítka 1:"
 
-#: crates/ui-egui/src/footer.rs:312
+#: crates/ui-egui/src/footer.rs:369
 msgid "Scale: the paper this view stands for, 1 : n of the model: its annotation and its line weights are that paper's"
 msgstr "Měřítko: velikost papíru odpovídající tomuto pohledu, 1 : n modelu: jeho popisy a tloušťky čar odpovídají tomuto papíru"
 
@@ -8068,13 +8064,13 @@ msgstr "Výkaz"
 msgid "Schedule Properties: {}"
 msgstr "Vlastnosti výkazu: {}"
 
-#: crates/ui-egui/src/lib.rs:4297
+#: crates/ui-egui/src/lib.rs:4299
 msgid "Schedule/Quantities…"
 msgstr "Výkaz/Množství…"
 
-#: crates/ui-egui/src/lib.rs:3246
-#: crates/ui-egui/src/lib.rs:3247
+#: crates/ui-egui/src/lib.rs:3248
 #: crates/ui-egui/src/lib.rs:3249
+#: crates/ui-egui/src/lib.rs:3251
 msgid "Schedule: {}"
 msgstr "Výkaz: {}"
 
@@ -8082,7 +8078,7 @@ msgstr "Výkaz: {}"
 msgid "Scheduled fields (in order):"
 msgstr "Pole výkazu (v pořadí):"
 
-#: crates/ui-egui/src/lib.rs:4295
+#: crates/ui-egui/src/lib.rs:4297
 msgid "Schedules"
 msgstr "Výkazy"
 
@@ -8120,12 +8116,12 @@ msgstr "Hledat…"
 msgid "Seat Height"
 msgstr "Výška sedáku"
 
-#: crates/ui-egui/src/lib.rs:4284
+#: crates/ui-egui/src/lib.rs:4286
 #: crates/ui-egui/src/selecting.rs:88
 msgid "Section"
 msgstr "Řez"
 
-#: crates/ui-egui/src/lib.rs:4283
+#: crates/ui-egui/src/lib.rs:4285
 msgid "Section (CR): click its start, then its end; it looks to the left of the line"
 msgstr "Řez (CR): klikněte na začátek a konec řezu; pohled směřuje vlevo od čáry"
 
@@ -8137,7 +8133,7 @@ msgstr "Ořezový kvádr"
 msgid "Section Box: cut the 3D view to a box, each face moved by its grip in the view or typed here (BX)"
 msgstr "Ořezový kvádr: ořízne 3D pohled na kvádr, jehož stěny lze posouvat uzlem v pohledu nebo zadáním hodnot zde (BX)"
 
-#: crates/ui-egui/src/lib.rs:3240
+#: crates/ui-egui/src/lib.rs:3242
 msgid "Section: {}"
 msgstr "Řez: {}"
 
@@ -8190,7 +8186,7 @@ msgstr "Segment {}: Dolů"
 msgid "Segment {}: Up"
 msgstr "Segment {}: Nahoru"
 
-#: crates/ui-egui/src/lib.rs:3897
+#: crates/ui-egui/src/lib.rs:3899
 msgid "Select"
 msgstr "Vybrat"
 
@@ -8214,7 +8210,7 @@ msgstr ""
 msgid "Select a beam, a column, a footing or a floor to reinforce first."
 msgstr "Nejprve vyberte průvlak, sloup, patku nebo podlahu, které chcete vyztužit."
 
-#: crates/ui-egui/src/lib.rs:3983
+#: crates/ui-egui/src/lib.rs:3985
 msgid "Select a mass first."
 msgstr "Nejprve vyberte objem."
 
@@ -8222,7 +8218,7 @@ msgstr "Nejprve vyberte objem."
 msgid "Select an action to assign."
 msgstr "Vyberte akci k přiřazení."
 
-#: crates/ui-egui/src/lib.rs:2655
+#: crates/ui-egui/src/lib.rs:2657
 msgid "Select an element first to match its properties"
 msgstr "Nejprve vyberte prvek pro převzetí jeho vlastností"
 
@@ -8231,11 +8227,11 @@ msgid "Select and zoom to it"
 msgstr ""
 
 #: crates/ui-egui/src/inquiry.rs:122
-#: crates/ui-egui/src/lib.rs:4560
+#: crates/ui-egui/src/lib.rs:4562
 msgid "Select by ID"
 msgstr "Vybrat podle ID"
 
-#: crates/ui-egui/src/lib.rs:4559
+#: crates/ui-egui/src/lib.rs:4561
 msgid "Select by ID: select elements by their IDs, GUIDs or IFC GlobalIds, as many as you paste, and show them"
 msgstr "Vybrat podle ID: vybrat prvky podle jejich ID, GUID nebo IFC GlobalId (i více vložených najednou) a zobrazit je"
 
@@ -8247,7 +8243,7 @@ msgstr "Vyberte prvky jednoho druhu: pouze průvlaky, pouze sloupy, pouze patky 
 msgid "Select elements, then press Enter"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:5220
+#: crates/ui-egui/src/lib.rs:5222
 msgid "Select fill pattern lines then press Enter"
 msgstr "Vyberte čáry vzoru výplně a stiskněte Enter"
 
@@ -8288,13 +8284,13 @@ msgstr "Nastaveno šablonou pohledu {}: upravte šablonu nebo ukončete její po
 msgid "Setback"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:3571
+#: crates/ui-egui/src/lib.rs:3573
 #: crates/ui-egui/src/settings.rs:389
 msgid "Settings"
 msgstr "Nastavení"
 
-#: crates/ui-egui/src/lib.rs:3837
-#: crates/ui-egui/src/lib.rs:3863
+#: crates/ui-egui/src/lib.rs:3839
+#: crates/ui-egui/src/lib.rs:3865
 msgid "Settings…"
 msgstr "Nastavení…"
 
@@ -8306,11 +8302,11 @@ msgstr "Stínovaný"
 msgid "Shadows"
 msgstr "Stíny"
 
-#: crates/ui-egui/src/lib.rs:4057
+#: crates/ui-egui/src/lib.rs:4059
 msgid "Shaft"
 msgstr "Šachta"
 
-#: crates/ui-egui/src/lib.rs:4058
+#: crates/ui-egui/src/lib.rs:4060
 msgid "Shaft Opening: click two opposite corners; it cuts the floors, ceilings and roofs it passes through"
 msgstr "Šachtový otvor: klikněte na dva protilehlé rohy; protne podlahy, podhledy a střechy, kterými prochází"
 
@@ -8318,15 +8314,15 @@ msgstr "Šachtový otvor: klikněte na dva protilehlé rohy; protne podlahy, pod
 msgid "Shape"
 msgstr "Tvar"
 
-#: crates/ui-egui/src/lib.rs:4833
+#: crates/ui-egui/src/lib.rs:4835
 msgid "Shape Editing"
 msgstr "Úpravy tvaru"
 
-#: crates/ui-egui/src/lib.rs:5080
+#: crates/ui-egui/src/lib.rs:5082
 msgid "Shed"
 msgstr "Pultová"
 
-#: crates/ui-egui/src/lib.rs:4315
+#: crates/ui-egui/src/lib.rs:4317
 #: crates/ui-egui/src/titleblocks.rs:148
 #: crates/ui-egui/src/titleblocks.rs:151
 #: crates/ui-egui/src/titleblocks.rs:477
@@ -8334,7 +8330,7 @@ msgstr "Pultová"
 msgid "Sheet"
 msgstr "Výkres"
 
-#: crates/ui-egui/src/lib.rs:4314
+#: crates/ui-egui/src/lib.rs:4316
 msgid "Sheet Composition"
 msgstr "Sestavení výkresu"
 
@@ -8355,7 +8351,7 @@ msgstr "Výkresy"
 msgid "Sheets (all)"
 msgstr "Výkresy (vše)"
 
-#: crates/ui-egui/src/lib.rs:3884
+#: crates/ui-egui/src/lib.rs:3886
 msgid "Sheets as PDF…"
 msgstr "Výkresy jako PDF…"
 
@@ -8376,7 +8372,7 @@ msgstr "Klávesové zkratky:"
 msgid "Shortcut keys are two characters, letters or numbers."
 msgstr "Klávesové zkratky se skládají ze dvou znaků, písmen nebo číslic."
 
-#: crates/ui-egui/src/lib.rs:4508
+#: crates/ui-egui/src/lib.rs:4510
 msgid "Shortcuts"
 msgstr "Klávesové zkratky"
 
@@ -8412,11 +8408,11 @@ msgstr "Zobrazit hrany"
 msgid "Show Every Tool"
 msgstr "Zobrazit všechny nástroje"
 
-#: crates/ui-egui/src/lib.rs:3931
+#: crates/ui-egui/src/lib.rs:3933
 msgid "Show Mass"
 msgstr "Zobrazit objem"
 
-#: crates/ui-egui/src/lib.rs:3930
+#: crates/ui-egui/src/lib.rs:3932
 msgid "Show Mass (MH): hides the masses in this view, or shows them again"
 msgstr "Zobrazit objem (MH): skryje objemy v tomto pohledu nebo je znovu zobrazí"
 
@@ -8432,12 +8428,12 @@ msgstr "Zobrazit předchozí + bourané"
 msgid "Show Previous + New"
 msgstr "Zobrazit předchozí + nové"
 
-#: crates/ui-egui/src/footer.rs:459
+#: crates/ui-egui/src/footer.rs:516
 msgid "Show background grids, change their settings, or toggle grid snapping"
 msgstr "Zobrazit mřížky na pozadí, změnit jejich nastavení nebo přepnout přichytávání k mřížce"
 
 #: crates/ui-egui/src/background_grid.rs:143
-#: crates/ui-egui/src/footer.rs:466
+#: crates/ui-egui/src/footer.rs:523
 msgid "Show grids"
 msgstr "Zobrazit mřížky"
 
@@ -8445,7 +8441,7 @@ msgstr "Zobrazit mřížky"
 msgid "Show it in Project info"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4355
+#: crates/ui-egui/src/lib.rs:4357
 msgid "Show or hide the palettes, and pick the interface's language"
 msgstr "Zobrazit nebo skrýt palety a vybrat jazyk rozhraní"
 
@@ -8594,19 +8590,19 @@ msgstr "Sklon"
 msgid "Slope (°)"
 msgstr "Sklon (°)"
 
-#: crates/ui-egui/src/lib.rs:4849
+#: crates/ui-egui/src/lib.rs:4851
 msgid "Slope Arrow"
 msgstr "Šipka sklonu"
 
-#: crates/ui-egui/src/lib.rs:4848
+#: crates/ui-egui/src/lib.rs:4850
 msgid "Slope Arrow: click its tail, then its head; the floor rises toward the head at the Options Bar's slope"
 msgstr "Šipka sklonu: klikněte na její patu a poté na hrot; podlaha stoupá směrem k hrotu podle sklonu z panelu Možnosti"
 
-#: crates/ui-egui/src/lib.rs:5025
-#: crates/ui-egui/src/lib.rs:5065
-#: crates/ui-egui/src/lib.rs:5070
-#: crates/ui-egui/src/lib.rs:5078
-#: crates/ui-egui/src/lib.rs:5088
+#: crates/ui-egui/src/lib.rs:5027
+#: crates/ui-egui/src/lib.rs:5067
+#: crates/ui-egui/src/lib.rs:5072
+#: crates/ui-egui/src/lib.rs:5080
+#: crates/ui-egui/src/lib.rs:5090
 msgid "Slope:"
 msgstr "Sklon:"
 
@@ -8658,7 +8654,7 @@ msgstr "Přichytit k tečnám"
 msgid "Snap tolerance"
 msgstr "Tolerance přichycení"
 
-#: crates/ui-egui/src/lib.rs:2549
+#: crates/ui-egui/src/lib.rs:2551
 msgid "Snap: {} (next point)"
 msgstr "Přichycení: {} (další bod)"
 
@@ -8670,11 +8666,11 @@ msgstr "Přichycení"
 msgid "Snaps Off"
 msgstr "Vypnout přichycení"
 
-#: crates/ui-egui/src/lib.rs:2550
+#: crates/ui-egui/src/lib.rs:2552
 msgid "Snaps off (next point)"
 msgstr "Přichycení vypnuto (další bod)"
 
-#: crates/ui-egui/src/lib.rs:4489
+#: crates/ui-egui/src/lib.rs:4491
 msgid "Snaps: what a picked point sticks to (ends, middles, crossings, centres, perpendiculars), and the angles it steps by; SE, SM, SI, SC, SP and SN take one alone for the next point, SO none"
 msgstr "Přichycení: k čemu se vybraný bod přichytí (konce, polovice, průsečíky, středy, kolmice) a úhlové přírůstky; SE, SM, SI, SC, SP a SN nastaví jedno přichycení pro další bod, SO žádné"
 
@@ -8690,7 +8686,7 @@ msgstr ""
 msgid "Soft shadows where faces meet inside a corner"
 msgstr "Měkké stíny v místech, kde se plochy stýkají ve vnitřním koutě"
 
-#: crates/ui-egui/src/graphics.rs:1462
+#: crates/ui-egui/src/graphics.rs:1471
 msgid "Solid"
 msgstr "Plné těleso"
 
@@ -8748,7 +8744,7 @@ msgstr "Rozteč"
 msgid "Spacing (mm)"
 msgstr "Rozteč (mm)"
 
-#: crates/ui-egui/src/lib.rs:4981
+#: crates/ui-egui/src/lib.rs:4983
 msgid "Spacing:"
 msgstr "Rozteč:"
 
@@ -8776,14 +8772,14 @@ msgstr "Křivka spline: klikněte na její řídicí body; klávesa Enter ji dok
 msgid "Split"
 msgstr "Rozdělit"
 
-#: crates/ui-egui/src/lib.rs:4707
+#: crates/ui-egui/src/lib.rs:4709
 #: crates/ui-egui/src/selecting.rs:83
 #: crates/ui-egui/src/sketch.rs:761
 #: crates/ui-egui/src/sketch.rs:1017
 msgid "Split Element"
 msgstr "Rozdělit prvek"
 
-#: crates/ui-egui/src/lib.rs:4708
+#: crates/ui-egui/src/lib.rs:4710
 #: crates/ui-egui/src/sketch.rs:761
 msgid "Split Element (SL): click a wall or a line where to split it"
 msgstr "Rozdělit prvek (SL): klikněte na stěnu nebo čáru v místě rozdělení"
@@ -8796,17 +8792,17 @@ msgstr "Rozdělit mezi koncovými body čáry."
 msgid "Spot Elevation"
 msgstr "Výšková kóta"
 
-#: crates/ui-egui/src/lib.rs:4135
+#: crates/ui-egui/src/lib.rs:4137
 msgid "Spot Elevation (EL): click a floor, a roof or a stair; in a section, a point"
 msgstr "Výšková kóta (EL): klikněte na podlahu, střechu nebo schodiště; v řezu na bod"
 
 #: crates/core/src/commands.rs:1020
-#: crates/ui-egui/src/lib.rs:1682
-#: crates/ui-egui/src/lib.rs:4140
+#: crates/ui-egui/src/lib.rs:1683
+#: crates/ui-egui/src/lib.rs:4142
 msgid "Spot Slope"
 msgstr "Kóta sklonu"
 
-#: crates/ui-egui/src/lib.rs:4141
+#: crates/ui-egui/src/lib.rs:4143
 msgid "Spot Slope: click a floor or a roof in a plan; an arrow points downhill with how steeply its top falls"
 msgstr "Kóta sklonu: klikněte na podlahu nebo střechu v půdorysu; šipka ukazuje po spádu a udává, jak strmě její horní líc klesá"
 
@@ -8823,7 +8819,7 @@ msgstr "Čtvercová mřížka"
 msgid "Stair"
 msgstr "Schodiště"
 
-#: crates/ui-egui/src/lib.rs:4021
+#: crates/ui-egui/src/lib.rs:4023
 msgid "Stair: click where it starts, then where its run ends; a landing turns it"
 msgstr "Schodiště: klikněte na místo začátku a poté na konec ramene; podesta jej zalomí"
 
@@ -8950,7 +8946,7 @@ msgstr "Konstrukční sloup"
 msgid "Structural Column (CL): click where it stands"
 msgstr "Konstrukční sloup (CL): klikněte na místo umístění"
 
-#: crates/ui-egui/src/lib.rs:1329
+#: crates/ui-egui/src/lib.rs:1330
 #: crates/ui-egui/src/properties.rs:744
 msgid "Structure"
 msgstr "Konstrukce"
@@ -8976,7 +8972,7 @@ msgid "Sub-divide / Graded Region: an area of the ground, of the Options Bar's t
 msgstr ""
 
 #: crates/ui-egui/src/background_grid.rs:161
-#: crates/ui-egui/src/footer.rs:468
+#: crates/ui-egui/src/footer.rs:525
 msgid "Subgrid"
 msgstr "Podmřížka"
 
@@ -9025,7 +9021,7 @@ msgstr "Vzor povrchu"
 msgid "Surface Pattern Color"
 msgstr ""
 
-#: crates/ui-egui/src/graphics.rs:744
+#: crates/ui-egui/src/graphics.rs:753
 msgid "Surface Transparency"
 msgstr "Průhlednost povrchu"
 
@@ -9145,20 +9141,20 @@ msgstr "Stůl"
 msgid "Tag"
 msgstr "Popiska"
 
-#: crates/ui-egui/src/lib.rs:4193
+#: crates/ui-egui/src/lib.rs:4195
 msgid "Tag All"
 msgstr "Popsat vše"
 
-#: crates/ui-egui/src/lib.rs:4190
+#: crates/ui-egui/src/lib.rs:4192
 #: crates/ui-egui/src/selecting.rs:87
 msgid "Tag by Category"
 msgstr "Popsat podle kategorie"
 
-#: crates/ui-egui/src/lib.rs:4189
+#: crates/ui-egui/src/lib.rs:4191
 msgid "Tag by Category (TG): click an element to tag it with its type, a door's or window's mark, or the field in Label"
 msgstr "Popsat podle kategorie (TG): kliknutím na prvek jej opatříte popiskou s jeho typem, označením dveří či oken nebo polem v popisku"
 
-#: crates/ui-egui/src/lib.rs:4193
+#: crates/ui-egui/src/lib.rs:4195
 msgid "Tag every door and window in this view that has no tag"
 msgstr "Popsat všechny dveře a okna v tomto pohledu, které nemají popisku"
 
@@ -9198,7 +9194,7 @@ msgstr "Oblouk tečný ke konci: klikněte na konec čáry a poté na místo, kd
 msgid "Target"
 msgstr "Cíl"
 
-#: crates/ui-egui/src/lib.rs:5019
+#: crates/ui-egui/src/lib.rs:5021
 msgid "Target Height:"
 msgstr "Výška cíle:"
 
@@ -9206,12 +9202,12 @@ msgstr "Výška cíle:"
 msgid "Team"
 msgstr "Tým"
 
-#: crates/ui-egui/src/lib.rs:4473
+#: crates/ui-egui/src/lib.rs:4475
 #: crates/ui-egui/src/standards.rs:271
 msgid "Technical Standards"
 msgstr "Technické normy"
 
-#: crates/ui-egui/src/lib.rs:4472
+#: crates/ui-egui/src/lib.rs:4474
 msgid "Technical Standards: configure drawing standards (NBR, ISO, ANSI, EU); now {}"
 msgstr "Technické normy: nastavení norem výkresů (NBR, ISO, ANSI, EU); nyní {}"
 
@@ -9240,7 +9236,7 @@ msgstr ""
 msgid "Temporary Dimensions"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4459
+#: crates/ui-egui/src/lib.rs:4461
 msgid "Temporary Dimensions: what a selected wall's, door's and window's temporary dimensions measure to and from: centerlines, faces, the core, openings"
 msgstr ""
 
@@ -9252,11 +9248,11 @@ msgstr "Dočasně skrýt kategorii"
 msgid "Temporary Hide Element"
 msgstr "Dočasně skrýt prvek"
 
-#: crates/ui-egui/src/footer.rs:425
+#: crates/ui-egui/src/footer.rs:482
 msgid "Temporary Hide/Isolate"
 msgstr "Dočasně skrýt/izolovat"
 
-#: crates/ui-egui/src/footer.rs:423
+#: crates/ui-egui/src/footer.rs:480
 msgid "Temporary Hide/Isolate: hide or isolate what is selected, or its categories, in this view until you reset it"
 msgstr "Dočasně skrýt/izolovat: skryje nebo izoluje vybrané prvky nebo jejich kategorie v tomto pohledu, dokud nastavení neobnovíte"
 
@@ -9291,7 +9287,7 @@ msgstr ""
 msgid "Text"
 msgstr "Text"
 
-#: crates/ui-egui/src/lib.rs:4175
+#: crates/ui-egui/src/lib.rs:4177
 msgid "Text (TX): type the note in the Options Bar, then click where it goes"
 msgstr "Text (TX): zadejte poznámku na panelu Možnosti a poté klikněte na místo jejího umístění"
 
@@ -9317,7 +9313,7 @@ msgstr "Velikost textu"
 msgid "Text colour"
 msgstr "Barva textu"
 
-#: crates/ui-egui/src/lib.rs:5129
+#: crates/ui-egui/src/lib.rs:5131
 msgid "Text:"
 msgstr "Text:"
 
@@ -9451,11 +9447,11 @@ msgstr ""
 msgid "The project changed while this window was open: Cancel, and open it again."
 msgstr "Projekt se změnil, zatímco bylo toto okno otevřené: Zrušte operaci a otevřete jej znovu."
 
-#: crates/ui-egui/src/graphics.rs:1225
+#: crates/ui-egui/src/graphics.rs:1234
 msgid "The project has no CAD drawings: Insert > Import CAD brings one in."
 msgstr "Projekt neobsahuje žádné výkresy CAD: načtěte výkres pomocí Vložit > Importovat CAD."
 
-#: crates/ui-egui/src/graphics.rs:1255
+#: crates/ui-egui/src/graphics.rs:1264
 msgid "The project has no design options: Manage > Design Options makes them."
 msgstr "Projekt neobsahuje žádné možnosti návrhu: vytvořte je pomocí Správa > Možnosti návrhu."
 
@@ -9487,7 +9483,7 @@ msgstr "Pás karet, palety a panely jako karty plovoucí nad pohledem"
 msgid "The ribbon, the palettes and the bars flush to the window's edges"
 msgstr "Pás karet, palety a panely zarovnané k okrajům okna"
 
-#: crates/ui-egui/src/lib.rs:2660
+#: crates/ui-egui/src/lib.rs:2662
 msgid "The selected element has no type to match"
 msgstr "Vybraný prvek nemá žádný odpovídající typ"
 
@@ -9582,11 +9578,11 @@ msgid "Thickness:"
 msgstr "Tloušťka:"
 
 #: crates/core/src/lines.rs:194
-#: crates/ui-egui/src/lib.rs:4241
+#: crates/ui-egui/src/lib.rs:4243
 msgid "Thin Lines"
 msgstr "Tenké čáry"
 
-#: crates/ui-egui/src/lib.rs:4241
+#: crates/ui-egui/src/lib.rs:4243
 msgid "Thin Lines (TL): every line one pixel wide"
 msgstr "Tenké čáry (TL): každá čára má šířku jeden pixel"
 
@@ -9608,18 +9604,18 @@ msgstr ""
 msgid "This plugin asks to read and write files on your computer. Its commands reach the disk only while you allow it."
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:1973
+#: crates/ui-egui/src/lib.rs:1974
 msgid "This project has no levels. Add one with the Level tool."
 msgstr "Tento projekt nemá žádná podlaží. Přidejte podlaží pomocí nástroje Podlaží."
 
-#: crates/ui-egui/src/lib.rs:5259
+#: crates/ui-egui/src/lib.rs:5261
 msgid "This tool works in plan views: open one from the Project Browser."
 msgstr "Tento nástroj funguje v půdorysných pohledech: otevřete některý z Prohlížeče projektu."
 
-#: crates/ui-egui/src/footer.rs:239
+#: crates/ui-egui/src/footer.rs:296
 #: crates/ui-egui/src/graphics.rs:221
 #: crates/ui-egui/src/graphics.rs:268
-#: crates/ui-egui/src/lib.rs:3970
+#: crates/ui-egui/src/lib.rs:3972
 msgid "This view has no graphics to override."
 msgstr "Tento pohled nemá žádná grafická zobrazení k přepsání."
 
@@ -9699,14 +9695,14 @@ msgstr "Šířka rozpisky:"
 msgid "Title Block {}"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4321
+#: crates/ui-egui/src/lib.rs:4323
 #: crates/ui-egui/src/purge.rs:17
 #: crates/ui-egui/src/titleblocks.rs:509
 #: crates/ui-egui/src/titleblocks.rs:541
 msgid "Title Blocks"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4320
+#: crates/ui-egui/src/lib.rs:4322
 msgid "Title Blocks (TB): your own, read from a DXF or typed, with fields each sheet or the whole project fills in"
 msgstr ""
 
@@ -9730,11 +9726,11 @@ msgstr ""
 msgid "Toddlers"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4620
+#: crates/ui-egui/src/lib.rs:4622
 msgid "Toggle Reveal Hidden Elements Mode"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4619
+#: crates/ui-egui/src/lib.rs:4621
 msgid "Toggle Reveal Hidden Elements Mode (RH): leave the mode; what the view hides is hidden again"
 msgstr ""
 
@@ -9742,7 +9738,7 @@ msgstr ""
 msgid "Too dense to preview at this size."
 msgstr "V této velikosti je příliš hustý na náhled."
 
-#: crates/ui-egui/src/lib.rs:5134
+#: crates/ui-egui/src/lib.rs:5136
 #: crates/ui-egui/src/reinforce.rs:182
 #: crates/ui-egui/src/templates.rs:744
 msgid "Top"
@@ -9797,7 +9793,7 @@ msgstr "Toposolid"
 msgid "Toposolid (TS): sketch the ground's outline; its heights and contours are edited after"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:5785
+#: crates/ui-egui/src/lib.rs:5787
 msgid "Total"
 msgstr "Celkem"
 
@@ -9805,8 +9801,8 @@ msgstr "Celkem"
 msgid "Total selected items: {}"
 msgstr "Celkem vybraných položek: {}"
 
-#: crates/ui-egui/src/graphics.rs:993
-#: crates/ui-egui/src/graphics.rs:1314
+#: crates/ui-egui/src/graphics.rs:1002
+#: crates/ui-egui/src/graphics.rs:1323
 #: crates/ui-egui/src/properties.rs:2278
 msgid "Transparency"
 msgstr "Průhlednost"
@@ -9823,22 +9819,22 @@ msgstr "Šířka stupně"
 msgid "Tree"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4753
+#: crates/ui-egui/src/lib.rs:4755
 #: crates/ui-egui/src/sketch.rs:757
 msgid "Trim/Extend Multiple Elements"
 msgstr "Oříznout/prodloužit více prvků"
 
-#: crates/ui-egui/src/lib.rs:4755
+#: crates/ui-egui/src/lib.rs:4757
 #: crates/ui-egui/src/sketch.rs:758
 msgid "Trim/Extend Multiple Elements: pick the line to trim or extend to, then each line to change, on the part to keep"
 msgstr "Oříznout/prodloužit více prvků: vyberte hraniční čáru a poté postupně jednotlivé čáry k úpravě na části, kterou chcete zachovat"
 
-#: crates/ui-egui/src/lib.rs:4721
+#: crates/ui-egui/src/lib.rs:4723
 #: crates/ui-egui/src/sketch.rs:751
 msgid "Trim/Extend Single Element"
 msgstr "Oříznout/prodloužit jeden prvek"
 
-#: crates/ui-egui/src/lib.rs:4722
+#: crates/ui-egui/src/lib.rs:4724
 #: crates/ui-egui/src/sketch.rs:752
 msgid "Trim/Extend Single Element: pick the line to trim or extend to, then the line to change, on the part to keep"
 msgstr "Oříznout/prodloužit jeden prvek: vyberte hraniční čáru a poté čáru k úpravě na části, kterou chcete zachovat"
@@ -9850,7 +9846,7 @@ msgstr "Oříznout/prodloužit jeden prvek: vyberte hraniční čáru a poté č
 msgid "Trim/Extend to Corner"
 msgstr "Oříznout/prodloužit k rohu"
 
-#: crates/ui-egui/src/lib.rs:4747
+#: crates/ui-egui/src/lib.rs:4749
 #: crates/ui-egui/src/sketch.rs:746
 msgid "Trim/Extend to Corner (TR): pick two walls or two lines, on the parts to keep"
 msgstr "Oříznout/prodloužit k rohu (TR): vyberte dvě stěny nebo dvě čáry na částech, které chcete zachovat"
@@ -9893,7 +9889,7 @@ msgid "Type Parameters"
 msgstr "Parametry typu"
 
 #: crates/ui-egui/src/dimtypes.rs:89
-#: crates/ui-egui/src/lib.rs:4643
+#: crates/ui-egui/src/lib.rs:4645
 #: crates/ui-egui/src/notes.rs:500
 #: crates/ui-egui/src/properties.rs:2104
 #: crates/ui-egui/src/properties.rs:2599
@@ -9920,15 +9916,15 @@ msgstr "Typ parametru"
 msgid "Type or paste an ID, a GUID or an IFC GlobalId."
 msgstr "Zadejte nebo vložte ID, GUID nebo IFC GlobalId."
 
-#: crates/ui-egui/src/lib.rs:5243
+#: crates/ui-egui/src/lib.rs:5245
 msgid "Type the new level's elevation in the Options Bar, then Create."
 msgstr "Zadejte výšku nového podlaží na panelu Možnosti a poté klikněte na Vytvořit."
 
-#: crates/ui-egui/src/lib.rs:5246
+#: crates/ui-egui/src/lib.rs:5248
 msgid "Type the note in the Options Bar, then click where it goes."
 msgstr "Zadejte poznámku na panelu Možnosti a poté klikněte na místo jejího umístění."
 
-#: crates/ui-egui/src/lib.rs:5344
+#: crates/ui-egui/src/lib.rs:5346
 msgid "Type the note in the Options Bar, then click where it goes: its top left corner."
 msgstr "Zadejte poznámku na panelu Možnosti a poté klikněte na místo jejího umístění: její levý horní roh."
 
@@ -9960,12 +9956,12 @@ msgstr ""
 msgid "Unbounded Height"
 msgstr "Neohraničená výška"
 
-#: crates/ui-egui/src/graphics.rs:1001
+#: crates/ui-egui/src/graphics.rs:1010
 msgid "Unchecked layers inherit; <None> hides a layer."
 msgstr "Nezaškrtnuté vrstvy dědí vlastnosti; položka <Žádné> vrstvu skryje."
 
-#: crates/ui-egui/src/lib.rs:982
-#: crates/ui-egui/src/lib.rs:990
+#: crates/ui-egui/src/lib.rs:983
+#: crates/ui-egui/src/lib.rs:991
 #: crates/ui-egui/src/properties.rs:1651
 msgid "Unconnected"
 msgstr "Nepřipojeno"
@@ -9983,11 +9979,11 @@ msgstr "Podtržené"
 msgid "Underline (Ctrl+U)"
 msgstr "Podtržené (Ctrl+U)"
 
-#: crates/ui-egui/src/lib.rs:3556
+#: crates/ui-egui/src/lib.rs:3558
 msgid "Undo"
 msgstr "Zpět"
 
-#: crates/ui-egui/src/lib.rs:3615
+#: crates/ui-egui/src/lib.rs:3617
 msgid "Undo History"
 msgstr "Historie kroků zpět"
 
@@ -9999,15 +9995,15 @@ msgstr ""
 msgid "Undo steps kept"
 msgstr "Počet uchovávaných kroků zpět"
 
-#: crates/ui-egui/src/lib.rs:3658
+#: crates/ui-egui/src/lib.rs:3660
 msgid "Undo {}"
 msgstr "Zpět: {}"
 
-#: crates/ui-egui/src/lib.rs:3657
+#: crates/ui-egui/src/lib.rs:3659
 msgid "Undo {} steps"
 msgstr "Vrátit zpět {} kroků"
 
-#: crates/ui-egui/src/graphics.rs:873
+#: crates/ui-egui/src/graphics.rs:882
 msgid "Unfold"
 msgstr "Rozbalit"
 
@@ -10015,11 +10011,19 @@ msgstr "Rozbalit"
 msgid "Ungroup"
 msgstr "Oddělit"
 
-#: crates/ui-egui/src/lib.rs:4615
+#: crates/ui-egui/src/lib.rs:4618
+msgid "Unhide Category"
+msgstr "Odkrýt kategorii"
+
+#: crates/ui-egui/src/lib.rs:4617
 msgid "Unhide Category (VU): bring back every category the selection is of that this view hides"
 msgstr "Odkrýt kategorii (VU): znovu zobrazí všechny kategorie odpovídající výběru, které jsou v tomto pohledu skryté"
 
-#: crates/ui-egui/src/lib.rs:4608
+#: crates/ui-egui/src/lib.rs:4614
+msgid "Unhide Element"
+msgstr "Odkrýt prvek"
+
+#: crates/ui-egui/src/lib.rs:4610
 msgid "Unhide Element (EU): bring back the selected elements this view hides"
 msgstr "Odkrýt prvek (EU): znovu zobrazí vybrané prvky skryté v tomto pohledu"
 
@@ -10060,7 +10064,7 @@ msgstr "Nepojmenovaný"
 msgid "Unpin"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4767
+#: crates/ui-egui/src/lib.rs:4769
 msgid "Unpin (UP): let the selected elements that are pinned be moved again"
 msgstr ""
 
@@ -10068,7 +10072,7 @@ msgstr ""
 msgid "Unpin element {}"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:5437
+#: crates/ui-egui/src/lib.rs:5439
 msgid "Unsaved changes"
 msgstr "Neuložené změny"
 
@@ -10080,7 +10084,7 @@ msgstr "Neupravený horní líc"
 msgid "Untitled project"
 msgstr "Projekt bez názvu"
 
-#: crates/ui-egui/src/graphics.rs:1162
+#: crates/ui-egui/src/graphics.rs:1171
 #: crates/ui-egui/src/linestyles/creator.rs:161
 msgid "Up"
 msgstr "Nahoru"
@@ -10101,7 +10105,7 @@ msgstr "Aktualizovat nyní"
 msgid "Update to Face"
 msgstr "Aktualizovat podle plochy"
 
-#: crates/ui-egui/src/lib.rs:3951
+#: crates/ui-egui/src/lib.rs:3953
 msgid "Update to Face (UF): the walls, floors and roofs made by face from the selected masses follow them again"
 msgstr "Aktualizovat podle plochy (UF): stěny, podlahy a střechy vytvořené podle plochy z vybraných objemů se znovu přizpůsobí jejich tvaru"
 
@@ -10134,7 +10138,7 @@ msgstr "Použít systémové záhlaví okna"
 msgid "Use:"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:4356
+#: crates/ui-egui/src/lib.rs:4358
 msgid "User Interface"
 msgstr "Uživatelské rozhraní"
 
@@ -10162,12 +10166,12 @@ msgid "Version {}"
 msgstr "Verze {}"
 
 #: crates/core/src/fills.rs:411
-#: crates/ui-egui/src/lib.rs:5119
+#: crates/ui-egui/src/lib.rs:5121
 #: crates/ui-egui/src/properties.rs:686
 msgid "Vertical"
 msgstr "Svislá"
 
-#: crates/ui-egui/src/lib.rs:1337
+#: crates/ui-egui/src/lib.rs:1338
 msgid "View"
 msgstr "Pohled"
 
@@ -10195,7 +10199,7 @@ msgstr "Vlastnosti pohledu"
 msgid "View Range"
 msgstr "Rozsah zobrazení"
 
-#: crates/ui-egui/src/graphics.rs:567
+#: crates/ui-egui/src/graphics.rs:576
 #: crates/ui-egui/src/templates.rs:674
 msgid "View Scale"
 msgstr "Měřítko pohledu"
@@ -10204,8 +10208,8 @@ msgstr "Měřítko pohledu"
 msgid "View Scale (1 : n)"
 msgstr "Měřítko pohledu (1 : n)"
 
-#: crates/ui-egui/src/graphics.rs:621
-#: crates/ui-egui/src/graphics.rs:625
+#: crates/ui-egui/src/graphics.rs:630
+#: crates/ui-egui/src/graphics.rs:634
 msgid "View Template"
 msgstr "Šablona pohledu"
 
@@ -10213,16 +10217,16 @@ msgstr "Šablona pohledu"
 msgid "View Template: {}"
 msgstr "Šablona pohledu: {}"
 
-#: crates/ui-egui/src/lib.rs:4238
+#: crates/ui-egui/src/lib.rs:4240
 #: crates/ui-egui/src/templates.rs:303
 msgid "View Templates"
 msgstr "Šablony pohledů"
 
-#: crates/ui-egui/src/lib.rs:4237
+#: crates/ui-egui/src/lib.rs:4239
 msgid "View Templates (VT): a view's settings under a name, for other views to follow"
 msgstr "Šablony pohledů (VT): pojmenované nastavení pohledu, které mohou přebírat další pohledy"
 
-#: crates/ui-egui/src/lib.rs:3878
+#: crates/ui-egui/src/lib.rs:3880
 msgid "View as PNG…"
 msgstr "Zobrazit jako PNG…"
 
@@ -10242,7 +10246,7 @@ msgstr "Pohledy (vše)"
 msgid "Views following it: {}"
 msgstr "Pohledy, které ji používají: {}"
 
-#: crates/ui-egui/src/graphics.rs:814
+#: crates/ui-egui/src/graphics.rs:823
 msgid "Visibility"
 msgstr "Viditelnost"
 
@@ -10255,20 +10259,20 @@ msgstr "Sada viditelnosti"
 msgid "Visibility Set: the view template this view follows, to switch what it shows at a click; <None> for its own"
 msgstr "Sada viditelnosti: šablona pohledu, kterou tento pohled používá, k přepnutí zobrazení jedním kliknutím; <Žádný> pro vlastní nastavení"
 
-#: crates/ui-egui/src/lib.rs:4227
+#: crates/ui-egui/src/lib.rs:4229
 msgid "Visibility/Graphics"
 msgstr "Viditelnost/Zobrazení"
 
-#: crates/ui-egui/src/lib.rs:4224
+#: crates/ui-egui/src/lib.rs:4226
 msgid "Visibility/Graphics (VV): what this view hides, and how it draws the rest, by category, filter and element"
 msgstr "Viditelnost/Zobrazení (VV): co tento pohled skrývá a jak vykresluje ostatní prvky podle kategorií, filtrů a prvků"
 
-#: crates/ui-egui/src/graphics.rs:631
-#: crates/ui-egui/src/graphics.rs:633
+#: crates/ui-egui/src/graphics.rs:640
+#: crates/ui-egui/src/graphics.rs:642
 msgid "Visibility/Graphics Overrides"
 msgstr "Přepsání viditelnosti/zobrazení"
 
-#: crates/ui-egui/src/graphics.rs:342
+#: crates/ui-egui/src/graphics.rs:351
 msgid "Visibility/Graphics Overrides for {}"
 msgstr "Přepsání viditelnosti/zobrazení pro {}"
 
@@ -10289,12 +10293,12 @@ msgstr "Viditelný když"
 msgid "Visitors"
 msgstr ""
 
-#: crates/ui-egui/src/graphics.rs:598
+#: crates/ui-egui/src/graphics.rs:607
 #: crates/ui-egui/src/templates.rs:690
 msgid "Visual Style"
 msgstr "Vizuální styl"
 
-#: crates/ui-egui/src/footer.rs:392
+#: crates/ui-egui/src/footer.rs:449
 msgid "Visual Style: how the 3D view draws surfaces: Shaded, Hidden Line (WF, HL and SD set them) or Wireframe"
 msgstr "Vizuální styl: jak 3D pohled vykresluje povrchy: Stínovaný, Skryté čáry (klávesové zkratky WF, HL a SD) nebo Drátový model"
 
@@ -10365,7 +10369,7 @@ msgstr ""
 msgid "Wall"
 msgstr "Stěna"
 
-#: crates/ui-egui/src/lib.rs:3996
+#: crates/ui-egui/src/lib.rs:3998
 msgid "Wall (WA): each click builds a wall; Enter or Esc ends the chain"
 msgstr "Stěna (WA): každé kliknutí vytvoří stěnu; klávesa Enter nebo Esc ukončí řetězec"
 
@@ -10393,7 +10397,7 @@ msgstr "Výkaz stěn"
 msgid "Wall by Face"
 msgstr "Stěna podle plochy"
 
-#: crates/ui-egui/src/lib.rs:3943
+#: crates/ui-egui/src/lib.rs:3945
 msgid "Wall by Face (WB): a wall on each edge of the selected masses' footprints"
 msgstr "Stěna podle plochy (WB): stěna na každé hraně obrysu vybraných objemů"
 
@@ -10415,7 +10419,7 @@ msgid "Wardrobe"
 msgstr "Šatní skříň"
 
 #: crates/ui-egui/src/browser.rs:626
-#: crates/ui-egui/src/lib.rs:5457
+#: crates/ui-egui/src/lib.rs:5459
 msgid "Warning"
 msgstr ""
 
@@ -10539,20 +10543,20 @@ msgid "Width Factor"
 msgstr "Faktor šířky"
 
 #: crates/ui-egui/src/draw.rs:699
-#: crates/ui-egui/src/lib.rs:5053
-#: crates/ui-egui/src/lib.rs:5063
-#: crates/ui-egui/src/lib.rs:5084
+#: crates/ui-egui/src/lib.rs:5055
+#: crates/ui-egui/src/lib.rs:5065
+#: crates/ui-egui/src/lib.rs:5086
 #: crates/ui-egui/src/site.rs:567
 #: crates/ui-egui/src/site.rs:588
 msgid "Width:"
 msgstr "Šířka:"
 
-#: crates/ui-egui/src/lib.rs:5090
+#: crates/ui-egui/src/lib.rs:5092
 #: crates/ui-egui/src/selecting.rs:72
 msgid "Window"
 msgstr "Okno"
 
-#: crates/ui-egui/src/lib.rs:3998
+#: crates/ui-egui/src/lib.rs:4000
 msgid "Window (WN): click a wall"
 msgstr "Okno (WN): klikněte na stěnu"
 
@@ -10734,7 +10738,7 @@ msgstr "Přiblížit oblast"
 msgid "Zoom Sheet Size"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:3132
+#: crates/ui-egui/src/lib.rs:3134
 msgid "Zoom Sheet Size: not in this view"
 msgstr ""
 
@@ -10750,7 +10754,7 @@ msgstr "Přizpůsobit oknu"
 msgid "`{}` is not a count"
 msgstr ""
 
-#: crates/ui-egui/src/lib.rs:1005
+#: crates/ui-egui/src/lib.rs:1006
 msgid "`{}` is not a height"
 msgstr "`{}` není platná výška"
 
@@ -10796,8 +10800,8 @@ msgstr "`{}` není bod; zadejte x, y"
 msgid "`{}` is not a point; type x, y in mm"
 msgstr "`{}` není bod; zadejte x, y v mm"
 
-#: crates/ui-egui/src/footer.rs:335
-#: crates/ui-egui/src/graphics.rs:582
+#: crates/ui-egui/src/footer.rs:392
+#: crates/ui-egui/src/graphics.rs:591
 msgid "`{}` is not a scale"
 msgstr "`{}` není platné měřítko"
 
@@ -10822,7 +10826,7 @@ msgstr "rodina musí mít název"
 msgid "a family needs a type"
 msgstr "rodina musí mít typ"
 
-#: crates/ui-egui/src/lib.rs:5108
+#: crates/ui-egui/src/lib.rs:5110
 msgid "a field, such as Type or Height"
 msgstr "pole, například Typ nebo Výška"
 
@@ -11022,7 +11026,7 @@ msgstr "fck (MPa)"
 msgid "fitted spline"
 msgstr "proložená křivka spline"
 
-#: crates/ui-egui/src/lib.rs:3888
+#: crates/ui-egui/src/lib.rs:3890
 msgid "glTF binary"
 msgstr "Binární glTF"
 
@@ -11054,7 +11058,7 @@ msgstr "je menší než"
 msgid "is less than or equal to"
 msgstr "je menší nebo rovno"
 
-#: crates/ui-egui/src/lib.rs:5207
+#: crates/ui-egui/src/lib.rs:5209
 msgid "level: `{}` is not an elevation"
 msgstr "podlaží: `{}` není platná výšková kóta"
 
@@ -11167,7 +11171,7 @@ msgstr "střecha: `{}` není platný sklon"
 msgid "roof: the slope `{}` and the overhang `{}` must be numbers"
 msgstr "střecha: sklon `{}` a přesah `{}` musí být čísla"
 
-#: crates/ui-egui/src/lib.rs:5180
+#: crates/ui-egui/src/lib.rs:5182
 msgid "rotate: `{}` is not an angle in degrees"
 msgstr "otočit: `{}` není úhel ve stupních"
 
@@ -11179,11 +11183,11 @@ msgstr "nejprve vyberte skupinu detailů k oddělení"
 msgid "select a point, a corner or an edge first"
 msgstr "nejprve vyberte bod, roh nebo hranu"
 
-#: crates/ui-egui/src/lib.rs:2642
+#: crates/ui-egui/src/lib.rs:2644
 msgid "select an element that has a type first"
 msgstr "nejprve vyberte prvek, který má typ"
 
-#: crates/ui-egui/src/lib.rs:2607
+#: crates/ui-egui/src/lib.rs:2609
 msgid "select one element to create one like it first"
 msgstr "nejprve vyberte jeden prvek k vytvoření podobného"
 
@@ -11191,15 +11195,15 @@ msgstr "nejprve vyberte jeden prvek k vytvoření podobného"
 msgid "select the detail lines, filled regions and text to group first"
 msgstr "nejprve vyberte čáry detailu, vyplněné oblasti a text k seskupení"
 
-#: crates/ui-egui/src/lib.rs:2774
+#: crates/ui-egui/src/lib.rs:2776
 msgid "select the floor or flat roof to shape first"
 msgstr "nejprve vyberte podlahu nebo plochou střechu, jejíž tvar chcete upravit"
 
-#: crates/ui-egui/src/lib.rs:2770
+#: crates/ui-egui/src/lib.rs:2772
 msgid "select the floor to slope first"
 msgstr "nejprve vyberte podlahu pro vytvoření sklonu"
 
-#: crates/ui-egui/src/lib.rs:2766
+#: crates/ui-egui/src/lib.rs:2768
 msgid "select the walls to attach first"
 msgstr "nejprve vyberte stěny k připojení"
 
@@ -11207,7 +11211,7 @@ msgstr "nejprve vyberte stěny k připojení"
 msgid "select what to copy first"
 msgstr ""
 
-#: crates/ui-egui/src/footer.rs:243
+#: crates/ui-egui/src/footer.rs:300
 msgid "select what to hide or isolate first"
 msgstr "nejprve vyberte prvky ke skrytí nebo izolování"
 
@@ -11263,7 +11267,7 @@ msgstr "začátek"
 msgid "the model has no levels"
 msgstr "model nemá žádná podlaží"
 
-#: crates/ui-egui/src/lib.rs:5195
+#: crates/ui-egui/src/lib.rs:5197
 msgid "the next free name"
 msgstr "další volný název"
 
@@ -11314,7 +11318,7 @@ msgstr "filtr pohledu"
 msgid "view template"
 msgstr "šablona pohledu"
 
-#: crates/ui-egui/src/footer.rs:361
+#: crates/ui-egui/src/footer.rs:418
 msgid "visual styles are for the 3D view: open it from the Project Browser"
 msgstr "vizuální styly jsou určeny pro 3D pohled: otevřete jej z Prohlížeče projektu"
 
@@ -11338,7 +11342,7 @@ msgstr "stěna: {}"
 msgid "west"
 msgstr "západ"
 
-#: crates/ui-egui/src/lib.rs:5130
+#: crates/ui-egui/src/lib.rs:5132
 msgid "what the note says"
 msgstr "obsah poznámky"
 
@@ -11423,7 +11427,7 @@ msgstr "{} souborů, načteno jako stanoviska jednoho skenu"
 msgid "{} flags"
 msgstr ""
 
-#: crates/ui-egui/src/graphics.rs:362
+#: crates/ui-egui/src/graphics.rs:371
 msgid "{} follow view template {}: change them there."
 msgstr "{} se řídí šablonou pohledu {}: změňte je tam."
 
@@ -11493,7 +11497,7 @@ msgstr "{} z {} stupňů"
 msgid "{} of {} {}"
 msgstr "{}: {} {}"
 
-#: crates/ui-egui/src/lib.rs:3394
+#: crates/ui-egui/src/lib.rs:3396
 msgid "{} opened without {} fields this version doesn't know; saving it leaves them out."
 msgstr "{} byl otevřen bez {} polí, která tato verze nezná; při uložení budou vynechána."
 
@@ -12438,9 +12442,126 @@ msgctxt "side"
 msgid "Top"
 msgstr "Horní"
 
+#: crates/ui-egui/src/fillpatterns.rs:634
+#~ msgid "A pattern of the file replaces the one of its name in this list; else it is left out"
+#~ msgstr "Vzor ze souboru nahradí vzor se stejným názvem v tomto seznamu; jinak bude vynechán"
+#: crates/ui-egui/src/fillpatterns.rs:437
+#~ msgid "Add Family"
+#~ msgstr "Přidat rodinu"
 #: crates/ui-egui/src/lib.rs:3039
 #~ msgid "Aligned Dimension (DI): pick parallel wall faces, wall ends, doors, windows or grids, then click where the dimension line goes"
 #~ msgstr "Zarovnaná kóta (DI): vyberte rovnoběžné plochy stěn, konce stěn, dveře, okna nebo osnovy a potom klikněte do místa vynášecí čáry"
+#: crates/ui-egui/src/properties.rs:1244
+#~ msgid "As placed"
+#~ msgstr "Jak umístěno"
+#: crates/ui-egui/src/settings.rs:470
+#~ msgid "BIMCraft's own look: a dark title bar, and the ribbon, the palettes and the bars laid out as Layout says"
+#~ msgstr "Vlastní vzhled BIMCraft: tmavé záhlaví okna a pás karet, palety a panely rozmístěné podle volby Rozvržení"
+#: crates/ui-egui/src/settings.rs:480
+#~ msgid "BIMCraft's own: the tools in a palette, the Inspector and the Navigator on the right"
+#~ msgstr ""
+#: crates/ui-egui/src/fillpatterns.rs:343
+#~ msgid "Background"
+#~ msgstr "Pozadí"
+#: crates/ui-egui/src/site.rs:245
+#~ msgid "Built"
+#~ msgstr ""
+#: crates/ui-egui/src/lib.rs:4503
+#~ msgid "Click to select. Drag to orbit (or Shift and the middle button), the middle button pans, the wheel zooms."
+#~ msgstr "Kliknutím vyberete prvek. Tažením myší (nebo Shift + prostřední tlačítko) otáčíte pohled, prostřední tlačítko posouvá, kolečko přibližuje."
+#: crates/ui-egui/src/properties.rs:1216
+#~ msgid "Click where the location line should run"
+#~ msgstr "Klikněte na místo, kudy má čára umístění procházet"
+#: crates/ui-egui/src/graphics.rs:554
+#~ msgid "Create from This View"
+#~ msgstr "Vytvořit z tohoto pohledu"
+#: crates/ui-egui/src/cad.rs:51
+#~ msgid "DXF drawings"
+#~ msgstr "Výkresy DXF"
+#: crates/ui-egui/src/fillpatterns.rs:395
+#~ msgid "Dashes"
+#~ msgstr "Čárky"
+#: crates/ui-egui/src/graphics.rs:524
+#~ msgid "Detail Level:"
+#~ msgstr "Úroveň detailu:"
+#: crates/ui-egui/src/sketch.rs:813
+#~ msgid "Edit Boundary: sketch its outline and holes again"
+#~ msgstr "Upravit obrys: znovu načrtněte obrys a otvory"
+#: crates/ui-egui/src/settings.rs:600
+#~ msgid "Faster for large models. Hidden line and wireframe are still drawn on the processor, and so is everything if the card fails"
+#~ msgstr "Rychlejší pro velké modely. Skryté čáry a drátový model se stále vykreslují procesorem, stejně jako vše ostatní při selhání grafické karty"
+#: crates/ui-egui/src/lib.rs:3472
+#~ msgid "Fill Patterns: the patterns filled regions fill with, and the filled region types"
+#~ msgstr "Vzory výplně: vzory používané pro vyplněné oblasti a typy vyplněných oblastí"
+#: crates/ui-egui/src/find.rs:51
+#~ msgid "Find a tool, a view or a setting (Ctrl+K)"
+#~ msgstr "Najít nástroj, pohled nebo nastavení (Ctrl+K)"
+#: crates/ui-egui/src/settings.rs:473
+#~ msgid "Flat and square, the title bar in the ribbon's greys: the File tab leads the ribbon's tabs and the Options Bar is docked under the ribbon"
+#~ msgstr "Plochý a hranatý vzhled, záhlaví okna v šedých odstínech pásu karet: karta Soubor stojí v čele karet pásu a panel Možnosti je ukotven pod pásem karet"
+#: crates/ui-egui/src/properties.rs:149
+#~ msgid "Flip Facing"
+#~ msgstr "Převrátit líc"
+#: crates/ui-egui/src/properties.rs:150
+#~ msgid "Flip Hand"
+#~ msgstr "Převrátit stranu"
+#: crates/ui-egui/src/properties.rs:1247
+#~ msgid "Flipped both"
+#~ msgstr "Převráceno obojí"
+#: crates/ui-egui/src/properties.rs:1246
+#~ msgid "Flipped facing"
+#~ msgstr "Převrácený líc"
+#: crates/ui-egui/src/properties.rs:1245
+#~ msgid "Flipped hand"
+#~ msgstr "Převrácená strana"
+#: crates/ui-egui/src/graphics.rs:538
+#~ msgid "Follow in This View"
+#~ msgstr "Sledovat v tomto pohledu"
+#: crates/ui-egui/src/fillpatterns.rs:343
+#~ msgid "Foreground"
+#~ msgstr "Popředí"
+#: crates/ui-egui/src/lib.rs:3401
+#~ msgid "Import CAD: a DXF drawing brought into the project, drawn under the model in the plans of a level, its layers, colours and linetypes kept, and snapped to"
+#~ msgstr "Importovat CAD: výkres DXF vložený do projektu, vykreslený pod modelem v půdorysech podlaží, se zachováním vrstev, barev a typů čar a možností uchopování"
+#: crates/ui-egui/src/dock.rs:51
+#~ msgid "Inspector"
+#~ msgstr "Inspektor"
+#: crates/ui-egui/src/properties.rs:1189
+#~ msgid "Layers, top down"
+#~ msgstr "Vrstvy shora dolů"
+#: crates/ui-egui/src/lib.rs:3454
+#~ msgid "Line Styles: the pen, colour and line pattern detail lines draw in, and the patterns' dashes, dots and spaces"
+#~ msgstr "Styly čar: pero, barva a vzor čáry pro kreslení čar detailu a čárky, tečky a mezery vzorů"
+#: crates/ui-egui/src/fillpatterns.rs:388
+#~ msgid "Line families of {}"
+#~ msgstr "Skupiny čar {}"
+#: crates/ui-egui/src/lib.rs:3393
+#~ msgid "Link CAD: a DXF drawing shown in the plans of a level, read again from its file on Reload and when the project opens"
+#~ msgstr "Připojit CAD: výkres DXF zobrazený v půdorysech podlaží, znovu načítaný ze souboru při opětovném načtení a při otevření projektu"
+#: crates/ui-egui/src/properties.rs:1214
+#~ msgid "Location line: {}"
+#~ msgstr "Čára umístění: {}"
+#: crates/ui-egui/src/lib.rs:1203
+#~ msgid "Massing"
+#~ msgstr "Objemy"
+#: crates/ui-egui/src/dock.rs:52
+#~ msgid "Navigator"
+#~ msgstr "Navigátor"
+#: crates/ui-egui/src/fillpatterns.rs:371
+#~ msgid "New Type"
+#~ msgstr "Nový typ"
+#: crates/ui-egui/src/graphics.rs:551
+#~ msgid "New template:"
+#~ msgstr "Nová šablona:"
+#: crates/ui-egui/src/graphics.rs:545
+#~ msgid "No view templates yet: Create from This View makes one."
+#~ msgstr "Dosud žádné šablony pohledů: tlačítkem Vytvořit z tohoto pohledu ji vytvoříte."
+#: crates/ui-egui/src/properties.rs:1239
+#~ msgid "Opens"
+#~ msgstr "Otevírání"
+#: crates/ui-egui/src/mep.rs:148
+#~ msgid "Patch Panel (PN): a panel on the wall, where you click; Space turns it"
+#~ msgstr "Propojovací panel (PN): panel na stěně v místě kliknutí; mezerník jej otočí"
 #: crates/ui-egui/src/lib.rs:4013
 #~ msgid "Pick a round column."
 #~ msgstr "Vyberte kruhový sloup."
@@ -12453,60 +12574,12 @@ msgstr "Horní"
 #: crates/ui-egui/src/lib.rs:4006
 #~ msgid "Pick the next reference, parallel to the first."
 #~ msgstr "Vyberte další referenci rovnoběžnou s první."
+#: crates/ui-egui/src/dock.rs:555
+#~ msgid "Project Browser · {}"
+#~ msgstr "Prohlížeč projektu · {}"
 #: crates/ui-egui/src/lib.rs:3053
 #~ msgid "Radial Dimension: pick a round column, then click where the radius goes"
 #~ msgstr "Poloměrová kóta: vyberte kruhový sloup a poté klikněte na umístění kótovací čáry"
-#: crates/ui-egui/src/cad.rs:51
-#~ msgid "DXF drawings"
-#~ msgstr "Výkresy DXF"
-#: crates/ui-egui/src/lib.rs:3401
-#~ msgid "Import CAD: a DXF drawing brought into the project, drawn under the model in the plans of a level, its layers, colours and linetypes kept, and snapped to"
-#~ msgstr "Importovat CAD: výkres DXF vložený do projektu, vykreslený pod modelem v půdorysech podlaží, se zachováním vrstev, barev a typů čar a možností uchopování"
-#: crates/ui-egui/src/lib.rs:3393
-#~ msgid "Link CAD: a DXF drawing shown in the plans of a level, read again from its file on Reload and when the project opens"
-#~ msgstr "Připojit CAD: výkres DXF zobrazený v půdorysech podlaží, znovu načítaný ze souboru při opětovném načtení a při otevření projektu"
-#: crates/ui-egui/src/fillpatterns.rs:634
-#~ msgid "A pattern of the file replaces the one of its name in this list; else it is left out"
-#~ msgstr "Vzor ze souboru nahradí vzor se stejným názvem v tomto seznamu; jinak bude vynechán"
-#: crates/ui-egui/src/fillpatterns.rs:437
-#~ msgid "Add Family"
-#~ msgstr "Přidat rodinu"
-#: crates/ui-egui/src/fillpatterns.rs:343
-#~ msgid "Background"
-#~ msgstr "Pozadí"
-#: crates/ui-egui/src/graphics.rs:554
-#~ msgid "Create from This View"
-#~ msgstr "Vytvořit z tohoto pohledu"
-#: crates/ui-egui/src/fillpatterns.rs:395
-#~ msgid "Dashes"
-#~ msgstr "Čárky"
-#: crates/ui-egui/src/graphics.rs:524
-#~ msgid "Detail Level:"
-#~ msgstr "Úroveň detailu:"
-#: crates/ui-egui/src/lib.rs:3472
-#~ msgid "Fill Patterns: the patterns filled regions fill with, and the filled region types"
-#~ msgstr "Vzory výplně: vzory používané pro vyplněné oblasti a typy vyplněných oblastí"
-#: crates/ui-egui/src/graphics.rs:538
-#~ msgid "Follow in This View"
-#~ msgstr "Sledovat v tomto pohledu"
-#: crates/ui-egui/src/fillpatterns.rs:343
-#~ msgid "Foreground"
-#~ msgstr "Popředí"
-#: crates/ui-egui/src/lib.rs:3454
-#~ msgid "Line Styles: the pen, colour and line pattern detail lines draw in, and the patterns' dashes, dots and spaces"
-#~ msgstr "Styly čar: pero, barva a vzor čáry pro kreslení čar detailu a čárky, tečky a mezery vzorů"
-#: crates/ui-egui/src/fillpatterns.rs:388
-#~ msgid "Line families of {}"
-#~ msgstr "Skupiny čar {}"
-#: crates/ui-egui/src/fillpatterns.rs:371
-#~ msgid "New Type"
-#~ msgstr "Nový typ"
-#: crates/ui-egui/src/graphics.rs:551
-#~ msgid "New template:"
-#~ msgstr "Nová šablona:"
-#: crates/ui-egui/src/graphics.rs:545
-#~ msgid "No view templates yet: Create from This View makes one."
-#~ msgstr "Dosud žádné šablony pohledů: tlačítkem Vytvořit z tohoto pohledu ji vytvoříte."
 #: crates/ui-egui/src/fillpatterns.rs:220
 #~ msgid "Region Type"
 #~ msgstr "Typ oblasti"
@@ -12516,30 +12589,69 @@ msgstr "Horní"
 #: crates/ui-egui/src/fillpatterns.rs:633
 #~ msgid "Replace Same Name"
 #~ msgstr "Nahradit se stejným názvem"
+#: crates/ui-egui/src/footer.rs:461
+#~ msgid "Reveal Hidden Elements (RH): draw what this view hides in magenta; again to hide it"
+#~ msgstr "Zobrazit skryté prvky (RH): vykreslit skryté prvky tohoto pohledu purpurově; opětovným stisknutím je skryjete"
+#: crates/ui-egui/src/footer.rs:489
+#~ msgid "Revealing hidden elements"
+#~ msgstr "Zobrazují se skryté prvky"
+#: crates/ui-egui/src/context.rs:81
+#~ msgid "Set Work Plane…"
+#~ msgstr "Nastavit pracovní rovinu…"
 #: crates/ui-egui/src/fillpatterns.rs:395
 #~ msgid "Shift"
 #~ msgstr "Posun"
 #: crates/ui-egui/src/graphics.rs:538
 #~ msgid "Stop Following in This View"
 #~ msgstr "Zastavit sledování v tomto pohledu"
+#: crates/ui-egui/src/editor.rs:811
+#~ msgid "Symbols are the lines a door's or a window's plan draws; this family isn't one."
+#~ msgstr "Symboly jsou čáry, které se vykreslují v půdorysu dveří nebo oken; tato rodina jimi není."
 #: crates/ui-egui/src/graphics.rs:490
 #~ msgid "Template:"
 #~ msgstr "Šablona:"
+#: crates/ui-egui/src/settings.rs:481
+#~ msgid "The ribbon over the view, Properties and the Project Browser on the left"
+#~ msgstr ""
+#: crates/ui-egui/src/settings.rs:466
+#~ msgid "The tools on the left, the Inspector over the Navigator on the right, as at first"
+#~ msgstr "Nástroje vlevo, Inspektor nad Navigátorem vpravo, jako ve výchozím nastavení"
 #: crates/ui-egui/src/graphics.rs:506
 #~ msgid "The views following it get from it:"
 #~ msgstr "Pohledy, které jej sledují, z něj přebírají:"
+#: crates/ui-egui/src/lib.rs:3563
+#~ msgid "Tick the tools this palette shows; Find still has the others"
+#~ msgstr "Zaškrtněte nástroje, které paleta zobrazuje; ostatní stále najdete pomocí funkce Najít"
+#: crates/ui-egui/src/lib.rs:4021
+#~ msgid "Title Blocks: your own, read from a DXF or typed, with fields each sheet or the whole project fills in"
+#~ msgstr ""
+#: crates/ui-egui/src/dock.rs:43
+#~ msgid "Tools"
+#~ msgstr "Nástroje"
 #: crates/ui-egui/src/graphics.rs:519
 #~ msgid "View Scale:"
 #~ msgstr "Měřítko pohledu:"
 #: crates/ui-egui/src/graphics.rs:529
 #~ msgid "Visual Style:"
 #~ msgstr "Vizuální styl:"
+#: crates/ui-egui/src/properties.rs:1189
+#~ msgid "Wall layers"
+#~ msgstr "Vrstvy stěny"
 #: crates/ui-egui/src/fillpatterns.rs:336
 #~ msgid "What filled regions are filled with: a foreground pattern over a background one, over the paper when it masks."
 #~ msgstr "Čím jsou vyplněny vyplněné oblasti: vzor popředí přes vzor pozadí, přes podklad při maskování."
+#: crates/ui-egui/src/canvas.rs:1865
+#~ msgid "Zoom In"
+#~ msgstr "Přiblížit"
+#: crates/ui-egui/src/lib.rs:2526
+#~ msgid "select what to move, copy, rotate or mirror first"
+#~ msgstr "nejprve vyberte prvky k přesunutí, zkopírování, otočení nebo zrcadlení"
 #: crates/ui-egui/src/fillpatterns.rs:415
 #~ msgid "whole"
 #~ msgstr "celý"
+#: crates/ui-egui/src/footer.rs:490
+#~ msgid "{} (HR resets)"
+#~ msgstr "{} (HR obnoví)"
 #: crates/ui-egui/src/fillpatterns.rs:402
 #~ msgid "{} family {}: {}"
 #~ msgstr "{} – rodina {}: {}"
@@ -12558,117 +12670,6 @@ msgstr "Horní"
 #: crates/ui-egui/src/fillpatterns.rs:354
 #~ msgid "{}: {} Colour"
 #~ msgstr "{}: Barva: {}"
-#: crates/ui-egui/src/editor.rs:811
-#~ msgid "Symbols are the lines a door's or a window's plan draws; this family isn't one."
-#~ msgstr "Symboly jsou čáry, které se vykreslují v půdorysu dveří nebo oken; tato rodina jimi není."
-#: crates/ui-egui/src/dock.rs:555
-#~ msgid "Project Browser · {}"
-#~ msgstr "Prohlížeč projektu · {}"
-#: crates/ui-egui/src/lib.rs:4503
-#~ msgid "Click to select. Drag to orbit (or Shift and the middle button), the middle button pans, the wheel zooms."
-#~ msgstr "Kliknutím vyberete prvek. Tažením myší (nebo Shift + prostřední tlačítko) otáčíte pohled, prostřední tlačítko posouvá, kolečko přibližuje."
-#: crates/ui-egui/src/settings.rs:600
-#~ msgid "Faster for large models. Hidden line and wireframe are still drawn on the processor, and so is everything if the card fails"
-#~ msgstr "Rychlejší pro velké modely. Skryté čáry a drátový model se stále vykreslují procesorem, stejně jako vše ostatní při selhání grafické karty"
-#: crates/ui-egui/src/settings.rs:470
-#~ msgid "BIMCraft's own look: a dark title bar, and the ribbon, the palettes and the bars laid out as Layout says"
-#~ msgstr "Vlastní vzhled BIMCraft: tmavé záhlaví okna a pás karet, palety a panely rozmístěné podle volby Rozvržení"
-#: crates/ui-egui/src/settings.rs:473
-#~ msgid "Flat and square, the title bar in the ribbon's greys: the File tab leads the ribbon's tabs and the Options Bar is docked under the ribbon"
-#~ msgstr "Plochý a hranatý vzhled, záhlaví okna v šedých odstínech pásu karet: karta Soubor stojí v čele karet pásu a panel Možnosti je ukotven pod pásem karet"
-#: crates/ui-egui/src/lib.rs:4021
-#~ msgid "Title Blocks: your own, read from a DXF or typed, with fields each sheet or the whole project fills in"
+#: crates/ui-egui/src/lib.rs:4605
+#~ msgid "Reveal Hidden"
 #~ msgstr ""
-#: crates/ui-egui/src/lib.rs:1203
-#~ msgid "Massing"
-#~ msgstr "Objemy"
-#: crates/ui-egui/src/site.rs:245
-#~ msgid "Built"
-#~ msgstr ""
-#: crates/ui-egui/src/settings.rs:480
-#~ msgid "BIMCraft's own: the tools in a palette, the Inspector and the Navigator on the right"
-#~ msgstr ""
-#: crates/ui-egui/src/find.rs:51
-#~ msgid "Find a tool, a view or a setting (Ctrl+K)"
-#~ msgstr "Najít nástroj, pohled nebo nastavení (Ctrl+K)"
-#: crates/ui-egui/src/dock.rs:51
-#~ msgid "Inspector"
-#~ msgstr "Inspektor"
-#: crates/ui-egui/src/dock.rs:52
-#~ msgid "Navigator"
-#~ msgstr "Navigátor"
-#: crates/ui-egui/src/settings.rs:481
-#~ msgid "The ribbon over the view, Properties and the Project Browser on the left"
-#~ msgstr ""
-#: crates/ui-egui/src/settings.rs:466
-#~ msgid "The tools on the left, the Inspector over the Navigator on the right, as at first"
-#~ msgstr "Nástroje vlevo, Inspektor nad Navigátorem vpravo, jako ve výchozím nastavení"
-#: crates/ui-egui/src/lib.rs:3563
-#~ msgid "Tick the tools this palette shows; Find still has the others"
-#~ msgstr "Zaškrtněte nástroje, které paleta zobrazuje; ostatní stále najdete pomocí funkce Najít"
-#: crates/ui-egui/src/dock.rs:43
-#~ msgid "Tools"
-#~ msgstr "Nástroje"
-#: crates/ui-egui/src/properties.rs:1244
-#~ msgid "As placed"
-#~ msgstr "Jak umístěno"
-#: crates/ui-egui/src/properties.rs:1216
-#~ msgid "Click where the location line should run"
-#~ msgstr "Klikněte na místo, kudy má čára umístění procházet"
-#: crates/ui-egui/src/sketch.rs:813
-#~ msgid "Edit Boundary: sketch its outline and holes again"
-#~ msgstr "Upravit obrys: znovu načrtněte obrys a otvory"
-#: crates/ui-egui/src/properties.rs:149
-#~ msgid "Flip Facing"
-#~ msgstr "Převrátit líc"
-#: crates/ui-egui/src/properties.rs:150
-#~ msgid "Flip Hand"
-#~ msgstr "Převrátit stranu"
-#: crates/ui-egui/src/properties.rs:1247
-#~ msgid "Flipped both"
-#~ msgstr "Převráceno obojí"
-#: crates/ui-egui/src/properties.rs:1246
-#~ msgid "Flipped facing"
-#~ msgstr "Převrácený líc"
-#: crates/ui-egui/src/properties.rs:1245
-#~ msgid "Flipped hand"
-#~ msgstr "Převrácená strana"
-#: crates/ui-egui/src/properties.rs:1189
-#~ msgid "Layers, top down"
-#~ msgstr "Vrstvy shora dolů"
-#: crates/ui-egui/src/properties.rs:1214
-#~ msgid "Location line: {}"
-#~ msgstr "Čára umístění: {}"
-#: crates/ui-egui/src/properties.rs:1239
-#~ msgid "Opens"
-#~ msgstr "Otevírání"
-#: crates/ui-egui/src/mep.rs:148
-#~ msgid "Patch Panel (PN): a panel on the wall, where you click; Space turns it"
-#~ msgstr "Propojovací panel (PN): panel na stěně v místě kliknutí; mezerník jej otočí"
-#: crates/ui-egui/src/properties.rs:1189
-#~ msgid "Wall layers"
-#~ msgstr "Vrstvy stěny"
-#: crates/ui-egui/src/canvas.rs:1865
-#~ msgid "Zoom In"
-#~ msgstr "Přiblížit"
-#: crates/ui-egui/src/lib.rs:2526
-#~ msgid "select what to move, copy, rotate or mirror first"
-#~ msgstr "nejprve vyberte prvky k přesunutí, zkopírování, otočení nebo zrcadlení"
-#: crates/ui-egui/src/footer.rs:461
-#~ msgid "Reveal Hidden Elements (RH): draw what this view hides in magenta; again to hide it"
-#~ msgstr "Zobrazit skryté prvky (RH): vykreslit skryté prvky tohoto pohledu purpurově; opětovným stisknutím je skryjete"
-#: crates/ui-egui/src/footer.rs:489
-#~ msgid "Revealing hidden elements"
-#~ msgstr "Zobrazují se skryté prvky"
-#: crates/ui-egui/src/context.rs:81
-#~ msgid "Set Work Plane…"
-#~ msgstr "Nastavit pracovní rovinu…"
-#: crates/ui-egui/src/lib.rs:4631
-#~ msgid "Unhide Category"
-#~ msgstr "Odkrýt kategorii"
-#: crates/ui-egui/src/lib.rs:4625
-#~ msgid "Unhide Element"
-#~ msgstr "Odkrýt prvek"
-#: crates/ui-egui/src/footer.rs:490
-#~ msgid "{} (HR resets)"
-#~ msgstr "{} (HR obnoví)"
