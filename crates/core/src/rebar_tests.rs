@@ -240,7 +240,8 @@ ENDSEC;END-ISO-10303-21;";
 
 #[test]
 fn a_section_draws_the_bars_it_cuts_as_dots_over_the_concrete_they_are_in() {
-    use crate::render::{self, Prim, View};
+    use crate::prim::{Prim, View};
+    use crate::render;
     let mut s = Session::new();
     let beam = beam(&mut s);
     // 20 mm bar through the middle of the beam, 250 under its top.

@@ -146,13 +146,13 @@ fn doors_and_windows_find_the_wall_under_a_point() {
 fn a_door_or_window_is_sketched_as_the_command_would_make_it() {
     let mut s = Session::new();
     house(&mut s);
-    let view = crate::render::View { scale: 0.1, cx: 4000.0, cy: 3000.0, width: 1000, height: 800 };
+    let view = crate::prim::View { scale: 0.1, cx: 4000.0, cy: 3000.0, width: 1000, height: 800 };
     for (is_door, at) in [(true, [2000, 30]), (false, [5000, 0])] {
         let p = json!({"at": at, "level": 100000});
         let sketched = crate::opening_of(&s.model, &p, is_door).unwrap();
         let d = crate::render::sketch(&s.model, view, 999, &sketched);
         assert!(d.owners.iter().all(|o| *o == Some(999)));
-        assert!(d.prims.iter().any(|p| matches!(p, crate::render::Prim::Fill { .. })), "the gap it leaves in the wall");
+        assert!(d.prims.iter().any(|p| matches!(p, crate::prim::Prim::Fill { .. })), "the gap it leaves in the wall");
         assert!(d.prims.len() >= 4, "the gap, its jambs and its swing or glass: {}", d.prims.len());
         let made = run(&mut s, if is_door { "door" } else { "window" }, p);
         assert_eq!(s.model.elements[&made["id"].as_u64().unwrap()], sketched, "the same element the click makes");
@@ -166,9 +166,9 @@ fn a_sketch_draws_its_pens_as_wide_as_the_plan_it_is_in_at_any_zoom() {
     house(&mut s);
     let sketched = crate::opening_of(&s.model, &json!({"at": [2000, 30], "level": 100000}), true).unwrap();
     let widest = |zoom: f64| {
-        let view = crate::render::View { scale: zoom, cx: 4000.0, cy: 3000.0, width: 1000, height: 800 };
+        let view = crate::prim::View { scale: zoom, cx: 4000.0, cy: 3000.0, width: 1000, height: 800 };
         let d = crate::render::sketch(&s.model, view, 999, &sketched);
-        d.prims.iter().filter_map(|p| if let crate::render::Prim::Line { width, .. } = p { Some(*width) } else { None }).fold(0.0, f32::max)
+        d.prims.iter().filter_map(|p| if let crate::prim::Prim::Line { width, .. } = p { Some(*width) } else { None }).fold(0.0, f32::max)
     };
     // Zoomed in twice as far, the paper the plan stands for is twice the pixels, and so is every pen.
     let (near, far) = (widest(0.2), widest(0.1));
@@ -1822,14 +1822,14 @@ fn components_show_in_plan_from_above_in_3d_and_beyond_a_section() {
     let mut s = Session::new();
     table(&mut s);
     let id = run(&mut s, "component", json!({"family": "Table", "at": [1000, 1000]}))["id"].as_u64().unwrap();
-    let view = crate::render::View { scale: 0.5, cx: 1500.0, cy: 1300.0, width: 1000, height: 800 };
+    let view = crate::prim::View { scale: 0.5, cx: 1500.0, cy: 1300.0, width: 1000, height: 800 };
     let lines = |s: &Session| -> Vec<P2> {
         let d = crate::render::draw(&s.model, 100000, view);
         d.prims
             .iter()
             .zip(&d.owners)
             .filter_map(|(p, o)| match p {
-                crate::render::Prim::Line { pts, .. } if *o == Some(id) => Some(pts.iter().map(|q| view.mm(*q)).collect::<Vec<_>>()),
+                crate::prim::Prim::Line { pts, .. } if *o == Some(id) => Some(pts.iter().map(|q| view.mm(*q)).collect::<Vec<_>>()),
                 _ => None,
             })
             .flatten()
@@ -1857,7 +1857,7 @@ fn components_show_in_plan_from_above_in_3d_and_beyond_a_section() {
     let sec = run(&mut s, "section", json!({"start": [0, 1300], "end": [3000, 1300]}))["id"].as_u64().unwrap();
     let sview = crate::render::section_fit(&s.model, sec, 1000, 800);
     let d = crate::render::section(&s.model, sec, sview);
-    assert!(d.prims.iter().zip(&d.owners).all(|(p, o)| *o != Some(id) || !matches!(p, crate::render::Prim::Fill { .. })), "cut");
+    assert!(d.prims.iter().zip(&d.owners).all(|(p, o)| *o != Some(id) || !matches!(p, crate::prim::Prim::Fill { .. })), "cut");
     let (cam, clip) = crate::render::section_camera(&s.model, sec, sview).unwrap();
     let image = crate::view3d::Scene::new(&s.model).cut(&cam, &clip, &[]);
     let p = sview.px(P2(1500.0, 735.0));
@@ -4485,7 +4485,7 @@ fn floors_roofs_and_ceilings_are_built_of_layers_from_the_top_down() {
         let y = view.px(P2(0.0, z)).1;
         d.prims.iter().zip(&d.owners).any(|(p, o)| {
             *o == Some(floor)
-                && matches!(p, crate::render::Prim::Line { pts, width, .. }
+                && matches!(p, crate::prim::Prim::Line { pts, width, .. }
                     if *width < d.width(crate::pen::Pen(7)) && pts.len() == 2 && pts.iter().all(|q| (q.1 - y).abs() < 0.5) && (pts[1].0 - pts[0].0).abs() > 50.0)
         })
     };
@@ -4500,7 +4500,7 @@ fn cut_patterns_show_where_a_layer_is_wide_enough_to_hold_them() {
     let w = run(&mut s, "wall", json!({"points": [[0, 0], [6000, 0]], "type": "Cavity 300"}))["ids"][0].as_u64().unwrap();
     // Close in, 2 px a millimetre: its brick (100 mm, to its left, north) holds a brick pattern's lines.
     let lines = |scale: f64| {
-        let view = crate::render::View { scale, cx: 3000.0, cy: 0.0, width: 1200, height: 800 };
+        let view = crate::prim::View { scale, cx: 3000.0, cy: 0.0, width: 1200, height: 800 };
         let d = crate::render::draw(&s.model, 100000, view);
         let (north, south) = (view.px(P2(3000.0, 150.0)).1, view.px(P2(3000.0, 50.0)).1);
         d.prims
@@ -4508,7 +4508,7 @@ fn cut_patterns_show_where_a_layer_is_wide_enough_to_hold_them() {
             .zip(&d.owners)
             .filter(|(p, o)| {
                 **o == Some(w)
-                    && matches!(p, crate::render::Prim::Line { pts, width, .. }
+                    && matches!(p, crate::prim::Prim::Line { pts, width, .. }
                         if *width < d.width(crate::pen::Pen(4)) && pts.iter().all(|q| q.1 >= north - 0.5 && q.1 <= south + 0.5))
             })
             .count()
@@ -4532,7 +4532,7 @@ fn a_section_crossing_a_curved_wall_twice_shows_its_layers_at_both_cuts() {
     let hatched = |west: bool| {
         d.prims.iter().zip(&d.owners).any(|(p, o)| {
             *o == Some(w)
-                && matches!(p, crate::render::Prim::Line { pts, width, .. } if *width < d.width(crate::pen::Pen(4)) && pts.iter().all(|q| (q.0 < middle) == west))
+                && matches!(p, crate::prim::Prim::Line { pts, width, .. } if *width < d.width(crate::pen::Pen(4)) && pts.iter().all(|q| (q.0 < middle) == west))
         })
     };
     assert!(hatched(true) && hatched(false), "west {}, east {}", hatched(true), hatched(false));
@@ -4547,14 +4547,14 @@ fn surface_patterns_keep_their_size_in_the_building() {
     let f = run(&mut s, "floor", json!({"boundary": boundary, "type": "Tiled"}))["id"].as_u64().unwrap();
     // Where the tiles' joints running east cross the plan, px down it.
     let rows = |scale: f64| {
-        let view = crate::render::View { scale, cx: 3000.0, cy: 2000.0, width: 1200, height: 800 };
+        let view = crate::prim::View { scale, cx: 3000.0, cy: 2000.0, width: 1200, height: 800 };
         let d = crate::render::draw(&s.model, 100000, view);
         let mut ys: Vec<f32> = d
             .prims
             .iter()
             .zip(&d.owners)
             .filter_map(|(p, o)| match p {
-                crate::render::Prim::Line { pts, width, .. }
+                crate::prim::Prim::Line { pts, width, .. }
                     if *o == Some(f)
                         && *width < d.width(crate::pen::Pen(4))
                         && pts.len() == 2
@@ -4760,7 +4760,7 @@ fn a_door_familys_swing_is_drawn_in_plan_and_flips_with_the_door() {
             .zip(&d.owners)
             .filter(|(_, o)| **o == Some(100006))
             .filter_map(|(p, _)| match p {
-                crate::render::Prim::Line { pts, closed: false, .. } if pts.len() > 10 => Some(pts.iter().map(|q| d.view.mm(*q)).collect()),
+                crate::prim::Prim::Line { pts, closed: false, .. } if pts.len() > 10 => Some(pts.iter().map(|q| d.view.mm(*q)).collect()),
                 _ => None,
             })
             .collect()
@@ -5425,7 +5425,8 @@ fn walls_floors_and_roofs_by_face_follow_a_mass() {
 
 #[test]
 fn masses_show_in_plans_sections_and_the_3d_view_and_a_category_hides_them() {
-    use crate::render::{self, Prim};
+    use crate::prim::Prim;
+    use crate::render;
     let mut s = Session::new();
     let walls = house(&mut s);
     let (id, levels) = tower(&mut s);
@@ -5698,7 +5699,8 @@ fn a_top_outline_pairs_up_with_the_footprint_point_for_point_and_never_collapses
 
 #[test]
 fn a_lofted_mass_is_drawn_in_plans_and_sections_where_the_view_cuts_it() {
-    use crate::render::{self, Prim};
+    use crate::prim::Prim;
+    use crate::render;
     let mut s = Session::new();
     let (id, _) = frustum(&mut s);
     let dashed = |d: &render::Drawing| -> Vec<Vec<(f32, f32)>> {
@@ -5752,7 +5754,8 @@ fn a_lofted_mass_is_drawn_in_plans_and_sections_where_the_view_cuts_it() {
 
 #[test]
 fn show_mass_toggles_the_mass_category_in_one_view_in_one_step() {
-    use crate::render::{self, Prim};
+    use crate::prim::Prim;
+    use crate::render;
     let mut s = Session::new();
     let (id, _) = tower(&mut s);
     let dashed = |m: &crate::model::Model, view: u64| {
@@ -5907,7 +5910,7 @@ fn a_levels_plane_in_3d_hides_its_near_edges_until_selected_and_names_itself_on_
     assert!(!near(&plain, [4000.0, 0.0, 9000.0]) && !near(&plain, [8000.0, 3000.0, 9000.0]));
     assert!(near(&plain, [4000.0, 6000.0, 9000.0]) && near(&plain, [0.0, 3000.0, 9000.0]));
     // Selected, all four.
-    let picked = scene.render(&cam, &[(top, crate::render::Rgb(0, 120, 255))]);
+    let picked = scene.render(&cam, &[(top, crate::prim::Rgb(0, 120, 255))]);
     assert!(near(&picked, [4000.0, 0.0, 9000.0]) && near(&picked, [8000.0, 3000.0, 9000.0]));
     // Its head: a vertical plane past the right end of its far edges, on the north edge's line, its name written on it.
     let heads = scene.level_heads(&cam);
@@ -5923,7 +5926,7 @@ fn a_levels_plane_in_3d_hides_its_near_edges_until_selected_and_names_itself_on_
     // Its name is drawn there: pixels in the level's colour inside the head.
     let lettered = (-30..=30)
         .flat_map(|dx| (-6..=6).map(move |dy| (dx, dy)))
-        .filter(|(dx, dy)| plain.color(x + f64::from(*dx), y + f64::from(*dy)) != crate::render::PAPER)
+        .filter(|(dx, dy)| plain.color(x + f64::from(*dx), y + f64::from(*dy)) != crate::prim::PAPER)
         .count();
     assert!(lettered > 10, "{lettered}");
 }
@@ -6538,14 +6541,14 @@ fn socket(category: &str) -> Value {
 
 /// What component `id` draws in the plan of level 100000 as model points: its open polylines (symbols), and its fills (dots).
 fn symbol_ink(s: &Session, id: u64) -> (Vec<Vec<P2>>, Vec<Vec<P2>>) {
-    let view = crate::render::View { scale: 0.5, cx: 1000.0, cy: 1000.0, width: 1000, height: 800 };
+    let view = crate::prim::View { scale: 0.5, cx: 1000.0, cy: 1000.0, width: 1000, height: 800 };
     let d = crate::render::draw(&s.model, 100000, view);
     let (mut lines, mut fills) = (Vec::new(), Vec::new());
     for (p, o) in d.prims.iter().zip(&d.owners).filter(|(_, o)| **o == Some(id)) {
         let _ = o;
         match p {
-            crate::render::Prim::Line { pts, closed: false, .. } => lines.push(pts.iter().map(|q| view.mm(*q)).collect()),
-            crate::render::Prim::Fill { rings, .. } => fills.extend(rings.iter().map(|r| r.iter().map(|q| view.mm(*q)).collect())),
+            crate::prim::Prim::Line { pts, closed: false, .. } => lines.push(pts.iter().map(|q| view.mm(*q)).collect()),
+            crate::prim::Prim::Fill { rings, .. } => fills.extend(rings.iter().map(|r| r.iter().map(|q| view.mm(*q)).collect())),
             _ => {}
         }
     }
@@ -6726,10 +6729,10 @@ fn symbols_draw_in_the_plan_and_ceiling_plan_of_their_level_whatever_height_the_
     let (lines, fills) = symbol_ink(&s, id);
     assert!(lines.iter().all(|l| l.len() != 2 || l[0].1 < 1200.0), "no outline of the form: {}", lines.len());
     assert!(lines.len() >= 3 && fills.len() == 1, "{} {}", lines.len(), fills.len());
-    let view = crate::render::View { scale: 0.5, cx: 1000.0, cy: 1000.0, width: 1000, height: 800 };
+    let view = crate::prim::View { scale: 0.5, cx: 1000.0, cy: 1000.0, width: 1000, height: 800 };
     let up = crate::render::draw_ceiling(&s.model, 100000, view);
     assert!(
-        up.owners.iter().zip(&up.prims).any(|(o, p)| *o == Some(id) && matches!(p, crate::render::Prim::Fill { .. })),
+        up.owners.iter().zip(&up.prims).any(|(o, p)| *o == Some(id) && matches!(p, crate::prim::Prim::Fill { .. })),
         "the ceiling plan has the dot"
     );
     // Not on another level's plan.

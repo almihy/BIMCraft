@@ -210,7 +210,7 @@ fn an_image_shows_only_in_its_view_behind_the_model_and_is_kept_in_the_file() {
     // 25.4 mm a side, made 4000 mm: red west of x = 0, blue east of it.
     let id = run(&mut s, "import_image", json!({"path": "site.png", "width": 4000}))["id"].clone();
     let (one, two) = (s.model.levels()[0].0, s.model.levels()[1].0);
-    let view = crate::render::View { scale: 0.05, cx: 0.0, cy: 0.0, width: 400, height: 400 };
+    let view = crate::prim::View { scale: 0.05, cx: 0.0, cy: 0.0, width: 400, height: 400 };
     let px = |s: &Session, level: u64, x: u32, y: u32| {
         let d = crate::render::draw_at(&s.model, level, view, 1.0);
         let pm = tiny_skia::Pixmap::decode_png(&crate::render::png(&d).unwrap()).unwrap();
@@ -278,7 +278,7 @@ fn plan_px_at(s: &Session, k: f64, x: u32, y: u32) -> [u8; 3] {
 
 /// The plan of the lowest level, 400 px a side at `k` px a mm round the origin.
 fn plan_at(s: &Session, k: f64) -> tiny_skia::Pixmap {
-    let view = crate::render::View { scale: k, cx: 0.0, cy: 0.0, width: 400, height: 400 };
+    let view = crate::prim::View { scale: k, cx: 0.0, cy: 0.0, width: 400, height: 400 };
     let d = crate::render::draw_at(&s.model, s.model.levels()[0].0, view, 1.0);
     tiny_skia::Pixmap::decode_png(&crate::render::png(&d).unwrap()).unwrap()
 }

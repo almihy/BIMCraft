@@ -15,7 +15,8 @@ use crate::geom::P2;
 use crate::language::Language;
 use crate::model::{Element, Key, Model};
 use crate::pen::{MAX_PEN, Pen};
-use crate::render::{Drawing, Rgb};
+use crate::prim::Rgb;
+use crate::render::Drawing;
 
 /// The widest and tallest a title block may be, mm: an A0's long side.
 pub const MAX_SIZE: f64 = 1189.0;
@@ -670,9 +671,9 @@ pub fn draw(d: &mut Drawing, tb: &TitleBlock, at: P2, values: &BTreeMap<String, 
         // Filled by the non-zero rule, as lettering is, so the desktop's canvas leaves its holes empty too.
         let part = d.part;
         if rings.len() > 1 {
-            d.part = crate::render::Part::Text;
+            d.part = crate::prim::Part::Text;
         }
-        d.push(crate::render::Prim::Fill { rings, color: ink(f.color) });
+        d.push(crate::prim::Prim::Fill { rings, color: ink(f.color) });
         d.part = part;
     }
     for l in &tb.lines {
@@ -705,7 +706,7 @@ pub fn preview(m: &Model, tb: &TitleBlock, values: &BTreeMap<String, String>) ->
     let density = crate::sheet::DENSITY;
     let side = |mm: f64| ((mm.clamp(1.0, MAX_SIZE) + 2.0 * ROOM) * density).round() as u32;
     let view =
-        crate::render::View { scale: density, cx: tb.width / 2.0, cy: tb.height / 2.0, width: side(tb.width), height: side(tb.height) };
+        crate::prim::View { scale: density, cx: tb.width / 2.0, cy: tb.height / 2.0, width: side(tb.width), height: side(tb.height) };
     let mut d = Drawing::new(view);
     d.weights = m.line_weights().at(m.units.default_scale());
     draw(&mut d, tb, P2(0.0, 0.0), values);

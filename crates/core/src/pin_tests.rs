@@ -229,7 +229,7 @@ fn a_dimensions_number_moves_along_and_across_its_line_and_goes_back() {
     assert_eq!(spots.len(), 1);
     assert!((spots[0].1 - crate::geom::P2(2000.0, -1000.0)).length() < 1e-6, "the number's place is the middle of its segment");
     // It draws where it was put: the plan differs from the unmoved one.
-    let view = crate::render::View { scale: 0.1, cx: 2000.0, cy: -500.0, width: 800, height: 600 };
+    let view = crate::prim::View { scale: 0.1, cx: 2000.0, cy: -500.0, width: 800, height: 600 };
     let points = |d: &crate::render::Drawing| d.prims.iter().flat_map(|p| p.points()).collect::<Vec<_>>();
     let moved = crate::render::draw(&s.model, 100000, view);
     run(&mut s, "dimension_text_move", json!({"id": d, "reset": true}));

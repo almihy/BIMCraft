@@ -87,7 +87,8 @@ impl Model {
 mod tests {
     use super::*;
     use crate::engine::Session;
-    use crate::render::{Drawing, Part, Prim, View};
+    use crate::prim::{Part, Prim, View};
+    use crate::render::Drawing;
     use serde_json::json;
 
     /// The widest solid line `id` draws of its `part` in `d`.

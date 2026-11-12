@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::geom::P2;
 use crate::model::MAX_COORD;
 use crate::pen::Pen;
-use crate::render::View;
+use crate::prim::View;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -146,7 +146,7 @@ impl BackgroundGrid {
 mod tests {
     use super::*;
     use crate::geom::P2;
-    use crate::render::View;
+    use crate::prim::View;
 
     #[test]
     fn background_grid_defaults_use_the_requested_neutral_greys() {

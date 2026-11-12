@@ -105,6 +105,7 @@ pub mod phasing;
 #[cfg(test)]
 mod pin_tests;
 pub mod plumbing;
+pub mod prim;
 pub mod quantities;
 #[cfg(test)]
 mod quantities_tests;

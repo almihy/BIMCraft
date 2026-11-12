@@ -230,7 +230,8 @@ fn a_project_with_structure_saves_and_opens_again() {
 // ---------- drawn ----------
 
 use crate::geom::P2;
-use crate::render::{self, Drawing, POCHE, Prim, View};
+use crate::prim::{POCHE, Prim, View};
+use crate::render::{self, Drawing};
 
 fn view() -> View {
     View { scale: 0.1, cx: 3000.0, cy: 0.0, width: 1000, height: 800 }

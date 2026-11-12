@@ -12,7 +12,8 @@ use crate::graphics::Look;
 use crate::language::Language;
 use crate::model::{Element, Id, Key, Model, Schedule, Viewport, paper};
 use crate::pen::Pen;
-use crate::render::{self, Drawing, PAPER, Part, Prim, Rgb, View};
+use crate::prim::{PAPER, Part, Prim, Rgb, View};
+use crate::render::{self, Drawing};
 use crate::{font, schedule, view3d};
 
 /// Paper px per mm in a sheet's drawing: plan lettering 10 px tall comes out 2 mm on paper.
@@ -442,7 +443,8 @@ mod tests {
     use super::*;
     use crate::engine::Session;
     use crate::geom::P2;
-    use crate::render::{POCHE, png};
+    use crate::prim::POCHE;
+    use crate::render::png;
 
     fn pixel(png: &[u8], (x, y): (f32, f32)) -> (u8, u8, u8) {
         let pm = tiny_skia::Pixmap::decode_png(png).unwrap();

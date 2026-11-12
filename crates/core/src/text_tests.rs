@@ -5,7 +5,8 @@ use serde_json::{Value, json};
 
 use crate::engine::Session;
 use crate::model::{Element, Id, Model, Note};
-use crate::render::{self, View};
+use crate::prim::View;
+use crate::render;
 
 fn run(s: &mut Session, c: &str, p: Value) -> Value {
     s.execute(c, &p).unwrap_or_else(|e| panic!("{c} {p}: {e}"))

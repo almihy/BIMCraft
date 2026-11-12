@@ -50,7 +50,8 @@ fn new_segment_parameters_are_validated_atomically() {
 #[test]
 fn graphic_segments_render_as_pixels_and_keep_their_paper_size() {
     use super::{LinePattern, Segment};
-    use crate::render::{Drawing, View};
+    use crate::prim::View;
+    use crate::render::Drawing;
     let pattern = LinePattern(vec![
         Segment::Space(2.0),
         Segment::Dash(6.0),

@@ -381,10 +381,10 @@ fn a_fill_with_islands_is_drawn_as_lettering_is_so_every_canvas_leaves_them_empt
     );
     let tb = s.model.title_blocks["Selo"].clone();
     let d = crate::titleblock::preview(&s.model, &tb, &Default::default());
-    let parts: Vec<crate::render::Part> =
-        d.prims.iter().zip(&d.parts).filter_map(|(p, part)| matches!(p, crate::render::Prim::Fill { .. }).then_some(*part)).collect();
+    let parts: Vec<crate::prim::Part> =
+        d.prims.iter().zip(&d.parts).filter_map(|(p, part)| matches!(p, crate::prim::Prim::Fill { .. }).then_some(*part)).collect();
     // Its fills come first, then its lettering (a new one starts as the built-in box, with its texts).
     assert!(parts.len() >= 2, "{parts:?}");
-    assert_eq!(parts[0], crate::render::Part::Text, "a band and its island fill by the non-zero rule");
-    assert_ne!(parts[1], crate::render::Part::Text, "a plain fill stays as it was");
+    assert_eq!(parts[0], crate::prim::Part::Text, "a band and its island fill by the non-zero rule");
+    assert_ne!(parts[1], crate::prim::Part::Text, "a plain fill stays as it was");
 }

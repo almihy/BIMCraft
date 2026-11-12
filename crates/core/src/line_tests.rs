@@ -7,7 +7,8 @@ use crate::curves::{Curve, FIT_TOL};
 use crate::engine::Session;
 use crate::geom::P2;
 use crate::model::{Element, Id, Model};
-use crate::render::{Drawing, Prim, View};
+use crate::prim::{Prim, View};
+use crate::render::Drawing;
 
 fn run(s: &mut Session, c: &str, p: Value) -> Value {
     s.execute(c, &p).unwrap_or_else(|e| panic!("{c} {p}: {e}"))

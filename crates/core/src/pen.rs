@@ -260,7 +260,7 @@ mod tests {
     #[test]
     fn a_line_draws_its_pen_as_the_line_weights_say_the_model_by_scale_annotation_at_any() {
         use crate::engine::Session;
-        use crate::render::{Prim, View};
+        use crate::prim::{Prim, View};
         use serde_json::json;
         let mut s = Session::new();
         s.script(

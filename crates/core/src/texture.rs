@@ -12,7 +12,7 @@ use zune_jpeg::zune_core::bytestream::ZCursor;
 use zune_jpeg::zune_core::options::DecoderOptions;
 
 use crate::model::{MAX_COORD, MAX_TEXT, mix};
-use crate::render::Rgb;
+use crate::prim::Rgb;
 
 /// Pictures one project may hold.
 pub const MAX_IMAGES: usize = 24;

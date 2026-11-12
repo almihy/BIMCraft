@@ -8,7 +8,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 
 use crate::geom::P2;
-use crate::render::Rgb;
+use crate::prim::Rgb;
 
 /// What a file may be before it's refused, bytes.
 pub const MAX_BYTES: usize = 128 << 20;

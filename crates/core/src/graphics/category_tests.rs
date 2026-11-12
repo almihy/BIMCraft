@@ -7,7 +7,7 @@ use crate::engine::Session;
 use crate::language::Language;
 use crate::model::{Element, Model};
 use crate::pen::Pen;
-use crate::render::Rgb;
+use crate::prim::Rgb;
 use crate::styles::ObjectStyle;
 use serde_json::json;
 

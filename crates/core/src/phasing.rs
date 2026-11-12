@@ -487,7 +487,7 @@ mod tests {
     use crate::geom::P2;
     use crate::graphics::testing::{PAPER, drawn_near, house, lines, owned, plan, run};
     use crate::model::Element;
-    use crate::render::Rgb;
+    use crate::prim::Rgb;
 
     /// The parameters an element holds, null when none.
     fn params(s: &Session, id: u64) -> Value {

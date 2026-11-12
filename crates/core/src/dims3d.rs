@@ -11,7 +11,7 @@ use crate::geom::v3::{P3, add, dot, mul, sub, unit};
 use crate::graphics::Look;
 use crate::ids::Key;
 use crate::model::{Dimension3D, Element, Id, Model, Ref3};
-use crate::render::Rgb;
+use crate::prim::Rgb;
 use crate::view3d::{Camera, Image};
 
 /// Pixels a millimetre of paper takes on a screen of 96 dots an inch: how big a dimension's ticks and number are on screen.
@@ -361,7 +361,7 @@ mod tests {
         // The sheet's lines, and the strokes of its PDF page.
         let strokes = |s: &Session| {
             let d = crate::sheet::draw(&s.model, sheet).unwrap();
-            let lines = d.prims.iter().filter(|p| matches!(p, crate::render::Prim::Line { .. })).count();
+            let lines = d.prims.iter().filter(|p| matches!(p, crate::prim::Prim::Line { .. })).count();
             (lines, crate::pdf::contents(&d, paper).0.matches(" S\n").count())
         };
         let (lines, with) = strokes(&s);

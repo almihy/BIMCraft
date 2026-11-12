@@ -17,7 +17,7 @@ use crate::component_geometry::ComponentInstance;
 use crate::geom::{self, P2};
 use crate::graphics::{Look, VisualStyle};
 use crate::model::Id;
-use crate::render::Rgb;
+use crate::prim::Rgb;
 
 /// One vertex: 52 bytes of 32-bit words here, 44 on the card, which takes the normals as 16-bit fractions.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -462,7 +462,7 @@ impl Mesh {
         // A texture is looked up as the CPU does unless the view colours its surface another way.
         let colour = |t: &super::Tri| {
             if lines {
-                crate::render::PAPER
+                crate::prim::PAPER
             } else if plain {
                 t.color
             } else {

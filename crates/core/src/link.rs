@@ -208,7 +208,8 @@ mod tests {
 
     #[test]
     fn plans_draw_a_link_in_halftone_and_never_pick_it() {
-        use crate::render::{self, Prim, View};
+        use crate::prim::{Prim, View};
+        use crate::render;
         let path = architect("plan");
         let mut direct = Session::new();
         run(&mut direct, "open", json!({"path": path}));
@@ -252,7 +253,7 @@ mod tests {
         let mut drawn = 0;
         for x in (0..400).step_by(5) {
             for y in (0..300).step_by(5) {
-                drawn += usize::from(image.color(f64::from(x), f64::from(y)) != crate::render::PAPER);
+                drawn += usize::from(image.color(f64::from(x), f64::from(y)) != crate::prim::PAPER);
                 assert!(image.pick(f64::from(x), f64::from(y)).is_none_or(|id| !is_linked(id)));
             }
         }
@@ -432,7 +433,8 @@ mod tests {
 
     #[test]
     fn what_a_link_builds_lies_under_what_the_project_draws() {
-        use crate::render::{self, View};
+        use crate::prim::View;
+        use crate::render;
         let path = architect("under");
         let mut s = Session::new();
         run(&mut s, "wall", json!({"points": [[1000, 1000], [7000, 1000]]}));
@@ -450,7 +452,8 @@ mod tests {
     #[test]
     fn a_line_keeps_its_pen_when_a_link_goes_under_the_projects() {
         use crate::pen::Pen;
-        use crate::render::{Drawing, Rgb, View};
+        use crate::prim::{Rgb, View};
+        use crate::render::Drawing;
         let mut d = Drawing::new(View { scale: 1.0, cx: 0.0, cy: 0.0, width: 10, height: 10 });
         d.own(Some(7));
         d.stroke(vec![(0.0, 0.0), (1.0, 1.0)], Pen::CUT, Rgb(0, 0, 0), None, false);
@@ -463,7 +466,8 @@ mod tests {
 
     #[test]
     fn a_link_brings_no_detail_lines_or_regions_into_the_projects_views() {
-        use crate::render::{self, View};
+        use crate::prim::View;
+        use crate::render;
         let mut other = Session::new();
         run(&mut other, "wall", json!({"points": [[0, 0], [8000, 0]]}));
         run(&mut other, "detail_line", json!({"points": [[0, 500], [6000, 500]]}));

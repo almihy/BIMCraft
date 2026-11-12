@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 
 use crate::geom::v3::{P3, dot};
 use crate::model::{Id, Model};
-use crate::render::Rgb;
+use crate::prim::Rgb;
 use crate::view3d::{Facet, Scene};
 
 /// The most triangles a file holds, which keeps a file (at most 84 bytes a triangle) well under the size a project file may be.

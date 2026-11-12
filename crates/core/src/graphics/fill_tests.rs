@@ -2,7 +2,8 @@ use super::testing::*;
 use crate::engine::Session;
 use crate::geom::P2;
 use crate::model::Model;
-use crate::render::{self, Rgb};
+use crate::prim::Rgb;
+use crate::render;
 use serde_json::json;
 
 #[test]

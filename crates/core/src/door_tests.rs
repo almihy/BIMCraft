@@ -7,7 +7,8 @@ use serde_json::{Value, json};
 use crate::engine::Session;
 use crate::geom::P2;
 use crate::model::Id;
-use crate::render::{self, Drawing, Prim};
+use crate::prim::Prim;
+use crate::render::{self, Drawing};
 
 fn run(s: &mut Session, c: &str, p: Value) -> Value {
     s.execute(c, &p).unwrap_or_else(|e| panic!("{c} {p}: {e}"))

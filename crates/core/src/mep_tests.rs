@@ -6,7 +6,8 @@ use serde_json::{Value, json};
 use crate::element_json;
 use crate::engine::Session;
 use crate::geom::P2;
-use crate::render::{self, Drawing, POCHE, Prim, View};
+use crate::prim::{POCHE, Prim, View};
+use crate::render::{self, Drawing};
 
 /// A run category and what is true of it.
 struct Case {

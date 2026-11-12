@@ -545,8 +545,8 @@ impl Default for Material {
 
 impl Material {
     /// The colour its surface pattern is drawn in: its own, else `default`.
-    pub fn surface_ink(&self, default: crate::render::Rgb) -> crate::render::Rgb {
-        self.surface_color.map_or(default, |[r, g, b]| crate::render::Rgb(r, g, b))
+    pub fn surface_ink(&self, default: crate::prim::Rgb) -> crate::prim::Rgb {
+        self.surface_color.map_or(default, |[r, g, b]| crate::prim::Rgb(r, g, b))
     }
 }
 

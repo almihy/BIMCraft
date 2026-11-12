@@ -16,7 +16,8 @@ use serde::{Deserialize, Serialize};
 use crate::language::Language;
 use crate::model::{Element, Guid, Id, Key, MAX_TEXT, Model, ViewRange};
 use crate::pen::{MAX_PEN, Pen};
-use crate::render::{Drawing, Part, Prim, Rgb};
+use crate::prim::{Part, Prim, Rgb};
+use crate::render::Drawing;
 use crate::schedule;
 
 #[cfg(test)]
@@ -1197,7 +1198,7 @@ impl Look {
     /// otherwise: what the drawing code fills the union of cut walls with.
     pub fn cut_fill(&self, id: Id, default: Rgb) -> Rgb {
         let Some(o) = self.paint.get(&id) else { return default };
-        let base = if self.pattern_style(id, true).is_some() { crate::render::PAPER } else { default };
+        let base = if self.pattern_style(id, true).is_some() { crate::prim::PAPER } else { default };
         let c = o.cut.fill.map_or(base, |[r, g, b]| Rgb(r, g, b));
         if o.halftone { halftone(c) } else { c }
     }
@@ -1295,7 +1296,8 @@ pub(crate) mod testing {
 
     use crate::engine::Session;
     use crate::geom::P2;
-    use crate::render::{self, Drawing, Prim, Rgb};
+    use crate::prim::{Prim, Rgb};
+    use crate::render::{self, Drawing};
 
     pub(crate) fn run(s: &mut Session, id: &str, p: Value) -> Value {
         s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"))
@@ -1372,7 +1374,8 @@ mod tests {
     use crate::graphics::Look;
     use crate::graphics::testing::*;
     use crate::model::Element;
-    use crate::render::{self, Drawing, POCHE, Prim, Rgb};
+    use crate::prim::{POCHE, Prim, Rgb};
+    use crate::render::{self, Drawing};
 
     #[test]
     fn a_category_hidden_in_a_view_is_left_out_of_that_view_only() {
@@ -2289,7 +2292,7 @@ mod tests {
     #[test]
     fn a_template_controls_the_scale_detail_level_and_visual_style_of_the_views_that_follow_it() {
         use crate::graphics::{Detail, VisualStyle};
-        use crate::render::View;
+        use crate::prim::View;
         let mut s = Session::new();
         run(&mut s, "wall", json!({"points": [[0, 0], [8000, 0], [8000, 6000], [0, 6000]], "closed": true, "type": "Exterior - 300mm"}));
         // Level 2 is held at 1 : 100, coarse; a template made from it says so, and controls every group.

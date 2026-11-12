@@ -27,6 +27,7 @@ use crate::model::{
     OpeningWay, Operation, Pattern, PlanRange, Railing, Ramp, Roof, Section, Shaft, Stair, TOL, Tag, View3D, Wall,
 };
 use crate::pen::{Pen, Weights};
+pub use crate::prim::{LIGHT_POCHE, PAPER, POCHE, Part, Prim, Rgb, View};
 use crate::styles::{BY_CATEGORY, ObjectStyle};
 use crate::units::Units;
 use crate::view3d::{self, Camera, Clip, Image, Scene};
@@ -39,14 +40,6 @@ use dimensions::dimension;
 mod regions;
 mod site;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Rgb(pub u8, pub u8, pub u8);
-
-pub const PAPER: Rgb = Rgb(255, 255, 255);
-/// Wall poché, the grey of cut walls.
-pub const POCHE: Rgb = Rgb(168, 168, 168);
-/// A cut compound wall's layers that aren't its structure: lighter.
-pub const LIGHT_POCHE: Rgb = Rgb(212, 212, 212);
 const INK: Rgb = Rgb(25, 25, 25);
 const FAINT: Rgb = Rgb(120, 120, 120);
 const GRID: Rgb = Rgb(60, 100, 150);
@@ -56,30 +49,6 @@ const MASS: Rgb = Rgb(88, 112, 168);
 const MARGIN: f64 = 70.0;
 const BUBBLE: f32 = 11.0;
 
-/// What a primitive draws of its element, for the view's overrides: lines and fills in projection
-/// (what lies below the cut plane, beyond a section's line, annotation) or where the view cuts
-/// it; lettering, which takes a line colour and no weight; and hatching, which takes neither.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Part {
-    #[default]
-    Projection,
-    Cut,
-    Text,
-    Pattern,
-    /// Stroke-like pattern graphics: filled dots and font outlines take line colour overrides.
-    LinePattern,
-    /// A raster image or a PDF page placed in the view: it picks where nothing drawn near is picked instead.
-    Picture,
-}
-
-impl Part {
-    /// Whether this part's lines turn their corners mitred, square as a cut wall's corner: all but lettering, whose strokes
-    /// turn round, so a V's point doesn't stick out.
-    pub(crate) fn mitred(self) -> bool {
-        self != Part::Text
-    }
-}
-
 impl Drawing {
     /// Whether primitive `i`'s corners are mitred ([`Part::mitred`]).
     pub(crate) fn mitred(&self, i: usize) -> bool {
@@ -87,131 +56,50 @@ impl Drawing {
     }
 }
 
-#[derive(Clone)]
-pub enum Prim {
-    Fill {
-        rings: Vec<Vec<(f32, f32)>>,
-        color: Rgb,
-    },
-    Line {
-        pts: Vec<(f32, f32)>,
-        width: f32,
-        color: Rgb,
-        /// Its on and off lengths, px, again and again; none, solid.
-        dash: Option<Vec<f32>>,
-        closed: bool,
-    },
-    /// A picture, its top left corner `at`, a pixel to a pixel: a section's on a sheet. `ink` when all of it is one colour
-    /// the view gives (a scan the view fills), not colours of its own: a dark canvas shows it as it is rather than dimmed.
-    Image {
-        at: (f32, f32),
-        width: u32,
-        height: u32,
-        rgba: Vec<u8>,
-        ink: bool,
-    },
-}
-
-impl Prim {
-    /// Its points, px: a fill's rings', a line's, a picture's corners.
-    pub fn points(&self) -> Vec<(f32, f32)> {
-        match self {
-            Prim::Fill { rings, .. } => rings.iter().flatten().copied().collect(),
-            Prim::Line { pts, .. } => pts.clone(),
-            Prim::Image { at, width, height, .. } => Prim::corners(*at, *width, *height),
+/// What of it lies inside the box from pixel `lo` to `hi`: a fill's rings clipped, a line in
+/// the pieces inside, a picture's whole pixels inside.
+fn cropped(prim: Prim, lo: (f32, f32), hi: (f32, f32)) -> Vec<Prim> {
+    let mm = |p: (f32, f32)| P2(f64::from(p.0), f64::from(p.1));
+    let px = |p: P2| (p.0 as f32, p.1 as f32);
+    match prim {
+        Prim::Fill { rings, color } => {
+            let rings: Vec<Vec<(f32, f32)>> = rings.iter().map(|r| clip_ring(r, lo, hi)).filter(|r| r.len() >= 3).collect();
+            if rings.is_empty() { Vec::new() } else { vec![Prim::Fill { rings, color }] }
         }
-    }
-
-    /// The same, `dx` px right and `dy` down.
-    pub(crate) fn moved(self, dx: f32, dy: f32) -> Prim {
-        let mv = |pts: Vec<(f32, f32)>| pts.into_iter().map(|(x, y)| (x + dx, y + dy)).collect();
-        match self {
-            Prim::Fill { rings, color } => Prim::Fill { rings: rings.into_iter().map(mv).collect(), color },
-            Prim::Line { pts, width, color, dash, closed } => Prim::Line { pts: mv(pts), width, color, dash, closed },
-            Prim::Image { at, width, height, rgba, ink } => Prim::Image { at: (at.0 + dx, at.1 + dy), width, height, rgba, ink },
+        Prim::Line { pts, width, color, dash, closed } => {
+            let inside = |p: &(f32, f32)| (lo.0..=hi.0).contains(&p.0) && (lo.1..=hi.1).contains(&p.1);
+            if pts.iter().all(inside) {
+                return vec![Prim::Line { pts, width, color, dash, closed }];
+            }
+            let close = closed.then(|| pts.last().copied().zip(pts.first().copied())).flatten();
+            let mut runs: Vec<Vec<(f32, f32)>> = Vec::new();
+            for (a, b) in pts.iter().copied().zip(pts.iter().copied().skip(1)).chain(close) {
+                let Some((p, q)) = clip(mm(a), mm(b), mm(lo), mm(hi)) else { continue };
+                let (p, q) = (px(p), px(q));
+                match runs.last_mut() {
+                    Some(run) if run.last() == Some(&p) => run.push(q),
+                    _ => runs.push(vec![p, q]),
+                }
+            }
+            runs.into_iter().map(|pts| Prim::Line { pts, width, color, dash: dash.clone(), closed: false }).collect()
         }
-    }
-
-    /// An image's corners, clockwise from its top left.
-    fn corners(at: (f32, f32), width: u32, height: u32) -> Vec<(f32, f32)> {
-        let (w, h) = (width as f32, height as f32);
-        vec![at, (at.0 + w, at.1), (at.0 + w, at.1 + h), (at.0, at.1 + h)]
-    }
-
-    /// What of it lies inside the box from pixel `lo` to `hi`: a fill's rings clipped, a line in
-    /// the pieces inside, a picture's whole pixels inside.
-    fn cropped(self, lo: (f32, f32), hi: (f32, f32)) -> Vec<Prim> {
-        let mm = |p: (f32, f32)| P2(f64::from(p.0), f64::from(p.1));
-        let px = |p: P2| (p.0 as f32, p.1 as f32);
-        match self {
-            Prim::Fill { rings, color } => {
-                let rings: Vec<Vec<(f32, f32)>> = rings.iter().map(|r| clip_ring(r, lo, hi)).filter(|r| r.len() >= 3).collect();
-                if rings.is_empty() { Vec::new() } else { vec![Prim::Fill { rings, color }] }
+        Prim::Image { at, width, height, rgba, ink } => {
+            let side = |lo: f32, hi: f32, from: f32, n: u32| {
+                let first = (lo - from).ceil().clamp(0.0, n as f32) as u32;
+                (first, ((hi - from).floor().clamp(0.0, n as f32) as u32).max(first))
+            };
+            let ((x0, x1), (y0, y1)) = (side(lo.0, hi.0, at.0, width), side(lo.1, hi.1, at.1, height));
+            if x1 == x0 || y1 == y0 {
+                return Vec::new();
             }
-            Prim::Line { pts, width, color, dash, closed } => {
-                let inside = |p: &(f32, f32)| (lo.0..=hi.0).contains(&p.0) && (lo.1..=hi.1).contains(&p.1);
-                if pts.iter().all(inside) {
-                    return vec![Prim::Line { pts, width, color, dash, closed }];
-                }
-                let close = closed.then(|| pts.last().copied().zip(pts.first().copied())).flatten();
-                let mut runs: Vec<Vec<(f32, f32)>> = Vec::new();
-                for (a, b) in pts.iter().copied().zip(pts.iter().copied().skip(1)).chain(close) {
-                    let Some((p, q)) = clip(mm(a), mm(b), mm(lo), mm(hi)) else { continue };
-                    let (p, q) = (px(p), px(q));
-                    match runs.last_mut() {
-                        Some(run) if run.last() == Some(&p) => run.push(q),
-                        _ => runs.push(vec![p, q]),
-                    }
-                }
-                runs.into_iter().map(|pts| Prim::Line { pts, width, color, dash: dash.clone(), closed: false }).collect()
+            let row = (x1 - x0) as usize * 4;
+            let mut kept = Vec::with_capacity(row * (y1 - y0) as usize);
+            for y in y0..y1 {
+                let from = (y as usize * width as usize + x0 as usize) * 4;
+                kept.extend_from_slice(rgba.get(from..from + row).unwrap_or_default());
             }
-            Prim::Image { at, width, height, rgba, ink } => {
-                let side = |lo: f32, hi: f32, from: f32, n: u32| {
-                    let first = (lo - from).ceil().clamp(0.0, n as f32) as u32;
-                    (first, ((hi - from).floor().clamp(0.0, n as f32) as u32).max(first))
-                };
-                let ((x0, x1), (y0, y1)) = (side(lo.0, hi.0, at.0, width), side(lo.1, hi.1, at.1, height));
-                if x1 == x0 || y1 == y0 {
-                    return Vec::new();
-                }
-                let row = (x1 - x0) as usize * 4;
-                let mut kept = Vec::with_capacity(row * (y1 - y0) as usize);
-                for y in y0..y1 {
-                    let from = (y as usize * width as usize + x0 as usize) * 4;
-                    kept.extend_from_slice(rgba.get(from..from + row).unwrap_or_default());
-                }
-                vec![Prim::Image { at: (at.0 + x0 as f32, at.1 + y0 as f32), width: x1 - x0, height: y1 - y0, rgba: kept, ink }]
-            }
+            vec![Prim::Image { at: (at.0 + x0 as f32, at.1 + y0 as f32), width: x1 - x0, height: y1 - y0, rgba: kept, ink }]
         }
-    }
-}
-
-/// Model millimetres (y up) to image pixels (y down). In a section or elevation, the first
-/// coordinate runs along its line from its start, the second up.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct View {
-    /// Pixels per millimetre.
-    pub scale: f64,
-    pub cx: f64,
-    pub cy: f64,
-    pub width: u32,
-    pub height: u32,
-}
-
-impl View {
-    pub fn px(&self, p: P2) -> (f32, f32) {
-        (
-            (f64::from(self.width) / 2.0 + (p.0 - self.cx) * self.scale) as f32,
-            (f64::from(self.height) / 2.0 - (p.1 - self.cy) * self.scale) as f32,
-        )
-    }
-
-    /// The model point at a pixel: the inverse of [`View::px`].
-    pub fn mm(&self, (x, y): (f32, f32)) -> P2 {
-        P2(
-            self.cx + (f64::from(x) - f64::from(self.width) / 2.0) / self.scale,
-            self.cy - (f64::from(y) - f64::from(self.height) / 2.0) / self.scale,
-        )
     }
 }
 
@@ -438,7 +326,7 @@ impl Drawing {
         let (prims, owners, parts) = (std::mem::take(&mut self.prims), std::mem::take(&mut self.owners), std::mem::take(&mut self.parts));
         let pens = std::mem::take(&mut self.pens);
         for (((prim, owner), part), pen) in prims.into_iter().zip(owners).zip(parts).zip(pens) {
-            for piece in if keep(owner) { vec![prim] } else { prim.cropped(lo, hi) } {
+            for piece in if keep(owner) { vec![prim] } else { cropped(prim, lo, hi) } {
                 self.prims.push(piece);
                 self.owners.push(owner);
                 self.parts.push(part);

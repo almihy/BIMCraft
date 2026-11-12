@@ -20,7 +20,7 @@ use crate::engine::Session;
 use crate::geom::{self, P2};
 use crate::model::{Changed, Element, Floor, Guid, Id, MAX_COORD, MAX_TEXT, Model, ShapePoint};
 use crate::phasing;
-use crate::render::Rgb;
+use crate::prim::Rgb;
 use crate::site::{Poly, Props, parking, shapes};
 
 /// Arqiflow's phases of a site element: what the design makes, what stands and stays, what stands and comes down, what

@@ -650,7 +650,8 @@ fn a_columns_bars_end_in_hooks_turned_into_the_section() {
     assert!(on(&s, host, "bars").iter().all(|b| b["path"].as_array().map(Vec::len) == Some(3) && (xy(b, 2).2 - 2975.0).abs() < 1e-6));
 }
 
-use crate::render::{self, Drawing, Prim, View};
+use crate::prim::{Prim, View};
+use crate::render::{self, Drawing};
 
 fn plan_view() -> View {
     View { scale: 0.1, cx: 3000.0, cy: 2000.0, width: 1400, height: 800 }

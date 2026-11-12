@@ -541,7 +541,8 @@ mod tests {
 
     use crate::engine::Session;
     use crate::model::{Element, Id};
-    use crate::render::{Drawing, Prim, View};
+    use crate::prim::{Prim, View};
+    use crate::render::Drawing;
     use serde_json::{Value, json};
 
     fn run(s: &mut Session, id: &str, p: Value) -> Value {
@@ -670,7 +671,7 @@ mod tests {
         let fills: Vec<&Vec<Vec<(f32, f32)>>> = drawn
             .iter()
             .filter_map(|(_, p)| match p {
-                Prim::Fill { rings, color } if *color == crate::render::Rgb(0, 0, 0) => Some(rings),
+                Prim::Fill { rings, color } if *color == crate::prim::Rgb(0, 0, 0) => Some(rings),
                 _ => None,
             })
             .collect();
@@ -845,7 +846,7 @@ mod tests {
         let d = plan(&s);
         let last = |id| of(&d, id).last().map(|(i, _)| *i).unwrap();
         let first = |id| of(&d, id).first().map(|(i, _)| *i).unwrap();
-        assert!(matches!(of(&d, m)[0].1, Prim::Fill { color, .. } if *color == crate::render::PAPER), "paper");
+        assert!(matches!(of(&d, m)[0].1, Prim::Fill { color, .. } if *color == crate::prim::PAPER), "paper");
         assert!(first(m) > last(w), "over the wall");
         assert!(first(t) > last(m), "under the note");
     }

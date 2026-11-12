@@ -13,7 +13,7 @@ use crate::dxf::{self, Color, Dxf, Entity, Shape};
 pub mod outlines;
 use crate::geom::P2;
 use crate::pen::Pen;
-use crate::render::Rgb;
+use crate::prim::Rgb;
 
 /// What reads a DWG drawing for a session: the DXF the file at a path becomes, and notes on what the read left out, or why it
 /// can't be read. The core reads no DWG of its own; the apps hand their `Session` one (`bimcraft-dwg`, which reads it in a

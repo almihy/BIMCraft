@@ -467,7 +467,8 @@ mod tests {
     use crate::geom::P2;
     use crate::library::Kind;
     use crate::model::{Element, Id, Model};
-    use crate::render::{Drawing, Prim, View};
+    use crate::prim::{Prim, View};
+    use crate::render::Drawing;
     use serde_json::json;
 
     /// The lines `id` draws in `d`: their width, colour and dash.

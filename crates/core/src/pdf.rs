@@ -8,7 +8,8 @@ use flate2::Compression;
 use flate2::write::ZlibEncoder;
 
 use crate::geom::P2;
-use crate::render::{Drawing, Prim};
+use crate::prim::Prim;
+use crate::render::Drawing;
 
 fn deflate(bytes: &[u8]) -> Vec<u8> {
     let mut z = ZlibEncoder::new(Vec::new(), Compression::default());
@@ -25,8 +26,7 @@ type Picture = (u32, u32, Vec<u8>, Option<Vec<u8>>);
 pub(crate) fn contents(d: &Drawing, paper: P2) -> (String, Vec<Picture>) {
     let k = 72.0 / 25.4 / d.view.scale;
     let mut s = format!("{k:.6} 0 0 {:.6} 0 {:.3} cm 1 J 0 j\n", -k, paper.1 * 72.0 / 25.4);
-    let color =
-        |c: crate::render::Rgb| format!("{:.3} {:.3} {:.3}", f32::from(c.0) / 255.0, f32::from(c.1) / 255.0, f32::from(c.2) / 255.0);
+    let color = |c: crate::prim::Rgb| format!("{:.3} {:.3} {:.3}", f32::from(c.0) / 255.0, f32::from(c.1) / 255.0, f32::from(c.2) / 255.0);
     let path = |s: &mut String, pts: &[(f32, f32)], closed: bool| {
         for (i, (x, y)) in pts.iter().enumerate() {
             let _ = write!(s, "{x:.2} {y:.2} {} ", if i == 0 { "m" } else { "l" });

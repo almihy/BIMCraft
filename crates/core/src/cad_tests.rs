@@ -433,7 +433,8 @@ fn stray_entities_far_off_are_counted_and_left_out_of_its_extents() {
 // ---------- plans ----------
 
 use crate::geom::P2;
-use crate::render::{self, Rgb};
+use crate::prim::Rgb;
+use crate::render;
 use crate::snap::{Kind, Reach, Snaps, snap};
 
 /// How many pixels of a drawing's PNG are `colour`'s.

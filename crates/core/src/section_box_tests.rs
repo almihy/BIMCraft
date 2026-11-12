@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use crate::engine::Session;
 use crate::geom::P2;
 use crate::graphics::Look;
-use crate::render::Rgb;
+use crate::prim::Rgb;
 use crate::view3d::{AZIMUTH, Camera, ELEVATION, Image, Scene, gpu};
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
@@ -194,7 +194,7 @@ fn a_section_box_cuts_the_models_surfaces_and_what_it_cuts_away_is_not_picked() 
     let img = picture(&s, &cam);
     assert_eq!(img.pick(low.0, low.1), Some(wall), "below the box's top, the wall is there");
     assert_eq!(img.pick(high.0, high.1), None, "above it, nothing");
-    assert_eq!(img.color(high.0, high.1), crate::render::PAPER);
+    assert_eq!(img.color(high.0, high.1), crate::prim::PAPER);
 }
 
 #[test]

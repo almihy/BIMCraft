@@ -8,7 +8,8 @@ use crate::engine::Session;
 use crate::geom::P2;
 use crate::geom::v3::P3;
 use crate::model::{Element, Id};
-use crate::render::{self, PAPER, POCHE};
+use crate::prim::{PAPER, POCHE};
+use crate::render;
 use crate::view3d::Scene;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {

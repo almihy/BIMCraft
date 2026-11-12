@@ -2,7 +2,7 @@
 use super::{LinePattern, Segment};
 use crate::{
     geom::P2,
-    render::{Prim, Rgb},
+    prim::{Prim, Rgb},
     text::{self, Face, Source},
 };
 

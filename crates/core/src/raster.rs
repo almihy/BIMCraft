@@ -15,7 +15,8 @@ use serde::{Deserialize, Serialize};
 use crate::cad::Cad;
 use crate::geom::P2;
 use crate::model::{Guid, MAX_TEXT, is_zero};
-use crate::render::{Drawing, Prim};
+use crate::prim::Prim;
+use crate::render::Drawing;
 
 /// Images one project may hold.
 pub const MAX_TYPES: usize = 256;
@@ -964,7 +965,7 @@ mod tests {
     fn an_image_draws_its_pixels_where_its_corners_say() {
         let t =
             ImageType::picture("q.png", &png(2, 2, |x, y| [if x == 0 { 0 } else { 255 }, if y == 0 { 0 } else { 255 }, 0, 255])).unwrap();
-        let mut d = Drawing::new(crate::render::View { scale: 1.0, cx: 50.0, cy: 50.0, width: 100, height: 100 });
+        let mut d = Drawing::new(crate::prim::View { scale: 1.0, cx: 50.0, cy: 50.0, width: 100, height: 100 });
         draw(&mut d, &t, [(10.0, 10.0), (30.0, 10.0), (30.0, 30.0), (10.0, 30.0)]);
         let Some(Prim::Image { at, width, height, rgba, .. }) = d.prims.first() else { panic!("no picture") };
         assert_eq!((*at, *width, *height), ((10.0, 10.0), 20, 20));
