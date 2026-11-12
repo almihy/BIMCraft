@@ -67,7 +67,8 @@ impl BimApp {
     /// A drag from a grip of a selected camera: held while it is dragged, then one `camera` where it is let go, the point
     /// snapped as any grip's. Whether it took the release, which is then no click.
     pub(crate) fn camera_grip_drag(&mut self, ui: &Ui, response: &Response, rect: Rect, view: &View, level: Id) -> bool {
-        let cams = selected_cameras(&self.session.model, &self.selection);
+        // Grips are Modify's, as Revit's: another tool's clicks are its own.
+        let cams = if self.tool == crate::Tool::Modify { selected_cameras(&self.session.model, &self.selection) } else { Vec::new() };
         if cams.is_empty() {
             self.camera_grip = None;
             return false;
@@ -123,7 +124,7 @@ impl BimApp {
     /// The selected cameras' cones and grips over the plan; the held one as the drag leaves it.
     pub(crate) fn camera_grip_overlay(&self, ui: &Ui, m: &Model, view: &View, rect: Rect, level: Id) {
         let cams = selected_cameras(m, &self.selection);
-        if cams.is_empty() {
+        if cams.is_empty() || self.tool != crate::Tool::Modify {
             return;
         }
         let p = ui.painter_at(rect);
@@ -145,8 +146,16 @@ fn draw_cone(p: &Painter, rect: Rect, view: &View, c: &Cone, targeted: bool, hel
     let accent = pal().accent;
     let line = Stroke::new(1.5, accent);
     let s = |q: P2| at(rect, view, q);
-    for [a, b] in render::cone_lines(c).into_iter().take(3) {
+    let [left, right, far, _] = render::cone_lines(c);
+    for [a, b] in [left, right] {
         p.line_segment([s(a), s(b)], line);
+    }
+    // The far line: solid where it clips (Clip Manually), dashed where it only shows how the cone goes on.
+    match c.clipped {
+        true => {
+            p.line_segment([s(far[0]), s(far[1])], line);
+        }
+        false => p.extend(egui::Shape::dashed_line(&[s(far[0]), s(far[1])], line, 6.0, 4.0)),
     }
     if targeted {
         p.extend(egui::Shape::dashed_line(&[s(c.eye), s(c.target)], Stroke::new(1.0, accent), 6.0, 4.0));
@@ -171,7 +180,7 @@ impl BimApp {
     pub(crate) fn camera_section_grips(&mut self, ui: &Ui, response: &Response, rect: Rect, view: &View, section: Id) -> Vec<egui::Shape> {
         let m = std::sync::Arc::clone(&self.session.model);
         let Some(sv) = m.section(section) else { return Vec::new() };
-        let cams = selected_cameras(&m, &self.selection);
+        let cams = if self.tool == crate::Tool::Modify { selected_cameras(&m, &self.selection) } else { Vec::new() };
         if cams.is_empty() {
             self.camera_section_grip = None;
             return Vec::new();

@@ -4447,6 +4447,8 @@ pub struct Cone {
     pub sides: [P2; 2],
     /// How far ahead of the eye the far line is in plan, mm.
     pub reach: f64,
+    /// Whether the far line clips (Clip Manually on); else it only shows the cone going on past the target.
+    pub clipped: bool,
 }
 
 /// The plan's unit way from the eye toward the target, and how steeply it looks (the cosine of its pitch): none for a camera
@@ -4458,8 +4460,8 @@ fn plan_way(cam: &crate::model::ViewCamera) -> Option<(P2, f64)> {
     (across > TOL && whole > TOL).then(|| (P2(d.0 / across, d.1 / across), across / whole))
 }
 
-/// The cone of 3D view `v`'s camera in plan, through focal length `lens` (its own unless given, which a grip being dragged
-/// changes): out to its far clip plane while Clip Manually is on, else to its target. None for a view without a camera, or
+/// The cone of 3D view `v`'s camera in plan: out to its far clip plane while Clip Manually is on, else a quarter past its
+/// target (so the far line's grip stands clear of the target's). None for a view without a camera, or
 /// one looking straight down.
 pub fn camera_cone(v: &View3D) -> Option<Cone> {
     let cam = v.camera?;
@@ -4472,7 +4474,7 @@ pub fn cone_of(cam: &crate::model::ViewCamera, lens: f64) -> Option<Cone> {
     let (way, cos) = plan_way(cam)?;
     let eye = P2(cam.eye[0], cam.eye[1]);
     let target = P2(cam.target[0], cam.target[1]);
-    let reach = if cam.physical.clip_on { cam.physical.far * cos } else { eye.dist(target) };
+    let reach = if cam.physical.clip_on { cam.physical.far * cos } else { eye.dist(target) * 1.25 };
     let half = (crate::view3d::field_of_view(lens, &cam.physical) / 2.0).to_radians();
     let side = |k: f64| {
         let (c, s) = (half.cos(), half.sin() * k);
@@ -4482,7 +4484,7 @@ pub fn cone_of(cam: &crate::model::ViewCamera, lens: f64) -> Option<Cone> {
     let (far_left, far_right) = (side(1.0), side(-1.0));
     let far = eye + way * reach;
     let mid = |a: P2| eye + (a - eye) * 0.5;
-    Some(Cone { eye, target, far_left, far_right, far, sides: [mid(far_left), mid(far_right)], reach })
+    Some(Cone { eye, target, far_left, far_right, far, sides: [mid(far_left), mid(far_right)], reach, clipped: cam.physical.clip_on })
 }
 
 /// Where a camera's grip, dragged to plan point `to`, puts it, as the `camera` command's params: the eye (`which` 0, its

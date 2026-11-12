@@ -48,13 +48,23 @@ fn show_camera_in_the_browser_selects_the_camera_so_the_plan_shows_its_cone() {
     h.state_mut().selection.clear();
     h.run();
     // The browser's entry, right-clicked: Show Camera.
-    let entry = h.get_all_by_label("Camera 1").min_by(|a, b| b.rect().top().total_cmp(&a.rect().top())).map(|n| n.rect().center()).unwrap();
-    h.hover_at(entry);
-    h.run();
-    for pressed in [true, false] {
-        h.event(Event::PointerButton { pos: entry, button: PointerButton::Secondary, pressed, modifiers: Modifiers::NONE });
+    use egui_kittest::kittest::NodeT;
+    let ids: Vec<_> = h.get_all_by_label("Camera 1").map(|n| n.accesskit_node().id()).collect();
+    for id in ids {
+        h.get_by(|n| n.id() == id).scroll_to_me();
+        h.run();
+        let entry = h.get_by(|n| n.id() == id).rect().center();
+        h.hover_at(entry);
+        h.run();
+        for pressed in [true, false] {
+            h.event(Event::PointerButton { pos: entry, button: PointerButton::Secondary, pressed, modifiers: Modifiers::NONE });
+        }
+        h.run();
+        if h.query_by_label("Show Camera").is_some() {
+            break;
+        }
+        key(&mut h, Key::Escape);
     }
-    h.run();
     press(&mut h, "Show Camera");
     assert_eq!(h.state().selection, vec![id]);
 }
@@ -137,7 +147,8 @@ fn properties_show_revit_s_camera_group_and_3ds_max_s_rollouts_and_apply_as_type
     h.key_press(Key::Enter);
     h.run();
     assert_eq!(cam(&h, id).target[2], 3000.0);
-    pick(&mut h, Role::CheckBox, "Auto Vertical Tilt Correction");
+    h.get_by_role_and_label(Role::CheckBox, "Auto Vertical Tilt Correction").click_accesskit();
+    h.run();
     assert!(cam(&h, id).physical.auto_tilt);
 }
 

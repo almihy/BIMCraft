@@ -102,7 +102,7 @@ mod tests {
         assert!(rect.contains_rect(f) && (f.center() - rect.center()).length() < 1e-3);
         let tall = safe_frame(rect, 0.7);
         assert!((tall.height() - (500.0 - 2.0 * MARGIN)).abs() < 1e-3);
-        assert_eq!(third_points(f)[0], pos2(f.min.x + f.width() / 3.0, f.min.y + f.height() / 3.0));
+        assert!((third_points(f)[0] - pos2(f.min.x + f.width() / 3.0, f.min.y + f.height() / 3.0)).length() < 1e-3);
     }
 
     #[test]

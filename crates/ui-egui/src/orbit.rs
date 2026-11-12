@@ -92,7 +92,12 @@ fn build_scene(job: SceneJob, cancel: &crate::view_worker::Cancel) -> Option<Sce
         return None;
     }
     let look = look_of(&job.model, job.view);
-    let fitted = scene.fit_from(Camera { lens: job.lens, ..scene.fit_in(AZIMUTH, ELEVATION, job.width, job.height, &look) }, &look);
+    // Fitted from the view's own azimuth and elevation, as `render` fits a view never moved.
+    let (azimuth, elevation) = match job.view.and_then(|id| job.model.elements.get(id)) {
+        Some(bimcraft_core::model::Element::View3D(v)) => (v.azimuth, v.elevation),
+        _ => (AZIMUTH, ELEVATION),
+    };
+    let fitted = scene.fit_from(Camera { lens: job.lens, ..scene.fit_in(azimuth, elevation, job.width, job.height, &look) }, &look);
     if cancel.cancelled() {
         return None;
     }
