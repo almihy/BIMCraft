@@ -235,7 +235,7 @@ msgstr "牆的中心線，使繪製在其上的牆與之相接"
 msgid "A {} needs a name."
 msgstr "{}需要名稱。"
 
-#: crates/model/src/sheet.rs:292
+#: crates/model/src/sheet.rs:299
 msgid "AS INDICATED"
 msgstr ""
 
@@ -693,7 +693,7 @@ msgstr ""
 msgid "And:"
 msgstr "並且："
 
-#: crates/model/src/snap.rs:71
+#: crates/model/src/snap.rs:72
 #: crates/ui-egui/src/reinforce.rs:83
 msgid "Angle"
 msgstr "角度"
@@ -726,7 +726,7 @@ msgstr "角度尺寸標註：選取相交的兩條線，然後單擊圓弧的位
 msgid "Annotate"
 msgstr "註釋"
 
-#: crates/model/src/snap.rs:70
+#: crates/model/src/snap.rs:71
 msgid "Annotation Anchor"
 msgstr ""
 
@@ -2751,7 +2751,7 @@ msgstr "剖切面"
 msgid "Cylinder"
 msgstr "圓柱體"
 
-#: crates/model/src/render.rs:3741
+#: crates/model/src/render.rs:3761
 msgid "DN"
 msgstr "下"
 
@@ -3559,7 +3559,7 @@ msgstr "端部區長度"
 msgid "End zone spacing"
 msgstr "端部區間距"
 
-#: crates/model/src/snap.rs:61
+#: crates/model/src/snap.rs:62
 msgid "Endpoint"
 msgstr "端點"
 
@@ -3884,7 +3884,7 @@ msgstr "找到 {}；以下沒有對應的圖元：{}"
 msgid "Fine"
 msgstr "精細"
 
-#: crates/model/src/import.rs:1365
+#: crates/model/src/import.rs:1366
 #: crates/ui-egui/src/notes.rs:450
 #: crates/ui-egui/src/properties.rs:764
 msgid "Finish"
@@ -4748,7 +4748,7 @@ msgstr "正在安裝 BIMCraft {}…"
 msgid "Instance"
 msgstr "實例"
 
-#: crates/model/src/import.rs:1364
+#: crates/model/src/import.rs:1365
 #: crates/ui-egui/src/draw.rs:664
 msgid "Insulation"
 msgstr "保溫層"
@@ -4769,7 +4769,7 @@ msgstr "隔熱層：沿每條線繪製的氈狀隔熱層，寬度在選項欄中
 msgid "Interface scale"
 msgstr "界面縮放"
 
-#: crates/model/src/snap.rs:63
+#: crates/model/src/snap.rs:64
 msgid "Intersection"
 msgstr "交點"
 
@@ -5572,7 +5572,7 @@ msgstr "中等"
 msgid "Medium Lines"
 msgstr "中粗線"
 
-#: crates/model/src/import.rs:1367
+#: crates/model/src/import.rs:1368
 #: crates/ui-egui/src/properties.rs:763
 msgid "Membrane"
 msgstr "薄膜層"
@@ -5602,7 +5602,7 @@ msgstr "米"
 msgid "Middle of the text"
 msgstr "文字中心"
 
-#: crates/model/src/snap.rs:62
+#: crates/model/src/snap.rs:63
 msgid "Midpoint"
 msgstr "中點"
 
@@ -5812,7 +5812,7 @@ msgstr "NBR 17068：延伸 2 至 3 mm"
 msgid "NBR 6492: Target in plan (±0.00), equilateral triangle in section"
 msgstr "NBR 6492：平面採用圓環靶心 (±0.00)，剖面採用等邊三角形"
 
-#: crates/model/src/render.rs:2878
+#: crates/model/src/render.rs:2898
 msgid "NOT ENCLOSED"
 msgstr "未封閉"
 
@@ -5843,7 +5843,7 @@ msgstr "名稱："
 msgid "Natural"
 msgstr ""
 
-#: crates/model/src/snap.rs:68
+#: crates/model/src/snap.rs:69
 msgid "Nearest"
 msgstr "最近點"
 
@@ -5945,7 +5945,7 @@ msgstr "新建{}"
 msgid "Next Pan/Zoom"
 msgstr ""
 
-#: crates/model/src/schedule.rs:1338
+#: crates/model/src/schedule.rs:1339
 msgid "No"
 msgstr "否"
 
@@ -6695,7 +6695,7 @@ msgstr "性能"
 msgid "Perimeter"
 msgstr "周長"
 
-#: crates/model/src/snap.rs:65
+#: crates/model/src/snap.rs:66
 msgid "Perpendicular"
 msgstr "垂足"
 
@@ -6731,7 +6731,7 @@ msgstr "拆除的階段"
 msgid "Phase Filter"
 msgstr "階段過濾器"
 
-#: crates/model/src/ifc.rs:1916
+#: crates/model/src/ifc.rs:1923
 msgid "Phase Filters"
 msgstr "階段過濾器列表"
 
@@ -7416,7 +7416,7 @@ msgstr "主選項（{}）"
 msgid "Profile"
 msgstr "輪廓"
 
-#: apps/bimcraft/src/main.rs:268
+#: apps/bimcraft/src/main.rs:270
 #: crates/ui-egui/src/titleblocks.rs:148
 #: crates/ui-egui/src/titleblocks.rs:152
 #: crates/ui-egui/src/titleblocks.rs:477
@@ -7541,11 +7541,11 @@ msgstr "已清除 {} 項未使用內容。"
 msgid "Put a view on this sheet: one not on a sheet yet"
 msgstr "將一個視圖放到此圖紙上：尚未上圖紙的視圖"
 
-#: crates/model/src/snap.rs:66
+#: crates/model/src/snap.rs:67
 msgid "Quadrant"
 msgstr "象限點"
 
-#: crates/model/src/render.rs:2878
+#: crates/model/src/render.rs:2898
 msgid "REDUNDANT"
 msgstr "冗餘"
 
@@ -8191,11 +8191,11 @@ msgstr ""
 msgid "Runs the plugin's command"
 msgstr ""
 
-#: crates/model/src/sheet.rs:281
+#: crates/model/src/sheet.rs:288
 msgid "SCALE"
 msgstr "比例"
 
-#: crates/model/src/sheet.rs:283
+#: crates/model/src/sheet.rs:290
 msgid "SCALE AS INDICATED"
 msgstr "比例如圖所示"
 
@@ -9270,7 +9270,7 @@ msgstr "子網格分割數 Y"
 msgid "Subgrid pen"
 msgstr "子網格筆"
 
-#: crates/model/src/import.rs:1366
+#: crates/model/src/import.rs:1367
 #: crates/ui-egui/src/properties.rs:761
 msgid "Substrate"
 msgstr "基層"
@@ -9452,7 +9452,7 @@ msgstr "刪除項目中未被使用的內容。每個類別保留一個類型；
 msgid "Takes up a shaped top's falls: one layer at most"
 msgstr "吸收形狀編輯後頂面的坡降：最多一層"
 
-#: crates/model/src/snap.rs:67
+#: crates/model/src/snap.rs:68
 msgid "Tangent"
 msgstr "切點"
 
@@ -10250,7 +10250,7 @@ msgstr "類型："
 msgid "Types"
 msgstr "類型"
 
-#: crates/model/src/render.rs:3741
+#: crates/model/src/render.rs:3761
 msgid "UP"
 msgstr "上"
 
@@ -11010,7 +11010,7 @@ msgstr "X"
 msgid "Y"
 msgstr "Y"
 
-#: crates/model/src/schedule.rs:1338
+#: crates/model/src/schedule.rs:1339
 msgid "Yes"
 msgstr "是"
 
@@ -11699,8 +11699,8 @@ msgstr "{}（未載入）"
 msgid "{} (primary)"
 msgstr "{}（主選項）"
 
-#: crates/model/src/schedule.rs:1327
 #: crates/model/src/schedule.rs:1328
+#: crates/model/src/schedule.rs:1329
 msgid "{} ({})"
 msgstr "{}（{}）"
 

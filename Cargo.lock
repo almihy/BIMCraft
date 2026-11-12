@@ -488,21 +488,13 @@ dependencies = [
  "bimcraft-i18n",
  "bimcraft-mep-calc",
  "bimcraft-model",
- "encoding_rs",
  "flate2",
- "getrandom 0.3.4",
- "hayro",
- "i_overlay",
  "image",
- "js-sys",
  "png 0.18.1",
- "rayon",
  "serde",
  "serde_json",
  "tempfile",
  "tiny-skia",
- "ttf-parser",
- "zune-jpeg",
 ]
 
 [[package]]

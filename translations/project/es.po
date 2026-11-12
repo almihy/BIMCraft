@@ -3,7 +3,7 @@
 msgid ""
 msgstr "Project-Id-Version: BIMCraft\nLanguage: es\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
-#: crates/model/src/sheet.rs:292
+#: crates/model/src/sheet.rs:299
 msgid "AS INDICATED"
 msgstr ""
 
@@ -57,7 +57,7 @@ msgstr ""
 msgid "Ceiling Luminaire"
 msgstr "Luminaria de techo"
 
-#: crates/model/src/render.rs:3046
+#: crates/model/src/render.rs:3066
 msgid "Ceiling Plan"
 msgstr "Plano de cielo raso"
 
@@ -101,7 +101,7 @@ msgstr "Recuento"
 msgid "Crosshatch"
 msgstr "Sombreado cruzado"
 
-#: crates/model/src/render.rs:3741
+#: crates/model/src/render.rs:3761
 msgid "DN"
 msgstr "BAJA"
 
@@ -255,7 +255,7 @@ msgid "Gate Valve"
 msgstr "Válvula de compuerta"
 
 #: crates/model/src/family.rs:2249
-#: crates/model/src/view3d.rs:941
+#: crates/model/src/view3d.rs:963
 msgid "Glass"
 msgstr "Vidrio"
 
@@ -295,7 +295,7 @@ msgstr "Horizontal"
 msgid "Inspection Box"
 msgstr "Caja de inspección"
 
-#: crates/model/src/import.rs:1364
+#: crates/model/src/import.rs:1365
 msgid "Insulation"
 msgstr "Aislamiento"
 
@@ -356,7 +356,7 @@ msgstr ""
 msgid "Medium Lines"
 msgstr "Líneas medias"
 
-#: crates/model/src/import.rs:1367
+#: crates/model/src/import.rs:1368
 msgid "Membrane"
 msgstr "Lámina impermeable"
 
@@ -368,7 +368,7 @@ msgstr "Metal"
 msgid "Mounting Height"
 msgstr "Altura de montaje"
 
-#: crates/model/src/render.rs:2878
+#: crates/model/src/render.rs:2898
 msgid "NOT ENCLOSED"
 msgstr "NO DELIMITADA"
 
@@ -380,7 +380,7 @@ msgstr "Nombre"
 msgid "New Construction"
 msgstr "Nueva construcción"
 
-#: crates/model/src/schedule.rs:1338
+#: crates/model/src/schedule.rs:1339
 msgid "No"
 msgstr "No"
 
@@ -441,7 +441,7 @@ msgstr "Porcelana"
 msgid "Project"
 msgstr "Proyecto"
 
-#: crates/model/src/render.rs:2878
+#: crates/model/src/render.rs:2898
 msgid "REDUNDANT"
 msgstr "REDUNDANTE"
 
@@ -481,11 +481,11 @@ msgstr "Número de habitación"
 msgid "Room Schedule"
 msgstr "Tabla de habitaciones"
 
-#: crates/model/src/sheet.rs:281
+#: crates/model/src/sheet.rs:288
 msgid "SCALE"
 msgstr "ESCALA"
 
-#: crates/model/src/sheet.rs:283
+#: crates/model/src/sheet.rs:290
 msgid "SCALE AS INDICATED"
 msgstr "ESCALA SEGÚN SE INDICA"
 
@@ -614,7 +614,7 @@ msgstr ""
 msgid "To Room: Number"
 msgstr ""
 
-#: crates/model/src/sheet.rs:220
+#: crates/model/src/sheet.rs:227
 msgid "Total"
 msgstr "Total"
 
@@ -626,7 +626,7 @@ msgstr "Huella"
 msgid "Type"
 msgstr "Tipo"
 
-#: crates/model/src/render.rs:3741
+#: crates/model/src/render.rs:3761
 msgid "UP"
 msgstr "SUBE"
 
@@ -694,7 +694,7 @@ msgstr "Tabla de ventanas"
 msgid "Worktop"
 msgstr "Encimera"
 
-#: crates/model/src/schedule.rs:1338
+#: crates/model/src/schedule.rs:1339
 msgid "Yes"
 msgstr "Sí"
 

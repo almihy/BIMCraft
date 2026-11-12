@@ -11,7 +11,8 @@ goes (a command, a rule in `Model::check`, ids and GUIDs) is in [crates/core/CLA
 - **Tests.** A module's tests that need only the model stay with it (inline, or in `<module>_tests.rs` beside it through
   `#[path]`, as `model_tests.rs` and `render_tests.rs`). Those that drive the Session live in the core's
   `src/model_tests/`, one file per module (`render.rs`, `view3d_update.rs`), and reach the module's items through its
-  public paths; an item only they need is `pub` and `#[doc(hidden)]` in spirit, not part of the engine's command API.
+  public paths; an item only they need, or only the core's code, is `pub` and `#[doc(hidden)]`, never part of
+  the model's API; everything else is `pub(crate)` or private, so the dead-code lint sees it.
 - **Self-checks and counters are debug builds'.** A fast path held to its twin (every element asked instead of the lookup's,
   the whole scene drawn) is `if selfcheck::on(Check::X) { ... }` (`selfcheck.rs`): compiled into every debug build and run
   by every crate's tests, a constant `false` in release builds (the browser's among them); the desktop and the command

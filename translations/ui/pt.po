@@ -235,7 +235,7 @@ msgstr "O eixo central de uma parede, para que uma parede desenhada nele se enco
 msgid "A {} needs a name."
 msgstr "O nome não pode ficar vazio ({})."
 
-#: crates/model/src/sheet.rs:292
+#: crates/model/src/sheet.rs:299
 msgid "AS INDICATED"
 msgstr "INDICADA"
 
@@ -693,7 +693,7 @@ msgstr ""
 msgid "And:"
 msgstr "E:"
 
-#: crates/model/src/snap.rs:71
+#: crates/model/src/snap.rs:72
 #: crates/ui-egui/src/reinforce.rs:83
 msgid "Angle"
 msgstr "Ângulo"
@@ -726,7 +726,7 @@ msgstr "Cota angular: selecione duas linhas que se encontram e clique onde vai o
 msgid "Annotate"
 msgstr "Anotar"
 
-#: crates/model/src/snap.rs:70
+#: crates/model/src/snap.rs:71
 msgid "Annotation Anchor"
 msgstr ""
 
@@ -2751,7 +2751,7 @@ msgstr "Plano de corte"
 msgid "Cylinder"
 msgstr "Cilindro"
 
-#: crates/model/src/render.rs:3741
+#: crates/model/src/render.rs:3761
 msgid "DN"
 msgstr "DESCE"
 
@@ -3559,7 +3559,7 @@ msgstr "Comprimento nas pontas"
 msgid "End zone spacing"
 msgstr "Espaçamento nas pontas"
 
-#: crates/model/src/snap.rs:61
+#: crates/model/src/snap.rs:62
 msgid "Endpoint"
 msgstr "Extremidade"
 
@@ -3884,7 +3884,7 @@ msgstr "Encontra {}; nada tem estes: {}"
 msgid "Fine"
 msgstr "Fino"
 
-#: crates/model/src/import.rs:1365
+#: crates/model/src/import.rs:1366
 #: crates/ui-egui/src/notes.rs:450
 #: crates/ui-egui/src/properties.rs:764
 msgid "Finish"
@@ -4748,7 +4748,7 @@ msgstr "Instalando o BIMCraft {}…"
 msgid "Instance"
 msgstr "Instância"
 
-#: crates/model/src/import.rs:1364
+#: crates/model/src/import.rs:1365
 #: crates/ui-egui/src/draw.rs:664
 msgid "Insulation"
 msgstr "Isolamento"
@@ -4769,7 +4769,7 @@ msgstr "Isolamento: isolamento em manta desenhado ao longo de cada linha, com a 
 msgid "Interface scale"
 msgstr "Escala da interface"
 
-#: crates/model/src/snap.rs:63
+#: crates/model/src/snap.rs:64
 msgid "Intersection"
 msgstr "Interseção"
 
@@ -5572,7 +5572,7 @@ msgstr "Médio"
 msgid "Medium Lines"
 msgstr "Linhas médias"
 
-#: crates/model/src/import.rs:1367
+#: crates/model/src/import.rs:1368
 #: crates/ui-egui/src/properties.rs:763
 msgid "Membrane"
 msgstr "Membrana"
@@ -5602,7 +5602,7 @@ msgstr "Metros"
 msgid "Middle of the text"
 msgstr "Meio do texto"
 
-#: crates/model/src/snap.rs:62
+#: crates/model/src/snap.rs:63
 msgid "Midpoint"
 msgstr "Ponto médio"
 
@@ -5812,7 +5812,7 @@ msgstr "NBR 17068: prolongamento de 2 a 3 mm"
 msgid "NBR 6492: Target in plan (±0.00), equilateral triangle in section"
 msgstr "NBR 6492: Alvo em planta (±0,00), triângulo equilátero em corte"
 
-#: crates/model/src/render.rs:2878
+#: crates/model/src/render.rs:2898
 msgid "NOT ENCLOSED"
 msgstr "NÃO DELIMITADO"
 
@@ -5843,7 +5843,7 @@ msgstr "Nome:"
 msgid "Natural"
 msgstr ""
 
-#: crates/model/src/snap.rs:68
+#: crates/model/src/snap.rs:69
 msgid "Nearest"
 msgstr "Mais próximo"
 
@@ -5945,7 +5945,7 @@ msgstr "Inserir: {}"
 msgid "Next Pan/Zoom"
 msgstr ""
 
-#: crates/model/src/schedule.rs:1338
+#: crates/model/src/schedule.rs:1339
 msgid "No"
 msgstr "Não"
 
@@ -6695,7 +6695,7 @@ msgstr "Desempenho"
 msgid "Perimeter"
 msgstr "Perímetro"
 
-#: crates/model/src/snap.rs:65
+#: crates/model/src/snap.rs:66
 msgid "Perpendicular"
 msgstr "Perpendicular"
 
@@ -6731,7 +6731,7 @@ msgstr "Fase de demolição"
 msgid "Phase Filter"
 msgstr "Filtro de fase"
 
-#: crates/model/src/ifc.rs:1916
+#: crates/model/src/ifc.rs:1923
 msgid "Phase Filters"
 msgstr "Filtros de fase"
 
@@ -7416,7 +7416,7 @@ msgstr "Principal ({})"
 msgid "Profile"
 msgstr "Perfil"
 
-#: apps/bimcraft/src/main.rs:268
+#: apps/bimcraft/src/main.rs:270
 #: crates/ui-egui/src/titleblocks.rs:148
 #: crates/ui-egui/src/titleblocks.rs:152
 #: crates/ui-egui/src/titleblocks.rs:477
@@ -7541,11 +7541,11 @@ msgstr "{} não usados foram limpos."
 msgid "Put a view on this sheet: one not on a sheet yet"
 msgstr "Colocar nesta folha uma vista que ainda não está em nenhuma"
 
-#: crates/model/src/snap.rs:66
+#: crates/model/src/snap.rs:67
 msgid "Quadrant"
 msgstr "Quadrante"
 
-#: crates/model/src/render.rs:2878
+#: crates/model/src/render.rs:2898
 msgid "REDUNDANT"
 msgstr "REDUNDANTE"
 
@@ -8191,11 +8191,11 @@ msgstr ""
 msgid "Runs the plugin's command"
 msgstr ""
 
-#: crates/model/src/sheet.rs:281
+#: crates/model/src/sheet.rs:288
 msgid "SCALE"
 msgstr "ESCALA"
 
-#: crates/model/src/sheet.rs:283
+#: crates/model/src/sheet.rs:290
 msgid "SCALE AS INDICATED"
 msgstr "ESCALA CONFORME INDICADO"
 
@@ -9270,7 +9270,7 @@ msgstr "Divisões da subgrade Y"
 msgid "Subgrid pen"
 msgstr "Pena da subgrade"
 
-#: crates/model/src/import.rs:1366
+#: crates/model/src/import.rs:1367
 #: crates/ui-egui/src/properties.rs:761
 msgid "Substrate"
 msgstr "Substrato"
@@ -9452,7 +9452,7 @@ msgstr "Tira o que nada no projeto usa. Cada categoria mantém um tipo; Desfazer
 msgid "Takes up a shaped top's falls: one layer at most"
 msgstr "Assume as quedas de um topo modelado: no máximo uma camada"
 
-#: crates/model/src/snap.rs:67
+#: crates/model/src/snap.rs:68
 msgid "Tangent"
 msgstr "Tangente"
 
@@ -10250,7 +10250,7 @@ msgstr "Tipo:"
 msgid "Types"
 msgstr "Tipos"
 
-#: crates/model/src/render.rs:3741
+#: crates/model/src/render.rs:3761
 msgid "UP"
 msgstr "SOBE"
 
@@ -11010,7 +11010,7 @@ msgstr "X"
 msgid "Y"
 msgstr "Y"
 
-#: crates/model/src/schedule.rs:1338
+#: crates/model/src/schedule.rs:1339
 msgid "Yes"
 msgstr "Sim"
 
@@ -11699,8 +11699,8 @@ msgstr "{} (não carregado)"
 msgid "{} (primary)"
 msgstr "{} (principal)"
 
-#: crates/model/src/schedule.rs:1327
 #: crates/model/src/schedule.rs:1328
+#: crates/model/src/schedule.rs:1329
 msgid "{} ({})"
 msgstr "{} ({})"
 

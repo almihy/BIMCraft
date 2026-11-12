@@ -3,7 +3,7 @@
 msgid ""
 msgstr "Project-Id-Version: BIMCraft\nLanguage: cs\nLast-Translator: Smatli\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
-#: crates/model/src/sheet.rs:292
+#: crates/model/src/sheet.rs:299
 msgid "AS INDICATED"
 msgstr ""
 
@@ -57,7 +57,7 @@ msgstr ""
 msgid "Ceiling Luminaire"
 msgstr "Stropní svítidlo"
 
-#: crates/model/src/render.rs:3046
+#: crates/model/src/render.rs:3066
 msgid "Ceiling Plan"
 msgstr "Půdorys podhledu"
 
@@ -101,7 +101,7 @@ msgstr "Počet"
 msgid "Crosshatch"
 msgstr "Křížové šrafování"
 
-#: crates/model/src/render.rs:3741
+#: crates/model/src/render.rs:3761
 msgid "DN"
 msgstr "DOLŮ"
 
@@ -255,7 +255,7 @@ msgid "Gate Valve"
 msgstr "Šoupátko"
 
 #: crates/model/src/family.rs:2249
-#: crates/model/src/view3d.rs:941
+#: crates/model/src/view3d.rs:963
 msgid "Glass"
 msgstr "Sklo"
 
@@ -295,7 +295,7 @@ msgstr "Vodorovná"
 msgid "Inspection Box"
 msgstr "Revizní šachta"
 
-#: crates/model/src/import.rs:1364
+#: crates/model/src/import.rs:1365
 msgid "Insulation"
 msgstr "Tepelná izolace"
 
@@ -356,7 +356,7 @@ msgstr ""
 msgid "Medium Lines"
 msgstr "Střední čáry"
 
-#: crates/model/src/import.rs:1367
+#: crates/model/src/import.rs:1368
 msgid "Membrane"
 msgstr "Hydroizolační fólie"
 
@@ -368,7 +368,7 @@ msgstr "Kov"
 msgid "Mounting Height"
 msgstr "Montážní výška"
 
-#: crates/model/src/render.rs:2878
+#: crates/model/src/render.rs:2898
 msgid "NOT ENCLOSED"
 msgstr "NEUZAVŘENÝ OBVOD"
 
@@ -380,7 +380,7 @@ msgstr "Název"
 msgid "New Construction"
 msgstr "Nová výstavba"
 
-#: crates/model/src/schedule.rs:1338
+#: crates/model/src/schedule.rs:1339
 msgid "No"
 msgstr "Ne"
 
@@ -441,7 +441,7 @@ msgstr "Porcelán"
 msgid "Project"
 msgstr "Projekt"
 
-#: crates/model/src/render.rs:2878
+#: crates/model/src/render.rs:2898
 msgid "REDUNDANT"
 msgstr "NADBYTEČNÁ"
 
@@ -481,11 +481,11 @@ msgstr ""
 msgid "Room Schedule"
 msgstr "Výkaz místností"
 
-#: crates/model/src/sheet.rs:281
+#: crates/model/src/sheet.rs:288
 msgid "SCALE"
 msgstr "MĚŘÍTKO"
 
-#: crates/model/src/sheet.rs:283
+#: crates/model/src/sheet.rs:290
 msgid "SCALE AS INDICATED"
 msgstr "MĚŘÍTKO DLE VÝKRESŮ"
 
@@ -614,7 +614,7 @@ msgstr ""
 msgid "To Room: Number"
 msgstr ""
 
-#: crates/model/src/sheet.rs:220
+#: crates/model/src/sheet.rs:227
 msgid "Total"
 msgstr "Celkem"
 
@@ -626,7 +626,7 @@ msgstr "Šířka stupně"
 msgid "Type"
 msgstr "Typ"
 
-#: crates/model/src/render.rs:3741
+#: crates/model/src/render.rs:3761
 msgid "UP"
 msgstr "NAHORU"
 
@@ -694,7 +694,7 @@ msgstr "Výkaz oken"
 msgid "Worktop"
 msgstr "Pracovní deska"
 
-#: crates/model/src/schedule.rs:1338
+#: crates/model/src/schedule.rs:1339
 msgid "Yes"
 msgstr "Ano"
 

@@ -336,6 +336,7 @@ fn only_the_desktop_app_can_reach_the_network() {
     for manifest in [
         "crates/core/Cargo.toml",
         "crates/geom/Cargo.toml",
+        "crates/icons/Cargo.toml",
         "crates/mep-calc/Cargo.toml",
         "crates/model/Cargo.toml",
         "apps/bimcraft-cli/Cargo.toml",

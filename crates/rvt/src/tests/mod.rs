@@ -52,6 +52,7 @@ fn only_the_command_line_and_the_desktop_take_the_reader_and_only_through_a_defa
     for manifest in [
         "crates/core/Cargo.toml",
         "crates/geom/Cargo.toml",
+        "crates/icons/Cargo.toml",
         "crates/mep-calc/Cargo.toml",
         "crates/model/Cargo.toml",
         "crates/update/Cargo.toml",

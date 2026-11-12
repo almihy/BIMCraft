@@ -8,7 +8,6 @@ pub mod files;
 #[doc(hidden)]
 pub mod font;
 pub mod geom;
-pub mod ifc_classes;
 pub mod language;
 pub mod prim;
 pub mod shared;

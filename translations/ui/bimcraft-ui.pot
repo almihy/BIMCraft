@@ -235,7 +235,7 @@ msgstr ""
 msgid "A {} needs a name."
 msgstr ""
 
-#: crates/model/src/sheet.rs:292
+#: crates/model/src/sheet.rs:299
 msgid "AS INDICATED"
 msgstr ""
 
@@ -693,7 +693,7 @@ msgstr ""
 msgid "And:"
 msgstr ""
 
-#: crates/model/src/snap.rs:71
+#: crates/model/src/snap.rs:72
 #: crates/ui-egui/src/reinforce.rs:83
 msgid "Angle"
 msgstr ""
@@ -726,7 +726,7 @@ msgstr ""
 msgid "Annotate"
 msgstr ""
 
-#: crates/model/src/snap.rs:70
+#: crates/model/src/snap.rs:71
 msgid "Annotation Anchor"
 msgstr ""
 
@@ -2751,7 +2751,7 @@ msgstr ""
 msgid "Cylinder"
 msgstr ""
 
-#: crates/model/src/render.rs:3741
+#: crates/model/src/render.rs:3761
 msgid "DN"
 msgstr ""
 
@@ -3559,7 +3559,7 @@ msgstr ""
 msgid "End zone spacing"
 msgstr ""
 
-#: crates/model/src/snap.rs:61
+#: crates/model/src/snap.rs:62
 msgid "Endpoint"
 msgstr ""
 
@@ -3884,7 +3884,7 @@ msgstr ""
 msgid "Fine"
 msgstr ""
 
-#: crates/model/src/import.rs:1365
+#: crates/model/src/import.rs:1366
 #: crates/ui-egui/src/notes.rs:450
 #: crates/ui-egui/src/properties.rs:764
 msgid "Finish"
@@ -4748,7 +4748,7 @@ msgstr ""
 msgid "Instance"
 msgstr ""
 
-#: crates/model/src/import.rs:1364
+#: crates/model/src/import.rs:1365
 #: crates/ui-egui/src/draw.rs:664
 msgid "Insulation"
 msgstr ""
@@ -4769,7 +4769,7 @@ msgstr ""
 msgid "Interface scale"
 msgstr ""
 
-#: crates/model/src/snap.rs:63
+#: crates/model/src/snap.rs:64
 msgid "Intersection"
 msgstr ""
 
@@ -5572,7 +5572,7 @@ msgstr ""
 msgid "Medium Lines"
 msgstr ""
 
-#: crates/model/src/import.rs:1367
+#: crates/model/src/import.rs:1368
 #: crates/ui-egui/src/properties.rs:763
 msgid "Membrane"
 msgstr ""
@@ -5602,7 +5602,7 @@ msgstr ""
 msgid "Middle of the text"
 msgstr ""
 
-#: crates/model/src/snap.rs:62
+#: crates/model/src/snap.rs:63
 msgid "Midpoint"
 msgstr ""
 
@@ -5812,7 +5812,7 @@ msgstr ""
 msgid "NBR 6492: Target in plan (±0.00), equilateral triangle in section"
 msgstr ""
 
-#: crates/model/src/render.rs:2878
+#: crates/model/src/render.rs:2898
 msgid "NOT ENCLOSED"
 msgstr ""
 
@@ -5843,7 +5843,7 @@ msgstr ""
 msgid "Natural"
 msgstr ""
 
-#: crates/model/src/snap.rs:68
+#: crates/model/src/snap.rs:69
 msgid "Nearest"
 msgstr ""
 
@@ -5945,7 +5945,7 @@ msgstr ""
 msgid "Next Pan/Zoom"
 msgstr ""
 
-#: crates/model/src/schedule.rs:1338
+#: crates/model/src/schedule.rs:1339
 msgid "No"
 msgstr ""
 
@@ -6695,7 +6695,7 @@ msgstr ""
 msgid "Perimeter"
 msgstr ""
 
-#: crates/model/src/snap.rs:65
+#: crates/model/src/snap.rs:66
 msgid "Perpendicular"
 msgstr ""
 
@@ -6731,7 +6731,7 @@ msgstr ""
 msgid "Phase Filter"
 msgstr ""
 
-#: crates/model/src/ifc.rs:1916
+#: crates/model/src/ifc.rs:1923
 msgid "Phase Filters"
 msgstr ""
 
@@ -7416,7 +7416,7 @@ msgstr ""
 msgid "Profile"
 msgstr ""
 
-#: apps/bimcraft/src/main.rs:268
+#: apps/bimcraft/src/main.rs:270
 #: crates/ui-egui/src/titleblocks.rs:148
 #: crates/ui-egui/src/titleblocks.rs:152
 #: crates/ui-egui/src/titleblocks.rs:477
@@ -7541,11 +7541,11 @@ msgstr ""
 msgid "Put a view on this sheet: one not on a sheet yet"
 msgstr ""
 
-#: crates/model/src/snap.rs:66
+#: crates/model/src/snap.rs:67
 msgid "Quadrant"
 msgstr ""
 
-#: crates/model/src/render.rs:2878
+#: crates/model/src/render.rs:2898
 msgid "REDUNDANT"
 msgstr ""
 
@@ -8191,11 +8191,11 @@ msgstr ""
 msgid "Runs the plugin's command"
 msgstr ""
 
-#: crates/model/src/sheet.rs:281
+#: crates/model/src/sheet.rs:288
 msgid "SCALE"
 msgstr ""
 
-#: crates/model/src/sheet.rs:283
+#: crates/model/src/sheet.rs:290
 msgid "SCALE AS INDICATED"
 msgstr ""
 
@@ -9270,7 +9270,7 @@ msgstr ""
 msgid "Subgrid pen"
 msgstr ""
 
-#: crates/model/src/import.rs:1366
+#: crates/model/src/import.rs:1367
 #: crates/ui-egui/src/properties.rs:761
 msgid "Substrate"
 msgstr ""
@@ -9452,7 +9452,7 @@ msgstr ""
 msgid "Takes up a shaped top's falls: one layer at most"
 msgstr ""
 
-#: crates/model/src/snap.rs:67
+#: crates/model/src/snap.rs:68
 msgid "Tangent"
 msgstr ""
 
@@ -10250,7 +10250,7 @@ msgstr ""
 msgid "Types"
 msgstr ""
 
-#: crates/model/src/render.rs:3741
+#: crates/model/src/render.rs:3761
 msgid "UP"
 msgstr ""
 
@@ -11010,7 +11010,7 @@ msgstr ""
 msgid "Y"
 msgstr ""
 
-#: crates/model/src/schedule.rs:1338
+#: crates/model/src/schedule.rs:1339
 msgid "Yes"
 msgstr ""
 
@@ -11699,8 +11699,8 @@ msgstr ""
 msgid "{} (primary)"
 msgstr ""
 
-#: crates/model/src/schedule.rs:1327
 #: crates/model/src/schedule.rs:1328
+#: crates/model/src/schedule.rs:1329
 msgid "{} ({})"
 msgstr ""
 

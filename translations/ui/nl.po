@@ -235,7 +235,7 @@ msgstr "De hartlijn van een muur, zodat een muur die erop getekend wordt er op a
 msgid "A {} needs a name."
 msgstr "Een {} heeft een naam nodig."
 
-#: crates/model/src/sheet.rs:292
+#: crates/model/src/sheet.rs:299
 msgid "AS INDICATED"
 msgstr ""
 
@@ -693,7 +693,7 @@ msgstr ""
 msgid "And:"
 msgstr "En:"
 
-#: crates/model/src/snap.rs:71
+#: crates/model/src/snap.rs:72
 #: crates/ui-egui/src/reinforce.rs:83
 msgid "Angle"
 msgstr "Hoek"
@@ -726,7 +726,7 @@ msgstr "Hoekmaatlijn: kies twee lijnen die samenkomen en klik waar de boog komt"
 msgid "Annotate"
 msgstr "Annoteren"
 
-#: crates/model/src/snap.rs:70
+#: crates/model/src/snap.rs:71
 msgid "Annotation Anchor"
 msgstr ""
 
@@ -2751,7 +2751,7 @@ msgstr "Snijvlak"
 msgid "Cylinder"
 msgstr "Cilinder"
 
-#: crates/model/src/render.rs:3741
+#: crates/model/src/render.rs:3761
 msgid "DN"
 msgstr "DN"
 
@@ -3559,7 +3559,7 @@ msgstr "Lengte eindzone"
 msgid "End zone spacing"
 msgstr "Afstand in de eindzone"
 
-#: crates/model/src/snap.rs:61
+#: crates/model/src/snap.rs:62
 msgid "Endpoint"
 msgstr "Eindpunt"
 
@@ -3884,7 +3884,7 @@ msgstr "Vindt {}; niets heeft deze: {}"
 msgid "Fine"
 msgstr "Fijn"
 
-#: crates/model/src/import.rs:1365
+#: crates/model/src/import.rs:1366
 #: crates/ui-egui/src/notes.rs:450
 #: crates/ui-egui/src/properties.rs:764
 msgid "Finish"
@@ -4748,7 +4748,7 @@ msgstr "BIMCraft {} installeren…"
 msgid "Instance"
 msgstr "Instantie"
 
-#: crates/model/src/import.rs:1364
+#: crates/model/src/import.rs:1365
 #: crates/ui-egui/src/draw.rs:664
 msgid "Insulation"
 msgstr "Isolatie"
@@ -4769,7 +4769,7 @@ msgstr "Isolatie: dekenisolatie getekend langs elke lijn, zijn breedte in de opt
 msgid "Interface scale"
 msgstr "Schaal van de interface"
 
-#: crates/model/src/snap.rs:63
+#: crates/model/src/snap.rs:64
 msgid "Intersection"
 msgstr "Doorsnede"
 
@@ -5572,7 +5572,7 @@ msgstr "Gemiddeld"
 msgid "Medium Lines"
 msgstr "Middeldikke lijnen"
 
-#: crates/model/src/import.rs:1367
+#: crates/model/src/import.rs:1368
 #: crates/ui-egui/src/properties.rs:763
 msgid "Membrane"
 msgstr "Membraan"
@@ -5602,7 +5602,7 @@ msgstr "Meter"
 msgid "Middle of the text"
 msgstr "Midden van de tekst"
 
-#: crates/model/src/snap.rs:62
+#: crates/model/src/snap.rs:63
 msgid "Midpoint"
 msgstr "Middelpunt"
 
@@ -5812,7 +5812,7 @@ msgstr "NBR 17068: 2 tot 3 mm verlenging"
 msgid "NBR 6492: Target in plan (±0.00), equilateral triangle in section"
 msgstr "NBR 6492: doelwit in plattegrond (±0,00), gelijkzijdige driehoek in doorsnede"
 
-#: crates/model/src/render.rs:2878
+#: crates/model/src/render.rs:2898
 msgid "NOT ENCLOSED"
 msgstr "NIET OMSLOTEN"
 
@@ -5843,7 +5843,7 @@ msgstr "Naam:"
 msgid "Natural"
 msgstr ""
 
-#: crates/model/src/snap.rs:68
+#: crates/model/src/snap.rs:69
 msgid "Nearest"
 msgstr "Dichtstbijzijnde"
 
@@ -5945,7 +5945,7 @@ msgstr "Nieuw: {}"
 msgid "Next Pan/Zoom"
 msgstr ""
 
-#: crates/model/src/schedule.rs:1338
+#: crates/model/src/schedule.rs:1339
 msgid "No"
 msgstr "Neen"
 
@@ -6695,7 +6695,7 @@ msgstr "Prestaties"
 msgid "Perimeter"
 msgstr "Omtrek"
 
-#: crates/model/src/snap.rs:65
+#: crates/model/src/snap.rs:66
 msgid "Perpendicular"
 msgstr "Loodrecht"
 
@@ -6731,7 +6731,7 @@ msgstr "Fase van sloop"
 msgid "Phase Filter"
 msgstr "Fasefilter"
 
-#: crates/model/src/ifc.rs:1916
+#: crates/model/src/ifc.rs:1923
 msgid "Phase Filters"
 msgstr "Fasefilters"
 
@@ -7416,7 +7416,7 @@ msgstr "Primair ({})"
 msgid "Profile"
 msgstr "Profiel"
 
-#: apps/bimcraft/src/main.rs:268
+#: apps/bimcraft/src/main.rs:270
 #: crates/ui-egui/src/titleblocks.rs:148
 #: crates/ui-egui/src/titleblocks.rs:152
 #: crates/ui-egui/src/titleblocks.rs:477
@@ -7541,11 +7541,11 @@ msgstr "{} ongebruikte verwijderd."
 msgid "Put a view on this sheet: one not on a sheet yet"
 msgstr "Zet een weergave op dit blad: een die nog op geen blad staat"
 
-#: crates/model/src/snap.rs:66
+#: crates/model/src/snap.rs:67
 msgid "Quadrant"
 msgstr "Kwadrant"
 
-#: crates/model/src/render.rs:2878
+#: crates/model/src/render.rs:2898
 msgid "REDUNDANT"
 msgstr "OVERBODIG"
 
@@ -8191,11 +8191,11 @@ msgstr ""
 msgid "Runs the plugin's command"
 msgstr ""
 
-#: crates/model/src/sheet.rs:281
+#: crates/model/src/sheet.rs:288
 msgid "SCALE"
 msgstr "SCHAAL"
 
-#: crates/model/src/sheet.rs:283
+#: crates/model/src/sheet.rs:290
 msgid "SCALE AS INDICATED"
 msgstr "SCHAAL ZOALS AANGEGEVEN"
 
@@ -9270,7 +9270,7 @@ msgstr "Onderverdelingen van het subraster Y"
 msgid "Subgrid pen"
 msgstr "Pen van het subraster"
 
-#: crates/model/src/import.rs:1366
+#: crates/model/src/import.rs:1367
 #: crates/ui-egui/src/properties.rs:761
 msgid "Substrate"
 msgstr "Ondergrond"
@@ -9452,7 +9452,7 @@ msgstr "Haalt weg wat niets in het project gebruikt. Elke categorie behoudt een 
 msgid "Takes up a shaped top's falls: one layer at most"
 msgstr "Neemt het afschot van een gevormde bovenkant op: hoogstens één laag"
 
-#: crates/model/src/snap.rs:67
+#: crates/model/src/snap.rs:68
 msgid "Tangent"
 msgstr "Raaklijn"
 
@@ -10250,7 +10250,7 @@ msgstr "Type:"
 msgid "Types"
 msgstr "Types"
 
-#: crates/model/src/render.rs:3741
+#: crates/model/src/render.rs:3761
 msgid "UP"
 msgstr "OMHOOG"
 
@@ -11010,7 +11010,7 @@ msgstr "X"
 msgid "Y"
 msgstr "Y"
 
-#: crates/model/src/schedule.rs:1338
+#: crates/model/src/schedule.rs:1339
 msgid "Yes"
 msgstr "Ja"
 
@@ -11699,8 +11699,8 @@ msgstr "{} (niet geladen)"
 msgid "{} (primary)"
 msgstr "{} (primair)"
 
-#: crates/model/src/schedule.rs:1327
 #: crates/model/src/schedule.rs:1328
+#: crates/model/src/schedule.rs:1329
 msgid "{} ({})"
 msgstr "{} ({})"
 

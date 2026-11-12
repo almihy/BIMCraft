@@ -171,6 +171,7 @@ warm for the dependencies, nothing else building; a one-line change is a new ite
 | one line in `model.rs` | 1m 11s / 1m 23s | 56 s |
 | one line in `geom.rs` | 1m 11s / 1m 23s | 40 s |
 
-The before column is core's tests and ui-egui's tests each on its own; after is both in one command. A clean build gains
+The before column was measured at 5bda50ab, not at this branch's base (94d57bea, 46 commits of other work later): core's
+tests and ui-egui's tests each on its own; after is both in one command. A clean build gains
 nothing yet: the model crate is still 3.4 MB everything waits for, and the core's test binary still holds the tests of
 the model's modules that drive the Session.

@@ -17,8 +17,6 @@ on another BIMCraft crate but `bimcraft-i18n`.
   `translations/project`). `files.rs`: the files a session's commands read and write, and base64. `shared.rs`: shared parts
   of the spatial core ([crates/core/CLAUDE.md](../core/CLAUDE.md)).
 - `prim.rs`: what a drawing is made of: `Rgb`, `Prim`, `Part` and the pixel `View`. `font.rs`: our own lettering.
-  `ifc_classes.rs`: IFC4's element classes, which a generic family from IFC goes back out as
-  ([families](../../docs/areas/families.md)).
 
 Helpers that only tests use, here and in the crates above, are `#[cfg(debug_assertions)]` (`xlsx::unzip`): a debug build is
 the same whichever crate's tests or build asks for it, and a release build leaves them out.

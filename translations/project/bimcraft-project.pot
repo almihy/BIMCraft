@@ -3,7 +3,7 @@
 msgid ""
 msgstr "Project-Id-Version: BIMCraft\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
-#: crates/model/src/sheet.rs:292
+#: crates/model/src/sheet.rs:299
 msgid "AS INDICATED"
 msgstr ""
 
@@ -57,7 +57,7 @@ msgstr ""
 msgid "Ceiling Luminaire"
 msgstr ""
 
-#: crates/model/src/render.rs:3046
+#: crates/model/src/render.rs:3066
 msgid "Ceiling Plan"
 msgstr ""
 
@@ -101,7 +101,7 @@ msgstr ""
 msgid "Crosshatch"
 msgstr ""
 
-#: crates/model/src/render.rs:3741
+#: crates/model/src/render.rs:3761
 msgid "DN"
 msgstr ""
 
@@ -255,7 +255,7 @@ msgid "Gate Valve"
 msgstr ""
 
 #: crates/model/src/family.rs:2249
-#: crates/model/src/view3d.rs:941
+#: crates/model/src/view3d.rs:963
 msgid "Glass"
 msgstr ""
 
@@ -295,7 +295,7 @@ msgstr ""
 msgid "Inspection Box"
 msgstr ""
 
-#: crates/model/src/import.rs:1364
+#: crates/model/src/import.rs:1365
 msgid "Insulation"
 msgstr ""
 
@@ -356,7 +356,7 @@ msgstr ""
 msgid "Medium Lines"
 msgstr ""
 
-#: crates/model/src/import.rs:1367
+#: crates/model/src/import.rs:1368
 msgid "Membrane"
 msgstr ""
 
@@ -368,7 +368,7 @@ msgstr ""
 msgid "Mounting Height"
 msgstr ""
 
-#: crates/model/src/render.rs:2878
+#: crates/model/src/render.rs:2898
 msgid "NOT ENCLOSED"
 msgstr ""
 
@@ -380,7 +380,7 @@ msgstr ""
 msgid "New Construction"
 msgstr ""
 
-#: crates/model/src/schedule.rs:1338
+#: crates/model/src/schedule.rs:1339
 msgid "No"
 msgstr ""
 
@@ -441,7 +441,7 @@ msgstr ""
 msgid "Project"
 msgstr ""
 
-#: crates/model/src/render.rs:2878
+#: crates/model/src/render.rs:2898
 msgid "REDUNDANT"
 msgstr ""
 
@@ -481,11 +481,11 @@ msgstr ""
 msgid "Room Schedule"
 msgstr ""
 
-#: crates/model/src/sheet.rs:281
+#: crates/model/src/sheet.rs:288
 msgid "SCALE"
 msgstr ""
 
-#: crates/model/src/sheet.rs:283
+#: crates/model/src/sheet.rs:290
 msgid "SCALE AS INDICATED"
 msgstr ""
 
@@ -614,7 +614,7 @@ msgstr ""
 msgid "To Room: Number"
 msgstr ""
 
-#: crates/model/src/sheet.rs:220
+#: crates/model/src/sheet.rs:227
 msgid "Total"
 msgstr ""
 
@@ -626,7 +626,7 @@ msgstr ""
 msgid "Type"
 msgstr ""
 
-#: crates/model/src/render.rs:3741
+#: crates/model/src/render.rs:3761
 msgid "UP"
 msgstr ""
 
@@ -694,7 +694,7 @@ msgstr ""
 msgid "Worktop"
 msgstr ""
 
-#: crates/model/src/schedule.rs:1338
+#: crates/model/src/schedule.rs:1339
 msgid "Yes"
 msgstr ""
 

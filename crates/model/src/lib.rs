@@ -4,7 +4,7 @@
 //! them are `bimcraft-core`'s, which re-exports each module here under its old path. Nothing here knows about a UI.
 
 // The crates under the model, by the paths its modules have always named them by (`crate::geom`, `crate::units`).
-pub use bimcraft_geom::{csg, files, font, geom, ifc_classes, language, prim, shared, skeleton, step, triangulation, units, xlsx};
+pub use bimcraft_geom::{csg, files, font, geom, language, prim, shared, skeleton, step, triangulation, units, xlsx};
 pub use bimcraft_mep_calc::{conduit, demand, dps, dr, drainage, hydrant, loads, nbr5410, plumbing, reservoir, storm, water};
 
 pub mod alignment;
@@ -37,6 +37,7 @@ pub mod graphics;
 pub mod groups;
 pub mod ids;
 pub mod ifc;
+pub mod ifc_classes;
 pub mod import;
 pub mod inquiry;
 pub mod insert;

@@ -2,7 +2,7 @@
 msgid ""
 msgstr "Project-Id-Version: BIMCraft\nLast-Translator: Christopher Kluge\nLanguage: de\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
-#: crates/model/src/sheet.rs:292
+#: crates/model/src/sheet.rs:299
 msgid "AS INDICATED"
 msgstr ""
 
@@ -56,7 +56,7 @@ msgstr ""
 msgid "Ceiling Luminaire"
 msgstr "Deckenleuchte"
 
-#: crates/model/src/render.rs:3046
+#: crates/model/src/render.rs:3066
 msgid "Ceiling Plan"
 msgstr "Deckenspiegel"
 
@@ -100,7 +100,7 @@ msgstr "Anzahl"
 msgid "Crosshatch"
 msgstr "Schraffur"
 
-#: crates/model/src/render.rs:3741
+#: crates/model/src/render.rs:3761
 msgid "DN"
 msgstr "AB"
 
@@ -254,7 +254,7 @@ msgid "Gate Valve"
 msgstr "Absperrventil"
 
 #: crates/model/src/family.rs:2249
-#: crates/model/src/view3d.rs:941
+#: crates/model/src/view3d.rs:963
 msgid "Glass"
 msgstr "Glas"
 
@@ -294,7 +294,7 @@ msgstr "Horizontal"
 msgid "Inspection Box"
 msgstr "Anschlussdose"
 
-#: crates/model/src/import.rs:1364
+#: crates/model/src/import.rs:1365
 msgid "Insulation"
 msgstr "Dämmung"
 
@@ -355,7 +355,7 @@ msgstr ""
 msgid "Medium Lines"
 msgstr "Mittlere Linien"
 
-#: crates/model/src/import.rs:1367
+#: crates/model/src/import.rs:1368
 msgid "Membrane"
 msgstr "Membran"
 
@@ -367,7 +367,7 @@ msgstr "Metall"
 msgid "Mounting Height"
 msgstr "Montagehöhe"
 
-#: crates/model/src/render.rs:2878
+#: crates/model/src/render.rs:2898
 msgid "NOT ENCLOSED"
 msgstr "NICHT UMSCHLOSSEN"
 
@@ -379,7 +379,7 @@ msgstr "Name"
 msgid "New Construction"
 msgstr "Neubau"
 
-#: crates/model/src/schedule.rs:1338
+#: crates/model/src/schedule.rs:1339
 msgid "No"
 msgstr "Nein"
 
@@ -440,7 +440,7 @@ msgstr "Porzellan"
 msgid "Project"
 msgstr "Projekt"
 
-#: crates/model/src/render.rs:2878
+#: crates/model/src/render.rs:2898
 msgid "REDUNDANT"
 msgstr "REDUNDANT"
 
@@ -480,11 +480,11 @@ msgstr ""
 msgid "Room Schedule"
 msgstr "Raumtabelle"
 
-#: crates/model/src/sheet.rs:281
+#: crates/model/src/sheet.rs:288
 msgid "SCALE"
 msgstr "MASSSTAB"
 
-#: crates/model/src/sheet.rs:283
+#: crates/model/src/sheet.rs:290
 msgid "SCALE AS INDICATED"
 msgstr "MASSSTAB WIE ANGEGEBEN"
 
@@ -613,7 +613,7 @@ msgstr ""
 msgid "To Room: Number"
 msgstr ""
 
-#: crates/model/src/sheet.rs:220
+#: crates/model/src/sheet.rs:227
 msgid "Total"
 msgstr "Gesamt"
 
@@ -625,7 +625,7 @@ msgstr "Auftritt"
 msgid "Type"
 msgstr "Typ"
 
-#: crates/model/src/render.rs:3741
+#: crates/model/src/render.rs:3761
 msgid "UP"
 msgstr "AUF"
 
@@ -693,7 +693,7 @@ msgstr "Fenstertabelle"
 msgid "Worktop"
 msgstr "Arbeitsplatte"
 
-#: crates/model/src/schedule.rs:1338
+#: crates/model/src/schedule.rs:1339
 msgid "Yes"
 msgstr "Ja"
 

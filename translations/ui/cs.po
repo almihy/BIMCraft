@@ -234,7 +234,7 @@ msgstr "Osa stěny, aby se stěna na ní kreslená napojila"
 msgid "A {} needs a name."
 msgstr "U položky ({}) chybí název."
 
-#: crates/model/src/sheet.rs:292
+#: crates/model/src/sheet.rs:299
 msgid "AS INDICATED"
 msgstr ""
 
@@ -692,7 +692,7 @@ msgstr ""
 msgid "And:"
 msgstr "A:"
 
-#: crates/model/src/snap.rs:71
+#: crates/model/src/snap.rs:72
 #: crates/ui-egui/src/reinforce.rs:83
 msgid "Angle"
 msgstr "Úhel"
@@ -725,7 +725,7 @@ msgstr "Úhlová kóta: vyberte dvě protínající se čáry a potom klikněte 
 msgid "Annotate"
 msgstr "Poznámka"
 
-#: crates/model/src/snap.rs:70
+#: crates/model/src/snap.rs:71
 msgid "Annotation Anchor"
 msgstr ""
 
@@ -2750,7 +2750,7 @@ msgstr "Rovina řezu"
 msgid "Cylinder"
 msgstr "Válec"
 
-#: crates/model/src/render.rs:3741
+#: crates/model/src/render.rs:3761
 msgid "DN"
 msgstr "DOLŮ"
 
@@ -3558,7 +3558,7 @@ msgstr "Délka koncové zóny"
 msgid "End zone spacing"
 msgstr "Rozteč v koncové zóně"
 
-#: crates/model/src/snap.rs:61
+#: crates/model/src/snap.rs:62
 msgid "Endpoint"
 msgstr "Koncový bod"
 
@@ -3883,7 +3883,7 @@ msgstr "Najde {}; žádný prvek nemá tyto vlastnosti: {}"
 msgid "Fine"
 msgstr "Jemná"
 
-#: crates/model/src/import.rs:1365
+#: crates/model/src/import.rs:1366
 #: crates/ui-egui/src/notes.rs:450
 #: crates/ui-egui/src/properties.rs:764
 msgid "Finish"
@@ -4747,7 +4747,7 @@ msgstr "Instalace aplikace BIMCraft {}…"
 msgid "Instance"
 msgstr "Instance"
 
-#: crates/model/src/import.rs:1364
+#: crates/model/src/import.rs:1365
 #: crates/ui-egui/src/draw.rs:664
 msgid "Insulation"
 msgstr "Tepelná izolace"
@@ -4768,7 +4768,7 @@ msgstr "Tepelná izolace: měkká izolace kreslená podél každé čáry, ší�
 msgid "Interface scale"
 msgstr "Měřítko rozhraní"
 
-#: crates/model/src/snap.rs:63
+#: crates/model/src/snap.rs:64
 msgid "Intersection"
 msgstr "Průsečík"
 
@@ -5571,7 +5571,7 @@ msgstr "Střední"
 msgid "Medium Lines"
 msgstr "Střední čáry"
 
-#: crates/model/src/import.rs:1367
+#: crates/model/src/import.rs:1368
 #: crates/ui-egui/src/properties.rs:763
 msgid "Membrane"
 msgstr "Hydroizolační fólie"
@@ -5601,7 +5601,7 @@ msgstr "Metry"
 msgid "Middle of the text"
 msgstr "Střed textu"
 
-#: crates/model/src/snap.rs:62
+#: crates/model/src/snap.rs:63
 msgid "Midpoint"
 msgstr "Polovina"
 
@@ -5811,7 +5811,7 @@ msgstr "NBR 17068: přesah 2 až 3 mm"
 msgid "NBR 6492: Target in plan (±0.00), equilateral triangle in section"
 msgstr "NBR 6492: terč v půdorysu (±0,00), rovnostranný trojúhelník v řezu"
 
-#: crates/model/src/render.rs:2878
+#: crates/model/src/render.rs:2898
 msgid "NOT ENCLOSED"
 msgstr "NEUZAVŘENÝ OBVOD"
 
@@ -5842,7 +5842,7 @@ msgstr "Název:"
 msgid "Natural"
 msgstr ""
 
-#: crates/model/src/snap.rs:68
+#: crates/model/src/snap.rs:69
 msgid "Nearest"
 msgstr "Nejbližší"
 
@@ -5944,7 +5944,7 @@ msgstr "Nový {}"
 msgid "Next Pan/Zoom"
 msgstr ""
 
-#: crates/model/src/schedule.rs:1338
+#: crates/model/src/schedule.rs:1339
 msgid "No"
 msgstr "Ne"
 
@@ -6694,7 +6694,7 @@ msgstr "Výkon"
 msgid "Perimeter"
 msgstr "Obvod"
 
-#: crates/model/src/snap.rs:65
+#: crates/model/src/snap.rs:66
 msgid "Perpendicular"
 msgstr "Kolmý"
 
@@ -6730,7 +6730,7 @@ msgstr "Fáze demolice"
 msgid "Phase Filter"
 msgstr "Filtr fází"
 
-#: crates/model/src/ifc.rs:1916
+#: crates/model/src/ifc.rs:1923
 msgid "Phase Filters"
 msgstr "Filtry fází"
 
@@ -7415,7 +7415,7 @@ msgstr "Primární ({})"
 msgid "Profile"
 msgstr "Profil"
 
-#: apps/bimcraft/src/main.rs:268
+#: apps/bimcraft/src/main.rs:270
 #: crates/ui-egui/src/titleblocks.rs:148
 #: crates/ui-egui/src/titleblocks.rs:152
 #: crates/ui-egui/src/titleblocks.rs:477
@@ -7540,11 +7540,11 @@ msgstr "Vyčištěno {} nepoužitých položek."
 msgid "Put a view on this sheet: one not on a sheet yet"
 msgstr "Umístit pohled na tento výkres: pohled, který dosud není na žádném výkresu"
 
-#: crates/model/src/snap.rs:66
+#: crates/model/src/snap.rs:67
 msgid "Quadrant"
 msgstr "Kvadrant"
 
-#: crates/model/src/render.rs:2878
+#: crates/model/src/render.rs:2898
 msgid "REDUNDANT"
 msgstr "NADBYTEČNÁ"
 
@@ -8190,11 +8190,11 @@ msgstr ""
 msgid "Runs the plugin's command"
 msgstr ""
 
-#: crates/model/src/sheet.rs:281
+#: crates/model/src/sheet.rs:288
 msgid "SCALE"
 msgstr "MĚŘÍTKO"
 
-#: crates/model/src/sheet.rs:283
+#: crates/model/src/sheet.rs:290
 msgid "SCALE AS INDICATED"
 msgstr "MĚŘÍTKO DLE VÝKRESŮ"
 
@@ -9269,7 +9269,7 @@ msgstr "Dělení podmřížky Y"
 msgid "Subgrid pen"
 msgstr "Pero podmřížky"
 
-#: crates/model/src/import.rs:1366
+#: crates/model/src/import.rs:1367
 #: crates/ui-egui/src/properties.rs:761
 msgid "Substrate"
 msgstr "Podkladní vrstva"
@@ -9451,7 +9451,7 @@ msgstr "Odstraní položky, které se v projektu nepoužívají. V každé kateg
 msgid "Takes up a shaped top's falls: one layer at most"
 msgstr "Přebírá spády tvarovaného horního líce: nejvýše jedna vrstva"
 
-#: crates/model/src/snap.rs:67
+#: crates/model/src/snap.rs:68
 msgid "Tangent"
 msgstr "Tečna"
 
@@ -10249,7 +10249,7 @@ msgstr "Typ:"
 msgid "Types"
 msgstr "Typy"
 
-#: crates/model/src/render.rs:3741
+#: crates/model/src/render.rs:3761
 msgid "UP"
 msgstr "NAHORU"
 
@@ -11009,7 +11009,7 @@ msgstr "X"
 msgid "Y"
 msgstr "Y"
 
-#: crates/model/src/schedule.rs:1338
+#: crates/model/src/schedule.rs:1339
 msgid "Yes"
 msgstr "Ano"
 
@@ -11698,8 +11698,8 @@ msgstr "{} (nenačteno)"
 msgid "{} (primary)"
 msgstr "{} (hlavní)"
 
-#: crates/model/src/schedule.rs:1327
 #: crates/model/src/schedule.rs:1328
+#: crates/model/src/schedule.rs:1329
 msgid "{} ({})"
 msgstr "{} ({})"
 

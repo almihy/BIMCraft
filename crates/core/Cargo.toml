@@ -1,6 +1,6 @@
 [package]
 name = "bimcraft-core"
-description = "BIMCraft building model, command engine, views, sheets and IFC export"
+description = "BIMCraft's commands and the Session that runs them, over the model (bimcraft-model), whose modules it re-exports"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -16,20 +16,12 @@ bimcraft-geom = { workspace = true }
 bimcraft-i18n = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# Autosave's snapshots are written beside the project and renamed into place.
+tempfile = { workspace = true }
+
+# The tests read back the pictures and PDFs the commands write.
+[dev-dependencies]
 tiny-skia = { workspace = true }
 flate2 = { workspace = true }
-zune-jpeg = { workspace = true }
-encoding_rs = { workspace = true }
-getrandom = { workspace = true }
-tempfile = { workspace = true }
-rayon = { workspace = true }
-ttf-parser = { workspace = true }
-i_overlay = { workspace = true }
-hayro = { workspace = true }
-# PNG written row by row in the channels a page needs (raster.rs): the version image reads.
 png = "0.18"
 image = { workspace = true }
-
-# The browser's clock (Rust's std has none there): today's date on a title block.
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys = "0.3"
