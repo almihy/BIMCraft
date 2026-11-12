@@ -1,2 +1,7 @@
 [alias]
 i18n = "run --quiet -p bimcraft-i18n --features tooling --"
+
+# Windows: link with rust-lld (LLVM's lld, shipped with Rust) instead of Visual Studio's link.exe, several times faster on
+# the big test binaries. It reads the same MSVC and Windows SDK libraries, so Visual Studio's C++ tools are still needed.
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld"

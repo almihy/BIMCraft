@@ -65,9 +65,20 @@ unimplemented = "deny"
 unreachable = "deny"
 dbg_macro = "warn"
 
-# The 3D view renders in software: build the core optimised in debug builds too, so it orbits smoothly.
+# Debug builds and tests keep file and line numbers (panics and backtraces say where) but not the variables' debug info,
+# which made the core's code generation and the test binaries' links much slower (the numbers are in the commit that set
+# this). A debugger session that needs locals sets CARGO_PROFILE_DEV_DEBUG=2.
+[profile.dev]
+debug = "line-tables-only"
+
+# The 3D view renders in software: build the core optimised in debug builds too, so it orbits smoothly. At 1, not 2: 1
+# compiles it much faster and its tests run about as fast.
 [profile.dev.package.bimcraft-core]
-opt-level = 2
+opt-level = 1
+# Every dependency too (tiny-skia's rasterising, i_overlay's booleans, egui under the desktop's tests): built once, then
+# shared through the compiler cache, so it costs nothing per change.
+[profile.dev.package."*"]
+opt-level = 1
 
 # The Revit reader inflates and scans tens of megabytes per file, which its real-file tests do over and over.
 [profile.dev.package.bimcraft-rvt]
