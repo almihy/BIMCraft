@@ -2485,6 +2485,7 @@ impl BimApp {
                 Some("copy") => Tool::Copy(None),
                 Some("rotate") => Tool::Rotate { centre: P2(0.0, 0.0), start: None, place: false },
                 Some("array") => Self::new_array(),
+                Some("scale_elements") => Tool::Scale(Vec::new()),
                 Some("corner") => Tool::Trim(None),
                 Some("split") => Tool::Split,
                 Some("linework") => Tool::Linework,

@@ -101,6 +101,8 @@
     "ManageImages": "images",
     "BringToFront": "bring-to-front",
     "SendToBack": "send-to-back",
+    "BringForward": "own:BringForward",
+    "SendBackward": "own:SendBackward",
     "Scale": "scaling",
     "PointCloud": "own:PointCloud",
     "Dimension": "own:Dimension",

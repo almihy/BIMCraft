@@ -83,9 +83,10 @@ fn a_hosted_window_has_the_checks_palette_open_and_the_desktops_has_none() {
     press(&mut d, "User Interface");
     assert!(d.query_by_role_and_label(Role::CheckBox, "Checks").is_none());
     assert!(d.query_by_role_and_label(Role::CheckBox, "Properties").is_some());
-    // The hosted window's View > User Interface switches it like the others.
+    // The hosted window's View > User Interface switches it like the others. Its View tab has Presentation (Render) too, so at
+    // this width User Interface is in the Windows panel's list.
     press(&mut h, "View");
-    press(&mut h, "User Interface");
+    from_list(&mut h, "Windows", "User Interface");
     pick(&mut h, Role::CheckBox, "Checks");
     assert!(!docking(&h).shown(Palette::Checks));
 }
