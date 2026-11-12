@@ -11,7 +11,6 @@ use serde_json::{Value, json};
 use crate::engine::Session;
 use crate::fills::SOLID_FILL;
 use crate::render;
-use crate::render::regions::*;
 use crate::sheet;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
@@ -201,40 +200,6 @@ fn what_a_region_lets_through_of_an_outline_is_one_line_with_its_corners() {
     // Lines the region kept, past what the plan drew without it: one of them goes round the corner.
     let round = d.prims.iter().skip(before).any(|p| matches!(p, Prim::Line { pts, .. } if pts.len() >= 3 && pts.iter().any(at)));
     assert!(round, "a corner inside the region is one line, not two that meet");
-}
-
-/// Whether `pieces` (lines along y = 50, as `Area::clip` gives them) draw at `x`, by their own dashes.
-fn drawn_at(pieces: &[Prim], x: f32) -> bool {
-    pieces.iter().any(|p| {
-        let Prim::Line { pts, dash, .. } = p else { return false };
-        let (a, b) = (pts[0].0, pts[pts.len() - 1].0);
-        if x < a || x > b {
-            return false;
-        }
-        match dash {
-            None => true,
-            Some(d) => {
-                let (cycle, on) = (d.iter().sum::<f32>(), d[0]);
-                (x - a).rem_euclid(cycle) < on
-            }
-        }
-    })
-}
-
-#[test]
-fn a_dashed_line_a_region_takes_part_of_keeps_its_dashes_where_they_were() {
-    // 10 px on and 5 off from the line's start; a region from x = 103 on takes the rest of it.
-    let line =
-        Prim::Line { pts: vec![(0.0, 50.0), (400.0, 50.0)], width: 1.0, color: Rgb(0, 0, 0), dash: Some(vec![10.0, 5.0]), closed: false };
-    let view = View { scale: 1.0, cx: 200.0, cy: 0.0, width: 400, height: 100 };
-    let ring = vec![vec![P2(103.0, -100.0), P2(500.0, -100.0), P2(500.0, 100.0), P2(103.0, 100.0)]];
-    let masks: Vec<Mask> = Vec::new();
-    let pieces = Area::new(&ring, &masks).unwrap().clip(&line, view, 1.0);
-    assert!(!pieces.is_empty());
-    for k in 104..399 {
-        let x = k as f32 + 0.5;
-        assert_eq!(drawn_at(&pieces, x), x.rem_euclid(15.0) < 10.0, "x = {x}");
-    }
 }
 
 #[test]

@@ -795,3 +795,7 @@ fn capsule(p: P2, q: P2, d: f64, a: P2, u: P2) -> Option<(f64, f64)> {
     }
     hull
 }
+
+#[cfg(test)]
+#[path = "regions_tests.rs"]
+mod tests;

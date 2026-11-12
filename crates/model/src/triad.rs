@@ -187,3 +187,7 @@ pub fn plane(current: Option<&Frame>, target: P3, end: End) -> Surface {
     let normal = if end == End::MinusZ { End::PlusZ.direction() } else { end.direction() };
     Surface { point: through.map(|v| v.round() + 0.0), normal }
 }
+
+#[cfg(test)]
+#[path = "triad_tests.rs"]
+mod tests;

@@ -141,3 +141,7 @@ impl BackgroundGrid {
         lines
     }
 }
+
+#[cfg(test)]
+#[path = "background_grid_tests.rs"]
+mod tests;

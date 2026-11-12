@@ -8,7 +8,8 @@ goes (a command, a rule in `Model::check`, ids and GUIDs) is in [crates/core/CLA
 - **Under the commands.** Nothing here knows about the `Session` or the commands (`bimcraft-core`); what runs after every
   command takes the model (`masterplan::keep`, `constraints`), and the engine applies it. The geometry under it is
   `bimcraft-geom`'s, re-exported here under the same paths (`crate::geom`, `crate::units`).
-- **Tests.** A module's tests that need only the model stay with it. Those that drive the Session live in the core's
+- **Tests.** A module's tests that need only the model stay with it (inline, or in `<module>_tests.rs` beside it through
+  `#[path]`, as `model_tests.rs` and `render_tests.rs`). Those that drive the Session live in the core's
   `src/model_tests/`, one file per module (`render.rs`, `view3d_update.rs`), and reach the module's items through its
   public paths; an item only they need is `pub` and `#[doc(hidden)]` in spirit, not part of the engine's command API.
 - **Self-checks and counters are debug builds'.** A fast path held to its twin (every element asked instead of the lookup's,

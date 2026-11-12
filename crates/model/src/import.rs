@@ -3868,3 +3868,7 @@ fn stair_from(r: &Reader, s: &Entity, faces: &[Vec<P3>]) -> Result<Flight, Strin
     let from = treads.first().map_or(z0, |(z, _)| z - each);
     Ok((start, angle, c1 - c0, risers, each * f64::from(risers), s1 - s0, from))
 }
+
+#[cfg(test)]
+#[path = "import_tests.rs"]
+mod tests;

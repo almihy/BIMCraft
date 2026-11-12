@@ -4752,3 +4752,7 @@ fn paint(pm: &mut Pixmap, d: &Drawing) {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "render_tests.rs"]
+mod tests;

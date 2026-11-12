@@ -77,3 +77,7 @@ pub fn families(set: &str, names: Names) -> Vec<(String, Family)> {
         })
         .collect()
 }
+
+#[cfg(test)]
+#[path = "symbol_set_tests.rs"]
+mod tests;

@@ -1283,3 +1283,7 @@ impl Look {
 
 /// Longest name of a filter or a template.
 pub const MAX_NAME: usize = MAX_TEXT;
+
+#[cfg(test)]
+#[path = "graphics_category_tests.rs"]
+mod category_tests;

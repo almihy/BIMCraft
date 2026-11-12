@@ -1408,3 +1408,7 @@ pub fn to_xlsx(t: &Table, name: &str) -> Vec<u8> {
         .collect();
     crate::xlsx::workbook(name, &headings, &rows)
 }
+
+#[cfg(test)]
+#[path = "schedule_tests.rs"]
+mod tests;

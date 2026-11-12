@@ -115,3 +115,7 @@ fn bring(to: &mut Model, l: &crate::model::Link, from: &Model) -> Result<(), Str
     }
     crate::insert::insert_as(to, &other, &ask, true).map(|_| ())
 }
+
+#[cfg(test)]
+#[path = "link_tests.rs"]
+mod tests;

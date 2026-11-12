@@ -234,26 +234,6 @@ fn an_outline_of_thousands_of_equal_edges_as_bad_as_it_was_is_let_by_when_mirror
 }
 
 #[test]
-fn comparing_two_outlines_of_thousands_of_equal_edges_stops_at_its_budget() {
-    // Rings of 5,000 edges of one length, a bow tie at the corner 4,000: every start passes the first corner and runs on for
-    // thousands before it fails, which is tens of millions of corners over the starts.
-    let points = |ring: Vec<[f64; 2]>| ring.into_iter().map(|p| crate::geom::P2(p[0], p[1])).collect::<Vec<_>>();
-    let a = points(regular_bow(5000, [0.0, 0.0], 4000));
-    // The same ring with its bow tie at another corner is found within the budget.
-    let (mut work, mut same) = (0, points(regular_bow(5000, [0.0, 0.0], 4500)));
-    assert!(crate::sketch::congruent(&a, &same, &mut work), "{work} corners compared");
-    // With a second bow tie it is another ring, and the budget is spent before every start is tried.
-    same.swap(1000, 1001);
-    let (mut work, most) = (0, crate::sketch::MAX_COMPARED);
-    assert!(!crate::sketch::congruent(&a, &same, &mut work));
-    assert!((most..=most + a.len()).contains(&work), "{work} corners compared, of a budget of {most}");
-    // Once it is spent, a comparison looks at nothing.
-    let spent = work;
-    assert!(!crate::sketch::congruent(&a, &a, &mut work));
-    assert_eq!(work, spent);
-}
-
-#[test]
 fn a_floor_over_boxes_of_walls_that_touch_at_a_corner_says_what_to_give_instead_of_naming_nothing() {
     let mut s = Session::new();
     for x in [0, 4000] {

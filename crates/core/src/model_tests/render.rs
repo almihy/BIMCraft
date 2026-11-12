@@ -4,7 +4,6 @@ use crate::geom::{self, P2};
 use crate::model::{Element, Id, Model};
 use crate::pen::Pen;
 use crate::prim::{LIGHT_POCHE, PAPER, POCHE, Part, Prim, Rgb, View};
-use crate::units::Units;
 use crate::view3d::SectionCache;
 use crate::view3d::{self};
 
@@ -569,15 +568,6 @@ fn notes_spot_elevations_and_dimensions_draw_in_their_views() {
 }
 
 #[test]
-fn spot_elevations_read_signed_heights_in_the_project_units() {
-    assert_eq!(
-        [height(Units::Millimetres, 0.3), height(Units::Millimetres, 3000.0), height(Units::Millimetres, -600.0)],
-        ["±0", "+3000", "-600"]
-    );
-    assert_eq!([height(Units::Metres, 0.0), height(Units::FeetInches, 3000.0)], ["±0.00", "+9'-10 1/8\""]);
-}
-
-#[test]
 fn plans_show_slope_arrows_and_shafts_and_the_holes_they_cut() {
     let mut s = house();
     // A ramp (11) rising east; an upper floor (12); a shaft (13) from Level 1 up through it.
@@ -990,20 +980,6 @@ fn a_cut_walls_outline_is_inked_over_its_poche_and_not_across_its_joins() {
     // Where two walls meet at a corner, the mitre between them is poché, no line.
     assert_eq!(pixel(&png, view.px(P2(8000.0, 0.0))), (POCHE.0, POCHE.1, POCHE.2));
     assert_eq!(pixel(&png, view.px(P2(8040.0, 40.0))), (POCHE.0, POCHE.1, POCHE.2));
-}
-
-#[test]
-fn lettering_turns_its_corners_round_while_a_pens_lines_turn_them_square() {
-    let view = View { scale: 1.0, cx: 0.0, cy: 0.0, width: 400, height: 200 };
-    let mut d = Drawing::new(view);
-    d.text("VW", (200.0, 100.0), 80.0, INK);
-    d.line(&[P2(-150.0, 0.0), P2(-100.0, 50.0), P2(-50.0, 0.0)], Pen::MEDIUM, INK, false);
-    let svg = svg(&d);
-    let joins: Vec<&str> = svg.split("stroke-linejoin=\"").skip(1).filter_map(|s| s.split('"').next()).collect();
-    assert_eq!(joins.last(), Some(&"miter"), "the pen's line");
-    assert!(joins.len() > 2 && joins[..joins.len() - 1].iter().all(|j| *j == "round"), "{joins:?}");
-    let (pdf, _) = crate::pdf::contents(&d, P2(100.0, 50.0));
-    assert!(pdf.contains(" 1 j ") && pdf.trim_end().rsplit('\n').next().is_some_and(|l| l.contains(" 0 j ")), "{pdf}");
 }
 
 #[test]

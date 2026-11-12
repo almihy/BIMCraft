@@ -1778,3 +1778,7 @@ fn element_parts_mut(e: &mut Element, f: &mut dyn FnMut(&mut Id, &mut Guid)) {
         sh.lines.iter_mut().for_each(|x| f(&mut x.id, &mut x.guid));
     }
 }
+
+#[cfg(test)]
+#[path = "library_tests.rs"]
+mod tests;

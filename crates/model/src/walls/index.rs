@@ -200,3 +200,7 @@ pub fn reach(m: &Model, w: &crate::model::Wall) -> Option<[f64; 4]> {
 fn tile(v: f64) -> i64 {
     (v / TILE).floor() as i64
 }
+
+#[cfg(test)]
+#[path = "index_tests.rs"]
+mod tests;

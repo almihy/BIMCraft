@@ -195,3 +195,7 @@ impl LineWeights {
         self
     }
 }
+
+#[cfg(test)]
+#[path = "pen_tests.rs"]
+mod tests;

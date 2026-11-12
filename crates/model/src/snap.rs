@@ -964,3 +964,7 @@ pub fn graduation(px_per_mm: f64) -> f64 {
     let decade = 10f64.powi(least.log10().floor() as i32);
     [1.0, 2.0, 5.0, 10.0].into_iter().map(|k| k * decade).find(|g| *g >= least * (1.0 - 1e-9)).unwrap_or(10.0 * decade)
 }
+
+#[cfg(test)]
+#[path = "snap_tests.rs"]
+mod tests;

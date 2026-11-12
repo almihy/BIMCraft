@@ -8772,3 +8772,7 @@ pub fn bad(cmd: &str, msg: impl std::fmt::Display) -> String {
         None => text,
     }
 }
+
+#[cfg(test)]
+#[path = "model_tests.rs"]
+mod tests;

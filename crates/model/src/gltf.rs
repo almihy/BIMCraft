@@ -263,3 +263,7 @@ impl File {
         Ok(out)
     }
 }
+
+#[cfg(test)]
+#[path = "gltf_tests.rs"]
+mod tests;

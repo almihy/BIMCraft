@@ -845,3 +845,7 @@ pub fn prisms_in(m: &Model, id: Id, openings: bool, index: Option<&Index>) -> Ve
     }
     out
 }
+
+#[cfg(test)]
+#[path = "walls_tests.rs"]
+mod tests;

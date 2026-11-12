@@ -3966,3 +3966,7 @@ impl Scene {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "view3d_tests.rs"]
+mod tests;

@@ -271,3 +271,7 @@ impl Report {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "crosscheck_tests.rs"]
+mod tests;

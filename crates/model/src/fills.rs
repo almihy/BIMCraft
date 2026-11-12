@@ -458,3 +458,7 @@ pub fn default_region_type(types: &BTreeMap<String, FilledRegionType>, language:
         .find_map(|n| types.get_key_value(n).map(|(k, _)| k))
         .or_else(|| types.keys().next())
 }
+
+#[cfg(test)]
+#[path = "fills_tests.rs"]
+mod tests;

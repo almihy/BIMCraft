@@ -201,3 +201,7 @@ pub fn write<'a>(patterns: impl IntoIterator<Item = (&'a String, &'a FillPattern
     }
     out
 }
+
+#[cfg(test)]
+#[path = "pat_tests.rs"]
+mod tests;

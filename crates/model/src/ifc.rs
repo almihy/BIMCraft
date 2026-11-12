@@ -1948,3 +1948,7 @@ pub fn export(m: &Model) -> String {
         w.out
     )
 }
+
+#[cfg(test)]
+#[path = "ifc_tests.rs"]
+mod tests;
