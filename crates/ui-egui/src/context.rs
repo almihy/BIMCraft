@@ -51,6 +51,8 @@ pub(crate) enum Action {
     /// The selected walls' and runs' joins refused (Revit's Disallow Join), or taken up again.
     DisallowJoin,
     AllowJoin,
+    /// The selected doors' and windows' From Room and To Room swapped (Revit's Flip From/To Room).
+    FlipFromToRoom,
 }
 
 impl Action {
@@ -81,6 +83,7 @@ impl Action {
             Action::WorkPlane => msg!("Set Work Plane…"),
             Action::DisallowJoin => msg!("Disallow Join"),
             Action::AllowJoin => msg!("Allow Join"),
+            Action::FlipFromToRoom => msg!("Flip From/To Room"),
         }
     }
 
@@ -248,6 +251,12 @@ impl BimApp {
                     Item::new(Action::OverrideGraphics, true),
                 ]);
             }
+            // Doors and windows: their From Room and To Room swapped, as Revit's.
+            if self.selection.iter().any(|id| {
+                matches!(m.elements.get(*id), Some(bimcraft_core::model::Element::Door(_) | bimcraft_core::model::Element::Window(_)))
+            }) {
+                groups.push(vec![Item::new(Action::FlipFromToRoom, true)]);
+            }
             if !joins.is_empty() {
                 groups.push(vec![
                     Item::new(Action::DisallowJoin, joins.iter().any(|j| *j)),
@@ -304,6 +313,23 @@ impl BimApp {
             }
             Action::DisallowJoin => self.set_joins(false),
             Action::AllowJoin => self.set_joins(true),
+            Action::FlipFromToRoom => self.flip_from_to_room(),
+        }
+    }
+
+    /// Swap the From Room and To Room of every selected door and window, as one command.
+    fn flip_from_to_room(&mut self) {
+        let m = &self.session.model;
+        let ids: Vec<bimcraft_core::model::Id> = self
+            .selection
+            .iter()
+            .copied()
+            .filter(|id| {
+                matches!(m.elements.get(*id), Some(bimcraft_core::model::Element::Door(_) | bimcraft_core::model::Element::Window(_)))
+            })
+            .collect();
+        if !ids.is_empty() {
+            self.run("flip_from_to_room", serde_json::json!({"ids": ids}));
         }
     }
 
