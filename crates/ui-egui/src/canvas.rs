@@ -264,6 +264,9 @@ pub(crate) struct Shown {
     pub(crate) place: Place,
     /// Its top left, from the canvas's.
     offset: Vec2,
+    /// The selected cameras' marks over it, drawn at the canvas's own pixels (`render::camera_marks`): a plan shows a camera
+    /// only while its view is selected, as Revit's does. They are picked first, as they lie on top.
+    pub(crate) marks: Option<Drawing>,
 }
 
 impl Shown {
@@ -274,7 +277,7 @@ impl Shown {
             let (x, y) = view.px(drawing.view.mm((0.0, 0.0)));
             ((view.scale / drawing.view.scale) as f32, vec2(x, y))
         };
-        Shown { drawing, place: Place { k, ..Place::at(origin + offset) }, offset }
+        Shown { drawing, place: Place { k, ..Place::at(origin + offset) }, offset, marks: None }
     }
 
     fn own(&self, (x, y): (f32, f32)) -> (f32, f32) {
@@ -282,15 +285,23 @@ impl Shown {
     }
 
     fn pick(&self, at: (f32, f32), tol: f32) -> Option<Id> {
-        self.drawing.pick(self.own(at), tol / self.place.k)
+        self.marks.as_ref().and_then(|m| m.pick(at, tol)).or_else(|| self.drawing.pick(self.own(at), tol / self.place.k))
     }
 
     pub(crate) fn pick_all(&self, at: (f32, f32), tol: f32) -> Vec<Id> {
-        self.drawing.pick_all(self.own(at), tol / self.place.k)
+        let mut all = self.marks.as_ref().map(|m| m.pick_all(at, tol)).unwrap_or_default();
+        let under: Vec<Id> = self.drawing.pick_all(self.own(at), tol / self.place.k).into_iter().filter(|id| !all.contains(id)).collect();
+        all.extend(under);
+        all
     }
 
     fn in_box(&self, a: (f32, f32), b: (f32, f32), crossing: bool) -> Vec<Id> {
-        self.drawing.in_box(self.own(a), self.own(b), crossing)
+        let mut all = self.drawing.in_box(self.own(a), self.own(b), crossing);
+        if let Some(m) = &self.marks {
+            let cameras: Vec<Id> = m.in_box(a, b, crossing).into_iter().filter(|id| !all.contains(id)).collect();
+            all.extend(cameras);
+        }
+        all
     }
 }
 
@@ -1422,7 +1433,7 @@ impl BimApp {
         let snaps = self.snaps_now();
         // A camera's mark is a symbol, not a set of snap points: anywhere on it lands on its eye.
         if snaps.endpoint
-            && let Some((id, eye)) = render::camera_at(m, level, v, at)
+            && let Some((id, eye)) = render::camera_at(m, level, v, at, &crate::camgrips::shown_cameras(m, &self.selection))
         {
             return Found { at: eye, kind: Kind::Endpoint, guide: None, source: Some(id) };
         }
@@ -1681,7 +1692,11 @@ impl BimApp {
             Some(pipeline) => c.drawing.moving(ui.ctx(), &model, key, view, up, pipeline, look),
             None => c.drawing.drawing(&model, key, view, up),
         };
-        let d = Shown::new(d, view, rect.min);
+        let mut d = Shown::new(d, view, rect.min);
+        let cameras = crate::camgrips::shown_cameras(&model, &self.selection);
+        if !up && !cameras.is_empty() {
+            d.marks = Some(render::camera_marks(&model, key, view, &cameras));
+        }
 
         // What's under the cursor; Tab steps through it. (Without the app's input hook, as in
         // tests, egui moved the keyboard to a widget on that Tab: give it back.)
@@ -1805,6 +1820,7 @@ impl BimApp {
         self.line_grip_drag(ui, &response, rect, &view, level);
         let dragged = self.shape_grip_drag(ui, &response, rect, &view, level) || dragged;
         let dragged = self.site_grip_drag(ui, &response, rect, &view, level) || dragged;
+        let dragged = self.camera_grip_drag(ui, &response, rect, &view, level) || dragged;
         let on_control = self.canvas.controls.pressed();
         if ui.input(|i| i.pointer.primary_pressed()) && !on_control {
             self.canvas.pressed_chain = hovered.filter(|id| self.flow.preview.contains(id)).map(|id| (id, self.click_set(Some(id))));
@@ -1819,6 +1835,7 @@ impl BimApp {
             && self.canvas.grip.is_none()
             && self.drawing.grip.is_none()
             && self.site_grip.is_none()
+            && self.camera_grip.is_none()
             && let Some(o) = ui.input(|i| i.pointer.press_origin())
         {
             let o = (o.x - rect.min.x, o.y - rect.min.y);
@@ -1920,6 +1937,9 @@ impl BimApp {
         if !kept {
             paint(&p, place, &d, &marked, painted_hover, self.thin, &pictures);
         }
+        if let Some(marks) = &d.marks {
+            paint(&p, Place::at(rect.min), marks, &marked, painted_hover, self.thin, &[]);
+        }
         // What Tab is highlighting, the chain of walls, in the hover's colours.
         if !self.flow.preview.is_empty() {
             paint_preview(&p, place, &d, &self.flow.preview, self.thin);
@@ -2019,6 +2039,7 @@ impl BimApp {
         self.pin_overlay(ui, &model, &view, rect);
         self.flip_overlay(ui, &model, &view, rect, self.canvas.drag.is_some());
         self.site_grip_overlay(ui, &model, &view, rect, level);
+        self.camera_grip_overlay(ui, &model, &view, rect, level);
         // Where the cursor snaps is worked out only while a grip is held to it.
         let cursor = self
             .drawing

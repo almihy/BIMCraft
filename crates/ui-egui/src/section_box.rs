@@ -32,10 +32,11 @@ pub(crate) enum Was {
 }
 
 impl BimApp {
-    /// The default 3D view's section box as the project holds it, on or off.
+    /// The section box of the 3D view the 3D tab shows (each 3D view has its own, as in Revit), as the project holds it, on
+    /// or off.
     pub(crate) fn section_box(&self) -> Option<SectionBox> {
         let m = &self.session.model;
-        match m.default_3d().and_then(|v| m.elements.get(v)) {
+        match self.active_3d().and_then(|v| m.elements.get(v)) {
             Some(Element::View3D(v)) => v.section_box,
             _ => None,
         }
@@ -47,7 +48,7 @@ impl BimApp {
         if self.sheet != Sheet::View3D {
             self.open_sheet(Sheet::View3D);
         }
-        self.run("section_box", json!({"on": !on}));
+        self.run("section_box", json!({"view": self.view3d_param(), "on": !on}));
     }
 
     /// The 3D view's Extents in Properties: Section Box, and while it's on where each of its faces is.
@@ -62,7 +63,7 @@ impl BimApp {
         }
         let b = self.section_box();
         let units = self.session.model.units;
-        let view = self.session.model.default_3d().unwrap_or_default();
+        let view = self.active_3d().unwrap_or_default();
         let mut set = None;
         crate::properties::grid(ui, "section-box-properties", |ui| {
             let name = t("Section Box");
@@ -97,9 +98,15 @@ impl BimApp {
                 ui.end_row();
             }
         });
-        if let Some(p) = set {
+        if let Some(mut p) = set {
+            p["view"] = self.view3d_param();
             self.run("section_box", p);
         }
+    }
+
+    /// The 3D view the 3D tab shows, as a command names it: its id, or `{3D}` before the default is made.
+    pub(crate) fn view3d_param(&self) -> serde_json::Value {
+        self.active_3d().map_or_else(|| json!("{3D}"), |id| json!(id))
     }
 
     /// Linked 3D View, on a plan's view control bar: the 3D view floats beside the plan, cut to what the plan shows

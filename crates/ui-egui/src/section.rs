@@ -258,7 +258,8 @@ impl BimApp {
             .and_then(|_| self.selection.first().filter(|_| self.selection.len() == 1))
             .and_then(|level| self.cut.levels.get(level))
             .copied();
-        let datum = self.level_grips(ui, &response, rect, &view, id, level_ends);
+        let mut datum = self.level_grips(ui, &response, rect, &view, id, level_ends);
+        datum.extend(self.camera_section_grips(ui, &response, rect, &view, id));
         // The picture at the screen's pixels, framed as the drawing is in points.
         let ppp = f64::from(ui.ctx().pixels_per_point());
         let side = |v: u32| ((f64::from(v) * ppp).round().max(1.0) as u32).min(MAX_SIDE);

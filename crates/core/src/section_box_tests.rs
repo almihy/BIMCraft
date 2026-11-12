@@ -100,7 +100,7 @@ fn a_camera_written_back_or_a_3d_dimension_leaves_the_scene_as_it_was_and_a_wall
     let step = |s: &mut Session, id: &str, p: Value| {
         let before = s.model.clone();
         run(s, id, p);
-        kept(&before, &s.model)
+        kept(&before, &s.model, None)
     };
     assert!(step(&mut s, "camera", json!({"eye": [-5000, -5000, 1700], "target": [1500, 0, 1000], "name": "Corner"})), "a camera view");
     // Its eye and target written back, as the 3D view does once the hand lets it be.
@@ -112,6 +112,25 @@ fn a_camera_written_back_or_a_3d_dimension_leaves_the_scene_as_it_was_and_a_wall
     assert!(step(&mut s, "section_box", json!({"on": true})), "the default view's box");
     assert!(!step(&mut s, "wall", json!({"points": [[0, 2000], [3000, 2000]]})), "a wall");
     assert!(!step(&mut s, "visual_style", json!({"style": "hidden_line"})), "the default view's style");
+}
+
+#[test]
+fn a_camera_view_s_own_look_changed_is_a_new_scene_for_it_and_none_for_the_default_view() {
+    use crate::view3d::scene_kept as kept;
+    let mut s = Session::new();
+    run(&mut s, "wall", json!({"points": [[0, 0], [3000, 0]]}));
+    let r = run(&mut s, "camera", json!({"eye": [-5000, -5000, 1700], "target": [1500, 0, 1000], "name": "Corner"}));
+    let corner = r["id"].as_u64().unwrap();
+    let before = s.model.clone();
+    run(&mut s, "visual_style", json!({"view": "Corner", "style": "wireframe"}));
+    assert!(!kept(&before, &s.model, Some(corner)), "the camera view's own style: its mesh is made again");
+    assert!(kept(&before, &s.model, None), "the default view looks as it did");
+    let before = s.model.clone();
+    run(&mut s, "graphics", json!({"view": "Corner", "categories": {"walls": {"hidden": true}}}));
+    assert!(!kept(&before, &s.model, Some(corner)), "what the camera view hides");
+    let before = s.model.clone();
+    run(&mut s, "section_box", json!({"view": "Corner", "on": true}));
+    assert!(kept(&before, &s.model, Some(corner)), "its own section box is asked of the scene as it is drawn");
 }
 
 #[test]
@@ -260,7 +279,17 @@ fn a_section_box_has_a_grip_on_each_face_that_a_drag_moves_along_its_axis() {
     assert_eq!(move_box_face(b, 5, -9000.0).1[2], crate::model::MIN_SECTION_BOX);
     assert_eq!(move_box_face(b, 0, 500.0).0[0], 500.0, "the west face east");
     // A drag up the screen moves the top up, as far as the view shows a mm of it; looking straight along x, a drag can't move x.
-    let cam = Camera { azimuth: -45.0, elevation: 30.0, scale: 0.1, target: [0.0; 3], width: 400, height: 300, lens: None };
+    let cam = Camera {
+        azimuth: -45.0,
+        elevation: 30.0,
+        scale: 0.1,
+        target: [0.0; 3],
+        width: 400,
+        height: 300,
+        lens: None,
+        shift: [0.0; 2],
+        clip: None,
+    };
     let up = cam.along(2, [0.0; 3], (200.0, 150.0), (200.0, 100.0)).unwrap();
     assert!((up - 50.0 / (0.1 * 30f64.to_radians().cos())).abs() < 1e-6, "{up}");
     let side = Camera { azimuth: 0.0, elevation: 0.0, ..cam };

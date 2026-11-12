@@ -2126,8 +2126,11 @@ fn the_camera_tool_makes_a_perspective_3d_view_from_an_eye_and_a_target() {
     h.run();
     assert_eq!(field(&h, made[0], "perspective")["lens"], json!(50.0));
     assert_eq!(ids(&h, "view3d"), made, "the same view, relensed");
-    // The camera shows on its level's plan: clicking its mark selects it, and the menu opens its view.
+    // The camera shows on its level's plan while its view is selected (the browser's Show Camera), as Revit's: its mark
+    // picks it there, and the menu opens its view.
     topmost(&mut h, "Level 1");
+    h.state_mut().selection = vec![made[0]];
+    h.run();
     click(&mut h, P2(-1000.0, 3000.0));
     assert_eq!(h.state().selection, vec![made[0]], "its mark is picked on the plan");
     // Dragging the mark on the plan moves the camera as a whole, each point keeping its height.
@@ -2168,11 +2171,14 @@ fn a_camera_views_mark_on_the_plan_edits_its_camera_in_properties() {
     let made = ids(&h, "view3d");
     assert_eq!(made.len(), 1);
     let id = made[0];
-    // On its level's plan its mark picks the view, and Properties shows the camera itself, not a dead azimuth or elevation.
+    // Selected, it shows on its level's plan, its mark picks the view, and Properties shows the camera itself, not a dead
+    // azimuth or elevation.
     topmost(&mut h, "Level 1");
+    h.state_mut().selection = vec![id];
+    h.run();
     click(&mut h, P2(-1000.0, 3000.0));
     assert_eq!(h.state().selection, vec![id]);
-    for label in ["View Name", "Eye", "Target", "Focal Length"] {
+    for label in ["View Name", "Eye Elevation", "Target Elevation", "Focal Length"] {
         assert!(h.query_by_label(label).is_some(), "Properties shows {label}");
     }
     assert!(h.query_by_label("Azimuth (°)").is_none(), "a camera view has no azimuth to edit");
@@ -2183,23 +2189,24 @@ fn a_camera_views_mark_on_the_plan_edits_its_camera_in_properties() {
     h.run();
     assert_eq!(field(&h, id, "perspective")["lens"], json!(50.0));
     assert_eq!(field(&h, id, "camera")["eye"], json!([-1000.0, 3000.0, 1600.0]));
-    // Eye and Target are points in the project's units (mm here).
-    type_into(&mut h, "Eye", "-2000, 3000, 2500");
+    // Eye Elevation and Target Elevation are heights in the project's units (mm here), as Revit's; the points move on the
+    // plan, by their grips.
+    type_into(&mut h, "Eye Elevation", "2500");
     h.key_press(Key::Enter);
     h.run();
-    assert_eq!(field(&h, id, "camera")["eye"], json!([-2000.0, 3000.0, 2500.0]));
+    assert_eq!(field(&h, id, "camera")["eye"], json!([-1000.0, 3000.0, 2500.0]));
     assert_eq!(field(&h, id, "camera")["target"], json!([4000.0, 3000.0, 1200.0]));
-    type_into(&mut h, "Target", "4000, 2000, 1500");
+    type_into(&mut h, "Target Elevation", "1500");
     h.key_press(Key::Enter);
     h.run();
-    assert_eq!(field(&h, id, "camera")["target"], json!([4000.0, 2000.0, 1500.0]));
+    assert_eq!(field(&h, id, "camera")["target"], json!([4000.0, 3000.0, 1500.0]));
     // Its name: the view keeps its id, and the old name is gone.
     type_into(&mut h, "View Name", "Camera West");
     h.key_press(Key::Enter);
     h.run();
     assert_eq!((field(&h, id, "name"), ids(&h, "view3d")), (json!("Camera West"), made));
-    // The mark stood where its eye was: it has moved with it, and picks there.
-    click(&mut h, P2(-2000.0, 3000.0));
+    // The mark stands at its eye, and picks there.
+    click(&mut h, P2(-1000.0, 3000.0));
     assert_eq!(h.state().selection, vec![id]);
     // Opened, the same panel shows the same values; changing one there updates the camera on screen and is not written back
     // over by the settled hand.
@@ -2208,22 +2215,26 @@ fn a_camera_views_mark_on_the_plan_edits_its_camera_in_properties() {
     h.state_mut().act(Action::OpenView);
     h.run();
     assert_eq!((h.state().sheet, h.state().active_3d()), (Sheet::View3D, Some(id)));
-    assert!(h.query_by_label("Eye").is_some() && h.query_by_label("Target").is_some());
-    type_into(&mut h, "Eye", "-3000, 3000, 2400");
+    assert!(h.query_by_label("Eye Elevation").is_some() && h.query_by_label("Target Elevation").is_some());
+    type_into(&mut h, "Eye Elevation", "2400");
     h.key_press(Key::Enter);
     h.run();
     h.run();
     h.run();
-    assert_eq!(field(&h, id, "camera")["eye"], json!([-3000.0, 3000.0, 2400.0]), "the settled hand didn't write the old eye back");
-    assert_eq!(field(&h, id, "camera")["target"], json!([4000.0, 2000.0, 1500.0]));
+    assert_eq!(field(&h, id, "camera")["eye"], json!([-1000.0, 3000.0, 2400.0]), "the settled hand didn't write the old eye back");
+    assert_eq!(field(&h, id, "camera")["target"], json!([4000.0, 3000.0, 1500.0]));
     let eye = h.state().orbit.camera.unwrap().eye().unwrap();
-    assert!(eye.iter().zip([-3000.0, 3000.0, 2400.0]).all(|(a, b)| (a - b).abs() < 0.1), "the picture stands at the new eye: {eye:?}");
+    assert!(eye.iter().zip([-1000.0, 3000.0, 2400.0]).all(|(a, b)| (a - b).abs() < 0.1), "the picture stands at the new eye: {eye:?}");
     type_into(&mut h, "Focal Length", "80");
     h.key_press(Key::Enter);
     h.run();
     h.run();
     assert_eq!(field(&h, id, "perspective")["lens"], json!(80.0));
-    assert_eq!(h.state().orbit.camera.unwrap().lens, Some(80.0), "the picture is seen through the new lens");
+    // Through the new lens, across the safe frame's width: as the 35 mm film is to the frame, so the view's lens to the view.
+    let seen = h.state().orbit.camera.unwrap().lens.unwrap();
+    let r = h.state().orbit.rect;
+    let frame = crate::fly::safe_frame(r, 1920.0 / 1080.0);
+    assert!((seen - 80.0 * f64::from(frame.width() / r.width())).abs() < 0.5, "the picture is seen through the new lens: {seen}");
 }
 
 #[test]
@@ -2240,6 +2251,8 @@ fn a_camera_view_follows_its_mark_dragged_on_the_plan() {
     topmost(&mut h, "Level 1");
     assert_eq!(h.state().sheet, Sheet::Plan(100000));
     assert_eq!(h.state().active_3d(), Some(id), "the camera view is still the one the 3D tab holds");
+    h.state_mut().selection = vec![id];
+    h.run();
     click(&mut h, P2(-1000.0, 3000.0));
     assert_eq!(h.state().selection, vec![id]);
     let from = h.state().screen(P2(-1000.0, 3000.0));
@@ -2273,6 +2286,8 @@ fn a_camera_view_in_a_window_of_its_own_follows_its_mark_dragged_on_the_plan() {
     h.run();
     topmost(&mut h, "Level 1");
     assert_eq!(h.state().sheet, Sheet::Plan(100000));
+    h.state_mut().selection = vec![id];
+    h.run();
     click(&mut h, P2(-1000.0, 3000.0));
     let from = h.state().screen(P2(-1000.0, 3000.0));
     drag_screen(&mut h, from, from + vec2(80.0, 0.0), PointerButton::Primary);
@@ -3313,6 +3328,9 @@ fn rotate_turns_a_component_about_its_own_point() {
 fn rotate_turns_a_camera_about_its_eye_by_default() {
     let mut h = app(&format!("{BOX}\ncamera {{\"eye\": [5000, 5000, 1500], \"target\": [6000, 5000, 1200]}}"));
     let camera = ids(&h, "view3d")[0];
+    // Selected in the browser (Show Camera): the plan shows it, and a click on its mark keeps it.
+    h.state_mut().show_camera(camera);
+    h.run();
     click(&mut h, P2(5000.0, 5000.0));
     assert_eq!(h.state().selection, [camera]);
     press(&mut h, "Rotate");
@@ -3327,6 +3345,8 @@ fn rotate_turns_a_camera_about_its_eye_by_default() {
 fn rotating_a_camera_about_its_eye_keeps_the_eye_and_turns_the_target() {
     let mut h = app(&format!("{BOX}\ncamera {{\"eye\": [5000, 5000, 1500], \"target\": [6000, 5000, 1200]}}"));
     let camera = ids(&h, "view3d")[0];
+    h.state_mut().show_camera(camera);
+    h.run();
     click(&mut h, P2(5000.0, 5000.0));
     press(&mut h, "Rotate");
     click(&mut h, P2(6000.0, 5000.0));
@@ -3367,7 +3387,11 @@ fn rotate_centre_snaps_to_a_notes_anchor() {
 #[test]
 fn a_click_on_a_cameras_mark_takes_its_eye() {
     let mut h = app(&format!("{BOX}\ncamera {{\"eye\": [5000, 5000, 1500], \"target\": [6000, 5000, 1200]}}"));
+    // Selected with the wall, so the plan shows it (Revit shows a camera only while its view is selected).
+    let camera = ids(&h, "view3d")[0];
     click(&mut h, P2(4000.0, 0.0));
+    h.state_mut().selection.push(camera);
+    h.run();
     press(&mut h, "Rotate");
     press(&mut h, "Place Centre");
     // The body stands behind the eye, against the way the camera looks: ten pixels west of it.
@@ -6206,6 +6230,7 @@ mod align;
 mod autosave;
 mod browser;
 mod cad;
+mod cameras;
 mod canvas_controls;
 mod checks;
 mod chinese;

@@ -24,7 +24,7 @@ const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// A vertex (see [`Vertex`]) as the card takes it: its position as three floats, its two normals as four 16-bit signed fractions
 /// each (the fourth 0), and its four words. 44 bytes, not the 52 of floats.
 const STRIDE: u64 = 44;
-const GLOBALS: u64 = 11 * 16;
+const GLOBALS: u64 = 12 * 16;
 /// A section box: its least corner and its greatest, in the model.
 type Cut = Option<([f64; 3], [f64; 3])>;
 /// An owner's edge and tint colours, a skin's parts and a segment's ends and colour: 2, 3 and 3 vec4s.
@@ -1250,6 +1250,8 @@ impl Gpu {
         let (lo, hi) = (from(lo), from(hi));
         put(&mut globals, &[lo[0], lo[1], lo[2], if cut.is_some() { 1.0 } else { 0.0 }]);
         put(&mut globals, &[hi[0], hi[1], hi[2], 0.0]);
+        let [sx, sy] = view.shift;
+        put(&mut globals, &[sx, sy, 2.0 * sx / width, -2.0 * sy / height]);
         write(&self.globals, &globals);
         // What this frame draws of the surfaces: nothing where they are drawn already for this camera (a tint changes only the
         // picture); the next part of the exact drawing while the camera stays; else, the camera moved, all it sees if that fits

@@ -195,7 +195,17 @@ mod tests {
     use crate::workplane::Frame;
 
     fn cam(azimuth: f64, elevation: f64) -> Camera {
-        Camera { azimuth, elevation, scale: 0.1, target: [1000.0, 2000.0, 500.0], width: 640, height: 480, lens: None }
+        Camera {
+            azimuth,
+            elevation,
+            scale: 0.1,
+            target: [1000.0, 2000.0, 500.0],
+            width: 640,
+            height: 480,
+            lens: None,
+            shift: [0.0; 2],
+            clip: None,
+        }
     }
 
     fn at(placed: &[Placed; 6], end: End) -> Placed {

@@ -377,6 +377,39 @@ it: `Orbit::built` holds the camera the picture was built from, and a difference
 model anew instead of its old camera being written back over the move; a floating window, drawn while the hand works in another
 view, writes nothing.
 
+A camera's **physical settings** are 3ds Max's Physical Camera, as the owner asked (the cone, grips, Show Camera and navigation
+stay Revit's): `ViewCamera::physical`, a `Physical` (`model.rs`) holding Target or Free, the film's width (`FILM_PRESETS`: 35 mm
+full frame 36, APS-C, APS-H, Four Thirds), zoom, aperture, depth of field and focus (the target's distance or Custom), exposure
+(Target by EV, or Manual by ISO, shutter and aperture, its EV worked out by `exposure_value`), Lens Shift (% of the film's
+width), Tilt Correction Vertical (3ds Max's: a slope, the film plane tilted by it as `IPhysicalCamera::GetTiltCorrection`
+applies it) and Auto Vertical Tilt Correction (the slope the camera looks at: two-point perspective), Clip Manually with near and far planes (Revit's
+Far Clip is the far one), and the image it renders (Output Size, `OUTPUT_PRESETS`, an aspect lock). Defaults are left out of the
+file, so an older camera reads as a new one's. The view's `perspective.lens` stays the focal length; `view3d::full_frame` makes it
+the 35 mm lens the core's `Camera` takes (`lens × zoom × 36 / film`), and `field_of_view` / `lens_for` turn it to and from the
+horizontal field of view. The limits are on that 35 mm equivalent, 10 to 600 mm (`view3d::lens_ok`, `fov_limits`: 3.4° to
+121.9° on any film), checked by the command and by `Model::check`; nothing clamps a lens where it is drawn, so the window, the
+cone and `render` see through the same one. `Camera::through` (and `bare`, before the perspective control) is how a camera view is seen; `Camera::physical`
+tilts the film plane by the vertical tilt correction exactly as 3ds Max's ray does (an equivalent camera turned by atan of the
+slope about the eye, its focal length cos of that as long, the lens shifted so the target stays in the middle; in perspective
+only, as an orthographic camera's verticals are vertical already); 3ds Max's horizontal tilt is not held, as this camera has
+no roll or skew to draw it with (`Camera::shift`: where the target shows from the picture's middle, px, which `Projector`, `unproject`, `Boxed` and the
+card's `to_clip`/`to_pixel` and `visible` all honour), then applies Lens Shift; `Camera::clip` cuts what lies outside the
+clipping planes, per pixel on the processor (`Projector::clipped`) and as the depth range on the card (`gpu::View`'s near and
+far). The `camera` command (`commands/camera.rs`) sets every one of them and reads them all back, with the field of view, the
+target and focus distances and the EV; `render` of a camera view draws it through its physical camera at its Output Size unless
+a size is asked for. `render::camera_cone` and `cone_of` are the camera in plan as Revit shows it selected (eye, target, the
+field of view's sides to the far clip, the far line), and `render::camera_grip` what a dragged grip does (eye, target, far clip, a
+side's field of view). The cone's far line is solid only where it clips (Clip Manually, in perspective), and reaches as far
+as the far plane cuts the way the picture looks, the tilt corrected. Orthographic (`projection`), a camera is seen parallel
+along the way it looks, as large at its target as its lens would show it, and takes no tilt correction or clipping.
+
+Every 3D view **keeps where it was left**, as Revit's do: a view without a camera holds `View3D::framing` (the point in the
+middle of its picture and the mm its width takes in there), with its `azimuth` and `elevation`; `view3d::as_left` stands any
+3D view as its person left it, and `render` of a view draws that, with the view's own Visibility/Graphics, visual style and
+section box (`Look::of` the view, not the default's). `view_orientation` sets or reads it: read, it gives everything the
+picture depends on (orientation, camera, section box, style) and a `revision` (FNV-1a of the view and its resolved graphics),
+so a server can tell a render is out of date.
+
 
 The 3D view is drawn on the graphics card where there is one ([where this is going](../3d-acceleration-plan.md): no limit on size) (File > Settings > Performance turns it off: `BimApp::card`, `settings.json`'s
 `gpu_3d`). `view3d::gpu::Mesh` is the triangles a view shows as f32 vertices relative to the middle of what is drawn (millimetres far

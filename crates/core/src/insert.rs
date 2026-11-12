@@ -452,7 +452,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let here = r["ids"][camera_there.to_string()].as_u64().unwrap();
         let Some(Element::View3D(v)) = s.model.elements.get(here) else { panic!("the camera view came in") };
-        assert_eq!(v.camera, Some(crate::model::ViewCamera { eye: [-5000.0, -4000.0, 1600.0], target: [4000.0, 3000.0, 1200.0] }));
+        assert_eq!(v.camera, Some(crate::model::ViewCamera::new([-5000.0, -4000.0, 1600.0], [4000.0, 3000.0, 1200.0])));
         assert_eq!(v.perspective.filter(|p| p.on).map(|p| p.lens), Some(24.0));
         assert!(v.name.starts_with("Camera 1") && v.name != "Camera 1", "named apart from this project's: {}", v.name);
         assert_eq!(s.model.check(), Ok(()));

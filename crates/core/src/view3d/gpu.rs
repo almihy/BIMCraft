@@ -71,6 +71,8 @@ pub struct View {
     /// nearer, 1 at [`NEAR`] in front of the eye and 0 as far past the target as the mesh reaches) as `a + b / ahead` for a
     /// point `ahead` mm in front of the eye.
     pub perspective: Option<Perspective>,
+    /// Where the target shows from the middle of the picture, px right and down: the camera's lens shift.
+    pub shift: [f32; 2],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -846,12 +848,25 @@ impl Mesh {
         let target = sub(cam.target, self.origin);
         let f = |v: P3| v.map(|x| x as f32);
         let depth = self.radius + dot(target, target).sqrt() + 1.0;
+        // The depth runs from the near plane to the far one: the camera's clipping planes where it has them, so what lies
+        // past them is outside the clip volume.
         let perspective = cam.focal().zip(cam.eye_distance()).map(|(focal, eye)| {
-            let far = (eye + depth).max(2.0 * NEAR);
-            let b = NEAR * far / (far - NEAR);
-            Perspective { focal: focal as f32, eye: eye as f32, a: (-NEAR / (far - NEAR)) as f32, b: b as f32 }
+            let near = cam.clip.map_or(NEAR, |[n, _]| n.max(NEAR));
+            let far = cam.clip.map_or(eye + depth, |[_, f]| f.min(eye + depth)).max(2.0 * near);
+            let b = near * far / (far - near);
+            Perspective { focal: focal as f32, eye: eye as f32, a: (-near / (far - near)) as f32, b: b as f32 }
         });
-        View { right: f(right), up: f(up), back: f(back), target: f(target), scale: cam.scale as f32, depth: depth as f32, perspective }
+        let shift = cam.shift.map(|v| v as f32);
+        View {
+            right: f(right),
+            up: f(up),
+            back: f(back),
+            target: f(target),
+            scale: cam.scale as f32,
+            depth: depth as f32,
+            perspective,
+            shift,
+        }
     }
 
     /// What a card draws of the mesh through `cam`: every group and copy but those wholly past one side of what the picture
@@ -871,13 +886,16 @@ impl Mesh {
         let pad = 1e-4 * (self.radius + dot(target, target).sqrt()) + 1.0;
         // Each side of the clip volume as a plane: a point `d` from the aim is past it where d·n > k.
         let (r, u) = (mul(right, sx), mul(up, sy));
+        // The lens's shift in clip space, which moves the picture's sides as the shader's `to_clip` does.
+        let (hx, hy) =
+            (2.0 * f64::from(view.shift[0]) / f64::from(cam.width.max(1)), -2.0 * f64::from(view.shift[1]) / f64::from(cam.height.max(1)));
         let planes: Vec<(P3, f64)> = match view.perspective {
-            // Across, past the eye's sight: x > w, with w how far ahead of the eye; in depth, nearer than the near plane
-            // (a·ahead + b > ahead) or beyond the far one (a·ahead + b < 0).
+            // Across, past the eye's sight: x + shift·w > w, with w how far ahead of the eye; in depth, nearer than the near
+            // plane (a·ahead + b > ahead) or beyond the far one (a·ahead + b < 0).
             Some(lens) => {
                 let (eye, a, b) = (f64::from(lens.eye), f64::from(lens.a), f64::from(lens.b));
-                let mut planes =
-                    vec![(add(r, back), eye), (add(mul(r, -1.0), back), eye), (add(u, back), eye), (add(mul(u, -1.0), back), eye)];
+                let side = |n: P3, k: f64| (add(n, mul(back, k)), k * eye);
+                let mut planes = vec![side(r, 1.0 - hx), side(mul(r, -1.0), 1.0 + hx), side(u, 1.0 - hy), side(mul(u, -1.0), 1.0 + hy)];
                 planes.push((back, eye - b / (1.0 - a)));
                 if a < 0.0 {
                     planes.push((mul(back, -1.0), -b / a - eye));
@@ -886,7 +904,14 @@ impl Mesh {
             }
             None => {
                 let depth = f64::from(view.depth);
-                vec![(r, 1.0), (mul(r, -1.0), 1.0), (u, 1.0), (mul(u, -1.0), 1.0), (back, depth), (mul(back, -1.0), depth)]
+                vec![
+                    (r, 1.0 - hx),
+                    (mul(r, -1.0), 1.0 + hx),
+                    (u, 1.0 - hy),
+                    (mul(u, -1.0), 1.0 + hy),
+                    (back, depth),
+                    (mul(back, -1.0), depth),
+                ]
             }
         };
         let mut planes = planes;
@@ -1288,7 +1313,7 @@ impl Mesh {
                     continue;
                 }
                 let z = wa * a.2 + wb * b.2 + wc * c.2;
-                if cut.as_ref().is_some_and(|k| !k.keeps(x, y, z)) {
+                if project.clipped(z) || cut.as_ref().is_some_and(|k| !k.keeps(x, y, z)) {
                     continue;
                 }
                 let z = z as f32;
@@ -1709,12 +1734,13 @@ mod tests {
         let (x, y, z) = (dot(d, f(view.right)), dot(d, f(view.up)), dot(d, f(view.back)));
         let across = view.perspective.map_or(f64::from(view.scale), |p| f64::from(p.focal));
         let (sx, sy) = (2.0 * across / f64::from(cam.width), 2.0 * across / f64::from(cam.height));
+        let (hx, hy) = (2.0 * f64::from(view.shift[0]) / f64::from(cam.width), -2.0 * f64::from(view.shift[1]) / f64::from(cam.height));
         match view.perspective {
             Some(p) => {
                 let ahead = f64::from(p.eye) - z;
-                [x * sx, y * sy, f64::from(p.a) * ahead + f64::from(p.b), ahead]
+                [x * sx + hx * ahead, y * sy + hy * ahead, f64::from(p.a) * ahead + f64::from(p.b), ahead]
             }
-            None => [x * sx, y * sy, 0.5 + z * 0.5 / f64::from(view.depth), 1.0],
+            None => [x * sx + hx, y * sy + hy, 0.5 + z * 0.5 / f64::from(view.depth), 1.0],
         }
     }
 

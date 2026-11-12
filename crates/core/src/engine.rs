@@ -112,6 +112,9 @@ pub struct Step {
     pub removed: Vec<(&'static str, usize)>,
     /// Whether the model the step goes back to passed [`Model::check`]: going back to it needs no check.
     pub(crate) checked: bool,
+    /// The 3D views the step itself turned (their orientation, where they were left, a camera's eye and target): undo and
+    /// redo put back only theirs. Every other view stays where it was turned since, as navigating is no undo step in Revit.
+    pub(crate) turned: Vec<Id>,
 }
 
 impl Step {
@@ -136,7 +139,64 @@ impl Step {
         } else {
             Vec::new()
         };
-        Step { label: label.to_string(), made, removed, checked: false }
+        Step { label: label.to_string(), made, removed, checked: false, turned: turned(before, after, &[]) }
+    }
+}
+
+/// The 3D views `after` stands elsewhere than `before` (see [`View3D::navigation`](crate::model::View3D::navigation)), or
+/// that only one of them has, but for those in `skip`: by what changed between the two, so a step with no view in it looks
+/// at none.
+fn turned(before: &Model, after: &Model, skip: &[Id]) -> Vec<Id> {
+    let ids: Vec<Id> = match after.changed_since(before) {
+        crate::ids::Changed::Ids(ids) => ids.into_iter().collect(),
+        crate::ids::Changed::All => before.elements.keys().chain(after.elements.keys()).copied().collect(),
+    };
+    let mut out: Vec<Id> = ids
+        .into_iter()
+        .filter(|id| !skip.contains(id))
+        .filter(|id| match (before.elements.get(*id), after.elements.get(*id)) {
+            (Some(Element::View3D(a)), Some(Element::View3D(b))) => a.navigation() != b.navigation(),
+            (Some(Element::View3D(_)), None) | (None, Some(Element::View3D(_))) => true,
+            _ => false,
+        })
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+/// `model`, gone back to by undo or redo from `left`, with every 3D view but those the step turned, made or took away itself
+/// (`own`) standing where it stands in `left`: where a person navigated since stays, and so does a view navigating made (the
+/// default `{3D}`, made when it is first turned), so long as the model still passes with it.
+fn keep_navigation(model: &mut Arc<Model>, left: &Model, own: &[Id]) {
+    let moved: Vec<(Id, Option<crate::ids::Guid>, crate::model::View3D)> = turned(model, left, own)
+        .into_iter()
+        .filter_map(|id| match left.elements.get(id) {
+            Some(Element::View3D(v)) => Some((id, model.elements.get(id).is_none().then(|| left.elements.guid(id)).flatten(), v.clone())),
+            _ => None,
+        })
+        .collect();
+    if moved.is_empty() {
+        return;
+    }
+    let mut kept = Arc::clone(model);
+    let m = Arc::make_mut(&mut kept);
+    let mut made = false;
+    for (id, guid, there) in moved {
+        match guid {
+            Some(guid) => {
+                made |= m.elements.insert_as(id, guid, Element::View3D(there)).is_ok();
+                m.next_id = m.next_id.max(id + 1);
+            }
+            None => {
+                if let Some(Element::View3D(v)) = m.elements.get_mut(id) {
+                    v.navigate_as(&there);
+                }
+            }
+        }
+    }
+    if !made || kept.check().is_ok() {
+        *model = kept;
     }
 }
 
@@ -989,7 +1049,9 @@ impl Session {
             let Some((mut step, model)) = from.pop() else { break };
             label = step.label.clone();
             std::mem::swap(&mut step.checked, &mut checked);
-            to.push((step, std::mem::replace(&mut self.model, model)));
+            let left = std::mem::replace(&mut self.model, model);
+            keep_navigation(&mut self.model, &left, &step.turned);
+            to.push((step, left));
         }
         if checked {
             self.verified = Some(Arc::clone(&self.model));

@@ -326,6 +326,7 @@ impl BimApp {
             Some(Act::Pick(category, name)) => {
                 self.types.insert(category, name);
             }
+            Some(Act::Select(id)) if crate::camgrips::shown_cameras(&self.session.model, &[id]) == [id] => self.show_camera(id),
             Some(Act::Select(id)) => self.selection = vec![id],
             Some(Act::Render(view)) => self.ask_host_to_render(ui.ctx(), view),
             _ => {}
@@ -479,7 +480,11 @@ impl BimApp {
                 three.extend(m.elements.iter().filter_map(|(id, e)| match e {
                     Element::View3D(v) if v.name != "{3D}" => {
                         let leaf = Node::leaf(&v.name, Act::Open3D(Some(*id)), active == Some(*id));
-                        Some(leaf.with_menu(render(Some(*id)).into_iter().chain([("Delete", Act::Delete(vec![*id]))]).collect()))
+                        // Render… (a hosted window's), then Show Camera, as Revit's: the camera selected, so every plan,
+                        // section and elevation shows its eye, its view cone and its target, with their grips.
+                        let show = v.camera.is_some().then_some((msg!("Show Camera"), Act::Select(*id)));
+                        let menu = render(Some(*id)).into_iter().chain(show).chain([("Delete", Act::Delete(vec![*id]))]).collect();
+                        Some(leaf.with_menu(menu))
                     }
                     _ => None,
                 }));

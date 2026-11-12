@@ -45,6 +45,7 @@ type R = Result<Value, String>;
 
 mod array;
 mod cad_pick;
+mod camera;
 pub(crate) mod clipboard;
 mod images;
 mod pin;
@@ -2165,20 +2166,9 @@ other_files(
          out stays as it was; with none of them it only says what the view has",
         graphic_display_options,
     ),
-    edit(
-        "camera",
-        ui_msg!("Camera"),
-        &[],
-        "{eye?: [x, y, z], target?: [x, y, z], lens?: mm, view?: a 3D view's name or id, name?} a 3D camera as Revit's \
-         Camera tool makes one: with `eye` (where the camera stands, mm) and `target` (what it looks at, mm) it makes a new \
-         named perspective 3D view looking from `eye` at `target` through `lens` (35 mm unless given, 10 to 600), named \
-         `name` or by number (\"Camera 1\", \"Camera 2\"…). With `view` too, it gives that 3D view the camera instead (its \
-         id stays; `{3D}` may be given one): a point left out stays as that camera has it, so `lens` alone or one point \
-         alone changes just that, and a view without a camera yet needs both. With `view` and none of `eye`, `target` or \
-         `lens` it reads the camera back: `eye`, `target`, `lens` and whether the view is in perspective (null eye/target \
-         for a view with no camera yet). The eye is never on the target, so the view always has a direction to look in",
-        camera,
-    ),
+    edit("camera", ui_msg!("Camera"), &[], camera::DOC, camera::camera),
+    // Navigation, as Revit's, is no undo step: the view is kept with the project, and undo leaves it where it was turned.
+    other("view_orientation", "View Orientation", camera::ORIENTATION_DOC, camera::view_orientation),
     edit(
         "work_plane",
         "Work Plane",
@@ -4001,6 +3991,12 @@ fn family_preview(s: &mut Session, p: &Value) -> R {
     Ok(reply)
 }
 
+/// A camera's output size as a picture the renderer can draw: as it is, or as large as fits [`view3d::MAX_SIDE`] at its aspect.
+fn output_side([w, h]: [u32; 2]) -> (u32, u32) {
+    let k = (f64::from(view3d::MAX_SIDE) / f64::from(w.max(h).max(1))).min(1.0);
+    (((f64::from(w) * k).round() as u32).max(1), ((f64::from(h) * k).round() as u32).max(1))
+}
+
 fn render_view(s: &mut Session, p: &Value) -> R {
     let c = "render";
     // A family on its own, in a model of its own: this project isn't touched by it. `mode` and the
@@ -4030,9 +4026,17 @@ fn render_view(s: &mut Session, p: &Value) -> R {
         _ => None,
     };
     if let Some(three) = three_d {
-        let (azimuth, elevation) = (num(c, p, "azimuth")?.unwrap_or(view3d::AZIMUTH), num(c, p, "elevation")?.unwrap_or(view3d::ELEVATION));
+        let own = three.and_then(|v| match m.elements.get(v) {
+            Some(Element::View3D(v3)) => Some((v3.azimuth, v3.elevation)),
+            _ => None,
+        });
+        let (azimuth, elevation) = (
+            num(c, p, "azimuth")?.unwrap_or(own.map_or(view3d::AZIMUTH, |o| o.0)),
+            num(c, p, "elevation")?.unwrap_or(own.map_or(view3d::ELEVATION, |o| o.1)),
+        );
         let scene = view3d::Scene::new(m);
-        let look = Look::of_3d(m);
+        // As the view itself is seen: its own Visibility/Graphics, section box and display options (a camera view's are its).
+        let look = three.map_or_else(|| Look::of_3d(m), |id| Look::of(m, id));
         // Through the view's lens, if it's in perspective, and from as high as the eye is put.
         let held = three.and_then(|v| match m.elements.get(v) {
             Some(Element::View3D(v3)) => Some(v3.clone()),
@@ -4042,9 +4046,19 @@ fn render_view(s: &mut Session, p: &Value) -> R {
         let name = held.as_ref().map_or_else(|| "{3D}".to_string(), |v| v.name.clone());
         let camera = held.as_ref().and_then(|v| v.camera);
         // A camera view is seen from its eye at its target through its lens; the default is fitted over the model.
-        let fitted = match (camera, lens) {
-            (Some(cam), Some(lens)) => view3d::Camera::at(cam.eye, cam.target, lens, w3, h3),
-            _ => scene.fit_from(view3d::Camera { lens, ..scene.fit_in(azimuth, elevation, w3, h3, &look) }, &look),
+        // As the person left it: a camera view through its physical camera, at its Output Size unless a width or height is
+        // asked for; another from where it was left; one never moved fitted over the model from its own azimuth and elevation
+        // (or those asked for).
+        let asked = !absent(p.get("width")) || !absent(p.get("height"));
+        let turned = !absent(p.get("azimuth")) || !absent(p.get("elevation"));
+        let (w3, h3) = match camera {
+            Some(cam) if !asked => output_side(cam.physical.output),
+            _ => (w3, h3),
+        };
+        let left = held.as_ref().filter(|v| v.camera.is_some() || !turned).and_then(|v| view3d::as_left(v, w3, h3));
+        let fitted = match left {
+            Some(cam) => cam,
+            None => scene.fit_from(view3d::Camera { lens, ..scene.fit_in(azimuth, elevation, w3, h3, &look) }, &look),
         };
         let cam = match (num(c, p, "eye_elevation")?, lens) {
             (Some(z), Some(_)) if z.is_finite() && z.abs() <= MAX_COORD => fitted.with_eye_elevation(z),
@@ -4063,7 +4077,7 @@ fn render_view(s: &mut Session, p: &Value) -> R {
             &mut s.files,
             p,
             png,
-            json!({"width": w3, "height": h3, "view": name, "kind": "3D view", "azimuth": cam.azimuth, "elevation": cam.elevation,
+            json!({"width": cam.width, "height": cam.height, "view": name, "kind": "3D view", "azimuth": cam.azimuth, "elevation": cam.elevation,
                 "lens": lens, "eye_elevation": cam.eye_elevation(), "eye": camera.map(|c| c.eye), "target": camera.map(|c| c.target)}),
         );
     }
@@ -4717,89 +4731,6 @@ fn point3_req(c: &str, p: &Value, key: &str) -> Result<[f64; 3], String> {
     }
 }
 
-fn camera(s: &mut Session, p: &Value) -> R {
-    let c = "camera";
-    let m = &s.model;
-    let eye_given = !absent(p.get("eye"));
-    let target_given = !absent(p.get("target"));
-    let view = p.get("view");
-    let named_view = !absent(view);
-    // The default 3D view asked for by name: it is made when it's first given a camera, as when its perspective is first
-    // turned; nothing exists yet to look up.
-    let default_3d = matches!(view, Some(Value::String(n)) if n.eq_ignore_ascii_case("{3D}") || n.eq_ignore_ascii_case("3D"));
-    // With a view and none of eye, target or lens, this reads the camera; it needs the view to exist. Otherwise the view is
-    // where the camera goes: given, a new default `{3D}`, or a new camera view made below.
-    let v = match view {
-        Some(_) if named_view && !default_3d => {
-            let id = view_param(c, m, p, false)?;
-            if !matches!(m.elements.get(id), Some(Element::View3D(_))) {
-                return Err(bad(c, format!("{} isn't a 3D view; a camera goes on a 3D view", view_title(m, id))));
-            }
-            Some(id)
-        }
-        Some(_) if named_view && default_3d => m.default_3d(),
-        _ => None,
-    };
-    let reading = named_view && !eye_given && !target_given && absent(p.get("lens"));
-    // A point given must be a point, by its name; one left out stays as the view has it (below).
-    let eye = if eye_given { Some(point3_req(c, p, "eye")?) } else { None };
-    let target = if target_given { Some(point3_req(c, p, "target")?) } else { None };
-    let lens = num(c, p, "lens")?;
-    let was = v.and_then(|id| match m.elements.get(id) {
-        Some(Element::View3D(v3)) => v3.perspective.filter(|p| p.on).map(|p| p.lens),
-        _ => None,
-    });
-    // Read: the camera as the view has it, with what its perspective says. Reading makes nothing: the default `{3D}`
-    // before anything made it reads as a view with no camera yet.
-    if reading {
-        let (cam, pers, name) = match v.and_then(|id| m.elements.get(id)) {
-            Some(Element::View3D(v3)) => (v3.camera, v3.perspective.map(|p| (p.on, p.lens)), v3.name.clone()),
-            _ => (None, None, "{3D}".to_string()),
-        };
-        let (on, lens) = pers.unwrap_or((false, lens.unwrap_or(view3d::LENS)));
-        return Ok(
-            json!({"view": v, "name": name, "eye": cam.map(|c| c.eye), "target": cam.map(|c| c.target), "lens": lens, "perspective": on}),
-        );
-    }
-    // Set: the points kept from the camera the view has when they are not given, so a lens alone (or one point) changes
-    // just that; a view without a camera yet needs both. The eye is never on the target.
-    let kept = v.and_then(|id| match m.elements.get(id) {
-        Some(Element::View3D(v3)) => v3.camera,
-        _ => None,
-    });
-    let (Some(eye), Some(target)) = (eye.or(kept.map(|k| k.eye)), target.or(kept.map(|k| k.target))) else {
-        return Err(bad(c, "`eye` and `target` [x, y, z] are both required to set a camera"));
-    };
-    let across = (0..3).map(|k| eye[k] - target[k]).fold(0.0, |acc, d| acc + d * d).sqrt();
-    if across <= TOL {
-        return Err(bad(c, "the eye is on the target; give the camera two points a little apart"));
-    }
-    // Set: the lens kept from the view it lands on when not given.
-    let lens = lens.or(was).unwrap_or(view3d::LENS);
-    if !(view3d::MIN_LENS..=view3d::MAX_LENS).contains(&lens) {
-        let (lo, hi) = (view3d::MIN_LENS, view3d::MAX_LENS);
-        return Err(bad(c, format!("a {lens} mm lens is no camera's; a camera's lens is {lo} to {hi} mm")));
-    }
-    let set = crate::model::ViewCamera { eye, target };
-    let id = match v {
-        Some(id) => id,
-        // The default `{3D}` when asked for and not made yet keeps its own name; a new camera view is named by number.
-        None if default_3d => s.model_mut().insert(Element::View3D(View3D { camera: Some(set), ..View3D::default_view() })),
-        None => {
-            let name = match string(c, p, "name")? {
-                Some(n) => n,
-                None => s.model.free_view_name(s.model.language.word("Camera"), true),
-            };
-            s.model_mut().insert(Element::View3D(View3D { name, camera: Some(set), ..View3D::default_view() }))
-        }
-    };
-    if let Some(Element::View3D(v3)) = s.model_mut().elements.get_mut(id) {
-        v3.camera = Some(set);
-        v3.perspective = Some(Perspective { lens, on: true });
-    }
-    Ok(json!({"view": id, "id": id, "name": s.model.view_name(id), "eye": eye, "target": target, "lens": lens, "perspective": true}))
-}
-
 fn work_plane(s: &mut Session, p: &Value) -> R {
     let c = "work_plane";
     only(c, p, &["view", "level", "offset", "points", "surface"])?;
@@ -4844,7 +4775,7 @@ fn work_plane(s: &mut Session, p: &Value) -> R {
         None => s.model_mut().insert(Element::View3D(View3D::default_view())),
     };
     if let Some(Element::View3D(v3)) = s.model_mut().elements.get_mut(v) {
-        v3.work_plane = plane;
+        v3.work_plane = plane.map(Box::new);
     }
     let wp = s.model.work_plane(Some(v));
     let level = wp.level.and_then(|g| s.model.elements.id(g));
@@ -12635,7 +12566,7 @@ pub(crate) fn transform(c: &str, m: &Model, mut e: Element, id: Id, mo: &Motion,
                     let q = f(P2(p[0], p[1]));
                     [q.0, q.1, p[2]]
                 };
-                v.camera = Some(crate::model::ViewCamera { eye: lift(cam.eye), target: lift(cam.target) });
+                v.camera = Some(crate::model::ViewCamera { eye: lift(cam.eye), target: lift(cam.target), ..cam });
             }
             None => return Err(bad(c, format!("view3d {id} has no place in plan; move its viewport on its sheet"))),
         },
