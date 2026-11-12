@@ -41,7 +41,9 @@ fn placed(h: &mut Harness<BimApp>) -> Id {
     // Its thumbnail is made a frame after the box opens.
     h.run();
     h.run();
-    assert!(h.query_by_label("Page to Import").is_some() && h.query_by_label("150 DPI").is_some(), "Revit's box, at 150 DPI");
+    assert!(h.state().pdf_box.is_some(), "the box is open: {:?}", h.state().status.text);
+    assert!(h.query_by_label("Page to Import").is_some(), "Revit's box");
+    assert_eq!(combo_value(h, "Resolution"), "150 DPI");
     assert!(h.query_by_label("200 × 150 mm").is_some(), "its page size");
     assert!(h.query_by_label("Page 1").is_some(), "its page's thumbnail");
     press(h, "OK");
@@ -71,16 +73,20 @@ fn import_pdf_picks_a_page_and_a_resolution_and_a_click_places_it_at_true_size()
 fn a_corner_dragged_scales_the_image_about_the_corner_across_in_proportion() {
     let mut h = with_pdf();
     let id = placed(&mut h);
+    // Made small enough to see whole in the plan on screen: 4 m by 3 m round (4000, 3000).
+    h.state_mut().session.execute("modify", &json!({"id": id, "width": 4000})).unwrap();
+    h.run();
     let before = images(&h)[0].1.clone();
     let [_, tr, _, bl] = before.corners();
     h.state_mut().selection = vec![id];
     h.run();
     // The top right corner, dragged out by 2 m and up by a little: in proportion, along its diagonal.
     drag(&mut h, tr, tr + P2(2000.0, 200.0));
+    assert!(h.state().session.model.pinned_ids().is_empty());
     let after = images(&h)[0].1.clone();
     let [_, _, _, bl2] = after.corners();
     assert!(close(bl2, bl, 30.0), "the corner across stays: {bl:?} {bl2:?}");
-    assert!(after.width > before.width + 1000.0, "{after:?}");
+    assert!(after.width > before.width + 1000.0, "{before:?} {after:?}");
     assert!((after.width / after.height - before.width / before.height).abs() < 1e-6, "Lock Proportions: {after:?}");
     // Unlocked, a corner sizes each side on its own.
     h.state_mut().session.execute("modify", &json!({"id": id, "lock": false})).unwrap();
@@ -123,15 +129,18 @@ fn bring_to_front_and_send_to_back_set_its_draw_layer() {
 fn manage_images_lists_them_and_places_one_again() {
     let mut h = with_pdf();
     placed(&mut h);
+    // Nothing selected, so the Properties palette doesn't name the image too.
+    h.state_mut().selection.clear();
+    h.run();
     press(&mut h, "Insert");
     press(&mut h, "Manage Images");
-    assert!(h.query_by_label("Loaded from file").is_some());
+    assert!(h.query_by_label("Place Instance").is_some());
     // Its name, and the file it was loaded from, say the same.
     h.get_all_by_label("WC.pdf").next().unwrap().click();
     h.run();
     press(&mut h, "Place Instance");
     assert_eq!(h.state().tool, Tool::PlaceImage);
-    click(&mut h, P2(-30_000.0, 0.0));
+    click(&mut h, P2(1000.0, 1000.0));
     assert_eq!(images(&h).len(), 2, "two instances of one image");
     assert_eq!(h.state().session.model.image_types.len(), 1);
 }
