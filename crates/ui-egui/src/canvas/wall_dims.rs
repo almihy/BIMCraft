@@ -121,7 +121,8 @@ impl BimApp {
         core: bool,
     ) {
         let name = t(if far { FAR } else { NEAR });
-        let r = self.control(ui, Rect::from_center_size(at, vec2(12.0, 12.0)), ui.id().with(("witness grip", id, d.side == Side::Left, far)));
+        let r =
+            self.control(ui, Rect::from_center_size(at, vec2(12.0, 12.0)), ui.id().with(("witness grip", id, d.side == Side::Left, far)));
         r.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, name));
         let ink = if r.hovered() || r.dragged() { pal().hover } else { pal().accent };
         ui.painter().circle_filled(at, 4.5, pal().surface);

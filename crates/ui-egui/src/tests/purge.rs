@@ -114,6 +114,7 @@ fn deleting_a_type_with_a_pinned_instance_says_so_as_revit_warns() {
     press(&mut h, "Delete");
     press(&mut h, "OK");
     assert!(ids(&h, "wall").is_empty(), "the pinned instance went with its type");
-    assert_eq!(h.state().status.text, "Pinned objects deleted.");
-    assert!(!h.state().status.error);
+    assert_eq!(h.state().warned, ["Pinned objects deleted."], "Revit's warning");
+    assert!(h.state().status.text.is_empty(), "no error: {:?}", h.state().status);
+    assert!(h.query_by_label("Warning").is_some(), "the box is titled Warning");
 }

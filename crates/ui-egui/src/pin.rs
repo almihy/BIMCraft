@@ -2,7 +2,8 @@
 //! (a click on it unpins), and a drag, Move, Rotate or Mirror of a pinned element that does nothing but say, in Revit's words,
 //! "Can't move pinned element." The core keeps the pins and refuses the same for the commands the agent sends (`bimcraft_core`'s
 //! `pin`); the window says it before it asks, as Revit does. Delete does what it can: the elements that are not pinned go, and
-//! the status says "Pinned objects were not deleted. To delete them, unpin them before using delete."
+//! the status box warns, as Revit's warning (not an error), "Pinned objects were not deleted. To delete them, unpin them before
+//! using delete."
 
 use bimcraft_core::geom::P2;
 use bimcraft_core::model::{Element, Id, Model};
@@ -71,18 +72,28 @@ impl BimApp {
     pub(crate) fn delete_selection(&mut self) {
         let pinned = self.pinned_selection();
         let free: Vec<Id> = self.selection.iter().copied().filter(|id| !pinned.contains(id)).collect();
+        let mut warned = Vec::new();
         if !free.is_empty() {
             let Some(reply) = self.run("delete", json!({"ids": free})) else { return };
             // A pinned door or window that went with its wall: Revit warns of it.
             if let Some(note) = reply["note"].as_str() {
-                self.status = Status { text: note.to_string(), error: false };
+                warned.push(note.to_string());
             }
         }
         if !pinned.is_empty() {
-            let text = t("Pinned objects were not deleted. To delete them, unpin them before using delete.").to_string();
-            self.status = Status { text, error: true };
+            warned.push(t("Pinned objects were not deleted. To delete them, unpin them before using delete.").to_string());
             // As Revit leaves it: nothing selected, the pinned ones neither.
             self.selection.clear();
+        }
+        self.warn(warned);
+    }
+
+    /// Revit's warnings of what was just done (warning-severity failures, never errors): in the status box's corner under
+    /// the warning sign until the next command works, in place of what it said before.
+    pub(crate) fn warn(&mut self, warned: Vec<String>) {
+        if !warned.is_empty() {
+            self.status = Status::default();
+            self.warned = warned;
         }
     }
 

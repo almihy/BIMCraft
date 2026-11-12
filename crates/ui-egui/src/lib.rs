@@ -548,6 +548,9 @@ pub struct BimApp {
     /// The selected elements, in the order they were picked.
     pub selection: Vec<Id>,
     pub status: Status,
+    /// What Revit would warn of after the last action ("Pinned objects were not deleted."): a warning, not an error, in the
+    /// status box's corner until the next command works or it is dismissed. An error said since takes its place.
+    pub(crate) warned: Vec<String>,
     /// The interface's own zoom (egui's zoom factor) on top of the system's scale, read each frame: Zoom Sheet Size takes it out.
     pub(crate) ui_zoom: f32,
     /// The interface's language: English unless told otherwise (the app asks the environment).
@@ -1345,6 +1348,7 @@ impl BimApp {
             tool: Tool::Modify,
             selection: Vec::new(),
             status: Status::default(),
+            warned: Vec::new(),
             ui_zoom: 1.0,
             views: vec![first],
             front: first,
@@ -1603,6 +1607,7 @@ impl BimApp {
         match self.session.execute(id, &params) {
             Ok(v) => {
                 self.status = Status::default();
+                self.warned.clear();
                 // The core renames and drops the option with its set.
                 self.active_option = self.session.option.clone();
                 Some(v)
@@ -5407,25 +5412,51 @@ impl BimApp {
         });
     }
 
-    /// Why the last command failed, in a box over the view's corner until the next one works.
+    /// Why the last command failed, or what it warns of, in a box over the view's corner until the next one works: an error in
+    /// the error's colour, a warning (Revit's warning-severity failures, such as "Pinned objects were not deleted.") under the
+    /// warning sign, as Review Warnings shows warnings.
     fn warning(&mut self, ctx: &Context) {
-        if self.status.text.is_empty() {
+        if !self.status.text.is_empty() {
+            // Said since the warning: it takes its place.
+            self.warned.clear();
+        }
+        let warned = self.status.text.is_empty() && !self.warned.is_empty();
+        if self.status.text.is_empty() && !warned {
             return;
         }
-        let (title, color) = if self.status.error { (t("Error"), pal().error) } else { (t("Note"), pal().accent_ink) };
+        let (title, color) = if warned {
+            (t("Warning"), pal().accent_ink)
+        } else if self.status.error {
+            (t("Error"), pal().error)
+        } else {
+            (t("Note"), pal().accent_ink)
+        };
+        let text = if warned {
+            self.warned.join(
+                "
+",
+            )
+        } else {
+            self.status.text.clone()
+        };
         let at = self.view_rect.right_bottom() - vec2(16.0, 16.0);
         Area::new(UiId::new("warning")).order(Order::Middle).fixed_pos(at).pivot(Align2::RIGHT_BOTTOM).show(ctx, |ui| {
             Frame::popup(ui.style()).fill(pal().surface).stroke(Stroke::new(1.0, color)).show(ui, |ui| {
                 ui.set_max_width(380.0);
                 ui.horizontal(|ui| {
+                    if warned {
+                        let (sign, _) = ui.allocate_exact_size(vec2(16.0, 16.0), egui::Sense::hover());
+                        icons::paint(ui.painter(), Icon::Warning, sign, color);
+                    }
                     ui.label(RichText::new(title).strong().color(color));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if icon_button(ui, Icon::Close, "Dismiss").clicked() {
                             self.status = Status::default();
+                            self.warned.clear();
                         }
                     });
                 });
-                ui.label(&self.status.text);
+                ui.label(text);
             });
         });
     }

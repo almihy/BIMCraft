@@ -140,24 +140,47 @@ fn delete_takes_what_is_not_pinned_and_says_what_it_left() {
     h.run();
     key(&mut h, Key::Delete);
     assert_eq!(ids(&h, "column"), [a], "the free column went, the pinned one stayed");
-    let status = &h.state().status;
-    assert!(
-        status.error && status.text.contains("Pinned objects were not deleted. To delete them, unpin them before using delete."),
-        "{status:?}"
-    );
+    // Revit's warning (PinnedObjectNotDeleted is a warning-severity failure), never an error.
+    const NOT_DELETED: &str = "Pinned objects were not deleted. To delete them, unpin them before using delete.";
+    assert_eq!(h.state().warned, [NOT_DELETED]);
+    assert!(h.state().status.text.is_empty(), "no error: {:?}", h.state().status);
+    assert!(h.query_by_label("Warning").is_some() && h.query_by_label("Error").is_none(), "the box is a warning's");
+    assert!(h.query_by_label(NOT_DELETED).is_some());
     assert!(h.state().selection.is_empty(), "nothing is left selected, the pinned one neither");
     // Alone, a pinned element is refused whole, and nothing stays selected; Unpin then lets it go.
     h.state_mut().selection = vec![a];
     h.run();
     key(&mut h, Key::Delete);
     assert_eq!(ids(&h, "column"), [a]);
-    assert!(h.state().status.text.contains("Pinned objects were not deleted"), "{:?}", h.state().status);
+    assert_eq!(h.state().warned, [NOT_DELETED], "{:?}", h.state().status);
+    assert!(h.state().status.text.is_empty());
     assert!(h.state().selection.is_empty());
     h.state_mut().selection = vec![a];
     h.run();
     shortcut(&mut h, "UP");
+    assert!(h.state().warned.is_empty(), "the next command that works ends the warning");
     key(&mut h, Key::Delete);
     assert!(ids(&h, "column").is_empty());
+}
+
+#[test]
+fn a_pinned_door_and_its_free_wall_deleted_are_warned_of_never_as_an_error() {
+    let mut h = app(&format!(
+        "{BOX}
+door {{\"at\": [2000, 0]}}"
+    ));
+    let (door, south) = (ids(&h, "door")[0], ids(&h, "wall")[0]);
+    h.state_mut().session.execute("pin", &json!({"ids": [door]})).unwrap();
+    h.state_mut().selection = vec![door, south];
+    h.run();
+    key(&mut h, Key::Delete);
+    assert!(!ids(&h, "wall").contains(&south), "the wall went");
+    let warned = h.state().warned.join(" ");
+    assert!(warned.contains("deleted because their parent or host object was deleted"), "{warned}");
+    assert!(warned.contains("Pinned objects were not deleted."), "{warned}");
+    assert!(h.state().status.text.is_empty(), "no error: {:?}", h.state().status);
+    assert!(h.query_by_label("Warning").is_some() && h.query_by_label("Error").is_none());
+    assert!(h.state().selection.is_empty());
 }
 
 #[test]

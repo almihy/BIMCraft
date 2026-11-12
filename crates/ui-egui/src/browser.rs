@@ -643,12 +643,12 @@ impl BimApp {
     }
 
     /// `delete_type`, and what Revit warns of when pinned objects went with it ("Pinned objects deleted.", and the host's words
-    /// for a pinned door or window that went with its wall) on the status bar.
+    /// for a pinned door or window that went with its wall), as a warning.
     fn delete_type_now(&mut self, params: Value) {
         if let Some(reply) = self.run("delete_type", params)
             && let Some(note) = reply["note"].as_str()
         {
-            self.status = crate::Status { text: note.to_string(), error: false };
+            self.warn(vec![note.to_string()]);
         }
     }
 }
