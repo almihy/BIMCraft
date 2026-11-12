@@ -7,14 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 publish = false
 
-# Cargo turns on a dependency's features for what a command builds: `cargo test -p bimcraft-core` builds num-traits
-# without `libm`, `-p bimcraft-ui-egui` (egui wants it) with it, `--workspace` adds getrandom's browser backend, and each
-# change of a dependency's features rebuilds it and everything above it, the model crate first (104 s). The model depends
-# on this crate (on the desktop), which asks for the union of them all, so every command builds the same dependencies and
-# switching between them rebuilds nothing. The list is the crates in the model's dependency graph whose features differed
-# between `cargo tree -e features` of `-p bimcraft-core`, `-p bimcraft-ui-egui` and `--workspace`: when a dependency
-# changes and the model rebuilds again on switching, run those three and add what differs. Host crates (proc-macro2,
-# syn, through derive macros and build scripts) are build-dependencies too, as cargo resolves the host's features apart.
+# Why, and how to keep it: CLAUDE.md beside this file.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bimcraft-i18n = { workspace = true, features = ["default", "catalog"] }
 either = { version = "1.19", features = ["use_std"] }
