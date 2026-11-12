@@ -3,10 +3,6 @@
 msgid ""
 msgstr "Project-Id-Version: BIMCraft\nLanguage: cs\nLast-Translator: Smatli\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
-#: crates/core/src/commands.rs:1380
-msgid "Array"
-msgstr "Pole"
-
 #: crates/core/src/sheet.rs:291
 msgid "AS INDICATED"
 msgstr ""
@@ -15,28 +11,29 @@ msgstr ""
 msgid "Air Terminal"
 msgstr "Vyústka"
 
-#: crates/core/src/schedule.rs:194
-#: crates/core/src/schedule.rs:233
+#: crates/core/src/schedule.rs:197
+#: crates/core/src/schedule.rs:218
+#: crates/core/src/schedule.rs:267
 msgid "Area"
 msgstr "Plocha"
 
-#: crates/core/src/family.rs:2071
+#: crates/core/src/family.rs:2115
 msgid "Arm Width"
 msgstr "Šířka područky"
 
-#: crates/core/src/family.rs:2115
+#: crates/core/src/family.rs:2159
 msgid "Base Cabinet"
 msgstr "Spodní skříňka"
 
-#: crates/core/src/family.rs:2169
+#: crates/core/src/family.rs:2213
 msgid "Bathtub"
 msgstr "Vana"
 
-#: crates/core/src/family.rs:2056
+#: crates/core/src/family.rs:2100
 msgid "Bed"
 msgstr "Postel"
 
-#: crates/core/src/model.rs:3080
+#: crates/core/src/model.rs:3137
 msgid "Brick"
 msgstr "Cihla"
 
@@ -44,15 +41,15 @@ msgstr "Cihla"
 msgid "Brick 225 x 75"
 msgstr "Cihla 225 x 75"
 
-#: crates/core/src/commands.rs:4417
+#: crates/core/src/commands.rs:4639
 msgid "Camera"
 msgstr "Kamera"
 
-#: crates/core/src/family.rs:2354
+#: crates/core/src/family.rs:2398
 msgid "Casement Window"
 msgstr "Křídlové okno"
 
-#: crates/core/src/schedule.rs:224
+#: crates/core/src/schedule.rs:258
 msgid "Category"
 msgstr ""
 
@@ -72,31 +69,31 @@ msgstr "Osa"
 msgid "Centre Lines"
 msgstr "Osové čáry"
 
-#: crates/core/src/model.rs:3088
+#: crates/core/src/model.rs:3145
 msgid "Ceramic tile"
 msgstr "Keramická dlažba"
 
-#: crates/core/src/family.rs:2041
+#: crates/core/src/family.rs:2085
 msgid "Chair"
 msgstr "Židle"
 
-#: crates/core/src/family.rs:1980
+#: crates/core/src/family.rs:2024
 msgid "Concrete"
 msgstr "Beton"
 
-#: crates/core/src/model.rs:3082
+#: crates/core/src/model.rs:3139
 msgid "Concrete block"
 msgstr "Betonová tvárnice"
 
-#: crates/core/src/model.rs:3096
+#: crates/core/src/model.rs:3153
 msgid "Copper"
 msgstr "Měď"
 
-#: crates/core/src/commands.rs:1320
+#: crates/core/src/commands.rs:1455
 msgid "Copy"
 msgstr "Kopie"
 
-#: crates/core/src/schedule.rs:206
+#: crates/core/src/schedule.rs:209
 msgid "Count"
 msgstr "Počet"
 
@@ -104,7 +101,7 @@ msgstr "Počet"
 msgid "Crosshatch"
 msgstr "Křížové šrafování"
 
-#: crates/core/src/render.rs:3718
+#: crates/core/src/render.rs:3723
 msgid "DN"
 msgstr "DOLŮ"
 
@@ -120,15 +117,15 @@ msgstr "Čerchovaná"
 msgid "Data Outlet"
 msgstr "Datová zásuvka"
 
-#: crates/core/src/commands.rs:10118
+#: crates/core/src/commands.rs:10681
 msgid "Dependent"
 msgstr "Závislý"
 
-#: crates/core/src/family.rs:1978
+#: crates/core/src/family.rs:2022
 msgid "Depth"
 msgstr "Hloubka"
 
-#: crates/core/src/family.rs:2087
+#: crates/core/src/family.rs:2131
 msgid "Desk"
 msgstr "Pracovní stůl"
 
@@ -152,7 +149,7 @@ msgstr "Průměr"
 msgid "Distribution Board"
 msgstr "Rozváděč"
 
-#: crates/core/src/schedule.rs:119
+#: crates/core/src/schedule.rs:120
 msgid "Door Schedule"
 msgstr "Výkaz dveří"
 
@@ -160,15 +157,15 @@ msgstr "Výkaz dveří"
 msgid "Dot"
 msgstr "Tečkovaná"
 
-#: crates/core/src/family.rs:2263
+#: crates/core/src/family.rs:2307
 msgid "Double Door"
 msgstr "Dvoukřídlé dveře"
 
-#: crates/core/src/model.rs:2599
+#: crates/core/src/model.rs:2646
 msgid "Double Sliding"
 msgstr "Dvoukřídlé posuvné"
 
-#: crates/core/src/model.rs:2597
+#: crates/core/src/model.rs:2644
 msgid "Double Swing"
 msgstr "Dvoukřídlé otočné"
 
@@ -176,7 +173,7 @@ msgstr "Dvoukřídlé otočné"
 msgid "Earthing Electrode"
 msgstr "Zemnicí elektroda"
 
-#: crates/core/src/model.rs:1938
+#: crates/core/src/model.rs:1969
 msgid "East"
 msgstr "Východ"
 
@@ -196,8 +193,8 @@ msgstr "Elektroinstalace – osvětlení"
 msgid "Electrical Power"
 msgstr "Elektroinstalace – napájení"
 
-#: crates/core/src/commands.rs:9902
-#: crates/core/src/commands.rs:12517
+#: crates/core/src/commands.rs:10465
+#: crates/core/src/commands.rs:13193
 msgid "Elevation"
 msgstr "Pohled"
 
@@ -205,19 +202,19 @@ msgstr "Pohled"
 msgid "Existing"
 msgstr "Stávající"
 
-#: crates/core/src/family.rs:1980
+#: crates/core/src/family.rs:2024
 msgid "Fabric"
 msgstr "Textilie"
 
-#: crates/core/src/schedule.rs:192
+#: crates/core/src/schedule.rs:195
 msgid "Family"
 msgstr "Rodina"
 
-#: crates/core/src/model.rs:2601
+#: crates/core/src/model.rs:2648
 msgid "Fixed"
 msgstr "Pevné"
 
-#: crates/core/src/family.rs:2331
+#: crates/core/src/family.rs:2375
 msgid "Fixed Window"
 msgstr "Fixní okno"
 
@@ -225,23 +222,23 @@ msgstr "Fixní okno"
 msgid "Floor Drain"
 msgstr "Podlahová vpusť"
 
-#: crates/core/src/schedule.rs:122
+#: crates/core/src/schedule.rs:123
 msgid "Floor Schedule"
 msgstr "Výkaz podlah"
 
-#: crates/core/src/model.rs:2600
+#: crates/core/src/model.rs:2647
 msgid "Folding"
 msgstr "Skládací"
 
-#: crates/core/src/family.rs:2203
+#: crates/core/src/family.rs:2247
 msgid "Frame Depth"
 msgstr "Hloubka rámu"
 
-#: crates/core/src/family.rs:2205
+#: crates/core/src/family.rs:2249
 msgid "Frame Material"
 msgstr "Materiál rámu"
 
-#: crates/core/src/family.rs:2203
+#: crates/core/src/family.rs:2247
 msgid "Frame Width"
 msgstr "Šířka rámu"
 
@@ -249,16 +246,16 @@ msgstr "Šířka rámu"
 msgid "Gate Valve"
 msgstr "Šoupátko"
 
-#: crates/core/src/family.rs:2205
+#: crates/core/src/family.rs:2249
 #: crates/core/src/view3d.rs:1020
 msgid "Glass"
 msgstr "Sklo"
 
-#: crates/core/src/schedule.rs:487
+#: crates/core/src/schedule.rs:526
 msgid "Gross Floor Area"
 msgstr "Hrubá podlažní plocha"
 
-#: crates/core/src/model.rs:3087
+#: crates/core/src/model.rs:3144
 msgid "Gypsum board"
 msgstr "Sádrokarton"
 
@@ -266,7 +263,7 @@ msgstr "Sádrokarton"
 msgid "Hairline"
 msgstr "Vlasová čára"
 
-#: crates/core/src/family.rs:2049
+#: crates/core/src/family.rs:2093
 msgid "Headboard Height"
 msgstr "Výška čela"
 
@@ -290,7 +287,7 @@ msgstr "Vodorovná"
 msgid "Inspection Box"
 msgstr "Revizní šachta"
 
-#: crates/core/src/import.rs:1364
+#: crates/core/src/import.rs:1363
 msgid "Insulation"
 msgstr "Tepelná izolace"
 
@@ -298,28 +295,28 @@ msgstr "Tepelná izolace"
 msgid "Kitchen Sink"
 msgstr "Kuchyňský dřez"
 
-#: crates/core/src/family.rs:2205
+#: crates/core/src/family.rs:2249
 msgid "Leaf Material"
 msgstr "Materiál křídla"
 
-#: crates/core/src/family.rs:2203
+#: crates/core/src/family.rs:2247
 msgid "Leaf Thickness"
 msgstr "Tloušťka křídla"
 
-#: crates/core/src/family.rs:1979
+#: crates/core/src/family.rs:2023
 msgid "Leg Width"
 msgstr "Šířka nohy"
 
-#: crates/core/src/family.rs:1978
+#: crates/core/src/family.rs:2022
 msgid "Length"
 msgstr "Délka"
 
-#: crates/core/src/commands.rs:6628
-#: crates/core/src/model.rs:3226
+#: crates/core/src/commands.rs:6850
+#: crates/core/src/model.rs:3298
 msgid "Level"
 msgstr "Podlaží"
 
-#: crates/core/src/schedule.rs:123
+#: crates/core/src/schedule.rs:124
 msgid "Level Schedule"
 msgstr "Výkaz podlaží"
 
@@ -331,7 +328,7 @@ msgstr "Zatížení"
 msgid "Long Dash"
 msgstr "Dlouhá čárkovaná"
 
-#: crates/core/src/model.rs:1545
+#: crates/core/src/model.rs:1576
 msgid "Mark"
 msgstr "Označení"
 
@@ -339,11 +336,11 @@ msgstr "Označení"
 msgid "Masking"
 msgstr "Maskovací"
 
-#: crates/core/src/commands.rs:7895
+#: crates/core/src/commands.rs:8417
 msgid "Mass"
 msgstr "Objem"
 
-#: crates/core/src/schedule.rs:234
+#: crates/core/src/schedule.rs:268
 msgid "Material"
 msgstr ""
 
@@ -351,11 +348,11 @@ msgstr ""
 msgid "Medium Lines"
 msgstr "Střední čáry"
 
-#: crates/core/src/import.rs:1367
+#: crates/core/src/import.rs:1366
 msgid "Membrane"
 msgstr "Hydroizolační fólie"
 
-#: crates/core/src/family.rs:2205
+#: crates/core/src/family.rs:2249
 msgid "Metal"
 msgstr "Kov"
 
@@ -367,7 +364,7 @@ msgstr "Montážní výška"
 msgid "NOT ENCLOSED"
 msgstr "NEUZAVŘENÝ OBVOD"
 
-#: crates/core/src/model.rs:1546
+#: crates/core/src/model.rs:1577
 msgid "Name"
 msgstr "Název"
 
@@ -375,27 +372,27 @@ msgstr "Název"
 msgid "New Construction"
 msgstr "Nová výstavba"
 
-#: crates/core/src/schedule.rs:1223
+#: crates/core/src/schedule.rs:1290
 msgid "No"
 msgstr "Ne"
 
-#: crates/core/src/model.rs:1936
+#: crates/core/src/model.rs:1967
 msgid "North"
 msgstr "Sever"
 
-#: crates/core/src/schedule.rs:251
+#: crates/core/src/schedule.rs:285
 msgid "Number"
 msgstr "Číslo"
 
-#: crates/core/src/schedule.rs:256
+#: crates/core/src/schedule.rs:290
 msgid "Occupancy"
 msgstr ""
 
-#: crates/core/src/schedule.rs:201
+#: crates/core/src/schedule.rs:204
 msgid "Offset"
 msgstr "Odsazení"
 
-#: crates/core/src/schedule.rs:203
+#: crates/core/src/schedule.rs:206
 msgid "Operation"
 msgstr "Způsob otevírání"
 
@@ -415,11 +412,12 @@ msgstr "PVC"
 msgid "Patch Panel"
 msgstr "Patch panel"
 
-#: crates/core/src/schedule.rs:255
+#: crates/core/src/schedule.rs:219
+#: crates/core/src/schedule.rs:289
 msgid "Perimeter"
 msgstr "Obvod"
 
-#: crates/core/src/schedule.rs:312
+#: crates/core/src/schedule.rs:348
 msgid "Plan Area"
 msgstr "Plocha v půdorysu"
 
@@ -427,11 +425,11 @@ msgstr "Plocha v půdorysu"
 msgid "Plaster"
 msgstr "Omítka"
 
-#: crates/core/src/family.rs:1980
+#: crates/core/src/family.rs:2024
 msgid "Porcelain"
 msgstr "Porcelán"
 
-#: crates/core/src/commands.rs:3027
+#: crates/core/src/commands.rs:3249
 msgid "Project"
 msgstr "Projekt"
 
@@ -447,31 +445,31 @@ msgstr "Datový rozvaděč (Rack)"
 msgid "Recessed Luminaire"
 msgstr "Zápustné svítidlo"
 
-#: crates/core/src/schedule.rs:448
+#: crates/core/src/schedule.rs:487
 msgid "Riser Height"
 msgstr "Výška stupně"
 
-#: crates/core/src/schedule.rs:447
+#: crates/core/src/schedule.rs:486
 msgid "Risers"
 msgstr "Počet stupňů"
 
-#: crates/core/src/model.rs:3089
+#: crates/core/src/model.rs:3146
 msgid "Roof tiles"
 msgstr "Střešní tašky"
 
-#: crates/core/src/commands.rs:8128
+#: crates/core/src/commands.rs:8650
 msgid "Room"
 msgstr "Místnost"
 
-#: crates/core/src/schedule.rs:212
+#: crates/core/src/schedule.rs:215
 msgid "Room Name"
 msgstr ""
 
-#: crates/core/src/schedule.rs:211
+#: crates/core/src/schedule.rs:214
 msgid "Room Number"
 msgstr ""
 
-#: crates/core/src/schedule.rs:118
+#: crates/core/src/schedule.rs:119
 msgid "Room Schedule"
 msgstr "Výkaz místností"
 
@@ -487,16 +485,16 @@ msgstr "MĚŘÍTKO DLE VÝKRESŮ"
 msgid "Sand"
 msgstr "Písek"
 
-#: crates/core/src/model.rs:3085
+#: crates/core/src/model.rs:3142
 msgid "Screed"
 msgstr "Potěr"
 
-#: crates/core/src/family.rs:1979
+#: crates/core/src/family.rs:2023
 msgid "Seat Height"
 msgstr "Výška sedáku"
 
-#: crates/core/src/commands.rs:9879
-#: crates/core/src/commands.rs:12516
+#: crates/core/src/commands.rs:10442
+#: crates/core/src/commands.rs:13192
 msgid "Section"
 msgstr "Řez"
 
@@ -524,31 +522,31 @@ msgstr "Zobrazit předchozí + nové"
 msgid "Shower"
 msgstr "Sprcha"
 
-#: crates/core/src/schedule.rs:274
+#: crates/core/src/schedule.rs:308
 msgid "Sill"
 msgstr "Parapet"
 
-#: crates/core/src/family.rs:2241
+#: crates/core/src/family.rs:2285
 msgid "Single Door"
 msgstr "Jednokřídlé dveře"
 
-#: crates/core/src/model.rs:2598
+#: crates/core/src/model.rs:2645
 msgid "Sliding"
 msgstr "Posuvné"
 
-#: crates/core/src/family.rs:2290
+#: crates/core/src/family.rs:2334
 msgid "Sliding Door"
 msgstr "Posuvné dveře"
 
-#: crates/core/src/family.rs:2385
+#: crates/core/src/family.rs:2429
 msgid "Sliding Window"
 msgstr "Posuvné okno"
 
-#: crates/core/src/schedule.rs:311
+#: crates/core/src/schedule.rs:347
 msgid "Slope"
 msgstr "Sklon"
 
-#: crates/core/src/family.rs:2073
+#: crates/core/src/family.rs:2117
 msgid "Sofa"
 msgstr "Pohovka"
 
@@ -560,11 +558,11 @@ msgstr "Plná černá"
 msgid "Solid fill"
 msgstr "Plná výplň"
 
-#: crates/core/src/model.rs:1937
+#: crates/core/src/model.rs:1968
 msgid "South"
 msgstr "Jih"
 
-#: crates/core/src/model.rs:2596
+#: crates/core/src/model.rs:2643
 msgid "Swing"
 msgstr "Otočné"
 
@@ -572,7 +570,7 @@ msgstr "Otočné"
 msgid "Switch"
 msgstr "Vypínač"
 
-#: crates/core/src/family.rs:2020
+#: crates/core/src/family.rs:2064
 msgid "Table"
 msgstr "Stůl"
 
@@ -580,7 +578,7 @@ msgstr "Stůl"
 msgid "Tee"
 msgstr "T-kus"
 
-#: crates/core/src/family.rs:1979
+#: crates/core/src/family.rs:2023
 msgid "Thickness"
 msgstr "Tloušťka"
 
@@ -596,7 +594,7 @@ msgstr "Třífázová zásuvka"
 msgid "Tile 300"
 msgstr "Dlažba 300"
 
-#: crates/core/src/family.rs:1980
+#: crates/core/src/family.rs:2024
 msgid "Timber"
 msgstr "Dřevo"
 
@@ -604,23 +602,23 @@ msgstr "Dřevo"
 msgid "Total"
 msgstr "Celkem"
 
-#: crates/core/src/schedule.rs:449
+#: crates/core/src/schedule.rs:488
 msgid "Tread"
 msgstr "Šířka stupně"
 
-#: crates/core/src/model.rs:1547
+#: crates/core/src/model.rs:1578
 msgid "Type"
 msgstr "Typ"
 
-#: crates/core/src/render.rs:3718
+#: crates/core/src/render.rs:3723
 msgid "UP"
 msgstr "NAHORU"
 
-#: crates/core/src/schedule.rs:258
+#: crates/core/src/schedule.rs:292
 msgid "Unbounded Height"
 msgstr "Neohraničená výška"
 
-#: crates/core/src/commands.rs:10259
+#: crates/core/src/commands.rs:10822
 msgid "Unnamed"
 msgstr "Nepojmenovaný"
 
@@ -632,35 +630,35 @@ msgstr "Svislá"
 msgid "Voice Outlet"
 msgstr "Telefonní zásuvka"
 
-#: crates/core/src/schedule.rs:213
+#: crates/core/src/schedule.rs:216
 msgid "Volume"
 msgstr "Objem"
 
-#: crates/core/src/family.rs:2129
+#: crates/core/src/family.rs:2173
 msgid "WC"
 msgstr "WC"
 
-#: crates/core/src/commands.rs:236
+#: crates/core/src/commands.rs:280
 msgid "Wall"
 msgstr "Stěna"
 
-#: crates/core/src/schedule.rs:121
+#: crates/core/src/schedule.rs:122
 msgid "Wall Schedule"
 msgstr "Výkaz stěn"
 
-#: crates/core/src/family.rs:2101
+#: crates/core/src/family.rs:2145
 msgid "Wardrobe"
 msgstr "Šatní skříň"
 
-#: crates/core/src/family.rs:2148
+#: crates/core/src/family.rs:2192
 msgid "Washbasin"
 msgstr "Umyvadlo"
 
-#: crates/core/src/schedule.rs:364
+#: crates/core/src/schedule.rs:403
 msgid "Weight"
 msgstr "Hmotnost"
 
-#: crates/core/src/model.rs:1939
+#: crates/core/src/model.rs:1970
 msgid "West"
 msgstr "Západ"
 
@@ -672,15 +670,15 @@ msgstr "Tlusté čáry"
 msgid "Width"
 msgstr "Šířka"
 
-#: crates/core/src/schedule.rs:120
+#: crates/core/src/schedule.rs:121
 msgid "Window Schedule"
 msgstr "Výkaz oken"
 
-#: crates/core/src/family.rs:2113
+#: crates/core/src/family.rs:2157
 msgid "Worktop"
 msgstr "Pracovní deska"
 
-#: crates/core/src/schedule.rs:1223
+#: crates/core/src/schedule.rs:1290
 msgid "Yes"
 msgstr "Ano"
 
@@ -696,3 +694,6 @@ msgstr "bwc"
 msgid "wc"
 msgstr "wc"
 
+#: crates/core/src/commands.rs:1380
+#~ msgid "Array"
+#~ msgstr "Pole"
