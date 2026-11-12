@@ -66,7 +66,7 @@ fn a_pdf_page_comes_in_at_the_scale_it_states_with_its_lines_where_it_shows_them
     // The agent reads its lines as an import's, in plan mm.
     let read = run(&mut s, "cad_read", json!({"id": id, "kinds": ["polyline"]}));
     let room = &read["items"][0];
-    assert_eq!(room["layer"], "Lines");
+    assert_eq!(room["layer"], "Black 0.30", "a PDF with no layers has its lines by colour and weight");
     assert_eq!(room["closed"], true);
     let pts = room["points"].as_array().unwrap();
     assert!(near(&pts[0], [-3000.0, -2000.0]) && near(&pts[2], [3000.0, 2000.0]), "{room}");

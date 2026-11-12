@@ -61,6 +61,8 @@ mod image_tests;
 #[cfg(test)]
 mod masterplan_tests;
 #[cfg(test)]
+mod pdf_layers_tests;
+#[cfg(test)]
 mod model_tests;
 #[cfg(test)]
 mod openings_past_top_tests;

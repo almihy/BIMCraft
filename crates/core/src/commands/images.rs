@@ -256,6 +256,12 @@ fn place(c: &str, s: &mut Session, p: &Value, name: &str, new: Option<ImageType>
         lock: true,
         snaps: true,
         layer,
+        // A PDF's layers it has off come in hidden, as an import of a drawing's visible layers.
+        hidden: t
+            .lines()
+            .filter(|_| t.drawn())
+            .map(|cad| cad.dxf().layers.iter().filter(|l| l.off).map(|l| l.name.clone()).collect())
+            .unwrap_or_default(),
     };
     let corners = im.corners();
     let m = s.model_mut();
@@ -268,6 +274,9 @@ fn place(c: &str, s: &mut Session, p: &Value, name: &str, new: Option<ImageType>
         "size": [read_mm(w0), read_mm(h0)], "width": read_mm(width), "height": read_mm(height), "scale": scale,
         "corners": corners.map(read_point), "lines": t.lines().map_or(0, |l| l.dxf().entities.len()),
     });
+    if t.drawn() {
+        reply["layers"] = json!(t.layers());
+    }
     if let Some(page) = t.page() {
         reply["page"] = json!(page);
         reply["stated_scale"] = json!(stated);
@@ -342,6 +351,7 @@ pub(super) fn manage_images(s: &mut Session, p: &Value) -> R {
         for n in &deleted {
             mm.image_types.remove(n);
         }
+        mm.forget_pdf_layers(&deleted);
     }
     let m = &s.model;
     let list: Vec<Value> = m
@@ -352,7 +362,7 @@ pub(super) fn manage_images(s: &mut Session, p: &Value) -> R {
                 "name": name, "source": t.source(), "kind": if t.page().is_some() { "pdf" } else { "image" }, "page": t.page(),
                 "dpi": t.dpi(), "pixels": [t.pixels().0, t.pixels().1], "size": t.size().map(read_mm),
                 "stated_scale": t.stated_scale(), "lines": t.lines().map_or(0, |l| l.dxf().entities.len()),
-                "instances": instances(m, name),
+                "layers": t.layers(), "instances": instances(m, name),
             })
         })
         .collect();
