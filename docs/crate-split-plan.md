@@ -165,15 +165,20 @@ table above names (the element solids, `Drawing`, the data halves of `sheet`, `t
 Measured with `cargo test -p bimcraft-core -p bimcraft-ui-egui --no-run --timings`, target on the Dev Drive, sccache
 warm for the dependencies, nothing else building; a one-line change is a new item at the end of the file:
 
-| | before (5bda50ab) | after |
-| --- | --- | --- |
-| clean build | 5m 40s (core lib tests) | 5m 44s (both): model 104 s, then core 36 s and its tests 148 s |
-| one line in `commands.rs` | 1m 11s / 1m 23s | 20 s |
-| one line in `render.rs` | 1m 11s / 1m 23s | 1m 14s (model 28 s, core tests 44 s, ui-egui tests 37 s) |
-| one line in `model.rs` | 1m 11s / 1m 23s | 56 s |
-| one line in `geom.rs` | 1m 11s / 1m 23s | 40 s |
+| | before (5bda50ab) | after | after the review's fixes |
+| --- | --- | --- | --- |
+| clean build | 5m 40s (core lib tests) | 5m 44s (both): model 104 s, then core 36 s and its tests 148 s | not measured |
+| one line in `commands.rs` | 1m 11s / 1m 23s | 20 s | 17 s (31 s): core tests 15 s, ui-egui tests 9 s |
+| one line in `render.rs` | 1m 11s / 1m 23s | 1m 14s (model 28 s, core tests 44 s, ui-egui tests 37 s) | 71 s (50 s): model 10 s, core tests 59 s, ui-egui tests 35 s |
+| one line in `model.rs` | 1m 11s / 1m 23s | 56 s | 39 s (35 s): model 8 s, core tests 23 s, ui-egui tests 28 s |
+| one line in `geom.rs` | 1m 11s / 1m 23s | 40 s | 63 s (55 s): geom 7 s, model 8 s, core tests 49 s, ui-egui tests 22 s |
+
+The last column is wall time on 13 November with the review's fixes (the model's tests that need no Session in the
+model, the self-checks in debug builds, the workspace hack), on a PC other builds shared, so they vary: in brackets, a run
+the day before without the workspace hack; the crates' own times are from `--timings`. The core's and ui-egui's test
+binaries, which compile side by side, are most of it.
 
 The before column was measured at 5bda50ab, not at this branch's base (94d57bea, 46 commits of other work later): core's
-tests and ui-egui's tests each on its own; after is both in one command. A clean build gains
-nothing yet: the model crate is still 3.4 MB everything waits for, and the core's test binary still holds the tests of
-the model's modules that drive the Session.
+tests and ui-egui's tests each on its own; after is both in one command. A clean build gains nothing yet:
+the model crate is still 3.4 MB everything waits for, and the core's test binary still holds the tests of the model's
+modules that drive the Session.
