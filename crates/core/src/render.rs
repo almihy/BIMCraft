@@ -1822,6 +1822,8 @@ pub fn section_camera(m: &Model, id: impl Key, view: View) -> Option<(Camera, Cl
         width: view.width,
         height: view.height,
         lens: None,
+        shift: [0.0; 2],
+        clip: None,
     };
     let column = |s: f64| f64::from(view.width) / 2.0 + (s - view.cx) * view.scale;
     let row = |z: f64| f64::from(view.height) / 2.0 - (z - view.cy) * view.scale;
@@ -4427,6 +4429,89 @@ fn camera_mark(d: &mut Drawing, v: &View3D) {
     let name_at = (a.0 - ux * (14.0 + font::width(&v.name, 10.0) / 2.0), a.1 - uy * (14.0 + font::width(&v.name, 10.0) / 2.0));
     d.text(&v.name, name_at, 10.0, INK);
     d.grow(from, a);
+}
+
+/// A camera seen in plan as Revit shows it while its view is selected (Show Camera): its eye, its target, and its view cone,
+/// the field of view's two sides out to the far clip plane and the far clip line across them. Each point is a grip: the eye
+/// moves the camera (the target stays), the target aims it, the far line's middle sets the far clip, a side's middle the
+/// field of view.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Cone {
+    pub eye: P2,
+    pub target: P2,
+    /// The far clip line's ends, left and right as the camera looks, and its middle.
+    pub far_left: P2,
+    pub far_right: P2,
+    pub far: P2,
+    /// Each side's middle, left then right: the field of view's grips.
+    pub sides: [P2; 2],
+    /// How far ahead of the eye the far line is in plan, mm.
+    pub reach: f64,
+}
+
+/// The plan's unit way from the eye toward the target, and how steeply it looks (the cosine of its pitch): none for a camera
+/// looking straight up or down.
+fn plan_way(cam: &crate::model::ViewCamera) -> Option<(P2, f64)> {
+    let d = P2(cam.target[0] - cam.eye[0], cam.target[1] - cam.eye[1]);
+    let across = d.0.hypot(d.1);
+    let whole = cam.target_distance();
+    (across > TOL && whole > TOL).then(|| (P2(d.0 / across, d.1 / across), across / whole))
+}
+
+/// The cone of 3D view `v`'s camera in plan, through focal length `lens` (its own unless given, which a grip being dragged
+/// changes): out to its far clip plane while Clip Manually is on, else to its target. None for a view without a camera, or
+/// one looking straight down.
+pub fn camera_cone(v: &View3D) -> Option<Cone> {
+    let cam = v.camera?;
+    let lens = v.perspective.map_or(crate::view3d::LENS, |p| p.lens);
+    cone_of(&cam, lens)
+}
+
+/// [`camera_cone`] for camera `cam` through focal length `lens`.
+pub fn cone_of(cam: &crate::model::ViewCamera, lens: f64) -> Option<Cone> {
+    let (way, cos) = plan_way(cam)?;
+    let eye = P2(cam.eye[0], cam.eye[1]);
+    let target = P2(cam.target[0], cam.target[1]);
+    let reach = if cam.physical.clip_on { cam.physical.far * cos } else { eye.dist(target) };
+    let half = (crate::view3d::field_of_view(lens, &cam.physical) / 2.0).to_radians();
+    let side = |k: f64| {
+        let (c, s) = (half.cos(), half.sin() * k);
+        let dir = P2(way.0 * c - way.1 * s, way.0 * s + way.1 * c);
+        eye + dir * (reach / half.cos().max(1e-6))
+    };
+    let (far_left, far_right) = (side(1.0), side(-1.0));
+    let far = eye + way * reach;
+    let mid = |a: P2| eye + (a - eye) * 0.5;
+    Some(Cone { eye, target, far_left, far_right, far, sides: [mid(far_left), mid(far_right)], reach })
+}
+
+/// Where a camera's grip, dragged to plan point `to`, puts it, as the `camera` command's params: the eye (`which` 0, its
+/// height kept, the target staying), the target (1), the far clip (2: Clip Manually on, as far along the way it looks as `to`
+/// is), a side (3 or 4: the field of view twice the angle `to` makes with the way it looks). None where it would put nothing.
+pub fn camera_grip(cam: &crate::model::ViewCamera, which: usize, to: P2) -> Option<serde_json::Value> {
+    let (way, cos) = plan_way(cam)?;
+    let eye = P2(cam.eye[0], cam.eye[1]);
+    match which {
+        0 => Some(serde_json::json!({"eye": [to.0, to.1, cam.eye[2]]})),
+        1 => (to.dist(eye) > TOL).then(|| serde_json::json!({"target": [to.0, to.1, cam.target[2]]})),
+        2 => {
+            let along = (to - eye).dot(way);
+            (along > TOL).then(|| serde_json::json!({"clip": true, "far": (along / cos.max(1e-6)).max(cam.physical.near + 1.0)}))
+        }
+        3 | 4 => {
+            let d = to - eye;
+            let along = d.dot(way);
+            let off = (way.0 * d.1 - way.1 * d.0).abs();
+            (along > TOL).then(|| serde_json::json!({"fov": (2.0 * off.atan2(along).to_degrees()).clamp(1.0, 170.0)}))
+        }
+        _ => None,
+    }
+}
+
+/// The camera's cone over a plan drawn through `v`: its sides and far line, the line to its target, and a grip at each
+/// point, as [`Cone`] lists them; for a front end to draw in its own colours.
+pub fn cone_lines(c: &Cone) -> [[P2; 2]; 4] {
+    [[c.eye, c.far_left], [c.eye, c.far_right], [c.far_left, c.far_right], [c.eye, c.target]]
 }
 
 /// The eye of the nearest camera whose mark (body, lens or name) the cursor at pixel `at` is over, so that a click on

@@ -2005,7 +2005,7 @@ impl Scene {
 
     /// A view of what `look` shows of the model, fitted into the picture.
     pub fn fit_in(&self, azimuth: f64, elevation: f64, width: u32, height: u32, look: &Look) -> Camera {
-        let cam = Camera { azimuth, elevation, scale: 1.0, target: [0.0; 3], width, height, lens: None };
+        let cam = Camera { azimuth, elevation, scale: 1.0, target: [0.0; 3], width, height, lens: None, shift: [0.0; 2], clip: None };
         self.fit_from(cam, look)
     }
 
@@ -2290,7 +2290,7 @@ impl Scene {
                         let z = wa * a.2 + wb * b.2 + wc * c.2;
                         if clip.is_some_and(|k| {
                             z > k.near || k.far.is_some_and(|f| z < k.near - f) || x < k.x.0 || x > k.x.1 || y < k.y.0 || y > k.y.1
-                        }) || cut.is_some_and(|k| !k.keeps(x, y, z))
+                        }) || project.clipped(z) || cut.is_some_and(|k| !k.keeps(x, y, z))
                         {
                             continue;
                         }
@@ -2372,7 +2372,7 @@ impl Scene {
                     let z = wa * a.2 + wb * b.2 + wc * c.2;
                     if clip.is_some_and(|k| {
                         z > k.near || k.far.is_some_and(|f| z < k.near - f) || x < k.x.0 || x > k.x.1 || y < k.y.0 || y > k.y.1
-                    }) || cut.is_some_and(|k| !k.keeps(x, y, z))
+                    }) || cam.projector().clipped(z) || cut.is_some_and(|k| !k.keeps(x, y, z))
                     {
                         continue;
                     }
@@ -2951,7 +2951,7 @@ impl Boxed {
     fn new(cam: &Camera, (lo, hi): (P3, P3)) -> Boxed {
         let (back, right, up) = cam.axes();
         let k = 1.0 / cam.scale.max(1e-12);
-        let (w, h) = (f64::from(cam.width) / 2.0, f64::from(cam.height) / 2.0);
+        let (w, h) = cam.middle();
         let o = add(cam.target, sub(mul(up, h * k), mul(right, w * k)));
         Boxed { lo, hi, o, dx: mul(right, k), dy: mul(up, -k), dz: back, eye: cam.eye().zip(cam.eye_distance()) }
     }
@@ -3094,7 +3094,7 @@ pub fn camera(m: &Model, azimuth: f64, elevation: f64, scale: f64, room: f64) ->
 
 /// [`camera`] for what `look` shows of the model.
 pub fn camera_in(m: &Model, azimuth: f64, elevation: f64, scale: f64, room: f64, look: &Look) -> Camera {
-    let mut cam = Camera { azimuth, elevation: elevation.clamp(-89.0, 89.0), scale, target: [0.0; 3], width: 1, height: 1, lens: None };
+    let mut cam = Camera { azimuth, elevation: elevation.clamp(-89.0, 89.0), scale, target: [0.0; 3], width: 1, height: 1, lens: None, shift: [0.0; 2], clip: None };
     let pts: Vec<P3> = solids(m).iter().filter(|s| look.shows(s.owner())).flat_map(Solid::corners).collect();
     if let Some((target, w, h)) = extent(&cam, &pts) {
         let side = |d: f64| (d * scale + 2.0 * room).ceil().clamp(1.0, f64::from(MAX_SIDE)) as u32;
@@ -3109,9 +3109,23 @@ pub fn camera_in(m: &Model, azimuth: f64, elevation: f64, scale: f64, room: f64,
 pub fn camera_of(m: &Model, v: &crate::model::View3D, scale: f64, room: f64, look: &Look) -> Camera {
     let fitted = camera_in(m, v.azimuth, v.elevation, scale, room, look);
     match (v.camera, v.lens()) {
-        (Some(cam), Some(lens)) => Camera::at(cam.eye, cam.target, lens, fitted.width, fitted.height),
+        (Some(cam), Some(lens)) => Camera::through(&cam, lens, true, fitted.width, fitted.height),
         _ => fitted,
     }
+}
+
+/// The camera 3D view `v` is seen through, as the person left it, in a picture `width` by `height` px: its own camera's (its
+/// physical camera, the film the picture's width), else where it was left ([`Framing`](crate::model::Framing)) from its
+/// azimuth and elevation through its lens. None for a view still fitted over the model.
+pub fn as_left(v: &crate::model::View3D, width: u32, height: u32) -> Option<Camera> {
+    if let Some(cam) = &v.camera {
+        let focal = v.perspective.map_or(LENS, |p| p.lens);
+        return Some(Camera::through(cam, focal, v.lens().is_some(), width, height));
+    }
+    let f = v.framing?;
+    let scale = (f64::from(width.max(1)) / f.across.max(1e-6)).clamp(1e-6, 50.0);
+    let elevation = v.elevation.clamp(-89.0, 89.0);
+    Some(Camera { azimuth: v.azimuth, elevation, scale, target: f.target, width, height, lens: v.lens(), shift: [0.0; 2], clip: None })
 }
 
 /// Each element's top over plan point `p`: the highest top of its solids standing over it.
@@ -3208,6 +3222,21 @@ fn mix(a: Rgb, b: Rgb) -> Rgb {
     Rgb(m(a.0, b.0), m(a.1, b.1), m(a.2, b.2))
 }
 
+/// The 35 mm lens that focal length `lens` on `p`'s film, zoomed by its zoom, is: as wide a field of view.
+pub fn full_frame(lens: f64, p: &crate::model::Physical) -> f64 {
+    lens * p.zoom * FILM / p.film.max(1e-6)
+}
+
+/// A camera's horizontal field of view, degrees, through focal length `lens` on `p`'s film at its zoom.
+pub fn field_of_view(lens: f64, p: &crate::model::Physical) -> f64 {
+    2.0 * (p.film / (2.0 * lens.max(1e-6) * p.zoom.max(1e-6))).atan().to_degrees()
+}
+
+/// The focal length that gives field of view `fov` degrees across `p`'s film at its zoom.
+pub fn lens_for(fov: f64, p: &crate::model::Physical) -> f64 {
+    p.film / (2.0 * p.zoom.max(1e-6) * (fov.clamp(0.1, 179.0).to_radians() / 2.0).tan())
+}
+
 /// The width of the film a lens's focal length is given for, mm: a 35 mm camera's, whose frame is 36 mm across.
 pub const FILM: f64 = 36.0;
 /// The lens a 3D view is first seen through in perspective, mm.
@@ -3235,6 +3264,12 @@ pub struct Camera {
     /// picture's width. None for a parallel (axonometric) view. The eye stands back from the target as far as makes `scale`
     /// true there, so orbiting turns it about the target, panning carries both, and zooming walks it in.
     pub lens: Option<f64>,
+    /// Where the target shows from the middle of the picture, px (right and down): a lens shift, as 3ds Max's Perspective
+    /// Control makes one, which moves the picture over the film without turning the camera. Zero for most views.
+    pub shift: [f64; 2],
+    /// In perspective, the nearest and furthest the picture shows, mm in front of the eye (a camera's clipping planes):
+    /// what is nearer than the first or further than the second is cut away. None for all of it.
+    pub clip: Option<[f64; 2]>,
 }
 
 /// A camera's projection, its axes worked out once for the many points of a picture.
@@ -3248,9 +3283,16 @@ pub(crate) struct Projector {
     scale: f64,
     /// In perspective: the focal length in px, and how far the eye is from the target, mm.
     eye: Option<(f64, f64)>,
+    /// In perspective with clipping planes: the nearness ([`Projector::at`]'s third) of the near plane and of the far one.
+    pub(crate) clip: Option<(f64, f64)>,
 }
 
 impl Projector {
+    /// Whether nearness `z` lies outside the camera's clipping planes, nearer than the near one or further than the far one.
+    pub(crate) fn clipped(&self, z: f64) -> bool {
+        self.clip.is_some_and(|(near, far)| z > near || z < far)
+    }
+
     /// The pixel `p` shows at, and how near the camera it is (larger is nearer): mm toward the camera from the target in a
     /// parallel view; in perspective, `d² / a - d` for a point `a` in front of an eye `d` from the target, which is as near as
     /// that is at the target and, as `1 / a` is, runs straight across the picture of a plane. Behind the eye, not a number.
@@ -3322,8 +3364,17 @@ impl Camera {
     pub(crate) fn projector(&self) -> Projector {
         let (back, right, up) = self.axes();
         let eye = self.focal().zip(self.eye_distance());
-        let middle = (f64::from(self.width) / 2.0, f64::from(self.height) / 2.0);
-        Projector { back, right, up, target: self.target, middle, scale: self.scale, eye }
+        let middle = self.middle();
+        let clip = self.clip.zip(eye).map(|([near, far], (_, e))| {
+            let z = |a: f64| e * e / a.max(NEAR) - e;
+            (z(near), z(far.max(near)))
+        });
+        Projector { back, right, up, target: self.target, middle, scale: self.scale, eye, clip }
+    }
+
+    /// The pixel the target shows at: the picture's middle, moved by the lens's shift.
+    pub fn middle(&self) -> (f64, f64) {
+        (f64::from(self.width) / 2.0 + self.shift[0], f64::from(self.height) / 2.0 + self.shift[1])
     }
 
     /// In perspective, the lens's focal length in px.
@@ -3386,7 +3437,56 @@ impl Camera {
         let azimuth = back[1].atan2(back[0]).to_degrees();
         let f = f64::from(width.max(1)) * lens / FILM;
         let scale = (f / d).clamp(1e-6, 50.0);
-        Camera { azimuth, elevation, scale, target, width, height, lens: Some(lens) }
+        Camera { azimuth, elevation, scale, target, width, height, lens: Some(lens), shift: [0.0; 2], clip: None }
+    }
+
+    /// The camera a camera view `cam` is seen through, into a picture `width` by `height` px whose width is the film: in
+    /// `perspective` through `lens` (the focal length, mm), else parallel along the way it looks (an orthographic camera, as
+    /// large at the target as the lens would show it). Its film and zoom make the lens the 35 mm one it is (`lens × zoom ×
+    /// 36 / film`); its perspective control and clipping are [`physical`](Self::physical)'s.
+    pub fn through(cam: &crate::model::ViewCamera, lens: f64, perspective: bool, width: u32, height: u32) -> Camera {
+        Camera::bare(cam, lens, perspective, width, height).physical(&cam.physical, cam.target, f64::from(width))
+    }
+
+    /// [`through`](Self::through) before its perspective control and clipping: the camera the hand moves, which
+    /// [`physical`](Self::physical) turns into the one the picture is drawn through.
+    pub fn bare(cam: &crate::model::ViewCamera, lens: f64, perspective: bool, width: u32, height: u32) -> Camera {
+        let seen = Camera::at(cam.eye, cam.target, full_frame(lens, &cam.physical), width, height);
+        if perspective { seen } else { Camera { lens: None, ..seen } }
+    }
+
+    /// This camera (standing as [`at`](Self::at) stands it, `target` in the middle) seen through `p`'s perspective control
+    /// and clipping, as 3ds Max's Physical Camera: the film turned back toward upright by its vertical tilt correction (1:
+    /// verticals stay vertical) with the lens shifted to keep `target` in the middle, then shifted by its Lens Shift (% of
+    /// the film's width, `film` px of the picture); its clipping planes while Clip Manually is on. The eye stays where it
+    /// stands.
+    pub fn physical(self, p: &crate::model::Physical, target: P3, film: f64) -> Camera {
+        let tilt = p.vertical_tilt().clamp(0.0, 1.0);
+        let mut cam = self;
+        if tilt > 0.0 && self.elevation.abs() > 1e-9 {
+            let elevation = self.elevation * (1.0 - tilt);
+            match self.eye() {
+                // In perspective the eye stays: the film turns about it, its middle a target as far along the turned axis.
+                Some(eye) => {
+                    let d = self.eye_distance().unwrap_or(1.0);
+                    let turned = Camera { elevation, ..self };
+                    let (back, ..) = turned.axes();
+                    cam = Camera { target: sub(eye, mul(back, d)), ..turned };
+                }
+                None => cam = Camera { elevation, ..self },
+            }
+            // Where `target` falls now, moved back to the middle.
+            let (x, y, _) = cam.project(target);
+            let (mx, my) = cam.middle();
+            if x.is_finite() && y.is_finite() {
+                cam.shift = [cam.shift[0] + mx - x, cam.shift[1] + my - y];
+            }
+        }
+        // Lens Shift: right and up as a share of the film's width, which is the picture's; the picture moves over the film,
+        // so what it shows moves the other way.
+        cam.shift = [cam.shift[0] - p.shift[0] / 100.0 * film, cam.shift[1] + p.shift[1] / 100.0 * film];
+        cam.clip = (p.clip_on && cam.lens.is_some()).then_some([p.near, p.far]);
+        cam
     }
 
     /// The pixel `p` shows at, and how near the camera it is (larger is nearer): mm toward the camera from the target in a
@@ -3417,15 +3517,23 @@ impl Camera {
     /// What of the line from `a` to `b` is at least [`NEAR`] in front of the eye: all of it in a parallel view.
     pub fn in_front(&self, a: P3, b: P3) -> Option<[P3; 2]> {
         let k = self.projector();
-        let (da, db) = (k.ahead(a) - NEAR, k.ahead(b) - NEAR);
-        match (da >= 0.0, db >= 0.0) {
-            (true, true) => Some([a, b]),
-            (false, false) => None,
-            _ => {
-                let cut = add(a, mul(sub(b, a), da / (da - db)));
-                Some(if da >= 0.0 { [a, cut] } else { [cut, b] })
+        let (near, far) = match (self.clip, k.eye) {
+            (Some([near, far]), Some(_)) => (near.max(NEAR), far.max(near)),
+            _ => (NEAR, f64::INFINITY),
+        };
+        // Cut to each plane in turn: in front of the near one, then short of the far one.
+        let cut = |[a, b]: [P3; 2], da: f64, db: f64| -> Option<[P3; 2]> {
+            match (da >= 0.0, db >= 0.0) {
+                (true, true) => Some([a, b]),
+                (false, false) => None,
+                _ => {
+                    let cut = add(a, mul(sub(b, a), da / (da - db)));
+                    Some(if da >= 0.0 { [a, cut] } else { [cut, b] })
+                }
             }
-        }
+        };
+        let [a, b] = cut([a, b], k.ahead(a) - near, k.ahead(b) - near)?;
+        if far.is_finite() { cut([a, b], far - k.ahead(a), far - k.ahead(b)) } else { Some([a, b]) }
     }
 
     /// How much nearer, in nearness as [`project`](Self::project) gives it, a surface may be than a line at nearness `z` and
@@ -3475,7 +3583,8 @@ impl Camera {
     /// The model point at pixel `(x, y)` on the plane through the target, square to the view.
     pub fn unproject(&self, (x, y): (f64, f64)) -> P3 {
         let (_, right, up) = self.axes();
-        let (dx, dy) = ((x - f64::from(self.width) / 2.0) / self.scale, (y - f64::from(self.height) / 2.0) / self.scale);
+        let (mx, my) = self.middle();
+        let (dx, dy) = ((x - mx) / self.scale, (y - my) / self.scale);
         add(self.target, sub(mul(right, dx), mul(up, dy)))
     }
 
@@ -3484,6 +3593,33 @@ impl Camera {
     pub fn orbit(self, around: f64, up: f64) -> Camera {
         let a = (self.azimuth + around).rem_euclid(360.0);
         Camera { azimuth: if a > 180.0 { a - 360.0 } else { a }, elevation: (self.elevation + up).clamp(-89.0, 89.0), ..self }
+    }
+
+    /// Turned `around` degrees (counter-clockwise, seen from above) and `up` degrees about the eye, which stays where it
+    /// stands: Revit's Look and a mouse look while flying. A parallel view turns about its target.
+    pub fn look(self, around: f64, up: f64) -> Camera {
+        let Some((eye, d)) = self.eye().zip(self.eye_distance()) else { return self.orbit(around, -up) };
+        let turned = self.orbit(around, -up);
+        let (back, ..) = turned.axes();
+        let target = sub(eye, mul(back, d));
+        if target.iter().all(|x| x.is_finite()) { Camera { target, ..turned } } else { self }
+    }
+
+    /// Moved `forward` mm the way it looks, `right` mm to its right and `up` mm straight up, turned as it was: Revit's Walk and
+    /// Up/Down, and flying with W, A, S, D, Q and E. With `level` the way forward is level (walking keeps the eye's height),
+    /// else it climbs or falls as the camera looks (flying).
+    pub fn walk(self, forward: f64, right: f64, up: f64, level: bool) -> Camera {
+        let (back, side, _) = self.axes();
+        let ahead = if level {
+            let flat = [-back[0], -back[1], 0.0];
+            let n = dot(flat, flat).sqrt();
+            if n > 1e-9 { mul(flat, 1.0 / n) } else { [0.0; 3] }
+        } else {
+            mul(back, -1.0)
+        };
+        let by = add(add(mul(ahead, forward), mul(side, right)), [0.0, 0.0, up]);
+        let target = add(self.target, by);
+        if target.iter().all(|x| x.is_finite() && x.abs() <= crate::model::MAX_COORD) { Camera { target, ..self } } else { self }
     }
 
     /// Moved so the model point under pixel `from` comes under pixel `to`: in perspective, the point on the plane through
@@ -4796,7 +4932,7 @@ mod tests {
         assert!(
             matches!(
                 s.model.elements.iter().find(|(_, e)| matches!(e, Element::View3D(v) if v.name == "Camera 1")),
-                Some((_, Element::View3D(v))) if v.camera == Some(crate::model::ViewCamera { eye: [1000.0, -9000.0, 1700.0], target })
+                Some((_, Element::View3D(v))) if v.camera == Some(crate::model::ViewCamera::new([1000.0, -9000.0, 1700.0], target))
             ),
             "the refused change left the camera alone"
         );
@@ -4862,7 +4998,7 @@ mod tests {
         s.execute("move", &json!({"ids": [id], "by": [2000.0, 500.0]})).unwrap();
         assert_eq!(
             cam(&s),
-            Some(crate::model::ViewCamera { eye: [3500.0, -1700.0, 1600.0], target: [7000.0, 3500.0, 1200.0] }),
+            Some(crate::model::ViewCamera::new([3500.0, -1700.0, 1600.0], [7000.0, 3500.0, 1200.0])),
             "the mark drags the camera with it"
         );
         assert_eq!(s.model.check(), Ok(()));
@@ -4870,7 +5006,7 @@ mod tests {
         s.execute("mirror", &json!({"ids": [id], "axis": [[0.0, 0.0], [1000.0, 0.0]]})).unwrap();
         assert_eq!(
             cam(&s),
-            Some(crate::model::ViewCamera { eye: [3500.0, 1700.0, 1600.0], target: [7000.0, -3500.0, 1200.0] }),
+            Some(crate::model::ViewCamera::new([3500.0, 1700.0, 1600.0], [7000.0, -3500.0, 1200.0])),
             "a mirror image flips it in plan, keeping its heights"
         );
         // The default `{3D}`, with no camera of its own, still has nothing to move.

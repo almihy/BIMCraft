@@ -1490,10 +1490,25 @@ pub struct View3D {
     /// What it sketches on (`workplane.rs`): the lowest level when it has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub work_plane: Option<crate::workplane::WorkPlane>,
+    /// Where a view without a camera of its own was left, as Revit's 3D views keep their orientation: the point in the middle
+    /// of its picture and how much of the model its width takes in there (seen from `azimuth` and `elevation`, through its
+    /// lens in perspective). None for a view still fitted over the model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub framing: Option<Framing>,
+}
+
+/// Where a 3D view without a camera stands: the model point in the middle of its picture, [x, y, z] mm, and `across`, the mm
+/// its picture's width takes in at that point (so any size of picture frames the same).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Framing {
+    pub target: [f64; 3],
+    pub across: f64,
 }
 
 /// A 3D view's camera: the model point its eye stands at, and the model point it looks at, in mm. The view is seen in
-/// perspective through its lens, from `eye` toward `target`.
+/// perspective through its lens (the view's `perspective`, its focal length), from `eye` toward `target`. The rest is the
+/// camera as 3ds Max's Physical Camera holds it ([`Physical`]), which travels with the camera to a renderer.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ViewCamera {
@@ -1501,6 +1516,243 @@ pub struct ViewCamera {
     pub eye: [f64; 3],
     /// What the camera looks at, [x, y, z] mm; never the eye itself.
     pub target: [f64; 3],
+    /// Its film, lens, focus, exposure, perspective control, clipping and output: as a new camera's unless set.
+    #[serde(default, skip_serializing_if = "Physical::is_default")]
+    pub physical: Physical,
+}
+
+impl ViewCamera {
+    /// A camera at `eye` looking at `target`, its physical settings as a new camera's.
+    pub fn new(eye: [f64; 3], target: [f64; 3]) -> ViewCamera {
+        ViewCamera { eye, target, physical: Physical::default() }
+    }
+
+    /// How far the target is from the eye, mm: 3ds Max's Target Distance.
+    pub fn target_distance(&self) -> f64 {
+        (0..3).map(|k| self.target[k] - self.eye[k]).fold(0.0, |s, d| s + d * d).sqrt()
+    }
+
+    /// Where it focuses, mm from the eye: the target's distance unless one is set (3ds Max's Use Target Distance, or Custom).
+    pub fn focus_distance(&self) -> f64 {
+        self.physical.focus.unwrap_or_else(|| self.target_distance())
+    }
+
+    /// The exposure value it is seen at: the one set (Target), else worked from ISO, shutter and aperture (Manual), as
+    /// EV = log2(N² / t) − log2(ISO / 100).
+    pub fn exposure_value(&self) -> f64 {
+        let p = &self.physical;
+        match p.iso {
+            Some(iso) => (p.f_number * p.f_number / p.shutter).log2() - (iso / 100.0).log2(),
+            None => p.ev,
+        }
+    }
+}
+
+/// The film widths 3ds Max's Physical Camera offers, mm, by the preset's name.
+pub const FILM_PRESETS: [(&str, f64); 5] =
+    [("35mm (Full Frame)", 36.0), ("APS-C (Canon)", 22.3), ("APS-C (Nikon, Sony, etc.)", 23.7), ("APS-H (Canon)", 27.9), ("Four Thirds", 17.3)];
+
+/// A camera's physical settings, as 3ds Max's Physical Camera rollouts hold them: Basic (target or free), Physical Camera
+/// (film, zoom, aperture, focus), Exposure, Perspective Control (lens shift, tilt correction), Clipping, and the image it
+/// renders (Render Setup's Output Size). The editor's view draws through the film, zoom, shift, tilt and clipping; the rest
+/// is for the renderer.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Physical {
+    /// Aimed at its target (Target), or free: a free camera keeps its target only as the distance it focuses at.
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub targeted: bool,
+    /// The film's (sensor's) width, mm: 36 for a 35 mm full frame.
+    #[serde(default = "film", skip_serializing_if = "is_film")]
+    pub film: f64,
+    /// Zoom: over 1 narrows the field of view, under 1 widens it, the camera standing where it is.
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub zoom: f64,
+    /// The aperture, f/`f_number`.
+    #[serde(default = "f_number", skip_serializing_if = "is_f_number")]
+    pub f_number: f64,
+    /// Depth of field: blurred away from the focus distance, by the aperture.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub depth_of_field: bool,
+    /// Where it focuses, mm from the eye (Custom); none for the target's distance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focus: Option<f64>,
+    /// The exposure value (Target exposure), while no `iso` is set.
+    #[serde(default = "ev", skip_serializing_if = "is_ev")]
+    pub ev: f64,
+    /// Manual exposure: the film's speed, ISO; none for Target, by `ev`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iso: Option<f64>,
+    /// The shutter's duration, seconds.
+    #[serde(default = "shutter", skip_serializing_if = "is_shutter")]
+    pub shutter: f64,
+    /// Lens Shift, horizontal and vertical, % of the film's width (right and up): the picture moved over the film without
+    /// turning the camera.
+    #[serde(default, skip_serializing_if = "is_zero2")]
+    pub shift: [f64; 2],
+    /// Tilt Correction, horizontal and vertical: how much of the camera's turn (0 to 1) the film is turned back from, the
+    /// lens shifted to keep what it looks at in the middle. Vertical 1 keeps verticals vertical (two-point perspective).
+    #[serde(default, skip_serializing_if = "is_zero2")]
+    pub tilt: [f64; 2],
+    /// Auto Vertical Tilt Correction: the vertical tilt correction kept at 1, so verticals stay vertical however it looks.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto_tilt: bool,
+    /// Clip Manually: the near and far clipping planes, mm in front of the eye, while `clip_on`. Revit's Far Clip is the
+    /// far one.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub clip_on: bool,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub near: f64,
+    #[serde(default = "far", skip_serializing_if = "is_far")]
+    pub far: f64,
+    /// The image it renders, px wide and high (Output Size), and whether its aspect stays as it is (the lock).
+    #[serde(default = "output", skip_serializing_if = "is_output")]
+    pub output: [u32; 2],
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub aspect_locked: bool,
+}
+
+/// A new camera's: 35 mm film, f/8, EV 6, 1/125 s, the far plane 100 m out, a 1920 by 1080 image.
+impl Default for Physical {
+    fn default() -> Physical {
+        Physical {
+            targeted: true,
+            film: film(),
+            zoom: one(),
+            f_number: f_number(),
+            depth_of_field: false,
+            focus: None,
+            ev: ev(),
+            iso: None,
+            shutter: shutter(),
+            shift: [0.0; 2],
+            tilt: [0.0; 2],
+            auto_tilt: false,
+            clip_on: false,
+            near: 0.0,
+            far: far(),
+            output: output(),
+            aspect_locked: false,
+        }
+    }
+}
+
+/// The largest image a camera renders, px a side.
+pub const MAX_OUTPUT: u32 = 16_384;
+
+/// The image sizes a camera's Output Size offers, px, by name: video's and the A series' (at 300 dpi), whose aspect is √2.
+pub const OUTPUT_PRESETS: [(&str, u32, u32); 7] = [
+    ("HD 720", 1280, 720),
+    ("Full HD 1080", 1920, 1080),
+    ("4K UHD", 3840, 2160),
+    ("A4 landscape", 3508, 2480),
+    ("A3 landscape", 4961, 3508),
+    ("A4 portrait", 2480, 3508),
+    ("Square", 2048, 2048),
+];
+
+impl Physical {
+    pub fn is_default(&self) -> bool {
+        *self == Physical::default()
+    }
+
+    /// The vertical tilt correction it is seen with: 1 with Auto Vertical Tilt Correction on.
+    pub fn vertical_tilt(&self) -> f64 {
+        if self.auto_tilt { 1.0 } else { self.tilt[1] }
+    }
+
+    /// The image's aspect, width over height.
+    pub fn aspect(&self) -> f64 {
+        f64::from(self.output[0].max(1)) / f64::from(self.output[1].max(1))
+    }
+
+    /// The film preset its width is, by name; "Custom" for another width.
+    pub fn film_preset(&self) -> &'static str {
+        FILM_PRESETS.iter().find(|(_, w)| (w - self.film).abs() < 1e-6).map_or("Custom", |(n, _)| *n)
+    }
+
+    /// What is wrong with it, for `Model::check`: numbers out of their range.
+    pub(crate) fn check(&self, who: &str) -> Result<(), String> {
+        let within = |what: &str, v: f64, lo: f64, hi: f64| {
+            if v.is_finite() && (lo..=hi).contains(&v) {
+                Ok(())
+            } else {
+                Err(format!("{who}: its camera's {what} is {v}; it is {lo} to {hi}"))
+            }
+        };
+        within("film width (mm)", self.film, 1.0, 100.0)?;
+        within("zoom", self.zoom, 0.1, 10.0)?;
+        within("aperture (f-number)", self.f_number, 0.5, 64.0)?;
+        if let Some(f) = self.focus {
+            within("focus distance (mm)", f, 1.0, crate::model::MAX_COORD)?;
+        }
+        within("exposure value", self.ev, -20.0, 30.0)?;
+        if let Some(iso) = self.iso {
+            within("ISO", iso, 1.0, 1_000_000.0)?;
+        }
+        within("shutter (s)", self.shutter, 1e-6, 3600.0)?;
+        for (what, v) in [("horizontal lens shift (%)", self.shift[0]), ("vertical lens shift (%)", self.shift[1])] {
+            within(what, v, -100.0, 100.0)?;
+        }
+        for (what, v) in [("horizontal tilt correction", self.tilt[0]), ("vertical tilt correction", self.tilt[1])] {
+            within(what, v, 0.0, 1.0)?;
+        }
+        within("near clipping plane (mm)", self.near, 0.0, crate::model::MAX_COORD)?;
+        within("far clipping plane (mm)", self.far, 1.0, crate::model::MAX_COORD)?;
+        if self.far <= self.near {
+            return Err(format!("{who}: its camera's far clipping plane ({} mm) is not past its near one ({} mm)", self.far, self.near));
+        }
+        for (what, v) in [("output width (px)", self.output[0]), ("output height (px)", self.output[1])] {
+            within(what, f64::from(v), 16.0, f64::from(MAX_OUTPUT))?;
+        }
+        Ok(())
+    }
+}
+
+fn is_true(b: &bool) -> bool {
+    *b
+}
+fn film() -> f64 {
+    36.0
+}
+fn is_film(v: &f64) -> bool {
+    *v == film()
+}
+fn is_one(v: &f64) -> bool {
+    *v == 1.0
+}
+fn f_number() -> f64 {
+    8.0
+}
+fn is_f_number(v: &f64) -> bool {
+    *v == f_number()
+}
+fn ev() -> f64 {
+    6.0
+}
+fn is_ev(v: &f64) -> bool {
+    *v == ev()
+}
+fn shutter() -> f64 {
+    1.0 / 125.0
+}
+fn is_shutter(v: &f64) -> bool {
+    *v == shutter()
+}
+fn is_zero2(v: &[f64; 2]) -> bool {
+    *v == [0.0; 2]
+}
+fn far() -> f64 {
+    100_000.0
+}
+fn is_far(v: &f64) -> bool {
+    *v == far()
+}
+fn output() -> [u32; 2] {
+    [1920, 1080]
+}
+fn is_output(v: &[u32; 2]) -> bool {
+    *v == output()
 }
 
 /// A 3D view's perspective: the focal length of the lens it is seen through, mm on a 35 mm camera (whose film is the
@@ -1531,6 +1783,7 @@ impl View3D {
             camera: None,
             display: Default::default(),
             work_plane: None,
+            framing: None,
         }
     }
 }
@@ -7314,6 +7567,17 @@ impl Model {
                 if let Some(cam) = &v.camera {
                     camera_ok(&who, cam)?;
                 }
+                if let Some(f) = &v.framing {
+                    for (axis, x) in ["x", "y", "z"].into_iter().zip(f.target) {
+                        coord(&format!("{who} framing target {axis}"), x)?;
+                    }
+                    if !(f.across.is_finite() && f.across > 1.0 && f.across <= MAX_COORD) {
+                        return Err(format!("{who}: its picture takes in {} mm across; it is above 1 mm and at most {MAX_COORD}", f.across));
+                    }
+                }
+                if !(v.azimuth.is_finite() && v.elevation.is_finite()) {
+                    return Err(format!("{who}: its azimuth and elevation are numbers of degrees"));
+                }
                 if v.display.silhouette > crate::view3d::MAX_SILHOUETTE {
                     let most = crate::view3d::MAX_SILHOUETTE;
                     return Err(format!("{who}: a silhouette {} px wide is wider than the {most} px one may be", v.display.silhouette));
@@ -7823,6 +8087,7 @@ fn section_box_ok(who: &str, b: &SectionBox) -> Result<(), String> {
 /// Whether `cam` is a camera a view can stand at: an eye and a target that are usable numbers, apart, so the view has a
 /// direction to look in.
 fn camera_ok(who: &str, cam: &ViewCamera) -> Result<(), String> {
+    cam.physical.check(who)?;
     for (what, p) in [("eye", cam.eye), ("target", cam.target)] {
         for (axis, v) in ["x", "y", "z"].into_iter().zip(p) {
             coord(&format!("{who} camera {what} {axis}"), v)?;
