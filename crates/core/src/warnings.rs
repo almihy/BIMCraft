@@ -907,7 +907,10 @@ fn room_pass(m: &Model, only: Option<&BTreeMap<Id, Option<[f64; 4]>>>, reach: &m
 /// (Of `others`, the rooms there were, and the rooms there are now among them: a room the change made is of a higher id.)
 fn shares(m: &Model, others: &[Id], id: Id, r: &crate::model::Room, g: &Region) -> Option<Id> {
     others.iter().copied().filter(|o| *o < id).find(
-        |o| matches!(m.elements.get(*o), Some(Element::Room(x)) if m.same(x.level, r.level) && crate::model::region_holds(g, x.point)),
+        |o| {
+            matches!(m.elements.get(*o), Some(Element::Room(x)) if m.same(x.level, r.level)
+                && crate::rooms::share_a_phase(m, x, r) && crate::model::region_holds(g, x.point))
+        },
     )
 }
 

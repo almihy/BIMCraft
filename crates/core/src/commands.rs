@@ -300,7 +300,8 @@ other_files(
          or in `wall` centred `offset` mm from its start; `toward` [x,y]: the door swings to the side of the wall that point is \
          on (the desktop sends the cursor), and `flip_facing` then flips it from there; without it, it swings to the wall's \
          left (start to end), `flip_facing` to its right, hinged on the jamb toward the wall's start, `flip_hand` its end \
-         (`elements` says back its `to_room`, the room it swings into as it is placed, kept through its flips as Revit's, \n         `swings_into`, its `hinge` and `swing`); with `family`, a door family's `type` (its first by default), \
+         (`elements` says back its `to_room`, the room it swings into as it is placed, kept through its flips as Revit's, \
+         `swings_into`, its `hinge` and `swing`); with `family`, a door family's `type` (its first by default), \
          which sizes the opening and draws the door; it may rise past a low wall's top, as Revit lets it",
         door,
     )
@@ -606,8 +607,8 @@ other_files(
         "{point: [x,y], level?, name?, number?, occupancy?, top_level?, limit_offset?, base_offset?, frozen?} bounded by the walls \
          and the room separation lines around the point (walls the level's `computation_height` cuts; separation lines \
          whatever their height). `occupancy` is Revit's Occupancy, what the room is used for (bedroom, office, kitchen; also \
-         `modify {id, occupancy}`): what reads a room's use reads it, and its name only when it is empty. Placed where nothing encloses it, or in a space another room has (two rooms can't share one; the first \
-         keeps it), it is placed unbounded, a 1000 mm square, and the reply has a `warning`. Its height is Revit's: from \
+         `modify {id, occupancy}`): what reads a room's use reads it, and its name only when it is empty. Placed where nothing encloses it, or in a space another room has (two rooms of a phase can't share one; the first \
+         keeps it, and a room of a later phase in the space of one demolished before it has it, as Revit's), it is placed unbounded, a 1000 mm square, and the reply has a `warning`. Its height is Revit's: from \
          `base_offset` mm over its level (0) up to `limit_offset` mm over its upper limit `top_level` (null: Not Bounded, \
          over its own level). Unless given, 300 mm under the level above (`top_level` that level, `limit_offset` -300), or \
          with none above, not bounded and 2500 mm tall. `elements` gives its `unbounded_height` and `volume_m3`, its area \

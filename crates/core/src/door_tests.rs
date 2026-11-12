@@ -305,3 +305,26 @@ fn a_door_from_before_from_and_to_room_were_kept_has_them_from_its_swing() {
     }
     assert_eq!(m.format, crate::model::FORMAT);
 }
+
+#[test]
+fn from_and_to_room_are_the_rooms_of_the_projects_last_phase_as_revits() {
+    let mut s = Session::new();
+    let walls = rooms(&mut s);
+    // The WC was there before and comes down in New Construction; a Bath takes its place.
+    let wc = s.model.elements.iter().find(|(_, e)| matches!(e, crate::model::Element::Room(r) if r.name == "WC")).map(|(id, _)| *id);
+    let wc = wc.unwrap();
+    run(&mut s, "modify", json!({"id": wc, "params": {"Phase Created": "Existing", "Phase Demolished": "New Construction"}}));
+    let bath = id_of(&run(&mut s, "room", json!({"point": [2000, 3000], "name": "Bath", "number": "3"})));
+    run(&mut s, "modify", json!({"id": bath, "params": {"Phase Created": "New Construction"}}));
+    let door = id_of(&run(&mut s, "door", json!({"wall": walls[4], "offset": 3000})));
+    assert_eq!(between(&s, door), named(Some("Hall"), Some("Bath"), Some("Bath")));
+    // Each room has its own phase's space: the Bath is bounded, not the WC's redundant room.
+    let e = crate::element_json(&s.model, bath);
+    assert_eq!((e["enclosed"].clone(), e.get("shares_space_with").cloned()), (json!(true), None), "{e}");
+    // Two rooms of the same phase still share it.
+    let twin = id_of(&run(&mut s, "room", json!({"point": [2500, 3000], "name": "Twin", "number": "4"})));
+    run(&mut s, "modify", json!({"id": twin, "params": {"Phase Created": "New Construction"}}));
+    let e = crate::element_json(&s.model, twin);
+    assert_eq!(e["shares_space_with"], json!(bath), "{e}");
+}
+
