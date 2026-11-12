@@ -215,7 +215,8 @@ pub const MAX_TEMPLATES: usize = 64;
 /// The most edges of Linework a view holds: each is split out of its element's lines when the view is drawn.
 pub const MAX_LINEWORK: usize = 2000;
 
-/// How much a view draws of what it cuts. Coarse: the cut in one poché, an opening only its gap and jambs. Medium: a
+/// How much a view draws of what it cuts. Coarse: the cut in one poché, an opening only its gap and jambs (a door of the
+/// project's own type its leaf and swing too, as Revit's door families show theirs at every level). Medium: a
 /// compound element's layers, each a fill with a line between, and an opening's leaf, swing and glass. Fine: the layers'
 /// patterns too, and a floor's surface pattern.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

@@ -6,12 +6,13 @@
 //! joins through a plan index ([`walls::Index`]) rather than among every wall of the project. It borrows the model, so
 //! what it holds can't go stale: the borrow ends before anything can change the model.
 
-use std::cell::{OnceCell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::geom::{self, P2, Region};
-use crate::model::{Element, Guid, Id, Model, Room, RoomArea, TOL, Unbound, region_holds};
+use crate::model::{Element, Guid, Id, Model, ROOM_PROBE, Room, RoomArea, TOL, Unbound, region_holds};
+use crate::phasing;
 use crate::walls::{self, Index};
 
 /// What a level's rooms are found among, at one measure.
@@ -25,6 +26,34 @@ struct Plan {
 /// A level's rooms, in order of id.
 type Placed<'a> = Rc<Vec<(Id, &'a Room)>>;
 
+thread_local! {
+    /// How many times this thread has looked up a door's or a window's rooms: see [`openings_looked_up`].
+    static LOOKED_UP: Cell<usize> = const { Cell::new(0) };
+}
+
+/// How many times this thread has looked up the rooms either side of a door or a window ([`Rooms::from_to`],
+/// [`Rooms::swings_into`]): what tests read to know that what wants an element's name, mark or tag, or a palette drawn
+/// again, doesn't look for them.
+pub fn openings_looked_up() -> usize {
+    LOOKED_UP.with(Cell::get)
+}
+
+/// The phases a room stands in, as Revit's rooms are each of a phase: from the one it was made in up to, not into, the one
+/// it comes down in (a room made and taken down in one phase stands in that one), by their places in the project's order.
+fn standing(m: &Model, r: &Room) -> (usize, usize) {
+    let at = |key: &str| r.params.get(key).and_then(serde_json::Value::as_str).and_then(|n| phasing::index(m, n));
+    let made = at(phasing::CREATED).unwrap_or(0);
+    let gone = at(phasing::DEMOLISHED).map_or(usize::MAX, |d| d.max(made + 1));
+    (made, gone)
+}
+
+/// Whether rooms `a` and `b` stand in a phase together ([`standing`]): only then may one have the other's space, as Revit's
+/// redundant rooms are of one phase.
+pub(crate) fn share_a_phase(m: &Model, a: &Room, b: &Room) -> bool {
+    let ((a0, a1), (b0, b1)) = (standing(m, a), standing(m, b));
+    a0 < b1 && b0 < a1
+}
+
 /// The boundaries of a model's rooms, each level's found once.
 pub struct Rooms<'a> {
     m: &'a Model,
@@ -34,6 +63,8 @@ pub struct Rooms<'a> {
     placed: RefCell<HashMap<Guid, Placed<'a>>>,
     /// Each room's boundary at the walls' centre lines, once found: what [`Rooms::room_at`] asks of every room of a level.
     centre: RefCell<HashMap<Id, Option<Region>>>,
+    /// Each level's room-bounding walls, once found: what a door's rooms are looked for past ([`Rooms::past_walls`]).
+    bounding: RefCell<HashMap<Guid, Rc<Vec<Id>>>>,
     /// Where the lines are looked for, when only those near one place are: the box `[x0, y0, x1, y1]` the loop must lie in,
     /// and the walls, separation lines and column faces that meet it grown by the second.
     window: Option<([f64; 4], f64)>,
@@ -47,6 +78,7 @@ impl<'a> Rooms<'a> {
             plans: RefCell::new(HashMap::new()),
             placed: RefCell::new(HashMap::new()),
             centre: RefCell::new(HashMap::new()),
+            bounding: RefCell::new(HashMap::new()),
             window: None,
         }
     }
@@ -170,6 +202,82 @@ impl<'a> Rooms<'a> {
         rooms.iter().find(|(id, r)| self.centre_of(*id, r).is_some_and(|g| region_holds(&g, p))).map(|(id, _)| *id)
     }
 
+    /// The rooms door or window `e` is between, as Revit's From Room and To Room: the room on each side of its wall at its
+    /// middle ([`Model::opening_sides`], [`Rooms::room_at`]), on the sides its `to_room_side` says (set as it was placed: a
+    /// door's To Room the room it swung into, a window's the one it faced, its exterior), from, then to; none on a side
+    /// outside every room. As Revit's FamilyInstance.FromRoom and ToRoom, of the project's last phase: among the rooms
+    /// standing in it ([`Rooms::room_in_last_phase`]). None for anything else.
+    pub fn from_to(&self, e: &Element) -> Option<(Option<Id>, Option<Id>)> {
+        let (Element::Door(o) | Element::Window(o)) = e else { return None };
+        LOOKED_UP.with(|n| n.set(n.get() + 1));
+        let w = self.m.wall(o.host)?;
+        let (from, to) = self.m.opening_sides(e)?;
+        let found = |p: P2| self.room_in_last_phase(w.level, self.past_walls(o.host, w, o.offset, p));
+        Some((found(from), found(to)))
+    }
+
+    /// [`Rooms::room_at`] among the rooms standing in the project's last phase ([`standing`]): what a door's or window's
+    /// rooms are, as Revit's.
+    pub fn room_in_last_phase(&self, level: Guid, p: P2) -> Option<Id> {
+        let last = self.m.phases.len().saturating_sub(1);
+        let rooms = self.placed(level);
+        rooms
+            .iter()
+            .filter(|(_, r)| {
+                let (made, gone) = standing(self.m, r);
+                made <= last && last < gone
+            })
+            .find(|(id, r)| self.centre_of(*id, r).is_some_and(|g| region_holds(&g, p)))
+            .map(|(id, _)| *id)
+    }
+
+    /// The room door `e` opens into now, on the side of its wall it swings to, whatever its From Room and To Room say
+    /// ([`Model::swing_point`]); of the project's last phase, as [`Rooms::from_to`]. None for a window.
+    pub fn swings_into(&self, e: &Element) -> Option<Option<Id>> {
+        let Element::Door(o) = e else { return None };
+        LOOKED_UP.with(|n| n.set(n.get() + 1));
+        let w = self.m.wall(o.host)?;
+        let p = self.past_walls(o.host, w, o.offset, self.m.swing_point(e)?);
+        Some(self.room_in_last_phase(w.level, p))
+    }
+
+    /// Point `p`, a door's or window's room looked for past the face of its wall `w` (of GUID `host`) at `along`, taken on
+    /// out of every other room-bounding wall of its level it lies in and the probe on past that one's far face: a lining
+    /// wall built against the door's wall, however thick, is not the room beyond it. Straight out from `w`, up to 10 m.
+    fn past_walls(&self, host: Guid, w: &crate::model::Wall, along: f64, p: P2) -> P2 {
+        let out = (p - walls::Axis::of(w).at(along, 0.0)).unit();
+        let ids = self.bounding(w.level);
+        let host = self.m.elements.id(host);
+        let inside = |q: P2| {
+            ids.iter().filter(|id| Some(**id) != host).filter_map(|id| self.m.wall(*id)).any(|o| {
+                let a = walls::Axis::of(o);
+                let (s, off) = a.project(q);
+                let (left, right) = walls::faces(self.m, o);
+                a.at(s, off).dist(q) < 0.5 && right - TOL < off && off < left + TOL
+            })
+        };
+        let (step, mut left) = (ROOM_PROBE / 10.0, 1000);
+        let mut q = p;
+        while inside(q) && left > 0 {
+            while inside(q) && left > 0 {
+                q = q + out * step;
+                left -= 1;
+            }
+            q = q + out * ROOM_PROBE;
+        }
+        q
+    }
+
+    /// The room-bounding walls of `level`, found once.
+    fn bounding(&self, level: Guid) -> Rc<Vec<Id>> {
+        if let Some(ids) = self.bounding.borrow().get(&level) {
+            return Rc::clone(ids);
+        }
+        let ids: Rc<Vec<Id>> = Rc::new(self.m.bounding_walls(&level, true).collect());
+        self.bounding.borrow_mut().insert(level, Rc::clone(&ids));
+        ids
+    }
+
     /// Room `r`'s (of id `id`) boundary at the walls' centre lines, found once.
     fn centre_of(&self, id: Id, r: &Room) -> Option<Region> {
         if let Some(g) = self.centre.borrow().get(&id) {
@@ -181,7 +289,8 @@ impl<'a> Rooms<'a> {
     }
 
     /// The room on `r`'s level placed before it (of a lower id; any, for a room not in the model) whose point lies in `g`
-    /// ([`Model::room_before`]).
+    /// and that stands in a phase `r` stands in ([`Model::room_before`]): as Revit's, each phase has its rooms, so a room of
+    /// a later phase in the space of one taken down before it has the space to itself.
     pub fn before(&self, r: &Room, g: &Region) -> Option<Id> {
         let rooms = self.placed(r.level);
         let me = rooms.iter().find(|(_, o)| std::ptr::eq(*o, r)).map(|(id, _)| *id);
@@ -189,6 +298,7 @@ impl<'a> Rooms<'a> {
         rooms
             .iter()
             .take_while(|(id, _)| me.is_none_or(|me| *id < me))
+            .filter(|(_, o)| share_a_phase(m, o, r))
             .find(|(_, o)| m.same(o.level, r.level) && region_holds(g, o.point))
             .map(|(id, _)| *id)
     }
@@ -260,7 +370,7 @@ mod tests {
             .elements
             .iter()
             .take_while(|(id, _)| me.is_none_or(|me| **id < me))
-            .find(|(_, e)| matches!(e, Element::Room(o) if m.same(o.level, r.level) && region_holds(&g, o.point)))
+            .find(|(_, e)| matches!(e, Element::Room(o) if m.same(o.level, r.level) && share_a_phase(m, o, r) && region_holds(&g, o.point)))
             .map(|(id, _)| *id);
         before.map_or(Ok(g), |id| Err(Unbound::Shared(id)))
     }

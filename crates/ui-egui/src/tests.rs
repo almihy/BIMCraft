@@ -7343,3 +7343,49 @@ wall {\"points\": [[0, 5000], [8000, 5000]], \"level\": \"Level 2\"}");
     assert!(h.query_by_label("Temporary dimension 3000").is_none(), "the Level 1 wall is not cut in this plan");
     assert!(h.query_by_label("Temporary dimension 5000").is_some());
 }
+
+#[test]
+fn a_doors_from_room_and_to_room_show_under_phasing_in_properties_and_flip_from_the_menu() {
+    let mut h = app(&format!(
+        "{BOX}
+room {{\"point\": [4000, 3000], \"name\": \"WC\", \"number\": \"1\"}}
+door {{\"at\": [2000, 0]}}"
+    ));
+    let door = ids(&h, "door")[0];
+    h.state_mut().selection = vec![door];
+    h.run();
+    // The south wall runs east: the door swings to its left, into the room; it opens from outside. Each value on its
+    // label's row.
+    let row = |h: &Harness<BimApp>, label: &str| h.get_by_label(label).rect().center().y;
+    let on = |h: &Harness<BimApp>, value: &str, y: f32| h.get_all_by_label(value).any(|n| (n.rect().center().y - y).abs() < 4.0);
+    let (from, to) = (row(&h, "From Room"), row(&h, "To Room"));
+    assert!(on(&h, "WC 1", to) && !on(&h, "WC 1", from), "the WC is its To Room");
+    assert!(on(&h, "<None>", from), "outside is its From Room");
+    // The right-click menu's Flip From/To Room swaps them; its swing stays.
+    let items: Vec<_> = h.state().context_items().into_iter().flatten().collect();
+    assert!(items.iter().any(|i| i.action == Action::FlipFromToRoom && i.enabled), "the menu offers Flip From/To Room");
+    h.state_mut().act(Action::FlipFromToRoom);
+    h.run();
+    let (from, to) = (row(&h, "From Room"), row(&h, "To Room"));
+    assert!(on(&h, "WC 1", from) && on(&h, "<None>", to), "swapped");
+    let e = element_json(&h.state().session.model, door);
+    assert_eq!((e["swing"].clone(), e["swings_into"]["name"].clone()), (json!("left"), json!("WC")), "{e}");
+}
+
+#[test]
+fn properties_never_looks_for_a_selected_doors_rooms_again_each_frame() {
+    let mut h = app(&format!(
+        "{BOX}
+room {{\"point\": [4000, 3000], \"name\": \"WC\", \"number\": \"1\"}}
+door {{\"at\": [2000, 0]}}"
+    ));
+    let door = ids(&h, "door")[0];
+    h.state_mut().selection = vec![door];
+    h.run();
+    h.get_by_label("WC 1");
+    let seen = bimcraft_core::rooms::openings_looked_up();
+    for _ in 0..3 {
+        h.step();
+    }
+    assert_eq!(bimcraft_core::rooms::openings_looked_up(), seen, "the palette's From Room and To Room come from what it keeps");
+}

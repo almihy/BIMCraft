@@ -88,7 +88,8 @@ pub fn names(m: &Model, id: Id) -> Option<Names> {
     }
     let e = m.elements.get(id)?;
     let guid = m.elements.guid(id)?;
-    let j = crate::element_json(m, id);
+    // Its name, type, number or mark, and none of its rooms.
+    let j = crate::element_json_bare(m, id);
     let name = ["name", "type", "number", "mark", "text"].iter().find_map(|k| j[*k].as_str().filter(|s| !s.is_empty())).unwrap_or_default();
     Some(Names { id, guid, ifc: crate::ifc::compress(guid.as_u128()), category: e.category().to_string(), name: name.to_string() })
 }

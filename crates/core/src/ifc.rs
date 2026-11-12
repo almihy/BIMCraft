@@ -1577,7 +1577,7 @@ pub fn export(m: &Model) -> String {
         let shape = w.body(profile, 0.0, t.height, &[]);
         let opening = w.add(format!("IFCOPENINGELEMENT({},$,'Opening',$,$,#{at},#{shape},$,.OPENING.)", w.guid(OPENING, id)));
         w.add(format!("IFCRELVOIDSELEMENT({},$,$,$,#{wall},#{opening})", w.guid(VOIDS, id)));
-        // The door or window itself: a 50 mm panel centred in the wall; of a family, its forms as a component's are,
+        // The door or window itself: a panel centred in the wall, a door's as thick as its leaf, a window's 50 mm; of a family, its forms as a component's are,
         // closed face sets in their materials' colours, standing at the middle of the opening.
         let mut made_of: Vec<u64> = Vec::new();
         let (fill_at, shape) = match m.opening_local(e).filter(|_| o.family.is_some()) {
@@ -1600,7 +1600,8 @@ pub fn export(m: &Model) -> String {
                 (w.place(Some(at), (t.width / 2.0, 0.0, 0.0), None), w.add(format!("IFCPRODUCTDEFINITIONSHAPE($,$,(#{rep}))")))
             }
             None => {
-                let profile = w.rectangle(P2(t.width / 2.0, 0.0), P2(t.width, 50.0));
+                let thick = if matches!(e, Element::Door(_)) { t.leaf() } else { 50.0 };
+                let profile = w.rectangle(P2(t.width / 2.0, 0.0), P2(t.width, thick));
                 (w.place(Some(at), (0.0, 0.0, 0.0), None), w.body(profile, 0.0, t.height, &[]))
             }
         };

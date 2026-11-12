@@ -72,7 +72,10 @@ pub const CEILING_HEIGHT: f64 = 2600.0;
 pub const MAX_SLOPE: f64 = 75.0;
 /// The closest a floor's contours may be drawn, mm: a site's are a metre or half a metre apart.
 pub const MIN_CONTOURS: f64 = 50.0;
-/// The version of the project file this build writes, and the newest it reads. 18: a family's connector may be a `pipe`,
+/// The version of the project file this build writes, and the newest it reads. 20: a door or a window keeps the side of its
+/// wall its To Room is on (`to_room_side`), set as it is placed and kept through its flips, as Revit's From Room and To Room;
+/// a file of 19 has it from the side each swings to or faces, once, as it is read, and a build that reads up to 19 would leave
+/// it out and take it from the swing, so a door flipped since it was placed would say its rooms the other way round. 18: a family's connector may be a `pipe`,
 /// `data` or `earthing` one, with no `system` (a pipe's `domain`, `flow`, `size`), and any may have a place (`at`, `direction`);
 /// the starter fixtures and fittings have them; a project may hold title blocks of its own (`title_blocks`, library entries of
 /// kind `title-block`) and its values of their fields (`title_values`), and a sheet may name one (`title_block`) and hold its
@@ -119,7 +122,7 @@ pub const MIN_CONTOURS: f64 = 50.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 19;
+pub const FORMAT: u32 = 20;
 /// How far past the model a level reaches without an extent of its own, mm.
 pub const LEVEL_PAST: f64 = 1000.0;
 
@@ -867,9 +870,32 @@ pub struct Opening {
     /// Hinge on the other jamb.
     #[serde(default)]
     pub flip_hand: bool,
+    /// The side of its wall (left or right, looking from the wall's start to its end) its To Room is on, as Revit's: set
+    /// when it is placed, from the side a door swings to or a window faces ([`Opening::swing_side`]), kept through its
+    /// flips, and swapped by Flip From/To Room. Its From Room is on the other side.
+    #[serde(default)]
+    pub to_room_side: Side,
     /// Its values of the project's parameters, by name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub params: BTreeMap<String, serde_json::Value>,
+}
+
+impl Opening {
+    /// The side of its wall a door swings to, or a window faces, now: its wall's left (start to end), or flipped facing
+    /// its right.
+    pub fn swing_side(&self) -> Side {
+        if self.flip_facing { Side::Right } else { Side::Left }
+    }
+}
+
+impl Side {
+    /// The other side.
+    pub fn other(self) -> Side {
+        match self {
+            Side::Left => Side::Right,
+            Side::Right => Side::Left,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2598,8 +2624,39 @@ pub struct OpeningType {
     pub sill: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation: Option<Operation>,
+    /// A door's leaf, how thick it is: Revit's Thickness of a door type; none, [`DOOR_THICKNESS`]. A window's has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thickness: Option<f64>,
     #[serde(default, skip_serializing_if = "crate::type_data::TypeIdentity::is_empty")]
     pub identity: crate::type_data::TypeIdentity,
+}
+
+/// How far past its wall's faces a door's or window's From Room and To Room are looked for ([`Model::opening_sides`]).
+pub const ROOM_PROBE: f64 = 100.0;
+
+/// Which way a door or a window is turned in its wall ([`Model::opening_way`]): lengths along its wall's location line
+/// and across it, to its left.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OpeningWay {
+    /// The side a door swings to, or a window faces, now: 1 its wall's left, -1 its right.
+    pub to: f64,
+    /// How far to the left of its wall's location line the face on that side lies.
+    pub face: f64,
+    /// And the face on its other side.
+    pub back: f64,
+    /// Along its wall, its hinged jamb (or the one it slides or folds toward), and the other.
+    pub hinge: f64,
+    pub free: f64,
+}
+
+/// How thick a door's leaf is where its type says nothing: Revit's out-of-the-box Single-Flush's Thickness, 50 mm.
+pub const DOOR_THICKNESS: f64 = 50.0;
+
+impl OpeningType {
+    /// Its leaf's thickness: its own, or [`DOOR_THICKNESS`].
+    pub fn leaf(&self) -> f64 {
+        self.thickness.unwrap_or(DOOR_THICKNESS)
+    }
 }
 
 /// How a door's or a window's leaves open, as IFC's door operation types name them; which jamb a
@@ -3177,12 +3234,10 @@ impl Model {
         m.types.wall.insert("Exterior - 300mm".into(), WallType { thickness: 300.0, layers, identity: Default::default() });
         m.types.floor.insert("Generic - 200mm".into(), FloorType { thickness: 200.0, layers: Vec::new(), identity: Default::default() });
         for (n, w) in [("Single 900 x 2100", 900.0), ("Single 800 x 2100", 800.0)] {
-            m.types
-                .door
-                .insert(n.into(), OpeningType { width: w, height: 2100.0, sill: 0.0, operation: None, identity: Default::default() });
+            m.types.door.insert(n.into(), OpeningType { width: w, height: 2100.0, ..Default::default() });
         }
         for (n, w, h, s) in [("Fixed 1200 x 1500", 1200.0, 1500.0, 900.0), ("Fixed 600 x 900", 600.0, 900.0, 1100.0)] {
-            m.types.window.insert(n.into(), OpeningType { width: w, height: h, sill: s, operation: None, identity: Default::default() });
+            m.types.window.insert(n.into(), OpeningType { width: w, height: h, sill: s, ..Default::default() });
         }
         m.types
             .column
@@ -3669,6 +3724,15 @@ impl Model {
         // did, and none of its dimensions measures `across`.
         // 18 to 19 (a dimension to a wall's core: its centre line and faces) has none either: a file of 18 holds no dimension
         // to a core, and the temporary dimensions' settings are left out of a file that has none, which reads as centre lines.
+        // 19 to 20: a door's or window's From Room and To Room are kept on it (`to_room_side`). One of 19 had them from the side
+        // it swings to or faces, as they are given it here, once.
+        if self.format < 20 {
+            for e in self.elements.values_mut() {
+                if let Element::Door(o) | Element::Window(o) = e {
+                    o.to_room_side = o.swing_side();
+                }
+            }
+        }
         self.format = FORMAT;
     }
 
@@ -4457,6 +4521,7 @@ impl Model {
             height: need(crate::family::HEIGHT)?,
             sill: number(crate::family::SILL).unwrap_or(if is_door { 0.0 } else { 900.0 }),
             operation: f.operation,
+            thickness: None,
             identity: f.identity.get(&o.type_name).cloned().unwrap_or_default(),
         })
     }
@@ -5454,6 +5519,55 @@ impl Model {
         P2(p.0 + 0.0, p.1 + 0.0)
     }
 
+    /// Which way door or window `e` is turned in its wall now: the side it swings to, or faces, and the jamb it is hinged on,
+    /// as plans draw it. A door swings to its wall's left (start to end, the exterior side), or flipped facing to its
+    /// right, and is hinged on the jamb toward the wall's start, or flipped hand toward its end; a window faces its wall's
+    /// left, or flipped its right. Its From Room and To Room are kept apart ([`Opening::to_room_side`]), as Revit's: set
+    /// from this when it is placed, they don't follow a later flip. None for an element that isn't a door or a window, or
+    /// whose wall or type is missing.
+    pub fn opening_way(&self, e: &Element) -> Option<OpeningWay> {
+        let (Element::Door(o) | Element::Window(o)) = e else { return None };
+        let (w, t) = (self.wall(o.host)?, self.opening_type(e)?);
+        let (ext, int) = walls::faces(self, w);
+        let left = o.swing_side() == Side::Left;
+        let (s0, s1) = (o.offset - t.width / 2.0, o.offset + t.width / 2.0);
+        let (hinge, free) = if o.flip_hand { (s1, s0) } else { (s0, s1) };
+        Some(OpeningWay {
+            to: if left { 1.0 } else { -1.0 },
+            face: if left { ext } else { int },
+            back: if left { int } else { ext },
+            hinge,
+            free,
+        })
+    }
+
+    /// The points either side of door or window `e`, a little past its wall's faces at its middle, that the rooms it
+    /// is between are found at, as Revit's From Room and To Room: from, then to, on the sides its `to_room_side` says.
+    pub fn opening_sides(&self, e: &Element) -> Option<(P2, P2)> {
+        let (Element::Door(o) | Element::Window(o)) = e else { return None };
+        let w = self.wall(o.host)?;
+        let ((left, right), axis) = (walls::faces(self, w), walls::Axis::of(w));
+        let (to, from) = (axis.at(o.offset, left + ROOM_PROBE), axis.at(o.offset, right - ROOM_PROBE));
+        Some(if o.to_room_side == Side::Left { (from, to) } else { (to, from) })
+    }
+
+    /// The point a little past the face of its wall door `e` swings to, at its middle, that the room it opens into now is
+    /// found at ([`Model::opening_way`]). None for a window.
+    pub fn swing_point(&self, e: &Element) -> Option<P2> {
+        let Element::Door(o) = e else { return None };
+        let (way, axis) = (self.opening_way(e)?, walls::Axis::of(self.wall(o.host)?));
+        Some(axis.at(o.offset, way.face + way.to * ROOM_PROBE))
+    }
+
+    /// Where door `e` is hinged: its hinged jamb, on the face of the wall it swings to (a double door's, the one toward its
+    /// wall's start unless flipped hand, its other leaf's at the other jamb; a sliding or folding one's, the jamb it slides
+    /// or folds toward). None for a window, or a door whose wall or type is missing ([`Model::opening_way`]).
+    pub fn door_hinge(&self, e: &Element) -> Option<P2> {
+        let Element::Door(o) = e else { return None };
+        let (way, axis) = (self.opening_way(e)?, walls::Axis::of(self.wall(o.host)?));
+        Some(axis.at(way.hinge, way.face))
+    }
+
     fn wall_of(&self, opening: impl Key) -> Option<&Wall> {
         match self.elements.get(opening) {
             Some(Element::Door(o) | Element::Window(o)) => self.wall(o.host),
@@ -6437,6 +6551,15 @@ impl Model {
                 size(&format!("{cat} type `{n}` width"), t.width)?;
                 size(&format!("{cat} type `{n}` height"), t.height)?;
                 coord(&format!("{cat} type `{n}` sill"), t.sill)?;
+                match t.thickness {
+                    Some(_) if cat == "window" => {
+                        return Err(format!(
+                            "window type `{n}` has a `thickness`: a window type has none, its glass sits in the middle of its wall"
+                        ));
+                    }
+                    Some(x) => size(&format!("{cat} type `{n}` thickness"), x)?,
+                    None => {}
+                }
             }
         }
         if self.images.len() > MAX_IMAGES {
@@ -8215,6 +8338,7 @@ mod tests {
             mark: String::new(),
             flip_facing: false,
             flip_hand: false,
+            to_room_side: Side::Left,
         })
     }
 

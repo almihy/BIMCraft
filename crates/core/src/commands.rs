@@ -298,7 +298,10 @@ other_files(
         &["DR"],
         "{at: [x,y] | wall: id, offset?, type?, family?, level?, mark?, toward?, flip_facing?, flip_hand?} in the wall under `at`, \
          or in `wall` centred `offset` mm from its start; `toward` [x,y]: the door swings to the side of the wall that point is \
-         on (the desktop sends the cursor), and `flip_facing` then flips it from there; with `family`, a door family's `type` (its first by default), \
+         on (the desktop sends the cursor), and `flip_facing` then flips it from there; without it, it swings to the wall's \
+         left (start to end), `flip_facing` to its right, hinged on the jamb toward the wall's start, `flip_hand` its end \
+         (`elements` says back its `to_room`, the room it swings into as it is placed, kept through its flips as Revit's, \
+         `swings_into`, its `hinge` and `swing`); with `family`, a door family's `type` (its first by default), \
          which sizes the opening and draws the door; it may rise past a low wall's top, as Revit lets it",
         door,
     )
@@ -604,8 +607,8 @@ other_files(
         "{point: [x,y], level?, name?, number?, occupancy?, top_level?, limit_offset?, base_offset?, frozen?} bounded by the walls \
          and the room separation lines around the point (walls the level's `computation_height` cuts; separation lines \
          whatever their height). `occupancy` is Revit's Occupancy, what the room is used for (bedroom, office, kitchen; also \
-         `modify {id, occupancy}`): what reads a room's use reads it, and its name only when it is empty. Placed where nothing encloses it, or in a space another room has (two rooms can't share one; the first \
-         keeps it), it is placed unbounded, a 1000 mm square, and the reply has a `warning`. Its height is Revit's: from \
+         `modify {id, occupancy}`): what reads a room's use reads it, and its name only when it is empty. Placed where nothing encloses it, or in a space another room has (two rooms of a phase can't share one; the first \
+         keeps it, and a room of a later phase in the space of one demolished before it has it, as Revit's), it is placed unbounded, a 1000 mm square, and the reply has a `warning`. Its height is Revit's: from \
          `base_offset` mm over its level (0) up to `limit_offset` mm over its upper limit `top_level` (null: Not Bounded, \
          over its own level). Unless given, 300 mm under the level above (`top_level` that level, `limit_offset` -300), or \
          with none above, not bounded and 2500 mm tall. `elements` gives its `unbounded_height` and `volume_m3`, its area \
@@ -1144,7 +1147,7 @@ other_files(
         "Detail Level",
         &[],
         "{view, detail?: coarse | medium | fine} how much a plan, a section or an elevation draws of what it cuts: coarse, one \
-         poché and openings as their gaps; medium, compound layers with the lines between them and an opening's leaf, swing and \
+         poché and openings as their gaps (a door of the project's own type still its leaf and swing, as Revit's); medium, compound layers with the lines between them and an opening's leaf, swing and \
          glass; fine (the default), the layers' patterns and a floor's surface pattern too. Without `detail` it only says what \
          the view has",
         view_detail,
@@ -1164,10 +1167,11 @@ other_files(
         "Edit Type",
         &[],
         "{category: wall|floor|ceiling|door|window|column|structuralcolumn|footing|roof|railing|beam|stripfooting|pipe|duct|conduit|\
-         cabletray|wire|downconductor|groundconductor|cable, name, thickness? | width?, height?, sill?, operation? | width?, depth?, round?, \
+         cabletray|wire|downconductor|groundconductor|cable, name, thickness? | width?, height?, sill?, operation?, thickness? | width?, depth?, round?, \
          material? | height?, spacing?, type_mark?, description?, manufacturer?, model?, fire_rating?, cost?, keynote?, assembly_code?, url?, type_comments?} creates the type, or changes it everywhere it's used. A column's, a structural column's or \
          a footing's type is a `width` by `depth`, or `round` (`width` across); a run's (a beam's, a pipe's, a cable tray's…) too, \
-         made of a `material` of the library. A wall type may have `layers` [{function?: structure|\
+         made of a `material` of the library. A door type's `thickness` is its leaf's, as Revit's door Thickness (none, or `null` to clear it, 50 mm as Revit's \
+         Single-Flush), which plans draw the leaf as and 3D views and IFC build; a window type has none. A wall type may have `layers` [{function?: structure|\
          substrate|thermal|membrane|finish, material?, thickness}, …] from its exterior side in: it's as thick as they are, \
          its core from its first structure layer to its last, and a new `thickness` goes to its structure. A ceiling type may \
          have `grid`: its square tiles' width, mm, which reflected ceiling plans draw (0, none); a railing type, `height` (its \
@@ -1340,8 +1344,15 @@ other_files(
         "{ids: [wall | door | window,…], hand?, facing?, step?} turns walls round about their location lines, as Revit's flip arrows \
          do: their exterior sides go to the other side, their doors and windows stay where they are. A door or window in `ids` \
          is flipped on its own: `hand` puts its hinge on the other jamb, `facing` its swing (a window's face) to the wall's \
-         other side; with neither given, its facing flips (`facing: false` leaves it). `hand` and `facing` apply to the doors and windows listed, not to a wall's. `step: true` is Revit's Space: each door listed takes one step through its four ways          (facing, hand, facing back, hand back) from its own state, and each window as a door; not with `hand` or `facing`",
+         other side; with neither given, its facing flips (`facing: false` leaves it). `hand` and `facing` apply to the doors and windows listed, not to a wall's. `step: true` is Revit's Space: each door listed takes one step through its four ways          (facing, hand, facing back, hand back) from its own state, and each window as a door; not with `hand` or `facing`.          A door's or window's From Room and To Room stay as they were, as Revit's: `flip_from_to_room` swaps them",
         flip,
+    ),
+    edit(
+        "flip_from_to_room",
+        ui_msg!("Flip From/To Room"),
+        &[],
+        "{ids: [door | window,…]} swaps the From Room and To Room of each door and window listed, as Revit's Flip From/To          Room: each is set when it is placed (a door's To Room the room it swings into, a window's the one it faces) and          keeps to its sides of the wall through `flip`, so a door flipped to swing the other way still has its rooms as          placed until this swaps them. Its swing and hand don't change; `elements` says the rooms back as `from_room` and          `to_room`, and a door's `swings_into`, the room it opens into now",
+        flip_from_to_room,
     ),
     edit(
         "modify",
@@ -2467,7 +2478,7 @@ other_files(
         ui_msg!("Elements"),
         "{category?, level?, limit?, offset?} elements with their `id` (six digits, what commands take) and `guid` (made once, \
          never changed), fields and derived values (length, height, area_m2…); what an element points at (its level, host, \
-         view…) it holds by GUID. Wherever a command takes an element, its id or its GUID will do",
+         view…) it holds by GUID. A door or window has `from_room` and `to_room`, as Revit's From Room and To Room: the room          on each side of its wall ({id, guid, number, name}; null outside every room, or a room not in the project's last          phase), on the sides its `to_room_side` (left or right of its wall, start to end) says. They are set as it is          placed (a door's To Room the room it swings into; a window's the one it faces, its exterior, as Revit's, so a window          faced out has its room as `from_room`) and keep to their sides through `flip`, as Revit's; `flip_from_to_room`          swaps them. A door also has `swings_into` (the room it opens into now, whatever its From and To Room say), `swing`          (left or right: the side of its wall, looking from the wall's start to its end, it swings to), `hinge` ([x, y]: its          hinged jamb on the face it swings to, as plans draw it; a double door's toward the wall's start, a sliding or          folding one's the jamb it slides or folds toward) and, of a project's own type, its leaf's `thickness`. Check          these after placing a door with `flip_facing` and `flip_hand`. Wherever a command takes an element, its id or its          GUID will do",
         elements,
     ),
 ];
@@ -2870,6 +2881,17 @@ pub fn element_json(m: &Model, id: Id) -> Value {
 
 /// [`element_json`], a room's boundary found among `rooms`: what one look at many elements shares.
 pub fn element_json_with(m: &Model, id: Id, rooms: &crate::rooms::Rooms) -> Value {
+    json_of(m, id, Some(rooms))
+}
+
+/// [`element_json`] less what is found among the rooms of its level: a component's room, a door's or window's From Room,
+/// To Room and the room it swings into. What wants an element's name, type or mark, often (the status bar, a tag that
+/// shows no room, IDs of Selection), and not its rooms; a room's own boundary and a tag's text are still found.
+pub fn element_json_bare(m: &Model, id: Id) -> Value {
+    json_of(m, id, None)
+}
+
+fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>) -> Value {
     let Some(e) = m.elements.get(id) else { return Value::Null };
     let mut extra = Map::new();
     extra.insert("id".into(), json!(id));
@@ -2900,7 +2922,7 @@ pub fn element_json_with(m: &Model, id: Id, rooms: &crate::rooms::Rooms) -> Valu
         extra.extend(identity.set().map(|(k, v)| (k.to_string(), v)));
     }
     // The room a component stands in, as Revit's Room parameter: by GUID, with its number and name for schedules and tags.
-    if let Element::Component(c) = e
+    if let (Element::Component(c), Some(rooms)) = (e, rooms)
         && let Some(id) = rooms.room_at(c.level, c.at)
         && let Some(Element::Room(r)) = m.elements.get(id)
     {
@@ -2963,6 +2985,33 @@ pub fn element_json_with(m: &Model, id: Id, rooms: &crate::rooms::Rooms) -> Valu
                 }
                 extra.insert("level".into(), json!(w.level));
                 extra.insert("at".into(), json!(m.anchor(id)));
+                // The rooms either side, as Revit's From Room and To Room (set as it was placed: a door's To Room, the one it
+                // swung into), the room a door swings into now, and its hinge and the side of its wall it swings to: what its
+                // flips mean, said back.
+                let room = |id: Option<Id>| match id.and_then(|id| m.elements.get(id).map(|r| (id, r))) {
+                    Some((id, Element::Room(r))) => json!({"id": id, "guid": m.guid(id), "number": r.number, "name": r.name}),
+                    _ => Value::Null,
+                };
+                if let Some(rooms) = rooms {
+                    if let Some((from, to)) = rooms.from_to(e) {
+                        extra.insert("from_room".into(), room(from));
+                        extra.insert("to_room".into(), room(to));
+                    }
+                    if let Some(into) = rooms.swings_into(e) {
+                        extra.insert("swings_into".into(), room(into));
+                    }
+                }
+                if let Element::Door(_) = e {
+                    if let Some(h) = m.door_hinge(e) {
+                        extra.insert("hinge".into(), json!([hundredth(h.0), hundredth(h.1)]));
+                    }
+                    if let Some(way) = m.opening_way(e) {
+                        extra.insert("swing".into(), json!(if way.to > 0.0 { "left" } else { "right" }));
+                    }
+                    if o.family.is_none() {
+                        extra.insert("thickness".into(), json!(t.leaf()));
+                    }
+                }
                 // Of a family: every parameter's value, worked out.
                 if let Some(v) = o
                     .family
@@ -3076,7 +3125,8 @@ pub fn element_json_with(m: &Model, id: Id, rooms: &crate::rooms::Rooms) -> Valu
             extra.insert("looking".into(), json!([l.0 + 0.0, l.1 + 0.0]));
         }
         Element::Tag(t) => {
-            extra.insert("text".into(), json!(m.tag_text_with(t, rooms)));
+            let text = rooms.map_or_else(|| m.tag_text(t), |rooms| m.tag_text_with(t, rooms));
+            extra.insert("text".into(), json!(text));
             extra.insert("level".into(), json!(m.level_of(e)));
             extra.insert("at".into(), json!(m.anchor(t.host).map(|a| a + t.offset)));
         }
@@ -3140,7 +3190,10 @@ pub fn element_json_with(m: &Model, id: Id, rooms: &crate::rooms::Rooms) -> Valu
             extra.insert("levels".into(), json!(m.mass_slices(ms).iter().map(|(l, _, _)| *l).collect::<Vec<Id>>()));
         }
         Element::Room(r) => {
-            let bound = rooms.bound(r, m.room_area);
+            let bound = match rooms {
+                Some(rooms) => rooms.bound(r, m.room_area),
+                None => crate::rooms::Rooms::new(m).bound(r, m.room_area),
+            };
             if let Err(Unbound::Shared(other)) = bound {
                 extra.insert("shares_space_with".into(), json!(other));
             }
@@ -8089,6 +8142,25 @@ fn location_names(n: &str) -> String {
     format!("`location` is one of {}, not `{n}`", names.join(", "))
 }
 
+/// Doors' and windows' From Room and To Room swapped, as Revit's Flip From/To Room: what side of its wall each one's To Room
+/// is on, nothing else. Not a move: a pinned one is flipped too.
+fn flip_from_to_room(s: &mut Session, p: &Value) -> R {
+    let c = "flip_from_to_room";
+    let m = &s.model;
+    let ids = ids_param(c, m, p)?;
+    if let Some(id) = ids.iter().find(|id| !matches!(m.elements.get(**id), Some(Element::Door(_) | Element::Window(_)))) {
+        let what = m.elements.get(*id).map_or("element", Element::category);
+        return Err(bad(c, format!("{what} {id} isn't a door or a window")));
+    }
+    let m = s.model_mut();
+    for id in &ids {
+        if let Some(Element::Door(o) | Element::Window(o)) = m.elements.get_mut(*id) {
+            o.to_room_side = o.to_room_side.other();
+        }
+    }
+    Ok(json!({"ids": ids}))
+}
+
 /// Walls turned round about their location lines: they run the other way, so their exterior sides
 /// go to the other side; their doors and windows stay where they are, swinging and hinged as they were.
 fn flip(s: &mut Session, p: &Value) -> R {
@@ -8119,6 +8191,8 @@ fn flip(s: &mut Session, p: &Value) -> R {
             Element::Door(o) | Element::Window(o) if lengths.contains_key(&o.host) => {
                 o.offset = lengths.get(&o.host).copied().unwrap_or_default() - o.offset;
                 (o.flip_facing, o.flip_hand) = (!o.flip_facing, !o.flip_hand);
+                // Its From Room and To Room stay where they are too: the wall's left and right swap.
+                o.to_room_side = o.to_room_side.other();
             }
             _ => {}
         }
@@ -8271,8 +8345,10 @@ fn build_opening(m: &Model, p: &Value, is_door: bool) -> Result<Opening, String>
         mark,
         flip_facing: flag(c, p, "flip_facing")? ^ toward_right,
         flip_hand: flag(c, p, "flip_hand")?,
+        to_room_side: Side::Left,
     };
-    Ok(o)
+    // Its To Room, as Revit's, on the side it swings to or faces as it is placed, and kept there through its flips.
+    Ok(Opening { to_room_side: o.swing_side(), ..o })
 }
 
 fn floor(s: &mut Session, p: &Value) -> R {
@@ -12033,11 +12109,18 @@ fn edit_type(s: &mut Session, p: &Value) -> R {
                 Some(name) => operation(c, &name)?,
                 None => old.as_ref().and_then(|t| t.operation),
             };
+            // A door's leaf, Revit's Thickness of a door type; `thickness: null` clears it back to Revit's Single-Flush's. A
+            // window has none, which `Model::check` refuses.
+            let leaf = match p.get("thickness") {
+                Some(Value::Null) => None,
+                _ => thickness.or(old.as_ref().and_then(|t| t.thickness)),
+            };
             let t = OpeningType {
                 width: width.or(old.as_ref().map(|t| t.width)).ok_or_else(|| need("width"))?,
                 height: height.or(old.as_ref().map(|t| t.height)).ok_or_else(|| need("height"))?,
                 sill: sill.or(old.as_ref().map(|t| t.sill)).unwrap_or(if cat == "window" { 900.0 } else { 0.0 }),
                 operation: op,
+                thickness: leaf,
                 identity,
             };
             map.insert(name.clone(), t.clone());

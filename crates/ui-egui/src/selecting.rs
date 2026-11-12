@@ -6,7 +6,7 @@
 
 use bimcraft_i18n::msg;
 
-use bimcraft_core::element_json;
+use bimcraft_core::element_json_bare;
 use bimcraft_core::geom::P2;
 use bimcraft_core::model::{Element, Id, Model};
 use egui::{Context, Modifiers, Response, Ui};
@@ -278,7 +278,7 @@ impl BimApp {
 /// The words for element `id`: its category, family and type, as Revit's status bar names them.
 fn name_of(m: &Model, id: Id) -> Option<String> {
     let e = m.elements.get(id)?;
-    let json = element_json(m, id);
+    let json = element_json_bare(m, id);
     let mut parts = vec![category(e.category(), true)];
     let family = json["family"].as_str().filter(|f| !f.is_empty()).map(str::to_string).or_else(|| system_family(e));
     parts.extend(family);

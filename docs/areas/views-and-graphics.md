@@ -260,7 +260,8 @@ Trim/Extend and Fillet's picks so far show in the selection's colour. Trim/Exten
 two sketch lines picked) joins them at once, each keeping the part toward its middle.
 
 `Drawing::detail` is the level the plan or the section is drawn at: coarse leaves out a compound element's layers and an opening's
-symbols, medium its patterns (`cut_layer`, a floor's `surface`), fine draws as before. In the 3D view `Look::style` picks how
+symbols (not the leaf and swing of a door of the project's own type, which Revit's door families show at every level:
+[families](families.md)), medium its patterns (`cut_layer`, a floor's `surface`), fine draws as before. In the 3D view `Look::style` picks how
 `Scene::picture` draws: shaded as ever, hidden line as a section's picture is (paper faces, edges), wireframe by `Scene::edges` (where
 surfaces meet at an angle or end, found once) drawn through the faces; a pixel within two of a line picks its element.
 

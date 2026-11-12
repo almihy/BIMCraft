@@ -13,7 +13,9 @@ use std::sync::Arc;
 
 use bimcraft_core::element_json_with;
 use bimcraft_core::family::{Kind as Holds, Val};
-use bimcraft_core::model::{Element, Function, Guid, Id, Layer, Location, Model, PARAMETER_CATEGORIES, ParameterKind, Pattern};
+use bimcraft_core::model::{
+    DOOR_THICKNESS, Element, Function, Guid, Id, Layer, Location, Model, PARAMETER_CATEGORIES, ParameterKind, Pattern,
+};
 use bimcraft_core::rooms::Rooms;
 use bimcraft_core::schedule::{self, Field, Filter, Op, Sort};
 use bimcraft_core::snap::Kind as Snap;
@@ -465,7 +467,7 @@ fn type_rows(category: &str) -> &'static [(&'static str, &'static str, &'static 
     match category {
         "wall" => &[(C, "thickness", msg!("Width"))],
         "floor" => &[(C, "thickness", msg!("Default Thickness"))],
-        "door" => &[(D, "width", msg!("Width")), (D, "height", msg!("Height"))],
+        "door" => &[(D, "thickness", msg!("Thickness")), (D, "width", msg!("Width")), (D, "height", msg!("Height"))],
         "window" => &[(D, "width", msg!("Width")), (D, "height", msg!("Height")), (C, "sill", msg!("Default Sill Height"))],
         "column" | "structuralcolumn" | "footing" => &[(D, "width", msg!("Width")), (D, "depth", msg!("Depth"))],
         run if bimcraft_core::model::RUN_CATEGORIES.contains(&run) => &[(D, "width", msg!("Width")), (D, "depth", msg!("Depth"))],
@@ -871,7 +873,16 @@ impl TypeDialog {
     /// A type's sizes, as typed: lengths in the project's units.
     fn fields(m: &Model, category: &str, name: &str) -> Vec<TypeField> {
         let types = serde_json::to_value(&m.types).unwrap_or_default();
-        type_rows(category).iter().map(|(g, k, l)| (*g, *k, *l, shown(Length, &type_json(&types, category, name)[k], m.units))).collect()
+        let leaf = json!(DOOR_THICKNESS);
+        type_rows(category)
+            .iter()
+            .map(|(g, k, l)| {
+                let v = &type_json(&types, category, name)[k];
+                // A door type that says no thickness has Revit's Single-Flush's.
+                let v = if v.is_null() && category == "door" && *k == "thickness" { &leaf } else { v };
+                (*g, *k, *l, shown(Length, v, m.units))
+            })
+            .collect()
     }
 
     /// A layered type's layers, as typed: one structure layer as thick as it, without any.

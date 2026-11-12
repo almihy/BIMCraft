@@ -491,6 +491,23 @@ impl BimApp {
             return;
         }
         let mut change: Option<(&str, Value)> = None;
+        // A door's or window's From Room and To Room, read only, as Revit's: the rooms either side, set as it was placed (a
+        // door's To Room the one it swung into, a window's the one it faces); several, where they share them. Read from
+        // what the palette keeps of each, never found again each frame.
+        let json = self.elements_json(model, ids);
+        let between = || {
+            let said = |r: &Value| match (r["name"].as_str(), r["number"].as_str()) {
+                (Some(name), Some(number)) => format!("{name} {number}").trim().to_string(),
+                _ => none.clone(),
+            };
+            let each: Vec<(String, String)> = json
+                .iter()
+                .map(|j| (j.get("from_room").is_some() && j.get("to_room").is_some()).then(|| (said(&j["from_room"]), said(&j["to_room"]))))
+                .collect::<Option<_>>()?;
+            let first = each.first()?.clone();
+            each.iter().all(|x| *x == first).then_some(first)
+        };
+        let between = between();
         crate::properties::grid(ui, ("phasing-parameters", id), |ui| {
             let label = ui.label(t("Phase Created"));
             // Written out even for the first phase: a door with none follows its wall.
@@ -511,6 +528,14 @@ impl BimApp {
                 if let Some(p) = combo(ui, (id, "design-option"), label.id, &option, &options) {
                     change = Some((phasing::OPTION, if p == main { Value::Null } else { json!(p) }));
                 }
+                ui.end_row();
+            }
+            if let Some((from, to)) = &between {
+                ui.label(t("From Room"));
+                ui.label(from);
+                ui.end_row();
+                ui.label(t("To Room"));
+                ui.label(to);
                 ui.end_row();
             }
         });

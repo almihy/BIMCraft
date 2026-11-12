@@ -107,7 +107,7 @@ use bimcraft_core::geom::P2;
 use bimcraft_core::model::{CEILING_HEIGHT, DimKind, Element, Id, Justify, Location, Model, RAMP_WIDTH, Reference, RoomArea, STAIR_WIDTH};
 use bimcraft_core::snap::{Kind as Snap, Snaps};
 use bimcraft_core::units::Units;
-use bimcraft_core::{element_json, render, schedule, stairs};
+use bimcraft_core::{element_json_bare, render, schedule, stairs};
 use egui::containers::menu::{MenuButton, SubMenuButton};
 use egui::{
     Align, Align2, Area, CentralPanel, Color32, Context, CornerRadius, Event, FontId, Frame, Grid, Id as UiId, Key, KeyboardShortcut,
@@ -2615,7 +2615,7 @@ impl BimApp {
             }
         };
         if let Some((id, e)) = picked
-            && let Some(name) = element_json(&m, id)["type"].as_str()
+            && let Some(name) = element_json_bare(&m, id)["type"].as_str()
         {
             self.types.insert(e.category(), name.to_string());
         }
@@ -2661,7 +2661,7 @@ impl BimApp {
             self.status = Status { text: t("Select an element first to match its properties").into(), error: true };
             return;
         };
-        let src = element_json(&self.session.model, first);
+        let src = element_json_bare(&self.session.model, first);
         let Some(typ) = src["type"].as_str().filter(|t| !t.is_empty()) else {
             self.status = Status { text: t("The selected element has no type to match").into(), error: true };
             return;
