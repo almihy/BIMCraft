@@ -453,7 +453,7 @@ const SHORTCUTS: [(&str, &str); 64] = [
     ("PP", "Properties"),
     ("VP", "Properties"),
     ("NP", "Project Browser"),
-    ("SA", "Select All Instances"),
+    ("SA", "Select All Instances in Entire Project"),
     ("AG", msg!("Alignment Guides")),
     ("OG", msg!("Orthogonal Guides")),
     ("SE", msg!("Snap to Endpoints")),
@@ -891,6 +891,14 @@ pub struct BimApp {
     purge_dialog: Option<purge::PurgeDialog>,
     /// Manage > Select by ID and IDs of Selection, while open.
     select_by_id: Option<inquiry::SelectById>,
+    /// Go To View, as Find Referring Views opened it.
+    go_to_view: Option<context::GoToView>,
+    /// The selected wall or run whose end grip the last right click landed on, and the view it was in: the menu offers its
+    /// join there.
+    menu_end: Option<(Sheet, Id)>,
+    /// The selection as last seen, and the one before it, which Select Previous brings back.
+    selection_seen: Vec<Id>,
+    selection_before: Vec<Id>,
     /// The Work Plane dialog's draft, while it's open or picking its points in the 3D view.
     work_plane: Option<workplane::Draft>,
     ids_of_selection: Option<inquiry::IdsOfSelection>,
@@ -1549,6 +1557,10 @@ impl BimApp {
             options_dialog: None,
             purge_dialog: None,
             select_by_id: None,
+            go_to_view: None,
+            menu_end: None,
+            selection_seen: Vec::new(),
+            selection_before: Vec::new(),
             work_plane: None,
             ids_of_selection: None,
             warnings_dialog: None,
@@ -1696,6 +1708,8 @@ impl BimApp {
         let m = &self.session.model;
         let categories: BTreeSet<&str> = self.selection.iter().filter_map(|id| m.elements.get(id)).map(|e| e.category()).collect();
         match categories.len() {
+            // Revit's mode has a tab of its own while nothing is selected.
+            0 if self.revealing() => Some(format!("{} | {}", t("Modify"), t("Reveal Hidden Elements"))),
             0 => None,
             1 => categories.first().map(|c| format!("{} | {}", t("Modify"), lang::category(c, true))),
             _ => Some(format!("{} | {}", t("Modify"), t("Multi-Select"))),
@@ -1791,6 +1805,7 @@ impl BimApp {
             self.autosave_document();
         }
         self.tidy();
+        self.note_selection();
         #[cfg(feature = "updater")]
         self.poll_updates(&ctx);
         self.poll_revit(&ctx);
@@ -2077,6 +2092,7 @@ impl BimApp {
             || self.options_dialog.is_some()
             || self.purge_dialog.is_some()
             || self.select_by_id.is_some()
+            || self.go_to_view.is_some()
             || self.work_plane.as_ref().is_some_and(|d| d.picking.is_none())
             || self.ids_of_selection.is_some()
             || self.warnings_dialog.is_some()
@@ -2290,8 +2306,9 @@ impl BimApp {
                 self.toggle_browser();
                 return true;
             }
+            // Revit's SA is Select All Instances: In Entire Project.
             "SA" => {
-                self.select_all_instances();
+                self.select_all_instances_in_project();
                 return true;
             }
             "AG" | "OG" => {
@@ -2603,13 +2620,13 @@ impl BimApp {
         self.floor_structural = matches!(picked.map(|(_, e)| e), Some(Element::Floor(f)) if f.structural);
     }
 
-    /// Select All Instances > Visible in View (SA): every element the open view shows of a type selected, a
+    /// Select All Instances > Visible in View: every element the open view shows of a type selected, a
     /// component's type being its family's.
     fn select_all_instances(&mut self) {
         self.select_instances(false);
     }
 
-    /// Select All Instances > In Entire Project: every element of the types selected, shown in the open view or not.
+    /// Select All Instances > In Entire Project (SA): every element of the types selected, shown in the open view or not.
     pub(crate) fn select_all_instances_in_project(&mut self) {
         self.select_instances(true);
     }
@@ -4581,6 +4598,33 @@ impl BimApp {
         });
     }
 
+    /// Revit's Reveal Hidden Elements panel, while the view is in Reveal Hidden Elements mode: Unhide Element and Unhide Category, on
+    /// only for a selection the view hides by element or by category, and Toggle Reveal Hidden Elements Mode to leave.
+    fn reveal_hidden_panel(&mut self, ui: &mut Ui) {
+        if !self.revealing() {
+            return;
+        }
+        panel(ui, "Reveal Hidden Elements", |ui| {
+            // What can be picked while hidden is what the mode draws: its selection can be brought back.
+            let (elements, categories) = self.hidden_selection();
+            let tip = msg!("Unhide Element (EU): bring back the selected elements this view hides");
+            let unhide = |ui: &mut Ui, on: bool, label: &str, tip: &str| {
+                ui.add_enabled_ui(on, |ui| big_button(ui, Icon::Visibility, label, false, tip)).inner.clicked()
+            };
+            if unhide(ui, !elements.is_empty(), msg!("Unhide Element"), tip) {
+                self.unhide_selection(false);
+            }
+            let tip = msg!("Unhide Category (VU): bring back every category the selection is of that this view hides");
+            if unhide(ui, !categories.is_empty(), msg!("Unhide Category"), tip) {
+                self.unhide_selection(true);
+            }
+            let tip = msg!("Toggle Reveal Hidden Elements Mode (RH): leave the mode; what the view hides is hidden again");
+            if big_button(ui, Icon::Reveal, msg!("Toggle Reveal Hidden Elements Mode"), true, tip).clicked() {
+                self.temp_reveal();
+            }
+        });
+    }
+
     fn modify_tab(&mut self, ui: &mut Ui) {
         self.select_panel(ui);
         if self.sketch.is_some() {
@@ -4620,22 +4664,9 @@ impl BimApp {
                 if big_button(ui, Icon::Visibility, "Override Graphics", false, tip).clicked() {
                     self.override_selection();
                 }
-                // What can be picked while hidden is what Reveal Hidden Elements draws: its selection can be brought back.
-                let (elements, categories) = self.hidden_selection();
-                if !elements.is_empty() {
-                    let tip = msg!("Unhide Element (EU): bring back the selected elements this view hides");
-                    if big_button(ui, Icon::Visibility, "Unhide Element", false, tip).clicked() {
-                        self.unhide_selection(false);
-                    }
-                }
-                if !categories.is_empty() {
-                    let tip = msg!("Unhide Category (VU): bring back every category the selection is of that this view hides");
-                    if big_button(ui, Icon::Visibility, "Unhide Category", false, tip).clicked() {
-                        self.unhide_selection(true);
-                    }
-                }
             });
         }
+        self.reveal_hidden_panel(ui);
         // Revit's Modify panel: small buttons in rows. Those taking the selection ask for it when there is none.
         let some = !self.selection.is_empty();
         // The button lit while its tool is on (the two Mirrors told apart by how they take the axis).
@@ -5783,6 +5814,7 @@ impl BimApp {
         self.new_schedule_window(ctx);
         self.schedule_window(ctx);
         self.graphics_window(ctx);
+        self.go_to_view_window(ctx);
         self.filters_window(ctx);
         self.templates_window(ctx);
         self.phasing_window(ctx);

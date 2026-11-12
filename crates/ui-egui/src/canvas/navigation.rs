@@ -136,6 +136,8 @@ pub(crate) struct Nav {
     armed: bool,
     /// The views the view had before its last pans and zooms, by level, the latest last.
     history: Vec<(Id, Camera)>,
+    /// What Previous Pan/Zoom went back from, for Next Pan/Zoom, the latest last; a new pan or zoom drops the view's.
+    ahead: Vec<(Id, Camera)>,
     /// When the last pan or zoom by hand or wheel went on, seconds.
     gesture: Option<f64>,
     /// The cursor shape the canvas asked for this frame.
@@ -208,6 +210,7 @@ impl Canvas {
     pub(crate) fn remember_now(&mut self, id: Id) {
         let Some(&now) = self.cams.get(&id) else { return };
         let same = |a: &Camera, b: &Camera| a.scale == b.scale && a.cx == b.cx && a.cy == b.cy;
+        self.nav.ahead.retain(|(k, _)| *k != id);
         if self.nav.history.last().is_some_and(|(k, c)| *k == id && same(c, &now)) {
             return;
         }
@@ -229,9 +232,27 @@ impl Canvas {
     pub(crate) fn previous(&mut self, id: Id) -> bool {
         let Some(at) = self.nav.history.iter().rposition(|(k, _)| *k == id) else { return false };
         let (_, cam) = self.nav.history.remove(at);
-        self.cams.insert(id, cam);
+        if let Some(now) = self.cams.insert(id, cam) {
+            self.nav.ahead.push((id, now));
+        }
         self.nav.gesture = None;
         true
+    }
+
+    /// Next Pan/Zoom: view `id` as it was before Previous Pan/Zoom took it back. Whether there was one.
+    pub(crate) fn next(&mut self, id: Id) -> bool {
+        let Some(at) = self.nav.ahead.iter().rposition(|(k, _)| *k == id) else { return false };
+        let (_, cam) = self.nav.ahead.remove(at);
+        if let Some(now) = self.cams.insert(id, cam) {
+            self.nav.history.push((id, now));
+        }
+        self.nav.gesture = None;
+        true
+    }
+
+    /// Whether view `id` has a pan or zoom to go back to, and one to go forward to again.
+    pub(crate) fn steps(&self, id: Id) -> (bool, bool) {
+        (self.nav.history.iter().any(|(k, _)| *k == id), self.nav.ahead.iter().any(|(k, _)| *k == id))
     }
 
     /// View `id` moved by `by` pixels, as a hand moves paper: what was under the cursor follows it.
@@ -407,6 +428,13 @@ impl BimApp {
         };
         if !went {
             self.status = Status { text: t("There is no earlier zoom to go back to").into(), error: false };
+        }
+    }
+
+    /// Next Pan/Zoom: the view as it was before Previous Pan/Zoom.
+    pub(crate) fn next_zoom(&mut self) {
+        if let crate::Sheet::Plan(id) | crate::Sheet::Ceiling(id) | crate::Sheet::Section(id) | crate::Sheet::Paper(id) = self.sheet {
+            self.canvas.next(id);
         }
     }
 

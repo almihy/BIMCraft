@@ -271,22 +271,30 @@ fn select_all_instances_takes_a_types_elements_in_the_view_or_in_the_entire_proj
     let all = wall_ids(&h);
     assert_eq!(all.len(), 5);
     click(&mut h, P2(4000.0, 0.0));
-    // SA: Visible in View.
-    shortcut(&mut h, "SA");
-    assert_eq!(h.state().selection.len(), 4, "the walls the plan shows: {:?}", h.state().selection);
-    // The menu's Select All Instances > In Entire Project.
-    click(&mut h, P2(4000.0, 0.0));
-    let at = h.state().screen(P2(4000.0, 3000.0));
+    // The menu's Select All Instances > Visible in View.
+    let at = h.state().screen(P2(4000.0, 0.0));
     right_click_at(&mut h, at);
     h.get_all_by(|n| n.label().is_some_and(|x| x.starts_with("Select All Instances"))).last().unwrap().click();
     h.run();
-    h.get_all_by(|n| n.label().is_some_and(|x| x.starts_with("In Entire Project"))).last().unwrap().click();
+    h.get_all_by(|n| n.label().is_some_and(|x| x == "Visible in View")).last().unwrap().click();
     h.run();
+    assert_eq!(h.state().selection.len(), 4, "the walls the plan shows: {:?}", h.state().selection);
+    // SA, as Revit's: Select All Instances: In Entire Project.
+    click(&mut h, P2(4000.0, 0.0));
+    shortcut(&mut h, "SA");
     let mut got = h.state().selection.clone();
     got.sort_unstable();
     let mut want = all;
     want.sort_unstable();
     assert_eq!(got, want, "all five, on both levels");
+    // The menu's Select All Instances > In Entire Project.
+    click(&mut h, P2(4000.0, 0.0));
+    right_click_at(&mut h, at);
+    h.get_all_by(|n| n.label().is_some_and(|x| x.starts_with("Select All Instances"))).last().unwrap().click();
+    h.run();
+    h.get_all_by(|n| n.label().is_some_and(|x| x.starts_with("In Entire Project"))).last().unwrap().click();
+    h.run();
+    assert_eq!(h.state().selection.len(), 5);
     assert_eq!(h.query_all_by(|n| n.label().is_some_and(|x| x.starts_with("In Entire Project"))).count(), 0, "the whole menu closed");
     // The same from the keyboard shortcut list's command, with no default keys.
     click(&mut h, P2(4000.0, 0.0));

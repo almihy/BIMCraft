@@ -13,8 +13,8 @@ use bimcraft_core::engine::Session;
 use bimcraft_core::graphics::{self, ANNOTATION, Detail, Group, MODEL, VisualStyle};
 use bimcraft_core::model::{Element, Id, Model};
 use egui::{
-    Color32, FontId, Frame, Key, Margin, Popup, Rect, Response, RichText, Sense, Stroke, StrokeKind, TextEdit, Ui, UiBuilder, WidgetInfo,
-    WidgetType, pos2, vec2,
+    Color32, FontId, Frame, Key, Margin, Popup, Rect, Response, Sense, Stroke, StrokeKind, TextEdit, Ui, UiBuilder, WidgetInfo, WidgetType,
+    pos2, vec2,
 };
 use serde_json::{Value, json};
 
@@ -26,6 +26,9 @@ use crate::{BimApp, Sheet, Status, small_button};
 
 /// What Revit draws round a view that is hiding or isolating for now.
 const FRAME: Color32 = Color32::from_rgb(0, 190, 220);
+
+/// What Revit draws round a view in Reveal Hidden Elements mode, and what it draws what the view hides in.
+const REVEAL_FRAME: Color32 = Color32::from_rgb(255, 0, 255);
 
 /// What a view hides or reveals for now.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -39,7 +42,7 @@ pub(crate) struct Temp {
 }
 
 impl Temp {
-    fn hides(&self) -> bool {
+    pub(crate) fn hides(&self) -> bool {
         !self.elements.is_empty() || !self.categories.is_empty()
     }
 }
@@ -90,6 +93,32 @@ const REVEALED: &str = "#FF00FF";
 /// on white paper and on the dark canvas, and apart from the model's black lines.
 pub(crate) const HIGH_CONTRAST: [u8; 3] = [220, 20, 60];
 
+/// `m` with view `id` holding as its own the categories and filters its view template sets, and following a copy of the
+/// template for the rest. What a view hides or reveals for now is drawing alone, which Revit does in a view whatever
+/// template it follows; the project's view, and its template, are left as they are.
+fn own_categories_and_filters(m: &mut Model, id: Id) {
+    let Some(name) = graphics::graphics_of(m, id).and_then(|g| g.template.clone()) else { return };
+    let Some(mut template) = m.view_templates.get(&name).cloned() else { return };
+    let (categories, filters) = (template.controls.remove(&Group::Categories), template.controls.remove(&Group::Filters));
+    if !categories && !filters {
+        return;
+    }
+    let mut copy = format!("{name} ");
+    while m.view_templates.contains_key(&copy) {
+        copy.push(' ');
+    }
+    let source = m.plan_source(id);
+    let Some(g) = m.elements.get_mut(source).and_then(graphics::graphics_mut) else { return };
+    if categories {
+        g.categories = template.graphics.categories.clone();
+    }
+    if filters {
+        g.filters = template.graphics.filters.clone();
+    }
+    g.template = Some(copy.clone());
+    m.view_templates.insert(copy, template);
+}
+
 /// `base` with the graphics of the view `sheet` changed as `temp` says. `three_d` is the 3D view on screen (a camera view
 /// by id, or none for the default `{3D}`).
 fn shadowed(base: &Arc<Model>, sheet: Sheet, three_d: Option<Id>, temp: &Temp) -> Result<Arc<Model>, String> {
@@ -103,39 +132,78 @@ fn shadowed(base: &Arc<Model>, sheet: Sheet, three_d: Option<Id>, temp: &Temp) -
         Sheet::View3D => (three_d.map_or_else(|| json!("{3D}"), |id| json!(id)), three_d.or_else(|| base.default_3d())),
         Sheet::Paper(_) | Sheet::Schedule(_) | Sheet::Table(_) => return Ok(Arc::clone(base)),
     };
-    let drawn = |id: &Id| base.elements.get(id).is_some_and(|e| graphics::drawn(e.category()));
+    let mut model = (**base).clone();
+    if let Some(id) = id {
+        own_categories_and_filters(&mut model, id);
+    }
+    let m = &model;
+    let drawn = |id: &Id| m.elements.get(id).is_some_and(|e| graphics::drawn(e.category()));
     let mut p = json!({
         "view": view,
         "hide_elements": temp.elements.iter().copied().filter(drawn).collect::<Vec<_>>(),
     });
-    // An empty list is still asking for categories, which a view template that controls them refuses.
     if !temp.categories.is_empty() {
         p["hide"] = json!(temp.categories);
     }
     if temp.reveal
-        && let Some(own) = id.and_then(|id| graphics::graphics_of(base, id))
+        && let Some(g) = id.and_then(|id| graphics::graphics_of(m, id))
     {
-        let g = own.resolved(base);
-        let cats: Vec<&str> = g.categories.iter().filter(|(_, o)| o.hidden).map(|(c, _)| c.as_str()).collect();
-        let els: Vec<Id> =
-            g.elements.iter().filter(|(_, o)| o.hidden).filter_map(|(g, _)| base.elements.id(g)).filter(|i| drawn(i)).collect();
-        // Each of them, and each element of a category hidden, in magenta.
+        // What the view hides for now stays hidden: the mode reveals what it hides for good.
+        let for_now = |i: &Id, e: &Element| temp.elements.contains(i) || temp.categories.contains(graphics::category_of(m, e));
+        let cats: Vec<&str> =
+            g.categories.iter().filter(|(c, o)| o.hidden && !temp.categories.contains(*c)).map(|(c, _)| c.as_str()).collect();
+        let els: Vec<Id> = g
+            .elements
+            .iter()
+            .filter(|(_, o)| o.hidden)
+            .filter_map(|(g, _)| m.elements.id(g))
+            .filter(|i| drawn(i) && !temp.elements.contains(i))
+            .collect();
+        // Each of them, each element of a category hidden, and each a filter hides, in magenta.
         let paint = json!({"projection": {"color": REVEALED}, "cut": {"color": REVEALED}});
         // Hidden with its own category, or with `component`, which an older project may say of all of them.
         let hidden_whole = |e: &Element| {
-            let c = graphics::category_of(base, e);
+            let c = graphics::category_of(m, e);
             cats.contains(&c) || (graphics::COMPONENTS.contains(&c) && cats.contains(&graphics::COMPONENT))
         };
-        let by_category = base.elements.iter().filter(|(_, e)| hidden_whole(e)).map(|(i, _)| *i);
+        let by_category = m.elements.iter().filter(|(_, e)| hidden_whole(e)).map(|(i, _)| *i);
+        let filtering: Vec<&graphics::Applied> = g.filters.iter().filter(|a| a.over.hidden).collect();
+        let by_filter: BTreeSet<Id> = filtering.iter().filter_map(|a| m.view_filters.get(&a.filter)).flat_map(|f| f.matching(m)).collect();
         if !cats.is_empty() {
             p["show"] = json!(cats);
         }
         p["show_elements"] = json!(els);
-        p["elements"] =
-            els.iter().copied().chain(by_category).map(|i| (i.to_string(), paint.clone())).collect::<serde_json::Map<_, _>>().into();
+        if !filtering.is_empty() {
+            let shown: Vec<graphics::Applied> = g
+                .filters
+                .iter()
+                .map(|a| {
+                    let mut a = a.clone();
+                    a.over.hidden = false;
+                    a
+                })
+                .collect();
+            p["filters"] = serde_json::to_value(shown).map_err(|e| e.to_string())?;
+        }
+        let revealed: BTreeSet<Id> = els
+            .iter()
+            .copied()
+            .chain(by_category)
+            .chain(by_filter)
+            .filter(|i| drawn(i) && m.elements.get(i).is_some_and(|e| !for_now(i, e)))
+            .collect();
+        // What the view shows anyway is drawn halftone, as Revit's mode does, so what it hides stands out.
+        let halftone = json!({"halftone": true});
+        let shown = m.elements.iter().map(|(i, _)| *i).filter(|i| drawn(i) && !revealed.contains(i));
+        p["elements"] = revealed
+            .iter()
+            .map(|i| (i.to_string(), paint.clone()))
+            .chain(shown.map(|i| (i.to_string(), halftone.clone())))
+            .collect::<serde_json::Map<_, _>>()
+            .into();
     }
     let mut s = Session::new();
-    s.reset((**base).clone(), None);
+    s.reset(model, None);
     if temp.hides() || temp.reveal {
         s.execute("graphics", &p)?;
     }
@@ -236,16 +304,28 @@ impl BimApp {
         Some((elements, categories))
     }
 
-    /// Reset Temporary Hide/Isolate (HR): what the view hid or isolated for now comes back, and Reveal Hidden Elements goes off.
+    /// Reset Temporary Hide/Isolate (HR): what the view hid or isolated for now comes back. Reveal Hidden Elements stays as
+    /// it is, as in Revit, where it is a mode of its own.
     pub(crate) fn temp_reset(&mut self) {
-        self.temporary.remove(&self.sheet);
+        if self.temporary.remove(&self.sheet).is_some_and(|t| t.reveal) {
+            self.temporary.insert(self.sheet, Temp { reveal: true, ..Temp::default() });
+        }
     }
 
-    /// Reveal Hidden Elements (RH): what the view hides for good is drawn in magenta, or hidden again.
+    /// Whether the active view is in Reveal Hidden Elements mode.
+    pub(crate) fn revealing(&self) -> bool {
+        self.temporary().is_some_and(|t| t.reveal)
+    }
+
+    /// Reveal Hidden Elements (RH), the view control bar's bulb, and Toggle Reveal Hidden Elements Mode: what the view hides for
+    /// good is drawn in magenta, the rest halftone, and the ribbon shows the Reveal Hidden Elements panel; again, and it is hidden again.
     pub(crate) fn temp_reveal(&mut self) {
         if self.graphic_view().is_some() {
             let t = self.temporary.entry(self.sheet).or_default();
             t.reveal = !t.reveal;
+            if t.reveal {
+                self.raise_context();
+            }
         }
     }
 
@@ -420,8 +500,7 @@ impl BimApp {
                         if ui.add_enabled(temp.hides(), egui::Button::new(t("Apply Hide/Isolate to View"))).clicked() {
                             self.temp_apply();
                         }
-                        if ui.add_enabled(temp.hides() || temp.reveal, egui::Button::new(t("Reset Temporary Hide/Isolate (HR)"))).clicked()
-                        {
+                        if ui.add_enabled(temp.hides(), egui::Button::new(t("Reset Temporary Hide/Isolate (HR)"))).clicked() {
                             self.temp_reset();
                         }
                     });
@@ -458,7 +537,8 @@ impl BimApp {
                             self.set_background_grid(grid);
                         }
                     }
-                    let tip = msg!("Reveal Hidden Elements (RH): draw what this view hides in magenta; again to hide it");
+                    let tip =
+                        msg!("Reveal Hidden Elements (RH): draw what this view hides in magenta, to select and unhide it; again to leave");
                     if small_button(ui, Icon::Reveal, "Reveal Hidden Elements", temp.reveal, tip).clicked() {
                         self.temp_reveal();
                     }
@@ -483,11 +563,6 @@ impl BimApp {
                         if r.clicked() {
                             self.toggle_scan_contrast();
                         }
-                    }
-                    if temp.hides() || temp.reveal {
-                        ui.add_space(8.0);
-                        let note = if temp.reveal && !temp.hides() { msg!("Revealing hidden elements") } else { "Temporary Hide/Isolate" };
-                        ui.label(RichText::new(tf("{} (HR resets)", &[t(note)])).color(FRAME));
                     }
                     // The control port: off, listening, the agents connected, read-only. A hosted window has none.
                     if !self.hosted() {
@@ -522,10 +597,15 @@ impl BimApp {
         tall.unwrap_or(crate::FLOATING_CARD) + f32::from(crate::style::gap())
     }
 
-    /// The cyan frame round a view that hides, isolates or reveals for now, as Revit draws.
+    /// The frame round a view that hides or isolates for now (cyan, "Temporary Hide/Isolate" in its top left corner) or is in
+    /// Reveal Hidden Elements mode (magenta, "Reveal Hidden Elements"), as Revit draws them.
     pub(crate) fn temp_frame(&self, ui: &Ui) {
-        if self.temporary().is_some_and(|t| t.hides() || t.reveal) {
-            ui.painter().rect_stroke(self.view_rect.shrink(1.5), 0.0, Stroke::new(3.0, FRAME), StrokeKind::Inside);
-        }
+        let Some(temp) = self.temporary().filter(|t| t.hides() || t.reveal) else { return };
+        let (colour, note) = if temp.reveal { (REVEAL_FRAME, "Reveal Hidden Elements") } else { (FRAME, "Temporary Hide/Isolate") };
+        let p = ui.painter();
+        p.rect_stroke(self.view_rect.shrink(1.5), 0.0, Stroke::new(3.0, colour), StrokeKind::Inside);
+        // Under the ribbon's tabs where they float over the view.
+        let top = self.view_rect.top().max(self.tabs_foot);
+        p.text(pos2(self.view_rect.left() + 10.0, top + 8.0), egui::Align2::LEFT_TOP, t(note), FontId::proportional(13.0), colour);
     }
 }

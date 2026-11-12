@@ -41,7 +41,7 @@ msgstr "Brique"
 msgid "Brick 225 x 75"
 msgstr "Brique 225 x 75"
 
-#: crates/core/src/commands.rs:4639
+#: crates/core/src/commands.rs:4640
 msgid "Camera"
 msgstr "Caméra"
 
@@ -117,7 +117,7 @@ msgstr "Tiret point"
 msgid "Data Outlet"
 msgstr "Prise de données"
 
-#: crates/core/src/commands.rs:10681
+#: crates/core/src/commands.rs:10682
 msgid "Dependent"
 msgstr "Dépendant"
 
@@ -193,8 +193,8 @@ msgstr "Éclairage électrique"
 msgid "Electrical Power"
 msgstr "Alimentation électrique"
 
-#: crates/core/src/commands.rs:10465
-#: crates/core/src/commands.rs:13193
+#: crates/core/src/commands.rs:10466
+#: crates/core/src/commands.rs:13194
 msgid "Elevation"
 msgstr "Élévation"
 
@@ -311,7 +311,7 @@ msgstr "Largeur du pied"
 msgid "Length"
 msgstr "Longueur"
 
-#: crates/core/src/commands.rs:6850
+#: crates/core/src/commands.rs:6851
 #: crates/core/src/model.rs:3298
 msgid "Level"
 msgstr "Niveau"
@@ -336,7 +336,7 @@ msgstr "Repère"
 msgid "Masking"
 msgstr "Masque"
 
-#: crates/core/src/commands.rs:8417
+#: crates/core/src/commands.rs:8418
 msgid "Mass"
 msgstr "Volume"
 
@@ -429,7 +429,7 @@ msgstr "Plâtre"
 msgid "Porcelain"
 msgstr "Porcelaine"
 
-#: crates/core/src/commands.rs:3249
+#: crates/core/src/commands.rs:3250
 msgid "Project"
 msgstr "Projet"
 
@@ -457,7 +457,7 @@ msgstr "Contremarches"
 msgid "Roof tiles"
 msgstr "Tuiles"
 
-#: crates/core/src/commands.rs:8650
+#: crates/core/src/commands.rs:8651
 msgid "Room"
 msgstr "Pièce"
 
@@ -493,8 +493,8 @@ msgstr "Chape"
 msgid "Seat Height"
 msgstr "Hauteur assise"
 
-#: crates/core/src/commands.rs:10442
-#: crates/core/src/commands.rs:13192
+#: crates/core/src/commands.rs:10443
+#: crates/core/src/commands.rs:13193
 msgid "Section"
 msgstr "Coupe"
 
@@ -618,7 +618,7 @@ msgstr "MONTE"
 msgid "Unbounded Height"
 msgstr "Hauteur non délimitée"
 
-#: crates/core/src/commands.rs:10822
+#: crates/core/src/commands.rs:10823
 msgid "Unnamed"
 msgstr "Sans nom"
 

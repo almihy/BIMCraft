@@ -143,7 +143,7 @@ fn a_line_sketched_in_3d_shows_where_it_goes_from_the_last_point_before_the_clic
 }
 
 #[test]
-fn the_work_plane_is_set_from_its_patch_in_the_view_the_right_click_menu_and_the_ribbon() {
+fn the_work_plane_is_set_from_its_patch_in_the_view_and_the_ribbon() {
     let mut h = app(BOX);
     press(&mut h, "Default 3D View");
     // The patch on the plane itself, as ArchiCAD's: a click on it opens the dialog.
@@ -153,12 +153,6 @@ fn the_work_plane_is_set_from_its_patch_in_the_view_the_right_click_menu_and_the
     assert!(h.state().selection.is_empty());
     press(&mut h, "Cancel");
     assert!(h.state().work_plane.is_none());
-    // The right-click menu.
-    let at = h.state().orbit.rect.min + vec2(40.0, 40.0);
-    right_click_at(&mut h, at);
-    choose_item(&mut h, "Set Work Plane");
-    assert!(h.state().work_plane.is_some(), "the menu opens the dialog");
-    press(&mut h, "Cancel");
     // The Architecture tab's Set, beside the levels and grids (in the Datum panel's list where the window folds it).
     press(&mut h, "Architecture");
     from_list(&mut h, "Datum", "Set");
