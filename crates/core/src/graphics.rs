@@ -1047,7 +1047,7 @@ pub struct Look {
     /// The section box a 3D view is cut to, its min and max corners, while it's on.
     section: Option<([f64; 3], [f64; 3])>,
     /// A 3D view's Graphic Display Options: its edges, silhouettes and ambient shadows.
-    display: crate::view3d::DisplayOptions,
+    display: crate::camera::DisplayOptions,
 }
 
 /// `c` halfway to the paper.
@@ -1083,7 +1083,7 @@ impl Look {
     }
 
     /// How a 3D view draws its edges and shadows: its Graphic Display Options.
-    pub fn display(&self) -> crate::view3d::DisplayOptions {
+    pub fn display(&self) -> crate::camera::DisplayOptions {
         self.display
     }
 

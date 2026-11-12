@@ -516,7 +516,7 @@ fn a_shapes_labels_give_each_points_height_relative_or_above_its_level() {
 
 /// The 3D view's default camera on the model, 1200 by 800 pixels.
 fn camera(s: &Session) -> crate::view3d::Camera {
-    crate::view3d::Scene::new(&s.model).fit(crate::view3d::AZIMUTH, crate::view3d::ELEVATION, 1200, 800)
+    crate::view3d::Scene::new(&s.model).fit(crate::camera::AZIMUTH, crate::camera::ELEVATION, 1200, 800)
 }
 
 #[test]

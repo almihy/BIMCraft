@@ -4501,7 +4501,7 @@ fn plan_way(cam: &crate::model::ViewCamera) -> Option<(P2, f64)> {
 /// one looking straight down.
 pub fn camera_cone(v: &View3D) -> Option<Cone> {
     let cam = v.camera?;
-    let lens = v.perspective.map_or(crate::view3d::LENS, |p| p.lens);
+    let lens = v.perspective.map_or(crate::camera::LENS, |p| p.lens);
     cone_of(&cam, lens, v.lens().is_some())
 }
 
@@ -4515,7 +4515,7 @@ pub fn cone_of(cam: &crate::model::ViewCamera, lens: f64, perspective: bool) -> 
     let clipped = cam.physical.clip_on && perspective;
     let pitch = cos.clamp(-1.0, 1.0).acos().copysign(cam.target[2] - cam.eye[2]) - cam.vertical_tilt().atan();
     let reach = if clipped { cam.physical.far * pitch.clamp(-1.55, 1.55).cos() } else { eye.dist(target) * 1.25 };
-    let half = (crate::view3d::field_of_view(lens, &cam.physical) / 2.0).to_radians();
+    let half = (crate::camera::field_of_view(lens, &cam.physical) / 2.0).to_radians();
     let side = |k: f64| {
         let (c, s) = (half.cos(), half.sin() * k);
         let dir = P2(way.0 * c - way.1 * s, way.0 * s + way.1 * c);
@@ -4544,8 +4544,8 @@ pub fn camera_grip(cam: &crate::model::ViewCamera, which: usize, to: P2) -> Opti
             let d = to - eye;
             let along = d.dot(way);
             let off = (way.0 * d.1 - way.1 * d.0).abs();
-            // Within what a camera's lens sees ([`fov_limits`](crate::view3d::fov_limits)), as far as the drag goes.
-            let (narrow, wide) = crate::view3d::fov_limits();
+            // Within what a camera's lens sees ([`fov_limits`](crate::camera::fov_limits)), as far as the drag goes.
+            let (narrow, wide) = crate::camera::fov_limits();
             (along > TOL).then(|| serde_json::json!({"fov": (2.0 * off.atan2(along).to_degrees()).clamp(narrow + 1e-3, wide - 1e-3)}))
         }
         _ => None,

@@ -220,9 +220,10 @@ pub fn cursor_plane(m: &Model, cam: &Camera, at: (f64, f64), under: Option<crate
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::camera::{AZIMUTH, ELEVATION};
     use crate::engine::Session;
     use crate::graphics::Look;
-    use crate::view3d::{AZIMUTH, ELEVATION, Scene, Surface};
+    use crate::view3d::{Scene, Surface};
 
     #[test]
     fn a_level_face_is_drawn_on_at_its_height_over_its_elements_level_and_a_face_that_isnt_level_is_not() {

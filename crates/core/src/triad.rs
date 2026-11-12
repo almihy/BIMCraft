@@ -191,8 +191,9 @@ pub fn plane(current: Option<&Frame>, target: P3, end: End) -> Surface {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::camera::{AZIMUTH, ELEVATION};
     use crate::engine::Session;
-    use crate::view3d::{AZIMUTH, Camera, ELEVATION};
+    use crate::view3d::Camera;
     use crate::workplane::Frame;
 
     fn cam(azimuth: f64, elevation: f64) -> Camera {

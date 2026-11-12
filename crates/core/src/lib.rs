@@ -17,6 +17,7 @@ pub mod bridge;
 pub mod cad;
 #[cfg(test)]
 mod cad_tests;
+pub mod camera;
 #[cfg(test)]
 mod clipboard_tests;
 pub mod cloud;

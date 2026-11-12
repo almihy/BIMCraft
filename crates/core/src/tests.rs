@@ -5800,7 +5800,8 @@ fn show_mass_toggles_the_mass_category_in_one_view_in_one_step() {
 
 #[test]
 fn a_level_reaches_as_far_as_its_extent_in_sections_elevations_and_the_3d_view() {
-    use crate::view3d::{AZIMUTH, ELEVATION, Scene};
+    use crate::camera::{AZIMUTH, ELEVATION};
+    use crate::view3d::Scene;
     let mut s = Session::new();
     house(&mut s);
     let sec = run(&mut s, "section", json!({"start": [-1000, 3000], "end": [9000, 3000]}))["id"].as_u64().unwrap();
@@ -5887,7 +5888,7 @@ fn a_levels_ends_in_a_section_drag_its_extent_and_its_edges_drag_in_3d() {
     assert_eq!(crate::geom::edge_grips(extent), [P2(0.0, 3000.0), P2(4000.0, 3000.0), P2(2000.0, 0.0), P2(2000.0, 6000.0)]);
     assert_eq!(crate::geom::move_edge(extent, 1, P2(5000.0, 999.0)), [P2(0.0, 0.0), P2(5000.0, 6000.0)]);
     // The camera finds where on the level's plane a pixel lies.
-    let cam = crate::view3d::Scene::new(&s.model).fit(crate::view3d::AZIMUTH, crate::view3d::ELEVATION, 800, 600);
+    let cam = crate::view3d::Scene::new(&s.model).fit(crate::camera::AZIMUTH, crate::camera::ELEVATION, 800, 600);
     let (x, y, _) = cam.project([2500.0, 1200.0, 1500.0]);
     let p = cam.on_plane((x, y), 1500.0).unwrap();
     assert!((p[0] - 2500.0).abs() < 1e-6 && (p[1] - 1200.0).abs() < 1e-6 && (p[2] - 1500.0).abs() < 1e-6, "{p:?}");
@@ -5895,7 +5896,8 @@ fn a_levels_ends_in_a_section_drag_its_extent_and_its_edges_drag_in_3d() {
 
 #[test]
 fn a_levels_plane_in_3d_hides_its_near_edges_until_selected_and_names_itself_on_a_head() {
-    use crate::view3d::{AZIMUTH, ELEVATION, Scene};
+    use crate::camera::{AZIMUTH, ELEVATION};
+    use crate::view3d::Scene;
     let mut s = Session::new();
     house(&mut s);
     let top = run(&mut s, "level", json!({"elevation": 9000, "name": "Top", "extent": [[0, 0], [8000, 6000]]}))["id"].as_u64().unwrap();

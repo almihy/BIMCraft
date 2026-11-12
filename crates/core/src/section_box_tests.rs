@@ -6,11 +6,12 @@ use std::path::PathBuf;
 
 use serde_json::{Value, json};
 
+use crate::camera::{AZIMUTH, ELEVATION};
 use crate::engine::Session;
 use crate::geom::P2;
 use crate::graphics::Look;
 use crate::prim::Rgb;
-use crate::view3d::{AZIMUTH, Camera, ELEVATION, Image, Scene, gpu};
+use crate::view3d::{Camera, Image, Scene, gpu};
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"))

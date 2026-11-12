@@ -256,9 +256,10 @@ fn insert_from_file_brings_a_scan_with_the_point_cloud_that_places_it() {
 
 // ---------- the 3D view ----------
 
+use crate::camera::{AZIMUTH, ELEVATION};
 use crate::graphics::Look;
 use crate::prim::Rgb;
-use crate::view3d::{AZIMUTH, ELEVATION, Image, Scene, gpu};
+use crate::view3d::{Image, Scene, gpu};
 
 /// A scan of a wall's face: points every 20 mm over 2 m by 2 m standing on y = 0, in metres, each in `rgb` or in none.
 fn sheet(rgb: Option<[u8; 3]>) -> String {

@@ -1525,8 +1525,8 @@ pub struct View3D {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camera: Option<ViewCamera>,
     /// Its Graphic Display Options: edges, silhouettes and ambient shadows.
-    #[serde(default, skip_serializing_if = "crate::view3d::DisplayOptions::is_default")]
-    pub display: crate::view3d::DisplayOptions,
+    #[serde(default, skip_serializing_if = "crate::camera::DisplayOptions::is_default")]
+    pub display: crate::camera::DisplayOptions,
     /// What it sketches on (`workplane.rs`): the lowest level when it has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     /// Boxed: few views have one, and it is large beside the rest of a view.
@@ -1846,8 +1846,8 @@ impl View3D {
     pub fn default_view() -> View3D {
         View3D {
             name: "{3D}".into(),
-            azimuth: crate::view3d::AZIMUTH,
-            elevation: crate::view3d::ELEVATION,
+            azimuth: crate::camera::AZIMUTH,
+            elevation: crate::camera::ELEVATION,
             graphics: Graphics::default(),
             section_box: None,
             perspective: None,
@@ -7766,9 +7766,9 @@ impl Model {
                 if let Some(p) = &v.perspective {
                     // A camera's lens is held to its 35 mm equivalent (its field of view), whatever its film.
                     match &v.camera {
-                        Some(cam) => crate::view3d::lens_ok(p.lens, &cam.physical).map_err(|e| format!("{who}: {e}"))?,
-                        None if !(crate::view3d::MIN_LENS..=crate::view3d::MAX_LENS).contains(&p.lens) => {
-                            let (lo, hi) = (crate::view3d::MIN_LENS, crate::view3d::MAX_LENS);
+                        Some(cam) => crate::camera::lens_ok(p.lens, &cam.physical).map_err(|e| format!("{who}: {e}"))?,
+                        None if !(crate::camera::MIN_LENS..=crate::camera::MAX_LENS).contains(&p.lens) => {
+                            let (lo, hi) = (crate::camera::MIN_LENS, crate::camera::MAX_LENS);
                             return Err(format!("{who}: a {} mm lens is no camera's; a perspective's lens is {lo} to {hi} mm", p.lens));
                         }
                         None => {}
@@ -7791,8 +7791,8 @@ impl Model {
                 if !(v.azimuth.is_finite() && v.elevation.is_finite()) {
                     return Err(format!("{who}: its azimuth and elevation are numbers of degrees"));
                 }
-                if v.display.silhouette > crate::view3d::MAX_SILHOUETTE {
-                    let most = crate::view3d::MAX_SILHOUETTE;
+                if v.display.silhouette > crate::camera::MAX_SILHOUETTE {
+                    let most = crate::camera::MAX_SILHOUETTE;
                     return Err(format!("{who}: a silhouette {} px wide is wider than the {most} px one may be", v.display.silhouette));
                 }
                 if let Some(wp) = &v.work_plane {

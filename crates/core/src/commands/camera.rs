@@ -737,7 +737,7 @@ mod review_tests {
         s.execute("camera", &json!({"view": "Camera 1", "film_preset": "35mm (Full Frame)", "lens": 600, "zoom": 1})).unwrap();
         let v = view(&s, "Camera 1");
         let cam = Camera::through(&v.camera.unwrap(), 600.0, true, 400, 300);
-        let fov = crate::view3d::field_of_view(600.0, &v.camera.unwrap().physical).to_radians();
+        let fov = crate::camera::field_of_view(600.0, &v.camera.unwrap().physical).to_radians();
         let (x, ..) = cam.project([10000.0 * (fov / 2.0).tan(), 0.0, 1600.0]);
         assert!((x - 400.0).abs() < 0.5, "{x}");
     }
@@ -759,7 +759,7 @@ mod review_tests {
         // 3ds Max's ray, by hand: the untilted camera's axes, its focal length in px.
         let bare = Camera::bare(&vc, 35.0, true, w, h);
         let (back, right, up) = bare.axes();
-        let f = f64::from(w) * 35.0 / crate::view3d::FILM;
+        let f = f64::from(w) * 35.0 / crate::camera::FILM;
         let t: f64 = 0.3;
         for p in [[3000.0, 0.0, 0.0], [-2000.0, 4000.0, 9000.0], [500.0, -3000.0, 2000.0]] {
             let d: [f64; 3] = std::array::from_fn(|k| p[k] - vc.eye[k]);

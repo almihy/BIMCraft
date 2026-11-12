@@ -324,7 +324,7 @@ mod tests {
         let m = &s.model;
         let view = m.default_3d().unwrap();
         let (scene, look) = (Scene::new(m), Look::of_3d(m));
-        let cam = scene.fit_in(crate::view3d::AZIMUTH, crate::view3d::ELEVATION, 800, 600, &look);
+        let cam = scene.fit_in(crate::camera::AZIMUTH, crate::camera::ELEVATION, 800, 600, &look);
         let (a, b) = line(the(&s, id));
         // Its line, a third of the way along: off the model, where the picture is paper.
         let along = add(a, mul(sub(b, a), 1.0 / 3.0));
