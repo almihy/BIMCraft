@@ -227,6 +227,7 @@ pub(crate) fn without_elements(m: &Model) -> Model {
         wire_types: m.wire_types.clone(),
         georeference: m.georeference.clone(),
         pinned: m.pinned.clone(),
+        temporary_dimensions: m.temporary_dimensions,
         elements: crate::ids::Elements::new(),
         library: m.library.clone(),
         loaded: std::collections::BTreeMap::new(),

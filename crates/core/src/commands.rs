@@ -373,7 +373,7 @@ other_files(
          holes (a floor's or a ceiling's openings, a roof's courtyards; a shaft has none) as a sketch, all at once (see \
          `sketch`); a roof's gable edges stay gables where the new footprint has the same edge. Without `sketch`, gives the \
          outline and holes it has now, as the lines to edit. The outline must be simple, as `floor` says; a line that \
-         crosses itself is found as two that cross are",
+         crosses itself is found as two that cross are. A pinned element is refused (Revit greys the button): `unpin` it first",
         edit_boundary,
     ),
     edit(
@@ -1336,10 +1336,10 @@ other_files(
         "flip",
         "Flip",
         &[],
-        "{ids: [wall | door | window,…], hand?, facing?} turns walls round about their location lines, as Revit's flip arrows \
+        "{ids: [wall | door | window,…], hand?, facing?, step?} turns walls round about their location lines, as Revit's flip arrows \
          do: their exterior sides go to the other side, their doors and windows stay where they are. A door or window in `ids` \
          is flipped on its own: `hand` puts its hinge on the other jamb, `facing` its swing (a window's face) to the wall's \
-         other side; with neither given, its facing flips (`facing: false` leaves it). `hand` and `facing` apply to the doors and windows listed, not to a wall's",
+         other side; with neither given, its facing flips (`facing: false` leaves it). `hand` and `facing` apply to the doors and windows listed, not to a wall's. `step: true` is Revit's Space: each door listed takes one step through its four ways          (facing, hand, facing back, hand back) from its own state, and each window turns its facing only (a window has no hand); not with `hand` or `facing`",
         flip,
     ),
     edit(
@@ -1388,15 +1388,30 @@ other_files(
     other(
         "temporary_dimensions",
         ui_msg!("Temporary Dimensions"),
-        "{id, level?, left?: centre|left|right, right?: centre|left|right} reads a wall's temporary dimensions, as Revit shows \
-         them when it is selected, and changes nothing: on each side of a straight wall (`left` and `right` as the wall runs, its \
-         exterior face on the left), how far it is, square to it, from the wall to the nearest parallel wall's centre line or \
-         grid that shares some of its run in the plan of `level` (the wall's own by default). `left` and `right` say which line of \
-         the wall each starts at: its centre line (the default), its exterior face (`left`) or its interior face (`right`). \
-         Returns {id, length, dimensions: [{side, from: {id, face}, to: {id, face}, distance, toward: [x, y], at: [x, y], \
-         dimension: {refs, at, level}}]}; to type a distance as a person does, `move` the wall by `toward` times (distance - wanted), and \
-         to make one permanent, run `dimension` with its `dimension` params",
+        "{id, level?, left?, right?, to_left?, to_right?} reads a wall's temporary dimensions, as Revit shows them when it is \
+         selected, and changes nothing: on each side of a straight wall (`left` and `right` as the wall runs, its exterior face on \
+         the left), how far it is, square to it, from the wall to the nearest parallel wall or grid that shares some of its run in \
+         the plan of `level` (the wall's own by default). Which lines they measure are the project's \
+         (`temporary_dimension_settings`: centre lines, faces, the core's centre or the core's faces) unless `left` and `right` \
+         say which line of the wall each side starts at (the witness line's dot): `centre`, `left` (its exterior face), `right` (its \
+         interior face), `core-centre`, `core-left` or `core-right` (a wall with no core of its own measures its centre line or \
+         face instead), and `to_left` and `to_right` ({id, face}, the other witness line moved to another reference: any line of \
+         a parallel wall the plan shows, or a grid's). Returns {id, length, core, settings: {walls, openings}, dimensions: [{side, \
+         from: {id, face}, to: {id, face}, distance, toward: [x, y], at: [x, y], dimension: {refs, at, level}}]}; to type a \
+         distance as a person does, `move` the wall by `toward` times (distance - wanted), and to make one permanent, run \
+         `dimension` with its `dimension` params",
         temporary_dimensions,
+    ),
+    edit(
+        "temporary_dimension_settings",
+        ui_msg!("Temporary Dimension Properties"),
+        &[],
+        "{walls?: centerlines|faces|core-centre|core-faces, openings?: centerlines|openings} Revit's Manage > Additional Settings > \
+         Temporary Dimensions: what the temporary dimensions of walls measure to and from (the centre of the wall, its faces, the \
+         centre of its core or its core's faces: a core runs from a wall type's first structure layer to its last), and what \
+         those of doors and windows do (their centre lines, or their openings: the jambs). Kept in the project. With neither, \
+         reads them. Returns {walls, openings}",
+        temporary_dimension_settings,
     ),
     other(
         "wall_chain",
@@ -1454,7 +1469,7 @@ other_files(
         "paste",
         "Paste",
         &[],
-        "{ids?: [id,…], by?: [dx, dy], same_place?: true, levels?: [level,…], view?} Ctrl+V: new elements, as copies, \
+        "{ids?: [id,…], by?: [dx, dy], same_place?: true, levels?: [level,…], view?, views?: [view,…]} Ctrl+V: new elements, as copies, \
          from the clipboard (or `ids`, elements of the project, with no copy first). Give one way to place them: `by`, \
          `same_place`, `levels` or `view`; the last two may go with a `by`, so what lands on a level is also moved in \
          plan, as a click does; a paste with none of them is refused. `by` puts them that far from the originals; \
@@ -1472,7 +1487,7 @@ other_files(
          let go, a room with no walls round it up there is unbounded); `left_out` says what was not pasted and why (an \
          annotation belongs to its view; a stair, a ramp, a CAD import, a site element or a room separation line where no \
          level stands at the height it would move to, as they have no offset to be raised by; a door or window that falls \
-         on no wall). Returns {ids, pasted: [{level?, name?, ids}], notes, left_out}",
+         on no wall). `views` (by name, id, GUID or a sheet's number) is Revit's Aligned to Selected Views: the annotation copied (dimensions,          tags, notes, detail lines, filled regions, detail groups, spot elevations) is put at the same place in each view given          that is of the kind it was copied in (a plan for a plan, a section for a section, a sheet for a sheet); a dimension or          tag goes only into plans of its own level; a model element among them goes to the level of each plan given, as `levels`          does, and is left out of any other kind of view. `views` goes with no other way to place, only `by`.          Returns {ids, pasted: [{level?, view?, name?, ids}], notes, left_out}",
         clipboard::paste,
     ),
     edit(
@@ -8079,6 +8094,10 @@ fn flip(s: &mut Session, p: &Value) -> R {
     let m = &s.model;
     let all = ids_param(c, m, p)?;
     let hand = flag(c, p, "hand")?;
+    let stepping = flag(c, p, "step")?;
+    if stepping && (!absent(p.get("hand")) || !absent(p.get("facing"))) {
+        return Err(bad(c, "`step` is the whole instruction: leave out `hand` and `facing`"));
+    }
     // Only when `facing` is left out does a flip with no `hand` turn the facing: a `facing` said to be false is false.
     let facing = if absent(p.get("facing")) { !hand } else { flag(c, p, "facing")? };
     let opening = |id: &Id| matches!(m.elements.get(*id), Some(Element::Door(_) | Element::Window(_)));
@@ -8104,9 +8123,21 @@ fn flip(s: &mut Session, p: &Value) -> R {
     }
     // The doors and windows asked for come after their walls, so one listed with its wall is flipped as asked on top of it.
     for id in &openings {
-        if let Some(Element::Door(o) | Element::Window(o)) = m.elements.get_mut(*id) {
-            o.flip_hand ^= hand;
-            o.flip_facing ^= facing;
+        match m.elements.get_mut(*id) {
+            // Space: a door goes one step on from where it is, a window turns its facing and has no hand.
+            Some(Element::Door(o)) if stepping => {
+                if o.flip_hand == o.flip_facing {
+                    o.flip_facing = !o.flip_facing;
+                } else {
+                    o.flip_hand = !o.flip_hand;
+                }
+            }
+            Some(Element::Window(o)) if stepping => o.flip_facing = !o.flip_facing,
+            Some(Element::Door(o) | Element::Window(o)) => {
+                o.flip_hand ^= hand;
+                o.flip_facing ^= facing;
+            }
+            _ => {}
         }
     }
     let hosts: BTreeMap<Guid, Guid> = m
@@ -9990,6 +10021,10 @@ fn edit_boundary(s: &mut Session, p: &Value) -> R {
     let m = &s.model;
     let id = id_opt(c, p, "id")?.ok_or_else(|| bad(c, "`id`, the floor, ceiling, roof or shaft to edit, is required"))?;
     let e = m.elements.get(id).cloned().ok_or_else(|| bad(c, format!("no element {id}")))?;
+    // Revit greys Edit Boundary for a pinned element: its closest failure is the move's, a re-sketch moving the outline.
+    if let Some(own) = m.elements.id(id) {
+        pin::refuse_pinned(c, m, &[own], pin::Held::Move)?;
+    }
     if let Element::Roof(Roof { extrusion: Some(_), .. }) = e {
         return Err(bad(c, format!("{id} is an extrusion roof: change its profile, `modify` its `extrusion`")));
     }
@@ -13360,7 +13395,7 @@ fn wall_chain(s: &mut Session, p: &Value) -> R {
 fn temporary_dimensions(s: &mut Session, p: &Value) -> R {
     use crate::tempdims::{self, Witness};
     let c = "temporary_dimensions";
-    only(c, p, &["id", "level", "left", "right"])?;
+    only(c, p, &["id", "level", "left", "right", "to_left", "to_right"])?;
     let m = &s.model;
     let id = element_id(c, m, p.get("id").unwrap_or(&Value::Null))?;
     let Some(w) = m.wall(id) else {
@@ -13373,15 +13408,32 @@ fn temporary_dimensions(s: &mut Session, p: &Value) -> R {
         let (level, view) = plan_param(c, m, p, "level")?;
         view.unwrap_or(level)
     };
-    let face = |key: &str| -> Result<Face, String> {
+    let face = |key: &str| -> Result<Option<Face>, String> {
         match string(c, p, key)?.as_deref() {
-            None | Some("centre" | "center") => Ok(Face::Centre),
-            Some("left") => Ok(Face::Left),
-            Some("right") => Ok(Face::Right),
-            Some(f) => Err(bad(c, format!("`{key}` is centre, left or right, not `{f}`"))),
+            None => Ok(None),
+            Some("centre" | "center") => Ok(Some(Face::Centre)),
+            Some("left") => Ok(Some(Face::Left)),
+            Some("right") => Ok(Some(Face::Right)),
+            Some("core-centre" | "core-center") => Ok(Some(Face::CoreCentre)),
+            Some("core-left") => Ok(Some(Face::CoreLeft)),
+            Some("core-right") => Ok(Some(Face::CoreRight)),
+            Some(f) => Err(bad(c, format!("`{key}` is centre, left, right, core-centre, core-left or core-right, not `{f}`"))),
         }
     };
-    let witness = Witness { left: face("left")?, right: face("right")? };
+    let target = |key: &str| -> Result<Option<Reference>, String> {
+        match p.get(key) {
+            v if absent(v) => Ok(None),
+            Some(v) => {
+                let r = serde_json::from_value::<Reference>(v.clone())
+                    .map_err(|e| bad(c, format!("`{key}` is a reference {{id, face}}: {e}")))?;
+                // An id given is the element's GUID now, which is what the lines are compared by.
+                let id = m.elements.id(r.id).ok_or_else(|| bad(c, format!("`{key}`: no element {}", r.id)))?;
+                Ok(Some(Reference { id: m.guid(id), ..r }))
+            }
+            None => Ok(None),
+        }
+    };
+    let witness = Witness { left: face("left")?, right: face("right")?, to_left: target("to_left")?, to_right: target("to_right")? };
     let named = |r: &Reference| json!({"id": m.elements.id(r.id), "face": r.face});
     let dimensions: Vec<Value> = tempdims::wall(m, id, level, witness)
         .into_iter()
@@ -13395,7 +13447,31 @@ fn temporary_dimensions(s: &mut Session, p: &Value) -> R {
             })
         })
         .collect();
-    Ok(json!({"id": id, "length": hundredth(Axis::of(w).length()), "dimensions": dimensions}))
+    let settings = json!({"walls": m.temporary_dimensions.walls.name(), "openings": m.temporary_dimensions.openings.name()});
+    Ok(json!({
+        "id": id, "length": hundredth(Axis::of(w).length()), "core": tempdims::has_core(m, id),
+        "settings": settings, "dimensions": dimensions,
+    }))
+}
+
+/// Temporary Dimension Properties ([`crate::tempdims::Settings`]): read, or changed.
+fn temporary_dimension_settings(s: &mut Session, p: &Value) -> R {
+    use crate::tempdims::{OpeningLines, WallLines};
+    let c = "temporary_dimension_settings";
+    only(c, p, &["walls", "openings"])?;
+    let mut now = s.model.temporary_dimensions;
+    if let Some(n) = string(c, p, "walls")? {
+        let names: Vec<&str> = WallLines::ALL.iter().map(|l| l.name()).collect();
+        now.walls = WallLines::parse(&n).ok_or_else(|| bad(c, format!("`walls` is one of {}, not `{n}`", names.join(", "))))?;
+    }
+    if let Some(n) = string(c, p, "openings")? {
+        let names: Vec<&str> = OpeningLines::ALL.iter().map(|l| l.name()).collect();
+        now.openings = OpeningLines::parse(&n).ok_or_else(|| bad(c, format!("`openings` is one of {}, not `{n}`", names.join(", "))))?;
+    }
+    if now != s.model.temporary_dimensions {
+        s.model_mut().temporary_dimensions = now;
+    }
+    Ok(json!({"walls": now.walls.name(), "openings": now.openings.name()}))
 }
 
 /// Element `id` moved `by` in plan, as `move` moves it: what keeps a dimension's constraints.
@@ -13939,7 +14015,7 @@ fn delete_type(s: &mut Session, p: &Value) -> R {
     s.model_mut().remove_entry(&kind, &name);
     let gone: Vec<Id> = deleted.iter().filter_map(Value::as_u64).collect();
     let said = json!({"deleted": {"kind": label, "name": name}, "instances": instances.len(), "elements": gone});
-    Ok(pin::hosted_pins_deleted(said, &before, &gone, &[]))
+    Ok(pin::type_pins_deleted(said, &before, &gone, &instances))
 }
 
 fn rename_type(s: &mut Session, p: &Value) -> R {

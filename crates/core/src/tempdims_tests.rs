@@ -95,19 +95,22 @@ fn the_witness_line_cycles_from_the_centre_to_the_exterior_face_to_the_interior_
     house(&mut s);
     let inner = wall_at(&mut s, [1000.0, 2000.0], [5500.0, 2000.0]);
     let half = s.model.thickness(s.model.wall(inner).unwrap()) / 2.0;
+    let core = tempdims::has_core(&s.model, inner);
+    assert!(!core, "a wall of one thickness has no core of its own");
     let mut witness = Witness::default();
+    let now = |s: &Session, w: Witness| tempdims::wall(&s.model, inner, s.model.wall(inner).unwrap().level, w)[0].from.face;
     assert_eq!(dims(&s, inner, witness)[0].2, 4000.0);
     // The exterior face is on the left: nearer the north wall.
-    witness = witness.cycled(Side::Left);
-    assert_eq!(witness.of(Side::Left), Face::Left);
-    assert_eq!(witness.of(Side::Right), Face::Centre, "the other side is its own");
+    witness = witness.cycled(Side::Left, now(&s, witness), core);
+    assert_eq!(witness.of(Side::Left), Some(Face::Left));
+    assert_eq!(witness.of(Side::Right), None, "the other side is its own");
     assert_eq!(dims(&s, inner, witness)[0].2, 4000.0 - half);
-    witness = witness.cycled(Side::Left);
-    assert_eq!(witness.of(Side::Left), Face::Right);
+    witness = witness.cycled(Side::Left, now(&s, witness), core);
+    assert_eq!(witness.of(Side::Left), Some(Face::Right));
     assert_eq!(dims(&s, inner, witness)[0].2, 4000.0 + half);
-    assert_eq!(witness.cycled(Side::Left).of(Side::Left), Face::Centre);
+    assert_eq!(witness.cycled(Side::Left, now(&s, witness), core).of(Side::Left), Some(Face::Centre));
     // The interior face, on the south side, is nearer the south wall.
-    let right = Witness { right: Face::Right, ..Witness::default() };
+    let right = Witness { right: Some(Face::Right), ..Witness::default() };
     assert_eq!(dims(&s, inner, right)[1].2, 2000.0 - half);
 }
 
@@ -228,4 +231,175 @@ fn a_tall_walls_dimensions_in_the_plan_of_the_level_above_measure_what_that_plan
     let level_2 = s.model.levels().into_iter().find(|(_, l)| l.name == "Level 2").map(|(id, _)| id).unwrap();
     let d = tempdims::wall(&s.model, tall, level_2, Witness::default());
     assert_eq!(d.iter().map(|d| (s.model.elements.id(d.to.id).unwrap(), d.distance)).collect::<Vec<_>>(), [(up, 5000.0)]);
+}
+
+/// Two "Exterior - 300mm" walls (brick 100, insulation 50, a 140 mm block core, plaster 10, from the exterior in), running east,
+/// the first on y = 0 and the second on y = 4000, location lines at their centres: a wall's exterior face is 150 on its left, its
+/// interior face 150 on its right, its core runs from 0 to 140 on the right of the location line.
+fn cored(s: &mut Session) -> (u64, u64) {
+    let wall = |s: &mut Session, y: f64| {
+        run(s, "wall", json!({"points": [[0.0, y], [6000.0, y]], "type": "Exterior - 300mm"}))["ids"][0].as_u64().unwrap()
+    };
+    (wall(s, 0.0), wall(s, 4000.0))
+}
+
+#[test]
+fn a_wall_with_a_core_has_its_centre_and_faces_to_cycle_through() {
+    let mut s = Session::new();
+    let (a, b) = cored(&mut s);
+    assert!(tempdims::has_core(&s.model, a));
+    let level = s.model.wall(a).unwrap().level;
+    let left = |s: &Session, w: Witness| tempdims::wall(&s.model, a, level, w).into_iter().find(|d| d.side == Side::Left).unwrap();
+    // Centre line to the neighbour's centre line, as the settings start: 4000.
+    let mut witness = Witness::default();
+    let mut seen = Vec::new();
+    for _ in 0..7 {
+        let d = left(&s, witness);
+        seen.push((d.from.face, d.distance));
+        witness = witness.cycled(Side::Left, d.from.face, true);
+    }
+    // The neighbour's centre line is on y = 4000; the wall's lines are on y = 0 (centre), 150 (exterior face), -150 (interior
+    // face), -70 (core centre), 0 (core exterior face) and -140 (core interior face).
+    assert_eq!(
+        seen,
+        [
+            (Face::Centre, 4000.0),
+            (Face::Left, 3850.0),
+            (Face::Right, 4150.0),
+            (Face::CoreCentre, 4070.0),
+            (Face::CoreLeft, 4000.0),
+            (Face::CoreRight, 4140.0),
+            (Face::Centre, 4000.0),
+        ]
+    );
+    // The far witness line stays at the neighbour's centre line, whichever the near one is.
+    assert_eq!(left(&s, witness).to, crate::model::Reference::line(s.model.guid(b), Face::Centre));
+}
+
+#[test]
+fn the_projects_temporary_dimension_settings_say_which_lines_a_wall_measures_when_none_was_chosen() {
+    let mut s = Session::new();
+    let (a, _) = cored(&mut s);
+    let level = s.model.wall(a).unwrap().level;
+    let left = |s: &Session| tempdims::wall(&s.model, a, level, Witness::default()).into_iter().find(|d| d.side == Side::Left).unwrap();
+    let as_set = |s: &mut Session, walls: &str| {
+        run(s, "temporary_dimension_settings", json!({"walls": walls}));
+        let d = left(s);
+        (d.from.face, d.to.face, d.distance)
+    };
+    // Centrelines: the default, as before. Faces: the face of each toward the other (a's exterior face, 3850 on to b's interior).
+    assert_eq!(as_set(&mut s, "centerlines"), (Face::Centre, Face::Centre, 4000.0));
+    assert_eq!(as_set(&mut s, "faces"), (Face::Left, Face::Right, 3700.0));
+    // The core's centre lines, the core's faces: b's core is the same distance off, its nearer face 3860.
+    assert_eq!(as_set(&mut s, "core-centre"), (Face::CoreCentre, Face::CoreCentre, 4000.0));
+    assert_eq!(as_set(&mut s, "core-faces"), (Face::CoreLeft, Face::CoreRight, 3860.0));
+    // A wall with no core of its own measures its centre line or its faces in their place.
+    let mut plain = Session::new();
+    for y in [0.0, 3000.0] {
+        run(&mut plain, "wall", json!({"points": [[0.0, y], [6000.0, y]], "type": "Generic - 200mm"}));
+    }
+    let id = plain.model.elements.iter().find(|(_, e)| e.category() == "wall").map(|(id, _)| *id).unwrap();
+    let lvl = plain.model.wall(id).unwrap().level;
+    let of = |s: &mut Session, walls: &str| {
+        run(s, "temporary_dimension_settings", json!({"walls": walls}));
+        let d = tempdims::wall(&s.model, id, lvl, Witness::default()).remove(0);
+        (d.from.face, d.to.face, d.distance)
+    };
+    assert_eq!(of(&mut plain, "core-centre"), (Face::Centre, Face::Centre, 3000.0));
+    assert_eq!(of(&mut plain, "core-faces"), (Face::Left, Face::Right, 2800.0));
+    // A person's own choice beats the setting for that side.
+    run(&mut s, "temporary_dimension_settings", json!({"walls": "faces"}));
+    let chosen = Witness { left: Some(Face::Centre), ..Witness::default() };
+    assert_eq!(tempdims::wall(&s.model, a, level, chosen)[0].from.face, Face::Centre);
+}
+
+#[test]
+fn the_settings_are_kept_in_the_project_and_read_back() {
+    let mut s = Session::new();
+    // Revit's defaults, and nothing in the file for them.
+    let r = run(&mut s, "temporary_dimension_settings", json!({}));
+    assert_eq!((r["walls"].as_str(), r["openings"].as_str()), (Some("centerlines"), Some("centerlines")));
+    assert!(serde_json::to_value(&*s.model).unwrap().get("temporary_dimensions").is_none());
+    let r = run(&mut s, "temporary_dimension_settings", json!({"walls": "core-faces", "openings": "openings"}));
+    assert_eq!((r["walls"].as_str(), r["openings"].as_str()), (Some("core-faces"), Some("openings")));
+    let saved = serde_json::to_value(&*s.model).unwrap();
+    assert_eq!(saved["temporary_dimensions"], json!({"walls": "core-faces", "openings": "openings"}));
+    assert_eq!(saved["format"], crate::model::FORMAT);
+    let (back, left_out) = crate::model::Model::read(&saved.to_string()).unwrap();
+    assert_eq!((back.temporary_dimensions, left_out.len()), (s.model.temporary_dimensions, 0));
+    // One step to undo, and a mistake is refused and changes nothing.
+    run(&mut s, "undo", json!({}));
+    assert!(s.model.temporary_dimensions.is_default());
+    for p in [json!({"walls": "nowhere"}), json!({"openings": "faces"}), json!({"walls": 3}), json!({"extra": 1})] {
+        assert!(s.execute("temporary_dimension_settings", &p).is_err(), "{p}");
+    }
+    assert!(s.model.temporary_dimensions.is_default());
+}
+
+#[test]
+fn a_far_witness_line_can_be_moved_to_another_parallel_reference_and_the_settings_follow_the_openings() {
+    let mut s = Session::new();
+    house(&mut s);
+    let inner = wall_at(&mut s, [1000.0, 2000.0], [5500.0, 2000.0]);
+    let level = s.model.wall(inner).unwrap().level;
+    let north = s.model.guid(100004);
+    let half = s.model.thickness(s.model.wall(100004).unwrap()) / 2.0;
+    // The north wall is the nearest on the left. Moved to its left face (on its south side, as it runs west), the dimension is shorter.
+    let mut witness = Witness::default();
+    assert_eq!(tempdims::wall(&s.model, inner, level, witness)[0].distance, 4000.0);
+    witness = witness.with_target(Side::Left, Some(crate::model::Reference::line(north, Face::Left)));
+    let d = tempdims::wall(&s.model, inner, level, witness);
+    assert_eq!((d[0].to.face, d[0].distance), (Face::Left, 4000.0 - half));
+    assert_eq!(d[1].distance, 2000.0, "the other side is its own");
+    // Moved on to a farther wall: any parallel line the plan shows, not only the nearest's.
+    let far = wall_at(&mut s, [0.0, 9000.0], [8000.0, 9000.0]);
+    let far_line = crate::model::Reference::line(s.model.guid(far), Face::Centre);
+    let d = tempdims::wall(&s.model, inner, level, witness.with_target(Side::Left, Some(far_line)));
+    assert_eq!((d[0].to, d[0].distance), (far_line, 7000.0));
+    // To what is behind the wall (south of it, for the left side), or not a line the plan shows, it stays where it was.
+    let behind = crate::model::Reference::line(s.model.guid(100002), Face::Centre);
+    let d = tempdims::wall(&s.model, inner, level, witness.with_target(Side::Left, Some(behind)));
+    assert_eq!(d[0].to.id, s.model.guid(100004));
+    // The lines it can be moved to: the faces of each wall beside it and a grid's line.
+    let grid = run(&mut s, "grid", json!({"start": [0, 2600], "end": [8000, 2600]}))["id"].as_u64().unwrap();
+    let lines = tempdims::neighbour_lines(&s.model, inner, level);
+    assert!(lines.iter().any(|(r, _)| *r == crate::model::Reference::line(s.model.guid(grid), Face::Centre)));
+    assert!(lines.iter().any(|(r, _)| r.id == north && r.face == Face::Left));
+    assert!(lines.iter().all(|(r, _)| r.id != s.model.guid(inner)), "never the wall's own");
+    // A door's dimensions stop at its opening when the settings say so.
+    let door = run(&mut s, "door", json!({"wall": 100002, "offset": 3000}))["id"].as_u64().unwrap();
+    let e = s.model.elements.get(door).unwrap().clone();
+    assert_eq!(tempdims::opening_reach(&s.model, &e), 0.0);
+    run(&mut s, "temporary_dimension_settings", json!({"openings": "openings"}));
+    assert_eq!(tempdims::opening_reach(&s.model, &e), s.model.opening_type(&e).unwrap().width / 2.0);
+}
+
+#[test]
+fn the_command_reads_the_witness_lines_a_person_set_and_a_core_is_a_line_a_dimension_can_measure_to() {
+    let mut s = Session::new();
+    let (a, b) = cored(&mut s);
+    let r = run(&mut s, "temporary_dimensions", json!({"id": a, "left": "core-left"}));
+    assert_eq!(r["core"], true);
+    assert_eq!((r["dimensions"][0]["from"]["face"].as_str(), r["dimensions"][0]["distance"].as_f64()), (Some("coreleft"), Some(4000.0)));
+    assert_eq!(r["settings"], json!({"walls": "centerlines", "openings": "centerlines"}));
+    // The far line moved to b's exterior-face-side line, by its reference.
+    let r = run(&mut s, "temporary_dimensions", json!({"id": a, "to_left": {"id": b, "face": "left"}}));
+    assert_eq!(r["dimensions"][0]["to"]["face"], "left");
+    assert_eq!(r["dimensions"][0]["distance"].as_f64(), Some(4150.0));
+    // Its ready-made dimension measures to the core as it says.
+    let r = run(&mut s, "temporary_dimensions", json!({"id": a, "left": "core-right", "right": "centre"}));
+    let made = run(&mut s, "dimension", r["dimensions"][0]["dimension"].clone());
+    assert_eq!(made["values"], json!([4140.0]), "{made}");
+    // A wall with no core of its own has none to measure to; a misspelt line or reference is refused.
+    let plain = wall_at(&mut s, [0.0, 9000.0], [6000.0, 9000.0]);
+    let before = s.model.elements.clone();
+    let e = s.execute("dimension", &json!({"refs": [{"id": plain, "face": "corecentre"}, {"id": a}], "at": [100, 5000]})).unwrap_err();
+    assert!(e.contains("no core"), "{e}");
+    for p in [json!({"id": a, "left": "core"}), json!({"id": a, "to_left": 3}), json!({"id": a, "to_left": {"id": b, "face": "up"}})] {
+        assert!(s.execute("temporary_dimensions", &p).is_err(), "{p}");
+    }
+    assert_eq!(s.model.elements, before);
+    // A flipped wall's core faces swap, as its faces do.
+    assert_eq!(Face::CoreLeft.flipped(), Face::CoreRight);
+    assert_eq!(Face::CoreCentre.flipped(), Face::CoreCentre);
 }

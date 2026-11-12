@@ -30,7 +30,12 @@ pub(crate) enum Action {
     /// The 3D view's default orientation.
     HomeView,
     EditType,
+    /// Select All Instances > Visible in View (SA): what the view shows of the selected elements' types.
     SelectAllInstances,
+    /// Select All Instances > In Entire Project: every element of the selected elements' types.
+    SelectAllInstancesProject,
+    /// Recent Commands: the nth of the commands last used, newest first.
+    Recent(u8),
     HideElement,
     HideCategory,
     OverrideGraphics,
@@ -62,7 +67,9 @@ impl Action {
             Action::ZoomOut => "Zoom Out",
             Action::HomeView => "Home View",
             Action::EditType => "Edit Type",
-            Action::SelectAllInstances => msg!("Select All Instances"),
+            Action::SelectAllInstances => msg!("Visible in View"),
+            Action::SelectAllInstancesProject => msg!("In Entire Project"),
+            Action::Recent(_) => "Recent",
             Action::HideElement => "Hide Element",
             Action::HideCategory => "Hide Category",
             Action::OverrideGraphics => "Override Graphics",
@@ -74,6 +81,15 @@ impl Action {
             Action::WorkPlane => msg!("Set Work Plane…"),
             Action::DisallowJoin => msg!("Disallow Join"),
             Action::AllowJoin => msg!("Allow Join"),
+        }
+    }
+
+    /// The submenu it belongs to, as Revit's menu holds Select All Instances and Recent Commands.
+    pub(crate) fn parent(self) -> Option<&'static str> {
+        match self {
+            Action::SelectAllInstances | Action::SelectAllInstancesProject => Some(msg!("Select All Instances")),
+            Action::Recent(_) => Some(msg!("Recent Commands")),
+            _ => None,
         }
     }
 
@@ -114,6 +130,7 @@ impl Item {
     fn label(&self) -> String {
         match self.of {
             Some(of) if self.action == Action::Repeat => tf(msg!("Repeat [{}]"), &[t(of)]),
+            Some(of) if matches!(self.action, Action::Recent(_)) => t(of).to_string(),
             _ => t(self.action.label()).to_string(),
         }
     }
@@ -127,18 +144,41 @@ pub(crate) fn menu(response: &Response, groups: &[Vec<Item>], chosen: &mut Optio
             if i > 0 {
                 ui.separator();
             }
-            for item in group {
-                let mut button = Button::new(item.label());
-                if let Some(keys) = item.action.shortcut() {
-                    button = button.shortcut_text(keys);
-                }
-                if ui.add_enabled(item.enabled, button).clicked() {
-                    *chosen = Some(item.action);
-                    ui.close();
-                }
+            let mut at = 0;
+            while at < group.len() {
+                let Some(parent) = group[at].action.parent() else {
+                    item_button(ui, &group[at], chosen);
+                    at += 1;
+                    continue;
+                };
+                // Items of one parent are its submenu, as Revit's Select All Instances and Recent Commands are.
+                let end = group[at..].iter().position(|x| x.action.parent() != Some(parent)).map_or(group.len(), |n| at + n);
+                let subs = &group[at..end];
+                let any = subs.iter().any(|x| x.enabled);
+                ui.add_enabled_ui(any, |ui| {
+                    ui.menu_button(t(parent), |ui| {
+                        for sub in subs {
+                            item_button(ui, sub, chosen);
+                        }
+                    });
+                });
+                at = end;
             }
         }
     });
+}
+
+/// One item as a button of the open menu; a click puts its action in `chosen` and closes the menu.
+fn item_button(ui: &mut egui::Ui, item: &Item, chosen: &mut Option<Action>) {
+    let mut button = Button::new(item.label());
+    if let Some(keys) = item.action.shortcut() {
+        button = button.shortcut_text(keys);
+    }
+    if ui.add_enabled(item.enabled, button).clicked() {
+        *chosen = Some(item.action);
+        ui.close_kind(egui::UiKind::Menu);
+        ui.close();
+    }
 }
 
 impl BimApp {
@@ -150,6 +190,15 @@ impl BimApp {
         // Revit's Repeat [last command], first of the menu while no tool runs.
         if let Some(last) = self.flow.last.as_ref().filter(|_| self.tool == Tool::Modify && self.flow.pending.is_none()) {
             first.insert(0, Item { of: Some(crate::selecting::tool_name(last)), ..Item::new(Action::Repeat, true) });
+        }
+        // Recent Commands beside it: up to five of the commands last used, newest first.
+        if self.tool == Tool::Modify && self.flow.pending.is_none() {
+            let recent = self.flow.recent.iter().take(crate::selecting::RECENT).enumerate();
+            let items: Vec<Item> = recent
+                .map(|(i, tool)| Item { of: Some(crate::selecting::tool_name(tool)), ..Item::new(Action::Recent(i as u8), true) })
+                .collect();
+            let at = first.iter().position(|i| i.action == Action::Cancel).unwrap_or(first.len());
+            first.splice(at..at, items);
         }
         if self.finishable() {
             first.insert(0, Item::new(Action::Finish, true));
@@ -169,6 +218,7 @@ impl BimApp {
                 groups.push(vec![
                     Item::new(Action::EditType, self.type_subject().is_some()),
                     Item::new(Action::SelectAllInstances, true),
+                    Item::new(Action::SelectAllInstancesProject, true),
                     Item::new(Action::CreateSimilar, self.selection.len() == 1),
                     Item::new(Action::Delete, true),
                 ]);
@@ -235,6 +285,8 @@ impl BimApp {
             Action::HomeView => self.home3d(),
             Action::EditType => self.edit_type(),
             Action::SelectAllInstances => self.select_all_instances(),
+            Action::SelectAllInstancesProject => self.select_all_instances_in_project(),
+            Action::Recent(i) => self.repeat_recent(usize::from(i)),
             Action::HideElement => self.hide_selection(false),
             Action::HideCategory => self.hide_selection(true),
             Action::OverrideGraphics => self.override_selection(),

@@ -119,7 +119,7 @@ pub const MIN_CONTOURS: f64 = 50.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 18;
+pub const FORMAT: u32 = 19;
 /// How far past the model a level reaches without an extent of its own, mm.
 pub const LEVEL_PAST: f64 = 1000.0;
 
@@ -981,6 +981,11 @@ pub enum Face {
     Right,
     Start,
     End,
+    /// A wall's core centre line, its core's exterior face and its core's interior face: the core runs from its first structure
+    /// layer to its last, so a wall has these only when it has such a layer that does not fill all of it. New in file format 19.
+    CoreCentre,
+    CoreLeft,
+    CoreRight,
 }
 
 impl Face {
@@ -1000,6 +1005,8 @@ impl Face {
         match self {
             Face::Left => Face::Right,
             Face::Right => Face::Left,
+            Face::CoreLeft => Face::CoreRight,
+            Face::CoreRight => Face::CoreLeft,
             other => other.mirrored(),
         }
     }
@@ -1012,6 +1019,9 @@ impl Face {
             Face::Right => "right face",
             Face::Start => "start",
             Face::End => "end",
+            Face::CoreCentre => "core centre line",
+            Face::CoreLeft => "core left face",
+            Face::CoreRight => "core right face",
         }
     }
 }
@@ -1037,7 +1047,8 @@ impl Reference {
     /// The same of a mirrored element, which runs back the other way ([`Face::mirrored`]): the end of a line along it
     /// swaps, and a line across it (a wall's end, any of an `opening`'s lines) still runs from its inside to its outside.
     pub fn mirrored(self, opening: bool) -> Reference {
-        let along = !opening && matches!(self.face, Face::Centre | Face::Left | Face::Right);
+        let along =
+            !opening && matches!(self.face, Face::Centre | Face::Left | Face::Right | Face::CoreCentre | Face::CoreLeft | Face::CoreRight);
         Reference { face: self.face.mirrored(), point: self.point.map(|p| if along { p.other() } else { p }), ..self }
     }
 
@@ -3010,6 +3021,10 @@ pub struct Model {
     /// older BIMCraft opens the rest, so it took no `FORMAT` step.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub pinned: BTreeSet<Guid>,
+    /// What temporary dimensions measure to and from by default (Revit's Manage > Additional Settings > Temporary Dimensions):
+    /// a wall's lines, and a door's or a window's. A file from before leaves it out, and reads as centre lines, as it always did.
+    #[serde(default, skip_serializing_if = "crate::tempdims::Settings::is_default")]
+    pub temporary_dimensions: crate::tempdims::Settings,
     pub elements: Elements,
     /// The ids and GUIDs of the library: its types, materials, pictures, families, parameters, view filters and
     /// templates, phases, phase filters and design options.
@@ -3111,6 +3126,7 @@ impl Model {
             wire_types: crate::electrical::wire_types(),
             georeference: None,
             pinned: BTreeSet::new(),
+            temporary_dimensions: Default::default(),
             elements: Elements::new(),
             library: crate::library::Library::default(),
             loaded: BTreeMap::new(),
@@ -3651,6 +3667,8 @@ impl Model {
         // either: a file of 17's connectors are a power or a switch one, each with its system, which 18 reads as they were; a
         // file of 17 holds no title blocks, its sheets keeping the built-in one, no `join`, which reads as joining, as it always
         // did, and none of its dimensions measures `across`.
+        // 18 to 19 (a dimension to a wall's core: its centre line and faces) has none either: a file of 18 holds no dimension
+        // to a core, and the temporary dimensions' settings are left out of a file that has none, which reads as centre lines.
         self.format = FORMAT;
     }
 
@@ -5480,6 +5498,9 @@ impl Model {
             Face::Right => (c.at - v * d - u * w, c.at - v * d + u * w),
             Face::Start => (c.at - u * w - v * d, c.at - u * w + v * d),
             Face::End => (c.at + u * w - v * d, c.at + u * w + v * d),
+            Face::CoreCentre | Face::CoreLeft | Face::CoreRight => {
+                return Err(format!("{} {} has no core; measure to its centre lines, faces or ends", e.category(), id));
+            }
         })
     }
 
@@ -5495,6 +5516,11 @@ impl Model {
             (Some(Element::Wall(w)), face) => {
                 let axis = walls::Axis::of(w);
                 let (ext, int) = walls::faces(self, w);
+                // The core's faces, where the wall has a core of its own (`walls::core_faces`).
+                let core = || {
+                    walls::core_faces(self, w)
+                        .ok_or_else(|| format!("wall {} has no core of its own; measure to its centre line or faces", r.id))
+                };
                 let (a, b) = match axis.radius() {
                     Some(_) if !matches!(face, Face::Start | Face::End) => {
                         return Err(format!("wall {}'s faces are arcs; measure to its start or its end, or its radius", r.id));
@@ -5514,6 +5540,12 @@ impl Model {
                     Face::Right => (axis.at(a, int), axis.at(b, int)),
                     Face::Start => (axis.at(a, int), axis.at(a, ext)),
                     Face::End => (axis.at(b, int), axis.at(b, ext)),
+                    Face::CoreCentre => {
+                        let (ce, ci) = core()?;
+                        (axis.at(a, (ce + ci) / 2.0), axis.at(b, (ce + ci) / 2.0))
+                    }
+                    Face::CoreLeft => (axis.at(a, core()?.0), axis.at(b, core()?.0)),
+                    Face::CoreRight => (axis.at(a, core()?.1), axis.at(b, core()?.1)),
                     Face::Across => {
                         return Err(format!("wall {} has no across line; measure to its centre line, faces or ends", r.id));
                     }
@@ -5528,7 +5560,7 @@ impl Model {
                     Face::Centre => o.offset,
                     Face::Start => o.offset - t.width / 2.0,
                     Face::End => o.offset + t.width / 2.0,
-                    Face::Left | Face::Right | Face::Across => {
+                    Face::Left | Face::Right | Face::Across | Face::CoreCentre | Face::CoreLeft | Face::CoreRight => {
                         return Err(format!("{what} has a centre and two jambs, start and end; measure to one of those"));
                     }
                 };
@@ -5550,7 +5582,7 @@ impl Model {
                     Face::Centre => Ok((a, b)),
                     Face::Start => Ok((a - n, a + n)),
                     Face::End => Ok((b - n, b + n)),
-                    Face::Left | Face::Right | Face::Across => {
+                    Face::Left | Face::Right | Face::Across | Face::CoreCentre | Face::CoreLeft | Face::CoreRight => {
                         Err(format!("detail line {} has a line and two ends; measure to one of those", r.id))
                     }
                 }
@@ -5645,7 +5677,11 @@ impl Model {
     /// column's two centre lines and four faces, a door's or a window's centre and jambs, a grid's line.
     pub fn reference_lines(&self, id: impl Key) -> Vec<(Reference, Line)> {
         let id = self.guid(id);
+        let core = matches!(self.elements.get(id), Some(Element::Wall(w)) if walls::core_faces(self, w).is_some());
         let faces: &[Face] = match self.elements.get(id) {
+            Some(Element::Wall(_)) if core => {
+                &[Face::Centre, Face::Left, Face::Right, Face::CoreCentre, Face::CoreLeft, Face::CoreRight, Face::Start, Face::End]
+            }
             Some(Element::Wall(_)) => &[Face::Centre, Face::Left, Face::Right, Face::Start, Face::End],
             Some(Element::Column(_) | Element::StructuralColumn(_)) => {
                 &[Face::Centre, Face::Across, Face::Left, Face::Right, Face::Start, Face::End]
@@ -5794,7 +5830,9 @@ impl Model {
                     Face::Left => ext,
                     Face::Right => int,
                     Face::Centre => (ext + int) / 2.0,
-                    Face::Start | Face::End | Face::Across => return Err(format!("wall {}'s ends are straight; {what}", r.id)),
+                    Face::Start | Face::End | Face::Across | Face::CoreCentre | Face::CoreLeft | Face::CoreRight => {
+                        return Err(format!("wall {}'s ends are straight; {what}", r.id));
+                    }
                 };
                 Ok((c, radius - sweep.signum() * off, a0, sweep))
             }
@@ -7677,6 +7715,7 @@ impl Model {
             wire_types,
             georeference,
             pinned,
+            temporary_dimensions,
             elements: _,
             library,
             loaded,
@@ -7720,6 +7759,7 @@ impl Model {
             && *wire_types == o.wire_types
             && *georeference == o.georeference
             && *pinned == o.pinned
+            && *temporary_dimensions == o.temporary_dimensions
             && *library == o.library
             && loaded.len() == o.loaded.len()
             && loaded.iter().zip(&o.loaded).all(|((a, x), (b, y))| a == b && Arc::ptr_eq(x, y))

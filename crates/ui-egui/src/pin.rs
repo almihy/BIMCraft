@@ -2,7 +2,7 @@
 //! (a click on it unpins), and a drag, Move, Rotate or Mirror of a pinned element that does nothing but say, in Revit's words,
 //! "Can't move pinned element." The core keeps the pins and refuses the same for the commands the agent sends (`bimcraft_core`'s
 //! `pin`); the window says it before it asks, as Revit does. Delete does what it can: the elements that are not pinned go, and
-//! the status says "Pinned objects were not deleted. To delete them, unpin them before using Delete."
+//! the status says "Pinned objects were not deleted. To delete them, unpin them before using delete."
 
 use bimcraft_core::geom::P2;
 use bimcraft_core::model::{Element, Id, Model};
@@ -79,7 +79,7 @@ impl BimApp {
             }
         }
         if !pinned.is_empty() {
-            let text = t("Pinned objects were not deleted. To delete them, unpin them before using Delete.").to_string();
+            let text = t("Pinned objects were not deleted. To delete them, unpin them before using delete.").to_string();
             self.status = Status { text, error: true };
         }
     }

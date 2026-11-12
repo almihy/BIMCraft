@@ -1,6 +1,7 @@
 //! Copy to Clipboard and Paste, as Revit's: Ctrl+C puts the selection on the clipboard (the session's, in the core: no OS
 //! clipboard), Ctrl+V holds what was copied at the cursor, outlined, until a click puts it there (snapping as every tool does),
-//! and the Paste list (the Modify panel's) has the aligned ways: to Selected Levels (a list of levels to tick), to the Current View,
+//! and the Paste list (the Modify panel's) has the aligned ways: to Selected Levels (a list of levels to tick), to Selected Views (a
+//! list of the views of the kind copied in, with a search), to the Current View,
 //! to a Picked Level (in an elevation or a section, a click on a level line) and to the Same Place. The commands are the core's
 //! `copy_to_clipboard` and `paste`.
 
@@ -15,6 +16,13 @@ use crate::lang::{t, tf};
 use crate::popup::Modal;
 use crate::ribbon;
 use crate::{BimApp, Status, Tool, list_row, small_button};
+
+/// The views dialog of Paste Aligned to Selected Views: the views of the kind copied in, each with whether it is ticked, and
+/// what is typed to search them.
+pub(crate) struct PasteViews {
+    views: Vec<(Id, String, bool)>,
+    search: String,
+}
 
 /// The levels dialog of Paste Aligned to Selected Levels: each level with its elevation, and whether it is ticked.
 pub(crate) struct PasteLevels {
@@ -126,6 +134,56 @@ impl BimApp {
         self.paste_levels = Some(PasteLevels { levels });
     }
 
+    /// Paste Aligned to Selected Views: the dialog of views of the kind the annotation was copied in.
+    pub(crate) fn open_paste_views(&mut self) {
+        let views: Vec<(Id, String, bool)> = self.session.clipboard_paste_views().into_iter().map(|(id, name)| (id, name, false)).collect();
+        if views.is_empty() {
+            self.status = Status { text: t("no other view of that kind to paste into").into(), error: true };
+            return;
+        }
+        self.paste_views = Some(PasteViews { views, search: String::new() });
+    }
+
+    /// The views dialog, while it is open.
+    pub(crate) fn paste_views_window(&mut self, ctx: &Context) {
+        let Some(d) = self.paste_views.as_mut() else { return };
+        let (mut ok, mut close) = (false, false);
+        let r = Modal::new(UiId::new("paste-views"), t("Select Views")).width(340.0).show(ctx, |ui| {
+            crate::popup::body(ui, |ui| {
+                ui.add_space(6.0);
+                ui.label(t("Paste to the views:"));
+                ui.add(egui::TextEdit::singleline(&mut d.search).hint_text(t("Search")));
+                let found = d.search.trim().to_lowercase();
+                ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                    for (_, name, on) in d.views.iter_mut().filter(|(_, name, _)| name.to_lowercase().contains(&found)) {
+                        ui.checkbox(on, name.as_str());
+                    }
+                });
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if ui.button(t("Check All")).clicked() {
+                        d.views.iter_mut().for_each(|v| v.2 = true);
+                    }
+                    if ui.button(t("Check None")).clicked() {
+                        d.views.iter_mut().for_each(|v| v.2 = false);
+                    }
+                });
+            });
+            crate::popup::footer(ui, |ui| {
+                ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                    close = ui.button(t("Cancel")).clicked();
+                    ok = ui.add_enabled(d.views.iter().any(|v| v.2), Button::new(t("OK"))).clicked();
+                });
+            });
+        });
+        if ok && let Some(d) = self.paste_views.take() {
+            let views: Vec<Id> = d.views.iter().filter(|v| v.2).map(|v| v.0).collect();
+            self.paste(json!({"views": views}));
+        } else if close || r.should_close() {
+            self.paste_views = None;
+        }
+    }
+
     /// The levels dialog, while it is open.
     pub(crate) fn paste_levels_window(&mut self, ctx: &Context) {
         let Some(d) = self.paste_levels.as_mut() else { return };
@@ -219,6 +277,14 @@ impl BimApp {
                 let in_section = matches!(self.sheet, crate::Sheet::Section(_));
                 if ui.add_enabled_ui(in_section, |ui| list_row(ui, Icon::Paste, "Aligned to Picked Level", false, tip)).inner.clicked() {
                     self.begin_paste_to_picked_level();
+                }
+                // The annotation copied goes into other views of its kind, which the dialog lists.
+                let tip = msg!(
+                    "Aligned to Selected Views: what belongs to a view (dimensions, tags, notes, detail lines) at the same place in each view ticked, of the kind it was copied in"
+                );
+                let any_view = !self.session.clipboard_paste_views().is_empty();
+                if ui.add_enabled_ui(any_view, |ui| list_row(ui, Icon::Paste, "Aligned to Selected Views…", false, tip)).inner.clicked() {
+                    self.open_paste_views();
                 }
                 let tip = msg!("Aligned to Same Place: on top of what was copied");
                 if list_row(ui, Icon::Paste, "Aligned to Same Place", false, tip).clicked() {

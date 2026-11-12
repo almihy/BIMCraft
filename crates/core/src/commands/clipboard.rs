@@ -5,7 +5,8 @@
 //! A paste puts new elements beside the old (`by`), on them (`same_place`), or on levels (`levels`, `view`: Revit's Paste Aligned
 //! to Selected Levels and to Current View): each at the same place in plan, its heights moved by the levels' difference and what
 //! it measures from a level measured from the level there. What cannot go the way it was is pasted as near as can be, and the
-//! reply says what it did (`notes`) and what it left out (`left_out`).
+//! reply says what it did (`notes`) and what it left out (`left_out`). Paste Aligned to Selected Views (`views`) puts the annotation
+//! copied (dimensions, tags, notes, detail lines) in each view picked, of the kind it was copied in.
 
 use std::collections::BTreeSet;
 
@@ -13,6 +14,7 @@ use serde_json::{Value, json};
 
 use super::{
     Motion, R, absent, along, bad, duplicate_exactly, flag, ids_param, level_param, micron, next_number, off_centre, only, point_req,
+    view_param,
 };
 use crate::engine::Session;
 use crate::geom::P2;
@@ -76,6 +78,26 @@ impl Session {
     /// The level what the clipboard holds was copied from: the lowest it stands on.
     pub fn clipboard_level(&self) -> Option<Guid> {
         self.clipboard.as_ref().and_then(|c| c.level(&self.model))
+    }
+}
+
+impl Session {
+    /// The views Paste Aligned to Selected Views offers: those of the kind the clipboard's annotation was copied in (plans when it
+    /// holds none), except the views it was copied in, by id with the name the Select Views dialog shows.
+    pub fn clipboard_paste_views(&self) -> Vec<(Id, String)> {
+        let m = &self.model;
+        let from: Vec<Guid> = self.clipboard_ids().into_iter().filter_map(|id| m.elements.get(id).and_then(|e| view_of(m, e))).collect();
+        let kind = from.iter().find_map(|g| view_kind(m, *g)).unwrap_or("plan");
+        let sheets = m.sheets();
+        m.views()
+            .into_iter()
+            .chain(sheets)
+            .filter(|id| view_kind(m, m.guid(*id)) == Some(kind) && !from.contains(&m.guid(*id)))
+            .map(|id| {
+                let name = m.view_name(id).map(String::from).or_else(|| m.sheet(id).map(|sh| format!("{} - {}", sh.number, sh.name)));
+                (id, name.unwrap_or_default())
+            })
+            .collect()
     }
 }
 
@@ -226,7 +248,13 @@ fn source(c: &str, s: &Session, p: &Value) -> Result<(Vec<Id>, Vec<String>, bool
 /// Revit's Paste (Ctrl+V) and its Aligned variants.
 pub(super) fn paste(s: &mut Session, p: &Value) -> R {
     let c = "paste";
-    only(c, p, &["ids", "id", "by", "levels", "view", "same_place"])?;
+    only(c, p, &["ids", "id", "by", "levels", "view", "views", "same_place"])?;
+    if !absent(p.get("views")) {
+        if !absent(p.get("levels")) || !absent(p.get("view")) || flag(c, p, "same_place")? {
+            return Err(bad(c, "`views` is its own way to place it: leave out `levels`, `view` and `same_place` (`by` may go with it)"));
+        }
+        return paste_to_views(c, s, p);
+    }
     let to_levels = !absent(p.get("levels")) || !absent(p.get("view"));
     let (same, by_given) = (flag(c, p, "same_place")?, !absent(p.get("by")));
     if !same && !by_given && !to_levels {
@@ -252,17 +280,7 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> R {
     let rest: Vec<Id> = ids.iter().copied().filter(|id| !loose.contains(id)).collect();
     if to_levels {
         let targets = target_levels(c, &s.model, p)?;
-        // What stands on no level (grids, sections, links) has none to be moved to: it is pasted once, by `by`, as Revit's
-        // paste to another level also puts down the datum elements it was given.
-        let (mut levelless, on_levels): (Vec<Id>, Vec<Id>) =
-            rest.iter().partition(|id| s.model.elements.get(**id).is_some_and(|e| s.model.level_of(e).is_none()));
-        // With no `by` a copy would lie on its original: it is left out, and the reply says so.
-        if !by_given {
-            left_out.extend(
-                levelless.drain(..).map(|id| format!("{}: it stands on no level; give `by` to paste it beside", named(&s.model, id))),
-            );
-        }
-        return paste_to_levels(c, s, &on_levels, &levelless, &loose, &targets, by, left_out);
+        return paste_model_to_levels(c, s, &rest, &loose, &targets, (by, by_given), left_out);
     }
     let mo = Motion { map: &|q| micron(q + by), slide: Some(by), mirror: false };
     let mut made = if rest.is_empty() { Vec::new() } else { duplicate_exactly(c, s, &rest, &mo)?.0 };
@@ -273,6 +291,193 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> R {
         return Err(bad(c, format!("nothing to paste: {}", left_out.join("; "))));
     }
     Ok(json!({"ids": made, "pasted": [{"ids": made}], "notes": [], "left_out": left_out}))
+}
+
+/// Paste Aligned to Selected Levels of `rest` (what stands on a level and what does not) and `loose` (doors and windows without
+/// their wall) to `targets`.
+fn paste_model_to_levels(
+    c: &str,
+    s: &mut Session,
+    rest: &[Id],
+    loose: &[Id],
+    targets: &[Guid],
+    (by, by_given): (P2, bool),
+    mut left_out: Vec<String>,
+) -> R {
+    // What stands on no level (grids, sections, links) has none to be moved to: it is pasted once, by `by`, as Revit's
+    // paste to another level also puts down the datum elements it was given.
+    let (mut levelless, on_levels): (Vec<Id>, Vec<Id>) =
+        rest.iter().partition(|id| s.model.elements.get(**id).is_some_and(|e| s.model.level_of(e).is_none()));
+    // With no `by` a copy would lie on its original: it is left out, and the reply says so.
+    if !by_given {
+        left_out
+            .extend(levelless.drain(..).map(|id| format!("{}: it stands on no level; give `by` to paste it beside", named(&s.model, id))));
+    }
+    paste_to_levels(c, s, &on_levels, &levelless, loose, targets, by, left_out)
+}
+
+/// What kind of view `g` is: Paste Aligned to Selected Views puts annotation in views of the kind it was copied in.
+fn view_kind(m: &Model, g: Guid) -> Option<&'static str> {
+    match m.elements.get(g)? {
+        Element::Level(_) | Element::PlanView(_) => Some("plan"),
+        Element::Section(_) => Some("section"),
+        Element::Elevation(_) => Some("elevation"),
+        Element::View3D(_) => Some("3D view"),
+        Element::Sheet(_) => Some("sheet"),
+        Element::Schedule(_) => Some("schedule"),
+        _ => None,
+    }
+}
+
+/// The view annotation `e` is in: a note's, a line's, a region's, a detail's; a dimension's or tag's own plan view, else its
+/// level's plan.
+fn view_of(m: &Model, e: &Element) -> Option<Guid> {
+    match e {
+        Element::Text(n) => Some(n.view),
+        Element::DetailLine(l) => Some(l.view),
+        Element::FilledRegion(r) => Some(r.view),
+        Element::DetailGroup(g) => Some(g.view),
+        Element::RepeatingDetail(r) => Some(r.view),
+        Element::Spot(sp) => Some(sp.view),
+        Element::Dimension(d) => Some(d.view.unwrap_or(d.level)),
+        Element::Tag(t) => t.view.or_else(|| m.level_of(e)),
+        _ => None,
+    }
+}
+
+/// Annotation `e` put in view `target`: what it says it is in, and for a dimension its level (a plan's).
+fn put_in_view(m: &Model, e: &mut Element, target: Guid) {
+    let own_plan = matches!(m.elements.get(target), Some(Element::Level(_)));
+    match e {
+        Element::Text(n) => n.view = target,
+        Element::DetailLine(l) => l.view = target,
+        Element::FilledRegion(r) => r.view = target,
+        Element::DetailGroup(g) => g.view = target,
+        Element::RepeatingDetail(r) => r.view = target,
+        Element::Spot(sp) => sp.view = target,
+        Element::Dimension(d) => {
+            if let Some(level) = m.plan_level(target) {
+                d.level = m.guid(level);
+            }
+            d.view = (!own_plan).then_some(target);
+        }
+        Element::Tag(t) => t.view = (!own_plan).then_some(target),
+        _ => {}
+    }
+}
+
+/// Revit's Paste Aligned to Selected Views: each annotation copied (what belongs to the view it is drawn in: dimensions, tags,
+/// notes, detail lines, regions and details) put at the same place in each view of `views` of the kind it was copied in; what
+/// measures or tags the elements of its level goes only into plans of that level. A model element goes to the level of each plan
+/// among the views, as Aligned to Selected Levels does, and is left out of the other kinds of view, where it shows already.
+fn paste_to_views(c: &str, s: &mut Session, p: &Value) -> R {
+    let (wanted, mut left_out, expand) = source(c, s, p)?;
+    let by = if absent(p.get("by")) { P2(0.0, 0.0) } else { point_req(c, p, "by")? };
+    let named_views: Vec<Value> = match p.get("views") {
+        Some(Value::Array(a)) if a.is_empty() => return Err(bad(c, "`views` names no view: say which views to paste to")),
+        Some(Value::Array(a)) if a.len() <= MAX_POINTS => a.clone(),
+        Some(Value::Array(_)) => return Err(bad(c, format!("`views` lists more than {MAX_POINTS} views"))),
+        _ => return Err(bad(c, "`views` is a list of views, by name, id or GUID")),
+    };
+    let mut targets: Vec<Guid> = Vec::new();
+    for v in named_views {
+        let id = view_param(c, &s.model, &json!({"view": v}), true)?;
+        let g = s.model.guid(id);
+        if view_kind(&s.model, g).is_none() {
+            return Err(bad(c, format!("`views`: {v} is not a view")));
+        }
+        if !targets.contains(&g) {
+            targets.push(g);
+        }
+    }
+    let (ids, more) = sort_out(&s.model, &wanted, false, expand);
+    left_out.extend(more);
+    let (notes_ids, model_ids): (Vec<Id>, Vec<Id>) = ids.iter().partition(|id| s.model.elements.get(**id).is_some_and(annotation));
+    let (mut all, mut pasted, mut notes) = (Vec::new(), Vec::new(), Vec::new());
+    for &target in &targets {
+        let m = &s.model;
+        let shown = m.view_name(target).map(String::from).or_else(|| m.sheet(target).map(|sh| sh.number.clone())).unwrap_or_default();
+        let kind = view_kind(m, target).unwrap_or_default();
+        let target_level = m.plan_level(target).map(|l| m.guid(l));
+        let mut fit = Vec::new();
+        for &id in &notes_ids {
+            let Some(e) = m.elements.get(id) else { continue };
+            let from = view_of(m, e);
+            let from_kind = from.and_then(|g| view_kind(m, g));
+            let why = if from == Some(target) {
+                Some(format!("it is in {shown} already"))
+            } else if from_kind != Some(kind) {
+                Some(format!("it is in a {}, and {shown} is a {kind}", from_kind.unwrap_or("view")))
+            } else if matches!(e, Element::Dimension(_) | Element::Tag(_)) && target_level.is_some() && target_level != m.level_of(e) {
+                Some(format!("it measures or tags what stands on its own level, and {shown} is a plan of another"))
+            } else {
+                None
+            };
+            match why {
+                Some(why) => say_once(&mut left_out, vec![format!("{} to {shown}: {why}", named(m, id))]),
+                None => fit.push(id),
+            }
+        }
+        if fit.is_empty() {
+            continue;
+        }
+        let mo = Motion { map: &|q| micron(q + by), slide: Some(by), mirror: false };
+        let (made, _) = duplicate_exactly(c, s, &fit, &mo)?;
+        let m = s.model_mut();
+        // Every copy is annotation (`fit` holds nothing else): each now says it is in the view.
+        for &id in &made {
+            if let Some(mut e) = m.elements.get(id).cloned() {
+                put_in_view(m, &mut e, target);
+                m.elements.insert(id, e);
+            }
+        }
+        pasted.push(json!({"view": s.model.elements.id(target), "name": shown, "ids": made}));
+        all.extend(made);
+    }
+    if !model_ids.is_empty() {
+        // The model elements: aligned to the level of each plan among the views, but not to the level they stand on.
+        let m = &s.model;
+        let loose = loose_openings(m, &model_ids);
+        let rest: Vec<Id> = model_ids.iter().copied().filter(|id| !loose.contains(id)).collect();
+        let from = model_ids
+            .iter()
+            .filter_map(|id| m.elements.get(*id).and_then(|e| m.level_of(e)))
+            .filter_map(|g| m.level(g).map(|l| (g, l.elevation)))
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(g, _)| g);
+        let mut levels: Vec<Guid> = Vec::new();
+        for &t in &targets {
+            match m.plan_level(t).map(|l| m.guid(l)) {
+                Some(l) if Some(l) != from && !levels.contains(&l) => levels.push(l),
+                Some(_) => {}
+                None => {
+                    let name = m.view_name(t).unwrap_or("it");
+                    say_once(
+                        &mut left_out,
+                        vec![format!("{name} is not a plan: a model element shows in it already; paste it to a level")],
+                    );
+                }
+            }
+        }
+        if !levels.is_empty() {
+            let r = paste_model_to_levels(c, s, &rest, &loose, &levels, (by, !absent(p.get("by"))), left_out.clone());
+            match r {
+                Ok(r) => {
+                    all.extend(r["ids"].as_array().into_iter().flatten().filter_map(Value::as_u64));
+                    pasted.extend(r["pasted"].as_array().cloned().unwrap_or_default());
+                    notes.extend(r["notes"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(String::from)));
+                    left_out = r["left_out"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(String::from)).collect();
+                }
+                Err(e) if !all.is_empty() => left_out.push(e),
+                Err(e) => return Err(e),
+            }
+        }
+    }
+    if all.is_empty() {
+        let said: Vec<String> = left_out.iter().chain(&notes).cloned().collect();
+        return Err(bad(c, format!("nothing to paste: {}", said.join("; "))));
+    }
+    Ok(json!({"ids": all, "pasted": pasted, "notes": notes, "left_out": left_out}))
 }
 
 /// The doors and windows among `ids` whose wall is not among them.

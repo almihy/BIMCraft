@@ -100,3 +100,20 @@ fn the_browsers_families_list_the_systems_types_and_a_right_click_deletes_an_unu
     press(&mut h, "Delete");
     assert!(!h.state().session.model.types.wall.contains_key("Spare 100"));
 }
+
+#[test]
+fn deleting_a_type_with_a_pinned_instance_says_so_as_revit_warns() {
+    let mut h = with_spare_types();
+    let wall = ids(&h, "wall")[0];
+    h.state_mut().session.execute("pin", &json!({"ids": [wall]})).unwrap();
+    h.run();
+    press(&mut h, "List Families");
+    type_into(&mut h, FIND, "generic - 200");
+    in_browser(&h, "Generic - 200mm").click_secondary();
+    h.run();
+    press(&mut h, "Delete");
+    press(&mut h, "OK");
+    assert!(ids(&h, "wall").is_empty(), "the pinned instance went with its type");
+    assert_eq!(h.state().status.text, "Pinned objects deleted.");
+    assert!(!h.state().status.error);
+}

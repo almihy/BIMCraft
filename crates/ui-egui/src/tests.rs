@@ -819,12 +819,12 @@ fn pp_shows_and_hides_the_properties_palette() {
 }
 
 #[test]
-fn zf_ze_and_za_zoom_to_fit() {
+fn zf_ze_and_zx_zoom_to_fit() {
     let mut h = app(SAMPLE);
     let p = P2(0.0, 0.0);
     press(&mut h, "Zoom to Fit");
     let fitted = h.state().screen(p);
-    for letters in ["ZF", "ZE", "ZA"] {
+    for letters in ["ZF", "ZE", "ZX"] {
         h.hover_at(h.state().screen(P2(8000.0, 3500.0)));
         h.event(Event::MouseWheel {
             unit: MouseWheelUnit::Point,
@@ -837,6 +837,50 @@ fn zf_ze_and_za_zoom_to_fit() {
         shortcut(&mut h, letters);
         assert!((h.state().screen(p) - fitted).length() < 1.0, "{letters} fits the plan, as the navigation bar does");
     }
+}
+
+#[test]
+fn za_fits_every_open_view_and_zs_sizes_a_sheet_to_the_paper() {
+    // Revit's ZA is Zoom All to Fit (every open view), not Zoom to Fit; ZS is Zoom Sheet Size.
+    let mut h = app(&format!(
+        "{BOX}
+sheet {{\"name\": \"Plans\"}}"
+    ));
+    let sheet = ids(&h, "sheet")[0];
+    let (l1, l2) = (100000, 100001);
+    // Both plans and the sheet open, each zoomed away from its fit.
+    h.state_mut().open_sheet(Sheet::Plan(l2));
+    h.run();
+    h.state_mut().open_sheet(Sheet::Paper(sheet));
+    h.run();
+    h.state_mut().open_sheet(Sheet::Plan(l1));
+    h.run();
+    for id in [l1, l2, sheet] {
+        h.state_mut().canvas.zoom(id, 2.0);
+    }
+    h.run();
+    let fitted = |h: &Harness<BimApp>, id: Id| h.state().canvas.has_view(id);
+    assert!(fitted(&h, l1) && fitted(&h, l2) && fitted(&h, sheet));
+    shortcut(&mut h, "ZA");
+    // Each open view, the ones behind this one too, goes back to being fitted the next time it is drawn.
+    assert!(!fitted(&h, l2) && !fitted(&h, sheet), "the other tabs' zoom is gone");
+    // ZF is the view on screen only.
+    h.state_mut().open_sheet(Sheet::Plan(l2));
+    h.run();
+    h.state_mut().open_sheet(Sheet::Plan(l1));
+    h.run();
+    h.state_mut().canvas.zoom(l1, 2.0);
+    h.state_mut().canvas.zoom(l2, 2.0);
+    shortcut(&mut h, "ZF");
+    assert!(h.state().canvas.has_view(l2), "Zoom to Fit leaves the other views as they are");
+    // ZS: on a sheet, a millimetre of paper is a millimetre on the screen; elsewhere it says so and does nothing.
+    shortcut(&mut h, "ZS");
+    assert!(h.state().status.error, "{:?}", h.state().status);
+    h.state_mut().open_sheet(Sheet::Paper(sheet));
+    h.run();
+    shortcut(&mut h, "ZS");
+    let scale = h.state().canvas.view(sheet).map(|v| v.scale).unwrap_or_default();
+    assert!((scale - 96.0 / 25.4).abs() < 1e-6, "{scale}");
 }
 
 #[test]
@@ -879,7 +923,7 @@ fn sa_selects_every_element_of_the_selected_ones_type_the_view_shows() {
 fn ks_lists_every_shortcut_and_every_one_it_lists_works() {
     let mut h = app(BOX);
     shortcut(&mut h, "KS");
-    for label in ["Create Similar", "CS", "Select All Instances", "SA", "CR", "WA", "KS", "ZF, ZE, ZA, ZX", "Demolish", "DW"] {
+    for label in ["Create Similar", "CS", "Select All Instances", "SA", "CR", "WA", "KS", "ZF, ZE, ZX", "Demolish", "DW"] {
         assert!(h.query_by_label(label).is_some(), "{label}");
     }
     shortcut(&mut h, "WA");
@@ -1673,7 +1717,7 @@ fn a_door_pointed_at_a_wall_shows_how_far_it_stands_from_the_ends() {
     let ctx = egui::Context::default();
     let painter = egui::Painter::new(ctx, egui::LayerId::background(), egui::Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0)));
     let v = bimcraft_core::render::View { scale: 0.06, cx: 4000.0, cy: 3000.0, width: 800, height: 600 };
-    let spans: Vec<String> = crate::canvas::opening_dimensions(&painter, &m, &v, o).into_iter().map(|(_, text, _)| text).collect();
+    let spans: Vec<String> = crate::canvas::opening_dimensions(&painter, &m, &v, o, 0.0).into_iter().map(|(_, text, _)| text).collect();
     assert_eq!(spans, ["1900", "5900"]);
 }
 

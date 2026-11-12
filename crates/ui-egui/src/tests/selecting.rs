@@ -1,5 +1,5 @@
 //! How a hand picks and repeats: the tools that take a selection asking for it first, Enter repeating the last tool, Create
-//! Similar and Repeat in the right-click menu, Tab selecting a chain of walls, Ctrl+A, the arrow keys nudging, the status bar
+//! Similar and Repeat in the right-click menu, Tab selecting a chain of walls, Select All Instances, the arrow keys nudging, the status bar
 //! naming what is under the cursor, and the cursor showing the tool.
 
 use super::*;
@@ -252,37 +252,47 @@ wall {{\"points\": [[20000, 0], [26000, 0]]}}"
 }
 
 #[test]
-fn ctrl_a_selects_everything_the_view_shows() {
+fn ctrl_a_selects_nothing_as_revit_has_no_default_for_it() {
     let mut h = app(BOX);
     h.key_press_modifiers(Modifiers::COMMAND, Key::A);
     h.run();
-    let mut got = h.state().selection.clone();
-    got.sort_unstable();
-    let mut walls = wall_ids(&h);
-    walls.sort_unstable();
-    assert!(walls.iter().all(|w| got.contains(w)), "the four walls are in {got:?}");
-    // In a text field it is the field's: select all the text, not the plan.
-    key(&mut h, Key::Escape);
-    assert!(h.state().selection.is_empty());
-    h.state_mut().selection = vec![walls[0]];
+    assert!(h.state().selection.is_empty(), "Revit's way is Select All Instances (SA): {:?}", h.state().selection);
+    let south = wall_ids(&h)[0];
+    click(&mut h, P2(4000.0, 0.0));
+    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
     h.run();
+    assert_eq!(h.state().selection, [south]);
 }
 
 #[test]
-fn ctrl_a_leaves_out_the_views_marks_so_delete_cannot_take_a_view_with_it() {
-    let mut h = app(&format!("{BOX}\nsection {{\"start\": [-1000, 3000], \"end\": [9000, 3000]}}\nelevation {{\"at\": [4000, 3000]}}"));
-    let marks = [ids(&h, "section"), ids(&h, "elevation")].concat();
-    assert!(!marks.is_empty(), "the plan has marks to leave out");
-    let walls = wall_ids(&h);
-    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+fn select_all_instances_takes_a_types_elements_in_the_view_or_in_the_entire_project() {
+    // A wall on another level is of the same type but not in the plan on screen.
+    let mut h = app(&format!("{BOX}\nlevel {{\"elevation\": 3000}}\nwall {{\"points\": [[0, 0], [8000, 0]], \"level\": \"Level 2\"}}"));
+    let all = wall_ids(&h);
+    assert_eq!(all.len(), 5);
+    click(&mut h, P2(4000.0, 0.0));
+    // SA: Visible in View.
+    shortcut(&mut h, "SA");
+    assert_eq!(h.state().selection.len(), 4, "the walls the plan shows: {:?}", h.state().selection);
+    // The menu's Select All Instances > In Entire Project.
+    click(&mut h, P2(4000.0, 0.0));
+    let at = h.state().screen(P2(4000.0, 3000.0));
+    right_click_at(&mut h, at);
+    h.get_all_by(|n| n.label().is_some_and(|x| x.starts_with("Select All Instances"))).last().unwrap().click();
     h.run();
-    let got = h.state().selection.clone();
-    assert!(walls.iter().all(|w| got.contains(w)), "the walls are in {got:?}");
-    assert!(marks.iter().all(|m| !got.contains(m)), "no section or elevation mark is in {got:?}");
-    // Delete then takes the model's elements and no view.
-    key(&mut h, Key::Delete);
-    assert!(wall_ids(&h).is_empty());
-    assert!(marks.iter().all(|m| h.state().session.model.elements.contains_key(m)), "the views are still there");
+    h.get_all_by(|n| n.label().is_some_and(|x| x.starts_with("In Entire Project"))).last().unwrap().click();
+    h.run();
+    let mut got = h.state().selection.clone();
+    got.sort_unstable();
+    let mut want = all;
+    want.sort_unstable();
+    assert_eq!(got, want, "all five, on both levels");
+    assert_eq!(h.query_all_by(|n| n.label().is_some_and(|x| x.starts_with("In Entire Project"))).count(), 0, "the whole menu closed");
+    // The same from the keyboard shortcut list's command, with no default keys.
+    click(&mut h, P2(4000.0, 0.0));
+    h.state_mut().execute_shortcut_action("Select All Instances in Entire Project");
+    h.run();
+    assert_eq!(h.state().selection.len(), 5);
 }
 
 #[test]
@@ -440,4 +450,34 @@ fn repeat_remembers_only_what_the_person_starts_from_a_shortcut_the_ribbon_or_a_
     shortcut(&mut h, "DR");
     key(&mut h, Key::Escape);
     assert_eq!(h.state().flow.last.as_ref().map(crate::selecting::tool_name), Some("Door"));
+}
+
+#[test]
+fn the_right_click_menu_lists_the_last_five_commands_beside_repeat_newest_first() {
+    let mut h = app(BOX);
+    let at = h.state().screen(P2(4000.0, 3000.0));
+    assert!(offered(&mut h, at, &["Recent Commands"]).is_empty(), "nothing used yet");
+    key(&mut h, Key::Escape);
+    // Seven commands, one after another: only the last five are listed, the newest first, and each once.
+    for letters in ["WA", "DR", "WN", "RM", "LL", "GR", "WA"] {
+        shortcut(&mut h, letters);
+        key(&mut h, Key::Escape);
+        key(&mut h, Key::Escape);
+    }
+    let names: Vec<&str> = h.state().flow.recent.iter().map(crate::selecting::tool_name).collect();
+    assert_eq!(names, ["Wall", "Grid", "Level", "Room", "Window"], "{names:?}");
+    assert_eq!(offered(&mut h, at, &["Repeat [Wall]", "Recent Commands"]), ["Repeat [Wall]", "Recent Commands"]);
+    // The submenu opens on the item and lists them.
+    h.get_all_by(|n| n.label().is_some_and(|x| x.starts_with("Recent Commands"))).last().unwrap().click();
+    h.run();
+    for name in ["Wall", "Grid", "Level", "Room", "Window"] {
+        assert!(h.query_all_by(|n| n.label().is_some_and(|x| x == name)).count() >= 1, "{name}");
+    }
+    // One chosen is started, closes the menu and is now the newest.
+    h.get_all_by(|n| n.label().is_some_and(|x| x == "Level")).last().unwrap().click();
+    h.run();
+    assert_eq!(h.state().tool, Tool::Level);
+    assert_eq!(h.state().flow.recent.first().map(crate::selecting::tool_name), Some("Level"));
+    assert_eq!(h.state().flow.recent.len(), 5);
+    assert_eq!(h.query_all_by(|n| n.label().is_some_and(|x| x.starts_with("Recent Commands"))).count(), 0, "the whole menu closed");
 }

@@ -1,6 +1,7 @@
 //! How a hand picks and repeats, as Revit's does: Move, Copy, Rotate and Mirror started with nothing selected ask for the
-//! elements and go on at Enter; Enter with no tool running repeats the last one (RC is the same); Tab over a wall selects the
-//! walls joined to it and Shift+Tab goes back; Ctrl+A selects what the view shows; the arrow keys nudge the selection; the
+//! elements and go on at Enter; Enter with no tool running repeats the last one (RC is the same, and the right-click menu's
+//! Recent Commands lists the last five); Tab over a wall selects the
+//! walls joined to it and Shift+Tab goes back; the arrow keys nudge the selection; the
 //! status bar names what is under the cursor; and the canvas shows the tool in the cursor.
 
 use bimcraft_i18n::msg;
@@ -29,6 +30,9 @@ const NUDGE: f64 = 3.0;
 /// What a Shift on the arrow keys multiplies the nudge by.
 const BIGGER: f64 = 10.0;
 
+/// How many commands Recent Commands lists, as Revit's menu does.
+pub(crate) const RECENT: usize = 5;
+
 /// The state of selecting and repeating, kept with the app.
 #[derive(Default)]
 pub(crate) struct Flow {
@@ -36,6 +40,8 @@ pub(crate) struct Flow {
     pub(crate) pending: Option<Tool>,
     /// The tool last started, which Enter and RC start again.
     pub(crate) last: Option<Tool>,
+    /// The commands last used, newest first, each once: the right-click menu's Recent Commands (the first is `last`).
+    pub(crate) recent: Vec<Tool>,
     /// The tool being started is one the person asked for (see `start_tool`): the only kind Repeat remembers.
     pub(crate) by_user: bool,
     /// Shift was held for the Tab that came this frame.
@@ -45,6 +51,17 @@ pub(crate) struct Flow {
     pub(crate) preview: Vec<Id>,
     /// What the status bar names under the cursor: the element, the model it was read from (an address), and the words.
     named: Option<(Id, usize, String)>,
+}
+
+impl Flow {
+    /// `tool` as the newest of the recent commands: one of the same name before it goes, and only the last few are kept.
+    pub(crate) fn remember_recent(&mut self, tool: &Tool) {
+        let name = tool_name(tool);
+        // A tool with no name of its own is told apart by what it is.
+        self.recent.retain(|t| if name == msg!("Last Command") { t != tool } else { tool_name(t) != name });
+        self.recent.insert(0, tool.clone());
+        self.recent.truncate(RECENT);
+    }
 }
 
 /// The name Repeat shows for a tool, in English: the menu translates it.
@@ -88,21 +105,15 @@ pub(crate) fn tool_name(tool: &Tool) -> &'static str {
 /// also starts tools of its own, to take a pick for a dialog (Fill Patterns' tile corners), and those have no command to repeat:
 /// Enter would start them without their dialog.
 fn repeatable(tool: &Tool) -> bool {
-    !matches!(tool, Tool::Modify | Tool::PatternCorner(_) | Tool::SketchLine(_) | Tool::SketchPick | Tool::Paste | Tool::PasteLevel)
-}
-
-/// Whether `e` is a view or a mark of one (a section or elevation line, a sheet, a viewport, a schedule, a camera, a plan view):
-/// something the plan shows that Ctrl+A leaves alone, since Delete would take a view away with it.
-fn view_mark(e: &Element) -> bool {
-    matches!(
-        e,
-        Element::Section(_)
-            | Element::Elevation(_)
-            | Element::Sheet(_)
-            | Element::Viewport(_)
-            | Element::Schedule(_)
-            | Element::View3D(_)
-            | Element::PlanView(_)
+    !matches!(
+        tool,
+        Tool::Modify
+            | Tool::PatternCorner(_)
+            | Tool::SketchLine(_)
+            | Tool::SketchPick
+            | Tool::Paste
+            | Tool::PasteLevel
+            | Tool::MoveWitness { .. }
     )
 }
 
@@ -177,15 +188,16 @@ impl BimApp {
     pub(crate) fn remember_tool(&mut self, tool: &Tool) {
         if self.flow.by_user && repeatable(tool) {
             self.flow.last = Some(tool.clone());
+            self.flow.remember_recent(tool);
         }
     }
 
-    /// Ctrl+A: the model's elements and annotation the open view shows, selected: not the views' own marks.
-    pub(crate) fn select_all(&mut self) {
-        let model = Arc::clone(&self.session.model);
-        let found: Vec<Id> = self.shown().into_iter().filter(|id| model.elements.get(*id).is_some_and(|e| !view_mark(e))).collect();
-        if !found.is_empty() {
-            self.pick_up(found, Modifiers::NONE);
+    /// Recent Commands' nth: the command started again, and now the newest.
+    pub(crate) fn repeat_recent(&mut self, nth: usize) {
+        if let Some(tool) = self.flow.recent.get(nth).cloned() {
+            self.flow.last = Some(tool.clone());
+            self.flow.remember_recent(&tool);
+            self.set_tool(tool);
         }
     }
 

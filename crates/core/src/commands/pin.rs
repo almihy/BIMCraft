@@ -42,7 +42,7 @@ impl Model {
 }
 
 /// What a command refused to do to a pinned element: Revit's own failures say "Can't move pinned element." and "Can't rotate
-/// pinned element."; and "Pinned objects were not deleted. To delete them, unpin them before using Delete.".
+/// pinned element."; and "Pinned objects were not deleted. To delete them, unpin them before using delete.".
 #[derive(Clone, Copy)]
 pub(super) enum Held {
     Move,
@@ -60,7 +60,7 @@ pub(super) fn refuse_pinned(c: &str, m: &Model, ids: &[Id], what: Held) -> Resul
     let revit = match what {
         Held::Move => "Can't move pinned element.",
         Held::Rotate => "Can't rotate pinned element.",
-        Held::Delete => "Pinned objects were not deleted. To delete them, unpin them before using Delete.",
+        Held::Delete => "Pinned objects were not deleted. To delete them, unpin them before using delete.",
     };
     let list = pinned.iter().map(Id::to_string).collect::<Vec<_>>().join(", ");
     Err(format!(
@@ -69,16 +69,39 @@ pub(super) fn refuse_pinned(c: &str, m: &Model, ids: &[Id], what: Held) -> Resul
     ))
 }
 
+const HOST_WORDS: &str = "Some pinned objects were deleted because their parent or host object was deleted.";
+const OWN_WORDS: &str = "Pinned objects deleted.";
+
 /// `result` (an object) with `pinned`, those of `gone` that were pinned and went with their host (Revit warns "Some pinned objects
 /// were deleted because their parent or host object was deleted."), and a note saying so. Nothing when none did.
-pub(super) fn hosted_pins_deleted(mut result: Value, before: &Model, gone: &[Id], asked: &[Id]) -> Value {
+pub(super) fn hosted_pins_deleted(result: Value, before: &Model, gone: &[Id], asked: &[Id]) -> Value {
     let went: Vec<Id> = before.pinned_among(gone).into_iter().filter(|id| !asked.contains(id)).collect();
-    if went.is_empty() {
+    pins_note(result, went, &[])
+}
+
+/// What `delete_type` did to pinned elements: a type's own pinned instances (`instances`) are deleted with it and Revit says
+/// "Pinned objects deleted." (its EditingFailures list); those that hung on a deleted host keep the host words. `pinned` lists
+/// both and the note both sentences, each when it applies.
+pub(super) fn type_pins_deleted(result: Value, before: &Model, gone: &[Id], instances: &[Id]) -> Value {
+    let pinned = before.pinned_among(gone);
+    let (own, hosted): (Vec<Id>, Vec<Id>) = pinned.into_iter().partition(|id| instances.contains(id));
+    pins_note(result, hosted, &own)
+}
+
+fn pins_note(mut result: Value, hosted: Vec<Id>, own: &[Id]) -> Value {
+    if hosted.is_empty() && own.is_empty() {
         return result;
     }
+    let mut all: Vec<Id> = own.iter().chain(&hosted).copied().collect();
+    all.sort_unstable();
+    let note = match (own.is_empty(), hosted.is_empty()) {
+        (false, false) => format!("{OWN_WORDS} {HOST_WORDS}"),
+        (false, true) => OWN_WORDS.to_string(),
+        _ => HOST_WORDS.to_string(),
+    };
     if let Some(o) = result.as_object_mut() {
-        o.insert("pinned".into(), json!(went));
-        o.insert("note".into(), json!("Some pinned objects were deleted because their parent or host object was deleted."));
+        o.insert("pinned".into(), json!(all));
+        o.insert("note".into(), json!(note));
     }
     result
 }

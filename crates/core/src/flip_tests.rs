@@ -119,3 +119,24 @@ fn toward_on_a_curved_wall_is_the_side_of_its_curve_at_the_door_not_of_its_chord
     let id = run(&mut s, "door", json!({"wall": w, "offset": 1000, "toward": [q.0, q.1]}))["id"].as_u64().unwrap_or_default();
     assert!(!opening(&s, id).flip_facing, "swings to the curve's left");
 }
+
+#[test]
+fn flip_step_takes_each_door_through_its_four_ways_from_its_own_state_and_a_window_only_its_facing() {
+    let (mut s, w, door, window) = wall_with_openings();
+    let door2 = run(&mut s, "door", json!({"wall": w, "offset": 3000}))["id"].as_u64().unwrap_or_default();
+    // The second door is a step ahead of the first.
+    run(&mut s, "flip", json!({"ids": [door2]}));
+    assert_eq!((flips(&s, door), flips(&s, door2)), ((false, false), (false, true)));
+    run(&mut s, "flip", json!({"ids": [door, door2, window], "step": true}));
+    // Each stepped from its own state: (false,false) -> facing; (false,true) -> hand; a window's facing only.
+    assert_eq!((flips(&s, door), flips(&s, door2), flips(&s, window)), ((false, true), (true, true), (false, true)));
+    run(&mut s, "flip", json!({"ids": [door, door2, window], "step": true}));
+    assert_eq!((flips(&s, door), flips(&s, door2), flips(&s, window)), ((true, true), (true, false), (false, false)));
+    // A window never takes a hand, whatever its state: four presses toggle its facing four times.
+    for _ in 0..4 {
+        run(&mut s, "flip", json!({"ids": [window], "step": true}));
+    }
+    assert_eq!(flips(&s, window), (false, false));
+    // `step` is the whole instruction: `hand` and `facing` beside it are refused.
+    assert!(s.execute("flip", &json!({"ids": [door], "step": true, "hand": true})).is_err());
+}

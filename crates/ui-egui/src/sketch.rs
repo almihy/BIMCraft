@@ -358,6 +358,10 @@ impl BimApp {
     /// kept from its last sketch with their ids.
     pub(crate) fn edit_boundary(&mut self) {
         let &[id] = self.selection.as_slice() else { return };
+        // The button is grey for a pinned element, and so is the key's way in.
+        if self.refuse_pinned_ids(&[id]) {
+            return;
+        }
         if self.site_boundary().is_some() {
             self.edit_site_boundary(id);
             return;
@@ -784,6 +788,7 @@ impl BimApp {
         if !sketching && !(self.boundary_selected() && self.tool == Tool::Modify) {
             return;
         }
+        let pinned = !self.pinned_selection().is_empty();
         // Pushed to the right end by the room the rest leaves: its width as it was last drawn.
         ribbon::push_right(ui, self.mode_width);
         let drawn = ui.scope(|ui| {
@@ -799,20 +804,16 @@ impl BimApp {
                         self.cancel_sketch();
                     }
                 } else if self.site_boundary().is_some_and(|(_, path)| path) {
-                    if big_button(
-                        ui,
-                        Icon::Line,
-                        msg!("Edit Path"),
-                        false,
-                        msg!("Edit Path: sketch its path again, lines and arcs end to end"),
-                    )
-                    .clicked()
-                    {
+                    let tip = msg!("Edit Path: sketch its path again, lines and arcs end to end");
+                    if ui.add_enabled_ui(!pinned, |ui| big_button(ui, Icon::Line, msg!("Edit Path"), false, tip)).inner.clicked() {
                         self.edit_boundary();
                     }
-                } else if big_button(ui, Icon::Line, "Edit Boundary", false, "Edit Boundary: sketch its outline and holes again").clicked()
-                {
-                    self.edit_boundary();
+                } else {
+                    // Revit greys Edit Boundary for a pinned element.
+                    let tip = "Edit Boundary: sketch its outline and holes again";
+                    if ui.add_enabled_ui(!pinned, |ui| big_button(ui, Icon::Line, "Edit Boundary", false, tip)).inner.clicked() {
+                        self.edit_boundary();
+                    }
                 }
             });
         });

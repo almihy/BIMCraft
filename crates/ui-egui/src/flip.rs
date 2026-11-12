@@ -157,8 +157,8 @@ impl BimApp {
         }
     }
 
-    /// Space in Modify: the selected walls turn round, and one door or window, or a few, turn one step through their four
-    /// ways: facing, hand, facing, hand. While a door is placed the cursor's side sets its swing, and Space flips its hand; a
+    /// Space in Modify: the selected walls turn round, and one door, or a few, turn one step through their four
+    /// ways (facing, hand, facing, hand), each from its own state, and a window turns its facing only. While a door is placed the cursor's side sets its swing, and Space flips its hand; a
     /// window put down faces the cursor's side too and has no hand, so Space does nothing there; while a wall is drawn, Space is
     /// the wall's exterior side. Whether Space was used.
     pub(crate) fn flip_key(&mut self) -> bool {
@@ -179,19 +179,11 @@ impl BimApp {
         }
     }
 
-    /// The flips of the selected doors and windows that Space asks for: the step from the first one's state.
-    pub(crate) fn opening_step(&self) -> Option<(Vec<Id>, bool, bool)> {
+    /// The selected doors and windows Space steps: each door one step through its four ways from its own state, each window
+    /// its facing (the `step` of the `flip` command).
+    pub(crate) fn opening_step(&self) -> Vec<Id> {
         let m = &self.session.model;
-        let ids: Vec<Id> = self
-            .selection
-            .iter()
-            .copied()
-            .filter(|id| matches!(m.elements.get(*id), Some(Element::Door(_) | Element::Window(_))))
-            .collect();
-        let Some(Element::Door(o) | Element::Window(o)) = ids.first().and_then(|id| m.elements.get(*id)) else { return None };
-        let (hand, facing) = (o.flip_hand, o.flip_facing);
-        let next = step((hand, facing));
-        Some((ids, next.0 != hand, next.1 != facing))
+        self.selection.iter().copied().filter(|id| matches!(m.elements.get(*id), Some(Element::Door(_) | Element::Window(_)))).collect()
     }
 
     /// The `door` or `window` command's parameters with where the cursor is, for the side of the wall to open to, and
@@ -232,9 +224,4 @@ impl BimApp {
             self.wall_flipped = false;
         }
     }
-}
-
-/// One step through a door's four ways, `(hand, facing)`: facing, then hand, then facing back, then hand back.
-pub(crate) fn step((hand, facing): (bool, bool)) -> (bool, bool) {
-    if hand == facing { (hand, !facing) } else { (!hand, facing) }
 }

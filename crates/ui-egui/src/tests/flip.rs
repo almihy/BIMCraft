@@ -236,3 +236,27 @@ fn space_while_drawing_a_wall_puts_its_exterior_side_on_the_other_side() {
     let made = walls(&h).into_iter().find(|(a, _)| a.1 == 4000.0).unwrap();
     assert_eq!(made, (P2(1000.0, 4000.0), P2(5000.0, 4000.0)));
 }
+
+#[test]
+fn space_turns_a_windows_facing_only_and_each_selected_opening_steps_from_its_own_state() {
+    let mut h = app(WITH_DOOR);
+    let (door, window) = (ids(&h, "door")[0], ids(&h, "window")[0]);
+    // A window alone: it has no hand, so every press flips its facing.
+    click(&mut h, P2(5000.0, 0.0));
+    let mut seen = Vec::new();
+    for _ in 0..4 {
+        key(&mut h, Key::Space);
+        seen.push(flips(&h, window));
+    }
+    assert_eq!(seen, [(false, true), (false, false), (false, true), (false, false)]);
+    // The door ahead of the window by a step: each goes on from its own state.
+    click(&mut h, P2(2000.0, 0.0));
+    key(&mut h, Key::Space);
+    assert_eq!(flips(&h, door), (false, true));
+    click_with(&mut h, P2(5000.0, 0.0), Modifiers::COMMAND);
+    assert_eq!(h.state().selection.len(), 2);
+    key(&mut h, Key::Space);
+    assert_eq!((flips(&h, door), flips(&h, window)), ((true, true), (false, true)));
+    key(&mut h, Key::Space);
+    assert_eq!((flips(&h, door), flips(&h, window)), ((true, false), (false, false)));
+}

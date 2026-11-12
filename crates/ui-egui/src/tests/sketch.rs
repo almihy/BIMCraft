@@ -393,3 +393,19 @@ fn a_picked_line_of_a_roofs_sketch_shows_its_slope_in_properties_and_sets_it() {
     click(&mut f, P2(4000.0, 6000.0));
     assert!(f.query_by_role_and_label(Role::TextInput, "Slope").is_none());
 }
+
+#[test]
+fn edit_boundary_is_grey_for_a_pinned_floor_and_a_click_changes_nothing() {
+    let (mut h, f) = floored();
+    assert!(!is_disabled(&h, Role::Button, "Edit Boundary"));
+    h.state_mut().session.execute("pin", &json!({"ids": [f]})).unwrap();
+    h.run();
+    assert!(is_disabled(&h, Role::Button, "Edit Boundary"), "Revit greys Edit Boundary for a pinned element");
+    h.get_by_role_and_label(Role::Button, "Edit Boundary").click();
+    h.run();
+    assert!(h.state().sketch.is_none());
+    // The key's way in refuses too, in Revit's words.
+    h.state_mut().edit_boundary();
+    assert!(h.state().sketch.is_none());
+    assert!(h.state().status.text.contains("Can't move pinned element."), "{:?}", h.state().status);
+}

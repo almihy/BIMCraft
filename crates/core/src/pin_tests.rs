@@ -105,7 +105,7 @@ fn a_pinned_element_is_not_deleted_until_it_is_unpinned() {
     run(&mut s, "pin", json!({"ids": [a, b]}));
     let held = snapshot(&s);
     let e = s.execute("delete", &json!({"ids": [a]})).unwrap_err();
-    assert!(e.contains("Pinned objects were not deleted. To delete them, unpin them before using Delete."), "{e}");
+    assert!(e.contains("Pinned objects were not deleted. To delete them, unpin them before using delete."), "{e}");
     assert!(e.contains(&a.to_string()) && e.contains("`unpin`"), "{e}");
     assert_eq!(snapshot(&s), held);
     // A mixed selection is refused whole: the agent says which to leave out.
@@ -132,6 +132,36 @@ fn a_pinned_door_goes_with_its_deleted_wall_and_the_reply_says_so() {
     assert_eq!(r["pinned"], json!([door]), "{r}");
     assert!(r["note"].as_str().is_some_and(|n| n.contains("deleted because their parent or host")), "{r}");
     assert!(s.model.pinned_ids().is_empty());
+}
+
+#[test]
+fn deleting_a_type_says_pinned_objects_deleted_for_its_own_instances_and_the_host_words_for_hosted_ones() {
+    // Revit's EditingFailures: "Pinned objects deleted." for what the delete itself takes; the parent-or-host words are for
+    // what hung on a deleted host.
+    let mut s = Session::new();
+    run(&mut s, "type", json!({"category": "wall", "name": "Brick 200", "thickness": 200}));
+    run(&mut s, "type", json!({"category": "wall", "name": "Spare 100", "thickness": 100}));
+    let w = run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]], "type": "Brick 200"}))["ids"][0].as_u64().unwrap();
+    run(&mut s, "pin", json!({"ids": [w]}));
+    let r = run(&mut s, "delete_type", json!({"category": "wall", "type": "Brick 200"}));
+    assert_eq!(r["pinned"], json!([w]), "{r}");
+    assert_eq!(r["note"], "Pinned objects deleted.", "{r}");
+    // A pinned door on that type's wall went with its host: the host words, and both when both happened.
+    run(&mut s, "type", json!({"category": "wall", "name": "Brick 200", "thickness": 200}));
+    let w = run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]], "type": "Brick 200"}))["ids"][0].as_u64().unwrap();
+    let door = run(&mut s, "door", json!({"wall": w, "offset": 1000}))["id"].as_u64().unwrap();
+    run(&mut s, "pin", json!({"ids": [door]}));
+    let r = run(&mut s, "delete_type", json!({"category": "wall", "type": "Brick 200"}));
+    assert_eq!(r["pinned"], json!([door]), "{r}");
+    let note = r["note"].as_str().unwrap_or_default();
+    assert!(note.contains("deleted because their parent or host") && !note.contains("Pinned objects deleted."), "{r}");
+    run(&mut s, "type", json!({"category": "wall", "name": "Brick 200", "thickness": 200}));
+    let w = run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]], "type": "Brick 200"}))["ids"][0].as_u64().unwrap();
+    let door = run(&mut s, "door", json!({"wall": w, "offset": 1000}))["id"].as_u64().unwrap();
+    run(&mut s, "pin", json!({"ids": [w, door]}));
+    let r = run(&mut s, "delete_type", json!({"category": "wall", "type": "Brick 200"}));
+    let note = r["note"].as_str().unwrap_or_default();
+    assert!(note.contains("Pinned objects deleted.") && note.contains("deleted because their parent or host"), "{r}");
 }
 
 #[test]
@@ -325,4 +355,22 @@ fn modify_refuses_what_places_a_pinned_element_and_not_its_height() {
     run(&mut s, "pin", json!({"ids": [floor]}));
     assert!(s.execute("modify", &json!({"id": floor, "offset": 150})).is_ok(), "a floor's height offset");
     assert!(refused(s.execute("modify", &json!({"id": floor, "boundary": [[0, 5000], [5000, 5000], [5000, 9000], [0, 9000]]}))));
+}
+
+#[test]
+fn edit_boundary_is_refused_for_a_pinned_element_as_revit_greys_the_button() {
+    // Revit greys Edit Boundary for a pinned floor, ceiling or roof; its closest failure is "Can't move pinned element."
+    // (BuiltInFailures.EditingFailures.CannotMoveLocked), since a re-sketch moves the element's outline.
+    let mut s = Session::new();
+    let floor = run(&mut s, "floor", json!({"boundary": [[0, 5000], [4000, 5000], [4000, 9000], [0, 9000]]}))["id"].as_u64().unwrap();
+    let before = run(&mut s, "edit_boundary", json!({"id": floor}));
+    run(&mut s, "pin", json!({"ids": [floor]}));
+    let held = snapshot(&s);
+    for p in [json!({"id": floor}), json!({"id": floor, "sketch": before["sketch"]})] {
+        let e = s.execute("edit_boundary", &p).unwrap_err();
+        assert!(e.contains("Can't move pinned element.") && e.contains("`unpin`"), "{e}");
+    }
+    assert_eq!(snapshot(&s), held);
+    run(&mut s, "unpin", json!({"ids": [floor]}));
+    run(&mut s, "edit_boundary", json!({"id": floor, "sketch": before["sketch"]}));
 }

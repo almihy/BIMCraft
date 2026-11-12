@@ -142,7 +142,7 @@ fn delete_takes_what_is_not_pinned_and_says_what_it_left() {
     assert_eq!(ids(&h, "column"), [a], "the free column went, the pinned one stayed");
     let status = &h.state().status;
     assert!(
-        status.error && status.text.contains("Pinned objects were not deleted. To delete them, unpin them before using Delete."),
+        status.error && status.text.contains("Pinned objects were not deleted. To delete them, unpin them before using delete."),
         "{status:?}"
     );
     // Alone, a pinned element is refused whole, and Unpin then lets it go.

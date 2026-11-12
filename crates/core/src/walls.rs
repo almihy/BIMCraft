@@ -148,9 +148,9 @@ pub fn sweep_through(a: P2, p: P2, b: P2) -> f64 {
     if side < 0.0 { sweep.to_degrees() } else { -sweep.to_degrees() }
 }
 
-/// How far from the exterior face of a wall of `thickness` with `layers` its location line `loc`
-/// lies. The core runs from the first structure layer to the last; without one, it's all of it.
-pub fn depth(thickness: f64, layers: &[Layer], loc: Location) -> f64 {
+/// Where a wall's core lies, as how far its exterior and its interior boundaries are from the wall's exterior face: from the
+/// first structure layer to the last. None when no layer is structure.
+fn core_span(layers: &[Layer]) -> Option<(f64, f64)> {
     let mut core: Option<(f64, f64)> = None;
     let mut at = 0.0;
     for l in layers {
@@ -159,7 +159,13 @@ pub fn depth(thickness: f64, layers: &[Layer], loc: Location) -> f64 {
         }
         at += l.thickness;
     }
-    let (c0, c1) = core.unwrap_or((0.0, thickness));
+    core
+}
+
+/// How far from the exterior face of a wall of `thickness` with `layers` its location line `loc`
+/// lies. The core runs from the first structure layer to the last; without one, it's all of it.
+pub fn depth(thickness: f64, layers: &[Layer], loc: Location) -> f64 {
+    let (c0, c1) = core_span(layers).unwrap_or((0.0, thickness));
     match loc {
         Location::Centre => thickness / 2.0,
         Location::CoreCentre => (c0 + c1) / 2.0,
@@ -192,6 +198,20 @@ pub fn faces(m: &Model, w: &Wall) -> (f64, f64) {
     let t = m.thickness(w);
     let ext = m.types.wall.get(&w.type_name).map_or(t / 2.0, |ty| depth(t, &ty.layers, w.location));
     (ext, ext - t)
+}
+
+/// How far to the left of its location line a wall's core's exterior and interior boundaries lie, when it has a core of its
+/// own: a structure layer, the core running from the first to the last, that finishes, insulation or membranes lie outside of
+/// (a core that is all of the wall's thickness is its faces, and has none of its own). Revit's Center of Core and Faces of Core.
+pub fn core_faces(m: &Model, w: &Wall) -> Option<(f64, f64)> {
+    let ty = m.types.wall.get(&w.type_name)?;
+    let t = m.thickness(w);
+    let (c0, c1) = core_span(&ty.layers)?;
+    if c0 <= 1e-6 && c1 >= t - 1e-6 {
+        return None;
+    }
+    let ext = depth(t, &ty.layers, w.location);
+    Some((ext - c0, ext - c1))
 }
 
 /// How far to the left of its location line a wall's centre line lies.

@@ -81,6 +81,7 @@ mod standards;
 mod start;
 mod structure;
 mod style;
+mod tempdimprops;
 mod templates;
 #[cfg(test)]
 mod tests;
@@ -166,6 +167,13 @@ pub enum Tool {
     Paste,
     /// Paste Aligned to Picked Level: in an elevation or a section, a click on a level line pastes what was copied onto it.
     PasteLevel,
+    /// Move Witness Line: a click on the line a temporary dimension's witness line goes to, `far` for the one at the other end,
+    /// of the wall's `side`.
+    MoveWitness {
+        wall: Id,
+        side: bimcraft_core::tempdims::Side,
+        far: bool,
+    },
     /// Rotate the selection about `centre`: the start of the angle, once clicked; with `place`, the
     /// next click moves the centre.
     Rotate {
@@ -418,7 +426,7 @@ type Buttons<'a> = &'a [(Icon, &'a str, &'a str, Option<Tool>, bool)];
 
 /// The desktop's own two-letter shortcuts, which [`BimApp::shortcut`] takes before the commands'
 /// aliases, and what Keyboard Shortcuts (KS) calls them.
-const SHORTCUTS: [(&str, &str); 63] = [
+const SHORTCUTS: [(&str, &str); 64] = [
     ("3D", "3D View"),
     ("MD", "Modify"),
     ("SB", "Floor: Structural"),
@@ -430,8 +438,9 @@ const SHORTCUTS: [(&str, &str); 63] = [
     ("DW", "Demolish"),
     ("ZF", "Zoom to Fit"),
     ("ZE", "Zoom to Fit"),
-    ("ZA", "Zoom to Fit"),
     ("ZX", "Zoom to Fit"),
+    ("ZA", msg!("Zoom All to Fit")),
+    ("ZS", msg!("Zoom Sheet Size")),
     ("ZR", msg!("Zoom Region")),
     ("ZZ", msg!("Zoom Region")),
     ("ZP", msg!("Previous Zoom")),
@@ -887,6 +896,11 @@ pub struct BimApp {
     selection_filter: Option<filter::SelectionFilter>,
     /// Paste Aligned to Selected Levels: the levels dialog, while open.
     paste_levels: Option<clipboard::PasteLevels>,
+    /// The lines a person set the witness lines of each wall's temporary dimensions to, for the session as Revit keeps them.
+    witnesses: std::collections::BTreeMap<Id, bimcraft_core::tempdims::Witness>,
+    /// Manage > Temporary Dimensions, while open.
+    temp_dim_dialog: Option<tempdimprops::TempDimDialog>,
+    paste_views: Option<clipboard::PasteViews>,
     /// Delete on a type with instances in the Project Browser: Revit's warning with their number, while open.
     delete_type: Option<browser::DeleteType>,
     /// What was last put on the clipboard.
@@ -1535,6 +1549,9 @@ impl BimApp {
             warnings_dialog: None,
             selection_filter: None,
             paste_levels: None,
+            witnesses: std::collections::BTreeMap::new(),
+            temp_dim_dialog: None,
+            paste_views: None,
             delete_type: None,
             copied: None,
             active_option: None,
@@ -1607,6 +1624,7 @@ impl BimApp {
             | Tool::Copy(_)
             | Tool::Paste
             | Tool::PasteLevel
+            | Tool::MoveWitness { .. }
             | Tool::Rotate { .. }
             | Tool::Array { .. }
             | Tool::Mirror { .. }
@@ -2057,6 +2075,8 @@ impl BimApp {
             || self.warnings_dialog.is_some()
             || self.selection_filter.is_some()
             || self.paste_levels.is_some()
+            || self.temp_dim_dialog.is_some()
+            || self.paste_views.is_some()
             || self.settings_page.is_some()
             || self.plugins_open()
             || self.find.is_some()
@@ -2106,9 +2126,6 @@ impl BimApp {
         self.clipboard_keys(ctx);
         if pressed(Modifiers::COMMAND, Key::D) {
             self.toggle_home();
-        }
-        if self.tool == Tool::Modify && pressed(Modifiers::COMMAND, Key::A) {
-            self.select_all();
         }
         self.nudge(ctx);
         if self.sketch.is_some() {
@@ -2222,8 +2239,16 @@ impl BimApp {
             "OF" => Tool::Offset,
             "DW" => Tool::Demolish,
             "LW" => Tool::Linework,
-            "ZF" | "ZE" | "ZA" | "ZX" => {
+            "ZF" | "ZE" | "ZX" => {
                 self.fit();
+                return true;
+            }
+            "ZA" => {
+                self.fit_all();
+                return true;
+            }
+            "ZS" => {
+                self.zoom_sheet_size();
                 return true;
             }
             "ZR" | "ZZ" => {
@@ -2571,11 +2596,20 @@ impl BimApp {
         self.floor_structural = matches!(picked.map(|(_, e)| e), Some(Element::Floor(f)) if f.structural);
     }
 
-    /// Select All Instances (SA): every element the open view shows of a type selected, a
+    /// Select All Instances > Visible in View (SA): every element the open view shows of a type selected, a
     /// component's type being its family's.
     fn select_all_instances(&mut self) {
+        self.select_instances(false);
+    }
+
+    /// Select All Instances > In Entire Project: every element of the types selected, shown in the open view or not.
+    pub(crate) fn select_all_instances_in_project(&mut self) {
+        self.select_instances(true);
+    }
+
+    fn select_instances(&mut self, project: bool) {
         let m = Arc::clone(&self.session.model);
-        // One look at every element the view shows: a component's room is found among its level's rooms once.
+        // One look at every element: a component's room is found among its level's rooms once.
         let rooms = bimcraft_core::rooms::Rooms::new(&m);
         let type_of = |id: &Id| {
             let e = bimcraft_core::element_json_with(&m, *id, &rooms);
@@ -2586,7 +2620,8 @@ impl BimApp {
             self.status = Status { text: t("select an element that has a type first").into(), error: true };
             return;
         }
-        let found = self.shown().into_iter().filter(|id| type_of(id).is_some_and(|k| types.contains(&k))).collect();
+        let from: BTreeSet<Id> = if project { m.elements.keys().copied().collect() } else { self.shown() };
+        let found = from.into_iter().filter(|id| type_of(id).is_some_and(|k| types.contains(&k))).collect();
         self.pick_up(found, Modifiers::NONE);
     }
 
@@ -2869,15 +2904,15 @@ impl BimApp {
     /// four ways: Revit's flip arrows, or Space.
     pub(crate) fn flip(&mut self) {
         let walls = self.selected_walls();
-        match (walls.is_empty(), self.opening_step()) {
-            (true, None) => {}
-            (false, None) => {
-                self.run("flip", json!({"ids": walls}));
-            }
-            (_, Some((ids, hand, facing))) => {
-                let ids: Vec<Id> = walls.into_iter().chain(ids).collect();
-                self.run("flip", json!({"ids": ids, "hand": hand, "facing": facing}));
-            }
+        let openings = self.opening_step();
+        if walls.is_empty() && openings.is_empty() {
+            return;
+        }
+        let ids: Vec<Id> = walls.into_iter().chain(openings.iter().copied()).collect();
+        if openings.is_empty() {
+            self.run("flip", json!({"ids": ids}));
+        } else {
+            self.run("flip", json!({"ids": ids, "step": true}));
         }
     }
 
@@ -3042,6 +3077,27 @@ impl BimApp {
                 }
             }
             Sheet::Schedule(_) | Sheet::Table(_) => {}
+        }
+    }
+
+    /// Zoom All to Fit (ZA): every open view, in a tab or a window of its own, shows all of what it holds again.
+    pub(crate) fn fit_all(&mut self) {
+        let open: Vec<Sheet> = self.views.iter().copied().chain(self.floating.iter().map(|f| f.sheet)).chain([self.sheet]).collect();
+        for sheet in open {
+            match sheet {
+                Sheet::Plan(id) | Sheet::Ceiling(id) | Sheet::Section(id) | Sheet::Paper(id) => self.canvas.fit(id),
+                Sheet::View3D => self.fit3d(),
+                Sheet::Schedule(_) | Sheet::Table(_) => {}
+            }
+        }
+    }
+
+    /// Zoom Sheet Size (ZS): a sheet at its actual size, a millimetre of paper as long on the screen as a millimetre is (96 points
+    /// to the inch, the unit egui draws in), about its middle. Only a sheet has a size.
+    pub(crate) fn zoom_sheet_size(&mut self) {
+        match self.sheet {
+            Sheet::Paper(id) => self.canvas.set_scale(id, 96.0 / 25.4),
+            _ => self.status = Status { text: t("Zoom Sheet Size: open a sheet").into(), error: true },
         }
     }
 
@@ -4344,7 +4400,7 @@ impl BimApp {
             }
             // What annotation draws with: pens, line styles and patterns, fill patterns; one button that lists them.
             let open = self.line_weights_dialog.is_some() || self.line_styles_dialog.is_some() || self.fill_patterns_dialog.is_some();
-            let tip = msg!("Annotation Settings: line weights, line styles, line patterns and fill patterns");
+            let tip = msg!("Annotation Settings: line weights, line styles, line patterns, fill patterns and temporary dimensions");
             let r = big_button(ui, Icon::AnnotationSettings, "Annotation Settings", open, tip);
             ribbon::choices(ui, &r, false, |ui| {
                 // As wide as its longest name, not the window.
@@ -4365,6 +4421,12 @@ impl BimApp {
                 let tip = msg!("Fill Patterns: the patterns filled regions and materials fill with, simple or made from lines drawn");
                 if list_row(ui, Icon::FillPatterns, "Fill Patterns", false, tip).clicked() {
                     self.fill_patterns_dialog = Some(fillpatterns::FillPatternsDialog::new(&self.session.model));
+                }
+                let tip = msg!(
+                    "Temporary Dimensions: what a selected wall's, door's and window's temporary dimensions measure to and from: centerlines, faces, the core, openings"
+                );
+                if list_row(ui, Icon::Dimension, "Temporary Dimensions", self.temp_dim_dialog.is_some(), tip).clicked() {
+                    self.open_temp_dim_properties();
                 }
             });
             let tip = msg!(
@@ -5175,6 +5237,7 @@ impl BimApp {
             Tool::Copy(Some(_)) => msg!("Click where the copy's base point goes, or type a distance and press Enter. Esc cancels."),
             Tool::Paste => msg!("Click where to paste what was copied. Esc cancels."),
             Tool::PasteLevel => msg!("Click a level line to paste what was copied onto that level. Esc cancels."),
+            Tool::MoveWitness { .. } => msg!("Click the line the witness line goes to. Esc cancels."),
             Tool::Rotate { place: true, .. } => msg!("Click the centre of rotation."),
             Tool::Rotate { start: None, .. } => msg!("Click the start of the angle, or type an angle in the Options Bar."),
             Tool::Rotate { start: Some(_), .. } => msg!("Click the end of the angle. Esc cancels."),
@@ -5710,6 +5773,8 @@ impl BimApp {
         self.warnings_window(ctx);
         self.selection_filter_window(ctx);
         self.paste_levels_window(ctx);
+        self.temp_dim_window(ctx);
+        self.paste_views_window(ctx);
         self.delete_type_window(ctx);
         self.shortcuts_window(ctx);
         self.settings_window(ctx);

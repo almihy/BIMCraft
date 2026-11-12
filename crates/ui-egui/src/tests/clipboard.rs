@@ -290,3 +290,40 @@ fn paste_aligned_to_current_view_is_not_offered_in_the_view_the_elements_were_co
     press(&mut h, "Paste");
     assert!(!h.get_by_label("Aligned to Current View").accesskit_node().is_disabled(), "another plan");
 }
+
+#[test]
+fn paste_aligned_to_selected_views_lists_the_views_of_the_kind_copied_in_and_pastes_the_annotation_into_those_ticked() {
+    let mut h = app(&format!(
+        "{BOX}\nduplicate_view {{\"view\": \"Level 1\"}}\nduplicate_view {{\"view\": \"Level 1\"}}\ntext {{\"text\": \"Note\", \"at\": [1000, 1000]}}"
+    ));
+    let note = ids(&h, "text")[0];
+    // Nothing copied: the item is there and greyed.
+    topmost(&mut h, "Modify");
+    press(&mut h, "Paste");
+    assert!(is_disabled(&h, Role::Button, "Aligned to Selected Views…"));
+    key(&mut h, Key::Escape);
+    h.state_mut().selection = vec![note];
+    h.key_press_modifiers(Modifiers::COMMAND, Key::C);
+    h.run();
+    paste_list(&mut h, "Aligned to Selected Views…");
+    assert!(h.state().paste_views.is_some(), "the views dialog");
+    // The views of its kind but the one it came from: the other plan views, and Level 2's plan; no sheets, sections or 3D.
+    let boxes =
+        |h: &Harness<BimApp>, name: &str| h.query_all_by(|n| n.role() == Role::CheckBox && n.label().is_some_and(|x| x == name)).count();
+    assert_eq!((boxes(&h, "Level 1 Copy 1"), boxes(&h, "Level 1 Copy 2"), boxes(&h, "Level 2")), (1, 1, 1));
+    assert_eq!(boxes(&h, "Level 1"), 0, "not the view it was copied in");
+    // OK waits for a view.
+    assert!(is_disabled(&h, Role::Button, "OK"));
+    h.get_by_role_and_label(Role::CheckBox, "Level 1 Copy 2").click();
+    h.run();
+    press(&mut h, "OK");
+    assert!(h.state().paste_views.is_none());
+    let texts = ids(&h, "text");
+    assert_eq!(texts.len(), 2, "one copy of the note");
+    let copy = texts.into_iter().find(|id| *id != note).unwrap();
+    let m = &h.state().session.model;
+    let Some(Element::Text(n)) = m.elements.get(copy) else { panic!("a text") };
+    assert_eq!(m.view_name(n.view), Some("Level 1 Copy 2"));
+    assert_eq!((n.at.0, n.at.1), (1000.0, 1000.0), "at the same place");
+    assert_eq!(h.state().session.history().last(), Some(&"Paste"));
+}

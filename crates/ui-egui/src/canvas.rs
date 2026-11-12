@@ -531,6 +531,15 @@ impl Canvas {
         }
     }
 
+    /// View `level` at `scale` px per mm about its middle.
+    pub(crate) fn set_scale(&mut self, level: Id, scale: f64) {
+        if let Some(v) = self.view(level) {
+            self.remember_now(level);
+            let mid = self.rect.size() / 2.0;
+            self.hold(level, v.mm(mid.into()), mid, scale);
+        }
+    }
+
     /// Keep model point `p` at pixel `at` (canvas coordinates) with `scale` px per mm.
     fn hold(&mut self, level: Id, p: P2, at: Vec2, scale: f64) {
         let scale = scale.clamp(SCALE.0, SCALE.1);
@@ -977,12 +986,19 @@ fn padlock(p: &Painter, at: Pos2, locked: bool, ink: Color32) {
 
 /// An opening's temporary dimensions, drawn on `p` beside its host wall: from the face of the wall meeting its wall
 /// before it (or the wall's start) to the middle of the opening, and from there to the next face (or the wall's end)
-/// (`Model::opening_span`), each as where its number goes, its text, and its length in mm. None on a curved wall, and for
-/// a span too short to draw.
-pub(crate) fn opening_dimensions(p: &Painter, m: &Model, v: &View, o: &bimcraft_core::model::Opening) -> Vec<(Pos2, String, f64)> {
+/// (`Model::opening_span`), each as where its number goes, its text, and its length in mm. With the project's temporary
+/// dimensions set to openings (`reach`, `tempdims::opening_reach`, half the opening's width) they stop at its jambs. None on a
+/// curved wall, and for a span too short to draw.
+pub(crate) fn opening_dimensions(
+    p: &Painter,
+    m: &Model,
+    v: &View,
+    o: &bimcraft_core::model::Opening,
+    reach: f64,
+) -> Vec<(Pos2, String, f64)> {
     let (Some(w), Some((start, end))) = (m.wall(o.host).filter(|w| w.arc == 0.0), m.opening_span(o)) else { return Vec::new() };
     let axis = Axis::of(w);
-    let (origin, c) = (p.clip_rect().min, axis.at(o.offset, 0.0));
+    let origin = p.clip_rect().min;
     let (from, to) = (axis.at(start, 0.0), axis.at(end, 0.0));
     let screen = |q: P2| pos(origin, v.px(q));
     let (a, b) = (screen(w.start), screen(w.end));
@@ -995,7 +1011,8 @@ pub(crate) fn opening_dimensions(p: &Painter, m: &Model, v: &View, o: &bimcraft_
     let mid = a + chord / 2.0;
     let n = if (mid + n - p.clip_rect().center()).length() < (mid - n - p.clip_rect().center()).length() { -n } else { n };
     let off = (m.thickness(w) / 2.0 * v.scale) as f32 + 18.0;
-    [(from, c), (c, to)]
+    let (before, after) = (axis.at(o.offset - reach, 0.0), axis.at(o.offset + reach, 0.0));
+    [(from, before), (after, to)]
         .into_iter()
         .filter(|(s, e)| screen(*s).distance(screen(*e)) >= 24.0)
         .map(|(s, e)| (dimension_line(p, screen(s), screen(e), n, off), m.units.length(s.dist(e)), s.dist(e)))
@@ -2280,6 +2297,8 @@ impl BimApp {
                 let pt = self.snap_point(m, level, v, at, &[], mods.shift);
                 self.place_paste(level, pt);
             }
+            // The line a temporary dimension's witness line goes to.
+            Tool::MoveWitness { .. } => self.pick_witness(m, key, v.mm(at)),
             // A level is picked by its line in an elevation or a section; a plan has none.
             Tool::PasteLevel => {
                 self.status = Status { text: t("open an elevation or a section to pick a level line").into(), error: true };
@@ -3806,12 +3825,14 @@ impl BimApp {
     fn opening_dimension(&mut self, ui: &mut Ui, m: &Model, v: &View, rect: Rect, id: Id, o: &bimcraft_core::model::Opening) {
         let Some((start, end)) = m.opening_span(o) else { return };
         let p = ui.painter_at(rect);
-        for (n, (middle, text, _)) in opening_dimensions(&p, m, v, o).into_iter().enumerate() {
+        // Dimensions to its jambs when the project's say so: what is typed is the distance to the jamb.
+        let reach = m.elements.get(id).map_or(0.0, |e| bimcraft_core::tempdims::opening_reach(m, e));
+        for (n, (middle, text, _)) in opening_dimensions(&p, m, v, o, reach).into_iter().enumerate() {
             let size = p.layout_no_wrap(text.clone(), FontId::proportional(12.0), pal().accent).size() + vec2(10.0, 4.0);
             let Some(typed) = self.dimension_number(ui, Rect::from_center_size(middle, size), (id, n), &text) else { continue };
             match typed.map(|t| (m.units.parse(&t), t)) {
-                Some((Some(len), _)) if (0.0..=end - start).contains(&len) => {
-                    let offset = if n == 0 { start + len } else { end - len };
+                Some((Some(len), _)) if (0.0..=end - start - 2.0 * reach).contains(&len) => {
+                    let offset = if n == 0 { start + len + reach } else { end - len - reach };
                     if (offset - o.offset).abs() > 1e-6 && !self.refuse_pinned_ids(&[id]) {
                         self.run("modify", json!({"id": id, "offset": offset}));
                     }
@@ -4208,7 +4229,7 @@ impl BimApp {
                 if let Ok(e) = opening_of(m, &centred_opening(m, v, params, door), door) {
                     sketched(&e);
                     if let Element::Door(o) | Element::Window(o) = &e {
-                        for (at, text, _) in opening_dimensions(p, m, v, o) {
+                        for (at, text, _) in opening_dimensions(p, m, v, o, bimcraft_core::tempdims::opening_reach(m, &e)) {
                             tag(p, at, Align2::CENTER_CENTER, text);
                         }
                     }

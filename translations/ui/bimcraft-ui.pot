@@ -11763,3 +11763,11 @@ msgstr ""
 #: crates/core/src/commands.rs
 msgid "Unpin"
 msgstr ""
+
+#: crates/ui-egui/src/lib.rs
+msgid "Zoom All to Fit"
+msgstr ""
+
+#: crates/ui-egui/src/lib.rs
+msgid "Zoom Sheet Size"
+msgstr ""

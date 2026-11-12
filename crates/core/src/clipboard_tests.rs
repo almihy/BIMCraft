@@ -774,3 +774,115 @@ fn a_paste_has_the_bars_that_were_on_the_clipboard_when_copied_not_those_added_s
     let r = run(&mut s, "paste", json!({"ids": [beam], "by": [0, 9000]}));
     assert_eq!(made_of(&s, &r, "rebar").len(), 1, "{r}");
 }
+
+/// The view a text, line, dimension or tag says it is in, by name.
+fn view_name_of(s: &Session, id: u64) -> String {
+    let m = &s.model;
+    let g = match m.elements.get(id) {
+        Some(Element::Text(n)) => Some(n.view),
+        Some(Element::DetailLine(l)) => Some(l.view),
+        Some(Element::Dimension(d)) => Some(d.view.unwrap_or(d.level)),
+        Some(Element::Tag(t)) => t.view.or_else(|| m.level_of(m.elements.get(id)?)),
+        other => panic!("{id} is {other:?}"),
+    };
+    g.and_then(|g| m.view_name(g)).unwrap_or_default().to_string()
+}
+
+#[test]
+fn annotation_copied_in_a_plan_is_pasted_into_each_plan_picked_at_the_same_place() {
+    // Revit's Paste Aligned to Selected Views: view-specific elements go into other views of the same kind.
+    let (mut s, _, walls, _) = building();
+    run(&mut s, "duplicate_view", json!({"view": "Level 1"}));
+    run(&mut s, "duplicate_view", json!({"view": "Level 1"}));
+    let note = run(&mut s, "text", json!({"text": "Hi", "at": [100, 100]}))["id"].as_u64().unwrap();
+    let line = run(&mut s, "detail_line", json!({"start": [0, 0], "end": [1000, 1000]}))["id"].as_u64().unwrap();
+    let dim = run(&mut s, "dimension", json!({"refs": [{"id": walls[0]}, {"id": walls[2]}], "at": [4000, 3000]}))["id"].as_u64().unwrap();
+    run(&mut s, "copy_to_clipboard", json!({"ids": [note, line, dim]}));
+    let before = (count(&s, "text"), count(&s, "line"), count(&s, "dimension"));
+    let r = run(&mut s, "paste", json!({"views": ["Level 1 Copy 1", "Level 1 Copy 2"]}));
+    assert_eq!(ids(&r["ids"]).len(), 6, "{r}");
+    assert_eq!((count(&s, "text"), count(&s, "line"), count(&s, "dimension")), (before.0 + 2, before.1 + 2, before.2 + 2));
+    let made = ids(&r["ids"]);
+    let in_view = |s: &Session, v: &str| -> Vec<u64> { made.iter().copied().filter(|id| view_name_of(s, *id) == v).collect() };
+    assert_eq!((in_view(&s, "Level 1 Copy 1").len(), in_view(&s, "Level 1 Copy 2").len()), (3, 3), "{r}");
+    // The same place, and the originals stay where they were.
+    let Some(Element::Text(copy)) = made.iter().find_map(|id| s.model.elements.get(*id).filter(|e| matches!(e, Element::Text(_)))) else {
+        panic!("a text among {made:?}")
+    };
+    assert_eq!((copy.at.0, copy.at.1), (100.0, 100.0));
+    assert_eq!(view_name_of(&s, note), "Level 1");
+    // The pasted dimension still measures the same walls, and is a plan view's own.
+    let Some(Element::Dimension(d)) = made.iter().find_map(|id| s.model.elements.get(*id).filter(|e| matches!(e, Element::Dimension(_))))
+    else {
+        panic!("a dimension among {made:?}")
+    };
+    assert_eq!(d.refs.iter().map(|r| r.id).collect::<Vec<_>>(), vec![s.model.guid(walls[0]), s.model.guid(walls[2])]);
+    assert_eq!(r["pasted"].as_array().map(Vec::len), Some(2));
+    // One undo takes the lot.
+    run(&mut s, "undo", json!({}));
+    assert_eq!(count(&s, "text"), before.0);
+}
+
+#[test]
+fn a_views_paste_leaves_out_the_view_it_came_from_and_views_of_another_kind() {
+    let (mut s, levels, walls, _) = building();
+    run(&mut s, "section", json!({"start": [-1000, 3000], "end": [9000, 3000]}));
+    let note = run(&mut s, "text", json!({"text": "Hi", "at": [100, 100]}))["id"].as_u64().unwrap();
+    run(&mut s, "copy_to_clipboard", json!({"ids": [note]}));
+    // A section is not a plan; the plan it came from has it already.
+    let e = s.execute("paste", &json!({"views": ["Section 1", "Level 1"]})).unwrap_err();
+    assert!(e.contains("Section 1") && e.contains("is a section") && e.contains("already"), "{e}");
+    // With another plan among them, that one gets it and the reply says what was left out.
+    let r = run(&mut s, "paste", json!({"views": ["Section 1", "Level 2"]}));
+    assert_eq!(ids(&r["ids"]).len(), 1, "{r}");
+    assert_eq!(view_name_of(&s, ids(&r["ids"])[0]), "Level 2");
+    assert!(r["left_out"].to_string().contains("Section 1"), "{r}");
+    // A dimension measures the walls of its own level: not a plan of another one.
+    let dim = run(&mut s, "dimension", json!({"refs": [{"id": walls[0]}, {"id": walls[2]}], "at": [4000, 3000]}))["id"].as_u64().unwrap();
+    run(&mut s, "copy_to_clipboard", json!({"ids": [dim]}));
+    let e = s.execute("paste", &json!({"views": ["Level 2"]})).unwrap_err();
+    assert!(e.contains("another"), "{e}");
+    let _ = levels;
+}
+
+#[test]
+fn a_notes_view_paste_goes_between_sections_and_a_model_element_goes_to_each_plans_level() {
+    let (mut s, _, walls, _) = building();
+    run(&mut s, "section", json!({"start": [-1000, 3000], "end": [9000, 3000]}));
+    run(&mut s, "section", json!({"start": [-1000, 4000], "end": [9000, 4000]}));
+    let note = run(&mut s, "text", json!({"text": "In section", "at": [100, 100], "view": "Section 1"}))["id"].as_u64().unwrap();
+    run(&mut s, "copy_to_clipboard", json!({"ids": [note]}));
+    let r = run(&mut s, "paste", json!({"views": ["Section 2"]}));
+    assert_eq!(view_name_of(&s, ids(&r["ids"])[0]), "Section 2", "{r}");
+    // Model and view-specific elements together: the wall goes to the plan's level, the note into the plan.
+    let plan_note = run(&mut s, "text", json!({"text": "Plan", "at": [100, 100]}))["id"].as_u64().unwrap();
+    run(&mut s, "copy_to_clipboard", json!({"ids": [walls[3], plan_note]}));
+    let r = run(&mut s, "paste", json!({"views": ["Level 2", "Section 1"]}));
+    let made = ids(&r["ids"]);
+    assert!(made.iter().any(|id| s.model.wall(*id).is_some_and(|w| w.level == s.model.guid(100_001))), "{r}");
+    assert!(made.iter().any(|id| view_name_of_text(&s, *id) == Some("Level 2".to_string())), "{r}");
+    assert!(r["left_out"].to_string().contains("Section 1"), "{r}");
+}
+
+fn view_name_of_text(s: &Session, id: u64) -> Option<String> {
+    match s.model.elements.get(id) {
+        Some(Element::Text(n)) => s.model.view_name(n.view).map(String::from),
+        _ => None,
+    }
+}
+
+#[test]
+fn views_is_its_own_way_to_place_and_must_name_views() {
+    let (mut s, levels, walls, _) = building();
+    run(&mut s, "copy_to_clipboard", json!({"ids": [walls[0]]}));
+    for p in [
+        json!({"views": ["Level 2"], "levels": [levels[1]]}),
+        json!({"views": ["Level 2"], "same_place": true}),
+        json!({"views": []}),
+        json!({"views": "Level 2"}),
+        json!({"views": ["No such view"]}),
+        json!({"views": [walls[0]]}),
+    ] {
+        assert!(s.execute("paste", &p).is_err(), "{p}");
+    }
+}

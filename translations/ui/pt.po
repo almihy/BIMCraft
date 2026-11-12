@@ -12012,3 +12012,11 @@ msgstr "Zoom anterior"
 #: crates/ui-egui/src/lib.rs
 msgid "Repeat Last Command"
 msgstr "Repetir último comando"
+
+#: crates/ui-egui/src/lib.rs
+msgid "Zoom All to Fit"
+msgstr "Ajustar todas as vistas"
+
+#: crates/ui-egui/src/lib.rs
+msgid "Zoom Sheet Size"
+msgstr "Zoom no tamanho da folha"

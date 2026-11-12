@@ -607,7 +607,7 @@ impl BimApp {
         let Some(reply) = self.run("delete_type", ask) else { return };
         let instances = reply["instances"].as_u64().unwrap_or_default() as usize;
         if instances == 0 {
-            self.run("delete_type", params);
+            self.delete_type_now(params);
             return;
         }
         let name = reply["would_delete"]["name"].as_str().unwrap_or_default().to_string();
@@ -636,9 +636,19 @@ impl BimApp {
             });
         });
         if ok && let Some(d) = self.delete_type.take() {
-            self.run("delete_type", d.params);
+            self.delete_type_now(d.params);
         } else if cancel || r.should_close() {
             self.delete_type = None;
+        }
+    }
+
+    /// `delete_type`, and what Revit warns of when pinned objects went with it ("Pinned objects deleted.", and the host's words
+    /// for a pinned door or window that went with its wall) on the status bar.
+    fn delete_type_now(&mut self, params: Value) {
+        if let Some(reply) = self.run("delete_type", params)
+            && let Some(note) = reply["note"].as_str()
+        {
+            self.status = crate::Status { text: note.to_string(), error: false };
         }
     }
 }
