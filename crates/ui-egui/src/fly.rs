@@ -4,7 +4,7 @@
 //! walking, and Safe Frame (Shift+F, 3ds Max's): the image's frame, the picture fitted in it, with the thirds drawn in it.
 //! The camera's own moves are the core's (`Camera::look`, `Camera::walk`).
 
-use egui::{Color32, Painter, Pos2, Rect, Stroke, Vec2, pos2, vec2};
+use egui::{Color32, Painter, Rect, Stroke, Vec2, pos2, vec2};
 
 use bimcraft_core::view3d::Camera;
 
@@ -85,32 +85,9 @@ pub(crate) fn draw_frame(p: &Painter, rect: Rect, frame: Rect, thirds: bool, ink
 
 /// The thirds' crossings of `frame`, where a shot's subject is put.
 #[cfg(test)]
-pub(crate) fn third_points(frame: Rect) -> [Pos2; 4] {
+pub(crate) fn third_points(frame: Rect) -> [egui::Pos2; 4] {
     let at = |a: f32, b: f32| pos2(frame.min.x + frame.width() * a, frame.min.y + frame.height() * b);
     [at(1.0 / 3.0, 1.0 / 3.0), at(2.0 / 3.0, 1.0 / 3.0), at(1.0 / 3.0, 2.0 / 3.0), at(2.0 / 3.0, 2.0 / 3.0)]
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_safe_frame_fits_the_image_s_aspect_in_the_view() {
-        let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 500.0));
-        let f = safe_frame(rect, 16.0 / 9.0);
-        assert!((f.width() / f.height() - 16.0 / 9.0).abs() < 1e-3);
-        assert!(rect.contains_rect(f) && (f.center() - rect.center()).length() < 1e-3);
-        let tall = safe_frame(rect, 0.7);
-        assert!((tall.height() - (500.0 - 2.0 * MARGIN)).abs() < 1e-3);
-        assert!((third_points(f)[0] - pos2(f.min.x + f.width() / 3.0, f.min.y + f.height() / 3.0)).length() < 1e-3);
-    }
-
-    #[test]
-    fn the_wheel_changes_the_flight_s_speed_within_its_limits() {
-        assert!(faster(SPEED, 50.0) > SPEED && faster(SPEED, -50.0) < SPEED);
-        assert_eq!(faster(SLOWEST, -1e6), SLOWEST);
-        assert_eq!(faster(SPEED, f64::NAN), SPEED);
-    }
 }
 
 impl crate::BimApp {
@@ -169,5 +146,28 @@ impl crate::BimApp {
                 self.orbit.keep_height = !self.orbit.keep_height;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_safe_frame_fits_the_image_s_aspect_in_the_view() {
+        let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 500.0));
+        let f = safe_frame(rect, 16.0 / 9.0);
+        assert!((f.width() / f.height() - 16.0 / 9.0).abs() < 1e-3);
+        assert!(rect.contains_rect(f) && (f.center() - rect.center()).length() < 1e-3);
+        let tall = safe_frame(rect, 0.7);
+        assert!((tall.height() - (500.0 - 2.0 * MARGIN)).abs() < 1e-3);
+        assert!((third_points(f)[0] - pos2(f.min.x + f.width() / 3.0, f.min.y + f.height() / 3.0)).length() < 1e-3);
+    }
+
+    #[test]
+    fn the_wheel_changes_the_flight_s_speed_within_its_limits() {
+        assert!(faster(SPEED, 50.0) > SPEED && faster(SPEED, -50.0) < SPEED);
+        assert_eq!(faster(SLOWEST, -1e6), SLOWEST);
+        assert_eq!(faster(SPEED, f64::NAN), SPEED);
     }
 }

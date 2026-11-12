@@ -4622,7 +4622,7 @@ fn work_plane(s: &mut Session, p: &Value) -> R {
         None => s.model_mut().insert(Element::View3D(View3D::default_view())),
     };
     if let Some(Element::View3D(v3)) = s.model_mut().elements.get_mut(v) {
-        v3.work_plane = plane;
+        v3.work_plane = plane.map(Box::new);
     }
     let wp = s.model.work_plane(Some(v));
     let level = wp.level.and_then(|g| s.model.elements.id(g));

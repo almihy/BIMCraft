@@ -193,7 +193,7 @@ pub(super) fn camera(s: &mut Session, p: &Value) -> R {
     if let Some(d) = num(c, p, "target_distance")? {
         let along: [f64; 3] = std::array::from_fn(|k| target[k] - eye[k]);
         let now = along.iter().map(|x| x * x).sum::<f64>().sqrt();
-        if !(d > TOL) {
+        if d.is_nan() || d <= TOL {
             return Err(bad(c, format!("`target_distance` is how far the target is from the eye, above zero, not {d}")));
         }
         if now > TOL {

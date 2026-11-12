@@ -1489,7 +1489,8 @@ pub struct View3D {
     pub display: crate::view3d::DisplayOptions,
     /// What it sketches on (`workplane.rs`): the lowest level when it has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub work_plane: Option<crate::workplane::WorkPlane>,
+    /// Boxed: few views have one, and it is large beside the rest of a view.
+    pub work_plane: Option<Box<crate::workplane::WorkPlane>>,
     /// Where a view without a camera of its own was left, as Revit's 3D views keep their orientation: the point in the middle
     /// of its picture and how much of the model its width takes in there (seen from `azimuth` and `elevation`, through its
     /// lens in perspective). None for a view still fitted over the model.
@@ -5548,7 +5549,7 @@ impl Model {
     /// What 3D view `view` sketches on: its own work plane, else the lowest level's (none in a project without levels).
     pub fn work_plane(&self, view: Option<Id>) -> crate::workplane::WorkPlane {
         let own = view.and_then(|v| match self.elements.get(v) {
-            Some(Element::View3D(v3)) => v3.work_plane.clone(),
+            Some(Element::View3D(v3)) => v3.work_plane.as_deref().cloned(),
             _ => None,
         });
         own.unwrap_or_else(|| {
