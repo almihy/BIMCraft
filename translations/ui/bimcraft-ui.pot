@@ -44,7 +44,7 @@ msgstr ""
 msgid "1 function"
 msgstr ""
 
-#: crates/ui-egui/src/browser.rs:628
+#: crates/ui-egui/src/browser.rs:630
 msgid "1 instance of {} will be deleted with it. Delete anyway?"
 msgstr ""
 
@@ -1303,7 +1303,7 @@ msgid "Can't rotate pinned element."
 msgstr ""
 
 #: crates/ui-egui/src/background_grid.rs:111
-#: crates/ui-egui/src/browser.rs:639
+#: crates/ui-egui/src/browser.rs:641
 #: crates/ui-egui/src/cad.rs:135
 #: crates/ui-egui/src/checks.rs:690
 #: crates/ui-egui/src/clipboard.rs:174
@@ -3428,7 +3428,7 @@ msgstr ""
 msgid "Elevation: {}"
 msgstr ""
 
-#: crates/ui-egui/src/browser.rs:487
+#: crates/ui-egui/src/browser.rs:489
 msgid "Elevations (Building Elevation)"
 msgstr ""
 
@@ -3600,7 +3600,7 @@ msgstr ""
 msgid "Failed to read file: {}"
 msgstr ""
 
-#: crates/ui-egui/src/browser.rs:578
+#: crates/ui-egui/src/browser.rs:580
 msgid "Families"
 msgstr ""
 
@@ -5093,7 +5093,7 @@ msgstr ""
 msgid "Linked File"
 msgstr ""
 
-#: crates/ui-egui/src/browser.rs:535
+#: crates/ui-egui/src/browser.rs:537
 msgid "Linked Models"
 msgstr ""
 
@@ -5951,7 +5951,7 @@ msgid "Number:"
 msgstr ""
 
 #: crates/ui-egui/src/background_grid.rs:113
-#: crates/ui-egui/src/browser.rs:640
+#: crates/ui-egui/src/browser.rs:642
 #: crates/ui-egui/src/cad.rs:136
 #: crates/ui-egui/src/clipboard.rs:175
 #: crates/ui-egui/src/clipboard.rs:213
@@ -7484,11 +7484,11 @@ msgstr ""
 msgid "Reinforcement"
 msgstr ""
 
-#: crates/ui-egui/src/browser.rs:528
+#: crates/ui-egui/src/browser.rs:530
 msgid "Reload"
 msgstr ""
 
-#: crates/ui-egui/src/browser.rs:535
+#: crates/ui-egui/src/browser.rs:537
 msgid "Reload All"
 msgstr ""
 
@@ -8055,7 +8055,7 @@ msgstr ""
 msgid "Schedules"
 msgstr ""
 
-#: crates/ui-egui/src/browser.rs:516
+#: crates/ui-egui/src/browser.rs:518
 msgid "Schedules/Quantities (all)"
 msgstr ""
 
@@ -8110,7 +8110,7 @@ msgstr ""
 msgid "Section: {}"
 msgstr ""
 
-#: crates/ui-egui/src/browser.rs:487
+#: crates/ui-egui/src/browser.rs:489
 msgid "Sections (Building Section)"
 msgstr ""
 
@@ -10199,7 +10199,7 @@ msgstr ""
 msgid "Views"
 msgstr ""
 
-#: crates/ui-egui/src/browser.rs:494
+#: crates/ui-egui/src/browser.rs:496
 msgid "Views (all)"
 msgstr ""
 
@@ -10379,7 +10379,7 @@ msgstr ""
 msgid "Wardrobe"
 msgstr ""
 
-#: crates/ui-egui/src/browser.rs:632
+#: crates/ui-egui/src/browser.rs:634
 #: crates/ui-egui/src/lib.rs:5444
 msgid "Warning"
 msgstr ""
@@ -11311,7 +11311,7 @@ msgstr ""
 msgid "{} (HR resets)"
 msgstr ""
 
-#: crates/ui-egui/src/browser.rs:527
+#: crates/ui-egui/src/browser.rs:529
 msgid "{} (not loaded)"
 msgstr ""
 
@@ -11400,7 +11400,7 @@ msgstr ""
 msgid "{} holds no parameters, so it has no phase to demolish"
 msgstr ""
 
-#: crates/ui-egui/src/browser.rs:630
+#: crates/ui-egui/src/browser.rs:632
 msgid "{} instances of {} will be deleted with it. Delete anyway?"
 msgstr ""
 

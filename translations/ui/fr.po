@@ -44,7 +44,7 @@ msgstr ""
 msgid "1 function"
 msgstr ""
 
-#: crates/ui-egui/src/browser.rs:628
+#: crates/ui-egui/src/browser.rs:630
 msgid "1 instance of {} will be deleted with it. Delete anyway?"
 msgstr ""
 
@@ -1303,7 +1303,7 @@ msgid "Can't rotate pinned element."
 msgstr ""
 
 #: crates/ui-egui/src/background_grid.rs:111
-#: crates/ui-egui/src/browser.rs:639
+#: crates/ui-egui/src/browser.rs:641
 #: crates/ui-egui/src/cad.rs:135
 #: crates/ui-egui/src/checks.rs:690
 #: crates/ui-egui/src/clipboard.rs:174
@@ -3428,7 +3428,7 @@ msgstr "Élévation: cliquer à côté du bâtiment, du côté à regarder"
 msgid "Elevation: {}"
 msgstr "Élévation: {}"
 
-#: crates/ui-egui/src/browser.rs:487
+#: crates/ui-egui/src/browser.rs:489
 msgid "Elevations (Building Elevation)"
 msgstr "Élévations (Élévation de bâtiment)"
 
@@ -3600,7 +3600,7 @@ msgstr ""
 msgid "Failed to read file: {}"
 msgstr "Échec de lecture du fichier: {}"
 
-#: crates/ui-egui/src/browser.rs:578
+#: crates/ui-egui/src/browser.rs:580
 msgid "Families"
 msgstr "Familles"
 
@@ -5093,7 +5093,7 @@ msgstr "Vue 3D liée: la vue 3D à côté de ce plan, coupée à son niveau et �
 msgid "Linked File"
 msgstr "Fichier lié"
 
-#: crates/ui-egui/src/browser.rs:535
+#: crates/ui-egui/src/browser.rs:537
 msgid "Linked Models"
 msgstr "Modèles liés"
 
@@ -5951,7 +5951,7 @@ msgid "Number:"
 msgstr ""
 
 #: crates/ui-egui/src/background_grid.rs:113
-#: crates/ui-egui/src/browser.rs:640
+#: crates/ui-egui/src/browser.rs:642
 #: crates/ui-egui/src/cad.rs:136
 #: crates/ui-egui/src/clipboard.rs:175
 #: crates/ui-egui/src/clipboard.rs:213
@@ -7114,7 +7114,7 @@ msgstr "Préfixe:"
 
 #: crates/ui-egui/src/lib.rs:4258
 msgid "Presentation"
-msgstr ""
+msgstr "Présentation"
 
 #: crates/ui-egui/src/cad.rs:21
 msgid "Preserve"
@@ -7484,11 +7484,11 @@ msgstr "Ferraillé: {} armatures, {} kg d'acier."
 msgid "Reinforcement"
 msgstr "Ferraillage"
 
-#: crates/ui-egui/src/browser.rs:528
+#: crates/ui-egui/src/browser.rs:530
 msgid "Reload"
 msgstr "Recharger"
 
-#: crates/ui-egui/src/browser.rs:535
+#: crates/ui-egui/src/browser.rs:537
 msgid "Reload All"
 msgstr "Tout recharger"
 
@@ -7568,15 +7568,15 @@ msgstr "Renommer…"
 
 #: crates/ui-egui/src/lib.rs:4261
 msgid "Render"
-msgstr ""
+msgstr "Rendu"
 
 #: crates/ui-egui/src/lib.rs:4259
 msgid "Render: a picture of this 3D view or camera, made by the renderer of the page the model is kept in"
-msgstr ""
+msgstr "Rendu: une image de cette vue 3D ou caméra, réalisée par le moteur de rendu de la page où le modèle est conservé"
 
 #: crates/ui-egui/src/browser.rs:471
 msgid "Render…"
-msgstr ""
+msgstr "Rendu…"
 
 #: crates/ui-egui/src/phasing.rs:189
 msgid "Renovation"
@@ -8055,7 +8055,7 @@ msgstr "Champs de nomenclature (dans l'ordre):"
 msgid "Schedules"
 msgstr "Nomenclatures"
 
-#: crates/ui-egui/src/browser.rs:516
+#: crates/ui-egui/src/browser.rs:518
 msgid "Schedules/Quantities (all)"
 msgstr "Nomenclatures/Quantités (toutes)"
 
@@ -8110,7 +8110,7 @@ msgstr "Zone de coupe: couper la vue 3D selon un volume, chaque face déplacée 
 msgid "Section: {}"
 msgstr "Coupe: {}"
 
-#: crates/ui-egui/src/browser.rs:487
+#: crates/ui-egui/src/browser.rs:489
 msgid "Sections (Building Section)"
 msgstr "Coupes (Coupe de bâtiment)"
 
@@ -10199,7 +10199,7 @@ msgstr "Modèle de vue {}"
 msgid "Views"
 msgstr "Vues"
 
-#: crates/ui-egui/src/browser.rs:494
+#: crates/ui-egui/src/browser.rs:496
 msgid "Views (all)"
 msgstr "Vues (toutes)"
 
@@ -10379,7 +10379,7 @@ msgstr "Contour des murs: le contour que délimitent les murs du niveau, le long
 msgid "Wardrobe"
 msgstr "Armoire"
 
-#: crates/ui-egui/src/browser.rs:632
+#: crates/ui-egui/src/browser.rs:634
 #: crates/ui-egui/src/lib.rs:5444
 msgid "Warning"
 msgstr ""
@@ -11311,7 +11311,7 @@ msgstr "{}\n\nLes détails se trouvent dans {}."
 msgid "{} (HR resets)"
 msgstr "{} (HR réinitialise)"
 
-#: crates/ui-egui/src/browser.rs:527
+#: crates/ui-egui/src/browser.rs:529
 msgid "{} (not loaded)"
 msgstr "{} (non chargé)"
 
@@ -11400,7 +11400,7 @@ msgstr "il y a {} h"
 msgid "{} holds no parameters, so it has no phase to demolish"
 msgstr "{} ne contient aucun paramètre, il n'a donc pas de phase à démolir"
 
-#: crates/ui-egui/src/browser.rs:630
+#: crates/ui-egui/src/browser.rs:632
 msgid "{} instances of {} will be deleted with it. Delete anyway?"
 msgstr ""
 

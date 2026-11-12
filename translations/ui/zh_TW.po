@@ -44,7 +44,7 @@ msgstr ""
 msgid "1 function"
 msgstr ""
 
-#: crates/ui-egui/src/browser.rs:628
+#: crates/ui-egui/src/browser.rs:630
 msgid "1 instance of {} will be deleted with it. Delete anyway?"
 msgstr ""
 
@@ -1303,7 +1303,7 @@ msgid "Can't rotate pinned element."
 msgstr ""
 
 #: crates/ui-egui/src/background_grid.rs:111
-#: crates/ui-egui/src/browser.rs:639
+#: crates/ui-egui/src/browser.rs:641
 #: crates/ui-egui/src/cad.rs:135
 #: crates/ui-egui/src/checks.rs:690
 #: crates/ui-egui/src/clipboard.rs:174
@@ -3428,7 +3428,7 @@ msgstr "立面：在建築旁邊、要觀察的一側單擊"
 msgid "Elevation: {}"
 msgstr "立面：{}"
 
-#: crates/ui-egui/src/browser.rs:487
+#: crates/ui-egui/src/browser.rs:489
 msgid "Elevations (Building Elevation)"
 msgstr "立面（建築立面）"
 
@@ -3600,7 +3600,7 @@ msgstr ""
 msgid "Failed to read file: {}"
 msgstr "讀取檔案失敗：{}"
 
-#: crates/ui-egui/src/browser.rs:578
+#: crates/ui-egui/src/browser.rs:580
 msgid "Families"
 msgstr "族"
 
@@ -5093,7 +5093,7 @@ msgstr "鏈接3D視圖：顯示在此平面旁的3D視圖，隨平移或切換�
 msgid "Linked File"
 msgstr "鏈接的檔案"
 
-#: crates/ui-egui/src/browser.rs:535
+#: crates/ui-egui/src/browser.rs:537
 msgid "Linked Models"
 msgstr "鏈接模型"
 
@@ -5951,7 +5951,7 @@ msgid "Number:"
 msgstr ""
 
 #: crates/ui-egui/src/background_grid.rs:113
-#: crates/ui-egui/src/browser.rs:640
+#: crates/ui-egui/src/browser.rs:642
 #: crates/ui-egui/src/cad.rs:136
 #: crates/ui-egui/src/clipboard.rs:175
 #: crates/ui-egui/src/clipboard.rs:213
@@ -7114,7 +7114,7 @@ msgstr "前綴："
 
 #: crates/ui-egui/src/lib.rs:4258
 msgid "Presentation"
-msgstr ""
+msgstr "簡報"
 
 #: crates/ui-egui/src/cad.rs:21
 msgid "Preserve"
@@ -7484,11 +7484,11 @@ msgstr "已配筋：{} 根鋼筋，{} kg 鋼材。"
 msgid "Reinforcement"
 msgstr "鋼筋"
 
-#: crates/ui-egui/src/browser.rs:528
+#: crates/ui-egui/src/browser.rs:530
 msgid "Reload"
 msgstr "重新載入"
 
-#: crates/ui-egui/src/browser.rs:535
+#: crates/ui-egui/src/browser.rs:537
 msgid "Reload All"
 msgstr "全部重新載入"
 
@@ -7568,15 +7568,15 @@ msgstr "重命名…"
 
 #: crates/ui-egui/src/lib.rs:4261
 msgid "Render"
-msgstr ""
+msgstr "彩現"
 
 #: crates/ui-egui/src/lib.rs:4259
 msgid "Render: a picture of this 3D view or camera, made by the renderer of the page the model is kept in"
-msgstr ""
+msgstr "彩現：此3D視圖或相機的圖片，由保存模型之頁面的彩現器產生"
 
 #: crates/ui-egui/src/browser.rs:471
 msgid "Render…"
-msgstr ""
+msgstr "彩現…"
 
 #: crates/ui-egui/src/phasing.rs:189
 msgid "Renovation"
@@ -8055,7 +8055,7 @@ msgstr "明細表字段（按順序）："
 msgid "Schedules"
 msgstr "明細表"
 
-#: crates/ui-egui/src/browser.rs:516
+#: crates/ui-egui/src/browser.rs:518
 msgid "Schedules/Quantities (all)"
 msgstr "明細表/數量（全部）"
 
@@ -8110,7 +8110,7 @@ msgstr "剖面框：將3D視圖剪下到一個框內，每個面可在視圖中�
 msgid "Section: {}"
 msgstr "剖面：{}"
 
-#: crates/ui-egui/src/browser.rs:487
+#: crates/ui-egui/src/browser.rs:489
 msgid "Sections (Building Section)"
 msgstr "剖面（建築剖面）"
 
@@ -10199,7 +10199,7 @@ msgstr "視圖樣板 {}"
 msgid "Views"
 msgstr "視圖"
 
-#: crates/ui-egui/src/browser.rs:494
+#: crates/ui-egui/src/browser.rs:496
 msgid "Views (all)"
 msgstr "視圖（全部）"
 
@@ -10379,7 +10379,7 @@ msgstr "牆的輪廓：標高上的牆沿其中心線圍合出的輪廓，作為
 msgid "Wardrobe"
 msgstr "衣櫃"
 
-#: crates/ui-egui/src/browser.rs:632
+#: crates/ui-egui/src/browser.rs:634
 #: crates/ui-egui/src/lib.rs:5444
 msgid "Warning"
 msgstr ""
@@ -11311,7 +11311,7 @@ msgstr "{}\n\n詳細信息見 {}。"
 msgid "{} (HR resets)"
 msgstr "{}（按 HR 重設）"
 
-#: crates/ui-egui/src/browser.rs:527
+#: crates/ui-egui/src/browser.rs:529
 msgid "{} (not loaded)"
 msgstr "{}（未載入）"
 
@@ -11400,7 +11400,7 @@ msgstr "{} 小時前"
 msgid "{} holds no parameters, so it has no phase to demolish"
 msgstr "{} 沒有參數，因此沒有可拆除的階段"
 
-#: crates/ui-egui/src/browser.rs:630
+#: crates/ui-egui/src/browser.rs:632
 msgid "{} instances of {} will be deleted with it. Delete anyway?"
 msgstr ""
 
