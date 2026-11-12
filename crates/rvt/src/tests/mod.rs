@@ -49,7 +49,13 @@ const RVT_RS_COMMIT: &str = "b6086d41b9758fd9b92f42f0a47b8345b9c58056";
 
 #[test]
 fn only_the_command_line_and_the_desktop_take_the_reader_and_only_through_a_default_feature() {
-    for manifest in ["crates/core/Cargo.toml", "crates/geom/Cargo.toml", "crates/update/Cargo.toml", "crates/ui-egui/Cargo.toml"] {
+    for manifest in [
+        "crates/core/Cargo.toml",
+        "crates/geom/Cargo.toml",
+        "crates/mep-calc/Cargo.toml",
+        "crates/update/Cargo.toml",
+        "crates/ui-egui/Cargo.toml",
+    ] {
         let text = read(manifest);
         assert!(!text.contains("bimcraft-rvt"), "{manifest} depends on bimcraft-rvt: the core, the updater and the UI never do");
     }

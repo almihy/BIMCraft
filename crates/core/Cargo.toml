@@ -10,6 +10,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+bimcraft-mep-calc = { workspace = true }
 bimcraft-geom = { workspace = true }
 bimcraft-i18n = { workspace = true }
 serde = { workspace = true }

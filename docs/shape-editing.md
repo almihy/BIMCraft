@@ -8,7 +8,7 @@ each floor is level or one sloped plane, and nothing else. The rules in [CLAUDE.
 
 Status, on the branch `mod-16-shape-editing` (raised upstream as IPedrax/BIMCraft#183):
 
-- **Phase 0**, the triangulation, is built (`crates/core/src/triangulation.rs`).
+- **Phase 0**, the triangulation, is built (`crates/geom/src/triangulation.rs`).
 - **Phase 1**, shapes on floors, is built (`crates/core/src/shape_tests.rs`, and
   [levels, walls and roofs](areas/levels-walls-roofs.md) says how): the data and parts, the four commands, the checks,
   `floor_faces` and `shape_planes`, 3D, plans, sections, IFC (one closed faceted Brep per slab, `Model::shape_solid`,

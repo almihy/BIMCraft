@@ -100,22 +100,14 @@ One line per module: what it owns. Read the module's file and, for the areas it 
 - `ifc.rs`, `import.rs`: IFC export and IFC import; `import/shapes.rs`: turned and swept solids and advanced B-reps ([IFC import](docs/areas/ifc-import.md)); `lenient.rs`: what a file holds that this version doesn't know, found so it can be left out. `cloud.rs`: point clouds read from PTS, XYZ, PLY and LAS, and E57 (`cloud/e57.rs`) ([point clouds](docs/areas/point-clouds.md)). `insert.rs`, `inquiry.rs`: Insert from File, Select by ID and IDs of Selection. `autosave.rs`: background snapshots. `sample.rs`, `sample/highrise.rs`, `sample/tower.rs`: the sample house and the benchmark towers. `component_geometry.rs`: family geometry reused within an operation.
 - The spatial core ([plan](docs/spatial-core-plan.md); each module in [crates/core/CLAUDE.md](crates/core/CLAUDE.md)): `derived.rs`, `rooms.rs`, `bounds.rs`, `family/bounds.rs`, `ids/revisions.rs`, `view3d/update.rs`, `view3d/fragments.rs`, `oracle_tests.rs`, `crosscheck.rs`.
 - `symbol_set.rs`: symbol sets, families of plan symbols loaded on demand by the `symbol_set` command (the AREI/RGIE's, `data/arei-symbols.json`; [families](docs/areas/families.md)).
-- `hydrant.rs`: the `hydrant_size` command, hydrants and hose reels by IT 22/2025.
-- `loads.rs`: the `load_points` command, a dwelling's lighting and outlets by room, by rule sets in `data/load-points.json` (NBR 5410 item 9.5.2 first).
-- `dr.rs`: the `dr_check` command, which circuits NBR 5410 asks a 30 mA residual-current device for.
-- `demand.rs`: the `demand` command, an installation's demand and service category by a utility's own standard.
-- `dps.rs`: the `dps_check` command, surge protection of a power line by NBR 5410 (when, where, connection, currents).
-- `water.rs`, `reservoir.rs`: `water_size`, cold water by NBR 5626, and `reservoir_size`, its reservation. `plumbing.rs`: the fixtures library (`data/plumbing.json`) they and `drain_size` read.
-- `storm.rs`: the `storm_size` command, storm drains by NBR 10844 (Manning, the downpipe abacuses).
-- `drainage.rs`: the `drain_size` and `vent_size` commands, sanitary drains and vents by NBR 8160's tables.
 - `network.rs`: the `network` command, the pipe network worked out from pipes' ends and pipe connectors, never stored (nodes, edges, open ends, warnings).
-- `conduit.rs`: the `conduit_fill` command, a conduit's fill by NBR 5410 (makers' catalogues in `conduit/tables.rs`).
 - `electrical.rs`: the electrical settings, the project's voltages, distribution systems and wire types (the `voltage`, `distribution_system` and `wire_type` commands; starter set in `data/electrical.json`; [structure and MEP](docs/areas/structure-and-mep.md)).
-- `nbr5410.rs`: the `circuit` command's sizing of a circuit by NBR 5410 (tables in `nbr5410/tables.rs`; [structure and MEP](docs/areas/structure-and-mep.md)).
 - `timber.rs`: the `timber_framing` command, a straight isolated wall's studs, plates and clear bays round one window, read and never built ([structure and MEP](docs/areas/structure-and-mep.md)).
 - `tests.rs`, `mep_tests.rs`, `structure_tests.rs`, `eberick_tests.rs`, `reinforce_tests.rs`, `autosave_tests.rs`: the engine driven through commands, as a front end drives it.
 
 `crates/geom` (`bimcraft-geom`, under the model; its map: [crates/geom/CLAUDE.md](crates/geom/CLAUDE.md)): plan and 3D maths, triangulation, the straight skeleton, solids, STEP and XLSX, units, languages, files, drawing primitives, lettering. `bimcraft-core` re-exports each module under its old path.
+
+`crates/mep-calc` (`bimcraft-mep-calc`, the MEP calculations by their standards, whose commands are the core's; map: [crates/mep-calc/CLAUDE.md](crates/mep-calc/CLAUDE.md)): NBR 5410's circuits, utilities' demand, NBR 5626, 8160 and 10844, IT 22.
 
 Plugins: [notes](crates/plugin/CLAUDE.md), [sdk](crates/plugin-sdk/CLAUDE.md), [area](docs/areas/plugins.md), one `unsafe`.
 

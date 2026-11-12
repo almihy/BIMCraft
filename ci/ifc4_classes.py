@@ -1,4 +1,4 @@
-"""Print IFC4's element classes as `crates/core/src/ifc/classes.rs` holds them: read from the IFC4 ADD2 TC1 schema
+"""Print IFC4's element classes as `crates/geom/src/ifc_classes.rs` holds them: read from the IFC4 ADD2 TC1 schema
 (ISO 16739-1:2018) that IfcOpenShell carries.
 
 Usage: python ci/ifc4_classes.py > table.txt, then put the rows in `CLASSES`.

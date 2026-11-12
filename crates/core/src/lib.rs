@@ -4,6 +4,7 @@
 
 use bimcraft_geom::{csg, font};
 pub use bimcraft_geom::{files, geom, ifc_classes, language, prim, shared, skeleton, step, triangulation, units, xlsx};
+pub use bimcraft_mep_calc::{conduit, demand, dps, dr, drainage, hydrant, loads, nbr5410, plumbing, reservoir, storm, water};
 pub mod align;
 #[cfg(test)]
 mod align_tests;
@@ -19,6 +20,8 @@ pub mod bridge;
 pub mod cad;
 #[cfg(test)]
 mod cad_tests;
+#[cfg(test)]
+mod calc_tests;
 pub mod camera;
 #[cfg(test)]
 mod clipboard_tests;
@@ -27,17 +30,12 @@ pub mod cloud;
 mod cloud_tests;
 mod commands;
 mod component_geometry;
-pub mod conduit;
 mod constraints;
 pub mod crosscheck;
 pub mod curves;
-pub mod demand;
 pub mod derived;
 pub mod dims;
 pub mod dims3d;
-pub mod dps;
-pub mod dr;
-pub mod drainage;
 pub mod draw;
 #[cfg(test)]
 mod dry_run_tests;
@@ -63,7 +61,6 @@ pub mod glue;
 mod glue_tests;
 pub mod graphics;
 pub mod groups;
-pub mod hydrant;
 pub mod ids;
 pub mod ifc;
 #[cfg(test)]
@@ -84,14 +81,12 @@ pub mod lenient;
 pub mod library;
 pub mod lines;
 pub mod link;
-pub mod loads;
 pub mod massing;
 pub mod masterplan;
 #[cfg(test)]
 mod masterplan_tests;
 pub mod model;
 pub mod motion;
-pub mod nbr5410;
 pub mod network;
 #[cfg(test)]
 mod openings_past_top_tests;
@@ -104,7 +99,6 @@ pub mod pen;
 pub mod phasing;
 #[cfg(test)]
 mod pin_tests;
-pub mod plumbing;
 pub mod quantities;
 #[cfg(test)]
 mod quantities_tests;
@@ -118,7 +112,6 @@ pub mod reinforce;
 #[cfg(test)]
 mod reinforce_tests;
 pub mod render;
-pub mod reservoir;
 #[cfg(test)]
 mod roof_slopes_tests;
 #[cfg(test)]
@@ -150,7 +143,6 @@ pub mod sketch;
 pub mod snap;
 pub mod stairs;
 pub mod standards;
-pub mod storm;
 pub mod styles;
 pub mod symbol_set;
 pub mod sync;
@@ -182,7 +174,6 @@ pub mod walls;
 pub mod warnings;
 #[cfg(test)]
 mod warnings_tests;
-pub mod water;
 pub mod workplane;
 #[cfg(test)]
 mod workplane_tests;

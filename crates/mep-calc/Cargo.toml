@@ -1,0 +1,14 @@
+[package]
+name = "bimcraft-mep-calc"
+description = "BIMCraft's MEP calculations by the standards: NBR 5410, 5626, 8160, 10844, utilities' demand, IT 22"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
