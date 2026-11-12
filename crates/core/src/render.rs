@@ -2657,7 +2657,7 @@ fn behind_model(d: &mut Drawing, m: &Model, picture: &Image) {
         }
         if let Prim::Image { at, width, rgba, .. } = prim {
             let (w, ax, ay) = (*width as usize, f64::from(at.0), f64::from(at.1));
-            for (i, px) in rgba.chunks_exact_mut(4).enumerate() {
+            for (i, px) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
                 let (x, y) = (ax + (i % w) as f64 + 0.5, ay + (i / w) as f64 + 0.5);
                 if picture.covered(x * rx, y * ry) {
                     px[3] = 0;

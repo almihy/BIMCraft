@@ -108,7 +108,7 @@ fn walls_drawn_over_a_pdf_snap_to_its_lines() {
     h.key_press(Key::Escape);
     h.run();
     let m = &h.state().session.model;
-    let w = m.elements.values().filter_map(|e| if let Element::Wall(w) = e { Some(w) } else { None }).last().unwrap();
+    let w = m.elements.values().filter_map(|e| if let Element::Wall(w) = e { Some(w) } else { None }).next_back().unwrap();
     assert!(close(w.start, P2(2000.0, 1500.0), 0.05), "on the PDF's corner: {:?}", w.start);
     assert!((w.end.1 - 1500.0).abs() < 0.05, "along its line: {:?}", w.end);
 }
