@@ -1,7 +1,7 @@
 # Splitting bimcraft-core: a plan
 
-Status: a plan, not started. Several helpers edit `crates/core` at once; the split moves most of its files, so it is done
-in one sitting when nobody else has core open, one step per commit, each step building and passing `cargo test --workspace`.
+Status: steps 1 to 3 done, and the icons (step 6); step 4 (render, site and IFC out of the model) is next. What was done,
+how it was done and the numbers are under *Where it stands*, at the end.
 
 ## Why
 
@@ -107,3 +107,42 @@ Visibility: many `pub(crate)` items become `pub` across crates; mark them `#[doc
 To check the cycles at any point, list each module's `crate::<module>` uses outside tests (leaving out the `*_tests.rs`
 files, `tests.rs`, `tests/` folders and `#[cfg(test)] mod` blocks) and find the strongly connected components (Tarjan's
 algorithm): step 1 is done when the one big component is gone.
+
+## Where it stands (12 November 2026, branch infra/crate-split)
+
+Done, one commit each, every suite passing (`cargo test --workspace -- --skip gpu:: --skip retained::`: 2003 engine tests
+across core, model, geom and mep-calc, as before the split; ui-egui's 1008) and both browser builds building:
+
+1. The helpers moved down inside the core: `geom::v3`, `prim` (Rgb, Prim, Part, View), `files::base64`, the commands'
+   name and number helpers (`micron`, `tidy`, `m2`, `category`, `colour`, `next_number`), `camera` (a 3D view's lens and
+   display options), `ifc_classes`, `motion` (Motion, transform), `json` (element_json), and what runs after every command
+   taking the model instead of the Session (`masterplan::keep`, `timber`; keeping constraints went up into the engine).
+2. `bimcraft-geom` and `bimcraft-mep-calc` (its command tests in the core's `calc_tests/`).
+3. `bimcraft-model`: here taken as everything under the commands (model, render, view3d, sheets, schedules, IFC, site,
+   warnings, the model's half of sync as `merge`), so the commands came apart from the rest first, which is the change
+   most edits make. Session-driven tests of its modules are the core's `model_tests/`; what the core's tests count inside
+   the model is on through its `testing` feature.
+6. `bimcraft-icons`: the Icon list and the generated drawings.
+
+Left: step 4, splitting render (with view3d, sheet and titleblock drawing, pdf, gltf), site and IFC out of
+`bimcraft-model`. The knots are as the table above says, with these found on the way: `Model::model_extent`,
+`level_extent`, `roof_at`, `spot_host` and `spot_value` ask `view3d::solids` and `tops_at` (and `spot_value` is in an
+element's JSON, which schedules and tags read), so the element solids either move into the model crate or those queries
+move up; `graphics::dress` and `raster::draw` take a `Drawing`; `titleblock` and `sheet` hold both their data and their
+drawing; `inquiry` calls `ifc::compress`. Step 5 beyond what moved already: the core's `*_tests.rs` that test one crate's
+code alone could move down to it.
+
+Measured with `cargo test -p bimcraft-core -p bimcraft-ui-egui --no-run --timings`, target on the Dev Drive, sccache
+warm for the dependencies, nothing else building; a one-line change is a new item at the end of the file:
+
+| | before (5bda50ab) | after |
+| --- | --- | --- |
+| clean build | 5m 40s (core lib tests) | 5m 44s (both): model 104 s, then core 36 s and its tests 148 s |
+| one line in `commands.rs` | 1m 11s / 1m 23s | 20 s |
+| one line in `render.rs` | 1m 11s / 1m 23s | 1m 14s (model 28 s, core tests 44 s, ui-egui tests 37 s) |
+| one line in `model.rs` | 1m 11s / 1m 23s | 56 s |
+| one line in `geom.rs` | 1m 11s / 1m 23s | 40 s |
+
+The before column is core's tests and ui-egui's tests each on its own; after is both in one command. A clean build gains
+nothing yet: the model crate is still 3.4 MB everything waits for, and the core's test binary still holds the tests of
+the model's modules that drive the Session.
