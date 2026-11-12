@@ -1415,6 +1415,20 @@ mod tests {
     }
 
     #[test]
+    fn show_and_show_elements_unhide_in_view_what_hide_and_hide_elements_hid() {
+        // Revit's Unhide in View: Elements and Category are `graphics` with `show_elements` and `show`, as Hide in View is
+        // with `hide_elements` and `hide`.
+        let mut s = Session::new();
+        let walls = house(&mut s);
+        run(&mut s, "graphics", json!({"view": 100000, "hide_elements": [walls[0], walls[1]], "hide": ["walls"]}));
+        let r = run(&mut s, "graphics", json!({"view": 100000, "show_elements": [walls[0]]}));
+        assert_eq!(r["hidden_elements"], json!([walls[1]]), "one element back, the other still hidden");
+        let r = run(&mut s, "graphics", json!({"view": 100000, "show": ["walls"], "show_elements": [walls[1]]}));
+        assert_eq!((r["hidden"].clone(), r["hidden_elements"].clone()), (json!([]), json!([])));
+        assert!(!owned(&plan(&s, 100000), walls[0]).is_empty() && !owned(&plan(&s, 100000), walls[1]).is_empty());
+    }
+
+    #[test]
     fn cut_and_projection_lines_take_their_own_overrides_in_a_view_alone() {
         let mut s = Session::new();
         let walls = house(&mut s);

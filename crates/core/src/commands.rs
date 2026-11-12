@@ -2007,7 +2007,8 @@ other_files(
          spacing?: [X,Y] (mm), divisions?: [X,Y] (1..1000), rotation?: degrees (-360..360)} | null, \
          reset?: true} what a view hides and how it draws the rest, as Revit's Visibility/Graphics does; with \
          none of those, the view's settings as they are. A category hidden (walls, floors, rooms, grids, dimensions, levels…, \
-         in any case, singular or plural) leaves all its elements out of that view, and `hide_elements` the elements given. \
+         in any case, singular or plural) leaves all its elements out of that view, and `hide_elements` the elements given \
+         (Revit's Hide in View > Category and Elements); `show` and `show_elements` bring them back (Unhide in View). \
          In a 3D view rooms are hidden unless shown (`show: [rooms]`), every new 3D view so; shown, each is a \
          see-through solid. Subcategories are hidden and shown as categories are, and go with their category: under rooms, `roomreference` (the \
          cross at each room's point, hidden unless shown, as Revit's Rooms > Reference) and `roomseparator` (room separation \
