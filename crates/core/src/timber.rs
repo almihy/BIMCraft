@@ -2,7 +2,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::engine::Session;
 use crate::geom;
 use crate::model::{Element, Function, Guid, Id, MAX_COORD, Model, TOL, Wall};
 use crate::walls::{self, Axis};
@@ -124,14 +123,13 @@ fn touching_wall(m: &Model, id: Id, w: &Wall) -> Option<Id> {
     })
 }
 
-pub(crate) fn query(s: &mut Session, params: &Value) -> Result<Value, String> {
+pub(crate) fn query(m: &crate::model::Model, params: &Value) -> Result<Value, String> {
     let rule: Request = serde_json::from_value(params.clone()).map_err(|e| format!("timber_framing: {e}"))?;
     if [rule.spacing, rule.thickness, rule.depth, rule.header_height].iter().any(|&v| !v.is_finite() || v <= EPS || v > MAX_COORD)
         || rule.spacing <= rule.thickness
     {
         return Err("supply positive framing dimensions in mm and spacing greater than stud thickness".into());
     }
-    let m = &s.model;
     let id = m.elements.id(rule.wall).ok_or("unknown framing wall")?;
     let w = m.wall(id).ok_or("select a wall for timber framing")?;
     if w.arc != 0. || w.attach_top.is_some() || w.attach_base.is_some() {

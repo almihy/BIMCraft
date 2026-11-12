@@ -9,23 +9,22 @@
 
 use std::collections::BTreeMap;
 
-use crate::engine::Session;
 use crate::ids::{Guid, Key};
 use crate::model::{DimKind, Dimension, Element, Id, Model};
 
 /// How far a station may be from where its constraint puts it, mm.
-const SLACK: f64 = 0.01;
+pub const SLACK: f64 = 0.01;
 /// How many times the dimensions are solved, one after another, before what still doesn't hold is refused.
-const PASSES: usize = 8;
+pub const PASSES: usize = 8;
 
 /// Whether dimension `d` holds constraints.
-fn constrained(d: &Dimension) -> bool {
+pub fn constrained(d: &Dimension) -> bool {
     matches!(d.kind, DimKind::Aligned | DimKind::Linear) && (d.equal || !d.locked.is_empty())
 }
 
 /// Where each station of `d` should be, given those of elements in `fixed` stay: none where it holds already. An error
 /// when its constraints contradict each other, or what stays.
-fn targets(m: &Model, d: &Dimension, fixed: &dyn Fn(Guid) -> bool) -> Result<Vec<(Guid, f64)>, String> {
+pub fn targets(m: &Model, d: &Dimension, fixed: &dyn Fn(Guid) -> bool) -> Result<Vec<(Guid, f64)>, String> {
     let (_, st) = m.stations(d);
     let k = st.len().saturating_sub(1);
     if k == 0 {
@@ -88,7 +87,7 @@ fn targets(m: &Model, d: &Dimension, fixed: &dyn Fn(Guid) -> bool) -> Result<Vec
 }
 
 /// The elements whose stations move how far, each once: an error when two of one element's would move it apart.
-fn moves(m: &Model, d: &Dimension, fixed: &dyn Fn(Guid) -> bool) -> Result<BTreeMap<Guid, f64>, String> {
+pub fn moves(m: &Model, d: &Dimension, fixed: &dyn Fn(Guid) -> bool) -> Result<BTreeMap<Guid, f64>, String> {
     let mut by: BTreeMap<Guid, f64> = BTreeMap::new();
     for (id, delta) in targets(m, d, fixed)? {
         match by.get(&id) {
@@ -105,56 +104,6 @@ fn moves(m: &Model, d: &Dimension, fixed: &dyn Fn(Guid) -> bool) -> Result<BTree
         }
     }
     Ok(by)
-}
-
-/// The constrained dimensions kept after a command changed `before` into the session's model: what they measure to moved
-/// as they say. An error, saying which and why, when they can't be.
-pub(crate) fn keep(s: &mut Session, before: &Model) -> Result<(), String> {
-    let lookup = s.model.lookup();
-    let dims: Vec<Id> =
-        lookup.dimensions().filter(|id| matches!(s.model.elements.get(*id), Some(Element::Dimension(d)) if constrained(d))).collect();
-    if dims.is_empty() {
-        return Ok(());
-    }
-    // What the command changed stays; so does what keeping the constraints has moved already.
-    let mut stays: Vec<Guid> = match s.model.changed_since(before) {
-        crate::ids::Changed::Ids(ids) => ids
-            .into_iter()
-            .filter(|id| s.model.elements.get(*id).is_some_and(|e| before.elements.get(*id) != Some(e)))
-            .filter_map(|id| s.model.elements.guid(id))
-            .collect(),
-        crate::ids::Changed::All => {
-            s.model.elements.with_guids().filter(|(id, _, e)| before.elements.get(*id) != Some(*e)).map(|(_, g, _)| g).collect()
-        }
-    };
-    for _ in 0..PASSES {
-        let mut moved = false;
-        for &id in &dims {
-            let Some(Element::Dimension(d)) = s.model.elements.get(id).cloned() else { continue };
-            let held = stays.clone();
-            let fixed = |g: Guid| held.contains(&g);
-            let by = moves(&s.model, &d, &fixed).map_err(|e| format!("dimension {id}'s constraints can't be kept: {e}"))?;
-            let (n, _) = s.model.stations(&d);
-            for (g, delta) in by {
-                let Some(e) = s.model.elements.id(g) else { continue };
-                let v = n * delta;
-                crate::commands::move_by(s, e, v).map_err(|err| format!("dimension {id}'s constraints can't be kept: {err}"))?;
-                stays.push(g);
-                moved = true;
-            }
-        }
-        if !moved {
-            return Ok(());
-        }
-    }
-    // Still moving after every pass: they pull against each other.
-    let unkept = dims.iter().find(|id| {
-        matches!(s.model.elements.get(**id), Some(Element::Dimension(d)) if targets(&s.model, d, &|_| false).map_or(true, |t| !t.is_empty()))
-    });
-    match unkept {
-        Some(id) => Err(format!("dimension {id}'s constraints can't be kept with the others: unlock one, or take its equality off")),
-        None => Ok(()),
-    }
 }
 
 impl Model {

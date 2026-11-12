@@ -16,7 +16,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::engine::Session;
 use crate::geom::{self, P2};
 use crate::model::{Changed, Element, Floor, Guid, Id, MAX_COORD, MAX_TEXT, Model, ShapePoint};
 use crate::phasing;
@@ -605,7 +604,7 @@ pub fn check_property_line(who: &str, p: &PropertyLine) -> Result<(), String> {
 // ====================================================================== keeping the shapes
 /// What a command left that [`keep`] works out again: an element's new shape, props, phase and params, a car park's
 /// layout, a mass's height.
-enum Update {
+pub enum Update {
     Site { id: Id, site: Box<Site> },
     Mass { id: Id, height: f64, phase: String, params: BTreeMap<String, Value> },
 }
@@ -614,13 +613,11 @@ enum Update {
 pub const SHAPES_ITSELF: &[&str] = &["site", "site_edit"];
 
 /// After a command: the site elements it changed shaped again, with the lanes they meet; the car parks it touched laid
-/// out again; phases and params in step; masses with storeys their height. Only what changed and its neighbours.
-pub fn keep(s: &mut Session, before: &Model) {
-    let changed = what_changed(&s.model, before);
-    let updates = plan(&s.model, Some(before), &changed);
-    if !updates.is_empty() {
-        apply(s.model_mut(), updates);
-    }
+/// out again; phases and params in step; masses with storeys their height. Only what changed and its neighbours: what
+/// [`apply`] then changes, none when nothing needs it (so the engine copies the model only when it must).
+pub fn keep(m: &Model, before: &Model) -> Vec<Update> {
+    let changed = what_changed(m, before);
+    plan(m, Some(before), &changed)
 }
 
 /// [`keep`] of the model alone, as a command that shapes itself runs it: `before` is the model before the command.
@@ -948,7 +945,7 @@ fn plan(m: &Model, before: Option<&Model>, changed: &Changed) -> Vec<Update> {
     out
 }
 
-fn apply(m: &mut Model, updates: Vec<Update>) {
+pub fn apply(m: &mut Model, updates: Vec<Update>) {
     for u in updates {
         match u {
             Update::Site { id, site } => {

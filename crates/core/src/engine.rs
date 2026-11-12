@@ -623,11 +623,14 @@ impl Session {
             // The site's shapes worked out again where what they are drawn from changed (masterplan.rs): a site element
             // moved, a lane that meets it, a car park round what it keeps clear of.
             if cmd.undoable && !crate::masterplan::SHAPES_ITSELF.contains(&cmd.id) {
-                crate::masterplan::keep(self, &before);
+                let updates = crate::masterplan::keep(&self.model, &before);
+                if !updates.is_empty() {
+                    crate::masterplan::apply(self.model_mut(), updates);
+                }
             }
             // Locked and equal dimensions moved what they measure to as the command moved it.
             if cmd.undoable {
-                crate::constraints::keep(self, &before)?;
+                keep_constraints(self, &before)?;
             }
             // What was made or changed must be as a sketch of it solves too (an outline that is simple), which a file
             // from before may break; Insert from File brings in what it finds.
@@ -1183,4 +1186,57 @@ fn sync_oracle(m: &Model, before: &Model) -> Option<(Model, Model)> {
     let mut whole = m.clone();
     whole.sync_library_with(&mut counter());
     Some((incremental, whole))
+}
+
+/// The constrained dimensions kept after a command changed `before` into the session's model: what they measure to moved
+/// as they say. An error, saying which and why, when they can't be.
+fn keep_constraints(s: &mut Session, before: &Model) -> Result<(), String> {
+    let lookup = s.model.lookup();
+    let dims: Vec<Id> = lookup
+        .dimensions()
+        .filter(|id| matches!(s.model.elements.get(*id), Some(crate::model::Element::Dimension(d)) if crate::constraints::constrained(d)))
+        .collect();
+    if dims.is_empty() {
+        return Ok(());
+    }
+    // What the command changed stays; so does what keeping the constraints has moved already.
+    let mut stays: Vec<crate::ids::Guid> = match s.model.changed_since(before) {
+        crate::ids::Changed::Ids(ids) => ids
+            .into_iter()
+            .filter(|id| s.model.elements.get(*id).is_some_and(|e| before.elements.get(*id) != Some(e)))
+            .filter_map(|id| s.model.elements.guid(id))
+            .collect(),
+        crate::ids::Changed::All => {
+            s.model.elements.with_guids().filter(|(id, _, e)| before.elements.get(*id) != Some(*e)).map(|(_, g, _)| g).collect()
+        }
+    };
+    for _ in 0..crate::constraints::PASSES {
+        let mut moved = false;
+        for &id in &dims {
+            let Some(Element::Dimension(d)) = s.model.elements.get(id).cloned() else { continue };
+            let held = stays.clone();
+            let fixed = |g: crate::ids::Guid| held.contains(&g);
+            let by =
+                crate::constraints::moves(&s.model, &d, &fixed).map_err(|e| format!("dimension {id}'s constraints can't be kept: {e}"))?;
+            let (n, _) = s.model.stations(&d);
+            for (g, delta) in by {
+                let Some(e) = s.model.elements.id(g) else { continue };
+                let v = n * delta;
+                crate::commands::move_by(s, e, v).map_err(|err| format!("dimension {id}'s constraints can't be kept: {err}"))?;
+                stays.push(g);
+                moved = true;
+            }
+        }
+        if !moved {
+            return Ok(());
+        }
+    }
+    // Still moving after every pass: they pull against each other.
+    let unkept = dims.iter().find(|id| {
+        matches!(s.model.elements.get(**id), Some(Element::Dimension(d)) if crate::constraints::targets(&s.model, d, &|_| false).map_or(true, |t| !t.is_empty()))
+    });
+    match unkept {
+        Some(id) => Err(format!("dimension {id}'s constraints can't be kept with the others: unlock one, or take its equality off")),
+        None => Ok(()),
+    }
 }
