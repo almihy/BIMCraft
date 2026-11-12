@@ -6766,3 +6766,17 @@ fn an_error_that_repeats_a_huge_value_stays_short() {
     let e = s.execute("graphics", &json!({"view": "Level 1", "hide_elements": [1]})).unwrap_err();
     assert!(!e.contains("more characters"), "{e}");
 }
+
+#[test]
+fn walls_on_their_faces_meet_at_their_far_faces_out_of_square() {
+    // Two walls 200 thick on their exterior faces, their bodies on the corner's outside: their location lines meet on
+    // its inside, and their far faces run on past the node until they cross, square or a few degrees out of it.
+    for b_from in [[-400.0, 4500.0], [0.0, 4500.0], [400.0, 4500.0]] {
+        let mut s = Session::new();
+        let a = run(&mut s, "wall", json!({"points": [[0, 0], [5000, 880]], "location": "exterior-finish"}))["ids"][0].as_u64().unwrap();
+        let b = run(&mut s, "wall", json!({"points": [b_from, [0, 0]], "location": "exterior-finish"}))["ids"][0].as_u64().unwrap();
+        let (ca, cb) = (crate::walls::cap(&s.model, a, false), crate::walls::cap(&s.model, b, true));
+        let far = |c: &Vec<P2>| c.iter().copied().max_by(|p, q| p.length().total_cmp(&q.length())).unwrap();
+        assert!(far(&ca).length() > 250.0 && far(&ca).dist(far(&cb)) < 1e-6, "{b_from:?}: {ca:?} {cb:?}");
+    }
+}
