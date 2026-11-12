@@ -61,6 +61,12 @@ ID with its zoom, the Project Browser's open): no command runs and the model doe
 the editor takes while its canvas has the keyboard, and the web app keeps the browser from acting on them (Tab, Space, Backspace, Delete, arrows, Home/End/Page Up/Down, Ctrl+A,
 D, K, O, P, S, Y, Z, F1 to F4 and F6 to F10; never F5, F11, F12, or Ctrl+C, V, X, whose browser events carry the clipboard).
 
+A hosting page renders, with its own renderer (Arqiflow's Render dialog, through Arqina), as Revit's View > Presentation > Render
+opens its dialog: a hosted window's Project Browser has Render… on every 3D view and camera (the default `{3D}` too, made or
+not), and its View tab a Presentation panel with Render, enabled while a 3D view is in front. Each asks the page to render that
+view (`BimApp::take_render_request`: its name, id, GUID and whether it is a camera's; the web app's `on_render`); the window draws
+nothing of its own for it, and a window no page hosts offers neither (`tests/render.rs`).
+
 Application dialogs use `popup.rs`: a shared modal frame with a draggable title bar and a corner × button. Each dialog keeps its own
 position while the application is open; dragging is constrained to the application window. The × button follows Cancel/Close, so it never
 applies a draft; so does Escape. A click beside a dialog, on the dimmed window behind it, does nothing: only its buttons, its × and Escape

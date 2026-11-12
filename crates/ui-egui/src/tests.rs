@@ -6251,6 +6251,7 @@ mod popup;
 mod presets;
 mod purge;
 mod reinforce;
+mod render;
 mod revit;
 mod rooms;
 mod section_box;
