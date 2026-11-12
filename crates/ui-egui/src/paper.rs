@@ -72,7 +72,8 @@ impl BimApp {
         if response.drag_started_by(PointerButton::Primary)
             && modify
             && let Some(o) = ui.input(|i| i.pointer.press_origin())
-            && let Some(vp) = pick(o).filter(|v| matches!(model.elements.get(v), Some(Element::Viewport(_) | Element::Text(_) | Element::Image(_))))
+            && let Some(vp) =
+                pick(o).filter(|v| matches!(model.elements.get(v), Some(Element::Viewport(_) | Element::Text(_) | Element::Image(_))))
         {
             papers.drag = Some(view.mm((o.x - rect.min.x, o.y - rect.min.y)));
             self.grab(vp);

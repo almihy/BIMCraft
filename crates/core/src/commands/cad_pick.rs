@@ -21,6 +21,8 @@ pub(super) struct Picked {
     pub found: outlines::Found,
     pub labels: Vec<Vec<String>>,
     pub cad: crate::cad::Cad,
+    /// The drawing's name, or the image's.
+    pub name: String,
     pub id: crate::model::Id,
 }
 
@@ -72,7 +74,7 @@ fn found(c: &str, m: &Model, v: &Value) -> Result<Picked, String> {
     let (id, ci, cad, chosen) = pick(c, m, v)?;
     let found = outlines::outlines(&cad, &ci, &chosen).map_err(|e| bad(c, e))?;
     let labels = outlines::labels(&cad, &ci, &found.outlines);
-    Ok(Picked { level: ci.level, found, labels, cad, id })
+    Ok(Picked { level: ci.level, found, labels, cad, name: ci.cad.clone(), id })
 }
 
 /// Refuses a pick of an image placed in other than a plan: the model is built from a plan's lines.
@@ -80,7 +82,10 @@ fn on_a_plan(c: &str, m: &Model, id: crate::model::Id) -> Result<(), String> {
     match m.elements.get(id) {
         Some(crate::model::Element::Image(im)) if m.plan_level(im.view).is_none() => Err(bad(
             c,
-            format!("image {id} is in {}, not a plan: the model is built from the lines of an image in a plan", super::view_title(m, im.view)),
+            format!(
+                "image {id} is in {}, not a plan: the model is built from the lines of an image in a plan",
+                super::view_title(m, im.view)
+            ),
         )),
         _ => Ok(()),
     }
@@ -209,5 +214,5 @@ pub(super) fn cad_outlines(s: &mut Session, p: &Value) -> R {
         })
         .collect();
     let open: Vec<Value> = picked.found.open.iter().map(|o| json!({"points": ring(&o.points), "entities": o.entities})).collect();
-    Ok(json!({"id": picked.id, "cad": picked.cad, "outlines": rows, "open": open}))
+    Ok(json!({"id": picked.id, "cad": picked.name, "outlines": rows, "open": open}))
 }

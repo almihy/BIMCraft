@@ -64,7 +64,10 @@ pub(super) fn import_pdf(s: &mut Session, p: &Value) -> R {
         (None, None) => return Err(bad(c, "give `path`, a PDF file to import, or `image`, the name of one the project holds")),
         (None, Some(n)) => {
             if !absent(p.get("page")) || !absent(p.get("resolution")) {
-                return Err(bad(c, "`page` and `resolution` are a file's, given with `path`; an image the project holds is placed as it is"));
+                return Err(bad(
+                    c,
+                    "`page` and `resolution` are a file's, given with `path`; an image the project holds is placed as it is",
+                ));
             }
             held(c, &s.model, &n)?;
             (n, None, Vec::new())
@@ -113,7 +116,12 @@ pub(super) fn import_image(s: &mut Session, p: &Value) -> R {
             match ext(&full).as_str() {
                 "png" | "jpg" | "jpeg" | "jpe" | "bmp" => {}
                 "pdf" => return Err(bad(c, format!("{}: a PDF comes in with `import_pdf`", full.display()))),
-                other => return Err(bad(c, format!("{}: a .{other} file isn't a picture BIMCraft reads; it reads PNG, JPEG and BMP", full.display()))),
+                other => {
+                    return Err(bad(
+                        c,
+                        format!("{}: a .{other} file isn't a picture BIMCraft reads; it reads PNG, JPEG and BMP", full.display()),
+                    ));
+                }
             }
             let (bytes, source) = read_file(c, s, &path)?;
             let t = ImageType::picture(&source, &bytes).map_err(|e| bad(c, format!("{path}: {e}")))?;
@@ -141,7 +149,10 @@ fn place(c: &str, s: &mut Session, p: &Value, name: &str, new: Option<ImageType>
         _ => {
             return Err(bad(
                 c,
-                format!("{} isn't a 2D view: an image goes in a plan, a ceiling plan, a section, an elevation or a sheet", view_title(m, view)),
+                format!(
+                    "{} isn't a 2D view: an image goes in a plan, a ceiling plan, a section, an elevation or a sheet",
+                    view_title(m, view)
+                ),
             ));
         }
     }
@@ -154,7 +165,9 @@ fn place(c: &str, s: &mut Session, p: &Value, name: &str, new: Option<ImageType>
     let scale = match num(c, p, "scale")? {
         Some(_) if sheet => return Err(bad(c, "on a sheet an image is the size of its paper; give a `width` to size it")),
         Some(k) if k.is_finite() && (1e-6..=1e6).contains(&k) => k,
-        Some(k) => return Err(bad(c, format!("`scale` is how many mm of the model a mm of the image stands for (100 at 1 : 100), not {k}"))),
+        Some(k) => {
+            return Err(bad(c, format!("`scale` is how many mm of the model a mm of the image stands for (100 at 1 : 100), not {k}")));
+        }
         None if sheet => 1.0,
         None => stated.unwrap_or(1.0),
     };
@@ -167,7 +180,10 @@ fn place(c: &str, s: &mut Session, p: &Value, name: &str, new: Option<ImageType>
         (None, None) => {}
     }
     if !(width.is_finite() && height.is_finite() && width >= raster::MIN_SIDE && height >= raster::MIN_SIDE) {
-        return Err(bad(c, format!("`width` and `height` are the image's size in mm, from {} up, not {width} by {height}", raster::MIN_SIDE)));
+        return Err(bad(
+            c,
+            format!("`width` and `height` are the image's size in mm, from {} up, not {width} by {height}", raster::MIN_SIDE),
+        ));
     }
     let at = match point_opt(c, p, "at")? {
         Some(q) => q,
@@ -287,7 +303,8 @@ pub(super) fn sized(c: &str, m: &Model, im: &ImageInstance, fields: &Map<String,
     let [w0, h0] = t.size();
     for (key, side, natural) in [("horizontal_scale", "width", w0), ("vertical_scale", "height", h0)] {
         if let Some(v) = out.remove(key) {
-            let k = v.as_f64().filter(|k| k.is_finite() && *k > 0.0).ok_or_else(|| bad(c, format!("`{key}` is a number over 0, not {v}")))?;
+            let k =
+                v.as_f64().filter(|k| k.is_finite() && *k > 0.0).ok_or_else(|| bad(c, format!("`{key}` is a number over 0, not {v}")))?;
             if out.contains_key(side) {
                 return Err(bad(c, format!("give `{key}` or `{side}`, not both")));
             }

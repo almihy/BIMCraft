@@ -337,8 +337,7 @@ fn decode(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
     if bytes.len() > MAX_FILE {
         return Err(format!("it's {} bytes; up to {MAX_FILE}", bytes.len()));
     }
-    let mut reader =
-        image::ImageReader::new(Cursor::new(bytes)).with_guessed_format().map_err(|e| format!("it can't be read: {e}"))?;
+    let mut reader = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format().map_err(|e| format!("it can't be read: {e}"))?;
     match reader.format() {
         Some(image::ImageFormat::Png | image::ImageFormat::Jpeg | image::ImageFormat::Bmp) => {}
         _ => return Err("it isn't a PNG, a JPEG or a BMP".into()),
@@ -511,8 +510,14 @@ pub(crate) fn draw(d: &mut Drawing, t: &ImageType, corners: [(f64, f64); 4]) {
     let (vw, vh) = (f64::from(d.view.width), f64::from(d.view.height));
     let xs = corners.map(|c| c.0);
     let ys = corners.map(|c| c.1);
-    let lo = (xs.iter().copied().fold(f64::INFINITY, f64::min).floor().max(0.0), ys.iter().copied().fold(f64::INFINITY, f64::min).floor().max(0.0));
-    let hi = (xs.iter().copied().fold(f64::NEG_INFINITY, f64::max).ceil().min(vw), ys.iter().copied().fold(f64::NEG_INFINITY, f64::max).ceil().min(vh));
+    let lo = (
+        xs.iter().copied().fold(f64::INFINITY, f64::min).floor().max(0.0),
+        ys.iter().copied().fold(f64::INFINITY, f64::min).floor().max(0.0),
+    );
+    let hi = (
+        xs.iter().copied().fold(f64::NEG_INFINITY, f64::max).ceil().min(vw),
+        ys.iter().copied().fold(f64::NEG_INFINITY, f64::max).ceil().min(vh),
+    );
     if !(lo.0 < hi.0 && lo.1 < hi.1) {
         return;
     }
@@ -583,16 +588,15 @@ mod tests {
     #[test]
     fn a_bmp_comes_in() {
         let mut bmp = Vec::new();
-        image::RgbImage::from_pixel(3, 2, image::Rgb([10, 20, 30]))
-            .write_to(&mut Cursor::new(&mut bmp), image::ImageFormat::Bmp)
-            .unwrap();
+        image::RgbImage::from_pixel(3, 2, image::Rgb([10, 20, 30])).write_to(&mut Cursor::new(&mut bmp), image::ImageFormat::Bmp).unwrap();
         let t = ImageType::picture("a.bmp", &bmp).unwrap();
         assert_eq!(t.pixels(), (3, 2));
     }
 
     #[test]
     fn an_image_draws_its_pixels_where_its_corners_say() {
-        let t = ImageType::picture("q.png", &png(2, 2, |x, y| [if x == 0 { 0 } else { 255 }, if y == 0 { 0 } else { 255 }, 0, 255])).unwrap();
+        let t =
+            ImageType::picture("q.png", &png(2, 2, |x, y| [if x == 0 { 0 } else { 255 }, if y == 0 { 0 } else { 255 }, 0, 255])).unwrap();
         let mut d = Drawing::new(crate::render::View { scale: 1.0, cx: 50.0, cy: 50.0, width: 100, height: 100 });
         draw(&mut d, &t, [(10.0, 10.0), (30.0, 10.0), (30.0, 30.0), (10.0, 30.0)]);
         let Some(Prim::Image { at, width, height, rgba, .. }) = d.prims.first() else { panic!("no picture") };

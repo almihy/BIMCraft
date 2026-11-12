@@ -7103,7 +7103,8 @@ fn cad_import(c: &str, m: &Model, p: &Value) -> Result<(Id, CadImport, Cad), Str
             Ok((id, ci.clone(), cad.clone()))
         }
         Some(Element::Image(im)) => {
-            let t = m.image_types.get(&im.type_name).ok_or_else(|| bad(c, format!("the project holds no image named `{}`", im.type_name)))?;
+            let t =
+                m.image_types.get(&im.type_name).ok_or_else(|| bad(c, format!("the project holds no image named `{}`", im.type_name)))?;
             let level = m.plan_level(im.view).map_or(im.view, |l| m.guid(l));
             let (cad, mut ci) = im.lines_placed(t, level).ok_or_else(|| {
                 bad(c, format!("image {id} has no vector lines to read: it is a picture, or a PDF page that is one picture (a scan)"))
@@ -7290,7 +7291,8 @@ fn import_cad(s: &mut Session, p: &Value) -> R {
     if new {
         m.cads.insert(name.clone(), cad);
     }
-    let id = m.insert(Element::CadImport(CadImport { cad: name.clone(), level, at, origin, scale, stretch: 1.0, angle, view, hidden, colors }));
+    let id =
+        m.insert(Element::CadImport(CadImport { cad: name.clone(), level, at, origin, scale, stretch: 1.0, angle, view, hidden, colors }));
     let extents = m.cad_box(id);
     let mut reply = json!({
         "id": id, "cad": name, "source": source, "unit": unit, "scale": scale, "entities": entities, "layers": layers,

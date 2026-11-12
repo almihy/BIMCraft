@@ -95,9 +95,7 @@ impl Document {
 
     fn page(&self, page: usize) -> Result<&Page<'_>, String> {
         let n = self.pages();
-        page.checked_sub(1)
-            .and_then(|i| self.pdf.pages().get(i))
-            .ok_or_else(|| format!("it has no page {page}: its pages are 1 to {n}"))
+        page.checked_sub(1).and_then(|i| self.pdf.pages().get(i)).ok_or_else(|| format!("it has no page {page}: its pages are 1 to {n}"))
     }
 
     /// The size of page `page` (from 1), mm, as it's shown: turned as the page says, its user unit taken in.
@@ -131,7 +129,8 @@ impl Document {
         let p = self.page(page)?;
         let [_, h] = self.size(page)?;
         // To mm, y down from the top left as the pixels are; then flipped, so y runs up from the bottom.
-        let to_mm = Affine::new([1.0, 0.0, 0.0, -1.0, 0.0, h]) * Affine::scale(user_unit(p) * MM_PER_PT) * p.initial_transform(true).to_kurbo();
+        let to_mm =
+            Affine::new([1.0, 0.0, 0.0, -1.0, 0.0, h]) * Affine::scale(user_unit(p) * MM_PER_PT) * p.initial_transform(true).to_kurbo();
         let cache = InterpreterCache::new();
         let mut ctx = Context::new(to_mm, Rect::new(-1e9, -1e9, 1e9, 1e9), &cache, p.xref(), InterpreterSettings::default());
         let mut device = Collect { out: Vectors::default(), held: 0 };

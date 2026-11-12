@@ -75,29 +75,17 @@ impl BimApp {
         let n = doc.as_ref().map_or(0, Document::pages);
         let sizes = (1..=n).map(|p| doc.as_ref().and_then(|d| d.size(p).ok()).unwrap_or([0.0, 0.0])).collect();
         let scales = (1..=n).map(|p| doc.as_ref().and_then(|d| d.scale(p))).collect();
-        self.pdf_box = Some(PdfBox {
-            path,
-            doc,
-            sizes,
-            scales,
-            page: 1,
-            page_text: "1".into(),
-            dpi: raster::DEFAULT_DPI,
-            thumbs: Vec::new(),
-            error,
-        });
+        self.pdf_box =
+            Some(PdfBox { path, doc, sizes, scales, page: 1, page_text: "1".into(), dpi: raster::DEFAULT_DPI, thumbs: Vec::new(), error });
     }
 
     /// The picture at `path` follows the cursor, to be placed by a click.
     pub(crate) fn import_image_path(&mut self, path: PathBuf) {
         let size = self.session.files.given.read(&path).map_err(|e| e.to_string()).and_then(|b| raster::picture_size(&b));
         match size {
-            Ok(size) => self.start_placing(Placing {
-                command: "import_image",
-                params: json!({"path": path.to_string_lossy()}),
-                size,
-                stated: None,
-            }),
+            Ok(size) => {
+                self.start_placing(Placing { command: "import_image", params: json!({"path": path.to_string_lossy()}), size, stated: None })
+            }
             Err(e) => {
                 let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                 self.status = crate::Status { text: format!("{name}: {e}"), error: true };
@@ -155,7 +143,8 @@ impl BimApp {
                         ui.horizontal_wrapped(|ui| {
                             for (i, tex) in b.thumbs.iter().enumerate() {
                                 let n = i + 1;
-                                let (rect, response) = ui.allocate_exact_size(vec2(THUMB as f32 + 8.0, THUMB as f32 + 24.0), Sense::click());
+                                let (rect, response) =
+                                    ui.allocate_exact_size(vec2(THUMB as f32 + 8.0, THUMB as f32 + 24.0), Sense::click());
                                 response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, tf("Page {}", &[&n.to_string()])));
                                 let picked = b.page == n;
                                 let p = ui.painter_at(rect);
@@ -169,7 +158,13 @@ impl BimApp {
                                     p.image(tex.id(), img, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
                                     p.rect_stroke(img, 0.0, Stroke::new(1.0, pal().border), StrokeKind::Outside);
                                 }
-                                p.text(rect.center_bottom() - vec2(0.0, 4.0), egui::Align2::CENTER_BOTTOM, n.to_string(), egui::FontId::proportional(11.0), pal().text);
+                                p.text(
+                                    rect.center_bottom() - vec2(0.0, 4.0),
+                                    egui::Align2::CENTER_BOTTOM,
+                                    n.to_string(),
+                                    egui::FontId::proportional(11.0),
+                                    pal().text,
+                                );
                                 if response.clicked() {
                                     b.page = n;
                                     b.page_text = n.to_string();
@@ -291,7 +286,9 @@ impl BimApp {
             let at = screen(*corner);
             let key = ui.id().with(("image grip", id, k));
             let response = self.control(ui, Rect::from_center_size(at, vec2(12.0, 12.0)), key);
-            response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, tf("Corner {} of image {}", &[&(k + 1).to_string(), &id.to_string()])));
+            response.widget_info(|| {
+                WidgetInfo::labeled(WidgetType::Button, true, tf("Corner {} of image {}", &[&(k + 1).to_string(), &id.to_string()]))
+            });
             if response.drag_started() && !self.refuse_pinned_ids(&[id]) {
                 ui.memory_mut(|mem| mem.data.insert_temp(held_key, k));
             }
@@ -304,10 +301,7 @@ impl BimApp {
             drawn = sized.corners().map(screen).to_vec();
             if response.drag_stopped() {
                 ui.memory_mut(|mem| mem.data.remove::<usize>(held_key));
-                self.run(
-                    "modify",
-                    json!({"id": id, "at": [sized.at.0, sized.at.1], "width": sized.width, "height": sized.height}),
-                );
+                self.run("modify", json!({"id": id, "at": [sized.at.0, sized.at.1], "width": sized.width, "height": sized.height}));
             }
         }
         let stroke = Stroke::new(1.0, pal().accent);

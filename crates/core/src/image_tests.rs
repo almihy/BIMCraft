@@ -245,7 +245,11 @@ fn an_image_goes_in_a_section_and_not_in_a_3d_view() {
     let r = run(&mut s, "import_image", json!({"path": "site.png", "view": section, "at": [0, 1500], "width": 2000}));
     let e = &el(&mut s, &r["id"]);
     assert_eq!(e["view"], s.model.guid(section.as_u64().unwrap()).to_string());
-    let d = crate::render::section(&s.model, section.as_u64().unwrap(), crate::render::section_fit(&s.model, section.as_u64().unwrap(), 400, 300));
+    let d = crate::render::section(
+        &s.model,
+        section.as_u64().unwrap(),
+        crate::render::section_fit(&s.model, section.as_u64().unwrap(), 400, 300),
+    );
     assert!(d.owners.contains(&r["id"].as_u64()), "the section draws it");
     let v3 = run(&mut s, "camera", json!({"eye": [10000, -10000, 5000], "target": [0, 0, 0], "name": "Mine"}))["id"].clone();
     let e = fails(&mut s, "import_image", json!({"image": "site.png", "view": v3}));
