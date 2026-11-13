@@ -139,6 +139,8 @@ mod family_parametric_tests;
 #[cfg(test)]
 mod family_revit_tests;
 #[cfg(test)]
+mod family_sample_tests;
+#[cfg(test)]
 mod flip_tests;
 #[cfg(test)]
 mod line_tests;
