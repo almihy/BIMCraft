@@ -134,7 +134,8 @@ fn imported_categories_hides_a_drawings_layers_or_the_category_in_the_view() {
     shortcut(&mut h, "VV");
     press(&mut h, "Imported Categories");
     assert!(h.query_by_label("Model Categories").is_some(), "the tabs stay");
-    // Its layers, under the drawing: WALLS cleared hides it in this view.
+    // Its layers, under the drawing's row, unfolded as Revit's: WALLS cleared hides it in this view.
+    press(&mut h, "plan: Unfold");
     pick(&mut h, Role::CheckBox, "WALLS");
     press(&mut h, "OK");
     let g = plan_graphics(&h, 100000);
@@ -142,6 +143,7 @@ fn imported_categories_hides_a_drawings_layers_or_the_category_in_the_view() {
     // Shown again, and the category hidden as a whole.
     shortcut(&mut h, "VV");
     press(&mut h, "Imported Categories");
+    press(&mut h, "plan: Unfold");
     pick(&mut h, Role::CheckBox, "WALLS");
     pick(&mut h, Role::CheckBox, "CAD Imports");
     press(&mut h, "OK");

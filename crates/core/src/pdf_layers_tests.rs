@@ -152,3 +152,84 @@ fn a_picture_has_no_layers_to_hide() {
     let e = fails(&mut s, "cad_layers", json!({"id": r["id"]}));
     assert!(e.contains("no vector lines"), "{e}");
 }
+
+#[test]
+fn a_pdfs_layer_is_drawn_in_the_lines_and_halftone_a_view_gives_it_and_a_template_carries_them() {
+    let mut s = with_file("plan.pdf", plan_pdf());
+    let id = run(&mut s, "import_pdf", json!({"path": "plan.pdf", "scale": 100}))["id"].clone();
+    let level = s.model.guid(s.model.levels()[0].0).to_string();
+    let (wx, wy) = at(100.0, 10.0);
+    // Walls in blue, as Revit's Projection Lines override of a DWG's layer.
+    run(
+        &mut s,
+        "graphics",
+        json!({"view": level, "pdf_imports": {"plan.pdf": {"layers": {"Walls": {"projection": {"color": [0, 0, 255]}}}}}}),
+    );
+    assert!(has(&plan(&s), wx, wy, [0, 0, 255]), "the wall is drawn blue");
+    // The whole page halftone from its own row: the wall stays blue, lightened.
+    run(&mut s, "graphics", json!({"view": level, "pdf_imports": {"plan.pdf": {"all": {"halftone": true}}}}));
+    assert!(has(&plan(&s), wx, wy, [127, 127, 255]), "halftone");
+    // Hidden whole: nothing of it drawn, nothing of it snapped to.
+    run(&mut s, "graphics", json!({"view": level, "pdf_imports": {"plan.pdf": {"all": {"hidden": true}}}}));
+    assert!(!has(&plan(&s), wx, wy, [127, 127, 255]) && !has(&plan(&s), wx, wy, [0, 0, 255]));
+    let e = fails(&mut s, "graphics", json!({"view": level, "pdf_imports": {"plan.pdf": {"layers": {"Doors": {"halftone": true}}}}}));
+    assert!(e.contains("no layer `Doors`"), "{e}");
+    let e = fails(&mut s, "graphics", json!({"view": level, "pdf_imports": {"plan.pdf": {"all": {"cut": {"color": [1, 2, 3]}}}}}));
+    assert!(e.contains("projection lines"), "{e}");
+    // A template made from the view carries its imported categories, and a view that follows it draws by them.
+    run(&mut s, "graphics", json!({"view": level, "pdf_imports": {"plan.pdf": {"all": {"hidden": null}}}}));
+    let t = run(&mut s, "template", json!({"name": "Imports", "from": level, "controls": ["imports"]}));
+    assert_eq!(t["controls"], json!(["imports"]), "{t}");
+    run(&mut s, "graphics", json!({"view": level, "reset": true}));
+    assert!(has(&plan(&s), wx, wy, [0, 0, 0]), "its own settings gone, the wall is black again");
+    run(&mut s, "graphics", json!({"view": level, "template": "Imports"}));
+    assert!(has(&plan(&s), wx, wy, [127, 127, 255]), "the template's: blue, halftone");
+    let e = fails(&mut s, "cad_layers", json!({"id": id, "view": level, "hide": ["Walls"]}));
+    assert!(e.contains("follow view template"), "{e}");
+    // What the file holds needs this build's format.
+    let v: Value = serde_json::from_str(&s.model.to_json().unwrap()).unwrap();
+    assert_eq!(v["format"], crate::model::FORMAT);
+}
+
+#[test]
+fn a_page_is_read_again_from_its_pdf_into_the_same_image_and_its_instances_stay() {
+    let mut s = with_file("plan.pdf", plan_pdf());
+    let r = run(&mut s, "import_pdf", json!({"path": "plan.pdf", "scale": 100}));
+    let id = r["id"].as_u64().unwrap();
+    let level = s.model.guid(s.model.levels()[0].0).to_string();
+    run(&mut s, "cad_layers", json!({"id": id, "view": level, "hide": ["Notes"]}));
+    // The page as it is now: Walls and a new layer, Doors; Notes and Furniture are gone.
+    let content = "/OC /L0 BDC 0 0 0 RG 4 w 10 10 m 190 10 l S EMC /OC /L1 BDC 0 0 1 RG 4 w 40 100 m 60 100 l S EMC";
+    s.files.give("plan v2.pdf", sample_layered(content, [200.0, 200.0], &[("Walls", false), ("Doors", false)]));
+    let r = run(&mut s, "manage_images", json!({"reload": "plan.pdf", "path": "plan v2.pdf"}));
+    assert_eq!(r["reloaded"]["layers"], json!(["Walls", "Doors"]), "{r}");
+    assert!(s.model.elements.get(id).is_some(), "its instance stays");
+    let g = run(&mut s, "graphics", json!({"view": level}));
+    assert_eq!(g["pdf_layers"], json!({}), "what was hidden of a layer that's gone goes: {g}");
+    let (dx, dy) = at(50.0, 100.0);
+    assert!(has(&plan(&s), dx, dy, [0, 0, 255]), "the new door is drawn");
+    let e = fails(&mut s, "manage_images", json!({"reload": "plan.pdf"}));
+    assert!(e.contains("`path`"), "{e}");
+}
+
+#[test]
+fn a_dense_sheet_keeps_its_lines_and_layers_past_what_a_page_used_to_keep() {
+    // Half a million points on ten layers: 125 000 small boxes, each four points.
+    let mut content = String::new();
+    for l in 0..10 {
+        content.push_str(&format!("/OC /L{l} BDC 0 0 0 RG 0.1 w "));
+        for i in 0..12_500 {
+            let (x, y) = (10.0 + (i % 125) as f64 * 1.5, 10.0 + (i / 125) as f64 * 1.8 + l as f64 * 0.1);
+            content.push_str(&format!("{x:.1} {y:.1} 1 1 re S "));
+        }
+        content.push_str("EMC ");
+    }
+    let names: Vec<String> = (0..10).map(|l| format!("Layer {l:02}")).collect();
+    let layers: Vec<(&str, bool)> = names.iter().map(|n| (n.as_str(), false)).collect();
+    let mut s = with_file("dense.pdf", sample_layered(&content, [200.0, 200.0], &layers));
+    let r = run(&mut s, "import_pdf", json!({"path": "dense.pdf", "scale": 100}));
+    assert_eq!(r["lines"], 125_000, "{}", r["notes"]);
+    assert_eq!(r["layers"].as_array().map(Vec::len), Some(10), "{r}");
+    assert!(r.get("notes").is_none(), "no picture, nothing left out: {r}");
+    assert!(s.model.image_types.get("dense.pdf").is_some_and(crate::raster::ImageType::drawn));
+}

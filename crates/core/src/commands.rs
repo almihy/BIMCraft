@@ -293,9 +293,13 @@ other_files(
         "manage_images",
         "Manage Images",
         &[],
-        "{delete?: [name, …]} Revit's Manage > Manage Images: the images and PDF pages the project holds, {images: [{name, \
-         source, kind: pdf|image, page, dpi, pixels, size, stated_scale, lines, instances: [id, …]}]}; `delete` removes those \
-         named and every instance of them (`deleted`, `removed`). `import_pdf` or `import_image` with `image` places one again",
+        "{delete?: [name, …], reload?: name, path?, page?, resolution?} Revit's Manage > Manage Images: the images and PDF \
+         pages the project holds, {images: [{name, source, kind: pdf|image, page, dpi, pixels (none for a page drawn from its \
+         lines with no raster images, which has no picture), size, stated_scale, lines, layers, instances: [id, …]}]}; \
+         `delete` removes those named and every instance of them (`deleted`, `removed`). `reload` reads image `reload` again \
+         from the file at `path` (Reload From: a PDF's `page` at `resolution`, as it came in unless given), into the same \
+         image, so its instances stay where they are; a page that came in before its layers were kept comes in with them now \
+         (`reloaded`: {image, lines, layers, drawn}). `import_pdf` or `import_image` with `image` places one again",
         images::manage_images,
     )
     .menu("Manage > Manage Images"),
@@ -4474,6 +4478,10 @@ fn view_template(s: &mut Session, p: &Value) -> R {
             detail: resolved.detail,
             style: resolved.style,
             background_grid: resolved.background_grid,
+            layers: resolved.layers.clone(),
+            pdf_layers: resolved.pdf_layers.clone(),
+            imports: resolved.imports.clone(),
+            pdf_imports: resolved.pdf_imports.clone(),
             ..Graphics::default()
         };
         t.view_range = match m.elements.get(view) {
@@ -6953,7 +6961,8 @@ fn cad_layers(s: &mut Session, p: &Value) -> R {
                     c,
                     format!(
                         "image {id} shows as a picture of the whole page, so its layers can't be shown and hidden (its lines don't \
-                         hold all it draws, or it came in before PDF layers were kept: import the page again)"
+                         hold all it draws, or it came in before PDF layers were kept: read it again from its PDF with \
+                         `manage_images` `reload` and `path`, Manage Images' Reload From, and its instances stay)"
                     ),
                 ));
             }
@@ -7005,6 +7014,16 @@ fn cad_layers(s: &mut Session, p: &Value) -> R {
             let mut g = graphics::graphics_of(m, v)
                 .cloned()
                 .ok_or_else(|| bad(c, format!("{} isn't a plan, a section, an elevation or a 3D view", view_title(m, v))))?;
+            if (!hide.is_empty() || !show.is_empty())
+                && let Some(t) = g.controlled_by(m, Group::Imports)
+            {
+                return Err(bad(
+                    c,
+                    format!(
+                        "its imported categories follow view template `{t}`; change the template, or `graphics` `template: null` to stop following it"
+                    ),
+                ));
+            }
             let map = if image { &mut g.pdf_layers } else { &mut g.layers };
             let was = map.get(&name).cloned().unwrap_or_default();
             let mut now = was.clone();

@@ -246,13 +246,14 @@ fn place(c: &str, s: &mut Session, p: &Value, name: &str, new: Option<ImageType>
         images_in(m, m.guid(view)).iter().filter_map(|id| image(m, *id)).map(|im| im.order).max().map_or(0, |o| o.saturating_add(1));
     // A PDF's layers it has off come in hidden in the view it is placed in, unticked in its Visibility/Graphics (Imported
     // Categories) for a person to tick on, as Revit shows a DWG's layers that are off; in a view that has none of its own (a
-    // sheet, a dependent view), hidden wherever it shows.
+    // sheet, a dependent view, one whose imported categories follow a template), hidden wherever it shows.
     let off: std::collections::BTreeSet<String> = t
         .lines()
         .filter(|_| t.drawn())
         .map(|cad| cad.dxf().layers.iter().filter(|l| l.off).map(|l| l.name.clone()).collect())
         .unwrap_or_default();
-    let own_graphics = crate::graphics::graphics_of(m, view).is_some() && m.plan_view(view).and_then(|v| v.parent).is_none();
+    let own_graphics = crate::graphics::graphics_of(m, view).is_some_and(|g| g.controlled_by(m, crate::graphics::Group::Imports).is_none())
+        && m.plan_view(view).and_then(|v| v.parent).is_none();
     let im = ImageInstance {
         order,
         type_name: name.to_string(),
@@ -343,7 +344,8 @@ fn instances(m: &Model, name: &str) -> Vec<Id> {
 /// The images a project holds, each with what places it; `delete` removes images and every instance of them.
 pub(super) fn manage_images(s: &mut Session, p: &Value) -> R {
     let c = "manage_images";
-    only(c, p, &["delete"])?;
+    only(c, p, &["delete", "reload", "path", "page", "resolution"])?;
+    let reloaded = reload(c, s, p)?;
     let m = &s.model;
     let mut deleted: Vec<String> = Vec::new();
     let mut gone: Vec<Id> = Vec::new();
@@ -383,7 +385,80 @@ pub(super) fn manage_images(s: &mut Session, p: &Value) -> R {
             })
         })
         .collect();
-    Ok(json!({"images": list, "deleted": deleted, "removed": gone}))
+    let mut reply = json!({"images": list, "deleted": deleted, "removed": gone});
+    if let Some(r) = reloaded {
+        reply["reloaded"] = r;
+    }
+    Ok(reply)
+}
+
+/// Manage Images' Reload From: image `reload` read again from the file at `path` (a PDF's page `page`, at `resolution`, each
+/// as it came in unless given; a picture's file), into the same image, so every instance of it keeps its place and stays.
+/// A page that comes in drawn from its lines has its layers: what views hid of it they still hide, where the layer is still
+/// there. None when nothing is to be reloaded.
+fn reload(c: &str, s: &mut Session, p: &Value) -> Result<Option<Value>, String> {
+    let Some(name) = string(c, p, "reload")? else {
+        if ["path", "page", "resolution"].iter().any(|k| !absent(p.get(*k))) {
+            return Err(bad(c, "`path`, `page` and `resolution` go with `reload`, the image to read again"));
+        }
+        return Ok(None);
+    };
+    let was = held(c, &s.model, &name)?.clone();
+    let path = string(c, p, "path")?.ok_or_else(|| bad(c, "`reload` takes `path`, the file to read the image from again"))?;
+    let (t, notes) = match was.page() {
+        Some(page) => {
+            if ext(&beside(s, &path)) != "pdf" {
+                return Err(bad(c, format!("`{name}` is a page of a PDF: reload it from a .pdf file")));
+            }
+            let page = count_opt(c, p, "page", page as usize)?;
+            let dpi = match num(c, p, "resolution")? {
+                None => was.dpi(),
+                Some(r) if raster::RESOLUTIONS.iter().any(|d| f64::from(*d) == r) => r as u32,
+                Some(r) => return Err(bad(c, format!("`resolution` is one of 72, 150, 300 or 600 dpi, not {r}"))),
+            };
+            let read = page_read(c, s, &path, page, dpi)?;
+            let source: String = Path::new(&path).file_name().map_or_else(|| path.clone(), |f| f.to_string_lossy().into_owned());
+            ImageType::from_pdf(&source, &read)
+        }
+        None => {
+            let (bytes, source) = read_file(c, s, &path)?;
+            (ImageType::picture(&source, &bytes).map_err(|e| bad(c, format!("{path}: {e}")))?, Vec::new())
+        }
+    };
+    let layers: Vec<String> = t.layers().into_iter().map(str::to_string).collect();
+    let [w0, h0] = t.size();
+    let m = s.model_mut();
+    // Each instance as wide as it was, as tall as the page now is to that width where its proportions are locked.
+    for e in m.elements.values_mut() {
+        if let Element::Image(im) = e
+            && im.type_name == name
+        {
+            if im.lock && w0 > 0.0 {
+                im.height = im.width * h0 / w0;
+            }
+            im.hidden.retain(|l| layers.contains(l));
+        }
+    }
+    for g in m.elements.values_mut().filter_map(crate::graphics::graphics_mut).chain(m.view_templates.values_mut().map(|t| &mut t.graphics))
+    {
+        if let Some(h) = g.pdf_layers.get_mut(&name) {
+            h.retain(|l| layers.contains(l));
+            if h.is_empty() {
+                g.pdf_layers.remove(&name);
+            }
+        }
+        if let Some(look) = g.pdf_imports.get_mut(&name) {
+            look.layers.retain(|l, _| layers.contains(l));
+        }
+    }
+    let lines = t.lines().map_or(0, |l| l.dxf().entities.len());
+    let drawn = t.drawn();
+    m.image_types.insert(name.clone(), t);
+    let mut out = json!({"image": name, "lines": lines, "layers": layers, "drawn": drawn});
+    if !notes.is_empty() {
+        out["notes"] = json!(notes);
+    }
+    Ok(Some(out))
 }
 
 /// What `modify` sets of image `im`, from `fields`: `horizontal_scale` and `vertical_scale` as its `width` and `height`, and,

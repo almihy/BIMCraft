@@ -359,7 +359,10 @@ fn templates_control_a_views_phase_and_its_options() {
     run(&mut s, "modify", json!({"id": walls[0], "params": {"Design Option": "Facade: Glass"}}));
     run(&mut s, "graphics", json!({"view": 100000, "phase": "Existing", "phase_filter": "Show Complete", "options": {"Facade": "Glass"}}));
     let r = run(&mut s, "template", json!({"name": "Survey", "from": 100000}));
-    assert_eq!(r["controls"], json!(["categories", "filters", "range", "phase", "options", "scale", "detail", "style", "background_grid"]));
+    assert_eq!(
+        r["controls"],
+        json!(["categories", "filters", "range", "phase", "options", "scale", "detail", "style", "background_grid", "imports"])
+    );
     assert_eq!(
         (r["phase"].clone(), r["phase_filter"].clone(), r["options"].clone()),
         (json!("Existing"), json!("Show Complete"), json!({"Facade": "Glass"}))
