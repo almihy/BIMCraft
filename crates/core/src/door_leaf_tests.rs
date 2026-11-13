@@ -79,9 +79,10 @@ fn the_built_in_single_door_draws_its_leaf_open_and_not_shut_at_every_detail_lev
         assert_eq!(leaves.len(), 1, "{detail}: one open leaf: {open:?}");
         assert!(near(leaves[0].0, 40.0) && near(leaves[0].1, 800.0), "{detail}: a 40 x 800 panel square to the wall: {leaves:?}");
         assert_eq!(swings(&open), 1, "{detail}: its swing");
-        // Nothing drawn shut across the opening: what is cut is its two jambs, at Medium and Fine.
+        // Nothing drawn shut across the opening: what is cut is its two jambs, at every level (they say nothing of their
+        // levels, so Revit's default draws them at Coarse too; its handles say Coarse and Top/Bottom off).
         assert!(closed.iter().all(|r| size(r).0 < 100.0), "{detail}: no leaf shut in the wall: {closed:?}");
-        assert_eq!(closed.len(), if detail == "coarse" { 0 } else { 2 }, "{detail}: its jambs cut");
+        assert_eq!(closed.len(), 2, "{detail}: its jambs cut");
     }
 }
 

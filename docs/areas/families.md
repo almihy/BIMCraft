@@ -95,8 +95,8 @@ buttons).
 
 A form's `show` and a symbol's are Revit's Visibility Settings (`family::Show`, `family::Levels`): each box true unless it says
 false. A form that says nothing is drawn in every view at every detail level, as Revit's default (`Show::in_view`; a symbol that
-says nothing, at every level but Coarse, `Levels::UNSAID`); the built-in door and window families state theirs, so their forms
-that Revit's families would hide at Coarse say so. The Family Editor carries both through (`FormText::show`, `SymbolText::show`), and
+says nothing, at every level but Coarse, `Levels::UNSAID`); the built-in door and window families' forms say nothing either (a door's leaf shut in its opening says
+no plan, its handles no Coarse and no plan from above), so a Coarse plan shows a door's jambs. The Family Editor carries both through (`FormText::show`, `SymbolText::show`), and
 each form's and symbol's Visibility/Graphics Overrides row has Edit…, which opens Family Element Visibility Settings as Revit's does
 (`editor.rs::visibility_settings`) and is the only place the editor sets a visibility: for a form View Specific Display (Plan/RCP,
 Front/Back, Left/Right, When cut in Plan/RCP) and Detail Levels, for a symbol its Detail Levels alone; it opens on what is drawn,
