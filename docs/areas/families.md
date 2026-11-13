@@ -223,14 +223,32 @@ other as the check and the fallback (`snapshot` forms and symbols), and checks e
   families (`Model::component_local_pieces` and `opening_local` pass them), at most `MAX_NESTING` deep and `MAX_NESTED` in
   all. Revit's result already has them, so they are built only in a parametric type.
 - **The check and the fallback.** `Family::run_check` compares each type's parametric pieces with its snapshot ones at
-  Coarse, Medium and Fine: volume within 1 % (`check::VOLUME`), box within 2 mm (`check::BOX`), and the plan symbols'
-  extent within 2 mm. `draws_snapshot(type)` is the one rule what is drawn follows: a type whose check failed (or that was
-  never checked while Revit's result for it is there) draws its snapshot forms and symbols, the others their parametric
-  ones (`build`, `marks`, `shapes` and `conservative_bounds` filter by it). `editable` is ok when every type matched and the
-  translation left nothing `untranslated`; its `reason` says why not in plain words. The check runs whenever the family
-  changes through `family`, but a type whose values changed since is `flexed` and keeps what it was found (Revit's result
-  no longer says what it should be); `like` copies the check of the type duplicated, so a duplicate of a matched type is
-  parametric.
+  Coarse, Medium and Fine (`Family::compare_type`): volume within 1 % (`check::VOLUME`), box within 2 mm (`check::BOX`),
+  the shape surface to surface both ways (`family/compare.rs`: points spread over each shape's triangles measured to the
+  other's nearest point, so a part mirrored, upside down, moved or missing is as far off as it is), and the plan's and the
+  front and side elevations' lines point by point, each within `check::NEAR` (2 mm); a share of a drawing no bigger than
+  `check::NOISE_SHARE` up to `check::NOISE` mm off passes (a seam of facets, a rounding in the export). A door or a window
+  is checked in the wall Revit's result was made in: `to_bimcraft.wall` (mm, one or per type), else the exporter's 200 mm
+  (`TypeCheck::wall` says which). `draws_snapshot(type)` is the one rule what is drawn follows: a type whose check failed
+  and that nobody has changed since (`TypeCheck::as_revit`) draws its snapshot forms and symbols, the others their
+  parametric ones (`build`, `marks`, `shapes` and `conservative_bounds` filter by it). The check runs once, when Revit's
+  definition comes in (`revit`, a package's `definition`): after that BIMCraft's rebuild is what a changed type is. A
+  type whose values change, every type when the definition changes (forms, symbols, parameters, references, dimensions,
+  nested parts; not its types' lists, identity, catalog or source), and those `rebuild` names are `edited`: drawn from
+  their rules, never compared again; Type Properties and the Family Editor offer the rebuild for a type drawn as Revit
+  made it, saying it may differ from Revit's. A type made since, not `like` another, has no check ("Not checked");
+  `like` copies the check of the type duplicated. `editable` (`Family::summarize`) is ok when no type is drawn as Revit
+  made it, at least one matched, and the translation left nothing `untranslated`; its `reason` says why not in plain
+  words. A change of a type its dimensions can't hold (solved before, over-constrained now) is refused, as Revit's
+  "Constraints are not satisfied".
+- **Families that exist already.** Loading a package whose shared nested family the project has otherwise is Revit's
+  "Family Already Exists": `shared` (one choice, or per name) says `overwrite` (the project's values of its types kept),
+  `overwrite_values` or `existing`; unsaid, the load is refused and names them. One the same as the project's asks nothing.
+  A dry run of a file says `exists` and `shared_asks`, which Load Family asks in Revit's dialog before it loads;
+  `keep_values: false` said takes each type the file brings exactly as it brings it ("... and its parameter values").
+- **The samples.** `family_sample_tests.rs` pins asymmetric families, a door in 100, 200 and 300 mm walls and a rebuilt
+  door flipped with its nested handle. The real exported samples are Autodesk's and never kept here: run it with
+  `BIMCRAFT_FAMILY_SAMPLES=<folder of packages>` and each family's match is held to `testdata/families/sample-matches.json`.
 - **The translator.** B (a bound number) becomes an `Expr`: a number, `ref(Name) + offset` (the offset itself bound where
   it follows parameters), `scale * Param + offset`, or `(formula)`; then taken into the family's axes: `x + x_offset`,
   `y_sign × y + y_offset` (and `x_sign × x + x_offset`), `z - z_minus`, where `z_minus` that names a plane (a window's sill) becomes the parameter

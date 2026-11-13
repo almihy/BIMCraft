@@ -1,13 +1,16 @@
 //! The check of a family from Revit: each type's parametric result (its references solved, its parametric forms and nested
 //! parts built) against Revit's own for it (its `snapshot` forms and symbols), at each detail level: the volume within 1 %, the
-//! box within 2 mm, and the plan's extent (its symbols and the forms it shows) within 2 mm. A type that matched draws its parametric forms; one that didn't
-//! draws Revit's, and says why ([`TypeCheck`]); the family is editable when every type matched and nothing was left
-//! untranslated ([`Editable`]).
+//! box within 2 mm, the shape surface to surface both ways, and the plan's and the elevations' lines point by point, within
+//! [`NEAR`] mm ([`compare`]). It runs once, when the family comes in. A type that matched draws its parametric forms; one
+//! that didn't draws Revit's, and says why ([`TypeCheck`]); the family is editable when every type matched and nothing was
+//! left untranslated ([`Editable`]).
 
 use std::collections::{BTreeMap, HashMap};
 
 use super::shapes::volume;
-use super::{Build, Editable, Family, Others, Piece, SymbolView, TypeCheck, csg};
+use super::{Build, Editable, Family, Others, Piece, SymbolView, TypeCheck, compare, csg};
+use crate::geom::P2;
+use crate::geom::v3::P3;
 use crate::graphics::Detail;
 
 /// How far the volumes may be apart, as a share of Revit's, and the boxes and the plan symbols' extents, mm.
@@ -16,6 +19,15 @@ pub const VOLUME: f64 = 0.01;
 /// facets, as its views tessellate them, where BIMCraft's are in many, so a curved form holds a little more in BIMCraft.
 pub const VOLUME_CURVED: f64 = 0.03;
 pub const BOX: f64 = 2.0;
+/// How far a point of BIMCraft's drawing may be from Revit's, and one of Revit's from BIMCraft's, mm: of the shape's
+/// surfaces, and of the plan's and the elevations' lines.
+pub const NEAR: f64 = 2.0;
+/// What is let pass beyond [`NEAR`]: a share of a drawing this small ([`NOISE_SHARE`]) no farther off than this, mm: a seam
+/// of facets or a rounding in the export, never a part out of place.
+pub const NOISE: f64 = 5.0;
+pub const NOISE_SHARE: f64 = 0.001;
+/// How far a point is looked for, mm: one farther off is said to be more than this.
+pub const REACH: f64 = 500.0;
 /// The height over its level a floor plan cuts at, mm: Revit's default, which its plan of a family is drawn at.
 pub const PLAN_CUT: f64 = 1200.0;
 /// How near the cut plane a form's bottom may be and still be seen below it, not cut, mm.
@@ -37,25 +49,6 @@ fn measure(pieces: &[Piece], d: Detail) -> (f64, Option<[[f64; 3]; 2]>) {
     (v, b)
 }
 
-/// The extent of `marks`, (x, y) from above.
-fn extent(marks: &[super::Mark]) -> Option<[[f64; 2]; 2]> {
-    let mut b: Option<[[f64; 2]; 2]> = None;
-    let mut take = |p: crate::geom::P2| {
-        b = Some(match b {
-            None => [[p.0, p.1], [p.0, p.1]],
-            Some([lo, hi]) => [[lo[0].min(p.0), lo[1].min(p.1)], [hi[0].max(p.0), hi[1].max(p.1)]],
-        });
-    };
-    for m in marks {
-        match m {
-            super::Mark::Line(pts) => pts.iter().for_each(|p| take(*p)),
-            super::Mark::Dot { centre, .. } => take(*centre),
-            super::Mark::Label { at, .. } => take(*at),
-        }
-    }
-    b
-}
-
 fn level(d: Detail) -> &'static str {
     match d {
         Detail::Coarse => "coarse",
@@ -67,37 +60,55 @@ fn level(d: Detail) -> &'static str {
 const AXES: [&str; 3] = ["width", "depth", "height"];
 
 impl Family {
-    /// Every type checked again ([`Family::check_type`]), but those flexed since they came in, and whether it is editable:
-    /// every type matched and nothing left untranslated. A family carrying no Revit result has nothing to check.
-    pub fn run_check(&mut self, others: Others) {
-        let untranslated = self.editable.as_ref().map(|e| e.untranslated.clone()).unwrap_or_default();
+    /// Every type checked as Revit exported it ([`Family::check_type`]), a door or a window in the wall Revit's result was
+    /// made in (`walls`, per type; else one of [`super::DEFAULT_WALL`]): run once, when the family comes in from Revit (loaded
+    /// or reloaded with its definition), never after an edit. Then whether it is editable ([`Family::summarize`]). A family
+    /// carrying no Revit result has nothing to check.
+    pub fn run_check(&mut self, others: Others, walls: &super::revit::Walls) {
         if !self.has_snapshot() && self.editable.is_none() {
             return;
         }
-        let mut check = BTreeMap::new();
-        for t in self.types.keys() {
-            let c = match self.check.get(t).filter(|c| c.flexed) {
-                Some(c) => c.clone(),
-                None => self.check_type(t, others),
-            };
-            check.insert(t.clone(), c);
-        }
+        let check = self
+            .types
+            .keys()
+            .filter_map(|t| {
+                let wall = walls.get(t).copied();
+                let c = self.check_type(t, others, wall.unwrap_or(super::DEFAULT_WALL))?;
+                Some((t.clone(), super::TypeCheck { wall, ..c }))
+            })
+            .collect();
         self.check = check;
+        self.summarize();
+    }
+
+    /// Whether it is editable, from its types' checks as they stand: every type that came in matched Revit's result or has
+    /// been changed since, at least one was compared and matched, and nothing was left untranslated; else why not, in plain
+    /// words. Nothing is built or compared: the check ran when it came in.
+    pub fn summarize(&mut self) {
+        if !self.has_snapshot() && self.editable.is_none() {
+            return;
+        }
+        let untranslated = self.editable.as_ref().map(|e| e.untranslated.clone()).unwrap_or_default();
         let failed: Vec<String> = self
             .check
             .iter()
-            .filter(|(_, c)| !c.matched)
+            .filter(|(_, c)| c.as_revit())
             .map(|(t, c)| format!("its type {t}: {}", c.reason.clone().unwrap_or_default()))
             .collect();
-        let ok = untranslated.is_empty() && failed.is_empty() && self.has_parametric();
+        let compared = self.check.values().any(|c| c.matched);
+        let ok = untranslated.is_empty() && failed.is_empty() && compared && self.has_parametric();
         let reason = if ok {
             None
         } else if let Some(u) = untranslated.first() {
             Some(if untranslated.len() > 1 { format!("{u} (and {} more)", untranslated.len() - 1) } else { u.clone() })
         } else if let Some(f) = failed.first() {
             Some(if failed.len() > 1 { format!("{f} (and {} more types)", failed.len() - 1) } else { f.clone() })
-        } else {
+        } else if !self.has_parametric() {
             Some("it came without the rules that size it, so it is drawn as Revit made it".into())
+        } else if self.check.is_empty() {
+            Some("it came without Revit's result for its types, so nothing was checked against Revit".into())
+        } else {
+            Some("none of its types matched Revit's result when it came in; each is drawn from its rules since it was changed, which may differ from Revit's".into())
         };
         self.editable = Some(Editable { ok, reason, untranslated });
     }
@@ -108,24 +119,36 @@ impl Family {
     }
 
     /// Type `t`'s parametric result against Revit's own, at Coarse, Medium and Fine: the volume within [`VOLUME`] of Revit's,
-    /// the box within [`BOX`] mm, and the plan symbols' extent within [`BOX`] mm. A type Revit's result says nothing of
-    /// matches.
-    pub fn check_type(&self, t: &str, others: Others) -> TypeCheck {
-        let fail = |reason: String| TypeCheck { matched: false, reason: Some(reason), flexed: false };
+    /// the box within [`BOX`] mm, the shape surface to surface both ways within [`NEAR`] mm ([`compare::surface_gap`]: a
+    /// part mirrored, upside down or out of place fails though the totals agree), and the plan's and the elevations' lines
+    /// point by point within [`NEAR`] mm. Measured in a wall `wall` mm thick for a door or a window (the one Revit's result
+    /// was made in). None for a type Revit's result says nothing of: it isn't checked.
+    pub fn check_type(&self, t: &str, others: Others, wall: f64) -> Option<TypeCheck> {
+        let fail = |reason: String| Some(TypeCheck { matched: false, reason: Some(reason), ..TypeCheck::default() });
         let snapshot_here =
             self.forms.iter().any(|f| f.snapshot && f.of_type(t)) || self.symbols.iter().any(|y| y.snapshot && y.of_type(t));
         if !snapshot_here {
-            return TypeCheck { matched: true, reason: None, flexed: false };
+            return None;
         }
         if !self.has_parametric() {
             return fail("it came without the rules that size it, so it is drawn as Revit made it".into());
         }
-        let values = match self.values(t, &BTreeMap::new()) {
-            Ok(v) => v,
-            Err(e) => return fail(e),
-        };
+        match self.compare_type(t, others, wall, true) {
+            Ok(found) => match found.iter().find_map(Compared::failed) {
+                Some(why) => fail(why),
+                None => Some(TypeCheck { matched: true, ..TypeCheck::default() }),
+            },
+            Err(why) => fail(why),
+        }
+    }
+
+    /// Type `t`'s parametric result and Revit's own, measured against each other at each detail level ([`Compared`]), in a
+    /// wall `wall` mm thick for a door or a window; `first_failure`, up to the first that doesn't match. Why they can't be,
+    /// where one doesn't come out.
+    pub fn compare_type(&self, t: &str, others: Others, wall: f64, first_failure: bool) -> Result<Vec<Compared>, String> {
+        let values = self.values_in(t, &BTreeMap::new(), wall)?;
         if let Err(e) = self.solve(&values) {
-            return fail(format!("its sizes can't all hold at once: {e}"));
+            return Err(format!("its sizes can't all hold at once: {e}"));
         }
         let build = |snapshot: bool| {
             self.build(
@@ -138,81 +161,220 @@ impl Family {
         };
         let (made, revit) = match (build(false), build(true)) {
             (Ok(a), Ok(b)) => (a, b),
-            (Err(e), _) => return fail(format!("it doesn't come out in this type: {e}")),
-            (_, Err(e)) => return fail(format!("what Revit made of it can't be drawn: {e}")),
+            (Err(e), _) => return Err(format!("it doesn't come out in this type: {e}")),
+            (_, Err(e)) => return Err(format!("what Revit made of it can't be drawn: {e}")),
         };
         let curved =
             self.forms.iter().any(|f| !f.snapshot && f.of_type(t) && (f.axis.is_some() || f.circle.is_some() || !f.arcs.is_empty()));
+        // Its plan as Revit's floor plan sees it (a door or a window at its sill), cutting 1200 mm over the level
+        // ([`Piece::in_plan_cut`]).
+        let cut = PLAN_CUT
+            - match values.get(super::SILL) {
+                Some(super::Val::Number(x)) => *x,
+                _ => 0.0,
+            };
+        let hosted = self.category.hosted();
+        let mut out = Vec::new();
+        // A drawing level's pieces measured once: Medium and Fine often draw the same as each other.
+        let mut shapes: Vec<(Vec<usize>, Vec<usize>, Gaps)> = Vec::new();
         for d in [Detail::Coarse, Detail::Medium, Detail::Fine] {
             let ((va, ba), (vb, bb)) = (measure(&made, d), measure(&revit, d));
+            let picked = |pieces: &[Piece]| -> Vec<usize> { (0..pieces.len()).filter(|i| pieces[*i].at(d)).collect() };
+            let (pa, pb) = (picked(&made), picked(&revit));
+            let shape = match shapes.iter().find(|(a, b, _)| *a == pa && *b == pb) {
+                Some((_, _, g)) => *g,
+                None => {
+                    let tris = |pieces: &[Piece], which: &[usize]| -> Vec<[P3; 3]> {
+                        which.iter().flat_map(|i| pieces[*i].tris.iter().copied()).collect()
+                    };
+                    let g = surfaces(&tris(&made, &pa), &tris(&revit, &pb));
+                    shapes.push((pa, pb, g));
+                    g
+                }
+            };
+            out.push(Compared { detail: d, what: View::Shape, volume: Some((va, vb, curved)), boxes: Some((ba, bb)), gaps: shape });
+            if first_failure && out.last().and_then(Compared::failed).is_some() {
+                return Ok(out);
+            }
+            // Its nested parts' plan symbols with its own (Revit's result has them among its own).
+            let marks = |snapshot: bool, view: SymbolView| -> Result<Vec<super::Mark>, String> {
+                let mut out = self
+                    .marks_where(&values, &|y: &super::Symbol| y.view == view && y.of_type(t) && y.snapshot == snapshot && y.drawn_at(d))?;
+                if !snapshot && view == SymbolView::Plan {
+                    self.nested_marks(t, &values, Some(d), others, (0, &std::cell::Cell::new(0)), &mut out)?;
+                }
+                Ok(out)
+            };
+            for view in [SymbolView::Plan, SymbolView::Front, SymbolView::Side] {
+                let (ma, mb) = match (marks(false, view), marks(true, view)) {
+                    (Ok(a), Ok(b)) => (a, b),
+                    (Err(e), _) => return Err(format!("its {} lines don't come out: {e}", view_name(view))),
+                    (_, Err(e)) => return Err(format!("Revit's {} lines can't be drawn: {e}", view_name(view))),
+                };
+                // What the plan draws: its symbols and the forms it shows from above (Revit's plan of a family it brings
+                // may be its forms' lines, which BIMCraft draws from the forms).
+                let lines = |marks: Vec<super::Mark>, pieces: &[Piece]| -> Vec<Vec<P2>> {
+                    let mut runs: Vec<Vec<P2>> = marks.iter().map(runs_of).collect();
+                    if view == SymbolView::Plan {
+                        runs.extend(pieces.iter().filter(|p| p.in_plan_cut(d, cut, hosted)).map(|p| closed(&p.outline)));
+                    }
+                    runs.retain(|r| !r.is_empty());
+                    runs
+                };
+                let (la, lb) = (lines(ma, &made), lines(mb, &revit));
+                let what = match view {
+                    SymbolView::Plan => View::Plan,
+                    SymbolView::Front => View::Front,
+                    SymbolView::Side => View::Side,
+                };
+                out.push(Compared { detail: d, what, volume: None, boxes: None, gaps: drawings(&la, &lb) });
+                if first_failure && out.last().and_then(Compared::failed).is_some() {
+                    return Ok(out);
+                }
+            }
+        }
+        Ok(out)
+    }
+}
+
+/// What a view draws, compared: the shape (3D, sections and elevations), the plan's lines, or an elevation's own lines.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum View {
+    Shape,
+    Plan,
+    Front,
+    Side,
+}
+
+fn view_name(v: SymbolView) -> &'static str {
+    match v {
+        SymbolView::Plan => "plan",
+        SymbolView::Front => "front elevation",
+        SymbolView::Side => "side elevation",
+    }
+}
+
+/// How far BIMCraft's drawing and Revit's are from each other: `None` where one draws nothing, the other something.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Gaps {
+    /// Neither draws anything.
+    Empty,
+    /// Only BIMCraft's draws something, or only Revit's (`false`).
+    Alone(bool),
+    /// BIMCraft's measured to Revit's, and Revit's to BIMCraft's.
+    Both(compare::Gap, compare::Gap),
+}
+
+/// Two shapes' surfaces measured each to the other.
+fn surfaces(made: &[[P3; 3]], revit: &[[P3; 3]]) -> Gaps {
+    match (compare::Surface::new(made, NEAR), compare::Surface::new(revit, NEAR)) {
+        (None, None) => Gaps::Empty,
+        (Some(_), None) => Gaps::Alone(true),
+        (None, Some(_)) => Gaps::Alone(false),
+        (Some(a), Some(b)) => Gaps::Both(compare::surface_gap(made, &b, NEAR, REACH), compare::surface_gap(revit, &a, NEAR, REACH)),
+    }
+}
+
+/// Two drawings' lines measured each to the other.
+fn drawings(made: &[Vec<P2>], revit: &[Vec<P2>]) -> Gaps {
+    match (compare::Lines::new(made, NEAR), compare::Lines::new(revit, NEAR)) {
+        (None, None) => Gaps::Empty,
+        (Some(_), None) => Gaps::Alone(true),
+        (None, Some(_)) => Gaps::Alone(false),
+        (Some(a), Some(b)) => Gaps::Both(compare::line_gap(made, &b, NEAR, REACH), compare::line_gap(revit, &a, NEAR, REACH)),
+    }
+}
+
+/// "its plan" as Revit's: "plan".
+fn strip(thing: &str) -> &str {
+    thing.trim_start_matches("its ")
+}
+
+/// A mark's points as one run: a line's, a dot's centre, a label's place.
+fn runs_of(m: &super::Mark) -> Vec<P2> {
+    match m {
+        super::Mark::Line(pts) => pts.clone(),
+        super::Mark::Dot { centre, .. } => vec![*centre],
+        super::Mark::Label { at, .. } => vec![*at],
+    }
+}
+
+/// An outline as a run back to its first point.
+fn closed(outline: &[P2]) -> Vec<P2> {
+    let mut run = outline.to_vec();
+    if let (Some(a), Some(b)) = (outline.first(), outline.last())
+        && a != b
+        && outline.len() > 2
+    {
+        run.push(*a);
+    }
+    run
+}
+
+/// A box, its least corner and its most.
+pub type Box3 = [[f64; 3]; 2];
+
+/// One comparison of a type's rebuild with Revit's result: at a detail level, of what one view draws; for the shape, the
+/// volumes (BIMCraft's, Revit's, and whether its definition has curves) and the boxes too.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Compared {
+    pub detail: Detail,
+    pub what: View,
+    pub volume: Option<(f64, f64, bool)>,
+    pub boxes: Option<(Option<Box3>, Option<Box3>)>,
+    pub gaps: Gaps,
+}
+
+impl Compared {
+    /// Why it doesn't match, in plain words, or none.
+    pub fn failed(&self) -> Option<String> {
+        let l = level(self.detail);
+        if let Some((va, vb, curved)) = self.volume {
             let off = (va - vb).abs();
             let share = if curved && va > vb { VOLUME_CURVED } else { VOLUME };
             if off > share * vb.max(1.0) && off > 1000.0 {
                 let pct = if vb > 0.0 { off / vb * 100.0 } else { 100.0 };
                 let way = if va > vb { "more" } else { "less" };
-                return fail(format!(
-                    "drawn {} it holds {pct:.1} % {way} than Revit's ({:.4} m³ against {:.4} m³)",
-                    level(d),
-                    va / 1e9,
-                    vb / 1e9
-                ));
-            }
-            match (ba, bb) {
-                (None, None) => {}
-                (Some(a), Some(b)) => {
-                    for k in 0..3 {
-                        let gap = (a[0][k] - b[0][k]).abs().max((a[1][k] - b[1][k]).abs());
-                        if gap > BOX {
-                            return fail(format!("drawn {} its {} is {gap:.0} mm off Revit's", level(d), AXES[k]));
-                        }
-                    }
-                }
-                (None, _) => return fail(format!("drawn {} it shows nothing where Revit's shows something", level(d))),
-                (_, None) => return fail(format!("drawn {} it shows something where Revit's shows nothing", level(d))),
-            }
-            // Its nested parts' plan symbols with its own (Revit's result has them among its own).
-            let marks = |snapshot: bool| -> Result<Vec<super::Mark>, String> {
-                let mut out = self.marks_where(&values, &|y: &super::Symbol| {
-                    y.view == SymbolView::Plan && y.of_type(t) && y.snapshot == snapshot && y.drawn_at(d)
-                })?;
-                if !snapshot {
-                    self.nested_marks(t, &values, Some(d), others, (0, &std::cell::Cell::new(0)), &mut out)?;
-                }
-                Ok(out)
-            };
-            // What the plan draws: its symbols and the forms it shows from above (Revit's plan of a family it brings may
-            // be its forms' lines, which BIMCraft draws from the forms).
-            // Its plan as Revit's floor plan sees it (a door or a window at its sill), cutting 1200 mm over the level
-            // ([`Piece::in_plan_cut`]).
-            let cut = PLAN_CUT
-                - match values.get(super::SILL) {
-                    Some(super::Val::Number(x)) => *x,
-                    _ => 0.0,
-                };
-            let hosted = self.category.hosted();
-            let shown = |p: &Piece| p.in_plan_cut(d, cut, hosted);
-            let plan = |marks: Vec<super::Mark>, pieces: &[Piece]| {
-                let mut all = marks;
-                all.extend(pieces.iter().filter(|p| shown(p)).map(|p| super::Mark::Line(p.outline.clone())));
-                extent(&all)
-            };
-            let (ma, mb) = match (marks(false), marks(true)) {
-                (Ok(a), Ok(b)) => (plan(a, &made), plan(b, &revit)),
-                (Err(e), _) => return fail(format!("its plan lines don't come out: {e}")),
-                (_, Err(e)) => return fail(format!("Revit's plan lines can't be drawn: {e}")),
-            };
-            match (ma, mb) {
-                (None, None) => {}
-                (Some(a), Some(b)) => {
-                    let gap = (0..2).map(|k| (a[0][k] - b[0][k]).abs().max((a[1][k] - b[1][k]).abs())).fold(0.0, f64::max);
-                    if gap > BOX {
-                        return fail(format!("its plan drawn {} reaches {gap:.0} mm off Revit's", level(d)));
-                    }
-                }
-                (None, Some(_)) => return fail(format!("its plan drawn {} has no lines where Revit's has", level(d))),
-                (Some(_), None) => return fail(format!("its plan drawn {} has lines where Revit's has none", level(d))),
+                return Some(format!("drawn {l} it holds {pct:.1} % {way} than Revit's ({:.4} m³ against {:.4} m³)", va / 1e9, vb / 1e9));
             }
         }
-        TypeCheck { matched: true, reason: None, flexed: false }
+        if let Some((Some(a), Some(b))) = self.boxes {
+            for k in 0..3 {
+                let gap = (a[0][k] - b[0][k]).abs().max((a[1][k] - b[1][k]).abs());
+                if gap > BOX {
+                    return Some(format!("drawn {l} its {} is {gap:.0} mm off Revit's", AXES[k]));
+                }
+            }
+        }
+        let (thing, lines) = match self.what {
+            View::Shape => ("its shape", false),
+            View::Plan => ("its plan", true),
+            View::Front => ("its front elevation", true),
+            View::Side => ("its side elevation", true),
+        };
+        match self.gaps {
+            Gaps::Empty => None,
+            Gaps::Alone(true) if lines => Some(format!("{thing} drawn {l} has lines where Revit's has none")),
+            Gaps::Alone(false) if lines => Some(format!("{thing} drawn {l} has no lines where Revit's has")),
+            Gaps::Alone(true) => Some(format!("drawn {l} it shows something where Revit's shows nothing")),
+            Gaps::Alone(false) => Some(format!("drawn {l} it shows nothing where Revit's shows something")),
+            Gaps::Both(ours, theirs) => {
+                let (worst, at, side) =
+                    if ours.worst >= theirs.worst { (ours.worst, ours.at, "") } else { (theirs.worst, theirs.at, " Revit's has") };
+                let share = ours.share.max(theirs.share);
+                if worst <= NEAR || (worst <= NOISE && share <= NOISE_SHARE) {
+                    return None;
+                }
+                let far = if worst >= REACH { format!("more than {REACH:.0}") } else { format!("{worst:.0}") };
+                let share = share * 100.0;
+                let at = if lines { format!("{:.0}, {:.0}", at[0], at[1]) } else { format!("{:.0}, {:.0}, {:.0}", at[0], at[1], at[2]) };
+                let what = if side.is_empty() {
+                    format!("{thing} drawn {l} is {far} mm off Revit's at ({at})")
+                } else {
+                    format!("drawn {l}, part of Revit's {} is missing from {thing}: {far} mm off at ({at})", strip(thing))
+                };
+                Some(format!("{what}, over {share:.1} % of it"))
+            }
+        }
     }
 }

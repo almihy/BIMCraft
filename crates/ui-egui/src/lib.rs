@@ -942,6 +942,9 @@ pub struct BimApp {
     paste_views: Option<clipboard::PasteViews>,
     /// Delete on a type with instances in the Project Browser: Revit's warning with their number, while open.
     delete_type: Option<browser::DeleteType>,
+    /// Load Family of a family the project has, or one whose shared nested families it has otherwise: Revit's "Family Already
+    /// Exists", asked for each, while open.
+    family_exists: Option<FamilyExists>,
     /// What was last put on the clipboard.
     pub copied: Option<String>,
     active_option: Option<String>,
@@ -1157,6 +1160,18 @@ fn ribbon_button(ui: &mut Ui, icon: Icon, label: &str, active: bool, tip: &str, 
         return edit_tool(ui, r, rect, name);
     }
     r.on_hover_text(tip)
+}
+
+/// Load Family asking Revit's "Family Already Exists": the file, the family's name, what is still to ask (the family itself
+/// first, then each shared family it nests), the answers for the shared ones, and the family's own.
+pub(crate) struct FamilyExists {
+    file: String,
+    name: String,
+    asks: Vec<String>,
+    answers: serde_json::Map<String, Value>,
+    keep_values: bool,
+    /// Whether the family itself was asked of (the project has it).
+    asked_itself: bool,
 }
 
 /// A small ribbon button: an icon alone, as in Revit's Modify panel; its name in its tooltip.
@@ -1614,6 +1629,7 @@ impl BimApp {
             temp_dim_dialog: None,
             paste_views: None,
             delete_type: None,
+            family_exists: None,
             copied: None,
             active_option: None,
             new_schedule: None,
@@ -4531,14 +4547,97 @@ impl BimApp {
     }
 
     /// Load Family: a family file picked and loaded, then its type (the one picked in it, else its first) placed with its
-    /// category's tool, as Revit's: a door's with Door, a window's with Window, any other with Component.
+    /// category's tool, as Revit's: a door's with Door, a window's with Window, any other with Component. A family the
+    /// project has, or a shared one it nests that the project has otherwise, asks first, as Revit's "Family Already Exists".
     fn load_family(&mut self, ctx: &egui::Context) {
         let dialog = crate::dialog::Ask::new().add_filter(t("BIMCraft family"), &["json"]).set_title(t("Load Family"));
-        self.ask_file(ctx, dialog, false, |app, path| {
-            if let Some(r) = app.run("family", json!({"path": path.to_string_lossy()})) {
-                app.place_loaded(&r);
+        self.ask_file(ctx, dialog, false, |app, path| app.load_family_file(path));
+    }
+
+    /// The family at `path` loaded, asking first what to do with what the project has of it.
+    pub(crate) fn load_family_file(&mut self, path: std::path::PathBuf) {
+        let file = path.to_string_lossy().to_string();
+        let Ok(dry) = self.session.execute("family", &json!({"path": file, "dry_run": true})) else {
+            // What stops it is said by loading it.
+            if let Some(r) = self.run("family", json!({"path": file})) {
+                self.place_loaded(&r);
             }
+            return;
+        };
+        let name = dry["name"].as_str().unwrap_or_default().to_string();
+        let mut asks: Vec<String> =
+            dry["shared_asks"].as_array().into_iter().flatten().filter_map(|n| n.as_str().map(str::to_string)).collect();
+        if dry["exists"] == true {
+            asks.insert(0, name.clone());
+        }
+        if asks.is_empty() {
+            if let Some(r) = self.run("family", json!({"path": file})) {
+                self.place_loaded(&r);
+            }
+        } else {
+            self.family_exists =
+                Some(FamilyExists { file, name, asks, answers: serde_json::Map::new(), keep_values: false, asked_itself: false });
+        }
+    }
+
+    /// Revit's "Family Already Exists", for the family being loaded and then each shared family it nests that the project has
+    /// otherwise: Overwrite the existing version (the project's values of its types kept), or with its parameter values too;
+    /// Cancel loads nothing.
+    fn family_exists_window(&mut self, ctx: &egui::Context) {
+        let Some(d) = self.family_exists.as_ref() else { return };
+        let Some(asked) = d.asks.first().cloned() else { return };
+        let text = if asked == d.name {
+            tf("You are trying to load the family {}, which already exists in this project. What do you want to do?", &[&asked])
+        } else {
+            tf(
+                "The family {} you are loading holds the shared family {}, which already exists in this project. What do you want to do?",
+                &[&d.name, &asked],
+            )
+        };
+        let (mut keep, mut values, mut cancel) = (false, false, false);
+        let r = crate::popup::Modal::new(egui::Id::new("family-exists"), t("Family Already Exists")).width(460.0).show(ctx, |ui| {
+            crate::popup::body(ui, |ui| {
+                ui.add_space(6.0);
+                ui.label(text);
+                ui.add_space(8.0);
+                keep = ui.button(t("Overwrite the existing version")).clicked();
+                values = ui.button(t("Overwrite the existing version and its parameter values")).clicked();
+            });
+            crate::popup::footer(ui, |ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                    cancel = ui.button(t("Cancel")).clicked();
+                });
+            });
         });
+        if cancel || r.should_close() {
+            self.family_exists = None;
+            return;
+        }
+        if !(keep || values) {
+            return;
+        }
+        let Some(mut d) = self.family_exists.take() else { return };
+        if asked == d.name && !d.asked_itself {
+            d.keep_values = keep;
+            d.asked_itself = true;
+        } else {
+            d.answers.insert(asked, json!(if keep { "overwrite" } else { "overwrite_values" }));
+        }
+        d.asks.remove(0);
+        if !d.asks.is_empty() {
+            self.family_exists = Some(d);
+            return;
+        }
+        let mut p = json!({"path": d.file});
+        if d.asked_itself {
+            p["keep_values"] = json!(d.keep_values);
+        }
+        if !d.answers.is_empty() {
+            p["shared"] = Value::Object(d.answers);
+        }
+        if let Some(r) = self.run("family", p) {
+            self.place_loaded(&r);
+        }
     }
 
     /// The tool that places the family `family {path}` replied with, on the type it says to place, else its first.
@@ -6040,6 +6139,7 @@ impl BimApp {
         self.temp_dim_window(ctx);
         self.paste_views_window(ctx);
         self.delete_type_window(ctx);
+        self.family_exists_window(ctx);
         self.shortcuts_window(ctx);
         self.settings_window(ctx);
         #[cfg(feature = "plugins")]

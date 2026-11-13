@@ -183,17 +183,30 @@ pub struct Catalog {
     pub rows: BTreeMap<String, BTreeMap<String, Value>>,
 }
 
-/// Whether a type's parametric result matched Revit's own when the family came in, and why not. A matched type draws its
-/// parametric forms; one that didn't, Revit's (its `snapshot` forms and symbols). `flexed`: its values changed since, so
-/// Revit's no longer says what it should be, and it isn't checked again.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Whether a type's parametric result matched Revit's own when the family came in, and why not: the check runs once, at
+/// import, for each type as Revit exported it ([`Family::run_check`]). A matched type draws its parametric forms; one that
+/// didn't, Revit's (its `snapshot` forms and symbols), until someone changes it. `edited`: changed since it came in (its values,
+/// the family's definition, or switched to BIMCraft's rebuild): BIMCraft's rebuild is what it is from then on, drawn whatever
+/// the check said, and never compared with Revit's result again. `wall`: a door's or a window's, the thickness of the wall
+/// Revit's result was made in, which it was checked in. A type with no check (one made since, not like another) was never
+/// checked.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TypeCheck {
     pub matched: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub flexed: bool,
+    pub edited: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wall: Option<f64>,
+}
+
+impl TypeCheck {
+    /// Whether it draws Revit's result: it didn't match, and nobody has changed it since.
+    pub fn as_revit(&self) -> bool {
+        !self.matched && !self.edited
+    }
 }
 
 /// Whether the family can be edited in BIMCraft as in Revit's Family Editor: every type matched and nothing left
@@ -220,16 +233,18 @@ impl Family {
     }
 
     /// Whether type `type_name` draws Revit's own result (its `snapshot` forms and symbols) rather than its parametric ones:
-    /// one whose check failed, or that was never checked while Revit's result for it is there.
+    /// one whose check failed and that nobody has changed since ([`TypeCheck::as_revit`]), or any type of a family that came
+    /// with Revit's result and no definition. A type never checked (made since) draws its definition.
     pub fn draws_snapshot(&self, type_name: &str) -> bool {
         if !self.has_snapshot() {
             return false;
         }
         match self.check.get(type_name) {
-            Some(c) => !c.matched,
+            Some(c) => c.as_revit(),
             None => {
-                self.forms.iter().any(|f| f.snapshot && f.of_type(type_name))
-                    || self.symbols.iter().any(|y| y.snapshot && y.of_type(type_name))
+                !self.has_parametric()
+                    && (self.forms.iter().any(|f| f.snapshot && f.of_type(type_name))
+                        || self.symbols.iter().any(|y| y.snapshot && y.of_type(type_name)))
             }
         }
     }
@@ -448,7 +463,8 @@ impl Family {
         self.embedded.get(name).or_else(|| others(name))
     }
 
-    /// Type `new`, made like `old` (Duplicate), checked as `old` was: a duplicate of a type that matched is parametric.
+    /// Type `new`, made like `old` (Duplicate), checked as `old` was: a duplicate of a type that matched, or that was changed
+    /// since, is parametric; one of a type drawn as Revit made it is drawn so too, till it is changed.
     pub(crate) fn check_like(&mut self, new: &str, old: &str) {
         if let Some(c) = self.check.get(old).cloned() {
             self.check.insert(new.to_string(), c);

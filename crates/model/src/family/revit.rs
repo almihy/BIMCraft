@@ -42,6 +42,17 @@ struct Reader<'a> {
     notes: Vec<String>,
     family: &'a Family,
     values: BTreeMap<String, Val>,
+    /// A door's or a window's: the thickness of the wall Revit's result was made in, per type.
+    walls: Walls,
+}
+
+/// The thickness of the wall a door's or a window's types were exported in (Revit's result made in), per type: what its
+/// formulas read as `Wall Thickness` while it is translated and checked.
+pub type Walls = BTreeMap<String, f64>;
+
+/// Type `t`'s values in the wall it was exported in.
+fn vals(f: &Family, t: &str, walls: &Walls) -> Result<BTreeMap<String, Val>, String> {
+    f.values_in(t, &BTreeMap::new(), walls.get(t).copied().unwrap_or(super::DEFAULT_WALL))
 }
 
 fn num(v: &Value) -> Option<f64> {
@@ -204,7 +215,7 @@ impl Reader<'_> {
 
     /// The first type's values, each plane's place among them as `ref(Name)`, in the family's axes.
     fn first_values(&mut self) {
-        let mut values = self.family.values(&self.first, &BTreeMap::new()).unwrap_or_default();
+        let mut values = vals(self.family, &self.first, &self.walls).unwrap_or_default();
         for (name, axis, at) in self.planes.values() {
             if let Some(x) = at.get(&self.first).or_else(|| at.values().next())
                 && let Ok(v) = number(&self.place(Expr::Number(*x), *axis), &values, &mut HashMap::new())
@@ -741,7 +752,7 @@ type Planes = BTreeMap<String, (String, Axis, BTreeMap<String, f64>)>;
 /// that holds in every type: the chain of dimensions from the level (z = 0, or a plane at 0 in every type) to it, each
 /// labelled (its parameter) or the same in every type (its value). A window's sill plane placed by its head height less
 /// its height, which no parameter says on its own. None where no such chain holds.
-fn from_level(def: &Value, planes: &Planes, target: &str, f: &Family, params: &BTreeSet<String>) -> Option<String> {
+fn from_level(def: &Value, planes: &Planes, target: &str, f: &Family, params: &BTreeSet<String>, walls: &Walls) -> Option<String> {
     let types: Vec<String> = f.types.keys().cloned().collect();
     let first = types.first()?.clone();
     const LEVEL: &str = "\u{0}level";
@@ -808,7 +819,7 @@ fn from_level(def: &Value, planes: &Planes, target: &str, f: &Family, params: &B
     let formula = if chain.starts_with(" - ") { format!("0{chain}") } else { formula };
     // It holds in every type, or it isn't it.
     let holds = types.iter().all(|t| {
-        let Ok(values) = f.values(t, &BTreeMap::new()) else { return false };
+        let Ok(values) = vals(f, t, walls) else { return false };
         let e = Expr::Formula(formula.clone());
         matches!((number(&e, &values, &mut HashMap::new()), pos(target, t)), (Ok(x), Some(y)) if (x - y).abs() < 0.05)
     });
@@ -818,7 +829,7 @@ fn from_level(def: &Value, planes: &Planes, target: &str, f: &Family, params: &B
 /// `def` (Revit's definition of family `f`) translated into it: its references, dimensions, parametric forms and symbols,
 /// nested parts and type catalog, beside the forms and symbols it has (Revit's result, which become `snapshot` ones). What
 /// can't be translated is left out and said in `editable.untranslated`; materials `has_material` doesn't know are left off.
-pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> bool) {
+pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> bool) -> Walls {
     for x in f.forms.iter_mut() {
         x.snapshot = true;
     }
@@ -833,7 +844,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     if !def.is_object() {
         f.editable =
             Some(super::Editable { ok: false, reason: None, untranslated: vec!["its definition isn't one BIMCraft can read".into()] });
-        return;
+        return Walls::new();
     }
     let to = &def["to_bimcraft"];
     let params: BTreeSet<String> = f
@@ -873,14 +884,31 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     };
     // The formula that places the sill plane above the level, where no parameter says it alone.
     let mut sill_from: Option<String> = None;
-    let mut reader = Reader { map, planes, params, first: first.clone(), notes: Vec::new(), family: f, values: BTreeMap::new() };
+    // A door's or a window's wall Revit's result was made in: the exporter places each type in a wall of its own and says how
+    // thick (`to_bimcraft.wall`, mm, one for all or per type); one that says nothing made it in a 200 mm wall, centred on
+    // the wall. Not the family document's template wall, whose faces only say what follows them.
+    let walls: Walls = if f.category.hosted() {
+        let said = &to["wall"];
+        let fits = |w: f64| (1.0..=crate::model::MAX_COORD).contains(&w);
+        f.types
+            .keys()
+            .map(|t| {
+                let w = num(said).or_else(|| said.get(t).and_then(num)).filter(|w| fits(*w)).unwrap_or(super::DEFAULT_WALL);
+                (t.clone(), w)
+            })
+            .collect()
+    } else {
+        Walls::new()
+    };
+    let mut reader =
+        Reader { map, planes, params, first: first.clone(), notes: Vec::new(), family: f, values: BTreeMap::new(), walls: walls.clone() };
     if let Some(z) = to.get("z_minus").filter(|z| !z.is_null()) {
         // A plane (a window's sill): the parameter that puts it where it is in every type, else where it is in the first.
         let plane = z.get("ref").and_then(Value::as_str).and_then(|id| reader.planes.get(id)).map(|p| p.2.clone());
         let moving = plane.as_ref().is_some_and(|at| at.values().any(|x| (x - at.values().next().copied().unwrap_or(0.0)).abs() > 0.05));
         let follows = plane.as_ref().filter(|_| moving).and_then(|at| {
             let typed: Vec<(String, BTreeMap<String, Val>)> =
-                f.types.keys().filter_map(|t| Some((t.clone(), f.values(t, &BTreeMap::new()).ok()?))).collect();
+                f.types.keys().filter_map(|t| Some((t.clone(), vals(f, t, &reader.walls).ok()?))).collect();
             reader.params.iter().find(|p| {
                 typed.iter().all(|(t, v)| match (v.get(*p), at.get(t)) {
                     (Some(Val::Number(x)), Some(y)) => (x - y).abs() < 0.05,
@@ -890,7 +918,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         });
         // Else the chain of dimensions that places it above the level (a head height less the height).
         let chain = match (&follows, z.get("ref").and_then(Value::as_str)) {
-            (None, Some(id)) if moving => from_level(def, &reader.planes, id, f, &reader.params),
+            (None, Some(id)) if moving => from_level(def, &reader.planes, id, f, &reader.params, &reader.walls),
             _ => None,
         };
         match (follows, chain, reader.value(z)) {
@@ -925,7 +953,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         if f.category.hosted() && *axis == Axis::Y && (kind == "host_exterior" || kind == "host_interior") {
             // The family's +y is toward the exterior, whichever way the document had it.
             let side = if kind == "host_exterior" { "" } else { "-" };
-            let half = super::DEFAULT_WALL / 2.0;
+            let half = reader.walls.get(&first).copied().unwrap_or(super::DEFAULT_WALL) / 2.0;
             reader.values.insert(super::ref_key(name), Val::Number(if side.is_empty() { half } else { -half }));
             references.push(Reference {
                 name: name.clone(),
@@ -955,7 +983,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
                 None
             };
             if let Some(kind) = kind {
-                let half = super::DEFAULT_WALL / 2.0;
+                let half = reader.walls.get(&first).copied().unwrap_or(super::DEFAULT_WALL) / 2.0;
                 let (side, x) = if kind == "host_exterior" { ("", half) } else { ("-", -half) };
                 reader.values.insert(super::ref_key(name), Val::Number(x));
                 references.push(Reference {
@@ -1313,7 +1341,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         let zero = f
             .types
             .keys()
-            .all(|t| matches!(f.values(t, &BTreeMap::new()).ok().and_then(|v| v.get(super::SILL).cloned()), None | Some(Val::Number(0.0))));
+            .all(|t| matches!(vals(f, t, &walls).ok().and_then(|v| v.get(super::SILL).cloned()), None | Some(Val::Number(0.0))));
         let room = f.parameters.len() < super::MAX_PARAMETERS;
         match f.parameters.iter_mut().find(|p| p.name == super::SILL) {
             Some(p) if p.formula.is_none() && zero && matches!(p.kind, Kind::Length) && !p.instance => {
@@ -1335,21 +1363,22 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         }
     }
     // What is made is tried in every type: a form or a line that doesn't work out in one is left out, and said.
-    let forms = turned_as_revit(f, forms);
-    let (forms, symbols, nested) = tried(f, forms, symbols, nested, &mut notes);
+    let forms = turned_as_revit(f, forms, &walls);
+    let (forms, symbols, nested) = tried(f, forms, symbols, nested, &mut notes, &walls);
     f.forms.extend(forms);
     f.symbols.extend(symbols);
     f.nested = nested;
     notes.truncate(64);
     f.editable = Some(super::Editable { ok: false, reason: None, untranslated: notes });
+    walls
 }
 
 /// `forms` with each part-turn revolve turned the way Revit turns it. The definition says its axis and its angles but not
 /// which way round they run from its sketch, so each is turned the other way where that brings the first type's volume
 /// nearer Revit's result (a void's, by what it cuts).
-fn turned_as_revit(f: &Family, mut forms: Vec<Form>) -> Vec<Form> {
+fn turned_as_revit(f: &Family, mut forms: Vec<Form>, walls: &Walls) -> Vec<Form> {
     let Some(first) = f.types.keys().next().cloned() else { return forms };
-    let Ok(values) = f.values(&first, &BTreeMap::new()) else { return forms };
+    let Ok(values) = vals(f, &first, walls) else { return forms };
     let snapshot: Vec<&Form> = f.forms.iter().filter(|x| x.snapshot && x.of_type(&first) && x.show.is_none_or(|s| s.fine)).collect();
     let revit: f64 = snapshot.iter().map(|x| super::shapes::volume(&x.mesh).abs()).sum();
     if revit <= 0.0 {
@@ -1510,8 +1539,9 @@ fn tried(
     symbols: Vec<Symbol>,
     nested: Vec<Nested>,
     notes: &mut Vec<String>,
+    walls: &Walls,
 ) -> (Vec<Form>, Vec<Symbol>, Vec<Nested>) {
-    let values: Vec<BTreeMap<String, Val>> = f.types.keys().filter_map(|t| f.values(t, &BTreeMap::new()).ok()).collect();
+    let values: Vec<BTreeMap<String, Val>> = f.types.keys().filter_map(|t| vals(f, t, walls).ok()).collect();
     let mut probe = Family { forms: Vec::new(), symbols: Vec::new(), nested: Vec::new(), check: BTreeMap::new(), ..f.clone() };
     let mut kept_forms = Vec::new();
     for (i, form) in forms.into_iter().enumerate() {

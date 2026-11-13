@@ -6167,9 +6167,9 @@ fn the_family_editor_shows_a_familys_connectors_and_keeps_them() {
     assert_eq!(h.state().session.model.families["WC"].connectors, before);
 }
 
-#[test]
-fn the_family_editor_shows_a_revit_familys_references_and_whether_it_is_editable_and_its_types_flex_the_preview() {
-    // A box from Revit's definition (original): Left and Right a labelled Width apart and EQ about the centre.
+/// A box from Revit's definition (original): Left and Right a labelled Width apart and EQ about the centre, 750 high; Revit's
+/// result for its type A `top` high (750 matches).
+fn revit_box(top: f64) -> Value {
     let line = |a: [&str; 2], b: [&str; 2]| json!({"line": [[{"ref": a[0]}, {"ref": a[1]}, 0], [{"ref": b[0]}, {"ref": b[1]}, 0]]});
     let at = |x: f64| json!({"A": x});
     let revit = json!({
@@ -6185,8 +6185,22 @@ fn the_family_editor_shows_a_revit_familys_references_and_whether_it_is_editable
         "forms": [{"kind": "extrusion", "normal": [0, 0, 1], "start": {"ref": "z"}, "end": {"ref": "t"},
                    "loops": [[line(["l", "f"], ["r", "f"]), line(["r", "f"], ["r", "b"]), line(["r", "b"], ["l", "b"]), line(["l", "b"], ["l", "f"])]]}]
     });
-    let family = json!({"name": "Revit Box", "category": "furniture", "types": {"A": {}},
-                        "parameters": [{"name": "Width", "kind": "length", "value": 1000}], "revit": revit});
+    // Revit's result for A: a box 1000 by 600 by `top`, as a mesh of its six faces.
+    let (lo, hi) = ([-500.0, 0.0, 0.0], [500.0, 600.0, top]);
+    let p =
+        |i: usize| [if i & 1 == 0 { lo[0] } else { hi[0] }, if i & 2 == 0 { lo[1] } else { hi[1] }, if i & 4 == 0 { lo[2] } else { hi[2] }];
+    let mesh: Vec<Value> = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]]
+        .iter()
+        .flat_map(|[a, b, c, d]| [json!([p(*a), p(*b), p(*c)]), json!([p(*a), p(*c), p(*d)])])
+        .collect();
+    json!({"name": "Revit Box", "category": "furniture", "types": {"A": {}},
+                        "parameters": [{"name": "Width", "kind": "length", "value": 1000}], "revit": revit,
+                        "forms": [{"mesh": mesh, "snapshot": true}]})
+}
+
+#[test]
+fn the_family_editor_shows_a_revit_familys_references_and_whether_it_is_editable_and_its_types_flex_the_preview() {
+    let family = revit_box(750.0);
     let mut h = app(&format!(
         "{BOX}
 family {family}
@@ -6203,6 +6217,10 @@ component {{\"family\": \"Revit Box\", \"type\": \"A\", \"at\": [3000, 3000]}}"
         assert!(h.query_by_label(name).is_some(), "{name}");
     }
     assert!(h.query_by_label("-500").is_some(), "Left where Width puts it in the type previewed");
+    assert!(h.query_by_label_contains("A: Matches Revit").is_some(), "its type matched Revit's result");
+    // Applied as it is, nothing is changed: its type is still as it was checked.
+    press_near(&mut h, "Apply", "Cancel");
+    assert!(!h.state().session.model.families["Revit Box"].check["A"].edited, "OK or Apply alone changes nothing");
     // Its width typed into the type, applied: the family flexes.
     press(&mut h, "Types");
     type_into(&mut h, "Type Value Width", "1600");
@@ -6210,6 +6228,63 @@ component {{\"family\": \"Revit Box\", \"type\": \"A\", \"at\": [3000, 3000]}}"
     let f = h.state().session.model.families["Revit Box"].clone();
     let v = f.values("A", &Default::default()).unwrap();
     assert_eq!(v["ref(Right)"], bimcraft_core::family::Val::Number(800.0));
+    assert!(f.check["A"].edited, "changed here: drawn from its rules from now on: {:?} {:?} {:?}", f.check, f.types, f.parameters);
+    press(&mut h, "References");
+    assert!(h.query_by_label_contains("A: Changed here").is_some());
+}
+
+/// A type whose check against Revit failed is drawn as Revit made it: Type Properties says so and offers BIMCraft's rebuild,
+/// which says it may differ from Revit's; taken, the type is drawn from its rules.
+#[test]
+fn type_properties_of_a_type_drawn_as_revit_made_it_offers_bimcrafts_rebuild() {
+    let family = revit_box(900.0);
+    let mut h = app(&format!(
+        "{BOX}
+family {family}
+component {{\"family\": \"Revit Box\", \"type\": \"A\", \"at\": [3000, 3000]}}"
+    ));
+    assert!(h.state().session.model.families["Revit Box"].draws_snapshot("A"));
+    let it = find(&h, |e| matches!(e, Element::Component(_)));
+    h.state_mut().selection = vec![it];
+    h.set_size(vec2(1800.0, 900.0));
+    press(&mut h, "Edit Type");
+    assert!(h.query_by_label_contains("Drawn as Revit made it").is_some());
+    assert!(h.query_by_label_contains("may differ from Revit").is_some());
+    press(&mut h, "Use BIMCraft's Rebuild");
+    let f = h.state().session.model.families["Revit Box"].clone();
+    assert!(f.check["A"].edited && !f.draws_snapshot("A"), "{:?}", f.check);
+    assert!(h.query_by_label_contains("Drawn as Revit made it").is_none(), "the dialog shows the type as it is now");
+}
+
+/// Load Family of a family the project has asks as Revit does ("Family Already Exists"): Overwrite the existing version keeps
+/// the project's values of its types; "... and its parameter values" takes the file's; Cancel loads nothing.
+#[test]
+fn loading_a_family_the_project_has_asks_whether_to_keep_its_values() {
+    let mut h = app(BOX);
+    h.state_mut().session.files.give("Revit Box.json", revit_box(750.0).to_string().into_bytes());
+    h.state_mut().load_family_file("Revit Box.json".into());
+    h.run();
+    assert!(h.query_by_label("Family Already Exists").is_none(), "a family the project hasn't loads at once");
+    assert!(h.state().session.model.families.contains_key("Revit Box"));
+    h.state_mut().session.execute("family", &json!({"name": "Revit Box", "types": {"A": {"Width": 1600}}})).unwrap();
+    let width = |h: &Harness<BimApp>| h.state().session.model.families["Revit Box"].types["A"].get("Width").cloned();
+    // Cancel: nothing loaded.
+    h.state_mut().load_family_file("Revit Box.json".into());
+    h.run();
+    assert!(h.query_by_label_contains("which already exists in this project").is_some());
+    press(&mut h, "Cancel");
+    assert_eq!(width(&h), Some(json!(1600)));
+    // Overwrite the existing version: the project's 1600 kept.
+    h.state_mut().load_family_file("Revit Box.json".into());
+    h.run();
+    press(&mut h, "Overwrite the existing version");
+    assert_eq!(width(&h), Some(json!(1600)));
+    // ... and its parameter values: the file's (it says none for A: the parameter's own).
+    h.state_mut().load_family_file("Revit Box.json".into());
+    h.run();
+    press(&mut h, "Overwrite the existing version and its parameter values");
+    assert_eq!(width(&h), None);
+    assert!(h.query_by_label("Family Already Exists").is_none());
 }
 
 #[test]
@@ -6286,6 +6361,8 @@ fn load_family_is_on_the_door_and_window_tools_and_the_insert_tab_and_places_wit
     press(&mut h, "Insert");
     press(&mut h, "Load Family");
     pick_file(&mut h, &door);
+    // The project has it now: Revit's "Family Already Exists" asks first.
+    press(&mut h, "Overwrite the existing version");
     assert_eq!(h.state().tool, Tool::Door);
     // A family of no opening starts the Component tool on its type.
     let stool = dir.path().join("Stool.json");

@@ -2576,6 +2576,11 @@ pub(crate) struct FamilyDialog {
     elements: Vec<Id>,
     /// Each type parameter: its name, what it holds, as typed, and whether a formula works it out.
     fields: Vec<(String, Holds, String, bool)>,
+    /// Each one as it was typed when the dialog showed the type: Apply and OK set only those changed since.
+    fields_were: Vec<String>,
+    /// A type of a family from Revit drawn as Revit made it, its check having failed: why (the dialog offers BIMCraft's
+    /// rebuild of it instead).
+    as_revit: Option<String>,
     /// Each one's group (Revit's parameter group) and display unit, where its family gives them, in the order of `fields`.
     about: Vec<(Option<String>, Option<String>)>,
     /// Its identity data, as typed and as it was.
@@ -2589,7 +2594,7 @@ pub(crate) struct FamilyDialog {
 
 impl FamilyDialog {
     pub(crate) fn new(m: &Model, family: String, name: String, elements: Vec<Id>) -> FamilyDialog {
-        let fields = m
+        let fields: Vec<(String, Holds, String, bool)> = m
             .families
             .get(&family)
             .map(|f| {
@@ -2610,7 +2615,26 @@ impl FamilyDialog {
             .map(|f| f.parameters.iter().filter(|p| !p.instance).map(|p| (p.group.clone(), p.unit.clone())).collect())
             .unwrap_or_default();
         let identity = identity_fields(m.families.get(&family).and_then(|f| f.identity.get(&name)));
-        FamilyDialog { family, name, elements, fields, about, identity_were: identity.clone(), identity, naming: Naming::None, error: None }
+        let fields_were = fields.iter().map(|f| f.2.clone()).collect();
+        let as_revit = m
+            .families
+            .get(&family)
+            .and_then(|f| f.check.get(&name))
+            .filter(|c| c.as_revit())
+            .map(|c| c.reason.clone().unwrap_or_default().replace('`', ""));
+        FamilyDialog {
+            family,
+            name,
+            elements,
+            fields,
+            fields_were,
+            as_revit,
+            about,
+            identity_were: identity.clone(),
+            identity,
+            naming: Naming::None,
+            error: None,
+        }
     }
 
     /// The dialog showing type `name` as the model has it now.
@@ -2619,10 +2643,11 @@ impl FamilyDialog {
     }
 
     /// The `family` command's parameters setting type `name` to the values as typed, or why they
-    /// aren't what they hold.
+    /// aren't what they hold: those changed since the dialog showed it, and for a copy (Duplicate) every one.
     fn params(&self, name: &str, units: Units, copy: bool) -> Result<Value, String> {
         let mut set = serde_json::Map::new();
-        for (key, kind, typed, _) in self.fields.iter().filter(|f| !f.3) {
+        let changed = |i: usize, typed: &String| copy || self.fields_were.get(i) != Some(typed);
+        for (_, (key, kind, typed, _)) in self.fields.iter().enumerate().filter(|(i, f)| !f.3 && changed(*i, &f.2)) {
             let v = match kind {
                 Holds::Length => json!(units.parse(typed).ok_or_else(|| tf("{}: `{}` is not a length", &[key, typed]))?),
                 Holds::Number | Holds::Angle => json!(number(typed).ok_or_else(|| tf("{}: `{}` is not a number", &[key, typed]))?),
@@ -2647,10 +2672,14 @@ impl BimApp {
         let model = Arc::clone(&self.session.model);
         let names: Vec<String> = model.families.get(&d.family).map(|f| f.types.keys().cloned().collect()).unwrap_or_default();
         let materials: Vec<String> = model.materials.keys().cloned().collect();
-        let (mut ok, mut cancel, mut apply, mut asked) = (false, false, false, None);
+        let (mut ok, mut cancel, mut apply, mut asked, mut rebuild) = (false, false, false, None, false);
         let r = Modal::new(UiId::new("family-type-properties"), t("Type Properties")).width(crate::typeprops::WIDTH).show(ctx, |ui| {
             crate::popup::body(ui, |ui| {
                 asked = typeprops::head(ui, "family-type", &d.family, &names, &d.name, &mut d.naming, true);
+                // A type drawn as Revit made it: why, and BIMCraft's rebuild offered in its place, said plainly.
+                if let Some(why) = &d.as_revit {
+                    rebuild = crate::editor::as_revit_offer(ui, why);
+                }
                 let below = typeprops::foot_height(ui, d.error.is_some());
                 // Each parameter under the group its family gives it (Revit's parameter group), else the one Revit gives what
                 // it holds: lengths and angles are dimensions.
@@ -2734,6 +2763,10 @@ impl BimApp {
             }
             Some(Head::Rename(_)) => {}
             None => {}
+        }
+        if rebuild && self.run_for_type("family", json!({"name": d.family, "rebuild": [d.name]}), &mut d.error) {
+            let name = d.name.clone();
+            d.show(&Arc::clone(&self.session.model), name);
         }
         if apply || ok {
             let applied = match d.params(&d.name, model.units, false) {

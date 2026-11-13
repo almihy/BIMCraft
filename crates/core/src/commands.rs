@@ -1380,7 +1380,7 @@ other_files(
          references?: [{name, axis: x|y|z, at, is_reference?, origin?}], dimensions?: [{refs: [name, …], label?, locked?, eq?, \
          value?, sense?, kind?}], nested?: [{family, type, at: [x, y, z], rotation?, mirrored?, params?: {name: value}, visible?, \
          types?, show?}], catalog?: {columns, rows}, revit?: <Revit's definition, as Arqiflow's exporter writes it>, \
-         delete?: true, dry_run?, path?, keep_values?, save?} a family of \
+         delete?: true, dry_run?, path?, keep_values?, rebuild?: true|[type, …], save?} a family of \
          the project's, BIMCraft's own parametric component: created, changed, read, or loaded from the .json file at `path` (a \
          family as `inspect` shows it, with its `name`). Without `name` it lists the project's families, each its category and \
          how many types, forms and symbols it has; with only a `name` it reads one — its definition, each of its types' \
@@ -1455,13 +1455,17 @@ other_files(
          is then checked: its parametric result against Revit's at each detail level (volume within 1 %, 3 % more where it has \
          curves, box within 2 mm, plan within 2 mm; a door's or window's plan as a floor plan cutting 1200 mm over its level sees \
          it at its sill). A type that matched draws its parametric forms and flexes with its parameters; one that didn't \
-         draws Revit's result and says why in `check`; `editable` is ok when every type matched and nothing was left \
-         untranslated (`untranslated` says what). The reply and the list give `editable` and `check`. A duplicate (`like`) of a \
-         matched type is parametric; a type whose values change is `flexed` and keeps what it was found. `keep_values: true` \
+         draws Revit's result and says why in `check`; `editable` is ok when every type matched (at least one compared) and \
+         nothing was left untranslated (`untranslated` says what). The check runs only when Revit's definition comes in: \
+         after that, a type whose values change, every type when the family's definition changes (its forms, symbols, \
+         parameters, references, dimensions, nested parts), and those `rebuild` names (true, every one) are `edited`: drawn \
+         from their rules, which may differ from Revit's, and never compared again. A type made since, not `like` another, \
+         has no `check`: it was never checked. The reply and the list give `editable` and `check`. A duplicate (`like`) is \
+         checked as the type it was made like. `keep_values: true` \
          is Revit's Reload with \"Overwrite the existing version\": the family loaded again (from `path`, or as given) takes its \
          new version's types as they come, translates and checks them, then gives each type the project already had the \
          project's values back (its own, else its parameter's; formulas and instance parameters aside): a type they change is \
-         `flexed` and regenerates at them, all in one undo step, and the reply's `kept` says which values of which types. \
+         `edited` and regenerates at them, all in one undo step, and the reply's `kept` says which values of which types. \
          Without it a type keeps what the new version doesn't say (\"... and its parameter values\" says them all). Written as \
          format 23",
         family,
@@ -11228,8 +11232,14 @@ fn family(s: &mut Session, p: &Value) -> R {
     let c = "family";
     // Revit's Reload, "Overwrite the existing version": the types the project has keep its values of them.
     let keep_values = flag(c, p, "keep_values")?;
+    // `keep_values: false` said: Revit's "... and its parameter values", each type it brings exactly as it brings it.
+    let take_values = p.get("keep_values") == Some(&Value::Bool(false));
     // From a file: its fields under the name given, else its own, else the file's.
     let mut p = p.clone();
+    // The shared families a package nests that the project has otherwise, which a dry run says.
+    let mut shared_asks: Vec<String> = Vec::new();
+    // A family file is the family as it was saved: what it says of its checks stands.
+    let from_file = p.get("path").is_some_and(|v| !v.is_null());
     if let Some(path) = string(c, &p, "path")? {
         let path = PathBuf::from(path);
         let size = s.files.given.size(&path).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
@@ -11248,7 +11258,29 @@ fn family(s: &mut Session, p: &Value) -> R {
         if let Some(Value::Object(inner)) = fields.get("family").cloned() {
             let definition = fields.get("definition").cloned().filter(|d| !d.is_null());
             let nested = fields.get("nested_families").cloned();
-            let held = if flag(c, &p, "dry_run")? { BTreeMap::new() } else { load_nested(s, nested.as_ref(), definition.as_ref())? };
+            // A shared one the project has otherwise is Revit's "Family Already Exists": the caller's `shared` says which
+            // to keep; unsaid, the load is refused and says which ask. A dry run says which would.
+            let choices = shared_choices(c, &p)?;
+            let dry = flag(c, &p, "dry_run")?;
+            let held = if dry {
+                let mut probe = Session::new();
+                *probe.model_mut() = (*s.model).clone();
+                let (_, asks) = load_nested(&mut probe, nested.as_ref(), definition.as_ref(), &choices)?;
+                shared_asks = asks;
+                BTreeMap::new()
+            } else {
+                let (held, asks) = load_nested(s, nested.as_ref(), definition.as_ref(), &choices)?;
+                if !asks.is_empty() {
+                    return Err(bad(
+                        c,
+                        format!(
+                            "the shared family {} it nests is in the project already, otherwise: say `shared`: {{name: \"overwrite\" (Revit's \"Overwrite the existing version\", the project's values of its types kept) | \"overwrite_values\" (\"... and its parameter values\") | \"existing\" (the project's kept)}}, or one of them for all",
+                            asks.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", ")
+                        ),
+                    ));
+                }
+                held
+            };
             fields = inner;
             loadable(&mut fields);
             let own = held_by(definition.as_ref(), &held);
@@ -11301,6 +11333,9 @@ fn family(s: &mut Session, p: &Value) -> R {
         // `dry_run` is the caller's, not the file's: a dry run of a file loads nothing.
         if let Some(dry) = p.get("dry_run") {
             family.insert("dry_run".into(), dry.clone());
+        }
+        if let Some(v) = p.get("rebuild") {
+            family.insert("rebuild".into(), v.clone());
         }
         // What the caller says of where it came from (a firm library's entry and version) over what the file says.
         if let Some(Value::Object(given)) = p.get("source") {
@@ -11394,6 +11429,7 @@ fn family(s: &mut Session, p: &Value) -> R {
         "check",
         "editable",
         "revit",
+        "rebuild",
     ];
     // The type a file says to place, given back.
     let place = p.get("place").filter(|v| v.is_string()).cloned();
@@ -11486,7 +11522,9 @@ fn family(s: &mut Session, p: &Value) -> R {
     if let Some(v) = p.get("types").filter(|v| !v.is_null()) {
         // Keeping the project's values, each type brought is first as it brings it (what it doesn't say, its parameters'
         // values), so it is checked as Revit made it; the project's values are set on it after.
-        if keep_values && let Value::Object(brought) = v {
+        if (keep_values || take_values)
+            && let Value::Object(brought) = v
+        {
             for (t, set) in brought {
                 if set.is_object() {
                     f.types.remove(t);
@@ -11639,27 +11677,69 @@ fn family(s: &mut Session, p: &Value) -> R {
     };
     let to = rename.clone().unwrap_or_else(|| name.clone());
     // Revit's definition translated (its result, the forms and symbols it brings, kept as the fallback), then each type
-    // checked against Revit's result; a type whose values were changed since keeps what it was found.
+    // checked against Revit's result, as Revit exported it: the only time it is. Any change after that (a type's values, the
+    // family's definition, `rebuild`) makes BIMCraft's rebuild what the type is: it is drawn, and never compared with Revit's
+    // result again.
     let has = |m: &str| s.model.materials.contains_key(m) || brought.contains_key(m);
     if let Some(def) = p.get("revit").filter(|v| !v.is_null()) {
-        crate::family::revit::translate(&mut f, def, &has);
-    }
-    if let Some(w) = &was {
+        let walls = crate::family::revit::translate(&mut f, def, &has);
+        let others = |n: &str| if n == name.as_str() { None } else { s.model.families.get(n) };
+        f.run_check(&others, &walls);
+    } else if let Some(w) = was.as_ref().filter(|_| !from_file) {
         let mut like: BTreeMap<String, String> = p.get("like").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
         like.retain(|new, _| !w.types.contains_key(new));
+        // What the family was, with the types made and taken away here made and taken away in it too: what is left is
+        // a change of its definition.
+        let mut base = w.clone();
+        for (new, old) in &like {
+            base.type_like(new, old);
+        }
+        for t in w.types.keys().filter(|t| !f.types.contains_key(*t)) {
+            base.forget_type(t);
+        }
+        let redefined = !same_definition(&base, &f);
         for (t, c) in f.check.iter_mut() {
             let before = w.types.get(t).or_else(|| like.get(t).and_then(|old| f.types.get(old)));
-            if before.is_some_and(|b| f.types.get(t) != Some(b)) {
-                c.flexed = true;
+            if redefined || before.is_some_and(|b| f.types.get(t).is_none_or(|now| !same_values(now, b))) {
+                c.edited = true;
+            }
+        }
+        // A change its dimensions can't hold is refused, as Revit refuses it ("Constraints are not satisfied"): a type whose
+        // references were placed before and can't be now. One that couldn't be before is no worse for it.
+        let solved = |fam: &crate::family::Family, t: &str| fam.values(t, &BTreeMap::new()).and_then(|v| fam.solve(&v).map(|_| ()));
+        for t in f.types.keys() {
+            let held = match (w.types.contains_key(t), like.get(t)) {
+                (true, _) => solved(w, t).is_ok(),
+                (false, Some(old)) => solved(w, old).is_ok() || solved(&f, old).is_ok(),
+                (false, None) => true,
+            };
+            if held && let Err(e) = solved(&f, t) {
+                return Err(bad(c, format!("family `{name}`, type `{t}`: the change can't hold: {e}")));
             }
         }
     }
-    if f.has_snapshot() || f.editable.is_some() {
-        let others = |n: &str| if n == name.as_str() { None } else { s.model.families.get(n) };
-        f.run_check(&others);
+    // Revit's result given up for BIMCraft's rebuild (the editor's offer for a type that didn't match): every type, or those
+    // named.
+    match p.get("rebuild") {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => {}
+        Some(Value::Bool(true)) => f.check.values_mut().for_each(|c| c.edited = true),
+        Some(v) => {
+            let named: Vec<String> =
+                serde_json::from_value(v.clone()).map_err(|_| bad(c, "`rebuild` is true, or the types to draw from their rules"))?;
+            for t in named {
+                match f.check.get_mut(&t) {
+                    Some(k) => k.edited = true,
+                    None if f.types.contains_key(&t) => {}
+                    None => {
+                        let names: Vec<&str> = f.types.keys().map(String::as_str).collect();
+                        return Err(bad(c, format!("`rebuild`: there's no type `{t}`{}", known_names(&names))));
+                    }
+                }
+            }
+        }
     }
-    // The project's own values of the types it had, set after the check, as a change of them: a type they change is flexed
-    // (it keeps what it was found) and regenerates at them. A value is the type's own, else its parameter's; only those of a
+    // The project's own values of the types it had, set after the check, as a change of them: a type they change is edited
+    // (drawn from its rules) and regenerates at them. A value is the type's own, else its parameter's; only those of a
     // type's parameters both have that no formula works out.
     let mut kept: BTreeMap<String, Vec<String>> = BTreeMap::new();
     if keep_values && let Some(w) = &was {
@@ -11688,10 +11768,11 @@ fn family(s: &mut Session, p: &Value) -> R {
             if kept.contains_key(t)
                 && let Some(c) = f.check.get_mut(t)
             {
-                c.flexed = true;
+                c.edited = true;
             }
         }
     }
+    f.summarize();
     // Every error of what it comes to, each addressed to what has it, and every warning of it.
     let (errors, warnings) = f.problems(&|m| s.model.materials.contains_key(m) || brought.contains_key(m));
     if !errors.is_empty() {
@@ -11705,6 +11786,10 @@ fn family(s: &mut Session, p: &Value) -> R {
         let mut reply = family_reply(&to, &f, &warnings);
         reply["dry_run"] = json!(true);
         reply["ok"] = json!(true);
+        // What loading it would ask, as Revit's "Family Already Exists": the project has it, and the shared families it
+        // nests that the project has otherwise.
+        reply["exists"] = json!(was.is_some());
+        reply["shared_asks"] = json!(shared_asks);
         reply["changes"] = family_changes(was.as_ref(), &f, &patches, rename.as_deref());
         reply["materials"] = json!(brought.keys().collect::<Vec<_>>());
         return Ok(reply);
@@ -11734,6 +11819,58 @@ fn family(s: &mut Session, p: &Value) -> R {
         reply["kept"] = json!(kept);
     }
     Ok(reply)
+}
+
+/// Whether two versions of a family are the same but for what doesn't change what it draws: its types' values (each type's
+/// own change is its own), their identity data, its checks, where it came from, its catalog, its IFC class, its kind and its
+/// connectors. Numbers are the same at the same value however they are written (`900` and `900.0`).
+fn same_definition(a: &crate::family::Family, b: &crate::family::Family) -> bool {
+    let plain = |f: &crate::family::Family| {
+        let f = crate::family::Family {
+            types: Default::default(),
+            identity: Default::default(),
+            check: Default::default(),
+            editable: None,
+            source: None,
+            catalog: None,
+            ifc: None,
+            kind: None,
+            connectors: Vec::new(),
+            ..f.clone()
+        };
+        let mut v = serde_json::to_value(f).unwrap_or(Value::Null);
+        strip_ids(&mut v);
+        v
+    };
+    same_json(&plain(a), &plain(b))
+}
+
+/// JSON without its parts' ids and GUIDs, which a family made again in another project has anew.
+fn strip_ids(v: &mut Value) {
+    match v {
+        Value::Object(m) => {
+            m.remove("id");
+            m.remove("guid");
+            m.values_mut().for_each(strip_ids);
+        }
+        Value::Array(a) => a.iter_mut().for_each(strip_ids),
+        _ => {}
+    }
+}
+
+/// Whether two types' values are the same, numbers by their value.
+fn same_values(a: &BTreeMap<String, Value>, b: &BTreeMap<String, Value>) -> bool {
+    a.len() == b.len() && a.iter().all(|(k, v)| b.get(k).is_some_and(|w| same_json(v, w)))
+}
+
+/// JSON compared with numbers by their value.
+fn same_json(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => x.as_f64() == y.as_f64(),
+        (Value::Array(x), Value::Array(y)) => x.len() == y.len() && x.iter().zip(y).all(|(p, q)| same_json(p, q)),
+        (Value::Object(x), Value::Object(y)) => x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| same_json(v, w))),
+        _ => a == b,
+    }
 }
 
 /// An exported family made one BIMCraft takes, as Revit had it: a material its parameters name that it brings no colour
@@ -11822,9 +11959,15 @@ fn held_by(definition: Option<&Value>, held: &BTreeMap<String, crate::family::Fa
 /// project as a family of its own, as Revit loads a shared nested family into the project; one it doesn't is made beside the
 /// project, never in it, and given back by name for the family it is in to hold ([`crate::family::Family::embedded`]), each
 /// holding those it nests in turn. `parent`: the package's own definition.
-fn load_nested(s: &mut Session, nested: Option<&Value>, parent: Option<&Value>) -> Result<BTreeMap<String, crate::family::Family>, String> {
+fn load_nested(
+    s: &mut Session,
+    nested: Option<&Value>,
+    parent: Option<&Value>,
+    choices: &SharedChoices,
+) -> Result<(BTreeMap<String, crate::family::Family>, Vec<String>), String> {
     let mut held = BTreeMap::new();
-    let Some(Value::Object(all)) = nested else { return Ok(held) };
+    let mut asks = Vec::new();
+    let Some(Value::Object(all)) = nested else { return Ok((held, asks)) };
     let shared: std::collections::BTreeSet<&str> = parent
         .into_iter()
         .chain(all.values().filter_map(|v| v.get("definition")))
@@ -11862,6 +12005,45 @@ fn load_nested(s: &mut Session, nested: Option<&Value>, parent: Option<&Value>) 
         let own = held_by(definition, &held);
         if !own.is_empty() {
             params["embedded"] = serde_json::to_value(own).map_err(|e| e.to_string())?;
+        }
+        // Shared, and the project has one of its name: kept where it is the same; otherwise as the caller chose, Revit's
+        // "Family Already Exists", and asked where it didn't.
+        if shared.contains(name.as_str())
+            && let Some(own) = s.model.families.get(name.as_str()).cloned()
+        {
+            let mut b = Session::new();
+            let m = b.model_mut();
+            m.materials = s.model.materials.clone();
+            m.families = s.model.families.clone();
+            m.families.remove(name.as_str());
+            if family(&mut b, &params).is_err() {
+                params["category"] = json!("generic");
+                params["host"] = Value::Null;
+                params["cut"] = Value::Null;
+                let _ = family(&mut b, &params);
+            }
+            let same = b.model.families.get(name.as_str()).is_some_and(|brought| {
+                same_definition(&own, brought)
+                    && own.types.len() == brought.types.len()
+                    && own.types.iter().all(|(t, v)| brought.types.get(t).is_some_and(|w| same_values(v, w)))
+            });
+            if same {
+                continue;
+            }
+            match choices.get(name) {
+                None => asks.push(name.clone()),
+                Some(SharedChoice::Existing) => {}
+                Some(choice) => {
+                    params["keep_values"] = json!(choice == SharedChoice::Overwrite);
+                    if family(s, &params).is_err() {
+                        params["category"] = json!("generic");
+                        params["host"] = Value::Null;
+                        params["cut"] = Value::Null;
+                        let _ = family(s, &params);
+                    }
+                }
+            }
+            continue;
         }
         // Not shared: made in a project of its own that has the project's families and materials, then held.
         let mut beside = (!shared.contains(name.as_str())).then(|| {
@@ -11903,7 +12085,48 @@ fn load_nested(s: &mut Session, nested: Option<&Value>, parent: Option<&Value>) 
             }
         }
     }
-    Ok(held)
+    Ok((held, asks))
+}
+
+/// What to do with a shared nested family the project has otherwise (Revit's "Family Already Exists"): the version from the
+/// family, the project's values of its types kept ("Overwrite the existing version"); the version from the family with its
+/// values ("... and its parameter values"); or the project's own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SharedChoice {
+    Overwrite,
+    OverwriteValues,
+    Existing,
+}
+
+/// The caller's `shared`: one choice for every shared nested family, or one per name.
+enum SharedChoices {
+    None,
+    All(SharedChoice),
+    Each(BTreeMap<String, SharedChoice>),
+}
+
+impl SharedChoices {
+    fn get(&self, name: &str) -> Option<SharedChoice> {
+        match self {
+            SharedChoices::None => None,
+            SharedChoices::All(c) => Some(*c),
+            SharedChoices::Each(m) => m.get(name).copied(),
+        }
+    }
+}
+
+fn shared_choices(c: &str, p: &Value) -> Result<SharedChoices, String> {
+    let one = |v: &Value| match v.as_str() {
+        Some("overwrite") => Ok(SharedChoice::Overwrite),
+        Some("overwrite_values") => Ok(SharedChoice::OverwriteValues),
+        Some("existing") => Ok(SharedChoice::Existing),
+        _ => Err(bad(c, format!("`shared`: `overwrite`, `overwrite_values` or `existing`, not {v}"))),
+    };
+    match p.get("shared") {
+        None | Some(Value::Null) => Ok(SharedChoices::None),
+        Some(Value::Object(m)) => Ok(SharedChoices::Each(m.iter().map(|(k, v)| Ok((k.clone(), one(v)?))).collect::<Result<_, String>>()?)),
+        Some(v) => Ok(SharedChoices::All(one(v)?)),
+    }
 }
 
 /// A family as `family` reads it: what it is, each of its types' parameters worked out (formulas and

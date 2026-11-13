@@ -135,7 +135,7 @@ fn a_box_from_revit_matches_revits_result_is_editable_and_flexes_with_its_parame
     assert_eq!(v["ref(Left)"], crate::family::Val::Number(-700.0));
     // Flexed: the type's Width changed, its box follows, and it stays parametric (Revit's result no longer says).
     let r = run(&mut s, "family", json!({"name": "Sample Box Table", "types": {"Small": {"Width": 1600, "Height": 900}}}));
-    assert_eq!(r["check"]["Small"]["flexed"], true, "{}", r["check"]);
+    assert_eq!(r["check"]["Small"]["edited"], true, "{}", r["check"]);
     let f = s.model.families["Sample Box Table"].clone();
     let (lo, hi) = extent(&f, "Small", &none);
     assert!(near(lo[0], -800.0) && near(hi[0], 800.0) && near(hi[2], 900.0), "{lo:?} {hi:?}");
@@ -173,8 +173,8 @@ fn reloaded_keeping_the_projects_values_is_one_step_and_a_flexed_type_regenerate
     let f = s.model.families["Sample Box Table"].clone();
     assert_eq!((f.types["Small"]["Width"].clone(), f.types["Small"]["Height"].clone()), (json!(1600), json!(900)));
     // Checked against Revit's result at Revit's sizes, then flexed: it regenerates at the project's.
-    assert_eq!((f.check["Small"].matched, f.check["Small"].flexed), (true, true), "{:?}", f.check);
-    assert_eq!((f.check["Large"].matched, f.check["Large"].flexed), (true, false), "{:?}", f.check);
+    assert_eq!((f.check["Small"].matched, f.check["Small"].edited), (true, true), "{:?}", f.check);
+    assert_eq!((f.check["Large"].matched, f.check["Large"].edited), (true, false), "{:?}", f.check);
     assert_eq!(f.editable.as_ref().map(|e| e.ok), Some(true));
     let none = |_: &str| None;
     let (lo, hi) = extent(&f, "Small", &none);
@@ -187,7 +187,7 @@ fn reloaded_keeping_the_projects_values_is_one_step_and_a_flexed_type_regenerate
     assert!(r.get("kept").is_none());
     let f = s.model.families["Sample Box Table"].clone();
     assert_eq!(f.types["Small"]["Width"], json!(1000));
-    assert_eq!((f.check["Small"].matched, f.check["Small"].flexed), (true, false));
+    assert_eq!((f.check["Small"].matched, f.check["Small"].edited), (true, false));
     // `keep_values` is a yes or no.
     assert!(s.execute("family", &json!({"path": "Sample Box Table.json", "keep_values": "yes"})).is_err());
 }
@@ -218,6 +218,76 @@ fn a_type_that_does_not_match_draws_revits_result_and_says_why() {
     let list = run(&mut s, "family", json!({}));
     let mine = list["families"].as_array().unwrap().iter().find(|f| f["name"] == "Sample Box Table").unwrap().clone();
     assert_eq!(mine["editable"]["ok"], false);
+}
+
+/// The parametric form of the box table, as the Family Editor patches it: its id.
+fn parametric_form(s: &Session) -> Id {
+    s.model.families["Sample Box Table"].forms.iter().find(|x| !x.snapshot).map(|x| x.id).unwrap()
+}
+
+/// The reviewer's repro: a matched box 750 high, its extrusion's end moved to 900 in the Family Editor. The edit stays: the
+/// family draws 900, every type is edited (drawn from its rules) and is never checked against Revit's 750 again.
+#[test]
+fn an_edit_in_the_family_editor_stays_and_is_never_checked_against_revit_again() {
+    let mut s = Session::new();
+    run(&mut s, "family", table(750.0));
+    let none = |_: &str| None;
+    assert!(near(extent(&s.model.families["Sample Box Table"], "Small", &none).1[2], 750.0));
+    let id = parametric_form(&s);
+    let r = run(&mut s, "family", json!({"name": "Sample Box Table", "form": {"id": id, "to": 900}}));
+    for t in ["Small", "Large"] {
+        assert_eq!((r["check"][t]["matched"].clone(), r["check"][t]["edited"].clone()), (json!(true), json!(true)), "{}", r["check"]);
+    }
+    assert_eq!(r["editable"]["ok"], true, "{}", r["editable"]);
+    let f = s.model.families["Sample Box Table"].clone();
+    assert!(!f.draws_snapshot("Small") && !f.draws_snapshot("Large"));
+    assert!(near(extent(&f, "Small", &none).1[2], 900.0), "the edit is drawn, not Revit's 750");
+    assert!(near(extent(&f, "Large", &none).1[2], 900.0));
+    // A later change of anything else checks nothing again: the edit stays.
+    run(&mut s, "family", json!({"name": "Sample Box Table", "types": {"Small": {"Width": 1200}}}));
+    let f = s.model.families["Sample Box Table"].clone();
+    assert!(near(extent(&f, "Small", &none).1[2], 900.0) && near(extent(&f, "Small", &none).1[0], 600.0));
+    // The whole family sent back as the Family Editor sends it, nothing changed, changes nothing of its checks.
+    let mut s = Session::new();
+    run(&mut s, "family", table(900.0));
+    let mut same = serde_json::to_value(&s.model.families["Sample Box Table"]).unwrap();
+    same["name"] = json!("Sample Box Table");
+    // Its numbers written as the editor writes them.
+    same["parameters"][0]["value"] = json!(1000.0);
+    run(&mut s, "family", same);
+    let f = s.model.families["Sample Box Table"].clone();
+    assert!(f.check.values().all(|c| !c.edited), "{:?}", f.check);
+    assert!(f.draws_snapshot("Large"), "a type that failed stays Revit's until it is changed");
+}
+
+/// A type that failed at import keeps Revit's shape until someone changes it: a change of its values, or BIMCraft's rebuild
+/// taken in its place (`rebuild`), draws it from its rules, and the wall's opening, its schedule and its forms agree.
+#[test]
+fn a_type_that_failed_keeps_revits_shape_until_it_is_changed_or_its_rebuild_is_taken() {
+    let none = |_: &str| None;
+    let mut s = Session::new();
+    run(&mut s, "family", table(900.0));
+    assert!(near(extent(&s.model.families["Sample Box Table"], "Large", &none).1[2], 900.0), "Revit's result");
+    // Its rebuild taken: drawn from its rules (750), said so, and its reason kept.
+    let r = run(&mut s, "family", json!({"name": "Sample Box Table", "rebuild": ["Large"]}));
+    assert_eq!((r["check"]["Large"]["matched"].clone(), r["check"]["Large"]["edited"].clone()), (json!(false), json!(true)));
+    assert!(r["check"]["Large"]["reason"].is_string());
+    let f = s.model.families["Sample Box Table"].clone();
+    assert!(!f.draws_snapshot("Large") && near(extent(&f, "Large", &none).1[2], 750.0));
+    assert!(s.execute("family", &json!({"name": "Sample Box Table", "rebuild": ["Nope"]})).unwrap_err().contains("Nope"));
+    // Changing a failed type's values draws it from its rules at them, not Revit's stale result.
+    let mut s = Session::new();
+    run(&mut s, "family", table(900.0));
+    run(&mut s, "family", json!({"name": "Sample Box Table", "types": {"Large": {"Width": 1600}}}));
+    let f = s.model.families["Sample Box Table"].clone();
+    assert!(f.check["Large"].edited && !f.draws_snapshot("Large"));
+    let (lo, hi) = extent(&f, "Large", &none);
+    assert!(near(lo[0], -800.0) && near(hi[0], 800.0) && near(hi[2], 750.0), "{lo:?} {hi:?}");
+    // A type made since, not like another, was never checked: it says so and draws its rules.
+    let r = run(&mut s, "family", json!({"name": "Sample Box Table", "types": {"New": {"Width": 500}}}));
+    assert!(r["check"].get("New").is_none(), "{}", r["check"]);
+    let f = s.model.families["Sample Box Table"].clone();
+    assert!(!f.draws_snapshot("New") && near(extent(&f, "New", &none).1[0], 250.0));
 }
 
 #[test]
@@ -355,7 +425,7 @@ fn revolves_blends_sweeps_and_swept_blends_regenerate() {
         }
     });
     let r = run(&mut s, "family", fam);
-    assert_eq!(r["editable"]["ok"], true, "{}", r["editable"]);
+    assert!(r["editable"]["untranslated"].is_null() && r["check"] == json!({}), "translated whole, and never checked: {}", r["editable"]);
     let f = s.model.families["Shapes"].clone();
     assert_eq!(f.forms.len(), 5);
     let alone = |i: usize| Family { forms: vec![f.forms[i].clone()], ..f.clone() };
@@ -375,7 +445,8 @@ fn frustum(big: f64, z0: f64, small: f64, z1: f64) -> Value {
     let (b, s) = (big / 2.0, small / 2.0);
     let ring = |h: f64, z: f64| [[-h, -h, z], [h, -h, z], [h, h, z], [-h, h, z]];
     let (lo, hi) = (ring(b, z0), ring(s, z1));
-    let mut tris = vec![json!([lo[0], lo[2], lo[1]]), json!([lo[0], lo[3], lo[2]]), json!([hi[0], hi[1], hi[2]]), json!([hi[0], hi[2], hi[3]])];
+    let mut tris =
+        vec![json!([lo[0], lo[2], lo[1]]), json!([lo[0], lo[3], lo[2]]), json!([hi[0], hi[1], hi[2]]), json!([hi[0], hi[2], hi[3]])];
     for i in 0..4 {
         let j = (i + 1) % 4;
         tris.push(json!([lo[i], lo[j], hi[j]]));
@@ -411,6 +482,164 @@ fn a_blend_built_from_top_to_bottom_comes_out_right_side_up() {
     let corners = pieces.iter().flat_map(|p| p.tris.iter().flatten());
     let half_at = |z: f64| corners.clone().filter(|q| (q[2] - z).abs() < 0.5).map(|q| q[0].abs()).fold(0.0, f64::max);
     assert!(near(half_at(3000.0), 300.0) && near(half_at(2500.0), 100.0), "{} at 3000, {} at 2500", half_at(3000.0), half_at(2500.0));
+}
+
+/// A family of extrusions between bound planes, its Revit result `snapshot`: what the match tests below vary.
+fn boxes(snapshot: Vec<Value>, forms: Value, symbols: Value, lines: Value) -> Value {
+    json!({
+        "name": "Sample Shapes", "category": "furniture", "types": {"A": {}}, "parameters": [],
+        "forms": snapshot.into_iter().map(|m| json!({"mesh": m, "snapshot": true})).collect::<Vec<_>>(),
+        "symbols": symbols,
+        "revit": {"forms": forms, "lines": lines}
+    })
+}
+
+/// An extrusion of a rectangle from `lo` to `hi`, numbers only.
+fn block(lo: [f64; 3], hi: [f64; 3]) -> Value {
+    json!({"kind": "extrusion", "normal": [0, 0, 1], "start": lo[2], "end": hi[2],
+           "loops": [rect(json!(lo[0]), json!(hi[0]), json!(lo[1]), json!(hi[1]))]})
+}
+
+/// "Matched" means matched: the same total volume and the same box are not enough. A mirrored L, a knob on the wrong side
+/// and a blend upside down each fail, and say where; the right ones match.
+#[test]
+fn a_mirrored_or_misplaced_part_fails_the_check_though_its_volume_and_box_agree() {
+    let check = |snapshot: Vec<Value>, forms: Value| {
+        let mut s = Session::new();
+        let r = run(&mut s, "family", boxes(snapshot, forms, json!([]), json!([])));
+        r["check"]["A"].clone()
+    };
+    // An L, its leg on +x; Revit's on +x too, then on -x.
+    let l = json!([block([-500.0, 0.0, 0.0], [500.0, 100.0, 100.0]), block([400.0, 100.0, 0.0], [500.0, 600.0, 100.0])]);
+    let leg_right = vec![cuboid([-500.0, 0.0, 0.0], [500.0, 100.0, 100.0]), cuboid([400.0, 100.0, 0.0], [500.0, 600.0, 100.0])];
+    let leg_left = vec![cuboid([-500.0, 0.0, 0.0], [500.0, 100.0, 100.0]), cuboid([-500.0, 100.0, 0.0], [-400.0, 600.0, 100.0])];
+    assert_eq!(check(leg_right, l.clone())["matched"], true);
+    let c = check(leg_left, l);
+    assert_eq!(c["matched"], false, "{c}");
+    assert!(c["reason"].as_str().unwrap().contains("mm off"), "{c}");
+    // A cabinet with a knob 40 mm out of its front at x 400; Revit's has it at x -400.
+    let cabinet =
+        |x: f64| vec![cuboid([-500.0, -300.0, 0.0], [500.0, 300.0, 800.0]), cuboid([x - 20.0, -340.0, 700.0], [x + 20.0, -300.0, 740.0])];
+    let forms = json!([block([-500.0, -300.0, 0.0], [500.0, 300.0, 800.0]), block([380.0, -340.0, 700.0], [420.0, -300.0, 740.0])]);
+    assert_eq!(check(cabinet(400.0), forms.clone())["matched"], true);
+    assert_eq!(check(cabinet(-400.0), forms)["matched"], false);
+}
+
+/// The plan's lines are compared one by one, not by their extent: a swing line moved inside the same extent fails.
+#[test]
+fn a_plan_line_out_of_place_fails_the_check_though_the_plan_reaches_as_far() {
+    let check = |x: f64| {
+        let mut s = Session::new();
+        let symbols = json!([{"line": [[-500, -300], [500, 300]], "snapshot": true, "show": {}},
+                             {"line": [[x, -300], [x, 300]], "snapshot": true, "show": {}}]);
+        let lines = json!([{"view": "plan", "show": {"coarse": true, "medium": true, "fine": true, "plan": true},
+                            "curves": [line(json!([-500, -300, 0]), json!([500, 300, 0])), line(json!([0, -300, 0]), json!([0, 300, 0]))]}]);
+        let r = run(
+            &mut s,
+            "family",
+            boxes(
+                vec![cuboid([-500.0, -300.0, 0.0], [500.0, 300.0, 50.0])],
+                json!([block([-500.0, -300.0, 0.0], [500.0, 300.0, 50.0])]),
+                symbols,
+                lines,
+            ),
+        );
+        r["check"]["A"].clone()
+    };
+    assert_eq!(check(0.0)["matched"], true, "{}", check(0.0));
+    let c = check(120.0);
+    assert_eq!(c["matched"], false, "{c}");
+    assert!(c["reason"].as_str().unwrap().contains("plan"), "{c}");
+}
+
+/// A blend upside down has Revit's volume and box, and still fails: its shape is compared.
+#[test]
+fn an_upside_down_blend_fails_the_check() {
+    let p = |x: f64, y: f64, z: f64| json!([x, y, z]);
+    let lp = |pts: &[Value]| -> Value {
+        json!((0..pts.len()).map(|i| line(pts[i].clone(), pts[(i + 1) % pts.len()].clone())).collect::<Vec<_>>())
+    };
+    let square = |h: f64, z: f64| lp(&[p(-h, -h, z), p(h, -h, z), p(h, h, z), p(-h, h, z)]);
+    let forms = json!([{"kind": "blend", "normal": [0, 0, 1], "start": 3000, "end": 2500,
+                        "bottom": [square(300.0, 3000.0)], "top": [square(100.0, 2500.0)]}]);
+    let mut s = Session::new();
+    let r = run(&mut s, "family", boxes(vec![frustum(200.0, 3000.0, 600.0, 2500.0)], forms, json!([]), json!([])));
+    assert_eq!(r["check"]["A"]["matched"], false, "{}", r["check"]);
+}
+
+/// Flexed to values its dimensions can't hold (a locked 1000 between Left and Right that Width labels too), the change is
+/// refused, as Revit refuses it, and the family is left as it was.
+#[test]
+fn a_change_its_dimensions_cant_hold_is_refused_and_not_stored() {
+    let mut s = Session::new();
+    let mut fam = table(750.0);
+    // Small's Right is locked 1000 from its Left as it was made: Width 1000 holds, 1600 can't.
+    fam["types"] = json!({"Small": {}});
+    fam["forms"] = json!([{"mesh": cuboid([-500.0, -300.0, 0.0], [500.0, 300.0, 750.0]), "snapshot": true}]);
+    fam["revit"]["dimensions"].as_array_mut().unwrap().push(json!({"refs": ["2", "3"], "locked": true, "value": {"Small": 1000}}));
+    run(&mut s, "family", fam);
+    let before = s.model.families["Sample Box Table"].clone();
+    let e = s.execute("family", &json!({"name": "Sample Box Table", "types": {"Small": {"Width": 1600}}})).unwrap_err();
+    assert!(e.contains("can't hold") && e.contains("over-constrained"), "{e}");
+    assert_eq!(s.model.families["Sample Box Table"], before, "nothing stored");
+    // One it can hold goes through.
+    run(&mut s, "family", json!({"name": "Sample Box Table", "types": {"Small": {"Depth": 700}}}));
+}
+
+/// A door's or a window's Revit result is made in the wall the exporter placed it in: one it says (`to_bimcraft.wall`), else
+/// a 200 mm one. A frame bound to the wall's faces is checked in that wall, so it matches in a 150 mm one, and placed in a
+/// 300 mm wall it follows that.
+#[test]
+fn a_hosted_family_is_checked_in_the_wall_its_revit_result_was_made_in() {
+    let package = |wall: Option<f64>, snapshot_wall: f64| {
+        let h = snapshot_wall / 2.0;
+        let at = |a: f64| json!({"900": a});
+        let mut to = json!({"x_offset": 0, "y_sign": 1, "z_minus": 0});
+        if let Some(w) = wall {
+            to["wall"] = json!(w);
+        }
+        json!({
+            "name": "Sample Frame", "category": "door", "host": "wall",
+            "parameters": [{"name": "Width", "kind": "length", "value": 900}, {"name": "Height", "kind": "length", "value": 2100}],
+            "types": {"900": {}},
+            // Revit's frame: a lining as deep as the wall it was made in.
+            "forms": [{"mesh": cuboid([-500.0, -h, 0.0], [-450.0, h, 2100.0]), "snapshot": true}],
+            "revit": {
+                "to_bimcraft": to,
+                "reference_planes": [
+                    {"id": "1", "name": "Center", "normal": [1, 0, 0], "defines_origin": true, "at": at(0.0)},
+                    {"id": "2", "name": "Left", "normal": [1, 0, 0], "at": at(-450.0)},
+                    {"id": "e", "name": "Exterior", "normal": [0, 1, 0], "is_reference": "host_exterior", "at": at(76.2)},
+                    {"id": "i", "name": "Interior", "normal": [0, 1, 0], "is_reference": "host_interior", "at": at(-76.2)},
+                    {"id": "7", "name": "Ref Level", "normal": [0, 0, 1], "defines_origin": true, "at": at(0.0)}
+                ],
+                "dimensions": [{"refs": ["2", "1"], "locked": true, "value": at(450.0)}],
+                "forms": [{"kind": "extrusion", "normal": [0, 0, 1], "start": 0, "end": 2100,
+                           "loops": [rect(json!({"ref": "2", "offset": -50}), r("2"), r("i"), r("e"))]}]
+            }
+        })
+    };
+    let check = |wall: Option<f64>, snapshot_wall: f64| {
+        let mut s = Session::new();
+        let r = run(&mut s, "family", package(wall, snapshot_wall));
+        (s, r["check"]["900"].clone())
+    };
+    let (_, c) = check(Some(150.0), 150.0);
+    assert_eq!((c["matched"].clone(), c["wall"].clone()), (json!(true), json!(150.0)), "{c}");
+    // Made in the exporter's usual 200 mm wall, said or not.
+    assert_eq!(check(None, 200.0).1["matched"], true);
+    // Revit's made in 150, checked in 200: the lining is 25 mm too deep each way.
+    let c = check(None, 150.0).1;
+    assert_eq!(c["matched"], false, "{c}");
+    // In a 300 mm wall of the project, the lining is as deep as that wall.
+    let (mut s, _) = check(Some(150.0), 150.0);
+    run(&mut s, "type", json!({"category": "wall", "name": "Thick", "thickness": 300}));
+    run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]], "type": "Thick"}));
+    let d = run(&mut s, "door", json!({"at": [2000, 0], "family": "Sample Frame", "type": "900"}));
+    let (pieces, _) = s.model.opening_local(&s.model.elements[&d["id"].as_u64().unwrap()]).unwrap();
+    let ys: Vec<f64> = pieces.iter().flat_map(|p| p.tris.iter().flatten()).map(|p| p[1]).collect();
+    let deep = ys.iter().copied().fold(f64::MIN, f64::max) - ys.iter().copied().fold(f64::MAX, f64::min);
+    assert!(near(deep, 300.0), "{deep}");
 }
 
 #[test]
@@ -614,7 +843,7 @@ fn a_ring_of_two_half_circles_is_a_hole_and_an_axis_drawn_in_a_sketch_is_no_loop
         ]}
     });
     let r = run(&mut s, "family", fam);
-    assert_eq!(r["editable"]["ok"], true, "{}", r["editable"]);
+    assert!(r["editable"]["untranslated"].is_null() && r["check"] == json!({}), "translated whole, and never checked: {}", r["editable"]);
     let f = s.model.families["Collar"].clone();
     assert_eq!(f.forms.len(), 2, "one ring with its hole, one revolve");
     assert_eq!(f.forms[0].holes.len(), 1);
@@ -634,7 +863,7 @@ fn a_sweep_of_a_profile_with_a_loop_inside_is_a_tube() {
                              "profile": [square(25.0), square(15.0)]}]}
     });
     let r = run(&mut s, "family", fam);
-    assert_eq!(r["editable"]["ok"], true, "{}", r["editable"]);
+    assert!(r["editable"]["untranslated"].is_null() && r["check"] == json!({}), "translated whole, and never checked: {}", r["editable"]);
     let f = s.model.families["Rail"].clone();
     assert_eq!(f.forms.len(), 1, "the inside is a hole of the one sweep");
     assert_eq!(f.forms[0].section_holes.len(), 1);
@@ -722,6 +951,59 @@ fn a_shared_nested_family_comes_into_the_project_and_one_not_shared_is_held_by_i
     assert_eq!(marks.len(), 2, "the knob's and the rail's plan lines");
 }
 
+/// A shared nested family the project has otherwise is Revit's "Family Already Exists": loading asks (refused, saying which
+/// and the choices) until the caller chooses; the project's kept, or the family's version, with its values or the project's.
+/// One the same as the project's asks nothing. A dry run says what would ask.
+#[test]
+fn a_shared_nested_family_the_project_has_otherwise_asks_before_it_replaces_it() {
+    let part = |w: f64, depth: f64| {
+        json!({"category": "generic", "types": {"Standard": {"Depth": depth}}, "parameters": [{"name": "Depth", "kind": "length", "value": 50}],
+               "forms": [{"profile": [[0, 0], [w, 0], [w, "Depth"], [0, "Depth"]], "from": 0, "to": 50}]})
+    };
+    let package = |knob: Value| {
+        let mut unit = table(750.0);
+        unit.as_object_mut().unwrap().remove("name");
+        let mut definition = unit.as_object_mut().unwrap().remove("revit").unwrap();
+        definition["nested"] = json!([{"id": "n1", "family": "Sample Knob", "type": "Standard", "shared": true, "at": [0, 0, 750]}]);
+        json!({"format": 2, "family": unit, "definition": definition, "nested_families": {"Sample Knob": {"family": knob}}})
+            .to_string()
+            .into_bytes()
+    };
+    let mut s = Session::new();
+    s.files.give("Unit.arqiflow-family.json", package(part(50.0, 50.0)));
+    run(&mut s, "family", json!({"path": "Unit.arqiflow-family.json"}));
+    // The same again: nothing to ask, and the dry run says the unit itself exists.
+    let dry = run(&mut s, "family", json!({"path": "Unit.arqiflow-family.json", "dry_run": true}));
+    assert_eq!((dry["exists"].clone(), dry["shared_asks"].clone()), (json!(true), json!([])), "{dry}");
+    run(&mut s, "family", json!({"path": "Unit.arqiflow-family.json"}));
+    // The project's knob made its own: a new version of the unit brings another.
+    run(&mut s, "family", json!({"name": "Sample Knob", "types": {"Standard": {"Depth": 80}}}));
+    s.files.give("Unit 2.arqiflow-family.json", package(part(60.0, 50.0)));
+    let dry = run(&mut s, "family", json!({"path": "Unit 2.arqiflow-family.json", "name": "Unit", "dry_run": true}));
+    assert_eq!(dry["shared_asks"], json!(["Sample Knob"]), "{dry}");
+    let e = s.execute("family", &json!({"path": "Unit 2.arqiflow-family.json", "name": "Unit"})).unwrap_err();
+    assert!(e.contains("Sample Knob") && e.contains("overwrite"), "{e}");
+    let knob = |s: &Session| {
+        (s.model.families["Sample Knob"].forms[0].profile[1][0].clone(), s.model.families["Sample Knob"].types["Standard"]["Depth"].clone())
+    };
+    assert_eq!(knob(&s), (crate::family::Expr::Number(50.0), json!(80)), "refused: nothing changed");
+    // The project's kept.
+    run(&mut s, "family", json!({"path": "Unit 2.arqiflow-family.json", "name": "Unit", "shared": "existing"}));
+    assert_eq!(knob(&s), (crate::family::Expr::Number(50.0), json!(80)));
+    // "Overwrite the existing version": the family's, the project's values of its types kept.
+    run(&mut s, "family", json!({"path": "Unit 2.arqiflow-family.json", "name": "Unit", "shared": {"Sample Knob": "overwrite"}}));
+    assert_eq!(knob(&s), (crate::family::Expr::Number(60.0), json!(80)));
+    // "... and its parameter values".
+    run(
+        &mut s,
+        "family",
+        json!({"name": "Sample Knob", "forms": [{"profile": [[0, 0], [70, 0], [70, "Depth"], [0, "Depth"]], "from": 0, "to": 50}]}),
+    );
+    run(&mut s, "family", json!({"path": "Unit 2.arqiflow-family.json", "name": "Unit", "shared": "overwrite_values"}));
+    assert_eq!(knob(&s), (crate::family::Expr::Number(60.0), json!(50.0)));
+    assert!(s.execute("family", &json!({"path": "Unit 2.arqiflow-family.json", "name": "Unit", "shared": "maybe"})).is_err());
+}
+
 #[test]
 fn a_sweep_of_a_round_profile_drawn_as_two_half_circles_is_a_rod() {
     let mut s = Session::new();
@@ -732,7 +1014,7 @@ fn a_sweep_of_a_round_profile_drawn_as_two_half_circles_is_a_rod() {
         "revit": {"forms": [{"kind": "sweep", "path": [line(p(0.0, 0.0, 0.0), p(500.0, 0.0, 0.0))], "profile": [[half(1.0), half(-1.0)]]}]}
     });
     let r = run(&mut s, "family", fam);
-    assert_eq!(r["editable"]["ok"], true, "{}", r["editable"]);
+    assert!(r["editable"]["untranslated"].is_null() && r["check"] == json!({}), "translated whole, and never checked: {}", r["editable"]);
     let f = s.model.families["Rod"].clone();
     let want = std::f64::consts::PI * 100.0 * 500.0;
     assert!((volume(&f, "A") - want).abs() < want * 0.02, "{} against {want}", volume(&f, "A"));
@@ -756,7 +1038,7 @@ fn an_extrusion_on_a_sloped_plane_is_swept_along_its_normal() {
         }
     });
     let r = run(&mut s, "family", fam);
-    assert_eq!(r["editable"]["ok"], true, "{}", r["editable"]);
+    assert!(r["editable"]["untranslated"].is_null() && r["check"] == json!({}), "translated whole, and never checked: {}", r["editable"]);
     let f = s.model.families["Leaning Back"].clone();
     let want = 400.0 * 300.0 * 38.0;
     assert!((volume(&f, "A") - want).abs() < want * 0.001, "{} against {want}", volume(&f, "A"));

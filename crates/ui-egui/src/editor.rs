@@ -1186,12 +1186,11 @@ fn references_tab(ed: &FamilyEditor, ui: &mut Ui) {
             ui.label(format!("{} : {}", n.family, n.type_name));
         }
     }
-    if !k.check.is_empty() {
+    if !k.check.is_empty() || k.editable.is_some() {
         ui.add_space(6.0);
         ui.label(RichText::new(t("Types against Revit")).strong());
-        for (ty, c) in &k.check {
-            let said = if c.matched { t("as in Revit, editable").to_string() } else { c.reason.clone().unwrap_or_default() };
-            ui.label(format!("{ty}: {said}"));
+        for (ty, _) in &ed.types {
+            ui.label(format!("{ty}: {}", type_check_text(k.check.get(ty))));
         }
     }
     if let Some(e) = &k.editable {
@@ -1199,6 +1198,43 @@ fn references_tab(ed: &FamilyEditor, ui: &mut Ui) {
             ui.label(RichText::new(u).color(pal().muted));
         }
     }
+}
+
+/// What a type's check against Revit says, in a few words: matched; drawn as Revit made it, and why; changed since it came
+/// in, so drawn from its rules; or never checked (made since).
+pub(crate) fn type_check_text(c: Option<&bimcraft_core::family::TypeCheck>) -> String {
+    let wall = |c: &bimcraft_core::family::TypeCheck| {
+        c.wall.map(|w| tf(" (in a {} mm wall)", &[&format!("{}", (w * 10.0).round() / 10.0)])).unwrap_or_default()
+    };
+    match c {
+        None => t("Not checked").to_string(),
+        Some(c) if c.edited => t("Changed here: drawn from its rules").to_string(),
+        Some(c) if c.matched => format!("{}{}", t("Matches Revit"), wall(c)),
+        Some(c) => tf("Drawn as Revit made it: {}", &[&c.reason.clone().unwrap_or_default().replace('`', "")]),
+    }
+}
+
+/// The Family Editor's offer for a family some of whose types are drawn as Revit made it: BIMCraft's rebuild of them all, which
+/// may differ from Revit's. Whether it was pressed.
+fn as_revit_offer_all(ui: &mut Ui) -> bool {
+    let mut pressed = false;
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new(t("BIMCraft's rebuild may differ from Revit's.")).color(pal().muted));
+        pressed = ui.button(t("Use BIMCraft's Rebuild")).clicked();
+    });
+    pressed
+}
+
+/// The offer for what's drawn as Revit made it (a type whose check against Revit failed): why, and a button that draws it
+/// from BIMCraft's rebuild instead, which may differ from Revit's. Whether it was pressed.
+pub(crate) fn as_revit_offer(ui: &mut Ui, why: &str) -> bool {
+    let mut pressed = false;
+    ui.label(RichText::new(tf("Drawn as Revit made it: {}", &[why])).color(pal().muted));
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new(t("BIMCraft's rebuild may differ from Revit's.")).color(pal().muted));
+        pressed = ui.button(t("Use BIMCraft's Rebuild")).clicked();
+    });
+    pressed
 }
 
 fn symbols_tab(ed: &mut FamilyEditor, ui: &mut Ui) {
@@ -1370,15 +1406,30 @@ impl BimApp {
                         ui.end_row();
                     }
                 });
-                // A family from Revit: whether it can be edited here, and why not, in plain words.
+                // A family from Revit: whether it can be edited here, and why not, in plain words; where a type is drawn as
+                // Revit made it, BIMCraft's rebuild offered in its place.
+                let mut rebuild = false;
                 if let Some(e) = &ed.kept.editable {
-                    let (text, color) = if e.ok {
-                        (t("Editable: its parameters flex it as in Revit.").to_string(), pal().muted)
+                    let why = e.reason.clone().unwrap_or_default().replace('`', "");
+                    let as_revit = ed.kept.check.values().any(|c| c.as_revit());
+                    if e.ok {
+                        ui.label(RichText::new(t("Editable: its parameters flex it as in Revit.")).color(pal().muted));
+                    } else if as_revit {
+                        ui.label(RichText::new(tf("As in Revit (not yet editable): {}", &[&why])).color(pal().error));
+                        rebuild = as_revit_offer_all(ui);
+                    } else if ed.kept.check.is_empty() {
+                        ui.label(RichText::new(tf("Not checked against Revit: {}", &[&why])).color(pal().muted));
                     } else {
-                        let why = e.reason.clone().unwrap_or_default().replace('`', "");
-                        (tf("As in Revit (not yet editable): {}", &[&why]), pal().error)
-                    };
-                    ui.label(RichText::new(text).color(color));
+                        ui.label(RichText::new(tf("Drawn from its rules, which may differ from Revit's: {}", &[&why])).color(pal().muted));
+                    }
+                }
+                // Taken: each type drawn from its rules in the preview at once, and in the project with OK or Apply.
+                if rebuild {
+                    ed.kept.check.values_mut().for_each(|c| c.edited = true);
+                    if let Ok(mut f) = ed.family() {
+                        f.summarize();
+                        ed.kept.editable = f.editable;
+                    }
                 }
                 ui.add_space(6.0);
                 // What the tabs leave of the screen, to the buttons below: a small one scrolls them.
@@ -1477,6 +1528,11 @@ impl BimApp {
                     if self.run("family", p).is_some() {
                         ed.original = Some(ed.name.trim().to_string());
                         made = true;
+                        // Its checks as the project now has them: a type changed here is drawn from its rules from now on.
+                        if let Some(f) = self.session.model.families.get(ed.name.trim()) {
+                            ed.kept.check = f.check.clone();
+                            ed.kept.editable = f.editable.clone();
+                        }
                     } else {
                         // Said in the window; the box over the view's corner would lie on its buttons.
                         ed.problem = Some(std::mem::take(&mut self.status).text);

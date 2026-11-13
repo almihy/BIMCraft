@@ -19,7 +19,8 @@ use crate::geom::v3::{P3, add, cross, mul};
 use crate::model::{MAX_COORD, MAX_TEXT};
 
 mod bounds;
-pub(crate) mod check;
+pub mod check;
+pub mod compare;
 mod parametric;
 pub mod revit;
 mod shapes;
