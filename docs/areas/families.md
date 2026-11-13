@@ -292,6 +292,12 @@ other as the check and the fallback (`snapshot` forms and symbols), and checks e
   drawn at the detail levels where Revit's own plan of the first type has them (`masked_as_revit`: a door's not at Coarse). An arc's `mid` (a bound point on it) makes its centre the one through
   its corners and that point, per type (`Bend::through`, `circumcentre`): an arched window's head, whose radius follows
   its width as no sum of parameters does.
+- **Loading.** Load Family is in the Mode panel of Modify | Place Component, Place Door and Place Window and on Insert ›
+  Load from Library, as in Revit (`BimApp::load_family`); the family loaded is placed with its category's tool on the type
+  its package says (`place`), else its first (`place_loaded`): a door's with Door, a window's with Window, any other's with
+  Component. A nested family Revit doesn't share is only ever in its parent's `embedded`, so no Type Selector, the
+  Project Browser's Families nor the Component tool lists it (a project that loaded a door before round 3 still holds its
+  handle as a family of its own, loaded then).
 - **Format.** `embedded`, `section_holes`, `section_end_holes`, `plan_top`, `plan_cut` and an arc's `through` are format
   22's (unreleased when they came: no step).
 
