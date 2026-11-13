@@ -523,9 +523,8 @@ fn dressed(f: &Family, def: &Value, has_material: &dyn Fn(&str) -> bool) -> Form
     if let Some(v) = def.get("visible").and_then(text) {
         form.visible = Some(Expr::Formula(v.to_string()));
     }
-    if let Some(s) = def.get("show").and_then(|s| serde_json::from_value::<Show>(s.clone()).ok())
-        && s != Show::default()
-    {
+    // A form of Revit's that shows everything says so (it is drawn at Coarse, in every view, as Revit draws it).
+    if let Some(s) = def.get("show").and_then(|s| serde_json::from_value::<Show>(s.clone()).ok()) {
         form.show = Some(s);
     }
     form.subcategory = def.get("subcategory").and_then(text).filter(|s| f.subcategories.iter().any(|x| x.name == *s)).map(str::to_string);
@@ -832,6 +831,13 @@ fn from_level(def: &Value, planes: &Planes, target: &str, f: &Family, params: &B
 pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> bool) -> Walls {
     for x in f.forms.iter_mut() {
         x.snapshot = true;
+        // Revit's result says where it is drawn. A form its plan didn't draw is drawn neither cut nor below the cut: the
+        // exporter writes no `plan_top` and `plan_cut` for it, which would default to drawing it below the cut.
+        let s = x.show.get_or_insert(Show::default());
+        if !s.plan {
+            s.plan_top = false;
+            s.plan_cut = false;
+        }
     }
     for y in f.symbols.iter_mut() {
         y.snapshot = true;
