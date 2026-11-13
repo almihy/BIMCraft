@@ -110,6 +110,9 @@ fn cropped(prim: Prim, lo: (f32, f32), hi: (f32, f32)) -> Vec<Prim> {
     }
 }
 
+/// A primitive with its owner, part, pen and halftone, taken out of a drawing to be pushed again.
+type Kept = (Prim, Option<Id>, Part, Option<Pen>, bool);
+
 pub struct Drawing {
     pub view: View,
     pub prims: Vec<Prim>,
@@ -291,7 +294,7 @@ impl Drawing {
         }
         let halves = self.take_halves();
         let prims = std::mem::take(&mut self.prims);
-        let mut all: Vec<(Prim, Option<Id>, Part, Option<Pen>, bool)> = prims
+        let mut all: Vec<Kept> = prims
             .into_iter()
             .zip(std::mem::take(&mut self.owners))
             .zip(std::mem::take(&mut self.parts))
@@ -748,10 +751,13 @@ fn plan_filter<'a>(
         .collect()
 }
 
+/// Cut outlines filled together: each colour, whether it is halftone, and the outlines it fills.
+type Unions = Vec<((Rgb, bool), Vec<Vec<P2>>)>;
+
 /// The cut outlines `look` fills in the same colour, together, so no seam shows where two fills
 /// meet: each colour, whether it is halftone, and the outlines it fills.
-fn cut_unions(look: &Look, outlines: impl Iterator<Item = (Id, Vec<P2>)>) -> Vec<((Rgb, bool), Vec<Vec<P2>>)> {
-    let mut unions: Vec<((Rgb, bool), Vec<Vec<P2>>)> = Vec::new();
+fn cut_unions(look: &Look, outlines: impl Iterator<Item = (Id, Vec<P2>)>) -> Unions {
+    let mut unions: Unions = Vec::new();
     for (id, o) in outlines {
         let color = (look.cut_fill(id, POCHE), look.half(id));
         match unions.iter_mut().find(|(c, _)| *c == color) {
@@ -2105,7 +2111,7 @@ fn section_base_cancellable(
     // Poché, then the edge of what is cut over it: joined walls show their union, as in plan, filled
     // as one first so no seam shows where pieces meet.
     d.owner = None;
-    let mut unions: Vec<((Rgb, bool), Vec<Vec<P2>>)> = Vec::new();
+    let mut unions: Unions = Vec::new();
     for (owner, rings) in &cuts {
         if cancelled() {
             return None;
