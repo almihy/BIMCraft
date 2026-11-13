@@ -673,7 +673,7 @@ pub fn draw(d: &mut Drawing, tb: &TitleBlock, at: P2, values: &BTreeMap<String, 
         if rings.len() > 1 {
             d.part = crate::prim::Part::Text;
         }
-        d.push(crate::prim::Prim::Fill { rings, color: ink(f.color) });
+        d.push(crate::prim::Prim::fill(rings, ink(f.color)));
         d.part = part;
     }
     for l in &tb.lines {

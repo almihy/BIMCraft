@@ -68,7 +68,7 @@ fn pattern_dots_and_lettering_take_line_overrides_and_exports_keep_outlines() {
             continue;
         }
         match prim {
-            Prim::Fill { rings, color } => {
+            Prim::Fill { rings, color, .. } => {
                 assert_eq!(*color, Rgb(200, 0, 0), "both text and dots take line colour");
                 if pen.is_some() {
                     let (lo, hi) = rings.iter().flatten().fold((f32::MAX, f32::MIN), |(lo, hi), p| (lo.min(p.0), hi.max(p.0)));

@@ -27,7 +27,7 @@ use crate::model::{
     OpeningWay, Operation, Pattern, PlanRange, Railing, Ramp, Roof, Section, Shaft, Stair, TOL, Tag, View3D, Wall,
 };
 use crate::pen::{Pen, Weights};
-pub use crate::prim::{LIGHT_POCHE, PAPER, POCHE, Part, Prim, Rgb, View};
+pub use crate::prim::{LIGHT_POCHE, OPAQUE, PAPER, POCHE, Part, Prim, Rgb, Rule, View};
 use crate::styles::{BY_CATEGORY, ObjectStyle};
 use crate::units::Units;
 use crate::view3d::{self, Camera, Clip, Image, Scene};
@@ -65,14 +65,14 @@ fn cropped(prim: Prim, lo: (f32, f32), hi: (f32, f32)) -> Vec<Prim> {
     let mm = |p: (f32, f32)| P2(f64::from(p.0), f64::from(p.1));
     let px = |p: P2| (p.0 as f32, p.1 as f32);
     match prim {
-        Prim::Fill { rings, color } => {
+        Prim::Fill { rings, color, rule, alpha } => {
             let rings: Vec<Vec<(f32, f32)>> = rings.iter().map(|r| clip_ring(r, lo, hi)).filter(|r| r.len() >= 3).collect();
-            if rings.is_empty() { Vec::new() } else { vec![Prim::Fill { rings, color }] }
+            if rings.is_empty() { Vec::new() } else { vec![Prim::Fill { rings, color, rule, alpha }] }
         }
-        Prim::Line { pts, width, color, dash, closed } => {
+        Prim::Line { pts, width, color, dash, closed, alpha } => {
             let inside = |p: &(f32, f32)| (lo.0..=hi.0).contains(&p.0) && (lo.1..=hi.1).contains(&p.1);
             if pts.iter().all(inside) {
-                return vec![Prim::Line { pts, width, color, dash, closed }];
+                return vec![Prim::Line { pts, width, color, dash, closed, alpha }];
             }
             let close = closed.then(|| pts.last().copied().zip(pts.first().copied())).flatten();
             let mut runs: Vec<Vec<(f32, f32)>> = Vec::new();
@@ -84,7 +84,7 @@ fn cropped(prim: Prim, lo: (f32, f32), hi: (f32, f32)) -> Vec<Prim> {
                     _ => runs.push(vec![p, q]),
                 }
             }
-            runs.into_iter().map(|pts| Prim::Line { pts, width, color, dash: dash.clone(), closed: false }).collect()
+            runs.into_iter().map(|pts| Prim::Line { pts, width, color, dash: dash.clone(), closed: false, alpha }).collect()
         }
         Prim::Image { at, width, height, rgba, ink } => {
             let side = |lo: f32, hi: f32, from: f32, n: u32| {
@@ -188,7 +188,12 @@ impl Drawing {
     /// A line through pixels `pts` in `pen`, `dash`ed if it says.
     pub(crate) fn stroke(&mut self, pts: Vec<(f32, f32)>, pen: Pen, color: Rgb, dash: Option<Vec<f32>>, closed: bool) {
         let width = self.width(pen);
-        self.push_pen(Prim::Line { pts, width, color, dash, closed }, Some(pen));
+        self.push_pen(Prim::line(pts, width, color, dash, closed), Some(pen));
+    }
+    /// [`Drawing::stroke`], `alpha` opaque.
+    pub(crate) fn stroke_seen(&mut self, pts: Vec<(f32, f32)>, pen: Pen, color: Rgb, dash: Option<Vec<f32>>, closed: bool, alpha: u8) {
+        let width = self.width(pen);
+        self.push_pen(Prim::Line { pts, width, color, dash, closed, alpha }, Some(pen));
     }
     /// One shared path for detail lines and region boundaries, in paper units.
     fn styled(&mut self, m: &Model, st: &crate::lines::LineStyle, mut pts: Vec<(f32, f32)>, closed: bool) {
@@ -283,7 +288,23 @@ impl Drawing {
                 r.iter().map(|p| self.view.px(*p)).collect()
             })
             .collect();
-        self.push(Prim::Fill { rings, color });
+        self.push(Prim::fill(rings, color));
+    }
+    /// `rings` (mm) filled as a drawing's hatch is, by the even-odd rule: a ring inside another is a hole; `alpha` opaque.
+    pub(crate) fn fill_odd(&mut self, rings: &[Vec<P2>], color: Rgb, alpha: u8) {
+        let rings: Vec<Vec<(f32, f32)>> = rings
+            .iter()
+            .map(|r| {
+                let mut r: Vec<(f32, f32)> = r.iter().map(|p| self.view.px(*p)).collect();
+                r.dedup();
+                r
+            })
+            .filter(|r| r.len() >= 3)
+            .collect();
+        if rings.is_empty() {
+            return;
+        }
+        self.push(Prim::Fill { rings, color, rule: Rule::EvenOdd, alpha });
     }
     /// `pts` joined in `pen`, as wide as it is on the paper the view stands for.
     pub(crate) fn line(&mut self, pts: &[P2], pen: Pen, color: Rgb, closed: bool) {
@@ -340,6 +361,19 @@ impl Drawing {
         }
     }
 
+    /// The fills and lines pushed since `from` made `alpha` opaque.
+    fn see_through(&mut self, from: usize, alpha: u8) {
+        if alpha == OPAQUE {
+            return;
+        }
+        for p in self.prims.iter_mut().skip(from) {
+            match p {
+                Prim::Fill { alpha: a, .. } | Prim::Line { alpha: a, .. } => *a = alpha,
+                Prim::Image { .. } => {}
+            }
+        }
+    }
+
     /// `text` centred on `(x, y)` px, capitals `height` px tall, turned `angle` radians clockwise
     /// on screen (y runs down).
     pub(crate) fn text_turned(&mut self, text: &str, (x, y): (f32, f32), height: f32, angle: f32, color: Rgb) {
@@ -348,7 +382,7 @@ impl Drawing {
         let part = std::mem::replace(&mut self.part, Part::Text);
         for pts in font::strokes(text, -w / 2.0, height / 2.0, height) {
             let pts = pts.into_iter().map(|(a, b)| (x + a * c - b * s, y + a * s + b * c)).collect();
-            self.push(Prim::Line { pts, width: (height / 10.0).max(1.0), color, dash: None, closed: false });
+            self.push(Prim::line(pts, (height / 10.0).max(1.0), color, None, false));
         }
         self.part = part;
     }
@@ -2523,19 +2557,22 @@ fn cad_drawing(d: &mut Drawing, cad: &crate::cad::Cad, ci: &crate::model::CadImp
                 // Its angle on screen: the drawing's turned by the import's, and mirrored when the import is.
                 let turned = if ci.stretch < 0.0 { -angle } else { *angle };
                 let middle = d.view.px(place(base + u * (wide / 2.0) + v * (height / 2.0)));
+                let from = d.prims.len();
                 d.text_turned(text, middle, px, -((turned + ci.angle).to_radians()) as f32, color);
+                d.see_through(from, ent.alpha);
             }
             Shape::Point(_) => {}
+            // A hatch's boundaries fill by odd parity, as DXF's do: an island in it is a hole.
             Shape::Fill { rings, solid } => {
                 let rings: Vec<Vec<P2>> = rings.iter().map(|r| r.iter().map(|p| place(*p)).collect()).collect();
                 let fill = if *solid { color } else { Rgb(pale(color.0), pale(color.1), pale(color.2)) };
-                d.fill(&rings, fill);
+                d.fill_odd(&rings, fill, ent.alpha);
             }
             shape => {
                 let dash = cad.dash(ent).map(|[a, b]| [(a * k) as f32, (b * k) as f32]).filter(|[a, b]| *a >= 1.0 && *b >= 1.0);
                 for (pts, closed) in crate::cad::paths(shape) {
                     let px = pts.iter().map(|p| d.view.px(place(*p))).collect();
-                    d.stroke(px, cad.pen(ent), color, dash.map(|d| d.to_vec()), closed);
+                    d.stroke_seen(px, cad.pen(ent), color, dash.map(|d| d.to_vec()), closed, ent.alpha);
                 }
             }
         }
@@ -3790,7 +3827,7 @@ fn arrow(d: &mut Drawing, a: (f32, f32), b: (f32, f32)) -> (f32, f32) {
     let (x, y) = ((b.0 - a.0) / len, (b.1 - a.1) / len);
     let (long, wide) = (d.px(10.0), d.px(4.0));
     let head = vec![b, (b.0 - x * long - y * wide, b.1 - y * long + x * wide), (b.0 - x * long + y * wide, b.1 - y * long - x * wide)];
-    d.push(Prim::Fill { rings: vec![head], color: INK });
+    d.push(Prim::fill(vec![head], INK));
     (x, y)
 }
 
@@ -4137,7 +4174,7 @@ struct EdgeStyle {
 /// The line `prim`, split where `edge` begins and ends along it: the pieces on the edge in its style (gone, when it is
 /// unseen), the rest as they were. A line off the edge comes back whole.
 fn along(prim: Prim, pen: Option<Pen>, edge: &Edge) -> Vec<(Prim, Option<Pen>)> {
-    let Prim::Line { pts, width, color, dash, closed } = &prim else { return vec![(prim, pen)] };
+    let Prim::Line { pts, width, color, dash, closed, alpha } = &prim else { return vec![(prim, pen)] };
     let Edge { a, u, len, style, .. } = edge;
     // Each piece of the line, marked when it lies on the edge.
     let mut runs: Vec<(bool, Vec<(f32, f32)>)> = Vec::new();
@@ -4174,9 +4211,11 @@ fn along(prim: Prim, pen: Option<Pen>, edge: &Edge) -> Vec<(Prim, Option<Pen>)> 
     }
     runs.into_iter()
         .filter_map(|(on, run)| match (on, style) {
-            (false, _) => Some((Prim::Line { pts: run, width: *width, color: *color, dash: dash.clone(), closed: false }, pen)),
+            (false, _) => {
+                Some((Prim::Line { pts: run, width: *width, color: *color, dash: dash.clone(), closed: false, alpha: *alpha }, pen))
+            }
             (true, Some(EdgeStyle { pen: p, color: c, dash: k, .. })) => {
-                Some((Prim::Line { pts: run, width: *width, color: *c, dash: k.clone(), closed: false }, Some(*p)))
+                Some((Prim::Line { pts: run, width: *width, color: *c, dash: k.clone(), closed: false, alpha: *alpha }, Some(*p)))
             }
             (true, None) => None,
         })
@@ -4279,10 +4318,10 @@ pub(crate) fn lettering(d: &mut Drawing, layout: &crate::text::Layout, frame: No
     let part = std::mem::replace(&mut d.part, Part::Text);
     let drawn = layout.drawn();
     for letter in &drawn.fill {
-        d.push(Prim::Fill { rings: letter.iter().map(|r| r.iter().copied().map(f).collect()).collect(), color });
+        d.push(Prim::fill(letter.iter().map(|r| r.iter().copied().map(f).collect()).collect(), color));
     }
     for (pts, width) in drawn.strokes {
-        d.push(Prim::Line { pts: pts.into_iter().map(f).collect(), width: (width * k).max(1.0), color, dash: None, closed: false });
+        d.push(Prim::line(pts.into_iter().map(f).collect(), (width * k).max(1.0), color, None, false));
     }
     for (a, b) in drawn.underlines {
         d.push(Prim::Line {
@@ -4291,6 +4330,7 @@ pub(crate) fn lettering(d: &mut Drawing, layout: &crate::text::Layout, frame: No
             color,
             dash: None,
             closed: false,
+            alpha: crate::prim::OPAQUE,
         });
     }
     d.part = part;
@@ -4305,7 +4345,7 @@ pub(crate) fn frame_at(d: &Drawing, top_left: P2, angle: f64) -> NoteFrame {
 /// reads over a line beside it, in `units`.
 fn spot_mark(d: &mut Drawing, (x, y): (f32, f32), z: Option<f64>, units: Units) {
     let from = d.prims.len();
-    d.push(Prim::Fill { rings: vec![vec![(x, y), (x + 5.0, y - 8.0), (x - 5.0, y - 8.0)]], color: INK });
+    d.push(Prim::fill(vec![vec![(x, y), (x + 5.0, y - 8.0), (x - 5.0, y - 8.0)]], INK));
     let text = z.map_or_else(|| "?".into(), |z| height(units, z));
     let w = font::width(&text, 10.0);
     d.stroke(vec![(x - 5.0, y - 8.0), (x + 9.0 + w, y - 8.0)], Pen::PROJECTION, INK, None, false);
@@ -4334,6 +4374,8 @@ fn slope_mark(d: &mut Drawing, at: P2, read: Option<(f64, Option<P2>)>) {
             d.push(Prim::Fill {
                 rings: vec![vec![tip, (back.0 + side.0, back.1 + side.1), (back.0 - side.0, back.1 - side.1)]],
                 color: INK,
+                rule: crate::prim::Rule::NonZero,
+                alpha: crate::prim::OPAQUE,
             });
             // Its fall beside the arrow's middle, upright.
             d.text(&text, (x + ux * 12.0 + w / 2.0 + 4.0 * uy.abs(), y + uy * 12.0 - 8.0), 10.0, INK);
@@ -4371,7 +4413,7 @@ fn tag(d: &mut Drawing, m: &Model, t: &Tag, rooms: &crate::rooms::Rooms) {
     } else {
         vec![(x - w, y - h), (x + w, y - h), (x + w, y + h), (x - w, y + h)]
     };
-    d.push(Prim::Fill { rings: vec![ring.clone()], color: PAPER });
+    d.push(Prim::fill(vec![ring.clone()], PAPER));
     // Openings' marks sit in a box or a hexagon; anything else's label is plain text.
     if matches!(m.elements.get(t.host), Some(Element::Door(_) | Element::Window(_))) {
         d.stroke(ring, Pen::PROJECTION, INK, None, true);
@@ -4395,7 +4437,7 @@ fn section_mark(d: &mut Drawing, v: &Section) {
     let len = (b.0 - a.0).hypot(b.1 - a.1).max(1e-3);
     let (ux, uy) = ((b.0 - a.0) / len, (b.1 - a.1) / len);
     let from = d.prims.len();
-    d.push(Prim::Fill { rings: vec![vec![a, (a.0 + ux * 12.0, a.1 + uy * 12.0), (a.0 + lx * 12.0, a.1 + ly * 12.0)]], color: INK });
+    d.push(Prim::fill(vec![vec![a, (a.0 + ux * 12.0, a.1 + uy * 12.0), (a.0 + lx * 12.0, a.1 + ly * 12.0)]], INK));
     let back = font::width(&v.name, 10.0) / 2.0 + 8.0;
     d.text(&v.name, (a.0 - ux * back, a.1 - uy * back), 10.0, INK);
     d.grow(from, a);
@@ -4416,12 +4458,12 @@ fn elevation_mark(d: &mut Drawing, v: &Section) {
             (c.0 + R * t.cos() as f32, c.1 + R * t.sin() as f32)
         })
         .collect();
-    d.push(Prim::Fill { rings: vec![ring.clone()], color: PAPER });
+    d.push(Prim::fill(vec![ring.clone()], PAPER));
     d.stroke(ring, Pen::BUBBLE, INK, None, true);
     let (lx, ly) = looking_px(v);
     let side = (-ly * R * 0.8, lx * R * 0.8);
     let flag = vec![(c.0 + side.0, c.1 + side.1), (c.0 + lx * (R + 7.0), c.1 + ly * (R + 7.0)), (c.0 - side.0, c.1 - side.1)];
-    d.push(Prim::Fill { rings: vec![flag], color: INK });
+    d.push(Prim::fill(vec![flag], INK));
     let back = R + 6.0 + font::width(&v.name, 10.0) / 2.0 * lx.abs() + 6.0 * ly.abs();
     d.text(&v.name, (c.0 - lx * back, c.1 - ly * back), 10.0, INK);
     d.grow(from, c);
@@ -4489,14 +4531,14 @@ fn camera_mark(d: &mut Drawing, v: &View3D) {
         (c.0 + ux * depth - px * half, c.1 + uy * depth - py * half),
         (c.0 - ux * depth - px * half, c.1 - uy * depth - py * half),
     ];
-    d.push(Prim::Fill { rings: vec![body.clone()], color: PAPER });
+    d.push(Prim::fill(vec![body.clone()], PAPER));
     d.stroke(body, Pen::BUBBLE, INK, None, true);
     // The lens: a small dark circle at the front, toward the target.
     let lc = (c.0 + ux * (depth + 3.0), c.1 + uy * (depth + 3.0));
     let ring: Vec<(f32, f32)> = (0..16)
         .map(|i| (lc.0 + 3.5 * (f64::from(i) * PI / 8.0).cos() as f32, lc.1 + 3.5 * (f64::from(i) * PI / 8.0).sin() as f32))
         .collect();
-    d.push(Prim::Fill { rings: vec![ring], color: INK });
+    d.push(Prim::fill(vec![ring], INK));
     // Its name behind the eye, against the way it looks.
     let name_at = (a.0 - ux * (14.0 + font::width(&v.name, 10.0) / 2.0), a.1 - uy * (14.0 + font::width(&v.name, 10.0) / 2.0));
     d.text(&v.name, name_at, 10.0, INK);
@@ -4681,20 +4723,22 @@ pub fn svg(d: &Drawing) -> String {
     );
     for (i, p) in d.prims.iter().enumerate() {
         let _ = match p {
-            Prim::Fill { rings, color } => {
+            Prim::Fill { rings, color, rule, alpha } => {
                 let data: Vec<String> = rings.iter().map(|r| path_data(r, true)).collect();
-                write!(s, r#"<path d="{}" fill="{}"/>"#, data.join(" "), hex(*color))
+                let rule = if *rule == Rule::EvenOdd { r#" fill-rule="evenodd""# } else { "" };
+                write!(s, r#"<path d="{}" fill="{}"{rule}{}/>"#, data.join(" "), hex(*color), opacity("fill", *alpha))
             }
-            Prim::Line { pts, width, color, dash, closed } => {
+            Prim::Line { pts, width, color, dash, closed, alpha } => {
                 let dash = dash.as_ref().map_or_else(String::new, |d| format!(r#" stroke-dasharray="{}""#, spaced(d)));
                 // A hairline (pen 0) is one pixel of whatever shows the SVG, at any zoom.
                 let width = if *width > 0.0 { format!(r#"{width}""#) } else { r#"1" vector-effect="non-scaling-stroke""#.to_string() };
                 write!(
                     s,
-                    r#"<path d="{}" fill="none" stroke="{}" stroke-width="{width} stroke-linecap="round" stroke-linejoin="{}"{dash}/>"#,
+                    r#"<path d="{}" fill="none" stroke="{}" stroke-width="{width} stroke-linecap="round" stroke-linejoin="{}"{dash}{}/>"#,
                     path_data(pts, *closed),
                     hex(*color),
-                    if d.mitred(i) { "miter" } else { "round" }
+                    if d.mitred(i) { "miter" } else { "round" },
+                    opacity("stroke", *alpha)
                 )
             }
             Prim::Image { at, width, height, rgba, .. } => match picture(*width, *height, rgba).and_then(|pm| pm.encode_png().ok()) {
@@ -4711,6 +4755,11 @@ pub fn svg(d: &Drawing) -> String {
     }
     s.push_str("</svg>\n");
     s
+}
+
+/// An SVG paint's opacity attribute (`fill` or `stroke`), when it isn't opaque.
+fn opacity(paint: &str, alpha: u8) -> String {
+    if alpha == OPAQUE { String::new() } else { format!(r#" {paint}-opacity="{:.3}""#, f32::from(alpha) / 255.0) }
 }
 
 fn path(rings: &[&[(f32, f32)]], closed: bool) -> Option<tiny_skia::Path> {
@@ -4743,15 +4792,16 @@ fn paint(pm: &mut Pixmap, d: &Drawing) {
     for (i, p) in d.prims.iter().enumerate() {
         let mut paint = Paint { anti_alias: true, ..Paint::default() };
         match p {
-            Prim::Fill { rings, color } => {
-                paint.set_color_rgba8(color.0, color.1, color.2, 255);
+            Prim::Fill { rings, color, rule, alpha } => {
+                paint.set_color_rgba8(color.0, color.1, color.2, *alpha);
                 let rings: Vec<&[(f32, f32)]> = rings.iter().map(Vec::as_slice).collect();
+                let rule = if *rule == Rule::EvenOdd { FillRule::EvenOdd } else { FillRule::Winding };
                 if let Some(path) = path(&rings, true) {
-                    pm.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+                    pm.fill_path(&path, &paint, rule, Transform::identity(), None);
                 }
             }
-            Prim::Line { pts, width, color, dash, closed } => {
-                paint.set_color_rgba8(color.0, color.1, color.2, 255);
+            Prim::Line { pts, width, color, dash, closed, alpha } => {
+                paint.set_color_rgba8(color.0, color.1, color.2, *alpha);
                 let stroke = Stroke {
                     width: *width,
                     line_cap: LineCap::Round,

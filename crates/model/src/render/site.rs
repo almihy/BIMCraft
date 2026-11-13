@@ -54,7 +54,7 @@ fn fill_poly(d: &mut Drawing, p: &Poly, color: Rgb) {
     };
     let mut rings = vec![turned(&p.outer, true)];
     rings.extend(p.holes.iter().filter(|h| h.len() >= 3).map(|h| turned(h, false)));
-    d.push(Prim::Fill { rings, color });
+    d.push(Prim::fill(rings, color));
 }
 
 fn fill_all(d: &mut Drawing, polys: &[Poly], color: Rgb) {
@@ -101,7 +101,7 @@ fn dot(d: &mut Drawing, at: P2, r: f32, color: Rgb) {
             (x + r * t.cos(), y + r * t.sin())
         })
         .collect();
-    d.push(Prim::Fill { rings: vec![ring], color });
+    d.push(Prim::fill(vec![ring], color));
 }
 
 /// Site element `id`, `s`, on the plan.

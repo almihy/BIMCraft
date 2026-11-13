@@ -1882,8 +1882,6 @@ dependencies = [
 [[package]]
 name = "hayro-interpret"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "166477622df4b770a0fc5889a9e4b48c7ff8595d6ec019bf71b4297b97b55fb6"
 dependencies = [
  "bitflags 2.13.2",
  "hayro-cmap",

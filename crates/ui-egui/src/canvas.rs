@@ -826,6 +826,8 @@ pub(crate) fn paint_prim(
     pictures: &mut std::slice::Iter<TextureId>,
 ) {
     let color = |c: Rgb| if at.paper { Color32::from_rgb(c.0, c.1, c.2) } else { color(c) };
+    // A see-through fill or line: its colour that opaque.
+    let seen = |c: Color32, alpha: u8| if alpha == render::OPAQUE { c } else { c.gamma_multiply(f32::from(alpha) / 255.0) };
     if owner.is_some() && owner == at.hide {
         return;
     }
@@ -840,10 +842,10 @@ pub(crate) fn paint_prim(
     match prim {
         // Notes and compound pattern glyphs use the non-zero fill rule, preserving counters and overlapping contours.
         // Single-contour pattern fills (including dots) keep their ordinary polygon rendering below.
-        Prim::Fill { rings, color: c } if part == render::Part::Text || (part == render::Part::LinePattern && rings.len() > 1) => {
+        Prim::Fill { rings, color: c, .. } if part == render::Part::Text || (part == render::Part::LinePattern && rings.len() > 1) => {
             let fill = accent.map_or(color(*c), |a| a.0);
             let mut mesh = Mesh::default();
-            for tri in letter(rings).iter() {
+            for tri in letter(rings, render::Rule::NonZero).iter() {
                 let first = mesh.vertices.len() as u32;
                 for q in tri {
                     mesh.colored_vertex(at.pos(*q), fill);
@@ -857,8 +859,38 @@ pub(crate) fn paint_prim(
         }
         // Ordinary fills are convex rings, feathered as egui fills them, or independent polygons, triangulated without seams. Whether
         // a ring is convex is read on screen, where it is drawn, and turned the same however big it is.
-        Prim::Fill { rings, color: c } => {
-            let fill = accent.map_or(color(*c), |a| a.1);
+        // A fill of rings by the even-odd rule, its holes and all (a drawing's hatch, a PDF's fill): its triangles.
+        Prim::Fill { rings, color: c, rule: render::Rule::EvenOdd, alpha } if rings.len() > 1 => {
+            let fill = accent.map_or(seen(color(*c), *alpha), |a| a.1);
+            let triangles = letter(rings, render::Rule::EvenOdd);
+            if triangles.is_empty() && rings.iter().map(Vec::len).sum::<usize>() > bimcraft_core::text::MAX_FILL_EDGES {
+                // Past what is cut into strips: ring by ring, holes filled.
+                let mut mesh = Mesh::default();
+                for r in rings {
+                    let ring: Vec<P2> = r.iter().map(|q| P2(f64::from(q.0), f64::from(q.1))).collect();
+                    let first = mesh.vertices.len() as u32;
+                    for q in r {
+                        mesh.colored_vertex(at.pos(*q), fill);
+                    }
+                    for [a, b, c] in geom::triangulate(&ring) {
+                        mesh.add_triangle(first + a as u32, first + b as u32, first + c as u32);
+                    }
+                }
+                out(Shape::mesh(mesh));
+                return;
+            }
+            let mut mesh = Mesh::default();
+            for tri in triangles.iter() {
+                let first = mesh.vertices.len() as u32;
+                for q in tri {
+                    mesh.colored_vertex(at.pos(*q), fill);
+                }
+                mesh.add_triangle(first, first + 1, first + 2);
+            }
+            out(Shape::mesh(mesh));
+        }
+        Prim::Fill { rings, color: c, alpha, .. } => {
+            let fill = accent.map_or(seen(color(*c), *alpha), |a| a.1);
             let one = match rings.as_slice() {
                 [r] => Some(distinct(&r.iter().map(|q| at.pos(*q)).collect::<Vec<_>>(), true)).filter(|r| convex(r)),
                 _ => None,
@@ -893,8 +925,8 @@ pub(crate) fn paint_prim(
                 out(Shape::image(*texture, rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), tint));
             }
         }
-        Prim::Line { pts, width, color: c, dash, closed } => {
-            let stroke = Stroke::new(on_screen(*width, at.k, thin), accent.map_or(color(*c), |a| a.0));
+        Prim::Line { pts, width, color: c, dash, closed, alpha } => {
+            let stroke = Stroke::new(on_screen(*width, at.k, thin), accent.map_or(seen(color(*c), *alpha), |a| a.0));
             let mut pts: Vec<Pos2> = pts.iter().map(|q| at.pos(*q)).collect();
             match dash {
                 Some(dash) => {
@@ -921,13 +953,15 @@ pub(crate) fn paint_prim(
 
 type Triangles = std::sync::Arc<Vec<[(f32, f32); 3]>>;
 
-/// The triangles that fill a letter's rings, kept for the frames that draw it again (hover, selection, the caret).
-fn letter(rings: &[Vec<(f32, f32)>]) -> Triangles {
+/// The triangles that fill a letter's rings (or a fill's, by `rule`), kept for the frames that draw it again (hover, selection,
+/// the caret).
+fn letter(rings: &[Vec<(f32, f32)>], rule: render::Rule) -> Triangles {
     use std::hash::{Hash, Hasher};
     thread_local! {
         static KEPT: std::cell::RefCell<std::collections::HashMap<u64, Triangles>> = Default::default();
     }
     let mut h = std::collections::hash_map::DefaultHasher::new();
+    (rule == render::Rule::EvenOdd).hash(&mut h);
     for r in rings {
         r.len().hash(&mut h);
         for q in r {
@@ -938,7 +972,7 @@ fn letter(rings: &[Vec<(f32, f32)>]) -> Triangles {
     if let Some(t) = KEPT.with(|k| k.borrow().get(&key).cloned()) {
         return t;
     }
-    let t: Triangles = std::sync::Arc::new(bimcraft_core::text::triangles(rings));
+    let t: Triangles = std::sync::Arc::new(bimcraft_core::text::fill_triangles(rings, rule));
     KEPT.with(|k| {
         let mut k = k.borrow_mut();
         if k.len() > 50_000 {

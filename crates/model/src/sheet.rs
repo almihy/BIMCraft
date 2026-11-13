@@ -346,7 +346,7 @@ pub fn draw(m: &Model, id: impl Key) -> Option<Drawing> {
         d.own(Some(vid));
         // Paper under it, its own: a click anywhere over a view picks it.
         let (w, h) = (view.width as f32, view.height as f32);
-        d.push(Prim::Fill { rings: vec![vec![(ox, oy), (ox + w, oy), (ox + w, oy + h), (ox, oy + h)]], color: PAPER });
+        d.push(Prim::fill(vec![vec![(ox, oy), (ox + w, oy), (ox + w, oy + h), (ox, oy + h)]], PAPER));
         let inner = match m.elements.get(vp.view) {
             Some(Element::Level(_) | Element::PlanView(_)) => render::draw_at(m, vp.view, view, 1.0),
             Some(Element::Section(_) | Element::Elevation(_)) => {
@@ -376,7 +376,7 @@ pub fn draw(m: &Model, id: impl Key) -> Option<Drawing> {
                 let mut inner = Drawing::new(view);
                 for mk in crate::dims3d::marks(m, vp.view, &cam, &look, DENSITY) {
                     inner.own(Some(mk.owner));
-                    inner.push(Prim::Line { pts: mk.pts, width: mk.width, color: mk.color, dash: None, closed: false });
+                    inner.push(Prim::line(mk.pts, mk.width, mk.color, None, false));
                 }
                 inner
             }

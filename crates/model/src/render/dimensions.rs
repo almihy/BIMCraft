@@ -110,7 +110,7 @@ impl Ink {
         let part = std::mem::replace(&mut d.part, Part::Text);
         let drawn = layout.drawn();
         for letter in &drawn.fill {
-            d.push(Prim::Fill { rings: letter.iter().map(|r| r.iter().copied().map(f).collect()).collect(), color: self.color });
+            d.push(Prim::fill(letter.iter().map(|r| r.iter().copied().map(f).collect()).collect(), self.color));
         }
         for (pts, width) in drawn.strokes {
             d.push(Prim::Line {
@@ -119,11 +119,12 @@ impl Ink {
                 color: self.color,
                 dash: None,
                 closed: false,
+                alpha: crate::prim::OPAQUE,
             });
         }
         for (a, b) in drawn.underlines {
             let width = (drawn.underline_width * k).max(1.0);
-            d.push(Prim::Line { pts: vec![frame.px(a), frame.px(b)], width, color: self.color, dash: None, closed: false });
+            d.push(Prim::line(vec![frame.px(a), frame.px(b)], width, self.color, None, false));
         }
         d.part = part;
     }

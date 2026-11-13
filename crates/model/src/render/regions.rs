@@ -296,7 +296,7 @@ fn runs(image: &Image, view: View) -> (Vec<Prim>, bool) {
                 let at = (y0 + y1) as f32 / 2.0 / ry;
                 (vec![(x0 as f32 / rx, at), (x1 as f32 / rx, at)], 1.0 / ry)
             };
-            Prim::Line { pts, width, color, dash: None, closed: false }
+            Prim::line(pts, width, color, None, false)
         })
         .collect();
     (prims, cut)
@@ -466,7 +466,7 @@ fn outside(prim: &Prim, view: View, rings: &[Vec<P2>], boxes: &[Option<Extent>])
     }
     match prim {
         Prim::Line { .. } => cut(prim, view, &Outside(near)),
-        Prim::Fill { rings: source, color } => {
+        Prim::Fill { rings: source, color, rule, alpha } => {
             let source: Vec<Vec<P2>> = source.iter().map(|r| r.iter().map(|p| view.mm(*p)).collect()).collect();
             fill(
                 rings.iter().fold(source, |pieces, r| {
@@ -475,25 +475,25 @@ fn outside(prim: &Prim, view: View, rings: &[Vec<P2>], boxes: &[Option<Extent>])
                     walls::minus(&pieces, r)
                 }),
                 view,
-                *color,
+                (*color, *rule, *alpha),
             )
         }
         Prim::Image { .. } => Vec::new(),
     }
 }
 
-fn fill(pieces: Vec<Vec<P2>>, view: View, color: Rgb) -> Vec<Prim> {
+fn fill(pieces: Vec<Vec<P2>>, view: View, (color, rule, alpha): (Rgb, crate::prim::Rule, u8)) -> Vec<Prim> {
     if pieces.is_empty() {
         Vec::new()
     } else {
-        vec![Prim::Fill { rings: pieces.iter().map(|r| r.iter().map(|p| view.px(*p)).collect()).collect(), color }]
+        vec![Prim::Fill { rings: pieces.iter().map(|r| r.iter().map(|p| view.px(*p)).collect()).collect(), color, rule, alpha }]
     }
 }
 
 /// The pieces of line `prim` that `keep` keeps. A polyline's pieces that meet stay one line, so its corners keep their joins;
 /// a dashed line's dashes stay where they were ([`phased`]); and a line left whole is the line.
 fn cut(prim: &Prim, view: View, keep: &impl Keep) -> Vec<Prim> {
-    let Prim::Line { pts, width, color, dash, closed } = prim else { return Vec::new() };
+    let Prim::Line { pts, width, color, dash, closed, alpha } = prim else { return Vec::new() };
     let segs: Vec<(P2, P2)> = segments(pts, *closed).into_iter().map(|(a, b)| (view.mm(a), view.mm(b))).collect();
     if segs.iter().all(|(a, b)| a.dist(*b) <= EPS) {
         return if segs.first().is_none_or(|(a, _)| keep.point(*a)) { vec![prim.clone()] } else { Vec::new() };
@@ -537,7 +537,7 @@ fn cut(prim: &Prim, view: View, keep: &impl Keep) -> Vec<Prim> {
     runs.into_iter()
         .flat_map(|(run, at)| {
             let pts = run.into_iter().map(|p| view.px(p)).collect();
-            phased(pts, at * view.scale, (*width, *color), dash.as_deref())
+            phased(pts, at * view.scale, (*width, *color, *alpha), dash.as_deref())
         })
         .collect()
 }
@@ -545,8 +545,8 @@ fn cut(prim: &Prim, view: View, keep: &impl Keep) -> Vec<Prim> {
 /// A run of a line, `at` px along the line it was cut from, drawn as the line's dashes (`dash`: on, off, on, ...) have it there.
 /// A dashed line's dashes start with it, so the run's own would start where it does: the dashes of the cycle it begins in are
 /// drawn as lines of their own, solid, and the rest of it is a dashed line that begins a cycle.
-fn phased(pts: Vec<(f32, f32)>, at: f64, (width, color): (f32, Rgb), dash: Option<&[f32]>) -> Vec<Prim> {
-    let line = |pts, dash: Option<&[f32]>| Prim::Line { pts, width, color, dash: dash.map(<[f32]>::to_vec), closed: false };
+fn phased(pts: Vec<(f32, f32)>, at: f64, (width, color, alpha): (f32, Rgb, u8), dash: Option<&[f32]>) -> Vec<Prim> {
+    let line = |pts, dash: Option<&[f32]>| Prim::Line { pts, width, color, dash: dash.map(<[f32]>::to_vec), closed: false, alpha };
     let Some(base) = dash else { return vec![line(pts, None)] };
     // As SVG has it, an odd list goes round twice.
     let d: Vec<f32> = if base.len() % 2 == 1 { base.iter().chain(base).copied().collect() } else { base.to_vec() };
@@ -652,7 +652,7 @@ impl<'a> Area<'a> {
                     _ => Vec::new(),
                 }
             }
-            Prim::Fill { rings: source, color } => {
+            Prim::Fill { rings: source, color, rule, alpha } => {
                 let source: Vec<Vec<P2>> = source.iter().map(|r| r.iter().map(|p| view.mm(*p)).collect()).collect();
                 let all: Vec<P2> = source.iter().flatten().copied().collect();
                 if !bounds(&all).is_some_and(|b| overlap(b, (self.lo, self.hi))) {
@@ -681,7 +681,7 @@ impl<'a> Area<'a> {
                         })
                         .collect();
                 }
-                fill(parts, view, *color)
+                fill(parts, view, (*color, *rule, *alpha))
             }
             Prim::Image { .. } => Vec::new(),
         }

@@ -136,7 +136,7 @@ fn a_filled_region_fills_its_outline_round_its_holes_in_its_type_and_draws_its_b
     let fills: Vec<&Vec<Vec<(f32, f32)>>> = drawn
         .iter()
         .filter_map(|(_, p)| match p {
-            Prim::Fill { rings, color } if *color == crate::prim::Rgb(0, 0, 0) => Some(rings),
+            Prim::Fill { rings, color, .. } if *color == crate::prim::Rgb(0, 0, 0) => Some(rings),
             _ => None,
         })
         .collect();

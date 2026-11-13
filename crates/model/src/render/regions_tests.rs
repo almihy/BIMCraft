@@ -24,8 +24,7 @@ fn drawn_at(pieces: &[Prim], x: f32) -> bool {
 #[test]
 fn a_dashed_line_a_region_takes_part_of_keeps_its_dashes_where_they_were() {
     // 10 px on and 5 off from the line's start; a region from x = 103 on takes the rest of it.
-    let line =
-        Prim::Line { pts: vec![(0.0, 50.0), (400.0, 50.0)], width: 1.0, color: Rgb(0, 0, 0), dash: Some(vec![10.0, 5.0]), closed: false };
+    let line = Prim::line(vec![(0.0, 50.0), (400.0, 50.0)], 1.0, Rgb(0, 0, 0), Some(vec![10.0, 5.0]), false);
     let view = View { scale: 1.0, cx: 200.0, cy: 0.0, width: 400, height: 100 };
     let ring = vec![vec![P2(103.0, -100.0), P2(500.0, -100.0), P2(500.0, 100.0), P2(103.0, 100.0)]];
     let masks: Vec<Mask> = Vec::new();

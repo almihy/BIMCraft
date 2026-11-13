@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "apps/*"]
+# Dependencies kept here with a change of ours ([patch.crates-io] below): built as the crates they stand in for, never
+# members (their own lints, not the workspace's).
+exclude = ["vendor"]
 
 [workspace.package]
 version = "0.11.0"
@@ -61,6 +64,12 @@ ttf-parser = { version = "0.25", features = ["gvar-alloc"] }
 # The site's shapes (site/poly.rs): polygon booleans, offsets (butt ends, mitred and round joins) and lines clipped by
 # polygons, in pure Rust so the core still builds for the browser.
 i_overlay = { version = "9.1", default-features = false }
+
+# hayro-interpret 0.9.0 with one change, marked "BIMCraft's patch" in its source: a form XObject's own optional content
+# (`/OC`) and an annotation's are told to the device as a `BDC /OC` is, so Import PDF finds what they draw on their layer
+# (upstream reads them for visibility only). Its own files and licences are as published; drop this when upstream does it.
+[patch.crates-io]
+hayro-interpret = { path = "vendor/hayro-interpret" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

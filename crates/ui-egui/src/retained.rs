@@ -739,6 +739,8 @@ mod tests {
         d.prims.push(render::Prim::Fill {
             rings: vec![vec![(left, top), (left + 10.0, top), (left + 10.0, top + 10.0), (left, top + 10.0)]],
             color: render::Rgb(0, 0, 0),
+            rule: render::Rule::NonZero,
+            alpha: 255,
         });
         d.owners.push(None);
         d.parts.push(render::Part::Text);

@@ -707,9 +707,21 @@ pub struct Drawn {
 }
 
 /// Triangles that fill `rings` by the non-zero rule (a letter's outline, its holes wound the other way), each corner
-/// counter-clockwise on paper as it is given: what a front end that fills no ring with holes draws a letter with. Cut
-/// into strips at every corner's and crossing's height, each strip's spans that wind are two triangles.
+/// counter-clockwise on paper as it is given: what a front end that fills no ring with holes draws a letter with.
 pub fn triangles(rings: &[Vec<(f32, f32)>]) -> Vec<[(f32, f32); 3]> {
+    fill_triangles(rings, crate::prim::Rule::NonZero)
+}
+
+/// The most edges [`fill_triangles`] fills: past them, nothing (a fill that big is drawn ring by ring).
+pub const MAX_FILL_EDGES: usize = 400_000;
+/// The most pairs of edges [`fill_triangles`] looks at for where they cross: past it, the rest are taken not to.
+const MAX_CROSSING_WORK: usize = 8_000_000;
+
+/// Triangles that fill `rings` by `rule`: the points they wind round (non-zero), or the points inside an odd number of them
+/// (even-odd, so a ring inside another is a hole whichever way it turns). Cut into strips at every corner's and crossing's
+/// height, swept top to bottom with the edges each strip crosses; each strip's spans inside are two triangles. Empty past
+/// [`MAX_FILL_EDGES`].
+pub fn fill_triangles(rings: &[Vec<(f32, f32)>], rule: crate::prim::Rule) -> Vec<[(f32, f32); 3]> {
     // Each edge top to bottom (y down), and which way it went.
     type Edge = ((f32, f32), (f32, f32), i32);
     let mut edges: Vec<Edge> = Vec::new();
@@ -720,14 +732,24 @@ pub fn triangles(rings: &[Vec<(f32, f32)>]) -> Vec<[(f32, f32); 3]> {
                 if a.1 < b.1 { edges.push((a, b, 1)) } else { edges.push((b, a, -1)) }
             }
         }
+        if edges.len() > MAX_FILL_EDGES {
+            return Vec::new();
+        }
     }
-    if edges.len() > 20_000 {
-        return Vec::new();
-    }
-    let mut ys: Vec<f32> = edges.iter().flat_map(|e| [e.0.1, e.1.1]).collect();
+    edges.sort_by(|a, b| a.0.1.total_cmp(&b.0.1));
     let x_at = |e: &Edge, y: f32| e.0.0 + (e.1.0 - e.0.0) * (y - e.0.1) / (e.1.1 - e.0.1);
-    for (i, e) in edges.iter().enumerate() {
+    let mut ys: Vec<f32> = edges.iter().flat_map(|e| [e.0.1, e.1.1]).collect();
+    // Where edges cross, between their ends: each edge against those that start before it ends.
+    let mut work = 0;
+    'cross: for (i, e) in edges.iter().enumerate() {
         for f in &edges[i + 1..] {
+            if f.0.1 >= e.1.1 {
+                break;
+            }
+            work += 1;
+            if work > MAX_CROSSING_WORK {
+                break 'cross;
+            }
             let (lo, hi) = (e.0.1.max(f.0.1), e.1.1.min(f.1.1));
             if hi <= lo {
                 continue;
@@ -741,19 +763,31 @@ pub fn triangles(rings: &[Vec<(f32, f32)>]) -> Vec<[(f32, f32); 3]> {
     ys.sort_by(f32::total_cmp);
     ys.dedup();
     let mut out = Vec::new();
+    // The edges that reach the strip, and the next to come in.
+    let (mut active, mut next): (Vec<usize>, usize) = (Vec::new(), 0);
+    let mut cross: Vec<(f32, f32, f32, i32)> = Vec::new();
     for w in ys.windows(2) {
         let (y0, y1) = (w[0], w[1]);
+        while next < edges.len() && edges[next].0.1 <= y0 {
+            active.push(next);
+            next += 1;
+        }
+        active.retain(|&i| edges[i].1.1 > y0);
         if y1 - y0 <= 1e-6 {
             continue;
         }
         let mid = (y0 + y1) / 2.0;
-        let mut cross: Vec<(f32, f32, f32, i32)> =
-            edges.iter().filter(|e| e.0.1 <= y0 && e.1.1 >= y1).map(|e| (x_at(e, mid), x_at(e, y0), x_at(e, y1), e.2)).collect();
+        cross.clear();
+        cross.extend(active.iter().map(|&i| &edges[i]).filter(|e| e.1.1 >= y1).map(|e| (x_at(e, mid), x_at(e, y0), x_at(e, y1), e.2)));
         cross.sort_by(|a, b| a.0.total_cmp(&b.0));
         let mut wind = 0;
         for pair in cross.windows(2) {
             wind += pair[0].3;
-            if wind != 0 {
+            let inside = match rule {
+                crate::prim::Rule::NonZero => wind != 0,
+                crate::prim::Rule::EvenOdd => wind % 2 != 0,
+            };
+            if inside {
                 let (l, r) = (pair[0], pair[1]);
                 out.push([(l.1, y0), (l.2, y1), (r.2, y1)]);
                 out.push([(l.1, y0), (r.2, y1), (r.1, y0)]);

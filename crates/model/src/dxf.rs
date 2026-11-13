@@ -218,6 +218,8 @@ pub struct Entity {
     pub linetype: Option<String>,
     /// Its line weight, mm, when it has one of its own.
     pub weight: Option<f64>,
+    /// How opaque it is (its transparency, group 440): 255 all, as an entity is unless it says.
+    pub alpha: u8,
     pub shape: Shape,
 }
 
@@ -750,6 +752,15 @@ fn index_color(n: i64) -> Color {
     }
 }
 
+/// How opaque an entity's transparency (group 440) makes it: its low byte, when the value says it is one (0x02000000 set);
+/// else (by layer, by block, or none) opaque.
+fn alpha(v: Option<i64>) -> u8 {
+    match v {
+        Some(t) if t & 0x0200_0000 != 0 => (t & 0xFF) as u8,
+        _ => 255,
+    }
+}
+
 /// A line weight as a file holds it, hundredths of a millimetre; by layer, by block and the default are none.
 fn weight(v: Option<i64>) -> Option<f64> {
     v.filter(|w| *w >= 0).map(|w| f64::from(w as i32) / 100.0)
@@ -832,6 +843,7 @@ struct Style {
     color: Color,
     linetype: Option<String>,
     weight: Option<f64>,
+    alpha: u8,
 }
 
 impl Style {
@@ -855,7 +867,13 @@ impl Style {
             Some(lt) if lt.eq_ignore_ascii_case("BYBLOCK") => inh.and_then(|i| i.linetype).map(String::from),
             Some(lt) => Some(lt.to_string()),
         };
-        Ok(Style { layer: layer.chars().take(MAX_CHARS).collect(), color, linetype, weight: weight(e.int(370)?) })
+        Ok(Style {
+            layer: layer.chars().take(MAX_CHARS).collect(),
+            color,
+            linetype,
+            weight: weight(e.int(370)?),
+            alpha: alpha(e.int(440)?),
+        })
     }
 }
 
@@ -937,6 +955,7 @@ impl<'a> Reader<'a> {
                             color,
                             linetype: style.linetype.clone(),
                             weight: style.weight,
+                            alpha: style.alpha,
                             shape: transformed(line, xf),
                         })?;
                     }
@@ -976,6 +995,7 @@ impl<'a> Reader<'a> {
                     color: style.color,
                     linetype: style.linetype,
                     weight: style.weight,
+                    alpha: style.alpha,
                     shape: transformed(shape, xf),
                 })?,
                 None => out.left("empty"),
