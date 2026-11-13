@@ -1047,6 +1047,10 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             notes.push("a dimension measures between reference planes square to different axes".into());
             continue;
         }
+        // The host wall's thickness between its faces: the wall places them, as its own faces.
+        if label.as_deref() == Some(super::WALL) && f.category.hosted() {
+            continue;
+        }
         let label = match label {
             Some(l) if reader.params.contains(&l) => Some(l),
             Some(l) => {
@@ -1089,6 +1093,51 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             dimensions.push(Dimension { refs: vec![a.0.clone(), b.0.clone()], locked: true, value: Some(0.0), ..Dimension::default() });
         }
     }
+    // Planes aligned to the same edge or face of a form (an id that is no plane) are aligned to each other, where they stand
+    // together in every type.
+    let mut via: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for c in def["constraints"].as_array().into_iter().flatten().take(super::MAX_DIMENSIONS) {
+        if c["kind"].as_str() != Some("alignment") || !c["locked"].as_bool().unwrap_or(false) {
+            continue;
+        }
+        if let [a, b] = ids_of(c).as_slice() {
+            match (reader.planes.contains_key(a), reader.planes.contains_key(b)) {
+                (true, false) => via.entry(b.clone()).or_default().push(a.clone()),
+                (false, true) => via.entry(a.clone()).or_default().push(b.clone()),
+                _ => {}
+            }
+        }
+    }
+    for planes in via.values() {
+        for w in planes.windows(2) {
+            let (Some(a), Some(b)) = (reader.planes.get(&w[0]), reader.planes.get(&w[1])) else { continue };
+            let together = a.1 == b.1 && !a.2.is_empty() && a.2.iter().all(|(t, x)| b.2.get(t).is_some_and(|y| (x - y).abs() < 0.05));
+            if together && a.0 != b.0 && dimensions.len() < super::MAX_DIMENSIONS {
+                dimensions.push(Dimension { refs: vec![a.0.clone(), b.0.clone()], locked: true, value: Some(0.0), ..Dimension::default() });
+            }
+        }
+    }
+    // A plane nothing else places, measured from another by a dimension Revit doesn't lock, keeps that distance: what holds
+    // it there in Revit (its sketch locked to it, a form's face) the definition doesn't carry, and it moves with the other
+    // when the family flexes.
+    let placed = |d: &Dimension| d.locked || d.eq || d.label.is_some();
+    for i in 0..dimensions.len() {
+        if placed(&dimensions[i]) || dimensions[i].refs.len() != 2 || dimensions[i].value.is_none() {
+            continue;
+        }
+        let free = |name: &str| {
+            !references.iter().any(|r| r.name == name && (r.origin || r.is_reference.as_deref().is_some_and(|k| k.starts_with("host_"))))
+                && !dimensions.iter().any(|d| placed(d) && d.refs.iter().any(|x| x == name))
+        };
+        // And only where the gap is the same in every type.
+        let at = |name: &str| reader.planes.values().find(|p| p.0 == name).map(|p| p.2.clone()).unwrap_or_default();
+        let (a, b) = (at(&dimensions[i].refs[0]), at(&dimensions[i].refs[1]));
+        let gaps: Vec<f64> = a.iter().filter_map(|(t, x)| Some(b.get(t)? - x)).collect();
+        let same = !gaps.is_empty() && gaps.iter().all(|g| (g - gaps[0]).abs() < 0.05);
+        if same && dimensions[i].refs.iter().any(|n| free(n)) {
+            dimensions[i].locked = true;
+        }
+    }
     // Forms and lines.
     let mut forms = Vec::new();
     for (i, d) in def["forms"].as_array().into_iter().flatten().take(MOST).enumerate() {
@@ -1110,6 +1159,9 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         let made = (|| -> Result<Nested, String> {
             let family = n.get("family").and_then(text).ok_or("it names no family")?.to_string();
             let type_name = n.get("type").and_then(text).ok_or("it names no type")?.to_string();
+            // Its insertion point (`at`): where its own family's origin lands. Its document's origin (`origin`) is that
+            // only where its family's axes are its document's; a door's or a window's are its opening's, the insertion
+            // point's (a handle's family is a door's).
             let at = reader.point(&n["at"])?;
             let rotation = n.get("rotation").map(|r| reader.value(r)).transpose()?.unwrap_or_default();
             let mirrored = n["mirrored"].as_bool().unwrap_or(false);

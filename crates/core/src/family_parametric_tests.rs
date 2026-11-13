@@ -644,3 +644,19 @@ fn a_shared_nested_family_comes_into_the_project_and_one_not_shared_is_held_by_i
     let marks = parametric.marks_with("Small", &v, crate::family::SymbolView::Plan, None, &others).unwrap();
     assert_eq!(marks.len(), 2, "the knob's and the rail's plan lines");
 }
+
+#[test]
+fn a_sweep_of_a_round_profile_drawn_as_two_half_circles_is_a_rod() {
+    let mut s = Session::new();
+    let p = |x: f64, y: f64, z: f64| json!([x, y, z]);
+    let half = |from: f64| json!({"arc": {"center": p(0.0, 0.0, 0.0), "radius": 10, "start": p(0.0, 0.0, 10.0 * from), "end": p(0.0, 0.0, -10.0 * from), "normal": [-1, 0, 0]}});
+    let fam = json!({
+        "name": "Rod", "category": "generic", "types": {"A": {}},
+        "revit": {"forms": [{"kind": "sweep", "path": [line(p(0.0, 0.0, 0.0), p(500.0, 0.0, 0.0))], "profile": [[half(1.0), half(-1.0)]]}]}
+    });
+    let r = run(&mut s, "family", fam);
+    assert_eq!(r["editable"]["ok"], true, "{}", r["editable"]);
+    let f = s.model.families["Rod"].clone();
+    let want = std::f64::consts::PI * 100.0 * 500.0;
+    assert!((volume(&f, "A") - want).abs() < want * 0.02, "{} against {want}", volume(&f, "A"));
+}
