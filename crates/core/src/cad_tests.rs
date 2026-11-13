@@ -1022,3 +1022,192 @@ fn walls_are_drawn_along_each_line_and_arc_picked_as_revits_pick_lines() {
     let r = run(&mut s, "wall", json!({"cad": {"id": id, "entities": [7, 9]}}));
     assert_eq!((r["ids"].as_array().unwrap().len(), r["skipped"].as_u64()), (1, Some(1)), "{r}");
 }
+
+/// A square's corners round its middle, `h` half its side, counter-clockwise from its lower left.
+fn square(x: f64, y: f64, h: f64) -> Vec<(f64, f64)> {
+    vec![(x - h, y - h), (x + h, y - h), (x + h, y + h), (x - h, y + h)]
+}
+
+/// A solid blue hatch of these polyline paths (mm), drawn as `style` says (group 75).
+fn hatch_of(style: &str, rings: &[Vec<(f64, f64)>]) -> String {
+    let mut list: Vec<(i32, String)> = vec![(0, "HATCH".into()), (8, "0".into()), (62, "5".into()), (2, "SOLID".into()), (70, "1".into())];
+    list.push((91, rings.len().to_string()));
+    for (i, ring) in rings.iter().enumerate() {
+        list.extend([(92, if i == 0 { "3" } else { "2" }.into()), (72, "0".into()), (73, "1".into()), (93, ring.len().to_string())]);
+        for (x, y) in ring {
+            list.extend([(10, x.to_string()), (20, y.to_string())]);
+        }
+        list.push((97, "0".into()));
+    }
+    list.extend([(75, style.into()), (76, "1".into()), (98, "0".into())]);
+    list.iter().map(|(c, v)| format!("{c}\n{v}\n")).collect()
+}
+
+/// Whether the plan's PNG is the hatch's blue at each of these model points.
+fn blue_at(s: &Session, points: &[(f64, f64)]) -> Vec<bool> {
+    let d = render::plan(&s.model, s.model.levels()[0].0, 800, 800);
+    let pm = tiny_skia::Pixmap::decode_png(&render::png(&d).unwrap()).unwrap();
+    points
+        .iter()
+        .map(|&(x, y)| {
+            let (px, py) = d.view.px(P2(x, y));
+            let p = pm.pixel(px.round() as u32, py.round() as u32).unwrap().demultiply();
+            p.blue() > 200 && p.red() < 60 && p.green() < 60
+        })
+        .collect()
+}
+
+#[test]
+fn a_hatchs_style_fills_its_islands_as_autocad_does() {
+    // A square with an island holding an island; probed in the outer band, the island's band and the inner island's middle.
+    let (outer, island, inner) = (square(1500.0, 1500.0, 1500.0), square(1500.0, 1500.0, 900.0), square(1500.0, 1500.0, 300.0));
+    let nested = [outer.clone(), island.clone(), inner];
+    let probes = [(300.0, 1500.0), (900.0, 1500.0), (1500.0, 1500.0)];
+    let shown = |style: &str, rings: &[Vec<(f64, f64)>], name: &str| {
+        let mut s = Session::new();
+        let text = dxf("4", &[], &hatch_of(style, rings));
+        run(&mut s, "import_cad", json!({"path": file("styles", &format!("{name}.dxf"), &text), "position": "origin"}));
+        blue_at(&s, &probes)
+    };
+    // Normal (0): odd parity, the islands alternate.
+    assert_eq!(shown("0", &nested, "normal"), [true, false, true]);
+    // Outermost (1): the outer band only; the inner island isn't filled again.
+    assert_eq!(shown("1", &nested, "outermost"), [true, false, false]);
+    // Ignore (2): the outer boundary filled through.
+    assert_eq!(shown("2", &nested, "ignore"), [true, true, true]);
+    // A boundary written twice is one boundary, not two that cancel: the same, or from another corner the other way round.
+    assert_eq!(shown("0", &[outer.clone(), outer.clone(), island.clone()], "twice"), [true, false, false]);
+    let mut turned = outer.clone();
+    turned.rotate_left(2);
+    turned.reverse();
+    assert_eq!(shown("0", &[outer, turned, island], "turned"), [true, false, false]);
+}
+
+#[test]
+fn a_see_through_hatch_with_an_island_goes_out_to_svg_and_pdf_even_odd_and_see_through() {
+    // A solid hatch half transparent (group 440: 0x02000000 and its opacity, 127), a square with an island.
+    let glass = format!("62\n5\n440\n{}\n", 0x0200_0000 | 127);
+    let hatch = hatch_of("0", &[square(1500.0, 1500.0, 1500.0), square(1500.0, 1500.0, 900.0)]).replacen("62\n5\n", &glass, 1);
+    let mut s = Session::new();
+    run(&mut s, "import_cad", json!({"path": file("exports", "glass.dxf", &dxf("4", &[], &hatch)), "position": "origin"}));
+    let d = render::plan(&s.model, s.model.levels()[0].0, 800, 800);
+    // SVG: one path of both rings, by odd parity, at its opacity.
+    let svg = render::svg(&d);
+    let path = svg.split("<path").find(|p| p.contains(r#"fill-rule="evenodd""#)).unwrap_or_else(|| panic!("{svg}"));
+    assert!(path.contains(r#"fill-opacity="0.498""#), "{path}");
+    assert_eq!(path.matches('Z').count() + path.matches('z').count(), 2, "both rings in one path: {path}");
+    // PDF: filled by f* inside the graphics state of its opacity, which the page's resources hold.
+    let (stream, _) = crate::pdf::contents(&d, P2(420.0, 297.0));
+    let fill = stream.lines().find(|l| l.ends_with("f* Q")).unwrap_or_else(|| panic!("{stream}"));
+    assert!(fill.starts_with("q /GA127 gs "), "{fill}");
+    let file = String::from_utf8_lossy(&crate::pdf::pdf(&[(&d, P2(420.0, 297.0))])).into_owned();
+    assert!(file.contains("/ExtGState << /GA127 << /Type /ExtGState /ca 0.4980 /CA 0.4980 >> >>"), "{file}");
+}
+
+#[test]
+fn a_new_template_forces_this_builds_format_only_when_import_settings_reach_its_views() {
+    let mut s = Session::new();
+    run(&mut s, "import_cad", json!({"path": file("template-format", "plan.dxf", &plan()), "position": "origin"}));
+    let (one, _) = levels(&s);
+    let format = |s: &Session| serde_json::from_str::<Value>(&s.model.to_json().unwrap()).unwrap()["format"].clone();
+    // A new template controls every group, Imported Categories among them, and holds nothing of any import.
+    run(&mut s, "template", json!({"name": "Plan", "from": one}));
+    assert!(s.model.view_templates["Plan"].controls.contains(&crate::graphics::Group::Imports));
+    assert_eq!(format(&s), json!(crate::model::PREVIOUS_FORMAT), "an older build opens it");
+    // That file reads back: the template, in all but the group the older build can't name.
+    let (m, left_out) = Model::read(&s.model.to_json().unwrap()).unwrap();
+    assert!(left_out.is_empty(), "{left_out:?}");
+    assert!(m.view_templates.contains_key("Plan"));
+    // The box over Imported Categories' table is a category's, which the older build reads.
+    run(&mut s, "template", json!({"name": "Plan", "hide": ["cadimport"]}));
+    assert_eq!(format(&s), json!(crate::model::PREVIOUS_FORMAT));
+    run(&mut s, "template", json!({"name": "Plan", "show": ["cadimport"]}));
+    // How an import draws, in the template: this build's.
+    run(&mut s, "template", json!({"name": "Plan", "imports": {"plan": {"all": {"halftone": true}}}}));
+    assert_eq!(format(&s), json!(crate::model::PDF_FORMAT));
+    run(&mut s, "template", json!({"name": "Plan", "imports": {"plan": null}}));
+    assert_eq!(format(&s), json!(crate::model::PREVIOUS_FORMAT));
+    // A drawing's layers it hides reach its views only through the group the older build can't name: this build's too.
+    run(&mut s, "template", json!({"name": "Plan", "layers": {"plan": ["WALLS"]}}));
+    assert_eq!(format(&s), json!(crate::model::PDF_FORMAT));
+    run(&mut s, "template", json!({"name": "Plan", "layers": {"plan": null}}));
+    assert_eq!(format(&s), json!(crate::model::PREVIOUS_FORMAT));
+    // As do a following view's own: the template's (none hidden) win over them.
+    let id = one_import(&mut s);
+    run(&mut s, "cad_layers", json!({"id": id, "view": one, "hide": ["WALLS"]}));
+    run(&mut s, "graphics", json!({"view": one, "template": "Plan"}));
+    assert_eq!(format(&s), json!(crate::model::PDF_FORMAT));
+}
+
+fn one_import(s: &mut Session) -> u64 {
+    run(s, "elements", json!({"category": "cadimport"}))["elements"][0]["id"].as_u64().unwrap()
+}
+
+#[test]
+fn a_dense_drawing_zoomed_out_on_a_screen_draws_its_cells_and_still_picks_and_snaps_to_its_lines() {
+    // 12 000 strokes a few millimetres long over 12 m by 8 m, in mm, and a frame: under a pixel each, fitted.
+    let mut strokes = String::new();
+    let mut seed = 5_u64;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed >> 11) as f64 / (1u64 << 53) as f64
+    };
+    for i in 0..12_000 {
+        let (x, y) = (100.0 + next() * 11_800.0, 100.0 + next() * 7_800.0);
+        strokes += &line(["WALLS", "TEXT"][i % 2], (x, y), (x + 20.0 + next() * 30.0, y + next() * 20.0));
+    }
+    let frame = [((0.0, 0.0), (12_000.0, 0.0)), ((12_000.0, 0.0), (12_000.0, 8_000.0)), ((12_000.0, 8_000.0), (0.0, 8_000.0))];
+    strokes += &frame.iter().map(|(a, b)| line("WALLS", *a, *b)).collect::<String>();
+    let text = dxf("4", &[("WALLS", "1", false), ("TEXT", "7", false)], &strokes);
+    let mut s = Session::new();
+    let r = run(&mut s, "import_cad", json!({"path": file("dense", "dense.dxf", &text), "position": "origin"}));
+    let id = r["id"].as_u64().unwrap();
+    let (one, _) = levels(&s);
+    // Fitted, 0.04 px a mm: the sheet 480 px across.
+    let view = crate::prim::View { scale: 0.04, cx: 6000.0, cy: 4000.0, width: 520, height: 360 };
+    let screen = render::draw(&s.model, one, view);
+    let paper = render::draw_at(&s.model, one, view, 1.0);
+    assert!(paper.prims.len() > 12_000, "paper draws every entity: {}", paper.prims.len());
+    assert!(screen.prims.len() * 10 < paper.prims.len(), "a screen draws its cells: {}", screen.prims.len());
+    assert!(drawn(&screen, reddish) > 1000, "WALLS still red");
+    // A layer hidden in the view is hidden in its cells too.
+    run(&mut s, "cad_layers", json!({"id": id, "hide": ["WALLS"]}));
+    assert_eq!(drawn(&render::draw(&s.model, one, view), reddish), 0);
+    run(&mut s, "cad_layers", json!({"id": id, "show": ["WALLS"]}));
+    // Halftone in the view's Imported Categories draws its cells halftone, as its lines: half as dark.
+    let ink = |d: &render::Drawing| {
+        let pm = tiny_skia::Pixmap::decode_png(&render::png(d).unwrap()).unwrap();
+        pm.pixels().iter().map(|p| 255.0 - f64::from(p.demultiply().green())).sum::<f64>()
+    };
+    let full = ink(&render::draw(&s.model, one, view));
+    run(&mut s, "graphics", json!({"view": "Level 1", "categories": {"cadimport": {"halftone": true}}}));
+    let half = ink(&render::draw(&s.model, one, view));
+    assert!(half < full * 0.6 && half > full * 0.3, "{half} of {full}");
+    // Each of its primitives, cells and lines, is marked halftone, for a dark screen to fade toward its ground.
+    let all_half = |d: &render::Drawing| {
+        let mine: Vec<usize> = (0..d.prims.len()).filter(|i| d.owners[*i] == Some(id)).collect();
+        !mine.is_empty() && mine.iter().all(|i| d.half(*i))
+    };
+    assert!(all_half(&render::draw(&s.model, one, view)));
+    run(&mut s, "graphics", json!({"view": "Level 1", "categories": {"cadimport": {"halftone": false}}}));
+    let d = render::draw(&s.model, one, view);
+    assert!((0..d.prims.len()).all(|i| !d.half(i)));
+    // As does Halftone on the drawing's row of Imported Categories; on one layer only, a picture of cells is not halftone.
+    run(&mut s, "graphics", json!({"view": "Level 1", "imports": {"dense": {"all": {"halftone": true}}}}));
+    assert!(all_half(&render::draw(&s.model, one, view)));
+    run(&mut s, "graphics", json!({"view": "Level 1", "imports": {"dense": null}}));
+    run(&mut s, "graphics", json!({"view": "Level 1", "imports": {"dense": {"layers": {"WALLS": {"halftone": true}}}}}));
+    let d = render::draw(&s.model, one, view);
+    assert!((0..d.prims.len()).any(|i| d.parts[i] == render::Part::Cells && !d.half(i)));
+    run(&mut s, "graphics", json!({"view": "Level 1", "imports": {"dense": null}}));
+    // Picked where its ink is, as one element; its frame, too big for a cell, is drawn as itself and picked along it.
+    let screen = render::draw(&s.model, one, view);
+    assert_eq!(screen.pick(view.px(P2(6000.0, 0.0)), 2.0), Some(id));
+    assert!(screen.prims.iter().zip(&screen.owners).any(|(p, o)| *o == Some(id) && matches!(p, render::Prim::Line { .. })));
+    // Snapping goes by the entities themselves: a stroke's end, to the millimetre, zoomed out or not.
+    let reach = Reach { point: 300.0, line: 300.0 };
+    let f = snap(&s.model, one, P2(12_000.0 - 40.0, 8_000.0 + 30.0), reach, &[], false, &Snaps::default());
+    assert_eq!((f.kind, f.at), (Kind::Endpoint, P2(12_000.0, 8_000.0)), "{f:?}");
+}

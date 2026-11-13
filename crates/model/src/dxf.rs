@@ -176,7 +176,9 @@ pub enum Shape {
     },
     Point(P2),
     /// One line of lettering: `height` is its capital height, `angle` its baseline's in degrees counter-clockwise from east.
-    /// An attribute's (ATTRIB) has its tag: what a title block reads it as a field of.
+    /// An attribute's (ATTRIB) has its tag: what a title block reads it as a field of. `wide` is its width factor (group 41:
+    /// its letters `wide` times as wide as the font draws them), and `mirrored` reads it backwards, its letters mirrored
+    /// (group 71's backward flag), from its point along the way its angle points the other way.
     Text {
         at: P2,
         height: f64,
@@ -184,12 +186,97 @@ pub enum Shape {
         text: String,
         align: Align,
         tag: Option<String>,
+        wide: f64,
+        mirrored: bool,
     },
-    /// A hatch's boundaries, or a solid: `solid` when filled through, else patterned, which a view draws as it can.
+    /// A hatch's boundaries, or a solid: `solid` when filled through, else patterned, which a view draws as it can. A patterned
+    /// one may hold its pattern (`tile`, a PDF's tiling pattern), drawn as its cell repeated inside its rings; its colour and
+    /// opacity are then what the pattern paints on the whole (its tint), which a view draws where the cell would be too small to
+    /// see. `shade` is a band of a gradient (a PDF's shading): it keeps its colours on a dark canvas, as a picture does.
     Fill {
         rings: Vec<Vec<P2>>,
         solid: bool,
+        tile: Option<std::sync::Arc<Tile>>,
+        shade: bool,
     },
+}
+
+/// A pattern a hatch is drawn with: one cell's lines and fills where the pattern lays its first cell, drawing units, and the
+/// two steps it is laid again at, the cell at `i` steps one way and `j` the other being them moved `i * steps[0] + j *
+/// steps[1]`. A hatch holds it by reference, so a page's rooms filled with one pattern share it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Tile {
+    pub lines: Vec<TileLine>,
+    pub fills: Vec<TileFill>,
+    pub steps: [P2; 2],
+}
+
+/// A line of a pattern's cell: its points and whether it closes, its colour and opacity, its width (drawing units, none a
+/// hairline) and its dashes (on, off, … drawing units).
+#[derive(Clone, Debug, PartialEq)]
+pub struct TileLine {
+    pub pts: Vec<P2>,
+    pub closed: bool,
+    pub color: [u8; 3],
+    pub alpha: u8,
+    pub weight: Option<f64>,
+    pub dash: Option<Vec<f64>>,
+}
+
+/// A fill of a pattern's cell: its rings (filling by odd parity), its colour and opacity.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TileFill {
+    pub rings: Vec<Vec<P2>>,
+    pub color: [u8; 3],
+    pub alpha: u8,
+}
+
+impl Tile {
+    /// How many points its cell holds.
+    pub fn points(&self) -> usize {
+        self.lines.iter().map(|l| l.pts.len()).sum::<usize>() + self.fills.iter().flat_map(|f| &f.rings).map(Vec::len).sum::<usize>()
+    }
+
+    /// The box round its cell, drawing units: low x, low y, high x, high y; none for a cell of nothing.
+    pub fn bounds(&self) -> Option<[f64; 4]> {
+        let pts = self.lines.iter().flat_map(|l| &l.pts).chain(self.fills.iter().flat_map(|f| f.rings.iter().flatten()));
+        union(pts.map(|p| [*p, *p])).map(|[lo, hi]| [lo.0, lo.1, hi.0, hi.1])
+    }
+
+    /// Itself through `f`, an affine map (a placement, a block's transform): its points mapped, its steps as `f` moves them,
+    /// its widths and dashes scaled by `k`.
+    pub fn mapped(&self, f: impl Fn(P2) -> P2, k: f64) -> Tile {
+        let o = f(P2(0.0, 0.0));
+        Tile {
+            lines: self
+                .lines
+                .iter()
+                .map(|l| TileLine {
+                    pts: l.pts.iter().map(|p| f(*p)).collect(),
+                    weight: l.weight.map(|w| w * k),
+                    dash: l.dash.as_ref().map(|d| d.iter().map(|x| x * k).collect()),
+                    ..l.clone()
+                })
+                .collect(),
+            fills: self
+                .fills
+                .iter()
+                .map(|x| TileFill { rings: x.rings.iter().map(|r| r.iter().map(|p| f(*p)).collect()).collect(), ..x.clone() })
+                .collect(),
+            steps: self.steps.map(|s| f(s) - o),
+        }
+    }
+
+    /// Whether every number of it is finite and within `most`, and its steps aren't nothing.
+    pub fn fits(&self, most: f64) -> bool {
+        let ok = |x: f64| x.is_finite() && x.abs() <= most;
+        let p = |p: &P2| ok(p.0) && ok(p.1);
+        let cross = self.steps[0].0 * self.steps[1].1 - self.steps[0].1 * self.steps[1].0;
+        self.steps.iter().all(p)
+            && cross.is_normal()
+            && self.lines.iter().all(|l| l.pts.iter().all(p) && l.weight.is_none_or(ok) && l.dash.iter().flatten().all(|x| ok(*x)))
+            && self.fills.iter().flat_map(|f| f.rings.iter().flatten()).all(p)
+    }
 }
 
 impl Shape {
@@ -204,7 +291,7 @@ impl Shape {
             Shape::Arc { c, r, start, end } => p(c) && ok(*r) && ok(*start) && ok(*end),
             Shape::Point(q) => p(q),
             Shape::Text { at, height, angle, .. } => p(at) && ok(*height) && ok(*angle),
-            Shape::Fill { rings, .. } => rings.iter().flatten().all(p),
+            Shape::Fill { rings, tile, .. } => rings.iter().flatten().all(p) && tile.as_ref().is_none_or(|t| t.fits(MAX_FILE_COORD)),
         }
     }
 }
@@ -218,6 +305,8 @@ pub struct Entity {
     pub linetype: Option<String>,
     /// Its line weight, mm, when it has one of its own.
     pub weight: Option<f64>,
+    /// How opaque it is (its transparency, group 440): 255 all, as an entity is unless it says.
+    pub alpha: u8,
     pub shape: Shape,
 }
 
@@ -750,6 +839,15 @@ fn index_color(n: i64) -> Color {
     }
 }
 
+/// How opaque an entity's transparency (group 440) makes it: its low byte, when the value says it is one (0x02000000 set);
+/// else (by layer, by block, or none) opaque.
+fn alpha(v: Option<i64>) -> u8 {
+    match v {
+        Some(t) if t & 0x0200_0000 != 0 => (t & 0xFF) as u8,
+        _ => 255,
+    }
+}
+
 /// A line weight as a file holds it, hundredths of a millimetre; by layer, by block and the default are none.
 fn weight(v: Option<i64>) -> Option<f64> {
     v.filter(|w| *w >= 0).map(|w| f64::from(w as i32) / 100.0)
@@ -832,6 +930,7 @@ struct Style {
     color: Color,
     linetype: Option<String>,
     weight: Option<f64>,
+    alpha: u8,
 }
 
 impl Style {
@@ -855,7 +954,13 @@ impl Style {
             Some(lt) if lt.eq_ignore_ascii_case("BYBLOCK") => inh.and_then(|i| i.linetype).map(String::from),
             Some(lt) => Some(lt.to_string()),
         };
-        Ok(Style { layer: layer.chars().take(MAX_CHARS).collect(), color, linetype, weight: weight(e.int(370)?) })
+        Ok(Style {
+            layer: layer.chars().take(MAX_CHARS).collect(),
+            color,
+            linetype,
+            weight: weight(e.int(370)?),
+            alpha: alpha(e.int(440)?),
+        })
     }
 }
 
@@ -937,6 +1042,7 @@ impl<'a> Reader<'a> {
                             color,
                             linetype: style.linetype.clone(),
                             weight: style.weight,
+                            alpha: style.alpha,
                             shape: transformed(line, xf),
                         })?;
                     }
@@ -950,7 +1056,7 @@ impl<'a> Reader<'a> {
                             ring.push(d);
                         }
                         ring.push(c);
-                        Some(Shape::Fill { rings: vec![ring], solid: true })
+                        Some(Shape::Fill { rings: vec![ring], solid: true, tile: None, shade: false })
                     }
                     _ => None,
                 },
@@ -976,6 +1082,7 @@ impl<'a> Reader<'a> {
                     color: style.color,
                     linetype: style.linetype,
                     weight: style.weight,
+                    alpha: style.alpha,
                     shape: transformed(shape, xf),
                 })?,
                 None => out.left("empty"),
@@ -1047,7 +1154,12 @@ fn transformed(shape: Shape, xf: Xf) -> Shape {
         Shape::Line(a, b) => Shape::Line(at(a), at(b)),
         Shape::Polyline { pts, closed } => Shape::Polyline { pts: pts.into_iter().map(at).collect(), closed },
         Shape::Point(p) => Shape::Point(at(p)),
-        Shape::Fill { rings, solid } => Shape::Fill { rings: rings.into_iter().map(|r| r.into_iter().map(at).collect()).collect(), solid },
+        Shape::Fill { rings, solid, tile, shade } => Shape::Fill {
+            rings: rings.into_iter().map(|r| r.into_iter().map(at).collect()).collect(),
+            solid,
+            tile: tile.map(|t| std::sync::Arc::new(t.mapped(at, xf.similarity().map_or(1.0, |(k, _, _)| k)))),
+            shade,
+        },
         Shape::Circle { c, r } => match xf.similarity() {
             Some((k, _, _)) => Shape::Circle { c: at(c), r: r * k },
             None => {
@@ -1063,9 +1175,9 @@ fn transformed(shape: Shape, xf: Xf) -> Shape {
             }
             None => Shape::Polyline { pts: arc_points(c, r, start, end - start).into_iter().map(at).collect(), closed: false },
         },
-        Shape::Text { at: p, height, angle, text, align, tag } => {
+        Shape::Text { at: p, height, angle, text, align, tag, wide, mirrored } => {
             let (k, turn) = xf.similarity().map_or((xf.x.length(), xf.x.1.atan2(xf.x.0).to_degrees()), |(k, t, _)| (k, t));
-            Shape::Text { at: at(p), height: height * k, angle: angle + turn, text, align, tag }
+            Shape::Text { at: at(p), height: height * k, angle: angle + turn, text, align, tag, wide, mirrored }
         }
     }
 }
@@ -1335,7 +1447,12 @@ fn text(e: &Ent) -> Result<Option<Shape>, String> {
         }
     };
     let tag = (e.kind == "ATTRIB").then(|| e.str(2).map(|t| t.trim().to_string())).flatten().filter(|t| !t.is_empty());
-    Ok(Some(Shape::Text { at, height, angle: e.num(50)?.unwrap_or(0.0), text: words, align, tag }))
+    let wide = e.num(41)?.filter(|w| *w > 0.0).map_or(1.0, |w| w.clamp(0.01, 100.0));
+    // Backward (2) reads it mirrored; upside down (4) is that turned half round.
+    let flags = e.int(71)?.unwrap_or(0);
+    let (backward, upside) = (flags & 2 != 0, flags & 4 != 0);
+    let angle = e.num(50)?.unwrap_or(0.0) + if upside { 180.0 } else { 0.0 };
+    Ok(Some(Shape::Text { at, height, angle, text: words, align, tag, wide, mirrored: backward != upside }))
 }
 
 /// A multi-line text's lines, each a text of its own, stepped down from where its attachment point puts the block.
@@ -1386,6 +1503,8 @@ fn mtext(e: &Ent) -> Result<Vec<Shape>, String> {
             text: line.to_string(),
             align: Align { h, v: Vertical::Baseline },
             tag: None,
+            wide: 1.0,
+            mirrored: false,
         })
         .collect())
 }
@@ -1517,7 +1636,125 @@ fn hatch(e: &Ent) -> Result<Option<Shape>, String> {
             rings.push(ring);
         }
     }
-    Ok((!rings.is_empty()).then_some(Shape::Fill { rings, solid }))
+    let rings = styled(rings, e.int(75)?.unwrap_or(0));
+    Ok((!rings.is_empty()).then_some(Shape::Fill { rings, solid, tile: None, shade: false }))
+}
+
+/// How much containment testing [`styled`] spends on one hatch (edges walked): past it, a hostile hatch keeps its rings as
+/// they are and fills by odd parity.
+const STYLE_WORK: usize = 20_000_000;
+
+/// A hatch's boundaries as its style (group 75) fills them, so a view fills what is left by odd parity: Normal (0) keeps every
+/// island, alternating; Outermost (1) keeps the outer boundaries and their first islands, so what lies deeper isn't filled
+/// again; Ignore (2) keeps the outer boundaries alone, filled through. A boundary written twice is kept once, or the two
+/// would cancel to nothing.
+fn styled(rings: Vec<Vec<P2>>, style: i64) -> Vec<Vec<P2>> {
+    let rings = once_each(rings);
+    let keep = match style {
+        1 => 2,
+        2 => 1,
+        _ => return rings,
+    };
+    if rings.len() < 2 {
+        return rings;
+    }
+    let boxes: Vec<(P2, P2)> = rings.iter().map(|r| bounds(r)).collect();
+    let mut work = 0usize;
+    let mut depth = vec![0usize; rings.len()];
+    for (i, (a, ab)) in rings.iter().zip(&boxes).enumerate() {
+        for (j, (b, bb)) in rings.iter().zip(&boxes).enumerate() {
+            if i == j || ab.0.0 < bb.0.0 || ab.0.1 < bb.0.1 || ab.1.0 > bb.1.0 || ab.1.1 > bb.1.1 {
+                continue;
+            }
+            work += b.len() * SAMPLES;
+            if work > STYLE_WORK {
+                return rings;
+            }
+            if inside(a, b)
+                && let Some(d) = depth.get_mut(i)
+            {
+                *d += 1;
+            }
+        }
+    }
+    rings.into_iter().zip(depth).filter(|(_, d)| *d < keep).map(|(r, _)| r).collect()
+}
+
+/// How many of a ring's points [`inside`] tries.
+const SAMPLES: usize = 5;
+
+/// Whether ring `a` lies inside ring `b`: most of a few of its points, its edges' middles among them, so a point on `b`'s
+/// edge (an island touching its boundary) doesn't decide alone.
+fn inside(a: &[P2], b: &[P2]) -> bool {
+    let n = a.len();
+    if n == 0 {
+        return false;
+    }
+    let step = n.div_ceil(SAMPLES).max(1);
+    let (mut yes, mut all) = (0, 0);
+    for k in (0..n).step_by(step) {
+        let (Some(&p), Some(&q)) = (a.get(k), a.get((k + 1) % n)) else { continue };
+        let mid = (p + q) * 0.5;
+        all += 1;
+        if crate::geom::contains(b, mid) {
+            yes += 1;
+        }
+    }
+    yes * 2 > all
+}
+
+/// A ring's lower left and upper right corners.
+fn bounds(ring: &[P2]) -> (P2, P2) {
+    ring.iter().fold((P2(f64::MAX, f64::MAX), P2(f64::MIN, f64::MIN)), |(lo, hi), p| {
+        (P2(lo.0.min(p.0), lo.1.min(p.1)), P2(hi.0.max(p.0), hi.1.max(p.1)))
+    })
+}
+
+/// The rings less each one that repeats an earlier one: the same points, from any of them, either way round.
+fn once_each(rings: Vec<Vec<P2>>) -> Vec<Vec<P2>> {
+    // Rings of the same length and corner are compared, in order of those, so a hatch of many is not compared pair by pair.
+    let mut order: Vec<(usize, (P2, P2))> = rings.iter().map(|r| bounds(r)).enumerate().collect();
+    order.sort_by(|(i, a), (j, b)| {
+        let (ri, rj) = (rings.get(*i).map_or(0, Vec::len), rings.get(*j).map_or(0, Vec::len));
+        ri.cmp(&rj).then(a.0.0.total_cmp(&b.0.0))
+    });
+    let mut gone = vec![false; rings.len()];
+    let mut work = 0usize;
+    for (k, (i, a)) in order.iter().enumerate() {
+        let Some(ri) = rings.get(*i) else { continue };
+        if gone.get(*i).copied().unwrap_or(true) {
+            continue;
+        }
+        let tol = 1e-9 + 1e-9 * (a.1 - a.0).length();
+        for (j, b) in order.iter().skip(k + 1) {
+            let Some(rj) = rings.get(*j) else { continue };
+            if rj.len() != ri.len() || b.0.0 - a.0.0 > tol {
+                break;
+            }
+            if gone.get(*j).copied().unwrap_or(true) || b.0.dist(a.0) > tol || b.1.dist(a.1) > tol {
+                continue;
+            }
+            work += ri.len();
+            if work > STYLE_WORK {
+                break;
+            }
+            if same_ring(ri, rj, tol)
+                && let Some(g) = gone.get_mut(*j)
+            {
+                *g = true;
+            }
+        }
+    }
+    rings.into_iter().zip(gone).filter(|(_, g)| !g).map(|(r, _)| r).collect()
+}
+
+/// Whether two rings of the same length go through the same points, from any of them, either way round.
+fn same_ring(a: &[P2], b: &[P2], tol: f64) -> bool {
+    let n = a.len();
+    let (Some(&first), true) = (a.first(), n == b.len()) else { return n == b.len() };
+    let at = |k: usize| b.get(k % n).copied().unwrap_or(P2(f64::NAN, f64::NAN));
+    let along = |s: usize, back: bool| a.iter().enumerate().all(|(i, p)| p.dist(at(if back { s + n - i } else { s + i })) <= tol);
+    b.iter().enumerate().filter(|(_, q)| q.dist(first) <= tol).take(8).any(|(s, _)| along(s, false) || along(s, true))
 }
 
 /// A walk forward through an entity's pairs: a hatch lays its paths out in order, each value after the last.
@@ -2070,7 +2307,9 @@ mod tests {
                     angle: 30.0,
                     text: "Room ° Ø ± % é x".into(),
                     align: Align { h: Horizontal::Left, v: Vertical::Baseline },
-                    tag: None
+                    tag: None,
+                    wide: 1.0,
+                    mirrored: false
                 },
                 &Shape::Text {
                     at: P2(8.0, 9.0),
@@ -2078,7 +2317,9 @@ mod tests {
                     angle: 0.0,
                     text: "Centred".into(),
                     align: Align { h: Horizontal::Center, v: Vertical::Top },
-                    tag: None
+                    tag: None,
+                    wide: 1.0,
+                    mirrored: false
                 },
                 &Shape::Text {
                     at: P2(8.0, 9.0),
@@ -2086,7 +2327,9 @@ mod tests {
                     angle: 0.0,
                     text: "Middle".into(),
                     align: Align { h: Horizontal::Center, v: Vertical::Middle },
-                    tag: None
+                    tag: None,
+                    wide: 1.0,
+                    mirrored: false
                 },
             ]
         );
@@ -2208,13 +2451,37 @@ mod tests {
         assert_eq!(d.entities.len(), 2, "{:?}", d.entities);
         assert_eq!(
             d.entities[0].shape,
-            Shape::Fill { rings: vec![vec![P2(0.0, 0.0), P2(10.0, 0.0), P2(10.0, 10.0), P2(0.0, 10.0)]], solid: true }
+            Shape::Fill {
+                rings: vec![vec![P2(0.0, 0.0), P2(10.0, 0.0), P2(10.0, 10.0), P2(0.0, 10.0)]],
+                solid: true,
+                tile: None,
+                shade: false
+            }
         );
-        let Shape::Fill { rings, solid: false } = &d.entities[1].shape else { panic!("{:?}", d.entities[1]) };
+        let Shape::Fill { rings, solid: false, .. } = &d.entities[1].shape else { panic!("{:?}", d.entities[1]) };
         assert_eq!(rings.len(), 1);
         assert!(near(rings[0][0], P2(0.0, 0.0)) && near(rings[0][1], P2(10.0, 0.0)), "{:?}", rings[0]);
         assert!(has_point_near(&rings[0], P2(5.0, 5.0)), "the arc's top: {:?}", rings[0]);
         assert!(rings[0].last().is_some_and(|p| !near(*p, P2(0.0, 0.0))), "the ring's end isn't its start again");
+    }
+
+    #[test]
+    fn a_hatchs_style_keeps_the_rings_it_fills_and_a_hostile_one_stays_quick() {
+        let square = |h: f64| vec![P2(-h, -h), P2(h, -h), P2(h, h), P2(-h, h)];
+        let nested = vec![square(30.0), square(20.0), square(10.0), square(5.0)];
+        assert_eq!(styled(nested.clone(), 0).len(), 4, "Normal keeps every island");
+        assert_eq!(styled(nested.clone(), 1), nested[..2].to_vec(), "Outermost: the outer boundary and its first islands");
+        assert_eq!(styled(nested.clone(), 2), nested[..1].to_vec(), "Ignore: the outer boundary");
+        assert_eq!(styled(vec![square(30.0), square(30.0)], 0).len(), 1, "written twice, kept once");
+        // An island touching its boundary is still its island.
+        let touching = vec![square(30.0), vec![P2(-30.0, -10.0), P2(0.0, -10.0), P2(0.0, 10.0), P2(-30.0, 10.0)]];
+        assert_eq!(styled(touching, 2).len(), 1);
+        // Thousands of nested rings, or thousands the same: done within its budget, never pair by pair without end.
+        let many: Vec<Vec<P2>> = (1..10_000).map(|k| square(k as f64)).collect();
+        let t = std::time::Instant::now();
+        assert!(!styled(many, 1).is_empty());
+        assert_eq!(styled(vec![square(1.0); 10_000], 2).len(), 1);
+        assert!(t.elapsed().as_secs() < 20, "{:?}", t.elapsed());
     }
 
     #[test]
@@ -2313,7 +2580,12 @@ mod tests {
         assert_eq!(d.entities[0].shape, Shape::Line(P2(0.0, 0.0), P2(1.0, 0.0)));
         assert_eq!(
             d.entities[1].shape,
-            Shape::Fill { rings: vec![vec![P2(0.0, 0.0), P2(10.0, 0.0), P2(10.0, 10.0), P2(0.0, 10.0)]], solid: true }
+            Shape::Fill {
+                rings: vec![vec![P2(0.0, 0.0), P2(10.0, 0.0), P2(10.0, 10.0), P2(0.0, 10.0)]],
+                solid: true,
+                tile: None,
+                shade: false
+            }
         );
         assert!(matches!(&d.entities[2].shape, Shape::Text { text, .. } if text == "shown"));
     }

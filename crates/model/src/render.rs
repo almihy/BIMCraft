@@ -27,7 +27,7 @@ use crate::model::{
     OpeningWay, Operation, Pattern, PlanRange, Railing, Ramp, Roof, Section, Shaft, Stair, TOL, Tag, View3D, Wall,
 };
 use crate::pen::{Pen, Weights};
-pub use crate::prim::{LIGHT_POCHE, PAPER, POCHE, Part, Prim, Rgb, View};
+pub use crate::prim::{LIGHT_POCHE, OPAQUE, PAPER, POCHE, Part, Prim, Rgb, Rule, View};
 use crate::styles::{BY_CATEGORY, ObjectStyle};
 use crate::units::Units;
 use crate::view3d::{self, Camera, Clip, Image, Scene};
@@ -37,6 +37,7 @@ use crate::{font, massing, sheet, stairs};
 
 mod dimensions;
 use dimensions::dimension;
+mod hatch;
 #[doc(hidden)]
 pub mod regions;
 mod site;
@@ -47,6 +48,9 @@ const FAINT: Rgb = Rgb(120, 120, 120);
 const GRID: Rgb = Rgb(60, 100, 150);
 /// A mass's outline, dashed.
 const MASS: Rgb = Rgb(88, 112, 168);
+/// BIMCraft's own colours for a light ground, each with the one a dark canvas draws it in, as light as reads on it (at least
+/// 4.5 : 1 against its ground): a grid's blue, a mass's.
+pub const ON_DARK: [(Rgb, Rgb); 2] = [(GRID, Rgb(120, 165, 220)), (MASS, Rgb(140, 160, 225))];
 /// Room for grid bubbles and the view title around the drawing, px.
 #[doc(hidden)]
 pub const MARGIN: f64 = 70.0;
@@ -65,14 +69,14 @@ fn cropped(prim: Prim, lo: (f32, f32), hi: (f32, f32)) -> Vec<Prim> {
     let mm = |p: (f32, f32)| P2(f64::from(p.0), f64::from(p.1));
     let px = |p: P2| (p.0 as f32, p.1 as f32);
     match prim {
-        Prim::Fill { rings, color } => {
+        Prim::Fill { rings, color, rule, alpha } => {
             let rings: Vec<Vec<(f32, f32)>> = rings.iter().map(|r| clip_ring(r, lo, hi)).filter(|r| r.len() >= 3).collect();
-            if rings.is_empty() { Vec::new() } else { vec![Prim::Fill { rings, color }] }
+            if rings.is_empty() { Vec::new() } else { vec![Prim::Fill { rings, color, rule, alpha }] }
         }
-        Prim::Line { pts, width, color, dash, closed } => {
+        Prim::Line { pts, width, color, dash, closed, alpha } => {
             let inside = |p: &(f32, f32)| (lo.0..=hi.0).contains(&p.0) && (lo.1..=hi.1).contains(&p.1);
             if pts.iter().all(inside) {
-                return vec![Prim::Line { pts, width, color, dash, closed }];
+                return vec![Prim::Line { pts, width, color, dash, closed, alpha }];
             }
             let close = closed.then(|| pts.last().copied().zip(pts.first().copied())).flatten();
             let mut runs: Vec<Vec<(f32, f32)>> = Vec::new();
@@ -84,7 +88,7 @@ fn cropped(prim: Prim, lo: (f32, f32), hi: (f32, f32)) -> Vec<Prim> {
                     _ => runs.push(vec![p, q]),
                 }
             }
-            runs.into_iter().map(|pts| Prim::Line { pts, width, color, dash: dash.clone(), closed: false }).collect()
+            runs.into_iter().map(|pts| Prim::Line { pts, width, color, dash: dash.clone(), closed: false, alpha }).collect()
         }
         Prim::Image { at, width, height, rgba, ink } => {
             let side = |lo: f32, hi: f32, from: f32, n: u32| {
@@ -106,6 +110,9 @@ fn cropped(prim: Prim, lo: (f32, f32), hi: (f32, f32)) -> Vec<Prim> {
     }
 }
 
+/// A primitive with its owner, part, pen and halftone, taken out of a drawing to be pushed again.
+type Kept = (Prim, Option<Id>, Part, Option<Pen>, bool);
+
 pub struct Drawing {
     pub view: View,
     pub prims: Vec<Prim>,
@@ -116,6 +123,12 @@ pub struct Drawing {
     /// The pen each stroke or pattern dot is drawn in, for [`Drawing::weigh`] to size; none for other fills, pictures, lettering and
     /// what is sized already (a view's lines on a sheet).
     pub pens: Vec<Option<Pen>>,
+    /// Whether each primitive is halftone, its colour halfway to the paper (baked in, as paper and pictures draw it): a screen
+    /// with a dark ground draws it halfway to that ground instead, as Revit fades halftone toward the background. Read through
+    /// [`Drawing::half`]: it may be shorter than `prims`, those past it not halftone.
+    pub halftone: Vec<bool>,
+    /// Whether the primitives pushed next are halftone.
+    half: bool,
     regions: regions::Layers,
     /// What it could not draw as asked, in English (a fill pattern too dense for the view): for a front end to say.
     pub notes: Vec<String>,
@@ -132,6 +145,9 @@ pub struct Drawing {
     paper: f32,
     /// How much of what the view cuts it draws.
     detail: Detail,
+    /// Whether it is for a screen, where a dense drawing zoomed out may be drawn simplified ([`crate::cad::lod`]); a picture
+    /// or paper draws every entity.
+    pub(crate) screen: bool,
     pattern_styles: std::collections::BTreeMap<Id, [crate::graphics::Style; 2]>,
 }
 
@@ -144,6 +160,8 @@ impl Drawing {
             owners: Vec::new(),
             parts: Vec::new(),
             pens: Vec::new(),
+            halftone: Vec::new(),
+            half: false,
             regions: regions::Layers::default(),
             notes: Vec::new(),
             weights: Weights::default(),
@@ -152,6 +170,7 @@ impl Drawing {
             k: 1.0,
             paper: 1.0,
             detail: Detail::Fine,
+            screen: false,
             pattern_styles: std::collections::BTreeMap::new(),
         }
     }
@@ -184,11 +203,40 @@ impl Drawing {
         self.owners.push(self.owner);
         self.parts.push(self.part);
         self.pens.push(pen);
+        if self.half {
+            self.set_half(self.prims.len() - 1);
+        }
+    }
+    /// Whether the primitives pushed next are halftone ([`Drawing::halftone`]).
+    pub(crate) fn halftone_next(&mut self, half: bool) {
+        self.half = half;
+    }
+    /// Whether primitive `i` is halftone ([`Drawing::halftone`]).
+    pub fn half(&self, i: usize) -> bool {
+        self.halftone.get(i).copied().unwrap_or(false)
+    }
+    /// Primitive `i` halftone ([`Drawing::halftone`]).
+    pub(crate) fn set_half(&mut self, i: usize) {
+        if self.halftone.len() <= i {
+            self.halftone.resize(i + 1, false);
+        }
+        self.halftone[i] = true;
+    }
+    /// Each primitive's halftone ([`Drawing::half`]), taken out to be pushed again.
+    fn take_halves(&mut self) -> Vec<bool> {
+        let halves = (0..self.prims.len()).map(|i| self.half(i)).collect();
+        self.halftone.clear();
+        halves
     }
     /// A line through pixels `pts` in `pen`, `dash`ed if it says.
     pub(crate) fn stroke(&mut self, pts: Vec<(f32, f32)>, pen: Pen, color: Rgb, dash: Option<Vec<f32>>, closed: bool) {
         let width = self.width(pen);
-        self.push_pen(Prim::Line { pts, width, color, dash, closed }, Some(pen));
+        self.push_pen(Prim::line(pts, width, color, dash, closed), Some(pen));
+    }
+    /// [`Drawing::stroke`], `alpha` opaque.
+    pub(crate) fn stroke_seen(&mut self, pts: Vec<(f32, f32)>, pen: Pen, color: Rgb, dash: Option<Vec<f32>>, closed: bool, alpha: u8) {
+        let width = self.width(pen);
+        self.push_pen(Prim::Line { pts, width, color, dash, closed, alpha }, Some(pen));
     }
     /// One shared path for detail lines and region boundaries, in paper units.
     fn styled(&mut self, m: &Model, st: &crate::lines::LineStyle, mut pts: Vec<(f32, f32)>, closed: bool) {
@@ -244,20 +292,19 @@ impl Drawing {
         if !self.owners.iter().any(under) {
             return;
         }
+        let halves = self.take_halves();
         let prims = std::mem::take(&mut self.prims);
-        let mut all: Vec<(Prim, Option<Id>, Part, Option<Pen>)> = prims
+        let mut all: Vec<Kept> = prims
             .into_iter()
             .zip(std::mem::take(&mut self.owners))
             .zip(std::mem::take(&mut self.parts))
             .zip(std::mem::take(&mut self.pens))
-            .map(|(((p, o), part), pen)| (p, o, part, pen))
+            .zip(halves)
+            .map(|((((p, o), part), pen), half)| (p, o, part, pen, half))
             .collect();
         all.sort_by_key(|(_, o, ..)| !under(o));
-        for (p, o, part, pen) in all {
-            self.prims.push(p);
-            self.owners.push(o);
-            self.parts.push(part);
-            self.pens.push(pen);
+        for (p, o, part, pen, half) in all {
+            keep(self, p, o, part, pen, half);
         }
     }
     /// Each line marked [`BY_CATEGORY`] in the pen its owner's object style gives, cut or in projection as its part is: before
@@ -283,7 +330,7 @@ impl Drawing {
                 r.iter().map(|p| self.view.px(*p)).collect()
             })
             .collect();
-        self.push(Prim::Fill { rings, color });
+        self.push(Prim::fill(rings, color));
     }
     /// `pts` joined in `pen`, as wide as it is on the paper the view stands for.
     pub(crate) fn line(&mut self, pts: &[P2], pen: Pen, color: Rgb, closed: bool) {
@@ -328,27 +375,53 @@ impl Drawing {
     /// What's drawn cropped to the box from pixel `lo` to `hi`, but for the primitives of the
     /// elements `keep` takes.
     pub(crate) fn crop(&mut self, lo: (f32, f32), hi: (f32, f32), keep: impl Fn(Option<Id>) -> bool) {
+        let halves = self.take_halves();
         let (prims, owners, parts) = (std::mem::take(&mut self.prims), std::mem::take(&mut self.owners), std::mem::take(&mut self.parts));
         let pens = std::mem::take(&mut self.pens);
-        for (((prim, owner), part), pen) in prims.into_iter().zip(owners).zip(parts).zip(pens) {
+        for ((((prim, owner), part), pen), half) in prims.into_iter().zip(owners).zip(parts).zip(pens).zip(halves) {
             for piece in if keep(owner) { vec![prim] } else { cropped(prim, lo, hi) } {
-                self.prims.push(piece);
-                self.owners.push(owner);
-                self.parts.push(part);
-                self.pens.push(pen);
+                self::keep(self, piece, owner, part, pen, half);
+            }
+        }
+    }
+
+    /// The fills and lines pushed since `from` made `alpha` opaque.
+    fn see_through(&mut self, from: usize, alpha: u8) {
+        if alpha == OPAQUE {
+            return;
+        }
+        for p in self.prims.iter_mut().skip(from) {
+            match p {
+                Prim::Fill { alpha: a, .. } | Prim::Line { alpha: a, .. } => *a = alpha,
+                Prim::Image { .. } => {}
             }
         }
     }
 
     /// `text` centred on `(x, y)` px, capitals `height` px tall, turned `angle` radians clockwise
     /// on screen (y runs down).
-    pub(crate) fn text_turned(&mut self, text: &str, (x, y): (f32, f32), height: f32, angle: f32, color: Rgb) {
+    pub(crate) fn text_turned(&mut self, text: &str, at: (f32, f32), height: f32, angle: f32, color: Rgb) {
+        self.text_shaped(text, at, height, angle, (1.0, false), color);
+    }
+
+    /// [`Drawing::text_turned`], its letters `wide` times as wide as the lettering draws them and, `mirrored`, read backwards,
+    /// each letter mirrored, as a drawing's text may be (DXF's width factor and backward flag).
+    pub(crate) fn text_shaped(
+        &mut self,
+        text: &str,
+        (x, y): (f32, f32),
+        height: f32,
+        angle: f32,
+        (wide, mirrored): (f32, bool),
+        color: Rgb,
+    ) {
         let (s, c) = angle.sin_cos();
         let w = font::width(text, height);
+        let across = if mirrored { -wide } else { wide };
         let part = std::mem::replace(&mut self.part, Part::Text);
         for pts in font::strokes(text, -w / 2.0, height / 2.0, height) {
-            let pts = pts.into_iter().map(|(a, b)| (x + a * c - b * s, y + a * s + b * c)).collect();
-            self.push(Prim::Line { pts, width: (height / 10.0).max(1.0), color, dash: None, closed: false });
+            let pts = pts.into_iter().map(|(a, b)| (a * across, b)).map(|(a, b)| (x + a * c - b * s, y + a * s + b * c)).collect();
+            self.push(Prim::line(pts, (height / 10.0).max(1.0), color, None, false));
         }
         self.part = part;
     }
@@ -679,12 +752,15 @@ fn plan_filter<'a>(
         .collect()
 }
 
+/// Cut outlines filled together: each colour, whether it is halftone, and the outlines it fills.
+type Unions = Vec<((Rgb, bool), Vec<Vec<P2>>)>;
+
 /// The cut outlines `look` fills in the same colour, together, so no seam shows where two fills
-/// meet: each colour, and the outlines it fills.
-fn cut_unions(look: &Look, outlines: impl Iterator<Item = (Id, Vec<P2>)>) -> Vec<(Rgb, Vec<Vec<P2>>)> {
-    let mut unions: Vec<(Rgb, Vec<Vec<P2>>)> = Vec::new();
+/// meet: each colour, whether it is halftone, and the outlines it fills.
+fn cut_unions(look: &Look, outlines: impl Iterator<Item = (Id, Vec<P2>)>) -> Unions {
+    let mut unions: Unions = Vec::new();
     for (id, o) in outlines {
-        let color = look.cut_fill(id, POCHE);
+        let color = (look.cut_fill(id, POCHE), look.half(id));
         match unions.iter_mut().find(|(c, _)| *c == color) {
             Some((_, rings)) => rings.push(o),
             None => unions.push((color, vec![o])),
@@ -950,7 +1026,7 @@ fn turn_corners(runs: &mut [(Id, Vec<Vec<P2>>)], reach: f64) {
 /// The plan of `level` fitted into `width` x `height` px, as an image of it is made: with its name lettered at its bottom left.
 pub fn plan(m: &Model, level: impl Key, width: u32, height: u32) -> Drawing {
     let view = fit(&plan_extent(m, level), width, height, scale_of(m, level));
-    draw_plan(m, level, view, false, annotation(m, level, view), scale_of(m, level), true)
+    draw_plan(m, level, view, false, annotation(m, level, view), scale_of(m, level), Out::Picture)
 }
 
 /// What a plan of `level` takes on paper: all it shows, or cropped, its crop region and the grids'
@@ -1914,6 +1990,8 @@ impl SectionOverlay {
             owners: b.owners.clone(),
             parts: b.parts.clone(),
             pens: b.pens.clone(),
+            halftone: b.halftone.clone(),
+            half: false,
             regions: regions::Layers::new(b.regions.end(), Some(self.id)),
             notes: b.notes.clone(),
             weights: b.weights,
@@ -1922,6 +2000,7 @@ impl SectionOverlay {
             k: b.k,
             paper: b.paper,
             detail: b.detail,
+            screen: b.screen,
             pattern_styles: b.pattern_styles.clone(),
         };
         if let Some(image) = picture {
@@ -2032,23 +2111,25 @@ fn section_base_cancellable(
     // Poché, then the edge of what is cut over it: joined walls show their union, as in plan, filled
     // as one first so no seam shows where pieces meet.
     d.owner = None;
-    let mut unions: Vec<(Rgb, Vec<Vec<P2>>)> = Vec::new();
+    let mut unions: Unions = Vec::new();
     for (owner, rings) in &cuts {
         if cancelled() {
             return None;
         }
-        let color = look.cut_fill(*owner, POCHE);
+        let color = (look.cut_fill(*owner, POCHE), look.half(*owner));
         match unions.iter_mut().find(|(c, _)| *c == color) {
             Some((_, all)) => all.extend(rings.iter().cloned()),
             None => unions.push((color, rings.clone())),
         }
     }
-    for (color, rings) in unions {
+    for ((color, half), rings) in unions {
         if cancelled() {
             return None;
         }
+        d.halftone_next(half);
         d.fill(&rings, color);
     }
+    d.halftone_next(false);
     for (owner, rings) in &cuts {
         if cancelled() {
             return None;
@@ -2387,20 +2468,20 @@ pub fn section_png_noted(m: &Model, id: impl Key, view: View) -> Result<(Vec<u8>
 
 /// The plan of `level` as `view` shows it: what a canvas that pans and zooms draws.
 pub fn draw(m: &Model, level: impl Key, view: View) -> Drawing {
-    draw_plan(m, level, view, false, annotation(m, level, view), scale_of(m, level), false)
+    draw_plan(m, level, view, false, annotation(m, level, view), scale_of(m, level), Out::Screen)
 }
 
 /// The reflected ceiling plan of `level` fitted into `width` x `height` px.
 pub fn ceiling_plan(m: &Model, level: impl Key, width: u32, height: u32) -> Drawing {
     let view = fit(&plan_shows(m, level), width, height, scale_of(m, level));
-    draw_plan(m, level, view, true, annotation(m, level, view), scale_of(m, level), true)
+    draw_plan(m, level, view, true, annotation(m, level, view), scale_of(m, level), Out::Picture)
 }
 
 /// The reflected ceiling plan of `level` as `view` shows it: cut [`CEILING_CUT`] above the level
 /// (over the doors) and looking up, at the ceilings up to the level above, as a floor plan lies
 /// (not mirrored). Its grids and its sections' marks; no annotation of the floor plan's.
 pub fn draw_ceiling(m: &Model, level: impl Key, view: View) -> Drawing {
-    draw_plan(m, level, view, true, annotation(m, level, view), scale_of(m, level), false)
+    draw_plan(m, level, view, true, annotation(m, level, view), scale_of(m, level), Out::Screen)
 }
 
 /// How big the annotation of view `id` is drawn through `view`, times the size it is laid out at. A view with a scale
@@ -2433,7 +2514,7 @@ fn detail_of(m: &Model, id: impl Key) -> Detail {
 
 /// Plan `level` as `draw` draws it, its annotation `k` times the size it is laid out at: a sheet's, at paper size.
 pub fn draw_at(m: &Model, level: impl Key, view: View, k: f32) -> Drawing {
-    draw_plan(m, level, view, false, k, f64::from(k) * sheet::DENSITY / view.scale, false)
+    draw_plan(m, level, view, false, k, f64::from(k) * sheet::DENSITY / view.scale, Out::Paper)
 }
 
 /// The points of the scans a plan sees, from its cut plane down to its view depth, as Revit draws a point cloud in plan: from
@@ -2502,79 +2583,294 @@ fn scans(d: &mut Drawing, m: &Model, range: &PlanRange, look: &Look) {
 }
 
 /// The CAD drawings a plan shows, under all the rest but its scans, as Revit draws an import in the background: those placed on
-/// its level, in each of its plans or in this one only, of the layers the import and the view show. Each entity is drawn in its
-/// colour (the view's ink where it has none, or the import draws in black), its pen and its linetype; a solid hatch filled, a
-/// patterned one as a pale fill of its colour; text lettered at its height, turned and aligned as the drawing has it.
+/// its level, in each of its plans or in this one only, of the layers the import and the view show, as the view's Imported
+/// Categories draw them.
 fn cad_imports(d: &mut Drawing, m: &Model, key: crate::ids::Guid, level: crate::ids::Guid, look: &Look) {
-    use crate::dxf::{Horizontal, Shape, Vertical};
-    // The view in model mm, to leave out what lies outside it.
-    let (w, h) = (d.view.width as f32, d.view.height as f32);
-    let view = [d.view.mm((0.0, 0.0)), d.view.mm((w, 0.0)), d.view.mm((w, h)), d.view.mm((0.0, h))];
     for (id, e) in m.rare("cadimport").into_iter().filter_map(|id| Some((id, m.elements.get(id)?))) {
         let Element::CadImport(ci) = e else { continue };
         if ci.level != level || ci.view.is_some_and(|v| v != key) || !look.shows(id) {
             continue;
         }
         let Some(cad) = m.cads.get(&ci.cad) else { continue };
-        let place = crate::model::cad_place(ci);
-        let Some([lo, hi]) = crate::dxf::union(view.map(|q| {
-            let p = crate::model::cad_unplace(ci, q);
-            [p, p]
-        })) else {
-            continue;
-        };
-        let seen = |b: [P2; 2]| b[0].0 <= hi.0 && b[1].0 >= lo.0 && b[0].1 <= hi.1 && b[1].1 >= lo.1;
-        // Pixels to each of the drawing's units.
-        let k = ci.scale * d.view.scale;
-        let in_view = look.hidden_layers(&ci.cad);
         d.own(Some(id));
-        for ent in &cad.dxf().entities {
-            if !cad.shows(ent, &ci.hidden) || in_view.is_some_and(|l| l.contains(&ent.layer)) || !seen(ent.shape.bounds()) {
-                continue;
-            }
-            let color = cad.color(ent, ci.colors).unwrap_or(INK);
-            match &ent.shape {
-                Shape::Text { at, height, angle, text, align, .. } => {
-                    let px = (height * k) as f32;
-                    if px < 1.0 {
-                        continue;
-                    }
-                    let wide = f64::from(font::width(text, px)) / k;
-                    let (u, v) =
-                        (P2(angle.to_radians().cos(), angle.to_radians().sin()), P2(-angle.to_radians().sin(), angle.to_radians().cos()));
-                    let left = match align.h {
-                        Horizontal::Left => *at,
-                        Horizontal::Center => *at - u * (wide / 2.0),
-                        Horizontal::Right => *at - u * wide,
-                    };
-                    let base = match align.v {
-                        Vertical::Baseline | Vertical::Bottom => left,
-                        Vertical::Middle => left - v * (height / 2.0),
-                        Vertical::Top => left - v * *height,
-                    };
-                    let middle = d.view.px(place(base + u * (wide / 2.0) + v * (height / 2.0)));
-                    d.text_turned(text, middle, px, -((angle + ci.angle).to_radians()) as f32, color);
-                }
-                Shape::Point(_) => {}
-                Shape::Fill { rings, solid } => {
-                    let rings: Vec<Vec<P2>> = rings.iter().map(|r| r.iter().map(|p| place(*p)).collect()).collect();
-                    let fill = if *solid { color } else { Rgb(pale(color.0), pale(color.1), pale(color.2)) };
-                    d.fill(&rings, fill);
-                }
-                shape => {
-                    let dash = cad.dash(ent).map(|[a, b]| [(a * k) as f32, (b * k) as f32]).filter(|[a, b]| *a >= 1.0 && *b >= 1.0);
-                    for (pts, closed) in crate::cad::paths(shape) {
-                        let px = pts.iter().map(|p| d.view.px(place(*p))).collect();
-                        d.stroke(px, cad.pen(ent), color, dash.map(|d| d.to_vec()), closed);
-                    }
-                }
-            }
-        }
+        cad_drawing(d, cad, ci, look.hidden_layers(&ci.cad), look.import_look(&ci.cad));
     }
     d.own(None);
 }
 
-/// The images placed in view `key` (a plan, with a dependent view's parent's, a section, an elevation or a sheet) on `layer`
+/// Pixels of a run of a drawing, those nearer than [`ONE_PIXEL`] to the last kept left out (the last always kept): zoomed out,
+/// a dense drawing's many points under a pixel are the run as it shows, in a fraction of the points.
+fn thinned(pts: impl Iterator<Item = (f32, f32)>) -> Vec<(f32, f32)> {
+    let mut out: Vec<(f32, f32)> = Vec::new();
+    let mut last = None;
+    for q in pts {
+        last = Some(q);
+        if out.last().is_none_or(|p| (q.0 - p.0).abs() >= ONE_PIXEL || (q.1 - p.1).abs() >= ONE_PIXEL) {
+            out.push(q);
+        }
+    }
+    if let (Some(q), Some(p)) = (last, out.last())
+        && q != *p
+    {
+        out.push(q);
+    }
+    out
+}
+
+/// The colour an import's fill or hatch is drawn in, of its own colour `own`: lighter when its layer's settings in the view's
+/// Imported Categories (`over`) are halftone. As in Revit, an import's Patterns can't be overridden, and its Lines' colour is
+/// its lines' and text's only.
+fn import_fill(over: Option<&crate::graphics::Override>, own: Rgb) -> Rgb {
+    if over.is_some_and(|o| o.halftone) { halftone(own) } else { own }
+}
+
+/// A colour halfway to the paper, as halftone draws it.
+fn halftone(c: Rgb) -> Rgb {
+    Rgb(c.0 + (255 - c.0) / 2, c.1 + (255 - c.1) / 2, c.2 + (255 - c.2) / 2)
+}
+
+/// How near two points of a drawing's run may come on screen before the second is left out, px.
+const ONE_PIXEL: f32 = 0.75;
+/// The most points of a fill's ring drawn as they are, never thinned.
+const FEW: usize = 16;
+
+/// A CAD drawing placed by `ci` (in the view's terms), of the layers it and `in_view` show, what lies in the view, as `look` (the
+/// view's Imported Categories) draws it: each entity in its colour (the view's ink where it has none, or the import draws in
+/// black), its pen and its linetype, and its lines and text in what its layer's override (else its import's) gives instead,
+/// lighter in halftone; a solid hatch filled (by odd parity: its islands are holes), a patterned one drawn with its pattern
+/// ([`hatch`]) or, with none, as a pale fill of its colour; text lettered at its height and width, turned, aligned and
+/// mirrored as the drawing has it. Only the entities in the view are looked at, and a run's points under a pixel apart are
+/// drawn as one. On a screen, a dense drawing zoomed out is drawn from its level of detail in the page's order: pictures of its
+/// small entities' cells with its big fills drawn into them ([`cad_cells`]), and its other big entities one by one between
+/// them. An import's, and a PDF's lines where its image shows them.
+fn cad_drawing(
+    d: &mut Drawing,
+    cad: &crate::cad::Cad,
+    ci: &crate::model::CadImport,
+    in_view: Option<&std::collections::BTreeSet<String>>,
+    look: Option<&crate::graphics::ImportLook>,
+) {
+    use crate::cad::lod::Step;
+    if look.is_some_and(|l| l.all.hidden) {
+        return;
+    }
+    // The view in the drawing's units, to leave out what lies outside it.
+    let (w, h) = (d.view.width as f32, d.view.height as f32);
+    let view = [d.view.mm((0.0, 0.0)), d.view.mm((w, 0.0)), d.view.mm((w, h)), d.view.mm((0.0, h))];
+    let Some([lo, hi]) = crate::dxf::union(view.map(|q| {
+        let p = crate::model::cad_unplace(ci, q);
+        [p, p]
+    })) else {
+        return;
+    };
+    // What the frame may draw of its hatches' patterns, and the smallest a pattern's cell may be on it before a hatch is its
+    // tint.
+    let (budget, least) = if d.screen { (hatch::SCREEN_POINTS, hatch::SCREEN_PX) } else { (hatch::PAPER_POINTS, hatch::PAPER_PX) };
+    let mut ents = CadEntities { cad, ci, in_view, look, lo, hi, overrides: std::collections::HashMap::new(), budget, least };
+    // Pixels to a unit of the drawing along whichever way it is the most: a cell of the band drawn is no more than a pixel.
+    let most = ci.scale.abs().max((ci.scale * ci.stretch).abs()) * d.view.scale;
+    if let Some((lod, band)) = cad.lod_band(most).filter(|_| d.screen)
+        && let Some(picture) = cad_picture(ci, (in_view, look), lod, band)
+        && cad_fills_fit(d, ci, lod, band, [lo, hi])
+    {
+        let meets = |i: usize| lod.entity_box(i).is_some_and(|b| b[0] <= hi.0 && b[2] >= lo.0 && b[1] <= hi.1 && b[3] >= lo.1);
+        let cells_half = look.is_some_and(|l| {
+            let shown = |name: &&String| !(ci.hidden.contains(*name) || in_view.is_some_and(|v| v.contains(*name)));
+            lod.layers.iter().filter(shown).all(|name| l.of_layer(name).halftone)
+        });
+        let mut pictures = 0;
+        for step in &band.steps {
+            match step {
+                Step::Picture(runs) => {
+                    // A picture of cells is halftone where every layer it may draw is: on a dark screen, one of a drawing
+                    // halftone in part keeps its halftone layers' cells halfway to the paper.
+                    d.halftone_next(cells_half);
+                    cad_cells(d, ci, (&picture, pictures, runs), band.cell, [lo, hi], &|i| ents.fill(i));
+                    d.halftone_next(false);
+                    pictures += 1;
+                }
+                Step::Whole(list) => {
+                    for i in list.iter().map(|i| *i as usize).filter(|i| meets(*i)) {
+                        ents.draw(d, i);
+                    }
+                }
+            }
+        }
+        return;
+    }
+    for i in cad.entities_in(lo, hi) {
+        ents.draw(d, i);
+    }
+}
+
+/// A CAD drawing's entities being drawn ([`cad_drawing`]): the drawing, its placement, the layers the view hides and how it
+/// draws them, the view's box in the drawing's units, each layer's override worked out once, and what is left of the frame's
+/// budget for its hatches' patterns and the smallest a cell of one may be.
+struct CadEntities<'a> {
+    cad: &'a crate::cad::Cad,
+    ci: &'a crate::model::CadImport,
+    in_view: Option<&'a std::collections::BTreeSet<String>>,
+    look: Option<&'a crate::graphics::ImportLook>,
+    lo: P2,
+    hi: P2,
+    overrides: std::collections::HashMap<String, crate::graphics::Override>,
+    budget: usize,
+    least: f64,
+}
+
+impl CadEntities<'_> {
+    /// Whether entity `e` is shown: its layer isn't hidden by the import or the view.
+    fn shows(&self, e: &crate::dxf::Entity) -> bool {
+        self.cad.shows(e, &self.ci.hidden) && !self.in_view.is_some_and(|l| l.contains(&e.layer))
+    }
+
+    /// The override entity `e`'s layer is drawn with, if the view sets how its import draws.
+    fn over(&mut self, e: &crate::dxf::Entity) -> Option<crate::graphics::Override> {
+        let look = self.look?;
+        if let Some(o) = self.overrides.get(&e.layer) {
+            return Some(o.clone());
+        }
+        let o = look.of_layer(&e.layer);
+        self.overrides.insert(e.layer.clone(), o.clone());
+        Some(o)
+    }
+
+    /// Entity `i` if it is a fill shown: its rings, its colour as drawn (its own, halftone or not) and its opacity.
+    fn fill(&self, i: usize) -> Option<CadFill<'_>> {
+        let e = self.cad.dxf().entities.get(i)?;
+        let crate::dxf::Shape::Fill { rings, .. } = &e.shape else { return None };
+        if !self.shows(e) {
+            return None;
+        }
+        let half = self.look.is_some_and(|l| l.of_layer(&e.layer).halftone);
+        let own = self.cad.color(e, self.ci.colors).unwrap_or(INK);
+        Some((rings, if half { halftone(own) } else { own }, e.alpha))
+    }
+
+    /// Draws entity `i`, if it is shown: all of it halftone, or none ([`Drawing::halftone`]).
+    fn draw(&mut self, d: &mut Drawing, i: usize) {
+        let Some(ent) = self.cad.dxf().entities.get(i) else { return };
+        let half = self.over(ent).is_some_and(|o| o.halftone);
+        d.halftone_next(half);
+        self.draw_one(d, i);
+        d.halftone_next(false);
+    }
+
+    /// [`CadEntities::draw`], halftone or not as it sets.
+    fn draw_one(&mut self, d: &mut Drawing, i: usize) {
+        use crate::dxf::{Horizontal, Shape, Vertical};
+        let (cad, ci) = (self.cad, self.ci);
+        let Some(ent) = cad.dxf().entities.get(i) else { return };
+        if !self.shows(ent) {
+            return;
+        }
+        let over = self.over(ent);
+        let lines = over.as_ref().map(|o| &o.projection);
+        let mut color = lines.and_then(|s| s.color).map_or_else(|| cad.color(ent, ci.colors).unwrap_or(INK), |[r, g, b]| Rgb(r, g, b));
+        if over.as_ref().is_some_and(|o| o.halftone) {
+            color = halftone(color);
+        }
+        let place = crate::model::cad_place(ci);
+        let frame = d.view;
+        // Pixels to each of the drawing's units.
+        let k = ci.scale * frame.scale;
+        let px_of = |p: &P2| frame.px(place(*p));
+        match &ent.shape {
+            Shape::Text { at, height, angle, text, align, wide: factor, mirrored, .. } => {
+                let px = (height * k) as f32;
+                if px < 1.0 {
+                    return;
+                }
+                // Its width as drawn, and the way its letters run: backwards when it is mirrored.
+                let wide = f64::from(font::width(text, px)) / k * factor;
+                let run = if *mirrored { -1.0 } else { 1.0 };
+                let (u, v) =
+                    (P2(angle.to_radians().cos(), angle.to_radians().sin()), P2(-angle.to_radians().sin(), angle.to_radians().cos()));
+                let left = match align.h {
+                    Horizontal::Left => *at,
+                    Horizontal::Center => *at - u * (run * wide / 2.0),
+                    Horizontal::Right => *at - u * (run * wide),
+                };
+                let base = match align.v {
+                    Vertical::Baseline | Vertical::Bottom => left,
+                    Vertical::Middle => left - v * (height / 2.0),
+                    Vertical::Top => left - v * *height,
+                };
+                // Its angle on screen: the drawing's turned by the import's, and mirrored when the import is.
+                let turned = if ci.stretch < 0.0 { -angle } else { *angle };
+                let middle = frame.px(place(base + u * (run * wide / 2.0) + v * (height / 2.0)));
+                let from = d.prims.len();
+                d.text_shaped(text, middle, px, -((turned + ci.angle).to_radians()) as f32, (*factor as f32, *mirrored), color);
+                d.see_through(from, ent.alpha);
+            }
+            Shape::Point(_) => {}
+            // A hatch's boundaries fill by odd parity, as DXF's do: an island in it is a hole.
+            Shape::Fill { rings, solid, tile, shade } => {
+                // In its own colour, halftone or not.
+                let own = import_fill(over.as_ref(), cad.color(ent, ci.colors).unwrap_or(INK));
+                // Drawn with its pattern, its cell laid again cut to it; where the cell is too small to see, its tint.
+                if let Some(t) = tile {
+                    let px = |p: P2| frame.px(place(p));
+                    let color = |c: [u8; 3]| {
+                        let c = match ci.colors {
+                            crate::cad::Colors::Preserve => Rgb(c[0], c[1], c[2]),
+                            crate::cad::Colors::Invert => Rgb(255 - c[0], 255 - c[1], 255 - c[2]),
+                            crate::cad::Colors::Black => INK,
+                        };
+                        import_fill(over.as_ref(), c)
+                    };
+                    let look = hatch::Look { px: &px, color: &color, k };
+                    let view = [self.lo.0, self.lo.1, self.hi.0, self.hi.1];
+                    if hatch::draw(d, t, rings, view, &look, self.least, &mut self.budget) {
+                        return;
+                    }
+                }
+                let fill = if *solid || tile.is_some() { own } else { Rgb(pale(own.0), pale(own.1), pale(own.2)) };
+                // A ring of a few points is drawn as it is: thinned, a band of a gradient narrower than a pixel would be a dot.
+                let px: Vec<Vec<(f32, f32)>> = rings
+                    .iter()
+                    .map(|r| if r.len() <= FEW { r.iter().map(px_of).collect() } else { thinned(r.iter().map(px_of)) })
+                    .collect();
+                if px.iter().all(|r| r.len() < 3) {
+                    // Under a pixel: a dot of its colour, so a dense hatch still reads as one.
+                    if let Some(&q) = px.iter().flatten().next() {
+                        d.stroke_seen(vec![q, (q.0 + ONE_PIXEL, q.1)], Pen::FINE, fill, None, false, ent.alpha);
+                    }
+                    return;
+                }
+                let rings = px.into_iter().filter(|r| r.len() >= 3).collect();
+                // A gradient's band keeps its colours on a dark canvas, as a picture does.
+                let part = if *shade { std::mem::replace(&mut d.part, Part::Shade) } else { d.part };
+                d.push(Prim::Fill { rings, color: fill, rule: Rule::EvenOdd, alpha: ent.alpha });
+                d.part = part;
+            }
+            shape => {
+                let pen = lines.and_then(|s| s.weight).unwrap_or_else(|| cad.pen(ent));
+                // Its dashes in pixels (the override's pattern, else its linetype's); a pattern whose cycle is under a few
+                // pixels draws solid, as it would look.
+                let dash = match lines.and_then(|s| s.dash) {
+                    Some(k) => k.pattern(),
+                    None => cad
+                        .dash(ent)
+                        .map(|d| d.into_iter().map(|x| (x * k) as f32).collect::<Vec<f32>>())
+                        .filter(|d| d.iter().sum::<f32>() >= 3.0 && d.iter().skip(1).step_by(2).any(|gap| *gap >= 0.5)),
+                };
+                for (pts, closed) in crate::cad::paths(shape) {
+                    let mut px = thinned(pts.iter().map(px_of));
+                    if px.len() == 1
+                        && let Some(&q) = px.first()
+                    {
+                        px.push((q.0 + ONE_PIXEL, q.1));
+                    }
+                    let closed = closed && px.len() > 2;
+                    d.stroke_seen(px, pen, color, dash.clone(), closed, ent.alpha);
+                }
+            }
+        }
+    }
+}
+
+// The images placed in view `key` (a plan, with a dependent view's parent's, a section, an elevation or a sheet) on `layer`
 /// that `look` shows (all on a sheet, which has none), each drawn over its corners in the view's terms.
 pub(crate) fn images(d: &mut Drawing, m: &Model, key: Guid, layer: crate::raster::DrawLayer, look: Option<&Look>) {
     // Back to front, as Arrange orders them.
@@ -2599,7 +2895,25 @@ pub(crate) fn images(d: &mut Drawing, m: &Model, key: Guid, layer: crate::raster
         });
         d.own(Some(id));
         let part = std::mem::replace(&mut d.part, Part::Picture);
-        crate::raster::draw(d, t, corners);
+        // Its picture over the part of it the picture covers (all of it, but for a page drawn from its lines): none, nothing.
+        if let Some([u0, v0, u1, v1]) = t.covers() {
+            let [tl, tr, _, bl] = corners;
+            let at = |u: f64, v: f64| (tl.0 + (tr.0 - tl.0) * u + (bl.0 - tl.0) * v, tl.1 + (tr.1 - tl.1) * u + (bl.1 - tl.1) * v);
+            crate::raster::draw(d, t, [at(u0, v0), at(u1, v0), at(u1, v1), at(u0, v1)]);
+        }
+        // A page drawn from its lines: they go over its picture, of the layers it and the view show.
+        if t.drawn()
+            && look.is_none_or(|l| l.draws_pdf_lines(&im.type_name))
+            && let Some((cad, ci)) = im.lines_placed(t, im.view)
+        {
+            cad_drawing(
+                d,
+                &cad,
+                &ci,
+                look.and_then(|l| l.hidden_pdf_layers(&im.type_name)),
+                look.and_then(|l| l.pdf_import_look(&im.type_name)),
+            );
+        }
         d.part = part;
     }
     d.own(None);
@@ -2630,7 +2944,308 @@ fn behind_model(d: &mut Drawing, m: &Model, picture: &Image) {
     }
 }
 
-/// A channel of a colour most of the way to the paper: a patterned hatch's fill.
+/// The picture of `band` (of a drawing placed by `ci`, its level of detail `lod`) for the view's look of it: its layers'
+/// marks in their colours as the view draws them (the import's colours, its ink inverted or black as the import says; a line's
+/// in its layer's override's colour; halftone, a fill's as a line's), none for a layer it hides. Made once for that look
+/// ([`crate::cad::lod::Lod::picture`]); none when it would hold too much.
+fn cad_picture(
+    ci: &crate::model::CadImport,
+    (in_view, look): (Option<&std::collections::BTreeSet<String>>, Option<&crate::graphics::ImportLook>),
+    lod: &crate::cad::lod::Lod,
+    band: &crate::cad::lod::Band,
+) -> Option<std::sync::Arc<crate::cad::lod::Picture>> {
+    use crate::cad::Colors;
+    use std::hash::{Hash, Hasher};
+    // Each layer as the view draws it: hidden, or its override's colour and halftone.
+    let seen: Vec<Option<(Option<Rgb>, bool)>> = lod
+        .layers
+        .iter()
+        .map(|name| {
+            if ci.hidden.contains(name) || in_view.is_some_and(|l| l.contains(name)) {
+                return None;
+            }
+            let over = look.map(|l| l.of_layer(name));
+            let color = over.as_ref().and_then(|o| o.projection.color).map(|[r, g, b]| Rgb(r, g, b));
+            Some((color, over.as_ref().is_some_and(|o| o.halftone)))
+        })
+        .collect();
+    let mut key = std::collections::hash_map::DefaultHasher::new();
+    ci.colors.name().hash(&mut key);
+    for s in &seen {
+        s.map(|(c, half)| (c.map(|c| (c.0, c.1, c.2)), half)).hash(&mut key);
+    }
+    let color = |l: usize, own: Option<Rgb>, fill: bool| -> Option<Rgb> {
+        let (over, half) = (*seen.get(l)?)?;
+        let own = match (ci.colors, own) {
+            (Colors::Preserve, Some(c)) => c,
+            (Colors::Invert, Some(c)) => Rgb(255 - c.0, 255 - c.1, 255 - c.2),
+            _ => INK,
+        };
+        // As drawn whole: a layer's Lines' colour is its lines' and text's, never its fills'.
+        let c = if fill { own } else { over.unwrap_or(own) };
+        Some(if half { halftone(c) } else { c })
+    };
+    lod.picture(band, key.finish(), &color)
+}
+
+/// The most pixels a frame's big fills drawn into the pictures of a drawing's level of detail may cover among them: past it,
+/// the drawing is drawn entity by entity.
+const MOST_FILLED: f64 = 32e6;
+
+/// Whether the big fills `band`'s pictures draw (of a drawing placed by `ci`) cover few enough of the frame's pixels, the
+/// part of each in the box from `lo` to `hi` (the view, in the drawing's units), to draw them into the pictures.
+fn cad_fills_fit(
+    d: &Drawing,
+    ci: &crate::model::CadImport,
+    lod: &crate::cad::lod::Lod,
+    band: &crate::cad::lod::Band,
+    [lo, hi]: [P2; 2],
+) -> bool {
+    let k = (ci.scale.abs() * d.view.scale) * ((ci.scale * ci.stretch).abs() * d.view.scale);
+    let mut covered = 0.0;
+    for step in &band.steps {
+        let crate::cad::lod::Step::Picture(runs) = step else { continue };
+        for run in runs {
+            let crate::cad::lod::Run::Fill(i) = run else { continue };
+            let Some(b) = lod.entity_box(*i as usize) else { continue };
+            let (w, h) = ((b[2].min(hi.0) - b[0].max(lo.0)).max(0.0), (b[3].min(hi.1) - b[1].max(lo.1)).max(0.0));
+            covered += w * h * k;
+        }
+    }
+    covered <= MOST_FILLED
+}
+
+/// A big fill a picture of cells draws: its rings, its colour as drawn and its opacity.
+type CadFill<'c> = (&'c [Vec<P2>], Rgb, u8);
+
+/// Picture `p` of a drawing's level of detail (placed by `ci`), its runs `runs`, the part of it in the box from `lo` to `hi`
+/// in the drawing's units, drawn as one image ([`Part::Cells`]) in the page's order: each run of cells the pixels their ink
+/// makes, a big fill (`fill` gives its rings, colour and opacity; none, it is hidden) filled where it covers. A cell's ink
+/// (its lines as long as they are and a pixel wide, as the finest pen draws on a screen, their round ends; its fills as much
+/// of it as they cover) is spread over the four pixels round its middle: a pixel is as opaque as its fills cover it, and its
+/// lines over them as opaque as their ink, laid at random, covers it.
+fn cad_cells<'c>(
+    d: &mut Drawing,
+    ci: &crate::model::CadImport,
+    (picture, p, runs): (&crate::cad::lod::Picture, usize, &[crate::cad::lod::Run]),
+    cell: f64,
+    [lo, hi]: [P2; 2],
+    fill: &dyn Fn(usize) -> Option<CadFill<'c>>,
+) {
+    let place = crate::model::cad_place(ci);
+    let frame = d.view;
+    // The pixels the picture may reach: its grid in the view, a pixel round.
+    let [glo, ghi] = picture.bounds();
+    let (from, to) = (P2(lo.0.max(glo.0), lo.1.max(glo.1)), P2(hi.0.min(ghi.0), hi.1.min(ghi.1)));
+    if !(from.0 <= to.0 && from.1 <= to.1) {
+        return;
+    }
+    let corners = [from, P2(to.0, from.1), to, P2(from.0, to.1)].map(|q| frame.px(place(q)));
+    let (w, h) = (frame.width as f32, frame.height as f32);
+    let (xs, ys) = (corners.map(|c| c.0), corners.map(|c| c.1));
+    let x0 = (xs.iter().copied().fold(f32::INFINITY, f32::min) - 1.0).floor().clamp(0.0, w);
+    let y0 = (ys.iter().copied().fold(f32::INFINITY, f32::min) - 1.0).floor().clamp(0.0, h);
+    let x1 = (xs.iter().copied().fold(f32::NEG_INFINITY, f32::max) + 1.0).ceil().clamp(0.0, w);
+    let y1 = (ys.iter().copied().fold(f32::NEG_INFINITY, f32::max) + 1.0).ceil().clamp(0.0, h);
+    let (pw, ph) = ((x1 - x0) as usize, (y1 - y0) as usize);
+    if pw == 0 || ph == 0 {
+        return;
+    }
+    // Pixels a cell is across (along a line, near enough for a stretched drawing): a cell's line ink is a pixel wide line
+    // through it that long; its fill ink, the share of it covered, is that many pixels squared.
+    let (kx, ky) = (ci.scale.abs() * frame.scale, (ci.scale * ci.stretch).abs() * frame.scale);
+    let across = ((kx * ky).sqrt() * cell) as f32;
+    // The picture, premultiplied; each run's lines' ink and fills' as it is summed, px², their colours times them; the pixels
+    // a run touched; and the box round all it touched.
+    let mut out = vec![[0.0_f32; 4]; pw * ph];
+    let mut ink = vec![[0.0_f32; 8]; pw * ph];
+    let mut touched: Vec<usize> = Vec::new();
+    let mut seen = [usize::MAX, usize::MAX, 0, 0];
+    let mark = |i: usize, seen: &mut [usize; 4]| {
+        let (x, y) = (i % pw, i / pw);
+        *seen = [seen[0].min(x), seen[1].min(y), seen[2].max(x + 1), seen[3].max(y + 1)];
+    };
+    for (r, run) in runs.iter().enumerate() {
+        if let crate::cad::lod::Run::Fill(i) = run {
+            let Some((rings, rgb, alpha)) = fill(*i as usize) else { continue };
+            let px: Vec<Vec<(f32, f32)>> = rings
+                .iter()
+                .map(|ring| {
+                    ring.iter()
+                        .map(|q| {
+                            let (x, y) = frame.px(place(*q));
+                            (x - x0, y - y0)
+                        })
+                        .collect()
+                })
+                .collect();
+            let c = [f32::from(rgb.0), f32::from(rgb.1), f32::from(rgb.2)];
+            fill_into(&mut out, (pw, ph), &px, c, f32::from(alpha) / 255.0, &mut |i| mark(i, &mut seen));
+            continue;
+        }
+        for (c, cell) in picture.run_in(p, r, lo, hi) {
+            let all = crate::cad::lod::ink_of(cell.ink) as f32 * if cell.fill { across * across } else { across };
+            let rgb = [f32::from(cell.rgb.0), f32::from(cell.rgb.1), f32::from(cell.rgb.2)];
+            // Its middle's pixel, and the four round it by how near.
+            let (px, py) = frame.px(place(c));
+            let (fx, fy) = (px - x0 - 0.5, py - y0 - 0.5);
+            let (ix, iy) = (fx.floor(), fy.floor());
+            let (tx, ty) = (fx - ix, fy - iy);
+            let o = if cell.fill { 4 } else { 0 };
+            for (dx, dy, share) in [(0, 0, (1.0 - tx) * (1.0 - ty)), (1, 0, tx * (1.0 - ty)), (0, 1, (1.0 - tx) * ty), (1, 1, tx * ty)] {
+                let (x, y) = (ix as i64 + dx, iy as i64 + dy);
+                if x < 0 || y < 0 || x >= pw as i64 || y >= ph as i64 {
+                    continue;
+                }
+                let at = y as usize * pw + x as usize;
+                if let Some(q) = ink.get_mut(at) {
+                    if q.iter().all(|v| *v == 0.0) {
+                        touched.push(at);
+                    }
+                    let a = all * share;
+                    for (k, v) in [rgb[0] * a, rgb[1] * a, rgb[2] * a, a].into_iter().enumerate() {
+                        if let Some(s) = q.get_mut(o + k) {
+                            *s += v;
+                        }
+                    }
+                }
+            }
+        }
+        // The run over what's under it: each pixel its fills, as opaque as they cover it, and its lines over them, as opaque as
+        // strokes laid one over another at random cover it (1 - e^-ink).
+        for at in touched.drain(..) {
+            let (Some(q), Some(o)) = (ink.get_mut(at), out.get_mut(at)) else { continue };
+            let (l, f) = (q[3], q[7]);
+            let al = if l > 0.0 && l.is_finite() { 1.0 - (-l).exp() } else { 0.0 };
+            let af = if f > 0.0 && f.is_finite() { f.min(1.0) } else { 0.0 };
+            let src_a = al + af * (1.0 - al);
+            if src_a > 0.0 {
+                let ch = |k: usize| {
+                    let line = if l > 0.0 { q[k] / l * al } else { 0.0 };
+                    let under = if f > 0.0 { q[4 + k] / f * af * (1.0 - al) } else { 0.0 };
+                    line + under
+                };
+                let src = [ch(0), ch(1), ch(2), src_a];
+                for (k, v) in src.into_iter().enumerate() {
+                    o[k] = v + o[k] * (1.0 - src_a);
+                }
+                mark(at, &mut seen);
+            }
+            *q = [0.0; 8];
+        }
+    }
+    // What it touched, as one image.
+    let [sx0, sy0, sx1, sy1] = seen;
+    if sx0 >= sx1 || sy0 >= sy1 {
+        return;
+    }
+    let (iw, ih) = (sx1 - sx0, sy1 - sy0);
+    let mut rgba = vec![0_u8; iw * ih * 4];
+    for y in 0..ih {
+        for x in 0..iw {
+            let (Some(o), Some(px)) = (out.get((sy0 + y) * pw + sx0 + x), rgba.get_mut((y * iw + x) * 4..(y * iw + x) * 4 + 4)) else {
+                continue;
+            };
+            if o[3] > 0.0 {
+                let c = |v: f32| (v / o[3]).round().clamp(0.0, 255.0) as u8;
+                px.copy_from_slice(&[c(o[0]), c(o[1]), c(o[2]), (o[3] * 255.0).round().clamp(0.0, 255.0) as u8]);
+            }
+        }
+    }
+    let part = std::mem::replace(&mut d.part, Part::Cells);
+    d.push(Prim::Image { at: (x0 + sx0 as f32, y0 + sy0 as f32), width: iw as u32, height: ih as u32, rgba, ink: false });
+    d.part = part;
+}
+
+/// Fills rings `rings` (pixels of a picture `pw` by `ph`, by odd parity) into `out` (premultiplied) in colour `c` at opacity
+/// `alpha`, each pixel by how much of it they cover (four rows of samples a pixel, each across exactly), telling `seen` each
+/// pixel it covers.
+fn fill_into(
+    out: &mut [[f32; 4]],
+    (pw, ph): (usize, usize),
+    rings: &[Vec<(f32, f32)>],
+    c: [f32; 3],
+    alpha: f32,
+    seen: &mut dyn FnMut(usize),
+) {
+    // Each edge that isn't level: its top, its bottom, and its x at the top and its slope, top down.
+    let mut edges: Vec<(f32, f32, f32, f32)> = Vec::new();
+    for r in rings.iter().filter(|r| r.len() >= 3) {
+        for (i, a) in r.iter().enumerate() {
+            let Some(b) = r.get((i + 1) % r.len()) else { continue };
+            if !(a.0.is_finite() && a.1.is_finite() && b.0.is_finite() && b.1.is_finite()) || a.1 == b.1 {
+                continue;
+            }
+            let (t, z) = if a.1 < b.1 { (a, b) } else { (b, a) };
+            edges.push((t.1, z.1, t.0, (z.0 - t.0) / (z.1 - t.1)));
+        }
+    }
+    if edges.is_empty() {
+        return;
+    }
+    edges.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let top = edges.iter().map(|e| e.0).fold(f32::INFINITY, f32::min).floor().max(0.0) as usize;
+    let bottom = (edges.iter().map(|e| e.1).fold(f32::NEG_INFINITY, f32::max).ceil().max(0.0) as usize).min(ph);
+    let mut cover = vec![0.0_f32; pw];
+    let (mut active, mut next): (Vec<usize>, usize) = (Vec::new(), 0);
+    let mut xs: Vec<f32> = Vec::new();
+    const SUB: usize = 4;
+    for y in top..bottom {
+        let (mut lo, mut hi) = (pw, 0);
+        for s in 0..SUB {
+            let sy = y as f32 + (s as f32 + 0.5) / SUB as f32;
+            while let Some(e) = edges.get(next).filter(|e| e.0 <= sy) {
+                let _ = e;
+                active.push(next);
+                next += 1;
+            }
+            active.retain(|i| edges.get(*i).is_some_and(|e| e.1 > sy));
+            xs.clear();
+            xs.extend(active.iter().filter_map(|i| edges.get(*i)).filter(|e| e.0 <= sy).map(|e| e.2 + (sy - e.0) * e.3));
+            xs.sort_by(f32::total_cmp);
+            for pair in xs.as_chunks::<2>().0 {
+                let (a, b) = (pair[0].clamp(0.0, pw as f32), pair[1].clamp(0.0, pw as f32));
+                if b <= a {
+                    continue;
+                }
+                let (ia, ib) = (a.floor() as usize, (b.floor() as usize).min(pw));
+                let share = 1.0 / SUB as f32;
+                lo = lo.min(ia);
+                hi = hi.max((ib + 1).min(pw));
+                if ia == ib {
+                    if let Some(v) = cover.get_mut(ia) {
+                        *v += (b - a) * share;
+                    }
+                    continue;
+                }
+                if let Some(v) = cover.get_mut(ia) {
+                    *v += (ia as f32 + 1.0 - a) * share;
+                }
+                for v in cover.get_mut(ia + 1..ib).unwrap_or_default() {
+                    *v += share;
+                }
+                if let Some(v) = cover.get_mut(ib) {
+                    *v += (b - ib as f32) * share;
+                }
+            }
+        }
+        for x in lo..hi {
+            let Some(v) = cover.get_mut(x) else { continue };
+            let a = v.min(1.0) * alpha;
+            *v = 0.0;
+            if a <= 0.0 {
+                continue;
+            }
+            let at = y * pw + x;
+            if let Some(o) = out.get_mut(at) {
+                *o = [c[0] * a + o[0] * (1.0 - a), c[1] * a + o[1] * (1.0 - a), c[2] * a + o[2] * (1.0 - a), a + o[3] * (1.0 - a)];
+                seen(at);
+            }
+        }
+    }
+}
+
+// A channel of a colour most of the way to the paper: a patterned hatch's fill.
 fn pale(v: u8) -> u8 {
     v + (255 - v) / 4 * 3
 }
@@ -2638,12 +3253,21 @@ fn pale(v: u8) -> u8 {
 /// A floor plan of `plan`, or `up`, its reflected ceiling plan; `titled`, with its name lettered at its bottom left (an image of
 /// it has it; a window letters it itself over the canvas, and shows it in the view's tab, and a sheet has it under its viewport). Its annotation `k` times the size it
 /// is laid out at, its pens the line weights' at 1 : `n`.
-fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, titled: bool) -> Drawing {
+/// What a plan is drawn for: a picture of it (titled with its name), a screen (where a dense drawing zoomed out is drawn
+/// simplified), or paper (a sheet's viewport).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Out {
+    Picture,
+    Screen,
+    Paper,
+}
+
+fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, out: Out) -> Drawing {
     let key = m.guid(plan);
-    let d = draw_plan_among(m, key, view, up, k, n, titled, true);
+    let d = draw_plan_among(m, key, view, up, k, n, out, true);
     // Its twin, which tests hold it to: every element looked at, the walls joined through an index of every wall.
     if crate::selfcheck::on(crate::selfcheck::Check::DrawPlan) {
-        let every = regions::uncounted(|| draw_plan_among(m, key, view, up, k, n, titled, false));
+        let every = regions::uncounted(|| draw_plan_among(m, key, view, up, k, n, out, false));
         let same = d.prims.len() == every.prims.len()
             && d.owners == every.owners
             && d.parts == every.parts
@@ -2657,7 +3281,8 @@ fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, ti
 /// ([`plan_elements`]), its walls joined through the model's lookup when it is made; else at every element, through an
 /// index of every wall.
 #[allow(clippy::too_many_arguments)]
-fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, titled: bool, among: bool) -> Drawing {
+fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, out: Out, among: bool) -> Drawing {
+    let titled = out == Out::Picture;
     // The plan's own guid says what it is: its graphics, range, crop and annotation; its level is what it shows of the model.
     let level = m.plan_level(key).map_or(key, |l| m.guid(l));
     let index = match m.derived.made(&m.elements) {
@@ -2667,6 +3292,7 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, t
     let index = index.as_ref();
     let mut d = Drawing::new(view);
     (d.k, d.paper, d.detail, d.weights) = (k, paper_of(n, view.scale), detail_of(m, key), m.line_weights().at(n));
+    d.screen = out == Out::Screen;
     let look = Look::of(m, key);
     let shown = |id: Id| look.shows(id);
     d.pattern_styles = look.pattern_styles();
@@ -2839,9 +3465,11 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, t
     let (under, own): (Vec<_>, Vec<_>) = outlines.iter().partition(|(id, _)| crate::link::is_linked(*id));
     for (group, owner) in [(under, Some(crate::link::UNION)), (own, None)] {
         d.owner = owner;
-        for (color, rings) in cut_unions(&look, group.into_iter().map(|(id, o)| (*id, o.clone()))) {
+        for ((color, half), rings) in cut_unions(&look, group.into_iter().map(|(id, o)| (*id, o.clone()))) {
+            d.halftone_next(half);
             d.fill(&rings, color);
         }
+        d.halftone_next(false);
     }
     // One fill per wall or column: in one even-odd fill, overlapping walls would cancel out.
     for (id, o) in &outlines {
@@ -3838,7 +4466,7 @@ fn arrow(d: &mut Drawing, a: (f32, f32), b: (f32, f32)) -> (f32, f32) {
     let (x, y) = ((b.0 - a.0) / len, (b.1 - a.1) / len);
     let (long, wide) = (d.px(10.0), d.px(4.0));
     let head = vec![b, (b.0 - x * long - y * wide, b.1 - y * long + x * wide), (b.0 - x * long + y * wide, b.1 - y * long - x * wide)];
-    d.push(Prim::Fill { rings: vec![head], color: INK });
+    d.push(Prim::fill(vec![head], INK));
     (x, y)
 }
 
@@ -4128,12 +4756,13 @@ fn linework(d: &mut Drawing, m: &Model, items: &[crate::graphics::Linework]) {
     if edges.is_empty() {
         return;
     }
+    let halves = d.take_halves();
     let prims = std::mem::take(&mut d.prims);
     let (owners, parts, pens) = (std::mem::take(&mut d.owners), std::mem::take(&mut d.parts), std::mem::take(&mut d.pens));
-    for (((prim, owner), part), pen) in prims.into_iter().zip(owners).zip(parts).zip(pens) {
+    for ((((prim, owner), part), pen), half) in prims.into_iter().zip(owners).zip(parts).zip(pens).zip(halves) {
         let mine = owner.and_then(|id| edges.get(&id)).filter(|_| !matches!(part, Part::Text | Part::Pattern));
         let (Some(mine), Prim::Line { .. }) = (mine, &prim) else {
-            keep(d, prim, owner, part, pen);
+            keep(d, prim, owner, part, pen, half);
             continue;
         };
         let mut pieces = vec![(prim, pen)];
@@ -4157,10 +4786,10 @@ fn linework(d: &mut Drawing, m: &Model, items: &[crate::graphics::Linework]) {
                 });
             if let (Some((pattern, color, k)), Prim::Line { pts, .. }, Some(pen)) = (pattern, &prim, pen) {
                 for graphic in pattern.geometry(pts, k, d.width(pen), color) {
-                    keep(d, graphic.prim, owner, Part::LinePattern, graphic.weighted.then_some(pen));
+                    keep(d, graphic.prim, owner, Part::LinePattern, graphic.weighted.then_some(pen), half);
                 }
             } else {
-                keep(d, prim, owner, part, pen);
+                keep(d, prim, owner, part, pen, half);
             }
         }
     }
@@ -4185,7 +4814,7 @@ struct EdgeStyle {
 /// The line `prim`, split where `edge` begins and ends along it: the pieces on the edge in its style (gone, when it is
 /// unseen), the rest as they were. A line off the edge comes back whole.
 fn along(prim: Prim, pen: Option<Pen>, edge: &Edge) -> Vec<(Prim, Option<Pen>)> {
-    let Prim::Line { pts, width, color, dash, closed } = &prim else { return vec![(prim, pen)] };
+    let Prim::Line { pts, width, color, dash, closed, alpha } = &prim else { return vec![(prim, pen)] };
     let Edge { a, u, len, style, .. } = edge;
     // Each piece of the line, marked when it lies on the edge.
     let mut runs: Vec<(bool, Vec<(f32, f32)>)> = Vec::new();
@@ -4222,21 +4851,26 @@ fn along(prim: Prim, pen: Option<Pen>, edge: &Edge) -> Vec<(Prim, Option<Pen>)> 
     }
     runs.into_iter()
         .filter_map(|(on, run)| match (on, style) {
-            (false, _) => Some((Prim::Line { pts: run, width: *width, color: *color, dash: dash.clone(), closed: false }, pen)),
+            (false, _) => {
+                Some((Prim::Line { pts: run, width: *width, color: *color, dash: dash.clone(), closed: false, alpha: *alpha }, pen))
+            }
             (true, Some(EdgeStyle { pen: p, color: c, dash: k, .. })) => {
-                Some((Prim::Line { pts: run, width: *width, color: *c, dash: k.clone(), closed: false }, Some(*p)))
+                Some((Prim::Line { pts: run, width: *width, color: *c, dash: k.clone(), closed: false, alpha: *alpha }, Some(*p)))
             }
             (true, None) => None,
         })
         .collect()
 }
 
-/// `prim` back in the drawing, with its owner, part and pen.
-fn keep(d: &mut Drawing, prim: Prim, owner: Option<Id>, part: Part, pen: Option<Pen>) {
+/// `prim` back in the drawing, with its owner, part, pen and halftone.
+fn keep(d: &mut Drawing, prim: Prim, owner: Option<Id>, part: Part, pen: Option<Pen>, half: bool) {
     d.prims.push(prim);
     d.owners.push(owner);
     d.parts.push(part);
     d.pens.push(pen);
+    if half {
+        d.set_half(d.prims.len() - 1);
+    }
 }
 
 /// A detail group's members where it puts them: its regions under its lines and notes.
@@ -4327,10 +4961,10 @@ pub(crate) fn lettering(d: &mut Drawing, layout: &crate::text::Layout, frame: No
     let part = std::mem::replace(&mut d.part, Part::Text);
     let drawn = layout.drawn();
     for letter in &drawn.fill {
-        d.push(Prim::Fill { rings: letter.iter().map(|r| r.iter().copied().map(f).collect()).collect(), color });
+        d.push(Prim::fill(letter.iter().map(|r| r.iter().copied().map(f).collect()).collect(), color));
     }
     for (pts, width) in drawn.strokes {
-        d.push(Prim::Line { pts: pts.into_iter().map(f).collect(), width: (width * k).max(1.0), color, dash: None, closed: false });
+        d.push(Prim::line(pts.into_iter().map(f).collect(), (width * k).max(1.0), color, None, false));
     }
     for (a, b) in drawn.underlines {
         d.push(Prim::Line {
@@ -4339,6 +4973,7 @@ pub(crate) fn lettering(d: &mut Drawing, layout: &crate::text::Layout, frame: No
             color,
             dash: None,
             closed: false,
+            alpha: crate::prim::OPAQUE,
         });
     }
     d.part = part;
@@ -4353,7 +4988,7 @@ pub(crate) fn frame_at(d: &Drawing, top_left: P2, angle: f64) -> NoteFrame {
 /// reads over a line beside it, in `units`.
 fn spot_mark(d: &mut Drawing, (x, y): (f32, f32), z: Option<f64>, units: Units) {
     let from = d.prims.len();
-    d.push(Prim::Fill { rings: vec![vec![(x, y), (x + 5.0, y - 8.0), (x - 5.0, y - 8.0)]], color: INK });
+    d.push(Prim::fill(vec![vec![(x, y), (x + 5.0, y - 8.0), (x - 5.0, y - 8.0)]], INK));
     let text = z.map_or_else(|| "?".into(), |z| height(units, z));
     let w = font::width(&text, 10.0);
     d.stroke(vec![(x - 5.0, y - 8.0), (x + 9.0 + w, y - 8.0)], Pen::PROJECTION, INK, None, false);
@@ -4382,6 +5017,8 @@ fn slope_mark(d: &mut Drawing, at: P2, read: Option<(f64, Option<P2>)>) {
             d.push(Prim::Fill {
                 rings: vec![vec![tip, (back.0 + side.0, back.1 + side.1), (back.0 - side.0, back.1 - side.1)]],
                 color: INK,
+                rule: crate::prim::Rule::NonZero,
+                alpha: crate::prim::OPAQUE,
             });
             // Its fall beside the arrow's middle, upright.
             d.text(&text, (x + ux * 12.0 + w / 2.0 + 4.0 * uy.abs(), y + uy * 12.0 - 8.0), 10.0, INK);
@@ -4419,7 +5056,7 @@ fn tag(d: &mut Drawing, m: &Model, t: &Tag, rooms: &crate::rooms::Rooms) {
     } else {
         vec![(x - w, y - h), (x + w, y - h), (x + w, y + h), (x - w, y + h)]
     };
-    d.push(Prim::Fill { rings: vec![ring.clone()], color: PAPER });
+    d.push(Prim::fill(vec![ring.clone()], PAPER));
     // Openings' marks sit in a box or a hexagon; anything else's label is plain text.
     if matches!(m.elements.get(t.host), Some(Element::Door(_) | Element::Window(_))) {
         d.stroke(ring, Pen::PROJECTION, INK, None, true);
@@ -4443,7 +5080,7 @@ fn section_mark(d: &mut Drawing, v: &Section) {
     let len = (b.0 - a.0).hypot(b.1 - a.1).max(1e-3);
     let (ux, uy) = ((b.0 - a.0) / len, (b.1 - a.1) / len);
     let from = d.prims.len();
-    d.push(Prim::Fill { rings: vec![vec![a, (a.0 + ux * 12.0, a.1 + uy * 12.0), (a.0 + lx * 12.0, a.1 + ly * 12.0)]], color: INK });
+    d.push(Prim::fill(vec![vec![a, (a.0 + ux * 12.0, a.1 + uy * 12.0), (a.0 + lx * 12.0, a.1 + ly * 12.0)]], INK));
     let back = font::width(&v.name, 10.0) / 2.0 + 8.0;
     d.text(&v.name, (a.0 - ux * back, a.1 - uy * back), 10.0, INK);
     d.grow(from, a);
@@ -4464,12 +5101,12 @@ fn elevation_mark(d: &mut Drawing, v: &Section) {
             (c.0 + R * t.cos() as f32, c.1 + R * t.sin() as f32)
         })
         .collect();
-    d.push(Prim::Fill { rings: vec![ring.clone()], color: PAPER });
+    d.push(Prim::fill(vec![ring.clone()], PAPER));
     d.stroke(ring, Pen::BUBBLE, INK, None, true);
     let (lx, ly) = looking_px(v);
     let side = (-ly * R * 0.8, lx * R * 0.8);
     let flag = vec![(c.0 + side.0, c.1 + side.1), (c.0 + lx * (R + 7.0), c.1 + ly * (R + 7.0)), (c.0 - side.0, c.1 - side.1)];
-    d.push(Prim::Fill { rings: vec![flag], color: INK });
+    d.push(Prim::fill(vec![flag], INK));
     let back = R + 6.0 + font::width(&v.name, 10.0) / 2.0 * lx.abs() + 6.0 * ly.abs();
     d.text(&v.name, (c.0 - lx * back, c.1 - ly * back), 10.0, INK);
     d.grow(from, c);
@@ -4537,14 +5174,14 @@ fn camera_mark(d: &mut Drawing, v: &View3D) {
         (c.0 + ux * depth - px * half, c.1 + uy * depth - py * half),
         (c.0 - ux * depth - px * half, c.1 - uy * depth - py * half),
     ];
-    d.push(Prim::Fill { rings: vec![body.clone()], color: PAPER });
+    d.push(Prim::fill(vec![body.clone()], PAPER));
     d.stroke(body, Pen::BUBBLE, INK, None, true);
     // The lens: a small dark circle at the front, toward the target.
     let lc = (c.0 + ux * (depth + 3.0), c.1 + uy * (depth + 3.0));
     let ring: Vec<(f32, f32)> = (0..16)
         .map(|i| (lc.0 + 3.5 * (f64::from(i) * PI / 8.0).cos() as f32, lc.1 + 3.5 * (f64::from(i) * PI / 8.0).sin() as f32))
         .collect();
-    d.push(Prim::Fill { rings: vec![ring], color: INK });
+    d.push(Prim::fill(vec![ring], INK));
     // Its name behind the eye, against the way it looks.
     let name_at = (a.0 - ux * (14.0 + font::width(&v.name, 10.0) / 2.0), a.1 - uy * (14.0 + font::width(&v.name, 10.0) / 2.0));
     d.text(&v.name, name_at, 10.0, INK);
@@ -4729,20 +5366,22 @@ pub fn svg(d: &Drawing) -> String {
     );
     for (i, p) in d.prims.iter().enumerate() {
         let _ = match p {
-            Prim::Fill { rings, color } => {
+            Prim::Fill { rings, color, rule, alpha } => {
                 let data: Vec<String> = rings.iter().map(|r| path_data(r, true)).collect();
-                write!(s, r#"<path d="{}" fill="{}"/>"#, data.join(" "), hex(*color))
+                let rule = if *rule == Rule::EvenOdd { r#" fill-rule="evenodd""# } else { "" };
+                write!(s, r#"<path d="{}" fill="{}"{rule}{}/>"#, data.join(" "), hex(*color), opacity("fill", *alpha))
             }
-            Prim::Line { pts, width, color, dash, closed } => {
+            Prim::Line { pts, width, color, dash, closed, alpha } => {
                 let dash = dash.as_ref().map_or_else(String::new, |d| format!(r#" stroke-dasharray="{}""#, spaced(d)));
                 // A hairline (pen 0) is one pixel of whatever shows the SVG, at any zoom.
                 let width = if *width > 0.0 { format!(r#"{width}""#) } else { r#"1" vector-effect="non-scaling-stroke""#.to_string() };
                 write!(
                     s,
-                    r#"<path d="{}" fill="none" stroke="{}" stroke-width="{width} stroke-linecap="round" stroke-linejoin="{}"{dash}/>"#,
+                    r#"<path d="{}" fill="none" stroke="{}" stroke-width="{width} stroke-linecap="round" stroke-linejoin="{}"{dash}{}/>"#,
                     path_data(pts, *closed),
                     hex(*color),
-                    if d.mitred(i) { "miter" } else { "round" }
+                    if d.mitred(i) { "miter" } else { "round" },
+                    opacity("stroke", *alpha)
                 )
             }
             Prim::Image { at, width, height, rgba, .. } => match picture(*width, *height, rgba).and_then(|pm| pm.encode_png().ok()) {
@@ -4759,6 +5398,11 @@ pub fn svg(d: &Drawing) -> String {
     }
     s.push_str("</svg>\n");
     s
+}
+
+/// An SVG paint's opacity attribute (`fill` or `stroke`), when it isn't opaque.
+fn opacity(paint: &str, alpha: u8) -> String {
+    if alpha == OPAQUE { String::new() } else { format!(r#" {paint}-opacity="{:.3}""#, f32::from(alpha) / 255.0) }
 }
 
 fn path(rings: &[&[(f32, f32)]], closed: bool) -> Option<tiny_skia::Path> {
@@ -4781,9 +5425,19 @@ pub fn png(d: &Drawing) -> Result<Vec<u8>, String> {
     pm.encode_png().map_err(|e| e.to_string())
 }
 
-/// A picture's pixels as a pixmap.
+/// A picture's pixels (each its colour and how opaque it is, as a front end takes them) as a pixmap, whose colours are
+/// times how opaque they are.
 fn picture(width: u32, height: u32, rgba: &[u8]) -> Option<Pixmap> {
-    Pixmap::from_vec(rgba.to_vec(), IntSize::from_wh(width, height)?)
+    let mut held = rgba.to_vec();
+    for px in held.as_chunks_mut::<4>().0 {
+        let a = u16::from(px[3]);
+        if a < 255 {
+            for c in &mut px[..3] {
+                *c = (u16::from(*c) * a / 255) as u8;
+            }
+        }
+    }
+    Pixmap::from_vec(held, IntSize::from_wh(width, height)?)
 }
 
 /// The display list drawn over what `pm` holds.
@@ -4791,15 +5445,16 @@ fn paint(pm: &mut Pixmap, d: &Drawing) {
     for (i, p) in d.prims.iter().enumerate() {
         let mut paint = Paint { anti_alias: true, ..Paint::default() };
         match p {
-            Prim::Fill { rings, color } => {
-                paint.set_color_rgba8(color.0, color.1, color.2, 255);
+            Prim::Fill { rings, color, rule, alpha } => {
+                paint.set_color_rgba8(color.0, color.1, color.2, *alpha);
                 let rings: Vec<&[(f32, f32)]> = rings.iter().map(Vec::as_slice).collect();
+                let rule = if *rule == Rule::EvenOdd { FillRule::EvenOdd } else { FillRule::Winding };
                 if let Some(path) = path(&rings, true) {
-                    pm.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+                    pm.fill_path(&path, &paint, rule, Transform::identity(), None);
                 }
             }
-            Prim::Line { pts, width, color, dash, closed } => {
-                paint.set_color_rgba8(color.0, color.1, color.2, 255);
+            Prim::Line { pts, width, color, dash, closed, alpha } => {
+                paint.set_color_rgba8(color.0, color.1, color.2, *alpha);
                 let stroke = Stroke {
                     width: *width,
                     line_cap: LineCap::Round,

@@ -707,27 +707,96 @@ pub struct Drawn {
 }
 
 /// Triangles that fill `rings` by the non-zero rule (a letter's outline, its holes wound the other way), each corner
-/// counter-clockwise on paper as it is given: what a front end that fills no ring with holes draws a letter with. Cut
-/// into strips at every corner's and crossing's height, each strip's spans that wind are two triangles.
+/// counter-clockwise on paper as it is given: what a front end that fills no ring with holes draws a letter with.
 pub fn triangles(rings: &[Vec<(f32, f32)>]) -> Vec<[(f32, f32); 3]> {
-    // Each edge top to bottom (y down), and which way it went.
-    type Edge = ((f32, f32), (f32, f32), i32);
+    fill_triangles(rings, crate::prim::Rule::NonZero)
+}
+
+/// The most edges [`fill_triangles`] fills: past them, nothing (a fill that big is drawn ring by ring).
+pub const MAX_FILL_EDGES: usize = 4_000_000;
+/// The most edges one sweep of [`fill_triangles`] takes: a fill of more is cut into bands across, each of about this many.
+const BAND_EDGES: usize = 400_000;
+/// The most pairs of edges one sweep looks at for where they cross: past it, the rest are taken not to.
+const MAX_CROSSING_WORK: usize = 8_000_000;
+/// The most edges [`fill_triangles`] steps over strip by strip, all its sweeps together: past it, the rest is left unfilled,
+/// so a hostile fill (edges top to bottom, each starting a little lower) can't keep a frame for ever.
+const MAX_SWEEP_WORK: usize = 200_000_000;
+
+/// An edge top to bottom (y down), and which way it went.
+type Edge = ((f32, f32), (f32, f32), i32);
+
+/// Where edge `e` is across at height `y`.
+fn x_at(e: &Edge, y: f32) -> f32 {
+    e.0.0 + (e.1.0 - e.0.0) * (y - e.0.1) / (e.1.1 - e.0.1)
+}
+
+/// Triangles that fill `rings` by `rule`: the points they wind round (non-zero), or the points inside an odd number of them
+/// (even-odd, so a ring inside another is a hole whichever way it turns). Cut into strips at every corner's and crossing's
+/// height, swept top to bottom with the edges each strip crosses; each strip's spans inside are two triangles. A fill of more
+/// than a sweep takes is cut into bands across first, each band swept with the edges that reach into it cut to it, so its
+/// holes stay holes. Empty past [`MAX_FILL_EDGES`].
+pub fn fill_triangles(rings: &[Vec<(f32, f32)>], rule: crate::prim::Rule) -> Vec<[(f32, f32); 3]> {
     let mut edges: Vec<Edge> = Vec::new();
     for r in rings {
         for (i, &a) in r.iter().enumerate() {
-            let b = r[(i + 1) % r.len()];
+            let Some(&b) = r.get((i + 1) % r.len()) else { continue };
             if a.1 != b.1 && a.0.is_finite() && a.1.is_finite() && b.0.is_finite() && b.1.is_finite() {
                 if a.1 < b.1 { edges.push((a, b, 1)) } else { edges.push((b, a, -1)) }
             }
         }
+        if edges.len() > MAX_FILL_EDGES {
+            return Vec::new();
+        }
     }
-    if edges.len() > 20_000 {
-        return Vec::new();
+    edges.sort_by(|a, b| a.0.1.total_cmp(&b.0.1));
+    let mut work = 0;
+    let mut out = Vec::new();
+    if edges.len() <= BAND_EDGES {
+        sweep(&edges, rule, &mut work, &mut out);
+        return out;
     }
+    // Bands of about BAND_EDGES edges starting in each, edges of the same top in one; an edge from a band above that reaches
+    // into one is cut at its top, and each at its bottom.
+    let (mut start, mut reaching) = (0, Vec::<usize>::new());
+    while start < edges.len() && work <= MAX_SWEEP_WORK {
+        let Some(top) = edges.get(start).map(|e| e.0.1) else { break };
+        let mut end = (start + BAND_EDGES).min(edges.len());
+        while edges.get(end).is_some_and(|e| e.0.1 <= top) {
+            end += 1;
+        }
+        let bottom = edges.get(end).map_or(f32::INFINITY, |e| e.0.1);
+        reaching.retain(|&i| edges.get(i).is_some_and(|e| e.1.1 > top));
+        let cut = |e: &Edge| {
+            let a = if e.0.1 < top { (x_at(e, top), top) } else { e.0 };
+            let b = if e.1.1 > bottom { (x_at(e, bottom), bottom) } else { e.1 };
+            (a, b, e.2)
+        };
+        let mut band: Vec<Edge> = reaching.iter().filter_map(|&i| edges.get(i)).map(cut).collect();
+        band.extend(edges.get(start..end).unwrap_or_default().iter().map(cut));
+        band.retain(|e| e.1.1 > e.0.1);
+        band.sort_by(|a, b| a.0.1.total_cmp(&b.0.1));
+        work += band.len();
+        sweep(&band, rule, &mut work, &mut out);
+        reaching.extend((start..end).filter(|&i| edges.get(i).is_some_and(|e| e.1.1 > bottom)));
+        start = end;
+    }
+    out
+}
+
+/// [`fill_triangles`]'s sweep of `edges` (sorted by their tops) into `out`, counting the edges it steps over in `work`.
+fn sweep(edges: &[Edge], rule: crate::prim::Rule, work: &mut usize, out: &mut Vec<[(f32, f32); 3]>) {
     let mut ys: Vec<f32> = edges.iter().flat_map(|e| [e.0.1, e.1.1]).collect();
-    let x_at = |e: &Edge, y: f32| e.0.0 + (e.1.0 - e.0.0) * (y - e.0.1) / (e.1.1 - e.0.1);
-    for (i, e) in edges.iter().enumerate() {
-        for f in &edges[i + 1..] {
+    // Where edges cross, between their ends: each edge against those that start before it ends.
+    let mut pairs = 0;
+    'cross: for (i, e) in edges.iter().enumerate() {
+        for f in edges.get(i + 1..).unwrap_or_default() {
+            if f.0.1 >= e.1.1 {
+                break;
+            }
+            pairs += 1;
+            if pairs > MAX_CROSSING_WORK {
+                break 'cross;
+            }
             let (lo, hi) = (e.0.1.max(f.0.1), e.1.1.min(f.1.1));
             if hi <= lo {
                 continue;
@@ -740,27 +809,43 @@ pub fn triangles(rings: &[Vec<(f32, f32)>]) -> Vec<[(f32, f32); 3]> {
     }
     ys.sort_by(f32::total_cmp);
     ys.dedup();
-    let mut out = Vec::new();
+    // The edges that reach the strip, and the next to come in.
+    let (mut active, mut next): (Vec<usize>, usize) = (Vec::new(), 0);
+    let mut cross: Vec<(f32, f32, f32, i32)> = Vec::new();
     for w in ys.windows(2) {
-        let (y0, y1) = (w[0], w[1]);
+        let [y0, y1] = [w[0], w[1]];
+        while edges.get(next).is_some_and(|e| e.0.1 <= y0) {
+            active.push(next);
+            next += 1;
+        }
+        *work += active.len();
+        if *work > MAX_SWEEP_WORK {
+            return;
+        }
+        active.retain(|&i| edges.get(i).is_some_and(|e| e.1.1 > y0));
         if y1 - y0 <= 1e-6 {
             continue;
         }
         let mid = (y0 + y1) / 2.0;
-        let mut cross: Vec<(f32, f32, f32, i32)> =
-            edges.iter().filter(|e| e.0.1 <= y0 && e.1.1 >= y1).map(|e| (x_at(e, mid), x_at(e, y0), x_at(e, y1), e.2)).collect();
+        cross.clear();
+        cross.extend(
+            active.iter().filter_map(|&i| edges.get(i)).filter(|e| e.1.1 >= y1).map(|e| (x_at(e, mid), x_at(e, y0), x_at(e, y1), e.2)),
+        );
         cross.sort_by(|a, b| a.0.total_cmp(&b.0));
         let mut wind = 0;
         for pair in cross.windows(2) {
-            wind += pair[0].3;
-            if wind != 0 {
-                let (l, r) = (pair[0], pair[1]);
+            let (l, r) = (pair[0], pair[1]);
+            wind += l.3;
+            let inside = match rule {
+                crate::prim::Rule::NonZero => wind != 0,
+                crate::prim::Rule::EvenOdd => wind % 2 != 0,
+            };
+            if inside {
                 out.push([(l.1, y0), (l.2, y1), (r.2, y1)]);
                 out.push([(l.1, y0), (r.2, y1), (r.1, y0)]);
             }
         }
     }
-    out
 }
 
 #[cfg(test)]

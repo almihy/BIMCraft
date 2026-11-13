@@ -239,11 +239,15 @@ other_files(
          size, or scale it after with `scale_elements` by a dimension it shows. `width` sizes it instead, its height in \
          proportion. `angle` turns it about its middle, degrees; `layer`: background (the default, behind the model) or \
          foreground; it comes in front of the view's other images (`arrange` orders them). Its vector lines and texts are kept \
-         (`lines` counts them): `cad_read`, `cad_query` and `cad_outlines` read them as an import's (by the image's `id`), \
+         (`lines` counts them), each on the PDF's layer it is drawn on (its optional content groups; for a PDF with none, by \
+         colour and weight: \"Black 0.35\", \"Red fill\", \"Black text\"), and the page is drawn from them over a picture of \
+         its raster images only (a page they can't hold all of stays one picture, said in `notes`): `layers` lists them, those \
+         the file has off come in hidden, and `cad_layers` shows and hides them by the image's `id`, in every view or one. \
+         `cad_read` (with `layers`, one layer's lines and words), `cad_query` and `cad_outlines` read them as an import's, \
          placed where the image shows them, and `wall`, `floor`… take them as a `cad` pick in a plan; walls drawn over it snap \
          to them. Named for its file (and page, of a file of more), unless `name`; a name taken gets a number. Returns {id, \
          image, source, page, stated_scale, dpi, pixels, size (its paper, mm), width, height, scale, corners (top left, top \
-         right, bottom right, bottom left), lines, notes}",
+         right, bottom right, bottom left), lines, layers, notes}",
         images::import_pdf,
         Files::Read,
     )
@@ -289,9 +293,13 @@ other_files(
         "manage_images",
         "Manage Images",
         &[],
-        "{delete?: [name, …]} Revit's Manage > Manage Images: the images and PDF pages the project holds, {images: [{name, \
-         source, kind: pdf|image, page, dpi, pixels, size, stated_scale, lines, instances: [id, …]}]}; `delete` removes those \
-         named and every instance of them (`deleted`, `removed`). `import_pdf` or `import_image` with `image` places one again",
+        "{delete?: [name, …], reload?: name, path?, page?, resolution?} Revit's Manage > Manage Images: the images and PDF \
+         pages the project holds, {images: [{name, source, kind: pdf|image, page, dpi, pixels (none for a page drawn from its \
+         lines with no raster images, which has no picture), size, stated_scale, lines, layers, instances: [id, …]}]}; \
+         `delete` removes those named and every instance of them (`deleted`, `removed`). `reload` reads image `reload` again \
+         from the file at `path` (Reload From: a PDF's `page` at `resolution`, as it came in unless given), into the same \
+         image, so its instances stay where they are; a page that came in before its layers were kept comes in with them now \
+         (`reloaded`: {image, lines, layers, drawn}). `import_pdf` or `import_image` with `image` places one again",
         images::manage_images,
     )
     .menu("Manage > Manage Images"),
@@ -313,9 +321,13 @@ other_files(
         "cad_layers",
         "CAD Layers",
         &[],
-        "{id, hide?: [layer, …], show?: [layer, …], view?} a CAD import's layers, each with its colour and linetype and whether \
-         it's shown; `hide` and `show` change which it shows in every view, or with `view` in that view only (its \
-         Visibility/Graphics, by the drawing's name)",
+        "{id, hide?: [layer, …], show?: [layer, …], view?} a CAD import's layers, or a PDF page's (an image's: its optional \
+         content groups, or for a PDF with none its lines by colour and weight, \"Black 0.35\", \"Red fill\", \"Black text\"), \
+         each with its colour (a PDF's layer has the colour most of what is on it is drawn in) and linetype and whether it's \
+         shown; `hide` and `show` change which it shows wherever it shows (`show` shows it again in each view that hides it \
+         too), or with `view` in that view only (its Visibility/Graphics' Imported Categories: `graphics` `layers` by the \
+         drawing's name, `pdf_layers` by the image's). A layer a PDF has off comes in hidden in the view it is placed in, \
+         unticked there. `cad_read` with `layers` gives the lines and words of one layer only",
         cad_layers,
     ),
     edit_files(
@@ -1430,7 +1442,7 @@ other_files(
          each the project has none of by that name (the project's own wins); `like` gives a type made in `types` the forms and \
          symbols of the type it was made like (Type Properties' Duplicate), and a type renamed (`rename_type`) or taken away \
          is renamed in or taken out of the forms' and symbols' `types` (what was of it alone goes with it). A project using \
-         `types`, `show`, a symbol's `view`, `outline`, `cut` or a text parameter is written as format 21. A family from Revit \
+         `types`, `show`, a symbol's `view`, `outline`, `cut` or a text parameter is written as format 22. A family from Revit \
          stays parametric: `revit` (Revit's definition; also read from a file, and a whole export package at `path` is taken: its \
          `family`, its `definition` and its `nested_families`, each loaded first, a shared one into the project and one that \
          isn't held by the family it is in, `embedded`; and its `place`, the type to place, given back) \
@@ -1451,7 +1463,7 @@ other_files(
          project's values back (its own, else its parameter's; formulas and instance parameters aside): a type they change is \
          `flexed` and regenerates at them, all in one undo step, and the reply's `kept` says which values of which types. \
          Without it a type keeps what the new version doesn't say (\"... and its parameter values\" says them all). Written as \
-         format 22",
+         format 23",
         family,
         Files::Conditional,
     )
@@ -2162,7 +2174,8 @@ other_files(
         "{view?: a level's, section's or elevation's name or id, or {3D} (the lowest level's plan unless given), hide?: [category, \
          …], show?: […], hide_elements?: [id, …], show_elements?: […], categories?: {category: override | null, …}, elements?: \
          {id: override | null, …}, filters?: [{filter, hidden?, projection?, cut?, halftone?, transparency?}, …], phase?: name \
-         | null, phase_filter?: name | null, options?: {set: option | null, …}, layers?: {drawing: [layer, …] | null, …}, template?: name | null, \
+         | null, phase_filter?: name | null, options?: {set: option | null, …}, layers?: {drawing: [layer, …] | null, …}, pdf_layers?: {image: [layer, …] | null, …}, imports?: {drawing: {all?: \
+         override, layers?: {layer: override | null, …}} | null, …}, pdf_imports?: {image: …}, template?: name | null, \
          background_grid?: {visible?, main?: {enabled?, color?: [r,g,b], pen?: 0..16}, sub?: {enabled?, color?, pen?}, \
          spacing?: [X,Y] (mm), divisions?: [X,Y] (1..1000), rotation?: degrees (-360..360)} | null, \
          reset?: true} what a view hides and how it draws the rest, as Revit's Visibility/Graphics does; with \
@@ -2188,7 +2201,17 @@ other_files(
          `template` follows a view template; `reset` takes away all of the view's own settings. `phase` is the phase the view \
          shows (the project's last unless it says) and `phase_filter` how it shows each status of what's in it (see `phase`); \
          `options` chooses the design option it shows of a set (the set's primary unless it says; see `option`); `layers` the \
-         layers of each CAD drawing it hides, by the drawing's name (null shows them all again)",
+         layers of each CAD drawing it hides, by the drawing's name (null shows them all again); `pdf_layers` the layers of each \
+         PDF page's lines it hides, by the image's name (`cad_layers` lists them); `imports` how each CAD drawing draws, by \
+         its name, and `pdf_imports` each PDF page's lines, by the image's, as Revit's Imported Categories: `all` the import's \
+         own row (hidden: the whole import is; projection: its lines' colour, weight and dash; halftone) and `layers` each \
+         layer's (its projection lines and halftone, winning over the import's), merged into what the view has (null takes a \
+         setting, a layer or the whole away); an import's patterns can't be overridden, as in Revit: its fills and hatches keep \
+         their own colours (halftone lightens them), and its Lines' colour is its lines' and text's. Imported Categories' box \
+         over its table, Show imported categories in this view, is the category `cadimport`: hidden (`hide: [cadimport]`), \
+         every CAD drawing and every PDF page's lines leave the view; its Imports in Families row is the category \
+         `familyimport`, hidden and overridden (projection lines, halftone) as any category (what families bring in from CAD \
+         files; families hold none yet). Both are in a template's `categories`",
         view_graphics,
     ),
     edit(
@@ -2263,17 +2286,20 @@ other_files(
         &[],
         "{name, from?: a level's, section's, elevation's or 3D view's name or id, like?: another template's name, \
          kind?: plan | section | 3d | null, rename?, controls?: [categories, filters, range, \
-         phase, options, scale, detail, style, background_grid], view_range?: {top?, cut?, bottom?, depth?}, phase?, phase_filter?, options?, \
+         phase, options, scale, detail, style, background_grid, imports], view_range?: {top?, cut?, bottom?, depth?}, phase?, phase_filter?, options?, \
          scale?: 1 | … | 100000, detail?: coarse | medium | fine, visual_style?: shaded | hidden_line | wireframe, \
-         background_grid?: grid settings as in graphics, hide?, show?, categories?, filters?, reset?, delete?: true} a view template, as Revit's: settings under a name for \
+         background_grid?: grid settings as in graphics, hide?, show?, categories?, filters?, layers?, pdf_layers?, imports?, \
+         pdf_imports?, reset?, delete?: true} a view template, as Revit's: settings under a name for \
          views to follow with `graphics {template}`. `kind` is the views it is for (plans, elevations and sections, or 3D \
          views; null, any), which `from` sets; `like` makes a new one a copy of another (Duplicate); `rename` names it anew, \
          and its views follow it under that name. `from` takes a view's categories (hidden and overridden), filters and, a \
          plan's, view range, its phase and phase filter, its design options, its scale, detail level and visual style; \
-         `controls` is what views following it get from it (all nine unless it says) and cannot change for themselves: its \
+         `controls` is what views following it get from it (all ten unless it says) and cannot change for themselves: its \
          categories, its filters, a plan's view range, its phase with its phase filter, its design options, its scale (`scale` \
-         command), its detail level (`detail`), its visual style (`visual_style`). `hide`, `show`, `categories`, `filters`, \
-         `phase`, `phase_filter`, `options`, `scale`, `detail`, `visual_style`, `background_grid` and `reset` change it as they change a view; \
+         command), its detail level (`detail`), its visual style (`visual_style`), its imported categories (`imports`: the layers it \
+         hides of each CAD drawing and PDF page, and how each draws, Revit's V/G Overrides Import). `hide`, `show`, \
+         `categories`, `filters`, `phase`, `phase_filter`, `options`, `scale`, `detail`, `visual_style`, `background_grid`, \
+         `layers`, `pdf_layers`, `imports`, `pdf_imports` and `reset` change it as they change a view; \
          `view_range` merges into its range. Changed, every view following it follows. Gone, they keep their own settings. \
          `name` alone reads one",
         view_template,
@@ -3870,9 +3896,9 @@ fn merged_override(c: &str, what: &str, from: Option<&Override>, patch: &Value) 
 /// categories' and its filters' alone.
 fn edit_graphics(c: &str, m: &Model, p: &Value, g: &mut Graphics, of_template: bool) -> Result<(), String> {
     let given = |k: &str| !absent(p.get(k));
-    let views_own = ["hide_elements", "show_elements", "elements", "layers"];
+    let views_own = ["hide_elements", "show_elements", "elements"];
     if of_template && let Some(k) = views_own.iter().find(|k| given(k)).or(p.get("template").map(|_| &"template")) {
-        return Err(bad(c, format!("`{k}` is a view's own; a template holds categories, filters, a phase and design options")));
+        return Err(bad(c, format!("`{k}` is a view's own; a template holds categories, filters, imports, a phase and design options")));
     }
     // The template the view will follow once this call is done: one named, or none, in the same call, rules.
     let template_then = match p.get("template") {
@@ -3893,6 +3919,7 @@ fn edit_graphics(c: &str, m: &Model, p: &Value, g: &mut Graphics, of_template: b
             (touches_phase, Group::Phase, "phase and phase filter"),
             (touches_options, Group::Options, "design options"),
             (p.get("background_grid").is_some(), Group::BackgroundGrid, "background grids"),
+            (["layers", "pdf_layers", "imports", "pdf_imports"].iter().any(|k| given(k)), Group::Imports, "imported categories"),
         ] {
             if touches && let Some(t) = follows(group) {
                 return Err(bad(
@@ -3986,6 +4013,86 @@ fn edit_graphics(c: &str, m: &Model, p: &Value, g: &mut Graphics, of_template: b
         Some(v) => return Err(bad(c, format!("`layers` is {{drawing: [layer, …] | null}}, not {v}"))),
         None => {}
     }
+    match p.get("pdf_layers") {
+        v if absent(v) => {}
+        Some(Value::Object(o)) if o.len() <= crate::raster::MAX_TYPES => {
+            for (image, hidden) in o {
+                let Some(t) = m.image_types.get(image) else {
+                    return Err(bad(c, format!("`pdf_layers`: the project has no image `{image}` (see `manage_images`)")));
+                };
+                let names: BTreeSet<String> = match hidden {
+                    Value::Null => BTreeSet::new(),
+                    Value::Array(a) if a.len() <= crate::model::MAX_HIDDEN => a
+                        .iter()
+                        .map(|v| {
+                            v.as_str()
+                                .map(str::to_string)
+                                .ok_or_else(|| bad(c, format!("`pdf_layers`: `{image}` lists layers by name, not {v}")))
+                        })
+                        .collect::<Result<_, _>>()?,
+                    v => return Err(bad(c, format!("`pdf_layers`: `{image}` is a list of the layers to hide, or null, not {v}"))),
+                };
+                let layers = t.layers();
+                if layers.is_empty() && !names.is_empty() {
+                    return Err(bad(c, format!("`pdf_layers`: `{image}` has no layers: it is a picture, or a PDF page drawn as one")));
+                }
+                if let Some(n) = names.iter().find(|n| !layers.contains(&n.as_str())) {
+                    return Err(bad(c, format!("`pdf_layers`: `{image}` has no layer `{n}` (see `cad_layers`)")));
+                }
+                if names.is_empty() {
+                    g.pdf_layers.remove(image);
+                } else {
+                    g.pdf_layers.insert(image.clone(), names);
+                }
+            }
+        }
+        Some(v) => return Err(bad(c, format!("`pdf_layers` is {{image: [layer, …] | null}}, not {v}"))),
+        None => {}
+    }
+    for (key, pdf) in [("imports", false), ("pdf_imports", true)] {
+        match p.get(key) {
+            v if absent(v) => {}
+            Some(Value::Object(o)) if o.len() <= crate::raster::MAX_TYPES.max(crate::cad::MAX_CADS) => {
+                for (name, patch) in o {
+                    // Null takes all it says of the import away, whether the import is still there or not.
+                    if patch.is_null() {
+                        if pdf { &mut g.pdf_imports } else { &mut g.imports }.remove(name);
+                        continue;
+                    }
+                    // The import's layers: a CAD drawing's, or a PDF page's drawn from its lines.
+                    let layers: Vec<String> = if pdf {
+                        let t = m
+                            .image_types
+                            .get(name)
+                            .ok_or_else(|| bad(c, format!("`{key}`: the project has no image `{name}` (see `manage_images`)")))?;
+                        t.layers().into_iter().map(str::to_string).collect()
+                    } else {
+                        let cad = m.cads.get(name).ok_or_else(|| bad(c, format!("`{key}`: the project has no CAD drawing `{name}`")))?;
+                        cad.dxf().layers.iter().map(|l| l.name.clone()).collect()
+                    };
+                    let looks = if pdf { &mut g.pdf_imports } else { &mut g.imports };
+                    // Merged into what it has, as a JSON merge patch: a null takes a setting (or the whole) away.
+                    let mut now = serde_json::to_value(looks.get(name).cloned().unwrap_or_default()).map_err(|e| bad(c, e))?;
+                    merge(&mut now, patch);
+                    let look: graphics::ImportLook = serde_json::from_value(now).map_err(|e| {
+                        bad(c, format!("`{key}`: `{name}` is {{all?: override, layers?: {{layer: override | null}}}} (an override's projection lines and halftone, and the import's hidden): {e}"))
+                    })?;
+                    if let Some(l) = look.layers.keys().find(|l| !layers.contains(l)) {
+                        return Err(bad(c, format!("`{key}`: `{name}` has no layer `{l}` (see `cad_layers`)")));
+                    }
+                    if look.is_empty() {
+                        looks.remove(name);
+                    } else {
+                        looks.insert(name.clone(), look);
+                    }
+                }
+            }
+            Some(v) => {
+                return Err(bad(c, format!("`{key}` is {{{}: {{all?, layers?}} | null}}, not {v}", if pdf { "image" } else { "drawing" })));
+            }
+            None => {}
+        }
+    }
     match p.get("elements") {
         v if absent(v) => {}
         Some(Value::Object(o)) if o.len() <= graphics::MAX_ENTRIES => {
@@ -4065,7 +4172,8 @@ fn edit_graphics(c: &str, m: &Model, p: &Value, g: &mut Graphics, of_template: b
 fn graphics_reply(g: &Graphics) -> Value {
     let hidden: Vec<&String> = g.categories.iter().filter(|(_, o)| o.hidden).map(|(k, _)| k).collect();
     json!({
-        "hidden": hidden, "categories": g.categories, "filters": g.filters, "layers": g.layers,
+        "hidden": hidden, "categories": g.categories, "filters": g.filters, "layers": g.layers, "pdf_layers": g.pdf_layers,
+        "imports": g.imports, "pdf_imports": g.pdf_imports,
         "phase": g.phase, "phase_filter": g.phase_filter, "options": g.options,
         "scale": g.scale, "detail": g.detail, "visual_style": g.style,
         "background_grid": g.background_grid,
@@ -4383,6 +4491,10 @@ fn view_template(s: &mut Session, p: &Value) -> R {
         "detail",
         "visual_style",
         "background_grid",
+        "layers",
+        "pdf_layers",
+        "imports",
+        "pdf_imports",
     ];
     let makes = keys.iter().any(|k| !absent(p.get(k))) || p.get("template").is_some();
     if was.is_none() && !makes {
@@ -4427,6 +4539,10 @@ fn view_template(s: &mut Session, p: &Value) -> R {
             detail: resolved.detail,
             style: resolved.style,
             background_grid: resolved.background_grid,
+            layers: resolved.layers.clone(),
+            pdf_layers: resolved.pdf_layers.clone(),
+            imports: resolved.imports.clone(),
+            pdf_imports: resolved.pdf_imports.clone(),
             ..Graphics::default()
         };
         t.view_range = match m.elements.get(view) {
@@ -6899,9 +7015,22 @@ fn cad_layers(s: &mut Session, p: &Value) -> R {
     let c = "cad_layers";
     let m = &s.model;
     let (id, ci, cad) = cad_import(c, m, p)?;
-    if matches!(m.elements.get(id), Some(Element::Image(_))) {
-        return Err(bad(c, format!("{id} is an image: its lines have no layers to hide; `modify` its `snaps` to stop them snapping")));
-    }
+    let image = match m.elements.get(id) {
+        Some(Element::Image(im)) => {
+            if !m.image_types.get(&im.type_name).is_some_and(crate::raster::ImageType::drawn) {
+                return Err(bad(
+                    c,
+                    format!(
+                        "image {id} shows as a picture of the whole page, so its layers can't be shown and hidden (its lines don't \
+                         hold all it draws, or it came in before PDF layers were kept: read it again from its PDF with \
+                         `manage_images` `reload` and `path`, Manage Images' Reload From, and its instances stay)"
+                    ),
+                ));
+            }
+            true
+        }
+        _ => false,
+    };
     let ci = &ci;
     let (hide, show) = (layer_list(c, p, "hide", &cad)?, layer_list(c, p, "show", &cad)?);
     if let Some(both) = hide.iter().find(|h| show.contains(h)) {
@@ -6916,10 +7045,29 @@ fn cad_layers(s: &mut Session, p: &Value) -> R {
             for l in &show {
                 hidden.remove(l);
             }
-            if hidden != ci.hidden
-                && let Some(Element::CadImport(ci)) = s.model_mut().elements.get_mut(id)
-            {
-                ci.hidden = hidden.clone();
+            if hidden != ci.hidden {
+                match s.model_mut().elements.get_mut(id) {
+                    Some(Element::CadImport(ci)) => ci.hidden = hidden.clone(),
+                    Some(Element::Image(im)) => im.hidden = hidden.clone(),
+                    _ => {}
+                }
+            }
+            // Shown everywhere: shown too in each view that hides it (a PDF's layer the file has off is hidden in the view it
+            // came into).
+            let hides = |g: &Graphics| {
+                let map = if image { &g.pdf_layers } else { &g.layers };
+                map.get(&name).is_some_and(|l| show.iter().any(|s| l.contains(s)))
+            };
+            if !show.is_empty() && s.model.elements.values().filter_map(graphics::graphics_of_element).any(hides) {
+                for g in s.model_mut().elements.values_mut().filter_map(graphics::graphics_mut) {
+                    let map = if image { &mut g.pdf_layers } else { &mut g.layers };
+                    if let Some(l) = map.get_mut(&name) {
+                        l.retain(|n| !show.contains(n));
+                        if l.is_empty() {
+                            map.remove(&name);
+                        }
+                    }
+                }
             }
             None
         }
@@ -6927,7 +7075,18 @@ fn cad_layers(s: &mut Session, p: &Value) -> R {
             let mut g = graphics::graphics_of(m, v)
                 .cloned()
                 .ok_or_else(|| bad(c, format!("{} isn't a plan, a section, an elevation or a 3D view", view_title(m, v))))?;
-            let was = g.layers.get(&name).cloned().unwrap_or_default();
+            if (!hide.is_empty() || !show.is_empty())
+                && let Some(t) = g.controlled_by(m, Group::Imports)
+            {
+                return Err(bad(
+                    c,
+                    format!(
+                        "its imported categories follow view template `{t}`; change the template, or `graphics` `template: null` to stop following it"
+                    ),
+                ));
+            }
+            let map = if image { &mut g.pdf_layers } else { &mut g.layers };
+            let was = map.get(&name).cloned().unwrap_or_default();
             let mut now = was.clone();
             now.extend(hide);
             for l in &show {
@@ -6936,9 +7095,9 @@ fn cad_layers(s: &mut Session, p: &Value) -> R {
             if now != was {
                 not_dependent(c, m, v, "graphics")?;
                 if now.is_empty() {
-                    g.layers.remove(&name);
+                    map.remove(&name);
                 } else {
-                    g.layers.insert(name.clone(), now.clone());
+                    map.insert(name.clone(), now.clone());
                 }
                 g.check(m).map_err(|e| bad(c, e))?;
                 set_graphics(s.model_mut(), v, g);
@@ -6946,7 +7105,8 @@ fn cad_layers(s: &mut Session, p: &Value) -> R {
             Some(now)
         }
     };
-    Ok(json!({"id": id, "cad": name, "layers": layers_json(&cad, &hidden, in_view.as_ref())}))
+    let key = if image { "image" } else { "cad" };
+    Ok(json!({"id": id, key: name, "layers": layers_json(&cad, &hidden, in_view.as_ref())}))
 }
 
 /// A linked drawing read again from its file.
@@ -7038,7 +7198,18 @@ fn read_item(n: usize, layer: &str, shape: &crate::dxf::Shape) -> Value {
         Shape::Text { at, height, angle, text, .. } => {
             json!({"text": text, "at": read_point(*at), "height": read_mm(*height), "angle": read_mm(*angle)})
         }
-        Shape::Fill { rings, solid } => json!({"rings": rings.iter().map(|r| pts(r)).collect::<Vec<_>>(), "solid": solid}),
+        Shape::Fill { rings, solid, tile, shade } => {
+            let mut fill = json!({"rings": rings.iter().map(|r| pts(r)).collect::<Vec<_>>(), "solid": solid});
+            // A band of a PDF's gradient.
+            if *shade {
+                fill["gradient"] = json!(true);
+            }
+            // A PDF's tiling pattern: its cell, laid again at each of its steps inside the rings.
+            if let Some(t) = tile {
+                fill["pattern"] = json!({"lines": t.lines.len(), "fills": t.fills.len(), "steps": t.steps.map(read_point)});
+            }
+            fill
+        }
     };
     if let (Some(item), Value::Object(more)) = (item.as_object_mut(), more) {
         item.extend(more);

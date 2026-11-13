@@ -69,20 +69,25 @@ pub const CEILING_HEIGHT: f64 = 2600.0;
 pub const MAX_SLOPE: f64 = 75.0;
 /// The closest a floor's contours may be drawn, mm: a site's are a metre or half a metre apart.
 pub const MIN_CONTOURS: f64 = 50.0;
-/// The version of the project file this build writes, and the newest it reads. 22: a family from Revit stays parametric:
+/// The version of the project file this build writes, and the newest it reads. 23: a family from Revit stays parametric:
 /// it may hold references (`references`, read by formulas as `ref(Name)`), dimensions that place them (`dimensions`), nested
 /// parts (`nested`), a type catalog, forms that are blends (`top`), sweeps (`path`, `section`), extrusions with holes and
 /// true arcs (`arcs`), Revit's own result kept beside its definition (`snapshot` forms and symbols, drawn only in a type
-/// whose `check` failed), and whether it is `editable`. A build that reads up to 21 would draw both Revit's result and the
-/// definition at once, and refuse `ref(…)` in a formula, so a project is written as 22 only when a family uses them
-/// ([`Model::written_format`]); nothing in a file of 21 changes and it takes no step. 21: a family's form or symbol may be of some
+/// whose `check` failed), and whether it is `editable`. A build that reads up to 22 would draw both Revit's result and the
+/// definition at once, and refuse `ref(…)` in a formula, so a project is written as 23 only when a family uses them
+/// ([`Model::written_format`]); nothing in a file of 22 changes and it takes no step. 22: a family's form or symbol may be of some
 /// of its types only (`types`) and say which detail levels and views draw it (`show`), a symbol may be drawn in sections and
 /// elevations (`view`: `front`, `side`), a mesh form may carry its own outline (`outline`), a door's or window's family may
 /// cut an opening other than its width by height (`cut`), and a parameter may hold text (kind `text`). A build that reads up
-/// to 20 would draw every type's forms at once and the elevation symbols in plan, cut the wall to the leaf, and refuse a text
-/// parameter, so a project is written as 21 only when one of its families uses them ([`Model::written_format`]); what a family
+/// to 21 would draw every type's forms at once and the elevation symbols in plan, cut the wall to the leaf, and refuse a text
+/// parameter, so a project is written as 22 only when one of its families uses them ([`Model::written_format`]); what a family
 /// only says of itself (`source`, `host`, `subcategories`, `flips`, a parameter's `unit` and `group`) an older build leaves
-/// out, and it takes no step. Nothing in a file of 20 changes. 20: a door or a window keeps the side of its
+/// out, and it takes no step. Nothing in a file of 21 changes. 21: a page of a PDF may be drawn from its
+/// lines, layer by layer, over a picture of only its raster images (an image's `drawn`, with a small picture of the whole page,
+/// `thumb`); an image may hide layers of its lines (`hidden`) and a view's graphics hide them in that view (`pdf_layers`).
+/// Nothing in a file of 20 changes (its pages stay pictures of the whole page), but a build that reads up to 20 would leave
+/// `drawn` out as a field it doesn't know and draw such a page as its raster images alone, its lines missing, not say "saved
+/// by a newer BIMCraft". A project with no page drawn so is written as 20 ([`IMAGES_FORMAT`]) or 19. 20: a door or a window keeps the side of its
 /// wall its To Room is on (`to_room_side`), set as it is placed and kept through its flips, as Revit's From Room and To Room;
 /// a file of 19 has it from the side each swings to or faces, once, as it is read, and a build that reads up to 19 would leave
 /// it out and take it from the swing, so a door flipped since it was placed would say its rooms the other way round. A project
@@ -135,18 +140,22 @@ pub const MIN_CONTOURS: f64 = 50.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 22;
+pub const FORMAT: u32 = 23;
 /// The format a project is written in when its families need nothing of [`FORMAT`]'s (a parametric family from Revit) but some
 /// have per-type forms, Visibility Settings, elevation symbols, traced outlines, a cut or text parameters, which a build that
-/// reads up to 20 would misread ([`Model::written_format`]).
-pub const TYPES_FORMAT: u32 = 21;
-/// The format a project is written in when it needs no family's per-type forms, Visibility Settings, elevation symbols,
-/// traced outlines, cut or text parameters (21's) but holds images, or a door or a window whose To Room is not on the side it
-/// swings to or faces (20's), so a build that reads up to 20 opens it ([`Model::written_format`]).
-pub const ROOMS_FORMAT: u32 = 20;
-/// The format a project is written in when it needs nothing of [`ROOMS_FORMAT`]'s or [`FORMAT`]'s (no images, every door's
-/// and window's To Room on the side it swings to or faces, no family that needs 21), so a build that reads up to 19 opens it
-/// ([`Model::written_format`]).
+/// reads up to 21 would misread ([`Model::written_format`]).
+pub const TYPES_FORMAT: u32 = 22;
+/// The format a project is written in when its families need nothing of [`TYPES_FORMAT`]'s but a page of a PDF it holds is
+/// drawn from its lines, or a view or a template hides a page's layers or sets how an import draws, which a build that reads up
+/// to 20 would misread ([`Model::written_format`]). A file older than this can't name Imported Categories as a group a
+/// template controls ([`Model::implied_imports`]).
+pub const PDF_FORMAT: u32 = 21;
+/// The format a project is written in when it holds images, or a door's or a window's To Room kept against its swing, but
+/// nothing of [`PDF_FORMAT`]'s or later ([`Model::written_format`]).
+pub const IMAGES_FORMAT: u32 = 20;
+/// The format a project is written in when it needs nothing of [`IMAGES_FORMAT`]'s or later (no images, every door's and
+/// window's To Room on the side it swings to or faces, no PDF page drawn from its lines, no family that needs 22), so a build
+/// that reads up to 19 opens it ([`Model::written_format`]).
 pub const PREVIOUS_FORMAT: u32 = 19;
 /// How far past the model a level reaches without an extent of its own, mm.
 pub const LEVEL_PAST: f64 = 1000.0;
@@ -3996,7 +4005,17 @@ impl Model {
         }
         let mut m: Model = serde_json::from_value(v).map_err(|e| e.to_string())?;
         m.migrate();
+        // An import's Patterns, which a file may hold from when they could be overridden, are left out: as in Revit, it has none.
+        for g in
+            m.elements.values_mut().filter_map(crate::graphics::graphics_mut).chain(m.view_templates.values_mut().map(|t| &mut t.graphics))
+        {
+            crate::graphics::drop_import_patterns(g);
+        }
         m.names_from_file();
+        // 20 to 21: a template from a file of 20 or older can't name Imported Categories as a group it controls.
+        if format < u64::from(PDF_FORMAT) {
+            m.implied_imports();
+        }
         m.renamed_clashing_parameters();
         m.renamed_clashing_calculated_fields();
         Ok((m, left_out))
@@ -4515,6 +4534,14 @@ impl Model {
         let views = self.elements.values_mut().filter_map(graphics::graphics_mut);
         for g in views.chain(self.view_templates.values_mut().map(|t| &mut t.graphics)) {
             g.layers.retain(|cad, _| !gone.contains(cad));
+        }
+    }
+
+    /// Forgets the layers views and templates hide of the PDF pages `gone` (images the project no longer holds).
+    pub fn forget_pdf_layers(&mut self, gone: &[String]) {
+        let views = self.elements.values_mut().filter_map(graphics::graphics_mut);
+        for g in views.chain(self.view_templates.values_mut().map(|t| &mut t.graphics)) {
+            g.pdf_layers.retain(|image, _| !gone.contains(image));
         }
     }
 
@@ -7739,6 +7766,12 @@ impl Model {
                             crate::raster::MIN_SIDE
                         ));
                     }
+                }
+                if im.hidden.len() > MAX_HIDDEN {
+                    return Err(format!("{who}: it hides {} layers; up to {MAX_HIDDEN}", im.hidden.len()));
+                }
+                for layer in &im.hidden {
+                    text(&format!("{who} hidden layer"), "name", layer)?;
                 }
             }
             Element::CadImport(ci) => {

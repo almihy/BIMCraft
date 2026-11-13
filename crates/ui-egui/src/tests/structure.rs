@@ -303,7 +303,7 @@ fn create_similar_and_the_view_lists_know_the_structures_categories() {
     // Visibility/Graphics lists them by name.
     shortcut(&mut h, "VV");
     for name in ["Beams", "Structural Columns", "Footings", "Strip Footings"] {
-        assert!(h.query_by_label(name).is_some(), "{name}");
+        assert!(h.query_by_role_and_label(Role::CheckBox, name).is_some(), "{name}");
     }
 }
 

@@ -56,7 +56,7 @@ mod tests {
         let mut result = Vec::new();
         for (prim, owner) in plan.prims.iter().zip(&plan.owners) {
             if *owner == Some(wall)
-                && let Prim::Fill { rings, color: PAPER } = prim
+                && let Prim::Fill { rings, color: PAPER, .. } = prim
             {
                 result.extend(rings.iter().map(|ring| ring.iter().map(|&p| plan.view.mm(p)).collect()));
             }

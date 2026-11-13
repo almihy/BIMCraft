@@ -5,6 +5,7 @@
 use std::path::PathBuf;
 
 use bimcraft_core::cad::Colors;
+use bimcraft_core::render::Rgb;
 
 use super::*;
 
@@ -134,7 +135,8 @@ fn imported_categories_hides_a_drawings_layers_or_the_category_in_the_view() {
     shortcut(&mut h, "VV");
     press(&mut h, "Imported Categories");
     assert!(h.query_by_label("Model Categories").is_some(), "the tabs stay");
-    // Its layers, under the drawing: WALLS cleared hides it in this view.
+    // Its layers, under the drawing's row, unfolded as Revit's: WALLS cleared hides it in this view.
+    press(&mut h, "plan: Unfold");
     pick(&mut h, Role::CheckBox, "WALLS");
     press(&mut h, "OK");
     let g = plan_graphics(&h, 100000);
@@ -142,12 +144,97 @@ fn imported_categories_hides_a_drawings_layers_or_the_category_in_the_view() {
     // Shown again, and the category hidden as a whole.
     shortcut(&mut h, "VV");
     press(&mut h, "Imported Categories");
+    press(&mut h, "plan: Unfold");
     pick(&mut h, Role::CheckBox, "WALLS");
-    pick(&mut h, Role::CheckBox, "CAD Imports");
+    pick(&mut h, Role::CheckBox, "Show imported categories in this view");
     press(&mut h, "OK");
     let g = plan_graphics(&h, 100000);
     assert!(g.layers.is_empty(), "{:?}", g.layers);
     assert!(g.categories.get("cadimport").is_some_and(|o| o.hidden), "{g:?}");
+    let look = bimcraft_core::graphics::Look::of(&h.state().session.model, 100000);
+    assert!(imports(&h).iter().all(|id| !look.shows(*id)), "every import is hidden");
+}
+
+/// Whether the check box named `label` is ticked.
+fn ticked(h: &Harness<BimApp>, label: &str) -> bool {
+    use egui_kittest::kittest::NodeT as _;
+    h.get_by_role_and_label(Role::CheckBox, label).accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
+}
+
+#[test]
+fn imported_categories_is_one_table_of_the_imports_and_imports_in_families_as_revits() {
+    let path = drawing("vg-table", "plan.dxf");
+    let mut h = app(&format!("{BOX}\nimport_cad {}", json!({"path": path, "layers": "all"})));
+    key(&mut h, Key::Escape);
+    shortcut(&mut h, "VV");
+    press(&mut h, "Imported Categories");
+    // The box over the table, ticked; the import and Imports in Families as rows; no CAD Imports row any more.
+    assert!(ticked(&h, "Show imported categories in this view"));
+    assert!(ticked(&h, "plan") && ticked(&h, "Imports in Families"));
+    assert!(h.query_by_label("CAD Imports").is_none(), "the old row is gone");
+    // Lines and Halftone on the import's row and on Imports in Families; Patterns can't be overridden, as Revit greys it out.
+    for label in ["plan: Projection Lines", "plan: Halftone", "Imports in Families: Projection Lines", "Imports in Families: Halftone"] {
+        assert!(h.query_by_label(label).is_some(), "{label}");
+    }
+    for label in ["plan: Projection Patterns", "Imports in Families: Projection Patterns"] {
+        assert!(h.query_by_label(label).is_none(), "{label} is shown hatched");
+    }
+    // Expand All unfolds the import: its layers have Lines and no Halftone, which is the whole file's.
+    press(&mut h, "Expand All");
+    assert!(h.query_by_label("plan: Fold").is_some(), "unfolded");
+    assert!(h.query_by_label("WALLS: Projection Lines").is_some() && h.query_by_label("WALLS: Projection Patterns").is_none());
+    assert!(h.query_by_label("WALLS: Halftone").is_none(), "a layer has no halftone of its own");
+    // A note and Object Styles… under the buttons.
+    assert!(h.query_by_label("Object Styles…").is_some());
+}
+
+#[test]
+fn all_none_and_invert_pick_every_import_its_layers_folded_or_not_and_imports_in_families_and_change_nothing_alone() {
+    let path = drawing("vg-all", "plan.dxf");
+    let mut h = app(&format!("{BOX}\nimport_cad {}", json!({"path": path, "layers": "all"})));
+    key(&mut h, Key::Escape);
+    shortcut(&mut h, "VV");
+    press(&mut h, "Imported Categories");
+    // Folded: All picks the import, both its layers and Imports in Families, and hides nothing; a box cleared on one of them
+    // hides them all.
+    press(&mut h, "All");
+    assert!(ticked(&h, "plan") && ticked(&h, "Imports in Families"), "All hides nothing");
+    pick(&mut h, Role::CheckBox, "plan");
+    press(&mut h, "OK");
+    let g = plan_graphics(&h, 100000);
+    let hidden: Vec<String> = g.layers.get("plan").map(|l| l.iter().cloned().collect()).unwrap_or_default();
+    assert_eq!(hidden, ["FURN", "WALLS"], "{g:?}");
+    assert!(g.imports.get("plan").is_some_and(|l| l.all.hidden), "{g:?}");
+    assert!(g.categories.get("familyimport").is_some_and(|o| o.hidden), "{g:?}");
+    assert!(!g.categories.get("cadimport").is_some_and(|o| o.hidden), "the box over the table isn't a row");
+    // Unfolded: None, then Invert picks every row; a box ticked shows them all. Nothing changes before it.
+    shortcut(&mut h, "VV");
+    press(&mut h, "Imported Categories");
+    press(&mut h, "plan: Unfold");
+    press(&mut h, "None");
+    press(&mut h, "Invert");
+    assert!(!ticked(&h, "WALLS") && !ticked(&h, "FURN") && !ticked(&h, "plan"), "picking changes nothing");
+    pick(&mut h, Role::CheckBox, "FURN");
+    assert!(ticked(&h, "WALLS") && ticked(&h, "FURN") && ticked(&h, "plan") && ticked(&h, "Imports in Families"));
+    // A row, then Shift on another: the rows from the first to it; a box cleared hides those, and no more.
+    row(&mut h, "FURN", egui::Modifiers::NONE);
+    row(&mut h, "WALLS", egui::Modifiers::SHIFT);
+    pick(&mut h, Role::CheckBox, "WALLS");
+    assert!(!ticked(&h, "WALLS") && !ticked(&h, "FURN") && ticked(&h, "plan") && ticked(&h, "Imports in Families"));
+    // Override… on a picked layer gives both layers its lines; a click on a row picks it alone again.
+    pick(&mut h, Role::Button, "FURN: Projection Lines");
+    pick(&mut h, Role::CheckBox, "Projection: Line color");
+    press(&mut h, "OK");
+    row(&mut h, "plan", egui::Modifiers::NONE);
+    pick(&mut h, Role::CheckBox, "plan");
+    press(&mut h, "OK");
+    let g = plan_graphics(&h, 100000);
+    let hidden: Vec<String> = g.layers.get("plan").map(|l| l.iter().cloned().collect()).unwrap_or_default();
+    assert_eq!(hidden, ["FURN", "WALLS"], "{g:?}");
+    let look = &g.imports["plan"];
+    assert!(look.all.hidden && !g.categories.contains_key("familyimport"), "{g:?}");
+    let colour = |l: &str| look.layers.get(l).and_then(|o| o.projection.color);
+    assert!(colour("FURN").is_some() && colour("FURN") == colour("WALLS") && look.all.projection.color.is_none(), "{g:?}");
 }
 
 #[test]
@@ -190,4 +277,100 @@ fn a_dwg_comes_in_through_the_box_with_the_reader_the_app_is_given_and_its_notes
     assert_eq!(h.state().session.model.cads["site"].source(), "site.dwg");
     let status = &h.state().status;
     assert!(!status.error && status.text.contains("3 of the DWG's object records"), "{status:?}");
+}
+
+#[test]
+fn a_dense_drawings_cells_are_lightened_on_a_dark_canvas_as_its_lines_are() {
+    // A pixel of the view's ink and a red one, as a dense drawing zoomed out draws them in its picture of cells.
+    let ink = bimcraft_core::render::INK;
+    let rgba = [ink.0, ink.1, ink.2, 200, 200, 30, 30, 255];
+    let line = |c: Rgb| {
+        let c = crate::canvas::color(c);
+        [c.r(), c.g(), c.b()]
+    };
+    crate::style::set_canvas(true, None);
+    let seen = crate::canvas::cells_seen(&rgba, bimcraft_core::render::Part::Cells, false).into_owned();
+    // Each pixel as a line of its colour shows on the dark canvas, as opaque as it was.
+    assert_eq!(seen[..3], line(ink));
+    assert_eq!(seen[4..7], line(Rgb(200, 30, 30)));
+    assert_eq!((seen[3], seen[7]), (200, 255));
+    assert!(seen[0] > 150, "the ink reads light on the dark canvas: {seen:?}");
+    // Another picture (a scan, a page's raster) is left as it is; and on a light canvas, the cells too.
+    assert_eq!(*crate::canvas::cells_seen(&rgba, bimcraft_core::render::Part::Picture, false), rgba);
+    crate::style::set_canvas(false, None);
+    assert_eq!(*crate::canvas::cells_seen(&rgba, bimcraft_core::render::Part::Cells, false), rgba);
+}
+
+#[test]
+fn a_dark_canvas_turns_over_black_white_and_greys_and_keeps_a_colour_as_revits_does() {
+    let seen = |c: Rgb| {
+        let c = crate::canvas::color(c);
+        [c.r(), c.g(), c.b()]
+    };
+    crate::style::set_canvas(true, None);
+    let (black, white, grey, warm_white) = (seen(Rgb(0, 0, 0)), seen(Rgb(255, 255, 255)), seen(Rgb(90, 90, 90)), seen(Rgb(245, 240, 235)));
+    let (red, green, pale_blue) = (seen(Rgb(220, 30, 30)), seen(Rgb(0, 153, 0)), seen(Rgb(170, 200, 255)));
+    crate::style::set_canvas(false, None);
+    assert!(black.iter().all(|v| *v > 220) && white.iter().all(|v| *v < 40), "{black:?} {white:?}");
+    assert!(grey.iter().all(|v| *v > 150) && warm_white.iter().all(|v| *v < 60), "{grey:?} {warm_white:?}");
+    assert_eq!((red, green, pale_blue), ([220, 30, 30], [0, 153, 0], [170, 200, 255]), "a colour is kept");
+}
+
+/// sRGB's relative luminance, and the contrast of two colours, as WCAG has them.
+fn contrast(a: [u8; 3], b: [u8; 3]) -> f64 {
+    let lum = |c: [u8; 3]| {
+        let lin = |v: u8| {
+            let v = f64::from(v) / 255.0;
+            if v <= 0.040_45 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+        };
+        0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2])
+    };
+    let (x, y) = (lum(a), lum(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+#[test]
+fn halftone_on_a_dark_canvas_fades_toward_its_ground_a_colour_too_as_revits_does() {
+    let rgb = |c: egui::Color32| [c.r(), c.g(), c.b()];
+    // Halftone as the drawing bakes it: halfway to white paper.
+    let half = |c: Rgb| Rgb(c.0 + (255 - c.0) / 2, c.1 + (255 - c.1) / 2, c.2 + (255 - c.2) / 2);
+    let (red, green, black) = (Rgb(220, 30, 30), Rgb(0, 128, 0), Rgb(0, 0, 0));
+    crate::style::set_canvas(true, None);
+    let ground = rgb(crate::canvas::color(bimcraft_core::render::PAPER));
+    let (red_full, red_half) = (rgb(crate::canvas::color(red)), rgb(crate::canvas::color_half(half(red))));
+    let (green_full, green_half) = (rgb(crate::canvas::color(green)), rgb(crate::canvas::color_half(half(green))));
+    let (black_full, black_half) = (rgb(crate::canvas::color(black)), rgb(crate::canvas::color_half(half(black))));
+    crate::style::set_canvas(false, None);
+    // Each halfway between the colour the canvas draws and its ground: dimmer than the colour, never a pastel brighter.
+    for (full, halved) in [(red_full, red_half), (green_full, green_half), (black_full, black_half)] {
+        for k in 0..3 {
+            let want = (u16::from(full[k]) + u16::from(ground[k])) / 2;
+            assert!(u16::from(halved[k]).abs_diff(want) <= 1, "{halved:?} is halfway from {full:?} to {ground:?}");
+        }
+        assert!(contrast(halved, ground) < contrast(full, ground), "{halved:?} fainter than {full:?} on {ground:?}");
+    }
+    assert_eq!(red_half, [122, 27, 27]);
+    assert_eq!(black_half, [129, 129, 129], "black ink halftone, as before");
+    // On a light canvas halftone is as the drawing baked it.
+    assert_eq!(rgb(crate::canvas::color_half(half(red))), [237, 142, 142]);
+}
+
+#[test]
+fn a_dark_canvas_turns_over_a_cream_as_white_and_draws_bimcrafts_own_blues_light_enough_to_read() {
+    let rgb = |c: egui::Color32| [c.r(), c.g(), c.b()];
+    crate::style::set_canvas(true, None);
+    let ground = rgb(crate::canvas::color(bimcraft_core::render::PAPER));
+    let cream = rgb(crate::canvas::color(Rgb(255, 245, 219)));
+    let grey_blue = rgb(crate::canvas::color(Rgb(200, 210, 230)));
+    let pink = rgb(crate::canvas::color(Rgb(255, 200, 200)));
+    let own: Vec<[u8; 3]> = bimcraft_core::render::ON_DARK.iter().map(|(light, _)| rgb(crate::canvas::color(*light))).collect();
+    crate::style::set_canvas(false, None);
+    // A cream or a grey-blue reads as white does, dark, not a muddy mid-tone; a pale pink is a colour, kept.
+    assert!(cream.iter().all(|v| *v < 80) && grey_blue.iter().all(|v| *v < 80), "{cream:?} {grey_blue:?}");
+    assert_eq!(pink, [255, 200, 200]);
+    // A grid's blue and a mass's: their dark-ground variants, 4.5 : 1 or more against the ground.
+    for (c, (light, _)) in own.iter().zip(bimcraft_core::render::ON_DARK) {
+        assert!(contrast(*c, ground) >= 4.5, "{c:?} on {ground:?}: {}", contrast(*c, ground));
+        assert!(contrast([light.0, light.1, light.2], [255; 3]) >= 4.5, "{light:?} reads on white");
+    }
 }

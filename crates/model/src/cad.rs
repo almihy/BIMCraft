@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::dxf::{self, Color, Dxf, Entity, Shape};
 
+pub mod lod;
 pub mod outlines;
+pub mod packed;
 use crate::geom::P2;
 use crate::pen::Pen;
 use crate::prim::Rgb;
@@ -67,6 +69,8 @@ pub struct Cad {
     /// Where it was read from, when it's linked: `reload_cad`, and opening the project, read it again from there.
     path: Option<String>,
     bytes: Arc<Vec<u8>>,
+    /// Whether `bytes` are a page's lines packed ([`packed`]), not a DXF.
+    lines: bool,
     dxf: Arc<Dxf>,
     /// The box round its bulk, drawing units: all of it but what lies far from the rest.
     bulk: Option<[P2; 2]>,
@@ -74,6 +78,98 @@ pub struct Cad {
     far: usize,
     /// What a project file holds of it, made the first time it's saved.
     packed: Arc<OnceLock<CadFile>>,
+    /// Its entities' boxes and a grid of them, made the first time what lies in a box is asked.
+    index: Arc<OnceLock<Index>>,
+    /// Its level of detail zoomed out, made the first time it is drawn so: none for a sparse drawing.
+    lod: Arc<OnceLock<Option<lod::Lod>>>,
+}
+
+/// A drawing's entities' boxes (x0, y0, x1, y1, drawing units), and a grid over them: each cell the entities whose boxes meet
+/// it, so what lies in a view or under the cursor is found among a few, not looked for among a dense sheet's hundreds of
+/// thousands. One that spans many cells is in none, and always looked at.
+struct Index {
+    boxes: Vec<[f64; 4]>,
+    lo: P2,
+    cell: f64,
+    nx: usize,
+    ny: usize,
+    cells: Vec<Vec<u32>>,
+    wide: Vec<u32>,
+}
+
+/// The most cells one entity is put in: past it, it is a wide one.
+const MOST_CELLS: usize = 64;
+
+impl Index {
+    fn new(d: &Dxf) -> Index {
+        let boxes: Vec<[f64; 4]> = d
+            .entities
+            .iter()
+            .map(|e| {
+                let [lo, hi] = e.shape.bounds();
+                [lo.0, lo.1, hi.0, hi.1]
+            })
+            .collect();
+        let finite = |b: &&[f64; 4]| b.iter().all(|v| v.is_finite());
+        let all = boxes.iter().filter(finite).fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |a, b| {
+            [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]
+        });
+        let (w, h) = ((all[2] - all[0]).max(1e-9), (all[3] - all[1]).max(1e-9));
+        let want = (boxes.len() / 8).clamp(1, 1 << 20) as f64;
+        let cell = ((w * h) / want).sqrt().max(w.max(h) / 4096.0).max(1e-9);
+        let (nx, ny) = (((w / cell).ceil() as usize).clamp(1, 4096), ((h / cell).ceil() as usize).clamp(1, 4096));
+        let lo = if all[0].is_finite() { P2(all[0], all[1]) } else { P2(0.0, 0.0) };
+        let mut index = Index { boxes: Vec::new(), lo, cell, nx, ny, cells: vec![Vec::new(); nx * ny], wide: Vec::new() };
+        for (i, b) in boxes.iter().enumerate() {
+            let Some([x0, y0, x1, y1]) = index.span(b) else {
+                index.wide.push(i as u32);
+                continue;
+            };
+            if (x1 - x0 + 1) * (y1 - y0 + 1) > MOST_CELLS {
+                index.wide.push(i as u32);
+                continue;
+            }
+            for y in y0..=y1 {
+                for x in x0..=x1 {
+                    if let Some(c) = index.cells.get_mut(y * nx + x) {
+                        c.push(i as u32);
+                    }
+                }
+            }
+        }
+        index.boxes = boxes;
+        index
+    }
+
+    /// The cells box `b` covers, first and last along each axis; none for a box that isn't a number's.
+    fn span(&self, b: &[f64; 4]) -> Option<[usize; 4]> {
+        if !b.iter().all(|v| v.is_finite()) {
+            return None;
+        }
+        let at = |v: f64, o: f64, n: usize| (((v - o) / self.cell).floor().max(0.0) as usize).min(n - 1);
+        Some([at(b[0], self.lo.0, self.nx), at(b[1], self.lo.1, self.ny), at(b[2], self.lo.0, self.nx), at(b[3], self.lo.1, self.ny)])
+    }
+
+    /// The entities whose boxes meet `b`, in the drawing's order.
+    fn within(&self, b: [f64; 4]) -> Vec<usize> {
+        let meets = |i: usize| self.boxes.get(i).is_some_and(|e| e[0] <= b[2] && e[2] >= b[0] && e[1] <= b[3] && e[3] >= b[1]);
+        let span = self.span(&b);
+        let cells = span.map_or(usize::MAX, |[x0, y0, x1, y1]| (x1 - x0 + 1) * (y1 - y0 + 1));
+        // Most of it: each entity looked at once is fewer steps than the cells' lists.
+        if cells * 2 >= self.nx * self.ny {
+            return (0..self.boxes.len()).filter(|i| meets(*i)).collect();
+        }
+        let Some([x0, y0, x1, y1]) = span else { return Vec::new() };
+        let mut found: Vec<u32> = self.wide.clone();
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                found.extend(self.cells.get(y * self.nx + x).into_iter().flatten());
+            }
+        }
+        found.sort_unstable();
+        found.dedup();
+        found.into_iter().map(|i| i as usize).filter(|i| meets(*i)).collect()
+    }
 }
 
 impl std::fmt::Debug for Cad {
@@ -84,7 +180,10 @@ impl std::fmt::Debug for Cad {
 
 impl PartialEq for Cad {
     fn eq(&self, other: &Cad) -> bool {
-        self.source == other.source && self.path == other.path && (Arc::ptr_eq(&self.bytes, &other.bytes) || self.bytes == other.bytes)
+        self.source == other.source
+            && self.path == other.path
+            && self.lines == other.lines
+            && (Arc::ptr_eq(&self.bytes, &other.bytes) || self.bytes == other.bytes)
     }
 }
 
@@ -100,11 +199,75 @@ impl Cad {
             source: source.chars().take(crate::model::MAX_TEXT).collect(),
             path: path.map(|p| p.chars().take(4096).collect()),
             bytes: Arc::new(bytes),
+            lines: false,
             dxf: Arc::new(dxf),
             bulk,
             far,
             packed: Arc::default(),
+            index: Arc::default(),
+            lod: Arc::default(),
         })
+    }
+
+    /// A page's lines a PDF's [`packed`] `bytes` hold, known by `source`; or why they can't be held.
+    pub fn of_lines(source: &str, bytes: Vec<u8>) -> Result<Cad, String> {
+        let dxf = packed::unpack(&bytes)?;
+        Ok(Cad::drawn(source, dxf, bytes))
+    }
+
+    /// Drawing `dxf`, read from a page (never empty: a page that draws nothing has no lines), held packed.
+    pub fn of_drawing(source: &str, dxf: Dxf) -> Cad {
+        let bytes = packed::pack(&dxf);
+        Cad::drawn(source, dxf, bytes)
+    }
+
+    /// A page's lines its [`packed`] `bytes` hold, already read back as `dxf`.
+    pub fn of_unpacked(source: &str, dxf: &Arc<Dxf>, bytes: Vec<u8>) -> Cad {
+        Cad::drawn_shared(source, Arc::clone(dxf), bytes)
+    }
+
+    fn drawn(source: &str, dxf: Dxf, bytes: Vec<u8>) -> Cad {
+        Cad::drawn_shared(source, Arc::new(dxf), bytes)
+    }
+
+    fn drawn_shared(source: &str, dxf: Arc<Dxf>, bytes: Vec<u8>) -> Cad {
+        let (bulk, far) = bulk(&dxf);
+        Cad {
+            source: source.chars().take(crate::model::MAX_TEXT).collect(),
+            path: None,
+            bytes: Arc::new(bytes),
+            lines: true,
+            dxf,
+            bulk,
+            far,
+            packed: Arc::default(),
+            index: Arc::default(),
+            lod: Arc::default(),
+        }
+    }
+
+    /// The entities whose boxes meet the box from `lo` to `hi` (drawing units), by their place in its entities, in its order:
+    /// what a view or the cursor's reach finds of it.
+    pub fn entities_in(&self, lo: P2, hi: P2) -> Vec<usize> {
+        self.index.get_or_init(|| Index::new(&self.dxf)).within([lo.0, lo.1, hi.0, hi.1])
+    }
+
+    /// Its level of detail ([`lod`]) and the band of it it is drawn with when a unit of it is `px` pixels: none when it is
+    /// drawn entity by entity at that zoom (it is sparse, the view is near, or the band would hold too much).
+    pub fn lod_band(&self, px: f64) -> Option<(&lod::Lod, &lod::Band)> {
+        let lod = self.lod.get_or_init(|| lod::Lod::new(&self.dxf, self.bulk, &|e| self.color(e, Colors::Preserve))).as_ref()?;
+        Some((lod, lod.band(&self.dxf, px)?))
+    }
+
+    /// Entity `i`'s box, drawing units, its low corner and its high.
+    pub fn entity_box(&self, i: usize) -> Option<[P2; 2]> {
+        let b = self.index.get_or_init(|| Index::new(&self.dxf)).boxes.get(i).copied()?;
+        Some([P2(b[0], b[1]), P2(b[2], b[3])])
+    }
+
+    /// The bytes it holds: its DXF, or its packed lines.
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
     }
 
     pub fn source(&self) -> &str {
@@ -152,10 +315,10 @@ impl Cad {
     }
 
     fn file(&self) -> &CadFile {
-        self.packed.get_or_init(|| CadFile {
-            source: self.source.clone(),
-            path: self.path.clone(),
-            dxf: crate::files::base64(&crate::cloud::deflate(&self.bytes)),
+        self.packed.get_or_init(|| {
+            let held = crate::files::base64(&crate::cloud::deflate(&self.bytes));
+            let (dxf, lines) = if self.lines { (String::new(), Some(held)) } else { (held, None) };
+            CadFile { source: self.source.clone(), path: self.path.clone(), dxf, lines }
         })
     }
 
@@ -179,15 +342,39 @@ impl Cad {
         e.weight.or_else(|| self.dxf.layer(&e.layer).and_then(|l| l.weight)).filter(|w| *w > 0.0).map_or(Pen::FINE, Pen::nearest)
     }
 
-    /// An entity's dash and gap, drawing units, when its linetype (its own, else its layer's) has dashes; times `ltscale`.
-    pub fn dash(&self, e: &Entity) -> Option<[f64; 2]> {
+    /// An entity's dashes, drawing units, when its linetype (its own, else its layer's) has gaps: on, off, on, …, all of them
+    /// (a dash-dot's dash, gap, dot and gap), times `ltscale`. A dot is drawn as a short dash, a quarter of the shortest gap;
+    /// pieces of one kind side by side are one, and a pattern that starts with a gap or ends with a dash starts with a dash of
+    /// nothing or ends with a gap of nothing, so the list is on and off in turn from its start.
+    pub fn dash(&self, e: &Entity) -> Option<Vec<f64>> {
         let name = e.linetype.as_deref().or_else(|| self.dxf.layer(&e.layer).map(|l| l.linetype.as_str()))?;
         let lt = self.dxf.linetypes.iter().find(|l| l.name.eq_ignore_ascii_case(name))?;
-        let dash = lt.dashes.iter().copied().find(|d| *d > 0.0);
-        let gap = lt.dashes.iter().copied().find(|d| *d < 0.0)?.abs();
+        let gap = lt.dashes.iter().copied().filter(|d| *d < 0.0).map(f64::abs).fold(f64::INFINITY, f64::min);
+        if !gap.is_finite() {
+            return None;
+        }
+        let mut out: Vec<(bool, f64)> = Vec::new();
+        for d in lt.dashes.iter().take(64) {
+            let (on, len) = if *d < 0.0 {
+                (false, -d)
+            } else if *d == 0.0 {
+                (true, gap / 4.0)
+            } else {
+                (true, *d)
+            };
+            match out.last_mut() {
+                Some(last) if last.0 == on => last.1 += len,
+                _ => out.push((on, len)),
+            }
+        }
+        if out.first().is_some_and(|p| !p.0) {
+            out.insert(0, (true, 0.0));
+        }
+        if out.last().is_some_and(|p| p.0) {
+            out.push((false, 0.0));
+        }
         let k = self.dxf.ltscale;
-        // A dot is drawn as a short dash.
-        Some([dash.unwrap_or(gap / 4.0) * k, gap * k])
+        Some(out.into_iter().map(|(_, len)| len * k).collect())
     }
 
     /// Whether an entity is drawn when the layers `hidden` are.
@@ -226,15 +413,22 @@ fn similar(shape: &Shape, f: impl Fn(P2) -> P2, turn: f64, k: f64) -> Shape {
             Shape::Arc { c: f(*c), r: r * k, start: s, end: s + (end - start) }
         }
         Shape::Point(p) => Shape::Point(f(*p)),
-        Shape::Text { at, height, angle, text, align, tag } => Shape::Text {
+        Shape::Text { at, height, angle, text, align, tag, wide, mirrored } => Shape::Text {
             at: f(*at),
             height: height * k,
             angle: (angle + turn).rem_euclid(360.0),
             text: text.clone(),
             align: *align,
             tag: tag.clone(),
+            wide: *wide,
+            mirrored: *mirrored,
         },
-        Shape::Fill { rings, solid } => Shape::Fill { rings: rings.iter().map(ring).collect(), solid: *solid },
+        Shape::Fill { rings, solid, tile, shade } => Shape::Fill {
+            rings: rings.iter().map(ring).collect(),
+            solid: *solid,
+            tile: tile.as_ref().map(|t| std::sync::Arc::new(t.mapped(&f, k))),
+            shade: *shade,
+        },
     }
 }
 
@@ -251,12 +445,23 @@ pub fn placed(shape: &Shape, ci: &crate::model::CadImport) -> Shape {
             let (pts, closed) = runs.pop().unwrap_or_default();
             Shape::Polyline { pts: pts.into_iter().map(f).collect(), closed }
         }
-        Shape::Text { at, height, angle, text, align, tag } => {
-            // Its baseline turned as the page is, its height as its up stretches.
+        Shape::Text { at, height, angle, text, align, tag, wide, mirrored } => {
+            // Its baseline turned as the page is, its height as its up stretches, its width as its baseline does.
             let (sin, cos) = angle.to_radians().sin_cos();
             let (o, along, up) = (f(*at), f(*at + P2(cos, sin)), f(*at + P2(-sin, cos)));
             let turn = (along.1 - o.1).atan2(along.0 - o.0).to_degrees().rem_euclid(360.0);
-            Shape::Text { at: o, height: height * up.dist(o), angle: turn, text: text.clone(), align: *align, tag: tag.clone() }
+            let (h, w) = (up.dist(o), along.dist(o));
+            let wide = if h > 0.0 { wide * w / h } else { *wide };
+            Shape::Text {
+                at: o,
+                height: height * h,
+                angle: turn,
+                text: text.clone(),
+                align: *align,
+                tag: tag.clone(),
+                wide,
+                mirrored: *mirrored,
+            }
         }
         other => similar(other, f, ci.angle, ci.scale),
     }
@@ -295,14 +500,11 @@ pub fn nearest<'c>(cad: &'c Cad, ci: &crate::model::CadImport, at: P2, reach: f6
     }
     let (rx, ry) = (reach / kx, reach / ky);
     let to_plan = |p: P2| P2(p.0 * kx, p.1 * ky);
-    cad.dxf()
-        .entities
-        .iter()
+    let entities = &cad.dxf().entities;
+    cad.entities_in(P2(q.0 - rx, q.1 - ry), P2(q.0 + rx, q.1 + ry))
+        .into_iter()
+        .filter_map(|i| entities.get(i))
         .filter(|e| cad.shows(e, &ci.hidden))
-        .filter(|e| {
-            let [lo, hi] = e.shape.bounds();
-            q.0 >= lo.0 - rx && q.0 <= hi.0 + rx && q.1 >= lo.1 - ry && q.1 <= hi.1 + ry
-        })
         .map(|e| (e, distance_scaled(&e.shape, q, &to_plan)))
         .filter(|(_, d)| *d <= reach)
         .min_by(|a, b| a.1.total_cmp(&b.1))
@@ -346,14 +548,22 @@ fn bulk(d: &Dxf) -> (Option<[P2; 2]>, usize) {
     (dxf::union(boxes.into_iter().filter(near)), far)
 }
 
-/// How a drawing goes in a project file: its DXF deflated (zlib) and in base64.
+#[cfg(test)]
+#[path = "cad_tests.rs"]
+pub(crate) mod tests;
+
+/// How a drawing goes in a project file: its DXF deflated (zlib) and in base64; a PDF page's lines are its packed lines
+/// (`lines`) instead.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CadFile {
     source: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     path: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     dxf: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    lines: Option<String>,
 }
 
 impl Serialize for Cad {
@@ -365,8 +575,16 @@ impl Serialize for Cad {
 impl Cad {
     /// A drawing as a file holds it, unpacking no more than `most` bytes.
     fn from_file(f: CadFile, most: usize) -> Result<Cad, String> {
-        let bytes = crate::cloud::inflate_of("a CAD drawing", &f.dxf, most.min(dxf::MAX_BYTES))?;
-        let cad = Cad::new(&f.source, f.path.clone(), bytes).map_err(|e| format!("CAD drawing `{}`: {e}", f.source))?;
+        let cad = match &f.lines {
+            Some(lines) => {
+                let bytes = crate::cloud::inflate_of("a page's lines", lines, most.min(dxf::MAX_BYTES))?;
+                Cad::of_lines(&f.source, bytes).map_err(|e| format!("the lines of `{}`: {e}", f.source))?
+            }
+            None => {
+                let bytes = crate::cloud::inflate_of("a CAD drawing", &f.dxf, most.min(dxf::MAX_BYTES))?;
+                Cad::new(&f.source, f.path.clone(), bytes).map_err(|e| format!("CAD drawing `{}`: {e}", f.source))?
+            }
+        };
         let _ = cad.packed.set(f);
         Ok(cad)
     }

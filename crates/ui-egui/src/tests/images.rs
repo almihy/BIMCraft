@@ -313,3 +313,106 @@ fn scale_takes_an_origin_and_two_reference_points_or_a_length_typed() {
     let im = images(&h)[0].1.clone();
     assert!((im.width - 20_000.0).abs() < 20.0, "{im:?}");
 }
+
+#[test]
+fn imported_categories_hides_a_pdfs_layers_in_the_view() {
+    // A plan on two layers, Walls and Notes, given to the window as a page hosting it gives a file.
+    let content = "/OC /L0 BDC 0 0 0 RG 2 w 10 10 m 190 10 l S EMC /OC /L1 BDC BT /F1 12 Tf 20 100 Td (Kitchen) Tj ET EMC";
+    let pdf = bimcraft_core::raster::pdf::sample_layered(content, [200.0, 200.0], &[("Walls", false), ("Notes", false)]);
+    let mut h = app(BOX);
+    h.state_mut().session.files.give("files/plan.pdf", pdf);
+    h.state_mut().session.execute("import_pdf", &json!({"path": "files/plan.pdf", "view": 100000})).unwrap();
+    assert_eq!(images(&h).len(), 1);
+    key(&mut h, Key::Escape);
+    shortcut(&mut h, "VV");
+    press(&mut h, "Imported Categories");
+    // Its layers, under the PDF's row, unfolded: Notes cleared hides it in this view.
+    press(&mut h, "plan.pdf: Unfold");
+    pick(&mut h, Role::CheckBox, "Notes");
+    press(&mut h, "OK");
+    let g = plan_graphics(&h, 100000);
+    assert_eq!(g.pdf_layers.get("plan.pdf").map(|l| l.iter().cloned().collect::<Vec<_>>()), Some(vec!["Notes".to_string()]));
+    // Shown again.
+    shortcut(&mut h, "VV");
+    press(&mut h, "Imported Categories");
+    press(&mut h, "plan.pdf: Unfold");
+    pick(&mut h, Role::CheckBox, "Notes");
+    press(&mut h, "OK");
+    assert!(plan_graphics(&h, 100000).pdf_layers.is_empty());
+}
+
+/// Whether the check box named `label` is ticked.
+fn ticked(h: &Harness<BimApp>, label: &str) -> bool {
+    use egui_kittest::kittest::NodeT as _;
+    h.get_by_role_and_label(Role::CheckBox, label).accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
+}
+
+#[test]
+fn a_layer_the_pdf_has_off_shows_unticked_in_the_view_and_ticking_it_shows_it() {
+    // Furniture is off in the file: it comes in hidden in the view it is placed in, unticked there, as Revit shows a DWG's.
+    let content = "/OC /L0 BDC 0 0 0 RG 2 w 10 10 m 190 10 l S EMC /OC /L1 BDC 1 0 0 RG 2 w 40 150 m 160 150 l S EMC";
+    let pdf = bimcraft_core::raster::pdf::sample_layered(content, [200.0, 200.0], &[("Walls", false), ("Furniture", true)]);
+    let mut h = app(BOX);
+    h.state_mut().session.files.give("files/plan.pdf", pdf);
+    h.state_mut().session.execute("import_pdf", &json!({"path": "files/plan.pdf", "view": 100000})).unwrap();
+    key(&mut h, Key::Escape);
+    shortcut(&mut h, "VV");
+    press(&mut h, "Imported Categories");
+    press(&mut h, "plan.pdf: Unfold");
+    assert!(ticked(&h, "Walls") && !ticked(&h, "Furniture"), "the layer the file has off is unticked");
+    pick(&mut h, Role::CheckBox, "Furniture");
+    press(&mut h, "OK");
+    assert!(plan_graphics(&h, 100000).pdf_layers.is_empty(), "ticked, it shows");
+    let drawn = bimcraft_core::render::draw(
+        &h.state().session.model,
+        100000,
+        bimcraft_core::prim::View { scale: 0.05, cx: 0.0, cy: 0.0, width: 400, height: 400 },
+    );
+    assert!(
+        drawn
+            .prims
+            .iter()
+            .any(|p| matches!(p, bimcraft_core::render::Prim::Line { color, .. } if *color == bimcraft_core::prim::Rgb(255, 0, 0))),
+        "the chair is drawn"
+    );
+}
+
+#[test]
+fn imported_categories_gives_a_pdf_its_visibility_and_halftone_as_a_dwgs() {
+    let content = "/OC /L0 BDC 0 0 0 RG 2 w 10 10 m 190 10 l S EMC /OC /L1 BDC 1 0 0 RG 2 w 40 150 m 160 150 l S EMC";
+    let pdf = bimcraft_core::raster::pdf::sample_layered(content, [200.0, 200.0], &[("Walls", false), ("Furniture", false)]);
+    let mut h = app(BOX);
+    h.state_mut().session.files.give("files/plan.pdf", pdf);
+    h.state_mut().session.execute("import_pdf", &json!({"path": "files/plan.pdf", "view": 100000})).unwrap();
+    key(&mut h, Key::Escape);
+    shortcut(&mut h, "VV");
+    press(&mut h, "Imported Categories");
+    press(&mut h, "plan.pdf: Unfold");
+    // The page in halftone (the whole file's, as Revit's: a layer has none of its own), and hidden by its own row's box.
+    assert!(h.query_by_label("Furniture: Halftone").is_none());
+    pick(&mut h, Role::CheckBox, "plan.pdf: Halftone");
+    pick(&mut h, Role::CheckBox, "plan.pdf");
+    press(&mut h, "OK");
+    let g = plan_graphics(&h, 100000);
+    let look = g.pdf_imports.get("plan.pdf").cloned().unwrap_or_default();
+    assert!(look.all.hidden && look.all.halftone, "{look:?}");
+    let view = bimcraft_core::prim::View { scale: 0.05, cx: 0.0, cy: 0.0, width: 400, height: 400 };
+    let drawn = bimcraft_core::render::draw(&h.state().session.model, 100000, view);
+    assert!(
+        !drawn.prims.iter().any(|p| matches!(p, bimcraft_core::render::Prim::Line { color, .. } if color.0 > 200 && color.1 < 160)),
+        "the page is hidden"
+    );
+    // Shown again, the chair in halftone: half way to the paper.
+    shortcut(&mut h, "VV");
+    press(&mut h, "Imported Categories");
+    pick(&mut h, Role::CheckBox, "plan.pdf");
+    press(&mut h, "OK");
+    let drawn = bimcraft_core::render::draw(&h.state().session.model, 100000, view);
+    assert!(
+        drawn
+            .prims
+            .iter()
+            .any(|p| matches!(p, bimcraft_core::render::Prim::Line { color, .. } if *color == bimcraft_core::prim::Rgb(255, 127, 127))),
+        "halftone"
+    );
+}

@@ -57,7 +57,7 @@ fn reach(prim: &Prim) -> f32 {
         &mut |s| shapes.push(s),
         clip,
         Place::at(pos2(0.0, 0.0)),
-        (prim, None, render::Part::Projection),
+        (prim, None, render::Part::Projection, false),
         &Default::default(),
         None,
         false,
@@ -84,7 +84,7 @@ fn on_screen(pts: &[(f64, f64)], scale: f64) -> Vec<(f32, f32)> {
 fn a_fill_that_turns_back_on_itself_stays_where_it_is_at_every_zoom() {
     // From a plan at 1 : 100 to one of a whole region: the hatch goes from a few hundred pixels to a few thousandths of one.
     for scale in [0.5, 0.05, 0.005, 0.001, 0.0005, 0.0002, 0.0001, 0.00005, 0.00002, 0.00001] {
-        let fill = Prim::Fill { rings: vec![on_screen(&HATCH, scale)], color: Rgb(222, 205, 160) };
+        let fill = Prim::fill(vec![on_screen(&HATCH, scale)], Rgb(222, 205, 160));
         let far = reach(&fill);
         assert!(far <= 2.0, "at {scale} px a mm the hatch's fill reaches {far} px past it");
     }
@@ -97,7 +97,7 @@ fn a_sliver_and_a_spur_are_filled_without_a_band_across_the_view() {
     let spur = [(0.0, 0.0), (1000.0, 0.0), (1000.0, 500.0), (3000.0, 500.0), (1000.0, 500.0001), (1000.0, 1000.0), (0.0, 1000.0)];
     for (name, ring) in [("sliver", &sliver[..]), ("spur", &spur[..])] {
         for scale in [0.1, 0.01, 0.001, 0.0001] {
-            let far = reach(&Prim::Fill { rings: vec![on_screen(ring, scale)], color: Rgb(222, 205, 160) });
+            let far = reach(&Prim::fill(vec![on_screen(ring, scale)], Rgb(222, 205, 160)));
             assert!(far <= 2.0, "at {scale} px a mm the {name}'s fill reaches {far} px past it");
         }
     }
@@ -107,7 +107,7 @@ fn a_sliver_and_a_spur_are_filled_without_a_band_across_the_view() {
 fn a_closed_line_that_turns_back_on_itself_is_mitred_no_further_than_its_width() {
     for scale in [0.5, 0.05, 0.005, 0.0005, 0.00005] {
         for width in [0.0, 1.0, 3.0] {
-            let line = Prim::Line { pts: on_screen(&HATCH, scale), width, color: Rgb(0, 0, 0), dash: None, closed: true };
+            let line = Prim::line(on_screen(&HATCH, scale), width, Rgb(0, 0, 0), None, true);
             let far = reach(&line);
             assert!(far <= 2.0 + 2.0 * width.max(1.0), "at {scale} px a mm a closed line {width} px wide reaches {far} px past it");
         }

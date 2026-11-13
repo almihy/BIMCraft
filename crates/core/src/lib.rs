@@ -67,6 +67,10 @@ mod openings_past_top_tests;
 #[cfg(test)]
 mod oracle_tests;
 #[cfg(test)]
+mod pdf_fidelity_tests;
+#[cfg(test)]
+mod pdf_layers_tests;
+#[cfg(test)]
 mod pin_tests;
 #[cfg(test)]
 mod quantities_tests;

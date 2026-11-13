@@ -105,8 +105,10 @@ pub const ANNOTATION: [&str; 10] = ["dimension", "tag", "text", "line", "region"
 /// The point clouds, which views hide and override as Revit's Visibility/Graphics does on a tab of their own: not a model
 /// category, so Object Styles has no row for them.
 pub const SCANS: [&str; 1] = ["pointcloud"];
-/// The CAD imports, which views hide and override on a tab of their own too, as Revit's Imported Categories.
-pub const IMPORTED: [&str; 1] = ["cadimport"];
+/// The imports, which views hide and override on a tab of their own too, as Revit's Imported Categories: `cadimport`, the
+/// box over its table (Show imported categories in this view), which hides every CAD drawing and every PDF page's lines in the
+/// view; and `familyimport`, its Imports in Families row, what families bring in from CAD files (none of the project's yet).
+pub const IMPORTED: [&str; 2] = ["cadimport", "familyimport"];
 
 /// A subcategory: a part of a category a view hides, shows and overrides apart from the rest, as Revit's (Rooms >
 /// Reference). It is held in a view's graphics by its `key`, as a category is; `off` ones are hidden unless the view shows
@@ -286,7 +288,7 @@ pub enum Dash {
 
 impl Dash {
     /// The on and off lengths a line is drawn with, px.
-    fn pattern(self) -> Option<Vec<f32>> {
+    pub(crate) fn pattern(self) -> Option<Vec<f32>> {
         match self {
             Dash::Solid => None,
             Dash::Dashed => Some(vec![10.0, 5.0]),
@@ -433,7 +435,7 @@ impl Override {
     }
 
     /// This override's settings, and `base`'s where it has none.
-    fn over(&self, base: &Override) -> Override {
+    pub(crate) fn over(&self, base: &Override) -> Override {
         Override {
             hidden: self.hidden || base.hidden,
             projection: self.projection.over(&base.projection),
@@ -542,6 +544,97 @@ pub struct Graphics {
     /// The layers of each CAD drawing it hides, by the drawing's name: Revit's Imported Categories, layer by layer.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub layers: BTreeMap<String, BTreeSet<String>>,
+    /// The layers of each PDF page's lines it hides, by the image's name: listed with the CAD drawings' in Imported
+    /// Categories, and shown and hidden as theirs are.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub pdf_layers: BTreeMap<String, BTreeSet<String>>,
+    /// How it draws each CAD drawing, by the drawing's name: Imported Categories' row of the import and of each of its
+    /// layers.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub imports: BTreeMap<String, ImportLook>,
+    /// How it draws each PDF page's lines, by the image's name, as `imports` does a drawing's.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub pdf_imports: BTreeMap<String, ImportLook>,
+}
+
+/// How a view draws an imported drawing (a DWG's, or a PDF page's lines), as Revit's Visibility/Graphics' Imported Categories
+/// has it: the import's own row (`all`: hidden, its projection lines' colour, weight and pattern, halftone) and each layer's
+/// (`layers`: its lines and halftone, by the layer's name). A layer's own settings win over the import's; which layers it
+/// hides is `layers` and `pdf_layers` of its graphics.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ImportLook {
+    #[serde(skip_serializing_if = "Override::is_empty")]
+    pub all: Override,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub layers: BTreeMap<String, Override>,
+}
+
+impl ImportLook {
+    pub fn is_empty(&self) -> bool {
+        *self == ImportLook::default()
+    }
+
+    /// Its overrides with their patterns taken off, which an import has none of, as in Revit: a file that holds them (written
+    /// while BIMCraft let an import's Patterns be overridden) reads with them left out.
+    fn drop_patterns(&mut self) {
+        for o in std::iter::once(&mut self.all).chain(self.layers.values_mut()) {
+            o.projection = lines_of(&o.projection);
+        }
+    }
+
+    /// How it draws layer `layer`'s lines: the layer's settings, and the import's where it has none.
+    pub fn of_layer(&self, layer: &str) -> Override {
+        match self.layers.get(layer) {
+            Some(o) => o.over(&self.all),
+            None => self.all.clone(),
+        }
+    }
+
+    /// Whether it is sound: an import's row sets its visibility, its projection lines and its halftone; a layer's its lines
+    /// and its halftone (whether it shows is the view's `layers`). Its Patterns can't be overridden, as in Revit.
+    fn check(&self, who: &str) -> Result<(), String> {
+        let only_lines = |o: &Override, what: &str| -> Result<(), String> {
+            if o.projection != lines_of(&o.projection) || !o.cut.is_empty() || o.transparency != 0 || o.shown {
+                return Err(format!(
+                    "{what}: an import sets its projection lines (colour, weight, pattern) and halftone only; its Patterns can't be overridden, as in Revit"
+                ));
+            }
+            o.check(what)
+        };
+        only_lines(&self.all, &format!("{who}'s row"))?;
+        if self.layers.len() > crate::model::MAX_HIDDEN {
+            return Err(format!("{who}: it sets more than {} layers", crate::model::MAX_HIDDEN));
+        }
+        for (name, o) in &self.layers {
+            if name.chars().count() > crate::model::MAX_TEXT {
+                return Err(format!("{who}: a layer's name is longer than {} characters", crate::model::MAX_TEXT));
+            }
+            if o.hidden {
+                return Err(format!("{who}: layer `{name}` is hidden with the view's `layers`, not an override"));
+            }
+            only_lines(o, &format!("{who}'s layer `{name}`"))?;
+        }
+        Ok(())
+    }
+}
+
+/// A style's lines alone (its colour, weight and dash), its patterns taken off: what an import's row and layers set.
+fn lines_of(s: &Style) -> Style {
+    Style { color: s.color, weight: s.weight, dash: s.dash, ..Style::default() }
+}
+
+/// What a view and a template hold of an import's Patterns, left out ([`ImportLook::drop_patterns`]): its imports' and PDF
+/// pages' rows and layers, and Imports in Families'.
+pub(crate) fn drop_import_patterns(g: &mut Graphics) {
+    for look in g.imports.values_mut().chain(g.pdf_imports.values_mut()) {
+        look.drop_patterns();
+    }
+    for c in IMPORTED {
+        if let Some(o) = g.categories.get_mut(c) {
+            o.projection = lines_of(&o.projection);
+        }
+    }
 }
 
 /// An edge of `element` as the view draws it, from `from` to `to` (mm in the view's terms), in line style `style` instead
@@ -559,6 +652,12 @@ pub struct Linework {
 impl Graphics {
     pub fn is_default(&self) -> bool {
         *self == Graphics::default()
+    }
+
+    /// Whether it holds what [`crate::model::FORMAT`] 21 brought: a PDF page's layers hidden, or how an import or a PDF page
+    /// draws; a build that reads up to 20 would refuse it as a field it doesn't know.
+    pub fn holds_imports(&self) -> bool {
+        !self.pdf_layers.is_empty() || !self.imports.is_empty() || !self.pdf_imports.is_empty()
     }
 
     /// The scale, 1 : n, these hold a view at in a project in `units`: their own, else the units' default (1 : 100, or
@@ -595,6 +694,12 @@ impl Graphics {
         }
         if t.controls.contains(&Group::BackgroundGrid) {
             g.background_grid = t.graphics.background_grid;
+        }
+        if t.controls.contains(&Group::Imports) {
+            g.layers = t.graphics.layers.clone();
+            g.pdf_layers = t.graphics.pdf_layers.clone();
+            g.imports = t.graphics.imports.clone();
+            g.pdf_imports = t.graphics.pdf_imports.clone();
         }
         std::borrow::Cow::Owned(g)
     }
@@ -680,6 +785,9 @@ impl Graphics {
                 ));
             }
             o.check(&format!("category `{c}`"))?;
+            if IMPORTED.contains(&c.as_str()) && o.projection != lines_of(&o.projection) {
+                return Err(format!("category `{c}`: an import's Patterns can't be overridden, as in Revit; it takes its lines only"));
+            }
         }
         for (id, o) in &self.elements {
             o.check(&format!("element {id}"))?;
@@ -711,10 +819,30 @@ impl Graphics {
                 crate::model::MAX_HIDDEN
             ));
         }
-        for (cad, layers) in &self.layers {
+        if self.pdf_layers.len() > crate::raster::MAX_TYPES || self.pdf_layers.values().any(|l| l.len() > crate::model::MAX_HIDDEN) {
+            return Err(format!(
+                "it hides layers of more than {} PDF pages, or more than {} of one",
+                crate::raster::MAX_TYPES,
+                crate::model::MAX_HIDDEN
+            ));
+        }
+        for (cad, layers) in self.layers.iter().chain(&self.pdf_layers) {
             if let Some(n) = std::iter::once(cad).chain(layers).find(|n| n.chars().count() > crate::model::MAX_TEXT) {
                 return Err(format!("the layer or drawing `{n}` is longer than {} characters", crate::model::MAX_TEXT));
             }
+        }
+        if self.imports.len() > crate::cad::MAX_CADS || self.pdf_imports.len() > crate::raster::MAX_TYPES {
+            return Err(format!(
+                "it sets how more than {} CAD drawings or {} PDF pages draw",
+                crate::cad::MAX_CADS,
+                crate::raster::MAX_TYPES
+            ));
+        }
+        for (name, look) in &self.imports {
+            look.check(&format!("CAD drawing `{name}`"))?;
+        }
+        for (name, look) in &self.pdf_imports {
+            look.check(&format!("PDF page `{name}`"))?;
         }
         let mut seen = BTreeSet::new();
         for a in &self.filters {
@@ -827,10 +955,13 @@ pub enum Group {
     /// The canvas background grid display settings.
     #[serde(rename = "background_grid")]
     BackgroundGrid,
+    /// Imported Categories: which layers of each CAD drawing and PDF page it hides, and how each draws (Revit's V/G Overrides
+    /// Import).
+    Imports,
 }
 
 impl Group {
-    pub const ALL: [Group; 9] = [
+    pub const ALL: [Group; 10] = [
         Group::Categories,
         Group::Filters,
         Group::Range,
@@ -840,6 +971,7 @@ impl Group {
         Group::Detail,
         Group::Style,
         Group::BackgroundGrid,
+        Group::Imports,
     ];
 }
 
@@ -988,6 +1120,8 @@ pub fn check_followed(m: &Model, old: &Element, new: &Element) -> Result<(), Str
     follows(Group::Detail, a.detail == b.detail, "detail level")?;
     follows(Group::Style, a.style == b.style, "visual style")?;
     follows(Group::BackgroundGrid, a.background_grid == b.background_grid, "background grids")?;
+    let imports = |g: &Graphics| (g.layers.clone(), g.pdf_layers.clone(), g.imports.clone(), g.pdf_imports.clone());
+    follows(Group::Imports, imports(a) == imports(b), "imported categories")?;
     if let (Element::Level(x), Element::Level(y)) = (old, new) {
         follows(Group::Range, x.view_range == y.view_range, "view range")?;
     }
@@ -1037,6 +1171,13 @@ pub struct Look {
     hidden: BTreeSet<Id>,
     /// The layers of each CAD drawing it hides, by the drawing's name.
     layers: BTreeMap<String, BTreeSet<String>>,
+    /// The layers of each PDF page's lines it hides, by the image's name.
+    pdf_layers: BTreeMap<String, BTreeSet<String>>,
+    /// How it draws each CAD drawing, and each PDF page's lines.
+    imports: BTreeMap<String, ImportLook>,
+    pdf_imports: BTreeMap<String, ImportLook>,
+    /// Imported Categories' Show imported categories in this view cleared: no import is drawn, nor a PDF page's lines.
+    imports_hidden: bool,
     paint: BTreeMap<Id, Override>,
     style: VisualStyle,
     /// The section box a 3D view is cut to, its min and max corners, while it's on.
@@ -1125,7 +1266,16 @@ impl Look {
     /// (a room's area) makes redraws slow.
     pub fn with(m: &Model, own: &Graphics) -> Look {
         let g = own.resolved(m);
-        let mut look = Look { style: g.style, detail: g.detail, layers: own.layers.clone(), ..Look::default() };
+        let mut look = Look {
+            style: g.style,
+            detail: g.detail,
+            layers: g.layers.clone(),
+            pdf_layers: g.pdf_layers.clone(),
+            imports: g.imports.clone(),
+            pdf_imports: g.pdf_imports.clone(),
+            imports_hidden: g.hides("cadimport"),
+            ..Look::default()
+        };
         // Nothing to look for: no graphics of its own, and nothing in the project phased or in an option.
         let linked = m.elements.keys().next_back().is_some_and(|id| crate::link::is_linked(*id));
         if own.draws_as_is() && !linked && !crate::phasing::any(m) && m.rare("mass").is_empty() {
@@ -1206,6 +1356,27 @@ impl Look {
         self.layers.get(cad)
     }
 
+    /// The layers of the lines of the PDF page `image` the view hides.
+    pub fn hidden_pdf_layers(&self, image: &str) -> Option<&BTreeSet<String>> {
+        self.pdf_layers.get(image)
+    }
+
+    /// How the view draws the CAD drawing `cad`, when it says.
+    pub fn import_look(&self, cad: &str) -> Option<&ImportLook> {
+        self.imports.get(cad)
+    }
+
+    /// How the view draws the lines of the PDF page `image`, when it says.
+    pub fn pdf_import_look(&self, image: &str) -> Option<&ImportLook> {
+        self.pdf_imports.get(image)
+    }
+
+    /// Whether the view draws the lines of the PDF page `image`: neither when its own row is cleared, nor when the view shows
+    /// no imports.
+    pub fn draws_pdf_lines(&self, image: &str) -> bool {
+        !self.imports_hidden && !self.pdf_imports.get(image).is_some_and(|l| l.all.hidden)
+    }
+
     /// Whether the view draws element `id`.
     pub fn shows(&self, id: Id) -> bool {
         !self.hidden.contains(&id)
@@ -1218,6 +1389,11 @@ impl Look {
         let base = if self.pattern_style(id, true).is_some() { crate::prim::PAPER } else { default };
         let c = o.cut.fill.map_or(base, |[r, g, b]| Rgb(r, g, b));
         if o.halftone { halftone(c) } else { c }
+    }
+
+    /// Whether element `id` is drawn halftone.
+    pub fn half(&self, id: Id) -> bool {
+        self.paint.get(&id).is_some_and(|o| o.halftone)
     }
 
     /// The colour a 3D view shades element `id` in, `base` unless it says otherwise.
@@ -1256,8 +1432,12 @@ impl Look {
         if self.paint.is_empty() {
             return;
         }
-        for (((prim, owner), part), pen) in d.prims.iter_mut().zip(&d.owners).zip(&d.parts).zip(d.pens.iter_mut()) {
+        let mut halves = Vec::new();
+        for (i, (((prim, owner), part), pen)) in d.prims.iter_mut().zip(&d.owners).zip(&d.parts).zip(d.pens.iter_mut()).enumerate() {
             let Some(over) = owner.and_then(|id| self.paint.get(&id)) else { continue };
+            if over.halftone && !matches!(prim, Prim::Image { .. } if *part != Part::Cells) {
+                halves.push(i);
+            }
             let style = if *part == Part::Cut { &over.cut } else { &over.projection };
             match prim {
                 Prim::Line { color, dash, .. } => {
@@ -1297,8 +1477,23 @@ impl Look {
                         *color = halftone(*color);
                     }
                 }
+                // A dense drawing's cells, as its lines would be.
+                Prim::Image { rgba, .. } if *part == Part::Cells => {
+                    for px in rgba.as_chunks_mut::<4>().0 {
+                        if let Some([r, g, b]) = style.color {
+                            px[..3].copy_from_slice(&[r, g, b]);
+                        }
+                        if over.halftone {
+                            let Rgb(r, g, b) = halftone(Rgb(px[0], px[1], px[2]));
+                            px[..3].copy_from_slice(&[r, g, b]);
+                        }
+                    }
+                }
                 Prim::Image { .. } => {}
             }
+        }
+        for i in halves {
+            d.set_half(i);
         }
     }
 }

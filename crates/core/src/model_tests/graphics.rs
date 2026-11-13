@@ -821,7 +821,10 @@ fn a_view_template_holds_a_views_settings_for_other_views_to_follow() {
     let grid = run(&mut s, "grid", json!({"start": [-1000, 3000], "end": [9000, 3000]}))["id"].as_u64().unwrap();
     run(&mut s, "graphics", json!({"view": 100000, "hide": ["grids"], "categories": {"walls": {"cut": {"color": [200, 0, 0]}}}}));
     let r = run(&mut s, "template", json!({"name": "Presentation", "from": "Level 1"}));
-    assert_eq!(r["controls"], json!(["categories", "filters", "range", "phase", "options", "scale", "detail", "style", "background_grid"]));
+    assert_eq!(
+        r["controls"],
+        json!(["categories", "filters", "range", "phase", "options", "scale", "detail", "style", "background_grid", "imports"])
+    );
     assert_eq!((r["hidden"].clone(), r["categories"]["wall"]["cut"]["color"].clone()), (json!(["grid"]), json!([200, 0, 0])));
     assert!(!owned(&plan(&s, 100001), grid).is_empty() && lines(&plan(&s, 100001), up).iter().all(|l| l.1 != RED));
     run(&mut s, "graphics", json!({"view": "Level 2", "template": "Presentation"}));
@@ -834,7 +837,7 @@ fn a_view_template_holds_a_views_settings_for_other_views_to_follow() {
         (
             json!("Presentation"),
             json!(["grid"]),
-            json!(["categories", "filters", "range", "phase", "options", "scale", "detail", "style", "background_grid"])
+            json!(["categories", "filters", "range", "phase", "options", "scale", "detail", "style", "background_grid", "imports"])
         )
     );
     // Change the template, and its views follow; the view it came from doesn't.

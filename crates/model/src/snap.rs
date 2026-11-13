@@ -299,9 +299,9 @@ impl<'a> Scene<'a> {
                 }
                 Element::DetailLine(l) if m.annotation_in(e, view) => s.curve(&l.curve, p, window, of),
                 // A PDF's lines, Revit's Enable Snaps: their ends, middles and crossings, and the lines themselves.
-                Element::Image(im) if im.snaps && m.annotation_in(e, view) => {
+                Element::Image(im) if im.snaps && m.annotation_in(e, view) && look.draws_pdf_lines(&im.type_name) => {
                     if let Some((cad, ci)) = m.image_types.get(&im.type_name).and_then(|t| im.lines_placed(t, im.view)) {
-                        cad_scene(&mut s, &cad, &ci, p, window, None, id);
+                        cad_scene(&mut s, &cad, &ci, p, window, look.hidden_pdf_layers(&im.type_name), id);
                     }
                 }
                 // The rest is a plan's: a section has none of it.
@@ -441,7 +441,7 @@ impl<'a> Scene<'a> {
                 Element::Stair(st) if st.level == level && near(&[st.start]) => s.points.push((st.start, Kind::Endpoint, of)),
                 Element::Ramp(r) if r.level == level && near(&[r.start]) => s.points.push((r.start, Kind::Endpoint, of)),
                 Element::Railing(r) if r.level == level => s.points.extend(ring(&r.path)),
-                Element::CadImport(ci) if ci.level == level => {
+                Element::CadImport(ci) if ci.level == level && !look.import_look(&ci.cad).is_some_and(|l| l.all.hidden) => {
                     if let Some(cad) = m.cads.get(&ci.cad) {
                         cad_scene(&mut s, cad, ci, p, window, look.hidden_layers(&ci.cad), id);
                     }
@@ -475,8 +475,10 @@ fn cad_scene(
     });
     let Some([lo, hi]) = crate::dxf::union(corners) else { return };
     let near = |b: [P2; 2]| b[0].0 <= hi.0 && b[1].0 >= lo.0 && b[0].1 <= hi.1 && b[1].1 >= lo.1;
-    for e in &cad.dxf().entities {
-        if !cad.shows(e, &ci.hidden) || in_view.is_some_and(|h| h.contains(&e.layer)) || !near(e.shape.bounds()) {
+    // Only those whose boxes reach the window: a dense sheet's hundreds of thousands are never all looked at.
+    let entities = &cad.dxf().entities;
+    for e in cad.entities_in(lo, hi).into_iter().filter_map(|i| entities.get(i)) {
+        if !cad.shows(e, &ci.hidden) || in_view.is_some_and(|h| h.contains(&e.layer)) {
             continue;
         }
         match &e.shape {

@@ -184,7 +184,7 @@ read only. A `text` parameter holds words (`Val::Text`), shown in Properties and
 schedule lists its families' parameters as a component's does), which no formula reads; a parameter's `unit` is said
 beside a number and its `group` is the bar Properties and Type Properties list it under. `family {path}` and the inline
 command take `materials: {name: {color, transparency?}}`, added where the project has none of that name, and the whitelist
-of a file's keys takes all of the above; a caller's `source` is laid over the file's. A project is written as format 21
+of a file's keys takes all of the above; a caller's `source` is laid over the file's. A project is written as format 22
 only when a family uses `types`, `show`, a symbol's `view`, `outline`, `cut` or a text parameter, which a build that reads
 up to 20 would misread (`Model::written_format`); the rest an older build leaves out. `family_library` lists BIMCraft's own
 families (the starter set, named in the project's language, and the symbol sets) for Load Family, and replies one's
@@ -245,7 +245,7 @@ other as the check and the fallback (`snapshot` forms and symbols), and checks e
   generic one; `loadable` gives a material named but not brought a grey, cuts a long text, drops a door's own
   `Wall Thickness` and lists a nested family's subcategories), named after the file without `.arqiflow-family`, and gives
   back its `place` (Load Family starts placing that type). The reply and the list say `editable` and `check`. A project
-  using any of it is written as format 22 (`Model::written_format`; 21 is `TYPES_FORMAT`). The Family Editor's References
+  using any of it is written as format 23 (`Model::written_format`; 22 is `TYPES_FORMAT`, 21 `PDF_FORMAT`). The Family Editor's References
   tab lists the planes (where each is in the type previewed), the dimensions, the nested families and each type's check,
   and the window says "Editable" or "As in Revit (not yet editable)" with the reason; a blend, a sweep and Revit's result
   are kept as they came and only their material, visibility and void are edited. `family_parametric_tests.rs` drives it

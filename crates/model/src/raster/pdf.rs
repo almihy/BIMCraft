@@ -1,30 +1,51 @@
 //! A PDF's pages read for Import PDF, through hayro (pure Rust, Apache-2.0 OR MIT, so it builds for the browser too): each
 //! page's size, its pixels at a resolution, and what it draws as vectors (its stroked and filled paths, and the text it
-//! shows) in millimetres on the paper, from its bottom left corner, y up, as the pixels have it. The file itself is not kept:
-//! a project holds the pixels and the lines.
+//! shows) in millimetres on the paper, from its bottom left corner, y up, as the pixels have it, each on the layer (the
+//! optional content group) it is drawn on, as the page draws it: a fill by its rule, holes and all, what is see-through as
+//! see-through, cut by the clipping paths it sets whatever their shape, a gradient as bands of its colours and a pattern as one
+//! hatch drawn with its cell, a dash
+//! in all its dashes, a line as wide as the page makes it each way. The file itself is not kept: a project holds the
+//! pictures it holds and the lines.
 
-use std::collections::BTreeSet;
+mod paint;
+mod patterns;
+mod pictures;
+mod shapes;
+
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Write as _;
 use std::sync::{Arc, Mutex};
 
-use hayro::hayro_interpret::font::GlyphRun;
+use hayro::hayro_interpret::font::{Glyph, GlyphRun};
 use hayro::hayro_interpret::{
-    self as interpret, BlendMode, ClipPath, Context, Device, DrawMode, DrawProps, ImageDrawProps, InterpreterCache, InterpreterSettings,
-    Paint, SoftMask, TransformExt,
+    self as interpret, BlendMode, ClipPath, Context, Device, DrawMode, DrawProps, FillRule, ImageDrawProps, InterpreterCache,
+    InterpreterSettings, Paint, SoftMask, StrokeProps, TransformExt,
 };
-use hayro::hayro_syntax::object::{Array, Dict, Name, Number, String as PdfString};
+use hayro::hayro_syntax::object::{Array, Dict, MaybeRef, Name, Number, ObjectIdentifier, String as PdfString};
 use hayro::hayro_syntax::page::Page;
 use hayro::hayro_syntax::{LoadPdfError, Pdf};
-use hayro::kurbo::{Affine, BezPath, CubicBez, ParamCurve, PathEl, Point, QuadBez, Rect};
+use hayro::kurbo::{Affine, BezPath, Cap, CubicBez, Join, ParamCurve, PathEl, Point, QuadBez, Rect};
+
+use crate::dxf::{Align, Color, Dxf, Entity, Horizontal, Layer as DxfLayer, Linetype, Shape, Vertical};
+use crate::geom::P2;
+use shapes::{Ends, Region};
+
+pub use patterns::TILE_BUDGET;
+
+// hayro-interpret as BIMCraft patches it (vendor/hayro-interpret, the root Cargo.toml's [patch.crates-io]): what a form or an
+// annotation draws on a layer is read on that layer only with it. A workspace that builds this crate without the patch fails
+// here: copy the root [patch.crates-io] into it.
+const _: () = assert!(hayro::hayro_interpret::BIMCRAFT_PATCH == 1, "hayro-interpret must be BIMCraft's patched copy");
 
 /// Millimetres in a point, PDF's unit.
 pub const MM_PER_PT: f64 = 25.4 / 72.0;
 /// The most pages a file may have to be read.
 pub const MAX_PAGES: usize = 10_000;
-/// The most path segments and texts kept of one page: past them the rest is left out, with a note.
-pub const MAX_SEGMENTS: usize = 400_000;
+/// The most points (and texts) a page's lines keep: a dense A0 sheet of a million and a half is well within. Past it, the
+/// page is too dense to keep as lines and shows as one picture, as its notes say.
+pub const MAX_SEGMENTS: usize = 4_000_000;
 /// The most points one path may become: a path that would be more is left out.
-pub const MAX_PATH_POINTS: usize = 100_000;
+pub const MAX_PATH_POINTS: usize = 400_000;
 /// The most points the curves of one page are worked into, kept or not: past it, the rest of the page's paths are left
 /// out, so a hostile file's curves can't hold up the read.
 const MAX_WORK: usize = 4 * MAX_SEGMENTS;
@@ -34,10 +55,32 @@ const FLATNESS: f64 = 0.05;
 const MAX_CHORDS: usize = 4096;
 /// How many times, at most, a curve far bigger than the box it is clipped to is halved to find the parts of it in the box.
 const MAX_HALVINGS: u32 = 48;
+/// The most layers (optional content groups) a file's are read of.
+pub const MAX_LAYERS: usize = 4096;
+/// The most pixels of a page's pictures painted, among them all: past it, the rest are left out of its picture.
+const MAX_PAINTED: u64 = 4 * 36_000_000;
+/// What the lines drawn on no layer of a file that has layers are on.
+pub const NO_LAYER: &str = "No layer";
+/// The widest a line is kept as a line, mm on paper: the widest pen draws 2 mm, so a line wider than a pen can draw (a stroke
+/// used as poché) is kept as the outline it fills instead, as wide as the page draws it.
+pub const MAX_LINE_WIDTH: f64 = 2.2;
+/// How much more a page may stretch a line one way than the other before its width is its outline's (a line along the stretch
+/// thinner than one across it): past this, as a fill.
+const STRETCHED: f64 = 1.02;
+/// How much of the page a white fill drawn before anything else covers to be the page's own ground, which no drawing has.
+const GROUND: f64 = 0.9;
 
-/// A PDF file opened: its pages.
+/// A PDF file opened: its pages, and its layers (its optional content groups, as Acrobat's Layers list them).
 pub struct Document {
     pdf: Pdf,
+    layers: Vec<(ObjectIdentifier, Layer)>,
+}
+
+/// A layer of a PDF, an optional content group: its name and whether the file has it off (hidden as it opens).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Layer {
+    pub name: String,
+    pub off: bool,
 }
 
 impl std::fmt::Debug for Document {
@@ -46,38 +89,84 @@ impl std::fmt::Debug for Document {
     }
 }
 
-/// What a page draws as vectors, mm on the paper: lines (open or closed runs of points), the outlines of what it fills,
-/// and its texts; each with its colour and, for a stroke, its width. Read with [`Document::vectors`].
+/// What a page draws as vectors, mm on the paper: lines (open or closed runs of points), the rings of what it fills, and its
+/// texts; each with its colour and opacity, its layer and, for a line, its width and dashes. Read with [`Document::vectors`].
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Vectors {
     pub strokes: Vec<Run>,
+    /// Each fill's rings, those of one fill sharing its `seq`: they fill by odd parity (a ring inside another is a hole),
+    /// whatever rule the page filled them by, resolved as it reads them.
     pub fills: Vec<Run>,
+    /// What it fills with a tiling pattern: each one hatch drawn with the pattern's cell.
+    pub tiled: Vec<Tiled>,
     pub texts: Vec<Text>,
+    /// The fills painted with a tiling pattern past what a page's patterns may lay ([`TILE_BUDGET`]), filled in
+    /// their pattern's tint instead.
+    pub tinted: usize,
+    /// The file's layers, which a run's or a text's `layer` counts in: every optional content group it has, whether this
+    /// page draws on it or not.
+    pub layers: Vec<Layer>,
     /// The paths left out past [`MAX_SEGMENTS`], [`MAX_PATH_POINTS`] or the work a page may take.
     pub left_out: usize,
+    /// The points the page would have kept, those left out with them: how dense it is.
+    pub points: usize,
     /// The character maps (CMaps) its text asked for that BIMCraft doesn't hold, by name: text in them (Chinese, Japanese
     /// or Korean, mostly) is missing from the lines and may show wrongly in the picture.
     pub cmaps: Vec<String>,
+    /// The letters drawn in a way its lines can't hold (a Type 3 font's, with no Unicode for them): they show only in the
+    /// picture.
+    pub unlettered: usize,
+    /// Whether layers the file has off couldn't be read (an encrypted file is read only as it opens): what they draw is
+    /// missing from the lines.
+    pub off_unread: bool,
 }
 
-/// A run of points a page draws, mm, and whether it closes; its colour, and a stroke's width, mm.
+/// A run of points a page draws, mm, and whether it closes; its colour and opacity (255 all), and a line's width, mm (0 a
+/// hairline), and dashes (on, off, on, … mm, begun where the page begins them). `seq` is its place in the order the page draws
+/// (the rings of one fill share one); `layer` the file's layer it is on, by its place in [`Vectors::layers`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct Run {
     pub pts: Vec<[f64; 2]>,
     pub closed: bool,
     pub color: [u8; 3],
+    pub alpha: u8,
     pub width: f64,
+    pub dash: Option<Vec<f64>>,
+    pub seq: usize,
+    pub layer: Option<usize>,
+    /// A fill that is a band of a gradient (a shading): it keeps its colours on a dark canvas.
+    pub shade: bool,
+}
+
+/// What a page fills with a tiling pattern (a brick, a batt of insulation, earth), kept as one hatch: its rings, mm (filling by
+/// odd parity, cut to the clip), the pattern's cell and its steps ([`crate::dxf::Tile`], shared by the fills of one
+/// pattern), the colour and opacity it paints on the whole (its tint), its place in the order and its layer, as a run's.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Tiled {
+    pub rings: Vec<Vec<[f64; 2]>>,
+    pub tile: Arc<crate::dxf::Tile>,
+    pub color: [u8; 3],
+    pub alpha: u8,
+    pub seq: usize,
+    pub layer: Option<usize>,
 }
 
 /// A text a page shows: what it says, where its first letter stands, how tall its letters are and the turn of its baseline,
-/// degrees counter-clockwise, all on the paper in mm.
+/// degrees counter-clockwise, all on the paper in mm; how much wider than BIMCraft's lettering it runs (its squeeze, its
+/// spacing and its font's own width, `wide`), and whether it reads mirrored; its colour and opacity, its place in the order
+/// the page draws and its layer, as a run's.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Text {
     pub text: String,
     pub at: [f64; 2],
     pub height: f64,
     pub angle: f64,
+    pub wide: f64,
+    pub mirrored: bool,
     pub color: [u8; 3],
+    pub alpha: u8,
+    pub seq: usize,
+    pub layer: Option<usize>,
 }
 
 impl Document {
@@ -99,7 +188,8 @@ impl Document {
         if n > MAX_PAGES {
             return Err(format!("it has {n} pages; a file to import has up to {MAX_PAGES}"));
         }
-        Ok(Document { pdf })
+        let layers = read_layers(&pdf);
+        Ok(Document { pdf, layers })
     }
 
     /// How many pages it has.
@@ -107,9 +197,47 @@ impl Document {
         self.pdf.pages().len()
     }
 
+    /// Its layers (optional content groups), in the order the file lists them.
+    pub fn layers(&self) -> Vec<Layer> {
+        self.layers.iter().map(|(_, l)| l.clone()).collect()
+    }
+
     fn page(&self, page: usize) -> Result<&Page<'_>, String> {
-        let n = self.pages();
-        page.checked_sub(1).and_then(|i| self.pdf.pages().get(i)).ok_or_else(|| format!("it has no page {page}: its pages are 1 to {n}"))
+        page_of(&self.pdf, page)
+    }
+
+    /// The file with every layer on: itself with one more revision appended (a catalog with no optional content, as PDF's
+    /// incremental updates add one), so a layer the file has off is read too. None when it has no layers, or is encrypted
+    /// (the revision would need its key), or the revision can't be read.
+    fn all_on(&self) -> Option<Pdf> {
+        if self.layers.is_empty() {
+            return None;
+        }
+        let data: &[u8] = self.pdf.data().as_ref();
+        if data.windows(8).any(|w| w == b"/Encrypt") {
+            return None;
+        }
+        let xref = self.pdf.xref();
+        let root = xref.root_id();
+        let catalog = xref.get::<Dict<'_>>(root)?;
+        let pages = catalog.get_ref(b"Pages")?;
+        // Where its last cross-reference section starts: the one the revision goes on from.
+        let at = data.windows(9).rposition(|w| w == b"startxref")?;
+        let prev: usize = String::from_utf8_lossy(data.get(at + 9..(at + 40).min(data.len()))?).split_whitespace().next()?.parse().ok()?;
+        let (n, g) = (root.obj_number, root.gen_number);
+        let mut out = data.to_vec();
+        out.push(b'\n');
+        let obj = out.len();
+        let _ = write!(Bytes(&mut out), "{n} {g} obj\n<< /Type /Catalog /Pages {} {} R >>\nendobj\n", pages.obj_number, pages.gen_number);
+        let table = out.len();
+        let size = n.saturating_add(1).max(u32::try_from(self.pdf.len()).unwrap_or(u32::MAX).saturating_add(1));
+        let _ = write!(
+            Bytes(&mut out),
+            "xref\n0 1\n0000000000 65535 f \n{n} 1\n{obj:010} {:05} n \ntrailer\n<< /Size {size} /Root {n} {g} R /Prev {prev} >>\nstartxref\n{table}\n%%EOF\n",
+            g.clamp(0, 65_535)
+        );
+        let pdf = Pdf::new(out).ok()?;
+        (pdf.pages().len() == self.pages()).then_some(pdf)
     }
 
     /// The size of page `page` (from 1), mm, as it's shown: turned as the page says, its user unit taken in.
@@ -168,12 +296,73 @@ impl Document {
             }),
             ..InterpreterSettings::default()
         };
+        // Read with every layer on, so what the file has off is in the lines too, on its layer.
+        let all_on = self.all_on();
+        let p = match &all_on {
+            Some(pdf) => page_of(pdf, page)?,
+            None => p,
+        };
         let mut ctx = Context::new(to_mm, page_box, &cache, p.xref(), settings);
-        let mut device = Collect { out: Vectors::default(), held: 0, worked: 0, clips: vec![page_box] };
+        let ids: HashMap<ObjectIdentifier, usize> = self.layers.iter().enumerate().map(|(i, (id, _))| (*id, i)).collect();
+        let names: HashMap<String, usize> = self.layers.iter().enumerate().rev().map(|(i, (_, l))| (l.name.clone(), i)).collect();
+        let mut device = Collect {
+            out: Vectors { layers: self.layers(), ..Vectors::default() },
+            held: 0,
+            worked: 0,
+            clips: vec![Region::Box([0.0, 0.0, w, h])],
+            ids,
+            names,
+            oc: Vec::new(),
+            seq: 0,
+            groups: vec![1.0],
+            page: [0.0, 0.0, w, h],
+            begun: false,
+            depth: 0,
+            tiles: Vec::new(),
+            laid: 0,
+        };
         interpret::interpret_page(p, &mut ctx, &mut device);
         let mut out = device.out;
         out.cmaps = asked.lock().map(|a| a.iter().cloned().collect()).unwrap_or_default();
+        out.off_unread = all_on.is_none() && self.layers.iter().any(|(_, l)| l.off);
         Ok(out)
+    }
+
+    /// Page `page`'s pictures (the raster images it draws) at `dpi` dots an inch, on nothing (transparent where none is), the
+    /// part of the page they cover cut out and handed to `f` as [`Document::render_into`] does: what its lines can't draw.
+    /// With the part of the page it is (from its top left, as shares of its width and height) and how many pictures it drew;
+    /// none when it draws none.
+    pub fn pictures_into<T>(
+        &self,
+        page: usize,
+        dpi: f64,
+        f: impl FnOnce(u32, u32, &[u8]) -> T,
+    ) -> Result<Option<(T, [f64; 4], usize)>, String> {
+        let p = self.page(page)?;
+        let k = (dpi / 72.0 * user_unit(p)) as f32;
+        let (w, h) = p.render_dimensions();
+        let (pw, ph) = ((w * k).floor(), (h * k).floor());
+        if !(pw >= 1.0 && ph >= 1.0 && pw <= f32::from(u16::MAX) && ph <= f32::from(u16::MAX)) {
+            return Err(format!("its page {page} would be {pw} by {ph} px at {dpi} dpi"));
+        }
+        let (pw, ph) = (pw as u32, ph as u32);
+        let to_px = Affine::scale(f64::from(k)) * p.initial_transform(true).to_kurbo();
+        let canvas = Rect::new(0.0, 0.0, f64::from(pw), f64::from(ph));
+        let cache = InterpreterCache::new();
+        let mut ctx = Context::new(to_px, canvas, &cache, p.xref(), InterpreterSettings::default());
+        let mut device = pictures::Pictures::new(pw, ph);
+        interpret::interpret_page(p, &mut ctx, &mut device);
+        let Some([x0, y0, x1, y1]) = device.covered.filter(|_| device.drawn > 0) else { return Ok(None) };
+        // The part they cover, row by row.
+        let (cw, ch) = (x1 - x0, y1 - y0);
+        let mut part = Vec::with_capacity(cw as usize * ch as usize * 4);
+        for y in y0..y1 {
+            let from = (y as usize * pw as usize + x0 as usize) * 4;
+            part.extend_from_slice(device.rgba.get(from..from + cw as usize * 4).unwrap_or_default());
+        }
+        let share =
+            [f64::from(x0) / f64::from(pw), f64::from(y0) / f64::from(ph), f64::from(x1) / f64::from(pw), f64::from(y1) / f64::from(ph)];
+        Ok(Some((f(cw, ch, &part), share, device.drawn)))
     }
 
     /// What page `page` says one millimetre of it stands for, mm, when it says (a viewport's measure, PDF's `/VP`, whose
@@ -214,6 +403,66 @@ fn unit_mm(unit: &str) -> Option<f64> {
     })
 }
 
+/// Page `page` (from 1) of `pdf`, or why there is none.
+fn page_of(pdf: &Pdf, page: usize) -> Result<&Page<'_>, String> {
+    let n = pdf.pages().len();
+    page.checked_sub(1).and_then(|i| pdf.pages().get(i)).ok_or_else(|| format!("it has no page {page}: its pages are 1 to {n}"))
+}
+
+/// A byte buffer written to as text.
+struct Bytes<'a>(&'a mut Vec<u8>);
+
+impl std::fmt::Write for Bytes<'_> {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        self.0.extend_from_slice(s.as_bytes());
+        Ok(())
+    }
+}
+
+/// A PDF text string as text: UTF-16 (big-endian) after its byte order mark, UTF-8 after its own, else PDFDocEncoding,
+/// read as Latin-1 (they differ only in a few marks).
+fn text_string(b: &[u8]) -> String {
+    if let Some(rest) = b.strip_prefix(&[0xFE, 0xFF]) {
+        let units: Vec<u16> = rest.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes(*c)).collect();
+        String::from_utf16_lossy(&units)
+    } else if let Some(rest) = b.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
+        String::from_utf8_lossy(rest).into_owned()
+    } else {
+        b.iter().map(|c| char::from(*c)).collect()
+    }
+}
+
+/// A file's layers, its optional content groups as its catalog lists them (`/OCProperties /OCGs`), each with its name and
+/// whether its default configuration (`/D`: its base state, its `/ON` and `/OFF`) has it off.
+fn read_layers(pdf: &Pdf) -> Vec<(ObjectIdentifier, Layer)> {
+    let xref = pdf.xref();
+    let Some(catalog) = xref.get::<Dict<'_>>(xref.root_id()) else { return Vec::new() };
+    let Some(props) = catalog.get::<Dict<'_>>(b"OCProperties") else { return Vec::new() };
+    let Some(list) = props.get::<Array<'_>>(b"OCGs") else { return Vec::new() };
+    let config = props.get::<Dict<'_>>(b"D");
+    let refs = |key: &[u8]| -> Vec<ObjectIdentifier> {
+        config
+            .as_ref()
+            .and_then(|d| d.get::<Array<'_>>(key))
+            .map(|a| a.raw_iter().take(MAX_LAYERS).filter_map(|i| i.as_obj_ref()).map(ObjectIdentifier::from).collect())
+            .unwrap_or_default()
+    };
+    let base_off = config.as_ref().and_then(|d| d.get::<Name<'_>>(b"BaseState")).is_some_and(|n| n.as_ref() == b"OFF");
+    let (on, off) = (refs(b"ON"), refs(b"OFF"));
+    let mut out: Vec<(ObjectIdentifier, Layer)> = Vec::new();
+    for item in list.raw_iter().take(MAX_LAYERS) {
+        let Some(r) = item.as_obj_ref() else { continue };
+        let id = ObjectIdentifier::from(r);
+        if out.iter().any(|(i, _)| *i == id) {
+            continue;
+        }
+        let name = xref.get::<Dict<'_>>(id).and_then(|d| d.get::<PdfString<'_>>(b"Name")).map(|n| text_string(n.as_bytes()));
+        let off = if base_off { !on.contains(&id) } else { off.contains(&id) };
+        out.push((id, Layer { name: name.unwrap_or_default(), off }));
+    }
+    out
+}
+
 /// A page's user unit: how many points one of its units is (PDF 1.6's `/UserUnit`), 1 unless it says.
 fn user_unit(p: &Page<'_>) -> f64 {
     p.raw().get::<Number>(b"UserUnit").map(|n| n.as_f64()).filter(|u| u.is_finite() && *u > 0.0 && *u <= 75_000.0).unwrap_or(1.0)
@@ -226,8 +475,28 @@ struct Collect {
     held: usize,
     /// Points the page's curves were worked into so far, kept or not.
     worked: usize,
-    /// The boxes what's drawn is clipped to, mm: the page's, then each clipping path's within the one before.
-    clips: Vec<Rect>,
+    /// The regions what's drawn is clipped to, mm: the page's, then each clipping path's within the one before.
+    clips: Vec<Region>,
+    /// The file's layers by their object, and by their name (a group read where its object isn't known), to their place in
+    /// [`Vectors::layers`].
+    ids: HashMap<ObjectIdentifier, usize>,
+    names: HashMap<String, usize>,
+    /// The layer of each marked-content sequence open (`BDC` to `EMC`), innermost last: one of optional content (`/OC`) is
+    /// on its group (an OCMD's first group), any other on the layer of the one round it.
+    oc: Vec<Option<usize>>,
+    /// What the page has drawn so far, the order its runs and texts keep.
+    seq: usize,
+    /// How opaque each transparency group open is, all of them taken together, the page's (1) first.
+    groups: Vec<f32>,
+    /// The page's box, mm, x0 y0 x1 y1.
+    page: [f64; 4],
+    /// Whether anything has been kept: a white fill over the page before that is the page's ground.
+    begun: bool,
+    /// How deep in patterns painted with patterns what is drawn now is: 0 on the page.
+    depth: u32,
+    /// The patterns its hatches are drawn with so far, each once, and the points their cells lay among them.
+    tiles: Vec<Arc<crate::dxf::Tile>>,
+    laid: usize,
 }
 
 /// Whether boxes `a` and `b` overlap or touch.
@@ -297,104 +566,20 @@ fn chords(ctrl: &[Point], clip: Rect, depth: u32, work: &mut usize, out: &mut Ve
     true
 }
 
-/// The parts of polyline `pts` (closed back to its start when `closed`) inside box `r`, each an open run of two or more
-/// points, Liang and Barsky's clipping of each segment: a stroke as it shows inside a clip. A polyline wholly inside comes
-/// back whole, its start again at its end when it closes.
-fn clip_lines(pts: &[[f64; 2]], closed: bool, r: Rect) -> Vec<Vec<[f64; 2]>> {
-    let inside = |q: &[f64; 2]| q[0] >= r.x0 && q[0] <= r.x1 && q[1] >= r.y0 && q[1] <= r.y1;
-    if pts.iter().all(inside) {
-        let mut all = pts.to_vec();
-        if closed && let Some(&first) = pts.first() {
-            all.push(first);
-        }
-        return vec![all];
-    }
-    let n = pts.len();
-    let segments = if closed { n } else { n.saturating_sub(1) };
-    let mut runs: Vec<Vec<[f64; 2]>> = Vec::new();
-    let mut run: Vec<[f64; 2]> = Vec::new();
-    let end = |run: &mut Vec<[f64; 2]>, runs: &mut Vec<Vec<[f64; 2]>>| {
-        let done = std::mem::take(run);
-        if done.len() > 1 {
-            runs.push(done);
-        }
-    };
-    for i in 0..segments {
-        let (Some(&a), Some(&b)) = (pts.get(i), pts.get((i + 1) % n)) else { break };
-        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
-        let (mut t0, mut t1) = (0.0_f64, 1.0_f64);
-        let mut keep = true;
-        for (p, q) in [(-dx, a[0] - r.x0), (dx, r.x1 - a[0]), (-dy, a[1] - r.y0), (dy, r.y1 - a[1])] {
-            if p == 0.0 {
-                keep &= q >= 0.0;
-            } else if p < 0.0 {
-                t0 = t0.max(q / p);
-            } else {
-                t1 = t1.min(q / p);
-            }
-        }
-        if !keep || t0 > t1 {
-            end(&mut run, &mut runs);
-            continue;
-        }
-        let (s, e) = ([a[0] + dx * t0, a[1] + dy * t0], [a[0] + dx * t1, a[1] + dy * t1]);
-        if run.last() != Some(&s) {
-            end(&mut run, &mut runs);
-            run.push(s);
-        }
-        run.push(e);
-        if t1 < 1.0 {
-            end(&mut run, &mut runs);
-        }
-    }
-    end(&mut run, &mut runs);
-    runs
-}
-
-/// Ring `pts` cut to box `r`, Sutherland and Hodgman's clipping by each side of the box in turn: a fill as it shows inside
-/// a clip. Empty when none of it is inside.
-fn clip_ring(pts: &[[f64; 2]], r: Rect) -> Vec<[f64; 2]> {
-    let mut ring = pts.to_vec();
-    // Each side of the box: which coordinate, its line, and whether inside is past it (above or right of it).
-    for (axis, at, past) in [(0, r.x0, true), (0, r.x1, false), (1, r.y0, true), (1, r.y1, false)] {
-        let inside = |q: &[f64; 2]| if past { q[axis] >= at } else { q[axis] <= at };
-        let cross = |a: [f64; 2], b: [f64; 2]| {
-            let t = (at - a[axis]) / (b[axis] - a[axis]);
-            [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
-        };
-        let n = ring.len();
-        let mut next = Vec::with_capacity(n + 4);
-        for i in 0..n {
-            let (Some(&a), Some(&b)) = (ring.get(i), ring.get((i + 1) % n)) else { break };
-            match (inside(&a), inside(&b)) {
-                (true, true) => next.push(b),
-                (true, false) => next.push(cross(a, b)),
-                (false, true) => {
-                    next.push(cross(a, b));
-                    next.push(b);
-                }
-                (false, false) => {}
-            }
-        }
-        ring = next;
-        if ring.is_empty() {
-            break;
-        }
-    }
-    ring.dedup();
-    if ring.len() > 1 && ring.first() == ring.last() {
-        ring.pop();
-    }
-    if ring.len() < 3 { Vec::new() } else { ring }
-}
-
 /// Runs of points: each one's points and whether it closes.
 type Runs = Vec<(Vec<[f64; 2]>, bool)>;
 
 impl Collect {
-    /// The box what's drawn now is clipped to.
-    fn clip(&self) -> Rect {
-        self.clips.last().copied().unwrap_or(Rect::ZERO)
+    /// The region what's drawn now is clipped to.
+    fn clip(&self) -> &Region {
+        static NOTHING: std::sync::OnceLock<Region> = std::sync::OnceLock::new();
+        self.clips.last().unwrap_or_else(|| NOTHING.get_or_init(Region::nothing))
+    }
+
+    /// The box round the region what's drawn now is clipped to.
+    fn clip_box(&self) -> Rect {
+        let [x0, y0, x1, y1] = self.clip().bounds();
+        Rect::new(x0, y0, x1, y1)
     }
 
     /// Runs of points a path draws, through `t`: its curves in chords, and of them only what lies near the clip. None when
@@ -403,7 +588,7 @@ impl Collect {
         if self.held >= MAX_SEGMENTS || self.worked > MAX_WORK {
             return None;
         }
-        let clip = self.clip();
+        let clip = self.clip_box();
         let placed = t * path.clone();
         let b = placed.control_box();
         if !(b.x0.is_finite() && b.y0.is_finite() && b.x1.is_finite() && b.y1.is_finite()) || !meets(b, clip) {
@@ -469,39 +654,171 @@ impl Collect {
         )
     }
 
-    /// Keeps the runs a path draws, cut to the clip: a stroke's lines (at `width`), else the outlines of a fill.
-    fn keep(&mut self, runs: Option<Runs>, color: [u8; 3], width: Option<f64>) {
+    /// The layer what is drawn now is on.
+    fn layer(&self) -> Option<usize> {
+        self.oc.last().copied().flatten()
+    }
+
+    /// The layer an optional content dictionary stands for: a group's own (by its object, else its name), an OCMD's first
+    /// group (of `/OCGs`, else of its visibility expression `/VE`).
+    fn layer_of(&self, d: &Dict<'_>) -> Option<usize> {
+        if d.get::<Name<'_>>(b"Type").is_some_and(|n| n.as_ref() == b"OCMD") {
+            if let Some(r) = d.get_ref(b"OCGs") {
+                return self.ids.get(&ObjectIdentifier::from(r)).copied();
+            }
+            if let Some(a) = d.get::<Array<'_>>(b"OCGs") {
+                return a.raw_iter().take(MAX_LAYERS).filter_map(|i| i.as_obj_ref()).find_map(|r| self.ids.get(&r.into()).copied());
+            }
+            return d.get::<Array<'_>>(b"VE").and_then(|a| self.first_in(&a, 0));
+        }
+        d.obj_id()
+            .and_then(|id| self.ids.get(&id).copied())
+            .or_else(|| d.get::<PdfString<'_>>(b"Name").and_then(|n| self.names.get(&text_string(n.as_bytes())).copied()))
+    }
+
+    /// The first group a visibility expression names, depth first.
+    fn first_in(&self, a: &Array<'_>, depth: u32) -> Option<usize> {
+        if depth > 16 {
+            return None;
+        }
+        a.raw_iter().take(MAX_LAYERS).find_map(|item| match item {
+            MaybeRef::Ref(r) => self.ids.get(&r.into()).copied(),
+            MaybeRef::NotRef(o) => o.into_array().and_then(|inner| self.first_in(&inner, depth + 1)),
+        })
+    }
+
+    /// An opacity as the transparency groups open make it: theirs times its own.
+    fn seen(&self, alpha: u8) -> u8 {
+        let group = self.groups.last().copied().unwrap_or(1.0);
+        (f32::from(alpha) * group).round().clamp(0.0, 255.0) as u8
+    }
+
+    /// What `paint` fills or strokes with over box `over` (mm), as opaque as the groups open make it; none when it paints
+    /// nothing.
+    fn paint(&self, paint: &Paint<'_>, over: [f64; 4]) -> Option<([u8; 3], u8)> {
+        let (c, a) = paint::rgba(paint, over)?;
+        Some((c, self.seen(a))).filter(|(_, a)| *a > 0)
+    }
+
+    /// Counts a path left out.
+    fn leave(&mut self) {
+        self.out.left_out += 1;
+    }
+
+    /// Keeps the lines a path strokes, cut to the clip: `width` mm wide (0 a hairline), dashed by `dash`, in the page's order at
+    /// `seq`.
+    fn keep_lines(&mut self, runs: Option<Runs>, (color, alpha): ([u8; 3], u8), width: f64, dash: Option<Vec<f64>>, seq: usize) {
         let Some(runs) = runs else {
-            self.out.left_out += 1;
+            self.leave();
             return;
         };
-        let clip = self.clip();
         let mut cut: Runs = Vec::new();
         for (pts, closed) in runs {
-            if width.is_some() {
-                let pieces = clip_lines(&pts, closed, clip);
-                // A closed run wholly inside stays closed; one the clip cuts is open where it was cut.
-                if closed && pieces.len() == 1 && pieces.first().is_some_and(|p| p.len() == pts.len() + 1) {
-                    cut.push((pts, true));
-                } else {
-                    cut.extend(pieces.into_iter().map(|p| (p, false)));
-                }
+            let pieces = self.clip().lines(&pts, closed);
+            // A closed run wholly inside stays closed; one the clip cuts is open where it was cut.
+            if closed && pieces.len() == 1 && pieces.first().is_some_and(|p| p.len() == pts.len() + 1) {
+                cut.push((pts, true));
             } else {
-                let ring = clip_ring(&pts, clip);
-                if !ring.is_empty() {
-                    cut.push((ring, true));
-                }
+                cut.extend(pieces.into_iter().map(|p| (p, false)));
             }
         }
         for (pts, closed) in cut {
+            self.out.points += pts.len();
             if self.held + pts.len() > MAX_SEGMENTS {
                 self.out.left_out += 1;
                 continue;
             }
             self.held += pts.len();
-            let run = Run { pts, closed, color, width: width.unwrap_or(0.0) };
-            if width.is_some() { self.out.strokes.push(run) } else { self.out.fills.push(run) }
+            self.begun = true;
+            let layer = self.layer();
+            self.out.strokes.push(Run { pts, closed, color, alpha, width, dash: dash.clone(), seq, layer, shade: false });
         }
+    }
+
+    /// Keeps the rings a path fills, by the even-odd rule or the non-zero one, as rings that fill by odd parity, cut to the
+    /// clip, in the page's order at `seq`. A white fill over the page before anything else is drawn is the page's ground,
+    /// which a drawing has none of, and is left out.
+    fn keep_fill(&mut self, rings: Vec<Vec<[f64; 2]>>, even_odd: bool, (color, alpha): ([u8; 3], u8), seq: usize) {
+        if !self.begun && alpha == 255 && color.iter().all(|c| *c >= 250) && self.layer().is_none() {
+            let [x0, y0, x1, y1] = self.page;
+            let page = (x1 - x0) * (y1 - y0);
+            let covered = shapes::around(rings.iter().flatten())
+                .map_or(0.0, |[a, b, c, d]| ((c.min(x1) - a.max(x0)).max(0.0)) * ((d.min(y1) - b.max(y0)).max(0.0)));
+            if page > 0.0 && covered >= GROUND * page {
+                return;
+            }
+        }
+        let rings = self.clip().fill(shapes::resolve(&rings, even_odd));
+        let n: usize = rings.iter().map(Vec::len).sum();
+        self.out.points += n;
+        if rings.is_empty() {
+            return;
+        }
+        if self.held + n > MAX_SEGMENTS {
+            self.out.left_out += 1;
+            return;
+        }
+        self.held += n;
+        self.begun = true;
+        let layer = self.layer();
+        for pts in rings {
+            self.out.fills.push(Run { pts, closed: true, color, alpha, width: 0.0, dash: None, seq, layer, shade: false });
+        }
+    }
+
+    /// Keeps what a path strokes through `t` with `s`: its lines, or, where the page stretches it more one way than the other
+    /// or makes it wider than a pen draws, its outline as a fill.
+    fn stroke(&mut self, path: &BezPath, t: Affine, s: &StrokeProps, paint: ([u8; 3], u8), seq: usize) {
+        let (most, least) = stretches(t);
+        let w = f64::from(s.line_width).max(0.0);
+        let k = (most * least).sqrt();
+        let width = w * k;
+        if w > 0.0 && least > 0.0 && (most / least > STRETCHED || width > MAX_LINE_WIDTH) {
+            self.outline(path, t, s, paint, seq);
+            return;
+        }
+        let runs = self.runs(path, t);
+        self.keep_lines(runs, paint, width, dash_of(s, k), seq);
+    }
+
+    /// Keeps a stroke as the outline it fills: its lines taken back to the page's own space, dashed there, stroked as wide as
+    /// the page says with its ends and corners, and brought out again, so it is as wide each way as the page draws it.
+    fn outline(&mut self, path: &BezPath, t: Affine, s: &StrokeProps, paint: ([u8; 3], u8), seq: usize) {
+        let back = t.inverse();
+        if !back.as_coeffs().iter().all(|v| v.is_finite()) {
+            return;
+        }
+        let Some(runs) = self.runs(path, t) else {
+            self.leave();
+            return;
+        };
+        let mut lines: Vec<(Vec<[f64; 2]>, bool)> = Vec::new();
+        let dash = dash_of(s, 1.0);
+        for (pts, closed) in runs {
+            let own: Vec<[f64; 2]> = pts.iter().map(|p| pt(back * Point::new(p[0], p[1]))).collect();
+            match &dash {
+                Some(d) => lines.extend(shapes::dashed(&own, closed, d).into_iter().map(|p| (p, false))),
+                None => lines.push((own, closed)),
+            }
+        }
+        let ends = Ends {
+            cap: match s.line_cap {
+                Cap::Butt => 0,
+                Cap::Round => 1,
+                Cap::Square => 2,
+            },
+            join: match s.line_join {
+                Join::Miter => 0,
+                Join::Round => 1,
+                Join::Bevel => 2,
+            },
+            miter_limit: f64::from(s.miter_limit),
+        };
+        let rings: Vec<Vec<[f64; 2]>> = shapes::outline(&lines, f64::from(s.line_width), ends)
+            .into_iter()
+            .map(|r| r.into_iter().map(|p| pt(t * Point::new(p[0], p[1]))).collect())
+            .collect();
+        self.keep_fill(rings, true, paint, seq);
     }
 }
 
@@ -509,89 +826,207 @@ fn pt(q: Point) -> [f64; 2] {
     [q.x, q.y]
 }
 
-/// A paint's colour, or black for a pattern.
-fn rgb(paint: &Paint<'_>) -> [u8; 3] {
-    match paint {
-        Paint::Color(c) => {
-            let [r, g, b, _] = c.to_rgba().to_rgba8();
-            [r, g, b]
-        }
-        Paint::Pattern(_) => [0, 0, 0],
-    }
+/// How much `t` stretches a length the most and the least, whichever way it lies: its linear part's singular values.
+fn stretches(t: Affine) -> (f64, f64) {
+    let [a, b, c, d, _, _] = t.as_coeffs();
+    let (p, q) = (a * a + b * b + c * c + d * d, (a * d - b * c).abs());
+    let r = (p * p - 4.0 * q * q).max(0.0).sqrt();
+    (((p + r) / 2.0).sqrt(), ((p - r) / 2.0).max(0.0).sqrt())
 }
 
-/// How much `t` stretches a length, on the whole: the square root of its area's scale.
-fn stretch(t: Affine) -> f64 {
-    t.determinant().abs().sqrt()
+/// A stroke's dashes, mm (its dash array times `k`): on, off, on, …, an odd list gone round twice as PDF says, begun where the
+/// page's phase begins them (the list turned to start there: a dash cut short first, its rest last). None when it is solid.
+fn dash_of(s: &StrokeProps, k: f64) -> Option<Vec<f64>> {
+    // Doubled when odd and turned to its phase, a dash of this many stays within what a drawing's linetype holds.
+    const MOST: usize = crate::cad::packed::MAX_DASHES / 2 - 2;
+    let mut a: Vec<f64> = s.dash_array.iter().take(MOST).map(|x| f64::from(*x) * k).collect();
+    if a.is_empty() || !a.iter().all(|x| x.is_finite() && *x >= 0.0) {
+        return None;
+    }
+    if a.len() % 2 == 1 {
+        a.extend(a.clone());
+    }
+    let total: f64 = a.iter().sum();
+    if total <= 1e-3 || a.iter().skip(1).step_by(2).all(|gap| *gap <= 1e-6) {
+        return None;
+    }
+    let mut phase = (f64::from(s.dash_offset) * k).rem_euclid(total);
+    if phase <= 1e-9 {
+        return Some(a);
+    }
+    // Which piece the phase falls in, and how far into it.
+    let mut j = 0;
+    while j + 1 < a.len() && phase >= a[j] {
+        phase -= a[j];
+        j += 1;
+    }
+    let mut out = Vec::with_capacity(a.len() + 2);
+    if j % 2 == 1 {
+        // In a gap: no dash first.
+        out.push(0.0);
+    }
+    out.push((a[j] - phase).max(0.0));
+    out.extend(&a[j + 1..]);
+    out.extend(&a[..j]);
+    out.push(phase);
+    if out.len() % 2 == 1 {
+        out.push(0.0);
+    }
+    Some(out)
 }
 
 impl<'a> Device<'a> for Collect {
     fn draw_path(&mut self, path: &BezPath, props: DrawProps<'a>, mode: &DrawMode) {
-        let color = rgb(&props.paint);
         if matches!(mode, DrawMode::Invisible) {
             return;
         }
-        let runs = self.runs(path, props.transform);
+        self.seq += 1;
+        let seq = self.seq;
+        let b = (props.transform * path.clone()).control_box();
+        let mean = self.paint(&props.paint, [b.x0, b.y0, b.x1, b.y1]);
+        let rings = |runs: Runs| runs.into_iter().map(|(p, _)| p).collect::<Vec<_>>();
+        // A fill painted with a pattern is kept as the pattern paints it; else (or past what that may make) in its mean colour.
+        let fill = |me: &mut Collect, runs: Runs, rule: &FillRule| {
+            let (rings, even_odd) = (rings(runs), *rule == FillRule::EvenOdd);
+            if let Paint::Pattern(p) = &props.paint
+                && me.fill_pattern(&rings, even_odd, p, mean.unwrap_or(([0, 0, 0], 0)))
+            {
+                return;
+            }
+            if let Some(paint) = mean {
+                me.keep_fill(rings, even_odd, paint, seq);
+            }
+        };
         match mode {
             DrawMode::Stroke(s) => {
-                let width = f64::from(s.line_width) * stretch(props.transform);
-                self.keep(runs, color, Some(width));
+                if let Some(paint) = mean {
+                    self.stroke(path, props.transform, s, paint, seq);
+                }
             }
-            DrawMode::Fill(_) => self.keep(runs, color, None),
-            DrawMode::FillAndStroke(_, s) => {
-                let width = f64::from(s.line_width) * stretch(props.transform);
-                self.keep(runs, color, Some(width));
+            DrawMode::Fill(rule) => match self.runs(path, props.transform) {
+                Some(runs) => fill(self, runs, rule),
+                None => self.leave(),
+            },
+            DrawMode::FillAndStroke(rule, s) => {
+                if let Some(runs) = self.runs(path, props.transform) {
+                    fill(self, runs, rule);
+                }
+                // Over the fill, which a pattern may have made many of.
+                self.seq += 1;
+                let seq = self.seq;
+                if let Some(paint) = mean {
+                    self.stroke(path, props.transform, s, paint, seq);
+                }
             }
             DrawMode::Invisible => {}
         }
     }
 
-    fn push_clip_path(&mut self, clip: &ClipPath) {
-        // The box round the clipping path, within the clip before: what is drawn is cut to it.
-        let b = clip.path.control_box();
-        let now = self.clip();
-        let inner = Rect::new(b.x0.max(now.x0), b.y0.max(now.y0), b.x1.min(now.x1), b.y1.min(now.y1));
-        let shows = inner.x0 <= inner.x1 && inner.y0 <= inner.y1 && inner.x0.is_finite() && inner.y1.is_finite();
-        // Through a clip of nothing, nothing shows: a box far off the page.
-        self.clips.push(if shows { inner } else { Rect::new(-2e9, -2e9, -1e9, -1e9) });
+    fn begin_marked_content(&mut self, tag: &[u8], properties: Option<&Dict<'_>>) {
+        let around = self.layer();
+        let here = if tag == b"OC" { properties.and_then(|d| self.layer_of(d)).or(around) } else { around };
+        if self.oc.len() < 4096 {
+            self.oc.push(here);
+        }
     }
 
-    fn push_transparency_group(&mut self, _: f32, _: Option<SoftMask<'a>>, _: BlendMode) {}
+    fn end_marked_content(&mut self) {
+        self.oc.pop();
+    }
+
+    fn push_clip_path(&mut self, clip: &ClipPath) {
+        // The clipping path's rings, each closed as a fill's are, within the region before.
+        let next = match self.runs(&clip.path, Affine::IDENTITY) {
+            Some(runs) => {
+                let rings: Vec<Vec<[f64; 2]>> = runs.into_iter().map(|(p, _)| p).filter(|p| p.len() >= 3).collect();
+                if rings.is_empty() { Region::nothing() } else { self.clip().within(&rings, clip.fill == FillRule::EvenOdd) }
+            }
+            // A clip too big to read clips to its box.
+            None => {
+                let b = clip.path.control_box();
+                let ring = vec![[b.x0, b.y0], [b.x1, b.y0], [b.x1, b.y1], [b.x0, b.y1]];
+                self.clip().within(&[ring], false)
+            }
+        };
+        self.clips.push(next);
+    }
+
+    fn push_transparency_group(&mut self, opacity: f32, _: Option<SoftMask<'a>>, _: BlendMode) {
+        let o = self.groups.last().copied().unwrap_or(1.0) * opacity.clamp(0.0, 1.0);
+        if self.groups.len() < 4096 {
+            self.groups.push(o);
+        }
+    }
 
     fn draw_glyph_run(&mut self, run: &GlyphRun<'_, 'a>, props: DrawProps<'a>, mode: &DrawMode) {
         if matches!(mode, DrawMode::Invisible) || self.held >= MAX_SEGMENTS {
             return;
         }
+        self.seq += 1;
+        let seq = self.seq;
         let glyphs = run.glyphs();
-        let mut text = String::new();
-        for g in glyphs {
+        let Some(first) = glyphs.first() else { return };
+        let o = (props.transform * first.transform()) * Point::ORIGIN;
+        let Some(paint) = self.paint(&props.paint, [o.x, o.y, o.x, o.y]) else { return };
+        // Each letter's text, by the glyph it is; a letter with no Unicode is kept as its outline, filled: it draws as the
+        // page does, though it reads as no text. A Type 3 font's letters are drawings of their own, which only the picture
+        // holds.
+        let mut letters: Vec<(usize, String)> = Vec::new();
+        for (i, g) in glyphs.iter().enumerate() {
             match g.as_unicode() {
-                Some(hayro::hayro_interpret::hayro_cmap::BfString::Char(c)) => text.push(c),
-                Some(hayro::hayro_interpret::hayro_cmap::BfString::String(s)) => text.push_str(&s),
-                None => {}
+                Some(hayro::hayro_interpret::hayro_cmap::BfString::Char(c)) => letters.push((i, c.to_string())),
+                Some(hayro::hayro_interpret::hayro_cmap::BfString::String(s)) => letters.push((i, s)),
+                None => match &**g {
+                    Glyph::Outline(o) => {
+                        let t = props.transform * g.transform();
+                        if let Some(runs) = self.runs(&o.outline(), t) {
+                            self.keep_fill(runs.into_iter().map(|(p, _)| p).collect(), false, paint, seq);
+                        }
+                    }
+                    Glyph::Type3(_) => self.out.unlettered += 1,
+                },
             }
         }
-        let text: String = text.trim().chars().take(crate::model::MAX_TEXT).collect();
-        let Some(first) = glyphs.first() else { return };
-        if text.is_empty() {
+        // The letters from the first to the last that isn't a space: where they stand is where the text does.
+        let blank = |s: &String| s.chars().all(char::is_whitespace);
+        let (Some(a), Some(z)) = (letters.iter().position(|(_, s)| !blank(s)), letters.iter().rposition(|(_, s)| !blank(s))) else {
             return;
-        }
-        // A glyph's space is an em a side: its height is the em's, placed.
-        let t = props.transform * first.transform();
+        };
+        let shown = &letters[a..=z];
+        let (Some((i0, _)), Some((i1, last))) = (shown.first(), shown.last()) else { return };
+        let (Some(g0), Some(g1)) = (glyphs.get(*i0), glyphs.get(*i1)) else { return };
+        let all: String = shown.iter().map(|(_, s)| s.as_str()).collect();
+        let before_last: String = shown[..shown.len() - 1].iter().map(|(_, s)| s.as_str()).collect();
+        let _ = last;
+        let text: String = all.chars().take(crate::model::MAX_TEXT).collect();
+        // A glyph's space is a thousand units an em (hayro's outlines are in them): its height is the em's, placed.
+        let t = props.transform * g0.transform();
         let origin = t * Point::ORIGIN;
-        let up = t * Point::new(0.0, 1.0) - origin;
+        let up = t * Point::new(0.0, 1000.0) - origin;
         let along = t * Point::new(1.0, 0.0) - origin;
         // Capitals stand about seven tenths of an em.
         let height = up.hypot() * 0.7;
-        let angle = along.y.atan2(along.x).to_degrees().rem_euclid(360.0);
-        let clip = self.clip();
-        if !(height.is_finite() && height > 0.0 && origin.x.is_finite() && origin.y.is_finite())
-            || !(origin.x >= clip.x0 && origin.x <= clip.x1 && origin.y >= clip.y0 && origin.y <= clip.y1)
+        let mirrored = along.cross(up) < 0.0;
+        // The way it runs: from its first letter to its last, else along its first.
+        let end = (props.transform * g1.transform()) * Point::ORIGIN;
+        let span = (end - origin).hypot();
+        let run_dir = if i1 > i0 && span > 1e-9 { end - origin } else { along };
+        let way = if mirrored { -run_dir } else { run_dir };
+        let angle = way.y.atan2(way.x).to_degrees().rem_euclid(360.0);
+        // How much wider it runs than BIMCraft's lettering would: from its first letter to its last, against the lettering's
+        // width of all it says before its last letter.
+        let ours = f64::from(crate::font::width(&before_last, height as f32));
+        let wide = if i1 > i0 && ours > 1e-9 && span > 1e-9 { (span / ours).clamp(0.05, 20.0) } else { 1.0 };
+        if !(height.is_finite() && height > 0.0 && origin.x.is_finite() && origin.y.is_finite() && angle.is_finite())
+            || !self.clip().holds(pt(origin))
         {
             return;
         }
         self.held += 1;
-        self.out.texts.push(Text { text, at: pt(origin), height, angle, color: rgb(&props.paint) });
+        self.begun = true;
+        let layer = self.layer();
+        let (color, alpha) = paint;
+        self.out.texts.push(Text { text, at: pt(origin), height, angle, wide, mirrored, color, alpha, seq, layer });
     }
 
     fn draw_image(&mut self, _: interpret::Image<'a, '_>, _: ImageDrawProps<'a>) {}
@@ -602,51 +1037,266 @@ impl<'a> Device<'a> for Collect {
         }
     }
 
-    fn pop_transparency_group(&mut self) {}
+    fn pop_transparency_group(&mut self) {
+        if self.groups.len() > 1 {
+            self.groups.pop();
+        }
+    }
+}
+
+/// The colours a page's lines are named by when it has no layers of its own: the plain names of a few, the nearest taken.
+const COLOUR_NAMES: [(&str, [u8; 3]); 18] = [
+    ("Black", [0, 0, 0]),
+    ("Dark grey", [64, 64, 64]),
+    ("Grey", [128, 128, 128]),
+    ("Light grey", [192, 192, 192]),
+    ("White", [255, 255, 255]),
+    ("Red", [230, 0, 0]),
+    ("Dark red", [128, 0, 0]),
+    ("Orange", [255, 140, 0]),
+    ("Brown", [140, 80, 20]),
+    ("Yellow", [255, 230, 0]),
+    ("Green", [0, 190, 0]),
+    ("Dark green", [0, 100, 0]),
+    ("Cyan", [0, 220, 220]),
+    ("Blue", [0, 70, 255]),
+    ("Dark blue", [0, 0, 128]),
+    ("Purple", [128, 0, 160]),
+    ("Magenta", [230, 0, 230]),
+    ("Pink", [255, 150, 190]),
+];
+
+/// The plain name of the colour nearest `c`.
+pub fn colour_name(c: [u8; 3]) -> &'static str {
+    let d = |n: [u8; 3]| (0..3).map(|i| (i32::from(c[i]) - i32::from(n[i])).pow(2)).sum::<i32>();
+    COLOUR_NAMES.iter().min_by_key(|(_, n)| d(*n)).map_or("Black", |(name, _)| name)
+}
+
+/// A layer name as a drawing holds it: no control characters, trimmed, not empty, not too long.
+fn layer_name(name: &str, i: usize) -> String {
+    let n: String = name.chars().filter(|c| !c.is_control()).collect::<String>().trim().chars().take(crate::model::MAX_TEXT).collect();
+    if n.is_empty() { format!("Layer {}", i + 1) } else { n }
+}
+
+/// What a page draws, item by item, in the order it draws it: a fill (its rings), a stroke or a text.
+enum Item<'v> {
+    Fill(Vec<&'v Run>),
+    Tiled(&'v Tiled),
+    Stroke(&'v Run),
+    Text(&'v Text),
+}
+
+impl Item<'_> {
+    fn color(&self) -> [u8; 3] {
+        match self {
+            Item::Fill(rings) => rings.first().map_or([0, 0, 0], |r| r.color),
+            Item::Tiled(t) => t.color,
+            Item::Stroke(r) => r.color,
+            Item::Text(t) => t.color,
+        }
+    }
+
+    fn layer(&self) -> Option<usize> {
+        match self {
+            Item::Fill(rings) => rings.first().and_then(|r| r.layer),
+            Item::Tiled(t) => t.layer,
+            Item::Stroke(r) => r.layer,
+            Item::Text(t) => t.layer,
+        }
+    }
+
+    /// The layer of its colour and weight it goes on when the file has none: "Black 0.35", "Red hairline", "Grey fill",
+    /// "Black text".
+    fn plain(&self) -> String {
+        match self {
+            Item::Stroke(r) => {
+                let w = if r.width < 0.005 { "hairline".to_string() } else { format!("{:.2}", r.width) };
+                format!("{} {w}", colour_name(r.color))
+            }
+            Item::Fill(_) => format!("{} fill", colour_name(self.color())),
+            Item::Tiled(_) => format!("{} hatch", colour_name(self.color())),
+            Item::Text(t) => format!("{} text", colour_name(t.color)),
+        }
+    }
 }
 
 impl Vectors {
     /// Whether it draws anything as vectors.
     pub fn is_empty(&self) -> bool {
-        self.strokes.is_empty() && self.fills.is_empty() && self.texts.is_empty()
+        self.strokes.is_empty() && self.fills.is_empty() && self.tiled.is_empty() && self.texts.is_empty()
     }
 
-    /// Itself as an ASCII DXF in mm, which [`crate::cad::Cad`] reads: its strokes on layer `Lines`, the outlines of its
-    /// fills on `Fills` and its texts on `Text`, each in its colour and a stroke at its width.
-    pub fn dxf(&self) -> Vec<u8> {
-        let mut s = String::with_capacity(64 * (self.strokes.len() + self.fills.len() + self.texts.len()) + 256);
-        s.push_str("0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLAYER\n");
-        for name in ["Lines", "Fills", "Text"] {
-            let _ = write!(s, "0\nLAYER\n2\n{name}\n70\n0\n62\n7\n6\nCONTINUOUS\n");
+    /// Whether any of it is on a layer of the file's: then its drawing has all the file's layers, and what is on none is on
+    /// [`NO_LAYER`].
+    pub fn layered(&self) -> bool {
+        self.strokes.iter().chain(&self.fills).any(|r| r.layer.is_some())
+            || self.tiled.iter().any(|t| t.layer.is_some())
+            || self.texts.iter().any(|t| t.layer.is_some())
+    }
+
+    /// What it draws, in the order the page draws it: each fill once with all its rings, before a stroke of the same path.
+    fn items(&self) -> Vec<Item<'_>> {
+        let mut fills: BTreeMap<usize, Vec<&Run>> = BTreeMap::new();
+        for f in &self.fills {
+            fills.entry(f.seq).or_default().push(f);
         }
-        s.push_str("0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n");
-        let color = |c: [u8; 3]| (u32::from(c[0]) << 16) | (u32::from(c[1]) << 8) | u32::from(c[2]);
-        for (layer, runs) in [("Lines", &self.strokes), ("Fills", &self.fills)] {
-            for r in runs.iter() {
-                let _ = write!(s, "0\nLWPOLYLINE\n8\n{layer}\n420\n{}\n90\n{}\n70\n{}\n", color(r.color), r.pts.len(), u8::from(r.closed));
-                if r.width > 0.0 {
-                    // DXF's line weights are hundredths of a mm, the thinnest 0.05 mm.
-                    let _ = write!(s, "370\n{}\n", ((r.width * 100.0).round() as i64).clamp(5, 211));
+        let mut items: Vec<(usize, u8, Item<'_>)> = fills.into_iter().map(|(seq, rings)| (seq, 0, Item::Fill(rings))).collect();
+        items.extend(self.tiled.iter().map(|t| (t.seq, 0, Item::Tiled(t))));
+        items.extend(self.strokes.iter().map(|r| (r.seq, 1, Item::Stroke(r))));
+        items.extend(self.texts.iter().map(|t| (t.seq, 2, Item::Text(t))));
+        items.sort_by_key(|(seq, kind, _)| (*seq, *kind));
+        items.into_iter().map(|(_, _, it)| it).collect()
+    }
+
+    /// The layers its drawing has ([`Vectors::drawing`]) in order, and whether the file has each off: a file's every layer
+    /// (each optional content group it lists, drawn on or not) and [`NO_LAYER`] when anything is on none; else the layers of
+    /// colour and weight its lines are on.
+    pub fn drawing_layers(&self) -> Vec<(String, bool)> {
+        self.drawing().layers.into_iter().map(|l| (l.name, l.off)).collect()
+    }
+
+    /// Itself as a drawing in mm, which [`crate::cad::Cad::of_drawing`] holds, in the order the page draws: lines as polylines
+    /// at their width (none for a hairline) and dashes, fills as solid hatches of rings that fill by odd parity, texts as texts
+    /// at their width and mirrored as the page has them, each in its colour and opacity on its layer. A layer has the colour
+    /// most of what is on it is drawn in; a layer the file has off is off.
+    pub fn drawing(&self) -> Dxf {
+        let layered = self.layered();
+        let items = self.items();
+        // The file's layers' names, made unique as a drawing's must be.
+        let mut own: Vec<String> = Vec::new();
+        if layered {
+            let mut taken: BTreeSet<String> = BTreeSet::new();
+            for (i, l) in self.layers.iter().enumerate() {
+                let base = layer_name(&l.name, i);
+                let mut n = base.clone();
+                let mut k = 2;
+                while taken.contains(&n) || n == NO_LAYER {
+                    n = format!("{base} ({k})");
+                    k += 1;
                 }
-                for [x, y] in &r.pts {
-                    let _ = write!(s, "10\n{x:.4}\n20\n{y:.4}\n");
-                }
+                taken.insert(n.clone());
+                own.push(n);
             }
         }
-        for t in &self.texts {
-            let text: String = t.text.chars().filter(|c| !c.is_control()).collect();
-            let _ = write!(
-                s,
-                "0\nTEXT\n8\nText\n420\n{}\n10\n{:.4}\n20\n{:.4}\n40\n{:.4}\n50\n{:.4}\n1\n{text}\n",
-                color(t.color),
-                t.at[0],
-                t.at[1],
-                t.height,
-                t.angle
-            );
+        let name_of = |it: &Item<'_>| -> String {
+            if layered { it.layer().and_then(|i| own.get(i).cloned()).unwrap_or_else(|| NO_LAYER.to_string()) } else { it.plain() }
+        };
+        // Each layer's colours, by how much is drawn in each.
+        let mut colours: BTreeMap<String, BTreeMap<[u8; 3], usize>> = BTreeMap::new();
+        let names: Vec<String> = items.iter().map(&name_of).collect();
+        for (it, n) in items.iter().zip(&names) {
+            *colours.entry(n.clone()).or_default().entry(it.color()).or_default() += 1;
         }
-        s.push_str("0\nENDSEC\n0\nEOF\n");
-        s.into_bytes()
+        let mut order: Vec<(String, bool)> = if layered {
+            let mut all: Vec<(String, bool)> = own.iter().cloned().zip(self.layers.iter().map(|l| l.off)).collect();
+            if names.iter().any(|n| n == NO_LAYER) {
+                all.push((NO_LAYER.to_string(), false));
+            }
+            all
+        } else {
+            colours.keys().map(|n| (n.clone(), false)).collect()
+        };
+        order.dedup_by(|a, b| a.0 == b.0);
+        let layers: Vec<DxfLayer> = order
+            .into_iter()
+            .map(|(name, off)| {
+                let most = colours.get(&name).and_then(|c| c.iter().max_by_key(|(_, n)| **n).map(|(c, _)| *c)).unwrap_or([0, 0, 0]);
+                DxfLayer {
+                    name,
+                    color: Color::True(most[0], most[1], most[2]),
+                    linetype: "Continuous".into(),
+                    weight: None,
+                    off,
+                    frozen: false,
+                }
+            })
+            .collect();
+        // Each dash pattern a linetype: its dashes and gaps, gaps less than nothing as DXF has them, its empty pieces dropped.
+        let mut linetypes: Vec<Linetype> = Vec::new();
+        let mut named: BTreeMap<Vec<i64>, String> = BTreeMap::new();
+        let mut linetype = |dash: &Option<Vec<f64>>| -> Option<String> {
+            let d = dash.as_ref()?;
+            let signed: Vec<f64> =
+                d.iter().enumerate().filter(|(_, x)| **x > 1e-9).map(|(i, x)| if i % 2 == 0 { *x } else { -*x }).collect();
+            let key: Vec<i64> = signed.iter().map(|x| (x * 1e4).round() as i64).collect();
+            if let Some(n) = named.get(&key) {
+                return Some(n.clone());
+            }
+            let name = format!("PDF dash {}", named.len() + 1);
+            named.insert(key, name.clone());
+            linetypes.push(Linetype { name: name.clone(), dashes: signed });
+            Some(name)
+        };
+        let mut entities = Vec::with_capacity(items.len());
+        for (it, layer) in items.iter().zip(names) {
+            let [r, g, b] = it.color();
+            let color = Color::True(r, g, b);
+            match it {
+                Item::Stroke(run) => entities.push(Entity {
+                    layer,
+                    color,
+                    linetype: linetype(&run.dash),
+                    weight: (run.width >= 0.005).then_some(run.width),
+                    alpha: run.alpha,
+                    shape: Shape::Polyline { pts: run.pts.iter().map(|p| P2(p[0], p[1])).collect(), closed: run.closed },
+                }),
+                Item::Fill(rings) => entities.push(Entity {
+                    layer,
+                    color,
+                    linetype: None,
+                    weight: None,
+                    alpha: rings.first().map_or(255, |r| r.alpha),
+                    shape: Shape::Fill {
+                        rings: rings.iter().map(|r| r.pts.iter().map(|p| P2(p[0], p[1])).collect()).collect(),
+                        solid: true,
+                        tile: None,
+                        shade: rings.first().is_some_and(|r| r.shade),
+                    },
+                }),
+                Item::Tiled(t) => entities.push(Entity {
+                    layer,
+                    color,
+                    linetype: None,
+                    weight: None,
+                    alpha: t.alpha,
+                    shape: Shape::Fill {
+                        rings: t.rings.iter().map(|r| r.iter().map(|p| P2(p[0], p[1])).collect()).collect(),
+                        solid: false,
+                        tile: Some(Arc::clone(&t.tile)),
+                        shade: false,
+                    },
+                }),
+                Item::Text(t) => entities.push(Entity {
+                    layer,
+                    color,
+                    linetype: None,
+                    weight: None,
+                    alpha: t.alpha,
+                    shape: Shape::Text {
+                        at: P2(t.at[0], t.at[1]),
+                        height: t.height,
+                        angle: t.angle,
+                        text: t.text.chars().filter(|c| !c.is_control()).collect(),
+                        align: Align { h: Horizontal::Left, v: Vertical::Baseline },
+                        tag: None,
+                        wide: t.wide,
+                        mirrored: t.mirrored,
+                    },
+                }),
+            }
+        }
+        Dxf {
+            scale: Some(1.0),
+            unit: "mm".into(),
+            version: String::new(),
+            layers,
+            linetypes,
+            ltscale: 1.0,
+            entities,
+            inserts: Vec::new(),
+            extents: None,
+            left_out: BTreeMap::new(),
+        }
     }
 }
 
@@ -721,6 +1371,52 @@ pub fn sample_pdf(pages: &[SamplePage], form: &str) -> Vec<u8> {
     out
 }
 
+/// A PDF of one page `size` points wide and high whose content stream is `content`, with layers: each of `layers` an optional
+/// content group (its name, and whether the file has it off), named `/L0`, `/L1`… in the page's properties for `BDC`, and
+/// `/M0` an OCMD of the first two (any on), what tests import. The page has the font `/F1` (Helvetica).
+#[doc(hidden)]
+pub fn sample_layered(content: &str, size: [f64; 2], layers: &[(&str, bool)]) -> Vec<u8> {
+    // 1 the catalog, 2 the pages, 3 the page, 4 its content, 5 the font, 6 the OCMD, then each layer.
+    let first = 7;
+    let refs: Vec<String> = (0..layers.len()).map(|i| format!("{} 0 R", first + i)).collect();
+    let off: Vec<String> = layers.iter().zip(&refs).filter(|((_, o), _)| *o).map(|(_, r)| r.clone()).collect();
+    let props: Vec<String> = refs.iter().enumerate().map(|(i, r)| format!("/L{i} {r}")).collect();
+    let pair: Vec<String> = refs.iter().take(2).cloned().collect();
+    let [w, h] = size;
+    let mut objects = vec![
+        format!(
+            "<< /Type /Catalog /Pages 2 0 R /OCProperties << /OCGs [{}] /D << /Order [{}] /OFF [{}] >> >> >>",
+            refs.join(" "),
+            refs.join(" "),
+            off.join(" ")
+        ),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {w} {h}] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> /Properties << {} /M0 6 0 R >> >> >>",
+            props.join(" ")
+        ),
+        format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+        format!("<< /Type /OCMD /OCGs [{}] /P /AnyOn >>", pair.join(" ")),
+    ];
+    for (name, _) in layers {
+        objects.push(format!("<< /Type /OCG /Name ({name}) >>"));
+    }
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objects.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend(format!("{} 0 obj\n{o}\nendobj\n", i + 1).bytes());
+    }
+    let xref = out.len();
+    out.extend(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).bytes());
+    for o in offsets {
+        out.extend(format!("{o:010} 00000 n \n").bytes());
+    }
+    out.extend(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).bytes());
+    out
+}
+
 /// A PDF of one page `size` points wide and high whose content stream is `content`, with a viewport's measure saying a point
 /// is `measure` (a length and its unit, `(0.0352778, "m")` at 1 : 100) when it's given: what tests import.
 #[doc(hidden)]
@@ -759,17 +1455,19 @@ mod tests {
         assert!((s.width - 2.0 * MM_PER_PT).abs() < 1e-6);
         assert_eq!(v.texts.len(), 1, "{v:?}");
         assert_eq!(v.texts[0].text, "WC 1");
+        // 12 points of letter: an em of 4.23 mm, its capitals seven tenths of it.
+        assert!((v.texts[0].height - 12.0 * MM_PER_PT * 0.7).abs() < 1e-6, "{:?}", v.texts[0]);
         assert!(near(v.texts[0].at, [80.0 * MM_PER_PT, 180.0 * MM_PER_PT]), "{:?}", v.texts[0]);
     }
 
     #[test]
     fn its_lines_read_as_a_drawing_in_mm() {
         let v = Document::open(square()).unwrap().vectors(1).unwrap();
-        let cad = crate::cad::Cad::new("square.pdf", None, v.dxf()).unwrap();
+        let cad = crate::cad::Cad::of_drawing("square.pdf", v.drawing());
         let dxf = cad.dxf();
         assert_eq!(dxf.unit, "mm");
         assert_eq!(dxf.entities.len(), 2);
-        assert_eq!(dxf.entities[0].layer, "Lines");
+        assert_eq!(dxf.entities[0].layer, "Blue 0.71", "a page with no layers has its lines by colour and weight");
         assert!(matches!(&dxf.entities[0].shape, crate::dxf::Shape::Polyline { pts, closed: true } if pts.len() == 4));
         assert!(matches!(&dxf.entities[1].shape, crate::dxf::Shape::Text { text, .. } if text == "WC 1"));
     }
@@ -836,7 +1534,7 @@ mod tests {
     #[test]
     fn a_user_unit_makes_the_page_and_its_lines_bigger() {
         let d =
-            Document::open(sample_pdf(&[SamplePage { user_unit: Some(2.0), ..page("4 w 0 50 m 100 50 l S", [100.0; 2]) }], "")).unwrap();
+            Document::open(sample_pdf(&[SamplePage { user_unit: Some(2.0), ..page("1 w 0 50 m 100 50 l S", [100.0; 2]) }], "")).unwrap();
         let [w, h] = d.size(1).unwrap();
         assert!((w - 200.0 * MM_PER_PT).abs() < 1e-6 && (h - w).abs() < 1e-6, "{w} {h}");
         let v = d.vectors(1).unwrap();
@@ -915,6 +1613,118 @@ mod tests {
         assert!(read.notes.iter().any(|n| n.contains("UniGB-UCS2-H") && n.contains("Chinese, Japanese or Korean")), "{:?}", read.notes);
         let plain = crate::raster::read_pdf(sample_pdf(&[page("BT /F1 12 Tf 50 80 Td (WC) Tj ET", [200.0; 2])], ""), 1, 72).unwrap();
         assert!(plain.notes.is_empty(), "{:?}", plain.notes);
+    }
+
+    /// A page on three layers, Walls, Furniture (off in the file) and Notes: a wall on Walls, a chair on Furniture inside a
+    /// group on Walls (the inner one counts), a line on the OCMD (its first group, Walls), a note on Notes, and a border on no
+    /// layer.
+    fn layered() -> Vec<u8> {
+        let content = "/OC /L0 BDC 0 0 0 RG 2 w 10 10 m 190 10 l S /OC /L1 BDC 1 0 0 RG 1 w 50 50 m 60 60 l S EMC EMC \
+                       /OC /M0 BDC 0 0 1 RG 0.5 w 10 20 m 100 20 l S EMC \
+                       /OC /L2 BDC BT /F1 12 Tf 20 100 Td (Kitchen) Tj ET EMC \
+                       0 0 0 RG 0 w 0 0 200 200 re S";
+        sample_layered(content, [200.0, 200.0], &[("Walls", false), ("Furniture", true), ("Notes", false)])
+    }
+
+    #[test]
+    fn a_pages_lines_and_words_keep_the_layer_they_are_drawn_on() {
+        let d = Document::open(layered()).unwrap();
+        let names: Vec<(String, bool)> = d.layers().into_iter().map(|l| (l.name, l.off)).collect();
+        let want = |n: &str, off: bool| (n.to_string(), off);
+        assert_eq!(names, vec![want("Walls", false), want("Furniture", true), want("Notes", false)]);
+        let v = d.vectors(1).unwrap();
+        // Furniture is off in the file, and still read: its chair is in the lines, on its layer.
+        let on = |c: [u8; 3]| v.strokes.iter().find(|r| r.color == c).map(|r| r.layer);
+        assert_eq!(on([0, 0, 0]), Some(Some(0)), "the wall: {v:?}");
+        assert_eq!(on([255, 0, 0]), Some(Some(1)), "the chair, in a group in Walls, is on Furniture");
+        assert_eq!(on([0, 0, 255]), Some(Some(0)), "the OCMD's line is on its first group");
+        assert_eq!(v.texts.len(), 1);
+        assert_eq!((v.texts[0].text.as_str(), v.texts[0].layer), ("Kitchen", Some(2)));
+        assert!(v.strokes.iter().any(|r| r.layer.is_none() && r.pts.len() == 4), "the border, on no layer");
+        assert!(!v.off_unread);
+        // Its drawing has the file's layers, in its order, those on none last; Furniture is off.
+        let layers = v.drawing_layers();
+        assert_eq!(layers, vec![want("Walls", false), want("Furniture", true), want("Notes", false), want(NO_LAYER, false)]);
+        let cad = crate::cad::Cad::of_drawing("plan.pdf", v.drawing());
+        let dxf = cad.dxf();
+        let furniture = dxf.layer("Furniture").unwrap();
+        assert!(furniture.off, "{furniture:?}");
+        let kitchen = dxf.entities.iter().find(|e| matches!(&e.shape, crate::dxf::Shape::Text { text, .. } if text == "Kitchen")).unwrap();
+        assert_eq!(kitchen.layer, "Notes");
+        // The rendered page shows it as the file opens: the chair, on a layer the file has off, isn't drawn.
+        assert!(!dark(&d, 55, 200 - 55), "the chair is hidden in the picture");
+        assert!(dark(&d, 100, 200 - 10), "the wall shows");
+    }
+
+    #[test]
+    fn a_page_with_no_layers_has_its_lines_grouped_by_colour_and_weight() {
+        let content = "0 0 0 RG 1 w 10 10 m 100 10 l S 1 0 0 RG 0.5 w 10 20 m 100 20 l S 0 0 0 RG 1 w 10 30 m 100 30 l S \
+                       0 0 1 rg 20 40 30 30 re f 0 0 0 rg BT /F1 12 Tf 20 100 Td (WC) Tj ET 0 w 10 150 m 50 150 l S";
+        let v = Document::open(sample(content, [200.0, 200.0], None)).unwrap().vectors(1).unwrap();
+        assert!(!v.layered());
+        let names: Vec<String> = v.drawing_layers().into_iter().map(|(n, _)| n).collect();
+        assert_eq!(names, ["Black 0.35", "Black hairline", "Black text", "Blue fill", "Red 0.18"], "{names:?}");
+        let cad = crate::cad::Cad::of_drawing("p.pdf", v.drawing());
+        let on = |l: &str| cad.dxf().entities.iter().filter(|e| e.layer == l).count();
+        assert_eq!((on("Black 0.35"), on("Red 0.18"), on("Blue fill"), on("Black text")), (2, 1, 1, 1));
+        // The fill is a solid hatch, in its colour.
+        let fill = cad.dxf().entities.iter().find(|e| e.layer == "Blue fill").unwrap();
+        assert!(matches!(&fill.shape, crate::dxf::Shape::Fill { solid: true, rings, .. } if rings.len() == 1), "{fill:?}");
+        assert_eq!(cad.color(fill, crate::cad::Colors::Preserve), Some(crate::prim::Rgb(0, 0, 255)));
+    }
+
+    #[test]
+    fn a_dashed_line_keeps_its_dashes_and_a_fill_its_holes_and_its_place_in_the_order() {
+        // A white mask over a line, then a dashed line over it, then a square with a hole (even-odd).
+        let content = "0 0 0 RG 1 w 10 50 m 190 50 l S 1 1 1 rg 40 40 20 20 re f [6 3] 0 d 10 60 m 190 60 l S [] 0 d \
+                       0 0 0 rg 100 100 m 150 100 l 150 150 l 100 150 l h 110 110 m 140 110 l 140 140 l 110 140 l h f*";
+        let v = Document::open(sample(content, [200.0, 200.0], None)).unwrap().vectors(1).unwrap();
+        let k = MM_PER_PT;
+        let dashed = v.strokes.iter().find(|r| r.dash.is_some()).unwrap();
+        let d = dashed.dash.clone().unwrap();
+        assert!(d.len() == 2 && (d[0] - 6.0 * k).abs() < 1e-6 && (d[1] - 3.0 * k).abs() < 1e-6, "{dashed:?}");
+        let cad = crate::cad::Cad::of_drawing("p.pdf", v.drawing());
+        let ents = &cad.dxf().entities;
+        // In the order the page draws: the line, the mask over it, the dashed line, the square.
+        let kinds: Vec<&str> = ents.iter().map(|e| crate::cad::kind(&e.shape)).collect();
+        assert_eq!(kinds, ["polyline", "hatch", "polyline", "hatch"], "{ents:?}");
+        let d = cad.dash(&ents[2]).unwrap();
+        assert!(d.len() == 2 && (d[0] - 6.0 * k).abs() < 0.01 && (d[1] - 3.0 * k).abs() < 0.01, "{d:?}");
+        assert!(matches!(&ents[3].shape, crate::dxf::Shape::Fill { rings, .. } if rings.len() == 2), "one fill, its hole a ring");
+    }
+
+    #[test]
+    fn a_pages_pictures_are_painted_without_its_lines() {
+        // A grey picture 50 points a side at (100, 100), and a black line across the page.
+        let content = "0 0 0 RG 4 w 0 20 m 200 20 l S q 50 0 0 50 100 100 cm BI /W 2 /H 2 /CS /G /BPC 8 /F /AHx ID 80808080> EI Q";
+        let d = Document::open(sample(content, [200.0, 200.0], None)).unwrap();
+        let ((w, h, rgba), share, n) = d.pictures_into(1, 72.0, |w, h, rgba| (w, h, rgba.to_vec())).unwrap().unwrap();
+        // Only the part the picture covers, on nothing: 50 points a side, from 100 across and 50 down.
+        assert_eq!((w, h, n), (50, 50, 1));
+        assert_eq!(share, [0.5, 0.25, 0.75, 0.5]);
+        let px = |x: u32, y: u32| &rgba[((y * w + x) * 4) as usize..((y * w + x) * 4 + 4) as usize];
+        assert_eq!(px(25, 25), [128, 128, 128, 255], "the picture");
+        assert!(dark(&d, 50, 200 - 20), "the whole page has the line");
+        // A page with no picture has none.
+        let lines = Document::open(sample("0 0 0 RG 4 w 0 20 m 200 20 l S", [200.0, 200.0], None)).unwrap();
+        assert!(lines.pictures_into(1, 72.0, |w, h, _| (w, h)).unwrap().is_none());
+    }
+
+    #[test]
+    fn text_stands_where_its_first_letter_does_squeezed_and_mirrored_as_the_page_has_it() {
+        let content = "BT /F1 20 Tf 10 100 Td (   SPACED) Tj ET BT /F1 20 Tf 10 170 Td (WIDE) Tj ET BT /F1 20 Tf 50 Tz 10 140 Td (WIDE) Tj 100 Tz ET \
+                       BT /F1 20 Tf -1 0 0 1 190 40 Tm (MIRROR) Tj ET";
+        let v = Document::open(sample(content, [200.0, 200.0], None)).unwrap().vectors(1).unwrap();
+        let t = |s: &str, y: f64| {
+            v.texts.iter().find(|t| t.text == s && (t.at[1] - y * MM_PER_PT).abs() < 0.1).unwrap_or_else(|| panic!("{v:?}"))
+        };
+        // Three spaces of Helvetica at 20 points are 16.68 points.
+        let spaced = t("SPACED", 100.0);
+        assert!((spaced.at[0] - 26.68 * MM_PER_PT).abs() < 0.05, "{spaced:?}");
+        let (wide, squeezed) = (t("WIDE", 170.0), t("WIDE", 140.0));
+        assert!((squeezed.wide / wide.wide - 0.5).abs() < 0.01, "{wide:?} {squeezed:?}");
+        let m = t("MIRROR", 40.0);
+        assert!(m.mirrored && m.angle.abs() < 1e-6 && (m.at[0] - 190.0 * MM_PER_PT).abs() < 0.05, "{m:?}");
     }
 
     #[test]

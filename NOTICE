@@ -233,7 +233,10 @@ PDF pages: hayro, and PDFium's standard fonts
 
 Import PDF reads a page through the hayro crates, version 0.9.0 (hayro, hayro-interpret, hayro-syntax, hayro-font,
 hayro-cmap and the decoders they bring: hayro-jpeg2000, hayro-jbig2, hayro-ccitt, hayro-postscript), by Laurenz Stampfl,
-https://github.com/LaurenzV/hayro, licensed MIT OR Apache-2.0, used unmodified. Its renderer, vello_cpu (Apache-2.0 OR MIT),
+https://github.com/LaurenzV/hayro, licensed MIT OR Apache-2.0, used unmodified but for hayro-interpret, kept in
+vendor/hayro-interpret with one change of BIMCraft's (a form's and an annotation's own optional content told to the device
+as marked content, an annotation on a layer the file has off hidden, as the PDF standard has it, and a constant naming the
+change, BIMCRAFT_PATCH), its files and licences as published; the changed files say where they were changed. Its renderer, vello_cpu (Apache-2.0 OR MIT),
 and the image crate (MIT OR Apache-2.0), which also reads the PNG, JPEG and BMP pictures Insert > Image brings in, are used
 unmodified too.
 

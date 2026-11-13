@@ -309,7 +309,7 @@ fn a_door_from_before_from_and_to_room_were_kept_has_them_from_its_swing() {
 
 #[test]
 fn a_project_is_written_as_format_20_only_when_a_doors_rooms_are_not_where_its_swing_puts_them() {
-    use crate::model::{Model, PREVIOUS_FORMAT, ROOMS_FORMAT};
+    use crate::model::{IMAGES_FORMAT, Model, PREVIOUS_FORMAT};
     let mut s = Session::new();
     rooms(&mut s);
     let door = id_of(&run(&mut s, "door", json!({"at": [6000, 0]})));
@@ -323,9 +323,9 @@ fn a_project_is_written_as_format_20_only_when_a_doors_rooms_are_not_where_its_s
         other => panic!("{other:?}"),
     };
     assert_eq!(rooms_of(&m), rooms_of(&s.model));
-    // Flipped, it keeps its rooms against its swing: only 20 holds that, and it reads back as it was.
+    // Flipped, it keeps its rooms against its swing: only 20 (or later) holds that, and it reads back as it was.
     run(&mut s, "flip", json!({"ids": [door]}));
-    assert_eq!(format(&s), json!(ROOMS_FORMAT));
+    assert_eq!(format(&s), json!(IMAGES_FORMAT));
     let (m, _) = Model::read(&s.model.to_json().unwrap()).unwrap();
     assert_eq!(rooms_of(&m), rooms_of(&s.model));
     // Its rooms flipped back to its swing, 19 again.

@@ -39,18 +39,21 @@ pub fn contents(d: &Drawing, paper: P2) -> (String, Vec<Picture>) {
     let mut images = Vec::new();
     for (i, p) in d.prims.iter().enumerate() {
         match p {
-            Prim::Fill { rings, color: c } => {
+            Prim::Fill { rings, color: c, rule, alpha } => {
+                let see = seen_through(&mut s, *alpha);
                 let _ = write!(s, "{} rg ", color(*c));
                 for r in rings {
                     path(&mut s, r, true);
                 }
-                s.push_str("f\n");
+                s.push_str(if *rule == crate::prim::Rule::EvenOdd { "f*" } else { "f" });
+                s.push_str(if see { " Q\n" } else { "\n" });
             }
-            Prim::Line { pts, width, color: c, dash, closed } => {
+            Prim::Line { pts, width, color: c, dash, closed, alpha } => {
+                let see = seen_through(&mut s, *alpha);
                 let dash = dash.as_ref().map_or_else(|| "[] 0 d".to_string(), |d| format!("[{}] 0 d", crate::render::spaced(d)));
                 let _ = write!(s, "{} RG {width} w {} j {dash} ", color(*c), if d.mitred(i) { 0 } else { 1 });
                 path(&mut s, pts, *closed);
-                s.push_str("S\n");
+                s.push_str(if see { "S Q\n" } else { "S\n" });
             }
             Prim::Image { at, width, height, rgba, .. } => {
                 let (w, h) = (*width as f32, *height as f32);
@@ -63,6 +66,30 @@ pub fn contents(d: &Drawing, paper: P2) -> (String, Vec<Picture>) {
         }
     }
     (s, images)
+}
+
+/// Starts what is drawn `alpha` opaque, when it is less than all: its graphics state (`/GA<alpha>`, which the page's
+/// resources hold, [`alphas`]) in a state of its own. Whether it did, so the state is ended after.
+fn seen_through(s: &mut String, alpha: u8) -> bool {
+    if alpha == crate::prim::OPAQUE {
+        return false;
+    }
+    let _ = write!(s, "q /GA{alpha} gs ");
+    true
+}
+
+/// The graphics states a drawing's see-through fills and lines take, by their opacity: a page's `/ExtGState` entries.
+fn alphas(d: &Drawing) -> String {
+    let used: std::collections::BTreeSet<u8> = d
+        .prims
+        .iter()
+        .filter_map(|p| match p {
+            Prim::Fill { alpha, .. } | Prim::Line { alpha, .. } => Some(*alpha),
+            Prim::Image { .. } => None,
+        })
+        .filter(|a| *a != crate::prim::OPAQUE)
+        .collect();
+    used.iter().map(|a| format!("/GA{a} << /Type /ExtGState /ca {0:.4} /CA {0:.4} >> ", f32::from(*a) / 255.0)).collect()
 }
 
 /// The pages, each a drawing of `paper` mm, as a PDF file.
@@ -101,7 +128,8 @@ pub fn pdf(pages: &[(&Drawing, P2)]) -> Vec<u8> {
         let xobjects: String = numbers.iter().enumerate().map(|(i, n)| format!("/Im{i} {n} 0 R ")).collect();
         let (w, h) = (paper.0 * 72.0 / 25.4, paper.1 * 72.0 / 25.4);
         let dict = format!(
-            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {w:.3} {h:.3}] /Resources << /XObject << {xobjects}>> >> /Contents {stream} 0 R >>"
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {w:.3} {h:.3}] /Resources << /XObject << {xobjects}>> /ExtGState << {}>> >> /Contents {stream} 0 R >>",
+            alphas(d)
         );
         object(&mut out, &mut offsets, page, &dict, None);
         let body = deflate(text.as_bytes());

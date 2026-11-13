@@ -215,7 +215,10 @@ in mm on paper (lines `LINE_PITCH` sizes apart, each character's place and width
 `Prim::Fill` of rings filled by the non-zero rule, our lettering and Plex Mono's bold as lines, underlines as lines; `Part::Text`)
 and which the desktop's editor reads for its caret, its selection and a click's place (`Layout::caret`, `boxes`, `index_at`;
 `Drawing::note_frame` turns layout mm into the drawing's pixels and back). The canvas fills a letter, holes and all, from
-`text::triangles` (strips between every corner's and crossing's height), kept by its points for the frames that draw it again.
+`text::triangles` (strips between every corner's and crossing's height), kept by its points for the frames that draw it again;
+an even-odd fill (a hatch, a PDF's fill) the same way by `text::fill_triangles`, a fill of more than 400,000 edges cut into
+bands across first, each swept with the edges reaching into it, so its holes stay holes (past `MAX_FILL_EDGES`, 4 million,
+it is filled ring by ring).
 A file of format 7 has notes with a `size`: reading it gives each a type of that size (`Model::typed_notes`), and `Model::check`
 refuses a `size` left on one. A note holds up to `MAX_NOTE` (4,000) characters and `MAX_RUNS` (1,000) runs.
 
@@ -318,6 +321,12 @@ Visibility/Graphics lists each tab's categories alphabetically by their translat
 cells edit independent foreground and background overrides, using the project's fill patterns (including imported PAT patterns),
 colours and a combined preview. Unchecked layers inherit; `<None>` explicitly hides a layer. OK/Apply submits the draft as one
 `graphics` command; Clear Overrides clears only that cell. Annotation categories expose projection patterns for filled regions.
+Rows are picked as in Revit: a click on a row's name picks it alone, Ctrl-click adds or takes one away, Shift-click picks those
+from the one picked last; All, None and Invert pick rows (every one, none, the others) and change nothing themselves. A
+visibility box, Halftone or Override… on a picked row reaches every row picked (`VgDialog::reached`); on another row, it
+alone, which it then picks.
+Imported Categories is laid out as Revit's: Show imported categories in this view over one table of the imports and Imports in
+Families, Patterns hatched, All, None, Invert and Expand All under it ([CAD import](cad-import.md)).
 Styles hold `foreground` and `background` as optional `{pattern: name | null, color: [r,g,b]}` layers, alongside the existing
 `fill` colour. Element, filter and category precedence resolves each layer separately. Plans, reflected ceiling plans, section
 cuts and regions draw the layers with the same bounded pattern renderer as filled region types; the pattern's drafting/model

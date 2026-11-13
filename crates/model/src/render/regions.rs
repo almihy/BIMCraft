@@ -145,6 +145,7 @@ struct Ink {
     owner: Option<Id>,
     part: Part,
     pen: Option<Pen>,
+    half: bool,
 }
 
 /// A convex piece of a masking region, and the box round it.
@@ -210,7 +211,7 @@ pub(super) fn foreground(d: &mut Drawing, m: &Model, rings: &[Vec<P2>]) {
         .flat_map(|(ink, stroke)| {
             // A section's picture is no element's: its ink is the region's now, as its pattern is.
             let (owner, part) = if ink.owner.is_some() { (ink.owner, ink.part) } else { (owner, Part::Pattern) };
-            area.clip(&ink.prim, view, stroke).into_iter().map(move |prim| Ink { prim, owner, part, pen: ink.pen })
+            area.clip(&ink.prim, view, stroke).into_iter().map(move |prim| Ink { prim, owner, part, pen: ink.pen, half: ink.half })
         })
         .collect();
     // Its twin, which tests hold it to: every ink clipped, the same lines and fills in the same order.
@@ -222,7 +223,7 @@ pub(super) fn foreground(d: &mut Drawing, m: &Model, rings: &[Vec<P2>]) {
         assert!(every == kept, "a region keeps other ink through the grid than among all of it");
     }
     for ink in restored {
-        keep(d, ink.prim, ink.owner, ink.part, ink.pen);
+        keep(d, ink.prim, ink.owner, ink.part, ink.pen, ink.half);
     }
 }
 
@@ -296,7 +297,7 @@ fn runs(image: &Image, view: View) -> (Vec<Prim>, bool) {
                 let at = (y0 + y1) as f32 / 2.0 / ry;
                 (vec![(x0 as f32 / rx, at), (x1 as f32 / rx, at)], 1.0 / ry)
             };
-            Prim::Line { pts, width, color, dash: None, closed: false }
+            Prim::line(pts, width, color, None, false)
         })
         .collect();
     (prims, cut)
@@ -352,7 +353,7 @@ fn visible(d: &Drawing, m: &Model, picture: Option<(Vec<Prim>, bool)>) -> (Vec<I
         for cover in candidates(span).into_iter().filter(|cover| near(span, cover)) {
             parts = parts.into_iter().flat_map(|p| outside(&p, d.view, &cover.rings, &cover.boxes)).collect();
         }
-        out.extend(parts.into_iter().map(|prim| Ink { prim, owner: None, part: Part::Projection, pen: None }));
+        out.extend(parts.into_iter().map(|prim| Ink { prim, owner: None, part: Part::Projection, pen: None, half: false }));
     }
     for (i, (((prim, owner), part), pen)) in d.prims.iter().zip(&d.owners).zip(&d.parts).zip(&d.pens).take(end).enumerate() {
         let model = owner.and_then(|id| m.elements.get(id)).is_some_and(|e| crate::graphics::is_model(e.category()));
@@ -370,7 +371,8 @@ fn visible(d: &Drawing, m: &Model, picture: Option<(Vec<Prim>, bool)>) -> (Vec<I
                 break;
             }
         }
-        out.extend(parts.into_iter().map(|prim| Ink { prim, owner: *owner, part: *part, pen: *pen }));
+        let half = d.half(i);
+        out.extend(parts.into_iter().map(|prim| Ink { prim, owner: *owner, part: *part, pen: *pen, half }));
     }
     (out, cut)
 }
@@ -466,7 +468,7 @@ fn outside(prim: &Prim, view: View, rings: &[Vec<P2>], boxes: &[Option<Extent>])
     }
     match prim {
         Prim::Line { .. } => cut(prim, view, &Outside(near)),
-        Prim::Fill { rings: source, color } => {
+        Prim::Fill { rings: source, color, rule, alpha } => {
             let source: Vec<Vec<P2>> = source.iter().map(|r| r.iter().map(|p| view.mm(*p)).collect()).collect();
             fill(
                 rings.iter().fold(source, |pieces, r| {
@@ -475,25 +477,25 @@ fn outside(prim: &Prim, view: View, rings: &[Vec<P2>], boxes: &[Option<Extent>])
                     walls::minus(&pieces, r)
                 }),
                 view,
-                *color,
+                (*color, *rule, *alpha),
             )
         }
         Prim::Image { .. } => Vec::new(),
     }
 }
 
-fn fill(pieces: Vec<Vec<P2>>, view: View, color: Rgb) -> Vec<Prim> {
+fn fill(pieces: Vec<Vec<P2>>, view: View, (color, rule, alpha): (Rgb, crate::prim::Rule, u8)) -> Vec<Prim> {
     if pieces.is_empty() {
         Vec::new()
     } else {
-        vec![Prim::Fill { rings: pieces.iter().map(|r| r.iter().map(|p| view.px(*p)).collect()).collect(), color }]
+        vec![Prim::Fill { rings: pieces.iter().map(|r| r.iter().map(|p| view.px(*p)).collect()).collect(), color, rule, alpha }]
     }
 }
 
 /// The pieces of line `prim` that `keep` keeps. A polyline's pieces that meet stay one line, so its corners keep their joins;
 /// a dashed line's dashes stay where they were ([`phased`]); and a line left whole is the line.
 fn cut(prim: &Prim, view: View, keep: &impl Keep) -> Vec<Prim> {
-    let Prim::Line { pts, width, color, dash, closed } = prim else { return Vec::new() };
+    let Prim::Line { pts, width, color, dash, closed, alpha } = prim else { return Vec::new() };
     let segs: Vec<(P2, P2)> = segments(pts, *closed).into_iter().map(|(a, b)| (view.mm(a), view.mm(b))).collect();
     if segs.iter().all(|(a, b)| a.dist(*b) <= EPS) {
         return if segs.first().is_none_or(|(a, _)| keep.point(*a)) { vec![prim.clone()] } else { Vec::new() };
@@ -537,7 +539,7 @@ fn cut(prim: &Prim, view: View, keep: &impl Keep) -> Vec<Prim> {
     runs.into_iter()
         .flat_map(|(run, at)| {
             let pts = run.into_iter().map(|p| view.px(p)).collect();
-            phased(pts, at * view.scale, (*width, *color), dash.as_deref())
+            phased(pts, at * view.scale, (*width, *color, *alpha), dash.as_deref())
         })
         .collect()
 }
@@ -545,8 +547,8 @@ fn cut(prim: &Prim, view: View, keep: &impl Keep) -> Vec<Prim> {
 /// A run of a line, `at` px along the line it was cut from, drawn as the line's dashes (`dash`: on, off, on, ...) have it there.
 /// A dashed line's dashes start with it, so the run's own would start where it does: the dashes of the cycle it begins in are
 /// drawn as lines of their own, solid, and the rest of it is a dashed line that begins a cycle.
-fn phased(pts: Vec<(f32, f32)>, at: f64, (width, color): (f32, Rgb), dash: Option<&[f32]>) -> Vec<Prim> {
-    let line = |pts, dash: Option<&[f32]>| Prim::Line { pts, width, color, dash: dash.map(<[f32]>::to_vec), closed: false };
+fn phased(pts: Vec<(f32, f32)>, at: f64, (width, color, alpha): (f32, Rgb, u8), dash: Option<&[f32]>) -> Vec<Prim> {
+    let line = |pts, dash: Option<&[f32]>| Prim::Line { pts, width, color, dash: dash.map(<[f32]>::to_vec), closed: false, alpha };
     let Some(base) = dash else { return vec![line(pts, None)] };
     // As SVG has it, an odd list goes round twice.
     let d: Vec<f32> = if base.len() % 2 == 1 { base.iter().chain(base).copied().collect() } else { base.to_vec() };
@@ -652,7 +654,7 @@ impl<'a> Area<'a> {
                     _ => Vec::new(),
                 }
             }
-            Prim::Fill { rings: source, color } => {
+            Prim::Fill { rings: source, color, rule, alpha } => {
                 let source: Vec<Vec<P2>> = source.iter().map(|r| r.iter().map(|p| view.mm(*p)).collect()).collect();
                 let all: Vec<P2> = source.iter().flatten().copied().collect();
                 if !bounds(&all).is_some_and(|b| overlap(b, (self.lo, self.hi))) {
@@ -681,7 +683,7 @@ impl<'a> Area<'a> {
                         })
                         .collect();
                 }
-                fill(parts, view, *color)
+                fill(parts, view, (*color, *rule, *alpha))
             }
             Prim::Image { .. } => Vec::new(),
         }

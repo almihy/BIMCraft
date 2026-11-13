@@ -673,7 +673,7 @@ pub fn draw(d: &mut Drawing, tb: &TitleBlock, at: P2, values: &BTreeMap<String, 
         if rings.len() > 1 {
             d.part = crate::prim::Part::Text;
         }
-        d.push(crate::prim::Prim::Fill { rings, color: ink(f.color) });
+        d.push(crate::prim::Prim::fill(rings, ink(f.color)));
         d.part = part;
     }
     for l in &tb.lines {
@@ -745,7 +745,7 @@ pub fn from_dxf(dxf: &Dxf, mm: f64) -> (TitleBlock, BTreeMap<String, usize>) {
         };
         let color = own.rgb().map(|Rgb(r, g, b)| [r, g, b]);
         match &e.shape {
-            Shape::Text { at, height, angle, text, align, tag } => {
+            Shape::Text { at, height, angle, text, align, tag, .. } => {
                 let size = (height * mm).clamp(MIN_LETTERING, MAX_LETTERING);
                 // To its baseline: a text that hangs from its point (top), or is centred on it, stands lower.
                 let drop = match align.v {
@@ -771,7 +771,7 @@ pub fn from_dxf(dxf: &Dxf, mm: f64) -> (TitleBlock, BTreeMap<String, usize>) {
                     None => tb.texts.push(Text { at, text, size, angle: *angle, align, color, width_factor: 1.0 }),
                 }
             }
-            Shape::Fill { rings, solid: true } => {
+            Shape::Fill { rings, solid: true, .. } => {
                 let rings: Vec<Vec<P2>> = rings.iter().filter(|r| r.len() >= 3).map(|r| r.iter().map(k).collect()).collect();
                 rings.iter().flatten().for_each(|p| grow(*p));
                 if !rings.is_empty() {

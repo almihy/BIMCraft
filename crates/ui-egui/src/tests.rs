@@ -249,6 +249,20 @@ fn pick(h: &mut Harness<BimApp>, role: Role, label: &str) {
     h.run();
 }
 
+/// Clicks the name of Visibility/Graphics' row `name`, with `modifiers` held: picks it as Revit's table does.
+fn row(h: &mut Harness<BimApp>, name: &str, modifiers: egui::Modifiers) {
+    h.get_by_role_and_label(Role::Button, name).scroll_to_me();
+    h.run();
+    h.get_by_role_and_label(Role::Button, name).click_modifiers(modifiers);
+    h.run();
+}
+
+/// Whether Visibility/Graphics' row `name` is ticked: shown.
+fn vg_ticked(h: &Harness<BimApp>, name: &str) -> bool {
+    use egui_kittest::kittest::NodeT as _;
+    h.get_by_role_and_label(Role::CheckBox, name).accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
+}
+
 /// Replace the text of the field of `role` named `label`, and press Enter.
 fn type_role(h: &mut Harness<BimApp>, role: Role, label: &str, text: &str) {
     h.get_by_role_and_label(role, label).focus();
@@ -4637,20 +4651,54 @@ fn visibility_graphics_is_a_table_each_cell_overriding_its_own_part() {
     pick(&mut h, Role::Button, "Floors: Transparency");
     assert!(h.query_by_label("Surface Transparency").is_some());
     press(&mut h, "Cancel");
-    // The search narrows the rows; None hides what it found and no more.
+    // The search narrows the rows; All picks what it found, as Revit's, and changes nothing by itself; a box cleared on a
+    // row picked hides every row picked, and no more.
     type_role(&mut h, Role::TextInput, "Category name search:", "wal");
     assert!(h.query_by_role_and_label(Role::CheckBox, "Floors").is_none());
-    press(&mut h, "None");
+    press(&mut h, "All");
+    assert!(h.state().vg_dialog.as_ref().is_some_and(|d| d.picked_count() >= 1), "what it found is picked");
+    assert!(vg_ticked(&h, "Walls"), "All picks; it hides nothing");
+    pick(&mut h, Role::CheckBox, "Walls");
     press(&mut h, "OK");
     let g = plan_graphics(&h, 100000);
     assert!(g.categories["floor"].halftone && g.categories["floor"].cut.fill.is_none());
     assert!(g.hides("wall") && !g.hides("floor") && !g.hides("door"));
-    // Invert shows them again and hides the rest; All shows everything.
+    // None and Invert pick rows too: pressed alone, they change nothing.
     shortcut(&mut h, "VV");
+    press(&mut h, "None");
     press(&mut h, "Invert");
-    press(&mut h, "All");
     press(&mut h, "OK");
-    assert!(!plan_graphics(&h, 100000).hides("wall"));
+    let g = plan_graphics(&h, 100000);
+    assert!(g.hides("wall") && !g.hides("floor") && !g.hides("door"));
+    // A row picked, a second with Ctrl: a box cleared on either hides both; Override… gives both the same lines.
+    shortcut(&mut h, "VV");
+    // A row's one Tab stop before its cells is its box: Tab goes from it to its first cell.
+    h.get_by_role_and_label(Role::CheckBox, "Floors").scroll_to_me();
+    h.run();
+    h.get_by_role_and_label(Role::CheckBox, "Floors").focus();
+    h.run();
+    key(&mut h, Key::Tab);
+    assert!(h.get_by_role_and_label(Role::Button, "Floors: Projection Lines").is_focused(), "from the box to the first cell");
+    row(&mut h, "Floors", egui::Modifiers::NONE);
+    row(&mut h, "Doors", egui::Modifiers::COMMAND);
+    pick(&mut h, Role::CheckBox, "Doors");
+    assert!(!vg_ticked(&h, "Floors") && !vg_ticked(&h, "Doors") && vg_ticked(&h, "Roofs"), "both picked rows, and no other");
+    pick(&mut h, Role::Button, "Floors: Projection Lines");
+    pick(&mut h, Role::CheckBox, "Projection: Line color");
+    press(&mut h, "OK");
+    press(&mut h, "OK");
+    let g = plan_graphics(&h, 100000);
+    assert!(g.hides("floor") && g.hides("door") && !g.hides("roof"));
+    assert!(
+        g.categories["floor"].projection.color.is_some() && g.categories["door"].projection.color == g.categories["floor"].projection.color
+    );
+    // All, and a box ticked on a row, shows every one again.
+    shortcut(&mut h, "VV");
+    press(&mut h, "All");
+    pick(&mut h, Role::CheckBox, "Walls");
+    press(&mut h, "OK");
+    let g = plan_graphics(&h, 100000);
+    assert!(!g.hides("wall") && !g.hides("floor") && !g.hides("door"));
     // Object Styles… stands in its place, for what isn't overridden, and gives it back as it was.
     shortcut(&mut h, "VV");
     pick(&mut h, Role::CheckBox, "Doors");
@@ -6386,6 +6434,7 @@ mod display;
 mod dock;
 mod draw;
 mod electrical;
+mod fill_rules;
 mod fills;
 mod filter;
 mod flip;

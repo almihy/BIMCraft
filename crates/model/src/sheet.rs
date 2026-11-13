@@ -346,7 +346,7 @@ pub fn draw(m: &Model, id: impl Key) -> Option<Drawing> {
         d.own(Some(vid));
         // Paper under it, its own: a click anywhere over a view picks it.
         let (w, h) = (view.width as f32, view.height as f32);
-        d.push(Prim::Fill { rings: vec![vec![(ox, oy), (ox + w, oy), (ox + w, oy + h), (ox, oy + h)]], color: PAPER });
+        d.push(Prim::fill(vec![vec![(ox, oy), (ox + w, oy), (ox + w, oy + h), (ox, oy + h)]], PAPER));
         let inner = match m.elements.get(vp.view) {
             Some(Element::Level(_) | Element::PlanView(_)) => render::draw_at(m, vp.view, view, 1.0),
             Some(Element::Section(_) | Element::Elevation(_)) => {
@@ -376,24 +376,27 @@ pub fn draw(m: &Model, id: impl Key) -> Option<Drawing> {
                 let mut inner = Drawing::new(view);
                 for mk in crate::dims3d::marks(m, vp.view, &cam, &look, DENSITY) {
                     inner.own(Some(mk.owner));
-                    inner.push(Prim::Line { pts: mk.pts, width: mk.width, color: mk.color, dash: None, closed: false });
+                    inner.push(Prim::line(mk.pts, mk.width, mk.color, None, false));
                 }
                 inner
             }
             _ => continue,
         };
+        let halves: Vec<bool> = (0..inner.prims.len()).map(|i| inner.half(i)).collect();
         for note in inner.notes {
             if d.notes.len() < 32 && !d.notes.contains(&note) {
                 d.notes.push(note);
             }
         }
         // Its own title, owned by no element, gives way to the viewport's.
-        for ((prim, owner), part) in inner.prims.into_iter().zip(inner.owners).zip(inner.parts) {
+        for (((prim, owner), part), half) in inner.prims.into_iter().zip(inner.owners).zip(inner.parts).zip(halves) {
             if owner.is_some() {
                 d.part(part);
+                d.halftone_next(half);
                 d.push(prim.moved(ox, oy));
             }
         }
+        d.halftone_next(false);
         d.part(Part::Projection);
         // The title, under it: the view's name over a line, its scale under that.
         let name = m.view_name(vp.view).unwrap_or_default();

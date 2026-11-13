@@ -90,7 +90,7 @@ impl LinePattern {
         if path.pts.len() < 2 || path.total <= 1e-9 {
             return Vec::new();
         }
-        let line = |pts| Prim::Line { pts, width, color, dash: None, closed: false };
+        let line = |pts| Prim::line(pts, width, color, None, false);
         let k = px_per_mm as f64;
         let repeat = self.0.iter().map(Segment::length).sum::<f64>() * k;
         if self.check("preview").is_err() || repeat < 2.0 || path.total / repeat * self.0.len() as f64 > MAX_STEPS as f64 {
@@ -122,7 +122,7 @@ impl LinePattern {
                                 )
                             })
                             .collect();
-                        made.push(Prim::Fill { rings: vec![ring], color });
+                        made.push(Prim::fill(vec![ring], color));
                     }
                 }
                 Segment::Offset { count, distance, .. } => {
@@ -168,7 +168,7 @@ impl LinePattern {
                             (p.0 as f32, p.1 as f32)
                         };
                         if !shape.fill.is_empty() {
-                            made.push(Prim::Fill { rings: shape.fill.iter().map(|r| r.iter().map(at).collect()).collect(), color });
+                            made.push(Prim::fill(shape.fill.iter().map(|r| r.iter().map(at).collect()).collect(), color));
                         }
                         for stroke in &shape.strokes {
                             made.push(Prim::Line {
@@ -177,6 +177,7 @@ impl LinePattern {
                                 color,
                                 dash: None,
                                 closed: false,
+                                alpha: crate::prim::OPAQUE,
                             });
                         }
                         x += advance;

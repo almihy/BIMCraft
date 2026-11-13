@@ -252,7 +252,7 @@ fn duplicating_a_type_keeps_its_forms_and_renaming_or_deleting_one_follows() {
 }
 
 #[test]
-fn a_project_using_the_new_fields_is_written_as_21_and_one_without_as_before() {
+fn a_project_using_the_new_fields_is_written_as_22_and_one_without_as_before() {
     use crate::model::{Model, PREVIOUS_FORMAT, TYPES_FORMAT as FORMAT};
     let mut s = Session::new();
     let format = |s: &Session| serde_json::from_str::<Value>(&s.model.to_json().unwrap()).unwrap()["format"].clone();
@@ -267,17 +267,46 @@ fn a_project_using_the_new_fields_is_written_as_21_and_one_without_as_before() {
     assert_eq!(format(&s), json!(PREVIOUS_FORMAT));
     let door = door(&mut s, "900 x 2100");
     assert_eq!(format(&s), json!(FORMAT));
-    assert_eq!(FORMAT, 21, "a family from Revit that is no more than its result per type");
+    assert_eq!(FORMAT, 22, "a family from Revit that is no more than its result per type");
     // Read back, it is as it was.
     let (m, left_out) = Model::read(&s.model.to_json().unwrap()).unwrap();
     assert!(left_out.is_empty(), "{left_out:?}");
     assert_eq!(m.families[NAME], s.model.families[NAME]);
     assert_eq!(m.families["Plain"].source, s.model.families["Plain"].source);
     assert_eq!(m.opening_local(&m.elements[&door]).unwrap().0.len(), 5);
-    // A build that reads up to 20 refuses it rather than drawing both leaves at once.
+    // A build that reads up to 21 refuses it rather than drawing both leaves at once.
     let mut v: Value = serde_json::from_str(&s.model.to_json().unwrap()).unwrap();
     v["format"] = json!(crate::model::FORMAT + 1);
     assert!(Model::read(&v.to_string()).unwrap_err().contains("newer"));
+}
+
+/// The formats after PDF layers (21): a template that chose not to control Imported Categories keeps that through a file of
+/// 22 or 23, which can name the group; only a file older than 21 has it given back where it is implied.
+#[test]
+fn a_file_of_a_family_format_keeps_a_templates_imported_categories_as_it_was() {
+    use crate::graphics::Group;
+    use crate::model::{FORMAT, Model, PDF_FORMAT, TYPES_FORMAT};
+    assert_eq!((PDF_FORMAT, TYPES_FORMAT, FORMAT), (21, 22, 23));
+    let mut s = Session::new();
+    door(&mut s, "900 x 2100");
+    let level = s.model.guid(s.model.levels()[0].0).to_string();
+    // Every group of a plan but Imported Categories: a file older than 21 would give it back.
+    let t = run(&mut s, "template", json!({"name": "No Imports", "from": level}));
+    let all: Vec<String> = t["controls"].as_array().unwrap().iter().filter_map(|g| g.as_str().map(str::to_string)).collect();
+    let wanted: Vec<&str> = all.iter().map(String::as_str).filter(|g| *g != "imports").collect();
+    assert_eq!(wanted.len() + 1, all.len(), "{all:?}");
+    run(&mut s, "template", json!({"name": "No Imports", "controls": wanted}));
+    assert!(!s.model.view_templates["No Imports"].controls.contains(&Group::Imports));
+    let text = s.model.to_json().unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&text).unwrap()["format"], json!(TYPES_FORMAT));
+    let (m, left_out) = Model::read(&text).unwrap();
+    assert!(left_out.is_empty(), "{left_out:?}");
+    assert!(!m.view_templates["No Imports"].controls.contains(&Group::Imports), "a file of 22 says what it controls");
+    // A file of 20, written the same, has it back.
+    let mut v: Value = serde_json::from_str(&text).unwrap();
+    v["format"] = json!(20);
+    let (m, _) = Model::read(&v.to_string()).unwrap();
+    assert!(m.view_templates["No Imports"].controls.contains(&Group::Imports), "implied where a file of 20 can't say");
 }
 
 #[test]

@@ -702,7 +702,12 @@ impl Model {
             }),
             Kind::Material => self.materials.remove(name).is_some(),
             Kind::Picture => self.images.remove(name).is_some(),
-            Kind::Image => self.image_types.remove(name).is_some(),
+            Kind::Image => {
+                let gone = self.image_types.remove(name).is_some();
+                // What views hid of it goes with it, so a page that comes in later under its name starts clean.
+                self.forget_pdf_layers(&[name.to_string()]);
+                gone
+            }
             Kind::ViewFilter => self.view_filters.remove(name).is_some(),
             Kind::ViewTemplate => self.view_templates.remove(name).is_some(),
             Kind::TitleBlock => self.title_blocks.remove(name).is_some(),
@@ -1408,6 +1413,13 @@ fn graphics_refs(g: &mut crate::graphics::Graphics, f: &mut dyn FnMut(&Kind, &mu
             (cad, layers)
         })
         .collect();
+    g.pdf_layers = std::mem::take(&mut g.pdf_layers)
+        .into_iter()
+        .map(|(mut image, layers)| {
+            f(&Kind::Image, &mut image);
+            (image, layers)
+        })
+        .collect();
 }
 
 /// A component's (or a family door's) family and its type of it, each given to `f`: the type as `family: type`, or as the
@@ -1667,15 +1679,26 @@ impl Model {
         m.sync_library();
         m.refs_to_file();
         m.format = self.written_format();
+        // A build that reads up to 20 can't name Imported Categories as a group a template controls; written for it, a
+        // template leaves it out, and reading the file gives it back to the templates it is implied for
+        // ([`Model::imports_implied`]); `written_format` makes sure that is each that had it.
+        if m.format < crate::model::PDF_FORMAT {
+            for t in m.view_templates.values_mut() {
+                t.controls.remove(&crate::graphics::Group::Imports);
+            }
+        }
         serde_json::to_string_pretty(&m).map_err(|e| e.to_string())
     }
 
-    /// The format its file is written in: the oldest that holds all it has. [`crate::model::FORMAT`] when a family has forms
-    /// or symbols of some of its types only, Visibility Settings, elevation symbols, a traced outline, a `cut` or a text
-    /// parameter, which a build that reads up to 20 would misread; [`crate::model::ROOMS_FORMAT`] when it holds images, or a
-    /// door or a window whose To Room is not on the side it swings to or faces (flipped since it was placed, or its rooms
-    /// flipped), which a file of 19 would give it back from its swing; else [`crate::model::PREVIOUS_FORMAT`], so an older
-    /// build opens it.
+    /// The format its file is written in: the oldest that holds all it has, the newest need first. [`crate::model::FORMAT`]
+    /// when a family from Revit stays parametric (references, dimensions, nested parts, a catalog, blends, sweeps, holes, arcs,
+    /// Revit's result kept beside it, its check); [`crate::model::TYPES_FORMAT`] when a family has forms or symbols of some of
+    /// its types only, Visibility Settings, elevation symbols, a traced outline, a `cut` or a text parameter;
+    /// [`crate::model::PDF_FORMAT`] when a page of a PDF it holds is drawn from its lines, which a file of 20 would draw as its
+    /// raster images alone, or a view or a template hides a page's layers; [`crate::model::IMAGES_FORMAT`] when it holds
+    /// images, or a door or a window whose To Room is not on the side it swings to or faces (flipped since it was placed, or
+    /// its rooms flipped), which a file of 19 would give it back from its swing; else [`crate::model::PREVIOUS_FORMAT`], so
+    /// an older build opens it.
     pub fn written_format(&self) -> u32 {
         use crate::model::Element;
         let parametric = self.families.values().any(|f| {
@@ -1702,12 +1725,49 @@ impl Model {
         if families {
             return crate::model::TYPES_FORMAT;
         }
+        // A view or a template that hides a page's layers or sets how an import draws holds what a build of 20 refuses as a
+        // field it doesn't know. A template is written without Imported Categories, which 20 can't name, and reading the file
+        // gives the group back where it is implied: so a template that controls it where it isn't implied, or doesn't where
+        // it is, is this build's.
+        let views: Vec<&crate::graphics::Graphics> = self.elements.values().filter_map(crate::graphics::graphics_of_element).collect();
+        let pdf_graphics = views.iter().copied().chain(self.view_templates.values().map(|t| &t.graphics)).any(|g| g.holds_imports())
+            || self
+                .view_templates
+                .iter()
+                .any(|(name, t)| t.controls.contains(&crate::graphics::Group::Imports) != Self::imports_implied(name, t, &views));
+        if pdf_graphics || self.image_types.values().any(crate::raster::ImageType::drawn) {
+            return crate::model::PDF_FORMAT;
+        }
         let images = !self.image_types.is_empty() || !self.rare("image").is_empty();
         let rooms_kept = self.elements.values().any(|e| match e {
             Element::Door(o) | Element::Window(o) => o.to_room_side != o.swing_side(),
             _ => false,
         });
-        if images || rooms_kept { crate::model::ROOMS_FORMAT } else { crate::model::PREVIOUS_FORMAT }
+        if images || rooms_kept { crate::model::IMAGES_FORMAT } else { crate::model::PREVIOUS_FORMAT }
+    }
+
+    /// Whether a template read from a file older than 21, which can't name Imported Categories as a group it controls,
+    /// controls it: when it controls every other group its kind of view has, as a new template does (and as Revit's
+    /// templates include V/G Overrides Import), and that changes nothing a view following it draws: it hides no layers of
+    /// a drawing, and no view following it hides any of its own (which the template's would win over).
+    pub(crate) fn imports_implied(name: &str, t: &crate::graphics::ViewTemplate, views: &[&crate::graphics::Graphics]) -> bool {
+        use crate::graphics::Group;
+        let groups = t.kind.map_or_else(|| Group::ALL.to_vec(), crate::graphics::ViewKind::groups);
+        groups.iter().all(|g| *g == Group::Imports || t.controls.contains(g))
+            && t.graphics.layers.is_empty()
+            && !views.iter().any(|g| g.template.as_deref() == Some(name) && !g.layers.is_empty())
+    }
+
+    /// A file older than 21 gives Imported Categories back to the templates it is implied for ([`Model::imports_implied`]).
+    pub(crate) fn implied_imports(&mut self) {
+        let views: Vec<&crate::graphics::Graphics> = self.elements.values().filter_map(crate::graphics::graphics_of_element).collect();
+        let implied: Vec<String> =
+            self.view_templates.iter().filter(|(name, t)| Self::imports_implied(name, t, &views)).map(|(n, _)| n.clone()).collect();
+        for name in implied {
+            if let Some(t) = self.view_templates.get_mut(&name) {
+                t.controls.insert(crate::graphics::Group::Imports);
+            }
+        }
     }
 
     /// Every name this model holds of a library entry (its elements', its types', its views'…) its GUID, and the values of

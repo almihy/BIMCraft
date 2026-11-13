@@ -545,7 +545,7 @@ fn create_similar_and_the_view_lists_know_the_categories_of_the_discipline_tabs(
     key(&mut h, Key::Escape);
     shortcut(&mut h, "VV");
     for name in CATEGORY_NAMES {
-        assert!(h.query_by_label(name).is_some(), "{name}");
+        assert!(h.query_by_role_and_label(Role::CheckBox, name).is_some(), "{name}");
     }
 }
 

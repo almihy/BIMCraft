@@ -242,9 +242,12 @@ impl PlanCache {
             let loaded = d
                 .prims
                 .iter()
-                .filter_map(|p| match p {
+                .zip(&d.parts)
+                .enumerate()
+                .filter_map(|(i, (p, part))| match p {
                     Prim::Image { width, height, rgba, .. } => {
-                        let pixels = ColorImage::from_rgba_unmultiplied([*width as usize, *height as usize], rgba);
+                        let pixels =
+                            ColorImage::from_rgba_unmultiplied([*width as usize, *height as usize], &cells_seen(rgba, *part, d.half(i)));
                         Some(ctx.load_texture("plan picture", pixels, TextureOptions::NEAREST))
                     }
                     _ => None,
@@ -254,6 +257,22 @@ impl PlanCache {
         }
         self.pictures.as_ref().map(|(_, t)| t.iter().map(TextureHandle::id).collect()).unwrap_or_default()
     }
+}
+
+/// A picture's pixels as the canvas shows them: a dense drawing's cells ([`render::Part::Cells`]) in its colours as its lines
+/// would be, lightened on a dark canvas, and faded toward it where they are `half`tone ([`color_half`]); any other picture as
+/// it is.
+pub(crate) fn cells_seen(rgba: &[u8], part: render::Part, half: bool) -> std::borrow::Cow<'_, [u8]> {
+    let ground = half && crate::style::canvas_ground().is_some();
+    if part != render::Part::Cells || !(crate::style::canvas_dark() || ground) {
+        return std::borrow::Cow::Borrowed(rgba);
+    }
+    let mut seen = rgba.to_vec();
+    for px in seen.as_chunks_mut::<4>().0 {
+        let c = if half { color_half(Rgb(px[0], px[1], px[2])) } else { color(Rgb(px[0], px[1], px[2])) };
+        px[..3].copy_from_slice(&[c.r(), c.g(), c.b()]);
+    }
+    std::borrow::Cow::Owned(seen)
 }
 
 /// The drawing shown, and where it lies on a canvas at a view that may have moved on from it: what's under a pixel of the canvas is
@@ -617,8 +636,11 @@ impl Canvas {
     }
 }
 
-/// A drawing's colour on screen: as drawn, or in the dark theme with its lightness turned over,
-/// so ink reads light on a dark ground and the grid stays blue. Its paper is the user's canvas colour when there is one.
+/// A drawing's colour on screen: as drawn, or on a dark canvas as Revit's dark background draws it: black, white and the greys
+/// between, and the colours so pale or so dull they read as greys (a cream, a grey-blue), with their lightness turned over, so
+/// ink reads light on a dark ground; a colour as it is (a red line stays red, a PDF's or a DWG's coloured fill its colour, a
+/// colour scheme's fill its colour); and BIMCraft's own colours for a light ground in their variants for a dark one
+/// ([`render::ON_DARK`]). Its paper is the user's canvas colour when there is one.
 pub(crate) fn color(c: Rgb) -> Color32 {
     if let Some(ground) = crate::style::canvas_ground().filter(|_| c == render::PAPER) {
         return ground;
@@ -626,10 +648,43 @@ pub(crate) fn color(c: Rgb) -> Color32 {
     if !crate::style::canvas_dark() {
         return Color32::from_rgb(c.0, c.1, c.2);
     }
+    if let Some((_, on_dark)) = render::ON_DARK.iter().find(|(light, _)| *light == c) {
+        return Color32::from_rgb(on_dark.0, on_dark.1, on_dark.2);
+    }
     let (r, g, b) = (i32::from(c.0), i32::from(c.1), i32::from(c.2));
-    let shift = 255 - r.max(g).max(b) - r.min(g).min(b);
+    let (most, least) = (r.max(g).max(b), r.min(g).min(b));
+    if !greyish(most, least) {
+        return Color32::from_rgb(c.0, c.1, c.2);
+    }
+    let shift = 255 - most - least;
     let over = |v: i32| (26 + (v + shift).clamp(0, 255) * 206 / 255) as u8;
     Color32::from_rgb(over(r), over(g), over(b))
+}
+
+/// Whether a colour whose channels are `most` and `least` at the most and the least is a grey a dark canvas turns over: its
+/// channels lie no more than [`GREYISH`] apart, or so near each other for how light it is that it reads as one (a cream
+/// (255, 245, 219), whose 36 apart are a seventh of its lightest).
+fn greyish(most: i32, least: i32) -> bool {
+    most - least <= GREYISH || (most - least) * DULL.1 <= most * DULL.0
+}
+
+/// How far apart a colour's channels may lie, of 255, and it still be a grey a dark canvas turns over.
+const GREYISH: i32 = 24;
+/// How far apart, as a share of its lightest channel, they may lie and it still read as a grey: 3 in 20.
+const DULL: (i32, i32) = (3, 20);
+
+/// A halftone primitive's colour on screen ([`render::Drawing::halftone`]): its colour is baked halfway to white paper, which a
+/// light canvas draws as it is. On a dark canvas, or paper of the user's colour, it is the colour it is halftone of as the canvas
+/// draws that, halfway to the ground, as Revit fades halftone toward the background: so it is always fainter than the same
+/// colour not halftone.
+pub(crate) fn color_half(c: Rgb) -> Color32 {
+    if !crate::style::canvas_dark() && crate::style::canvas_ground().is_none() {
+        return color(c);
+    }
+    let full = |v: u8| (2 * i32::from(v) - 255).clamp(0, 255) as u8;
+    let (own, ground) = (color(Rgb(full(c.0), full(c.1), full(c.2))), color(render::PAPER));
+    let half = |a: u8, b: u8| ((u16::from(a) + u16::from(b)) / 2) as u8;
+    Color32::from_rgb(half(own.r(), ground.r()), half(own.g(), ground.g()), half(own.b(), ground.b()))
 }
 
 /// Screen points nearer each other than this (px) are one: zoomed out, many of an outline's points come to a few thousandths of a
@@ -762,9 +817,9 @@ fn paint_preview(p: &Painter, at: Place, d: &Drawing, preview: &[Id], thin: bool
         p.add(shape);
     };
     let none = HashSet::new();
-    for ((prim, owner), part) in d.prims.iter().zip(&d.owners).zip(&d.parts) {
+    for (i, ((prim, owner), part)) in d.prims.iter().zip(&d.owners).zip(&d.parts).enumerate() {
         if let Some(id) = owner.filter(|id| preview.contains(id)) {
-            paint_prim(&mut out, p.clip_rect(), at, (prim, Some(id), *part), &none, Some(id), thin, &mut [].iter());
+            paint_prim(&mut out, p.clip_rect(), at, (prim, Some(id), *part, d.half(i)), &none, Some(id), thin, &mut [].iter());
         }
     }
 }
@@ -808,24 +863,31 @@ pub(crate) fn paint_to(
     let mut pictures = pictures.iter();
     // Looked up for each primitive: not searched through.
     let set: HashSet<Id> = selected.iter().copied().collect();
-    for ((prim, owner), part) in d.prims.iter().zip(&d.owners).zip(&d.parts) {
-        paint_prim(out, clip, at, (prim, *owner, *part), &set, hovered, thin, &mut pictures);
+    for (i, ((prim, owner), part)) in d.prims.iter().zip(&d.owners).zip(&d.parts).enumerate() {
+        paint_prim(out, clip, at, (prim, *owner, *part, d.half(i)), &set, hovered, thin, &mut pictures);
     }
 }
 
-/// One primitive of a drawing, as [`paint`] draws it.
+/// One primitive of a drawing, as [`paint`] draws it: with its owner, its part and whether it is halftone.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn paint_prim(
     out: &mut dyn FnMut(Shape),
     clip: Rect,
     at: Place,
-    (prim, owner, part): (&Prim, Option<Id>, render::Part),
+    (prim, owner, part, half): (&Prim, Option<Id>, render::Part, bool),
     selected: &HashSet<Id>,
     hovered: Option<Id>,
     thin: bool,
     pictures: &mut std::slice::Iter<TextureId>,
 ) {
-    let color = |c: Rgb| if at.paper { Color32::from_rgb(c.0, c.1, c.2) } else { color(c) };
+    // A gradient's band keeps its colours on a dark canvas, as a picture does.
+    let color = |c: Rgb| match () {
+        _ if at.paper || part == render::Part::Shade => Color32::from_rgb(c.0, c.1, c.2),
+        _ if half => color_half(c),
+        _ => color(c),
+    };
+    // A see-through fill or line: its colour that opaque.
+    let seen = |c: Color32, alpha: u8| if alpha == render::OPAQUE { c } else { c.gamma_multiply(f32::from(alpha) / 255.0) };
     if owner.is_some() && owner == at.hide {
         return;
     }
@@ -840,10 +902,10 @@ pub(crate) fn paint_prim(
     match prim {
         // Notes and compound pattern glyphs use the non-zero fill rule, preserving counters and overlapping contours.
         // Single-contour pattern fills (including dots) keep their ordinary polygon rendering below.
-        Prim::Fill { rings, color: c } if part == render::Part::Text || (part == render::Part::LinePattern && rings.len() > 1) => {
+        Prim::Fill { rings, color: c, .. } if part == render::Part::Text || (part == render::Part::LinePattern && rings.len() > 1) => {
             let fill = accent.map_or(color(*c), |a| a.0);
             let mut mesh = Mesh::default();
-            for tri in letter(rings).iter() {
+            for tri in letter(rings, render::Rule::NonZero).iter() {
                 let first = mesh.vertices.len() as u32;
                 for q in tri {
                     mesh.colored_vertex(at.pos(*q), fill);
@@ -857,8 +919,38 @@ pub(crate) fn paint_prim(
         }
         // Ordinary fills are convex rings, feathered as egui fills them, or independent polygons, triangulated without seams. Whether
         // a ring is convex is read on screen, where it is drawn, and turned the same however big it is.
-        Prim::Fill { rings, color: c } => {
-            let fill = accent.map_or(color(*c), |a| a.1);
+        // A fill of rings by the even-odd rule, its holes and all (a drawing's hatch, a PDF's fill): its triangles.
+        Prim::Fill { rings, color: c, rule: render::Rule::EvenOdd, alpha } if rings.len() > 1 => {
+            let fill = accent.map_or(seen(color(*c), *alpha), |a| a.1);
+            let triangles = letter(rings, render::Rule::EvenOdd);
+            if triangles.is_empty() && rings.iter().map(Vec::len).sum::<usize>() > bimcraft_core::text::MAX_FILL_EDGES {
+                // Past what is cut into strips: ring by ring, holes filled.
+                let mut mesh = Mesh::default();
+                for r in rings {
+                    let ring: Vec<P2> = r.iter().map(|q| P2(f64::from(q.0), f64::from(q.1))).collect();
+                    let first = mesh.vertices.len() as u32;
+                    for q in r {
+                        mesh.colored_vertex(at.pos(*q), fill);
+                    }
+                    for [a, b, c] in geom::triangulate(&ring) {
+                        mesh.add_triangle(first + a as u32, first + b as u32, first + c as u32);
+                    }
+                }
+                out(Shape::mesh(mesh));
+                return;
+            }
+            let mut mesh = Mesh::default();
+            for tri in triangles.iter() {
+                let first = mesh.vertices.len() as u32;
+                for q in tri {
+                    mesh.colored_vertex(at.pos(*q), fill);
+                }
+                mesh.add_triangle(first, first + 1, first + 2);
+            }
+            out(Shape::mesh(mesh));
+        }
+        Prim::Fill { rings, color: c, alpha, .. } => {
+            let fill = accent.map_or(seen(color(*c), *alpha), |a| a.1);
             let one = match rings.as_slice() {
                 [r] => Some(distinct(&r.iter().map(|q| at.pos(*q)).collect::<Vec<_>>(), true)).filter(|r| convex(r)),
                 _ => None,
@@ -886,15 +978,18 @@ pub(crate) fn paint_prim(
         Prim::Image { at: corner, width, height, ink, .. } => {
             if let Some(texture) = pictures.next() {
                 let rect = Rect::from_min_size(at.pos(*corner), vec2(*width as f32, *height as f32) * at.k);
-                // On a dark canvas a plan's picture (a scan's) is dimmed, so the ink lightened over it still reads; a sheet's
-                // paper stays white, and so does a scan the view fills with a colour of its own, which is ink itself.
-                let plain = if !at.paper && !*ink && crate::style::canvas_dark() { Color32::from_gray(120) } else { Color32::WHITE };
+                // On a dark canvas a point cloud's scan is dimmed, so the ink lightened over it still reads; a sheet's paper
+                // stays white, and so does a scan the view fills with a colour of its own, which is ink itself. A picture
+                // placed in the view (an image, a PDF's raster images) keeps its colours, as Revit's does; a dense drawing's
+                // cells are lightened as its lines are ([`cells_seen`]).
+                let dim = !at.paper && !*ink && !matches!(part, render::Part::Cells | render::Part::Picture) && crate::style::canvas_dark();
+                let plain = if dim { Color32::from_gray(120) } else { Color32::WHITE };
                 let tint = accent.map_or(plain, |a| a.1);
                 out(Shape::image(*texture, rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), tint));
             }
         }
-        Prim::Line { pts, width, color: c, dash, closed } => {
-            let stroke = Stroke::new(on_screen(*width, at.k, thin), accent.map_or(color(*c), |a| a.0));
+        Prim::Line { pts, width, color: c, dash, closed, alpha } => {
+            let stroke = Stroke::new(on_screen(*width, at.k, thin), accent.map_or(seen(color(*c), *alpha), |a| a.0));
             let mut pts: Vec<Pos2> = pts.iter().map(|q| at.pos(*q)).collect();
             match dash {
                 Some(dash) => {
@@ -921,13 +1016,15 @@ pub(crate) fn paint_prim(
 
 type Triangles = std::sync::Arc<Vec<[(f32, f32); 3]>>;
 
-/// The triangles that fill a letter's rings, kept for the frames that draw it again (hover, selection, the caret).
-fn letter(rings: &[Vec<(f32, f32)>]) -> Triangles {
+/// The triangles that fill a letter's rings (or a fill's, by `rule`), kept for the frames that draw it again (hover, selection,
+/// the caret).
+fn letter(rings: &[Vec<(f32, f32)>], rule: render::Rule) -> Triangles {
     use std::hash::{Hash, Hasher};
     thread_local! {
         static KEPT: std::cell::RefCell<std::collections::HashMap<u64, Triangles>> = Default::default();
     }
     let mut h = std::collections::hash_map::DefaultHasher::new();
+    (rule == render::Rule::EvenOdd).hash(&mut h);
     for r in rings {
         r.len().hash(&mut h);
         for q in r {
@@ -938,7 +1035,7 @@ fn letter(rings: &[Vec<(f32, f32)>]) -> Triangles {
     if let Some(t) = KEPT.with(|k| k.borrow().get(&key).cloned()) {
         return t;
     }
-    let t: Triangles = std::sync::Arc::new(bimcraft_core::text::triangles(rings));
+    let t: Triangles = std::sync::Arc::new(bimcraft_core::text::fill_triangles(rings, rule));
     KEPT.with(|k| {
         let mut k = k.borrow_mut();
         if k.len() > 50_000 {
@@ -1932,7 +2029,18 @@ impl BimApp {
         let painted_hover = if matches!(self.tool, Tool::Align(_)) || sketch_trim { None } else { hovered };
         let place = Place { hide: self.writing(), ..d.place };
         let kept = pipeline.as_ref().is_some_and(|pipeline| {
-            self.canvas.drawing.retained.paint(ui.ctx(), pipeline, &p, place, rect.min, &d.drawing, &marked, painted_hover, self.thin)
+            self.canvas.drawing.retained.paint(
+                ui.ctx(),
+                pipeline,
+                &p,
+                place,
+                rect.min,
+                &d.drawing,
+                &marked,
+                painted_hover,
+                self.thin,
+                &pictures,
+            )
         });
         if !kept {
             paint(&p, place, &d, &marked, painted_hover, self.thin, &pictures);
