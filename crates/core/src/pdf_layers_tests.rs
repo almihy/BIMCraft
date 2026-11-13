@@ -230,7 +230,7 @@ fn a_page_is_read_again_from_its_pdf_into_the_same_image_and_its_instances_stay(
 }
 
 #[test]
-fn an_imports_patterns_colour_or_hide_its_fills_and_leave_its_lines_be() {
+fn an_imports_fills_keep_their_colour_its_patterns_cant_be_overridden_and_a_file_holding_them_reads() {
     // A grey fill and a black line on Walls.
     let content = "/OC /L0 BDC 0.5 0.5 0.5 rg 20 40 160 40 re f 0 0 0 RG 4 w 10 10 m 190 10 l S EMC";
     let mut s = with_file("p.pdf", sample_layered(content, [200.0, 200.0], &[("Walls", false)]));
@@ -240,17 +240,33 @@ fn an_imports_patterns_colour_or_hide_its_fills_and_leave_its_lines_be() {
     let ((fx, fy), (lx, ly)) = (at(100.0, 60.0), at(100.0, 10.0));
     assert!(has(&plan(&s), fx, fy, [128, 128, 128]) && has(&plan(&s), lx, ly, [0, 0, 0]));
     let walls = |o: Value| json!({"view": level, "pdf_imports": {"p.pdf": {"layers": {"Walls": o}}}});
-    // Its Patterns' foreground: the fill takes its colour, the line keeps its own.
-    run(&mut s, "graphics", walls(json!({"projection": {"foreground": {"pattern": solid, "color": [0, 0, 255]}}})));
-    assert!(has(&plan(&s), fx, fy, [0, 0, 255]), "the fill takes the Patterns' colour");
-    assert!(has(&plan(&s), lx, ly, [0, 0, 0]), "the line keeps its own");
-    // A foreground of no pattern hides the fill, and only the fill.
-    run(&mut s, "graphics", walls(json!({"projection": {"foreground": {"pattern": null, "color": [0, 0, 0]}}})));
-    assert!(!has(&plan(&s), fx, fy, [128, 128, 128]) && !has(&plan(&s), fx, fy, [0, 0, 255]), "the fill is hidden");
-    assert!(has(&plan(&s), lx, ly, [0, 0, 0]));
-    // An import's patterns are its projection's: cut is still refused.
-    let e = fails(&mut s, "graphics", walls(json!({"cut": {"color": [1, 2, 3]}})));
-    assert!(e.contains("projection lines"), "{e}");
+    // As in Revit, an import's Patterns can't be overridden: on its row, a layer's, or Imports in Families.
+    for o in [json!({"projection": {"foreground": {"pattern": solid, "color": [0, 0, 255]}}}), json!({"projection": {"fill": [0, 0, 255]}})]
+    {
+        let e = fails(&mut s, "graphics", walls(o));
+        assert!(e.contains("Patterns can't be overridden"), "{e}");
+    }
+    let e = fails(&mut s, "graphics", json!({"view": level, "categories": {"familyimport": {"projection": {"fill": [0, 0, 255]}}}}));
+    assert!(e.contains("Patterns can't be overridden"), "{e}");
+    // Its Lines' colour is its lines' only: the fill keeps its own; halftone lightens both.
+    run(&mut s, "graphics", walls(json!({"projection": {"color": [0, 0, 255]}})));
+    assert!(has(&plan(&s), fx, fy, [128, 128, 128]), "the fill keeps its own colour");
+    assert!(has(&plan(&s), lx, ly, [0, 0, 255]), "the line takes the Lines' colour");
+    run(&mut s, "graphics", walls(json!({"projection": {"color": null}, "halftone": true})));
+    assert!(has(&plan(&s), fx, fy, [191, 191, 191]) && has(&plan(&s), lx, ly, [127, 127, 127]), "halftone, both");
+    // A file written while an import's Patterns could be overridden reads, with them left out.
+    let mut v: Value = serde_json::from_str(&s.model.to_json().unwrap()).unwrap();
+    let (key, _) = v["elements"].as_object().unwrap().iter().find(|(_, e)| e["graphics"]["pdf_imports"].is_object()).unwrap();
+    let key = key.clone();
+    v["elements"][&key]["graphics"]["pdf_imports"]["p.pdf"]["all"] = json!({"projection": {"fill": [0, 0, 255]}});
+    v["elements"][&key]["graphics"]["categories"] = json!({"familyimport": {"projection": {"fill": [0, 0, 255], "color": [1, 2, 3]}}});
+    let (m, _) = crate::model::Model::read(&v.to_string()).unwrap();
+    m.check().unwrap();
+    let g = crate::graphics::graphics_of(&m, s.model.levels()[0].0).unwrap();
+    let all = &g.pdf_imports["p.pdf"].all;
+    assert!(all.projection.fill.is_none() && all.projection.is_empty(), "{all:?}");
+    assert_eq!(g.categories["familyimport"].projection.color, Some([1, 2, 3]), "its lines are kept");
+    assert!(g.categories["familyimport"].projection.fill.is_none());
 }
 
 #[test]

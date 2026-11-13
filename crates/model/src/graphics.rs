@@ -575,9 +575,12 @@ impl ImportLook {
         *self == ImportLook::default()
     }
 
-    /// Its overrides, the import's row's and each layer's.
-    pub(crate) fn overrides_mut(&mut self) -> impl Iterator<Item = &mut Override> {
-        std::iter::once(&mut self.all).chain(self.layers.values_mut())
+    /// Its overrides with their patterns taken off, which an import has none of, as in Revit: a file that holds them (written
+    /// while BIMCraft let an import's Patterns be overridden) reads with them left out.
+    fn drop_patterns(&mut self) {
+        for o in std::iter::once(&mut self.all).chain(self.layers.values_mut()) {
+            o.projection = lines_of(&o.projection);
+        }
     }
 
     /// How it draws layer `layer`'s lines: the layer's settings, and the import's where it has none.
@@ -588,13 +591,13 @@ impl ImportLook {
         }
     }
 
-    /// Whether it is sound: an import's row sets its visibility, its projection lines and patterns (its fills' and hatches')
-    /// and its halftone; a layer's its lines, patterns and halftone (whether it shows is the view's `layers`).
+    /// Whether it is sound: an import's row sets its visibility, its projection lines and its halftone; a layer's its lines
+    /// and its halftone (whether it shows is the view's `layers`). Its Patterns can't be overridden, as in Revit.
     fn check(&self, who: &str) -> Result<(), String> {
         let only_lines = |o: &Override, what: &str| -> Result<(), String> {
-            if !o.cut.is_empty() || o.transparency != 0 || o.shown {
+            if o.projection != lines_of(&o.projection) || !o.cut.is_empty() || o.transparency != 0 || o.shown {
                 return Err(format!(
-                    "{what}: an import sets its projection lines (colour, weight, pattern), its patterns and halftone only"
+                    "{what}: an import sets its projection lines (colour, weight, pattern) and halftone only; its Patterns can't be overridden, as in Revit"
                 ));
             }
             o.check(what)
@@ -613,6 +616,24 @@ impl ImportLook {
             only_lines(o, &format!("{who}'s layer `{name}`"))?;
         }
         Ok(())
+    }
+}
+
+/// A style's lines alone (its colour, weight and dash), its patterns taken off: what an import's row and layers set.
+fn lines_of(s: &Style) -> Style {
+    Style { color: s.color, weight: s.weight, dash: s.dash, ..Style::default() }
+}
+
+/// What a view and a template hold of an import's Patterns, left out ([`ImportLook::drop_patterns`]): its imports' and PDF
+/// pages' rows and layers, and Imports in Families'.
+pub(crate) fn drop_import_patterns(g: &mut Graphics) {
+    for look in g.imports.values_mut().chain(g.pdf_imports.values_mut()) {
+        look.drop_patterns();
+    }
+    for c in IMPORTED {
+        if let Some(o) = g.categories.get_mut(c) {
+            o.projection = lines_of(&o.projection);
+        }
     }
 }
 
@@ -764,6 +785,9 @@ impl Graphics {
                 ));
             }
             o.check(&format!("category `{c}`"))?;
+            if IMPORTED.contains(&c.as_str()) && o.projection != lines_of(&o.projection) {
+                return Err(format!("category `{c}`: an import's Patterns can't be overridden, as in Revit; it takes its lines only"));
+            }
         }
         for (id, o) in &self.elements {
             o.check(&format!("element {id}"))?;
@@ -819,11 +843,6 @@ impl Graphics {
         }
         for (name, look) in &self.pdf_imports {
             look.check(&format!("PDF page `{name}`"))?;
-        }
-        for look in self.imports.values().chain(self.pdf_imports.values()) {
-            for o in std::iter::once(&look.all).chain(look.layers.values()) {
-                o.check_patterns(m)?;
-            }
         }
         let mut seen = BTreeSet::new();
         for a in &self.filters {

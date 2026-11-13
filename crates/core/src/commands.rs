@@ -2153,10 +2153,10 @@ other_files(
          layers of each CAD drawing it hides, by the drawing's name (null shows them all again); `pdf_layers` the layers of each \
          PDF page's lines it hides, by the image's name (`cad_layers` lists them); `imports` how each CAD drawing draws, by \
          its name, and `pdf_imports` each PDF page's lines, by the image's, as Revit's Imported Categories: `all` the import's \
-         own row (hidden: the whole import is; projection: its lines' colour, weight and dash, and its patterns, which its fills \
-         and hatches take: `foreground` {pattern, color} gives their colour, a `foreground` of pattern null hides them, `fill` \
-         a solid colour; halftone) and `layers` each layer's (its projection lines, patterns and halftone, winning over the \
-         import's), merged into what the view has (null takes a setting, a layer or the whole away). Imported Categories' box \
+         own row (hidden: the whole import is; projection: its lines' colour, weight and dash; halftone) and `layers` each \
+         layer's (its projection lines and halftone, winning over the import's), merged into what the view has (null takes a \
+         setting, a layer or the whole away); an import's patterns can't be overridden, as in Revit: its fills and hatches keep \
+         their own colours (halftone lightens them), and its Lines' colour is its lines' and text's. Imported Categories' box \
          over its table, Show imported categories in this view, is the category `cadimport`: hidden (`hide: [cadimport]`), \
          every CAD drawing and every PDF page's lines leave the view; its Imports in Families row is the category \
          `familyimport`, hidden and overridden (projection lines, halftone) as any category (what families bring in from CAD \

@@ -3965,6 +3965,12 @@ impl Model {
         }
         let mut m: Model = serde_json::from_value(v).map_err(|e| e.to_string())?;
         m.migrate();
+        // An import's Patterns, which a file may hold from when they could be overridden, are left out: as in Revit, it has none.
+        for g in
+            m.elements.values_mut().filter_map(crate::graphics::graphics_mut).chain(m.view_templates.values_mut().map(|t| &mut t.graphics))
+        {
+            crate::graphics::drop_import_patterns(g);
+        }
         m.names_from_file();
         m.renamed_clashing_parameters();
         m.renamed_clashing_calculated_fields();

@@ -141,10 +141,11 @@ import is one element: picked by any of its lines, selected whole. Sections, ele
 Revit's do for a drawing placed in a plan; IFC export leaves them out too. The category is `cadimport`: hidden in a view
 (Imported Categories' Show imported categories in this view cleared), every drawing and every PDF page's lines leave it
 (`Look::draws_pdf_lines`), and it halftones like any other. `familyimport` is Imports in Families' row, a category hidden and
-overridden as any; families bring in no CAD yet, so it draws nothing. An import's fills and hatches (a hatch, a PDF's fill, a
-gradient's bands, a pattern's fills) take its Patterns: their foreground's colour, a foreground of no pattern hiding them, or
-a solid fill's colour (`render::import_fill`); its Lines are its lines' and text's. Revit greys an import's Patterns out;
-BIMCraft gives them, as the owner asked, since a PDF's fills are its own.
+overridden as any; families bring in no CAD yet, so it draws nothing. An import's fills and hatches keep their own colours
+(halftone lightens them, `render::import_fill`): as in Revit, its Patterns can't be overridden (hatched on the import's
+row, its layers' and Imports in Families'; `ImportLook::check` takes lines and halftone only, and a file that holds Patterns
+for an import, written while BIMCraft let them be set, reads with them left out, `graphics::drop_import_patterns`). Its
+Lines' colour is its lines' and text's, drawn whole and zoomed out alike.
 
 ### A dense drawing zoomed out
 

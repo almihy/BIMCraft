@@ -838,6 +838,8 @@ struct Row {
     sub: bool,
     /// A category with subcategories: whether they are unfolded.
     fold: Option<bool>,
+    /// The cells it can't override, hatched as Revit greys them out: an import's Patterns.
+    hatched: &'static [Cell],
     /// Whether it has a Halftone box: an import's layer hasn't, its file's being the whole file's.
     halftone: bool,
     /// Whether it can be changed here: not what a view template the view follows sets.
@@ -847,7 +849,7 @@ struct Row {
 impl Row {
     /// A row of `pick`, named `name`, with override `over` and the pens of `start`: every cell, changed with its table.
     fn new(pick: Pick, name: String, over: Override, start: ObjectStyle) -> Row {
-        Row { pick, name, over, start, sub: false, fold: None, halftone: true, enabled: true }
+        Row { pick, name, over, start, sub: false, fold: None, hatched: &[], halftone: true, enabled: true }
     }
 }
 
@@ -974,6 +976,11 @@ fn table(ui: &mut Ui, d: &mut VgDialog, model: &Model, rows: &[Row], cols: &Colu
             for k in cols.cells {
                 let at = cell(x, CELL_W);
                 p.vline(x, r.y_range(), line);
+                if row.hatched.contains(k) {
+                    hatch(ui, &p, at);
+                    x += CELL_W;
+                    continue;
+                }
                 let name = format!("{}: {}", row.name, t(k.name()));
                 let mut c = child(ui, at.shrink(2.0), Layout::centered_and_justified(egui::Direction::LeftToRight));
                 let b = c.add_enabled(enabled, Button::new(if picked { t("Override…") } else { "" }).frame(picked));
@@ -1004,6 +1011,8 @@ fn table(ui: &mut Ui, d: &mut VgDialog, model: &Model, rows: &[Row], cols: &Colu
                 if h.changed() {
                     edits.push((row.pick.clone(), Override { halftone: half, ..row.over.clone() }));
                 }
+            } else {
+                hatch(ui, &p, cell(x, HALFTONE_W));
             }
             x += HALFTONE_W;
             // Detail Level: each category drawn at the view's, until a category can have its own.
@@ -1014,6 +1023,19 @@ fn table(ui: &mut Ui, d: &mut VgDialog, model: &Model, rows: &[Row], cols: &Colu
         }
     });
     edits
+}
+
+/// A cell that can't be overridden, hatched as Revit greys it out: fine diagonal lines over a faint ground.
+fn hatch(ui: &Ui, p: &Painter, r: Rect) {
+    let r = r.shrink2(vec2(0.5, 0.0));
+    let p = p.with_clip_rect(r.intersect(p.clip_rect()));
+    p.rect_filled(r, 0.0, ui.visuals().faint_bg_color);
+    let stroke = Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color);
+    let mut x = r.left() - r.height();
+    while x < r.right() {
+        p.line_segment([pos2(x, r.bottom()), pos2(x + r.height(), r.top())], stroke);
+        x += 4.0;
+    }
 }
 
 /// A fold arrow: a small triangle in the text's colour centred on `at` (dark grey on a light dialog, light on a dark one),
@@ -1330,9 +1352,9 @@ pub(crate) fn pdfs_in(model: &Model, key: Option<Guid>) -> Vec<(String, Vec<Stri
 /// which hides every import in the view); one table of a row for each CAD drawing of the project and each PDF page drawn from
 /// its lines placed in the view (each in a template's), and Imports in Families (`familyimport`), sorted by name, each import
 /// unfolding to a row for each of its layers; All, None, Invert and Expand All under it; and Object Styles…. An import's row
-/// and a layer's set its visibility, its projection lines and its patterns (its fills' and hatches'), and the import's its
-/// halftone, the whole file's. A layer's own settings win over its import's. Whether Object Styles… was
-/// pressed.
+/// and a layer's set its visibility and its projection lines, and the import's its halftone, the whole file's (a layer's
+/// Halftone is hatched); Patterns is hatched on every row, as Revit can't override an import's. A layer's own settings win
+/// over its import's. Whether Object Styles… was pressed.
 fn imported(ui: &mut Ui, d: &mut VgDialog, model: &Model, shown: &Graphics, followed: &BTreeSet<Group>) -> bool {
     let (own_categories, own_imports) = (!followed.contains(&Group::Categories), !followed.contains(&Group::Imports));
     let mut show = !shown.hides("cadimport");
@@ -1347,7 +1369,9 @@ fn imported(ui: &mut Ui, d: &mut VgDialog, model: &Model, shown: &Graphics, foll
     ui.add_space(4.0);
     // Every row, an import's layers among them, folded or not: what All, None and Invert reach.
     let start = model.object_style("cadimport");
+    let patterns: &'static [Cell] = &[Cell::ProjectionPatterns];
     let families = Row {
+        hatched: patterns,
         enabled: own_categories,
         ..Row::new(
             Pick::Category("familyimport".into()),
@@ -1365,6 +1389,7 @@ fn imported(ui: &mut Ui, d: &mut VgDialog, model: &Model, shown: &Graphics, foll
         let open = pick.fold_key().is_some_and(|k| d.unfolded.contains(&k));
         let mut group = vec![Row {
             fold: (!layers.is_empty()).then_some(open),
+            hatched: patterns,
             enabled: own_imports,
             ..Row::new(pick, name.clone(), look.all.clone(), start)
         }];
@@ -1372,7 +1397,7 @@ fn imported(ui: &mut Ui, d: &mut VgDialog, model: &Model, shown: &Graphics, foll
             let mut over = look.layers.get(&l).cloned().unwrap_or_default();
             over.hidden = hidden.get(&name).is_some_and(|h| h.contains(&l));
             let pick = Pick::Import { pdf, name: name.clone(), layer: Some(l.clone()) };
-            group.push(Row { sub: true, halftone: false, enabled: own_imports, ..Row::new(pick, l, over, start) });
+            group.push(Row { sub: true, hatched: patterns, halftone: false, enabled: own_imports, ..Row::new(pick, l, over, start) });
         }
         tops.push((name.to_lowercase(), group));
     }
