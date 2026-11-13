@@ -678,6 +678,7 @@ impl Model {
             Kind::FamilyType => name.split_once(": ").is_some_and(|(f, t)| {
                 self.families.get_mut(f).is_some_and(|fam| {
                     fam.identity.remove(t);
+                    fam.forget_type(t);
                     fam.types.remove(t).is_some()
                 })
             }),
@@ -722,6 +723,7 @@ impl Model {
             Kind::FamilyType => match (from.split_once(": "), to.split_once(": ")) {
                 (Some((f, old)), Some((g, new))) if f == g => self.families.get_mut(f).is_some_and(|fam| {
                     mv(&mut fam.identity, old, new);
+                    fam.rename_type(old, new);
                     mv(&mut fam.types, old, new)
                 }),
                 _ => false,
@@ -1641,18 +1643,29 @@ impl Model {
         serde_json::to_string_pretty(&m).map_err(|e| e.to_string())
     }
 
-    /// The format its file is written in: the oldest that holds all it has. [`crate::model::FORMAT`] when it holds images, or
-    /// a door or a window whose To Room is not on the side it swings to or faces (flipped since it was placed, or its rooms
+    /// The format its file is written in: the oldest that holds all it has. [`crate::model::FORMAT`] when a family has forms
+    /// or symbols of some of its types only, Visibility Settings, elevation symbols, a traced outline, a `cut` or a text
+    /// parameter, which a build that reads up to 20 would misread; [`crate::model::ROOMS_FORMAT`] when it holds images, or a
+    /// door or a window whose To Room is not on the side it swings to or faces (flipped since it was placed, or its rooms
     /// flipped), which a file of 19 would give it back from its swing; else [`crate::model::PREVIOUS_FORMAT`], so an older
     /// build opens it.
     pub fn written_format(&self) -> u32 {
         use crate::model::Element;
+        let families = self.families.values().any(|f| {
+            f.cut.is_some()
+                || f.parameters.iter().any(|p| p.kind == crate::family::Kind::Text)
+                || f.forms.iter().any(|x| !x.types.is_empty() || x.show.is_some() || !x.outline.is_empty())
+                || f.symbols.iter().any(|y| !y.types.is_empty() || y.show.is_some() || y.view != crate::family::SymbolView::Plan)
+        });
+        if families {
+            return crate::model::FORMAT;
+        }
         let images = !self.image_types.is_empty() || !self.rare("image").is_empty();
         let rooms_kept = self.elements.values().any(|e| match e {
             Element::Door(o) | Element::Window(o) => o.to_room_side != o.swing_side(),
             _ => false,
         });
-        if images || rooms_kept { crate::model::FORMAT } else { crate::model::PREVIOUS_FORMAT }
+        if images || rooms_kept { crate::model::ROOMS_FORMAT } else { crate::model::PREVIOUS_FORMAT }
     }
 
     /// Every name this model holds of a library entry (its elements', its types', its views'…) its GUID, and the values of
