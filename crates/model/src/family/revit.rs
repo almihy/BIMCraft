@@ -440,7 +440,7 @@ impl Reader<'_> {
         let n: Vec<f64> = def["normal"].as_array().map(|v| v.iter().filter_map(num).collect()).unwrap_or_default();
         let [nx, ny, nz] = n.as_slice() else { return Err("it says no normal".into()) };
         let len = (nx * nx + ny * ny + nz * nz).sqrt();
-        if !(len > 1e-9) {
+        if len.is_nan() || len <= 1e-9 {
             return Err("it says no normal".into());
         }
         // Its normal in the family's axes, and the family's origin along it in the document's.
