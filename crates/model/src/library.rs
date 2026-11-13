@@ -1692,7 +1692,7 @@ impl Model {
 
     /// The format its file is written in: the oldest that holds all it has, the newest need first. [`crate::model::FORMAT`]
     /// when a family from Revit stays parametric (references, dimensions, nested parts, a catalog, blends, sweeps, holes, arcs,
-    /// Revit's result kept beside it, its check); [`crate::model::TYPES_FORMAT`] when a family has forms or symbols of some of
+    /// an arc that follows its ends, a form's `source` and a void's `cuts`, Revit's result kept beside it, its check); [`crate::model::TYPES_FORMAT`] when a family has forms or symbols of some of
     /// its types only, elevation symbols, a traced outline, a `cut` or a text parameter; [`crate::model::LEAF_FORMAT`] when it
     /// places a door, a window or a component of a family whose forms or symbols say which views or detail levels draw them
     /// (`show`), which a file of 21 would leave out, drawing a door's leaf shut in the wall again;
@@ -1712,7 +1712,15 @@ impl Model {
                 || f.editable.is_some()
                 || f.forms
                     .iter()
-                    .any(|x| x.snapshot || !x.top.is_empty() || !x.path.is_empty() || !x.holes.is_empty() || !x.arcs.is_empty())
+                    .any(|x| {
+                        x.snapshot
+                            || !x.top.is_empty()
+                            || !x.path.is_empty()
+                            || !x.holes.is_empty()
+                            || !x.arcs.is_empty()
+                            || x.source.is_some()
+                            || x.cuts.is_some()
+                    })
                 || f.symbols.iter().any(|y| y.snapshot || y.arc.as_ref().is_some_and(crate::family::Curve::follows_ends))
         });
         if parametric {

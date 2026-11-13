@@ -4,6 +4,7 @@
 
 use serde_json::{Value, json};
 
+use crate::engine::Session;
 use crate::family::{Family, Mark, SymbolView};
 use crate::geom::P2;
 
@@ -204,3 +205,101 @@ fn a_nested_part_turned_onto_a_face_draws_its_plan_symbols_in_the_parents_front_
     assert!(points(&f.marks_with("Standard", &v, SymbolView::Plan, None, &others).unwrap()).is_empty());
 }
 
+
+#[test]
+fn a_traced_outline_that_crosses_itself_is_drawn_as_the_hull() {
+    let bar = |outline: Value| {
+        family(json!({
+            "category": "generic", "types": {"Standard": {}},
+            "forms": [{"mesh": cuboid([0.0, 0.0, 0.0], [100.0, 40.0, 10.0]), "outline": outline}]
+        }))
+    };
+    let outline = |f: &Family| {
+        let v = f.values("Standard", &Default::default()).unwrap();
+        f.pieces("Standard", &v).unwrap()[0].outline.clone()
+    };
+    // A bow tie: its edges cross.
+    let tie = outline(&bar(json!([[0, 0], [100, 40], [100, 0], [0, 40]])));
+    assert_eq!(tie.len(), 4, "the hull of the box: its four corners: {tie:?}");
+    assert!(tie.iter().all(|p| (near(p.0, 0.0) || near(p.0, 100.0)) && (near(p.1, 0.0) || near(p.1, 40.0))), "{tie:?}");
+    // A ring that backtracks along itself touches itself too.
+    assert_eq!(outline(&bar(json!([[0, 0], [100, 40], [0, 0], [100, 0], [100, 40]]))).len(), 4);
+    // An L that doesn't cross itself stays as traced.
+    let l = outline(&bar(json!([[0, 0], [100, 0], [100, 20], [50, 20], [50, 40], [0, 40]])));
+    assert_eq!(l.len(), 6, "a traced L: {l:?}");
+}
+
+/// The volume of every piece `f`'s type `Standard` builds to, in the order they are built.
+fn volumes(f: &Family) -> Vec<f64> {
+    let v = f.values("Standard", &Default::default()).unwrap();
+    f.pieces("Standard", &v)
+        .unwrap()
+        .iter()
+        .map(|p| p.tris.iter().map(|[a, b, c]| crate::geom::v3::dot(*a, crate::geom::v3::cross(*b, *c))).sum::<f64>() / 6.0)
+        .collect()
+}
+
+#[test]
+fn a_void_cuts_only_the_forms_it_names() {
+    let boxed = |x0: f64, x1: f64, source: &str| {
+        json!({"profile": [[x0, 0], [x1, 0], [x1, 100], [x0, 100]], "from": 0, "to": 100, "source": source})
+    };
+    // A void through the right half of A (x 0 to 100) and the left half of B (x 200 to 300): 50 x 100 x 100 of each.
+    let hole = |cuts: Value, listed: &str| {
+        let void = json!({"profile": [[50, -10], [250, -10], [250, 110], [50, 110]], "from": -10, "to": 110, "void": true, "cuts": cuts});
+        let mut forms = vec![boxed(0.0, 100.0, "1"), boxed(200.0, 300.0, "2")];
+        if listed == "first" {
+            forms.insert(0, void);
+        } else {
+            forms.push(void);
+        }
+        family(json!({"category": "generic", "types": {"Standard": {}}, "forms": forms}))
+    };
+    let whole = 100.0 * 100.0 * 100.0;
+    let none = |f: Family| {
+        let mut f = f;
+        for form in &mut f.forms {
+            form.cuts = None;
+        }
+        f
+    };
+    for listed in ["last", "first"] {
+        let v = volumes(&hole(json!(["1"]), listed));
+        assert!((v[0] - whole / 2.0).abs() < 1.0 && (v[1] - whole).abs() < 1.0, "{listed}: only A is cut: {v:?}");
+        let v = volumes(&hole(json!(["2", "1"]), listed));
+        assert!((v[0] - whole / 2.0).abs() < 1.0 && (v[1] - whole / 2.0).abs() < 1.0, "{listed}: both, in any order: {v:?}");
+        let v = volumes(&hole(json!([]), listed));
+        assert!((v[0] - whole).abs() < 1.0 && (v[1] - whole).abs() < 1.0, "{listed}: it names none: {v:?}");
+    }
+    // Where it names none, a void listed after them cuts every solid before it, and one listed before cuts none.
+    let v = volumes(&none(hole(json!(["1"]), "last")));
+    assert!((v[0] - whole / 2.0).abs() < 1.0 && (v[1] - whole / 2.0).abs() < 1.0, "both cut where `cuts` is absent: {v:?}");
+    let v = volumes(&none(hole(json!(["1"]), "first")));
+    assert!((v[0] - whole).abs() < 1.0 && (v[1] - whole).abs() < 1.0, "listed before them, it cuts none: {v:?}");
+    // `cuts` is a void's.
+    let mut solid = hole(json!(["1"]), "last");
+    solid.forms[0].cuts = Some(vec!["2".into()]);
+    assert!(solid.check(&|_| true).is_err_and(|e| e.contains("`cuts`")));
+}
+
+#[test]
+fn a_project_whose_family_follows_ends_or_names_what_a_void_cuts_is_written_as_24() {
+    let written = |definition: Value| {
+        let mut s = Session::new();
+        s.execute("family", &definition).unwrap_or_else(|e| panic!("family {definition}: {e}"));
+        serde_json::from_str::<Value>(&s.model.to_json().unwrap()).unwrap()["format"].as_u64().unwrap()
+    };
+    let rect = |x1: f64| json!([[0, 0], [x1, 0], [x1, 100], [0, 100]]);
+    let plain = json!({"name": "Sample Plain", "category": "generic", "types": {"A": {}},
+                       "forms": [{"profile": rect(100.0), "from": 0, "to": 100}]});
+    assert!(written(plain) < 24, "a family saying none of it is as before");
+    let sourced = json!({"name": "Sample Sourced", "category": "generic", "types": {"A": {}},
+                         "forms": [{"profile": rect(100.0), "from": 0, "to": 100, "source": "7"}]});
+    let cutting = json!({"name": "Sample Cutting", "category": "generic", "types": {"A": {}},
+                         "forms": [{"profile": rect(100.0), "from": 0, "to": 100}, {"profile": rect(50.0), "from": 0, "to": 50, "void": true, "cuts": []}]});
+    let arc = json!({"name": "Sample Arc", "category": "generic", "types": {"A": {}},
+                     "symbols": [{"arc": {"centre": [0, 0], "radius": 100, "from": 0, "to": 90, "start": [100, 0], "end": [0, 100]}}]});
+    for definition in [sourced, cutting, arc] {
+        assert_eq!(written(definition.clone()), 24, "{definition}");
+    }
+}

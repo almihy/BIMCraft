@@ -112,7 +112,16 @@ fn geometry(f: &Family, out: &mut Vec<String>) {
         };
         let shapes = f.shapes(ty, &values);
         for void in shapes.iter().filter(|s| s.void) {
-            let cut = shapes.iter().any(|solid| !solid.void && solid.index < void.index && void.over(solid));
+            // A void that names what it cuts cuts those wherever they are listed; one that doesn't, those listed before it.
+            let cuts = f.forms[void.index].cuts.as_deref();
+            let cut = shapes.iter().any(|solid| {
+                !solid.void
+                    && void.over(solid)
+                    && match cuts {
+                        Some(list) => f.forms[solid.index].source.as_ref().is_some_and(|s| list.contains(s)),
+                        None => solid.index < void.index,
+                    }
+            });
             if !cut {
                 faults
                     .entry(format!("form {}: its void passes through no solid form listed before it; it cuts nothing", void.index + 1))

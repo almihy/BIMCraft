@@ -941,6 +941,14 @@ pub struct Form {
     /// Revit's own result for its types, kept as the check and the fallback ([`Family::draws_snapshot`]).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub snapshot: bool,
+    /// The id of the Revit definition form it was made from, which every form it was split into carries: what a void's `cuts`
+    /// name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// A void's: the `source` ids of the forms it cuts, wherever they are listed (Revit's void cuts what it was joined to, not
+    /// whatever it crosses). None, it cuts every solid listed before it that it reaches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cuts: Option<Vec<String>>,
 }
 
 /// Which ring of a form an arc is an edge of.
@@ -2050,6 +2058,14 @@ impl Family {
                 material_ok(&who, &form.material)?;
             }
             self.check_part(&who, &form.types, form.subcategory.as_deref())?;
+            if let Some(cuts) = &form.cuts
+                && (!form.void || cuts.len() > MAX_FORMS || cuts.iter().any(|c| c.chars().count() > MAX_TEXT))
+            {
+                return Err(format!("{who}: `cuts` is a void's, up to {MAX_FORMS} names of up to {MAX_TEXT} characters"));
+            }
+            if form.source.as_ref().is_some_and(|s| s.chars().count() > MAX_TEXT) {
+                return Err(format!("{who}: its `source` is longer than {MAX_TEXT} characters"));
+            }
             if form.exprs().into_iter().any(|e| matches!(e, Expr::Formula(f) if long(f))) {
                 return Err(format!("{who}: a formula of it is longer than {MAX_FORMULA} characters"));
             }
@@ -2569,7 +2585,7 @@ impl Family {
         cuts: &mut csg::Meter,
         how: Build,
     ) -> Result<Vec<Piece>, String> {
-        let (mut out, mut voids) = (Vec::new(), Vec::new());
+        let (mut out, mut voids, mut made_of) = (Vec::new(), Vec::new(), Vec::new());
         for i in 0..self.forms.len() {
             if !self.forms[i].of_type(type_name) || self.forms[i].snapshot != how.snapshot {
                 continue;
@@ -2581,13 +2597,20 @@ impl Family {
             if self.forms[i].void {
                 voids.push((i, out.len(), piece.tris));
             } else {
+                made_of.push(self.forms[i].source.as_deref());
                 out.push(piece);
             }
         }
-        // Each void cut from the solids listed before it that it reaches. A cut solid is no longer one round surface,
+        // Each void cut from the solids it says it cuts (`cuts`: the forms of those `source`s, wherever they are listed) or, where
+        // it says nothing, from the solids listed before it that it reaches. A cut solid is no longer one round surface,
         // and its outline seen from above is as it was. ponytail: a notch or a hole doesn't show in plan; trace it if it must.
         for (i, before, void) in &voids {
-            for piece in out.iter_mut().take(*before) {
+            let named = self.forms[*i].cuts.as_deref();
+            let reach = if named.is_some() { out.len() } else { *before };
+            for (piece, source) in out.iter_mut().zip(&made_of).take(reach) {
+                if named.is_some_and(|list| !source.is_some_and(|s| list.iter().any(|c| c == s))) {
+                    continue;
+                }
                 let tris = csg::subtract(&piece.tris, void, cuts).map_err(|e| format!("form {}: {e}", i + 1))?;
                 if tris != piece.tris {
                     let (bottom, top) = heights(&tris);
@@ -3189,6 +3212,39 @@ fn revolve(ring: &[P2], [p0, p1]: [P2; 2], (from, to): (f64, f64), plane: Plane)
     Ok((tris, outline))
 }
 
+/// How near a point is to a line, or a segment's end to another's, for them to meet, mm (an area, for the turn of three points).
+const MEET: f64 = 1e-9;
+
+/// Whether the closed `ring` crosses or touches itself: two of its edges that share no corner meet.
+fn crosses_itself(ring: &[P2]) -> bool {
+    let n = ring.len();
+    let edge = |i: usize| (ring[i], ring[(i + 1) % n]);
+    (0..n).any(|i| {
+        let (a, b) = edge(i);
+        // Edge `i + 1` and, round the ring's end, edge `n - 1` for the first, share a corner with it.
+        (i + 2..n).filter(|j| !(i == 0 && *j == n - 1)).any(|j| {
+            let (c, d) = edge(j);
+            segments_meet(a, b, c, d)
+        })
+    })
+}
+
+/// Whether the segments `a`-`b` and `c`-`d` meet: cross, touch or overlap.
+fn segments_meet(a: P2, b: P2, c: P2, d: P2) -> bool {
+    let turn = |p: P2, q: P2, r: P2| (q - p).cross(r - p);
+    let within = |p: P2, q: P2, r: P2| {
+        r.0 >= p.0.min(q.0) - MEET && r.0 <= p.0.max(q.0) + MEET && r.1 >= p.1.min(q.1) - MEET && r.1 <= p.1.max(q.1) + MEET
+    };
+    let (d1, d2, d3, d4) = (turn(c, d, a), turn(c, d, b), turn(a, b, c), turn(a, b, d));
+    if ((d1 > MEET && d2 < -MEET) || (d1 < -MEET && d2 > MEET)) && ((d3 > MEET && d4 < -MEET) || (d3 < -MEET && d4 > MEET)) {
+        return true;
+    }
+    (d1.abs() <= MEET && within(c, d, a))
+        || (d2.abs() <= MEET && within(c, d, b))
+        || (d3.abs() <= MEET && within(a, b, c))
+        || (d4.abs() <= MEET && within(a, b, d))
+}
+
 /// A form a file brought as triangles: its outline seen from above, the one it `traced` (counter-clockwise), else the hull
 /// round them.
 fn mesh(tris: &[[P3; 3]], traced: &[[f64; 2]], material: String) -> Result<Piece, String> {
@@ -3210,7 +3266,14 @@ fn mesh(tris: &[[P3; 3]], traced: &[[f64; 2]], material: String) -> Result<Piece
             return Err("a point of its `outline` isn't a usable number".into());
         }
         let ring: Vec<P2> = traced.iter().map(|[x, y]| P2(*x, *y)).collect();
-        if crate::geom::area(&ring) < 0.0 { ring.into_iter().rev().collect() } else { ring }
+        if crosses_itself(&ring) {
+            // A traced outline that zig-zags or crosses itself fills nothing: the hull stands for it, as if none was traced.
+            crate::geom::hull(tris.iter().flatten().map(|p| P2(p[0], p[1])).collect())
+        } else if crate::geom::area(&ring) < 0.0 {
+            ring.into_iter().rev().collect()
+        } else {
+            ring
+        }
     };
     Ok(Piece { tris: tris.to_vec(), caps: tris.len(), outline, bottom, top, material, round: false, show: None })
 }
