@@ -6964,7 +6964,7 @@ impl Model {
     /// itself), as the chain of families from it back to it, `start` last; none where it doesn't. Such a family would nest
     /// without end, and its nested parts draw nothing.
     fn nesting_cycle(&self, start: &str) -> Option<Vec<String>> {
-        let Some(first) = self.families.get(start) else { return None };
+        let first = self.families.get(start)?;
         if first.nested.is_empty() {
             return None;
         }
