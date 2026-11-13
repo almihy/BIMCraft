@@ -130,7 +130,9 @@ entity of a layer the import and the view show, in its colour (the view's ink wh
 its pen (`Cad::pen`, the entity's or its layer's line weight) and its dashes (`Cad::dash`, its linetype by `$LTSCALE`, scaled to
 the view, every dash, dot and gap of it: `Cad::dash`, left solid when its cycle would be under a few pixels). Text is lettered
 with `font.rs` at its height and width factor (DXF group 41), turned, aligned and, backwards (group 71), mirrored; a hatch's
-rings fill by odd parity, as DXF's do, so an island is a hole; an entity's transparency (group 440) draws see-through. Only the
+rings fill by odd parity, as DXF's do, so an island is a hole, and reading keeps the rings its style (group 75) fills, as
+AutoCAD does (`dxf::styled`: Normal every island, Outermost the outer boundaries and their first islands, Ignore the outer
+boundaries alone, nesting found by containment; a boundary written twice is kept once, so the two don't cancel); an entity's transparency (group 440) draws see-through. Only the
 entities whose boxes reach the view are looked at (`Cad::entities_in`, a grid of the entities' boxes made the first time it is
 asked, which snapping and `cad::nearest` use too), and a run's points under a pixel apart are drawn as one (`thinned`), so a
 dense sheet draws quickly zoomed in and zoomed out. Each layer draws as the view's Imported Categories say (`ImportLook`:
