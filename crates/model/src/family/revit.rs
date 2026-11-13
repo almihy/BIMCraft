@@ -287,6 +287,29 @@ fn sketch(axis: Axis) -> (Plane, [usize; 2]) {
     }
 }
 
+/// A form of `base` for each outer loop of `rings` (its profile and its arcs), the loops inside it its holes (one inside a
+/// hole is an outer again).
+fn nest(rings: &[Loop], base: &Form) -> Vec<Form> {
+    let depth: Vec<usize> = rings
+        .iter()
+        .enumerate()
+        .map(|(i, r)| rings.iter().enumerate().filter(|(j, o)| *j != i && r.2.first().is_some_and(|p| inside(*p, &o.2))).count())
+        .collect();
+    let mut out = Vec::new();
+    for (i, r) in rings.iter().enumerate().filter(|(i, _)| depth[*i].is_multiple_of(2)) {
+        let mut form = Form { profile: r.0.clone(), arcs: r.1.clone(), ..base.clone() };
+        for (j, h) in rings.iter().enumerate() {
+            if depth[j] == depth[i] + 1 && h.2.first().is_some_and(|p| inside(*p, &r.2)) {
+                let hole = form.holes.len();
+                form.arcs.extend(h.1.iter().cloned().map(|b| Bend { ring: Ring::Hole, hole, ..b }));
+                form.holes.push(h.0.clone());
+            }
+        }
+        out.push(form);
+    }
+    out
+}
+
 /// Whether point `p` is inside ring `r`.
 fn inside(p: P2, r: &[P2]) -> bool {
     let mut odd = false;
@@ -341,28 +364,8 @@ impl Reader<'_> {
                 }
                 let loops = def["loops"].as_array().filter(|l| !l.is_empty() && l.len() <= MOST).ok_or("its sketch has no loops")?;
                 let rings = loops.iter().map(|l| self.ring(l, k, Ring::Profile, 0)).collect::<Result<Vec<_>, _>>()?;
-                // Outer loops each a form, the loops inside them its holes (one inside a hole is an outer again).
-                let depth: Vec<usize> = rings
-                    .iter()
-                    .enumerate()
-                    .map(|(i, r)| {
-                        rings.iter().enumerate().filter(|(j, o)| *j != i && r.2.first().is_some_and(|p| inside(*p, &o.2))).count()
-                    })
-                    .collect();
-                let mut out = Vec::new();
-                for (i, r) in rings.iter().enumerate().filter(|(i, _)| depth[*i].is_multiple_of(2)) {
-                    let mut form =
-                        Form { plane, profile: r.0.clone(), arcs: r.1.clone(), from: from.clone(), to: to.clone(), ..base.clone() };
-                    for (j, h) in rings.iter().enumerate() {
-                        if depth[j] == depth[i] + 1 && h.2.first().is_some_and(|p| inside(*p, &r.2)) {
-                            let hole = form.holes.len();
-                            form.arcs.extend(h.1.iter().cloned().map(|b| Bend { ring: Ring::Hole, hole, ..b }));
-                            form.holes.push(h.0.clone());
-                        }
-                    }
-                    out.push(form);
-                }
-                Ok(out)
+                let base = Form { plane, from, to, ..base };
+                Ok(nest(&rings, &base))
             }
             "revolution" => {
                 let loops = def["loops"].as_array().filter(|l| !l.is_empty() && l.len() <= MOST).ok_or("its sketch has no loops")?;
@@ -380,25 +383,16 @@ impl Reader<'_> {
                 let (plane, k) = sketch(flat);
                 // Where its sketch plane is: the axis' first point's coordinate square to it.
                 let at = Some(a0[flat.index()].clone()).filter(|e| !matches!(e, Expr::Number(x) if *x == 0.0));
-                // The outer loop its profile, the loops inside it its holes.
+                // Each outer loop a form, the loops inside it its holes.
                 let rings = loops.iter().map(|l| self.ring(l, k, Ring::Profile, 0)).collect::<Result<Vec<_>, _>>()?;
-                let outer = (0..rings.len())
-                    .find(|i| rings.iter().enumerate().all(|(j, r)| j == *i || r.2.first().is_some_and(|p| inside(*p, &rings[*i].2))))
-                    .ok_or("a revolve of loops side by side")?;
-                let (profile, mut arcs, _) = rings[outer].clone();
-                let mut holes = Vec::new();
-                for (_, h) in rings.iter().enumerate().filter(|(j, _)| *j != outer) {
-                    let hole = holes.len();
-                    arcs.extend(h.1.iter().cloned().map(|b| Bend { ring: Ring::Hole, hole, ..b }));
-                    holes.push(h.0.clone());
-                }
                 let (mut from, mut to) = (self.value(&def["start_angle"])?, self.value(&def["end_angle"])?);
                 // Mirrored, it turns the other way about its axis.
                 if self.map.y_sign < 0.0 {
                     (from, to) = (neg(to), neg(from));
                 }
                 let axis = Some([[a0[k[0]].clone(), a0[k[1]].clone()], [a1[k[0]].clone(), a1[k[1]].clone()]]);
-                Ok(vec![Form { plane, profile, holes, arcs, axis, from, to, at, ..base }])
+                let base = Form { plane, axis, from, to, at, ..base };
+                Ok(nest(&rings, &base))
             }
             "sweep" | "swept_blend" => {
                 let path = def["path"].as_array().filter(|p| !p.is_empty() && p.len() <= MOST).ok_or("it has no path")?;
@@ -421,8 +415,9 @@ impl Reader<'_> {
                     last = Some(bit.end);
                 }
                 points.extend(last);
-                let section = |key: &str, ring: Ring, arcs: &mut Vec<Bend>| -> Result<Vec<[Expr; 3]>, String> {
-                    let lp = def[key].as_array().and_then(|l| l.first()).ok_or(format!("its {key} is missing"))?;
+                let section = |key: &str, n: usize, ring: Ring, arcs: &mut Vec<Bend>| -> Result<Vec<[Expr; 3]>, String> {
+                    let lp = def[key].as_array().and_then(|l| l.get(n)).filter(|l| l.as_array().is_some_and(|c| !c.is_empty()));
+                    let lp = lp.ok_or(format!("its {key} is missing (a profile family's?)"))?;
                     let mut out = Vec::new();
                     for c in lp.as_array().into_iter().flatten() {
                         let bit = self.curve(c)?;
@@ -440,12 +435,17 @@ impl Reader<'_> {
                     }
                     Ok(out)
                 };
-                let section_start = section("profile", Ring::Section, &mut arcs)?;
-                let section_end = if kind == "swept_blend" { section("profile_end", Ring::SectionEnd, &mut arcs)? } else { Vec::new() };
-                if def["profile"].as_array().is_some_and(|l| l.len() > 1) {
-                    return Err("a sweep of a profile of more than one loop".into());
+                // Each loop of its profile swept on its own (a loop inside another, a tube's, isn't a hole of it yet).
+                let loops = def["profile"].as_array().map_or(1, Vec::len).clamp(1, MOST);
+                let mut out = Vec::new();
+                for n in 0..loops {
+                    let mut arcs = arcs.clone();
+                    let section_start = section("profile", n, Ring::Section, &mut arcs)?;
+                    let section_end =
+                        if kind == "swept_blend" { section("profile_end", n, Ring::SectionEnd, &mut arcs)? } else { Vec::new() };
+                    out.push(Form { path: points.clone(), section: section_start, section_end, arcs, ..base.clone() });
                 }
-                Ok(vec![Form { path: points, section: section_start, section_end, arcs, ..base }])
+                Ok(out)
             }
             "" => Err("it says no kind".into()),
             k => Err(format!("a form of a kind BIMCraft doesn't have yet ({k})")),
