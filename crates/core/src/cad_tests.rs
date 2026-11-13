@@ -1022,3 +1022,63 @@ fn walls_are_drawn_along_each_line_and_arc_picked_as_revits_pick_lines() {
     let r = run(&mut s, "wall", json!({"cad": {"id": id, "entities": [7, 9]}}));
     assert_eq!((r["ids"].as_array().unwrap().len(), r["skipped"].as_u64()), (1, Some(1)), "{r}");
 }
+
+/// A square's corners round its middle, `h` half its side, counter-clockwise from its lower left.
+fn square(x: f64, y: f64, h: f64) -> Vec<(f64, f64)> {
+    vec![(x - h, y - h), (x + h, y - h), (x + h, y + h), (x - h, y + h)]
+}
+
+/// A solid blue hatch of these polyline paths (mm), drawn as `style` says (group 75).
+fn hatch_of(style: &str, rings: &[Vec<(f64, f64)>]) -> String {
+    let mut list: Vec<(i32, String)> = vec![(0, "HATCH".into()), (8, "0".into()), (62, "5".into()), (2, "SOLID".into()), (70, "1".into())];
+    list.push((91, rings.len().to_string()));
+    for (i, ring) in rings.iter().enumerate() {
+        list.extend([(92, if i == 0 { "3" } else { "2" }.into()), (72, "0".into()), (73, "1".into()), (93, ring.len().to_string())]);
+        for (x, y) in ring {
+            list.extend([(10, x.to_string()), (20, y.to_string())]);
+        }
+        list.push((97, "0".into()));
+    }
+    list.extend([(75, style.into()), (76, "1".into()), (98, "0".into())]);
+    list.iter().map(|(c, v)| format!("{c}\n{v}\n")).collect()
+}
+
+/// Whether the plan's PNG is the hatch's blue at each of these model points.
+fn blue_at(s: &Session, points: &[(f64, f64)]) -> Vec<bool> {
+    let d = render::plan(&s.model, s.model.levels()[0].0, 800, 800);
+    let pm = tiny_skia::Pixmap::decode_png(&render::png(&d).unwrap()).unwrap();
+    points
+        .iter()
+        .map(|&(x, y)| {
+            let (px, py) = d.view.px(P2(x, y));
+            let p = pm.pixel(px.round() as u32, py.round() as u32).unwrap().demultiply();
+            p.blue() > 200 && p.red() < 60 && p.green() < 60
+        })
+        .collect()
+}
+
+#[test]
+fn a_hatchs_style_fills_its_islands_as_autocad_does() {
+    // A square with an island holding an island; probed in the outer band, the island's band and the inner island's middle.
+    let (outer, island, inner) = (square(1500.0, 1500.0, 1500.0), square(1500.0, 1500.0, 900.0), square(1500.0, 1500.0, 300.0));
+    let nested = [outer.clone(), island.clone(), inner];
+    let probes = [(300.0, 1500.0), (900.0, 1500.0), (1500.0, 1500.0)];
+    let shown = |style: &str, rings: &[Vec<(f64, f64)>], name: &str| {
+        let mut s = Session::new();
+        let text = dxf("4", &[], &hatch_of(style, rings));
+        run(&mut s, "import_cad", json!({"path": file("styles", &format!("{name}.dxf"), &text), "position": "origin"}));
+        blue_at(&s, &probes)
+    };
+    // Normal (0): odd parity, the islands alternate.
+    assert_eq!(shown("0", &nested, "normal"), [true, false, true]);
+    // Outermost (1): the outer band only; the inner island isn't filled again.
+    assert_eq!(shown("1", &nested, "outermost"), [true, false, false]);
+    // Ignore (2): the outer boundary filled through.
+    assert_eq!(shown("2", &nested, "ignore"), [true, true, true]);
+    // A boundary written twice is one boundary, not two that cancel: the same, or from another corner the other way round.
+    assert_eq!(shown("0", &[outer.clone(), outer.clone(), island.clone()], "twice"), [true, false, false]);
+    let mut turned = outer.clone();
+    turned.rotate_left(2);
+    turned.reverse();
+    assert_eq!(shown("0", &[outer, turned, island], "turned"), [true, false, false]);
+}

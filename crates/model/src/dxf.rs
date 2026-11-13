@@ -1548,7 +1548,127 @@ fn hatch(e: &Ent) -> Result<Option<Shape>, String> {
             rings.push(ring);
         }
     }
+    let rings = styled(rings, e.int(75)?.unwrap_or(0));
     Ok((!rings.is_empty()).then_some(Shape::Fill { rings, solid }))
+}
+
+/// How much containment testing [`styled`] spends on one hatch (edges walked): past it, a hostile hatch keeps its rings as
+/// they are and fills by odd parity.
+const STYLE_WORK: usize = 20_000_000;
+
+/// A hatch's boundaries as its style (group 75) fills them, so a view fills what is left by odd parity: Normal (0) keeps every
+/// island, alternating; Outermost (1) keeps the outer boundaries and their first islands, so what lies deeper isn't filled
+/// again; Ignore (2) keeps the outer boundaries alone, filled through. A boundary written twice is kept once, or the two
+/// would cancel to nothing.
+fn styled(rings: Vec<Vec<P2>>, style: i64) -> Vec<Vec<P2>> {
+    let rings = once_each(rings);
+    let keep = match style {
+        1 => 2,
+        2 => 1,
+        _ => return rings,
+    };
+    if rings.len() < 2 {
+        return rings;
+    }
+    let boxes: Vec<(P2, P2)> = rings.iter().map(|r| bounds(r)).collect();
+    let mut work = 0usize;
+    let mut depth = vec![0usize; rings.len()];
+    for (i, (a, ab)) in rings.iter().zip(&boxes).enumerate() {
+        for (j, (b, bb)) in rings.iter().zip(&boxes).enumerate() {
+            if i == j || ab.0.0 < bb.0.0 || ab.0.1 < bb.0.1 || ab.1.0 > bb.1.0 || ab.1.1 > bb.1.1 {
+                continue;
+            }
+            work += b.len() * SAMPLES;
+            if work > STYLE_WORK {
+                return rings;
+            }
+            if inside(a, b)
+                && let Some(d) = depth.get_mut(i)
+            {
+                *d += 1;
+            }
+        }
+    }
+    rings.into_iter().zip(depth).filter(|(_, d)| *d < keep).map(|(r, _)| r).collect()
+}
+
+/// How many of a ring's points [`inside`] tries.
+const SAMPLES: usize = 5;
+
+/// Whether ring `a` lies inside ring `b`: most of a few of its points, its edges' middles among them, so a point on `b`'s
+/// edge (an island touching its boundary) doesn't decide alone.
+fn inside(a: &[P2], b: &[P2]) -> bool {
+    let n = a.len();
+    if n == 0 {
+        return false;
+    }
+    let step = n.div_ceil(SAMPLES).max(1);
+    let (mut yes, mut all) = (0, 0);
+    for k in (0..n).step_by(step) {
+        let (Some(&p), Some(&q)) = (a.get(k), a.get((k + 1) % n)) else { continue };
+        let mid = (p + q) * 0.5;
+        all += 1;
+        if crate::geom::contains(b, mid) {
+            yes += 1;
+        }
+    }
+    yes * 2 > all
+}
+
+/// A ring's lower left and upper right corners.
+fn bounds(ring: &[P2]) -> (P2, P2) {
+    ring.iter().fold((P2(f64::MAX, f64::MAX), P2(f64::MIN, f64::MIN)), |(lo, hi), p| {
+        (P2(lo.0.min(p.0), lo.1.min(p.1)), P2(hi.0.max(p.0), hi.1.max(p.1)))
+    })
+}
+
+/// The rings less each one that repeats an earlier one: the same points, from any of them, either way round.
+fn once_each(rings: Vec<Vec<P2>>) -> Vec<Vec<P2>> {
+    // Rings of the same length and corner are compared, in order of those, so a hatch of many is not compared pair by pair.
+    let mut order: Vec<(usize, (P2, P2))> = rings.iter().map(|r| bounds(r)).enumerate().collect();
+    order.sort_by(|(i, a), (j, b)| {
+        let (ri, rj) = (rings.get(*i).map_or(0, Vec::len), rings.get(*j).map_or(0, Vec::len));
+        ri.cmp(&rj).then(a.0.0.total_cmp(&b.0.0))
+    });
+    let mut gone = vec![false; rings.len()];
+    let mut work = 0usize;
+    for (k, (i, a)) in order.iter().enumerate() {
+        let Some(ri) = rings.get(*i) else { continue };
+        if gone.get(*i).copied().unwrap_or(true) {
+            continue;
+        }
+        let tol = 1e-9 + 1e-9 * (a.1 - a.0).length();
+        for (j, b) in order.iter().skip(k + 1) {
+            let Some(rj) = rings.get(*j) else { continue };
+            if rj.len() != ri.len() || b.0.0 - a.0.0 > tol {
+                break;
+            }
+            if gone.get(*j).copied().unwrap_or(true) || b.0.dist(a.0) > tol || b.1.dist(a.1) > tol {
+                continue;
+            }
+            work += ri.len();
+            if work > STYLE_WORK {
+                break;
+            }
+            if same_ring(ri, rj, tol)
+                && let Some(g) = gone.get_mut(*j)
+            {
+                *g = true;
+            }
+        }
+    }
+    rings.into_iter().zip(gone).filter(|(_, g)| !g).map(|(r, _)| r).collect()
+}
+
+/// Whether two rings of the same length go through the same points, from any of them, either way round.
+fn same_ring(a: &[P2], b: &[P2], tol: f64) -> bool {
+    let n = a.len();
+    let (Some(&first), true) = (a.first(), n == b.len()) else { return n == b.len() };
+    let at = |k: usize| b.get(k % n).copied().unwrap_or(P2(f64::NAN, f64::NAN));
+    let along = |s: usize, back: bool| {
+        a.iter().enumerate().all(|(i, p)| p.dist(at(if back { s + n - i } else { s + i })) <= tol)
+    };
+    b.iter().enumerate().filter(|(_, q)| q.dist(first) <= tol).take(8).any(|(s, _)| along(s, false) || along(s, true))
 }
 
 /// A walk forward through an entity's pairs: a hatch lays its paths out in order, each value after the last.
@@ -2252,6 +2372,25 @@ mod tests {
         assert!(near(rings[0][0], P2(0.0, 0.0)) && near(rings[0][1], P2(10.0, 0.0)), "{:?}", rings[0]);
         assert!(has_point_near(&rings[0], P2(5.0, 5.0)), "the arc's top: {:?}", rings[0]);
         assert!(rings[0].last().is_some_and(|p| !near(*p, P2(0.0, 0.0))), "the ring's end isn't its start again");
+    }
+
+    #[test]
+    fn a_hatchs_style_keeps_the_rings_it_fills_and_a_hostile_one_stays_quick() {
+        let square = |h: f64| vec![P2(-h, -h), P2(h, -h), P2(h, h), P2(-h, h)];
+        let nested = vec![square(30.0), square(20.0), square(10.0), square(5.0)];
+        assert_eq!(styled(nested.clone(), 0).len(), 4, "Normal keeps every island");
+        assert_eq!(styled(nested.clone(), 1), nested[..2].to_vec(), "Outermost: the outer boundary and its first islands");
+        assert_eq!(styled(nested.clone(), 2), nested[..1].to_vec(), "Ignore: the outer boundary");
+        assert_eq!(styled(vec![square(30.0), square(30.0)], 0).len(), 1, "written twice, kept once");
+        // An island touching its boundary is still its island.
+        let touching = vec![square(30.0), vec![P2(-30.0, -10.0), P2(0.0, -10.0), P2(0.0, 10.0), P2(-30.0, 10.0)]];
+        assert_eq!(styled(touching, 2).len(), 1);
+        // Thousands of nested rings, or thousands the same: done within its budget, never pair by pair without end.
+        let many: Vec<Vec<P2>> = (1..10_000).map(|k| square(k as f64)).collect();
+        let t = std::time::Instant::now();
+        assert!(!styled(many, 1).is_empty());
+        assert_eq!(styled(vec![square(1.0); 10_000], 2).len(), 1);
+        assert!(t.elapsed().as_secs() < 20, "{:?}", t.elapsed());
     }
 
     #[test]
