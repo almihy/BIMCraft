@@ -369,7 +369,7 @@ impl SymbolText {
         };
         Ok(match self.part {
             Part::Arc => Symbol {
-                arc: Some(Curve { centre, radius: text_expr(&self.radius), from: text_expr(&self.from), to: text_expr(&self.to) }),
+                arc: Some(Curve { centre, radius: text_expr(&self.radius), from: text_expr(&self.from), to: text_expr(&self.to), ..Curve::default() }),
                 ..base
             },
             Part::Text => Symbol {
@@ -1813,6 +1813,7 @@ mod tests {
                 radius: Expr::Number(700.0),
                 from: Expr::Number(0.0),
                 to: Expr::Number(90.0),
+                ..Curve::default()
             }),
             ..Symbol::default()
         };

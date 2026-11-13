@@ -107,15 +107,10 @@ impl Family {
         for (i, s) in self.symbols.iter().enumerate() {
             let Some(c) = &s.arc else { continue };
             let mut n = |e| number(e, values, &mut read).ok();
-            let (Some(x), Some(y), Some(r), Some(from), Some(to)) = (n(&c.centre[0]), n(&c.centre[1]), n(&c.radius), n(&c.from), n(&c.to))
-            else {
+            let (Some(x), Some(y), Some(r), Some((from, to))) = (n(&c.centre[0]), n(&c.centre[1]), n(&c.radius), c.ends(values)) else {
                 continue;
             };
-            let end = |deg: f64| {
-                let (s, c) = deg.to_radians().sin_cos();
-                P2(x + r * c, y + r * s)
-            };
-            arcs.push((i, P2(x, y), r, [end(from), end(to)]));
+            arcs.push((i, P2(x, y), r, [from, to]));
         }
         let mut opened = Vec::new();
         for (i, s) in self.symbols.iter().enumerate() {

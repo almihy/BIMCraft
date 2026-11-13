@@ -490,7 +490,11 @@ pub struct Circle {
     pub radius: Expr,
 }
 
-/// A round line: its middle, its radius, and the angles it runs between, degrees counter-clockwise from +x.
+/// A round line: its middle, its radius, and the angles it runs between, degrees counter-clockwise from +x. Where it has
+/// `start` and `end` (points in the family's plane, as Revit's arc is its centre and two ends, constrained), its angles
+/// follow them as they move: it runs from the angle of `start` about its middle to the angle of `end`, the way round
+/// that `from` and `to` say (counter-clockwise when `to` is not below `from`, else clockwise), a whole turn when the two
+/// ends are one point; its radius stays `radius`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Curve {
@@ -498,7 +502,70 @@ pub struct Curve {
     pub radius: Expr,
     #[serde(default)]
     pub from: Expr,
+    #[serde(default)]
     pub to: Expr,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<[Expr; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<[Expr; 2]>,
+}
+
+/// An arc worked out: its middle, its radius, and the angles it runs between, degrees, counter-clockwise from +x.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Sweep {
+    pub centre: P2,
+    pub radius: f64,
+    pub from: f64,
+    pub to: f64,
+}
+
+/// How near two ends are one point, mm: an arc between them is a whole turn.
+const ONE_POINT: f64 = 1e-6;
+
+impl Curve {
+    /// Its every number or formula.
+    pub fn exprs(&self) -> impl Iterator<Item = &Expr> {
+        self.centre.iter().chain([&self.radius, &self.from, &self.to]).chain(self.start.iter().flatten()).chain(self.end.iter().flatten())
+    }
+
+    /// Whether it follows its ends: it has both.
+    pub fn follows_ends(&self) -> bool {
+        self.start.is_some() && self.end.is_some()
+    }
+
+    /// Its middle, its radius and its angles, worked out by `values`. Where it follows its ends, its angles are those of its
+    /// ends about its middle; the way round is that of the `from` and `to` it was given.
+    fn sweep<'a>(
+        &'a self,
+        values: &BTreeMap<String, Val>,
+        read: &mut HashMap<&'a str, Result<Node, String>>,
+    ) -> Result<Sweep, String> {
+        let mut n = |e: &'a Expr| number(e, values, read);
+        let (centre, radius, from, to) = (P2(n(&self.centre[0])?, n(&self.centre[1])?), n(&self.radius)?, n(&self.from)?, n(&self.to)?);
+        let (Some(start), Some(end)) = (&self.start, &self.end) else { return Ok(Sweep { centre, radius, from, to }) };
+        let (start, end) = (P2(n(&start[0])?, n(&start[1])?), P2(n(&end[0])?, n(&end[1])?));
+        let angle = |p: P2| (p.1 - centre.1).atan2(p.0 - centre.0).to_degrees();
+        let (a0, a1) = (angle(start), angle(end));
+        let ccw = to >= from;
+        let turn = if start.dist(end) < ONE_POINT {
+            360.0
+        } else if ccw {
+            (a1 - a0).rem_euclid(360.0)
+        } else {
+            (a0 - a1).rem_euclid(360.0)
+        };
+        Ok(Sweep { centre, radius, from: a0, to: if ccw { a0 + turn } else { a0 - turn } })
+    }
+
+    /// Its two ends, worked out by `values`: at its angles, `radius` from its middle; none where it doesn't work out.
+    pub(crate) fn ends(&self, values: &BTreeMap<String, Val>) -> Option<(P2, P2)> {
+        let s = self.sweep(values, &mut HashMap::new()).ok()?;
+        let at = |deg: f64| {
+            let (sin, cos) = deg.to_radians().sin_cos();
+            P2(s.centre.0 + s.radius * cos, s.centre.1 + s.radius * sin)
+        };
+        Some((at(s.from), at(s.to)))
+    }
 }
 
 /// Which side of its point a label's lettering starts, is centred or ends.
@@ -1958,6 +2025,11 @@ impl Family {
             if y.view != SymbolView::Plan && (y.text.is_some() || y.dot.is_some()) {
                 return Err(format!("symbol {}: a `front` or `side` symbol is a `line` or an `arc`, as Revit's symbolic lines are", i + 1));
             }
+            if let Some(c) = &y.arc
+                && c.start.is_some() != c.end.is_some()
+            {
+                return Err(format!("symbol {}: an arc takes both `start` and `end`, or neither", i + 1));
+            }
             let Some(label) = &y.text else { continue };
             for name in fields(&label.value).map_err(|e| format!("symbol {}: {e}", i + 1))? {
                 if !self.parameters.iter().any(|p| p.name == name) {
@@ -1972,7 +2044,7 @@ impl Family {
                 .iter()
                 .flatten()
                 .chain(&y.visible)
-                .chain(y.arc.iter().flat_map(|c| c.centre.iter().chain([&c.radius, &c.from, &c.to])))
+                .chain(y.arc.iter().flat_map(Curve::exprs))
                 .chain(label)
                 .chain(dot)
         });
@@ -2408,8 +2480,8 @@ impl Family {
                 pts.push(P2(n(a)?, n(b)?));
             }
             if let Some(c) = &sym.arc {
-                let (centre, r, from, to) = (P2(n(&c.centre[0])?, n(&c.centre[1])?), n(&c.radius)?, n(&c.from)?, n(&c.to)?);
-                if r <= 0.0 || (to - from).abs() > 360.0 || to == from {
+                let Sweep { centre, radius: r, from, to } = c.sweep(values, &mut read).map_err(said)?;
+                if r <= 0.0 || (to - from).abs() > 360.0 + 1e-9 || to == from {
                     return Err(said(format!(
                         "its arc has radius {r} and runs from {from} to {to} degrees; it needs a radius above zero and up to a full turn"
                     )));

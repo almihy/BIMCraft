@@ -765,6 +765,7 @@ impl Reader<'_> {
                             radius,
                             from: Expr::Number(a0),
                             to: Expr::Number(to),
+                            ..Curve::default()
                         }),
                         ..base.clone()
                     });

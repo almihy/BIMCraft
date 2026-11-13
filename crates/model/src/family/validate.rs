@@ -78,7 +78,7 @@ fn formulas(f: &Family, out: &mut Vec<String>) {
             .iter()
             .flatten()
             .chain(&sym.visible)
-            .chain(sym.arc.iter().flat_map(|c| c.centre.iter().chain([&c.radius, &c.from, &c.to])));
+            .chain(sym.arc.iter().flat_map(super::Curve::exprs));
         for e in exprs {
             if let Expr::Formula(formula) = e {
                 read(&format!("symbol {}", i + 1), formula, out);

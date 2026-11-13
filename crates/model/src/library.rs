@@ -1713,7 +1713,7 @@ impl Model {
                 || f.forms
                     .iter()
                     .any(|x| x.snapshot || !x.top.is_empty() || !x.path.is_empty() || !x.holes.is_empty() || !x.arcs.is_empty())
-                || f.symbols.iter().any(|y| y.snapshot)
+                || f.symbols.iter().any(|y| y.snapshot || y.arc.as_ref().is_some_and(crate::family::Curve::follows_ends))
         });
         if parametric {
             return crate::model::FORMAT;
