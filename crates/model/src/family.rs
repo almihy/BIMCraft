@@ -4085,6 +4085,50 @@ mod tests {
     }
 
     #[test]
+    fn a_family_that_nests_itself_is_refused_with_the_way_it_does() {
+        let nesting = |inside: &str| -> Family {
+            serde_json::from_value(json!({"types": {"A": {}}, "nested": [{"family": inside, "type": "A"}]})).unwrap()
+        };
+        let mut m = crate::model::Model::new("Test");
+        m.families.insert("Self".into(), nesting("Self"));
+        let e = {
+            m.sync_library();
+            m.check()
+        }
+        .unwrap_err();
+        assert!(e.contains("nests itself") && e.contains("`Self`"), "{e}");
+        // Through others, and where it is named.
+        let mut m = crate::model::Model::new("Test");
+        m.families.insert("A".into(), nesting("B"));
+        m.families.insert("B".into(), nesting("C"));
+        assert!(
+            {
+                m.sync_library();
+                m.check()
+            }
+            .is_ok(),
+            "a chain that ends is sound"
+        );
+        m.families.insert("C".into(), nesting("A"));
+        let e = {
+            m.sync_library();
+            m.check()
+        }
+        .unwrap_err();
+        assert!(e.contains("nests itself") && e.contains("`A`") && e.contains("`B`") && e.contains("`C`"), "{e}");
+        // A family that holds the one it nests itself doesn't reach the project's.
+        let mut m = crate::model::Model::new("Test");
+        let mut a = nesting("A");
+        a.embedded.insert("A".into(), serde_json::from_value(json!({"types": {"A": {}}})).unwrap());
+        m.families.insert("A".into(), a);
+        {
+            m.sync_library();
+            m.check()
+        }
+        .unwrap();
+    }
+
+    #[test]
     fn a_family_too_big_to_build_is_refused() {
         let ring = |n: usize| -> Vec<Value> {
             (0..n).map(|k| (k as f64 * std::f64::consts::TAU / n as f64).sin_cos()).map(|(s, c)| json!([100.0 * c, 100.0 * s])).collect()

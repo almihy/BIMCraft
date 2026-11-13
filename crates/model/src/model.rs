@@ -6960,6 +6960,47 @@ impl Model {
         Ok(())
     }
 
+    /// How family `start` reaches itself through its nested parts' families (those of the project, not the ones a family holds
+    /// itself), as the chain of families from it back to it, `start` last; none where it doesn't. Such a family would nest
+    /// without end, and its nested parts draw nothing.
+    fn nesting_cycle(&self, start: &str) -> Option<Vec<String>> {
+        let Some(first) = self.families.get(start) else { return None };
+        if first.nested.is_empty() {
+            return None;
+        }
+        // Depth first, each family once: the way taken so far, and the families already walked without finding it.
+        let mut walked: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        let mut path: Vec<&str> = vec![start];
+        fn walk<'a>(
+            m: &'a Model,
+            f: &'a crate::family::Family,
+            start: &str,
+            path: &mut Vec<&'a str>,
+            walked: &mut std::collections::BTreeSet<&'a str>,
+        ) -> bool {
+            for n in f.nested.iter().filter(|n| !f.embedded.contains_key(&n.family)) {
+                if n.family == start {
+                    return true;
+                }
+                let Some((name, inner)) = m.families.get_key_value(&n.family) else { continue };
+                if !walked.insert(name.as_str()) {
+                    continue;
+                }
+                path.push(name.as_str());
+                if walk(m, inner, start, path, walked) {
+                    return true;
+                }
+                path.pop();
+            }
+            false
+        }
+        walk(self, first, start, &mut path, &mut walked).then(|| {
+            let mut chain: Vec<String> = path.iter().map(|c| c.to_string()).collect();
+            chain.push(start.to_string());
+            chain
+        })
+    }
+
     /// Everything that must hold between commands: references resolve, geometry is finite and
     /// not degenerate, sizes are in range. What is only questionable (doors that overlap or don't fit their wall, walls that
     /// overlap, a room not enclosed) is a warning, not a refusal ([`Model::review`]).
@@ -7107,6 +7148,12 @@ impl Model {
                 return Err("a family needs a name".into());
             }
             f.check(&|m| self.materials.contains_key(m)).map_err(|e| format!("family `{n}`: {e}"))?;
+            if let Some(chain) = self.nesting_cycle(n) {
+                return Err(format!(
+                    "family `{n}` nests itself through {}",
+                    chain.iter().map(|c| format!("`{c}`")).collect::<Vec<_>>().join(", ")
+                ));
+            }
         }
         if self.parameters.len() > MAX_PROJECT_PARAMETERS {
             return Err(format!("the project has {} parameters; it holds up to {MAX_PROJECT_PARAMETERS}", self.parameters.len()));
