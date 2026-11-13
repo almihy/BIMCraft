@@ -1,6 +1,6 @@
 //! The family engine's own rules, on original families built here (never Autodesk content): an arc that follows its ends, a
 //! nested part drawn as Revit made it that follows the values its parent hands it, a nested part's symbols in every view,
-//! a traced outline that crosses itself, and a void that cuts only the forms it names.
+//! a traced outline that crosses itself, and a void that cuts every form listed before it that it reaches whatever its `cuts` say.
 
 use serde_json::{Value, json};
 
@@ -245,7 +245,7 @@ fn volumes(f: &Family) -> Vec<f64> {
 }
 
 #[test]
-fn a_void_cuts_only_the_forms_it_names() {
+fn a_void_cuts_every_form_listed_before_it_that_it_reaches_whatever_its_cuts_say() {
     let boxed = |x0: f64, x1: f64, source: &str| json!({"profile": [[x0, 0], [x1, 0], [x1, 100], [x0, 100]], "from": 0, "to": 100, "source": source});
     // A void through the right half of A (x 0 to 100) and the left half of B (x 200 to 300): 50 x 100 x 100 of each.
     let hole = |cuts: Value, listed: &str| {
@@ -266,19 +266,16 @@ fn a_void_cuts_only_the_forms_it_names() {
         }
         f
     };
-    for listed in ["last", "first"] {
-        let v = volumes(&hole(json!(["1"]), listed));
-        assert!((v[0] - whole / 2.0).abs() < 1.0 && (v[1] - whole).abs() < 1.0, "{listed}: only A is cut: {v:?}");
-        let v = volumes(&hole(json!(["2", "1"]), listed));
-        assert!((v[0] - whole / 2.0).abs() < 1.0 && (v[1] - whole / 2.0).abs() < 1.0, "{listed}: both, in any order: {v:?}");
-        let v = volumes(&hole(json!([]), listed));
-        assert!((v[0] - whole).abs() < 1.0 && (v[1] - whole).abs() < 1.0, "{listed}: it names none: {v:?}");
+    // Revit's `cuts` is kept but limits nothing: its lists leave out forms its void cuts, name none for one that does and name
+    // solids made after the void. A void cuts every solid listed before it that it reaches, whatever `cuts` says.
+    for cuts in [json!(["1"]), json!(["2", "1"]), json!([])] {
+        let v = volumes(&hole(cuts.clone(), "last"));
+        assert!((v[0] - whole / 2.0).abs() < 1.0 && (v[1] - whole / 2.0).abs() < 1.0, "cuts {cuts}: it cuts both forms it reaches: {v:?}");
+        let v = volumes(&hole(cuts.clone(), "first"));
+        assert!((v[0] - whole).abs() < 1.0 && (v[1] - whole).abs() < 1.0, "cuts {cuts}: listed before them it cuts none: {v:?}");
     }
-    // Where it names none, a void listed after them cuts every solid before it, and one listed before cuts none.
     let v = volumes(&none(hole(json!(["1"]), "last")));
     assert!((v[0] - whole / 2.0).abs() < 1.0 && (v[1] - whole / 2.0).abs() < 1.0, "both cut where `cuts` is absent: {v:?}");
-    let v = volumes(&none(hole(json!(["1"]), "first")));
-    assert!((v[0] - whole).abs() < 1.0 && (v[1] - whole).abs() < 1.0, "listed before them, it cuts none: {v:?}");
     // `cuts` is a void's.
     let mut solid = hole(json!(["1"]), "last");
     solid.forms[0].cuts = Some(vec!["2".into()]);

@@ -952,8 +952,9 @@ pub struct Form {
     /// name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
-    /// A void's: the `source` ids of the forms it cuts, wherever they are listed (Revit's void cuts what it was joined to, not
-    /// whatever it crosses). None, it cuts every solid listed before it that it reaches.
+    /// A void's, where it came from Revit: the `source` ids of the forms Revit says it cuts. Kept as Revit said it and used for
+    /// nothing: Revit's lists leave out forms its void plainly cuts (and say none for one that does), and name solids made after
+    /// the void, which it doesn't cut. A void cuts every solid listed before it that it reaches, whatever this says.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cuts: Option<Vec<String>>,
 }
@@ -2592,7 +2593,7 @@ impl Family {
         cuts: &mut csg::Meter,
         how: Build,
     ) -> Result<Vec<Piece>, String> {
-        let (mut out, mut voids, mut made_of) = (Vec::new(), Vec::new(), Vec::new());
+        let (mut out, mut voids) = (Vec::new(), Vec::new());
         for i in 0..self.forms.len() {
             if !self.forms[i].of_type(type_name) || self.forms[i].snapshot != how.snapshot {
                 continue;
@@ -2604,20 +2605,14 @@ impl Family {
             if self.forms[i].void {
                 voids.push((i, out.len(), piece.tris));
             } else {
-                made_of.push(self.forms[i].source.as_deref());
                 out.push(piece);
             }
         }
-        // Each void cut from the solids it says it cuts (`cuts`: the forms of those `source`s, wherever they are listed) or, where
-        // it says nothing, from the solids listed before it that it reaches. A cut solid is no longer one round surface,
+        // Each void cut from every solid listed before it that it reaches (Revit's `cuts` lists don't limit it: they leave out forms
+        // its void cuts and name some it doesn't). A cut solid is no longer one round surface,
         // and its outline seen from above is as it was. ponytail: a notch or a hole doesn't show in plan; trace it if it must.
         for (i, before, void) in &voids {
-            let named = self.forms[*i].cuts.as_deref();
-            let reach = if named.is_some() { out.len() } else { *before };
-            for (piece, source) in out.iter_mut().zip(&made_of).take(reach) {
-                if named.is_some_and(|list| !source.is_some_and(|s| list.iter().any(|c| c == s))) {
-                    continue;
-                }
+            for piece in out.iter_mut().take(*before) {
                 let tris = csg::subtract(&piece.tris, void, cuts).map_err(|e| format!("form {}: {e}", i + 1))?;
                 if tris != piece.tris {
                     let (bottom, top) = heights(&tris);
