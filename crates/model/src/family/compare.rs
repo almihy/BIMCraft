@@ -336,6 +336,57 @@ pub fn section(tris: &[[P3; 3]], z: f64) -> Vec<[P2; 2]> {
     out
 }
 
+/// [`section`] joined end to end into runs of points, each with whether it closes on itself: what a plan draws of a solid its cut
+/// plane crosses, a jamb's section as a closed ring and a rebated frame's as one ring with the rebate in it. Points the same to
+/// a hundredth of a millimetre are one; a point on the straight line between its neighbours is left out.
+pub fn section_runs(tris: &[[P3; 3]], z: f64) -> Vec<(Vec<P2>, bool)> {
+    let segments = section(tris, z);
+    let key = |p: P2| ((p.0 * 100.0).round() as i64, (p.1 * 100.0).round() as i64);
+    let mut at: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
+    for (i, [a, b]) in segments.iter().enumerate() {
+        at.entry(key(*a)).or_default().push(i);
+        at.entry(key(*b)).or_default().push(i);
+    }
+    let mut used = vec![false; segments.len()];
+    // The run's end continued by any segment not used yet that starts there.
+    let extend = |run: &mut Vec<P2>, used: &mut Vec<bool>| {
+        while let Some(end) = run.last().copied() {
+            let Some(next) = at.get(&key(end)).and_then(|l| l.iter().copied().find(|j| !used[*j])) else { break };
+            used[next] = true;
+            let [a, b] = segments[next];
+            run.push(if key(a) == key(end) { b } else { a });
+        }
+    };
+    let mut out = Vec::new();
+    for i in 0..segments.len() {
+        if used[i] {
+            continue;
+        }
+        used[i] = true;
+        let mut run = vec![segments[i][0], segments[i][1]];
+        extend(&mut run, &mut used);
+        run.reverse();
+        extend(&mut run, &mut used);
+        let closed = run.len() > 3 && key(run[0]) == key(run[run.len() - 1]);
+        if closed {
+            run.pop();
+        }
+        // Without the points that lie on the line between their neighbours (where a face's two triangles met).
+        let n = run.len();
+        let straight = |a: P2, b: P2, c: P2| ((b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0)).abs() < 1e-6 * (1.0 + a.dist(c));
+        let keep: Vec<P2> = (0..n)
+            .filter(|k| {
+                let prev = if *k == 0 { closed.then(|| run[n - 1]) } else { Some(run[k - 1]) };
+                let next = if k + 1 == n { closed.then(|| run[0]) } else { Some(run[k + 1]) };
+                !matches!((prev, next), (Some(a), Some(c)) if straight(a, run[*k], c))
+            })
+            .map(|k| run[k])
+            .collect();
+        out.push((keep, closed));
+    }
+    out
+}
+
 /// A drawing's lines, each a run of points, as segments in a grid: what the nearest point to a point is found on.
 pub struct Lines {
     segs: Vec<[P2; 2]>,
@@ -535,6 +586,27 @@ mod tests {
         assert!((s.winding([100.0, 50.0, 50.0]) - 1.0).abs() < 1e-9);
         assert!((s.winding([500.0, 50.0, 50.0]) - 2.0).abs() < 1e-9);
         assert!(s.winding([1500.0, 50.0, 50.0]).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_section_joins_into_closed_rings_with_only_its_corners() {
+        // A box cut across: one ring of its four corners, the two triangles of each face met at no point of their own.
+        let one = section_runs(&cuboid([0.0, 0.0, 0.0], [50.0, 200.0, 100.0]), 50.0);
+        assert_eq!(one.len(), 1, "{one:?}");
+        assert!(one[0].1 && one[0].0.len() == 4, "{one:?}");
+        // Two boxes side by side, the second shorter (a jamb and its stop): their sections are rings of their own, the second's
+        // corner at the jamb's face among the points.
+        let mut tris = cuboid([0.0, 0.0, 0.0], [50.0, 200.0, 100.0]);
+        tris.extend(cuboid([50.0, 0.0, 0.0], [70.0, 40.0, 100.0]));
+        let runs = section_runs(&tris, 50.0);
+        assert!(runs.iter().all(|r| r.1), "{runs:?}");
+        assert!(runs.iter().flat_map(|r| &r.0).any(|p| (p.0 - 70.0).abs() < 1e-6 && (p.1 - 40.0).abs() < 1e-6), "{runs:?}");
+        // Nothing cut, nothing drawn.
+        assert!(section_runs(&one_box_above(), 50.0).is_empty());
+    }
+
+    fn one_box_above() -> Vec<[P3; 3]> {
+        cuboid([0.0, 0.0, 60.0], [10.0, 10.0, 70.0])
     }
 
     #[test]

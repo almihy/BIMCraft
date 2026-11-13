@@ -4265,8 +4265,8 @@ fn opening(d: &mut Drawing, m: &Model, e: &Element, o: &Opening, w: &Wall, cut: 
             // What the cut plane crosses is drawn as its section (a frame's jambs, their rebates and stops), as Revit's plan draws
             // it; what lies under the plane is drawn by its outline from above.
             if piece.bottom < cut - crate::family::check::CUT_EPS && cut < piece.top {
-                for [a, b] in crate::family::compare::section(&piece.tris, cut) {
-                    d.line(&[a, b], BY_CATEGORY, INK, false);
+                for (run, closed) in crate::family::compare::section_runs(&piece.tris, cut) {
+                    d.line(&run, BY_CATEGORY, INK, closed);
                 }
             } else {
                 d.line(&piece.outline, BY_CATEGORY, INK, true);
