@@ -346,7 +346,7 @@ fn flat(p: P2) -> P3 {
     [p.0, p.1, 0.0]
 }
 
-fn near_on_segment(p: P2, [a, b]: [P2; 2]) -> P2 {
+pub fn near_on_segment(p: P2, [a, b]: [P2; 2]) -> P2 {
     let (dx, dy) = (b.0 - a.0, b.1 - a.1);
     let l = dx * dx + dy * dy;
     if l <= 0.0 {

@@ -216,7 +216,7 @@ impl Family {
                 let lines = |marks: Vec<super::Mark>, pieces: &[Piece]| -> Vec<Vec<P2>> {
                     let mut runs: Vec<Vec<P2>> = marks.iter().map(runs_of).collect();
                     if view == SymbolView::Plan {
-                        runs.extend(pieces.iter().filter(|p| p.in_plan_cut(d, cut, hosted)).map(|p| closed(&p.outline)));
+                        runs.extend(pieces.iter().filter(|p| p.in_plan_cut(d, cut, hosted)).flat_map(|p| plan_runs(p, cut)));
                     }
                     runs.retain(|r| !r.is_empty());
                     runs
@@ -304,6 +304,17 @@ fn runs_of(m: &super::Mark) -> Vec<P2> {
     }
 }
 
+/// What a plan cutting at `cut` draws of a piece it draws: its section there if the plane cuts it (Revit's plan draws the
+/// section of what its cut plane crosses, a frame's jambs and their rebates, not the silhouette round the whole frame), else
+/// its outline seen from above.
+fn plan_runs(p: &Piece, cut: f64) -> Vec<Vec<P2>> {
+    if p.bottom < cut - CUT_EPS && cut < p.top {
+        compare::section(&p.tris, cut).into_iter().map(|s| s.to_vec()).collect()
+    } else {
+        vec![closed(&p.outline)]
+    }
+}
+
 /// An outline as a run back to its first point.
 fn closed(outline: &[P2]) -> Vec<P2> {
     let mut run = outline.to_vec();
@@ -381,5 +392,72 @@ impl Compared {
                 Some(format!("{what}, over {share:.1} % of it"))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{Value, json};
+
+    /// A door frame as one sweep: a U round its opening (jambs 2100 high, 900 between their middles), its section a jamb with
+    /// a rebate (100 wide and 100 deep, a 20 mm step on its inner side).
+    fn frame() -> Value {
+        json!({
+            "path": [[-450, 0, 0], [-450, 0, 2100], [450, 0, 2100], [450, 0, 0]],
+            "section": [[-500, -50, 0], [-420, -50, 0], [-420, 0, 0], [-400, 0, 0], [-400, 50, 0], [-500, 50, 0]]
+        })
+    }
+
+    /// The family with its frame, and with Revit's result for it as a mesh that its plan doesn't draw (as Revit's plan doesn't
+    /// draw what it draws by its symbols) and the plan symbols `plan` (Revit's jamb sections, as lines).
+    fn door(plan: Vec<Value>) -> Family {
+        let mut form = frame();
+        form["show"] = json!({"coarse": false});
+        let own: Family = serde_json::from_value(json!({"category": "door", "types": {"A": {}}, "forms": [form.clone()]})).unwrap();
+        let made = own.pieces("A", &own.values("A", &BTreeMap::new()).unwrap()).unwrap();
+        let mesh: Vec<Vec<Vec<f64>>> = made.iter().flat_map(|p| p.tris.iter().map(|t| t.iter().map(|q| q.to_vec()).collect())).collect();
+        let revit = json!({"mesh": mesh, "snapshot": true, "show": {"coarse": false, "plan": false, "plan_top": false, "plan_cut": false}});
+        let symbols: Vec<Value> = plan.into_iter().map(|line| json!({"line": line, "snapshot": true})).collect();
+        serde_json::from_value(json!({"category": "door", "types": {"A": {}}, "forms": [form, revit], "symbols": symbols})).unwrap()
+    }
+
+    /// A jamb's section, as the plan's line: the rebated section's corners round to its first, shifted `dx` across.
+    fn jamb(dx: f64, mirror: bool) -> Value {
+        let pts = [[-50.0, -50.0], [30.0, -50.0], [30.0, 0.0], [50.0, 0.0], [50.0, 50.0], [-50.0, 50.0], [-50.0, -50.0]];
+        json!(pts.iter().map(|[u, y]| [dx + if mirror { -u } else { *u }, *y]).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn a_frame_swept_round_the_opening_is_drawn_in_plan_by_its_cut_jambs() {
+        let f = door(vec![jamb(-450.0, false), jamb(450.0, true)]);
+        let others: Others = &|_| None;
+        let check = f.check_type("A", others, super::super::DEFAULT_WALL).expect("a type Revit's result is for");
+        assert!(check.matched, "{:?}", check.reason);
+        // Its plan: the two jambs' sections, the rebate among them, and no line across the opening.
+        let values = f.values_in("A", &BTreeMap::new(), super::super::DEFAULT_WALL).unwrap();
+        let pieces = f.pieces("A", &values).unwrap();
+        let runs = plan_runs(&pieces[0], PLAN_CUT);
+        // A face the triangles split is several segments: what matters is that the rebate's line is drawn along its length.
+        let on = |p: P2| {
+            runs.iter().any(|r| {
+                let q = compare::near_on_segment(p, [r[0], r[1]]);
+                r.len() == 2 && (p.0 - q.0).abs() < 1e-6 && (p.1 - q.1).abs() < 1e-6
+            })
+        };
+        assert!([-45.0, -25.0, -5.0].iter().all(|y| on(P2(-420.0, *y)) && on(P2(420.0, *y))), "the rebate: {runs:?}");
+        assert!(runs.iter().all(|r| r.iter().all(|p| p.0.abs() >= 400.0 - 1e-6)), "a line across the opening: {runs:?}");
+        // The silhouette it replaces runs across the opening.
+        assert!(closed(&pieces[0].outline).windows(2).any(|w| w[0].0 < 0.0 && w[1].0 > 0.0), "{:?}", pieces[0].outline);
+    }
+
+    #[test]
+    fn a_frame_whose_plan_lacks_a_rebate_does_not_match() {
+        // The jambs plain rectangles: Revit's plan has no rebate, ours does.
+        let plain = |dx: f64| json!([[dx - 50.0, -50.0], [dx + 50.0, -50.0], [dx + 50.0, 50.0], [dx - 50.0, 50.0], [dx - 50.0, -50.0]]);
+        let f = door(vec![plain(-450.0), plain(450.0)]);
+        let others: Others = &|_| None;
+        let check = f.check_type("A", others, super::super::DEFAULT_WALL).expect("checked");
+        assert!(!check.matched);
     }
 }
