@@ -30,8 +30,8 @@ fn covered(prim: &Prim, probes: &[(f32, f32)]) -> Vec<bool> {
         .iter()
         .map(|&(x, y)| {
             let p = pos2(x, y);
-            mesh.indices.chunks_exact(3).any(|t| {
-                let [a, b, c] = [t[0], t[1], t[2]].map(|i| mesh.vertices[i as usize]);
+            mesh.indices.as_chunks::<3>().0.iter().any(|t| {
+                let [a, b, c] = t.map(|i| mesh.vertices[i as usize]);
                 if a.color.a() == 0 && b.color.a() == 0 && c.color.a() == 0 {
                     return false;
                 }

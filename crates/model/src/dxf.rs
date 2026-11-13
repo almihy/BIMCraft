@@ -1665,9 +1665,7 @@ fn same_ring(a: &[P2], b: &[P2], tol: f64) -> bool {
     let n = a.len();
     let (Some(&first), true) = (a.first(), n == b.len()) else { return n == b.len() };
     let at = |k: usize| b.get(k % n).copied().unwrap_or(P2(f64::NAN, f64::NAN));
-    let along = |s: usize, back: bool| {
-        a.iter().enumerate().all(|(i, p)| p.dist(at(if back { s + n - i } else { s + i })) <= tol)
-    };
+    let along = |s: usize, back: bool| a.iter().enumerate().all(|(i, p)| p.dist(at(if back { s + n - i } else { s + i })) <= tol);
     b.iter().enumerate().filter(|(_, q)| q.dist(first) <= tol).take(8).any(|(s, _)| along(s, false) || along(s, true))
 }
 

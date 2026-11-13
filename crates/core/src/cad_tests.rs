@@ -1086,8 +1086,8 @@ fn a_hatchs_style_fills_its_islands_as_autocad_does() {
 #[test]
 fn a_see_through_hatch_with_an_island_goes_out_to_svg_and_pdf_even_odd_and_see_through() {
     // A solid hatch half transparent (group 440: 0x02000000 and its opacity, 127), a square with an island.
-    let hatch = hatch_of("0", &[square(1500.0, 1500.0, 1500.0), square(1500.0, 1500.0, 900.0)])
-        .replacen("62\n5\n", &format!("62\n5\n440\n{}\n", 0x0200_0000 | 127), 1);
+    let glass = format!("62\n5\n440\n{}\n", 0x0200_0000 | 127);
+    let hatch = hatch_of("0", &[square(1500.0, 1500.0, 1500.0), square(1500.0, 1500.0, 900.0)]).replacen("62\n5\n", &glass, 1);
     let mut s = Session::new();
     run(&mut s, "import_cad", json!({"path": file("exports", "glass.dxf", &dxf("4", &[], &hatch)), "position": "origin"}));
     let d = render::plan(&s.model, s.model.levels()[0].0, 800, 800);
