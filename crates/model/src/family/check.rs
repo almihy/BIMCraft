@@ -486,7 +486,7 @@ mod tests {
             "types": {"Small": {"Height": 3000}, "Tall": {"Height": 6000}},
             "forms": [{"snapshot": true, "mesh": mesh, "show": {"plan": false, "plan_top": false, "plan_cut": false}}],
             "symbols": symbols,
-            "nested": [{"family": "Base", "type": "Base", "at": [0, 0, 0], "scale": {"formula": "Height / 6000"}}],
+            "nested": [{"family": "Base", "type": "Base", "at": [0, 0, 0], "scale": "Height / 6000"}],
             "embedded": {"Base": base}
         }))
         .unwrap()
