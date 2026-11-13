@@ -1067,7 +1067,19 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         }
     }
     let still: BTreeSet<String> = refs.iter().filter(|r| !moves(&r.3)).map(|r| r.1.clone()).collect();
-    references.sort_by_key(|r| still.contains(&r.name));
+    // Of those, the ones standing on their axis' origin plane in every type (a desk's base on its level) go last of all: solving
+    // keeps the later planes where they stand and moves the other end of a dimension (Revit flexes a desk taller upward).
+    let on_origin: BTreeSet<String> = references
+        .iter()
+        .map(|r| r.name.clone())
+        .filter(|name| {
+            let Some(r) = refs.iter().find(|r| r.1 == *name) else { return false };
+            let origin = references.iter().find(|q| q.axis == r.2 && q.origin).and_then(|q| refs.iter().find(|x| x.1 == q.name));
+            let (Some(at), Some(origin)) = (r.3["at"].as_object(), origin.and_then(|o| o.3["at"].as_object())) else { return false };
+            !at.is_empty() && at.iter().all(|(t, v)| matches!((num(v), origin.get(t).and_then(num)), (Some(x), Some(y)) if (x - y).abs() < 0.05))
+        })
+        .collect();
+    references.sort_by_key(|r| (still.contains(&r.name), on_origin.contains(&r.name)));
     // What a dimension or an alignment measures to that isn't one of the planes: the host wall (its face nearer the other
     // end) and the level (z = 0, a plane of its own).
     let ids_of = |v: &Value| -> Vec<String> {
@@ -1086,7 +1098,16 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             && ids.iter().filter_map(|i| reader.planes.get(i)).all(|p| p.1 == Axis::Z)
             && ids.iter().any(|i| reader.planes.contains_key(i))
     });
-    if level_wanted && references.len() < super::MAX_REFERENCES {
+    // The level a dimension measures to is the plane the family's z is measured from where that stands at the level (a desk's
+    // Ground floor): not a second plane.
+    let base = base_plane.as_deref().and_then(|b| refs.iter().find(|r| r.0 == b && r.2 == Axis::Z));
+    let base_on_level = base.is_some_and(|r| {
+        r.3["at"].as_object().is_some_and(|at| !at.is_empty() && at.values().all(|v| num(v).is_some_and(|x| x.abs() < 0.05)))
+    });
+    if level_wanted && base_on_level && let Some(base) = base {
+        let at: BTreeMap<String, f64> = f.types.keys().map(|t| (t.clone(), 0.0)).collect();
+        reader.planes.insert("__level".into(), (base.1.clone(), Axis::Z, at));
+    } else if level_wanted && references.len() < super::MAX_REFERENCES {
         let mut name = "Ref Level".to_string();
         for n in 2.. {
             if !references.iter().any(|r| r.name == name) {
