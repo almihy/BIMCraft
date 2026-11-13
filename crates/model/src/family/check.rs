@@ -57,6 +57,9 @@ fn level(d: Detail) -> &'static str {
     }
 }
 
+/// What a matched type of an RPC family says of its 3D.
+pub const RPC_3D: &str = "drawn as Revit made it in 3D (an RPC render placeholder)";
+
 const AXES: [&str; 3] = ["width", "depth", "height"];
 
 impl Family {
@@ -136,7 +139,12 @@ impl Family {
         match self.compare_type(t, others, wall, true) {
             Ok(found) => match found.iter().find_map(Compared::failed) {
                 Some(why) => fail(why),
-                None => Some(TypeCheck { matched: true, ..TypeCheck::default() }),
+                // A planting's 3D is Revit's render placeholder, drawn as Revit made it whatever its plan says.
+                None => Some(TypeCheck {
+                    matched: true,
+                    reason: self.rpc.then(|| RPC_3D.to_string()),
+                    ..TypeCheck::default()
+                }),
             },
             Err(why) => fail(why),
         }
@@ -178,23 +186,26 @@ impl Family {
         // A drawing level's pieces measured once: Medium and Fine often draw the same as each other.
         let mut shapes: Vec<(Vec<usize>, Vec<usize>, Gaps)> = Vec::new();
         for d in [Detail::Coarse, Detail::Medium, Detail::Fine] {
-            let ((va, ba), (vb, bb)) = (measure(&made, d), measure(&revit, d));
-            let picked = |pieces: &[Piece]| -> Vec<usize> { (0..pieces.len()).filter(|i| pieces[*i].at(d)).collect() };
-            let (pa, pb) = (picked(&made), picked(&revit));
-            let shape = match shapes.iter().find(|(a, b, _)| *a == pa && *b == pb) {
-                Some((_, _, g)) => *g,
-                None => {
-                    let tris = |pieces: &[Piece], which: &[usize]| -> Vec<[P3; 3]> {
-                        which.iter().flat_map(|i| pieces[*i].tris.iter().copied()).collect()
-                    };
-                    let g = surfaces(&tris(&made, &pa), &tris(&revit, &pb));
-                    shapes.push((pa, pb, g));
-                    g
+            // An RPC family's 3D is a render placeholder: only what its plan and its elevations draw is compared.
+            if !self.rpc {
+                let ((va, ba), (vb, bb)) = (measure(&made, d), measure(&revit, d));
+                let picked = |pieces: &[Piece]| -> Vec<usize> { (0..pieces.len()).filter(|i| pieces[*i].at(d)).collect() };
+                let (pa, pb) = (picked(&made), picked(&revit));
+                let shape = match shapes.iter().find(|(a, b, _)| *a == pa && *b == pb) {
+                    Some((_, _, g)) => *g,
+                    None => {
+                        let tris = |pieces: &[Piece], which: &[usize]| -> Vec<[P3; 3]> {
+                            which.iter().flat_map(|i| pieces[*i].tris.iter().copied()).collect()
+                        };
+                        let g = surfaces(&tris(&made, &pa), &tris(&revit, &pb));
+                        shapes.push((pa, pb, g));
+                        g
+                    }
+                };
+                out.push(Compared { detail: d, what: View::Shape, volume: Some((va, vb, curved)), boxes: Some((ba, bb)), gaps: shape });
+                if first_failure && out.last().and_then(Compared::failed).is_some() {
+                    return Ok(out);
                 }
-            };
-            out.push(Compared { detail: d, what: View::Shape, volume: Some((va, vb, curved)), boxes: Some((ba, bb)), gaps: shape });
-            if first_failure && out.last().and_then(Compared::failed).is_some() {
-                return Ok(out);
             }
             // Its nested parts' plan symbols with its own (Revit's result has them among its own).
             let marks = |snapshot: bool, view: SymbolView| -> Result<Vec<super::Mark>, String> {
@@ -449,6 +460,90 @@ mod tests {
         assert!(runs.iter().all(|r| r.iter().all(|p| p.0.abs() >= 400.0 - 1e-6)), "a line across the opening: {runs:?}");
         // The silhouette it replaces runs across the opening.
         assert!(closed(&pieces[0].outline).windows(2).any(|w| w[0].0 < 0.0 && w[1].0 > 0.0), "{:?}", pieces[0].outline);
+    }
+
+    /// A planting as Revit exports it: its 3D a render placeholder (a box as a mesh, drawn in no plan), its plan symbols a circle
+    /// of the radius Revit scales for each type (`small` and `tall`), and its base family (a circle of radius 1000 when it is
+    /// 6000 tall) nested in it scaled by the tree's Height over that.
+    fn tree(rpc: bool, tall: f64) -> Family {
+        let circle = |r: f64, types: &str| -> Vec<Value> {
+            [(0, 180), (180, 360)]
+                .iter()
+                .map(|(a, b)| json!({"snapshot": true, "arc": {"centre": [0, 0], "radius": r, "from": a, "to": b}, "types": [types]}))
+                .collect()
+        };
+        let base = json!({"category": "generic", "types": {"Base": {}},
+            "symbols": [{"arc": {"centre": [0, 0], "radius": 1000, "from": 0, "to": 180}}, {"arc": {"centre": [0, 0], "radius": 1000, "from": 180, "to": 360}}]});
+        let mesh: Vec<Value> = [[0.0, 0.0, 0.0], [0.0, 0.0, 3000.0]]
+            .iter()
+            .map(|p| json!([[p[0], p[1], p[2]], [p[0] + 100.0, p[1], p[2]], [p[0], p[1] + 100.0, p[2]]]))
+            .collect();
+        let mut symbols = circle(500.0, "Small");
+        symbols.extend(circle(tall, "Tall"));
+        serde_json::from_value(json!({
+            "category": "generic", "rpc": rpc,
+            "parameters": [{"name": "Height", "kind": "length", "value": 3000}],
+            "types": {"Small": {"Height": 3000}, "Tall": {"Height": 6000}},
+            "forms": [{"snapshot": true, "mesh": mesh, "show": {"plan": false, "plan_top": false, "plan_cut": false}}],
+            "symbols": symbols,
+            "nested": [{"family": "Base", "type": "Base", "at": [0, 0, 0], "scale": {"formula": "Height / 6000"}}],
+            "embedded": {"Base": base}
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn an_rpc_planting_is_checked_in_plan_only_and_its_3d_is_revits() {
+        let others: Others = &|_| None;
+        // Not an RPC family: its rules draw no solid where Revit's placeholder is, which fails it.
+        let plain = tree(false, 1000.0);
+        let check = plain.check_type("Small", others, super::super::DEFAULT_WALL).expect("a type Revit's result is for");
+        assert!(!check.matched, "{:?}", check.reason);
+        // An RPC one: only its plan is compared, the nested base scaled by Height / 6000 (a half, a whole).
+        let mut f = tree(true, 1000.0);
+        for t in ["Small", "Tall"] {
+            let check = f.check_type(t, others, super::super::DEFAULT_WALL).expect("checked");
+            assert!(check.matched, "{t}: {:?}", check.reason);
+            assert_eq!(check.reason.as_deref(), Some(RPC_3D));
+        }
+        f.run_check(others, &Default::default());
+        assert!(f.check.values().all(|c| c.matched) && f.editable.as_ref().is_some_and(|e| e.ok), "{:?}", f.editable);
+        // Its plan is drawn from its rules (the base scaled), its 3D is always Revit's.
+        assert!(!f.draws_snapshot("Tall") && f.draws_snapshot_forms("Tall"));
+        let values = f.values("Tall", &BTreeMap::new()).unwrap();
+        let pieces = f.pieces("Tall", &values).unwrap();
+        assert_eq!(pieces.len(), 1);
+        assert!(pieces[0].top > 2999.0, "Revit's box, not what the rules build");
+        let marks = f.marks_with("Tall", &values, SymbolView::Plan, None, others).unwrap();
+        let far = marks.iter().flat_map(runs_of).map(|p| p.0.abs().max(p.1.abs())).fold(0.0, f64::max);
+        assert!((far - 1000.0).abs() < 1e-6, "the base at a whole: {far}");
+        let small = f.marks_with("Small", &f.values("Small", &BTreeMap::new()).unwrap(), SymbolView::Plan, None, others).unwrap();
+        let far = small.iter().flat_map(runs_of).map(|p| p.0.abs().max(p.1.abs())).fold(0.0, f64::max);
+        assert!((far - 500.0).abs() < 1e-6, "the base at a half: {far}");
+    }
+
+    #[test]
+    fn an_rpc_planting_whose_plan_is_off_still_fails_and_is_drawn_as_revit_made_it() {
+        // Revit's plan circle for Tall is 900 across where the base scaled makes 1000.
+        let mut f = tree(true, 900.0);
+        f.run_check(&|_| None, &Default::default());
+        assert!(f.check["Small"].matched);
+        let c = &f.check["Tall"];
+        assert!(!c.matched && c.reason.as_deref().is_some_and(|r| r.contains("plan")), "{c:?}");
+        assert!(f.draws_snapshot("Tall") && f.draws_snapshot_forms("Tall"));
+        assert!(f.editable.as_ref().is_some_and(|e| !e.ok));
+    }
+
+    #[test]
+    fn a_nested_part_with_no_scale_is_drawn_as_it_is_and_one_that_scales_to_nothing_is_refused() {
+        let mut f = tree(true, 1000.0);
+        f.nested[0].scale = None;
+        let values = f.values("Small", &BTreeMap::new()).unwrap();
+        let marks = f.marks_with("Small", &values, SymbolView::Plan, None, &|_| None).unwrap();
+        assert!(marks.iter().flat_map(runs_of).any(|p| p.0.abs() > 900.0));
+        f.nested[0].scale = Some(super::super::Expr::Formula("Height - 3000".into()));
+        let err = f.marks_with("Small", &values, SymbolView::Plan, None, &|_| None).unwrap_err();
+        assert!(err.contains("scale"), "{err}");
     }
 
     #[test]

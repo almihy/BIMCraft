@@ -26,7 +26,7 @@ impl Family {
         if !self.nested.is_empty() {
             return None;
         }
-        let which = self.draws_snapshot(type_name);
+        let which = self.draws_snapshot_forms(type_name);
         for form in self.forms.iter().filter(|f| f.of_type(type_name) && f.snapshot == which) {
             if !form.path.is_empty() || !form.top.is_empty() || !form.arcs.is_empty() {
                 return None;

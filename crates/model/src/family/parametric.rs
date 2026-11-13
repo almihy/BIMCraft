@@ -148,6 +148,10 @@ pub struct Nested {
     /// Its own x, y and z axes in this family's (a face-based part on a wall's face), in place of `rotation` and `mirrored`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub axes: Option<[[f64; 3]; 3]>,
+    /// How much it is scaled about its insertion point (a number or a formula over the parent's parameters; none, as it is):
+    /// Revit's planting symbol is its base family drawn at the parent's `Height` over the base's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<Expr>,
 }
 
 impl Nested {
@@ -247,6 +251,12 @@ impl Family {
                         || self.symbols.iter().any(|y| y.snapshot && y.of_type(type_name)))
             }
         }
+    }
+
+    /// Whether type `type_name`'s solids are Revit's own result (its `snapshot` forms): when it draws that result
+    /// ([`Family::draws_snapshot`]), and always for an RPC family's, whose 3D is a render placeholder no rules can rebuild.
+    pub fn draws_snapshot_forms(&self, type_name: &str) -> bool {
+        (self.rpc && self.forms.iter().any(|f| f.snapshot && f.of_type(type_name))) || self.draws_snapshot(type_name)
     }
 
     /// Where each reference ends up for these `values` (a type's parameters worked out): by name, along its axis, mm. Over
