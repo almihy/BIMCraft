@@ -472,6 +472,17 @@ impl Family {
         {
             return Err(format!("its type catalog holds more than {MAX_CATALOG} rows or columns"));
         }
+        // What a type's check kept of the wall and the opening Revit cut sizes the wall's cut for a type drawn as Revit made it.
+        let size = |x: f64| x.is_finite() && (1.0..=crate::model::MAX_COORD).contains(&x);
+        for (t, c) in &self.check {
+            let shown: String = t.chars().take(40).collect();
+            if c.wall.is_some_and(|w| !size(w)) {
+                return Err(format!("its check of type `{shown}`: its wall isn't a usable size"));
+            }
+            if c.opening.is_some_and(|[w, h, b]| !size(w) || !size(h) || !b.is_finite() || b.abs() > crate::model::MAX_COORD) {
+                return Err(format!("its check of type `{shown}`: its opening isn't a usable size"));
+            }
+        }
         Ok(())
     }
 

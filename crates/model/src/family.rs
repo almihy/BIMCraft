@@ -4000,6 +4000,31 @@ mod tests {
     }
 
     #[test]
+    fn a_checks_opening_and_wall_are_sizes_it_can_cut() {
+        let with = |check: Value| -> Result<(), String> {
+            let f: Family = serde_json::from_value(json!({"types": {"900": {}}, "check": {"900": check}})).unwrap();
+            f.check_parametric()
+        };
+        assert!(with(json!({"matched": false, "opening": [900.0, 2100.0, 0.0], "wall": 200.0})).is_ok());
+        assert!(with(json!({"matched": false, "opening": [900.0, 1200.0, -150.0]})).is_ok(), "an opening below the sill is Revit's");
+        for bad in [
+            json!({"matched": false, "opening": [-5.0, 2100.0, 0.0]}),
+            json!({"matched": false, "opening": [900.0, 1e12, 0.0]}),
+            json!({"matched": false, "opening": [900.0, 2100.0, 1e12]}),
+        ] {
+            let e = with(bad.clone()).unwrap_err();
+            assert!(e.contains("isn't a usable size"), "{bad}: {e}");
+        }
+        for bad in [json!({"matched": false, "wall": 0.0}), json!({"matched": false, "wall": 1e12})] {
+            assert!(with(bad.clone()).unwrap_err().contains("wall isn't a usable size"), "{bad}");
+        }
+        // JSON has no NaN; a number that overflows reads as infinite in the types, caught by the same range.
+        let mut f: Family = serde_json::from_value(json!({"types": {"900": {}}, "check": {"900": {"matched": false}}})).unwrap();
+        f.check.get_mut("900").unwrap().opening = Some([f64::NAN, 2100.0, 0.0]);
+        assert!(f.check_parametric().is_err());
+    }
+
+    #[test]
     fn a_family_too_big_to_build_is_refused() {
         let ring = |n: usize| -> Vec<Value> {
             (0..n).map(|k| (k as f64 * std::f64::consts::TAU / n as f64).sin_cos()).map(|(s, c)| json!([100.0 * c, 100.0 * s])).collect()
