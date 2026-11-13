@@ -66,6 +66,22 @@ pub struct Exported {
     pub openings: BTreeMap<String, Opening>,
 }
 
+/// A nested part's axes as unit directions, none where they are not three apart (flat, huge or not numbers): what the family's
+/// own check takes.
+fn unit_axes(a: [[f64; 3]; 3]) -> Option<[[f64; 3]; 3]> {
+    let mut out = a;
+    for d in &mut out {
+        let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        if !len.is_finite() || len < 1e-9 || len > 1e3 {
+            return None;
+        }
+        d.iter_mut().for_each(|x| *x /= len);
+    }
+    let det = out[0][0] * (out[1][1] * out[2][2] - out[1][2] * out[2][1]) - out[0][1] * (out[1][0] * out[2][2] - out[1][2] * out[2][0])
+        + out[0][2] * (out[1][0] * out[2][1] - out[1][1] * out[2][0]);
+    (det.is_finite() && det.abs() >= 1e-6).then_some(out)
+}
+
 /// Whether `dimensions` has room for one more measuring between `refs` references: under the most dimensions, and the most
 /// references they measure between in all.
 fn room(dimensions: &[Dimension], refs: usize) -> bool {
@@ -1418,7 +1434,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             let rotation = n.get("rotation").map(|r| reader.value(r)).transpose()?.unwrap_or_default();
             let mirrored = n["mirrored"].as_bool().unwrap_or(false);
             let mut params = BTreeMap::new();
-            for (k, b) in n["params"].as_object().into_iter().flatten() {
+            for (k, b) in n["params"].as_object().into_iter().flatten().take(super::MAX_PARAMETERS) {
                 // A material or a text handed down sizes nothing: the nested family keeps its own.
                 if b.get("param").and_then(Value::as_str).is_some_and(|p| !reader.params.contains(p)) {
                     continue;
@@ -1447,7 +1463,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             };
             let turned = reader.map.x_sign < 0.0 || reader.map.y_sign < 0.0;
             let axes = match (given, &rotation) {
-                (Some(a), _) => Some(a.map(|d| reader.map.turn(d))),
+                (Some(a), _) => Some(unit_axes(a.map(|d| reader.map.turn(d))).ok_or("its axes aren't three directions that aren't flat")?),
                 (None, Expr::Number(r)) if turned => {
                     let (sn, cs) = r.to_radians().sin_cos();
                     let flip = if mirrored { -1.0 } else { 1.0 };
@@ -1467,12 +1483,30 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             Ok(Nested { family, type_name, at, rotation, mirrored, params, visible, show, axes, type_in, scale, ..Nested::default() })
         })();
         match made {
-            Ok(x) => nested.push(x),
+            Ok(x) => {
+                if n["params"].as_object().is_some_and(|p| p.len() > super::MAX_PARAMETERS) {
+                    notes.push(format!(
+                        "its {} is given more than {} parameters, which BIMCraft doesn't follow: the rest are left out",
+                        x.family,
+                        super::MAX_PARAMETERS
+                    ));
+                }
+                nested.push(x)
+            }
             Err(e) => notes
                 .push(format!("its {} is placed by a rule BIMCraft can't follow yet: {e}", n["family"].as_str().unwrap_or("nested part"))),
         }
     }
     let catalog = def.get("type_catalog").filter(|c| !c.is_null()).and_then(|c| serde_json::from_value::<Catalog>(c.clone()).ok());
+    // A catalog of more rows or columns than a family holds would make the family its own check refuses.
+    let most = super::parametric::MAX_CATALOG;
+    let catalog = match catalog {
+        Some(c) if c.columns.len() > most || c.rows.len() > most || c.rows.values().any(|r| r.len() > most) => {
+            notes.push(format!("its type catalog holds more than {most} rows or columns, which BIMCraft doesn't hold: it is left out"));
+            None
+        }
+        c => c,
+    };
     notes.append(&mut reader.notes);
     f.references = references;
     f.dimensions = dimensions;

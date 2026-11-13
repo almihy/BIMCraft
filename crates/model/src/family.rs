@@ -4128,6 +4128,40 @@ mod tests {
         .unwrap();
     }
 
+    /// A translation of `def` into a family with one type `A`: it must load (its own check takes it) and say what it left out.
+    fn translated(def: Value) -> (Family, String) {
+        let mut f: Family =
+            serde_json::from_value(json!({"types": {"A": {}}, "parameters": [{"name": "W", "kind": "length", "value": 10}]})).unwrap();
+        revit::translate(&mut f, &def, &|_| true);
+        f.check(&|_| true).unwrap_or_else(|e| panic!("the translation isn't a family its own check takes: {e}"));
+        let said = f.editable.as_ref().map(|e| e.untranslated.join("; ")).unwrap_or_default();
+        (f, said)
+    }
+
+    #[test]
+    fn a_translation_is_always_a_family_that_loads_a_huge_catalog_too_many_nested_params_or_flat_axes_are_left_out_and_said() {
+        // A type catalog of more rows than a family holds.
+        let rows: serde_json::Map<String, Value> = (0..1001).map(|k| (format!("T{k}"), json!({"W": k}))).collect();
+        let (f, said) = translated(json!({"type_catalog": {"columns": [{"name": "W"}], "rows": rows}}));
+        assert!(f.catalog.is_none() && said.contains("catalog"), "{said}");
+        // A nested part that sets more parameters than a family has.
+        let params: serde_json::Map<String, Value> = (0..300).map(|k| (format!("P{k}"), json!({"formula": "1"}))).collect();
+        let (f, said) = translated(json!({"nested": [{"family": "Knob", "type": "Standard", "at": [0, 0, 0], "params": params}]}));
+        assert!(f.nested.iter().all(|n| n.params.len() <= MAX_PARAMETERS), "{said}");
+        assert!(said.contains("parameters"), "{said}");
+        // A nested part whose axes are flat, or huge.
+        for (x, y) in [([1.0, 0.0, 0.0], [2.0, 0.0, 0.0]), ([1e9, 0.0, 0.0], [0.0, 1e9, 0.0])] {
+            let (f, said) =
+                translated(json!({"nested": [{"family": "Knob", "type": "Standard", "at": [0, 0, 0], "x_axis": x, "y_axis": y}]}));
+            if f.nested.iter().all(|n| n.axes.is_none()) {
+                assert!(f.nested.is_empty() && said.contains("Knob"), "{x:?}: {said}");
+            }
+            if let Some(a) = f.nested.first().and_then(|n| n.axes) {
+                assert!(a.iter().flatten().all(|c| c.abs() <= 1.0 + 1e-9), "an axis kept as it came: {a:?}");
+            }
+        }
+    }
+
     #[test]
     fn a_family_too_big_to_build_is_refused() {
         let ring = |n: usize| -> Vec<Value> {
