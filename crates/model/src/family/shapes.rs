@@ -171,7 +171,29 @@ pub(crate) fn along(path: &[P3], section: &[P3], section_end: &[P3]) -> Result<V
     let p0 = path[0];
     // The profile in the frame of the first leg: across it, in a plane square to it.
     let offset = |s: &[P3], base: P3, dir: P3| -> Vec<P3> { s.iter().map(|q| sub(*q, base)).map(|o| sub(o, mul(dir, dot(o, dir)))).collect() };
-    let start = offset(section, p0, t0);
+    // The profile is drawn square to one leg of the path, anywhere along it (Revit's profile at the middle of a curve of
+    // the path): found by its plane and where its middle is, and taken back along the turns to the first leg's frame.
+    let centre = mul(section.iter().fold([0.0; 3], |a, p| add(a, *p)), 1.0 / section.len() as f64);
+    let facing = unit((0..section.len()).map(|i| cross(section[i], section[(i + 1) % section.len()])).fold([0.0; 3], add));
+    let leg = facing
+        .and_then(|nrm| {
+            (0..legs)
+                .filter(|i| dot(nrm, dirs[*i]).abs() > 0.999)
+                .map(|i| {
+                    let t = dot(sub(centre, path[i]), dirs[i]);
+                    let len = dot(sub(path[(i + 1) % n], path[i]), dirs[i]);
+                    let off = sub(sub(centre, path[i]), mul(dirs[i], t));
+                    (i, if t < -1e-3 || t > len + 1e-3 { f64::INFINITY } else { dot(off, off) })
+                })
+                .filter(|(_, d)| d.is_finite())
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(i, _)| i)
+        })
+        .unwrap_or(0);
+    let mut start = offset(section, path[leg], dirs[leg]);
+    for k in (1..=leg).rev() {
+        start = start.into_iter().map(|o| turned(o, dirs[k], dirs[k - 1])).collect();
+    }
     // The end profile, taken back to the first leg's frame by undoing the turns along the way.
     let end = if section_end.is_empty() {
         start.clone()

@@ -11055,6 +11055,7 @@ fn family(s: &mut Session, p: &Value) -> R {
                 load_nested(s, nested.as_ref())?;
             }
             fields = inner;
+            loadable(&mut fields);
             if let Some(d) = definition {
                 fields.insert("revit".into(), d);
             }
@@ -11483,6 +11484,80 @@ fn family(s: &mut Session, p: &Value) -> R {
     Ok(reply)
 }
 
+/// An exported family made one BIMCraft takes, as Revit had it: a material its parameters name that it brings no colour
+/// for comes with a grey of its own, a text longer than a parameter holds is cut to it, and a door's or a window's own
+/// `Wall Thickness` gives way to its wall's.
+fn loadable(fields: &mut Map<String, Value>) {
+    let hosted = fields.get("category").and_then(Value::as_str).is_some_and(|c| c == "door" || c == "window");
+    let mut materials = Vec::new();
+    let mut texts = Vec::new();
+    if let Some(Value::Array(list)) = fields.get_mut("parameters") {
+        if hosted {
+            list.retain(|q| q["name"] != crate::family::WALL);
+        }
+        for q in list.iter_mut() {
+            match q["kind"].as_str() {
+                Some("material") => materials.push(q["name"].as_str().unwrap_or_default().to_string()),
+                Some("text") => texts.push(q["name"].as_str().unwrap_or_default().to_string()),
+                _ => {}
+            }
+        }
+    }
+    let cut = |v: &mut Value| {
+        if let Value::String(t) = v
+            && t.chars().count() > crate::family::MAX_WORDS
+        {
+            *t = t.chars().take(crate::family::MAX_WORDS).collect();
+        }
+    };
+    let mut named: Vec<String> = Vec::new();
+    for q in fields.get_mut("parameters").and_then(Value::as_array_mut).into_iter().flatten() {
+        let name = q["name"].as_str().unwrap_or_default().to_string();
+        if texts.contains(&name) {
+            cut(&mut q["value"]);
+        }
+        if materials.contains(&name) {
+            named.extend(q["value"].as_str().map(str::to_string));
+        }
+    }
+    for set in fields.get_mut("types").and_then(Value::as_object_mut).into_iter().flat_map(|t| t.values_mut()) {
+        if let Value::Object(set) = set {
+            if hosted {
+                set.remove(crate::family::WALL);
+            }
+            for (k, v) in set.iter_mut() {
+                if texts.contains(k) {
+                    cut(v);
+                }
+                if materials.contains(k) {
+                    named.extend(v.as_str().map(str::to_string));
+                }
+            }
+        }
+    }
+    // A subcategory a form or a symbol is drawn in that the family doesn't list (one of a nested family's) is listed.
+    let used: Vec<String> = ["forms", "symbols"]
+        .iter()
+        .filter_map(|k| fields.get(*k).and_then(Value::as_array))
+        .flatten()
+        .filter_map(|x| x["subcategory"].as_str().map(str::to_string))
+        .collect();
+    let subs = fields.entry("subcategories").or_insert_with(|| json!([]));
+    if let Value::Array(subs) = subs {
+        for u in used {
+            if !subs.iter().any(|x| x["name"] == u.as_str()) {
+                subs.push(json!({"name": u}));
+            }
+        }
+    }
+    let brought = fields.entry("materials").or_insert_with(|| json!({}));
+    if let Value::Object(brought) = brought {
+        for m in named.into_iter().filter(|m| !m.trim().is_empty()) {
+            brought.entry(m).or_insert_with(|| json!({"color": [160, 160, 160]}));
+        }
+    }
+}
+
 /// The nested families of an export package (`{name: {family, definition}}`), each loaded as a family of its own, those it
 /// nests first; at most [`crate::family::MAX_NESTED`] of them.
 fn load_nested(s: &mut Session, nested: Option<&Value>) -> Result<(), String> {
@@ -11502,7 +11577,9 @@ fn load_nested(s: &mut Session, nested: Option<&Value>) -> Result<(), String> {
         let (name, v) = left.remove(ready);
         done.insert(name.as_str());
         let Some(Value::Object(fields)) = v.get("family") else { continue };
-        let mut params = Value::Object(fields.clone());
+        let mut fields = fields.clone();
+        loadable(&mut fields);
+        let mut params = Value::Object(fields);
         params["name"] = json!(name);
         if let Some(d) = v.get("definition").filter(|d| !d.is_null()) {
             params["revit"] = d.clone();

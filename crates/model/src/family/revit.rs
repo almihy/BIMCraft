@@ -5,7 +5,7 @@
 //! made is tried in every type before it is kept, so the family always loads and the check decides what is drawn.
 //!
 //! Lengths are mm in the family document's axes; [`Map`] takes them into the family's own (a door's or a window's: the
-//! opening's): `x + x_offset`, `y × y_sign`, `z - z_minus`. A bound number (B) is a number, `{ref, offset}` (a reference
+//! opening's): `x + x_offset`, `(y + y_offset) × y_sign`, `z - z_minus`. A bound number (B) is a number, `{ref, offset}` (a reference
 //! plane's coordinate along its axis plus an offset), `{param, scale, offset}` or `{formula}`; it becomes an [`Expr`]. A
 //! reference plane's position and an extrusion's start and end are coordinates along the positive axis of their normal.
 
@@ -26,6 +26,7 @@ const MOST: usize = 4096;
 struct Map {
     x_offset: f64,
     y_sign: f64,
+    y_offset: f64,
     /// What z drops by: a number, or a formula over the family's parameters (a window's sill).
     z_minus: Expr,
 }
@@ -160,8 +161,8 @@ impl Reader<'_> {
     fn place(&self, v: Expr, axis: Axis) -> Expr {
         match axis {
             Axis::X => plus(v, self.map.x_offset),
-            Axis::Y if self.map.y_sign < 0.0 => neg(v),
-            Axis::Y => v,
+            Axis::Y if self.map.y_sign < 0.0 => neg(plus(v, self.map.y_offset)),
+            Axis::Y => plus(v, self.map.y_offset),
             Axis::Z => minus(v, &self.map.z_minus),
         }
     }
@@ -550,19 +551,46 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     let map = Map {
         x_offset: num(&to["x_offset"]).unwrap_or(0.0),
         y_sign: if num(&to["y_sign"]).is_some_and(|s| s < 0.0) { -1.0 } else { 1.0 },
+        y_offset: num(&to["y_offset"]).unwrap_or(0.0),
         z_minus: Expr::Number(0.0),
     };
     let mut reader = Reader { map, planes, params, first: first.clone(), notes: Vec::new(), family: f, values: BTreeMap::new() };
     if let Some(z) = to.get("z_minus").filter(|z| !z.is_null()) {
-        match reader.value(z) {
-            Ok(e) => reader.map.z_minus = e,
-            Err(e) => notes.push(format!("where its z starts: {e}")),
+        // A plane (a window's sill): the parameter that puts it where it is in every type, else where it is in the first.
+        let plane = z.get("ref").and_then(Value::as_str).and_then(|id| reader.planes.get(id)).map(|p| p.2.clone());
+        let follows = plane.as_ref().and_then(|at| {
+            let typed: Vec<(String, BTreeMap<String, Val>)> =
+                f.types.keys().filter_map(|t| Some((t.clone(), f.values(t, &BTreeMap::new()).ok()?))).collect();
+            reader.params.iter().find(|p| {
+                typed.iter().all(|(t, v)| match (v.get(*p), at.get(t)) {
+                    (Some(Val::Number(x)), Some(y)) => (x - y).abs() < 0.05,
+                    _ => false,
+                })
+            })
+        });
+        match (follows, reader.value(z)) {
+            (Some(p), _) => reader.map.z_minus = Expr::Formula(p.clone()),
+            (None, Ok(e)) => reader.map.z_minus = e,
+            (None, Err(e)) => notes.push(format!("where its z starts: {e}")),
         }
     }
     reader.first_values();
     // References: where each stands in the first type, taken into the family's axes; the origin's at the origin.
     let mut references = Vec::new();
-    for (_, name, axis, p) in &refs {
+    let base_plane = to.get("z_minus").and_then(|z| z.get("ref")).and_then(Value::as_str).map(str::to_string);
+    for (id, name, axis, p) in &refs {
+        // The plane z is measured from (a window's sill): the family's z = 0, which stays.
+        if base_plane.as_deref() == Some(id.as_str()) && *axis == Axis::Z {
+            references.push(Reference {
+                name: name.clone(),
+                axis: *axis,
+                at: Expr::Number(0.0),
+                is_reference: p.get("is_reference").and_then(text).map(str::to_string),
+                origin: true,
+                ..Reference::default()
+            });
+            continue;
+        }
         // A wall's faces (a door's or a window's host) follow the wall it stands in: half its thickness out each way.
         let kind = p.get("is_reference").and_then(Value::as_str).unwrap_or("");
         if f.category.hosted() && *axis == Axis::Y && (kind == "host_exterior" || kind == "host_interior") {
@@ -576,9 +604,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             });
             continue;
         }
-        let doc = if p["defines_origin"].as_bool().unwrap_or(false) {
-            Expr::Number(0.0)
-        } else {
+        let doc = {
             let at = &reader.planes.values().find(|(n, _, _)| n == name).map(|x| x.2.clone()).unwrap_or_default();
             Expr::Number(at.get(&first).or_else(|| at.values().next()).copied().unwrap_or(0.0))
         };
@@ -591,6 +617,27 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             ..Reference::default()
         });
     }
+    // Where an axis has no plane defining its origin, the plane at 0 in every type is it (a level's plane): what Revit
+    // keeps still. And the planes that never move go last, so solving keeps them where they are and moves the others.
+    let moves = |p: &Value| {
+        let at: Vec<f64> = p["at"].as_object().into_iter().flatten().filter_map(|(_, v)| num(v)).collect();
+        at.iter().any(|x| (x - at.first().copied().unwrap_or(0.0)).abs() > 0.05)
+    };
+    for axis in Axis::ALL {
+        if references.iter().any(|r| r.axis == axis && r.origin) {
+            continue;
+        }
+        let at_zero = |r: &&(String, String, Axis, Value)| {
+            r.2 == axis && !moves(&r.3) && r.3["at"].as_object().into_iter().flatten().all(|(_, v)| num(v).is_some_and(|x| x.abs() < 0.05))
+        };
+        if let Some(found) = refs.iter().find(at_zero).map(|r| r.1.clone())
+            && let Some(r) = references.iter_mut().find(|r| r.name == found && r.is_reference.as_deref().is_none_or(|k| !k.starts_with("host_")))
+        {
+            r.origin = true;
+        }
+    }
+    let still: BTreeSet<String> = refs.iter().filter(|r| !moves(&r.3)).map(|r| r.1.clone()).collect();
+    references.sort_by_key(|r| still.contains(&r.name));
     // Dimensions between planes; alignments locked between two planes.
     let mut dimensions = Vec::new();
     for d in def["dimensions"].as_array().into_iter().flatten().take(super::MAX_DIMENSIONS) {
@@ -682,6 +729,10 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             }
             let mut params = BTreeMap::new();
             for (k, b) in n["params"].as_object().into_iter().flatten() {
+                // A material or a text handed down sizes nothing: the nested family keeps its own.
+                if b.get("param").and_then(Value::as_str).is_some_and(|p| !reader.params.contains(p)) {
+                    continue;
+                }
                 match reader.value(b) {
                     Ok(e) => {
                         params.insert(k.clone(), e);
