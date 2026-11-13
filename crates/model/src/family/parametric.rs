@@ -243,7 +243,9 @@ impl Family {
             let col = |n: &str| names.iter().position(|m| *m == n);
             // Each equation: its coefficients by column, and what they come to.
             let mut rows: Vec<(Vec<f64>, f64, String)> = Vec::new();
-            for r in self.references.iter().filter(|r| r.axis == axis && r.origin) {
+            // What stays where it is: the plane at the origin, and a host's face (where the wall puts it).
+            let fixed = |r: &Reference| r.origin || r.is_reference.as_deref().is_some_and(|k| k.starts_with("host_"));
+            for r in self.references.iter().filter(|r| r.axis == axis && fixed(r)) {
                 let mut a = vec![0.0; names.len()];
                 if let Some(k) = col(&r.name) {
                     a[k] = 1.0;

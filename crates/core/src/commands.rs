@@ -11507,7 +11507,15 @@ fn load_nested(s: &mut Session, nested: Option<&Value>) -> Result<(), String> {
         if let Some(d) = v.get("definition").filter(|d| !d.is_null()) {
             params["revit"] = d.clone();
         }
-        family(s, &params).map_err(|e| format!("nested family `{name}`: {e}"))?;
+        // A nested family is a part of its parent: one that can't be what it says (a window nested in a window, which
+        // has a wall's thickness of its own) comes in as a generic one, and one that can't come in at all is left out,
+        // its parent's check saying what that costs.
+        if family(s, &params).is_err() {
+            params["category"] = json!("generic");
+            params["host"] = Value::Null;
+            params["cut"] = Value::Null;
+            let _ = family(s, &params);
+        }
     }
     Ok(())
 }

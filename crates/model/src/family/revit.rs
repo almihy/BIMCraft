@@ -126,7 +126,10 @@ impl Reader<'_> {
             // A plane's coordinate as a value: where it stands in the first type, in the document's axes.
             let (_, _, at) = self.planes.get(r).ok_or_else(|| format!("it follows a reference `{r}` the definition doesn't have"))?;
             let x = at.get(&self.first).or_else(|| at.values().next()).copied().unwrap_or(0.0);
-            return Ok(Expr::Number(x + b.get("offset").and_then(num).unwrap_or(0.0)));
+            return Ok(match b.get("offset").filter(|o| !o.is_null()) {
+                None => Expr::Number(x),
+                Some(o) => plus(self.value(o)?, x),
+            });
         }
         Err(format!("`{}` isn't a number the definition says", short(b)))
     }
@@ -137,9 +140,17 @@ impl Reader<'_> {
             && let Some((name, a, _)) = self.planes.get(r)
             && *a == axis
         {
-            let offset = b.get("offset").and_then(num).unwrap_or(0.0);
             let sign = if axis == Axis::Y { self.map.y_sign } else { 1.0 };
-            return Ok(plus(Expr::Formula(format!("ref({name})")), sign * offset));
+            let at = Expr::Formula(format!("ref({name})"));
+            // The offset: a number, or itself bound (a parameter's value, a formula).
+            return Ok(match b.get("offset").filter(|o| !o.is_null()) {
+                None => at,
+                Some(o) => match self.value(o)? {
+                    Expr::Number(x) => plus(at, sign * x),
+                    e if sign < 0.0 => minus(at, &e),
+                    Expr::Formula(f) => Expr::Formula(format!("ref({name}) + {f}")),
+                },
+            });
         }
         let v = self.value(b)?;
         Ok(self.place(v, axis))
@@ -552,6 +563,19 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     // References: where each stands in the first type, taken into the family's axes; the origin's at the origin.
     let mut references = Vec::new();
     for (_, name, axis, p) in &refs {
+        // A wall's faces (a door's or a window's host) follow the wall it stands in: half its thickness out each way.
+        let kind = p.get("is_reference").and_then(Value::as_str).unwrap_or("");
+        if f.category.hosted() && *axis == Axis::Y && (kind == "host_exterior" || kind == "host_interior") {
+            let side = if (kind == "host_exterior") == (reader.map.y_sign > 0.0) { "" } else { "-" };
+            references.push(Reference {
+                name: name.clone(),
+                axis: *axis,
+                at: Expr::Formula(format!("{side}{} / 2", super::WALL)),
+                is_reference: Some(kind.to_string()),
+                ..Reference::default()
+            });
+            continue;
+        }
         let doc = if p["defines_origin"].as_bool().unwrap_or(false) {
             Expr::Number(0.0)
         } else {
@@ -581,12 +605,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         let label = d.get("label").and_then(text).map(str::to_string);
         let (locked, eq) = (d["locked"].as_bool().unwrap_or(false), d["eq"].as_bool().unwrap_or(false));
         if found.len() != ids.len() || found.len() < 2 || kind != DimensionKind::Linear {
-            if (label.is_some() || locked || eq) && kind == DimensionKind::Linear {
-                notes.push(format!(
-                    "a {} dimension measures to something other than reference planes: it doesn't place them",
-                    if eq { "EQ" } else { "labelled or locked" }
-                ));
-            }
+            // One to a form's face or a line: the form's own numbers follow what it measures already.
             continue;
         }
         if found.iter().any(|p| p.1 != found[0].1) {
