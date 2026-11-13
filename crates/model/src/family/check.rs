@@ -51,13 +51,13 @@ fn extent(marks: &[super::Mark]) -> Option<[[f64; 2]; 2]> {
 
 fn level(d: Detail) -> &'static str {
     match d {
-        Detail::Coarse => "Coarse",
-        Detail::Medium => "Medium",
-        Detail::Fine => "Fine",
+        Detail::Coarse => "coarse",
+        Detail::Medium => "medium",
+        Detail::Fine => "fine",
     }
 }
 
-const AXES: [&str; 3] = ["x", "y", "z"];
+const AXES: [&str; 3] = ["width", "depth", "height"];
 
 impl Family {
     /// Every type checked again ([`Family::check_type`]), but those flexed since they came in, and whether it is editable:
@@ -80,7 +80,7 @@ impl Family {
             .check
             .iter()
             .filter(|(_, c)| !c.matched)
-            .map(|(t, c)| format!("type `{t}`: {}", c.reason.clone().unwrap_or_default()))
+            .map(|(t, c)| format!("its type {t}: {}", c.reason.clone().unwrap_or_default()))
             .collect();
         let ok = untranslated.is_empty() && failed.is_empty() && self.has_parametric();
         let reason = if ok {
@@ -90,7 +90,7 @@ impl Family {
         } else if let Some(f) = failed.first() {
             Some(if failed.len() > 1 { format!("{f} (and {} more types)", failed.len() - 1) } else { f.clone() })
         } else {
-            Some("it brings no definition BIMCraft can regenerate: it is drawn as Revit made it".into())
+            Some("it came without the rules that size it, so it is drawn as Revit made it".into())
         };
         self.editable = Some(Editable { ok, reason, untranslated });
     }
@@ -111,14 +111,14 @@ impl Family {
             return TypeCheck { matched: true, reason: None, flexed: false };
         }
         if !self.has_parametric() {
-            return fail("it brings no definition BIMCraft can regenerate".into());
+            return fail("it came without the rules that size it, so it is drawn as Revit made it".into());
         }
         let values = match self.values(t, &BTreeMap::new()) {
             Ok(v) => v,
             Err(e) => return fail(e),
         };
         if let Err(e) = self.solve(&values) {
-            return fail(format!("its reference planes can't be placed: {e}"));
+            return fail(format!("its sizes can't all hold at once: {e}"));
         }
         let build = |snapshot: bool| {
             self.build(
@@ -131,16 +131,17 @@ impl Family {
         };
         let (made, revit) = match (build(false), build(true)) {
             (Ok(a), Ok(b)) => (a, b),
-            (Err(e), _) => return fail(format!("its definition doesn't build: {e}")),
-            (_, Err(e)) => return fail(format!("Revit's result doesn't build: {e}")),
+            (Err(e), _) => return fail(format!("it doesn't come out in this type: {e}")),
+            (_, Err(e)) => return fail(format!("what Revit made of it can't be drawn: {e}")),
         };
         for d in [Detail::Coarse, Detail::Medium, Detail::Fine] {
             let ((va, ba), (vb, bb)) = (measure(&made, d), measure(&revit, d));
             let off = (va - vb).abs();
             if off > VOLUME * vb.max(1.0) && off > 1000.0 {
                 let pct = if vb > 0.0 { off / vb * 100.0 } else { 100.0 };
+                let way = if va > vb { "more" } else { "less" };
                 return fail(format!(
-                    "at {} its volume is {pct:.1} % off Revit's ({:.4} m³ against {:.4} m³)",
+                    "drawn {} it holds {pct:.1} % {way} than Revit's ({:.4} m³ against {:.4} m³)",
                     level(d),
                     va / 1e9,
                     vb / 1e9
@@ -152,11 +153,12 @@ impl Family {
                     for k in 0..3 {
                         let gap = (a[0][k] - b[0][k]).abs().max((a[1][k] - b[1][k]).abs());
                         if gap > BOX {
-                            return fail(format!("at {} its box is {gap:.0} mm off Revit's along {}", level(d), AXES[k]));
+                            return fail(format!("drawn {} its {} is {gap:.0} mm off Revit's", level(d), AXES[k]));
                         }
                     }
                 }
-                _ => return fail(format!("at {} one of it and Revit's result draws nothing", level(d))),
+                (None, _) => return fail(format!("drawn {} it shows nothing where Revit's shows something", level(d))),
+                (_, None) => return fail(format!("drawn {} it shows something where Revit's shows nothing", level(d))),
             }
             // Its nested parts' plan symbols with its own (Revit's result has them among its own).
             let marks = |snapshot: bool| -> Result<Vec<super::Mark>, String> {
@@ -177,19 +179,19 @@ impl Family {
             };
             let (ma, mb) = match (marks(false), marks(true)) {
                 (Ok(a), Ok(b)) => (plan(a, &made), plan(b, &revit)),
-                (Err(e), _) => return fail(format!("its plan symbols don't work out: {e}")),
-                (_, Err(e)) => return fail(format!("Revit's plan symbols don't work out: {e}")),
+                (Err(e), _) => return fail(format!("its plan lines don't come out: {e}")),
+                (_, Err(e)) => return fail(format!("Revit's plan lines can't be drawn: {e}")),
             };
             match (ma, mb) {
                 (None, None) => {}
                 (Some(a), Some(b)) => {
                     let gap = (0..2).map(|k| (a[0][k] - b[0][k]).abs().max((a[1][k] - b[1][k]).abs())).fold(0.0, f64::max);
                     if gap > BOX {
-                        return fail(format!("at {} its plan symbols reach {gap:.0} mm off Revit's", level(d)));
+                        return fail(format!("its plan drawn {} reaches {gap:.0} mm off Revit's", level(d)));
                     }
                 }
-                (None, Some(_)) => return fail(format!("at {} its plan draws no symbols where Revit's does", level(d))),
-                (Some(_), None) => return fail(format!("at {} its plan draws symbols where Revit's draws none", level(d))),
+                (None, Some(_)) => return fail(format!("its plan drawn {} has no lines where Revit's has", level(d))),
+                (Some(_), None) => return fail(format!("its plan drawn {} has lines where Revit's has none", level(d))),
             }
         }
         TypeCheck { matched: true, reason: None, flexed: false }

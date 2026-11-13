@@ -165,7 +165,7 @@ fn a_type_that_does_not_match_draws_revits_result_and_says_why() {
     assert_eq!(r["check"]["Small"]["matched"], true);
     assert_eq!(r["check"]["Large"]["matched"], false, "{}", r["check"]);
     let why = r["check"]["Large"]["reason"].as_str().unwrap();
-    assert!(why.contains("volume") || why.contains("box"), "{why}");
+    assert!(why.contains("Revit's") && !why.contains("along"), "{why}");
     assert_eq!(r["editable"]["ok"], false);
     assert!(r["editable"]["reason"].as_str().unwrap().contains("Large"), "{}", r["editable"]);
     let f = s.model.families["Sample Box Table"].clone();

@@ -139,7 +139,7 @@ impl Reader<'_> {
         }
         if let Some(p) = b.get("param").and_then(text) {
             if !self.params.contains(p) {
-                return Err(format!("it follows `{p}`, which the family has no number parameter of"));
+                return Err(format!("it follows `{p}`, which isn't one of the family's numbers"));
             }
             let (scale, offset) = (b.get("scale").and_then(num).unwrap_or(1.0), b.get("offset").and_then(num).unwrap_or(0.0));
             let base = if scale == 1.0 { p.to_string() } else { format!("{} * {p}", plain(scale)) };
@@ -154,7 +154,7 @@ impl Reader<'_> {
                 Some(o) => plus(self.value(o)?, x),
             });
         }
-        Err(format!("`{}` isn't a number the definition says", short(b)))
+        Err(format!("it is placed by a rule BIMCraft can't read yet ({})", short(b)))
     }
 
     /// A coordinate along `axis`, bound as `b`, in the family's axes.
@@ -251,7 +251,7 @@ impl Reader<'_> {
         let a = c.get("arc").ok_or_else(|| format!("a curve of a kind it can't draw: {}", short(c)))?;
         let (start, end, centre) = (self.point(&a["start"])?, self.point(&a["end"])?, self.point(&a["center"])?);
         let n: Vec<f64> = a["normal"].as_array().map(|v| v.iter().filter_map(num).collect()).unwrap_or_default();
-        let [nx, ny, nz] = n.as_slice() else { return Err("an arc says no normal".into()) };
+        let [nx, ny, nz] = n.as_slice() else { return Err("an arc of it says no direction".into()) };
         // Its middle, worked out in the document's axes (counter-clockwise about its normal), then taken over: what says
         // which way it turns once mirrored.
         let (s, e, c3) = (self.at(&start)?, self.at(&end)?, self.at(&centre)?);
@@ -617,7 +617,7 @@ impl Reader<'_> {
                 Ok(out)
             }
             "" => Err("it says no kind".into()),
-            k => Err(format!("a form of a kind BIMCraft doesn't have yet ({k})")),
+            k => Err(format!("it is a kind of form BIMCraft doesn't have yet ({k})")),
         }
     }
 
@@ -887,7 +887,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
                 sill_from = Some(c);
             }
             (None, None, Ok(e)) => reader.map.z_minus = e,
-            (None, None, Err(e)) => notes.push(format!("where its z starts: {e}")),
+            (None, None, Err(e)) => notes.push(format!("its height above its level is set by a rule BIMCraft can't follow yet: {e}")),
         }
     }
     reader.first_values();
@@ -1091,7 +1091,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             continue;
         }
         if found.iter().any(|p| p.1 != found[0].1) {
-            notes.push("a dimension measures between reference planes square to different axes".into());
+            notes.push("one of its dimensions measures across two directions at once, which BIMCraft can't follow yet".into());
             continue;
         }
         // The host wall's thickness between its faces: the wall places them, as its own faces.
@@ -1101,7 +1101,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         let label = match label {
             Some(l) if reader.params.contains(&l) => Some(l),
             Some(l) => {
-                notes.push(format!("a dimension is labelled `{l}`, which isn't a number parameter of the family"));
+                notes.push(format!("one of its sizes is set by `{l}`, which isn't one of the family's numbers"));
                 None
             }
             None => None,
@@ -1190,14 +1190,14 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     for (i, d) in def["forms"].as_array().into_iter().flatten().take(MOST).enumerate() {
         match reader.forms(d, has_material) {
             Ok(made) => forms.extend(made),
-            Err(e) => notes.push(format!("form {} ({}): {e}", i + 1, d["kind"].as_str().unwrap_or("?"))),
+            Err(e) => notes.push(format!("its {}: {e}", part_of(d))),
         }
     }
     let mut symbols = Vec::new();
     for (i, d) in def["lines"].as_array().into_iter().flatten().take(MOST).enumerate() {
         match reader.lines(d) {
             Ok(made) => symbols.extend(made),
-            Err(e) => notes.push(format!("line {}: {e}", i + 1)),
+            Err(e) => notes.push(format!("one of its lines: {e}")),
         }
     }
     // Nested families, placed: mirrored by the family's own axes where they are.
@@ -1262,7 +1262,8 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         })();
         match made {
             Ok(x) => nested.push(x),
-            Err(e) => notes.push(format!("nested family {} ({}): {e}", i + 1, n["family"].as_str().unwrap_or("?"))),
+            Err(e) => notes
+                .push(format!("its {} is placed by a rule BIMCraft can't follow yet: {e}", n["family"].as_str().unwrap_or("nested part"))),
         }
     }
     let catalog = def.get("type_catalog").filter(|c| !c.is_null()).and_then(|c| serde_json::from_value::<Catalog>(c.clone()).ok());
@@ -1377,6 +1378,31 @@ fn turned_as_revit(f: &Family, mut forms: Vec<Form>) -> Vec<Form> {
     forms
 }
 
+/// What an architect calls a form of the definition: its subcategory, else its material, and what kind of form it is.
+fn part_of(def: &Value) -> String {
+    let kind = match def["kind"].as_str().unwrap_or("") {
+        "extrusion" => "extrusion",
+        "blend" => "blend",
+        "revolution" => "revolve",
+        "sweep" => "sweep",
+        "swept_blend" => "swept blend",
+        _ => "form",
+    };
+    let name = ["subcategory", "material_param", "material"].iter().find_map(|k| def.get(*k).and_then(text));
+    match name {
+        Some(n) => format!("{} ({kind})", n.to_lowercase()),
+        None => kind.to_string(),
+    }
+}
+
+/// [`part_of`] of a form as translated, the `i`th: its subcategory, else its material.
+fn part(form: &Form, i: usize) -> String {
+    match form.subcategory.as_deref().or(Some(form.material.as_str()).filter(|m| !m.is_empty())) {
+        Some(n) => n.to_lowercase(),
+        None => format!("form {}", i + 1),
+    }
+}
+
 /// `forms`, `symbols` and `nested` parts kept where each works out in every type of `f` (its references where they're
 /// placed); one that doesn't is left out, and said in `notes`.
 fn tried(
@@ -1394,16 +1420,16 @@ fn tried(
         let fails = values.iter().find_map(|v| probe.solid(0, v, &mut HashMap::new()).err());
         match fails {
             None => kept_forms.append(&mut probe.forms),
-            Some(e) => notes.push(format!("form {} as translated doesn't build: {e}", i + 1)),
+            Some(e) => notes.push(format!("its {} doesn't come out in every type: {e}", part(&probe.forms[0], i))),
         }
     }
     let mut kept_symbols = Vec::new();
-    for (i, y) in symbols.into_iter().enumerate() {
+    for y in symbols {
         probe.symbols = vec![y];
         let fails = values.iter().find_map(|v| probe.marks_where(v, &|_| true).err());
         match fails {
             None => kept_symbols.append(&mut probe.symbols),
-            Some(e) => notes.push(format!("line {} as translated doesn't work out: {e}", i + 1)),
+            Some(e) => notes.push(format!("one of its lines doesn't come out in every type: {e}")),
         }
     }
     let mut kept_nested = Vec::new();
@@ -1415,7 +1441,7 @@ fn tried(
         if ok {
             kept_nested.push(n);
         } else {
-            notes.push(format!("nested family `{}`: its placement doesn't work out", n.family));
+            notes.push(format!("its {} is placed by a rule BIMCraft can't follow yet", n.family));
         }
     }
     (kept_forms, kept_symbols, kept_nested)
