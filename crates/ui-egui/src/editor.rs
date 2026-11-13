@@ -521,6 +521,7 @@ impl FamilyEditor {
                 catalog: f.catalog.clone(),
                 check: f.check.clone(),
                 editable: f.editable.clone(),
+                rpc: f.rpc,
                 ..Family::default()
             },
             tab: Tab::Parameters,
@@ -603,6 +604,7 @@ impl FamilyEditor {
             catalog: self.kept.catalog.clone(),
             check,
             editable: self.kept.editable.clone(),
+            rpc: self.kept.rpc,
         })
     }
 
