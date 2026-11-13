@@ -2,11 +2,13 @@
 //! page's size, its pixels at a resolution, and what it draws as vectors (its stroked and filled paths, and the text it
 //! shows) in millimetres on the paper, from its bottom left corner, y up, as the pixels have it, each on the layer (the
 //! optional content group) it is drawn on, as the page draws it: a fill by its rule, holes and all, what is see-through as
-//! see-through, cut by the clipping paths it sets whatever their shape, a gradient or a pattern in its mean colour, a dash
+//! see-through, cut by the clipping paths it sets whatever their shape, a gradient as bands of its colours and a pattern as its cell's lines repeated, a dash
 //! in all its dashes, a line as wide as the page makes it each way. The file itself is not kept: a project holds the
 //! pictures it holds and the lines.
 
 mod paint;
+mod patterns;
+mod pictures;
 mod shapes;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -15,8 +17,8 @@ use std::sync::{Arc, Mutex};
 
 use hayro::hayro_interpret::font::{Glyph, GlyphRun};
 use hayro::hayro_interpret::{
-    self as interpret, BlendMode, ClipPath, Context, Device, DrawMode, DrawProps, FillRule, Image, ImageData, ImageDrawProps,
-    InterpreterCache, InterpreterSettings, LumaData, Paint, SoftMask, StrokeProps, TransformExt,
+    self as interpret, BlendMode, ClipPath, Context, Device, DrawMode, DrawProps, FillRule, ImageDrawProps, InterpreterCache,
+    InterpreterSettings, Paint, SoftMask, StrokeProps, TransformExt,
 };
 use hayro::hayro_syntax::object::{Array, Dict, MaybeRef, Name, Number, ObjectIdentifier, String as PdfString};
 use hayro::hayro_syntax::page::Page;
@@ -26,6 +28,11 @@ use hayro::kurbo::{Affine, BezPath, Cap, CubicBez, Join, ParamCurve, PathEl, Poi
 use crate::dxf::{Align, Color, Dxf, Entity, Horizontal, Layer as DxfLayer, Linetype, Shape, Vertical};
 use crate::geom::P2;
 use shapes::{Ends, Region};
+
+// hayro-interpret as BIMCraft patches it (vendor/hayro-interpret, the root Cargo.toml's [patch.crates-io]): what a form or an
+// annotation draws on a layer is read on that layer only with it. A workspace that builds this crate without the patch fails
+// here: copy the root [patch.crates-io] into it.
+const _: () = assert!(hayro::hayro_interpret::BIMCRAFT_PATCH == 1, "hayro-interpret must be BIMCraft's patched copy");
 
 /// Millimetres in a point, PDF's unit.
 pub const MM_PER_PT: f64 = 25.4 / 72.0;
@@ -287,6 +294,7 @@ impl Document {
             groups: vec![1.0],
             page: [0.0, 0.0, w, h],
             begun: false,
+            depth: 0,
         };
         interpret::interpret_page(p, &mut ctx, &mut device);
         let mut out = device.out;
@@ -317,15 +325,7 @@ impl Document {
         let canvas = Rect::new(0.0, 0.0, f64::from(pw), f64::from(ph));
         let cache = InterpreterCache::new();
         let mut ctx = Context::new(to_px, canvas, &cache, p.xref(), InterpreterSettings::default());
-        let mut device = Pictures {
-            w: pw,
-            h: ph,
-            rgba: vec![0; pw as usize * ph as usize * 4],
-            clips: vec![canvas],
-            drawn: 0,
-            painted: 0,
-            covered: None,
-        };
+        let mut device = pictures::Pictures::new(pw, ph);
         interpret::interpret_page(p, &mut ctx, &mut device);
         let Some([x0, y0, x1, y1]) = device.covered.filter(|_| device.drawn > 0) else { return Ok(None) };
         // The part they cover, row by row.
@@ -467,6 +467,8 @@ struct Collect {
     page: [f64; 4],
     /// Whether anything has been kept: a white fill over the page before that is the page's ground.
     begun: bool,
+    /// How deep in patterns painted with patterns what is drawn now is: 0 on the page.
+    depth: u32,
 }
 
 /// Whether boxes `a` and `b` overlap or touch.
@@ -853,19 +855,40 @@ impl<'a> Device<'a> for Collect {
         self.seq += 1;
         let seq = self.seq;
         let b = (props.transform * path.clone()).control_box();
-        let Some(paint) = self.paint(&props.paint, [b.x0, b.y0, b.x1, b.y1]) else { return };
+        let mean = self.paint(&props.paint, [b.x0, b.y0, b.x1, b.y1]);
         let rings = |runs: Runs| runs.into_iter().map(|(p, _)| p).collect::<Vec<_>>();
+        // A fill painted with a pattern is kept as the pattern paints it; else (or past what that may make) in its mean colour.
+        let fill = |me: &mut Collect, runs: Runs, rule: &FillRule| {
+            let (rings, even_odd) = (rings(runs), *rule == FillRule::EvenOdd);
+            if let Paint::Pattern(p) = &props.paint
+                && me.fill_pattern(&rings, even_odd, p)
+            {
+                return;
+            }
+            if let Some(paint) = mean {
+                me.keep_fill(rings, even_odd, paint, seq);
+            }
+        };
         match mode {
-            DrawMode::Stroke(s) => self.stroke(path, props.transform, s, paint, seq),
+            DrawMode::Stroke(s) => {
+                if let Some(paint) = mean {
+                    self.stroke(path, props.transform, s, paint, seq);
+                }
+            }
             DrawMode::Fill(rule) => match self.runs(path, props.transform) {
-                Some(runs) => self.keep_fill(rings(runs), *rule == FillRule::EvenOdd, paint, seq),
+                Some(runs) => fill(self, runs, rule),
                 None => self.leave(),
             },
             DrawMode::FillAndStroke(rule, s) => {
                 if let Some(runs) = self.runs(path, props.transform) {
-                    self.keep_fill(rings(runs), *rule == FillRule::EvenOdd, paint, seq);
+                    fill(self, runs, rule);
                 }
-                self.stroke(path, props.transform, s, paint, seq);
+                // Over the fill, which a pattern may have made many of.
+                self.seq += 1;
+                let seq = self.seq;
+                if let Some(paint) = mean {
+                    self.stroke(path, props.transform, s, paint, seq);
+                }
             }
             DrawMode::Invisible => {}
         }
@@ -991,146 +1014,6 @@ impl<'a> Device<'a> for Collect {
             self.groups.pop();
         }
     }
-}
-
-/// The device a page's pictures are painted on: its raster images and stencil masks, each pixel the image's nearest, inside
-/// the box round each clipping path, on nothing; what it fills and strokes, and its text, are left to its lines.
-struct Pictures {
-    w: u32,
-    h: u32,
-    rgba: Vec<u8>,
-    /// The boxes what's painted is clipped to, px: the page's, then each clipping path's within the one before.
-    clips: Vec<Rect>,
-    /// The pictures painted.
-    drawn: usize,
-    /// The pixels painted so far, held to [`MAX_PAINTED`].
-    painted: u64,
-    /// The box of pixels painted, x0 y0 x1 y1 (the last two past it).
-    covered: Option<[u32; 4]>,
-}
-
-impl Pictures {
-    /// Paints an image of `dw` by `dh` pixels placed by `t` (its pixels to the page's): each of the page's pixels it covers
-    /// takes `color(x, y)` of its nearest, an RGB and an opacity.
-    fn paint(&mut self, t: Affine, dw: u32, dh: u32, color: impl Fn(u32, u32) -> ([u8; 3], u8)) {
-        if dw == 0 || dh == 0 || t.determinant().abs() < 1e-12 || !t.determinant().is_finite() {
-            return;
-        }
-        let clip = self.clips.last().copied().unwrap_or(Rect::ZERO);
-        let b = t.transform_rect_bbox(Rect::new(0.0, 0.0, f64::from(dw), f64::from(dh)));
-        let (x0, y0) = (b.x0.max(clip.x0).max(0.0).floor(), b.y0.max(clip.y0).max(0.0).floor());
-        let (x1, y1) = (b.x1.min(clip.x1).min(f64::from(self.w)).ceil(), b.y1.min(clip.y1).min(f64::from(self.h)).ceil());
-        if !(x0 < x1 && y0 < y1) {
-            return;
-        }
-        let area = (x1 - x0) * (y1 - y0);
-        if self.painted as f64 + area > MAX_PAINTED as f64 {
-            return;
-        }
-        self.painted += area as u64;
-        self.drawn += 1;
-        let (bx0, by0, bx1, by1) = (x0 as u32, y0 as u32, x1 as u32, y1 as u32);
-        self.covered = Some(match self.covered {
-            None => [bx0, by0, bx1, by1],
-            Some([a, b, c, d]) => [a.min(bx0), b.min(by0), c.max(bx1), d.max(by1)],
-        });
-        let back = t.inverse();
-        for y in y0 as u32..y1 as u32 {
-            for x in x0 as u32..x1 as u32 {
-                let q = back * Point::new(f64::from(x) + 0.5, f64::from(y) + 0.5);
-                if !(q.x >= 0.0 && q.y >= 0.0 && q.x < f64::from(dw) && q.y < f64::from(dh)) {
-                    continue;
-                }
-                let (c, a) = color(q.x as u32, q.y as u32);
-                let i = (y as usize * self.w as usize + x as usize) * 4;
-                if let Some(px) = self.rgba.get_mut(i..i + 4) {
-                    // Over what is there, straight alpha.
-                    let (a, under) = (u32::from(a), u32::from(px[3]));
-                    let out = a * 255 + under * (255 - a);
-                    for k in 0..3 {
-                        let v = u32::from(c[k]) * a * 255 + u32::from(px[k]) * under * (255 - a);
-                        px[k] = v.checked_div(out).unwrap_or(0) as u8;
-                    }
-                    px[3] = (out / 255) as u8;
-                }
-            }
-        }
-    }
-}
-
-/// The opacity of pixel (`x`, `y`) of an image of `w` by `h` pixels, from its mask, which may be of another size.
-fn alpha_at(alpha: Option<&LumaData>, w: u32, h: u32, x: u32, y: u32) -> u8 {
-    let Some(a) = alpha else { return 255 };
-    let (ax, ay) = (u64::from(x) * u64::from(a.width) / u64::from(w.max(1)), u64::from(y) * u64::from(a.height) / u64::from(h.max(1)));
-    a.data.get((ay * u64::from(a.width) + ax) as usize).copied().unwrap_or(255)
-}
-
-impl<'a> Device<'a> for Pictures {
-    fn draw_path(&mut self, _: &BezPath, _: DrawProps<'a>, _: &DrawMode) {}
-
-    fn push_clip_path(&mut self, clip: &ClipPath) {
-        let b = clip.path.control_box();
-        let now = self.clips.last().copied().unwrap_or(Rect::ZERO);
-        let inner = Rect::new(b.x0.max(now.x0), b.y0.max(now.y0), b.x1.min(now.x1), b.y1.min(now.y1));
-        let shows = inner.x0 <= inner.x1 && inner.y0 <= inner.y1 && inner.x0.is_finite() && inner.y1.is_finite();
-        self.clips.push(if shows { inner } else { Rect::ZERO });
-    }
-
-    fn push_transparency_group(&mut self, _: f32, _: Option<SoftMask<'a>>, _: BlendMode) {}
-
-    fn draw_glyph_run(&mut self, _: &GlyphRun<'_, 'a>, _: DrawProps<'a>, _: &DrawMode) {}
-
-    fn draw_image(&mut self, image: Image<'a, '_>, props: ImageDrawProps<'a>) {
-        // About the size it shows at, so a huge picture is decoded no finer than it is painted.
-        let t = props.transform;
-        let along = |v: Point| (t * v - t * Point::ORIGIN).hypot();
-        let (iw, ih) = (f64::from(image.width()), f64::from(image.height()));
-        let target = (
-            (along(Point::new(1.0, 0.0)) * iw).ceil().clamp(1.0, 65_535.0) as u32,
-            (along(Point::new(0.0, 1.0)) * ih).ceil().clamp(1.0, 65_535.0) as u32,
-        );
-        match image {
-            Image::Raster(r) => r.with_rgba(
-                |data, alpha| {
-                    let (sx, sy) = data.scale_factors();
-                    let placed = t * Affine::scale_non_uniform(f64::from(sx), f64::from(sy));
-                    let (w, h) = (data.width(), data.height());
-                    match &data {
-                        ImageData::Rgb(d) => self.paint(placed, w, h, |x, y| {
-                            let i = (y as usize * w as usize + x as usize) * 3;
-                            let c = d.data.get(i..i + 3).map_or([255; 3], |p| [p[0], p[1], p[2]]);
-                            (c, alpha_at(alpha.as_ref(), w, h, x, y))
-                        }),
-                        ImageData::Luma(d) => self.paint(placed, w, h, |x, y| {
-                            let v = d.data.get(y as usize * w as usize + x as usize).copied().unwrap_or(255);
-                            ([v; 3], alpha_at(alpha.as_ref(), w, h, x, y))
-                        }),
-                    }
-                },
-                Some(target),
-            ),
-            Image::Stencil(st) => st.with_stencil(
-                |mask, paint| {
-                    let color = paint::rgba(paint, [0.0; 4]).map_or([0, 0, 0], |(c, _)| c);
-                    let (sx, sy) = mask.scale_factors;
-                    let placed = t * Affine::scale_non_uniform(f64::from(sx), f64::from(sy));
-                    let w = mask.width;
-                    self.paint(placed, w, mask.height, |x, y| {
-                        (color, mask.data.get(y as usize * w as usize + x as usize).copied().unwrap_or(0))
-                    });
-                },
-                Some(target),
-            ),
-        }
-    }
-
-    fn pop_clip(&mut self) {
-        if self.clips.len() > 1 {
-            self.clips.pop();
-        }
-    }
-
-    fn pop_transparency_group(&mut self) {}
 }
 
 /// The colours a page's lines are named by when it has no layers of its own: the plain names of a few, the nearest taken.

@@ -1,8 +1,9 @@
 //! A PDF's page drawn from its lines as the PDF draws it, through the commands every front end drives: fills keep their holes
 //! by either rule, see-through paint stays see-through, a clip of any shape cuts what it clips, a form's own layer holds what
-//! it draws, a page's white ground is no page, gradients and patterns fill in their colours, a dash-dot keeps its dots, text
-//! keeps its squeeze, its spaces and its mirror, a line keeps its width however the page stretches it, and a purged page
-//! leaves nothing behind for an older build to stumble on. Each was seen failing before its fix.
+//! it draws, a page's white ground is no page, gradients and patterns are drawn as the PDF renderer paints them, a picture is
+//! cut to its clip and as see-through as the page makes it, a dash-dot keeps its dots, text keeps its squeeze, its spaces and
+//! its mirror, a line keeps its width however the page stretches it, and a purged page leaves nothing behind for an older
+//! build to stumble on. Each was seen failing before its fix.
 
 use serde_json::{Value, json};
 
@@ -152,23 +153,131 @@ fn a_pages_white_ground_is_no_page() {
     assert_eq!(r["layers"], json!(["Black 0.71"]), "{r}");
 }
 
-#[test]
-fn a_gradient_and_a_pattern_fill_in_their_colours() {
-    // An axial gradient from red to blue over the left half; a red square on half of each cell of a pattern on the right.
-    let content = "q 10 50 80 100 re W n /Sh0 sh Q /Pattern cs /P0 scn 110 50 80 100 re f";
-    let resources = "/Shading << /Sh0 << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [10 0 90 0] /Extend [true true] /Function << \
-                     /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> >> /Pattern << /P0 5 0 R >>";
-    let cell = "1 0 0 rg 0 0 10 5 re f";
-    let pattern = format!(
-        "<< /Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 10 10] /XStep 10 /YStep 10 /Resources << >> /Length {} >>\nstream\n{cell}\nendstream",
+/// The page as the PDF renderer itself paints it, at the plan's own scale (5 px a mm of paper: 127 dpi), its pixel at page point
+/// (`x`, `y`), RGB: what the page drawn from its lines is held to.
+fn reference(bytes: &[u8]) -> impl Fn(f64, f64) -> [u8; 3] {
+    let doc = crate::raster::pdf::Document::open(bytes.to_vec()).unwrap();
+    let (w, h, rgba) = doc.render(1, 127.0).unwrap();
+    move |x: f64, y: f64| {
+        let (i, j) = ((x * 127.0 / 72.0).floor() as u32, ((200.0 - y) * 127.0 / 72.0).floor() as u32);
+        let k = ((j.min(h - 1) * w + i.min(w - 1)) * 4) as usize;
+        [rgba[k], rgba[k + 1], rgba[k + 2]]
+    }
+}
+
+/// The mean difference, each channel 0 to 255, between the plan and the reference over page box `b` (x0 y0 x1 y1, points),
+/// each compared as the mean of the pixels within half a point of it, so a line's edge a pixel over is no difference; and how
+/// many distinct colours the plan shows there, to a step of 16.
+fn compared(p: &tiny_skia::Pixmap, want: &dyn Fn(f64, f64) -> [u8; 3], b: [f64; 4]) -> (f64, usize) {
+    let mean = |f: &dyn Fn(f64, f64) -> [u8; 3], x: f64, y: f64| -> [f64; 3] {
+        let mut sum = [0.0; 3];
+        for (dx, dy) in [(-0.5, -0.5), (0.5, -0.5), (-0.5, 0.5), (0.5, 0.5), (0.0, 0.0)] {
+            let c = f(x + dx, y + dy);
+            (0..3).for_each(|k| sum[k] += f64::from(c[k]) / 5.0);
+        }
+        sum
+    };
+    let (mut total, mut n) = (0.0, 0.0);
+    let mut seen = std::collections::BTreeSet::new();
+    let mut y = b[1];
+    while y <= b[3] {
+        let mut x = b[0];
+        while x <= b[2] {
+            let (a, z) = (mean(&|x, y| px(p, x, y), x, y), mean(want, x, y));
+            total += (0..3).map(|k| (a[k] - z[k]).abs()).sum::<f64>() / 3.0;
+            n += 1.0;
+            let c = px(p, x, y);
+            seen.insert(c.map(|v| v / 16));
+            x += 1.0;
+        }
+        y += 1.0;
+    }
+    (total / n, seen.len())
+}
+
+/// How alike the plan and the reference are over page box `b` (points): the correlation of their lightness, sampled every half
+/// point, 1 the same picture however heavy its lines, 0 nothing alike (a flat tint, or the pattern laid out of step).
+fn alike(p: &tiny_skia::Pixmap, want: &dyn Fn(f64, f64) -> [u8; 3], b: [f64; 4]) -> f64 {
+    let light = |c: [u8; 3]| c.iter().map(|v| f64::from(*v)).sum::<f64>() / 3.0;
+    let mut pairs = Vec::new();
+    let mut y = b[1];
+    while y <= b[3] {
+        let mut x = b[0];
+        while x <= b[2] {
+            pairs.push((light(px(p, x, y)), light(want(x, y))));
+            x += 0.5;
+        }
+        y += 0.5;
+    }
+    let n = pairs.len() as f64;
+    let (ma, mb) = (pairs.iter().map(|q| q.0).sum::<f64>() / n, pairs.iter().map(|q| q.1).sum::<f64>() / n);
+    let (mut ab, mut aa, mut bb) = (0.0, 0.0, 0.0);
+    for (a, b) in pairs {
+        (ab, aa, bb) = (ab + (a - ma) * (b - mb), aa + (a - ma).powi(2), bb + (b - mb).powi(2));
+    }
+    ab / (aa * bb).sqrt().max(1e-9)
+}
+
+/// A tiling pattern object: its cell's content, `w` by `h` points a step.
+fn tiling(cell: &str, w: f64, h: f64) -> String {
+    format!(
+        "<< /Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 {w} {h}] /XStep {w} /YStep {h} /Resources << >> \
+         /Length {} >>\nstream\n{cell}\nendstream",
         cell.len()
+    )
+}
+
+#[test]
+fn a_brick_and_an_insulation_hatch_are_drawn_as_their_cells_repeated_and_cut_to_what_they_fill() {
+    // Brick in running bond (12 by 6 points, its mortar lines 1 point) in a wall 160 by 50; a batt of insulation (a zigzag
+    // 8 points a step) in a slanted strip, which cuts it.
+    let brick = tiling(
+        "0 0 0 RG 1 w 0 0.5 m 12 0.5 l S 0 3.5 m 12 3.5 l S 0.5 0.5 m 0.5 3.5 l S 6.5 3.5 m 6.5 6 l S 6.5 0 m 6.5 0.5 l S",
+        12.0,
+        6.0,
     );
-    let (s, _) = imported(pdf(content, resources, "", &[&pattern]));
+    let batt = tiling("0 0 0 RG 1 w 0 1 m 4 9 l 8 1 l S", 8.0, 10.0);
+    let content = "/Pattern cs /P0 scn 20 120 160 50 re f /Pattern cs /P1 scn 20 20 m 180 40 l 180 90 l 20 70 l h f";
+    let bytes = pdf(content, "/Pattern << /P0 5 0 R /P1 6 0 R >>", "", &[&brick, &batt]);
+    let (mut s, r) = imported(bytes.clone());
     let p = plan(&s);
-    let g = px(&p, 50.0, 100.0);
-    assert!(g[0] > 80 && g[2] > 80 && g[1] < 60, "the gradient's middle is between red and blue: {g:?}");
-    let t = px(&p, 150.0, 100.0);
-    assert!(t[0] > 230 && t[1] > 90 && t[1] < 170 && (i32::from(t[1]) - i32::from(t[2])).abs() < 20, "half red is pink: {t:?}");
+    let want = reference(&bytes);
+    for (what, b) in [("brick", [22.0, 122.0, 178.0, 168.0]), ("insulation", [22.0, 45.0, 178.0, 65.0])] {
+        // Laid out as the renderer lays it: its lines where the renderer's are (a line drawn a little heavier is no matter).
+        let r = alike(&p, &want, b);
+        assert!(r > 0.6, "the {what} is drawn as the renderer paints it: correlated by {r:.2}");
+        let (_, colours) = compared(&p, &want, b);
+        assert!(colours >= 3, "the {what} is lines on white, not a tint: {colours} colours");
+    }
+    // Outside what they fill, nothing: the batt is cut to its slanted strip.
+    assert!(white(px(&p, 100.0, 100.0)) && white(px(&p, 25.0, 85.0)), "{:?}", px(&p, 25.0, 85.0));
+    // The bricks' mortar is lines of the drawing, on its layer, to snap to.
+    let read = run(&mut s, "cad_read", json!({"id": r["id"], "kinds": ["polyline"]}));
+    assert!(read["total"].as_u64().unwrap() > 100, "{}", read["total"]);
+}
+
+#[test]
+fn a_gradient_is_drawn_as_a_gradient_axial_or_radial() {
+    // An axial gradient from red to blue over the left half, extended; a radial one from white at the middle to green at
+    // 40 points on the right, cut to a square.
+    let content = "q 10 50 80 100 re W n /Sh0 sh Q q 105 55 90 90 re W n /Sh1 sh Q";
+    let resources = "/Shading << /Sh0 << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [10 0 90 0] /Extend [true true] /Function << \
+                     /FunctionType 2 /Domain [0 1] /C0 [1 0 0] /C1 [0 0 1] /N 1 >> >> \
+                     /Sh1 << /ShadingType 3 /ColorSpace /DeviceRGB /Coords [150 100 0 150 100 40] /Extend [false true] /Function << \
+                     /FunctionType 2 /Domain [0 1] /C0 [1 1 1] /C1 [0 0.6 0] /N 1 >> >> >>";
+    let bytes = pdf(content, resources, "", &[]);
+    let (s, _) = imported(bytes.clone());
+    let p = plan(&s);
+    let want = reference(&bytes);
+    for (what, b) in [("axial", [12.0, 52.0, 88.0, 148.0]), ("radial", [107.0, 57.0, 193.0, 143.0])] {
+        let (diff, colours) = compared(&p, &want, b);
+        assert!(diff < 6.0, "the {what} gradient is drawn as the renderer paints it: a mean difference of {diff:.1}");
+        assert!(colours >= 8, "the {what} gradient goes from one colour to the other, not one flat colour: {colours}");
+    }
+    // Smooth: along the axial one, each pixel moves by little from the one before.
+    let row: Vec<[u8; 3]> = (0..140).map(|i| px(&p, 15.0 + i as f64 * 0.5, 100.0)).collect();
+    let jump = row.windows(2).map(|w| (0..3).map(|k| (i32::from(w[0][k]) - i32::from(w[1][k])).abs()).max().unwrap_or(0)).max();
+    assert!(jump.unwrap_or(0) <= 12, "no band shows: a step of {jump:?}");
 }
 
 /// The lengths of the dark runs along row `y` (page points) of the plan, from page x `from` to `to`, px.
@@ -282,4 +391,47 @@ fn a_purged_page_leaves_no_layers_for_an_older_build_to_trip_on() {
     m.image_types.clear();
     let v: Value = serde_json::from_str(&m.to_json().unwrap()).unwrap();
     assert_eq!(v["format"], crate::model::FORMAT, "pdf_layers is this build's");
+}
+
+#[test]
+fn a_picture_is_cut_to_a_clip_of_any_shape_and_as_see_through_as_the_page_makes_it() {
+    // A black picture 160 points a side three times over, each over the line along the top that makes the page one drawn from
+    // its lines: in a triangle; at half its opacity; and under a soft mask that lets its left half through.
+    let image = "BI /W 2 /H 2 /CS /RGB /BPC 8 /F /AHx ID 000000000000000000000000> EI";
+    let line = "0 0 0 RG 1 w 10 195 m 190 195 l S";
+    let resources = "/ExtGState << /GS0 << /Type /ExtGState /ca 0.5 >> /GS1 << /Type /ExtGState /SMask << /S /Luminosity /G 5 0 R >> >> >>";
+    let mask = "1 1 1 rg 0 0 100 200 re f";
+    let form = format!(
+        "<< /Type /XObject /Subtype /Form /BBox [0 0 200 200] /Group << /S /Transparency /CS /DeviceRGB >> /Length {} >>\nstream\n{mask}\nendstream",
+        mask.len()
+    );
+    let page = |content: String| pdf(&content, resources, "", &[&form]);
+    let placed = format!("q 160 0 0 160 20 20 cm {image} Q");
+    for (what, content) in [
+        ("triangle", format!("{line} q 20 20 m 180 20 l 20 180 l h W n {placed} Q")),
+        ("half", format!("{line} q /GS0 gs {placed} Q")),
+        ("masked", format!("{line} q /GS1 gs {placed} Q")),
+    ] {
+        let bytes = page(content);
+        let (s, r) = imported(bytes.clone());
+        assert!(r["layers"].as_array().is_some_and(|l| !l.is_empty()), "{what}: drawn from its lines: {r}");
+        let p = plan(&s);
+        let want = reference(&bytes);
+        let (diff, _) = compared(&p, &want, [22.0, 22.0, 178.0, 178.0]);
+        assert!(diff < 8.0, "{what}: the picture shows as the renderer paints it: a mean difference of {diff:.1}");
+        match what {
+            "triangle" => {
+                assert!(dark(px(&p, 40.0, 40.0)), "inside the triangle");
+                assert!(white(px(&p, 160.0, 160.0)), "outside it, in the picture's box: {:?}", px(&p, 160.0, 160.0));
+            }
+            "half" => {
+                let g = px(&p, 100.0, 100.0);
+                assert!(g.iter().all(|v| (110..=145).contains(v)), "half of black over white is grey: {g:?}");
+            }
+            _ => {
+                assert!(dark(px(&p, 60.0, 100.0)), "the mask lets the left half through");
+                assert!(white(px(&p, 140.0, 100.0)), "and not the right: {:?}", px(&p, 140.0, 100.0));
+            }
+        }
+    }
 }

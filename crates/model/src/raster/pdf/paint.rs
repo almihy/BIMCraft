@@ -1,7 +1,8 @@
-//! What a page paints with, as a drawing can fill: a colour and how opaque it is. A colour is itself; a gradient (a shading)
-//! is the mean of its colours over what it fills, sampled; a tiling pattern (a hatch, a brick, insulation) is the mean of the
-//! colours its cell paints, as opaque as the share of the cell they cover. A drawing has no gradient or pattern fill of its
-//! own, and a mean colour is what the page shows at a glance; the lines of a pattern are not the drawing's lines.
+//! What a page paints with, as one colour: a colour and how opaque it is. A colour is itself; a gradient (a shading) is the
+//! mean of its colours over what it fills, sampled; a tiling pattern (a hatch, a brick, insulation) is the mean of the colours
+//! its cell paints, as opaque as the share of the cell they cover. A fill is kept as its pattern paints it
+//! ([`super::patterns`]); a mean is for what that can't be: a stroke or text painted with a pattern, a pattern past what one
+//! fill may make or nested too deep, and a soft mask's gradients.
 
 use hayro::hayro_interpret::font::GlyphRun;
 use hayro::hayro_interpret::pattern::{Pattern, ShadingPattern, TilingPattern};
