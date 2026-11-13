@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use bimcraft_core::engine::Session;
 use bimcraft_core::family::{
-    Align as LabelAlign, Category, Circle, Connector, Curve, Expr, Family, Form, IfcClass, Kind as Holds, Label, Levels, Parameter, Plane, Show,
-    Symbol,
+    Align as LabelAlign, Category, Circle, Connector, Curve, Expr, Family, Form, IfcClass, Kind as Holds, Label, Levels, Parameter, Plane,
+    Show, Symbol,
 };
 use bimcraft_core::model::{Model, Operation};
 use bimcraft_core::view3d::{AZIMUTH, ELEVATION, Scene};
@@ -812,7 +812,9 @@ fn types_tab(ed: &mut FamilyEditor, ui: &mut Ui, materials: &[String]) {
 fn visibility_row(ui: &mut Ui, n: usize) -> bool {
     ui.label(t("Visibility/Graphics Overrides"));
     let r = ui.add_sized([200.0, ui.spacing().interact_size.y], egui::Button::new(t("Edit…")));
-    r.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, format!("{} {n}", tf("Edit {}", &[t("Visibility/Graphics Overrides")]))));
+    r.widget_info(|| {
+        WidgetInfo::labeled(WidgetType::Button, true, format!("{} {n}", tf("Edit {}", &[t("Visibility/Graphics Overrides")])))
+    });
     ui.end_row();
     r.clicked()
 }
@@ -821,80 +823,84 @@ fn visibility_row(ui: &mut Ui, n: usize) -> bool {
 fn form_fields(ui: &mut Ui, f: &mut FormText, i: usize, options: &[String]) -> bool {
     let n = i + 1;
     let planes = [(Plane::Xy, msg!("Plane XY")), (Plane::Xz, msg!("Plane XZ")), (Plane::Yz, msg!("Plane YZ"))];
-    Grid::new(("fe-form-grid", i)).num_columns(2).spacing(vec2(12.0, 5.0)).show(ui, |ui| {
-        if f.mesh() {
-            ui.label(t("Mesh"));
-            ui.label(RichText::new(tf("{} triangles, from a file", &[&f.original.mesh.len().to_string()])).color(pal().muted));
-            ui.end_row();
-        } else {
-            ui.label(t("Plane"));
-            crate::icons::combo(("fe-plane", i))
-                .selected_text(t(planes.iter().find(|(p, _)| *p == f.plane).map_or("Plane XY", |(_, l)| l)))
-                .width(110.0)
-                .show_ui(ui, |ui| {
-                    for (p, label) in planes {
-                        ui.selectable_value(&mut f.plane, p, t(label));
-                    }
-                });
-            ui.end_row();
-            ui.label(t("Shape"));
-            crate::icons::combo(("fe-shape", i))
-                .selected_text(if f.shape == Shape::Profile { t("Profile") } else { t("Circle") })
-                .width(110.0)
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut f.shape, Shape::Profile, t("Profile"));
-                    ui.selectable_value(&mut f.shape, Shape::Circle, t("Circle"));
-                });
-            ui.end_row();
-            if f.shape == Shape::Profile {
-                ui.label(t("Corners"));
-                let r = ui.add(TextEdit::multiline(&mut f.profile).desired_rows(4).desired_width(300.0).id_salt(("fe-profile", i)));
-                r.widget_info(|| WidgetInfo::labeled(WidgetType::TextEdit, true, format!("{} {n}", t("Form Corners"))));
+    Grid::new(("fe-form-grid", i))
+        .num_columns(2)
+        .spacing(vec2(12.0, 5.0))
+        .show(ui, |ui| {
+            if f.mesh() {
+                ui.label(t("Mesh"));
+                ui.label(RichText::new(tf("{} triangles, from a file", &[&f.original.mesh.len().to_string()])).color(pal().muted));
+                ui.end_row();
             } else {
-                ui.label(t("Circle centre and radius"));
-                ui.horizontal(|ui| {
-                    for (k, what) in [msg!("Form Circle X"), msg!("Form Circle Y"), msg!("Form Circle Radius")].into_iter().enumerate() {
-                        field(ui, format!("{} {n}", t(what)), &mut f.circle[k], 80.0);
-                    }
-                });
-            }
-            ui.end_row();
-            ui.label(t("Revolve"));
-            ui.checkbox(&mut f.revolve, t("turned about an axis"));
-            ui.end_row();
-            if f.revolve {
-                ui.label(t("Axis"));
-                ui.horizontal(|ui| {
-                    for (k, what) in
-                        [msg!("Form Axis X1"), msg!("Form Axis Y1"), msg!("Form Axis X2"), msg!("Form Axis Y2")].into_iter().enumerate()
-                    {
-                        field(ui, format!("{} {n}", t(what)), &mut f.axis[k], 60.0);
-                    }
-                });
+                ui.label(t("Plane"));
+                crate::icons::combo(("fe-plane", i))
+                    .selected_text(t(planes.iter().find(|(p, _)| *p == f.plane).map_or("Plane XY", |(_, l)| l)))
+                    .width(110.0)
+                    .show_ui(ui, |ui| {
+                        for (p, label) in planes {
+                            ui.selectable_value(&mut f.plane, p, t(label));
+                        }
+                    });
+                ui.end_row();
+                ui.label(t("Shape"));
+                crate::icons::combo(("fe-shape", i))
+                    .selected_text(if f.shape == Shape::Profile { t("Profile") } else { t("Circle") })
+                    .width(110.0)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut f.shape, Shape::Profile, t("Profile"));
+                        ui.selectable_value(&mut f.shape, Shape::Circle, t("Circle"));
+                    });
+                ui.end_row();
+                if f.shape == Shape::Profile {
+                    ui.label(t("Corners"));
+                    let r = ui.add(TextEdit::multiline(&mut f.profile).desired_rows(4).desired_width(300.0).id_salt(("fe-profile", i)));
+                    r.widget_info(|| WidgetInfo::labeled(WidgetType::TextEdit, true, format!("{} {n}", t("Form Corners"))));
+                } else {
+                    ui.label(t("Circle centre and radius"));
+                    ui.horizontal(|ui| {
+                        for (k, what) in [msg!("Form Circle X"), msg!("Form Circle Y"), msg!("Form Circle Radius")].into_iter().enumerate()
+                        {
+                            field(ui, format!("{} {n}", t(what)), &mut f.circle[k], 80.0);
+                        }
+                    });
+                }
+                ui.end_row();
+                ui.label(t("Revolve"));
+                ui.checkbox(&mut f.revolve, t("turned about an axis"));
+                ui.end_row();
+                if f.revolve {
+                    ui.label(t("Axis"));
+                    ui.horizontal(|ui| {
+                        for (k, what) in
+                            [msg!("Form Axis X1"), msg!("Form Axis Y1"), msg!("Form Axis X2"), msg!("Form Axis Y2")].into_iter().enumerate()
+                        {
+                            field(ui, format!("{} {n}", t(what)), &mut f.axis[k], 60.0);
+                        }
+                    });
+                    ui.end_row();
+                }
+                ui.label(if f.revolve { t("From (degrees)") } else { t("From") });
+                field(ui, format!("{} {n}", t("Form From")), &mut f.from, 200.0);
+                ui.end_row();
+                ui.label(if f.revolve { t("To (degrees)") } else { t("To") });
+                field(ui, format!("{} {n}", t("Form To")), &mut f.to, 200.0);
                 ui.end_row();
             }
-            ui.label(if f.revolve { t("From (degrees)") } else { t("From") });
-            field(ui, format!("{} {n}", t("Form From")), &mut f.from, 200.0);
+            ui.label(t("Material"));
+            if let Some(m) = pick(ui, format!("{} {n}", t("Form Material")), &f.material, options) {
+                f.material = m;
+            }
             ui.end_row();
-            ui.label(if f.revolve { t("To (degrees)") } else { t("To") });
-            field(ui, format!("{} {n}", t("Form To")), &mut f.to, 200.0);
+            ui.label(t("Visible when"));
+            field(ui, format!("{} {n}", t("Form Visible")), &mut f.visible, 200.0);
             ui.end_row();
-        }
-        ui.label(t("Material"));
-        if let Some(m) = pick(ui, format!("{} {n}", t("Form Material")), &f.material, options) {
-            f.material = m;
-        }
-        ui.end_row();
-        ui.label(t("Visible when"));
-        field(ui, format!("{} {n}", t("Form Visible")), &mut f.visible, 200.0);
-        ui.end_row();
-        ui.label(t("Void"));
-        let r = ui.checkbox(&mut f.void, t("cuts the forms listed above it"));
-        r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, f.void, format!("{} {n}", t("Form Void"))));
-        ui.end_row();
-        visibility_row(ui, n)
-    })
-    .inner
+            ui.label(t("Void"));
+            let r = ui.checkbox(&mut f.void, t("cuts the forms listed above it"));
+            r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, f.void, format!("{} {n}", t("Form Void"))));
+            ui.end_row();
+            visibility_row(ui, n)
+        })
+        .inner
 }
 
 fn forms_tab(ed: &mut FamilyEditor, ui: &mut Ui, materials: &[String]) {

@@ -6174,8 +6174,10 @@ fn the_family_editor_sets_a_forms_and_a_symbols_visibility_settings_as_revits_di
     let ticked = |h: &Harness<BimApp>, name: &str| {
         h.get_by_role_and_label(Role::CheckBox, name).accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
     };
-    let mut h = app(&format!("{BOX}
-door {{\"at\": [2000, 0], \"family\": \"Single Door\", \"type\": \"900 x 2100\"}}"));
+    let mut h = app(&format!(
+        "{BOX}
+door {{\"at\": [2000, 0], \"family\": \"Single Door\", \"type\": \"900 x 2100\"}}"
+    ));
     let door = find(&h, |e| matches!(e, Element::Door(_)));
     h.state_mut().selection = vec![door];
     h.set_size(vec2(1800.0, 900.0));
@@ -6207,7 +6209,11 @@ door {{\"at\": [2000, 0], \"family\": \"Single Door\", \"type\": \"900 x 2100\"}
     // Ticked and OK'd, then applied: a plan draws it, and the plan draws the leaf shut in the wall.
     let shut = |h: &Harness<BimApp>| {
         let d = bimcraft_core::render::plan(&h.state().session.model, 100000, 4000, 3000);
-        d.prims.iter().zip(&d.owners).filter(|(p, o)| **o == Some(door) && matches!(p, bimcraft_core::prim::Prim::Line { closed: true, .. })).count()
+        d.prims
+            .iter()
+            .zip(&d.owners)
+            .filter(|(p, o)| **o == Some(door) && matches!(p, bimcraft_core::prim::Prim::Line { closed: true, .. }))
+            .count()
     };
     let before = shut(&h);
     h.get_by_label(&format!("Edit Visibility/Graphics Overrides {n}")).click_accesskit();
