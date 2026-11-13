@@ -647,13 +647,18 @@ impl Reader<'_> {
     /// A symbolic line's curves as symbols in its view; a model line's in each of plan, front and side its Visibility
     /// Settings draw it in (Revit draws a model line in every view that sees it, seen flat in that view).
     fn lines(&self, def: &Value) -> Result<Vec<Symbol>, String> {
-        // A line drawn in Revit's invisible style draws nothing.
-        if def["invisible"].as_bool() == Some(true) {
+        // A line drawn in Revit's invisible style draws nothing, in any view.
+        if def["invisible"].as_bool() == Some(true) || def["subcategory"].as_str() == Some("<Invisible lines>") {
             return Ok(Vec::new());
         }
         // A masking region's edge is drawn as its Visibility Settings say, as a line's.
         let show = def.get("show").and_then(|s| serde_json::from_value::<Show>(s.clone()).ok());
-        let views = match def["view"].as_str().unwrap_or("plan") {
+        // One the exporter called a plan's but that stands in the family's yz or xz plane is a side's or a front's.
+        let view = match def["view"].as_str().unwrap_or("plan") {
+            "plan" => self.stands_in(def).unwrap_or("plan"),
+            v => v,
+        };
+        let views = match view {
             "plan" => vec![SymbolView::Plan],
             "front" => vec![SymbolView::Front],
             "side" => vec![SymbolView::Side],
@@ -671,6 +676,32 @@ impl Reader<'_> {
             out.extend(self.lines_in(def, view, show)?);
         }
         Ok(out)
+    }
+
+    /// The view a line drawn as a plan's is really in, where all its points (the ends of its curves, in the first type) share
+    /// their x (`side`) or their y (`front`) while their z varies: a region drawn on a plane standing in the family, which a
+    /// plan would draw as a stroke across it. None where it lies flat or isn't on such a plane.
+    fn stands_in(&self, def: &Value) -> Option<&'static str> {
+        let curves = def["curves"].as_array().filter(|c| !c.is_empty() && c.len() <= MOST)?;
+        let mut points = Vec::new();
+        for c in curves {
+            let bit = self.curve(c).ok()?;
+            points.push(self.at(&bit.start).ok()?);
+            points.push(self.at(&bit.end).ok()?);
+        }
+        let spread = |k: usize| {
+            let (lo, hi) = points.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p[k]), hi.max(p[k])));
+            hi - lo
+        };
+        if spread(2) <= 1.0 {
+            None
+        } else if spread(0) <= 0.05 {
+            Some("side")
+        } else if spread(1) <= 0.05 {
+            Some("front")
+        } else {
+            None
+        }
     }
 
     /// A line's curves as symbols in `view`.
