@@ -161,18 +161,31 @@ entity, as before.
   nothing changes. A band is made the first time a view needs it (`Cad::lod_band`, half a second for a sheet of 400 000
   entities) and kept, as `Cad::entities_in`'s grid is.
 - **Marks, layer by layer.** In a band, each layer's entities no more than 16 cells across and inside its grid lay ink in the
-  cells they cross: a line its length in each (walked cell by cell), a run's round ends a dot, a fill its area (a pattern's
-  pale), a text a share of its box. Each cell of each layer is one mark of 4 bytes: where along its row, the ink (a byte,
-  logarithmic), and the colour most of it is in (one of up to 255 the drawing names, the view's ink among them). A bigger
-  entity, or one past the bulk, is in the band's `big` list and drawn as itself, so long lines and a sheet's frame stay crisp.
-- **The picture.** What a view draws of a band is its `Picture`: the marks of the layers the import and the view show, in
-  their colours as the view draws them (`ImportLook`'s colour and halftone by layer, the import's Colors), summed cell by cell.
-  It is made when the view's look is new (a layer hidden, an override) and the last two are kept (`Lod::picture`), so a
-  frame that changes nothing but the zoom only spreads its cells over the pixels: each cell's ink a pixel-wide line through it,
-  spread over the four pixels round its middle, each pixel as opaque as strokes laid at random would cover it
-  (`1 - e^-ink`). The result is one `Prim::Image` of `Part::Cells`: the view's overrides colour and halftone it as they do lines
-  (`Look::dress`), and the canvas lightens it on a dark canvas as it does lines (`canvas::cells_seen`). Pens are drawn a pixel
-  wide, as the finest pens are on a screen zoomed out; a pen or a line pattern of a layer's override doesn't reach the cells.
+  cells they cross: a line its length in each (walked cell by cell), a run's round ends a dot, a fill the share of each cell it
+  covers (a patterned hatch with no pattern held pale, one drawn with its pattern in its tint), a text a share of its box. Each
+  cell of each layer is one mark of 4 bytes: where along its row, the ink (a byte, logarithmic), and the colour most of it is
+  in (one of up to 255 the drawing names, each a fill's or a line's, the view's ink among them).
+- **The page's order.** A band is a few pictures and, between them, the big entities drawn themselves (`Band::steps`), so what
+  the page draws over a fill stays over it. A picture is runs of cells, each the small entities between two big fills, and those
+  big fills, filled into the picture at their place (`render::fill_into`, four rows of samples a pixel); a big line, text or
+  patterned hatch, or one past the bulk, is drawn itself (a sheet's frame and long walls stay crisp), after the picture that
+  holds what lies under it, and what is drawn over it goes in a later picture. Which picture each goes in is found on a coarse
+  grid of the drawing (64 cells a side, `lod::Order`; a line by the cells along it): an entity goes in the first picture after
+  every big one drawn itself before it that it may meet, up to eight pictures (`MOST_PICTURES`; past them, in the last).
+  Within a run, its lines lie over its fills. A frame whose big fills would cover more than 32 million pixels draws entity by
+  entity.
+- **The picture.** What a view draws of a band is its `Picture`: for each run, the marks of the layers the import and the view
+  show, in their colours as the view draws them, exactly as drawn whole (a layer's Lines colour on its lines and text only, its
+  fills in their own colours; halftone on both; the import's Colors), summed cell by cell, a fill's apart from a line's. It is
+  made when the view's look is new (a layer hidden, an override) and the last two are kept (`Lod::picture`), so a frame that
+  changes nothing but the zoom only spreads its cells over the pixels: each cell's ink spread over the four pixels round its
+  middle, a pixel as opaque as its fills cover it (straight, up to all of it, so a solid fill stays solid) and its lines over
+  them as opaque as strokes laid at random would cover it (`1 - e^-ink`, a line's ink being a pixel-wide line through the
+  cell). Each picture is one `Prim::Image` of `Part::Cells`, cut to what it inks: the view's overrides colour and halftone it as
+  they do lines (`Look::dress`), and the canvas lightens it on a dark canvas as it does lines (`canvas::cells_seen`). Pens are
+  drawn a pixel wide, as the finest pens are on a screen zoomed out; a pen or a line pattern of a layer's override doesn't
+  reach the cells. `render_tests` hold the two to agree: a red area under 30 000 lines and a white mask over them, and 20 000
+  small solid fills under lines with a Lines colour and halftone, zoomed out and drawn whole, in what they ink and its colour.
 - **Bounded.** A band holds no more than 8 million marks (32 MB), a drawing's bands 16 million among them (64 MB), and a
   picture 4 million cells (24 MB); what the small entities would lay is counted before a band is made, so one past it is let
   go at once. A band dropped draws every entity at its zoom, as before; the finest go first, as they hold the most.

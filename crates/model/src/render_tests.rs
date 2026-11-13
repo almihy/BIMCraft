@@ -116,3 +116,133 @@ fn a_dense_drawing_zoomed_out_on_a_screen_draws_its_cells_and_looks_as_it_does_d
     assert!(dense_drawn(&cad, &ci, near, true, None).prims.len() >= shown * 2 / 3, "{shown}");
     assert!(dense_drawn(&cad, &ci, view, false, None).prims.len() > 40_000);
 }
+
+/// An import of `cad` placed with its middle `middle` on the origin, as drawn.
+fn placed(middle: P2) -> crate::model::CadImport {
+    crate::model::CadImport {
+        cad: String::new(),
+        level: crate::ids::Guid::default(),
+        at: P2(0.0, 0.0),
+        origin: middle,
+        scale: 1.0,
+        stretch: 1.0,
+        angle: 0.0,
+        view: None,
+        hidden: Default::default(),
+        colors: Default::default(),
+    }
+}
+
+/// How many of the pixels `p` paints are what `is` says.
+fn count(p: &[u8], is: impl Fn(&[u8]) -> bool) -> usize {
+    p.chunks(4).filter(|c| is(c)).count()
+}
+
+/// The mean of each channel of the pixels `p` paints: its colour and how much of it is inked, taken together.
+fn mean(p: &[u8]) -> [f64; 3] {
+    let n = (p.len() / 4).max(1) as f64;
+    [0, 1, 2].map(|k| p.chunks(4).map(|c| f64::from(c[k])).sum::<f64>() / n)
+}
+
+/// Whether two drawings' means are within `levels` of each other in every channel.
+fn alike(a: &[u8], b: &[u8], levels: f64) -> bool {
+    mean(a).iter().zip(mean(b)).all(|(x, y)| (x - y).abs() < levels)
+}
+
+/// The verifier's sheet: a red fill 380 by 260 drawn first, 30 000 short black strokes over it, and a white mask over its
+/// left half drawn last, which hides what it covers.
+fn under_and_over() -> crate::dxf::Dxf {
+    use crate::cad::tests::{drawing, entity, random};
+    use crate::dxf::{Color, Shape};
+    let rect = |x0: f64, y0: f64, x1: f64, y1: f64| vec![vec![P2(x0, y0), P2(x1, y0), P2(x1, y1), P2(x0, y1)]];
+    let mut entities = vec![entity("Zones", Shape::Fill { rings: rect(20.0, 20.0, 400.0, 280.0), solid: true, tile: None })];
+    let mut seed = 1;
+    for _ in 0..30_000 {
+        let at = P2(30.0 + random(&mut seed) * 360.0, 30.0 + random(&mut seed) * 240.0);
+        let to = at + P2(random(&mut seed) * 4.0 - 2.0, random(&mut seed) * 4.0 - 2.0);
+        entities.push(crate::dxf::Entity { weight: Some(0.2), ..entity("Lines", Shape::Polyline { pts: vec![at, to], closed: false }) });
+    }
+    entities.push(entity("Mask", Shape::Fill { rings: rect(20.0, 20.0, 120.0, 280.0), solid: true, tile: None }));
+    drawing(&[("Zones", Color::True(255, 0, 0)), ("Lines", Color::Index(7)), ("Mask", Color::True(255, 255, 255))], entities)
+}
+
+#[test]
+fn zoomed_out_a_dense_drawing_keeps_the_pages_order_a_fill_under_its_lines_and_a_mask_over_them() {
+    let cad = crate::cad::Cad::of_drawing("zorder.pdf", under_and_over());
+    let ci = placed(P2(210.0, 150.0));
+    // Inked: a line over the red or the paper, darker than either.
+    let dark = |c: &[u8]| c[0] < 150 && c[1] < 100 && c[2] < 100;
+    let red = |c: &[u8]| c[0] > 180 && c[1] < 90 && c[2] < 90;
+    // Fitted (the sheet 380 px across) and three times as near, whole and from its level of detail.
+    for (scale, width) in [(1.0, 440), (3.0, 1300)] {
+        let view = View { scale, cx: 0.0, cy: 0.0, width, height: (width as f64 * 0.75) as u32 };
+        let (whole, cells) = (dense_drawn(&cad, &ci, view, false, None), dense_drawn(&cad, &ci, view, true, None));
+        assert!(cells.prims.len() * 20 < whole.prims.len(), "drawn from its cells: {} prims", cells.prims.len());
+        let (a, b) = (painted(&whole), painted(&cells));
+        // The lines show over the red as they do drawn whole.
+        let (da, db) = (count(&a, dark), count(&b, dark));
+        assert!(da > 1000 && db as f64 > da as f64 * 0.6 && (db as f64) < da as f64 * 1.6, "at {scale}: {db} dark pixels against {da}");
+        // As much red, and the same colour on the whole.
+        assert!(count(&a, red) > 10_000 && count(&b, red) > 10_000, "at {scale}");
+        assert!(alike(&a, &b, 10.0), "at {scale}: a mean of {:?} against {:?}", mean(&b), mean(&a));
+        // The mask, drawn last, hides the left of it either way: nothing dark, nothing red there.
+        let left = |p: &[u8]| -> usize {
+            let x = |i: usize| (i % width as usize) as f64;
+            let (x0, x1) = (view.px(P2(20.0 - 210.0 + 3.0, 0.0)).0 as f64, view.px(P2(120.0 - 210.0 - 3.0, 0.0)).0 as f64);
+            p.chunks(4).enumerate().filter(|(i, c)| x(*i) > x0 && x(*i) < x1 && (dark(c) || red(c))).count()
+        };
+        assert_eq!((left(&a), left(&b)), (0, 0), "at {scale}: the mask covers the left");
+    }
+}
+
+#[test]
+fn zoomed_out_solid_fills_stay_solid_and_take_the_views_overrides_as_they_do_drawn_whole() {
+    use crate::cad::tests::{drawing, entity, random};
+    use crate::dxf::{Color, Shape};
+    // 20 000 red squares a unit across on Poche (the verifier's sheet of small fills), and over them as many short strokes.
+    let mut seed = 3;
+    let mut entities = Vec::new();
+    let mut strokes = Vec::new();
+    for _ in 0..20_000 {
+        let at = P2(10.0 + random(&mut seed) * 380.0, 10.0 + random(&mut seed) * 260.0);
+        let ring = vec![at, at + P2(1.0, 0.0), at + P2(1.0, 1.0), at + P2(0.0, 1.0)];
+        entities.push(entity("Poche", Shape::Fill { rings: vec![ring], solid: true, tile: None }));
+        let to = at + P2(random(&mut seed) * 3.0, random(&mut seed) * 3.0) + P2(1.5, 1.5);
+        strokes.push(entity("Poche", Shape::Polyline { pts: vec![at + P2(1.5, 1.5), to], closed: false }));
+    }
+    entities.extend(strokes);
+    let d = drawing(&[("Poche", Color::True(230, 20, 20))], entities);
+    let cad = crate::cad::Cad::of_drawing("smallfills.pdf", d);
+    let ci = placed(P2(200.0, 140.0));
+    let red = |c: &[u8]| c[0] > 200 && c[1] < 70 && c[2] < 70;
+    let bluish = |c: &[u8]| i32::from(c[2]) > i32::from(c[0]) + 30;
+    let pink = |c: &[u8]| c[0] > 230 && c[1] > 110 && c[1] < 170 && c[2] > 110 && c[2] < 170;
+    let view = View { scale: 3.0, cx: 0.0, cy: 0.0, width: 1300, height: 900 };
+    let both = |look: Option<&crate::graphics::ImportLook>| {
+        (painted(&dense_drawn(&cad, &ci, view, false, look)), painted(&dense_drawn(&cad, &ci, view, true, look)))
+    };
+    let near =
+        |a: usize, b: usize, what: &str| assert!(a > 2000 && (b as f64 - a as f64).abs() < a as f64 * 0.3, "{what}: {b} against {a}");
+    // As they are: as many solid red pixels, not a pink haze, and the same colour on the whole.
+    let (a, b) = both(None);
+    assert!(dense_drawn(&cad, &ci, view, true, None).prims.len() < 100, "drawn from its cells");
+    near(count(&a, red), count(&b, red), "solid red");
+    assert!(alike(&a, &b, 10.0), "a mean of {:?} against {:?}", mean(&b), mean(&a));
+    // The layer's Lines in blue: its lines turn blue, its fills stay red, either way.
+    let mut look = crate::graphics::ImportLook::default();
+    let lines = crate::graphics::Style { color: Some([0, 0, 255]), ..Default::default() };
+    look.layers.insert("Poche".into(), crate::graphics::Override { projection: lines, ..Default::default() });
+    let (a, b) = both(Some(&look));
+    near(count(&a, red), count(&b, red), "red fills under blue lines");
+    // As many lines blue (spread a little wider zoomed out, as a cell's ink is over the pixels round it).
+    let (ba, bb) = (count(&a, bluish), count(&b, bluish));
+    assert!(ba > 2000 && bb as f64 > ba as f64 * 0.7 && (bb as f64) < ba as f64 * 1.6, "blue lines: {bb} against {ba}");
+    assert!(alike(&a, &b, 10.0), "a mean of {:?} against {:?}", mean(&b), mean(&a));
+    // Halftone: both pale, the fills a pink.
+    let mut look = crate::graphics::ImportLook::default();
+    look.layers.insert("Poche".into(), crate::graphics::Override { halftone: true, ..Default::default() });
+    let (a, b) = both(Some(&look));
+    near(count(&a, pink), count(&b, pink), "halftone fills");
+    assert_eq!((count(&a, red), count(&b, red)), (0, 0), "no full red left in halftone");
+    assert!(alike(&a, &b, 10.0), "a mean of {:?} against {:?}", mean(&b), mean(&a));
+}

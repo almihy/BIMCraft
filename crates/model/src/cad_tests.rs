@@ -9,7 +9,7 @@ fn layer(name: &str, color: Color) -> Layer {
 }
 
 /// An entity of `layer` in its layer's colour.
-fn entity(layer: &str, shape: Shape) -> Entity {
+pub(crate) fn entity(layer: &str, shape: Shape) -> Entity {
     Entity { layer: layer.into(), color: Color::ByLayer, linetype: None, weight: None, alpha: 255, shape }
 }
 
@@ -117,11 +117,12 @@ fn a_dense_drawing_has_bands_of_cells_each_under_a_pixel_and_a_sparse_one_none()
     let (lod, band) = cad.lod_band(0.4).unwrap();
     assert_eq!(lod.layers, ["Walls", "Doors", "Hatch"]);
     assert!(band.cell * 0.4 <= 1.0 && band.cell * 0.4 > 0.5, "{}", band.cell);
-    // The frame is too big for its cells and drawn itself; every stroke is in them.
-    assert_eq!(band.big, vec![20_000]);
+    // The frame is too big for its cells and drawn itself, over the picture of the rest; every stroke is in that picture.
+    assert_eq!(band.whole().collect::<Vec<_>>(), vec![20_000]);
+    assert!(matches!(band.steps.as_slice(), [lod::Step::Picture(_), lod::Step::Whole(_)]), "{:?}", band.steps);
     assert!(band.len() > 1000 && band.len() < 20_000 * 3, "{}", band.len());
     // Its ink is all there: as much line as the strokes are long (a cell a cell), and their ends; and the hatches' area.
-    let as_drawn = |_: usize, c: Option<Rgb>| Some(c.unwrap_or(crate::render::INK));
+    let as_drawn = |_: usize, c: Option<Rgb>, _: bool| Some(c.unwrap_or(crate::render::INK));
     let all = lod.picture(band, 1, &as_drawn).unwrap();
     let ink: f64 = all.cells_in(P2(-1e9, -1e9), P2(1e9, 1e9)).map(|(_, c)| lod::ink_of(c.ink)).sum();
     let want: f64 = cad
@@ -133,7 +134,7 @@ fn a_dense_drawing_has_bands_of_cells_each_under_a_pixel_and_a_sparse_one_none()
             Shape::Polyline { pts, .. } => {
                 pts.windows(2).map(|w| w[0].dist(w[1])).sum::<f64>() / band.cell + std::f64::consts::FRAC_PI_4 / 0.75
             }
-            Shape::Fill { rings, .. } => crate::geom::area(&rings[0]).abs() / (band.cell * band.cell) * 0.75,
+            Shape::Fill { rings, .. } => crate::geom::area(&rings[0]).abs() / (band.cell * band.cell),
             _ => 0.0,
         })
         .sum();
@@ -146,7 +147,7 @@ fn a_dense_drawing_has_bands_of_cells_each_under_a_pixel_and_a_sparse_one_none()
     }
     // A layer hidden lays no ink: Doors, red, is gone; the rest the same.
     let doors = lod.layers.iter().position(|l| l == "Doors").unwrap();
-    let hidden = lod.picture(band, 2, &|l, c| (l != doors).then(|| c.unwrap_or(crate::render::INK))).unwrap();
+    let hidden = lod.picture(band, 2, &|l, c, _| (l != doors).then(|| c.unwrap_or(crate::render::INK))).unwrap();
     assert!(hidden.cells_in(P2(-1e9, -1e9), P2(1e9, 1e9)).all(|(_, c)| c.rgb.0 < 150 || c.rgb.2 > 100), "no red left");
     let left: f64 = hidden.cells_in(P2(-1e9, -1e9), P2(1e9, 1e9)).map(|(_, c)| lod::ink_of(c.ink)).sum();
     assert!(left < ink * 0.72 && left > ink * 0.6, "{left} of {ink}");

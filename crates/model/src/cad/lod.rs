@@ -4,13 +4,20 @@
 //! area) and that ink's colour (the one most of it is in). A view that shows a cell under a pixel draws the cells' ink as
 //! pixels, and only the entities too big for a cell's band as themselves.
 //!
+//! It keeps the page's order, so what is drawn over a fill stays over it: a band is a few pictures and, between them, the big
+//! entities drawn themselves ([`Step`]). A picture is runs of cells, each the small entities between two big fills, and those
+//! big fills, which are drawn into the picture at their place; a big line, text or patterned hatch is drawn itself after the
+//! picture that holds what lies under it, and what is drawn over it goes in a later picture. Which picture each goes in is
+//! found on a coarse grid of the drawing ([`LEVELS`] a side): an entity goes in the first picture after every big one drawn
+//! itself before it that it may meet; past [`MOST_PICTURES`], in the last.
+//!
 //! A drawing has a few bands, each a grid twice as fine as the last ([`BANDS`]); each is made the first time a view needs it,
 //! and kept. What a view shows of a band, its layers' ink mixed as the view draws them (its layers hidden, their colours and
 //! halftone), is a [`Picture`], made from the band's marks when the view's look of the drawing is new; the last [`PICTURES`]
 //! are kept for the next frames.
 //!
 //! What it holds is bounded: a band no more than [`MOST_MARKS`] marks (4 bytes each), all of a drawing's bands no more than
-//! [`MOST_HELD`] (so 64 MB), and a picture no more than [`MOST_CELLS`] cells (6 bytes each). A band past what it may hold is
+//! [`MOST_HELD`] (so 64 MB), and a picture no more than [`MOST_CELLS`] cells (8 bytes each). A band past what it may hold is
 //! dropped (the finest first, as they hold the most), and a view at its zoom draws every entity as before. What's drawn is
 //! only a picture: picking and snapping go by the entities themselves.
 
@@ -28,7 +35,7 @@ pub const LOD_FROM: usize = 10_000;
 pub const BANDS: [u32; 7] = [64, 128, 256, 512, 1024, 2048, 4096];
 /// An entity no more than this many of a band's cells across goes in its cells; a bigger one is drawn itself.
 const SMALL_CELLS: f64 = 16.0;
-/// The most marks one band holds among its layers (4 bytes each), and the most cells a picture of it holds (6 bytes each):
+/// The most marks one band holds among its layers (4 bytes each), and the most cells a picture of it holds (8 bytes each):
 /// past either the band is dropped. A dense A0 sheet's band of cells a millimetre across holds a few million marks.
 pub const MOST_MARKS: usize = 8 << 20;
 pub const MOST_CELLS: usize = 4 << 20;
@@ -40,22 +47,25 @@ const MOST_COLORS: usize = 255;
 const TEXT_INK: f64 = 0.35;
 /// How many pixels a cell is when its band is drawn, near enough: from half to one, three quarters on the whole. A line's ink
 /// is drawn a pixel wide, as long as it is: a cell's ink is a line through it a cell long (so many pixels times its cells
-/// across); a run's round ends and a fill are as big in pixels whatever the cells are, and are held as that line would be at
-/// this size.
+/// across); a run's round ends are as big in pixels whatever the cells are, and are held as that line would be at this size.
 const CELL_PX: f64 = 0.75;
 /// The ink of a run's two round ends: a dot a pixel across.
 const ENDS: f64 = std::f64::consts::FRAC_PI_4 / CELL_PX;
 /// Pictures a drawing keeps, for the views that show it differently (a plan and its ceiling plan, two windows).
 pub const PICTURES: usize = 2;
+/// The most pictures a band is drawn in, with big entities drawn themselves between them.
+pub const MOST_PICTURES: usize = 8;
+/// The cells a side of the grid that finds which picture an entity goes in.
+const LEVELS: usize = 64;
 
 /// A drawing's level of detail: its layers by number, each entity's layer and colour, the box its bands cover, and the
 /// bands, each made when first asked.
 pub struct Lod {
     pub layers: Vec<String>,
-    /// The entities of each layer, by their place in the drawing.
-    of_layer: Vec<Vec<u32>>,
-    /// The colours its entities are drawn in (none, the view's ink), and each entity's among them.
-    pub colors: Vec<Option<Rgb>>,
+    /// Each entity's layer, by number in `layers`.
+    layer_of: Vec<u16>,
+    /// The colours its entities are drawn in (none, the view's ink), each a fill's or a line's, and each entity's among them.
+    pub colors: Vec<(Option<Rgb>, bool)>,
     color_of: Vec<u8>,
     /// Each entity's box, to a float's precision: the cells it may lay ink in, and whether it is in a view when it is drawn
     /// itself.
@@ -80,7 +90,7 @@ impl std::fmt::Debug for Lod {
 /// A picture made of a drawing: of which band, for which look, and the picture (none when it would hold too much).
 type Kept = (usize, u64, Option<Arc<Picture>>);
 
-/// A grid over a drawing's bulk, `cell` drawing units square: each layer's marks, and the entities too big for it.
+/// A grid over a drawing's bulk, `cell` drawing units square: what it draws, in the drawing's order.
 pub struct Band {
     /// Which of [`BANDS`] it is.
     at: usize,
@@ -88,44 +98,75 @@ pub struct Band {
     lo: P2,
     nx: usize,
     ny: usize,
-    layers: Vec<Marks>,
-    /// The entities drawn themselves at this band's zoom, in the drawing's order: too big for its cells, or lying outside
-    /// its grid.
-    pub big: Vec<u32>,
+    pub steps: Vec<Step>,
 }
 
 impl std::fmt::Debug for Band {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Band({} by {} cells of {}, {} marks)", self.nx, self.ny, self.cell, self.len())
+        write!(f, "Band({} by {} cells of {}, {} marks, {} steps)", self.nx, self.ny, self.cell, self.len(), self.steps.len())
     }
 }
 
-/// One layer's marks in a band: the rows it inks (from the bottom) and where each's marks start, and its marks, each a cell
+/// What a band draws, in order: a picture of its cells, or entities drawn themselves.
+#[derive(Debug)]
+pub enum Step {
+    /// A picture: its runs, in order.
+    Picture(Vec<Run>),
+    /// Entities drawn themselves (a line, a text or a patterned hatch too big for the cells, or lying outside its grid), by
+    /// their place in the drawing, in its order.
+    Whole(Vec<u32>),
+}
+
+/// A run of a picture: the small entities between two big fills, summed into each layer's marks; or a big fill, drawn into
+/// the picture at its place.
+pub enum Run {
+    Cells(Vec<(u16, Marks)>),
+    Fill(u32),
+}
+
+impl std::fmt::Debug for Run {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Run::Cells(layers) => write!(f, "Cells({} layers)", layers.len()),
+            Run::Fill(i) => write!(f, "Fill({i})"),
+        }
+    }
+}
+
+/// One layer's marks in a run: the rows it inks (from the bottom) and where each's marks start, and its marks, each a cell
 /// along its row (two bytes), the ink there ([`ink_code`]) and its colour (by number in [`Lod::colors`]).
 #[derive(Default)]
-struct Marks {
+pub struct Marks {
     rows: Vec<(u32, u32)>,
     marks: Vec<[u8; 4]>,
 }
 
-/// What a view shows of a band: each inked cell's ink, all its layers' the view shows, mixed in their colours as it draws
-/// them. Row by row from the bottom.
+/// What a view shows of a band: for each of its pictures' runs of cells, each inked cell's ink, all its layers' the view
+/// shows, mixed in their colours as it draws them, a fill's apart from a line's. Row by row from the bottom.
 pub struct Picture {
     cell: f64,
     lo: P2,
     nx: usize,
     ny: usize,
-    /// Where each row's cells start, and one past the last row's end.
-    rows: Vec<u32>,
+    /// For each [`Step::Picture`] of the band in order, for each of its runs, its cells (none for a fill's).
+    pub runs: Vec<Vec<Cells>>,
+}
+
+/// A run's cells in a picture: its rows (from the bottom) and where each's cells start, and the cells.
+#[derive(Default)]
+pub struct Cells {
+    rows: Vec<(u32, u32)>,
     cells: Vec<Inked>,
 }
 
-/// A cell of a picture: its place along its row, its colour, and its ink ([`ink_code`]).
+/// A cell of a picture: its place along its row, its colour, its ink ([`ink_code`]) and whether that is a fill's (its share of
+/// the cell it covers) or a line's (a line a cell long through it being 1). A cell inked by both has the fill's first.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Inked {
     pub x: u16,
     pub rgb: Rgb,
     pub ink: u8,
+    pub fill: bool,
 }
 
 /// Ink as a byte, by its logarithm: 16 steps a doubling, from 2⁻⁸ to 2⁸ of a cell (a cell a pixel, a line a pixel wide
@@ -158,19 +199,34 @@ fn span(grid: (P2, f64, usize, usize), lo: P2, hi: P2) -> Option<(std::ops::Rang
 }
 
 impl Picture {
-    /// The inked cells that meet the box from `lo` to `hi` (drawing units), each with its middle.
+    /// Run `run` of picture `picture`'s inked cells that meet the box from `lo` to `hi` (drawing units), each with its middle.
+    pub fn run_in(&self, picture: usize, run: usize, lo: P2, hi: P2) -> impl Iterator<Item = (P2, &Inked)> {
+        let cells = self.runs.get(picture).and_then(|p| p.get(run));
+        let (ys, x0, x1) = match cells {
+            Some(_) => span((self.lo, self.cell, self.nx, self.ny), lo, hi).unwrap_or((0..0, 0, 0)),
+            None => (0..0, 0, 0),
+        };
+        let rows: &[(u32, u32)] = cells.map_or(&[], |c| &c.rows);
+        let first = rows.partition_point(|r| (r.0 as usize) < ys.start);
+        let all: &[Inked] = cells.map_or(&[], |c| &c.cells);
+        rows.get(first..).unwrap_or_default().iter().enumerate().take_while(move |(_, r)| (r.0 as usize) < ys.end).flat_map(
+            move |(k, r)| {
+                let end = rows.get(first + k + 1).map_or(all.len(), |n| n.1 as usize);
+                let row = all.get(r.1 as usize..end).unwrap_or_default();
+                let from = row.partition_point(|c| usize::from(c.x) < x0);
+                let y = r.0 as f64;
+                row.get(from..)
+                    .unwrap_or_default()
+                    .iter()
+                    .take_while(move |c| usize::from(c.x) <= x1)
+                    .map(move |c| (self.lo + P2((f64::from(c.x) + 0.5) * self.cell, (y + 0.5) * self.cell), c))
+            },
+        )
+    }
+
+    /// Every run's inked cells that meet the box from `lo` to `hi`, each with its middle.
     pub fn cells_in(&self, lo: P2, hi: P2) -> impl Iterator<Item = (P2, &Inked)> {
-        let (ys, x0, x1) = span((self.lo, self.cell, self.nx, self.ny), lo, hi).unwrap_or((0..0, 0, 0));
-        ys.flat_map(move |y| {
-            let (from, to) = (self.rows.get(y).copied().unwrap_or(0) as usize, self.rows.get(y + 1).copied().unwrap_or(0) as usize);
-            let row = self.cells.get(from..to).unwrap_or_default();
-            let first = row.partition_point(|c| usize::from(c.x) < x0);
-            row.get(first..)
-                .unwrap_or_default()
-                .iter()
-                .take_while(move |c| usize::from(c.x) <= x1)
-                .map(move |c| (self.lo + P2((f64::from(c.x) + 0.5) * self.cell, (y as f64 + 0.5) * self.cell), c))
-        })
+        self.runs.iter().enumerate().flat_map(move |(p, runs)| (0..runs.len()).flat_map(move |r| self.run_in(p, r, lo, hi)))
     }
 
     /// The box its grid covers, drawing units.
@@ -180,11 +236,11 @@ impl Picture {
 
     /// How many inked cells it holds.
     pub fn len(&self) -> usize {
-        self.cells.len()
+        self.runs.iter().flatten().map(|c| c.cells.len()).sum()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.cells.is_empty()
+        self.len() == 0
     }
 }
 
@@ -201,15 +257,15 @@ impl Lod {
             return None;
         }
         let mut layers: Vec<String> = Vec::new();
-        let mut of_layer: Vec<Vec<u32>> = Vec::new();
-        let mut known: HashMap<&str, usize> = HashMap::new();
-        let mut colors: Vec<Option<Rgb>> = Vec::new();
-        let mut color_at: HashMap<Option<(u8, u8, u8)>, u8> = HashMap::new();
+        let mut known: HashMap<&str, u16> = HashMap::new();
+        let mut layer_of = Vec::with_capacity(d.entities.len());
+        let mut colors: Vec<(Option<Rgb>, bool)> = Vec::new();
+        let mut color_at: HashMap<(Option<(u8, u8, u8)>, bool), u8> = HashMap::new();
         let mut color_of = Vec::with_capacity(d.entities.len());
         let mut boxes = Vec::with_capacity(d.entities.len());
         // A colour by layer is its layer's: looked up once a layer.
         let mut by_layer: Vec<Option<Option<Rgb>>> = Vec::new();
-        for (i, e) in d.entities.iter().enumerate() {
+        for e in &d.entities {
             boxes.push(bounds(&e.shape));
             let n = match known.get(e.layer.as_str()) {
                 Some(n) => *n,
@@ -218,42 +274,41 @@ impl Lod {
                         return None;
                     }
                     layers.push(e.layer.clone());
-                    of_layer.push(Vec::new());
-                    known.insert(e.layer.as_str(), layers.len() - 1);
-                    layers.len() - 1
+                    let n = (layers.len() - 1) as u16;
+                    known.insert(e.layer.as_str(), n);
+                    n
                 }
             };
-            if let Some(l) = of_layer.get_mut(n) {
-                l.push(i as u32);
-            }
-            // A patterned hatch's fill is pale.
-            let mut c = match (e.color, by_layer.get(n)) {
+            layer_of.push(n);
+            let mut c = match (e.color, by_layer.get(usize::from(n))) {
                 (crate::dxf::Color::ByLayer, Some(Some(c))) => *c,
                 (crate::dxf::Color::ByLayer, _) => {
                     let c = color(e);
-                    by_layer.resize(by_layer.len().max(n + 1), None);
-                    if let Some(at) = by_layer.get_mut(n) {
+                    by_layer.resize(by_layer.len().max(usize::from(n) + 1), None);
+                    if let Some(at) = by_layer.get_mut(usize::from(n)) {
                         *at = Some(c);
                     }
                     c
                 }
                 _ => color(e),
             };
-            if let Shape::Fill { solid: false, .. } = e.shape {
+            // A patterned hatch with no pattern held is filled pale; one drawn with its pattern is its tint, its colour.
+            if let Shape::Fill { solid: false, tile: None, .. } = e.shape {
                 let Rgb(r, g, b) = c.unwrap_or(crate::render::INK);
                 c = Some(Rgb(pale(r), pale(g), pale(b)));
             }
-            let held = c.map(|c| (c.0, c.1, c.2));
+            let fill = matches!(e.shape, Shape::Fill { .. });
+            let held = (c.map(|c| (c.0, c.1, c.2)), fill);
             let at = match color_at.get(&held) {
                 Some(at) => *at,
                 None if colors.len() < MOST_COLORS => {
-                    colors.push(c);
+                    colors.push((c, fill));
                     let at = (colors.len() - 1) as u8;
                     color_at.insert(held, at);
                     at
                 }
                 None => {
-                    let near = nearest(&colors, c);
+                    let near = nearest(&colors, c, fill);
                     color_at.insert(held, near);
                     near
                 }
@@ -262,7 +317,7 @@ impl Lod {
         }
         Some(Lod {
             layers,
-            of_layer,
+            layer_of,
             colors,
             color_of,
             boxes,
@@ -285,11 +340,11 @@ impl Lod {
     }
 
     /// The picture of `band` for a view's `look` of the drawing (any number that is the same for the same look, and differs
-    /// for another): its layers' marks in the colour `color` gives each layer's (the colour a mark names among
-    /// [`Lod::colors`], which it may override, halftone, or draw in the view's ink), none for a layer the view hides. The last
-    /// [`PICTURES`] are kept, so the next frames of the views find theirs made; none when it would hold more than
-    /// [`MOST_CELLS`] cells (and that too is kept).
-    pub fn picture(&self, band: &Band, look: u64, color: &dyn Fn(usize, Option<Rgb>) -> Option<Rgb>) -> Option<Arc<Picture>> {
+    /// for another): its layers' marks in the colour `color` gives each (of a layer, the colour a mark names among
+    /// [`Lod::colors`], and whether that is a fill's: it may override a line's, halftone it, or draw it in the view's ink),
+    /// none for a layer the view hides. The last [`PICTURES`] are kept, so the next frames of the views find theirs made; none
+    /// when it would hold more than [`MOST_CELLS`] cells (and that too is kept).
+    pub fn picture(&self, band: &Band, look: u64, color: &dyn Fn(usize, Option<Rgb>, bool) -> Option<Rgb>) -> Option<Arc<Picture>> {
         if let Ok(kept) = self.pictures.lock()
             && let Some((.., p)) = kept.iter().find(|(b, l, _)| *b == band.at && *l == look)
         {
@@ -309,16 +364,20 @@ impl Lod {
         self.boxes.get(i).map(|b| b.map(f64::from))
     }
 
-    /// Band `at`, of cells `cell` units square, layer by layer; none when it would hold more marks than it may, or than the
-    /// drawing's other bands leave. What the small entities would lay (a cell for each a run passes through, each a fill or a
-    /// text covers) is counted first, so a band past it is let go at once.
+    /// Entity `i`'s layer, by number in [`Lod::layers`].
+    pub fn layer_of(&self, i: usize) -> Option<usize> {
+        self.layer_of.get(i).map(|l| usize::from(*l))
+    }
+
+    /// Band `at`, of cells `cell` units square, in the drawing's order; none when it would hold more marks than it may, or
+    /// than the drawing's other bands leave. What the small entities would lay (a cell for each a run passes through, each a
+    /// fill or a text covers) is counted first, so a band past it is let go at once.
     fn make(&self, d: &Dxf, at: usize, cell: f64) -> Option<Band> {
         let nx = ((self.size.0 / cell).ceil() as usize).clamp(1, 1 << 16);
         let ny = ((self.size.1 / cell).ceil() as usize).clamp(1, 1 << 16);
         let (gx, gy) = (self.lo.0 + nx as f64 * cell, self.lo.1 + ny as f64 * cell);
-        let small = |b: &[f64; 4]| {
-            b[0] >= self.lo.0 && b[1] >= self.lo.1 && b[2] < gx && b[3] < gy && (b[2] - b[0]).max(b[3] - b[1]) <= SMALL_CELLS * cell
-        };
+        let inside = |b: &[f64; 4]| b[0] >= self.lo.0 && b[1] >= self.lo.1 && b[2] < gx && b[3] < gy;
+        let small = |b: &[f64; 4]| inside(b) && (b[2] - b[0]).max(b[3] - b[1]) <= SMALL_CELLS * cell;
         let most = self.most.0.min(self.most.1.saturating_sub(self.held.load(Ordering::Relaxed)));
         let laid: f64 = d
             .entities
@@ -335,116 +394,378 @@ impl Lod {
         if laid > most as f64 {
             return None;
         }
-        let (mut big, mut layers, mut held) = (Vec::new(), Vec::with_capacity(self.of_layer.len()), 0_usize);
-        for entities in &self.of_layer {
-            let mut sums = Sums { lo: self.lo, cell, nx, ny, laid: Vec::new(), merged: 0 };
-            for &i in entities {
-                let (Some(e), Some(b)) = (d.entities.get(i as usize), self.entity_box(i as usize)) else { continue };
-                let ink = Ink { color: self.color_of.get(i as usize).copied().unwrap_or(0), alpha: f64::from(e.alpha) / 255.0 };
-                let fits = small(&b)
-                    && match &e.shape {
-                        Shape::Point(_) => true,
-                        Shape::Text { at, height, angle, text, align, wide, .. } => {
-                            let w = f64::from(crate::font::width(text, 1.0)) * height * wide;
-                            sums.text(*at, (w, *height), *angle, (align.h, align.v), ink, (gx, gy))
-                        }
-                        Shape::Fill { rings, .. } => {
-                            sums.spread(b, fill_area(rings) / (cell * cell) * CELL_PX, ink);
-                            true
-                        }
-                        Shape::Line(a, b) => {
-                            sums.run(&[*a, *b], false, ink);
-                            true
-                        }
-                        Shape::Polyline { pts, closed } => {
-                            sums.run(pts, *closed, ink);
-                            true
-                        }
-                        shape => {
-                            for (pts, closed) in super::paths(shape) {
-                                sums.run(&pts, closed, ink);
-                            }
-                            true
-                        }
-                    };
-                if !fits {
-                    big.push(i);
+        let mut order = Order::new(self.lo, self.size);
+        let mut pictures: Vec<Making> = Vec::new();
+        // Big entities drawn themselves: those before picture k at k, the last after them all.
+        let mut wholes: Vec<Vec<u32>> = Vec::new();
+        let mut held = 0_usize;
+        for (i, e) in d.entities.iter().enumerate() {
+            let (Some(b), Some(&layer)) = (self.entity_box(i), self.layer_of.get(i)) else { continue };
+            let ink = Ink { color: self.color_of.get(i).copied().unwrap_or(0), alpha: f64::from(e.alpha) / 255.0 };
+            // A text's box is its letters', turned and aligned; one of numbers that aren't is drawn itself.
+            let b = match &e.shape {
+                Shape::Text { at, height, angle, text, align, wide, .. } => {
+                    let w = f64::from(crate::font::width(text, 1.0)) * height * wide;
+                    text_box(*at, (w, *height), *angle, (align.h, align.v)).unwrap_or([f64::NEG_INFINITY, 0.0, f64::INFINITY, 0.0])
                 }
-                if held + sums.merged > most {
-                    return None;
+                _ => b,
+            };
+            // In its cells, as a big fill in a picture, or drawn itself.
+            let what = if small(&b) {
+                What::Cells
+            } else if inside(&b) && matches!(&e.shape, Shape::Fill { tile: None, .. }) {
+                What::Fill
+            } else {
+                What::Whole
+            };
+            if what == What::Whole {
+                let s = order.whole(&e.shape, b);
+                wholes.resize_with(wholes.len().max(s + 1), Vec::new);
+                if let Some(w) = wholes.get_mut(s) {
+                    w.push(i as u32);
+                }
+                continue;
+            }
+            let k = order.picture(b);
+            pictures.resize_with(pictures.len().max(k + 1), || Making::new(self.lo, cell, nx, ny));
+            let Some(p) = pictures.get_mut(k) else { continue };
+            if what == What::Fill {
+                held += p.close();
+                p.runs.push(Run::Fill(i as u32));
+                continue;
+            }
+            let Some(sums) = p.sums(layer) else { continue };
+            match &e.shape {
+                Shape::Point(_) => {}
+                Shape::Text { height, text, wide, .. } => {
+                    let w = f64::from(crate::font::width(text, 1.0)) * height * wide;
+                    sums.spread(b, w * height * TEXT_INK / (cell * cell) * CELL_PX, ink);
+                }
+                Shape::Fill { rings, .. } => sums.spread(b, fill_area(rings) / (cell * cell), ink),
+                Shape::Line(a, z) => sums.run(&[*a, *z], false, ink),
+                Shape::Polyline { pts, closed } => sums.run(pts, *closed, ink),
+                shape => {
+                    for (pts, closed) in super::paths(shape) {
+                        sums.run(&pts, closed, ink);
+                    }
                 }
             }
-            sums.merge();
-            if held + sums.laid.len() > most {
+            // What's laid and not yet merged kept within bounds across every layer open; and what's merged within what a band
+            // may hold.
+            if i % 256 == 0 && pictures.iter().map(Making::unmerged).sum::<usize>() > MERGE_AT {
+                pictures.iter_mut().for_each(Making::merge);
+            }
+            if held + pictures.iter().map(Making::merged).sum::<usize>() > most {
                 return None;
             }
-            held += sums.laid.len();
-            layers.push(sums.marks());
         }
-        big.sort_unstable();
+        let mut steps = Vec::new();
+        let n = pictures.len().max(wholes.len().saturating_sub(1));
+        let mut pictures = pictures.into_iter();
+        let mut wholes = wholes.into_iter();
+        for _ in 0..=n {
+            if let Some(w) = wholes.next().filter(|w| !w.is_empty()) {
+                steps.push(Step::Whole(w));
+            }
+            if let Some(mut p) = pictures.next() {
+                held += p.close();
+                if !p.runs.is_empty() {
+                    steps.push(Step::Picture(p.runs));
+                }
+            }
+        }
+        if held > most {
+            return None;
+        }
         self.held.fetch_add(held, Ordering::Relaxed);
-        Some(Band { at, cell, lo: self.lo, nx, ny, layers, big })
+        Some(Band { at, cell, lo: self.lo, nx, ny, steps })
+    }
+}
+
+/// What an entity is in a band: summed into cells (a line, a fill or a text small enough), a big fill drawn into a picture,
+/// or drawn itself.
+#[derive(PartialEq)]
+enum What {
+    Cells,
+    Fill,
+    Whole,
+}
+
+/// A picture of a band being made: its runs so far, and each layer's sums of the run open.
+struct Making {
+    lo: P2,
+    cell: f64,
+    nx: usize,
+    ny: usize,
+    runs: Vec<Run>,
+    open: Vec<(u16, Sums)>,
+}
+
+impl Making {
+    fn new(lo: P2, cell: f64, nx: usize, ny: usize) -> Making {
+        Making { lo, cell, nx, ny, runs: Vec::new(), open: Vec::new() }
+    }
+
+    /// The sums of layer `layer` in the run open.
+    fn sums(&mut self, layer: u16) -> Option<&mut Sums> {
+        if !self.open.iter().any(|(l, _)| *l == layer) {
+            self.open.push((layer, Sums { lo: self.lo, cell: self.cell, nx: self.nx, ny: self.ny, laid: Vec::new(), merged: 0 }));
+        }
+        self.open.iter_mut().rev().find(|(l, _)| *l == layer).map(|(_, s)| s)
+    }
+
+    /// How many pieces of ink its open run has merged.
+    fn merged(&self) -> usize {
+        self.open.iter().map(|(_, s)| s.merged).sum()
+    }
+
+    /// How many pieces of ink its open run has laid since they were merged.
+    fn unmerged(&self) -> usize {
+        self.open.iter().map(|(_, s)| s.laid.len().saturating_sub(s.merged)).sum()
+    }
+
+    /// Its open run's pieces merged, cell by cell.
+    fn merge(&mut self) {
+        for (_, s) in &mut self.open {
+            if s.laid.len() > s.merged {
+                s.merge();
+            }
+        }
+    }
+
+    /// Its open run closed: each layer's sums merged into marks. How many marks it holds.
+    fn close(&mut self) -> usize {
+        if self.open.is_empty() {
+            return 0;
+        }
+        let mut layers: Vec<(u16, Marks)> = std::mem::take(&mut self.open)
+            .into_iter()
+            .map(|(l, mut s)| {
+                s.merge();
+                (l, s.marks())
+            })
+            .collect();
+        layers.sort_by_key(|(l, _)| *l);
+        let n = layers.iter().map(|(_, m)| m.marks.len()).sum();
+        self.runs.push(Run::Cells(layers));
+        n
+    }
+}
+
+/// Which picture an entity of a band goes in, and after which picture an entity drawn itself is: found on a coarse grid of the
+/// drawing, each of its cells holding the last picture anything in it went in and the last place anything drawn itself was.
+struct Order {
+    lo: P2,
+    cell: P2,
+    /// The last picture something in each cell went in, and after which picture the last drawn itself there is (0, before
+    /// the first), each one more than that (0 for none).
+    pictures: Vec<u8>,
+    wholes: Vec<u8>,
+}
+
+impl Order {
+    fn new(lo: P2, size: P2) -> Order {
+        let cell = P2((size.0 / LEVELS as f64).max(1e-9), (size.1 / LEVELS as f64).max(1e-9));
+        Order { lo, cell, pictures: vec![0; LEVELS * LEVELS], wholes: vec![0; LEVELS * LEVELS] }
+    }
+
+    /// The grid's cells box `b` meets, as rows and columns.
+    fn cells(&self, b: [f64; 4]) -> (std::ops::RangeInclusive<usize>, std::ops::RangeInclusive<usize>) {
+        let at = |v: f64, o: f64, c: f64| {
+            let k = ((v - o) / c).floor();
+            if k.is_finite() { k.clamp(0.0, (LEVELS - 1) as f64) as usize } else { 0 }
+        };
+        let (x0, x1) = (at(b[0], self.lo.0, self.cell.0), at(b[2], self.lo.0, self.cell.0));
+        let (y0, y1) = (at(b[1], self.lo.1, self.cell.1), at(b[3], self.lo.1, self.cell.1));
+        (y0..=y1, x0..=x1)
+    }
+
+    /// The picture an entity in box `b` goes in: the first after every entity drawn itself before it that it may meet.
+    fn picture(&mut self, b: [f64; 4]) -> usize {
+        let (ys, xs) = self.cells(b);
+        let mut k = 0;
+        for y in ys.clone() {
+            for x in xs.clone() {
+                k = k.max(self.wholes.get(y * LEVELS + x).copied().unwrap_or(0));
+            }
+        }
+        let k = usize::from(k).min(MOST_PICTURES - 1);
+        for y in ys {
+            for x in xs.clone() {
+                if let Some(p) = self.pictures.get_mut(y * LEVELS + x) {
+                    *p = (*p).max(k as u8 + 1);
+                }
+            }
+        }
+        k
+    }
+
+    /// Where an entity drawn itself goes, `shape` in box `b`: after the last picture anything it may meet went in, and after
+    /// those drawn themselves before it; 0 before the first picture, `k + 1` after picture `k`. A line is found along its
+    /// runs, so a frame round a sheet lies over only its edges.
+    fn whole(&mut self, shape: &Shape, b: [f64; 4]) -> usize {
+        let mut cells: Vec<usize> = Vec::new();
+        match shape {
+            Shape::Line(..) | Shape::Polyline { .. } | Shape::Circle { .. } | Shape::Arc { .. } => {
+                for (pts, closed) in super::paths(shape) {
+                    let back = closed.then(|| pts.last().copied().zip(pts.first().copied())).flatten();
+                    for (a, z) in pts.windows(2).filter_map(|w| Some((*w.first()?, *w.get(1)?))).chain(back) {
+                        // Along it, half a cell a step.
+                        let steps = ((z.0 - a.0).abs() / self.cell.0 + (z.1 - a.1).abs() / self.cell.1).mul_add(2.0, 1.0);
+                        let steps = if steps.is_finite() { (steps as usize).min(4 * LEVELS) } else { 1 };
+                        for s in 0..=steps {
+                            let p = a + (z - a) * (s as f64 / steps.max(1) as f64);
+                            let (ys, xs) = self.cells([p.0, p.1, p.0, p.1]);
+                            cells.push(ys.start() * LEVELS + xs.start());
+                        }
+                    }
+                }
+            }
+            _ => {
+                let (ys, xs) = self.cells(b);
+                for y in ys {
+                    for x in xs.clone() {
+                        cells.push(y * LEVELS + x);
+                    }
+                }
+            }
+        }
+        cells.sort_unstable();
+        cells.dedup();
+        let s = cells
+            .iter()
+            .map(|c| self.pictures.get(*c).copied().unwrap_or(0).max(self.wholes.get(*c).copied().unwrap_or(0)))
+            .max()
+            .unwrap_or(0)
+            .min(MOST_PICTURES as u8);
+        for c in cells {
+            if let Some(w) = self.wholes.get_mut(c) {
+                *w = (*w).max(s);
+            }
+        }
+        usize::from(s)
     }
 }
 
 impl Band {
-    /// How many marks it holds among its layers.
+    /// How many marks it holds among its pictures' runs.
     pub fn len(&self) -> usize {
-        self.layers.iter().map(|l| l.marks.len()).sum()
+        self.steps
+            .iter()
+            .filter_map(|s| match s {
+                Step::Picture(runs) => Some(runs),
+                Step::Whole(_) => None,
+            })
+            .flatten()
+            .map(|r| match r {
+                Run::Cells(layers) => layers.iter().map(|(_, m)| m.marks.len()).sum(),
+                Run::Fill(_) => 0,
+            })
+            .sum()
     }
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    /// [`Lod::picture`], made: row by row, each shown layer's marks in the row summed into the row's cells.
-    fn paint(&self, colors: &[Option<Rgb>], color: &dyn Fn(usize, Option<Rgb>) -> Option<Rgb>) -> Option<Picture> {
-        // Each layer's colours, worked out once, and where it is in its rows.
-        let shown: Vec<(usize, Vec<Rgb>)> = (0..self.layers.len())
-            .filter_map(|l| {
-                let all: Option<Vec<Rgb>> = colors.iter().map(|c| color(l, *c)).collect();
-                Some((l, all?))
-            })
-            .collect();
-        let mut at: Vec<usize> = vec![0; shown.len()];
-        let mut row = vec![[0.0_f64; 4]; self.nx];
-        let (mut rows, mut cells) = (Vec::with_capacity(self.ny + 1), Vec::new());
-        for y in 0..self.ny {
-            rows.push(cells.len() as u32);
-            let mut any = false;
-            for ((l, palette), next) in shown.iter().zip(at.iter_mut()) {
-                let Some(marks) = self.layers.get(*l) else { continue };
-                let Some(&(ry, start)) = marks.rows.get(*next) else { continue };
-                if ry as usize != y {
+    /// The entities it draws themselves: those drawn whole, and the big fills its pictures draw.
+    pub fn whole(&self) -> impl Iterator<Item = u32> + '_ {
+        self.steps.iter().flat_map(|s| match s {
+            Step::Whole(w) => w.clone(),
+            Step::Picture(runs) => runs
+                .iter()
+                .filter_map(|r| match r {
+                    Run::Fill(i) => Some(*i),
+                    Run::Cells(_) => None,
+                })
+                .collect(),
+        })
+    }
+
+    /// [`Lod::picture`], made: each run of cells row by row, each shown layer's marks in the row summed into the row's cells,
+    /// a fill's apart from a line's.
+    fn paint(&self, colors: &[(Option<Rgb>, bool)], color: &dyn Fn(usize, Option<Rgb>, bool) -> Option<Rgb>) -> Option<Picture> {
+        // Each layer's colours, worked out once; none for a layer hidden.
+        let mut palettes: HashMap<u16, Option<Vec<Rgb>>> = HashMap::new();
+        // Each cell of a row: a line's ink and its colour times it, and a fill's.
+        let mut row = vec![[0.0_f64; 8]; self.nx];
+        let mut touched: Vec<usize> = Vec::new();
+        let mut total = 0_usize;
+        let mut runs_out = Vec::new();
+        for step in &self.steps {
+            let Step::Picture(runs) = step else { continue };
+            let mut pictures = Vec::with_capacity(runs.len());
+            for run in runs {
+                let Run::Cells(layers) = run else {
+                    pictures.push(Cells::default());
                     continue;
+                };
+                // Every shown layer's rows, by row.
+                for (l, _) in layers {
+                    palettes
+                        .entry(*l)
+                        .or_insert_with(|| colors.iter().map(|(c, fill)| color(usize::from(*l), *c, *fill)).collect::<Option<Vec<Rgb>>>());
                 }
-                let end = marks.rows.get(*next + 1).map_or(marks.marks.len(), |r| r.1 as usize);
-                *next += 1;
-                for m in marks.marks.get(start as usize..end).unwrap_or_default() {
-                    let x = usize::from(u16::from_le_bytes([m[0], m[1]]));
-                    let (ink, c) = (ink_of(m[2]), palette.get(usize::from(m[3])).copied().unwrap_or(crate::render::INK));
-                    if let Some(p) = row.get_mut(x) {
-                        *p = [p[0] + ink, p[1] + f64::from(c.0) * ink, p[2] + f64::from(c.1) * ink, p[3] + f64::from(c.2) * ink];
-                        any = true;
+                let mut rows: Vec<(u32, &[[u8; 4]], &[Rgb])> = Vec::new();
+                for (l, marks) in layers {
+                    let Some(palette) = palettes.get(l).and_then(|p| p.as_deref()) else { continue };
+                    for (k, (y, start)) in marks.rows.iter().enumerate() {
+                        let end = marks.rows.get(k + 1).map_or(marks.marks.len(), |r| r.1 as usize);
+                        rows.push((*y, marks.marks.get(*start as usize..end).unwrap_or_default(), palette));
                     }
                 }
-            }
-            if !any {
-                continue;
-            }
-            for (x, p) in row.iter_mut().enumerate() {
-                if p[0] > 0.0 {
-                    let c = |v: f64| (v / p[0]).round().clamp(0.0, 255.0) as u8;
-                    cells.push(Inked { x: x as u16, rgb: Rgb(c(p[1]), c(p[2]), c(p[3])), ink: ink_code(p[0]) });
-                    *p = [0.0; 4];
+                rows.sort_by_key(|r| r.0);
+                let mut out = Cells::default();
+                let mut at = 0;
+                while let Some(&(y, ..)) = rows.get(at) {
+                    out.rows.push((y, out.cells.len() as u32));
+                    while let Some(&(_, marks, palette)) = rows.get(at).filter(|r| r.0 == y) {
+                        at += 1;
+                        for m in marks {
+                            let x = usize::from(u16::from_le_bytes([m[0], m[1]]));
+                            let k = usize::from(m[3]);
+                            let (ink, c) = (ink_of(m[2]), palette.get(k).copied().unwrap_or(crate::render::INK));
+                            let fill = colors.get(k).is_some_and(|c| c.1);
+                            if let Some(p) = row.get_mut(x) {
+                                if p.iter().all(|v| *v == 0.0) {
+                                    touched.push(x);
+                                }
+                                let o = if fill { 4 } else { 0 };
+                                for (i, v) in
+                                    [ink, f64::from(c.0) * ink, f64::from(c.1) * ink, f64::from(c.2) * ink].into_iter().enumerate()
+                                {
+                                    if let Some(s) = p.get_mut(o + i) {
+                                        *s += v;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    touched.sort_unstable();
+                    for x in touched.drain(..) {
+                        let Some(p) = row.get_mut(x) else { continue };
+                        for (o, fill) in [(4, true), (0, false)] {
+                            let ink = p.get(o).copied().unwrap_or(0.0);
+                            if ink > 0.0 {
+                                let ch = |i: usize| (p.get(o + i).copied().unwrap_or(0.0) / ink).round().clamp(0.0, 255.0) as u8;
+                                out.cells.push(Inked { x: x as u16, rgb: Rgb(ch(1), ch(2), ch(3)), ink: ink_code(ink), fill });
+                            }
+                        }
+                        *p = [0.0; 8];
+                    }
+                    if out.rows.last().is_some_and(|r| r.1 as usize == out.cells.len()) {
+                        out.rows.pop();
+                    }
                 }
+                total += out.cells.len();
+                if total > MOST_CELLS {
+                    return None;
+                }
+                pictures.push(out);
             }
-            if cells.len() > MOST_CELLS {
-                return None;
-            }
+            runs_out.push(pictures);
         }
-        rows.push(cells.len() as u32);
-        Some(Picture { cell: self.cell, lo: self.lo, nx: self.nx, ny: self.ny, rows, cells })
+        Some(Picture { cell: self.cell, lo: self.lo, nx: self.nx, ny: self.ny, runs: runs_out })
     }
 }
 
@@ -485,14 +806,14 @@ fn length(shape: &Shape) -> f64 {
     if d.is_finite() { d } else { 0.0 }
 }
 
-/// The colour among `colors` nearest `c` (the view's ink as [`crate::render::INK`]).
-fn nearest(colors: &[Option<Rgb>], c: Option<Rgb>) -> u8 {
+/// The colour among `colors` of `fill`'s kind nearest `c` (the view's ink as [`crate::render::INK`]).
+fn nearest(colors: &[(Option<Rgb>, bool)], c: Option<Rgb>, fill: bool) -> u8 {
     let rgb = |c: Option<Rgb>| c.unwrap_or(crate::render::INK);
     let d = |a: Rgb, b: Rgb| {
         let (r, g, b2) = (i32::from(a.0) - i32::from(b.0), i32::from(a.1) - i32::from(b.1), i32::from(a.2) - i32::from(b.2));
         r * r + g * g + b2 * b2
     };
-    colors.iter().enumerate().min_by_key(|(_, k)| d(rgb(**k), rgb(c))).map_or(0, |(i, _)| i as u8)
+    colors.iter().enumerate().filter(|(_, k)| k.1 == fill).min_by_key(|(_, k)| d(rgb(k.0), rgb(c))).map_or(0, |(i, _)| i as u8)
 }
 
 /// A channel of a colour most of the way to the paper, as a patterned hatch is filled.
@@ -532,8 +853,9 @@ struct Ink {
     alpha: f64,
 }
 
-/// One layer of a band being summed: its grid, and the ink it has laid so far, piece by piece (in order of its cells, one
-/// each, up to `merged`).
+/// One layer of a run being summed: its grid, and the ink it has laid so far, piece by piece (in order of its cells, one
+/// each, up to `merged`). A line's ink is a line a cell long through a cell being 1; a fill's, the share of the cell it covers.
+/// A fill's and a line's are told apart by their colours ([`Lod::colors`]).
 struct Sums {
     lo: P2,
     cell: f64,
@@ -550,7 +872,7 @@ impl Sums {
         at(p.1, self.lo.1, self.ny) * self.nx + at(p.0, self.lo.0, self.nx)
     }
 
-    /// `amount` of ink (cells squared) added to cell `c`, in what `ink` draws.
+    /// `amount` of ink added to cell `c`, in what `ink` draws.
     fn add(&mut self, c: usize, amount: f64, ink: Ink) {
         let amount = (amount * ink.alpha) as f32;
         if amount.is_nan() || amount <= 0.0 {
@@ -562,7 +884,7 @@ impl Sums {
         }
     }
 
-    /// What's laid, merged: one for each cell, in their order.
+    /// What's laid, merged: one for each cell and colour's kind, in their order.
     fn merge(&mut self) {
         self.laid.sort_unstable_by_key(|l| l.cell);
         let mut kept: usize = 0;
@@ -652,7 +974,7 @@ impl Sums {
         true
     }
 
-    /// `ink` spread over the cells box `b` covers, by how much of each it covers.
+    /// `amount` of ink spread over the cells box `b` covers, by how much of each it covers.
     fn spread(&mut self, b: [f64; 4], amount: f64, ink: Ink) {
         let (w, h) = ((b[2] - b[0]).max(0.0), (b[3] - b[1]).max(0.0));
         let [first, last] = [self.cell_of(P2(b[0], b[1])), self.cell_of(P2(b[2], b[3]))];
@@ -675,32 +997,6 @@ impl Sums {
         }
     }
 
-    /// A text `size` (width, height) at `at`, turned `angle` degrees and aligned so: its letters' ink spread over its box, if
-    /// that box is small and inside the grid (up to `top`, its far corner).
-    fn text(&mut self, at: P2, (w, h): (f64, f64), angle: f64, (ah, av): (Horizontal, Vertical), ink: Ink, top: (f64, f64)) -> bool {
-        if !(w.is_finite() && h.is_finite() && w >= 0.0 && h > 0.0) || w.max(h) > SMALL_CELLS * self.cell {
-            return false;
-        }
-        let (u, v) = (P2(angle.to_radians().cos(), angle.to_radians().sin()), P2(-angle.to_radians().sin(), angle.to_radians().cos()));
-        let left = match ah {
-            Horizontal::Left => at,
-            Horizontal::Center => at - u * (w / 2.0),
-            Horizontal::Right => at - u * w,
-        };
-        let base = match av {
-            Vertical::Baseline | Vertical::Bottom => left,
-            Vertical::Middle => left - v * (h / 2.0),
-            Vertical::Top => left - v * h,
-        };
-        let corners = [base, base + u * w, base + u * w + v * h, base + v * h];
-        let Some([lo, hi]) = crate::dxf::union(corners.map(|p| [p, p])) else { return false };
-        if lo.0 < self.lo.0 || lo.1 < self.lo.1 || hi.0 >= top.0 || hi.1 >= top.1 {
-            return false;
-        }
-        self.spread([lo.0, lo.1, hi.0, hi.1], w * h * TEXT_INK / (self.cell * self.cell) * CELL_PX, ink);
-        true
-    }
-
     /// Its cells' sums, merged, as a layer's marks, row by row.
     fn marks(self) -> Marks {
         let mut out = Marks { rows: Vec::new(), marks: Vec::with_capacity(self.laid.len()) };
@@ -714,6 +1010,28 @@ impl Sums {
         }
         out
     }
+}
+
+/// The box of a text `size` (width, height) at `at`, turned `angle` degrees and aligned so: low x, low y, high x, high y; none
+/// for a text of no height or of numbers that aren't.
+fn text_box(at: P2, (w, h): (f64, f64), angle: f64, (ah, av): (Horizontal, Vertical)) -> Option<[f64; 4]> {
+    if !(w.is_finite() && h.is_finite() && w >= 0.0 && h > 0.0) {
+        return None;
+    }
+    let (u, v) = (P2(angle.to_radians().cos(), angle.to_radians().sin()), P2(-angle.to_radians().sin(), angle.to_radians().cos()));
+    let left = match ah {
+        Horizontal::Left => at,
+        Horizontal::Center => at - u * (w / 2.0),
+        Horizontal::Right => at - u * w,
+    };
+    let base = match av {
+        Vertical::Baseline | Vertical::Bottom => left,
+        Vertical::Middle => left - v * (h / 2.0),
+        Vertical::Top => left - v * h,
+    };
+    let corners = [base, base + u * w, base + u * w + v * h, base + v * h];
+    let [lo, hi] = crate::dxf::union(corners.map(|p| [p, p]))?;
+    [lo.0, lo.1, hi.0, hi.1].iter().all(|x| x.is_finite()).then_some([lo.0, lo.1, hi.0, hi.1])
 }
 
 /// The area a hatch's rings fill by odd parity, near enough: its biggest ring's, less those inside it, plus those outside.
