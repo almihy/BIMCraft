@@ -290,22 +290,6 @@ impl Drawing {
             .collect();
         self.push(Prim::fill(rings, color));
     }
-    /// `rings` (mm) filled as a drawing's hatch is, by the even-odd rule: a ring inside another is a hole; `alpha` opaque.
-    pub(crate) fn fill_odd(&mut self, rings: &[Vec<P2>], color: Rgb, alpha: u8) {
-        let rings: Vec<Vec<(f32, f32)>> = rings
-            .iter()
-            .map(|r| {
-                let mut r: Vec<(f32, f32)> = r.iter().map(|p| self.view.px(*p)).collect();
-                r.dedup();
-                r
-            })
-            .filter(|r| r.len() >= 3)
-            .collect();
-        if rings.is_empty() {
-            return;
-        }
-        self.push(Prim::Fill { rings, color, rule: Rule::EvenOdd, alpha });
-    }
     /// `pts` joined in `pen`, as wide as it is on the paper the view stands for.
     pub(crate) fn line(&mut self, pts: &[P2], pen: Pen, color: Rgb, closed: bool) {
         let pts = pts.iter().map(|p| self.view.px(*p)).collect();
@@ -2510,9 +2494,8 @@ fn scans(d: &mut Drawing, m: &Model, range: &PlanRange, look: &Look) {
 }
 
 /// The CAD drawings a plan shows, under all the rest but its scans, as Revit draws an import in the background: those placed on
-/// its level, in each of its plans or in this one only, of the layers the import and the view show. Each entity is drawn in its
-/// colour (the view's ink where it has none, or the import draws in black), its pen and its linetype; a solid hatch filled, a
-/// patterned one as a pale fill of its colour; text lettered at its height, turned and aligned as the drawing has it.
+/// its level, in each of its plans or in this one only, of the layers the import and the view show, as the view's Imported
+/// Categories draw them.
 fn cad_imports(d: &mut Drawing, m: &Model, key: crate::ids::Guid, level: crate::ids::Guid, look: &Look) {
     for (id, e) in m.rare("cadimport").into_iter().filter_map(|id| Some((id, m.elements.get(id)?))) {
         let Element::CadImport(ci) = e else { continue };
@@ -2521,17 +2504,50 @@ fn cad_imports(d: &mut Drawing, m: &Model, key: crate::ids::Guid, level: crate::
         }
         let Some(cad) = m.cads.get(&ci.cad) else { continue };
         d.own(Some(id));
-        cad_drawing(d, cad, ci, look.hidden_layers(&ci.cad));
+        cad_drawing(d, cad, ci, look.hidden_layers(&ci.cad), look.import_look(&ci.cad));
     }
     d.own(None);
 }
 
-/// A CAD drawing placed by `ci` (in the view's terms), of the layers it and `in_view` show, what lies in the view: each entity
-/// in its colour (the view's ink where it has none, or the import draws in black), its pen and its linetype; a solid hatch
-/// filled, a patterned one as a pale fill of its colour; text lettered at its height, turned and aligned as the drawing has
-/// it. An import's, and a PDF's lines where its image shows them.
-fn cad_drawing(d: &mut Drawing, cad: &crate::cad::Cad, ci: &crate::model::CadImport, in_view: Option<&std::collections::BTreeSet<String>>) {
+/// Pixels of a run of a drawing, those nearer than [`ONE_PIXEL`] to the last kept left out (the last always kept): zoomed out,
+/// a dense drawing's many points under a pixel are the run as it shows, in a fraction of the points.
+fn thinned(pts: impl Iterator<Item = (f32, f32)>) -> Vec<(f32, f32)> {
+    let mut out: Vec<(f32, f32)> = Vec::new();
+    let mut last = None;
+    for q in pts {
+        last = Some(q);
+        if out.last().is_none_or(|p| (q.0 - p.0).abs() >= ONE_PIXEL || (q.1 - p.1).abs() >= ONE_PIXEL) {
+            out.push(q);
+        }
+    }
+    if let (Some(q), Some(p)) = (last, out.last())
+        && q != *p
+    {
+        out.push(q);
+    }
+    out
+}
+
+/// How near two points of a drawing's run may come on screen before the second is left out, px.
+const ONE_PIXEL: f32 = 0.75;
+
+/// A CAD drawing placed by `ci` (in the view's terms), of the layers it and `in_view` show, what lies in the view, as `look` (the
+/// view's Imported Categories) draws it: each entity in its colour (the view's ink where it has none, or the import draws in
+/// black), its pen and its linetype, and in what its layer's override (else its import's) gives instead, lighter in halftone;
+/// a solid hatch filled (by odd parity: its islands are holes), a patterned one as a pale fill of its colour; text lettered at
+/// its height and width, turned, aligned and mirrored as the drawing has it. Only the entities in the view are looked at, and
+/// a run's points under a pixel apart are drawn as one. An import's, and a PDF's lines where its image shows them.
+fn cad_drawing(
+    d: &mut Drawing,
+    cad: &crate::cad::Cad,
+    ci: &crate::model::CadImport,
+    in_view: Option<&std::collections::BTreeSet<String>>,
+    look: Option<&crate::graphics::ImportLook>,
+) {
     use crate::dxf::{Horizontal, Shape, Vertical};
+    if look.is_some_and(|l| l.all.hidden) {
+        return;
+    }
     // The view in the drawing's units, to leave out what lies outside it.
     let (w, h) = (d.view.width as f32, d.view.height as f32);
     let view = [d.view.mm((0.0, 0.0)), d.view.mm((w, 0.0)), d.view.mm((w, h)), d.view.mm((0.0, h))];
@@ -2542,14 +2558,24 @@ fn cad_drawing(d: &mut Drawing, cad: &crate::cad::Cad, ci: &crate::model::CadImp
     })) else {
         return;
     };
-    let seen = |b: [P2; 2]| b[0].0 <= hi.0 && b[1].0 >= lo.0 && b[0].1 <= hi.1 && b[1].1 >= lo.1;
     // Pixels to each of the drawing's units.
     let k = ci.scale * d.view.scale;
-    for ent in &cad.dxf().entities {
-        if !cad.shows(ent, &ci.hidden) || in_view.is_some_and(|l| l.contains(&ent.layer)) || !seen(ent.shape.bounds()) {
+    // Each layer's override, worked out once.
+    let mut overrides: std::collections::HashMap<&str, crate::graphics::Override> = std::collections::HashMap::new();
+    let entities = &cad.dxf().entities;
+    let frame = d.view;
+    for i in cad.entities_in(lo, hi) {
+        let Some(ent) = entities.get(i) else { continue };
+        if !cad.shows(ent, &ci.hidden) || in_view.is_some_and(|l| l.contains(&ent.layer)) {
             continue;
         }
-        let color = cad.color(ent, ci.colors).unwrap_or(INK);
+        let over = look.map(|l| overrides.entry(ent.layer.as_str()).or_insert_with(|| l.of_layer(&ent.layer)).clone());
+        let lines = over.as_ref().map(|o| &o.projection);
+        let mut color = lines.and_then(|s| s.color).map_or_else(|| cad.color(ent, ci.colors).unwrap_or(INK), |[r, g, b]| Rgb(r, g, b));
+        if over.as_ref().is_some_and(|o| o.halftone) {
+            color = Rgb(color.0 + (255 - color.0) / 2, color.1 + (255 - color.1) / 2, color.2 + (255 - color.2) / 2);
+        }
+        let px_of = |p: &P2| frame.px(place(*p));
         match &ent.shape {
             Shape::Text { at, height, angle, text, align, wide: factor, mirrored, .. } => {
                 let px = (height * k) as f32;
@@ -2581,19 +2607,38 @@ fn cad_drawing(d: &mut Drawing, cad: &crate::cad::Cad, ci: &crate::model::CadImp
             Shape::Point(_) => {}
             // A hatch's boundaries fill by odd parity, as DXF's do: an island in it is a hole.
             Shape::Fill { rings, solid } => {
-                let rings: Vec<Vec<P2>> = rings.iter().map(|r| r.iter().map(|p| place(*p)).collect()).collect();
                 let fill = if *solid { color } else { Rgb(pale(color.0), pale(color.1), pale(color.2)) };
-                d.fill_odd(&rings, fill, ent.alpha);
+                let px: Vec<Vec<(f32, f32)>> = rings.iter().map(|r| thinned(r.iter().map(px_of))).collect();
+                if px.iter().all(|r| r.len() < 3) {
+                    // Under a pixel: a dot of its colour, so a dense hatch still reads as one.
+                    if let Some(&q) = px.iter().flatten().next() {
+                        d.stroke_seen(vec![q, (q.0 + ONE_PIXEL, q.1)], Pen::FINE, fill, None, false, ent.alpha);
+                    }
+                    continue;
+                }
+                let rings = px.into_iter().filter(|r| r.len() >= 3).collect();
+                d.push(Prim::Fill { rings, color: fill, rule: Rule::EvenOdd, alpha: ent.alpha });
             }
             shape => {
-                // Its dashes in pixels; a pattern whose cycle is under a few pixels draws solid, as it would look.
-                let dash = cad
-                    .dash(ent)
-                    .map(|d| d.into_iter().map(|x| (x * k) as f32).collect::<Vec<f32>>())
-                    .filter(|d| d.iter().sum::<f32>() >= 3.0 && d.iter().skip(1).step_by(2).any(|gap| *gap >= 0.5));
+                let pen = lines.and_then(|s| s.weight).unwrap_or_else(|| cad.pen(ent));
+                // Its dashes in pixels (the override's pattern, else its linetype's); a pattern whose cycle is under a few
+                // pixels draws solid, as it would look.
+                let dash = match lines.and_then(|s| s.dash) {
+                    Some(k) => k.pattern(),
+                    None => cad
+                        .dash(ent)
+                        .map(|d| d.into_iter().map(|x| (x * k) as f32).collect::<Vec<f32>>())
+                        .filter(|d| d.iter().sum::<f32>() >= 3.0 && d.iter().skip(1).step_by(2).any(|gap| *gap >= 0.5)),
+                };
                 for (pts, closed) in crate::cad::paths(shape) {
-                    let px = pts.iter().map(|p| d.view.px(place(*p))).collect();
-                    d.stroke_seen(px, cad.pen(ent), color, dash.clone(), closed, ent.alpha);
+                    let mut px = thinned(pts.iter().map(px_of));
+                    if px.len() == 1
+                        && let Some(&q) = px.first()
+                    {
+                        px.push((q.0 + ONE_PIXEL, q.1));
+                    }
+                    let closed = closed && px.len() > 2;
+                    d.stroke_seen(px, pen, color, dash.clone(), closed, ent.alpha);
                 }
             }
         }
@@ -2635,7 +2680,13 @@ pub(crate) fn images(d: &mut Drawing, m: &Model, key: Guid, layer: crate::raster
         if t.drawn()
             && let Some((cad, ci)) = im.lines_placed(t, im.view)
         {
-            cad_drawing(d, &cad, &ci, look.and_then(|l| l.hidden_pdf_layers(&im.type_name)));
+            cad_drawing(
+                d,
+                &cad,
+                &ci,
+                look.and_then(|l| l.hidden_pdf_layers(&im.type_name)),
+                look.and_then(|l| l.pdf_import_look(&im.type_name)),
+            );
         }
         d.part = part;
     }

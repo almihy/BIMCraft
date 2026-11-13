@@ -1660,9 +1660,11 @@ impl Model {
     /// else [`crate::model::PREVIOUS_FORMAT`], so an older build opens it.
     pub fn written_format(&self) -> u32 {
         use crate::model::Element;
-        // A view or a template that hides a page's layers holds what a build of 20 refuses as a field it doesn't know.
+        // A view or a template that hides a page's layers or sets how an import draws (or a template that controls it) holds
+        // what a build of 20 refuses as a field it doesn't know.
         let views = self.elements.values().filter_map(crate::graphics::graphics_of_element);
-        let pdf_graphics = views.chain(self.view_templates.values().map(|t| &t.graphics)).any(|g| g.holds_pdf_layers());
+        let pdf_graphics = views.chain(self.view_templates.values().map(|t| &t.graphics)).any(|g| g.holds_imports())
+            || self.view_templates.values().any(|t| t.controls.contains(&crate::graphics::Group::Imports));
         if pdf_graphics || self.image_types.values().any(crate::raster::ImageType::drawn) {
             return crate::model::FORMAT;
         }

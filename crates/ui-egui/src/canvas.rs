@@ -1966,7 +1966,18 @@ impl BimApp {
         let painted_hover = if matches!(self.tool, Tool::Align(_)) || sketch_trim { None } else { hovered };
         let place = Place { hide: self.writing(), ..d.place };
         let kept = pipeline.as_ref().is_some_and(|pipeline| {
-            self.canvas.drawing.retained.paint(ui.ctx(), pipeline, &p, place, rect.min, &d.drawing, &marked, painted_hover, self.thin)
+            self.canvas.drawing.retained.paint(
+                ui.ctx(),
+                pipeline,
+                &p,
+                place,
+                rect.min,
+                &d.drawing,
+                &marked,
+                painted_hover,
+                self.thin,
+                &pictures,
+            )
         });
         if !kept {
             paint(&p, place, &d, &marked, painted_hover, self.thin, &pictures);

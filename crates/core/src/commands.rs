@@ -2119,7 +2119,8 @@ other_files(
         "{view?: a level's, section's or elevation's name or id, or {3D} (the lowest level's plan unless given), hide?: [category, \
          …], show?: […], hide_elements?: [id, …], show_elements?: […], categories?: {category: override | null, …}, elements?: \
          {id: override | null, …}, filters?: [{filter, hidden?, projection?, cut?, halftone?, transparency?}, …], phase?: name \
-         | null, phase_filter?: name | null, options?: {set: option | null, …}, layers?: {drawing: [layer, …] | null, …}, pdf_layers?: {image: [layer, …] | null, …}, template?: name | null, \
+         | null, phase_filter?: name | null, options?: {set: option | null, …}, layers?: {drawing: [layer, …] | null, …}, pdf_layers?: {image: [layer, …] | null, …}, imports?: {drawing: {all?: \
+         override, layers?: {layer: override | null, …}} | null, …}, pdf_imports?: {image: …}, template?: name | null, \
          background_grid?: {visible?, main?: {enabled?, color?: [r,g,b], pen?: 0..16}, sub?: {enabled?, color?, pen?}, \
          spacing?: [X,Y] (mm), divisions?: [X,Y] (1..1000), rotation?: degrees (-360..360)} | null, \
          reset?: true} what a view hides and how it draws the rest, as Revit's Visibility/Graphics does; with \
@@ -2146,7 +2147,11 @@ other_files(
          shows (the project's last unless it says) and `phase_filter` how it shows each status of what's in it (see `phase`); \
          `options` chooses the design option it shows of a set (the set's primary unless it says; see `option`); `layers` the \
          layers of each CAD drawing it hides, by the drawing's name (null shows them all again); `pdf_layers` the layers of each \
-         PDF page's lines it hides, by the image's name (`cad_layers` lists them)",
+         PDF page's lines it hides, by the image's name (`cad_layers` lists them); `imports` how each CAD drawing draws, by \
+         its name, and `pdf_imports` each PDF page's lines, by the image's, as Revit's Imported Categories: `all` the import's \
+         own row (hidden: the whole import is; projection: its lines' colour, weight and dash; halftone) and `layers` each \
+         layer's (its projection lines and halftone, winning over the import's), merged into what the view has (null takes a \
+         setting, a layer or the whole away)",
         view_graphics,
     ),
     edit(
@@ -2221,17 +2226,20 @@ other_files(
         &[],
         "{name, from?: a level's, section's, elevation's or 3D view's name or id, like?: another template's name, \
          kind?: plan | section | 3d | null, rename?, controls?: [categories, filters, range, \
-         phase, options, scale, detail, style, background_grid], view_range?: {top?, cut?, bottom?, depth?}, phase?, phase_filter?, options?, \
+         phase, options, scale, detail, style, background_grid, imports], view_range?: {top?, cut?, bottom?, depth?}, phase?, phase_filter?, options?, \
          scale?: 1 | … | 100000, detail?: coarse | medium | fine, visual_style?: shaded | hidden_line | wireframe, \
-         background_grid?: grid settings as in graphics, hide?, show?, categories?, filters?, reset?, delete?: true} a view template, as Revit's: settings under a name for \
+         background_grid?: grid settings as in graphics, hide?, show?, categories?, filters?, layers?, pdf_layers?, imports?, \
+         pdf_imports?, reset?, delete?: true} a view template, as Revit's: settings under a name for \
          views to follow with `graphics {template}`. `kind` is the views it is for (plans, elevations and sections, or 3D \
          views; null, any), which `from` sets; `like` makes a new one a copy of another (Duplicate); `rename` names it anew, \
          and its views follow it under that name. `from` takes a view's categories (hidden and overridden), filters and, a \
          plan's, view range, its phase and phase filter, its design options, its scale, detail level and visual style; \
-         `controls` is what views following it get from it (all nine unless it says) and cannot change for themselves: its \
+         `controls` is what views following it get from it (all ten unless it says) and cannot change for themselves: its \
          categories, its filters, a plan's view range, its phase with its phase filter, its design options, its scale (`scale` \
-         command), its detail level (`detail`), its visual style (`visual_style`). `hide`, `show`, `categories`, `filters`, \
-         `phase`, `phase_filter`, `options`, `scale`, `detail`, `visual_style`, `background_grid` and `reset` change it as they change a view; \
+         command), its detail level (`detail`), its visual style (`visual_style`), its imported categories (`imports`: the layers it \
+         hides of each CAD drawing and PDF page, and how each draws, Revit's V/G Overrides Import). `hide`, `show`, \
+         `categories`, `filters`, `phase`, `phase_filter`, `options`, `scale`, `detail`, `visual_style`, `background_grid`, \
+         `layers`, `pdf_layers`, `imports`, `pdf_imports` and `reset` change it as they change a view; \
          `view_range` merges into its range. Changed, every view following it follows. Gone, they keep their own settings. \
          `name` alone reads one",
         view_template,
@@ -3828,9 +3836,9 @@ fn merged_override(c: &str, what: &str, from: Option<&Override>, patch: &Value) 
 /// categories' and its filters' alone.
 fn edit_graphics(c: &str, m: &Model, p: &Value, g: &mut Graphics, of_template: bool) -> Result<(), String> {
     let given = |k: &str| !absent(p.get(k));
-    let views_own = ["hide_elements", "show_elements", "elements", "layers", "pdf_layers"];
+    let views_own = ["hide_elements", "show_elements", "elements"];
     if of_template && let Some(k) = views_own.iter().find(|k| given(k)).or(p.get("template").map(|_| &"template")) {
-        return Err(bad(c, format!("`{k}` is a view's own; a template holds categories, filters, a phase and design options")));
+        return Err(bad(c, format!("`{k}` is a view's own; a template holds categories, filters, imports, a phase and design options")));
     }
     // The template the view will follow once this call is done: one named, or none, in the same call, rules.
     let template_then = match p.get("template") {
@@ -3851,6 +3859,7 @@ fn edit_graphics(c: &str, m: &Model, p: &Value, g: &mut Graphics, of_template: b
             (touches_phase, Group::Phase, "phase and phase filter"),
             (touches_options, Group::Options, "design options"),
             (p.get("background_grid").is_some(), Group::BackgroundGrid, "background grids"),
+            (["layers", "pdf_layers", "imports", "pdf_imports"].iter().any(|k| given(k)), Group::Imports, "imported categories"),
         ] {
             if touches && let Some(t) = follows(group) {
                 return Err(bad(
@@ -3980,6 +3989,45 @@ fn edit_graphics(c: &str, m: &Model, p: &Value, g: &mut Graphics, of_template: b
         Some(v) => return Err(bad(c, format!("`pdf_layers` is {{image: [layer, …] | null}}, not {v}"))),
         None => {}
     }
+    for (key, pdf) in [("imports", false), ("pdf_imports", true)] {
+        match p.get(key) {
+            v if absent(v) => {}
+            Some(Value::Object(o)) if o.len() <= crate::raster::MAX_TYPES.max(crate::cad::MAX_CADS) => {
+                for (name, patch) in o {
+                    // The import's layers: a CAD drawing's, or a PDF page's drawn from its lines.
+                    let layers: Vec<String> = if pdf {
+                        let t = m
+                            .image_types
+                            .get(name)
+                            .ok_or_else(|| bad(c, format!("`{key}`: the project has no image `{name}` (see `manage_images`)")))?;
+                        t.layers().into_iter().map(str::to_string).collect()
+                    } else {
+                        let cad = m.cads.get(name).ok_or_else(|| bad(c, format!("`{key}`: the project has no CAD drawing `{name}`")))?;
+                        cad.dxf().layers.iter().map(|l| l.name.clone()).collect()
+                    };
+                    let looks = if pdf { &mut g.pdf_imports } else { &mut g.imports };
+                    // Merged into what it has, as a JSON merge patch: a null takes a setting (or the whole) away.
+                    let mut now = serde_json::to_value(looks.get(name).cloned().unwrap_or_default()).map_err(|e| bad(c, e))?;
+                    merge(&mut now, patch);
+                    let look: graphics::ImportLook = serde_json::from_value(now).map_err(|e| {
+                        bad(c, format!("`{key}`: `{name}` is {{all?: override, layers?: {{layer: override | null}}}} (an override's projection lines and halftone, and the import's hidden): {e}"))
+                    })?;
+                    if let Some(l) = look.layers.keys().find(|l| !layers.contains(l)) {
+                        return Err(bad(c, format!("`{key}`: `{name}` has no layer `{l}` (see `cad_layers`)")));
+                    }
+                    if look.is_empty() {
+                        looks.remove(name);
+                    } else {
+                        looks.insert(name.clone(), look);
+                    }
+                }
+            }
+            Some(v) => {
+                return Err(bad(c, format!("`{key}` is {{{}: {{all?, layers?}} | null}}, not {v}", if pdf { "image" } else { "drawing" })));
+            }
+            None => {}
+        }
+    }
     match p.get("elements") {
         v if absent(v) => {}
         Some(Value::Object(o)) if o.len() <= graphics::MAX_ENTRIES => {
@@ -4060,6 +4108,7 @@ fn graphics_reply(g: &Graphics) -> Value {
     let hidden: Vec<&String> = g.categories.iter().filter(|(_, o)| o.hidden).map(|(k, _)| k).collect();
     json!({
         "hidden": hidden, "categories": g.categories, "filters": g.filters, "layers": g.layers, "pdf_layers": g.pdf_layers,
+        "imports": g.imports, "pdf_imports": g.pdf_imports,
         "phase": g.phase, "phase_filter": g.phase_filter, "options": g.options,
         "scale": g.scale, "detail": g.detail, "visual_style": g.style,
         "background_grid": g.background_grid,
@@ -4377,6 +4426,10 @@ fn view_template(s: &mut Session, p: &Value) -> R {
         "detail",
         "visual_style",
         "background_grid",
+        "layers",
+        "pdf_layers",
+        "imports",
+        "pdf_imports",
     ];
     let makes = keys.iter().any(|k| !absent(p.get(k))) || p.get("template").is_some();
     if was.is_none() && !makes {

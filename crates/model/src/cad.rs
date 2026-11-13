@@ -77,6 +77,96 @@ pub struct Cad {
     far: usize,
     /// What a project file holds of it, made the first time it's saved.
     packed: Arc<OnceLock<CadFile>>,
+    /// Its entities' boxes and a grid of them, made the first time what lies in a box is asked.
+    index: Arc<OnceLock<Index>>,
+}
+
+/// A drawing's entities' boxes (x0, y0, x1, y1, drawing units), and a grid over them: each cell the entities whose boxes meet
+/// it, so what lies in a view or under the cursor is found among a few, not looked for among a dense sheet's hundreds of
+/// thousands. One that spans many cells is in none, and always looked at.
+struct Index {
+    boxes: Vec<[f64; 4]>,
+    lo: P2,
+    cell: f64,
+    nx: usize,
+    ny: usize,
+    cells: Vec<Vec<u32>>,
+    wide: Vec<u32>,
+}
+
+/// The most cells one entity is put in: past it, it is a wide one.
+const MOST_CELLS: usize = 64;
+
+impl Index {
+    fn new(d: &Dxf) -> Index {
+        let boxes: Vec<[f64; 4]> = d
+            .entities
+            .iter()
+            .map(|e| {
+                let [lo, hi] = e.shape.bounds();
+                [lo.0, lo.1, hi.0, hi.1]
+            })
+            .collect();
+        let finite = |b: &&[f64; 4]| b.iter().all(|v| v.is_finite());
+        let all = boxes.iter().filter(finite).fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |a, b| {
+            [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]
+        });
+        let (w, h) = ((all[2] - all[0]).max(1e-9), (all[3] - all[1]).max(1e-9));
+        let want = (boxes.len() / 8).clamp(1, 1 << 20) as f64;
+        let cell = ((w * h) / want).sqrt().max(w.max(h) / 4096.0).max(1e-9);
+        let (nx, ny) = (((w / cell).ceil() as usize).clamp(1, 4096), ((h / cell).ceil() as usize).clamp(1, 4096));
+        let lo = if all[0].is_finite() { P2(all[0], all[1]) } else { P2(0.0, 0.0) };
+        let mut index = Index { boxes: Vec::new(), lo, cell, nx, ny, cells: vec![Vec::new(); nx * ny], wide: Vec::new() };
+        for (i, b) in boxes.iter().enumerate() {
+            let Some([x0, y0, x1, y1]) = index.span(b) else {
+                index.wide.push(i as u32);
+                continue;
+            };
+            if (x1 - x0 + 1) * (y1 - y0 + 1) > MOST_CELLS {
+                index.wide.push(i as u32);
+                continue;
+            }
+            for y in y0..=y1 {
+                for x in x0..=x1 {
+                    if let Some(c) = index.cells.get_mut(y * nx + x) {
+                        c.push(i as u32);
+                    }
+                }
+            }
+        }
+        index.boxes = boxes;
+        index
+    }
+
+    /// The cells box `b` covers, first and last along each axis; none for a box that isn't a number's.
+    fn span(&self, b: &[f64; 4]) -> Option<[usize; 4]> {
+        if !b.iter().all(|v| v.is_finite()) {
+            return None;
+        }
+        let at = |v: f64, o: f64, n: usize| (((v - o) / self.cell).floor().max(0.0) as usize).min(n - 1);
+        Some([at(b[0], self.lo.0, self.nx), at(b[1], self.lo.1, self.ny), at(b[2], self.lo.0, self.nx), at(b[3], self.lo.1, self.ny)])
+    }
+
+    /// The entities whose boxes meet `b`, in the drawing's order.
+    fn within(&self, b: [f64; 4]) -> Vec<usize> {
+        let meets = |i: usize| self.boxes.get(i).is_some_and(|e| e[0] <= b[2] && e[2] >= b[0] && e[1] <= b[3] && e[3] >= b[1]);
+        let span = self.span(&b);
+        let cells = span.map_or(usize::MAX, |[x0, y0, x1, y1]| (x1 - x0 + 1) * (y1 - y0 + 1));
+        // Most of it: each entity looked at once is fewer steps than the cells' lists.
+        if cells * 2 >= self.nx * self.ny {
+            return (0..self.boxes.len()).filter(|i| meets(*i)).collect();
+        }
+        let Some([x0, y0, x1, y1]) = span else { return Vec::new() };
+        let mut found: Vec<u32> = self.wide.clone();
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                found.extend(self.cells.get(y * self.nx + x).into_iter().flatten());
+            }
+        }
+        found.sort_unstable();
+        found.dedup();
+        found.into_iter().map(|i| i as usize).filter(|i| meets(*i)).collect()
+    }
 }
 
 impl std::fmt::Debug for Cad {
@@ -111,6 +201,7 @@ impl Cad {
             bulk,
             far,
             packed: Arc::default(),
+            index: Arc::default(),
         })
     }
 
@@ -137,7 +228,20 @@ impl Cad {
             bulk,
             far,
             packed: Arc::default(),
+            index: Arc::default(),
         }
+    }
+
+    /// The entities whose boxes meet the box from `lo` to `hi` (drawing units), by their place in its entities, in its order:
+    /// what a view or the cursor's reach finds of it.
+    pub fn entities_in(&self, lo: P2, hi: P2) -> Vec<usize> {
+        self.index.get_or_init(|| Index::new(&self.dxf)).within([lo.0, lo.1, hi.0, hi.1])
+    }
+
+    /// Entity `i`'s box, drawing units, its low corner and its high.
+    pub fn entity_box(&self, i: usize) -> Option<[P2; 2]> {
+        let b = self.index.get_or_init(|| Index::new(&self.dxf)).boxes.get(i).copied()?;
+        Some([P2(b[0], b[1]), P2(b[2], b[3])])
     }
 
     /// The bytes it holds: its DXF, or its packed lines.
@@ -370,14 +474,11 @@ pub fn nearest<'c>(cad: &'c Cad, ci: &crate::model::CadImport, at: P2, reach: f6
     }
     let (rx, ry) = (reach / kx, reach / ky);
     let to_plan = |p: P2| P2(p.0 * kx, p.1 * ky);
-    cad.dxf()
-        .entities
-        .iter()
+    let entities = &cad.dxf().entities;
+    cad.entities_in(P2(q.0 - rx, q.1 - ry), P2(q.0 + rx, q.1 + ry))
+        .into_iter()
+        .filter_map(|i| entities.get(i))
         .filter(|e| cad.shows(e, &ci.hidden))
-        .filter(|e| {
-            let [lo, hi] = e.shape.bounds();
-            q.0 >= lo.0 - rx && q.0 <= hi.0 + rx && q.1 >= lo.1 - ry && q.1 <= hi.1 + ry
-        })
         .map(|e| (e, distance_scaled(&e.shape, q, &to_plan)))
         .filter(|(_, d)| *d <= reach)
         .min_by(|a, b| a.1.total_cmp(&b.1))

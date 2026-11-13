@@ -45,6 +45,23 @@ enum Pick {
     Category(String),
     Filter(usize),
     Element(Id),
+    /// An import's row in Imported Categories (a CAD drawing, or a PDF page by its image's name), or one of its layers'.
+    Import {
+        pdf: bool,
+        name: String,
+        layer: Option<String>,
+    },
+}
+
+impl Pick {
+    /// What its row folds by, when it is one that folds: a category, or an import.
+    fn fold_key(&self) -> Option<String> {
+        match self {
+            Pick::Category(c) => Some(c.clone()),
+            Pick::Import { pdf, name, layer: None } => Some(format!("import:{pdf}:{name}")),
+            _ => None,
+        }
+    }
 }
 
 /// The Visibility/Graphics dialog: the view (as commands take it) and its name, its graphics as the
@@ -124,6 +141,7 @@ pub(crate) fn group_name(g: Group) -> &'static str {
         Group::Detail => "Detail Level",
         Group::Style => "Visual Style",
         Group::BackgroundGrid => msg!("Background Grids"),
+        Group::Imports => msg!("Imported Categories"),
     }
 }
 
@@ -403,11 +421,8 @@ impl BimApp {
                         }
                         2 => {
                             styles = categories(ui, &mut d, &model, &shown, &IMPORTED, !followed.contains(&Group::Categories));
-                            // A drawing's layers are a view's own.
-                            if d.template.is_none() {
-                                ui.add_space(6.0);
-                                imported_layers(ui, &mut d, &model);
-                            }
+                            ui.add_space(6.0);
+                            imports(ui, &mut d, &model, &shown, !followed.contains(&Group::Imports));
                         }
                         3 => filters(ui, &mut d, &model, &shown, !followed.contains(&Group::Filters)),
                         ELEMENTS_TAB => elements(ui, &mut d, &model, &self.selection),
@@ -440,6 +455,10 @@ impl BimApp {
                 slot.graphics.categories = d.draft.categories.clone();
                 slot.graphics.filters = d.draft.filters.clone();
                 slot.graphics.options = d.draft.options.clone();
+                slot.graphics.layers = d.draft.layers.clone();
+                slot.graphics.pdf_layers = d.draft.pdf_layers.clone();
+                slot.graphics.imports = d.draft.imports.clone();
+                slot.graphics.pdf_imports = d.draft.pdf_imports.clone();
             }
             d.own = d.draft.clone();
         } else if ok || apply {
@@ -677,8 +696,11 @@ fn patch(d: &VgDialog, followed: &BTreeSet<Group>) -> Option<Value> {
     put("categories", json!(d.own.categories), json!(d.draft.categories), followed.contains(&Group::Categories));
     put("elements", json!(d.own.elements), json!(d.draft.elements), false);
     put("options", json!(d.own.options), json!(d.draft.options), followed.contains(&Group::Options));
-    put("layers", json!(d.own.layers), json!(d.draft.layers), false);
-    put("pdf_layers", json!(d.own.pdf_layers), json!(d.draft.pdf_layers), false);
+    let imports = followed.contains(&Group::Imports);
+    put("layers", json!(d.own.layers), json!(d.draft.layers), imports);
+    put("pdf_layers", json!(d.own.pdf_layers), json!(d.draft.pdf_layers), imports);
+    put("imports", json!(d.own.imports), json!(d.draft.imports), imports);
+    put("pdf_imports", json!(d.own.pdf_imports), json!(d.draft.pdf_imports), imports);
     if !followed.contains(&Group::Filters) && d.own.filters != d.draft.filters {
         p.insert("filters".into(), json!(d.draft.filters));
     }
@@ -713,6 +735,40 @@ fn put(d: &mut VgDialog, model: &Model, pick: &Pick, o: Override) {
             }
         }
         Pick::Element(id) => put_element(d, model.guid(*id), o),
+        Pick::Import { pdf, name, layer } => put_import(d, *pdf, name, layer.as_deref(), o),
+    }
+}
+
+/// Put `o` back as how an import draws in the draft (its own row's, or a layer's): a layer's visibility as one the view's
+/// `layers` (or `pdf_layers`) hides, the rest as its override.
+fn put_import(d: &mut VgDialog, pdf: bool, name: &str, layer: Option<&str>, mut o: Override) {
+    if let Some(l) = layer {
+        let hidden = if pdf { &mut d.draft.pdf_layers } else { &mut d.draft.layers };
+        let set = hidden.entry(name.to_string()).or_default();
+        if o.hidden {
+            set.insert(l.to_string());
+        } else {
+            set.remove(l);
+        }
+        if set.is_empty() {
+            hidden.remove(name);
+        }
+        o.hidden = false;
+    }
+    o.shown = false;
+    let looks = if pdf { &mut d.draft.pdf_imports } else { &mut d.draft.imports };
+    let look = looks.entry(name.to_string()).or_default();
+    match layer {
+        Some(l) if o.is_empty() => {
+            look.layers.remove(l);
+        }
+        Some(l) => {
+            look.layers.insert(l.to_string(), o);
+        }
+        None => look.all = o,
+    }
+    if look.is_empty() {
+        looks.remove(name);
     }
 }
 
@@ -885,14 +941,14 @@ fn table(ui: &mut Ui, d: &mut VgDialog, model: &Model, rows: &[Row], cols: &Colu
             let mut c = child(ui, Rect::from_min_max(pos2(at.left() + indent, at.top()), at.max), Layout::left_to_right(Align::Center));
             // A category with subcategories folds them away, as Revit's tree.
             // A small triangle, pointing right while folded, turning 90° down as it opens.
-            if let (Some(open), Pick::Category(cat)) = (row.fold, &row.pick) {
+            if let (Some(open), Some(cat)) = (row.fold, row.pick.fold_key()) {
                 let arrow = c.add(Button::new("").frame(false).min_size(vec2(14.0, 14.0)));
-                let openness = c.ctx().animate_bool(c.id().with(("folding", cat)), open);
+                let openness = c.ctx().animate_bool(c.id().with(("folding", &cat)), open);
                 fold_arrow(c.painter(), arrow.rect.center(), openness);
                 let what = if open { t("Fold") } else { t("Unfold") };
                 arrow.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, format!("{}: {what}", row.name)));
-                if arrow.clicked() && !d.unfolded.remove(cat) {
-                    d.unfolded.insert(cat.clone());
+                if arrow.clicked() && !d.unfolded.remove(&cat) {
+                    d.unfolded.insert(cat);
                 }
             } else if !row.sub && rows.iter().any(|r| r.fold.is_some()) {
                 c.add_space(14.0 + c.spacing().item_spacing.x);
@@ -1237,16 +1293,21 @@ fn elements(ui: &mut Ui, d: &mut VgDialog, model: &Model, selection: &[Id]) {
     });
 }
 
-/// The PDF pages placed in view `key` that are drawn from their lines, by image: those whose layers the view shows and hides.
+/// The PDF pages placed in view `key` that are drawn from their lines, by image: those whose layers the view shows and hides;
+/// with no view (a template's), every one the project holds.
 pub(crate) fn pdfs_in(model: &Model, key: Option<Guid>) -> Vec<(String, Vec<String>)> {
-    let Some(key) = key else { return Vec::new() };
     let mut names: BTreeSet<&str> = BTreeSet::new();
-    for id in model.rare("image") {
-        if let Some(e @ Element::Image(im)) = model.elements.get(id)
-            && (im.view == key || model.annotation_in(e, key))
-        {
-            names.insert(im.type_name.as_str());
+    match key {
+        Some(key) => {
+            for id in model.rare("image") {
+                if let Some(e @ Element::Image(im)) = model.elements.get(id)
+                    && (im.view == key || model.annotation_in(e, key))
+                {
+                    names.insert(im.type_name.as_str());
+                }
+            }
         }
+        None => names.extend(model.image_types.keys().map(String::as_str)),
     }
     names
         .into_iter()
@@ -1257,28 +1318,11 @@ pub(crate) fn pdfs_in(model: &Model, key: Option<Guid>) -> Vec<(String, Vec<Stri
         .collect()
 }
 
-/// A drawing's layers, each a check box cleared for those `hidden` holds of it (by the drawing's name): Revit's layers under
-/// each import's row.
-fn layer_boxes(ui: &mut Ui, hidden: &mut std::collections::BTreeMap<String, BTreeSet<String>>, name: &str, layers: &[String]) {
-    for layer in layers {
-        let mut on = !hidden.get(name).is_some_and(|l| l.contains(layer));
-        if ui.checkbox(&mut on, layer).changed() {
-            let set = hidden.entry(name.to_string()).or_default();
-            if on {
-                set.remove(layer);
-            } else {
-                set.insert(layer.clone());
-            }
-            if set.is_empty() {
-                hidden.remove(name);
-            }
-        }
-    }
-}
-
-/// The Imported Categories tab's layers: for each CAD drawing of the project, and each PDF placed in the view, a check box for
-/// each of its layers, cleared for those this view hides (Revit's layers under each drawing's row).
-fn imported_layers(ui: &mut Ui, d: &mut VgDialog, model: &Model) {
+/// The Imported Categories tab's imports, as Revit's: a row for each CAD drawing of the project and each PDF page drawn from
+/// its lines placed in the view (each in a template's), its visibility, its projection lines and halftone, and under it,
+/// unfolded, a row for each of its layers with the same: a layer's box cleared for those the view hides. A layer's own
+/// settings win over its import's.
+fn imports(ui: &mut Ui, d: &mut VgDialog, model: &Model, shown: &Graphics, enabled: bool) {
     let pdfs = pdfs_in(model, d.key);
     if model.cads.is_empty() && pdfs.is_empty() {
         ui.label(
@@ -1287,21 +1331,28 @@ fn imported_layers(ui: &mut Ui, d: &mut VgDialog, model: &Model) {
         );
         return;
     }
-    ui.label(RichText::new(t("Layers this view shows of each drawing")).strong());
-    let one = model.cads.len() + pdfs.len() == 1;
-    ScrollArea::vertical().max_height(220.0).auto_shrink([false, true]).id_salt("vg-layers").show(ui, |ui| {
-        for (name, cad) in &model.cads {
-            egui::CollapsingHeader::new(name).id_salt(("vg-cad", name)).default_open(one).show(ui, |ui| {
-                let layers: Vec<String> = cad.dxf().layers.iter().map(|l| l.name.clone()).collect();
-                layer_boxes(ui, &mut d.draft.layers, name, &layers);
-            });
+    let start = model.object_style("cadimport");
+    let mut rows: Vec<Row> = Vec::new();
+    let cads = model.cads.iter().map(|(n, cad)| (false, n.clone(), cad.dxf().layers.iter().map(|l| l.name.clone()).collect::<Vec<_>>()));
+    for (pdf, name, layers) in cads.chain(pdfs.into_iter().map(|(n, l)| (true, n, l))) {
+        let (looks, hidden) = if pdf { (&shown.pdf_imports, &shown.pdf_layers) } else { (&shown.imports, &shown.layers) };
+        let look = looks.get(&name).cloned().unwrap_or_default();
+        let pick = Pick::Import { pdf, name: name.clone(), layer: None };
+        let open = pick.fold_key().is_some_and(|k| d.unfolded.contains(&k));
+        rows.push(Row { pick, name: name.clone(), over: look.all.clone(), start, sub: false, fold: (!layers.is_empty()).then_some(open) });
+        if open {
+            for l in layers {
+                let mut over = look.layers.get(&l).cloned().unwrap_or_default();
+                over.hidden = hidden.get(&name).is_some_and(|h| h.contains(&l));
+                let pick = Pick::Import { pdf, name: name.clone(), layer: Some(l.clone()) };
+                rows.push(Row { pick, name: l, over, start, sub: true, fold: None });
+            }
         }
-        for (name, layers) in &pdfs {
-            egui::CollapsingHeader::new(name).id_salt(("vg-pdf", name)).default_open(one).show(ui, |ui| {
-                layer_boxes(ui, &mut d.draft.pdf_layers, name, layers);
-            });
-        }
-    });
+    }
+    let cols = Columns { cells: &[Cell::ProjectionLines], detail: false };
+    for (pick, o) in table(ui, d, model, &rows, &cols, enabled) {
+        put(d, model, &pick, o);
+    }
 }
 
 /// The Design Options tab: for each set of options, the one this view shows, the primary unless

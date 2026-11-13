@@ -79,11 +79,12 @@ fn listed(t: &ViewTemplate, kind: ViewKind) -> bool {
 const SET: [Group; 3] = [Group::Categories, Group::Filters, Group::Phase];
 
 /// The settings of a template, Revit's order: how it draws, what it shows, then its range and phase.
-const ORDER: [Group; 9] = [
+const ORDER: [Group; 10] = [
     Group::Scale,
     Group::Detail,
     Group::Style,
     Group::Categories,
+    Group::Imports,
     Group::Filters,
     Group::Options,
     Group::Range,
@@ -131,6 +132,16 @@ fn patch(was: &ViewTemplate, now: &ViewTemplate) -> Option<serde_json::Map<Strin
     }
     if a.background_grid != b.background_grid {
         p.insert("background_grid".into(), json!(b.background_grid));
+    }
+    for (key, was, now) in [
+        ("layers", json!(a.layers), json!(b.layers)),
+        ("pdf_layers", json!(a.pdf_layers), json!(b.pdf_layers)),
+        ("imports", json!(a.imports), json!(b.imports)),
+        ("pdf_imports", json!(a.pdf_imports), json!(b.pdf_imports)),
+    ] {
+        if was != now {
+            p.insert(key.into(), merge_patch(&was, &now));
+        }
     }
     (!p.is_empty()).then_some(p)
 }
@@ -695,6 +706,7 @@ fn group_rows(rows: &mut Rows, g: Group, now: &mut ViewTemplate, m: &Model) -> O
             None
         }
         Group::Categories => rows.edit(t("V/G Overrides"), include, Ask::Graphics(0)),
+        Group::Imports => rows.edit(t("V/G Overrides Import"), include, Ask::Graphics(2)),
         Group::Filters => rows.edit(t("V/G Filters"), include, Ask::Graphics(FILTERS_TAB)),
         Group::Options => rows.edit(t("Design Options"), include, Ask::Graphics(OPTIONS_TAB)),
         Group::Range => rows.edit(t("View Range"), include, Ask::Range),
