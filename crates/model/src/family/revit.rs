@@ -523,9 +523,8 @@ fn dressed(f: &Family, def: &Value, has_material: &dyn Fn(&str) -> bool) -> Form
     if let Some(v) = def.get("visible").and_then(text) {
         form.visible = Some(Expr::Formula(v.to_string()));
     }
-    if let Some(s) = def.get("show").and_then(|s| serde_json::from_value::<Show>(s.clone()).ok())
-        && s != Show::default()
-    {
+    // A form of Revit's that shows everything says so (it is drawn at Coarse, in every view, as Revit draws it).
+    if let Some(s) = def.get("show").and_then(|s| serde_json::from_value::<Show>(s.clone()).ok()) {
         form.show = Some(s);
     }
     form.subcategory = def.get("subcategory").and_then(text).filter(|s| f.subcategories.iter().any(|x| x.name == *s)).map(str::to_string);
@@ -648,13 +647,18 @@ impl Reader<'_> {
     /// A symbolic line's curves as symbols in its view; a model line's in each of plan, front and side its Visibility
     /// Settings draw it in (Revit draws a model line in every view that sees it, seen flat in that view).
     fn lines(&self, def: &Value) -> Result<Vec<Symbol>, String> {
-        // A line drawn in Revit's invisible style draws nothing.
-        if def["invisible"].as_bool() == Some(true) {
+        // A line drawn in Revit's invisible style draws nothing, in any view.
+        if def["invisible"].as_bool() == Some(true) || def["subcategory"].as_str() == Some("<Invisible lines>") {
             return Ok(Vec::new());
         }
         // A masking region's edge is drawn as its Visibility Settings say, as a line's.
         let show = def.get("show").and_then(|s| serde_json::from_value::<Show>(s.clone()).ok());
-        let views = match def["view"].as_str().unwrap_or("plan") {
+        // One the exporter called a plan's but that stands in the family's yz or xz plane is a side's or a front's.
+        let view = match def["view"].as_str().unwrap_or("plan") {
+            "plan" => self.stands_in(def).unwrap_or("plan"),
+            v => v,
+        };
+        let views = match view {
             "plan" => vec![SymbolView::Plan],
             "front" => vec![SymbolView::Front],
             "side" => vec![SymbolView::Side],
@@ -672,6 +676,32 @@ impl Reader<'_> {
             out.extend(self.lines_in(def, view, show)?);
         }
         Ok(out)
+    }
+
+    /// The view a line drawn as a plan's is really in, where all its points (the ends of its curves, in the first type) share
+    /// their x (`side`) or their y (`front`) while their z varies: a region drawn on a plane standing in the family, which a
+    /// plan would draw as a stroke across it. None where it lies flat or isn't on such a plane.
+    fn stands_in(&self, def: &Value) -> Option<&'static str> {
+        let curves = def["curves"].as_array().filter(|c| !c.is_empty() && c.len() <= MOST)?;
+        let mut points = Vec::new();
+        for c in curves {
+            let bit = self.curve(c).ok()?;
+            points.push(self.at(&bit.start).ok()?);
+            points.push(self.at(&bit.end).ok()?);
+        }
+        let spread = |k: usize| {
+            let (lo, hi) = points.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p[k]), hi.max(p[k])));
+            hi - lo
+        };
+        if spread(2) <= 1.0 {
+            None
+        } else if spread(0) <= 0.05 {
+            Some("side")
+        } else if spread(1) <= 0.05 {
+            Some("front")
+        } else {
+            None
+        }
     }
 
     /// A line's curves as symbols in `view`.
@@ -832,6 +862,13 @@ fn from_level(def: &Value, planes: &Planes, target: &str, f: &Family, params: &B
 pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> bool) -> Walls {
     for x in f.forms.iter_mut() {
         x.snapshot = true;
+        // Revit's result says where it is drawn. A form its plan didn't draw is drawn neither cut nor below the cut: the
+        // exporter writes no `plan_top` and `plan_cut` for it, which would default to drawing it below the cut.
+        let s = x.show.get_or_insert(Show::default());
+        if !s.plan {
+            s.plan_top = false;
+            s.plan_cut = false;
+        }
     }
     for y in f.symbols.iter_mut() {
         y.snapshot = true;
@@ -1030,7 +1067,20 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         }
     }
     let still: BTreeSet<String> = refs.iter().filter(|r| !moves(&r.3)).map(|r| r.1.clone()).collect();
-    references.sort_by_key(|r| still.contains(&r.name));
+    // Of those, the ones standing on their axis' origin plane in every type (a desk's base on its level) go last of all: solving
+    // keeps the later planes where they stand and moves the other end of a dimension (Revit flexes a desk taller upward).
+    let on_origin: BTreeSet<String> = references
+        .iter()
+        .map(|r| r.name.clone())
+        .filter(|name| {
+            let Some(r) = refs.iter().find(|r| r.1 == *name) else { return false };
+            let origin = references.iter().find(|q| q.axis == r.2 && q.origin).and_then(|q| refs.iter().find(|x| x.1 == q.name));
+            let (Some(at), Some(origin)) = (r.3["at"].as_object(), origin.and_then(|o| o.3["at"].as_object())) else { return false };
+            !at.is_empty()
+                && at.iter().all(|(t, v)| matches!((num(v), origin.get(t).and_then(num)), (Some(x), Some(y)) if (x - y).abs() < 0.05))
+        })
+        .collect();
+    references.sort_by_key(|r| (still.contains(&r.name), on_origin.contains(&r.name)));
     // What a dimension or an alignment measures to that isn't one of the planes: the host wall (its face nearer the other
     // end) and the level (z = 0, a plane of its own).
     let ids_of = |v: &Value| -> Vec<String> {
@@ -1049,7 +1099,19 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             && ids.iter().filter_map(|i| reader.planes.get(i)).all(|p| p.1 == Axis::Z)
             && ids.iter().any(|i| reader.planes.contains_key(i))
     });
-    if level_wanted && references.len() < super::MAX_REFERENCES {
+    // The level a dimension measures to is the plane the family's z is measured from where that stands at the level (a desk's
+    // Ground floor): not a second plane.
+    let base = base_plane.as_deref().and_then(|b| refs.iter().find(|r| r.0 == b && r.2 == Axis::Z));
+    let base_on_level = base.is_some_and(|r| {
+        r.3["at"].as_object().is_some_and(|at| !at.is_empty() && at.values().all(|v| num(v).is_some_and(|x| x.abs() < 0.05)))
+    });
+    if level_wanted
+        && base_on_level
+        && let Some(base) = base
+    {
+        let at: BTreeMap<String, f64> = f.types.keys().map(|t| (t.clone(), 0.0)).collect();
+        reader.planes.insert("__level".into(), (base.1.clone(), Axis::Z, at));
+    } else if level_wanted && references.len() < super::MAX_REFERENCES {
         let mut name = "Ref Level".to_string();
         for n in 2.. {
             if !references.iter().any(|r| r.name == name) {
@@ -1251,11 +1313,13 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         }
     }
     let mut symbols = Vec::new();
+    // Where in `symbols` each masking region's edges are: they are dressed once the planes are solved.
+    let mut regions: Vec<std::ops::Range<usize>> = Vec::new();
     for d in def["lines"].as_array().into_iter().flatten().take(MOST) {
         match reader.lines(d) {
-            Ok(mut made) => {
+            Ok(made) => {
                 if d["masking"].as_bool() == Some(true) {
-                    masked_as_revit(f, &reader.first, &reader.values, &mut made);
+                    regions.push(symbols.len()..symbols.len() + made.len());
                 }
                 symbols.extend(made)
             }
@@ -1333,6 +1397,14 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     f.references = references;
     f.dimensions = dimensions;
     f.catalog = catalog;
+    // A masking region's edges, each at the levels Revit's plan draws it at, where the first type's planes stand solved.
+    if !regions.is_empty()
+        && let Ok(solved) = vals(f, &first, &walls)
+    {
+        for region in regions {
+            masked_as_revit(f, &first, &solved, &mut symbols[region]);
+        }
+    }
     // A window whose sill plane stands above its level by a chain no parameter says (its Sill Height none, or 0 in every
     // type): its Sill Height is that chain, so it is placed in its wall where Revit places it.
     if let Some(c) = sill_from
@@ -1441,47 +1513,77 @@ fn turned_as_revit(f: &Family, mut forms: Vec<Form>, walls: &Walls) -> Vec<Form>
     forms
 }
 
-/// A masking region's edges `made` drawn at the detail levels Revit's plan draws them at in the first type: its family
-/// says none (a masking region has no Visibility Settings), yet Revit leaves a door's out at Coarse, so a level whose
-/// snapshot plan has none of the edges' ends doesn't draw them.
+/// A masking region's edges `made`, each drawn at the detail levels Revit's plan draws it at in the first type: its family says
+/// none (a masking region has no Visibility Settings), yet Revit leaves a door's out at Coarse. An edge is there at a level
+/// where its two ends and its middle each lie on a line of Revit's plan at that level (within 1 mm); an edge says only the
+/// levels it is found at, even none. Where no edge is found at any level (the region is hidden in the first type), what the
+/// definition says stays.
 fn masked_as_revit(f: &Family, first: &str, values: &BTreeMap<String, Val>, made: &mut [Symbol]) {
     use crate::graphics::Detail;
-    let mut read = HashMap::new();
-    // Each edge's two ends.
-    let mut edges: Vec<(P2, P2)> = Vec::new();
-    for y in made.iter() {
-        let pts: Vec<P2> =
-            y.line.iter().filter_map(|[a, b]| Some(P2(number(a, values, &mut read).ok()?, number(b, values, &mut read).ok()?))).collect();
-        edges.extend(pts.windows(2).map(|w| (w[0], w[1])));
-    }
-    if edges.is_empty() {
-        return;
-    }
-    let mut levels = Levels { coarse: true, medium: true, fine: true };
-    for d in [Detail::Coarse, Detail::Medium, Detail::Fine] {
+    let probes: Vec<Option<[P2; 3]>> = made.iter().map(|y| edge_points(y, values)).collect();
+    let mut found = vec![[false; 3]; made.len()];
+    for (level, d) in [Detail::Coarse, Detail::Medium, Detail::Fine].into_iter().enumerate() {
         let Ok(marks) = f.marks_where(values, &|y: &Symbol| y.snapshot && y.view == SymbolView::Plan && y.of_type(first) && y.drawn_at(d))
         else {
             return;
         };
-        let any = marks.iter().any(|m| match m {
-            // An edge is there where one line of Revit's passes through both its ends.
-            super::Mark::Line(pts) => {
-                edges.iter().any(|(a, b)| pts.iter().any(|p| a.dist(*p) < 1.0) && pts.iter().any(|p| b.dist(*p) < 1.0))
+        let segments: Vec<(P2, P2)> = marks
+            .iter()
+            .filter_map(|m| match m {
+                super::Mark::Line(pts) => Some(pts),
+                _ => None,
+            })
+            .flat_map(|pts| pts.windows(2).map(|w| (w[0], w[1])))
+            .collect();
+        for (edge, probe) in probes.iter().enumerate() {
+            if let Some(points) = probe
+                && points.iter().all(|p| segments.iter().any(|(a, b)| near_segment(*p, *a, *b, 1.0)))
+            {
+                found[edge][level] = true;
             }
-            _ => false,
-        });
-        match d {
-            Detail::Coarse => levels.coarse = any,
-            Detail::Medium => levels.medium = any,
-            Detail::Fine => levels.fine = any,
         }
     }
-    let has_snapshot = f.symbols.iter().any(|y| y.snapshot && y.of_type(first));
-    if has_snapshot && (levels.coarse || levels.medium || levels.fine) {
-        for y in made.iter_mut() {
-            y.show = Some(levels);
+    if !found.iter().flatten().any(|x| *x) {
+        return;
+    }
+    for ((y, probe), at) in made.iter_mut().zip(&probes).zip(found) {
+        if probe.is_some() {
+            y.show = Some(Levels { coarse: at[0], medium: at[1], fine: at[2] });
         }
     }
+}
+
+/// A symbol's two ends and its middle along its length, in the first type; none where it doesn't work out.
+fn edge_points(y: &Symbol, values: &BTreeMap<String, Val>) -> Option<[P2; 3]> {
+    let n = |e: &Expr| number(e, values, &mut HashMap::new()).ok();
+    if let Some(c) = &y.arc {
+        let (cx, cy, r, from, to) = (n(&c.centre[0])?, n(&c.centre[1])?, n(&c.radius)?, n(&c.from)?, n(&c.to)?);
+        let at = |a: f64| P2(cx + r * a.to_radians().cos(), cy + r * a.to_radians().sin());
+        return Some([at(from), at((from + to) / 2.0), at(to)]);
+    }
+    let pts: Vec<P2> = y.line.iter().map(|[a, b]| Some(P2(n(a)?, n(b)?))).collect::<Option<_>>()?;
+    let (start, end) = (*pts.first()?, *pts.last()?);
+    let lengths: Vec<f64> = pts.windows(2).map(|w| w[0].dist(w[1])).collect();
+    let mut left = lengths.iter().sum::<f64>() / 2.0;
+    let mut middle = start;
+    for (w, len) in pts.windows(2).zip(&lengths) {
+        if left <= *len || *len <= 0.0 {
+            let t = if *len > 0.0 { left / len } else { 0.0 };
+            middle = P2(w[0].0 + (w[1].0 - w[0].0) * t, w[0].1 + (w[1].1 - w[0].1) * t);
+            break;
+        }
+        left -= len;
+        middle = w[1];
+    }
+    Some([start, middle, end])
+}
+
+/// Whether point `p` is within `tol` of the segment from `a` to `b`.
+fn near_segment(p: P2, a: P2, b: P2, tol: f64) -> bool {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let len2 = dx * dx + dy * dy;
+    let t = if len2 > 0.0 { (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / len2).clamp(0.0, 1.0) } else { 0.0 };
+    p.dist(P2(a.0 + dx * t, a.1 + dy * t)) <= tol
 }
 
 /// Whether reference `name` is free: nothing ties it, through the dimensions that place planes (locked, labelled, EQ), to a
@@ -1574,4 +1676,266 @@ fn tried(
         }
     }
     (kept_forms, kept_symbols, kept_nested)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::graphics::Detail;
+
+    /// The twelve triangles of a box, outward facing.
+    fn boxed(a: [f64; 3], b: [f64; 3]) -> Value {
+        let p = |x: usize, y: usize, z: usize| [[a[0], b[0]][x], [a[1], b[1]][y], [a[2], b[2]][z]];
+        let quad = |q: [[f64; 3]; 4]| [[q[0], q[1], q[2]], [q[0], q[2], q[3]]];
+        let faces = [
+            quad([p(0, 0, 0), p(0, 1, 0), p(1, 1, 0), p(1, 0, 0)]),
+            quad([p(0, 0, 1), p(1, 0, 1), p(1, 1, 1), p(0, 1, 1)]),
+            quad([p(0, 0, 0), p(1, 0, 0), p(1, 0, 1), p(0, 0, 1)]),
+            quad([p(0, 1, 0), p(0, 1, 1), p(1, 1, 1), p(1, 1, 0)]),
+            quad([p(0, 0, 0), p(0, 0, 1), p(0, 1, 1), p(0, 1, 0)]),
+            quad([p(1, 0, 0), p(1, 1, 0), p(1, 1, 1), p(1, 0, 1)]),
+        ];
+        json!(faces.iter().flatten().collect::<Vec<_>>())
+    }
+
+    /// A door family of two types, Revit's own result `extra` (its forms and symbols) in it.
+    fn door(extra: Value) -> Family {
+        let mut v = json!({
+            "category": "door",
+            "parameters": [{"name": "Width", "kind": "length", "value": 900}, {"name": "Height", "kind": "length", "value": 2100}],
+            "types": {"A": {}, "B": {}}
+        });
+        for (k, x) in extra.as_object().into_iter().flatten() {
+            v[k] = x.clone();
+        }
+        serde_json::from_value(v).unwrap()
+    }
+
+    /// A closed rectangle of lines in the plane `z`, from (x0, y0) to (x1, y1).
+    fn rectangle(x0: f64, y0: f64, x1: f64, y1: f64, z: f64) -> Value {
+        json!([
+            {"line": [[x0, y0, z], [x1, y0, z]]},
+            {"line": [[x1, y0, z], [x1, y1, z]]},
+            {"line": [[x1, y1, z], [x0, y1, z]]},
+            {"line": [[x0, y1, z], [x0, y0, z]]}
+        ])
+    }
+
+    /// Revit's plan line from (x0, y0) to (x1, y1) at the levels `show` says.
+    fn drawn(x0: f64, y0: f64, x1: f64, y1: f64, show: Value) -> Value {
+        json!({"line": [[x0, y0], [x1, y1]], "show": show, "snapshot": true})
+    }
+
+    fn translated(f: &mut Family, def: Value) {
+        translate(f, &def, &|_| true);
+    }
+
+    /// What the definition's own lines became, not Revit's.
+    fn made(f: &Family) -> Vec<&Symbol> {
+        f.symbols.iter().filter(|y| !y.snapshot).collect()
+    }
+
+    fn at_levels(coarse: bool, medium: bool, fine: bool) -> Option<Levels> {
+        Some(Levels { coarse, medium, fine })
+    }
+
+    #[test]
+    fn a_revit_form_hidden_in_plan_is_not_drawn_below_the_cut() {
+        // A threshold Revit's plan doesn't draw, and a leaf it does: the exporter writes no `plan_top` or `plan_cut`.
+        let mut f = door(json!({"forms": [
+            {"snapshot": true, "mesh": boxed([-450.0, -50.0, 0.0], [450.0, 50.0, 50.0]), "show": {"plan": false}},
+            {"snapshot": true, "mesh": boxed([-450.0, -20.0, 50.0], [450.0, 20.0, 2100.0])}
+        ]}));
+        translated(&mut f, json!({"to_bimcraft": {}}));
+        let threshold = f.forms[0].show.unwrap();
+        assert!(!threshold.plan && !threshold.plan_top && !threshold.plan_cut, "{threshold:?}");
+        let values = f.values("A", &BTreeMap::new()).unwrap();
+        let pieces = f.pieces("A", &values).unwrap();
+        assert_eq!(pieces.len(), 2);
+        assert!(!pieces[0].in_plan_cut(Detail::Medium, 1200.0, true), "the threshold is not drawn below the cut");
+        assert!(pieces[1].in_plan_cut(Detail::Medium, 1200.0, true), "the leaf the cut passes through still is");
+        // A form that said nothing says everything now.
+        assert_eq!(f.forms[1].show, Some(Show::default()));
+    }
+
+    #[test]
+    fn a_definition_form_showing_everything_keeps_saying_so() {
+        let mut f = door(json!({}));
+        let form = |show: Value| {
+            let mut x = json!({"id": "1", "kind": "extrusion", "normal": [0, 0, 1], "start": 0, "end": 50,
+                "loops": [rectangle(0.0, 0.0, 100.0, 40.0, 0.0)]});
+            if !show.is_null() {
+                x["show"] = show;
+            }
+            x
+        };
+        let all = json!({"coarse": true, "medium": true, "fine": true, "plan": true, "front": true, "side": true,
+            "plan_top": true, "plan_cut": true});
+        translated(&mut f, json!({"to_bimcraft": {}, "forms": [form(all), form(Value::Null)]}));
+        let ours: Vec<&Form> = f.forms.iter().filter(|x| !x.snapshot).collect();
+        assert_eq!(ours.len(), 2, "{:?}", f.editable);
+        assert_eq!(ours[0].show, Some(Show::default()), "it says so, though it says what the default does");
+        assert_eq!(ours[1].show, None, "one that says nothing still says nothing");
+    }
+
+    /// A door whose Revit plan draws a rectangle's four edges at the levels `shows` say, one for each, and whose definition has
+    /// that rectangle as a masking region.
+    fn masked(shows: [Value; 4]) -> Family {
+        let edges = [(0.0, 0.0, 100.0, 0.0), (100.0, 0.0, 100.0, 50.0), (100.0, 50.0, 0.0, 50.0), (0.0, 50.0, 0.0, 0.0)];
+        let symbols: Vec<Value> = edges.iter().zip(shows).map(|((a, b, c, d), s)| drawn(*a, *b, *c, *d, s)).collect();
+        let mut f = door(json!({ "symbols": symbols }));
+        translated(
+            &mut f,
+            json!({"to_bimcraft": {}, "lines": [
+            {"view": "plan", "masking": true, "curves": rectangle(0.0, 0.0, 100.0, 50.0, 0.0)}]}),
+        );
+        f
+    }
+
+    #[test]
+    fn a_masking_region_edge_is_drawn_only_at_the_levels_revit_draws_that_edge() {
+        // Revit's plan: the first edge at Medium and Fine, the others at Medium only.
+        let both = json!({"coarse": false});
+        let medium = json!({"coarse": false, "fine": false});
+        let f = masked([both, medium.clone(), medium.clone(), medium]);
+        let edges = made(&f);
+        assert_eq!(edges.len(), 4, "{:?}", f.editable);
+        assert_eq!(edges[0].show, at_levels(false, true, true));
+        for e in &edges[1..] {
+            assert_eq!(e.show, at_levels(false, true, false), "not drawn at Fine, where Revit's plan has no such edge");
+        }
+    }
+
+    #[test]
+    fn a_masking_region_sharing_one_edge_with_a_coarse_line_is_still_hidden_at_coarse() {
+        // A line of Revit's at Coarse lies along the first edge only.
+        let always = json!({});
+        let medium = json!({"coarse": false, "fine": false});
+        let f = masked([always, medium.clone(), medium.clone(), medium]);
+        let edges = made(&f);
+        assert_eq!(edges.len(), 4, "{:?}", f.editable);
+        assert!(edges[0].drawn_at(Detail::Coarse), "the edge Revit draws at Coarse is");
+        for e in &edges[1..] {
+            assert!(!e.drawn_at(Detail::Coarse), "the others are hidden at Coarse");
+            assert!(e.drawn_at(Detail::Medium) && !e.drawn_at(Detail::Fine));
+        }
+    }
+
+    #[test]
+    fn a_masking_region_nobody_draws_says_what_its_definition_says() {
+        // None of its edges is among Revit's lines (hidden in the first type): its own settings stay.
+        let mut f = door(json!({"symbols": [drawn(500.0, 500.0, 600.0, 500.0, json!({}))]}));
+        translated(
+            &mut f,
+            json!({"to_bimcraft": {}, "lines": [{"view": "plan", "masking": true, "show": {"coarse": false, "fine": false},
+            "curves": rectangle(0.0, 0.0, 100.0, 50.0, 0.0)}]}),
+        );
+        let edges = made(&f);
+        assert_eq!(edges.len(), 4);
+        assert!(edges.iter().all(|e| e.show == at_levels(false, true, false)));
+    }
+
+    #[test]
+    fn a_line_in_invisible_style_draws_nothing() {
+        let mut f = door(json!({}));
+        translated(
+            &mut f,
+            json!({"to_bimcraft": {}, "lines": [
+                {"view": "plan", "subcategory": "<Invisible lines>", "curves": [{"line": [[0, 0, 0], [100, 0, 0]]}]},
+                {"view": "plan", "curves": [{"line": [[0, 10, 0], [100, 10, 0]]}]}]}),
+        );
+        let lines = made(&f);
+        assert_eq!(lines.len(), 1, "only the one in a style that draws");
+        assert_eq!(lines[0].line[0][1], Expr::Number(10.0));
+    }
+
+    #[test]
+    fn a_region_whose_points_share_x_is_a_side_symbol() {
+        let mut f = door(json!({}));
+        // Exported as plan: one standing in the family's yz plane, one in its xz plane, one lying flat.
+        let region = |curves: Value| json!({"view": "plan", "masking": true, "curves": curves});
+        let upright = |x: [f64; 2], y: [f64; 2]| {
+            let (a, b) = ([x[0], y[0]], [x[1], y[1]]);
+            json!([
+                {"line": [[a[0], a[1], 0], [b[0], b[1], 0]]},
+                {"line": [[b[0], b[1], 0], [b[0], b[1], 30]]},
+                {"line": [[b[0], b[1], 30], [a[0], a[1], 30]]},
+                {"line": [[a[0], a[1], 30], [a[0], a[1], 0]]}
+            ])
+        };
+        translated(
+            &mut f,
+            json!({"to_bimcraft": {}, "lines": [
+                region(upright([100.0, 100.0], [0.0, 50.0])),
+                region(upright([0.0, 100.0], [40.0, 40.0])),
+                region(rectangle(0.0, 0.0, 100.0, 50.0, 0.0))]}),
+        );
+        let views: Vec<SymbolView> = made(&f).iter().map(|y| y.view).collect();
+        assert_eq!(views.len(), 12, "{:?}", f.editable);
+        assert!(views[..4].iter().all(|v| *v == SymbolView::Side), "{views:?}");
+        assert!(views[4..8].iter().all(|v| *v == SymbolView::Front), "{views:?}");
+        assert!(views[8..].iter().all(|v| *v == SymbolView::Plan), "{views:?}");
+    }
+
+    /// A furniture family on a level at 0 whose base plane is at 0 in each type, its top at 762, `Height` labelled from one
+    /// to the other, and the one form between them; `more` is added to the definition.
+    fn desk(more: Value) -> Family {
+        let mut f: Family = serde_json::from_value(json!({
+            "category": "furniture",
+            "parameters": [{"name": "Height", "kind": "length", "value": 762}],
+            "types": {"A": {"Height": 762}, "B": {"Height": 762}}
+        }))
+        .unwrap();
+        let plane = |id: &str, name: &str, at: f64, extra: Value| {
+            let mut p = json!({"id": id, "name": name, "normal": [0, 0, 1], "at": {"A": at, "B": at}});
+            for (k, x) in extra.as_object().into_iter().flatten() {
+                p[k] = x.clone();
+            }
+            p
+        };
+        let mut def = json!({
+            "to_bimcraft": {"z_minus": {"ref": "L"}},
+            "reference_planes": [
+                plane("L", "Ground floor", 0.0, json!({"is_reference": "level"})),
+                plane("B", "Base Plane", 0.0, json!({})),
+                plane("T", "Top Plane", 762.0, json!({}))],
+            "dimensions": [{"id": "d", "kind": "linear", "refs": ["B", "T"], "label": "Height", "locked": true,
+                "value": {"A": 762, "B": 762}}],
+            "forms": [{"id": "f", "kind": "extrusion", "normal": [0, 0, 1], "start": {"ref": "B"}, "end": {"ref": "T"},
+                "loops": [rectangle(0.0, 0.0, 100.0, 40.0, 0.0)]}]
+        });
+        for (k, x) in more.as_object().into_iter().flatten() {
+            def[k] = x.clone();
+        }
+        translated(&mut f, def);
+        f
+    }
+
+    #[test]
+    fn a_desk_flexed_taller_keeps_its_base_on_the_level() {
+        let f = desk(json!({}));
+        for height in [900.0, 600.0] {
+            let given = BTreeMap::from([("Height".to_string(), height)]);
+            let values = f.values_given("A", &given, super::super::DEFAULT_WALL).unwrap();
+            let at = f.solve(&values).unwrap();
+            assert!(at["Base Plane"].abs() < 1e-6 && (at["Top Plane"] - height).abs() < 1e-6, "{at:?}");
+            let pieces = f.pieces("A", &values).unwrap();
+            assert_eq!(pieces.len(), 1, "{:?}", f.editable);
+            assert!(pieces[0].bottom.abs() < 1e-6 && (pieces[0].top - height).abs() < 1e-6, "{} .. {}", pieces[0].bottom, pieces[0].top);
+        }
+    }
+
+    #[test]
+    fn a_dimension_to_the_level_measures_to_the_base_plane_where_that_is_the_level() {
+        // A dimension from the top plane to a form's face (no plane): the level it may stand for is the family's base plane
+        // where that is at 0, not a second plane.
+        let to_a_face = json!({"dimensions": [
+            {"id": "d", "kind": "linear", "refs": ["B", "T"], "label": "Height", "locked": true, "value": {"A": 762, "B": 762}},
+            {"id": "e", "kind": "linear", "refs": ["T", "face"], "locked": false, "value": {"A": 762, "B": 762}}]});
+        let f = desk(to_a_face);
+        assert!(f.references.iter().all(|r| r.name != "Ref Level"), "{:?}", f.references);
+        assert_eq!(f.references.len(), 3);
+    }
 }
