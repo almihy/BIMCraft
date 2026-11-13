@@ -1710,17 +1710,15 @@ impl Model {
                 || f.catalog.is_some()
                 || !f.check.is_empty()
                 || f.editable.is_some()
-                || f.forms
-                    .iter()
-                    .any(|x| {
-                        x.snapshot
-                            || !x.top.is_empty()
-                            || !x.path.is_empty()
-                            || !x.holes.is_empty()
-                            || !x.arcs.is_empty()
-                            || x.source.is_some()
-                            || x.cuts.is_some()
-                    })
+                || f.forms.iter().any(|x| {
+                    x.snapshot
+                        || !x.top.is_empty()
+                        || !x.path.is_empty()
+                        || !x.holes.is_empty()
+                        || !x.arcs.is_empty()
+                        || x.source.is_some()
+                        || x.cuts.is_some()
+                })
                 || f.symbols.iter().any(|y| y.snapshot || y.arc.as_ref().is_some_and(crate::family::Curve::follows_ends))
         });
         if parametric {

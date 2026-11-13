@@ -569,11 +569,7 @@ impl Curve {
 
     /// Its middle, its radius and its angles, worked out by `values`. Where it follows its ends, its angles are those of its
     /// ends about its middle; the way round is that of the `from` and `to` it was given.
-    fn sweep<'a>(
-        &'a self,
-        values: &BTreeMap<String, Val>,
-        read: &mut HashMap<&'a str, Result<Node, String>>,
-    ) -> Result<Sweep, String> {
+    fn sweep<'a>(&'a self, values: &BTreeMap<String, Val>, read: &mut HashMap<&'a str, Result<Node, String>>) -> Result<Sweep, String> {
         let mut n = |e: &'a Expr| number(e, values, read);
         let (centre, radius, from, to) = (P2(n(&self.centre[0])?, n(&self.centre[1])?), n(&self.radius)?, n(&self.from)?, n(&self.to)?);
         let (Some(start), Some(end)) = (&self.start, &self.end) else { return Ok(Sweep { centre, radius, from, to }) };
@@ -2090,13 +2086,7 @@ impl Family {
         let symbol_exprs = self.symbols.iter().flat_map(|y| {
             let label = y.text.iter().flat_map(|l| l.at.iter().chain([&l.height]));
             let dot = y.dot.iter().flat_map(|c| c.centre.iter().chain([&c.radius]));
-            y.line
-                .iter()
-                .flatten()
-                .chain(&y.visible)
-                .chain(y.arc.iter().flat_map(Curve::exprs))
-                .chain(label)
-                .chain(dot)
+            y.line.iter().flatten().chain(&y.visible).chain(y.arc.iter().flat_map(Curve::exprs)).chain(label).chain(dot)
         });
         if symbol_exprs.into_iter().any(|e| matches!(e, Expr::Formula(f) if long(f))) {
             return Err(format!("a formula of a symbol is longer than {MAX_FORMULA} characters"));
@@ -2430,7 +2420,7 @@ impl Family {
     ) -> Result<Vec<Mark>, String> {
         let mut out = self.marks(type_name, values, view, detail)?;
         if !self.draws_snapshot(type_name) {
-            self.nested_marks(type_name, values, view, detail, others, (0, &std::cell::Cell::new(0)), &mut out)?;
+            self.nested_marks(type_name, values, (view, detail), others, (0, &std::cell::Cell::new(0)), &mut out)?;
         }
         Ok(out)
     }
@@ -2442,8 +2432,7 @@ impl Family {
         &self,
         type_name: &str,
         values: &BTreeMap<String, Val>,
-        view: SymbolView,
-        detail: Option<crate::graphics::Detail>,
+        (view, detail): (SymbolView, Option<crate::graphics::Detail>),
         others: Others,
         (depth, spent): (usize, &std::cell::Cell<usize>),
         out: &mut Vec<Mark>,
@@ -2496,7 +2485,9 @@ impl Family {
                 }
                 let mut marks = inner.marks_as(inner_type, &inner_values, inner_view, detail, revit).map_err(said)?;
                 if !revit {
-                    inner.nested_marks(inner_type, &inner_values, inner_view, detail, others, (depth + 1, spent), &mut marks).map_err(said)?;
+                    inner
+                        .nested_marks(inner_type, &inner_values, (inner_view, detail), others, (depth + 1, spent), &mut marks)
+                        .map_err(said)?;
                 }
                 let place = |q: P2| {
                     let p = inner_view.lift(q);

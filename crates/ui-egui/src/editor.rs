@@ -369,7 +369,13 @@ impl SymbolText {
         };
         Ok(match self.part {
             Part::Arc => Symbol {
-                arc: Some(Curve { centre, radius: text_expr(&self.radius), from: text_expr(&self.from), to: text_expr(&self.to), ..Curve::default() }),
+                arc: Some(Curve {
+                    centre,
+                    radius: text_expr(&self.radius),
+                    from: text_expr(&self.from),
+                    to: text_expr(&self.to),
+                    ..Curve::default()
+                }),
                 ..base
             },
             Part::Text => Symbol {

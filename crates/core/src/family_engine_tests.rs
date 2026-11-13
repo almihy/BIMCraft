@@ -173,7 +173,10 @@ fn a_nested_parts_side_symbols_draw_in_the_parents_side_view() {
     let f = parent(json!({}));
     // Its side view is (y, z): the leg's line, up from where it stands (y 200).
     let side = marks(&f, SymbolView::Side);
-    assert!(side.iter().any(|p| near(p.0, 200.0) && near(p.1, 0.0)) && side.iter().any(|p| near(p.0, 200.0) && near(p.1, 500.0)), "{side:?}");
+    assert!(
+        side.iter().any(|p| near(p.0, 200.0) && near(p.1, 0.0)) && side.iter().any(|p| near(p.0, 200.0) && near(p.1, 500.0)),
+        "{side:?}"
+    );
     // Its plan has the leg's plan line and not its side one; its front has neither.
     let plan = marks(&f, SymbolView::Plan);
     assert!(plan.iter().any(|p| near(p.0, 1100.0) && near(p.1, 250.0)) && !plan.iter().any(|p| near(p.1, 700.0)), "{plan:?}");
@@ -200,11 +203,13 @@ fn a_nested_part_turned_onto_a_face_draws_its_plan_symbols_in_the_parents_front_
     let v = f.values("Standard", &Default::default()).unwrap();
     let front = points(&f.marks_with("Standard", &v, SymbolView::Front, None, &others).unwrap());
     // The leg's plan line, (0, 0) to (100, 50), in the parent's (x, z): from (1000, 300) to (1100, 350).
-    assert!(front.iter().any(|p| near(p.0, 1000.0) && near(p.1, 300.0)) && front.iter().any(|p| near(p.0, 1100.0) && near(p.1, 350.0)), "{front:?}");
+    assert!(
+        front.iter().any(|p| near(p.0, 1000.0) && near(p.1, 300.0)) && front.iter().any(|p| near(p.0, 1100.0) && near(p.1, 350.0)),
+        "{front:?}"
+    );
     // Nothing of it looks down, so the parent's plan has none of its plan symbols.
     assert!(points(&f.marks_with("Standard", &v, SymbolView::Plan, None, &others).unwrap()).is_empty());
 }
-
 
 #[test]
 fn a_traced_outline_that_crosses_itself_is_drawn_as_the_hull() {
@@ -241,9 +246,7 @@ fn volumes(f: &Family) -> Vec<f64> {
 
 #[test]
 fn a_void_cuts_only_the_forms_it_names() {
-    let boxed = |x0: f64, x1: f64, source: &str| {
-        json!({"profile": [[x0, 0], [x1, 0], [x1, 100], [x0, 100]], "from": 0, "to": 100, "source": source})
-    };
+    let boxed = |x0: f64, x1: f64, source: &str| json!({"profile": [[x0, 0], [x1, 0], [x1, 100], [x0, 100]], "from": 0, "to": 100, "source": source});
     // A void through the right half of A (x 0 to 100) and the left half of B (x 200 to 300): 50 x 100 x 100 of each.
     let hole = |cuts: Value, listed: &str| {
         let void = json!({"profile": [[50, -10], [250, -10], [250, 110], [50, 110]], "from": -10, "to": 110, "void": true, "cuts": cuts});
