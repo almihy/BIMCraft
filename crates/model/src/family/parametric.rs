@@ -148,6 +148,10 @@ pub struct Nested {
     /// Its own x, y and z axes in this family's (a face-based part on a wall's face), in place of `rotation` and `mirrored`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub axes: Option<[[f64; 3]; 3]>,
+    /// How much it is scaled about its insertion point (a number or a formula over the parent's parameters; none, as it is):
+    /// Revit's planting symbol is its base family drawn at the parent's `Height` over the base's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<Expr>,
 }
 
 impl Nested {
@@ -266,6 +270,18 @@ impl Family {
             (Val::Number(_), _) => false,
             _ => true,
         })
+    }
+
+    /// Whether a nested part's solids are Revit's own forms ([`Family::draws_snapshot_forms`]): always for an RPC family's, and
+    /// else where Revit's result is right at the values its parent hands it ([`Family::draws_revit_result`]).
+    pub(crate) fn draws_revit_forms(&self, type_name: &str, values: &BTreeMap<String, Val>, wall: f64) -> bool {
+        (self.draws_snapshot_forms(type_name) && !self.draws_snapshot(type_name)) || self.draws_revit_result(type_name, values, wall)
+    }
+
+    /// Whether type `type_name`'s solids are Revit's own result (its `snapshot` forms): when it draws that result
+    /// ([`Family::draws_snapshot`]), and always for an RPC family's, whose 3D is a render placeholder no rules can rebuild.
+    pub fn draws_snapshot_forms(&self, type_name: &str) -> bool {
+        (self.rpc && self.forms.iter().any(|f| f.snapshot && f.of_type(type_name))) || self.draws_snapshot(type_name)
     }
 
     /// Where each reference ends up for these `values` (a type's parameters worked out): by name, along its axis, mm. Over

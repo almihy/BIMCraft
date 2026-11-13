@@ -11263,6 +11263,8 @@ fn family(s: &mut Session, p: &Value) -> R {
         if let Some(Value::Object(inner)) = fields.get("family").cloned() {
             let definition = fields.get("definition").cloned().filter(|d| !d.is_null());
             let nested = fields.get("nested_families").cloned();
+            // Revit's RPC plantings say so (`revit.rpc`): their 3D is a render placeholder.
+            let rpc = fields.get("revit").and_then(|r| r.get("rpc")).and_then(Value::as_bool) == Some(true);
             // A shared one the project has otherwise is Revit's "Family Already Exists": the caller's `shared` says which
             // to keep; unsaid, the load is refused and says which ask. A dry run says which would.
             let choices = shared_choices(c, &p)?;
@@ -11288,6 +11290,9 @@ fn family(s: &mut Session, p: &Value) -> R {
             };
             fields = inner;
             loadable(&mut fields);
+            if rpc {
+                fields.insert("rpc".into(), Value::Bool(true));
+            }
             let own = held_by(definition.as_ref(), &held);
             if !own.is_empty() {
                 fields.insert("embedded".into(), serde_json::to_value(own).map_err(|e| bad(c, e))?);
@@ -11327,6 +11332,7 @@ fn family(s: &mut Session, p: &Value) -> R {
             "check",
             "editable",
             "revit",
+            "rpc",
         ]
         .into_iter()
         .filter_map(|k| fields.remove(k).map(|v| (k.to_string(), v)))
@@ -11434,6 +11440,7 @@ fn family(s: &mut Session, p: &Value) -> R {
         "check",
         "editable",
         "revit",
+        "rpc",
         "rebuild",
     ];
     // The type a file says to place, given back.
@@ -11616,6 +11623,12 @@ fn family(s: &mut Session, p: &Value) -> R {
     }
     if let Some(v) = p.get("editable") {
         f.editable = if v.is_null() { None } else { Some(serde_json::from_value(v.clone()).map_err(|e| field("editable", e))?) };
+    }
+    // A Revit RPC planting says so: a saved one brings it back.
+    if let Some(v) = p.get("rpc") {
+        f.rpc = v.as_bool().unwrap_or(false);
+    } else if from_file {
+        f.rpc = false;
     }
     // Materials it brings, each added where the project has none of its name: the project's own wins, as in Revit.
     let mut brought: BTreeMap<String, crate::model::Material> = BTreeMap::new();

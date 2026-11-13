@@ -645,6 +645,17 @@ impl Mark {
             Mark::Label { at, height, text, align } => Mark::Label { at: f(*at), height: *height, text: text.clone(), align: *align },
         }
     }
+
+    /// The same mark drawn `k` times as large about the origin: its points and a dot's radius, not a label's lettering.
+    pub fn scaled(&self, k: f64) -> Mark {
+        match self {
+            Mark::Dot { radius, .. } => match self.map(|p| P2(p.0 * k, p.1 * k)) {
+                Mark::Dot { centre, .. } => Mark::Dot { centre, radius: radius * k },
+                other => other,
+            },
+            _ => self.map(|p| P2(p.0 * k, p.1 * k)),
+        }
+    }
 }
 
 /// A mark a family's plan draws in its own axes, and no view shows otherwise (a door's swing, a socket's circle): a `line`
@@ -1095,6 +1106,10 @@ pub struct Family {
     /// Whether it can be edited as in Revit's Family Editor, and why not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub editable: Option<Editable>,
+    /// Whether it is a Revit RPC planting (a tree, a person): the 3D Revit draws of it is a render placeholder, so its check
+    /// compares only its plan and its 3D is always Revit's own result ([`Family::draws_snapshot_forms`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub rpc: bool,
 }
 
 impl Symbol {
@@ -2113,7 +2128,7 @@ impl Family {
                         &v,
                         &mut read,
                         &mut cuts,
-                        Build { snapshot: self.draws_snapshot(t), others: &|_| None, depth: 0, spent: &std::cell::Cell::new(0) },
+                        Build { snapshot: self.draws_snapshot_forms(t), others: &|_| None, depth: 0, spent: &std::cell::Cell::new(0) },
                     )
                 })
                 .map_err(|e| format!("type `{t}`: {e}"))?;
@@ -2364,7 +2379,7 @@ impl Family {
 
     /// [`Family::pieces`] with its nested parts, the families they are of found by `others` (the project's).
     pub fn pieces_with(&self, type_name: &str, values: &BTreeMap<String, Val>, others: Others) -> Result<Vec<Piece>, String> {
-        let snapshot = self.draws_snapshot(type_name);
+        let snapshot = self.draws_snapshot_forms(type_name);
         self.build(
             type_name,
             values,
@@ -2476,6 +2491,7 @@ impl Family {
             let inner_type = n.type_for(type_name);
             let inner_values = inner.values_given(inner_type, &given, wall).map_err(said)?;
             let revit = inner.draws_revit_result(inner_type, &inner_values, wall);
+            let scale = nested_scale(n, values, &mut read).map_err(said)?;
             // The way each of its views faces in this family's axes, and which of this one's: a view of the part is drawn
             // where it is square to the view being drawn, however it is turned.
             let faces = view.normal();
@@ -2494,7 +2510,7 @@ impl Family {
                     let p = add(at, add(add(mul(axes[0], p[0]), mul(axes[1], p[1])), mul(axes[2], p[2])));
                     view.flat(p)
                 };
-                out.extend(marks.iter().map(|m| m.map(place)));
+                out.extend(marks.iter().map(|m| m.scaled(scale).map(place)));
             }
             if out.len() > MAX_SYMBOLS * 4 {
                 return Err(said(format!("its nested parts draw more than {} marks", MAX_SYMBOLS * 4)));
@@ -2663,7 +2679,7 @@ impl Family {
             return Err(format!("it builds more than {MAX_NESTED} nested parts in all"));
         }
         let deeper = Build {
-            snapshot: inner.draws_revit_result(inner_type, &inner_values, wall),
+            snapshot: inner.draws_revit_forms(inner_type, &inner_values, wall),
             others: how.others,
             depth: how.depth + 1,
             spent: how.spent,
@@ -2672,7 +2688,8 @@ impl Family {
         let (at, axes) = nested_frame(n, values, read)?;
         let det = crate::geom::v3::dot(axes[0], cross(axes[1], axes[2]));
         let mirrored = det < 0.0;
-        let place = |p: P3| add(at, add(add(mul(axes[0], p[0]), mul(axes[1], p[1])), mul(axes[2], p[2])));
+        let scale = nested_scale(n, values, read)?;
+        let place = |p: P3| add(at, add(add(mul(axes[0], p[0] * scale), mul(axes[1], p[1] * scale)), mul(axes[2], p[2] * scale)));
         let plan = |q: &P2| {
             let p = place([q.0, q.1, 0.0]);
             P2(p[0], p[1])
@@ -2915,7 +2932,7 @@ impl Family {
     pub fn shapes(&self, type_name: &str, values: &BTreeMap<String, Val>) -> Vec<Shape> {
         let mut read = HashMap::new();
         let mut out = Vec::new();
-        let which = self.draws_snapshot(type_name);
+        let which = self.draws_snapshot_forms(type_name);
         for i in (0..self.forms.len()).filter(|i| self.forms[*i].of_type(type_name) && self.forms[*i].snapshot == which) {
             let Some(piece) = self.solid(i, values, &mut read).ok().flatten() else {
                 continue;
@@ -3042,6 +3059,20 @@ fn nested_frame<'a>(
     Ok((at, n.axes.unwrap_or([[cos, sin, 0.0], [-flip * sin, flip * cos, 0.0], [0.0, 0.0, 1.0]])))
 }
 
+/// How many times as large nested part `n` is drawn, sized by `values`: one where it says nothing; else a number above zero.
+fn nested_scale<'a>(
+    n: &'a Nested,
+    values: &BTreeMap<String, Val>,
+    read: &mut HashMap<&'a str, Result<Node, String>>,
+) -> Result<f64, String> {
+    let Some(e) = &n.scale else { return Ok(1.0) };
+    let k = number(e, values, read)?;
+    if !(k.is_finite() && k > 0.0 && k <= MAX_SCALE) {
+        return Err(format!("its scale is {k}; it needs a number above zero and up to {MAX_SCALE}"));
+    }
+    Ok(k)
+}
+
 /// The centre of the circle through `a`, `m` and `c`; none where they lie on a line.
 fn circumcentre(a: P2, m: P2, c: P2) -> Option<P2> {
     let d = 2.0 * (a.0 * (m.1 - c.1) + m.0 * (c.1 - a.1) + c.0 * (a.1 - m.1));
@@ -3059,6 +3090,9 @@ fn hulled(tris: Vec<[P3; 3]>, material: String) -> Piece {
     let outline = crate::geom::hull(tris.iter().flatten().map(|p| P2(p[0], p[1])).collect());
     Piece { caps: tris.len(), tris, outline, bottom, top, material, round: false, show: None }
 }
+
+/// The most a nested part may be scaled by.
+const MAX_SCALE: f64 = 1000.0;
 
 /// The families a nested part may be of, by name: the project's.
 pub type Others<'o> = &'o dyn Fn(&str) -> Option<&'o Family>;

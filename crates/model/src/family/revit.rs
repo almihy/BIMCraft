@@ -1385,7 +1385,8 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
                 .filter(|(t, _)| f.types.contains_key(*t))
                 .filter_map(|(t, v)| Some((t.clone(), text(v)?.to_string())))
                 .collect();
-            Ok(Nested { family, type_name, at, rotation, mirrored, params, visible, show, axes, type_in, ..Nested::default() })
+            let scale = planting_scale(f, &family, &type_name);
+            Ok(Nested { family, type_name, at, rotation, mirrored, params, visible, show, axes, type_in, scale, ..Nested::default() })
         })();
         match made {
             Ok(x) => nested.push(x),
@@ -1609,6 +1610,24 @@ fn free(dimensions: &[Dimension], references: &[Reference], name: &str) -> bool 
     !group.iter().any(|n| stays(n))
 }
 
+/// How a planting's base family is scaled in the family it is placed in. Revit draws a planting's plan symbol (its base family
+/// nested in it) at the parent's `Height` over the height the base is drawn at: the top plane of the base, the highest of its
+/// planes standing upright. A formula for it, `Height / 6096`; none where the family isn't a planting, holds its base itself
+/// (a shared base is the project's, not read here), or has no `Height` length to follow or no top plane to scale from.
+fn planting_scale(f: &Family, family: &str, type_name: &str) -> Option<Expr> {
+    if f.source.as_ref()?.category.as_deref() != Some("Planting") {
+        return None;
+    }
+    if !f.parameters.iter().any(|p| p.name == "Height" && p.kind == Kind::Length) {
+        return None;
+    }
+    let base = f.embedded.get(family)?;
+    let values = base.values_in(type_name, &BTreeMap::new(), super::DEFAULT_WALL).ok()?;
+    let solved = base.solve(&values).ok()?;
+    let top = base.references.iter().filter(|r| r.axis == Axis::Z).filter_map(|r| solved.get(&r.name)).copied().fold(0.0_f64, f64::max);
+    (top.is_finite() && top > 0.0).then(|| Expr::Formula(format!("Height / {top}")))
+}
+
 /// What an architect calls a form of the definition: its subcategory, else its material, and what kind of form it is.
 fn part_of(def: &Value) -> String {
     let kind = match def["kind"].as_str().unwrap_or("") {
@@ -1667,9 +1686,14 @@ fn tried(
     let mut kept_nested = Vec::new();
     for n in nested {
         let mut read = HashMap::new();
-        let ok = values
-            .iter()
-            .all(|v| n.at.iter().chain([&n.rotation]).chain(&n.visible).chain(n.params.values()).all(|e| number(e, v, &mut read).is_ok()));
+        let ok = values.iter().all(|v| {
+            n.at.iter()
+                .chain([&n.rotation])
+                .chain(&n.visible)
+                .chain(&n.scale)
+                .chain(n.params.values())
+                .all(|e| number(e, v, &mut read).is_ok())
+        });
         if ok {
             kept_nested.push(n);
         } else {
@@ -1740,6 +1764,45 @@ mod tests {
 
     fn at_levels(coarse: bool, medium: bool, fine: bool) -> Option<Levels> {
         Some(Levels { coarse, medium, fine })
+    }
+
+    /// A planting's base family: its ground at 0 and its top plane at 6096 mm, in its only type.
+    fn base() -> Family {
+        serde_json::from_value(json!({
+            "category": "generic", "types": {"Base": {}},
+            "references": [{"name": "Ground", "axis": "z", "at": 0, "origin": true}, {"name": "Top", "axis": "z", "at": 6096}]
+        }))
+        .unwrap()
+    }
+
+    /// A family of the Revit category `category`, with a `Height` parameter if `height`, holding the base nested in it.
+    fn planted(category: &str, height: bool) -> Family {
+        let parameters = if height { json!([{"name": "Height", "kind": "length", "value": 6000}]) } else { json!([]) };
+        serde_json::from_value(json!({
+            "category": "generic", "source": {"category": category}, "parameters": parameters,
+            "types": {"Tree": {"Height": 3000}}, "embedded": {"Base": base()}
+        }))
+        .unwrap()
+    }
+
+    fn base_in() -> Value {
+        json!({"to_bimcraft": {}, "nested": [{"id": "1", "family": "Base", "type": "Base", "at": [0, 0, 0], "rotation": 0,
+                                              "mirrored": false, "params": {}}]})
+    }
+
+    #[test]
+    fn a_plantings_base_is_scaled_by_the_trees_height_over_the_bases_top_plane() {
+        let mut f = planted("Planting", true);
+        translated(&mut f, base_in());
+        assert_eq!(f.nested.len(), 1, "{:?}", f.editable);
+        assert_eq!(f.nested[0].scale, Some(Expr::Formula("Height / 6096".into())));
+        // Any other category's nested part is as it is, and so is a planting with no Height to follow.
+        let mut other = planted("Furniture", true);
+        translated(&mut other, base_in());
+        assert_eq!(other.nested[0].scale, None);
+        let mut flat = planted("Planting", false);
+        translated(&mut flat, base_in());
+        assert_eq!(flat.nested[0].scale, None);
     }
 
     #[test]

@@ -61,7 +61,7 @@ fn formulas(f: &Family, out: &mut Vec<String>) {
         }
     }
     for (i, n) in f.nested.iter().enumerate() {
-        for e in n.at.iter().chain([&n.rotation]).chain(&n.visible).chain(n.params.values()) {
+        for e in n.at.iter().chain([&n.rotation]).chain(&n.visible).chain(&n.scale).chain(n.params.values()) {
             if let Expr::Formula(formula) = e {
                 read(&format!("nested part {}", i + 1), formula, out);
             }
