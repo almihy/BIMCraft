@@ -28,7 +28,7 @@ fn circle(r: f64, types: &[&str]) -> Vec<Value> {
         .collect()
 }
 
-/// An export package of a two-type tree: Revit's box for its 3D, a circle in plan scaled by Height / 6096 (the base's top
+/// An export package of a two-type tree: Revit's box for its 3D, a circle in plan scaled by Height / 6096 (snapped to 6096 within a foot; the base's top
 /// plane), the base nested in it; `rpc` whether the package says it is an RPC planting.
 fn package(rpc: bool) -> Value {
     let base = json!({
@@ -68,7 +68,7 @@ fn a_package_that_says_rpc_is_checked_in_plan_only_and_counts_as_editable() {
     let f = load(&mut s, true);
     assert!(f.rpc);
     // The base is scaled by the tree's Height over the base's top plane, from the base the tree holds.
-    assert_eq!(f.nested[0].scale, Some(crate::family::Expr::Formula("Height / 6096".into())));
+    assert_eq!(f.nested[0].scale, Some(crate::family::Expr::Formula("if(abs(Height - 6096) <= 304.8, 6096, Height) / 6096".into())));
     for t in ["Short", "Tall"] {
         assert!(f.check[t].matched, "{t}: {:?}", f.check[t].reason);
         assert_eq!(f.check[t].reason.as_deref(), Some(RPC_3D));

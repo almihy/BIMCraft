@@ -11700,9 +11700,9 @@ fn family(s: &mut Session, p: &Value) -> R {
     // result again.
     let has = |m: &str| s.model.materials.contains_key(m) || brought.contains_key(m);
     if let Some(def) = p.get("revit").filter(|v| !v.is_null()) {
-        let walls = crate::family::revit::translate(&mut f, def, &has);
+        let exported = crate::family::revit::translate(&mut f, def, &has);
         let others = |n: &str| if n == name.as_str() { None } else { s.model.families.get(n) };
-        f.run_check(&others, &walls);
+        f.run_check(&others, &exported);
     } else if let Some(w) = was.as_ref().filter(|_| !from_file) {
         let mut like: BTreeMap<String, String> = p.get("like").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
         like.retain(|new, _| !w.types.contains_key(new));

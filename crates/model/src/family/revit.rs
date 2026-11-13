@@ -50,6 +50,22 @@ struct Reader<'a> {
 /// formulas read as `Wall Thickness` while it is translated and checked.
 pub type Walls = BTreeMap<String, f64>;
 
+/// The opening a door's or a window's type cut in its wall in Revit, mm: across the wall, up from the sill, and where it
+/// starts over the sill (negative: below it).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Opening {
+    pub width: f64,
+    pub height: f64,
+    pub bottom: f64,
+}
+
+/// What a translation says of how Revit's result was made, for the check: each type's wall and each type's opening in it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Exported {
+    pub walls: Walls,
+    pub openings: BTreeMap<String, Opening>,
+}
+
 /// Type `t`'s values in the wall it was exported in.
 fn vals(f: &Family, t: &str, walls: &Walls) -> Result<BTreeMap<String, Val>, String> {
     f.values_in(t, &BTreeMap::new(), walls.get(t).copied().unwrap_or(super::DEFAULT_WALL))
@@ -765,7 +781,10 @@ impl Reader<'_> {
                             radius,
                             from: Expr::Number(a0),
                             to: Expr::Number(to),
-                            ..Curve::default()
+                            // Its ends as the definition binds them (a swing's start at its leaf's free corner), so every
+                            // type's arc starts where the leaf ends: the angles above are the first type's, as numbers.
+                            start: Some([bit.start[k[0]].clone(), bit.start[k[1]].clone()]),
+                            end: Some([bit.end[k[0]].clone(), bit.end[k[1]].clone()]),
                         }),
                         ..base.clone()
                     });
@@ -860,7 +879,7 @@ fn from_level(def: &Value, planes: &Planes, target: &str, f: &Family, params: &B
 /// `def` (Revit's definition of family `f`) translated into it: its references, dimensions, parametric forms and symbols,
 /// nested parts and type catalog, beside the forms and symbols it has (Revit's result, which become `snapshot` ones). What
 /// can't be translated is left out and said in `editable.untranslated`; materials `has_material` doesn't know are left off.
-pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> bool) -> Walls {
+pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> bool) -> Exported {
     for x in f.forms.iter_mut() {
         x.snapshot = true;
         // Revit's result says where it is drawn. A form its plan didn't draw is drawn neither cut nor below the cut: the
@@ -882,7 +901,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     if !def.is_object() {
         f.editable =
             Some(super::Editable { ok: false, reason: None, untranslated: vec!["its definition isn't one BIMCraft can read".into()] });
-        return Walls::new();
+        return Exported::default();
     }
     let to = &def["to_bimcraft"];
     let params: BTreeSet<String> = f
@@ -938,6 +957,23 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     } else {
         Walls::new()
     };
+    // The opening each type cut in its wall in Revit (`to_bimcraft.openings`, mm, by type): what the check compares with the
+    // one BIMCraft cuts. One that doesn't read is left out and said.
+    let mut openings = BTreeMap::new();
+    if f.category.hosted() {
+        let reads = |v: &Value, key: &str| num(&v[key]).filter(|x| x.is_finite());
+        for (t, v) in to["openings"].as_object().into_iter().flatten().filter(|(t, _)| f.types.contains_key(*t)) {
+            let big = |x: f64| (1.0..=crate::model::MAX_COORD).contains(&x);
+            // Where it starts says nothing when it starts at the sill.
+            let bottom = if v.get("bottom").is_none_or(Value::is_null) { Some(0.0) } else { reads(v, "bottom") };
+            match (reads(v, "width"), reads(v, "height"), bottom) {
+                (Some(width), Some(height), Some(bottom)) if big(width) && big(height) && bottom.abs() <= crate::model::MAX_COORD => {
+                    openings.insert(t.clone(), Opening { width, height, bottom });
+                }
+                _ => notes.push(format!("its type {t} says an opening in its wall that BIMCraft can't read")),
+            }
+        }
+    }
     let mut reader =
         Reader { map, planes, params, first: first.clone(), notes: Vec::new(), family: f, values: BTreeMap::new(), walls: walls.clone() };
     if let Some(z) = to.get("z_minus").filter(|z| !z.is_null()) {
@@ -1307,9 +1343,30 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     }
     // Forms and lines.
     let mut forms = Vec::new();
+    // Each form of the definition by the id it goes by: what a void's `cuts` can name.
+    let id_of = |v: &Value| v.as_str().map_or_else(|| v.to_string(), str::to_string);
+    let form_ids: BTreeSet<String> =
+        def["forms"].as_array().into_iter().flatten().take(MOST).filter_map(|d| d.get("id")).map(id_of).collect();
     for d in def["forms"].as_array().into_iter().flatten().take(MOST) {
         match reader.forms(d, has_material) {
-            Ok(made) => forms.extend(made),
+            Ok(mut made) => {
+                // Every form made from a definition form says which it was made from; a void that names the forms it cuts
+                // (Revit's void cuts only what it was set to cut) cuts those, and only those the definition has.
+                let source = d.get("id").filter(|v| !v.is_null()).map(id_of);
+                let cuts = d.get("cuts").and_then(Value::as_array).map(|l| {
+                    let mut ids: Vec<String> = l.iter().map(id_of).filter(|i| form_ids.contains(i)).collect();
+                    ids.sort();
+                    ids.dedup();
+                    ids
+                });
+                for x in &mut made {
+                    x.source.clone_from(&source);
+                    if x.void {
+                        x.cuts.clone_from(&cuts);
+                    }
+                }
+                forms.extend(made)
+            }
             Err(e) => notes.push(format!("its {}: {e}", part_of(d))),
         }
     }
@@ -1444,7 +1501,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     f.nested = nested;
     notes.truncate(64);
     f.editable = Some(super::Editable { ok: false, reason: None, untranslated: notes });
-    walls
+    Exported { walls, openings }
 }
 
 /// `forms` with each part-turn revolve turned the way Revit turns it. The definition says its axis and its angles but not
@@ -1610,9 +1667,14 @@ fn free(dimensions: &[Dimension], references: &[Reference], name: &str) -> bool 
     !group.iter().any(|n| stays(n))
 }
 
+/// The height Revit snaps a planting to, mm (20 ft), and how near it a height must be to be snapped (one foot).
+const SNAP: f64 = 6096.0;
+const SNAP_WITHIN: f64 = 304.8;
+
 /// How a planting's base family is scaled in the family it is placed in. Revit draws a planting's plan symbol (its base family
 /// nested in it) at the parent's `Height` over the height the base is drawn at: the top plane of the base, the highest of its
-/// planes standing upright. A formula for it, `Height / 6096`; none where the family isn't a planting, holds its base itself
+/// planes standing upright, where Revit takes a tree within a foot of 20 ft (6096 mm) as 20 ft: `if(abs(Height - 6096) <=
+/// 304.8, 6096, Height) / 6096`. None where the family isn't a planting, holds its base itself
 /// (a shared base is the project's, not read here), or has no `Height` length to follow or no top plane to scale from.
 fn planting_scale(f: &Family, family: &str, type_name: &str) -> Option<Expr> {
     if f.source.as_ref()?.category.as_deref() != Some("Planting") {
@@ -1625,7 +1687,8 @@ fn planting_scale(f: &Family, family: &str, type_name: &str) -> Option<Expr> {
     let values = base.values_in(type_name, &BTreeMap::new(), super::DEFAULT_WALL).ok()?;
     let solved = base.solve(&values).ok()?;
     let top = base.references.iter().filter(|r| r.axis == Axis::Z).filter_map(|r| solved.get(&r.name)).copied().fold(0.0_f64, f64::max);
-    (top.is_finite() && top > 0.0).then(|| Expr::Formula(format!("Height / {top}")))
+    // Revit snaps a planting's height to 20 ft when it is within a foot of it (measured on its plan symbol, whatever the asset).
+    (top.is_finite() && top > 0.0).then(|| Expr::Formula(format!("if(abs(Height - {SNAP}) <= {SNAP_WITHIN}, {SNAP}, Height) / {top}")))
 }
 
 /// What an architect calls a form of the definition: its subcategory, else its material, and what kind of form it is.
@@ -1795,7 +1858,13 @@ mod tests {
         let mut f = planted("Planting", true);
         translated(&mut f, base_in());
         assert_eq!(f.nested.len(), 1, "{:?}", f.editable);
-        assert_eq!(f.nested[0].scale, Some(Expr::Formula("Height / 6096".into())));
+        // Revit takes a tree within a foot of 20 ft as 20 ft: 6000 and 6100 draw alike, 3000 and 6500 follow their own height.
+        let scale = f.nested[0].scale.clone().expect("a planting's base is scaled");
+        for (height, want) in [(3000.0, 3000.0 / 6096.0), (6000.0, 1.0), (6100.0, 1.0), (6500.0, 6500.0 / 6096.0)] {
+            let values = BTreeMap::from([("Height".to_string(), Val::Number(height))]);
+            let k = number(&scale, &values, &mut HashMap::new()).expect("it works out");
+            assert!((k - want).abs() < 1e-9, "{height}: {k} is not {want}");
+        }
         // Any other category's nested part is as it is, and so is a planting with no Height to follow.
         let mut other = planted("Furniture", true);
         translated(&mut other, base_in());
@@ -1803,6 +1872,77 @@ mod tests {
         let mut flat = planted("Planting", false);
         translated(&mut flat, base_in());
         assert_eq!(flat.nested[0].scale, None);
+    }
+
+    #[test]
+    fn a_definition_arc_from_a_leaf_corner_follows_it_in_every_type() {
+        // A swing from the leaf's free corner (Width, 0) round to (0, Width), the hinge at the origin: its angles as numbers
+        // are the first type's, so the arc says its ends, bound to Width (as its radius is).
+        let mut f = door(json!({"types": {"A": {"Width": 762}, "B": {"Width": 915}}}));
+        translated(
+            &mut f,
+            json!({"to_bimcraft": {}, "lines": [{"view": "plan", "curves": [{"arc": {
+                "start": [{"param": "Width"}, 0, 0], "end": [0, {"param": "Width"}, 0], "center": [0, 0, 0], "normal": [0, 0, 1],
+                "radius": {"param": "Width"}}}]}]}),
+        );
+        let swings = made(&f);
+        assert_eq!(swings.len(), 1, "{:?}", f.editable);
+        let arc = swings[0].arc.as_ref().expect("an arc");
+        assert!(arc.start.is_some() && arc.end.is_some(), "{arc:?}");
+        for (t, w) in [("A", 762.0), ("B", 915.0)] {
+            let values = f.values_in(t, &BTreeMap::new(), 200.0).unwrap();
+            let marks = f.marks(t, &values, SymbolView::Plan, None).unwrap();
+            let Some(crate::family::Mark::Line(pts)) = marks.first() else { panic!("{t}: {marks:?}") };
+            let (first, last) = (pts[0], pts[pts.len() - 1]);
+            assert!((first.0 - w).abs() < 0.1 && first.1.abs() < 0.1, "{t}: starts at {first:?}");
+            assert!(last.0.abs() < 0.1 && (last.1 - w).abs() < 0.1, "{t}: ends at {last:?}");
+        }
+    }
+
+    #[test]
+    fn a_void_cutting_only_its_named_form_is_translated_so() {
+        let form = |id: Value, void: bool, cuts: Value| {
+            let mut d = json!({"id": id, "kind": "extrusion", "normal": [0, 0, 1], "start": 0, "end": 100,
+                "loops": [rectangle(0.0, 0.0, 100.0, 50.0, 0.0)], "void": void});
+            if !cuts.is_null() {
+                d["cuts"] = cuts;
+            }
+            d
+        };
+        let mut f = door(json!({}));
+        translated(
+            &mut f,
+            json!({"to_bimcraft": {}, "forms": [
+                form(json!("7"), false, Value::Null),
+                form(json!(8), false, Value::Null),
+                form(json!(9), true, json!(["8", "nowhere"])),
+                form(json!("10"), true, json!([])),
+                form(json!("11"), true, Value::Null)]}),
+        );
+        let made: Vec<&Form> = f.forms.iter().filter(|x| !x.snapshot).collect();
+        let by = |id: &str| made.iter().find(|x| x.source.as_deref() == Some(id)).copied().unwrap_or_else(|| panic!("no form {id}"));
+        assert_eq!(by("7").cuts, None);
+        assert_eq!(by("9").cuts, Some(vec!["8".to_string()]), "only forms the definition has");
+        assert_eq!(by("10").cuts, Some(Vec::new()), "an empty list cuts nothing");
+        assert_eq!(by("11").cuts, None, "one that says nothing keeps cutting what comes before it");
+        assert!(by("8").source.as_deref() == Some("8") && by("8").cuts.is_none());
+    }
+
+    #[test]
+    fn an_opening_the_exporter_measures_is_read_per_type_and_a_bad_one_is_said() {
+        let mut f = door(json!({"types": {"A": {}, "B": {}}}));
+        let out = translate(
+            &mut f,
+            &json!({"to_bimcraft": {"openings": {
+                "A": {"width": 900.0, "height": 2100.0, "bottom": -10.0},
+                "B": {"width": -5.0, "height": 2100.0},
+                "Nowhere": {"width": 900.0, "height": 2100.0}}}}),
+            &|_| true,
+        );
+        assert_eq!(out.openings.len(), 1, "{:?}", out.openings);
+        assert_eq!(out.openings["A"], Opening { width: 900.0, height: 2100.0, bottom: -10.0 });
+        let said = f.editable.as_ref().map(|e| e.untranslated.join(" | ")).unwrap_or_default();
+        assert!(said.contains("type B"), "{said}");
     }
 
     #[test]

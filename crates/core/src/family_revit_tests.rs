@@ -357,10 +357,9 @@ fn a_door_schedule_lists_a_familys_text_parameter_with_each_doors_words() {
     let _ = d;
 }
 
-/// A form of Revit's definition that says every view and every detail level (all eight boxes ticked, which is Revit's
-/// default) is drawn in a plan at Coarse when it crosses the cut: a form that says everything is a form that says nothing.
-#[test]
-fn a_revit_form_saying_every_view_is_drawn_in_a_coarse_plan() {
+/// The export package of a one-type door (900 wide) with a jamb: Revit's result (a mesh, per type) and the definition (an
+/// extrusion bound to the door's planes) that rebuilds it, `to_bimcraft` saying the `openings` Revit cut where given.
+fn jamb_package(openings: Option<Value>) -> Value {
     // A jamb 50 by 200 in plan, 2100 tall, as the exporter writes it: Revit's result (a mesh, per type) and the definition
     // (an extrusion bound to the door's planes) that rebuilds it.
     let cuboid = |lo: [f64; 3], hi: [f64; 3]| {
@@ -383,7 +382,7 @@ fn a_revit_form_saying_every_view_is_drawn_in_a_coarse_plan() {
     ]);
     let everything = json!({"coarse": true, "medium": true, "fine": true, "plan": true, "front": true, "side": true,
                             "plan_top": true, "plan_cut": true});
-    let package = json!({
+    let mut package = json!({
         "format": 2,
         "family": {"category": "door", "host": "wall",
                    "parameters": [{"name": "Width", "kind": "length", "value": 900}, {"name": "Height", "kind": "length", "value": 2100}],
@@ -403,6 +402,17 @@ fn a_revit_form_saying_every_view_is_drawn_in_a_coarse_plan() {
             "forms": [{"kind": "extrusion", "normal": [0, 0, 1], "start": 0, "end": 2100, "loops": [ring], "show": everything}]
         }
     });
+    if let Some(o) = openings {
+        package["definition"]["to_bimcraft"]["openings"] = o;
+    }
+    package
+}
+
+/// A form of Revit's definition that says every view and every detail level (all eight boxes ticked, which is Revit's
+/// default) is drawn in a plan at Coarse when it crosses the cut: a form that says everything is a form that says nothing.
+#[test]
+fn a_revit_form_saying_every_view_is_drawn_in_a_coarse_plan() {
+    let package = jamb_package(None);
     let mut s = Session::new();
     s.files.give("jamb.arqiflow-family.json", package.to_string().into_bytes());
     let r = run(&mut s, "family", json!({"path": "jamb.arqiflow-family.json"}));
@@ -415,4 +425,28 @@ fn a_revit_form_saying_every_view_is_drawn_in_a_coarse_plan() {
             lines(&plan(&s), d).into_iter().filter(|(p, closed)| *closed && near(spans(p).0, 50.0) && near(spans(p).1, 200.0)).count();
         assert_eq!(jamb, 1, "{detail}: the jamb the plane cuts is outlined");
     }
+}
+
+/// A door of the jamb package loaded with Revit's opening `openings` (by type), what it replies for its type "900".
+fn jamb_check(openings: Value) -> Value {
+    let mut s = Session::new();
+    s.files.give("jamb.arqiflow-family.json", jamb_package(Some(openings)).to_string().into_bytes());
+    run(&mut s, "family", json!({"path": "jamb.arqiflow-family.json"}))["check"]["900"].clone()
+}
+
+#[test]
+fn a_door_whose_opening_is_revits_matches() {
+    let c = jamb_check(json!({"900": {"width": 900.0, "height": 2100.0, "bottom": 0.0}}));
+    assert_eq!(c["matched"], true, "{c}");
+    assert_eq!(c["opening"], json!([900.0, 2100.0, 0.0]), "the opening is kept with the check");
+}
+
+#[test]
+fn a_door_cutting_a_narrower_opening_than_revit_fails_and_says_so() {
+    let c = jamb_check(json!({"900": {"width": 1000.0, "height": 2100.0, "bottom": 0.0}}));
+    assert_eq!(c["matched"], false, "{c}");
+    let why = c["reason"].as_str().unwrap_or_default();
+    assert!(why.contains("opening in the wall") && why.contains("900") && why.contains("1000"), "{why}");
+    let low = jamb_check(json!({"900": {"width": 900.0, "height": 2100.0, "bottom": -40.0}}));
+    assert!(low["reason"].as_str().is_some_and(|w| w.contains("40 mm below its sill")), "{low}");
 }

@@ -64,10 +64,11 @@ const AXES: [&str; 3] = ["width", "depth", "height"];
 
 impl Family {
     /// Every type checked as Revit exported it ([`Family::check_type`]), a door or a window in the wall Revit's result was
-    /// made in (`walls`, per type; else one of [`super::DEFAULT_WALL`]): run once, when the family comes in from Revit (loaded
+    /// made in (`exported.walls`, per type; else one of [`super::DEFAULT_WALL`]) and with the opening Revit cut in it
+    /// (`exported.openings`): run once, when the family comes in from Revit (loaded
     /// or reloaded with its definition), never after an edit. Then whether it is editable ([`Family::summarize`]). A family
     /// carrying no Revit result has nothing to check.
-    pub fn run_check(&mut self, others: Others, walls: &super::revit::Walls) {
+    pub fn run_check(&mut self, others: Others, exported: &super::revit::Exported) {
         if !self.has_snapshot() && self.editable.is_none() {
             return;
         }
@@ -75,9 +76,11 @@ impl Family {
             .types
             .keys()
             .filter_map(|t| {
-                let wall = walls.get(t).copied();
-                let c = self.check_type(t, others, wall.unwrap_or(super::DEFAULT_WALL))?;
-                Some((t.clone(), super::TypeCheck { wall, ..c }))
+                let wall = exported.walls.get(t).copied();
+                let opening = exported.openings.get(t);
+                let c = self.check_type(t, others, wall.unwrap_or(super::DEFAULT_WALL), opening)?;
+                let opening = opening.map(|o| [o.width, o.height, o.bottom]);
+                Some((t.clone(), super::TypeCheck { wall, opening, ..c }))
             })
             .collect();
         self.check = check;
@@ -125,8 +128,9 @@ impl Family {
     /// the box within [`BOX`] mm, the shape surface to surface both ways within [`NEAR`] mm ([`compare::surface_gap`]: a
     /// part mirrored, upside down or out of place fails though the totals agree), and the plan's and the elevations' lines
     /// point by point within [`NEAR`] mm. Measured in a wall `wall` mm thick for a door or a window (the one Revit's result
-    /// was made in). None for a type Revit's result says nothing of: it isn't checked.
-    pub fn check_type(&self, t: &str, others: Others, wall: f64) -> Option<TypeCheck> {
+    /// was made in), and, for one that says the opening Revit cut in it, that opening first ([`Family::opening_differs`]: a part of
+    /// the type's match). None for a type Revit's result says nothing of: it isn't checked.
+    pub fn check_type(&self, t: &str, others: Others, wall: f64, opening: Option<&super::revit::Opening>) -> Option<TypeCheck> {
         let fail = |reason: String| Some(TypeCheck { matched: false, reason: Some(reason), ..TypeCheck::default() });
         let snapshot_here =
             self.forms.iter().any(|f| f.snapshot && f.of_type(t)) || self.symbols.iter().any(|y| y.snapshot && y.of_type(t));
@@ -136,6 +140,9 @@ impl Family {
         if !self.has_parametric() {
             return fail("it came without the rules that size it, so it is drawn as Revit made it".into());
         }
+        if let Some(why) = opening.and_then(|o| self.opening_differs(t, wall, o)) {
+            return fail(why);
+        }
         match self.compare_type(t, others, wall, true) {
             Ok(found) => match found.iter().find_map(Compared::failed) {
                 Some(why) => fail(why),
@@ -144,6 +151,42 @@ impl Family {
             },
             Err(why) => fail(why),
         }
+    }
+
+    /// Why the opening type `t` cuts in a wall `wall` mm thick isn't the one Revit cut (`opening`), within [`BOX`] mm: its
+    /// `cut`'s size, else its `Width` and `Height`, against Revit's width and height; and where Revit's starts, which BIMCraft's
+    /// does at the sill. None where they agree, or where it is no door or window, or its size doesn't work out here (the
+    /// shape's check says why).
+    pub fn opening_differs(&self, t: &str, wall: f64, opening: &super::revit::Opening) -> Option<String> {
+        if !self.category.hosted() {
+            return None;
+        }
+        let values = self.values_in(t, &BTreeMap::new(), wall).ok()?;
+        let number = |key: &str| match values.get(key) {
+            Some(super::Val::Number(x)) => Some(*x),
+            _ => None,
+        };
+        let ours = match self.cut_size(&values) {
+            Ok(Some(size)) => Some(size),
+            Ok(None) => number(super::WIDTH).zip(number(super::HEIGHT)),
+            Err(_) => None,
+        };
+        if let Some((w, h)) = ours
+            && ((w - opening.width).abs() > BOX || (h - opening.height).abs() > BOX)
+        {
+            return Some(format!(
+                "its opening in the wall is {w:.0} × {h:.0} mm where Revit's is {:.0} × {:.0} mm",
+                opening.width, opening.height
+            ));
+        }
+        if opening.bottom.abs() > BOX {
+            return Some(if opening.bottom < 0.0 {
+                format!("Revit's opening starts {:.0} mm below its sill", -opening.bottom)
+            } else {
+                format!("Revit's opening starts {:.0} mm above its sill", opening.bottom)
+            });
+        }
+        None
     }
 
     /// Type `t`'s parametric result and Revit's own, measured against each other at each detail level ([`Compared`]), in a
@@ -203,11 +246,11 @@ impl Family {
                     return Ok(out);
                 }
             }
-            // Its nested parts' plan symbols with its own (Revit's result has them among its own).
+            // Its nested parts' symbols in the view, with its own (Revit's result has them among its own).
             let marks = |snapshot: bool, view: SymbolView| -> Result<Vec<super::Mark>, String> {
                 let mut out = self
                     .marks_where(&values, &|y: &super::Symbol| y.view == view && y.of_type(t) && y.snapshot == snapshot && y.drawn_at(d))?;
-                if !snapshot && view == SymbolView::Plan {
+                if !snapshot {
                     self.nested_marks(t, &values, (view, Some(d)), others, (0, &std::cell::Cell::new(0)), &mut out)?;
                 }
                 Ok(out)
@@ -439,7 +482,7 @@ mod tests {
     fn a_frame_swept_round_the_opening_is_drawn_in_plan_by_its_cut_jambs() {
         let f = door(vec![jamb(-450.0, false), jamb(450.0, true)]);
         let others: Others = &|_| None;
-        let check = f.check_type("A", others, super::super::DEFAULT_WALL).expect("a type Revit's result is for");
+        let check = f.check_type("A", others, super::super::DEFAULT_WALL, None).expect("a type Revit's result is for");
         assert!(check.matched, "{:?}", check.reason);
         // Its plan: the two jambs' sections, the rebate among them, and no line across the opening.
         let values = f.values_in("A", &BTreeMap::new(), super::super::DEFAULT_WALL).unwrap();
@@ -493,12 +536,12 @@ mod tests {
         let others: Others = &|_| None;
         // Not an RPC family: its rules draw no solid where Revit's placeholder is, which fails it.
         let plain = tree(false, 1000.0);
-        let check = plain.check_type("Small", others, super::super::DEFAULT_WALL).expect("a type Revit's result is for");
+        let check = plain.check_type("Small", others, super::super::DEFAULT_WALL, None).expect("a type Revit's result is for");
         assert!(!check.matched, "{:?}", check.reason);
         // An RPC one: only its plan is compared, the nested base scaled by Height / 6000 (a half, a whole).
         let mut f = tree(true, 1000.0);
         for t in ["Small", "Tall"] {
-            let check = f.check_type(t, others, super::super::DEFAULT_WALL).expect("checked");
+            let check = f.check_type(t, others, super::super::DEFAULT_WALL, None).expect("checked");
             assert!(check.matched, "{t}: {:?}", check.reason);
             assert_eq!(check.reason.as_deref(), Some(RPC_3D));
         }
@@ -548,7 +591,7 @@ mod tests {
         let plain = |dx: f64| json!([[dx - 50.0, -50.0], [dx + 50.0, -50.0], [dx + 50.0, 50.0], [dx - 50.0, 50.0], [dx - 50.0, -50.0]]);
         let f = door(vec![plain(-450.0), plain(450.0)]);
         let others: Others = &|_| None;
-        let check = f.check_type("A", others, super::super::DEFAULT_WALL).expect("checked");
+        let check = f.check_type("A", others, super::super::DEFAULT_WALL, None).expect("checked");
         assert!(!check.matched);
     }
 }

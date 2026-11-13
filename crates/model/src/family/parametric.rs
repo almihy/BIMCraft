@@ -192,7 +192,7 @@ pub struct Catalog {
 /// didn't, Revit's (its `snapshot` forms and symbols), until someone changes it. `edited`: changed since it came in (its values,
 /// the family's definition, or switched to BIMCraft's rebuild): BIMCraft's rebuild is what it is from then on, drawn whatever
 /// the check said, and never compared with Revit's result again. `wall`: a door's or a window's, the thickness of the wall
-/// Revit's result was made in, which it was checked in. A type with no check (one made since, not like another) was never
+/// Revit's result was made in, which it was checked in; `opening`: the opening Revit cut in it. A type with no check (one made since, not like another) was never
 /// checked.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -204,6 +204,10 @@ pub struct TypeCheck {
     pub edited: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wall: Option<f64>,
+    /// A door's or a window's opening in the wall as Revit made it, mm: its width, its height and where it starts over the
+    /// sill (negative: below it). The check compared it with the one BIMCraft cuts; a type drawn as Revit made it cuts it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opening: Option<[f64; 3]>,
 }
 
 impl TypeCheck {
