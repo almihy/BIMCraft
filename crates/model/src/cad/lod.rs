@@ -87,6 +87,12 @@ impl std::fmt::Debug for Lod {
     }
 }
 
+/// A colour as a drawing's cells hold it: its channels (none, the view's ink) and whether it is a fill's.
+type Held = (Option<(u8, u8, u8)>, bool);
+
+/// A row of a layer's marks being painted: which row, its marks and its layer's colours.
+type RowOf<'a> = (u32, &'a [[u8; 4]], &'a [Rgb]);
+
 /// A picture made of a drawing: of which band, for which look, and the picture (none when it would hold too much).
 type Kept = (usize, u64, Option<Arc<Picture>>);
 
@@ -260,7 +266,7 @@ impl Lod {
         let mut known: HashMap<&str, u16> = HashMap::new();
         let mut layer_of = Vec::with_capacity(d.entities.len());
         let mut colors: Vec<(Option<Rgb>, bool)> = Vec::new();
-        let mut color_at: HashMap<(Option<(u8, u8, u8)>, bool), u8> = HashMap::new();
+        let mut color_at: HashMap<Held, u8> = HashMap::new();
         let mut color_of = Vec::with_capacity(d.entities.len());
         let mut boxes = Vec::with_capacity(d.entities.len());
         // A colour by layer is its layer's: looked up once a layer.
@@ -706,7 +712,7 @@ impl Band {
                         .entry(*l)
                         .or_insert_with(|| colors.iter().map(|(c, fill)| color(usize::from(*l), *c, *fill)).collect::<Option<Vec<Rgb>>>());
                 }
-                let mut rows: Vec<(u32, &[[u8; 4]], &[Rgb])> = Vec::new();
+                let mut rows: Vec<RowOf<'_>> = Vec::new();
                 for (l, marks) in layers {
                     let Some(palette) = palettes.get(l).and_then(|p| p.as_deref()) else { continue };
                     for (k, (y, start)) in marks.rows.iter().enumerate() {

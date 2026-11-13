@@ -2645,7 +2645,7 @@ impl CadEntities<'_> {
     }
 
     /// Entity `i` if it is a fill shown: its rings, its colour as drawn (its own, halftone or not) and its opacity.
-    fn fill(&self, i: usize) -> Option<(&[Vec<P2>], Rgb, u8)> {
+    fn fill(&self, i: usize) -> Option<CadFill<'_>> {
         let e = self.cad.dxf().entities.get(i)?;
         let crate::dxf::Shape::Fill { rings, .. } = &e.shape else { return None };
         if !self.shows(e) {
@@ -2915,6 +2915,9 @@ fn cad_fills_fit(
     covered <= MOST_FILLED
 }
 
+/// A big fill a picture of cells draws: its rings, its colour as drawn and its opacity.
+type CadFill<'c> = (&'c [Vec<P2>], Rgb, u8);
+
 /// Picture `p` of a drawing's level of detail (placed by `ci`), its runs `runs`, the part of it in the box from `lo` to `hi`
 /// in the drawing's units, drawn as one image ([`Part::Cells`]) in the page's order: each run of cells the pixels their ink
 /// makes, a big fill (`fill` gives its rings, colour and opacity; none, it is hidden) filled where it covers. A cell's ink
@@ -2927,7 +2930,7 @@ fn cad_cells<'c>(
     (picture, p, runs): (&crate::cad::lod::Picture, usize, &[crate::cad::lod::Run]),
     cell: f64,
     [lo, hi]: [P2; 2],
-    fill: &dyn Fn(usize) -> Option<(&'c [Vec<P2>], Rgb, u8)>,
+    fill: &dyn Fn(usize) -> Option<CadFill<'c>>,
 ) {
     let place = crate::model::cad_place(ci);
     let frame = d.view;
@@ -3100,7 +3103,7 @@ fn fill_into(
             xs.clear();
             xs.extend(active.iter().filter_map(|i| edges.get(*i)).filter(|e| e.0 <= sy).map(|e| e.2 + (sy - e.0) * e.3));
             xs.sort_by(f32::total_cmp);
-            for pair in xs.chunks_exact(2) {
+            for pair in xs.as_chunks::<2>().0 {
                 let (a, b) = (pair[0].clamp(0.0, pw as f32), pair[1].clamp(0.0, pw as f32));
                 if b <= a {
                     continue;
