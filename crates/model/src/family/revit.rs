@@ -871,24 +871,46 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
 fn turned_as_revit(f: &Family, mut forms: Vec<Form>) -> Vec<Form> {
     let Some(first) = f.types.keys().next().cloned() else { return forms };
     let Ok(values) = f.values(&first, &BTreeMap::new()) else { return forms };
-    let revit: f64 = f
-        .forms
-        .iter()
-        .filter(|x| x.snapshot && x.of_type(&first) && x.show.is_none_or(|s| s.fine))
-        .map(|x| super::shapes::volume(&x.mesh).abs())
-        .sum();
+    let snapshot: Vec<&Form> = f.forms.iter().filter(|x| x.snapshot && x.of_type(&first) && x.show.is_none_or(|s| s.fine)).collect();
+    let revit: f64 = snapshot.iter().map(|x| super::shapes::volume(&x.mesh).abs()).sum();
     if revit <= 0.0 {
         return forms;
     }
+    type Bounds = ([f64; 3], [f64; 3]);
+    let bounds = |tris: &[[crate::geom::v3::P3; 3]]| -> Option<Bounds> {
+        let mut b: Option<Bounds> = None;
+        for q in tris.iter().flatten() {
+            b = Some(match b {
+                None => (*q, *q),
+                Some((lo, hi)) => (std::array::from_fn(|k| lo[k].min(q[k])), std::array::from_fn(|k| hi[k].max(q[k]))),
+            });
+        }
+        b
+    };
+    let boxes: Vec<Bounds> = snapshot.iter().filter_map(|x| bounds(&x.mesh)).collect();
     let mut probe = Family { forms: Vec::new(), symbols: Vec::new(), nested: Vec::new(), check: BTreeMap::new(), ..f.clone() };
-    let mut off = |forms: &[Form]| -> f64 {
+    // How far it is from Revit's: each piece's box from the nearest of Revit's pieces' (mm), then the volume.
+    let mut off = |forms: &[Form]| -> (f64, f64) {
         probe.forms = forms.to_vec();
         let how = super::Build { snapshot: false, others: &|_| None, depth: 0, spent: &std::cell::Cell::new(0) };
         match probe.build(&first, &values, &mut HashMap::new(), &mut crate::csg::Meter::default(), how) {
-            Ok(pieces) => (pieces.iter().map(|p| super::shapes::volume(&p.tris).abs()).sum::<f64>() - revit).abs(),
-            Err(_) => f64::INFINITY,
+            Ok(pieces) => {
+                let apart = pieces
+                    .iter()
+                    .filter_map(|p| bounds(&p.tris))
+                    .map(|(lo, hi)| {
+                        boxes
+                            .iter()
+                            .map(|(a, b)| (0..3).map(|k| (lo[k] - a[k]).abs() + (hi[k] - b[k]).abs()).sum::<f64>())
+                            .fold(f64::INFINITY, f64::min)
+                    })
+                    .sum::<f64>();
+                (apart, (pieces.iter().map(|p| super::shapes::volume(&p.tris).abs()).sum::<f64>() - revit).abs())
+            }
+            Err(_) => (f64::INFINITY, f64::INFINITY),
         }
     };
+    let better = |now: (f64, f64), best: (f64, f64)| now.0 < best.0 - 1.0 || (now.0 <= best.0 + 1.0 && now.1 < best.1 * 0.999);
     let mut best = off(&forms);
     for i in 0..forms.len() {
         let part = forms[i].axis.is_some()
@@ -902,7 +924,7 @@ fn turned_as_revit(f: &Family, mut forms: Vec<Form>) -> Vec<Form> {
         let was = forms[i].clone();
         (forms[i].from, forms[i].to) = (neg(was.to.clone()), neg(was.from.clone()));
         let now = off(&forms);
-        if now < best * 0.999 {
+        if better(now, best) {
             best = now;
         } else {
             forms[i] = was;
