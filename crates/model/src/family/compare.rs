@@ -92,12 +92,28 @@ struct Grid {
     cells: HashMap<[i64; 3], Vec<usize>>,
     /// The least and the most cell keys anything is in.
     span: [[i64; 3]; 2],
+    /// What reaches too many cells to be listed in each: looked at for every point instead.
+    big: Vec<usize>,
+    /// How many places the cells list items in all.
+    entries: usize,
 }
+
+/// An item that touches more cells than this is kept apart (`Grid::big`), not listed in each.
+const MOST_CELLS: f64 = 512.0;
+/// The most places the cells list items in all; past that, items are kept apart.
+const MOST_ENTRIES: usize = 20_000_000;
 
 impl Grid {
     fn new(lo: P3, hi: P3, near: f64) -> Grid {
         let side = (0..3).map(|k| hi[k] - lo[k]).fold(0.0, f64::max);
-        Grid { lo, cell: (side / CELLS).max(near * 2.0).max(1.0), cells: HashMap::new(), span: [[i64::MAX; 3], [i64::MIN; 3]] }
+        Grid {
+            lo,
+            cell: (side / CELLS).max(near * 2.0).max(1.0),
+            cells: HashMap::new(),
+            span: [[i64::MAX; 3], [i64::MIN; 3]],
+            big: Vec::new(),
+            entries: 0,
+        }
     }
 
     fn key(&self, p: P3) -> [i64; 3] {
@@ -107,6 +123,14 @@ impl Grid {
     /// Item `i` in every cell its box (`lo` to `hi`) touches.
     fn put(&mut self, i: usize, lo: P3, hi: P3) {
         let (a, b) = (self.key(lo), self.key(hi));
+        // A long or diagonal triangle across the whole box would be in tens of thousands of cells; one of a hundred thousand
+        // such would be in more than memory holds.
+        let cells = (0..3).map(|k| (b[k] - a[k] + 1) as f64).product::<f64>();
+        if cells > MOST_CELLS || self.entries as f64 + cells > MOST_ENTRIES as f64 {
+            self.big.push(i);
+            return;
+        }
+        self.entries += cells as usize;
         for k in 0..3 {
             self.span[0][k] = self.span[0][k].min(a[k]);
             self.span[1][k] = self.span[1][k].max(b[k]);
@@ -126,13 +150,18 @@ impl Grid {
         let (a, b) = (self.key(sub(p, [reach; 3])), self.key(add(p, [reach; 3])));
         let a: [i64; 3] = std::array::from_fn(|k| a[k].max(self.span[0][k]));
         let b: [i64; 3] = std::array::from_fn(|k| b[k].min(self.span[1][k]));
+        let big = self.big.iter().copied();
         if (0..3).any(|k| a[k] > b[k]) {
-            return Box::new(std::iter::empty());
+            return Box::new(big);
         }
         let count = (0..3).map(|k| (b[k] - a[k] + 1) as f64).product::<f64>();
         if count > self.cells.len() as f64 {
             return Box::new(
-                self.cells.iter().filter(move |(k, _)| (0..3).all(|i| k[i] >= a[i] && k[i] <= b[i])).flat_map(|(_, v)| v.iter().copied()),
+                self.cells
+                    .iter()
+                    .filter(move |(k, _)| (0..3).all(|i| k[i] >= a[i] && k[i] <= b[i]))
+                    .flat_map(|(_, v)| v.iter().copied())
+                    .chain(big),
             );
         }
         Box::new(
@@ -140,7 +169,8 @@ impl Grid {
                 .flat_map(move |x| (a[1]..=b[1]).flat_map(move |y| (a[2]..=b[2]).map(move |z| [x, y, z])))
                 .filter_map(|k| self.cells.get(&k))
                 .flatten()
-                .copied(),
+                .copied()
+                .chain(big),
         )
     }
 }
@@ -495,6 +525,24 @@ mod tests {
         };
         let quads = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]];
         quads.iter().flat_map(|[a, b, c, d]| [[p(*a), p(*b), p(*c)], [p(*a), p(*c), p(*d)]]).collect()
+    }
+
+    #[test]
+    fn triangles_across_the_whole_box_are_kept_apart_not_listed_in_every_cell() {
+        // Each reaches nearly every cell of the grid (48 by 48 by 48): listed in each, these would be millions of entries.
+        let tris: Vec<[P3; 3]> = (0..200)
+            .map(|k| {
+                let d = k as f64 * 4.0;
+                [[0.0, 0.0, 0.0], [1000.0, d, 1000.0], [d, 1000.0, 1000.0]]
+            })
+            .collect();
+        let surface = Surface::new(&tris, 5.0).unwrap();
+        assert!(surface.grid.entries < 1_000_000, "{} entries", surface.grid.entries);
+        assert_eq!(surface.grid.big.len(), 200);
+        for p in [[500.0, 500.0, 500.0], [10.0, 900.0, 20.0], [2000.0, 0.0, 0.0]] {
+            let brute = tris.iter().map(|t| length(sub(p, nearest_on(p, *t)))).fold(f64::INFINITY, f64::min);
+            assert!((surface.distance(p, 5000.0) - brute.min(5000.0)).abs() < 1e-9, "{p:?}");
+        }
     }
 
     #[test]
