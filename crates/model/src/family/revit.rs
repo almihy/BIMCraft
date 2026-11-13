@@ -880,6 +880,7 @@ fn from_level(def: &Value, planes: &Planes, target: &str, f: &Family, params: &B
 /// nested parts and type catalog, beside the forms and symbols it has (Revit's result, which become `snapshot` ones). What
 /// can't be translated is left out and said in `editable.untranslated`; materials `has_material` doesn't know are left off.
 pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> bool) -> Exported {
+    f.clear_crossing_outlines();
     for x in f.forms.iter_mut() {
         x.snapshot = true;
         // Revit's result says where it is drawn. A form its plan didn't draw is drawn neither cut nor below the cut: the

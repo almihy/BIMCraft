@@ -1773,6 +1773,18 @@ impl Family {
         self.embedded.values_mut().for_each(|inner| inner.rename_material(from, to));
     }
 
+    /// A mesh form's traced `outline` that crosses itself taken away, so its hull stands for it, as a draw would have it: tested
+    /// once, as the family is loaded, not at every draw of every type (a ring's pairs of edges are many); in the families it
+    /// holds itself too.
+    pub fn clear_crossing_outlines(&mut self) {
+        for x in &mut self.forms {
+            if x.outline.len() > 2 && crosses_itself(&x.outline.iter().map(|[a, b]| P2(*a, *b)).collect::<Vec<_>>()) {
+                x.outline.clear();
+            }
+        }
+        self.embedded.values_mut().for_each(Family::clear_crossing_outlines);
+    }
+
     /// Type `from` renamed `to` in the lists of types its forms and symbols are of.
     pub fn rename_type(&mut self, from: &str, to: &str) {
         let lists = self
@@ -3263,6 +3275,9 @@ fn too_fine(triangles: usize, what: &str) -> Result<(), String> {
 /// How near a point is to a line, or a segment's end to another's, for them to meet, mm (an area, for the turn of three points).
 const MEET: f64 = 1e-9;
 
+/// The most points of a traced outline a draw tests for crossing itself; a longer one was tested as its family was loaded.
+const TESTED_AT_DRAW: usize = 1024;
+
 /// Whether the closed `ring` crosses or touches itself: two of its edges that share no corner meet.
 fn crosses_itself(ring: &[P2]) -> bool {
     let n = ring.len();
@@ -3314,7 +3329,9 @@ fn mesh(tris: &[[P3; 3]], traced: &[[f64; 2]], material: String) -> Result<Piece
             return Err("a point of its `outline` isn't a usable number".into());
         }
         let ring: Vec<P2> = traced.iter().map(|[x, y]| P2(*x, *y)).collect();
-        if crosses_itself(&ring) {
+        // A long one was tested when it was loaded ([`Family::clear_crossing_outlines`]); here, every draw of every type would
+        // test its pairs of edges again.
+        if traced.len() <= TESTED_AT_DRAW && crosses_itself(&ring) {
             // A traced outline that zig-zags or crosses itself fills nothing: the hull stands for it, as if none was traced.
             crate::geom::hull(tris.iter().flatten().map(|p| P2(p[0], p[1])).collect())
         } else if crate::geom::area(&ring) < 0.0 {
@@ -3952,6 +3969,34 @@ mod tests {
         f.type_like("E", "B");
         assert_eq!(f.nested[0].type_in.get("E").map(String::as_str), Some("Other"));
         assert!(f.check_parametric().is_ok());
+    }
+
+    /// A ring of `n` points on a circle, the two at `k` swapped where `swap`: it crosses itself there.
+    fn circle_ring(n: usize, swap: Option<usize>) -> Vec<[f64; 2]> {
+        let mut r: Vec<[f64; 2]> =
+            (0..n).map(|k| (k as f64 * std::f64::consts::TAU / n as f64).sin_cos()).map(|(s, c)| [500.0 * c, 500.0 * s]).collect();
+        if let Some(k) = swap {
+            r.swap(k, k + 1);
+        }
+        r
+    }
+
+    #[test]
+    fn an_outline_that_crosses_itself_is_cleared_once_at_load_not_tested_at_every_draw() {
+        let tris = [[[0.0, 0.0, 0.0], [100.0, 0.0, 0.0], [0.0, 100.0, 100.0]]];
+        let family = |outline: Vec<[f64; 2]>| -> Family {
+            serde_json::from_value(json!({"types": {"A": {}}, "forms": [{"mesh": tris, "outline": outline}]})).unwrap()
+        };
+        let mut f = family(circle_ring(5000, Some(2000)));
+        revit::translate(&mut f, &json!({}), &|_| true);
+        assert!(f.forms[0].outline.is_empty(), "a crossing outline of five thousand points was kept");
+        // One that doesn't cross stays.
+        let mut f = family(circle_ring(5000, None));
+        revit::translate(&mut f, &json!({}), &|_| true);
+        assert_eq!(f.forms[0].outline.len(), 5000);
+        // A large outline is trusted at a draw (it was looked at when loaded): no test of its pairs of edges.
+        let pieces = f.pieces("A", &f.values("A", &BTreeMap::new()).unwrap()).unwrap();
+        assert_eq!(pieces[0].outline.len(), 5000);
     }
 
     #[test]
