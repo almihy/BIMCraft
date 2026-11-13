@@ -215,7 +215,10 @@ in mm on paper (lines `LINE_PITCH` sizes apart, each character's place and width
 `Prim::Fill` of rings filled by the non-zero rule, our lettering and Plex Mono's bold as lines, underlines as lines; `Part::Text`)
 and which the desktop's editor reads for its caret, its selection and a click's place (`Layout::caret`, `boxes`, `index_at`;
 `Drawing::note_frame` turns layout mm into the drawing's pixels and back). The canvas fills a letter, holes and all, from
-`text::triangles` (strips between every corner's and crossing's height), kept by its points for the frames that draw it again.
+`text::triangles` (strips between every corner's and crossing's height), kept by its points for the frames that draw it again;
+an even-odd fill (a hatch, a PDF's fill) the same way by `text::fill_triangles`, a fill of more than 400,000 edges cut into
+bands across first, each swept with the edges reaching into it, so its holes stay holes (past `MAX_FILL_EDGES`, 4 million,
+it is filled ring by ring).
 A file of format 7 has notes with a `size`: reading it gives each a type of that size (`Model::typed_notes`), and `Model::check`
 refuses a `size` left on one. A note holds up to `MAX_NOTE` (4,000) characters and `MAX_RUNS` (1,000) runs.
 

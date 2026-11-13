@@ -6244,6 +6244,7 @@ mod display;
 mod dock;
 mod draw;
 mod electrical;
+mod fill_rules;
 mod fills;
 mod filter;
 mod flip;
