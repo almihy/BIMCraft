@@ -354,6 +354,16 @@ impl Default for Show {
 }
 
 impl Show {
+    /// What a form that says nothing is drawn as, as before Visibility Settings: in every view, at every detail level but
+    /// Coarse.
+    pub const UNSAID: Show =
+        Show { coarse: false, medium: true, fine: true, plan: true, front: true, side: true, plan_top: true, plan_cut: true };
+
+    /// What `show` draws: its settings, or what a form that says nothing is drawn as.
+    pub fn of(show: Option<Show>) -> Show {
+        show.unwrap_or(Show::UNSAID)
+    }
+
     /// Whether a view at detail level `d` draws it.
     pub fn at(&self, d: crate::graphics::Detail) -> bool {
         use crate::graphics::Detail;
@@ -384,6 +394,14 @@ impl Default for Levels {
 }
 
 impl Levels {
+    /// What a symbol that says nothing is drawn at: every detail level but Coarse.
+    pub const UNSAID: Levels = Levels { coarse: false, medium: true, fine: true };
+
+    /// What `levels` draws at: its settings, or what a symbol that says nothing is drawn at.
+    pub fn of(levels: Option<Levels>) -> Levels {
+        levels.unwrap_or(Levels::UNSAID)
+    }
+
     /// Whether a view at detail level `d` draws it.
     pub fn at(&self, d: crate::graphics::Detail) -> bool {
         Show { coarse: self.coarse, medium: self.medium, fine: self.fine, ..Show::default() }.at(d)
@@ -428,10 +446,7 @@ pub struct Symbol {
 impl Symbol {
     /// Whether a view at detail level `d` draws it: at the levels its `show` says, else at every level but Coarse.
     pub fn drawn_at(&self, d: crate::graphics::Detail) -> bool {
-        match &self.show {
-            Some(l) => l.at(d),
-            None => d != crate::graphics::Detail::Coarse,
-        }
+        Levels::of(self.show).at(d)
     }
 }
 

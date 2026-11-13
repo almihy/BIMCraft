@@ -4207,7 +4207,10 @@ fn opening(d: &mut Drawing, m: &Model, e: &Element, o: &Opening, w: &Wall, cut: 
     // symbols drawn at that level (a door's leaf and swing).
     if o.family.is_some() {
         let detail = d.detail;
-        let drawn = |p: &crate::family::Piece| p.show.map_or(detail != Detail::Coarse, |s| s.plan && s.plan_cut && s.at(detail));
+        let drawn = |p: &crate::family::Piece| {
+            let s = crate::family::Show::of(p.show);
+            s.plan && s.plan_cut && s.at(detail)
+        };
         for piece in m.opening_pieces(e).iter().filter(|p| p.bottom <= cut && cut < p.top && drawn(p)) {
             d.line(&piece.outline, BY_CATEGORY, INK, true);
         }
