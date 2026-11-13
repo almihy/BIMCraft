@@ -769,3 +769,46 @@ fn an_arch_through_a_bound_point_follows_its_width_where_its_centre_cant() {
     let want = (1600.0 * 1000.0 + segment) * 100.0;
     assert!((volume(&f, "Wide") - want).abs() < want * 0.005, "{} against {want}", volume(&f, "Wide"));
 }
+
+#[test]
+fn a_plane_following_a_host_face_a_masking_region_and_a_nested_parts_detail_levels_are_read_as_revit_has_them() {
+    let mut s = Session::new();
+    run(
+        &mut s,
+        "family",
+        json!({"name": "Sample Knob", "category": "generic", "types": {"Standard": {}},
+               "forms": [{"profile": [[0, 0], [50, 0], [50, 50], [0, 50]], "from": 0, "to": 50, "show": {"coarse": false}}]}),
+    );
+    let at = json!({"A": 0});
+    let fam = json!({
+        "name": "Sample Sill", "category": "door", "host": "wall", "types": {"A": {}},
+        "parameters": [{"name": "Width", "kind": "length", "value": 900}, {"name": "Height", "kind": "length", "value": 2100}],
+        "revit": {
+            "reference_planes": [
+                {"id": "w.exterior", "name": "Host Exterior", "normal": [0, 1, 0], "is_reference": "host_exterior", "at": {"A": 100}},
+                {"id": "t", "name": "Threshold Front", "normal": [0, 1, 0], "at": {"A": 130}, "follows": {"ref": "w.exterior", "offset": 30}},
+                {"id": "c", "name": "Center", "normal": [1, 0, 0], "defines_origin": true, "at": at}
+            ],
+            "lines": [{"view": "plan", "filled": true, "masking": true, "curves": [line(json!([0, 0, 0]), json!([100, 0, 0]))]}],
+            "nested": [{"family": "Sample Knob", "type": "Standard", "at": [0, 0, 0], "rotation": 0, "mirrored": false,
+                        "show": {"coarse": true, "medium": true, "fine": true, "plan": true, "front": true, "side": true, "plan_top": false}}]
+        }
+    });
+    run(&mut s, "family", fam);
+    let f = s.model.families["Sample Sill"].clone();
+    // The threshold's plane is kept 30 out from the wall's face, whatever the wall.
+    assert!(
+        f.dimensions.iter().any(|d| d.locked && d.value == Some(30.0) && d.refs == ["Host Exterior", "Threshold Front"]),
+        "{:?}",
+        f.dimensions
+    );
+    let v = f.values_in("A", &Default::default(), 300.0).unwrap();
+    assert_eq!(v["ref(Threshold Front)"], crate::family::Val::Number(180.0));
+    // The masking region draws nothing.
+    assert!(f.symbols.iter().all(|y| y.snapshot), "{:?}", f.symbols);
+    // The knob: its own form is off at Coarse, its nested part's settings take off its Top/Bottom; both hold.
+    let others = |n: &str| s.model.families.get(n);
+    let pieces = f.pieces_with("A", &f.values("A", &Default::default()).unwrap(), &others).unwrap();
+    let show = pieces[0].show.unwrap();
+    assert!(!show.coarse && show.medium && !show.plan_top, "{show:?}");
+}

@@ -283,7 +283,16 @@ other as the check and the fallback (`snapshot` forms and symbols), and checks e
   (revolves, arcs) may hold up to 3 % more than Revit's result (`VOLUME_CURVED`): Revit's is its curves in a few facets.
   Why a family isn't editable is said in an architect's words: its part by its subcategory or material, "placed by a rule
   BIMCraft can't follow yet", how much more or less it holds than Revit's, its width, depth or height off.
-- **Format.** `embedded`, `section_holes` and `section_end_holes` are format 22's (unreleased when they came: no step).
+- **Later in the round.** A form's `show` also carries Revit's Top/Bottom (`plan_top`) and Plan/RCP when cut (`plan_cut`):
+  `Piece::in_plan_cut` is the floor plan's rule for every family (cut: Plan/RCP and when cut; below: Top/Bottom, and for a
+  family other than a door's or a window's its Plan/RCP too; above: such a family's Plan/RCP), and a nested part is drawn
+  where both its own settings and its form's say (`Show::and`). A reference plane that `follows` a host's face (the
+  exporter thickened the host) keeps its offset from it where nothing else ties it to what stays (`free`). A line entry
+  that is `masking` or `invisible` draws nothing. An arc's `mid` (a bound point on it) makes its centre the one through
+  its corners and that point, per type (`Bend::through`, `circumcentre`): an arched window's head, whose radius follows
+  its width as no sum of parameters does.
+- **Format.** `embedded`, `section_holes`, `section_end_holes`, `plan_top`, `plan_cut` and an arc's `through` are format
+  22's (unreleased when they came: no step).
 
 ## Symbol sets
 
