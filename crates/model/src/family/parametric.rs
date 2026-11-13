@@ -421,6 +421,33 @@ impl Family {
         Ok(())
     }
 
+    /// Whether the families it holds itself are sound, each as a family of the project is: at most [`MAX_NESTED`] of them,
+    /// held at most [`MAX_NESTING`] deep, each named.
+    pub(crate) fn check_embedded(&self, has_material: &dyn Fn(&str) -> bool, depth: usize) -> Result<(), String> {
+        if self.embedded.is_empty() {
+            return Ok(());
+        }
+        if depth >= MAX_NESTING {
+            return Err(format!("it holds families nested more than {MAX_NESTING} deep"));
+        }
+        if self.embedded.len() > MAX_NESTED {
+            return Err(format!("it holds more than {MAX_NESTED} nested families"));
+        }
+        for (name, inner) in &self.embedded {
+            let shown: String = name.chars().take(40).collect();
+            if !one_line(name, MAX_TEXT) {
+                return Err(format!("a family it holds is named `{shown}`: a name is one line"));
+            }
+            inner.check_at(has_material, depth + 1).map_err(|e| format!("the nested family `{shown}` it holds: {e}"))?;
+        }
+        Ok(())
+    }
+
+    /// The family a nested part named `name` is of: one it holds itself, else the project's (`others`).
+    pub fn nested_family<'r, 's: 'r, 'o: 'r>(&'s self, name: &str, others: super::Others<'o>) -> Option<&'r Family> {
+        self.embedded.get(name).or_else(|| others(name))
+    }
+
     /// Type `new`, made like `old` (Duplicate), checked as `old` was: a duplicate of a type that matched is parametric.
     pub(crate) fn check_like(&mut self, new: &str, old: &str) {
         if let Some(c) = self.check.get(old).cloned() {

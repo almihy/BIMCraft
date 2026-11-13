@@ -11062,15 +11062,17 @@ fn family(s: &mut Session, p: &Value) -> R {
         // The type the person picked to place, which the reply gives back: Load Family starts placing it.
         let place = fields.remove("place").filter(|v| v.is_string());
         // An export package (Arqiflow's): its `family`, its `definition` (Revit's, translated) and its nested families,
-        // each loaded first under its own name.
+        // each loaded first: a shared one into the project under its own name, one that isn't held by the family it is in.
         if let Some(Value::Object(inner)) = fields.get("family").cloned() {
             let definition = fields.get("definition").cloned().filter(|d| !d.is_null());
             let nested = fields.get("nested_families").cloned();
-            if !flag(c, &p, "dry_run")? {
-                load_nested(s, nested.as_ref())?;
-            }
+            let held = if flag(c, &p, "dry_run")? { BTreeMap::new() } else { load_nested(s, nested.as_ref(), definition.as_ref())? };
             fields = inner;
             loadable(&mut fields);
+            let own = held_by(definition.as_ref(), &held);
+            if !own.is_empty() {
+                fields.insert("embedded".into(), serde_json::to_value(own).map_err(|e| bad(c, e))?);
+            }
             if let Some(d) = definition {
                 fields.insert("revit".into(), d);
             }
@@ -11101,6 +11103,7 @@ fn family(s: &mut Session, p: &Value) -> R {
             "references",
             "dimensions",
             "nested",
+            "embedded",
             "catalog",
             "check",
             "editable",
@@ -11204,6 +11207,7 @@ fn family(s: &mut Session, p: &Value) -> R {
         "references",
         "dimensions",
         "nested",
+        "embedded",
         "catalog",
         "check",
         "editable",
@@ -11360,6 +11364,12 @@ fn family(s: &mut Session, p: &Value) -> R {
             if v.is_null() { Vec::new() } else { serde_json::from_value(v.clone()).map_err(|e| field("nested", e))? };
         crate::library::keep_parts(&mut f.nested, &mut list);
         f.nested = list;
+    }
+    // The families its nested parts are of that it holds itself (Revit's nested families that aren't shared).
+    match p.get("embedded") {
+        None => {}
+        Some(Value::Null) => f.embedded.clear(),
+        Some(v) => f.embedded = serde_json::from_value(v.clone()).map_err(|e| field("embedded", e))?,
     }
     match p.get("catalog") {
         None => {}
@@ -11572,10 +11582,29 @@ fn loadable(fields: &mut Map<String, Value>) {
     }
 }
 
-/// The nested families of an export package (`{name: {family, definition}}`), each loaded as a family of its own, those it
-/// nests first; at most [`crate::family::MAX_NESTED`] of them.
-fn load_nested(s: &mut Session, nested: Option<&Value>) -> Result<(), String> {
-    let Some(Value::Object(all)) = nested else { return Ok(()) };
+/// The families a definition's nested parts name, of those `held`: what the family it defines holds itself.
+fn held_by(definition: Option<&Value>, held: &BTreeMap<String, crate::family::Family>) -> BTreeMap<String, crate::family::Family> {
+    let names: std::collections::BTreeSet<&str> =
+        definition.and_then(|d| d["nested"].as_array()).into_iter().flatten().filter_map(|n| n["family"].as_str()).collect();
+    held.iter().filter(|(n, _)| names.contains(n.as_str())).map(|(n, f)| (n.clone(), f.clone())).collect()
+}
+
+/// The nested families of an export package (`{name: {family, definition}}`), those each nests first; at most
+/// [`crate::family::MAX_NESTED`] of them. One Revit shares (a nested part of the package says `shared`) is loaded into the
+/// project as a family of its own, as Revit loads a shared nested family into the project; one it doesn't is made beside the
+/// project, never in it, and given back by name for the family it is in to hold ([`crate::family::Family::embedded`]), each
+/// holding those it nests in turn. `parent`: the package's own definition.
+fn load_nested(s: &mut Session, nested: Option<&Value>, parent: Option<&Value>) -> Result<BTreeMap<String, crate::family::Family>, String> {
+    let mut held = BTreeMap::new();
+    let Some(Value::Object(all)) = nested else { return Ok(held) };
+    let shared: std::collections::BTreeSet<&str> = parent
+        .into_iter()
+        .chain(all.values().filter_map(|v| v.get("definition")))
+        .filter_map(|d| d["nested"].as_array())
+        .flatten()
+        .filter(|n| n["shared"].as_bool() == Some(true))
+        .filter_map(|n| n["family"].as_str())
+        .collect();
     let mut left: Vec<(&String, &Value)> = all.iter().take(crate::family::MAX_NESTED).collect();
     // Those whose own nested families are loaded go first, round after round.
     let mut done = std::collections::BTreeSet::new();
@@ -11598,20 +11627,55 @@ fn load_nested(s: &mut Session, nested: Option<&Value>) -> Result<(), String> {
         loadable(&mut fields);
         let mut params = Value::Object(fields);
         params["name"] = json!(name);
-        if let Some(d) = v.get("definition").filter(|d| !d.is_null()) {
+        let definition = v.get("definition").filter(|d| !d.is_null());
+        if let Some(d) = definition {
             params["revit"] = d.clone();
         }
+        let own = held_by(definition, &held);
+        if !own.is_empty() {
+            params["embedded"] = serde_json::to_value(own).map_err(|e| e.to_string())?;
+        }
+        // Not shared: made in a project of its own that has the project's families and materials, then held.
+        let mut beside = (!shared.contains(name.as_str())).then(|| {
+            let mut b = Session::new();
+            let m = b.model_mut();
+            m.materials = s.model.materials.clone();
+            m.families = s.model.families.clone();
+            // Made afresh, whatever of its name the project has.
+            m.families.remove(name.as_str());
+            b
+        });
+        let at: &mut Session = beside.as_mut().unwrap_or(&mut *s);
         // A nested family is a part of its parent: one that can't be what it says (a window nested in a window, which
         // has a wall's thickness of its own) comes in as a generic one, and one that can't come in at all is left out,
         // its parent's check saying what that costs.
-        if family(s, &params).is_err() {
+        if family(at, &params).is_err() {
             params["category"] = json!("generic");
             params["host"] = Value::Null;
             params["cut"] = Value::Null;
-            let _ = family(s, &params);
+            let _ = family(at, &params);
+        }
+        if let Some(b) = beside {
+            if let Some(f) = b.model.families.get(name.as_str()) {
+                held.insert(name.clone(), f.clone());
+            }
+            // The materials it brought, which the family holding it names.
+            let brought: Vec<(String, crate::model::Material)> = b
+                .model
+                .materials
+                .iter()
+                .filter(|(k, _)| !s.model.materials.contains_key(*k))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            if !brought.is_empty() {
+                let m = s.model_mut();
+                for (k, v) in brought {
+                    m.materials.insert(k, v);
+                }
+            }
         }
     }
-    Ok(())
+    Ok(held)
 }
 
 /// A family as `family` reads it: what it is, each of its types' parameters worked out (formulas and

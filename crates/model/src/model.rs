@@ -3826,11 +3826,12 @@ impl Model {
     /// A label is lettered upright in the family's axes, so it turns (and mirrors) with the component.
     pub fn component_marks(&self, c: &Component, detail: crate::graphics::Detail) -> Vec<crate::family::Mark> {
         let Some(f) = self.families.get(&c.family) else { return Vec::new() };
-        if f.symbols.is_empty() {
+        if f.symbols.is_empty() && f.nested.is_empty() {
             return Vec::new();
         }
         let plan = crate::family::SymbolView::Plan;
-        let Ok(marks) = f.values(&c.type_name, &c.params).and_then(|v| f.marks(&c.type_name, &v, plan, Some(detail))) else {
+        let others = |n: &str| self.families.get(n);
+        let Ok(marks) = f.values(&c.type_name, &c.params).and_then(|v| f.marks_with(&c.type_name, &v, plan, Some(detail), &others)) else {
             return Vec::new();
         };
         let (sin, cos) = c.angle.to_radians().sin_cos();
@@ -4901,7 +4902,7 @@ impl Model {
         let plan = crate::family::SymbolView::Plan;
         let others = |n: &str| self.families.get(n);
         let (pieces, marks) =
-            (f.pieces_with(&o.type_name, &values, &others).ok()?, f.marks(&o.type_name, &values, plan, Some(detail)).ok()?);
+            (f.pieces_with(&o.type_name, &values, &others).ok()?, f.marks_with(&o.type_name, &values, plan, Some(detail), &others).ok()?);
         let (fx, fy) = (if o.flip_hand { -1.0 } else { 1.0 }, if o.flip_facing { -1.0 } else { 1.0 });
         let mirrored = fx * fy < 0.0;
         let flip = |p: [f64; 3]| [fx * p[0] + 0.0, fy * p[1] + 0.0, p[2]];

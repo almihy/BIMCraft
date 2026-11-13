@@ -786,6 +786,12 @@ pub struct Form {
     pub section: Vec<[Expr; 3]>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub section_end: Vec<[Expr; 3]>,
+    /// Loops inside a sweep's profile (a tube's inside), at the path's first point, and a swept blend's at its last: swept
+    /// with it as holes. A true arc of hole `k` is a `section` (or `section_end`) arc of `hole` `k + 1`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub section_holes: Vec<Vec<[Expr; 3]>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub section_end_holes: Vec<Vec<[Expr; 3]>>,
     /// A revolve's sketch plane, where it is along the axis it is square to (none, through the family's origin).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub at: Option<Expr>,
@@ -855,6 +861,8 @@ impl Form {
             .chain(self.path.iter().flatten())
             .chain(self.section.iter().flatten())
             .chain(self.section_end.iter().flatten())
+            .chain(self.section_holes.iter().flatten().flatten())
+            .chain(self.section_end_holes.iter().flatten().flatten())
             .chain(self.arcs.iter().flat_map(|b| b.centre.iter()))
             .chain(&self.at)
             .collect()
@@ -922,9 +930,13 @@ pub struct Family {
     pub references: Vec<Reference>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dimensions: Vec<Dimension>,
-    /// Other families of the project placed in it, as Revit's nested families.
+    /// Other families placed in it, as Revit's nested families: its own `embedded` ones first, else the project's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub nested: Vec<Nested>,
+    /// The families its nested parts are of that it holds itself, by name, as Revit's family holds a nested family that isn't
+    /// shared: never one of the project's, so the project's list shows only what is placed in it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub embedded: BTreeMap<String, Family>,
     /// Its type catalog, as Revit's `.txt` beside a family.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub catalog: Option<Catalog>,
@@ -1533,6 +1545,9 @@ impl Family {
         for m in self.subcategories.iter_mut().filter_map(|s| s.material.as_mut()) {
             f(m);
         }
+        for inner in self.embedded.values_mut() {
+            inner.material_refs_mut(f);
+        }
     }
 
     /// Whether `name` is one of its material parameters.
@@ -1549,6 +1564,9 @@ impl Family {
         }
         out.extend(self.forms.iter().filter(|f| !self.material_parameter(&f.material)).map(|f| f.material.as_str()));
         out.extend(self.subcategories.iter().filter_map(|s| s.material.as_deref()));
+        for inner in self.embedded.values() {
+            out.extend(inner.materials());
+        }
         out.retain(|m| !m.is_empty());
         out
     }
@@ -1565,6 +1583,7 @@ impl Family {
         self.types.values_mut().flat_map(|t| t.iter_mut()).filter(|(k, _)| params.contains(k)).for_each(|(_, v)| swap(v));
         self.forms.iter_mut().filter(|f| f.material == from && !params.contains(&f.material)).for_each(|f| f.material = to.into());
         self.subcategories.iter_mut().filter(|s| s.material.as_deref() == Some(from)).for_each(|s| s.material = Some(to.into()));
+        self.embedded.values_mut().for_each(|inner| inner.rename_material(from, to));
     }
 
     /// Type `from` renamed `to` in the lists of types its forms and symbols are of.
@@ -1732,6 +1751,11 @@ impl Family {
     /// what their kinds hold; its types setting only the type parameters no formula works out; its
     /// materials in the library (`has_material`); and every type building.
     pub fn check(&self, has_material: &dyn Fn(&str) -> bool) -> Result<(), String> {
+        self.check_at(has_material, 0)
+    }
+
+    /// [`Family::check`] of a family held `depth` deep in another ([`Family::embedded`]).
+    pub(crate) fn check_at(&self, has_material: &dyn Fn(&str) -> bool, depth: usize) -> Result<(), String> {
         for (what, n, most) in [
             ("parameters", self.parameters.len(), MAX_PARAMETERS),
             ("forms", self.forms.len(), MAX_FORMS),
@@ -1748,6 +1772,7 @@ impl Family {
         }
         self.check_described()?;
         self.check_parametric()?;
+        self.check_embedded(has_material, depth)?;
         if let Some(kind) = &self.kind {
             let kinds = self.category.kinds();
             if !kinds.iter().any(|(k, _)| k == kind) {
@@ -2194,6 +2219,83 @@ impl Family {
         self.marks_where(values, &|y: &Symbol| y.of_type(type_name) && y.snapshot == which)
     }
 
+    /// [`Family::marks`] with, in plan, its nested parts' own plan symbols placed where they stand (in a type drawn from its
+    /// definition: Revit's result has them already), the families they are of its own ([`Family::embedded`]) or `others`.
+    pub fn marks_with(
+        &self,
+        type_name: &str,
+        values: &BTreeMap<String, Val>,
+        view: SymbolView,
+        detail: Option<crate::graphics::Detail>,
+        others: Others,
+    ) -> Result<Vec<Mark>, String> {
+        let mut out = self.marks(type_name, values, view, detail)?;
+        if view == SymbolView::Plan && !self.draws_snapshot(type_name) {
+            self.nested_marks(type_name, values, detail, others, (0, &std::cell::Cell::new(0)), &mut out)?;
+        }
+        Ok(out)
+    }
+
+    /// Its nested parts' plan marks in type `type_name`, in its axes, onto `out`: each standing upright (a part turned onto
+    /// a face draws none in plan), there, and drawn at `detail`.
+    pub(crate) fn nested_marks(
+        &self,
+        type_name: &str,
+        values: &BTreeMap<String, Val>,
+        detail: Option<crate::graphics::Detail>,
+        others: Others,
+        (depth, spent): (usize, &std::cell::Cell<usize>),
+        out: &mut Vec<Mark>,
+    ) -> Result<(), String> {
+        if self.nested.is_empty() {
+            return Ok(());
+        }
+        if depth >= MAX_NESTING {
+            return Err(format!("nested more than {MAX_NESTING} deep"));
+        }
+        let mut read = HashMap::new();
+        for (i, n) in self.nested.iter().enumerate().filter(|(_, n)| n.of_type(type_name)) {
+            let said = |e: String| format!("nested part {} ({}): {e}", i + 1, n.family);
+            if detail.is_some_and(|d| n.show.is_some_and(|s| !s.at(d))) {
+                continue;
+            }
+            if let Some(v) = &n.visible
+                && number(v, values, &mut read).map_err(said)? == 0.0
+            {
+                continue;
+            }
+            let Some(inner) = self.nested_family(&n.family, others) else { continue };
+            spent.set(spent.get() + 1);
+            if spent.get() > MAX_NESTED {
+                return Err(format!("it draws more than {MAX_NESTED} nested parts in all"));
+            }
+            let (at, axes) = nested_frame(n, values, &mut read).map_err(said)?;
+            if axes[2] != [0.0, 0.0, 1.0] {
+                continue;
+            }
+            let mut given = BTreeMap::new();
+            for (k, e) in &n.params {
+                given.insert(k.clone(), number(e, values, &mut read).map_err(said)?);
+            }
+            let wall = match values.get(WALL) {
+                Some(Val::Number(x)) => *x,
+                _ => DEFAULT_WALL,
+            };
+            let inner_type = n.type_for(type_name);
+            let inner_values = inner.values_given(inner_type, &given, wall).map_err(said)?;
+            let mut marks = inner.marks(inner_type, &inner_values, SymbolView::Plan, detail).map_err(said)?;
+            if !inner.draws_snapshot(inner_type) {
+                inner.nested_marks(inner_type, &inner_values, detail, others, (depth + 1, spent), &mut marks).map_err(said)?;
+            }
+            let place = |q: P2| P2(at[0] + axes[0][0] * q.0 + axes[1][0] * q.1, at[1] + axes[0][1] * q.0 + axes[1][1] * q.1);
+            out.extend(marks.iter().map(|m| m.map(place)));
+            if out.len() > MAX_SYMBOLS * 4 {
+                return Err(said(format!("its nested parts draw more than {} marks", MAX_SYMBOLS * 4)));
+            }
+        }
+        Ok(())
+    }
+
     /// The marks of its visible symbols `pick` keeps, sized by `values`, each worked out and checked.
     fn marks_where<'a>(&'a self, values: &BTreeMap<String, Val>, pick: &dyn Fn(&Symbol) -> bool) -> Result<Vec<Mark>, String> {
         let mut read = HashMap::new();
@@ -2329,7 +2431,7 @@ impl Family {
         {
             return Ok(Vec::new());
         }
-        let Some(inner) = (how.others)(&n.family) else { return Ok(Vec::new()) };
+        let Some(inner) = self.nested_family(&n.family, how.others) else { return Ok(Vec::new()) };
         if how.depth >= MAX_NESTING {
             return Err(format!("nested more than {MAX_NESTING} deep"));
         }
@@ -2348,11 +2450,7 @@ impl Family {
         }
         let deeper = Build { snapshot: inner.draws_snapshot(inner_type), others: how.others, depth: how.depth + 1, spent: how.spent };
         let pieces = inner.build(inner_type, &inner_values, &mut HashMap::new(), cuts, deeper)?;
-        let at = [number(&n.at[0], values, read)?, number(&n.at[1], values, read)?, number(&n.at[2], values, read)?];
-        let (sin, cos) = number(&n.rotation, values, read)?.to_radians().sin_cos();
-        let flip = if n.mirrored { -1.0 } else { 1.0 };
-        // Its axes in this family's: given, or turned about z and mirrored across its x.
-        let axes = n.axes.unwrap_or([[cos, sin, 0.0], [-flip * sin, flip * cos, 0.0], [0.0, 0.0, 1.0]]);
+        let (at, axes) = nested_frame(n, values, read)?;
         let det = crate::geom::v3::dot(axes[0], cross(axes[1], axes[2]));
         let mirrored = det < 0.0;
         let place = |p: P3| add(at, add(add(mul(axes[0], p[0]), mul(axes[1], p[1])), mul(axes[2], p[2])));
@@ -2406,28 +2504,50 @@ impl Family {
         let piece = if !form.mesh.is_empty() {
             mesh(&form.mesh, &form.outline, material)?
         } else if !form.path.is_empty() {
-            if form.path.len() > MAX_RING || form.section.len() > MAX_RING || form.section_end.len() > MAX_RING {
+            let holes = form.section_holes.iter().chain(&form.section_end_holes);
+            if form.path.len() > MAX_RING
+                || form.section.len() > MAX_RING
+                || form.section_end.len() > MAX_RING
+                || form.section_holes.len() + form.section_end_holes.len() > MAX_RING
+                || holes.clone().any(|h| h.len() > MAX_RING)
+            {
                 return Err(format!("its path or its profile has more than {MAX_RING} points"));
+            }
+            if !form.section_end_holes.is_empty() && form.section_end_holes.len() != form.section_holes.len() {
+                return Err("a swept blend has as many loops inside its profile at its end as at its start".into());
             }
             let mut pts =
                 |v: &'a [[Expr; 3]]| -> Result<Vec<P3>, String> { v.iter().map(|[a, b, c]| Ok([num(a)?, num(b)?, num(c)?])).collect() };
             let (path, section, end) = (pts(&form.path)?, pts(&form.section)?, pts(&form.section_end)?);
-            let mut bends = |ring: Ring| -> Result<Vec<(usize, P3, P3, bool)>, String> {
+            let mut inner = Vec::new();
+            for (k, h) in form.section_holes.iter().enumerate() {
+                inner.push((k, pts(h)?, form.section_end_holes.get(k).map(|e| pts(e)).transpose()?.unwrap_or_default()));
+            }
+            let mut bends = |ring: Ring, hole: usize| -> Result<Vec<(usize, P3, P3, bool)>, String> {
                 let mut out = Vec::new();
-                for b in form.arcs.iter().filter(|b| b.ring == ring) {
+                for b in form.arcs.iter().filter(|b| b.ring == ring && b.hole == hole) {
                     let [x, y, z] = b.centre.as_slice() else { return Err("an arc of a sweep has a centre of three numbers".into()) };
                     out.push((b.edge, [num(x)?, num(y)?, num(z)?], b.normal.unwrap_or([0.0, 0.0, 1.0]), b.clockwise));
                 }
                 Ok(out)
             };
             let closed = path.len() > 2 && path.first() == path.last();
-            let path = shapes::bent3(path, &bends(Ring::Path)?, closed);
-            let section = shapes::bent3(section, &bends(Ring::Section)?, true);
-            let end = shapes::bent3(end, &bends(Ring::SectionEnd)?, true);
+            let path = shapes::bent3(path, &bends(Ring::Path, 0)?, closed);
+            let section = shapes::bent3(section, &bends(Ring::Section, 0)?, true);
+            let end = shapes::bent3(end, &bends(Ring::SectionEnd, 0)?, true);
+            let mut holes = Vec::new();
+            for (k, s, e) in inner {
+                let s = shapes::bent3(s, &bends(Ring::Section, k + 1)?, true);
+                let e = shapes::bent3(e, &bends(Ring::SectionEnd, k + 1)?, true);
+                if s.len() > MAX_RING * 4 || e.len() > MAX_RING * 4 {
+                    return Err(format!("its arcs come to more than {} points", MAX_RING * 4));
+                }
+                holes.push((s, e));
+            }
             if section.len() > MAX_RING * 4 || path.len() > MAX_RING * 4 {
                 return Err(format!("its arcs come to more than {} points", MAX_RING * 4));
             }
-            hulled(shapes::along(&path, &section, &end)?, material)
+            hulled(shapes::along_holed(&path, &section, &end, &holes)?, material)
         } else {
             if !form.outline.is_empty() {
                 return Err("an `outline` is a `mesh`'s: a `profile` or a `circle` has its own".into());
@@ -2666,6 +2786,19 @@ fn point<'a>(
     read: &mut HashMap<&'a str, Result<Node, String>>,
 ) -> Result<[f64; 3], String> {
     Ok([number(&v[0], values, read)?, number(&v[1], values, read)?, number(&v[2], values, read)?])
+}
+
+/// Where nested part `n` stands in its parent sized by `values`, and its own x, y and z axes in the parent's: given, or turned
+/// about z and mirrored across its x.
+fn nested_frame<'a>(
+    n: &'a Nested,
+    values: &BTreeMap<String, Val>,
+    read: &mut HashMap<&'a str, Result<Node, String>>,
+) -> Result<(P3, [P3; 3]), String> {
+    let at = point(&n.at, values, read)?;
+    let (sin, cos) = number(&n.rotation, values, read)?.to_radians().sin_cos();
+    let flip = if n.mirrored { -1.0 } else { 1.0 };
+    Ok((at, n.axes.unwrap_or([[cos, sin, 0.0], [-flip * sin, flip * cos, 0.0], [0.0, 0.0, 1.0]])))
 }
 
 /// A piece of `tris`, its outline the hull round them from above.

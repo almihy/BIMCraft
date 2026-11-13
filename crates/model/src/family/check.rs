@@ -158,10 +158,15 @@ impl Family {
                 }
                 _ => return fail(format!("at {} one of it and Revit's result draws nothing", level(d))),
             }
-            let marks = |snapshot: bool| {
-                self.marks_where(&values, &|y: &super::Symbol| {
+            // Its nested parts' plan symbols with its own (Revit's result has them among its own).
+            let marks = |snapshot: bool| -> Result<Vec<super::Mark>, String> {
+                let mut out = self.marks_where(&values, &|y: &super::Symbol| {
                     y.view == SymbolView::Plan && y.of_type(t) && y.snapshot == snapshot && y.drawn_at(d)
-                })
+                })?;
+                if !snapshot {
+                    self.nested_marks(t, &values, Some(d), others, (0, &std::cell::Cell::new(0)), &mut out)?;
+                }
+                Ok(out)
             };
             // What the plan draws: its symbols and the forms it shows from above (Revit's plan of a family it brings may
             // be its forms' lines, which BIMCraft draws from the forms).

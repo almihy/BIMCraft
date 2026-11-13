@@ -460,6 +460,7 @@ impl FamilyEditor {
                 references: f.references.clone(),
                 dimensions: f.dimensions.clone(),
                 nested: f.nested.clone(),
+                embedded: f.embedded.clone(),
                 catalog: f.catalog.clone(),
                 check: f.check.clone(),
                 editable: f.editable.clone(),
@@ -540,6 +541,7 @@ impl FamilyEditor {
             references: self.kept.references.clone(),
             dimensions: self.kept.dimensions.clone(),
             nested: self.kept.nested.clone(),
+            embedded: self.kept.embedded.clone(),
             catalog: self.kept.catalog.clone(),
             check,
             editable: self.kept.editable.clone(),
@@ -605,11 +607,9 @@ impl FamilyEditor {
             let m = s.model_mut();
             m.materials = base.materials.clone();
             m.images = base.images.clone();
-            // The families its nested parts are of.
-            for n in &family.nested {
-                if let Some(other) = base.families.get(&n.family) {
-                    m.families.insert(n.family.clone(), other.clone());
-                }
+            // The families its nested parts are of, and theirs.
+            for (n, other) in nested_of(base, family) {
+                m.families.insert(n.to_string(), other.clone());
             }
             m.families.insert(name.to_string(), family.clone());
         }
@@ -638,6 +638,10 @@ impl FamilyEditor {
                 )
                     .hash(&mut h);
                 (base.materials.len(), base.images.len()).hash(&mut h);
+                // A project family its nested parts are of, changed, draws it again.
+                for (n, other) in nested_of(base, &f) {
+                    (n, serde_json::to_string(other).unwrap_or_default()).hash(&mut h);
+                }
                 h.finish()
             };
             if self.preview.as_ref().is_some_and(|(k, _)| *k == key) {
@@ -665,6 +669,23 @@ impl FamilyEditor {
             Err(e) => self.problem = Some(e),
         }
     }
+}
+
+/// The project's families `family`'s nested parts are of, and those theirs are of, each once: what its preview needs and
+/// what it is drawn again for when one changes. Those it holds itself it carries.
+fn nested_of<'m>(base: &'m Model, family: &Family) -> Vec<(&'m str, &'m Family)> {
+    let mut out: Vec<(&str, &Family)> = Vec::new();
+    let mut want: Vec<String> = family.nested.iter().map(|n| n.family.clone()).collect();
+    while let Some(n) = want.pop() {
+        if out.iter().any(|(m, _)| *m == n) || family.embedded.contains_key(&n) {
+            continue;
+        }
+        if let Some((name, other)) = base.families.get_key_value(&n) {
+            out.push((name.as_str(), other));
+            want.extend(other.nested.iter().map(|x| x.family.clone()));
+        }
+    }
+    out
 }
 
 /// The categories a family may be of, in the order they're offered.

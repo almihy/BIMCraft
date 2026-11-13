@@ -220,7 +220,19 @@ fn short(v: &Value) -> String {
     v.to_string().chars().take(60).collect()
 }
 
-/// A loop in a plane: its corners, its arcs, and its corners' numbers in the first type.
+/// Whether a loop of the definition encloses something: not a lone line (a revolve's axis drawn in its sketch).
+fn encloses(lp: &Value) -> bool {
+    lp.as_array().is_some_and(|c| c.len() >= 2 || c.first().is_some_and(|c| c.get("arc").is_some()))
+}
+
+/// The loops of a form's `key` that enclose something ([`encloses`]), at most [`MOST`]; none, why.
+fn loops_of<'v>(def: &'v Value, key: &str) -> Result<Vec<&'v Value>, &'static str> {
+    let all = def[key].as_array().filter(|l| l.len() <= MOST).ok_or("its sketch has no loops")?;
+    let kept: Vec<&Value> = all.iter().filter(|l| encloses(l)).collect();
+    if kept.is_empty() { Err("its sketch has no loops") } else { Ok(kept) }
+}
+
+/// A loop in a plane: its corners, its arcs, and points round it in the first type (its corners and its arcs' middles).
 type Loop = (Vec<[Expr; 2]>, Vec<Bend>, Vec<P2>);
 
 /// A curve of a loop: its start (and end) point, and for an arc its centre, its normal and its middle point.
@@ -272,6 +284,13 @@ impl Reader<'_> {
                     clockwise: a.cross(m) < 0.0,
                     normal: None,
                 });
+                // Its middle too, so a ring of arcs (a circle drawn as two halves) has an inside to test.
+                numbers.push(P2(s[k[0]], s[k[1]]));
+                numbers.push(P2(mid[k[0]], mid[k[1]]));
+                let [a, b, c3] = bit.start;
+                let p = [a, b, c3];
+                corners.push([p[k[0]].clone(), p[k[1]].clone()]);
+                continue;
             }
             numbers.push(P2(s[k[0]], s[k[1]]));
             let [a, b, c3] = bit.start;
@@ -331,6 +350,27 @@ fn nest(rings: &[Loop], base: &Form) -> Vec<Form> {
         out.push(form);
     }
     out
+}
+
+/// Points in a plane (a sweep's profile) laid flat in it: across the plane of the loop of most points, its normal by
+/// Newell's sum.
+fn profile_plane<'p>(loops: impl Iterator<Item = &'p [[f64; 3]]>) -> impl Fn([f64; 3]) -> P2 {
+    use crate::geom::v3::{cross, dot};
+    let biggest = loops.max_by_key(|l| l.len()).unwrap_or_default();
+    let mut n = [0.0; 3];
+    for (i, a) in biggest.iter().enumerate() {
+        let b = biggest[(i + 1) % biggest.len()];
+        n = [n[0] + (a[1] - b[1]) * (a[2] + b[2]), n[1] + (a[2] - b[2]) * (a[0] + b[0]), n[2] + (a[0] - b[0]) * (a[1] + b[1])];
+    }
+    let len = dot(n, n).sqrt();
+    let n = if len > 1e-9 { n.map(|x| x / len) } else { [0.0, 0.0, 1.0] };
+    // Any direction across it, and the one square to that in it.
+    let seed = if n[0].abs() < 0.9 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
+    let u = cross(n, seed);
+    let ul = dot(u, u).sqrt().max(1e-12);
+    let u = u.map(|x| x / ul);
+    let v = cross(n, u);
+    move |p: [f64; 3]| P2(dot(p, u), dot(p, v))
 }
 
 /// Whether point `p` is inside ring `r`.
@@ -398,13 +438,13 @@ impl Reader<'_> {
                     arcs.extend(top_arcs);
                     return Ok(vec![Form { plane, profile, top, arcs, from, to, ..base }]);
                 }
-                let loops = def["loops"].as_array().filter(|l| !l.is_empty() && l.len() <= MOST).ok_or("its sketch has no loops")?;
+                let loops = loops_of(def, "loops")?;
                 let rings = loops.iter().map(|l| self.ring(l, k, Ring::Profile, 0)).collect::<Result<Vec<_>, _>>()?;
                 let base = Form { plane, from, to, ..base };
                 Ok(nest(&rings, &base))
             }
             "revolution" => {
-                let loops = def["loops"].as_array().filter(|l| !l.is_empty() && l.len() <= MOST).ok_or("its sketch has no loops")?;
+                let loops = loops_of(def, "loops")?;
                 let axis = def["axis"].as_array().filter(|a| a.len() == 2).ok_or("it says no axis")?;
                 let (a0, a1) = (self.point(&axis[0])?, self.point(&axis[1])?);
                 // Its plane: the axis whose coordinate every corner and the axis share.
@@ -451,13 +491,18 @@ impl Reader<'_> {
                     last = Some(bit.end);
                 }
                 points.extend(last);
-                let section = |key: &str, n: usize, ring: Ring, arcs: &mut Vec<Bend>| -> Result<Vec<[Expr; 3]>, String> {
+                // A loop of a profile: its corners, its arcs (as edges of `ring`, `hole` 0 for none), and points round it in
+                // the first type (its corners and its arcs' middles), what says which loop is inside which.
+                type Loop3 = (Vec<[Expr; 3]>, Vec<Bend>, Vec<[f64; 3]>);
+                let section = |key: &str, n: usize, ring: Ring| -> Result<Loop3, String> {
                     let lp = def[key].as_array().and_then(|l| l.get(n)).filter(|l| l.as_array().is_some_and(|c| !c.is_empty()));
                     let lp = lp.ok_or(format!("its {key} is missing (a profile family's?)"))?;
-                    let mut out = Vec::new();
+                    let (mut out, mut arcs, mut round) = (Vec::new(), Vec::new(), Vec::new());
                     for c in lp.as_array().into_iter().flatten() {
                         let bit = self.curve(c)?;
-                        if let Some((centre, normal, _)) = bit.arc {
+                        round.push(self.at(&bit.start)?);
+                        if let Some((centre, normal, mid)) = bit.arc {
+                            round.push(mid);
                             arcs.push(Bend {
                                 ring,
                                 edge: out.len(),
@@ -469,17 +514,54 @@ impl Reader<'_> {
                         }
                         out.push(bit.start);
                     }
-                    Ok(out)
+                    Ok((out, arcs, round))
                 };
-                // Each loop of its profile swept on its own (a loop inside another, a tube's, isn't a hole of it yet).
-                let loops = def["profile"].as_array().map_or(1, Vec::len).clamp(1, MOST);
+                let count = def["profile"].as_array().map_or(1, Vec::len).clamp(1, MOST);
+                let starts = (0..count).map(|n| section("profile", n, Ring::Section)).collect::<Result<Vec<_>, _>>()?;
+                let ends = if kind == "swept_blend" {
+                    (0..count).map(|n| section("profile_end", n, Ring::SectionEnd)).collect::<Result<Vec<_>, _>>()?
+                } else {
+                    Vec::new()
+                };
+                // Which loop is inside which, in the profile's plane: a loop inside an outer one is a hole of it (a tube's
+                // inside), one inside a hole an outer again.
+                let flat = profile_plane(starts.iter().map(|l| l.2.as_slice()));
+                let rings: Vec<Vec<P2>> = starts.iter().map(|l| l.2.iter().map(|p| flat(*p)).collect()).collect();
+                let depth: Vec<usize> = (0..rings.len())
+                    .map(|i| (0..rings.len()).filter(|j| *j != i && rings[i].first().is_some_and(|p| inside(*p, &rings[*j]))).count())
+                    .collect();
                 let mut out = Vec::new();
-                for n in 0..loops {
+                for i in (0..rings.len()).filter(|i| depth[*i].is_multiple_of(2)) {
                     let mut arcs = arcs.clone();
-                    let section_start = section("profile", n, Ring::Section, &mut arcs)?;
-                    let section_end =
-                        if kind == "swept_blend" { section("profile_end", n, Ring::SectionEnd, &mut arcs)? } else { Vec::new() };
-                    out.push(Form { path: points.clone(), section: section_start, section_end, arcs, ..base.clone() });
+                    arcs.extend(starts[i].1.iter().cloned());
+                    let (mut holes, mut end_holes) = (Vec::new(), Vec::new());
+                    for j in
+                        (0..rings.len()).filter(|j| depth[*j] == depth[i] + 1 && rings[*j].first().is_some_and(|p| inside(*p, &rings[i])))
+                    {
+                        let hole = holes.len() + 1;
+                        arcs.extend(starts[j].1.iter().cloned().map(|b| Bend { hole, ..b }));
+                        holes.push(starts[j].0.clone());
+                        if let Some(e) = ends.get(j) {
+                            arcs.extend(e.1.iter().cloned().map(|b| Bend { hole, ..b }));
+                            end_holes.push(e.0.clone());
+                        }
+                    }
+                    let section_end = match ends.get(i) {
+                        Some(e) => {
+                            arcs.extend(e.1.iter().cloned());
+                            e.0.clone()
+                        }
+                        None => Vec::new(),
+                    };
+                    out.push(Form {
+                        path: points.clone(),
+                        section: starts[i].0.clone(),
+                        section_end,
+                        section_holes: holes,
+                        section_end_holes: end_holes,
+                        arcs,
+                        ..base.clone()
+                    });
                 }
                 Ok(out)
             }
@@ -493,21 +575,37 @@ impl Reader<'_> {
         number(e, &self.values, &mut HashMap::new())
     }
 
-    /// A symbolic line's curves as symbols in its view.
+    /// A symbolic line's curves as symbols in its view; a model line's in each of plan, front and side its Visibility
+    /// Settings draw it in (Revit draws a model line in every view that sees it, seen flat in that view).
     fn lines(&self, def: &Value) -> Result<Vec<Symbol>, String> {
-        let view = match def["view"].as_str().unwrap_or("plan") {
-            "plan" => SymbolView::Plan,
-            "front" => SymbolView::Front,
-            "side" => SymbolView::Side,
-            // A model line is drawn as the forms are, which BIMCraft's families don't hold.
-            _ => return Ok(Vec::new()),
+        let show = def.get("show").and_then(|s| serde_json::from_value::<Show>(s.clone()).ok());
+        let views = match def["view"].as_str().unwrap_or("plan") {
+            "plan" => vec![SymbolView::Plan],
+            "front" => vec![SymbolView::Front],
+            "side" => vec![SymbolView::Side],
+            "model" => {
+                let s = show.unwrap_or_default();
+                [(s.plan, SymbolView::Plan), (s.front, SymbolView::Front), (s.side, SymbolView::Side)]
+                    .into_iter()
+                    .filter_map(|(on, v)| on.then_some(v))
+                    .collect()
+            }
+            _ => Vec::new(),
         };
+        let mut out = Vec::new();
+        for view in views {
+            out.extend(self.lines_in(def, view, show)?);
+        }
+        Ok(out)
+    }
+
+    /// A line's curves as symbols in `view`.
+    fn lines_in(&self, def: &Value, view: SymbolView, show: Option<Show>) -> Result<Vec<Symbol>, String> {
         let k = match view {
             SymbolView::Plan => [0, 1],
             SymbolView::Front => [0, 2],
             SymbolView::Side => [1, 2],
         };
-        let show = def.get("show").and_then(|s| serde_json::from_value::<Show>(s.clone()).ok());
         let levels = show.map(|s| Levels { coarse: s.coarse, medium: s.medium, fine: s.fine });
         let base = Symbol {
             view,
@@ -529,6 +627,17 @@ impl Reader<'_> {
                     line: vec![[bit.start[k[0]].clone(), bit.start[k[1]].clone()], [bit.end[k[0]].clone(), bit.end[k[1]].clone()]],
                     ..base.clone()
                 }),
+                Some((centre, normal, _)) if normal[3 - k[0] - k[1]].abs() < 0.99999 * crate::geom::v3::dot(*normal, *normal).sqrt() => {
+                    // An arc not flat in the view (a model line's seen edge-on or slanted): its points as the first type has
+                    // them, seen flat.
+                    let (s, e, cn) = (self.at(&bit.start)?, self.at(&bit.end)?, self.at(centre)?);
+                    let mut pts = vec![s];
+                    let n = if self.map.mirrors() { normal.map(|x| -x) } else { *normal };
+                    pts.extend(super::shapes::arc3(s, e, cn, n, false));
+                    pts.push(e);
+                    let line = pts.iter().map(|p| [Expr::Number(p[k[0]]), Expr::Number(p[k[1]])]).collect();
+                    out.push(Symbol { line, ..base.clone() });
+                }
                 Some((centre, _, mid)) => {
                     let (s, e, cn) = (self.at(&bit.start)?, self.at(&bit.end)?, self.at(centre)?);
                     let angle = |p: [f64; 3]| (p[k[1]] - cn[k[1]]).atan2(p[k[0]] - cn[k[0]]).to_degrees();
@@ -559,6 +668,87 @@ impl Reader<'_> {
         }
         Ok(out)
     }
+}
+
+/// Each plane by its id: its name, its axis, its coordinate per type in the document's axes.
+type Planes = BTreeMap<String, (String, Axis, BTreeMap<String, f64>)>;
+
+/// Where plane `target` (square to z) stands above the family document's level, as a formula over the family's parameters
+/// that holds in every type: the chain of dimensions from the level (z = 0, or a plane at 0 in every type) to it, each
+/// labelled (its parameter) or the same in every type (its value). A window's sill plane placed by its head height less
+/// its height, which no parameter says on its own. None where no such chain holds.
+fn from_level(def: &Value, planes: &Planes, target: &str, f: &Family, params: &BTreeSet<String>) -> Option<String> {
+    let types: Vec<String> = f.types.keys().cloned().collect();
+    let first = types.first()?.clone();
+    const LEVEL: &str = "\u{0}level";
+    let pos = |id: &str, t: &str| -> Option<f64> {
+        if id == LEVEL {
+            return Some(0.0);
+        }
+        planes.get(id).filter(|p| p.1 == Axis::Z).and_then(|p| p.2.get(t).copied())
+    };
+    let level_like = |id: &str| types.iter().all(|t| pos(id, t).is_some_and(|x| x.abs() < 0.05));
+    // Edges: (a, b, term, sign) with b = a + sign × term in every type.
+    let mut edges: Vec<(String, String, String)> = Vec::new();
+    for d in def["dimensions"].as_array().into_iter().flatten().take(super::MAX_DIMENSIONS) {
+        let ids: Vec<String> =
+            d["refs"].as_array().into_iter().flatten().map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_string)).collect();
+        let [a, b] = ids.as_slice() else { continue };
+        let value = |t: &str| d["value"].get(t).and_then(num);
+        // An end that isn't a plane is the level where the dimension says the other end is that far above it.
+        let end = |x: &str, other: &str| -> Option<String> {
+            if pos(x, &first).is_some() {
+                return Some(if level_like(x) { LEVEL.to_string() } else { x.to_string() });
+            }
+            let fits = types.iter().all(|t| matches!((pos(other, t), value(t)), (Some(o), Some(v)) if (o.abs() - v.abs()).abs() < 0.1));
+            (pos(other, &first).is_some() && fits).then(|| LEVEL.to_string())
+        };
+        let (Some(a), Some(b)) = (end(a, b), end(b, a)) else { continue };
+        if a == b {
+            continue;
+        }
+        let label = d.get("label").and_then(text).filter(|l| params.contains(*l));
+        let constant = types.iter().map(|t| value(t)).collect::<Option<Vec<f64>>>().filter(|v| v.iter().all(|x| (x - v[0]).abs() < 0.05));
+        let term = match (label, constant) {
+            (Some(l), _) => l.to_string(),
+            (None, Some(v)) if !v.is_empty() => plain(v[0].abs()),
+            _ => continue,
+        };
+        // Which way: the same in every type.
+        let signs: Option<Vec<f64>> = types.iter().map(|t| Some((pos(&b, t)? - pos(&a, t)?).signum())).collect();
+        let Some(signs) = signs.filter(|s| !s.is_empty() && s.iter().all(|x| *x == s[0] && *x != 0.0)) else { continue };
+        let (a, b) = if signs[0] > 0.0 { (a, b) } else { (b, a) };
+        edges.push((a, b, term));
+    }
+    // From the level outward, breadth first.
+    let mut found: BTreeMap<String, String> = BTreeMap::from([(LEVEL.to_string(), String::new())]);
+    let mut queue = std::collections::VecDeque::from([LEVEL.to_string()]);
+    while let Some(at) = queue.pop_front() {
+        let here = found.get(&at).cloned().unwrap_or_default();
+        for (a, b, term) in &edges {
+            let (next, step) = if *a == at {
+                (b, format!(" + {term}"))
+            } else if *b == at {
+                (a, format!(" - {term}"))
+            } else {
+                continue;
+            };
+            if !found.contains_key(next) && found.len() < super::MAX_REFERENCES {
+                found.insert(next.clone(), format!("{here}{step}"));
+                queue.push_back(next.clone());
+            }
+        }
+    }
+    let chain = found.get(target)?;
+    let formula = chain.trim_start_matches(" + ").to_string();
+    let formula = if chain.starts_with(" - ") { format!("0{chain}") } else { formula };
+    // It holds in every type, or it isn't it.
+    let holds = types.iter().all(|t| {
+        let Ok(values) = f.values(t, &BTreeMap::new()) else { return false };
+        let e = Expr::Formula(formula.clone());
+        matches!((number(&e, &values, &mut HashMap::new()), pos(target, t)), (Ok(x), Some(y)) if (x - y).abs() < 0.05)
+    });
+    holds.then_some(formula)
 }
 
 /// `def` (Revit's definition of family `f`) translated into it: its references, dimensions, parametric forms and symbols,
@@ -621,6 +811,8 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         y_offset: num(&to["y_offset"]).unwrap_or(0.0),
         z_minus: Expr::Number(0.0),
     };
+    // The formula that places the sill plane above the level, where no parameter says it alone.
+    let mut sill_from: Option<String> = None;
     let mut reader = Reader { map, planes, params, first: first.clone(), notes: Vec::new(), family: f, values: BTreeMap::new() };
     if let Some(z) = to.get("z_minus").filter(|z| !z.is_null()) {
         // A plane (a window's sill): the parameter that puts it where it is in every type, else where it is in the first.
@@ -636,10 +828,19 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
                 })
             })
         });
-        match (follows, reader.value(z)) {
-            (Some(p), _) => reader.map.z_minus = Expr::Formula(p.clone()),
-            (None, Ok(e)) => reader.map.z_minus = e,
-            (None, Err(e)) => notes.push(format!("where its z starts: {e}")),
+        // Else the chain of dimensions that places it above the level (a head height less the height).
+        let chain = match (&follows, z.get("ref").and_then(Value::as_str)) {
+            (None, Some(id)) if moving => from_level(def, &reader.planes, id, f, &reader.params),
+            _ => None,
+        };
+        match (follows, chain, reader.value(z)) {
+            (Some(p), _, _) => reader.map.z_minus = Expr::Formula(p.clone()),
+            (None, Some(c), _) => {
+                reader.map.z_minus = Expr::Formula(format!("({c})"));
+                sill_from = Some(c);
+            }
+            (None, None, Ok(e)) => reader.map.z_minus = e,
+            (None, None, Err(e)) => notes.push(format!("where its z starts: {e}")),
         }
     }
     reader.first_values();
@@ -826,7 +1027,18 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         let ids = resolve(&ids_of(d), measured);
         let found: Vec<&(String, Axis, BTreeMap<String, f64>)> = ids.iter().filter_map(|i| reader.planes.get(i)).collect();
         let label = d.get("label").and_then(text).map(str::to_string);
-        let (locked, eq) = (d["locked"].as_bool().unwrap_or(false), d["eq"].as_bool().unwrap_or(false));
+        let (mut locked, eq) = (d["locked"].as_bool().unwrap_or(false), d["eq"].as_bool().unwrap_or(false));
+        // One Revit doesn't lock but that measures the same in every type while its planes move between types (a shell's
+        // inner face kept its thickness in from the outer by the sketch): the planes move together, as if locked.
+        if !locked && !eq && label.is_none() && f.types.len() > 1 && ids.len() == 2 {
+            let values: Vec<f64> = f.types.keys().filter_map(|t| d["value"].get(t).and_then(num)).collect();
+            let same = values.len() == f.types.len() && values.iter().all(|x| (x - values[0]).abs() < 0.05);
+            let moving = ids.iter().filter_map(|i| reader.planes.get(i)).any(|p| {
+                let at: Vec<f64> = p.2.values().copied().collect();
+                at.iter().any(|x| (x - at.first().copied().unwrap_or(0.0)).abs() > 0.05)
+            });
+            locked = same && moving;
+        }
         if found.len() != ids.len() || found.len() < 2 || kind != DimensionKind::Linear {
             // One to a form's face or a line: the form's own numbers follow what it measures already.
             continue;
@@ -959,6 +1171,35 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     f.references = references;
     f.dimensions = dimensions;
     f.catalog = catalog;
+    // A window whose sill plane stands above its level by a chain no parameter says (its Sill Height none, or 0 in every
+    // type): its Sill Height is that chain, so it is placed in its wall where Revit places it.
+    if let Some(c) = sill_from
+        && f.category == super::Category::Window
+    {
+        let zero = f
+            .types
+            .keys()
+            .all(|t| matches!(f.values(t, &BTreeMap::new()).ok().and_then(|v| v.get(super::SILL).cloned()), None | Some(Val::Number(0.0))));
+        let room = f.parameters.len() < super::MAX_PARAMETERS;
+        match f.parameters.iter_mut().find(|p| p.name == super::SILL) {
+            Some(p) if p.formula.is_none() && zero && matches!(p.kind, Kind::Length) && !p.instance => {
+                p.formula = Some(c);
+                // A type sets no value a formula works out.
+                for set in f.types.values_mut() {
+                    set.remove(super::SILL);
+                }
+            }
+            Some(_) => {}
+            None if room => f.parameters.push(super::Parameter {
+                name: super::SILL.to_string(),
+                kind: Kind::Length,
+                value: serde_json::json!(0.0),
+                formula: Some(c),
+                ..super::Parameter::default()
+            }),
+            None => {}
+        }
+    }
     // What is made is tried in every type: a form or a line that doesn't work out in one is left out, and said.
     let forms = turned_as_revit(f, forms);
     let (forms, symbols, nested) = tried(f, forms, symbols, nested, &mut notes);

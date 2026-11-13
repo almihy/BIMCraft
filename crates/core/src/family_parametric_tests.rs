@@ -354,10 +354,12 @@ fn a_package_loads_its_nested_families_and_gives_back_the_type_to_place() {
     let r = run(&mut s, "family", json!({"path": "Sample Shelf.arqiflow-family.json"}));
     assert_eq!(r["place"], "Large");
     assert_eq!(r["name"], "Sample Shelf", "named after its file, as any family file");
-    assert!(s.model.families.contains_key("Sample Bracket"));
+    // Not shared: the shelf holds it, and the project's list doesn't show it.
+    assert!(!s.model.families.contains_key("Sample Bracket"));
     let name = r["name"].as_str().unwrap().to_string();
     let f = s.model.families[&name].clone();
     assert_eq!(f.nested.len(), 1);
+    assert!(f.embedded.contains_key("Sample Bracket"));
     // Its check sees the bracket, which Revit's result here hasn't: not a match, so Revit's result is drawn.
     let others = |n: &str| s.model.families.get(n);
     let (lo, hi) = extent(
@@ -421,4 +423,224 @@ fn hostile_definitions_never_panic() {
         }
         assert!(s.model.check().is_ok());
     }
+}
+
+// Round 3: what the translator reads beside round 2's.
+
+/// A closed loop through `pts`, as lines.
+fn ring_of(pts: &[Value]) -> Value {
+    json!((0..pts.len()).map(|i| line(pts[i].clone(), pts[(i + 1) % pts.len()].clone())).collect::<Vec<_>>())
+}
+
+#[test]
+fn a_model_line_draws_in_each_view_its_visibility_settings_say() {
+    let mut s = Session::new();
+    let show = json!({"coarse": true, "medium": true, "fine": true, "plan": true, "front": false, "side": true});
+    let fam = json!({
+        "name": "Bay", "category": "generic", "types": {"A": {}},
+        "revit": {"lines": [{"view": "model", "show": show, "curves": [line(json!([0, 0, 0]), json!([2400, 0, 0])), line(json!([0, 0, 0]), json!([0, 4800, 0]))]}]}
+    });
+    run(&mut s, "family", fam);
+    let f = &s.model.families["Bay"];
+    let views: Vec<crate::family::SymbolView> = f.symbols.iter().map(|y| y.view).collect();
+    use crate::family::SymbolView::{Front, Plan, Side};
+    assert_eq!(views.iter().filter(|v| **v == Plan).count(), 2, "{views:?}");
+    assert_eq!(views.iter().filter(|v| **v == Side).count(), 2, "{views:?}");
+    assert!(!views.contains(&Front), "its Front/Back is off");
+}
+
+/// A window whose sill plane stands under a fixed head by its height (Revit's Default Head Height less Height), which
+/// no parameter says alone: its Sill Height is 0 in every type, as Revit's families of the kind have it.
+fn head_hung_window() -> Value {
+    let at = |a: f64, b: f64| json!({"Tall": a, "Short": b});
+    let planes = json!([
+        {"id": "1", "name": "Center Left Right", "normal": [1, 0, 0], "defines_origin": true, "at": at(0.0, 0.0)},
+        {"id": "2", "name": "Left", "normal": [-1, 0, 0], "at": at(-400.0, -400.0)},
+        {"id": "3", "name": "Right", "normal": [1, 0, 0], "at": at(400.0, 400.0)},
+        {"id": "4", "name": "Sill", "normal": [0, 0, 1], "is_reference": "bottom", "at": at(900.0, 1200.0)},
+        {"id": "5", "name": "Head", "normal": [0, 0, 1], "is_reference": "top", "at": at(2100.0, 2100.0)}
+    ]);
+    let snapshot = |t: &str, h: f64| json!({"mesh": cuboid([-400.0, -50.0, 0.0], [400.0, 50.0, h]), "types": [t], "snapshot": true});
+    json!({
+        "name": "Head Hung", "category": "window", "host": "wall",
+        "parameters": [
+            {"name": "Width", "kind": "length", "value": 800}, {"name": "Height", "kind": "length", "value": 1200},
+            {"name": "Default Head Height", "kind": "length", "value": 2100}, {"name": "Sill Height", "kind": "length", "value": 0}
+        ],
+        "types": {"Tall": {"Sill Height": 0}, "Short": {"Height": 900, "Sill Height": 0}},
+        "forms": [snapshot("Tall", 1200.0), snapshot("Short", 900.0)],
+        "revit": {
+            "to_bimcraft": {"x_offset": 0, "y_sign": 1, "z_minus": {"ref": "4"}},
+            "reference_planes": planes,
+            "dimensions": [
+                {"refs": ["2", "3"], "label": "Width", "locked": true},
+                {"refs": ["2", "1", "3"], "eq": true},
+                {"refs": ["4", "5"], "label": "Height", "locked": true, "value": {"Tall": 1200, "Short": 900}},
+                // To the level, which isn't a reference plane.
+                {"refs": ["5", "21"], "label": "Default Head Height", "locked": true, "value": {"Tall": 2100, "Short": 2100}}
+            ],
+            "forms": [{"kind": "extrusion", "normal": [0, 0, 1], "start": r("4"), "end": r("5"), "loops": [rect(r("2"), r("3"), json!(-50), json!(50))]}]
+        }
+    })
+}
+
+#[test]
+fn a_window_hung_from_its_head_takes_its_sill_from_the_dimensions_and_is_placed_there() {
+    let mut s = Session::new();
+    let r = run(&mut s, "family", head_hung_window());
+    assert_eq!(r["editable"]["ok"], true, "{} {}", r["editable"], r["check"]);
+    let f = s.model.families["Head Hung"].clone();
+    let sill = |t: &str| f.values(t, &Default::default()).unwrap()[crate::family::SILL].clone();
+    assert_eq!(sill("Tall"), crate::family::Val::Number(900.0));
+    assert_eq!(sill("Short"), crate::family::Val::Number(1200.0));
+    let none = |_: &str| None;
+    assert!(near(extent(&f, "Short", &none).1[2], 900.0), "its z from its sill in every type");
+    // Placed with no sill said, it stands where Revit puts it.
+    run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]]}));
+    let w: Id = run(&mut s, "window", json!({"at": [2000, 0], "family": "Head Hung", "type": "Short"}))["id"].as_u64().unwrap();
+    let Some(Element::Window(o)) = s.model.elements.get(w) else { panic!("no window") };
+    assert!(near(o.sill, 1200.0), "{}", o.sill);
+}
+
+#[test]
+fn a_plane_kept_its_distance_in_every_type_by_an_unlocked_dimension_moves_with_the_other() {
+    let mut s = Session::new();
+    let mut fam = table(750.0);
+    // An inner face 10 mm in from Right, measured but not locked in Revit: it still moves with Right in each type.
+    fam["revit"]["reference_planes"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"id": "9", "name": "Inner", "normal": [1, 0, 0], "at": {"Small": 490, "Large": 690}}));
+    fam["revit"]["dimensions"].as_array_mut().unwrap().push(json!({"refs": ["9", "3"], "value": {"Small": 10, "Large": 10}}));
+    fam["revit"]["forms"][0]["loops"] = json!([rect(r("2"), r("9"), r("5"), r("6"))]);
+    fam["forms"] = json!([
+        {"mesh": cuboid([-500.0, -300.0, 0.0], [490.0, 300.0, 750.0]), "types": ["Small"], "snapshot": true},
+        {"mesh": cuboid([-700.0, -400.0, 0.0], [690.0, 400.0, 750.0]), "types": ["Large"], "snapshot": true}
+    ]);
+    let r = run(&mut s, "family", fam);
+    assert_eq!(r["editable"]["ok"], true, "{} {}", r["editable"], r["check"]);
+}
+
+#[test]
+fn a_ring_of_two_half_circles_is_a_hole_and_an_axis_drawn_in_a_sketch_is_no_loop() {
+    let mut s = Session::new();
+    let p = |x: f64, y: f64, z: f64| json!([x, y, z]);
+    let half = |r: f64, from: f64| json!({"arc": {"center": p(0.0, 0.0, 0.0), "radius": r, "start": p(from * r, 0.0, 0.0), "end": p(-from * r, 0.0, 0.0), "normal": [0, 0, 1]}});
+    let circle = |r: f64| json!([half(r, 1.0), half(r, -1.0)]);
+    let fam = json!({
+        "name": "Collar", "category": "generic", "types": {"A": {}},
+        "revit": {"forms": [
+            {"kind": "extrusion", "normal": [0, 0, 1], "start": 0, "end": 100, "loops": [circle(80.0), circle(70.0)]},
+            {"kind": "revolution", "axis": [p(0.0, 0.0, 0.0), p(0.0, 0.0, 1000.0)], "start_angle": 0, "end_angle": 360,
+             "loops": [ring_of(&[p(100.0, 0.0, 200.0), p(150.0, 0.0, 200.0), p(150.0, 0.0, 300.0), p(100.0, 0.0, 300.0)]),
+                       [line(p(0.0, 0.0, 0.0), p(0.0, 0.0, 1000.0))]]}
+        ]}
+    });
+    let r = run(&mut s, "family", fam);
+    assert_eq!(r["editable"]["ok"], true, "{}", r["editable"]);
+    let f = s.model.families["Collar"].clone();
+    assert_eq!(f.forms.len(), 2, "one ring with its hole, one revolve");
+    assert_eq!(f.forms[0].holes.len(), 1);
+    let alone = Family { forms: vec![f.forms[0].clone()], ..f.clone() };
+    let want = std::f64::consts::PI * (80.0f64.powi(2) - 70.0f64.powi(2)) * 100.0;
+    assert!((volume(&alone, "A") - want).abs() < want * 0.02, "{} against {want}", volume(&alone, "A"));
+}
+
+#[test]
+fn a_sweep_of_a_profile_with_a_loop_inside_is_a_tube() {
+    let mut s = Session::new();
+    let p = |x: f64, y: f64, z: f64| json!([x, y, z]);
+    let square = |h: f64| ring_of(&[p(0.0, -h, -h), p(0.0, h, -h), p(0.0, h, h), p(0.0, -h, h)]);
+    let fam = json!({
+        "name": "Rail", "category": "generic", "types": {"A": {}},
+        "revit": {"forms": [{"kind": "sweep", "path": [line(p(0.0, 0.0, 0.0), p(1000.0, 0.0, 0.0)), line(p(1000.0, 0.0, 0.0), p(1000.0, 1000.0, 0.0))],
+                             "profile": [square(25.0), square(15.0)]}]}
+    });
+    let r = run(&mut s, "family", fam);
+    assert_eq!(r["editable"]["ok"], true, "{}", r["editable"]);
+    let f = s.model.families["Rail"].clone();
+    assert_eq!(f.forms.len(), 1, "the inside is a hole of the one sweep");
+    assert_eq!(f.forms[0].section_holes.len(), 1);
+    let want = 2.0 * 1000.0 * (2500.0 - 900.0);
+    assert!((volume(&f, "A") - want).abs() < want * 0.001, "{} against {want}", volume(&f, "A"));
+    let v = f.values("A", &Default::default()).unwrap();
+    let pieces = f.pieces("A", &v).unwrap();
+    let tris: Vec<[[f64; 3]; 3]> = pieces.iter().flat_map(|p| p.tris.iter().copied()).collect();
+    // Closed: every edge met by one running the other way.
+    let key = |p: [f64; 3]| p.map(|x| (x * 1000.0).round() as i64);
+    let mut edges = std::collections::HashMap::new();
+    for t in &tris {
+        for i in 0..3 {
+            *edges.entry((key(t[i]), key(t[(i + 1) % 3]))).or_insert(0i32) += 1;
+        }
+    }
+    let open = edges.iter().filter(|((a, b), n)| edges.get(&(*b, *a)).copied().unwrap_or(0) != **n).count();
+    assert_eq!(open, 0, "a tube closed at its ends round its inside");
+}
+
+#[test]
+fn a_nested_parts_plan_symbols_are_drawn_where_it_stands() {
+    let mut s = Session::new();
+    run(
+        &mut s,
+        "family",
+        json!({"name": "Sample Mark", "category": "generic", "types": {"Standard": {}},
+               "forms": [{"profile": [[0, 0], [100, 0], [100, 100], [0, 100]], "from": 0, "to": 10}],
+               "symbols": [{"line": [[0, 0], [100, 0]]}]}),
+    );
+    run(
+        &mut s,
+        "family",
+        json!({"name": "Sample Holder", "category": "furniture", "types": {"Standard": {}},
+               "forms": [{"profile": [[0, 0], [500, 0], [500, 500], [0, 500]], "from": 0, "to": 10}],
+               "nested": [{"family": "Sample Mark", "type": "Standard", "at": [1000, 0, 0], "rotation": 90}]}),
+    );
+    let c: Id = run(&mut s, "component", json!({"family": "Sample Holder", "type": "Standard", "at": [0, 0]}))["id"].as_u64().unwrap();
+    let Some(Element::Component(comp)) = s.model.elements.get(c) else { panic!("no component") };
+    let marks = s.model.component_marks(comp, crate::graphics::Detail::Medium);
+    let ends: Vec<crate::geom::P2> = marks
+        .iter()
+        .flat_map(|m| match m {
+            crate::family::Mark::Line(pts) => pts.clone(),
+            _ => Vec::new(),
+        })
+        .collect();
+    assert!(ends.iter().any(|p| near(p.0, 1000.0) && near(p.1, 100.0)), "turned a quarter where it stands: {ends:?}");
+}
+
+#[test]
+fn a_shared_nested_family_comes_into_the_project_and_one_not_shared_is_held_by_its_parent() {
+    let mut s = Session::new();
+    let part = |w: f64| {
+        json!({"category": "generic", "types": {"Standard": {}},
+               "forms": [{"profile": [[0, 0], [w, 0], [w, 50], [0, 50]], "from": 0, "to": 50}],
+               "symbols": [{"line": [[0, 0], [w, 0]]}]})
+    };
+    let mut shelf = table(750.0);
+    shelf.as_object_mut().unwrap().remove("name");
+    let mut definition = shelf.as_object_mut().unwrap().remove("revit").unwrap();
+    definition["nested"] = json!([
+        {"id": "n1", "family": "Sample Knob", "type": "Standard", "shared": true, "at": [0, 0, 750], "rotation": 0, "mirrored": false},
+        {"id": "n2", "family": "Sample Rail", "type": "Standard", "shared": false, "at": [0, 0, 750], "rotation": 0, "mirrored": false}
+    ]);
+    let package = json!({"format": 2, "family": shelf, "definition": definition,
+                         "nested_families": {"Sample Knob": {"family": part(50.0)}, "Sample Rail": {"family": part(300.0)}}});
+    s.files.give("Sample Unit.arqiflow-family.json", package.to_string().into_bytes());
+    run(&mut s, "family", json!({"path": "Sample Unit.arqiflow-family.json"}));
+    assert!(s.model.families.contains_key("Sample Knob"), "shared: the project's");
+    assert!(!s.model.families.contains_key("Sample Rail"), "not shared: its parent's");
+    let f = s.model.families["Sample Unit"].clone();
+    assert!(f.embedded.contains_key("Sample Rail") && !f.embedded.contains_key("Sample Knob"));
+    // The project written and read back keeps what the family holds.
+    let (m, _) = crate::model::Model::read(&s.model.to_json().unwrap()).unwrap();
+    assert_eq!(m.families["Sample Unit"].embedded, f.embedded);
+    // Its parts, built with the project's families: the rail it holds among them.
+    let mut parametric =
+        Family { check: Default::default(), forms: f.forms.iter().filter(|x| !x.snapshot).cloned().collect(), ..f.clone() };
+    parametric.symbols.retain(|y| !y.snapshot);
+    let others = |n: &str| s.model.families.get(n);
+    assert!(near(extent(&parametric, "Small", &others).1[2], 800.0), "the parts stand on the top");
+    let v = parametric.values("Small", &Default::default()).unwrap();
+    let marks = parametric.marks_with("Small", &v, crate::family::SymbolView::Plan, None, &others).unwrap();
+    assert_eq!(marks.len(), 2, "the knob's and the rail's plan lines");
 }

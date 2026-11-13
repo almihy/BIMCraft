@@ -151,7 +151,17 @@ fn turned(v: P3, from: P3, to: P3) -> P3 {
 /// A profile `section` (points in 3D at `path`'s first point) swept along `path`, mitred at each of its corners, its ends
 /// capped, or joined where the path closes; a swept blend's changing on the way to `section_end` (at the path's last point,
 /// as many corners as `section`). Every triangle turned out.
+#[cfg(test)]
 pub(crate) fn along(path: &[P3], section: &[P3], section_end: &[P3]) -> Result<Vec<[P3; 3]>, String> {
+    along_holed(path, section, section_end, &[])
+}
+
+/// A loop of a profile at a sweep's start, and at its end for a swept blend (as many corners; none, the same).
+pub(crate) type Section = (Vec<P3>, Vec<P3>);
+
+/// [`along`] with `holes` in its profile (loops inside it, each at the path's start and, for a swept blend, at its end): a
+/// tube's inside swept with it, its caps cut round them.
+pub(crate) fn along_holed(path: &[P3], section: &[P3], section_end: &[P3], holes: &[Section]) -> Result<Vec<[P3; 3]>, String> {
     let mut path: Vec<P3> = path.to_vec();
     path.dedup_by(|a, b| dot(sub(*a, *b), sub(*a, *b)) < 1e-12);
     if path.len() < 2 {
@@ -159,6 +169,9 @@ pub(crate) fn along(path: &[P3], section: &[P3], section_end: &[P3]) -> Result<V
     }
     if section.len() < 3 || (!section_end.is_empty() && section_end.len() != section.len()) {
         return Err("its profile needs three corners or more, its end profile as many".into());
+    }
+    if holes.iter().any(|(s, e)| s.len() < 3 || (!e.is_empty() && e.len() != s.len())) {
+        return Err("a loop inside its profile needs three corners or more, at its end as many".into());
     }
     let closed = path.len() > 2 && path.first().zip(path.last()).is_some_and(|(a, b)| dot(sub(*a, *b), sub(*a, *b)) < 1e-6);
     if closed {
@@ -192,95 +205,120 @@ pub(crate) fn along(path: &[P3], section: &[P3], section_end: &[P3]) -> Result<V
                 .map(|(i, _)| i)
         })
         .unwrap_or(0);
-    let mut start = offset(section, path[leg], dirs[leg]);
-    for k in (1..=leg).rev() {
-        start = start.into_iter().map(|o| turned(o, dirs[k], dirs[k - 1])).collect();
-    }
-    // The end profile, taken back to the first leg's frame by undoing the turns along the way.
-    let end = if section_end.is_empty() {
-        start.clone()
-    } else {
-        let last = dirs[legs - 1];
-        let mut e = offset(section_end, if closed { p0 } else { path[n - 1] }, last);
-        for i in (1..legs).rev() {
-            e = e.into_iter().map(|o| turned(o, dirs[i], dirs[i - 1])).collect();
+    // Each loop at the start and at the end, in the first leg's frame.
+    let framed = |s: &[P3], e: &[P3]| -> Section {
+        let mut start = offset(s, path[leg], dirs[leg]);
+        for k in (1..=leg).rev() {
+            start = start.into_iter().map(|o| turned(o, dirs[k], dirs[k - 1])).collect();
         }
-        e
-    };
-    // The profile turned counter-clockwise about the path, as the sides and the caps take it.
-    let turn: P3 = (0..start.len()).map(|i| cross(start[i], start[(i + 1) % start.len()])).fold([0.0; 3], add);
-    let (start, end) = if dot(turn, t0) < 0.0 {
-        (start.into_iter().rev().collect::<Vec<P3>>(), end.into_iter().rev().collect::<Vec<P3>>())
-    } else {
+        // The end profile, taken back to the first leg's frame by undoing the turns along the way.
+        let end = if e.is_empty() {
+            start.clone()
+        } else {
+            let last = dirs[legs - 1];
+            let mut e = offset(e, if closed { p0 } else { path[n - 1] }, last);
+            for i in (1..legs).rev() {
+                e = e.into_iter().map(|o| turned(o, dirs[i], dirs[i - 1])).collect();
+            }
+            e
+        };
         (start, end)
     };
+    // Each loop turned about the path the way the sides and the caps take it: the outer counter-clockwise, a hole the other
+    // way, so its sides face into the tube.
+    let oriented = |(start, end): Section, outer: bool| -> Section {
+        let turn: P3 = (0..start.len()).map(|i| cross(start[i], start[(i + 1) % start.len()])).fold([0.0; 3], add);
+        if (dot(turn, t0) < 0.0) == outer { (start.into_iter().rev().collect(), end.into_iter().rev().collect()) } else { (start, end) }
+    };
+    let mut loops = vec![oriented(framed(section, section_end), true)];
+    for (s, e) in holes {
+        loops.push(oriented(framed(s, e), false));
+    }
     // How far along the path each corner is, 0 to 1.
     let lengths: Vec<f64> = (0..legs).map(|i| dot(sub(path[(i + 1) % n], path[i]), dirs[i])).collect();
     let total: f64 = lengths.iter().sum();
-    // The profile carried along each leg, turned at each corner as the path turns (rotation-minimising): its offsets at
-    // `f` of the way along, in leg `leg`'s frame.
-    let carried = |f: f64, leg: usize| -> Vec<P3> {
-        let mut o: Vec<P3> = start.iter().zip(&end).map(|(a, b)| add(mul(*a, 1.0 - f), mul(*b, f))).collect();
-        for k in 1..=leg {
-            o = o.into_iter().map(|v| turned(v, dirs[k - 1], dirs[k])).collect();
-        }
-        o
-    };
-    let corners = n;
-    let mut rings: Vec<Vec<P3>> = Vec::with_capacity(corners);
-    let mut run = 0.0;
-    for i in 0..corners {
-        let f = if total > 0.0 { run / total } else { 0.0 };
-        let corner = path[i];
-        let ring: Vec<P3> = if !closed && i == 0 {
-            carried(0.0, 0).into_iter().map(|o| add(corner, o)).collect()
-        } else if !closed && i == n - 1 {
-            carried(1.0, legs - 1).into_iter().map(|o| add(corner, o)).collect()
-        } else {
-            // The leg before the corner and the one after: the profile, square to the one before, meets the mitre that
-            // halves the corner.
-            let (prev, next) = (if i == 0 { legs - 1 } else { i - 1 }, i % legs);
-            let (before, after) = (dirs[prev], dirs[next]);
-            let o = if i == 0 { carried(0.0, 0).into_iter().map(|v| turned(v, dirs[0], before)).collect() } else { carried(f, prev) };
-            let mitre = unit(add(before, after)).unwrap_or(after);
-            let along = dot(mitre, before);
-            o.into_iter()
-                .map(|v| {
-                    let s = if along.abs() > 1e-9 { -dot(v, mitre) / along } else { 0.0 };
-                    add(add(corner, v), mul(before, s))
-                })
-                .collect()
-        };
-        rings.push(ring);
-        if i < legs {
-            run += lengths[i];
-        }
-    }
-    let m = section.len();
     let mut tris = Vec::new();
-    let count = rings.len();
-    let sides = if closed { count } else { count - 1 };
-    for r in 0..sides {
-        let (a, b) = (&rings[r], &rings[(r + 1) % count]);
-        for j in 0..m {
-            let k = (j + 1) % m;
-            tris.push([a[j], a[k], b[k]]);
-            tris.push([a[j], b[k], b[j]]);
+    // Each loop's rings where the path starts and ends.
+    let mut ends: Vec<(Vec<P3>, Vec<P3>)> = Vec::new();
+    for (start, end) in &loops {
+        // The loop carried along each leg, turned at each corner as the path turns (rotation-minimising): its offsets at
+        // `f` of the way along, in leg `leg`'s frame.
+        let carried = |f: f64, leg: usize| -> Vec<P3> {
+            let mut o: Vec<P3> = start.iter().zip(end).map(|(a, b)| add(mul(*a, 1.0 - f), mul(*b, f))).collect();
+            for k in 1..=leg {
+                o = o.into_iter().map(|v| turned(v, dirs[k - 1], dirs[k])).collect();
+            }
+            o
+        };
+        let mut rings: Vec<Vec<P3>> = Vec::with_capacity(n);
+        let mut run = 0.0;
+        for i in 0..n {
+            let f = if total > 0.0 { run / total } else { 0.0 };
+            let corner = path[i];
+            let ring: Vec<P3> = if !closed && i == 0 {
+                carried(0.0, 0).into_iter().map(|o| add(corner, o)).collect()
+            } else if !closed && i == n - 1 {
+                carried(1.0, legs - 1).into_iter().map(|o| add(corner, o)).collect()
+            } else {
+                // The leg before the corner and the one after: the profile, square to the one before, meets the mitre that
+                // halves the corner.
+                let (prev, next) = (if i == 0 { legs - 1 } else { i - 1 }, i % legs);
+                let (before, after) = (dirs[prev], dirs[next]);
+                let o = if i == 0 { carried(0.0, 0).into_iter().map(|v| turned(v, dirs[0], before)).collect() } else { carried(f, prev) };
+                let mitre = unit(add(before, after)).unwrap_or(after);
+                let along = dot(mitre, before);
+                o.into_iter()
+                    .map(|v| {
+                        let s = if along.abs() > 1e-9 { -dot(v, mitre) / along } else { 0.0 };
+                        add(add(corner, v), mul(before, s))
+                    })
+                    .collect()
+            };
+            rings.push(ring);
+            if i < legs {
+                run += lengths[i];
+            }
+        }
+        let m = start.len();
+        let count = rings.len();
+        let sides = if closed { count } else { count - 1 };
+        for r in 0..sides {
+            let (a, b) = (&rings[r], &rings[(r + 1) % count]);
+            for j in 0..m {
+                let k = (j + 1) % m;
+                tris.push([a[j], a[k], b[k]]);
+                tris.push([a[j], b[k], b[j]]);
+            }
+        }
+        if let (Some(first), Some(last)) = (rings.first(), rings.last()) {
+            ends.push((first.clone(), last.clone()));
         }
     }
-    if !closed {
-        // The caps: each end's profile laid flat in its own plane to be cut into triangles.
-        for (ring, dir, first) in [(&rings[0], dirs[0], true), (&rings[count - 1], dirs[legs - 1], false)] {
-            let u = unit(sub(ring[1 % m], ring[0])).unwrap_or([1.0, 0.0, 0.0]);
+    if !closed && !ends.is_empty() {
+        // The caps: each end's loops laid flat in their own plane, the outer cut round the holes into triangles.
+        for (first, dir) in [(true, dirs[0]), (false, dirs[legs - 1])] {
+            let rings: Vec<&Vec<P3>> = ends.iter().map(|(a, b)| if first { a } else { b }).collect();
+            let outer = rings[0];
+            let o = outer[0];
+            let u = unit(sub(outer[1 % outer.len()], o)).unwrap_or([1.0, 0.0, 0.0]);
             let v = cross(dir, u);
-            let flat: Vec<P2> = ring.iter().map(|q| P2(dot(sub(*q, ring[0]), u), dot(sub(*q, ring[0]), v))).collect();
-            let flip = crate::geom::area(&flat) < 0.0;
-            let flat: Vec<P2> = if flip { flat.into_iter().rev().collect() } else { flat };
-            let idx = |i: usize| if flip { m - 1 - i } else { i };
-            for [x, y, z] in cap(&flat)? {
-                let (x, y, z) = (idx(x), idx(y), idx(z));
-                tris.push(if first { [ring[x], ring[z], ring[y]] } else { [ring[x], ring[y], ring[z]] });
-            }
+            let flat = |r: &[P3]| -> Vec<P2> { r.iter().map(|q| P2(dot(sub(*q, o), u), dot(sub(*q, o), v))).collect() };
+            let ring = ccw(flat(outer));
+            let caps: Vec<[P3; 3]> = if rings.len() == 1 {
+                let idx = cap(&ring)?;
+                let back = |p: P2| add(o, add(mul(u, p.0), mul(v, p.1)));
+                idx.iter().map(|[a, b, c]| [back(ring[*a]), back(ring[*b]), back(ring[*c])]).collect()
+            } else {
+                let holes: Vec<Vec<P2>> = rings[1..].iter().map(|h| ccw(flat(h)).into_iter().rev().collect()).collect();
+                let t = crate::triangulation::constrained(&ring, &holes, &[], &[]).map_err(|e| format!("its profile's end: {e}"))?;
+                let back = |i: usize| {
+                    let p = t.points.get(i).copied().unwrap_or_default();
+                    add(o, add(mul(u, p.0), mul(v, p.1)))
+                };
+                t.triangles.iter().map(|[a, b, c]| [back(*a), back(*b), back(*c)]).collect()
+            };
+            // Counter-clockwise seen from along the path: the start's turned to face back, the end's facing on.
+            tris.extend(caps.into_iter().map(|[a, b, c]| if first { [a, c, b] } else { [a, b, c] }));
         }
     }
     let tris: Vec<[P3; 3]> = tris.into_iter().filter(|[a, b, c]| a != b && b != c && a != c).collect();
