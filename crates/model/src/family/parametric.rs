@@ -249,6 +249,25 @@ impl Family {
         }
     }
 
+    /// Whether a nested part of this family, type `type_name` sized by `values` (what its parent hands it, worked out in a wall
+    /// `wall` thick), is drawn as Revit made it ([`Family::draws_snapshot`]) rather than from its definition. Revit always
+    /// regenerates a nested family with the values its parent hands it, so its result for the type is right only at the
+    /// type's own values: where the parent hands others, the definition draws it (a family with no definition keeps Revit's).
+    pub(crate) fn draws_revit_result(&self, type_name: &str, values: &BTreeMap<String, Val>, wall: f64) -> bool {
+        if !self.draws_snapshot(type_name) {
+            return false;
+        }
+        if !self.has_parametric() {
+            return true;
+        }
+        let Ok(own) = self.values_in(type_name, &BTreeMap::new(), wall) else { return true };
+        values.iter().all(|(k, v)| match (v, own.get(k)) {
+            (Val::Number(a), Some(Val::Number(b))) => (a - b).abs() <= 0.01,
+            (Val::Number(_), _) => false,
+            _ => true,
+        })
+    }
+
     /// Where each reference ends up for these `values` (a type's parameters worked out): by name, along its axis, mm. Over
     /// or wrongly constrained, why.
     pub fn solve(&self, values: &BTreeMap<String, Val>) -> Result<BTreeMap<String, f64>, String> {

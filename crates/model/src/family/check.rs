@@ -201,7 +201,7 @@ impl Family {
                 let mut out = self
                     .marks_where(&values, &|y: &super::Symbol| y.view == view && y.of_type(t) && y.snapshot == snapshot && y.drawn_at(d))?;
                 if !snapshot && view == SymbolView::Plan {
-                    self.nested_marks(t, &values, Some(d), others, (0, &std::cell::Cell::new(0)), &mut out)?;
+                    self.nested_marks(t, &values, view, Some(d), others, (0, &std::cell::Cell::new(0)), &mut out)?;
                 }
                 Ok(out)
             };

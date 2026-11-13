@@ -371,6 +371,40 @@ impl SymbolView {
     fn is_plan(&self) -> bool {
         *self == SymbolView::Plan
     }
+
+    /// The direction a view looks along, in the family's axes (up for a plan, along y for a front, along x for a side).
+    fn normal(self) -> P3 {
+        let mut n = [0.0; 3];
+        n[self.axis()] = 1.0;
+        n
+    }
+
+    /// Which of the family's axes (x 0, y 1, z 2) a view looks along.
+    fn axis(self) -> usize {
+        match self {
+            SymbolView::Plan => 2,
+            SymbolView::Front => 1,
+            SymbolView::Side => 0,
+        }
+    }
+
+    /// A point of this view's drawing, in the family's axes: a plan's (x, y) at the floor, a front's (x, z) and a side's (y, z).
+    fn lift(self, q: P2) -> P3 {
+        match self {
+            SymbolView::Plan => [q.0, q.1, 0.0],
+            SymbolView::Front => [q.0, 0.0, q.1],
+            SymbolView::Side => [0.0, q.0, q.1],
+        }
+    }
+
+    /// A point of the family's axes as this view draws it: (x, y), (x, z) or (y, z).
+    fn flat(self, p: P3) -> P2 {
+        match self {
+            SymbolView::Plan => P2(p[0], p[1]),
+            SymbolView::Front => P2(p[0], p[2]),
+            SymbolView::Side => P2(p[1], p[2]),
+        }
+    }
 }
 
 /// Where a family came from, which the engine carries and shows and never acts on: the firm library's entry and its version
@@ -2345,9 +2379,20 @@ impl Family {
         view: SymbolView,
         detail: Option<crate::graphics::Detail>,
     ) -> Result<Vec<Mark>, String> {
-        let which = self.draws_snapshot(type_name);
+        self.marks_as(type_name, values, view, detail, self.draws_snapshot(type_name))
+    }
+
+    /// [`Family::marks`] of its `snapshot` symbols (Revit's result) or of its others (its definition's), as `snapshot` says.
+    fn marks_as(
+        &self,
+        type_name: &str,
+        values: &BTreeMap<String, Val>,
+        view: SymbolView,
+        detail: Option<crate::graphics::Detail>,
+        snapshot: bool,
+    ) -> Result<Vec<Mark>, String> {
         self.marks_where(values, &|y: &Symbol| {
-            y.view == view && y.of_type(type_name) && y.snapshot == which && detail.is_none_or(|d| y.drawn_at(d))
+            y.view == view && y.of_type(type_name) && y.snapshot == snapshot && detail.is_none_or(|d| y.drawn_at(d))
         })
     }
 
@@ -2357,8 +2402,8 @@ impl Family {
         self.marks_where(values, &|y: &Symbol| y.of_type(type_name) && y.snapshot == which)
     }
 
-    /// [`Family::marks`] with, in plan, its nested parts' own plan symbols placed where they stand (in a type drawn from its
-    /// definition: Revit's result has them already), the families they are of its own ([`Family::embedded`]) or `others`.
+    /// [`Family::marks`] with its nested parts' own symbols that lie in `view` placed where they stand (in a type drawn from
+    /// its definition: Revit's result has them already), the families they are of its own ([`Family::embedded`]) or `others`.
     pub fn marks_with(
         &self,
         type_name: &str,
@@ -2368,18 +2413,20 @@ impl Family {
         others: Others,
     ) -> Result<Vec<Mark>, String> {
         let mut out = self.marks(type_name, values, view, detail)?;
-        if view == SymbolView::Plan && !self.draws_snapshot(type_name) {
-            self.nested_marks(type_name, values, detail, others, (0, &std::cell::Cell::new(0)), &mut out)?;
+        if !self.draws_snapshot(type_name) {
+            self.nested_marks(type_name, values, view, detail, others, (0, &std::cell::Cell::new(0)), &mut out)?;
         }
         Ok(out)
     }
 
-    /// Its nested parts' plan marks in type `type_name`, in its axes, onto `out`: each standing upright (a part turned onto
-    /// a face draws none in plan), there, and drawn at `detail`.
+    /// Its nested parts' marks in `view` in type `type_name`, in its axes, onto `out`: each of the part's own symbols whose
+    /// view faces the way this one does (a part's plan symbols in a parent's plan where it stands upright, and in the
+    /// parent's front where it is turned onto a face), there, and drawn at `detail`.
     pub(crate) fn nested_marks(
         &self,
         type_name: &str,
         values: &BTreeMap<String, Val>,
+        view: SymbolView,
         detail: Option<crate::graphics::Detail>,
         others: Others,
         (depth, spent): (usize, &std::cell::Cell<usize>),
@@ -2394,7 +2441,12 @@ impl Family {
         let mut read = HashMap::new();
         for (i, n) in self.nested.iter().enumerate().filter(|(_, n)| n.of_type(type_name)) {
             let said = |e: String| format!("nested part {} ({}): {e}", i + 1, n.family);
-            if detail.is_some_and(|d| n.show.is_some_and(|s| !s.at(d))) {
+            let seen = |s: Show| match view {
+                SymbolView::Plan => s.plan,
+                SymbolView::Front => s.front,
+                SymbolView::Side => s.side,
+            };
+            if n.show.is_some_and(|s| !seen(s) || detail.is_some_and(|d| !s.at(d))) {
                 continue;
             }
             if let Some(v) = &n.visible
@@ -2408,9 +2460,6 @@ impl Family {
                 return Err(format!("it draws more than {MAX_NESTED} nested parts in all"));
             }
             let (at, axes) = nested_frame(n, values, &mut read).map_err(said)?;
-            if axes[2] != [0.0, 0.0, 1.0] {
-                continue;
-            }
             let mut given = BTreeMap::new();
             for (k, e) in &n.params {
                 given.insert(k.clone(), number(e, values, &mut read).map_err(said)?);
@@ -2421,12 +2470,25 @@ impl Family {
             };
             let inner_type = n.type_for(type_name);
             let inner_values = inner.values_given(inner_type, &given, wall).map_err(said)?;
-            let mut marks = inner.marks(inner_type, &inner_values, SymbolView::Plan, detail).map_err(said)?;
-            if !inner.draws_snapshot(inner_type) {
-                inner.nested_marks(inner_type, &inner_values, detail, others, (depth + 1, spent), &mut marks).map_err(said)?;
+            let revit = inner.draws_revit_result(inner_type, &inner_values, wall);
+            // The way each of its views faces in this family's axes, and which of this one's: a view of the part is drawn
+            // where it is square to the view being drawn, however it is turned.
+            let faces = view.normal();
+            for inner_view in [SymbolView::Plan, SymbolView::Front, SymbolView::Side] {
+                if crate::geom::v3::dot(axes[inner_view.axis()], faces).abs() < 1.0 - 1e-6 {
+                    continue;
+                }
+                let mut marks = inner.marks_as(inner_type, &inner_values, inner_view, detail, revit).map_err(said)?;
+                if !revit {
+                    inner.nested_marks(inner_type, &inner_values, inner_view, detail, others, (depth + 1, spent), &mut marks).map_err(said)?;
+                }
+                let place = |q: P2| {
+                    let p = inner_view.lift(q);
+                    let p = add(at, add(add(mul(axes[0], p[0]), mul(axes[1], p[1])), mul(axes[2], p[2])));
+                    view.flat(p)
+                };
+                out.extend(marks.iter().map(|m| m.map(place)));
             }
-            let place = |q: P2| P2(at[0] + axes[0][0] * q.0 + axes[1][0] * q.1, at[1] + axes[0][1] * q.0 + axes[1][1] * q.1);
-            out.extend(marks.iter().map(|m| m.map(place)));
             if out.len() > MAX_SYMBOLS * 4 {
                 return Err(said(format!("its nested parts draw more than {} marks", MAX_SYMBOLS * 4)));
             }
@@ -2586,7 +2648,12 @@ impl Family {
         if how.spent.get() > MAX_NESTED {
             return Err(format!("it builds more than {MAX_NESTED} nested parts in all"));
         }
-        let deeper = Build { snapshot: inner.draws_snapshot(inner_type), others: how.others, depth: how.depth + 1, spent: how.spent };
+        let deeper = Build {
+            snapshot: inner.draws_revit_result(inner_type, &inner_values, wall),
+            others: how.others,
+            depth: how.depth + 1,
+            spent: how.spent,
+        };
         let pieces = inner.build(inner_type, &inner_values, &mut HashMap::new(), cuts, deeper)?;
         let (at, axes) = nested_frame(n, values, read)?;
         let det = crate::geom::v3::dot(axes[0], cross(axes[1], axes[2]));
