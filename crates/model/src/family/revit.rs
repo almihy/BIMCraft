@@ -378,6 +378,8 @@ impl Reader<'_> {
                     .find(|ax| pts.iter().all(|p| (p[ax.index()] - pts[0][ax.index()]).abs() < 0.05))
                     .ok_or("its sketch is on a sloped plane")?;
                 let (plane, k) = sketch(flat);
+                // Where its sketch plane is: the axis' first point's coordinate square to it.
+                let at = Some(a0[flat.index()].clone()).filter(|e| !matches!(e, Expr::Number(x) if *x == 0.0));
                 // The outer loop its profile, the loops inside it its holes.
                 let rings = loops.iter().map(|l| self.ring(l, k, Ring::Profile, 0)).collect::<Result<Vec<_>, _>>()?;
                 let outer = (0..rings.len())
@@ -396,7 +398,7 @@ impl Reader<'_> {
                     (from, to) = (neg(to), neg(from));
                 }
                 let axis = Some([[a0[k[0]].clone(), a0[k[1]].clone()], [a1[k[0]].clone(), a1[k[1]].clone()]]);
-                Ok(vec![Form { plane, profile, holes, arcs, axis, from, to, ..base }])
+                Ok(vec![Form { plane, profile, holes, arcs, axis, from, to, at, ..base }])
             }
             "sweep" | "swept_blend" => {
                 let path = def["path"].as_array().filter(|p| !p.is_empty() && p.len() <= MOST).ok_or("it has no path")?;
@@ -586,7 +588,8 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     if let Some(z) = to.get("z_minus").filter(|z| !z.is_null()) {
         // A plane (a window's sill): the parameter that puts it where it is in every type, else where it is in the first.
         let plane = z.get("ref").and_then(Value::as_str).and_then(|id| reader.planes.get(id)).map(|p| p.2.clone());
-        let follows = plane.as_ref().and_then(|at| {
+        let moving = plane.as_ref().is_some_and(|at| at.values().any(|x| (x - at.values().next().copied().unwrap_or(0.0)).abs() > 0.05));
+        let follows = plane.as_ref().filter(|_| moving).and_then(|at| {
             let typed: Vec<(String, BTreeMap<String, Val>)> =
                 f.types.keys().filter_map(|t| Some((t.clone(), f.values(t, &BTreeMap::new()).ok()?))).collect();
             reader.params.iter().find(|p| {
@@ -853,12 +856,59 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     f.dimensions = dimensions;
     f.catalog = catalog;
     // What is made is tried in every type: a form or a line that doesn't work out in one is left out, and said.
+    let forms = turned_as_revit(f, forms);
     let (forms, symbols, nested) = tried(f, forms, symbols, nested, &mut notes);
     f.forms.extend(forms);
     f.symbols.extend(symbols);
     f.nested = nested;
     notes.truncate(64);
     f.editable = Some(super::Editable { ok: false, reason: None, untranslated: notes });
+}
+
+/// `forms` with each part-turn revolve turned the way Revit turns it. The definition says its axis and its angles but not
+/// which way round they run from its sketch, so each is turned the other way where that brings the first type's volume
+/// nearer Revit's result (a void's, by what it cuts).
+fn turned_as_revit(f: &Family, mut forms: Vec<Form>) -> Vec<Form> {
+    let Some(first) = f.types.keys().next().cloned() else { return forms };
+    let Ok(values) = f.values(&first, &BTreeMap::new()) else { return forms };
+    let revit: f64 = f
+        .forms
+        .iter()
+        .filter(|x| x.snapshot && x.of_type(&first) && x.show.is_none_or(|s| s.fine))
+        .map(|x| super::shapes::volume(&x.mesh).abs())
+        .sum();
+    if revit <= 0.0 {
+        return forms;
+    }
+    let mut probe = Family { forms: Vec::new(), symbols: Vec::new(), nested: Vec::new(), check: BTreeMap::new(), ..f.clone() };
+    let mut off = |forms: &[Form]| -> f64 {
+        probe.forms = forms.to_vec();
+        let how = super::Build { snapshot: false, others: &|_| None, depth: 0, spent: &std::cell::Cell::new(0) };
+        match probe.build(&first, &values, &mut HashMap::new(), &mut crate::csg::Meter::default(), how) {
+            Ok(pieces) => (pieces.iter().map(|p| super::shapes::volume(&p.tris).abs()).sum::<f64>() - revit).abs(),
+            Err(_) => f64::INFINITY,
+        }
+    };
+    let mut best = off(&forms);
+    for i in 0..forms.len() {
+        let part = forms[i].axis.is_some()
+            && match (&forms[i].from, &forms[i].to) {
+                (Expr::Number(a), Expr::Number(b)) => (b - a).abs() < 359.9,
+                _ => true,
+            };
+        if !part {
+            continue;
+        }
+        let was = forms[i].clone();
+        (forms[i].from, forms[i].to) = (neg(was.to.clone()), neg(was.from.clone()));
+        let now = off(&forms);
+        if now < best * 0.999 {
+            best = now;
+        } else {
+            forms[i] = was;
+        }
+    }
+    forms
 }
 
 /// `forms`, `symbols` and `nested` parts kept where each works out in every type of `f` (its references where they're

@@ -786,6 +786,9 @@ pub struct Form {
     pub section: Vec<[Expr; 3]>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub section_end: Vec<[Expr; 3]>,
+    /// A revolve's sketch plane, where it is along the axis it is square to (none, through the family's origin).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<Expr>,
     /// Edges of its rings that are true arcs (Revit's arcs in its sketches): drawn as a circle is, kept as arcs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub arcs: Vec<Bend>,
@@ -853,6 +856,7 @@ impl Form {
             .chain(self.section.iter().flatten())
             .chain(self.section_end.iter().flatten())
             .chain(self.arcs.iter().flat_map(|b| b.centre.iter()))
+            .chain(&self.at)
             .collect()
     }
 
@@ -2451,6 +2455,12 @@ impl Family {
                 return Err(format!("sweeps nothing: from {from} to {to}{unit}"));
             }
             let ring = if crate::geom::area(&ring) < 0.0 { ring.into_iter().rev().collect() } else { ring };
+            // A revolve's sketch plane where it is along the axis it is square to: its triangles moved there.
+            let lift = match &form.at {
+                Some(e) => embed(form.plane, P2(0.0, 0.0), num(e)?),
+                None => [0.0; 3],
+            };
+            let lifted = |tris: Vec<[P3; 3]>| -> Vec<[P3; 3]> { tris.into_iter().map(|t| t.map(|q| add(q, lift))).collect() };
             // A revolve of a profile with holes (a ring's section): the profile turned, less each hole turned.
             if let (Some([p, q]), false, true) = (&form.axis, form.holes.is_empty(), form.top.is_empty()) {
                 if to - from > 360.0 || form.holes.len() > MAX_RING || form.holes.iter().any(|h| h.len() > MAX_RING) {
@@ -2458,12 +2468,14 @@ impl Family {
                 }
                 let mut corner = |c: &'a [Expr; 2]| -> Result<P2, String> { Ok(P2(num(&c[0])?, num(&c[1])?)) };
                 let axis = [corner(p)?, corner(q)?];
-                let (mut tris, _) = revolve(&ring, axis, (from, to), form.plane)?;
+                let (tris, _) = revolve(&ring, axis, (from, to), form.plane)?;
+                let mut tris = lifted(tris);
                 for (h, b) in form.holes.iter().zip(&hole_bends) {
                     let hole: Vec<P2> = h.iter().map(|[a, c]| Ok(P2(num(a)?, num(c)?))).collect::<Result<_, String>>()?;
                     let hole = shapes::bent2(hole, b);
                     let hole = if crate::geom::area(&hole) < 0.0 { hole.into_iter().rev().collect() } else { hole };
                     let (inner, _) = revolve(&hole, axis, (from, to), form.plane)?;
+                    let inner = lifted(inner);
                     tris.extend(inner.into_iter().map(|[a, b, c]| [a, c, b]));
                 }
                 return Ok(Some(Piece { show: form.show, ..hulled(tris, material) }));
@@ -2498,6 +2510,8 @@ impl Family {
                     let mut corner = |c: &'a [Expr; 2]| -> Result<P2, String> { Ok(P2(num(&c[0])?, num(&c[1])?)) };
                     let axis = [corner(p)?, corner(q)?];
                     let (tris, outline) = revolve(&ring, axis, (from, to), form.plane)?;
+                    let tris = lifted(tris);
+                    let outline = outline.into_iter().map(|q| P2(q.0 + lift[0], q.1 + lift[1])).collect();
                     let (bottom, top) = heights(&tris);
                     Piece { caps: tris.len(), tris, outline, bottom, top, material, round: false, show: None }
                 }
