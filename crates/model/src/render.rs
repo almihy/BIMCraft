@@ -2418,7 +2418,8 @@ fn elevation_symbols(d: &mut Drawing, m: &Model, v: &Section, look: &Look, cance
     let families: std::collections::BTreeSet<&str> = m
         .families
         .iter()
-        .filter(|(_, f)| f.symbols.iter().any(|y| y.view != crate::family::SymbolView::Plan))
+        // A family whose elevation lines all come from a nested part has none of its own.
+        .filter(|(_, f)| f.symbols.iter().any(|y| y.view != crate::family::SymbolView::Plan) || !f.nested.is_empty())
         .map(|(n, _)| n.as_str())
         .collect();
     if families.is_empty() {

@@ -90,6 +90,33 @@ fn an_elevation_of_a_window_draws_its_nested_parts_side_lines() {
 }
 
 #[test]
+fn a_section_along_a_wall_draws_a_windows_nested_parts_lines_though_the_window_has_no_elevation_symbols_of_its_own() {
+    let leg = json!({"category": "generic", "types": {"Standard": {}}, "symbols": [{"line": [[0, 0], [0, 500]], "view": "side"}]});
+    let mut s = Session::new();
+    run(
+        &mut s,
+        "family",
+        json!({"name": "Sample Sash Window", "category": "window", "host": "wall",
+               "parameters": [{"name": "Width", "kind": "length", "value": 900}, {"name": "Height", "kind": "length", "value": 1200},
+                              {"name": "Sill Height", "kind": "length", "value": 900}],
+               "types": {"900": {}}, "forms": [{"profile": [[-450, -50], [450, -50], [450, 50], [-450, 50]], "from": 0, "to": 1200}],
+               "embedded": {"Sample Leg": leg},
+               "nested": [{"family": "Sample Leg", "type": "Standard", "at": [0, 0, 200]}]}),
+    );
+    run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]]}));
+    let w = id_of(&run(&mut s, "window", json!({"at": [2000, 0], "family": "Sample Sash Window", "type": "900"})));
+    // A section across the wall's line at x = 500, looking along it towards the window: one of its two directions sees it.
+    let mut found = Vec::new();
+    for (start, end) in [([500, -3000], [500, 3000]), ([500, 3000], [500, -3000])] {
+        let id = id_of(&run(&mut s, "section", json!({"start": start, "end": end})));
+        let d = render::section(&s.model, id, render::section_fit(&s.model, id, 1600, 1000));
+        let heights: Vec<f64> = points(&d, w).iter().map(|p| p.1).collect();
+        found.push((heights.iter().any(|z| (z - 1100.0).abs() < 1.0), heights.iter().any(|z| (z - 1600.0).abs() < 1.0)));
+    }
+    assert!(found.contains(&(true, true)), "the sash's line is in the drawing, from 1100 to 1600: {found:?}");
+}
+
+#[test]
 fn a_type_drawn_as_revit_made_it_cuts_revits_opening() {
     let hole = |openings: Value| {
         let mut s = Session::new();
