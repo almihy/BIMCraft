@@ -359,7 +359,7 @@ fn a_door_schedule_lists_a_familys_text_parameter_with_each_doors_words() {
 
 /// The export package of a one-type door (900 wide) with a jamb: Revit's result (a mesh, per type) and the definition (an
 /// extrusion bound to the door's planes) that rebuilds it, `to_bimcraft` saying the `openings` Revit cut where given.
-fn jamb_package(openings: Option<Value>) -> Value {
+pub(crate) fn jamb_package(openings: Option<Value>) -> Value {
     // A jamb 50 by 200 in plan, 2100 tall, as the exporter writes it: Revit's result (a mesh, per type) and the definition
     // (an extrusion bound to the door's planes) that rebuilds it.
     let cuboid = |lo: [f64; 3], hi: [f64; 3]| {

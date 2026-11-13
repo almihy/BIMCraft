@@ -4934,6 +4934,11 @@ impl Model {
             _ => None,
         };
         let need = |key: &str| number(key).ok_or_else(|| format!("family `{name}` has no length `{key}`"));
+        // A type drawn as Revit made it cuts the opening Revit measured for it; one drawn from its rules, the one they say.
+        let hole = match f.check.get(&o.type_name).and_then(|c| c.opening).filter(|_| f.draws_snapshot(&o.type_name)) {
+            Some([w, h, _]) => Some((w, h)),
+            None => f.cut_size(&values)?,
+        };
         Ok(OpeningType {
             width: need(crate::family::WIDTH)?,
             height: need(crate::family::HEIGHT)?,
@@ -4941,7 +4946,7 @@ impl Model {
             operation: f.operation,
             thickness: None,
             identity: f.identity.get(&o.type_name).cloned().unwrap_or_default(),
-            hole: f.cut_size(&values)?,
+            hole,
         })
     }
 
@@ -5034,7 +5039,7 @@ impl Model {
             _ => return Vec::new(),
         };
         let Some(f) = self.families.get(family) else { return Vec::new() };
-        if !f.symbols.iter().any(|y| y.view != SymbolView::Plan) {
+        if !f.symbols.iter().any(|y| y.view != SymbolView::Plan) && f.nested.is_empty() {
             return Vec::new();
         }
         // The family's axes in the model, and where its (x, y, z) stands.
@@ -5064,7 +5069,9 @@ impl Model {
             Some(t) => f.values_in(type_name, params, t),
             None => f.values(type_name, params),
         };
-        let Ok(marks) = values.and_then(|v| f.marks(type_name, &v, view, Some(detail))) else { return Vec::new() };
+        // Its nested parts' symbols that face the view too (a window's sash, a door's handle).
+        let others = |n: &str| self.families.get(n);
+        let Ok(marks) = values.and_then(|v| f.marks_with(type_name, &v, view, Some(detail), &others)) else { return Vec::new() };
         let lift = |q: P2| if side { place([0.0, q.0, q.1]) } else { place([q.0, 0.0, q.1]) };
         marks
             .into_iter()

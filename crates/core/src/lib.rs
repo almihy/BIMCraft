@@ -137,6 +137,8 @@ mod door_leaf_tests;
 #[cfg(test)]
 mod door_tests;
 #[cfg(test)]
+mod family_drawing_tests;
+#[cfg(test)]
 mod family_engine_tests;
 #[cfg(test)]
 mod family_parametric_tests;
