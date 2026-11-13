@@ -9,6 +9,10 @@ use crate::geom::v3::{P3, add, cross, dot, mul, sub};
 pub const MAX_TRIANGLES: usize = 20_000;
 /// How near a plane, mm, a point lies on it.
 const EPS: f64 = 1e-5;
+/// How near a plane, mm, a polygon's corner lies for the polygon to count as in it when a solid is cut by it: Revit's
+/// own geometry tolerance is about 0.15 mm, so a void whose face is 0.02 to 0.06 mm off a solid's cuts it clean
+/// and leaves no skin.
+const COPLANAR: f64 = 0.1;
 /// A triangle with less area than this, mm², has no plane worth cutting by.
 const SLIVER: f64 = 1e-6;
 
@@ -84,15 +88,15 @@ enum Side {
     Across(Option<Poly>, Option<Poly>),
 }
 
-/// `p` against the plane `n · x = w`.
+/// `p` against the plane `n · x = w`; a corner within [`COPLANAR`] of it is in it.
 fn divide(n: P3, w: f64, p: Poly) -> Side {
     let kinds: Vec<i8> =
         p.v.iter()
             .map(|c| {
                 let d = dot(n, *c) - w;
-                if d > EPS {
+                if d > COPLANAR {
                     1
-                } else if d < -EPS {
+                } else if d < -COPLANAR {
                     -1
                 } else {
                     0
