@@ -300,6 +300,10 @@ struct SymbolText {
     radius: String,
     from: String,
     to: String,
+    /// An arc's ends where it follows them (Revit's arc is its centre and two ends), as typed; the dialog carries them as they
+    /// are, so editing an arc never drops them.
+    start: Option<[String; 2]>,
+    end: Option<[String; 2]>,
     value: String,
     align: LabelAlign,
     visible: String,
@@ -321,6 +325,8 @@ impl SymbolText {
             radius: String::new(),
             from: String::new(),
             to: String::new(),
+            start: None,
+            end: None,
             value: String::new(),
             align: LabelAlign::Left,
             visible: String::new(),
@@ -344,6 +350,8 @@ impl SymbolText {
         if let Some(c) = &y.arc {
             (t.part, t.centre, t.radius, t.from, t.to) =
                 (Part::Arc, [ex(&c.centre[0]), ex(&c.centre[1])], ex(&c.radius), ex(&c.from), ex(&c.to));
+            let point = |p: &[Expr; 2]| [ex(&p[0]), ex(&p[1])];
+            (t.start, t.end) = (c.start.as_ref().map(point), c.end.as_ref().map(point));
         } else if let Some(l) = &y.text {
             (t.part, t.centre, t.radius, t.value, t.align) =
                 (Part::Text, [ex(&l.at[0]), ex(&l.at[1])], ex(&l.height), l.value.clone(), l.align);
@@ -374,7 +382,8 @@ impl SymbolText {
                     radius: text_expr(&self.radius),
                     from: text_expr(&self.from),
                     to: text_expr(&self.to),
-                    ..Curve::default()
+                    start: self.start.as_ref().map(|p| [text_expr(&p[0]), text_expr(&p[1])]),
+                    end: self.end.as_ref().map(|p| [text_expr(&p[0]), text_expr(&p[1])]),
                 }),
                 ..base
             },
@@ -1811,6 +1820,33 @@ mod tests {
         set.apply(&mut ed);
         assert_eq!(ed.symbols[last].show, Some(Levels { coarse: false, medium: true, fine: false }));
         assert!(Settings::of(&ed, Which::Form(99)).is_none());
+    }
+
+    #[test]
+    fn an_arc_following_its_ends_keeps_them_through_the_dialog() {
+        let y = Symbol {
+            arc: Some(Curve {
+                centre: [Expr::Number(0.0), Expr::Number(0.0)],
+                radius: Expr::Formula("Width".into()),
+                from: Expr::Number(0.0),
+                to: Expr::Number(90.0),
+                start: Some([Expr::Formula("Width".into()), Expr::Number(0.0)]),
+                end: Some([Expr::Number(0.0), Expr::Formula("Width - 51".into())]),
+            }),
+            ..Symbol::default()
+        };
+        assert_eq!(SymbolText::of(&y).symbol().unwrap(), y, "as it came");
+        // Edited in the dialog (its radius and angles retyped), it still follows its ends; a plain arc still has none.
+        let mut edited = SymbolText::of(&y);
+        (edited.radius, edited.to) = ("Width + 10".into(), "120".into());
+        let arc = edited.symbol().unwrap().arc.unwrap();
+        assert_eq!((arc.start, arc.end), (y.arc.as_ref().unwrap().start.clone(), y.arc.as_ref().unwrap().end.clone()));
+        assert_eq!(arc.radius, Expr::Formula("Width + 10".into()));
+        let plain = SymbolText::blank(Part::Arc).symbol().unwrap().arc.unwrap();
+        assert!(plain.start.is_none() && plain.end.is_none());
+        // Through the whole editor: the family comes back with the arc's ends.
+        let f = Family { symbols: vec![y.clone()], ..Family::default() };
+        assert_eq!(FamilyEditor::of("Sample", &f).symbols[0].symbol().unwrap(), y);
     }
 
     #[test]

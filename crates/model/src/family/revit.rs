@@ -1616,9 +1616,10 @@ fn masked_as_revit(f: &Family, first: &str, values: &BTreeMap<String, Val>, made
 fn edge_points(y: &Symbol, values: &BTreeMap<String, Val>) -> Option<[P2; 3]> {
     let n = |e: &Expr| number(e, values, &mut HashMap::new()).ok();
     if let Some(c) = &y.arc {
-        let (cx, cy, r, from, to) = (n(&c.centre[0])?, n(&c.centre[1])?, n(&c.radius)?, n(&c.from)?, n(&c.to)?);
-        let at = |a: f64| P2(cx + r * a.to_radians().cos(), cy + r * a.to_radians().sin());
-        return Some([at(from), at((from + to) / 2.0), at(to)]);
+        // An arc that follows its ends has the angles of its ends, not the first type's numbers.
+        let s = c.sweep(values, &mut HashMap::new()).ok()?;
+        let at = |a: f64| P2(s.centre.0 + s.radius * a.to_radians().cos(), s.centre.1 + s.radius * a.to_radians().sin());
+        return Some([at(s.from), at((s.from + s.to) / 2.0), at(s.to)]);
     }
     let pts: Vec<P2> = y.line.iter().map(|[a, b]| Some(P2(n(a)?, n(b)?))).collect::<Option<_>>()?;
     let (start, end) = (*pts.first()?, *pts.last()?);
@@ -1943,6 +1944,24 @@ mod tests {
         assert_eq!(out.openings["A"], Opening { width: 900.0, height: 2100.0, bottom: -10.0 });
         let said = f.editable.as_ref().map(|e| e.untranslated.join(" | ")).unwrap_or_default();
         assert!(said.contains("type B"), "{said}");
+    }
+
+    #[test]
+    fn the_edge_points_of_an_arc_follow_its_ends() {
+        // Its stored angles (0 to 90) are another type's; its ends, bound to Width, put it from 90 round to 180 here.
+        let arc = Curve {
+            centre: [Expr::Number(0.0), Expr::Number(0.0)],
+            radius: Expr::Number(100.0),
+            from: Expr::Number(0.0),
+            to: Expr::Number(90.0),
+            start: Some([Expr::Number(0.0), Expr::Formula("Width".into())]),
+            end: Some([Expr::Formula("-Width".into()), Expr::Number(0.0)]),
+        };
+        let values = BTreeMap::from([("Width".to_string(), Val::Number(100.0))]);
+        let [a, m, b] = edge_points(&Symbol { arc: Some(arc), ..Symbol::default() }, &values).expect("it works out");
+        let near = |p: P2, x: f64, y: f64| (p.0 - x).abs() < 1e-6 && (p.1 - y).abs() < 1e-6;
+        assert!(near(a, 0.0, 100.0) && near(b, -100.0, 0.0), "{a:?} {b:?}");
+        assert!(near(m, -100.0 * 0.5_f64.sqrt(), 100.0 * 0.5_f64.sqrt()), "{m:?}");
     }
 
     #[test]
