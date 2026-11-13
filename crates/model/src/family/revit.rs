@@ -353,6 +353,18 @@ impl Reader<'_> {
                 let (start, end) = (self.coord(&def["start"], axis)?, self.coord(&def["end"], axis)?);
                 let order = |e: &Expr| self.first_number(e);
                 let (from, to) = if order(&start)? <= order(&end)? { (start, end) } else { (end, start) };
+                // An extrusion runs between its two ends whichever is lower in a type.
+                let text = |e: &Expr| match e {
+                    Expr::Number(x) => plain(*x),
+                    Expr::Formula(f) => f.clone(),
+                };
+                let (from, to) = match (&from, &to) {
+                    (Expr::Number(_), Expr::Number(_)) => (from, to),
+                    _ if kind == "extrusion" => {
+                        (Expr::Formula(format!("min({}, {})", text(&from), text(&to))), Expr::Formula(format!("max({}, {})", text(&from), text(&to))))
+                    }
+                    _ => (from, to),
+                };
                 if kind == "blend" {
                     let one =
                         |key: &str| def[key].as_array().and_then(|l| l.first()).cloned().ok_or(format!("its {key} profile is missing"));
@@ -638,6 +650,28 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             });
             continue;
         }
+        // A plane on a host face in every type (a window's Exterior) is on it.
+        if f.category.hosted() && *axis == Axis::Y {
+            let at = &reader.planes.get(id.as_str()).map(|x| x.2.clone()).unwrap_or_default();
+            let face = |k: &str| {
+                refs.iter().find(|r| r.3.get("is_reference").and_then(Value::as_str) == Some(k)).and_then(|r| reader.planes.get(&r.0)).map(|p| &p.2)
+            };
+            let on = |k: &str| face(k).is_some_and(|f| !at.is_empty() && at.iter().all(|(t, x)| f.get(t).is_some_and(|y| (x - y).abs() < 0.05)));
+            let kind = if on("host_exterior") { Some("host_exterior") } else if on("host_interior") { Some("host_interior") } else { None };
+            if let Some(kind) = kind {
+                let half = super::DEFAULT_WALL / 2.0;
+                let (side, x) = if kind == "host_exterior" { ("", half) } else { ("-", -half) };
+                reader.values.insert(super::ref_key(name), Val::Number(x));
+                references.push(Reference {
+                    name: name.clone(),
+                    axis: *axis,
+                    at: Expr::Formula(format!("{side}{} / 2", super::WALL)),
+                    is_reference: Some(kind.to_string()),
+                    ..Reference::default()
+                });
+                continue;
+            }
+        }
         let doc = {
             let at = &reader.planes.values().find(|(n, _, _)| n == name).map(|x| x.2.clone()).unwrap_or_default();
             Expr::Number(at.get(&first).or_else(|| at.values().next()).copied().unwrap_or(0.0))
@@ -843,7 +877,22 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
                 }
             }
             let visible = n.get("visible").and_then(text).map(|v| Expr::Formula(v.to_string()));
-            Ok(Nested { family, type_name, at, rotation, mirrored, params, visible, ..Nested::default() })
+            let show = n.get("show").and_then(|s| serde_json::from_value::<Show>(s.clone()).ok()).filter(|s| *s != Show::default());
+            // Its axes where the definition gives them (a part on a face), taken into the family's: y the other way where
+            // the family's is.
+            let axis = |k: &str| -> Option<[f64; 3]> {
+                let v: Vec<f64> = n[k].as_array()?.iter().filter_map(num).collect();
+                let [x, y, z] = v.as_slice() else { return None };
+                Some([*x, y * reader.map.y_sign, *z])
+            };
+            let axes = match (axis("x_axis"), axis("y_axis")) {
+                (Some(x), Some(y)) => {
+                    let z = axis("z_axis").unwrap_or_else(|| crate::geom::v3::cross(x, y));
+                    Some([x, y, z])
+                }
+                _ => None,
+            };
+            Ok(Nested { family, type_name, at, rotation, mirrored, params, visible, show, axes, ..Nested::default() })
         })();
         match made {
             Ok(x) => nested.push(x),

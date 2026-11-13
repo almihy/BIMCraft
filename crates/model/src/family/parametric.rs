@@ -142,6 +142,9 @@ pub struct Nested {
     pub types: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show: Option<Show>,
+    /// Its own x, y and z axes in this family's (a face-based part on a wall's face), in place of `rotation` and `mirrored`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub axes: Option<[[f64; 3]; 3]>,
 }
 
 impl Nested {
@@ -387,6 +390,13 @@ impl Family {
             if let Some(t) = n.types.iter().find(|t| !self.types.contains_key(*t)) {
                 let shown: String = t.chars().take(40).collect();
                 return Err(format!("{who}: its `types` name `{shown}`, which isn't one of the family's types"));
+            }
+            if let Some(a) = &n.axes {
+                let det = a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
+                    + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
+                if a.iter().flatten().any(|x| !x.is_finite() || x.abs() > 1e3) || det.abs() < 1e-6 {
+                    return Err(format!("{who}: its `axes` are three directions that aren't flat"));
+                }
             }
             if n.params.len() > super::MAX_PARAMETERS {
                 return Err(format!("{who}: it sets more than {} parameters", super::MAX_PARAMETERS));

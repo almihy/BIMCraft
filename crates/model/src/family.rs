@@ -2350,7 +2350,11 @@ impl Family {
         let at = [number(&n.at[0], values, read)?, number(&n.at[1], values, read)?, number(&n.at[2], values, read)?];
         let (sin, cos) = number(&n.rotation, values, read)?.to_radians().sin_cos();
         let flip = if n.mirrored { -1.0 } else { 1.0 };
-        let place = |p: P3| [at[0] + p[0] * cos - flip * p[1] * sin, at[1] + p[0] * sin + flip * p[1] * cos, at[2] + p[2]];
+        // Its axes in this family's: given, or turned about z and mirrored across its x.
+        let axes = n.axes.unwrap_or([[cos, sin, 0.0], [-flip * sin, flip * cos, 0.0], [0.0, 0.0, 1.0]]);
+        let det = crate::geom::v3::dot(axes[0], cross(axes[1], axes[2]));
+        let mirrored = det < 0.0;
+        let place = |p: P3| add(at, add(add(mul(axes[0], p[0]), mul(axes[1], p[1])), mul(axes[2], p[2])));
         let plan = |q: &P2| {
             let p = place([q.0, q.1, 0.0]);
             P2(p[0], p[1])
@@ -2361,13 +2365,20 @@ impl Family {
                 let tris = pc
                     .tris
                     .iter()
-                    .map(|[a, b, c]| if n.mirrored { [place(*a), place(*c), place(*b)] } else { [place(*a), place(*b), place(*c)] })
-                    .collect();
-                let mut outline: Vec<P2> = pc.outline.iter().map(plan).collect();
-                if n.mirrored {
+                    .map(|[a, b, c]| if mirrored { [place(*a), place(*c), place(*b)] } else { [place(*a), place(*b), place(*c)] })
+                    .collect::<Vec<_>>();
+                // Upright, its outline from above is its own placed; turned onto a face, the hull of what it comes to.
+                let upright = axes[2] == [0.0, 0.0, 1.0];
+                let mut outline: Vec<P2> = if upright {
+                    pc.outline.iter().map(plan).collect()
+                } else {
+                    crate::geom::hull(tris.iter().flatten().map(|p: &P3| P2(p[0], p[1])).collect())
+                };
+                if mirrored && upright {
                     outline.reverse();
                 }
-                Piece { tris, outline, bottom: pc.bottom + at[2], top: pc.top + at[2], show: n.show.or(pc.show), ..pc }
+                let (bottom, top) = heights(&tris);
+                Piece { tris, outline, bottom, top, show: n.show.or(pc.show), ..pc }
             })
             .collect())
     }
