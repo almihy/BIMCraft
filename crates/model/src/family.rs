@@ -198,7 +198,7 @@ pub const WIDTH: &str = msg!("Width");
 pub const HEIGHT: &str = msg!("Height");
 pub const SILL: &str = ui_msg!("Sill Height");
 
-/// What a parameter holds.
+/// What a parameter holds. `text` is a string a schedule shows and no formula reads (Revit's Text parameter).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
@@ -208,6 +208,7 @@ pub enum Kind {
     Angle,
     YesNo,
     Material,
+    Text,
 }
 
 /// A parameter: a type's (each type its own value) or, `instance`, each component's.
@@ -219,12 +220,191 @@ pub struct Parameter {
     pub kind: Kind,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub instance: bool,
-    /// Where no type or component sets it: a number (yes/no, true or false), or a material's name.
+    /// Where no type or component sets it: a number (yes/no, true or false), a material's name, or a text's words.
     #[serde(default)]
     pub value: Value,
     /// Computed from the others, as Revit's formulas are.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub formula: Option<String>,
+    /// The unit a `number` is shown in (`m²`, `W`, `%`): said beside it, never converted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    /// Revit's parameter group (`Dimensions`, `Construction`, `Identity Data`): Properties and Type Properties list it under it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn is_yes(b: &bool) -> bool {
+    *b
+}
+
+/// Revit's Visibility Settings of a family's form: the detail levels a view draws it at, and whether a plan (or a ceiling
+/// plan), a view along the family's y (its front or back) and a view along its x (its left or right) draw it. Each is true
+/// unless it says otherwise.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Show {
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub coarse: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub medium: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub fine: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub plan: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub front: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub side: bool,
+}
+
+impl Default for Show {
+    fn default() -> Show {
+        Show { coarse: true, medium: true, fine: true, plan: true, front: true, side: true }
+    }
+}
+
+impl Show {
+    /// Whether a view at detail level `d` draws it.
+    pub fn at(&self, d: crate::graphics::Detail) -> bool {
+        use crate::graphics::Detail;
+        match d {
+            Detail::Coarse => self.coarse,
+            Detail::Medium => self.medium,
+            Detail::Fine => self.fine,
+        }
+    }
+}
+
+/// The detail levels a symbol is drawn at (Revit's Visibility Settings of a symbolic line), each true unless it says.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Levels {
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub coarse: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub medium: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub fine: bool,
+}
+
+impl Default for Levels {
+    fn default() -> Levels {
+        Levels { coarse: true, medium: true, fine: true }
+    }
+}
+
+impl Levels {
+    /// Whether a view at detail level `d` draws it.
+    pub fn at(&self, d: crate::graphics::Detail) -> bool {
+        Show { coarse: self.coarse, medium: self.medium, fine: self.fine, ..Show::default() }.at(d)
+    }
+}
+
+/// The plane a symbol's points are in: `plan`, (x, y) seen from above; `front`, (x, z) seen from the family's front, looking
+/// along +y (Revit's Front elevation of a family; its Back mirrors it); `side`, (y, z) seen from +x looking along −x (Revit's
+/// Right; Left mirrors it).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SymbolView {
+    #[default]
+    Plan,
+    Front,
+    Side,
+}
+
+impl SymbolView {
+    fn is_plan(&self) -> bool {
+        *self == SymbolView::Plan
+    }
+}
+
+/// Where a family came from, which the engine carries and shows and never acts on: the firm library's entry and its version
+/// (set by whoever hands the definition over to load), the application and its own category name (`Revit 2025`, `Doors`),
+/// and the file (`Single-Flush.rfa`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Source {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub library: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+}
+
+/// What a family is hosted by, as Revit's families are: a level (the default), a wall (a door, a window), a floor, a ceiling, a
+/// roof, a face, or nothing at all. A door's and a window's stand in a wall whatever it says; the others place on a level.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Host {
+    #[default]
+    Level,
+    Wall,
+    Floor,
+    Ceiling,
+    Roof,
+    Face,
+    #[serde(rename = "none")]
+    Unhosted,
+}
+
+impl Host {
+    fn is_level(&self) -> bool {
+        *self == Host::Level
+    }
+}
+
+/// A subcategory of a family's category, as Revit's (`Frame/Mullion`, `Panel`, `Plan Swing`, `Elevation Swing`): its line
+/// colour and its material where it sets them.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Subcategory {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<[u8; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material: Option<String>,
+}
+
+/// A door's or a window's opening in its wall where it isn't `Width` by `Height` (a frame outside the leaf): numbers or
+/// formulas over the family's parameters, mm. Rectangular, from the sill up, centred on the opening.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Cut {
+    pub width: Expr,
+    pub height: Expr,
+}
+
+/// Whether a family has Revit's flip controls: `hand` (left and right) and `facing` (in and out). Without one, the canvas
+/// shows no arrow for it; the `flip` command flips it all the same, as Revit's API does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Flips {
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub hand: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub facing: bool,
+}
+
+impl Default for Flips {
+    fn default() -> Flips {
+        Flips { hand: true, facing: true }
+    }
+}
+
+impl Flips {
+    fn is_default(&self) -> bool {
+        *self == Flips::default()
+    }
 }
 
 /// A number, or a formula over the family's parameters.
@@ -341,6 +521,29 @@ pub struct Symbol {
     pub dot: Option<Circle>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible: Option<Expr>,
+    /// The plane its points are in, and so the views that draw it: plans (the default), or sections and elevations along
+    /// the family's y (`front`) or x (`side`).
+    #[serde(default, skip_serializing_if = "SymbolView::is_plan")]
+    pub view: SymbolView,
+    /// The detail levels it is drawn at; none, every level but Coarse.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show: Option<Levels>,
+    /// The types it is drawn in; none, every type.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub types: Vec<String>,
+    /// One of its family's `subcategories`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subcategory: Option<String>,
+}
+
+impl Symbol {
+    /// Whether a view at detail level `d` draws it: at the levels its `show` says, else at every level but Coarse.
+    pub fn drawn_at(&self, d: crate::graphics::Detail) -> bool {
+        match &self.show {
+            Some(s) => s.at(d),
+            None => d != crate::graphics::Detail::Coarse,
+        }
+    }
 }
 
 /// What a connector joins: `power` carries a load, `switch` only switches one, `pipe` joins a pipe of its `domain`, `data`
@@ -542,6 +745,25 @@ pub struct Form {
     /// Shared, so an undo step's copy of the model doesn't copy it.
     #[serde(default, skip_serializing_if = "no_mesh")]
     pub mesh: Arc<Vec<[P3; 3]>>,
+    /// Revit's Visibility Settings: the detail levels and the views it is drawn in; none, every one, as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show: Option<Show>,
+    /// The types it is built in; none, every type. A family exported from Revit carries each type's own geometry.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub types: Vec<String>,
+    /// A `mesh`'s outline seen from above, in the family's axes, as whoever made it traced it, in place of the hull round it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outline: Vec<[f64; 2]>,
+    /// One of its family's `subcategories`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subcategory: Option<String>,
+}
+
+impl Form {
+    /// Whether it is built in type `type_name`: one it names, or any when it names none.
+    pub fn of_type(&self, type_name: &str) -> bool {
+        self.types.is_empty() || self.types.iter().any(|t| t == type_name)
+    }
 }
 
 fn no_mesh(mesh: &Arc<Vec<[P3; 3]>>) -> bool {
@@ -580,6 +802,28 @@ pub struct Family {
     /// Where it joins a system: an electrical device's load, a switch. At most one is `power`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub connectors: Vec<Connector>,
+    /// Where it came from: a firm library's entry, an application, a file. Carried and shown, never acted on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<Source>,
+    /// What it is hosted by, as Revit says it: a level unless it says.
+    #[serde(default, skip_serializing_if = "Host::is_level")]
+    pub host: Host,
+    /// Its category's subcategories its forms and symbols are drawn in.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subcategories: Vec<Subcategory>,
+    /// A door's or a window's opening in its wall, where it isn't `Width` by `Height`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cut: Option<Cut>,
+    /// Whether it has Revit's flip controls.
+    #[serde(default, skip_serializing_if = "Flips::is_default")]
+    pub flips: Flips,
+}
+
+impl Symbol {
+    /// Whether it is drawn in type `type_name`: one it names, or any when it names none.
+    pub fn of_type(&self, type_name: &str) -> bool {
+        self.types.is_empty() || self.types.iter().any(|t| t == type_name)
+    }
 }
 
 /// The IFC class a product came in as, which a generic family remembers (BIMCraft has no element for it): the class as STEP
@@ -651,6 +895,20 @@ pub struct Piece {
     pub top: f64,
     pub material: String,
     pub round: bool,
+    /// Its form's Visibility Settings (which detail levels and views draw it); none, every one.
+    pub show: Option<Show>,
+}
+
+impl Piece {
+    /// Whether a plan at detail level `d` draws it: `plan` and that level, as its form says.
+    pub fn in_plan(&self, d: crate::graphics::Detail) -> bool {
+        self.show.is_none_or(|s| s.plan && s.at(d))
+    }
+
+    /// Whether a view at detail level `d` draws it, whichever way it looks (a 3D view's, IFC's at Fine).
+    pub fn at(&self, d: crate::graphics::Detail) -> bool {
+        self.show.is_none_or(|s| s.at(d))
+    }
 }
 
 /// Where one form lies before any void cuts it: its box in the family's own axes (x along a
@@ -694,10 +952,15 @@ pub const MAX_BUILT: usize = 400_000;
 /// Triangles one form, as a file brings it, may have.
 pub const MAX_TRIANGLES: usize = 100_000;
 
-/// Parameters, forms, symbols and types one family may have.
-pub const MAX_PARAMETERS: usize = 64;
-pub const MAX_FORMS: usize = 256;
-pub const MAX_SYMBOLS: usize = 64;
+/// Parameters, forms, symbols and types one family may have: as many as a family exported from Revit, which carries each
+/// type's own forms, may bring.
+pub const MAX_PARAMETERS: usize = 256;
+pub const MAX_FORMS: usize = 4096;
+pub const MAX_SYMBOLS: usize = 4096;
+/// Points one symbol's `line` may have.
+pub const MAX_SYMBOL_POINTS: usize = 1024;
+/// Characters a text parameter's value, a subcategory's name or a source's field may hold.
+pub const MAX_WORDS: usize = 1024;
 pub const MAX_CONNECTORS: usize = 8;
 /// The highest voltage and load a connector may hold: far past any real device, short of overflow.
 pub const MAX_VOLTAGE: f64 = 1.0e5;
@@ -1073,6 +1336,11 @@ fn worked(formula: &str, node: &Node, get: &mut dyn FnMut(&str) -> Result<f64, S
     if x.is_finite() { Ok(x) } else { Err(said(format!("it comes to {x}, which isn't a number"))) }
 }
 
+/// Whether `text` is of 1 to `most` characters on one line.
+fn one_line(text: &str, most: usize) -> bool {
+    !text.trim().is_empty() && text.chars().count() <= most && !text.chars().any(char::is_control)
+}
+
 /// Whether `name` is one a formula can say: a letter or `_` first, then letters, digits, `_` and
 /// spaces, none at its end; up to `MAX_TEXT` long.
 pub fn nameable(name: &str) -> bool {
@@ -1095,6 +1363,11 @@ pub(crate) fn read(p: &Parameter, v: &Value) -> Result<Val, String> {
             Value::Bool(b) => Ok(Val::Number(truth(*b))),
             Value::Null => Ok(Val::Number(0.0)),
             v => v.as_f64().filter(|x| x.is_finite()).map(|x| Val::Number(truth(x != 0.0))).ok_or_else(|| bad("yes or no")),
+        },
+        Kind::Text => match v {
+            Value::String(s) => Ok(Val::Text(s.clone())),
+            Value::Null => Ok(Val::Text(String::new())),
+            _ => Err(bad("text")),
         },
         Kind::Length | Kind::Number | Kind::Angle => match v {
             Value::Null => Ok(Val::Number(0.0)),
@@ -1124,6 +1397,9 @@ impl Family {
         for form in self.forms.iter_mut().filter(|x| !x.material.is_empty() && !params.contains(&x.material)) {
             f(&mut form.material);
         }
+        for m in self.subcategories.iter_mut().filter_map(|s| s.material.as_mut()) {
+            f(m);
+        }
     }
 
     /// Whether `name` is one of its material parameters.
@@ -1139,6 +1415,7 @@ impl Family {
             out.extend(self.types.values().filter_map(|t| t.get(&p.name)).filter_map(Value::as_str));
         }
         out.extend(self.forms.iter().filter(|f| !self.material_parameter(&f.material)).map(|f| f.material.as_str()));
+        out.extend(self.subcategories.iter().filter_map(|s| s.material.as_deref()));
         out.retain(|m| !m.is_empty());
         out
     }
@@ -1154,6 +1431,31 @@ impl Family {
         self.parameters.iter_mut().filter(|p| p.kind == Kind::Material).for_each(|p| swap(&mut p.value));
         self.types.values_mut().flat_map(|t| t.iter_mut()).filter(|(k, _)| params.contains(k)).for_each(|(_, v)| swap(v));
         self.forms.iter_mut().filter(|f| f.material == from && !params.contains(&f.material)).for_each(|f| f.material = to.into());
+        self.subcategories.iter_mut().filter(|s| s.material.as_deref() == Some(from)).for_each(|s| s.material = Some(to.into()));
+    }
+
+    /// Type `from` renamed `to` in the lists of types its forms and symbols are of.
+    pub fn rename_type(&mut self, from: &str, to: &str) {
+        let lists = self.forms.iter_mut().map(|f| &mut f.types).chain(self.symbols.iter_mut().map(|y| &mut y.types));
+        lists.flat_map(|l| l.iter_mut()).filter(|t| *t == from).for_each(|t| *t = to.to_string());
+    }
+
+    /// Type `name` gone: taken out of the lists of types its forms and symbols are of, and a form or a symbol that was of it
+    /// alone gone with it (left of no type, it would be of every one).
+    pub fn forget_type(&mut self, name: &str) {
+        let gone = |types: &Vec<String>| !types.is_empty() && types.iter().all(|t| t == name);
+        self.forms.retain(|f| !gone(&f.types));
+        self.symbols.retain(|y| !gone(&y.types));
+        let lists = self.forms.iter_mut().map(|f| &mut f.types).chain(self.symbols.iter_mut().map(|y| &mut y.types));
+        lists.for_each(|l| l.retain(|t| t != name));
+    }
+
+    /// Type `new`, made like `old`, is of each form and symbol `old` is of: a duplicated type keeps its forms.
+    pub fn type_like(&mut self, new: &str, old: &str) {
+        let lists = self.forms.iter_mut().map(|f| &mut f.types).chain(self.symbols.iter_mut().map(|y| &mut y.types));
+        for l in lists.filter(|l| l.iter().any(|t| t == old) && !l.iter().any(|t| t == new)) {
+            l.push(new.to_string());
+        }
     }
 
     /// Its parameters' values for type `type_name`, a component's `instance` values over them, and
@@ -1203,7 +1505,7 @@ impl Family {
                 path.push(name.to_string());
                 let x = eval(f, &mut |n: &str| match self.resolve(n, set, instance, done, path)? {
                     Val::Number(x) => Ok(x),
-                    Val::Text(_) => Err(format!("`{n}` is a material, not a number")),
+                    Val::Text(_) => Err(format!("`{n}` is a material or text, not a number")),
                 });
                 path.pop();
                 Val::Number(x.map_err(|e| format!("parameter `{name}`: {e}"))?)
@@ -1257,6 +1559,7 @@ impl Family {
         if self.types.is_empty() {
             return Err("it needs a type: add one to `types`".into());
         }
+        self.check_described()?;
         if let Some(kind) = &self.kind {
             let kinds = self.category.kinds();
             if !kinds.iter().any(|(k, _)| k == kind) {
@@ -1289,6 +1592,9 @@ impl Family {
                 Err(format!("{who}: material `{m}` isn't in the library; add it with `material`"))
             }
         };
+        for sub in &self.subcategories {
+            material_ok(&format!("subcategory `{}`", sub.name), sub.material.as_deref().unwrap_or_default())?;
+        }
         let long = |f: &str| f.chars().count() > MAX_FORMULA;
         let mut names = BTreeSet::new();
         for p in &self.parameters {
@@ -1299,13 +1605,23 @@ impl Family {
             if !names.insert(p.name.as_str()) {
                 return Err(format!("{who} is named twice"));
             }
+            for (what, v) in [("unit", &p.unit), ("group", &p.group)] {
+                if let Some(v) = v
+                    && !one_line(v, MAX_TEXT)
+                {
+                    return Err(format!("{who}: its `{what}` is text of 1 to {MAX_TEXT} characters on one line"));
+                }
+            }
             match (&p.formula, p.kind) {
                 (Some(_), Kind::Material) => return Err(format!("{who}: a material takes no formula")),
+                (Some(_), Kind::Text) => return Err(format!("{who}: a text takes no formula")),
                 (Some(f), _) if long(f) => return Err(format!("{who}: its formula is longer than {MAX_FORMULA} characters")),
                 _ => {}
             }
-            if let Val::Text(m) = read(p, &p.value)? {
-                material_ok(&who, &m)?;
+            match read(p, &p.value)? {
+                Val::Text(m) if p.kind == Kind::Material => material_ok(&who, &m)?,
+                Val::Text(t) if t.chars().count() > MAX_WORDS => return Err(format!("{who}: its text is longer than {MAX_WORDS} characters")),
+                _ => {}
             }
         }
         for (t, set) in &self.types {
@@ -1321,8 +1637,12 @@ impl Family {
                 if p.formula.is_some() {
                     return Err(format!("{who}: `{k}` is worked out by its formula"));
                 }
-                if let Val::Text(m) = read(p, v)? {
-                    material_ok(&who, &m)?;
+                match read(p, v)? {
+                    Val::Text(m) if p.kind == Kind::Material => material_ok(&who, &m)?,
+                    Val::Text(t) if t.chars().count() > MAX_WORDS => {
+                        return Err(format!("{who}: `{k}`'s text is longer than {MAX_WORDS} characters"));
+                    }
+                    _ => {}
                 }
             }
         }
@@ -1338,6 +1658,7 @@ impl Family {
             if !self.parameters.iter().any(|p| p.name == form.material && p.kind == Kind::Material) {
                 material_ok(&who, &form.material)?;
             }
+            self.check_part(&who, &form.types, form.subcategory.as_deref())?;
             let circle = form.circle.iter().flat_map(|c| c.centre.iter().chain([&c.radius]));
             let mut exprs = form
                 .profile
@@ -1352,6 +1673,10 @@ impl Family {
             }
         }
         for (i, y) in self.symbols.iter().enumerate() {
+            self.check_part(&format!("symbol {}", i + 1), &y.types, y.subcategory.as_deref())?;
+            if y.view != SymbolView::Plan && (y.text.is_some() || y.dot.is_some()) {
+                return Err(format!("symbol {}: a `front` or `side` symbol is a `line` or an `arc`, as Revit's symbolic lines are", i + 1));
+            }
             let Some(label) = &y.text else { continue };
             for name in fields(&label.value).map_err(|e| format!("symbol {}: {e}", i + 1))? {
                 if !self.parameters.iter().any(|p| p.name == name) {
@@ -1374,14 +1699,23 @@ impl Family {
             return Err(format!("a formula of a symbol is longer than {MAX_FORMULA} characters"));
         }
         self.check_connectors()?;
+        if let Some(cut) = &self.cut {
+            if !self.category.hosted() {
+                return Err("a `cut` is a door's or a window's: the opening it makes in its wall".into());
+            }
+            if [&cut.width, &cut.height].into_iter().any(|e| matches!(e, Expr::Formula(f) if long(f))) {
+                return Err(format!("its `cut`: a formula of it is longer than {MAX_FORMULA} characters"));
+            }
+        }
         // Each formula read once across the types; past what a family may build, refused.
         let (mut read, mut built, mut cuts) = (HashMap::new(), 0, csg::Meter::default());
         for t in self.types.keys() {
             let pieces = self
                 .values(t, &BTreeMap::new())
                 .and_then(|v| {
-                    self.marks(&v)?;
-                    self.build(&v, &mut read, &mut cuts)
+                    self.all_marks(t, &v)?;
+                    self.cut_size(&v)?;
+                    self.build(t, &v, &mut read, &mut cuts)
                 })
                 .map_err(|e| format!("type `{t}`: {e}"))?;
             built += pieces.iter().map(|p| p.tris.len()).sum::<usize>();
@@ -1478,6 +1812,64 @@ impl Family {
         Ok(())
     }
 
+    /// Whether what it says of itself is sound: its `source`'s fields text on one line; its subcategories named once each,
+    /// their materials in the library is [`Family::check`]'s to say.
+    fn check_described(&self) -> Result<(), String> {
+        if let Some(src) = &self.source {
+            for (what, v) in [("library", &src.library), ("app", &src.app), ("category", &src.category), ("file", &src.file)] {
+                if let Some(v) = v
+                    && !one_line(v, MAX_WORDS)
+                {
+                    return Err(format!("`source` `{what}`: text of 1 to {MAX_WORDS} characters on one line"));
+                }
+            }
+        }
+        let mut names = BTreeSet::new();
+        for (i, sub) in self.subcategories.iter().enumerate() {
+            if !one_line(&sub.name, MAX_TEXT) {
+                return Err(format!("subcategory {}: a name of 1 to {MAX_TEXT} characters on one line", i + 1));
+            }
+            if !names.insert(sub.name.as_str()) {
+                return Err(format!("subcategory `{}` is named twice", sub.name));
+            }
+            if let Some(m) = &sub.material
+                && !one_line(m, MAX_TEXT)
+            {
+                return Err(format!("subcategory `{}`: its material is a name of 1 to {MAX_TEXT} characters", sub.name));
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether a form's or a symbol's (`who`) types are the family's, and its subcategory one of its subcategories.
+    fn check_part(&self, who: &str, types: &[String], subcategory: Option<&str>) -> Result<(), String> {
+        if let Some(t) = types.iter().find(|t| !self.types.contains_key(*t)) {
+            let shown: String = t.chars().take(40).collect();
+            return Err(format!("{who}: its `types` name `{shown}`, which isn't one of the family's types"));
+        }
+        if let Some(sub) = subcategory
+            && !self.subcategories.iter().any(|s| s.name == sub)
+        {
+            let shown: String = sub.chars().take(40).collect();
+            return Err(format!("{who}: subcategory `{shown}` isn't one of the family's `subcategories`"));
+        }
+        Ok(())
+    }
+
+    /// The width and height of the opening a door or a window of these `values` cuts in its wall: its `cut`'s, else its
+    /// `Width` and `Height`; none where it has neither.
+    pub fn cut_size(&self, values: &BTreeMap<String, Val>) -> Result<Option<(f64, f64)>, String> {
+        let Some(cut) = &self.cut else { return Ok(None) };
+        let mut read = HashMap::new();
+        let said = |e: String| format!("its `cut`: {e}");
+        let w = number(&cut.width, values, &mut read).map_err(said)?;
+        let h = number(&cut.height, values, &mut read).map_err(said)?;
+        if w <= 0.0 || h <= 0.0 {
+            return Err(format!("its `cut` is {w} by {h} mm; an opening needs a width and a height above zero"));
+        }
+        Ok(Some((w, h)))
+    }
+
     /// Its connectors, worked out for type `type_name` and a component's `instance` values.
     pub fn connector_values(&self, type_name: &str, instance: &BTreeMap<String, Value>) -> Result<Vec<ConnectorValues>, String> {
         if self.connectors.is_empty() {
@@ -1565,24 +1957,48 @@ impl Family {
         Ok(out)
     }
 
-    /// Its visible forms' solids, sized by `values`, less what its voids cut.
-    pub fn pieces(&self, values: &BTreeMap<String, Val>) -> Result<Vec<Piece>, String> {
-        self.build(values, &mut HashMap::new(), &mut csg::Meter::default())
+    /// Its visible forms' solids in type `type_name` (those of no type, and those of it), sized by `values`, less what its
+    /// voids cut.
+    pub fn pieces(&self, type_name: &str, values: &BTreeMap<String, Val>) -> Result<Vec<Piece>, String> {
+        self.build(type_name, values, &mut HashMap::new(), &mut csg::Meter::default())
     }
 
-    /// The marks of its visible symbols, sized by `values`, in its own axes: an arc as a polyline of short chords, a label
-    /// a label as its anchor (lettered by [`lettering`] where it is placed), a dot as it is.
-    pub fn marks<'a>(&'a self, values: &BTreeMap<String, Val>) -> Result<Vec<Mark>, String> {
+    /// The marks of its visible symbols in `view` and type `type_name`, sized by `values`, in its own axes, drawn at detail
+    /// level `detail` ([`Symbol::drawn_at`]; none, at any): an arc as a polyline of short chords, a label as its anchor
+    /// (lettered by [`lettering`] where it is placed), a dot as it is. A `plan` mark's points are (x, y), a `front` one's
+    /// (x, z) and a `side` one's (y, z).
+    pub fn marks(
+        &self,
+        type_name: &str,
+        values: &BTreeMap<String, Val>,
+        view: SymbolView,
+        detail: Option<crate::graphics::Detail>,
+    ) -> Result<Vec<Mark>, String> {
+        self.marks_where(values, &|y: &Symbol| y.view == view && y.of_type(type_name) && detail.is_none_or(|d| y.drawn_at(d)))
+    }
+
+    /// The marks of all its symbols of type `type_name`, whatever view and detail level draws them: what checks them.
+    pub fn all_marks(&self, type_name: &str, values: &BTreeMap<String, Val>) -> Result<Vec<Mark>, String> {
+        self.marks_where(values, &|y: &Symbol| y.of_type(type_name))
+    }
+
+    /// The marks of its visible symbols `pick` keeps, sized by `values`, each worked out and checked.
+    fn marks_where<'a>(&'a self, values: &BTreeMap<String, Val>, pick: &dyn Fn(&Symbol) -> bool) -> Result<Vec<Mark>, String> {
         let mut read = HashMap::new();
         let mut out = Vec::new();
         for (i, sym) in self.symbols.iter().enumerate() {
+            if !pick(sym) {
+                continue;
+            }
             let said = |e: String| format!("symbol {}: {e}", i + 1);
             let ways = usize::from(!sym.line.is_empty())
                 + usize::from(sym.arc.is_some())
                 + usize::from(sym.text.is_some())
                 + usize::from(sym.dot.is_some());
-            if ways != 1 || sym.line.len() > MAX_PROFILE {
-                return Err(said(format!("it takes a `line` of up to {MAX_PROFILE} points, an `arc`, a `text` or a `dot`, one of them")));
+            if ways != 1 || sym.line.len() > MAX_SYMBOL_POINTS {
+                return Err(said(format!(
+                    "it takes a `line` of up to {MAX_SYMBOL_POINTS} points, an `arc`, a `text` or a `dot`, one of them"
+                )));
             }
             if let Some(v) = &sym.visible
                 && number(v, values, &mut read).map_err(said)? == 0.0
@@ -1633,12 +2049,16 @@ impl Family {
     /// read already, and `cuts`, what the cutting may still cost.
     fn build<'a>(
         &'a self,
+        type_name: &str,
         values: &BTreeMap<String, Val>,
         read: &mut HashMap<&'a str, Result<Node, String>>,
         cuts: &mut csg::Meter,
     ) -> Result<Vec<Piece>, String> {
         let (mut out, mut voids) = (Vec::new(), Vec::new());
         for i in 0..self.forms.len() {
+            if !self.forms[i].of_type(type_name) {
+                continue;
+            }
             let what = format!("form {}", i + 1);
             let Some(piece) = self.solid(i, values, read).map_err(|e| format!("{what}: {e}"))? else {
                 continue;
@@ -1664,6 +2084,7 @@ impl Family {
                         round: false,
                         outline: std::mem::take(&mut piece.outline),
                         material: std::mem::take(&mut piece.material),
+                        show: piece.show,
                     };
                 }
             }
@@ -1692,8 +2113,11 @@ impl Family {
             _ => form.material.clone(),
         };
         let piece = if !form.mesh.is_empty() {
-            mesh(&form.mesh, material)?
+            mesh(&form.mesh, &form.outline, material)?
         } else {
+            if !form.outline.is_empty() {
+                return Err("an `outline` is a `mesh`'s: a `profile` or a `circle` has its own".into());
+            }
             let ring: Vec<P2> = match &form.circle {
                 Some(c) => {
                     let (x, y, r) = (num(&c.centre[0])?, num(&c.centre[1])?, num(&c.radius)?);
@@ -1726,7 +2150,7 @@ impl Family {
                     let axis = [corner(p)?, corner(q)?];
                     let (tris, outline) = revolve(&ring, axis, (from, to), form.plane)?;
                     let (bottom, top) = heights(&tris);
-                    Piece { caps: tris.len(), tris, outline, bottom, top, material, round: false }
+                    Piece { caps: tris.len(), tris, outline, bottom, top, material, round: false, show: None }
                 }
                 None => {
                     let (tris, caps) = sweep(&ring, from, to, form.plane)?;
@@ -1741,21 +2165,21 @@ impl Family {
                         Plane::Xz => (vec![P2(a0, from), P2(a1, from), P2(a1, to), P2(a0, to)], b0, b1),
                         Plane::Yz => (vec![P2(from, a0), P2(to, a0), P2(to, a1), P2(from, a1)], b0, b1),
                     };
-                    Piece { tris, caps, outline, bottom, top, material, round: form.circle.is_some() }
+                    Piece { tris, caps, outline, bottom, top, material, round: form.circle.is_some(), show: None }
                 }
             }
         };
-        Ok(Some(piece))
+        Ok(Some(Piece { show: form.show, ..piece }))
     }
 
     /// Where each of its forms lies, sized by `values`, before any void cuts it: its place in
     /// `forms`, whether it is a void, and the box its solid fills in the family's own axes. A form
     /// that builds to nothing on its own — a formula it can't read, a profile with no area — is left
     /// out: what a warning tells is best worked out around it, not stopped by it.
-    pub fn shapes(&self, values: &BTreeMap<String, Val>) -> Vec<Shape> {
+    pub fn shapes(&self, type_name: &str, values: &BTreeMap<String, Val>) -> Vec<Shape> {
         let mut read = HashMap::new();
         let mut out = Vec::new();
-        for i in 0..self.forms.len() {
+        for i in (0..self.forms.len()).filter(|i| self.forms[*i].of_type(type_name)) {
             let Some(piece) = self.solid(i, values, &mut read).ok().flatten() else {
                 continue;
             };
@@ -1850,7 +2274,7 @@ fn number<'a>(e: &'a Expr, values: &BTreeMap<String, Val>, read: &mut HashMap<&'
         Expr::Formula(f) => match read.entry(f.as_str()).or_insert_with(|| parse(f)) {
             Ok(node) => worked(f, node, &mut |n: &str| match values.get(n) {
                 Some(Val::Number(x)) => Ok(*x),
-                Some(Val::Text(_)) => Err(format!("`{n}` is a material, not a number")),
+                Some(Val::Text(_)) => Err(format!("`{n}` is a material or text, not a number")),
                 None => Err(format!("`{n}` isn't one of its parameters")),
             })?,
             Err(e) => return Err(e.clone()),
@@ -1998,8 +2422,9 @@ fn revolve(ring: &[P2], [p0, p1]: [P2; 2], (from, to): (f64, f64), plane: Plane)
     Ok((tris, outline))
 }
 
-/// A form a file brought as triangles: its outline seen from above, the hull round them.
-fn mesh(tris: &[[P3; 3]], material: String) -> Result<Piece, String> {
+/// A form a file brought as triangles: its outline seen from above, the one it `traced` (counter-clockwise), else the hull
+/// round them.
+fn mesh(tris: &[[P3; 3]], traced: &[[f64; 2]], material: String) -> Result<Piece, String> {
     if tris.len() > MAX_TRIANGLES {
         return Err(format!("it has more than {MAX_TRIANGLES} triangles"));
     }
@@ -2007,9 +2432,20 @@ fn mesh(tris: &[[P3; 3]], material: String) -> Result<Piece, String> {
         return Err("a corner of it isn't a usable number".into());
     }
     let (bottom, top) = tris.iter().flatten().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| (lo.min(p[2]), hi.max(p[2])));
-    // ponytail: the convex hull stands for its outline; trace its silhouette if hulls mislead.
-    let outline = crate::geom::hull(tris.iter().flatten().map(|p| P2(p[0], p[1])).collect());
-    Ok(Piece { tris: tris.to_vec(), caps: tris.len(), outline, bottom, top, material, round: false })
+    let outline = if traced.is_empty() {
+        // ponytail: the convex hull stands for its outline where none was traced.
+        crate::geom::hull(tris.iter().flatten().map(|p| P2(p[0], p[1])).collect())
+    } else {
+        if traced.len() < 3 || traced.len() > crate::model::MAX_POINTS {
+            return Err(format!("its `outline` has {} points: it takes 3 to {}", traced.len(), crate::model::MAX_POINTS));
+        }
+        if traced.iter().flatten().any(|x| !x.is_finite() || x.abs() > MAX_COORD) {
+            return Err("a point of its `outline` isn't a usable number".into());
+        }
+        let ring: Vec<P2> = traced.iter().map(|[x, y]| P2(*x, *y)).collect();
+        if crate::geom::area(&ring) < 0.0 { ring.into_iter().rev().collect() } else { ring }
+    };
+    Ok(Piece { tris: tris.to_vec(), caps: tris.len(), outline, bottom, top, material, round: false, show: None })
 }
 
 /// The families a new project starts with, BIMCraft's own: tables, chairs, beds, sofas, desks,
@@ -2586,7 +3022,7 @@ mod tests {
     fn forms_sweep_their_profiles_across_their_planes() {
         let f = table();
         let v = f.values("1000 x 600", &BTreeMap::new()).unwrap();
-        let pieces = f.pieces(&v).unwrap();
+        let pieces = f.pieces("", &v).unwrap();
         assert_eq!(pieces.len(), 2);
         let top = &pieces[0];
         assert_eq!((top.bottom, top.top, top.material.as_str(), top.round), (720.0, 750.0, "Timber", false));
@@ -2595,7 +3031,7 @@ mod tests {
         // Hidden: no leg.
         let mut no_legs = v.clone();
         no_legs.insert("Legs".into(), Val::Number(0.0));
-        assert_eq!(f.pieces(&no_legs).unwrap().len(), 1);
+        assert_eq!(f.pieces("", &no_legs).unwrap().len(), 1);
         // Upright profiles: a back across x and z, swept along y; a rail across y and z, along x;
         // a round post, its sides one surface.
         let f: Family = serde_json::from_value(json!({
@@ -2607,7 +3043,7 @@ mod tests {
             ]
         }))
         .unwrap();
-        let pieces = f.pieces(&f.values("A", &BTreeMap::new()).unwrap()).unwrap();
+        let pieces = f.pieces("A", &f.values("A", &BTreeMap::new()).unwrap()).unwrap();
         let back = &pieces[0];
         assert!((volume(&back.tris) - 500.0 * 500.0 * 40.0).abs() < 1e-3);
         assert_eq!((back.bottom, back.top), (400.0, 900.0));
@@ -2623,7 +3059,7 @@ mod tests {
         // Nothing to sweep, or a profile with no area: said.
         let mut flat = table();
         flat.forms[0].to = Expr::Formula("Top".into());
-        assert!(flat.pieces(&flat.values("Small", &BTreeMap::new()).unwrap()).unwrap_err().contains("form 1"));
+        assert!(flat.pieces("Small", &flat.values("Small", &BTreeMap::new()).unwrap()).unwrap_err().contains("form 1"));
     }
 
     /// The pieces of a family of `forms`, its one type built.
@@ -2631,7 +3067,7 @@ mod tests {
         let f: Family = serde_json::from_value(json!({"types": {"A": {}}, "parameters": [{"name": "R", "value": 300}], "forms": forms}))
             .map_err(|e| e.to_string())?;
         f.check(&|_| true)?;
-        f.pieces(&f.values("A", &BTreeMap::new())?)
+        f.pieces("A", &f.values("A", &BTreeMap::new())?)
     }
 
     #[test]

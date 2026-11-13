@@ -1033,7 +1033,7 @@ fn plan_shows_among(m: &Model, key: Guid, among: bool) -> Vec<P2> {
             Element::Mass(ms) if m.mass_cut_by(ms, r.cut) => extent.extend(m.mass_outline(ms, r.cut)),
             Element::Component(c) if c.level == level => {
                 extent.extend(components.outlines(c));
-                for mark in m.component_marks(c) {
+                for mark in m.component_marks(c, Detail::Fine) {
                     match mark {
                         crate::family::Mark::Line(pts) => extent.extend(pts),
                         crate::family::Mark::Dot { centre, .. } => extent.push(centre),
@@ -1102,9 +1102,8 @@ pub fn sketch(m: &Model, view: View, id: Id, e: &Element) -> Drawing {
         }
         Element::Component(c) => {
             component(&mut d, m, &m.component_pieces(c));
-            if d.detail != Detail::Coarse {
-                marks(&mut d, &m.component_marks(c));
-            }
+            let shown = m.component_marks(c, d.detail);
+            marks(&mut d, &shown);
         }
         // Drawn at its sill, where the cut plane would pass through it whatever the plan's cut is.
         Element::Door(o) | Element::Window(o) => {
@@ -2319,6 +2318,7 @@ fn section_finish_cancellable(m: &Model, id: Id, mut d: Drawing, cancelled: &(dy
             _ => {}
         }
     }
+    elevation_symbols(&mut d, m, v, &look, cancelled)?;
     d.owner = None;
     d.by_category(|o| style_of(m, o));
     look.dress(&mut d);
@@ -2326,6 +2326,46 @@ fn section_finish_cancellable(m: &Model, id: Id, mut d: Drawing, cancelled: &(dy
     let at = (24.0 + font::width(&v.name, 16.0) / 2.0, view.height as f32 - 26.0);
     d.text_turned(&v.name, at, 16.0, 0.0, INK);
     (!cancelled()).then_some(d)
+}
+
+/// The symbolic lines of the families a section or an elevation `v` sees, as Revit draws them in a view along a family's y
+/// (its `front` symbols: a door's Elevation Swing) or x (its `side` ones), at the view's detail level ([`Model::elevation_lines`]):
+/// those of the components, doors and windows it shows that stand in front of it, past its line and within its depth, in
+/// their category's projection pen. None, cancelled.
+fn elevation_symbols(d: &mut Drawing, m: &Model, v: &Section, look: &Look, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<()> {
+    let families: std::collections::BTreeSet<&str> = m
+        .families
+        .iter()
+        .filter(|(_, f)| f.symbols.iter().any(|y| y.view != crate::family::SymbolView::Plan))
+        .map(|(n, _)| n.as_str())
+        .collect();
+    if families.is_empty() {
+        return Some(());
+    }
+    let (u, looking) = ((v.end - v.start).unit(), v.looking());
+    let depth = v.depth.unwrap_or(f64::INFINITY);
+    let was = d.part;
+    d.part(Part::Projection);
+    for (&id, e) in m.elements.iter().filter(|(id, _)| look.shows(**id)) {
+        if !e.family().is_some_and(|(f, _)| families.contains(f)) {
+            continue;
+        }
+        if cancelled() {
+            return None;
+        }
+        d.owner = Some(id);
+        for line in m.elevation_lines(e, looking, d.detail) {
+            // Before the line or past the depth, it isn't seen.
+            let ahead = |p: &[f64; 3]| (P2(p[0], p[1]) - v.start).dot(looking);
+            if line.iter().any(|p| ahead(p) < -1e-6 || ahead(p) > depth) {
+                continue;
+            }
+            let pts: Vec<P2> = line.iter().map(|p| P2((P2(p[0], p[1]) - v.start).dot(u), p[2])).collect();
+            d.line(&pts, BY_CATEGORY, INK, false);
+        }
+    }
+    d.part(was);
+    Some(())
 }
 
 /// Section or elevation `id` through `view`, as a PNG: its picture, and its drawing over it.
@@ -2728,9 +2768,11 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, t
                 component(&mut d, m, &pieces);
             }
         }
-        // Its symbols are annotation of its level: in that level's plan and ceiling plan, whatever height its forms reach.
-        if c.level == level && d.detail != Detail::Coarse {
-            marks(&mut d, &m.component_marks(c));
+        // Its symbols are annotation of its level: in that level's plan and ceiling plan, whatever height its forms reach; each
+        // at the detail levels it says (none, all but Coarse).
+        if c.level == level {
+            let shown = m.component_marks(c, d.detail);
+            marks(&mut d, &shown);
         }
     }
     // Walls and columns below the cut plane, as seen from it; past the bottom, faint.
@@ -3099,6 +3141,14 @@ fn marks(d: &mut Drawing, marks: &[crate::family::Mark]) {
 /// A component seen from above: each of its forms' outlines, but where a higher form covers it (a
 /// table's top over its legs).
 fn component(d: &mut Drawing, m: &Model, pieces: &[crate::family::Piece]) {
+    // Only the forms a plan at its detail level draws, as their Visibility Settings say.
+    let kept: Vec<crate::family::Piece>;
+    let pieces = if pieces.iter().all(|p| p.in_plan(d.detail)) {
+        pieces
+    } else {
+        kept = pieces.iter().filter(|p| p.in_plan(d.detail)).cloned().collect();
+        &kept
+    };
     if pattern_style(d, false).is_some() {
         for p in pieces {
             let visible =
@@ -3545,11 +3595,13 @@ fn fit_by(extent: impl Fn(f64) -> [P2; 2], width: u32, height: u32, n: f64) -> V
 fn opening(d: &mut Drawing, m: &Model, e: &Element, o: &Opening, w: &Wall, cut: f64, shown: bool) {
     let Some(t) = m.opening_type(e) else { return };
     let bottom = m.own_base(w) + o.sill;
-    if !(bottom <= cut && cut < bottom + t.height) {
+    // The gap is the opening it cuts: its family's `cut` where it says one.
+    let (width, height) = t.cut();
+    if !(bottom <= cut && cut < bottom + height) {
         return;
     }
     let (axis, (ext, int)) = (Axis::of(w), walls::faces(m, w));
-    let (s0, s1) = (o.offset - t.width / 2.0, o.offset + t.width / 2.0);
+    let (s0, s1) = (o.offset - width / 2.0, o.offset + width / 2.0);
     // The gap is the wall's: where an opening reaches past the wall's end (a warning, not a refusal), only the part in it is cut.
     let (g0, g1) = (s0.max(0.0), s1.min(axis.length()));
     if g1 - g0 <= 0.0 {
@@ -3568,18 +3620,23 @@ fn opening(d: &mut Drawing, m: &Model, e: &Element, o: &Opening, w: &Wall, cut: 
         d.line(&[axis.at(s, int), axis.at(s, ext)], Pen::HEAVY, INK, false);
     }
     d.own(owner);
-    // At coarse, a window is its gap, as are a family's forms and symbols; a door of the project's own type still shows
-    // its leaf and swing, as Revit's Single-Flush draws its panel and Plan Swing at every detail level.
-    if !shown || (d.detail == Detail::Coarse && (o.family.is_some() || !matches!(e, Element::Door(_)))) {
+    // At coarse, a window is its gap, as are a family's forms and symbols that say nothing of their detail levels; a door of
+    // the project's own type still shows its leaf and swing, as Revit's Single-Flush draws its panel and Plan Swing at every
+    // detail level, and so does a family's form or symbol whose Visibility Settings say Coarse.
+    if !shown || (d.detail == Detail::Coarse && o.family.is_none() && !matches!(e, Element::Door(_))) {
         return;
     }
-    // Of a family: the forms the cut plane passes through, outlined, and the lines of its symbols (a door's swing).
+    // Of a family: the forms the cut plane passes through that a plan at its detail level draws, outlined, and the lines of
+    // its symbols at that level (a door's swing).
     if o.family.is_some() {
-        for piece in m.opening_pieces(e).iter().filter(|p| p.bottom <= cut && cut < p.top) {
+        let detail = d.detail;
+        let drawn = |p: &crate::family::Piece| p.show.map_or(detail != Detail::Coarse, |s| s.plan && s.at(detail));
+        for piece in m.opening_pieces(e).iter().filter(|p| p.bottom <= cut && cut < p.top && drawn(p)) {
             d.line(&piece.outline, BY_CATEGORY, INK, true);
         }
         d.part(Part::Projection);
-        marks(d, &m.opening_marks(e));
+        let shown = m.opening_marks(e, d.detail);
+        marks(d, &shown);
         d.part(Part::Cut);
         return;
     }

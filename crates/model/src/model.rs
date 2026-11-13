@@ -2930,6 +2930,10 @@ pub struct OpeningType {
     pub thickness: Option<f64>,
     #[serde(default, skip_serializing_if = "crate::type_data::TypeIdentity::is_empty")]
     pub identity: crate::type_data::TypeIdentity,
+    /// The opening a family's door or window cuts in its wall, where its family's `cut` says one other than `width` by
+    /// `height`: worked out, never stored.
+    #[serde(skip)]
+    pub hole: Option<(f64, f64)>,
 }
 
 /// How far past its wall's faces a door's or window's From Room and To Room are looked for ([`Model::opening_sides`]).
@@ -2957,6 +2961,11 @@ impl OpeningType {
     /// Its leaf's thickness: its own, or [`DOOR_THICKNESS`].
     pub fn leaf(&self) -> f64 {
         self.thickness.unwrap_or(DOOR_THICKNESS)
+    }
+
+    /// The width and height of the opening it cuts in its wall: its family's `cut`, else its width and height.
+    pub fn cut(&self) -> (f64, f64) {
+        self.hole.unwrap_or((self.width, self.height))
     }
 }
 
@@ -3771,7 +3780,7 @@ impl Model {
     /// for one that doesn't build.
     pub fn component_local_pieces(&self, c: &Component) -> Vec<Piece> {
         let Some(f) = self.families.get(&c.family) else { return Vec::new() };
-        let Ok(pieces) = f.values(&c.type_name, &c.params).and_then(|v| f.pieces(&v)) else { return Vec::new() };
+        let Ok(pieces) = f.values(&c.type_name, &c.params).and_then(|v| f.pieces(&c.type_name, &v)) else { return Vec::new() };
         if !c.mirrored {
             return pieces;
         }
@@ -3787,14 +3796,18 @@ impl Model {
             .collect()
     }
 
-    /// Component `c`'s plan marks in the model: its family's symbols in its own axes, mirrored if it is, turned and moved to
-    /// where it stands. A label is lettered upright in the family's axes, so it turns (and mirrors) with the component.
-    pub fn component_marks(&self, c: &Component) -> Vec<crate::family::Mark> {
+    /// Component `c`'s plan marks in the model at detail level `detail`: its family's plan symbols of its type drawn at that
+    /// level ([`crate::family::Symbol::drawn_at`]), in its own axes, mirrored if it is, turned and moved to where it stands.
+    /// A label is lettered upright in the family's axes, so it turns (and mirrors) with the component.
+    pub fn component_marks(&self, c: &Component, detail: crate::graphics::Detail) -> Vec<crate::family::Mark> {
         let Some(f) = self.families.get(&c.family) else { return Vec::new() };
         if f.symbols.is_empty() {
             return Vec::new();
         }
-        let Ok(marks) = f.values(&c.type_name, &c.params).and_then(|v| f.marks(&v)) else { return Vec::new() };
+        let plan = crate::family::SymbolView::Plan;
+        let Ok(marks) = f.values(&c.type_name, &c.params).and_then(|v| f.marks(&c.type_name, &v, plan, Some(detail))) else {
+            return Vec::new();
+        };
         let (sin, cos) = c.angle.to_radians().sin_cos();
         let flip = if c.mirrored { -1.0 } else { 1.0 };
         marks.iter().map(|k| k.map(|q| P2(c.at.0 + q.0 * cos - flip * q.1 * sin, c.at.1 + q.0 * sin + flip * q.1 * cos))).collect()
@@ -4829,6 +4842,7 @@ impl Model {
             operation: f.operation,
             thickness: None,
             identity: f.identity.get(&o.type_name).cloned().unwrap_or_default(),
+            hole: f.cut_size(&values)?,
         })
     }
 
@@ -4849,10 +4863,16 @@ impl Model {
     /// the opening's flips as mirror images (its hinge on the other jamb, its swing to the wall's other side);
     /// none for one that isn't of a family, or doesn't build.
     pub fn opening_local(&self, e: &Element) -> Option<(Vec<Piece>, Vec<crate::family::Mark>)> {
+        self.opening_local_at(e, crate::graphics::Detail::Fine)
+    }
+
+    /// [`Model::opening_local`], its plan marks those drawn at detail level `detail`.
+    fn opening_local_at(&self, e: &Element, detail: crate::graphics::Detail) -> Option<(Vec<Piece>, Vec<crate::family::Mark>)> {
         let (Element::Door(o) | Element::Window(o)) = e else { return None };
         let f = self.families.get(o.family.as_ref()?)?;
         let values = f.values_in(&o.type_name, &o.params, self.thickness(self.wall(o.host)?)).ok()?;
-        let (pieces, marks) = (f.pieces(&values).ok()?, f.marks(&values).ok()?);
+        let plan = crate::family::SymbolView::Plan;
+        let (pieces, marks) = (f.pieces(&o.type_name, &values).ok()?, f.marks(&o.type_name, &values, plan, Some(detail)).ok()?);
         let (fx, fy) = (if o.flip_hand { -1.0 } else { 1.0 }, if o.flip_facing { -1.0 } else { 1.0 });
         let mirrored = fx * fy < 0.0;
         let flip = |p: [f64; 3]| [fx * p[0] + 0.0, fy * p[1] + 0.0, p[2]];
@@ -4890,11 +4910,68 @@ impl Model {
             .collect()
     }
 
-    /// The marks a door's or window's family draws in plan, where it stands.
-    pub fn opening_marks(&self, e: &Element) -> Vec<crate::family::Mark> {
+    /// The marks a door's or window's family draws in plan at detail level `detail`, where it stands.
+    pub fn opening_marks(&self, e: &Element, detail: crate::graphics::Detail) -> Vec<crate::family::Mark> {
         let (Element::Door(o) | Element::Window(o)) = e else { return Vec::new() };
-        let (Some((_, marks)), Some((at, u, _))) = (self.opening_local(e), self.opening_frame(o)) else { return Vec::new() };
+        let (Some((_, marks)), Some((at, u, _))) = (self.opening_local_at(e, detail), self.opening_frame(o)) else { return Vec::new() };
         marks.iter().map(|k| k.map(|q| at + u * q.0 + u.perp() * q.1)).collect()
+    }
+
+    /// The lines a component's or a door's or window's family draws in a section or an elevation looking along `looking` at
+    /// detail level `detail`, in the model (mm, z up): its `front` symbols where the view looks along the family's y within
+    /// 45°, else its `side` ones (Revit's symbolic lines in an elevation: a door's Elevation Swing). A `front` symbol's
+    /// (x, z) stand in the family's plane y = 0 and a `side` one's (y, z) in x = 0, placed as its forms are (mirrored,
+    /// flipped, turned and moved), so the view from the back or the left sees them mirrored.
+    pub fn elevation_lines(&self, e: &Element, looking: P2, detail: crate::graphics::Detail) -> Vec<Vec<[f64; 3]>> {
+        use crate::family::{Mark, SymbolView};
+        let (family, type_name, params, wall) = match e {
+            Element::Component(c) => (&c.family, &c.type_name, &c.params, None),
+            Element::Door(o) | Element::Window(o) => match (&o.family, self.wall(o.host)) {
+                (Some(f), Some(w)) => (f, &o.type_name, &o.params, Some(self.thickness(w))),
+                _ => return Vec::new(),
+            },
+            _ => return Vec::new(),
+        };
+        let Some(f) = self.families.get(family) else { return Vec::new() };
+        if !f.symbols.iter().any(|y| y.view != SymbolView::Plan) {
+            return Vec::new();
+        }
+        // The family's axes in the model, and where its (x, y, z) stands.
+        let place: Box<dyn Fn([f64; 3]) -> [f64; 3]> = match e {
+            Element::Component(c) => {
+                let base = self.elevation(c.level) + c.offset;
+                let (sin, cos) = c.angle.to_radians().sin_cos();
+                let flip = if c.mirrored { -1.0 } else { 1.0 };
+                let at = c.at;
+                Box::new(move |p| [at.0 + p[0] * cos - flip * p[1] * sin, at.1 + p[0] * sin + flip * p[1] * cos, base + p[2]])
+            }
+            Element::Door(o) | Element::Window(o) => {
+                let Some((at, u, z)) = self.opening_frame(o) else { return Vec::new() };
+                let (fx, fy) = (if o.flip_hand { -1.0 } else { 1.0 }, if o.flip_facing { -1.0 } else { 1.0 });
+                Box::new(move |p| {
+                    let q = at + u * (fx * p[0]) + u.perp() * (fy * p[1]);
+                    [q.0, q.1, z + p[2]]
+                })
+            }
+            _ => return Vec::new(),
+        };
+        let (o, x) = (place([0.0; 3]), place([1.0, 0.0, 0.0]));
+        let along_x = P2(x[0] - o[0], x[1] - o[1]);
+        let side = looking.unit().dot(along_x).abs() > std::f64::consts::FRAC_1_SQRT_2;
+        let view = if side { SymbolView::Side } else { SymbolView::Front };
+        let values = match wall {
+            Some(t) => f.values_in(type_name, params, t),
+            None => f.values(type_name, params),
+        };
+        let Ok(marks) = values.and_then(|v| f.marks(type_name, &v, view, Some(detail))) else { return Vec::new() };
+        let lift = |q: P2| if side { place([0.0, q.0, q.1]) } else { place([q.0, 0.0, q.1]) };
+        marks
+            .into_iter()
+            .filter_map(|k| match k {
+                Mark::Line(pts) => Some(pts.into_iter().map(lift).collect()),
+                _ => None,
+            })
+            .collect()
     }
 
     /// The level an element stands on: a door's or window's is its wall's, a tag's its door's or
@@ -7397,7 +7474,7 @@ impl Model {
                 if let Some(f) = o.family.as_ref().and_then(|n| self.families.get(n)) {
                     self.family_values_ok(&who, o.family.as_deref().unwrap_or_default(), f, &o.params)?;
                     let values = f.values_in(&o.type_name, &o.params, self.thickness(w)).map_err(|e| format!("{who}: {e}"))?;
-                    f.pieces(&values).and_then(|_| f.marks(&values)).map_err(|e| format!("{who}: {e}"))?;
+                    f.pieces(&o.type_name, &values).and_then(|_| f.all_marks(&o.type_name, &values)).map_err(|e| format!("{who}: {e}"))?;
                     size(&format!("{who} width"), t.width)?;
                     size(&format!("{who} height"), t.height)?;
                 }
@@ -7843,7 +7920,11 @@ impl Model {
                 coord(&format!("{who} offset"), c.offset)?;
                 self.family_values_ok(&who, &c.family, f, &c.params)?;
                 // Its shape, built once for each family, type and values the project's components have.
-                let build = || f.values(&c.type_name, &c.params).and_then(|v| f.pieces(&v).and(f.marks(&v))).map(|_| ());
+                let build = || {
+                    f.values(&c.type_name, &c.params)
+                        .and_then(|v| f.pieces(&c.type_name, &v).and(f.all_marks(&c.type_name, &v)))
+                        .map(|_| ())
+                };
                 let built = match serde_json::to_string(&c.params) {
                     Ok(values) => shapes.entry((c.family.as_str(), c.type_name.as_str(), values)).or_insert_with(build).clone(),
                     Err(_) => build(),

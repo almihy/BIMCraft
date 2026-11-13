@@ -35,7 +35,7 @@ fn a_picture_draws_every_point_up_to_its_budget_and_an_even_share_past_it() {
 
 #[test]
 fn coplanar_triangles_share_a_plane_and_degenerate_ones_each_their_own() {
-    let tri = |p: [P3; 3]| Tri { p, owner: 1, color: EDGE, tex: 0, curve: None };
+    let tri = |p: [P3; 3]| Tri { p, owner: 1, color: EDGE, tex: 0, curve: None, vis: Vis::ALWAYS };
     // A face's triangles a micron off its plane, as a file rounds them, are one plane;
     // triangles with no area are each their own, and many of them stay quick.
     let mut tris: Vec<Tri> = (0..200)
@@ -73,7 +73,7 @@ fn cylinder(n: usize, r: f64, h: f64) -> Vec<[P3; 3]> {
 
 #[test]
 fn a_meshs_facets_that_turn_little_read_as_one_surface_and_its_creases_keep_their_edges() {
-    let mesh = |owner, tris: Vec<[P3; 3]>| Solid::Mesh { owner, color: EDGE, tex: 0, caps: tris.len(), round: false, cut: false, tris };
+    let mesh = |owner, tris: Vec<[P3; 3]>| Solid::Mesh { owner, color: EDGE, tex: 0, caps: tris.len(), round: false, cut: false, tris, vis: Vis::ALWAYS };
     // Each cylinder's planes: its sides one surface where they turn 20° or less at their edges,
     // else a plane to each side; and a plane to each cap, however many triangles make it.
     for (n, planes_of) in [(4, 6), (8, 10), (16, 18), (20, 3), (24, 3), (64, 3)] {
@@ -110,7 +110,7 @@ fn a_meshs_facets_that_turn_little_read_as_one_surface_and_its_creases_keep_thei
 fn a_curves_corners_take_the_normals_of_the_surface_they_are_on() {
     let n = 24;
     let mut out = Vec::new();
-    Solid::Mesh { owner: 1, color: EDGE, tex: 0, caps: 0, round: false, cut: false, tris: cylinder(n, 200.0, 450.0) }.tris(&mut out);
+    Solid::Mesh { owner: 1, color: EDGE, tex: 0, caps: 0, round: false, cut: false, tris: cylinder(n, 200.0, 450.0), vis: Vis::ALWAYS }.tris(&mut out);
     let normals = corner_normals(&out);
     // Its caps are flat faces: none. Each corner of its sides points straight out from the axis, the top
     // ones as the bottom ones (two triangles meet at some corners, one at others).
@@ -129,13 +129,13 @@ fn a_curves_corners_take_the_normals_of_the_surface_they_are_on() {
     let mut roofed = cylinder(n, 200.0, 450.0);
     roofed.extend((0..n).map(|k| [ring(k), ring(k + 1), [0.0, 0.0, 850.0]]));
     let mut out = Vec::new();
-    Solid::Mesh { owner: 1, color: EDGE, tex: 0, caps: 0, round: false, cut: false, tris: roofed }.tris(&mut out);
+    Solid::Mesh { owner: 1, color: EDGE, tex: 0, caps: 0, round: false, cut: false, tris: roofed, vis: Vis::ALWAYS }.tris(&mut out);
     let normals = corner_normals(&out);
     let normal = |i: usize| normals[i].as_deref().unwrap();
     assert!((2 * n..4 * n).all(|i| normal(i).iter().all(|v| v[2].abs() < 1e-9)));
     assert!((4 * n..5 * n).all(|i| normal(i)[0][2] > 0.4 && normal(i)[1][2] > 0.4 && normal(i)[2][2] > 1.0 - 1e-9));
     // Triangles with corners that aren't numbers, or no area, have none, and don't crash it.
-    let odd = |p: [P3; 3]| Tri { p, owner: 1, color: EDGE, tex: 0, curve: Some((1, 0)) };
+    let odd = |p: [P3; 3]| Tri { p, owner: 1, color: EDGE, tex: 0, curve: Some((1, 0)), vis: Vis::ALWAYS };
     let odd = [
         odd([[f64::NAN; 3]; 3]),
         odd([[f64::INFINITY; 3]; 3]),
@@ -151,7 +151,7 @@ fn a_section_cuts_a_tube_in_its_ring_an_oblique_one_in_an_ellipse_and_leaves_oth
     // A pipe 200 across along east at 500 up, from x = 0 to 4000, and a section 2000 along it, level and then at 45°.
     let g = Geom { a: [0.0, 0.0, 500.0], b: [4000.0, 0.0, 500.0], width: 200.0, depth: 200.0, round: true };
     let (tris, caps) = g.tube();
-    let tube = |cut| Solid::Mesh { owner: 1, color: EDGE, tex: 0, tris: tris.clone(), caps, round: true, cut };
+    let tube = |cut| Solid::Mesh { owner: 1, color: EDGE, tex: 0, tris: tris.clone(), caps, round: true, cut, vis: Vis::ALWAYS };
     let extent = |rings: &[Vec<P2>]| {
         let pts: Vec<P2> = rings.iter().flatten().copied().collect();
         let (lo, hi) = pts.iter().fold((P2(f64::MAX, f64::MAX), P2(f64::MIN, f64::MIN)), |(lo, hi), q| {
@@ -200,7 +200,7 @@ fn a_section_cuts_a_tube_in_its_ring_an_oblique_one_in_an_ellipse_and_leaves_oth
         [d, a, e],
         [d, e, h],
     ];
-    let cube = Solid::Mesh { owner: 1, color: EDGE, tex: 0, tris, caps: 0, round: false, cut: true };
+    let cube = Solid::Mesh { owner: 1, color: EDGE, tex: 0, tris, caps: 0, round: false, cut: true, vis: Vis::ALWAYS };
     let (w, h, ..) = extent(&cube.cuts(P2(0.0, 100.0), P2(1.0, 0.0), 1000.0));
     assert!((w - 200.0).abs() < 1e-6 && (h - 200.0).abs() < 1e-6, "{w} {h}");
     // A section along the pipe cuts it lengthwise: a strip as long as the pipe is and as high as it is round.

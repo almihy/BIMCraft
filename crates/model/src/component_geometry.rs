@@ -162,7 +162,7 @@ pub(crate) fn plain_envelopes<'a>(
 fn local_envelope(m: &Model, c: &Component) -> Option<[[f64; 3]; 2]> {
     let family = m.families.get(&c.family)?;
     let values = family.values(&c.type_name, &c.params).ok()?;
-    family.conservative_bounds(&values)
+    family.conservative_bounds(&c.type_name, &values)
 }
 
 #[doc(hidden)]
@@ -293,6 +293,7 @@ impl<'a> Components<'a> {
                 material: pc.material.clone(),
                 caps: pc.caps,
                 round: pc.round,
+                show: pc.show,
             })
             .collect()
     }

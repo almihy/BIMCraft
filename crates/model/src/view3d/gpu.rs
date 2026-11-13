@@ -442,7 +442,8 @@ impl Mesh {
                 return Ok(None);
             }
             if plain || look.shows(span.id) {
-                shown.extend(span.at.clone());
+                // A family's form its Visibility Settings keep from the view's detail level is left out.
+                shown.extend(span.at.clone().filter(|i| scene.tris.get(*i).is_some_and(|t| look.draws_vis(t.vis))));
                 let view = if plain { 0 } else { look.transparency(span.id) };
                 for (a, t) in
                     alphas.get_mut(span.at.clone()).unwrap_or_default().iter_mut().zip(scene.tris.get(span.at.clone()).unwrap_or_default())
@@ -499,7 +500,7 @@ impl Mesh {
             }
             let Some(local) = scene.shapes.get(place.shape) else { continue };
             let Some(tris) = scene.tris.get(first..first + local.len()) else { continue };
-            if !(plain || look.shows(place.owner)) {
+            if !(plain || look.shows(place.owner)) || !tris.iter().all(|t| look.draws_vis(t.vis)) {
                 continue;
             }
             // One owner for what is seen through of a copy, so one way see-through.
@@ -724,7 +725,7 @@ impl Mesh {
                 if k % 8192 == 0 && cancelled() {
                     return Ok(None);
                 }
-                let Some(t) = scene.tris.get(i).filter(|t| look.shows(t.owner)) else { continue };
+                let Some(t) = scene.tris.get(i).filter(|t| look.draws(t)) else { continue };
                 let owner = owner_of(&mut mesh, t.owner, 0);
                 mesh.wires.push(Wire { ends, owner, face: face_at(i) });
             }

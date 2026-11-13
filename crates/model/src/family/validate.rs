@@ -63,6 +63,11 @@ fn formulas(f: &Family, out: &mut Vec<String>) {
             }
         }
     }
+    for e in f.cut.iter().flat_map(|c| [&c.width, &c.height]) {
+        if let Expr::Formula(formula) = e {
+            read("its `cut`", formula, out);
+        }
+    }
     for (i, sym) in f.symbols.iter().enumerate() {
         let exprs = sym
             .line
@@ -82,7 +87,7 @@ fn formulas(f: &Family, out: &mut Vec<String>) {
 /// a window's form wholly outside the opening it stands in, one thicker than the wall it's in, and
 /// a plan with nothing drawn on it. A fault every type has is one warning naming all of them.
 fn geometry(f: &Family, out: &mut Vec<String>) {
-    if f.category.hosted() && f.symbols.is_empty() {
+    if f.category.hosted() && !f.symbols.iter().any(|y| y.view == super::SymbolView::Plan) {
         out.push("its plan draws no symbols: a door's or a window's plan shows its swing or its sill, and this one shows nothing".into());
     }
     let number = |values: &BTreeMap<String, Val>, name: &str| match values.get(name) {
@@ -95,7 +100,7 @@ fn geometry(f: &Family, out: &mut Vec<String>) {
         let Ok(values) = f.values_in(ty, &BTreeMap::new(), DEFAULT_WALL) else {
             continue;
         };
-        let shapes = f.shapes(&values);
+        let shapes = f.shapes(ty, &values);
         for void in shapes.iter().filter(|s| s.void) {
             let cut = shapes.iter().any(|solid| !solid.void && solid.index < void.index && void.over(solid));
             if !cut {
@@ -108,7 +113,10 @@ fn geometry(f: &Family, out: &mut Vec<String>) {
         if !f.category.hosted() {
             continue;
         }
-        let (width, height) = (number(&values, WIDTH), number(&values, HEIGHT));
+        let (width, height) = match f.cut_size(&values) {
+            Ok(Some((w, h))) => (Some(w), Some(h)),
+            _ => (number(&values, WIDTH), number(&values, HEIGHT)),
+        };
         let wall = number(&values, WALL).unwrap_or(DEFAULT_WALL);
         for solid in shapes.iter().filter(|s| !s.void) {
             if let (Some(w), Some(h)) = (width, height)

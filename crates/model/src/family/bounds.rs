@@ -18,11 +18,11 @@ impl Family {
     /// No triangles or boolean results are constructed. None means unknown/empty;
     /// callers must keep the instance. Visible voids and revolved forms currently
     /// return unknown. These envelopes must not replace exact framing extrema.
-    pub fn conservative_bounds<'a>(&'a self, values: &BTreeMap<String, Val>) -> Option<[P3; 2]> {
+    pub fn conservative_bounds<'a>(&'a self, type_name: &str, values: &BTreeMap<String, Val>) -> Option<[P3; 2]> {
         let mut read = HashMap::new();
         let mut num = |e: &'a Expr| number(e, values, &mut read).ok();
         let mut out = None;
-        for form in &self.forms {
+        for form in self.forms.iter().filter(|f| f.of_type(type_name)) {
             if let Some(visible) = &form.visible
                 && num(visible)? == 0.0
             {
@@ -80,8 +80,12 @@ mod tests {
     use super::*;
 
     fn encloses(f: &Family, values: &BTreeMap<String, Val>) {
-        let [lo, hi] = f.conservative_bounds(values).unwrap();
-        let pieces = f.pieces(values).unwrap();
+        encloses_type(f, "", values);
+    }
+
+    fn encloses_type(f: &Family, type_name: &str, values: &BTreeMap<String, Val>) {
+        let [lo, hi] = f.conservative_bounds(type_name, values).unwrap();
+        let pieces = f.pieces(type_name, values).unwrap();
         assert!(!pieces.is_empty());
         for p in pieces.iter().flat_map(|p| p.tris.iter().flatten()) {
             assert!((0..3).all(|i| lo[i] <= p[i] && p[i] <= hi[i]), "{p:?} outside {lo:?}..{hi:?}");
@@ -104,7 +108,7 @@ mod tests {
         let source: Family = serde_json::from_value(serde_json::json!({"forms":[{
             "profile":[[0,0],[500,0],[500,300],[0,300]],"from":-20,"to":100}]}))
         .unwrap();
-        let mesh = source.pieces(&BTreeMap::new()).unwrap().into_iter().flat_map(|p| p.tris).collect();
+        let mesh = source.pieces("", &BTreeMap::new()).unwrap().into_iter().flat_map(|p| p.tris).collect();
         encloses(&Family { forms: vec![Form { mesh: Arc::new(mesh), ..Default::default() }], ..Default::default() }, &BTreeMap::new());
     }
 
@@ -114,8 +118,8 @@ mod tests {
         for family in library(crate::language::Language::English).values() {
             for name in family.types.keys() {
                 let values = family.values(name, &BTreeMap::new()).unwrap();
-                if family.conservative_bounds(&values).is_some() {
-                    encloses(family, &values);
+                if family.conservative_bounds(name, &values).is_some() {
+                    encloses_type(family, name, &values);
                     supported += 1;
                 }
             }
@@ -130,15 +134,15 @@ mod tests {
         .unwrap();
         let mut unsupported = f.clone();
         unsupported.forms[0].void = true;
-        assert!(unsupported.conservative_bounds(&BTreeMap::new()).is_none());
+        assert!(unsupported.conservative_bounds("", &BTreeMap::new()).is_none());
         unsupported.forms[0].visible = Some(Expr::Number(0.0));
         unsupported.forms.extend(f.forms.clone());
         encloses(&unsupported, &BTreeMap::new());
         unsupported = f.clone();
         unsupported.forms[0].axis = Some([[Expr::Number(0.0), Expr::Number(0.0)], [Expr::Number(0.0), Expr::Number(1.0)]]);
-        assert!(unsupported.conservative_bounds(&BTreeMap::new()).is_none());
+        assert!(unsupported.conservative_bounds("", &BTreeMap::new()).is_none());
         unsupported = f;
         unsupported.forms[0].to = Expr::Number(f64::NAN);
-        assert!(unsupported.conservative_bounds(&BTreeMap::new()).is_none());
+        assert!(unsupported.conservative_bounds("", &BTreeMap::new()).is_none());
     }
 }

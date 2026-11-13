@@ -727,8 +727,9 @@ pub fn notches(m: &Model, id: Id) -> Vec<[P2; 2]> {
     for e in m.lookup().referrers(&guid).filter_map(|k| m.elements.get(k)) {
         let (Element::Door(o) | Element::Window(o)) = e else { continue };
         let Some(t) = m.opening_type(e).filter(|_| o.host == guid) else { continue };
-        let head = base + o.sill + t.height;
-        for s in [o.offset - t.width / 2.0, o.offset + t.width / 2.0] {
+        let (width, height) = t.cut();
+        let head = base + o.sill + height;
+        for s in [o.offset - width / 2.0, o.offset + width / 2.0] {
             if head >= top_at(m, w, s) - 1e-6 {
                 out.push([axis.at(s, int), axis.at(s, ext)]);
             }
@@ -803,8 +804,8 @@ pub fn prisms_in(m: &Model, id: Id, openings: bool, index: Option<&Index>) -> Ve
     let holes: Vec<((f64, f64), (f64, f64))> = candidates
         .filter_map(|e| match e {
             Element::Door(o) | Element::Window(o) if o.host == guid => {
-                let t = m.opening_type(e)?;
-                Some(((o.offset - t.width / 2.0, o.offset + t.width / 2.0), (z0 + o.sill, z0 + o.sill + t.height)))
+                let (width, height) = m.opening_type(e)?.cut();
+                Some(((o.offset - width / 2.0, o.offset + width / 2.0), (z0 + o.sill, z0 + o.sill + height)))
             }
             _ => None,
         })

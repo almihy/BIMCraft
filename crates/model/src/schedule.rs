@@ -692,7 +692,7 @@ fn fields_with(m: &Model, cat: &str, identity_data: bool) -> Vec<(String, Kind)>
                     family::Kind::Length => Kind::Length,
                     family::Kind::Number | family::Kind::Angle => Kind::Number,
                     family::Kind::YesNo => Kind::YesNo,
-                    family::Kind::Material => Kind::Text,
+                    family::Kind::Material | family::Kind::Text => Kind::Text,
                 },
             );
         }

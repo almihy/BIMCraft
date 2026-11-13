@@ -11580,6 +11580,7 @@ fn edit_type(s: &mut Session, p: &Value) -> R {
                 operation: op,
                 thickness: leaf,
                 identity,
+                hole: None,
             };
             map.insert(name.clone(), t.clone());
             json!(t)
