@@ -838,8 +838,6 @@ struct Row {
     sub: bool,
     /// A category with subcategories: whether they are unfolded.
     fold: Option<bool>,
-    /// The cells it can't override, hatched as Revit greys them out.
-    hatched: &'static [Cell],
     /// Whether it has a Halftone box: an import's layer hasn't, its file's being the whole file's.
     halftone: bool,
     /// Whether it can be changed here: not what a view template the view follows sets.
@@ -849,7 +847,7 @@ struct Row {
 impl Row {
     /// A row of `pick`, named `name`, with override `over` and the pens of `start`: every cell, changed with its table.
     fn new(pick: Pick, name: String, over: Override, start: ObjectStyle) -> Row {
-        Row { pick, name, over, start, sub: false, fold: None, hatched: &[], halftone: true, enabled: true }
+        Row { pick, name, over, start, sub: false, fold: None, halftone: true, enabled: true }
     }
 }
 
@@ -883,7 +881,10 @@ fn table(ui: &mut Ui, d: &mut VgDialog, model: &Model, rows: &[Row], cols: &Colu
             .as_ref()
             .and_then(|n| model.view_templates.get(n))
             .is_some_and(|t| t.kind == Some(bimcraft_core::graphics::ViewKind::ThreeD));
-    let total = NAME_W + cols.cells.len() as f32 * CELL_W + HALFTONE_W + if cols.detail { DETAIL_W } else { 0.0 };
+    // The cells keep their widths; Visibility takes what is left of the dialog's, so every tab's table fills it.
+    let rest = cols.cells.len() as f32 * CELL_W + HALFTONE_W + if cols.detail { DETAIL_W } else { 0.0 };
+    let name_w = (ui.available_width() - rest).max(NAME_W);
+    let total = name_w + rest;
     let line = ui.visuals().widgets.noninteractive.bg_stroke;
     let ink = ui.visuals().text_color();
     let small = TextStyle::Small.resolve(ui.style());
@@ -896,8 +897,8 @@ fn table(ui: &mut Ui, d: &mut VgDialog, model: &Model, rows: &[Row], cols: &Colu
         p.text(r.center(), Align2::CENTER_CENTER, s, font.clone(), ink);
     };
     let (top, mid) = (head.top(), head.top() + ROW_H);
-    text(Rect::from_min_size(pos2(head.left(), top), vec2(NAME_W, ROW_H * 2.0)), t("Visibility"), &body);
-    let mut x = head.left() + NAME_W;
+    text(Rect::from_min_size(pos2(head.left(), top), vec2(name_w, ROW_H * 2.0)), t("Visibility"), &body);
+    let mut x = head.left() + name_w;
     for (group, cut) in [(msg!("Projection/Surface"), false), ("Cut", true)] {
         let cells: Vec<Cell> = cols.cells.iter().copied().filter(|c| c.cut() == cut).collect();
         if cells.is_empty() {
@@ -949,14 +950,14 @@ fn table(ui: &mut Ui, d: &mut VgDialog, model: &Model, rows: &[Row], cols: &Colu
             let mut visible = !row.over.hidden && (!off || row.over.shown);
             // A subcategory's box well in from its category's, which stands after the fold arrow.
             let indent = if row.sub { 14.0 + ui.spacing().item_spacing.x + 24.0 } else { 0.0 };
-            let at = cell(r.left(), NAME_W).shrink2(vec2(6.0, 0.0));
+            let at = cell(r.left(), name_w).shrink2(vec2(6.0, 0.0));
             let mut c = child(ui, Rect::from_min_max(pos2(at.left() + indent, at.top()), at.max), Layout::left_to_right(Align::Center));
             // A category with subcategories folds them away, as Revit's tree.
             // A small triangle, pointing right while folded, turning 90° down as it opens.
             if let (Some(open), Some(cat)) = (row.fold, row.pick.fold_key()) {
                 let arrow = c.add(Button::new("").frame(false).min_size(vec2(14.0, 14.0)));
                 let openness = c.ctx().animate_bool(c.id().with(("folding", &cat)), open);
-                fold_arrow(c.painter(), arrow.rect.center(), openness);
+                fold_arrow(c.painter(), arrow.rect.center(), openness, c.visuals().text_color());
                 let what = if open { t("Fold") } else { t("Unfold") };
                 arrow.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, format!("{}: {what}", row.name)));
                 if arrow.clicked() && !d.unfolded.remove(&cat) {
@@ -969,15 +970,10 @@ fn table(ui: &mut Ui, d: &mut VgDialog, model: &Model, rows: &[Row], cols: &Colu
                 edits.push((row.pick.clone(), Override { hidden: !visible, shown: visible && off, ..row.over.clone() }));
             }
             // The cells: Override… on the row picked, what each overrides on the rest.
-            let mut x = r.left() + NAME_W;
+            let mut x = r.left() + name_w;
             for k in cols.cells {
                 let at = cell(x, CELL_W);
                 p.vline(x, r.y_range(), line);
-                if row.hatched.contains(k) {
-                    hatch(ui, &p, at);
-                    x += CELL_W;
-                    continue;
-                }
                 let name = format!("{}: {}", row.name, t(k.name()));
                 let mut c = child(ui, at.shrink(2.0), Layout::centered_and_justified(egui::Direction::LeftToRight));
                 let b = c.add_enabled(enabled, Button::new(if picked { t("Override…") } else { "" }).frame(picked));
@@ -1008,8 +1004,6 @@ fn table(ui: &mut Ui, d: &mut VgDialog, model: &Model, rows: &[Row], cols: &Colu
                 if h.changed() {
                     edits.push((row.pick.clone(), Override { halftone: half, ..row.over.clone() }));
                 }
-            } else {
-                hatch(ui, &p, cell(x, HALFTONE_W));
             }
             x += HALFTONE_W;
             // Detail Level: each category drawn at the view's, until a category can have its own.
@@ -1022,26 +1016,13 @@ fn table(ui: &mut Ui, d: &mut VgDialog, model: &Model, rows: &[Row], cols: &Colu
     edits
 }
 
-/// A cell that can't be overridden, hatched as Revit greys it out: fine diagonal lines over a faint ground.
-fn hatch(ui: &Ui, p: &Painter, r: Rect) {
-    let r = r.shrink2(vec2(0.5, 0.0));
-    let p = p.with_clip_rect(r.intersect(p.clip_rect()));
-    p.rect_filled(r, 0.0, ui.visuals().faint_bg_color);
-    let stroke = Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color);
-    let mut x = r.left() - r.height();
-    while x < r.right() {
-        p.line_segment([pos2(x, r.bottom()), pos2(x + r.height(), r.top())], stroke);
-        x += 4.0;
-    }
-}
-
-/// A fold arrow: a small dark grey triangle centred on `at`, pointing right while folded and turned 90° down as `openness`
-/// goes from 0 to 1.
-fn fold_arrow(p: &Painter, at: egui::Pos2, openness: f32) {
+/// A fold arrow: a small triangle in the text's colour centred on `at` (dark grey on a light dialog, light on a dark one),
+/// pointing right while folded and turned 90° down as `openness` goes from 0 to 1.
+fn fold_arrow(p: &Painter, at: egui::Pos2, openness: f32, ink: Color32) {
     const HALF: f32 = 3.5;
     let turn = egui::emath::Rot2::from_angle(openness * std::f32::consts::FRAC_PI_2);
     let corners = [vec2(-HALF * 0.6, -HALF), vec2(HALF * 0.9, 0.0), vec2(-HALF * 0.6, HALF)].map(|v| at + turn * v);
-    p.add(Shape::convex_polygon(corners.to_vec(), Color32::from_rgb(66, 66, 66), Stroke::NONE));
+    p.add(Shape::convex_polygon(corners.to_vec(), ink, Stroke::NONE));
 }
 
 /// What a cell of `o` overrides, drawn in it: a line as it would draw, a fill's colour, the transparency's percent; nothing
@@ -1412,11 +1393,11 @@ fn imported(ui: &mut Ui, d: &mut VgDialog, model: &Model, shown: &Graphics, foll
     });
     ui.add_space(12.0);
     let mut styles = false;
+    // As wide as the table, its note in the words and look of Model Categories' beside the button.
     egui::Frame::group(ui.style()).inner_margin(12.0).show(ui, |ui| {
+        ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
-            let note = t("Categories not overridden are drawn as this project's Object Styles set imported objects.");
-            ui.add_sized(vec2(300.0, 0.0), egui::Label::new(note).wrap());
-            ui.add_space(12.0);
+            ui.label(RichText::new(t("Categories not overridden are drawn as Object Styles sets them.")).color(pal().muted));
             styles = ui.button(t("Object Styles…")).clicked();
         });
     });
