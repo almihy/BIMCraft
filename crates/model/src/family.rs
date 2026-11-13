@@ -1620,7 +1620,9 @@ impl Family {
             }
             match read(p, &p.value)? {
                 Val::Text(m) if p.kind == Kind::Material => material_ok(&who, &m)?,
-                Val::Text(t) if t.chars().count() > MAX_WORDS => return Err(format!("{who}: its text is longer than {MAX_WORDS} characters")),
+                Val::Text(t) if t.chars().count() > MAX_WORDS => {
+                    return Err(format!("{who}: its text is longer than {MAX_WORDS} characters"));
+                }
                 _ => {}
             }
         }

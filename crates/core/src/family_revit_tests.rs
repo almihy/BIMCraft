@@ -89,9 +89,12 @@ fn a_family_file_brings_its_materials_and_says_where_it_came_from() {
     assert_eq!(read["values"]["900 x 2100"]["Fire Rating"], "EI 30");
     assert!((read["values"]["900 x 2100"]["Leaf Area"].as_f64().unwrap() - 1.89).abs() < 1e-9);
     let e = s
-        .execute("family", &json!({"name": NAME, "parameters": [{"name": "Width", "value": 900}, {"name": "Height", "value": 2100},
+        .execute(
+            "family",
+            &json!({"name": NAME, "parameters": [{"name": "Width", "value": 900}, {"name": "Height", "value": 2100},
             {"name": "Frame Width", "value": 50}, {"name": "Fire Rating", "kind": "text", "value": "x"},
-            {"name": "Twice", "formula": "Fire Rating * 2"}]}))
+            {"name": "Twice", "formula": "Fire Rating * 2"}]}),
+        )
         .unwrap_err();
     assert!(e.contains("not a number"), "{e}");
 }
@@ -154,9 +157,11 @@ fn a_plan_draws_the_swing_at_every_level_and_never_the_leaf_mesh() {
         assert_eq!(all.iter().filter(|(p, closed)| !closed && p.len() > 5).count(), 1, "{detail}: the swing");
         assert_eq!(open_with(&dr, 5), 1, "{detail}: the open leaf");
         // The leaf mesh, 900 by 40 seen from above, is never outlined: its `show.plan` is false.
-        let leaf = all.iter().filter(|(p, closed)| *closed && {
-            let (a, b) = spans(p);
-            near(a, 900.0) && near(b, 40.0)
+        let leaf = all.iter().filter(|(p, closed)| {
+            *closed && {
+                let (a, b) = spans(p);
+                near(a, 900.0) && near(b, 40.0)
+            }
         });
         assert_eq!(leaf.count(), 0, "{detail}");
         // The frame's jambs are cut, outlined at Medium and Fine; at Coarse a form that says nothing of its levels is left out.
@@ -253,8 +258,12 @@ fn a_project_using_the_new_fields_is_written_as_21_and_one_without_as_before() {
     let format = |s: &Session| serde_json::from_str::<Value>(&s.model.to_json().unwrap()).unwrap()["format"].clone();
     assert_eq!(format(&s), json!(PREVIOUS_FORMAT));
     // Where it came from and its flip controls an older build leaves out: no new format for them.
-    run(&mut s, "family", json!({"name": "Plain", "types": {"A": {}}, "source": {"app": "Revit 2025"}, "flips": {"hand": false},
-        "forms": [{"profile": [[0, 0], [100, 0], [100, 100]], "to": 100}]}));
+    run(
+        &mut s,
+        "family",
+        json!({"name": "Plain", "types": {"A": {}}, "source": {"app": "Revit 2025"}, "flips": {"hand": false},
+        "forms": [{"profile": [[0, 0], [100, 0], [100, 100]], "to": 100}]}),
+    );
     assert_eq!(format(&s), json!(PREVIOUS_FORMAT));
     let door = door(&mut s, "900 x 2100");
     assert_eq!(format(&s), json!(FORMAT));

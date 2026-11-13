@@ -75,3 +75,15 @@ fn hidden_line_draws_its_edges_whatever_the_view_says_so_show_edges_is_greyed_ou
     button_of_dialog(&mut h, "Cancel");
     assert!(!open(&h));
 }
+
+#[test]
+fn the_3d_views_bar_has_its_detail_level_as_revits_does() {
+    let mut h = app(BOX);
+    shortcut(&mut h, "3D");
+    assert_eq!(h.state().sheet, Sheet::View3D);
+    pick(&mut h, Role::Button, "Detail Level");
+    press(&mut h, "Coarse");
+    let m = &h.state().session.model;
+    let view = m.default_3d().expect("the default 3D view, made as its detail level is set");
+    assert_eq!(bimcraft_core::graphics::Look::of(m, view).detail(), bimcraft_core::graphics::Detail::Coarse);
+}

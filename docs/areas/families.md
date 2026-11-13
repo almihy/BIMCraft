@@ -135,7 +135,7 @@ numeric is checked finite and within `MAX_COORD`; a label's height and a dot's r
 
 `Model::component_marks` places a component's marks (mirrored, then turned and moved) and `Model::opening_marks` an opening's,
 and `render::marks` draws them: lines in the category's pen (`BY_CATEGORY`, so Object Styles and Visibility/Graphics apply), dots
-as filled discs. Coarse detail leaves them out. A label's anchor is placed with the component (turned, mirrored, moved) but its
+as filled discs. Coarse detail leaves them out, unless a symbol's `show` says Coarse (below). A label's anchor is placed with the component (turned, mirrored, moved) but its
 letters never are: they are always drawn at 0 degrees in the view, left to right with a horizontal baseline, however the component
 stands (the simplest rule; no flipping by quadrant). Symbols are annotation of the component's level: they draw in that level's
 plan and its ceiling plan whatever height the component's forms reach (a ceiling light shows its symbols in the floor plan) and
@@ -145,6 +145,51 @@ all four parts. Library parts: a symbol of any kind has its own id and GUID (`Ha
 `text` or `dot` symbols, or symbols on a category other than a door or a window, is read by an older version only with them left
 out or refused, so the file format is unchanged.
 
+
+## Families from Revit
+
+A family exported from Revit by Arqiflow's add-in (the design: Arqiflow's `docs/superpowers/specs/2026-11-13-revit-families-design.md`,
+section 1) is a BIMCraft family with fields a hand-made one leaves out, all optional and written only when not the default.
+Revit's own parametric sketches aren't readable, so its geometry comes baked per type: a form or a symbol with `types` is
+built only in those (`Form::of_type`, `Symbol::of_type`), so `Family::pieces`, `marks` and `shapes` take the type name
+(`all_marks` checks every symbol of a type), and a family of many per-type forms builds only the type's own (`MAX_FORMS`
+and `MAX_SYMBOLS` 4096, `MAX_PARAMETERS` 256, a symbol's line `MAX_SYMBOL_POINTS` 1024). `like: {new: old}` on `family`
+gives a new type the old one's forms and symbols (`Family::type_like`; Type Properties' Duplicate sends it, and the Family
+Editor's Duplicate, rename and Delete Type do the same to its lists); `rename_type` renames the type in the lists
+(`Library::move_entry`, `Family::rename_type`) and a type taken away (`types: {name: null}`, `delete_type`, purge) takes
+itself out of them, a form or symbol of it alone going with it (`Family::forget_type`), never left of no type and so of
+every one. A form's `show` is Revit's Visibility Settings: the detail levels and the views that draw it, carried on its
+`Piece` and, in the 3D scene, on its `Solid::Mesh` and every `Tri` as a `view3d::Vis` (its bits and the family's x axis in
+plan). A plan draws a component's form when `show.plan` and its detail level say so (`Piece::in_plan`), a family opening's
+at Coarse only where its `show` says Coarse (one without keeps the old rule, only its gap); a section or an elevation
+draws one by `show.front` where it looks along the family's y within 45° and `show.side` along its x, at its detail level;
+a 3D view by its own detail level, which a 3D view now has as Revit's do (`detail {view: "{3D}"}`, the view control bar;
+Fine by default, as every BIMCraft view); IFC exports what Fine draws. `Look` carries the view's detail level and, for a
+section or an elevation, the way it looks, and `Look::draws` is the one test a triangle passes (the picture, the section's
+occluders, the card's mesh, whose placed copies fall back to triangles of their own where a copy has one not drawn). A
+symbol's `view` is `plan`, `front` ((x, z) in the family's plane y = 0) or `side` ((y, z) in x = 0); `Model::elevation_lines`
+places a component's or an opening's front or side lines in the model as its forms are (mirrored, flipped, turned), and
+`render::elevation_symbols` draws them in the sections and elevations that see them past their line and within their
+depth, in the category's projection pen, so the back or the left sees them mirrored (a door's Elevation Swing); they are
+not hidden behind what stands in front of them. A symbol's `show` gives its detail levels, Coarse among them; one without
+is drawn at Medium and Fine, as before. A mesh form's `outline` is its silhouette from above as the exporter traced it, in
+place of the hull. A door's or window's `cut` (formulas over its parameters) is the wall's opening where it isn't
+`Width` by `Height` (a frame outside the leaf): `OpeningType::hole`, worked out and never stored, read by `cut()` for the
+wall's hole, its notches, the plan's gap and IFC's opening element, while the type's width and height stay the leaf's.
+`flips` says which of Revit's flip controls it has, and the canvas shows only those arrows (`flip.rs`); `flip` and Space
+flip it all the same, as Revit's API does. `source` (the firm library's entry and version, the application, its category,
+the file), `host`, `subcategories` and a form's or symbol's `subcategory` are stored, checked (`Family::check_described`,
+`check_part`) and shown, never acted on: the `family` list gives each family's `source`, and the Family Editor shows it
+read only. A `text` parameter holds words (`Val::Text`), shown in Properties and in schedules (a door's or window's
+schedule lists its families' parameters as a component's does), which no formula reads; a parameter's `unit` is said
+beside a number and its `group` is the bar Properties and Type Properties list it under. `family {path}` and the inline
+command take `materials: {name: {color, transparency?}}`, added where the project has none of that name, and the whitelist
+of a file's keys takes all of the above; a caller's `source` is laid over the file's. A project is written as format 21
+only when a family uses `types`, `show`, a symbol's `view`, `outline`, `cut` or a text parameter, which a build that reads
+up to 20 would misread (`Model::written_format`); the rest an older build leaves out. `family_library` lists BIMCraft's own
+families (the starter set, named in the project's language, and the symbol sets) for Load Family, and replies one's
+definition as a family file holds it, at no undo step. The sample `crates/core/testdata/families/sample-two-type-flush-door.json`
+(original) has all of it; `family_revit_tests.rs` drives it.
 
 ## Symbol sets
 

@@ -1349,9 +1349,11 @@ other_files(
         "Load Family",
         &[],
         "{name?, category?: furniture|casework|plumbing|lighting|generic|door|window, parameters?: [{name, kind?: length|number|\
-         angle|yesno|material, instance?, value?, formula?}], types?: {type: {parameter: value}}, forms?: [{plane?: xy|xz|yz, \
+         angle|yesno|material|text, instance?, value?, formula?, unit?, group?}], types?: {type: {parameter: value}}, forms?: [{plane?: xy|xz|yz, \
          profile?: [[a, b], …], circle?: {centre: [a, b], radius}, axis?: [[a, b], [a, b]], from?, to, material?, visible?, \
-         void?}], symbols?: [{line?: [[x, y], …] | arc?: {centre: [x, y], radius, from?, to} | text?: {at: [x, y], height, value, align?: left|center|right} | dot?: {centre: [x, y], radius}, visible?}], form?: {id | guid, …a \
+         void?, show?: {coarse?, medium?, fine?, plan?, front?, side?}, types?: [type, …], outline?: [[x, y], …], subcategory?}], \
+         symbols?: [{line?: [[x, y], …] | arc?: {centre: [x, y], radius, from?, to} | text?: {at: [x, y], height, value, align?: left|center|right} | dot?: {centre: [x, y], radius}, visible?, \
+         view?: plan|front|side, show?: {coarse?, medium?, fine?}, types?: [type, …], subcategory?}], form?: {id | guid, …a \
          form's fields}, symbol?: {id | guid, …a symbol's fields}, delete_form?: [id | guid, …], delete_symbol?: [id | guid, …], \
          operation?: swing|double-swing|sliding|double-sliding|folding|fixed (a door's or window's, for IFC and schedules), \
          kind?: which fixture or fitting it is, for IFC's predefined type (plumbing: wc|lav|sink|laundry|shower|bath|bidet|urinal; \
@@ -1360,7 +1362,10 @@ other_files(
          opened from IFC remembers: `IFCPLATE`, `CURTAIN_PANEL`; one IFC4 lacks goes out as a proxy that names it), \
          connectors?: [{kind: power|switch|pipe|data|earthing, name?, system?: power-balanced|power-unbalanced|switch, \
          domain?: cold|hot|waste|vent|storm|gas, flow?: in|out|both, at?: [x, y, z], direction?: [x, y, z], size?, poles?: 1-3, \
-         voltage?, load_va?, power_factor?, classification?}], rename?, delete?: true, dry_run?, path?, save?} a family of \
+         voltage?, load_va?, power_factor?, classification?}], source?: {library?, version?, app?, category?, file?}, host?: \
+         level|wall|floor|ceiling|roof|face|none, subcategories?: [{name, color?: [r, g, b], material?}], cut?: {width, height}, \
+         flips?: {hand?, facing?}, materials?: {name: {color: [r, g, b], transparency?}}, like?: {new type: type}, rename?, \
+         delete?: true, dry_run?, path?, save?} a family of \
          the project's, BIMCraft's own parametric component: created, changed, read, or loaded from the .json file at `path` (a \
          family as `inspect` shows it, with its `name`). Without `name` it lists the project's families, each its category and \
          how many types, forms and symbols it has; with only a `name` it reads one — its definition, each of its types' \
@@ -1407,7 +1412,22 @@ other_files(
          turned or mirrored; `{Parameter Name}` in its \
          `value` is replaced by that parameter's value (a name the family lacks is refused), up to 256 characters. A `dot` is \
          a solid disc in ink of a radius above zero. Symbols draw in the plan and ceiling plan of the component's level whatever height \
-         it has, and on no other level's. IFC leaves symbols out",
+         it has, and on no other level's. IFC leaves symbols out. What a family exported from Revit brings, all optional: a form or a \
+         symbol of some `types` only (none, every type: a Revit family's geometry comes baked per type), Revit's Visibility \
+         Settings in `show` (a form: the detail levels and the views that draw it, `plan` a plan or ceiling plan, `front` a \
+         section or elevation looking along the family's y within 45°, `side` along its x, a 3D view by its own detail level, \
+         IFC as Fine; a symbol: its detail levels, Coarse among them, where one without `show` is drawn at Medium and Fine), a \
+         symbol's `view` (`front`: its points are (x, z) seen from the front, looking along +y; `side`: (y, z) seen from +x: \
+         drawn in sections and elevations along the family's y or x, mirrored from the back or the left: a door's Elevation \
+         Swing, a line or an arc), a mesh's traced `outline` seen from above in place of its hull, a door's or window's `cut` \
+         (the wall's opening, formulas over its parameters, where it isn't Width by Height), `flips` (the flip arrows it has; \
+         `flip` works regardless), `host`, `subcategories` and a form's or symbol's `subcategory`, `source` (kept and shown, \
+         never acted on: `family` lists it for each family), a `text` parameter (words a schedule shows, which no formula \
+         reads), a parameter's `unit` and `group` (Properties and Type Properties list it under its group). `materials` adds \
+         each the project has none of by that name (the project's own wins); `like` gives a type made in `types` the forms and \
+         symbols of the type it was made like (Type Properties' Duplicate), and a type renamed (`rename_type`) or taken away \
+         is renamed in or taken out of the forms' and symbols' `types` (what was of it alone goes with it). A project using \
+         `types`, `show`, a symbol's `view`, `outline`, `cut` or a text parameter is written as format 21",
         family,
         Files::Conditional,
     )
@@ -11027,29 +11047,28 @@ fn family(s: &mut Session, p: &Value) -> R {
         let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         let name = p.get("name").filter(|v| !v.is_null()).cloned().or_else(|| fields.remove("name")).unwrap_or(json!(stem));
         // Only the family it holds: what a file says to rename or delete isn't for it to say.
-        let mut family: Map<String, Value> =
-            [
-                "category",
-                "kind",
-                "ifc",
-                "parameters",
-                "types",
-                "identity",
-                "forms",
-                "symbols",
-                "operation",
-                "connectors",
-                "source",
-                "host",
-                "subcategories",
-                "cut",
-                "flips",
-                "materials",
-                "like",
-            ]
-            .into_iter()
-                .filter_map(|k| fields.remove(k).map(|v| (k.to_string(), v)))
-                .collect();
+        let mut family: Map<String, Value> = [
+            "category",
+            "kind",
+            "ifc",
+            "parameters",
+            "types",
+            "identity",
+            "forms",
+            "symbols",
+            "operation",
+            "connectors",
+            "source",
+            "host",
+            "subcategories",
+            "cut",
+            "flips",
+            "materials",
+            "like",
+        ]
+        .into_iter()
+        .filter_map(|k| fields.remove(k).map(|v| (k.to_string(), v)))
+        .collect();
         family.insert("name".into(), name);
         // `dry_run` is the caller's, not the file's: a dry run of a file loads nothing.
         if let Some(dry) = p.get("dry_run") {
@@ -11260,7 +11279,8 @@ fn family(s: &mut Session, p: &Value) -> R {
         f.host = if v.is_null() { Default::default() } else { serde_json::from_value(v.clone()).map_err(|e| field("host", e))? };
     }
     if let Some(v) = p.get("subcategories") {
-        f.subcategories = if v.is_null() { Vec::new() } else { serde_json::from_value(v.clone()).map_err(|e| field("subcategories", e))? };
+        f.subcategories =
+            if v.is_null() { Vec::new() } else { serde_json::from_value(v.clone()).map_err(|e| field("subcategories", e))? };
     }
     match p.get("cut") {
         None => {}

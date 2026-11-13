@@ -1910,7 +1910,8 @@ impl BimApp {
                                 ui.label(RichText::new(format!("{}{unit}", shown(kind, &val, units))).color(pal().muted));
                             }
                             Holds::Text => {
-                                if let Some(typed) = self.field(ui, id, &p.name, val.as_str().unwrap_or_default().to_string(), name.id, "") {
+                                if let Some(typed) = self.field(ui, id, &p.name, val.as_str().unwrap_or_default().to_string(), name.id, "")
+                                {
                                     change = Some((p.name.clone(), Ok(json!(typed))));
                                 }
                             }

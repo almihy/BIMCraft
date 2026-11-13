@@ -479,7 +479,14 @@ impl Solid {
                 for [a, b, c] in geom::triangulate(ring) {
                     let pt = |i: usize| ring.get(i).copied().unwrap_or_default();
                     out.push(Tri { p: [at(pt(a), top), at(pt(b), top), at(pt(c), top)], owner, color, tex, curve: None, vis: Vis::ALWAYS });
-                    out.push(Tri { p: [at(pt(a), bottom), at(pt(c), bottom), at(pt(b), bottom)], owner, color, tex, curve: None, vis: Vis::ALWAYS });
+                    out.push(Tri {
+                        p: [at(pt(a), bottom), at(pt(c), bottom), at(pt(b), bottom)],
+                        owner,
+                        color,
+                        tex,
+                        curve: None,
+                        vis: Vis::ALWAYS,
+                    });
                 }
                 for (a, b) in geom::ring_edges(ring) {
                     let (a0, b0, a1, b1) = (at(a, bottom), at(b, bottom), at(a, top), at(b, top));
@@ -2506,7 +2513,8 @@ impl Scene {
         let mut hit = vec![u32::MAX; w * h];
         for tinted in [false, true] {
             for &(i, [a, b]) in self.edges() {
-                let Some(owner) = self.tris.get(i).filter(|t| look.draws(t)).map(|t| t.owner).filter(|o| tints.contains_key(o) == tinted) else {
+                let Some(owner) = self.tris.get(i).filter(|t| look.draws(t)).map(|t| t.owner).filter(|o| tints.contains_key(o) == tinted)
+                else {
                     continue;
                 };
                 let Rgb(r, g, bl) = tints.get(&owner).copied().unwrap_or_else(|| look.edge(owner, EDGE));
@@ -2637,7 +2645,8 @@ impl Scene {
         // What the view sees through is drawn over what lies behind it, after the opaque surfaces: the
         // nearest of them at each pixel, where nothing opaque is nearer. (Not in a section's hidden line.)
         let see_through = |t: &Tri| !flat && t.alpha(look) > 0;
-        let shown = |t: &Tri| ((plain || look.shows(t.owner)) && look.draws_vis(t.vis)) && !(clip.is_some() && self.masses.contains(&t.owner));
+        let shown =
+            |t: &Tri| ((plain || look.shows(t.owner)) && look.draws_vis(t.vis)) && !(clip.is_some() && self.masses.contains(&t.owner));
         let mut depth = vec![f32::NEG_INFINITY; w * h];
         let mut hit = vec![u32::MAX; w * h];
         let mut curve_lit = vec![0.0; w * h];

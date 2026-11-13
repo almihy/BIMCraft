@@ -73,7 +73,16 @@ fn cylinder(n: usize, r: f64, h: f64) -> Vec<[P3; 3]> {
 
 #[test]
 fn a_meshs_facets_that_turn_little_read_as_one_surface_and_its_creases_keep_their_edges() {
-    let mesh = |owner, tris: Vec<[P3; 3]>| Solid::Mesh { owner, color: EDGE, tex: 0, caps: tris.len(), round: false, cut: false, tris, vis: Vis::ALWAYS };
+    let mesh = |owner, tris: Vec<[P3; 3]>| Solid::Mesh {
+        owner,
+        color: EDGE,
+        tex: 0,
+        caps: tris.len(),
+        round: false,
+        cut: false,
+        tris,
+        vis: Vis::ALWAYS,
+    };
     // Each cylinder's planes: its sides one surface where they turn 20° or less at their edges,
     // else a plane to each side; and a plane to each cap, however many triangles make it.
     for (n, planes_of) in [(4, 6), (8, 10), (16, 18), (20, 3), (24, 3), (64, 3)] {
@@ -110,7 +119,8 @@ fn a_meshs_facets_that_turn_little_read_as_one_surface_and_its_creases_keep_thei
 fn a_curves_corners_take_the_normals_of_the_surface_they_are_on() {
     let n = 24;
     let mut out = Vec::new();
-    Solid::Mesh { owner: 1, color: EDGE, tex: 0, caps: 0, round: false, cut: false, tris: cylinder(n, 200.0, 450.0), vis: Vis::ALWAYS }.tris(&mut out);
+    Solid::Mesh { owner: 1, color: EDGE, tex: 0, caps: 0, round: false, cut: false, tris: cylinder(n, 200.0, 450.0), vis: Vis::ALWAYS }
+        .tris(&mut out);
     let normals = corner_normals(&out);
     // Its caps are flat faces: none. Each corner of its sides points straight out from the axis, the top
     // ones as the bottom ones (two triangles meet at some corners, one at others).
