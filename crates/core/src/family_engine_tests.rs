@@ -303,3 +303,49 @@ fn a_project_whose_family_follows_ends_or_names_what_a_void_cuts_is_written_as_2
         assert_eq!(written(definition.clone()), 24, "{definition}");
     }
 }
+
+/// What the `family` command refuses of a family that would break its limits: a check's opening, a family nesting itself.
+#[test]
+fn the_family_command_refuses_a_checks_unusable_opening_and_a_family_that_nests_itself() {
+    let mut s = Session::new();
+    let e = s
+        .execute(
+            "family",
+            &json!({"name": "Odd Door", "category": "door", "types": {"900": {}},
+                    "parameters": [{"name": "Width", "kind": "length", "value": 900}, {"name": "Height", "kind": "length", "value": 2100}],
+                    "check": {"900": {"matched": false, "opening": [-5, 2100, 0]}}}),
+        )
+        .unwrap_err();
+    assert!(e.contains("opening isn't a usable size"), "{e}");
+    assert!(!s.model.families.contains_key("Odd Door"));
+    let e = s
+        .execute("family", &json!({"name": "Loop", "category": "generic", "types": {"A": {}}, "nested": [{"family": "Loop", "type": "A"}]}))
+        .unwrap_err();
+    assert!(e.contains("nests itself"), "{e}");
+    assert!(!s.model.families.contains_key("Loop"));
+}
+
+/// A traced outline that crosses itself is cleared as the family is loaded, not tested at every draw.
+#[test]
+fn a_mesh_forms_outline_that_crosses_itself_is_cleared_as_the_family_loads() {
+    let tri = json!([[0, 0, 0], [100, 0, 0], [0, 100, 100]]);
+    let ring = |swap: bool| {
+        let n = 3000;
+        let mut r: Vec<[f64; 2]> =
+            (0..n).map(|k| (k as f64 * std::f64::consts::TAU / n as f64).sin_cos()).map(|(s, c)| [500.0 * c, 500.0 * s]).collect();
+        if swap {
+            r.swap(1000, 1001);
+        }
+        r
+    };
+    let mut s = Session::new();
+    for (name, swap) in [("Crossing", true), ("Clean", false)] {
+        s.execute(
+            "family",
+            &json!({"name": name, "category": "generic", "types": {"A": {}}, "forms": [{"mesh": [tri], "outline": ring(swap)}]}),
+        )
+        .unwrap();
+    }
+    assert!(s.model.families["Crossing"].forms[0].outline.is_empty());
+    assert_eq!(s.model.families["Clean"].forms[0].outline.len(), 3000);
+}
