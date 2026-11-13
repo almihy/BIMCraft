@@ -221,14 +221,23 @@ impl Cad {
         Cad::drawn(source, dxf, bytes)
     }
 
+    /// A page's lines its [`packed`] `bytes` hold, already read back as `dxf`.
+    pub fn of_unpacked(source: &str, dxf: &Arc<Dxf>, bytes: Vec<u8>) -> Cad {
+        Cad::drawn_shared(source, Arc::clone(dxf), bytes)
+    }
+
     fn drawn(source: &str, dxf: Dxf, bytes: Vec<u8>) -> Cad {
+        Cad::drawn_shared(source, Arc::new(dxf), bytes)
+    }
+
+    fn drawn_shared(source: &str, dxf: Arc<Dxf>, bytes: Vec<u8>) -> Cad {
         let (bulk, far) = bulk(&dxf);
         Cad {
             source: source.chars().take(crate::model::MAX_TEXT).collect(),
             path: None,
             bytes: Arc::new(bytes),
             lines: true,
-            dxf: Arc::new(dxf),
+            dxf,
             bulk,
             far,
             packed: Arc::default(),

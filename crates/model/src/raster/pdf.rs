@@ -807,7 +807,9 @@ fn stretches(t: Affine) -> (f64, f64) {
 /// A stroke's dashes, mm (its dash array times `k`): on, off, on, …, an odd list gone round twice as PDF says, begun where the
 /// page's phase begins them (the list turned to start there: a dash cut short first, its rest last). None when it is solid.
 fn dash_of(s: &StrokeProps, k: f64) -> Option<Vec<f64>> {
-    let mut a: Vec<f64> = s.dash_array.iter().take(64).map(|x| f64::from(*x) * k).collect();
+    // Doubled when odd and turned to its phase, a dash of this many stays within what a drawing's linetype holds.
+    const MOST: usize = crate::cad::packed::MAX_DASHES / 2 - 2;
+    let mut a: Vec<f64> = s.dash_array.iter().take(MOST).map(|x| f64::from(*x) * k).collect();
     if a.is_empty() || !a.iter().all(|x| x.is_finite() && *x >= 0.0) {
         return None;
     }

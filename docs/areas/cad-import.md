@@ -227,7 +227,7 @@ Images lists them): the file's name, the page and the resolution, its size in mm
 Revit takes every raster image), the scale the page states, its pixels as a PNG (grey when they are) and a PDF's vectors as a
 `Cad` held packed (`cad/packed.rs`: its layers, linetypes, polylines, fills and texts, every point to a micron as the step
 from the one before, a few bytes each, deflated in the file; a dense A0 sheet's million and a half points are a few
-megabytes, where their DXF would be forty; lines that can't be read back are said in the notes). The PDF itself is not kept. `MAX_PIXELS` (36 million) caps an
+megabytes, where their DXF would be forty). What packs them and what reads them back go by the same limits (`MAX_LAYERS`, `MAX_LINETYPES`, `MAX_DASHES`, `MAX_RINGS`, `MAX_WEIGHT`, a text's numbers within 10⁸ mm), so whatever is written reads back: one stray value (a dash of 33 entries, a text a billion points tall) is brought within them, never the page lost, as `whatever_is_packed_reads_back` holds over random drawings. `read_pdf` reads the lines back before it calls the page drawn; a page whose lines still don't read back (broken on the way from a worker) shows as a picture of the whole page, never its raster images alone, as its notes say. The PDF itself is not kept. `MAX_PIXELS` (36 million) caps an
 image: a page that would pass it at the resolution asked comes in at the finest that fits, said in the notes. Its pixels are
 held in the channels they need (grey, RGB or RGBA), so a drawing's grey page holds a byte a pixel, encoded to PNG row by row
 and decoded again only when first drawn. `MAX_TYPES` images and `MAX_HELD` (256 MB) of PNG among them are the most a project

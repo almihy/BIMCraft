@@ -551,28 +551,37 @@ impl ImageType {
     }
 
     /// A page read from a PDF ([`read_pdf`], here or apart), known by `source`; and notes on what was left out of it.
+    /// A page drawn from lines that don't read back (handed over from where it was read, broken on the way) shows as the small
+    /// picture of the whole of it, never as its raster images alone.
     pub fn from_pdf(source: &str, read: &PdfRead) -> (ImageType, Vec<String>) {
         let mut notes = read.notes.clone();
-        let lines = read.lines.as_ref().and_then(|lines| match Cad::of_lines(source, lines.clone()) {
-            Ok(cad) => Some(cad),
-            Err(e) => {
+        let lines = read.lines.as_ref().and_then(|lines| {
+            let cad = match &read.unpacked {
+                Some(d) => Ok(Cad::of_unpacked(source, d, lines.clone())),
+                None => Cad::of_lines(source, lines.clone()),
+            };
+            cad.map_err(|e| {
                 notes.push(format!(
-                    "page {}'s lines couldn't be kept ({e}): it shows as a picture only, with nothing to snap to",
+                    "page {}'s lines couldn't be kept ({e}): it shows as a picture of the whole page, with nothing to snap to",
                     read.page
-                ));
-                None
-            }
+                ))
+            })
+            .ok()
         });
-        let pixels = read.level.clone().map_or_else(Arc::default, |l| Arc::new(OnceLock::from(Some(l))));
         let drawn = read.drawn && lines.is_some();
+        // Its pixels: what was read, or, for a page drawn from lines it lost, the small picture of all of it.
+        let (png, px, pixels) = match (&read.thumb, read.drawn && !drawn) {
+            (Some(thumb), true) => (Arc::clone(thumb), png_size(thumb).unwrap_or((1, 1)), Arc::default()),
+            _ => (Arc::clone(&read.png), read.px, read.level.clone().map_or_else(Arc::default, |l| Arc::new(OnceLock::from(Some(l))))),
+        };
         let t = ImageType {
             source: source.chars().take(MAX_TEXT).collect(),
             page: u32::try_from(read.page).ok(),
             dpi: read.dpi,
             size: read.size,
             scale: read.scale,
-            png: Arc::clone(&read.png),
-            px: read.px,
+            png,
+            px,
             pixels,
             lines,
             drawn,
@@ -690,6 +699,8 @@ pub struct PdfRead {
     picture: Option<[f64; 4]>,
     /// Its pixels, when it was read here: the image needn't decode its PNG again.
     level: Option<Arc<Pixels>>,
+    /// Its lines read back, when it was read here: they needn't be read back again.
+    unpacked: Option<Arc<crate::dxf::Dxf>>,
 }
 
 impl std::fmt::Debug for PdfRead {
@@ -788,6 +799,7 @@ impl PdfRead {
             thumb: thumb.map(Arc::new),
             picture,
             level: None,
+            unpacked: None,
         })
     }
 }
@@ -817,8 +829,15 @@ pub fn read_pdf(bytes: Vec<u8>, page: usize, dpi: u32) -> Result<PdfRead, String
         ));
     }
     let vectors = doc.vectors(page)?;
+    // Its lines packed, and read back as a project will read them: a page whose lines don't read back is a picture of it all.
+    let lines = (!vectors.is_empty()).then(|| crate::cad::packed::pack(&vectors.drawing()));
+    let (unpacked, unread) = match lines.as_deref().map(crate::cad::packed::unpack) {
+        Some(Ok(d)) => (Some(Arc::new(d)), None),
+        Some(Err(e)) => (None, Some(e)),
+        None => (None, None),
+    };
     // Drawn from its lines when they hold all it draws but its raster images.
-    let whole = vectors.left_out == 0 && vectors.cmaps.is_empty() && vectors.unlettered == 0;
+    let whole = vectors.left_out == 0 && vectors.cmaps.is_empty() && vectors.unlettered == 0 && unread.is_none();
     let drawn = !vectors.is_empty() && whole;
     // The page's pixels in the channels they need, taken straight from what hayro drew, which is then let go: of a page
     // drawn from its lines, its raster images only, on nothing, and none when it has none.
@@ -866,6 +885,8 @@ pub fn read_pdf(bytes: Vec<u8>, page: usize, dpi: u32) -> Result<PdfRead, String
             pdf::MAX_SEGMENTS,
             vectors.left_out
         ));
+    } else if let Some(e) = &unread {
+        notes.push(format!("page {page}'s lines couldn't be kept ({e}): it shows as a picture of the whole page, with nothing to snap to"));
     } else if !vectors.is_empty() && !whole {
         notes.push(format!(
             "page {page} shows as a picture of the whole page, so its layers can't be shown and hidden one by one (its lines don't \
@@ -889,7 +910,8 @@ pub fn read_pdf(bytes: Vec<u8>, page: usize, dpi: u32) -> Result<PdfRead, String
             vectors.cmaps.join(", ")
         ));
     }
-    let lines = (!vectors.is_empty()).then(|| crate::cad::packed::pack(&vectors.drawing()));
+    // Lines that don't read back are none: nothing to snap to.
+    let lines = lines.filter(|_| unread.is_none());
     drop(vectors);
     Ok(PdfRead {
         pages: doc.pages(),
@@ -905,6 +927,7 @@ pub fn read_pdf(bytes: Vec<u8>, page: usize, dpi: u32) -> Result<PdfRead, String
         thumb,
         picture,
         level: Some(Arc::new(Pixels::new(level, !drawn))),
+        unpacked,
     })
 }
 
@@ -1082,13 +1105,42 @@ mod tests {
     }
 
     #[test]
-    fn a_page_whose_lines_cant_be_kept_says_so() {
+    fn a_page_whose_lines_cant_be_kept_says_so_and_shows_all_of_it() {
         let mut read = read_pdf(page(), 1, 72).unwrap();
         assert!(read.lines.is_some());
+        // Broken on the way from where it was read.
         read.lines = Some(b"BCL1\x05".to_vec());
+        read.unpacked = None;
         let (t, notes) = ImageType::from_pdf("p.pdf", &read);
-        assert!(t.lines().is_none());
+        assert!(t.lines().is_none() && !t.drawn());
         assert!(notes.iter().any(|n| n.contains("lines couldn't be kept")), "{notes:?}");
+        // Its picture is of the whole page, the line across its middle in it: never an empty one.
+        assert_eq!(t.covers(), whole());
+        let p = t.levels().unwrap();
+        let l = &p.levels[0];
+        let dark = |y: u32| (0..l.w).filter(|x| l.at(*x, y)[..3].iter().all(|c| *c < 128) && l.at(*x, y)[3] > 128).count();
+        let middle = (0..l.h).map(dark).max().unwrap_or(0);
+        assert!(middle > l.w as usize / 2, "the line across the middle: {middle} of {} px", l.w);
+        assert_eq!(dark(l.h / 5), 0);
+    }
+
+    #[test]
+    fn a_stray_value_in_a_page_leaves_out_only_itself() {
+        // A dash of 33 entries, a text a billion points tall, and a solid line beside them: all its lines are kept.
+        let dashes = (1..=33).map(|i| i.to_string()).collect::<Vec<_>>().join(" ");
+        let content = format!(
+            "0 0 0 RG 1 w [{dashes}] 3 d 10 20 m 90 20 l S [] 0 d 10 50 m 90 50 l S BT /F1 1 Tf 1000000000 0 0 1000000000 50 50 Tm (HUGE) Tj ET \
+             BT /F1 10 Tf 1 0 0 1 10 80 Tm (Note) Tj ET"
+        );
+        let read = read_pdf(pdf::sample(&content, [100.0, 100.0], None), 1, 72).unwrap();
+        assert!(read.drawn, "{:?}", read.notes);
+        let (t, notes) = ImageType::from_pdf("p.pdf", &read);
+        assert!(t.drawn() && !notes.iter().any(|n| n.contains("couldn't")), "{notes:?}");
+        let d = t.lines().unwrap().dxf();
+        let lines = d.entities.iter().filter(|e| matches!(e.shape, crate::dxf::Shape::Polyline { .. })).count();
+        assert_eq!(lines, 2, "{:?}", d.entities);
+        assert!(d.linetypes.iter().all(|l| l.dashes.len() <= crate::cad::packed::MAX_DASHES));
+        assert!(d.entities.iter().any(|e| matches!(&e.shape, crate::dxf::Shape::Text { text, .. } if text == "Note")));
     }
 
     #[test]
