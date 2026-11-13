@@ -1901,7 +1901,7 @@ impl Family {
                 .and_then(|v| {
                     self.all_marks(t, &v)?;
                     self.cut_size(&v)?;
-                    self.build(t, &v, &mut read, &mut cuts, Build { snapshot: self.draws_snapshot(t), others: &|_| None, depth: 0 })
+                    self.build(t, &v, &mut read, &mut cuts, Build { snapshot: self.draws_snapshot(t), others: &|_| None, depth: 0, spent: &std::cell::Cell::new(0) })
                 })
                 .map_err(|e| format!("type `{t}`: {e}"))?;
             built += pieces.iter().map(|p| p.tris.len()).sum::<usize>();
@@ -2152,7 +2152,7 @@ impl Family {
     /// [`Family::pieces`] with its nested parts, the families they are of found by `others` (the project's).
     pub fn pieces_with(&self, type_name: &str, values: &BTreeMap<String, Val>, others: Others) -> Result<Vec<Piece>, String> {
         let snapshot = self.draws_snapshot(type_name);
-        self.build(type_name, values, &mut HashMap::new(), &mut csg::Meter::default(), Build { snapshot, others, depth: 0 })
+        self.build(type_name, values, &mut HashMap::new(), &mut csg::Meter::default(), Build { snapshot, others, depth: 0, spent: &std::cell::Cell::new(0) })
     }
 
     /// The marks of its visible symbols in `view` and type `type_name`, sized by `values`, in its own axes, drawn at detail
@@ -2325,7 +2325,11 @@ impl Family {
             _ => DEFAULT_WALL,
         };
         let inner_values = inner.values_given(&n.type_name, &given, wall)?;
-        let deeper = Build { snapshot: inner.draws_snapshot(&n.type_name), others: how.others, depth: how.depth + 1 };
+        how.spent.set(how.spent.get() + 1);
+        if how.spent.get() > MAX_NESTED {
+            return Err(format!("it builds more than {MAX_NESTED} nested parts in all"));
+        }
+        let deeper = Build { snapshot: inner.draws_snapshot(&n.type_name), others: how.others, depth: how.depth + 1, spent: how.spent };
         let pieces = inner.build(&n.type_name, &inner_values, &mut HashMap::new(), cuts, deeper)?;
         let at = [number(&n.at[0], values, read)?, number(&n.at[1], values, read)?, number(&n.at[2], values, read)?];
         let (sin, cos) = number(&n.rotation, values, read)?.to_radians().sin_cos();
@@ -2619,10 +2623,12 @@ pub type Others<'o> = &'o dyn Fn(&str) -> Option<&'o Family>;
 
 /// How [`Family::build`] builds: Revit's own forms or the parametric ones, the families nested parts are of, how deep.
 #[derive(Clone, Copy)]
-struct Build<'o> {
+struct Build<'o, 's> {
     snapshot: bool,
     others: Others<'o>,
     depth: usize,
+    /// Nested parts built so far, of every depth: at most [`MAX_NESTED`].
+    spent: &'s std::cell::Cell<usize>,
 }
 
 /// How low and how high `tris` reach.

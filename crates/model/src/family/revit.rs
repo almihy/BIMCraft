@@ -443,7 +443,7 @@ impl Reader<'_> {
             SymbolView::Side => [1, 2],
         };
         let show = def.get("show").and_then(|s| serde_json::from_value::<Show>(s.clone()).ok());
-        let levels = show.map(|s| Levels { coarse: s.coarse, medium: s.medium, fine: s.fine }).filter(|l| *l != Levels::default());
+        let levels = show.map(|s| Levels { coarse: s.coarse, medium: s.medium, fine: s.fine });
         let base = Symbol {
             view,
             show: levels,

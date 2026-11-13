@@ -131,6 +131,8 @@ mod dimension_tests;
 #[cfg(test)]
 mod door_tests;
 #[cfg(test)]
+mod family_parametric_tests;
+#[cfg(test)]
 mod family_revit_tests;
 #[cfg(test)]
 mod flip_tests;

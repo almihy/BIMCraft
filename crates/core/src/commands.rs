@@ -11060,6 +11060,8 @@ fn family(s: &mut Session, p: &Value) -> R {
             }
         }
         let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        // An export package is `<family name>.arqiflow-family.json`.
+        let stem = stem.strip_suffix(".arqiflow-family").map(str::to_string).unwrap_or(stem);
         let name = p.get("name").filter(|v| !v.is_null()).cloned().or_else(|| fields.remove("name")).unwrap_or(json!(stem));
         // Only the family it holds: what a file says to rename or delete isn't for it to say.
         let mut family: Map<String, Value> = [

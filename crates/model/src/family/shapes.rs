@@ -183,6 +183,13 @@ pub(crate) fn along(path: &[P3], section: &[P3], section_end: &[P3]) -> Result<V
         }
         e
     };
+    // The profile turned counter-clockwise about the path, as the sides and the caps take it.
+    let turn: P3 = (0..start.len()).map(|i| cross(start[i], start[(i + 1) % start.len()])).fold([0.0; 3], add);
+    let (start, end) = if dot(turn, t0) < 0.0 {
+        (start.into_iter().rev().collect::<Vec<P3>>(), end.into_iter().rev().collect::<Vec<P3>>())
+    } else {
+        (start, end)
+    };
     // How far along the path each corner is, 0 to 1.
     let lengths: Vec<f64> = (0..legs).map(|i| dot(sub(path[(i + 1) % n], path[i]), dirs[i])).collect();
     let total: f64 = lengths.iter().sum();
@@ -368,6 +375,12 @@ mod tests {
         let end = [[100.0, -10.0, -10.0], [100.0, 10.0, -10.0], [100.0, 10.0, 10.0], [100.0, -10.0, 10.0]];
         let v = volume(&along(&[[0.0, 0.0, 0.0], [100.0, 0.0, 0.0]], &section, &end).unwrap());
         assert!((v - 100.0 / 3.0 * (100.0 + 400.0 + 200.0)).abs() < 1.0, "{v}");
+        // A quarter arc of radius 500, a 50 x 50 profile: Pappus, within the chords' share.
+        let path = bent3(vec![[500.0, 0.0, 0.0], [0.0, 500.0, 0.0]], &[(0, [0.0, 0.0, 0.0], [0.0, 0.0, 1.0], false)], false);
+        let section = [[475.0, 0.0, -25.0], [525.0, 0.0, -25.0], [525.0, 0.0, 25.0], [475.0, 0.0, 25.0]];
+        let v = volume(&along(&path, &section, &[]).unwrap());
+        let want = 2500.0 * std::f64::consts::FRAC_PI_2 * 500.0;
+        assert!((v - want).abs() < want * 0.01, "{v} against {want}, path {path:?}");
         // Blend rings of different counts pair along their lengths.
         let tri = vec![P2(0.0, 0.0), P2(10.0, 0.0), P2(5.0, 8.0)];
         let (a, b) = paired(&square(10.0), &tri);

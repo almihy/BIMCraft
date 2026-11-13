@@ -253,7 +253,7 @@ fn duplicating_a_type_keeps_its_forms_and_renaming_or_deleting_one_follows() {
 
 #[test]
 fn a_project_using_the_new_fields_is_written_as_21_and_one_without_as_before() {
-    use crate::model::{FORMAT, Model, PREVIOUS_FORMAT};
+    use crate::model::{Model, PREVIOUS_FORMAT, TYPES_FORMAT as FORMAT};
     let mut s = Session::new();
     let format = |s: &Session| serde_json::from_str::<Value>(&s.model.to_json().unwrap()).unwrap()["format"].clone();
     assert_eq!(format(&s), json!(PREVIOUS_FORMAT));
@@ -267,7 +267,7 @@ fn a_project_using_the_new_fields_is_written_as_21_and_one_without_as_before() {
     assert_eq!(format(&s), json!(PREVIOUS_FORMAT));
     let door = door(&mut s, "900 x 2100");
     assert_eq!(format(&s), json!(FORMAT));
-    assert_eq!(FORMAT, 21);
+    assert_eq!(FORMAT, 21, "a family from Revit that is no more than its result per type");
     // Read back, it is as it was.
     let (m, left_out) = Model::read(&s.model.to_json().unwrap()).unwrap();
     assert!(left_out.is_empty(), "{left_out:?}");
@@ -276,7 +276,7 @@ fn a_project_using_the_new_fields_is_written_as_21_and_one_without_as_before() {
     assert_eq!(m.opening_local(&m.elements[&door]).unwrap().0.len(), 5);
     // A build that reads up to 20 refuses it rather than drawing both leaves at once.
     let mut v: Value = serde_json::from_str(&s.model.to_json().unwrap()).unwrap();
-    v["format"] = json!(FORMAT + 1);
+    v["format"] = json!(crate::model::FORMAT + 1);
     assert!(Model::read(&v.to_string()).unwrap_err().contains("newer"));
 }
 

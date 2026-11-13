@@ -116,7 +116,7 @@ impl Family {
             return fail(format!("its reference planes can't be placed: {e}"));
         }
         let build = |snapshot: bool| {
-            self.build(t, &values, &mut HashMap::new(), &mut csg::Meter::default(), Build { snapshot, others, depth: 0 })
+            self.build(t, &values, &mut HashMap::new(), &mut csg::Meter::default(), Build { snapshot, others, depth: 0, spent: &std::cell::Cell::new(0) })
         };
         let (made, revit) = match (build(false), build(true)) {
             (Ok(a), Ok(b)) => (a, b),
