@@ -1204,9 +1204,10 @@ fn held_in_the_middle(type_width: f64) -> Value {
 fn an_instance_value_the_dimensions_cannot_hold_is_refused_and_the_old_one_kept() {
     let mut s = Session::new();
     run(&mut s, "family", held_in_the_middle(600.0));
-    let c: Id = run(&mut s, "component", json!({"family": "Sample Held", "type": "Standard", "at": [0, 0], "params": {"Width": 600}}))["id"]
-        .as_u64()
-        .unwrap();
+    let c: Id =
+        run(&mut s, "component", json!({"family": "Sample Held", "type": "Standard", "at": [0, 0], "params": {"Width": 600}}))["id"]
+            .as_u64()
+            .unwrap();
     let e = s.execute("modify", &json!({"id": c, "params": {"Width": 900}})).unwrap_err().to_string();
     assert!(e.contains("Constraints are not satisfied"), "{e}");
     let Some(Element::Component(comp)) = s.model.elements.get(c) else { panic!("no component") };
