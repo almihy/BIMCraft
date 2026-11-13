@@ -1076,7 +1076,8 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             let Some(r) = refs.iter().find(|r| r.1 == *name) else { return false };
             let origin = references.iter().find(|q| q.axis == r.2 && q.origin).and_then(|q| refs.iter().find(|x| x.1 == q.name));
             let (Some(at), Some(origin)) = (r.3["at"].as_object(), origin.and_then(|o| o.3["at"].as_object())) else { return false };
-            !at.is_empty() && at.iter().all(|(t, v)| matches!((num(v), origin.get(t).and_then(num)), (Some(x), Some(y)) if (x - y).abs() < 0.05))
+            !at.is_empty()
+                && at.iter().all(|(t, v)| matches!((num(v), origin.get(t).and_then(num)), (Some(x), Some(y)) if (x - y).abs() < 0.05))
         })
         .collect();
     references.sort_by_key(|r| (still.contains(&r.name), on_origin.contains(&r.name)));
@@ -1104,7 +1105,10 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     let base_on_level = base.is_some_and(|r| {
         r.3["at"].as_object().is_some_and(|at| !at.is_empty() && at.values().all(|v| num(v).is_some_and(|x| x.abs() < 0.05)))
     });
-    if level_wanted && base_on_level && let Some(base) = base {
+    if level_wanted
+        && base_on_level
+        && let Some(base) = base
+    {
         let at: BTreeMap<String, f64> = f.types.keys().map(|t| (t.clone(), 0.0)).collect();
         reader.planes.insert("__level".into(), (base.1.clone(), Axis::Z, at));
     } else if level_wanted && references.len() < super::MAX_REFERENCES {
@@ -1919,12 +1923,7 @@ mod tests {
             assert!(at["Base Plane"].abs() < 1e-6 && (at["Top Plane"] - height).abs() < 1e-6, "{at:?}");
             let pieces = f.pieces("A", &values).unwrap();
             assert_eq!(pieces.len(), 1, "{:?}", f.editable);
-            assert!(
-                pieces[0].bottom.abs() < 1e-6 && (pieces[0].top - height).abs() < 1e-6,
-                "{} .. {}",
-                pieces[0].bottom,
-                pieces[0].top
-            );
+            assert!(pieces[0].bottom.abs() < 1e-6 && (pieces[0].top - height).abs() < 1e-6, "{} .. {}", pieces[0].bottom, pieces[0].top);
         }
     }
 
