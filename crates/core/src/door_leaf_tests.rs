@@ -209,3 +209,27 @@ fn a_project_is_written_as_format_22_only_when_it_places_a_door_whose_family_say
     run(&mut s, "delete", json!({"ids": [door, own]}));
     assert_eq!(format(&s), json!(crate::model::PREVIOUS_FORMAT));
 }
+
+#[test]
+fn the_family_command_sets_a_forms_and_a_symbols_visibility_settings_by_id() {
+    use crate::family::{Levels, Show};
+    let mut s = Session::new();
+    wall(&mut s);
+    let door = id_of(&run(&mut s, "door", json!({"at": [2000, 0], "family": "Single Door", "type": "900 x 2100"})));
+    let f = &s.model.families["Single Door"];
+    let leaf = f.forms.iter().position(|x| x.show.is_some_and(|v| !v.plan)).expect("the leaf");
+    let (form, symbol) = (f.forms[leaf].id, f.symbols[0].guid);
+    let shut = |s: &mut Session| lines(&plan_at(s, "medium"), door).0.len();
+    let before = shut(&mut s);
+    // `show` merges into what the form says: Plan/RCP ticked, the rest as it was.
+    run(&mut s, "family", json!({"name": "Single Door", "form": {"id": form, "show": {"plan": true, "coarse": false}}}));
+    assert_eq!(s.model.families["Single Door"].forms[leaf].show, Some(Show { coarse: false, ..Show::default() }));
+    assert_eq!(shut(&mut s), before + 1, "the plan draws the leaf cut, shut in the opening");
+    run(&mut s, "family", json!({"name": "Single Door", "symbol": {"guid": symbol, "show": {"fine": false}}}));
+    assert_eq!(s.model.families["Single Door"].symbols[0].show, Some(Levels { fine: false, ..Levels::default() }));
+    // A null takes them away: drawn as a form or a symbol that says nothing is.
+    run(&mut s, "family", json!({"name": "Single Door", "form": {"id": form, "show": null}}));
+    assert_eq!(s.model.families["Single Door"].forms[leaf].show, None);
+    // And a misspelled one is an error.
+    assert!(s.execute("family", &json!({"name": "Single Door", "form": {"id": form, "show": {"plann": true}}})).is_err());
+}

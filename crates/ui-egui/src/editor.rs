@@ -1446,6 +1446,30 @@ mod tests {
         assert!(f.profile.is_empty() && f.circle.as_ref().is_some_and(|c| c.radius == Expr::Formula("R".into())));
     }
 
+    /// The Visibility Settings dialog shows what is drawn, and sets it only when changed: what never said keeps saying nothing.
+    #[test]
+    fn the_visibility_settings_show_what_is_drawn_and_set_only_what_changed() {
+        let m = Model::new("x");
+        let mut ed = FamilyEditor::of("Table", &m.families["Table"]);
+        assert_eq!(ed.forms[0].show, None, "the table's top says nothing");
+        let set = Settings::of(&ed, Which::Form(0)).unwrap();
+        assert_eq!(set.show, Show::UNSAID, "a form that says nothing is drawn at every level but Coarse");
+        set.apply(&mut ed);
+        assert_eq!(ed.forms[0].show, None, "unchanged, it still says nothing");
+        let mut set = Settings::of(&ed, Which::Form(0)).unwrap();
+        set.show.coarse = true;
+        set.apply(&mut ed);
+        assert_eq!(ed.forms[0].show, Some(Show::default()));
+        ed.symbols.push(SymbolText::blank(Part::Line));
+        let last = ed.symbols.len() - 1;
+        let mut set = Settings::of(&ed, Which::Symbol(last)).unwrap();
+        assert!(!set.show.coarse && set.show.medium && set.show.fine);
+        set.show.fine = false;
+        set.apply(&mut ed);
+        assert_eq!(ed.symbols[last].show, Some(Levels { coarse: false, medium: true, fine: false }));
+        assert!(Settings::of(&ed, Which::Form(99)).is_none());
+    }
+
     #[test]
     fn symbols_and_parameters_come_back_as_typed() {
         let y = Symbol {
@@ -1481,6 +1505,11 @@ mod tests {
             ..Symbol::default()
         };
         assert_eq!(SymbolText::of(&dot).symbol().unwrap(), dot);
+        // A symbol's detail levels and a form's Visibility Settings, as the family has them.
+        let leveled = Symbol { show: Some(Levels { coarse: true, medium: false, fine: true }), ..dot.clone() };
+        assert_eq!(SymbolText::of(&leveled).symbol().unwrap(), leveled);
+        let shown = Form { show: Some(Show { plan: false, side: false, ..Show::default() }), ..FormText::blank().form().unwrap() };
+        assert_eq!(FormText::of(&shown).form().unwrap().show, shown.show);
         for part in [Part::Line, Part::Arc, Part::Text, Part::Dot] {
             assert_eq!(SymbolText::of(&SymbolText::blank(part).symbol().unwrap()).part, part);
         }
