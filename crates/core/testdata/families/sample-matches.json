@@ -1,11 +1,10 @@
 {
-  "editable": 9,
+  "editable": 21,
   "families": {
     "Casework_Base_Corner_Sgl-Door.arqiflow-family.json": {
-      "editable": false,
-      "matched": 0,
-      "types": 1,
-      "why": "its type 900x900x860mm: its shape drawn coarse is 13 mm off Revit's at (-352, -632, 214), over 4.5 % of it"
+      "editable": true,
+      "matched": 1,
+      "types": 1
     },
     "Casework_Base_Sgl-Door_1.arqiflow-family.json": {
       "editable": true,
@@ -13,34 +12,29 @@
       "types": 1
     },
     "Doors_ExtDbl_1.arqiflow-family.json": {
-      "editable": false,
-      "matched": 0,
-      "types": 2,
-      "why": "its type 1510x2110mm: drawn coarse, part of Revit's plan is missing from its plan: 60 mm off at (-780, 130), over 13.7 % of it (and 1 more types)"
+      "editable": true,
+      "matched": 2,
+      "types": 2
     },
     "Doors_IntDbl_1.arqiflow-family.json": {
-      "editable": false,
-      "matched": 0,
-      "types": 2,
-      "why": "its type 1510x2110mm: drawn medium, part of Revit's plan is missing from its plan: 101 mm off at (102, 100), over 32.7 % of it (and 1 more types)"
+      "editable": true,
+      "matched": 2,
+      "types": 2
     },
     "Doors_IntSgl_1.arqiflow-family.json": {
-      "editable": false,
-      "matched": 0,
-      "types": 3,
-      "why": "its type 1010x2110mm: its shape drawn medium is 63 mm off Revit's at (-268, 163, 1000), over 0.5 % of it (and 2 more types)"
+      "editable": true,
+      "matched": 3,
+      "types": 3
     },
     "Doors_IntSgl_Catalog.arqiflow-family.json": {
-      "editable": false,
-      "matched": 0,
-      "types": 3,
-      "why": "its type 1010x2110mm: its shape drawn medium is 63 mm off Revit's at (-268, 163, 1000), over 0.5 % of it (and 2 more types)"
+      "editable": true,
+      "matched": 3,
+      "types": 3
     },
     "Furniture_Chair.arqiflow-family.json": {
-      "editable": false,
-      "matched": 0,
-      "types": 1,
-      "why": "its type 430x480x457mm: drawn coarse, part of Revit's shape is missing from its shape: 13 mm off at (204, -203, 457), over 0.1 % of it"
+      "editable": true,
+      "matched": 1,
+      "types": 1
     },
     "Lighting_Fixtures_Ceiling_Round.arqiflow-family.json": {
       "editable": true,
@@ -68,16 +62,14 @@
       "types": 1
     },
     "M_Parking Space.arqiflow-family.json": {
-      "editable": false,
-      "matched": 0,
-      "types": 4,
-      "why": "its type 4800 x 2400mm - 60 deg: drawn coarse, part of Revit's plan is missing from its plan: 16 mm off at (2045, -3473), over 13.9 % of it (and 3 more types)"
+      "editable": true,
+      "matched": 4,
+      "types": 4
     },
     "M_RPC Tree - Deciduous.arqiflow-family.json": {
-      "editable": false,
-      "matched": 0,
-      "types": 18,
-      "why": "its type American Beech - 6.0 Meters: drawn coarse it shows nothing where Revit's shows something (and 17 more types)"
+      "editable": true,
+      "matched": 18,
+      "types": 18
     },
     "M_Rectangular Column.arqiflow-family.json": {
       "editable": true,
@@ -85,10 +77,9 @@
       "types": 3
     },
     "M_Single-Flush.arqiflow-family.json": {
-      "editable": false,
-      "matched": 5,
-      "types": 7,
-      "why": "its type 0915 x 2032mm: drawn coarse, part of Revit's plan is missing from its plan: 5 mm off at (401, 1015), over 0.2 % of it (and 1 more types)"
+      "editable": true,
+      "matched": 7,
+      "types": 7
     },
     "M_Trim-Window-Exterior-Flat.arqiflow-family.json": {
       "editable": true,
@@ -104,43 +95,40 @@
       "editable": false,
       "matched": 0,
       "types": 4,
-      "why": "its type 1050 x 1350mm: its shape drawn coarse is 13 mm off Revit's at (30, 36, 1337), over 0.0 % of it (and 3 more types)"
+      "why": "its type 1050 x 1350mm: its shape drawn coarse is 13 mm off Revit's at (-30, 26, 19), over 0.0 % of it (and 3 more types)"
     },
     "M_Window-Double-Hung.arqiflow-family.json": {
       "editable": false,
       "matched": 0,
       "types": 4,
-      "why": "its type 600 x 1100mm: its plan drawn coarse is 220 mm off Revit's at (-568, -2), over 69.5 % of it (and 3 more types)"
+      "why": "its type 600 x 1100mm: drawn coarse, part of Revit's plan is missing from its plan: 50 mm off at (-300, -100), over 50.8 % of it (and 3 more types)"
     },
     "Plumbing_Fixtures_Basin_Small.arqiflow-family.json": {
-      "editable": false,
-      "matched": 0,
-      "types": 1,
-      "why": "its type 360x350x140mm: its shape drawn coarse is 19 mm off Revit's at (0, 186, 403), over 0.9 % of it"
+      "editable": true,
+      "matched": 1,
+      "types": 1
     },
     "Plumbing_Fixtures_WC.arqiflow-family.json": {
       "editable": false,
       "matched": 0,
       "types": 1,
-      "why": "its type 540x360x410mm: its shape drawn coarse is 7 mm off Revit's at (151, -460, 327), over 25.1 % of it"
+      "why": "its type 540x360x410mm: drawn coarse, part of Revit's shape is missing from its shape: 3 mm off at (135, -69, 390), over 15.2 % of it"
     },
     "UC-Universal Columns-Column.arqiflow-family.json": {
-      "editable": false,
-      "matched": 0,
-      "types": 1,
-      "why": "its type UC305x305x97: its front elevation drawn coarse has no lines where Revit's has"
+      "editable": true,
+      "matched": 1,
+      "types": 1
     },
     "Windows_Arched.arqiflow-family.json": {
       "editable": false,
       "matched": 0,
       "types": 6,
-      "why": "its type 1360x1210mm: its shape drawn coarse is 23 mm off Revit's at (-640, -7, 1208), over 1.9 % of it (and 5 more types)"
+      "why": "its type 1360x1210mm: drawn coarse, part of Revit's shape is missing from its shape: 3 mm off at (-429, 50, 1738), over 2.2 % of it (and 5 more types)"
     },
     "Windows_Sgl_Casement_Top-Hung.arqiflow-family.json": {
-      "editable": false,
-      "matched": 0,
-      "types": 6,
-      "why": "its type 1360x1210mm: its shape drawn coarse is 13 mm off Revit's at (-667, 28, 63), over 0.3 % of it (and 5 more types)"
+      "editable": true,
+      "matched": 6,
+      "types": 6
     }
   }
 }

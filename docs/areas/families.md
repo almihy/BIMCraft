@@ -259,6 +259,16 @@ other as the check and the fallback (`snapshot` forms and symbols), and checks e
 - **The samples.** `family_sample_tests.rs` pins asymmetric families, a door in 100, 200 and 300 mm walls and a rebuilt
   door flipped with its nested handle. The real exported samples are Autodesk's and never kept here: run it with
   `BIMCRAFT_FAMILY_SAMPLES=<folder of packages>` and each family's match is held to `testdata/families/sample-matches.json`.
+  Re-exported on 14 November (packages v4 and v5 give the same), **21 of Revit's 25 sample families are editable and 73 of
+  their 88 types match Revit's result** (9 and 29 before the fidelity work); `sample-matches.json` records each family's
+  types, how many matched and, for one that does not, why. A form that says nothing is drawn in every view at every level, as
+  Revit's default. Revit's joined forms are compared as the one surface they make, a void cuts every solid form of its family
+  that it reaches (the exporter's `cuts` lists stay as information and limit nothing), and a family the package says is an RPC
+  render placeholder (`revit.rpc`, the sample tree) is checked in plan only and always draws Revit's 3D. Not yet matching:
+  `M_Window-Casement-Double` and `M_Window-Double-Hung` (their Coarse shape and plan, 13 and 50 mm off), `Plumbing_Fixtures_WC`
+  (3 mm over 15 % of its shape) and `Windows_Arched` (3 mm over 2 %); each is drawn exactly as Revit's, marked "As in Revit
+  (not yet editable)" with that reason. Never change a tolerance (`NEAR`, `NOISE`, `NOISE_SHARE`, `VOLUME`, `VOLUME_CURVED`,
+  `BOX`, `REACH`) to make a family match.
 - **The translator.** B (a bound number) becomes an `Expr`: a number, `ref(Name) + offset` (the offset itself bound where
   it follows parameters), `scale * Param + offset`, or `(formula)`; then taken into the family's axes: `x + x_offset`,
   `y_sign × y + y_offset` (and `x_sign × x + x_offset`), `z - z_minus`, where `z_minus` that names a plane (a window's sill) becomes the parameter
