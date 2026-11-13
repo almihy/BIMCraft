@@ -1365,6 +1365,9 @@ other_files(
          voltage?, load_va?, power_factor?, classification?}], source?: {library?, version?, app?, category?, file?}, host?: \
          level|wall|floor|ceiling|roof|face|none, subcategories?: [{name, color?: [r, g, b], material?}], cut?: {width, height}, \
          flips?: {hand?, facing?}, materials?: {name: {color: [r, g, b], transparency?}}, like?: {new type: type}, rename?, \
+         references?: [{name, axis: x|y|z, at, is_reference?, origin?}], dimensions?: [{refs: [name, …], label?, locked?, eq?, \
+         value?, sense?, kind?}], nested?: [{family, type, at: [x, y, z], rotation?, mirrored?, params?: {name: value}, visible?, \
+         types?, show?}], catalog?: {columns, rows}, revit?: <Revit's definition, as Arqiflow's exporter writes it>, \
          delete?: true, dry_run?, path?, save?} a family of \
          the project's, BIMCraft's own parametric component: created, changed, read, or loaded from the .json file at `path` (a \
          family as `inspect` shows it, with its `name`). Without `name` it lists the project's families, each its category and \
@@ -1427,7 +1430,19 @@ other_files(
          each the project has none of by that name (the project's own wins); `like` gives a type made in `types` the forms and \
          symbols of the type it was made like (Type Properties' Duplicate), and a type renamed (`rename_type`) or taken away \
          is renamed in or taken out of the forms' and symbols' `types` (what was of it alone goes with it). A project using \
-         `types`, `show`, a symbol's `view`, `outline`, `cut` or a text parameter is written as format 21",
+         `types`, `show`, a symbol's `view`, `outline`, `cut` or a text parameter is written as format 21. A family from Revit \
+         stays parametric: `revit` (Revit's definition; also read from a file, and a whole export package at `path` is taken: its \
+         `family`, its `definition` and its `nested_families`, each loaded first, and its `place`, the type to place, given back) \
+         is translated into `references` (reference planes, which formulas read as `ref(Name)`), the `dimensions` placing them per \
+         type (labelled with a parameter, locked, EQ; over-constrained, the family isn't editable), parametric forms (extrusions \
+         with `holes`, revolves, blends with a `top`, sweeps along a `path` with their `section`, swept blends with a \
+         `section_end`, true `arcs` in any ring), symbols and `nested` parts (another family of the project, placed and sized \
+         by this one's numbers); the forms and symbols it brings are Revit's result per type, kept as `snapshot` ones. Each type \
+         is then checked: its parametric result against Revit's at each detail level (volume within 1 %, box within 2 mm, plan \
+         symbols within 2 mm). A type that matched draws its parametric forms and flexes with its parameters; one that didn't \
+         draws Revit's result and says why in `check`; `editable` is ok when every type matched and nothing was left \
+         untranslated (`untranslated` says what). The reply and the list give `editable` and `check`. A duplicate (`like`) of a \
+         matched type is parametric; a type whose values change is `flexed` and keeps what it was found. Written as format 22",
         family,
         Files::Conditional,
     )

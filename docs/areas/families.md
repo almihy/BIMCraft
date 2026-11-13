@@ -191,6 +191,65 @@ families (the starter set, named in the project's language, and the symbol sets)
 definition as a family file holds it, at no undo step. The sample `crates/core/testdata/families/sample-two-type-flush-door.json`
 (original) has all of it; `family_revit_tests.rs` drives it.
 
+## Families from Revit that stay parametric (round 2)
+
+The owner wants firms to rely on Revit less and less, so a family from Revit stays a family: flexed, its parameters
+changed, new types made, edited in the Family Editor. The export package (Arqiflow's design, section 4) brings Revit's
+definition beside its result per type; the engine translates the one (`family/revit.rs`, `revit::translate`), keeps the
+other as the check and the fallback (`snapshot` forms and symbols), and checks each type (`family/check.rs`).
+
+- **References and dimensions** (`family/parametric.rs`). A `Reference` is a reference plane: a name a formula can say,
+  an `axis` (the family axis it is square to) and `at`, where it stands when nothing places it, in the family's axes;
+  `origin` keeps it there (the plane defining the origin, and z's plane at 0 in every type where none does), and so does a
+  host wall's face (`is_reference` `host_exterior`/`host_interior`, at `±Wall Thickness / 2`). A `Dimension` between
+  references (by name, in order) keeps two of them its `label`'s value apart, or its own `value` when `locked`, or spaces
+  a chain equally when `eq`; `sense` says which way along the axis each gap runs. `Family::solve` places them per type and
+  per axis by Gauss-Jordan elimination over those equations: a plane no equation places stays at its `at` (the translator
+  lists the planes that never move last, so they are the ones kept), two equations that can't both hold are
+  over-constrained, and the type falls back. `values_in` adds each reference's place as `ref(Name)`, which the formula
+  reader reads as a call (`ref(Left) + 50`); validation accepts `ref(X)` for a reference `X`.
+- **Forms Revit has** (`family/shapes.rs`). An extrusion's `holes` (inner loops, cut round by a constrained
+  triangulation); a blend's `top` (the profile at `to`, `profile` at `from`, corners paired one for one where they have as
+  many, else along their lengths from the corners nearest each other); a sweep's `path` (points in the family's axes) and
+  `section` (its profile in 3D, square to one leg of the path anywhere along it: found by its plane and its middle and taken
+  back to the first leg), mitred at each corner, the profile carried along without twisting, capped or joined where the path
+  closes; a swept blend's `section_end` at the path's end. `arcs` keep Revit's arcs as arcs: an edge of a ring (`profile`,
+  `top`, a `hole`, `path`, `section`, `section_end`) from one corner to the next about a `centre` (bound like any number),
+  counter-clockwise unless `clockwise`, about `normal` in 3D; drawn as a circle is, 32 corners a turn. Every new form comes
+  out turned out by its volume's sign.
+- **Nested parts** (`Nested`). Another family of the project at `at`, turned `rotation` about z, `mirrored` across its x,
+  its parameters from the parent's numbers (`Family::values_given`); `Family::pieces_with` builds them with the project's
+  families (`Model::component_local_pieces` and `opening_local` pass them), at most `MAX_NESTING` deep and `MAX_NESTED` in
+  all. Revit's result already has them, so they are built only in a parametric type.
+- **The check and the fallback.** `Family::run_check` compares each type's parametric pieces with its snapshot ones at
+  Coarse, Medium and Fine: volume within 1 % (`check::VOLUME`), box within 2 mm (`check::BOX`), and the plan symbols'
+  extent within 2 mm. `draws_snapshot(type)` is the one rule what is drawn follows: a type whose check failed (or that was
+  never checked while Revit's result for it is there) draws its snapshot forms and symbols, the others their parametric
+  ones (`build`, `marks`, `shapes` and `conservative_bounds` filter by it). `editable` is ok when every type matched and the
+  translation left nothing `untranslated`; its `reason` says why not in plain words. The check runs whenever the family
+  changes through `family`, but a type whose values changed since is `flexed` and keeps what it was found (Revit's result
+  no longer says what it should be); `like` copies the check of the type duplicated, so a duplicate of a matched type is
+  parametric.
+- **The translator.** B (a bound number) becomes an `Expr`: a number, `ref(Name) + offset` (the offset itself bound where
+  it follows parameters), `scale * Param + offset`, or `(formula)`; then taken into the family's axes: `x + x_offset`,
+  `(y + y_offset) × y_sign`, `z - z_minus`, where `z_minus` that names a plane (a window's sill) becomes the parameter
+  that puts it there in every type, and that plane is the family's z = 0. A plane's `at` and an extrusion's start and end
+  are coordinates along the positive axis of their normal. An extrusion's loops: the outer ones forms, those inside them
+  holes. A revolve's plane is the axis all its corners share. Symbolic lines in plan, front and side become symbols (an arc a
+  true arc, its turn read from the first type); model lines are left out. What can't be translated (a sloped sketch or
+  reference plane, a revolve or sweep of more than one loop, a sweep with no profile) is left out and named in
+  `editable.untranslated`; what is made is tried in every type first (`tried`), so the family always loads.
+- **Commands and files.** `family {revit}` translates; `family {path}` takes a family file with `revit`, or a whole export
+  package (`family`, `definition`, `nested_families`, each nested one loaded first and, if it can't be what it says, as a
+  generic one; `loadable` gives a material named but not brought a grey, cuts a long text, drops a door's own
+  `Wall Thickness` and lists a nested family's subcategories), named after the file without `.arqiflow-family`, and gives
+  back its `place` (Load Family starts placing that type). The reply and the list say `editable` and `check`. A project
+  using any of it is written as format 22 (`Model::written_format`; 21 is `TYPES_FORMAT`). The Family Editor's References
+  tab lists the planes (where each is in the type previewed), the dimensions, the nested families and each type's check,
+  and the window says "Editable" or "As in Revit (not yet editable)" with the reason; a blend, a sweep and Revit's result
+  are kept as they came and only their material, visibility and void are edited. `family_parametric_tests.rs` drives it
+  with original synthetic definitions.
+
 ## Symbol sets
 
 A symbol set (`symbol_set.rs`) is families that are a plan symbol and nothing else, loaded on demand and never part of a new
