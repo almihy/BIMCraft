@@ -171,7 +171,7 @@ itself out of them, a form or symbol of it alone going with it (`Family::forget_
 every one. A form's `show` is Revit's Visibility Settings: the detail levels and the views that draw it, carried on its
 `Piece` and, in the 3D scene, on its `Solid::Mesh` and every `Tri` as a `view3d::Vis` (its bits and the family's x axis in
 plan). A plan draws a component's form when `show.plan` and its detail level say so (`Piece::in_plan`), a family opening's
-at Coarse only where its `show` says Coarse (one without keeps the old rule, only its gap); a section or an elevation
+at Coarse where its `show` says Coarse, and one that says nothing at every level, as Revit's default (`render.rs::opening` draws what `Piece::in_plan_cut` says); a section or an elevation
 draws one by `show.front` where it looks along the family's y within 45° and `show.side` along its x, at its detail level;
 a 3D view by its own detail level, which a 3D view now has as Revit's do (`detail {view: "{3D}"}`, the view control bar;
 Fine by default, as every BIMCraft view); IFC exports what Fine draws. `Look` carries the view's detail level and, for a
