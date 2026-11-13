@@ -649,12 +649,217 @@ mod tests {
         let (f, wf) = (&t.fills[0], &was.fills[0]);
         assert!(near(&f.rings[0], &wf.rings[0]) && (f.color, f.alpha) == (wf.color, wf.alpha), "{f:?}");
         assert_eq!(back.entities[3].alpha, 90);
-        // What an older build wrote reads as it did, with no patterns.
-        let mut old = bytes.clone();
-        old[..4].copy_from_slice(MAGIC_1);
-        assert!(unpack(&old).is_err() || unpack(&old).is_ok(), "never a panic");
         for cut in (0..bytes.len()).step_by(7) {
             let _ = unpack(&bytes[..cut]);
+        }
+    }
+
+    /// What a build before patterns (BCL1) packed a drawing as: its writer as it was, which wrote no patterns' table and a fill's
+    /// byte 0 or 1.
+    fn pack_bcl1(d: &Dxf) -> Vec<u8> {
+        let mut out = Vec::with_capacity(16 + d.entities.len() * 24);
+        out.extend_from_slice(MAGIC_1);
+        let layers = &d.layers[..d.layers.len().min(MAX_LAYERS)];
+        varint(&mut out, layers.len() as u64);
+        for l in layers {
+            string(&mut out, &l.name);
+            let (r, g, b) = match l.color {
+                Color::True(r, g, b) => (r, g, b),
+                c => c.rgb().map_or((0, 0, 0), |c| (c.0, c.1, c.2)),
+            };
+            out.extend_from_slice(&[r, g, b, u8::from(l.off), u8::from(matches!(l.color, Color::Index(7)))]);
+            string(&mut out, &l.linetype);
+        }
+        let linetypes = &d.linetypes[..d.linetypes.len().min(MAX_LINETYPES)];
+        varint(&mut out, linetypes.len() as u64);
+        for lt in linetypes {
+            string(&mut out, &lt.name);
+            let dashes = &lt.dashes[..lt.dashes.len().min(MAX_DASHES)];
+            varint(&mut out, dashes.len() as u64);
+            for x in dashes {
+                let x = if x.is_finite() { x.clamp(-FAR, FAR) } else { 0.0 };
+                out.extend_from_slice(&(x as f32).to_le_bytes());
+            }
+        }
+        // Each layer and linetype by its name, the first of a name, as a reader finds it.
+        let mut layer_at: HashMap<&str, u64> = HashMap::with_capacity(layers.len());
+        for (i, l) in layers.iter().enumerate() {
+            layer_at.entry(l.name.as_str()).or_insert(i as u64);
+        }
+        let mut linetype_at: HashMap<&str, u64> = HashMap::with_capacity(linetypes.len());
+        for (i, l) in linetypes.iter().enumerate() {
+            linetype_at.entry(l.name.as_str()).or_insert(i as u64 + 1);
+        }
+        let layer = |n: &str| layer_at.get(n).copied().unwrap_or(0);
+        let linetype = |n: &Option<String>| n.as_deref().and_then(|n| linetype_at.get(n).copied()).unwrap_or(0);
+        // What is held: the entities a page makes, up to the most entities and the most points among them.
+        let mut held = 0_usize;
+        let kept: Vec<&Entity> = d
+            .entities
+            .iter()
+            .filter(|e| {
+                let n = match &e.shape {
+                    Shape::Line(..) => 2,
+                    Shape::Polyline { pts, .. } => pts.len(),
+                    Shape::Fill { rings, .. } => rings.iter().take(MAX_RINGS).map(Vec::len).sum(),
+                    Shape::Text { .. } => 0,
+                    _ => return false,
+                };
+                if held.saturating_add(n) > MAX_POINTS {
+                    return false;
+                }
+                held += n;
+                true
+            })
+            .take(MAX_ENTITIES)
+            .collect();
+        varint(&mut out, kept.len() as u64);
+        // Each point the step from the last one written, of any entity.
+        let mut last = (0_i64, 0_i64);
+        for e in kept {
+            let (r, g, b) = match e.color {
+                Color::True(r, g, b) => (r, g, b),
+                c => c.rgb().map_or((0, 0, 0), |c| (c.0, c.1, c.2)),
+            };
+            let kind = match e.shape {
+                Shape::Fill { .. } => FILL,
+                Shape::Text { .. } => TEXT,
+                _ => POLYLINE,
+            };
+            out.push(kind);
+            varint(&mut out, layer(&e.layer));
+            out.extend_from_slice(&[r, g, b, e.alpha]);
+            match &e.shape {
+                Shape::Line(a, b) => {
+                    varint(&mut out, weight(e.weight));
+                    varint(&mut out, linetype(&e.linetype));
+                    out.push(0);
+                    points(&mut out, &[*a, *b], &mut last);
+                }
+                Shape::Polyline { pts, closed } => {
+                    varint(&mut out, weight(e.weight));
+                    varint(&mut out, linetype(&e.linetype));
+                    out.push(u8::from(*closed));
+                    points(&mut out, pts, &mut last);
+                }
+                Shape::Fill { rings, solid, .. } => {
+                    out.push(u8::from(*solid));
+                    let rings = &rings[..rings.len().min(MAX_RINGS)];
+                    varint(&mut out, rings.len() as u64);
+                    for r in rings {
+                        points(&mut out, r, &mut last);
+                    }
+                }
+                Shape::Text { at, height, angle, text, align, wide, mirrored, .. } => {
+                    // Each a number within reach: a height that isn't a number is none, which reads back as a text left out.
+                    let within = |x: f64| if x.is_finite() { x.clamp(-FAR, FAR) } else { 0.0 };
+                    let angle = if angle.is_finite() { angle.rem_euclid(360.0) } else { 0.0 };
+                    for x in [within(at.0), within(at.1), within(*height), angle, within(*wide)] {
+                        out.extend_from_slice(&x.to_le_bytes());
+                    }
+                    let h = match align.h {
+                        Horizontal::Left => 0,
+                        Horizontal::Center => 1,
+                        Horizontal::Right => 2,
+                    };
+                    let v = match align.v {
+                        Vertical::Baseline => 0,
+                        Vertical::Bottom => 1,
+                        Vertical::Middle => 2,
+                        Vertical::Top => 3,
+                    };
+                    out.push(h | (v << 2) | (u8::from(*mirrored) << 4));
+                    string(&mut out, text);
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn a_drawing_an_older_build_packed_reads_back_exactly_as_it_was() {
+        let layer = |n: &str, color, off| Layer { name: n.into(), color, linetype: "Continuous".into(), weight: None, off, frozen: false };
+        let entity = |layer: &str, color, linetype: Option<&str>, weight, alpha, shape| Entity {
+            layer: layer.into(),
+            color,
+            linetype: linetype.map(String::from),
+            weight,
+            alpha,
+            shape,
+        };
+        let fill = |rings: Vec<Vec<P2>>, solid| Shape::Fill { rings, solid, tile: None, shade: false };
+        let d = Dxf {
+            scale: Some(1.0),
+            unit: "mm".into(),
+            version: String::new(),
+            layers: vec![layer("Walls", Color::True(10, 20, 30), false), layer("Notes", Color::Index(7), true)],
+            linetypes: vec![Linetype { name: "DASH1".into(), dashes: vec![4.0, -1.0, 0.5, -1.0] }],
+            ltscale: 1.0,
+            entities: vec![
+                entity(
+                    "Walls",
+                    Color::True(255, 0, 0),
+                    Some("DASH1"),
+                    Some(0.35),
+                    128,
+                    Shape::Polyline { pts: vec![P2(1.5, 2.0), P2(300.25, -4.5), P2(-7.125, 12.5)], closed: true },
+                ),
+                entity("Walls", Color::True(0, 0, 0), None, None, 255, fill(vec![vec![P2(0.0, 0.0), P2(10.0, 0.0), P2(0.0, 10.0)]], true)),
+                entity(
+                    "Notes",
+                    Color::True(200, 120, 40),
+                    None,
+                    None,
+                    90,
+                    fill(
+                        vec![
+                            vec![P2(20.0, 0.0), P2(40.0, 0.0), P2(40.0, 20.0), P2(20.0, 20.0)],
+                            vec![P2(25.0, 5.0), P2(30.0, 5.0), P2(30.0, 10.0)],
+                        ],
+                        false,
+                    ),
+                ),
+                entity(
+                    "Walls",
+                    Color::True(0, 128, 0),
+                    None,
+                    Some(0.18),
+                    255,
+                    Shape::Polyline { pts: vec![P2(0.0, 0.0), P2(5.5, 5.5)], closed: false },
+                ),
+                entity(
+                    "Notes",
+                    Color::True(0, 0, 255),
+                    None,
+                    None,
+                    255,
+                    Shape::Text {
+                        at: P2(5.0, 6.0),
+                        height: 2.5,
+                        angle: 30.0,
+                        text: "Kitchen".into(),
+                        align: Align { h: Horizontal::Center, v: Vertical::Middle },
+                        tag: None,
+                        wide: 0.5,
+                        mirrored: true,
+                    },
+                ),
+            ],
+            inserts: Vec::new(),
+            extents: None,
+            left_out: Default::default(),
+        };
+        let old = pack_bcl1(&d);
+        assert_eq!(&old[..4], MAGIC_1);
+        let back = unpack(&old).unwrap();
+        assert_eq!(back.layers, d.layers);
+        assert_eq!(back.linetypes, d.linetypes);
+        assert_eq!(back.entities, d.entities, "every entity as it was: no fill has a pattern or is a gradient's band");
+        // Packed again, it is this build's, and reads back the same.
+        assert_eq!(unpack(&pack(&back)).unwrap().entities, d.entities);
+        for cut in 0..old.len() {
+            let _ = unpack(&old[..cut]);
         }
     }
 
