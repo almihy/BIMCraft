@@ -633,6 +633,10 @@ impl Reader<'_> {
     /// A symbolic line's curves as symbols in its view; a model line's in each of plan, front and side its Visibility
     /// Settings draw it in (Revit draws a model line in every view that sees it, seen flat in that view).
     fn lines(&self, def: &Value) -> Result<Vec<Symbol>, String> {
+        // A masking region's edge, or a line drawn in Revit's invisible style, draws nothing.
+        if ["masking", "invisible"].iter().any(|k| def[*k].as_bool() == Some(true)) {
+            return Ok(Vec::new());
+        }
         let show = def.get("show").and_then(|s| serde_json::from_value::<Show>(s.clone()).ok());
         let views = match def["view"].as_str().unwrap_or("plan") {
             "plan" => vec![SymbolView::Plan],
@@ -1144,25 +1148,6 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             dimensions.push(Dimension { refs: vec![a.0.clone(), b.0.clone()], locked: true, value: Some(0.0), ..Dimension::default() });
         }
     }
-    // A plane that moves with a host's face (`follows`, as the exporter found by thickening the host): kept its offset from it.
-    for (_, name, axis, p) in &refs {
-        let Some(fw) = p.get("follows").filter(|v| v.is_object()) else { continue };
-        let (Some(target), Some(off)) = (fw.get("ref").and_then(Value::as_str).and_then(|r| reader.planes.get(r)), num(&fw["offset"]))
-        else {
-            continue;
-        };
-        if target.1 != *axis || target.0 == *name || dimensions.len() >= super::MAX_DIMENSIONS {
-            continue;
-        }
-        let sense = if off * reader.map.sign(*axis) < 0.0 { Some(vec![-1]) } else { None };
-        dimensions.push(Dimension {
-            refs: vec![target.0.clone(), name.clone()],
-            locked: true,
-            value: Some(off.abs()),
-            sense,
-            ..Dimension::default()
-        });
-    }
     // Planes aligned to the same edge or face of a form (an id that is no plane) are aligned to each other, where they stand
     // together in every type.
     let mut via: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -1195,34 +1180,34 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         if placed(&dimensions[i]) || dimensions[i].refs.len() != 2 || dimensions[i].value.is_none() {
             continue;
         }
-        // Free: nothing ties it, through the dimensions that place planes, to a plane that stays (the origin, a host's face).
-        let free = |name: &str| {
-            let stays = |n: &str| {
-                references.iter().any(|r| r.name == n && (r.origin || r.is_reference.as_deref().is_some_and(|k| k.starts_with("host_"))))
-            };
-            let mut group: BTreeSet<&str> = BTreeSet::from([name]);
-            loop {
-                let before = group.len();
-                let more: Vec<&str> = dimensions
-                    .iter()
-                    .filter(|d| placed(d) && d.refs.iter().any(|x| group.contains(x.as_str())))
-                    .flat_map(|d| d.refs.iter().map(String::as_str))
-                    .collect();
-                group.extend(more);
-                if group.len() == before || group.len() > super::MAX_REFERENCES {
-                    break;
-                }
-            }
-            !group.iter().any(|n| stays(n))
-        };
         // And only where the gap is the same in every type.
         let at = |name: &str| reader.planes.values().find(|p| p.0 == name).map(|p| p.2.clone()).unwrap_or_default();
         let (a, b) = (at(&dimensions[i].refs[0]), at(&dimensions[i].refs[1]));
         let gaps: Vec<f64> = a.iter().filter_map(|(t, x)| Some(b.get(t)? - x)).collect();
         let same = !gaps.is_empty() && gaps.iter().all(|g| (g - gaps[0]).abs() < 0.05);
-        if same && dimensions[i].refs.iter().any(|n| free(n)) {
+        if same && dimensions[i].refs.iter().any(|n| free(&dimensions, &references, n)) {
             dimensions[i].locked = true;
         }
+    }
+    // A plane that moves with a host's face (`follows`, as the exporter found by thickening the host) and that nothing else
+    // ties to what stays: kept its offset from the face.
+    for (_, name, axis, p) in &refs {
+        let Some(fw) = p.get("follows").filter(|v| v.is_object()) else { continue };
+        let (Some(target), Some(off)) = (fw.get("ref").and_then(Value::as_str).and_then(|r| reader.planes.get(r)), num(&fw["offset"]))
+        else {
+            continue;
+        };
+        if target.1 != *axis || target.0 == *name || dimensions.len() >= super::MAX_DIMENSIONS || !free(&dimensions, &references, name) {
+            continue;
+        }
+        let sense = if off * reader.map.sign(*axis) < 0.0 { Some(vec![-1]) } else { None };
+        dimensions.push(Dimension {
+            refs: vec![target.0.clone(), name.clone()],
+            locked: true,
+            value: Some(off.abs()),
+            sense,
+            ..Dimension::default()
+        });
     }
     // Forms and lines.
     let mut forms = Vec::new();
@@ -1415,6 +1400,28 @@ fn turned_as_revit(f: &Family, mut forms: Vec<Form>) -> Vec<Form> {
         }
     }
     forms
+}
+
+/// Whether reference `name` is free: nothing ties it, through the dimensions that place planes (locked, labelled, EQ), to a
+/// plane that stays (the origin, a host's face).
+fn free(dimensions: &[Dimension], references: &[Reference], name: &str) -> bool {
+    let placed = |d: &Dimension| d.locked || d.eq || d.label.is_some();
+    let stays =
+        |n: &str| references.iter().any(|r| r.name == n && (r.origin || r.is_reference.as_deref().is_some_and(|k| k.starts_with("host_"))));
+    let mut group: BTreeSet<&str> = BTreeSet::from([name]);
+    loop {
+        let before = group.len();
+        let more: Vec<&str> = dimensions
+            .iter()
+            .filter(|d| placed(d) && d.refs.iter().any(|x| group.contains(x.as_str())))
+            .flat_map(|d| d.refs.iter().map(String::as_str))
+            .collect();
+        group.extend(more);
+        if group.len() == before || group.len() > super::MAX_REFERENCES {
+            break;
+        }
+    }
+    !group.iter().any(|n| stays(n))
 }
 
 /// What an architect calls a form of the definition: its subcategory, else its material, and what kind of form it is.

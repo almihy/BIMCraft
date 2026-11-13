@@ -284,6 +284,20 @@ impl Default for Show {
 }
 
 impl Show {
+    /// What both say draws: a nested part's settings over those of a form of the family it is of.
+    pub fn and(self, o: Show) -> Show {
+        Show {
+            coarse: self.coarse && o.coarse,
+            medium: self.medium && o.medium,
+            fine: self.fine && o.fine,
+            plan: self.plan && o.plan,
+            front: self.front && o.front,
+            side: self.side && o.side,
+            plan_top: self.plan_top && o.plan_top,
+            plan_cut: self.plan_cut && o.plan_cut,
+        }
+    }
+
     /// Whether a view at detail level `d` draws it.
     pub fn at(&self, d: crate::graphics::Detail) -> bool {
         use crate::graphics::Detail;
@@ -2509,7 +2523,12 @@ impl Family {
                     outline.reverse();
                 }
                 let (bottom, top) = heights(&tris);
-                Piece { tris, outline, bottom, top, show: n.show.or(pc.show), ..pc }
+                // Drawn where both its nested part's settings and its own form's say.
+                let show = match (n.show, pc.show) {
+                    (Some(a), Some(b)) => Some(a.and(b)),
+                    (a, b) => a.or(b),
+                };
+                Piece { tris, outline, bottom, top, show, ..pc }
             })
             .collect())
     }
