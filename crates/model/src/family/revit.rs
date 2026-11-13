@@ -365,10 +365,7 @@ impl Reader<'_> {
                 Ok(out)
             }
             "revolution" => {
-                let loops = def["loops"].as_array().filter(|l| !l.is_empty()).ok_or("its sketch has no loops")?;
-                if loops.len() > 1 {
-                    return Err("a revolve of more than one loop".into());
-                }
+                let loops = def["loops"].as_array().filter(|l| !l.is_empty() && l.len() <= MOST).ok_or("its sketch has no loops")?;
                 let axis = def["axis"].as_array().filter(|a| a.len() == 2).ok_or("it says no axis")?;
                 let (a0, a1) = (self.point(&axis[0])?, self.point(&axis[1])?);
                 // Its plane: the axis whose coordinate every corner and the axis share.
@@ -381,14 +378,25 @@ impl Reader<'_> {
                     .find(|ax| pts.iter().all(|p| (p[ax.index()] - pts[0][ax.index()]).abs() < 0.05))
                     .ok_or("its sketch is on a sloped plane")?;
                 let (plane, k) = sketch(flat);
-                let (profile, arcs, _) = self.ring(&loops[0], k, Ring::Profile, 0)?;
+                // The outer loop its profile, the loops inside it its holes.
+                let rings = loops.iter().map(|l| self.ring(l, k, Ring::Profile, 0)).collect::<Result<Vec<_>, _>>()?;
+                let outer = (0..rings.len())
+                    .find(|i| rings.iter().enumerate().all(|(j, r)| j == *i || r.2.first().is_some_and(|p| inside(*p, &rings[*i].2))))
+                    .ok_or("a revolve of loops side by side")?;
+                let (profile, mut arcs, _) = rings[outer].clone();
+                let mut holes = Vec::new();
+                for (_, h) in rings.iter().enumerate().filter(|(j, _)| *j != outer) {
+                    let hole = holes.len();
+                    arcs.extend(h.1.iter().cloned().map(|b| Bend { ring: Ring::Hole, hole, ..b }));
+                    holes.push(h.0.clone());
+                }
                 let (mut from, mut to) = (self.value(&def["start_angle"])?, self.value(&def["end_angle"])?);
                 // Mirrored, it turns the other way about its axis.
                 if self.map.y_sign < 0.0 {
                     (from, to) = (neg(to), neg(from));
                 }
                 let axis = Some([[a0[k[0]].clone(), a0[k[1]].clone()], [a1[k[0]].clone(), a1[k[1]].clone()]]);
-                Ok(vec![Form { plane, profile, arcs, axis, from, to, ..base }])
+                Ok(vec![Form { plane, profile, holes, arcs, axis, from, to, ..base }])
             }
             "sweep" | "swept_blend" => {
                 let path = def["path"].as_array().filter(|p| !p.is_empty() && p.len() <= MOST).ok_or("it has no path")?;
@@ -614,7 +622,10 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         // A wall's faces (a door's or a window's host) follow the wall it stands in: half its thickness out each way.
         let kind = p.get("is_reference").and_then(Value::as_str).unwrap_or("");
         if f.category.hosted() && *axis == Axis::Y && (kind == "host_exterior" || kind == "host_interior") {
-            let side = if (kind == "host_exterior") == (reader.map.y_sign > 0.0) { "" } else { "-" };
+            // The family's +y is toward the exterior, whichever way the document had it.
+            let side = if kind == "host_exterior" { "" } else { "-" };
+            let half = super::DEFAULT_WALL / 2.0;
+            reader.values.insert(super::ref_key(name), Val::Number(if side.is_empty() { half } else { -half }));
             references.push(Reference {
                 name: name.clone(),
                 axis: *axis,
@@ -659,6 +670,70 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     }
     let still: BTreeSet<String> = refs.iter().filter(|r| !moves(&r.3)).map(|r| r.1.clone()).collect();
     references.sort_by_key(|r| still.contains(&r.name));
+    // What a dimension or an alignment measures to that isn't one of the planes: the host wall (its face nearer the other
+    // end) and the level (z = 0, a plane of its own).
+    let ids_of = |v: &Value| -> Vec<String> {
+        v["refs"].as_array().into_iter().flatten().map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_string)).collect()
+    };
+    let lists: Vec<Vec<String>> = def["dimensions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .chain(def["constraints"].as_array().into_iter().flatten())
+        .take(super::MAX_DIMENSIONS * 2)
+        .map(ids_of)
+        .collect();
+    let level_wanted = lists.iter().any(|ids| {
+        ids.iter().any(|i| !reader.planes.contains_key(i))
+            && ids.iter().filter_map(|i| reader.planes.get(i)).all(|p| p.1 == Axis::Z)
+            && ids.iter().any(|i| reader.planes.contains_key(i))
+    });
+    if level_wanted && references.len() < super::MAX_REFERENCES {
+        let mut name = "Ref Level".to_string();
+        for n in 2.. {
+            if !references.iter().any(|r| r.name == name) {
+                break;
+            }
+            name = format!("Ref Level {n}");
+        }
+        let at: BTreeMap<String, f64> = f.types.keys().map(|t| (t.clone(), 0.0)).collect();
+        let origin = !references.iter().any(|r| r.axis == Axis::Z && r.origin);
+        references.push(Reference { name: name.clone(), axis: Axis::Z, at: reader.place(Expr::Number(0.0), Axis::Z), origin, ..Reference::default() });
+        reader.planes.insert("__level".into(), (name, Axis::Z, at));
+    }
+    // `ids` with the one end that isn't a plane read as the level or a host wall's face, where the dimension's `value` (0 for
+    // an alignment) says it is that far from the plane at the other end; else left as it is (and the dimension left out).
+    let resolve = |ids: &[String], value: Option<f64>| -> Vec<String> {
+        let first_at = |id: &str| reader.planes.get(id).and_then(|p| p.2.get(&first).or_else(|| p.2.values().next()).copied());
+        let other = match ids {
+            [a, b] if reader.planes.contains_key(a) != reader.planes.contains_key(b) => {
+                let known = if reader.planes.contains_key(a) { a } else { b };
+                reader.planes.get(known).map(|p| p.1).zip(first_at(known))
+            }
+            _ => None,
+        };
+        let fits = |x: f64| other.zip(value).is_some_and(|((_, at), v)| ((at - x).abs() - v.abs()).abs() < 0.1);
+        ids.iter()
+            .map(|i| {
+                if reader.planes.contains_key(i) {
+                    return i.clone();
+                }
+                let (ext, int) = (format!("{i}.exterior"), format!("{i}.interior"));
+                if let (Some((Axis::Y, _)), Some(e), Some(n)) = (other, first_at(&ext), first_at(&int)) {
+                    if fits(e) {
+                        return ext;
+                    }
+                    if fits(n) {
+                        return int;
+                    }
+                }
+                if matches!(other, Some((Axis::Z, _))) && fits(0.0) && reader.planes.contains_key("__level") {
+                    return "__level".to_string();
+                }
+                i.clone()
+            })
+            .collect()
+    };
     // Dimensions between planes; alignments locked between two planes.
     let mut dimensions = Vec::new();
     for d in def["dimensions"].as_array().into_iter().flatten().take(super::MAX_DIMENSIONS) {
@@ -668,8 +743,9 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             "diameter" => DimensionKind::Diameter,
             _ => DimensionKind::Linear,
         };
-        let ids: Vec<String> =
-            d["refs"].as_array().into_iter().flatten().map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_string)).collect();
+        let measured =
+            d["value"].as_object().and_then(|v| v.get(&first).or_else(|| v.values().next())).and_then(num).or_else(|| num(&d["value"]));
+        let ids = resolve(&ids_of(d), measured);
         let found: Vec<&(String, Axis, BTreeMap<String, f64>)> = ids.iter().filter_map(|i| reader.planes.get(i)).collect();
         let label = d.get("label").and_then(text).map(str::to_string);
         let (locked, eq) = (d["locked"].as_bool().unwrap_or(false), d["eq"].as_bool().unwrap_or(false));
@@ -715,8 +791,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         if c["kind"].as_str() != Some("alignment") || !c["locked"].as_bool().unwrap_or(false) {
             continue;
         }
-        let ids: Vec<&(String, Axis, BTreeMap<String, f64>)> =
-            c["refs"].as_array().into_iter().flatten().filter_map(|v| reader.planes.get(v.as_str()?)).collect();
+        let ids: Vec<&(String, Axis, BTreeMap<String, f64>)> = resolve(&ids_of(c), Some(0.0)).iter().filter_map(|v| reader.planes.get(v)).collect();
         if let [a, b] = ids.as_slice()
             && a.1 == b.1
         {

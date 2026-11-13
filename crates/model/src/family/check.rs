@@ -1,6 +1,6 @@
 //! The check of a family from Revit: each type's parametric result (its references solved, its parametric forms and nested
 //! parts built) against Revit's own for it (its `snapshot` forms and symbols), at each detail level: the volume within 1 %, the
-//! box within 2 mm, and the plan symbols' extent within 2 mm. A type that matched draws its parametric forms; one that didn't
+//! box within 2 mm, and the plan's extent (its symbols and the forms it shows) within 2 mm. A type that matched draws its parametric forms; one that didn't
 //! draws Revit's, and says why ([`TypeCheck`]); the family is editable when every type matched and nothing was left
 //! untranslated ([`Editable`]).
 
@@ -163,8 +163,15 @@ impl Family {
                     y.view == SymbolView::Plan && y.of_type(t) && y.snapshot == snapshot && y.drawn_at(d)
                 })
             };
+            // What the plan draws: its symbols and the forms it shows from above (Revit's plan of a family it brings may
+            // be its forms' lines, which BIMCraft draws from the forms).
+            let plan = |marks: Vec<super::Mark>, pieces: &[Piece]| {
+                let mut all = marks;
+                all.extend(pieces.iter().filter(|p| p.in_plan(d)).map(|p| super::Mark::Line(p.outline.clone())));
+                extent(&all)
+            };
             let (ma, mb) = match (marks(false), marks(true)) {
-                (Ok(a), Ok(b)) => (extent(&a), extent(&b)),
+                (Ok(a), Ok(b)) => (plan(a, &made), plan(b, &revit)),
                 (Err(e), _) => return fail(format!("its plan symbols don't work out: {e}")),
                 (_, Err(e)) => return fail(format!("Revit's plan symbols don't work out: {e}")),
             };
