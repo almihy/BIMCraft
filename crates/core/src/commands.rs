@@ -319,10 +319,11 @@ other_files(
         &[],
         "{id, hide?: [layer, …], show?: [layer, …], view?} a CAD import's layers, or a PDF page's (an image's: its optional \
          content groups, or for a PDF with none its lines by colour and weight, \"Black 0.35\", \"Red fill\", \"Black text\"), \
-         each with its colour and linetype and whether it's shown; `hide` and `show` change which it shows wherever it shows, \
-         or with `view` in that view only (its Visibility/Graphics' Imported Categories: `graphics` `layers` by the drawing's \
-         name, `pdf_layers` by the image's). A layer a PDF has off comes in hidden. `cad_read` with `layers` gives the lines and \
-         words of one layer only",
+         each with its colour (a PDF's layer has the colour most of what is on it is drawn in) and linetype and whether it's \
+         shown; `hide` and `show` change which it shows wherever it shows (`show` shows it again in each view that hides it \
+         too), or with `view` in that view only (its Visibility/Graphics' Imported Categories: `graphics` `layers` by the \
+         drawing's name, `pdf_layers` by the image's). A layer a PDF has off comes in hidden in the view it is placed in, \
+         unticked there. `cad_read` with `layers` gives the lines and words of one layer only",
         cad_layers,
     ),
     edit_files(
@@ -6926,6 +6927,23 @@ fn cad_layers(s: &mut Session, p: &Value) -> R {
                     Some(Element::CadImport(ci)) => ci.hidden = hidden.clone(),
                     Some(Element::Image(im)) => im.hidden = hidden.clone(),
                     _ => {}
+                }
+            }
+            // Shown everywhere: shown too in each view that hides it (a PDF's layer the file has off is hidden in the view it
+            // came into).
+            let hides = |g: &Graphics| {
+                let map = if image { &g.pdf_layers } else { &g.layers };
+                map.get(&name).is_some_and(|l| show.iter().any(|s| l.contains(s)))
+            };
+            if !show.is_empty() && s.model.elements.values().filter_map(graphics::graphics_of_element).any(hides) {
+                for g in s.model_mut().elements.values_mut().filter_map(graphics::graphics_mut) {
+                    let map = if image { &mut g.pdf_layers } else { &mut g.layers };
+                    if let Some(l) = map.get_mut(&name) {
+                        l.retain(|n| !show.contains(n));
+                        if l.is_empty() {
+                            map.remove(&name);
+                        }
+                    }
                 }
             }
             None

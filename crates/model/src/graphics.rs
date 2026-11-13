@@ -565,6 +565,12 @@ impl Graphics {
         *self == Graphics::default()
     }
 
+    /// Whether it holds anything of a PDF page's layers ([`crate::model::FORMAT`] 21's): a build that reads up to 20 would
+    /// refuse it as a field it doesn't know.
+    pub fn holds_pdf_layers(&self) -> bool {
+        !self.pdf_layers.is_empty()
+    }
+
     /// The scale, 1 : n, these hold a view at in a project in `units`: their own, else the units' default (1 : 100, or
     /// 1/8" = 1'-0"). Every plan, section and elevation has a scale, so what it draws is paper at that scale: its
     /// lettering, marks and pens. Read it of [`Graphics::resolved`] for the one in force, as [`scale_of`] does.

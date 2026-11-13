@@ -191,6 +191,20 @@ pub struct ImageType {
     drawn: bool,
     /// A small picture of the whole of a page drawn from its lines, as a PNG.
     thumb: Option<Arc<Vec<u8>>>,
+    /// The part of it its pixels cover, from its top left as shares of its width and height (all of it, but for a page drawn
+    /// from its lines, whose pixels are its raster images only); none when it has no picture.
+    picture: Option<[f64; 4]>,
+}
+
+/// All of an image: what its pixels cover unless it says.
+const WHOLE: [f64; 4] = [0.0, 0.0, 1.0, 1.0];
+
+fn whole() -> Option<[f64; 4]> {
+    Some(WHOLE)
+}
+
+fn is_whole(p: &Option<[f64; 4]>) -> bool {
+    *p == Some(WHOLE)
 }
 
 impl std::fmt::Debug for ImageType {
@@ -210,6 +224,7 @@ impl PartialEq for ImageType {
             && self.lines == o.lines
             && self.drawn == o.drawn
             && self.thumb == o.thumb
+            && self.picture == o.picture
     }
 }
 
@@ -274,7 +289,7 @@ impl Level {
     }
 
     /// Half its size: each pixel the darkest of the four it covers when `keep_lines` (a drawing's lines stay as it zooms out),
-    /// else their mean.
+    /// else their mean (of what of them is there, where some is see-through).
     fn halved(&self, keep_lines: bool) -> Level {
         let (w, h) = ((self.w / 2).max(1), (self.h / 2).max(1));
         let ch = self.ch;
@@ -289,6 +304,16 @@ impl Level {
                 if keep_lines {
                     let dark = four.iter().min_by_key(|p| p.iter().take(3).map(|c| u32::from(*c)).sum::<u32>()).copied().unwrap_or(&[]);
                     px.extend((0..ch).map(|c| dark.get(c).copied().unwrap_or(255)));
+                } else if ch == 4 {
+                    let a: u32 = four.iter().map(|p| u32::from(p.get(3).copied().unwrap_or(0))).sum();
+                    for c in 0..3 {
+                        let v: u32 = four
+                            .iter()
+                            .map(|p| u32::from(p.get(c).copied().unwrap_or(0)) * u32::from(p.get(3).copied().unwrap_or(0)))
+                            .sum();
+                        px.push(if a > 0 { (v / a) as u8 } else { 0 });
+                    }
+                    px.push((a / 4) as u8);
                 } else {
                     for c in 0..ch {
                         px.push((four.iter().map(|p| u32::from(p.get(c).copied().unwrap_or(255))).sum::<u32>() / 4) as u8);
@@ -318,6 +343,8 @@ struct ImageFile {
     drawn: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     thumb: Option<String>,
+    #[serde(default = "whole", skip_serializing_if = "is_whole")]
+    picture: Option<[f64; 4]>,
 }
 
 impl Serialize for ImageType {
@@ -332,6 +359,7 @@ impl Serialize for ImageType {
             lines: self.lines.clone(),
             drawn: self.drawn,
             thumb: self.thumb.as_ref().map(|t| crate::files::base64(t)),
+            picture: self.picture,
         }
         .serialize(s)
     }
@@ -373,6 +401,13 @@ impl<'de> Deserialize<'de> for ImageType {
         if f.drawn && f.lines.is_none() {
             return Err(bad("it is drawn from its lines, but has none".into()));
         }
+        match f.picture {
+            Some(p) if !(p.iter().all(|v| (0.0..=1.0).contains(v)) && p[0] < p[2] && p[1] < p[3]) => {
+                return Err(bad(format!("its picture covers {p:?} of it: shares of its width and height, from 0 to 1")));
+            }
+            None if !f.drawn => return Err(bad("it has no picture, and no lines to draw it".into())),
+            _ => {}
+        }
         Ok(ImageType {
             source: f.source,
             page: f.page,
@@ -385,6 +420,7 @@ impl<'de> Deserialize<'de> for ImageType {
             lines: f.lines,
             drawn: f.drawn,
             thumb,
+            picture: f.picture,
         })
     }
 }
@@ -510,13 +546,14 @@ impl ImageType {
             lines: None,
             drawn: false,
             thumb: None,
+            picture: whole(),
         })
     }
 
     /// A page read from a PDF ([`read_pdf`], here or apart), known by `source`; and notes on what was left out of it.
     pub fn from_pdf(source: &str, read: &PdfRead) -> (ImageType, Vec<String>) {
         let mut notes = read.notes.clone();
-        let lines = read.dxf.as_ref().and_then(|dxf| match Cad::new(source, None, dxf.clone()) {
+        let lines = read.lines.as_ref().and_then(|lines| match Cad::of_lines(source, lines.clone()) {
             Ok(cad) => Some(cad),
             Err(e) => {
                 notes.push(format!(
@@ -540,6 +577,7 @@ impl ImageType {
             lines,
             drawn,
             thumb: if drawn { read.thumb.clone() } else { None },
+            picture: if drawn { read.picture } else { whole() },
         };
         (t, notes)
     }
@@ -585,6 +623,12 @@ impl ImageType {
         self.drawn
     }
 
+    /// The part of it its pixels cover, from its top left as shares of its width and height: all of it but for a page drawn
+    /// from its lines, whose pixels are its raster images only; none when it has no picture (such a page with none).
+    pub fn covers(&self) -> Option<[f64; 4]> {
+        self.picture
+    }
+
     /// The layers of its lines, when it is drawn from them: those a view shows and hides.
     pub fn layers(&self) -> Vec<&str> {
         match (&self.lines, self.drawn) {
@@ -604,7 +648,7 @@ impl ImageType {
 
     /// Its pixels and their levels, decoded the first time they're asked for; none when its PNG can't be read.
     fn levels(&self) -> Option<Arc<Pixels>> {
-        self.pixels.get_or_init(|| Some(Arc::new(Pixels::new(unpng(&self.png)?, self.page.is_some())))).clone()
+        self.pixels.get_or_init(|| Some(Arc::new(Pixels::new(unpng(&self.png)?, self.page.is_some() && !self.drawn)))).clone()
     }
 
     /// A small picture of it, no side over `side` px: its width, height and RGBA (Manage Images, the box that places it).
@@ -634,12 +678,16 @@ pub struct PdfRead {
     pub scale: Option<f64>,
     png: Arc<Vec<u8>>,
     px: (u32, u32),
-    dxf: Option<Vec<u8>>,
+    /// Its lines, packed ([`crate::cad::packed`]).
+    lines: Option<Vec<u8>>,
     pub notes: Vec<String>,
     /// Whether the page is drawn from its lines (its PNG then holds only its raster images), and a small picture of the
     /// whole of it.
     drawn: bool,
     thumb: Option<Arc<Vec<u8>>>,
+    /// The part of the page its PNG covers (from its top left, shares of its width and height); none when it has no picture
+    /// (a page drawn from its lines with no raster images).
+    picture: Option<[f64; 4]>,
     /// Its pixels, when it was read here: the image needn't decode its PNG again.
     level: Option<Arc<Pixels>>,
 }
@@ -661,10 +709,11 @@ struct ReadHead {
     size: [u64; 2],
     scale: Option<u64>,
     png: usize,
-    dxf: Option<usize>,
+    lines: Option<usize>,
     notes: Vec<String>,
     drawn: bool,
     thumb: Option<usize>,
+    picture: Option<[u64; 4]>,
 }
 
 impl PdfRead {
@@ -678,17 +727,18 @@ impl PdfRead {
             size: self.size.map(f64::to_bits),
             scale: self.scale.map(f64::to_bits),
             png: self.png.len(),
-            dxf: self.dxf.as_ref().map(Vec::len),
+            lines: self.lines.as_ref().map(Vec::len),
             notes: self.notes.clone(),
             drawn: self.drawn,
             thumb: self.thumb.as_ref().map(|t| t.len()),
+            picture: self.picture.map(|p| p.map(f64::to_bits)),
         };
         let head = serde_json::to_vec(&head).unwrap_or_default();
-        let mut out = Vec::with_capacity(4 + head.len() + self.png.len() + self.dxf.as_ref().map_or(0, Vec::len));
+        let mut out = Vec::with_capacity(4 + head.len() + self.png.len() + self.lines.as_ref().map_or(0, Vec::len));
         out.extend((head.len() as u32).to_le_bytes());
         out.extend(head);
         out.extend(self.png.iter());
-        out.extend(self.dxf.iter().flatten());
+        out.extend(self.lines.iter().flatten());
         out.extend(self.thumb.iter().flat_map(|t| t.iter()));
         out
     }
@@ -701,8 +751,8 @@ impl PdfRead {
         let n = u32::from_le_bytes(<[u8; 4]>::try_from(at(0, 4)?).map_err(|e| e.to_string())?) as usize;
         let head: ReadHead = serde_json::from_slice(at(4, n)?).map_err(|e| e.to_string())?;
         let png = at(4 + n, head.png)?.to_vec();
-        let dxf = head.dxf.map(|d| at(4 + n + head.png, d).map(<[u8]>::to_vec)).transpose()?;
-        let after = 4 + n + head.png + head.dxf.unwrap_or(0);
+        let lines = head.lines.map(|d| at(4 + n + head.png, d).map(<[u8]>::to_vec)).transpose()?;
+        let after = 4 + n + head.png + head.lines.unwrap_or(0);
         let thumb = head.thumb.map(|t| at(after, t).map(<[u8]>::to_vec)).transpose()?;
         if let Some(t) = &thumb {
             let (w, h) = png_size(t)?;
@@ -710,7 +760,9 @@ impl PdfRead {
                 return Err("the page read says what no page is".into());
             }
         }
-        if head.drawn && dxf.is_none() {
+        let picture = head.picture.map(|p| p.map(f64::from_bits));
+        let share = |p: &[f64; 4]| p.iter().all(|v| (0.0..=1.0).contains(v)) && p[0] < p[2] && p[1] < p[3];
+        if (head.drawn && lines.is_none()) || picture.as_ref().is_some_and(|p| !share(p)) || (picture.is_none() && !head.drawn) {
             return Err("the page read says what no page is".into());
         }
         let px = png_size(&png)?;
@@ -730,10 +782,11 @@ impl PdfRead {
             scale,
             png: Arc::new(png),
             px,
-            dxf,
+            lines,
             notes,
             drawn: head.drawn,
             thumb: thumb.map(Arc::new),
+            picture,
             level: None,
         })
     }
@@ -741,10 +794,10 @@ impl PdfRead {
 
 /// Page `page` (from 1) of a PDF file's `bytes` read for Import PDF: rasterised at `dpi` (or the finest under it that keeps
 /// it within [`MAX_PIXELS`], said in its notes), with what it draws as vectors on its layers. A page with lines is drawn from
-/// them: its pixels are then its raster images only, on white, with a small picture of the whole of it; a page whose lines
-/// can't hold all it draws (past what a page may keep, text in a character map BIMCraft doesn't hold, letters only a
-/// picture holds) keeps the picture of it all, said in the notes. This is where a hostile file is read: in the browser, only
-/// ever in a worker of its own ([`run_pdf_job`]).
+/// them: its pixels are then only its raster images (none when it has none), on nothing, cut to the part of the page they
+/// cover, with a small picture of the whole of it; a page whose lines can't hold all it draws (one too dense to keep, text in
+/// a character map BIMCraft doesn't hold, letters only a picture holds) keeps the picture of it all, as its notes say. This is
+/// where a hostile file is read: in the browser, only ever in a worker of its own ([`run_pdf_job`]).
 pub fn read_pdf(bytes: Vec<u8>, page: usize, dpi: u32) -> Result<PdfRead, String> {
     if bytes.len() > MAX_FILE {
         return Err(format!("it's {} bytes; up to {MAX_FILE}", bytes.len()));
@@ -755,9 +808,10 @@ pub fn read_pdf(bytes: Vec<u8>, page: usize, dpi: u32) -> Result<PdfRead, String
     let [w_in, h_in] = size.map(|s| s / 25.4);
     let fits = (MAX_PIXELS as f64 / (w_in * h_in).max(1e-9)).sqrt().floor();
     let mut dots = f64::from(dpi);
+    let mut lowered = None;
     if dots * w_in > 65_535.0 || dots * h_in > 65_535.0 || (dots * w_in) * (dots * h_in) > MAX_PIXELS as f64 {
         dots = fits.min((65_535.0 / w_in.max(h_in)).floor()).max(1.0);
-        notes.push(format!(
+        lowered = Some(format!(
             "page {page} is {:.0} × {:.0} mm: at {dpi} dpi it would be more than {MAX_PIXELS} pixels, so it came in at {dots} dpi",
             size[0], size[1]
         ));
@@ -767,9 +821,19 @@ pub fn read_pdf(bytes: Vec<u8>, page: usize, dpi: u32) -> Result<PdfRead, String
     let whole = vectors.left_out == 0 && vectors.cmaps.is_empty() && vectors.unlettered == 0;
     let drawn = !vectors.is_empty() && whole;
     // The page's pixels in the channels they need, taken straight from what hayro drew, which is then let go: of a page
-    // drawn from its lines, its raster images only.
-    let (level, pictures) =
-        if drawn { doc.pictures_into(page, dots, Level::from_rgba)? } else { (doc.render_into(page, dots, Level::from_rgba)?, 0) };
+    // drawn from its lines, its raster images only, on nothing, and none when it has none.
+    let (level, picture, pictures) = if drawn {
+        match doc.pictures_into(page, dots, Level::from_rgba)? {
+            Some((level, share, n)) => (level, Some(share), n),
+            None => (Level { w: 1, h: 1, ch: 4, px: vec![0; 4] }, None, 0),
+        }
+    } else {
+        (doc.render_into(page, dots, Level::from_rgba)?, Some([0.0, 0.0, 1.0, 1.0]), 0)
+    };
+    // What resolution it came in at says something only of a picture.
+    if picture.is_some() {
+        notes.extend(lowered);
+    }
     let (w, h) = (level.w, level.h);
     too_big(w, h)?;
     let png = encode(&level)?;
@@ -787,14 +851,22 @@ pub fn read_pdf(bytes: Vec<u8>, page: usize, dpi: u32) -> Result<PdfRead, String
     };
     if pictures > 0 {
         notes.push(format!(
-            "page {page} has {pictures} picture{} in it (raster images): {} in the background picture, under its lines, and \
-             {} with the PDF, not by layer",
+            "page {page} has {pictures} picture{} in it (raster images): {} kept as a picture under its lines, and {} with the \
+             PDF, not by layer",
             if pictures == 1 { "" } else { "s" },
-            if pictures == 1 { "it stays" } else { "they stay" },
+            if pictures == 1 { "it is" } else { "they are" },
             if pictures == 1 { "shows and hides" } else { "show and hide" }
         ));
     }
-    if !vectors.is_empty() && !whole {
+    if vectors.left_out > 0 {
+        notes.push(format!(
+            "page {page} is too dense to keep as lines: it draws more than the {} points a page keeps ({} of its paths are past \
+             them), so it shows as one picture of the whole page, with nothing to snap to past them, and its layers can't be \
+             shown and hidden one by one",
+            pdf::MAX_SEGMENTS,
+            vectors.left_out
+        ));
+    } else if !vectors.is_empty() && !whole {
         notes.push(format!(
             "page {page} shows as a picture of the whole page, so its layers can't be shown and hidden one by one (its lines don't \
              hold all it draws)"
@@ -811,19 +883,14 @@ pub fn read_pdf(bytes: Vec<u8>, page: usize, dpi: u32) -> Result<PdfRead, String
             "page {page}'s file is encrypted, so the layers it has off couldn't be read: what they draw is left out of its lines"
         ));
     }
-    if vectors.left_out > 0 {
-        notes.push(format!(
-            "page {page} draws more than its lines can hold ({} points, or curves past the work a page may take): {} of its paths were left out of the lines it snaps to",
-            pdf::MAX_SEGMENTS,
-            vectors.left_out
-        ));
-    }
     if !vectors.cmaps.is_empty() {
         notes.push(format!(
             "page {page}'s text is set in character maps BIMCraft doesn't hold ({}): its Chinese, Japanese or Korean text is missing from its lines and may show wrongly",
             vectors.cmaps.join(", ")
         ));
     }
+    let lines = (!vectors.is_empty()).then(|| crate::cad::packed::pack(&vectors.drawing()));
+    drop(vectors);
     Ok(PdfRead {
         pages: doc.pages(),
         page,
@@ -832,11 +899,12 @@ pub fn read_pdf(bytes: Vec<u8>, page: usize, dpi: u32) -> Result<PdfRead, String
         scale: doc.scale(page),
         png: Arc::new(png),
         px: (w, h),
-        dxf: (!vectors.is_empty()).then(|| vectors.dxf()),
+        lines,
         notes,
         drawn,
         thumb,
-        level: Some(Arc::new(Pixels::new(level, true))),
+        picture,
+        level: Some(Arc::new(Pixels::new(level, !drawn))),
     })
 }
 
@@ -1016,23 +1084,24 @@ mod tests {
     #[test]
     fn a_page_whose_lines_cant_be_kept_says_so() {
         let mut read = read_pdf(page(), 1, 72).unwrap();
-        assert!(read.dxf.is_some());
-        read.dxf = Some(b"0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF\n".to_vec());
+        assert!(read.lines.is_some());
+        read.lines = Some(b"BCL1\x05".to_vec());
         let (t, notes) = ImageType::from_pdf("p.pdf", &read);
         assert!(t.lines().is_none());
         assert!(notes.iter().any(|n| n.contains("lines couldn't be kept")), "{notes:?}");
     }
 
     #[test]
-    fn a_drawings_grey_page_holds_a_byte_a_pixel() {
-        let read = read_pdf(page(), 1, 72).unwrap();
+    fn a_grey_page_holds_a_byte_a_pixel() {
+        let scan = pdf::sample("q 100 0 0 100 0 0 cm BI /W 2 /H 2 /CS /G /BPC 8 /F /AHx ID 80808080> EI Q", [100.0, 100.0], None);
+        let read = read_pdf(scan, 1, 72).unwrap();
         let p = read.level.clone().unwrap();
         assert_eq!((p.levels[0].ch, p.levels[0].px.len()), (1, 100 * 100), "grey");
         // Its PNG is grey too, and decoded again it is the same.
         let (t, _) = ImageType::from_pdf("p.pdf", &PdfRead { level: None, ..read });
         let again = t.levels().unwrap();
         assert_eq!((again.levels[0].ch, &again.levels[0].px), (1, &p.levels[0].px));
-        assert_eq!(again.levels[0].at(50, 20), [255, 255, 255, 255]);
+        assert_eq!(again.levels[0].at(50, 20), [128, 128, 128, 255]);
     }
 
     #[test]
@@ -1042,8 +1111,10 @@ mod tests {
         let (t, notes) = ImageType::from_pdf("p.pdf", &read);
         assert!(t.drawn() && notes.is_empty(), "{notes:?}");
         assert_eq!(t.layers(), ["Black 0.71"]);
-        // Its picture has no line: its lines draw it. Its thumbnail is of the whole page, the line in it.
-        assert_eq!(t.levels().unwrap().levels[0].at(50, 50), [255, 255, 255, 255]);
+        // It has no picture: its lines draw all of it, and there is no page under them, as a DWG has none. Its thumbnail is
+        // of the whole page, the line in it.
+        assert_eq!(t.covers(), None);
+        assert_eq!(t.levels().unwrap().levels[0].at(0, 0), [0, 0, 0, 0]);
         let (w, h, px) = t.thumbnail(64).unwrap();
         let dark = (0..(w * h) as usize).any(|i| px[i * 4] < 100);
         assert!(dark, "the thumbnail shows the line");
@@ -1056,7 +1127,9 @@ mod tests {
         // A scan, all picture, keeps its picture whole and isn't drawn from lines.
         let scan = pdf::sample("q 100 0 0 100 0 0 cm BI /W 2 /H 2 /CS /G /BPC 8 /F /AHx ID 00FF00FF> EI Q", [100.0, 100.0], None);
         let read = read_pdf(scan, 1, 72).unwrap();
-        assert!(!read.drawn && read.thumb.is_none() && read.dxf.is_none());
+        assert!(!read.drawn && read.thumb.is_none() && read.lines.is_none());
+        let (t, _) = ImageType::from_pdf("scan.pdf", &read);
+        assert_eq!(t.covers(), Some(WHOLE));
     }
 
     #[test]
@@ -1087,7 +1160,8 @@ mod tests {
         let (w, h, rgba) = thumbnail_from_bytes(&run_pdf_job(&PdfJob::Thumbnail { page: 1, side: 50 }, page()).unwrap()).unwrap();
         assert!(w <= 50 && h <= 50 && rgba.len() == (w * h * 4) as usize);
         let read = PdfRead::from_bytes(&run_pdf_job(&PdfJob::Page { page: 1, dpi: 72 }, page()).unwrap()).unwrap();
-        assert_eq!(read.px, (100, 100));
+        // Drawn from its lines, it has no picture.
+        assert!(read.drawn && read.picture.is_none() && read.px == (1, 1), "{read:?}");
         assert!(run_pdf_job(&PdfJob::Page { page: 2, dpi: 72 }, page()).unwrap_err().contains("no page 2"));
         assert!(run_pdf_job(&PdfJob::Outline, b"junk".to_vec()).is_err());
         let job: PdfJob = serde_json::from_str(r#"{"job": "page", "page": 1, "dpi": 300}"#).unwrap();

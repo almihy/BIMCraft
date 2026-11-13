@@ -683,7 +683,12 @@ impl Model {
             }),
             Kind::Material => self.materials.remove(name).is_some(),
             Kind::Picture => self.images.remove(name).is_some(),
-            Kind::Image => self.image_types.remove(name).is_some(),
+            Kind::Image => {
+                let gone = self.image_types.remove(name).is_some();
+                // What views hid of it goes with it, so a page that comes in later under its name starts clean.
+                self.forget_pdf_layers(&[name.to_string()]);
+                gone
+            }
             Kind::ViewFilter => self.view_filters.remove(name).is_some(),
             Kind::ViewTemplate => self.view_templates.remove(name).is_some(),
             Kind::TitleBlock => self.title_blocks.remove(name).is_some(),
@@ -1655,7 +1660,10 @@ impl Model {
     /// else [`crate::model::PREVIOUS_FORMAT`], so an older build opens it.
     pub fn written_format(&self) -> u32 {
         use crate::model::Element;
-        if self.image_types.values().any(crate::raster::ImageType::drawn) {
+        // A view or a template that hides a page's layers holds what a build of 20 refuses as a field it doesn't know.
+        let views = self.elements.values().filter_map(crate::graphics::graphics_of_element);
+        let pdf_graphics = views.chain(self.view_templates.values().map(|t| &t.graphics)).any(|g| g.holds_pdf_layers());
+        if pdf_graphics || self.image_types.values().any(crate::raster::ImageType::drawn) {
             return crate::model::FORMAT;
         }
         let images = !self.image_types.is_empty() || !self.rare("image").is_empty();

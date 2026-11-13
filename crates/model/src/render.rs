@@ -376,12 +376,27 @@ impl Drawing {
 
     /// `text` centred on `(x, y)` px, capitals `height` px tall, turned `angle` radians clockwise
     /// on screen (y runs down).
-    pub(crate) fn text_turned(&mut self, text: &str, (x, y): (f32, f32), height: f32, angle: f32, color: Rgb) {
+    pub(crate) fn text_turned(&mut self, text: &str, at: (f32, f32), height: f32, angle: f32, color: Rgb) {
+        self.text_shaped(text, at, height, angle, (1.0, false), color);
+    }
+
+    /// [`Drawing::text_turned`], its letters `wide` times as wide as the lettering draws them and, `mirrored`, read backwards,
+    /// each letter mirrored, as a drawing's text may be (DXF's width factor and backward flag).
+    pub(crate) fn text_shaped(
+        &mut self,
+        text: &str,
+        (x, y): (f32, f32),
+        height: f32,
+        angle: f32,
+        (wide, mirrored): (f32, bool),
+        color: Rgb,
+    ) {
         let (s, c) = angle.sin_cos();
         let w = font::width(text, height);
+        let across = if mirrored { -wide } else { wide };
         let part = std::mem::replace(&mut self.part, Part::Text);
         for pts in font::strokes(text, -w / 2.0, height / 2.0, height) {
-            let pts = pts.into_iter().map(|(a, b)| (x + a * c - b * s, y + a * s + b * c)).collect();
+            let pts = pts.into_iter().map(|(a, b)| (a * across, b)).map(|(a, b)| (x + a * c - b * s, y + a * s + b * c)).collect();
             self.push(Prim::line(pts, (height / 10.0).max(1.0), color, None, false));
         }
         self.part = part;
@@ -2536,18 +2551,20 @@ fn cad_drawing(d: &mut Drawing, cad: &crate::cad::Cad, ci: &crate::model::CadImp
         }
         let color = cad.color(ent, ci.colors).unwrap_or(INK);
         match &ent.shape {
-            Shape::Text { at, height, angle, text, align, .. } => {
+            Shape::Text { at, height, angle, text, align, wide: factor, mirrored, .. } => {
                 let px = (height * k) as f32;
                 if px < 1.0 {
                     continue;
                 }
-                let wide = f64::from(font::width(text, px)) / k;
+                // Its width as drawn, and the way its letters run: backwards when it is mirrored.
+                let wide = f64::from(font::width(text, px)) / k * factor;
+                let run = if *mirrored { -1.0 } else { 1.0 };
                 let (u, v) =
                     (P2(angle.to_radians().cos(), angle.to_radians().sin()), P2(-angle.to_radians().sin(), angle.to_radians().cos()));
                 let left = match align.h {
                     Horizontal::Left => *at,
-                    Horizontal::Center => *at - u * (wide / 2.0),
-                    Horizontal::Right => *at - u * wide,
+                    Horizontal::Center => *at - u * (run * wide / 2.0),
+                    Horizontal::Right => *at - u * (run * wide),
                 };
                 let base = match align.v {
                     Vertical::Baseline | Vertical::Bottom => left,
@@ -2556,9 +2573,9 @@ fn cad_drawing(d: &mut Drawing, cad: &crate::cad::Cad, ci: &crate::model::CadImp
                 };
                 // Its angle on screen: the drawing's turned by the import's, and mirrored when the import is.
                 let turned = if ci.stretch < 0.0 { -angle } else { *angle };
-                let middle = d.view.px(place(base + u * (wide / 2.0) + v * (height / 2.0)));
+                let middle = d.view.px(place(base + u * (run * wide / 2.0) + v * (height / 2.0)));
                 let from = d.prims.len();
-                d.text_turned(text, middle, px, -((turned + ci.angle).to_radians()) as f32, color);
+                d.text_shaped(text, middle, px, -((turned + ci.angle).to_radians()) as f32, (*factor as f32, *mirrored), color);
                 d.see_through(from, ent.alpha);
             }
             Shape::Point(_) => {}
@@ -2569,10 +2586,14 @@ fn cad_drawing(d: &mut Drawing, cad: &crate::cad::Cad, ci: &crate::model::CadImp
                 d.fill_odd(&rings, fill, ent.alpha);
             }
             shape => {
-                let dash = cad.dash(ent).map(|[a, b]| [(a * k) as f32, (b * k) as f32]).filter(|[a, b]| *a >= 1.0 && *b >= 1.0);
+                // Its dashes in pixels; a pattern whose cycle is under a few pixels draws solid, as it would look.
+                let dash = cad
+                    .dash(ent)
+                    .map(|d| d.into_iter().map(|x| (x * k) as f32).collect::<Vec<f32>>())
+                    .filter(|d| d.iter().sum::<f32>() >= 3.0 && d.iter().skip(1).step_by(2).any(|gap| *gap >= 0.5));
                 for (pts, closed) in crate::cad::paths(shape) {
                     let px = pts.iter().map(|p| d.view.px(place(*p))).collect();
-                    d.stroke_seen(px, cad.pen(ent), color, dash.map(|d| d.to_vec()), closed, ent.alpha);
+                    d.stroke_seen(px, cad.pen(ent), color, dash.clone(), closed, ent.alpha);
                 }
             }
         }
@@ -2604,7 +2625,12 @@ pub(crate) fn images(d: &mut Drawing, m: &Model, key: Guid, layer: crate::raster
         });
         d.own(Some(id));
         let part = std::mem::replace(&mut d.part, Part::Picture);
-        crate::raster::draw(d, t, corners);
+        // Its picture over the part of it the picture covers (all of it, but for a page drawn from its lines): none, nothing.
+        if let Some([u0, v0, u1, v1]) = t.covers() {
+            let [tl, tr, _, bl] = corners;
+            let at = |u: f64, v: f64| (tl.0 + (tr.0 - tl.0) * u + (bl.0 - tl.0) * v, tl.1 + (tr.1 - tl.1) * u + (bl.1 - tl.1) * v);
+            crate::raster::draw(d, t, [at(u0, v0), at(u1, v0), at(u1, v1), at(u0, v1)]);
+        }
         // A page drawn from its lines: they go over its picture, of the layers it and the view show.
         if t.drawn()
             && let Some((cad, ci)) = im.lines_placed(t, im.view)

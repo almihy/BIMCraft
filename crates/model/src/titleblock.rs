@@ -745,7 +745,7 @@ pub fn from_dxf(dxf: &Dxf, mm: f64) -> (TitleBlock, BTreeMap<String, usize>) {
         };
         let color = own.rgb().map(|Rgb(r, g, b)| [r, g, b]);
         match &e.shape {
-            Shape::Text { at, height, angle, text, align, tag } => {
+            Shape::Text { at, height, angle, text, align, tag, .. } => {
                 let size = (height * mm).clamp(MIN_LETTERING, MAX_LETTERING);
                 // To its baseline: a text that hangs from its point (top), or is centred on it, stands lower.
                 let drop = match align.v {

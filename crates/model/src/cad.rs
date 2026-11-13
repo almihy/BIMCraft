@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::dxf::{self, Color, Dxf, Entity, Shape};
 
 pub mod outlines;
+pub mod packed;
 use crate::geom::P2;
 use crate::pen::Pen;
 use crate::prim::Rgb;
@@ -67,6 +68,8 @@ pub struct Cad {
     /// Where it was read from, when it's linked: `reload_cad`, and opening the project, read it again from there.
     path: Option<String>,
     bytes: Arc<Vec<u8>>,
+    /// Whether `bytes` are a page's lines packed ([`packed`]), not a DXF.
+    lines: bool,
     dxf: Arc<Dxf>,
     /// The box round its bulk, drawing units: all of it but what lies far from the rest.
     bulk: Option<[P2; 2]>,
@@ -84,7 +87,10 @@ impl std::fmt::Debug for Cad {
 
 impl PartialEq for Cad {
     fn eq(&self, other: &Cad) -> bool {
-        self.source == other.source && self.path == other.path && (Arc::ptr_eq(&self.bytes, &other.bytes) || self.bytes == other.bytes)
+        self.source == other.source
+            && self.path == other.path
+            && self.lines == other.lines
+            && (Arc::ptr_eq(&self.bytes, &other.bytes) || self.bytes == other.bytes)
     }
 }
 
@@ -100,11 +106,43 @@ impl Cad {
             source: source.chars().take(crate::model::MAX_TEXT).collect(),
             path: path.map(|p| p.chars().take(4096).collect()),
             bytes: Arc::new(bytes),
+            lines: false,
             dxf: Arc::new(dxf),
             bulk,
             far,
             packed: Arc::default(),
         })
+    }
+
+    /// A page's lines a PDF's [`packed`] `bytes` hold, known by `source`; or why they can't be held.
+    pub fn of_lines(source: &str, bytes: Vec<u8>) -> Result<Cad, String> {
+        let dxf = packed::unpack(&bytes)?;
+        Ok(Cad::drawn(source, dxf, bytes))
+    }
+
+    /// Drawing `dxf`, read from a page (never empty: a page that draws nothing has no lines), held packed.
+    pub fn of_drawing(source: &str, dxf: Dxf) -> Cad {
+        let bytes = packed::pack(&dxf);
+        Cad::drawn(source, dxf, bytes)
+    }
+
+    fn drawn(source: &str, dxf: Dxf, bytes: Vec<u8>) -> Cad {
+        let (bulk, far) = bulk(&dxf);
+        Cad {
+            source: source.chars().take(crate::model::MAX_TEXT).collect(),
+            path: None,
+            bytes: Arc::new(bytes),
+            lines: true,
+            dxf: Arc::new(dxf),
+            bulk,
+            far,
+            packed: Arc::default(),
+        }
+    }
+
+    /// The bytes it holds: its DXF, or its packed lines.
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
     }
 
     pub fn source(&self) -> &str {
@@ -152,10 +190,10 @@ impl Cad {
     }
 
     fn file(&self) -> &CadFile {
-        self.packed.get_or_init(|| CadFile {
-            source: self.source.clone(),
-            path: self.path.clone(),
-            dxf: crate::files::base64(&crate::cloud::deflate(&self.bytes)),
+        self.packed.get_or_init(|| {
+            let held = crate::files::base64(&crate::cloud::deflate(&self.bytes));
+            let (dxf, lines) = if self.lines { (String::new(), Some(held)) } else { (held, None) };
+            CadFile { source: self.source.clone(), path: self.path.clone(), dxf, lines }
         })
     }
 
@@ -179,15 +217,39 @@ impl Cad {
         e.weight.or_else(|| self.dxf.layer(&e.layer).and_then(|l| l.weight)).filter(|w| *w > 0.0).map_or(Pen::FINE, Pen::nearest)
     }
 
-    /// An entity's dash and gap, drawing units, when its linetype (its own, else its layer's) has dashes; times `ltscale`.
-    pub fn dash(&self, e: &Entity) -> Option<[f64; 2]> {
+    /// An entity's dashes, drawing units, when its linetype (its own, else its layer's) has gaps: on, off, on, …, all of them
+    /// (a dash-dot's dash, gap, dot and gap), times `ltscale`. A dot is drawn as a short dash, a quarter of the shortest gap;
+    /// pieces of one kind side by side are one, and a pattern that starts with a gap or ends with a dash starts with a dash of
+    /// nothing or ends with a gap of nothing, so the list is on and off in turn from its start.
+    pub fn dash(&self, e: &Entity) -> Option<Vec<f64>> {
         let name = e.linetype.as_deref().or_else(|| self.dxf.layer(&e.layer).map(|l| l.linetype.as_str()))?;
         let lt = self.dxf.linetypes.iter().find(|l| l.name.eq_ignore_ascii_case(name))?;
-        let dash = lt.dashes.iter().copied().find(|d| *d > 0.0);
-        let gap = lt.dashes.iter().copied().find(|d| *d < 0.0)?.abs();
+        let gap = lt.dashes.iter().copied().filter(|d| *d < 0.0).map(f64::abs).fold(f64::INFINITY, f64::min);
+        if !gap.is_finite() {
+            return None;
+        }
+        let mut out: Vec<(bool, f64)> = Vec::new();
+        for d in lt.dashes.iter().take(64) {
+            let (on, len) = if *d < 0.0 {
+                (false, -d)
+            } else if *d == 0.0 {
+                (true, gap / 4.0)
+            } else {
+                (true, *d)
+            };
+            match out.last_mut() {
+                Some(last) if last.0 == on => last.1 += len,
+                _ => out.push((on, len)),
+            }
+        }
+        if out.first().is_some_and(|p| !p.0) {
+            out.insert(0, (true, 0.0));
+        }
+        if out.last().is_some_and(|p| p.0) {
+            out.push((false, 0.0));
+        }
         let k = self.dxf.ltscale;
-        // A dot is drawn as a short dash.
-        Some([dash.unwrap_or(gap / 4.0) * k, gap * k])
+        Some(out.into_iter().map(|(_, len)| len * k).collect())
     }
 
     /// Whether an entity is drawn when the layers `hidden` are.
@@ -226,13 +288,15 @@ fn similar(shape: &Shape, f: impl Fn(P2) -> P2, turn: f64, k: f64) -> Shape {
             Shape::Arc { c: f(*c), r: r * k, start: s, end: s + (end - start) }
         }
         Shape::Point(p) => Shape::Point(f(*p)),
-        Shape::Text { at, height, angle, text, align, tag } => Shape::Text {
+        Shape::Text { at, height, angle, text, align, tag, wide, mirrored } => Shape::Text {
             at: f(*at),
             height: height * k,
             angle: (angle + turn).rem_euclid(360.0),
             text: text.clone(),
             align: *align,
             tag: tag.clone(),
+            wide: *wide,
+            mirrored: *mirrored,
         },
         Shape::Fill { rings, solid } => Shape::Fill { rings: rings.iter().map(ring).collect(), solid: *solid },
     }
@@ -251,12 +315,23 @@ pub fn placed(shape: &Shape, ci: &crate::model::CadImport) -> Shape {
             let (pts, closed) = runs.pop().unwrap_or_default();
             Shape::Polyline { pts: pts.into_iter().map(f).collect(), closed }
         }
-        Shape::Text { at, height, angle, text, align, tag } => {
-            // Its baseline turned as the page is, its height as its up stretches.
+        Shape::Text { at, height, angle, text, align, tag, wide, mirrored } => {
+            // Its baseline turned as the page is, its height as its up stretches, its width as its baseline does.
             let (sin, cos) = angle.to_radians().sin_cos();
             let (o, along, up) = (f(*at), f(*at + P2(cos, sin)), f(*at + P2(-sin, cos)));
             let turn = (along.1 - o.1).atan2(along.0 - o.0).to_degrees().rem_euclid(360.0);
-            Shape::Text { at: o, height: height * up.dist(o), angle: turn, text: text.clone(), align: *align, tag: tag.clone() }
+            let (h, w) = (up.dist(o), along.dist(o));
+            let wide = if h > 0.0 { wide * w / h } else { *wide };
+            Shape::Text {
+                at: o,
+                height: height * h,
+                angle: turn,
+                text: text.clone(),
+                align: *align,
+                tag: tag.clone(),
+                wide,
+                mirrored: *mirrored,
+            }
         }
         other => similar(other, f, ci.angle, ci.scale),
     }
@@ -346,14 +421,18 @@ fn bulk(d: &Dxf) -> (Option<[P2; 2]>, usize) {
     (dxf::union(boxes.into_iter().filter(near)), far)
 }
 
-/// How a drawing goes in a project file: its DXF deflated (zlib) and in base64.
+/// How a drawing goes in a project file: its DXF deflated (zlib) and in base64; a PDF page's lines are its packed lines
+/// (`lines`) instead.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CadFile {
     source: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     path: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     dxf: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    lines: Option<String>,
 }
 
 impl Serialize for Cad {
@@ -365,8 +444,16 @@ impl Serialize for Cad {
 impl Cad {
     /// A drawing as a file holds it, unpacking no more than `most` bytes.
     fn from_file(f: CadFile, most: usize) -> Result<Cad, String> {
-        let bytes = crate::cloud::inflate_of("a CAD drawing", &f.dxf, most.min(dxf::MAX_BYTES))?;
-        let cad = Cad::new(&f.source, f.path.clone(), bytes).map_err(|e| format!("CAD drawing `{}`: {e}", f.source))?;
+        let cad = match &f.lines {
+            Some(lines) => {
+                let bytes = crate::cloud::inflate_of("a page's lines", lines, most.min(dxf::MAX_BYTES))?;
+                Cad::of_lines(&f.source, bytes).map_err(|e| format!("the lines of `{}`: {e}", f.source))?
+            }
+            None => {
+                let bytes = crate::cloud::inflate_of("a CAD drawing", &f.dxf, most.min(dxf::MAX_BYTES))?;
+                Cad::new(&f.source, f.path.clone(), bytes).map_err(|e| format!("CAD drawing `{}`: {e}", f.source))?
+            }
+        };
         let _ = cad.packed.set(f);
         Ok(cad)
     }

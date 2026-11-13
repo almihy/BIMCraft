@@ -60,7 +60,8 @@ fn a_pdf_page_comes_in_at_the_scale_it_states_with_its_lines_where_it_shows_them
     let r = run(&mut s, "import_pdf", json!({"path": "files/doc_1/WC.pdf", "at": [5000, 3500]}));
     assert_eq!((r["image"].as_str(), r["page"].as_u64(), r["dpi"].as_u64()), (Some("WC.pdf"), Some(1), Some(150)), "{r}");
     assert!((r["width"].as_f64().unwrap() - 20_000.0).abs() < 0.01 && (r["height"].as_f64().unwrap() - 15_000.0).abs() < 0.01, "{r}");
-    assert_eq!(r["pixels"], json!([1181, 885]), "200 by 150 mm at 150 dpi");
+    // Drawn from its lines, with no raster images in it: no picture under them, as a DWG has no page.
+    assert_eq!(r["pixels"], Value::Null, "{r}");
     assert_eq!(r["lines"], 3, "the room, the leaf and the text: {r}");
     let id = r["id"].clone();
     // The agent reads its lines as an import's, in plan mm.
@@ -113,7 +114,7 @@ fn a_scale_given_wins_and_a_sheet_takes_its_paper_size() {
     let mut s = with_file("WC.pdf", consultant());
     let r = run(&mut s, "import_pdf", json!({"path": "WC.pdf", "scale": 50, "resolution": 72}));
     assert!((r["width"].as_f64().unwrap() - 10_000.0).abs() < 0.01, "{r}");
-    assert_eq!(r["pixels"], json!([566, 425]));
+    assert_eq!(r["pixels"], Value::Null);
     let e = fails(&mut s, "import_pdf", json!({"path": "WC.pdf", "resolution": 200}));
     assert!(e.contains("72, 150, 300, 600"), "{e}");
     let e = fails(&mut s, "import_pdf", json!({"path": "WC.pdf", "page": 2}));
@@ -305,7 +306,9 @@ fn a_pdf_or_a_picture_comes_in_at_its_paper_times_the_view_scale_as_revit_brings
 fn a_page_too_fine_for_36_million_pixels_comes_in_coarser_and_says_so() {
     // 1100 mm a side at 150 dpi would be 6496 px a side, 42 million pixels.
     let side = 1100.0 * PT;
-    let mut s = with_file("big.pdf", sample("0 0 0 RG 10 w 100 100 m 1000 1000 l S", [side, side], None));
+    // A scan of it, a picture over all of it: what a picture's resolution says something of.
+    let scan = format!("q {side} 0 0 {side} 0 0 cm BI /W 2 /H 2 /CS /G /BPC 8 /F /AHx ID 00FF00FF> EI Q");
+    let mut s = with_file("big.pdf", sample(&scan, [side, side], None));
     let r = run(&mut s, "import_pdf", json!({"path": "big.pdf"}));
     let dpi = r["dpi"].as_u64().unwrap();
     assert!(dpi < 150 && dpi > 100, "{r}");

@@ -63,12 +63,20 @@ fn a_pdfs_layers_come_in_and_show_and_hide_as_a_dwgs_do() {
     assert_eq!(r["layers"], json!(["Walls", "Furniture", "Notes", "No layer"]), "{r}");
     let id = r["id"].clone();
     let level = s.model.guid(s.model.levels()[0].0).to_string();
-    // Furniture, off in the file, comes in hidden.
-    let l = run(&mut s, "cad_layers", json!({"id": id}));
+    // Furniture, off in the file, comes in hidden in the view it is placed in, unticked in its Visibility/Graphics, as Revit
+    // shows a DWG's layers that are off; each layer has the colour of what is on it.
+    let l = run(&mut s, "cad_layers", json!({"id": id, "view": level}));
     assert_eq!(l["image"], "plan.pdf");
-    let shown: Vec<(String, bool)> =
-        l["layers"].as_array().unwrap().iter().map(|r| (r["name"].as_str().unwrap().to_string(), r["shown"] == true)).collect();
+    let shown: Vec<(String, bool)> = l["layers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| (r["name"].as_str().unwrap().to_string(), r["shown"] == true && r["shown_in_view"] == true))
+        .collect();
     assert_eq!(shown[..3], [("Walls".into(), true), ("Furniture".into(), false), ("Notes".into(), true)]);
+    let colour = |n: &str| l["layers"].as_array().unwrap().iter().find(|r| r["name"] == n).unwrap()["color"].clone();
+    assert_eq!((colour("Walls"), colour("Furniture")), (json!([0, 0, 0]), json!([255, 0, 0])), "{l}");
+    assert_eq!(run(&mut s, "graphics", json!({"view": level}))["pdf_layers"], json!({"plan.pdf": ["Furniture"]}));
     let (wx, wy) = at(100.0, 10.0);
     let (cx, cy) = at(100.0, 150.0);
     let p = plan(&s);
@@ -128,7 +136,7 @@ fn a_pdfs_layers_are_kept_in_the_file_and_forgotten_with_the_image() {
     back.model = std::sync::Arc::new(m);
     let l = run(&mut back, "cad_layers", json!({"id": id, "view": level}));
     let row = |n: &str| l["layers"].as_array().unwrap().iter().find(|r| r["name"] == n).unwrap().clone();
-    assert_eq!((row("Furniture")["shown"].clone(), row("Notes")["shown_in_view"].clone()), (json!(false), json!(false)), "{l}");
+    assert_eq!((row("Furniture")["shown_in_view"].clone(), row("Notes")["shown_in_view"].clone()), (json!(false), json!(false)), "{l}");
     // Deleting the image forgets the layers views hid of it.
     run(&mut s, "manage_images", json!({"delete": ["plan.pdf"]}));
     let g = run(&mut s, "graphics", json!({"view": level}));

@@ -119,7 +119,7 @@ fn a_clip_that_is_no_rectangle_cuts_what_it_clips_and_what_snaps() {
     let read = run(&mut s, "cad_read", json!({"id": r["id"], "kinds": ["polyline"]}));
     let items = read["items"].as_array().unwrap();
     assert_eq!(items.len(), 1, "{read}");
-    let xs: Vec<f64> = items[0]["pts"].as_array().unwrap().iter().map(|q| q[0].as_f64().unwrap()).collect();
+    let xs: Vec<f64> = items[0]["points"].as_array().unwrap().iter().map(|q| q[0].as_f64().unwrap()).collect();
     let page_x = |mm: f64| mm / 100.0 * 72.0 / 25.4 + 100.0;
     let (lo, hi) = (xs.iter().copied().fold(f64::INFINITY, f64::min), xs.iter().copied().fold(f64::NEG_INFINITY, f64::max));
     assert!((page_x(lo) - 20.0).abs() < 0.5 && (page_x(hi) - 50.0).abs() < 0.5, "from 20 to 50: {lo} {hi}");
@@ -229,7 +229,8 @@ fn inked(p: &tiny_skia::Pixmap, lo: (f64, f64), hi: (f64, f64)) -> Option<[f64; 
 
 #[test]
 fn text_keeps_its_squeeze_its_spaces_and_its_mirror() {
-    let content = "0 0 0 rg BT /F1 20 Tf 10 170 Td (WIDE) Tj ET BT /F1 20 Tf 50 Tz 10 140 Td (WIDE) Tj ET \
+    // A squeeze holds till it is set again, past the end of its text object.
+    let content = "0 0 0 rg BT /F1 20 Tf 10 170 Td (WIDE) Tj ET BT /F1 20 Tf 50 Tz 10 140 Td (WIDE) Tj 100 Tz ET \
                    BT /F1 20 Tf 10 100 Td (   SPACED) Tj ET BT /F1 20 Tf -1 0 0 1 190 40 Tm (MIRROR) Tj ET";
     let (s, _) = imported(pdf(content, "", "", &[]));
     let p = plan(&s);

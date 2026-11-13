@@ -244,6 +244,15 @@ fn place(c: &str, s: &mut Session, p: &Value, name: &str, new: Option<ImageType>
     // In front of the view's other images.
     let order =
         images_in(m, m.guid(view)).iter().filter_map(|id| image(m, *id)).map(|im| im.order).max().map_or(0, |o| o.saturating_add(1));
+    // A PDF's layers it has off come in hidden in the view it is placed in, unticked in its Visibility/Graphics (Imported
+    // Categories) for a person to tick on, as Revit shows a DWG's layers that are off; in a view that has none of its own (a
+    // sheet, a dependent view), hidden wherever it shows.
+    let off: std::collections::BTreeSet<String> = t
+        .lines()
+        .filter(|_| t.drawn())
+        .map(|cad| cad.dxf().layers.iter().filter(|l| l.off).map(|l| l.name.clone()).collect())
+        .unwrap_or_default();
+    let own_graphics = crate::graphics::graphics_of(m, view).is_some() && m.plan_view(view).and_then(|v| v.parent).is_none();
     let im = ImageInstance {
         order,
         type_name: name.to_string(),
@@ -256,21 +265,24 @@ fn place(c: &str, s: &mut Session, p: &Value, name: &str, new: Option<ImageType>
         lock: true,
         snaps: true,
         layer,
-        // A PDF's layers it has off come in hidden, as an import of a drawing's visible layers.
-        hidden: t
-            .lines()
-            .filter(|_| t.drawn())
-            .map(|cad| cad.dxf().layers.iter().filter(|l| l.off).map(|l| l.name.clone()).collect())
-            .unwrap_or_default(),
+        hidden: if own_graphics { Default::default() } else { off.clone() },
     };
     let corners = im.corners();
+    if own_graphics
+        && !off.is_empty()
+        && let Some(mut g) = crate::graphics::graphics_of(&s.model, view).cloned()
+        && !g.pdf_layers.contains_key(name)
+    {
+        g.pdf_layers.insert(name.to_string(), off);
+        super::set_graphics(s.model_mut(), view, g);
+    }
     let m = s.model_mut();
     if let Some(t) = new {
         m.image_types.insert(name.to_string(), t.clone());
     }
     let id = m.insert(Element::Image(im));
     let mut reply = json!({
-        "id": id, "image": name, "source": t.source(), "dpi": t.dpi(), "pixels": [t.pixels().0, t.pixels().1],
+        "id": id, "image": name, "source": t.source(), "dpi": t.dpi(), "pixels": pixels(&t),
         "size": [read_mm(w0), read_mm(h0)], "width": read_mm(width), "height": read_mm(height), "scale": scale,
         "corners": corners.map(read_point), "lines": t.lines().map_or(0, |l| l.dxf().entities.len()),
     });
@@ -285,6 +297,11 @@ fn place(c: &str, s: &mut Session, p: &Value, name: &str, new: Option<ImageType>
         reply["notes"] = json!(notes);
     }
     Ok(reply)
+}
+
+/// An image's picture's size, px: none for a page drawn from its lines with no raster images, which has no picture.
+fn pixels(t: &ImageType) -> Value {
+    if t.covers().is_some() { json!([t.pixels().0, t.pixels().1]) } else { Value::Null }
 }
 
 /// What a PDF file's pages are: each one's size, mm, and the scale it says it is at.
@@ -360,7 +377,7 @@ pub(super) fn manage_images(s: &mut Session, p: &Value) -> R {
         .map(|(name, t)| {
             json!({
                 "name": name, "source": t.source(), "kind": if t.page().is_some() { "pdf" } else { "image" }, "page": t.page(),
-                "dpi": t.dpi(), "pixels": [t.pixels().0, t.pixels().1], "size": t.size().map(read_mm),
+                "dpi": t.dpi(), "pixels": pixels(t), "size": t.size().map(read_mm),
                 "stated_scale": t.stated_scale(), "lines": t.lines().map_or(0, |l| l.dxf().entities.len()),
                 "layers": t.layers(), "instances": instances(m, name),
             })

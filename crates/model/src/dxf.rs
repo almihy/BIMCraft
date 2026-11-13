@@ -176,7 +176,9 @@ pub enum Shape {
     },
     Point(P2),
     /// One line of lettering: `height` is its capital height, `angle` its baseline's in degrees counter-clockwise from east.
-    /// An attribute's (ATTRIB) has its tag: what a title block reads it as a field of.
+    /// An attribute's (ATTRIB) has its tag: what a title block reads it as a field of. `wide` is its width factor (group 41:
+    /// its letters `wide` times as wide as the font draws them), and `mirrored` reads it backwards, its letters mirrored
+    /// (group 71's backward flag), from its point along the way its angle points the other way.
     Text {
         at: P2,
         height: f64,
@@ -184,6 +186,8 @@ pub enum Shape {
         text: String,
         align: Align,
         tag: Option<String>,
+        wide: f64,
+        mirrored: bool,
     },
     /// A hatch's boundaries, or a solid: `solid` when filled through, else patterned, which a view draws as it can.
     Fill {
@@ -1083,9 +1087,9 @@ fn transformed(shape: Shape, xf: Xf) -> Shape {
             }
             None => Shape::Polyline { pts: arc_points(c, r, start, end - start).into_iter().map(at).collect(), closed: false },
         },
-        Shape::Text { at: p, height, angle, text, align, tag } => {
+        Shape::Text { at: p, height, angle, text, align, tag, wide, mirrored } => {
             let (k, turn) = xf.similarity().map_or((xf.x.length(), xf.x.1.atan2(xf.x.0).to_degrees()), |(k, t, _)| (k, t));
-            Shape::Text { at: at(p), height: height * k, angle: angle + turn, text, align, tag }
+            Shape::Text { at: at(p), height: height * k, angle: angle + turn, text, align, tag, wide, mirrored }
         }
     }
 }
@@ -1355,7 +1359,12 @@ fn text(e: &Ent) -> Result<Option<Shape>, String> {
         }
     };
     let tag = (e.kind == "ATTRIB").then(|| e.str(2).map(|t| t.trim().to_string())).flatten().filter(|t| !t.is_empty());
-    Ok(Some(Shape::Text { at, height, angle: e.num(50)?.unwrap_or(0.0), text: words, align, tag }))
+    let wide = e.num(41)?.filter(|w| *w > 0.0).map_or(1.0, |w| w.clamp(0.01, 100.0));
+    // Backward (2) reads it mirrored; upside down (4) is that turned half round.
+    let flags = e.int(71)?.unwrap_or(0);
+    let (backward, upside) = (flags & 2 != 0, flags & 4 != 0);
+    let angle = e.num(50)?.unwrap_or(0.0) + if upside { 180.0 } else { 0.0 };
+    Ok(Some(Shape::Text { at, height, angle, text: words, align, tag, wide, mirrored: backward != upside }))
 }
 
 /// A multi-line text's lines, each a text of its own, stepped down from where its attachment point puts the block.
@@ -1406,6 +1415,8 @@ fn mtext(e: &Ent) -> Result<Vec<Shape>, String> {
             text: line.to_string(),
             align: Align { h, v: Vertical::Baseline },
             tag: None,
+            wide: 1.0,
+            mirrored: false,
         })
         .collect())
 }
@@ -2090,7 +2101,9 @@ mod tests {
                     angle: 30.0,
                     text: "Room ° Ø ± % é x".into(),
                     align: Align { h: Horizontal::Left, v: Vertical::Baseline },
-                    tag: None
+                    tag: None,
+                    wide: 1.0,
+                    mirrored: false
                 },
                 &Shape::Text {
                     at: P2(8.0, 9.0),
@@ -2098,7 +2111,9 @@ mod tests {
                     angle: 0.0,
                     text: "Centred".into(),
                     align: Align { h: Horizontal::Center, v: Vertical::Top },
-                    tag: None
+                    tag: None,
+                    wide: 1.0,
+                    mirrored: false
                 },
                 &Shape::Text {
                     at: P2(8.0, 9.0),
@@ -2106,7 +2121,9 @@ mod tests {
                     angle: 0.0,
                     text: "Middle".into(),
                     align: Align { h: Horizontal::Center, v: Vertical::Middle },
-                    tag: None
+                    tag: None,
+                    wide: 1.0,
+                    mirrored: false
                 },
             ]
         );
