@@ -1103,3 +1103,42 @@ fn a_see_through_hatch_with_an_island_goes_out_to_svg_and_pdf_even_odd_and_see_t
     let file = String::from_utf8_lossy(&crate::pdf::pdf(&[(&d, P2(420.0, 297.0))])).into_owned();
     assert!(file.contains("/ExtGState << /GA127 << /Type /ExtGState /ca 0.4980 /CA 0.4980 >> >>"), "{file}");
 }
+
+#[test]
+fn a_new_template_forces_this_builds_format_only_when_import_settings_reach_its_views() {
+    let mut s = Session::new();
+    run(&mut s, "import_cad", json!({"path": file("template-format", "plan.dxf", &plan()), "position": "origin"}));
+    let (one, _) = levels(&s);
+    let format = |s: &Session| serde_json::from_str::<Value>(&s.model.to_json().unwrap()).unwrap()["format"].clone();
+    // A new template controls every group, Imported Categories among them, and holds nothing of any import.
+    run(&mut s, "template", json!({"name": "Plan", "from": one}));
+    assert!(s.model.view_templates["Plan"].controls.contains(&crate::graphics::Group::Imports));
+    assert_eq!(format(&s), json!(crate::model::PREVIOUS_FORMAT), "an older build opens it");
+    // That file reads back: the template, in all but the group the older build can't name.
+    let (m, left_out) = Model::read(&s.model.to_json().unwrap()).unwrap();
+    assert!(left_out.is_empty(), "{left_out:?}");
+    assert!(m.view_templates.contains_key("Plan"));
+    // The box over Imported Categories' table is a category's, which the older build reads.
+    run(&mut s, "template", json!({"name": "Plan", "hide": ["cadimport"]}));
+    assert_eq!(format(&s), json!(crate::model::PREVIOUS_FORMAT));
+    run(&mut s, "template", json!({"name": "Plan", "show": ["cadimport"]}));
+    // How an import draws, in the template: this build's.
+    run(&mut s, "template", json!({"name": "Plan", "imports": {"plan": {"all": {"halftone": true}}}}));
+    assert_eq!(format(&s), json!(crate::model::FORMAT));
+    run(&mut s, "template", json!({"name": "Plan", "imports": {"plan": null}}));
+    assert_eq!(format(&s), json!(crate::model::PREVIOUS_FORMAT));
+    // A drawing's layers it hides reach its views only through the group the older build can't name: this build's too.
+    run(&mut s, "template", json!({"name": "Plan", "layers": {"plan": ["WALLS"]}}));
+    assert_eq!(format(&s), json!(crate::model::FORMAT));
+    run(&mut s, "template", json!({"name": "Plan", "layers": {"plan": null}}));
+    assert_eq!(format(&s), json!(crate::model::PREVIOUS_FORMAT));
+    // As do a following view's own: the template's (none hidden) win over them.
+    let id = one_import(&mut s);
+    run(&mut s, "cad_layers", json!({"id": id, "view": one, "hide": ["WALLS"]}));
+    run(&mut s, "graphics", json!({"view": one, "template": "Plan"}));
+    assert_eq!(format(&s), json!(crate::model::FORMAT));
+}
+
+fn one_import(s: &mut Session) -> u64 {
+    run(s, "elements", json!({"category": "cadimport"}))["elements"][0]["id"].as_u64().unwrap()
+}

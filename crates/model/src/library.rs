@@ -1650,6 +1650,13 @@ impl Model {
         m.sync_library();
         m.refs_to_file();
         m.format = self.written_format();
+        // A build that reads up to 20 can't name Imported Categories as a group a template controls; written for it, a
+        // template that controls it leaves it out, which changes nothing it draws (`written_format` makes sure).
+        if m.format < crate::model::FORMAT {
+            for t in m.view_templates.values_mut() {
+                t.controls.remove(&crate::graphics::Group::Imports);
+            }
+        }
         serde_json::to_string_pretty(&m).map_err(|e| e.to_string())
     }
 
@@ -1660,11 +1667,16 @@ impl Model {
     /// else [`crate::model::PREVIOUS_FORMAT`], so an older build opens it.
     pub fn written_format(&self) -> u32 {
         use crate::model::Element;
-        // A view or a template that hides a page's layers or sets how an import draws (or a template that controls it) holds
-        // what a build of 20 refuses as a field it doesn't know.
-        let views = self.elements.values().filter_map(crate::graphics::graphics_of_element);
-        let pdf_graphics = views.chain(self.view_templates.values().map(|t| &t.graphics)).any(|g| g.holds_imports())
-            || self.view_templates.values().any(|t| t.controls.contains(&crate::graphics::Group::Imports));
+        // A view or a template that hides a page's layers or sets how an import draws holds what a build of 20 refuses as a
+        // field it doesn't know. A template that controls Imported Categories and holds none of that is written without the
+        // group, which 20 can't name, unless that would change what a view following it draws: the layers of a drawing it
+        // hides, or those a view following it hides of its own (which the template's win over).
+        let views: Vec<&crate::graphics::Graphics> = self.elements.values().filter_map(crate::graphics::graphics_of_element).collect();
+        let pdf_graphics = views.iter().copied().chain(self.view_templates.values().map(|t| &t.graphics)).any(|g| g.holds_imports())
+            || self.view_templates.iter().any(|(name, t)| {
+                t.controls.contains(&crate::graphics::Group::Imports)
+                    && (!t.graphics.layers.is_empty() || views.iter().any(|g| g.template.as_ref() == Some(name) && !g.layers.is_empty()))
+            });
         if pdf_graphics || self.image_types.values().any(crate::raster::ImageType::drawn) {
             return crate::model::FORMAT;
         }
