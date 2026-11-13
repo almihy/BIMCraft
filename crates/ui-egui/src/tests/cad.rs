@@ -289,16 +289,16 @@ fn a_dense_drawings_cells_are_lightened_on_a_dark_canvas_as_its_lines_are() {
         [c.r(), c.g(), c.b()]
     };
     crate::style::set_canvas(true, None);
-    let seen = crate::canvas::cells_seen(&rgba, bimcraft_core::render::Part::Cells).into_owned();
+    let seen = crate::canvas::cells_seen(&rgba, bimcraft_core::render::Part::Cells, false).into_owned();
     // Each pixel as a line of its colour shows on the dark canvas, as opaque as it was.
     assert_eq!(seen[..3], line(ink));
     assert_eq!(seen[4..7], line(Rgb(200, 30, 30)));
     assert_eq!((seen[3], seen[7]), (200, 255));
     assert!(seen[0] > 150, "the ink reads light on the dark canvas: {seen:?}");
     // Another picture (a scan, a page's raster) is left as it is; and on a light canvas, the cells too.
-    assert_eq!(*crate::canvas::cells_seen(&rgba, bimcraft_core::render::Part::Picture), rgba);
+    assert_eq!(*crate::canvas::cells_seen(&rgba, bimcraft_core::render::Part::Picture, false), rgba);
     crate::style::set_canvas(false, None);
-    assert_eq!(*crate::canvas::cells_seen(&rgba, bimcraft_core::render::Part::Cells), rgba);
+    assert_eq!(*crate::canvas::cells_seen(&rgba, bimcraft_core::render::Part::Cells, false), rgba);
 }
 
 #[test]
@@ -314,4 +314,63 @@ fn a_dark_canvas_turns_over_black_white_and_greys_and_keeps_a_colour_as_revits_d
     assert!(black.iter().all(|v| *v > 220) && white.iter().all(|v| *v < 40), "{black:?} {white:?}");
     assert!(grey.iter().all(|v| *v > 150) && warm_white.iter().all(|v| *v < 60), "{grey:?} {warm_white:?}");
     assert_eq!((red, green, pale_blue), ([220, 30, 30], [0, 153, 0], [170, 200, 255]), "a colour is kept");
+}
+
+/// sRGB's relative luminance, and the contrast of two colours, as WCAG has them.
+fn contrast(a: [u8; 3], b: [u8; 3]) -> f64 {
+    let lum = |c: [u8; 3]| {
+        let lin = |v: u8| {
+            let v = f64::from(v) / 255.0;
+            if v <= 0.040_45 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+        };
+        0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2])
+    };
+    let (x, y) = (lum(a), lum(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+#[test]
+fn halftone_on_a_dark_canvas_fades_toward_its_ground_a_colour_too_as_revits_does() {
+    let rgb = |c: egui::Color32| [c.r(), c.g(), c.b()];
+    // Halftone as the drawing bakes it: halfway to white paper.
+    let half = |c: Rgb| Rgb(c.0 + (255 - c.0) / 2, c.1 + (255 - c.1) / 2, c.2 + (255 - c.2) / 2);
+    let (red, green, black) = (Rgb(220, 30, 30), Rgb(0, 128, 0), Rgb(0, 0, 0));
+    crate::style::set_canvas(true, None);
+    let ground = rgb(crate::canvas::color(bimcraft_core::render::PAPER));
+    let (red_full, red_half) = (rgb(crate::canvas::color(red)), rgb(crate::canvas::color_half(half(red))));
+    let (green_full, green_half) = (rgb(crate::canvas::color(green)), rgb(crate::canvas::color_half(half(green))));
+    let (black_full, black_half) = (rgb(crate::canvas::color(black)), rgb(crate::canvas::color_half(half(black))));
+    crate::style::set_canvas(false, None);
+    // Each halfway between the colour the canvas draws and its ground: dimmer than the colour, never a pastel brighter.
+    for (full, halved) in [(red_full, red_half), (green_full, green_half), (black_full, black_half)] {
+        for k in 0..3 {
+            let want = (u16::from(full[k]) + u16::from(ground[k])) / 2;
+            assert!(u16::from(halved[k]).abs_diff(want) <= 1, "{halved:?} is halfway from {full:?} to {ground:?}");
+        }
+        assert!(contrast(halved, ground) < contrast(full, ground), "{halved:?} fainter than {full:?} on {ground:?}");
+    }
+    assert_eq!(red_half, [122, 27, 27]);
+    assert_eq!(black_half, [129, 129, 129], "black ink halftone, as before");
+    // On a light canvas halftone is as the drawing baked it.
+    assert_eq!(rgb(crate::canvas::color_half(half(red))), [237, 142, 142]);
+}
+
+#[test]
+fn a_dark_canvas_turns_over_a_cream_as_white_and_draws_bimcrafts_own_blues_light_enough_to_read() {
+    let rgb = |c: egui::Color32| [c.r(), c.g(), c.b()];
+    crate::style::set_canvas(true, None);
+    let ground = rgb(crate::canvas::color(bimcraft_core::render::PAPER));
+    let cream = rgb(crate::canvas::color(Rgb(255, 245, 219)));
+    let grey_blue = rgb(crate::canvas::color(Rgb(200, 210, 230)));
+    let pink = rgb(crate::canvas::color(Rgb(255, 200, 200)));
+    let own: Vec<[u8; 3]> = bimcraft_core::render::ON_DARK.iter().map(|(light, _)| rgb(crate::canvas::color(*light))).collect();
+    crate::style::set_canvas(false, None);
+    // A cream or a grey-blue reads as white does, dark, not a muddy mid-tone; a pale pink is a colour, kept.
+    assert!(cream.iter().all(|v| *v < 80) && grey_blue.iter().all(|v| *v < 80), "{cream:?} {grey_blue:?}");
+    assert_eq!(pink, [255, 200, 200]);
+    // A grid's blue and a mass's: their dark-ground variants, 4.5 : 1 or more against the ground.
+    for (c, (light, _)) in own.iter().zip(bimcraft_core::render::ON_DARK) {
+        assert!(contrast(*c, ground) >= 4.5, "{c:?} on {ground:?}: {}", contrast(*c, ground));
+        assert!(contrast([light.0, light.1, light.2], [255; 3]) >= 4.5, "{light:?} reads on white");
+    }
 }

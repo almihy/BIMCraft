@@ -14,7 +14,7 @@ fn covered(prim: &Prim, probes: &[(f32, f32)]) -> Vec<bool> {
         &mut |s| shapes.push(s),
         clip,
         Place::at(pos2(0.0, 0.0)),
-        (prim, None, render::Part::Projection),
+        (prim, None, render::Part::Projection, false),
         &Default::default(),
         None,
         false,

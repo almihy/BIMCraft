@@ -243,9 +243,11 @@ impl PlanCache {
                 .prims
                 .iter()
                 .zip(&d.parts)
-                .filter_map(|(p, part)| match p {
+                .enumerate()
+                .filter_map(|(i, (p, part))| match p {
                     Prim::Image { width, height, rgba, .. } => {
-                        let pixels = ColorImage::from_rgba_unmultiplied([*width as usize, *height as usize], &cells_seen(rgba, *part));
+                        let pixels =
+                            ColorImage::from_rgba_unmultiplied([*width as usize, *height as usize], &cells_seen(rgba, *part, d.half(i)));
                         Some(ctx.load_texture("plan picture", pixels, TextureOptions::NEAREST))
                     }
                     _ => None,
@@ -258,14 +260,16 @@ impl PlanCache {
 }
 
 /// A picture's pixels as the canvas shows them: a dense drawing's cells ([`render::Part::Cells`]) in its colours as its lines
-/// would be, lightened on a dark canvas; any other picture as it is.
-pub(crate) fn cells_seen(rgba: &[u8], part: render::Part) -> std::borrow::Cow<'_, [u8]> {
-    if part != render::Part::Cells || !crate::style::canvas_dark() {
+/// would be, lightened on a dark canvas, and faded toward it where they are `half`tone ([`color_half`]); any other picture as
+/// it is.
+pub(crate) fn cells_seen(rgba: &[u8], part: render::Part, half: bool) -> std::borrow::Cow<'_, [u8]> {
+    let ground = half && crate::style::canvas_ground().is_some();
+    if part != render::Part::Cells || !(crate::style::canvas_dark() || ground) {
         return std::borrow::Cow::Borrowed(rgba);
     }
     let mut seen = rgba.to_vec();
     for px in seen.as_chunks_mut::<4>().0 {
-        let c = color(Rgb(px[0], px[1], px[2]));
+        let c = if half { color_half(Rgb(px[0], px[1], px[2])) } else { color(Rgb(px[0], px[1], px[2])) };
         px[..3].copy_from_slice(&[c.r(), c.g(), c.b()]);
     }
     std::borrow::Cow::Owned(seen)
@@ -633,9 +637,10 @@ impl Canvas {
 }
 
 /// A drawing's colour on screen: as drawn, or on a dark canvas as Revit's dark background draws it: black, white and the greys
-/// between with their lightness turned over, so ink reads light on a dark ground, and a colour as it is (a red line stays red,
-/// a blue grid blue, a PDF's or a DWG's coloured fill its colour), those nearly grey turned over in part. Its paper is the
-/// user's canvas colour when there is one.
+/// between, and the colours so pale or so dull they read as greys (a cream, a grey-blue), with their lightness turned over, so
+/// ink reads light on a dark ground; a colour as it is (a red line stays red, a PDF's or a DWG's coloured fill its colour, a
+/// colour scheme's fill its colour); and BIMCraft's own colours for a light ground in their variants for a dark one
+/// ([`render::ON_DARK`]). Its paper is the user's canvas colour when there is one.
 pub(crate) fn color(c: Rgb) -> Color32 {
     if let Some(ground) = crate::style::canvas_ground().filter(|_| c == render::PAPER) {
         return ground;
@@ -643,19 +648,44 @@ pub(crate) fn color(c: Rgb) -> Color32 {
     if !crate::style::canvas_dark() {
         return Color32::from_rgb(c.0, c.1, c.2);
     }
+    if let Some((_, on_dark)) = render::ON_DARK.iter().find(|(light, _)| *light == c) {
+        return Color32::from_rgb(on_dark.0, on_dark.1, on_dark.2);
+    }
     let (r, g, b) = (i32::from(c.0), i32::from(c.1), i32::from(c.2));
     let (most, least) = (r.max(g).max(b), r.min(g).min(b));
+    if !greyish(most, least) {
+        return Color32::from_rgb(c.0, c.1, c.2);
+    }
     let shift = 255 - most - least;
-    let over = |v: i32| 26 + (v + shift).clamp(0, 255) * 206 / 255;
-    // How much of a colour it is, by how far its channels lie apart: a grey turned over whole, a colour kept.
-    let kept = ((most - least - GREYISH) * 255 / GREYISH).clamp(0, 255);
-    let mix = |v: i32| ((over(v) * (255 - kept) + v * kept) / 255) as u8;
-    Color32::from_rgb(mix(r), mix(g), mix(b))
+    let over = |v: i32| (26 + (v + shift).clamp(0, 255) * 206 / 255) as u8;
+    Color32::from_rgb(over(r), over(g), over(b))
 }
 
-/// How far apart a colour's channels may lie, of 255, and it still be a grey a dark canvas turns over; twice as far, it is a
-/// colour, kept as it is.
+/// Whether a colour whose channels are `most` and `least` at the most and the least is a grey a dark canvas turns over: its
+/// channels lie no more than [`GREYISH`] apart, or so near each other for how light it is that it reads as one (a cream
+/// (255, 245, 219), whose 36 apart are a seventh of its lightest).
+fn greyish(most: i32, least: i32) -> bool {
+    most - least <= GREYISH || (most - least) * DULL.1 <= most * DULL.0
+}
+
+/// How far apart a colour's channels may lie, of 255, and it still be a grey a dark canvas turns over.
 const GREYISH: i32 = 24;
+/// How far apart, as a share of its lightest channel, they may lie and it still read as a grey: 3 in 20.
+const DULL: (i32, i32) = (3, 20);
+
+/// A halftone primitive's colour on screen ([`render::Drawing::halftone`]): its colour is baked halfway to white paper, which a
+/// light canvas draws as it is. On a dark canvas, or paper of the user's colour, it is the colour it is halftone of as the canvas
+/// draws that, halfway to the ground, as Revit fades halftone toward the background: so it is always fainter than the same
+/// colour not halftone.
+pub(crate) fn color_half(c: Rgb) -> Color32 {
+    if !crate::style::canvas_dark() && crate::style::canvas_ground().is_none() {
+        return color(c);
+    }
+    let full = |v: u8| (2 * i32::from(v) - 255).clamp(0, 255) as u8;
+    let (own, ground) = (color(Rgb(full(c.0), full(c.1), full(c.2))), color(render::PAPER));
+    let half = |a: u8, b: u8| ((u16::from(a) + u16::from(b)) / 2) as u8;
+    Color32::from_rgb(half(own.r(), ground.r()), half(own.g(), ground.g()), half(own.b(), ground.b()))
+}
 
 /// Screen points nearer each other than this (px) are one: zoomed out, many of an outline's points come to a few thousandths of a
 /// pixel apart, where the way from one to the next is the rounding of the numbers, not the drawing's.
@@ -787,9 +817,9 @@ fn paint_preview(p: &Painter, at: Place, d: &Drawing, preview: &[Id], thin: bool
         p.add(shape);
     };
     let none = HashSet::new();
-    for ((prim, owner), part) in d.prims.iter().zip(&d.owners).zip(&d.parts) {
+    for (i, ((prim, owner), part)) in d.prims.iter().zip(&d.owners).zip(&d.parts).enumerate() {
         if let Some(id) = owner.filter(|id| preview.contains(id)) {
-            paint_prim(&mut out, p.clip_rect(), at, (prim, Some(id), *part), &none, Some(id), thin, &mut [].iter());
+            paint_prim(&mut out, p.clip_rect(), at, (prim, Some(id), *part, d.half(i)), &none, Some(id), thin, &mut [].iter());
         }
     }
 }
@@ -833,25 +863,29 @@ pub(crate) fn paint_to(
     let mut pictures = pictures.iter();
     // Looked up for each primitive: not searched through.
     let set: HashSet<Id> = selected.iter().copied().collect();
-    for ((prim, owner), part) in d.prims.iter().zip(&d.owners).zip(&d.parts) {
-        paint_prim(out, clip, at, (prim, *owner, *part), &set, hovered, thin, &mut pictures);
+    for (i, ((prim, owner), part)) in d.prims.iter().zip(&d.owners).zip(&d.parts).enumerate() {
+        paint_prim(out, clip, at, (prim, *owner, *part, d.half(i)), &set, hovered, thin, &mut pictures);
     }
 }
 
-/// One primitive of a drawing, as [`paint`] draws it.
+/// One primitive of a drawing, as [`paint`] draws it: with its owner, its part and whether it is halftone.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn paint_prim(
     out: &mut dyn FnMut(Shape),
     clip: Rect,
     at: Place,
-    (prim, owner, part): (&Prim, Option<Id>, render::Part),
+    (prim, owner, part, half): (&Prim, Option<Id>, render::Part, bool),
     selected: &HashSet<Id>,
     hovered: Option<Id>,
     thin: bool,
     pictures: &mut std::slice::Iter<TextureId>,
 ) {
     // A gradient's band keeps its colours on a dark canvas, as a picture does.
-    let color = |c: Rgb| if at.paper || part == render::Part::Shade { Color32::from_rgb(c.0, c.1, c.2) } else { color(c) };
+    let color = |c: Rgb| match () {
+        _ if at.paper || part == render::Part::Shade => Color32::from_rgb(c.0, c.1, c.2),
+        _ if half => color_half(c),
+        _ => color(c),
+    };
     // A see-through fill or line: its colour that opaque.
     let seen = |c: Color32, alpha: u8| if alpha == render::OPAQUE { c } else { c.gamma_multiply(f32::from(alpha) / 255.0) };
     if owner.is_some() && owner == at.hide {

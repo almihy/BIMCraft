@@ -382,18 +382,21 @@ pub fn draw(m: &Model, id: impl Key) -> Option<Drawing> {
             }
             _ => continue,
         };
+        let halves: Vec<bool> = (0..inner.prims.len()).map(|i| inner.half(i)).collect();
         for note in inner.notes {
             if d.notes.len() < 32 && !d.notes.contains(&note) {
                 d.notes.push(note);
             }
         }
         // Its own title, owned by no element, gives way to the viewport's.
-        for ((prim, owner), part) in inner.prims.into_iter().zip(inner.owners).zip(inner.parts) {
+        for (((prim, owner), part), half) in inner.prims.into_iter().zip(inner.owners).zip(inner.parts).zip(halves) {
             if owner.is_some() {
                 d.part(part);
+                d.halftone_next(half);
                 d.push(prim.moved(ox, oy));
             }
         }
+        d.halftone_next(false);
         d.part(Part::Projection);
         // The title, under it: the view's name over a line, its scale under that.
         let name = m.view_name(vp.view).unwrap_or_default();

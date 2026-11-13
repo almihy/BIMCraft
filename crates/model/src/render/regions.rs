@@ -145,6 +145,7 @@ struct Ink {
     owner: Option<Id>,
     part: Part,
     pen: Option<Pen>,
+    half: bool,
 }
 
 /// A convex piece of a masking region, and the box round it.
@@ -210,7 +211,7 @@ pub(super) fn foreground(d: &mut Drawing, m: &Model, rings: &[Vec<P2>]) {
         .flat_map(|(ink, stroke)| {
             // A section's picture is no element's: its ink is the region's now, as its pattern is.
             let (owner, part) = if ink.owner.is_some() { (ink.owner, ink.part) } else { (owner, Part::Pattern) };
-            area.clip(&ink.prim, view, stroke).into_iter().map(move |prim| Ink { prim, owner, part, pen: ink.pen })
+            area.clip(&ink.prim, view, stroke).into_iter().map(move |prim| Ink { prim, owner, part, pen: ink.pen, half: ink.half })
         })
         .collect();
     // Its twin, which tests hold it to: every ink clipped, the same lines and fills in the same order.
@@ -222,7 +223,7 @@ pub(super) fn foreground(d: &mut Drawing, m: &Model, rings: &[Vec<P2>]) {
         assert!(every == kept, "a region keeps other ink through the grid than among all of it");
     }
     for ink in restored {
-        keep(d, ink.prim, ink.owner, ink.part, ink.pen);
+        keep(d, ink.prim, ink.owner, ink.part, ink.pen, ink.half);
     }
 }
 
@@ -352,7 +353,7 @@ fn visible(d: &Drawing, m: &Model, picture: Option<(Vec<Prim>, bool)>) -> (Vec<I
         for cover in candidates(span).into_iter().filter(|cover| near(span, cover)) {
             parts = parts.into_iter().flat_map(|p| outside(&p, d.view, &cover.rings, &cover.boxes)).collect();
         }
-        out.extend(parts.into_iter().map(|prim| Ink { prim, owner: None, part: Part::Projection, pen: None }));
+        out.extend(parts.into_iter().map(|prim| Ink { prim, owner: None, part: Part::Projection, pen: None, half: false }));
     }
     for (i, (((prim, owner), part), pen)) in d.prims.iter().zip(&d.owners).zip(&d.parts).zip(&d.pens).take(end).enumerate() {
         let model = owner.and_then(|id| m.elements.get(id)).is_some_and(|e| crate::graphics::is_model(e.category()));
@@ -370,7 +371,8 @@ fn visible(d: &Drawing, m: &Model, picture: Option<(Vec<Prim>, bool)>) -> (Vec<I
                 break;
             }
         }
-        out.extend(parts.into_iter().map(|prim| Ink { prim, owner: *owner, part: *part, pen: *pen }));
+        let half = d.half(i);
+        out.extend(parts.into_iter().map(|prim| Ink { prim, owner: *owner, part: *part, pen: *pen, half }));
     }
     (out, cut)
 }

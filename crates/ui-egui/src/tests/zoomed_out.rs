@@ -57,7 +57,7 @@ fn reach(prim: &Prim) -> f32 {
         &mut |s| shapes.push(s),
         clip,
         Place::at(pos2(0.0, 0.0)),
-        (prim, None, render::Part::Projection),
+        (prim, None, render::Part::Projection, false),
         &Default::default(),
         None,
         false,

@@ -1368,6 +1368,11 @@ impl Look {
         if o.halftone { halftone(c) } else { c }
     }
 
+    /// Whether element `id` is drawn halftone.
+    pub fn half(&self, id: Id) -> bool {
+        self.paint.get(&id).is_some_and(|o| o.halftone)
+    }
+
     /// The colour a 3D view shades element `id` in, `base` unless it says otherwise.
     pub fn surface(&self, id: Id, base: Rgb) -> Rgb {
         let Some(o) = self.paint.get(&id) else { return base };
@@ -1404,8 +1409,12 @@ impl Look {
         if self.paint.is_empty() {
             return;
         }
-        for (((prim, owner), part), pen) in d.prims.iter_mut().zip(&d.owners).zip(&d.parts).zip(d.pens.iter_mut()) {
+        let mut halves = Vec::new();
+        for (i, (((prim, owner), part), pen)) in d.prims.iter_mut().zip(&d.owners).zip(&d.parts).zip(d.pens.iter_mut()).enumerate() {
             let Some(over) = owner.and_then(|id| self.paint.get(&id)) else { continue };
+            if over.halftone && !matches!(prim, Prim::Image { .. } if *part != Part::Cells) {
+                halves.push(i);
+            }
             let style = if *part == Part::Cut { &over.cut } else { &over.projection };
             match prim {
                 Prim::Line { color, dash, .. } => {
@@ -1459,6 +1468,9 @@ impl Look {
                 }
                 Prim::Image { .. } => {}
             }
+        }
+        for i in halves {
+            d.set_half(i);
         }
     }
 }

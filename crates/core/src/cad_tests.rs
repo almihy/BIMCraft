@@ -1185,7 +1185,23 @@ fn a_dense_drawing_zoomed_out_on_a_screen_draws_its_cells_and_still_picks_and_sn
     run(&mut s, "graphics", json!({"view": "Level 1", "categories": {"cadimport": {"halftone": true}}}));
     let half = ink(&render::draw(&s.model, one, view));
     assert!(half < full * 0.6 && half > full * 0.3, "{half} of {full}");
-    run(&mut s, "graphics", json!({"view": "Level 1", "categories": {"cadimport": {}}}));
+    // Each of its primitives, cells and lines, is marked halftone, for a dark screen to fade toward its ground.
+    let all_half = |d: &render::Drawing| {
+        let mine: Vec<usize> = (0..d.prims.len()).filter(|i| d.owners[*i] == Some(id)).collect();
+        !mine.is_empty() && mine.iter().all(|i| d.half(*i))
+    };
+    assert!(all_half(&render::draw(&s.model, one, view)));
+    run(&mut s, "graphics", json!({"view": "Level 1", "categories": {"cadimport": {"halftone": false}}}));
+    let d = render::draw(&s.model, one, view);
+    assert!((0..d.prims.len()).all(|i| !d.half(i)));
+    // As does Halftone on the drawing's row of Imported Categories; on one layer only, a picture of cells is not halftone.
+    run(&mut s, "graphics", json!({"view": "Level 1", "imports": {"dense": {"all": {"halftone": true}}}}));
+    assert!(all_half(&render::draw(&s.model, one, view)));
+    run(&mut s, "graphics", json!({"view": "Level 1", "imports": {"dense": null}}));
+    run(&mut s, "graphics", json!({"view": "Level 1", "imports": {"dense": {"layers": {"WALLS": {"halftone": true}}}}}));
+    let d = render::draw(&s.model, one, view);
+    assert!((0..d.prims.len()).any(|i| d.parts[i] == render::Part::Cells && !d.half(i)));
+    run(&mut s, "graphics", json!({"view": "Level 1", "imports": {"dense": null}}));
     // Picked where its ink is, as one element; its frame, too big for a cell, is drawn as itself and picked along it.
     let screen = render::draw(&s.model, one, view);
     assert_eq!(screen.pick(view.px(P2(6000.0, 0.0)), 2.0), Some(id));

@@ -48,6 +48,9 @@ const FAINT: Rgb = Rgb(120, 120, 120);
 const GRID: Rgb = Rgb(60, 100, 150);
 /// A mass's outline, dashed.
 const MASS: Rgb = Rgb(88, 112, 168);
+/// BIMCraft's own colours for a light ground, each with the one a dark canvas draws it in, as light as reads on it (at least
+/// 4.5 : 1 against its ground): a grid's blue, a mass's.
+pub const ON_DARK: [(Rgb, Rgb); 2] = [(GRID, Rgb(120, 165, 220)), (MASS, Rgb(140, 160, 225))];
 /// Room for grid bubbles and the view title around the drawing, px.
 #[doc(hidden)]
 pub const MARGIN: f64 = 70.0;
@@ -117,6 +120,12 @@ pub struct Drawing {
     /// The pen each stroke or pattern dot is drawn in, for [`Drawing::weigh`] to size; none for other fills, pictures, lettering and
     /// what is sized already (a view's lines on a sheet).
     pub pens: Vec<Option<Pen>>,
+    /// Whether each primitive is halftone, its colour halfway to the paper (baked in, as paper and pictures draw it): a screen
+    /// with a dark ground draws it halfway to that ground instead, as Revit fades halftone toward the background. Read through
+    /// [`Drawing::half`]: it may be shorter than `prims`, those past it not halftone.
+    pub halftone: Vec<bool>,
+    /// Whether the primitives pushed next are halftone.
+    half: bool,
     regions: regions::Layers,
     /// What it could not draw as asked, in English (a fill pattern too dense for the view): for a front end to say.
     pub notes: Vec<String>,
@@ -148,6 +157,8 @@ impl Drawing {
             owners: Vec::new(),
             parts: Vec::new(),
             pens: Vec::new(),
+            halftone: Vec::new(),
+            half: false,
             regions: regions::Layers::default(),
             notes: Vec::new(),
             weights: Weights::default(),
@@ -189,6 +200,30 @@ impl Drawing {
         self.owners.push(self.owner);
         self.parts.push(self.part);
         self.pens.push(pen);
+        if self.half {
+            self.set_half(self.prims.len() - 1);
+        }
+    }
+    /// Whether the primitives pushed next are halftone ([`Drawing::halftone`]).
+    pub(crate) fn halftone_next(&mut self, half: bool) {
+        self.half = half;
+    }
+    /// Whether primitive `i` is halftone ([`Drawing::halftone`]).
+    pub fn half(&self, i: usize) -> bool {
+        self.halftone.get(i).copied().unwrap_or(false)
+    }
+    /// Primitive `i` halftone ([`Drawing::halftone`]).
+    pub(crate) fn set_half(&mut self, i: usize) {
+        if self.halftone.len() <= i {
+            self.halftone.resize(i + 1, false);
+        }
+        self.halftone[i] = true;
+    }
+    /// Each primitive's halftone ([`Drawing::half`]), taken out to be pushed again.
+    fn take_halves(&mut self) -> Vec<bool> {
+        let halves = (0..self.prims.len()).map(|i| self.half(i)).collect();
+        self.halftone.clear();
+        halves
     }
     /// A line through pixels `pts` in `pen`, `dash`ed if it says.
     pub(crate) fn stroke(&mut self, pts: Vec<(f32, f32)>, pen: Pen, color: Rgb, dash: Option<Vec<f32>>, closed: bool) {
@@ -254,20 +289,19 @@ impl Drawing {
         if !self.owners.iter().any(under) {
             return;
         }
+        let halves = self.take_halves();
         let prims = std::mem::take(&mut self.prims);
-        let mut all: Vec<(Prim, Option<Id>, Part, Option<Pen>)> = prims
+        let mut all: Vec<(Prim, Option<Id>, Part, Option<Pen>, bool)> = prims
             .into_iter()
             .zip(std::mem::take(&mut self.owners))
             .zip(std::mem::take(&mut self.parts))
             .zip(std::mem::take(&mut self.pens))
-            .map(|(((p, o), part), pen)| (p, o, part, pen))
+            .zip(halves)
+            .map(|((((p, o), part), pen), half)| (p, o, part, pen, half))
             .collect();
         all.sort_by_key(|(_, o, ..)| !under(o));
-        for (p, o, part, pen) in all {
-            self.prims.push(p);
-            self.owners.push(o);
-            self.parts.push(part);
-            self.pens.push(pen);
+        for (p, o, part, pen, half) in all {
+            keep(self, p, o, part, pen, half);
         }
     }
     /// Each line marked [`BY_CATEGORY`] in the pen its owner's object style gives, cut or in projection as its part is: before
@@ -338,14 +372,12 @@ impl Drawing {
     /// What's drawn cropped to the box from pixel `lo` to `hi`, but for the primitives of the
     /// elements `keep` takes.
     pub(crate) fn crop(&mut self, lo: (f32, f32), hi: (f32, f32), keep: impl Fn(Option<Id>) -> bool) {
+        let halves = self.take_halves();
         let (prims, owners, parts) = (std::mem::take(&mut self.prims), std::mem::take(&mut self.owners), std::mem::take(&mut self.parts));
         let pens = std::mem::take(&mut self.pens);
-        for (((prim, owner), part), pen) in prims.into_iter().zip(owners).zip(parts).zip(pens) {
+        for ((((prim, owner), part), pen), half) in prims.into_iter().zip(owners).zip(parts).zip(pens).zip(halves) {
             for piece in if keep(owner) { vec![prim] } else { cropped(prim, lo, hi) } {
-                self.prims.push(piece);
-                self.owners.push(owner);
-                self.parts.push(part);
-                self.pens.push(pen);
+                self::keep(self, piece, owner, part, pen, half);
             }
         }
     }
@@ -717,11 +749,11 @@ fn plan_filter<'a>(
 }
 
 /// The cut outlines `look` fills in the same colour, together, so no seam shows where two fills
-/// meet: each colour, and the outlines it fills.
-fn cut_unions(look: &Look, outlines: impl Iterator<Item = (Id, Vec<P2>)>) -> Vec<(Rgb, Vec<Vec<P2>>)> {
-    let mut unions: Vec<(Rgb, Vec<Vec<P2>>)> = Vec::new();
+/// meet: each colour, whether it is halftone, and the outlines it fills.
+fn cut_unions(look: &Look, outlines: impl Iterator<Item = (Id, Vec<P2>)>) -> Vec<((Rgb, bool), Vec<Vec<P2>>)> {
+    let mut unions: Vec<((Rgb, bool), Vec<Vec<P2>>)> = Vec::new();
     for (id, o) in outlines {
-        let color = look.cut_fill(id, POCHE);
+        let color = (look.cut_fill(id, POCHE), look.half(id));
         match unions.iter_mut().find(|(c, _)| *c == color) {
             Some((_, rings)) => rings.push(o),
             None => unions.push((color, vec![o])),
@@ -1952,6 +1984,8 @@ impl SectionOverlay {
             owners: b.owners.clone(),
             parts: b.parts.clone(),
             pens: b.pens.clone(),
+            halftone: b.halftone.clone(),
+            half: false,
             regions: regions::Layers::new(b.regions.end(), Some(self.id)),
             notes: b.notes.clone(),
             weights: b.weights,
@@ -2071,23 +2105,25 @@ fn section_base_cancellable(
     // Poché, then the edge of what is cut over it: joined walls show their union, as in plan, filled
     // as one first so no seam shows where pieces meet.
     d.owner = None;
-    let mut unions: Vec<(Rgb, Vec<Vec<P2>>)> = Vec::new();
+    let mut unions: Vec<((Rgb, bool), Vec<Vec<P2>>)> = Vec::new();
     for (owner, rings) in &cuts {
         if cancelled() {
             return None;
         }
-        let color = look.cut_fill(*owner, POCHE);
+        let color = (look.cut_fill(*owner, POCHE), look.half(*owner));
         match unions.iter_mut().find(|(c, _)| *c == color) {
             Some((_, all)) => all.extend(rings.iter().cloned()),
             None => unions.push((color, rings.clone())),
         }
     }
-    for (color, rings) in unions {
+    for ((color, half), rings) in unions {
         if cancelled() {
             return None;
         }
+        d.halftone_next(half);
         d.fill(&rings, color);
     }
+    d.halftone_next(false);
     for (owner, rings) in &cuts {
         if cancelled() {
             return None;
@@ -2591,11 +2627,19 @@ fn cad_drawing(
         && cad_fills_fit(d, ci, lod, band, [lo, hi])
     {
         let meets = |i: usize| lod.entity_box(i).is_some_and(|b| b[0] <= hi.0 && b[2] >= lo.0 && b[1] <= hi.1 && b[3] >= lo.1);
+        let cells_half = look.is_some_and(|l| {
+            let shown = |name: &&String| !(ci.hidden.contains(*name) || in_view.is_some_and(|v| v.contains(*name)));
+            lod.layers.iter().filter(shown).all(|name| l.of_layer(name).halftone)
+        });
         let mut pictures = 0;
         for step in &band.steps {
             match step {
                 Step::Picture(runs) => {
+                    // A picture of cells is halftone where every layer it may draw is: on a dark screen, one of a drawing
+                    // halftone in part keeps its halftone layers' cells halfway to the paper.
+                    d.halftone_next(cells_half);
                     cad_cells(d, ci, (&picture, pictures, runs), band.cell, [lo, hi], &|i| ents.fill(i));
+                    d.halftone_next(false);
                     pictures += 1;
                 }
                 Step::Whole(list) => {
@@ -2656,8 +2700,17 @@ impl CadEntities<'_> {
         Some((rings, if half { halftone(own) } else { own }, e.alpha))
     }
 
-    /// Draws entity `i`, if it is shown.
+    /// Draws entity `i`, if it is shown: all of it halftone, or none ([`Drawing::halftone`]).
     fn draw(&mut self, d: &mut Drawing, i: usize) {
+        let Some(ent) = self.cad.dxf().entities.get(i) else { return };
+        let half = self.over(ent).is_some_and(|o| o.halftone);
+        d.halftone_next(half);
+        self.draw_one(d, i);
+        d.halftone_next(false);
+    }
+
+    /// [`CadEntities::draw`], halftone or not as it sets.
+    fn draw_one(&mut self, d: &mut Drawing, i: usize) {
         use crate::dxf::{Horizontal, Shape, Vertical};
         let (cad, ci) = (self.cad, self.ci);
         let Some(ent) = cad.dxf().entities.get(i) else { return };
@@ -3363,9 +3416,11 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
     let (under, own): (Vec<_>, Vec<_>) = outlines.iter().partition(|(id, _)| crate::link::is_linked(*id));
     for (group, owner) in [(under, Some(crate::link::UNION)), (own, None)] {
         d.owner = owner;
-        for (color, rings) in cut_unions(&look, group.into_iter().map(|(id, o)| (*id, o.clone()))) {
+        for ((color, half), rings) in cut_unions(&look, group.into_iter().map(|(id, o)| (*id, o.clone()))) {
+            d.halftone_next(half);
             d.fill(&rings, color);
         }
+        d.halftone_next(false);
     }
     // One fill per wall or column: in one even-odd fill, overlapping walls would cancel out.
     for (id, o) in &outlines {
@@ -4632,12 +4687,13 @@ fn linework(d: &mut Drawing, m: &Model, items: &[crate::graphics::Linework]) {
     if edges.is_empty() {
         return;
     }
+    let halves = d.take_halves();
     let prims = std::mem::take(&mut d.prims);
     let (owners, parts, pens) = (std::mem::take(&mut d.owners), std::mem::take(&mut d.parts), std::mem::take(&mut d.pens));
-    for (((prim, owner), part), pen) in prims.into_iter().zip(owners).zip(parts).zip(pens) {
+    for ((((prim, owner), part), pen), half) in prims.into_iter().zip(owners).zip(parts).zip(pens).zip(halves) {
         let mine = owner.and_then(|id| edges.get(&id)).filter(|_| !matches!(part, Part::Text | Part::Pattern));
         let (Some(mine), Prim::Line { .. }) = (mine, &prim) else {
-            keep(d, prim, owner, part, pen);
+            keep(d, prim, owner, part, pen, half);
             continue;
         };
         let mut pieces = vec![(prim, pen)];
@@ -4661,10 +4717,10 @@ fn linework(d: &mut Drawing, m: &Model, items: &[crate::graphics::Linework]) {
                 });
             if let (Some((pattern, color, k)), Prim::Line { pts, .. }, Some(pen)) = (pattern, &prim, pen) {
                 for graphic in pattern.geometry(pts, k, d.width(pen), color) {
-                    keep(d, graphic.prim, owner, Part::LinePattern, graphic.weighted.then_some(pen));
+                    keep(d, graphic.prim, owner, Part::LinePattern, graphic.weighted.then_some(pen), half);
                 }
             } else {
-                keep(d, prim, owner, part, pen);
+                keep(d, prim, owner, part, pen, half);
             }
         }
     }
@@ -4737,12 +4793,15 @@ fn along(prim: Prim, pen: Option<Pen>, edge: &Edge) -> Vec<(Prim, Option<Pen>)> 
         .collect()
 }
 
-/// `prim` back in the drawing, with its owner, part and pen.
-fn keep(d: &mut Drawing, prim: Prim, owner: Option<Id>, part: Part, pen: Option<Pen>) {
+/// `prim` back in the drawing, with its owner, part, pen and halftone.
+fn keep(d: &mut Drawing, prim: Prim, owner: Option<Id>, part: Part, pen: Option<Pen>, half: bool) {
     d.prims.push(prim);
     d.owners.push(owner);
     d.parts.push(part);
     d.pens.push(pen);
+    if half {
+        d.set_half(d.prims.len() - 1);
+    }
 }
 
 /// A detail group's members where it puts them: its regions under its lines and notes.
