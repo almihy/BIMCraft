@@ -1011,7 +1011,8 @@ fn table(
         };
         for (n, row) in rows.iter().enumerate() {
             let enabled = enabled && row.enabled;
-            let (r, clicked) = ui.allocate_exact_size(vec2(total, ROW_H), Sense::click());
+            // The row and its name take a click but no Tab stop: a row's one stop before its cells is its box, as it was.
+            let (r, clicked) = ui.allocate_exact_size(vec2(total, ROW_H), Sense::CLICK);
             let picked = d.picked.contains(&row.pick);
             let p = ui.painter().clone();
             if picked {
@@ -1054,7 +1055,7 @@ fn table(
                 tone,
             );
             // A click on the name, or on the row where nothing else takes it, picks the row.
-            let name_hit = ui.interact(name_at, ui.id().with(("vg-row", n, &row.name)), Sense::click());
+            let name_hit = ui.interact(name_at, ui.id().with(("vg-row", n, &row.name)), Sense::CLICK);
             name_hit.widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, enabled, picked, &row.name));
             if (clicked.clicked() || name_hit.clicked()) && enabled {
                 // The keys held as the button was let go, as the click is.

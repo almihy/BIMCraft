@@ -4672,6 +4672,13 @@ fn visibility_graphics_is_a_table_each_cell_overriding_its_own_part() {
     assert!(g.hides("wall") && !g.hides("floor") && !g.hides("door"));
     // A row picked, a second with Ctrl: a box cleared on either hides both; Override… gives both the same lines.
     shortcut(&mut h, "VV");
+    // A row's one Tab stop before its cells is its box: Tab goes from it to its first cell.
+    h.get_by_role_and_label(Role::CheckBox, "Floors").scroll_to_me();
+    h.run();
+    h.get_by_role_and_label(Role::CheckBox, "Floors").focus();
+    h.run();
+    key(&mut h, Key::Tab);
+    assert!(h.get_by_role_and_label(Role::Button, "Floors: Projection Lines").is_focused(), "from the box to the first cell");
     row(&mut h, "Floors", egui::Modifiers::NONE);
     row(&mut h, "Doors", egui::Modifiers::COMMAND);
     pick(&mut h, Role::CheckBox, "Doors");
