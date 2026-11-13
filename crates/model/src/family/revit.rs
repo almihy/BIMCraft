@@ -262,7 +262,9 @@ impl Reader<'_> {
         let mid = middle(sd, ed, cd, [*nx, *ny, *nz]);
         let radius = a.get("radius").map(|r| self.value(r)).transpose()?;
         // A point it passes through, where the exporter gives one bound (its centre follows nothing it can say).
-        let through = a.get("mid").filter(|m| m.is_array()).map(|m| self.point(m)).transpose()?;
+        // Only where it is bound: a mid of plain numbers says nothing a centre doesn't.
+        let through =
+            a.get("mid").filter(|m| m.as_array().is_some_and(|v| v.iter().any(|x| !x.is_number()))).map(|m| self.point(m)).transpose()?;
         Ok(Bit { start, end, arc: Some((centre, normal, doc(mid))), radius, through })
     }
 
@@ -633,10 +635,11 @@ impl Reader<'_> {
     /// A symbolic line's curves as symbols in its view; a model line's in each of plan, front and side its Visibility
     /// Settings draw it in (Revit draws a model line in every view that sees it, seen flat in that view).
     fn lines(&self, def: &Value) -> Result<Vec<Symbol>, String> {
-        // A masking region's edge, or a line drawn in Revit's invisible style, draws nothing.
-        if ["masking", "invisible"].iter().any(|k| def[*k].as_bool() == Some(true)) {
+        // A line drawn in Revit's invisible style draws nothing.
+        if def["invisible"].as_bool() == Some(true) {
             return Ok(Vec::new());
         }
+        // A masking region's edge is drawn as its Visibility Settings say, as a line's.
         let show = def.get("show").and_then(|s| serde_json::from_value::<Show>(s.clone()).ok());
         let views = match def["view"].as_str().unwrap_or("plan") {
             "plan" => vec![SymbolView::Plan],

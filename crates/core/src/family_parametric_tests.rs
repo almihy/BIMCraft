@@ -754,7 +754,7 @@ fn an_arch_through_a_bound_point_follows_its_width_where_its_centre_cant() {
             line(json!([w(-0.5), 0, 0]), json!([w(0.5), 0, 0])),
             line(json!([w(0.5), 0, 0]), json!([w(0.5), 0, 1000])),
             {"arc": {"start": [w(0.5), 0, 1000], "end": [w(-0.5), 0, 1000], "center": [0, 0, 375], "radius": 725, "normal": [0, -1, 0],
-                     "mid": [0, 0, 1200]}},
+                     "mid": [0, 0, {"formula": "1200"}]}},
             line(json!([w(-0.5), 0, 1000]), json!([w(-0.5), 0, 0]))
         ]]}]}
     });
@@ -789,7 +789,8 @@ fn a_plane_following_a_host_face_a_masking_region_and_a_nested_parts_detail_leve
                 {"id": "t", "name": "Threshold Front", "normal": [0, 1, 0], "at": {"A": 130}, "follows": {"ref": "w.exterior", "offset": 30}},
                 {"id": "c", "name": "Center", "normal": [1, 0, 0], "defines_origin": true, "at": at}
             ],
-            "lines": [{"view": "plan", "filled": true, "masking": true, "curves": [line(json!([0, 0, 0]), json!([100, 0, 0]))]}],
+            "lines": [{"view": "plan", "filled": true, "masking": true, "curves": [line(json!([0, 0, 0]), json!([100, 0, 0]))]},
+                      {"view": "plan", "filled": true, "masking": true, "invisible": true, "curves": [line(json!([0, 0, 0]), json!([0, 100, 0]))]}],
             "nested": [{"family": "Sample Knob", "type": "Standard", "at": [0, 0, 0], "rotation": 0, "mirrored": false,
                         "show": {"coarse": true, "medium": true, "fine": true, "plan": true, "front": true, "side": true, "plan_top": false}}]
         }
@@ -804,8 +805,8 @@ fn a_plane_following_a_host_face_a_masking_region_and_a_nested_parts_detail_leve
     );
     let v = f.values_in("A", &Default::default(), 300.0).unwrap();
     assert_eq!(v["ref(Threshold Front)"], crate::family::Val::Number(180.0));
-    // The masking region draws nothing.
-    assert!(f.symbols.iter().all(|y| y.snapshot), "{:?}", f.symbols);
+    // The masking region's edge draws as a line does; one in invisible lines, nothing.
+    assert_eq!(f.symbols.iter().filter(|y| !y.snapshot).count(), 1, "{:?}", f.symbols);
     // The knob: its own form is off at Coarse, its nested part's settings take off its Top/Bottom; both hold.
     let others = |n: &str| s.model.families.get(n);
     let pieces = f.pieces_with("A", &f.values("A", &Default::default()).unwrap(), &others).unwrap();
