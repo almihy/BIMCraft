@@ -1363,7 +1363,7 @@ other_files(
         "{name?, category?: furniture|casework|plumbing|lighting|generic|door|window, parameters?: [{name, kind?: length|number|\
          angle|yesno|material|text, instance?, value?, formula?, unit?, group?}], types?: {type: {parameter: value}}, forms?: [{plane?: xy|xz|yz, \
          profile?: [[a, b], …], circle?: {centre: [a, b], radius}, axis?: [[a, b], [a, b]], from?, to, material?, visible?, \
-         void?, show?: {coarse?, medium?, fine?, plan?, front?, side?}, types?: [type, …], outline?: [[x, y], …], subcategory?}], \
+         void?, show?: {coarse?, medium?, fine?, plan?, front?, side?, plan_top?, plan_cut?}, types?: [type, …], outline?: [[x, y], …], subcategory?}], \
          symbols?: [{line?: [[x, y], …] | arc?: {centre: [x, y], radius, from?, to} | text?: {at: [x, y], height, value, align?: left|center|right} | dot?: {centre: [x, y], radius}, visible?, \
          view?: plan|front|side, show?: {coarse?, medium?, fine?}, types?: [type, …], subcategory?}], form?: {id | guid, …a \
          form's fields}, symbol?: {id | guid, …a symbol's fields}, delete_form?: [id | guid, …], delete_symbol?: [id | guid, …], \
@@ -1391,7 +1391,12 @@ other_files(
          a field away; its place, its id and its GUID stay), `delete_form` takes those forms away; `symbol` and `delete_symbol` \
          do the same for symbols — where `forms` and `symbols` still replace whole lists. Every reply carries `warnings`: what's \
          worth knowing and doesn't stop the change (a void cutting no solid, a form outside the opening or thicker than its \
-         wall, a door's or window's plan with no symbols). Its forms are profiles drawn in its own axes (x along a component's \
+         wall, a door's or window's plan with no symbols, a door's leaf drawn shut in plan beside its swing). A form's `show` is \
+         Revit's Visibility Settings, each true unless it says false: the detail levels that draw it, whether plans draw it \
+         (`plan`; `plan_cut` where the cut plane passes through it), and views along its y (`front`) or x (`side`); none, \
+         every one. A door's leaf, shut in its opening, takes `show: {plan: false}`, and its plan draws it open with symbols, \
+         as Revit's door families do: a `line` round the panel, square to the wall from its hinge on the face it swings to, as \
+         long as the leaf and as thick, and the `arc` its free edge sweeps, both `show: {}` so every detail level draws them. Its forms are profiles drawn in its own axes (x along a component's \
          angle, y to its left, z up from its base) and swept: `xy` up from `from` to `to`, `xz` along y, `yz` along x. With an \
          `axis`, a line in that plane, the profile is turned about it instead, `from` to `to` degrees (up to 360, right-handed \
          from the axis' first point toward its second; it can't cross the axis): a pipe, a bowl, a lamp shade. A `void` is no \
@@ -1419,8 +1424,8 @@ other_files(
          `connectors` in `elements`, with `at` and `direction` in the model, where it stands; a \
          lighting, outlet or switch family without one counts as zero load, which `inspect` warns of; `connectors` replace \
          their own, as `parameters`, `forms` and `symbols` do. The `symbols` of a family of any category are what its plan \
-         draws besides its forms, in its own axes, turned and moved (and mirrored) with the component or opening and hidden at \
-         coarse detail: each one `line` (points), `arc` (degrees from +x counter-clockwise, up to a full turn), `text` or `dot`, \
+         draws besides its forms, in its own axes, turned and moved (and mirrored) with the component or opening and drawn at \
+         the detail levels its `show` says (none, every level but Coarse): each one `line` (points), `arc` (degrees from +x counter-clockwise, up to a full turn), `text` or `dot`, \
          one of them, with `visible` a yes/no parameter or formula. A `text` is lettered in BIMCraft's own strokes, capitals \
          `height` mm tall, `at` the middle of the line of text vertically (`align` says whether `at` is where it starts, its \
          middle or its end); its anchor moves with the component but its letters always read upright, left to right, never \

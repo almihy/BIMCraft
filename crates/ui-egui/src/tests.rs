@@ -6288,6 +6288,83 @@ fn loading_a_family_the_project_has_asks_whether_to_keep_its_values() {
 }
 
 #[test]
+fn the_family_editor_sets_a_forms_and_a_symbols_visibility_settings_as_revits_dialog_does() {
+    use bimcraft_core::family::{Levels, Show};
+    use egui_kittest::kittest::NodeT as _;
+    let ticked = |h: &Harness<BimApp>, name: &str| {
+        h.get_by_role_and_label(Role::CheckBox, name).accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
+    };
+    let mut h = app(&format!(
+        "{BOX}
+door {{\"at\": [2000, 0], \"family\": \"Single Door\", \"type\": \"900 x 2100\"}}"
+    ));
+    let door = find(&h, |e| matches!(e, Element::Door(_)));
+    h.state_mut().selection = vec![door];
+    h.set_size(vec2(1800.0, 900.0));
+    press(&mut h, "Manage");
+    press(&mut h, "Edit Family");
+    press(&mut h, "Forms");
+    // The leaf, shut in its opening: the form a plan doesn't draw.
+    let forms = |h: &Harness<BimApp>| h.state().session.model.families["Single Door"].forms.clone();
+    let leaf = forms(&h).iter().position(|f| f.show.is_some_and(|s| !s.plan)).expect("the leaf says a plan doesn't draw it");
+    let n = leaf + 1;
+    h.get_by_label(&format!("{n}. Extrusion")).click_accesskit();
+    h.run();
+    h.get_by_label(&format!("Edit Visibility/Graphics Overrides {n}")).click_accesskit();
+    h.run();
+    assert!(h.query_by_label("Family Element Visibility Settings").is_some(), "Edit… opens the dialog");
+    // Its settings as the family has them: every view but Plan/RCP, every detail level.
+    assert!(!ticked(&h, "Plan/RCP"), "a plan doesn't draw the leaf shut");
+    for name in ["Front/Back", "Left/Right", "When cut in Plan/RCP (if category permits)", "Coarse", "Medium", "Fine"] {
+        assert!(ticked(&h, name), "{name}");
+    }
+    // Cancel leaves it as it was.
+    h.get_by_role_and_label(Role::CheckBox, "Plan/RCP").click();
+    h.run();
+    assert!(ticked(&h, "Plan/RCP"), "ticked");
+    press_near(&mut h, "Cancel", "Default");
+    assert!(h.query_by_label("Family Element Visibility Settings").is_none(), "Cancel closes the dialog");
+    press_near(&mut h, "Apply", "Cancel");
+    assert_eq!(forms(&h)[leaf].show, Some(Show { plan: false, ..Show::default() }), "Cancel changes nothing");
+    // Ticked and OK'd, then applied: a plan draws it, and the plan draws the leaf shut in the wall.
+    let shut = |h: &Harness<BimApp>| {
+        let d = bimcraft_core::render::plan(&h.state().session.model, 100000, 4000, 3000);
+        d.prims
+            .iter()
+            .zip(&d.owners)
+            .filter(|(p, o)| **o == Some(door) && matches!(p, bimcraft_core::prim::Prim::Line { closed: true, .. }))
+            .count()
+    };
+    let before = shut(&h);
+    h.get_by_label(&format!("Edit Visibility/Graphics Overrides {n}")).click_accesskit();
+    h.run();
+    h.get_by_role_and_label(Role::CheckBox, "Plan/RCP").click();
+    h.run();
+    assert!(ticked(&h, "Plan/RCP"), "ticked again");
+    h.get_by_role_and_label(Role::CheckBox, "Coarse").click();
+    h.run();
+    assert!(!ticked(&h, "Coarse"), "Coarse off");
+    press_near(&mut h, "OK", "Default");
+    assert!(h.query_by_label("Family Element Visibility Settings").is_none(), "OK closes the dialog");
+    press_near(&mut h, "Apply", "Cancel");
+    assert_eq!(forms(&h)[leaf].show, Some(Show { coarse: false, ..Show::default() }), "Plan/RCP ticked, Coarse not");
+    assert_eq!(shut(&h), before + 1, "the plan draws the leaf where it is cut, shut in the opening");
+    // A symbol's: its detail levels alone.
+    press(&mut h, "Symbols");
+    h.get_by_label("Edit Visibility/Graphics Overrides 1").click_accesskit();
+    h.run();
+    assert!(h.query_by_label("Plan/RCP").is_none(), "a symbol is drawn in plan: only its detail levels");
+    assert!(ticked(&h, "Coarse"), "the leaf's panel is drawn at every level");
+    h.get_by_role_and_label(Role::CheckBox, "Coarse").click();
+    h.run();
+    press_near(&mut h, "OK", "Default");
+    press_near(&mut h, "OK", "Cancel");
+    let symbols = &h.state().session.model.families["Single Door"].symbols;
+    assert_eq!(symbols[0].show, Some(Levels { coarse: false, ..Levels::default() }));
+    assert_eq!(symbols[1].show, Some(Levels::default()), "the other symbols as they were");
+}
+
+#[test]
 fn the_door_tool_places_the_projects_single_door_of_a_family_and_the_type_selector_offers_both_kinds() {
     let mut h = app(BOX);
     tool(&mut h, "Door");

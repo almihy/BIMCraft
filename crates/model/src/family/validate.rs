@@ -88,11 +88,17 @@ fn formulas(f: &Family, out: &mut Vec<String>) {
 }
 
 /// What the forms' boxes say, over every type: a void that reaches no solid before it, a door's or
-/// a window's form wholly outside the opening it stands in, one thicker than the wall it's in, and
-/// a plan with nothing drawn on it. A fault every type has is one warning naming all of them.
+/// a window's form wholly outside the opening it stands in, one thicker than the wall it's in, a
+/// plan with nothing drawn on it, and a door's leaf drawn shut in a plan that draws it open. A fault every type has is one warning naming all of them.
 fn geometry(f: &Family, out: &mut Vec<String>) {
     if f.category.hosted() && !f.symbols.iter().any(|y| y.view == super::SymbolView::Plan) {
         out.push("its plan draws no symbols: a door's or a window's plan shows its swing or its sill, and this one shows nothing".into());
+    }
+    for i in f.shut_leaves() {
+        out.push(format!(
+            "form {}: a door's leaf, shut in its opening, is drawn in plan beside its swing; as Revit's door families do, give it              `show: {{plan: false}}` and draw the leaf open with its symbols (a panel as thick as the leaf, square to the wall)",
+            i + 1
+        ));
     }
     let number = |values: &BTreeMap<String, Val>, name: &str| match values.get(name) {
         Some(Val::Number(x)) => Some(*x),

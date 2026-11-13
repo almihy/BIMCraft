@@ -4255,22 +4255,17 @@ fn opening(d: &mut Drawing, m: &Model, e: &Element, o: &Opening, w: &Wall, cut: 
     if !shown || (d.detail == Detail::Coarse && o.family.is_none() && !matches!(e, Element::Door(_))) {
         return;
     }
-    // Of a family: the forms the cut plane passes through that a plan at its detail level draws, outlined, and the lines of
-    // its symbols at that level (a door's swing).
+    // Of a family: the forms a plan at its detail level draws (as Revit's Visibility Settings say: cut by its Plan/RCP when
+    // cut, wholly under the cut plane seen from above by its Top/Bottom, as Revit draws a door's or a window's forms below
+    // the cut; a door's leaf, shut in the opening, says no and is drawn open by its symbols), outlined, and the lines of its
+    // symbols drawn at that level (a door's swing).
     if o.family.is_some() {
         let detail = d.detail;
-        // Cut, as its Plan/RCP setting says; wholly under the cut plane (a window's board), seen from above at its level,
-        // as Revit draws a door's or a window's forms below the cut whatever that setting says.
-        let drawn = |p: &crate::family::Piece| p.show.map_or(detail != Detail::Coarse, |s| s.plan && s.plan_cut && s.at(detail));
-        let seen = |p: &crate::family::Piece| p.show.map_or(detail != Detail::Coarse, |s| s.plan_top && s.at(detail));
-        let eps = crate::family::check::CUT_EPS;
-        let crossing = |p: &crate::family::Piece| p.bottom < cut - eps && cut < p.top;
-        for piece in m.opening_pieces(e).iter().filter(|p| if crossing(p) { drawn(p) } else { p.bottom <= cut + eps && seen(p) }) {
+        for piece in m.opening_pieces(e).iter().filter(|p| p.in_plan_cut(detail, cut, true)) {
             d.line(&piece.outline, BY_CATEGORY, INK, true);
         }
         d.part(Part::Projection);
-        let shown = m.opening_marks(e, d.detail);
-        marks(d, &shown);
+        marks(d, &m.opening_marks(e, detail));
         d.part(Part::Cut);
         return;
     }

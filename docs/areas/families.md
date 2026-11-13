@@ -93,6 +93,16 @@ a project only through the `favorite` command (`load` never overwrites without `
 preview is a scratch `Session` of its own, and it says what's wrong inside the window (the status box, over the view's corner, would lie on its
 buttons).
 
+A form's `show` and a symbol's are Revit's Visibility Settings (`family::Show`, `family::Levels`): each box true unless it says
+false. A form that says nothing is drawn in every view at every detail level, as Revit's default (`Show::in_view`; a symbol that
+says nothing, at every level but Coarse, `Levels::UNSAID`); the built-in door and window families state theirs, so their forms
+that Revit's families would hide at Coarse say so. The Family Editor carries both through (`FormText::show`, `SymbolText::show`), and
+each form's and symbol's Visibility/Graphics Overrides row has Edit…, which opens Family Element Visibility Settings as Revit's does
+(`editor.rs::visibility_settings`) and is the only place the editor sets a visibility: for a form View Specific Display (Plan/RCP,
+Front/Back, Left/Right, When cut in Plan/RCP) and Detail Levels, for a symbol its Detail Levels alone; it opens on what is drawn,
+Default ticks every box, and OK sets `show` only when a box changed, so what said nothing keeps saying nothing. The `family`
+command sets the same with `form`/`symbol` patches (`{"id": …, "show": {"plan": true}}` merges; `null` takes it away).
+
 A type of a category or of a family is renamed with `rename_type` (`Model::move_entry` moves it in its map, and `rename_entry` the
 library entry and every reference `Model::lib_refs_mut` visits, so it keeps its GUID). A type or a family goes with `delete_type` (one entry, refused while an element uses it, and for the last type of a category or of a family: a
 tool needs one to place) and `purge` (every entry of the kinds asked that nothing uses). Use is what `Model::lib_refs_mut` visits, the one place

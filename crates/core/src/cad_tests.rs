@@ -1122,12 +1122,12 @@ fn a_new_template_forces_this_builds_format_only_when_import_settings_reach_its_
     run(&mut s, "template", json!({"name": "Plan", "hide": ["cadimport"]}));
     assert_eq!(format(&s), json!(crate::model::PREVIOUS_FORMAT));
     run(&mut s, "template", json!({"name": "Plan", "show": ["cadimport"]}));
-    // How an import draws, in the template: this build's.
+    // How an import draws, in the template: format 21's.
     run(&mut s, "template", json!({"name": "Plan", "imports": {"plan": {"all": {"halftone": true}}}}));
     assert_eq!(format(&s), json!(crate::model::PDF_FORMAT));
     run(&mut s, "template", json!({"name": "Plan", "imports": {"plan": null}}));
     assert_eq!(format(&s), json!(crate::model::PREVIOUS_FORMAT));
-    // A drawing's layers it hides reach its views only through the group the older build can't name: this build's too.
+    // A drawing's layers it hides reach its views only through the group the older build can't name: format 21's too.
     run(&mut s, "template", json!({"name": "Plan", "layers": {"plan": ["WALLS"]}}));
     assert_eq!(format(&s), json!(crate::model::PDF_FORMAT));
     run(&mut s, "template", json!({"name": "Plan", "layers": {"plan": null}}));

@@ -654,7 +654,7 @@ impl Graphics {
         *self == Graphics::default()
     }
 
-    /// Whether it holds what [`crate::model::FORMAT`] 21 brought: a PDF page's layers hidden, or how an import or a PDF page
+    /// Whether it holds what [`crate::model::LAYERS_FORMAT`] 21 brought: a PDF page's layers hidden, or how an import or a PDF page
     /// draws; a build that reads up to 20 would refuse it as a field it doesn't know.
     pub fn holds_imports(&self) -> bool {
         !self.pdf_layers.is_empty() || !self.imports.is_empty() || !self.pdf_imports.is_empty()

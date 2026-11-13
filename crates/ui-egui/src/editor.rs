@@ -107,6 +107,8 @@ struct FormText {
     material: String,
     visible: String,
     void: bool,
+    /// Its Visibility Settings, as the family has them or the dialog set them; none, never said.
+    show: Option<Show>,
 }
 
 impl FormText {
@@ -130,6 +132,7 @@ impl FormText {
             material: f.material.clone(),
             visible: f.visible.as_ref().map(expr_text).unwrap_or_default(),
             void: f.void,
+            show: f.show,
         }
     }
 
@@ -169,6 +172,7 @@ impl FormText {
         f.material = self.material.trim().to_string();
         f.visible = (!self.visible.trim().is_empty()).then(|| text_expr(&self.visible));
         f.void = self.void;
+        f.show = self.show;
         if self.mesh() {
             return Ok(f);
         }
@@ -300,6 +304,8 @@ struct SymbolText {
     value: String,
     align: LabelAlign,
     visible: String,
+    /// The detail levels it is drawn at, as the family has them or the dialog set them; none, never said.
+    show: Option<Levels>,
 }
 
 impl SymbolText {
@@ -320,6 +326,7 @@ impl SymbolText {
             value: String::new(),
             align: LabelAlign::Left,
             visible: String::new(),
+            show: None,
         };
         match part {
             Part::Line => SymbolText { line: s("0, 0\n0, 900"), ..base },
@@ -417,6 +424,58 @@ pub(crate) struct FamilyEditor {
     preview: Option<(u64, TextureHandle)>,
     /// Why the family can't be tried or made: shown under the preview.
     problem: Option<String>,
+    /// The Family Element Visibility Settings dialog, while it's open over the editor.
+    settings: Option<Settings>,
+}
+
+/// Which of the family's elements the Visibility Settings dialog sets: a form or a symbol, by its place in its list.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Which {
+    Form(usize),
+    Symbol(usize),
+}
+
+/// The Family Element Visibility Settings dialog, as Revit's: the views and detail levels that draw a form, or the detail
+/// levels that draw a symbol.
+struct Settings {
+    of: Which,
+    /// As ticked.
+    show: Show,
+    /// As it opened: unchanged, a form or a symbol that never said keeps saying nothing.
+    was: Show,
+}
+
+impl Settings {
+    fn of(ed: &FamilyEditor, of: Which) -> Option<Settings> {
+        let show = match of {
+            Which::Form(i) => Show::in_view(ed.forms.get(i)?.show),
+            Which::Symbol(i) => {
+                let l = Levels::of(ed.symbols.get(i)?.show);
+                Show { coarse: l.coarse, medium: l.medium, fine: l.fine, ..Show::default() }
+            }
+        };
+        Some(Settings { of, show, was: show })
+    }
+
+    /// What was ticked, set on its form or symbol; untouched, it stays as it was.
+    fn apply(&self, ed: &mut FamilyEditor) {
+        if self.show == self.was {
+            return;
+        }
+        let s = self.show;
+        match self.of {
+            Which::Form(i) => {
+                if let Some(f) = ed.forms.get_mut(i) {
+                    f.show = Some(s);
+                }
+            }
+            Which::Symbol(i) => {
+                if let Some(y) = ed.symbols.get_mut(i) {
+                    y.show = Some(Levels { coarse: s.coarse, medium: s.medium, fine: s.fine });
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -471,6 +530,7 @@ impl FamilyEditor {
             look: (AZIMUTH, ELEVATION),
             preview: None,
             problem: None,
+            settings: None,
         }
     }
 
@@ -907,125 +967,109 @@ fn types_tab(ed: &mut FamilyEditor, ui: &mut Ui, materials: &[String]) {
     }
 }
 
-/// Ticks for a form's or a symbol's Visibility Settings, as Revit's dialog has them: each flag of `flags`, named, its value
-/// changed in place. Whether one changed.
-fn visibility(ui: &mut Ui, id: String, flags: &mut [(&'static str, &mut bool)]) -> bool {
-    let mut changed = false;
-    ui.horizontal(|ui| {
-        for (label, on) in flags.iter_mut() {
-            let r = ui.checkbox(on, t(label));
-            let on_now = **on;
-            r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on_now, format!("{id} {}", t(label))));
-            changed |= r.changed();
-        }
+/// A row of a form's or a symbol's fields, as Revit's Properties have it for a family's element: Visibility/Graphics
+/// Overrides, its Edit… opening the Visibility Settings. Whether it was clicked.
+fn visibility_row(ui: &mut Ui, n: usize) -> bool {
+    ui.label(t("Visibility/Graphics Overrides"));
+    let r = ui.add_sized([200.0, ui.spacing().interact_size.y], egui::Button::new(t("Edit…")));
+    r.widget_info(|| {
+        WidgetInfo::labeled(WidgetType::Button, true, format!("{} {n}", tf("Edit {}", &[t("Visibility/Graphics Overrides")])))
     });
-    changed
+    ui.end_row();
+    r.clicked()
 }
 
-/// One form's fields.
-fn form_fields(ui: &mut Ui, f: &mut FormText, i: usize, options: &[String]) {
+/// One form's fields: whether its Visibility/Graphics Overrides' Edit… was clicked.
+fn form_fields(ui: &mut Ui, f: &mut FormText, i: usize, options: &[String]) -> bool {
     let n = i + 1;
     let planes = [(Plane::Xy, msg!("Plane XY")), (Plane::Xz, msg!("Plane XZ")), (Plane::Yz, msg!("Plane YZ"))];
-    Grid::new(("fe-form-grid", i)).num_columns(2).spacing(vec2(12.0, 5.0)).show(ui, |ui| {
-        if f.mesh() {
-            ui.label(t("Mesh"));
-            ui.label(RichText::new(tf("{} triangles, from a file", &[&f.original.mesh.len().to_string()])).color(pal().muted));
-            ui.end_row();
-        } else {
-            ui.label(t("Plane"));
-            crate::icons::combo(("fe-plane", i))
-                .selected_text(t(planes.iter().find(|(p, _)| *p == f.plane).map_or("Plane XY", |(_, l)| l)))
-                .width(110.0)
-                .show_ui(ui, |ui| {
-                    for (p, label) in planes {
-                        ui.selectable_value(&mut f.plane, p, t(label));
-                    }
-                });
-            ui.end_row();
-            ui.label(t("Shape"));
-            crate::icons::combo(("fe-shape", i))
-                .selected_text(if f.shape == Shape::Profile { t("Profile") } else { t("Circle") })
-                .width(110.0)
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut f.shape, Shape::Profile, t("Profile"));
-                    ui.selectable_value(&mut f.shape, Shape::Circle, t("Circle"));
-                });
-            ui.end_row();
-            if f.shape == Shape::Profile {
-                ui.label(t("Corners"));
-                let r = ui.add(TextEdit::multiline(&mut f.profile).desired_rows(4).desired_width(300.0).id_salt(("fe-profile", i)));
-                r.widget_info(|| WidgetInfo::labeled(WidgetType::TextEdit, true, format!("{} {n}", t("Form Corners"))));
+    Grid::new(("fe-form-grid", i))
+        .num_columns(2)
+        .spacing(vec2(12.0, 5.0))
+        .show(ui, |ui| {
+            if f.mesh() {
+                ui.label(t("Mesh"));
+                ui.label(RichText::new(tf("{} triangles, from a file", &[&f.original.mesh.len().to_string()])).color(pal().muted));
+                ui.end_row();
             } else {
-                ui.label(t("Circle centre and radius"));
-                ui.horizontal(|ui| {
-                    for (k, what) in [msg!("Form Circle X"), msg!("Form Circle Y"), msg!("Form Circle Radius")].into_iter().enumerate() {
-                        field(ui, format!("{} {n}", t(what)), &mut f.circle[k], 80.0);
-                    }
-                });
-            }
-            ui.end_row();
-            ui.label(t("Revolve"));
-            ui.checkbox(&mut f.revolve, t("turned about an axis"));
-            ui.end_row();
-            if f.revolve {
-                ui.label(t("Axis"));
-                ui.horizontal(|ui| {
-                    for (k, what) in
-                        [msg!("Form Axis X1"), msg!("Form Axis Y1"), msg!("Form Axis X2"), msg!("Form Axis Y2")].into_iter().enumerate()
-                    {
-                        field(ui, format!("{} {n}", t(what)), &mut f.axis[k], 60.0);
-                    }
-                });
+                ui.label(t("Plane"));
+                crate::icons::combo(("fe-plane", i))
+                    .selected_text(t(planes.iter().find(|(p, _)| *p == f.plane).map_or("Plane XY", |(_, l)| l)))
+                    .width(110.0)
+                    .show_ui(ui, |ui| {
+                        for (p, label) in planes {
+                            ui.selectable_value(&mut f.plane, p, t(label));
+                        }
+                    });
+                ui.end_row();
+                ui.label(t("Shape"));
+                crate::icons::combo(("fe-shape", i))
+                    .selected_text(if f.shape == Shape::Profile { t("Profile") } else { t("Circle") })
+                    .width(110.0)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut f.shape, Shape::Profile, t("Profile"));
+                        ui.selectable_value(&mut f.shape, Shape::Circle, t("Circle"));
+                    });
+                ui.end_row();
+                if f.shape == Shape::Profile {
+                    ui.label(t("Corners"));
+                    let r = ui.add(TextEdit::multiline(&mut f.profile).desired_rows(4).desired_width(300.0).id_salt(("fe-profile", i)));
+                    r.widget_info(|| WidgetInfo::labeled(WidgetType::TextEdit, true, format!("{} {n}", t("Form Corners"))));
+                } else {
+                    ui.label(t("Circle centre and radius"));
+                    ui.horizontal(|ui| {
+                        for (k, what) in [msg!("Form Circle X"), msg!("Form Circle Y"), msg!("Form Circle Radius")].into_iter().enumerate()
+                        {
+                            field(ui, format!("{} {n}", t(what)), &mut f.circle[k], 80.0);
+                        }
+                    });
+                }
+                ui.end_row();
+                ui.label(t("Revolve"));
+                ui.checkbox(&mut f.revolve, t("turned about an axis"));
+                ui.end_row();
+                if f.revolve {
+                    ui.label(t("Axis"));
+                    ui.horizontal(|ui| {
+                        for (k, what) in
+                            [msg!("Form Axis X1"), msg!("Form Axis Y1"), msg!("Form Axis X2"), msg!("Form Axis Y2")].into_iter().enumerate()
+                        {
+                            field(ui, format!("{} {n}", t(what)), &mut f.axis[k], 60.0);
+                        }
+                    });
+                    ui.end_row();
+                }
+                ui.label(if f.revolve { t("From (degrees)") } else { t("From") });
+                field(ui, format!("{} {n}", t("Form From")), &mut f.from, 200.0);
+                ui.end_row();
+                ui.label(if f.revolve { t("To (degrees)") } else { t("To") });
+                field(ui, format!("{} {n}", t("Form To")), &mut f.to, 200.0);
                 ui.end_row();
             }
-            ui.label(if f.revolve { t("From (degrees)") } else { t("From") });
-            field(ui, format!("{} {n}", t("Form From")), &mut f.from, 200.0);
-            ui.end_row();
-            ui.label(if f.revolve { t("To (degrees)") } else { t("To") });
-            field(ui, format!("{} {n}", t("Form To")), &mut f.to, 200.0);
-            ui.end_row();
-        }
-        ui.label(t("Material"));
-        if let Some(m) = pick(ui, format!("{} {n}", t("Form Material")), &f.material, options) {
-            f.material = m;
-        }
-        ui.end_row();
-        ui.label(t("Visible when"));
-        field(ui, format!("{} {n}", t("Form Visible")), &mut f.visible, 200.0);
-        ui.end_row();
-        ui.label(t("Void"));
-        let r = ui.checkbox(&mut f.void, t("cuts the forms listed above it"));
-        r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, f.void, format!("{} {n}", t("Form Void"))));
-        ui.end_row();
-        // Revit's Visibility Settings: the views and detail levels that draw it; all ticked, it says nothing.
-        ui.label(t("Visibility"));
-        let mut s = f.original.show.unwrap_or_default();
-        let ticked = visibility(
-            ui,
-            format!("{} {n}", t("Form Visibility")),
-            &mut [
-                (msg!("Plan"), &mut s.plan),
-                (msg!("Front/Back"), &mut s.front),
-                (msg!("Left/Right"), &mut s.side),
-                ("Coarse", &mut s.coarse),
-                ("Medium", &mut s.medium),
-                ("Fine", &mut s.fine),
-            ],
-        );
-        if ticked {
-            f.original.show = (s != Show::default()).then_some(s);
-        }
-        ui.end_row();
-        if !f.original.types.is_empty() || f.original.subcategory.is_some() {
-            ui.label(t("Types"));
-            let mut said = f.original.types.join(", ");
-            if let Some(sub) = &f.original.subcategory {
-                said = if said.is_empty() { sub.clone() } else { format!("{said} · {sub}") };
+            ui.label(t("Material"));
+            if let Some(m) = pick(ui, format!("{} {n}", t("Form Material")), &f.material, options) {
+                f.material = m;
             }
-            ui.label(RichText::new(said).color(pal().muted));
             ui.end_row();
-        }
-    });
+            ui.label(t("Visible when"));
+            field(ui, format!("{} {n}", t("Form Visible")), &mut f.visible, 200.0);
+            ui.end_row();
+            if !f.original.types.is_empty() || f.original.subcategory.is_some() {
+                ui.label(t("Types"));
+                let mut said = f.original.types.join(", ");
+                if let Some(sub) = &f.original.subcategory {
+                    said = if said.is_empty() { sub.clone() } else { format!("{said} · {sub}") };
+                }
+                ui.label(RichText::new(said).color(pal().muted));
+                ui.end_row();
+            }
+            ui.label(t("Void"));
+            let r = ui.checkbox(&mut f.void, t("cuts the forms listed above it"));
+            r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, f.void, format!("{} {n}", t("Form Void"))));
+            ui.end_row();
+            visibility_row(ui, n)
+        })
+        .inner
 }
 
 fn forms_tab(ed: &mut FamilyEditor, ui: &mut Ui, materials: &[String]) {
@@ -1034,10 +1078,13 @@ fn forms_tab(ed: &mut FamilyEditor, ui: &mut Ui, materials: &[String]) {
     options.extend(ed.params.iter().filter(|p| p.kind == Holds::Material).map(|p| p.name.clone()));
     options.extend(materials.iter().cloned());
     let mut act: Option<(usize, i8)> = None;
+    let mut settings = None;
     for i in 0..ed.forms.len() {
         let heading = format!("{}. {}", i + 1, ed.forms[i].describe());
         CollapsingHeader::new(heading).id_salt(("fe-form", i)).default_open(ed.forms.len() == 1).show(ui, |ui| {
-            form_fields(ui, &mut ed.forms[i], i, &options);
+            if form_fields(ui, &mut ed.forms[i], i, &options) {
+                settings = Some(Which::Form(i));
+            }
             ui.horizontal(|ui| {
                 if ui.add_enabled(i > 0, egui::Button::new(t("Move Up"))).clicked() {
                     act = Some((i, -1));
@@ -1058,6 +1105,9 @@ fn forms_tab(ed: &mut FamilyEditor, ui: &mut Ui, materials: &[String]) {
             ed.forms.remove(i);
         }
         None => {}
+    }
+    if let Some(of) = settings {
+        ed.settings = Settings::of(ed, of);
     }
     ui.horizontal(|ui| {
         if ui.button(t("Add Box")).clicked() {
@@ -1242,7 +1292,7 @@ fn symbols_tab(ed: &mut FamilyEditor, ui: &mut Ui) {
         RichText::new(t("Symbols are what the plan draws of the family besides its forms: lines, arcs, labels and dots."))
             .color(pal().muted),
     );
-    let mut remove = None;
+    let (mut remove, mut settings) = (None, None);
     for (i, y) in ed.symbols.iter_mut().enumerate() {
         let n = i + 1;
         let kind = match y.part {
@@ -1298,18 +1348,9 @@ fn symbols_tab(ed: &mut FamilyEditor, ui: &mut Ui) {
                 ui.label(t("Visible when"));
                 field(ui, format!("{} {n}", t("Symbol Visible")), &mut y.visible, 200.0);
                 ui.end_row();
-                // Its detail levels, as Revit's symbolic lines say them; none said, every level but Coarse.
-                ui.label(t("Detail Levels"));
-                let mut s = y.show.unwrap_or(Levels { coarse: false, ..Levels::default() });
-                let ticked = visibility(
-                    ui,
-                    format!("{} {n}", t("Symbol Detail")),
-                    &mut [("Coarse", &mut s.coarse), ("Medium", &mut s.medium), ("Fine", &mut s.fine)],
-                );
-                if ticked {
-                    y.show = Some(s);
+                if visibility_row(ui, n) {
+                    settings = Some(Which::Symbol(i));
                 }
-                ui.end_row();
                 if y.view != SymbolView::Plan {
                     ui.label(t("View"));
                     let seen = if y.view == SymbolView::Front { t("Front/Back") } else { t("Left/Right") };
@@ -1325,6 +1366,9 @@ fn symbols_tab(ed: &mut FamilyEditor, ui: &mut Ui) {
     if let Some(i) = remove {
         ed.symbols.remove(i);
     }
+    if let Some(of) = settings {
+        ed.settings = Settings::of(ed, of);
+    }
     ui.horizontal(|ui| {
         for (part, label) in
             [(Part::Line, msg!("Add Line")), (Part::Arc, msg!("Add Arc")), (Part::Text, msg!("Add Text")), (Part::Dot, msg!("Add Dot"))]
@@ -1334,6 +1378,56 @@ fn symbols_tab(ed: &mut FamilyEditor, ui: &mut Ui) {
             }
         }
     });
+}
+
+/// The Family Element Visibility Settings dialog over the editor, while it's open: OK sets what's ticked on its form or
+/// symbol, Cancel leaves it as it was, Default ticks every box.
+fn visibility_settings(ed: &mut FamilyEditor, ctx: &Context) {
+    let Some(mut set) = ed.settings.take() else { return };
+    let form = matches!(set.of, Which::Form(_));
+    let (mut ok, mut cancel) = (false, false);
+    let r = Modal::new(UiId::new("family-element-visibility"), t("Family Element Visibility Settings")).width(420.0).show(ctx, |ui| {
+        crate::popup::body(ui, |ui| {
+            let s = &mut set.show;
+            if form {
+                ui.label(RichText::new(t("View Specific Display")).strong());
+                ui.label(t("Display in 3D views and:"));
+                ui.indent("fev-views", |ui| {
+                    for (label, on) in [
+                        (msg!("Plan/RCP"), &mut s.plan),
+                        (msg!("Front/Back"), &mut s.front),
+                        (msg!("Left/Right"), &mut s.side),
+                        (msg!("When cut in Plan/RCP (if category permits)"), &mut s.plan_cut),
+                    ] {
+                        ui.checkbox(on, t(label));
+                    }
+                });
+                ui.add_space(8.0);
+            }
+            ui.label(RichText::new(t("Detail Levels")).strong());
+            ui.horizontal(|ui| {
+                for (label, on) in [(msg!("Coarse"), &mut s.coarse), (msg!("Medium"), &mut s.medium), (msg!("Fine"), &mut s.fine)] {
+                    ui.checkbox(on, t(label));
+                }
+            });
+        });
+        crate::popup::footer(ui, |ui| {
+            ui.horizontal(|ui| {
+                if ui.button(t("Default")).clicked() {
+                    set.show = Show::default();
+                }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ok = ui.button(t("OK")).clicked();
+                    cancel = ui.button(t("Cancel")).clicked();
+                });
+            });
+        });
+    });
+    if ok {
+        set.apply(ed);
+    } else if !(cancel || r.should_close()) {
+        ed.settings = Some(set);
+    }
 }
 
 /// The family in the file at `path`: its name (its own, else the file's), and what it holds.
@@ -1507,6 +1601,7 @@ impl BimApp {
                 });
             });
         });
+        visibility_settings(&mut ed, ctx);
         if load {
             let dialog = crate::dialog::Ask::new().add_filter(t("BIMCraft family"), &["json"]).set_title(t("Load Family"));
             self.ask_file(ctx, dialog, false, |app, path| match read_family_file(&path) {
@@ -1684,6 +1779,34 @@ mod tests {
         assert!(f.profile.is_empty() && f.circle.as_ref().is_some_and(|c| c.radius == Expr::Formula("R".into())));
     }
 
+    /// The Visibility Settings dialog shows what is drawn, and sets it only when changed: what never said keeps saying nothing.
+    #[test]
+    fn the_visibility_settings_show_what_is_drawn_and_set_only_what_changed() {
+        let m = Model::new("x");
+        let mut ed = FamilyEditor::of("Table", &m.families["Table"]);
+        assert_eq!(ed.forms[0].show, None, "the table's top says nothing");
+        let set = Settings::of(&ed, Which::Form(0)).unwrap();
+        assert_eq!(set.show, Show::ALL, "a form that says nothing is drawn in every view at every level, as Revit's default");
+        set.apply(&mut ed);
+        assert_eq!(ed.forms[0].show, None, "unchanged, it still says nothing");
+        let mut set = Settings::of(&ed, Which::Form(0)).unwrap();
+        set.show.plan = false;
+        set.apply(&mut ed);
+        assert_eq!(ed.forms[0].show, Some(Show { plan: false, ..Show::ALL }));
+        let mut set = Settings::of(&ed, Which::Form(0)).unwrap();
+        set.show.plan = true;
+        set.apply(&mut ed);
+        assert_eq!(ed.forms[0].show, Some(Show::ALL), "once changed it says so, even when it says everything");
+        ed.symbols.push(SymbolText::blank(Part::Line));
+        let last = ed.symbols.len() - 1;
+        let mut set = Settings::of(&ed, Which::Symbol(last)).unwrap();
+        assert!(!set.show.coarse && set.show.medium && set.show.fine);
+        set.show.fine = false;
+        set.apply(&mut ed);
+        assert_eq!(ed.symbols[last].show, Some(Levels { coarse: false, medium: true, fine: false }));
+        assert!(Settings::of(&ed, Which::Form(99)).is_none());
+    }
+
     #[test]
     fn symbols_and_parameters_come_back_as_typed() {
         let y = Symbol {
@@ -1719,6 +1842,11 @@ mod tests {
             ..Symbol::default()
         };
         assert_eq!(SymbolText::of(&dot).symbol().unwrap(), dot);
+        // A symbol's detail levels and a form's Visibility Settings, as the family has them.
+        let leveled = Symbol { show: Some(Levels { coarse: true, medium: false, fine: true }), ..dot.clone() };
+        assert_eq!(SymbolText::of(&leveled).symbol().unwrap(), leveled);
+        let shown = Form { show: Some(Show { plan: false, side: false, ..Show::default() }), ..FormText::blank().form().unwrap() };
+        assert_eq!(FormText::of(&shown).form().unwrap().show, shown.show);
         for part in [Part::Line, Part::Arc, Part::Text, Part::Dot] {
             assert_eq!(SymbolText::of(&SymbolText::blank(part).symbol().unwrap()).part, part);
         }

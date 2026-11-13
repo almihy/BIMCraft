@@ -1693,7 +1693,9 @@ impl Model {
     /// The format its file is written in: the oldest that holds all it has, the newest need first. [`crate::model::FORMAT`]
     /// when a family from Revit stays parametric (references, dimensions, nested parts, a catalog, blends, sweeps, holes, arcs,
     /// Revit's result kept beside it, its check); [`crate::model::TYPES_FORMAT`] when a family has forms or symbols of some of
-    /// its types only, Visibility Settings, elevation symbols, a traced outline, a `cut` or a text parameter;
+    /// its types only, elevation symbols, a traced outline, a `cut` or a text parameter; [`crate::model::LEAF_FORMAT`] when it
+    /// places a door, a window or a component of a family whose forms or symbols say which views or detail levels draw them
+    /// (`show`), which a file of 21 would leave out, drawing a door's leaf shut in the wall again;
     /// [`crate::model::PDF_FORMAT`] when a page of a PDF it holds is drawn from its lines, which a file of 20 would draw as its
     /// raster images alone, or a view or a template hides a page's layers; [`crate::model::IMAGES_FORMAT`] when it holds
     /// images, or a door or a window whose To Room is not on the side it swings to or faces (flipped since it was placed, or
@@ -1719,11 +1721,21 @@ impl Model {
         let families = self.families.values().any(|f| {
             f.cut.is_some()
                 || f.parameters.iter().any(|p| p.kind == crate::family::Kind::Text)
-                || f.forms.iter().any(|x| !x.types.is_empty() || x.show.is_some() || !x.outline.is_empty())
-                || f.symbols.iter().any(|y| !y.types.is_empty() || y.show.is_some() || y.view != crate::family::SymbolView::Plan)
+                || f.forms.iter().any(|x| !x.types.is_empty() || !x.outline.is_empty())
+                || f.symbols.iter().any(|y| !y.types.is_empty() || y.view != crate::family::SymbolView::Plan)
         });
         if families {
             return crate::model::TYPES_FORMAT;
+        }
+        // A door, a window or a component of a family whose forms or symbols say which views and detail levels draw them, which
+        // a build of 21 would leave out, drawing a door's leaf shut in its wall again. A family no element places draws nothing.
+        let says_views = |f: &crate::family::Family| f.forms.iter().any(|x| x.show.is_some()) || f.symbols.iter().any(|x| x.show.is_some());
+        if self.elements.values().any(|e| match e {
+            Element::Door(o) | Element::Window(o) => o.family.as_ref().and_then(|n| self.families.get(n)).is_some_and(says_views),
+            Element::Component(c) => self.families.get(&c.family).is_some_and(says_views),
+            _ => false,
+        }) {
+            return crate::model::LEAF_FORMAT;
         }
         // A view or a template that hides a page's layers or sets how an import draws holds what a build of 20 refuses as a
         // field it doesn't know. A template is written without Imported Categories, which 20 can't name, and reading the file

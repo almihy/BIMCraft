@@ -69,20 +69,26 @@ pub const CEILING_HEIGHT: f64 = 2600.0;
 pub const MAX_SLOPE: f64 = 75.0;
 /// The closest a floor's contours may be drawn, mm: a site's are a metre or half a metre apart.
 pub const MIN_CONTOURS: f64 = 50.0;
-/// The version of the project file this build writes, and the newest it reads. 23: a family from Revit stays parametric:
+/// The version of the project file this build writes, and the newest it reads. 24: a family from Revit stays parametric:
 /// it may hold references (`references`, read by formulas as `ref(Name)`), dimensions that place them (`dimensions`), nested
 /// parts (`nested`), a type catalog, forms that are blends (`top`), sweeps (`path`, `section`), extrusions with holes and
 /// true arcs (`arcs`), Revit's own result kept beside its definition (`snapshot` forms and symbols, drawn only in a type
-/// whose `check` failed), and whether it is `editable`. A build that reads up to 22 would draw both Revit's result and the
-/// definition at once, and refuse `ref(…)` in a formula, so a project is written as 23 only when a family uses them
-/// ([`Model::written_format`]); nothing in a file of 22 changes and it takes no step. 22: a family's form or symbol may be of some
-/// of its types only (`types`) and say which detail levels and views draw it (`show`), a symbol may be drawn in sections and
-/// elevations (`view`: `front`, `side`), a mesh form may carry its own outline (`outline`), a door's or window's family may
-/// cut an opening other than its width by height (`cut`), and a parameter may hold text (kind `text`). A build that reads up
-/// to 21 would draw every type's forms at once and the elevation symbols in plan, cut the wall to the leaf, and refuse a text
-/// parameter, so a project is written as 22 only when one of its families uses them ([`Model::written_format`]); what a family
-/// only says of itself (`source`, `host`, `subcategories`, `flips`, a parameter's `unit` and `group`) an older build leaves
-/// out, and it takes no step. Nothing in a file of 21 changes. 21: a page of a PDF may be drawn from its
+/// whose `check` failed), and whether it is `editable`. A build that reads up to 23 would draw both Revit's result and the
+/// definition at once, and refuse `ref(…)` in a formula, so a project is written as 24 only when a family uses them
+/// ([`Model::written_format`]); nothing in a file of 23 changes and it takes no step. 23: a family's form or symbol may be of
+/// some of its types only (`types`), a symbol may be drawn in sections and elevations (`view`: `front`, `side`), a mesh form
+/// may carry its own outline (`outline`), a door's or window's family may cut an opening other than its width by height
+/// (`cut`), and a parameter may hold text (kind `text`). A build that reads up to 22 would draw every type's forms at once and
+/// the elevation symbols in plan, cut the wall to the leaf, and refuse a text parameter, so a project is written as 23 only
+/// when one of its families uses them ([`Model::written_format`]); what a family only says of itself (`source`, `host`,
+/// `subcategories`, `flips`, a parameter's `unit` and `group`) an older build leaves out, and it takes no step. Nothing in a
+/// file of 22 changes. 22: a family's form may say which detail levels and views draw it (`show`: Revit's Visibility Settings,
+/// a door's leaf shut in its opening drawn in no plan), and a symbol which detail levels (`show`; none, every level but
+/// Coarse); the built-in doors draw their leaves open, a panel as thick as the leaf, with their swings, at every level, as
+/// Revit's door families do. A file of 21 or older has a swinging door family's shut leaf drawn in no plan and its open
+/// leaf's line made a panel, once, as it is read ([`crate::family::Family::leaves_drawn_open`]); a build that reads up to 21
+/// would leave `show` out and draw the shut leaf in the wall again, so a project is written as 22 only when it places a door,
+/// a window or a component of a family whose forms or symbols say it ([`Model::written_format`]). 21: a page of a PDF may be drawn from its
 /// lines, layer by layer, over a picture of only its raster images (an image's `drawn`, with a small picture of the whole page,
 /// `thumb`); an image may hide layers of its lines (`hidden`) and a view's graphics hide them in that view (`pdf_layers`).
 /// Nothing in a file of 20 changes (its pages stay pictures of the whole page), but a build that reads up to 20 would leave
@@ -140,21 +146,26 @@ pub const MIN_CONTOURS: f64 = 50.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 23;
+pub const FORMAT: u32 = 24;
 /// The format a project is written in when its families need nothing of [`FORMAT`]'s (a parametric family from Revit) but some
-/// have per-type forms, Visibility Settings, elevation symbols, traced outlines, a cut or text parameters, which a build that
-/// reads up to 21 would misread ([`Model::written_format`]).
-pub const TYPES_FORMAT: u32 = 22;
-/// The format a project is written in when its families need nothing of [`TYPES_FORMAT`]'s but a page of a PDF it holds is
-/// drawn from its lines, or a view or a template hides a page's layers or sets how an import draws, which a build that reads up
-/// to 20 would misread ([`Model::written_format`]). A file older than this can't name Imported Categories as a group a
-/// template controls ([`Model::implied_imports`]).
+/// have per-type forms, elevation symbols, traced outlines, a cut or text parameters, which a build that reads up to 22
+/// would misread ([`Model::written_format`]).
+pub const TYPES_FORMAT: u32 = 23;
+/// The format a project is written in when it needs nothing of [`TYPES_FORMAT`]'s but it places a door, a window or a component
+/// of a family whose forms or symbols say which views and detail levels draw them (Visibility Settings), which a build that
+/// reads up to 21 would leave out, drawing a door's leaf shut in the wall again ([`Model::written_format`]). A file older than
+/// this has its swinging door families' leaves drawn open as it is read ([`Model::migrate`]).
+pub const LEAF_FORMAT: u32 = 22;
+/// The format a project is written in when it needs nothing of [`LEAF_FORMAT`]'s but a page of a PDF it holds is drawn from its
+/// lines, or a view or a template hides a page's layers or sets how an import draws, which a build that reads up to 20 would
+/// misread ([`Model::written_format`]). A file older than this can't name Imported Categories as a group a template controls
+/// ([`Model::implied_imports`]).
 pub const PDF_FORMAT: u32 = 21;
 /// The format a project is written in when it holds images, or a door's or a window's To Room kept against its swing, but
 /// nothing of [`PDF_FORMAT`]'s or later ([`Model::written_format`]).
 pub const IMAGES_FORMAT: u32 = 20;
 /// The format a project is written in when it needs nothing of [`IMAGES_FORMAT`]'s or later (no images, every door's and
-/// window's To Room on the side it swings to or faces, no PDF page drawn from its lines, no family that needs 22), so a build
+/// window's To Room on the side it swings to or faces, no PDF page drawn from its lines, no family that needs 22 or later), so a build
 /// that reads up to 19 opens it ([`Model::written_format`]).
 pub const PREVIOUS_FORMAT: u32 = 19;
 /// How far past the model a level reaches without an extent of its own, mm.
@@ -4096,8 +4107,16 @@ impl Model {
                 }
             }
         }
-        // 20 to 21 (a family's per-type forms and symbols, Visibility Settings, elevation symbols, traced outlines, cut and
-        // text parameters) has no step: a file of 20 holds none of them, which read as before.
+        // 20 to 21 has no step here: what it has, `Model::read` gives a template after this.
+        // 21 to 22: a swinging door family's leaf shut in its opening is drawn in no plan, and its open leaf is a panel as
+        // thick as the leaf, with its swing, at every detail level, as Revit's door families draw them.
+        if self.format < LEAF_FORMAT {
+            for f in self.families.values_mut() {
+                f.leaves_drawn_open();
+            }
+        }
+        // 22 to 23 (a family's per-type forms and symbols, elevation symbols, traced outlines, cut and text parameters) and 23
+        // to 24 (a parametric family from Revit) have no step: a file of 22 or 23 holds none of them, which read as before.
         self.format = FORMAT;
     }
 
