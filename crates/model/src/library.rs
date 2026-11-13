@@ -1651,7 +1651,8 @@ impl Model {
         m.refs_to_file();
         m.format = self.written_format();
         // A build that reads up to 20 can't name Imported Categories as a group a template controls; written for it, a
-        // template that controls it leaves it out, which changes nothing it draws (`written_format` makes sure).
+        // template leaves it out, and reading the file gives it back to the templates it is implied for
+        // ([`Model::imports_implied`]); `written_format` makes sure that is each that had it.
         if m.format < crate::model::FORMAT {
             for t in m.view_templates.values_mut() {
                 t.controls.remove(&crate::graphics::Group::Imports);
@@ -1668,14 +1669,13 @@ impl Model {
     pub fn written_format(&self) -> u32 {
         use crate::model::Element;
         // A view or a template that hides a page's layers or sets how an import draws holds what a build of 20 refuses as a
-        // field it doesn't know. A template that controls Imported Categories and holds none of that is written without the
-        // group, which 20 can't name, unless that would change what a view following it draws: the layers of a drawing it
-        // hides, or those a view following it hides of its own (which the template's win over).
+        // field it doesn't know. A template is written without Imported Categories, which 20 can't name, and reading the file
+        // gives the group back where it is implied: so a template that controls it where it isn't implied, or doesn't where
+        // it is, is this build's.
         let views: Vec<&crate::graphics::Graphics> = self.elements.values().filter_map(crate::graphics::graphics_of_element).collect();
         let pdf_graphics = views.iter().copied().chain(self.view_templates.values().map(|t| &t.graphics)).any(|g| g.holds_imports())
             || self.view_templates.iter().any(|(name, t)| {
-                t.controls.contains(&crate::graphics::Group::Imports)
-                    && (!t.graphics.layers.is_empty() || views.iter().any(|g| g.template.as_ref() == Some(name) && !g.layers.is_empty()))
+                t.controls.contains(&crate::graphics::Group::Imports) != Self::imports_implied(name, t, &views)
             });
         if pdf_graphics || self.image_types.values().any(crate::raster::ImageType::drawn) {
             return crate::model::FORMAT;
@@ -1686,6 +1686,30 @@ impl Model {
             _ => false,
         });
         if images || rooms_kept { crate::model::IMAGES_FORMAT } else { crate::model::PREVIOUS_FORMAT }
+    }
+
+    /// Whether a template read from a file older than 21, which can't name Imported Categories as a group it controls,
+    /// controls it: when it controls every other group its kind of view has, as a new template does (and as Revit's
+    /// templates include V/G Overrides Import), and that changes nothing a view following it draws: it hides no layers of
+    /// a drawing, and no view following it hides any of its own (which the template's would win over).
+    pub(crate) fn imports_implied(name: &str, t: &crate::graphics::ViewTemplate, views: &[&crate::graphics::Graphics]) -> bool {
+        use crate::graphics::Group;
+        let groups = t.kind.map_or_else(|| Group::ALL.to_vec(), crate::graphics::ViewKind::groups);
+        groups.iter().all(|g| *g == Group::Imports || t.controls.contains(g))
+            && t.graphics.layers.is_empty()
+            && !views.iter().any(|g| g.template.as_deref() == Some(name) && !g.layers.is_empty())
+    }
+
+    /// A file older than 21 gives Imported Categories back to the templates it is implied for ([`Model::imports_implied`]).
+    pub(crate) fn implied_imports(&mut self) {
+        let views: Vec<&crate::graphics::Graphics> = self.elements.values().filter_map(crate::graphics::graphics_of_element).collect();
+        let implied: Vec<String> =
+            self.view_templates.iter().filter(|(name, t)| Self::imports_implied(name, t, &views)).map(|(n, _)| n.clone()).collect();
+        for name in implied {
+            if let Some(t) = self.view_templates.get_mut(&name) {
+                t.controls.insert(crate::graphics::Group::Imports);
+            }
+        }
     }
 
     /// Every name this model holds of a library entry (its elements', its types', its views'…) its GUID, and the values of

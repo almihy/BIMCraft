@@ -3972,6 +3972,10 @@ impl Model {
             crate::graphics::drop_import_patterns(g);
         }
         m.names_from_file();
+        // 20 to 21: a template from a file of 20 or older can't name Imported Categories as a group it controls.
+        if format < u64::from(FORMAT) {
+            m.implied_imports();
+        }
         m.renamed_clashing_parameters();
         m.renamed_clashing_calculated_fields();
         Ok((m, left_out))
