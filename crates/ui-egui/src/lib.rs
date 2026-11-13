@@ -4903,7 +4903,10 @@ impl BimApp {
                     self.ask_file(ui.ctx(), dialog, false, |app, path| {
                         if let Some(r) = app.run("family", json!({"path": path.to_string_lossy()})) {
                             let name = r["name"].as_str().unwrap_or_default().to_string();
-                            let first = r["family"]["types"].as_object().and_then(|t| t.keys().next().cloned()).unwrap_or_default();
+                            // The type the person picked in Load Family, else its first.
+                            let types = r["family"]["types"].as_object();
+                            let picked = r["place"].as_str().filter(|t| types.is_some_and(|all| all.contains_key(*t))).map(str::to_string);
+                            let first = picked.or_else(|| types.and_then(|t| t.keys().next().cloned())).unwrap_or_default();
                             app.component = Some((name, first));
                         }
                     });

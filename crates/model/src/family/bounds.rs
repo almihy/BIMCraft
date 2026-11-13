@@ -22,7 +22,15 @@ impl Family {
         let mut read = HashMap::new();
         let mut num = |e: &'a Expr| number(e, values, &mut read).ok();
         let mut out = None;
-        for form in self.forms.iter().filter(|f| f.of_type(type_name)) {
+        // Nested parts, and forms whose corners don't bound them (an arc bulges past its ends), are unknown here.
+        if !self.nested.is_empty() {
+            return None;
+        }
+        let which = self.draws_snapshot(type_name);
+        for form in self.forms.iter().filter(|f| f.of_type(type_name) && f.snapshot == which) {
+            if !form.path.is_empty() || !form.top.is_empty() || !form.arcs.is_empty() {
+                return None;
+            }
             if let Some(visible) = &form.visible
                 && num(visible)? == 0.0
             {

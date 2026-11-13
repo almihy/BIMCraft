@@ -254,6 +254,24 @@ impl HasPart for crate::model::SplitLine {
     }
 }
 
+impl HasPart for crate::family::Reference {
+    fn ident(&mut self) -> (&mut Id, &mut Guid) {
+        (&mut self.id, &mut self.guid)
+    }
+}
+
+impl HasPart for crate::family::Dimension {
+    fn ident(&mut self) -> (&mut Id, &mut Guid) {
+        (&mut self.id, &mut self.guid)
+    }
+}
+
+impl HasPart for crate::family::Nested {
+    fn ident(&mut self) -> (&mut Id, &mut Guid) {
+        (&mut self.id, &mut self.guid)
+    }
+}
+
 impl HasPart for crate::family::Symbol {
     fn ident(&mut self) -> (&mut Id, &mut Guid) {
         (&mut self.id, &mut self.guid)
@@ -959,6 +977,9 @@ impl Model {
             add("form", "family", n, f.forms.iter().map(|x| (x.id, x.guid)).collect());
             add("symbol", "family", n, f.symbols.iter().map(|x| (x.id, x.guid)).collect());
             add("connector", "family", n, f.connectors.iter().map(|x| (x.id, x.guid)).collect());
+            add("reference", "family", n, f.references.iter().map(|x| (x.id, x.guid)).collect());
+            add("dimension", "family", n, f.dimensions.iter().map(|x| (x.id, x.guid)).collect());
+            add("nested", "family", n, f.nested.iter().map(|x| (x.id, x.guid)).collect());
         }
         for (n, g) in &self.detail_groups {
             add("member", "detail group", n, g.members.iter().map(|x| (x.id, x.guid)).collect());
@@ -1090,6 +1111,9 @@ impl Model {
             f.forms.iter_mut().for_each(|x| give(&mut x.id, &mut x.guid));
             f.symbols.iter_mut().for_each(|x| give(&mut x.id, &mut x.guid));
             f.connectors.iter_mut().for_each(|x| give(&mut x.id, &mut x.guid));
+            f.references.iter_mut().for_each(|x| give(&mut x.id, &mut x.guid));
+            f.dimensions.iter_mut().for_each(|x| give(&mut x.id, &mut x.guid));
+            f.nested.iter_mut().for_each(|x| give(&mut x.id, &mut x.guid));
         }
         for g in self.detail_groups.values_mut() {
             g.members.iter_mut().for_each(|x| give(&mut x.id, &mut x.guid));
@@ -1299,6 +1323,9 @@ impl Model {
             f.forms.iter_mut().for_each(|x| (x.id, x.guid) = (0, Guid::default()));
             f.symbols.iter_mut().for_each(|x| (x.id, x.guid) = (0, Guid::default()));
             f.connectors.iter_mut().for_each(|x| (x.id, x.guid) = (0, Guid::default()));
+            f.references.iter_mut().for_each(|x| (x.id, x.guid) = (0, Guid::default()));
+            f.dimensions.iter_mut().for_each(|x| (x.id, x.guid) = (0, Guid::default()));
+            f.nested.iter_mut().for_each(|x| (x.id, x.guid) = (0, Guid::default()));
         }
         for g in self.detail_groups.values_mut() {
             g.members.iter_mut().for_each(|x| (x.id, x.guid) = (0, Guid::default()));
@@ -1651,6 +1678,19 @@ impl Model {
     /// build opens it.
     pub fn written_format(&self) -> u32 {
         use crate::model::Element;
+        let parametric = self.families.values().any(|f| {
+            !f.references.is_empty()
+                || !f.dimensions.is_empty()
+                || !f.nested.is_empty()
+                || f.catalog.is_some()
+                || !f.check.is_empty()
+                || f.editable.is_some()
+                || f.forms.iter().any(|x| x.snapshot || !x.top.is_empty() || !x.path.is_empty() || !x.holes.is_empty() || !x.arcs.is_empty())
+                || f.symbols.iter().any(|y| y.snapshot)
+        });
+        if parametric {
+            return crate::model::FORMAT;
+        }
         let families = self.families.values().any(|f| {
             f.cut.is_some()
                 || f.parameters.iter().any(|p| p.kind == crate::family::Kind::Text)
@@ -1658,7 +1698,7 @@ impl Model {
                 || f.symbols.iter().any(|y| !y.types.is_empty() || y.show.is_some() || y.view != crate::family::SymbolView::Plan)
         });
         if families {
-            return crate::model::FORMAT;
+            return crate::model::TYPES_FORMAT;
         }
         let images = !self.image_types.is_empty() || !self.rare("image").is_empty();
         let rooms_kept = self.elements.values().any(|e| match e {

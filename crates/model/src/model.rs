@@ -69,7 +69,13 @@ pub const CEILING_HEIGHT: f64 = 2600.0;
 pub const MAX_SLOPE: f64 = 75.0;
 /// The closest a floor's contours may be drawn, mm: a site's are a metre or half a metre apart.
 pub const MIN_CONTOURS: f64 = 50.0;
-/// The version of the project file this build writes, and the newest it reads. 21: a family's form or symbol may be of some
+/// The version of the project file this build writes, and the newest it reads. 22: a family from Revit stays parametric:
+/// it may hold references (`references`, read by formulas as `ref(Name)`), dimensions that place them (`dimensions`), nested
+/// parts (`nested`), a type catalog, forms that are blends (`top`), sweeps (`path`, `section`), extrusions with holes and
+/// true arcs (`arcs`), Revit's own result kept beside its definition (`snapshot` forms and symbols, drawn only in a type
+/// whose `check` failed), and whether it is `editable`. A build that reads up to 21 would draw both Revit's result and the
+/// definition at once, and refuse `ref(…)` in a formula, so a project is written as 22 only when a family uses them
+/// ([`Model::written_format`]); nothing in a file of 21 changes and it takes no step. 21: a family's form or symbol may be of some
 /// of its types only (`types`) and say which detail levels and views draw it (`show`), a symbol may be drawn in sections and
 /// elevations (`view`: `front`, `side`), a mesh form may carry its own outline (`outline`), a door's or window's family may
 /// cut an opening other than its width by height (`cut`), and a parameter may hold text (kind `text`). A build that reads up
@@ -129,7 +135,11 @@ pub const MIN_CONTOURS: f64 = 50.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 21;
+pub const FORMAT: u32 = 22;
+/// The format a project is written in when its families need nothing of [`FORMAT`]'s (a parametric family from Revit) but some
+/// have per-type forms, Visibility Settings, elevation symbols, traced outlines, a cut or text parameters, which a build that
+/// reads up to 20 would misread ([`Model::written_format`]).
+pub const TYPES_FORMAT: u32 = 21;
 /// The format a project is written in when it needs no family's per-type forms, Visibility Settings, elevation symbols,
 /// traced outlines, cut or text parameters (21's) but holds images, or a door or a window whose To Room is not on the side it
 /// swings to or faces (20's), so a build that reads up to 20 opens it ([`Model::written_format`]).
@@ -3792,7 +3802,8 @@ impl Model {
     /// for one that doesn't build.
     pub fn component_local_pieces(&self, c: &Component) -> Vec<Piece> {
         let Some(f) = self.families.get(&c.family) else { return Vec::new() };
-        let Ok(pieces) = f.values(&c.type_name, &c.params).and_then(|v| f.pieces(&c.type_name, &v)) else { return Vec::new() };
+        let others = |n: &str| self.families.get(n);
+        let Ok(pieces) = f.values(&c.type_name, &c.params).and_then(|v| f.pieces_with(&c.type_name, &v, &others)) else { return Vec::new() };
         if !c.mirrored {
             return pieces;
         }
@@ -4886,7 +4897,8 @@ impl Model {
         let f = self.families.get(o.family.as_ref()?)?;
         let values = f.values_in(&o.type_name, &o.params, self.thickness(self.wall(o.host)?)).ok()?;
         let plan = crate::family::SymbolView::Plan;
-        let (pieces, marks) = (f.pieces(&o.type_name, &values).ok()?, f.marks(&o.type_name, &values, plan, Some(detail)).ok()?);
+        let others = |n: &str| self.families.get(n);
+        let (pieces, marks) = (f.pieces_with(&o.type_name, &values, &others).ok()?, f.marks(&o.type_name, &values, plan, Some(detail)).ok()?);
         let (fx, fy) = (if o.flip_hand { -1.0 } else { 1.0 }, if o.flip_facing { -1.0 } else { 1.0 });
         let mirrored = fx * fy < 0.0;
         let flip = |p: [f64; 3]| [fx * p[0] + 0.0, fy * p[1] + 0.0, p[2]];

@@ -26,7 +26,8 @@ pub(crate) fn problems(f: &Family, has_material: &dyn Fn(&str) -> bool) -> (Vec<
 /// the ones that say a name it has no parameter of. `Wall Thickness`, the wall's own, counts as one
 /// of a door's or a window's; no other family's formulas may say it.
 fn formulas(f: &Family, out: &mut Vec<String>) {
-    let given: BTreeSet<&str> = f.parameters.iter().map(|p| p.name.as_str()).collect();
+    let refs: Vec<String> = f.references.iter().map(|r| super::ref_key(&r.name)).collect();
+    let given: BTreeSet<&str> = f.parameters.iter().map(|p| p.name.as_str()).chain(refs.iter().map(String::as_str)).collect();
     let read = |who: &str, formula: &str, out: &mut Vec<String>| {
         // A formula longer than what it may be is `Family::check`'s to count, not read again here.
         if formula.chars().count() > MAX_FORMULA {
@@ -48,18 +49,21 @@ fn formulas(f: &Family, out: &mut Vec<String>) {
         }
     }
     for (i, form) in f.forms.iter().enumerate() {
-        let circle = form.circle.iter().flat_map(|c| c.centre.iter().chain([&c.radius]));
-        let exprs = form
-            .profile
-            .iter()
-            .flatten()
-            .chain([&form.from, &form.to])
-            .chain(&form.visible)
-            .chain(circle)
-            .chain(form.axis.iter().flatten().flatten());
-        for e in exprs {
+        for e in form.exprs() {
             if let Expr::Formula(formula) = e {
                 read(&format!("form {}", i + 1), formula, out);
+            }
+        }
+    }
+    for r in &f.references {
+        if let Expr::Formula(formula) = &r.at {
+            read(&format!("reference `{}`", r.name), formula, out);
+        }
+    }
+    for (i, n) in f.nested.iter().enumerate() {
+        for e in n.at.iter().chain([&n.rotation]).chain(&n.visible).chain(n.params.values()) {
+            if let Expr::Formula(formula) = e {
+                read(&format!("nested part {}", i + 1), formula, out);
             }
         }
     }

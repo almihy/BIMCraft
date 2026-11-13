@@ -11044,6 +11044,21 @@ fn family(s: &mut Session, p: &Value) -> R {
         let Value::Object(mut fields) = loaded else {
             return Err(bad(c, format!("{} is not a family: it isn't an object", path.display())));
         };
+        // The type the person picked to place, which the reply gives back: Load Family starts placing it.
+        let place = fields.remove("place").filter(|v| v.is_string());
+        // An export package (Arqiflow's): its `family`, its `definition` (Revit's, translated) and its nested families,
+        // each loaded first under its own name.
+        if let Some(Value::Object(inner)) = fields.get("family").cloned() {
+            let definition = fields.get("definition").cloned().filter(|d| !d.is_null());
+            let nested = fields.get("nested_families").cloned();
+            if !flag(c, &p, "dry_run")? {
+                load_nested(s, nested.as_ref())?;
+            }
+            fields = inner;
+            if let Some(d) = definition {
+                fields.insert("revit".into(), d);
+            }
+        }
         let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         let name = p.get("name").filter(|v| !v.is_null()).cloned().or_else(|| fields.remove("name")).unwrap_or(json!(stem));
         // Only the family it holds: what a file says to rename or delete isn't for it to say.
@@ -11065,11 +11080,21 @@ fn family(s: &mut Session, p: &Value) -> R {
             "flips",
             "materials",
             "like",
+            "references",
+            "dimensions",
+            "nested",
+            "catalog",
+            "check",
+            "editable",
+            "revit",
         ]
         .into_iter()
         .filter_map(|k| fields.remove(k).map(|v| (k.to_string(), v)))
         .collect();
         family.insert("name".into(), name);
+        if let Some(place) = place {
+            family.insert("place".into(), place);
+        }
         // `dry_run` is the caller's, not the file's: a dry run of a file loads nothing.
         if let Some(dry) = p.get("dry_run") {
             family.insert("dry_run".into(), dry.clone());
@@ -11110,7 +11135,7 @@ fn family(s: &mut Session, p: &Value) -> R {
             .iter()
             .map(|(n, f)| {
                 json!({"name": n, "category": f.category, "types": f.types.len(), "forms": f.forms.len(), "symbols": f.symbols.len(),
-                       "source": f.source})
+                       "source": f.source, "editable": f.editable, "check": f.check})
             })
             .collect();
         return Ok(json!({"families": families}));
@@ -11158,7 +11183,16 @@ fn family(s: &mut Session, p: &Value) -> R {
         "flips",
         "materials",
         "like",
+        "references",
+        "dimensions",
+        "nested",
+        "catalog",
+        "check",
+        "editable",
+        "revit",
     ];
+    // The type a file says to place, given back.
+    let place = p.get("place").filter(|v| v.is_string()).cloned();
     if !keys.iter().any(|k| p.get(*k).is_some_and(|v| !v.is_null())) {
         let f = s.model.families.get(&name).ok_or_else(|| bad(c, format!("there's no family `{name}`")))?;
         let (_, warnings) = f.problems(&|m| s.model.materials.contains_key(m));
@@ -11290,6 +11324,37 @@ fn family(s: &mut Session, p: &Value) -> R {
     if let Some(v) = p.get("flips") {
         f.flips = if v.is_null() { Default::default() } else { serde_json::from_value(v.clone()).map_err(|e| field("flips", e))? };
     }
+    // Its references, the dimensions placing them, its nested parts and its type catalog; `null` takes them away.
+    if let Some(v) = p.get("references") {
+        let mut list: Vec<crate::family::Reference> =
+            if v.is_null() { Vec::new() } else { serde_json::from_value(v.clone()).map_err(|e| field("references", e))? };
+        crate::library::keep_parts(&mut f.references, &mut list);
+        f.references = list;
+    }
+    if let Some(v) = p.get("dimensions") {
+        let mut list: Vec<crate::family::Dimension> =
+            if v.is_null() { Vec::new() } else { serde_json::from_value(v.clone()).map_err(|e| field("dimensions", e))? };
+        crate::library::keep_parts(&mut f.dimensions, &mut list);
+        f.dimensions = list;
+    }
+    if let Some(v) = p.get("nested") {
+        let mut list: Vec<crate::family::Nested> =
+            if v.is_null() { Vec::new() } else { serde_json::from_value(v.clone()).map_err(|e| field("nested", e))? };
+        crate::library::keep_parts(&mut f.nested, &mut list);
+        f.nested = list;
+    }
+    match p.get("catalog") {
+        None => {}
+        Some(Value::Null) => f.catalog = None,
+        Some(v) => f.catalog = Some(serde_json::from_value(v.clone()).map_err(|e| field("catalog", e))?),
+    }
+    // What a file kept of its check: a saved family brings it back as it was.
+    if let Some(v) = p.get("check").filter(|v| !v.is_null()) {
+        f.check = serde_json::from_value(v.clone()).map_err(|e| field("check", e))?;
+    }
+    if let Some(v) = p.get("editable") {
+        f.editable = if v.is_null() { None } else { Some(serde_json::from_value(v.clone()).map_err(|e| field("editable", e))?) };
+    }
     // Materials it brings, each added where the project has none of its name: the project's own wins, as in Revit.
     let mut brought: BTreeMap<String, crate::model::Material> = BTreeMap::new();
     if let Some(v) = p.get("materials").filter(|v| !v.is_null()) {
@@ -11354,6 +11419,27 @@ fn family(s: &mut Session, p: &Value) -> R {
         None => None,
     };
     let to = rename.clone().unwrap_or_else(|| name.clone());
+    // Revit's definition translated (its result, the forms and symbols it brings, kept as the fallback), then each type
+    // checked against Revit's result; a type whose values were changed since keeps what it was found.
+    let has = |m: &str| s.model.materials.contains_key(m) || brought.contains_key(m);
+    if let Some(def) = p.get("revit").filter(|v| !v.is_null()) {
+        crate::family::revit::translate(&mut f, def, &has);
+    }
+    if let Some(w) = &was {
+        let mut like: BTreeMap<String, String> =
+            p.get("like").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
+        like.retain(|new, _| !w.types.contains_key(new));
+        for (t, c) in f.check.iter_mut() {
+            let before = w.types.get(t).or_else(|| like.get(t).and_then(|old| f.types.get(old)));
+            if before.is_some_and(|b| f.types.get(t) != Some(b)) {
+                c.flexed = true;
+            }
+        }
+    }
+    if f.has_snapshot() || f.editable.is_some() {
+        let others = |n: &str| if n == name.as_str() { None } else { s.model.families.get(n) };
+        f.run_check(&others);
+    }
     // Every error of what it comes to, each addressed to what has it, and every warning of it.
     let (errors, warnings) = f.problems(&|m| s.model.materials.contains_key(m) || brought.contains_key(m));
     if !errors.is_empty() {
@@ -11388,7 +11474,40 @@ fn family(s: &mut Session, p: &Value) -> R {
         }
     }
     m.families.insert(to.clone(), f.clone());
-    Ok(json!({"name": to, "family": f, "warnings": warnings, "materials": added}))
+    let mut reply = json!({"name": to, "family": f, "warnings": warnings, "materials": added, "editable": f.editable, "check": f.check});
+    if let Some(place) = place {
+        reply["place"] = place;
+    }
+    Ok(reply)
+}
+
+/// The nested families of an export package (`{name: {family, definition}}`), each loaded as a family of its own, those it
+/// nests first; at most [`crate::family::MAX_NESTED`] of them.
+fn load_nested(s: &mut Session, nested: Option<&Value>) -> Result<(), String> {
+    let Some(Value::Object(all)) = nested else { return Ok(()) };
+    let mut left: Vec<(&String, &Value)> = all.iter().take(crate::family::MAX_NESTED).collect();
+    // Those whose own nested families are loaded go first, round after round.
+    let mut done = std::collections::BTreeSet::new();
+    while !left.is_empty() {
+        let ready = left
+            .iter()
+            .position(|(_, v)| {
+                v["definition"]["nested"].as_array().into_iter().flatten().filter_map(|n| n["family"].as_str()).all(|n| {
+                    done.contains(n) || !all.contains_key(n)
+                })
+            })
+            .unwrap_or(0);
+        let (name, v) = left.remove(ready);
+        done.insert(name.as_str());
+        let Some(Value::Object(fields)) = v.get("family") else { continue };
+        let mut params = Value::Object(fields.clone());
+        params["name"] = json!(name);
+        if let Some(d) = v.get("definition").filter(|d| !d.is_null()) {
+            params["revit"] = d.clone();
+        }
+        family(s, &params).map_err(|e| format!("nested family `{name}`: {e}"))?;
+    }
+    Ok(())
 }
 
 /// A family as `family` reads it: what it is, each of its types' parameters worked out (formulas and

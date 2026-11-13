@@ -140,14 +140,21 @@ impl FormText {
         FormText { profile, to: "1000".into(), axis: ["0".into(), "0".into(), "0".into(), "1".into()], ..FormText::of(&Form::default()) }
     }
 
-    /// Whether the triangles of a file are what it's made of.
+    /// Whether what it's made of is kept as it came (a file's triangles, a blend's two profiles, a sweep's path): the editor
+    /// edits only its material, visibility and void.
     fn mesh(&self) -> bool {
-        !self.original.mesh.is_empty()
+        let f = &self.original;
+        !f.mesh.is_empty() || !f.path.is_empty() || !f.top.is_empty()
     }
 
     /// What it says it is, for its heading.
     fn describe(&self) -> String {
+        let f = &self.original;
         let what = match (self.mesh(), self.shape, self.revolve) {
+            _ if !f.path.is_empty() && !f.section_end.is_empty() => t("Swept Blend"),
+            _ if !f.path.is_empty() => t("Sweep"),
+            _ if !f.top.is_empty() => t("Blend"),
+            (true, _, _) if f.snapshot => t("As in Revit"),
             (true, _, _) => t("Mesh"),
             (_, Shape::Circle, true) => t("Revolved Circle"),
             (_, Shape::Circle, false) => t("Cylinder"),
@@ -398,6 +405,9 @@ pub(crate) struct FamilyEditor {
     subcategories: Vec<Subcategory>,
     cut: Option<Cut>,
     flips: Flips,
+    /// What keeps a family from Revit parametric (its references, dimensions, nested parts, type catalog and check), as the
+    /// family has it: the References tab shows it, and the editor keeps it.
+    kept: Family,
     tab: Tab,
     /// The type shown in Types and on the preview.
     picked: usize,
@@ -416,6 +426,7 @@ enum Tab {
     Forms,
     Symbols,
     Connectors,
+    References,
 }
 
 impl FamilyEditor {
@@ -445,6 +456,15 @@ impl FamilyEditor {
             subcategories: f.subcategories.clone(),
             cut: f.cut.clone(),
             flips: f.flips,
+            kept: Family {
+                references: f.references.clone(),
+                dimensions: f.dimensions.clone(),
+                nested: f.nested.clone(),
+                catalog: f.catalog.clone(),
+                check: f.check.clone(),
+                editable: f.editable.clone(),
+                ..Family::default()
+            },
             tab: Tab::Parameters,
             picked: 0,
             look: (AZIMUTH, ELEVATION),
@@ -499,6 +519,7 @@ impl FamilyEditor {
         let operation = self.operation.filter(|_| self.category.hosted());
         // Each type's identity data stays with the type, and goes with it.
         let identity = self.identity.iter().filter(|(t, _)| types.contains_key(*t)).map(|(t, i)| (t.clone(), i.clone())).collect();
+        let check = self.kept.check.iter().filter(|(t, _)| types.contains_key(*t)).map(|(t, c)| (t.clone(), c.clone())).collect();
         Ok(Family {
             category: self.category,
             // A kind the category it now is has no row for goes with the change of category.
@@ -516,6 +537,12 @@ impl FamilyEditor {
             subcategories: self.subcategories.clone(),
             cut: self.cut.clone(),
             flips: self.flips,
+            references: self.kept.references.clone(),
+            dimensions: self.kept.dimensions.clone(),
+            nested: self.kept.nested.clone(),
+            catalog: self.kept.catalog.clone(),
+            check,
+            editable: self.kept.editable.clone(),
         })
     }
 
@@ -578,6 +605,12 @@ impl FamilyEditor {
             let m = s.model_mut();
             m.materials = base.materials.clone();
             m.images = base.images.clone();
+            // The families its nested parts are of.
+            for n in &family.nested {
+                if let Some(other) = base.families.get(&n.family) {
+                    m.families.insert(n.family.clone(), other.clone());
+                }
+            }
             m.families.insert(name.to_string(), family.clone());
         }
         let place = |s: &mut Session, id: &str, p: Value| s.execute(id, &p).map(|_| ());
@@ -1067,6 +1100,86 @@ fn connectors_tab(ed: &FamilyEditor, ui: &mut Ui) {
     }
 }
 
+/// Its reference planes (where each is in the type previewed), the dimensions placing them, its nested parts and, for a
+/// family from Revit, each type's check.
+fn references_tab(ed: &FamilyEditor, ui: &mut Ui) {
+    let k = &ed.kept;
+    if k.references.is_empty() && k.nested.is_empty() && k.check.is_empty() {
+        ui.label(t("This family has no reference planes."));
+        return;
+    }
+    let picked = ed.types.get(ed.picked).map(|(n, _)| n.clone()).unwrap_or_default();
+    let values = ed.family().ok().and_then(|f| f.values(&picked, &BTreeMap::new()).ok()).unwrap_or_default();
+    let axis = |a: bimcraft_core::family::Axis| match a {
+        bimcraft_core::family::Axis::X => "x",
+        bimcraft_core::family::Axis::Y => "y",
+        bimcraft_core::family::Axis::Z => "z",
+    };
+    if !k.references.is_empty() {
+        ui.label(RichText::new(t("Reference Planes")).strong());
+        Grid::new("fe-refs").num_columns(4).striped(true).spacing(vec2(12.0, 4.0)).show(ui, |ui| {
+            for h in [msg!("Name"), msg!("Axis"), msg!("Position"), msg!("Is Reference")] {
+                ui.label(RichText::new(t(h)).color(pal().muted));
+            }
+            ui.end_row();
+            for r in &k.references {
+                ui.label(&r.name);
+                ui.label(axis(r.axis));
+                let at = match values.get(&bimcraft_core::family::ref_key(&r.name)) {
+                    Some(bimcraft_core::family::Val::Number(x)) => number_text(*x),
+                    _ => expr_text(&r.at),
+                };
+                ui.label(if r.origin { format!("{at} ({})", t("origin")) } else { at });
+                ui.label(r.is_reference.clone().unwrap_or_default());
+                ui.end_row();
+            }
+        });
+    }
+    if !k.dimensions.is_empty() {
+        ui.add_space(6.0);
+        ui.label(RichText::new(t("Dimensions")).strong());
+        Grid::new("fe-dims").num_columns(3).striped(true).spacing(vec2(12.0, 4.0)).show(ui, |ui| {
+            for h in [msg!("Between"), msg!("Label"), msg!("Constraint")] {
+                ui.label(RichText::new(t(h)).color(pal().muted));
+            }
+            ui.end_row();
+            for d in &k.dimensions {
+                ui.label(d.refs.join(" – "));
+                ui.label(d.label.clone().unwrap_or_default());
+                let mut how = Vec::new();
+                if d.eq {
+                    how.push(t("EQ").to_string());
+                }
+                if d.locked {
+                    how.push(format!("{} {}", t("Locked"), d.value.map(number_text).unwrap_or_default()));
+                }
+                ui.label(how.join(", "));
+                ui.end_row();
+            }
+        });
+    }
+    if !k.nested.is_empty() {
+        ui.add_space(6.0);
+        ui.label(RichText::new(t("Nested Families")).strong());
+        for n in &k.nested {
+            ui.label(format!("{} : {}", n.family, n.type_name));
+        }
+    }
+    if !k.check.is_empty() {
+        ui.add_space(6.0);
+        ui.label(RichText::new(t("Types against Revit")).strong());
+        for (ty, c) in &k.check {
+            let said = if c.matched { t("as in Revit, editable").to_string() } else { c.reason.clone().unwrap_or_default() };
+            ui.label(format!("{ty}: {said}"));
+        }
+    }
+    if let Some(e) = &k.editable {
+        for u in &e.untranslated {
+            ui.label(RichText::new(u).color(pal().muted));
+        }
+    }
+}
+
 fn symbols_tab(ed: &mut FamilyEditor, ui: &mut Ui) {
     ui.label(
         RichText::new(t("Symbols are what the plan draws of the family besides its forms: lines, arcs, labels and dots."))
@@ -1236,6 +1349,16 @@ impl BimApp {
                         ui.end_row();
                     }
                 });
+                // A family from Revit: whether it can be edited here, and why not, in plain words.
+                if let Some(e) = &ed.kept.editable {
+                    let (text, color) = if e.ok {
+                        (t("Editable: its parameters flex it as in Revit.").to_string(), pal().muted)
+                    } else {
+                        let why = e.reason.clone().unwrap_or_default();
+                        (tf("As in Revit (not yet editable): {}", &[&why]), pal().error)
+                    };
+                    ui.label(RichText::new(text).color(color));
+                }
                 ui.add_space(6.0);
                 // What the tabs leave of the screen, to the buttons below: a small one scrolls them.
                 let room = (ctx.content_rect().height() - 330.0).clamp(160.0, 470.0);
@@ -1249,6 +1372,7 @@ impl BimApp {
                                 (Tab::Forms, msg!("Forms")),
                                 (Tab::Symbols, msg!("Symbols")),
                                 (Tab::Connectors, msg!("Connectors")),
+                                (Tab::References, msg!("References")),
                             ] {
                                 if ui.selectable_label(ed.tab == tab, t(label)).clicked() {
                                     ed.tab = tab;
@@ -1264,6 +1388,7 @@ impl BimApp {
                                 Tab::Forms => forms_tab(&mut ed, ui, &materials),
                                 Tab::Symbols => symbols_tab(&mut ed, ui),
                                 Tab::Connectors => connectors_tab(&ed, ui),
+                                Tab::References => references_tab(&ed, ui),
                             },
                         );
                     });
