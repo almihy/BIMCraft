@@ -1674,9 +1674,10 @@ impl Model {
         // it is, is this build's.
         let views: Vec<&crate::graphics::Graphics> = self.elements.values().filter_map(crate::graphics::graphics_of_element).collect();
         let pdf_graphics = views.iter().copied().chain(self.view_templates.values().map(|t| &t.graphics)).any(|g| g.holds_imports())
-            || self.view_templates.iter().any(|(name, t)| {
-                t.controls.contains(&crate::graphics::Group::Imports) != Self::imports_implied(name, t, &views)
-            });
+            || self
+                .view_templates
+                .iter()
+                .any(|(name, t)| t.controls.contains(&crate::graphics::Group::Imports) != Self::imports_implied(name, t, &views));
         if pdf_graphics || self.image_types.values().any(crate::raster::ImageType::drawn) {
             return crate::model::FORMAT;
         }
