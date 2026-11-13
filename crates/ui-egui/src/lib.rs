@@ -4594,14 +4594,29 @@ impl BimApp {
                 &[&d.name, &asked],
             )
         };
-        let (mut keep, mut values, mut cancel) = (false, false, false);
-        let r = crate::popup::Modal::new(egui::Id::new("family-exists"), t("Family Already Exists")).width(460.0).show(ctx, |ui| {
+        // A shared family it nests is Revit's "Shared Family Already Exists": use the project's version (the default, first) or the
+        // one being loaded. The family itself is asked as "Family Already Exists": overwrite it, keeping the project's values of
+        // its types, or with its parameter values too.
+        let shared = asked != d.name;
+        let (mut keep, mut values, mut existing, mut cancel) = (false, false, false, false);
+        let title = if shared { t("Shared Family Already Exists") } else { t("Family Already Exists") };
+        let r = crate::popup::Modal::new(egui::Id::new("family-exists"), title).width(460.0).show(ctx, |ui| {
             crate::popup::body(ui, |ui| {
                 ui.add_space(6.0);
                 ui.label(text);
                 ui.add_space(8.0);
-                keep = ui.button(t("Overwrite the existing version")).clicked();
-                values = ui.button(t("Overwrite the existing version and its parameter values")).clicked();
+                if shared {
+                    let first = ui.button(t("Use the existing version"));
+                    // Revit's default: the project's version, which Enter takes.
+                    if !ui.memory(|m| m.focused().is_some()) {
+                        first.request_focus();
+                    }
+                    existing = first.clicked();
+                    keep = ui.button(t("Use the version you are loading")).clicked();
+                } else {
+                    keep = ui.button(t("Overwrite the existing version")).clicked();
+                    values = ui.button(t("Overwrite the existing version and its parameter values")).clicked();
+                }
             });
             crate::popup::footer(ui, |ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
@@ -4613,7 +4628,7 @@ impl BimApp {
             self.family_exists = None;
             return;
         }
-        if !(keep || values) {
+        if !(keep || values || existing) {
             return;
         }
         let Some(mut d) = self.family_exists.take() else { return };
@@ -4621,7 +4636,16 @@ impl BimApp {
             d.keep_values = keep;
             d.asked_itself = true;
         } else {
-            d.answers.insert(asked, json!(if keep { "overwrite" } else { "overwrite_values" }));
+            d.answers.insert(
+                asked,
+                json!(if existing {
+                    "existing"
+                } else if keep {
+                    "overwrite"
+                } else {
+                    "overwrite_values"
+                }),
+            );
         }
         d.asks.remove(0);
         if !d.asks.is_empty() {

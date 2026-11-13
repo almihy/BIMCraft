@@ -6287,6 +6287,47 @@ fn loading_a_family_the_project_has_asks_whether_to_keep_its_values() {
     assert!(h.query_by_label("Family Already Exists").is_none());
 }
 
+/// A door family whose handle is a shared family (Revit's `shared`), `width` wide, named `name`.
+fn shared_handle_package(dir: &std::path::Path, name: &str, width: f64) -> std::path::PathBuf {
+    let door = json!({"category": "door", "types": {"910 x 2110": {"Width": 910}},
+                      "parameters": [{"name": "Width", "kind": "length", "value": 900}, {"name": "Height", "kind": "length", "value": 2100}],
+                      "forms": [{"plane": "xz", "profile": [[-450, 0], [450, 0], [450, 2100], [-450, 2100]], "from": -20, "to": 20}]});
+    let handle = json!({"category": "generic", "types": {"Standard": {}},
+                        "forms": [{"profile": [[0, 0], [width, 0], [width, 50], [0, 50]], "from": 0, "to": 50}]});
+    let definition = json!({"nested": [{"id": "n1", "family": "Handle", "type": "Standard", "shared": true, "at": [300, 0, 1000]}]});
+    let package = json!({"format": 2, "family": door, "definition": definition, "nested_families": {"Handle": {"family": handle}}});
+    let path = dir.join(format!("{name}.arqiflow-family.json"));
+    std::fs::write(&path, package.to_string()).unwrap();
+    path
+}
+
+/// A shared family a loaded family nests, which the project has otherwise, is Revit's "Shared Family Already Exists": Use the
+/// existing version (the default) keeps the project's; Use the version you are loading replaces it.
+#[test]
+fn loading_a_family_that_nests_a_shared_family_the_project_has_asks_which_version_to_use() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = app(BOX);
+    let handle_width = |h: &Harness<BimApp>| h.state().session.model.families["Handle"].forms[0].profile[1][0].clone();
+    h.state_mut().load_family_file(shared_handle_package(dir.path(), "Sample Door A", 50.0));
+    h.run();
+    assert!(h.query_by_label("Family Already Exists").is_none() && h.query_by_label("Shared Family Already Exists").is_none());
+    assert_eq!(handle_width(&h), bimcraft_core::family::Expr::Number(50.0));
+    // Another door nesting a different Handle: asked; the project's is used.
+    h.state_mut().load_family_file(shared_handle_package(dir.path(), "Sample Door B", 60.0));
+    h.run();
+    assert!(h.query_by_label("Shared Family Already Exists").is_some());
+    assert!(h.query_by_label("Overwrite the existing version").is_none(), "the family itself isn't asked: it is new");
+    press(&mut h, "Use the existing version");
+    assert!(h.state().session.model.families.contains_key("Sample Door B"));
+    assert_eq!(handle_width(&h), bimcraft_core::family::Expr::Number(50.0), "the project's version kept");
+    // A third: the version it brings replaces it.
+    h.state_mut().load_family_file(shared_handle_package(dir.path(), "Sample Door C", 60.0));
+    h.run();
+    press(&mut h, "Use the version you are loading");
+    assert!(h.state().session.model.families.contains_key("Sample Door C"));
+    assert_eq!(handle_width(&h), bimcraft_core::family::Expr::Number(60.0), "the loaded version");
+}
+
 #[test]
 fn the_family_editor_sets_a_forms_and_a_symbols_visibility_settings_as_revits_dialog_does() {
     use bimcraft_core::family::{Levels, Show};
