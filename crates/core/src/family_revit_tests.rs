@@ -411,7 +411,8 @@ fn a_revit_form_saying_every_view_is_drawn_in_a_coarse_plan() {
     let d = id_of(&run(&mut s, "door", json!({"at": [2000, 0], "family": "jamb", "type": "900"})));
     for detail in ["coarse", "medium", "fine"] {
         run(&mut s, "detail", json!({"view": 100000, "detail": detail}));
-        let jamb = lines(&plan(&s), d).into_iter().filter(|(p, closed)| *closed && near(spans(p).0, 50.0) && near(spans(p).1, 200.0)).count();
+        let jamb =
+            lines(&plan(&s), d).into_iter().filter(|(p, closed)| *closed && near(spans(p).0, 50.0) && near(spans(p).1, 200.0)).count();
         assert_eq!(jamb, 1, "{detail}: the jamb the plane cuts is outlined");
     }
 }

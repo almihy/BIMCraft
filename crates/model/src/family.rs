@@ -3335,7 +3335,8 @@ fn hosted_library(language: crate::language::Language) -> Vec<(String, Value)> {
     // A handle is not drawn at Coarse, nor in a plan seen from above (below its cut): a door's plan is its jambs, its leaf and
     // its swing.
     let handle = |x: [&str; 2], bx: Block<'_>| {
-        let mut both = vec![bx(x, [&leaf_y[1], &face_out], ["1000", "1030"], &metal), bx(x, [&face_in, &leaf_y[0]], ["1000", "1030"], &metal)];
+        let mut both =
+            vec![bx(x, [&leaf_y[1], &face_out], ["1000", "1030"], &metal), bx(x, [&face_in, &leaf_y[0]], ["1000", "1030"], &metal)];
         for form in &mut both {
             form["show"] = json!({"coarse": false, "plan_top": false});
         }
