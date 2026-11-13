@@ -191,7 +191,7 @@ fn a_door_family_from_before_visibility_settings_draws_its_leaf_open_once_its_pr
     assert!(near(lo, hinge) && near(hi, hinge + 40.0), "{lo}..{hi}");
     // Written again it says so (22), and read again it is as it was.
     let again = s.model.to_json().unwrap();
-    assert!(again.contains(&format!("\"format\": {}", crate::model::FORMAT)));
+    assert!(again.contains(&format!("\"format\": {}", crate::model::LEAF_FORMAT)));
     let (m2, _) = Model::read(&again).unwrap();
     assert_eq!(m2.families, s.model.families, "read once, changed once");
 }
@@ -205,7 +205,7 @@ fn a_project_is_written_as_format_22_only_when_it_places_a_door_whose_family_say
     let own = id_of(&run(&mut s, "door", json!({"at": [2000, 0], "type": "Single 900 x 2100"})));
     assert_eq!(format(&s), json!(crate::model::PREVIOUS_FORMAT));
     let door = id_of(&run(&mut s, "door", json!({"at": [5000, 0], "family": "Single Door"})));
-    assert_eq!(format(&s), json!(crate::model::FORMAT), "a build of 21 would draw its leaf shut in the wall");
+    assert_eq!(format(&s), json!(crate::model::LEAF_FORMAT), "a build of 21 would draw its leaf shut in the wall");
     run(&mut s, "delete", json!({"ids": [door, own]}));
     assert_eq!(format(&s), json!(crate::model::PREVIOUS_FORMAT));
 }
@@ -232,4 +232,67 @@ fn the_family_command_sets_a_forms_and_a_symbols_visibility_settings_by_id() {
     assert_eq!(s.model.families["Single Door"].forms[leaf].show, None);
     // And a misspelled one is an error.
     assert!(s.execute("family", &json!({"name": "Single Door", "form": {"id": form, "show": {"plann": true}}})).is_err());
+}
+
+#[test]
+fn a_door_family_form_saying_nothing_is_drawn_in_a_coarse_plan_and_in_3d_as_revits_default() {
+    use crate::graphics::Look;
+    let mut s = Session::new();
+    wall(&mut s);
+    // One jamb, 50 by 200 in plan, saying nothing of the views and detail levels that draw it.
+    run(
+        &mut s,
+        "family",
+        json!({
+            "name": "Plain door",
+            "category": "door",
+            "operation": "swing",
+            "parameters": [{"name": "Width", "value": 900}, {"name": "Height", "value": 2100}],
+            "types": {"900x2100": {}},
+            "forms": [{"profile": [["-Width / 2", -100], ["-Width / 2 + 50", -100], ["-Width / 2 + 50", 100], ["-Width / 2", 100]], "from": 0, "to": "Height"}]
+        }),
+    );
+    assert_eq!(s.model.families["Plain door"].forms[0].show, None);
+    let door = id_of(&run(&mut s, "door", json!({"at": [2000, 0], "family": "Plain door"})));
+    // Revit's default is every view at every level: the plan outlines the jamb where it cuts, at Coarse too (the built-in
+    // doors say their forms are not drawn at Coarse, and are drawn so).
+    for detail in ["coarse", "medium", "fine"] {
+        let (closed, _) = lines(&plan_at(&mut s, detail), door);
+        assert_eq!(closed.iter().filter(|r| near(size(r).0, 50.0) && near(size(r).1, 200.0)).count(), 1, "{detail}: {closed:?}");
+    }
+    // And a 3D view at Coarse draws it.
+    let view = run(&mut s, "detail", json!({"view": "{3D}", "detail": "coarse"}))["view"].as_u64().unwrap();
+    let scene = crate::view3d::Scene::new(&s.model);
+    let look = Look::of(&s.model, view);
+    assert!(scene.tris.iter().any(|t| t.owner == door && look.draws(t)), "the jamb in 3D at Coarse");
+}
+
+#[test]
+fn a_project_is_written_as_22_for_a_component_whose_form_says_its_views_23_for_per_type_forms_and_24_for_a_parametric_family() {
+    use crate::model::{FORMAT, LEAF_FORMAT, PREVIOUS_FORMAT, TYPES_FORMAT};
+    assert_eq!((LEAF_FORMAT, TYPES_FORMAT, FORMAT), (22, 23, 24));
+    let mut s = Session::new();
+    let format = |s: &Session| serde_json::from_str::<Value>(&s.model.to_json().unwrap()).unwrap()["format"].clone();
+    // A family whose form says which views draw it, placed nowhere: nothing a build of 21 would misread is drawn.
+    run(
+        &mut s,
+        "family",
+        json!({"name": "Plinth", "category": "furniture", "types": {"A": {}},
+               "forms": [{"profile": [[0, 0], [100, 0], [100, 100]], "to": 100, "show": {"side": false}}]}),
+    );
+    assert_eq!(format(&s), json!(PREVIOUS_FORMAT));
+    let c = id_of(&run(&mut s, "component", json!({"family": "Plinth", "type": "A", "at": [0, 0]})));
+    assert_eq!(format(&s), json!(LEAF_FORMAT), "a component of a family whose form says its views");
+    // A form of some types only is per-type: 23, which holds what 22 does.
+    run(
+        &mut s,
+        "family",
+        json!({"name": "Plinth", "forms": [{"profile": [[0, 0], [100, 0], [100, 100]], "to": 100, "show": {"side": false}, "types": ["A"]}]}),
+    );
+    assert_eq!(format(&s), json!(TYPES_FORMAT));
+    // A family that stays parametric is 24, over both.
+    run(&mut s, "family", json!({"name": "Plinth", "references": [{"name": "Base", "axis": "z", "at": 0}]}));
+    assert_eq!(format(&s), json!(FORMAT));
+    run(&mut s, "delete", json!({"ids": [c]}));
+    assert_eq!(format(&s), json!(FORMAT), "parametric whether or not it is placed");
 }

@@ -164,9 +164,9 @@ fn a_plan_draws_the_swing_at_every_level_and_never_the_leaf_mesh() {
             }
         });
         assert_eq!(leaf.count(), 0, "{detail}");
-        // The frame's jambs are cut, outlined at Medium and Fine; at Coarse a form that says nothing of its levels is left out.
+        // The frame's jambs are cut and outlined at every level: a form that says nothing is drawn everywhere, as Revit's default.
         let jambs = all.iter().filter(|(p, closed)| *closed && near(spans(p).0, 50.0)).count();
-        assert_eq!(jambs, if detail == "coarse" { 0 } else { 2 }, "{detail}");
+        assert_eq!(jambs, 2, "{detail}");
     }
 }
 
@@ -252,7 +252,7 @@ fn duplicating_a_type_keeps_its_forms_and_renaming_or_deleting_one_follows() {
 }
 
 #[test]
-fn a_project_using_the_new_fields_is_written_as_22_and_one_without_as_before() {
+fn a_project_using_the_new_fields_is_written_as_23_and_one_without_as_before() {
     use crate::model::{Model, PREVIOUS_FORMAT, TYPES_FORMAT as FORMAT};
     let mut s = Session::new();
     let format = |s: &Session| serde_json::from_str::<Value>(&s.model.to_json().unwrap()).unwrap()["format"].clone();
@@ -267,26 +267,26 @@ fn a_project_using_the_new_fields_is_written_as_22_and_one_without_as_before() {
     assert_eq!(format(&s), json!(PREVIOUS_FORMAT));
     let door = door(&mut s, "900 x 2100");
     assert_eq!(format(&s), json!(FORMAT));
-    assert_eq!(FORMAT, 22, "a family from Revit that is no more than its result per type");
+    assert_eq!(FORMAT, 23, "a family from Revit that is no more than its result per type");
     // Read back, it is as it was.
     let (m, left_out) = Model::read(&s.model.to_json().unwrap()).unwrap();
     assert!(left_out.is_empty(), "{left_out:?}");
     assert_eq!(m.families[NAME], s.model.families[NAME]);
     assert_eq!(m.families["Plain"].source, s.model.families["Plain"].source);
     assert_eq!(m.opening_local(&m.elements[&door]).unwrap().0.len(), 5);
-    // A build that reads up to 21 refuses it rather than drawing both leaves at once.
+    // A build that reads up to 22 refuses it rather than drawing both leaves at once.
     let mut v: Value = serde_json::from_str(&s.model.to_json().unwrap()).unwrap();
     v["format"] = json!(crate::model::FORMAT + 1);
     assert!(Model::read(&v.to_string()).unwrap_err().contains("newer"));
 }
 
 /// The formats after PDF layers (21): a template that chose not to control Imported Categories keeps that through a file of
-/// 22 or 23, which can name the group; only a file older than 21 has it given back where it is implied.
+/// 22, 23 or 24, which can name the group; only a file older than 21 has it given back where it is implied.
 #[test]
 fn a_file_of_a_family_format_keeps_a_templates_imported_categories_as_it_was() {
     use crate::graphics::Group;
     use crate::model::{FORMAT, Model, PDF_FORMAT, TYPES_FORMAT};
-    assert_eq!((PDF_FORMAT, TYPES_FORMAT, FORMAT), (21, 22, 23));
+    assert_eq!((PDF_FORMAT, TYPES_FORMAT, FORMAT), (21, 23, 24));
     let mut s = Session::new();
     door(&mut s, "900 x 2100");
     let level = s.model.guid(s.model.levels()[0].0).to_string();
@@ -301,7 +301,7 @@ fn a_file_of_a_family_format_keeps_a_templates_imported_categories_as_it_was() {
     assert_eq!(serde_json::from_str::<Value>(&text).unwrap()["format"], json!(TYPES_FORMAT));
     let (m, left_out) = Model::read(&text).unwrap();
     assert!(left_out.is_empty(), "{left_out:?}");
-    assert!(!m.view_templates["No Imports"].controls.contains(&Group::Imports), "a file of 22 says what it controls");
+    assert!(!m.view_templates["No Imports"].controls.contains(&Group::Imports), "a file of 23 says what it controls");
     // A file of 20, written the same, has it back.
     let mut v: Value = serde_json::from_str(&text).unwrap();
     v["format"] = json!(20);
@@ -355,4 +355,64 @@ fn a_door_schedule_lists_a_familys_text_parameter_with_each_doors_words() {
     assert!(rows[0].to_string().contains("EI 60"), "{r}");
     assert!(r["available"].as_array().is_some_and(|a| a.iter().any(|f| f.to_string().contains("Fire Rating"))), "{r}");
     let _ = d;
+}
+
+/// A form of Revit's definition that says every view and every detail level (all eight boxes ticked, which is Revit's
+/// default) is drawn in a plan at Coarse when it crosses the cut: a form that says everything is a form that says nothing.
+#[test]
+fn a_revit_form_saying_every_view_is_drawn_in_a_coarse_plan() {
+    // A jamb 50 by 200 in plan, 2100 tall, as the exporter writes it: Revit's result (a mesh, per type) and the definition
+    // (an extrusion bound to the door's planes) that rebuilds it.
+    let cuboid = |lo: [f64; 3], hi: [f64; 3]| {
+        let p = |i: usize| {
+            [if i & 1 == 0 { lo[0] } else { hi[0] }, if i & 2 == 0 { lo[1] } else { hi[1] }, if i & 4 == 0 { lo[2] } else { hi[2] }]
+        };
+        let quads = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]];
+        json!(quads.iter().flat_map(|[a, b, c, d]| [json!([p(*a), p(*b), p(*c)]), json!([p(*a), p(*c), p(*d)])]).collect::<Vec<_>>())
+    };
+    let at = |v: f64| json!({"900": v});
+    let side = |a: Value, b: Value| json!({"line": [a, b]});
+    let corner = |x: Value, y: Value| json!([x, y, 0]);
+    let (l0, l1) = (json!({"ref": "l", "offset": -50.0}), json!({"ref": "l", "offset": 0.0}));
+    let (i, e) = (json!({"ref": "i", "offset": 0.0}), json!({"ref": "e", "offset": 0.0}));
+    let ring = json!([
+        side(corner(l0.clone(), i.clone()), corner(l1.clone(), i.clone())),
+        side(corner(l1.clone(), i.clone()), corner(l1.clone(), e.clone())),
+        side(corner(l1.clone(), e.clone()), corner(l0.clone(), e.clone())),
+        side(corner(l0.clone(), e), corner(l0, i)),
+    ]);
+    let everything = json!({"coarse": true, "medium": true, "fine": true, "plan": true, "front": true, "side": true,
+                            "plan_top": true, "plan_cut": true});
+    let package = json!({
+        "format": 2,
+        "family": {"category": "door", "host": "wall",
+                   "parameters": [{"name": "Width", "kind": "length", "value": 900}, {"name": "Height", "kind": "length", "value": 2100}],
+                   "types": {"900": {"Width": 900}},
+                   "forms": [{"mesh": cuboid([-500.0, -100.0, 0.0], [-450.0, 100.0, 2100.0]), "types": ["900"], "snapshot": true}]},
+        "definition": {
+            "to_bimcraft": {"x_offset": 0, "y_sign": 1, "z_minus": 0, "wall": at(200.0)},
+            "reference_planes": [
+                {"id": "c", "name": "Center", "normal": [1, 0, 0], "defines_origin": true, "at": at(0.0)},
+                {"id": "l", "name": "Left", "normal": [1, 0, 0], "at": at(-450.0)},
+                {"id": "r", "name": "Right", "normal": [1, 0, 0], "at": at(450.0)},
+                {"id": "e", "name": "Exterior", "normal": [0, 1, 0], "is_reference": "host_exterior", "at": at(100.0)},
+                {"id": "i", "name": "Interior", "normal": [0, 1, 0], "is_reference": "host_interior", "at": at(-100.0)},
+                {"id": "z", "name": "Ref Level", "normal": [0, 0, 1], "defines_origin": true, "at": at(0.0)}
+            ],
+            "dimensions": [{"refs": ["l", "r"], "label": "Width"}, {"refs": ["l", "c", "r"], "eq": true}],
+            "forms": [{"kind": "extrusion", "normal": [0, 0, 1], "start": 0, "end": 2100, "loops": [ring], "show": everything}]
+        }
+    });
+    let mut s = Session::new();
+    s.files.give("jamb.arqiflow-family.json", package.to_string().into_bytes());
+    let r = run(&mut s, "family", json!({"path": "jamb.arqiflow-family.json"}));
+    assert_eq!(r["check"]["900"]["matched"], true, "{}", r["check"]);
+    run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]]}));
+    let name = s.model.families.keys().next().cloned().unwrap();
+    let d = id_of(&run(&mut s, "door", json!({"at": [2000, 0], "family": name, "type": "900"})));
+    for detail in ["coarse", "medium", "fine"] {
+        run(&mut s, "detail", json!({"view": 100000, "detail": detail}));
+        let jamb = lines(&plan(&s), d).into_iter().filter(|(p, closed)| *closed && near(spans(p).0, 50.0) && near(spans(p).1, 200.0)).count();
+        assert_eq!(jamb, 1, "{detail}: the jamb the plane cuts is outlined");
+    }
 }

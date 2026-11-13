@@ -290,9 +290,8 @@ enum Part {
 struct SymbolText {
     /// Its id and GUID, which it keeps wherever it's moved to in the list.
     ident: (bimcraft_core::model::Id, bimcraft_core::model::Guid),
-    /// The view it is drawn in, its detail levels, its types and its subcategory: kept as they are, its levels ticked here.
+    /// The view it is drawn in, its types and its subcategory: kept as they are.
     view: SymbolView,
-    show: Option<Levels>,
     types: Vec<String>,
     subcategory: Option<String>,
     part: Part,
@@ -314,7 +313,6 @@ impl SymbolText {
         let base = SymbolText {
             ident: Default::default(),
             view: SymbolView::Plan,
-            show: None,
             types: Vec::new(),
             subcategory: None,
             part,

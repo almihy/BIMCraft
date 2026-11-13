@@ -3516,6 +3516,16 @@ fn hosted_library(language: crate::language::Language) -> Vec<(String, Value)> {
             ]
         }),
     ));
+    // A plan at Coarse shows these as their opening alone and what their symbols draw, as BIMCraft's always has. A form that
+    // says nothing is drawn in every view at every level (Revit's default), so each of theirs that has no settings says it
+    // is not drawn at Coarse.
+    for (_, family) in &mut out {
+        for form in family["forms"].as_array_mut().into_iter().flatten() {
+            if form.get("show").is_none() && form.get("void").is_none() {
+                form["show"] = json!({"coarse": false});
+            }
+        }
+    }
     out
 }
 

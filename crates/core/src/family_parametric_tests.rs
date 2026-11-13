@@ -682,13 +682,13 @@ fn a_package_loads_its_nested_families_and_gives_back_the_type_to_place() {
 }
 
 #[test]
-fn a_project_with_a_parametric_family_is_written_as_23() {
+fn a_project_with_a_parametric_family_is_written_as_24() {
     use crate::model::{FORMAT, Model};
     let mut s = Session::new();
     run(&mut s, "family", table(750.0));
     let v: Value = serde_json::from_str(&s.model.to_json().unwrap()).unwrap();
     assert_eq!(v["format"], json!(FORMAT));
-    assert_eq!(FORMAT, 23);
+    assert_eq!(FORMAT, 24);
     let (m, left_out) = Model::read(&s.model.to_json().unwrap()).unwrap();
     assert!(left_out.is_empty(), "{left_out:?}");
     assert_eq!(m.families["Sample Box Table"].references, s.model.families["Sample Box Table"].references);
