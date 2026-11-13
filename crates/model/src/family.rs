@@ -3332,8 +3332,14 @@ fn hosted_library(language: crate::language::Language) -> Vec<(String, Value)> {
     };
     let leaf_y = [format!("-{leaf} / 2"), format!("{leaf} / 2")];
     let (face_in, face_out) = (format!("-{leaf} / 2 - 55"), format!("{leaf} / 2 + 55"));
+    // A handle is not drawn at Coarse, nor in a plan seen from above (below its cut): a door's plan is its jambs, its leaf and
+    // its swing.
     let handle = |x: [&str; 2], bx: Block<'_>| {
-        vec![bx(x, [&leaf_y[1], &face_out], ["1000", "1030"], &metal), bx(x, [&face_in, &leaf_y[0]], ["1000", "1030"], &metal)]
+        let mut both = vec![bx(x, [&leaf_y[1], &face_out], ["1000", "1030"], &metal), bx(x, [&face_in, &leaf_y[0]], ["1000", "1030"], &metal)];
+        for form in &mut both {
+            form["show"] = json!({"coarse": false, "plan_top": false});
+        }
+        both
     };
     let sizes = |names: &[(&str, f64, f64)]| -> Value {
         names.iter().map(|(n, wd, h)| (n.to_string(), json!({width: wd, height: h}))).collect::<serde_json::Map<String, Value>>().into()

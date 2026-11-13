@@ -408,8 +408,7 @@ fn a_revit_form_saying_every_view_is_drawn_in_a_coarse_plan() {
     let r = run(&mut s, "family", json!({"path": "jamb.arqiflow-family.json"}));
     assert_eq!(r["check"]["900"]["matched"], true, "{}", r["check"]);
     run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]]}));
-    let name = s.model.families.keys().next().cloned().unwrap();
-    let d = id_of(&run(&mut s, "door", json!({"at": [2000, 0], "family": name, "type": "900"})));
+    let d = id_of(&run(&mut s, "door", json!({"at": [2000, 0], "family": "jamb", "type": "900"})));
     for detail in ["coarse", "medium", "fine"] {
         run(&mut s, "detail", json!({"view": 100000, "detail": detail}));
         let jamb = lines(&plan(&s), d).into_iter().filter(|(p, closed)| *closed && near(spans(p).0, 50.0) && near(spans(p).1, 200.0)).count();

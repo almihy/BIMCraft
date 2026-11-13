@@ -174,7 +174,9 @@ fn a_door_family_from_before_visibility_settings_draws_its_leaf_open_once_its_pr
     for detail in ["coarse", "medium", "fine"] {
         let d = plan_at(&mut s, detail);
         let (closed, open) = lines(&d, door);
-        assert!(closed.iter().all(|r| size(r).0 < 100.0), "{detail}: no leaf shut in the wall: {closed:?}");
+        // The kick plate, low down and below the cut, is outlined seen from above (a form that says nothing is drawn at every
+        // level); the leaf, 846 by 40, is not.
+        assert!(!closed.iter().any(|r| size(r).0 > 800.0 && size(r).1 > 30.0), "{detail}: no leaf shut in the wall: {closed:?}");
         let leaves = panels(&open);
         // The leaf's 40 mm, on the side it shuts to, as long as the arc's radius (926 - 80).
         assert_eq!(leaves.len(), 1, "{detail}: {open:?}");
