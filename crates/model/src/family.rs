@@ -19,6 +19,7 @@ use crate::geom::v3::{P3, add, cross, mul};
 use crate::model::{MAX_COORD, MAX_TEXT};
 
 mod bounds;
+mod leaves;
 mod validate;
 
 /// What a family is: how IFC names its components; a door or a window is hosted in a wall, which
@@ -320,6 +321,84 @@ impl Mark {
     }
 }
 
+/// Revit's Visibility Settings of a family's form: the detail levels a view draws it at, and whether a plan (or a ceiling
+/// plan), a view along the family's y (its front or back) and a view along its x (its left or right) draw it. Each is true
+/// unless it says otherwise.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Show {
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub coarse: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub medium: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub fine: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub plan: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub front: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub side: bool,
+    /// Revit's Top/Bottom: a plan draws it seen from above, wholly below its cut plane.
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub plan_top: bool,
+    /// Revit's Plan/RCP when cut: a plan draws it where its cut plane passes through it.
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub plan_cut: bool,
+}
+
+impl Default for Show {
+    fn default() -> Show {
+        Show { coarse: true, medium: true, fine: true, plan: true, front: true, side: true, plan_top: true, plan_cut: true }
+    }
+}
+
+impl Show {
+    /// Whether a view at detail level `d` draws it.
+    pub fn at(&self, d: crate::graphics::Detail) -> bool {
+        use crate::graphics::Detail;
+        match d {
+            Detail::Coarse => self.coarse,
+            Detail::Medium => self.medium,
+            Detail::Fine => self.fine,
+        }
+    }
+}
+
+/// The detail levels a symbol is drawn at (Revit's Visibility Settings of a symbolic line), each true unless it says.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Levels {
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub coarse: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub medium: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub fine: bool,
+}
+
+impl Default for Levels {
+    fn default() -> Levels {
+        Levels { coarse: true, medium: true, fine: true }
+    }
+}
+
+impl Levels {
+    /// Whether a view at detail level `d` draws it.
+    pub fn at(&self, d: crate::graphics::Detail) -> bool {
+        Show { coarse: self.coarse, medium: self.medium, fine: self.fine, ..Show::default() }.at(d)
+    }
+}
+
+fn yes() -> bool {
+    true
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's `skip_serializing_if` passes a reference
+fn is_yes(b: &bool) -> bool {
+    *b
+}
+
 /// A mark a family's plan draws in its own axes, and no view shows otherwise (a door's swing, a socket's circle): a `line`
 /// through points, an `arc`, a `text` label or a `dot`, a solid disc; `visible` (a yes/no parameter, or a formula) whether it's
 /// there.
@@ -341,6 +420,19 @@ pub struct Symbol {
     pub dot: Option<Circle>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible: Option<Expr>,
+    /// The detail levels it is drawn at; none, every level but Coarse.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show: Option<Levels>,
+}
+
+impl Symbol {
+    /// Whether a view at detail level `d` draws it: at the levels its `show` says, else at every level but Coarse.
+    pub fn drawn_at(&self, d: crate::graphics::Detail) -> bool {
+        match &self.show {
+            Some(l) => l.at(d),
+            None => d != crate::graphics::Detail::Coarse,
+        }
+    }
 }
 
 /// What a connector joins: `power` carries a load, `switch` only switches one, `pipe` joins a pipe of its `domain`, `data`
@@ -542,6 +634,9 @@ pub struct Form {
     /// Shared, so an undo step's copy of the model doesn't copy it.
     #[serde(default, skip_serializing_if = "no_mesh")]
     pub mesh: Arc<Vec<[P3; 3]>>,
+    /// Revit's Visibility Settings: the detail levels and the views it is drawn in; none, every one, as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show: Option<Show>,
 }
 
 fn no_mesh(mesh: &Arc<Vec<[P3; 3]>>) -> bool {
@@ -651,6 +746,8 @@ pub struct Piece {
     pub top: f64,
     pub material: String,
     pub round: bool,
+    /// Its form's Visibility Settings ([`Form::show`]).
+    pub show: Option<Show>,
 }
 
 /// Where one form lies before any void cuts it: its box in the family's own axes (x along a
@@ -1572,10 +1669,18 @@ impl Family {
 
     /// The marks of its visible symbols, sized by `values`, in its own axes: an arc as a polyline of short chords, a label
     /// a label as its anchor (lettered by [`lettering`] where it is placed), a dot as it is.
-    pub fn marks<'a>(&'a self, values: &BTreeMap<String, Val>) -> Result<Vec<Mark>, String> {
+    pub fn marks(&self, values: &BTreeMap<String, Val>) -> Result<Vec<Mark>, String> {
+        self.marks_at(values, None)
+    }
+
+    /// [`Family::marks`], of the symbols a view at detail level `detail` draws ([`Symbol::drawn_at`]); every one with none.
+    pub fn marks_at<'a>(&'a self, values: &BTreeMap<String, Val>, detail: Option<crate::graphics::Detail>) -> Result<Vec<Mark>, String> {
         let mut read = HashMap::new();
         let mut out = Vec::new();
         for (i, sym) in self.symbols.iter().enumerate() {
+            if detail.is_some_and(|d| !sym.drawn_at(d)) {
+                continue;
+            }
             let said = |e: String| format!("symbol {}: {e}", i + 1);
             let ways = usize::from(!sym.line.is_empty())
                 + usize::from(sym.arc.is_some())
@@ -1664,6 +1769,7 @@ impl Family {
                         round: false,
                         outline: std::mem::take(&mut piece.outline),
                         material: std::mem::take(&mut piece.material),
+                        show: piece.show,
                     };
                 }
             }
@@ -1726,7 +1832,7 @@ impl Family {
                     let axis = [corner(p)?, corner(q)?];
                     let (tris, outline) = revolve(&ring, axis, (from, to), form.plane)?;
                     let (bottom, top) = heights(&tris);
-                    Piece { caps: tris.len(), tris, outline, bottom, top, material, round: false }
+                    Piece { caps: tris.len(), tris, outline, bottom, top, material, round: false, show: None }
                 }
                 None => {
                     let (tris, caps) = sweep(&ring, from, to, form.plane)?;
@@ -1741,11 +1847,11 @@ impl Family {
                         Plane::Xz => (vec![P2(a0, from), P2(a1, from), P2(a1, to), P2(a0, to)], b0, b1),
                         Plane::Yz => (vec![P2(from, a0), P2(to, a0), P2(to, a1), P2(from, a1)], b0, b1),
                     };
-                    Piece { tris, caps, outline, bottom, top, material, round: form.circle.is_some() }
+                    Piece { tris, caps, outline, bottom, top, material, round: form.circle.is_some(), show: None }
                 }
             }
         };
-        Ok(Some(piece))
+        Ok(Some(Piece { show: form.show, ..piece }))
     }
 
     /// Where each of its forms lies, sized by `values`, before any void cuts it: its place in
@@ -2009,7 +2115,7 @@ fn mesh(tris: &[[P3; 3]], material: String) -> Result<Piece, String> {
     let (bottom, top) = tris.iter().flatten().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| (lo.min(p[2]), hi.max(p[2])));
     // ponytail: the convex hull stands for its outline; trace its silhouette if hulls mislead.
     let outline = crate::geom::hull(tris.iter().flatten().map(|p| P2(p[0], p[1])).collect());
-    Ok(Piece { tris: tris.to_vec(), caps: tris.len(), outline, bottom, top, material, round: false })
+    Ok(Piece { tris: tris.to_vec(), caps: tris.len(), outline, bottom, top, material, round: false, show: None })
 }
 
 /// The families a new project starts with, BIMCraft's own: tables, chairs, beds, sofas, desks,
@@ -2276,10 +2382,30 @@ fn hosted_library(language: crate::language::Language) -> Vec<(String, Value)> {
     };
     let mut out = Vec::new();
 
+    // A door's leaf, shut in its opening: built in 3D and never drawn in a plan, which draws it open (Revit's door families'
+    // panel, its Visibility Settings' Plan/RCP off).
+    let leaf_form = |x: [&str; 2], y: [&str; 2]| {
+        let mut v = block(x, y, ["0", &under_head], &leaf_mat);
+        v["show"] = json!({"plan": false});
+        v
+    };
+    // A leaf drawn open in plan, at every detail level as Revit's Panel and Plan Swing are: hinged at `at` on the exterior
+    // face, square to the wall, `run` long and `leaf` thick toward the side `toward` (+1 along x, -1 back), and the arc its
+    // free edge sweeps from where it shuts (`from` to `to` degrees).
+    let every = json!({});
+    let open_leaf = |at: &str, run: &str, toward: &str, from: i32, to: i32| {
+        let side = format!("{at} {toward} {leaf}");
+        let tip = format!("{wall} / 2 + {run}");
+        vec![
+            json!({"line": [[at, &half_t], [at, &tip], [&side, &tip], [&side, &half_t], [at, &half_t]], "show": every}),
+            json!({"arc": {"centre": [at, &half_t], "radius": run, "from": from, "to": to}, "show": every}),
+        ]
+    };
+
     // A single door, hinged on the jamb toward the wall's start and swinging to its exterior.
     let run = format!("{width} - 2 * {frame}");
     let mut forms = door_frame(&block);
-    forms.push(block([&left, &right], [&leaf_y[0], &leaf_y[1]], ["0", &under_head], &leaf_mat));
+    forms.push(leaf_form([&left, &right], [&leaf_y[0], &leaf_y[1]]));
     forms.extend(handle([&format!("{width} / 2 - {frame} - 120"), &format!("{width} / 2 - {frame} - 40")], &block));
     out.push((
         w(msg!("Single Door")),
@@ -2289,20 +2415,18 @@ fn hosted_library(language: crate::language::Language) -> Vec<(String, Value)> {
             "parameters": [size(width, 900.0), size(height, 2100.0), size(&frame, 50.0), size(&leaf, 40.0), material(&frame_mat, &timber), material(&leaf_mat, &timber)],
             "types": sizes(&[("900 x 2100", 900.0, 2100.0), ("800 x 2100", 800.0, 2100.0), ("1000 x 2100", 1000.0, 2100.0)]),
             "forms": forms,
-            "symbols": [
-                {"line": [[&left, &half_t], [&left, &format!("{wall} / 2 + {run}")]]},
-                {"arc": {"centre": [&left, &half_t], "radius": &run, "from": 0, "to": 90}}
-            ]
+            "symbols": open_leaf(&left, &run, "+", 0, 90)
         }),
     ));
 
     // A double door: two leaves, each hinged on its jamb, meeting in the middle.
     let each = format!("({width} - 2 * {frame}) / 2");
     let mut forms = door_frame(&block);
-    forms.push(block([&left, "-1"], [&leaf_y[0], &leaf_y[1]], ["0", &under_head], &leaf_mat));
-    forms.push(block(["1", &right], [&leaf_y[0], &leaf_y[1]], ["0", &under_head], &leaf_mat));
+    forms.push(leaf_form([&left, "-1"], [&leaf_y[0], &leaf_y[1]]));
+    forms.push(leaf_form(["1", &right], [&leaf_y[0], &leaf_y[1]]));
     forms.extend(handle(["-120", "-40"], &block));
     forms.extend(handle(["40", "120"], &block));
+    let both = [open_leaf(&left, &each, "+", 0, 90), open_leaf(&right, &each, "-", 90, 180)].concat();
     out.push((
         w(msg!("Double Door")),
         json!({
@@ -2311,12 +2435,7 @@ fn hosted_library(language: crate::language::Language) -> Vec<(String, Value)> {
             "parameters": [size(width, 1500.0), size(height, 2100.0), size(&frame, 50.0), size(&leaf, 40.0), material(&frame_mat, &timber), material(&leaf_mat, &timber)],
             "types": sizes(&[("1500 x 2100", 1500.0, 2100.0), ("1200 x 2100", 1200.0, 2100.0), ("1800 x 2100", 1800.0, 2100.0)]),
             "forms": forms,
-            "symbols": [
-                {"line": [[&left, &half_t], [&left, &format!("{wall} / 2 + {each}")]]},
-                {"arc": {"centre": [&left, &half_t], "radius": &each, "from": 0, "to": 90}},
-                {"line": [[&right, &half_t], [&right, &format!("{wall} / 2 + {each}")]]},
-                {"arc": {"centre": [&right, &half_t], "radius": &each, "from": 90, "to": 180}}
-            ]
+            "symbols": both
         }),
     ));
 
@@ -2325,10 +2444,9 @@ fn hosted_library(language: crate::language::Language) -> Vec<(String, Value)> {
     let (past_l, past_r) = ("25", "-25");
     let inner_track = [format!("-{leaf} - 5"), "-5".to_string()];
     let outer_track = ["5".to_string(), format!("{leaf} + 5")];
-    let (inner_y, outer_y) = (format!("-{leaf} / 2 - 5"), format!("{leaf} / 2 + 5"));
     let mut forms = door_frame(&block);
-    forms.push(block([&left, past_l], [&inner_track[0], &inner_track[1]], ["0", &under_head], &leaf_mat));
-    forms.push(block([past_r, &right], [&outer_track[0], &outer_track[1]], ["0", &under_head], &leaf_mat));
+    forms.push(leaf_form([&left, past_l], [&inner_track[0], &inner_track[1]]));
+    forms.push(leaf_form([past_r, &right], [&outer_track[0], &outer_track[1]]));
     forms.push(block(["15", "55"], [&outer_track[1], &format!("{leaf} + 30")], ["1000", "1150"], &metal));
     out.push((
         w(msg!("Sliding Door")),
@@ -2338,9 +2456,10 @@ fn hosted_library(language: crate::language::Language) -> Vec<(String, Value)> {
             "parameters": [size(width, 2000.0), size(height, 2100.0), size(&frame, 50.0), size(&leaf, 40.0), material(&frame_mat, &metal), material(&leaf_mat, &glass)],
             "types": sizes(&[("2000 x 2100", 2000.0, 2100.0), ("1500 x 2100", 1500.0, 2100.0), ("2400 x 2100", 2400.0, 2100.0)]),
             "forms": forms,
+            // Each leaf a panel on its track, at every detail level, as Revit's sliding doors draw theirs.
             "symbols": [
-                {"line": [[&left, &inner_y], [past_l, &inner_y]]},
-                {"line": [[past_r, &outer_y], [&right, &outer_y]]}
+                {"line": [[&left, &inner_track[0]], [past_l, &inner_track[0]], [past_l, &inner_track[1]], [&left, &inner_track[1]], [&left, &inner_track[0]]], "show": every},
+                {"line": [[past_r, &outer_track[0]], [&right, &outer_track[0]], [&right, &outer_track[1]], [past_r, &outer_track[1]], [past_r, &outer_track[0]]], "show": every}
             ]
         }),
     ));

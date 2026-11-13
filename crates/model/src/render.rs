@@ -4196,18 +4196,23 @@ fn opening(d: &mut Drawing, m: &Model, e: &Element, o: &Opening, w: &Wall, cut: 
         d.line(&[axis.at(s, int), axis.at(s, ext)], Pen::HEAVY, INK, false);
     }
     d.own(owner);
-    // At coarse, a window is its gap, as are a family's forms and symbols; a door of the project's own type still shows
-    // its leaf and swing, as Revit's Single-Flush draws its panel and Plan Swing at every detail level.
-    if !shown || (d.detail == Detail::Coarse && (o.family.is_some() || !matches!(e, Element::Door(_)))) {
+    // At coarse, a window of the project's own type is its gap; a door of the project's own type still shows its leaf and
+    // swing, as Revit's Single-Flush draws its panel and Plan Swing at every detail level. A family's forms and symbols are
+    // drawn at the levels their Visibility Settings say, and those that say nothing at every level but Coarse.
+    if !shown || (d.detail == Detail::Coarse && o.family.is_none() && !matches!(e, Element::Door(_))) {
         return;
     }
-    // Of a family: the forms the cut plane passes through, outlined, and the lines of its symbols (a door's swing).
+    // Of a family: the forms the cut plane passes through that a plan at its detail level draws (as Revit's Plan/RCP when
+    // cut: a door's leaf, shut in the opening, says no and is drawn open by its symbols), outlined, and the lines of the
+    // symbols drawn at that level (a door's leaf and swing).
     if o.family.is_some() {
-        for piece in m.opening_pieces(e).iter().filter(|p| p.bottom <= cut && cut < p.top) {
+        let detail = d.detail;
+        let drawn = |p: &crate::family::Piece| p.show.map_or(detail != Detail::Coarse, |s| s.plan && s.plan_cut && s.at(detail));
+        for piece in m.opening_pieces(e).iter().filter(|p| p.bottom <= cut && cut < p.top && drawn(p)) {
             d.line(&piece.outline, BY_CATEGORY, INK, true);
         }
         d.part(Part::Projection);
-        marks(d, &m.opening_marks(e));
+        marks(d, &m.opening_marks(e, detail));
         d.part(Part::Cut);
         return;
     }

@@ -1653,7 +1653,7 @@ impl Model {
         // A build that reads up to 20 can't name Imported Categories as a group a template controls; written for it, a
         // template leaves it out, and reading the file gives it back to the templates it is implied for
         // ([`Model::imports_implied`]); `written_format` makes sure that is each that had it.
-        if m.format < crate::model::FORMAT {
+        if m.format < crate::model::LAYERS_FORMAT {
             for t in m.view_templates.values_mut() {
                 t.controls.remove(&crate::graphics::Group::Imports);
             }
@@ -1661,13 +1661,23 @@ impl Model {
         serde_json::to_string_pretty(&m).map_err(|e| e.to_string())
     }
 
-    /// The format its file is written in: the oldest that holds all it has. [`crate::model::FORMAT`] when a page of a PDF it
-    /// holds is drawn from its lines, which a file of 20 would draw as its raster images alone; else
+    /// The format its file is written in: the oldest that holds all it has. [`crate::model::FORMAT`] when it places a door or
+    /// a window of a family whose forms or symbols say which views or detail levels draw them (`show`), which a file of 21
+    /// would leave out, drawing a door's leaf shut in the wall again; else [`crate::model::LAYERS_FORMAT`] when a page of a PDF it holds is drawn from its lines, which a file of 20 would draw as its raster images alone; else
     /// [`crate::model::IMAGES_FORMAT`] when it holds images, or a door or a window whose To Room is not on the side it swings
     /// to or faces (flipped since it was placed, or its rooms flipped), which a file of 19 would give it back from its swing;
     /// else [`crate::model::PREVIOUS_FORMAT`], so an older build opens it.
     pub fn written_format(&self) -> u32 {
         use crate::model::Element;
+        // A door or a window of a family whose forms or symbols say which views and detail levels draw them, which a build
+        // of 21 would leave out, drawing a door's leaf shut in its wall again. A family no door or window places draws nothing.
+        let says_views = |f: &crate::family::Family| f.forms.iter().any(|x| x.show.is_some()) || f.symbols.iter().any(|x| x.show.is_some());
+        if self.elements.values().any(|e| match e {
+            Element::Door(o) | Element::Window(o) => o.family.as_ref().and_then(|n| self.families.get(n)).is_some_and(says_views),
+            _ => false,
+        }) {
+            return crate::model::FORMAT;
+        }
         // A view or a template that hides a page's layers or sets how an import draws holds what a build of 20 refuses as a
         // field it doesn't know. A template is written without Imported Categories, which 20 can't name, and reading the file
         // gives the group back where it is implied: so a template that controls it where it isn't implied, or doesn't where
@@ -1679,7 +1689,7 @@ impl Model {
                 .iter()
                 .any(|(name, t)| t.controls.contains(&crate::graphics::Group::Imports) != Self::imports_implied(name, t, &views));
         if pdf_graphics || self.image_types.values().any(crate::raster::ImageType::drawn) {
-            return crate::model::FORMAT;
+            return crate::model::LAYERS_FORMAT;
         }
         let images = !self.image_types.is_empty() || !self.rare("image").is_empty();
         let rooms_kept = self.elements.values().any(|e| match e {

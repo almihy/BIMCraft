@@ -463,7 +463,7 @@ fn a_purged_page_leaves_no_layers_for_an_older_build_to_trip_on() {
     let mut m = (*s.model).clone();
     m.image_types.clear();
     let v: Value = serde_json::from_str(&m.to_json().unwrap()).unwrap();
-    assert_eq!(v["format"], crate::model::FORMAT, "pdf_layers is this build's");
+    assert_eq!(v["format"], crate::model::LAYERS_FORMAT, "pdf_layers needs format 21");
 }
 
 #[test]

@@ -127,7 +127,7 @@ fn a_pdfs_layers_are_kept_in_the_file_and_forgotten_with_the_image() {
     run(&mut s, "cad_layers", json!({"id": id, "view": level, "hide": ["Notes"]}));
     let text = s.model.to_json().unwrap();
     let v: Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(v["format"], crate::model::FORMAT, "a page drawn from its lines needs this build's format");
+    assert_eq!(v["format"], crate::model::LAYERS_FORMAT, "a page drawn from its lines needs format 21");
     let (m, left_out) = crate::model::Model::read(&text).unwrap();
     assert!(left_out.is_empty(), "{left_out:?}");
     let t = m.image_types.get("plan.pdf").unwrap();
@@ -188,7 +188,7 @@ fn a_pdfs_layer_is_drawn_in_the_lines_and_halftone_a_view_gives_it_and_a_templat
     assert!(e.contains("follow view template"), "{e}");
     // What the file holds needs this build's format.
     let v: Value = serde_json::from_str(&s.model.to_json().unwrap()).unwrap();
-    assert_eq!(v["format"], crate::model::FORMAT);
+    assert_eq!(v["format"], crate::model::LAYERS_FORMAT);
 }
 
 #[test]
@@ -300,7 +300,7 @@ fn reload_from_keeps_the_scale_hides_a_new_layer_the_file_has_off_leaves_nothing
     assert_eq!(g["pdf_imports"], json!({}), "no empty entry is left of the layer that's gone: {g}");
     assert_eq!(g["pdf_layers"], json!({"plan.pdf": ["Doors"]}), "the new layer the file has off comes in hidden: {g}");
     let v: Value = serde_json::from_str(&s.model.to_json().unwrap()).unwrap();
-    assert_eq!(v["format"], crate::model::FORMAT, "a drawn page is this build's format");
+    assert_eq!(v["format"], crate::model::LAYERS_FORMAT, "a drawn page needs format 21");
     // One undo puts it all back as it was: the page, its instance, the view's settings.
     run(&mut s, "undo", json!({}));
     assert_eq!(s.model.to_json().unwrap(), before, "undone whole");

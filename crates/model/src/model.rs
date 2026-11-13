@@ -69,7 +69,14 @@ pub const CEILING_HEIGHT: f64 = 2600.0;
 pub const MAX_SLOPE: f64 = 75.0;
 /// The closest a floor's contours may be drawn, mm: a site's are a metre or half a metre apart.
 pub const MIN_CONTOURS: f64 = 50.0;
-/// The version of the project file this build writes, and the newest it reads. 21: a page of a PDF may be drawn from its
+/// The version of the project file this build writes, and the newest it reads. 22: a family's form may say which detail
+/// levels and views draw it (`show`: Revit's Visibility Settings, a door's leaf shut in its opening drawn in no plan), and a
+/// symbol which detail levels (`show`; none, every level but Coarse); the built-in doors draw their leaves open, a panel as
+/// thick as the leaf, with their swings, at every level, as Revit's door families do. A file of 21 or older has a swinging
+/// door family's shut leaf drawn in no plan and its open leaf's line made a panel, once, as it is read
+/// ([`crate::family::Family::leaves_drawn_open`]); a build that reads up to 21 would leave `show` out and draw the shut
+/// leaf in the wall again, so a project is written as 22 only when it places a door or a window of a family
+/// whose forms or symbols say it ([`Model::written_format`]). 21: a page of a PDF may be drawn from its
 /// lines, layer by layer, over a picture of only its raster images (an image's `drawn`, with a small picture of the whole page,
 /// `thumb`); an image may hide layers of its lines (`hidden`) and a view's graphics hide them in that view (`pdf_layers`).
 /// Nothing in a file of 20 changes (its pages stay pictures of the whole page), but a build that reads up to 20 would leave
@@ -127,7 +134,10 @@ pub const MIN_CONTOURS: f64 = 50.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 21;
+pub const FORMAT: u32 = 22;
+/// The format a project is written in when it needs nothing of [`FORMAT`]'s but a page of a PDF drawn from its lines, or
+/// layers of one hidden ([`Model::written_format`]).
+pub const LAYERS_FORMAT: u32 = 21;
 /// The format a project is written in when it holds images, or a door's or a window's To Room kept against its swing, but no
 /// page of a PDF drawn from its lines ([`Model::written_format`]).
 pub const IMAGES_FORMAT: u32 = 20;
@@ -3973,7 +3983,7 @@ impl Model {
         }
         m.names_from_file();
         // 20 to 21: a template from a file of 20 or older can't name Imported Categories as a group it controls.
-        if format < u64::from(FORMAT) {
+        if format < u64::from(LAYERS_FORMAT) {
             m.implied_imports();
         }
         m.renamed_clashing_parameters();
@@ -4054,6 +4064,14 @@ impl Model {
                 if let Element::Door(o) | Element::Window(o) = e {
                     o.to_room_side = o.swing_side();
                 }
+            }
+        }
+        // 20 to 21 has no step here: what it has, `Model::read` gives a template after this.
+        // 21 to 22: a swinging door family's leaf shut in its opening is drawn in no plan, and its open leaf is a panel as
+        // thick as the leaf, with its swing, at every detail level, as Revit's door families draw them.
+        if self.format < 22 {
+            for f in self.families.values_mut() {
+                f.leaves_drawn_open();
             }
         }
         self.format = FORMAT;
@@ -4875,10 +4893,15 @@ impl Model {
     /// the opening's flips as mirror images (its hinge on the other jamb, its swing to the wall's other side);
     /// none for one that isn't of a family, or doesn't build.
     pub fn opening_local(&self, e: &Element) -> Option<(Vec<Piece>, Vec<crate::family::Mark>)> {
+        self.opening_local_at(e, None)
+    }
+
+    /// [`Model::opening_local`], with the marks of the symbols a view at detail level `detail` draws; every one with none.
+    fn opening_local_at(&self, e: &Element, detail: Option<crate::graphics::Detail>) -> Option<(Vec<Piece>, Vec<crate::family::Mark>)> {
         let (Element::Door(o) | Element::Window(o)) = e else { return None };
         let f = self.families.get(o.family.as_ref()?)?;
         let values = f.values_in(&o.type_name, &o.params, self.thickness(self.wall(o.host)?)).ok()?;
-        let (pieces, marks) = (f.pieces(&values).ok()?, f.marks(&values).ok()?);
+        let (pieces, marks) = (f.pieces(&values).ok()?, f.marks_at(&values, detail).ok()?);
         let (fx, fy) = (if o.flip_hand { -1.0 } else { 1.0 }, if o.flip_facing { -1.0 } else { 1.0 });
         let mirrored = fx * fy < 0.0;
         let flip = |p: [f64; 3]| [fx * p[0] + 0.0, fy * p[1] + 0.0, p[2]];
@@ -4916,10 +4939,13 @@ impl Model {
             .collect()
     }
 
-    /// The marks a door's or window's family draws in plan, where it stands.
-    pub fn opening_marks(&self, e: &Element) -> Vec<crate::family::Mark> {
+    /// The marks a door's or window's family draws in a plan at detail level `detail`, where it stands: those of the symbols
+    /// that level shows ([`crate::family::Symbol::drawn_at`]).
+    pub fn opening_marks(&self, e: &Element, detail: crate::graphics::Detail) -> Vec<crate::family::Mark> {
         let (Element::Door(o) | Element::Window(o)) = e else { return Vec::new() };
-        let (Some((_, marks)), Some((at, u, _))) = (self.opening_local(e), self.opening_frame(o)) else { return Vec::new() };
+        let (Some((_, marks)), Some((at, u, _))) = (self.opening_local_at(e, Some(detail)), self.opening_frame(o)) else {
+            return Vec::new();
+        };
         marks.iter().map(|k| k.map(|q| at + u * q.0 + u.perp() * q.1)).collect()
     }
 

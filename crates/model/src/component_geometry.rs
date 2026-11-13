@@ -293,6 +293,7 @@ impl<'a> Components<'a> {
                 material: pc.material.clone(),
                 caps: pc.caps,
                 round: pc.round,
+                show: pc.show,
             })
             .collect()
     }
