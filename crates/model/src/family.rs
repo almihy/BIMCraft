@@ -2306,7 +2306,7 @@ impl Family {
         if !how.snapshot {
             for (i, n) in self.nested.iter().enumerate().filter(|(_, n)| n.of_type(type_name)) {
                 let said = |e: String| format!("nested part {} ({}): {e}", i + 1, n.family);
-                out.extend(self.nested_pieces(n, values, read, cuts, how).map_err(said)?);
+                out.extend(self.nested_pieces(n, n.type_for(type_name), values, read, cuts, how).map_err(said)?);
             }
         }
         out.retain(|p| !p.tris.is_empty());
@@ -2318,6 +2318,7 @@ impl Family {
     fn nested_pieces<'a>(
         &'a self,
         n: &'a Nested,
+        inner_type: &str,
         values: &BTreeMap<String, Val>,
         read: &mut HashMap<&'a str, Result<Node, String>>,
         cuts: &mut csg::Meter,
@@ -2340,13 +2341,13 @@ impl Family {
             Some(Val::Number(x)) => *x,
             _ => DEFAULT_WALL,
         };
-        let inner_values = inner.values_given(&n.type_name, &given, wall)?;
+        let inner_values = inner.values_given(inner_type, &given, wall)?;
         how.spent.set(how.spent.get() + 1);
         if how.spent.get() > MAX_NESTED {
             return Err(format!("it builds more than {MAX_NESTED} nested parts in all"));
         }
-        let deeper = Build { snapshot: inner.draws_snapshot(&n.type_name), others: how.others, depth: how.depth + 1, spent: how.spent };
-        let pieces = inner.build(&n.type_name, &inner_values, &mut HashMap::new(), cuts, deeper)?;
+        let deeper = Build { snapshot: inner.draws_snapshot(inner_type), others: how.others, depth: how.depth + 1, spent: how.spent };
+        let pieces = inner.build(inner_type, &inner_values, &mut HashMap::new(), cuts, deeper)?;
         let at = [number(&n.at[0], values, read)?, number(&n.at[1], values, read)?, number(&n.at[2], values, read)?];
         let (sin, cos) = number(&n.rotation, values, read)?.to_radians().sin_cos();
         let flip = if n.mirrored { -1.0 } else { 1.0 };

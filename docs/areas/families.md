@@ -217,7 +217,8 @@ other as the check and the fallback (`snapshot` forms and symbols), and checks e
   `top`, a `hole`, `path`, `section`, `section_end`) from one corner to the next about a `centre` (bound like any number),
   counter-clockwise unless `clockwise`, about `normal` in 3D; drawn as a circle is, 32 corners a turn. Every new form comes
   out turned out by its volume's sign.
-- **Nested parts** (`Nested`). Another family of the project at `at`, turned `rotation` about z, `mirrored` across its x,
+- **Nested parts** (`Nested`). Another family of the project at `at`, turned `rotation` about z, `mirrored` across its x
+  (or set on a face by its own `axes`), of `type` or the one each of the parent's types chooses (`type_in`),
   its parameters from the parent's numbers (`Family::values_given`); `Family::pieces_with` builds them with the project's
   families (`Model::component_local_pieces` and `opening_local` pass them), at most `MAX_NESTING` deep and `MAX_NESTED` in
   all. Revit's result already has them, so they are built only in a parametric type.
@@ -232,7 +233,7 @@ other as the check and the fallback (`snapshot` forms and symbols), and checks e
   parametric.
 - **The translator.** B (a bound number) becomes an `Expr`: a number, `ref(Name) + offset` (the offset itself bound where
   it follows parameters), `scale * Param + offset`, or `(formula)`; then taken into the family's axes: `x + x_offset`,
-  `(y + y_offset) × y_sign`, `z - z_minus`, where `z_minus` that names a plane (a window's sill) becomes the parameter
+  `y_sign × y + y_offset` (and `x_sign × x + x_offset`), `z - z_minus`, where `z_minus` that names a plane (a window's sill) becomes the parameter
   that puts it there in every type, and that plane is the family's z = 0. A plane's `at` and an extrusion's start and end
   are coordinates along the positive axis of their normal. An extrusion's loops: the outer ones forms, those inside them
   holes. A revolve's plane is the axis all its corners share. Symbolic lines in plan, front and side become symbols (an arc a

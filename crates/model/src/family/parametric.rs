@@ -142,6 +142,9 @@ pub struct Nested {
     pub types: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show: Option<Show>,
+    /// The type of it each of this family's types chooses, where they choose others than `type`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub type_in: BTreeMap<String, String>,
     /// Its own x, y and z axes in this family's (a face-based part on a wall's face), in place of `rotation` and `mirrored`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub axes: Option<[[f64; 3]; 3]>,
@@ -151,6 +154,11 @@ impl Nested {
     /// Whether it is in type `type_name`: one it names, or any when it names none.
     pub fn of_type(&self, type_name: &str) -> bool {
         self.types.is_empty() || self.types.iter().any(|t| t == type_name)
+    }
+
+    /// The type of it the parent's type `parent` places.
+    pub fn type_for(&self, parent: &str) -> &str {
+        self.type_in.get(parent).map_or(self.type_name.as_str(), String::as_str)
     }
 }
 
@@ -397,6 +405,9 @@ impl Family {
                 if a.iter().flatten().any(|x| !x.is_finite() || x.abs() > 1e3) || det.abs() < 1e-6 {
                     return Err(format!("{who}: its `axes` are three directions that aren't flat"));
                 }
+            }
+            if n.type_in.len() > super::MAX_TYPES || n.type_in.iter().any(|(t, v)| !self.types.contains_key(t) || !one_line(v, MAX_TEXT)) {
+                return Err(format!("{who}: its `type_in` names a type of the family and the nested family's type for it"));
             }
             if n.params.len() > super::MAX_PARAMETERS {
                 return Err(format!("{who}: it sets more than {} parameters", super::MAX_PARAMETERS));

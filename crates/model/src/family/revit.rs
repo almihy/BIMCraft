@@ -5,7 +5,7 @@
 //! made is tried in every type before it is kept, so the family always loads and the check decides what is drawn.
 //!
 //! Lengths are mm in the family document's axes; [`Map`] takes them into the family's own (a door's or a window's: the
-//! opening's): `x + x_offset`, `(y + y_offset) × y_sign`, `z - z_minus`. A bound number (B) is a number, `{ref, offset}` (a reference
+//! opening's): `x_sign × x + x_offset`, `y_sign × y + y_offset`, `z - z_minus`. A bound number (B) is a number, `{ref, offset}` (a reference
 //! plane's coordinate along its axis plus an offset), `{param, scale, offset}` or `{formula}`; it becomes an [`Expr`]. A
 //! reference plane's position and an extrusion's start and end are coordinates along the positive axis of their normal.
 
@@ -25,6 +25,7 @@ const MOST: usize = 4096;
 /// The family document's axes taken into the family's own.
 struct Map {
     x_offset: f64,
+    x_sign: f64,
     y_sign: f64,
     y_offset: f64,
     /// What z drops by: a number, or a formula over the family's parameters (a window's sill).
@@ -106,6 +107,27 @@ fn axis_of(n: &Value) -> Option<(Axis, bool)> {
     }
 }
 
+impl Map {
+    /// Whether it mirrors: one of x and y turned the other way.
+    fn mirrors(&self) -> bool {
+        self.x_sign * self.y_sign < 0.0
+    }
+
+    /// The sign a length along `axis` takes.
+    fn sign(&self, axis: Axis) -> f64 {
+        match axis {
+            Axis::X => self.x_sign,
+            Axis::Y => self.y_sign,
+            Axis::Z => 1.0,
+        }
+    }
+
+    /// A direction of the document's in the family's axes.
+    fn turn(&self, d: [f64; 3]) -> [f64; 3] {
+        [d[0] * self.x_sign, d[1] * self.y_sign, d[2]]
+    }
+}
+
 impl Reader<'_> {
     /// A bound number as an expression of the document's (not taken into the family's axes): a value, a length, an angle.
     fn value(&self, b: &Value) -> Result<Expr, String> {
@@ -141,7 +163,7 @@ impl Reader<'_> {
             && let Some((name, a, _)) = self.planes.get(r)
             && *a == axis
         {
-            let sign = if axis == Axis::Y { self.map.y_sign } else { 1.0 };
+            let sign = self.map.sign(axis);
             let at = Expr::Formula(format!("ref({name})"));
             // The offset: a number, or itself bound (a parameter's value, a formula).
             return Ok(match b.get("offset").filter(|o| !o.is_null()) {
@@ -160,8 +182,9 @@ impl Reader<'_> {
     /// A document coordinate along `axis` taken into the family's axes.
     fn place(&self, v: Expr, axis: Axis) -> Expr {
         match axis {
+            Axis::X if self.map.x_sign < 0.0 => plus(neg(v), self.map.x_offset),
             Axis::X => plus(v, self.map.x_offset),
-            Axis::Y if self.map.y_sign < 0.0 => neg(plus(v, self.map.y_offset)),
+            Axis::Y if self.map.y_sign < 0.0 => plus(neg(v), self.map.y_offset),
             Axis::Y => plus(v, self.map.y_offset),
             Axis::Z => minus(v, &self.map.z_minus),
         }
@@ -220,8 +243,8 @@ impl Reader<'_> {
         // Its middle, worked out in the document's axes (counter-clockwise about its normal), then taken over: what says
         // which way it turns once mirrored.
         let (s, e, c3) = (self.at(&start)?, self.at(&end)?, self.at(&centre)?);
-        let normal = [*nx, ny * self.map.y_sign, *nz];
-        let doc = |p: [f64; 3]| [p[0], p[1] * self.map.y_sign, p[2]];
+        let normal = self.map.turn([*nx, *ny, *nz]);
+        let doc = |p: [f64; 3]| self.map.turn(p);
         let (sd, ed, cd) = (doc(s), doc(e), doc(c3));
         let mid = middle(sd, ed, cd, [*nx, *ny, *nz]);
         let radius = a.get("radius").map(|r| self.value(r)).transpose()?;
@@ -400,7 +423,7 @@ impl Reader<'_> {
                 let rings = loops.iter().map(|l| self.ring(l, k, Ring::Profile, 0)).collect::<Result<Vec<_>, _>>()?;
                 let (mut from, mut to) = (self.value(&def["start_angle"])?, self.value(&def["end_angle"])?);
                 // Mirrored, it turns the other way about its axis.
-                if self.map.y_sign < 0.0 {
+                if self.map.mirrors() {
                     (from, to) = (neg(to), neg(from));
                 }
                 let axis = Some([[a0[k[0]].clone(), a0[k[1]].clone()], [a1[k[0]].clone(), a1[k[1]].clone()]]);
@@ -419,7 +442,7 @@ impl Reader<'_> {
                             ring: Ring::Path,
                             edge: points.len(),
                             centre: centre.to_vec(),
-                            clockwise: self.map.y_sign < 0.0,
+                            clockwise: self.map.mirrors(),
                             normal: Some(normal),
                             ..Bend::default()
                         });
@@ -439,7 +462,7 @@ impl Reader<'_> {
                                 ring,
                                 edge: out.len(),
                                 centre: centre.to_vec(),
-                                clockwise: self.map.y_sign < 0.0,
+                                clockwise: self.map.mirrors(),
                                 normal: Some(normal),
                                 ..Bend::default()
                             });
@@ -593,6 +616,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     }
     let map = Map {
         x_offset: num(&to["x_offset"]).unwrap_or(0.0),
+        x_sign: if num(&to["x_sign"]).is_some_and(|s| s < 0.0) { -1.0 } else { 1.0 },
         y_sign: if num(&to["y_sign"]).is_some_and(|s| s < 0.0) { -1.0 } else { 1.0 },
         y_offset: num(&to["y_offset"]).unwrap_or(0.0),
         z_minus: Expr::Number(0.0),
@@ -820,7 +844,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             None => None,
         };
         let axis = found[0].1;
-        let sign = if axis == Axis::Y { reader.map.y_sign } else { 1.0 };
+        let sign = reader.map.sign(axis);
         let sense: Vec<i8> = found
             .windows(2)
             .map(|w| {
@@ -875,12 +899,8 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             let family = n.get("family").and_then(text).ok_or("it names no family")?.to_string();
             let type_name = n.get("type").and_then(text).ok_or("it names no type")?.to_string();
             let at = reader.point(&n["at"])?;
-            let mut rotation = n.get("rotation").map(|r| reader.value(r)).transpose()?.unwrap_or_default();
-            let mut mirrored = n["mirrored"].as_bool().unwrap_or(false);
-            if reader.map.y_sign < 0.0 {
-                rotation = neg(rotation);
-                mirrored = !mirrored;
-            }
+            let rotation = n.get("rotation").map(|r| reader.value(r)).transpose()?.unwrap_or_default();
+            let mirrored = n["mirrored"].as_bool().unwrap_or(false);
             let mut params = BTreeMap::new();
             for (k, b) in n["params"].as_object().into_iter().flatten() {
                 // A material or a text handed down sizes nothing: the nested family keeps its own.
@@ -901,16 +921,33 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             let axis = |k: &str| -> Option<[f64; 3]> {
                 let v: Vec<f64> = n[k].as_array()?.iter().filter_map(num).collect();
                 let [x, y, z] = v.as_slice() else { return None };
-                Some([*x, y * reader.map.y_sign, *z])
+                Some([*x, *y, *z])
             };
-            let axes = match (axis("x_axis"), axis("y_axis")) {
-                (Some(x), Some(y)) => {
-                    let z = axis("z_axis").unwrap_or_else(|| crate::geom::v3::cross(x, y));
-                    Some([x, y, z])
+            // Its own axes in the document's: given, or turned about z and mirrored across its x; taken into the family's
+            // where those turn a way round.
+            let given = match (axis("x_axis"), axis("y_axis")) {
+                (Some(x), Some(y)) => Some([x, y, axis("z_axis").unwrap_or_else(|| crate::geom::v3::cross(x, y))]),
+                _ => None,
+            };
+            let turned = reader.map.x_sign < 0.0 || reader.map.y_sign < 0.0;
+            let axes = match (given, &rotation) {
+                (Some(a), _) => Some(a.map(|d| reader.map.turn(d))),
+                (None, Expr::Number(r)) if turned => {
+                    let (sn, cs) = r.to_radians().sin_cos();
+                    let flip = if mirrored { -1.0 } else { 1.0 };
+                    Some([[cs, sn, 0.0], [-flip * sn, flip * cs, 0.0], [0.0, 0.0, 1.0]].map(|d| reader.map.turn(d)))
                 }
                 _ => None,
             };
-            Ok(Nested { family, type_name, at, rotation, mirrored, params, visible, show, axes, ..Nested::default() })
+            // The type the parent's types each choose of it, where they choose others.
+            let type_in: BTreeMap<String, String> = n["types"]
+                .as_object()
+                .into_iter()
+                .flatten()
+                .filter(|(t, _)| f.types.contains_key(*t))
+                .filter_map(|(t, v)| Some((t.clone(), text(v)?.to_string())))
+                .collect();
+            Ok(Nested { family, type_name, at, rotation, mirrored, params, visible, show, axes, type_in, ..Nested::default() })
         })();
         match made {
             Ok(x) => nested.push(x),
