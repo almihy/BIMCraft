@@ -895,7 +895,8 @@ fn table(ui: &mut Ui, d: &mut VgDialog, model: &Model, rows: &[Row], cols: &Colu
         }
         let w = cells.len() as f32 * CELL_W;
         p.vline(x, head.y_range(), line);
-        text(Rect::from_min_size(pos2(x, top), vec2(w, ROW_H)), t(group), &body);
+        // Over a single column (an import's Lines) the group's name is set small, so it stays within it.
+        text(Rect::from_min_size(pos2(x, top), vec2(w, ROW_H)), t(group), if cells.len() > 1 { &body } else { &small });
         p.hline(x..=x + w, mid, line);
         for (i, c) in cells.iter().enumerate() {
             let cx = x + i as f32 * CELL_W;
