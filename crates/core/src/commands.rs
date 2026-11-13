@@ -11706,7 +11706,11 @@ fn family(s: &mut Session, p: &Value) -> R {
         }
         // A change its dimensions can't hold is refused, as Revit refuses it ("Constraints are not satisfied"): a type whose
         // references were placed before and can't be now. One that couldn't be before is no worse for it.
-        let solved = |fam: &crate::family::Family, t: &str| fam.values(t, &BTreeMap::new()).and_then(|v| fam.solve(&v).map(|_| ()));
+        // (A formula that doesn't work out is said by the family's own check, below.)
+        let solved = |fam: &crate::family::Family, t: &str| match fam.values(t, &BTreeMap::new()) {
+            Ok(v) => fam.solve(&v).map(|_| ()),
+            Err(_) => Ok(()),
+        };
         for t in f.types.keys() {
             let held = match (w.types.contains_key(t), like.get(t)) {
                 (true, _) => solved(w, t).is_ok(),

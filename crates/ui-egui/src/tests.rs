@@ -1604,9 +1604,9 @@ fn the_view_control_bar_sets_the_3d_views_visual_style_and_wf_hl_and_sd_do_too()
     let style = |h: &Harness<BimApp>| Look::of_3d(&h.state().session.model).style();
     press(&mut h, "Default 3D View");
     assert_eq!(h.state().sheet, Sheet::View3D);
-    // Shaded until told otherwise; a 3D view has no scale or detail level.
+    // Shaded until told otherwise; a 3D view has no scale, and has a detail level, as Revit's bar.
     assert!(painted_text(&h).contains(&"Shaded".to_string()));
-    assert!(h.query_by_label("Scale").is_none() && h.query_by_label("Detail Level").is_none());
+    assert!(h.query_by_label("Scale").is_none() && h.query_by_label("Detail Level").is_some());
     pick(&mut h, Role::Button, "Visual Style");
     press(&mut h, "Wireframe");
     assert_eq!(style(&h), VisualStyle::Wireframe);

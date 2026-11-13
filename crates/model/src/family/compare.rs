@@ -371,7 +371,8 @@ mod tests {
         m.extend(cuboid([-500.0, 100.0, 0.0], [-400.0, 600.0, 100.0]));
         let s = Surface::new(&l, 2.0).unwrap();
         let g = surface_gap(&m, &s, 2.0, 2000.0);
-        assert!(g.worst > 700.0 && g.share > 0.2, "{g:?}");
+        // The leg's far end is 500 from the bar, the nearest of the L.
+        assert!(g.worst > 400.0 && g.share > 0.2, "{g:?}");
     }
 
     #[test]
