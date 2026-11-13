@@ -2707,8 +2707,12 @@ pub fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, String> 
         });
         let pick = match same {
             Some(pick) => pick,
-            None if fam.forms + forms.len() > crate::family::MAX_FORMS => {
-                let why = format!("family `{family}` has more shapes than one family holds ({} forms)", crate::family::MAX_FORMS);
+            None if fam.forms + forms.len() > crate::family::MAX_FORMS || fam.types.len() >= crate::family::MAX_TYPES => {
+                let why = format!(
+                    "family `{family}` has more shapes than one family holds ({} forms, {} types)",
+                    crate::family::MAX_FORMS,
+                    crate::family::MAX_TYPES
+                );
                 leave(skipped, seen, id, &why);
                 return true;
             }

@@ -345,10 +345,12 @@ fn a_clockwise_profile_or_a_downward_sweep_comes_in_turned_out() {
 #[test]
 fn more_shapes_of_one_family_than_it_holds_leave_only_the_rest_out() {
     let square = [(0.0, 0.0), (300.0, 0.0), (300.0, 300.0), (0.0, 300.0)];
-    let n = crate::family::MAX_FORMS + 3;
+    // A shape a type: as many as a family holds of either.
+    let most = crate::family::MAX_FORMS.min(crate::family::MAX_TYPES);
+    let n = most + 3;
     let i = ifc(proxies("Thing:A", n, &square, "0.,0.,1.", 400.0).as_bytes(), "x").unwrap();
-    assert_eq!(i.model.families["Thing"].types.len(), crate::family::MAX_FORMS);
-    assert_eq!(only(&i.model, "component").len(), crate::family::MAX_FORMS);
+    assert_eq!(i.model.families["Thing"].types.len(), most);
+    assert_eq!(only(&i.model, "component").len(), most);
     assert_eq!(i.skipped.len(), 3, "{:?}", i.skipped);
     assert!(i.skipped.iter().all(|s| s.contains("Thing")), "{:?}", i.skipped);
 }
