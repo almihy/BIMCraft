@@ -495,7 +495,7 @@ fn reload(c: &str, s: &mut Session, p: &Value) -> Result<Option<Value>, String> 
     if resized {
         out["size"] = json!({"was": [read_mm(was_w), read_mm(was_h)], "now": [read_mm(w0), read_mm(h0)]});
         out["note"] = json!(format!(
-            "the page is now {:.0} × {:.0} mm, where it was {:.0} × {:.0} mm: each instance keeps the scale it was placed at, so it              is as much bigger or smaller",
+            "the page is now {:.0} × {:.0} mm, where it was {:.0} × {:.0} mm: each instance keeps the scale it was placed at, so it is as much bigger or smaller",
             w0, h0, was_w, was_h
         ));
     }
