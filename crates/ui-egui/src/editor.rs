@@ -633,11 +633,14 @@ impl FamilyEditor {
         for l in self.type_lists().filter(|l| l.iter().any(|t| t == old)) {
             l.push(new.to_string());
         }
+        // Its check, the nested parts it is of and the types they choose for it, as the project's family keeps them.
+        self.kept.type_like(new, old);
     }
 
     /// Type `old` renamed `new` in its forms' and symbols' lists of types.
     fn type_renamed(&mut self, old: &str, new: &str) {
         self.type_lists().flat_map(|l| l.iter_mut()).filter(|t| *t == old).for_each(|t| *t = new.to_string());
+        self.kept.rename_type(old, new);
     }
 
     /// Type `gone` taken away: out of the lists, and what was of it alone with it.
@@ -646,6 +649,7 @@ impl FamilyEditor {
         self.forms.retain(|f| !alone(&f.original.types));
         self.symbols.retain(|y| !alone(&y.types));
         self.type_lists().for_each(|l| l.retain(|t| t != gone));
+        self.kept.forget_type(gone);
     }
 
     /// The `family` command's parameters making the project's family what's typed: its name, its own and the type it drops.
@@ -1921,6 +1925,26 @@ mod tests {
         ed.type_gone("1000 x 2100");
         assert_eq!(lists(&ed), [vec!["900 x 2100".to_string(), "Narrow".into()]]);
         assert_eq!(ed.forms.len(), f.forms.len() - 1, "the form of that type alone went with it");
+        // A type renamed, duplicated or taken away takes its check and its nested types with it.
+        let check = bimcraft_core::family::TypeCheck { matched: false, reason: Some("it differs".into()), ..Default::default() };
+        ed.kept.check.insert("Narrow".into(), check.clone());
+        ed.kept.nested.push(bimcraft_core::family::Nested {
+            family: "Handle".into(),
+            type_name: "Standard".into(),
+            type_in: [("Narrow".to_string(), "Other".to_string())].into(),
+            ..Default::default()
+        });
+        ed.type_renamed("Narrow", "Slim");
+        assert_eq!(ed.kept.check.get("Slim"), Some(&check));
+        assert!(!ed.kept.check.contains_key("Narrow"));
+        assert_eq!(ed.kept.nested[0].type_in.get("Slim").map(String::as_str), Some("Other"));
+        ed.type_like("Slim Copy", "Slim");
+        assert_eq!(ed.kept.check.get("Slim Copy"), Some(&check));
+        assert_eq!(ed.kept.nested[0].type_in.get("Slim Copy").map(String::as_str), Some("Other"));
+        ed.type_gone("Slim Copy");
+        assert!(!ed.kept.check.contains_key("Slim Copy") && !ed.kept.nested[0].type_in.contains_key("Slim Copy"));
+        ed.type_gone("Slim");
+        assert!(ed.kept.nested[0].type_in.is_empty());
         // A symbol keeps the view it is drawn in and its detail levels.
         let back = ed.family().unwrap();
         assert_eq!(back.symbols.iter().filter(|y| y.view == SymbolView::Front).count(), 1);

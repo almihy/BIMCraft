@@ -1785,6 +1785,12 @@ impl Family {
         if let Some(c) = self.check.remove(from) {
             self.check.insert(to.to_string(), c);
         }
+        // The type each nested part's parent type chose goes with the type's name.
+        for n in &mut self.nested {
+            if let Some(v) = n.type_in.remove(from) {
+                n.type_in.insert(to.to_string(), v);
+            }
+        }
     }
 
     /// Type `name` gone: taken out of the lists of types its forms and symbols are of, and a form or a symbol that was of it
@@ -1802,6 +1808,9 @@ impl Family {
             .chain(self.nested.iter_mut().map(|n| &mut n.types));
         lists.for_each(|l| l.retain(|t| t != name));
         self.check.remove(name);
+        self.nested.iter_mut().for_each(|n| {
+            n.type_in.remove(name);
+        });
     }
 
     /// Type `new`, made like `old`, is of each form and symbol `old` is of: a duplicated type keeps its forms.
@@ -1816,6 +1825,12 @@ impl Family {
             l.push(new.to_string());
         }
         self.check_like(new, old);
+        // The copy chooses the nested types its original did, as Revit keeps them.
+        for n in &mut self.nested {
+            if let Some(v) = n.type_in.get(old).cloned() {
+                n.type_in.entry(new.to_string()).or_insert(v);
+            }
+        }
     }
 
     /// Its parameters' values for type `type_name`, a component's `instance` values over them, and
@@ -3893,6 +3908,50 @@ mod tests {
         let path: Vec<Value> = (0..20).map(|k| json!([0.0, 0.0, k as f64 * 5.0])).collect();
         let f: Family = serde_json::from_value(json!({"types": {"A": {}}, "forms": [{"path": path, "section": ring(40, 50.0)}]})).unwrap();
         assert!(f.check(&|_| true).is_ok());
+    }
+
+    #[test]
+    fn a_type_renamed_deleted_or_duplicated_keeps_the_nested_types_it_chose() {
+        let family = || -> Family {
+            serde_json::from_value(json!({"types": {"A": {}, "B": {}},
+                "nested": [{"family": "Handle", "type": "Standard", "type_in": {"B": "Other"}}]}))
+            .unwrap()
+        };
+        // Deleted: the type's choice goes with it, so the family stays sound.
+        let mut f = family();
+        f.forget_type("B");
+        f.types.remove("B");
+        assert!(f.check_parametric().is_ok());
+        assert!(f.nested[0].type_in.is_empty());
+        // Renamed: the choice follows the type.
+        let mut f = family();
+        f.rename_type("A", "C");
+        f.rename_type("B", "D");
+        f.types = f
+            .types
+            .iter()
+            .map(|(k, v)| {
+                (
+                    if k == "A" {
+                        "C".into()
+                    } else if k == "B" {
+                        "D".into()
+                    } else {
+                        k.clone()
+                    },
+                    v.clone(),
+                )
+            })
+            .collect();
+        assert!(f.check_parametric().is_ok());
+        assert_eq!(f.nested[0].type_in.get("D").map(String::as_str), Some("Other"));
+        assert!(!f.nested[0].type_in.contains_key("B"));
+        // Duplicated: the copy chooses what its original chose.
+        let mut f = family();
+        f.types.insert("E".into(), BTreeMap::new());
+        f.type_like("E", "B");
+        assert_eq!(f.nested[0].type_in.get("E").map(String::as_str), Some("Other"));
+        assert!(f.check_parametric().is_ok());
     }
 
     #[test]
