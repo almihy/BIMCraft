@@ -528,7 +528,7 @@ pub struct Circle {
 /// `start` and `end` (points in the family's plane, as Revit's arc is its centre and two ends, constrained), its angles
 /// follow them as they move: it runs from the angle of `start` about its middle to the angle of `end`, the way round
 /// that `from` and `to` say (counter-clockwise when `to` is not below `from`, else clockwise), a whole turn when the two
-/// ends are one point; its radius stays `radius`.
+/// ends are one point (or on one line from its middle); its radius is `start`'s distance from its middle, not `radius`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Curve {
@@ -577,14 +577,19 @@ impl Curve {
         let angle = |p: P2| (p.1 - centre.1).atan2(p.0 - centre.0).to_degrees();
         let (a0, a1) = (angle(start), angle(end));
         let ccw = to >= from;
-        let turn = if start.dist(end) < ONE_POINT {
+        let mut turn = if start.dist(end) < ONE_POINT {
             360.0
         } else if ccw {
             (a1 - a0).rem_euclid(360.0)
         } else {
             (a0 - a1).rem_euclid(360.0)
         };
-        Ok(Sweep { centre, radius, from: a0, to: if ccw { a0 + turn } else { a0 - turn } })
+        // Ends at one angle but at different distances from the middle (nothing to turn through) are the whole way round.
+        if turn < 1e-9 && start.dist(end) >= ONE_POINT {
+            turn = 360.0;
+        }
+        // Its ends set its radius: where nothing binds the radius to a parameter, the ends' distance from the middle is it.
+        Ok(Sweep { centre, radius: centre.dist(start), from: a0, to: if ccw { a0 + turn } else { a0 - turn } })
     }
 
     /// Its two ends, worked out by `values`: at its angles, `radius` from its middle; none where it doesn't work out.
@@ -4055,6 +4060,28 @@ mod tests {
         let said = f.editable.as_ref().map(|e| e.untranslated.join("; ")).unwrap_or_default();
         assert!(said.contains("dimensions") && said.contains("more than"), "{said}");
         let _ = made;
+    }
+
+    #[test]
+    fn an_arc_that_follows_its_ends_follows_their_distance_from_its_middle() {
+        let at = |w: f64| BTreeMap::from([("Width".to_string(), Val::Number(w))]);
+        let n = |x: f64| Expr::Number(x);
+        let w = || Expr::Formula("Width".into());
+        // A door's swing: its radius not bound to anything, its ends on the leaf's corner when open and shut.
+        let swing = Curve {
+            centre: [n(0.0), n(0.0)],
+            radius: n(762.0),
+            from: n(0.0),
+            to: n(90.0),
+            start: Some([w(), n(0.0)]),
+            end: Some([n(0.0), w()]),
+        };
+        let (a, b) = swing.ends(&at(915.0)).unwrap();
+        assert!(a.dist(P2(915.0, 0.0)) < 1e-6 && b.dist(P2(0.0, 915.0)) < 1e-6, "{a:?} {b:?}");
+        // Ends on one line from the middle at different distances: a whole turn, not nothing.
+        let odd = Curve { start: Some([n(100.0), n(0.0)]), end: Some([n(300.0), n(0.0)]), ..swing };
+        let sweep = odd.sweep(&at(900.0), &mut HashMap::new()).unwrap();
+        assert!((sweep.to - sweep.from - 360.0).abs() < 1e-9, "{sweep:?}");
     }
 
     #[test]
