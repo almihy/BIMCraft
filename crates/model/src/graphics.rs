@@ -1416,6 +1416,18 @@ impl Look {
                         *color = halftone(*color);
                     }
                 }
+                // A dense drawing's cells, as its lines would be.
+                Prim::Image { rgba, .. } if *part == Part::Cells => {
+                    for px in rgba.as_chunks_mut::<4>().0 {
+                        if let Some([r, g, b]) = style.color {
+                            px[..3].copy_from_slice(&[r, g, b]);
+                        }
+                        if over.halftone {
+                            let Rgb(r, g, b) = halftone(Rgb(px[0], px[1], px[2]));
+                            px[..3].copy_from_slice(&[r, g, b]);
+                        }
+                    }
+                }
                 Prim::Image { .. } => {}
             }
         }

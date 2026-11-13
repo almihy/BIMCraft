@@ -5,6 +5,7 @@
 use std::path::PathBuf;
 
 use bimcraft_core::cad::Colors;
+use bimcraft_core::render::Rgb;
 
 use super::*;
 
@@ -262,4 +263,26 @@ fn a_dwg_comes_in_through_the_box_with_the_reader_the_app_is_given_and_its_notes
     assert_eq!(h.state().session.model.cads["site"].source(), "site.dwg");
     let status = &h.state().status;
     assert!(!status.error && status.text.contains("3 of the DWG's object records"), "{status:?}");
+}
+
+#[test]
+fn a_dense_drawings_cells_are_lightened_on_a_dark_canvas_as_its_lines_are() {
+    // A pixel of the view's ink and a red one, as a dense drawing zoomed out draws them in its picture of cells.
+    let ink = bimcraft_core::render::INK;
+    let rgba = [ink.0, ink.1, ink.2, 200, 200, 30, 30, 255];
+    let line = |c: Rgb| {
+        let c = crate::canvas::color(c);
+        [c.r(), c.g(), c.b()]
+    };
+    crate::style::set_canvas(true, None);
+    let seen = crate::canvas::cells_seen(&rgba, bimcraft_core::render::Part::Cells).into_owned();
+    // Each pixel as a line of its colour shows on the dark canvas, as opaque as it was.
+    assert_eq!(seen[..3], line(ink));
+    assert_eq!(seen[4..7], line(Rgb(200, 30, 30)));
+    assert_eq!((seen[3], seen[7]), (200, 255));
+    assert!(seen[0] > 150, "the ink reads light on the dark canvas: {seen:?}");
+    // Another picture (a scan, a page's raster) is left as it is; and on a light canvas, the cells too.
+    assert_eq!(*crate::canvas::cells_seen(&rgba, bimcraft_core::render::Part::Picture), rgba);
+    crate::style::set_canvas(false, None);
+    assert_eq!(*crate::canvas::cells_seen(&rgba, bimcraft_core::render::Part::Cells), rgba);
 }

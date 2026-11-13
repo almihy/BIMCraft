@@ -132,6 +132,9 @@ pub struct Drawing {
     paper: f32,
     /// How much of what the view cuts it draws.
     detail: Detail,
+    /// Whether it is for a screen, where a dense drawing zoomed out may be drawn simplified ([`crate::cad::lod`]); a picture
+    /// or paper draws every entity.
+    pub(crate) screen: bool,
     pattern_styles: std::collections::BTreeMap<Id, [crate::graphics::Style; 2]>,
 }
 
@@ -152,6 +155,7 @@ impl Drawing {
             k: 1.0,
             paper: 1.0,
             detail: Detail::Fine,
+            screen: false,
             pattern_styles: std::collections::BTreeMap::new(),
         }
     }
@@ -982,7 +986,7 @@ fn turn_corners(runs: &mut [(Id, Vec<Vec<P2>>)], reach: f64) {
 /// The plan of `level` fitted into `width` x `height` px, as an image of it is made: with its name lettered at its bottom left.
 pub fn plan(m: &Model, level: impl Key, width: u32, height: u32) -> Drawing {
     let view = fit(&plan_extent(m, level), width, height, scale_of(m, level));
-    draw_plan(m, level, view, false, annotation(m, level, view), scale_of(m, level), true)
+    draw_plan(m, level, view, false, annotation(m, level, view), scale_of(m, level), Out::Picture)
 }
 
 /// What a plan of `level` takes on paper: all it shows, or cropped, its crop region and the grids'
@@ -1955,6 +1959,7 @@ impl SectionOverlay {
             k: b.k,
             paper: b.paper,
             detail: b.detail,
+            screen: b.screen,
             pattern_styles: b.pattern_styles.clone(),
         };
         if let Some(image) = picture {
@@ -2379,20 +2384,20 @@ pub fn section_png_noted(m: &Model, id: impl Key, view: View) -> Result<(Vec<u8>
 
 /// The plan of `level` as `view` shows it: what a canvas that pans and zooms draws.
 pub fn draw(m: &Model, level: impl Key, view: View) -> Drawing {
-    draw_plan(m, level, view, false, annotation(m, level, view), scale_of(m, level), false)
+    draw_plan(m, level, view, false, annotation(m, level, view), scale_of(m, level), Out::Screen)
 }
 
 /// The reflected ceiling plan of `level` fitted into `width` x `height` px.
 pub fn ceiling_plan(m: &Model, level: impl Key, width: u32, height: u32) -> Drawing {
     let view = fit(&plan_shows(m, level), width, height, scale_of(m, level));
-    draw_plan(m, level, view, true, annotation(m, level, view), scale_of(m, level), true)
+    draw_plan(m, level, view, true, annotation(m, level, view), scale_of(m, level), Out::Picture)
 }
 
 /// The reflected ceiling plan of `level` as `view` shows it: cut [`CEILING_CUT`] above the level
 /// (over the doors) and looking up, at the ceilings up to the level above, as a floor plan lies
 /// (not mirrored). Its grids and its sections' marks; no annotation of the floor plan's.
 pub fn draw_ceiling(m: &Model, level: impl Key, view: View) -> Drawing {
-    draw_plan(m, level, view, true, annotation(m, level, view), scale_of(m, level), false)
+    draw_plan(m, level, view, true, annotation(m, level, view), scale_of(m, level), Out::Screen)
 }
 
 /// How big the annotation of view `id` is drawn through `view`, times the size it is laid out at. A view with a scale
@@ -2425,7 +2430,7 @@ fn detail_of(m: &Model, id: impl Key) -> Detail {
 
 /// Plan `level` as `draw` draws it, its annotation `k` times the size it is laid out at: a sheet's, at paper size.
 pub fn draw_at(m: &Model, level: impl Key, view: View, k: f32) -> Drawing {
-    draw_plan(m, level, view, false, k, f64::from(k) * sheet::DENSITY / view.scale, false)
+    draw_plan(m, level, view, false, k, f64::from(k) * sheet::DENSITY / view.scale, Out::Paper)
 }
 
 /// The points of the scans a plan sees, from its cut plane down to its view depth, as Revit draws a point cloud in plan: from
@@ -2536,7 +2541,9 @@ const ONE_PIXEL: f32 = 0.75;
 /// black), its pen and its linetype, and in what its layer's override (else its import's) gives instead, lighter in halftone;
 /// a solid hatch filled (by odd parity: its islands are holes), a patterned one as a pale fill of its colour; text lettered at
 /// its height and width, turned, aligned and mirrored as the drawing has it. Only the entities in the view are looked at, and
-/// a run's points under a pixel apart are drawn as one. An import's, and a PDF's lines where its image shows them.
+/// a run's points under a pixel apart are drawn as one. On a screen, a dense drawing zoomed out draws its small entities as the
+/// ink of its level of detail's cells ([`cad_cells`]), and only the rest one by one. An import's, and a PDF's lines where its
+/// image shows them.
 fn cad_drawing(
     d: &mut Drawing,
     cad: &crate::cad::Cad,
@@ -2564,7 +2571,16 @@ fn cad_drawing(
     let mut overrides: std::collections::HashMap<&str, crate::graphics::Override> = std::collections::HashMap::new();
     let entities = &cad.dxf().entities;
     let frame = d.view;
-    for i in cad.entities_in(lo, hi) {
+    // Pixels to a unit of the drawing along whichever way it is the most: a cell of the band drawn is no more than a pixel.
+    let most = ci.scale.abs().max((ci.scale * ci.stretch).abs()) * d.view.scale;
+    let found = match cad.lod_band(most).filter(|_| d.screen) {
+        Some((lod, band)) if cad_cells(d, ci, (in_view, look), (lod, band), [lo, hi]) => {
+            let meets = |b: [f64; 4]| b[0] <= hi.0 && b[2] >= lo.0 && b[1] <= hi.1 && b[3] >= lo.1;
+            band.big.iter().map(|i| *i as usize).filter(|i| lod.entity_box(*i).is_some_and(meets)).collect()
+        }
+        _ => cad.entities_in(lo, hi),
+    };
+    for i in found {
         let Some(ent) = entities.get(i) else { continue };
         if !cad.shows(ent, &ci.hidden) || in_view.is_some_and(|l| l.contains(&ent.layer)) {
             continue;
@@ -2719,6 +2735,109 @@ fn behind_model(d: &mut Drawing, m: &Model, picture: &Image) {
     }
 }
 
+/// The cells of `band` (of a drawing placed by `ci`, its level of detail `lod`) that meet the box from `lo` to `hi` in the
+/// drawing's units, drawn as the pixels their ink makes: of the layers the import and the view show (`in_view`), in their
+/// colours (the view's ink, inverted or black as the import says, its layer's override's colour, halftone), each cell's ink
+/// (its lines as long as they are and a pixel wide, as the finest pen draws on a screen, their round ends, its fills as big as
+/// they are, a pattern's pale) spread over the four pixels round its middle, as one picture ([`Part::Cells`]). Each pixel is
+/// as opaque as that ink, laid at random, covers it, its colour theirs mixed. The band's picture for the view's look is made
+/// once ([`crate::cad::lod::Lod::picture`]); with none (it would hold too much), nothing is drawn and it says so, for the
+/// caller to draw every entity.
+fn cad_cells(
+    d: &mut Drawing,
+    ci: &crate::model::CadImport,
+    (in_view, look): (Option<&std::collections::BTreeSet<String>>, Option<&crate::graphics::ImportLook>),
+    (lod, band): (&crate::cad::lod::Lod, &crate::cad::lod::Band),
+    [lo, hi]: [P2; 2],
+) -> bool {
+    use crate::cad::Colors;
+    use std::hash::{Hash, Hasher};
+    // Each layer as the view draws it: hidden, or its override's colour and halftone.
+    let seen: Vec<Option<(Option<Rgb>, bool)>> = lod
+        .layers
+        .iter()
+        .map(|name| {
+            if ci.hidden.contains(name) || in_view.is_some_and(|l| l.contains(name)) {
+                return None;
+            }
+            let over = look.map(|l| l.of_layer(name));
+            let color = over.as_ref().and_then(|o| o.projection.color).map(|[r, g, b]| Rgb(r, g, b));
+            Some((color, over.as_ref().is_some_and(|o| o.halftone)))
+        })
+        .collect();
+    let mut key = std::collections::hash_map::DefaultHasher::new();
+    ci.colors.name().hash(&mut key);
+    for s in &seen {
+        s.map(|(c, half)| (c.map(|c| (c.0, c.1, c.2)), half)).hash(&mut key);
+    }
+    let color = |l: usize, own: Option<Rgb>| -> Option<Rgb> {
+        let (over, half) = (*seen.get(l)?)?;
+        let c = over.unwrap_or(match (ci.colors, own) {
+            (Colors::Preserve, Some(c)) => c,
+            (Colors::Invert, Some(c)) => Rgb(255 - c.0, 255 - c.1, 255 - c.2),
+            _ => INK,
+        });
+        Some(if half { Rgb(c.0 + (255 - c.0) / 2, c.1 + (255 - c.1) / 2, c.2 + (255 - c.2) / 2) } else { c })
+    };
+    let Some(picture) = lod.picture(band, key.finish(), &color) else { return false };
+    let place = crate::model::cad_place(ci);
+    let frame = d.view;
+    // The pixels the cells may reach: the band's grid in the view, a pixel round.
+    let [glo, ghi] = picture.bounds();
+    let (from, to) = (P2(lo.0.max(glo.0), lo.1.max(glo.1)), P2(hi.0.min(ghi.0), hi.1.min(ghi.1)));
+    if !(from.0 <= to.0 && from.1 <= to.1) {
+        return true;
+    }
+    let corners = [from, P2(to.0, from.1), to, P2(from.0, to.1)].map(|p| frame.px(place(p)));
+    let (w, h) = (frame.width as f32, frame.height as f32);
+    let (xs, ys) = (corners.map(|c| c.0), corners.map(|c| c.1));
+    let x0 = (xs.iter().copied().fold(f32::INFINITY, f32::min) - 1.0).floor().clamp(0.0, w);
+    let y0 = (ys.iter().copied().fold(f32::INFINITY, f32::min) - 1.0).floor().clamp(0.0, h);
+    let x1 = (xs.iter().copied().fold(f32::NEG_INFINITY, f32::max) + 1.0).ceil().clamp(0.0, w);
+    let y1 = (ys.iter().copied().fold(f32::NEG_INFINITY, f32::max) + 1.0).ceil().clamp(0.0, h);
+    let (pw, ph) = ((x1 - x0) as usize, (y1 - y0) as usize);
+    if pw == 0 || ph == 0 {
+        return true;
+    }
+    // Pixels a cell is across (along a line, near enough for a stretched drawing): a cell's ink is a pixel wide line through it
+    // that long.
+    let (kx, ky) = (ci.scale.abs() * frame.scale, (ci.scale * ci.stretch).abs() * frame.scale);
+    let across = ((kx * ky).sqrt() * band.cell) as f32;
+    // Each pixel's ink, px², and its colour times it.
+    let mut ink = vec![[0.0_f32; 4]; pw * ph];
+    for (c, cell) in picture.cells_in(lo, hi) {
+        let all = crate::cad::lod::ink_of(cell.ink) as f32 * across;
+        let rgb = [f32::from(cell.rgb.0), f32::from(cell.rgb.1), f32::from(cell.rgb.2)];
+        // Its middle's pixel, and the four round it by how near.
+        let (px, py) = frame.px(place(c));
+        let (fx, fy) = (px - x0 - 0.5, py - y0 - 0.5);
+        let (ix, iy) = (fx.floor(), fy.floor());
+        let (tx, ty) = (fx - ix, fy - iy);
+        for (dx, dy, share) in [(0, 0, (1.0 - tx) * (1.0 - ty)), (1, 0, tx * (1.0 - ty)), (0, 1, (1.0 - tx) * ty), (1, 1, tx * ty)] {
+            let (x, y) = (ix as i64 + dx, iy as i64 + dy);
+            if x < 0 || y < 0 || x >= pw as i64 || y >= ph as i64 {
+                continue;
+            }
+            if let Some(p) = ink.get_mut(y as usize * pw + x as usize) {
+                let a = all * share;
+                *p = [p[0] + rgb[0] * a, p[1] + rgb[1] * a, p[2] + rgb[2] * a, p[3] + a];
+            }
+        }
+    }
+    // Each pixel as opaque as strokes laid one over another at random cover it (1 - e^-ink), its colour theirs mixed.
+    let mut rgba = vec![0_u8; pw * ph * 4];
+    for (p, out) in ink.iter().zip(rgba.as_chunks_mut::<4>().0) {
+        if p[3] > 0.0 && p[3].is_finite() {
+            let c = |v: f32| (v / p[3]).round().clamp(0.0, 255.0) as u8;
+            *out = [c(p[0]), c(p[1]), c(p[2]), ((1.0 - (-p[3]).exp()) * 255.0).round() as u8];
+        }
+    }
+    let part = std::mem::replace(&mut d.part, Part::Cells);
+    d.push(Prim::Image { at: (x0, y0), width: pw as u32, height: ph as u32, rgba, ink: false });
+    d.part = part;
+    true
+}
+
 /// A channel of a colour most of the way to the paper: a patterned hatch's fill.
 fn pale(v: u8) -> u8 {
     v + (255 - v) / 4 * 3
@@ -2727,12 +2846,21 @@ fn pale(v: u8) -> u8 {
 /// A floor plan of `plan`, or `up`, its reflected ceiling plan; `titled`, with its name lettered at its bottom left (an image of
 /// it has it; a window letters it itself over the canvas, and shows it in the view's tab, and a sheet has it under its viewport). Its annotation `k` times the size it
 /// is laid out at, its pens the line weights' at 1 : `n`.
-fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, titled: bool) -> Drawing {
+/// What a plan is drawn for: a picture of it (titled with its name), a screen (where a dense drawing zoomed out is drawn
+/// simplified), or paper (a sheet's viewport).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Out {
+    Picture,
+    Screen,
+    Paper,
+}
+
+fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, out: Out) -> Drawing {
     let key = m.guid(plan);
-    let d = draw_plan_among(m, key, view, up, k, n, titled, true);
+    let d = draw_plan_among(m, key, view, up, k, n, out, true);
     // Its twin, which tests hold it to: every element looked at, the walls joined through an index of every wall.
     if crate::selfcheck::on(crate::selfcheck::Check::DrawPlan) {
-        let every = regions::uncounted(|| draw_plan_among(m, key, view, up, k, n, titled, false));
+        let every = regions::uncounted(|| draw_plan_among(m, key, view, up, k, n, out, false));
         let same = d.prims.len() == every.prims.len()
             && d.owners == every.owners
             && d.parts == every.parts
@@ -2746,7 +2874,8 @@ fn draw_plan(m: &Model, plan: impl Key, view: View, up: bool, k: f32, n: f64, ti
 /// ([`plan_elements`]), its walls joined through the model's lookup when it is made; else at every element, through an
 /// index of every wall.
 #[allow(clippy::too_many_arguments)]
-fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, titled: bool, among: bool) -> Drawing {
+fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, out: Out, among: bool) -> Drawing {
+    let titled = out == Out::Picture;
     // The plan's own guid says what it is: its graphics, range, crop and annotation; its level is what it shows of the model.
     let level = m.plan_level(key).map_or(key, |l| m.guid(l));
     let index = match m.derived.made(&m.elements) {
@@ -2756,6 +2885,7 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, t
     let index = index.as_ref();
     let mut d = Drawing::new(view);
     (d.k, d.paper, d.detail, d.weights) = (k, paper_of(n, view.scale), detail_of(m, key), m.line_weights().at(n));
+    d.screen = out == Out::Screen;
     let look = Look::of(m, key);
     let shown = |id: Id| look.shows(id);
     d.pattern_styles = look.pattern_styles();
@@ -4860,9 +4990,19 @@ pub fn png(d: &Drawing) -> Result<Vec<u8>, String> {
     pm.encode_png().map_err(|e| e.to_string())
 }
 
-/// A picture's pixels as a pixmap.
+/// A picture's pixels (each its colour and how opaque it is, as a front end takes them) as a pixmap, whose colours are
+/// times how opaque they are.
 fn picture(width: u32, height: u32, rgba: &[u8]) -> Option<Pixmap> {
-    Pixmap::from_vec(rgba.to_vec(), IntSize::from_wh(width, height)?)
+    let mut held = rgba.to_vec();
+    for px in held.as_chunks_mut::<4>().0 {
+        let a = u16::from(px[3]);
+        if a < 255 {
+            for c in &mut px[..3] {
+                *c = (u16::from(*c) * a / 255) as u8;
+            }
+        }
+    }
+    Pixmap::from_vec(held, IntSize::from_wh(width, height)?)
 }
 
 /// The display list drawn over what `pm` holds.

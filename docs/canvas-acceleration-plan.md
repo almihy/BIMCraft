@@ -118,6 +118,14 @@ The whole window's frame, 1600 × 1000, the plan's 52,351 primitives, on the car
 Left: what a selection still costs each frame, 10 ms past none and 169 ms for the whole model, was not looked into. Selecting past a quarter of
 the plan makes its triangles again on the interface's thread. Without a card, frames stay at about 165 ms (egui tessellating the plan).
 
+## Dense drawings zoomed out (2026-11-13)
+
+A plan with dense CAD drawings or PDF pages (hundreds of thousands of entities each) drew every entity at every zoom: four A0
+sheets fitted were 1.6 million primitives and 1.5 s a redraw on the worker. The core now draws a dense drawing whose cells
+come under a pixel from its level of detail ([CAD import](areas/cad-import.md#a-dense-drawing-zoomed-out)): one picture of
+`Part::Cells` a drawing, 40 ms. The canvas loads it as it loads a scan's, but in the drawing's colours as its lines are, lightened
+on a dark canvas (`canvas::cells_seen`), not dimmed as a scan is.
+
 ## Status
 
 - [x] Measure

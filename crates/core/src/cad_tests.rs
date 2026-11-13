@@ -1142,3 +1142,56 @@ fn a_new_template_forces_this_builds_format_only_when_import_settings_reach_its_
 fn one_import(s: &mut Session) -> u64 {
     run(s, "elements", json!({"category": "cadimport"}))["elements"][0]["id"].as_u64().unwrap()
 }
+
+#[test]
+fn a_dense_drawing_zoomed_out_on_a_screen_draws_its_cells_and_still_picks_and_snaps_to_its_lines() {
+    // 12 000 strokes a few millimetres long over 12 m by 8 m, in mm, and a frame: under a pixel each, fitted.
+    let mut strokes = String::new();
+    let mut seed = 5_u64;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed >> 11) as f64 / (1u64 << 53) as f64
+    };
+    for i in 0..12_000 {
+        let (x, y) = (100.0 + next() * 11_800.0, 100.0 + next() * 7_800.0);
+        strokes += &line(["WALLS", "TEXT"][i % 2], (x, y), (x + 20.0 + next() * 30.0, y + next() * 20.0));
+    }
+    let frame = [((0.0, 0.0), (12_000.0, 0.0)), ((12_000.0, 0.0), (12_000.0, 8_000.0)), ((12_000.0, 8_000.0), (0.0, 8_000.0))];
+    strokes += &frame.iter().map(|(a, b)| line("WALLS", *a, *b)).collect::<String>();
+    let text = dxf("4", &[("WALLS", "1", false), ("TEXT", "7", false)], &strokes);
+    let mut s = Session::new();
+    let r = run(&mut s, "import_cad", json!({"path": file("dense", "dense.dxf", &text), "position": "origin"}));
+    let id = r["id"].as_u64().unwrap();
+    let (one, _) = levels(&s);
+    // Fitted, 0.04 px a mm: the sheet 480 px across.
+    let view = crate::prim::View { scale: 0.04, cx: 6000.0, cy: 4000.0, width: 520, height: 360 };
+    let screen = render::draw(&s.model, one, view);
+    let paper = render::draw_at(&s.model, one, view, 1.0);
+    assert!(paper.prims.len() > 12_000, "paper draws every entity: {}", paper.prims.len());
+    assert!(screen.prims.len() * 10 < paper.prims.len(), "a screen draws its cells: {}", screen.prims.len());
+    assert!(drawn(&screen, reddish) > 1000, "WALLS still red");
+    // A layer hidden in the view is hidden in its cells too.
+    run(&mut s, "cad_layers", json!({"id": id, "hide": ["WALLS"]}));
+    assert_eq!(drawn(&render::draw(&s.model, one, view), reddish), 0);
+    run(&mut s, "cad_layers", json!({"id": id, "show": ["WALLS"]}));
+    // Halftone in the view's Imported Categories draws its cells halftone, as its lines: half as dark.
+    let ink = |d: &render::Drawing| {
+        let pm = tiny_skia::Pixmap::decode_png(&render::png(d).unwrap()).unwrap();
+        pm.pixels().iter().map(|p| 255.0 - f64::from(p.demultiply().green())).sum::<f64>()
+    };
+    let full = ink(&render::draw(&s.model, one, view));
+    run(&mut s, "graphics", json!({"view": "Level 1", "categories": {"cadimport": {"halftone": true}}}));
+    let half = ink(&render::draw(&s.model, one, view));
+    assert!(half < full * 0.6 && half > full * 0.3, "{half} of {full}");
+    run(&mut s, "graphics", json!({"view": "Level 1", "categories": {"cadimport": {}}}));
+    // Picked where its ink is, as one element; its frame, too big for a cell, is drawn as itself and picked along it.
+    let screen = render::draw(&s.model, one, view);
+    assert_eq!(screen.pick(view.px(P2(6000.0, 0.0)), 2.0), Some(id));
+    assert!(screen.prims.iter().zip(&screen.owners).any(|(p, o)| *o == Some(id) && matches!(p, render::Prim::Line { .. })));
+    // Snapping goes by the entities themselves: a stroke's end, to the millimetre, zoomed out or not.
+    let reach = Reach { point: 300.0, line: 300.0 };
+    let f = snap(&s.model, one, P2(12_000.0 - 40.0, 8_000.0 + 30.0), reach, &[], false, &Snaps::default());
+    assert_eq!((f.kind, f.at), (Kind::Endpoint, P2(12_000.0, 8_000.0)), "{f:?}");
+}

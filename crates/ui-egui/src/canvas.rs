@@ -242,9 +242,10 @@ impl PlanCache {
             let loaded = d
                 .prims
                 .iter()
-                .filter_map(|p| match p {
+                .zip(&d.parts)
+                .filter_map(|(p, part)| match p {
                     Prim::Image { width, height, rgba, .. } => {
-                        let pixels = ColorImage::from_rgba_unmultiplied([*width as usize, *height as usize], rgba);
+                        let pixels = ColorImage::from_rgba_unmultiplied([*width as usize, *height as usize], &cells_seen(rgba, *part));
                         Some(ctx.load_texture("plan picture", pixels, TextureOptions::NEAREST))
                     }
                     _ => None,
@@ -254,6 +255,20 @@ impl PlanCache {
         }
         self.pictures.as_ref().map(|(_, t)| t.iter().map(TextureHandle::id).collect()).unwrap_or_default()
     }
+}
+
+/// A picture's pixels as the canvas shows them: a dense drawing's cells ([`render::Part::Cells`]) in its colours as its lines
+/// would be, lightened on a dark canvas; any other picture as it is.
+pub(crate) fn cells_seen(rgba: &[u8], part: render::Part) -> std::borrow::Cow<'_, [u8]> {
+    if part != render::Part::Cells || !crate::style::canvas_dark() {
+        return std::borrow::Cow::Borrowed(rgba);
+    }
+    let mut seen = rgba.to_vec();
+    for px in seen.as_chunks_mut::<4>().0 {
+        let c = color(Rgb(px[0], px[1], px[2]));
+        px[..3].copy_from_slice(&[c.r(), c.g(), c.b()]);
+    }
+    std::borrow::Cow::Owned(seen)
 }
 
 /// The drawing shown, and where it lies on a canvas at a view that may have moved on from it: what's under a pixel of the canvas is
@@ -920,7 +935,9 @@ pub(crate) fn paint_prim(
                 let rect = Rect::from_min_size(at.pos(*corner), vec2(*width as f32, *height as f32) * at.k);
                 // On a dark canvas a plan's picture (a scan's) is dimmed, so the ink lightened over it still reads; a sheet's
                 // paper stays white, and so does a scan the view fills with a colour of its own, which is ink itself.
-                let plain = if !at.paper && !*ink && crate::style::canvas_dark() { Color32::from_gray(120) } else { Color32::WHITE };
+                // A dense drawing's cells are lightened as its lines are ([`cells_seen`]), not dimmed.
+                let dim = !at.paper && !*ink && part != render::Part::Cells && crate::style::canvas_dark();
+                let plain = if dim { Color32::from_gray(120) } else { Color32::WHITE };
                 let tint = accent.map_or(plain, |a| a.1);
                 out(Shape::image(*texture, rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), tint));
             }

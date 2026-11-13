@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::dxf::{self, Color, Dxf, Entity, Shape};
 
+pub mod lod;
 pub mod outlines;
 pub mod packed;
 use crate::geom::P2;
@@ -79,6 +80,8 @@ pub struct Cad {
     packed: Arc<OnceLock<CadFile>>,
     /// Its entities' boxes and a grid of them, made the first time what lies in a box is asked.
     index: Arc<OnceLock<Index>>,
+    /// Its level of detail zoomed out, made the first time it is drawn so: none for a sparse drawing.
+    lod: Arc<OnceLock<Option<lod::Lod>>>,
 }
 
 /// A drawing's entities' boxes (x0, y0, x1, y1, drawing units), and a grid over them: each cell the entities whose boxes meet
@@ -202,6 +205,7 @@ impl Cad {
             far,
             packed: Arc::default(),
             index: Arc::default(),
+            lod: Arc::default(),
         })
     }
 
@@ -229,6 +233,7 @@ impl Cad {
             far,
             packed: Arc::default(),
             index: Arc::default(),
+            lod: Arc::default(),
         }
     }
 
@@ -236,6 +241,13 @@ impl Cad {
     /// what a view or the cursor's reach finds of it.
     pub fn entities_in(&self, lo: P2, hi: P2) -> Vec<usize> {
         self.index.get_or_init(|| Index::new(&self.dxf)).within([lo.0, lo.1, hi.0, hi.1])
+    }
+
+    /// Its level of detail ([`lod`]) and the band of it it is drawn with when a unit of it is `px` pixels: none when it is
+    /// drawn entity by entity at that zoom (it is sparse, the view is near, or the band would hold too much).
+    pub fn lod_band(&self, px: f64) -> Option<(&lod::Lod, &lod::Band)> {
+        let lod = self.lod.get_or_init(|| lod::Lod::new(&self.dxf, self.bulk, &|e| self.color(e, Colors::Preserve))).as_ref()?;
+        Some((lod, lod.band(&self.dxf, px)?))
     }
 
     /// Entity `i`'s box, drawing units, its low corner and its high.
@@ -521,6 +533,10 @@ fn bulk(d: &Dxf) -> (Option<[P2; 2]>, usize) {
     let far = boxes.iter().filter(|b| !near(b)).count();
     (dxf::union(boxes.into_iter().filter(near)), far)
 }
+
+#[cfg(test)]
+#[path = "cad_tests.rs"]
+pub(crate) mod tests;
 
 /// How a drawing goes in a project file: its DXF deflated (zlib) and in base64; a PDF page's lines are its packed lines
 /// (`lines`) instead.

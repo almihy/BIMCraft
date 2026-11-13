@@ -135,7 +135,7 @@ AutoCAD does (`dxf::styled`: Normal every island, Outermost the outer boundaries
 boundaries alone, nesting found by containment; a boundary written twice is kept once, so the two don't cancel); an entity's transparency (group 440) draws see-through. Only the
 entities whose boxes reach the view are looked at (`Cad::entities_in`, a grid of the entities' boxes made the first time it is
 asked, which snapping and `cad::nearest` use too), and a run's points under a pixel apart are drawn as one (`thinned`), so a
-dense sheet draws quickly zoomed in and zoomed out. Each layer draws as the view's Imported Categories say (`ImportLook`:
+dense sheet draws quickly zoomed in; zoomed out, a screen draws a dense one from its level of detail (below). Each layer draws as the view's Imported Categories say (`ImportLook`:
 the import's row and each layer's projection lines, colour, weight and pattern, and halftone; a layer's own win). An
 import is one element: picked by any of its lines, selected whole. Sections, elevations and the 3D view leave imports out, as
 Revit's do for a drawing placed in a plan; IFC export leaves them out too. The category is `cadimport`: hidden in a view
@@ -143,6 +143,47 @@ Revit's do for a drawing placed in a plan; IFC export leaves them out too. The c
 (`Look::draws_pdf_lines`), and it halftones like any other. `familyimport` is Imports in Families' row, a category hidden and
 overridden as any; families bring in no CAD yet, so it draws nothing. An import's fills and hatches keep their own colours:
 as in Revit, its Patterns can't be overridden (`ImportLook::check` takes lines and halftone only).
+
+### A dense drawing zoomed out
+
+On a screen (`render::draw` and `render::draw_ceiling`, what the canvas and its workers draw, which set `Drawing::screen`), a
+drawing of 10 000 entities or more (`lod::LOD_FROM`) whose cells come under a pixel draws from its level of detail
+(`cad/lod.rs`) instead of entity by entity: four dense A0 sheets fitted went from 1.5 s and 1.6 million primitives a
+redraw to 40 ms and eight. Pictures and paper (`render::plan`, `draw_at` for sheets, PNG, SVG and PDF of them) draw every
+entity, as before.
+
+- **Bands.** Over the drawing's bulk (`Cad::bulk`), grids of 64 to 4096 cells across its long side, each twice as fine as the
+  last. A view takes the coarsest whose cells are no more than a pixel (pixels to a drawing unit `k = ci.scale * view.scale`,
+  the most of its two ways for a stretched page); when even the finest's are bigger, it draws entity by entity, so zoomed in
+  nothing changes. A band is made the first time a view needs it (`Cad::lod_band`, half a second for a sheet of 400 000
+  entities) and kept, as `Cad::entities_in`'s grid is.
+- **Marks, layer by layer.** In a band, each layer's entities no more than 16 cells across and inside its grid lay ink in the
+  cells they cross: a line its length in each (walked cell by cell), a run's round ends a dot, a fill its area (a pattern's
+  pale), a text a share of its box. Each cell of each layer is one mark of 4 bytes: where along its row, the ink (a byte,
+  logarithmic), and the colour most of it is in (one of up to 255 the drawing names, the view's ink among them). A bigger
+  entity, or one past the bulk, is in the band's `big` list and drawn as itself, so long lines and a sheet's frame stay crisp.
+- **The picture.** What a view draws of a band is its `Picture`: the marks of the layers the import and the view show, in
+  their colours as the view draws them (`ImportLook`'s colour and halftone by layer, the import's Colors), summed cell by cell.
+  It is made when the view's look is new (a layer hidden, an override) and the last two are kept (`Lod::picture`), so a
+  frame that changes nothing but the zoom only spreads its cells over the pixels: each cell's ink a pixel-wide line through it,
+  spread over the four pixels round its middle, each pixel as opaque as strokes laid at random would cover it
+  (`1 - e^-ink`). The result is one `Prim::Image` of `Part::Cells`: the view's overrides colour and halftone it as they do lines
+  (`Look::dress`), and the canvas lightens it on a dark canvas as it does lines (`canvas::cells_seen`). Pens are drawn a pixel
+  wide, as the finest pens are on a screen zoomed out; a pen or a line pattern of a layer's override doesn't reach the cells.
+- **Bounded.** A band holds no more than 8 million marks (32 MB), a drawing's bands 16 million among them (64 MB), and a
+  picture 4 million cells (24 MB); what the small entities would lay is counted before a band is made, so one past it is let
+  go at once. A band dropped draws every entity at its zoom, as before; the finest go first, as they hold the most.
+- **Only drawing.** Picking goes by what's drawn (the picture where its ink is, the big entities as lines), snapping and
+  `cad::nearest` by the entities themselves through `Cad::entities_in`, at any zoom.
+- **Faithful.** `a_dense_drawing_zoomed_out_on_a_screen_draws_its_cells_and_looks_as_it_does_drawn_whole` holds a dense sheet
+  fitted to the drawing drawn whole: as dark within a tenth, and nearer it pixel for pixel than the whole drawing moved half
+  a pixel is (random strokes under a pixel land on other pixels when moved, so that is as near as the same drawing comes).
+
+Measured on four copies of a 400 000-entity A0 page with 60 layers (`rvpdf/probes/huge_a0.pdf`), side by side on one level and
+fitted to 1600 by 1000 px: a redraw went from 1.5 s to 40 ms (the first, which makes the bands, 1.3 s), primitives from 1.6
+million to 8, and the engine's peak from 846 MB to 650 MB (the import's own peak); one sheet fitted, from 184 ms to 23 ms.
+Zoomed in past the bands, a redraw is as it was. A PNG of it is a little darker than the whole drawing's where a page's pens
+are hairlines, which the PNG's painter draws thinner than a pixel and the canvas a pixel wide.
 
 `snap.rs` gathers a plan's imports' endpoints, midpoints and centres, and their segments for crossings and nearest points, so a
 wall drawn from corner to corner of a drawing lies on its lines; a layer hidden isn't snapped to.

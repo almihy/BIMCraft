@@ -26,6 +26,9 @@ pub enum Part {
     LinePattern,
     /// A raster image or a PDF page placed in the view: it picks where nothing drawn near is picked instead.
     Picture,
+    /// A dense drawing zoomed out, its cells' ink drawn as a picture: its colours are the drawing's, taking a line colour, its
+    /// halftone, and a dark canvas's lightening as lines do.
+    Cells,
 }
 
 impl Part {
