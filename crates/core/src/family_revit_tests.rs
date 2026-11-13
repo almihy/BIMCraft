@@ -306,3 +306,15 @@ fn bimcraft_families_are_listed_and_read_for_load_family_at_no_undo_step() {
     assert!(s.execute("family_library", &json!({"name": "Nope"})).unwrap_err().contains("no family"));
     assert!(s.execute("family_library", &json!({"set": "nope"})).unwrap_err().contains("no set"));
 }
+
+#[test]
+fn a_door_schedule_lists_a_familys_text_parameter_with_each_doors_words() {
+    let mut s = Session::new();
+    let d = door(&mut s, "1000 x 2100");
+    let r = run(&mut s, "schedule", json!({"category": "door", "fields": ["Mark", "Fire Rating", "Leaf Area"]}));
+    let rows = r["rows"].as_array().unwrap_or_else(|| panic!("{r}"));
+    assert_eq!(rows.len(), 1, "{r}");
+    assert!(rows[0].to_string().contains("EI 60"), "{r}");
+    assert!(r["available"].as_array().is_some_and(|a| a.iter().any(|f| f.to_string().contains("Fire Rating"))), "{r}");
+    let _ = d;
+}
