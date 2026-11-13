@@ -740,3 +740,32 @@ fn a_sweep_starting_on_a_bend_keeps_its_profile_at_the_start() {
     let (lo, hi) = extent(&f, "A", &none);
     assert!(lo[1] > -401.0 && hi[1] < 64.0 && lo[2] > -0.5, "{lo:?} {hi:?}");
 }
+
+#[test]
+fn an_arch_through_a_bound_point_follows_its_width_where_its_centre_cant() {
+    let mut s = Session::new();
+    // A segmental arch over a 1000 wide opening rising 200: its centre and radius aren't sums of Width; its ends and its
+    // crown are.
+    let w = |k: f64| json!({"param": "Width", "scale": k});
+    let fam = json!({
+        "name": "Arch", "category": "generic", "types": {"Narrow": {}, "Wide": {"Width": 1600}},
+        "parameters": [{"name": "Width", "kind": "length", "value": 1000}],
+        "revit": {"forms": [{"kind": "extrusion", "normal": [0, 1, 0], "start": 0, "end": 100, "loops": [[
+            line(json!([w(-0.5), 0, 0]), json!([w(0.5), 0, 0])),
+            line(json!([w(0.5), 0, 0]), json!([w(0.5), 0, 1000])),
+            {"arc": {"start": [w(0.5), 0, 1000], "end": [w(-0.5), 0, 1000], "center": [0, 0, 375], "radius": 725, "normal": [0, -1, 0],
+                     "mid": [0, 0, 1200]}},
+            line(json!([w(-0.5), 0, 1000]), json!([w(-0.5), 0, 0]))
+        ]]}]}
+    });
+    run(&mut s, "family", fam);
+    let f = s.model.families["Arch"].clone();
+    let none = |_: &str| None;
+    let (lo, hi) = extent(&f, "Wide", &none);
+    assert!(near(lo[0], -800.0) && near(hi[0], 800.0) && (hi[2] - 1200.0).abs() < 10.0, "{lo:?} {hi:?}");
+    // The segment over 1600 rising 200: radius (800² + 200²) / 400 = 1700.
+    let (r, half) = (1700.0f64, 800.0f64);
+    let segment = r * r * (half / r).asin() - half * (r - 200.0);
+    let want = (1600.0 * 1000.0 + segment) * 100.0;
+    assert!((volume(&f, "Wide") - want).abs() < want * 0.005, "{} against {want}", volume(&f, "Wide"));
+}

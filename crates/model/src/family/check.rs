@@ -182,21 +182,15 @@ impl Family {
             };
             // What the plan draws: its symbols and the forms it shows from above (Revit's plan of a family it brings may
             // be its forms' lines, which BIMCraft draws from the forms).
-            // A door or a window in plan as Revit's floor plan sees it at its sill: what its cut plane, 1200 mm over the
-            // level, passes through, where its Plan/RCP says, and what is wholly below it, seen.
+            // Its plan as Revit's floor plan sees it (a door or a window at its sill), cutting 1200 mm over the level
+            // ([`Piece::in_plan_cut`]).
             let cut = PLAN_CUT
                 - match values.get(super::SILL) {
                     Some(super::Val::Number(x)) => *x,
                     _ => 0.0,
                 };
-            let shown = |p: &Piece| {
-                if !self.category.hosted() || (p.bottom < cut - CUT_EPS && cut < p.top) {
-                    p.in_plan(d)
-                } else {
-                    // Below it, or standing on it (a board on the sill the plane cuts at): seen.
-                    p.bottom <= cut + CUT_EPS && p.at(d)
-                }
-            };
+            let hosted = self.category.hosted();
+            let shown = |p: &Piece| p.in_plan_cut(d, cut, hosted);
             let plan = |marks: Vec<super::Mark>, pieces: &[Piece]| {
                 let mut all = marks;
                 all.extend(pieces.iter().filter(|p| shown(p)).map(|p| super::Mark::Line(p.outline.clone())));

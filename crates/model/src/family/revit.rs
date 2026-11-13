@@ -241,12 +241,13 @@ struct Bit {
     end: [Expr; 3],
     arc: Option<([Expr; 3], [f64; 3], [f64; 3])>,
     radius: Option<Expr>,
+    through: Option<[Expr; 3]>,
 }
 
 impl Reader<'_> {
     fn curve(&self, c: &Value) -> Result<Bit, String> {
         if let Some(l) = c.get("line").and_then(Value::as_array).filter(|l| l.len() == 2) {
-            return Ok(Bit { start: self.point(&l[0])?, end: self.point(&l[1])?, arc: None, radius: None });
+            return Ok(Bit { start: self.point(&l[0])?, end: self.point(&l[1])?, arc: None, radius: None, through: None });
         }
         let a = c.get("arc").ok_or_else(|| format!("a curve of a kind it can't draw: {}", short(c)))?;
         let (start, end, centre) = (self.point(&a["start"])?, self.point(&a["end"])?, self.point(&a["center"])?);
@@ -260,7 +261,9 @@ impl Reader<'_> {
         let (sd, ed, cd) = (doc(s), doc(e), doc(c3));
         let mid = middle(sd, ed, cd, [*nx, *ny, *nz]);
         let radius = a.get("radius").map(|r| self.value(r)).transpose()?;
-        Ok(Bit { start, end, arc: Some((centre, normal, doc(mid))), radius })
+        // A point it passes through, where the exporter gives one bound (its centre follows nothing it can say).
+        let through = a.get("mid").filter(|m| m.is_array()).map(|m| self.point(m)).transpose()?;
+        Ok(Bit { start, end, arc: Some((centre, normal, doc(mid))), radius, through })
     }
 
     /// A loop as corners in a plane (`k`: the two axes it is drawn in) and its arcs, `ring` of a form.
@@ -283,6 +286,7 @@ impl Reader<'_> {
                     centre: vec![centre[k[0]].clone(), centre[k[1]].clone()],
                     clockwise: a.cross(m) < 0.0,
                     normal: None,
+                    through: bit.through.as_ref().map(|t| vec![t[k[0]].clone(), t[k[1]].clone()]).unwrap_or_default(),
                 });
                 // Its middle too, so a ring of arcs (a circle drawn as two halves) has an inside to test.
                 numbers.push(P2(s[k[0]], s[k[1]]));
@@ -1139,6 +1143,25 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         {
             dimensions.push(Dimension { refs: vec![a.0.clone(), b.0.clone()], locked: true, value: Some(0.0), ..Dimension::default() });
         }
+    }
+    // A plane that moves with a host's face (`follows`, as the exporter found by thickening the host): kept its offset from it.
+    for (_, name, axis, p) in &refs {
+        let Some(fw) = p.get("follows").filter(|v| v.is_object()) else { continue };
+        let (Some(target), Some(off)) = (fw.get("ref").and_then(Value::as_str).and_then(|r| reader.planes.get(r)), num(&fw["offset"]))
+        else {
+            continue;
+        };
+        if target.1 != *axis || target.0 == *name || dimensions.len() >= super::MAX_DIMENSIONS {
+            continue;
+        }
+        let sense = if off * reader.map.sign(*axis) < 0.0 { Some(vec![-1]) } else { None };
+        dimensions.push(Dimension {
+            refs: vec![target.0.clone(), name.clone()],
+            locked: true,
+            value: Some(off.abs()),
+            sense,
+            ..Dimension::default()
+        });
     }
     // Planes aligned to the same edge or face of a form (an id that is no plane) are aligned to each other, where they stand
     // together in every type.

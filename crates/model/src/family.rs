@@ -269,11 +269,17 @@ pub struct Show {
     pub front: bool,
     #[serde(default = "yes", skip_serializing_if = "is_yes")]
     pub side: bool,
+    /// Revit's Top/Bottom: a plan draws it seen from above, wholly below its cut plane.
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub plan_top: bool,
+    /// Revit's Plan/RCP when cut: a plan draws it where its cut plane passes through it.
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub plan_cut: bool,
 }
 
 impl Default for Show {
     fn default() -> Show {
-        Show { coarse: true, medium: true, fine: true, plan: true, front: true, side: true }
+        Show { coarse: true, medium: true, fine: true, plan: true, front: true, side: true, plan_top: true, plan_cut: true }
     }
 }
 
@@ -839,6 +845,11 @@ pub struct Bend {
     pub clockwise: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub normal: Option<[f64; 3]>,
+    /// A point the arc passes through between its corners (two numbers in a plane's ring): where it is given, the arc is the
+    /// one through its two corners and it, its `centre` worked out from them (an arched window's head, whose centre and
+    /// radius follow its width as no sum of parameters does).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub through: Vec<Expr>,
 }
 
 fn is_naught(n: &usize) -> bool {
@@ -863,7 +874,7 @@ impl Form {
             .chain(self.section_end.iter().flatten())
             .chain(self.section_holes.iter().flatten().flatten())
             .chain(self.section_end_holes.iter().flatten().flatten())
-            .chain(self.arcs.iter().flat_map(|b| b.centre.iter()))
+            .chain(self.arcs.iter().flat_map(|b| b.centre.iter().chain(&b.through)))
             .chain(&self.at)
             .collect()
     }
@@ -1032,6 +1043,27 @@ impl Piece {
     /// Whether a plan at detail level `d` draws it: `plan` and that level, as its form says.
     pub fn in_plan(&self, d: crate::graphics::Detail) -> bool {
         self.show.is_none_or(|s| s.plan && s.at(d))
+    }
+
+    /// Whether a plan at detail level `d` cutting at height `cut` (in its own axes) draws it, as Revit's floor plan does: one
+    /// the plane cuts where its Plan/RCP (and Plan/RCP when cut) say, one wholly below it (or standing on it) where its
+    /// Top/Bottom says, and for a family other than a door's or a window's (`hosted`) its Plan/RCP too; one above it only
+    /// for such a family, where its Plan/RCP says.
+    pub fn in_plan_cut(&self, d: crate::graphics::Detail, cut: f64, hosted: bool) -> bool {
+        let eps = check::CUT_EPS;
+        let Some(s) = self.show else { return true };
+        if !s.at(d) {
+            return false;
+        }
+        if self.bottom < cut - eps && cut < self.top {
+            s.plan && s.plan_cut
+        } else if self.bottom <= cut + eps {
+            s.plan_top && (hosted || s.plan)
+        } else {
+            // Above it: a door's or a window's isn't seen; another family's plan draws it where its Plan/RCP says, as
+            // Revit's plan of it (a ceiling light's, looking up) does.
+            !hosted && s.plan
+        }
     }
 
     /// Whether a view at detail level `d` draws it, whichever way it looks (a 3D view's, IFC's at Fine).
@@ -2568,10 +2600,25 @@ impl Family {
             };
             // Its true arcs, drawn as a circle is.
             let mut bends = |ring: Ring, hole: usize| -> Result<Vec<(usize, P2, bool)>, String> {
+                let corners: &[[Expr; 2]] = match ring {
+                    Ring::Top => &form.top,
+                    Ring::Hole => form.holes.get(hole).map_or(&[], Vec::as_slice),
+                    _ => &form.profile,
+                };
                 let mut out = Vec::new();
                 for b in form.arcs.iter().filter(|b| b.ring == ring && b.hole == hole) {
                     let [x, y] = b.centre.as_slice() else { return Err("an arc of a profile has a centre of two numbers".into()) };
-                    out.push((b.edge, P2(num(x)?, num(y)?), b.clockwise));
+                    let mut centre = P2(num(x)?, num(y)?);
+                    // Through a point between its corners: the circle through the three.
+                    if let ([tx, ty], Some(a), Some(c)) =
+                        (b.through.as_slice(), corners.get(b.edge), corners.get((b.edge + 1) % corners.len().max(1)))
+                    {
+                        let (a, m, c) = (P2(num(&a[0])?, num(&a[1])?), P2(num(tx)?, num(ty)?), P2(num(&c[0])?, num(&c[1])?));
+                        if let Some(o) = circumcentre(a, m, c) {
+                            centre = o;
+                        }
+                    }
+                    out.push((b.edge, centre, b.clockwise));
                 }
                 Ok(out)
             };
@@ -2799,6 +2846,17 @@ fn nested_frame<'a>(
     let (sin, cos) = number(&n.rotation, values, read)?.to_radians().sin_cos();
     let flip = if n.mirrored { -1.0 } else { 1.0 };
     Ok((at, n.axes.unwrap_or([[cos, sin, 0.0], [-flip * sin, flip * cos, 0.0], [0.0, 0.0, 1.0]])))
+}
+
+/// The centre of the circle through `a`, `m` and `c`; none where they lie on a line.
+fn circumcentre(a: P2, m: P2, c: P2) -> Option<P2> {
+    let d = 2.0 * (a.0 * (m.1 - c.1) + m.0 * (c.1 - a.1) + c.0 * (a.1 - m.1));
+    if d.abs() < 1e-9 {
+        return None;
+    }
+    let (sa, sm, sc) = (a.0 * a.0 + a.1 * a.1, m.0 * m.0 + m.1 * m.1, c.0 * c.0 + c.1 * c.1);
+    let o = P2((sa * (m.1 - c.1) + sm * (c.1 - a.1) + sc * (a.1 - m.1)) / d, (sa * (c.0 - m.0) + sm * (a.0 - c.0) + sc * (m.0 - a.0)) / d);
+    (o.0.is_finite() && o.1.is_finite()).then_some(o)
 }
 
 /// A piece of `tris`, its outline the hull round them from above.
