@@ -370,6 +370,49 @@ fn revolves_blends_sweeps_and_swept_blends_regenerate() {
     assert!(f.forms[4].arcs.iter().any(|b| b.ring == crate::family::Ring::Path), "the path keeps its arc");
 }
 
+/// A frustum from a square `big` across at `z0` to one `small` across at `z1`, as a snapshot mesh holds it.
+fn frustum(big: f64, z0: f64, small: f64, z1: f64) -> Value {
+    let (b, s) = (big / 2.0, small / 2.0);
+    let ring = |h: f64, z: f64| [[-h, -h, z], [h, -h, z], [h, h, z], [-h, h, z]];
+    let (lo, hi) = (ring(b, z0), ring(s, z1));
+    let mut tris = vec![json!([lo[0], lo[2], lo[1]]), json!([lo[0], lo[3], lo[2]]), json!([hi[0], hi[1], hi[2]]), json!([hi[0], hi[2], hi[3]])];
+    for i in 0..4 {
+        let j = (i + 1) % 4;
+        tris.push(json!([lo[i], lo[j], hi[j]]));
+        tris.push(json!([lo[i], hi[j], hi[i]]));
+    }
+    json!(tris)
+}
+
+/// A blend Revit extrudes down from its sketch plane (a pendant shade sketched on a ceiling plane, its normal flipped): its
+/// start, 3000, carries its bottom profile, 600 square, and its end, 2500, its top, 200 square. It comes out right side up,
+/// the big square at 3000, and matches Revit's result.
+#[test]
+fn a_blend_built_from_top_to_bottom_comes_out_right_side_up() {
+    let p = |x: f64, y: f64, z: f64| json!([x, y, z]);
+    let lp = |pts: &[Value]| -> Value {
+        json!((0..pts.len()).map(|i| line(pts[i].clone(), pts[(i + 1) % pts.len()].clone())).collect::<Vec<_>>())
+    };
+    let square = |h: f64, z: f64| lp(&[p(-h, -h, z), p(h, -h, z), p(h, h, z), p(-h, h, z)]);
+    let shade = |snapshot: Value| {
+        json!({
+            "name": "Pendant", "category": "lighting", "types": {"A": {}}, "parameters": [],
+            "forms": [{"mesh": snapshot, "snapshot": true}],
+            "revit": {"forms": [{"kind": "blend", "normal": [0, 0, 1], "start": 3000, "end": 2500,
+                                 "bottom": [square(300.0, 3000.0)], "top": [square(100.0, 2500.0)]}]}
+        })
+    };
+    let mut s = Session::new();
+    let r = run(&mut s, "family", shade(frustum(600.0, 3000.0, 200.0, 2500.0)));
+    assert_eq!(r["check"]["A"]["matched"], true, "{}", r["check"]);
+    let f = s.model.families["Pendant"].clone();
+    let v = f.values("A", &Default::default()).unwrap();
+    let pieces = f.pieces("A", &v).unwrap();
+    let corners = pieces.iter().flat_map(|p| p.tris.iter().flatten());
+    let half_at = |z: f64| corners.clone().filter(|q| (q[2] - z).abs() < 0.5).map(|q| q[0].abs()).fold(0.0, f64::max);
+    assert!(near(half_at(3000.0), 300.0) && near(half_at(2500.0), 100.0), "{} at 3000, {} at 2500", half_at(3000.0), half_at(2500.0));
+}
+
 #[test]
 fn a_package_loads_its_nested_families_and_gives_back_the_type_to_place() {
     let mut s = Session::new();

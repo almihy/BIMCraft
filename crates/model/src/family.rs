@@ -2648,7 +2648,9 @@ impl Family {
             if ring.len() < 3 || crate::geom::area(&ring).abs() < 1.0 {
                 return Err("its profile has no area: it needs three corners or more, or a circle".into());
             }
-            if to <= from {
+            // A blend may run down: its profile at `from` above its top at `to`.
+            let down = !form.top.is_empty() && to < from;
+            if to <= from && !down {
                 let unit = if form.axis.is_some() { " degrees" } else { "" };
                 return Err(format!("sweeps nothing: from {from} to {to}{unit}"));
             }

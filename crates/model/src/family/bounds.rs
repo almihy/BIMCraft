@@ -68,7 +68,7 @@ impl Family {
                 }
             };
             let (from, to) = (num(&form.from)?, num(&form.to)?);
-            if to <= from {
+            if to == from || (to < from && form.top.is_empty()) {
                 return None;
             }
             for p in profile {

@@ -531,6 +531,18 @@ impl Reader<'_> {
                 let Some((axis, _)) = axis_of(&def["normal"]) else { return self.sloped(def, kind, &base) };
                 let (plane, k) = sketch(axis);
                 let (start, end) = (self.coord(&def["start"], axis)?, self.coord(&def["end"], axis)?);
+                // A blend's bottom profile is at its start and its top at its end, whichever is higher (Revit extrudes one
+                // against its sketch plane's normal, from a ceiling down): `from` and `to` keep that, and the blend is
+                // built so in every type.
+                if kind == "blend" {
+                    let one =
+                        |key: &str| def[key].as_array().and_then(|l| l.first()).cloned().ok_or(format!("its {key} profile is missing"));
+                    let (bottom, top) = (one("bottom")?, one("top")?);
+                    let (profile, mut arcs, _) = self.ring(&bottom, k, Ring::Profile, 0)?;
+                    let (top, top_arcs, _) = self.ring(&top, k, Ring::Top, 0)?;
+                    arcs.extend(top_arcs);
+                    return Ok(vec![Form { plane, profile, top, arcs, from: start, to: end, ..base }]);
+                }
                 let order = |e: &Expr| self.first_number(e);
                 let (from, to) = if order(&start)? <= order(&end)? { (start, end) } else { (end, start) };
                 // An extrusion runs between its two ends whichever is lower in a type.
@@ -540,21 +552,11 @@ impl Reader<'_> {
                 };
                 let (from, to) = match (&from, &to) {
                     (Expr::Number(_), Expr::Number(_)) => (from, to),
-                    _ if kind == "extrusion" => (
+                    _ => (
                         Expr::Formula(format!("min({}, {})", text(&from), text(&to))),
                         Expr::Formula(format!("max({}, {})", text(&from), text(&to))),
                     ),
-                    _ => (from, to),
                 };
-                if kind == "blend" {
-                    let one =
-                        |key: &str| def[key].as_array().and_then(|l| l.first()).cloned().ok_or(format!("its {key} profile is missing"));
-                    let (bottom, top) = (one("bottom")?, one("top")?);
-                    let (profile, mut arcs, _) = self.ring(&bottom, k, Ring::Profile, 0)?;
-                    let (top, top_arcs, _) = self.ring(&top, k, Ring::Top, 0)?;
-                    arcs.extend(top_arcs);
-                    return Ok(vec![Form { plane, profile, top, arcs, from, to, ..base }]);
-                }
                 let loops = loops_of(def, "loops")?;
                 let rings = loops.iter().map(|l| self.ring(l, k, Ring::Profile, 0)).collect::<Result<Vec<_>, _>>()?;
                 let base = Form { plane, from, to, ..base };
