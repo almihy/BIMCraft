@@ -237,8 +237,8 @@ other as the check and the fallback (`snapshot` forms and symbols), and checks e
   that puts it there in every type, and that plane is the family's z = 0. A plane's `at` and an extrusion's start and end
   are coordinates along the positive axis of their normal. An extrusion's loops: the outer ones forms, those inside them
   holes. A revolve's plane is the axis all its corners share. Symbolic lines in plan, front and side become symbols (an arc a
-  true arc, its turn read from the first type); model lines are left out. What can't be translated (a sloped sketch or
-  reference plane, a revolve or sweep of more than one loop, a sweep with no profile) is left out and named in
+  true arc, its turn read from the first type); model lines are left out. What can't be translated (a blend on a sloped
+  plane, a sweep with no profile; round 3 below for what came since) is left out and named in
   `editable.untranslated`; what is made is tried in every type first (`tried`), so the family always loads.
 - **Commands and files.** `family {revit}` translates; `family {path}` takes a family file with `revit`, or a whole export
   package (`family`, `definition`, `nested_families`, each nested one loaded first and, if it can't be what it says, as a
@@ -250,6 +250,40 @@ other as the check and the fallback (`snapshot` forms and symbols), and checks e
   and the window says "Editable" or "As in Revit (not yet editable)" with the reason; a blend, a sweep and Revit's result
   are kept as they came and only their material, visibility and void are edited. `family_parametric_tests.rs` drives it
   with original synthetic definitions.
+
+## Families from Revit that stay parametric (round 3)
+
+- **What the translator reads besides.** A model line is drawn in each of plan, front and side its Visibility Settings show
+  it in (an arc not flat in that view as its points). An extrusion on a sloped sketch plane (a chair's back) is a sweep of
+  its loops straight along its normal from its start to its end (`Reader::sloped`); a sloped reference plane stays still
+  and doesn't stop the family (a blend on one still does). A loop that is a lone line (a revolve's axis drawn in its
+  sketch) is no loop; a ring of arcs (a circle drawn as two halves) has its arcs' middles to test what is inside it, so a
+  ring inside it is its hole. A sweep's loops inside another are its `section_holes` (and a swept blend's
+  `section_end_holes`), a tube's inside swept with it, its arcs `section` arcs of `hole` k + 1; `shapes::along_holed`
+  caps its ends round them. A sweep's profile goes on the leg of its path nearest its middle among those it is square to
+  within 18° (a curved path's first chord). Nested parts are placed by `at`, the insertion point: a door-category nested
+  family (a handle) has its own axes there; `x_axis`/`y_axis`/`z_axis` are taken as given, flips in them.
+- **Planes.** A window whose sill plane moves between types and no parameter says where (a head-hung window: its
+  Default Head Height less its Height) takes its z from the chain of labelled or constant dimensions from the level to it
+  (`from_level`), and its `Sill Height`, 0 in every type as Revit has it, becomes that formula, so it is placed in its wall
+  where Revit places it. A dimension Revit doesn't lock that measures the same in every type ties its planes where they
+  move between types, or where a plane's group (planes tied by dimensions that place them) reaches nothing that stays (the
+  origin, a host's face). Planes aligned to the same edge of a form, where they stand together in every type, are
+  aligned to each other. A hosted family's `Wall Thickness` dimension is the wall's.
+- **Nested families.** A package's nested family Revit shares comes into the project; one it doesn't is made beside the
+  project and held by the family it is in (`Family::embedded`, by name, each holding its own; `Family::nested_family` looks
+  there first, then in the project's), so the project's list shows only what is placed in it. Embedded families are
+  checked as the project's are (`check_embedded`: at most `MAX_NESTED`, `MAX_NESTING` deep) and their materials are the
+  project's. A nested part's plan symbols are drawn with its parent's (`Family::marks_with`, `nested_marks`, upright parts
+  only, at most `MAX_NESTED` in all) in plans and in the check. The Family Editor's preview carries the project families
+  its nested parts are of, to any depth, and is drawn again when one of them changes.
+- **The check.** A door's or a window's plan is checked as Revit's floor plan draws it, cutting 1200 mm over its level
+  (`check::PLAN_CUT`) with the opening at its sill: a form the plane cuts as its Plan/RCP says, a form wholly below it (or
+  standing on it: `CUT_EPS`) seen whatever that says (a window board); plans draw them the same way. A family with curves
+  (revolves, arcs) may hold up to 3 % more than Revit's result (`VOLUME_CURVED`): Revit's is its curves in a few facets.
+  Why a family isn't editable is said in an architect's words: its part by its subcategory or material, "placed by a rule
+  BIMCraft can't follow yet", how much more or less it holds than Revit's, its width, depth or height off.
+- **Format.** `embedded`, `section_holes` and `section_end_holes` are format 22's (unreleased when they came: no step).
 
 ## Symbol sets
 

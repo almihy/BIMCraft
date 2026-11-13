@@ -1432,14 +1432,17 @@ other_files(
          is renamed in or taken out of the forms' and symbols' `types` (what was of it alone goes with it). A project using \
          `types`, `show`, a symbol's `view`, `outline`, `cut` or a text parameter is written as format 21. A family from Revit \
          stays parametric: `revit` (Revit's definition; also read from a file, and a whole export package at `path` is taken: its \
-         `family`, its `definition` and its `nested_families`, each loaded first, and its `place`, the type to place, given back) \
+         `family`, its `definition` and its `nested_families`, each loaded first, a shared one into the project and one that \
+         isn't held by the family it is in, `embedded`; and its `place`, the type to place, given back) \
          is translated into `references` (reference planes, which formulas read as `ref(Name)`), the `dimensions` placing them per \
          type (labelled with a parameter, locked, EQ; over-constrained, the family isn't editable), parametric forms (extrusions \
-         with `holes`, revolves, blends with a `top`, sweeps along a `path` with their `section`, swept blends with a \
-         `section_end`, true `arcs` in any ring), symbols and `nested` parts (another family of the project, placed and sized \
-         by this one's numbers); the forms and symbols it brings are Revit's result per type, kept as `snapshot` ones. Each type \
-         is then checked: its parametric result against Revit's at each detail level (volume within 1 %, box within 2 mm, plan \
-         symbols within 2 mm). A type that matched draws its parametric forms and flexes with its parameters; one that didn't \
+         with `holes`, revolves, blends with a `top`, sweeps along a `path` with their `section` and its `section_holes`, \
+         an extrusion on a sloped plane as a sweep along its normal, swept blends with a `section_end`, true `arcs` in any ring), \
+         symbols (a model line in each of plan, front and side it shows in) and `nested` parts (a family it holds in `embedded`, \
+         else the project's, placed and sized by this one's numbers, its plan symbols drawn with its own); the forms and symbols it brings are Revit's result per type, kept as `snapshot` ones. Each type \
+         is then checked: its parametric result against Revit's at each detail level (volume within 1 %, 3 % more where it has \
+         curves, box within 2 mm, plan within 2 mm; a door's or window's plan as a floor plan cutting 1200 mm over its level sees \
+         it at its sill). A type that matched draws its parametric forms and flexes with its parameters; one that didn't \
          draws Revit's result and says why in `check`; `editable` is ok when every type matched and nothing was left \
          untranslated (`untranslated` says what). The reply and the list give `editable` and `check`. A duplicate (`like`) of a \
          matched type is parametric; a type whose values change is `flexed` and keeps what it was found. Written as format 22",
