@@ -340,6 +340,13 @@ fn a_gradient_is_drawn_as_a_gradient_axial_or_radial() {
         assert!(diff < 6.0, "the {what} gradient is drawn as the renderer paints it: a mean difference of {diff:.1}");
         assert!(colours >= 8, "the {what} gradient goes from one colour to the other, not one flat colour: {colours}");
     }
+    // Its bands are a gradient's, which keep their colours on a dark canvas, drawn as such.
+    let t = s.model.image_types.values().next().unwrap();
+    let bands = t.lines().unwrap().dxf().entities.iter().filter(|e| matches!(e.shape, crate::dxf::Shape::Fill { shade: true, .. })).count();
+    assert!(bands > 50, "{bands} bands");
+    let d =
+        crate::render::draw(&s.model, s.model.levels()[0].0, crate::prim::View { scale: 0.05, cx: 0.0, cy: 0.0, width: 400, height: 400 });
+    assert!(d.parts.iter().filter(|p| **p == crate::prim::Part::Shade).count() > 50, "drawn as a gradient's");
     // Smooth: along the axial one, each pixel moves by little from the one before.
     let row: Vec<[u8; 3]> = (0..140).map(|i| px(&p, 15.0 + i as f64 * 0.5, 100.0)).collect();
     let jump = row.windows(2).map(|w| (0..3).map(|k| (i32::from(w[0][k]) - i32::from(w[1][k])).abs()).max().unwrap_or(0)).max();

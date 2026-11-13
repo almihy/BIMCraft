@@ -178,8 +178,9 @@ pub fn pack(d: &Dxf) -> Vec<u8> {
                 out.push(u8::from(*closed));
                 points(&mut out, pts, &mut last);
             }
-            Shape::Fill { rings, solid, tile } => {
-                out.push(u8::from(*solid));
+            Shape::Fill { rings, solid, tile, shade } => {
+                // Whether it is solid, and whether it is a gradient's band.
+                out.push(u8::from(*solid) | (u8::from(*shade) << 1));
                 varint(&mut out, tile.as_ref().and_then(|t| tile_at.get(&Arc::as_ptr(t)).copied()).unwrap_or(0));
                 let rings = &rings[..rings.len().min(MAX_RINGS)];
                 varint(&mut out, rings.len() as u64);
@@ -432,7 +433,8 @@ pub fn unpack(bytes: &[u8]) -> Result<Dxf, String> {
                 (Shape::Polyline { pts, closed }, weight, linetype)
             }
             FILL => {
-                let solid = r.byte()? != 0;
+                let flags = r.byte()?;
+                let (solid, shade) = (flags & 1 != 0, flags & 2 != 0);
                 let tile = if tiled {
                     let t = r.varint()?;
                     usize::try_from(t).ok().and_then(|t| t.checked_sub(1)).and_then(|t| tiles.get(t).cloned().flatten())
@@ -450,7 +452,7 @@ pub fn unpack(bytes: &[u8]) -> Result<Dxf, String> {
                 if rings.is_empty() {
                     continue;
                 }
-                (Shape::Fill { rings, solid, tile }, None, None)
+                (Shape::Fill { rings, solid, tile, shade }, None, None)
             }
             TEXT => {
                 let (x, y, height, angle, wide) = (r.f64()?, r.f64()?, r.f64()?, r.f64()?, r.f64()?);
@@ -530,7 +532,12 @@ mod tests {
                     linetype: None,
                     weight: None,
                     alpha: 255,
-                    shape: Shape::Fill { rings: vec![vec![P2(0.0, 0.0), P2(10.0, 0.0), P2(0.0, 10.0)]], solid: true, tile: None },
+                    shape: Shape::Fill {
+                        rings: vec![vec![P2(0.0, 0.0), P2(10.0, 0.0), P2(0.0, 10.0)]],
+                        solid: true,
+                        tile: None,
+                        shade: false,
+                    },
                 },
                 Entity {
                     layer: "Notes".into(),
@@ -598,6 +605,7 @@ mod tests {
                 rings: vec![vec![P2(x, 0.0), P2(x + 30.0, 0.0), P2(x + 30.0, 25.0), P2(x, 25.0)]],
                 solid: false,
                 tile: Some(Arc::clone(&tile)),
+                shade: false,
             },
         };
         let d = Dxf {
@@ -717,7 +725,7 @@ mod tests {
                         let steps = [P2(wild(&mut next), wild(&mut next)), P2(wild(&mut next), wild(&mut next))];
                         Arc::new(Tile { lines: vec![line], fills: vec![fill], steps })
                     });
-                    Shape::Fill { rings, solid: next() % 2 == 0, tile }
+                    Shape::Fill { rings, solid: next() % 2 == 0, tile, shade: next() % 5 == 0 }
                 }
                 _ => Shape::Text {
                     at: P2(wild(&mut next), wild(&mut next)),

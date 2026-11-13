@@ -2705,7 +2705,7 @@ impl CadEntities<'_> {
             }
             Shape::Point(_) => {}
             // A hatch's boundaries fill by odd parity, as DXF's do: an island in it is a hole.
-            Shape::Fill { rings, solid, tile } => {
+            Shape::Fill { rings, solid, tile, shade } => {
                 // In its own colour, halftone or not.
                 let own = import_fill(over.as_ref(), cad.color(ent, ci.colors).unwrap_or(INK));
                 // Drawn with its pattern, its cell laid again cut to it; where the cell is too small to see, its tint.
@@ -2739,7 +2739,10 @@ impl CadEntities<'_> {
                     return;
                 }
                 let rings = px.into_iter().filter(|r| r.len() >= 3).collect();
+                // A gradient's band keeps its colours on a dark canvas, as a picture does.
+                let part = if *shade { std::mem::replace(&mut d.part, Part::Shade) } else { d.part };
                 d.push(Prim::Fill { rings, color: fill, rule: Rule::EvenOdd, alpha: ent.alpha });
+                d.part = part;
             }
             shape => {
                 let pen = lines.and_then(|s| s.weight).unwrap_or_else(|| cad.pen(ent));

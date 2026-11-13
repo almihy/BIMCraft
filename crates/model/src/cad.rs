@@ -423,10 +423,11 @@ fn similar(shape: &Shape, f: impl Fn(P2) -> P2, turn: f64, k: f64) -> Shape {
             wide: *wide,
             mirrored: *mirrored,
         },
-        Shape::Fill { rings, solid, tile } => Shape::Fill {
+        Shape::Fill { rings, solid, tile, shade } => Shape::Fill {
             rings: rings.iter().map(ring).collect(),
             solid: *solid,
             tile: tile.as_ref().map(|t| std::sync::Arc::new(t.mapped(&f, k))),
+            shade: *shade,
         },
     }
 }

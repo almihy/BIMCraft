@@ -134,6 +134,8 @@ pub struct Run {
     pub dash: Option<Vec<f64>>,
     pub seq: usize,
     pub layer: Option<usize>,
+    /// A fill that is a band of a gradient (a shading): it keeps its colours on a dark canvas.
+    pub shade: bool,
 }
 
 /// What a page fills with a tiling pattern (a brick, a batt of insulation, earth), kept as one hatch: its rings, mm (filling by
@@ -729,7 +731,7 @@ impl Collect {
             self.held += pts.len();
             self.begun = true;
             let layer = self.layer();
-            self.out.strokes.push(Run { pts, closed, color, alpha, width, dash: dash.clone(), seq, layer });
+            self.out.strokes.push(Run { pts, closed, color, alpha, width, dash: dash.clone(), seq, layer, shade: false });
         }
     }
 
@@ -760,7 +762,7 @@ impl Collect {
         self.begun = true;
         let layer = self.layer();
         for pts in rings {
-            self.out.fills.push(Run { pts, closed: true, color, alpha, width: 0.0, dash: None, seq, layer });
+            self.out.fills.push(Run { pts, closed: true, color, alpha, width: 0.0, dash: None, seq, layer, shade: false });
         }
     }
 
@@ -1248,6 +1250,7 @@ impl Vectors {
                         rings: rings.iter().map(|r| r.pts.iter().map(|p| P2(p[0], p[1])).collect()).collect(),
                         solid: true,
                         tile: None,
+                        shade: rings.first().is_some_and(|r| r.shade),
                     },
                 }),
                 Item::Tiled(t) => entities.push(Entity {
@@ -1260,6 +1263,7 @@ impl Vectors {
                         rings: t.rings.iter().map(|r| r.iter().map(|p| P2(p[0], p[1])).collect()).collect(),
                         solid: false,
                         tile: Some(Arc::clone(&t.tile)),
+                        shade: false,
                     },
                 }),
                 Item::Text(t) => entities.push(Entity {

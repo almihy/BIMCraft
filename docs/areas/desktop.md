@@ -43,7 +43,10 @@ and GPU 3D painters use the canvas background. What the drawing paints in a pale
 a crop region's outline) takes it from `style::canvas_pal`, which follows the canvas, not `pal`, which follows the interface:
 `DARK`'s fills are near-black on a white drawing. A light canvas has a palette of its own (`CANVAS_LIGHT`: a deeper hover stroke and
 selection tint than the interface's `LIGHT`, which keeps the tints it always had, so the plain Light window's chrome is unchanged). A scan is dimmed only on a dark canvas (`canvas_dark`), so a dark interface
-around a light drawing leaves it as it is.
+around a light drawing leaves it as it is. On a dark canvas the drawing's colours are turned as Revit's dark background turns
+them (`canvas::color`): black, white and the greys between have their lightness turned over, a colour (a red line, a PDF's or
+a DWG's coloured fill) is kept, and one nearly grey is turned over in part; a PDF's gradient (`Part::Shade`, its bands
+marked `shade`) and a picture placed in the view (an image, a PDF's raster images) keep all their colours.
 
 New and Open (`BimApp::reopened`) keep the look: a new `BimApp` would run `style::apply` again, which sets the theme
 preference back to the system's (and `keep_settings` would then write that over the user's choice), so `reopened` carries

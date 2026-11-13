@@ -155,14 +155,14 @@ fn under_and_over() -> crate::dxf::Dxf {
     use crate::cad::tests::{drawing, entity, random};
     use crate::dxf::{Color, Shape};
     let rect = |x0: f64, y0: f64, x1: f64, y1: f64| vec![vec![P2(x0, y0), P2(x1, y0), P2(x1, y1), P2(x0, y1)]];
-    let mut entities = vec![entity("Zones", Shape::Fill { rings: rect(20.0, 20.0, 400.0, 280.0), solid: true, tile: None })];
+    let mut entities = vec![entity("Zones", Shape::Fill { rings: rect(20.0, 20.0, 400.0, 280.0), solid: true, tile: None, shade: false })];
     let mut seed = 1;
     for _ in 0..30_000 {
         let at = P2(30.0 + random(&mut seed) * 360.0, 30.0 + random(&mut seed) * 240.0);
         let to = at + P2(random(&mut seed) * 4.0 - 2.0, random(&mut seed) * 4.0 - 2.0);
         entities.push(crate::dxf::Entity { weight: Some(0.2), ..entity("Lines", Shape::Polyline { pts: vec![at, to], closed: false }) });
     }
-    entities.push(entity("Mask", Shape::Fill { rings: rect(20.0, 20.0, 120.0, 280.0), solid: true, tile: None }));
+    entities.push(entity("Mask", Shape::Fill { rings: rect(20.0, 20.0, 120.0, 280.0), solid: true, tile: None, shade: false }));
     drawing(&[("Zones", Color::True(255, 0, 0)), ("Lines", Color::Index(7)), ("Mask", Color::True(255, 255, 255))], entities)
 }
 
@@ -206,7 +206,7 @@ fn zoomed_out_solid_fills_stay_solid_and_take_the_views_overrides_as_they_do_dra
     for _ in 0..20_000 {
         let at = P2(10.0 + random(&mut seed) * 380.0, 10.0 + random(&mut seed) * 260.0);
         let ring = vec![at, at + P2(1.0, 0.0), at + P2(1.0, 1.0), at + P2(0.0, 1.0)];
-        entities.push(entity("Poche", Shape::Fill { rings: vec![ring], solid: true, tile: None }));
+        entities.push(entity("Poche", Shape::Fill { rings: vec![ring], solid: true, tile: None, shade: false }));
         let to = at + P2(random(&mut seed) * 3.0, random(&mut seed) * 3.0) + P2(1.5, 1.5);
         strokes.push(entity("Poche", Shape::Polyline { pts: vec![at + P2(1.5, 1.5), to], closed: false }));
     }

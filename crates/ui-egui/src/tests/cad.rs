@@ -300,3 +300,18 @@ fn a_dense_drawings_cells_are_lightened_on_a_dark_canvas_as_its_lines_are() {
     crate::style::set_canvas(false, None);
     assert_eq!(*crate::canvas::cells_seen(&rgba, bimcraft_core::render::Part::Cells), rgba);
 }
+
+#[test]
+fn a_dark_canvas_turns_over_black_white_and_greys_and_keeps_a_colour_as_revits_does() {
+    let seen = |c: Rgb| {
+        let c = crate::canvas::color(c);
+        [c.r(), c.g(), c.b()]
+    };
+    crate::style::set_canvas(true, None);
+    let (black, white, grey, warm_white) = (seen(Rgb(0, 0, 0)), seen(Rgb(255, 255, 255)), seen(Rgb(90, 90, 90)), seen(Rgb(245, 240, 235)));
+    let (red, green, pale_blue) = (seen(Rgb(220, 30, 30)), seen(Rgb(0, 153, 0)), seen(Rgb(170, 200, 255)));
+    crate::style::set_canvas(false, None);
+    assert!(black.iter().all(|v| *v > 220) && white.iter().all(|v| *v < 40), "{black:?} {white:?}");
+    assert!(grey.iter().all(|v| *v > 150) && warm_white.iter().all(|v| *v < 60), "{grey:?} {warm_white:?}");
+    assert_eq!((red, green, pale_blue), ([220, 30, 30], [0, 153, 0], [170, 200, 255]), "a colour is kept");
+}

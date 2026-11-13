@@ -29,6 +29,8 @@ pub enum Part {
     /// A dense drawing zoomed out, its cells' ink drawn as a picture: its colours are the drawing's, taking a line colour, its
     /// halftone, and a dark canvas's lightening as lines do.
     Cells,
+    /// A band of a gradient an import draws (a PDF's shading): it keeps its colours on a dark canvas, as a picture does.
+    Shade,
 }
 
 impl Part {

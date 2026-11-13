@@ -79,7 +79,12 @@ impl Collect {
             return;
         }
         let seq = self.next_seq();
+        let from = self.out.fills.len();
         self.keep_fill(rings, even_odd, ([to(c[0]), to(c[1]), to(c[2])], alpha), seq);
+        // A gradient's band keeps its colours on a dark canvas.
+        for r in self.out.fills.iter_mut().skip(from) {
+            r.shade = true;
+        }
     }
 
     /// A tiling pattern's cell, read once as lines and fills where the pattern puts its first cell, kept with the two steps it

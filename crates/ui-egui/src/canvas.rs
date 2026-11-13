@@ -632,8 +632,10 @@ impl Canvas {
     }
 }
 
-/// A drawing's colour on screen: as drawn, or in the dark theme with its lightness turned over,
-/// so ink reads light on a dark ground and the grid stays blue. Its paper is the user's canvas colour when there is one.
+/// A drawing's colour on screen: as drawn, or on a dark canvas as Revit's dark background draws it: black, white and the greys
+/// between with their lightness turned over, so ink reads light on a dark ground, and a colour as it is (a red line stays red,
+/// a blue grid blue, a PDF's or a DWG's coloured fill its colour), those nearly grey turned over in part. Its paper is the
+/// user's canvas colour when there is one.
 pub(crate) fn color(c: Rgb) -> Color32 {
     if let Some(ground) = crate::style::canvas_ground().filter(|_| c == render::PAPER) {
         return ground;
@@ -642,10 +644,18 @@ pub(crate) fn color(c: Rgb) -> Color32 {
         return Color32::from_rgb(c.0, c.1, c.2);
     }
     let (r, g, b) = (i32::from(c.0), i32::from(c.1), i32::from(c.2));
-    let shift = 255 - r.max(g).max(b) - r.min(g).min(b);
-    let over = |v: i32| (26 + (v + shift).clamp(0, 255) * 206 / 255) as u8;
-    Color32::from_rgb(over(r), over(g), over(b))
+    let (most, least) = (r.max(g).max(b), r.min(g).min(b));
+    let shift = 255 - most - least;
+    let over = |v: i32| 26 + (v + shift).clamp(0, 255) * 206 / 255;
+    // How much of a colour it is, by how far its channels lie apart: a grey turned over whole, a colour kept.
+    let kept = ((most - least - GREYISH) * 255 / GREYISH).clamp(0, 255);
+    let mix = |v: i32| ((over(v) * (255 - kept) + v * kept) / 255) as u8;
+    Color32::from_rgb(mix(r), mix(g), mix(b))
 }
+
+/// How far apart a colour's channels may lie, of 255, and it still be a grey a dark canvas turns over; twice as far, it is a
+/// colour, kept as it is.
+const GREYISH: i32 = 24;
 
 /// Screen points nearer each other than this (px) are one: zoomed out, many of an outline's points come to a few thousandths of a
 /// pixel apart, where the way from one to the next is the rounding of the numbers, not the drawing's.
@@ -840,7 +850,8 @@ pub(crate) fn paint_prim(
     thin: bool,
     pictures: &mut std::slice::Iter<TextureId>,
 ) {
-    let color = |c: Rgb| if at.paper { Color32::from_rgb(c.0, c.1, c.2) } else { color(c) };
+    // A gradient's band keeps its colours on a dark canvas, as a picture does.
+    let color = |c: Rgb| if at.paper || part == render::Part::Shade { Color32::from_rgb(c.0, c.1, c.2) } else { color(c) };
     // A see-through fill or line: its colour that opaque.
     let seen = |c: Color32, alpha: u8| if alpha == render::OPAQUE { c } else { c.gamma_multiply(f32::from(alpha) / 255.0) };
     if owner.is_some() && owner == at.hide {
@@ -933,10 +944,11 @@ pub(crate) fn paint_prim(
         Prim::Image { at: corner, width, height, ink, .. } => {
             if let Some(texture) = pictures.next() {
                 let rect = Rect::from_min_size(at.pos(*corner), vec2(*width as f32, *height as f32) * at.k);
-                // On a dark canvas a plan's picture (a scan's) is dimmed, so the ink lightened over it still reads; a sheet's
-                // paper stays white, and so does a scan the view fills with a colour of its own, which is ink itself.
-                // A dense drawing's cells are lightened as its lines are ([`cells_seen`]), not dimmed.
-                let dim = !at.paper && !*ink && part != render::Part::Cells && crate::style::canvas_dark();
+                // On a dark canvas a point cloud's scan is dimmed, so the ink lightened over it still reads; a sheet's paper
+                // stays white, and so does a scan the view fills with a colour of its own, which is ink itself. A picture
+                // placed in the view (an image, a PDF's raster images) keeps its colours, as Revit's does; a dense drawing's
+                // cells are lightened as its lines are ([`cells_seen`]).
+                let dim = !at.paper && !*ink && !matches!(part, render::Part::Cells | render::Part::Picture) && crate::style::canvas_dark();
                 let plain = if dim { Color32::from_gray(120) } else { Color32::WHITE };
                 let tint = accent.map_or(plain, |a| a.1);
                 out(Shape::image(*texture, rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), tint));

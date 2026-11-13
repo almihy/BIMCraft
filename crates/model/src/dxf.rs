@@ -192,11 +192,12 @@ pub enum Shape {
     /// A hatch's boundaries, or a solid: `solid` when filled through, else patterned, which a view draws as it can. A patterned
     /// one may hold its pattern (`tile`, a PDF's tiling pattern), drawn as its cell repeated inside its rings; its colour and
     /// opacity are then what the pattern paints on the whole (its tint), which a view draws where the cell would be too small to
-    /// see.
+    /// see. `shade` is a band of a gradient (a PDF's shading): it keeps its colours on a dark canvas, as a picture does.
     Fill {
         rings: Vec<Vec<P2>>,
         solid: bool,
         tile: Option<std::sync::Arc<Tile>>,
+        shade: bool,
     },
 }
 
@@ -1055,7 +1056,7 @@ impl<'a> Reader<'a> {
                             ring.push(d);
                         }
                         ring.push(c);
-                        Some(Shape::Fill { rings: vec![ring], solid: true, tile: None })
+                        Some(Shape::Fill { rings: vec![ring], solid: true, tile: None, shade: false })
                     }
                     _ => None,
                 },
@@ -1153,10 +1154,11 @@ fn transformed(shape: Shape, xf: Xf) -> Shape {
         Shape::Line(a, b) => Shape::Line(at(a), at(b)),
         Shape::Polyline { pts, closed } => Shape::Polyline { pts: pts.into_iter().map(at).collect(), closed },
         Shape::Point(p) => Shape::Point(at(p)),
-        Shape::Fill { rings, solid, tile } => Shape::Fill {
+        Shape::Fill { rings, solid, tile, shade } => Shape::Fill {
             rings: rings.into_iter().map(|r| r.into_iter().map(at).collect()).collect(),
             solid,
             tile: tile.map(|t| std::sync::Arc::new(t.mapped(at, xf.similarity().map_or(1.0, |(k, _, _)| k)))),
+            shade,
         },
         Shape::Circle { c, r } => match xf.similarity() {
             Some((k, _, _)) => Shape::Circle { c: at(c), r: r * k },
@@ -1635,7 +1637,7 @@ fn hatch(e: &Ent) -> Result<Option<Shape>, String> {
         }
     }
     let rings = styled(rings, e.int(75)?.unwrap_or(0));
-    Ok((!rings.is_empty()).then_some(Shape::Fill { rings, solid, tile: None }))
+    Ok((!rings.is_empty()).then_some(Shape::Fill { rings, solid, tile: None, shade: false }))
 }
 
 /// How much containment testing [`styled`] spends on one hatch (edges walked): past it, a hostile hatch keeps its rings as
@@ -2449,7 +2451,12 @@ mod tests {
         assert_eq!(d.entities.len(), 2, "{:?}", d.entities);
         assert_eq!(
             d.entities[0].shape,
-            Shape::Fill { rings: vec![vec![P2(0.0, 0.0), P2(10.0, 0.0), P2(10.0, 10.0), P2(0.0, 10.0)]], solid: true, tile: None }
+            Shape::Fill {
+                rings: vec![vec![P2(0.0, 0.0), P2(10.0, 0.0), P2(10.0, 10.0), P2(0.0, 10.0)]],
+                solid: true,
+                tile: None,
+                shade: false
+            }
         );
         let Shape::Fill { rings, solid: false, .. } = &d.entities[1].shape else { panic!("{:?}", d.entities[1]) };
         assert_eq!(rings.len(), 1);
@@ -2573,7 +2580,12 @@ mod tests {
         assert_eq!(d.entities[0].shape, Shape::Line(P2(0.0, 0.0), P2(1.0, 0.0)));
         assert_eq!(
             d.entities[1].shape,
-            Shape::Fill { rings: vec![vec![P2(0.0, 0.0), P2(10.0, 0.0), P2(10.0, 10.0), P2(0.0, 10.0)]], solid: true, tile: None }
+            Shape::Fill {
+                rings: vec![vec![P2(0.0, 0.0), P2(10.0, 0.0), P2(10.0, 10.0), P2(0.0, 10.0)]],
+                solid: true,
+                tile: None,
+                shade: false
+            }
         );
         assert!(matches!(&d.entities[2].shape, Shape::Text { text, .. } if text == "shown"));
     }
