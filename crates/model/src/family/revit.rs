@@ -1187,14 +1187,14 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     }
     // Forms and lines.
     let mut forms = Vec::new();
-    for (i, d) in def["forms"].as_array().into_iter().flatten().take(MOST).enumerate() {
+    for d in def["forms"].as_array().into_iter().flatten().take(MOST) {
         match reader.forms(d, has_material) {
             Ok(made) => forms.extend(made),
             Err(e) => notes.push(format!("its {}: {e}", part_of(d))),
         }
     }
     let mut symbols = Vec::new();
-    for (i, d) in def["lines"].as_array().into_iter().flatten().take(MOST).enumerate() {
+    for d in def["lines"].as_array().into_iter().flatten().take(MOST) {
         match reader.lines(d) {
             Ok(made) => symbols.extend(made),
             Err(e) => notes.push(format!("one of its lines: {e}")),
@@ -1202,7 +1202,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     }
     // Nested families, placed: mirrored by the family's own axes where they are.
     let mut nested = Vec::new();
-    for (i, n) in def["nested"].as_array().into_iter().flatten().take(super::MAX_NESTED).enumerate() {
+    for n in def["nested"].as_array().into_iter().flatten().take(super::MAX_NESTED) {
         let made = (|| -> Result<Nested, String> {
             let family = n.get("family").and_then(text).ok_or("it names no family")?.to_string();
             let type_name = n.get("type").and_then(text).ok_or("it names no type")?.to_string();
