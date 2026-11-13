@@ -6120,6 +6120,51 @@ fn the_family_editor_shows_a_familys_connectors_and_keeps_them() {
 }
 
 #[test]
+fn the_family_editor_shows_a_revit_familys_references_and_whether_it_is_editable_and_its_types_flex_the_preview() {
+    // A box from Revit's definition (original): Left and Right a labelled Width apart and EQ about the centre.
+    let line = |a: [&str; 2], b: [&str; 2]| json!({"line": [[{"ref": a[0]}, {"ref": a[1]}, 0], [{"ref": b[0]}, {"ref": b[1]}, 0]]});
+    let at = |x: f64| json!({"A": x});
+    let revit = json!({
+        "reference_planes": [
+            {"id": "c", "name": "Center", "normal": [1, 0, 0], "defines_origin": true, "at": at(0.0)},
+            {"id": "l", "name": "Left", "normal": [1, 0, 0], "at": at(-500.0)},
+            {"id": "r", "name": "Right", "normal": [1, 0, 0], "at": at(500.0)},
+            {"id": "f", "name": "Front", "normal": [0, 1, 0], "defines_origin": true, "at": at(0.0)},
+            {"id": "b", "name": "Back", "normal": [0, 1, 0], "at": at(600.0)},
+            {"id": "z", "name": "Level", "normal": [0, 0, 1], "defines_origin": true, "at": at(0.0)},
+            {"id": "t", "name": "Top", "normal": [0, 0, 1], "at": at(750.0)}],
+        "dimensions": [{"refs": ["l", "r"], "label": "Width"}, {"refs": ["l", "c", "r"], "eq": true}],
+        "forms": [{"kind": "extrusion", "normal": [0, 0, 1], "start": {"ref": "z"}, "end": {"ref": "t"},
+                   "loops": [[line(["l", "f"], ["r", "f"]), line(["r", "f"], ["r", "b"]), line(["r", "b"], ["l", "b"]), line(["l", "b"], ["l", "f"])]]}]
+    });
+    let family = json!({"name": "Revit Box", "category": "furniture", "types": {"A": {}},
+                        "parameters": [{"name": "Width", "kind": "length", "value": 1000}], "revit": revit});
+    let mut h = app(&format!(
+        "{BOX}
+family {family}
+component {{\"family\": \"Revit Box\", \"type\": \"A\", \"at\": [3000, 3000]}}"
+    ));
+    let it = find(&h, |e| matches!(e, Element::Component(_)));
+    h.state_mut().selection = vec![it];
+    h.set_size(vec2(1800.0, 900.0));
+    press(&mut h, "Manage");
+    press(&mut h, "Edit Family");
+    assert!(h.query_by_label_contains("Editable").is_some(), "it says it can be edited");
+    press(&mut h, "References");
+    for name in ["Left", "Right", "Center", "Left – Center – Right"] {
+        assert!(h.query_by_label(name).is_some(), "{name}");
+    }
+    assert!(h.query_by_label("-500").is_some(), "Left where Width puts it in the type previewed");
+    // Its width typed into the type, applied: the family flexes.
+    press(&mut h, "Types");
+    type_into(&mut h, "Type Value Width", "1600");
+    press_near(&mut h, "Apply", "Cancel");
+    let f = h.state().session.model.families["Revit Box"].clone();
+    let v = f.values("A", &Default::default()).unwrap();
+    assert_eq!(v["ref(Right)"], bimcraft_core::family::Val::Number(800.0));
+}
+
+#[test]
 fn the_door_tool_places_the_projects_single_door_of_a_family_and_the_type_selector_offers_both_kinds() {
     let mut h = app(BOX);
     tool(&mut h, "Door");

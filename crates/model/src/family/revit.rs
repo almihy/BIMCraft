@@ -360,9 +360,10 @@ impl Reader<'_> {
                 };
                 let (from, to) = match (&from, &to) {
                     (Expr::Number(_), Expr::Number(_)) => (from, to),
-                    _ if kind == "extrusion" => {
-                        (Expr::Formula(format!("min({}, {})", text(&from), text(&to))), Expr::Formula(format!("max({}, {})", text(&from), text(&to))))
-                    }
+                    _ if kind == "extrusion" => (
+                        Expr::Formula(format!("min({}, {})", text(&from), text(&to))),
+                        Expr::Formula(format!("max({}, {})", text(&from), text(&to))),
+                    ),
                     _ => (from, to),
                 };
                 if kind == "blend" {
@@ -654,10 +655,20 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         if f.category.hosted() && *axis == Axis::Y {
             let at = &reader.planes.get(id.as_str()).map(|x| x.2.clone()).unwrap_or_default();
             let face = |k: &str| {
-                refs.iter().find(|r| r.3.get("is_reference").and_then(Value::as_str) == Some(k)).and_then(|r| reader.planes.get(&r.0)).map(|p| &p.2)
+                refs.iter()
+                    .find(|r| r.3.get("is_reference").and_then(Value::as_str) == Some(k))
+                    .and_then(|r| reader.planes.get(&r.0))
+                    .map(|p| &p.2)
             };
-            let on = |k: &str| face(k).is_some_and(|f| !at.is_empty() && at.iter().all(|(t, x)| f.get(t).is_some_and(|y| (x - y).abs() < 0.05)));
-            let kind = if on("host_exterior") { Some("host_exterior") } else if on("host_interior") { Some("host_interior") } else { None };
+            let on =
+                |k: &str| face(k).is_some_and(|f| !at.is_empty() && at.iter().all(|(t, x)| f.get(t).is_some_and(|y| (x - y).abs() < 0.05)));
+            let kind = if on("host_exterior") {
+                Some("host_exterior")
+            } else if on("host_interior") {
+                Some("host_interior")
+            } else {
+                None
+            };
             if let Some(kind) = kind {
                 let half = super::DEFAULT_WALL / 2.0;
                 let (side, x) = if kind == "host_exterior" { ("", half) } else { ("-", -half) };
@@ -735,7 +746,13 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         }
         let at: BTreeMap<String, f64> = f.types.keys().map(|t| (t.clone(), 0.0)).collect();
         let origin = !references.iter().any(|r| r.axis == Axis::Z && r.origin);
-        references.push(Reference { name: name.clone(), axis: Axis::Z, at: reader.place(Expr::Number(0.0), Axis::Z), origin, ..Reference::default() });
+        references.push(Reference {
+            name: name.clone(),
+            axis: Axis::Z,
+            at: reader.place(Expr::Number(0.0), Axis::Z),
+            origin,
+            ..Reference::default()
+        });
         reader.planes.insert("__level".into(), (name, Axis::Z, at));
     }
     // `ids` with the one end that isn't a plane read as the level or a host wall's face, where the dimension's `value` (0 for
@@ -828,7 +845,8 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         if c["kind"].as_str() != Some("alignment") || !c["locked"].as_bool().unwrap_or(false) {
             continue;
         }
-        let ids: Vec<&(String, Axis, BTreeMap<String, f64>)> = resolve(&ids_of(c), Some(0.0)).iter().filter_map(|v| reader.planes.get(v)).collect();
+        let ids: Vec<&(String, Axis, BTreeMap<String, f64>)> =
+            resolve(&ids_of(c), Some(0.0)).iter().filter_map(|v| reader.planes.get(v)).collect();
         if let [a, b] = ids.as_slice()
             && a.1 == b.1
         {

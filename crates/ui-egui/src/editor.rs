@@ -1354,7 +1354,7 @@ impl BimApp {
                     let (text, color) = if e.ok {
                         (t("Editable: its parameters flex it as in Revit.").to_string(), pal().muted)
                     } else {
-                        let why = e.reason.clone().unwrap_or_default();
+                        let why = e.reason.clone().unwrap_or_default().replace('`', "");
                         (tf("As in Revit (not yet editable): {}", &[&why]), pal().error)
                     };
                     ui.label(RichText::new(text).color(color));
