@@ -4519,6 +4519,47 @@ impl BimApp {
                 self.images_window = true;
             }
         });
+        panel(ui, msg!("Load from Library"), |ui| {
+            let tip = msg!("Load Family: a family saved as a .json file, BIMCraft's own, loaded and its type placed");
+            if big_button(ui, Icon::LoadFamily, "Load Family", false, tip).clicked() {
+                self.load_family(ui.ctx());
+            }
+        });
+    }
+
+    /// Load Family: a family file picked and loaded, then its type (the one picked in it, else its first) placed with its
+    /// category's tool, as Revit's: a door's with Door, a window's with Window, any other with Component.
+    fn load_family(&mut self, ctx: &egui::Context) {
+        let dialog = crate::dialog::Ask::new().add_filter(t("BIMCraft family"), &["json"]).set_title(t("Load Family"));
+        self.ask_file(ctx, dialog, false, |app, path| {
+            if let Some(r) = app.run("family", json!({"path": path.to_string_lossy()})) {
+                app.place_loaded(&r);
+            }
+        });
+    }
+
+    /// The tool that places the family `family {path}` replied with, on the type it says to place, else its first.
+    pub(crate) fn place_loaded(&mut self, r: &Value) {
+        let name = r["name"].as_str().unwrap_or_default().to_string();
+        let types = r["family"]["types"].as_object();
+        let picked = r["place"].as_str().filter(|t| types.is_some_and(|all| all.contains_key(*t))).map(str::to_string);
+        let first = picked.or_else(|| types.and_then(|t| t.keys().next().cloned())).unwrap_or_default();
+        match r["family"]["category"].as_str() {
+            Some(category @ ("door" | "window")) => {
+                let (category, tool) = if category == "door" { ("door", Tool::Door) } else { ("window", Tool::Window) };
+                self.opening_families.insert(category, name);
+                self.types.insert(category, first);
+                if self.tool != tool {
+                    self.start_tool(tool);
+                }
+            }
+            _ => {
+                self.component = Some((name, first));
+                if !matches!(self.tool, Tool::Component | Tool::Fixture(_)) {
+                    self.start_tool(Tool::Component);
+                }
+            }
+        }
     }
 
     fn manage_tab(&mut self, ui: &mut Ui) {
@@ -4894,22 +4935,12 @@ impl BimApp {
             Tool::DetailLine(_) => self.draw_panel(ui, draw::Target::Detail),
             _ => {}
         }
-        // Placing a component: Revit's Mode panel, which loads a family from a file.
-        if matches!(self.tool, Tool::Component | Tool::Fixture(_)) {
+        // Placing a component, a door or a window: Revit's Mode panel, which loads a family from a file.
+        if matches!(self.tool, Tool::Component | Tool::Fixture(_) | Tool::Door | Tool::Window) {
             panel(ui, msg!("Mode"), |ui| {
                 let tip = msg!("Load Family: a family saved as a .json file, BIMCraft's own");
                 if big_button(ui, Icon::LoadFamily, "Load Family", false, tip).clicked() {
-                    let dialog = crate::dialog::Ask::new().add_filter(t("BIMCraft family"), &["json"]).set_title(t("Load Family"));
-                    self.ask_file(ui.ctx(), dialog, false, |app, path| {
-                        if let Some(r) = app.run("family", json!({"path": path.to_string_lossy()})) {
-                            let name = r["name"].as_str().unwrap_or_default().to_string();
-                            // The type the person picked in Load Family, else its first.
-                            let types = r["family"]["types"].as_object();
-                            let picked = r["place"].as_str().filter(|t| types.is_some_and(|all| all.contains_key(*t))).map(str::to_string);
-                            let first = picked.or_else(|| types.and_then(|t| t.keys().next().cloned())).unwrap_or_default();
-                            app.component = Some((name, first));
-                        }
-                    });
+                    self.load_family(ui.ctx());
                 }
             });
         }

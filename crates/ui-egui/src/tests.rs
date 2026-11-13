@@ -6187,6 +6187,103 @@ fn the_door_tool_places_the_projects_single_door_of_a_family_and_the_type_select
     assert!(h.query_by_label("Family:").is_some());
 }
 
+/// An export package of a door family whose handle, a door-category family Revit doesn't share, is nested in it.
+fn door_package(dir: &std::path::Path) -> std::path::PathBuf {
+    let opening = |types: Value| {
+        json!({"category": "door", "types": types,
+               "parameters": [{"name": "Width", "kind": "length", "value": 900}, {"name": "Height", "kind": "length", "value": 2100}],
+               "forms": [{"plane": "xz", "profile": [[-450, 0], [450, 0], [450, 2100], [-450, 2100]], "from": -20, "to": 20}]})
+    };
+    let definition = json!({"nested": [{"id": "n1", "family": "Handle", "type": "Standard", "shared": false,
+                                         "at": [300, 0, 1000], "rotation": 0, "mirrored": false}]});
+    let package = json!({"format": 2, "family": opening(json!({"810 x 2110": {"Width": 810}, "910 x 2110": {"Width": 910}})),
+                         "definition": definition, "place": "910 x 2110",
+                         "nested_families": {"Handle": {"family": opening(json!({"Standard": {}}))}}});
+    let path = dir.join("Sample Flush.arqiflow-family.json");
+    std::fs::write(&path, package.to_string()).unwrap();
+    path
+}
+
+/// The file dialog the last click began, answered with `path`.
+fn pick_file(h: &mut Harness<BimApp>, path: &std::path::Path) {
+    let tx = crate::dialog::BEGUN.with(|b| b.borrow_mut().pop()).expect("a file dialog was begun");
+    tx.send(Some(vec![path.to_path_buf()])).unwrap();
+    h.run();
+    h.run();
+}
+
+#[test]
+fn load_family_is_on_the_door_and_window_tools_and_the_insert_tab_and_places_with_the_familys_own_tool() {
+    let dir = tempfile::tempdir().unwrap();
+    let door = door_package(dir.path());
+    let mut h = app(BOX);
+    // Modify | Place Door's Mode panel: the door it loads is the Door tool's, on the type the package says to place.
+    tool(&mut h, "Door");
+    press(&mut h, "Load Family");
+    pick_file(&mut h, &door);
+    assert!(!h.state().status.error, "{}", h.state().status.text);
+    assert_eq!(h.state().tool, Tool::Door);
+    assert_eq!(h.state().opening_pick("door"), (Some("Sample Flush".into()), Some("910 x 2110".into())));
+    click(&mut h, P2(2000.0, 0.0));
+    let placed = ids(&h, "door")[0];
+    assert_eq!((field(&h, placed, "family"), field(&h, placed, "type")), (json!("Sample Flush"), json!("910 x 2110")));
+    // Modify | Place Window's has it too.
+    key(&mut h, Key::Escape);
+    key(&mut h, Key::Escape);
+    tool(&mut h, "Window");
+    assert!(h.query_by_label("Load Family").is_some(), "Place Window's Mode panel");
+    key(&mut h, Key::Escape);
+    key(&mut h, Key::Escape);
+    // Insert › Load from Library: a door family starts the Door tool, whatever was on.
+    press(&mut h, "Insert");
+    press(&mut h, "Load Family");
+    pick_file(&mut h, &door);
+    assert_eq!(h.state().tool, Tool::Door);
+    // A family of no opening starts the Component tool on its type.
+    let stool = dir.path().join("Stool.json");
+    std::fs::write(
+        &stool,
+        json!({"category": "furniture", "types": {"Low": {}}, "forms": [{"profile": [[0, 0], [400, 0], [400, 400], [0, 400]], "to": 450}]})
+            .to_string(),
+    )
+    .unwrap();
+    key(&mut h, Key::Escape);
+    key(&mut h, Key::Escape);
+    press(&mut h, "Insert");
+    press(&mut h, "Load Family");
+    pick_file(&mut h, &stool);
+    assert_eq!(h.state().tool, Tool::Component);
+    assert_eq!(h.state().component, Some(("Stool".into(), "Low".into())));
+}
+
+#[test]
+fn a_nested_family_revit_doesnt_share_is_in_no_list_of_families_to_place() {
+    let dir = tempfile::tempdir().unwrap();
+    let door = door_package(dir.path());
+    let mut h = app(BOX);
+    tool(&mut h, "Door");
+    press(&mut h, "Load Family");
+    pick_file(&mut h, &door);
+    assert!(!h.state().session.model.families.contains_key("Handle"), "held by the door, not the project's");
+    assert!(h.state().session.model.families["Sample Flush"].embedded.contains_key("Handle"));
+    // The Door tool's Type Selector: the door's types, never the handle's.
+    press(&mut h, "Type Selector");
+    assert!(h.query_by_label("Sample Flush: 810 x 2110").is_some());
+    assert!(h.query_by_label_contains("Handle").is_none(), "the handle is no door to place");
+    key(&mut h, Key::Escape);
+    // The Project Browser's Families: the door, not its handle.
+    h.get_by_label("Families").click_accesskit();
+    h.run();
+    assert!(h.query_by_label("Sample Flush").is_some());
+    assert!(h.query_by_label_contains("Handle").is_none(), "the browser lists no family the project doesn't hold");
+    // The Component tool's list neither.
+    key(&mut h, Key::Escape);
+    key(&mut h, Key::Escape);
+    tool(&mut h, "Component");
+    press(&mut h, "Type Selector");
+    assert!(h.query_by_label_contains("Handle").is_none(), "the Component tool places no handle");
+}
+
 // ---------- updates ----------
 
 /// A tool or button from the Massing tab.
