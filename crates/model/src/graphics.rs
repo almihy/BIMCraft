@@ -575,6 +575,11 @@ impl ImportLook {
         *self == ImportLook::default()
     }
 
+    /// Its overrides, the import's row's and each layer's.
+    pub(crate) fn overrides_mut(&mut self) -> impl Iterator<Item = &mut Override> {
+        std::iter::once(&mut self.all).chain(self.layers.values_mut())
+    }
+
     /// How it draws layer `layer`'s lines: the layer's settings, and the import's where it has none.
     pub fn of_layer(&self, layer: &str) -> Override {
         match self.layers.get(layer) {
@@ -583,13 +588,14 @@ impl ImportLook {
         }
     }
 
-    /// Whether it is sound: an import's row sets its visibility, its projection lines and its halftone; a layer's its lines
-    /// and its halftone (whether it shows is the view's `layers`).
+    /// Whether it is sound: an import's row sets its visibility, its projection lines and patterns (its fills' and hatches')
+    /// and its halftone; a layer's its lines, patterns and halftone (whether it shows is the view's `layers`).
     fn check(&self, who: &str) -> Result<(), String> {
         let only_lines = |o: &Override, what: &str| -> Result<(), String> {
-            let lines = Style { color: o.projection.color, weight: o.projection.weight, dash: o.projection.dash, ..Style::default() };
-            if o.projection != lines || !o.cut.is_empty() || o.transparency != 0 || o.shown {
-                return Err(format!("{what}: an import sets its projection lines (colour, weight, pattern) and halftone only"));
+            if !o.cut.is_empty() || o.transparency != 0 || o.shown {
+                return Err(format!(
+                    "{what}: an import sets its projection lines (colour, weight, pattern), its patterns and halftone only"
+                ));
             }
             o.check(what)
         };
@@ -810,10 +816,14 @@ impl Graphics {
         }
         for (name, look) in &self.imports {
             look.check(&format!("CAD drawing `{name}`"))?;
-            look.all.check_patterns(m)?;
         }
         for (name, look) in &self.pdf_imports {
             look.check(&format!("PDF page `{name}`"))?;
+        }
+        for look in self.imports.values().chain(self.pdf_imports.values()) {
+            for o in std::iter::once(&look.all).chain(look.layers.values()) {
+                o.check_patterns(m)?;
+            }
         }
         let mut seen = BTreeSet::new();
         for a in &self.filters {

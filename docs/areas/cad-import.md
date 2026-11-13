@@ -141,8 +141,10 @@ import is one element: picked by any of its lines, selected whole. Sections, ele
 Revit's do for a drawing placed in a plan; IFC export leaves them out too. The category is `cadimport`: hidden in a view
 (Imported Categories' Show imported categories in this view cleared), every drawing and every PDF page's lines leave it
 (`Look::draws_pdf_lines`), and it halftones like any other. `familyimport` is Imports in Families' row, a category hidden and
-overridden as any; families bring in no CAD yet, so it draws nothing. An import's fills and hatches keep their own colours:
-as in Revit, its Patterns can't be overridden (`ImportLook::check` takes lines and halftone only).
+overridden as any; families bring in no CAD yet, so it draws nothing. An import's fills and hatches (a hatch, a PDF's fill, a
+gradient's bands, a pattern's fills) take its Patterns: their foreground's colour, a foreground of no pattern hiding them, or
+a solid fill's colour (`render::import_fill`); its Lines are its lines' and text's. Revit greys an import's Patterns out;
+BIMCraft gives them, as the owner asked, since a PDF's fills are its own.
 
 ### A dense drawing zoomed out
 
@@ -257,7 +259,10 @@ stroke, fill and text records the layer it is drawn on (`Run::layer`, `Text::lay
 its own group (the innermost wins); an OCMD is on its first group (of `/OCGs`, else of its visibility expression `/VE`);
 what is drawn on no group is on `No layer`. A form XObject's own `/OC`, and an annotation's, are told to the device as a
 `BDC /OC` is by hayro-interpret, vendored with that change (`vendor/hayro-interpret`, `[patch.crates-io]` in the root
-`Cargo.toml`, its changes marked "BIMCraft's patch"), so what a form draws is on its layer. hayro skips what a group the
+`Cargo.toml`, its changes marked "BIMCraft's patch"), so what a form draws is on its layer; the same change hides an
+annotation on a layer the file has off, as the standard says and upstream doesn't. The patch holds only where this
+workspace is built: a crate depending on bimcraft-model from a workspace of its own gets crates.io's hayro-interpret, and the
+model refuses to build, naming `hayro_interpret::BIMCRAFT_PATCH` (`raster/pdf.rs`); copy the root `[patch.crates-io]` there. hayro skips what a group the
 file has off draws, so the vectors are read from the file with one more revision appended (`Document::all_on`: a catalog
 with no optional content, as an incremental update writes one); an encrypted file isn't revised (its key would be needed),
 so what its off layers draw is left out, said in the notes. Every group the file lists is a layer of its drawing, drawn on
@@ -267,9 +272,13 @@ colour and weight instead (`colour_name`, the nearest of a few plain names: `Bla
 
 The page is read as it draws (`Vectors::drawing`, in the page's order, `seq`): a fill by its rule, even-odd or non-zero, as
 rings that fill by odd parity (`shapes::resolve`, so its holes stay holes and overlaps stay filled); paint's opacity (`ca`
-and `CA`, and the transparency groups open) as the entity's; a gradient (a shading) in its mean colour over what it fills,
-and a tiling pattern in the mean colour its cell paints, as opaque as the share of the cell it covers
-(`raster/pdf/paint.rs`); a dash with all its dashes, its phase taken in; a line as wide as the page draws it, and where the
+and `CA`, and the transparency groups open) as the entity's; a tiling pattern (a brick, a batt of insulation, earth) as its cell's own lines
+and fills, read once and laid again at every step of the pattern over what it fills, cut to it, on the fill's layer; a
+gradient (a shading) as bands of its colours, each at most one in 255 from the next in any channel and none narrower than
+0.05 mm (an axial one across its axis, a radial one in rings between its circles, a function's in cells, a mesh's in
+triangles cut as its colours need), an opaque band lying under all those after it so no seam shows at any zoom
+(`raster/pdf/patterns.rs`, held to the PDF renderer's own picture of the page in `pdf_fidelity_tests`); one that would make
+more than 400 000 points, or a pattern nested three deep, in its mean colour instead (`raster/pdf/paint.rs`); a dash with all its dashes, its phase taken in; a line as wide as the page draws it, and where the
 page stretches it more one way than the other, or makes it wider than the widest pen (`MAX_LINE_WIDTH`), its outline as a
 fill; text at the width it runs (its squeeze, spacing and font: a width factor), from its first letter that isn't a space,
 mirrored where the page mirrors it. A white fill over the page before anything else is drawn is the page's ground and is
@@ -277,8 +286,10 @@ left out: a drawing has no page. A letter with no Unicode is kept as its outline
 (`unlettered`).
 
 A page with lines is drawn from them (`ImageType::drawn`): its pixels are then only its raster images, painted on nothing by
-the `Pictures` device (each image's and stencil's nearest pixel, inside the box round each clip, no more than
-`MAX_PAINTED` pixels) and cut to the part of the page they cover (`ImageType::covers`); a page with none has no picture, as a
+the `Pictures` device (`raster/pdf/pictures.rs`: each image's and stencil's nearest pixel, cut to each clip whatever its
+shape, a box at once and any other shape by a smooth-edged mask of it, as see-through as the transparency groups round it
+make it, the fill's opacity `ca` among them, and their soft masks, a luminosity or an alpha group painted in its fills'
+and strokes' colours, a gradient in it in its mean colour; no more than `MAX_PAINTED` pixels painted) and cut to the part of the page they cover (`ImageType::covers`); a page with none has no picture, as a
 DWG has no page. A small picture of the whole page (`thumb`, `THUMB` px a side) is kept for Manage Images, and the notes say
 how many pictures there are, showing and hiding with the PDF and not by layer. A page keeps up to `MAX_SEGMENTS` (4 million)
 points; one denser, or whose lines can't hold all it draws (text in a character map not held, Type 3 letters), keeps the

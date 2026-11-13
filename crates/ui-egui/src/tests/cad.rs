@@ -172,18 +172,51 @@ fn imported_categories_is_one_table_of_the_imports_and_imports_in_families_as_re
     assert!(ticked(&h, "Show imported categories in this view"));
     assert!(ticked(&h, "plan") && ticked(&h, "Imports in Families"));
     assert!(h.query_by_label("CAD Imports").is_none(), "the old row is gone");
-    // Lines, Patterns and Halftone on the import's row; Patterns can't be overridden, as Revit greys it out.
-    for label in ["plan: Projection Lines", "plan: Halftone", "Imports in Families: Projection Lines", "Imports in Families: Halftone"] {
+    // Lines, Patterns and Halftone on the import's row and on Imports in Families.
+    for label in [
+        "plan: Projection Lines",
+        "plan: Projection Patterns",
+        "plan: Halftone",
+        "Imports in Families: Projection Lines",
+        "Imports in Families: Projection Patterns",
+        "Imports in Families: Halftone",
+    ] {
         assert!(h.query_by_label(label).is_some(), "{label}");
     }
-    assert!(h.query_by_label("plan: Projection Patterns").is_none(), "Patterns is shown hatched");
     // Expand All unfolds the import: its layers have Lines and no Halftone, which is the whole file's.
     press(&mut h, "Expand All");
     assert!(h.query_by_label("plan: Fold").is_some(), "unfolded");
-    assert!(h.query_by_label("WALLS: Projection Lines").is_some());
+    assert!(h.query_by_label("WALLS: Projection Lines").is_some() && h.query_by_label("WALLS: Projection Patterns").is_some());
     assert!(h.query_by_label("WALLS: Halftone").is_none(), "a layer has no halftone of its own");
     // A note and Object Styles… under the buttons.
     assert!(h.query_by_label("Object Styles…").is_some());
+}
+
+#[test]
+fn an_imports_patterns_are_overridden_row_by_row_in_imported_categories() {
+    let path = drawing("vg-patterns", "plan.dxf");
+    let mut h = app(&format!(
+        "{BOX}
+import_cad {}",
+        json!({"path": path, "layers": "all"})
+    ));
+    key(&mut h, Key::Escape);
+    shortcut(&mut h, "VV");
+    press(&mut h, "Imported Categories");
+    // The import's own row: its fills' foreground in a colour of its own; a layer's: <None>, which hides its fills.
+    pick(&mut h, Role::Button, "plan: Projection Patterns");
+    pick(&mut h, Role::CheckBox, "Projection: Foreground");
+    press(&mut h, "OK");
+    press(&mut h, "Expand All");
+    pick(&mut h, Role::Button, "WALLS: Projection Patterns");
+    pick(&mut h, Role::CheckBox, "Projection: Foreground");
+    choose(&mut h, "Projection: Foreground Pattern", "<None>");
+    press(&mut h, "OK");
+    press(&mut h, "OK");
+    let g = serde_json::to_value(plan_graphics(&h, 100000)).unwrap();
+    assert!(g["imports"]["plan"]["all"]["projection"]["foreground"]["pattern"].is_string(), "{g}");
+    assert_eq!(g["imports"]["plan"]["layers"]["WALLS"]["projection"]["foreground"]["pattern"], Value::Null, "{g}");
+    assert!(g["imports"]["plan"]["layers"]["WALLS"]["projection"]["foreground"].is_object(), "{g}");
 }
 
 #[test]

@@ -67,7 +67,11 @@ i_overlay = { version = "9.1", default-features = false }
 
 # hayro-interpret 0.9.0 with one change, marked "BIMCraft's patch" in its source: a form XObject's own optional content
 # (`/OC`) and an annotation's are told to the device as a `BDC /OC` is, so Import PDF finds what they draw on their layer
-# (upstream reads them for visibility only). Its own files and licences are as published; drop this when upstream does it.
+# (upstream reads them for visibility only); and an annotation on a layer the file has off is hidden, as the PDF standard
+# says (upstream draws it). Its own files and licences are as published; drop this when upstream does it.
+# A [patch] holds only where this workspace is the one built: a crate that depends on bimcraft-model (or -core) from a
+# workspace of its own gets crates.io's hayro-interpret, and the model then fails to build, naming
+# `hayro_interpret::BIMCRAFT_PATCH`: copy this [patch] section, with the path to vendor/hayro-interpret, into that workspace.
 [patch.crates-io]
 hayro-interpret = { path = "vendor/hayro-interpret" }
 

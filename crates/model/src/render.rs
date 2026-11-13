@@ -2533,8 +2533,25 @@ fn thinned(pts: impl Iterator<Item = (f32, f32)>) -> Vec<(f32, f32)> {
     out
 }
 
+/// The colour an import's fill or hatch is drawn in, of its own colour `own`, as `over` (its layer's settings in the view's
+/// Imported Categories) says: its Patterns' foreground colour, else their solid fill's, else its own; lighter in halftone;
+/// none when its Patterns' foreground is set to no pattern (`<None>`), which hides it. Its Lines' settings are its lines'.
+pub(crate) fn import_fill(over: Option<&crate::graphics::Override>, own: Rgb) -> Option<Rgb> {
+    let Some(o) = over else { return Some(own) };
+    let p = &o.projection;
+    let rgb = |[r, g, b]: [u8; 3]| Rgb(r, g, b);
+    let c = match &p.foreground {
+        Some(f) if f.pattern.is_none() => return None,
+        Some(f) => rgb(f.color),
+        None => p.fill.map_or(own, rgb),
+    };
+    Some(if o.halftone { Rgb(c.0 + (255 - c.0) / 2, c.1 + (255 - c.1) / 2, c.2 + (255 - c.2) / 2) } else { c })
+}
+
 /// How near two points of a drawing's run may come on screen before the second is left out, px.
 const ONE_PIXEL: f32 = 0.75;
+/// The most points of a fill's ring drawn as they are, never thinned.
+const FEW: usize = 16;
 
 /// A CAD drawing placed by `ci` (in the view's terms), of the layers it and `in_view` show, what lies in the view, as `look` (the
 /// view's Imported Categories) draws it: each entity in its colour (the view's ink where it has none, or the import draws in
@@ -2623,8 +2640,14 @@ fn cad_drawing(
             Shape::Point(_) => {}
             // A hatch's boundaries fill by odd parity, as DXF's do: an island in it is a hole.
             Shape::Fill { rings, solid } => {
-                let fill = if *solid { color } else { Rgb(pale(color.0), pale(color.1), pale(color.2)) };
-                let px: Vec<Vec<(f32, f32)>> = rings.iter().map(|r| thinned(r.iter().map(px_of))).collect();
+                // In its own colour, or in what the view's Patterns give it instead; none, hidden.
+                let Some(own) = import_fill(over.as_ref(), cad.color(ent, ci.colors).unwrap_or(INK)) else { continue };
+                let fill = if *solid { own } else { Rgb(pale(own.0), pale(own.1), pale(own.2)) };
+                // A ring of a few points is drawn as it is: thinned, a band of a gradient narrower than a pixel would be a dot.
+                let px: Vec<Vec<(f32, f32)>> = rings
+                    .iter()
+                    .map(|r| if r.len() <= FEW { r.iter().map(px_of).collect() } else { thinned(r.iter().map(px_of)) })
+                    .collect();
                 if px.iter().all(|r| r.len() < 3) {
                     // Under a pixel: a dot of its colour, so a dense hatch still reads as one.
                     if let Some(&q) = px.iter().flatten().next() {

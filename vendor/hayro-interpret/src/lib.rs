@@ -57,3 +57,8 @@ pub use kurbo;
 pub use types::*;
 pub use util::{RectExt, TransformExt};
 pub use x_object::soft_mask::*;
+
+/// BIMCraft's patch: this copy of hayro-interpret is BIMCraft's, with its change (a form's and an annotation's own optional
+/// content told to the device as marked content; an annotation on a layer the file has off hidden). BIMCraft's model names
+/// this, so it fails to build against an unpatched copy rather than reading layers wrongly.
+pub const BIMCRAFT_PATCH: u32 = 1;

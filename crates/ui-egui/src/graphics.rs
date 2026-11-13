@@ -838,7 +838,7 @@ struct Row {
     sub: bool,
     /// A category with subcategories: whether they are unfolded.
     fold: Option<bool>,
-    /// The cells it can't override, hatched as Revit greys them out: an import's Patterns.
+    /// The cells it can't override, hatched as Revit greys them out.
     hatched: &'static [Cell],
     /// Whether it has a Halftone box: an import's layer hasn't, its file's being the whole file's.
     halftone: bool,
@@ -1349,8 +1349,8 @@ pub(crate) fn pdfs_in(model: &Model, key: Option<Guid>) -> Vec<(String, Vec<Stri
 /// which hides every import in the view); one table of a row for each CAD drawing of the project and each PDF page drawn from
 /// its lines placed in the view (each in a template's), and Imports in Families (`familyimport`), sorted by name, each import
 /// unfolding to a row for each of its layers; All, None, Invert and Expand All under it; and Object Styles…. An import's row
-/// and a layer's set its visibility and its projection lines, and the import's its halftone, the whole file's; Patterns is
-/// hatched, as Revit can't override an import's. A layer's own settings win over its import's. Whether Object Styles… was
+/// and a layer's set its visibility, its projection lines and its patterns (its fills' and hatches'), and the import's its
+/// halftone, the whole file's. A layer's own settings win over its import's. Whether Object Styles… was
 /// pressed.
 fn imported(ui: &mut Ui, d: &mut VgDialog, model: &Model, shown: &Graphics, followed: &BTreeSet<Group>) -> bool {
     let (own_categories, own_imports) = (!followed.contains(&Group::Categories), !followed.contains(&Group::Imports));
@@ -1366,9 +1366,7 @@ fn imported(ui: &mut Ui, d: &mut VgDialog, model: &Model, shown: &Graphics, foll
     ui.add_space(4.0);
     // Every row, an import's layers among them, folded or not: what All, None and Invert reach.
     let start = model.object_style("cadimport");
-    let patterns: &'static [Cell] = &[Cell::ProjectionPatterns];
     let families = Row {
-        hatched: patterns,
         enabled: own_categories,
         ..Row::new(
             Pick::Category("familyimport".into()),
@@ -1386,7 +1384,6 @@ fn imported(ui: &mut Ui, d: &mut VgDialog, model: &Model, shown: &Graphics, foll
         let open = pick.fold_key().is_some_and(|k| d.unfolded.contains(&k));
         let mut group = vec![Row {
             fold: (!layers.is_empty()).then_some(open),
-            hatched: patterns,
             enabled: own_imports,
             ..Row::new(pick, name.clone(), look.all.clone(), start)
         }];
@@ -1394,7 +1391,7 @@ fn imported(ui: &mut Ui, d: &mut VgDialog, model: &Model, shown: &Graphics, foll
             let mut over = look.layers.get(&l).cloned().unwrap_or_default();
             over.hidden = hidden.get(&name).is_some_and(|h| h.contains(&l));
             let pick = Pick::Import { pdf, name: name.clone(), layer: Some(l.clone()) };
-            group.push(Row { sub: true, hatched: patterns, halftone: false, enabled: own_imports, ..Row::new(pick, l, over, start) });
+            group.push(Row { sub: true, halftone: false, enabled: own_imports, ..Row::new(pick, l, over, start) });
         }
         tops.push((name.to_lowercase(), group));
     }

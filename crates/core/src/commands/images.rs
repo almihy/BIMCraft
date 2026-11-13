@@ -427,16 +427,49 @@ fn reload(c: &str, s: &mut Session, p: &Value) -> Result<Option<Value>, String> 
     };
     let layers: Vec<String> = t.layers().into_iter().map(str::to_string).collect();
     let [w0, h0] = t.size();
+    let [was_w, was_h] = was.size();
+    // The layers new to it that the file has off: hidden where it is placed, as a page placed anew has them.
+    let before: std::collections::BTreeSet<&str> = was.layers().into_iter().collect();
+    let new_off: std::collections::BTreeSet<String> = t
+        .lines()
+        .filter(|_| t.drawn())
+        .map(|cad| cad.dxf().layers.iter().filter(|l| l.off && !before.contains(l.name.as_str())).map(|l| l.name.clone()).collect())
+        .unwrap_or_default();
     let m = s.model_mut();
-    // Each instance as wide as it was, as tall as the page now is to that width where its proportions are locked.
+    // Each instance at the scale it was placed at: a page that is now another size (A1 to A0) is as much bigger, so a plan at
+    // 1 : 100 stays at 1 : 100; as tall as the page now is to that width where its proportions are locked.
+    let (kw, kh) = (if was_w > 0.0 { w0 / was_w } else { 1.0 }, if was_h > 0.0 { h0 / was_h } else { 1.0 });
+    let resized = (kw - 1.0).abs() > 1e-9 || (kh - 1.0).abs() > 1e-9;
+    let mut views: std::collections::BTreeSet<crate::model::Guid> = std::collections::BTreeSet::new();
     for e in m.elements.values_mut() {
         if let Element::Image(im) = e
             && im.type_name == name
         {
-            if im.lock && w0 > 0.0 {
-                im.height = im.width * h0 / w0;
-            }
+            im.width *= kw;
+            im.height = if im.lock && w0 > 0.0 { im.width * h0 / w0 } else { im.height * kh };
             im.hidden.retain(|l| layers.contains(l));
+            views.insert(im.view);
+        }
+    }
+    // A new layer the file has off: unticked in the Visibility/Graphics of each view it is placed in that has its own, else
+    // hidden on the instance wherever it shows.
+    if !new_off.is_empty() {
+        for view in views {
+            let own = crate::graphics::graphics_of(m, view).is_some_and(|g| g.controlled_by(m, crate::graphics::Group::Imports).is_none())
+                && m.plan_view(view).and_then(|v| v.parent).is_none();
+            if own && let Some(mut g) = crate::graphics::graphics_of(m, view).cloned() {
+                g.pdf_layers.entry(name.clone()).or_default().extend(new_off.iter().cloned());
+                super::set_graphics(m, view, g);
+            } else {
+                for e in m.elements.values_mut() {
+                    if let Element::Image(im) = e
+                        && im.type_name == name
+                        && im.view == view
+                    {
+                        im.hidden.extend(new_off.iter().cloned());
+                    }
+                }
+            }
         }
     }
     for g in m.elements.values_mut().filter_map(crate::graphics::graphics_mut).chain(m.view_templates.values_mut().map(|t| &mut t.graphics))
@@ -447,14 +480,28 @@ fn reload(c: &str, s: &mut Session, p: &Value) -> Result<Option<Value>, String> 
                 g.pdf_layers.remove(&name);
             }
         }
+        // What a view said of a layer that's gone goes, and with nothing left, the entry.
         if let Some(look) = g.pdf_imports.get_mut(&name) {
             look.layers.retain(|l, _| layers.contains(l));
+            if look.is_empty() {
+                g.pdf_imports.remove(&name);
+            }
         }
     }
     let lines = t.lines().map_or(0, |l| l.dxf().entities.len());
     let drawn = t.drawn();
     m.image_types.insert(name.clone(), t);
     let mut out = json!({"image": name, "lines": lines, "layers": layers, "drawn": drawn});
+    if resized {
+        out["size"] = json!({"was": [read_mm(was_w), read_mm(was_h)], "now": [read_mm(w0), read_mm(h0)]});
+        out["note"] = json!(format!(
+            "the page is now {:.0} × {:.0} mm, where it was {:.0} × {:.0} mm: each instance keeps the scale it was placed at, so it              is as much bigger or smaller",
+            w0, h0, was_w, was_h
+        ));
+    }
+    if !new_off.is_empty() {
+        out["hidden"] = json!(new_off);
+    }
     if !notes.is_empty() {
         out["notes"] = json!(notes);
     }

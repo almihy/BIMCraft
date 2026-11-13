@@ -230,6 +230,69 @@ fn a_page_is_read_again_from_its_pdf_into_the_same_image_and_its_instances_stay(
 }
 
 #[test]
+fn an_imports_patterns_colour_or_hide_its_fills_and_leave_its_lines_be() {
+    // A grey fill and a black line on Walls.
+    let content = "/OC /L0 BDC 0.5 0.5 0.5 rg 20 40 160 40 re f 0 0 0 RG 4 w 10 10 m 190 10 l S EMC";
+    let mut s = with_file("p.pdf", sample_layered(content, [200.0, 200.0], &[("Walls", false)]));
+    run(&mut s, "import_pdf", json!({"path": "p.pdf", "scale": 100}));
+    let level = s.model.guid(s.model.levels()[0].0).to_string();
+    let solid = s.model.fill_patterns.iter().find(|(_, p)| p.is_solid()).map(|(n, _)| n.clone()).unwrap();
+    let ((fx, fy), (lx, ly)) = (at(100.0, 60.0), at(100.0, 10.0));
+    assert!(has(&plan(&s), fx, fy, [128, 128, 128]) && has(&plan(&s), lx, ly, [0, 0, 0]));
+    let walls = |o: Value| json!({"view": level, "pdf_imports": {"p.pdf": {"layers": {"Walls": o}}}});
+    // Its Patterns' foreground: the fill takes its colour, the line keeps its own.
+    run(&mut s, "graphics", walls(json!({"projection": {"foreground": {"pattern": solid, "color": [0, 0, 255]}}})));
+    assert!(has(&plan(&s), fx, fy, [0, 0, 255]), "the fill takes the Patterns' colour");
+    assert!(has(&plan(&s), lx, ly, [0, 0, 0]), "the line keeps its own");
+    // A foreground of no pattern hides the fill, and only the fill.
+    run(&mut s, "graphics", walls(json!({"projection": {"foreground": {"pattern": null, "color": [0, 0, 0]}}})));
+    assert!(!has(&plan(&s), fx, fy, [128, 128, 128]) && !has(&plan(&s), fx, fy, [0, 0, 255]), "the fill is hidden");
+    assert!(has(&plan(&s), lx, ly, [0, 0, 0]));
+    // An import's patterns are its projection's: cut is still refused.
+    let e = fails(&mut s, "graphics", walls(json!({"cut": {"color": [1, 2, 3]}})));
+    assert!(e.contains("projection lines"), "{e}");
+}
+
+#[test]
+fn reload_from_keeps_the_scale_hides_a_new_layer_the_file_has_off_leaves_nothing_empty_and_undoes_in_one_step() {
+    let mut s = with_file("plan.pdf", plan_pdf());
+    let r = run(&mut s, "import_pdf", json!({"path": "plan.pdf", "scale": 100}));
+    let id = r["id"].as_u64().unwrap();
+    let level = s.model.guid(s.model.levels()[0].0).to_string();
+    // Notes drawn blue in this view: an override of a layer the revised page no longer has.
+    run(
+        &mut s,
+        "graphics",
+        json!({"view": level, "pdf_imports": {"plan.pdf": {"layers": {"Notes": {"projection": {"color": [0, 0, 255]}}}}}}),
+    );
+    let width = |s: &Session| match s.model.elements.get(id) {
+        Some(crate::model::Element::Image(im)) => (im.width, im.height),
+        _ => panic!("no image"),
+    };
+    let (w, h) = width(&s);
+    let before = s.model.to_json().unwrap();
+    // The page as it is now: twice the size (A1 to A0, say), its walls, and a new layer the file has off.
+    let content = "/OC /L0 BDC 0 0 0 RG 4 w 10 10 m 390 10 l S EMC /OC /L1 BDC 0 0 1 RG 4 w 40 100 m 60 100 l S EMC";
+    s.files.give("plan A0.pdf", sample_layered(content, [400.0, 400.0], &[("Walls", false), ("Doors", true)]));
+    let r = run(&mut s, "manage_images", json!({"reload": "plan.pdf", "path": "plan A0.pdf"}));
+    // Placed at 1 : 100, it stays at 1 : 100: twice as wide and tall, and the reply says the page's size changed.
+    let (w2, h2) = width(&s);
+    assert!((w2 / w - 2.0).abs() < 1e-9 && (h2 / h - 2.0).abs() < 1e-9, "{w} {h} -> {w2} {h2}");
+    assert!(r["reloaded"]["size"]["was"].is_array() && r["reloaded"]["note"].as_str().unwrap().contains("scale"), "{r}");
+    assert_eq!(r["reloaded"]["hidden"], json!(["Doors"]), "{r}");
+    let g = run(&mut s, "graphics", json!({"view": level}));
+    assert_eq!(g["pdf_imports"], json!({}), "no empty entry is left of the layer that's gone: {g}");
+    assert_eq!(g["pdf_layers"], json!({"plan.pdf": ["Doors"]}), "the new layer the file has off comes in hidden: {g}");
+    let v: Value = serde_json::from_str(&s.model.to_json().unwrap()).unwrap();
+    assert_eq!(v["format"], crate::model::FORMAT, "a drawn page is this build's format");
+    // One undo puts it all back as it was: the page, its instance, the view's settings.
+    run(&mut s, "undo", json!({}));
+    assert_eq!(s.model.to_json().unwrap(), before, "undone whole");
+    run(&mut s, "redo", json!({}));
+    assert_eq!(width(&s), (w2, h2), "and done again");
+}
+
+#[test]
 fn a_dense_sheet_keeps_its_lines_and_layers_past_what_a_page_used_to_keep() {
     // Half a million points on ten layers: 125 000 small boxes, each four points.
     let mut content = String::new();
