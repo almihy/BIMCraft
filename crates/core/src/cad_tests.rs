@@ -1082,3 +1082,24 @@ fn a_hatchs_style_fills_its_islands_as_autocad_does() {
     turned.reverse();
     assert_eq!(shown("0", &[outer, turned, island], "turned"), [true, false, false]);
 }
+
+#[test]
+fn a_see_through_hatch_with_an_island_goes_out_to_svg_and_pdf_even_odd_and_see_through() {
+    // A solid hatch half transparent (group 440: 0x02000000 and its opacity, 127), a square with an island.
+    let hatch = hatch_of("0", &[square(1500.0, 1500.0, 1500.0), square(1500.0, 1500.0, 900.0)])
+        .replacen("62\n5\n", &format!("62\n5\n440\n{}\n", 0x0200_0000 | 127), 1);
+    let mut s = Session::new();
+    run(&mut s, "import_cad", json!({"path": file("exports", "glass.dxf", &dxf("4", &[], &hatch)), "position": "origin"}));
+    let d = render::plan(&s.model, s.model.levels()[0].0, 800, 800);
+    // SVG: one path of both rings, by odd parity, at its opacity.
+    let svg = render::svg(&d);
+    let path = svg.split("<path").find(|p| p.contains(r#"fill-rule="evenodd""#)).unwrap_or_else(|| panic!("{svg}"));
+    assert!(path.contains(r#"fill-opacity="0.498""#), "{path}");
+    assert_eq!(path.matches('Z').count() + path.matches('z').count(), 2, "both rings in one path: {path}");
+    // PDF: filled by f* inside the graphics state of its opacity, which the page's resources hold.
+    let (stream, _) = crate::pdf::contents(&d, P2(420.0, 297.0));
+    let fill = stream.lines().find(|l| l.ends_with("f* Q")).unwrap_or_else(|| panic!("{stream}"));
+    assert!(fill.starts_with("q /GA127 gs "), "{fill}");
+    let file = String::from_utf8_lossy(&crate::pdf::pdf(&[(&d, P2(420.0, 297.0))])).into_owned();
+    assert!(file.contains("/ExtGState << /GA127 << /Type /ExtGState /ca 0.4980 /CA 0.4980 >> >>"), "{file}");
+}
