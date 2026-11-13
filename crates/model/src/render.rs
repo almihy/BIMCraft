@@ -37,6 +37,7 @@ use crate::{font, massing, sheet, stairs};
 
 mod dimensions;
 use dimensions::dimension;
+mod hatch;
 #[doc(hidden)]
 pub mod regions;
 mod site;
@@ -2585,6 +2586,9 @@ fn cad_drawing(
     let mut overrides: std::collections::HashMap<&str, crate::graphics::Override> = std::collections::HashMap::new();
     let entities = &cad.dxf().entities;
     let frame = d.view;
+    // What the frame may draw of its hatches' patterns, and the smallest a pattern's cell may be on it before a hatch is its
+    // tint.
+    let (mut budget, least) = if d.screen { (hatch::SCREEN_POINTS, hatch::SCREEN_PX) } else { (hatch::PAPER_POINTS, hatch::PAPER_PX) };
     // Pixels to a unit of the drawing along whichever way it is the most: a cell of the band drawn is no more than a pixel.
     let most = ci.scale.abs().max((ci.scale * ci.stretch).abs()) * d.view.scale;
     let found = match cad.lod_band(most).filter(|_| d.screen) {
@@ -2636,10 +2640,26 @@ fn cad_drawing(
             }
             Shape::Point(_) => {}
             // A hatch's boundaries fill by odd parity, as DXF's do: an island in it is a hole.
-            Shape::Fill { rings, solid } => {
+            Shape::Fill { rings, solid, tile } => {
                 // In its own colour, halftone or not.
                 let own = import_fill(over.as_ref(), cad.color(ent, ci.colors).unwrap_or(INK));
-                let fill = if *solid { own } else { Rgb(pale(own.0), pale(own.1), pale(own.2)) };
+                // Drawn with its pattern, its cell laid again cut to it; where the cell is too small to see, its tint.
+                if let Some(t) = tile {
+                    let px = |p: P2| frame.px(place(p));
+                    let color = |c: [u8; 3]| {
+                        let c = match ci.colors {
+                            crate::cad::Colors::Preserve => Rgb(c[0], c[1], c[2]),
+                            crate::cad::Colors::Invert => Rgb(255 - c[0], 255 - c[1], 255 - c[2]),
+                            crate::cad::Colors::Black => INK,
+                        };
+                        import_fill(over.as_ref(), c)
+                    };
+                    let look = hatch::Look { px: &px, color: &color, k };
+                    if hatch::draw(d, t, rings, [lo.0, lo.1, hi.0, hi.1], &look, least, &mut budget) {
+                        continue;
+                    }
+                }
+                let fill = if *solid || tile.is_some() { own } else { Rgb(pale(own.0), pale(own.1), pale(own.2)) };
                 // A ring of a few points is drawn as it is: thinned, a band of a gradient narrower than a pixel would be a dot.
                 let px: Vec<Vec<(f32, f32)>> = rings
                     .iter()

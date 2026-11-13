@@ -189,11 +189,93 @@ pub enum Shape {
         wide: f64,
         mirrored: bool,
     },
-    /// A hatch's boundaries, or a solid: `solid` when filled through, else patterned, which a view draws as it can.
+    /// A hatch's boundaries, or a solid: `solid` when filled through, else patterned, which a view draws as it can. A patterned
+    /// one may hold its pattern (`tile`, a PDF's tiling pattern), drawn as its cell repeated inside its rings; its colour and
+    /// opacity are then what the pattern paints on the whole (its tint), which a view draws where the cell would be too small to
+    /// see.
     Fill {
         rings: Vec<Vec<P2>>,
         solid: bool,
+        tile: Option<std::sync::Arc<Tile>>,
     },
+}
+
+/// A pattern a hatch is drawn with: one cell's lines and fills where the pattern lays its first cell, drawing units, and the
+/// two steps it is laid again at, the cell at `i` steps one way and `j` the other being them moved `i * steps[0] + j *
+/// steps[1]`. A hatch holds it by reference, so a page's rooms filled with one pattern share it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Tile {
+    pub lines: Vec<TileLine>,
+    pub fills: Vec<TileFill>,
+    pub steps: [P2; 2],
+}
+
+/// A line of a pattern's cell: its points and whether it closes, its colour and opacity, its width (drawing units, none a
+/// hairline) and its dashes (on, off, … drawing units).
+#[derive(Clone, Debug, PartialEq)]
+pub struct TileLine {
+    pub pts: Vec<P2>,
+    pub closed: bool,
+    pub color: [u8; 3],
+    pub alpha: u8,
+    pub weight: Option<f64>,
+    pub dash: Option<Vec<f64>>,
+}
+
+/// A fill of a pattern's cell: its rings (filling by odd parity), its colour and opacity.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TileFill {
+    pub rings: Vec<Vec<P2>>,
+    pub color: [u8; 3],
+    pub alpha: u8,
+}
+
+impl Tile {
+    /// How many points its cell holds.
+    pub fn points(&self) -> usize {
+        self.lines.iter().map(|l| l.pts.len()).sum::<usize>() + self.fills.iter().flat_map(|f| &f.rings).map(Vec::len).sum::<usize>()
+    }
+
+    /// The box round its cell, drawing units: low x, low y, high x, high y; none for a cell of nothing.
+    pub fn bounds(&self) -> Option<[f64; 4]> {
+        let pts = self.lines.iter().flat_map(|l| &l.pts).chain(self.fills.iter().flat_map(|f| f.rings.iter().flatten()));
+        union(pts.map(|p| [*p, *p])).map(|[lo, hi]| [lo.0, lo.1, hi.0, hi.1])
+    }
+
+    /// Itself through `f`, an affine map (a placement, a block's transform): its points mapped, its steps as `f` moves them,
+    /// its widths and dashes scaled by `k`.
+    pub fn mapped(&self, f: impl Fn(P2) -> P2, k: f64) -> Tile {
+        let o = f(P2(0.0, 0.0));
+        Tile {
+            lines: self
+                .lines
+                .iter()
+                .map(|l| TileLine {
+                    pts: l.pts.iter().map(|p| f(*p)).collect(),
+                    weight: l.weight.map(|w| w * k),
+                    dash: l.dash.as_ref().map(|d| d.iter().map(|x| x * k).collect()),
+                    ..l.clone()
+                })
+                .collect(),
+            fills: self
+                .fills
+                .iter()
+                .map(|x| TileFill { rings: x.rings.iter().map(|r| r.iter().map(|p| f(*p)).collect()).collect(), ..x.clone() })
+                .collect(),
+            steps: self.steps.map(|s| f(s) - o),
+        }
+    }
+
+    /// Whether every number of it is finite and within `most`, and its steps aren't nothing.
+    pub fn fits(&self, most: f64) -> bool {
+        let ok = |x: f64| x.is_finite() && x.abs() <= most;
+        let p = |p: &P2| ok(p.0) && ok(p.1);
+        let cross = self.steps[0].0 * self.steps[1].1 - self.steps[0].1 * self.steps[1].0;
+        self.steps.iter().all(p)
+            && cross.is_normal()
+            && self.lines.iter().all(|l| l.pts.iter().all(p) && l.weight.is_none_or(ok) && l.dash.iter().flatten().all(|x| ok(*x)))
+            && self.fills.iter().flat_map(|f| f.rings.iter().flatten()).all(p)
+    }
 }
 
 impl Shape {
@@ -208,7 +290,7 @@ impl Shape {
             Shape::Arc { c, r, start, end } => p(c) && ok(*r) && ok(*start) && ok(*end),
             Shape::Point(q) => p(q),
             Shape::Text { at, height, angle, .. } => p(at) && ok(*height) && ok(*angle),
-            Shape::Fill { rings, .. } => rings.iter().flatten().all(p),
+            Shape::Fill { rings, tile, .. } => rings.iter().flatten().all(p) && tile.as_ref().is_none_or(|t| t.fits(MAX_FILE_COORD)),
         }
     }
 }
@@ -973,7 +1055,7 @@ impl<'a> Reader<'a> {
                             ring.push(d);
                         }
                         ring.push(c);
-                        Some(Shape::Fill { rings: vec![ring], solid: true })
+                        Some(Shape::Fill { rings: vec![ring], solid: true, tile: None })
                     }
                     _ => None,
                 },
@@ -1071,7 +1153,11 @@ fn transformed(shape: Shape, xf: Xf) -> Shape {
         Shape::Line(a, b) => Shape::Line(at(a), at(b)),
         Shape::Polyline { pts, closed } => Shape::Polyline { pts: pts.into_iter().map(at).collect(), closed },
         Shape::Point(p) => Shape::Point(at(p)),
-        Shape::Fill { rings, solid } => Shape::Fill { rings: rings.into_iter().map(|r| r.into_iter().map(at).collect()).collect(), solid },
+        Shape::Fill { rings, solid, tile } => Shape::Fill {
+            rings: rings.into_iter().map(|r| r.into_iter().map(at).collect()).collect(),
+            solid,
+            tile: tile.map(|t| std::sync::Arc::new(t.mapped(at, xf.similarity().map_or(1.0, |(k, _, _)| k)))),
+        },
         Shape::Circle { c, r } => match xf.similarity() {
             Some((k, _, _)) => Shape::Circle { c: at(c), r: r * k },
             None => {
@@ -1549,7 +1635,7 @@ fn hatch(e: &Ent) -> Result<Option<Shape>, String> {
         }
     }
     let rings = styled(rings, e.int(75)?.unwrap_or(0));
-    Ok((!rings.is_empty()).then_some(Shape::Fill { rings, solid }))
+    Ok((!rings.is_empty()).then_some(Shape::Fill { rings, solid, tile: None }))
 }
 
 /// How much containment testing [`styled`] spends on one hatch (edges walked): past it, a hostile hatch keeps its rings as
@@ -2363,9 +2449,9 @@ mod tests {
         assert_eq!(d.entities.len(), 2, "{:?}", d.entities);
         assert_eq!(
             d.entities[0].shape,
-            Shape::Fill { rings: vec![vec![P2(0.0, 0.0), P2(10.0, 0.0), P2(10.0, 10.0), P2(0.0, 10.0)]], solid: true }
+            Shape::Fill { rings: vec![vec![P2(0.0, 0.0), P2(10.0, 0.0), P2(10.0, 10.0), P2(0.0, 10.0)]], solid: true, tile: None }
         );
-        let Shape::Fill { rings, solid: false } = &d.entities[1].shape else { panic!("{:?}", d.entities[1]) };
+        let Shape::Fill { rings, solid: false, .. } = &d.entities[1].shape else { panic!("{:?}", d.entities[1]) };
         assert_eq!(rings.len(), 1);
         assert!(near(rings[0][0], P2(0.0, 0.0)) && near(rings[0][1], P2(10.0, 0.0)), "{:?}", rings[0]);
         assert!(has_point_near(&rings[0], P2(5.0, 5.0)), "the arc's top: {:?}", rings[0]);
@@ -2487,7 +2573,7 @@ mod tests {
         assert_eq!(d.entities[0].shape, Shape::Line(P2(0.0, 0.0), P2(1.0, 0.0)));
         assert_eq!(
             d.entities[1].shape,
-            Shape::Fill { rings: vec![vec![P2(0.0, 0.0), P2(10.0, 0.0), P2(10.0, 10.0), P2(0.0, 10.0)]], solid: true }
+            Shape::Fill { rings: vec![vec![P2(0.0, 0.0), P2(10.0, 0.0), P2(10.0, 10.0), P2(0.0, 10.0)]], solid: true, tile: None }
         );
         assert!(matches!(&d.entities[2].shape, Shape::Text { text, .. } if text == "shown"));
     }

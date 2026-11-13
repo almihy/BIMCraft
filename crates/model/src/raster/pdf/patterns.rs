@@ -1,18 +1,26 @@
 //! A fill painted with a pattern, kept as the page paints it, on the layer it is drawn on: a tiling pattern (a brick, a batt
-//! of insulation, earth) as its cell's own lines and fills, repeated over what it fills and cut to it; a shading (a gradient)
-//! as bands of colour, each so near the next that no zoom tells them apart (a step of at most one in 255 in each channel, and
-//! none narrower than [`NARROWEST`]), cut to what it fills. A fill whose pattern would make more than [`MOST_POINTS`] points,
-//! or a pattern nested past [`DEPTH`], is filled in the pattern's mean colour instead ([`super::paint`]).
+//! of insulation, earth) as one hatch, what it fills and its cell's own lines and fills with the steps they are laid again
+//! at ([`crate::dxf::Tile`]), which a view repeats cut to what it fills; a shading (a gradient) as bands of colour, each so
+//! near the next that no zoom tells them apart (a step of at most one in 255 in each channel, and none narrower than
+//! [`NARROWEST`]), cut to what it fills. A page's patterns laying more than [`TILE_BUDGET`] points among them, or a pattern
+//! nested past [`DEPTH`], fill in the pattern's mean colour instead ([`super::paint`]), the notes saying how many.
 
 use hayro::hayro_interpret::pattern::{Pattern, ShadingPattern, TilingPattern};
 use hayro::hayro_interpret::shading::{ShadingFunction, ShadingType, Triangle};
 use hayro::kurbo::{Affine, Point, Vec2};
 
-use super::shapes::{Pt, Region};
-use super::{Collect, Run, Vectors, pt};
+use std::sync::Arc;
 
-/// The most points the lines and fills of one pattern fill become.
-const MOST_POINTS: usize = 400_000;
+use super::shapes::{Pt, Region};
+use super::{Collect, Tiled, Vectors, pt};
+use crate::dxf::{Tile, TileFill, TileLine};
+use crate::geom::P2;
+
+/// The most points a page's tiling patterns lay among them, their cells' points times the times each is laid: what drawing
+/// all of a page's hatches whole may cost. Past it, a fill is its pattern's tint.
+pub const TILE_BUDGET: usize = 16_000_000;
+/// The most patterns a page's hatches share before each one past them is held on its own.
+const MOST_TILES: usize = 4096;
 /// How deep patterns painted with patterns are worked out.
 pub(super) const DEPTH: u32 = 3;
 /// The narrowest band a gradient is cut into, mm on the paper, and the most bands one gradient is cut into.
@@ -31,9 +39,10 @@ const FAR: f64 = 1e7;
 type Rgbaf = [f32; 4];
 
 impl Collect {
-    /// Keeps a fill of `rings` (mm, filling by the even-odd rule or the non-zero one) painted with pattern `p`, cut to the clip:
-    /// true when it is kept as the page paints it, false when it is to be filled in the pattern's mean colour.
-    pub(super) fn fill_pattern(&mut self, rings: &[Vec<Pt>], even_odd: bool, p: &Pattern<'_>) -> bool {
+    /// Keeps a fill of `rings` (mm, filling by the even-odd rule or the non-zero one) painted with pattern `p`, whose mean colour
+    /// and opacity are `tint`, cut to the clip: true when it is kept as the page paints it, false when it is to be filled in the
+    /// pattern's mean colour.
+    pub(super) fn fill_pattern(&mut self, rings: &[Vec<Pt>], even_odd: bool, p: &Pattern<'_>, tint: ([u8; 3], u8)) -> bool {
         if self.depth >= DEPTH {
             return false;
         }
@@ -49,7 +58,7 @@ impl Collect {
         self.begun = true;
         self.clips.push(region);
         let done = match p {
-            Pattern::Tiling(t) => self.tile(t, [x0, y0, x1, y1]),
+            Pattern::Tiling(t) => self.tile(t, [x0, y0, x1, y1], tint),
             Pattern::Shading(s) => self.shade(s, [x0, y0, x1, y1]),
         };
         self.clips.pop();
@@ -73,9 +82,11 @@ impl Collect {
         self.keep_fill(rings, even_odd, ([to(c[0]), to(c[1]), to(c[2])], alpha), seq);
     }
 
-    /// A tiling pattern's cell, read once as lines and fills where the pattern puts its first cell, then laid again at every
-    /// step of the pattern over box `b` (mm), each cut to what it fills.
-    fn tile(&mut self, t: &TilingPattern<'_>, b: [f64; 4]) -> bool {
+    /// A tiling pattern's cell, read once as lines and fills where the pattern puts its first cell, kept with the two steps it
+    /// is laid again at and what it fills (the clip now, box `b` round it, mm) as one hatch in `tint`, its pattern's mean
+    /// colour: the page's hatches of one pattern share its cell. False, for the tint instead, when its cell can't be read or
+    /// laying it over the box would take the page's patterns past [`TILE_BUDGET`] points.
+    fn tile(&mut self, t: &TilingPattern<'_>, b: [f64; 4], tint: ([u8; 3], u8)) -> bool {
         let m = t.matrix;
         let back = m.inverse();
         let (xs, ys) = (f64::from(t.x_step), f64::from(t.y_step));
@@ -99,6 +110,8 @@ impl Collect {
             page: self.page,
             begun: true,
             depth: self.depth + 1,
+            tiles: Vec::new(),
+            laid: 0,
         };
         let read = t.interpret(&mut cell, m, false);
         self.ids = std::mem::take(&mut cell.ids);
@@ -106,8 +119,9 @@ impl Collect {
         if read.is_none() || cell.out.left_out > 0 {
             return false;
         }
-        let Vectors { strokes, fills, .. } = cell.out;
-        let points: usize = strokes.iter().chain(&fills).map(|r| r.pts.len()).sum();
+        let Vectors { strokes, fills, tiled, .. } = cell.out;
+        let points: usize = strokes.iter().chain(&fills).map(|r| r.pts.len()).sum::<usize>()
+            + tiled.iter().flat_map(|x| &x.rings).map(Vec::len).sum::<usize>();
         if points == 0 {
             return true;
         }
@@ -123,44 +137,74 @@ impl Collect {
         let (i0, i1) = steps(px0, px1, cb.x0, cb.x1, xs);
         let (j0, j1) = steps(py0, py1, cb.y0, cb.y1, ys);
         let tiles = (i1 - i0 + 1.0) * (j1 - j0 + 1.0);
-        if !(tiles.is_finite() && tiles >= 1.0) || tiles * points as f64 > MOST_POINTS as f64 {
+        let laid = tiles * points as f64;
+        if !(tiles.is_finite() && tiles >= 1.0) || laid + self.laid as f64 > TILE_BUDGET as f64 {
+            self.out.tinted += 1;
             return false;
         }
         let opacity = t.opacity.clamp(0.0, 1.0);
         let step_x = m * Point::new(xs, 0.0) - m * Point::ORIGIN;
         let step_y = m * Point::new(0.0, ys) - m * Point::ORIGIN;
-        // The cell's fills, ring by ring as each fill has them, in the cell's order.
-        let mut groups: Vec<(usize, Vec<&Run>)> = Vec::new();
+        let see = |a: u8| self.seen((f32::from(a) * opacity).round().clamp(0.0, 255.0) as u8);
+        let at = |p: &[f64; 2]| P2(p[0], p[1]);
+        // The cell's fills, ring by ring as each fill has them, in the cell's order; a pattern inside it in its tint.
+        let mut groups: Vec<(usize, TileFill)> = Vec::new();
         for f in &fills {
+            let ring: Vec<P2> = f.pts.iter().map(at).collect();
             match groups.last_mut() {
-                Some((seq, rings)) if *seq == f.seq => rings.push(f),
-                _ => groups.push((f.seq, vec![f])),
+                Some((seq, last)) if *seq == f.seq => last.rings.push(ring),
+                _ => groups.push((f.seq, TileFill { rings: vec![ring], color: f.color, alpha: see(f.alpha) })),
             }
         }
-        let see = |a: u8| (f32::from(a) * opacity).round().clamp(0.0, 255.0) as u8;
-        for j in j0 as i64..=j1 as i64 {
-            for i in i0 as i64..=i1 as i64 {
-                let by: Vec2 = step_x * i as f64 + step_y * j as f64;
-                let moved = |r: &Run| -> Vec<Pt> { r.pts.iter().map(|p| [p[0] + by.x, p[1] + by.y]).collect() };
-                for (_, rings) in &groups {
-                    let Some(first) = rings.first() else { continue };
-                    let alpha = self.seen(see(first.alpha));
-                    if alpha == 0 {
-                        continue;
-                    }
-                    let seq = self.next_seq();
-                    self.keep_fill(rings.iter().map(|r| moved(r)).collect(), true, (first.color, alpha), seq);
-                }
-                let seq = self.next_seq();
-                for s in &strokes {
-                    let alpha = self.seen(see(s.alpha));
-                    if alpha == 0 {
-                        continue;
-                    }
-                    self.keep_lines(Some(vec![(moved(s), s.closed)]), (s.color, alpha), s.width, s.dash.clone(), seq);
-                }
-            }
+        let mut cell_fills: Vec<TileFill> = groups.into_iter().map(|(_, f)| f).collect();
+        cell_fills.extend(tiled.iter().map(|x| TileFill {
+            rings: x.rings.iter().map(|r| r.iter().map(at).collect()).collect(),
+            color: x.color,
+            alpha: see(x.alpha),
+        }));
+        let lines: Vec<TileLine> = strokes
+            .iter()
+            .map(|s| TileLine {
+                pts: s.pts.iter().map(at).collect(),
+                closed: s.closed,
+                color: s.color,
+                alpha: see(s.alpha),
+                weight: (s.width >= 0.005).then_some(s.width),
+                dash: s.dash.clone(),
+            })
+            .collect();
+        let tile = Tile { lines, fills: cell_fills, steps: [P2(step_x.x, step_x.y), P2(step_y.x, step_y.y)] };
+        if !tile.fits(FAR) {
+            return false;
         }
+        // One pattern's hatches share its cell.
+        let tile = match self.tiles.iter().find(|k| ***k == tile) {
+            Some(k) => Arc::clone(k),
+            None => {
+                let k = Arc::new(tile);
+                if self.tiles.len() < MOST_TILES {
+                    self.tiles.push(Arc::clone(&k));
+                }
+                k
+            }
+        };
+        // What it fills, cut to the clip: its outline, which is all it holds of the page's points.
+        let rings: Vec<Vec<Pt>> = match self.clip() {
+            Region::Box([x0, y0, x1, y1]) => vec![vec![[*x0, *y0], [*x1, *y0], [*x1, *y1], [*x0, *y1]]],
+            Region::Rings { rings, .. } => rings.clone(),
+        };
+        let n: usize = rings.iter().map(Vec::len).sum();
+        self.out.points += n;
+        if self.held + n > super::MAX_SEGMENTS {
+            self.out.left_out += 1;
+            return true;
+        }
+        self.held += n;
+        self.laid += laid as usize;
+        self.begun = true;
+        let seq = self.next_seq();
+        let layer = self.layer();
+        self.out.tiled.push(Tiled { rings, tile, color: tint.0, alpha: tint.1, seq, layer });
         true
     }
 

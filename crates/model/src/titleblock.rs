@@ -771,7 +771,7 @@ pub fn from_dxf(dxf: &Dxf, mm: f64) -> (TitleBlock, BTreeMap<String, usize>) {
                     None => tb.texts.push(Text { at, text, size, angle: *angle, align, color, width_factor: 1.0 }),
                 }
             }
-            Shape::Fill { rings, solid: true } => {
+            Shape::Fill { rings, solid: true, .. } => {
                 let rings: Vec<Vec<P2>> = rings.iter().filter(|r| r.len() >= 3).map(|r| r.iter().map(k).collect()).collect();
                 rings.iter().flatten().for_each(|p| grow(*p));
                 if !rings.is_empty() {

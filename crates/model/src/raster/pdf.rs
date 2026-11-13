@@ -2,7 +2,8 @@
 //! page's size, its pixels at a resolution, and what it draws as vectors (its stroked and filled paths, and the text it
 //! shows) in millimetres on the paper, from its bottom left corner, y up, as the pixels have it, each on the layer (the
 //! optional content group) it is drawn on, as the page draws it: a fill by its rule, holes and all, what is see-through as
-//! see-through, cut by the clipping paths it sets whatever their shape, a gradient as bands of its colours and a pattern as its cell's lines repeated, a dash
+//! see-through, cut by the clipping paths it sets whatever their shape, a gradient as bands of its colours and a pattern as one
+//! hatch drawn with its cell, a dash
 //! in all its dashes, a line as wide as the page makes it each way. The file itself is not kept: a project holds the
 //! pictures it holds and the lines.
 
@@ -28,6 +29,8 @@ use hayro::kurbo::{Affine, BezPath, Cap, CubicBez, Join, ParamCurve, PathEl, Poi
 use crate::dxf::{Align, Color, Dxf, Entity, Horizontal, Layer as DxfLayer, Linetype, Shape, Vertical};
 use crate::geom::P2;
 use shapes::{Ends, Region};
+
+pub use patterns::TILE_BUDGET;
 
 // hayro-interpret as BIMCraft patches it (vendor/hayro-interpret, the root Cargo.toml's [patch.crates-io]): what a form or an
 // annotation draws on a layer is read on that layer only with it. A workspace that builds this crate without the patch fails
@@ -94,7 +97,12 @@ pub struct Vectors {
     /// Each fill's rings, those of one fill sharing its `seq`: they fill by odd parity (a ring inside another is a hole),
     /// whatever rule the page filled them by, resolved as it reads them.
     pub fills: Vec<Run>,
+    /// What it fills with a tiling pattern: each one hatch drawn with the pattern's cell.
+    pub tiled: Vec<Tiled>,
     pub texts: Vec<Text>,
+    /// The fills painted with a tiling pattern past what a page's patterns may lay ([`TILE_BUDGET`]), filled in
+    /// their pattern's tint instead.
+    pub tinted: usize,
     /// The file's layers, which a run's or a text's `layer` counts in: every optional content group it has, whether this
     /// page draws on it or not.
     pub layers: Vec<Layer>,
@@ -124,6 +132,19 @@ pub struct Run {
     pub alpha: u8,
     pub width: f64,
     pub dash: Option<Vec<f64>>,
+    pub seq: usize,
+    pub layer: Option<usize>,
+}
+
+/// What a page fills with a tiling pattern (a brick, a batt of insulation, earth), kept as one hatch: its rings, mm (filling by
+/// odd parity, cut to the clip), the pattern's cell and its steps ([`crate::dxf::Tile`], shared by the fills of one
+/// pattern), the colour and opacity it paints on the whole (its tint), its place in the order and its layer, as a run's.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Tiled {
+    pub rings: Vec<Vec<[f64; 2]>>,
+    pub tile: Arc<crate::dxf::Tile>,
+    pub color: [u8; 3],
+    pub alpha: u8,
     pub seq: usize,
     pub layer: Option<usize>,
 }
@@ -295,6 +316,8 @@ impl Document {
             page: [0.0, 0.0, w, h],
             begun: false,
             depth: 0,
+            tiles: Vec::new(),
+            laid: 0,
         };
         interpret::interpret_page(p, &mut ctx, &mut device);
         let mut out = device.out;
@@ -469,6 +492,9 @@ struct Collect {
     begun: bool,
     /// How deep in patterns painted with patterns what is drawn now is: 0 on the page.
     depth: u32,
+    /// The patterns its hatches are drawn with so far, each once, and the points their cells lay among them.
+    tiles: Vec<Arc<crate::dxf::Tile>>,
+    laid: usize,
 }
 
 /// Whether boxes `a` and `b` overlap or touch.
@@ -861,7 +887,7 @@ impl<'a> Device<'a> for Collect {
         let fill = |me: &mut Collect, runs: Runs, rule: &FillRule| {
             let (rings, even_odd) = (rings(runs), *rule == FillRule::EvenOdd);
             if let Paint::Pattern(p) = &props.paint
-                && me.fill_pattern(&rings, even_odd, p)
+                && me.fill_pattern(&rings, even_odd, p, mean.unwrap_or(([0, 0, 0], 0)))
             {
                 return;
             }
@@ -1053,6 +1079,7 @@ fn layer_name(name: &str, i: usize) -> String {
 /// What a page draws, item by item, in the order it draws it: a fill (its rings), a stroke or a text.
 enum Item<'v> {
     Fill(Vec<&'v Run>),
+    Tiled(&'v Tiled),
     Stroke(&'v Run),
     Text(&'v Text),
 }
@@ -1061,6 +1088,7 @@ impl Item<'_> {
     fn color(&self) -> [u8; 3] {
         match self {
             Item::Fill(rings) => rings.first().map_or([0, 0, 0], |r| r.color),
+            Item::Tiled(t) => t.color,
             Item::Stroke(r) => r.color,
             Item::Text(t) => t.color,
         }
@@ -1069,6 +1097,7 @@ impl Item<'_> {
     fn layer(&self) -> Option<usize> {
         match self {
             Item::Fill(rings) => rings.first().and_then(|r| r.layer),
+            Item::Tiled(t) => t.layer,
             Item::Stroke(r) => r.layer,
             Item::Text(t) => t.layer,
         }
@@ -1083,6 +1112,7 @@ impl Item<'_> {
                 format!("{} {w}", colour_name(r.color))
             }
             Item::Fill(_) => format!("{} fill", colour_name(self.color())),
+            Item::Tiled(_) => format!("{} hatch", colour_name(self.color())),
             Item::Text(t) => format!("{} text", colour_name(t.color)),
         }
     }
@@ -1091,13 +1121,15 @@ impl Item<'_> {
 impl Vectors {
     /// Whether it draws anything as vectors.
     pub fn is_empty(&self) -> bool {
-        self.strokes.is_empty() && self.fills.is_empty() && self.texts.is_empty()
+        self.strokes.is_empty() && self.fills.is_empty() && self.tiled.is_empty() && self.texts.is_empty()
     }
 
     /// Whether any of it is on a layer of the file's: then its drawing has all the file's layers, and what is on none is on
     /// [`NO_LAYER`].
     pub fn layered(&self) -> bool {
-        self.strokes.iter().chain(&self.fills).any(|r| r.layer.is_some()) || self.texts.iter().any(|t| t.layer.is_some())
+        self.strokes.iter().chain(&self.fills).any(|r| r.layer.is_some())
+            || self.tiled.iter().any(|t| t.layer.is_some())
+            || self.texts.iter().any(|t| t.layer.is_some())
     }
 
     /// What it draws, in the order the page draws it: each fill once with all its rings, before a stroke of the same path.
@@ -1107,6 +1139,7 @@ impl Vectors {
             fills.entry(f.seq).or_default().push(f);
         }
         let mut items: Vec<(usize, u8, Item<'_>)> = fills.into_iter().map(|(seq, rings)| (seq, 0, Item::Fill(rings))).collect();
+        items.extend(self.tiled.iter().map(|t| (t.seq, 0, Item::Tiled(t))));
         items.extend(self.strokes.iter().map(|r| (r.seq, 1, Item::Stroke(r))));
         items.extend(self.texts.iter().map(|t| (t.seq, 2, Item::Text(t))));
         items.sort_by_key(|(seq, kind, _)| (*seq, *kind));
@@ -1214,6 +1247,19 @@ impl Vectors {
                     shape: Shape::Fill {
                         rings: rings.iter().map(|r| r.pts.iter().map(|p| P2(p[0], p[1])).collect()).collect(),
                         solid: true,
+                        tile: None,
+                    },
+                }),
+                Item::Tiled(t) => entities.push(Entity {
+                    layer,
+                    color,
+                    linetype: None,
+                    weight: None,
+                    alpha: t.alpha,
+                    shape: Shape::Fill {
+                        rings: t.rings.iter().map(|r| r.iter().map(|p| P2(p[0], p[1])).collect()).collect(),
+                        solid: false,
+                        tile: Some(Arc::clone(&t.tile)),
                     },
                 }),
                 Item::Text(t) => entities.push(Entity {
@@ -1619,7 +1665,7 @@ mod tests {
         assert_eq!((on("Black 0.35"), on("Red 0.18"), on("Blue fill"), on("Black text")), (2, 1, 1, 1));
         // The fill is a solid hatch, in its colour.
         let fill = cad.dxf().entities.iter().find(|e| e.layer == "Blue fill").unwrap();
-        assert!(matches!(&fill.shape, crate::dxf::Shape::Fill { solid: true, rings } if rings.len() == 1), "{fill:?}");
+        assert!(matches!(&fill.shape, crate::dxf::Shape::Fill { solid: true, rings, .. } if rings.len() == 1), "{fill:?}");
         assert_eq!(cad.color(fill, crate::cad::Colors::Preserve), Some(crate::prim::Rgb(0, 0, 255)));
     }
 

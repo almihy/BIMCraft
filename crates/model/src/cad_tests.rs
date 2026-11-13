@@ -50,7 +50,7 @@ pub(crate) fn dense(n: usize, size: P2) -> Dxf {
         let layer = ["Walls", "Doors", "Hatch"][i % 3];
         let shape = if i % 100 == 7 {
             let r = 0.5 + random(&mut seed);
-            Shape::Fill { rings: vec![vec![at, at + P2(r, 0.0), at + P2(r, r), at + P2(0.0, r)]], solid: i % 200 == 7 }
+            Shape::Fill { rings: vec![vec![at, at + P2(r, 0.0), at + P2(r, r), at + P2(0.0, r)]], solid: i % 200 == 7, tile: None }
         } else {
             let (len, turn) = (1.0 + random(&mut seed) * 2.0, random(&mut seed) * std::f64::consts::TAU);
             Shape::Polyline { pts: vec![at, at + P2(turn.cos(), turn.sin()) * len], closed: false }
@@ -74,7 +74,7 @@ fn what_lies_in_a_box_is_what_a_scan_of_every_entity_finds() {
             0 => Shape::Polyline { pts: vec![at, P2(1000.0 - at.0, 800.0 - at.1)], closed: false },
             1 => Shape::Polyline { pts: vec![at, at + P2(random(&mut seed) * 400.0, 3.0)], closed: false },
             2 => Shape::Point(at),
-            3 => Shape::Fill { rings: vec![vec![at, at + P2(30.0, 0.0), at + P2(0.0, 30.0)]], solid: true },
+            3 => Shape::Fill { rings: vec![vec![at, at + P2(30.0, 0.0), at + P2(0.0, 30.0)]], solid: true, tile: None },
             _ => Shape::Polyline { pts: vec![at, at + P2(random(&mut seed) * 4.0, random(&mut seed) * 4.0)], closed: false },
         };
         entities.push(entity("A", shape));

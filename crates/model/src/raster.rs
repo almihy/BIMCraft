@@ -893,6 +893,15 @@ pub fn read_pdf(bytes: Vec<u8>, page: usize, dpi: u32) -> Result<PdfRead, String
              hold all it draws)"
         ));
     }
+    if vectors.tinted > 0 {
+        notes.push(format!(
+            "page {page} fills {} area{} with a pattern past the {} points a page's patterns may lay among them: {} in the pattern's tint (its mean colour), not its cell",
+            vectors.tinted,
+            if vectors.tinted == 1 { "" } else { "s" },
+            pdf::TILE_BUDGET,
+            if vectors.tinted == 1 { "it shows" } else { "they show" }
+        ));
+    }
     if vectors.unlettered > 0 {
         notes.push(format!(
             "page {page} has {} letters drawn in a Type 3 font with no text behind them: they show in the picture only",

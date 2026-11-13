@@ -273,13 +273,22 @@ colour and weight instead (`colour_name`, the nearest of a few plain names: `Bla
 
 The page is read as it draws (`Vectors::drawing`, in the page's order, `seq`): a fill by its rule, even-odd or non-zero, as
 rings that fill by odd parity (`shapes::resolve`, so its holes stay holes and overlaps stay filled); paint's opacity (`ca`
-and `CA`, and the transparency groups open) as the entity's; a tiling pattern (a brick, a batt of insulation, earth) as its cell's own lines
-and fills, read once and laid again at every step of the pattern over what it fills, cut to it, on the fill's layer; a
+and `CA`, and the transparency groups open) as the entity's; a tiling pattern (a brick, a batt of insulation, earth) as one
+hatch on the fill's layer: what it fills (cut to the clip), and its cell's own lines and fills, read once where the pattern
+lays its first cell, with the two steps it is laid again at (`dxf::Tile`, held by reference in `Shape::Fill`'s `tile`, so the
+rooms a page fills with one pattern share one cell, and packed once in a page's lines). Its colour and opacity are the
+pattern's tint (its mean, `paint.rs`). It counts against the page's points by its outline alone; a page's patterns may lay
+`TILE_BUDGET` (16 million) points among them (each cell's points times the times it is laid over what it fills), and a fill
+past that is its tint, the notes saying how many. A view draws it (`render/hatch.rs`) by laying the cell over the part of it in
+view, a laid cell wholly inside as it is and one across an edge cut to the rings; where a step of the cell is under 3 px on a
+screen (1 on paper), or laying it would take the frame past 2 million points (32 million on paper), it is filled with its
+tint, as Revit draws a pattern too dense to show. An A1 of 750 rooms of 0.8 mm brick, once two million stroke entities and a
+picture past the page's points, comes in as 1 611 entities in 0.05 s with an engine peak of 62 MB. A
 gradient (a shading) as bands of its colours, each at most one in 255 from the next in any channel and none narrower than
 0.05 mm (an axial one across its axis, a radial one in rings between its circles, a function's in cells, a mesh's in
 triangles cut as its colours need), an opaque band lying under all those after it so no seam shows at any zoom
-(`raster/pdf/patterns.rs`, held to the PDF renderer's own picture of the page in `pdf_fidelity_tests`); one that would make
-more than 400 000 points, or a pattern nested three deep, in its mean colour instead (`raster/pdf/paint.rs`); a dash with all its dashes, its phase taken in; a line as wide as the page draws it, and where the
+(`raster/pdf/patterns.rs`, held to the PDF renderer's own picture of the page in `pdf_fidelity_tests`); a pattern nested three
+deep in its mean colour instead (`raster/pdf/paint.rs`); a dash with all its dashes, its phase taken in; a line as wide as the page draws it, and where the
 page stretches it more one way than the other, or makes it wider than the widest pen (`MAX_LINE_WIDTH`), its outline as a
 fill; text at the width it runs (its squeeze, spacing and font: a width factor), from its first letter that isn't a space,
 mirrored where the page mirrors it. A white fill over the page before anything else is drawn is the page's ground and is

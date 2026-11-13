@@ -16,11 +16,16 @@ fn run(s: &mut Session, id: &str, p: Value) -> Value {
 /// A one-page PDF 200 points a side: its content stream `content`, what its resources hold besides the font `/F1`
 /// (Helvetica), what its catalog holds besides its pages, and objects of its own from 5 on (4 is the content).
 fn pdf(content: &str, resources: &str, catalog: &str, more: &[&str]) -> Vec<u8> {
+    pdf_of(200.0, content, resources, catalog, more)
+}
+
+/// [`pdf`], its page `side` points a side.
+fn pdf_of(side: f64, content: &str, resources: &str, catalog: &str, more: &[&str]) -> Vec<u8> {
     let mut objects = vec![
         format!("<< /Type /Catalog /Pages 2 0 R {catalog} >>"),
         "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
         format!(
-            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R /Resources << /Font << /F1 << /Type /Font \
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {side} {side}] /Contents 4 0 R /Resources << /Font << /F1 << /Type /Font \
              /Subtype /Type1 /BaseFont /Helvetica >> >> {resources} >> >>"
         ),
         format!("<< /Length {} >>\nstream\n{content}\nendstream", content.len()),
@@ -251,9 +256,70 @@ fn a_brick_and_an_insulation_hatch_are_drawn_as_their_cells_repeated_and_cut_to_
     }
     // Outside what they fill, nothing: the batt is cut to its slanted strip.
     assert!(white(px(&p, 100.0, 100.0)) && white(px(&p, 25.0, 85.0)), "{:?}", px(&p, 25.0, 85.0));
-    // The bricks' mortar is lines of the drawing, on its layer, to snap to.
+    // Each is one hatch of the drawing, what it fills and its pattern's cell, not a line for each brick.
+    let read = run(&mut s, "cad_read", json!({"id": r["id"], "kinds": ["hatch"]}));
+    assert_eq!(read["total"], 2, "{read}");
+    let cells: Vec<u64> = read["items"].as_array().unwrap().iter().map(|h| h["pattern"]["lines"].as_u64().unwrap()).collect();
+    assert_eq!(cells, [5, 1], "the brick's five mortar lines and the batt's one zigzag: {read}");
     let read = run(&mut s, "cad_read", json!({"id": r["id"], "kinds": ["polyline"]}));
-    assert!(read["total"].as_u64().unwrap() > 100, "{}", read["total"]);
+    assert_eq!(read["total"], 0, "{read}");
+}
+
+#[test]
+fn rooms_hatched_with_one_pattern_are_a_hatch_each_sharing_its_cell_and_drawn_as_it_zoomed_in_and_its_tint_zoomed_out() {
+    // 750 rooms of brick, a cell of 0.8 mm, on an A1 page: the page that, with a stroke for each brick, was too dense to keep.
+    let mm = 72.0 / 25.4;
+    let s = 0.8 * mm;
+    let brick =
+        tiling(&format!("0 0 0 RG 0.1 w 0 0 m {s} 0 l S 0 {h} m {s} {h} l S 0 0 m 0 {h} l S {h} {h} m {h} {s} l S", h = s / 2.0), s, s);
+    let mut content = String::from("0 0 0 RG 0.35 w ");
+    for k in 0..750 {
+        let (x, y) = ((20.0 + f64::from(k % 25) * 32.0) * mm, (20.0 + f64::from(k / 25) * 27.0) * mm);
+        let (w, h) = (30.0 * mm, 25.0 * mm);
+        content += &format!("/Pattern cs /P0 scn {x:.2} {y:.2} {w:.2} {h:.2} re f {x:.2} {y:.2} {w:.2} {h:.2} re S ");
+    }
+    let bytes = pdf_of(841.0 * mm, &content, "/Pattern << /P0 5 0 R >>", "", &[&brick]);
+    let (mut s, r) = imported(bytes);
+    assert!(r["pixels"].is_null() && r["lines"] == 1500, "kept as lines, a hatch and an outline a room: {r}");
+    assert!(r["notes"].as_array().is_none_or(|n| n.iter().all(|n| !n.as_str().unwrap_or("").contains("dense"))), "{r}");
+    let read = run(&mut s, "cad_read", json!({"id": r["id"], "kinds": ["hatch"]}));
+    assert_eq!(read["total"], 750, "a hatch for each room: {}", read["total"]);
+    let t = s.model.image_types.values().next().unwrap();
+    let cad = t.lines().unwrap();
+    let tiles: Vec<&std::sync::Arc<crate::dxf::Tile>> = cad
+        .dxf()
+        .entities
+        .iter()
+        .filter_map(|e| match &e.shape {
+            crate::dxf::Shape::Fill { tile: Some(t), .. } => Some(t),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(tiles.len(), 750);
+    assert!(tiles.iter().all(|t| std::sync::Arc::ptr_eq(t, tiles[0])), "one cell, shared");
+    assert!(cad.dxf().entities.len() < 2000, "{} entities", cad.dxf().entities.len());
+    // On a screen round the first room's middle (page 35, 32.5 mm): zoomed in, its bricks, lines on white; zoomed out, where
+    // a brick would be under a few pixels, its tint, a grey with no white in it.
+    let level = s.model.levels()[0].0;
+    let middle = ((35.0 - 420.5) * 100.0, (32.5 - 420.5) * 100.0);
+    let shot = |scale: f64| {
+        let view = crate::prim::View { scale, cx: middle.0, cy: middle.1, width: 60, height: 60 };
+        let p = tiny_skia::Pixmap::decode_png(&crate::render::png(&crate::render::draw(&s.model, level, view)).unwrap()).unwrap();
+        let light = |c: tiny_skia::PremultipliedColorU8| (u32::from(c.red()) + u32::from(c.green()) + u32::from(c.blue())) / 3;
+        // The middle of the view, inside the room either way.
+        let inside: Vec<_> = p
+            .pixels()
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| (i % 60).abs_diff(30) < 10 && (i / 60).abs_diff(30) < 10)
+            .map(|(_, c)| *c)
+            .collect();
+        (inside.iter().filter(|c| light(**c) < 100).count(), inside.iter().filter(|c| light(**c) > 240).count(), inside.len())
+    };
+    let (dark, white, n) = shot(0.2);
+    assert!(dark > n / 20 && white > n / 4, "zoomed in, the bricks: {dark} dark and {white} white of {n}");
+    let (dark, white, n) = shot(0.01);
+    assert!(dark == 0 && white == 0, "zoomed out, the tint: {dark} dark and {white} white of {n}");
 }
 
 #[test]

@@ -7147,7 +7147,14 @@ fn read_item(n: usize, layer: &str, shape: &crate::dxf::Shape) -> Value {
         Shape::Text { at, height, angle, text, .. } => {
             json!({"text": text, "at": read_point(*at), "height": read_mm(*height), "angle": read_mm(*angle)})
         }
-        Shape::Fill { rings, solid } => json!({"rings": rings.iter().map(|r| pts(r)).collect::<Vec<_>>(), "solid": solid}),
+        Shape::Fill { rings, solid, tile } => {
+            let mut fill = json!({"rings": rings.iter().map(|r| pts(r)).collect::<Vec<_>>(), "solid": solid});
+            // A PDF's tiling pattern: its cell, laid again at each of its steps inside the rings.
+            if let Some(t) = tile {
+                fill["pattern"] = json!({"lines": t.lines.len(), "fills": t.fills.len(), "steps": t.steps.map(read_point)});
+            }
+            fill
+        }
     };
     if let (Some(item), Value::Object(more)) = (item.as_object_mut(), more) {
         item.extend(more);
