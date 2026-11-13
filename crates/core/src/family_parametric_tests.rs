@@ -660,3 +660,31 @@ fn a_sweep_of_a_round_profile_drawn_as_two_half_circles_is_a_rod() {
     let want = std::f64::consts::PI * 100.0 * 500.0;
     assert!((volume(&f, "A") - want).abs() < want * 0.02, "{} against {want}", volume(&f, "A"));
 }
+
+#[test]
+fn an_extrusion_on_a_sloped_plane_is_swept_along_its_normal() {
+    let mut s = Session::new();
+    // A back leaning 10 degrees: its sketch on a plane whose normal is (0, cos 10, sin 10), 400 by 300, 38 thick.
+    let (c, si) = (10f64.to_radians().cos(), 10f64.to_radians().sin());
+    let n = [0.0, c, si];
+    // Corners on the plane through (0, -200, 600): across it x, and up it (0, -sin, cos).
+    let corner = |x: f64, up: f64| json!([x, -200.0 - si * up, 600.0 + c * up]);
+    let at = -200.0 * c + 600.0 * si;
+    let fam = json!({
+        "name": "Leaning Back", "category": "furniture", "types": {"A": {}},
+        "revit": {
+            "reference_planes": [{"id": "b", "name": "back", "normal": n, "at": {"A": at}}],
+            "forms": [{"kind": "extrusion", "normal": n, "start": at, "end": at + 38.0,
+                       "loops": [ring_of(&[corner(-200.0, 0.0), corner(200.0, 0.0), corner(200.0, 300.0), corner(-200.0, 300.0)])]}]
+        }
+    });
+    let r = run(&mut s, "family", fam);
+    assert_eq!(r["editable"]["ok"], true, "{}", r["editable"]);
+    let f = s.model.families["Leaning Back"].clone();
+    let want = 400.0 * 300.0 * 38.0;
+    assert!((volume(&f, "A") - want).abs() < want * 0.001, "{} against {want}", volume(&f, "A"));
+    let none = |_: &str| None;
+    let (lo, hi) = extent(&f, "A", &none);
+    // It leans back from its sketch, the far face 38 along the normal.
+    assert!(near(lo[2], 600.0) && near(hi[1], -200.0 + 38.0 * c), "{lo:?} {hi:?}");
+}

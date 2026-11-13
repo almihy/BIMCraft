@@ -352,6 +352,117 @@ fn nest(rings: &[Loop], base: &Form) -> Vec<Form> {
     out
 }
 
+/// A loop of a profile in 3D: its corners, its arcs (as edges of a ring, `hole` 0 for none), and points round it in the first
+/// type (its corners and its arcs' middles), what says which loop is inside which.
+type Loop3 = (Vec<[Expr; 3]>, Vec<Bend>, Vec<[f64; 3]>);
+
+/// Sweeps along `points` (with the path's `arcs`) of each outer loop of `starts`, the loops inside it its holes (a tube's
+/// inside), one inside a hole an outer again; a swept blend's loops at its end in `ends`, as many.
+fn swept(points: &[[Expr; 3]], arcs: &[Bend], starts: &[Loop3], ends: &[Loop3], base: &Form) -> Vec<Form> {
+    let flat = profile_plane(starts.iter().map(|l| l.2.as_slice()));
+    let rings: Vec<Vec<P2>> = starts.iter().map(|l| l.2.iter().map(|p| flat(*p)).collect()).collect();
+    let depth: Vec<usize> = (0..rings.len())
+        .map(|i| (0..rings.len()).filter(|j| *j != i && rings[i].first().is_some_and(|p| inside(*p, &rings[*j]))).count())
+        .collect();
+    let mut out = Vec::new();
+    for i in (0..rings.len()).filter(|i| depth[*i].is_multiple_of(2)) {
+        let mut arcs = arcs.to_vec();
+        arcs.extend(starts[i].1.iter().cloned());
+        let (mut holes, mut end_holes) = (Vec::new(), Vec::new());
+        for j in (0..rings.len()).filter(|j| depth[*j] == depth[i] + 1 && rings[*j].first().is_some_and(|p| inside(*p, &rings[i]))) {
+            let hole = holes.len() + 1;
+            arcs.extend(starts[j].1.iter().cloned().map(|b| Bend { hole, ..b }));
+            holes.push(starts[j].0.clone());
+            if let Some(e) = ends.get(j) {
+                arcs.extend(e.1.iter().cloned().map(|b| Bend { hole, ..b }));
+                end_holes.push(e.0.clone());
+            }
+        }
+        let section_end = match ends.get(i) {
+            Some(e) => {
+                arcs.extend(e.1.iter().cloned());
+                e.0.clone()
+            }
+            None => Vec::new(),
+        };
+        out.push(Form {
+            path: points.to_vec(),
+            section: starts[i].0.clone(),
+            section_end,
+            section_holes: holes,
+            section_end_holes: end_holes,
+            arcs,
+            ..base.clone()
+        });
+    }
+    out
+}
+
+/// `e` times `k`, a number where it is.
+fn times(e: &Expr, k: f64) -> Expr {
+    match e {
+        Expr::Number(x) => Expr::Number(x * k + 0.0),
+        _ if k == 1.0 => e.clone(),
+        Expr::Formula(f) => Expr::Formula(format!("{} * ({f})", plain(k))),
+    }
+}
+
+impl Reader<'_> {
+    /// A loop of curves in 3D as a ring of `ring` ([`Loop3`]).
+    fn loop3(&self, lp: &Value, ring: Ring) -> Result<Loop3, String> {
+        let (mut out, mut arcs, mut round) = (Vec::new(), Vec::new(), Vec::new());
+        for c in lp.as_array().into_iter().flatten().take(MOST) {
+            let bit = self.curve(c)?;
+            round.push(self.at(&bit.start)?);
+            if let Some((centre, normal, mid)) = bit.arc {
+                round.push(mid);
+                arcs.push(Bend {
+                    ring,
+                    edge: out.len(),
+                    centre: centre.to_vec(),
+                    clockwise: self.map.mirrors(),
+                    normal: Some(normal),
+                    ..Bend::default()
+                });
+            }
+            out.push(bit.start);
+        }
+        Ok((out, arcs, round))
+    }
+
+    /// An extrusion on a sloped sketch plane (a chair's back): its loops swept straight along its normal from its start to
+    /// its end, a sweep of one leg. Its loops' corners follow what they are bound to, its ends what they are; the plane
+    /// itself stays where it is in the family. A blend on one isn't drawn yet.
+    fn sloped(&self, def: &Value, kind: &str, base: &Form) -> Result<Vec<Form>, String> {
+        if kind != "extrusion" {
+            return Err("it is a blend on a sloped plane, which BIMCraft can't draw yet".into());
+        }
+        let n: Vec<f64> = def["normal"].as_array().map(|v| v.iter().filter_map(num).collect()).unwrap_or_default();
+        let [nx, ny, nz] = n.as_slice() else { return Err("it says no normal".into()) };
+        let len = (nx * nx + ny * ny + nz * nz).sqrt();
+        if !(len > 1e-9) {
+            return Err("it says no normal".into());
+        }
+        // Its normal in the family's axes, and the family's origin along it in the document's.
+        let nf = self.map.turn([nx / len, ny / len, nz / len]);
+        let z0 = self.first_number(&self.map.z_minus).unwrap_or(0.0);
+        let o = [self.map.x_offset, self.map.y_offset, -z0];
+        let shift = crate::geom::v3::dot(o, nf);
+        let along = |key: &str| -> Result<Expr, String> { Ok(plus(self.value(&def[key])?, shift)) };
+        let (start, end) = (along("start")?, along("end")?);
+        let starts = loops_of(def, "loops")?.into_iter().map(|l| self.loop3(l, Ring::Section)).collect::<Result<Vec<_>, _>>()?;
+        // The path: through the first corner as the first type has it, from its start to its end along the normal.
+        let first = *starts.first().and_then(|l| l.2.first()).ok_or("its sketch has no loops")?;
+        let level = crate::geom::v3::dot(first, nf);
+        let at = |t: &Expr| -> [Expr; 3] { std::array::from_fn(|k| plus(times(t, nf[k]), first[k] - nf[k] * level)) };
+        let points = [at(&start), at(&end)];
+        if (self.first_number(&start)? - self.first_number(&end)?).abs() < 1e-6 {
+            return Err("its start and its end are one".into());
+        }
+        Ok(swept(&points, &[], &starts, &[], base))
+    }
+}
+
 /// Points in a plane (a sweep's profile) laid flat in it: across the plane of the loop of most points, its normal by
 /// Newell's sum.
 fn profile_plane<'p>(loops: impl Iterator<Item = &'p [[f64; 3]]>) -> impl Fn([f64; 3]) -> P2 {
@@ -411,7 +522,7 @@ impl Reader<'_> {
         let base = dressed(self.family, def, has_material);
         match kind {
             "extrusion" | "blend" => {
-                let (axis, _) = axis_of(&def["normal"]).ok_or("its sketch is on a sloped plane")?;
+                let Some((axis, _)) = axis_of(&def["normal"]) else { return self.sloped(def, kind, &base) };
                 let (plane, k) = sketch(axis);
                 let (start, end) = (self.coord(&def["start"], axis)?, self.coord(&def["end"], axis)?);
                 let order = |e: &Expr| self.first_number(e);
@@ -491,78 +602,18 @@ impl Reader<'_> {
                     last = Some(bit.end);
                 }
                 points.extend(last);
-                // A loop of a profile: its corners, its arcs (as edges of `ring`, `hole` 0 for none), and points round it in
-                // the first type (its corners and its arcs' middles), what says which loop is inside which.
-                type Loop3 = (Vec<[Expr; 3]>, Vec<Bend>, Vec<[f64; 3]>);
+                let count = def["profile"].as_array().map_or(1, Vec::len).clamp(1, MOST);
                 let section = |key: &str, n: usize, ring: Ring| -> Result<Loop3, String> {
                     let lp = def[key].as_array().and_then(|l| l.get(n)).filter(|l| l.as_array().is_some_and(|c| !c.is_empty()));
-                    let lp = lp.ok_or(format!("its {key} is missing (a profile family's?)"))?;
-                    let (mut out, mut arcs, mut round) = (Vec::new(), Vec::new(), Vec::new());
-                    for c in lp.as_array().into_iter().flatten() {
-                        let bit = self.curve(c)?;
-                        round.push(self.at(&bit.start)?);
-                        if let Some((centre, normal, mid)) = bit.arc {
-                            round.push(mid);
-                            arcs.push(Bend {
-                                ring,
-                                edge: out.len(),
-                                centre: centre.to_vec(),
-                                clockwise: self.map.mirrors(),
-                                normal: Some(normal),
-                                ..Bend::default()
-                            });
-                        }
-                        out.push(bit.start);
-                    }
-                    Ok((out, arcs, round))
+                    self.loop3(lp.ok_or(format!("its {key} is missing (a profile family's?)"))?, ring)
                 };
-                let count = def["profile"].as_array().map_or(1, Vec::len).clamp(1, MOST);
                 let starts = (0..count).map(|n| section("profile", n, Ring::Section)).collect::<Result<Vec<_>, _>>()?;
                 let ends = if kind == "swept_blend" {
                     (0..count).map(|n| section("profile_end", n, Ring::SectionEnd)).collect::<Result<Vec<_>, _>>()?
                 } else {
                     Vec::new()
                 };
-                // Which loop is inside which, in the profile's plane: a loop inside an outer one is a hole of it (a tube's
-                // inside), one inside a hole an outer again.
-                let flat = profile_plane(starts.iter().map(|l| l.2.as_slice()));
-                let rings: Vec<Vec<P2>> = starts.iter().map(|l| l.2.iter().map(|p| flat(*p)).collect()).collect();
-                let depth: Vec<usize> = (0..rings.len())
-                    .map(|i| (0..rings.len()).filter(|j| *j != i && rings[i].first().is_some_and(|p| inside(*p, &rings[*j]))).count())
-                    .collect();
-                let mut out = Vec::new();
-                for i in (0..rings.len()).filter(|i| depth[*i].is_multiple_of(2)) {
-                    let mut arcs = arcs.clone();
-                    arcs.extend(starts[i].1.iter().cloned());
-                    let (mut holes, mut end_holes) = (Vec::new(), Vec::new());
-                    for j in
-                        (0..rings.len()).filter(|j| depth[*j] == depth[i] + 1 && rings[*j].first().is_some_and(|p| inside(*p, &rings[i])))
-                    {
-                        let hole = holes.len() + 1;
-                        arcs.extend(starts[j].1.iter().cloned().map(|b| Bend { hole, ..b }));
-                        holes.push(starts[j].0.clone());
-                        if let Some(e) = ends.get(j) {
-                            arcs.extend(e.1.iter().cloned().map(|b| Bend { hole, ..b }));
-                            end_holes.push(e.0.clone());
-                        }
-                    }
-                    let section_end = match ends.get(i) {
-                        Some(e) => {
-                            arcs.extend(e.1.iter().cloned());
-                            e.0.clone()
-                        }
-                        None => Vec::new(),
-                    };
-                    out.push(Form {
-                        path: points.clone(),
-                        section: starts[i].0.clone(),
-                        section_end,
-                        section_holes: holes,
-                        section_end_holes: end_holes,
-                        arcs,
-                        ..base.clone()
-                    });
-                }
+                let out = swept(&points, &arcs, &starts, &ends, &base);
                 Ok(out)
             }
             "" => Err("it says no kind".into()),
@@ -784,13 +835,9 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     let mut refs = Vec::new();
     for (i, p) in def["reference_planes"].as_array().into_iter().flatten().take(super::MAX_REFERENCES).enumerate() {
         let Some(id) = p.get("id").map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_string)) else { continue };
-        let Some((axis, _)) = axis_of(&p["normal"]) else {
-            notes.push(format!(
-                "reference plane `{}` is sloped: BIMCraft's references are square to the family's axes",
-                p["name"].as_str().unwrap_or(&id)
-            ));
-            continue;
-        };
+        // A sloped plane stays where it is: what is sketched on it is placed by its own numbers (`Reader::sloped`), and
+        // what follows it in a dimension or a binding is said where it is read.
+        let Some((axis, _)) = axis_of(&p["normal"]) else { continue };
         let wanted = p.get("name").and_then(text).unwrap_or("").to_string();
         let mut name = if nameable(&wanted) { wanted } else { format!("Reference {}", i + 1) };
         let stem = name.clone();
