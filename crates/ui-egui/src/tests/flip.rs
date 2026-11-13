@@ -267,3 +267,17 @@ fn space_steps_a_selected_window_as_a_door_and_each_selected_opening_from_its_ow
     key(&mut h, Key::Space);
     assert_eq!((flips(&h, door), flips(&h, window)), ((true, false), (true, true)));
 }
+
+#[test]
+fn a_family_door_shows_only_the_flip_controls_its_family_has() {
+    let script = r#"wall {"points": [[0,0],[8000,0]]}
+family {"name": "Hand Only", "category": "door", "flips": {"facing": false}, "parameters": [{"name": "Width", "value": 900}, {"name": "Height", "value": 2100}], "types": {"A": {}}, "forms": [{"profile": [[-450, -20], [450, -20], [450, 20], [-450, 20]], "to": 2100}], "symbols": [{"line": [[-450, 100], [-450, 1000]]}]}
+door {"at": [2000, 0], "family": "Hand Only", "type": "A"}"#;
+    let mut h = app(script);
+    let door = ids(&h, "door")[0];
+    click(&mut h, P2(2000.0, 0.0));
+    assert_eq!(h.state().selection, [door]);
+    assert!(h.query_by_label("Flip facing").is_none(), "its family has no facing control");
+    arrow(&mut h, "Flip hand");
+    assert_eq!(flips(&h, door), (true, false));
+}

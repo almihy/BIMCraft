@@ -1869,19 +1869,32 @@ impl BimApp {
         };
         let (units, materials): (Units, Vec<String>) = (model.units, model.materials.keys().cloned().collect());
         let mut change: Option<(String, Result<Value, String>)> = None;
-        for (group, kinds) in [
-            ("Dimensions", &[Holds::Length, Holds::Number, Holds::Angle][..]),
-            (msg!("Materials and Finishes"), &[Holds::Material][..]),
-            ("Other", &[Holds::YesNo][..]),
-        ] {
-            let params: Vec<_> = f.parameters.iter().filter(|p| p.instance && kinds.contains(&p.kind)).collect();
-            if params.is_empty() {
-                continue;
+        // Each under the group its family gives it (Revit's parameter group), else the one Revit gives what it holds.
+        let group_of = |p: &&bimcraft_core::family::Parameter| -> String {
+            p.group.clone().unwrap_or_else(|| {
+                match p.kind {
+                    Holds::Length | Holds::Number | Holds::Angle => "Dimensions",
+                    Holds::Material => msg!("Materials and Finishes"),
+                    Holds::YesNo => "Other",
+                    Holds::Text => "Text",
+                }
+                .to_string()
+            })
+        };
+        let mut groups: Vec<String> = Vec::new();
+        for g in f.parameters.iter().filter(|p| p.instance).map(|p| group_of(&p)) {
+            if !groups.contains(&g) {
+                groups.push(g);
             }
-            let open = !self.collapsed.contains(group);
-            if group_header(ui, t(group), open) && !self.collapsed.remove(group) {
-                self.collapsed.insert(group);
+        }
+        groups.sort_by_key(|g| ["Dimensions", "Materials and Finishes", "Other"].iter().position(|x| x == g).unwrap_or(3));
+        for group_name in &groups {
+            let params: Vec<_> = f.parameters.iter().filter(|p| p.instance && group_of(p) == *group_name).collect();
+            let open = !self.collapsed_groups.contains(group_name);
+            if group_header(ui, t(group_name), open) && !self.collapsed_groups.remove(group_name) {
+                self.collapsed_groups.insert(group_name.clone());
             }
+            let group = group_name.as_str();
             if !open {
                 continue;
             }
@@ -1893,7 +1906,13 @@ impl BimApp {
                         let kind = if p.kind == Holds::Length { Length } else { Number };
                         match p.kind {
                             _ if p.formula.is_some() => {
-                                ui.label(RichText::new(shown(kind, &val, units)).color(pal().muted));
+                                let unit = p.unit.as_deref().map(|u| format!(" {u}")).unwrap_or_default();
+                                ui.label(RichText::new(format!("{}{unit}", shown(kind, &val, units))).color(pal().muted));
+                            }
+                            Holds::Text => {
+                                if let Some(typed) = self.field(ui, id, &p.name, val.as_str().unwrap_or_default().to_string(), name.id, "") {
+                                    change = Some((p.name.clone(), Ok(json!(typed))));
+                                }
                             }
                             Holds::YesNo => {
                                 let mut on = val.as_f64().is_some_and(|x| x != 0.0);
@@ -2556,6 +2575,8 @@ pub(crate) struct FamilyDialog {
     elements: Vec<Id>,
     /// Each type parameter: its name, what it holds, as typed, and whether a formula works it out.
     fields: Vec<(String, Holds, String, bool)>,
+    /// Each one's group (Revit's parameter group) and display unit, where its family gives them, in the order of `fields`.
+    about: Vec<(Option<String>, Option<String>)>,
     /// Its identity data, as typed and as it was.
     identity: Vec<IdentityField>,
     identity_were: Vec<IdentityField>,
@@ -2582,8 +2603,13 @@ impl FamilyDialog {
                 f.parameters.iter().filter(|p| !p.instance).map(|p| (p.name.clone(), p.kind, typed(p), p.formula.is_some())).collect()
             })
             .unwrap_or_default();
+        let about = m
+            .families
+            .get(&family)
+            .map(|f| f.parameters.iter().filter(|p| !p.instance).map(|p| (p.group.clone(), p.unit.clone())).collect())
+            .unwrap_or_default();
         let identity = identity_fields(m.families.get(&family).and_then(|f| f.identity.get(&name)));
-        FamilyDialog { family, name, elements, fields, identity_were: identity.clone(), identity, naming: Naming::None, error: None }
+        FamilyDialog { family, name, elements, fields, about, identity_were: identity.clone(), identity, naming: Naming::None, error: None }
     }
 
     /// The dialog showing type `name` as the model has it now.
@@ -2600,7 +2626,7 @@ impl FamilyDialog {
                 Holds::Length => json!(units.parse(typed).ok_or_else(|| tf("{}: `{}` is not a length", &[key, typed]))?),
                 Holds::Number | Holds::Angle => json!(number(typed).ok_or_else(|| tf("{}: `{}` is not a number", &[key, typed]))?),
                 Holds::YesNo => json!(typed == "1"),
-                Holds::Material => json!(typed),
+                Holds::Material | Holds::Text => json!(typed),
             };
             set.insert(key.clone(), v);
         }
@@ -2625,25 +2651,38 @@ impl BimApp {
             crate::popup::body(ui, |ui| {
                 asked = typeprops::head(ui, "family-type", &d.family, &names, &d.name, &mut d.naming, true);
                 let below = typeprops::foot_height(ui, d.error.is_some());
-                // Each parameter under the group Revit gives what it holds: lengths and angles are dimensions.
-                let group = |kind: &Holds| match kind {
+                // Each parameter under the group its family gives it (Revit's parameter group), else the one Revit gives what
+                // it holds: lengths and angles are dimensions.
+                let by_kind = |kind: &Holds| match kind {
                     Holds::Length | Holds::Angle => "Dimensions",
                     Holds::Material => msg!("Materials and Finishes"),
                     Holds::Number | Holds::YesNo => "Other",
+                    Holds::Text => "Text",
                 };
-                let mut groups: Vec<&str> = Vec::new();
-                for (_, kind, ..) in &d.fields {
-                    if !groups.contains(&group(kind)) {
-                        groups.push(group(kind));
+                let about = d.about.clone();
+                let group_at = |i: usize, kind: &Holds| -> String {
+                    about.get(i).and_then(|(g, _)| g.clone()).unwrap_or_else(|| by_kind(kind).to_string())
+                };
+                let unit_at = |i: usize| about.get(i).and_then(|(_, u)| u.clone()).unwrap_or_default();
+                let mut groups: Vec<String> = Vec::new();
+                for (i, (_, kind, ..)) in d.fields.iter().enumerate() {
+                    let g = group_at(i, kind);
+                    if !groups.contains(&g) {
+                        groups.push(g);
                     }
                 }
-                groups.sort_by_key(|g| ["Materials and Finishes", "Dimensions", "Other"].iter().position(|x| x == g));
+                groups.sort_by_key(|g| ["Materials and Finishes", "Dimensions", "Other"].iter().position(|x| x == g).unwrap_or(3));
                 typeprops::table(ui, "family-type", below, |tb| {
-                    for g in groups {
+                    for g in &groups {
                         tb.group(g);
-                        for (key, kind, typed, computed) in d.fields.iter_mut().filter(|f| group(&f.1) == g) {
+                        for (i, (key, kind, typed, computed)) in d.fields.iter_mut().enumerate() {
+                            if group_at(i, kind) != *g {
+                                continue;
+                            }
+                            let unit = unit_at(i);
                             match kind {
-                                // What a formula works out, shown as Revit greys it.
+                                // What a formula works out, shown as Revit greys it, with its unit.
+                                _ if *computed && !unit.is_empty() => tb.shown(key, &format!("{typed} {unit}")),
                                 _ if *computed => tb.shown(key, typed),
                                 Holds::YesNo => {
                                     let mut on = typed == "1";
@@ -2653,7 +2692,8 @@ impl BimApp {
                                 Holds::Material => tb.pick(key, typed, &materials),
                                 Holds::Length => tb.text(key, typed, model.units.name()),
                                 Holds::Angle => tb.text(key, typed, "°"),
-                                Holds::Number => tb.text(key, typed, ""),
+                                Holds::Number => tb.text(key, typed, &unit),
+                                Holds::Text => tb.text(key, typed, ""),
                             }
                         }
                     }
@@ -2668,8 +2708,12 @@ impl BimApp {
         match asked {
             Some(Head::Switch(n)) => d.show(&model, n),
             Some(Head::Duplicate(new)) => {
+                // The copy has the forms and symbols of the type it was made from, as Revit's Duplicate.
                 let made = match d.params(&new, model.units, true) {
-                    Ok(p) => self.run_for_type("family", p, &mut d.error),
+                    Ok(mut p) => {
+                        p["like"] = json!({&new: d.name});
+                        self.run_for_type("family", p, &mut d.error)
+                    }
                     Err(e) => {
                         d.error = Some(e);
                         false

@@ -956,6 +956,9 @@ pub struct BimApp {
     wall_flipped: bool,
     /// The Properties palette's folded groups.
     collapsed: BTreeSet<&'static str>,
+    /// The groups of a family's instance parameters in Properties that are folded, by the group's name (Revit's parameter
+    /// group, which a family names).
+    collapsed_groups: BTreeSet<String>,
     /// Where views show, last frame.
     view_rect: Rect,
     /// Where the last view drawn showed, whether it was the active view or not.
@@ -1616,6 +1619,7 @@ impl BimApp {
             place_flip: flip::PlaceFlip::default(),
             wall_flipped: false,
             collapsed: BTreeSet::new(),
+            collapsed_groups: BTreeSet::new(),
             view_rect: Rect::ZERO,
             pane: Rect::ZERO,
             browser_tab: browser::Tab::All,
