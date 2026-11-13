@@ -301,7 +301,7 @@ pub fn unpack(bytes: &[u8]) -> Result<Dxf, String> {
                     _ => Vertical::Baseline,
                 };
                 let text = r.string()?;
-                if !(height > 0.0) {
+                if height <= 0.0 {
                     continue;
                 }
                 let wide = if wide > 0.0 { wide.clamp(0.01, 100.0) } else { 1.0 };

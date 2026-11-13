@@ -311,7 +311,7 @@ impl Level {
                             .iter()
                             .map(|p| u32::from(p.get(c).copied().unwrap_or(0)) * u32::from(p.get(3).copied().unwrap_or(0)))
                             .sum();
-                        px.push(if a > 0 { (v / a) as u8 } else { 0 });
+                        px.push(v.checked_div(a).unwrap_or(0) as u8);
                     }
                     px.push((a / 4) as u8);
                 } else {

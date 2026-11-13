@@ -815,11 +815,11 @@ fn dash_of(s: &StrokeProps, k: f64) -> Option<Vec<f64>> {
         a.extend(a.clone());
     }
     let total: f64 = a.iter().sum();
-    if !(total > 1e-3) || a.iter().skip(1).step_by(2).all(|gap| *gap <= 1e-6) {
+    if total <= 1e-3 || a.iter().skip(1).step_by(2).all(|gap| *gap <= 1e-6) {
         return None;
     }
     let mut phase = (f64::from(s.dash_offset) * k).rem_euclid(total);
-    if !(phase > 1e-9) {
+    if phase <= 1e-9 {
         return Some(a);
     }
     // Which piece the phase falls in, and how far into it.
@@ -1045,13 +1045,11 @@ impl Pictures {
                     // Over what is there, straight alpha.
                     let (a, under) = (u32::from(a), u32::from(px[3]));
                     let out = a * 255 + under * (255 - a);
-                    if out > 0 {
-                        for k in 0..3 {
-                            let v = u32::from(c[k]) * a * 255 + u32::from(px[k]) * under * (255 - a);
-                            px[k] = (v / out) as u8;
-                        }
-                        px[3] = (out / 255) as u8;
+                    for k in 0..3 {
+                        let v = u32::from(c[k]) * a * 255 + u32::from(px[k]) * under * (255 - a);
+                        px[k] = v.checked_div(out).unwrap_or(0) as u8;
                     }
+                    px[3] = (out / 255) as u8;
                 }
             }
         }

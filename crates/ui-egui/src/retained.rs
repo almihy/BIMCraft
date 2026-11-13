@@ -433,6 +433,10 @@ fn tints_hold(kept: &Kept, selected: &[Id], hovered: Option<Id>) -> bool {
     }
 }
 
+/// A run of a drawing's primitives as one thread made them: their triangles, each element's pieces of them, and where each of
+/// its pictures comes among the triangles (its primitive, and the indices before it).
+type Part = (epaint::Mesh, Vec<(Id, Piece)>, Vec<(u32, u32)>);
+
 /// The triangles of `key`; none once `cancelled`.
 fn build(pipeline: &Pipeline, key: &Key, selected: &[Id], hovered: Option<Id>, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Kept> {
     use rayon::prelude::*;
@@ -442,7 +446,7 @@ fn build(pipeline: &Pipeline, key: &Key, selected: &[Id], hovered: Option<Id>, c
     let prims: Vec<usize> = (0..d.prims.len()).collect();
     // A part of the drawing's primitives at a time, each thread's triangles in their place in the order, so the whole is what one
     // thread would have made.
-    let parts: Vec<(epaint::Mesh, Vec<(Id, Piece)>, Vec<(u32, u32)>)> = prims
+    let parts: Vec<Part> = prims
         .par_chunks(PRIMS_AT_ONCE)
         .map(|chunk| {
             if cancelled() {
