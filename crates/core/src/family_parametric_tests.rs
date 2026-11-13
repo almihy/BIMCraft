@@ -1177,3 +1177,54 @@ fn a_plane_following_a_host_face_a_masking_region_and_a_nested_parts_detail_leve
     let show = pieces[0].show.unwrap();
     assert!(!show.coarse && show.medium && !show.plan_top, "{show:?}");
 }
+
+/// A stool whose two ends are `Width` apart (an instance length) with a middle plane locked 300 from each end, so a Width
+/// of 600 holds and any other can't; `type_width` is its type's Width.
+fn held_in_the_middle(type_width: f64) -> Value {
+    json!({
+        "name": "Sample Held",
+        "category": "furniture",
+        "parameters": [{"name": "Width", "kind": "length", "instance": true, "value": type_width}],
+        "types": {"Standard": {}},
+        "references": [
+            {"name": "L", "axis": "x", "at": 0, "origin": true},
+            {"name": "M", "axis": "x", "at": 300},
+            {"name": "R", "axis": "x", "at": 600}
+        ],
+        "dimensions": [
+            {"refs": ["L", "R"], "label": "Width"},
+            {"refs": ["L", "M"], "locked": true, "value": 300},
+            {"refs": ["M", "R"], "locked": true, "value": 300}
+        ],
+        "forms": [{"profile": [[0, 0], [100, 0], [100, 100], [0, 100]], "from": 0, "to": 10}]
+    })
+}
+
+#[test]
+fn an_instance_value_the_dimensions_cannot_hold_is_refused_and_the_old_one_kept() {
+    let mut s = Session::new();
+    run(&mut s, "family", held_in_the_middle(600.0));
+    let c: Id =
+        run(&mut s, "component", json!({"family": "Sample Held", "type": "Standard", "at": [0, 0], "params": {"Width": 600}}))["id"]
+            .as_u64()
+            .unwrap();
+    let e = s.execute("modify", &json!({"id": c, "params": {"Width": 900}})).unwrap_err().to_string();
+    assert!(e.contains("Constraints are not satisfied"), "{e}");
+    let Some(Element::Component(comp)) = s.model.elements.get(c) else { panic!("no component") };
+    assert_eq!(comp.params["Width"], json!(600));
+    // A new one placed with a value that can't hold is refused the same way.
+    let e = s
+        .execute("component", &json!({"family": "Sample Held", "type": "Standard", "at": [0, 0], "params": {"Width": 900}}))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("Constraints are not satisfied"), "{e}");
+}
+
+#[test]
+fn a_type_already_over_constrained_still_places() {
+    let mut s = Session::new();
+    // Its type's Width of 700 can't hold with the two locked gaps.
+    run(&mut s, "family", held_in_the_middle(700.0));
+    run(&mut s, "component", json!({"family": "Sample Held", "type": "Standard", "at": [0, 0]}));
+    run(&mut s, "component", json!({"family": "Sample Held", "type": "Standard", "at": [0, 0], "params": {"Width": 700}}));
+}

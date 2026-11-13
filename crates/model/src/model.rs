@@ -3792,6 +3792,31 @@ impl Model {
         Ok(())
     }
 
+    /// Whether the dimensions of family `name` can hold the instance values `params` give an element of type `type_name`: Revit
+    /// refuses a change that over-constrains ("Constraints are not satisfied") and keeps the old value. A type whose own
+    /// values can't be held never blocks placing it: only what the instance values add is refused. `wall` is the thickness
+    /// of the wall a door or window stands in.
+    fn family_values_hold(
+        &self,
+        who: &str,
+        f: &Family,
+        type_name: &str,
+        params: &BTreeMap<String, serde_json::Value>,
+        wall: f64,
+    ) -> Result<(), String> {
+        if params.is_empty() || f.references.is_empty() {
+            return Ok(());
+        }
+        let none = BTreeMap::new();
+        let (Ok(base), Ok(with)) = (f.values_in(type_name, &none, wall), f.values_in(type_name, params, wall)) else { return Ok(()) };
+        if f.solve(&base).is_ok()
+            && let Err(e) = f.solve(&with)
+        {
+            return Err(format!("{who}: Constraints are not satisfied: {e}"));
+        }
+        Ok(())
+    }
+
     /// Material `from`, renamed `to` in the families and their components.
     pub fn rename_material_in_families(&mut self, from: &str, to: &str) {
         for f in self.families.values_mut() {
@@ -7549,6 +7574,7 @@ impl Model {
                 let t = self.opening_dims(e).map_err(|e| format!("{who}: {e}"))?;
                 if let Some(f) = o.family.as_ref().and_then(|n| self.families.get(n)) {
                     self.family_values_ok(&who, o.family.as_deref().unwrap_or_default(), f, &o.params)?;
+                    self.family_values_hold(&who, f, &o.type_name, &o.params, self.thickness(w))?;
                     let values = f.values_in(&o.type_name, &o.params, self.thickness(w)).map_err(|e| format!("{who}: {e}"))?;
                     f.pieces(&o.type_name, &values).and_then(|_| f.all_marks(&o.type_name, &values)).map_err(|e| format!("{who}: {e}"))?;
                     size(&format!("{who} width"), t.width)?;
@@ -8001,6 +8027,7 @@ impl Model {
                 coord(&format!("{who} angle"), c.angle)?;
                 coord(&format!("{who} offset"), c.offset)?;
                 self.family_values_ok(&who, &c.family, f, &c.params)?;
+                self.family_values_hold(&who, f, &c.type_name, &c.params, crate::family::DEFAULT_WALL)?;
                 // Its shape, built once for each family, type and values the project's components have.
                 let build = || {
                     f.values(&c.type_name, &c.params)
