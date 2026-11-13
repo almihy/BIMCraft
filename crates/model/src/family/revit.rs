@@ -1223,7 +1223,12 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     let mut symbols = Vec::new();
     for d in def["lines"].as_array().into_iter().flatten().take(MOST) {
         match reader.lines(d) {
-            Ok(made) => symbols.extend(made),
+            Ok(mut made) => {
+                if d["masking"].as_bool() == Some(true) {
+                    masked_as_revit(f, &reader.first, &reader.values, &mut made);
+                }
+                symbols.extend(made)
+            }
             Err(e) => notes.push(format!("one of its lines: {e}")),
         }
     }
@@ -1403,6 +1408,49 @@ fn turned_as_revit(f: &Family, mut forms: Vec<Form>) -> Vec<Form> {
         }
     }
     forms
+}
+
+/// A masking region's edges `made` drawn at the detail levels Revit's plan draws them at in the first type: its family
+/// says none (a masking region has no Visibility Settings), yet Revit leaves a door's out at Coarse, so a level whose
+/// snapshot plan has none of the edges' ends doesn't draw them.
+fn masked_as_revit(f: &Family, first: &str, values: &BTreeMap<String, Val>, made: &mut [Symbol]) {
+    use crate::graphics::Detail;
+    let mut read = HashMap::new();
+    // Each edge's two ends.
+    let mut edges: Vec<(P2, P2)> = Vec::new();
+    for y in made.iter() {
+        let pts: Vec<P2> =
+            y.line.iter().filter_map(|[a, b]| Some(P2(number(a, values, &mut read).ok()?, number(b, values, &mut read).ok()?))).collect();
+        edges.extend(pts.windows(2).map(|w| (w[0], w[1])));
+    }
+    if edges.is_empty() {
+        return;
+    }
+    let mut levels = Levels { coarse: true, medium: true, fine: true };
+    for d in [Detail::Coarse, Detail::Medium, Detail::Fine] {
+        let Ok(marks) = f.marks_where(values, &|y: &Symbol| y.snapshot && y.view == SymbolView::Plan && y.of_type(first) && y.drawn_at(d))
+        else {
+            return;
+        };
+        let any = marks.iter().any(|m| match m {
+            // An edge is there where one line of Revit's passes through both its ends.
+            super::Mark::Line(pts) => {
+                edges.iter().any(|(a, b)| pts.iter().any(|p| a.dist(*p) < 1.0) && pts.iter().any(|p| b.dist(*p) < 1.0))
+            }
+            _ => false,
+        });
+        match d {
+            Detail::Coarse => levels.coarse = any,
+            Detail::Medium => levels.medium = any,
+            Detail::Fine => levels.fine = any,
+        }
+    }
+    let has_snapshot = f.symbols.iter().any(|y| y.snapshot && y.of_type(first));
+    if has_snapshot && (levels.coarse || levels.medium || levels.fine) {
+        for y in made.iter_mut() {
+            y.show = Some(levels);
+        }
+    }
 }
 
 /// Whether reference `name` is free: nothing ties it, through the dimensions that place planes (locked, labelled, EQ), to a

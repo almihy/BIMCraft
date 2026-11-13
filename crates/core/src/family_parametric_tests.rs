@@ -782,6 +782,8 @@ fn a_plane_following_a_host_face_a_masking_region_and_a_nested_parts_detail_leve
     let at = json!({"A": 0});
     let fam = json!({
         "name": "Sample Sill", "category": "door", "host": "wall", "types": {"A": {}},
+        // Revit's plan draws the masking region's edge at Medium and Fine only.
+        "symbols": [{"line": [[0, 0], [100, 0]], "types": ["A"], "snapshot": true, "show": {"coarse": false}}],
         "parameters": [{"name": "Width", "kind": "length", "value": 900}, {"name": "Height", "kind": "length", "value": 2100}],
         "revit": {
             "reference_planes": [
@@ -805,11 +807,14 @@ fn a_plane_following_a_host_face_a_masking_region_and_a_nested_parts_detail_leve
     );
     let v = f.values_in("A", &Default::default(), 300.0).unwrap();
     assert_eq!(v["ref(Threshold Front)"], crate::family::Val::Number(180.0));
-    // The masking region's edge draws as a line does; one in invisible lines, nothing.
-    assert_eq!(f.symbols.iter().filter(|y| !y.snapshot).count(), 1, "{:?}", f.symbols);
+    // The masking region's edge draws where Revit's plan draws it (Medium and Fine); one in invisible lines, nothing.
+    let masks: Vec<_> = f.symbols.iter().filter(|y| !y.snapshot).collect();
+    assert_eq!(masks.len(), 1, "{masks:?}");
+    assert!(masks[0].show.is_some_and(|l| !l.coarse && l.medium && l.fine), "{masks:?}");
     // The knob: its own form is off at Coarse, its nested part's settings take off its Top/Bottom; both hold.
     let others = |n: &str| s.model.families.get(n);
-    let pieces = f.pieces_with("A", &f.values("A", &Default::default()).unwrap(), &others).unwrap();
+    let parametric = Family { symbols: Vec::new(), check: Default::default(), ..f.clone() };
+    let pieces = parametric.pieces_with("A", &f.values("A", &Default::default()).unwrap(), &others).unwrap();
     let show = pieces[0].show.unwrap();
     assert!(!show.coarse && show.medium && !show.plan_top, "{show:?}");
 }

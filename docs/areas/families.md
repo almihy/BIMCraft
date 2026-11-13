@@ -288,7 +288,8 @@ other as the check and the fallback (`snapshot` forms and symbols), and checks e
   family other than a door's or a window's its Plan/RCP too; above: such a family's Plan/RCP), and a nested part is drawn
   where both its own settings and its form's say (`Show::and`). A reference plane that `follows` a host's face (the
   exporter thickened the host) keeps its offset from it where nothing else ties it to what stays (`free`). A line entry
-  that is `masking` or `invisible` draws nothing. An arc's `mid` (a bound point on it) makes its centre the one through
+  that is `invisible` draws nothing; a `masking` region's edges, which have no Visibility Settings, are
+  drawn at the detail levels where Revit's own plan of the first type has them (`masked_as_revit`: a door's not at Coarse). An arc's `mid` (a bound point on it) makes its centre the one through
   its corners and that point, per type (`Bend::through`, `circumcentre`): an arched window's head, whose radius follows
   its width as no sum of parameters does.
 - **Format.** `embedded`, `section_holes`, `section_end_holes`, `plan_top`, `plan_cut` and an arc's `through` are format
