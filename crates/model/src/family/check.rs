@@ -265,13 +265,18 @@ pub enum Gaps {
     Both(compare::Gap, compare::Gap),
 }
 
-/// Two shapes' surfaces measured each to the other.
+/// Two shapes' surfaces measured each to the other: the outer surface of each as a solid, for Revit's joined forms are one
+/// solid (the plan and the sections draw no line at a joint) and a mesh may hold faces back to back between its lumps.
 fn surfaces(made: &[[P3; 3]], revit: &[[P3; 3]]) -> Gaps {
     match (compare::Surface::new(made, NEAR), compare::Surface::new(revit, NEAR)) {
         (None, None) => Gaps::Empty,
         (Some(_), None) => Gaps::Alone(true),
         (None, Some(_)) => Gaps::Alone(false),
-        (Some(a), Some(b)) => Gaps::Both(compare::surface_gap(made, &b, NEAR, REACH), compare::surface_gap(revit, &a, NEAR, REACH)),
+        // Each measured as its own solid: its joined forms are one surface, so a face inside it is no part of it.
+        (Some(a), Some(b)) => Gaps::Both(
+            compare::surface_gap(made, &b, NEAR, REACH, Some(&compare::Solid::new(made))),
+            compare::surface_gap(revit, &a, NEAR, REACH, Some(&compare::Solid::new(revit))),
+        ),
     }
 }
 

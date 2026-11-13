@@ -1,7 +1,9 @@
 //! How near two drawings of one family are, by their geometry: BIMCraft's rebuild of a type against Revit's own result for
 //! it ([`super::check`]). Shapes are compared surface to surface both ways: points spread evenly over one's triangles, each
 //! measured to the nearest point of the other's, so a part mirrored, turned upside down, moved or missing is as far off as
-//! it really is, whatever the totals say. Plan and elevation lines are compared the same way, point by point along them.
+//! it really is, whatever the totals say. A point on a face inside the drawing's own solid (where forms overlap or touch) is
+//! no part of its outer surface and isn't measured ([`Solid`]). Plan and elevation lines are compared the same way, point by
+//! point along them.
 
 use std::collections::HashMap;
 
@@ -10,6 +12,13 @@ use crate::geom::v3::{P3, add, cross, dot, mul, sub};
 
 /// Points spread over a shape's surface, or along a drawing's lines, at most.
 const SAMPLES: usize = 6000;
+/// Triangle by point tests, at most, that deciding whether faces lie inside their own solid may cost in one comparison: past
+/// it the rest are measured as they are, never skipped.
+const WINDING_WORK: usize = 40_000_000;
+/// How far to either side of a face a point is tested for lying inside its own solid, mm.
+const SIDE: f64 = 0.05;
+/// The winding number from which a point counts as inside a solid.
+const INSIDE: f64 = 0.75;
 /// Cells a grid spreads a shape over along its longest side.
 const CELLS: f64 = 48.0;
 /// Points off by more than the tolerance measured out to the search's reach, at most: the rest are only counted.
@@ -180,9 +189,53 @@ impl<'a> Surface<'a> {
     }
 }
 
+/// A shape's solid, its triangles taken as closed surfaces however many lumps they make (forms that overlap, or touch with
+/// faces face to face): what says whether a point lies inside it, by the generalised winding number.
+pub struct Solid<'a> {
+    tris: &'a [[P3; 3]],
+    bounds: Option<(P3, P3)>,
+}
+
+impl<'a> Solid<'a> {
+    pub fn new(tris: &'a [[P3; 3]]) -> Solid<'a> {
+        Solid { tris, bounds: bounds(tris.iter().flatten().copied()) }
+    }
+
+    /// How many times `p` is inside it: the sum of the solid angles its triangles subtend at `p` over 4π (Van Oosterom and
+    /// Strackee), 1 inside a lump, 2 inside two that overlap, 0 outside. Never defined on its surface.
+    pub fn winding(&self, p: P3) -> f64 {
+        let mut sum = 0.0;
+        for [a, b, c] in self.tris {
+            let (a, b, c) = (sub(*a, p), sub(*b, p), sub(*c, p));
+            let (la, lb, lc) = (length(a), length(b), length(c));
+            let denom = la * lb * lc + dot(a, b) * lc + dot(a, c) * lb + dot(b, c) * la;
+            sum += 2.0 * dot(a, cross(b, c)).atan2(denom);
+        }
+        sum / (4.0 * std::f64::consts::PI)
+    }
+
+    /// Whether a point on a face of this solid, whose unit normal is `n`, lies inside it on both sides of the face: the face is
+    /// between parts, not on the solid's outer surface. `work` is what is left to spend on triangles tested; a point with no
+    /// work left to decide it is not inside.
+    fn encloses(&self, p: P3, n: P3, work: &mut usize) -> bool {
+        let Some((lo, hi)) = self.bounds else { return false };
+        for side in [SIDE, -SIDE] {
+            let q = add(p, mul(n, side));
+            if (0..3).any(|k| q[k] < lo[k] || q[k] > hi[k]) || *work < self.tris.len() {
+                return false;
+            }
+            *work -= self.tris.len();
+            if self.winding(q) < INSIDE {
+                return false;
+            }
+        }
+        true
+    }
+}
+
 /// Points spread over `tris`, about `SAMPLES` of them by area (a small triangle gets its corners and its middle at least),
-/// each with the area it stands for.
-fn spread(tris: &[[P3; 3]]) -> Vec<(P3, f64)> {
+/// each with the area it stands for and its triangle's unit normal (a triangle of no area has no points).
+fn spread(tris: &[[P3; 3]]) -> Vec<(P3, f64, P3)> {
     let total: f64 = tris.iter().map(area).sum();
     if total <= 0.0 {
         return Vec::new();
@@ -191,6 +244,10 @@ fn spread(tris: &[[P3; 3]]) -> Vec<(P3, f64)> {
     let mut out = Vec::new();
     for t in tris {
         let a = area(t);
+        if a <= 1e-12 {
+            continue;
+        }
+        let normal = mul(cross(sub(t[1], t[0]), sub(t[2], t[0])), 1.0 / (2.0 * a));
         let longest = (0..3).map(|k| length(sub(t[(k + 1) % 3], t[k]))).fold(0.0, f64::max);
         let n = ((longest / step).ceil() as usize).clamp(1, 64);
         // A lattice of n steps along two of its sides, and its middle: each point stands for an even share of its area.
@@ -204,19 +261,20 @@ fn spread(tris: &[[P3; 3]]) -> Vec<(P3, f64)> {
             }
         }
         let share = a / pts.len() as f64;
-        out.extend(pts.into_iter().map(|p| (p, share)));
+        out.extend(pts.into_iter().map(|p| (p, share, normal)));
     }
     // Too many: every k-th kept, its weight taken up.
     if out.len() > SAMPLES * 4 {
         let k = out.len().div_ceil(SAMPLES * 4);
-        out = out.chunks(k).map(|c| (c[0].0, c.iter().map(|q| q.1).sum())).collect();
+        out = out.chunks(k).map(|c| (c[0].0, c.iter().map(|q| q.1).sum(), c[0].2)).collect();
     }
     out
 }
 
 /// How far `a`'s surface is from `b`'s: each of `a`'s points measured to `b`, those farther than `near` counted, the farthest
-/// looked for within `reach`.
-pub fn surface_gap(a: &[[P3; 3]], b: &Surface, near: f64, reach: f64) -> Gap {
+/// looked for within `reach`. With `own` (`a`'s solid), a point farther than `near` that lies inside it on both sides of its
+/// face is left out, weight and all: `a`'s joined forms are one solid, and a face between them is no surface of it.
+pub fn surface_gap(a: &[[P3; 3]], b: &Surface, near: f64, reach: f64, own: Option<&Solid>) -> Gap {
     let points = spread(a);
     let total: f64 = points.iter().map(|p| p.1).sum();
     if total <= 0.0 {
@@ -224,9 +282,17 @@ pub fn surface_gap(a: &[[P3; 3]], b: &Surface, near: f64, reach: f64) -> Gap {
     }
     let mut gap = Gap::NONE;
     let (mut off, mut far) = (0.0, 0);
-    for (p, w) in points {
+    let mut work = WINDING_WORK;
+    let mut inside = 0.0;
+    for (p, w, n) in points {
         let d = b.distance(p, near * 1.000_001);
         if d <= near {
+            continue;
+        }
+        if let Some(s) = own
+            && s.encloses(p, n, &mut work)
+        {
+            inside += w;
             continue;
         }
         off += w;
@@ -237,8 +303,37 @@ pub fn surface_gap(a: &[[P3; 3]], b: &Surface, near: f64, reach: f64) -> Gap {
             gap.at = p;
         }
     }
-    gap.share = off / total;
+    // What stays is a share of the surface that stays.
+    gap.share = if total > inside { off / (total - inside) } else { 0.0 };
     gap
+}
+
+/// What the plane at height `z` cuts of a solid's triangles, as segments: for each triangle with corners on both sides of `z`
+/// (one at exactly `z` is above it), the segment between its two edges' crossings, as a plan draws what its cut plane cuts.
+/// A segment shorter than a millionth of a millimetre is left out.
+pub fn section(tris: &[[P3; 3]], z: f64) -> Vec<[P2; 2]> {
+    let mut out = Vec::new();
+    for t in tris {
+        let above = t.map(|c| c[2] >= z);
+        if above.iter().all(|a| *a) || above.iter().all(|a| !*a) {
+            continue;
+        }
+        let mut at = Vec::with_capacity(2);
+        for k in 0..3 {
+            let (i, j) = (k, (k + 1) % 3);
+            if above[i] != above[j] {
+                let (a, b) = (t[i], t[j]);
+                let u = (z - a[2]) / (b[2] - a[2]);
+                at.push(P2(a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u));
+            }
+        }
+        if let [a, b] = at.as_slice()
+            && ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt() >= 1e-6
+        {
+            out.push([*a, *b]);
+        }
+    }
+    out
 }
 
 /// A drawing's lines, each a run of points, as segments in a grid: what the nearest point to a point is found on.
@@ -355,10 +450,10 @@ mod tests {
     fn a_shape_is_near_itself_and_as_far_from_a_moved_copy_as_it_was_moved() {
         let a = cuboid([0.0; 3], [1000.0, 500.0, 750.0]);
         let s = Surface::new(&a, 2.0).unwrap();
-        let g = surface_gap(&a, &s, 2.0, 200.0);
+        let g = surface_gap(&a, &s, 2.0, 200.0, None);
         assert!(g.worst < 1e-6 && g.share == 0.0, "{g:?}");
         let b = cuboid([30.0, 0.0, 0.0], [1030.0, 500.0, 750.0]);
-        let g = surface_gap(&b, &s, 2.0, 200.0);
+        let g = surface_gap(&b, &s, 2.0, 200.0, None);
         assert!((g.worst - 30.0).abs() < 1e-6 && g.share > 0.0, "{g:?}");
     }
 
@@ -370,7 +465,7 @@ mod tests {
         let mut m = cuboid([-500.0, 0.0, 0.0], [500.0, 100.0, 100.0]);
         m.extend(cuboid([-500.0, 100.0, 0.0], [-400.0, 600.0, 100.0]));
         let s = Surface::new(&l, 2.0).unwrap();
-        let g = surface_gap(&m, &s, 2.0, 2000.0);
+        let g = surface_gap(&m, &s, 2.0, 2000.0, None);
         // The leg's far end is 500 from the bar, the nearest of the L.
         assert!(g.worst > 400.0 && g.share > 0.2, "{g:?}");
     }
@@ -383,5 +478,74 @@ mod tests {
         let b = vec![vec![P2(0.0, 5.0), P2(1000.0, 5.0), P2(1000.0, 500.0)]];
         let g = line_gap(&b, &l, 1.0, 100.0);
         assert!((g.worst - 5.0).abs() < 1e-9 && g.share > 0.5, "{g:?}");
+    }
+
+    /// `a`'s outer surface measured to `b`, with `a`'s own solid taken into account.
+    fn outer_gap(a: &[[P3; 3]], b: &[[P3; 3]]) -> Gap {
+        let s = Surface::new(b, 2.0).unwrap();
+        surface_gap(a, &s, 2.0, 500.0, Some(&Solid::new(a)))
+    }
+
+    #[test]
+    fn faces_inside_the_solid_are_not_compared() {
+        // Two cuboids overlapping, against the one cuboid they make together.
+        let mut ours = cuboid([0.0, 0.0, 0.0], [600.0, 100.0, 100.0]);
+        ours.extend(cuboid([400.0, 0.0, 0.0], [1000.0, 100.0, 100.0]));
+        let one = cuboid([0.0, 0.0, 0.0], [1000.0, 100.0, 100.0]);
+        let (a, b) = (outer_gap(&ours, &one), outer_gap(&one, &ours));
+        assert!(a.worst <= 2.0 && b.worst <= 2.0, "{a:?} {b:?}");
+        // Without its solid, the faces inside it are off by tens of millimetres.
+        let s = Surface::new(&one, 2.0).unwrap();
+        assert!(surface_gap(&ours, &s, 2.0, 500.0, None).worst > 10.0);
+        // Two lumps sharing a face, against one cuboid.
+        let mut lumps = cuboid([0.0, 0.0, 0.0], [500.0, 100.0, 100.0]);
+        lumps.extend(cuboid([500.0, 0.0, 0.0], [1000.0, 100.0, 100.0]));
+        let (a, b) = (outer_gap(&lumps, &one), outer_gap(&one, &lumps));
+        assert!(a.worst <= 2.0 && b.worst <= 2.0, "{a:?} {b:?}");
+        let s = Surface::new(&one, 2.0).unwrap();
+        assert!(surface_gap(&lumps, &s, 2.0, 500.0, None).worst > 10.0);
+    }
+
+    #[test]
+    fn a_missing_part_is_still_far() {
+        let ours = cuboid([0.0, 0.0, 0.0], [1000.0, 100.0, 100.0]);
+        let mut revit = ours.clone();
+        revit.extend(cuboid([1200.0, 0.0, 0.0], [1300.0, 100.0, 100.0]));
+        let (a, b) = (outer_gap(&ours, &revit), outer_gap(&revit, &ours));
+        assert!(a.worst <= 2.0, "{a:?}");
+        assert!(b.worst >= 200.0 - 1e-6 && b.share > 0.0, "{b:?}");
+    }
+
+    #[test]
+    fn a_hollow_inside_a_solid_is_still_its_surface() {
+        // A cuboid with a closed cavity: the cavity's faces face into the hollow, so they are not inside the solid.
+        let mut ours = cuboid([0.0, 0.0, 0.0], [1000.0, 1000.0, 1000.0]);
+        let cavity = cuboid([400.0, 400.0, 400.0], [600.0, 600.0, 600.0]);
+        ours.extend(cavity.iter().map(|[a, b, c]| [*a, *c, *b]));
+        let outer = cuboid([0.0, 0.0, 0.0], [1000.0, 1000.0, 1000.0]);
+        let g = outer_gap(&ours, &outer);
+        assert!(g.worst > 100.0 && g.share > 0.0, "{g:?}");
+    }
+
+    #[test]
+    fn the_winding_number_counts_the_lumps_a_point_is_in() {
+        let mut t = cuboid([0.0; 3], [600.0, 100.0, 100.0]);
+        t.extend(cuboid([400.0, 0.0, 0.0], [1000.0, 100.0, 100.0]));
+        let s = Solid::new(&t);
+        assert!((s.winding([100.0, 50.0, 50.0]) - 1.0).abs() < 1e-9);
+        assert!((s.winding([500.0, 50.0, 50.0]) - 2.0).abs() < 1e-9);
+        assert!(s.winding([1500.0, 50.0, 50.0]).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_section_is_what_the_plane_cuts() {
+        // A 100 x 200 x 300 box cut at 150 draws its four sides: a rectangle round it.
+        let b = cuboid([0.0; 3], [100.0, 200.0, 300.0]);
+        let cut = section(&b, 150.0);
+        let len: f64 = cut.iter().map(|[a, b]| ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt()).sum();
+        assert!((len - 600.0).abs() < 1e-6, "{len}");
+        assert!(cut.iter().flatten().all(|p| p.0 == 0.0 || p.0 == 100.0 || p.1 == 0.0 || p.1 == 200.0), "{cut:?}");
+        // Above the box, below it, or at its bottom face (a corner at exactly z is above it): nothing.
+        assert!(section(&b, 400.0).is_empty() && section(&b, -1.0).is_empty() && section(&b, 0.0).is_empty());
     }
 }
