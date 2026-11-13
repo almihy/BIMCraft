@@ -1172,9 +1172,25 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         if placed(&dimensions[i]) || dimensions[i].refs.len() != 2 || dimensions[i].value.is_none() {
             continue;
         }
+        // Free: nothing ties it, through the dimensions that place planes, to a plane that stays (the origin, a host's face).
         let free = |name: &str| {
-            !references.iter().any(|r| r.name == name && (r.origin || r.is_reference.as_deref().is_some_and(|k| k.starts_with("host_"))))
-                && !dimensions.iter().any(|d| placed(d) && d.refs.iter().any(|x| x == name))
+            let stays = |n: &str| {
+                references.iter().any(|r| r.name == n && (r.origin || r.is_reference.as_deref().is_some_and(|k| k.starts_with("host_"))))
+            };
+            let mut group: BTreeSet<&str> = BTreeSet::from([name]);
+            loop {
+                let before = group.len();
+                let more: Vec<&str> = dimensions
+                    .iter()
+                    .filter(|d| placed(d) && d.refs.iter().any(|x| group.contains(x.as_str())))
+                    .flat_map(|d| d.refs.iter().map(String::as_str))
+                    .collect();
+                group.extend(more);
+                if group.len() == before || group.len() > super::MAX_REFERENCES {
+                    break;
+                }
+            }
+            !group.iter().any(|n| stays(n))
         };
         // And only where the gap is the same in every type.
         let at = |name: &str| reader.planes.values().find(|p| p.0 == name).map(|p| p.2.clone()).unwrap_or_default();

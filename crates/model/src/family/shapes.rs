@@ -193,14 +193,15 @@ pub(crate) fn along_holed(path: &[P3], section: &[P3], section_end: &[P3], holes
     let leg = facing
         .and_then(|nrm| {
             (0..legs)
-                .filter(|i| dot(nrm, dirs[*i]).abs() > 0.999)
+                // Square to the leg, near enough for a chord of an arc (a profile at a curved path's start), and the
+                // leg nearest its middle.
+                .filter(|i| dot(nrm, dirs[*i]).abs() > 0.95)
                 .map(|i| {
-                    let t = dot(sub(centre, path[i]), dirs[i]);
                     let len = dot(sub(path[(i + 1) % n], path[i]), dirs[i]);
+                    let t = dot(sub(centre, path[i]), dirs[i]).clamp(0.0, len.max(0.0));
                     let off = sub(sub(centre, path[i]), mul(dirs[i], t));
-                    (i, if t < -1e-3 || t > len + 1e-3 { f64::INFINITY } else { dot(off, off) })
+                    (i, dot(off, off))
                 })
-                .filter(|(_, d)| d.is_finite())
                 .min_by(|a, b| a.1.total_cmp(&b.1))
                 .map(|(i, _)| i)
         })

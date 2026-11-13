@@ -12,7 +12,14 @@ use crate::graphics::Detail;
 
 /// How far the volumes may be apart, as a share of Revit's, and the boxes and the plan symbols' extents, mm.
 pub const VOLUME: f64 = 0.01;
+/// How far the volumes may be apart where its definition has curves (revolves, arcs): Revit's result is its curves in a few
+/// facets, as its views tessellate them, where BIMCraft's are in many, so a curved form holds a little more in BIMCraft.
+pub const VOLUME_CURVED: f64 = 0.03;
 pub const BOX: f64 = 2.0;
+/// The height over its level a floor plan cuts at, mm: Revit's default, which its plan of a family is drawn at.
+pub const PLAN_CUT: f64 = 1200.0;
+/// How near the cut plane a form's bottom may be and still be seen below it, not cut, mm.
+pub const CUT_EPS: f64 = 0.5;
 
 /// The volume and box of what a view at a detail level draws of `pieces`.
 fn measure(pieces: &[Piece], d: Detail) -> (f64, Option<[[f64; 3]; 2]>) {
@@ -134,10 +141,13 @@ impl Family {
             (Err(e), _) => return fail(format!("it doesn't come out in this type: {e}")),
             (_, Err(e)) => return fail(format!("what Revit made of it can't be drawn: {e}")),
         };
+        let curved =
+            self.forms.iter().any(|f| !f.snapshot && f.of_type(t) && (f.axis.is_some() || f.circle.is_some() || !f.arcs.is_empty()));
         for d in [Detail::Coarse, Detail::Medium, Detail::Fine] {
             let ((va, ba), (vb, bb)) = (measure(&made, d), measure(&revit, d));
             let off = (va - vb).abs();
-            if off > VOLUME * vb.max(1.0) && off > 1000.0 {
+            let share = if curved && va > vb { VOLUME_CURVED } else { VOLUME };
+            if off > share * vb.max(1.0) && off > 1000.0 {
                 let pct = if vb > 0.0 { off / vb * 100.0 } else { 100.0 };
                 let way = if va > vb { "more" } else { "less" };
                 return fail(format!(
@@ -172,9 +182,24 @@ impl Family {
             };
             // What the plan draws: its symbols and the forms it shows from above (Revit's plan of a family it brings may
             // be its forms' lines, which BIMCraft draws from the forms).
+            // A door or a window in plan as Revit's floor plan sees it at its sill: what its cut plane, 1200 mm over the
+            // level, passes through, where its Plan/RCP says, and what is wholly below it, seen.
+            let cut = PLAN_CUT
+                - match values.get(super::SILL) {
+                    Some(super::Val::Number(x)) => *x,
+                    _ => 0.0,
+                };
+            let shown = |p: &Piece| {
+                if !self.category.hosted() || (p.bottom < cut - CUT_EPS && cut < p.top) {
+                    p.in_plan(d)
+                } else {
+                    // Below it, or standing on it (a board on the sill the plane cuts at): seen.
+                    p.bottom <= cut + CUT_EPS && p.at(d)
+                }
+            };
             let plan = |marks: Vec<super::Mark>, pieces: &[Piece]| {
                 let mut all = marks;
-                all.extend(pieces.iter().filter(|p| p.in_plan(d)).map(|p| super::Mark::Line(p.outline.clone())));
+                all.extend(pieces.iter().filter(|p| shown(p)).map(|p| super::Mark::Line(p.outline.clone())));
                 extent(&all)
             };
             let (ma, mb) = match (marks(false), marks(true)) {

@@ -688,3 +688,55 @@ fn an_extrusion_on_a_sloped_plane_is_swept_along_its_normal() {
     // It leans back from its sketch, the far face 38 along the normal.
     assert!(near(lo[2], 600.0) && near(hi[1], -200.0 + 38.0 * c), "{lo:?} {hi:?}");
 }
+
+#[test]
+fn a_windows_board_below_the_plan_cut_is_seen_in_plan_whatever_its_plan_setting() {
+    let mut s = Session::new();
+    // A board on the sill, 25 thick, Plan/RCP off: Revit's floor plan, cutting 1200 over the level, sees it from above.
+    let board = |t: &str| {
+        json!({"mesh": cuboid([-450.0, -160.0, 0.0], [450.0, 0.0, 25.0]), "types": [t], "snapshot": true,
+                                 "show": {"coarse": false, "medium": true, "fine": true, "plan": false, "front": true, "side": true}})
+    };
+    let outline = |t: &str| {
+        let ring = [[-450.0, -160.0], [450.0, -160.0], [450.0, 0.0], [-450.0, 0.0], [-450.0, -160.0]];
+        json!({"line": ring, "types": [t], "snapshot": true, "show": {"coarse": false, "medium": true, "fine": true}})
+    };
+    let fam = json!({
+        "name": "Boarded", "category": "window", "host": "wall",
+        "parameters": [{"name": "Width", "kind": "length", "value": 800}, {"name": "Height", "kind": "length", "value": 1200},
+                       {"name": "Sill Height", "kind": "length", "value": 900}],
+        "types": {"A": {}},
+        "forms": [board("A")],
+        "symbols": [outline("A")],
+        "revit": {"forms": [{"kind": "extrusion", "normal": [0, 0, 1], "start": 0, "end": 25,
+                             "show": {"coarse": false, "medium": true, "fine": true, "plan": false, "front": true, "side": true},
+                             "loops": [rect(json!(-450), json!(450), json!(-160), json!(0))]}]}
+    });
+    let r = run(&mut s, "family", fam);
+    assert_eq!(r["editable"]["ok"], true, "{} {}", r["editable"], r["check"]);
+}
+
+#[test]
+fn a_sweep_starting_on_a_bend_keeps_its_profile_at_the_start() {
+    let mut s = Session::new();
+    let p = |x: f64, y: f64, z: f64| json!([x, y, z]);
+    // A tube's bend up from the floor, then a long run back along -y high above: the profile at the start faces y, as the
+    // run does, but it belongs at the start.
+    let half = |from: f64| {
+        json!({"arc": {"center": p(0.0, 0.0, 12.7), "radius": 12.7, "start": p(0.0, 0.0, 12.7 + 12.7 * from),
+                                          "end": p(0.0, 0.0, 12.7 - 12.7 * from), "normal": [0, -1, 0]}})
+    };
+    let fam = json!({
+        "name": "Frame", "category": "furniture", "types": {"A": {}},
+        "revit": {"forms": [{"kind": "sweep", "profile": [[half(1.0), half(-1.0)]],
+                             "path": [{"arc": {"center": p(0.0, 0.0, 63.5), "radius": 50.8, "start": p(0.0, 0.0, 12.7), "end": p(0.0, 50.8, 63.5), "normal": [1, 0, 0]}},
+                                      line(p(0.0, 50.8, 63.5), p(0.0, 50.8, 400.0)),
+                                      {"arc": {"center": p(0.0, 0.0, 400.0), "radius": 50.8, "start": p(0.0, 50.8, 400.0), "end": p(0.0, 0.0, 450.8), "normal": [1, 0, 0]}},
+                                      line(p(0.0, 0.0, 450.8), p(0.0, -400.0, 450.8))]}]}
+    });
+    run(&mut s, "family", fam);
+    let f = s.model.families["Frame"].clone();
+    let none = |_: &str| None;
+    let (lo, hi) = extent(&f, "A", &none);
+    assert!(lo[1] > -401.0 && hi[1] < 64.0 && lo[2] > -0.5, "{lo:?} {hi:?}");
+}

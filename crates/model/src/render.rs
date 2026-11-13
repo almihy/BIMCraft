@@ -3631,8 +3631,13 @@ fn opening(d: &mut Drawing, m: &Model, e: &Element, o: &Opening, w: &Wall, cut: 
     // its symbols at that level (a door's swing).
     if o.family.is_some() {
         let detail = d.detail;
+        // Cut, as its Plan/RCP setting says; wholly under the cut plane (a window's board), seen from above at its level,
+        // as Revit draws a door's or a window's forms below the cut whatever that setting says.
         let drawn = |p: &crate::family::Piece| p.show.map_or(detail != Detail::Coarse, |s| s.plan && s.at(detail));
-        for piece in m.opening_pieces(e).iter().filter(|p| p.bottom <= cut && cut < p.top && drawn(p)) {
+        let seen = |p: &crate::family::Piece| p.show.map_or(detail != Detail::Coarse, |s| s.at(detail));
+        let eps = crate::family::check::CUT_EPS;
+        let crossing = |p: &crate::family::Piece| p.bottom < cut - eps && cut < p.top;
+        for piece in m.opening_pieces(e).iter().filter(|p| if crossing(p) { drawn(p) } else { p.bottom <= cut + eps && seen(p) }) {
             d.line(&piece.outline, BY_CATEGORY, INK, true);
         }
         d.part(Part::Projection);
