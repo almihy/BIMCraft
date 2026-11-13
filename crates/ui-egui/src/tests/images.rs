@@ -378,7 +378,7 @@ fn a_layer_the_pdf_has_off_shows_unticked_in_the_view_and_ticking_it_shows_it() 
 }
 
 #[test]
-fn imported_categories_gives_a_pdf_and_each_of_its_layers_their_lines_and_halftone_as_a_dwgs() {
+fn imported_categories_gives_a_pdf_its_visibility_and_halftone_as_a_dwgs() {
     let content = "/OC /L0 BDC 0 0 0 RG 2 w 10 10 m 190 10 l S EMC /OC /L1 BDC 1 0 0 RG 2 w 40 150 m 160 150 l S EMC";
     let pdf = bimcraft_core::raster::pdf::sample_layered(content, [200.0, 200.0], &[("Walls", false), ("Furniture", false)]);
     let mut h = app(BOX);
@@ -388,13 +388,14 @@ fn imported_categories_gives_a_pdf_and_each_of_its_layers_their_lines_and_halfto
     shortcut(&mut h, "VV");
     press(&mut h, "Imported Categories");
     press(&mut h, "plan.pdf: Unfold");
-    // Furniture in halftone, the whole page hidden by its own row's box.
-    pick(&mut h, Role::CheckBox, "Furniture: Halftone");
+    // The page in halftone (the whole file's, as Revit's: a layer has none of its own), and hidden by its own row's box.
+    assert!(h.query_by_label("Furniture: Halftone").is_none());
+    pick(&mut h, Role::CheckBox, "plan.pdf: Halftone");
     pick(&mut h, Role::CheckBox, "plan.pdf");
     press(&mut h, "OK");
     let g = plan_graphics(&h, 100000);
     let look = g.pdf_imports.get("plan.pdf").cloned().unwrap_or_default();
-    assert!(look.all.hidden && look.layers.get("Furniture").is_some_and(|o| o.halftone), "{look:?}");
+    assert!(look.all.hidden && look.all.halftone, "{look:?}");
     let view = bimcraft_core::prim::View { scale: 0.05, cx: 0.0, cy: 0.0, width: 400, height: 400 };
     let drawn = bimcraft_core::render::draw(&h.state().session.model, 100000, view);
     assert!(

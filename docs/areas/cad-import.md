@@ -138,8 +138,11 @@ asked, which snapping and `cad::nearest` use too), and a run's points under a pi
 dense sheet draws quickly zoomed in and zoomed out. Each layer draws as the view's Imported Categories say (`ImportLook`:
 the import's row and each layer's projection lines, colour, weight and pattern, and halftone; a layer's own win). An
 import is one element: picked by any of its lines, selected whole. Sections, elevations and the 3D view leave imports out, as
-Revit's do for a drawing placed in a plan; IFC export leaves them out too. The category is `cadimport`, Revit's Imported
-Categories: Visibility/Graphics hides it or halftones it in a view like any other.
+Revit's do for a drawing placed in a plan; IFC export leaves them out too. The category is `cadimport`: hidden in a view
+(Imported Categories' Show imported categories in this view cleared), every drawing and every PDF page's lines leave it
+(`Look::draws_pdf_lines`), and it halftones like any other. `familyimport` is Imports in Families' row, a category hidden and
+overridden as any; families bring in no CAD yet, so it draws nothing. An import's fills and hatches keep their own colours:
+as in Revit, its Patterns can't be overridden (`ImportLook::check` takes lines and halftone only).
 
 `snap.rs` gathers a plan's imports' endpoints, midpoints and centres, and their segments for crossings and nearest points, so a
 wall drawn from corner to corner of a drawing lies on its lines; a layer hidden isn't snapped to.
@@ -150,11 +153,16 @@ Insert > Link CAD (in the Link panel) and Import CAD (a panel of its own) ask fo
 for its name, colours, layers (visible or all), units (auto-detect, or one), positioning (center to center, or origin to origin)
 and whether it's for the current view only; it runs `import_cad` on the plan on screen's level, selects what came in, and keeps
 the box open with the reason when a file can't come in. The Properties palette shows an import's drawing, file, unit, counts,
-level, position, angle and scale, and a drop-down for its colours. Visibility/Graphics has an Imported Categories tab: the
-category's row, then a row for each drawing of the project and each PDF page placed in the view (`imports`), as Revit's: its
-visibility, its Projection Lines (Line Graphics) and Halftone, and folded under it a row for each of its layers with the same,
-a layer's box cleared for those the view hides. A view template carries all of it when it controls `imports` (V/G Overrides
-Import), as the rest of a view's graphics. A right click on linked drawings selected offers Reload CAD, which runs
+level, position, angle and scale, and a drop-down for its colours. Visibility/Graphics has an Imported Categories tab laid
+out as Revit's (`graphics.rs` `imported`): Show imported categories in this view over it (`cadimport` hidden), then one table,
+its columns Visibility, Projection/Surface (Lines, Patterns) and Halftone, of a row for each drawing of the project, each PDF
+page drawn from its lines placed in the view, and Imports in Families, sorted by name. An import's row has its visibility,
+its Projection Lines (Line Graphics) and its Halftone, the whole file's; folded under it, a row for each of its layers has its
+visibility and Lines, its Halftone hatched, a layer's box cleared for those the view hides. Patterns is hatched on every row.
+All, None and Invert under the table set the visibility of every row, an import's layers among them whether folded or not,
+and Expand All unfolds every import; Object Styles… is in a box below. The box over the table and Imports in Families are
+categories, which a view template carries when it controls `categories`; the imports' rows are what it carries when it
+controls `imports` (V/G Overrides Import), and each row can be changed only where the view's template doesn't set it. A right click on linked drawings selected offers Reload CAD, which runs
 `reload_cad` for each.
 
 ## Images and PDFs
@@ -240,7 +248,10 @@ the layers the image hides everywhere (`ImageInstance::hidden`) and those its vi
 image's name, a library reference of kind `image`; `Look::hidden_pdf_layers`), as its view draws it
 (`Graphics::pdf_imports`). The canvas keeps a drawing's triangles on the card even with pictures in it, each picture drawn
 by egui in its place between them (`retained.rs`). A project with a drawn page, or a view or template that hides a page's
-layers or says how an import draws, is written as format 21; one with images but none, 20.
+layers or says how an import draws, is written as format 21; one with images but none, 20. A template that controls `imports`
+but holds none of that (every new one) doesn't force 21 by itself: written older, it leaves the group out of its `controls`,
+which a build of 20 can't name, unless the drawings' layers it hides, or those of a view following it, would then show
+differently (`Model::written_format`).
 
 Commands: `import_pdf` lists the page's `layers`; those the file has off come in hidden in the view it is placed in, unticked
 in its Imported Categories (on the instance, hidden wherever it shows, where that view has no graphics of its own);

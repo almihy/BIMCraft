@@ -299,9 +299,7 @@ impl<'a> Scene<'a> {
                 }
                 Element::DetailLine(l) if m.annotation_in(e, view) => s.curve(&l.curve, p, window, of),
                 // A PDF's lines, Revit's Enable Snaps: their ends, middles and crossings, and the lines themselves.
-                Element::Image(im)
-                    if im.snaps && m.annotation_in(e, view) && !look.pdf_import_look(&im.type_name).is_some_and(|l| l.all.hidden) =>
-                {
+                Element::Image(im) if im.snaps && m.annotation_in(e, view) && look.draws_pdf_lines(&im.type_name) => {
                     if let Some((cad, ci)) = m.image_types.get(&im.type_name).and_then(|t| im.lines_placed(t, im.view)) {
                         cad_scene(&mut s, &cad, &ci, p, window, look.hidden_pdf_layers(&im.type_name), id);
                     }

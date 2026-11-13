@@ -192,6 +192,23 @@ fn a_pdfs_layer_is_drawn_in_the_lines_and_halftone_a_view_gives_it_and_a_templat
 }
 
 #[test]
+fn show_imported_categories_cleared_hides_a_pdfs_lines_with_the_cad_drawings() {
+    let mut s = with_file("plan.pdf", plan_pdf());
+    run(&mut s, "import_pdf", json!({"path": "plan.pdf", "scale": 100}));
+    let level = s.model.guid(s.model.levels()[0].0).to_string();
+    let (wx, wy) = at(100.0, 10.0);
+    assert!(has(&plan(&s), wx, wy, [0, 0, 0]), "the wall is drawn");
+    // Imported Categories' box over its table: the `cadimport` category hidden hides every import in the view.
+    run(&mut s, "graphics", json!({"view": level, "hide": ["cadimport"]}));
+    assert!(!has(&plan(&s), wx, wy, [0, 0, 0]), "the page's lines are hidden with the imports");
+    run(&mut s, "graphics", json!({"view": level, "show": ["cadimport"]}));
+    assert!(has(&plan(&s), wx, wy, [0, 0, 0]));
+    // Imports in Families is a row of its own, hidden and overridden as a category.
+    run(&mut s, "graphics", json!({"view": level, "categories": {"familyimport": {"hidden": true, "halftone": true}}}));
+    assert!(has(&plan(&s), wx, wy, [0, 0, 0]), "it isn't the project's imports");
+}
+
+#[test]
 fn a_page_is_read_again_from_its_pdf_into_the_same_image_and_its_instances_stay() {
     let mut s = with_file("plan.pdf", plan_pdf());
     let r = run(&mut s, "import_pdf", json!({"path": "plan.pdf", "scale": 100}));

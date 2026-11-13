@@ -2155,7 +2155,11 @@ other_files(
          its name, and `pdf_imports` each PDF page's lines, by the image's, as Revit's Imported Categories: `all` the import's \
          own row (hidden: the whole import is; projection: its lines' colour, weight and dash; halftone) and `layers` each \
          layer's (its projection lines and halftone, winning over the import's), merged into what the view has (null takes a \
-         setting, a layer or the whole away)",
+         setting, a layer or the whole away); an import's patterns can't be overridden, as in Revit. Imported Categories' box \
+         over its table, Show imported categories in this view, is the category `cadimport`: hidden (`hide: [cadimport]`), \
+         every CAD drawing and every PDF page's lines leave the view; its Imports in Families row is the category \
+         `familyimport`, hidden and overridden (projection lines, halftone) as any category (what families bring in from CAD \
+         files; families hold none yet). Both are in a template's `categories`",
         view_graphics,
     ),
     edit(
@@ -3998,6 +4002,11 @@ fn edit_graphics(c: &str, m: &Model, p: &Value, g: &mut Graphics, of_template: b
             v if absent(v) => {}
             Some(Value::Object(o)) if o.len() <= crate::raster::MAX_TYPES.max(crate::cad::MAX_CADS) => {
                 for (name, patch) in o {
+                    // Null takes all it says of the import away, whether the import is still there or not.
+                    if patch.is_null() {
+                        if pdf { &mut g.pdf_imports } else { &mut g.imports }.remove(name);
+                        continue;
+                    }
                     // The import's layers: a CAD drawing's, or a PDF page's drawn from its lines.
                     let layers: Vec<String> = if pdf {
                         let t = m

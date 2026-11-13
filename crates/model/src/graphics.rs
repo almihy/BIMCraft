@@ -105,8 +105,10 @@ pub const ANNOTATION: [&str; 10] = ["dimension", "tag", "text", "line", "region"
 /// The point clouds, which views hide and override as Revit's Visibility/Graphics does on a tab of their own: not a model
 /// category, so Object Styles has no row for them.
 pub const SCANS: [&str; 1] = ["pointcloud"];
-/// The CAD imports, which views hide and override on a tab of their own too, as Revit's Imported Categories.
-pub const IMPORTED: [&str; 1] = ["cadimport"];
+/// The imports, which views hide and override on a tab of their own too, as Revit's Imported Categories: `cadimport`, the
+/// box over its table (Show imported categories in this view), which hides every CAD drawing and every PDF page's lines in the
+/// view; and `familyimport`, its Imports in Families row, what families bring in from CAD files (none of the project's yet).
+pub const IMPORTED: [&str; 2] = ["cadimport", "familyimport"];
 
 /// A subcategory: a part of a category a view hides, shows and overrides apart from the rest, as Revit's (Rooms >
 /// Reference). It is held in a view's graphics by its `key`, as a category is; `off` ones are hidden unless the view shows
@@ -1145,6 +1147,8 @@ pub struct Look {
     /// How it draws each CAD drawing, and each PDF page's lines.
     imports: BTreeMap<String, ImportLook>,
     pdf_imports: BTreeMap<String, ImportLook>,
+    /// Imported Categories' Show imported categories in this view cleared: no import is drawn, nor a PDF page's lines.
+    imports_hidden: bool,
     paint: BTreeMap<Id, Override>,
     style: VisualStyle,
     /// The section box a 3D view is cut to, its min and max corners, while it's on.
@@ -1217,6 +1221,7 @@ impl Look {
             pdf_layers: g.pdf_layers.clone(),
             imports: g.imports.clone(),
             pdf_imports: g.pdf_imports.clone(),
+            imports_hidden: g.hides("cadimport"),
             ..Look::default()
         };
         // Nothing to look for: no graphics of its own, and nothing in the project phased or in an option.
@@ -1312,6 +1317,12 @@ impl Look {
     /// How the view draws the lines of the PDF page `image`, when it says.
     pub fn pdf_import_look(&self, image: &str) -> Option<&ImportLook> {
         self.pdf_imports.get(image)
+    }
+
+    /// Whether the view draws the lines of the PDF page `image`: neither when its own row is cleared, nor when the view shows
+    /// no imports.
+    pub fn draws_pdf_lines(&self, image: &str) -> bool {
+        !self.imports_hidden && !self.pdf_imports.get(image).is_some_and(|l| l.all.hidden)
     }
 
     /// Whether the view draws element `id`.

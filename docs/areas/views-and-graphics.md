@@ -321,6 +321,8 @@ Visibility/Graphics lists each tab's categories alphabetically by their translat
 cells edit independent foreground and background overrides, using the project's fill patterns (including imported PAT patterns),
 colours and a combined preview. Unchecked layers inherit; `<None>` explicitly hides a layer. OK/Apply submits the draft as one
 `graphics` command; Clear Overrides clears only that cell. Annotation categories expose projection patterns for filled regions.
+Imported Categories is laid out as Revit's: Show imported categories in this view over one table of the imports and Imports in
+Families, Patterns hatched, All, None, Invert and Expand All under it ([CAD import](cad-import.md)).
 Styles hold `foreground` and `background` as optional `{pattern: name | null, color: [r,g,b]}` layers, alongside the existing
 `fill` colour. Element, filter and category precedence resolves each layer separately. Plans, reflected ceiling plans, section
 cuts and regions draw the layers with the same bounded pattern renderer as filled region types; the pattern's drafting/model

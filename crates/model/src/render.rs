@@ -2678,6 +2678,7 @@ pub(crate) fn images(d: &mut Drawing, m: &Model, key: Guid, layer: crate::raster
         }
         // A page drawn from its lines: they go over its picture, of the layers it and the view show.
         if t.drawn()
+            && look.is_none_or(|l| l.draws_pdf_lines(&im.type_name))
             && let Some((cad, ci)) = im.lines_placed(t, im.view)
         {
             cad_drawing(

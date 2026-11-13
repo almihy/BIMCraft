@@ -145,11 +145,81 @@ fn imported_categories_hides_a_drawings_layers_or_the_category_in_the_view() {
     press(&mut h, "Imported Categories");
     press(&mut h, "plan: Unfold");
     pick(&mut h, Role::CheckBox, "WALLS");
-    pick(&mut h, Role::CheckBox, "CAD Imports");
+    pick(&mut h, Role::CheckBox, "Show imported categories in this view");
     press(&mut h, "OK");
     let g = plan_graphics(&h, 100000);
     assert!(g.layers.is_empty(), "{:?}", g.layers);
     assert!(g.categories.get("cadimport").is_some_and(|o| o.hidden), "{g:?}");
+    let look = bimcraft_core::graphics::Look::of(&h.state().session.model, 100000);
+    assert!(imports(&h).iter().all(|id| !look.shows(*id)), "every import is hidden");
+}
+
+/// Whether the check box named `label` is ticked.
+fn ticked(h: &Harness<BimApp>, label: &str) -> bool {
+    use egui_kittest::kittest::NodeT as _;
+    h.get_by_role_and_label(Role::CheckBox, label).accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
+}
+
+#[test]
+fn imported_categories_is_one_table_of_the_imports_and_imports_in_families_as_revits() {
+    let path = drawing("vg-table", "plan.dxf");
+    let mut h = app(&format!("{BOX}\nimport_cad {}", json!({"path": path, "layers": "all"})));
+    key(&mut h, Key::Escape);
+    shortcut(&mut h, "VV");
+    press(&mut h, "Imported Categories");
+    // The box over the table, ticked; the import and Imports in Families as rows; no CAD Imports row any more.
+    assert!(ticked(&h, "Show imported categories in this view"));
+    assert!(ticked(&h, "plan") && ticked(&h, "Imports in Families"));
+    assert!(h.query_by_label("CAD Imports").is_none(), "the old row is gone");
+    // Lines, Patterns and Halftone on the import's row; Patterns can't be overridden, as Revit greys it out.
+    for label in ["plan: Projection Lines", "plan: Halftone", "Imports in Families: Projection Lines", "Imports in Families: Halftone"] {
+        assert!(h.query_by_label(label).is_some(), "{label}");
+    }
+    assert!(h.query_by_label("plan: Projection Patterns").is_none(), "Patterns is shown hatched");
+    // Expand All unfolds the import: its layers have Lines and no Halftone, which is the whole file's.
+    press(&mut h, "Expand All");
+    assert!(h.query_by_label("plan: Fold").is_some(), "unfolded");
+    assert!(h.query_by_label("WALLS: Projection Lines").is_some());
+    assert!(h.query_by_label("WALLS: Halftone").is_none(), "a layer has no halftone of its own");
+    // A note and Object Styles… under the buttons.
+    assert!(h.query_by_label("Object Styles…").is_some());
+}
+
+#[test]
+fn all_none_and_invert_reach_every_import_its_layers_folded_or_not_and_imports_in_families() {
+    let path = drawing("vg-all", "plan.dxf");
+    let mut h = app(&format!("{BOX}\nimport_cad {}", json!({"path": path, "layers": "all"})));
+    key(&mut h, Key::Escape);
+    shortcut(&mut h, "VV");
+    press(&mut h, "Imported Categories");
+    // Folded: None clears the import, both its layers and Imports in Families.
+    press(&mut h, "None");
+    press(&mut h, "OK");
+    let g = plan_graphics(&h, 100000);
+    let hidden: Vec<String> = g.layers.get("plan").map(|l| l.iter().cloned().collect()).unwrap_or_default();
+    assert_eq!(hidden, ["FURN", "WALLS"], "{g:?}");
+    assert!(g.imports.get("plan").is_some_and(|l| l.all.hidden), "{g:?}");
+    assert!(g.categories.get("familyimport").is_some_and(|o| o.hidden), "{g:?}");
+    assert!(!g.categories.get("cadimport").is_some_and(|o| o.hidden), "the box over the table isn't a row");
+    // Unfolded, one layer shown again, then Invert: that layer hidden, the rest shown.
+    shortcut(&mut h, "VV");
+    press(&mut h, "Imported Categories");
+    press(&mut h, "plan: Unfold");
+    pick(&mut h, Role::CheckBox, "WALLS");
+    press(&mut h, "Invert");
+    assert!(!ticked(&h, "WALLS") && ticked(&h, "FURN") && ticked(&h, "plan") && ticked(&h, "Imports in Families"));
+    press(&mut h, "OK");
+    let g = plan_graphics(&h, 100000);
+    let hidden: Vec<String> = g.layers.get("plan").map(|l| l.iter().cloned().collect()).unwrap_or_default();
+    assert_eq!(hidden, ["WALLS"], "{g:?}");
+    assert!(g.imports.is_empty() && !g.categories.contains_key("familyimport"), "{g:?}");
+    // All shows every one.
+    shortcut(&mut h, "VV");
+    press(&mut h, "Imported Categories");
+    press(&mut h, "All");
+    press(&mut h, "OK");
+    let g = plan_graphics(&h, 100000);
+    assert!(g.layers.is_empty() && g.imports.is_empty() && g.categories.is_empty(), "{g:?}");
 }
 
 #[test]
