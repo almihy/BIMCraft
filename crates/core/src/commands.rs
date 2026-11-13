@@ -1368,7 +1368,7 @@ other_files(
          references?: [{name, axis: x|y|z, at, is_reference?, origin?}], dimensions?: [{refs: [name, …], label?, locked?, eq?, \
          value?, sense?, kind?}], nested?: [{family, type, at: [x, y, z], rotation?, mirrored?, params?: {name: value}, visible?, \
          types?, show?}], catalog?: {columns, rows}, revit?: <Revit's definition, as Arqiflow's exporter writes it>, \
-         delete?: true, dry_run?, path?, save?} a family of \
+         delete?: true, dry_run?, path?, keep_values?, save?} a family of \
          the project's, BIMCraft's own parametric component: created, changed, read, or loaded from the .json file at `path` (a \
          family as `inspect` shows it, with its `name`). Without `name` it lists the project's families, each its category and \
          how many types, forms and symbols it has; with only a `name` it reads one — its definition, each of its types' \
@@ -1445,7 +1445,13 @@ other_files(
          it at its sill). A type that matched draws its parametric forms and flexes with its parameters; one that didn't \
          draws Revit's result and says why in `check`; `editable` is ok when every type matched and nothing was left \
          untranslated (`untranslated` says what). The reply and the list give `editable` and `check`. A duplicate (`like`) of a \
-         matched type is parametric; a type whose values change is `flexed` and keeps what it was found. Written as format 22",
+         matched type is parametric; a type whose values change is `flexed` and keeps what it was found. `keep_values: true` \
+         is Revit's Reload with \"Overwrite the existing version\": the family loaded again (from `path`, or as given) takes its \
+         new version's types as they come, translates and checks them, then gives each type the project already had the \
+         project's values back (its own, else its parameter's; formulas and instance parameters aside): a type they change is \
+         `flexed` and regenerates at them, all in one undo step, and the reply's `kept` says which values of which types. \
+         Without it a type keeps what the new version doesn't say (\"... and its parameter values\" says them all). Written as \
+         format 22",
         family,
         Files::Conditional,
     )
@@ -11049,6 +11055,8 @@ struct Patches {
 /// refuse is never put in it: every error it has comes back at once, its warnings with them.
 fn family(s: &mut Session, p: &Value) -> R {
     let c = "family";
+    // Revit's Reload, "Overwrite the existing version": the types the project has keep its values of them.
+    let keep_values = flag(c, p, "keep_values")?;
     // From a file: its fields under the name given, else its own, else the file's.
     let mut p = p.clone();
     if let Some(path) = string(c, &p, "path")? {
@@ -11305,6 +11313,15 @@ fn family(s: &mut Session, p: &Value) -> R {
         }
     }
     if let Some(v) = p.get("types").filter(|v| !v.is_null()) {
+        // Keeping the project's values, each type brought is first as it brings it (what it doesn't say, its parameters'
+        // values), so it is checked as Revit made it; the project's values are set on it after.
+        if keep_values && let Value::Object(brought) = v {
+            for (t, set) in brought {
+                if set.is_object() {
+                    f.types.remove(t);
+                }
+            }
+        }
         let mut types = serde_json::to_value(&f.types).map_err(|e| bad(c, e))?;
         merge(&mut types, v);
         f.types = serde_json::from_value(types).map_err(|e| field("types", e))?;
@@ -11470,6 +11487,40 @@ fn family(s: &mut Session, p: &Value) -> R {
         let others = |n: &str| if n == name.as_str() { None } else { s.model.families.get(n) };
         f.run_check(&others);
     }
+    // The project's own values of the types it had, set after the check, as a change of them: a type they change is flexed
+    // (it keeps what it was found) and regenerates at them. A value is the type's own, else its parameter's; only those of a
+    // type's parameters both have that no formula works out.
+    let mut kept: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    if keep_values && let Some(w) = &was {
+        let set = |q: &crate::family::Parameter| !q.instance && q.formula.is_none();
+        let same = |a: &Value, b: &Value| match (a.as_f64(), b.as_f64()) {
+            (Some(x), Some(y)) => x == y,
+            _ => a == b,
+        };
+        let params: Vec<(String, Value, Value)> = f
+            .parameters
+            .iter()
+            .filter(|q| set(q))
+            .filter_map(|q| {
+                w.parameters.iter().find(|o| o.name == q.name && set(o)).map(|o| (q.name.clone(), o.value.clone(), q.value.clone()))
+            })
+            .collect();
+        for (t, values) in &w.types {
+            let Some(now) = f.types.get_mut(t) else { continue };
+            for (k, old_default, new_default) in &params {
+                let old = values.get(k).unwrap_or(old_default);
+                if !same(old, now.get(k).unwrap_or(new_default)) {
+                    now.insert(k.clone(), old.clone());
+                    kept.entry(t.clone()).or_default().push(k.clone());
+                }
+            }
+            if kept.contains_key(t)
+                && let Some(c) = f.check.get_mut(t)
+            {
+                c.flexed = true;
+            }
+        }
+    }
     // Every error of what it comes to, each addressed to what has it, and every warning of it.
     let (errors, warnings) = f.problems(&|m| s.model.materials.contains_key(m) || brought.contains_key(m));
     if !errors.is_empty() {
@@ -11507,6 +11558,9 @@ fn family(s: &mut Session, p: &Value) -> R {
     let mut reply = json!({"name": to, "family": f, "warnings": warnings, "materials": added, "editable": f.editable, "check": f.check});
     if let Some(place) = place {
         reply["place"] = place;
+    }
+    if keep_values {
+        reply["kept"] = json!(kept);
     }
     Ok(reply)
 }

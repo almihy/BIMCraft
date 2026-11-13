@@ -298,6 +298,10 @@ other as the check and the fallback (`snapshot` forms and symbols), and checks e
   Component. A nested family Revit doesn't share is only ever in its parent's `embedded`, so no Type Selector, the
   Project Browser's Families nor the Component tool lists it (a project that loaded a door before round 3 still holds its
   handle as a family of its own, loaded then).
+- **Reload.** `family {path, keep_values: true}` is Revit's Reload with "Overwrite the existing version" in one undo step:
+  the types the file brings are taken as it brings them (not merged over the project's), translated and checked as Revit
+  made them, then each type the project had gets the project's values back (its own, else its parameter's; formulas and
+  instance parameters aside), and a type they change is `flexed`, so it regenerates at them; the reply's `kept` lists them.
 - **Format.** `embedded`, `section_holes`, `section_end_holes`, `plan_top`, `plan_cut` and an arc's `through` are format
   22's (unreleased when they came: no step).
 

@@ -159,6 +159,40 @@ fn a_box_from_revit_matches_revits_result_is_editable_and_flexes_with_its_parame
 }
 
 #[test]
+fn reloaded_keeping_the_projects_values_is_one_step_and_a_flexed_type_regenerates_at_them() {
+    let mut s = Session::new();
+    s.files.give("Sample Box Table.json", table(750.0).to_string().into_bytes());
+    run(&mut s, "family", json!({"path": "Sample Box Table.json"}));
+    // The project's own size of Small, and of a type of its own.
+    run(&mut s, "family", json!({"name": "Sample Box Table", "types": {"Small": {"Width": 1600, "Height": 900}}}));
+    let steps = s.history().len();
+    // Revit's Reload, "Overwrite the existing version": the library's version, the project's values kept.
+    let r = run(&mut s, "family", json!({"path": "Sample Box Table.json", "keep_values": true}));
+    assert_eq!(s.history().len(), steps + 1, "one undo step");
+    assert_eq!(r["kept"], json!({"Small": ["Width", "Height"]}), "{}", r["kept"]);
+    let f = s.model.families["Sample Box Table"].clone();
+    assert_eq!((f.types["Small"]["Width"].clone(), f.types["Small"]["Height"].clone()), (json!(1600), json!(900)));
+    // Checked against Revit's result at Revit's sizes, then flexed: it regenerates at the project's.
+    assert_eq!((f.check["Small"].matched, f.check["Small"].flexed), (true, true), "{:?}", f.check);
+    assert_eq!((f.check["Large"].matched, f.check["Large"].flexed), (true, false), "{:?}", f.check);
+    assert_eq!(f.editable.as_ref().map(|e| e.ok), Some(true));
+    let none = |_: &str| None;
+    let (lo, hi) = extent(&f, "Small", &none);
+    assert!(near(lo[0], -800.0) && near(hi[0], 800.0) && near(hi[2], 900.0), "{lo:?} {hi:?}");
+    // "... and its parameter values": without it, the library's values.
+    let mut library = table(750.0);
+    library["types"]["Small"] = json!({"Width": 1000, "Height": 750});
+    s.files.give("Sample Box Table 2.json", library.to_string().into_bytes());
+    let r = run(&mut s, "family", json!({"path": "Sample Box Table 2.json", "name": "Sample Box Table"}));
+    assert!(r.get("kept").is_none());
+    let f = s.model.families["Sample Box Table"].clone();
+    assert_eq!(f.types["Small"]["Width"], json!(1000));
+    assert_eq!((f.check["Small"].matched, f.check["Small"].flexed), (true, false));
+    // `keep_values` is a yes or no.
+    assert!(s.execute("family", &json!({"path": "Sample Box Table.json", "keep_values": "yes"})).is_err());
+}
+
+#[test]
 fn a_type_that_does_not_match_draws_revits_result_and_says_why() {
     let mut s = Session::new();
     let r = run(&mut s, "family", table(900.0));
