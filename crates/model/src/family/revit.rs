@@ -1309,11 +1309,13 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         }
     }
     let mut symbols = Vec::new();
+    // Where in `symbols` each masking region's edges are: they are dressed once the planes are solved.
+    let mut regions: Vec<std::ops::Range<usize>> = Vec::new();
     for d in def["lines"].as_array().into_iter().flatten().take(MOST) {
         match reader.lines(d) {
-            Ok(mut made) => {
+            Ok(made) => {
                 if d["masking"].as_bool() == Some(true) {
-                    masked_as_revit(f, &reader.first, &reader.values, &mut made);
+                    regions.push(symbols.len()..symbols.len() + made.len());
                 }
                 symbols.extend(made)
             }
@@ -1391,6 +1393,14 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     f.references = references;
     f.dimensions = dimensions;
     f.catalog = catalog;
+    // A masking region's edges, each at the levels Revit's plan draws it at, where the first type's planes stand solved.
+    if !regions.is_empty()
+        && let Ok(solved) = vals(f, &first, &walls)
+    {
+        for region in regions {
+            masked_as_revit(f, &first, &solved, &mut symbols[region]);
+        }
+    }
     // A window whose sill plane stands above its level by a chain no parameter says (its Sill Height none, or 0 in every
     // type): its Sill Height is that chain, so it is placed in its wall where Revit places it.
     if let Some(c) = sill_from
@@ -1499,47 +1509,77 @@ fn turned_as_revit(f: &Family, mut forms: Vec<Form>, walls: &Walls) -> Vec<Form>
     forms
 }
 
-/// A masking region's edges `made` drawn at the detail levels Revit's plan draws them at in the first type: its family
-/// says none (a masking region has no Visibility Settings), yet Revit leaves a door's out at Coarse, so a level whose
-/// snapshot plan has none of the edges' ends doesn't draw them.
+/// A masking region's edges `made`, each drawn at the detail levels Revit's plan draws it at in the first type: its family says
+/// none (a masking region has no Visibility Settings), yet Revit leaves a door's out at Coarse. An edge is there at a level
+/// where its two ends and its middle each lie on a line of Revit's plan at that level (within 1 mm); an edge says only the
+/// levels it is found at, even none. Where no edge is found at any level (the region is hidden in the first type), what the
+/// definition says stays.
 fn masked_as_revit(f: &Family, first: &str, values: &BTreeMap<String, Val>, made: &mut [Symbol]) {
     use crate::graphics::Detail;
-    let mut read = HashMap::new();
-    // Each edge's two ends.
-    let mut edges: Vec<(P2, P2)> = Vec::new();
-    for y in made.iter() {
-        let pts: Vec<P2> =
-            y.line.iter().filter_map(|[a, b]| Some(P2(number(a, values, &mut read).ok()?, number(b, values, &mut read).ok()?))).collect();
-        edges.extend(pts.windows(2).map(|w| (w[0], w[1])));
-    }
-    if edges.is_empty() {
-        return;
-    }
-    let mut levels = Levels { coarse: true, medium: true, fine: true };
-    for d in [Detail::Coarse, Detail::Medium, Detail::Fine] {
+    let probes: Vec<Option<[P2; 3]>> = made.iter().map(|y| edge_points(y, values)).collect();
+    let mut found = vec![[false; 3]; made.len()];
+    for (level, d) in [Detail::Coarse, Detail::Medium, Detail::Fine].into_iter().enumerate() {
         let Ok(marks) = f.marks_where(values, &|y: &Symbol| y.snapshot && y.view == SymbolView::Plan && y.of_type(first) && y.drawn_at(d))
         else {
             return;
         };
-        let any = marks.iter().any(|m| match m {
-            // An edge is there where one line of Revit's passes through both its ends.
-            super::Mark::Line(pts) => {
-                edges.iter().any(|(a, b)| pts.iter().any(|p| a.dist(*p) < 1.0) && pts.iter().any(|p| b.dist(*p) < 1.0))
+        let segments: Vec<(P2, P2)> = marks
+            .iter()
+            .filter_map(|m| match m {
+                super::Mark::Line(pts) => Some(pts),
+                _ => None,
+            })
+            .flat_map(|pts| pts.windows(2).map(|w| (w[0], w[1])))
+            .collect();
+        for (edge, probe) in probes.iter().enumerate() {
+            if let Some(points) = probe
+                && points.iter().all(|p| segments.iter().any(|(a, b)| near_segment(*p, *a, *b, 1.0)))
+            {
+                found[edge][level] = true;
             }
-            _ => false,
-        });
-        match d {
-            Detail::Coarse => levels.coarse = any,
-            Detail::Medium => levels.medium = any,
-            Detail::Fine => levels.fine = any,
         }
     }
-    let has_snapshot = f.symbols.iter().any(|y| y.snapshot && y.of_type(first));
-    if has_snapshot && (levels.coarse || levels.medium || levels.fine) {
-        for y in made.iter_mut() {
-            y.show = Some(levels);
+    if !found.iter().flatten().any(|x| *x) {
+        return;
+    }
+    for ((y, probe), at) in made.iter_mut().zip(&probes).zip(found) {
+        if probe.is_some() {
+            y.show = Some(Levels { coarse: at[0], medium: at[1], fine: at[2] });
         }
     }
+}
+
+/// A symbol's two ends and its middle along its length, in the first type; none where it doesn't work out.
+fn edge_points(y: &Symbol, values: &BTreeMap<String, Val>) -> Option<[P2; 3]> {
+    let n = |e: &Expr| number(e, values, &mut HashMap::new()).ok();
+    if let Some(c) = &y.arc {
+        let (cx, cy, r, from, to) = (n(&c.centre[0])?, n(&c.centre[1])?, n(&c.radius)?, n(&c.from)?, n(&c.to)?);
+        let at = |a: f64| P2(cx + r * a.to_radians().cos(), cy + r * a.to_radians().sin());
+        return Some([at(from), at((from + to) / 2.0), at(to)]);
+    }
+    let pts: Vec<P2> = y.line.iter().map(|[a, b]| Some(P2(n(a)?, n(b)?))).collect::<Option<_>>()?;
+    let (start, end) = (*pts.first()?, *pts.last()?);
+    let lengths: Vec<f64> = pts.windows(2).map(|w| w[0].dist(w[1])).collect();
+    let mut left = lengths.iter().sum::<f64>() / 2.0;
+    let mut middle = start;
+    for (w, len) in pts.windows(2).zip(&lengths) {
+        if left <= *len || *len <= 0.0 {
+            let t = if *len > 0.0 { left / len } else { 0.0 };
+            middle = P2(w[0].0 + (w[1].0 - w[0].0) * t, w[0].1 + (w[1].1 - w[0].1) * t);
+            break;
+        }
+        left -= len;
+        middle = w[1];
+    }
+    Some([start, middle, end])
+}
+
+/// Whether point `p` is within `tol` of the segment from `a` to `b`.
+fn near_segment(p: P2, a: P2, b: P2, tol: f64) -> bool {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let len2 = dx * dx + dy * dy;
+    let t = if len2 > 0.0 { (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / len2).clamp(0.0, 1.0) } else { 0.0 };
+    p.dist(P2(a.0 + dx * t, a.1 + dy * t)) <= tol
 }
 
 /// Whether reference `name` is free: nothing ties it, through the dimensions that place planes (locked, labelled, EQ), to a
