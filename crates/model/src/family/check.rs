@@ -140,11 +140,7 @@ impl Family {
             Ok(found) => match found.iter().find_map(Compared::failed) {
                 Some(why) => fail(why),
                 // A planting's 3D is Revit's render placeholder, drawn as Revit made it whatever its plan says.
-                None => Some(TypeCheck {
-                    matched: true,
-                    reason: self.rpc.then(|| RPC_3D.to_string()),
-                    ..TypeCheck::default()
-                }),
+                None => Some(TypeCheck { matched: true, reason: self.rpc.then(|| RPC_3D.to_string()), ..TypeCheck::default() }),
             },
             Err(why) => fail(why),
         }

@@ -1385,7 +1385,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
                 .filter_map(|(t, v)| Some((t.clone(), text(v)?.to_string())))
                 .collect();
             let scale = planting_scale(f, &family, &type_name);
-Ok(Nested { family, type_name, at, rotation, mirrored, params, visible, show, axes, type_in, scale, ..Nested::default() })
+            Ok(Nested { family, type_name, at, rotation, mirrored, params, visible, show, axes, type_in, scale, ..Nested::default() })
         })();
         match made {
             Ok(x) => nested.push(x),
@@ -1685,9 +1685,14 @@ fn tried(
     let mut kept_nested = Vec::new();
     for n in nested {
         let mut read = HashMap::new();
-        let ok = values
-            .iter()
-            .all(|v| n.at.iter().chain([&n.rotation]).chain(&n.visible).chain(&n.scale).chain(n.params.values()).all(|e| number(e, v, &mut read).is_ok()));
+        let ok = values.iter().all(|v| {
+            n.at.iter()
+                .chain([&n.rotation])
+                .chain(&n.visible)
+                .chain(&n.scale)
+                .chain(n.params.values())
+                .all(|e| number(e, v, &mut read).is_ok())
+        });
         if ok {
             kept_nested.push(n);
         } else {
