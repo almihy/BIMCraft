@@ -91,7 +91,16 @@ name: a triangle's face is read from its winding, so every solid emits triangles
 a project only through the `favorite` command (`load` never overwrites without `replace`). The desktop's Family Editor
 (`editor.rs`) edits text (`FormText`, `ParamText`, ...) and changes the project's family only through a `family` command; its
 preview is a scratch `Session` of its own, and it says what's wrong inside the window (the status box, over the view's corner, would lie on its
-buttons).
+buttons).
+
+A form's `show` and a symbol's are Revit's Visibility Settings (`family::Show`, `family::Levels`): each box true unless it says
+false, and one that says nothing drawn as `Show::UNSAID` and `Levels::UNSAID` are (every view, every detail level but Coarse), which
+`render.rs` reads for a family's opening in plan. The Family Editor carries both through (`FormText::show`, `SymbolText::show`), and
+each form's and symbol's Visibility/Graphics Overrides row has Edit…, which opens Family Element Visibility Settings as Revit's does
+(`editor.rs::visibility_settings`): for a form View Specific Display (Plan/RCP, Front/Back, Left/Right, When cut in Plan/RCP) and
+Detail Levels, for a symbol its Detail Levels alone; it opens on what is drawn, Default ticks every box, and OK sets `show` only
+when a box changed, so what said nothing keeps saying nothing. The `family` command sets the same with `form`/`symbol` patches
+(`{"id": …, "show": {"plan": true}}` merges; `null` takes it away).
 
 A type of a category or of a family is renamed with `rename_type` (`Model::move_entry` moves it in its map, and `rename_entry` the
 library entry and every reference `Model::lib_refs_mut` visits, so it keeps its GUID). A type or a family goes with `delete_type` (one entry, refused while an element uses it, and for the last type of a category or of a family: a
