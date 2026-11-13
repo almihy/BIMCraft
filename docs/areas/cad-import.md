@@ -216,8 +216,8 @@ its columns Visibility, Projection/Surface (Lines, Patterns) and Halftone, of a 
 page drawn from its lines placed in the view, and Imports in Families, sorted by name. An import's row has its visibility,
 its Projection Lines (Line Graphics) and its Halftone, the whole file's; folded under it, a row for each of its layers has its
 visibility and Lines, its Halftone hatched, a layer's box cleared for those the view hides. Patterns is hatched on every row.
-All, None and Invert under the table set the visibility of every row, an import's layers among them whether folded or not,
-and Expand All unfolds every import; Object Styles… is in a box below. The box over the table and Imports in Families are
+All, None and Invert under the table pick rows, as Revit's (every row, an import's layers among them whether folded or not;
+none; the others) and change nothing themselves; Expand All unfolds every import; Object Styles… is in a box below. The box over the table and Imports in Families are
 categories, which a view template carries when it controls `categories`; the imports' rows are what it carries when it
 controls `imports` (V/G Overrides Import), and each row can be changed only where the view's template doesn't set it. A right click on linked drawings selected offers Reload CAD, which runs
 `reload_cad` for each.

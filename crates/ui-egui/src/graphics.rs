@@ -78,7 +78,11 @@ pub(crate) struct VgDialog {
     own: Graphics,
     draft: Graphics,
     tab: usize,
+    /// The row picked last, which a Shift-click picks from (and Remove, Up and Down act on).
     pick: Option<Pick>,
+    /// The rows picked, as Revit selects them: a click picks one, Ctrl-click adds or takes one away, Shift-click those from
+    /// the last; All, None and Invert pick rows. A visibility click, Halftone or Override… on a picked row reaches them all.
+    picked: Vec<Pick>,
     listed: BTreeSet<Id>,
     cell: Option<CellEdit>,
     search: String,
@@ -187,6 +191,7 @@ impl VgDialog {
             draft,
             tab,
             pick: None,
+            picked: Vec::new(),
             listed: BTreeSet::new(),
             cell: None,
             search: String::new(),
@@ -261,6 +266,7 @@ impl BimApp {
             own,
             tab,
             pick: None,
+            picked: Vec::new(),
             listed,
             cell: None,
             search: String::new(),
@@ -274,7 +280,7 @@ impl BimApp {
         let picked: Vec<Id> = self.drawn_selection(&m);
         self.open_graphics(ELEMENTS_TAB);
         if let Some(d) = &mut self.vg_dialog {
-            d.pick = picked.first().map(|id| Pick::Element(*id));
+            d.pick_only(picked.first().map(|id| Pick::Element(*id)));
             d.listed.extend(picked);
         }
     }
@@ -320,7 +326,7 @@ impl BimApp {
         let tab = usize::from(category.is_some_and(|c| ANNOTATION.contains(&c)));
         self.open_graphics(tab);
         if let (Some(d), Some(c)) = (&mut self.vg_dialog, category) {
-            d.pick = Some(Pick::Category(c.to_string()));
+            d.pick_only(Some(Pick::Category(c.to_string())));
         }
     }
 
@@ -406,6 +412,7 @@ impl BimApp {
                             if ui.selectable_label(d.tab == i, t(label)).clicked() {
                                 d.tab = i;
                                 d.pick = None;
+                                d.picked.clear();
                             }
                         }
                     });
@@ -721,6 +728,61 @@ fn put_category(d: &mut VgDialog, cat: &str, o: Override) {
     }
 }
 
+impl VgDialog {
+    /// How many rows are picked.
+    #[cfg(test)]
+    pub(crate) fn picked_count(&self) -> usize {
+        self.picked.len()
+    }
+
+    /// Picks row `pick` alone, or none.
+    fn pick_only(&mut self, pick: Option<Pick>) {
+        self.picked = pick.iter().cloned().collect();
+        self.pick = pick;
+    }
+
+    /// A click on row `pick` of `rows` (the rows in the table's order), as Revit's: alone; with Ctrl, added or taken away;
+    /// with Shift, the rows from the one picked last to it (added to those picked with Ctrl too).
+    fn click(&mut self, pick: &Pick, rows: &[Row], m: egui::Modifiers) {
+        let at = |p: &Pick| rows.iter().position(|r| r.pick == *p);
+        if m.shift
+            && let Some((a, b)) = self.pick.as_ref().and_then(at).zip(at(pick))
+        {
+            let span: Vec<Pick> =
+                rows.iter().skip(a.min(b)).take(a.abs_diff(b) + 1).filter(|r| r.enabled).map(|r| r.pick.clone()).collect();
+            if !m.command {
+                self.picked.clear();
+            }
+            for p in span {
+                if !self.picked.contains(&p) {
+                    self.picked.push(p);
+                }
+            }
+        } else if m.command {
+            match self.picked.iter().position(|p| p == pick) {
+                Some(i) => {
+                    self.picked.remove(i);
+                }
+                None => self.picked.push(pick.clone()),
+            }
+            self.pick = Some(pick.clone());
+        } else {
+            self.pick_only(Some(pick.clone()));
+        }
+    }
+
+    /// The rows of `rows` a change to row `row` reaches: every row picked that can be changed (`can` says which), when it is
+    /// one of them; else it alone, now picked.
+    fn reached<'r>(&mut self, row: &'r Row, rows: &'r [Row], can: impl Fn(&Row) -> bool) -> Vec<&'r Row> {
+        if self.picked.contains(&row.pick) {
+            rows.iter().filter(|r| r.enabled && can(r) && self.picked.contains(&r.pick)).collect()
+        } else {
+            self.pick_only(Some(row.pick.clone()));
+            vec![row]
+        }
+    }
+}
+
 /// Put `o` back as the override of the row `pick` is: a category's, a filter's or an element's.
 fn put(d: &mut VgDialog, model: &Model, pick: &Pick, o: Override) {
     match pick {
@@ -825,6 +887,8 @@ pub(crate) struct CellEdit {
     cell: Cell,
     over: Override,
     start: ObjectStyle,
+    /// The rows OK gives the cell's settings to, each with its override as it was: the rows picked.
+    rows: Vec<(Pick, Override)>,
 }
 
 /// A row of the table: what it is, its name, its override and the pens its object style gives.
@@ -874,9 +938,18 @@ fn child(ui: &mut Ui, r: Rect, layout: Layout) -> Ui {
 }
 
 /// The table of Visibility/Graphics, as Revit's: a row for each of `rows`, its visibility, a cell for each of the
-/// columns that opens its editor and shows what it overrides, Halftone, and Detail Level. A click on a row picks it,
-/// and its cells read Override…. The rows whose visibility or halftone changed, with their override as it is now.
-fn table(ui: &mut Ui, d: &mut VgDialog, model: &Model, rows: &[Row], cols: &Columns, enabled: bool) -> Vec<(Pick, Override)> {
+/// columns that opens its editor and shows what it overrides, Halftone, and Detail Level. A click on a row's name picks it
+/// (with Ctrl and Shift as Revit's, [`VgDialog::click`]), and the cells of the rows picked read Override…; a visibility
+/// click, Halftone or Override… on a row picked reaches every row picked, of `all` (the table's rows, those folded away
+/// among them). The rows whose visibility or halftone changed, with their override as it is now.
+fn table(
+    ui: &mut Ui,
+    d: &mut VgDialog,
+    model: &Model,
+    (rows, all): (&[Row], &[Row]),
+    cols: &Columns,
+    enabled: bool,
+) -> Vec<(Pick, Override)> {
     // A 3D view's (or a 3D template's): rooms are off there unless shown.
     let three_d = d.view == json!("{3D}")
         || d.template
@@ -931,13 +1004,15 @@ fn table(ui: &mut Ui, d: &mut VgDialog, model: &Model, rows: &[Row], cols: &Colu
     let mut edits = Vec::new();
     ScrollArea::vertical().max_height(300.0).auto_shrink([false, true]).id_salt(("vg-table", d.tab)).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
+        // Whether a row is off unless shown (Rooms > Reference), so shown only by saying so.
+        let off = |row: &Row| {
+            matches!(&row.pick, Pick::Category(c) if bimcraft_core::graphics::off_unless_shown(c)
+                || (three_d && bimcraft_core::graphics::OFF_IN_3D.contains(&c.as_str())))
+        };
         for (n, row) in rows.iter().enumerate() {
             let enabled = enabled && row.enabled;
             let (r, clicked) = ui.allocate_exact_size(vec2(total, ROW_H), Sense::click());
-            if clicked.clicked() {
-                d.pick = Some(row.pick.clone());
-            }
-            let picked = d.pick.as_ref() == Some(&row.pick);
+            let picked = d.picked.contains(&row.pick);
             let p = ui.painter().clone();
             if picked {
                 p.rect_filled(r, 0.0, pal().select_fill);
@@ -947,9 +1022,7 @@ fn table(ui: &mut Ui, d: &mut VgDialog, model: &Model, rows: &[Row], cols: &Colu
             p.hline(r.x_range(), r.bottom(), line);
             let cell = |x: f32, w: f32| Rect::from_min_size(pos2(x, r.top()), vec2(w, ROW_H));
             // Visibility, ticked to show it: a subcategory off unless shown (Rooms > Reference) is shown only by saying so.
-            let off = matches!(&row.pick, Pick::Category(c) if bimcraft_core::graphics::off_unless_shown(c)
-                || (three_d && bimcraft_core::graphics::OFF_IN_3D.contains(&c.as_str())));
-            let mut visible = !row.over.hidden && (!off || row.over.shown);
+            let mut visible = !row.over.hidden && (!off(row) || row.over.shown);
             // A subcategory's box well in from its category's, which stands after the fold arrow.
             let indent = if row.sub { 14.0 + ui.spacing().item_spacing.x + 24.0 } else { 0.0 };
             let at = cell(r.left(), name_w).shrink2(vec2(6.0, 0.0));
@@ -968,8 +1041,39 @@ fn table(ui: &mut Ui, d: &mut VgDialog, model: &Model, rows: &[Row], cols: &Colu
             } else if !row.sub && rows.iter().any(|r| r.fold.is_some()) {
                 c.add_space(14.0 + c.spacing().item_spacing.x);
             }
-            if c.add_enabled(enabled, Checkbox::new(&mut visible, &row.name)).changed() {
-                edits.push((row.pick.clone(), Override { hidden: !visible, shown: visible && off, ..row.over.clone() }));
+            // The box, and the row's name beside it, which picks the row as Revit's does, rather than ticking the box.
+            let b = c.add_enabled(enabled, Checkbox::without_text(&mut visible));
+            b.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, visible, &row.name));
+            let name_at = Rect::from_min_max(pos2(b.rect.right() + c.spacing().item_spacing.x, at.top()), at.max);
+            let tone = if enabled { ink } else { ui.visuals().weak_text_color() };
+            p.with_clip_rect(name_at.intersect(p.clip_rect())).text(
+                name_at.left_center(),
+                Align2::LEFT_CENTER,
+                &row.name,
+                body.clone(),
+                tone,
+            );
+            // A click on the name, or on the row where nothing else takes it, picks the row.
+            let name_hit = ui.interact(name_at, ui.id().with(("vg-row", n, &row.name)), Sense::click());
+            name_hit.widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, enabled, picked, &row.name));
+            if (clicked.clicked() || name_hit.clicked()) && enabled {
+                // The keys held as the button was let go, as the click is.
+                let held = ui.input(|i| {
+                    i.events
+                        .iter()
+                        .rev()
+                        .find_map(|e| match e {
+                            egui::Event::PointerButton { modifiers, .. } => Some(*modifiers),
+                            _ => None,
+                        })
+                        .unwrap_or(i.modifiers)
+                });
+                d.click(&row.pick, rows, held);
+            }
+            if b.changed() {
+                for r in d.reached(row, all, |_| true) {
+                    edits.push((r.pick.clone(), Override { hidden: !visible, shown: visible && off(r), ..r.over.clone() }));
+                }
             }
             // The cells: Override… on the row picked, what each overrides on the rest.
             let mut x = r.left() + name_w;
@@ -986,13 +1090,15 @@ fn table(ui: &mut Ui, d: &mut VgDialog, model: &Model, rows: &[Row], cols: &Colu
                 let b = c.add_enabled(enabled, Button::new(if picked { t("Override…") } else { "" }).frame(picked));
                 b.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, name.clone()));
                 if b.clicked() {
-                    d.pick = Some(row.pick.clone());
+                    let reached = d.reached(row, all, |r| !r.hatched.contains(k));
+                    let rows = reached.into_iter().map(|r| (r.pick.clone(), r.over.clone())).collect();
                     d.cell = Some(CellEdit {
                         pick: row.pick.clone(),
                         name: row.name.clone(),
                         cell: *k,
                         over: row.over.clone(),
                         start: row.start,
+                        rows,
                     });
                 }
                 if !picked {
@@ -1009,7 +1115,9 @@ fn table(ui: &mut Ui, d: &mut VgDialog, model: &Model, rows: &[Row], cols: &Colu
                 let h = c.add_enabled(enabled, Checkbox::without_text(&mut half));
                 h.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, half, name.clone()));
                 if h.changed() {
-                    edits.push((row.pick.clone(), Override { halftone: half, ..row.over.clone() }));
+                    for r in d.reached(row, all, |r| r.halftone) {
+                        edits.push((r.pick.clone(), Override { halftone: half, ..r.over.clone() }));
+                    }
                 }
             } else {
                 hatch(ui, &p, cell(x, HALFTONE_W));
@@ -1141,26 +1249,45 @@ fn cell_window(ctx: &Context, d: &mut VgDialog, model: &Model) {
             });
         });
     if ok {
-        let pick = e.pick.clone();
-        put(d, model, &pick, e.over);
+        // Each row picked takes the cell's settings, keeping the rest of its own.
+        let rows = if e.rows.is_empty() { vec![(e.pick.clone(), e.over.clone())] } else { std::mem::take(&mut e.rows) };
+        for (pick, mut over) in rows {
+            match e.cell {
+                Cell::ProjectionLines | Cell::CutLines => {
+                    let (to, from) = if e.cell.cut() { (&mut over.cut, &e.over.cut) } else { (&mut over.projection, &e.over.projection) };
+                    (to.color, to.weight, to.dash) = (from.color, from.weight, from.dash);
+                }
+                Cell::ProjectionPatterns | Cell::CutPatterns => {
+                    let (to, from) = if e.cell.cut() { (&mut over.cut, &e.over.cut) } else { (&mut over.projection, &e.over.projection) };
+                    (to.fill, to.foreground, to.background) = (from.fill, from.foreground.clone(), from.background.clone());
+                }
+                Cell::Transparency => over.transparency = e.over.transparency,
+            }
+            put(d, model, &pick, over);
+        }
     } else if !(cancel || r.should_close()) {
         d.cell = Some(e);
     }
 }
 
-/// All, None and Invert: every row of `rows` that can be changed shown, hidden, or the other way about.
-fn visibility_buttons(ui: &mut Ui, d: &mut VgDialog, model: &Model, rows: &[Row], enabled: bool) {
+/// All, None and Invert, as Revit's: they pick rows of `rows` (every row that can be changed, none, or the others) and change
+/// nothing themselves; a visibility click or Override… then reaches the rows picked.
+fn visibility_buttons(ui: &mut Ui, d: &mut VgDialog, rows: &[Row], enabled: bool) {
     let open = rows.iter().any(|r| r.enabled);
     for label in ["All", "None", msg!("Invert")] {
         if ui.add_enabled(enabled && open, Button::new(t(label)).min_size(vec2(64.0, 0.0))).clicked() {
-            for row in rows.iter().filter(|r| r.enabled) {
-                let hidden = match label {
-                    "All" => false,
-                    "None" => true,
-                    _ => !row.over.hidden,
-                };
-                put(d, model, &row.pick, Override { hidden, ..row.over.clone() });
-            }
+            let picked: Vec<Pick> = rows
+                .iter()
+                .filter(|r| r.enabled)
+                .filter(|r| match label {
+                    "All" => true,
+                    "None" => false,
+                    _ => !d.picked.contains(&r.pick),
+                })
+                .map(|r| r.pick.clone())
+                .collect();
+            d.pick = picked.first().cloned();
+            d.picked = picked;
         }
     }
 }
@@ -1204,7 +1331,7 @@ fn categories(ui: &mut Ui, d: &mut VgDialog, model: &Model, shown: &Graphics, na
     } else {
         Columns { cells: &[Cell::ProjectionLines, Cell::ProjectionPatterns], detail: false }
     };
-    for (pick, o) in table(ui, d, model, &rows, &cols, enabled) {
+    for (pick, o) in table(ui, d, model, (&rows, &rows), &cols, enabled) {
         put(d, model, &pick, o);
     }
     if rows.is_empty() {
@@ -1213,7 +1340,7 @@ fn categories(ui: &mut Ui, d: &mut VgDialog, model: &Model, shown: &Graphics, na
     ui.add_space(6.0);
     let mut styles = false;
     ui.horizontal(|ui| {
-        visibility_buttons(ui, d, model, &rows, enabled);
+        visibility_buttons(ui, d, &rows, enabled);
         if model_tab {
             ui.add_space(16.0);
             ui.label(RichText::new(t("Categories not overridden are drawn as Object Styles sets them.")).color(pal().muted));
@@ -1226,13 +1353,13 @@ fn categories(ui: &mut Ui, d: &mut VgDialog, model: &Model, shown: &Graphics, na
 /// The Filters tab: the filters the view applies in order, each a row of the table, and Add, Remove, Up and Down.
 fn filters(ui: &mut Ui, d: &mut VgDialog, model: &Model, shown: &Graphics, enabled: bool) {
     if d.pick.as_ref().is_some_and(|p| !matches!(p, Pick::Filter(i) if *i < shown.filters.len())) {
-        d.pick = None;
+        d.pick_only(None);
     }
     // A template's filters are only shown: editing them would go to the draft, which doesn't hold them.
     let start = bimcraft_core::styles::default_of("");
     let rows: Vec<Row> =
         (shown.filters.iter().enumerate()).map(|(i, a)| Row::new(Pick::Filter(i), a.filter.clone(), a.over.clone(), start)).collect();
-    for (pick, o) in table(ui, d, model, &rows, &Columns { cells: &Cell::ALL, detail: false }, enabled) {
+    for (pick, o) in table(ui, d, model, (&rows, &rows), &Columns { cells: &Cell::ALL, detail: false }, enabled) {
         put(d, model, &pick, o);
     }
     if rows.is_empty() {
@@ -1256,7 +1383,7 @@ fn filters(ui: &mut Ui, d: &mut VgDialog, model: &Model, shown: &Graphics, enabl
             && enabled
         {
             d.draft.filters.push(Applied { filter: n, over: Override::default() });
-            d.pick = Some(Pick::Filter(d.draft.filters.len() - 1));
+            d.pick_only(Some(Pick::Filter(d.draft.filters.len() - 1)));
         }
         let at = match d.pick {
             Some(Pick::Filter(i)) if i < d.draft.filters.len() => Some(i),
@@ -1266,19 +1393,19 @@ fn filters(ui: &mut Ui, d: &mut VgDialog, model: &Model, shown: &Graphics, enabl
             && let Some(i) = at
         {
             d.draft.filters.remove(i);
-            d.pick = None;
+            d.pick_only(None);
         }
         if ui.add_enabled(enabled && at.is_some_and(|i| i > 0), Button::new(t("Up"))).clicked()
             && let Some(i) = at
         {
             d.draft.filters.swap(i, i - 1);
-            d.pick = Some(Pick::Filter(i - 1));
+            d.pick_only(Some(Pick::Filter(i - 1)));
         }
         if ui.add_enabled(enabled && at.is_some_and(|i| i + 1 < d.draft.filters.len()), Button::new(t("Down"))).clicked()
             && let Some(i) = at
         {
             d.draft.filters.swap(i, i + 1);
-            d.pick = Some(Pick::Filter(i + 1));
+            d.pick_only(Some(Pick::Filter(i + 1)));
         }
     });
 }
@@ -1293,7 +1420,7 @@ fn elements(ui: &mut Ui, d: &mut VgDialog, model: &Model, selection: &[Id]) {
             Row::new(Pick::Element(id), element_name(model, id), over, model.object_style(cat))
         })
         .collect();
-    for (pick, o) in table(ui, d, model, &rows, &Columns { cells: &Cell::ALL, detail: false }, true) {
+    for (pick, o) in table(ui, d, model, (&rows, &rows), &Columns { cells: &Cell::ALL, detail: false }, true) {
         put(d, model, &pick, o);
     }
     if rows.is_empty() {
@@ -1318,7 +1445,7 @@ fn elements(ui: &mut Ui, d: &mut VgDialog, model: &Model, selection: &[Id]) {
         {
             d.draft.elements.remove(&model.guid(id));
             d.listed.remove(&id);
-            d.pick = None;
+            d.pick_only(None);
         }
     });
 }
@@ -1406,12 +1533,12 @@ fn imported(ui: &mut Ui, d: &mut VgDialog, model: &Model, shown: &Graphics, foll
     // What shows: the imports, and the layers of those unfolded.
     let rows: Vec<Row> = every.iter().filter(|r| !r.sub || unfolded(r, &d.unfolded)).cloned().collect();
     let cols = Columns { cells: &[Cell::ProjectionLines, Cell::ProjectionPatterns], detail: false };
-    for (pick, o) in table(ui, d, model, &rows, &cols, show) {
+    for (pick, o) in table(ui, d, model, (&rows, &every), &cols, show) {
         put(d, model, &pick, o);
     }
     ui.add_space(6.0);
     ui.horizontal(|ui| {
-        visibility_buttons(ui, d, model, &every, show);
+        visibility_buttons(ui, d, &every, show);
         if ui.add(Button::new(t("Expand All")).min_size(vec2(64.0, 0.0))).clicked() {
             d.unfolded.extend(every.iter().filter(|r| r.fold.is_some()).filter_map(|r| r.pick.fold_key()));
         }

@@ -189,14 +189,17 @@ fn imported_categories_is_one_table_of_the_imports_and_imports_in_families_as_re
 }
 
 #[test]
-fn all_none_and_invert_reach_every_import_its_layers_folded_or_not_and_imports_in_families() {
+fn all_none_and_invert_pick_every_import_its_layers_folded_or_not_and_imports_in_families_and_change_nothing_alone() {
     let path = drawing("vg-all", "plan.dxf");
     let mut h = app(&format!("{BOX}\nimport_cad {}", json!({"path": path, "layers": "all"})));
     key(&mut h, Key::Escape);
     shortcut(&mut h, "VV");
     press(&mut h, "Imported Categories");
-    // Folded: None clears the import, both its layers and Imports in Families.
-    press(&mut h, "None");
+    // Folded: All picks the import, both its layers and Imports in Families, and hides nothing; a box cleared on one of them
+    // hides them all.
+    press(&mut h, "All");
+    assert!(ticked(&h, "plan") && ticked(&h, "Imports in Families"), "All hides nothing");
+    pick(&mut h, Role::CheckBox, "plan");
     press(&mut h, "OK");
     let g = plan_graphics(&h, 100000);
     let hidden: Vec<String> = g.layers.get("plan").map(|l| l.iter().cloned().collect()).unwrap_or_default();
@@ -204,25 +207,34 @@ fn all_none_and_invert_reach_every_import_its_layers_folded_or_not_and_imports_i
     assert!(g.imports.get("plan").is_some_and(|l| l.all.hidden), "{g:?}");
     assert!(g.categories.get("familyimport").is_some_and(|o| o.hidden), "{g:?}");
     assert!(!g.categories.get("cadimport").is_some_and(|o| o.hidden), "the box over the table isn't a row");
-    // Unfolded, one layer shown again, then Invert: that layer hidden, the rest shown.
+    // Unfolded: None, then Invert picks every row; a box ticked shows them all. Nothing changes before it.
     shortcut(&mut h, "VV");
     press(&mut h, "Imported Categories");
     press(&mut h, "plan: Unfold");
-    pick(&mut h, Role::CheckBox, "WALLS");
+    press(&mut h, "None");
     press(&mut h, "Invert");
-    assert!(!ticked(&h, "WALLS") && ticked(&h, "FURN") && ticked(&h, "plan") && ticked(&h, "Imports in Families"));
+    assert!(!ticked(&h, "WALLS") && !ticked(&h, "FURN") && !ticked(&h, "plan"), "picking changes nothing");
+    pick(&mut h, Role::CheckBox, "FURN");
+    assert!(ticked(&h, "WALLS") && ticked(&h, "FURN") && ticked(&h, "plan") && ticked(&h, "Imports in Families"));
+    // A row, then Shift on another: the rows from the first to it; a box cleared hides those, and no more.
+    row(&mut h, "FURN", egui::Modifiers::NONE);
+    row(&mut h, "WALLS", egui::Modifiers::SHIFT);
+    pick(&mut h, Role::CheckBox, "WALLS");
+    assert!(!ticked(&h, "WALLS") && !ticked(&h, "FURN") && ticked(&h, "plan") && ticked(&h, "Imports in Families"));
+    // Override… on a picked layer gives both layers its lines; a click on a row picks it alone again.
+    pick(&mut h, Role::Button, "FURN: Projection Lines");
+    pick(&mut h, Role::CheckBox, "Projection: Line color");
+    press(&mut h, "OK");
+    row(&mut h, "plan", egui::Modifiers::NONE);
+    pick(&mut h, Role::CheckBox, "plan");
     press(&mut h, "OK");
     let g = plan_graphics(&h, 100000);
     let hidden: Vec<String> = g.layers.get("plan").map(|l| l.iter().cloned().collect()).unwrap_or_default();
-    assert_eq!(hidden, ["WALLS"], "{g:?}");
-    assert!(g.imports.is_empty() && !g.categories.contains_key("familyimport"), "{g:?}");
-    // All shows every one.
-    shortcut(&mut h, "VV");
-    press(&mut h, "Imported Categories");
-    press(&mut h, "All");
-    press(&mut h, "OK");
-    let g = plan_graphics(&h, 100000);
-    assert!(g.layers.is_empty() && g.imports.is_empty() && g.categories.is_empty(), "{g:?}");
+    assert_eq!(hidden, ["FURN", "WALLS"], "{g:?}");
+    let look = &g.imports["plan"];
+    assert!(look.all.hidden && !g.categories.contains_key("familyimport"), "{g:?}");
+    let colour = |l: &str| look.layers.get(l).and_then(|o| o.projection.color);
+    assert!(colour("FURN").is_some() && colour("FURN") == colour("WALLS") && look.all.projection.color.is_none(), "{g:?}");
 }
 
 #[test]

@@ -321,6 +321,10 @@ Visibility/Graphics lists each tab's categories alphabetically by their translat
 cells edit independent foreground and background overrides, using the project's fill patterns (including imported PAT patterns),
 colours and a combined preview. Unchecked layers inherit; `<None>` explicitly hides a layer. OK/Apply submits the draft as one
 `graphics` command; Clear Overrides clears only that cell. Annotation categories expose projection patterns for filled regions.
+Rows are picked as in Revit: a click on a row's name picks it alone, Ctrl-click adds or takes one away, Shift-click picks those
+from the one picked last; All, None and Invert pick rows (every one, none, the others) and change nothing themselves. A
+visibility box, Halftone or Override… on a picked row reaches every row picked (`VgDialog::reached`); on another row, it
+alone, which it then picks.
 Imported Categories is laid out as Revit's: Show imported categories in this view over one table of the imports and Imports in
 Families, Patterns hatched, All, None, Invert and Expand All under it ([CAD import](cad-import.md)).
 Styles hold `foreground` and `background` as optional `{pattern: name | null, color: [r,g,b]}` layers, alongside the existing
