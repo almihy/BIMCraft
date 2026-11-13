@@ -15,7 +15,8 @@ fn run(s: &mut Session, c: &str, p: Value) -> Value {
 
 /// A box from `lo` to `hi` as twelve triangles turned out, as a snapshot mesh holds it.
 fn cuboid(lo: [f64; 3], hi: [f64; 3]) -> Value {
-    let p = |i: usize| [if i & 1 == 0 { lo[0] } else { hi[0] }, if i & 2 == 0 { lo[1] } else { hi[1] }, if i & 4 == 0 { lo[2] } else { hi[2] }];
+    let p =
+        |i: usize| [if i & 1 == 0 { lo[0] } else { hi[0] }, if i & 2 == 0 { lo[1] } else { hi[1] }, if i & 4 == 0 { lo[2] } else { hi[2] }];
     let quads = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]];
     let mut tris = Vec::new();
     for [a, b, c, d] in quads {
@@ -139,7 +140,11 @@ fn a_box_from_revit_matches_revits_result_is_editable_and_flexes_with_its_parame
     let (lo, hi) = extent(&f, "Small", &none);
     assert!(near(lo[0], -800.0) && near(hi[0], 800.0) && near(hi[2], 900.0), "{lo:?} {hi:?}");
     // Duplicated (Type Properties' Duplicate) and flexed: a parametric type of its own.
-    let r = run(&mut s, "family", json!({"name": "Sample Box Table", "types": {"Huge": {"Width": 2000, "Depth": 800}}, "like": {"Huge": "Large"}}));
+    let r = run(
+        &mut s,
+        "family",
+        json!({"name": "Sample Box Table", "types": {"Huge": {"Width": 2000, "Depth": 800}}, "like": {"Huge": "Large"}}),
+    );
     assert_eq!(r["check"]["Huge"]["matched"], true, "{}", r["check"]);
     let f = s.model.families["Sample Box Table"].clone();
     let (lo, hi) = extent(&f, "Huge", &none);
@@ -147,7 +152,7 @@ fn a_box_from_revit_matches_revits_result_is_editable_and_flexes_with_its_parame
     // Placed, the component is the parametric box.
     let c = run(&mut s, "component", json!({"family": "Sample Box Table", "type": "Huge", "at": [5000, 5000]}));
     let id: Id = c["id"].as_u64().unwrap();
-    let Some(Element::Component(comp)) = s.model.elements.get(&id) else { panic!("no component") };
+    let Some(Element::Component(comp)) = s.model.elements.get(id) else { panic!("no component") };
     let pieces = s.model.component_local_pieces(comp);
     let xs: Vec<f64> = pieces.iter().flat_map(|p| p.tris.iter().flatten()).map(|p| p[0]).collect();
     assert!(near(xs.iter().copied().fold(f64::MIN, f64::max), 1000.0));
@@ -169,7 +174,11 @@ fn a_type_that_does_not_match_draws_revits_result_and_says_why() {
     assert!(near(extent(&f, "Large", &none).1[2], 900.0), "Revit's result, as it came");
     assert!(near(extent(&f, "Small", &none).1[2], 750.0));
     // A duplicate of it is Revit's result too.
-    let r = run(&mut s, "family", json!({"name": "Sample Box Table", "types": {"Copy": {"Width": 1400, "Depth": 800}}, "like": {"Copy": "Large"}}));
+    let r = run(
+        &mut s,
+        "family",
+        json!({"name": "Sample Box Table", "types": {"Copy": {"Width": 1400, "Depth": 800}}, "like": {"Copy": "Large"}}),
+    );
     assert_eq!(r["check"]["Copy"]["matched"], false);
     // The list says it.
     let list = run(&mut s, "family", json!({}));
@@ -288,7 +297,9 @@ fn a_door_from_revit_flexes_its_frame_leaf_and_swing_as_in_revit() {
 fn revolves_blends_sweeps_and_swept_blends_regenerate() {
     let mut s = Session::new();
     let p = |x: f64, y: f64, z: f64| json!([x, y, z]);
-    let lp = |pts: &[Value]| -> Value { json!((0..pts.len()).map(|i| line(pts[i].clone(), pts[(i + 1) % pts.len()].clone())).collect::<Vec<_>>()) };
+    let lp = |pts: &[Value]| -> Value {
+        json!((0..pts.len()).map(|i| line(pts[i].clone(), pts[(i + 1) % pts.len()].clone())).collect::<Vec<_>>())
+    };
     let plan_square = |h: f64, z: f64| lp(&[p(-h, -h, z), p(h, -h, z), p(h, h, z), p(-h, h, z)]);
     let fam = json!({
         "name": "Shapes", "category": "generic",
@@ -349,7 +360,11 @@ fn a_package_loads_its_nested_families_and_gives_back_the_type_to_place() {
     assert_eq!(f.nested.len(), 1);
     // Its check sees the bracket, which Revit's result here hasn't: not a match, so Revit's result is drawn.
     let others = |n: &str| s.model.families.get(n);
-    let (lo, hi) = extent(&Family { check: Default::default(), forms: f.forms.iter().filter(|x| !x.snapshot).cloned().collect(), ..f.clone() }, "Large", &others);
+    let (lo, hi) = extent(
+        &Family { check: Default::default(), forms: f.forms.iter().filter(|x| !x.snapshot).cloned().collect(), ..f.clone() },
+        "Large",
+        &others,
+    );
     assert!(near(hi[0], 700.0) && near(hi[2], 850.0) && near(lo[1], -400.0), "{lo:?} {hi:?}");
     // The bracket follows the shelf's width.
     let mut wider = Family { check: Default::default(), forms: f.forms.iter().filter(|x| !x.snapshot).cloned().collect(), ..f.clone() };

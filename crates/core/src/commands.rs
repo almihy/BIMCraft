@@ -11429,8 +11429,7 @@ fn family(s: &mut Session, p: &Value) -> R {
         crate::family::revit::translate(&mut f, def, &has);
     }
     if let Some(w) = &was {
-        let mut like: BTreeMap<String, String> =
-            p.get("like").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
+        let mut like: BTreeMap<String, String> = p.get("like").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
         like.retain(|new, _| !w.types.contains_key(new));
         for (t, c) in f.check.iter_mut() {
             let before = w.types.get(t).or_else(|| like.get(t).and_then(|old| f.types.get(old)));
@@ -11569,9 +11568,12 @@ fn load_nested(s: &mut Session, nested: Option<&Value>) -> Result<(), String> {
         let ready = left
             .iter()
             .position(|(_, v)| {
-                v["definition"]["nested"].as_array().into_iter().flatten().filter_map(|n| n["family"].as_str()).all(|n| {
-                    done.contains(n) || !all.contains_key(n)
-                })
+                v["definition"]["nested"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|n| n["family"].as_str())
+                    .all(|n| done.contains(n) || !all.contains_key(n))
             })
             .unwrap_or(0);
         let (name, v) = left.remove(ready);

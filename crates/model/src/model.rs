@@ -3803,7 +3803,9 @@ impl Model {
     pub fn component_local_pieces(&self, c: &Component) -> Vec<Piece> {
         let Some(f) = self.families.get(&c.family) else { return Vec::new() };
         let others = |n: &str| self.families.get(n);
-        let Ok(pieces) = f.values(&c.type_name, &c.params).and_then(|v| f.pieces_with(&c.type_name, &v, &others)) else { return Vec::new() };
+        let Ok(pieces) = f.values(&c.type_name, &c.params).and_then(|v| f.pieces_with(&c.type_name, &v, &others)) else {
+            return Vec::new();
+        };
         if !c.mirrored {
             return pieces;
         }
@@ -4898,7 +4900,8 @@ impl Model {
         let values = f.values_in(&o.type_name, &o.params, self.thickness(self.wall(o.host)?)).ok()?;
         let plan = crate::family::SymbolView::Plan;
         let others = |n: &str| self.families.get(n);
-        let (pieces, marks) = (f.pieces_with(&o.type_name, &values, &others).ok()?, f.marks(&o.type_name, &values, plan, Some(detail)).ok()?);
+        let (pieces, marks) =
+            (f.pieces_with(&o.type_name, &values, &others).ok()?, f.marks(&o.type_name, &values, plan, Some(detail)).ok()?);
         let (fx, fy) = (if o.flip_hand { -1.0 } else { 1.0 }, if o.flip_facing { -1.0 } else { 1.0 });
         let mirrored = fx * fy < 0.0;
         let flip = |p: [f64; 3]| [fx * p[0] + 0.0, fy * p[1] + 0.0, p[2]];

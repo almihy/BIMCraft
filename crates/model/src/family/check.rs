@@ -76,8 +76,12 @@ impl Family {
             check.insert(t.clone(), c);
         }
         self.check = check;
-        let failed: Vec<String> =
-            self.check.iter().filter(|(_, c)| !c.matched).map(|(t, c)| format!("type `{t}`: {}", c.reason.clone().unwrap_or_default())).collect();
+        let failed: Vec<String> = self
+            .check
+            .iter()
+            .filter(|(_, c)| !c.matched)
+            .map(|(t, c)| format!("type `{t}`: {}", c.reason.clone().unwrap_or_default()))
+            .collect();
         let ok = untranslated.is_empty() && failed.is_empty() && self.has_parametric();
         let reason = if ok {
             None
@@ -101,7 +105,8 @@ impl Family {
     /// matches.
     pub fn check_type(&self, t: &str, others: Others) -> TypeCheck {
         let fail = |reason: String| TypeCheck { matched: false, reason: Some(reason), flexed: false };
-        let snapshot_here = self.forms.iter().any(|f| f.snapshot && f.of_type(t)) || self.symbols.iter().any(|y| y.snapshot && y.of_type(t));
+        let snapshot_here =
+            self.forms.iter().any(|f| f.snapshot && f.of_type(t)) || self.symbols.iter().any(|y| y.snapshot && y.of_type(t));
         if !snapshot_here {
             return TypeCheck { matched: true, reason: None, flexed: false };
         }
@@ -116,7 +121,13 @@ impl Family {
             return fail(format!("its reference planes can't be placed: {e}"));
         }
         let build = |snapshot: bool| {
-            self.build(t, &values, &mut HashMap::new(), &mut csg::Meter::default(), Build { snapshot, others, depth: 0, spent: &std::cell::Cell::new(0) })
+            self.build(
+                t,
+                &values,
+                &mut HashMap::new(),
+                &mut csg::Meter::default(),
+                Build { snapshot, others, depth: 0, spent: &std::cell::Cell::new(0) },
+            )
         };
         let (made, revit) = match (build(false), build(true)) {
             (Ok(a), Ok(b)) => (a, b),

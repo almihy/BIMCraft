@@ -166,11 +166,13 @@ pub(crate) fn along(path: &[P3], section: &[P3], section_end: &[P3]) -> Result<V
     }
     let n = path.len();
     let legs = if closed { n } else { n - 1 };
-    let dirs: Vec<P3> = (0..legs).map(|i| unit(sub(path[(i + 1) % n], path[i]))).collect::<Option<_>>().ok_or("its path doubles back on itself")?;
+    let dirs: Vec<P3> =
+        (0..legs).map(|i| unit(sub(path[(i + 1) % n], path[i]))).collect::<Option<_>>().ok_or("its path doubles back on itself")?;
     let t0 = dirs[0];
     let p0 = path[0];
     // The profile in the frame of the first leg: across it, in a plane square to it.
-    let offset = |s: &[P3], base: P3, dir: P3| -> Vec<P3> { s.iter().map(|q| sub(*q, base)).map(|o| sub(o, mul(dir, dot(o, dir)))).collect() };
+    let offset =
+        |s: &[P3], base: P3, dir: P3| -> Vec<P3> { s.iter().map(|q| sub(*q, base)).map(|o| sub(o, mul(dir, dot(o, dir)))).collect() };
     // The profile is drawn square to one leg of the path, anywhere along it (Revit's profile at the middle of a curve of
     // the path): found by its plane and where its middle is, and taken back along the turns to the first leg's frame.
     let centre = mul(section.iter().fold([0.0; 3], |a, p| add(a, *p)), 1.0 / section.len() as f64);

@@ -1901,7 +1901,13 @@ impl Family {
                 .and_then(|v| {
                     self.all_marks(t, &v)?;
                     self.cut_size(&v)?;
-                    self.build(t, &v, &mut read, &mut cuts, Build { snapshot: self.draws_snapshot(t), others: &|_| None, depth: 0, spent: &std::cell::Cell::new(0) })
+                    self.build(
+                        t,
+                        &v,
+                        &mut read,
+                        &mut cuts,
+                        Build { snapshot: self.draws_snapshot(t), others: &|_| None, depth: 0, spent: &std::cell::Cell::new(0) },
+                    )
                 })
                 .map_err(|e| format!("type `{t}`: {e}"))?;
             built += pieces.iter().map(|p| p.tris.len()).sum::<usize>();
@@ -2152,7 +2158,13 @@ impl Family {
     /// [`Family::pieces`] with its nested parts, the families they are of found by `others` (the project's).
     pub fn pieces_with(&self, type_name: &str, values: &BTreeMap<String, Val>, others: Others) -> Result<Vec<Piece>, String> {
         let snapshot = self.draws_snapshot(type_name);
-        self.build(type_name, values, &mut HashMap::new(), &mut csg::Meter::default(), Build { snapshot, others, depth: 0, spent: &std::cell::Cell::new(0) })
+        self.build(
+            type_name,
+            values,
+            &mut HashMap::new(),
+            &mut csg::Meter::default(),
+            Build { snapshot, others, depth: 0, spent: &std::cell::Cell::new(0) },
+        )
     }
 
     /// The marks of its visible symbols in `view` and type `type_name`, sized by `values`, in its own axes, drawn at detail
@@ -2381,7 +2393,8 @@ impl Family {
             if form.path.len() > MAX_RING || form.section.len() > MAX_RING || form.section_end.len() > MAX_RING {
                 return Err(format!("its path or its profile has more than {MAX_RING} points"));
             }
-            let mut pts = |v: &'a [[Expr; 3]]| -> Result<Vec<P3>, String> { v.iter().map(|[a, b, c]| Ok([num(a)?, num(b)?, num(c)?])).collect() };
+            let mut pts =
+                |v: &'a [[Expr; 3]]| -> Result<Vec<P3>, String> { v.iter().map(|[a, b, c]| Ok([num(a)?, num(b)?, num(c)?])).collect() };
             let (path, section, end) = (pts(&form.path)?, pts(&form.section)?, pts(&form.section_end)?);
             let mut bends = |ring: Ring| -> Result<Vec<(usize, P3, P3, bool)>, String> {
                 let mut out = Vec::new();
@@ -2445,7 +2458,8 @@ impl Family {
                 if form.axis.is_some() || form.circle.is_some() {
                     return Err("a `top` or `holes` go with a `profile` swept across its plane, not turned or round".into());
                 }
-                let mut ring_of = |v: &'a [[Expr; 2]]| -> Result<Vec<P2>, String> { v.iter().map(|[a, b]| Ok(P2(num(a)?, num(b)?))).collect() };
+                let mut ring_of =
+                    |v: &'a [[Expr; 2]]| -> Result<Vec<P2>, String> { v.iter().map(|[a, b]| Ok(P2(num(a)?, num(b)?))).collect() };
                 let tris = if form.top.is_empty() {
                     let holes = form.holes.iter().map(|h| ring_of(h)).collect::<Result<Vec<_>, _>>()?;
                     let holes: Vec<Vec<P2>> = holes.into_iter().zip(&hole_bends).map(|(h, b)| shapes::bent2(h, b)).collect();
@@ -3341,8 +3355,7 @@ mod tests {
         let ring = |n: usize| -> Vec<Value> {
             (0..n).map(|k| (k as f64 * std::f64::consts::TAU / n as f64).sin_cos()).map(|(s, c)| json!([100.0 * c, 100.0 * s])).collect()
         };
-        let f: Family =
-            serde_json::from_value(json!({"types": {"A": {}}, "forms": [{"profile": ring(MAX_RING + 1), "to": 10}]})).unwrap();
+        let f: Family = serde_json::from_value(json!({"types": {"A": {}}, "forms": [{"profile": ring(MAX_RING + 1), "to": 10}]})).unwrap();
         assert!(f.check(&|_| true).unwrap_err().contains("corners"));
         // Many types, each building a little: past what one family may build, refused.
         let types: serde_json::Map<String, Value> = (0..MAX_TYPES).map(|k| (format!("T{k}"), json!({}))).collect();

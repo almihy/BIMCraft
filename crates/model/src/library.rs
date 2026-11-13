@@ -1685,7 +1685,9 @@ impl Model {
                 || f.catalog.is_some()
                 || !f.check.is_empty()
                 || f.editable.is_some()
-                || f.forms.iter().any(|x| x.snapshot || !x.top.is_empty() || !x.path.is_empty() || !x.holes.is_empty() || !x.arcs.is_empty())
+                || f.forms
+                    .iter()
+                    .any(|x| x.snapshot || !x.top.is_empty() || !x.path.is_empty() || !x.holes.is_empty() || !x.arcs.is_empty())
                 || f.symbols.iter().any(|y| y.snapshot)
         });
         if parametric {

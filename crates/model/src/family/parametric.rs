@@ -217,7 +217,8 @@ impl Family {
         match self.check.get(type_name) {
             Some(c) => !c.matched,
             None => {
-                self.forms.iter().any(|f| f.snapshot && f.of_type(type_name)) || self.symbols.iter().any(|y| y.snapshot && y.of_type(type_name))
+                self.forms.iter().any(|f| f.snapshot && f.of_type(type_name))
+                    || self.symbols.iter().any(|y| y.snapshot && y.of_type(type_name))
             }
         }
     }
@@ -259,7 +260,10 @@ impl Family {
                 if ks.iter().all(Option::is_none) {
                     continue;
                 }
-                let ks: Vec<usize> = ks.into_iter().collect::<Option<_>>().ok_or_else(|| format!("{who} measures between references along different axes"))?;
+                let ks: Vec<usize> = ks
+                    .into_iter()
+                    .collect::<Option<_>>()
+                    .ok_or_else(|| format!("{who} measures between references along different axes"))?;
                 if ks.len() < 2 {
                     continue;
                 }
@@ -360,7 +364,10 @@ impl Family {
                 return Err(format!("{who}: `{shown}` isn't one of the family's references"));
             }
             if let Some(label) = &d.label
-                && !self.parameters.iter().any(|p| p.name == *label && matches!(p.kind, super::Kind::Length | super::Kind::Number | super::Kind::Angle))
+                && !self
+                    .parameters
+                    .iter()
+                    .any(|p| p.name == *label && matches!(p.kind, super::Kind::Length | super::Kind::Number | super::Kind::Angle))
             {
                 let shown: String = label.chars().take(40).collect();
                 return Err(format!("{who}: its label `{shown}` isn't a length or number parameter of the family"));

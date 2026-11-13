@@ -14,8 +14,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use serde_json::Value;
 
 use super::{
-    Axis, Bend, Catalog, Curve, Dimension, DimensionKind, Expr, Family, Form, Kind, Levels, Nested, Plane, Reference, Ring, Show,
-    Symbol, SymbolView, Val, nameable, number,
+    Axis, Bend, Catalog, Curve, Dimension, DimensionKind, Expr, Family, Form, Kind, Levels, Nested, Plane, Reference, Ring, Show, Symbol,
+    SymbolView, Val, nameable, number,
 };
 use crate::geom::P2;
 
@@ -78,7 +78,7 @@ fn neg(a: Expr) -> Expr {
 fn minus(a: Expr, b: &Expr) -> Expr {
     match (a, b) {
         (a, Expr::Number(y)) => plus(a, -y),
-        (Expr::Number(x), Expr::Formula(g)) if x == 0.0 => Expr::Formula(format!("-({g})")),
+        (Expr::Number(0.0), Expr::Formula(g)) => Expr::Formula(format!("-({g})")),
         (Expr::Number(x), Expr::Formula(g)) => Expr::Formula(format!("{} - ({g})", plain(x))),
         (Expr::Formula(f), Expr::Formula(g)) => Expr::Formula(format!("{f} - ({g})")),
     }
@@ -197,6 +197,9 @@ fn short(v: &Value) -> String {
     v.to_string().chars().take(60).collect()
 }
 
+/// A loop in a plane: its corners, its arcs, and its corners' numbers in the first type.
+type Loop = (Vec<[Expr; 2]>, Vec<Bend>, Vec<P2>);
+
 /// A curve of a loop: its start (and end) point, and for an arc its centre, its normal and its middle point.
 struct Bit {
     start: [Expr; 3],
@@ -226,7 +229,7 @@ impl Reader<'_> {
     }
 
     /// A loop as corners in a plane (`k`: the two axes it is drawn in) and its arcs, `ring` of a form.
-    fn ring(&self, lp: &Value, k: [usize; 2], ring: Ring, hole: usize) -> Result<(Vec<[Expr; 2]>, Vec<Bend>, Vec<P2>), String> {
+    fn ring(&self, lp: &Value, k: [usize; 2], ring: Ring, hole: usize) -> Result<Loop, String> {
         let curves = lp.as_array().ok_or("a loop is a list of curves")?;
         if curves.len() > MOST {
             return Err(format!("a loop has more than {MOST} curves"));
@@ -328,7 +331,8 @@ impl Reader<'_> {
                 let order = |e: &Expr| self.first_number(e);
                 let (from, to) = if order(&start)? <= order(&end)? { (start, end) } else { (end, start) };
                 if kind == "blend" {
-                    let one = |key: &str| def[key].as_array().and_then(|l| l.first()).cloned().ok_or(format!("its {key} profile is missing"));
+                    let one =
+                        |key: &str| def[key].as_array().and_then(|l| l.first()).cloned().ok_or(format!("its {key} profile is missing"));
                     let (bottom, top) = (one("bottom")?, one("top")?);
                     let (profile, mut arcs, _) = self.ring(&bottom, k, Ring::Profile, 0)?;
                     let (top, top_arcs, _) = self.ring(&top, k, Ring::Top, 0)?;
@@ -341,11 +345,14 @@ impl Reader<'_> {
                 let depth: Vec<usize> = rings
                     .iter()
                     .enumerate()
-                    .map(|(i, r)| rings.iter().enumerate().filter(|(j, o)| *j != i && r.2.first().is_some_and(|p| inside(*p, &o.2))).count())
+                    .map(|(i, r)| {
+                        rings.iter().enumerate().filter(|(j, o)| *j != i && r.2.first().is_some_and(|p| inside(*p, &o.2))).count()
+                    })
                     .collect();
                 let mut out = Vec::new();
-                for (i, r) in rings.iter().enumerate().filter(|(i, _)| depth[*i] % 2 == 0) {
-                    let mut form = Form { plane, profile: r.0.clone(), arcs: r.1.clone(), from: from.clone(), to: to.clone(), ..base.clone() };
+                for (i, r) in rings.iter().enumerate().filter(|(i, _)| depth[*i].is_multiple_of(2)) {
+                    let mut form =
+                        Form { plane, profile: r.0.clone(), arcs: r.1.clone(), from: from.clone(), to: to.clone(), ..base.clone() };
                     for (j, h) in rings.iter().enumerate() {
                         if depth[j] == depth[i] + 1 && h.2.first().is_some_and(|p| inside(*p, &r.2)) {
                             let hole = form.holes.len();
@@ -460,7 +467,11 @@ impl Reader<'_> {
             view,
             show: levels,
             visible: def.get("visible").and_then(text).map(|v| Expr::Formula(v.to_string())),
-            subcategory: def.get("subcategory").and_then(text).filter(|s| self.family.subcategories.iter().any(|x| x.name == *s)).map(str::to_string),
+            subcategory: def
+                .get("subcategory")
+                .and_then(text)
+                .filter(|s| self.family.subcategories.iter().any(|x| x.name == *s))
+                .map(str::to_string),
             ..Symbol::default()
         };
         let curves = def["curves"].as_array().filter(|c| c.len() <= MOST).ok_or("it has no curves")?;
@@ -486,9 +497,15 @@ impl Reader<'_> {
                     } else {
                         a0 - (a0 - a1).rem_euclid(360.0)
                     };
-                    let radius = bit.radius.clone().unwrap_or(Expr::Number(((s[k[0]] - cn[k[0]]).hypot(s[k[1]] - cn[k[1]]) * 10.0).round() / 10.0));
+                    let radius =
+                        bit.radius.clone().unwrap_or(Expr::Number(((s[k[0]] - cn[k[0]]).hypot(s[k[1]] - cn[k[1]]) * 10.0).round() / 10.0));
                     out.push(Symbol {
-                        arc: Some(Curve { centre: [centre[k[0]].clone(), centre[k[1]].clone()], radius, from: Expr::Number(a0), to: Expr::Number(to) }),
+                        arc: Some(Curve {
+                            centre: [centre[k[0]].clone(), centre[k[1]].clone()],
+                            radius,
+                            from: Expr::Number(a0),
+                            to: Expr::Number(to),
+                        }),
                         ..base.clone()
                     });
                 }
@@ -514,7 +531,8 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     f.check.clear();
     let mut notes = Vec::new();
     if !def.is_object() {
-        f.editable = Some(super::Editable { ok: false, reason: None, untranslated: vec!["its definition isn't one BIMCraft can read".into()] });
+        f.editable =
+            Some(super::Editable { ok: false, reason: None, untranslated: vec!["its definition isn't one BIMCraft can read".into()] });
         return;
     }
     let to = &def["to_bimcraft"];
@@ -531,7 +549,10 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     for (i, p) in def["reference_planes"].as_array().into_iter().flatten().take(super::MAX_REFERENCES).enumerate() {
         let Some(id) = p.get("id").map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_string)) else { continue };
         let Some((axis, _)) = axis_of(&p["normal"]) else {
-            notes.push(format!("reference plane `{}` is sloped: BIMCraft's references are square to the family's axes", p["name"].as_str().unwrap_or(&id)));
+            notes.push(format!(
+                "reference plane `{}` is sloped: BIMCraft's references are square to the family's axes",
+                p["name"].as_str().unwrap_or(&id)
+            ));
             continue;
         };
         let wanted = p.get("name").and_then(text).unwrap_or("").to_string();
@@ -543,8 +564,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             }
             name = format!("{stem} {n}");
         }
-        let at: BTreeMap<String, f64> =
-            p["at"].as_object().into_iter().flatten().filter_map(|(t, v)| Some((t.clone(), num(v)?))).collect();
+        let at: BTreeMap<String, f64> = p["at"].as_object().into_iter().flatten().filter_map(|(t, v)| Some((t.clone(), num(v)?))).collect();
         refs.push((id.clone(), name.clone(), axis, p.clone()));
         planes.insert(id, (name, axis, at));
     }
@@ -631,7 +651,8 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             r.2 == axis && !moves(&r.3) && r.3["at"].as_object().into_iter().flatten().all(|(_, v)| num(v).is_some_and(|x| x.abs() < 0.05))
         };
         if let Some(found) = refs.iter().find(at_zero).map(|r| r.1.clone())
-            && let Some(r) = references.iter_mut().find(|r| r.name == found && r.is_reference.as_deref().is_none_or(|k| !k.starts_with("host_")))
+            && let Some(r) =
+                references.iter_mut().find(|r| r.name == found && r.is_reference.as_deref().is_none_or(|k| !k.starts_with("host_")))
         {
             r.origin = true;
         }
@@ -647,7 +668,8 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             "diameter" => DimensionKind::Diameter,
             _ => DimensionKind::Linear,
         };
-        let ids: Vec<String> = d["refs"].as_array().into_iter().flatten().map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_string)).collect();
+        let ids: Vec<String> =
+            d["refs"].as_array().into_iter().flatten().map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_string)).collect();
         let found: Vec<&(String, Axis, BTreeMap<String, f64>)> = ids.iter().filter_map(|i| reader.planes.get(i)).collect();
         let label = d.get("label").and_then(text).map(str::to_string);
         let (locked, eq) = (d["locked"].as_bool().unwrap_or(false), d["eq"].as_bool().unwrap_or(false));
@@ -676,7 +698,8 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
                 if gap * sign < 0.0 { -1 } else { 1 }
             })
             .collect();
-        let value = d["value"].as_object().and_then(|v| v.get(&first).or_else(|| v.values().next())).and_then(num).or_else(|| num(&d["value"]));
+        let value =
+            d["value"].as_object().and_then(|v| v.get(&first).or_else(|| v.values().next())).and_then(num).or_else(|| num(&d["value"]));
         dimensions.push(Dimension {
             kind,
             refs: found.iter().map(|p| p.0.clone()).collect(),
@@ -692,7 +715,8 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         if c["kind"].as_str() != Some("alignment") || !c["locked"].as_bool().unwrap_or(false) {
             continue;
         }
-        let ids: Vec<&(String, Axis, BTreeMap<String, f64>)> = c["refs"].as_array().into_iter().flatten().filter_map(|v| reader.planes.get(v.as_str()?)).collect();
+        let ids: Vec<&(String, Axis, BTreeMap<String, f64>)> =
+            c["refs"].as_array().into_iter().flatten().filter_map(|v| reader.planes.get(v.as_str()?)).collect();
         if let [a, b] = ids.as_slice()
             && a.1 == b.1
         {
@@ -764,7 +788,13 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
 
 /// `forms`, `symbols` and `nested` parts kept where each works out in every type of `f` (its references where they're
 /// placed); one that doesn't is left out, and said in `notes`.
-fn tried(f: &Family, forms: Vec<Form>, symbols: Vec<Symbol>, nested: Vec<Nested>, notes: &mut Vec<String>) -> (Vec<Form>, Vec<Symbol>, Vec<Nested>) {
+fn tried(
+    f: &Family,
+    forms: Vec<Form>,
+    symbols: Vec<Symbol>,
+    nested: Vec<Nested>,
+    notes: &mut Vec<String>,
+) -> (Vec<Form>, Vec<Symbol>, Vec<Nested>) {
     let values: Vec<BTreeMap<String, Val>> = f.types.keys().filter_map(|t| f.values(t, &BTreeMap::new()).ok()).collect();
     let mut probe = Family { forms: Vec::new(), symbols: Vec::new(), nested: Vec::new(), check: BTreeMap::new(), ..f.clone() };
     let mut kept_forms = Vec::new();
@@ -772,7 +802,7 @@ fn tried(f: &Family, forms: Vec<Form>, symbols: Vec<Symbol>, nested: Vec<Nested>
         probe.forms = vec![form];
         let fails = values.iter().find_map(|v| probe.solid(0, v, &mut HashMap::new()).err());
         match fails {
-            None => kept_forms.extend(probe.forms.drain(..)),
+            None => kept_forms.append(&mut probe.forms),
             Some(e) => notes.push(format!("form {} as translated doesn't build: {e}", i + 1)),
         }
     }
@@ -781,16 +811,16 @@ fn tried(f: &Family, forms: Vec<Form>, symbols: Vec<Symbol>, nested: Vec<Nested>
         probe.symbols = vec![y];
         let fails = values.iter().find_map(|v| probe.marks_where(v, &|_| true).err());
         match fails {
-            None => kept_symbols.extend(probe.symbols.drain(..)),
+            None => kept_symbols.append(&mut probe.symbols),
             Some(e) => notes.push(format!("line {} as translated doesn't work out: {e}", i + 1)),
         }
     }
     let mut kept_nested = Vec::new();
     for n in nested {
         let mut read = HashMap::new();
-        let ok = values.iter().all(|v| {
-            n.at.iter().chain([&n.rotation]).chain(&n.visible).chain(n.params.values()).all(|e| number(e, v, &mut read).is_ok())
-        });
+        let ok = values
+            .iter()
+            .all(|v| n.at.iter().chain([&n.rotation]).chain(&n.visible).chain(n.params.values()).all(|e| number(e, v, &mut read).is_ok()));
         if ok {
             kept_nested.push(n);
         } else {
