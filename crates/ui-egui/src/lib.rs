@@ -799,6 +799,8 @@ pub struct BimApp {
     /// Manage Images is open, and the image picked in it.
     images_window: bool,
     images_picked: Option<String>,
+    /// Manage Images' Reload From of a PDF's page: the read asked of it, the image, and the file.
+    reloading: Option<(u64, String, std::path::PathBuf)>,
     /// Scale's Options Bar: the length the first reference becomes, as typed.
     scale_length: String,
     /// A selected element's temporary dimension being typed: the element, which of its dimensions (a wall has one, a
@@ -1527,6 +1529,7 @@ impl BimApp {
             pdf_reader: Default::default(),
             images_window: false,
             images_picked: None,
+            reloading: None,
             scale_length: String::new(),
             tab_cycle: false,
             flow: selecting::Flow::default(),

@@ -128,8 +128,13 @@ a list of 3D points per entity), and then `toposolid` would take a pick as its `
 `render::cad_imports` draws a plan's imports under all the rest but its scans, as Revit draws an import in the background: each
 entity of a layer the import and the view show, in its colour (the view's ink when it has none or the import draws in black),
 its pen (`Cad::pen`, the entity's or its layer's line weight) and its dashes (`Cad::dash`, its linetype by `$LTSCALE`, scaled to
-the view, left solid when a dash would be under a pixel). Text is lettered with `font.rs` at its height, turned and aligned; a
-solid hatch is filled. What lies outside the view is passed over, so a large site plan zoomed in draws only what's on screen. An
+the view, every dash, dot and gap of it: `Cad::dash`, left solid when its cycle would be under a few pixels). Text is lettered
+with `font.rs` at its height and width factor (DXF group 41), turned, aligned and, backwards (group 71), mirrored; a hatch's
+rings fill by odd parity, as DXF's do, so an island is a hole; an entity's transparency (group 440) draws see-through. Only the
+entities whose boxes reach the view are looked at (`Cad::entities_in`, a grid of the entities' boxes made the first time it is
+asked, which snapping and `cad::nearest` use too), and a run's points under a pixel apart are drawn as one (`thinned`), so a
+dense sheet draws quickly zoomed in and zoomed out. Each layer draws as the view's Imported Categories say (`ImportLook`:
+the import's row and each layer's projection lines, colour, weight and pattern, and halftone; a layer's own win). An
 import is one element: picked by any of its lines, selected whole. Sections, elevations and the 3D view leave imports out, as
 Revit's do for a drawing placed in a plan; IFC export leaves them out too. The category is `cadimport`, Revit's Imported
 Categories: Visibility/Graphics hides it or halftones it in a view like any other.
@@ -144,7 +149,11 @@ for its name, colours, layers (visible or all), units (auto-detect, or one), pos
 and whether it's for the current view only; it runs `import_cad` on the plan on screen's level, selects what came in, and keeps
 the box open with the reason when a file can't come in. The Properties palette shows an import's drawing, file, unit, counts,
 level, position, angle and scale, and a drop-down for its colours. Visibility/Graphics has an Imported Categories tab: the
-category's row, and under each drawing of the project a check box for each of its layers, cleared for those the view hides. A right click on linked drawings selected offers Reload CAD, which runs `reload_cad` for each.
+category's row, then a row for each drawing of the project and each PDF page placed in the view (`imports`), as Revit's: its
+visibility, its Projection Lines (Line Graphics) and Halftone, and folded under it a row for each of its layers with the same,
+a layer's box cleared for those the view hides. A view template carries all of it when it controls `imports` (V/G Overrides
+Import), as the rest of a view's graphics. A right click on linked drawings selected offers Reload CAD, which runs
+`reload_cad` for each.
 
 ## Images and PDFs
 
@@ -154,8 +163,9 @@ fonts are PDFium's, BSD, in NOTICE): a page's size (turned, its `/UserUnit` take
 its viewport's measure states (`/VP` with a rectilinear `/Measure`, the real length of a point), and what it draws as
 vectors: each stroked path (curves in chords of 0.05 mm), the outline of each fill, and each text it shows, in mm of the
 paper from its bottom left. Only what shows is kept: what lies on the page (its crop box, as the picture has it) and inside
-the clipping paths it sets (the box round each, within the one before), cut where it leaves them (strokes by Liang and
-Barsky, fills' outlines by Sutherland and Hodgman). A hostile file can't hold the read up: a path whose control points lie
+the clipping paths it sets, whatever their shape and by their fill rule (`raster/pdf/shapes.rs`: a box clips by Liang and
+Barsky and Sutherland and Hodgman, any other shape by `i_overlay`), so what is drawn, snapped to and read is only what shows.
+A hostile file can't hold the read up: a path whose control points lie
 off the clip is dropped before it is worked, a curve far bigger than the page is halved until its parts near the page are
 found (the rest become chords the clip drops), and the chords a page's curves may become (`MAX_WORK`), the points a path
 (`MAX_PATH_POINTS`) and a page (`MAX_SEGMENTS`) may keep are capped; past them paths are left out with a note. Text set in a
@@ -164,8 +174,9 @@ character map BIMCraft doesn't hold (the CJK CMaps, left out of the build) is na
 A project holds each image once, by name, as an `ImageType` in `Model::image_types` (a library entry of kind `image`; Manage
 Images lists them): the file's name, the page and the resolution, its size in mm (a PDF's page; a picture's at 72 dpi, as
 Revit takes every raster image), the scale the page states, its pixels as a PNG (grey when they are) and a PDF's vectors as a
-`Cad` (a DXF in mm written of them: strokes on layer `Lines` in their colour and width, fills' outlines on `Fills`, texts on
-`Text`; a DXF that can't be read back is said in the notes). The PDF itself is not kept. `MAX_PIXELS` (36 million) caps an
+`Cad` held packed (`cad/packed.rs`: its layers, linetypes, polylines, fills and texts, every point to a micron as the step
+from the one before, a few bytes each, deflated in the file; a dense A0 sheet's million and a half points are a few
+megabytes, where their DXF would be forty; lines that can't be read back are said in the notes). The PDF itself is not kept. `MAX_PIXELS` (36 million) caps an
 image: a page that would pass it at the resolution asked comes in at the finest that fits, said in the notes. Its pixels are
 held in the channels they need (grey, RGB or RGBA), so a drawing's grey page holds a byte a pixel, encoded to PNG row by row
 and decoded again only when first drawn. `MAX_TYPES` images and `MAX_HELD` (256 MB) of PNG among them are the most a project
@@ -193,37 +204,51 @@ layers work as a DWG import's do. `pdf::Document` reads a file's optional conten
 and which its default configuration has off), and the vectors device (`Collect`) follows the page's marked content: each
 stroke, fill and text records the layer it is drawn on (`Run::layer`, `Text::layer`). An `/OC` sequence inside another is on
 its own group (the innermost wins); an OCMD is on its first group (of `/OCGs`, else of its visibility expression `/VE`);
-what is drawn on no group is on `No layer`. A form XObject's own `/OC` isn't seen by the device (hayro keeps it to itself),
-so what it draws is on the layer round it. hayro skips what a group the file has off draws, so the vectors are read from the
-file with one more revision appended (`Document::all_on`: a catalog with no optional content, as an incremental update
-writes one); an encrypted file isn't revised (its key would be needed), so what its off layers draw is left out, said in the
-notes. A page of a file with no layers has its lines grouped by colour and weight instead (`colour_name`, the nearest of a
-few plain names: `Black 0.35`, `Red hairline`, `Grey fill`, `Black text`, `Pattern fill`). The DXF (`Vectors::dxf`) keeps
-the page's order of drawing (`seq`: a fill, as one HATCH of all its rings, before its own stroke; a white mask over the lines
-under it), each stroke's dash as a linetype (`DASH_<dash>_<gap>`, hundredths of a mm) and width, solid fills as solid
-hatches, and the file's off layers off. A letter with no Unicode is kept as its outline, filled; a Type 3 font's are counted
+what is drawn on no group is on `No layer`. A form XObject's own `/OC`, and an annotation's, are told to the device as a
+`BDC /OC` is by hayro-interpret, vendored with that change (`vendor/hayro-interpret`, `[patch.crates-io]` in the root
+`Cargo.toml`, its changes marked "BIMCraft's patch"), so what a form draws is on its layer. hayro skips what a group the
+file has off draws, so the vectors are read from the file with one more revision appended (`Document::all_on`: a catalog
+with no optional content, as an incremental update writes one); an encrypted file isn't revised (its key would be needed),
+so what its off layers draw is left out, said in the notes. Every group the file lists is a layer of its drawing, drawn on
+or not, each with the colour most of what is on it is drawn in. A page of a file with no layers has its lines grouped by
+colour and weight instead (`colour_name`, the nearest of a few plain names: `Black 0.35`, `Red hairline`, `Grey fill`,
+`Black text`).
+
+The page is read as it draws (`Vectors::drawing`, in the page's order, `seq`): a fill by its rule, even-odd or non-zero, as
+rings that fill by odd parity (`shapes::resolve`, so its holes stay holes and overlaps stay filled); paint's opacity (`ca`
+and `CA`, and the transparency groups open) as the entity's; a gradient (a shading) in its mean colour over what it fills,
+and a tiling pattern in the mean colour its cell paints, as opaque as the share of the cell it covers
+(`raster/pdf/paint.rs`); a dash with all its dashes, its phase taken in; a line as wide as the page draws it, and where the
+page stretches it more one way than the other, or makes it wider than the widest pen (`MAX_LINE_WIDTH`), its outline as a
+fill; text at the width it runs (its squeeze, spacing and font: a width factor), from its first letter that isn't a space,
+mirrored where the page mirrors it. A white fill over the page before anything else is drawn is the page's ground and is
+left out: a drawing has no page. A letter with no Unicode is kept as its outline, filled; a Type 3 font's are counted
 (`unlettered`).
 
-A page with lines is drawn from them (`ImageType::drawn`): its pixels are then only its raster images, painted on white by
+A page with lines is drawn from them (`ImageType::drawn`): its pixels are then only its raster images, painted on nothing by
 the `Pictures` device (each image's and stencil's nearest pixel, inside the box round each clip, no more than
-`MAX_PAINTED` pixels), with a small picture of the whole page (`thumb`, `THUMB` px a side) for Manage Images, and the notes
-say how many pictures stay in the background, showing and hiding with the PDF and not by layer. A page whose lines can't hold
-all it draws (paths left out past the caps, text in a character map not held, Type 3 letters) keeps the picture of it all, and
-its layers can't be shown and hidden (`cad_layers` says so); a page with no lines (a scan) is its picture, as before.
-`render::images` draws a drawn page's picture, then its lines through `cad_drawing` (the same code as an import's) at
-`Part::Picture`, so it still picks only where nothing else does, leaving out the layers the image hides everywhere
-(`ImageInstance::hidden`) and those its view hides (`Graphics::pdf_layers`, by the image's name, a library reference of kind
-`image`; `Look::hidden_pdf_layers`). Text is lettered as a DWG's is. A project with a drawn page is written as format 21; one
-with images but none, 20.
+`MAX_PAINTED` pixels) and cut to the part of the page they cover (`ImageType::covers`); a page with none has no picture, as a
+DWG has no page. A small picture of the whole page (`thumb`, `THUMB` px a side) is kept for Manage Images, and the notes say
+how many pictures there are, showing and hiding with the PDF and not by layer. A page keeps up to `MAX_SEGMENTS` (4 million)
+points; one denser, or whose lines can't hold all it draws (text in a character map not held, Type 3 letters), keeps the
+picture of it all, its notes saying so plainly, and its layers can't be shown and hidden (`cad_layers` says so); a page with
+no lines (a scan) is its picture, as before. `render::images` draws a drawn page's picture, then its lines through
+`cad_drawing` (the same code as an import's) at `Part::Picture`, so it still picks only where nothing else does, leaving out
+the layers the image hides everywhere (`ImageInstance::hidden`) and those its view hides (`Graphics::pdf_layers`, by the
+image's name, a library reference of kind `image`; `Look::hidden_pdf_layers`), as its view draws it
+(`Graphics::pdf_imports`). The canvas keeps a drawing's triangles on the card even with pictures in it, each picture drawn
+by egui in its place between them (`retained.rs`). A project with a drawn page, or a view or template that hides a page's
+layers or says how an import draws, is written as format 21; one with images but none, 20.
 
-Commands: `import_pdf` lists the page's `layers` and hides those the file has off (as `import_cad` with its visible layers);
-`cad_layers` takes the image's `id` (hide and show wherever it shows, or with `view` in that view only); `graphics` takes
-`pdf_layers` (`{image: [layer, …] | null}`) as it takes `layers`; `cad_read` with `layers` gives one layer's lines and
-words; `manage_images` lists each image's layers and, deleting one, forgets the layers views hid of it. In the desktop,
-Visibility/Graphics' Imported Categories lists under the CAD drawings each PDF placed in the view, a check box for each of
-its layers (`pdfs_in`, `layer_boxes` in `crates/ui-egui/src/graphics.rs`). As for a DWG, a view template doesn't carry a
-drawing's layers (they are a view's own), and there is no Query or right-click hide by layer in the window (an agent has
-`cad_query`).
+Commands: `import_pdf` lists the page's `layers`; those the file has off come in hidden in the view it is placed in, unticked
+in its Imported Categories (on the instance, hidden wherever it shows, where that view has no graphics of its own);
+`cad_layers` takes the image's `id` (hide and show wherever it shows, `show` showing it again in every view that hides it,
+or with `view` in that view only) and gives each layer's colour; `graphics` takes `pdf_layers` (`{image: [layer, …] |
+null}`) as it takes `layers`, and `pdf_imports` as `imports`; `cad_read` with `layers` gives one layer's lines and words;
+`manage_images` lists each image's layers, deleting one (or taking its entry out of the library) forgets what views hid of
+it, and `reload` reads one again from its file (Reload From, in Manage Images too) into the same image, its instances
+staying, so a page that came in before its layers were kept comes in with them. As for a DWG, there is no Query or
+right-click hide by layer in the window (an agent has `cad_query`).
 
 A PDF's lines are placed where the image shows them by `ImageInstance::lines_placed`, an import of the image's `Cad` (with
 `CadImport::stretch` when its sides are scaled apart, and turned half round and flipped when mirrored), so everything an

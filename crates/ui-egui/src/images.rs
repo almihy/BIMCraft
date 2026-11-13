@@ -138,6 +138,24 @@ impl BimApp {
     /// placed (given to the session, and placed if it was clicked already). A read that failed says why.
     pub(crate) fn take_pdf_answers(&mut self, ctx: &Context) {
         for (id, job, answer) in self.pdf_answers() {
+            // Manage Images' Reload From: the page read again, given to the session, then taken into the image.
+            if let Some((_, name, path)) = self.reloading.take_if(|(asked, ..)| *asked == id) {
+                let file = path.to_string_lossy().into_owned();
+                match (answer.and_then(|bytes| raster::PdfRead::from_bytes(&bytes)), job) {
+                    (Ok(read), PdfJob::Page { page, dpi }) => {
+                        self.session.give_pdf_page(&file, page, dpi, read);
+                        let p = json!({"reload": name, "path": file, "page": page, "resolution": dpi});
+                        self.run("manage_images", p);
+                        self.session.forget_pdf(Some(&file));
+                    }
+                    (Ok(_), _) => {}
+                    (Err(e), _) => {
+                        let shown = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                        self.status = crate::Status { text: crate::pdfread::could_not_read(&shown, &e), error: true };
+                    }
+                }
+                continue;
+            }
             if let Some(b) = self.pdf_box.as_mut() {
                 let name = b.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                 if b.outline_job == Some(id) {
@@ -485,7 +503,7 @@ impl BimApp {
         let count = |name: &str| {
             m.rare("image").into_iter().filter(|id| matches!(m.elements.get(*id), Some(Element::Image(im)) if im.type_name == name)).count()
         };
-        let (mut place, mut delete, mut close) = (None, None, false);
+        let (mut place, mut delete, mut reload, mut close) = (None, None, None, false);
         let r = Modal::new(UiId::new("manage-images"), t("Manage Images")).width(620.0).show(ctx, |ui| {
             crate::popup::body(ui, |ui| {
                 if m.image_types.is_empty() {
@@ -518,7 +536,10 @@ impl BimApp {
                         delete = picked.clone();
                     }
                     if ui.add_enabled(picked.is_some(), Button::new(t("Place Instance"))).clicked() {
-                        place = picked;
+                        place = picked.clone();
+                    }
+                    if ui.add_enabled(picked.is_some() && self.reloading.is_none(), Button::new(t("Reload From…"))).clicked() {
+                        reload = picked;
                     }
                 });
             });
@@ -527,12 +548,41 @@ impl BimApp {
             self.run("manage_images", json!({"delete": [name]}));
             self.images_picked = None;
         }
+        if let Some(name) = reload {
+            self.reload_from(ctx, name);
+        }
         if let Some(name) = place {
             self.images_window = false;
             self.place_instance(&name);
         } else if close || r.should_close() {
             self.images_window = false;
         }
+    }
+}
+
+impl BimApp {
+    /// Manage Images' Reload From: the file the user picks read again into image `name`, its instances staying where they
+    /// are. A page of a PDF is read apart, as Import PDF reads one, at the page and resolution it came in at.
+    fn reload_from(&mut self, ctx: &Context, name: String) {
+        let Some(ty) = self.session.model.image_types.get(&name) else { return };
+        let (page, dpi) = (ty.page(), ty.dpi());
+        let ask = match page {
+            Some(_) => crate::dialog::Ask::new().add_filter(t("PDF files"), &["pdf"]),
+            None => crate::dialog::Ask::new().add_filter(t("Image files (PNG, JPEG, BMP)"), &["png", "jpg", "jpeg", "bmp"]),
+        }
+        .set_title(t("Reload From"));
+        self.ask_file(ctx, ask, false, move |app, path| match page {
+            Some(page) => match app.ask_pdf(None, &path, PdfJob::Page { page: page as usize, dpi }) {
+                Ok(id) => app.reloading = Some((id, name, path)),
+                Err(e) => {
+                    let shown = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    app.status = crate::Status { text: crate::pdfread::could_not_read(&shown, &e), error: true };
+                }
+            },
+            None => {
+                app.run("manage_images", json!({"reload": name, "path": path.to_string_lossy()}));
+            }
+        });
     }
 }
 
