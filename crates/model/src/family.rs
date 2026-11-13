@@ -2783,6 +2783,9 @@ impl Family {
             if section.len() > MAX_RING * 4 || path.len() > MAX_RING * 4 {
                 return Err(format!("its arcs come to more than {} points", MAX_RING * 4));
             }
+            // Counted before it is built: a path and a profile each of thousands of points would make tens of millions.
+            let around = section.len().max(end.len()) + holes.iter().map(|(s, e)| s.len().max(e.len())).sum::<usize>();
+            too_fine(path.len().saturating_mul(around).saturating_mul(2).saturating_add(4 * section.len()), "sweep")?;
             hulled(shapes::along_holed(&path, &section, &end, &holes)?, material)
         } else {
             if !form.outline.is_empty() {
@@ -2877,12 +2880,14 @@ impl Family {
                 let tris = if form.top.is_empty() {
                     let holes = form.holes.iter().map(|h| ring_of(h)).collect::<Result<Vec<_>, _>>()?;
                     let holes: Vec<Vec<P2>> = holes.into_iter().zip(&hole_bends).map(|(h, b)| shapes::bent2(h, b)).collect();
+                    too_fine((ring.len() + holes.iter().map(Vec::len).sum::<usize>()).saturating_mul(4), "profile")?;
                     shapes::holed(&ring, &holes, from, to, form.plane)?
                 } else {
                     let top = shapes::bent2(ring_of(&form.top)?, &top_bends);
                     if top.len() < 3 || crate::geom::area(&top).abs() < 1.0 {
                         return Err("its top has no area: it needs three corners or more".into());
                     }
+                    too_fine((ring.len() + top.len()).saturating_mul(4), "blend")?;
                     shapes::blend(&ring, &top, from, to, form.plane)?
                 };
                 return Ok(Some(Piece { show: form.show, ..hulled(tris, material) }));
@@ -3230,6 +3235,14 @@ fn revolve(ring: &[P2], [p0, p1]: [P2; 2], (from, to): (f64, f64), plane: Plane)
         crate::geom::hull(tris.iter().flatten().map(|p| P2(p[0], p[1])).collect())
     };
     Ok((tris, outline))
+}
+
+/// Refuses a form whose triangles, counted before they are made, come to more than a piece may hold.
+fn too_fine(triangles: usize, what: &str) -> Result<(), String> {
+    if triangles > MAX_TRIANGLES {
+        return Err(format!("its {what} would make more than {MAX_TRIANGLES} triangles"));
+    }
+    Ok(())
 }
 
 /// How near a point is to a line, or a segment's end to another's, for them to meet, mm (an area, for the turn of three points).
@@ -3865,6 +3878,21 @@ mod tests {
             .unwrap();
         assert_eq!(worked.0, Ok(601.0));
         assert!(worked.1.unwrap_err().contains("deep"));
+    }
+
+    #[test]
+    fn a_sweep_too_fine_to_build_is_refused_before_it_is_built() {
+        let ring = |n: usize, r: f64| -> Vec<Value> {
+            (0..n).map(|k| (k as f64 * std::f64::consts::TAU / n as f64).sin_cos()).map(|(s, c)| json!([r * c, r * s, 0.0])).collect()
+        };
+        let path: Vec<Value> = (0..800).map(|k| json!([0.0, 0.0, k as f64 * 5.0])).collect();
+        let f: Family = serde_json::from_value(json!({"types": {"A": {}}, "forms": [{"path": path, "section": ring(800, 50.0)}]})).unwrap();
+        let e = f.check(&|_| true).unwrap_err();
+        assert!(e.contains("would make more than"), "{e}");
+        // The same sweep a sixth as fine is built.
+        let path: Vec<Value> = (0..20).map(|k| json!([0.0, 0.0, k as f64 * 5.0])).collect();
+        let f: Family = serde_json::from_value(json!({"types": {"A": {}}, "forms": [{"path": path, "section": ring(40, 50.0)}]})).unwrap();
+        assert!(f.check(&|_| true).is_ok());
     }
 
     #[test]
