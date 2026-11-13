@@ -66,6 +66,13 @@ pub struct Exported {
     pub openings: BTreeMap<String, Opening>,
 }
 
+/// Whether `dimensions` has room for one more measuring between `refs` references: under the most dimensions, and the most
+/// references they measure between in all.
+fn room(dimensions: &[Dimension], refs: usize) -> bool {
+    dimensions.len() < super::MAX_DIMENSIONS
+        && dimensions.iter().map(|d| d.refs.len()).sum::<usize>() + refs <= super::MAX_DIMENSION_REFERENCES
+}
+
 /// Type `t`'s values in the wall it was exported in.
 fn vals(f: &Family, t: &str, walls: &Walls) -> Result<BTreeMap<String, Val>, String> {
     f.values_in(t, &BTreeMap::new(), walls.get(t).copied().unwrap_or(super::DEFAULT_WALL))
@@ -1203,6 +1210,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     };
     // Dimensions between planes; alignments locked between two planes.
     let mut dimensions = Vec::new();
+    let mut over_budget = false;
     for d in def["dimensions"].as_array().into_iter().flatten().take(super::MAX_DIMENSIONS) {
         let kind = match d["kind"].as_str().unwrap_or("linear") {
             "angular" => DimensionKind::Angular,
@@ -1258,6 +1266,17 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             .collect();
         let value =
             d["value"].as_object().and_then(|v| v.get(&first).or_else(|| v.values().next())).and_then(num).or_else(|| num(&d["value"]));
+        // The solver's work is bounded: dimensions past the budget are left out, and said.
+        if !room(&dimensions, found.len()) {
+            if !over_budget {
+                notes.push(format!(
+                    "it has more dimensions than BIMCraft follows (more than {} references in all): the rest are left out",
+                    super::MAX_DIMENSION_REFERENCES
+                ));
+                over_budget = true;
+            }
+            continue;
+        }
         dimensions.push(Dimension {
             kind,
             refs: found.iter().map(|p| p.0.clone()).collect(),
@@ -1277,6 +1296,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             resolve(&ids_of(c), Some(0.0)).iter().filter_map(|v| reader.planes.get(v)).collect();
         if let [a, b] = ids.as_slice()
             && a.1 == b.1
+            && room(&dimensions, 2)
         {
             dimensions.push(Dimension { refs: vec![a.0.clone(), b.0.clone()], locked: true, value: Some(0.0), ..Dimension::default() });
         }
@@ -1300,7 +1320,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         for w in planes.windows(2) {
             let (Some(a), Some(b)) = (reader.planes.get(&w[0]), reader.planes.get(&w[1])) else { continue };
             let together = a.1 == b.1 && !a.2.is_empty() && a.2.iter().all(|(t, x)| b.2.get(t).is_some_and(|y| (x - y).abs() < 0.05));
-            if together && a.0 != b.0 && dimensions.len() < super::MAX_DIMENSIONS {
+            if together && a.0 != b.0 && room(&dimensions, 2) {
                 dimensions.push(Dimension { refs: vec![a.0.clone(), b.0.clone()], locked: true, value: Some(0.0), ..Dimension::default() });
             }
         }
@@ -1330,7 +1350,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         else {
             continue;
         };
-        if target.1 != *axis || target.0 == *name || dimensions.len() >= super::MAX_DIMENSIONS || !free(&dimensions, &references, name) {
+        if target.1 != *axis || target.0 == *name || !room(&dimensions, 2) || !free(&dimensions, &references, name) {
             continue;
         }
         let sense = if off * reader.map.sign(*axis) < 0.0 { Some(vec![-1]) } else { None };

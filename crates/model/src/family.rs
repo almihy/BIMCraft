@@ -28,8 +28,8 @@ mod shapes;
 mod validate;
 
 pub use parametric::{
-    Axis, Catalog, CatalogColumn, Dimension, DimensionKind, Editable, MAX_DIMENSIONS, MAX_NESTED, MAX_NESTING, MAX_REFERENCES, Nested,
-    Reference, TypeCheck, ref_key,
+    Axis, Catalog, CatalogColumn, Dimension, DimensionKind, Editable, MAX_DIMENSION_REFERENCES, MAX_DIMENSIONS, MAX_NESTED, MAX_NESTING,
+    MAX_REFERENCES, Nested, Reference, TypeCheck, ref_key,
 };
 
 /// What a family is: how IFC names its components; a door or a window is hosted in a wall, which
@@ -4022,6 +4022,39 @@ mod tests {
         let mut f: Family = serde_json::from_value(json!({"types": {"900": {}}, "check": {"900": {"matched": false}}})).unwrap();
         f.check.get_mut("900").unwrap().opening = Some([f64::NAN, 2100.0, 0.0]);
         assert!(f.check_parametric().is_err());
+    }
+
+    #[test]
+    fn dimensions_measuring_between_too_many_references_in_all_are_refused_quickly() {
+        let refs = |n: usize| -> Vec<Value> { (0..n).map(|k| json!({"name": format!("R{k}"), "at": k as f64})).collect() };
+        let eq = |n: usize| -> Vec<Value> {
+            (0..n).map(|k| json!({"refs": (0..256).map(|j| format!("R{j}")).collect::<Vec<_>>(), "eq": true, "id": k})).collect()
+        };
+        let f: Family = serde_json::from_value(json!({"types": {"A": {}}, "references": refs(256), "dimensions": eq(512)})).unwrap();
+        let started = std::time::Instant::now();
+        let e = f.check(&|_| true).unwrap_err();
+        assert!(e.contains("references in all"), "{e}");
+        assert!(started.elapsed().as_secs() < 5);
+        // Four of them are as many as are allowed.
+        let f: Family = serde_json::from_value(json!({"types": {"A": {}}, "references": refs(256), "dimensions": eq(4)})).unwrap();
+        assert!(f.check_parametric().is_ok());
+    }
+
+    #[test]
+    fn a_translation_stops_adding_dimensions_at_the_references_budget_and_says_so() {
+        let planes: Vec<Value> = (0..300)
+            .map(|k| json!({"id": format!("p{k}"), "name": format!("Plane {k}"), "normal": [1, 0, 0], "at": {"A": k as f64}}))
+            .collect();
+        let dimension = |k: usize| json!({"id": format!("d{k}"), "kind": "linear", "refs": (0..256).map(|j| format!("p{j}")).collect::<Vec<_>>(), "eq": true});
+        let def = json!({"reference_planes": planes, "dimensions": (0..8).map(dimension).collect::<Vec<_>>()});
+        let mut f: Family = serde_json::from_value(json!({"types": {"A": {}}})).unwrap();
+        let made = revit::translate(&mut f, &def, &|_| true);
+        let spent: usize = f.dimensions.iter().map(|d| d.refs.len()).sum();
+        assert!(spent <= 4 * MAX_REFERENCES && !f.dimensions.is_empty(), "{spent} references in all");
+        assert!(f.check_parametric().is_ok(), "the family it makes is one its own check takes: {:?}", f.check_parametric());
+        let said = f.editable.as_ref().map(|e| e.untranslated.join("; ")).unwrap_or_default();
+        assert!(said.contains("dimensions") && said.contains("more than"), "{said}");
+        let _ = made;
     }
 
     #[test]

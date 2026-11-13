@@ -15,6 +15,8 @@ use super::{Expr, Family, MAX_TEXT, Show, Val, nameable, number, one_line};
 /// References one family may have, dimensions, nested parts, and how deep nested parts may nest.
 pub const MAX_REFERENCES: usize = 256;
 pub const MAX_DIMENSIONS: usize = 512;
+/// The most references all of a family's dimensions measure between together.
+pub const MAX_DIMENSION_REFERENCES: usize = 4 * MAX_REFERENCES;
 pub const MAX_NESTED: usize = 256;
 pub const MAX_NESTING: usize = 4;
 /// Rows and columns a type catalog may hold.
@@ -404,6 +406,11 @@ impl Family {
             if n > most {
                 return Err(format!("it has more than {most} {what}"));
             }
+        }
+        // Each dimension is a row of the solver for every gap it measures: all of them together are bounded, as the solver's work
+        // is, at every draw.
+        if self.dimensions.iter().map(|d| d.refs.len()).sum::<usize>() > MAX_DIMENSION_REFERENCES {
+            return Err(format!("its dimensions measure between more than {MAX_DIMENSION_REFERENCES} references in all"));
         }
         let mut names = std::collections::BTreeSet::new();
         for r in &self.references {
