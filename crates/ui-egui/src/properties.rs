@@ -647,7 +647,15 @@ pub(crate) fn group_header(ui: &mut Ui, group: &str, open: bool) -> bool {
     let bleed = ui.ctx().data(|d| d.get_temp::<f32>(UiId::new(BLEED))).unwrap_or(0.0);
     let (slot, _) = ui.allocate_exact_size(vec2(ui.available_width(), HEIGHT), Sense::hover());
     let r = slot.expand2(vec2(bleed, 0.0));
-    let response = ui.interact(r, ui.id().with(("group-header", group)), Sense::click());
+    // Two groups of one name in a ui (the element's Other and its family's) are two bars: the nth of a name in a pass is the nth's.
+    let pass = ui.ctx().cumulative_pass_nr();
+    let seen = UiId::new(("group-header-seen", group));
+    let nth = ui.data_mut(|d| {
+        let (was, n) = d.get_temp::<(u64, usize)>(seen).filter(|(was, _)| *was == pass).unwrap_or((pass, 0));
+        d.insert_temp(seen, (was, n + 1));
+        n
+    });
+    let response = ui.interact(r, ui.id().with(("group-header", group, nth)), Sense::click());
     response.widget_info(|| WidgetInfo::selected(WidgetType::CollapsingHeader, true, open, group));
     let p = ui.painter();
     p.rect_filled(r, 0.0, if response.hovered() { pal().hover_fill } else { pal().bar });
