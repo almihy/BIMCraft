@@ -684,6 +684,15 @@ fn bad_inputs_are_refused() {
     let messy = [P2(0.0, 0.0), P2(0.0, 1000.0), P2(0.0, 1000.0), P2(500.0, 1000.0), P2(1000.0, 1000.0), P2(1000.0, 0.0)];
     let s = Solid3::prism(&messy, Level::flat(0.0), Level::flat(100.0), org(1)).unwrap();
     assert!(rel(s.volume(), 1000.0 * 1000.0 * 100.0) < 1e-12);
+    // A spike, out along an edge and straight back, holds no area: it is left out, as it is when a layer is cut to its band
+    // beside a butt joint's step (a wall's core with a zero-width tongue up the line the next wall's core ends on).
+    let spiked =
+        [P2(-60.0, -80.0), P2(-60.0, -80.0), P2(60.0, -80.0), P2(60.0, 80.0), P2(60.0, 80.0), P2(60.0, -4000.0), P2(-60.0, -4000.0)];
+    let s = Solid3::prism(&spiked, Level::flat(0.0), Level::flat(3000.0), org(1)).unwrap();
+    assert!(rel(s.volume(), 120.0 * 3920.0 * 3000.0) < 1e-12, "{}", s.volume());
+    let doubled = [P2(0.0, 0.0), P2(1000.0, 0.0), P2(1000.0, 500.0), P2(1000.0, 0.0), P2(1000.0, 1000.0), P2(0.0, 1000.0)];
+    let s = Solid3::prism(&doubled, Level::flat(0.0), Level::flat(100.0), org(1)).unwrap();
+    assert!(rel(s.volume(), 1000.0 * 1000.0 * 100.0) < 1e-12, "{}", s.volume());
     // A wedge: the top meets the bottom along one edge.
     let wedge = Solid3::prism(&ring, Level::flat(0.0), Level { z: 0.0, g: P2(0.1, 0.0) }, org(1)).unwrap();
     assert!(wedge.is_closed());

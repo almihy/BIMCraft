@@ -2206,6 +2206,31 @@ fn section_base_cancellable(
         }
         d.part(Part::Cut);
     }
+    // Where two walls join, the line between their layers of different materials (a section along the return of a corner shows the
+    // line between the two cores when they differ; where they are of one material the walls show as one), as thin as the lines
+    // between the layers of one wall.
+    if !coarse {
+        let mut rings: Vec<section_cut::JoinRing> = Vec::new();
+        for (&owner, by_layer) in &layers {
+            if !matches!(m.elements.get(owner), Some(Element::Wall(_))) {
+                continue;
+            }
+            let Some(table) = layer_table(m, owner) else { continue };
+            for (k, rs) in by_layer {
+                let Some(layer) = table.get(usize::from(*k)) else { continue };
+                rings.extend(rs.iter().map(|r| (owner, layer.material.as_str(), r.as_slice())));
+            }
+        }
+        d.part(Part::Pattern);
+        for (owner, run) in section_cut::joins(&rings) {
+            if cancelled() {
+                return None;
+            }
+            d.owner = Some(owner);
+            d.line(&run, Pen::PROJECTION, INK, false);
+        }
+        d.part(Part::Cut);
+    }
     for (mid, e) in lookup.rare("mass").filter(|id| look.shows(*id)).filter_map(|id| Some((id, m.elements.get(id)?))) {
         if cancelled() {
             return None;

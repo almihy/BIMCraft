@@ -13,6 +13,7 @@
 //! Everything is in a section's own plane: `x` along its line from where the cut begins, `y` up, in mm.
 
 use crate::geom::{self, P2};
+use crate::model::Id;
 use crate::solid::{Frame, Loop, Seg};
 use crate::view3d::{ElementSolids, Vis};
 
@@ -257,46 +258,71 @@ pub(crate) fn course_of(ring: &[P2]) -> P2 {
 /// The edges between one layer's rings and the next's of the same element, as runs of points: each ring's edge where a ring of a
 /// layer with a higher number lies against it, on the outer side (so each boundary once).
 pub(crate) fn interfaces(layers: &[(u16, Vec<Vec<P2>>)]) -> Vec<Vec<P2>> {
-    // How far past an edge, outward, a point is looked for in another ring: mm.
-    const PAST: f64 = 1.0;
     let all: Vec<(u16, &[P2])> = layers.iter().flat_map(|(k, rings)| rings.iter().map(move |r| (*k, r.as_slice()))).collect();
     let mut out = Vec::new();
     for (k, ring) in &all {
         let others: Vec<&[P2]> = all.iter().filter(|(k2, r)| k2 > k && near(ring, r, PAST)).map(|(_, r)| *r).collect();
-        if others.is_empty() {
+        out.extend(runs_against(ring, &others));
+    }
+    out
+}
+
+/// One ring of one layer of an element, for [`joins`]: the element, the name of the material of the layer, the ring.
+pub(crate) type JoinRing<'a> = (Id, &'a str, &'a [P2]);
+
+/// The edges between a layer of one element and a layer of another that is of a different material, as runs of points, with
+/// the element that draws each: where two walls join and their cores differ (a section along the return of a corner shows the
+/// line between the two cores; where they are one material the walls show as one). Each boundary once, by the element with the
+/// higher id.
+pub(crate) fn joins(rings: &[JoinRing]) -> Vec<(Id, Vec<P2>)> {
+    let mut out = Vec::new();
+    for (id, material, ring) in rings {
+        let others: Vec<&[P2]> =
+            rings.iter().filter(|(id2, m2, r)| id2 < id && m2 != material && near(ring, r, PAST)).map(|(_, _, r)| *r).collect();
+        out.extend(runs_against(ring, &others).into_iter().map(|run| (*id, run)));
+    }
+    out
+}
+
+/// How far past an edge, outward, a point is looked for in another ring: mm.
+const PAST: f64 = 1.0;
+
+/// The stretches of `ring`'s edges that one of `others` lies against, on the outer side, as runs of points.
+fn runs_against(ring: &[P2], others: &[&[P2]]) -> Vec<Vec<P2>> {
+    let mut out = Vec::new();
+    if others.is_empty() {
+        return out;
+    }
+    // Outward is to the right of a counter-clockwise ring.
+    let sign = if geom::area(ring) > 0.0 { -1.0 } else { 1.0 };
+    for (a, b) in geom::ring_edges(ring) {
+        let len = a.dist(b);
+        if len <= 1e-9 {
             continue;
         }
-        // Outward is to the right of a counter-clockwise ring.
-        let sign = if geom::area(ring) > 0.0 { -1.0 } else { 1.0 };
-        for (a, b) in geom::ring_edges(ring) {
-            let len = a.dist(b);
-            if len <= 1e-9 {
-                continue;
-            }
-            let mut ts = vec![0.0, 1.0];
-            for (c, e) in others.iter().flat_map(|r| geom::ring_edges(r)) {
-                ts.extend(geom::crossing(a, b, c, e));
-                for q in [c, e] {
-                    if geom::dist_to_segment(q, a, b) < 1e-6 * len.max(1.0) {
-                        ts.push(geom::param_on_segment(q, a, b));
-                    }
+        let mut ts = vec![0.0, 1.0];
+        for (c, e) in others.iter().flat_map(|r| geom::ring_edges(r)) {
+            ts.extend(geom::crossing(a, b, c, e));
+            for q in [c, e] {
+                if geom::dist_to_segment(q, a, b) < 1e-6 * len.max(1.0) {
+                    ts.push(geom::param_on_segment(q, a, b));
                 }
             }
-            ts.sort_by(f64::total_cmp);
-            ts.dedup_by(|x, y| (*x - *y) * len < 1e-6);
-            let out_of = ((b - a).perp() * sign).unit() * PAST;
-            let mut run: Option<Vec<P2>> = None;
-            for w in ts.windows(2) {
-                let (p, q) = (a + (b - a) * w[0], a + (b - a) * w[1]);
-                let against = others.iter().any(|r| geom::contains(r, (p + q) * 0.5 + out_of));
-                match (against, run.as_mut()) {
-                    (true, Some(r)) => r.push(q),
-                    (true, None) => run = Some(vec![p, q]),
-                    (false, _) => out.extend(run.take()),
-                }
-            }
-            out.extend(run);
         }
+        ts.sort_by(f64::total_cmp);
+        ts.dedup_by(|x, y| (*x - *y) * len < 1e-6);
+        let out_of = ((b - a).perp() * sign).unit() * PAST;
+        let mut run: Option<Vec<P2>> = None;
+        for w in ts.windows(2) {
+            let (p, q) = (a + (b - a) * w[0], a + (b - a) * w[1]);
+            let against = others.iter().any(|r| geom::contains(r, (p + q) * 0.5 + out_of));
+            match (against, run.as_mut()) {
+                (true, Some(r)) => r.push(q),
+                (true, None) => run = Some(vec![p, q]),
+                (false, _) => out.extend(run.take()),
+            }
+        }
+        out.extend(run);
     }
     out
 }

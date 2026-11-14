@@ -576,29 +576,33 @@ fn merge_tables<'a>(tables: impl IntoIterator<Item = &'a Arc<HashMap<u32, Origin
     out.map_or_else(|| first.clone(), Arc::new)
 }
 
-/// A ring without repeated corners (the closing one included) and without corners on the line between their neighbours.
+/// A ring without repeated corners (the closing one included), without corners on the line between their neighbours, and
+/// without spikes: a corner where the ring goes out along a line and straight back along it, which holds no area and which the
+/// kernel takes for a non-manifold edge (a wall's layer cut to its band where a butt joint's step lies along the band's edge
+/// leaves one).
 fn clean_ring(ring: &[P2]) -> Vec<P2> {
-    let mut out: Vec<P2> = Vec::with_capacity(ring.len());
-    for q in ring {
-        if out.last().is_none_or(|p| p.dist(*q) > tol::RING) {
-            out.push(*q);
-        }
-    }
-    while out.len() > 1 && out.first().zip(out.last()).is_some_and(|(a, b)| a.dist(*b) <= tol::RING) {
-        out.pop();
-    }
-    // Corners on the line between neighbours go, until none does.
+    let mut out: Vec<P2> = ring.to_vec();
     loop {
+        // Repeated corners, the closing one included.
+        out.dedup_by(|b, a| a.dist(*b) <= tol::RING);
+        while out.len() > 1 && out.first().zip(out.last()).is_some_and(|(a, b)| a.dist(*b) <= tol::RING) {
+            out.pop();
+        }
         let n = out.len();
         if n < 3 {
             return out;
         }
-        let flat = (0..n).find(|&k| {
+        // A corner on the line between its neighbours goes, and so does a spike's tip, until none does.
+        let loose = (0..n).find(|&k| {
             let (a, b, c) = (out[(k + n - 1) % n], out[k], out[(k + 1) % n]);
             let ac = c - a;
-            ac.length() > tol::RING && (b - a).cross(ac).abs() / ac.length() <= tol::RING && (b - a).dot(c - b) > 0.0
+            let flat = ac.length() > tol::RING && (b - a).cross(ac).abs() / ac.length() <= tol::RING && (b - a).dot(c - b) > 0.0;
+            // The way on, `c`, lies on the line it came by (`a` to `b`) and back along it.
+            let spike =
+                (b - a).length() > tol::RING && (b - a).cross(c - a).abs() / (b - a).length() <= tol::RING && (b - a).dot(c - b) < 0.0;
+            flat || spike
         });
-        match flat {
+        match loose {
             Some(k) => {
                 out.remove(k);
             }

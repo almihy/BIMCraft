@@ -267,4 +267,14 @@ mod tests {
         }
         assert_eq!(segment_count(&d, v, P2(380., 0.), P2(380., 3000.)), 1);
     }
+
+    #[test]
+    fn a_section_along_the_return_draws_the_seam_between_the_cores_only_where_their_materials_differ() {
+        for (material, seams) in [("Concrete", 1), ("Masonry", 0)] {
+            let (mut s, _, v) = fixture(&CORNER.replace(r#""material":"Concrete""#, &format!(r#""material":"{material}""#)));
+            let id = s.execute("section", &serde_json::json!({"start":[0,300],"end":[0,-4200],"depth":1})).unwrap()["id"].as_u64().unwrap();
+            let d = render::section(&s.model, id, View { scale: 1.0, cx: 2150.0, cy: 1500.0, width: 4500, height: 3100 });
+            assert_eq!(segment_count(&d, v, P2(380., 0.), P2(380., 3000.)), seams, "{material} against masonry");
+        }
+    }
 }
