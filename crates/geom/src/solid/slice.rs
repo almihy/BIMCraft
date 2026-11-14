@@ -91,10 +91,21 @@ impl Frame {
 /// One edge of a section loop, in the frame's `(x, y)`, with the input it came from.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Seg {
-    Line { a: P2, b: P2, origin: Origin },
+    Line {
+        a: P2,
+        b: P2,
+        origin: Origin,
+    },
     /// An arc of the circle about `centre`, exactly of `radius`, from `start` to `end` (both on the circle, to rounding),
     /// counter-clockwise when `ccw`. Never a whole circle: a full circle comes back as two arcs.
-    Arc { centre: P2, radius: f64, start: P2, end: P2, ccw: bool, origin: Origin },
+    Arc {
+        centre: P2,
+        radius: f64,
+        start: P2,
+        end: P2,
+        ccw: bool,
+        origin: Origin,
+    },
 }
 
 impl Seg {

@@ -270,7 +270,8 @@ fn layered_wall(id: u64, x_dir: bool, a0: f64, a1: f64, c: f64, z: f64) -> Solid
         let o = Origin::new(id, layer);
         if x_dir { bx(a0, lo, 0.0, a1, hi, z, o) } else { bx(lo, a0, 0.0, hi, a1, z, o) }
     };
-    let (core, fin) = if x_dir { (b(c - 125.0, c + 75.0, 0), b(c + 75.0, c + 125.0, 1)) } else { (b(c - 75.0, c + 125.0, 0), b(c - 125.0, c - 75.0, 1)) };
+    let (core, fin) =
+        if x_dir { (b(c - 125.0, c + 75.0, 0), b(c + 75.0, c + 125.0, 1)) } else { (b(c - 75.0, c + 125.0, 0), b(c - 125.0, c - 75.0, 1)) };
     core.union(&fin)
 }
 
@@ -347,7 +348,17 @@ fn case5_curtain_walls_straight_and_on_an_arc_are_fifty_solids() {
     }
     for j in 0..=nz {
         let z = j as f64 * gz;
-        ms.push(sector(cen, r - md / 2.0, r + md / 2.0, a_start - pad, a_start + span + pad, z - hm, z + hm, mullion(300 + j as u64), true));
+        ms.push(sector(
+            cen,
+            r - md / 2.0,
+            r + md / 2.0,
+            a_start - pad,
+            a_start + span + pad,
+            z - hm,
+            z + hm,
+            mullion(300 + j as u64),
+            true,
+        ));
     }
     let arc_mullions = Solid3::union_all(&ms);
     solids.push(arc_mullions.clone());
@@ -476,7 +487,11 @@ fn curve_tags_follow_moves_and_turns() {
     let centre_of = |s: &Solid3| {
         let loops = s.slice(&Frame::plan(1000.0));
         assert_eq!(loops.len(), 1);
-        let arcs: Vec<(P2, f64)> = loops[0].segs.iter().filter_map(|g| if let Seg::Arc { centre, radius, .. } = g { Some((*centre, *radius)) } else { None }).collect();
+        let arcs: Vec<(P2, f64)> = loops[0]
+            .segs
+            .iter()
+            .filter_map(|g| if let Seg::Arc { centre, radius, .. } = g { Some((*centre, *radius)) } else { None })
+            .collect();
         assert_eq!(arcs.len(), 2, "{:?}", loops[0]);
         arcs[0]
     };
@@ -529,7 +544,9 @@ fn vertical_section_through_a_sloped_top_prism_shows_the_slope() {
     }
     assert!(rel(l.area(), 10000.0 * 3500.0) < 1e-12);
     // The sloped edge is the one from (10000, 4000) to (0, 3000).
-    assert!(l.segs.iter().any(|g| matches!(g, Seg::Line { a, b, .. } if a.dist(P2(10000.0, 4000.0)) < 1e-9 && b.dist(P2(0.0, 3000.0)) < 1e-9)));
+    assert!(
+        l.segs.iter().any(|g| matches!(g, Seg::Line { a, b, .. } if a.dist(P2(10000.0, 4000.0)) < 1e-9 && b.dist(P2(0.0, 3000.0)) < 1e-9))
+    );
     // A slanted prism with a sloped bottom too (a roof slab): thickness 300 down the slope.
     let slab = Solid3::prism(&ring, Level { z: 3000.0, g: P2(0.1, 0.0) }, Level { z: 3300.0, g: P2(0.1, 0.0) }, org(2)).unwrap();
     assert!(rel(slab.volume(), 10000.0 * 4000.0 * 300.0) < 1e-12);
@@ -637,7 +654,8 @@ fn bad_inputs_are_refused() {
 
 #[test]
 fn batch_booleans_and_queries() {
-    let boxes: Vec<Solid3> = (0..4).map(|i| bx(i as f64 * 500.0, 0.0, 0.0, i as f64 * 500.0 + 1000.0, 1000.0, 1000.0, org(i + 1))).collect();
+    let boxes: Vec<Solid3> =
+        (0..4).map(|i| bx(i as f64 * 500.0, 0.0, 0.0, i as f64 * 500.0 + 1000.0, 1000.0, 1000.0, org(i + 1))).collect();
     let u = Solid3::union_all(&boxes);
     assert!(rel(u.volume(), 2500.0 * 1000.0 * 1000.0) < 1e-12);
     assert_eq!(u.bounds().unwrap(), Bounds3 { min: [0.0; 3], max: [2500.0, 1000.0, 1000.0] });
