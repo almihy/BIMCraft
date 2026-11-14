@@ -8424,6 +8424,17 @@ impl Model {
         self.derived.lookup(&self.elements)
     }
 
+    /// This model's element solids, kept with it (one snapshot's, as [`Model::lookup`] is): what quantities, schedules and the
+    /// element JSON measure from, built when first asked for, once for each element.
+    pub fn solids(&self) -> Arc<crate::derived::Solids> {
+        self.derived.solids(&self.elements)
+    }
+
+    /// Drops the solids kept by [`Model::solids`]: for a type, family or material changed in place in a model that has made some.
+    pub fn forget_solids(&self) {
+        self.derived.forget_solids();
+    }
+
     /// What changed from `before` to this model: the elements a command added, changed or removed, when it changed nothing
     /// else (no type, material, family, setting or other entry of the project), and this model is the one it made of
     /// `before`; else everything.

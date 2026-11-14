@@ -55,7 +55,8 @@ impl ElementSolids {
     /// ([`Solid3::volume_on_curves`]), and what each open piece holds the way the prisms were summed before the solids
     /// ([`crate::quantities::piece_volume`]): the pieces the solid kernel refuses are in the quantity all the same.
     pub fn volume(&self) -> f64 {
-        self.layers.iter().map(|(_, s)| s.volume_on_curves()).sum::<f64>() + self.open.iter().map(|o| crate::quantities::piece_volume(&o.piece)).sum::<f64>()
+        self.layers.iter().map(|(_, s)| s.volume_on_curves()).sum::<f64>()
+            + self.open.iter().map(|o| crate::quantities::piece_volume(&o.piece)).sum::<f64>()
     }
 
     /// The solid of layer `layer`.
@@ -94,15 +95,7 @@ fn build(m: &Model, id: Id, index: Option<&Index>, components: &mut Components, 
         // A wall without its openings is the one piece the scene never draws: its prisms alone.
         Element::Wall(_) if !openings => walls::prisms_in(m, id, false, index)
             .into_iter()
-            .map(|p| Solid::Prism {
-                owner: id,
-                color: super::WALL,
-                tex: 0,
-                ring: p.ring,
-                bottom: p.bottom,
-                top: p.top,
-                curve: p.curve,
-            })
+            .map(|p| Solid::Prism { owner: id, color: super::WALL, tex: 0, ring: p.ring, bottom: p.bottom, top: p.top, curve: p.curve })
             .collect(),
         _ => solids_in_with(m, &[(id, e)], index, components),
     };
@@ -145,9 +138,10 @@ fn build(m: &Model, id: Id, index: Option<&Index>, components: &mut Components, 
 
 fn paint_of(s: &Solid) -> (Rgb, u32) {
     match s {
-        Solid::Box { color, tex, .. } | Solid::Slab { color, tex, .. } | Solid::Prism { color, tex, .. } | Solid::Mesh { color, tex, .. } => {
-            (*color, *tex)
-        }
+        Solid::Box { color, tex, .. }
+        | Solid::Slab { color, tex, .. }
+        | Solid::Prism { color, tex, .. }
+        | Solid::Mesh { color, tex, .. } => (*color, *tex),
     }
 }
 
@@ -256,7 +250,15 @@ mod tests {
 
     /// A prism over `ring` from 0 to `rise`.
     fn prism(ring: &[P2], rise: f64) -> Solid {
-        Solid::Prism { owner: 1, color: super::super::WALL, tex: 0, ring: ring.to_vec(), bottom: Plane::flat(0.0), top: Plane::flat(rise), curve: None }
+        Solid::Prism {
+            owner: 1,
+            color: super::super::WALL,
+            tex: 0,
+            ring: ring.to_vec(),
+            bottom: Plane::flat(0.0),
+            top: Plane::flat(rise),
+            curve: None,
+        }
     }
 
     #[test]
@@ -274,7 +276,13 @@ mod tests {
         let v = es.volume();
         assert!((v - (kept + refused)).abs() < 1e-6 * v, "{v} is not the block's {kept} and the refused ring's {refused}");
         // The same for each kind of piece that can be left open.
-        let slab = Solid::Slab { owner: 1, color: super::super::WALL, tex: 0, face: vec![[0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [1000.0, 1000.0, 0.0], [0.0, 1000.0, 0.0]], rise: 50.0 };
+        let slab = Solid::Slab {
+            owner: 1,
+            color: super::super::WALL,
+            tex: 0,
+            face: vec![[0.0, 0.0, 0.0], [1000.0, 0.0, 0.0], [1000.0, 1000.0, 0.0], [0.0, 1000.0, 0.0]],
+            rise: 50.0,
+        };
         assert!((crate::quantities::piece_volume(&slab) - 5e7).abs() < 1e-6);
     }
 }

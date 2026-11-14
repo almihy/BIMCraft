@@ -306,3 +306,79 @@ fn a_sloped_floors_area_is_its_top_stretched_by_the_slope() {
     let q = quantities::floor(&s.model, f);
     assert!(near(q.gross_area, 48e6) && near(q.net_area, 48e6) && q.level, "{q:?}");
 }
+
+/// What the 5-storey highrise's walls and floors cost to measure, and that a model's solids are built once and only where a
+/// volume is asked for. (`cargo test -p bimcraft-core --lib the_models_solids -- --nocapture` prints the timings; the figures the
+/// review took before the fix, with the element JSON building a solid at every call: 282 ms for the 165 walls and floors against
+/// 4 ms for the old prism sums.)
+#[test]
+fn the_models_solids_are_built_once_and_only_where_a_volume_is_asked_for() {
+    use std::sync::Arc;
+    use std::time::Instant;
+
+    use crate::model::{Element, Id};
+    use crate::schedule::{self, Field};
+
+    let m = crate::sample::highrise(5).unwrap();
+    let measured: Vec<Id> = m.elements.iter().filter(|(_, e)| matches!(e, Element::Wall(_) | Element::Floor(_))).map(|(id, _)| *id).collect();
+    assert!(measured.len() > 100, "{} walls and floors", measured.len());
+    let rooms = crate::rooms::Rooms::new(&m);
+
+    // The old sums.
+    let t = Instant::now();
+    let by_prisms: f64 = measured.iter().filter(|id| m.wall(**id).is_some()).map(|id| quantities::wall_volume_by_prisms(&m, *id, true)).sum();
+    let prisms = t.elapsed();
+    assert!(by_prisms > 0.0);
+
+    // No solid for what asks for none: the bare and the light JSON, a schedule that shows no area or volume, a tag's text of a mark.
+    let t = Instant::now();
+    for id in &measured {
+        let (bare, light) = (crate::element_json_bare(&m, *id), crate::json::element_json_light(&m, *id, &rooms));
+        assert!(bare.get("volume_m3").is_none() && light.get("volume_m3").is_none());
+    }
+    let schedule_of = |names: &[&str]| crate::model::Schedule {
+        of: "wall".into(),
+        fields: names.iter().map(|n| Field { name: n.to_string(), ..Field::default() }).collect(),
+        ..crate::model::Schedule::default()
+    };
+    let plain = schedule::table(&m, &schedule_of(&["Length", "Height", "Type"])).unwrap();
+    assert!(!plain.rows.is_empty());
+    let light = t.elapsed();
+    assert_eq!(m.solids().cache.len(), 0, "a solid was built for what shows no area or volume");
+
+    // A schedule that shows the Volume builds each wall's solid, once.
+    let t = Instant::now();
+    let full = schedule::table(&m, &schedule_of(&["Length", "Volume", "Area"])).unwrap();
+    let cold = t.elapsed();
+    let built = m.solids().cache.len();
+    let walls = measured.iter().filter(|id| m.wall(**id).is_some()).count();
+    assert_eq!(built, walls, "one set of solids for each wall");
+    let sum: f64 = full.rows.iter().map(|r| r[1].as_f64().unwrap_or(0.0)).sum();
+    assert!((sum * 1e9 / by_prisms - 1.0).abs() < 1e-3, "the schedule's volumes {sum} m3 against the prisms' {} m3", by_prisms / 1e9);
+
+    // Again, and the element JSON of the same walls: nothing is built again, the same solids are read.
+    let first = m.solids().cache.get(&m, measured.iter().copied().find(|id| m.wall(*id).is_some()).unwrap());
+    let t = Instant::now();
+    let again = schedule::table(&m, &schedule_of(&["Length", "Volume", "Area"])).unwrap();
+    for id in &measured {
+        let with = crate::element_json_with(&m, *id, &rooms);
+        if m.wall(*id).is_some() {
+            assert!(with["volume_m3"].is_number());
+        }
+    }
+    let warm = t.elapsed();
+    assert_eq!(again.rows, full.rows);
+    assert!(m.solids().cache.len() >= built);
+    let kept = m.solids().cache.get(&m, measured.iter().copied().find(|id| m.wall(*id).is_some()).unwrap());
+    assert!(Arc::ptr_eq(&first, &kept), "the solids are made once for a snapshot");
+    eprintln!(
+        "{} walls and floors: old prism sums {prisms:?}; JSON and a schedule without volumes {light:?}; a schedule with them, cold {cold:?}; \
+         that and every element's JSON again, warm {warm:?}",
+        measured.len()
+    );
+    assert!(warm < cold, "warm {warm:?} against cold {cold:?}");
+
+    // A copy of the model (what a command changes) starts with none of them.
+    let copy = m.clone();
+    assert_eq!(copy.solids().cache.len(), 0);
+}

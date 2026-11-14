@@ -14,7 +14,7 @@
 
 use crate::geom::{self, P2};
 use crate::model::{Ceiling, Element, Floor, Id, Model, Roof};
-use crate::view3d::{Solid, element_solids, wall_volume};
+use crate::view3d::Solid;
 use crate::walls::{self, Axis, Plane};
 
 /// What a wall measures.
@@ -42,9 +42,10 @@ pub struct WallQ {
 pub fn wall(m: &Model, id: Id) -> Option<WallQ> {
     let wl = m.wall(id)?;
     let (length, width) = (Axis::of(wl).length(), m.thickness(wl));
-    let volume = |openings: bool| wall_volume(m, id, openings).unwrap_or_default();
-    let gross_volume = volume(false);
-    let net_volume = volume(true).min(gross_volume);
+    // The solids are the model's own, kept: a wall's, and its volume before its openings, are made once for each snapshot.
+    let solids = m.solids();
+    let gross_volume = solids.wall_gross_volume(m, id).unwrap_or_default();
+    let net_volume = solids.cache.get(m, id).volume().min(gross_volume);
     let side = |v: f64| if width > 0.0 { v / width } else { 0.0 };
     let height = (wl.attach_top.is_none() && wl.attach_base.is_none()).then(|| m.top_z(wl) - m.base_z(wl));
     Some(WallQ { length, width, height, gross_side: side(gross_volume), net_side: side(net_volume), gross_volume, net_volume })
@@ -128,23 +129,29 @@ fn id_of<'a, T: 'a>(m: &'a Model, target: &T, pick: impl Fn(&'a Element) -> Opti
     m.elements.iter().find(|(_, e)| pick(e).is_some_and(|x| std::ptr::eq(x, target))).map(|(id, _)| *id)
 }
 
-/// What element `id` holds, mm³: its layers' solids.
+/// What element `id` holds, mm³: its layers' solids, as the model keeps them ([`Model::solids`]).
 fn solid_volume(m: &Model, id: Id) -> f64 {
-    element_solids(m, id).volume()
+    m.solids().cache.get(m, id).volume()
 }
 
 /// Floor `f`, measured (its volume from its solids when it is one of the model's floors; the ground's, a toposolid's, from its
 /// prisms).
 pub fn floor(m: &Model, f: &Floor) -> SlabQ {
-    floor_with(m, f, id_of(m, f, |e| if let Element::Floor(g) = e { Some(g) } else { None }))
+    floor_with(m, f, id_of(m, f, |e| if let Element::Floor(g) = e { Some(g) } else { None }), true)
 }
 
 /// [`floor`] for floor `id` of `m`, which is `f`: no search for where it is.
 pub fn floor_at(m: &Model, id: Id, f: &Floor) -> SlabQ {
-    floor_with(m, f, matches!(m.elements.get(id), Some(Element::Floor(_))).then_some(id))
+    floor_with(m, f, matches!(m.elements.get(id), Some(Element::Floor(_))).then_some(id), true)
 }
 
-fn floor_with(m: &Model, f: &Floor, id: Option<Id>) -> SlabQ {
+/// [`floor_at`] without its volume (`net_volume` is 0): what asks only for the areas builds no solid.
+pub fn floor_areas_at(m: &Model, f: &Floor) -> SlabQ {
+    floor_with(m, f, None, false)
+}
+
+/// `volume`: whether to measure `net_volume` (from the solid of floor `id` where it is one, else the prisms), or leave it 0.
+fn floor_with(m: &Model, f: &Floor, id: Option<Id>, volume: bool) -> SlabQ {
     let depth = m.floor_depth(f);
     let level = m.floor_top(f).g == P2(0.0, 0.0) && f.shape.is_empty();
     let outline = geom::area(&f.boundary).abs();
@@ -158,7 +165,7 @@ fn floor_with(m: &Model, f: &Floor, id: Option<Id>) -> SlabQ {
     let net_area: f64 = pieces(m, m.floor_prisms(f)).map(|(ring, _, top)| geom::area(&ring).abs() * stretch(&top)).sum();
     let gross_volume =
         if level { outline * depth } else { m.shape_solid_over(f, &[]).map_or(outline * depth, |s| crate::model::volume(&s)) };
-    let net_volume = id.map_or_else(|| m.floor_volume(f), |id| solid_volume(m, id));
+    let net_volume = if volume { id.map_or_else(|| m.floor_volume(f), |id| solid_volume(m, id)) } else { 0.0 };
     SlabQ { depth, perimeter: geom::perimeter(&f.boundary), gross_area, net_area, gross_volume, net_volume, level }
 }
 
@@ -174,15 +181,20 @@ pub struct CoveringQ {
 
 /// Ceiling `c`, measured.
 pub fn ceiling(m: &Model, c: &Ceiling) -> CoveringQ {
-    ceiling_with(m, c, id_of(m, c, |e| if let Element::Ceiling(g) = e { Some(g) } else { None }))
+    ceiling_with(m, c, id_of(m, c, |e| if let Element::Ceiling(g) = e { Some(g) } else { None }), true)
 }
 
 /// [`ceiling`] for ceiling `id` of `m`, which is `c`.
 pub fn ceiling_at(m: &Model, id: Id, c: &Ceiling) -> CoveringQ {
-    ceiling_with(m, c, matches!(m.elements.get(id), Some(Element::Ceiling(_))).then_some(id))
+    ceiling_with(m, c, matches!(m.elements.get(id), Some(Element::Ceiling(_))).then_some(id), true)
 }
 
-fn ceiling_with(m: &Model, c: &Ceiling, id: Option<Id>) -> CoveringQ {
+/// [`ceiling_at`] without its volume (0): what asks only for the areas builds no solid.
+pub fn ceiling_areas_at(m: &Model, c: &Ceiling) -> CoveringQ {
+    ceiling_with(m, c, None, false)
+}
+
+fn ceiling_with(m: &Model, c: &Ceiling, id: Option<Id>, volume: bool) -> CoveringQ {
     let net_area: f64 = m.ceiling_slabs(c).iter().map(|(face, rise)| plan_area(&m.less_shafts(face, *rise).0)).sum();
     let width = m.types.ceiling.get(&c.type_name).map_or(0.0, |t| t.thickness);
     CoveringQ {
@@ -190,7 +202,7 @@ fn ceiling_with(m: &Model, c: &Ceiling, id: Option<Id>) -> CoveringQ {
         perimeter: geom::perimeter(&c.boundary),
         gross_area: geom::area(&c.boundary).abs(),
         net_area,
-        volume: id.map_or(net_area * width, |id| solid_volume(m, id)),
+        volume: if volume { id.map_or(net_area * width, |id| solid_volume(m, id)) } else { 0.0 },
     }
 }
 
@@ -213,15 +225,20 @@ pub struct RoofQ {
 
 /// Roof `r`, measured.
 pub fn roof(m: &Model, r: &Roof) -> RoofQ {
-    roof_with(m, r, id_of(m, r, |e| if let Element::Roof(g) = e { Some(g) } else { None }))
+    roof_with(m, r, id_of(m, r, |e| if let Element::Roof(g) = e { Some(g) } else { None }), true)
 }
 
 /// [`roof`] for roof `id` of `m`, which is `r`.
 pub fn roof_at(m: &Model, id: Id, r: &Roof) -> RoofQ {
-    roof_with(m, r, matches!(m.elements.get(id), Some(Element::Roof(_))).then_some(id))
+    roof_with(m, r, matches!(m.elements.get(id), Some(Element::Roof(_))).then_some(id), true)
 }
 
-fn roof_with(m: &Model, r: &Roof, id: Option<Id>) -> RoofQ {
+/// [`roof_at`] without its volume (0): what asks only for the areas builds no solid.
+pub fn roof_areas_at(m: &Model, r: &Roof) -> RoofQ {
+    roof_with(m, r, None, false)
+}
+
+fn roof_with(m: &Model, r: &Roof, id: Option<Id>, volume: bool) -> RoofQ {
     let outline = m.roof_outline(r);
     // A face's loops are its outline and then its holes, wound the other way: their areas, signed, add up.
     let gross_surface_area: f64 = m
@@ -230,16 +247,16 @@ fn roof_with(m: &Model, r: &Roof, id: Option<Id>) -> RoofQ {
         .iter()
         .map(|(loops, plane)| loops.iter().map(|l| geom::area(l)).sum::<f64>().abs() * stretch(plane))
         .sum();
-    let (mut plan_area, mut surface_area, mut volume) = (0.0, 0.0, 0.0);
+    let (mut plan_area, mut surface_area, mut by_prisms) = (0.0, 0.0, 0.0);
     for (ring, bottom, top) in pieces(m, m.roof_prisms(r)) {
         let plan = geom::area(&ring).abs();
         let c = geom::centroid(&ring);
         plan_area += plan;
         surface_area += plan * stretch(&top);
-        volume += plan * (top.at(c) - bottom.at(c)).max(0.0);
+        by_prisms += plan * (top.at(c) - bottom.at(c)).max(0.0);
     }
     let thickness = m.types.roof.get(&r.type_name).map_or(0.0, |t| t.thickness);
-    let volume = id.map_or(volume, |id| solid_volume(m, id));
+    let volume = if !volume { 0.0 } else { id.map_or(by_prisms, |id| solid_volume(m, id)) };
     RoofQ { thickness, perimeter: geom::perimeter(&outline), plan_area, gross_surface_area, surface_area, volume }
 }
 
