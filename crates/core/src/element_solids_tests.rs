@@ -309,6 +309,8 @@ fn every_element_of_the_sample_house_has_closed_solids_or_a_recorded_open_piece(
         assert_sound(*id, es);
     }
     assert!(c.with_solids > 25, "{c:?}");
+    // Every door and window of the house, the family ones too, is closed: nothing is left open (the windows' forms once were).
+    assert_eq!(c.open, 0, "{c:?}");
     // Walls: the sum of their volumes is what the quantities were (the prisms summed), and what they are now.
     let (mut by_solids, mut by_prisms, mut walls) = (0.0, 0.0, 0);
     for (&id, e) in m.elements.iter() {

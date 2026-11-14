@@ -382,19 +382,21 @@ fn a_section_cuts_the_samples_doors_and_windows() {
     let mut s = Session::new();
     s.script(crate::sample::SAMPLE).unwrap();
     // Down x = 2000 across the front wall, through the family door 900 wide at (2000, 0); down x = 4500, through the plain door
-    // of the wall y = 4000 (and the casement window's family form, which is open and cut as it was); along y = 5250, through the
+    // of the wall y = 4000 and the casement window's family form (closed, so cut with the rest); along y = 5250, through the
     // plain fixed window in the east wall.
     for (line, want) in [
-        ([[2000.0, -1500.0], [2000.0, 8500.0]], "door"),
-        ([[4500.0, -1500.0], [4500.0, 8500.0]], "door"),
-        ([[-1500.0, 5250.0], [11500.0, 5250.0]], "window"),
+        ([[2000.0, -1500.0], [2000.0, 8500.0]], &["door"][..]),
+        ([[4500.0, -1500.0], [4500.0, 8500.0]], &["door", "window"][..]),
+        ([[-1500.0, 5250.0], [11500.0, 5250.0]], &["window"][..]),
     ] {
         let sec = section(&mut s, line[0], line[1]);
         let rings = cut(&s, sec);
         let cats: std::collections::BTreeSet<&str> =
             rings.iter().filter_map(|(id, ..)| s.model.elements.get(*id).map(|e| e.category())).collect();
         eprintln!("{line:?}: {cats:?}");
-        assert!(cats.contains(want), "{line:?} cuts a {want}: {cats:?}");
+        for want in want {
+            assert!(cats.contains(want), "{line:?} cuts a {want}: {cats:?}");
+        }
         assert!(cats.contains("wall") && cats.contains("floor"), "{cats:?}");
     }
 }
