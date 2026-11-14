@@ -265,3 +265,35 @@ fn a_project_subcategory_style_wins_over_the_familys_on_load() {
     styled_door(&mut s, "Sample Styled Door", json!([{"name": "Frame", "projection": 5}]), json!({}), json!([]), Some("Frame"));
     assert_eq!(s.model.subcategory_styles["door/Frame"], before["door/Frame"]);
 }
+
+#[test]
+fn a_walls_face_lines_stop_at_a_doors_opening() {
+    let mut s = Session::new();
+    run(
+        &mut s,
+        "family",
+        json!({"name": "Sample Wide Door", "category": "door", "host": "wall",
+               "parameters": [{"name": "Width", "kind": "length", "value": 1010}, {"name": "Height", "kind": "length", "value": 2100}],
+               "types": {"1010": {}}, "forms": [{"profile": [[-505, -20], [505, -20], [505, 20], [-505, 20]], "from": 0, "to": 50}]}),
+    );
+    let wall = id_of(&run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]]})));
+    let door = id_of(&run(&mut s, "door", json!({"at": [2000, 0], "family": "Sample Wide Door", "type": "1010"})));
+    let half = s.model.thickness(s.model.wall(match &s.model.elements[&door] {
+        crate::model::Element::Door(o) => o.host,
+        _ => panic!("a door"),
+    }).unwrap()) / 2.0;
+    for detail in ["coarse", "medium", "fine"] {
+        run(&mut s, "detail", json!({"view": 100000, "detail": detail}));
+        let d = render::plan(&s.model, 100000, 3000, 2000);
+        let across: Vec<P2> = strokes(&d, wall).into_iter().flat_map(|(_, _, _, pts)| pts).collect();
+        assert!(across.iter().any(|p| p.0 < 1400.0) && across.iter().any(|p| p.0 > 2600.0), "{detail}: the wall is drawn either side");
+        // Between the jambs, no point of the wall's lines at its faces: they end at the jambs. (Its hatch and the lines between its
+        // layers run across the opening under the gap's white; what stays is the faces.)
+        let stray: Vec<&P2> = across.iter().filter(|p| p.0 > 1500.0 && p.0 < 2500.0 && (p.1.abs() - half).abs() < 20.0).collect();
+        assert!(stray.is_empty(), "{detail}: the wall's lines cross the opening: {stray:?}");
+        // And the jambs are the wall's own, at the opening's two ends.
+        for x in [1495.0, 2505.0] {
+            assert!(across.iter().any(|p| (p.0 - x).abs() < 1.0 && (p.1.abs() - half).abs() < 1.0), "{detail}: a jamb at {x}");
+        }
+    }
+}

@@ -3483,10 +3483,14 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
             d.fill(rings, POCHE);
         }
     }
+    // A wall's lines stop where an opening the plan cuts leaves it: Revit's wall is cut by its openings, its face lines ending at
+    // the jambs (the opening draws them, in the wall's cut pen).
+    let gaps = opening_gaps(m, all().map(|(id, e)| (*id, e)), range.cut, &shown);
     for (id, runs) in cut_edges(&outlines, 1.0 / d.view.scale) {
         d.owner = Some(id);
+        let own = gaps.get(&id).map_or(&[][..], Vec::as_slice);
         for run in runs {
-            ink_cut(&mut d, &run);
+            ink_cut_around(&mut d, &run, own);
         }
     }
     // A compound wall's layers: each its material's cut pattern where it's wide enough to hold it,
@@ -4250,6 +4254,65 @@ fn fit_by(extent: impl Fn(f64) -> [P2; 2], width: u32, height: u32, n: f64) -> V
     View { scale: fits_at, cx: (lo.0 + hi.0) / 2.0, cy: (lo.1 + hi.1) / 2.0, width, height }
 }
 
+/// The gaps the doors and windows the plan at height `cut` cuts leave in their walls, by wall: each a polygon from jamb to jamb
+/// and a little past the wall's two faces, convex pieces (an opening in an arc wall is curved), where the wall and the opening
+/// are shown ([`opening`]).
+fn opening_gaps<'a>(
+    m: &Model,
+    elements: impl Iterator<Item = (Id, &'a Element)>,
+    cut: f64,
+    shown: &dyn Fn(Id) -> bool,
+) -> std::collections::HashMap<Id, Vec<Vec<P2>>> {
+    // How far past the faces a gap reaches, so a face's line lies inside it: mm.
+    const PAST: f64 = 0.5;
+    let mut out: std::collections::HashMap<Id, Vec<Vec<P2>>> = std::collections::HashMap::new();
+    for (id, e) in elements {
+        let (Element::Door(o) | Element::Window(o)) = e else { continue };
+        let (Some(w), Some(wall)) = (m.wall(o.host), m.elements.id(o.host)) else { continue };
+        if !(m.spans(w, cut) && (shown(id) || shown(wall))) {
+            continue;
+        }
+        let Some(t) = m.opening_type(e) else { continue };
+        let (width, height) = t.cut();
+        let bottom = m.own_base(w) + o.sill;
+        if !(bottom <= cut && cut < bottom + height) {
+            continue;
+        }
+        let (axis, (ext, int)) = (Axis::of(w), walls::faces(m, w));
+        let (g0, g1) = ((o.offset - width / 2.0).max(0.0), (o.offset + width / 2.0).min(axis.length()));
+        if g1 - g0 <= 0.0 {
+            continue;
+        }
+        let gap: Vec<P2> = axis.points(g0, g1, int - PAST).into_iter().chain(axis.points(g1, g0, ext + PAST)).collect();
+        out.entry(wall).or_default().extend(walls::convex_pieces(&gap));
+    }
+    out
+}
+
+/// [`ink_cut`] of `run`, but for what lies in `gaps`: the parts outside them, each a line of its own.
+fn ink_cut_around(d: &mut Drawing, run: &[P2], gaps: &[Vec<P2>]) {
+    if gaps.is_empty() {
+        return ink_cut(d, run);
+    }
+    let holes: Vec<&[P2]> = gaps.iter().map(Vec::as_slice).collect();
+    let mut parts = lines_outside_columns(run, &holes);
+    // Nothing of it was in a gap: it is as it was (a ring stays a ring).
+    if parts.len() == 1 && parts[0].len() == run.len() {
+        return ink_cut(d, run);
+    }
+    // A ring that starts and ends outside the gaps is one line through its start, not two that meet there.
+    let closed = run.len() > 2 && run.first().zip(run.last()).is_some_and(|(a, b)| a.dist(*b) < 1e-9);
+    if closed && parts.len() > 1 && parts[0].first() == run.first() && parts[parts.len() - 1].last() == run.last() {
+        let tail = parts.remove(0);
+        if let Some(last) = parts.last_mut() {
+            last.extend(tail.into_iter().skip(1));
+        }
+    }
+    for part in parts {
+        d.line(&part, BY_CATEGORY, INK, false);
+    }
+}
+
 /// A door or window the cut plane at height `cut` passes through: a gap in the wall, jambs, and
 /// a leaf with its swing, or glass.
 fn opening(d: &mut Drawing, m: &Model, e: &Element, o: &Opening, w: &Wall, cut: f64, shown: bool) {
@@ -4267,17 +4330,19 @@ fn opening(d: &mut Drawing, m: &Model, e: &Element, o: &Opening, w: &Wall, cut: 
     if g1 - g0 <= 0.0 {
         return;
     }
-    // Clear a little past the faces too, where the outlines' outer halves are; along an arc, an arc.
-    let past = 3.0 / d.view.scale;
-    let gap: Vec<P2> = axis.points(g0, g1, int - past).into_iter().chain(axis.points(g1, g0, ext + past)).collect();
+    // The gap between the faces; along an arc, an arc. The wall's own lines stop at it (`opening_gaps`), so it paints only what
+    // lies inside: the poché and the layers' hatch.
+    let gap: Vec<P2> = axis.points(g0, g1, int).into_iter().chain(axis.points(g1, g0, ext)).collect();
     // The opening is the wall's: a hidden door or window leaves it, outlined, owned by no one.
     let owner = d.owner;
     if !shown {
         d.own(None);
     }
     d.fill(&[gap], PAPER);
+    // The jambs are where the wall is cut: the wall's own outline there, in its cut pen.
+    d.own(m.elements.id(o.host));
     for s in [g0, g1] {
-        d.line(&[axis.at(s, int), axis.at(s, ext)], Pen::HEAVY, INK, false);
+        d.line(&[axis.at(s, int), axis.at(s, ext)], BY_CATEGORY, INK, false);
     }
     d.own(owner);
     // At coarse, a window is its gap, as are a family's forms and symbols that say nothing of their detail levels; a door of
