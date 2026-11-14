@@ -246,3 +246,39 @@ fn a_region_whose_levels_were_read_keeps_them_and_one_whose_levels_were_not_lear
     assert_eq!(levels(1), Some((true, true, true)), "read: kept, whatever Revit's plan draws");
     assert_eq!(levels(2), Some((false, true, true)), "read: Medium and Fine");
 }
+
+#[test]
+fn a_line_pattern_the_engine_cannot_hold_is_said_and_left_out_not_a_reason_to_refuse_the_family() {
+    let long: Vec<Value> = (0..40).map(|_| json!({"dash": 1.0})).collect();
+    let package = |patterns: Value| {
+        json!({"name": "Sample Block", "category": "furniture", "types": {"A": {}},
+            "forms": [{"profile": [[0, 0], [100, 0], [100, 100], [0, 100]], "from": 0, "to": 100}],
+            "subcategories": [{"name": "Edge", "pattern": "Too Long"}, {"name": "Rim", "pattern": "Sample Dash"},
+                              {"name": "Hidden", "pattern": "Odd Segment"}],
+            "line_patterns": patterns, "revit": {}})
+    };
+    let mut s = Session::new();
+    let patterns = json!({
+        "Sample Dash": [{"dash": 3.0}, {"space": 1.5}],
+        "Too Long": long,
+        "Too Short": [{"dash": 0.001}, {"space": 1.5}],
+        "Odd Segment": [{"squiggle": 3.0}],
+    });
+    let r = run(&mut s, "family", package(patterns.clone()));
+    let f = &s.model.families["Sample Block"];
+    assert_eq!(f.line_patterns.keys().map(String::as_str).collect::<Vec<_>>(), ["Sample Dash"], "{:?}", f.line_patterns);
+    let pattern_of = |n: &str| f.subcategories.iter().find(|s| s.name == n).and_then(|s| s.pattern.clone());
+    assert_eq!((pattern_of("Edge"), pattern_of("Rim"), pattern_of("Hidden")), (None, Some("Sample Dash".to_string()), None));
+    let said = &f.editable.as_ref().expect("said").untranslated;
+    for name in ["Too Long", "Too Short", "Odd Segment"] {
+        assert!(said.iter().any(|n| n.contains(name) && n.contains("drawn solid")), "{name}: {said:?} {r}");
+    }
+    assert!(!said.iter().any(|n| n.contains("Sample Dash")), "{said:?}");
+    // The project drew the one it can hold.
+    assert!(s.model.line_patterns.contains_key("Sample Dash") && !s.model.line_patterns.contains_key("Too Long"));
+    // The same patterns given directly, not by a package from Revit, are still refused: a person is told what to fix.
+    let mut plain = package(patterns);
+    plain.as_object_mut().map(|o| o.remove("revit"));
+    let e = Session::new().execute("family", &plain).unwrap_err();
+    assert!(e.contains("line_patterns") || e.contains("line pattern"), "{e}");
+}

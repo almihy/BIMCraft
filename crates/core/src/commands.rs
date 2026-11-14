@@ -11649,10 +11649,35 @@ fn family(s: &mut Session, p: &Value) -> R {
         None => {}
         Some(Value::Null) => f.line_patterns.clear(),
         Some(v) => f.line_patterns = serde_json::from_value(v.clone()).map_err(|e| field("line_patterns", e))?,
+    // What an export package (Revit's definition comes with it) brings of line patterns that the engine can't hold is left out and
+    // said (`editable.untranslated`), not a reason to refuse the family: its lines are drawn solid.
+    let package = p.get("revit").is_some_and(|v| !v.is_null());
+    let mut not_held: Vec<String> = Vec::new();
     }
     // Materials it brings, each added where the project has none of its name: the project's own wins, as in Revit.
     let mut brought: BTreeMap<String, crate::model::Material> = BTreeMap::new();
     if let Some(v) = p.get("materials").filter(|v| !v.is_null()) {
+        Some(Value::Object(map)) if package => {
+            f.line_patterns.clear();
+            for (name, v) in map {
+                match serde_json::from_value::<crate::lines::LinePattern>(v.clone()) {
+                    Ok(pattern) => {
+                        f.line_patterns.insert(name.clone(), pattern);
+                    }
+                    Err(_) => {
+                        let shown: String = name.chars().take(40).collect();
+                        not_held.push(format!(
+                            "its line pattern `{shown}` can't be held (a segment BIMCraft has no kind of): its lines are drawn solid"
+                        ));
+                        // The subcategories naming it draw solid too.
+                        for sub in f.subcategories.iter_mut().filter(|s| s.pattern.as_ref() == Some(name)) {
+                            sub.pattern = None;
+                        }
+                    }
+                }
+            }
+            not_held.extend(f.drop_unholdable_line_patterns());
+        }
         #[derive(serde::Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Brought {
@@ -11730,6 +11755,9 @@ fn family(s: &mut Session, p: &Value) -> R {
     } else if let Some(w) = was.as_ref().filter(|_| !from_file) {
         let mut like: BTreeMap<String, String> = p.get("like").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
         like.retain(|new, _| !w.types.contains_key(new));
+        if !not_held.is_empty() {
+            f.editable.get_or_insert_with(Default::default).untranslated.extend(not_held);
+        }
         // What the family was, with the types made and taken away here made and taken away in it too: what is left is
         // a change of its definition.
         let mut base = w.clone();

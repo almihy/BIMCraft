@@ -2017,6 +2017,42 @@ impl Family {
         self.ifc.as_ref().filter(|_| self.category == Category::Generic)
     }
 
+    /// Leaves out the line patterns it can't hold (more than [`MAX_LINE_PATTERNS`], a name that isn't one line of text, one
+    /// that is `Solid`, segments [`crate::lines::LinePattern::check`] refuses), and the subcategories' naming them: those are
+    /// drawn solid. What a family from Revit brings that the engine can't hold is said and left out, not a reason to refuse the
+    /// family. What was left out, said in plain words, for `Editable::untranslated`.
+    pub fn drop_unholdable_line_patterns(&mut self) -> Vec<String> {
+        let shown = |n: &str| n.chars().take(40).collect::<String>();
+        let mut said = Vec::new();
+        let mut gone: Vec<String> = Vec::new();
+        let mut kept = 0usize;
+        for (name, pattern) in &self.line_patterns {
+            let why = if !one_line(name, MAX_TEXT) || name == crate::lines::SOLID {
+                Some("its name isn't one a line pattern may have".to_string())
+            } else if kept >= MAX_LINE_PATTERNS {
+                Some(format!("a family holds {MAX_LINE_PATTERNS} line patterns at most"))
+            } else {
+                pattern.check(name).err().map(|e| e.split_once(": ").map_or(e.clone(), |(_, r)| r.to_string()))
+            };
+            match why {
+                Some(why) => {
+                    said.push(format!("its line pattern `{}` can't be held ({why}): its lines are drawn solid", shown(name)));
+                    gone.push(name.clone());
+                }
+                None => kept += 1,
+            }
+        }
+        for name in &gone {
+            self.line_patterns.remove(name);
+        }
+        for sub in &mut self.subcategories {
+            if sub.pattern.as_ref().is_some_and(|p| gone.contains(p)) {
+                sub.pattern = None;
+            }
+        }
+        said
+    }
+
     /// Whether it's sound: its parameters named once each, so formulas can say them, and holding
     /// what their kinds hold; its types setting only the type parameters no formula works out; its
     /// materials in the library (`has_material`); and every type building.
