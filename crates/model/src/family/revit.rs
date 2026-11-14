@@ -998,27 +998,23 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         let fits = |w: f64| (1.0..=crate::model::MAX_COORD).contains(&w);
         // Where it says nothing: a nested door's or window's result was made in its own document at its own `Wall Thickness`, the
         // first dimension so labelled between ordinary planes (not the host's faces) says how thick, per type or for all.
-        let own = def["dimensions"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .take(super::MAX_DIMENSIONS)
-            .find(|d| {
-                let ids = d["refs"].as_array().map(|r| r.iter().filter_map(|v| v.as_str().map(str::to_string).or_else(|| Some(v.to_string()))).collect::<Vec<_>>());
-                d.get("label").and_then(text) == Some(super::WALL)
-                    && ids.is_some_and(|ids| {
-                        ids.len() >= 2
-                            && ids.iter().all(|i| {
-                                planes.contains_key(i)
-                                    && refs.iter().all(|r| r.0 != *i || !r.3.get("is_reference").and_then(Value::as_str).is_some_and(|k| k.starts_with("host_")))
-                            })
-                    })
-            });
-        let own_wall = |t: &str| {
-            own.and_then(|d| num(&d["value"]).or_else(|| d["value"].get(t).and_then(num)))
-                .map(f64::abs)
-                .filter(|w| fits(*w))
-        };
+        let own = def["dimensions"].as_array().into_iter().flatten().take(super::MAX_DIMENSIONS).find(|d| {
+            let ids = d["refs"]
+                .as_array()
+                .map(|r| r.iter().filter_map(|v| v.as_str().map(str::to_string).or_else(|| Some(v.to_string()))).collect::<Vec<_>>());
+            d.get("label").and_then(text) == Some(super::WALL)
+                && ids.is_some_and(|ids| {
+                    ids.len() >= 2
+                        && ids.iter().all(|i| {
+                            planes.contains_key(i)
+                                && refs.iter().all(|r| {
+                                    r.0 != *i || !r.3.get("is_reference").and_then(Value::as_str).is_some_and(|k| k.starts_with("host_"))
+                                })
+                        })
+                })
+        });
+        let own_wall =
+            |t: &str| own.and_then(|d| num(&d["value"]).or_else(|| d["value"].get(t).and_then(num))).map(f64::abs).filter(|w| fits(*w));
         f.types
             .keys()
             .map(|t| {
@@ -1703,8 +1699,7 @@ fn masked_as_revit(f: &Family, first: &str, values: &BTreeMap<String, Val>, made
     // The region's own view: a side region's edges are looked for among Revit's side lines, a plan's among its plan's.
     let view = made.first().map_or(SymbolView::Plan, |y| y.view);
     for (level, d) in [Detail::Coarse, Detail::Medium, Detail::Fine].into_iter().enumerate() {
-        let Ok(marks) = f.marks_where(values, &|y: &Symbol| y.snapshot && y.view == view && y.of_type(first) && y.drawn_at(d))
-        else {
+        let Ok(marks) = f.marks_where(values, &|y: &Symbol| y.snapshot && y.view == view && y.of_type(first) && y.drawn_at(d)) else {
             return;
         };
         let segments: Vec<(P2, P2)> = marks
@@ -2481,9 +2476,7 @@ mod tests {
                            {"name": "Half", "kind": "length", "value": 262.5}]
         }));
         let at = |v: f64| json!({"A": v, "B": v});
-        let plane = |id: &str, name: &str, v: f64, origin: bool| {
-            json!({"id": id, "name": name, "normal": [1, 0, 0], "defines_origin": origin, "at": at(v)})
-        };
+        let plane = |id: &str, name: &str, v: f64, origin: bool| json!({"id": id, "name": name, "normal": [1, 0, 0], "defines_origin": origin, "at": at(v)});
         let dim = |id: &str, refs: Value, label: Option<&str>, locked: bool| {
             let mut d = json!({"id": id, "kind": "linear", "refs": refs, "locked": locked});
             if let Some(l) = label {
@@ -2606,7 +2599,12 @@ mod tests {
             let values = f.values(t, &BTreeMap::new()).unwrap();
             let pieces = f.pieces(t, &values).unwrap();
             assert_eq!(pieces.len(), 1, "{t}");
-            let nearest = pieces[0].tris.iter().flatten().map(|p| ((p[0] - want.0).powi(2) + (p[2] - want.1).powi(2)).sqrt()).fold(f64::MAX, f64::min);
+            let nearest = pieces[0]
+                .tris
+                .iter()
+                .flatten()
+                .map(|p| ((p[0] - want.0).powi(2) + (p[2] - want.1).powi(2)).sqrt())
+                .fold(f64::MAX, f64::min);
             assert!(nearest < 0.05, "{t}: the corner is {nearest} mm from where the line meets the circle {want:?}");
             // ... on the circle.
             let on = ((want.0 - centre.0).powi(2) + (want.1 - centre.1).powi(2)).sqrt();

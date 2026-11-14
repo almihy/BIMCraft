@@ -2327,7 +2327,12 @@ impl Family {
                 if let Some(p) = pen
                     && !(1..=crate::pen::MAX_PEN).contains(&p.0)
                 {
-                    return Err(format!("subcategory `{}`: its {what} line weight is a pen from 1 to {}, not {}", sub.name, crate::pen::MAX_PEN, p.0));
+                    return Err(format!(
+                        "subcategory `{}`: its {what} line weight is a pen from 1 to {}, not {}",
+                        sub.name,
+                        crate::pen::MAX_PEN,
+                        p.0
+                    ));
                 }
             }
             if let Some(p) = &sub.pattern
@@ -2952,10 +2957,7 @@ impl Family {
                         return Err(format!("its circle's radius is {r}; it needs one above zero"));
                     }
                     let n = sides(std::f64::consts::TAU, r);
-                    (0..n)
-                        .map(|k| (k as f64 * std::f64::consts::TAU / n as f64).sin_cos())
-                        .map(|(s, c)| P2(x + r * c, y + r * s))
-                        .collect()
+                    (0..n).map(|k| (k as f64 * std::f64::consts::TAU / n as f64).sin_cos()).map(|(s, c)| P2(x + r * c, y + r * s)).collect()
                 }
                 None if form.profile.len() > MAX_RING => return Err(format!("its profile has more than {MAX_RING} corners")),
                 None => form.profile.iter().map(|[a, b]| Ok(P2(num(a)?, num(b)?))).collect::<Result<_, String>>()?,
@@ -4470,8 +4472,8 @@ mod tests {
 
     /// A family of the subcategories `subs` and the line patterns `patterns` (JSON), checked.
     fn styled(subs: Value, patterns: Value) -> Result<Family, String> {
-        let f: Family =
-            serde_json::from_value(json!({"types": {"A": {}}, "subcategories": subs, "line_patterns": patterns})).map_err(|e| e.to_string())?;
+        let f: Family = serde_json::from_value(json!({"types": {"A": {}}, "subcategories": subs, "line_patterns": patterns}))
+            .map_err(|e| e.to_string())?;
         f.check(&|_| true)?;
         Ok(f)
     }
@@ -4516,7 +4518,8 @@ mod tests {
         ] {
             assert!(styled(json!([]), patterns.clone()).is_err(), "{patterns}");
         }
-        let many: serde_json::Map<String, Value> = (0..=MAX_LINE_PATTERNS).map(|i| (format!("P{i}"), json!([{"dash": 3.0}, {"space": 1.0}]))).collect();
+        let many: serde_json::Map<String, Value> =
+            (0..=MAX_LINE_PATTERNS).map(|i| (format!("P{i}"), json!([{"dash": 3.0}, {"space": 1.0}]))).collect();
         assert!(styled(json!([]), Value::Object(many)).unwrap_err().contains("more than"));
         let segments: Vec<Value> = (0..40).map(|_| json!({"dash": 1.0})).collect();
         assert!(styled(json!([]), json!({"Long": segments})).is_err(), "more than 32 segments");
@@ -4531,9 +4534,7 @@ mod tests {
 
     /// Two 100 cubes side by side (A at x 0..100, B at x 200..300) and a void through both, listed between them.
     fn two_cubes_and_a_void(void_cuts: Value) -> Value {
-        let cube = |x: f64, source: &str| {
-            json!({"profile": [[x, 0], [x + 100.0, 0], [x + 100.0, 100], [x, 100]], "from": 0, "to": 100, "source": source})
-        };
+        let cube = |x: f64, source: &str| json!({"profile": [[x, 0], [x + 100.0, 0], [x + 100.0, 100], [x, 100]], "from": 0, "to": 100, "source": source});
         let mut void = json!({"profile": [[-50, 20], [350, 20], [350, 80], [-50, 80]], "from": -10, "to": 110, "void": true});
         if !void_cuts.is_null() {
             void["cuts"] = void_cuts;

@@ -193,7 +193,9 @@ fn an_elevation_swing_draws_dashed_in_its_subcategorys_weight() {
         let d = render::section(&s.model, id, render::section_fit(&s.model, id, 1600, 1000));
         let (a, b) = (strokes(&d, dashed), strokes(&d, plain));
         // The swing: a line of three points, the apex 2000 up.
-        let swing_of = |l: &[(f32, bool, bool, Vec<P2>)]| l.iter().find(|(_, _, closed, pts)| !closed && pts.iter().any(|p| (p.1 - 2000.0).abs() < 1.0)).cloned();
+        let swing_of = |l: &[(f32, bool, bool, Vec<P2>)]| {
+            l.iter().find(|(_, _, closed, pts)| !closed && pts.iter().any(|p| (p.1 - 2000.0).abs() < 1.0)).cloned()
+        };
         if let (Some(a), Some(b)) = (swing_of(&a), swing_of(&b)) {
             seen = true;
             assert!(a.1, "the Dash pattern draws it dashed");
@@ -235,7 +237,9 @@ fn a_door_frame_cut_draws_in_its_subcategorys_cut_pen() {
 fn a_project_subcategory_style_wins_over_the_familys_on_load() {
     let mut s = Session::new();
     // The project has an Object Style for door/Frame (a pen 9 where seen) and a pattern of its own named as the family's.
-    s.model_mut().subcategory_styles.insert("door/Frame".into(), crate::styles::SubcategoryStyle { projection: Some(Pen(9)), ..Default::default() });
+    s.model_mut()
+        .subcategory_styles
+        .insert("door/Frame".into(), crate::styles::SubcategoryStyle { projection: Some(Pen(9)), ..Default::default() });
     let mine = crate::lines::LinePattern(vec![crate::lines::Segment::Dash(8.0), crate::lines::Segment::Space(2.0)]);
     s.model_mut().line_patterns.insert("Sample Dash".into(), mine.clone());
     styled_door(
@@ -278,10 +282,14 @@ fn a_walls_face_lines_stop_at_a_doors_opening() {
     );
     let wall = id_of(&run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]]})));
     let door = id_of(&run(&mut s, "door", json!({"at": [2000, 0], "family": "Sample Wide Door", "type": "1010"})));
-    let half = s.model.thickness(s.model.wall(match &s.model.elements[&door] {
-        crate::model::Element::Door(o) => o.host,
-        _ => panic!("a door"),
-    }).unwrap()) / 2.0;
+    let half = s.model.thickness(
+        s.model
+            .wall(match &s.model.elements[&door] {
+                crate::model::Element::Door(o) => o.host,
+                _ => panic!("a door"),
+            })
+            .unwrap(),
+    ) / 2.0;
     for detail in ["coarse", "medium", "fine"] {
         run(&mut s, "detail", json!({"view": 100000, "detail": detail}));
         let d = render::plan(&s.model, 100000, 3000, 2000);
