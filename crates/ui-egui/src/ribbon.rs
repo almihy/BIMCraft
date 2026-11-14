@@ -469,9 +469,7 @@ pub(crate) fn panel(ui: &mut Ui, title: &str, mut add: impl FnMut(&mut Ui)) {
         }
         _ => ui.ctx().data(|d| d.get_temp::<f32>(small_id)).unwrap_or(0.0),
     };
-    SEEN.with(|s| {
-        s.borrow_mut().push(Seen { name: title.to_string(), natural, drawn, small, tools, cols, label: text + 24.0, smallable })
-    });
+    SEEN.with(|s| s.borrow_mut().push(Seen { name: title.to_string(), natural, drawn, small, tools, cols, label: text + 24.0, smallable }));
     // A hairline between panels, short of the card's edges.
     let (rule, _) = ui.allocate_exact_size(vec2(RULE, ui.available_height().max(70.0)), Sense::hover());
     ui.painter().vline(rule.center().x, rule.y_range().shrink(4.0), Stroke::new(1.0, pal().border));
@@ -715,7 +713,8 @@ mod tests {
             pub fn frame(&self, room: f32) -> Frame {
                 let mut shown = vec![0; self.spec.len()];
                 let mut planned = Vec::new();
-                let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(3000.0, 300.0))), ..Default::default() };
+                let input =
+                    egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(3000.0, 300.0))), ..Default::default() };
                 let key = self.key;
                 let mut out = self.ctx.run_ui(input, |ui| {
                     let last: (Vec<Seen>, f32, f32, f32) = ui.ctx().data(|d| d.get_temp(key)).unwrap_or_default();
