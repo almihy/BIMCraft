@@ -630,6 +630,11 @@ impl Reader<'_> {
                 // Each outer loop a form, the loops inside it its holes.
                 let rings = loops.iter().map(|l| self.ring(l, k, Ring::Profile, 0)).collect::<Result<Vec<_>, _>>()?;
                 let (mut from, mut to) = (self.value(&def["start_angle"])?, self.value(&def["end_angle"])?);
+                // Which way round its axis it turns from its sketch, where the definition says (`turn`: `right` is the right-hand
+                // way, by the angles as they stand; `left` the other).
+                if def["turn"].as_str() == Some("left") {
+                    (from, to) = (neg(to), neg(from));
+                }
                 // Mirrored, it turns the other way about its axis.
                 if self.map.mirrors() {
                     (from, to) = (neg(to), neg(from));
@@ -686,8 +691,10 @@ impl Reader<'_> {
     /// A symbolic line's curves as symbols in its view; a model line's in each of plan, front and side its Visibility
     /// Settings draw it in (Revit draws a model line in every view that sees it, seen flat in that view).
     fn lines(&self, def: &Value) -> Result<Vec<Symbol>, String> {
-        // A line drawn in Revit's invisible style draws nothing, in any view.
-        if def["invisible"].as_bool() == Some(true) || def["subcategory"].as_str() == Some("<Invisible lines>") {
+        // A line drawn in Revit's invisible style draws nothing, in any view; a region whose edges say their own styles
+        // (`edge_styles`) says it of each edge.
+        let edge_styles = def["edge_styles"].as_bool() == Some(true);
+        if !edge_styles && (def["invisible"].as_bool() == Some(true) || def["subcategory"].as_str() == Some("<Invisible lines>")) {
             return Ok(Vec::new());
         }
         // A masking region's edge is drawn as its Visibility Settings say, as a line's.
@@ -763,8 +770,24 @@ impl Reader<'_> {
             ..Symbol::default()
         };
         let curves = def["curves"].as_array().filter(|c| c.len() <= MOST).ok_or("it has no curves")?;
+        let edge_styles = def["edge_styles"].as_bool() == Some(true);
         let mut out = Vec::new();
         for c in curves {
+            // An edge of a region whose edges say their own styles: an invisible one draws nothing, another its own subcategory.
+            let base = if edge_styles {
+                if c["invisible"].as_bool() == Some(true) || c["subcategory"].as_str() == Some("<Invisible lines>") {
+                    continue;
+                }
+                match c.get("subcategory").and_then(text) {
+                    Some(own) => Symbol {
+                        subcategory: Some(own).filter(|s| self.family.subcategories.iter().any(|x| x.name == *s)).map(str::to_string),
+                        ..base.clone()
+                    },
+                    None => base.clone(),
+                }
+            } else {
+                base.clone()
+            };
             let bit = self.curve(c)?;
             match &bit.arc {
                 None => out.push(Symbol {
@@ -921,6 +944,8 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     f.dimensions.clear();
     f.nested.clear();
     f.check.clear();
+    // What a void cuts was measured (the add-in removed each void and saw which solids grew): then its `cuts` is what it cuts.
+    f.cuts_measured = def["cuts_by"].as_str() == Some("removal");
     let mut notes = Vec::new();
     if !def.is_object() {
         f.editable =
@@ -1410,6 +1435,8 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     }
     // Forms and lines.
     let mut forms = Vec::new();
+    // Whether each form's definition said which way it turns (`turn`), so what is guessed from Revit's result leaves it alone.
+    let mut turn_said: Vec<bool> = Vec::new();
     // Each form of the definition by the id it goes by: what a void's `cuts` can name.
     let id_of = |v: &Value| v.as_str().map_or_else(|| v.to_string(), str::to_string);
     let form_ids: BTreeSet<String> =
@@ -1432,6 +1459,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
                         x.cuts.clone_from(&cuts);
                     }
                 }
+                turn_said.extend(std::iter::repeat_n(matches!(d["turn"].as_str(), Some("left" | "right")), made.len()));
                 forms.extend(made)
             }
             Err(e) => notes.push(format!("its {}: {e}", part_of(d))),
@@ -1443,7 +1471,9 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     for d in def["lines"].as_array().into_iter().flatten().take(MOST) {
         match reader.lines(d) {
             Ok(made) => {
-                if d["masking"].as_bool() == Some(true) {
+                // A region whose edges each say their own style (`edge_styles`) is drawn as they say: no edge is looked for among
+                // Revit's lines to learn the detail levels it is drawn at.
+                if d["masking"].as_bool() == Some(true) && d["edge_styles"].as_bool() != Some(true) {
                     regions.push(symbols.len()..symbols.len() + made.len());
                 }
                 symbols.extend(made)
@@ -1582,7 +1612,7 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
         }
     }
     // What is made is tried in every type: a form or a line that doesn't work out in one is left out, and said.
-    let forms = turned_as_revit(f, forms, &walls);
+    let forms = turned_as_revit(f, forms, &walls, &turn_said);
     let (forms, symbols, nested) = tried(f, forms, symbols, nested, &mut notes, &walls);
     f.forms.extend(forms);
     f.symbols.extend(symbols);
@@ -1592,10 +1622,10 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     Exported { walls, openings }
 }
 
-/// `forms` with each part-turn revolve turned the way Revit turns it. The definition says its axis and its angles but not
-/// which way round they run from its sketch, so each is turned the other way where that brings the first type's volume
-/// nearer Revit's result (a void's, by what it cuts).
-fn turned_as_revit(f: &Family, mut forms: Vec<Form>, walls: &Walls) -> Vec<Form> {
+/// `forms` with each part-turn revolve turned the way Revit turns it. A definition that doesn't say (`turn`) says its axis and
+/// its angles but not which way round they run from its sketch, so each is turned the other way where that brings the first
+/// type's volume nearer Revit's result (a void's, by what it cuts); `said` is whether each form's definition did say.
+fn turned_as_revit(f: &Family, mut forms: Vec<Form>, walls: &Walls, said: &[bool]) -> Vec<Form> {
     let Some(first) = f.types.keys().next().cloned() else { return forms };
     let Ok(values) = vals(f, &first, walls) else { return forms };
     let snapshot: Vec<&Form> = f.forms.iter().filter(|x| x.snapshot && x.of_type(&first) && x.show.is_none_or(|s| s.fine)).collect();
@@ -1645,7 +1675,8 @@ fn turned_as_revit(f: &Family, mut forms: Vec<Form>, walls: &Walls) -> Vec<Form>
                 (Expr::Number(a), Expr::Number(b)) => (b - a).abs() < 359.9,
                 _ => true,
             };
-        if !part {
+        // One whose definition says which way it turns is as it says.
+        if !part || said.get(i).copied().unwrap_or(false) {
             continue;
         }
         let was = forms[i].clone();
@@ -2353,5 +2384,238 @@ mod tests {
             assert_eq!(e.view, SymbolView::Side);
             assert_eq!(e.show, at_levels(false, true, true), "every edge is Revit's side edge at Medium and Fine");
         }
+    }
+
+    #[test]
+    fn a_definition_that_says_its_cuts_were_measured_marks_the_family_so() {
+        let mut f = door(json!({}));
+        translated(&mut f, json!({"to_bimcraft": {}, "cuts_by": "removal"}));
+        assert!(f.cuts_measured);
+        // Anything else, or nothing, is not; a family translated again says what its definition now says.
+        translated(&mut f, json!({"to_bimcraft": {}, "cuts_by": "something else"}));
+        assert!(!f.cuts_measured);
+        translated(&mut f, json!({"to_bimcraft": {}, "cuts_by": "removal"}));
+        translated(&mut f, json!({"to_bimcraft": {}}));
+        assert!(!f.cuts_measured);
+    }
+
+    /// A revolve of a 100 x 500 rectangle 100 out from its axis (z), a quarter turn, as a definition form, `turn` as given.
+    fn revolved(turn: Option<&str>, snapshot_at_y: f64) -> Family {
+        // Revit's result: a box where the quarter turn lands, on the +y side or the -y side of the x axis.
+        let (lo, hi) = if snapshot_at_y > 0.0 { (0.0, 200.0) } else { (-200.0, 0.0) };
+        let mut f = door(json!({"forms": [{"snapshot": true, "mesh": boxed([0.0, lo, 0.0], [200.0, hi, 500.0])}]}));
+        let mut form = json!({"id": "r", "kind": "revolution", "start_angle": 0, "end_angle": 90, "axis": [[0, 0, 0], [0, 0, 500]],
+            "loops": [[{"line": [[100, 0, 0], [200, 0, 0]]}, {"line": [[200, 0, 0], [200, 0, 500]]},
+                       {"line": [[200, 0, 500], [100, 0, 500]]}, {"line": [[100, 0, 500], [100, 0, 0]]}]]});
+        if let Some(t) = turn {
+            form["turn"] = json!(t);
+        }
+        translated(&mut f, json!({"to_bimcraft": {}, "forms": [form]}));
+        f
+    }
+
+    /// The angles the one form translated from the definition turns from and to.
+    fn angles(f: &Family) -> (Expr, Expr) {
+        let ours: Vec<&Form> = f.forms.iter().filter(|x| !x.snapshot).collect();
+        assert_eq!(ours.len(), 1, "{:?}", f.editable);
+        (ours[0].from.clone(), ours[0].to.clone())
+    }
+
+    #[test]
+    fn a_revolve_turns_the_way_its_definition_says() {
+        let n = Expr::Number;
+        let (right, left) = ((n(0.0), n(90.0)), (n(-90.0), n(0.0)));
+        // Said `right`, it is as its angles stand; said `left`, the other way: wherever Revit's result lies.
+        for side in [1.0, -1.0] {
+            assert_eq!(angles(&revolved(Some("right"), side)), right, "right, Revit's result at {side}");
+            assert_eq!(angles(&revolved(Some("left"), side)), left, "left, Revit's result at {side}");
+            // A word it doesn't know says nothing: guessed, as when there is none.
+            assert_eq!(angles(&revolved(Some("up"), side)), angles(&revolved(None, side)));
+        }
+        // Said nothing, it is guessed from Revit's result, which lands on one side or the other: the guess turns it one way for
+        // one and the other for the other, so the words above are not the guess's.
+        let guessed = [angles(&revolved(None, 1.0)), angles(&revolved(None, -1.0))];
+        assert_ne!(guessed[0], guessed[1], "the guess follows Revit's result");
+        assert!(guessed.contains(&right) && guessed.contains(&left), "{guessed:?}");
+    }
+
+    #[test]
+    fn a_region_whose_edges_say_their_style_draws_only_its_visible_edges() {
+        let curve = |a: [f64; 3], b: [f64; 3], extra: Value| {
+            let mut c = json!({"line": [a, b]});
+            for (k, v) in extra.as_object().into_iter().flatten() {
+                c[k] = v.clone();
+            }
+            c
+        };
+        let mut f = door(json!({"subcategories": [{"name": "Plan Swing"}]}));
+        translated(
+            &mut f,
+            json!({"to_bimcraft": {}, "lines": [{"view": "plan", "masking": true, "edge_styles": true, "invisible": true, "curves": [
+                curve([0.0, 0.0, 0.0], [100.0, 0.0, 0.0], json!({"invisible": true})),
+                curve([100.0, 0.0, 0.0], [100.0, 50.0, 0.0], json!({"subcategory": "Plan Swing"})),
+                curve([100.0, 50.0, 0.0], [0.0, 50.0, 0.0], json!({"invisible": true})),
+                curve([0.0, 50.0, 0.0], [0.0, 0.0, 0.0], json!({}))]}]}),
+        );
+        let edges = made(&f);
+        assert_eq!(edges.len(), 2, "the two invisible edges are not drawn, whatever the region says: {:?}", f.editable);
+        assert_eq!(edges[0].subcategory.as_deref(), Some("Plan Swing"));
+        assert_eq!(edges[1].subcategory, None);
+        // Nobody looks for them among Revit's lines to learn the levels they draw at: they say nothing of them.
+        assert!(edges.iter().all(|e| e.show.is_none()));
+        // Without it, a region's `invisible` is still all its edges.
+        let mut g = door(json!({}));
+        translated(
+            &mut g,
+            json!({"to_bimcraft": {}, "lines": [{"view": "plan", "invisible": true, "curves": [curve([0.0, 0.0, 0.0], [100.0, 0.0, 0.0], json!({}))]}]}),
+        );
+        assert!(made(&g).is_empty());
+    }
+
+    /// A door of a `Half` length parameter, its planes (an origin, a jamb 262.5 out and two frame planes 12.7 and 19.1 further
+    /// out), the jamb labelled `Half` from the origin, the frame planes hanging off it by a string dimension; `segments` the
+    /// string's locked segments as the add-in writes them (each its own two-plane dimension, locked).
+    fn framed(segments: bool) -> Family {
+        let mut f = door(json!({
+            "parameters": [{"name": "Width", "kind": "length", "value": 900}, {"name": "Height", "kind": "length", "value": 2100},
+                           {"name": "Half", "kind": "length", "value": 262.5}]
+        }));
+        let at = |v: f64| json!({"A": v, "B": v});
+        let plane = |id: &str, name: &str, v: f64, origin: bool| {
+            json!({"id": id, "name": name, "normal": [1, 0, 0], "defines_origin": origin, "at": at(v)})
+        };
+        let dim = |id: &str, refs: Value, label: Option<&str>, locked: bool| {
+            let mut d = json!({"id": id, "kind": "linear", "refs": refs, "locked": locked});
+            if let Some(l) = label {
+                d["label"] = json!(l);
+            }
+            d
+        };
+        let mut dimensions = vec![
+            dim("h", json!(["o", "j"]), Some("Half"), false),
+            // The string: its padlock is the whole string's, off.
+            dim("s", json!(["j", "f1", "f2"]), None, false),
+        ];
+        if segments {
+            let mut first = dim("s.0", json!(["j", "f1"]), None, true);
+            first["value"] = at(12.7);
+            let mut second = dim("s.1", json!(["f1", "f2"]), None, true);
+            second["value"] = at(19.1);
+            dimensions.extend([first, second]);
+        }
+        translated(
+            &mut f,
+            json!({"to_bimcraft": {}, "reference_planes": [plane("o", "Origin", 0.0, true), plane("j", "Jamb", 262.5, false),
+                plane("f1", "Frame 1", 275.2, false), plane("f2", "Frame 2", 294.3, false)], "dimensions": dimensions}),
+        );
+        f
+    }
+
+    #[test]
+    fn a_locked_segment_of_a_string_dimension_places_its_planes() {
+        let at = |f: &Family, half: f64| {
+            let values = f.values_given("A", &BTreeMap::from([("Half".to_string(), half)]), super::super::DEFAULT_WALL).unwrap();
+            f.solve(&values).unwrap()
+        };
+        // Wider, the jamb goes out with `Half`; the frame planes stay where they were: nothing holds them to it.
+        let loose = at(&framed(false), 300.0);
+        assert!((loose["Jamb"] - 300.0).abs() < 1e-6 && (loose["Frame 1"] - 275.2).abs() < 1e-6, "{loose:?}");
+        // With the segments each its own locked dimension, they follow it, by 12.7 and by 19.1 more.
+        let f = framed(true);
+        assert_eq!(f.dimensions.iter().filter(|d| d.locked && d.refs.len() == 2).count(), 2, "{:?}", f.dimensions);
+        for half in [262.5, 300.0, 400.0] {
+            let held = at(&f, half);
+            assert!((held["Jamb"] - half).abs() < 1e-6, "{half}: {held:?}");
+            assert!((held["Frame 1"] - (half + 12.7)).abs() < 1e-6, "{half}: {held:?}");
+            assert!((held["Frame 2"] - (half + 12.7 + 19.1)).abs() < 1e-6, "{half}: {held:?}");
+        }
+    }
+
+    #[test]
+    fn values_set_on_a_nested_part_hold_for_that_instance() {
+        // A plan swing of two Yes/No parameters, `LH` and `RH`, each switching an arc; its parent's instance of it sets them
+        // directly (numbers: 1 and 0), not through a parameter of its own.
+        let swing: Family = serde_json::from_value(json!({
+            "category": "generic",
+            "parameters": [{"name": "LH", "kind": "yesno", "value": true}, {"name": "RH", "kind": "yesno", "value": true}],
+            "types": {"Swing": {}},
+            "symbols": [{"line": [[0, 0], [100, 0]], "visible": "LH"}, {"line": [[0, 0], [0, 100]], "visible": "RH"}]
+        }))
+        .unwrap();
+        let mut f = door(json!({"embedded": {"Swing": swing}}));
+        let leaf = |lh: Value, rh: Value| {
+            json!({"to_bimcraft": {}, "nested": [{"id": "n", "family": "Swing", "type": "Swing", "at": [0, 0, 0],
+                "params": {"LH": lh, "RH": rh}}]})
+        };
+        translated(&mut f, leaf(json!(1), json!(0)));
+        assert_eq!(f.nested.len(), 1, "{:?}", f.editable);
+        assert_eq!(f.nested[0].params["LH"], Expr::Number(1.0));
+        assert_eq!(f.nested[0].params["RH"], Expr::Number(0.0));
+        let others = |_: &str| None;
+        let lines = |f: &Family| -> Vec<Vec<P2>> {
+            let values = f.values("A", &BTreeMap::new()).unwrap();
+            f.marks_with("A", &values, SymbolView::Plan, None, &others)
+                .unwrap()
+                .into_iter()
+                .filter_map(|m| match m {
+                    crate::family::Mark::Line(p) => Some(p),
+                    _ => None,
+                })
+                .collect()
+        };
+        let drawn = lines(&f);
+        assert_eq!(drawn.len(), 1, "only the left-hand arc: {drawn:?}");
+        assert!((drawn[0][1].0 - 100.0).abs() < 1e-6 && drawn[0][1].1.abs() < 1e-6, "{drawn:?}");
+        // The other way round, the other one.
+        translated(&mut f, leaf(json!(0), json!(1)));
+        let drawn = lines(&f);
+        assert_eq!(drawn.len(), 1, "{drawn:?}");
+        assert!(drawn[0][1].0.abs() < 1e-6 && (drawn[0][1].1 - 100.0).abs() < 1e-6, "{drawn:?}");
+        // Nothing set on it, both are drawn, as the part's own parameters say.
+        translated(&mut f, json!({"to_bimcraft": {}, "nested": [{"id": "n", "family": "Swing", "type": "Swing", "at": [0, 0, 0]}]}));
+        assert_eq!(lines(&f).len(), 2);
+    }
+
+    #[test]
+    fn a_bar_end_on_the_arch_binds_as_line_meets_circle() {
+        // The add-in binds a bar's corner where its side line meets the arch's circle as a formula over `Width` and `Height`
+        // (a line 15 mm off the 120 degree radial from a hub at (7.5, 1253), the circle of radius Width / 2 - 58 about
+        // (0, Height)): the engine reads that formula, `sqrt` in it, and the corner is the intersection in every type.
+        let (px, pz) = (7.5_f64, 1253.0_f64);
+        let (dx, dz) = (120.0_f64.to_radians().cos(), 120.0_f64.to_radians().sin());
+        let b = format!("({dx} * {px} + {dz} * ({pz} - Height))");
+        let c = format!("({px} ^ 2 + ({pz} - Height) ^ 2 - (Width / 2 - 58) ^ 2)");
+        let t = format!("(-{b} + sqrt({b} ^ 2 - {c}))");
+        let (x, z) = (format!("{px} + {t} * {dx}"), format!("{pz} + {t} * {dz}"));
+        let mut f = door(json!({"types": {"910": {"Width": 910, "Height": 1210}, "1360": {"Width": 1360, "Height": 910},
+                                          "1810": {"Width": 1810, "Height": 1210}}}));
+        let corner = json!([{"formula": x}, 0, {"formula": z}]);
+        let ring = json!([{"line": [[px, 0, pz], corner.clone()]}, {"line": [corner, [px + 20.0, 0, pz + 20.0]]},
+                          {"line": [[px + 20.0, 0, pz + 20.0], [px, 0, pz]]}]);
+        translated(
+            &mut f,
+            json!({"to_bimcraft": {}, "forms": [{"id": "bar", "kind": "extrusion", "normal": [0, 1, 0], "start": 0, "end": 40,
+                "loops": [ring]}]}),
+        );
+        assert!(made_forms(&f).len() == 1, "{:?}", f.editable);
+        for (t, w, h) in [("910", 910.0, 1210.0), ("1360", 1360.0, 910.0), ("1810", 1810.0, 1210.0)] {
+            let (r, centre) = (w / 2.0 - 58.0, (0.0, h));
+            let (bb, cc) = (dx * (px - centre.0) + dz * (pz - centre.1), (px - centre.0).powi(2) + (pz - centre.1).powi(2) - r * r);
+            let at = -bb + (bb * bb - cc).sqrt();
+            let want = (px + at * dx, pz + at * dz);
+            let values = f.values(t, &BTreeMap::new()).unwrap();
+            let pieces = f.pieces(t, &values).unwrap();
+            assert_eq!(pieces.len(), 1, "{t}");
+            let nearest = pieces[0].tris.iter().flatten().map(|p| ((p[0] - want.0).powi(2) + (p[2] - want.1).powi(2)).sqrt()).fold(f64::MAX, f64::min);
+            assert!(nearest < 0.05, "{t}: the corner is {nearest} mm from where the line meets the circle {want:?}");
+            // ... on the circle.
+            let on = ((want.0 - centre.0).powi(2) + (want.1 - centre.1).powi(2)).sqrt();
+            assert!((on - r).abs() < 1e-6, "{t}: {on} is not {r}");
+        }
+    }
+
+    /// What the definition's own forms became, not Revit's.
+    fn made_forms(f: &Family) -> Vec<&Form> {
+        f.forms.iter().filter(|x| !x.snapshot).collect()
     }
 }

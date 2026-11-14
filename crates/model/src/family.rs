@@ -448,7 +448,7 @@ impl Host {
 }
 
 /// A subcategory of a family's category, as Revit's (`Frame/Mullion`, `Panel`, `Plan Swing`, `Elevation Swing`): its line
-/// colour and its material where it sets them.
+/// colour, its material, its line weights (seen, cut) and its line pattern where it sets them.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Subcategory {
@@ -457,6 +457,15 @@ pub struct Subcategory {
     pub color: Option<[u8; 3]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub material: Option<String>,
+    /// The pen its lines are drawn in where they are seen (Revit's Line Weight, Projection), 1 to 16; none, its category's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projection: Option<crate::pen::Pen>,
+    /// The pen its forms are outlined in where a view cuts them (Line Weight, Cut), 1 to 16; none, its category's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cut: Option<crate::pen::Pen>,
+    /// The line pattern its lines are drawn in, by name: one of the family's `line_patterns` or the project's; none, solid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<String>,
 }
 
 /// A door's or a window's opening in its wall where it isn't `Width` by `Height` (a frame outside the leaf): numbers or
@@ -1116,6 +1125,15 @@ pub struct Family {
     /// compares only its plan and its 3D is always Revit's own result ([`Family::draws_snapshot_forms`]).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub rpc: bool,
+    /// Whether what each of its voids cuts (`Form::cuts`) was measured: the add-in removed each void and saw which solids grew.
+    /// Then a void cuts exactly the solids it names, whatever their order in the family; a family without it (every package
+    /// before the add-in measured) has a void cut every solid listed before it that it reaches.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cuts_measured: bool,
+    /// The line patterns its subcategories name, by name, as Revit's Line Patterns the family was made with: each added to the
+    /// project's when the family is loaded, unless the project has one of the name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub line_patterns: BTreeMap<String, crate::lines::LinePattern>,
 }
 
 impl Symbol {
@@ -1196,6 +1214,8 @@ pub struct Piece {
     pub round: bool,
     /// Its form's Visibility Settings ([`Form::show`]); none, every view at every level.
     pub show: Option<Show>,
+    /// Its form's subcategory ([`Form::subcategory`]): the pens it is outlined in come from it, else from its category.
+    pub subcategory: Option<String>,
 }
 
 impl Piece {
@@ -1288,6 +1308,8 @@ pub const MAX_CHAIN: usize = 16;
 pub const MAX_BUILT: usize = 400_000;
 /// Triangles one form, as a file brings it, may have.
 pub const MAX_TRIANGLES: usize = 100_000;
+/// Line patterns one family may bring.
+pub const MAX_LINE_PATTERNS: usize = 256;
 
 /// Parameters, forms, symbols and types one family may have: as many as a family exported from Revit, which carries each
 /// type's own forms, may bring.
@@ -2300,6 +2322,28 @@ impl Family {
             {
                 return Err(format!("subcategory `{}`: its material is a name of 1 to {MAX_TEXT} characters", sub.name));
             }
+            // A line weight is a pen of Revit's, 1 to 16: not a hairline, which Revit has no weight for.
+            for (what, pen) in [("projection", sub.projection), ("cut", sub.cut)] {
+                if let Some(p) = pen
+                    && !(1..=crate::pen::MAX_PEN).contains(&p.0)
+                {
+                    return Err(format!("subcategory `{}`: its {what} line weight is a pen from 1 to {}, not {}", sub.name, crate::pen::MAX_PEN, p.0));
+                }
+            }
+            if let Some(p) = &sub.pattern
+                && !one_line(p, MAX_TEXT)
+            {
+                return Err(format!("subcategory `{}`: its line pattern is a name of 1 to {MAX_TEXT} characters", sub.name));
+            }
+        }
+        if self.line_patterns.len() > MAX_LINE_PATTERNS {
+            return Err(format!("it has more than {MAX_LINE_PATTERNS} line patterns"));
+        }
+        for (name, pattern) in &self.line_patterns {
+            if !one_line(name, MAX_TEXT) || name == crate::lines::SOLID {
+                return Err(format!("line pattern: a name of 1 to {MAX_TEXT} characters on one line, and not `{}`", crate::lines::SOLID));
+            }
+            pattern.check(name)?;
         }
         Ok(())
     }
@@ -2642,6 +2686,8 @@ impl Family {
         how: Build,
     ) -> Result<Vec<Piece>, String> {
         let (mut out, mut voids) = (Vec::new(), Vec::new());
+        // The form each solid of `out` is of: what a measured void's `cuts` names.
+        let mut of: Vec<usize> = Vec::new();
         for i in 0..self.forms.len() {
             if !self.forms[i].of_type(type_name) || self.forms[i].snapshot != how.snapshot {
                 continue;
@@ -2653,14 +2699,23 @@ impl Family {
             if self.forms[i].void {
                 voids.push((i, out.len(), piece.tris));
             } else {
+                of.push(i);
                 out.push(piece);
             }
         }
-        // Each void cut from every solid listed before it that it reaches (Revit's `cuts` lists don't limit it: they leave out forms
-        // its void cuts and name some it doesn't). A cut solid is no longer one round surface,
-        // and its outline seen from above is as it was. ponytail: a notch or a hole doesn't show in plan; trace it if it must.
+        // Each void cut from every solid listed before it that it reaches (Revit's `cuts` lists of before the add-in measured them
+        // don't limit it: they leave out forms its void cuts and name some it doesn't). Where they were measured
+        // (`cuts_measured`), a void that names the forms it cuts cuts those and only those, whatever their order. A cut solid is
+        // no longer one round surface, and its outline seen from above is as it was. ponytail: a notch or a hole doesn't show in
+        // plan; trace it if it must.
         for (i, before, void) in &voids {
-            for piece in out.iter_mut().take(*before) {
+            let named = self.cuts_measured.then(|| self.forms[*i].cuts.as_ref()).flatten();
+            for (k, piece) in out.iter_mut().enumerate() {
+                match named {
+                    Some(list) if !self.forms[of[k]].source.as_ref().is_some_and(|src| list.contains(src)) => continue,
+                    None if k >= *before => break,
+                    _ => {}
+                }
                 let tris = csg::subtract(&piece.tris, void, cuts).map_err(|e| format!("form {}: {e}", i + 1))?;
                 if tris != piece.tris {
                     let (bottom, top) = heights(&tris);
@@ -2673,6 +2728,7 @@ impl Family {
                         outline: std::mem::take(&mut piece.outline),
                         material: std::mem::take(&mut piece.material),
                         show: piece.show,
+                        subcategory: piece.subcategory.take(),
                     };
                 }
             }
@@ -2915,7 +2971,7 @@ impl Family {
                     let inner = lifted(inner);
                     tris.extend(inner.into_iter().map(|[a, b, c]| [a, c, b]));
                 }
-                return Ok(Some(Piece { show: form.show, ..hulled(tris, material) }));
+                return Ok(Some(Piece { show: form.show, subcategory: form.subcategory.clone(), ..hulled(tris, material) }));
             }
             if !form.top.is_empty() || !form.holes.is_empty() {
                 if form.top.len() > MAX_RING || form.holes.len() > MAX_RING || form.holes.iter().any(|h| h.len() > MAX_RING) {
@@ -2939,7 +2995,7 @@ impl Family {
                     too_fine((ring.len() + top.len()).saturating_mul(4), "blend")?;
                     shapes::blend(&ring, &top, from, to, form.plane)?
                 };
-                return Ok(Some(Piece { show: form.show, ..hulled(tris, material) }));
+                return Ok(Some(Piece { show: form.show, subcategory: form.subcategory.clone(), ..hulled(tris, material) }));
             }
             match &form.axis {
                 Some([p, q]) => {
@@ -2952,7 +3008,7 @@ impl Family {
                     let tris = lifted(tris);
                     let outline = outline.into_iter().map(|q| P2(q.0 + lift[0], q.1 + lift[1])).collect();
                     let (bottom, top) = heights(&tris);
-                    Piece { caps: tris.len(), tris, outline, bottom, top, material, round: false, show: None }
+                    Piece { caps: tris.len(), tris, outline, bottom, top, material, round: false, show: None, subcategory: None }
                 }
                 None => {
                     let (tris, caps) = sweep(&ring, from, to, form.plane)?;
@@ -2967,11 +3023,11 @@ impl Family {
                         Plane::Xz => (vec![P2(a0, from), P2(a1, from), P2(a1, to), P2(a0, to)], b0, b1),
                         Plane::Yz => (vec![P2(from, a0), P2(to, a0), P2(to, a1), P2(from, a1)], b0, b1),
                     };
-                    Piece { tris, caps, outline, bottom, top, material, round: form.circle.is_some(), show: None }
+                    Piece { tris, caps, outline, bottom, top, material, round: form.circle.is_some(), show: None, subcategory: None }
                 }
             }
         };
-        Ok(Some(Piece { show: form.show, ..piece }))
+        Ok(Some(Piece { show: form.show, subcategory: form.subcategory.clone(), ..piece }))
     }
 
     /// Where each of its forms lies, sized by `values`, before any void cuts it: its place in
@@ -3137,7 +3193,7 @@ fn circumcentre(a: P2, m: P2, c: P2) -> Option<P2> {
 fn hulled(tris: Vec<[P3; 3]>, material: String) -> Piece {
     let (bottom, top) = heights(&tris);
     let outline = crate::geom::hull(tris.iter().flatten().map(|p| P2(p[0], p[1])).collect());
-    Piece { caps: tris.len(), tris, outline, bottom, top, material, round: false, show: None }
+    Piece { caps: tris.len(), tris, outline, bottom, top, material, round: false, show: None, subcategory: None }
 }
 
 /// The most a nested part may be scaled by.
@@ -3362,7 +3418,7 @@ fn mesh(tris: &[[P3; 3]], traced: &[[f64; 2]], material: String) -> Result<Piece
             ring
         }
     };
-    Ok(Piece { tris: tris.to_vec(), caps: tris.len(), outline, bottom, top, material, round: false, show: None })
+    Ok(Piece { tris: tris.to_vec(), caps: tris.len(), outline, bottom, top, material, round: false, show: None, subcategory: None })
 }
 
 /// The families a new project starts with, BIMCraft's own: tables, chairs, beds, sofas, desks,
@@ -4360,6 +4416,104 @@ mod tests {
         )
         .unwrap();
         assert!(f.check(&|_| true).unwrap_err().contains("axis"));
+    }
+
+    /// A family of the subcategories `subs` and the line patterns `patterns` (JSON), checked.
+    fn styled(subs: Value, patterns: Value) -> Result<Family, String> {
+        let f: Family =
+            serde_json::from_value(json!({"types": {"A": {}}, "subcategories": subs, "line_patterns": patterns})).map_err(|e| e.to_string())?;
+        f.check(&|_| true)?;
+        Ok(f)
+    }
+
+    #[test]
+    fn a_subcategory_says_its_line_weights_and_pattern_and_the_family_the_patterns() {
+        let f = styled(
+            json!([{"name": "Elevation Swing", "projection": 1, "cut": 3, "pattern": "Dash"}, {"name": "Frame"}]),
+            json!({"Dash": [{"dash": 3.0}, {"space": 1.5}], "Centre": [{"dash": 6.0}, {"space": 1.0}, "dot", {"space": 1.0}]}),
+        )
+        .unwrap();
+        assert_eq!(f.subcategories[0].projection, Some(crate::pen::Pen(1)));
+        assert_eq!((f.subcategories[0].cut, f.subcategories[0].pattern.as_deref()), (Some(crate::pen::Pen(3)), Some("Dash")));
+        assert_eq!(f.subcategories[1].projection, None, "a subcategory that says nothing says nothing");
+        assert_eq!(f.line_patterns["Dash"].0.len(), 2);
+        assert!(f.line_patterns["Centre"].is_dash());
+        // Written and read back as they are; none of them written where none is said.
+        let back: Family = serde_json::from_value(serde_json::to_value(&f).unwrap()).unwrap();
+        assert_eq!(back, f);
+        let bare = serde_json::to_value(styled(json!([{"name": "Frame"}]), json!({})).unwrap()).unwrap();
+        assert_eq!(bare["subcategories"], json!([{"name": "Frame"}]));
+        assert!(bare.get("line_patterns").is_none());
+    }
+
+    #[test]
+    fn hostile_line_weights_and_patterns_are_refused_in_plain_words() {
+        let weights = [(json!(0), "from 1 to 16"), (json!(17), "from 1 to 16")];
+        for (pen, says) in weights {
+            let e = styled(json!([{"name": "F", "projection": pen}]), json!({})).unwrap_err();
+            assert!(e.contains(says) || e.contains("whole number"), "{e}");
+        }
+        assert!(styled(json!([{"name": "F", "cut": 2.5}]), json!({})).is_err(), "a pen is a whole number");
+        assert!(styled(json!([{"name": "F", "pattern": "two\nlines"}]), json!({})).is_err(), "a pattern's name is on one line");
+        let long = "x".repeat(MAX_TEXT + 1);
+        assert!(styled(json!([{"name": "F", "pattern": long}]), json!({})).unwrap_err().contains("line pattern"));
+        for patterns in [
+            json!({"Solid": [{"dash": 3.0}, {"space": 1.0}]}),
+            json!({"Dash": []}),
+            json!({"Dash": [{"dash": 0.0}]}),
+            json!({"Dash": [{"dash": 1000.0}, {"space": 1.0}]}),
+            json!({"Dash": [{"dash": -1.0}]}),
+        ] {
+            assert!(styled(json!([]), patterns.clone()).is_err(), "{patterns}");
+        }
+        let many: serde_json::Map<String, Value> = (0..=MAX_LINE_PATTERNS).map(|i| (format!("P{i}"), json!([{"dash": 3.0}, {"space": 1.0}]))).collect();
+        assert!(styled(json!([]), Value::Object(many)).unwrap_err().contains("more than"));
+        let segments: Vec<Value> = (0..40).map(|_| json!({"dash": 1.0})).collect();
+        assert!(styled(json!([]), json!({"Long": segments})).is_err(), "more than 32 segments");
+    }
+
+    /// The pieces of a family of `forms` whose voids' cuts were measured, or not (`measured`).
+    fn built_cuts(measured: bool, forms: Value) -> Vec<Piece> {
+        let f: Family = serde_json::from_value(json!({"types": {"A": {}}, "cuts_measured": measured, "forms": forms})).unwrap();
+        f.check(&|_| true).unwrap();
+        f.pieces("A", &f.values("A", &BTreeMap::new()).unwrap()).unwrap()
+    }
+
+    /// Two 100 cubes side by side (A at x 0..100, B at x 200..300) and a void through both, listed between them.
+    fn two_cubes_and_a_void(void_cuts: Value) -> Value {
+        let cube = |x: f64, source: &str| {
+            json!({"profile": [[x, 0], [x + 100.0, 0], [x + 100.0, 100], [x, 100]], "from": 0, "to": 100, "source": source})
+        };
+        let mut void = json!({"profile": [[-50, 20], [350, 20], [350, 80], [-50, 80]], "from": -10, "to": 110, "void": true});
+        if !void_cuts.is_null() {
+            void["cuts"] = void_cuts;
+        }
+        json!([cube(0.0, "1"), void, cube(200.0, "2")])
+    }
+
+    #[test]
+    fn a_measured_void_cuts_only_what_it_names_whatever_the_order() {
+        // The void is listed between the two, and names the one after it: that one is cut (a bar of 100 x 60 x 100 out of it),
+        // the one before it is whole.
+        let pieces = built_cuts(true, two_cubes_and_a_void(json!(["2"])));
+        assert_eq!(pieces.len(), 2);
+        let (a, b) = (volume(&pieces[0].tris), volume(&pieces[1].tris));
+        assert!((a - 1e6).abs() < 1e-3, "the one it doesn't name is whole: {a}");
+        assert!((b - (1e6 - 100.0 * 60.0 * 100.0)).abs() < 1e-3, "the one it names is cut though it comes after: {b}");
+        // One that names nothing cuts nothing; one that says nothing cuts what comes before it, as ever.
+        let none = built_cuts(true, two_cubes_and_a_void(json!([])));
+        assert!(none.iter().all(|p| (volume(&p.tris) - 1e6).abs() < 1e-3));
+        let says_nothing = built_cuts(true, two_cubes_and_a_void(Value::Null));
+        assert!((volume(&says_nothing[0].tris) - (1e6 - 100.0 * 60.0 * 100.0)).abs() < 1e-3);
+        assert!((volume(&says_nothing[1].tris) - 1e6).abs() < 1e-3);
+    }
+
+    #[test]
+    fn an_unmeasured_void_cuts_every_solid_before_it() {
+        // Whatever `cuts` says (here: only the one after it), a void of a family whose lists weren't measured cuts the one before.
+        let pieces = built_cuts(false, two_cubes_and_a_void(json!(["2"])));
+        assert!((volume(&pieces[0].tris) - (1e6 - 100.0 * 60.0 * 100.0)).abs() < 1e-3, "{}", volume(&pieces[0].tris));
+        assert!((volume(&pieces[1].tris) - 1e6).abs() < 1e-3, "the one after it is whole");
     }
 
     #[test]

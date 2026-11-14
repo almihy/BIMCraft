@@ -72,7 +72,74 @@ pub fn inherited(styles: &BTreeMap<String, ObjectStyle>, category: &str) -> Obje
     }
 }
 
+/// What a family's subcategory draws in in this project, Revit's Object Style `Category/Subcategory`: the pens its lines are seen
+/// and cut in, their pattern (by name) and their colour; what it says nothing of is its category's. A family that comes into
+/// the project brings its subcategories' (as it names them), each unless the project has one of that name: Revit keeps the
+/// project's Object Styles when a family is loaded.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SubcategoryStyle {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projection: Option<Pen>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cut: Option<Pen>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<[u8; 3]>,
+}
+
+impl SubcategoryStyle {
+    /// An error saying what to fix, unless what it holds are pens and a short name.
+    pub fn check(&self, key: &str) -> Result<(), String> {
+        for (what, p) in [("projection", self.projection), ("cut", self.cut)] {
+            if let Some(p) = p
+                && !(1..=MAX_PEN).contains(&p.0)
+            {
+                return Err(format!("object style `{key}` {what}: a line weight is a pen, 1 to {MAX_PEN}, not {}", p.0));
+            }
+        }
+        if self.pattern.as_ref().is_some_and(|p| p.is_empty() || p.chars().count() > crate::model::MAX_TEXT) {
+            return Err(format!("object style `{key}`: its line pattern is a name of 1 to {} characters", crate::model::MAX_TEXT));
+        }
+        Ok(())
+    }
+
+    /// Whether it says nothing: no pen, pattern or colour.
+    pub fn is_empty(&self) -> bool {
+        *self == SubcategoryStyle::default()
+    }
+}
+
 impl Model {
+    /// What subcategory `sub` of `category` draws in: the project's Object Style of `Category/Subcategory`; each of its pens it
+    /// says nothing of is none (the category's, by [`BY_CATEGORY`]). None where the project has none.
+    pub fn subcategory_style(&self, category: &str, sub: &str) -> Option<&SubcategoryStyle> {
+        self.subcategory_styles.get(&format!("{category}/{sub}"))
+    }
+
+    /// Each subcategory `f` names added to the project's Object Styles as `Category/Subcategory`, with its line patterns added
+    /// to the project's where it has none of the name; what the project has of either already stays as it is.
+    pub fn take_subcategory_styles(&mut self, f: &crate::family::Family) {
+        use crate::family::Category as C;
+        let category = match f.category {
+            C::Door => "door",
+            C::Window => "window",
+            other => crate::graphics::component_category(other).unwrap_or(crate::graphics::COMPONENT),
+        };
+        for s in &f.subcategories {
+            let style = SubcategoryStyle { projection: s.projection, cut: s.cut, pattern: s.pattern.clone(), color: s.color };
+            if !style.is_empty() {
+                self.subcategory_styles.entry(format!("{category}/{}", s.name)).or_insert(style);
+            }
+        }
+        for (name, pattern) in &f.line_patterns {
+            if !name.eq_ignore_ascii_case(crate::lines::SOLID) {
+                self.line_patterns.entry(name.clone()).or_insert_with(|| pattern.clone());
+            }
+        }
+    }
+
     /// The pens `category` draws in: the project's own, or what it starts with (a family category: what `component` says).
     pub fn object_style(&self, category: &str) -> ObjectStyle {
         self.object_styles.get(category).copied().unwrap_or_else(|| inherited(&self.object_styles, category))

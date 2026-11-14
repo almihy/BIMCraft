@@ -294,6 +294,7 @@ impl<'a> Components<'a> {
                 caps: pc.caps,
                 round: pc.round,
                 show: pc.show,
+                subcategory: pc.subcategory.clone(),
             })
             .collect()
     }

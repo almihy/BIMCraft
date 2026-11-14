@@ -537,6 +537,8 @@ impl FamilyEditor {
                 check: f.check.clone(),
                 editable: f.editable.clone(),
                 rpc: f.rpc,
+                cuts_measured: f.cuts_measured,
+                line_patterns: f.line_patterns.clone(),
                 ..Family::default()
             },
             tab: Tab::Parameters,
@@ -620,6 +622,8 @@ impl FamilyEditor {
             check,
             editable: self.kept.editable.clone(),
             rpc: self.kept.rpc,
+            cuts_measured: self.kept.cuts_measured,
+            line_patterns: self.kept.line_patterns.clone(),
         })
     }
 

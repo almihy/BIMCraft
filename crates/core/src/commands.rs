@@ -1450,7 +1450,11 @@ other_files(
          `types`, `show`, a symbol's `view`, `outline`, `cut` or a text parameter is written as format 22. A family from Revit \
          stays parametric: `revit` (Revit's definition; also read from a file, and a whole export package at `path` is taken: its \
          `family`, its `definition` and its `nested_families`, each loaded first, a shared one into the project and one that \
-         isn't held by the family it is in, `embedded`; and its `place`, the type to place, given back) \
+         isn't held by the family it is in, `embedded`; and its `place`, the type to place, given back; its `subcategories` may \
+         say a `projection` and a `cut` line weight (a pen, 1 to 16) and a `pattern` (a name), and `line_patterns` the patterns \
+         they name, each added to the project's unless it has one of that name, as the subcategories are its Object Styles of \
+         `Category/Subcategory` unless it has those; `cuts_measured` says the voids' `cuts` were measured, so each void cuts \
+         the forms it names whatever their order) \
          is translated into `references` (reference planes, which formulas read as `ref(Name)`), the `dimensions` placing them per \
          type (labelled with a parameter, locked, EQ; over-constrained, the family isn't editable), parametric forms (extrusions \
          with `holes`, revolves, blends with a `top`, sweeps along a `path` with their `section` and its `section_holes`, \
@@ -11333,6 +11337,8 @@ fn family(s: &mut Session, p: &Value) -> R {
             "editable",
             "revit",
             "rpc",
+            "cuts_measured",
+            "line_patterns",
         ]
         .into_iter()
         .filter_map(|k| fields.remove(k).map(|v| (k.to_string(), v)))
@@ -11441,6 +11447,8 @@ fn family(s: &mut Session, p: &Value) -> R {
         "editable",
         "revit",
         "rpc",
+        "cuts_measured",
+        "line_patterns",
         "rebuild",
     ];
     // The type a file says to place, given back.
@@ -11629,6 +11637,18 @@ fn family(s: &mut Session, p: &Value) -> R {
         f.rpc = v.as_bool().unwrap_or(false);
     } else if from_file {
         f.rpc = false;
+    }
+    // Whether what its voids cut was measured, and the line patterns its subcategories name: a saved family brings them back.
+    if let Some(v) = p.get("cuts_measured") {
+        f.cuts_measured = v.as_bool().unwrap_or(false);
+    } else if from_file {
+        f.cuts_measured = false;
+    }
+    match p.get("line_patterns") {
+        None if from_file => f.line_patterns.clear(),
+        None => {}
+        Some(Value::Null) => f.line_patterns.clear(),
+        Some(v) => f.line_patterns = serde_json::from_value(v.clone()).map_err(|e| field("line_patterns", e))?,
     }
     // Materials it brings, each added where the project has none of its name: the project's own wins, as in Revit.
     let mut brought: BTreeMap<String, crate::model::Material> = BTreeMap::new();
@@ -11837,6 +11857,9 @@ fn family(s: &mut Session, p: &Value) -> R {
         }
     }
     m.families.insert(to.clone(), f.clone());
+    // Its subcategories become the project's Object Styles of `Category/Subcategory` (and its line patterns the project's), each
+    // unless the project has one of the name: as in Revit, what the project has is kept when a family is loaded.
+    m.take_subcategory_styles(&f);
     let mut reply = json!({"name": to, "family": f, "warnings": warnings, "materials": added, "editable": f.editable, "check": f.check});
     if let Some(place) = place {
         reply["place"] = place;

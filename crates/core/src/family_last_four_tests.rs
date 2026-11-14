@@ -119,3 +119,48 @@ fn a_shared_trim_below_the_cut_is_drawn_in_a_windows_plan() {
         assert!((at[0] - 2150.0).abs() < 1.0, "{detail}: {at:?}");
     }
 }
+
+#[test]
+fn a_family_saying_its_line_weights_or_patterns_is_written_as_23_and_read_back() {
+    let family = |extra: Value| {
+        let mut f = json!({"name": "Sample Block", "category": "furniture", "types": {"A": {}},
+            "forms": [{"profile": [[0, 0], [100, 0], [100, 100], [0, 100]], "from": 0, "to": 100}], "subcategories": [{"name": "Edge"}]});
+        for (k, v) in extra.as_object().into_iter().flatten() {
+            f[k] = v.clone();
+        }
+        f
+    };
+    let written = |f: Value| {
+        let mut s = Session::new();
+        run(&mut s, "family", f);
+        let json = s.model.to_json().unwrap();
+        let v: Value = serde_json::from_str(&json).unwrap();
+        let (m, left_out) = crate::model::Model::read(&json).unwrap();
+        assert!(left_out.is_empty(), "{left_out:?}");
+        assert_eq!(m.families["Sample Block"], s.model.families["Sample Block"]);
+        v["format"].as_u64().unwrap_or_default()
+    };
+    let plain = written(family(json!({})));
+    assert!(plain < u64::from(crate::model::TYPES_FORMAT), "no line weights: {plain}");
+    let weighted = written(family(json!({"subcategories": [{"name": "Edge", "projection": 2}]})));
+    assert_eq!(weighted, u64::from(crate::model::TYPES_FORMAT));
+    let patterned = written(family(json!({"subcategories": [{"name": "Edge", "pattern": "Sample Dash"}],
+        "line_patterns": {"Sample Dash": [{"dash": 3.0}, {"space": 1.5}]}})));
+    assert_eq!(patterned, u64::from(crate::model::TYPES_FORMAT));
+}
+
+#[test]
+fn a_hostile_subcategory_weight_is_refused_by_the_family_command() {
+    let mut s = Session::new();
+    for sub in [json!({"name": "Edge", "projection": 0}), json!({"name": "Edge", "cut": 17}), json!({"name": "Edge", "projection": 2.5})] {
+        let e = s
+            .execute(
+                "family",
+                &json!({"name": "Sample Block", "category": "furniture", "types": {"A": {}},
+                        "forms": [{"profile": [[0, 0], [100, 0], [100, 100], [0, 100]], "from": 0, "to": 100}], "subcategories": [sub]}),
+            )
+            .unwrap_err();
+        assert!(e.contains("pen") || e.contains("line weight") || e.contains("whole number"), "{e}");
+    }
+    assert!(s.model.families.is_empty() && s.model.subcategory_styles.is_empty());
+}

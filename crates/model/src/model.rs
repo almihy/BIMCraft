@@ -3381,6 +3381,10 @@ pub struct Model {
     /// has set apart from what a project starts with ([`Model::object_style`]).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub object_styles: BTreeMap<String, crate::styles::ObjectStyle>,
+    /// What each family subcategory the project has drawn in, by `Category/Subcategory` (Revit's Object Styles of a family's
+    /// subcategories): each added when a family comes in, unless the project has one of that name ([`Model::subcategory_style`]).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub subcategory_styles: BTreeMap<String, crate::styles::SubcategoryStyle>,
     /// Its line patterns, by name: graphic segments along a centerline, mm on paper.
     #[serde(default = "lines::default_patterns")]
     pub line_patterns: BTreeMap<String, LinePattern>,
@@ -3523,6 +3527,7 @@ impl Model {
             line_weights: None,
             standard,
             object_styles: BTreeMap::new(),
+            subcategory_styles: BTreeMap::new(),
             line_patterns: lines::patterns(language),
             line_styles: lines::styles(language),
             fill_patterns: fills::patterns(language),
@@ -7012,6 +7017,9 @@ impl Model {
             crate::styles::known(c)?;
             style.check(c)?;
         }
+        for (key, style) in &self.subcategory_styles {
+            style.check(key)?;
+        }
         for (n, p) in &self.line_patterns {
             if n.eq_ignore_ascii_case(lines::SOLID) {
                 return Err(format!("line pattern `{n}`: {} is a line with no pattern; name it another way", lines::SOLID));
@@ -8422,6 +8430,7 @@ impl Model {
             line_weights,
             standard,
             object_styles,
+            subcategory_styles,
             line_patterns,
             line_styles,
             fill_patterns,
@@ -8467,6 +8476,7 @@ impl Model {
             && *line_weights == o.line_weights
             && *standard == o.standard
             && *object_styles == o.object_styles
+            && *subcategory_styles == o.subcategory_styles
             && *line_patterns == o.line_patterns
             && *line_styles == o.line_styles
             && *fill_patterns == o.fill_patterns
