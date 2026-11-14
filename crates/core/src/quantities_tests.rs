@@ -320,13 +320,15 @@ fn the_models_solids_are_built_once_and_only_where_a_volume_is_asked_for() {
     use crate::schedule::{self, Field};
 
     let m = crate::sample::highrise(5).unwrap();
-    let measured: Vec<Id> = m.elements.iter().filter(|(_, e)| matches!(e, Element::Wall(_) | Element::Floor(_))).map(|(id, _)| *id).collect();
+    let measured: Vec<Id> =
+        m.elements.iter().filter(|(_, e)| matches!(e, Element::Wall(_) | Element::Floor(_))).map(|(id, _)| *id).collect();
     assert!(measured.len() > 100, "{} walls and floors", measured.len());
     let rooms = crate::rooms::Rooms::new(&m);
 
     // The old sums.
     let t = Instant::now();
-    let by_prisms: f64 = measured.iter().filter(|id| m.wall(**id).is_some()).map(|id| quantities::wall_volume_by_prisms(&m, *id, true)).sum();
+    let by_prisms: f64 =
+        measured.iter().filter(|id| m.wall(**id).is_some()).map(|id| quantities::wall_volume_by_prisms(&m, *id, true)).sum();
     let prisms = t.elapsed();
     assert!(by_prisms > 0.0);
 
