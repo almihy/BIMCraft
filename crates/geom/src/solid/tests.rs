@@ -13,6 +13,12 @@ fn rel(got: f64, want: f64) -> f64 {
     (got - want).abs() / want.abs()
 }
 
+/// Checks a volume against its analytic value, within `tol` (the harness's), and says how close it came (`--nocapture`).
+fn check_volume(name: &str, got: f64, want: f64, tol: f64) {
+    eprintln!("{name}: volume {got:.3}, analytic {want:.3}, off by {:.3e} (allowed {tol:e})", rel(got, want));
+    assert!(rel(got, want) < tol, "{name}: volume {got} against {want}");
+}
+
 fn org(element: u64) -> Origin {
     Origin::new(element, 0)
 }
@@ -91,7 +97,7 @@ fn case1_curved_wall_with_door_volume() {
     let door = 2.0 * HALF_DOOR / 2.0 * (r1 * r1 - r0 * r0) * 2100.0;
     let want = wall - door;
     // The harness: 0.5 % where an arc is tessellated.
-    assert!(rel(s.volume(), want) < 0.005, "volume {} against {want}", s.volume());
+    check_volume("case 1", s.volume(), want, 0.005);
     assert!((want - 7915300164.692).abs() < 1.0, "the analytic value is the harness's: {want}");
     all_closed(&[s]);
 }
@@ -135,6 +141,8 @@ fn case1_plan_slice_is_exact_arcs() {
         assert_eq!(origin.element, WALL);
         assert!((s.dist(*c) - r).abs() < 1e-6 && (e.dist(*c) - r).abs() < 1e-6, "ends on the circle: {s:?} {e:?}");
     }
+    let worst = arcs.iter().flat_map(|(c, r, s, e, _, _)| [(s.dist(*c) - r).abs(), (e.dist(*c) - r).abs()]).fold(0.0, f64::max);
+    eprintln!("case 1 arcs: radii {:?}, worst endpoint off its circle by {worst:e} mm", arcs.iter().map(|a| a.1).collect::<Vec<_>>());
     // The outer arcs run counter-clockwise (the wall is on their left), the inner ones clockwise.
     for (_, r, _, _, ccw, _) in &arcs {
         assert_eq!(*ccw, *r > 6000.0);
@@ -146,6 +154,7 @@ fn case1_plan_slice_is_exact_arcs() {
     let outer_jamb = P2(6150.0 * hi.cos(), 6150.0 * hi.sin());
     assert!((outer_jamb.0 - 4010.634).abs() < 1e-3 && (outer_jamb.1 - 4662.329).abs() < 1e-3, "{outer_jamb:?}");
     let touches = |p: P2| door_lines.iter().any(|l| l.0.dist(p) < 1e-6 || l.1.dist(p) < 1e-6);
+    eprintln!("case 1 jambs: {:?}", door_lines.iter().map(|l| (l.0, l.1)).collect::<Vec<_>>());
     assert!(touches(outer_jamb), "{door_lines:#?}");
     assert!(touches(P2(outer_jamb.1, outer_jamb.0)), "{door_lines:#?}");
     // Jambs are straight radial lines between the circles.
@@ -156,6 +165,7 @@ fn case1_plan_slice_is_exact_arcs() {
     // The area, arcs and all, is the sector area exactly.
     let area: f64 = loops.iter().map(Loop::area).sum();
     let want = (HALF_PI - 2.0 * HALF_DOOR) / 2.0 * (6150.0f64.powi(2) - 5850.0f64.powi(2));
+    eprintln!("case 1 plan slice at z = 1200: {} loops, {} arcs, area {area:.6} against {want:.6}", loops.len(), arcs.len());
     assert!(rel(area, want) < 1e-9, "area {area} against {want}");
 }
 
@@ -202,7 +212,7 @@ fn case2_walls_trimmed_by_a_sloped_plane() {
         (f(x0) + f(xc)) / 2.0 * (xc - x0) + wh * (x1 - xc)
     };
     let want = 2.0 * t * trim(-h, w + h) + (d - t) * (trim(-h, h) + trim(w - h, w + h));
-    assert!(rel(total_volume(&trimmed), want) < 1e-4, "{} against {want}", total_volume(&trimmed));
+    check_volume("case 2 walls", total_volume(&trimmed), want, 1e-4);
     // Origins: a trimmed wall's triangles are the wall's or the roof plane's.
     for (k, s) in trimmed.iter().enumerate() {
         for tri in s.triangles() {
@@ -227,7 +237,7 @@ fn case3_slab_with_shaft_and_sleeves() {
     let want = 20000.0 * 15000.0 * 250.0 - 2000.0 * 3000.0 * 250.0 - 3.0 * PI * 200.0 * 200.0 * 250.0;
     assert!((want - 73405752220.392).abs() < 1.0);
     // The harness: 0.05 % where round sleeves are tessellated.
-    assert!(rel(cut.volume(), want) < 0.0005, "{} against {want}", cut.volume());
+    check_volume("case 3", cut.volume(), want, 0.0005);
     all_closed(&[cut.clone()]);
     assert_eq!(cut.bounds().unwrap(), Bounds3 { min: [0.0, 0.0, 0.0], max: [20000.0, 15000.0, 250.0] });
 
@@ -273,7 +283,7 @@ fn case4_layered_joins_are_one_closed_solid_each() {
     let joins = [l, t, x];
     all_closed(&joins);
     // analytic.py: 26,718,750,000 mm3 in all, 0.01 %.
-    assert!(rel(total_volume(&joins), 26_718_750_000.0) < 1e-4, "{}", total_volume(&joins));
+    check_volume("case 4", total_volume(&joins), 26_718_750_000.0, 1e-4);
     // Every triangle is one of the walls' layers.
     for (j, s) in joins.iter().enumerate() {
         let ids: std::collections::BTreeSet<(u64, u16)> = s.triangles().iter().map(|t| (t.origin.element, t.origin.layer)).collect();
@@ -318,8 +328,8 @@ fn case5_curtain_walls_straight_and_on_an_arc_are_fifty_solids() {
         }
     }
     // The harness's per-wall parts, planar so 0.01 %.
-    assert!(rel(straight.volume(), 958_875_000.0) < 1e-4, "{}", straight.volume());
-    assert!(rel(glass_volume, 2_463_840_000.0) < 1e-4, "{glass_volume}");
+    check_volume("case 5 straight mullions", straight.volume(), 958_875_000.0, 1e-4);
+    check_volume("case 5 straight glass", glass_volume, 2_463_840_000.0, 1e-4);
     // Every mullion box shows in the union's triangles.
     let ids: std::collections::BTreeSet<u64> = straight.triangles().iter().map(|t| t.origin.element).collect();
     assert_eq!(ids.len(), 13, "{ids:?}");
@@ -355,9 +365,9 @@ fn case5_curtain_walls_straight_and_on_an_arc_are_fifty_solids() {
     assert_eq!(solids.len(), 50);
     all_closed(&solids);
     // The arc wall's parts, 0.5 % (tessellated; the harness takes the same volume as the straight wall's).
-    assert!(rel(arc_mullions.volume(), 958_875_000.0) < 0.005, "{}", arc_mullions.volume());
-    assert!(rel(arc_glass, 2_463_840_000.0) < 0.005, "{arc_glass}");
-    assert!(rel(total_volume(&solids), 6_845_430_000.0) < 0.005, "{}", total_volume(&solids));
+    check_volume("case 5 arc mullions", arc_mullions.volume(), 958_875_000.0, 0.005);
+    check_volume("case 5 arc glass", arc_glass, 2_463_840_000.0, 0.005);
+    check_volume("case 5 total", total_volume(&solids), 6_845_430_000.0, 0.005);
 }
 
 // ----- case 6: a tower (three storeys; the harness has twenty) ------------------------------------------------------------
@@ -415,7 +425,7 @@ fn case6_tower_three_storeys() {
     let perimeter = 4.0 * (30000.0 - 300.0) * 300.0 * wall_h - 4.0 * 12.0 * 1800.0 * 1500.0 * 300.0;
     let interior = 36.0 * (4000.0 * 150.0 * wall_h - 900.0 * 2100.0 * 150.0);
     let want = storeys as f64 * (slab + perimeter + interior);
-    assert!(rel(total_volume(&solids), want) < 1e-4, "{} against {want}", total_volume(&solids));
+    check_volume("case 6 (3 storeys)", total_volume(&solids), want, 1e-4);
 }
 
 // ----- origins -----------------------------------------------------------------------------------------------------------
