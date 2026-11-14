@@ -21,6 +21,7 @@ use crate::model::{MAX_COORD, MAX_TEXT};
 mod bounds;
 pub mod check;
 pub mod compare;
+mod cutting;
 mod leaves;
 mod parametric;
 pub mod revit;
@@ -2643,22 +2644,26 @@ impl Family {
         // Each void cut from every solid listed before it that it reaches (Revit's `cuts` lists don't limit it: they leave out forms
         // its void cuts and name some it doesn't). A cut solid is no longer one round surface,
         // and its outline seen from above is as it was. ponytail: a notch or a hole doesn't show in plan; trace it if it must.
-        for (i, before, void) in &voids {
-            for piece in out.iter_mut().take(*before) {
-                let tris = csg::subtract(&piece.tris, void, cuts).map_err(|e| format!("form {}: {e}", i + 1))?;
-                if tris != piece.tris {
-                    let (bottom, top) = heights(&tris);
-                    *piece = Piece {
-                        caps: tris.len(),
-                        tris,
-                        bottom,
-                        top,
-                        round: false,
-                        outline: std::mem::take(&mut piece.outline),
-                        material: std::mem::take(&mut piece.material),
-                        show: piece.show,
-                    };
-                }
+        // A closed form cut by closed voids is cut on the solid kernel, a form or void that isn't closed by `csg` ([`cutting`]).
+        let voids: Vec<(usize, cutting::Void)> = voids.iter().map(|(i, before, tris)| (*before, cutting::Void::new(*i, tris))).collect();
+        for (k, piece) in out.iter_mut().enumerate() {
+            let mine: Vec<&cutting::Void> = voids.iter().filter(|(before, _)| *before > k).map(|(_, v)| v).collect();
+            if mine.is_empty() {
+                continue;
+            }
+            let tris = cutting::cut(&piece.tris, &mine, cuts)?;
+            if tris != piece.tris {
+                let (bottom, top) = heights(&tris);
+                *piece = Piece {
+                    caps: tris.len(),
+                    tris,
+                    bottom,
+                    top,
+                    round: false,
+                    outline: std::mem::take(&mut piece.outline),
+                    material: std::mem::take(&mut piece.material),
+                    show: piece.show,
+                };
             }
         }
         // Its nested parts: Revit's result for a type has them in its own forms already.
