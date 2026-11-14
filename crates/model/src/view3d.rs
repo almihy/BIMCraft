@@ -168,7 +168,7 @@ impl Tri {
 }
 
 /// A wall's plan frame: its start, along it, and square to it.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 #[doc(hidden)]
 pub struct Frame {
     o: P2,
@@ -204,9 +204,10 @@ impl Frame {
 /// face, level or sloped, and what lies up to `rise` mm above it (a floor, a column, a roof's
 /// slope); a prism: a ring in plan from one plane up to another (a wall's part; of a curved wall,
 /// with its centre and its centre line's radius, its faces being one surface each); or triangles
-/// (a component's form, which sections show and don't cut; a round run's tube, convex, which they do, as `cut` says): a round
+/// (a component's form, which a section cuts as Revit's category of the family does ([`crate::graphics::cuttable`]) and the
+/// element solids make of it; a round run's tube, convex, which they cut by its `cut`): a round
 /// one's sides, past `caps`, are one curved surface; any other's facets that turn little where they meet are ([`facets`]).
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 #[doc(hidden)]
 pub enum Solid {
     Box { owner: Id, color: Rgb, tex: u32, frame: Frame, a: (f64, f64), c: (f64, f64), z: (f64, f64) },
@@ -295,9 +296,11 @@ impl PreparedSolids {
     }
 }
 
+mod element_solids;
 mod fragments;
 #[doc(hidden)]
 pub mod update;
+pub use element_solids::{ElementSolids, OpenPiece, ShownSolid, SolidCache, element_solids, element_solids_in, wall_volume};
 pub use fragments::{FragmentStats, SectionCache};
 pub(crate) type PreparedMade = (Vec<Prepared>, Vec<(Id, Vec<P3>)>, Vec<Option<[P3; 2]>>);
 
@@ -431,7 +434,8 @@ impl Solid {
     /// The rings a section along unit `u` from `p`, `len` long, cuts it into, as (along, up) in mm: where it lies over the
     /// line, level or along a sloped face; a convex mesh that `cut` allows is cut by the plane through the line, where its
     /// edges cross it (a tube across is its ring, an ellipse if it is oblique).
-    pub(crate) fn cuts(&self, p: P2, u: P2, len: f64) -> Vec<Vec<P2>> {
+    #[doc(hidden)]
+    pub fn cuts(&self, p: P2, u: P2, len: f64) -> Vec<Vec<P2>> {
         if let Solid::Mesh { tris, cut: true, .. } = self {
             let side = |q: P3| (P2(q[0], q[1]) - p).dot(u.perp());
             let at = |q: P3| P2((P2(q[0], q[1]) - p).dot(u), q[2]);
@@ -927,7 +931,8 @@ pub fn solids_in_with(
                 out.push(Solid::Mesh { owner: id, color: MASS, tex: 0, tris, caps: 0, round: false, cut: false, vis: Vis::ALWAYS });
             }
             Element::Mass(ms) => out.push(slab(id, MASS, &ms.footprint(), m.span(ms.level, ms.base_offset, ms.top_level, ms.height))),
-            // Each form in its material's colour; a curved one's facets one surface, as a curved wall's are.
+            // Each form in its material's colour; a curved one's facets one surface, as a curved wall's are. A section cuts it
+            // only when Revit cuts its category (`graphics::cuttable`), from the element solids, not by `cut`.
             Element::Component(c) => {
                 let x = P2(c.angle.to_radians().cos(), c.angle.to_radians().sin());
                 for piece in components.pieces(c) {
@@ -1000,8 +1005,8 @@ pub fn solids_in_with(
                     slabs(&mut out, m, id, ROOF, face, rise);
                 }
             }
-            // Of a family: each form in its material's colour, shown beyond a section's line and never cut, as a
-            // component's are. Else a door's leaf, as thick as its type says (`OpeningType::leaf`), or a window's glass, a 50 mm
+            // Of a family: each form in its material's colour, shown beyond a section's line and cut by it from the element
+            // solids (a door's and a window's are cut, as Revit cuts them). Else a door's leaf, as thick as its type says (`OpeningType::leaf`), or a window's glass, a 50 mm
             // panel: in the middle of the wall, shut, square to it.
             Element::Door(o) | Element::Window(o) => {
                 if o.family.is_some() {
@@ -1159,6 +1164,12 @@ pub fn shaded(m: &Model) -> Vec<Solid> {
 }
 
 fn layered(m: &Model, s: Solid) -> Vec<Solid> {
+    layered_indexed(m, s).into_iter().map(|(_, part)| part).collect()
+}
+
+/// [`layered`], each part with the layer of the element's type it is of, counted from the first as the type lists its layers
+/// (none where the element is not split into layers): what a solid per layer (`element_solids`) is made of.
+pub(crate) fn layered_indexed(m: &Model, s: Solid) -> Vec<(Option<usize>, Solid)> {
     let layers = match m.elements.get(s.owner()) {
         Some(Element::Wall(w)) => m.type_layers("wall", &w.type_name),
         Some(Element::Floor(f) | Element::Toposolid(f)) => m.type_layers("floor", &f.type_name),
@@ -1168,19 +1179,19 @@ fn layered(m: &Model, s: Solid) -> Vec<Solid> {
     };
     let total: f64 = layers.iter().map(|l| l.thickness).sum();
     if total <= 0.0 {
-        return vec![s];
+        return vec![(None, s)];
     }
     let colour = |l: &Layer, or: Rgb| m.materials.get(&l.material).map_or(or, |x| Rgb(x.color[0], x.color[1], x.color[2]));
     match s {
         Solid::Slab { owner, color, tex, face, rise } => {
             let mut out = Vec::new();
             let mut above = 0.0;
-            for l in layers {
+            for (k, l) in layers.iter().enumerate() {
                 let r = rise * l.thickness / total;
                 if r > 1e-9 {
                     let lift = rise - above - r;
                     let face = face.iter().map(|p| [p[0], p[1], p[2] + lift]).collect();
-                    out.push(Solid::Slab { owner, color: colour(l, color), tex: over(skin(m, &l.material), tex), face, rise: r });
+                    out.push((Some(k), Solid::Slab { owner, color: colour(l, color), tex: over(skin(m, &l.material), tex), face, rise: r }));
                 }
                 above += r;
             }
@@ -1200,21 +1211,24 @@ fn layered(m: &Model, s: Solid) -> Vec<Solid> {
                 .iter()
                 .enumerate()
                 .filter(|(_, l)| l.thickness > 1e-9 || l.variable)
-                .map(|(k, l)| Solid::Prism {
-                    owner,
-                    color: colour(l, color),
-                    tex: over(skin(m, &l.material), tex),
-                    ring: ring.clone(),
-                    bottom: at(k + 1),
-                    top: at(k),
-                    curve: None,
+                .map(|(k, l)| {
+                    let part = Solid::Prism {
+                        owner,
+                        color: colour(l, color),
+                        tex: over(skin(m, &l.material), tex),
+                        ring: ring.clone(),
+                        bottom: at(k + 1),
+                        top: at(k),
+                        curve: None,
+                    };
+                    (Some(k), part)
                 })
                 .collect()
         }
         // Across the wall from its exterior face in, each layer between two of its boundaries; the
         // outermost and innermost reach whatever lies past them.
         Solid::Prism { owner, color, tex, ring, bottom, top, curve } => {
-            let Some(w) = m.wall(owner) else { return vec![Solid::Prism { owner, color, tex, ring, bottom, top, curve }] };
+            let Some(w) = m.wall(owner) else { return vec![(None, Solid::Prism { owner, color, tex, ring, bottom, top, curve })] };
             let (axis, b) = (Axis::of(w), walls::boundaries(m, w));
             let off = |q: P2| axis.project(q).1;
             let n = layers.len();
@@ -1230,19 +1244,22 @@ fn layered(m: &Model, s: Solid) -> Vec<Solid> {
                     if let Some(lo) = b.get(k + 1).filter(|_| k + 1 < n) {
                         part = geom::clip(&part, |q| off(q) - lo);
                     }
-                    (part.len() >= 3 && geom::area(&part).abs() > 1e-6).then(|| Solid::Prism {
-                        owner,
-                        color: colour(l, color),
-                        tex: over(skin(m, &l.material), tex),
-                        ring: part,
-                        bottom,
-                        top,
-                        curve,
+                    (part.len() >= 3 && geom::area(&part).abs() > 1e-6).then(|| {
+                        let part = Solid::Prism {
+                            owner,
+                            color: colour(l, color),
+                            tex: over(skin(m, &l.material), tex),
+                            ring: part,
+                            bottom,
+                            top,
+                            curve,
+                        };
+                        (Some(k), part)
                     })
                 })
                 .collect()
         }
-        other => vec![other],
+        other => vec![(None, other)],
     }
 }
 
@@ -1303,6 +1320,8 @@ pub struct Scene {
     pub spans: Vec<Span>,
     /// What numbered the planes, so an edit numbers its triangles' among them.
     table: PlaneTable,
+    /// Each element as closed solids, made when first asked for ([`Scene::element_solids`]).
+    solids: SolidCache,
 }
 
 /// An element's triangles in a scene: where they are in its `tris`, and the box round them.
@@ -1512,6 +1531,7 @@ impl Scene {
             shape_keys: HashMap::new(),
             spans: Vec::new(),
             table: PlaneTable::default(),
+            solids: SolidCache::default(),
         })
     }
 
@@ -1575,6 +1595,7 @@ impl Scene {
             shape_keys,
             spans,
             table,
+            solids: SolidCache::default(),
         })
     }
 
@@ -1747,6 +1768,7 @@ impl Scene {
             shape_keys: HashMap::new(),
             spans: Vec::new(),
             table: PlaneTable::default(),
+            solids: SolidCache::default(),
         }
     }
 }

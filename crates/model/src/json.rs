@@ -22,17 +22,59 @@ pub fn element_json(m: &Model, id: Id) -> Value {
 
 /// [`element_json`], a room's boundary found among `rooms`: what one look at many elements shares.
 pub fn element_json_with(m: &Model, id: Id, rooms: &crate::rooms::Rooms) -> Value {
-    json_of(m, id, Some(rooms))
+    json_of(m, id, Some(rooms), true)
+}
+
+/// [`element_json_with`] less what is measured from the element's solids ([`measured`]: a wall's area and volume, a floor's, a roof's
+/// and a ceiling's volume), which is what costs: a schedule or a tag reads those only where it shows them, and asks [`measured`] for
+/// them then.
+pub fn element_json_light(m: &Model, id: Id, rooms: &crate::rooms::Rooms) -> Value {
+    json_of(m, id, Some(rooms), false)
 }
 
 /// [`element_json`] less what is found among the rooms of its level: a component's room, a door's or window's From Room,
 /// To Room and the room it swings into. What wants an element's name, type or mark, often (the status bar, a tag that
-/// shows no room, IDs of Selection), and not its rooms; a room's own boundary and a tag's text are still found.
+/// shows no room, IDs of Selection), and not its rooms nor what is measured from its solids ([`measured`]); a room's own boundary
+/// and a tag's text are still found.
 pub fn element_json_bare(m: &Model, id: Id) -> Value {
-    json_of(m, id, None)
+    json_of(m, id, None, false)
 }
 
-fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>) -> Value {
+/// Whether `key` of an element's JSON is one [`measured`] gives.
+pub fn is_measured(key: &str) -> bool {
+    matches!(key, "area_m2" | "volume_m3")
+}
+
+/// What element `id`'s JSON says that is measured from its solids (as the model keeps them, [`Model::solids`]): a wall's `area_m2`
+/// and `volume_m3`, a floor's, roof's and ceiling's `volume_m3`. [`element_json_with`] has them, [`element_json_light`] and
+/// [`element_json_bare`] leave them out.
+pub fn measured(m: &Model, id: Id) -> Map<String, Value> {
+    let mut out = Map::new();
+    match m.elements.get(id) {
+        // One side's area and the volume, less the doors and windows in it, as Revit's wall Area and Volume.
+        Some(Element::Wall(_)) => {
+            if let Some(q) = crate::quantities::wall(m, id) {
+                out.insert("area_m2".into(), json!(m2(q.net_side)));
+                out.insert("volume_m3".into(), json!(m3(q.net_volume)));
+            }
+        }
+        // What a floor holds, less its openings and the shafts through it: under a variable layer, less where its top falls.
+        Some(Element::Floor(f) | Element::Toposolid(f)) => {
+            out.insert("volume_m3".into(), json!(m3(crate::quantities::floor_at(m, id, f).net_volume)));
+        }
+        // What a roof holds through its thickness.
+        Some(Element::Roof(r)) => {
+            out.insert("volume_m3".into(), json!(m3(crate::quantities::roof_at(m, id, r).volume)));
+        }
+        Some(Element::Ceiling(c)) => {
+            out.insert("volume_m3".into(), json!(m3(crate::quantities::ceiling_at(m, id, c).volume)));
+        }
+        _ => {}
+    }
+    out
+}
+
+fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>, measures: bool) -> Value {
     let Some(e) = m.elements.get(id) else { return Value::Null };
     let mut extra = Map::new();
     extra.insert("id".into(), json!(id));
@@ -120,11 +162,6 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>) -> Value {
             extra.insert("thickness".into(), json!(m.thickness(w)));
             if let Some(r) = axis.radius() {
                 extra.insert("radius".into(), json!(hundredth(r)));
-            }
-            // One side's area and the volume, less the doors and windows in it, as Revit's wall Area and Volume.
-            if let Some(q) = crate::quantities::wall(m, id) {
-                extra.insert("area_m2".into(), json!(m2(q.net_side)));
-                extra.insert("volume_m3".into(), json!(m3(q.net_volume)));
             }
         }
         Element::Door(o) | Element::Window(o) => {
@@ -241,12 +278,11 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>) -> Value {
                 .flat_map(|(loops, p)| loops.iter().flatten().map(|q| p.at(*q)))
                 .fold(m.elevation(r.level) + r.offset, f64::max);
             let outline = m.roof_outline(r);
-            let q = crate::quantities::roof(m, r);
+            let q = crate::quantities::roof_areas_at(m, r);
             extra.insert("ridge".into(), json!(hundredth(ridge)));
             extra.insert("area_m2".into(), json!(m2(q.plan_area)));
-            // Its surface, as Revit's roof Area, and what it holds through its thickness.
+            // Its surface, as Revit's roof Area.
             extra.insert("surface_area_m2".into(), json!(m2(q.surface_area)));
-            extra.insert("volume_m3".into(), json!(m3(q.volume)));
             extra.insert("perimeter_m".into(), json!(m_of(q.perimeter)));
             extra.insert("outline".into(), json!(outline.into_iter().map(micron).collect::<Vec<_>>()));
         }
@@ -304,11 +340,9 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>) -> Value {
         }
         // Areas less the openings and shafts through them.
         Element::Floor(f) | Element::Toposolid(f) => {
-            let q = crate::quantities::floor(m, f);
+            let q = crate::quantities::floor_areas_at(m, f);
             extra.insert("area_m2".into(), json!(m2(q.net_area)));
             extra.insert("thickness".into(), json!(m.types.floor.get(&f.type_name).map_or(0.0, |t| t.thickness)));
-            // What it holds, less its openings and the shafts through it: under a variable layer, less where its top falls.
-            extra.insert("volume_m3".into(), json!(m3(q.net_volume)));
             extra.insert("perimeter_m".into(), json!(m_of(q.perimeter)));
             // How high its top is, at its lowest and its highest, its shape's points too.
             extra.insert("top".into(), top_range(m, f));
@@ -317,9 +351,8 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>) -> Value {
             extra.insert("pattern_angle".into(), json!(f.pattern_angle));
         }
         Element::Ceiling(cl) => {
-            let q = crate::quantities::ceiling(m, cl);
+            let q = crate::quantities::ceiling_areas_at(m, cl);
             extra.insert("area_m2".into(), json!(m2(q.net_area)));
-            extra.insert("volume_m3".into(), json!(m3(q.volume)));
             extra.insert("perimeter_m".into(), json!(m_of(q.perimeter)));
             if let Some(t) = m.types.ceiling.get(&cl.type_name) {
                 extra.insert("thickness".into(), json!(t.thickness));
@@ -403,6 +436,9 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>) -> Value {
             extra.insert("length".into(), json!(hundredth(crate::dims3d::length(d))));
         }
         Element::Grid(_) | Element::Schedule(_) | Element::View3D(_) | Element::PlanView(_) => {}
+    }
+    if measures {
+        extra.extend(measured(m, id));
     }
     let mut v = serde_json::to_value(e).unwrap_or_default();
     if let Some(o) = v.as_object_mut() {

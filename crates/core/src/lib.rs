@@ -2,7 +2,7 @@
 //! rendered to SVG and PNG, sections, elevations, the 3D view, sheets printed to PDF, schedules
 //! and IFC4 export. Nothing here knows about a UI.
 
-pub use bimcraft_geom::{files, geom, language, prim, shared, skeleton, step, triangulation, units, xlsx};
+pub use bimcraft_geom::{files, geom, language, prim, shared, skeleton, solid, step, triangulation, units, xlsx};
 pub use bimcraft_mep_calc::{conduit, demand, dps, dr, drainage, hydrant, loads, nbr5410, plumbing, reservoir, storm, water};
 #[doc(hidden)]
 pub use bimcraft_model::run_arm;
@@ -39,6 +39,8 @@ mod commands;
 mod dry_run_tests;
 #[cfg(test)]
 mod eberick_tests;
+#[cfg(test)]
+mod element_solids_tests;
 #[cfg(test)]
 mod electrical_tests;
 pub mod engine;
@@ -97,6 +99,8 @@ mod run_join_tests;
 pub mod sample;
 #[cfg(test)]
 mod section_box_tests;
+#[cfg(test)]
+mod section_cut_tests;
 #[cfg(test)]
 mod selfcheck_tests;
 #[cfg(test)]

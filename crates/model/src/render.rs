@@ -30,7 +30,7 @@ use crate::pen::{Pen, Weights};
 pub use crate::prim::{LIGHT_POCHE, OPAQUE, PAPER, POCHE, Part, Prim, Rgb, Rule, View};
 use crate::styles::{BY_CATEGORY, ObjectStyle};
 use crate::units::Units;
-use crate::view3d::{self, Camera, Clip, Image, Scene};
+use crate::view3d::{self, Camera, Clip, Image, Scene, Solid};
 pub use crate::view3d::{FragmentStats, SectionCache};
 use crate::walls::{self, Axis};
 use crate::{font, massing, sheet, stairs};
@@ -40,6 +40,7 @@ use dimensions::dimension;
 mod hatch;
 #[doc(hidden)]
 pub mod regions;
+mod section_cut;
 mod site;
 
 #[doc(hidden)]
@@ -1243,40 +1244,17 @@ fn bar_in_plan(d: &mut Drawing, rb: &crate::model::Rebar, dashed: bool, seen: &m
 /// How far past the lowest and highest heights a section's grids run, mm.
 const GRID_PAST: f64 = 600.0;
 
-/// From the lowest level or solid `look` shows to the highest.
-/// The walls whose layers section or elevation `v` may cut between `first` and `last` along its line, by id: those near
-/// the line in the lookup's tiles, by as much as a wall is thick, twice (its joins carry its layers past its ends).
-fn section_walls<'a>(
-    m: &'a Model,
-    lookup: &crate::derived::Lookup,
-    v: &Section,
-    first: f64,
-    last: f64,
-) -> Vec<(Id, &'a crate::model::Wall)> {
-    let u = (v.end - v.start).unit();
-    let (a, b) = (v.start + u * first, v.start + u * last);
-    let grow = 2.0 * m.types.wall.values().map(|t| t.thickness.abs()).fold(0.0, f64::max) + 10.0;
-    let near = lookup.walls_near([a.0.min(b.0), a.1.min(b.1), a.0.max(b.0), a.1.max(b.1)], grow);
-    let walls: Vec<(Id, &crate::model::Wall)> = near.into_iter().filter_map(|id| Some((id, m.wall(id)?))).collect();
-    // Its twin, which tests hold it to: no other wall's layer lines cross the line there.
-    if crate::selfcheck::on(crate::selfcheck::Check::SectionWalls) {
-        for (&id, e) in &m.elements {
-            if let Element::Wall(_) = e
-                && !walls.iter().any(|(w, _)| *w == id)
-            {
-                for line in walls::layer_lines(m, id) {
-                    for seg in line.windows(2) {
-                        let &[p, q] = seg else { continue };
-                        let crosses = geom::line_intersection(v.start, v.end, p, q)
-                            .filter(|x| geom::dist_to_segment(*x, p, q) < 1e-6)
-                            .is_some_and(|x| (first - 1e-6..=last + 1e-6).contains(&(x - v.start).dot(u)));
-                        assert!(!crosses, "wall {id}'s layers cross the section's line, and it isn't among the walls near it");
-                    }
-                }
-            }
-        }
-    }
-    walls
+/// The layers of the type of `id`, a wall, floor, roof or ceiling, that its section is drawn in: none for an element that has
+/// none, or whose layers have no thickness (as `view3d::layered_indexed` takes them).
+fn layer_table(m: &Model, id: Id) -> Option<&[Layer]> {
+    let layers = match m.elements.get(id)? {
+        Element::Wall(w) => m.type_layers("wall", &w.type_name),
+        Element::Floor(f) | Element::Toposolid(f) => m.type_layers("floor", &f.type_name),
+        Element::Roof(r) => m.type_layers("roof", &r.type_name),
+        Element::Ceiling(c) => m.type_layers("ceiling", &c.type_name),
+        _ => return None,
+    };
+    (layers.iter().map(|l| l.thickness).sum::<f64>() > 0.0).then_some(layers)
 }
 
 /// Bounds of external data used by cached level/model extents. Names and floating
@@ -1352,6 +1330,23 @@ pub struct PreparationStats {
     pub resolved_components: usize,
 }
 
+/// The element solids a snapshot's [`SectionWork`] made, with the pieces they were made of: for the next snapshot's work to take
+/// over what an edit left as it was ([`SectionWork::inherit_solids`]).
+#[derive(Default)]
+pub struct SolidCarry {
+    entries: Vec<(Id, std::sync::Arc<view3d::ElementSolids>, Vec<view3d::Solid>)>,
+}
+
+impl SolidCarry {
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
 /// A snapshot's section/elevation geometry, component extrema or deferred envelopes,
 /// and exact model extent. `new` prepares the full oracle; `new_deferred` can resolve
 /// supported component extrema lazily when fitting or datum queries need them.
@@ -1372,6 +1367,9 @@ pub struct SectionWork {
     deferred_components: usize,
     deferred_runs: usize,
     resolved: std::sync::atomic::AtomicUsize,
+    /// The element solids a section is cut through, made when first asked for and kept for as long as this work is of its
+    /// model (`view3d::SolidCache`).
+    solid_cache: view3d::SolidCache,
 }
 
 impl SectionWork {
@@ -1394,6 +1392,7 @@ impl SectionWork {
             deferred_components: 0,
             deferred_runs: 0,
             resolved: Default::default(),
+            solid_cache: Default::default(),
         }
     }
 
@@ -1472,7 +1471,74 @@ impl SectionWork {
             deferred_components: 0,
             deferred_runs: 0,
             resolved: Default::default(),
+            solid_cache: Default::default(),
         })
+    }
+
+    /// How many elements' solids it holds, made or taken over from an earlier snapshot's work ([`Self::inherit_solids`]).
+    pub fn solids_kept(&self) -> usize {
+        self.solid_cache.len()
+    }
+
+    /// What this work's solids leave for the next snapshot's work: each element's solids it made, with the pieces of the
+    /// element they were made of (to tell, then, which are still what the new model's pieces say).
+    pub fn solid_carry(&self) -> SolidCarry {
+        let entries = self
+            .solid_cache
+            .entries()
+            .into_iter()
+            .map(|(id, es)| {
+                let pieces = self.ranges.get(&id).map(|r| self.solids.in_range(r.clone()).cloned().collect()).unwrap_or_default();
+                (id, es, pieces)
+            })
+            .collect();
+        SolidCarry { entries }
+    }
+
+    /// Takes over from `carry` (of the work of model `before`, which this is of `after`, an edit of it) the solids of every
+    /// element the edit left as it was, so that a section after an edit builds only what the edit touched. An element's solids
+    /// are what its pieces and its type's layers and materials and families make of it, so they are kept when none of those is
+    /// other than before: `after` came by edits of elements only (`Model::changed_since`, which says everything else), the
+    /// element is none of those edited nor one of those pointing at or pointed at by one (a door's wall, a level's elements), and
+    /// its pieces, as this work made them (a wall mitred where it joins another, cut at its doors, a floor less its shafts),
+    /// are the pieces the solids were made of. A component's pieces are not kept in a work (only its extremes), so it is kept
+    /// by the first two. Returns how many it took over.
+    pub fn inherit_solids(&self, carry: SolidCarry, before: &Model, after: &Model) -> usize {
+        use crate::ids::Changed;
+        if !self.of.is_of(after) {
+            return 0;
+        }
+        let Changed::Ids(changed) = after.changed_since(before) else { return 0 };
+        let (old, new) = (before.lookup(), after.lookup());
+        let mut touched: std::collections::BTreeSet<Id> = changed.clone();
+        for &id in &changed {
+            for (m, lookup) in [(before, &old), (after, &new)] {
+                let Some(e) = m.elements.get(id) else { continue };
+                if let Some(g) = m.elements.guid(id) {
+                    touched.extend(lookup.referrers(&g));
+                }
+                touched.extend(e.refs().iter().filter_map(|g| after.elements.id(*g)));
+            }
+        }
+        let mut taken = 0;
+        for (id, solids, was) in carry.entries {
+            if touched.contains(&id) || after.elements.get(id).is_none() {
+                continue;
+            }
+            let now = self.ranges.get(&id).map(|r| self.solids.in_range(r.clone()));
+            let same = match now {
+                Some(now) => {
+                    let now: Vec<&Solid> = now.collect();
+                    now.len() == was.len() && now.iter().zip(&was).all(|(a, b)| *a == b)
+                }
+                None => was.is_empty(),
+            };
+            if same {
+                self.solid_cache.adopt(id, solids);
+                taken += 1;
+            }
+        }
+        taken
     }
 
     /// The box of element `id`: `placed` lists elements as the model does, by id. None tells a caller nothing of where it is.
@@ -2056,64 +2122,11 @@ fn section_base_cancellable(
     let (first, last) = span(m, work, v, &look, cancelled)?;
     // Each element's cut pieces, filled as one so where they meet (a roof's slopes at its ridge)
     // leaves no seam.
-    let mut cuts: std::collections::BTreeMap<Id, Vec<Vec<P2>>> = std::collections::BTreeMap::new();
-    let solids: Vec<&view3d::Solid> = work.shown(&look).collect();
     d.part(Part::Cut);
-    // A bar lies inside the concrete it reinforces, so its cuts are dots over that poché, not pieces of it.
-    let mut dots: Vec<(Id, Vec<P2>)> = Vec::new();
-    // A mass is outlined where the line cuts it, below, not filled.
-    // What lies all on one side of the line's upright plane is cut by none of it, whatever it is made of.
-    let side = |q: P2| (q - v.start).dot(u.perp());
-    let one_side = |id: Id| {
-        work.box_of(id).is_some_and(|[lo, hi]| {
-            let s = [P2(lo[0], lo[1]), P2(hi[0], lo[1]), P2(hi[0], hi[1]), P2(lo[0], hi[1])].map(side);
-            s.iter().all(|x| *x > 1e-3) || s.iter().all(|x| *x < -1e-3)
-        })
-    };
-    // Its twin, which tests hold it to: what is left out cuts nothing.
-    if crate::selfcheck::on(crate::selfcheck::Check::OneSide) {
-        for s in solids.iter().filter(|s| one_side(s.owner())) {
-            if cancelled() {
-                return None;
-            }
-            assert!(s.cuts(v.start + u * first, u, last - first).is_empty(), "{} is cut by a line it lies all on one side of", s.owner());
-        }
-    }
-    for s in solids.iter().filter(|s| !matches!(m.elements.get(s.owner()), Some(Element::Mass(_))) && !one_side(s.owner())) {
-        if cancelled() {
-            return None;
-        }
-        let bar = matches!(m.elements.get(s.owner()), Some(Element::Rebar(_)));
-        // Cut from where the view begins, then back along the line from its start.
-        for ring in s.cuts(v.start + u * first, u, last - first) {
-            let ring: Vec<P2> = ring.into_iter().map(|q| P2(q.0 + first, q.1)).collect();
-            if bar { dots.push((s.owner(), ring)) } else { cuts.entry(s.owner()).or_default().push(ring) }
-        }
-    }
-    // The round runs not made yet: only those whose boxes the line's plane crosses.
-    let mut lazy = crate::component_geometry::Components::new(m);
-    for (at, (id, _)) in work.placed.iter().enumerate() {
-        if work.cell(at).is_none() || !look.shows(*id) {
-            continue;
-        }
-        let Some(e) = m.elements.get(*id).filter(|e| e.run().is_some()) else { continue };
-        // Its twin, which tests hold it to: what is left out cuts nothing, so it is made and cut all the same.
-        let twin = crate::selfcheck::on(crate::selfcheck::Check::OneSideLazy);
-        if !twin && one_side(*id) {
-            continue;
-        }
-        if cancelled() {
-            return None;
-        }
-        for s in view3d::lazy_solids(m, *id, e, &mut lazy) {
-            let rings = s.cuts(v.start + u * first, u, last - first);
-            if twin {
-                assert!(!one_side(*id) || rings.is_empty(), "{id} is cut by a line it lies all on one side of");
-            }
-            for ring in rings {
-                cuts.entry(*id).or_default().push(ring.into_iter().map(|q| P2(q.0 + first, q.1)).collect());
-            }
-        }
+    let Cut { layered: layers, loose, dots, .. } = cut_model(m, work, v, &look, (first, last), cancelled)?;
+    let mut cuts: std::collections::BTreeMap<Id, Vec<Vec<P2>>> = loose;
+    for (id, by_layer) in &layers {
+        cuts.entry(*id).or_default().extend(by_layer.iter().flat_map(|(_, rings)| rings.iter().cloned()));
     }
     // Poché, then the edge of what is cut over it: joined walls show their union, as in plan, filled
     // as one first so no seam shows where pieces meet.
@@ -2167,129 +2180,56 @@ fn section_base_cancellable(
         d.fill(std::slice::from_ref(&ring), INK);
         ink_cut(&mut d, &ring);
     }
-    // A compound wall's layers where the line cuts it: each its material's cut pattern, between where
-    // the line crosses its boundaries; a thin line up each boundary between two, as high as the wall
-    // stands there, around its openings.
+    // Each layer of a compound wall, floor, roof or ceiling it cuts: its material's cut pattern over the layer's own pieces,
+    // and a thin line along each boundary between two (up the wall, along the floor), as long as the layers lie together.
     let lookup = m.lookup();
-    for (wall, w) in section_walls(m, &lookup, v, first, last) {
-        if cancelled() {
-            return None;
-        }
-        let layers = m.type_layers("wall", &w.type_name);
-        if layers.is_empty() || !look.shows(wall) || d.detail == Detail::Coarse {
-            continue;
-        }
-        d.owner = Some(wall);
-        let geometry = walls::layer_geometry(m, wall, None);
-        let intervals = if geometry.joined() {
-            // At a butt the core and its neighbouring finish can end at different stations.
-            // A section can also run lengthwise into the return and cross only its cap.
-            (0..layers.len()).map(|k| view3d::crossings(&geometry.band(k), v.start, u)).collect::<Vec<_>>()
-        } else {
-            let crossings: Vec<Vec<f64>> = geometry
-                .lines
-                .iter()
-                .map(|line| {
-                    let mut xs: Vec<f64> = line
-                        .windows(2)
-                        .filter_map(|seg| {
-                            let &[p, q] = seg else { return None };
-                            let x = geom::line_intersection(v.start, v.end, p, q).filter(|x| geom::dist_to_segment(*x, p, q) < 1e-6)?;
-                            Some((x - v.start).dot(u))
-                        })
-                        .collect();
-                    xs.sort_by(f64::total_cmp);
-                    xs.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
-                    xs
-                })
-                .collect();
-            crossings
-                .windows(2)
-                .map(|pair| {
-                    let (a, b) = (&pair[0], &pair[1]);
-                    if a.len() == b.len() { a.iter().copied().zip(b.iter().copied()).collect() } else { Vec::new() }
-                })
-                .collect()
-        };
-        for (layer, spans) in layers.iter().zip(intervals) {
-            for (s0, s1) in spans {
-                let (s0, s1) = (s0.min(s1).max(first), s0.max(s1).min(last));
-                for r in cuts.get(&wall).into_iter().flatten() {
-                    let part = geom::clip(&geom::clip(r, |q| q.0 - s0), |q| s1 - q.0);
-                    if part.len() >= 3 {
-                        let room = (s1 - s0) * d.view.scale;
-                        cut_layer(&mut d, m, layer, &part, P2(1.0, 0.0), room);
-                    }
-                }
-            }
-        }
-        for line in geometry.interfaces() {
-            for seg in line.windows(2) {
-                let &[p, q] = seg else { continue };
-                let Some(x) = geom::line_intersection(v.start, v.end, p, q).filter(|x| geom::dist_to_segment(*x, p, q) < 1e-6) else {
-                    continue;
-                };
-                let along = (x - v.start).dot(u);
-                if !(first..=last).contains(&along) {
-                    continue;
-                }
-                let own = work.solids.in_range(work.ranges.get(&wall).cloned().unwrap_or(0..0));
-                // A butt interface can lie on the body edge; test either side of that edge.
-                let n = (q - p).unit().perp() * 1e-6;
-                for s in own.filter(|s| s.owner() == wall && (s.over(x) || geometry.joined() && (s.over(x + n) || s.over(x - n)))) {
-                    let (z0, z1) = s.z_at(x);
-                    d.part(Part::Pattern);
-                    d.line(&[P2(along, z0), P2(along, z1)], Pen::PROJECTION, INK, false);
-                    d.part(Part::Cut);
-                }
-            }
-        }
-    }
-    // Each layer of a compound floor, roof or ceiling it cuts: its material's cut pattern, a thin
-    // line between each two, parallel to its faces.
     let coarse = d.detail == Detail::Coarse;
-    for (&owner, rings) in cuts.iter().filter(|_| !coarse) {
+    for (&owner, by_layer) in layers.iter().filter(|_| !coarse) {
         if cancelled() {
             return None;
         }
-        let layers = match m.elements.get(owner) {
-            Some(Element::Floor(f) | Element::Toposolid(f)) => m.type_layers("floor", &f.type_name),
-            Some(Element::Roof(r)) => m.type_layers("roof", &r.type_name),
-            Some(Element::Ceiling(c)) => m.type_layers("ceiling", &c.type_name),
-            _ => continue,
-        };
-        let total: f64 = layers.iter().map(|l| l.thickness).sum();
-        if total <= 0.0 {
-            continue;
-        }
-        // A shaped floor's or roof's over a level underside: the layers above its variable one from the top, those below it
-        // from the bottom, the variable one between; any other's in proportion to their thicknesses.
-        let variable = m.variable_under(owner);
+        let Some(table) = layer_table(m, owner) else { continue };
+        let wall = matches!(m.elements.get(owner), Some(Element::Wall(_)));
         d.owner = Some(owner);
-        for r in rings {
-            let &[a0, b0, b1, a1] = r.as_slice() else { continue };
-            // Where each layer starts down from the top at each end.
-            let down = |top: P2, bottom: P2| {
-                let depth = top.1 - bottom.1;
-                crate::model::Variable::bounds(variable, layers, depth)
-                    .into_iter()
-                    .map(|x| if depth.abs() > 1e-9 { top + (bottom - top) * (x / depth) } else { top })
-                    .collect::<Vec<P2>>()
-            };
-            let (at_a, at_b) = (down(a1, a0), down(b1, b0));
-            for (k, layer) in layers.iter().enumerate() {
-                let (Some(&p), Some(&q), Some(&p2), Some(&q2)) = (at_a.get(k), at_b.get(k), at_a.get(k + 1), at_b.get(k + 1)) else {
-                    continue;
-                };
-                let room = (p.1 - p2.1).abs().min((q.1 - q2.1).abs()) * d.view.scale;
-                cut_layer(&mut d, m, layer, &[p2, q2, q, p], (q - p).unit(), room);
-                if k > 0 {
-                    d.part(Part::Pattern);
-                    d.line(&[p, q], Pen::PROJECTION, INK, false);
-                    d.part(Part::Cut);
-                }
+        for (k, rings) in by_layer {
+            let Some(layer) = table.get(usize::from(*k)) else { continue };
+            for ring in rings {
+                // Its courses level in a wall; along the slope in a floor, roof or ceiling.
+                let course = if wall { P2(1.0, 0.0) } else { section_cut::course_of(ring) };
+                let room = section_cut::width_of(ring) * d.view.scale;
+                cut_layer(&mut d, m, layer, ring, course, room);
             }
         }
+        d.part(Part::Pattern);
+        for run in section_cut::interfaces(by_layer) {
+            d.line(&run, Pen::PROJECTION, INK, false);
+        }
+        d.part(Part::Cut);
+    }
+    // Where two walls join, the line between their layers of different materials (a section along the return of a corner shows the
+    // line between the two cores when they differ; where they are of one material the walls show as one), as thin as the lines
+    // between the layers of one wall.
+    if !coarse {
+        let mut rings: Vec<section_cut::JoinRing> = Vec::new();
+        for (&owner, by_layer) in &layers {
+            if !matches!(m.elements.get(owner), Some(Element::Wall(_))) {
+                continue;
+            }
+            let Some(table) = layer_table(m, owner) else { continue };
+            for (k, rs) in by_layer {
+                let Some(layer) = table.get(usize::from(*k)) else { continue };
+                rings.extend(rs.iter().map(|r| (owner, layer.material.as_str(), r.as_slice())));
+            }
+        }
+        d.part(Part::Pattern);
+        for (owner, run) in section_cut::joins(&rings) {
+            if cancelled() {
+                return None;
+            }
+            d.owner = Some(owner);
+            d.line(&run, Pen::PROJECTION, INK, false);
+        }
+        d.part(Part::Cut);
     }
     for (mid, e) in lookup.rare("mass").filter(|id| look.shows(*id)).filter_map(|id| Some((id, m.elements.get(id)?))) {
         if cancelled() {
@@ -2359,6 +2299,162 @@ fn section_base_cancellable(
         return None;
     }
     Some(d)
+}
+
+/// What a section cuts, ring by ring: `(element, layer, ring)`.
+#[doc(hidden)]
+pub type CutRings = Vec<(Id, Option<u16>, Vec<P2>)>;
+pub use section_cut::Region;
+/// What a section cuts as regions: `(element, layer, region)`, in the section's own plane. A closed layer solid's cut is a region
+/// for each outline with the holes in it, the real outline of the cut (a window along a wall is a hole in it), where
+/// [`CutRings`] holds the simple rings the raster fill is made of.
+pub type CutRegions = Vec<(Id, u16, Region)>;
+
+/// What section or elevation `id` cuts, for the tests to read: each ring (counter-clockwise, simple) of each element, as `(element,
+/// layer, ring)`, in the section's own plane (x along its line from its start, y up, mm); `layer` is that of the element's type for
+/// a closed solid, none for what is cut as an open piece, a round run or a bar. None for an id that is no section or elevation.
+#[doc(hidden)]
+pub fn section_cut_rings(m: &Model, id: impl Key) -> Option<CutRings> {
+    let v = m.section(id)?;
+    let look = Look::of(m, id);
+    let work = SectionWork::new(m);
+    section_cut_rings_in(m, &work, v, &look)
+}
+
+/// [`section_cut_rings`] of `w`'s solids, which keep what they cut for the next section.
+#[doc(hidden)]
+pub fn section_cut_rings_with(m: &Model, w: &SectionWork, id: impl Key) -> Option<CutRings> {
+    let v = m.section(id)?;
+    let look = Look::of(m, id);
+    section_cut_rings_in(m, w, v, &look)
+}
+
+/// What section `id` cuts as regions, an outline and the holes in it each ([`CutRegions`]): the closed layer solids' cut only (an
+/// open piece, a round run and a bar have no regions), in the order of their elements and layers.
+#[doc(hidden)]
+pub fn section_cut_regions(m: &Model, id: impl Key) -> Option<CutRegions> {
+    section_cut_regions_with(m, &SectionWork::new(m), id)
+}
+
+/// [`section_cut_regions`] of `w`'s solids, which keep what they cut for the next section.
+#[doc(hidden)]
+pub fn section_cut_regions_with(m: &Model, w: &SectionWork, id: impl Key) -> Option<CutRegions> {
+    let v = m.section(id)?;
+    let look = Look::of(m, id);
+    let span = span(m, w, v, &look, &|| false)?;
+    let cut = cut_model(m, w, v, &look, span, &|| false)?;
+    Some(
+        cut.regions
+            .into_iter()
+            .flat_map(|(id, by_layer)| by_layer.into_iter().flat_map(move |(k, rs)| rs.into_iter().map(move |r| (id, k, r))))
+            .collect(),
+    )
+}
+
+fn section_cut_rings_in(m: &Model, w: &SectionWork, v: &Section, look: &Look) -> Option<CutRings> {
+    let span = span(m, w, v, look, &|| false)?;
+    let Cut { layered, loose, dots, .. } = cut_model(m, w, v, look, span, &|| false)?;
+    let mut out: CutRings = Vec::new();
+    for (id, by_layer) in layered {
+        out.extend(by_layer.into_iter().flat_map(|(k, rings)| rings.into_iter().map(move |r| (id, Some(k), r))));
+    }
+    out.extend(loose.into_iter().flat_map(|(id, rings)| rings.into_iter().map(move |r| (id, None, r))));
+    out.extend(dots.into_iter().map(|(id, r)| (id, None, r)));
+    out.sort_by_key(|(id, k, _)| (*id, *k));
+    Some(out)
+}
+
+/// What a section's line cuts of the model.
+#[derive(Default)]
+struct Cut {
+    /// Each element's closed layer solids' rings, by layer.
+    layered: std::collections::BTreeMap<Id, section_cut::LayerRings>,
+    /// The rings of what is cut in no layer: an open piece, a round run made as the cut asks.
+    loose: std::collections::BTreeMap<Id, Vec<Vec<P2>>>,
+    /// A bar's cuts: dots over the concrete it lies in.
+    dots: Vec<(Id, Vec<P2>)>,
+    /// The same cuts as `layered` as regions (an outline and its holes), by element and layer.
+    regions: std::collections::BTreeMap<Id, section_cut::LayerRegions>,
+}
+
+/// What the vertical plane of section `v` cuts of every element `look` shows, from `first` to `last` along its line (as
+/// `span` finds them), in the section's own plane: x along its line from its start, y up, mm. None, cancelled.
+fn cut_model(
+    m: &Model,
+    work: &SectionWork,
+    v: &Section,
+    look: &Look,
+    (first, last): (f64, f64),
+    cancelled: &(dyn Fn() -> bool + Sync),
+) -> Option<Cut> {
+    let u = (v.end - v.start).unit();
+    let mut out = Cut::default();
+    // What lies all on one side of the line's upright plane is cut by none of it, whatever it is made of.
+    let side = |q: P2| (q - v.start).dot(u.perp());
+    let one_side = |id: Id| {
+        work.box_of(id).is_some_and(|[lo, hi]| {
+            let s = [P2(lo[0], lo[1]), P2(hi[0], lo[1]), P2(hi[0], hi[1]), P2(lo[0], hi[1])].map(side);
+            s.iter().all(|x| *x > 1e-3) || s.iter().all(|x| *x < -1e-3)
+        })
+    };
+    // Its twin, which tests hold it to: what is left out cuts nothing.
+    if crate::selfcheck::on(crate::selfcheck::Check::OneSide) {
+        for s in work.shown(look).filter(|s| one_side(s.owner())) {
+            if cancelled() {
+                return None;
+            }
+            assert!(s.cuts(v.start + u * first, u, last - first).is_empty(), "{} is cut by a line it lies all on one side of", s.owner());
+        }
+    }
+    // Every element the line's plane may cross, cut from its solids: one closed solid to each layer, so the doors, windows and
+    // components are cut as well as the walls; what is not a solid (a pipe's tube, a family's open form) is cut as it was.
+    // Cut from where the view begins, then back along the line from its start.
+    let origin = (v.start + u * first, u);
+    if let Some(frame) = crate::solid::Frame::vertical(origin.0, u) {
+        for (at, (id, _)) in work.placed.iter().enumerate() {
+            let Some(e) = m.elements.get(*id) else { continue };
+            // A round run whose tubes are not made yet (a deferred preparation) is cut from its solids as the full preparation's
+            // is: they are made here, for just the runs whose boxes the line's plane crosses.
+            let lazy = e.run().is_some() && work.cell(at).is_some();
+            // A mass is outlined where the line cuts it, not filled. What Revit does not cut (a sofa, a light fitting, a pipe
+            // fitting, a basin) stays in the picture beyond the line.
+            if !look.shows(*id) || matches!(e, Element::Mass(_)) || !crate::graphics::cuttable(m, e) {
+                continue;
+            }
+            // Its twin, which tests hold it to: what is left out cuts nothing, so a lazy run is made and cut all the same.
+            let twin = lazy && crate::selfcheck::on(crate::selfcheck::Check::OneSideLazy);
+            let aside = one_side(*id);
+            if aside && !twin {
+                continue;
+            }
+            if cancelled() {
+                return None;
+            }
+            // Only the forms of a family the section draws are cut (its detail level, the way it looks at the family).
+            let cut =
+                section_cut::cut_element(&work.solid_cache.get(m, *id), &frame, origin, last - first, first, &|vis| look.draws_vis(vis));
+            if aside {
+                assert!(cut.is_empty(), "{id} is cut by a line it lies all on one side of");
+                continue;
+            }
+            if cut.is_empty() {
+                continue;
+            }
+            // A bar lies inside the concrete it reinforces, so its cuts are dots over that poché, not pieces of it.
+            if matches!(e, Element::Rebar(_)) {
+                out.dots.extend(cut.rings().map(|r| (*id, r.clone())));
+                continue;
+            }
+            if !cut.open.is_empty() {
+                out.loose.entry(*id).or_default().extend(cut.open);
+            }
+            if !cut.layers.is_empty() {
+                out.layered.insert(*id, cut.layers);
+                out.regions.insert(*id, cut.regions);
+            }
+        }
+    }
+    Some(out)
 }
 
 fn section_finish(m: &Model, id: Id, d: Drawing) -> Drawing {

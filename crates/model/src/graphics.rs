@@ -187,6 +187,38 @@ pub fn category_of(m: &Model, e: &Element) -> &'static str {
     }
 }
 
+/// Whether Revit gives a family of `category` the per-family option "Enable Cutting in Views": the categories that were not
+/// cuttable until Revit 2023 and are now only when the family says so ([`crate::family::Family::cut_in_views`]): Furniture
+/// (Furniture Systems and Specialty Equipment, which the engine has no category for), and Plumbing Fixtures (the engine's
+/// `Plumbing` and `Drain`).
+pub fn cut_needs_family_option(category: crate::family::Category) -> bool {
+    use crate::family::Category as C;
+    matches!(category, C::Furniture | C::Plumbing | C::Drain)
+}
+
+/// Whether a section's or a plan's cut plane cuts element `e`, as Revit's cuttable and non-cuttable categories do (Revit 2025
+/// help, "About Cuttable Families" and "About Non-Cuttable Families"); an element that is not cut is only drawn in projection,
+/// where it lies beyond the plane.
+///
+/// | Element | Cut |
+/// |---|---|
+/// | Everything that is not a family component (walls, floors, roofs, ceilings, columns, structural framing and columns,
+///   foundations, stairs, ramps, railings, doors, windows, toposolids, site and building pads, runs, rebar, masses as they were) | yes |
+/// | Component of `Casework`, `Generic` (Generic Models, curtain panels and mullions) | yes |
+/// | Component of `Furniture`, `Plumbing`, `Drain` (Furniture, Furniture Systems, Specialty Equipment, Plumbing Fixtures) | only when its family has Enable Cutting in Views on (default off) |
+/// | Component of `PipeFitting`, `PipeAccessory`, `Equipment` (Electrical Equipment), `Outlet`, `Switch`, `DataOutlet`, `VoiceOutlet`, `Lighting`, `PatchPanel`, `Rack`, `AirTerminal`, `Earthing`, `InspectionBox` (Electrical Fixtures, Lighting Devices, Data and Communication Devices, Lighting Fixtures) | never |
+/// | Component whose family is gone, or a door's or a window's | never (it has no forms) |
+pub fn cuttable(m: &Model, e: &Element) -> bool {
+    use crate::family::Category as C;
+    let Element::Component(c) = e else { return true };
+    let Some(f) = m.families.get(&c.family) else { return false };
+    match f.category {
+        C::Casework | C::Generic => true,
+        category if cut_needs_family_option(category) => f.cut_in_views,
+        _ => false,
+    }
+}
+
 /// Whether `category` is one of the model's: a row of [`MODEL`], or `component`, which names the family categories.
 pub fn is_model(category: &str) -> bool {
     MODEL.contains(&category) || category == COMPONENT

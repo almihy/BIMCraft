@@ -21,6 +21,7 @@ use crate::model::{MAX_COORD, MAX_TEXT};
 mod bounds;
 pub mod check;
 pub mod compare;
+mod cutting;
 mod leaves;
 mod parametric;
 pub mod revit;
@@ -1143,6 +1144,12 @@ pub struct Family {
     /// before the add-in measured) has a void cut every solid listed before it that it reaches.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub cuts_measured: bool,
+    /// Revit's per-family "Enable Cutting in Views" (Family Category and Parameters), which Furniture, Furniture Systems,
+    /// Specialty Equipment and Plumbing Fixtures have since Revit 2023: only then does a section or a plan's cut plane cut the
+    /// family's components (see [`crate::graphics::cuttable`]); off, they stay in projection. Revit's default is off, and it is
+    /// type-independent. Of no other category (they are always cut or never cut).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cut_in_views: bool,
     /// The line patterns its subcategories name, by name, as Revit's Line Patterns the family was made with: each added to the
     /// project's when the family is loaded, unless the project has one of the name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -2808,29 +2815,35 @@ impl Family {
         // (`cuts_measured`), a void that names the forms it cuts cuts those and only those, whatever their order. A cut solid is
         // no longer one round surface, and its outline seen from above is as it was. ponytail: a notch or a hole doesn't show in
         // plan; trace it if it must.
-        for (i, before, void) in &voids {
-            let named = self.cuts_measured.then(|| self.forms[*i].cuts.as_ref()).flatten();
-            for (k, piece) in out.iter_mut().enumerate() {
-                match named {
-                    Some(list) if !self.forms[of[k]].source.as_ref().is_some_and(|src| list.contains(src)) => continue,
-                    None if k >= *before => break,
-                    _ => {}
-                }
-                let tris = csg::subtract(&piece.tris, void, cuts).map_err(|e| format!("form {}: {e}", i + 1))?;
-                if tris != piece.tris {
-                    let (bottom, top) = heights(&tris);
-                    *piece = Piece {
-                        caps: tris.len(),
-                        tris,
-                        bottom,
-                        top,
-                        round: false,
-                        outline: std::mem::take(&mut piece.outline),
-                        material: std::mem::take(&mut piece.material),
-                        show: piece.show,
-                        subcategory: piece.subcategory.take(),
-                    };
-                }
+        // A closed form cut by closed voids is cut on the solid kernel, a form or void that isn't closed by `csg` ([`cutting`]).
+        let voids: Vec<(usize, usize, cutting::Void)> =
+            voids.iter().map(|(i, before, tris)| (*i, *before, cutting::Void::new(*i, tris))).collect();
+        for (k, piece) in out.iter_mut().enumerate() {
+            let mine: Vec<&cutting::Void> = voids
+                .iter()
+                .filter(|(i, before, _)| match self.cuts_measured.then(|| self.forms[*i].cuts.as_ref()).flatten() {
+                    Some(list) => self.forms[of[k]].source.as_ref().is_some_and(|src| list.contains(src)),
+                    None => k < *before,
+                })
+                .map(|(_, _, v)| v)
+                .collect();
+            if mine.is_empty() {
+                continue;
+            }
+            let tris = cutting::cut(&piece.tris, &mine, cuts)?;
+            if tris != piece.tris {
+                let (bottom, top) = heights(&tris);
+                *piece = Piece {
+                    caps: tris.len(),
+                    tris,
+                    bottom,
+                    top,
+                    round: false,
+                    outline: std::mem::take(&mut piece.outline),
+                    material: std::mem::take(&mut piece.material),
+                    show: piece.show,
+                    subcategory: piece.subcategory.take(),
+                };
             }
         }
         // Its nested parts: Revit's result for a type has them in its own forms already.
@@ -4651,12 +4664,14 @@ mod tests {
 
     #[test]
     fn voids_of_many_triangles_never_exhaust_the_stack() {
-        // The largest a revolve comes to that a void can cut: a profile of MAX_PROFILE corners (twice the old test's 28), turned
-        // about an axis 250 mm from it, about 7,500 triangles at the half-millimetre fineness (59 sides a turn; the 64 corners of
-        // 32 sides this test was first written for were 4,100), cut on a small stack (a wasm thread's): done, and in the time it
-        // takes in a release build. A little further out the cut's budget says it has too many faces: said, not a stack overflow.
+        // The largest a revolve comes to: a profile of MAX_PROFILE corners (twice the old test's 28), turned about an axis `out` mm
+        // from it, 7,500 triangles at 250 mm (59 sides a turn at the half-millimetre fineness; the 64 corners of 32 sides this
+        // test was first written for were 4,100), cut on a small stack (a wasm thread's). A closed void is cut by the solid kernel
+        // (`cutting`), which has no budget of triangles: done, and in the time it takes in a release build, however far out the
+        // revolve is, up to the 256 sides a turn at most. A void that is not a closed solid goes to the older cutter, whose
+        // budget says the revolve has too many faces when it is a little further out: said, not a stack overflow.
         const CORNERS: usize = MAX_PROFILE;
-        let revolve = |out: f64| {
+        let revolve = |out: f64, closed: bool| {
             let ring: Vec<Value> = (0..CORNERS)
                 .map(|k| (k as f64 * std::f64::consts::TAU / CORNERS as f64).sin_cos())
                 .map(|(s, c)| json!([out + 100.0 * c, 300.0 + 100.0 * s]))
@@ -4666,25 +4681,36 @@ mod tests {
                 .spawn(move || {
                     let started = std::time::Instant::now();
                     let solid = json!({"plane": "xz", "profile": ring, "axis": [[0, 0], [0, 1]], "to": 360});
-                    let void =
-                        json!({"profile": [[-9000, -9000], [9000, -9000], [9000, 0], [-9000, 0]], "from": -10, "to": 1000, "void": true});
+                    // The half-plane y < 0, as a closed prism, or as a box of triangles with one left out.
+                    let void = if closed {
+                        json!({"profile": [[-9000, -9000], [9000, -9000], [9000, 0], [-9000, 0]], "from": -10, "to": 1000, "void": true})
+                    } else {
+                        json!({"mesh": cutting::tests::cuboid([-9000.0, -9000.0, -10.0], [9000.0, 0.0, 1000.0], 1), "void": true})
+                    };
                     (built(json!([solid, void])), started.elapsed())
                 })
                 .unwrap()
                 .join()
                 .unwrap()
         };
-        let (pieces, took) = revolve(250.0);
+        let (pieces, took) = revolve(250.0, true);
         let pieces = pieces.unwrap();
         assert!(volume(&pieces[0].tris) > 0.0, "the revolve is left holding something");
-        assert!(pieces[0].tris.len() > 20_000, "cut, it holds more triangles than the 4,100 it was first written for");
+        assert!(cutting::as_solid(&pieces[0].tris, crate::solid::Origin::new(0, 0)).is_ok(), "and it is one closed solid");
         // A debug build is many times slower than the release the limit is for.
         #[cfg(not(debug_assertions))]
         assert!(took.as_secs_f64() < 10.0, "{took:?}: a hang, not a slow machine");
         let _ = took;
-        // Past what the budget cuts (and past the 256 sides a turn at most, at 7 m): refused, not overflowed.
+        // Further out, past what the older cutter's budget allows, and past the 256 sides a turn at most (at 7 m): the kernel cuts it.
         for out in [450.0, 7000.0] {
-            let (too_many, _) = revolve(out);
+            let (cut, _) = revolve(out, true);
+            assert!(volume(&cut.unwrap()[0].tris) > 0.0, "{out}");
+        }
+        // The open void goes to the older cutter: what it can cut it cuts, past its budget it says so.
+        let (cut, _) = revolve(250.0, false);
+        assert!(volume(&cut.unwrap()[0].tris) > 0.0, "an open void is cut by the older cutter");
+        for out in [450.0, 7000.0] {
+            let (too_many, _) = revolve(out, false);
             let e = too_many.unwrap_err();
             assert!(e.contains("too many faces") || e.contains("can't have more than"), "{out}: {e}");
         }

@@ -171,3 +171,11 @@ impl Engine {
         Ok(serde_json::json!({ "left_out": left_out }).to_string())
     }
 }
+
+/// The Manifold trial (docs/manifold-trial.md): a 100 mm box minus a cylinder, cut by Manifold running in this module:
+/// `{"volume", "triangles"}` as JSON.
+#[wasm_bindgen]
+pub fn manifold_trial() -> String {
+    let t = bimcraft_geom::solid::solid_trial();
+    serde_json::json!({ "volume": t.volume, "triangles": t.triangles }).to_string()
+}

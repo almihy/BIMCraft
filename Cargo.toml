@@ -74,6 +74,10 @@ i_overlay = { version = "9.1", default-features = false }
 # `hayro_interpret::BIMCRAFT_PATCH`: copy this [patch] section, with the path to vendor/hayro-interpret, into that workspace.
 [patch.crates-io]
 hayro-interpret = { path = "vendor/hayro-interpret" }
+# manifold-csg-sys 3.5.106 with two changes of ours for building on Windows (marked "BIMCraft's patch" in build/wasm.rs and
+# wasm32-uu/CMakeLists.txt): the browser build's cmake paths with forward slashes and quoted, so a path with a backslash or a
+# space in it (G:\Software Development\...) does not break. Drop this when upstream does it (docs/manifold-trial.md).
+manifold-csg-sys = { path = "vendor/manifold-csg-sys" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

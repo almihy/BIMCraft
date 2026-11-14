@@ -232,7 +232,8 @@ jobs:
             echo "deb [arch=riscv64] https://ports.ubuntu.com/ubuntu-ports $suite main universe restricted multiverse"
           done | sudo tee /etc/apt/sources.list.d/riscv64.list
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gcc-riscv64-linux-gnu binutils-riscv64-linux-gnu \
+          # g++ as well: every native build compiles Manifold, the solid kernel (C++17), through cmake.
+          sudo apt-get install -y --no-install-recommends gcc-riscv64-linux-gnu g++-riscv64-linux-gnu binutils-riscv64-linux-gnu \
             libc6-dev-riscv64-cross libc6-dev:riscv64 qemu-user pkg-config desktop-file-utils appstream \
             libxkbcommon-dev:riscv64 libwayland-dev:riscv64 libx11-dev:riscv64 libxrandr-dev:riscv64 \
             libxi-dev:riscv64 libgl1-mesa-dev:riscv64
@@ -245,6 +246,9 @@ jobs:
       - name: Build and package
         env:
           CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
+          # The C and C++ compilers the cmake build of Manifold is given (cc-rs would find the same names).
+          CC_riscv64gc_unknown_linux_gnu: riscv64-linux-gnu-gcc
+          CXX_riscv64gc_unknown_linux_gnu: riscv64-linux-gnu-g++
           PKG_CONFIG_SYSROOT_DIR: /
           PKG_CONFIG_PATH: /usr/lib/riscv64-linux-gnu/pkgconfig:/usr/share/pkgconfig
           PKG_CONFIG_ALLOW_CROSS: "1"

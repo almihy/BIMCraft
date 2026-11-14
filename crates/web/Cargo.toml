@@ -12,6 +12,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 bimcraft-core = { workspace = true }
+bimcraft-geom = { workspace = true }
 serde_json = { workspace = true }
 js-sys = "0.3"
 wasm-bindgen = "=0.2.129"

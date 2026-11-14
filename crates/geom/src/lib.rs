@@ -12,6 +12,7 @@ pub mod language;
 pub mod prim;
 pub mod shared;
 pub mod skeleton;
+pub mod solid;
 pub mod step;
 pub mod triangulation;
 pub mod units;

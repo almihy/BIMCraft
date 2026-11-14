@@ -130,6 +130,8 @@ impl Scene {
     /// out.
     fn spliced(&self, after: &Model, mut made: HashMap<Id, Vec<Tri>>, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Scene> {
         let mut skins = self.skins.clone();
+        // Each element made again is made as solids again too, as are those that are gone: the cache keeps the rest.
+        let solids = self.solids.kept(|id| !made.contains_key(&id) && after.elements.get(id).is_some());
         for own in made.values() {
             skins_for(after, &mut skins, own);
         }
@@ -198,7 +200,19 @@ impl Scene {
             shape_keys: keys,
             spans: out.spans,
             table,
+            solids,
         })
+    }
+
+    /// Element `id` as one closed solid per material layer (`element_solids`), made when first asked for and kept until an edit makes
+    /// the element's triangles again ([`Scene::update`]): `m` must be the model this scene is of.
+    pub fn element_solids(&self, m: &Model, id: Id) -> Arc<super::ElementSolids> {
+        self.solids.get(m, id)
+    }
+
+    /// How many elements' solids the scene holds.
+    pub fn solids_kept(&self) -> usize {
+        self.solids.len()
     }
 
     /// Where element `id`'s triangles are.

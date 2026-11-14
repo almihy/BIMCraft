@@ -1040,7 +1040,7 @@ pub fn export(m: &Model) -> String {
                 // A level slab measures as its outline less its openings and the shafts through it, through its depth; a
                 // sloped or shaped one has no one plan area to give, so its depth, and its volumes: its plan through its depth
                 // plumb, as its underside follows its top (`quantities::floor`, which schedules read too).
-                let q = crate::quantities::floor(m, f);
+                let q = crate::quantities::floor_at(m, id, f);
                 let values = if q.level {
                     vec![
                         ("Width", "LENGTH", q.depth),
@@ -1075,7 +1075,7 @@ pub fn export(m: &Model) -> String {
                 products.insert(id, ent);
                 w.typed("IFCCOVERINGTYPE", ".CEILING.", &c.type_name, ent);
                 hosts.insert(id, (ent, at, m.elevation(c.level)));
-                let q = crate::quantities::ceiling(m, c);
+                let q = crate::quantities::ceiling_at(m, id, c);
                 let values =
                     [("Width", "LENGTH", q.width), ("GrossArea", "AREA", q.gross_area / 1e6), ("NetArea", "AREA", q.net_area / 1e6)];
                 w.quantities(ent, "Qto_CoveringBaseQuantities", &values, id);
@@ -1502,7 +1502,7 @@ pub fn export(m: &Model) -> String {
                 hosts.insert(id, (ent, at, m.elevation(r.level)));
                 // Its top's surface before and after its openings and the shafts through it, and what it covers in plan (`quantities::roof`,
                 // which schedules read too).
-                let q = crate::quantities::roof(m, r);
+                let q = crate::quantities::roof_at(m, id, r);
                 let values = [
                     ("GrossArea", "AREA", q.gross_surface_area / 1e6),
                     ("NetArea", "AREA", q.surface_area / 1e6),

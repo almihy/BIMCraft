@@ -538,6 +538,7 @@ impl FamilyEditor {
                 editable: f.editable.clone(),
                 rpc: f.rpc,
                 cuts_measured: f.cuts_measured,
+                cut_in_views: f.cut_in_views,
                 line_patterns: f.line_patterns.clone(),
                 ..Family::default()
             },
@@ -623,6 +624,7 @@ impl FamilyEditor {
             editable: self.kept.editable.clone(),
             rpc: self.kept.rpc,
             cuts_measured: self.kept.cuts_measured,
+            cut_in_views: self.kept.cut_in_views && cut_option(self.category),
             line_patterns: self.kept.line_patterns.clone(),
         })
     }
@@ -841,6 +843,12 @@ fn pick(ui: &mut Ui, label: String, current: &str, options: &[String]) -> Option
     });
     c.response.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, true, label.as_str()));
     picked
+}
+
+/// Whether Revit gives a family of `category` the Enable Cutting in Views option (Furniture, Furniture Systems, Specialty
+/// Equipment, Plumbing Fixtures): the engine's categories of those.
+fn cut_option(category: Category) -> bool {
+    bimcraft_core::graphics::cut_needs_family_option(category)
 }
 
 fn parameters_tab(ed: &mut FamilyEditor, ui: &mut Ui, materials: &[String]) {
@@ -1506,6 +1514,12 @@ impl BimApp {
                     });
                     c.response.labelled_by(l.id);
                     ui.end_row();
+                    // Revit's per-family Enable Cutting in Views, of the categories a section otherwise leaves in projection.
+                    if cut_option(ed.category) {
+                        ui.label("");
+                        ui.checkbox(&mut ed.kept.cut_in_views, t("Enable Cutting in Views"));
+                        ui.end_row();
+                    }
                     if ed.category.hosted() {
                         let l = ui.label(t("Operation"));
                         let shown = ed.operation.map_or(t("(none)"), |op| t(op.label()));

@@ -1853,7 +1853,8 @@ fn components_show_in_plan_from_above_in_3d_and_beyond_a_section() {
     let colours: Vec<[u8; 3]> = solids.iter().filter(|x| x.owner() == id).map(|x| x.color()).map(|c| [c.0, c.1, c.2]).collect();
     assert_eq!(colours.len(), 3);
     assert!(colours.contains(&s.model.materials["Timber"].color), "{colours:?}");
-    // A section across it, looking north: it shows beyond the line, and none of it is cut.
+    // A section across it, looking north: it shows beyond the line, and none of it is cut (a table is Furniture, which Revit cuts
+    // only when its family says so).
     let sec = run(&mut s, "section", json!({"start": [0, 1300], "end": [3000, 1300]}))["id"].as_u64().unwrap();
     let sview = crate::render::section_fit(&s.model, sec, 1000, 800);
     let d = crate::render::section(&s.model, sec, sview);
