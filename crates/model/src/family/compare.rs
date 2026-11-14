@@ -21,7 +21,8 @@ const SIDE: f64 = 0.05;
 const INSIDE: f64 = 0.75;
 /// Cells a grid spreads a shape over along its longest side.
 const CELLS: f64 = 48.0;
-/// Points off by more than the tolerance measured out to the search's reach, at most: the rest are only counted.
+/// Points off by more than the tolerance measured out to the search's reach, at most (the first ones, and as many more spread
+/// over all of them): the rest are only counted.
 const FAR: usize = 128;
 
 /// How far one drawing is from another: the farthest of its points from the other (capped at the search's reach), the
@@ -290,6 +291,17 @@ fn spread(tris: &[[P3; 3]]) -> Vec<(P3, f64, P3)> {
                 }
             }
         }
+        // A point on a vertex or an edge can lie on another lump's face, where it is neither inside nor outside the drawing's own
+        // solid; one just inside its triangle is unambiguous: moved toward the triangle's middle by a twentieth of a millimetre,
+        // or by a hundredth of its way there where that is less.
+        let middle = pts[0];
+        for p in &mut pts {
+            let to = sub(middle, *p);
+            let way = length(to);
+            if way > 0.0 {
+                *p = add(*p, mul(to, (0.05_f64).min(0.01 * way) / way));
+            }
+        }
         let share = a / pts.len() as f64;
         out.extend(pts.into_iter().map(|p| (p, share, normal)));
     }
@@ -299,6 +311,12 @@ fn spread(tris: &[[P3; 3]]) -> Vec<(P3, f64, P3)> {
         out = out.chunks(k).map(|c| (c[0].0, c.iter().map(|q| q.1).sum(), c[0].2)).collect();
     }
     out
+}
+
+/// The places of at most [`FAR`] of `n` items, spread evenly from the first to the last (all of them where there are no more).
+fn evenly(n: usize) -> impl Iterator<Item = usize> {
+    let k = n.min(FAR);
+    (0..k).map(move |i| if k > 1 { i * (n - 1) / (k - 1) } else { 0 })
 }
 
 /// How far `a`'s surface is from `b`'s: each of `a`'s points measured to `b`, those farther than `near` counted, the farthest
@@ -311,7 +329,8 @@ pub fn surface_gap(a: &[[P3; 3]], b: &Surface, near: f64, reach: f64, own: Optio
         return Gap::NONE;
     }
     let mut gap = Gap::NONE;
-    let (mut off, mut far) = (0.0, 0);
+    let mut off = 0.0;
+    let mut far: Vec<P3> = Vec::new();
     let mut work = WINDING_WORK;
     let mut inside = 0.0;
     for (p, w, n) in points {
@@ -326,11 +345,22 @@ pub fn surface_gap(a: &[[P3; 3]], b: &Surface, near: f64, reach: f64, own: Optio
             continue;
         }
         off += w;
-        far += 1;
-        let d = if far <= FAR { b.distance(p, reach) } else { d };
+        far.push(p);
+        if far.len() <= FAR {
+            let d = b.distance(p, reach);
+            if d > gap.worst {
+                gap.worst = d;
+                gap.at = p;
+            }
+        }
+    }
+    // The rest of the far points are measured too, as many as the first were, spread evenly over all of them from the first to
+    // the last: the farthest of what is far is what a reason says, not the farthest of the first it came to.
+    for i in evenly(far.len()).filter(|i| *i >= FAR) {
+        let d = b.distance(far[i], reach);
         if d > gap.worst {
             gap.worst = d;
-            gap.at = p;
+            gap.at = far[i];
         }
     }
     // What stays is a share of the surface that stays.
@@ -501,18 +531,28 @@ pub fn line_gap(a: &[Vec<P2>], b: &Lines, near: f64, reach: f64) -> Gap {
         return Gap::NONE;
     }
     let mut gap = Gap::NONE;
-    let (mut off, mut far) = (0.0, 0);
+    let mut off = 0.0;
+    let mut far: Vec<P2> = Vec::new();
     for (p, w) in points {
         let d = b.distance(p, near * 1.000_001);
         if d <= near {
             continue;
         }
         off += w;
-        far += 1;
-        let d = if far <= FAR { b.distance(p, reach) } else { d };
+        far.push(p);
+        if far.len() <= FAR {
+            let d = b.distance(p, reach);
+            if d > gap.worst {
+                gap.worst = d;
+                gap.at = flat(p);
+            }
+        }
+    }
+    for i in evenly(far.len()).filter(|i| *i >= FAR) {
+        let d = b.distance(far[i], reach);
         if d > gap.worst {
             gap.worst = d;
-            gap.at = flat(p);
+            gap.at = flat(far[i]);
         }
     }
     gap.share = off / total;
@@ -671,6 +711,54 @@ mod tests {
         assert!(cut.iter().flatten().all(|p| p.0 == 0.0 || p.0 == 100.0 || p.1 == 0.0 || p.1 == 200.0), "{cut:?}");
         // Above the box, below it, or at its bottom face (a corner at exactly z is above it): nothing.
         assert!(section(&b, 400.0).is_empty() && section(&b, -1.0).is_empty() && section(&b, 0.0).is_empty());
+    }
+
+    #[test]
+    fn a_vertex_on_another_lumps_face_is_not_measured_as_surface() {
+        // Two cuboids overlapping and a third inside them whose face has a vertex on the second's face (a seam inside the
+        // solid), against the one cuboid they make together: nothing of ours is off, either way.
+        let mut ours = cuboid([0.0, 0.0, 0.0], [600.0, 100.0, 100.0]);
+        ours.extend(cuboid([400.0, 0.0, 0.0], [1000.0, 100.0, 100.0]));
+        ours.extend(cuboid([400.0, 20.0, 20.0], [500.0, 80.0, 80.0]));
+        let one = cuboid([0.0, 0.0, 0.0], [1000.0, 100.0, 100.0]);
+        let (a, b) = (outer_gap(&ours, &one), outer_gap(&one, &ours));
+        assert!(a.worst <= 2.0 && b.worst <= 2.0, "{a:?} {b:?}");
+    }
+
+    #[test]
+    fn the_points_a_surface_is_measured_at_lie_inside_their_triangles() {
+        // None at a corner or on an edge, where another lump's face may pass: each a hair in from there, and a point as near the
+        // middle as it was stays at it.
+        let t = [[0.0, 0.0, 0.0], [100.0, 0.0, 0.0], [0.0, 100.0, 0.0]];
+        let pts = spread(&[t]);
+        assert!(pts.len() > 3);
+        let corners = [[0.0, 0.0], [100.0, 0.0], [0.0, 100.0]];
+        for (p, _, _) in &pts {
+            assert!(p[0] > 0.0 && p[1] > 0.0 && p[0] + p[1] < 100.0, "{p:?} is on an edge or a corner");
+            assert!(corners.iter().all(|c| ((p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2)).sqrt() > 0.0));
+        }
+        // By no more than a twentieth of a millimetre: the surface measured is the same one.
+        let cx = (100.0f64 / 3.0, 100.0f64 / 3.0);
+        let near_a_corner = pts.iter().map(|(p, _, _)| p).filter(|p| p[0] < 1.0 && p[1] < 1.0).count();
+        assert!(near_a_corner >= 1);
+        assert!(pts.iter().any(|(p, _, _)| (p[0] - cx.0).abs() < 1e-9 && (p[1] - cx.1).abs() < 1e-9));
+    }
+
+    #[test]
+    fn the_worst_far_point_is_measured_however_many_points_are_far() {
+        // A line 2.5 off along a metre (a thousand points, all a little far), and a lone point 80 off listed last: the reason says
+        // 80, not 2.5.
+        let theirs = Lines::new(&[vec![P2(0.0, 0.0), P2(1000.0, 0.0)]], 2.0).unwrap();
+        let ours = vec![vec![P2(0.0, 2.5), P2(1000.0, 2.5)], vec![P2(500.0, 80.0)]];
+        let g = line_gap(&ours, &theirs, 2.0, 500.0);
+        assert!(g.worst >= 79.0, "{g:?}");
+        // The same of surfaces: a slab 2.5 off over many triangles and a small box 80 off made last.
+        let one = cuboid([0.0, 0.0, 0.0], [1000.0, 100.0, 100.0]);
+        let s = Surface::new(&one, 2.0).unwrap();
+        let mut band = cuboid([0.0, 2.5, 2.5], [1000.0, 97.5, 97.5]);
+        band.extend(cuboid([400.0, 200.0, 0.0], [410.0, 210.0, 10.0]));
+        let g = surface_gap(&band, &s, 2.0, 500.0, None);
+        assert!(g.worst >= 79.0, "{g:?}");
     }
 
     #[test]
