@@ -471,14 +471,15 @@ fn small_tools(ui: &mut Ui, add: &mut impl FnMut(&mut Ui)) -> Rect {
     ui.allocate_exact_size(vec2(width, HEIGHT), Sense::hover()).0
 }
 
-/// Where the next small tool of the panel being drawn goes, when its tools are in two rows (`small_tools`): none for a panel that is
-/// not.
-pub(crate) fn slot() -> Option<Rect> {
+/// Where the next small tool of the panel being drawn goes, when its tools are in two rows (`small_tools`), and which place that is:
+/// none for a panel that is not. A tool's place in the panel is the same however the ribbon is laid out or scrolled, where it is on
+/// the screen is not.
+pub(crate) fn slot() -> Option<(usize, Rect)> {
     SLOTS.with(|s| {
         s.get().map(|(origin, n)| {
             s.set(Some((origin, n + 1)));
             let at = origin + vec2((n / ROWS) as f32 * COLUMN, (n % ROWS) as f32 * (SMALL_TOOL.y + 2.0));
-            Rect::from_min_size(at, SMALL_TOOL)
+            (n, Rect::from_min_size(at, SMALL_TOOL))
         })
     })
 }
@@ -669,8 +670,8 @@ mod tests {
             *shown += 1;
             match (small(), big) {
                 (true, _) | (false, None) => match slot() {
-                    Some(r) => {
-                        ui.interact(r, ui.id().with(("t", r.min.x.to_bits(), r.min.y.to_bits())), Sense::click());
+                    Some((place, r)) => {
+                        ui.interact(r, ui.id().with(("t", place)), Sense::click());
                     }
                     None => {
                         ui.allocate_exact_size(SMALL_TOOL, Sense::click());

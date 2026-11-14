@@ -1179,9 +1179,7 @@ fn small_button(ui: &mut Ui, icon: Icon, label: &str, active: bool, tip: &str) -
 fn small_icon(ui: &mut Ui, icon: Icon, label: &str, active: bool, tip: &str, name: &str) -> Response {
     // In a panel's two rows of small icons the tool has its place; else the layout gives it one.
     let (rect, r) = match ribbon::slot() {
-        Some(rect) => {
-            (rect, ui.interact(rect, ui.id().with(("small-tool", name, rect.min.x.to_bits(), rect.min.y.to_bits())), Sense::click()))
-        }
+        Some((place, rect)) => (rect, ui.interact(rect, ui.id().with(("small-tool", name, place)), Sense::click())),
         None => ui.allocate_exact_size(ribbon::SMALL_TOOL, Sense::click()),
     };
     let enabled = ui.is_enabled();

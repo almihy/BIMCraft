@@ -216,3 +216,22 @@ fn the_rows_of_another_menu_fill_it_whatever_width_a_panels_list_had() {
     let row = h.get_by_label("Copy to Clipboard").rect();
     assert!((row.width() - 230.0).abs() < 1.0, "a row of the menu fills it, 230: {}", row.width());
 }
+
+#[test]
+fn a_small_icons_choices_stay_open_when_the_ribbon_moves_under_them() {
+    // The View tab's last panel is small icons at both widths: the window's width moves User Interface, and its open choices, being
+    // those of the same icon, stay.
+    let mut h = window(475.0, 0.1);
+    h.state_mut().tab = crate::Tab::View;
+    h.run_steps(5);
+    let at = h.get_by_label("User Interface").rect();
+    assert!(at.width() < 40.0, "a small icon: {at:?}");
+    press(&mut h, "User Interface");
+    h.run_steps(2);
+    assert!(h.query_by_role_and_label(Role::CheckBox, "Properties").is_some(), "its choices are open");
+    h.set_size(vec2(525.0, 800.0));
+    h.run_steps(4);
+    let now = h.get_by_label("User Interface").rect();
+    assert!(now.width() < 40.0 && now.left() > at.left() + 20.0, "moved, still a small icon: {at:?} {now:?}");
+    assert!(h.query_by_role_and_label(Role::CheckBox, "Properties").is_some(), "its choices are still open");
+}
