@@ -143,10 +143,8 @@ thread_local! {
     static COLS: Cell<usize> = const { Cell::new(0) };
     /// How many tools of the panel being drawn were in rows.
     static ROWED: Cell<usize> = const { Cell::new(0) };
-    /// How many tools of the panel being drawn can be small icons, and whether something that is no tool came out of a small panel's
-    /// grid (`small_tools`).
+    /// How many tools of the panel being drawn can be small icons.
     static SMALLABLE: Cell<usize> = const { Cell::new(0) };
-    static STRAY: Cell<bool> = const { Cell::new(false) };
     /// Where the small tools of the panel being drawn start, and how many are drawn so far (`small_tools`).
     static SLOTS: Cell<Option<(egui::Pos2, usize)>> = const { Cell::new(None) };
     /// A panel's list: how wide its rows were last frame, and how wide the widest row is so far.
@@ -265,6 +263,7 @@ pub(crate) fn tab(ui: &mut Ui, key: Id, room: f32, add: impl FnOnce(&mut Ui)) {
     // The last frame's panels, how wide the whole tab would have been with every tool shown, and what the tools' average widths
     // missed at the room it had then: asked of the panels again, so a tab they misjudged still ends up fitting.
     let (seen, whole, missed, then): (Vec<Seen>, f32, f32, f32) = ui.ctx().data(|d| d.get_temp(key)).unwrap_or_default();
+    let prior = seen.clone();
     let missed = if (then - room).abs() < 0.5 { missed } else { 0.0 };
     let fitted = !seen.is_empty();
     FITTED.with(|f| f.set(fitted));
@@ -282,24 +281,38 @@ pub(crate) fn tab(ui: &mut Ui, key: Id, room: f32, add: impl FnOnce(&mut Ui)) {
     // Still over though fitted (a first frame lays out every tool): another frame, asking more of the panels, until it fits or all
     // there is to ask is asked.
     let over = if fitted { (drawn - (room - SLACK)).max(0.0) } else { 0.0 };
-    // What was missed is given back when it leaves room to spare: a measure that was off once is not asked of the panels for good.
-    let spare = if fitted { (room - SLACK) - drawn } else { 0.0 };
     // Asking more of the panels than they have to give is for nothing: a tab that cannot fit scrolls.
     let give: f32 = seen.iter().map(|p| (p.natural - p.least()).max(0.0)).sum();
     let (missed, again) = if over > 0.0 {
-        let missed = (missed + over).min(whole);
-        (missed, whole + missed - (room - SLACK) < give)
-    } else if missed > 0.0 && spare > 2.0 * COLUMN {
-        ((missed - (spare - COLUMN)).max(0.0), true)
+        // Asked of the panels by as much as makes their plan different: the plan goes in whole tools, and a measure that adds a
+        // pixel or two to it may change nothing, frame after frame.
+        let now = fits(&seen, whole + missed, room - SLACK);
+        let mut asked = (missed + over).min(whole);
+        while whole + asked - (room - SLACK) < give && fits(&seen, whole + asked, room - SLACK) == now {
+            asked += 1.0;
+        }
+        (asked, whole + asked - (room - SLACK) < give)
     } else {
         (missed, false)
     };
+    // What was missed holds while the room and the panels do, and only grows: asked back (a layout that fits with room to spare
+    // answered by the one before it, which overflowed) the tab would flip between the two for ever. A different set of panels
+    // (another tool selected, another tab) is a different tab, and has it to learn again.
+    let missed = if same_panels(&prior, &seen) { missed } else { 0.0 };
+    // What this frame measured (a small panel's true width, where it had only been reckoned) may change the plan the next frame makes:
+    // drawn now, not on the next event, which would show the tab laid out twice.
+    let again = again || fits(&seen, whole + missed, room - SLACK) != FITS.with(|f| f.borrow().clone());
     if again {
         ui.ctx().request_repaint();
     }
     ui.ctx().data_mut(|d| d.insert_temp(key, (seen, whole, missed, room)));
     FITS.with(|f| f.borrow_mut().clear());
     FITTED.with(|f| f.set(true));
+}
+
+/// Whether two frames of a tab drew the same panels: by name and by how many tools each has.
+fn same_panels(a: &[Seen], b: &[Seen]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.name == y.name && x.tools == y.tools)
 }
 
 /// Pushes what is drawn next to the right end of the tab being drawn, a panel `width` wide (one that stands apart, as Edit Mode's
@@ -367,7 +380,6 @@ pub(crate) fn panel(ui: &mut Ui, title: &str, mut add: impl FnMut(&mut Ui)) {
     COLS.with(|c| c.set(0));
     ROWED.with(|c| c.set(0));
     SMALLABLE.with(|c| c.set(0));
-    STRAY.with(|c| c.set(false));
     let rows_id = id.with("rows-only");
     BY_ROWS.with(|b| b.set(ui.ctx().data(|d| d.get_temp::<bool>(rows_id)).unwrap_or(false)));
     let font = FontId::proportional(11.5);
@@ -401,12 +413,7 @@ pub(crate) fn panel(ui: &mut Ui, title: &str, mut add: impl FnMut(&mut Ui)) {
         .rect
         .width();
     let tools = TOOLS.with(Cell::get).0;
-    // A widget that was no tool in a small panel's grid marks the panel for good: it goes on stacked out of the ribbon.
-    let stray_id = id.with("stray");
-    if STRAY.with(Cell::take) {
-        ui.ctx().data_mut(|d| d.insert_temp(stray_id, true));
-    }
-    let smallable = tools > 0 && SMALLABLE.with(Cell::take) == tools && !ui.ctx().data(|d| d.get_temp::<bool>(stray_id)).unwrap_or(false);
+    let smallable = tools > 0 && SMALLABLE.with(Cell::take) == tools;
     // A panel is one of rows when all its tools are in them; one that has others too (large ones beside a few rows) is counted tool by tool.
     let cols = if ROWED.with(Cell::take) == tools { COLS.with(Cell::take) } else { 0 };
     COLS.with(|c| c.set(0));
@@ -448,7 +455,6 @@ fn small_tools(ui: &mut Ui, add: &mut impl FnMut(&mut Ui)) -> Rect {
     // A child that takes no room: what isn't a tool of the grid (a handed-over tool's nothing) stays out of the way.
     let mut child = ui.new_child(UiBuilder::new().max_rect(Rect::from_min_size(origin, Vec2::ZERO)));
     add(&mut child);
-    STRAY.with(|s| s.set(child.min_rect().size().max_elem() > 0.5));
     let drawn = SLOTS.with(|s| s.take()).map_or(0, |(_, n)| n);
     let columns = drawn.div_ceil(ROWS);
     let width = if columns == 0 { 0.0 } else { columns as f32 * COLUMN - 2.0 };
@@ -621,13 +627,18 @@ mod tests {
             pub planned: Vec<(String, Fit)>,
         }
 
-        fn tool(ui: &mut Ui, big: bool, smallable: bool, shown: &mut usize) {
+        /// A large button's width, by its place: a tab's tools are not all as wide as their average.
+        fn width(i: usize) -> f32 {
+            [54.0, 96.0, 70.0, 130.0, 62.0][i % 5]
+        }
+
+        fn tool(ui: &mut Ui, big: Option<usize>, smallable: bool, shown: &mut usize) {
             if handed_over(ui, smallable).is_some() {
                 return;
             }
             *shown += 1;
             match (small(), big) {
-                (true, _) | (false, false) => match slot() {
+                (true, _) | (false, None) => match slot() {
                     Some(r) => {
                         ui.interact(r, ui.id().with(("t", r.min.x.to_bits(), r.min.y.to_bits())), Sense::click());
                     }
@@ -635,8 +646,8 @@ mod tests {
                         ui.allocate_exact_size(SMALL_TOOL, Sense::click());
                     }
                 },
-                (false, true) => {
-                    ui.allocate_exact_size(vec2(54.0, HEIGHT), Sense::click());
+                (false, Some(i)) => {
+                    ui.allocate_exact_size(vec2(width(i), HEIGHT), Sense::click());
                 }
             }
         }
@@ -661,15 +672,15 @@ mod tests {
                         ui.horizontal(|ui| {
                             for (spec, shown) in self.spec.iter().zip(shown.iter_mut()) {
                                 panel(ui, spec.name, |ui| {
-                                    for _ in 0..spec.large {
-                                        tool(ui, true, spec.smallable, shown);
+                                    for i in 0..spec.large {
+                                        tool(ui, Some(i), spec.smallable, shown);
                                     }
                                     if !spec.rows.is_empty() {
                                         ui.vertical(|ui| {
                                             for &n in &spec.rows {
                                                 row(ui, |ui| {
                                                     for _ in 0..n {
-                                                        tool(ui, false, spec.smallable, shown);
+                                                        tool(ui, None, spec.smallable, shown);
                                                     }
                                                 });
                                             }
@@ -739,5 +750,38 @@ mod tests {
             }
         }
         assert!(handed);
+    }
+
+    #[test]
+    fn a_tab_settles_at_every_width_and_asks_for_no_more_frames() {
+        let spec = || {
+            vec![
+                drawn::Spec { name: "Select", large: 1, rows: vec![], smallable: true },
+                drawn::Spec { name: "Build", large: 7, rows: vec![], smallable: true },
+                drawn::Spec { name: "Circulation", large: 4, rows: vec![], smallable: true },
+                drawn::Spec { name: "Modify", large: 0, rows: vec![6, 5], smallable: true },
+                drawn::Spec { name: "Datum", large: 3, rows: vec![], smallable: true },
+                drawn::Spec { name: "Shape", large: 1, rows: vec![3, 2], smallable: true },
+                drawn::Spec { name: "Work", large: 2, rows: vec![], smallable: true },
+            ]
+        };
+        // Widths swept down and up on one tab, as a window being dragged is, and each on a tab of its own.
+        let swept = drawn::Tab::new(spec());
+        let mut most = 0;
+        let widths: Vec<f32> = (100..1700).step_by(3).map(|w| w as f32).collect();
+        for (i, &room) in widths.iter().chain(widths.iter().rev()).enumerate() {
+            let alone = drawn::Tab::new(spec());
+            for (tab, how) in [(&swept, "swept"), (&alone, "fresh")] {
+                let (f, frames) = tab.settle(room, 40);
+                most = most.max(frames);
+                assert!(!f.repaint, "{how}: still asking for frames at {room} after {frames} (step {i})");
+                // And it stays settled: no frame more asks for another.
+                for _ in 0..3 {
+                    let g = tab.frame(room);
+                    assert!(!g.repaint, "{how}: settled at {room} and asks again (step {i})");
+                }
+            }
+        }
+        assert!(most <= 8, "the most frames a width took to lay out: {most}");
     }
 }
