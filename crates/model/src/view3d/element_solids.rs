@@ -20,7 +20,7 @@ use crate::component_geometry::Components;
 use crate::geom::P2;
 use crate::model::{Element, Id, Model};
 use crate::prim::Rgb;
-use crate::solid::{Curve, Level, Matrix, Origin, Solid3, SolidError};
+use crate::solid::{Curve, Level, Matrix, Origin, Solid3, SolidError, tol};
 use crate::walls::{self, Axis, Index, Plane};
 
 /// A piece of an element that is not in its solid, and why.
@@ -125,7 +125,9 @@ fn build(m: &Model, id: Id, index: Option<&Index>, components: &mut Components, 
             let mut origin = Origin::new(id, layer);
             origin.curve = curve_of(m, e, &part, k);
             match solid_of(&part, origin) {
-                Ok(solid) => by_layer.entry(layer).or_default().push(solid),
+                Ok(Some(solid)) => by_layer.entry(layer).or_default().push(solid),
+                // No volume: a flat sliver of a wall where an opening reaches the base or the top, left in the scene's pieces.
+                Ok(None) => {}
                 Err(why) => open.push(OpenPiece { layer, why, piece: part }),
             }
         }
@@ -153,8 +155,21 @@ fn level_of(p: &Plane) -> Level {
 }
 
 /// One piece as a solid of `origin`: a box, a slab (its face, level or sloped, and what lies up to `rise` over it), a prism or a
-/// mesh (which must be closed).
-fn solid_of(s: &Solid, origin: Origin) -> Result<Solid3, SolidError> {
+/// mesh (which must be closed). None for a piece that holds nothing: a prism or slab no thick anywhere (a wall's piece over an
+/// opening that reaches its base is one, between the two planes that meet).
+fn solid_of(s: &Solid, origin: Origin) -> Result<Option<Solid3>, SolidError> {
+    let thin = match s {
+        Solid::Slab { rise, .. } => *rise <= tol::THICKNESS,
+        Solid::Prism { ring, bottom, top, .. } => ring.iter().all(|q| top.at(*q) - bottom.at(*q) <= tol::THICKNESS),
+        Solid::Box { .. } | Solid::Mesh { .. } => false,
+    };
+    if thin {
+        return Ok(None);
+    }
+    solid_in(s, origin).map(Some)
+}
+
+fn solid_in(s: &Solid, origin: Origin) -> Result<Solid3, SolidError> {
     match s {
         Solid::Box { frame, a, c, z, .. } => {
             let (o, u, n) = (frame.o, frame.u, frame.n);

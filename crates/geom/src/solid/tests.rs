@@ -134,7 +134,10 @@ fn case1_volume_on_curves_is_the_arcs_volume() {
     // moment in y is (r1^3 - r0^3) / 3 for a quarter ring.
     let area = HALF_PI / 2.0 * (2100.0 * 2100.0 - 1900.0 * 1900.0);
     let moment_y = (2100f64.powi(3) - 1900f64.powi(3)) / 3.0;
-    check_volume("sloped quarter ring", sloped.volume_on_curves(), 3000.0 * area + 0.1 * moment_y, 1e-9);
+    // The height over a segment is taken at the chord's plane, not at each point of it: second order in the sagitta (here 4.5 mm
+    // of 2000, a 0.1 slope: 1.5e-7), where the level top above is exact.
+    check_volume("sloped quarter ring", sloped.volume_on_curves(), 3000.0 * area + 0.1 * moment_y, 1e-6);
+    assert!(rel(sloped.volume_on_curves(), 3000.0 * area + 0.1 * moment_y) < rel(sloped.volume(), 3000.0 * area + 0.1 * moment_y) / 100.0);
 }
 
 #[test]

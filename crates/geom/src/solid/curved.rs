@@ -5,7 +5,9 @@
 //! 0.13 % of a wall's volume at the 5 degrees a facet turns). A quantity must be the circle's, so [`Solid3::volume_on_curves`]
 //! adds back what lies between each tagged facet and its arc (taken off for a concave face, the inside of a curved wall,
 //! where the solid is the side the arc bulges away from): exact, in closed form, for any part of a facet that is left (a
-//! door's jamb cuts through the middle of one) and for a sloped top or bottom (the height is the triangle's own).
+//! door's jamb cuts through the middle of one). Over a segment the height of a sloped top or bottom is taken at the chord's
+//! plane, where the triangle's is, not at each point of the segment: exact where tops and bottoms are level, and second order in
+//! the sagitta (a few mm of a wall's radius, 1e-7 of the volume with a 1:10 slope) where they are not.
 //!
 //! Which triangles are facets of a curve is decided as [`Solid3::slice`] decides it for arcs: a vertical triangle of an origin
 //! with a [`Curve`], whose plane lies at a distance from the axis between `r cos(MAX_FACET_ANGLE / 2)` and `r` for the radius
