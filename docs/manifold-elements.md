@@ -77,8 +77,9 @@ What the sample models leave open (every element is otherwise closed, tested by 
 | Tower, small plate, one storey | 2,953 | 2,050 | 2,475 | 645: 292 furniture and fixture forms (`component`), 210 conduit tubes, 143 pipe tubes (`mesh: not closed`) |
 | Highrise, two storeys | 953 | 950 | 1,214 | none |
 
-Walls, floors, ceilings, roofs, columns, beams, stairs, railings, doors and windows without a family, and the box-and-prism
-elements of the sites: every piece closed. A tube of a round run is an open sleeve (its ends are not capped), as the view draws it.
+Walls, floors, ceilings, roofs, columns (round and square), structural columns, beams, stairs with railings, ramps, building pads,
+doors and windows without a family: every piece closed (the samples hold most; `columns_stairs_ramps_beams_and_pads_are_solids...`
+makes the others). A round column is a 24-gon on its circle, tagged so, and measures pi r2 through its height. A tube of a round run is an open sleeve (its ends are not capped), as the view draws it.
 A closed family form is a solid; the open ones are not unioned (step 4 falls back on today's cuts for them, and the family
 check of step 2 says which form is open).
 
@@ -152,7 +153,8 @@ half-circle curved wall with a door: closed, 3,349,911,184.307763 mm3 against th
 radii, the one run of wall over the door's head at 2500; a holed floor of two layers less a shaft: exact, closed, and what the floor
 measured before (`floor_volume`); a gable roof of 30 degrees with a wall attached under it: the roof 27,712,812,921.102047 mm3
 against ...036 (4e-16), the wall 4,132,050,807.568878 against ...877; the cache (kept through an edit that touches one wall of
-sixteen, remade for the neighbour a new wall joins, equal to a whole new scene's); every element of the sample house, the tower
+sixteen, remade for the neighbour a new wall joins, equal to a whole new scene's); a round column, a square one, a structural
+column, a stair, a ramp, a beam and a pad, each sound; every element of the sample house, the tower
 and the highrise sound; origins through a union. `crates/geom/src/solid/tests.rs`:
 `case1_volume_on_curves_is_the_arcs_volume` (the bake-off's case 1 at 4.6e-11 where the facets were 2.1e-4 off, a 24-gon column to
 the circle exactly, a sloped quarter ring to 1.5e-7).

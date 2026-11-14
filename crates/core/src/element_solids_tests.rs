@@ -381,6 +381,39 @@ fn origins_name_the_element_and_layer() {
     assert!(union.triangles().iter().all(|t| t.origin != Origin::NONE && t.origin.element == w));
 }
 
+// ----- the other kinds ---------------------------------------------------------------------------------------------------
+
+#[test]
+fn columns_stairs_ramps_beams_and_pads_are_solids_and_a_round_column_is_the_circles() {
+    let mut s = Session::new();
+    let round = id_of(&run(&mut s, "column", json!({"at": [5000, 3000], "type": "Round 300"})));
+    let square = id_of(&run(&mut s, "column", json!({"at": [1000, 7000]})));
+    let structural = id_of(&run(&mut s, "structural_column", json!({"at": [3000, 7000]})));
+    let stair = id_of(&run(&mut s, "stair", json!({"start": [3000, 9000], "end": [3000, 12000], "height": 3000, "railings": true})));
+    let ramp = id_of(&run(&mut s, "ramp", json!({"start": [6000, 9000], "end": [6000, 12000], "height": 600})));
+    let beam = id_of(&run(&mut s, "beam", json!({"points": [[0, 15000], [4000, 15000]]})));
+    let pad = id_of(&run(&mut s, "building_pad", json!({"boundary": [[0, 18000], [3000, 18000], [3000, 21000], [0, 21000]], "offset": 200})));
+    for id in [round, square, structural, stair, ramp, beam, pad] {
+        let es = element_solids(&s.model, id);
+        assert!(es.is_whole(), "element {id}: {:?}", es.open);
+        assert!(!es.layers.is_empty(), "element {id} has no solid");
+        assert_sound(id, &es);
+    }
+    // A round column is a 24-gon of its circle's radius, taken as the circle it is: pi r² through its height.
+    let q = quantities::column(&s.model, round).unwrap();
+    assert_near("a round column", q.volume, PI * 150.0 * 150.0 * q.height, 1e-9);
+    let facets = element_solids(&s.model, round).layers[0].1.volume();
+    assert!(facets < q.volume && facets > q.volume * 0.988, "{facets} against {}", q.volume);
+    let curve = element_solids(&s.model, round).layers[0].1.triangles().iter().find_map(|t| t.origin.curve).expect("a curve tag");
+    assert!(near(curve.radii[0], 150.0, 1e-9) && near(curve.centre.0, 5000.0, 1e-9), "{curve:?}");
+    // A rectangular one is its width by its depth by its height.
+    let q = quantities::column(&s.model, square).unwrap();
+    let e = s.model.elements.get(square).unwrap();
+    let t = s.model.column_type(e).unwrap();
+    assert_near("a square column", q.volume, t.width * t.depth * q.height, 1e-9);
+    assert!(quantities::column(&s.model, stair).is_none());
+}
+
 // ----- the time it takes --------------------------------------------------------------------------------------------------
 
 /// What making every element's solids takes, cold (every one built) and warm (every one asked of a scene that holds them), on the
