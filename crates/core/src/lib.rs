@@ -41,7 +41,6 @@ mod dry_run_tests;
 mod eberick_tests;
 #[cfg(test)]
 mod element_solids_tests;
-mod section_cut_tests;
 #[cfg(test)]
 mod electrical_tests;
 pub mod engine;
@@ -100,6 +99,8 @@ mod run_join_tests;
 pub mod sample;
 #[cfg(test)]
 mod section_box_tests;
+#[cfg(test)]
+mod section_cut_tests;
 #[cfg(test)]
 mod selfcheck_tests;
 #[cfg(test)]
