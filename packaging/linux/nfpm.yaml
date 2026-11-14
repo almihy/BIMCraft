@@ -20,7 +20,7 @@ description: |-
   IFC; exports PNG, SVG and PDF.
   Includes bimcraft-cli, which runs scripts, converts files and serves MCP.
 
-# The binaries link only glibc and libgcc_s. The window (X11 or Wayland, xkbcommon) and OpenGL,
+# The binaries link glibc, libgcc_s and libstdc++ (the solid kernel, Manifold, is C++). The window (X11 or Wayland, xkbcommon) and OpenGL,
 # through EGL on both, are loaded while it runs, so they are dependencies here, not ELF NEEDED
 # entries: `strings` on the binary lists the libraries it opens. The file dialogs go through the
 # XDG desktop portal.
@@ -29,6 +29,7 @@ overrides:
     depends:
       - libc6 (>= 2.35)
       - libgcc-s1
+      - libstdc++6 (>= 12)
       - libxkbcommon0
       - libegl1
     recommends:
@@ -45,6 +46,7 @@ overrides:
       - xdg-desktop-portal
   rpm:
     depends:
+      - libstdc++
       - libxkbcommon
       - libglvnd-egl
     recommends:

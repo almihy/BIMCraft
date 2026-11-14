@@ -100,7 +100,7 @@ if has deb || has rpm; then
   # nfpm expands environment variables in fields like `version` and `arch`, but not in `src`.
   sed "s|\${STAGE}|$STAGE|g" "$HERE/nfpm.yaml" >"$WORK/nfpm.yaml"
   # Built on Ubuntu 24.04, the riscv64 binaries need glibc 2.39; the others, built on 22.04, 2.35.
-  [ "$ARCH" != riscv64 ] || sed -i 's/libc6 (>= 2.35)/libc6 (>= 2.39)/' "$WORK/nfpm.yaml"
+  [ "$ARCH" != riscv64 ] || sed -i -e 's/libc6 (>= 2.35)/libc6 (>= 2.39)/' -e 's/libstdc++6 (>= 12)/libstdc++6 (>= 13)/' "$WORK/nfpm.yaml"
   for fmt in deb rpm; do
     if has "$fmt"; then (cd "$ROOT" && nfpm package -f "$WORK/nfpm.yaml" -p "$fmt" -t "$DIST/$BASENAME.$fmt"); fi
   done

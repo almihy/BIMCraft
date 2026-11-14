@@ -13,6 +13,8 @@ use std::sync::{Arc, Mutex};
 
 use crate::ids::{Elements, Guid, Id};
 use crate::model::Element;
+use crate::model::Model;
+use crate::view3d::SolidCache;
 
 const SHIFT: u32 = 10;
 
@@ -577,6 +579,36 @@ pub struct Derived {
     parent: Option<(u64, u64, Arc<Lookup>)>,
     /// What a slab asks of each shaft, with the token and version of the elements it is of.
     shafts: Mutex<Option<KeptShafts>>,
+    /// The elements' solids, with the token and version of the elements they are of.
+    solids: Mutex<Option<(u64, u64, Arc<Solids>)>>,
+}
+
+/// The solids of one model as it is (one snapshot: a copy of the model starts with none): each element's, made when first asked
+/// for and kept ([`SolidCache`], the scene's own kind), and each wall's volume before its openings. What measures an element
+/// (quantities: schedules, tags' text, element JSON, IFC) reads them from here, so an element's solids are built once, not at
+/// every call.
+///
+/// They are of the elements as they were when first asked for and of the library as it was then: a copy of the model that a
+/// command changes starts with none, but a type, family or material changed in place in a model that has made some leaves them
+/// stale ([`Model::forget_solids`](crate::model::Model::forget_solids) drops them).
+#[derive(Default)]
+pub struct Solids {
+    pub cache: SolidCache,
+    gross: Mutex<HashMap<Id, f64>>,
+}
+
+impl Solids {
+    /// Wall `id`'s volume before its doors and windows, mm³: kept once made. None for an id that is no wall.
+    pub fn wall_gross_volume(&self, m: &Model, id: Id) -> Option<f64> {
+        if let Some(kept) = self.gross.lock().ok().and_then(|g| g.get(&id).copied()) {
+            return Some(kept);
+        }
+        let made = crate::view3d::wall_volume(m, id, false)?;
+        if let Ok(mut g) = self.gross.lock() {
+            g.insert(id, made);
+        }
+        Some(made)
+    }
 }
 
 type KeptShafts = (u64, u64, Arc<Vec<ShaftReach>>);
@@ -612,6 +644,29 @@ impl Derived {
         made
     }
 
+    /// The solids of the model whose elements are `elements`: those kept, or an empty set to fill as they are asked for.
+    pub fn solids(&self, elements: &Elements) -> Arc<Solids> {
+        let (token, version) = elements.state();
+        if let Ok(mut now) = self.solids.lock() {
+            if let Some((t, v, solids)) = now.as_ref()
+                && (*t, *v) == (token, version)
+            {
+                return Arc::clone(solids);
+            }
+            let fresh = Arc::new(Solids::default());
+            *now = Some((token, version, Arc::clone(&fresh)));
+            return fresh;
+        }
+        Arc::new(Solids::default())
+    }
+
+    /// Drops the kept solids.
+    pub fn forget_solids(&self) {
+        if let Ok(mut now) = self.solids.lock() {
+            *now = None;
+        }
+    }
+
     /// The lookup of `elements` if it is made already: what asks only where it costs nothing.
     pub fn made(&self, elements: &Elements) -> Option<Arc<Lookup>> {
         let state = elements.state();
@@ -642,7 +697,7 @@ impl Clone for Derived {
     /// For the model's copy: what it starts from, this one's lookup. It is the copy's to bring up to date, if its elements
     /// were cloned from the elements this lookup is of, as they were then.
     fn clone(&self) -> Derived {
-        Derived { now: Mutex::new(None), parent: self.current(), shafts: Mutex::new(None) }
+        Derived { now: Mutex::new(None), parent: self.current(), shafts: Mutex::new(None), solids: Mutex::new(None) }
     }
 }
 

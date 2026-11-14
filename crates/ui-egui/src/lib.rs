@@ -2750,10 +2750,9 @@ impl BimApp {
 
     fn select_instances(&mut self, project: bool) {
         let m = Arc::clone(&self.session.model);
-        // One look at every element: a component's room is found among its level's rooms once.
-        let rooms = bimcraft_core::rooms::Rooms::new(&m);
+        // What is read is each element's category, family and type: no room, and no solid measured.
         let type_of = |id: &Id| {
-            let e = bimcraft_core::element_json_with(&m, *id, &rooms);
+            let e = element_json_bare(&m, *id);
             e["type"].is_string().then(|| [e["category"].clone(), e["family"].clone(), e["type"].clone()])
         };
         let types: Vec<[Value; 3]> = self.selection.iter().filter_map(type_of).collect();

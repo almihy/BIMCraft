@@ -35,7 +35,7 @@ const WASM_CXX_SHIM_GIT: &str = "https://github.com/zmerlynn/wasm-cxx-shim.git";
 // surfaced by v3.5.0's new ExecutionContext-attached-via-shared_ptr
 // model. The shim's tested-pin default is `v3.5.0`.
 //
-// Our host pin (MANIFOLD_VERSION) is now `v3.5.5`, five patch releases
+// Our host pin (MANIFOLD_VERSION) is now v3.5.5 (by commit), five patch releases
 // PAST the shim's tested pin. Build.rs passes `-DMANIFOLD_GIT_TAG=<our
 // pin>` (below), so the wasm-uu lane builds v3.5.5 through the shim.
 //
@@ -58,6 +58,8 @@ const WASM_CXX_SHIM_GIT: &str = "https://github.com/zmerlynn/wasm-cxx-shim.git";
 // once. scripts/pins.py reads it by matching that exact line, for the
 // upstream-watch check.
 const WASM_CXX_SHIM_TAG: &str = "v0.5.0";
+/// BIMCraft's patch: the commit the tag above is, which is what is fetched (a moved tag changes nothing).
+const WASM_CXX_SHIM_COMMIT: &str = "a156e60fcc324f6ce7b7864e39a3de770809423c";
 
 /// BIMCraft's patch: a path as CMake wants it in a `-D` value, with forward slashes. wasm32-uu/CMakeLists.txt puts these
 /// paths in `SHELL:-isystem <path>` options, which CMake splits like a Unix shell, and a Windows path's backslashes are
@@ -338,7 +340,7 @@ pub fn build_wasm_unknown_unknown() {
     let shim_build = out_dir.join("wasm-cxx-shim-build");
     let shim_stamp = out_dir.join(".shim-version-stamp");
     let shim_old = std::fs::read_to_string(&shim_stamp).unwrap_or_default();
-    if shim_old.trim() != WASM_CXX_SHIM_TAG && shim_src.exists() {
+    if shim_old.trim() != WASM_CXX_SHIM_COMMIT && shim_src.exists() {
         let _ = std::fs::remove_dir_all(&shim_src);
         let _ = std::fs::remove_dir_all(&shim_build);
     }
@@ -347,20 +349,23 @@ pub fn build_wasm_unknown_unknown() {
         if shim_src.exists() {
             let _ = std::fs::remove_dir_all(&shim_src);
         }
-        let status = Command::new("git")
-            .args([
-                "clone",
-                "--depth",
-                "1",
-                "--branch",
-                WASM_CXX_SHIM_TAG,
-                WASM_CXX_SHIM_GIT,
-                shim_src.to_str().unwrap(),
-            ])
-            .status()
-            .expect("failed to run git clone for wasm-cxx-shim");
-        assert!(status.success(), "git clone wasm-cxx-shim failed");
-        let _ = std::fs::write(&shim_stamp, WASM_CXX_SHIM_TAG);
+        // BIMCraft's patch: by commit. A commit is fetched on its own (GitHub serves any commit by its SHA), so the tag is
+        // only a name for it.
+        let git = |args: &[&str]| {
+            Command::new("git")
+                .args(args)
+                .current_dir(&shim_src)
+                .status()
+                .expect("failed to run git for wasm-cxx-shim")
+                .success()
+        };
+        std::fs::create_dir_all(&shim_src).expect("failed to create the wasm-cxx-shim directory");
+        let fetched = git(&["init", "-q"])
+            && git(&["remote", "add", "origin", WASM_CXX_SHIM_GIT])
+            && git(&["fetch", "-q", "--depth", "1", "origin", WASM_CXX_SHIM_COMMIT])
+            && git(&["checkout", "-q", "--detach", "FETCH_HEAD"]);
+        assert!(fetched, "git fetch of wasm-cxx-shim {WASM_CXX_SHIM_TAG} ({WASM_CXX_SHIM_COMMIT}) failed");
+        let _ = std::fs::write(&shim_stamp, WASM_CXX_SHIM_COMMIT);
     }
 
     let shim_toolchain = shim_src.join("cmake/toolchain-wasm32.cmake");

@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::family::{self, MAX_FORMULA};
-use crate::json::{element_json_bare, element_json_with};
+use crate::json::{element_json_bare, element_json_light};
 use crate::language::Language;
 use crate::model::category;
 use crate::model::{Element, Id, MAX_COORD, MAX_TEXT, Model, ParameterKind, Schedule};
@@ -725,8 +725,8 @@ pub fn field_text_with(m: &Model, id: impl crate::ids::Key, name: &str, rooms: &
     let kind = fields(m, cat).into_iter().find(|(n, _)| n == name)?.1;
     let formulas = BTreeMap::new();
     // What a tag shows of a door (its mark, its type) wants nothing found among the rooms; its From Room does.
-    let json = if reads_rooms(m, cat, name) { element_json_with(m, id, rooms) } else { element_json_bare(m, id) };
-    let mut row = Row { m, e, cat, json, formulas: &formulas, done: BTreeMap::new() };
+    let json = if reads_rooms(m, cat, name) { element_json_light(m, id, rooms) } else { element_json_bare(m, id) };
+    let mut row = Row { m, e, cat, json, formulas: &formulas, done: BTreeMap::new(), measured: Default::default() };
     match row.get(name) {
         Value::Null => None,
         v => Some(shown(m.units, kind, &v)),
@@ -914,7 +914,15 @@ pub fn picks(m: &Model, cats: &[String], rules: &[Filter]) -> BTreeSet<Id> {
     let rooms = Rooms::new(m);
     for (&id, e) in &m.elements {
         let Some(of) = kinds.get(e.category()) else { continue };
-        let mut row = Row { m, e, cat: e.category(), json: element_json_with(m, id, &rooms), formulas: &formulas, done: BTreeMap::new() };
+        let mut row = Row {
+            m,
+            e,
+            cat: e.category(),
+            json: element_json_light(m, id, &rooms),
+            formulas: &formulas,
+            done: BTreeMap::new(),
+            measured: Default::default(),
+        };
         if rules.iter().all(|f| keeps(f, &row.get(&f.field), of.get(&f.field).copied(), m.units)) {
             out.insert(id);
         }
@@ -970,9 +978,12 @@ struct Row<'a> {
     e: &'a Element,
     /// The category of the schedule it is a row of: `e`'s, but for a mass floor, which is a row of a mass.
     cat: &'a str,
+    /// Its element's JSON, less what is measured from its solids (`json::measured`), which is found as a field asks for it.
     json: Value,
     formulas: &'a BTreeMap<&'a str, (&'a str, Kind)>,
     done: BTreeMap<String, Value>,
+    /// What is measured from its element's solids, once something asked for it.
+    measured: std::cell::OnceCell<serde_json::Map<String, Value>>,
 }
 
 impl Row<'_> {
@@ -1008,6 +1019,14 @@ impl Row<'_> {
         v
     }
 
+    /// Key `k` of its element's JSON: what is measured from the element's solids is made now, once, for the row that shows it.
+    fn json_get(&self, k: &str) -> Option<&Value> {
+        self.json.get(k).or_else(|| {
+            let id = self.json.get("id")?.as_u64()?;
+            crate::json::is_measured(k).then(|| self.measured.get_or_init(|| crate::json::measured(self.m, id)).get(k)).flatten()
+        })
+    }
+
     /// One of its category's fields: its own, a project parameter's, or its family's.
     fn field(&self, name: &str) -> Value {
         self.field_of(self.cat, name)
@@ -1024,7 +1043,7 @@ impl Row<'_> {
                     Some(v) => v.clone(),
                     None => Value::Null,
                 },
-                From::Key(k) => serde_json::json!(number(j.get(k))),
+                From::Key(k) => serde_json::json!(number(self.json_get(k))),
                 From::Ref(k) => {
                     let to = j.get(k).and_then(|g| serde_json::from_value::<crate::model::Guid>(g.clone()).ok());
                     serde_json::json!(to.and_then(|g| m.elements.id(g)).map_or(0.0, |id| id as f64))
@@ -1164,12 +1183,17 @@ fn sources<'a>(m: &'a Model, sc: &Schedule, cat: &str) -> Vec<(Id, &'a Element, 
             .elements
             .iter()
             .filter(|(_, e)| cats.iter().any(|c| c == e.category()))
-            .map(|(id, e)| (*id, e, element_json_with(m, *id, &rooms)))
+            .map(|(id, e)| (*id, e, element_json_light(m, *id, &rooms)))
             .collect();
     }
     if cat != "massfloor" {
         let rooms = Rooms::new(m);
-        return m.elements.iter().filter(|(_, e)| e.category() == cat).map(|(id, e)| (*id, e, element_json_with(m, *id, &rooms))).collect();
+        return m
+            .elements
+            .iter()
+            .filter(|(_, e)| e.category() == cat)
+            .map(|(id, e)| (*id, e, element_json_light(m, *id, &rooms)))
+            .collect();
     }
     let mut out = Vec::new();
     for (&id, e) in &m.elements {
@@ -1220,7 +1244,7 @@ pub fn table(m: &Model, sc: &Schedule) -> Result<Table, String> {
     // Each element its filters keep: its cells, its sort fields' values, and itself.
     let mut rows: Vec<(Vec<Value>, Vec<Value>, Id)> = Vec::new();
     for (id, e, json) in sources(m, sc, &cat) {
-        let mut row = Row { m, e, cat: &cat, json, formulas: &formulas, done: BTreeMap::new() };
+        let mut row = Row { m, e, cat: &cat, json, formulas: &formulas, done: BTreeMap::new(), measured: Default::default() };
         if sc.filters.iter().all(|f| keeps(f, &row.get(&f.field), kind_of(&f.field), m.units)) {
             let cells = fields.iter().map(|f| row.get(&f.name)).collect();
             rows.push((cells, sort.iter().map(|(n, _)| sorts_as(m, &cat, n, row.get(n))).collect(), id));

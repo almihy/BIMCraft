@@ -208,3 +208,10 @@ C++ already built; `unstable-wasm-uu`, the environment of `docs/manifold-trial.m
 `csg::subtract` (cap 20,000), which stays for that alone. `Family::open_forms` names the parametric forms and voids that are not
 closed and why; `check_type` puts them in `TypeCheck::warnings` (a warning, never a refusal). A piece carries one material, so
 the cut faces take it without needing the origin map.
+
+**A void a hair off a face leaves no skin (review finding 5).** Revit's families have voids 0.02-0.06 mm off the face they are meant
+to be flush with, which the older cutter took as one face (`csg`'s 0.1 mm). Before the boolean, `cutting::Planes::snap` puts each
+corner of a closed void that lies within 0.1 mm of a form face parallel to one of the void's faces that meet there onto that face's
+plane and 0.01 mm out of the form (the nearest plane of each direction; nothing else moves; a snap that does not leave a solid of
+about the void's volume is dropped). A void 0.04 mm off an underside or a top now leaves the hole open (volume 96,000,000 mm3 for
+the 1000 x 1000 x 100 slab and 200 x 200 hole, where it was 96,001,600); one 0.5 mm off is kept as it is.
