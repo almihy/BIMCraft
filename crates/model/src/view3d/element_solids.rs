@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use super::{Solid, layered_indexed, solids_in_with};
+use super::{Solid, Vis, layered_indexed, solids_in_with};
 use crate::component_geometry::Components;
 use crate::geom::P2;
 use crate::model::{Element, Id, Model};
@@ -48,6 +48,19 @@ pub struct ElementSolids {
     pub layers: Vec<(u16, Solid3)>,
     /// What is left out of them: the pieces that are not solids.
     pub open: Vec<OpenPiece>,
+    /// Where some of its pieces are drawn only in some views (a family's forms' Visibility Settings: detail levels, front and back,
+    /// left and right): its solids again, one for each layer and each way of being shown, for a section to cut only what it
+    /// draws ([`ElementSolids::drawn_layers`]). Empty when every piece is drawn everywhere, which is every element but a family's.
+    pub shown: Vec<ShownSolid>,
+}
+
+/// The pieces of one layer that a view draws alike, as one solid.
+#[derive(Clone, Debug)]
+pub struct ShownSolid {
+    pub layer: u16,
+    /// Which views draw it ([`Vis::drawn`]).
+    pub vis: Vis,
+    pub solid: Solid3,
 }
 
 impl ElementSolids {
@@ -65,6 +78,25 @@ impl ElementSolids {
     /// Whether the element is all solid: no piece left open.
     pub fn is_whole(&self) -> bool {
         self.open.is_empty()
+    }
+
+    /// What a view draws of each layer, for a section to cut: the layers' own solids, or where the pieces are drawn in some
+    /// views only, the pieces `drawn` says the view draws, united (a layer with none left is left out). Pieces that overlap
+    /// across ways of being shown are cut as the one solid they make.
+    pub fn drawn_layers(&self, drawn: &dyn Fn(Vis) -> bool) -> Vec<(u16, Solid3)> {
+        if self.shown.is_empty() {
+            return self.layers.clone();
+        }
+        let mut out: Vec<(u16, Vec<&Solid3>)> = Vec::new();
+        for s in self.shown.iter().filter(|s| drawn(s.vis)) {
+            match out.iter_mut().find(|(k, _)| *k == s.layer) {
+                Some((_, v)) => v.push(&s.solid),
+                None => out.push((s.layer, vec![&s.solid])),
+            }
+        }
+        out.into_iter()
+            .map(|(k, v)| (k, if let [one] = v.as_slice() { (*one).clone() } else { Solid3::union_all(v) }))
+            .collect()
     }
 }
 
@@ -105,7 +137,7 @@ fn build(m: &Model, id: Id, index: Option<&Index>, components: &mut Components, 
             .collect(),
         _ => solids_in_with(m, &[(id, e)], index, components),
     };
-    let mut by_layer: BTreeMap<u16, Vec<Solid3>> = BTreeMap::new();
+    let mut by_layer: BTreeMap<u16, Vec<(Vis, Solid3)>> = BTreeMap::new();
     let mut open = Vec::new();
     // Where an element's type has no layers (a component, a door), the pieces of one material are one layer.
     let mut paints: Vec<(Rgb, u32)> = Vec::new();
@@ -125,21 +157,49 @@ fn build(m: &Model, id: Id, index: Option<&Index>, components: &mut Components, 
             let mut origin = Origin::new(id, layer);
             origin.curve = curve_of(m, e, &part, k);
             match solid_of(&part, origin) {
-                Ok(Some(solid)) => by_layer.entry(layer).or_default().push(solid),
+                Ok(Some(solid)) => by_layer.entry(layer).or_default().push((vis_of(&part), solid)),
                 // No volume: a flat sliver of a wall where an opening reaches the base or the top, left in the scene's pieces.
                 Ok(None) => {}
                 Err(why) => open.push(OpenPiece { layer, why, piece: part }),
             }
         }
     }
-    let layers = by_layer
-        .into_iter()
-        .filter_map(|(layer, mut solids)| {
-            let solid = if solids.len() == 1 { solids.pop()? } else { Solid3::union_all(&solids) };
-            (!solid.is_empty()).then_some((layer, solid))
-        })
-        .collect();
-    ElementSolids { layers, open }
+    // Where a piece is drawn in some views only, the layers again by the way they are shown.
+    let apart = by_layer.values().flatten().any(|(v, _)| *v != Vis::ALWAYS);
+    let mut shown = Vec::new();
+    let mut layers = Vec::new();
+    for (layer, pieces) in by_layer {
+        let whole = if let [(_, only)] = pieces.as_slice() { only.clone() } else { Solid3::union_all(pieces.iter().map(|(_, s)| s)) };
+        if whole.is_empty() {
+            continue;
+        }
+        if apart {
+            let mut ways: Vec<(Vis, Vec<&Solid3>)> = Vec::new();
+            for (vis, solid) in &pieces {
+                match ways.iter_mut().find(|(v, _)| v == vis) {
+                    Some((_, v)) => v.push(solid),
+                    None => ways.push((*vis, vec![solid])),
+                }
+            }
+            for (vis, v) in &ways {
+                // A layer drawn one way throughout is its own solid again.
+                let solid = if ways.len() == 1 { whole.clone() } else { Solid3::union_all(v.iter().copied()) };
+                if !solid.is_empty() {
+                    shown.push(ShownSolid { layer, vis: *vis, solid });
+                }
+            }
+        }
+        layers.push((layer, whole));
+    }
+    ElementSolids { layers, open, shown }
+}
+
+/// Which views draw `s`: its form's Visibility Settings, every view for what says nothing.
+fn vis_of(s: &Solid) -> Vis {
+    match s {
+        Solid::Mesh { vis, .. } => *vis,
+        Solid::Box { .. } | Solid::Slab { .. } | Solid::Prism { .. } => Vis::ALWAYS,
+    }
 }
 
 fn paint_of(s: &Solid) -> (Rgb, u32) {
@@ -238,6 +298,18 @@ impl SolidCache {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Every element it holds, with its solids.
+    pub(crate) fn entries(&self) -> Vec<(Id, Arc<ElementSolids>)> {
+        self.entries.lock().map(|e| e.iter().map(|(id, s)| (*id, Arc::clone(s))).collect()).unwrap_or_default()
+    }
+
+    /// Keeps `solids` as element `id`'s (made from the same pieces, in the same library, as it would be now).
+    pub(crate) fn adopt(&self, id: Id, solids: Arc<ElementSolids>) {
+        if let Ok(mut entries) = self.entries.lock() {
+            entries.insert(id, solids);
+        }
     }
 
     /// What it holds of the elements `keep` says are unchanged.

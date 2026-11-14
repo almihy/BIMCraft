@@ -45,6 +45,10 @@ pub(super) struct Renderer {
     model: Option<Arc<Model>>,
     work: Option<render::SectionWork>,
     base: Option<Base>,
+    /// The element solids of the snapshot before, and that snapshot's model, for the next work to take over those an edit left
+    /// as they were (`SectionWork::inherit_solids`): an edit makes a section build the solids of what it touched, not of
+    /// everything the line crosses again. Kept until a work of a later snapshot is made, cancelled attempts included.
+    carry: Option<(Arc<Model>, render::SolidCarry)>,
 }
 
 impl Renderer {
@@ -60,11 +64,16 @@ impl Renderer {
         }
         let m = &request.model;
         if !self.model.as_ref().is_some_and(|old| Arc::ptr_eq(old, m)) {
-            // Release old geometry before constructing a new snapshot's work.
+            // Release old geometry before constructing a new snapshot's work, but for the element solids it made.
             self.base = None;
-            self.work = None;
-            self.model = None;
-            self.work = Some(render::SectionWork::new_deferred_cancellable(m, cancelled)?);
+            if let (Some(work), Some(old)) = (self.work.take(), self.model.take()) {
+                self.carry = Some((old, work.solid_carry()));
+            }
+            let work = render::SectionWork::new_deferred_cancellable(m, cancelled)?;
+            if let Some((old, carry)) = self.carry.take() {
+                work.inherit_solids(carry, &old, m);
+            }
+            self.work = Some(work);
             self.model = Some(Arc::clone(m));
         }
         let work = self.work.as_ref()?;

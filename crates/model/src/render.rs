@@ -30,7 +30,7 @@ use crate::pen::{Pen, Weights};
 pub use crate::prim::{LIGHT_POCHE, OPAQUE, PAPER, POCHE, Part, Prim, Rgb, Rule, View};
 use crate::styles::{BY_CATEGORY, ObjectStyle};
 use crate::units::Units;
-use crate::view3d::{self, Camera, Clip, Image, Scene};
+use crate::view3d::{self, Camera, Clip, Image, Scene, Solid};
 pub use crate::view3d::{FragmentStats, SectionCache};
 use crate::walls::{self, Axis};
 use crate::{font, massing, sheet, stairs};
@@ -1330,6 +1330,23 @@ pub struct PreparationStats {
     pub resolved_components: usize,
 }
 
+/// The element solids a snapshot's [`SectionWork`] made, with the pieces they were made of: for the next snapshot's work to take
+/// over what an edit left as it was ([`SectionWork::inherit_solids`]).
+#[derive(Default)]
+pub struct SolidCarry {
+    entries: Vec<(Id, std::sync::Arc<view3d::ElementSolids>, Vec<view3d::Solid>)>,
+}
+
+impl SolidCarry {
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
 /// A snapshot's section/elevation geometry, component extrema or deferred envelopes,
 /// and exact model extent. `new` prepares the full oracle; `new_deferred` can resolve
 /// supported component extrema lazily when fitting or datum queries need them.
@@ -1456,6 +1473,72 @@ impl SectionWork {
             resolved: Default::default(),
             solid_cache: Default::default(),
         })
+    }
+
+    /// How many elements' solids it holds, made or taken over from an earlier snapshot's work ([`Self::inherit_solids`]).
+    pub fn solids_kept(&self) -> usize {
+        self.solid_cache.len()
+    }
+
+    /// What this work's solids leave for the next snapshot's work: each element's solids it made, with the pieces of the
+    /// element they were made of (to tell, then, which are still what the new model's pieces say).
+    pub fn solid_carry(&self) -> SolidCarry {
+        let entries = self
+            .solid_cache
+            .entries()
+            .into_iter()
+            .map(|(id, es)| {
+                let pieces = self.ranges.get(&id).map(|r| self.solids.in_range(r.clone()).cloned().collect()).unwrap_or_default();
+                (id, es, pieces)
+            })
+            .collect();
+        SolidCarry { entries }
+    }
+
+    /// Takes over from `carry` (of the work of model `before`, which this is of `after`, an edit of it) the solids of every
+    /// element the edit left as it was, so that a section after an edit builds only what the edit touched. An element's solids
+    /// are what its pieces and its type's layers and materials and families make of it, so they are kept when none of those is
+    /// other than before: `after` came by edits of elements only (`Model::changed_since`, which says everything else), the
+    /// element is none of those edited nor one of those pointing at or pointed at by one (a door's wall, a level's elements), and
+    /// its pieces, as this work made them (a wall mitred where it joins another, cut at its doors, a floor less its shafts),
+    /// are the pieces the solids were made of. A component's pieces are not kept in a work (only its extremes), so it is kept
+    /// by the first two. Returns how many it took over.
+    pub fn inherit_solids(&self, carry: SolidCarry, before: &Model, after: &Model) -> usize {
+        use crate::ids::Changed;
+        if !self.of.is_of(after) {
+            return 0;
+        }
+        let Changed::Ids(changed) = after.changed_since(before) else { return 0 };
+        let (old, new) = (before.lookup(), after.lookup());
+        let mut touched: std::collections::BTreeSet<Id> = changed.clone();
+        for &id in &changed {
+            for (m, lookup) in [(before, &old), (after, &new)] {
+                let Some(e) = m.elements.get(id) else { continue };
+                if let Some(g) = m.elements.guid(id) {
+                    touched.extend(lookup.referrers(&g));
+                }
+                touched.extend(e.refs().iter().filter_map(|g| after.elements.id(*g)));
+            }
+        }
+        let mut taken = 0;
+        for (id, solids, was) in carry.entries {
+            if touched.contains(&id) || after.elements.get(id).is_none() {
+                continue;
+            }
+            let now = self.ranges.get(&id).map(|r| self.solids.in_range(r.clone()));
+            let same = match now {
+                Some(now) => {
+                    let now: Vec<&Solid> = now.collect();
+                    now.len() == was.len() && now.iter().zip(&was).all(|(a, b)| *a == b)
+                }
+                None => was.is_empty(),
+            };
+            if same {
+                self.solid_cache.adopt(id, solids);
+                taken += 1;
+            }
+        }
+        taken
     }
 
     /// The box of element `id`: `placed` lists elements as the model does, by id. None tells a caller nothing of where it is.
@@ -2040,7 +2123,7 @@ fn section_base_cancellable(
     // Each element's cut pieces, filled as one so where they meet (a roof's slopes at its ridge)
     // leaves no seam.
     d.part(Part::Cut);
-    let Cut { layered: layers, loose, dots } = cut_model(m, work, v, &look, (first, last), cancelled)?;
+    let Cut { layered: layers, loose, dots, .. } = cut_model(m, work, v, &look, (first, last), cancelled)?;
     let mut cuts: std::collections::BTreeMap<Id, Vec<Vec<P2>>> = loose;
     for (id, by_layer) in &layers {
         cuts.entry(*id).or_default().extend(by_layer.iter().flat_map(|(_, rings)| rings.iter().cloned()));
@@ -2196,6 +2279,11 @@ fn section_base_cancellable(
 /// What a section cuts, ring by ring: `(element, layer, ring)`.
 #[doc(hidden)]
 pub type CutRings = Vec<(Id, Option<u16>, Vec<P2>)>;
+pub use section_cut::Region;
+/// What a section cuts as regions: `(element, layer, region)`, in the section's own plane. A closed layer solid's cut is a region
+/// for each outline with the holes in it, the real outline of the cut (a window along a wall is a hole in it), where
+/// [`CutRings`] holds the simple rings the raster fill is made of.
+pub type CutRegions = Vec<(Id, u16, Region)>;
 
 /// What section or elevation `id` cuts, for the tests to read: each ring (counter-clockwise, simple) of each element, as `(element,
 /// layer, ring)`, in the section's own plane (x along its line from its start, y up, mm); `layer` is that of the element's type for
@@ -2216,9 +2304,26 @@ pub fn section_cut_rings_with(m: &Model, w: &SectionWork, id: impl Key) -> Optio
     section_cut_rings_in(m, w, v, &look)
 }
 
+/// What section `id` cuts as regions, an outline and the holes in it each ([`CutRegions`]): the closed layer solids' cut only (an
+/// open piece, a round run and a bar have no regions), in the order of their elements and layers.
+#[doc(hidden)]
+pub fn section_cut_regions(m: &Model, id: impl Key) -> Option<CutRegions> {
+    section_cut_regions_with(m, &SectionWork::new(m), id)
+}
+
+/// [`section_cut_regions`] of `w`'s solids, which keep what they cut for the next section.
+#[doc(hidden)]
+pub fn section_cut_regions_with(m: &Model, w: &SectionWork, id: impl Key) -> Option<CutRegions> {
+    let v = m.section(id)?;
+    let look = Look::of(m, id);
+    let span = span(m, w, v, &look, &|| false)?;
+    let cut = cut_model(m, w, v, &look, span, &|| false)?;
+    Some(cut.regions.into_iter().flat_map(|(id, by_layer)| by_layer.into_iter().flat_map(move |(k, rs)| rs.into_iter().map(move |r| (id, k, r)))).collect())
+}
+
 fn section_cut_rings_in(m: &Model, w: &SectionWork, v: &Section, look: &Look) -> Option<CutRings> {
     let span = span(m, w, v, look, &|| false)?;
-    let Cut { layered, loose, dots } = cut_model(m, w, v, look, span, &|| false)?;
+    let Cut { layered, loose, dots, .. } = cut_model(m, w, v, look, span, &|| false)?;
     let mut out: CutRings = Vec::new();
     for (id, by_layer) in layered {
         out.extend(by_layer.into_iter().flat_map(|(k, rings)| rings.into_iter().map(move |r| (id, Some(k), r))));
@@ -2238,6 +2343,8 @@ struct Cut {
     loose: std::collections::BTreeMap<Id, Vec<Vec<P2>>>,
     /// A bar's cuts: dots over the concrete it lies in.
     dots: Vec<(Id, Vec<P2>)>,
+    /// The same cuts as `layered` as regions (an outline and its holes), by element and layer.
+    regions: std::collections::BTreeMap<Id, section_cut::LayerRegions>,
 }
 
 /// What the vertical plane of section `v` cuts of every element `look` shows, from `first` to `last` along its line (as
@@ -2278,14 +2385,16 @@ fn cut_model(
             let Some(e) = m.elements.get(*id) else { continue };
             // The round runs not made yet are cut below, as they were.
             let lazy = e.run().is_some() && work.cell(at).is_some();
-            // A mass is outlined where the line cuts it, not filled.
-            if !look.shows(*id) || matches!(e, Element::Mass(_)) || lazy || one_side(*id) {
+            // A mass is outlined where the line cuts it, not filled. What Revit does not cut (a sofa, a light fitting, a pipe
+            // fitting, a basin) stays in the picture beyond the line.
+            if !look.shows(*id) || matches!(e, Element::Mass(_)) || lazy || one_side(*id) || !crate::graphics::cuttable(m, e) {
                 continue;
             }
             if cancelled() {
                 return None;
             }
-            let cut = section_cut::cut_element(&work.solid_cache.get(m, *id), &frame, origin, last - first, first);
+            // Only the forms of a family the section draws are cut (its detail level, the way it looks at the family).
+            let cut = section_cut::cut_element(&work.solid_cache.get(m, *id), &frame, origin, last - first, first, &|vis| look.draws_vis(vis));
             if cut.is_empty() {
                 continue;
             }
@@ -2299,6 +2408,7 @@ fn cut_model(
             }
             if !cut.layers.is_empty() {
                 out.layered.insert(*id, cut.layers);
+                out.regions.insert(*id, cut.regions);
             }
         }
     }

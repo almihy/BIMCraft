@@ -14,16 +14,32 @@
 
 use crate::geom::{self, P2};
 use crate::solid::{Frame, Loop, Seg};
-use crate::view3d::ElementSolids;
+use crate::view3d::{ElementSolids, Vis};
 
 /// The rings of an element's layers: each layer (as `Origin::layer` counts them) and its rings.
 pub(crate) type LayerRings = Vec<(u16, Vec<Vec<P2>>)>;
+
+/// A region of a cut: its outline (counter-clockwise) and the holes in it (clockwise), the solid on the left of every edge. What a
+/// vector drawing (an outline, a hatch over the whole region) wants; the raster poché is filled from [`ElementCut::layers`]'s
+/// simple rings, which cut a hole out as trapezoids.
+///
+/// A region that runs past a cropped section's end is cut to the line's range as trapezoids with no holes (as the rings are).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Region {
+    pub outer: Vec<P2>,
+    pub holes: Vec<Vec<P2>>,
+}
+
+/// The regions of an element's layers, by layer.
+pub(crate) type LayerRegions = Vec<(u16, Vec<Region>)>;
 
 /// What a section cuts of one element.
 #[derive(Default)]
 pub(crate) struct ElementCut {
     /// The rings of each closed layer solid it is cut through, by layer: simple, counter-clockwise, the holes cut out.
     pub layers: LayerRings,
+    /// The same cut as regions, each an outline and its holes, by layer.
+    pub regions: LayerRegions,
     /// The rings of its open pieces (as they were cut before the solids), in no layer.
     pub open: Vec<Vec<P2>>,
 }
@@ -40,10 +56,19 @@ impl ElementCut {
 }
 
 /// The cut `es` is made into by the vertical plane `frame`, `len` mm of it from where it begins (`p`, along unit `u`: the
-/// frame's own origin and direction), its `x` moved on by `shift`. Layers the plane does not reach are not sliced.
-pub(crate) fn cut_element(es: &ElementSolids, frame: &Frame, (p, u): (P2, P2), len: f64, shift: f64) -> ElementCut {
+/// frame's own origin and direction), its `x` moved on by `shift`. Layers the plane does not reach are not sliced. Only what the
+/// view `drawn` says draws a piece is cut (a form of a family drawn at Fine only is not cut in a Coarse section, one that is drawn
+/// in no front view is not cut in a section that looks at the family's front).
+pub(crate) fn cut_element(
+    es: &ElementSolids,
+    frame: &Frame,
+    (p, u): (P2, P2),
+    len: f64,
+    shift: f64,
+    drawn: &dyn Fn(Vis) -> bool,
+) -> ElementCut {
     let mut out = ElementCut::default();
-    for (layer, solid) in &es.layers {
+    for (layer, solid) in &es.drawn_layers(drawn) {
         if !reaches(solid.bounds().map(|b| (b.min, b.max)), frame) {
             // Its twin, which tests hold it to: what is passed over is cut by none of the plane.
             if crate::selfcheck::on(crate::selfcheck::Check::SectionLayers) {
@@ -51,16 +76,19 @@ pub(crate) fn cut_element(es: &ElementSolids, frame: &Frame, (p, u): (P2, P2), l
             }
             continue;
         }
-        let rings = rings_of(&solid.slice(frame), len);
-        if !rings.is_empty() {
-            out.layers.push((*layer, rings));
+        let regions = regions_of(&solid.slice(frame), len);
+        if !regions.is_empty() {
+            out.layers.push((*layer, rings_of_regions(&regions, len)));
+            out.regions.push((*layer, regions));
         }
     }
     for open in &es.open {
         out.open.extend(open.piece.cuts(p, u, len));
     }
     if shift != 0.0 {
-        for ring in out.layers.iter_mut().flat_map(|(_, r)| r.iter_mut()).chain(out.open.iter_mut()) {
+        let rings = out.layers.iter_mut().flat_map(|(_, r)| r.iter_mut()).chain(out.open.iter_mut());
+        let loops = out.regions.iter_mut().flat_map(|(_, rs)| rs.iter_mut()).flat_map(|r| std::iter::once(&mut r.outer).chain(r.holes.iter_mut()));
+        for ring in rings.chain(loops) {
             for q in ring.iter_mut() {
                 q.0 += shift;
             }
@@ -86,8 +114,23 @@ fn reaches(bounds: Option<([f64; 3], [f64; 3])>, frame: &Frame) -> bool {
     side.0 <= 1e-6 && side.1 >= -1e-6
 }
 
-/// The rings a plane's loops make, within `0..=len` along the line.
-pub(crate) fn rings_of(loops: &[Loop], len: f64) -> Vec<Vec<P2>> {
+/// The simple rings the regions come to: a region with no hole as it is, one with a hole cut into trapezoids that abut.
+pub(crate) fn rings_of_regions(regions: &[Region], len: f64) -> Vec<Vec<P2>> {
+    let mut rings = Vec::new();
+    for r in regions {
+        if r.holes.is_empty() {
+            rings.push(r.outer.clone());
+        } else {
+            let group: Vec<&[P2]> = std::iter::once(r.outer.as_slice()).chain(r.holes.iter().map(Vec::as_slice)).collect();
+            rings.extend(slabs(&group, 0.0, len));
+        }
+    }
+    rings
+}
+
+/// The regions a plane's loops make, within `0..=len` along the line: each outer loop with the holes in it (a hole goes with the
+/// smallest outer loop that holds it). One that runs past the range is cut to it as trapezoids, each a region of its own.
+pub(crate) fn regions_of(loops: &[Loop], len: f64) -> Vec<Region> {
     let polys: Vec<Vec<P2>> = loops.iter().map(polyline).filter(|p| p.len() >= 3).collect();
     let area: Vec<f64> = polys.iter().map(|p| geom::area(p)).collect();
     let outers: Vec<usize> = (0..polys.len()).filter(|&i| area[i] > 0.0).collect();
@@ -100,18 +143,18 @@ pub(crate) fn rings_of(loops: &[Loop], len: f64) -> Vec<Vec<P2>> {
             holes[o].push(h);
         }
     }
-    let mut rings = Vec::new();
+    let mut regions = Vec::new();
     for &o in &outers {
         let (lo, hi) = polys[o].iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), q| (lo.min(q.0), hi.max(q.0)));
         let inside = lo >= -1e-9 && hi <= len + 1e-9;
-        if holes[o].is_empty() && inside {
-            rings.push(polys[o].clone());
+        if inside {
+            regions.push(Region { outer: polys[o].clone(), holes: holes[o].iter().map(|&h| polys[h].clone()).collect() });
         } else {
             let group: Vec<&[P2]> = std::iter::once(polys[o].as_slice()).chain(holes[o].iter().map(|&h| polys[h].as_slice())).collect();
-            rings.extend(slabs(&group, 0.0, len));
+            regions.extend(slabs(&group, 0.0, len).into_iter().map(|outer| Region { outer, holes: Vec::new() }));
         }
     }
-    rings
+    regions
 }
 
 /// A point on the inside of a loop's first edge: the middle of that edge (on the hole's boundary, so the test that asks which

@@ -1144,6 +1144,12 @@ pub struct Family {
     /// before the add-in measured) has a void cut every solid listed before it that it reaches.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub cuts_measured: bool,
+    /// Revit's per-family "Enable Cutting in Views" (Family Category and Parameters), which Furniture, Furniture Systems,
+    /// Specialty Equipment and Plumbing Fixtures have since Revit 2023: only then does a section or a plan's cut plane cut the
+    /// family's components (see [`crate::graphics::cuttable`]); off, they stay in projection. Revit's default is off, and it is
+    /// type-independent. Of no other category (they are always cut or never cut).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cut_in_views: bool,
     /// The line patterns its subcategories name, by name, as Revit's Line Patterns the family was made with: each added to the
     /// project's when the family is loaded, unless the project has one of the name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]

@@ -168,7 +168,7 @@ impl Tri {
 }
 
 /// A wall's plan frame: its start, along it, and square to it.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 #[doc(hidden)]
 pub struct Frame {
     o: P2,
@@ -204,9 +204,10 @@ impl Frame {
 /// face, level or sloped, and what lies up to `rise` mm above it (a floor, a column, a roof's
 /// slope); a prism: a ring in plan from one plane up to another (a wall's part; of a curved wall,
 /// with its centre and its centre line's radius, its faces being one surface each); or triangles
-/// (a component's form, which sections show and don't cut; a round run's tube, convex, which they do, as `cut` says): a round
+/// (a component's form, which a section cuts as Revit's category of the family does ([`crate::graphics::cuttable`]) and the
+/// element solids make of it; a round run's tube, convex, which they cut by its `cut`): a round
 /// one's sides, past `caps`, are one curved surface; any other's facets that turn little where they meet are ([`facets`]).
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 #[doc(hidden)]
 pub enum Solid {
     Box { owner: Id, color: Rgb, tex: u32, frame: Frame, a: (f64, f64), c: (f64, f64), z: (f64, f64) },
@@ -299,7 +300,7 @@ mod element_solids;
 mod fragments;
 #[doc(hidden)]
 pub mod update;
-pub use element_solids::{ElementSolids, OpenPiece, SolidCache, element_solids, element_solids_in, wall_volume};
+pub use element_solids::{ElementSolids, OpenPiece, ShownSolid, SolidCache, element_solids, element_solids_in, wall_volume};
 pub use fragments::{FragmentStats, SectionCache};
 pub(crate) type PreparedMade = (Vec<Prepared>, Vec<(Id, Vec<P3>)>, Vec<Option<[P3; 2]>>);
 
@@ -930,7 +931,8 @@ pub fn solids_in_with(
                 out.push(Solid::Mesh { owner: id, color: MASS, tex: 0, tris, caps: 0, round: false, cut: false, vis: Vis::ALWAYS });
             }
             Element::Mass(ms) => out.push(slab(id, MASS, &ms.footprint(), m.span(ms.level, ms.base_offset, ms.top_level, ms.height))),
-            // Each form in its material's colour; a curved one's facets one surface, as a curved wall's are.
+            // Each form in its material's colour; a curved one's facets one surface, as a curved wall's are. A section cuts it
+            // only when Revit cuts its category (`graphics::cuttable`), from the element solids, not by `cut`.
             Element::Component(c) => {
                 let x = P2(c.angle.to_radians().cos(), c.angle.to_radians().sin());
                 for piece in components.pieces(c) {
@@ -1003,8 +1005,8 @@ pub fn solids_in_with(
                     slabs(&mut out, m, id, ROOF, face, rise);
                 }
             }
-            // Of a family: each form in its material's colour, shown beyond a section's line and never cut, as a
-            // component's are. Else a door's leaf, as thick as its type says (`OpeningType::leaf`), or a window's glass, a 50 mm
+            // Of a family: each form in its material's colour, shown beyond a section's line and cut by it from the element
+            // solids (a door's and a window's are cut, as Revit cuts them). Else a door's leaf, as thick as its type says (`OpeningType::leaf`), or a window's glass, a 50 mm
             // panel: in the middle of the wall, shut, square to it.
             Element::Door(o) | Element::Window(o) => {
                 if o.family.is_some() {

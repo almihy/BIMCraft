@@ -1853,25 +1853,12 @@ fn components_show_in_plan_from_above_in_3d_and_beyond_a_section() {
     let colours: Vec<[u8; 3]> = solids.iter().filter(|x| x.owner() == id).map(|x| x.color()).map(|c| [c.0, c.1, c.2]).collect();
     assert_eq!(colours.len(), 3);
     assert!(colours.contains(&s.model.materials["Timber"].color), "{colours:?}");
-    // A section across it, looking north: its line runs through the top, which is cut (a component is cut like any element, from
-    // its solids: before them none was), and the top shows beyond the line as well.
+    // A section across it, looking north: it shows beyond the line, and none of it is cut (a table is Furniture, which Revit cuts
+    // only when its family says so).
     let sec = run(&mut s, "section", json!({"start": [0, 1300], "end": [3000, 1300]}))["id"].as_u64().unwrap();
     let sview = crate::render::section_fit(&s.model, sec, 1000, 800);
     let d = crate::render::section(&s.model, sec, sview);
-    let cut: Vec<P2> = d
-        .prims
-        .iter()
-        .zip(&d.owners)
-        .filter(|(_, o)| **o == Some(id))
-        .filter_map(|(p, _)| match p {
-            crate::prim::Prim::Fill { rings, .. } => Some(rings),
-            _ => None,
-        })
-        .flatten()
-        .flatten()
-        .map(|q| sview.mm(*q))
-        .collect();
-    assert!(!cut.is_empty() && cut.iter().all(|q| (999.0..=2001.0).contains(&q.0)), "the top, cut where the line crosses it: {cut:?}");
+    assert!(d.prims.iter().zip(&d.owners).all(|(p, o)| *o != Some(id) || !matches!(p, crate::prim::Prim::Fill { .. })), "cut");
     let (cam, clip) = crate::render::section_camera(&s.model, sec, sview).unwrap();
     let image = crate::view3d::Scene::new(&s.model).cut(&cam, &clip, &[]);
     let p = sview.px(P2(1500.0, 735.0));

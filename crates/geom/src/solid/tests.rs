@@ -718,3 +718,23 @@ fn batch_booleans_and_queries() {
     // Outward normals still point out after the mirror: the one at x = 0 points +x.
     assert!(mirrored.triangles().iter().filter(|t| t.p.iter().all(|p| p[0].abs() < 1e-9)).all(|t| t.normal[0] > 0.99));
 }
+
+/// A solid's surface is taken from Manifold once, however often it is sliced, measured or asked for its triangles: its clones
+/// share it, and a solid made of it by an operation has a surface of its own.
+#[test]
+fn a_solids_surface_is_made_once_and_shared_by_its_clones() {
+    let a = bx(0.0, 0.0, 0.0, 1000.0, 1000.0, 1000.0, org(1));
+    let first: *const Mesh = a.surface();
+    assert!(std::ptr::eq(first, a.surface()), "the second ask is the first's mesh");
+    let copy = a.clone();
+    assert!(std::ptr::eq(first, copy.surface()), "a clone is the same manifold, with the same mesh");
+    let frame = Frame::vertical(P2(500.0, 0.0), P2(0.0, 1.0)).unwrap();
+    let loops = a.slice(&frame);
+    assert!(!loops.is_empty() && std::ptr::eq(first, a.surface()), "slicing reads it and keeps it");
+    assert_eq!(a.mesh().tris, a.surface().tris);
+    let moved = a.translate([10.0, 0.0, 0.0]);
+    assert!(!std::ptr::eq(first, moved.surface()), "a moved solid has its own");
+    assert!((moved.bounds().unwrap().min[0] - 10.0).abs() < 1e-12 && (a.bounds().unwrap().min[0]).abs() < 1e-12);
+    let holed = a.difference(&bx(400.0, 400.0, -1.0, 600.0, 600.0, 1001.0, org(2)));
+    assert!(holed.surface().tris.len() > a.surface().tris.len());
+}

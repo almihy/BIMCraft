@@ -1454,7 +1454,7 @@ other_files(
          say a `projection` and a `cut` line weight (a pen, 1 to 16) and a `pattern` (a name), and `line_patterns` the patterns \
          they name, each added to the project's unless it has one of that name, as the subcategories are its Object Styles of \
          `Category/Subcategory` unless it has those; `cuts_measured` (a definition's `cuts_by: \"instance\"`) says the voids' `cuts` were measured, so each void cuts \
-         the forms it names whatever their order) \
+         the forms it names whatever their order; `cut_in_views` is Revit's \"Enable Cutting in Views\", which a furniture, plumbing fixture or drain family needs for a section or plan to cut it, default false) \
          is translated into `references` (reference planes, which formulas read as `ref(Name)`), the `dimensions` placing them per \
          type (labelled with a parameter, locked, EQ; over-constrained, the family isn't editable), parametric forms (extrusions \
          with `holes`, revolves, blends with a `top`, sweeps along a `path` with their `section` and its `section_holes`, \
@@ -11343,6 +11343,7 @@ fn family(s: &mut Session, p: &Value) -> R {
             "revit",
             "rpc",
             "cuts_measured",
+            "cut_in_views",
             "line_patterns",
         ]
         .into_iter()
@@ -11453,6 +11454,7 @@ fn family(s: &mut Session, p: &Value) -> R {
         "revit",
         "rpc",
         "cuts_measured",
+        "cut_in_views",
         "line_patterns",
         "rebuild",
     ];
@@ -11648,6 +11650,12 @@ fn family(s: &mut Session, p: &Value) -> R {
         f.cuts_measured = v.as_bool().unwrap_or(false);
     } else if from_file {
         f.cuts_measured = false;
+    }
+    // Revit's Enable Cutting in Views: off unless said.
+    if let Some(v) = p.get("cut_in_views") {
+        f.cut_in_views = v.as_bool().unwrap_or(false);
+    } else if from_file {
+        f.cut_in_views = false;
     }
     // What an export package (Revit's definition comes with it) brings of line patterns that the engine can't hold is left out and
     // said (`editable.untranslated`), not a reason to refuse the family: its lines are drawn solid.
