@@ -259,16 +259,34 @@ other as the check and the fallback (`snapshot` forms and symbols), and checks e
 - **The samples.** `family_sample_tests.rs` pins asymmetric families, a door in 100, 200 and 300 mm walls and a rebuilt
   door flipped with its nested handle. The real exported samples are Autodesk's and never kept here: run it with
   `BIMCRAFT_FAMILY_SAMPLES=<folder of packages>` and each family's match is held to `testdata/families/sample-matches.json`.
-  Re-exported on 14 November (packages v4 and v5 give the same), **21 of Revit's 25 sample families are editable and 73 of
-  their 88 types match Revit's result** (9 and 29 before the fidelity work); `sample-matches.json` records each family's
-  types, how many matched and, for one that does not, why. A form that says nothing is drawn in every view at every level, as
-  Revit's default. Revit's joined forms are compared as the one surface they make, a void cuts every solid form of its family
-  that it reaches (the exporter's `cuts` lists stay as information and limit nothing), and a family the package says is an RPC
-  render placeholder (`revit.rpc`, the sample tree) is checked in plan only and always draws Revit's 3D. Not yet matching:
-  `M_Window-Casement-Double` and `M_Window-Double-Hung` (their Coarse shape and plan, 13 and 50 mm off), `Plumbing_Fixtures_WC`
-  (3 mm over 15 % of its shape) and `Windows_Arched` (3 mm over 2 %); each is drawn exactly as Revit's, marked "As in Revit
-  (not yet editable)" with that reason. Never change a tolerance (`NEAR`, `NOISE`, `NOISE_SHARE`, `VOLUME`, `VOLUME_CURVED`,
-  `BOX`, `REACH`) to make a family match.
+  Re-exported on 14 November after the add-in's last round (packages v9), **23 of Revit's 25 sample families are editable and
+  84 of their 88 types match Revit's result** (9 and 29 before the fidelity work, 21 and 73 after its first round);
+  `sample-matches.json` records each family's types, how many matched and, for one that does not, why. A form that says
+  nothing is drawn in every view at every level, as Revit's default. Revit's joined forms are compared as the one surface they
+  make, a void cuts every solid form of its family that it reaches unless the definition says its `cuts` were measured from the
+  instance (below), and a family the package says is an RPC render placeholder (`revit.rpc`, the sample tree) is checked in
+  plan only and always draws Revit's 3D. Not yet matching: `Plumbing_Fixtures_WC` (its shape drawn coarse 12 mm off Revit's
+  over 0.9 % of it) and `Windows_Arched` (3 of its 6 types match; the rest 7 mm off over under 0.1 % of their shape); each is
+  drawn exactly as Revit's, marked "As in Revit (not yet editable)" with that reason. Never change a tolerance (`NEAR`,
+  `NOISE`, `NOISE_SHARE`, `VOLUME`, `VOLUME_CURVED`, `BOX`, `REACH`) to make a family match.
+- **What the last four families needed.** Subcategory pens: a subcategory's line weight (projection and cut), colour and line
+  pattern (`-1`, Revit's none, reads as no line) draw a family's lines in plan, elevation and section (a door's Elevation Swing
+  dashed in its own weight, a cut frame in its subcategory's cut pen), a component's plan outline and symbols in theirs, and the
+  project's Object Style of the subcategory, now rows under each category in Object Styles, wins over the family's own.
+  `line_patterns` is a family's own pattern definitions (dash and space segments); one the engine cannot hold (an unknown
+  segment, more than 32 segments, a dash or space out of range, a name it may not have) is left out and said in `untranslated`,
+  the subcategories that name it draw solid, and the family still loads. `cuts_by: "instance"` says a void's `cuts` were
+  measured from the placed instance, so each void cuts only what the list names; without it (a removal, which measured
+  nothing) the list limits nothing. A masking region's edges keep the detail levels the package says it read (`levels_read`),
+  and an older package still learns them from Revit's plan. A revolve keeps its turn, a blend's sides run curve to curve
+  (a line's ends join a line's ends, an arc's an arc's) where both rings have as many curves, a masking region's edges each keep
+  their own style, and values set on a nested part, a string dimension's locked segments and a line-meets-arc corner read as
+  formulas. Curves are drawn to within half a millimetre. A screen's lines keep their weight's width as the view zooms in, as
+  Revit's (the retained path too); a sheet's and a picture's follow the paper.
+- **Format 25 is new.** A project that holds subcategory styles, line patterns, void cuts measured from the instance or a
+  subcategory's pens or pattern is written as format 25, which a build that reads up to 24 reads as newer rather than refusing
+  a field it does not know; parametric families stay 24, per-type forms 23. A project's subcategory style outlives its
+  family. A build that reads only up to 24 says the file is from a newer version; it does not open it.
 - **The translator.** B (a bound number) becomes an `Expr`: a number, `ref(Name) + offset` (the offset itself bound where
   it follows parameters), `scale * Param + offset`, or `(formula)`; then taken into the family's axes: `x + x_offset`,
   `y_sign × y + y_offset` (and `x_sign × x + x_offset`), `z - z_minus`, where `z_minus` that names a plane (a window's sill) becomes the parameter
