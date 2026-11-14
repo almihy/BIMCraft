@@ -2505,7 +2505,19 @@ impl Family {
         detail: Option<crate::graphics::Detail>,
         snapshot: bool,
     ) -> Result<Vec<Mark>, String> {
-        self.marks_where(values, &|y: &Symbol| {
+        Ok(self.marks_as_styled(type_name, values, view, detail, snapshot)?.into_iter().map(|(m, _)| m).collect())
+    }
+
+    /// [`Family::marks_as`], each mark with the subcategory of the symbol it came from.
+    fn marks_as_styled(
+        &self,
+        type_name: &str,
+        values: &BTreeMap<String, Val>,
+        view: SymbolView,
+        detail: Option<crate::graphics::Detail>,
+        snapshot: bool,
+    ) -> Result<Vec<(Mark, Option<String>)>, String> {
+        self.marks_where_styled(values, &|y: &Symbol| {
             y.view == view && y.of_type(type_name) && y.snapshot == snapshot && detail.is_none_or(|d| y.drawn_at(d))
         })
     }
@@ -2526,9 +2538,22 @@ impl Family {
         detail: Option<crate::graphics::Detail>,
         others: Others,
     ) -> Result<Vec<Mark>, String> {
-        let mut out = self.marks(type_name, values, view, detail)?;
+        Ok(self.marks_styled(type_name, values, view, detail, others)?.into_iter().map(|(m, _)| m).collect())
+    }
+
+    /// [`Family::marks_with`], each mark with the subcategory of the symbol it came from (a nested part's, its own family's): what
+    /// the pens, colour and pattern it is drawn in come from.
+    pub fn marks_styled(
+        &self,
+        type_name: &str,
+        values: &BTreeMap<String, Val>,
+        view: SymbolView,
+        detail: Option<crate::graphics::Detail>,
+        others: Others,
+    ) -> Result<Vec<(Mark, Option<String>)>, String> {
+        let mut out = self.marks_as_styled(type_name, values, view, detail, self.draws_snapshot(type_name))?;
         if !self.draws_snapshot(type_name) {
-            self.nested_marks(type_name, values, (view, detail), others, (0, &std::cell::Cell::new(0)), &mut out)?;
+            self.nested_marks_styled(type_name, values, (view, detail), others, (0, &std::cell::Cell::new(0)), &mut out)?;
         }
         Ok(out)
     }
@@ -2540,10 +2565,26 @@ impl Family {
         &self,
         type_name: &str,
         values: &BTreeMap<String, Val>,
+        at: (SymbolView, Option<crate::graphics::Detail>),
+        others: Others,
+        depth: (usize, &std::cell::Cell<usize>),
+        out: &mut Vec<Mark>,
+    ) -> Result<(), String> {
+        let mut styled = Vec::new();
+        self.nested_marks_styled(type_name, values, at, others, depth, &mut styled)?;
+        out.extend(styled.into_iter().map(|(m, _)| m));
+        Ok(())
+    }
+
+    /// [`Family::nested_marks`], each mark with the subcategory of the symbol it came from.
+    fn nested_marks_styled(
+        &self,
+        type_name: &str,
+        values: &BTreeMap<String, Val>,
         (view, detail): (SymbolView, Option<crate::graphics::Detail>),
         others: Others,
         (depth, spent): (usize, &std::cell::Cell<usize>),
-        out: &mut Vec<Mark>,
+        out: &mut Vec<(Mark, Option<String>)>,
     ) -> Result<(), String> {
         if self.nested.is_empty() {
             return Ok(());
@@ -2592,10 +2633,10 @@ impl Family {
                 if crate::geom::v3::dot(axes[inner_view.axis()], faces).abs() < 1.0 - 1e-6 {
                     continue;
                 }
-                let mut marks = inner.marks_as(inner_type, &inner_values, inner_view, detail, revit).map_err(said)?;
+                let mut marks = inner.marks_as_styled(inner_type, &inner_values, inner_view, detail, revit).map_err(said)?;
                 if !revit {
                     inner
-                        .nested_marks(inner_type, &inner_values, (inner_view, detail), others, (depth + 1, spent), &mut marks)
+                        .nested_marks_styled(inner_type, &inner_values, (inner_view, detail), others, (depth + 1, spent), &mut marks)
                         .map_err(said)?;
                 }
                 let place = |q: P2| {
@@ -2603,7 +2644,7 @@ impl Family {
                     let p = add(at, add(add(mul(axes[0], p[0]), mul(axes[1], p[1])), mul(axes[2], p[2])));
                     view.flat(p)
                 };
-                out.extend(marks.iter().map(|m| m.scaled(scale).map(place)));
+                out.extend(marks.iter().map(|(m, sub)| (m.scaled(scale).map(place), sub.clone())));
             }
             if out.len() > MAX_SYMBOLS * 4 {
                 return Err(said(format!("its nested parts draw more than {} marks", MAX_SYMBOLS * 4)));
@@ -2614,6 +2655,15 @@ impl Family {
 
     /// The marks of its visible symbols `pick` keeps, sized by `values`, each worked out and checked.
     fn marks_where<'a>(&'a self, values: &BTreeMap<String, Val>, pick: &dyn Fn(&Symbol) -> bool) -> Result<Vec<Mark>, String> {
+        Ok(self.marks_where_styled(values, pick)?.into_iter().map(|(m, _)| m).collect())
+    }
+
+    /// [`Family::marks_where`], each mark with the subcategory of the symbol it came from.
+    fn marks_where_styled<'a>(
+        &'a self,
+        values: &BTreeMap<String, Val>,
+        pick: &dyn Fn(&Symbol) -> bool,
+    ) -> Result<Vec<(Mark, Option<String>)>, String> {
         let mut read = HashMap::new();
         let mut out = Vec::new();
         for (i, sym) in self.symbols.iter().enumerate() {
@@ -2641,7 +2691,7 @@ impl Family {
                 if r <= 0.0 {
                     return Err(said(format!("its dot has radius {r}; it needs a radius above zero")));
                 }
-                out.push(Mark::Dot { centre, radius: r });
+                out.push((Mark::Dot { centre, radius: r }, sym.subcategory.clone()));
                 continue;
             }
             if let Some(l) = &sym.text {
@@ -2650,7 +2700,7 @@ impl Family {
                     return Err(said(format!("its text has height {height}; it needs a height above zero")));
                 }
                 let text = said_text(&l.value, values).map_err(said)?;
-                out.push(Mark::Label { at, height, text, align: l.align });
+                out.push((Mark::Label { at, height, text, align: l.align }, sym.subcategory.clone()));
                 continue;
             }
             let mut pts = Vec::new();
@@ -2670,7 +2720,7 @@ impl Family {
                     P2(centre.0 + r * c, centre.1 + r * s)
                 }));
             }
-            out.push(Mark::Line(pts));
+            out.push((Mark::Line(pts), sym.subcategory.clone()));
         }
         Ok(out)
     }

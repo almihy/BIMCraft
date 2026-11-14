@@ -2437,14 +2437,14 @@ fn elevation_symbols(d: &mut Drawing, m: &Model, v: &Section, look: &Look, cance
             return None;
         }
         d.owner = Some(id);
-        for line in m.elevation_lines(e, looking, d.detail) {
+        for (line, sub) in m.elevation_lines(e, looking, d.detail) {
             // Before the line or past the depth, it isn't seen.
             let ahead = |p: &[f64; 3]| (P2(p[0], p[1]) - v.start).dot(looking);
             if line.iter().any(|p| ahead(p) < -1e-6 || ahead(p) > depth) {
                 continue;
             }
             let pts: Vec<P2> = line.iter().map(|p| P2((P2(p[0], p[1]) - v.start).dot(u), p[2])).collect();
-            d.line(&pts, BY_CATEGORY, INK, false);
+            family_line(d, m, e, sub.as_deref(), &pts, false, false);
         }
     }
     d.part(was);
@@ -3743,6 +3743,36 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
     d
 }
 
+/// A line of a door's or a window's family `e`, of its subcategory `sub` where it has one: in the project's Object Style of
+/// `Category/Subcategory` (its cut pen where `cut`, else its projection pen; its colour and its line pattern), each as far as it
+/// says one; else in its category's pen as a family's lines are.
+fn family_line(d: &mut Drawing, m: &Model, e: &Element, sub: Option<&str>, pts: &[P2], cut: bool, closed: bool) {
+    let Some(style) = sub.and_then(|s| m.subcategory_style(crate::graphics::category_of(m, e), s)) else {
+        return d.line(pts, BY_CATEGORY, INK, closed);
+    };
+    let pen = (if cut { style.cut } else { style.projection }).unwrap_or(BY_CATEGORY);
+    let color = style.color.unwrap_or([INK.0, INK.1, INK.2]);
+    let line = crate::lines::LineStyle { pen, color, pattern: style.pattern.clone() };
+    let px = pts.iter().map(|p| d.view.px(*p)).collect();
+    d.styled(m, &line, px, closed);
+}
+
+/// [`marks`] of a door's or a window's family `e`: each in the subcategory of the symbol it came from ([`family_line`]).
+fn family_marks(d: &mut Drawing, m: &Model, e: &Element, marks: &[(crate::family::Mark, Option<String>)]) {
+    use crate::family::Mark;
+    for (mark, sub) in marks {
+        match mark {
+            Mark::Line(pts) => family_line(d, m, e, sub.as_deref(), pts, false, false),
+            Mark::Label { at, height, text, align } => {
+                for line in crate::family::lettering(text, *at, *height, *align) {
+                    family_line(d, m, e, sub.as_deref(), &line, false, false);
+                }
+            }
+            dot => self::marks(d, std::slice::from_ref(dot)),
+        }
+    }
+}
+
 /// A family's plan marks, in the model's axes: its lines and lettering in the category's pen, its dots solid ink.
 fn marks(d: &mut Drawing, marks: &[crate::family::Mark]) {
     use crate::family::Mark;
@@ -4264,17 +4294,18 @@ fn opening(d: &mut Drawing, m: &Model, e: &Element, o: &Opening, w: &Wall, cut: 
         let detail = d.detail;
         for piece in m.opening_pieces(e).iter().filter(|p| p.in_plan_cut(detail, cut, true)) {
             // What the cut plane crosses is drawn as its section (a frame's jambs, their rebates and stops), as Revit's plan draws
-            // it; what lies under the plane is drawn by its outline from above.
+            // it, in its subcategory's cut weight; what lies under the plane is drawn by its outline from above.
+            let sub = piece.subcategory.as_deref();
             if piece.bottom < cut - crate::family::check::CUT_EPS && cut < piece.top {
                 for (run, closed) in crate::family::compare::section_runs(&piece.tris, cut) {
-                    d.line(&run, BY_CATEGORY, INK, closed);
+                    family_line(d, m, e, sub, &run, true, closed);
                 }
             } else {
-                d.line(&piece.outline, BY_CATEGORY, INK, true);
+                family_line(d, m, e, sub, &piece.outline, false, true);
             }
         }
         d.part(Part::Projection);
-        marks(d, &m.opening_marks(e, detail));
+        family_marks(d, m, e, &m.opening_marks_styled(e, detail));
         d.part(Part::Cut);
         return;
     }

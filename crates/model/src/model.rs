@@ -4977,13 +4977,23 @@ impl Model {
 
     /// [`Model::opening_local`], its plan marks those drawn at detail level `detail`.
     fn opening_local_at(&self, e: &Element, detail: crate::graphics::Detail) -> Option<(Vec<Piece>, Vec<crate::family::Mark>)> {
+        let (pieces, marks) = self.opening_local_styled(e, detail)?;
+        Some((pieces, marks.into_iter().map(|(m, _)| m).collect()))
+    }
+
+    /// [`Model::opening_local_at`], each mark with the subcategory of the symbol it came from.
+    fn opening_local_styled(
+        &self,
+        e: &Element,
+        detail: crate::graphics::Detail,
+    ) -> Option<(Vec<Piece>, Vec<(crate::family::Mark, Option<String>)>)> {
         let (Element::Door(o) | Element::Window(o)) = e else { return None };
         let f = self.families.get(o.family.as_ref()?)?;
         let values = f.values_in(&o.type_name, &o.params, self.thickness(self.wall(o.host)?)).ok()?;
         let plan = crate::family::SymbolView::Plan;
         let others = |n: &str| self.families.get(n);
         let (pieces, marks) =
-            (f.pieces_with(&o.type_name, &values, &others).ok()?, f.marks_with(&o.type_name, &values, plan, Some(detail), &others).ok()?);
+            (f.pieces_with(&o.type_name, &values, &others).ok()?, f.marks_styled(&o.type_name, &values, plan, Some(detail), &others).ok()?);
         let (fx, fy) = (if o.flip_hand { -1.0 } else { 1.0 }, if o.flip_facing { -1.0 } else { 1.0 });
         let mirrored = fx * fy < 0.0;
         let flip = |p: [f64; 3]| [fx * p[0] + 0.0, fy * p[1] + 0.0, p[2]];
@@ -4996,7 +5006,7 @@ impl Model {
                 Piece { tris: tris.collect(), outline: if mirrored { outline.into_iter().rev().collect() } else { outline }, ..pc }
             })
             .collect();
-        let marks = marks.iter().map(|k| k.map(|q| P2(fx * q.0 + 0.0, fy * q.1 + 0.0))).collect();
+        let marks = marks.iter().map(|(k, sub)| (k.map(|q| P2(fx * q.0 + 0.0, fy * q.1 + 0.0)), sub.clone())).collect();
         Some((pieces, marks))
     }
 
@@ -5023,17 +5033,24 @@ impl Model {
 
     /// The marks a door's or window's family draws in plan at detail level `detail`, where it stands.
     pub fn opening_marks(&self, e: &Element, detail: crate::graphics::Detail) -> Vec<crate::family::Mark> {
+        self.opening_marks_styled(e, detail).into_iter().map(|(m, _)| m).collect()
+    }
+
+    /// [`Model::opening_marks`], each with the subcategory of the symbol it came from.
+    pub fn opening_marks_styled(&self, e: &Element, detail: crate::graphics::Detail) -> Vec<(crate::family::Mark, Option<String>)> {
         let (Element::Door(o) | Element::Window(o)) = e else { return Vec::new() };
-        let (Some((_, marks)), Some((at, u, _))) = (self.opening_local_at(e, detail), self.opening_frame(o)) else { return Vec::new() };
-        marks.iter().map(|k| k.map(|q| at + u * q.0 + u.perp() * q.1)).collect()
+        let (Some((_, marks)), Some((at, u, _))) = (self.opening_local_styled(e, detail), self.opening_frame(o)) else {
+            return Vec::new();
+        };
+        marks.iter().map(|(k, sub)| (k.map(|q| at + u * q.0 + u.perp() * q.1), sub.clone())).collect()
     }
 
     /// The lines a component's or a door's or window's family draws in a section or an elevation looking along `looking` at
-    /// detail level `detail`, in the model (mm, z up): its `front` symbols where the view looks along the family's y within
+    /// detail level `detail`, in the model (mm, z up), each with the subcategory of the symbol it came from: its `front` symbols where the view looks along the family's y within
     /// 45°, else its `side` ones (Revit's symbolic lines in an elevation: a door's Elevation Swing). A `front` symbol's
     /// (x, z) stand in the family's plane y = 0 and a `side` one's (y, z) in x = 0, placed as its forms are (mirrored,
     /// flipped, turned and moved), so the view from the back or the left sees them mirrored.
-    pub fn elevation_lines(&self, e: &Element, looking: P2, detail: crate::graphics::Detail) -> Vec<Vec<[f64; 3]>> {
+    pub fn elevation_lines(&self, e: &Element, looking: P2, detail: crate::graphics::Detail) -> Vec<(Vec<[f64; 3]>, Option<String>)> {
         use crate::family::{Mark, SymbolView};
         let (family, type_name, params, wall) = match e {
             Element::Component(c) => (&c.family, &c.type_name, &c.params, None),
@@ -5076,12 +5093,12 @@ impl Model {
         };
         // Its nested parts' symbols that face the view too (a window's sash, a door's handle).
         let others = |n: &str| self.families.get(n);
-        let Ok(marks) = values.and_then(|v| f.marks_with(type_name, &v, view, Some(detail), &others)) else { return Vec::new() };
+        let Ok(marks) = values.and_then(|v| f.marks_styled(type_name, &v, view, Some(detail), &others)) else { return Vec::new() };
         let lift = |q: P2| if side { place([0.0, q.0, q.1]) } else { place([q.0, 0.0, q.1]) };
         marks
             .into_iter()
-            .filter_map(|k| match k {
-                Mark::Line(pts) => Some(pts.into_iter().map(lift).collect()),
+            .filter_map(|(k, sub)| match k {
+                Mark::Line(pts) => Some((pts.into_iter().map(lift).collect(), sub)),
                 _ => None,
             })
             .collect()
