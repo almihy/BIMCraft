@@ -1,4 +1,4 @@
-//! The view control bar under a view, as Revit's has it: the view's Scale and Detail Level, or the 3D view's Visual Style, which
+//! The view control bar under a view, as Revit's has it: the view's Scale and Detail Level, or the 3D view's Detail Level and Visual Style, which
 //! the project keeps (the `scale`, `detail` and `visual_style` commands), then Temporary Hide/Isolate and Reveal Hidden Elements. What is hidden or revealed here is
 //! the window's, per view: it isn't in the project, saved or undone. Last on the bar, the control port's state (`control.rs`). The view draws a copy of the model with its graphics
 //! changed ([`BimApp::view_model`]), made once for each model and each setting, through the same `graphics` command the
@@ -395,6 +395,13 @@ impl BimApp {
                 }
             });
         });
+        self.detail_menu(ui, view);
+        ui.separator();
+    }
+
+    /// The Detail Level menu of `view`: a plan's, a section's, an elevation's or a 3D view's, as Revit's bar has it.
+    fn detail_menu(&mut self, ui: &mut Ui, view: &Value) {
+        let now = self.graphics_shown();
         let tip = msg!(
             "Detail Level: Coarse draws what is cut in one poché, Medium adds the layers and the symbols of openings, Fine the patterns"
         );
@@ -406,7 +413,6 @@ impl BimApp {
                 }
             }
         });
-        ui.separator();
     }
 
     /// Visual Style (WF, HL, SD): how the 3D view draws its surfaces; in another view, says there is none to set.
@@ -444,6 +450,9 @@ impl BimApp {
                     match (self.graphic_view(), self.sheet == Sheet::View3D) {
                         (Some(view), false) => self.scale_and_detail(ui, &view),
                         (_, true) => {
+                            // A 3D view's Detail Level, as Revit's: which of a family's forms it draws.
+                            let view = self.active_3d().map_or_else(|| json!("{3D}"), |id| json!(id));
+                            self.detail_menu(ui, &view);
                             let now = self.graphics_shown().style;
                             let tip = msg!(
                                 "Visual Style: how the 3D view draws surfaces: Shaded, Hidden Line (WF, HL and SD set them) or Wireframe"

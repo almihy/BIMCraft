@@ -26,7 +26,8 @@ pub(crate) fn problems(f: &Family, has_material: &dyn Fn(&str) -> bool) -> (Vec<
 /// the ones that say a name it has no parameter of. `Wall Thickness`, the wall's own, counts as one
 /// of a door's or a window's; no other family's formulas may say it.
 fn formulas(f: &Family, out: &mut Vec<String>) {
-    let given: BTreeSet<&str> = f.parameters.iter().map(|p| p.name.as_str()).collect();
+    let refs: Vec<String> = f.references.iter().map(|r| super::ref_key(&r.name)).collect();
+    let given: BTreeSet<&str> = f.parameters.iter().map(|p| p.name.as_str()).chain(refs.iter().map(String::as_str)).collect();
     let read = |who: &str, formula: &str, out: &mut Vec<String>| {
         // A formula longer than what it may be is `Family::check`'s to count, not read again here.
         if formula.chars().count() > MAX_FORMULA {
@@ -48,28 +49,31 @@ fn formulas(f: &Family, out: &mut Vec<String>) {
         }
     }
     for (i, form) in f.forms.iter().enumerate() {
-        let circle = form.circle.iter().flat_map(|c| c.centre.iter().chain([&c.radius]));
-        let exprs = form
-            .profile
-            .iter()
-            .flatten()
-            .chain([&form.from, &form.to])
-            .chain(&form.visible)
-            .chain(circle)
-            .chain(form.axis.iter().flatten().flatten());
-        for e in exprs {
+        for e in form.exprs() {
             if let Expr::Formula(formula) = e {
                 read(&format!("form {}", i + 1), formula, out);
             }
         }
     }
+    for r in &f.references {
+        if let Expr::Formula(formula) = &r.at {
+            read(&format!("reference `{}`", r.name), formula, out);
+        }
+    }
+    for (i, n) in f.nested.iter().enumerate() {
+        for e in n.at.iter().chain([&n.rotation]).chain(&n.visible).chain(&n.scale).chain(n.params.values()) {
+            if let Expr::Formula(formula) = e {
+                read(&format!("nested part {}", i + 1), formula, out);
+            }
+        }
+    }
+    for e in f.cut.iter().flat_map(|c| [&c.width, &c.height]) {
+        if let Expr::Formula(formula) = e {
+            read("its `cut`", formula, out);
+        }
+    }
     for (i, sym) in f.symbols.iter().enumerate() {
-        let exprs = sym
-            .line
-            .iter()
-            .flatten()
-            .chain(&sym.visible)
-            .chain(sym.arc.iter().flat_map(|c| c.centre.iter().chain([&c.radius, &c.from, &c.to])));
+        let exprs = sym.line.iter().flatten().chain(&sym.visible).chain(sym.arc.iter().flat_map(super::Curve::exprs));
         for e in exprs {
             if let Expr::Formula(formula) = e {
                 read(&format!("symbol {}", i + 1), formula, out);
@@ -82,7 +86,7 @@ fn formulas(f: &Family, out: &mut Vec<String>) {
 /// a window's form wholly outside the opening it stands in, one thicker than the wall it's in, a
 /// plan with nothing drawn on it, and a door's leaf drawn shut in a plan that draws it open. A fault every type has is one warning naming all of them.
 fn geometry(f: &Family, out: &mut Vec<String>) {
-    if f.category.hosted() && f.symbols.is_empty() {
+    if f.category.hosted() && !f.symbols.iter().any(|y| y.view == super::SymbolView::Plan) {
         out.push("its plan draws no symbols: a door's or a window's plan shows its swing or its sill, and this one shows nothing".into());
     }
     for i in f.shut_leaves() {
@@ -101,9 +105,9 @@ fn geometry(f: &Family, out: &mut Vec<String>) {
         let Ok(values) = f.values_in(ty, &BTreeMap::new(), DEFAULT_WALL) else {
             continue;
         };
-        let shapes = f.shapes(&values);
+        let shapes = f.shapes(ty, &values);
         for void in shapes.iter().filter(|s| s.void) {
-            let cut = shapes.iter().any(|solid| !solid.void && solid.index < void.index && void.over(solid));
+            let cut = shapes.iter().any(|solid| !solid.void && void.over(solid) && solid.index < void.index);
             if !cut {
                 faults
                     .entry(format!("form {}: its void passes through no solid form listed before it; it cuts nothing", void.index + 1))
@@ -114,7 +118,10 @@ fn geometry(f: &Family, out: &mut Vec<String>) {
         if !f.category.hosted() {
             continue;
         }
-        let (width, height) = (number(&values, WIDTH), number(&values, HEIGHT));
+        let (width, height) = match f.cut_size(&values) {
+            Ok(Some((w, h))) => (Some(w), Some(h)),
+            _ => (number(&values, WIDTH), number(&values, HEIGHT)),
+        };
         let wall = number(&values, WALL).unwrap_or(DEFAULT_WALL);
         for solid in shapes.iter().filter(|s| !s.void) {
             if let (Some(w), Some(h)) = (width, height)

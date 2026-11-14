@@ -19,8 +19,18 @@ use crate::geom::v3::{P3, add, cross, mul};
 use crate::model::{MAX_COORD, MAX_TEXT};
 
 mod bounds;
+pub mod check;
+pub mod compare;
 mod leaves;
+mod parametric;
+pub mod revit;
+mod shapes;
 mod validate;
+
+pub use parametric::{
+    Axis, Catalog, CatalogColumn, Dimension, DimensionKind, Editable, MAX_DIMENSION_REFERENCES, MAX_DIMENSIONS, MAX_NESTED, MAX_NESTING,
+    MAX_REFERENCES, Nested, Reference, TypeCheck, ref_key,
+};
 
 /// What a family is: how IFC names its components; a door or a window is hosted in a wall, which
 /// its `Width` and `Height` open.
@@ -199,7 +209,7 @@ pub const WIDTH: &str = msg!("Width");
 pub const HEIGHT: &str = msg!("Height");
 pub const SILL: &str = ui_msg!("Sill Height");
 
-/// What a parameter holds.
+/// What a parameter holds. `text` is a string a schedule shows and no formula reads (Revit's Text parameter).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
@@ -209,6 +219,7 @@ pub enum Kind {
     Angle,
     YesNo,
     Material,
+    Text,
 }
 
 /// A parameter: a type's (each type its own value) or, `instance`, each component's.
@@ -220,12 +231,283 @@ pub struct Parameter {
     pub kind: Kind,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub instance: bool,
-    /// Where no type or component sets it: a number (yes/no, true or false), or a material's name.
+    /// Where no type or component sets it: a number (yes/no, true or false), a material's name, or a text's words.
     #[serde(default)]
     pub value: Value,
     /// Computed from the others, as Revit's formulas are.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub formula: Option<String>,
+    /// The unit a `number` is shown in (`m²`, `W`, `%`): said beside it, never converted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    /// Revit's parameter group (`Dimensions`, `Construction`, `Identity Data`): Properties and Type Properties list it under it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn is_yes(b: &bool) -> bool {
+    *b
+}
+
+/// Revit's Visibility Settings of a family's form (Family Element Visibility Settings: Plan/RCP, Front/Back, Left/Right, When
+/// cut in Plan/RCP, Coarse/Medium/Fine): the detail levels a view draws it at, and whether a plan (or a ceiling plan), a view
+/// along the family's y (its front or back) and a view along its x (its left or right) draw it. Each is true unless it says
+/// otherwise.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Show {
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub coarse: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub medium: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub fine: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub plan: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub front: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub side: bool,
+    /// Revit's Top/Bottom: a plan draws it seen from above, wholly below its cut plane.
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub plan_top: bool,
+    /// Revit's Plan/RCP when cut: a plan draws it where its cut plane passes through it.
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub plan_cut: bool,
+}
+
+impl Default for Show {
+    fn default() -> Show {
+        Show { coarse: true, medium: true, fine: true, plan: true, front: true, side: true, plan_top: true, plan_cut: true }
+    }
+}
+
+impl Show {
+    /// Revit's default: every view, every detail level.
+    pub const ALL: Show =
+        Show { coarse: true, medium: true, fine: true, plan: true, front: true, side: true, plan_top: true, plan_cut: true };
+
+    /// What a view (a plan, 3D, a section, an elevation, IFC) draws of a form whose settings are `show`: its settings, or
+    /// every one, as Revit's default (a door's or a window's form that says nothing is drawn in a Coarse plan too).
+    pub fn in_view(show: Option<Show>) -> Show {
+        show.unwrap_or(Show::ALL)
+    }
+
+    /// What both say draws: a nested part's settings over those of a form of the family it is of.
+    pub fn and(self, o: Show) -> Show {
+        Show {
+            coarse: self.coarse && o.coarse,
+            medium: self.medium && o.medium,
+            fine: self.fine && o.fine,
+            plan: self.plan && o.plan,
+            front: self.front && o.front,
+            side: self.side && o.side,
+            plan_top: self.plan_top && o.plan_top,
+            plan_cut: self.plan_cut && o.plan_cut,
+        }
+    }
+
+    /// Whether a view at detail level `d` draws it.
+    pub fn at(&self, d: crate::graphics::Detail) -> bool {
+        use crate::graphics::Detail;
+        match d {
+            Detail::Coarse => self.coarse,
+            Detail::Medium => self.medium,
+            Detail::Fine => self.fine,
+        }
+    }
+}
+
+/// The detail levels a symbol is drawn at (Revit's Visibility Settings of a symbolic line), each true unless it says.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Levels {
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub coarse: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub medium: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub fine: bool,
+}
+
+impl Default for Levels {
+    fn default() -> Levels {
+        Levels { coarse: true, medium: true, fine: true }
+    }
+}
+
+impl Levels {
+    /// What a symbol that says nothing is drawn at: every detail level but Coarse.
+    pub const UNSAID: Levels = Levels { coarse: false, medium: true, fine: true };
+
+    /// What a symbol whose settings are `levels` is drawn at: its settings, or what a symbol that says nothing is drawn at.
+    pub fn of(levels: Option<Levels>) -> Levels {
+        levels.unwrap_or(Levels::UNSAID)
+    }
+
+    /// Whether a view at detail level `d` draws it.
+    pub fn at(&self, d: crate::graphics::Detail) -> bool {
+        Show { coarse: self.coarse, medium: self.medium, fine: self.fine, ..Show::default() }.at(d)
+    }
+}
+
+/// The plane a symbol's points are in: `plan`, (x, y) seen from above; `front`, (x, z) seen from the family's front, looking
+/// along +y (Revit's Front elevation of a family; its Back mirrors it); `side`, (y, z) seen from +x looking along −x (Revit's
+/// Right; Left mirrors it).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SymbolView {
+    #[default]
+    Plan,
+    Front,
+    Side,
+}
+
+impl SymbolView {
+    fn is_plan(&self) -> bool {
+        *self == SymbolView::Plan
+    }
+
+    /// The direction a view looks along, in the family's axes (up for a plan, along y for a front, along x for a side).
+    fn normal(self) -> P3 {
+        let mut n = [0.0; 3];
+        n[self.axis()] = 1.0;
+        n
+    }
+
+    /// Which of the family's axes (x 0, y 1, z 2) a view looks along.
+    fn axis(self) -> usize {
+        match self {
+            SymbolView::Plan => 2,
+            SymbolView::Front => 1,
+            SymbolView::Side => 0,
+        }
+    }
+
+    /// A point of this view's drawing, in the family's axes: a plan's (x, y) at the floor, a front's (x, z) and a side's (y, z).
+    fn lift(self, q: P2) -> P3 {
+        match self {
+            SymbolView::Plan => [q.0, q.1, 0.0],
+            SymbolView::Front => [q.0, 0.0, q.1],
+            SymbolView::Side => [0.0, q.0, q.1],
+        }
+    }
+
+    /// A point of the family's axes as this view draws it: (x, y), (x, z) or (y, z).
+    fn flat(self, p: P3) -> P2 {
+        match self {
+            SymbolView::Plan => P2(p[0], p[1]),
+            SymbolView::Front => P2(p[0], p[2]),
+            SymbolView::Side => P2(p[1], p[2]),
+        }
+    }
+}
+
+/// Where a family came from, which the engine carries and shows and never acts on: the firm library's entry and its version
+/// (set by whoever hands the definition over to load), the application and its own category name (`Revit 2025`, `Doors`),
+/// and the file (`Single-Flush.rfa`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Source {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub library: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+}
+
+/// What a family is hosted by, as Revit's families are: a level (the default), a wall (a door, a window), a floor, a ceiling, a
+/// roof, a face, or nothing at all. A door's and a window's stand in a wall whatever it says; the others place on a level.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Host {
+    #[default]
+    Level,
+    Wall,
+    Floor,
+    Ceiling,
+    Roof,
+    Face,
+    #[serde(rename = "none")]
+    Unhosted,
+}
+
+impl Host {
+    fn is_level(&self) -> bool {
+        *self == Host::Level
+    }
+}
+
+/// A subcategory of a family's category, as Revit's (`Frame/Mullion`, `Panel`, `Plan Swing`, `Elevation Swing`): its line
+/// colour, its material, its line weights (seen, cut) and its line pattern where it sets them.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Subcategory {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<[u8; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material: Option<String>,
+    /// The pen its lines are drawn in where they are seen (Revit's Line Weight, Projection), 1 to 16; none, its category's. Revit's
+    /// -1, a subcategory with no weight (a category that has no cut), reads as none.
+    #[serde(default, deserialize_with = "weight", skip_serializing_if = "Option::is_none")]
+    pub projection: Option<crate::pen::Pen>,
+    /// The pen its forms are outlined in where a view cuts them (Line Weight, Cut), 1 to 16; none, its category's.
+    #[serde(default, deserialize_with = "weight", skip_serializing_if = "Option::is_none")]
+    pub cut: Option<crate::pen::Pen>,
+    /// The line pattern its lines are drawn in, by name: one of the family's `line_patterns` or the project's; none, solid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<String>,
+}
+
+/// A line weight as Revit says it: a pen, or -1 (or null) where it has none, which is none.
+fn weight<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<crate::pen::Pen>, D::Error> {
+    match Option::<f64>::deserialize(d)? {
+        Some(n) if n < 0.0 => Ok(None),
+        Some(n) => serde_json::from_value(serde_json::json!(n)).map(Some).map_err(serde::de::Error::custom),
+        None => Ok(None),
+    }
+}
+
+/// A door's or a window's opening in its wall where it isn't `Width` by `Height` (a frame outside the leaf): numbers or
+/// formulas over the family's parameters, mm. Rectangular, from the sill up, centred on the opening.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Cut {
+    pub width: Expr,
+    pub height: Expr,
+}
+
+/// Whether a family has Revit's flip controls: `hand` (left and right) and `facing` (in and out). Without one, the canvas
+/// shows no arrow for it; the `flip` command flips it all the same, as Revit's API does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Flips {
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub hand: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub facing: bool,
+}
+
+impl Default for Flips {
+    fn default() -> Flips {
+        Flips { hand: true, facing: true }
+    }
+}
+
+impl Flips {
+    fn is_default(&self) -> bool {
+        *self == Flips::default()
+    }
 }
 
 /// A number, or a formula over the family's parameters.
@@ -261,7 +543,11 @@ pub struct Circle {
     pub radius: Expr,
 }
 
-/// A round line: its middle, its radius, and the angles it runs between, degrees counter-clockwise from +x.
+/// A round line: its middle, its radius, and the angles it runs between, degrees counter-clockwise from +x. Where it has
+/// `start` and `end` (points in the family's plane, as Revit's arc is its centre and two ends, constrained), its angles
+/// follow them as they move: it runs from the angle of `start` about its middle to the angle of `end`, the way round
+/// that `from` and `to` say (counter-clockwise when `to` is not below `from`, else clockwise), a whole turn when the two
+/// ends are one point (or on one line from its middle); its radius is `start`'s distance from its middle, not `radius`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Curve {
@@ -269,7 +555,71 @@ pub struct Curve {
     pub radius: Expr,
     #[serde(default)]
     pub from: Expr,
+    #[serde(default)]
     pub to: Expr,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<[Expr; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<[Expr; 2]>,
+}
+
+/// An arc worked out: its middle, its radius, and the angles it runs between, degrees, counter-clockwise from +x.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Sweep {
+    pub centre: P2,
+    pub radius: f64,
+    pub from: f64,
+    pub to: f64,
+}
+
+/// How near two ends are one point, mm: an arc between them is a whole turn.
+const ONE_POINT: f64 = 1e-6;
+
+impl Curve {
+    /// Its every number or formula.
+    pub fn exprs(&self) -> impl Iterator<Item = &Expr> {
+        self.centre.iter().chain([&self.radius, &self.from, &self.to]).chain(self.start.iter().flatten()).chain(self.end.iter().flatten())
+    }
+
+    /// Whether it follows its ends: it has both.
+    pub fn follows_ends(&self) -> bool {
+        self.start.is_some() && self.end.is_some()
+    }
+
+    /// Its middle, its radius and its angles, worked out by `values`. Where it follows its ends, its angles are those of its
+    /// ends about its middle; the way round is that of the `from` and `to` it was given.
+    fn sweep<'a>(&'a self, values: &BTreeMap<String, Val>, read: &mut HashMap<&'a str, Result<Node, String>>) -> Result<Sweep, String> {
+        let mut n = |e: &'a Expr| number(e, values, read);
+        let (centre, radius, from, to) = (P2(n(&self.centre[0])?, n(&self.centre[1])?), n(&self.radius)?, n(&self.from)?, n(&self.to)?);
+        let (Some(start), Some(end)) = (&self.start, &self.end) else { return Ok(Sweep { centre, radius, from, to }) };
+        let (start, end) = (P2(n(&start[0])?, n(&start[1])?), P2(n(&end[0])?, n(&end[1])?));
+        let angle = |p: P2| (p.1 - centre.1).atan2(p.0 - centre.0).to_degrees();
+        let (a0, a1) = (angle(start), angle(end));
+        let ccw = to >= from;
+        let mut turn = if start.dist(end) < ONE_POINT {
+            360.0
+        } else if ccw {
+            (a1 - a0).rem_euclid(360.0)
+        } else {
+            (a0 - a1).rem_euclid(360.0)
+        };
+        // Ends at one angle but at different distances from the middle (nothing to turn through) are the whole way round.
+        if turn < 1e-9 && start.dist(end) >= ONE_POINT {
+            turn = 360.0;
+        }
+        // Its ends set its radius: where nothing binds the radius to a parameter, the ends' distance from the middle is it.
+        Ok(Sweep { centre, radius: centre.dist(start), from: a0, to: if ccw { a0 + turn } else { a0 - turn } })
+    }
+
+    /// Its two ends, worked out by `values`: at its angles, `radius` from its middle; none where it doesn't work out.
+    pub(crate) fn ends(&self, values: &BTreeMap<String, Val>) -> Option<(P2, P2)> {
+        let s = self.sweep(values, &mut HashMap::new()).ok()?;
+        let at = |deg: f64| {
+            let (sin, cos) = deg.to_radians().sin_cos();
+            P2(s.centre.0 + s.radius * cos, s.centre.1 + s.radius * sin)
+        };
+        Some((at(s.from), at(s.to)))
+    }
 }
 
 /// Which side of its point a label's lettering starts, is centred or ends.
@@ -310,6 +660,9 @@ pub enum Mark {
     Label { at: P2, height: f64, text: String, align: Align },
 }
 
+/// A mark with the subcategory of the symbol it came from: what the pens, colour and pattern it is drawn in come from.
+pub type Marked = (Mark, Option<String>);
+
 impl Mark {
     /// The same mark with every point taken through `f`.
     pub fn map(&self, f: impl Fn(P2) -> P2) -> Mark {
@@ -319,102 +672,17 @@ impl Mark {
             Mark::Label { at, height, text, align } => Mark::Label { at: f(*at), height: *height, text: text.clone(), align: *align },
         }
     }
-}
 
-/// Revit's Visibility Settings of a family's form: the detail levels a view draws it at, and whether a plan (or a ceiling
-/// plan), a view along the family's y (its front or back) and a view along its x (its left or right) draw it. Each is true
-/// unless it says otherwise.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Show {
-    #[serde(default = "yes", skip_serializing_if = "is_yes")]
-    pub coarse: bool,
-    #[serde(default = "yes", skip_serializing_if = "is_yes")]
-    pub medium: bool,
-    #[serde(default = "yes", skip_serializing_if = "is_yes")]
-    pub fine: bool,
-    #[serde(default = "yes", skip_serializing_if = "is_yes")]
-    pub plan: bool,
-    #[serde(default = "yes", skip_serializing_if = "is_yes")]
-    pub front: bool,
-    #[serde(default = "yes", skip_serializing_if = "is_yes")]
-    pub side: bool,
-    /// Revit's Top/Bottom: a plan draws it seen from above, wholly below its cut plane.
-    #[serde(default = "yes", skip_serializing_if = "is_yes")]
-    pub plan_top: bool,
-    /// Revit's Plan/RCP when cut: a plan draws it where its cut plane passes through it.
-    #[serde(default = "yes", skip_serializing_if = "is_yes")]
-    pub plan_cut: bool,
-}
-
-impl Default for Show {
-    fn default() -> Show {
-        Show { coarse: true, medium: true, fine: true, plan: true, front: true, side: true, plan_top: true, plan_cut: true }
-    }
-}
-
-impl Show {
-    /// What a form that says nothing is drawn as, as before Visibility Settings: in every view, at every detail level but
-    /// Coarse.
-    pub const UNSAID: Show =
-        Show { coarse: false, medium: true, fine: true, plan: true, front: true, side: true, plan_top: true, plan_cut: true };
-
-    /// What `show` draws: its settings, or what a form that says nothing is drawn as.
-    pub fn of(show: Option<Show>) -> Show {
-        show.unwrap_or(Show::UNSAID)
-    }
-
-    /// Whether a view at detail level `d` draws it.
-    pub fn at(&self, d: crate::graphics::Detail) -> bool {
-        use crate::graphics::Detail;
-        match d {
-            Detail::Coarse => self.coarse,
-            Detail::Medium => self.medium,
-            Detail::Fine => self.fine,
+    /// The same mark drawn `k` times as large about the origin: its points and a dot's radius, not a label's lettering.
+    pub fn scaled(&self, k: f64) -> Mark {
+        match self {
+            Mark::Dot { radius, .. } => match self.map(|p| P2(p.0 * k, p.1 * k)) {
+                Mark::Dot { centre, .. } => Mark::Dot { centre, radius: radius * k },
+                other => other,
+            },
+            _ => self.map(|p| P2(p.0 * k, p.1 * k)),
         }
     }
-}
-
-/// The detail levels a symbol is drawn at (Revit's Visibility Settings of a symbolic line), each true unless it says.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Levels {
-    #[serde(default = "yes", skip_serializing_if = "is_yes")]
-    pub coarse: bool,
-    #[serde(default = "yes", skip_serializing_if = "is_yes")]
-    pub medium: bool,
-    #[serde(default = "yes", skip_serializing_if = "is_yes")]
-    pub fine: bool,
-}
-
-impl Default for Levels {
-    fn default() -> Levels {
-        Levels { coarse: true, medium: true, fine: true }
-    }
-}
-
-impl Levels {
-    /// What a symbol that says nothing is drawn at: every detail level but Coarse.
-    pub const UNSAID: Levels = Levels { coarse: false, medium: true, fine: true };
-
-    /// What `levels` draws at: its settings, or what a symbol that says nothing is drawn at.
-    pub fn of(levels: Option<Levels>) -> Levels {
-        levels.unwrap_or(Levels::UNSAID)
-    }
-
-    /// Whether a view at detail level `d` draws it.
-    pub fn at(&self, d: crate::graphics::Detail) -> bool {
-        Show { coarse: self.coarse, medium: self.medium, fine: self.fine, ..Show::default() }.at(d)
-    }
-}
-
-fn yes() -> bool {
-    true
-}
-
-#[allow(clippy::trivially_copy_pass_by_ref)] // serde's `skip_serializing_if` passes a reference
-fn is_yes(b: &bool) -> bool {
-    *b
 }
 
 /// A mark a family's plan draws in its own axes, and no view shows otherwise (a door's swing, a socket's circle): a `line`
@@ -438,9 +706,23 @@ pub struct Symbol {
     pub dot: Option<Circle>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible: Option<Expr>,
+    /// The plane its points are in, and so the views that draw it: plans (the default), or sections and elevations along
+    /// the family's y (`front`) or x (`side`).
+    #[serde(default, skip_serializing_if = "SymbolView::is_plan")]
+    pub view: SymbolView,
     /// The detail levels it is drawn at; none, every level but Coarse.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show: Option<Levels>,
+    /// The types it is drawn in; none, every type.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub types: Vec<String>,
+    /// One of its family's `subcategories`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subcategory: Option<String>,
+    /// Revit's own result for its types, kept as the check and the fallback: drawn only in a type that draws Revit's
+    /// ([`Family::draws_snapshot`]), and a parametric one only in a type that doesn't.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub snapshot: bool,
 }
 
 impl Symbol {
@@ -649,9 +931,135 @@ pub struct Form {
     /// Shared, so an undo step's copy of the model doesn't copy it.
     #[serde(default, skip_serializing_if = "no_mesh")]
     pub mesh: Arc<Vec<[P3; 3]>>,
-    /// Revit's Visibility Settings: the detail levels and the views it is drawn in; none, every one, as before.
+    /// Revit's Visibility Settings: the detail levels and the views it is drawn in; none (it says nothing), every one, as
+    /// Revit's default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show: Option<Show>,
+    /// The types it is built in; none, every type. A family exported from Revit carries each type's own geometry.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub types: Vec<String>,
+    /// A `mesh`'s outline seen from above, in the family's axes, as whoever made it traced it, in place of the hull round it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outline: Vec<[f64; 2]>,
+    /// One of its family's `subcategories`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subcategory: Option<String>,
+    /// Rings inside its `profile` its sweep leaves open (Revit's inner loops of an extrusion's sketch).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub holes: Vec<Vec<[Expr; 2]>>,
+    /// A blend: its profile at `to`, its `profile` being the one at `from`; the sides run between corners paired as Revit
+    /// pairs them (one for one where both have as many, else along their lengths from the corners nearest each other).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub top: Vec<[Expr; 2]>,
+    /// A sweep: the line its profile follows, points in the family's axes (an arc as short chords), and its profile there,
+    /// `section`, points in the family's axes at the path's first point; a swept blend's profile at the path's last point is
+    /// `section_end`, as many corners as `section`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path: Vec<[Expr; 3]>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub section: Vec<[Expr; 3]>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub section_end: Vec<[Expr; 3]>,
+    /// Loops inside a sweep's profile (a tube's inside), at the path's first point, and a swept blend's at its last: swept
+    /// with it as holes. A true arc of hole `k` is a `section` (or `section_end`) arc of `hole` `k + 1`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub section_holes: Vec<Vec<[Expr; 3]>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub section_end_holes: Vec<Vec<[Expr; 3]>>,
+    /// A revolve's sketch plane, where it is along the axis it is square to (none, through the family's origin).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<Expr>,
+    /// Edges of its rings that are true arcs (Revit's arcs in its sketches): drawn as a circle is, kept as arcs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub arcs: Vec<Bend>,
+    /// Revit's own result for its types, kept as the check and the fallback ([`Family::draws_snapshot`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub snapshot: bool,
+    /// The id of the Revit definition form it was made from, which every form it was split into carries: what a void's `cuts`
+    /// name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// A void's, where it came from Revit: the `source` ids of the forms Revit says it cuts. Kept as Revit said it and used for
+    /// nothing: Revit's lists leave out forms its void plainly cuts (and say none for one that does), and name solids made after
+    /// the void, which it doesn't cut. A void cuts every solid listed before it that it reaches, whatever this says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cuts: Option<Vec<String>>,
+}
+
+/// Which ring of a form an arc is an edge of.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Ring {
+    #[default]
+    Profile,
+    Top,
+    Hole,
+    Path,
+    Section,
+    SectionEnd,
+}
+
+impl Ring {
+    fn is_profile(&self) -> bool {
+        *self == Ring::Profile
+    }
+}
+
+/// An edge of a form's ring that is a true arc: the edge from corner `edge` to the next (the last to the first in a closed
+/// ring), about `centre` (two numbers in a plane's ring, three in a sweep's), counter-clockwise unless `clockwise`, about
+/// `normal` in 3D; its ends are the corners, so it follows them as they flex, and its radius goes from one's to the other's.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Bend {
+    #[serde(default, skip_serializing_if = "Ring::is_profile")]
+    pub ring: Ring,
+    /// Which hole, for a `hole`'s.
+    #[serde(default, skip_serializing_if = "is_naught")]
+    pub hole: usize,
+    pub edge: usize,
+    pub centre: Vec<Expr>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub clockwise: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normal: Option<[f64; 3]>,
+    /// A point the arc passes through between its corners (two numbers in a plane's ring): where it is given, the arc is the
+    /// one through its two corners and it, its `centre` worked out from them (an arched window's head, whose centre and
+    /// radius follow its width as no sum of parameters does).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub through: Vec<Expr>,
+}
+
+fn is_naught(n: &usize) -> bool {
+    *n == 0
+}
+
+impl Form {
+    /// Every number or formula it is sized by.
+    pub fn exprs(&self) -> Vec<&Expr> {
+        let circle = self.circle.iter().flat_map(|c| c.centre.iter().chain([&c.radius]));
+        self.profile
+            .iter()
+            .flatten()
+            .chain([&self.from, &self.to])
+            .chain(&self.visible)
+            .chain(circle)
+            .chain(self.axis.iter().flatten().flatten())
+            .chain(self.holes.iter().flatten().flatten())
+            .chain(self.top.iter().flatten())
+            .chain(self.path.iter().flatten())
+            .chain(self.section.iter().flatten())
+            .chain(self.section_end.iter().flatten())
+            .chain(self.section_holes.iter().flatten().flatten())
+            .chain(self.section_end_holes.iter().flatten().flatten())
+            .chain(self.arcs.iter().flat_map(|b| b.centre.iter().chain(&b.through)))
+            .chain(&self.at)
+            .collect()
+    }
+
+    /// Whether it is built in type `type_name`: one it names, or any when it names none.
+    pub fn of_type(&self, type_name: &str) -> bool {
+        self.types.is_empty() || self.types.iter().any(|t| t == type_name)
+    }
 }
 
 fn no_mesh(mesh: &Arc<Vec<[P3; 3]>>) -> bool {
@@ -690,6 +1098,62 @@ pub struct Family {
     /// Where it joins a system: an electrical device's load, a switch. At most one is `power`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub connectors: Vec<Connector>,
+    /// Where it came from: a firm library's entry, an application, a file. Carried and shown, never acted on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<Source>,
+    /// What it is hosted by, as Revit says it: a level unless it says.
+    #[serde(default, skip_serializing_if = "Host::is_level")]
+    pub host: Host,
+    /// Its category's subcategories its forms and symbols are drawn in.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subcategories: Vec<Subcategory>,
+    /// A door's or a window's opening in its wall, where it isn't `Width` by `Height`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cut: Option<Cut>,
+    /// Whether it has Revit's flip controls.
+    #[serde(default, skip_serializing_if = "Flips::is_default")]
+    pub flips: Flips,
+    /// Its reference planes, which formulas read as `ref(Name)`, and the dimensions between them that place them per type.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub references: Vec<Reference>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dimensions: Vec<Dimension>,
+    /// Other families placed in it, as Revit's nested families: its own `embedded` ones first, else the project's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nested: Vec<Nested>,
+    /// The families its nested parts are of that it holds itself, by name, as Revit's family holds a nested family that isn't
+    /// shared: never one of the project's, so the project's list shows only what is placed in it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub embedded: BTreeMap<String, Family>,
+    /// Its type catalog, as Revit's `.txt` beside a family.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog: Option<Catalog>,
+    /// Per type, whether its parametric result matched Revit's own when it came in ([`Family::run_check`]).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub check: BTreeMap<String, TypeCheck>,
+    /// Whether it can be edited as in Revit's Family Editor, and why not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editable: Option<Editable>,
+    /// Whether it is a Revit RPC planting (a tree, a person): the 3D Revit draws of it is a render placeholder, so its check
+    /// compares only its plan and its 3D is always Revit's own result ([`Family::draws_snapshot_forms`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub rpc: bool,
+    /// Whether what each of its voids cuts (`Form::cuts`) was measured from the instance (the definition's `cuts_by` is `instance`).
+    /// Then a void cuts exactly the solids it names, whatever their order in the family; a family without it (every package
+    /// before the add-in measured) has a void cut every solid listed before it that it reaches.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cuts_measured: bool,
+    /// The line patterns its subcategories name, by name, as Revit's Line Patterns the family was made with: each added to the
+    /// project's when the family is loaded, unless the project has one of the name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub line_patterns: BTreeMap<String, crate::lines::LinePattern>,
+}
+
+impl Symbol {
+    /// Whether it is drawn in type `type_name`: one it names, or any when it names none.
+    pub fn of_type(&self, type_name: &str) -> bool {
+        self.types.is_empty() || self.types.iter().any(|t| t == type_name)
+    }
 }
 
 /// The IFC class a product came in as, which a generic family remembers (BIMCraft has no element for it): the class as STEP
@@ -761,8 +1225,44 @@ pub struct Piece {
     pub top: f64,
     pub material: String,
     pub round: bool,
-    /// Its form's Visibility Settings ([`Form::show`]).
+    /// Its form's Visibility Settings ([`Form::show`]); none, every view at every level.
     pub show: Option<Show>,
+    /// Its form's subcategory ([`Form::subcategory`]): the pens it is outlined in come from it, else from its category.
+    pub subcategory: Option<String>,
+}
+
+impl Piece {
+    /// Whether a plan at detail level `d` draws it: `plan` and that level, as its form says.
+    pub fn in_plan(&self, d: crate::graphics::Detail) -> bool {
+        let s = Show::in_view(self.show);
+        s.plan && s.at(d)
+    }
+
+    /// Whether a plan at detail level `d` cutting at height `cut` (in its own axes) draws it, as Revit's floor plan does: one
+    /// the plane cuts where its Plan/RCP (and Plan/RCP when cut) say, one wholly below it (or standing on it) where its
+    /// Top/Bottom says, and for a family other than a door's or a window's (`hosted`) its Plan/RCP too; one above it only
+    /// for such a family, where its Plan/RCP says.
+    pub fn in_plan_cut(&self, d: crate::graphics::Detail, cut: f64, hosted: bool) -> bool {
+        let eps = check::CUT_EPS;
+        let s = Show::in_view(self.show);
+        if !s.at(d) {
+            return false;
+        }
+        if self.bottom < cut - eps && cut < self.top {
+            s.plan && s.plan_cut
+        } else if self.bottom <= cut + eps {
+            s.plan_top && (hosted || s.plan)
+        } else {
+            // Above it: a door's or a window's isn't seen; another family's plan draws it where its Plan/RCP says, as
+            // Revit's plan of it (a ceiling light's, looking up) does.
+            !hosted && s.plan
+        }
+    }
+
+    /// Whether a view at detail level `d` draws it, whichever way it looks (a 3D view's, IFC's at Fine).
+    pub fn at(&self, d: crate::graphics::Detail) -> bool {
+        Show::in_view(self.show).at(d)
+    }
 }
 
 /// Where one form lies before any void cuts it: its box in the family's own axes (x along a
@@ -793,8 +1293,24 @@ impl Shape {
 
 /// How deep a formula may nest.
 const MAX_DEPTH: usize = 64;
-/// Sides a circle's profile is drawn with.
+/// Sides a full turn of a curve is drawn with at least.
 const SEGMENTS: usize = 32;
+/// Sides a full turn of a curve is drawn with at most.
+const MOST_SEGMENTS: usize = 256;
+/// How far a chord of a curve may sag from it, mm: Revit's fine tessellation, which the check compares with, stays within a
+/// fraction of a millimetre of the true surface.
+pub(crate) const SAG: f64 = 0.5;
+
+/// Sides an arc of `turn` radians at radius `r` is drawn with: at least 32 a turn, enough that no chord sags more than [`SAG`],
+/// at most 256 a turn. (A millionth of a side is float noise, not a side.)
+pub(crate) fn sides(turn: f64, r: f64) -> usize {
+    use std::f64::consts::TAU;
+    let turn = turn.abs();
+    let base = (turn / TAU * SEGMENTS as f64 - 1e-9).ceil();
+    let by_sag = if r.is_finite() && r > SAG { (turn / (2.0 * (1.0 - SAG / r).acos()) - 1e-9).ceil() } else { 0.0 };
+    let most = (turn / TAU * MOST_SEGMENTS as f64 - 1e-9).ceil().max(1.0);
+    base.max(by_sag).clamp(1.0, most) as usize
+}
 /// Degrees a symbol's arc turns between the corners it is drawn with.
 const ARC_STEP: f64 = 3.75;
 /// Corners one profile may have.
@@ -805,11 +1321,20 @@ pub const MAX_CHAIN: usize = 16;
 pub const MAX_BUILT: usize = 400_000;
 /// Triangles one form, as a file brings it, may have.
 pub const MAX_TRIANGLES: usize = 100_000;
+/// Line patterns one family may bring.
+pub const MAX_LINE_PATTERNS: usize = 256;
 
-/// Parameters, forms, symbols and types one family may have.
-pub const MAX_PARAMETERS: usize = 64;
-pub const MAX_FORMS: usize = 256;
-pub const MAX_SYMBOLS: usize = 64;
+/// Parameters, forms, symbols and types one family may have: as many as a family exported from Revit, which carries each
+/// type's own forms, may bring.
+pub const MAX_PARAMETERS: usize = 256;
+pub const MAX_FORMS: usize = 8192;
+pub const MAX_SYMBOLS: usize = 8192;
+/// Corners one ring of a family's form may have (a profile, a hole, a blend's top, a sweep's section), and points its path.
+pub const MAX_RING: usize = 1024;
+/// Points one symbol's `line` may have.
+pub const MAX_SYMBOL_POINTS: usize = 1024;
+/// Characters a text parameter's value, a subcategory's name or a source's field may hold.
+pub const MAX_WORDS: usize = 1024;
 pub const MAX_CONNECTORS: usize = 8;
 /// The highest voltage and load a connector may hold: far past any real device, short of overflow.
 pub const MAX_VOLTAGE: f64 = 1.0e5;
@@ -1028,6 +1553,11 @@ fn value(n: &Node, get: &mut dyn FnMut(&str) -> Result<f64, String>) -> Result<f
             };
             let deg = |x: f64| x.to_radians();
             match f.to_lowercase().as_str() {
+                // Where a reference plane is for the type: `ref(Left)`.
+                "ref" => match args.as_slice() {
+                    [Node::Name(name)] => get(&ref_key(name))?,
+                    _ => return Err("`ref` takes the name of one of the family's references: `ref(Left)`".into()),
+                },
                 "if" => match args.as_slice() {
                     [c, a, b] => value(if value(c, get)? != 0.0 { a } else { b }, get)?,
                     _ => return Err(format!("`{f}` takes a condition and two values, not {} values", args.len())),
@@ -1068,7 +1598,7 @@ fn value(n: &Node, get: &mut dyn FnMut(&str) -> Result<f64, String>) -> Result<f
 
 /// The functions a formula calls.
 const FUNCTIONS: &str =
-    "if, and, or, not, min, max, abs, sqrt, round, roundup, rounddown, sin, cos, tan, asin, acos, atan, exp, ln, log and pi()";
+    "ref, if, and, or, not, min, max, abs, sqrt, round, roundup, rounddown, sin, cos, tan, asin, acos, atan, exp, ln, log and pi()";
 
 /// The names `formula` reads, in every branch of its `if`s; or why it can't be worked out: it
 /// doesn't read, or calls a function there isn't or with the wrong number of values.
@@ -1089,6 +1619,15 @@ pub fn names(formula: &str) -> Result<Vec<String>, String> {
                 walk(a, out)?;
                 walk(b, out)?;
             }
+            Node::Call(f, args) if f.eq_ignore_ascii_case("ref") => match args.as_slice() {
+                [Node::Name(name)] => {
+                    let key = ref_key(name);
+                    if !out.contains(&key) {
+                        out.push(key);
+                    }
+                }
+                _ => return Err("`ref` takes the name of one of the family's references: `ref(Left)`".into()),
+            },
             Node::Call(f, args) => {
                 let fits = match f.to_lowercase().as_str() {
                     "if" => args.len() == 3,
@@ -1185,6 +1724,11 @@ fn worked(formula: &str, node: &Node, get: &mut dyn FnMut(&str) -> Result<f64, S
     if x.is_finite() { Ok(x) } else { Err(said(format!("it comes to {x}, which isn't a number"))) }
 }
 
+/// Whether `text` is of 1 to `most` characters on one line.
+fn one_line(text: &str, most: usize) -> bool {
+    !text.trim().is_empty() && text.chars().count() <= most && !text.chars().any(char::is_control)
+}
+
 /// Whether `name` is one a formula can say: a letter or `_` first, then letters, digits, `_` and
 /// spaces, none at its end; up to `MAX_TEXT` long.
 pub fn nameable(name: &str) -> bool {
@@ -1207,6 +1751,11 @@ pub(crate) fn read(p: &Parameter, v: &Value) -> Result<Val, String> {
             Value::Bool(b) => Ok(Val::Number(truth(*b))),
             Value::Null => Ok(Val::Number(0.0)),
             v => v.as_f64().filter(|x| x.is_finite()).map(|x| Val::Number(truth(x != 0.0))).ok_or_else(|| bad("yes or no")),
+        },
+        Kind::Text => match v {
+            Value::String(s) => Ok(Val::Text(s.clone())),
+            Value::Null => Ok(Val::Text(String::new())),
+            _ => Err(bad("text")),
         },
         Kind::Length | Kind::Number | Kind::Angle => match v {
             Value::Null => Ok(Val::Number(0.0)),
@@ -1236,6 +1785,12 @@ impl Family {
         for form in self.forms.iter_mut().filter(|x| !x.material.is_empty() && !params.contains(&x.material)) {
             f(&mut form.material);
         }
+        for m in self.subcategories.iter_mut().filter_map(|s| s.material.as_mut()) {
+            f(m);
+        }
+        for inner in self.embedded.values_mut() {
+            inner.material_refs_mut(f);
+        }
     }
 
     /// Whether `name` is one of its material parameters.
@@ -1251,6 +1806,10 @@ impl Family {
             out.extend(self.types.values().filter_map(|t| t.get(&p.name)).filter_map(Value::as_str));
         }
         out.extend(self.forms.iter().filter(|f| !self.material_parameter(&f.material)).map(|f| f.material.as_str()));
+        out.extend(self.subcategories.iter().filter_map(|s| s.material.as_deref()));
+        for inner in self.embedded.values() {
+            out.extend(inner.materials());
+        }
         out.retain(|m| !m.is_empty());
         out
     }
@@ -1266,6 +1825,80 @@ impl Family {
         self.parameters.iter_mut().filter(|p| p.kind == Kind::Material).for_each(|p| swap(&mut p.value));
         self.types.values_mut().flat_map(|t| t.iter_mut()).filter(|(k, _)| params.contains(k)).for_each(|(_, v)| swap(v));
         self.forms.iter_mut().filter(|f| f.material == from && !params.contains(&f.material)).for_each(|f| f.material = to.into());
+        self.subcategories.iter_mut().filter(|s| s.material.as_deref() == Some(from)).for_each(|s| s.material = Some(to.into()));
+        self.embedded.values_mut().for_each(|inner| inner.rename_material(from, to));
+    }
+
+    /// A mesh form's traced `outline` that crosses itself taken away, so its hull stands for it, as a draw would have it: tested
+    /// once, as the family is loaded, not at every draw of every type (a ring's pairs of edges are many); in the families it
+    /// holds itself too.
+    pub fn clear_crossing_outlines(&mut self) {
+        for x in &mut self.forms {
+            if x.outline.len() > 2 && crosses_itself(&x.outline.iter().map(|[a, b]| P2(*a, *b)).collect::<Vec<_>>()) {
+                x.outline.clear();
+            }
+        }
+        self.embedded.values_mut().for_each(Family::clear_crossing_outlines);
+    }
+
+    /// Type `from` renamed `to` in the lists of types its forms and symbols are of.
+    pub fn rename_type(&mut self, from: &str, to: &str) {
+        let lists = self
+            .forms
+            .iter_mut()
+            .map(|f| &mut f.types)
+            .chain(self.symbols.iter_mut().map(|y| &mut y.types))
+            .chain(self.nested.iter_mut().map(|n| &mut n.types));
+        lists.flat_map(|l| l.iter_mut()).filter(|t| *t == from).for_each(|t| *t = to.to_string());
+        if let Some(c) = self.check.remove(from) {
+            self.check.insert(to.to_string(), c);
+        }
+        // The type each nested part's parent type chose goes with the type's name.
+        for n in &mut self.nested {
+            if let Some(v) = n.type_in.remove(from) {
+                n.type_in.insert(to.to_string(), v);
+            }
+        }
+    }
+
+    /// Type `name` gone: taken out of the lists of types its forms and symbols are of, and a form or a symbol that was of it
+    /// alone gone with it (left of no type, it would be of every one).
+    pub fn forget_type(&mut self, name: &str) {
+        let gone = |types: &Vec<String>| !types.is_empty() && types.iter().all(|t| t == name);
+        self.forms.retain(|f| !gone(&f.types));
+        self.symbols.retain(|y| !gone(&y.types));
+        self.nested.retain(|n| !gone(&n.types));
+        let lists = self
+            .forms
+            .iter_mut()
+            .map(|f| &mut f.types)
+            .chain(self.symbols.iter_mut().map(|y| &mut y.types))
+            .chain(self.nested.iter_mut().map(|n| &mut n.types));
+        lists.for_each(|l| l.retain(|t| t != name));
+        self.check.remove(name);
+        self.nested.iter_mut().for_each(|n| {
+            n.type_in.remove(name);
+        });
+    }
+
+    /// Type `new`, made like `old`, is of each form and symbol `old` is of: a duplicated type keeps its forms.
+    pub fn type_like(&mut self, new: &str, old: &str) {
+        let lists = self
+            .forms
+            .iter_mut()
+            .map(|f| &mut f.types)
+            .chain(self.symbols.iter_mut().map(|y| &mut y.types))
+            .chain(self.nested.iter_mut().map(|n| &mut n.types));
+        for l in lists.filter(|l| l.iter().any(|t| t == old) && !l.iter().any(|t| t == new)) {
+            l.push(new.to_string());
+        }
+        self.check_like(new, old);
+        // The copy chooses the nested types its original did, as Revit keeps them.
+        for n in &mut self.nested {
+            if let Some(v) = n.type_in.get(old).cloned() {
+                n.type_in.entry(new.to_string()).or_insert(v);
+            }
+        }
     }
 
     /// Its parameters' values for type `type_name`, a component's `instance` values over them, and
@@ -1287,6 +1920,39 @@ impl Family {
         for p in &self.parameters {
             self.resolve(&p.name, set, instance, &mut done, &mut Vec::new())?;
         }
+        // Where its references are for the type: solved, else where each stands (the check says why it isn't solved).
+        let _ = self.place_references(&mut done);
+        Ok(done)
+    }
+
+    /// [`Family::values_in`] with `given` (a parent family's numbers for a nested part's parameters) over its types' and its
+    /// instance values: what a nested part of it is sized by.
+    pub fn values_given(&self, type_name: &str, given: &BTreeMap<String, f64>, wall: f64) -> Result<BTreeMap<String, Val>, String> {
+        let mut types = self.types.clone();
+        let set = types.get_mut(type_name).ok_or_else(|| format!("type `{type_name}` doesn't exist"))?;
+        let mut instance = BTreeMap::new();
+        for (k, x) in given {
+            let Some(p) = self.parameters.iter().find(|p| p.name == *k && p.formula.is_none()) else { continue };
+            let v = match p.kind {
+                Kind::YesNo => Value::Bool(*x != 0.0),
+                Kind::Length | Kind::Number | Kind::Angle => serde_json::json!(x),
+                Kind::Material | Kind::Text => continue,
+            };
+            if p.instance {
+                instance.insert(k.clone(), v);
+            } else {
+                set.insert(k.clone(), v);
+            }
+        }
+        let set = set.clone();
+        let mut done = BTreeMap::new();
+        if self.category.hosted() {
+            done.insert(WALL.to_string(), Val::Number(wall));
+        }
+        for p in &self.parameters {
+            self.resolve(&p.name, &set, &instance, &mut done, &mut Vec::new())?;
+        }
+        let _ = self.place_references(&mut done);
         Ok(done)
     }
 
@@ -1315,7 +1981,7 @@ impl Family {
                 path.push(name.to_string());
                 let x = eval(f, &mut |n: &str| match self.resolve(n, set, instance, done, path)? {
                     Val::Number(x) => Ok(x),
-                    Val::Text(_) => Err(format!("`{n}` is a material, not a number")),
+                    Val::Text(_) => Err(format!("`{n}` is a material or text, not a number")),
                 });
                 path.pop();
                 Val::Number(x.map_err(|e| format!("parameter `{name}`: {e}"))?)
@@ -1351,10 +2017,51 @@ impl Family {
         self.ifc.as_ref().filter(|_| self.category == Category::Generic)
     }
 
+    /// Leaves out the line patterns it can't hold (more than [`MAX_LINE_PATTERNS`], a name that isn't one line of text, one
+    /// that is `Solid`, segments [`crate::lines::LinePattern::check`] refuses), and the subcategories' naming them: those are
+    /// drawn solid. What a family from Revit brings that the engine can't hold is said and left out, not a reason to refuse the
+    /// family. What was left out, said in plain words, for `Editable::untranslated`.
+    pub fn drop_unholdable_line_patterns(&mut self) -> Vec<String> {
+        let shown = |n: &str| n.chars().take(40).collect::<String>();
+        let mut said = Vec::new();
+        let mut gone: Vec<String> = Vec::new();
+        let mut kept = 0usize;
+        for (name, pattern) in &self.line_patterns {
+            let why = if !one_line(name, MAX_TEXT) || name == crate::lines::SOLID {
+                Some("its name isn't one a line pattern may have".to_string())
+            } else if kept >= MAX_LINE_PATTERNS {
+                Some(format!("a family holds {MAX_LINE_PATTERNS} line patterns at most"))
+            } else {
+                pattern.check(name).err().map(|e| e.split_once(": ").map_or(e.clone(), |(_, r)| r.to_string()))
+            };
+            match why {
+                Some(why) => {
+                    said.push(format!("its line pattern `{}` can't be held ({why}): its lines are drawn solid", shown(name)));
+                    gone.push(name.clone());
+                }
+                None => kept += 1,
+            }
+        }
+        for name in &gone {
+            self.line_patterns.remove(name);
+        }
+        for sub in &mut self.subcategories {
+            if sub.pattern.as_ref().is_some_and(|p| gone.contains(p)) {
+                sub.pattern = None;
+            }
+        }
+        said
+    }
+
     /// Whether it's sound: its parameters named once each, so formulas can say them, and holding
     /// what their kinds hold; its types setting only the type parameters no formula works out; its
     /// materials in the library (`has_material`); and every type building.
     pub fn check(&self, has_material: &dyn Fn(&str) -> bool) -> Result<(), String> {
+        self.check_at(has_material, 0)
+    }
+
+    /// [`Family::check`] of a family held `depth` deep in another ([`Family::embedded`]).
+    pub(crate) fn check_at(&self, has_material: &dyn Fn(&str) -> bool, depth: usize) -> Result<(), String> {
         for (what, n, most) in [
             ("parameters", self.parameters.len(), MAX_PARAMETERS),
             ("forms", self.forms.len(), MAX_FORMS),
@@ -1369,6 +2076,9 @@ impl Family {
         if self.types.is_empty() {
             return Err("it needs a type: add one to `types`".into());
         }
+        self.check_described()?;
+        self.check_parametric()?;
+        self.check_embedded(has_material, depth)?;
         if let Some(kind) = &self.kind {
             let kinds = self.category.kinds();
             if !kinds.iter().any(|(k, _)| k == kind) {
@@ -1401,6 +2111,9 @@ impl Family {
                 Err(format!("{who}: material `{m}` isn't in the library; add it with `material`"))
             }
         };
+        for sub in &self.subcategories {
+            material_ok(&format!("subcategory `{}`", sub.name), sub.material.as_deref().unwrap_or_default())?;
+        }
         let long = |f: &str| f.chars().count() > MAX_FORMULA;
         let mut names = BTreeSet::new();
         for p in &self.parameters {
@@ -1411,13 +2124,25 @@ impl Family {
             if !names.insert(p.name.as_str()) {
                 return Err(format!("{who} is named twice"));
             }
+            for (what, v) in [("unit", &p.unit), ("group", &p.group)] {
+                if let Some(v) = v
+                    && !one_line(v, MAX_TEXT)
+                {
+                    return Err(format!("{who}: its `{what}` is text of 1 to {MAX_TEXT} characters on one line"));
+                }
+            }
             match (&p.formula, p.kind) {
                 (Some(_), Kind::Material) => return Err(format!("{who}: a material takes no formula")),
+                (Some(_), Kind::Text) => return Err(format!("{who}: a text takes no formula")),
                 (Some(f), _) if long(f) => return Err(format!("{who}: its formula is longer than {MAX_FORMULA} characters")),
                 _ => {}
             }
-            if let Val::Text(m) = read(p, &p.value)? {
-                material_ok(&who, &m)?;
+            match read(p, &p.value)? {
+                Val::Text(m) if p.kind == Kind::Material => material_ok(&who, &m)?,
+                Val::Text(t) if t.chars().count() > MAX_WORDS => {
+                    return Err(format!("{who}: its text is longer than {MAX_WORDS} characters"));
+                }
+                _ => {}
             }
         }
         for (t, set) in &self.types {
@@ -1433,16 +2158,29 @@ impl Family {
                 if p.formula.is_some() {
                     return Err(format!("{who}: `{k}` is worked out by its formula"));
                 }
-                if let Val::Text(m) = read(p, v)? {
-                    material_ok(&who, &m)?;
+                match read(p, v)? {
+                    Val::Text(m) if p.kind == Kind::Material => material_ok(&who, &m)?,
+                    Val::Text(t) if t.chars().count() > MAX_WORDS => {
+                        return Err(format!("{who}: `{k}`'s text is longer than {MAX_WORDS} characters"));
+                    }
+                    _ => {}
                 }
             }
         }
         for (i, form) in self.forms.iter().enumerate() {
             let who = format!("form {}", i + 1);
-            let ways = usize::from(!form.profile.is_empty()) + usize::from(form.circle.is_some()) + usize::from(!form.mesh.is_empty());
+            let ways = usize::from(!form.profile.is_empty())
+                + usize::from(form.circle.is_some())
+                + usize::from(!form.mesh.is_empty())
+                + usize::from(!form.path.is_empty());
             if ways != 1 {
-                return Err(format!("{who}: it takes a `profile`, a `circle` or a `mesh`, one of them"));
+                return Err(format!("{who}: it takes a `profile`, a `circle`, a `mesh` or a `path`, one of them"));
+            }
+            if form.path.is_empty() && (!form.section.is_empty() || !form.section_end.is_empty()) {
+                return Err(format!("{who}: a `section` is a sweep's profile, along its `path`"));
+            }
+            if (!form.top.is_empty() || !form.holes.is_empty()) && form.profile.is_empty() {
+                return Err(format!("{who}: a `top` or `holes` go with a `profile`"));
             }
             if form.axis.is_some() && !form.mesh.is_empty() {
                 return Err(format!("{who}: a `mesh` is as it is; an `axis` turns a `profile` or a `circle`"));
@@ -1450,20 +2188,29 @@ impl Family {
             if !self.parameters.iter().any(|p| p.name == form.material && p.kind == Kind::Material) {
                 material_ok(&who, &form.material)?;
             }
-            let circle = form.circle.iter().flat_map(|c| c.centre.iter().chain([&c.radius]));
-            let mut exprs = form
-                .profile
-                .iter()
-                .flatten()
-                .chain([&form.from, &form.to])
-                .chain(&form.visible)
-                .chain(circle)
-                .chain(form.axis.iter().flatten().flatten());
-            if exprs.any(|e| matches!(e, Expr::Formula(f) if long(f))) {
+            self.check_part(&who, &form.types, form.subcategory.as_deref())?;
+            if let Some(cuts) = &form.cuts
+                && (!form.void || cuts.len() > MAX_FORMS || cuts.iter().any(|c| c.chars().count() > MAX_TEXT))
+            {
+                return Err(format!("{who}: `cuts` is a void's, up to {MAX_FORMS} names of up to {MAX_TEXT} characters"));
+            }
+            if form.source.as_ref().is_some_and(|s| s.chars().count() > MAX_TEXT) {
+                return Err(format!("{who}: its `source` is longer than {MAX_TEXT} characters"));
+            }
+            if form.exprs().into_iter().any(|e| matches!(e, Expr::Formula(f) if long(f))) {
                 return Err(format!("{who}: a formula of it is longer than {MAX_FORMULA} characters"));
             }
         }
         for (i, y) in self.symbols.iter().enumerate() {
+            self.check_part(&format!("symbol {}", i + 1), &y.types, y.subcategory.as_deref())?;
+            if y.view != SymbolView::Plan && (y.text.is_some() || y.dot.is_some()) {
+                return Err(format!("symbol {}: a `front` or `side` symbol is a `line` or an `arc`, as Revit's symbolic lines are", i + 1));
+            }
+            if let Some(c) = &y.arc
+                && c.start.is_some() != c.end.is_some()
+            {
+                return Err(format!("symbol {}: an arc takes both `start` and `end`, or neither", i + 1));
+            }
             let Some(label) = &y.text else { continue };
             for name in fields(&label.value).map_err(|e| format!("symbol {}: {e}", i + 1))? {
                 if !self.parameters.iter().any(|p| p.name == name) {
@@ -1474,26 +2221,35 @@ impl Family {
         let symbol_exprs = self.symbols.iter().flat_map(|y| {
             let label = y.text.iter().flat_map(|l| l.at.iter().chain([&l.height]));
             let dot = y.dot.iter().flat_map(|c| c.centre.iter().chain([&c.radius]));
-            y.line
-                .iter()
-                .flatten()
-                .chain(&y.visible)
-                .chain(y.arc.iter().flat_map(|c| c.centre.iter().chain([&c.radius, &c.from, &c.to])))
-                .chain(label)
-                .chain(dot)
+            y.line.iter().flatten().chain(&y.visible).chain(y.arc.iter().flat_map(Curve::exprs)).chain(label).chain(dot)
         });
         if symbol_exprs.into_iter().any(|e| matches!(e, Expr::Formula(f) if long(f))) {
             return Err(format!("a formula of a symbol is longer than {MAX_FORMULA} characters"));
         }
         self.check_connectors()?;
+        if let Some(cut) = &self.cut {
+            if !self.category.hosted() {
+                return Err("a `cut` is a door's or a window's: the opening it makes in its wall".into());
+            }
+            if [&cut.width, &cut.height].into_iter().any(|e| matches!(e, Expr::Formula(f) if long(f))) {
+                return Err(format!("its `cut`: a formula of it is longer than {MAX_FORMULA} characters"));
+            }
+        }
         // Each formula read once across the types; past what a family may build, refused.
         let (mut read, mut built, mut cuts) = (HashMap::new(), 0, csg::Meter::default());
         for t in self.types.keys() {
             let pieces = self
                 .values(t, &BTreeMap::new())
                 .and_then(|v| {
-                    self.marks(&v)?;
-                    self.build(&v, &mut read, &mut cuts)
+                    self.all_marks(t, &v)?;
+                    self.cut_size(&v)?;
+                    self.build(
+                        t,
+                        &v,
+                        &mut read,
+                        &mut cuts,
+                        Build { snapshot: self.draws_snapshot_forms(t), others: &|_| None, depth: 0, spent: &std::cell::Cell::new(0) },
+                    )
                 })
                 .map_err(|e| format!("type `{t}`: {e}"))?;
             built += pieces.iter().map(|p| p.tris.len()).sum::<usize>();
@@ -1590,6 +2346,91 @@ impl Family {
         Ok(())
     }
 
+    /// Whether what it says of itself is sound: its `source`'s fields text on one line; its subcategories named once each,
+    /// their materials in the library is [`Family::check`]'s to say.
+    fn check_described(&self) -> Result<(), String> {
+        if let Some(src) = &self.source {
+            for (what, v) in [("library", &src.library), ("app", &src.app), ("category", &src.category), ("file", &src.file)] {
+                if let Some(v) = v
+                    && !one_line(v, MAX_WORDS)
+                {
+                    return Err(format!("`source` `{what}`: text of 1 to {MAX_WORDS} characters on one line"));
+                }
+            }
+        }
+        let mut names = BTreeSet::new();
+        for (i, sub) in self.subcategories.iter().enumerate() {
+            if !one_line(&sub.name, MAX_TEXT) {
+                return Err(format!("subcategory {}: a name of 1 to {MAX_TEXT} characters on one line", i + 1));
+            }
+            if !names.insert(sub.name.as_str()) {
+                return Err(format!("subcategory `{}` is named twice", sub.name));
+            }
+            if let Some(m) = &sub.material
+                && !one_line(m, MAX_TEXT)
+            {
+                return Err(format!("subcategory `{}`: its material is a name of 1 to {MAX_TEXT} characters", sub.name));
+            }
+            // A line weight is a pen of Revit's, 1 to 16: not a hairline, which Revit has no weight for.
+            for (what, pen) in [("projection", sub.projection), ("cut", sub.cut)] {
+                if let Some(p) = pen
+                    && !(1..=crate::pen::MAX_PEN).contains(&p.0)
+                {
+                    return Err(format!(
+                        "subcategory `{}`: its {what} line weight is a pen from 1 to {}, not {}",
+                        sub.name,
+                        crate::pen::MAX_PEN,
+                        p.0
+                    ));
+                }
+            }
+            if let Some(p) = &sub.pattern
+                && !one_line(p, MAX_TEXT)
+            {
+                return Err(format!("subcategory `{}`: its line pattern is a name of 1 to {MAX_TEXT} characters", sub.name));
+            }
+        }
+        if self.line_patterns.len() > MAX_LINE_PATTERNS {
+            return Err(format!("it has more than {MAX_LINE_PATTERNS} line patterns"));
+        }
+        for (name, pattern) in &self.line_patterns {
+            if !one_line(name, MAX_TEXT) || name == crate::lines::SOLID {
+                return Err(format!("line pattern: a name of 1 to {MAX_TEXT} characters on one line, and not `{}`", crate::lines::SOLID));
+            }
+            pattern.check(name)?;
+        }
+        Ok(())
+    }
+
+    /// Whether a form's or a symbol's (`who`) types are the family's, and its subcategory one of its subcategories.
+    fn check_part(&self, who: &str, types: &[String], subcategory: Option<&str>) -> Result<(), String> {
+        if let Some(t) = types.iter().find(|t| !self.types.contains_key(*t)) {
+            let shown: String = t.chars().take(40).collect();
+            return Err(format!("{who}: its `types` name `{shown}`, which isn't one of the family's types"));
+        }
+        if let Some(sub) = subcategory
+            && !self.subcategories.iter().any(|s| s.name == sub)
+        {
+            let shown: String = sub.chars().take(40).collect();
+            return Err(format!("{who}: subcategory `{shown}` isn't one of the family's `subcategories`"));
+        }
+        Ok(())
+    }
+
+    /// The width and height of the opening a door or a window of these `values` cuts in its wall: its `cut`'s, else its
+    /// `Width` and `Height`; none where it has neither.
+    pub fn cut_size(&self, values: &BTreeMap<String, Val>) -> Result<Option<(f64, f64)>, String> {
+        let Some(cut) = &self.cut else { return Ok(None) };
+        let mut read = HashMap::new();
+        let said = |e: String| format!("its `cut`: {e}");
+        let w = number(&cut.width, values, &mut read).map_err(said)?;
+        let h = number(&cut.height, values, &mut read).map_err(said)?;
+        if w <= 0.0 || h <= 0.0 {
+            return Err(format!("its `cut` is {w} by {h} mm; an opening needs a width and a height above zero"));
+        }
+        Ok(Some((w, h)))
+    }
+
     /// Its connectors, worked out for type `type_name` and a component's `instance` values.
     pub fn connector_values(&self, type_name: &str, instance: &BTreeMap<String, Value>) -> Result<Vec<ConnectorValues>, String> {
         if self.connectors.is_empty() {
@@ -1677,23 +2518,206 @@ impl Family {
         Ok(out)
     }
 
-    /// Its visible forms' solids, sized by `values`, less what its voids cut.
-    pub fn pieces(&self, values: &BTreeMap<String, Val>) -> Result<Vec<Piece>, String> {
-        self.build(values, &mut HashMap::new(), &mut csg::Meter::default())
+    /// Its visible forms' solids in type `type_name` (those of no type, and those of it), sized by `values`, less what its
+    /// voids cut.
+    pub fn pieces(&self, type_name: &str, values: &BTreeMap<String, Val>) -> Result<Vec<Piece>, String> {
+        self.pieces_with(type_name, values, &|_| None)
     }
 
-    /// The marks of its visible symbols, sized by `values`, in its own axes: an arc as a polyline of short chords, a label
-    /// a label as its anchor (lettered by [`lettering`] where it is placed), a dot as it is.
-    pub fn marks(&self, values: &BTreeMap<String, Val>) -> Result<Vec<Mark>, String> {
-        self.marks_at(values, None)
+    /// [`Family::pieces`] with its nested parts, the families they are of found by `others` (the project's).
+    pub fn pieces_with(&self, type_name: &str, values: &BTreeMap<String, Val>, others: Others) -> Result<Vec<Piece>, String> {
+        let snapshot = self.draws_snapshot_forms(type_name);
+        self.build(
+            type_name,
+            values,
+            &mut HashMap::new(),
+            &mut csg::Meter::default(),
+            Build { snapshot, others, depth: 0, spent: &std::cell::Cell::new(0) },
+        )
     }
 
-    /// [`Family::marks`], of the symbols a view at detail level `detail` draws ([`Symbol::drawn_at`]); every one with none.
-    pub fn marks_at<'a>(&'a self, values: &BTreeMap<String, Val>, detail: Option<crate::graphics::Detail>) -> Result<Vec<Mark>, String> {
+    /// The marks of its visible symbols in `view` and type `type_name`, sized by `values`, in its own axes, drawn at detail
+    /// level `detail` ([`Symbol::drawn_at`]; none, at any): an arc as a polyline of short chords, a label as its anchor
+    /// (lettered by [`lettering`] where it is placed), a dot as it is. A `plan` mark's points are (x, y), a `front` one's
+    /// (x, z) and a `side` one's (y, z).
+    pub fn marks(
+        &self,
+        type_name: &str,
+        values: &BTreeMap<String, Val>,
+        view: SymbolView,
+        detail: Option<crate::graphics::Detail>,
+    ) -> Result<Vec<Mark>, String> {
+        self.marks_as(type_name, values, view, detail, self.draws_snapshot(type_name))
+    }
+
+    /// [`Family::marks`] of its `snapshot` symbols (Revit's result) or of its others (its definition's), as `snapshot` says.
+    fn marks_as(
+        &self,
+        type_name: &str,
+        values: &BTreeMap<String, Val>,
+        view: SymbolView,
+        detail: Option<crate::graphics::Detail>,
+        snapshot: bool,
+    ) -> Result<Vec<Mark>, String> {
+        Ok(self.marks_as_styled(type_name, values, view, detail, snapshot)?.into_iter().map(|(m, _)| m).collect())
+    }
+
+    /// [`Family::marks_as`], each mark with the subcategory of the symbol it came from.
+    fn marks_as_styled(
+        &self,
+        type_name: &str,
+        values: &BTreeMap<String, Val>,
+        view: SymbolView,
+        detail: Option<crate::graphics::Detail>,
+        snapshot: bool,
+    ) -> Result<Vec<Marked>, String> {
+        self.marks_where_styled(values, &|y: &Symbol| {
+            y.view == view && y.of_type(type_name) && y.snapshot == snapshot && detail.is_none_or(|d| y.drawn_at(d))
+        })
+    }
+
+    /// The marks of all its symbols type `type_name` draws, whatever view and detail level draws them: what checks them.
+    pub fn all_marks(&self, type_name: &str, values: &BTreeMap<String, Val>) -> Result<Vec<Mark>, String> {
+        let which = self.draws_snapshot(type_name);
+        self.marks_where(values, &|y: &Symbol| y.of_type(type_name) && y.snapshot == which)
+    }
+
+    /// [`Family::marks`] with its nested parts' own symbols that lie in `view` placed where they stand (in a type drawn from
+    /// its definition: Revit's result has them already), the families they are of its own ([`Family::embedded`]) or `others`.
+    pub fn marks_with(
+        &self,
+        type_name: &str,
+        values: &BTreeMap<String, Val>,
+        view: SymbolView,
+        detail: Option<crate::graphics::Detail>,
+        others: Others,
+    ) -> Result<Vec<Mark>, String> {
+        Ok(self.marks_styled(type_name, values, view, detail, others)?.into_iter().map(|(m, _)| m).collect())
+    }
+
+    /// [`Family::marks_with`], each mark with the subcategory of the symbol it came from (a nested part's, its own family's): what
+    /// the pens, colour and pattern it is drawn in come from.
+    pub fn marks_styled(
+        &self,
+        type_name: &str,
+        values: &BTreeMap<String, Val>,
+        view: SymbolView,
+        detail: Option<crate::graphics::Detail>,
+        others: Others,
+    ) -> Result<Vec<Marked>, String> {
+        let mut out = self.marks_as_styled(type_name, values, view, detail, self.draws_snapshot(type_name))?;
+        if !self.draws_snapshot(type_name) {
+            self.nested_marks_styled(type_name, values, (view, detail), others, (0, &std::cell::Cell::new(0)), &mut out)?;
+        }
+        Ok(out)
+    }
+
+    /// Its nested parts' marks in `view` in type `type_name`, in its axes, onto `out`: each of the part's own symbols whose
+    /// view faces the way this one does (a part's plan symbols in a parent's plan where it stands upright, and in the
+    /// parent's front where it is turned onto a face), there, and drawn at `detail`.
+    pub(crate) fn nested_marks(
+        &self,
+        type_name: &str,
+        values: &BTreeMap<String, Val>,
+        at: (SymbolView, Option<crate::graphics::Detail>),
+        others: Others,
+        depth: (usize, &std::cell::Cell<usize>),
+        out: &mut Vec<Mark>,
+    ) -> Result<(), String> {
+        let mut styled = Vec::new();
+        self.nested_marks_styled(type_name, values, at, others, depth, &mut styled)?;
+        out.extend(styled.into_iter().map(|(m, _)| m));
+        Ok(())
+    }
+
+    /// [`Family::nested_marks`], each mark with the subcategory of the symbol it came from.
+    fn nested_marks_styled(
+        &self,
+        type_name: &str,
+        values: &BTreeMap<String, Val>,
+        (view, detail): (SymbolView, Option<crate::graphics::Detail>),
+        others: Others,
+        (depth, spent): (usize, &std::cell::Cell<usize>),
+        out: &mut Vec<Marked>,
+    ) -> Result<(), String> {
+        if self.nested.is_empty() {
+            return Ok(());
+        }
+        if depth >= MAX_NESTING {
+            return Err(format!("nested more than {MAX_NESTING} deep"));
+        }
+        let mut read = HashMap::new();
+        for (i, n) in self.nested.iter().enumerate().filter(|(_, n)| n.of_type(type_name)) {
+            let said = |e: String| format!("nested part {} ({}): {e}", i + 1, n.family);
+            let seen = |s: Show| match view {
+                SymbolView::Plan => s.plan,
+                SymbolView::Front => s.front,
+                SymbolView::Side => s.side,
+            };
+            if n.show.is_some_and(|s| !seen(s) || detail.is_some_and(|d| !s.at(d))) {
+                continue;
+            }
+            if let Some(v) = &n.visible
+                && number(v, values, &mut read).map_err(said)? == 0.0
+            {
+                continue;
+            }
+            let Some(inner) = self.nested_family(&n.family, others) else { continue };
+            spent.set(spent.get() + 1);
+            if spent.get() > MAX_NESTED {
+                return Err(format!("it draws more than {MAX_NESTED} nested parts in all"));
+            }
+            let (at, axes) = nested_frame(n, values, &mut read).map_err(said)?;
+            let mut given = BTreeMap::new();
+            for (k, e) in &n.params {
+                given.insert(k.clone(), number(e, values, &mut read).map_err(said)?);
+            }
+            let wall = match values.get(WALL) {
+                Some(Val::Number(x)) => *x,
+                _ => DEFAULT_WALL,
+            };
+            let inner_type = n.type_for(type_name);
+            let inner_values = inner.values_given(inner_type, &given, wall).map_err(said)?;
+            let revit = inner.draws_revit_result(inner_type, &inner_values, wall);
+            let scale = nested_scale(n, values, &mut read).map_err(said)?;
+            // The way each of its views faces in this family's axes, and which of this one's: a view of the part is drawn
+            // where it is square to the view being drawn, however it is turned.
+            let faces = view.normal();
+            for inner_view in [SymbolView::Plan, SymbolView::Front, SymbolView::Side] {
+                if crate::geom::v3::dot(axes[inner_view.axis()], faces).abs() < 1.0 - 1e-6 {
+                    continue;
+                }
+                let mut marks = inner.marks_as_styled(inner_type, &inner_values, inner_view, detail, revit).map_err(said)?;
+                if !revit {
+                    inner
+                        .nested_marks_styled(inner_type, &inner_values, (inner_view, detail), others, (depth + 1, spent), &mut marks)
+                        .map_err(said)?;
+                }
+                let place = |q: P2| {
+                    let p = inner_view.lift(q);
+                    let p = add(at, add(add(mul(axes[0], p[0]), mul(axes[1], p[1])), mul(axes[2], p[2])));
+                    view.flat(p)
+                };
+                out.extend(marks.iter().map(|(m, sub)| (m.scaled(scale).map(place), sub.clone())));
+            }
+            if out.len() > MAX_SYMBOLS * 4 {
+                return Err(said(format!("its nested parts draw more than {} marks", MAX_SYMBOLS * 4)));
+            }
+        }
+        Ok(())
+    }
+
+    /// The marks of its visible symbols `pick` keeps, sized by `values`, each worked out and checked.
+    fn marks_where<'a>(&'a self, values: &BTreeMap<String, Val>, pick: &dyn Fn(&Symbol) -> bool) -> Result<Vec<Mark>, String> {
+        Ok(self.marks_where_styled(values, pick)?.into_iter().map(|(m, _)| m).collect())
+    }
+
+    /// [`Family::marks_where`], each mark with the subcategory of the symbol it came from.
+    fn marks_where_styled<'a>(&'a self, values: &BTreeMap<String, Val>, pick: &dyn Fn(&Symbol) -> bool) -> Result<Vec<Marked>, String> {
         let mut read = HashMap::new();
         let mut out = Vec::new();
         for (i, sym) in self.symbols.iter().enumerate() {
-            if detail.is_some_and(|d| !sym.drawn_at(d)) {
+            if !pick(sym) {
                 continue;
             }
             let said = |e: String| format!("symbol {}: {e}", i + 1);
@@ -1701,8 +2725,10 @@ impl Family {
                 + usize::from(sym.arc.is_some())
                 + usize::from(sym.text.is_some())
                 + usize::from(sym.dot.is_some());
-            if ways != 1 || sym.line.len() > MAX_PROFILE {
-                return Err(said(format!("it takes a `line` of up to {MAX_PROFILE} points, an `arc`, a `text` or a `dot`, one of them")));
+            if ways != 1 || sym.line.len() > MAX_SYMBOL_POINTS {
+                return Err(said(format!(
+                    "it takes a `line` of up to {MAX_SYMBOL_POINTS} points, an `arc`, a `text` or a `dot`, one of them"
+                )));
             }
             if let Some(v) = &sym.visible
                 && number(v, values, &mut read).map_err(said)? == 0.0
@@ -1715,7 +2741,7 @@ impl Family {
                 if r <= 0.0 {
                     return Err(said(format!("its dot has radius {r}; it needs a radius above zero")));
                 }
-                out.push(Mark::Dot { centre, radius: r });
+                out.push((Mark::Dot { centre, radius: r }, sym.subcategory.clone()));
                 continue;
             }
             if let Some(l) = &sym.text {
@@ -1724,7 +2750,7 @@ impl Family {
                     return Err(said(format!("its text has height {height}; it needs a height above zero")));
                 }
                 let text = said_text(&l.value, values).map_err(said)?;
-                out.push(Mark::Label { at, height, text, align: l.align });
+                out.push((Mark::Label { at, height, text, align: l.align }, sym.subcategory.clone()));
                 continue;
             }
             let mut pts = Vec::new();
@@ -1732,8 +2758,8 @@ impl Family {
                 pts.push(P2(n(a)?, n(b)?));
             }
             if let Some(c) = &sym.arc {
-                let (centre, r, from, to) = (P2(n(&c.centre[0])?, n(&c.centre[1])?), n(&c.radius)?, n(&c.from)?, n(&c.to)?);
-                if r <= 0.0 || (to - from).abs() > 360.0 || to == from {
+                let Sweep { centre, radius: r, from, to } = c.sweep(values, &mut read).map_err(said)?;
+                if r <= 0.0 || (to - from).abs() > 360.0 + 1e-9 || to == from {
                     return Err(said(format!(
                         "its arc has radius {r} and runs from {from} to {to} degrees; it needs a radius above zero and up to a full turn"
                     )));
@@ -1744,7 +2770,7 @@ impl Family {
                     P2(centre.0 + r * c, centre.1 + r * s)
                 }));
             }
-            out.push(Mark::Line(pts));
+            out.push((Mark::Line(pts), sym.subcategory.clone()));
         }
         Ok(out)
     }
@@ -1753,12 +2779,19 @@ impl Family {
     /// read already, and `cuts`, what the cutting may still cost.
     fn build<'a>(
         &'a self,
+        type_name: &str,
         values: &BTreeMap<String, Val>,
         read: &mut HashMap<&'a str, Result<Node, String>>,
         cuts: &mut csg::Meter,
+        how: Build,
     ) -> Result<Vec<Piece>, String> {
         let (mut out, mut voids) = (Vec::new(), Vec::new());
+        // The form each solid of `out` is of: what a measured void's `cuts` names.
+        let mut of: Vec<usize> = Vec::new();
         for i in 0..self.forms.len() {
+            if !self.forms[i].of_type(type_name) || self.forms[i].snapshot != how.snapshot {
+                continue;
+            }
             let what = format!("form {}", i + 1);
             let Some(piece) = self.solid(i, values, read).map_err(|e| format!("{what}: {e}"))? else {
                 continue;
@@ -1766,13 +2799,23 @@ impl Family {
             if self.forms[i].void {
                 voids.push((i, out.len(), piece.tris));
             } else {
+                of.push(i);
                 out.push(piece);
             }
         }
-        // Each void cut from the solids listed before it that it reaches. A cut solid is no longer one round surface,
-        // and its outline seen from above is as it was. ponytail: a notch or a hole doesn't show in plan; trace it if it must.
+        // Each void cut from every solid listed before it that it reaches (Revit's `cuts` lists of before the add-in measured them
+        // don't limit it: they leave out forms its void cuts and name some it doesn't). Where they were measured
+        // (`cuts_measured`), a void that names the forms it cuts cuts those and only those, whatever their order. A cut solid is
+        // no longer one round surface, and its outline seen from above is as it was. ponytail: a notch or a hole doesn't show in
+        // plan; trace it if it must.
         for (i, before, void) in &voids {
-            for piece in out.iter_mut().take(*before) {
+            let named = self.cuts_measured.then(|| self.forms[*i].cuts.as_ref()).flatten();
+            for (k, piece) in out.iter_mut().enumerate() {
+                match named {
+                    Some(list) if !self.forms[of[k]].source.as_ref().is_some_and(|src| list.contains(src)) => continue,
+                    None if k >= *before => break,
+                    _ => {}
+                }
                 let tris = csg::subtract(&piece.tris, void, cuts).map_err(|e| format!("form {}: {e}", i + 1))?;
                 if tris != piece.tris {
                     let (bottom, top) = heights(&tris);
@@ -1785,12 +2828,98 @@ impl Family {
                         outline: std::mem::take(&mut piece.outline),
                         material: std::mem::take(&mut piece.material),
                         show: piece.show,
+                        subcategory: piece.subcategory.take(),
                     };
                 }
             }
         }
+        // Its nested parts: Revit's result for a type has them in its own forms already.
+        if !how.snapshot {
+            for (i, n) in self.nested.iter().enumerate().filter(|(_, n)| n.of_type(type_name)) {
+                let said = |e: String| format!("nested part {} ({}): {e}", i + 1, n.family);
+                out.extend(self.nested_pieces(n, n.type_for(type_name), values, read, cuts, how).map_err(said)?);
+            }
+        }
         out.retain(|p| !p.tris.is_empty());
         Ok(out)
+    }
+
+    /// Nested part `n`'s solids in this family's axes, sized by this family's `values`: none where it isn't there or the
+    /// project has no family of its name.
+    fn nested_pieces<'a>(
+        &'a self,
+        n: &'a Nested,
+        inner_type: &str,
+        values: &BTreeMap<String, Val>,
+        read: &mut HashMap<&'a str, Result<Node, String>>,
+        cuts: &mut csg::Meter,
+        how: Build,
+    ) -> Result<Vec<Piece>, String> {
+        if let Some(v) = &n.visible
+            && number(v, values, read)? == 0.0
+        {
+            return Ok(Vec::new());
+        }
+        let Some(inner) = self.nested_family(&n.family, how.others) else { return Ok(Vec::new()) };
+        if how.depth >= MAX_NESTING {
+            return Err(format!("nested more than {MAX_NESTING} deep"));
+        }
+        let mut given = BTreeMap::new();
+        for (k, e) in &n.params {
+            given.insert(k.clone(), number(e, values, read)?);
+        }
+        let wall = match values.get(WALL) {
+            Some(Val::Number(x)) => *x,
+            _ => DEFAULT_WALL,
+        };
+        let inner_values = inner.values_given(inner_type, &given, wall)?;
+        how.spent.set(how.spent.get() + 1);
+        if how.spent.get() > MAX_NESTED {
+            return Err(format!("it builds more than {MAX_NESTED} nested parts in all"));
+        }
+        let deeper = Build {
+            snapshot: inner.draws_revit_forms(inner_type, &inner_values, wall),
+            others: how.others,
+            depth: how.depth + 1,
+            spent: how.spent,
+        };
+        let pieces = inner.build(inner_type, &inner_values, &mut HashMap::new(), cuts, deeper)?;
+        let (at, axes) = nested_frame(n, values, read)?;
+        let det = crate::geom::v3::dot(axes[0], cross(axes[1], axes[2]));
+        let mirrored = det < 0.0;
+        let scale = nested_scale(n, values, read)?;
+        let place = |p: P3| add(at, add(add(mul(axes[0], p[0] * scale), mul(axes[1], p[1] * scale)), mul(axes[2], p[2] * scale)));
+        let plan = |q: &P2| {
+            let p = place([q.0, q.1, 0.0]);
+            P2(p[0], p[1])
+        };
+        Ok(pieces
+            .into_iter()
+            .map(|pc| {
+                let tris = pc
+                    .tris
+                    .iter()
+                    .map(|[a, b, c]| if mirrored { [place(*a), place(*c), place(*b)] } else { [place(*a), place(*b), place(*c)] })
+                    .collect::<Vec<_>>();
+                // Upright, its outline from above is its own placed; turned onto a face, the hull of what it comes to.
+                let upright = axes[2] == [0.0, 0.0, 1.0];
+                let mut outline: Vec<P2> = if upright {
+                    pc.outline.iter().map(plan).collect()
+                } else {
+                    crate::geom::hull(tris.iter().flatten().map(|p: &P3| P2(p[0], p[1])).collect())
+                };
+                if mirrored && upright {
+                    outline.reverse();
+                }
+                let (bottom, top) = heights(&tris);
+                // Drawn where both its nested part's settings and its own form's say.
+                let show = match (n.show, pc.show) {
+                    (Some(a), Some(b)) => Some(a.and(b)),
+                    (a, b) => a.or(b),
+                };
+                Piece { tris, outline, bottom, top, show, ..pc }
+            })
+            .collect())
     }
 
     /// Form `i`'s own solid, sized by `values`, before any void cuts it: `None` where its `visible`
@@ -1813,31 +2942,168 @@ impl Family {
             _ => form.material.clone(),
         };
         let piece = if !form.mesh.is_empty() {
-            mesh(&form.mesh, material)?
+            mesh(&form.mesh, &form.outline, material)?
+        } else if !form.path.is_empty() {
+            let holes = form.section_holes.iter().chain(&form.section_end_holes);
+            if form.path.len() > MAX_RING
+                || form.section.len() > MAX_RING
+                || form.section_end.len() > MAX_RING
+                || form.section_holes.len() + form.section_end_holes.len() > MAX_RING
+                || holes.clone().any(|h| h.len() > MAX_RING)
+            {
+                return Err(format!("its path or its profile has more than {MAX_RING} points"));
+            }
+            if !form.section_end_holes.is_empty() && form.section_end_holes.len() != form.section_holes.len() {
+                return Err("a swept blend has as many loops inside its profile at its end as at its start".into());
+            }
+            let mut pts =
+                |v: &'a [[Expr; 3]]| -> Result<Vec<P3>, String> { v.iter().map(|[a, b, c]| Ok([num(a)?, num(b)?, num(c)?])).collect() };
+            let (path, section, end) = (pts(&form.path)?, pts(&form.section)?, pts(&form.section_end)?);
+            let mut inner = Vec::new();
+            for (k, h) in form.section_holes.iter().enumerate() {
+                inner.push((k, pts(h)?, form.section_end_holes.get(k).map(|e| pts(e)).transpose()?.unwrap_or_default()));
+            }
+            let mut bends = |ring: Ring, hole: usize| -> Result<Vec<(usize, P3, P3, bool)>, String> {
+                let mut out = Vec::new();
+                for b in form.arcs.iter().filter(|b| b.ring == ring && b.hole == hole) {
+                    let [x, y, z] = b.centre.as_slice() else { return Err("an arc of a sweep has a centre of three numbers".into()) };
+                    out.push((b.edge, [num(x)?, num(y)?, num(z)?], b.normal.unwrap_or([0.0, 0.0, 1.0]), b.clockwise));
+                }
+                Ok(out)
+            };
+            let closed = path.len() > 2 && path.first() == path.last();
+            let path = shapes::bent3(path, &bends(Ring::Path, 0)?, closed);
+            let section = shapes::bent3(section, &bends(Ring::Section, 0)?, true);
+            let end = shapes::bent3(end, &bends(Ring::SectionEnd, 0)?, true);
+            let mut holes = Vec::new();
+            for (k, s, e) in inner {
+                let s = shapes::bent3(s, &bends(Ring::Section, k + 1)?, true);
+                let e = shapes::bent3(e, &bends(Ring::SectionEnd, k + 1)?, true);
+                if s.len() > MAX_RING * 4 || e.len() > MAX_RING * 4 {
+                    return Err(format!("its arcs come to more than {} points", MAX_RING * 4));
+                }
+                holes.push((s, e));
+            }
+            if section.len() > MAX_RING * 4 || path.len() > MAX_RING * 4 {
+                return Err(format!("its arcs come to more than {} points", MAX_RING * 4));
+            }
+            // Counted before it is built: a path and a profile each of thousands of points would make tens of millions.
+            let around = section.len().max(end.len()) + holes.iter().map(|(s, e)| s.len().max(e.len())).sum::<usize>();
+            too_fine(path.len().saturating_mul(around).saturating_mul(2).saturating_add(4 * section.len()), "sweep")?;
+            hulled(shapes::along_holed(&path, &section, &end, &holes)?, material)
         } else {
+            if !form.outline.is_empty() {
+                return Err("an `outline` is a `mesh`'s: a `profile` or a `circle` has its own".into());
+            }
             let ring: Vec<P2> = match &form.circle {
                 Some(c) => {
                     let (x, y, r) = (num(&c.centre[0])?, num(&c.centre[1])?, num(&c.radius)?);
                     if r <= 0.0 {
                         return Err(format!("its circle's radius is {r}; it needs one above zero"));
                     }
-                    (0..SEGMENTS)
-                        .map(|k| (k as f64 * std::f64::consts::TAU / SEGMENTS as f64).sin_cos())
-                        .map(|(s, c)| P2(x + r * c, y + r * s))
-                        .collect()
+                    let n = sides(std::f64::consts::TAU, r);
+                    (0..n).map(|k| (k as f64 * std::f64::consts::TAU / n as f64).sin_cos()).map(|(s, c)| P2(x + r * c, y + r * s)).collect()
                 }
-                None if form.profile.len() > MAX_PROFILE => return Err(format!("its profile has more than {MAX_PROFILE} corners")),
+                None if form.profile.len() > MAX_RING => return Err(format!("its profile has more than {MAX_RING} corners")),
                 None => form.profile.iter().map(|[a, b]| Ok(P2(num(a)?, num(b)?))).collect::<Result<_, String>>()?,
+            };
+            // Its true arcs, drawn as a circle is.
+            let mut bends = |ring: Ring, hole: usize| -> Result<Vec<(usize, P2, bool)>, String> {
+                let corners: &[[Expr; 2]] = match ring {
+                    Ring::Top => &form.top,
+                    Ring::Hole => form.holes.get(hole).map_or(&[], Vec::as_slice),
+                    _ => &form.profile,
+                };
+                let mut out = Vec::new();
+                for b in form.arcs.iter().filter(|b| b.ring == ring && b.hole == hole) {
+                    let [x, y] = b.centre.as_slice() else { return Err("an arc of a profile has a centre of two numbers".into()) };
+                    let mut centre = P2(num(x)?, num(y)?);
+                    // Through a point between its corners: the circle through the three.
+                    if let ([tx, ty], Some(a), Some(c)) =
+                        (b.through.as_slice(), corners.get(b.edge), corners.get((b.edge + 1) % corners.len().max(1)))
+                    {
+                        let (a, m, c) = (P2(num(&a[0])?, num(&a[1])?), P2(num(tx)?, num(ty)?), P2(num(&c[0])?, num(&c[1])?));
+                        if let Some(o) = circumcentre(a, m, c) {
+                            centre = o;
+                        }
+                    }
+                    out.push((b.edge, centre, b.clockwise));
+                }
+                Ok(out)
+            };
+            let (profile_bends, top_bends) = (bends(Ring::Profile, 0)?, bends(Ring::Top, 0)?);
+            let hole_bends = (0..form.holes.len()).map(|k| bends(Ring::Hole, k)).collect::<Result<Vec<_>, _>>()?;
+            let (ring, ring_breaks) = if form.circle.is_none() {
+                shapes::bent2_marked(ring, &profile_bends)
+            } else {
+                let at = (0..ring.len()).collect();
+                (ring, at)
             };
             let (from, to) = (num(&form.from)?, num(&form.to)?);
             if ring.len() < 3 || crate::geom::area(&ring).abs() < 1.0 {
                 return Err("its profile has no area: it needs three corners or more, or a circle".into());
             }
-            if to <= from {
+            // A blend may run down: its profile at `from` above its top at `to`.
+            let down = !form.top.is_empty() && to < from;
+            if to <= from && !down {
                 let unit = if form.axis.is_some() { " degrees" } else { "" };
                 return Err(format!("sweeps nothing: from {from} to {to}{unit}"));
             }
-            let ring = if crate::geom::area(&ring) < 0.0 { ring.into_iter().rev().collect() } else { ring };
+            let (ring, ring_breaks) = if crate::geom::area(&ring) < 0.0 {
+                let n = ring.len();
+                (ring.into_iter().rev().collect(), ring_breaks.into_iter().map(|b| n - 1 - b).collect())
+            } else {
+                (ring, ring_breaks)
+            };
+            // A revolve's sketch plane where it is along the axis it is square to: its triangles moved there.
+            let lift = match &form.at {
+                Some(e) => embed(form.plane, P2(0.0, 0.0), num(e)?),
+                None => [0.0; 3],
+            };
+            let lifted = |tris: Vec<[P3; 3]>| -> Vec<[P3; 3]> { tris.into_iter().map(|t| t.map(|q| add(q, lift))).collect() };
+            // A revolve of a profile with holes (a ring's section): the profile turned, less each hole turned.
+            if let (Some([p, q]), false, true) = (&form.axis, form.holes.is_empty(), form.top.is_empty()) {
+                if to - from > 360.0 || form.holes.len() > MAX_RING || form.holes.iter().any(|h| h.len() > MAX_RING) {
+                    return Err(format!("it turns more than all the way round, or its holes have more than {MAX_RING} corners"));
+                }
+                let mut corner = |c: &'a [Expr; 2]| -> Result<P2, String> { Ok(P2(num(&c[0])?, num(&c[1])?)) };
+                let axis = [corner(p)?, corner(q)?];
+                let (tris, _) = revolve(&ring, axis, (from, to), form.plane)?;
+                let mut tris = lifted(tris);
+                for (h, b) in form.holes.iter().zip(&hole_bends) {
+                    let hole: Vec<P2> = h.iter().map(|[a, c]| Ok(P2(num(a)?, num(c)?))).collect::<Result<_, String>>()?;
+                    let hole = shapes::bent2(hole, b);
+                    let hole = if crate::geom::area(&hole) < 0.0 { hole.into_iter().rev().collect() } else { hole };
+                    let (inner, _) = revolve(&hole, axis, (from, to), form.plane)?;
+                    let inner = lifted(inner);
+                    tris.extend(inner.into_iter().map(|[a, b, c]| [a, c, b]));
+                }
+                return Ok(Some(Piece { show: form.show, subcategory: form.subcategory.clone(), ..hulled(tris, material) }));
+            }
+            if !form.top.is_empty() || !form.holes.is_empty() {
+                if form.top.len() > MAX_RING || form.holes.len() > MAX_RING || form.holes.iter().any(|h| h.len() > MAX_RING) {
+                    return Err(format!("its top or its holes have more than {MAX_RING} corners"));
+                }
+                if form.axis.is_some() || form.circle.is_some() {
+                    return Err("a `top` or `holes` go with a `profile` swept across its plane, not turned or round".into());
+                }
+                let mut ring_of =
+                    |v: &'a [[Expr; 2]]| -> Result<Vec<P2>, String> { v.iter().map(|[a, b]| Ok(P2(num(a)?, num(b)?))).collect() };
+                let tris = if form.top.is_empty() {
+                    let holes = form.holes.iter().map(|h| ring_of(h)).collect::<Result<Vec<_>, _>>()?;
+                    let holes: Vec<Vec<P2>> = holes.into_iter().zip(&hole_bends).map(|(h, b)| shapes::bent2(h, b)).collect();
+                    too_fine((ring.len() + holes.iter().map(Vec::len).sum::<usize>()).saturating_mul(4), "profile")?;
+                    shapes::holed(&ring, &holes, from, to, form.plane)?
+                } else {
+                    let (top, top_breaks) = shapes::bent2_marked(ring_of(&form.top)?, &top_bends);
+                    if top.len() < 3 || crate::geom::area(&top).abs() < 1.0 {
+                        return Err("its top has no area: it needs three corners or more".into());
+                    }
+                    too_fine((ring.len() + top.len()).saturating_mul(4), "blend")?;
+                    shapes::blend((&ring, &ring_breaks), (&top, &top_breaks), from, to, form.plane)?
+                };
+                return Ok(Some(Piece { show: form.show, subcategory: form.subcategory.clone(), ..hulled(tris, material) }));
+            }
             match &form.axis {
                 Some([p, q]) => {
                     if to - from > 360.0 {
@@ -1846,8 +3112,10 @@ impl Family {
                     let mut corner = |c: &'a [Expr; 2]| -> Result<P2, String> { Ok(P2(num(&c[0])?, num(&c[1])?)) };
                     let axis = [corner(p)?, corner(q)?];
                     let (tris, outline) = revolve(&ring, axis, (from, to), form.plane)?;
+                    let tris = lifted(tris);
+                    let outline = outline.into_iter().map(|q| P2(q.0 + lift[0], q.1 + lift[1])).collect();
                     let (bottom, top) = heights(&tris);
-                    Piece { caps: tris.len(), tris, outline, bottom, top, material, round: false, show: None }
+                    Piece { caps: tris.len(), tris, outline, bottom, top, material, round: false, show: None, subcategory: None }
                 }
                 None => {
                     let (tris, caps) = sweep(&ring, from, to, form.plane)?;
@@ -1862,21 +3130,22 @@ impl Family {
                         Plane::Xz => (vec![P2(a0, from), P2(a1, from), P2(a1, to), P2(a0, to)], b0, b1),
                         Plane::Yz => (vec![P2(from, a0), P2(to, a0), P2(to, a1), P2(from, a1)], b0, b1),
                     };
-                    Piece { tris, caps, outline, bottom, top, material, round: form.circle.is_some(), show: None }
+                    Piece { tris, caps, outline, bottom, top, material, round: form.circle.is_some(), show: None, subcategory: None }
                 }
             }
         };
-        Ok(Some(Piece { show: form.show, ..piece }))
+        Ok(Some(Piece { show: form.show, subcategory: form.subcategory.clone(), ..piece }))
     }
 
     /// Where each of its forms lies, sized by `values`, before any void cuts it: its place in
     /// `forms`, whether it is a void, and the box its solid fills in the family's own axes. A form
     /// that builds to nothing on its own — a formula it can't read, a profile with no area — is left
     /// out: what a warning tells is best worked out around it, not stopped by it.
-    pub fn shapes(&self, values: &BTreeMap<String, Val>) -> Vec<Shape> {
+    pub fn shapes(&self, type_name: &str, values: &BTreeMap<String, Val>) -> Vec<Shape> {
         let mut read = HashMap::new();
         let mut out = Vec::new();
-        for i in 0..self.forms.len() {
+        let which = self.draws_snapshot_forms(type_name);
+        for i in (0..self.forms.len()).filter(|i| self.forms[*i].of_type(type_name) && self.forms[*i].snapshot == which) {
             let Some(piece) = self.solid(i, values, &mut read).ok().flatten() else {
                 continue;
             };
@@ -1971,7 +3240,7 @@ fn number<'a>(e: &'a Expr, values: &BTreeMap<String, Val>, read: &mut HashMap<&'
         Expr::Formula(f) => match read.entry(f.as_str()).or_insert_with(|| parse(f)) {
             Ok(node) => worked(f, node, &mut |n: &str| match values.get(n) {
                 Some(Val::Number(x)) => Ok(*x),
-                Some(Val::Text(_)) => Err(format!("`{n}` is a material, not a number")),
+                Some(Val::Text(_)) => Err(format!("`{n}` is a material or text, not a number")),
                 None => Err(format!("`{n}` isn't one of its parameters")),
             })?,
             Err(e) => return Err(e.clone()),
@@ -1987,6 +3256,67 @@ fn point<'a>(
     read: &mut HashMap<&'a str, Result<Node, String>>,
 ) -> Result<[f64; 3], String> {
     Ok([number(&v[0], values, read)?, number(&v[1], values, read)?, number(&v[2], values, read)?])
+}
+
+/// Where nested part `n` stands in its parent sized by `values`, and its own x, y and z axes in the parent's: given, or turned
+/// about z and mirrored across its x.
+fn nested_frame<'a>(
+    n: &'a Nested,
+    values: &BTreeMap<String, Val>,
+    read: &mut HashMap<&'a str, Result<Node, String>>,
+) -> Result<(P3, [P3; 3]), String> {
+    let at = point(&n.at, values, read)?;
+    let (sin, cos) = number(&n.rotation, values, read)?.to_radians().sin_cos();
+    let flip = if n.mirrored { -1.0 } else { 1.0 };
+    Ok((at, n.axes.unwrap_or([[cos, sin, 0.0], [-flip * sin, flip * cos, 0.0], [0.0, 0.0, 1.0]])))
+}
+
+/// How many times as large nested part `n` is drawn, sized by `values`: one where it says nothing; else a number above zero.
+fn nested_scale<'a>(
+    n: &'a Nested,
+    values: &BTreeMap<String, Val>,
+    read: &mut HashMap<&'a str, Result<Node, String>>,
+) -> Result<f64, String> {
+    let Some(e) = &n.scale else { return Ok(1.0) };
+    let k = number(e, values, read)?;
+    if !(k.is_finite() && k > 0.0 && k <= MAX_SCALE) {
+        return Err(format!("its scale is {k}; it needs a number above zero and up to {MAX_SCALE}"));
+    }
+    Ok(k)
+}
+
+/// The centre of the circle through `a`, `m` and `c`; none where they lie on a line.
+fn circumcentre(a: P2, m: P2, c: P2) -> Option<P2> {
+    let d = 2.0 * (a.0 * (m.1 - c.1) + m.0 * (c.1 - a.1) + c.0 * (a.1 - m.1));
+    if d.abs() < 1e-9 {
+        return None;
+    }
+    let (sa, sm, sc) = (a.0 * a.0 + a.1 * a.1, m.0 * m.0 + m.1 * m.1, c.0 * c.0 + c.1 * c.1);
+    let o = P2((sa * (m.1 - c.1) + sm * (c.1 - a.1) + sc * (a.1 - m.1)) / d, (sa * (c.0 - m.0) + sm * (a.0 - c.0) + sc * (m.0 - a.0)) / d);
+    (o.0.is_finite() && o.1.is_finite()).then_some(o)
+}
+
+/// A piece of `tris`, its outline the hull round them from above.
+fn hulled(tris: Vec<[P3; 3]>, material: String) -> Piece {
+    let (bottom, top) = heights(&tris);
+    let outline = crate::geom::hull(tris.iter().flatten().map(|p| P2(p[0], p[1])).collect());
+    Piece { caps: tris.len(), tris, outline, bottom, top, material, round: false, show: None, subcategory: None }
+}
+
+/// The most a nested part may be scaled by.
+const MAX_SCALE: f64 = 1000.0;
+
+/// The families a nested part may be of, by name: the project's.
+pub type Others<'o> = &'o dyn Fn(&str) -> Option<&'o Family>;
+
+/// How [`Family::build`] builds: Revit's own forms or the parametric ones, the families nested parts are of, how deep.
+#[derive(Clone, Copy)]
+struct Build<'o, 's> {
+    snapshot: bool,
+    others: Others<'o>,
+    depth: usize,
+    /// Nested parts built so far, of every depth: at most [`MAX_NESTED`].
+    spent: &'s std::cell::Cell<usize>,
 }
 
 /// How low and how high `tris` reach.
@@ -2065,7 +3395,7 @@ fn revolve(ring: &[P2], [p0, p1]: [P2; 2], (from, to): (f64, f64), plane: Plane)
     let w = cross(u, n);
     let turn = to - from;
     let full = turn > 360.0 - 1e-9;
-    let steps = (turn / 360.0 * SEGMENTS as f64 - 1e-9).ceil().max(1.0) as usize;
+    let steps = sides(turn.to_radians(), most.max(-least));
     let angle = |k: usize| (from + turn * (if full { k % steps } else { k }) as f64 / steps as f64).to_radians().sin_cos();
     let at = |i: usize, k: usize| -> P3 {
         let (t, r) = reach.get(i).copied().unwrap_or_default();
@@ -2119,8 +3449,53 @@ fn revolve(ring: &[P2], [p0, p1]: [P2; 2], (from, to): (f64, f64), plane: Plane)
     Ok((tris, outline))
 }
 
-/// A form a file brought as triangles: its outline seen from above, the hull round them.
-fn mesh(tris: &[[P3; 3]], material: String) -> Result<Piece, String> {
+/// Refuses a form whose triangles, counted before they are made, come to more than a piece may hold.
+fn too_fine(triangles: usize, what: &str) -> Result<(), String> {
+    if triangles > MAX_TRIANGLES {
+        return Err(format!("its {what} would make more than {MAX_TRIANGLES} triangles"));
+    }
+    Ok(())
+}
+
+/// How near a point is to a line, or a segment's end to another's, for them to meet, mm (an area, for the turn of three points).
+const MEET: f64 = 1e-9;
+
+/// The most points of a traced outline a draw tests for crossing itself; a longer one was tested as its family was loaded.
+const TESTED_AT_DRAW: usize = 1024;
+
+/// Whether the closed `ring` crosses or touches itself: two of its edges that share no corner meet.
+fn crosses_itself(ring: &[P2]) -> bool {
+    let n = ring.len();
+    let edge = |i: usize| (ring[i], ring[(i + 1) % n]);
+    (0..n).any(|i| {
+        let (a, b) = edge(i);
+        // Edge `i + 1` and, round the ring's end, edge `n - 1` for the first, share a corner with it.
+        (i + 2..n).filter(|j| !(i == 0 && *j == n - 1)).any(|j| {
+            let (c, d) = edge(j);
+            segments_meet(a, b, c, d)
+        })
+    })
+}
+
+/// Whether the segments `a`-`b` and `c`-`d` meet: cross, touch or overlap.
+fn segments_meet(a: P2, b: P2, c: P2, d: P2) -> bool {
+    let turn = |p: P2, q: P2, r: P2| (q - p).cross(r - p);
+    let within = |p: P2, q: P2, r: P2| {
+        r.0 >= p.0.min(q.0) - MEET && r.0 <= p.0.max(q.0) + MEET && r.1 >= p.1.min(q.1) - MEET && r.1 <= p.1.max(q.1) + MEET
+    };
+    let (d1, d2, d3, d4) = (turn(c, d, a), turn(c, d, b), turn(a, b, c), turn(a, b, d));
+    if ((d1 > MEET && d2 < -MEET) || (d1 < -MEET && d2 > MEET)) && ((d3 > MEET && d4 < -MEET) || (d3 < -MEET && d4 > MEET)) {
+        return true;
+    }
+    (d1.abs() <= MEET && within(c, d, a))
+        || (d2.abs() <= MEET && within(c, d, b))
+        || (d3.abs() <= MEET && within(a, b, c))
+        || (d4.abs() <= MEET && within(a, b, d))
+}
+
+/// A form a file brought as triangles: its outline seen from above, the one it `traced` (counter-clockwise), else the hull
+/// round them.
+fn mesh(tris: &[[P3; 3]], traced: &[[f64; 2]], material: String) -> Result<Piece, String> {
     if tris.len() > MAX_TRIANGLES {
         return Err(format!("it has more than {MAX_TRIANGLES} triangles"));
     }
@@ -2128,9 +3503,29 @@ fn mesh(tris: &[[P3; 3]], material: String) -> Result<Piece, String> {
         return Err("a corner of it isn't a usable number".into());
     }
     let (bottom, top) = tris.iter().flatten().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| (lo.min(p[2]), hi.max(p[2])));
-    // ponytail: the convex hull stands for its outline; trace its silhouette if hulls mislead.
-    let outline = crate::geom::hull(tris.iter().flatten().map(|p| P2(p[0], p[1])).collect());
-    Ok(Piece { tris: tris.to_vec(), caps: tris.len(), outline, bottom, top, material, round: false, show: None })
+    let outline = if traced.is_empty() {
+        // ponytail: the convex hull stands for its outline where none was traced.
+        crate::geom::hull(tris.iter().flatten().map(|p| P2(p[0], p[1])).collect())
+    } else {
+        if traced.len() < 3 || traced.len() > crate::model::MAX_POINTS {
+            return Err(format!("its `outline` has {} points: it takes 3 to {}", traced.len(), crate::model::MAX_POINTS));
+        }
+        if traced.iter().flatten().any(|x| !x.is_finite() || x.abs() > MAX_COORD) {
+            return Err("a point of its `outline` isn't a usable number".into());
+        }
+        let ring: Vec<P2> = traced.iter().map(|[x, y]| P2(*x, *y)).collect();
+        // A long one was tested when it was loaded ([`Family::clear_crossing_outlines`]); here, every draw of every type would
+        // test its pairs of edges again.
+        if traced.len() <= TESTED_AT_DRAW && crosses_itself(&ring) {
+            // A traced outline that zig-zags or crosses itself fills nothing: the hull stands for it, as if none was traced.
+            crate::geom::hull(tris.iter().flatten().map(|p| P2(p[0], p[1])).collect())
+        } else if crate::geom::area(&ring) < 0.0 {
+            ring.into_iter().rev().collect()
+        } else {
+            ring
+        }
+    };
+    Ok(Piece { tris: tris.to_vec(), caps: tris.len(), outline, bottom, top, material, round: false, show: None, subcategory: None })
 }
 
 /// The families a new project starts with, BIMCraft's own: tables, chairs, beds, sofas, desks,
@@ -2389,8 +3784,15 @@ fn hosted_library(language: crate::language::Language) -> Vec<(String, Value)> {
     };
     let leaf_y = [format!("-{leaf} / 2"), format!("{leaf} / 2")];
     let (face_in, face_out) = (format!("-{leaf} / 2 - 55"), format!("{leaf} / 2 + 55"));
+    // A handle is not drawn at Coarse, nor in a plan seen from above (below its cut): a door's plan is its jambs, its leaf and
+    // its swing.
     let handle = |x: [&str; 2], bx: Block<'_>| {
-        vec![bx(x, [&leaf_y[1], &face_out], ["1000", "1030"], &metal), bx(x, [&face_in, &leaf_y[0]], ["1000", "1030"], &metal)]
+        let mut both =
+            vec![bx(x, [&leaf_y[1], &face_out], ["1000", "1030"], &metal), bx(x, [&face_in, &leaf_y[0]], ["1000", "1030"], &metal)];
+        for form in &mut both {
+            form["show"] = json!({"coarse": false, "plan_top": false});
+        }
+        both
     };
     let sizes = |names: &[(&str, f64, f64)]| -> Value {
         names.iter().map(|(n, wd, h)| (n.to_string(), json!({width: wd, height: h}))).collect::<serde_json::Map<String, Value>>().into()
@@ -2696,12 +4098,256 @@ mod tests {
     }
 
     #[test]
+    fn a_sweep_too_fine_to_build_is_refused_before_it_is_built() {
+        let ring = |n: usize, r: f64| -> Vec<Value> {
+            (0..n).map(|k| (k as f64 * std::f64::consts::TAU / n as f64).sin_cos()).map(|(s, c)| json!([r * c, r * s, 0.0])).collect()
+        };
+        let path: Vec<Value> = (0..800).map(|k| json!([0.0, 0.0, k as f64 * 5.0])).collect();
+        let f: Family = serde_json::from_value(json!({"types": {"A": {}}, "forms": [{"path": path, "section": ring(800, 50.0)}]})).unwrap();
+        let e = f.check(&|_| true).unwrap_err();
+        assert!(e.contains("would make more than"), "{e}");
+        // The same sweep a sixth as fine is built.
+        let path: Vec<Value> = (0..20).map(|k| json!([0.0, 0.0, k as f64 * 5.0])).collect();
+        let f: Family = serde_json::from_value(json!({"types": {"A": {}}, "forms": [{"path": path, "section": ring(40, 50.0)}]})).unwrap();
+        assert!(f.check(&|_| true).is_ok());
+    }
+
+    #[test]
+    fn a_type_renamed_deleted_or_duplicated_keeps_the_nested_types_it_chose() {
+        let family = || -> Family {
+            serde_json::from_value(json!({"types": {"A": {}, "B": {}},
+                "nested": [{"family": "Handle", "type": "Standard", "type_in": {"B": "Other"}}]}))
+            .unwrap()
+        };
+        // Deleted: the type's choice goes with it, so the family stays sound.
+        let mut f = family();
+        f.forget_type("B");
+        f.types.remove("B");
+        assert!(f.check_parametric().is_ok());
+        assert!(f.nested[0].type_in.is_empty());
+        // Renamed: the choice follows the type.
+        let mut f = family();
+        f.rename_type("A", "C");
+        f.rename_type("B", "D");
+        f.types = f
+            .types
+            .iter()
+            .map(|(k, v)| {
+                (
+                    if k == "A" {
+                        "C".into()
+                    } else if k == "B" {
+                        "D".into()
+                    } else {
+                        k.clone()
+                    },
+                    v.clone(),
+                )
+            })
+            .collect();
+        assert!(f.check_parametric().is_ok());
+        assert_eq!(f.nested[0].type_in.get("D").map(String::as_str), Some("Other"));
+        assert!(!f.nested[0].type_in.contains_key("B"));
+        // Duplicated: the copy chooses what its original chose.
+        let mut f = family();
+        f.types.insert("E".into(), BTreeMap::new());
+        f.type_like("E", "B");
+        assert_eq!(f.nested[0].type_in.get("E").map(String::as_str), Some("Other"));
+        assert!(f.check_parametric().is_ok());
+    }
+
+    /// A ring of `n` points on a circle, the two at `k` swapped where `swap`: it crosses itself there.
+    fn circle_ring(n: usize, swap: Option<usize>) -> Vec<[f64; 2]> {
+        let mut r: Vec<[f64; 2]> =
+            (0..n).map(|k| (k as f64 * std::f64::consts::TAU / n as f64).sin_cos()).map(|(s, c)| [500.0 * c, 500.0 * s]).collect();
+        if let Some(k) = swap {
+            r.swap(k, k + 1);
+        }
+        r
+    }
+
+    #[test]
+    fn an_outline_that_crosses_itself_is_cleared_once_at_load_not_tested_at_every_draw() {
+        let tris = [[[0.0, 0.0, 0.0], [100.0, 0.0, 0.0], [0.0, 100.0, 100.0]]];
+        let family = |outline: Vec<[f64; 2]>| -> Family {
+            serde_json::from_value(json!({"types": {"A": {}}, "forms": [{"mesh": tris, "outline": outline}]})).unwrap()
+        };
+        let mut f = family(circle_ring(5000, Some(2000)));
+        revit::translate(&mut f, &json!({}), &|_| true);
+        assert!(f.forms[0].outline.is_empty(), "a crossing outline of five thousand points was kept");
+        // One that doesn't cross stays.
+        let mut f = family(circle_ring(5000, None));
+        revit::translate(&mut f, &json!({}), &|_| true);
+        assert_eq!(f.forms[0].outline.len(), 5000);
+        // A large outline is trusted at a draw (it was looked at when loaded): no test of its pairs of edges.
+        let pieces = f.pieces("A", &f.values("A", &BTreeMap::new()).unwrap()).unwrap();
+        assert_eq!(pieces[0].outline.len(), 5000);
+    }
+
+    #[test]
+    fn a_checks_opening_and_wall_are_sizes_it_can_cut() {
+        let with = |check: Value| -> Result<(), String> {
+            let f: Family = serde_json::from_value(json!({"types": {"900": {}}, "check": {"900": check}})).unwrap();
+            f.check_parametric()
+        };
+        assert!(with(json!({"matched": false, "opening": [900.0, 2100.0, 0.0], "wall": 200.0})).is_ok());
+        assert!(with(json!({"matched": false, "opening": [900.0, 1200.0, -150.0]})).is_ok(), "an opening below the sill is Revit's");
+        for bad in [
+            json!({"matched": false, "opening": [-5.0, 2100.0, 0.0]}),
+            json!({"matched": false, "opening": [900.0, 1e12, 0.0]}),
+            json!({"matched": false, "opening": [900.0, 2100.0, 1e12]}),
+        ] {
+            let e = with(bad.clone()).unwrap_err();
+            assert!(e.contains("isn't a usable size"), "{bad}: {e}");
+        }
+        for bad in [json!({"matched": false, "wall": 0.0}), json!({"matched": false, "wall": 1e12})] {
+            assert!(with(bad.clone()).unwrap_err().contains("wall isn't a usable size"), "{bad}");
+        }
+        // JSON has no NaN; a number that overflows reads as infinite in the types, caught by the same range.
+        let mut f: Family = serde_json::from_value(json!({"types": {"900": {}}, "check": {"900": {"matched": false}}})).unwrap();
+        f.check.get_mut("900").unwrap().opening = Some([f64::NAN, 2100.0, 0.0]);
+        assert!(f.check_parametric().is_err());
+    }
+
+    #[test]
+    fn dimensions_measuring_between_too_many_references_in_all_are_refused_quickly() {
+        let refs = |n: usize| -> Vec<Value> { (0..n).map(|k| json!({"name": format!("R{k}"), "at": k as f64})).collect() };
+        let eq = |n: usize| -> Vec<Value> {
+            (0..n).map(|k| json!({"refs": (0..256).map(|j| format!("R{j}")).collect::<Vec<_>>(), "eq": true, "id": k})).collect()
+        };
+        let f: Family = serde_json::from_value(json!({"types": {"A": {}}, "references": refs(256), "dimensions": eq(512)})).unwrap();
+        let started = std::time::Instant::now();
+        let e = f.check(&|_| true).unwrap_err();
+        assert!(e.contains("references in all"), "{e}");
+        assert!(started.elapsed().as_secs() < 5);
+        // Four of them are as many as are allowed.
+        let f: Family = serde_json::from_value(json!({"types": {"A": {}}, "references": refs(256), "dimensions": eq(4)})).unwrap();
+        assert!(f.check_parametric().is_ok());
+    }
+
+    #[test]
+    fn a_translation_stops_adding_dimensions_at_the_references_budget_and_says_so() {
+        let planes: Vec<Value> = (0..300)
+            .map(|k| json!({"id": format!("p{k}"), "name": format!("Plane {k}"), "normal": [1, 0, 0], "at": {"A": k as f64}}))
+            .collect();
+        let dimension = |k: usize| json!({"id": format!("d{k}"), "kind": "linear", "refs": (0..256).map(|j| format!("p{j}")).collect::<Vec<_>>(), "eq": true});
+        let def = json!({"reference_planes": planes, "dimensions": (0..8).map(dimension).collect::<Vec<_>>()});
+        let mut f: Family = serde_json::from_value(json!({"types": {"A": {}}})).unwrap();
+        let made = revit::translate(&mut f, &def, &|_| true);
+        let spent: usize = f.dimensions.iter().map(|d| d.refs.len()).sum();
+        assert!(spent <= 4 * MAX_REFERENCES && !f.dimensions.is_empty(), "{spent} references in all");
+        assert!(f.check_parametric().is_ok(), "the family it makes is one its own check takes: {:?}", f.check_parametric());
+        let said = f.editable.as_ref().map(|e| e.untranslated.join("; ")).unwrap_or_default();
+        assert!(said.contains("dimensions") && said.contains("more than"), "{said}");
+        let _ = made;
+    }
+
+    #[test]
+    fn an_arc_that_follows_its_ends_follows_their_distance_from_its_middle() {
+        let at = |w: f64| BTreeMap::from([("Width".to_string(), Val::Number(w))]);
+        let n = |x: f64| Expr::Number(x);
+        let w = || Expr::Formula("Width".into());
+        // A door's swing: its radius not bound to anything, its ends on the leaf's corner when open and shut.
+        let swing = Curve {
+            centre: [n(0.0), n(0.0)],
+            radius: n(762.0),
+            from: n(0.0),
+            to: n(90.0),
+            start: Some([w(), n(0.0)]),
+            end: Some([n(0.0), w()]),
+        };
+        let (a, b) = swing.ends(&at(915.0)).unwrap();
+        assert!(a.dist(P2(915.0, 0.0)) < 1e-6 && b.dist(P2(0.0, 915.0)) < 1e-6, "{a:?} {b:?}");
+        // Ends on one line from the middle at different distances: a whole turn, not nothing.
+        let odd = Curve { start: Some([n(100.0), n(0.0)]), end: Some([n(300.0), n(0.0)]), ..swing };
+        let sweep = odd.sweep(&at(900.0), &mut HashMap::new()).unwrap();
+        assert!((sweep.to - sweep.from - 360.0).abs() < 1e-9, "{sweep:?}");
+    }
+
+    #[test]
+    fn a_family_that_nests_itself_is_refused_with_the_way_it_does() {
+        let nesting = |inside: &str| -> Family {
+            serde_json::from_value(json!({"types": {"A": {}}, "nested": [{"family": inside, "type": "A"}]})).unwrap()
+        };
+        let mut m = crate::model::Model::new("Test");
+        m.families.insert("Self".into(), nesting("Self"));
+        let e = {
+            m.sync_library();
+            m.check()
+        }
+        .unwrap_err();
+        assert!(e.contains("nests itself") && e.contains("`Self`"), "{e}");
+        // Through others, and where it is named.
+        let mut m = crate::model::Model::new("Test");
+        m.families.insert("A".into(), nesting("B"));
+        m.families.insert("B".into(), nesting("C"));
+        assert!(
+            {
+                m.sync_library();
+                m.check()
+            }
+            .is_ok(),
+            "a chain that ends is sound"
+        );
+        m.families.insert("C".into(), nesting("A"));
+        let e = {
+            m.sync_library();
+            m.check()
+        }
+        .unwrap_err();
+        assert!(e.contains("nests itself") && e.contains("`A`") && e.contains("`B`") && e.contains("`C`"), "{e}");
+        // A family that holds the one it nests itself doesn't reach the project's.
+        let mut m = crate::model::Model::new("Test");
+        let mut a = nesting("A");
+        a.embedded.insert("A".into(), serde_json::from_value(json!({"types": {"A": {}}})).unwrap());
+        m.families.insert("A".into(), a);
+        {
+            m.sync_library();
+            m.check()
+        }
+        .unwrap();
+    }
+
+    /// A translation of `def` into a family with one type `A`: it must load (its own check takes it) and say what it left out.
+    fn translated(def: Value) -> (Family, String) {
+        let mut f: Family =
+            serde_json::from_value(json!({"types": {"A": {}}, "parameters": [{"name": "W", "kind": "length", "value": 10}]})).unwrap();
+        revit::translate(&mut f, &def, &|_| true);
+        f.check(&|_| true).unwrap_or_else(|e| panic!("the translation isn't a family its own check takes: {e}"));
+        let said = f.editable.as_ref().map(|e| e.untranslated.join("; ")).unwrap_or_default();
+        (f, said)
+    }
+
+    #[test]
+    fn a_translation_is_always_a_family_that_loads_a_huge_catalog_too_many_nested_params_or_flat_axes_are_left_out_and_said() {
+        // A type catalog of more rows than a family holds.
+        let rows: serde_json::Map<String, Value> = (0..1001).map(|k| (format!("T{k}"), json!({"W": k}))).collect();
+        let (f, said) = translated(json!({"type_catalog": {"columns": [{"name": "W"}], "rows": rows}}));
+        assert!(f.catalog.is_none() && said.contains("catalog"), "{said}");
+        // A nested part that sets more parameters than a family has.
+        let params: serde_json::Map<String, Value> = (0..300).map(|k| (format!("P{k}"), json!({"formula": "1"}))).collect();
+        let (f, said) = translated(json!({"nested": [{"family": "Knob", "type": "Standard", "at": [0, 0, 0], "params": params}]}));
+        assert!(f.nested.iter().all(|n| n.params.len() <= MAX_PARAMETERS), "{said}");
+        assert!(said.contains("parameters"), "{said}");
+        // A nested part whose axes are flat, or huge.
+        for (x, y) in [([1.0, 0.0, 0.0], [2.0, 0.0, 0.0]), ([1e9, 0.0, 0.0], [0.0, 1e9, 0.0])] {
+            let (f, said) =
+                translated(json!({"nested": [{"family": "Knob", "type": "Standard", "at": [0, 0, 0], "x_axis": x, "y_axis": y}]}));
+            if f.nested.iter().all(|n| n.axes.is_none()) {
+                assert!(f.nested.is_empty() && said.contains("Knob"), "{x:?}: {said}");
+            }
+            if let Some(a) = f.nested.first().and_then(|n| n.axes) {
+                assert!(a.iter().flatten().all(|c| c.abs() <= 1.0 + 1e-9), "an axis kept as it came: {a:?}");
+            }
+        }
+    }
+
+    #[test]
     fn a_family_too_big_to_build_is_refused() {
         let ring = |n: usize| -> Vec<Value> {
             (0..n).map(|k| (k as f64 * std::f64::consts::TAU / n as f64).sin_cos()).map(|(s, c)| json!([100.0 * c, 100.0 * s])).collect()
         };
-        let f: Family =
-            serde_json::from_value(json!({"types": {"A": {}}, "forms": [{"profile": ring(MAX_PROFILE + 1), "to": 10}]})).unwrap();
+        let f: Family = serde_json::from_value(json!({"types": {"A": {}}, "forms": [{"profile": ring(MAX_RING + 1), "to": 10}]})).unwrap();
         assert!(f.check(&|_| true).unwrap_err().contains("corners"));
         // Many types, each building a little: past what one family may build, refused.
         let types: serde_json::Map<String, Value> = (0..MAX_TYPES).map(|k| (format!("T{k}"), json!({}))).collect();
@@ -2720,7 +4366,7 @@ mod tests {
     fn forms_sweep_their_profiles_across_their_planes() {
         let f = table();
         let v = f.values("1000 x 600", &BTreeMap::new()).unwrap();
-        let pieces = f.pieces(&v).unwrap();
+        let pieces = f.pieces("", &v).unwrap();
         assert_eq!(pieces.len(), 2);
         let top = &pieces[0];
         assert_eq!((top.bottom, top.top, top.material.as_str(), top.round), (720.0, 750.0, "Timber", false));
@@ -2729,7 +4375,7 @@ mod tests {
         // Hidden: no leg.
         let mut no_legs = v.clone();
         no_legs.insert("Legs".into(), Val::Number(0.0));
-        assert_eq!(f.pieces(&no_legs).unwrap().len(), 1);
+        assert_eq!(f.pieces("", &no_legs).unwrap().len(), 1);
         // Upright profiles: a back across x and z, swept along y; a rail across y and z, along x;
         // a round post, its sides one surface.
         let f: Family = serde_json::from_value(json!({
@@ -2741,7 +4387,7 @@ mod tests {
             ]
         }))
         .unwrap();
-        let pieces = f.pieces(&f.values("A", &BTreeMap::new()).unwrap()).unwrap();
+        let pieces = f.pieces("A", &f.values("A", &BTreeMap::new()).unwrap()).unwrap();
         let back = &pieces[0];
         assert!((volume(&back.tris) - 500.0 * 500.0 * 40.0).abs() < 1e-3);
         assert_eq!((back.bottom, back.top), (400.0, 900.0));
@@ -2757,7 +4403,7 @@ mod tests {
         // Nothing to sweep, or a profile with no area: said.
         let mut flat = table();
         flat.forms[0].to = Expr::Formula("Top".into());
-        assert!(flat.pieces(&flat.values("Small", &BTreeMap::new()).unwrap()).unwrap_err().contains("form 1"));
+        assert!(flat.pieces("Small", &flat.values("Small", &BTreeMap::new()).unwrap()).unwrap_err().contains("form 1"));
     }
 
     /// The pieces of a family of `forms`, its one type built.
@@ -2765,7 +4411,13 @@ mod tests {
         let f: Family = serde_json::from_value(json!({"types": {"A": {}}, "parameters": [{"name": "R", "value": 300}], "forms": forms}))
             .map_err(|e| e.to_string())?;
         f.check(&|_| true)?;
-        f.pieces(&f.values("A", &BTreeMap::new())?)
+        f.pieces("A", &f.values("A", &BTreeMap::new())?)
+    }
+
+    /// The area of a polygon sector of `turn` radians about a unit radius, as a revolve out to `r` draws it (`sides` of them).
+    fn sector(turn: f64, r: f64) -> f64 {
+        let n = sides(turn, r) as f64;
+        n / 2.0 * (turn / n).sin()
     }
 
     #[test]
@@ -2774,8 +4426,10 @@ mod tests {
         let ring = json!([[100, 0], ["R", 0], ["R", 500], [100, 500]]);
         let tube = built(json!([{"plane": "xz", "profile": ring, "axis": [[0, 0], [0, 1]], "to": 360}])).unwrap();
         let [p] = tube.as_slice() else { panic!("{tube:?}") };
-        // Its sides are polygons of 32 sides: their area is a hair under the circle's.
-        let k = 16.0 * (std::f64::consts::TAU / 32.0).sin() / std::f64::consts::PI;
+        // Its sides are polygons of as many sides as keep a chord within half a millimetre of the circle (55 out to 300): their
+        // area is a hair under the circle's.
+        assert_eq!(sides(std::f64::consts::TAU, 300.0), 55);
+        let k = sector(std::f64::consts::TAU, 300.0) / std::f64::consts::PI;
         let want = std::f64::consts::PI * (300.0 * 300.0 - 100.0 * 100.0) * 500.0 * k;
         assert!((volume(&p.tris) / want - 1.0).abs() < 1e-6, "{} not {want}", volume(&p.tris));
         assert_eq!((p.bottom, p.top), (0.0, 500.0));
@@ -2785,10 +4439,11 @@ mod tests {
         );
         // A quarter of it, closed at both ends; its axis given the other way round, or across x and y.
         let quarter = built(json!([{"plane": "xz", "profile": ring, "axis": [[0, 1], [0, 0]], "from": 0, "to": 90}])).unwrap();
-        assert!((volume(&quarter[0].tris) / (want / 4.0) - 1.0).abs() < 1e-6, "{}", volume(&quarter[0].tris));
+        let quarter_of = sector(std::f64::consts::FRAC_PI_2, 300.0) * (300.0 * 300.0 - 100.0 * 100.0) * 500.0;
+        assert!((volume(&quarter[0].tris) / quarter_of - 1.0).abs() < 1e-6, "{}", volume(&quarter[0].tris));
         let half = built(json!([{"profile": [[100, 0], [300, 0], [300, 50], [100, 50]], "axis": [[0, 0], [0, 1]], "to": 180}])).unwrap();
-        let ring_of = std::f64::consts::PI * (300.0 * 300.0 - 100.0 * 100.0) * 50.0 * k;
-        assert!((volume(&half[0].tris) / (ring_of / 2.0) - 1.0).abs() < 1e-6, "{}", volume(&half[0].tris));
+        let half_of = sector(std::f64::consts::PI, 300.0) * (300.0 * 300.0 - 100.0 * 100.0) * 50.0;
+        assert!((volume(&half[0].tris) / half_of - 1.0).abs() < 1e-6, "{}", volume(&half[0].tris));
         assert!((half[0].top - half[0].bottom - 300.0).abs() < 1e-6, "turned out of its plane, 300 to one side");
         // A profile across its axis, an axis of one point, a turn of nothing or more than all the way: said.
         for (form, says) in [
@@ -2806,8 +4461,7 @@ mod tests {
     fn a_revolve_faces_out_whatever_plane_side_and_direction_it_turns() {
         // The same tube, 100 to 300 out and 500 along: drawn across each plane, to either side of its axis, the axis given
         // either way round, from any angle: one volume, turned out.
-        let k = 16.0 * (std::f64::consts::TAU / 32.0).sin();
-        let want = k * (300.0 * 300.0 - 100.0 * 100.0) * 500.0;
+        let want = sector(std::f64::consts::TAU, 300.0) * (300.0 * 300.0 - 100.0 * 100.0) * 500.0;
         let across = |a0: f64, a1: f64| json!([[a0, 0], [a1, 0], [a1, 500], [a0, 500]]);
         for (plane, profile, axis) in [
             ("xz", across(100.0, 300.0), json!([[0, 0], [0, 1]])),
@@ -2829,7 +4483,7 @@ mod tests {
         }
         // A part turn is closed by two caps, turned out. About an axis beside the origin, with neither cap in a plane through it
         // (a cap in one adds nothing to the volume, however it faces), the volume is the sector's only if both are.
-        let sector = k / 4.0 * (300.0 * 300.0 - 100.0 * 100.0) * 500.0;
+        let sector = sector(std::f64::consts::FRAC_PI_2, 300.0) * (300.0 * 300.0 - 100.0 * 100.0) * 500.0;
         for (from, to) in [(30, 120), (-120, -30)] {
             for axis in [json!([[1000, 0], [1000, 1]]), json!([[1000, 1], [1000, 0]])] {
                 let part =
@@ -2842,12 +4496,13 @@ mod tests {
 
     #[test]
     fn a_part_turn_about_an_upright_axis_shows_a_slice_in_plan_and_a_circle_makes_a_torus() {
-        let k = 16.0 * (std::f64::consts::TAU / 32.0).sin();
+        let k = 2.0 * sector(std::f64::consts::FRAC_PI_2, 300.0);
         let ring = json!([[100, 0], [300, 0], [300, 500], [100, 500]]);
         let quarter = built(json!([{"plane": "xz", "profile": ring, "axis": [[0, 0], [0, 1]], "to": 90}])).unwrap();
         let outline = &quarter[0].outline;
-        // 4 sin δ (R² − r²) where δ is a step's angle: a quarter of the ring, as the polygon makes it, counter-clockwise, from +x.
-        assert!((crate::geom::area(outline) / (k / 4.0 * (300.0 * 300.0 - 100.0 * 100.0)) - 1.0).abs() < 1e-6, "{outline:?}");
+        // (n / 2) sin δ (R² − r²) where δ is a step's angle and n the steps: a quarter of the ring, as the polygon makes it,
+        // counter-clockwise, from +x.
+        assert!((crate::geom::area(outline) / (k / 2.0 * (300.0 * 300.0 - 100.0 * 100.0)) - 1.0).abs() < 1e-6, "{outline:?}");
         assert!(outline.iter().all(|p| p.0 > -1e-6 && p.1 > -1e-6), "in the first quarter: {outline:?}");
         // The same turned the other way round the axis, the other way round the plan.
         let down = built(json!([{"plane": "xz", "profile": ring, "axis": [[0, 1], [0, 0]], "to": 90}])).unwrap();
@@ -2855,7 +4510,7 @@ mod tests {
         // A profile on the axis: a slice of a disc, its centre one of its corners.
         let wedge =
             built(json!([{"plane": "xz", "profile": [[0, 0], [300, 0], [300, 500], [0, 500]], "axis": [[0, 0], [0, 1]], "to": 90}]));
-        assert!((crate::geom::area(&wedge.unwrap()[0].outline) / (k / 4.0 * 300.0 * 300.0) - 1.0).abs() < 1e-6);
+        assert!((crate::geom::area(&wedge.unwrap()[0].outline) / (k / 2.0 * 300.0 * 300.0) - 1.0).abs() < 1e-6);
         // A circle turned about an axis beside it: a torus. Its volume is its circle's area times the way its centre goes.
         let donut = built(json!([{"plane": "xz", "circle": {"centre": [500, 100], "radius": 100}, "axis": [[0, 0], [0, 1]], "to": 360}]));
         let donut = donut.unwrap();
@@ -2868,6 +4523,106 @@ mod tests {
         )
         .unwrap();
         assert!(f.check(&|_| true).unwrap_err().contains("axis"));
+    }
+
+    /// A family of the subcategories `subs` and the line patterns `patterns` (JSON), checked.
+    fn styled(subs: Value, patterns: Value) -> Result<Family, String> {
+        let f: Family = serde_json::from_value(json!({"types": {"A": {}}, "subcategories": subs, "line_patterns": patterns}))
+            .map_err(|e| e.to_string())?;
+        f.check(&|_| true)?;
+        Ok(f)
+    }
+
+    #[test]
+    fn a_subcategory_says_its_line_weights_and_pattern_and_the_family_the_patterns() {
+        let f = styled(
+            json!([{"name": "Elevation Swing", "projection": 1, "cut": 3, "pattern": "Dash"}, {"name": "Frame"}]),
+            json!({"Dash": [{"dash": 3.0}, {"space": 1.5}], "Centre": [{"dash": 6.0}, {"space": 1.0}, "dot", {"space": 1.0}]}),
+        )
+        .unwrap();
+        assert_eq!(f.subcategories[0].projection, Some(crate::pen::Pen(1)));
+        assert_eq!((f.subcategories[0].cut, f.subcategories[0].pattern.as_deref()), (Some(crate::pen::Pen(3)), Some("Dash")));
+        assert_eq!(f.subcategories[1].projection, None, "a subcategory that says nothing says nothing");
+        // Revit's -1 is a weight it has none of (a category with no cut).
+        let none = styled(json!([{"name": "Opening", "projection": -1, "cut": -1}]), json!({})).unwrap();
+        assert_eq!((none.subcategories[0].projection, none.subcategories[0].cut), (None, None));
+        assert_eq!(f.line_patterns["Dash"].0.len(), 2);
+        assert!(f.line_patterns["Centre"].is_dash());
+        // Written and read back as they are; none of them written where none is said.
+        let back: Family = serde_json::from_value(serde_json::to_value(&f).unwrap()).unwrap();
+        assert_eq!(back, f);
+        let bare = serde_json::to_value(styled(json!([{"name": "Frame"}]), json!({})).unwrap()).unwrap();
+        assert_eq!(bare["subcategories"], json!([{"name": "Frame"}]));
+        assert!(bare.get("line_patterns").is_none());
+    }
+
+    #[test]
+    fn hostile_line_weights_and_patterns_are_refused_in_plain_words() {
+        let weights = [(json!(0), "from 1 to 16"), (json!(17), "from 1 to 16")];
+        for (pen, says) in weights {
+            let e = styled(json!([{"name": "F", "projection": pen}]), json!({})).unwrap_err();
+            assert!(e.contains(says) || e.contains("whole number"), "{e}");
+        }
+        assert!(styled(json!([{"name": "F", "cut": 2.5}]), json!({})).is_err(), "a pen is a whole number");
+        assert!(styled(json!([{"name": "F", "pattern": "two\nlines"}]), json!({})).is_err(), "a pattern's name is on one line");
+        let long = "x".repeat(MAX_TEXT + 1);
+        assert!(styled(json!([{"name": "F", "pattern": long}]), json!({})).unwrap_err().contains("line pattern"));
+        for patterns in [
+            json!({"Solid": [{"dash": 3.0}, {"space": 1.0}]}),
+            json!({"Dash": []}),
+            json!({"Dash": [{"dash": 0.0}]}),
+            json!({"Dash": [{"dash": 1000.0}, {"space": 1.0}]}),
+            json!({"Dash": [{"dash": -1.0}]}),
+        ] {
+            assert!(styled(json!([]), patterns.clone()).is_err(), "{patterns}");
+        }
+        let many: serde_json::Map<String, Value> =
+            (0..=MAX_LINE_PATTERNS).map(|i| (format!("P{i}"), json!([{"dash": 3.0}, {"space": 1.0}]))).collect();
+        assert!(styled(json!([]), Value::Object(many)).unwrap_err().contains("more than"));
+        let segments: Vec<Value> = (0..40).map(|_| json!({"dash": 1.0})).collect();
+        assert!(styled(json!([]), json!({"Long": segments})).is_err(), "more than 32 segments");
+    }
+
+    /// The pieces of a family of `forms` whose voids' cuts were measured, or not (`measured`).
+    fn built_cuts(measured: bool, forms: Value) -> Vec<Piece> {
+        let f: Family = serde_json::from_value(json!({"types": {"A": {}}, "cuts_measured": measured, "forms": forms})).unwrap();
+        f.check(&|_| true).unwrap();
+        f.pieces("A", &f.values("A", &BTreeMap::new()).unwrap()).unwrap()
+    }
+
+    /// Two 100 cubes side by side (A at x 0..100, B at x 200..300) and a void through both, listed between them.
+    fn two_cubes_and_a_void(void_cuts: Value) -> Value {
+        let cube = |x: f64, source: &str| json!({"profile": [[x, 0], [x + 100.0, 0], [x + 100.0, 100], [x, 100]], "from": 0, "to": 100, "source": source});
+        let mut void = json!({"profile": [[-50, 20], [350, 20], [350, 80], [-50, 80]], "from": -10, "to": 110, "void": true});
+        if !void_cuts.is_null() {
+            void["cuts"] = void_cuts;
+        }
+        json!([cube(0.0, "1"), void, cube(200.0, "2")])
+    }
+
+    #[test]
+    fn a_measured_void_cuts_only_what_it_names_whatever_the_order() {
+        // The void is listed between the two, and names the one after it: that one is cut (a bar of 100 x 60 x 100 out of it),
+        // the one before it is whole.
+        let pieces = built_cuts(true, two_cubes_and_a_void(json!(["2"])));
+        assert_eq!(pieces.len(), 2);
+        let (a, b) = (volume(&pieces[0].tris), volume(&pieces[1].tris));
+        assert!((a - 1e6).abs() < 1e-3, "the one it doesn't name is whole: {a}");
+        assert!((b - (1e6 - 100.0 * 60.0 * 100.0)).abs() < 1e-3, "the one it names is cut though it comes after: {b}");
+        // One that names nothing cuts nothing; one that says nothing cuts what comes before it, as ever.
+        let none = built_cuts(true, two_cubes_and_a_void(json!([])));
+        assert!(none.iter().all(|p| (volume(&p.tris) - 1e6).abs() < 1e-3));
+        let says_nothing = built_cuts(true, two_cubes_and_a_void(Value::Null));
+        assert!((volume(&says_nothing[0].tris) - (1e6 - 100.0 * 60.0 * 100.0)).abs() < 1e-3);
+        assert!((volume(&says_nothing[1].tris) - 1e6).abs() < 1e-3);
+    }
+
+    #[test]
+    fn an_unmeasured_void_cuts_every_solid_before_it() {
+        // Whatever `cuts` says (here: only the one after it), a void of a family whose lists weren't measured cuts the one before.
+        let pieces = built_cuts(false, two_cubes_and_a_void(json!(["2"])));
+        assert!((volume(&pieces[0].tris) - (1e6 - 100.0 * 60.0 * 100.0)).abs() < 1e-3, "{}", volume(&pieces[0].tris));
+        assert!((volume(&pieces[1].tris) - 1e6).abs() < 1e-3, "the one after it is whole");
     }
 
     #[test]
@@ -2890,33 +4645,52 @@ mod tests {
         let block = json!({"profile": [[-300, -300], [300, -300], [300, 300], [-300, 300]], "from": 0, "to": 200});
         let bowl = json!({"plane": "xz", "profile": [[0, 50], [200, 50], [200, 250], [0, 250]], "axis": [[0, 0], [0, 1]], "to": 360, "void": true});
         let basin = built(json!([block, bowl])).unwrap();
-        let k = 16.0 * (std::f64::consts::TAU / 32.0).sin();
+        let k = sector(std::f64::consts::TAU, 200.0);
         assert!((volume(&basin[0].tris) - (600.0 * 600.0 * 200.0 - k * 200.0 * 200.0 * 150.0)).abs() < 1.0, "{}", volume(&basin[0].tris));
     }
 
     #[test]
     fn voids_of_many_triangles_never_exhaust_the_stack() {
-        // Two revolves of 64 corners each, the one cutting the other, on a small stack: done, and quickly.
-        let ring: Vec<Value> = (0..MAX_PROFILE)
-            .map(|k| (k as f64 * std::f64::consts::TAU / MAX_PROFILE as f64).sin_cos())
-            .map(|(s, c)| json!([400.0 + 100.0 * c, 300.0 + 100.0 * s]))
-            .collect();
-        let worked = std::thread::Builder::new()
-            .stack_size(256 * 1024)
-            .spawn(move || {
-                let started = std::time::Instant::now();
-                let solid = json!({"plane": "xz", "profile": ring, "axis": [[0, 0], [0, 1]], "to": 360});
-                let void =
-                    json!({"profile": [[-1000, -1000], [1000, -1000], [1000, 0], [-1000, 0]], "from": -10, "to": 1000, "void": true});
-                (built(json!([solid, void])), started.elapsed())
-            })
-            .unwrap()
-            .join()
-            .unwrap();
-        let (pieces, took) = worked;
+        // The largest a revolve comes to that a void can cut: a profile of MAX_PROFILE corners (twice the old test's 28), turned
+        // about an axis 250 mm from it, about 7,500 triangles at the half-millimetre fineness (59 sides a turn; the 64 corners of
+        // 32 sides this test was first written for were 4,100), cut on a small stack (a wasm thread's): done, and in the time it
+        // takes in a release build. A little further out the cut's budget says it has too many faces: said, not a stack overflow.
+        const CORNERS: usize = MAX_PROFILE;
+        let revolve = |out: f64| {
+            let ring: Vec<Value> = (0..CORNERS)
+                .map(|k| (k as f64 * std::f64::consts::TAU / CORNERS as f64).sin_cos())
+                .map(|(s, c)| json!([out + 100.0 * c, 300.0 + 100.0 * s]))
+                .collect();
+            std::thread::Builder::new()
+                .stack_size(256 * 1024)
+                .spawn(move || {
+                    let started = std::time::Instant::now();
+                    let solid = json!({"plane": "xz", "profile": ring, "axis": [[0, 0], [0, 1]], "to": 360});
+                    let void =
+                        json!({"profile": [[-9000, -9000], [9000, -9000], [9000, 0], [-9000, 0]], "from": -10, "to": 1000, "void": true});
+                    (built(json!([solid, void])), started.elapsed())
+                })
+                .unwrap()
+                .join()
+                .unwrap()
+        };
+        let (pieces, took) = revolve(250.0);
         let pieces = pieces.unwrap();
-        assert!(volume(&pieces[0].tris) > 0.0 && took.as_secs_f64() < 10.0, "{took:?}: a hang, not a slow machine");
+        assert!(volume(&pieces[0].tris) > 0.0, "the revolve is left holding something");
+        assert!(pieces[0].tris.len() > 20_000, "cut, it holds more triangles than the 4,100 it was first written for");
+        // A debug build is many times slower than the release the limit is for.
+        #[cfg(not(debug_assertions))]
+        assert!(took.as_secs_f64() < 10.0, "{took:?}: a hang, not a slow machine");
+        let _ = took;
+        // Past what the budget cuts (and past the 256 sides a turn at most, at 7 m): refused, not overflowed.
+        for out in [450.0, 7000.0] {
+            let (too_many, _) = revolve(out);
+            let e = too_many.unwrap_err();
+            assert!(e.contains("too many faces") || e.contains("can't have more than"), "{out}: {e}");
+        }
+        assert_eq!(sides(std::f64::consts::TAU, 7100.0), MOST_SEGMENTS);
     }
+
     /// A one-type lighting family holding `connectors`.
     fn lamp(connectors: Value) -> Family {
         serde_json::from_value(json!({

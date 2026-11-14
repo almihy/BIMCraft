@@ -1526,10 +1526,19 @@ fn a_line_weight_is_a_pen_picked_from_a_list_and_a_hairline_is_a_pixel_on_screen
     press(&mut h, "OK");
     press(&mut h, "OK");
     assert_eq!(plan_graphics(&h, 100000).categories["wall"].cut.weight, Some(Pen(0)));
-    // On screen a line is its pen's pixels at the zoom, at least one: a hairline is one at any zoom; Thin Lines makes all one.
-    use crate::canvas::on_screen;
-    assert_eq!((on_screen(2.0, 3.0, false), on_screen(0.0, 3.0, false), on_screen(0.2, 1.0, false)), (6.0, 1.0, 1.0));
-    assert_eq!(on_screen(2.0, 3.0, true), 1.0);
+    // On screen a line is its pen's pixels, at least one: a hairline is one at any zoom; Thin Lines makes all one. A drawing that
+    // says no zoom (a sheet) is as wide as it says, times how big it is shown.
+    use crate::canvas::{Place, on_screen};
+    let shown = |k: f32, zoom: f32| Place { k, zoom, ..Place::at(egui::Pos2::ZERO) };
+    assert_eq!((on_screen(2.0, shown(3.0, 0.0), false), on_screen(0.0, shown(3.0, 0.0), false)), (6.0, 1.0));
+    assert_eq!(on_screen(0.2, shown(1.0, 0.0), false), 1.0);
+    assert_eq!(on_screen(2.0, shown(3.0, 0.0), true), 1.0);
+    // A screen's drawing made at a zoom is no wider as it zooms in: its lines' width over the zoom it was made at, whatever its
+    // `k` (Revit keeps a line's width at its weight's for the view's scale).
+    assert_eq!(on_screen(8.0, shown(1.0, 4.0), false), 2.0);
+    assert_eq!(on_screen(32.0, shown(1.0, 16.0), false), 2.0, "four times as far in, as wide");
+    assert_eq!(on_screen(8.0, shown(2.5, 4.0), false), 2.0, "scaled while it is still being zoomed, as wide");
+    assert_eq!(on_screen(8.0, Place { paper: true, ..shown(2.0, 4.0) }, false), 16.0, "a sheet's are the drawing's, times its size");
 }
 
 #[test]
@@ -1604,9 +1613,9 @@ fn the_view_control_bar_sets_the_3d_views_visual_style_and_wf_hl_and_sd_do_too()
     let style = |h: &Harness<BimApp>| Look::of_3d(&h.state().session.model).style();
     press(&mut h, "Default 3D View");
     assert_eq!(h.state().sheet, Sheet::View3D);
-    // Shaded until told otherwise; a 3D view has no scale or detail level.
+    // Shaded until told otherwise; a 3D view has no scale, and has a detail level, as Revit's bar.
     assert!(painted_text(&h).contains(&"Shaded".to_string()));
-    assert!(h.query_by_label("Scale").is_none() && h.query_by_label("Detail Level").is_none());
+    assert!(h.query_by_label("Scale").is_none() && h.query_by_label("Detail Level").is_some());
     pick(&mut h, Role::Button, "Visual Style");
     press(&mut h, "Wireframe");
     assert_eq!(style(&h), VisualStyle::Wireframe);
@@ -6176,6 +6185,167 @@ fn the_family_editor_shows_a_familys_connectors_and_keeps_them() {
     assert_eq!(h.state().session.model.families["WC"].connectors, before);
 }
 
+/// A box from Revit's definition (original): Left and Right a labelled Width apart and EQ about the centre, 750 high; Revit's
+/// result for its type A `top` high (750 matches).
+fn revit_box(top: f64) -> Value {
+    let line = |a: [&str; 2], b: [&str; 2]| json!({"line": [[{"ref": a[0]}, {"ref": a[1]}, 0], [{"ref": b[0]}, {"ref": b[1]}, 0]]});
+    let at = |x: f64| json!({"A": x});
+    let revit = json!({
+        "reference_planes": [
+            {"id": "c", "name": "Center", "normal": [1, 0, 0], "defines_origin": true, "at": at(0.0)},
+            {"id": "l", "name": "Left", "normal": [1, 0, 0], "at": at(-500.0)},
+            {"id": "r", "name": "Right", "normal": [1, 0, 0], "at": at(500.0)},
+            {"id": "f", "name": "Front", "normal": [0, 1, 0], "defines_origin": true, "at": at(0.0)},
+            {"id": "b", "name": "Back", "normal": [0, 1, 0], "at": at(600.0)},
+            {"id": "z", "name": "Level", "normal": [0, 0, 1], "defines_origin": true, "at": at(0.0)},
+            {"id": "t", "name": "Top", "normal": [0, 0, 1], "at": at(750.0)}],
+        "dimensions": [{"refs": ["l", "r"], "label": "Width"}, {"refs": ["l", "c", "r"], "eq": true}],
+        "forms": [{"kind": "extrusion", "normal": [0, 0, 1], "start": {"ref": "z"}, "end": {"ref": "t"},
+                   "loops": [[line(["l", "f"], ["r", "f"]), line(["r", "f"], ["r", "b"]), line(["r", "b"], ["l", "b"]), line(["l", "b"], ["l", "f"])]]}]
+    });
+    // Revit's result for A: a box 1000 by 600 by `top`, as a mesh of its six faces.
+    let (lo, hi) = ([-500.0, 0.0, 0.0], [500.0, 600.0, top]);
+    let p =
+        |i: usize| [if i & 1 == 0 { lo[0] } else { hi[0] }, if i & 2 == 0 { lo[1] } else { hi[1] }, if i & 4 == 0 { lo[2] } else { hi[2] }];
+    let mesh: Vec<Value> = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]]
+        .iter()
+        .flat_map(|[a, b, c, d]| [json!([p(*a), p(*b), p(*c)]), json!([p(*a), p(*c), p(*d)])])
+        .collect();
+    json!({"name": "Revit Box", "category": "furniture", "types": {"A": {}},
+                        "parameters": [{"name": "Width", "kind": "length", "value": 1000}], "revit": revit,
+                        "forms": [{"mesh": mesh, "snapshot": true}]})
+}
+
+#[test]
+fn the_family_editor_shows_a_revit_familys_references_and_whether_it_is_editable_and_its_types_flex_the_preview() {
+    let family = revit_box(750.0);
+    let mut h = app(&format!(
+        "{BOX}
+family {family}
+component {{\"family\": \"Revit Box\", \"type\": \"A\", \"at\": [3000, 3000]}}"
+    ));
+    let it = find(&h, |e| matches!(e, Element::Component(_)));
+    h.state_mut().selection = vec![it];
+    h.set_size(vec2(1800.0, 900.0));
+    press(&mut h, "Manage");
+    press(&mut h, "Edit Family");
+    assert!(h.query_by_label_contains("Editable").is_some(), "it says it can be edited");
+    press(&mut h, "References");
+    for name in ["Left", "Right", "Center", "Left – Center – Right"] {
+        assert!(h.query_by_label(name).is_some(), "{name}");
+    }
+    assert!(h.query_by_label("-500").is_some(), "Left where Width puts it in the type previewed");
+    assert!(h.query_by_label_contains("A: Matches Revit").is_some(), "its type matched Revit's result");
+    // Applied as it is, nothing is changed: its type is still as it was checked.
+    press_near(&mut h, "Apply", "Cancel");
+    assert!(!h.state().session.model.families["Revit Box"].check["A"].edited, "OK or Apply alone changes nothing");
+    // Its width typed into the type, applied: the family flexes.
+    press(&mut h, "Types");
+    type_into(&mut h, "Type Value Width", "1600");
+    press_near(&mut h, "Apply", "Cancel");
+    let f = h.state().session.model.families["Revit Box"].clone();
+    let v = f.values("A", &Default::default()).unwrap();
+    assert_eq!(v["ref(Right)"], bimcraft_core::family::Val::Number(800.0));
+    assert!(f.check["A"].edited, "changed here: drawn from its rules from now on: {:?} {:?} {:?}", f.check, f.types, f.parameters);
+    press(&mut h, "References");
+    assert!(h.query_by_label_contains("A: Changed here").is_some());
+}
+
+/// A type whose check against Revit failed is drawn as Revit made it: Type Properties says so and offers BIMCraft's rebuild,
+/// which says it may differ from Revit's; taken, the type is drawn from its rules.
+#[test]
+fn type_properties_of_a_type_drawn_as_revit_made_it_offers_bimcrafts_rebuild() {
+    let family = revit_box(900.0);
+    let mut h = app(&format!(
+        "{BOX}
+family {family}
+component {{\"family\": \"Revit Box\", \"type\": \"A\", \"at\": [3000, 3000]}}"
+    ));
+    assert!(h.state().session.model.families["Revit Box"].draws_snapshot("A"));
+    let it = find(&h, |e| matches!(e, Element::Component(_)));
+    h.state_mut().selection = vec![it];
+    h.set_size(vec2(1800.0, 900.0));
+    press(&mut h, "Edit Type");
+    assert!(h.query_by_label_contains("Drawn as Revit made it").is_some());
+    assert!(h.query_by_label_contains("may differ from Revit").is_some());
+    press(&mut h, "Use BIMCraft's Rebuild");
+    let f = h.state().session.model.families["Revit Box"].clone();
+    assert!(f.check["A"].edited && !f.draws_snapshot("A"), "{:?}", f.check);
+    assert!(h.query_by_label_contains("Drawn as Revit made it").is_none(), "the dialog shows the type as it is now");
+}
+
+/// Load Family of a family the project has asks as Revit does ("Family Already Exists"): Overwrite the existing version keeps
+/// the project's values of its types; "... and its parameter values" takes the file's; Cancel loads nothing.
+#[test]
+fn loading_a_family_the_project_has_asks_whether_to_keep_its_values() {
+    let mut h = app(BOX);
+    h.state_mut().session.files.give("Revit Box.json", revit_box(750.0).to_string().into_bytes());
+    h.state_mut().load_family_file("Revit Box.json".into());
+    h.run();
+    assert!(h.query_by_label("Family Already Exists").is_none(), "a family the project hasn't loads at once");
+    assert!(h.state().session.model.families.contains_key("Revit Box"));
+    h.state_mut().session.execute("family", &json!({"name": "Revit Box", "types": {"A": {"Width": 1600}}})).unwrap();
+    let width = |h: &Harness<BimApp>| h.state().session.model.families["Revit Box"].types["A"].get("Width").cloned();
+    // Cancel: nothing loaded.
+    h.state_mut().load_family_file("Revit Box.json".into());
+    h.run();
+    assert!(h.query_by_label_contains("which already exists in this project").is_some());
+    press(&mut h, "Cancel");
+    assert_eq!(width(&h), Some(json!(1600)));
+    // Overwrite the existing version: the project's 1600 kept.
+    h.state_mut().load_family_file("Revit Box.json".into());
+    h.run();
+    press(&mut h, "Overwrite the existing version");
+    assert_eq!(width(&h), Some(json!(1600)));
+    // ... and its parameter values: the file's (it says none for A: the parameter's own).
+    h.state_mut().load_family_file("Revit Box.json".into());
+    h.run();
+    press(&mut h, "Overwrite the existing version and its parameter values");
+    assert_eq!(width(&h), None);
+    assert!(h.query_by_label("Family Already Exists").is_none());
+}
+
+/// A door family whose handle is a shared family (Revit's `shared`), `width` wide, named `name`.
+fn shared_handle_package(dir: &std::path::Path, name: &str, width: f64) -> std::path::PathBuf {
+    let door = json!({"category": "door", "types": {"910 x 2110": {"Width": 910}},
+                      "parameters": [{"name": "Width", "kind": "length", "value": 900}, {"name": "Height", "kind": "length", "value": 2100}],
+                      "forms": [{"plane": "xz", "profile": [[-450, 0], [450, 0], [450, 2100], [-450, 2100]], "from": -20, "to": 20}]});
+    let handle = json!({"category": "generic", "types": {"Standard": {}},
+                        "forms": [{"profile": [[0, 0], [width, 0], [width, 50], [0, 50]], "from": 0, "to": 50}]});
+    let definition = json!({"nested": [{"id": "n1", "family": "Handle", "type": "Standard", "shared": true, "at": [300, 0, 1000]}]});
+    let package = json!({"format": 2, "family": door, "definition": definition, "nested_families": {"Handle": {"family": handle}}});
+    let path = dir.join(format!("{name}.arqiflow-family.json"));
+    std::fs::write(&path, package.to_string()).unwrap();
+    path
+}
+
+/// A shared family a loaded family nests, which the project has otherwise, is Revit's "Shared Family Already Exists": Use the
+/// existing version (the default) keeps the project's; Use the version you are loading replaces it.
+#[test]
+fn loading_a_family_that_nests_a_shared_family_the_project_has_asks_which_version_to_use() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = app(BOX);
+    let handle_width = |h: &Harness<BimApp>| h.state().session.model.families["Handle"].forms[0].profile[1][0].clone();
+    h.state_mut().load_family_file(shared_handle_package(dir.path(), "Sample Door A", 50.0));
+    h.run();
+    assert!(h.query_by_label("Family Already Exists").is_none() && h.query_by_label("Shared Family Already Exists").is_none());
+    assert_eq!(handle_width(&h), bimcraft_core::family::Expr::Number(50.0));
+    // Another door nesting a different Handle: asked; the project's is used.
+    h.state_mut().load_family_file(shared_handle_package(dir.path(), "Sample Door B", 60.0));
+    h.run();
+    assert!(h.query_by_label("Shared Family Already Exists").is_some());
+    assert!(h.query_by_label("Overwrite the existing version").is_none(), "the family itself isn't asked: it is new");
+    press(&mut h, "Use the existing version");
+    assert!(h.state().session.model.families.contains_key("Sample Door B"));
+    assert_eq!(handle_width(&h), bimcraft_core::family::Expr::Number(50.0), "the project's version kept");
+    // A third: the version it brings replaces it.
+    h.state_mut().load_family_file(shared_handle_package(dir.path(), "Sample Door C", 60.0));
+    h.run();
+    press(&mut h, "Use the version you are loading");
+    assert!(h.state().session.model.families.contains_key("Sample Door C"));
+    assert_eq!(handle_width(&h), bimcraft_core::family::Expr::Number(60.0), "the loaded version");
+}
+
 #[test]
 fn the_family_editor_sets_a_forms_and_a_symbols_visibility_settings_as_revits_dialog_does() {
     use bimcraft_core::family::{Levels, Show};
@@ -6274,6 +6444,105 @@ fn the_door_tool_places_the_projects_single_door_of_a_family_and_the_type_select
     // Its Edit Type is its family type's, with a family's own parameters.
     press(&mut h, "Edit Type");
     assert!(h.query_by_label("Family:").is_some());
+}
+
+/// An export package of a door family whose handle, a door-category family Revit doesn't share, is nested in it.
+fn door_package(dir: &std::path::Path) -> std::path::PathBuf {
+    let opening = |types: Value| {
+        json!({"category": "door", "types": types,
+               "parameters": [{"name": "Width", "kind": "length", "value": 900}, {"name": "Height", "kind": "length", "value": 2100}],
+               "forms": [{"plane": "xz", "profile": [[-450, 0], [450, 0], [450, 2100], [-450, 2100]], "from": -20, "to": 20}]})
+    };
+    let definition = json!({"nested": [{"id": "n1", "family": "Handle", "type": "Standard", "shared": false,
+                                         "at": [300, 0, 1000], "rotation": 0, "mirrored": false}]});
+    let package = json!({"format": 2, "family": opening(json!({"810 x 2110": {"Width": 810}, "910 x 2110": {"Width": 910}})),
+                         "definition": definition, "place": "910 x 2110",
+                         "nested_families": {"Handle": {"family": opening(json!({"Standard": {}}))}}});
+    let path = dir.join("Sample Flush.arqiflow-family.json");
+    std::fs::write(&path, package.to_string()).unwrap();
+    path
+}
+
+/// The file dialog the last click began, answered with `path`.
+fn pick_file(h: &mut Harness<BimApp>, path: &std::path::Path) {
+    let tx = crate::dialog::BEGUN.with(|b| b.borrow_mut().pop()).expect("a file dialog was begun");
+    tx.send(Some(vec![path.to_path_buf()])).unwrap();
+    h.run();
+    h.run();
+}
+
+#[test]
+fn load_family_is_on_the_door_and_window_tools_and_the_insert_tab_and_places_with_the_familys_own_tool() {
+    let dir = tempfile::tempdir().unwrap();
+    let door = door_package(dir.path());
+    let mut h = app(BOX);
+    // Modify | Place Door's Mode panel: the door it loads is the Door tool's, on the type the package says to place.
+    tool(&mut h, "Door");
+    press(&mut h, "Load Family");
+    pick_file(&mut h, &door);
+    assert!(!h.state().status.error, "{}", h.state().status.text);
+    assert_eq!(h.state().tool, Tool::Door);
+    assert_eq!(h.state().opening_pick("door"), (Some("Sample Flush".into()), Some("910 x 2110".into())));
+    click(&mut h, P2(2000.0, 0.0));
+    let placed = ids(&h, "door")[0];
+    assert_eq!((field(&h, placed, "family"), field(&h, placed, "type")), (json!("Sample Flush"), json!("910 x 2110")));
+    // Modify | Place Window's has it too.
+    key(&mut h, Key::Escape);
+    key(&mut h, Key::Escape);
+    tool(&mut h, "Window");
+    assert!(h.query_by_label("Load Family").is_some(), "Place Window's Mode panel");
+    key(&mut h, Key::Escape);
+    key(&mut h, Key::Escape);
+    // Insert › Load from Library: a door family starts the Door tool, whatever was on.
+    press(&mut h, "Insert");
+    press(&mut h, "Load Family");
+    pick_file(&mut h, &door);
+    // The project has it now: Revit's "Family Already Exists" asks first.
+    press(&mut h, "Overwrite the existing version");
+    assert_eq!(h.state().tool, Tool::Door);
+    // A family of no opening starts the Component tool on its type.
+    let stool = dir.path().join("Stool.json");
+    std::fs::write(
+        &stool,
+        json!({"category": "furniture", "types": {"Low": {}}, "forms": [{"profile": [[0, 0], [400, 0], [400, 400], [0, 400]], "to": 450}]})
+            .to_string(),
+    )
+    .unwrap();
+    key(&mut h, Key::Escape);
+    key(&mut h, Key::Escape);
+    press(&mut h, "Insert");
+    press(&mut h, "Load Family");
+    pick_file(&mut h, &stool);
+    assert_eq!(h.state().tool, Tool::Component);
+    assert_eq!(h.state().component, Some(("Stool".into(), "Low".into())));
+}
+
+#[test]
+fn a_nested_family_revit_doesnt_share_is_in_no_list_of_families_to_place() {
+    let dir = tempfile::tempdir().unwrap();
+    let door = door_package(dir.path());
+    let mut h = app(BOX);
+    tool(&mut h, "Door");
+    press(&mut h, "Load Family");
+    pick_file(&mut h, &door);
+    assert!(!h.state().session.model.families.contains_key("Handle"), "held by the door, not the project's");
+    assert!(h.state().session.model.families["Sample Flush"].embedded.contains_key("Handle"));
+    // The Door tool's Type Selector: the door's types, never the handle's.
+    press(&mut h, "Type Selector");
+    assert!(h.query_by_label("Sample Flush: 810 x 2110").is_some());
+    assert!(h.query_by_label_contains("Handle").is_none(), "the handle is no door to place");
+    key(&mut h, Key::Escape);
+    // The Project Browser's Families: the door, not its handle.
+    h.get_by_label("Families").click_accesskit();
+    h.run();
+    assert!(h.query_by_label("Sample Flush").is_some());
+    assert!(h.query_by_label_contains("Handle").is_none(), "the browser lists no family the project doesn't hold");
+    // The Component tool's list neither.
+    key(&mut h, Key::Escape);
+    key(&mut h, Key::Escape);
+    tool(&mut h, "Component");
+    press(&mut h, "Type Selector");
+    assert!(h.query_by_label_contains("Handle").is_none(), "the Component tool places no handle");
 }
 
 // ---------- updates ----------

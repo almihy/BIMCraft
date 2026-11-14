@@ -819,7 +819,8 @@ fn a_plans_detail_level_takes_patterns_then_layers_then_symbols_away() {
     assert_eq!((coarse, floor), ((0, 0), 0), "one poché");
     // A window is its gap and jambs; a door keeps its leaf and swing, as Revit's door families do at every level.
     assert!(door == fine_door && window < fine_window, "a window is its gap and jambs, a door all of it: {door} {window}");
-    assert!(door >= 3 && window >= 3, "which are still there");
+    // (Its jambs are the wall's own outline where the wall is cut, no longer the window's: it still owns its gap.)
+    assert!(door >= 3 && window >= 1, "which are still there");
     // The ceiling plan is the same level's.
     assert!(drawn_by(&ceiling_plan(&s.model, 100000, 800, 600), 100002) > 0);
 }

@@ -9,6 +9,10 @@ use crate::geom::v3::{P3, add, cross, dot, mul, sub};
 pub const MAX_TRIANGLES: usize = 20_000;
 /// How near a plane, mm, a point lies on it.
 const EPS: f64 = 1e-5;
+/// How near a plane, mm, a polygon's corner lies for the polygon to count as in it when a solid is cut by it: Revit's
+/// own geometry tolerance is about 0.15 mm, so a void whose face is 0.02 to 0.06 mm off a solid's cuts it clean
+/// and leaves no skin.
+const COPLANAR: f64 = 0.1;
 /// A triangle with less area than this, mm², has no plane worth cutting by.
 const SLIVER: f64 = 1e-6;
 
@@ -84,15 +88,15 @@ enum Side {
     Across(Option<Poly>, Option<Poly>),
 }
 
-/// `p` against the plane `n · x = w`.
+/// `p` against the plane `n · x = w`; a corner within [`COPLANAR`] of it is in it.
 fn divide(n: P3, w: f64, p: Poly) -> Side {
     let kinds: Vec<i8> =
         p.v.iter()
             .map(|c| {
                 let d = dot(n, *c) - w;
-                if d > EPS {
+                if d > COPLANAR {
                     1
-                } else if d < -EPS {
+                } else if d < -COPLANAR {
                     -1
                 } else {
                     0
@@ -386,5 +390,39 @@ mod tests {
         // Triangles with corners that aren't numbers, or no area, take nothing and don't crash it.
         let odd = [[[f64::NAN; 3]; 3], [[f64::INFINITY; 3]; 3], [[0.0; 3]; 3]];
         assert!(subtract(&odd, &half, &mut Meter::default()).is_ok() && subtract(&half, &odd, &mut Meter::default()).is_ok());
+    }
+
+    #[test]
+    fn a_void_flush_with_a_face_within_a_tenth_cuts_through_and_leaves_no_skin() {
+        let slab = cuboid([0.0, 0.0, 0.0], [1000.0, 1000.0, 19.0]);
+        // A box 200 × 200 whose top and bottom sit 0.03 mm inside the slab's faces, each tilted 1e-4 rad about y, so
+        // they lie 0.02 to 0.04 mm from the slab's faces and their normals differ from them by 1e-4.
+        let tilt = 1e-4_f64.tan();
+        let z = |x: f64, z0: f64| z0 + tilt * (x - 500.0);
+        let c = |x: usize, y: usize, top: bool| {
+            let (x, y) = ([400.0, 600.0][x], [400.0, 600.0][y]);
+            [x, y, if top { z(x, 18.97) } else { z(x, 0.03) }]
+        };
+        let faces = [
+            [c(0, 0, true), c(1, 0, true), c(1, 1, true), c(0, 1, true)],
+            [c(0, 0, false), c(0, 1, false), c(1, 1, false), c(1, 0, false)],
+            [c(0, 0, false), c(1, 0, false), c(1, 0, true), c(0, 0, true)],
+            [c(1, 1, false), c(0, 1, false), c(0, 1, true), c(1, 1, true)],
+            [c(0, 1, false), c(0, 0, false), c(0, 0, true), c(0, 1, true)],
+            [c(1, 0, false), c(1, 1, false), c(1, 1, true), c(1, 0, true)],
+        ];
+        let hole: Vec<[P3; 3]> = faces.iter().flat_map(|[a, b, c, d]| [[*a, *b, *c], [*a, *c, *d]]).collect();
+        let got = cut(&slab, &hole);
+        let want = 1000.0 * 1000.0 * 19.0 - 200.0 * 200.0 * 19.0;
+        assert!((volume(&got) / want - 1.0).abs() < 1e-3, "{} left, not {want}", volume(&got));
+        // No skin across the hole: nothing of the result lies over the hole's footprint.
+        let skin: Vec<_> = got
+            .iter()
+            .filter(|[a, b, c]| {
+                let m = [(a[0] + b[0] + c[0]) / 3.0, (a[1] + b[1] + c[1]) / 3.0];
+                m.iter().all(|v| *v > 401.0 && *v < 599.0)
+            })
+            .collect();
+        assert!(skin.is_empty(), "{} triangles across the hole", skin.len());
     }
 }

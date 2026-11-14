@@ -1184,6 +1184,10 @@ pub struct Look {
     section: Option<([f64; 3], [f64; 3])>,
     /// A 3D view's Graphic Display Options: its edges, silhouettes and ambient shadows.
     display: crate::camera::DisplayOptions,
+    /// Its detail level, which says which of a family's forms it draws.
+    detail: Detail,
+    /// The way a section or an elevation looks, in plan: which of a family's forms it draws, by their front and side.
+    looking: Option<crate::geom::P2>,
 }
 
 /// `c` halfway to the paper.
@@ -1215,7 +1219,25 @@ impl Look {
             Some(Element::View3D(v)) => v.display,
             _ => Default::default(),
         };
-        Look { section: m.section_box(view), display, ..look }
+        let detail = graphics_of(m, view).map_or_else(Detail::default, |g| g.resolved(m).detail);
+        let looking = m.section(view).map(|v| v.looking());
+        Look { section: m.section_box(view), display, detail, looking, ..look }
+    }
+
+    /// Its detail level.
+    pub fn detail(&self) -> Detail {
+        self.detail
+    }
+
+    /// Whether it draws triangle `t`: its element shown, and its form drawn at the view's detail level and, in a section or
+    /// an elevation, the way it looks ([`crate::view3d::Vis`]).
+    pub fn draws(&self, t: &crate::view3d::Tri) -> bool {
+        self.shows(t.owner) && t.vis.drawn(self.detail, self.looking)
+    }
+
+    /// Whether a triangle of `vis` is drawn at its detail level and the way it looks, whatever element it is of.
+    pub fn draws_vis(&self, vis: crate::view3d::Vis) -> bool {
+        vis.drawn(self.detail, self.looking)
     }
 
     /// How a 3D view draws its edges and shadows: its Graphic Display Options.
@@ -1246,6 +1268,7 @@ impl Look {
         let g = own.resolved(m);
         let mut look = Look {
             style: g.style,
+            detail: g.detail,
             layers: g.layers.clone(),
             pdf_layers: g.pdf_layers.clone(),
             imports: g.imports.clone(),

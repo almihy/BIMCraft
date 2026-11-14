@@ -5,6 +5,8 @@
 //! on a selection. While a door or a window is placed the cursor's side of the wall is its facing (`toward` of the `door` and
 //! `window` commands) and Space flips its hand, which the next one placed keeps; while a
 //! wall is drawn, Space puts its exterior side on the other side of the line. Flipping is not a move: a pinned element flips.
+//! A door or a window of a family shows only the arrows its family has (`Family::flips`, Revit's flip controls); the `flip`
+//! command and Space flip it all the same.
 
 use bimcraft_core::geom::P2;
 use bimcraft_core::model::{Element, Id, Model};
@@ -90,10 +92,17 @@ pub(crate) fn arrows(m: &Model, v: &View, origin: Pos2, selection: &[Id]) -> Vec
             let left = toward(c, axis.at(o.offset, centre + 100.0));
             let front = if o.flip_facing { -left } else { left };
             let here = screen(c);
+            // Only the controls its family has, as Revit's flip controls are a family's (a family-less door or window has both).
+            let flips = o.family.as_ref().and_then(|f| m.families.get(f)).map(|f| f.flips).unwrap_or_default();
+            let mut arrows = Vec::new();
             // Across the wall, beside the opening, clear of its leaf.
-            let mut arrows = vec![Arrow { control: Control::Facing, id, at: here + along * (half_width as f32 + CLEAR), along: left }];
+            if flips.facing {
+                arrows.push(Arrow { control: Control::Facing, id, at: here + along * (half_width as f32 + CLEAR), along: left });
+            }
             // Its hand, along the wall, on the side it doesn't open to: a door's or a window's.
-            arrows.push(Arrow { control: Control::Hand, id, at: here - front * (thick as f32 / 2.0 + CLEAR), along });
+            if flips.hand {
+                arrows.push(Arrow { control: Control::Hand, id, at: here - front * (thick as f32 / 2.0 + CLEAR), along });
+            }
             arrows
         }
         Some(Element::Wall(w)) => {

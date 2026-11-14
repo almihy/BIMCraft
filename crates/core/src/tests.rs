@@ -1903,7 +1903,7 @@ fn a_new_project_comes_with_a_library_of_families() {
     for family in ["Table", "Chair"] {
         let f = &m.families[family];
         for t in f.types.keys() {
-            let pieces = f.pieces(&f.values(t, &Default::default()).unwrap()).unwrap();
+            let pieces = f.pieces(t, &f.values(t, &Default::default()).unwrap()).unwrap();
             let (lo, hi) = pieces[0].outline.iter().fold((P2(f64::MAX, f64::MAX), P2(f64::MIN, f64::MIN)), |(lo, hi), q| {
                 (P2(lo.0.min(q.0), lo.1.min(q.1)), P2(hi.0.max(q.0), hi.1.max(q.1)))
             });
@@ -2043,6 +2043,14 @@ fn hostile_params_never_panic_or_break_the_model() {
         json!({"category": "wall", "name": "", "thickness": -5}),
         json!({"category": "wall", "name": "Odd", "thickness": 100, "type_mark": [], "cost": 1e300, "model": "a\nb", "url": {"x": 1}}),
         json!({"name": "Odd", "identity": {"A": {"type_mark": 5}}, "types": {"A": {}}}),
+        json!({"name": "Odd", "types": {"A": {}}, "like": {"B": "A"}, "materials": {"X": {"color": [1, 2, 3], "transparency": 300}}, "cut": {"width": "1e300", "height": -1}}),
+        json!({"name": "Odd", "types": {"A": {}}, "forms": [{"profile": [[0, 0], [1, 0], [1, 1]], "to": 1, "types": ["Nope"], "show": {"coarse": 5}, "outline": [[1e300, 0]]}], "source": {"file": "a
+b"}, "host": "sky", "flips": {"hand": "x"}}),
+        json!({"name": "Odd", "types": {"A": {}, "B": null}, "like": {"A": "A"}, "symbols": [{"view": "front", "line": [[0, 0], [1e300, 1]], "show": {}, "types": ["A", "A"]}], "subcategories": [{"name": ""}, {"name": ""}]}),
+        json!({"name": "Odd", "set": 5, "category": "nope", "language": []}),
+        json!({"name": "Odd", "types": {"A": {}}, "references": [{"name": "L", "axis": "x", "at": "ref(L)"}], "dimensions": [{"refs": ["L", "L"], "label": "Odd", "sense": [1, 1, 1]}],
+               "nested": [{"family": "Odd", "type": "A", "at": [0, 0, "1e300"]}], "catalog": {"rows": {"A": {"x": [1]}}},
+               "revit": {"reference_planes": [{"id": 1, "name": "L", "normal": [1, 0, 0], "at": {"A": 1e300}}], "forms": [{"kind": "sweep", "path": 5}]}}),
         json!({"category": "window", "name": "W", "width": 1e12, "height": 1}),
         json!({"boundary": [[0, 0], [1, 0], [0, 0]]}),
         json!({"start": [0, 0], "end": [0, 0]}),

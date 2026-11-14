@@ -1240,7 +1240,9 @@ pub fn export(m: &Model) -> String {
             // each form a closed face set styled in its material's colour.
             Element::Component(cp) => {
                 let (Some(&(_, storey)), Some(f)) = (storeys.get(&cp.level), m.families.get(&cp.family)) else { continue };
-                let pieces = m.component_local_pieces(cp);
+                // As a view at Fine draws it: a form its Visibility Settings keep from Fine is left out.
+                let mut pieces = m.component_local_pieces(cp);
+                pieces.retain(|p| p.at(crate::graphics::Detail::Fine));
                 if pieces.is_empty() {
                     continue;
                 }
@@ -1573,15 +1575,17 @@ pub fn export(m: &Model) -> String {
         // From its jamb toward the wall's start, square to the wall at its middle, in the wall's frame.
         let axis = Axis::of(wl);
         let (u, way) = (axis.tangent(0.0), axis.tangent(o.offset));
-        let jamb = axis.at(o.offset, walls::centre(m, wl)) - way * (t.width / 2.0) - wl.start;
+        // The hole is the family's `cut` where it says one; the door or window stands in its middle.
+        let (cw, ch) = t.cut();
+        let jamb = axis.at(o.offset, walls::centre(m, wl)) - way * (cw / 2.0) - wl.start;
         let at = w.place(Some(wall_at), (jamb.dot(u), jamb.dot(u.perp()), o.sill), Some(P2(way.dot(u), way.dot(u.perp()))));
         // The hole reaches 10 mm past both faces so it cuts cleanly; through a curved wall, past its bow too.
         let bow = axis.radius().map_or(0.0, |r| {
             let inner = r - m.thickness(wl) / 2.0 - walls::centre(m, wl).abs();
-            if inner > t.width / 2.0 { inner - (inner * inner - t.width * t.width / 4.0).sqrt() } else { t.width }
+            if inner > cw / 2.0 { inner - (inner * inner - cw * cw / 4.0).sqrt() } else { cw }
         });
-        let profile = w.rectangle(P2(t.width / 2.0, 0.0), P2(t.width, m.thickness(wl) + 20.0 + 2.0 * bow));
-        let shape = w.body(profile, 0.0, t.height, &[]);
+        let profile = w.rectangle(P2(cw / 2.0, 0.0), P2(cw, m.thickness(wl) + 20.0 + 2.0 * bow));
+        let shape = w.body(profile, 0.0, ch, &[]);
         let opening = w.add(format!("IFCOPENINGELEMENT({},$,'Opening',$,$,#{at},#{shape},$,.OPENING.)", w.guid(OPENING, id)));
         w.add(format!("IFCRELVOIDSELEMENT({},$,$,$,#{wall},#{opening})", w.guid(VOIDS, id)));
         // The door or window itself: a panel centred in the wall, a door's as thick as its leaf, a window's 50 mm; of a family, its forms as a component's are,
@@ -1590,7 +1594,7 @@ pub fn export(m: &Model) -> String {
         let (fill_at, shape) = match m.opening_local(e).filter(|_| o.family.is_some()) {
             Some((pieces, _)) => {
                 let mut items = Vec::new();
-                for piece in &pieces {
+                for piece in pieces.iter().filter(|p| p.at(crate::graphics::Detail::Fine)) {
                     let set = w.faceset(&piece.tris);
                     if !piece.material.trim().is_empty() {
                         let (material, style) = w.material_style(m, piece.material.trim());
@@ -1604,7 +1608,7 @@ pub fn export(m: &Model) -> String {
                     items.push(set);
                 }
                 let rep = w.add(format!("IFCSHAPEREPRESENTATION(#{},'Body','Tessellation',({}))", w.body, refs(&items)));
-                (w.place(Some(at), (t.width / 2.0, 0.0, 0.0), None), w.add(format!("IFCPRODUCTDEFINITIONSHAPE($,$,(#{rep}))")))
+                (w.place(Some(at), (cw / 2.0, 0.0, 0.0), None), w.add(format!("IFCPRODUCTDEFINITIONSHAPE($,$,(#{rep}))")))
             }
             None => {
                 let thick = if matches!(e, Element::Door(_)) { t.leaf() } else { 50.0 };

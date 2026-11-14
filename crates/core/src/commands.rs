@@ -1256,10 +1256,11 @@ other_files(
         "detail",
         "Detail Level",
         &[],
-        "{view, detail?: coarse | medium | fine} how much a plan, a section or an elevation draws of what it cuts: coarse, one \
-         poché and openings as their gaps (a door of the project's own type still its leaf and swing, as Revit's); medium, compound layers with the lines between them and an opening's leaf, swing and \
-         glass; fine (the default), the layers' patterns and a floor's surface pattern too. Without `detail` it only says what \
-         the view has",
+        "{view, detail?: coarse | medium | fine} how much a plan, a section, an elevation or a 3D view (`{3D}` or by name) \
+         draws: coarse, one poché and openings as their gaps (a door of the project's own type still its leaf and swing, as \
+         Revit's); medium, compound layers with the lines between them and an opening's leaf, swing and glass; fine (the \
+         default), the layers' patterns and a floor's surface pattern too. A family's forms and symbols that say which detail \
+         levels draw them (`show`) are drawn at those, in every kind of view. Without `detail` it only says what the view has",
         view_detail,
     ),
     edit(
@@ -1360,9 +1361,11 @@ other_files(
         "Load Family",
         &[],
         "{name?, category?: furniture|casework|plumbing|lighting|generic|door|window, parameters?: [{name, kind?: length|number|\
-         angle|yesno|material, instance?, value?, formula?}], types?: {type: {parameter: value}}, forms?: [{plane?: xy|xz|yz, \
+         angle|yesno|material|text, instance?, value?, formula?, unit?, group?}], types?: {type: {parameter: value}}, forms?: [{plane?: xy|xz|yz, \
          profile?: [[a, b], …], circle?: {centre: [a, b], radius}, axis?: [[a, b], [a, b]], from?, to, material?, visible?, \
-         void?, show?: {coarse?, medium?, fine?, plan?, front?, side?, plan_top?, plan_cut?}}], symbols?: [{line?: [[x, y], …] | arc?: {centre: [x, y], radius, from?, to} | text?: {at: [x, y], height, value, align?: left|center|right} | dot?: {centre: [x, y], radius}, visible?, show?: {coarse?, medium?, fine?}}], form?: {id | guid, …a \
+         void?, show?: {coarse?, medium?, fine?, plan?, front?, side?, plan_top?, plan_cut?}, types?: [type, …], outline?: [[x, y], …], subcategory?}], \
+         symbols?: [{line?: [[x, y], …] | arc?: {centre: [x, y], radius, from?, to} | text?: {at: [x, y], height, value, align?: left|center|right} | dot?: {centre: [x, y], radius}, visible?, \
+         view?: plan|front|side, show?: {coarse?, medium?, fine?}, types?: [type, …], subcategory?}], form?: {id | guid, …a \
          form's fields}, symbol?: {id | guid, …a symbol's fields}, delete_form?: [id | guid, …], delete_symbol?: [id | guid, …], \
          operation?: swing|double-swing|sliding|double-sliding|folding|fixed (a door's or window's, for IFC and schedules), \
          kind?: which fixture or fitting it is, for IFC's predefined type (plumbing: wc|lav|sink|laundry|shower|bath|bidet|urinal; \
@@ -1371,7 +1374,13 @@ other_files(
          opened from IFC remembers: `IFCPLATE`, `CURTAIN_PANEL`; one IFC4 lacks goes out as a proxy that names it), \
          connectors?: [{kind: power|switch|pipe|data|earthing, name?, system?: power-balanced|power-unbalanced|switch, \
          domain?: cold|hot|waste|vent|storm|gas, flow?: in|out|both, at?: [x, y, z], direction?: [x, y, z], size?, poles?: 1-3, \
-         voltage?, load_va?, power_factor?, classification?}], rename?, delete?: true, dry_run?, path?, save?} a family of \
+         voltage?, load_va?, power_factor?, classification?}], source?: {library?, version?, app?, category?, file?}, host?: \
+         level|wall|floor|ceiling|roof|face|none, subcategories?: [{name, color?: [r, g, b], material?}], cut?: {width, height}, \
+         flips?: {hand?, facing?}, materials?: {name: {color: [r, g, b], transparency?}}, like?: {new type: type}, rename?, \
+         references?: [{name, axis: x|y|z, at, is_reference?, origin?}], dimensions?: [{refs: [name, …], label?, locked?, eq?, \
+         value?, sense?, kind?}], nested?: [{family, type, at: [x, y, z], rotation?, mirrored?, params?: {name: value}, visible?, \
+         types?, show?}], catalog?: {columns, rows}, revit?: <Revit's definition, as Arqiflow's exporter writes it>, \
+         delete?: true, dry_run?, path?, keep_values?, rebuild?: true|[type, …], save?} a family of \
          the project's, BIMCraft's own parametric component: created, changed, read, or loaded from the .json file at `path` (a \
          family as `inspect` shows it, with its `name`). Without `name` it lists the project's families, each its category and \
          how many types, forms and symbols it has; with only a `name` it reads one — its definition, each of its types' \
@@ -1423,7 +1432,51 @@ other_files(
          turned or mirrored; `{Parameter Name}` in its \
          `value` is replaced by that parameter's value (a name the family lacks is refused), up to 256 characters. A `dot` is \
          a solid disc in ink of a radius above zero. Symbols draw in the plan and ceiling plan of the component's level whatever height \
-         it has, and on no other level's. IFC leaves symbols out",
+         it has, and on no other level's. IFC leaves symbols out. What a family exported from Revit brings, all optional: a form or a \
+         symbol of some `types` only (none, every type: a Revit family's geometry comes baked per type), Revit's Visibility \
+         Settings in `show` (a form: the detail levels and the views that draw it, `plan` a plan or ceiling plan, `front` a \
+         section or elevation looking along the family's y within 45°, `side` along its x, a 3D view by its own detail level, \
+         IFC as Fine; a symbol: its detail levels, Coarse among them, where one without `show` is drawn at Medium and Fine), a \
+         symbol's `view` (`front`: its points are (x, z) seen from the front, looking along +y; `side`: (y, z) seen from +x: \
+         drawn in sections and elevations along the family's y or x, mirrored from the back or the left: a door's Elevation \
+         Swing, a line or an arc), a mesh's traced `outline` seen from above in place of its hull, a door's or window's `cut` \
+         (the wall's opening, formulas over its parameters, where it isn't Width by Height), `flips` (the flip arrows it has; \
+         `flip` works regardless), `host`, `subcategories` and a form's or symbol's `subcategory`, `source` (kept and shown, \
+         never acted on: `family` lists it for each family), a `text` parameter (words a schedule shows, which no formula \
+         reads), a parameter's `unit` and `group` (Properties and Type Properties list it under its group). `materials` adds \
+         each the project has none of by that name (the project's own wins); `like` gives a type made in `types` the forms and \
+         symbols of the type it was made like (Type Properties' Duplicate), and a type renamed (`rename_type`) or taken away \
+         is renamed in or taken out of the forms' and symbols' `types` (what was of it alone goes with it). A project using \
+         `types`, `show`, a symbol's `view`, `outline`, `cut` or a text parameter is written as format 22. A family from Revit \
+         stays parametric: `revit` (Revit's definition; also read from a file, and a whole export package at `path` is taken: its \
+         `family`, its `definition` and its `nested_families`, each loaded first, a shared one into the project and one that \
+         isn't held by the family it is in, `embedded`; and its `place`, the type to place, given back; its `subcategories` may \
+         say a `projection` and a `cut` line weight (a pen, 1 to 16) and a `pattern` (a name), and `line_patterns` the patterns \
+         they name, each added to the project's unless it has one of that name, as the subcategories are its Object Styles of \
+         `Category/Subcategory` unless it has those; `cuts_measured` (a definition's `cuts_by: \"instance\"`) says the voids' `cuts` were measured, so each void cuts \
+         the forms it names whatever their order) \
+         is translated into `references` (reference planes, which formulas read as `ref(Name)`), the `dimensions` placing them per \
+         type (labelled with a parameter, locked, EQ; over-constrained, the family isn't editable), parametric forms (extrusions \
+         with `holes`, revolves, blends with a `top`, sweeps along a `path` with their `section` and its `section_holes`, \
+         an extrusion on a sloped plane as a sweep along its normal, swept blends with a `section_end`, true `arcs` in any ring), \
+         symbols (a model line in each of plan, front and side it shows in) and `nested` parts (a family it holds in `embedded`, \
+         else the project's, placed and sized by this one's numbers, its plan symbols drawn with its own); the forms and symbols it brings are Revit's result per type, kept as `snapshot` ones. Each type \
+         is then checked: its parametric result against Revit's at each detail level (volume within 1 %, 3 % more where it has \
+         curves, box within 2 mm, plan within 2 mm; a door's or window's plan as a floor plan cutting 1200 mm over its level sees \
+         it at its sill). A type that matched draws its parametric forms and flexes with its parameters; one that didn't \
+         draws Revit's result and says why in `check`; `editable` is ok when every type matched (at least one compared) and \
+         nothing was left untranslated (`untranslated` says what). The check runs only when Revit's definition comes in: \
+         after that, a type whose values change, every type when the family's definition changes (its forms, symbols, \
+         parameters, references, dimensions, nested parts), and those `rebuild` names (true, every one) are `edited`: drawn \
+         from their rules, which may differ from Revit's, and never compared again. A type made since, not `like` another, \
+         has no `check`: it was never checked. The reply and the list give `editable` and `check`. A duplicate (`like`) is \
+         checked as the type it was made like. `keep_values: true` \
+         is Revit's Reload with \"Overwrite the existing version\": the family loaded again (from `path`, or as given) takes its \
+         new version's types as they come, translates and checks them, then gives each type the project already had the \
+         project's values back (its own, else its parameter's; formulas and instance parameters aside): a type they change is \
+         `edited` and regenerates at them, all in one undo step, and the reply's `kept` says which values of which types. \
+         Without it a type keeps what the new version doesn't say (\"... and its parameter values\" says them all). Written as \
+         format 23",
         family,
         Files::Conditional,
     )
@@ -1440,6 +1493,12 @@ other_files(
          that name stays as it is, so loading twice changes nothing; the reply lists `loaded` and `kept`. Place them as \
          components",
         symbol_set,
+    ),
+    other(
+        "family_library",
+        "Load Family: BIMCraft's Families",
+        "{name?, set?: bimcraft|arei, category?, language?: en|pt|es|…} BIMCraft's own families, which Load Family offers beside          a firm's: `bimcraft` the furniture, casework, fixtures, doors and windows a new project starts with (named in          `language`, the project's unless given), `arei` the AREI/RGIE plan symbols (`symbol_set`). Without `name` it lists them,          each its `name`, `set`, `category`, `types` (their names) and whether the project has a family of that name          (`loaded`), filtered by `set` and `category`; with `name` it replies that one's definition as a `family {path}` file          holds it (`family`, its `name` in it), to load with `family`. It only reads: no undo step, nothing in the project changes",
+        family_library,
     ),
     edit(
         "component",
@@ -1980,13 +2039,18 @@ other_files(
         "object_styles",
         "Object Styles",
         &[],
-        "{categories?: {category: {projection?: pen, cut?: pen}, …}, reset?: true} the project's object styles, as Revit's \
+        "{categories?: {category: {projection?: pen, cut?: pen}, …}, subcategories?: {\"Category/Subcategory\": {projection?: pen | null, \
+         cut?: pen | null, color?: [r, g, b] | null, pattern?: line pattern | null, material?: material | null}, …}, reset?: true} \
+         the project's object styles, as Revit's \
          Manage > Object Styles: the pen (0, a hairline, to 16) each model category draws its lines in where it is seen \
          (`projection`) and where a view cuts it (`cut`), in every plan and section; a view's Visibility/Graphics overrides \
          them. A category given keeps the pen it isn't given. The rest of an element's lines keep their own: a compound \
          wall's layers, a door's jambs, a stair's walk line. `reset` goes back to what a project starts with (cut pen 10 and \
-         seen pen 4; a door's and a window's cut 6, a railing seen 6, a mass 4 both). Without either, it says each model \
-         category's, `own` whether the project has set it apart",
+         seen pen 4; a door's and a window's cut 6, a railing seen 6, a mass 4 both). `subcategories` sets what a family's \
+         subcategory (the rows under their category, as `door/Frame/Mullion`) draws in: its line weights (1 to 16; null, its \
+         category's), colour, line pattern (one of the project's) and material (one of the project's); each it isn't given \
+         stays, null takes it back to none, and `reset` leaves them. Without any, it says each model category's, `own` \
+         whether the project has set it apart, and `subcategories`, each with its own settings (none where it has none)",
         object_styles,
     )
     .menu("Manage > Object Styles"),
@@ -3476,7 +3540,7 @@ fn family_preview(s: &mut Session, p: &Value) -> R {
     } else {
         // A floor over its own footprint, so it stands on something and the picture has a ground.
         let mut box_ = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
-        for shape in family.shapes(&values) {
+        for shape in family.shapes(&ty, &values) {
             box_[0] = box_[0].min(shape.min[0]);
             box_[1] = box_[1].min(shape.min[1]);
             box_[2] = box_[2].max(shape.max[0]);
@@ -10564,8 +10628,20 @@ fn visual_style(s: &mut Session, p: &Value) -> R {
 
 fn view_detail(s: &mut Session, p: &Value) -> R {
     let c = "detail";
-    let view = scaled_view(c, &s.model, p)?;
-    if let Some(level) = detail_param(c, p)? {
+    // A 3D view has one too, as Revit's, which says which of a family's forms it draws; the default 3D view is made when it
+    // is first changed, as `graphics` makes it.
+    let is_3d = matches!(p.get("view"), Some(Value::String(n)) if n.eq_ignore_ascii_case("{3D}") || n.eq_ignore_ascii_case("3D"));
+    let level = detail_param(c, p)?;
+    let view = match (is_3d, s.model.default_3d(), level) {
+        (true, Some(v), _) => v,
+        (true, None, Some(_)) => s.model_mut().insert(Element::View3D(View3D::default_view())),
+        (true, None, None) => return Ok(json!({"view": null, "name": "{3D}", "detail": crate::graphics::Detail::default()})),
+        _ => match view_param(c, &s.model, p, false)? {
+            v if matches!(s.model.elements.get(v), Some(Element::View3D(_))) => v,
+            _ => scaled_view(c, &s.model, p)?,
+        },
+    };
+    if let Some(level) = level {
         own_to_set(c, &s.model, view, Group::Detail, "detail level")?;
         change_graphics(s, view, |g| g.detail = level);
     }
@@ -11168,8 +11244,16 @@ struct Patches {
 /// refuse is never put in it: every error it has comes back at once, its warnings with them.
 fn family(s: &mut Session, p: &Value) -> R {
     let c = "family";
+    // Revit's Reload, "Overwrite the existing version": the types the project has keep its values of them.
+    let keep_values = flag(c, p, "keep_values")?;
+    // `keep_values: false` said: Revit's "... and its parameter values", each type it brings exactly as it brings it.
+    let take_values = p.get("keep_values") == Some(&Value::Bool(false));
     // From a file: its fields under the name given, else its own, else the file's.
     let mut p = p.clone();
+    // The shared families a package nests that the project has otherwise, which a dry run says.
+    let mut shared_asks: Vec<String> = Vec::new();
+    // A family file is the family as it was saved: what it says of its checks stands.
+    let from_file = p.get("path").is_some_and(|v| !v.is_null());
     if let Some(path) = string(c, &p, "path")? {
         let path = PathBuf::from(path);
         let size = s.files.given.size(&path).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
@@ -11181,18 +11265,105 @@ fn family(s: &mut Session, p: &Value) -> R {
         let Value::Object(mut fields) = loaded else {
             return Err(bad(c, format!("{} is not a family: it isn't an object", path.display())));
         };
+        // The type the person picked to place, which the reply gives back: Load Family starts placing it.
+        let place = fields.remove("place").filter(|v| v.is_string());
+        // An export package (Arqiflow's): its `family`, its `definition` (Revit's, translated) and its nested families,
+        // each loaded first: a shared one into the project under its own name, one that isn't held by the family it is in.
+        if let Some(Value::Object(inner)) = fields.get("family").cloned() {
+            let definition = fields.get("definition").cloned().filter(|d| !d.is_null());
+            let nested = fields.get("nested_families").cloned();
+            // Revit's RPC plantings say so (`revit.rpc`): their 3D is a render placeholder.
+            let rpc = fields.get("revit").and_then(|r| r.get("rpc")).and_then(Value::as_bool) == Some(true);
+            // A shared one the project has otherwise is Revit's "Family Already Exists": the caller's `shared` says which
+            // to keep; unsaid, the load is refused and says which ask. A dry run says which would.
+            let choices = shared_choices(c, &p)?;
+            let dry = flag(c, &p, "dry_run")?;
+            let held = if dry {
+                let mut probe = Session::new();
+                *probe.model_mut() = (*s.model).clone();
+                let (_, asks) = load_nested(&mut probe, nested.as_ref(), definition.as_ref(), &choices)?;
+                shared_asks = asks;
+                BTreeMap::new()
+            } else {
+                let (held, asks) = load_nested(s, nested.as_ref(), definition.as_ref(), &choices)?;
+                if !asks.is_empty() {
+                    return Err(bad(
+                        c,
+                        format!(
+                            "the shared family {} it nests is in the project already, otherwise: say `shared`: {{name: \"overwrite\" (Revit's \"Overwrite the existing version\", the project's values of its types kept) | \"overwrite_values\" (\"... and its parameter values\") | \"existing\" (the project's kept)}}, or one of them for all",
+                            asks.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", ")
+                        ),
+                    ));
+                }
+                held
+            };
+            fields = inner;
+            loadable(&mut fields);
+            if rpc {
+                fields.insert("rpc".into(), Value::Bool(true));
+            }
+            let own = held_by(definition.as_ref(), &held);
+            if !own.is_empty() {
+                fields.insert("embedded".into(), serde_json::to_value(own).map_err(|e| bad(c, e))?);
+            }
+            if let Some(d) = definition {
+                fields.insert("revit".into(), d);
+            }
+        }
         let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        // An export package is `<family name>.arqiflow-family.json`.
+        let stem = stem.strip_suffix(".arqiflow-family").map(str::to_string).unwrap_or(stem);
         let name = p.get("name").filter(|v| !v.is_null()).cloned().or_else(|| fields.remove("name")).unwrap_or(json!(stem));
         // Only the family it holds: what a file says to rename or delete isn't for it to say.
-        let mut family: Map<String, Value> =
-            ["category", "kind", "ifc", "parameters", "types", "identity", "forms", "symbols", "operation", "connectors"]
-                .into_iter()
-                .filter_map(|k| fields.remove(k).map(|v| (k.to_string(), v)))
-                .collect();
+        let mut family: Map<String, Value> = [
+            "category",
+            "kind",
+            "ifc",
+            "parameters",
+            "types",
+            "identity",
+            "forms",
+            "symbols",
+            "operation",
+            "connectors",
+            "source",
+            "host",
+            "subcategories",
+            "cut",
+            "flips",
+            "materials",
+            "like",
+            "references",
+            "dimensions",
+            "nested",
+            "embedded",
+            "catalog",
+            "check",
+            "editable",
+            "revit",
+            "rpc",
+            "cuts_measured",
+            "line_patterns",
+        ]
+        .into_iter()
+        .filter_map(|k| fields.remove(k).map(|v| (k.to_string(), v)))
+        .collect();
         family.insert("name".into(), name);
+        if let Some(place) = place {
+            family.insert("place".into(), place);
+        }
         // `dry_run` is the caller's, not the file's: a dry run of a file loads nothing.
         if let Some(dry) = p.get("dry_run") {
             family.insert("dry_run".into(), dry.clone());
+        }
+        if let Some(v) = p.get("rebuild") {
+            family.insert("rebuild".into(), v.clone());
+        }
+        // What the caller says of where it came from (a firm library's entry and version) over what the file says.
+        if let Some(Value::Object(given)) = p.get("source") {
+            let mut source = family.get("source").cloned().unwrap_or_else(|| json!({}));
+            merge(&mut source, &Value::Object(given.clone()));
+            family.insert("source".into(), source);
         }
         p = Value::Object(family);
     }
@@ -11223,7 +11394,8 @@ fn family(s: &mut Session, p: &Value) -> R {
             .families
             .iter()
             .map(|(n, f)| {
-                json!({"name": n, "category": f.category, "types": f.types.len(), "forms": f.forms.len(), "symbols": f.symbols.len()})
+                json!({"name": n, "category": f.category, "types": f.types.len(), "forms": f.forms.len(), "symbols": f.symbols.len(),
+                       "source": f.source, "editable": f.editable, "check": f.check})
             })
             .collect();
         return Ok(json!({"families": families}));
@@ -11264,7 +11436,28 @@ fn family(s: &mut Session, p: &Value) -> R {
         "symbol",
         "delete_form",
         "delete_symbol",
+        "source",
+        "host",
+        "subcategories",
+        "cut",
+        "flips",
+        "materials",
+        "like",
+        "references",
+        "dimensions",
+        "nested",
+        "embedded",
+        "catalog",
+        "check",
+        "editable",
+        "revit",
+        "rpc",
+        "cuts_measured",
+        "line_patterns",
+        "rebuild",
     ];
+    // The type a file says to place, given back.
+    let place = p.get("place").filter(|v| v.is_string()).cloned();
     if !keys.iter().any(|k| p.get(*k).is_some_and(|v| !v.is_null())) {
         let f = s.model.families.get(&name).ok_or_else(|| bad(c, format!("there's no family `{name}`")))?;
         let (_, warnings) = f.problems(&|m| s.model.materials.contains_key(m));
@@ -11352,9 +11545,164 @@ fn family(s: &mut Session, p: &Value) -> R {
         }
     }
     if let Some(v) = p.get("types").filter(|v| !v.is_null()) {
+        // Keeping the project's values, each type brought is first as it brings it (what it doesn't say, its parameters'
+        // values), so it is checked as Revit made it; the project's values are set on it after.
+        if (keep_values || take_values)
+            && let Value::Object(brought) = v
+        {
+            for (t, set) in brought {
+                if set.is_object() {
+                    f.types.remove(t);
+                }
+            }
+        }
         let mut types = serde_json::to_value(&f.types).map_err(|e| bad(c, e))?;
         merge(&mut types, v);
         f.types = serde_json::from_value(types).map_err(|e| field("types", e))?;
+    }
+    // A type made like another (Type Properties' Duplicate): of each form and symbol the other is of.
+    if let Some(v) = p.get("like").filter(|v| !v.is_null()) {
+        let like: BTreeMap<String, String> = serde_json::from_value(v.clone()).map_err(|e| field("like", e))?;
+        for (new, old) in &like {
+            if !f.types.contains_key(new) {
+                return Err(bad(c, format!("`like`: there's no type `{new}`; add it in `types` with the same command")));
+            }
+            if !f.types.contains_key(old) && was.as_ref().is_none_or(|w| !w.types.contains_key(old)) {
+                let names: Vec<&str> = f.types.keys().map(String::as_str).collect();
+                return Err(bad(c, format!("`like`: there's no type `{old}` to make `{new}` like{}", known_names(&names))));
+            }
+            f.type_like(new, old);
+        }
+    }
+    // A type taken away is taken out of the forms' and symbols' lists of types, and what was of it alone goes with it.
+    let gone: Vec<String> = was.iter().flat_map(|w| w.types.keys()).filter(|t| !f.types.contains_key(*t)).cloned().collect();
+    for t in &gone {
+        f.forget_type(t);
+    }
+    // Where it came from, what hosts it, its subcategories, its opening and its flip controls: `null` takes one away.
+    match p.get("source") {
+        None => {}
+        Some(Value::Null) => f.source = None,
+        Some(v) => f.source = Some(serde_json::from_value(v.clone()).map_err(|e| field("source", e))?),
+    }
+    if let Some(v) = p.get("host") {
+        f.host = if v.is_null() { Default::default() } else { serde_json::from_value(v.clone()).map_err(|e| field("host", e))? };
+    }
+    if let Some(v) = p.get("subcategories") {
+        f.subcategories =
+            if v.is_null() { Vec::new() } else { serde_json::from_value(v.clone()).map_err(|e| field("subcategories", e))? };
+    }
+    match p.get("cut") {
+        None => {}
+        Some(Value::Null) => f.cut = None,
+        Some(v) => f.cut = Some(serde_json::from_value(v.clone()).map_err(|e| field("cut", e))?),
+    }
+    if let Some(v) = p.get("flips") {
+        f.flips = if v.is_null() { Default::default() } else { serde_json::from_value(v.clone()).map_err(|e| field("flips", e))? };
+    }
+    // Its references, the dimensions placing them, its nested parts and its type catalog; `null` takes them away.
+    if let Some(v) = p.get("references") {
+        let mut list: Vec<crate::family::Reference> =
+            if v.is_null() { Vec::new() } else { serde_json::from_value(v.clone()).map_err(|e| field("references", e))? };
+        crate::library::keep_parts(&mut f.references, &mut list);
+        f.references = list;
+    }
+    if let Some(v) = p.get("dimensions") {
+        let mut list: Vec<crate::family::Dimension> =
+            if v.is_null() { Vec::new() } else { serde_json::from_value(v.clone()).map_err(|e| field("dimensions", e))? };
+        crate::library::keep_parts(&mut f.dimensions, &mut list);
+        f.dimensions = list;
+    }
+    if let Some(v) = p.get("nested") {
+        let mut list: Vec<crate::family::Nested> =
+            if v.is_null() { Vec::new() } else { serde_json::from_value(v.clone()).map_err(|e| field("nested", e))? };
+        crate::library::keep_parts(&mut f.nested, &mut list);
+        f.nested = list;
+    }
+    // The families its nested parts are of that it holds itself (Revit's nested families that aren't shared).
+    match p.get("embedded") {
+        None => {}
+        Some(Value::Null) => f.embedded.clear(),
+        Some(v) => f.embedded = serde_json::from_value(v.clone()).map_err(|e| field("embedded", e))?,
+    }
+    match p.get("catalog") {
+        None => {}
+        Some(Value::Null) => f.catalog = None,
+        Some(v) => f.catalog = Some(serde_json::from_value(v.clone()).map_err(|e| field("catalog", e))?),
+    }
+    // What a file kept of its check: a saved family brings it back as it was.
+    if let Some(v) = p.get("check").filter(|v| !v.is_null()) {
+        f.check = serde_json::from_value(v.clone()).map_err(|e| field("check", e))?;
+    }
+    if let Some(v) = p.get("editable") {
+        f.editable = if v.is_null() { None } else { Some(serde_json::from_value(v.clone()).map_err(|e| field("editable", e))?) };
+    }
+    // A Revit RPC planting says so: a saved one brings it back.
+    if let Some(v) = p.get("rpc") {
+        f.rpc = v.as_bool().unwrap_or(false);
+    } else if from_file {
+        f.rpc = false;
+    }
+    // Whether what its voids cut was measured, and the line patterns its subcategories name: a saved family brings them back.
+    if let Some(v) = p.get("cuts_measured") {
+        f.cuts_measured = v.as_bool().unwrap_or(false);
+    } else if from_file {
+        f.cuts_measured = false;
+    }
+    // What an export package (Revit's definition comes with it) brings of line patterns that the engine can't hold is left out and
+    // said (`editable.untranslated`), not a reason to refuse the family: its lines are drawn solid.
+    let package = p.get("revit").is_some_and(|v| !v.is_null());
+    let mut not_held: Vec<String> = Vec::new();
+    match p.get("line_patterns") {
+        None if from_file => f.line_patterns.clear(),
+        None => {}
+        Some(Value::Null) => f.line_patterns.clear(),
+        Some(Value::Object(map)) if package => {
+            f.line_patterns.clear();
+            for (name, v) in map {
+                match serde_json::from_value::<crate::lines::LinePattern>(v.clone()) {
+                    Ok(pattern) => {
+                        f.line_patterns.insert(name.clone(), pattern);
+                    }
+                    Err(_) => {
+                        let shown: String = name.chars().take(40).collect();
+                        not_held.push(format!(
+                            "its line pattern `{shown}` can't be held (a segment BIMCraft has no kind of): its lines are drawn solid"
+                        ));
+                        // The subcategories naming it draw solid too.
+                        for sub in f.subcategories.iter_mut().filter(|s| s.pattern.as_ref() == Some(name)) {
+                            sub.pattern = None;
+                        }
+                    }
+                }
+            }
+            not_held.extend(f.drop_unholdable_line_patterns());
+        }
+        Some(v) => f.line_patterns = serde_json::from_value(v.clone()).map_err(|e| field("line_patterns", e))?,
+    }
+    // Materials it brings, each added where the project has none of its name: the project's own wins, as in Revit.
+    let mut brought: BTreeMap<String, crate::model::Material> = BTreeMap::new();
+    if let Some(v) = p.get("materials").filter(|v| !v.is_null()) {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Brought {
+            color: [u8; 3],
+            #[serde(default)]
+            transparency: u8,
+        }
+        let given: BTreeMap<String, Brought> = serde_json::from_value(v.clone()).map_err(|e| field("materials", e))?;
+        for (name, b) in given {
+            let name = name.trim().to_string();
+            if name.is_empty() || name.chars().count() > crate::model::MAX_TEXT {
+                return Err(bad(c, format!("`materials`: a material's name is 1 to {} characters", crate::model::MAX_TEXT)));
+            }
+            if b.transparency > 100 {
+                return Err(bad(c, format!("`materials` `{name}`: its transparency is 0 to 100, not {}", b.transparency)));
+            }
+            if !s.model.materials.contains_key(&name) {
+                brought.insert(name, crate::model::Material { color: b.color, transparency: b.transparency, ..Default::default() });
+            }
+        }
     }
     // Each type's identity data (Type Mark, Manufacturer…), as `type` takes it for a category's types: `{type: {type_mark?, …}}`.
     if let Some(v) = p.get("identity").filter(|v| !v.is_null()) {
@@ -11396,8 +11744,116 @@ fn family(s: &mut Session, p: &Value) -> R {
         None => None,
     };
     let to = rename.clone().unwrap_or_else(|| name.clone());
+    // Revit's definition translated (its result, the forms and symbols it brings, kept as the fallback), then each type
+    // checked against Revit's result, as Revit exported it: the only time it is. Any change after that (a type's values, the
+    // family's definition, `rebuild`) makes BIMCraft's rebuild what the type is: it is drawn, and never compared with Revit's
+    // result again.
+    let has = |m: &str| s.model.materials.contains_key(m) || brought.contains_key(m);
+    // (A mesh form's traced outline that crosses itself is cleared here, once, rather than tested at every draw.)
+    if p.get("revit").is_none_or(Value::is_null) {
+        f.clear_crossing_outlines();
+    }
+    if let Some(def) = p.get("revit").filter(|v| !v.is_null()) {
+        let exported = crate::family::revit::translate(&mut f, def, &has);
+        if !not_held.is_empty() {
+            f.editable.get_or_insert_with(Default::default).untranslated.extend(not_held);
+        }
+        let others = |n: &str| if n == name.as_str() { None } else { s.model.families.get(n) };
+        f.run_check(&others, &exported);
+    } else if let Some(w) = was.as_ref().filter(|_| !from_file) {
+        let mut like: BTreeMap<String, String> = p.get("like").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
+        like.retain(|new, _| !w.types.contains_key(new));
+        // What the family was, with the types made and taken away here made and taken away in it too: what is left is
+        // a change of its definition.
+        let mut base = w.clone();
+        for (new, old) in &like {
+            base.type_like(new, old);
+        }
+        for t in w.types.keys().filter(|t| !f.types.contains_key(*t)) {
+            base.forget_type(t);
+        }
+        let redefined = !same_definition(&base, &f);
+        for (t, c) in f.check.iter_mut() {
+            let before = w.types.get(t).or_else(|| like.get(t).and_then(|old| f.types.get(old)));
+            if redefined || before.is_some_and(|b| f.types.get(t).is_none_or(|now| !same_values(now, b))) {
+                c.edited = true;
+            }
+        }
+        // A change its dimensions can't hold is refused, as Revit refuses it ("Constraints are not satisfied"): a type whose
+        // references were placed before and can't be now. One that couldn't be before is no worse for it.
+        // (A formula that doesn't work out is said by the family's own check, below.)
+        let solved = |fam: &crate::family::Family, t: &str| match fam.values(t, &BTreeMap::new()) {
+            Ok(v) => fam.solve(&v).map(|_| ()),
+            Err(_) => Ok(()),
+        };
+        for t in f.types.keys() {
+            let held = match (w.types.contains_key(t), like.get(t)) {
+                (true, _) => solved(w, t).is_ok(),
+                (false, Some(old)) => solved(w, old).is_ok() || solved(&f, old).is_ok(),
+                (false, None) => true,
+            };
+            if held && let Err(e) = solved(&f, t) {
+                return Err(bad(c, format!("family `{name}`, type `{t}`: the change can't hold: {e}")));
+            }
+        }
+    }
+    // Revit's result given up for BIMCraft's rebuild (the editor's offer for a type that didn't match): every type, or those
+    // named.
+    match p.get("rebuild") {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => {}
+        Some(Value::Bool(true)) => f.check.values_mut().for_each(|c| c.edited = true),
+        Some(v) => {
+            let named: Vec<String> =
+                serde_json::from_value(v.clone()).map_err(|_| bad(c, "`rebuild` is true, or the types to draw from their rules"))?;
+            for t in named {
+                match f.check.get_mut(&t) {
+                    Some(k) => k.edited = true,
+                    None if f.types.contains_key(&t) => {}
+                    None => {
+                        let names: Vec<&str> = f.types.keys().map(String::as_str).collect();
+                        return Err(bad(c, format!("`rebuild`: there's no type `{t}`{}", known_names(&names))));
+                    }
+                }
+            }
+        }
+    }
+    // The project's own values of the types it had, set after the check, as a change of them: a type they change is edited
+    // (drawn from its rules) and regenerates at them. A value is the type's own, else its parameter's; only those of a
+    // type's parameters both have that no formula works out.
+    let mut kept: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    if keep_values && let Some(w) = &was {
+        let set = |q: &crate::family::Parameter| !q.instance && q.formula.is_none();
+        let same = |a: &Value, b: &Value| match (a.as_f64(), b.as_f64()) {
+            (Some(x), Some(y)) => x == y,
+            _ => a == b,
+        };
+        let params: Vec<(String, Value, Value)> = f
+            .parameters
+            .iter()
+            .filter(|q| set(q))
+            .filter_map(|q| {
+                w.parameters.iter().find(|o| o.name == q.name && set(o)).map(|o| (q.name.clone(), o.value.clone(), q.value.clone()))
+            })
+            .collect();
+        for (t, values) in &w.types {
+            let Some(now) = f.types.get_mut(t) else { continue };
+            for (k, old_default, new_default) in &params {
+                let old = values.get(k).unwrap_or(old_default);
+                if !same(old, now.get(k).unwrap_or(new_default)) {
+                    now.insert(k.clone(), old.clone());
+                    kept.entry(t.clone()).or_default().push(k.clone());
+                }
+            }
+            if kept.contains_key(t)
+                && let Some(c) = f.check.get_mut(t)
+            {
+                c.edited = true;
+            }
+        }
+    }
+    f.summarize();
     // Every error of what it comes to, each addressed to what has it, and every warning of it.
-    let (errors, warnings) = f.problems(&|m| s.model.materials.contains_key(m));
+    let (errors, warnings) = f.problems(&|m| s.model.materials.contains_key(m) || brought.contains_key(m));
     if !errors.is_empty() {
         // What it's worth knowing comes with what stops it: an author fixes both at once, and a
         // warning never hides behind the error that came first.
@@ -11409,10 +11865,19 @@ fn family(s: &mut Session, p: &Value) -> R {
         let mut reply = family_reply(&to, &f, &warnings);
         reply["dry_run"] = json!(true);
         reply["ok"] = json!(true);
+        // What loading it would ask, as Revit's "Family Already Exists": the project has it, and the shared families it
+        // nests that the project has otherwise.
+        reply["exists"] = json!(was.is_some());
+        reply["shared_asks"] = json!(shared_asks);
         reply["changes"] = family_changes(was.as_ref(), &f, &patches, rename.as_deref());
+        reply["materials"] = json!(brought.keys().collect::<Vec<_>>());
         return Ok(reply);
     }
     let m = s.model_mut();
+    let added: Vec<String> = brought.keys().cloned().collect();
+    for (n, material) in brought {
+        m.materials.insert(n, material);
+    }
     if let Some(to) = rename {
         m.families.remove(&name);
         m.library.family_renamed(&name, &to);
@@ -11425,7 +11890,325 @@ fn family(s: &mut Session, p: &Value) -> R {
         }
     }
     m.families.insert(to.clone(), f.clone());
-    Ok(json!({"name": to, "family": f, "warnings": warnings}))
+    // Its subcategories become the project's Object Styles of `Category/Subcategory` (and its line patterns the project's), each
+    // unless the project has one of the name: as in Revit, what the project has is kept when a family is loaded.
+    m.take_subcategory_styles(&f);
+    let mut reply = json!({"name": to, "family": f, "warnings": warnings, "materials": added, "editable": f.editable, "check": f.check});
+    if let Some(place) = place {
+        reply["place"] = place;
+    }
+    if keep_values {
+        reply["kept"] = json!(kept);
+    }
+    Ok(reply)
+}
+
+/// Whether two versions of a family are the same but for what doesn't change what it draws: its types' values (each type's
+/// own change is its own), their identity data, its checks, where it came from, its catalog, its IFC class, its kind and its
+/// connectors. Numbers are the same at the same value however they are written (`900` and `900.0`).
+fn same_definition(a: &crate::family::Family, b: &crate::family::Family) -> bool {
+    let plain = |f: &crate::family::Family| {
+        let f = crate::family::Family {
+            types: Default::default(),
+            identity: Default::default(),
+            check: Default::default(),
+            editable: None,
+            source: None,
+            catalog: None,
+            ifc: None,
+            kind: None,
+            connectors: Vec::new(),
+            ..f.clone()
+        };
+        let mut v = serde_json::to_value(f).unwrap_or(Value::Null);
+        strip_ids(&mut v);
+        v
+    };
+    same_json(&plain(a), &plain(b))
+}
+
+/// JSON without its parts' ids and GUIDs, which a family made again in another project has anew.
+fn strip_ids(v: &mut Value) {
+    match v {
+        Value::Object(m) => {
+            m.remove("id");
+            m.remove("guid");
+            m.values_mut().for_each(strip_ids);
+        }
+        Value::Array(a) => a.iter_mut().for_each(strip_ids),
+        _ => {}
+    }
+}
+
+/// Whether two types' values are the same, numbers by their value.
+fn same_values(a: &BTreeMap<String, Value>, b: &BTreeMap<String, Value>) -> bool {
+    a.len() == b.len() && a.iter().all(|(k, v)| b.get(k).is_some_and(|w| same_json(v, w)))
+}
+
+/// JSON compared with numbers by their value.
+fn same_json(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => x.as_f64() == y.as_f64(),
+        (Value::Array(x), Value::Array(y)) => x.len() == y.len() && x.iter().zip(y).all(|(p, q)| same_json(p, q)),
+        (Value::Object(x), Value::Object(y)) => x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| same_json(v, w))),
+        _ => a == b,
+    }
+}
+
+/// An exported family made one BIMCraft takes, as Revit had it: a material its parameters name that it brings no colour
+/// for comes with a grey of its own, a text longer than a parameter holds is cut to it, and a door's or a window's own
+/// `Wall Thickness` gives way to its wall's.
+fn loadable(fields: &mut Map<String, Value>) {
+    let hosted = fields.get("category").and_then(Value::as_str).is_some_and(|c| c == "door" || c == "window");
+    let mut materials = Vec::new();
+    let mut texts = Vec::new();
+    if let Some(Value::Array(list)) = fields.get_mut("parameters") {
+        if hosted {
+            list.retain(|q| q["name"] != crate::family::WALL);
+        }
+        for q in list.iter_mut() {
+            match q["kind"].as_str() {
+                Some("material") => materials.push(q["name"].as_str().unwrap_or_default().to_string()),
+                Some("text") => texts.push(q["name"].as_str().unwrap_or_default().to_string()),
+                _ => {}
+            }
+        }
+    }
+    let cut = |v: &mut Value| {
+        if let Value::String(t) = v
+            && t.chars().count() > crate::family::MAX_WORDS
+        {
+            *t = t.chars().take(crate::family::MAX_WORDS).collect();
+        }
+    };
+    let mut named: Vec<String> = Vec::new();
+    for q in fields.get_mut("parameters").and_then(Value::as_array_mut).into_iter().flatten() {
+        let name = q["name"].as_str().unwrap_or_default().to_string();
+        if texts.contains(&name) {
+            cut(&mut q["value"]);
+        }
+        if materials.contains(&name) {
+            named.extend(q["value"].as_str().map(str::to_string));
+        }
+    }
+    for set in fields.get_mut("types").and_then(Value::as_object_mut).into_iter().flat_map(|t| t.values_mut()) {
+        if let Value::Object(set) = set {
+            if hosted {
+                set.remove(crate::family::WALL);
+            }
+            for (k, v) in set.iter_mut() {
+                if texts.contains(k) {
+                    cut(v);
+                }
+                if materials.contains(k) {
+                    named.extend(v.as_str().map(str::to_string));
+                }
+            }
+        }
+    }
+    // A subcategory a form or a symbol is drawn in that the family doesn't list (one of a nested family's) is listed.
+    let used: Vec<String> = ["forms", "symbols"]
+        .iter()
+        .filter_map(|k| fields.get(*k).and_then(Value::as_array))
+        .flatten()
+        .filter_map(|x| x["subcategory"].as_str().map(str::to_string))
+        .collect();
+    let subs = fields.entry("subcategories").or_insert_with(|| json!([]));
+    if let Value::Array(subs) = subs {
+        for u in used {
+            if !subs.iter().any(|x| x["name"] == u.as_str()) {
+                subs.push(json!({"name": u}));
+            }
+        }
+    }
+    let brought = fields.entry("materials").or_insert_with(|| json!({}));
+    if let Value::Object(brought) = brought {
+        for m in named.into_iter().filter(|m| !m.trim().is_empty()) {
+            brought.entry(m).or_insert_with(|| json!({"color": [160, 160, 160]}));
+        }
+    }
+}
+
+/// The families a definition's nested parts name, of those `held`: what the family it defines holds itself.
+fn held_by(definition: Option<&Value>, held: &BTreeMap<String, crate::family::Family>) -> BTreeMap<String, crate::family::Family> {
+    let names: std::collections::BTreeSet<&str> =
+        definition.and_then(|d| d["nested"].as_array()).into_iter().flatten().filter_map(|n| n["family"].as_str()).collect();
+    held.iter().filter(|(n, _)| names.contains(n.as_str())).map(|(n, f)| (n.clone(), f.clone())).collect()
+}
+
+/// The nested families of an export package (`{name: {family, definition}}`), those each nests first; at most
+/// [`crate::family::MAX_NESTED`] of them. One Revit shares (a nested part of the package says `shared`) is loaded into the
+/// project as a family of its own, as Revit loads a shared nested family into the project; one it doesn't is made beside the
+/// project, never in it, and given back by name for the family it is in to hold ([`crate::family::Family::embedded`]), each
+/// holding those it nests in turn. `parent`: the package's own definition.
+fn load_nested(
+    s: &mut Session,
+    nested: Option<&Value>,
+    parent: Option<&Value>,
+    choices: &SharedChoices,
+) -> Result<(BTreeMap<String, crate::family::Family>, Vec<String>), String> {
+    let mut held = BTreeMap::new();
+    let mut asks = Vec::new();
+    let Some(Value::Object(all)) = nested else { return Ok((held, asks)) };
+    let shared: std::collections::BTreeSet<&str> = parent
+        .into_iter()
+        .chain(all.values().filter_map(|v| v.get("definition")))
+        .filter_map(|d| d["nested"].as_array())
+        .flatten()
+        .filter(|n| n["shared"].as_bool() == Some(true))
+        .filter_map(|n| n["family"].as_str())
+        .collect();
+    let mut left: Vec<(&String, &Value)> = all.iter().take(crate::family::MAX_NESTED).collect();
+    // Those whose own nested families are loaded go first, round after round.
+    let mut done = std::collections::BTreeSet::new();
+    while !left.is_empty() {
+        let ready = left
+            .iter()
+            .position(|(_, v)| {
+                v["definition"]["nested"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|n| n["family"].as_str())
+                    .all(|n| done.contains(n) || !all.contains_key(n))
+            })
+            .unwrap_or(0);
+        let (name, v) = left.remove(ready);
+        done.insert(name.as_str());
+        let Some(Value::Object(fields)) = v.get("family") else { continue };
+        let mut fields = fields.clone();
+        loadable(&mut fields);
+        let mut params = Value::Object(fields);
+        params["name"] = json!(name);
+        let definition = v.get("definition").filter(|d| !d.is_null());
+        if let Some(d) = definition {
+            params["revit"] = d.clone();
+        }
+        let own = held_by(definition, &held);
+        if !own.is_empty() {
+            params["embedded"] = serde_json::to_value(own).map_err(|e| e.to_string())?;
+        }
+        // Shared, and the project has one of its name: kept where it is the same; otherwise as the caller chose, Revit's
+        // "Family Already Exists", and asked where it didn't.
+        if shared.contains(name.as_str())
+            && let Some(own) = s.model.families.get(name.as_str()).cloned()
+        {
+            let mut b = Session::new();
+            let m = b.model_mut();
+            m.materials = s.model.materials.clone();
+            m.families = s.model.families.clone();
+            m.families.remove(name.as_str());
+            if family(&mut b, &params).is_err() {
+                params["category"] = json!("generic");
+                params["host"] = Value::Null;
+                params["cut"] = Value::Null;
+                let _ = family(&mut b, &params);
+            }
+            let same = b.model.families.get(name.as_str()).is_some_and(|brought| {
+                same_definition(&own, brought)
+                    && own.types.len() == brought.types.len()
+                    && own.types.iter().all(|(t, v)| brought.types.get(t).is_some_and(|w| same_values(v, w)))
+            });
+            if same {
+                continue;
+            }
+            match choices.get(name) {
+                None => asks.push(name.clone()),
+                Some(SharedChoice::Existing) => {}
+                Some(choice) => {
+                    params["keep_values"] = json!(choice == SharedChoice::Overwrite);
+                    if family(s, &params).is_err() {
+                        params["category"] = json!("generic");
+                        params["host"] = Value::Null;
+                        params["cut"] = Value::Null;
+                        let _ = family(s, &params);
+                    }
+                }
+            }
+            continue;
+        }
+        // Not shared: made in a project of its own that has the project's families and materials, then held.
+        let mut beside = (!shared.contains(name.as_str())).then(|| {
+            let mut b = Session::new();
+            let m = b.model_mut();
+            m.materials = s.model.materials.clone();
+            m.families = s.model.families.clone();
+            // Made afresh, whatever of its name the project has.
+            m.families.remove(name.as_str());
+            b
+        });
+        let at: &mut Session = beside.as_mut().unwrap_or(&mut *s);
+        // A nested family is a part of its parent: one that can't be what it says (a window nested in a window, which
+        // has a wall's thickness of its own) comes in as a generic one, and one that can't come in at all is left out,
+        // its parent's check saying what that costs.
+        if family(at, &params).is_err() {
+            params["category"] = json!("generic");
+            params["host"] = Value::Null;
+            params["cut"] = Value::Null;
+            let _ = family(at, &params);
+        }
+        if let Some(b) = beside {
+            if let Some(f) = b.model.families.get(name.as_str()) {
+                held.insert(name.clone(), f.clone());
+            }
+            // The materials it brought, which the family holding it names.
+            let brought: Vec<(String, crate::model::Material)> = b
+                .model
+                .materials
+                .iter()
+                .filter(|(k, _)| !s.model.materials.contains_key(*k))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            if !brought.is_empty() {
+                let m = s.model_mut();
+                for (k, v) in brought {
+                    m.materials.insert(k, v);
+                }
+            }
+        }
+    }
+    Ok((held, asks))
+}
+
+/// What to do with a shared nested family the project has otherwise (Revit's "Family Already Exists"): the version from the
+/// family, the project's values of its types kept ("Overwrite the existing version"); the version from the family with its
+/// values ("... and its parameter values"); or the project's own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SharedChoice {
+    Overwrite,
+    OverwriteValues,
+    Existing,
+}
+
+/// The caller's `shared`: one choice for every shared nested family, or one per name.
+enum SharedChoices {
+    None,
+    All(SharedChoice),
+    Each(BTreeMap<String, SharedChoice>),
+}
+
+impl SharedChoices {
+    fn get(&self, name: &str) -> Option<SharedChoice> {
+        match self {
+            SharedChoices::None => None,
+            SharedChoices::All(c) => Some(*c),
+            SharedChoices::Each(m) => m.get(name).copied(),
+        }
+    }
+}
+
+fn shared_choices(c: &str, p: &Value) -> Result<SharedChoices, String> {
+    let one = |v: &Value| match v.as_str() {
+        Some("overwrite") => Ok(SharedChoice::Overwrite),
+        Some("overwrite_values") => Ok(SharedChoice::OverwriteValues),
+        Some("existing") => Ok(SharedChoice::Existing),
+        _ => Err(bad(c, format!("`shared`: `overwrite`, `overwrite_values` or `existing`, not {v}"))),
+    };
+    match p.get("shared") {
+        None | Some(Value::Null) => Ok(SharedChoices::None),
+        Some(Value::Object(m)) => Ok(SharedChoices::Each(m.iter().map(|(k, v)| Ok((k.clone(), one(v)?))).collect::<Result<_, String>>()?)),
+        Some(v) => Ok(SharedChoices::All(one(v)?)),
+    }
 }
 
 /// A family as `family` reads it: what it is, each of its types' parameters worked out (formulas and
@@ -11541,6 +12324,52 @@ fn shown(key: &Value) -> String {
         Value::String(s) => s.clone(),
         v => v.to_string(),
     }
+}
+
+fn family_library(s: &mut Session, p: &Value) -> R {
+    let c = "family_library";
+    only(c, p, &["name", "set", "category", "language"])?;
+    let language = match string(c, p, "language")? {
+        Some(code) => language_param(c, &code)?,
+        None => s.model.language,
+    };
+    let set = string(c, p, "set")?;
+    let sets: Vec<&str> = std::iter::once("bimcraft").chain(crate::symbol_set::SETS.iter().copied()).collect();
+    if let Some(set) = &set
+        && !sets.contains(&set.as_str())
+    {
+        return Err(bad(c, format!("no set `{set}`: there is {}", sets.join(", "))));
+    }
+    let category = match string(c, p, "category")? {
+        Some(k) => Some(serde_json::from_value::<crate::family::Category>(json!(k)).map_err(|e| bad(c, format!("`category`: {e}")))?),
+        None => None,
+    };
+    let mut all: Vec<(&str, String, crate::family::Family)> = Vec::new();
+    for from in sets.iter().copied().filter(|n| set.as_deref().is_none_or(|s| s == *n)) {
+        if from == "bimcraft" {
+            all.extend(crate::family::library(language).into_iter().map(|(n, f)| (from, n, f)));
+        } else {
+            let names = crate::symbol_set::Names::of(language);
+            all.extend(crate::symbol_set::families(from, names).into_iter().map(|(n, f)| (from, n, f)));
+        }
+    }
+    all.retain(|(_, _, f)| category.is_none_or(|k| f.category == k));
+    if let Some(name) = string(c, p, "name")? {
+        let Some((from, name, f)) = all.into_iter().find(|(_, n, _)| *n == name) else {
+            return Err(bad(c, format!("BIMCraft has no family `{name}`; `family_library` without a name lists them")));
+        };
+        let mut v = serde_json::to_value(&f).map_err(|e| bad(c, e))?;
+        v["name"] = json!(name);
+        return Ok(json!({"name": name, "set": from, "loaded": s.model.families.contains_key(&name), "family": v}));
+    }
+    let families: Vec<Value> = all
+        .iter()
+        .map(|(from, n, f)| {
+            json!({"name": n, "set": from, "category": f.category, "types": f.types.keys().collect::<Vec<_>>(),
+                   "loaded": s.model.families.contains_key(n)})
+        })
+        .collect();
+    Ok(json!({"families": families}))
 }
 
 fn symbol_set(s: &mut Session, p: &Value) -> R {
@@ -11756,6 +12585,7 @@ fn edit_type(s: &mut Session, p: &Value) -> R {
                 operation: op,
                 thickness: leaf,
                 identity,
+                hole: None,
             };
             map.insert(name.clone(), t.clone());
             json!(t)
@@ -14687,6 +15517,74 @@ fn object_styles(s: &mut Session, p: &Value) -> R {
             s.model_mut().object_styles = styles;
         }
     }
+    if let Some(v) = p.get("subcategories").filter(|v| !v.is_null()) {
+        /// What a subcategory is given: each of its settings, or null to take it back to none.
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Given {
+            #[serde(default, deserialize_with = "set")]
+            projection: Option<Option<crate::pen::Pen>>,
+            #[serde(default, deserialize_with = "set")]
+            cut: Option<Option<crate::pen::Pen>>,
+            #[serde(default, deserialize_with = "set")]
+            color: Option<Option<[u8; 3]>>,
+            #[serde(default, deserialize_with = "set")]
+            pattern: Option<Option<String>>,
+            #[serde(default, deserialize_with = "set")]
+            material: Option<Option<String>>,
+        }
+        /// A present field: null is `Some(None)`.
+        fn set<'de, D: serde::Deserializer<'de>, T: serde::Deserialize<'de>>(d: D) -> Result<Option<Option<T>>, D::Error> {
+            <Option<T> as serde::Deserialize>::deserialize(d).map(Some)
+        }
+        let given: BTreeMap<String, Given> = serde_json::from_value(v.clone()).map_err(|e| {
+            bad(c, format!("`subcategories` is {{\"Category/Subcategory\": {{projection?, cut?, color?, pattern?, material?}}, …}}: {e}"))
+        })?;
+        let rows = s.model.subcategory_rows();
+        let mut styles = s.model.subcategory_styles.clone();
+        for (key, g) in given {
+            if !rows.iter().any(|(k, ..)| *k == key) {
+                let there: Vec<&str> = rows.iter().map(|(k, ..)| k.as_str()).take(40).collect();
+                return Err(bad(c, format!("`{key}` isn't a subcategory of the project's families (there are: {})", there.join(", "))));
+            }
+            let mut style = styles.get(&key).cloned().unwrap_or_default();
+            if let Some(x) = g.projection {
+                style.projection = x;
+            }
+            if let Some(x) = g.cut {
+                style.cut = x;
+            }
+            if let Some(x) = g.color {
+                style.color = x;
+            }
+            if let Some(x) = g.pattern {
+                if let Some(n) = &x
+                    && !s.model.line_patterns.contains_key(n)
+                {
+                    let there: Vec<&str> = s.model.line_patterns.keys().map(String::as_str).collect();
+                    return Err(bad(c, format!("`{key}`: there's no line pattern `{n}` (there are: {})", there.join(", "))));
+                }
+                style.pattern = x;
+            }
+            if let Some(x) = g.material {
+                if let Some(n) = &x
+                    && !s.model.materials.contains_key(n)
+                {
+                    return Err(bad(c, format!("`{key}`: there's no material `{n}`")));
+                }
+                style.material = x;
+            }
+            style.check(&key).map_err(|e| bad(c, e))?;
+            if style.is_empty() {
+                styles.remove(&key);
+            } else {
+                styles.insert(key, style);
+            }
+        }
+        if styles != s.model.subcategory_styles {
+            s.model_mut().subcategory_styles = styles;
+        }
+    }
     let m = &s.model;
     let all: Vec<Value> = crate::graphics::MODEL
         .iter()
@@ -14695,7 +15593,16 @@ fn object_styles(s: &mut Session, p: &Value) -> R {
             json!({"category": cat, "projection": st.projection, "cut": st.cut, "own": m.object_styles.contains_key(*cat)})
         })
         .collect();
-    Ok(json!({"categories": all}))
+    let subcategories: Vec<Value> = m
+        .subcategory_rows()
+        .into_iter()
+        .map(|(key, category, name)| {
+            let st = m.subcategory_styles.get(&key).cloned().unwrap_or_default();
+            json!({"key": key, "category": category, "name": name, "projection": st.projection, "cut": st.cut, "color": st.color,
+                   "pattern": st.pattern, "material": st.material, "own": m.subcategory_styles.contains_key(&key)})
+        })
+        .collect();
+    Ok(json!({"categories": all, "subcategories": subcategories}))
 }
 
 fn inspect(s: &mut Session, p: &Value) -> R {

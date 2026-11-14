@@ -69,14 +69,31 @@ pub const CEILING_HEIGHT: f64 = 2600.0;
 pub const MAX_SLOPE: f64 = 75.0;
 /// The closest a floor's contours may be drawn, mm: a site's are a metre or half a metre apart.
 pub const MIN_CONTOURS: f64 = 50.0;
-/// The version of the project file this build writes, and the newest it reads. 22: a family's form may say which detail
-/// levels and views draw it (`show`: Revit's Visibility Settings, a door's leaf shut in its opening drawn in no plan), and a
-/// symbol which detail levels (`show`; none, every level but Coarse); the built-in doors draw their leaves open, a panel as
-/// thick as the leaf, with their swings, at every level, as Revit's door families do. A file of 21 or older has a swinging
-/// door family's shut leaf drawn in no plan and its open leaf's line made a panel, once, as it is read
-/// ([`crate::family::Family::leaves_drawn_open`]); a build that reads up to 21 would leave `show` out and draw the shut
-/// leaf in the wall again, so a project is written as 22 only when it places a door or a window of a family
-/// whose forms or symbols say it ([`Model::written_format`]). 21: a page of a PDF may be drawn from its
+/// The version of the project file this build writes, and the newest it reads. 25: a project or a family says how it is drawn in
+/// line weights, colours and patterns: the project's `subcategory_styles` (what each family subcategory draws in), a family's
+/// `line_patterns`, a subcategory's `projection`, `cut` and `pattern` (Revit's Object Styles of a family's subcategories), and
+/// whether a family's void cuts were measured (`cuts_measured`). A build that reads up to 24 refuses each as a field it doesn't
+/// know, so a project is written as 25 only when it holds one ([`Model::written_format`]); nothing in a file of 24 changes and it
+/// takes no step. 24: a family from Revit stays parametric:
+/// it may hold references (`references`, read by formulas as `ref(Name)`), dimensions that place them (`dimensions`), nested
+/// parts (`nested`), a type catalog, forms that are blends (`top`), sweeps (`path`, `section`), extrusions with holes and
+/// true arcs (`arcs`), Revit's own result kept beside its definition (`snapshot` forms and symbols, drawn only in a type
+/// whose `check` failed), and whether it is `editable`. A build that reads up to 23 would draw both Revit's result and the
+/// definition at once, and refuse `ref(…)` in a formula, so a project is written as 24 only when a family uses them
+/// ([`Model::written_format`]); nothing in a file of 23 changes and it takes no step. 23: a family's form or symbol may be of
+/// some of its types only (`types`), a symbol may be drawn in sections and elevations (`view`: `front`, `side`), a mesh form
+/// may carry its own outline (`outline`), a door's or window's family may cut an opening other than its width by height
+/// (`cut`), and a parameter may hold text (kind `text`). A build that reads up to 22 would draw every type's forms at once and
+/// the elevation symbols in plan, cut the wall to the leaf, and refuse a text parameter, so a project is written as 23 only
+/// when one of its families uses them ([`Model::written_format`]); what a family only says of itself (`source`, `host`,
+/// `subcategories`, `flips`, a parameter's `unit` and `group`) an older build leaves out, and it takes no step. Nothing in a
+/// file of 22 changes. 22: a family's form may say which detail levels and views draw it (`show`: Revit's Visibility Settings,
+/// a door's leaf shut in its opening drawn in no plan), and a symbol which detail levels (`show`; none, every level but
+/// Coarse); the built-in doors draw their leaves open, a panel as thick as the leaf, with their swings, at every level, as
+/// Revit's door families do. A file of 21 or older has a swinging door family's shut leaf drawn in no plan and its open
+/// leaf's line made a panel, once, as it is read ([`crate::family::Family::leaves_drawn_open`]); a build that reads up to 21
+/// would leave `show` out and draw the shut leaf in the wall again, so a project is written as 22 only when it places a door,
+/// a window or a component of a family whose forms or symbols say it ([`Model::written_format`]). 21: a page of a PDF may be drawn from its
 /// lines, layer by layer, over a picture of only its raster images (an image's `drawn`, with a small picture of the whole page,
 /// `thumb`); an image may hide layers of its lines (`hidden`) and a view's graphics hide them in that view (`pdf_layers`).
 /// Nothing in a file of 20 changes (its pages stay pictures of the whole page), but a build that reads up to 20 would leave
@@ -134,15 +151,33 @@ pub const MIN_CONTOURS: f64 = 50.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 22;
-/// The format a project is written in when it needs nothing of [`FORMAT`]'s but a page of a PDF drawn from its lines, or
-/// layers of one hidden ([`Model::written_format`]).
-pub const LAYERS_FORMAT: u32 = 21;
-/// The format a project is written in when it holds images, or a door's or a window's To Room kept against its swing, but no
-/// page of a PDF drawn from its lines ([`Model::written_format`]).
+pub const FORMAT: u32 = 25;
+/// [`FORMAT`], by what it brought: line weights, colours and patterns of family subcategories, and measured void cuts.
+pub const STYLES_FORMAT: u32 = FORMAT;
+/// The format a project is written in when it needs nothing of [`STYLES_FORMAT`]'s but a family from Revit stays parametric
+/// (references, dimensions, nested parts, a catalog, blends, sweeps, holes, arcs, Revit's result kept beside it), which a build
+/// that reads up to 23 would misread ([`Model::written_format`]).
+pub const PARAMETRIC_FORMAT: u32 = 24;
+/// The format a project is written in when its families need nothing of [`PARAMETRIC_FORMAT`]'s but some
+/// have per-type forms, elevation symbols, traced outlines, a cut or text parameters, which a build that reads up to 22
+/// would misread ([`Model::written_format`]).
+pub const TYPES_FORMAT: u32 = 23;
+/// The format a project is written in when it needs nothing of [`TYPES_FORMAT`]'s but it places a door, a window or a component
+/// of a family whose forms or symbols say which views and detail levels draw them (Visibility Settings), which a build that
+/// reads up to 21 would leave out, drawing a door's leaf shut in the wall again ([`Model::written_format`]). A file older than
+/// this has its swinging door families' leaves drawn open as it is read ([`Model::migrate`]).
+pub const LEAF_FORMAT: u32 = 22;
+/// The format a project is written in when it needs nothing of [`LEAF_FORMAT`]'s but a page of a PDF it holds is drawn from its
+/// lines, or a view or a template hides a page's layers or sets how an import draws, which a build that reads up to 20 would
+/// misread ([`Model::written_format`]). A file older than this can't name Imported Categories as a group a template controls
+/// ([`Model::implied_imports`]).
+pub const PDF_FORMAT: u32 = 21;
+/// The format a project is written in when it holds images, or a door's or a window's To Room kept against its swing, but
+/// nothing of [`PDF_FORMAT`]'s or later ([`Model::written_format`]).
 pub const IMAGES_FORMAT: u32 = 20;
-/// The format a project is written in when it needs nothing of [`FORMAT`]'s (no images, and every door's and window's To Room
-/// on the side it swings to or faces), so a build that reads up to 19 opens it ([`Model::written_format`]).
+/// The format a project is written in when it needs nothing of [`IMAGES_FORMAT`]'s or later (no images, every door's and
+/// window's To Room on the side it swings to or faces, no PDF page drawn from its lines, no family that needs 22 or later), so a build
+/// that reads up to 19 opens it ([`Model::written_format`]).
 pub const PREVIOUS_FORMAT: u32 = 19;
 /// How far past the model a level reaches without an extent of its own, mm.
 pub const LEVEL_PAST: f64 = 1000.0;
@@ -2948,6 +2983,10 @@ pub struct OpeningType {
     pub thickness: Option<f64>,
     #[serde(default, skip_serializing_if = "crate::type_data::TypeIdentity::is_empty")]
     pub identity: crate::type_data::TypeIdentity,
+    /// The opening a family's door or window cuts in its wall, where its family's `cut` says one other than `width` by
+    /// `height`: worked out, never stored.
+    #[serde(skip)]
+    pub hole: Option<(f64, f64)>,
 }
 
 /// How far past its wall's faces a door's or window's From Room and To Room are looked for ([`Model::opening_sides`]).
@@ -2975,6 +3014,11 @@ impl OpeningType {
     /// Its leaf's thickness: its own, or [`DOOR_THICKNESS`].
     pub fn leaf(&self) -> f64 {
         self.thickness.unwrap_or(DOOR_THICKNESS)
+    }
+
+    /// The width and height of the opening it cuts in its wall: its family's `cut`, else its width and height.
+    pub fn cut(&self) -> (f64, f64) {
+        self.hole.unwrap_or((self.width, self.height))
     }
 }
 
@@ -3348,6 +3392,10 @@ pub struct Model {
     /// has set apart from what a project starts with ([`Model::object_style`]).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub object_styles: BTreeMap<String, crate::styles::ObjectStyle>,
+    /// What each family subcategory the project has drawn in, by `Category/Subcategory` (Revit's Object Styles of a family's
+    /// subcategories): each added when a family comes in, unless the project has one of that name ([`Model::subcategory_style`]).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub subcategory_styles: BTreeMap<String, crate::styles::SubcategoryStyle>,
     /// Its line patterns, by name: graphic segments along a centerline, mm on paper.
     #[serde(default = "lines::default_patterns")]
     pub line_patterns: BTreeMap<String, LinePattern>,
@@ -3490,6 +3538,7 @@ impl Model {
             line_weights: None,
             standard,
             object_styles: BTreeMap::new(),
+            subcategory_styles: BTreeMap::new(),
             line_patterns: lines::patterns(language),
             line_styles: lines::styles(language),
             fill_patterns: fills::patterns(language),
@@ -3759,6 +3808,31 @@ impl Model {
         Ok(())
     }
 
+    /// Whether the dimensions of family `name` can hold the instance values `params` give an element of type `type_name`: Revit
+    /// refuses a change that over-constrains ("Constraints are not satisfied") and keeps the old value. A type whose own
+    /// values can't be held never blocks placing it: only what the instance values add is refused. `wall` is the thickness
+    /// of the wall a door or window stands in.
+    fn family_values_hold(
+        &self,
+        who: &str,
+        f: &Family,
+        type_name: &str,
+        params: &BTreeMap<String, serde_json::Value>,
+        wall: f64,
+    ) -> Result<(), String> {
+        if params.is_empty() || f.references.is_empty() {
+            return Ok(());
+        }
+        let none = BTreeMap::new();
+        let (Ok(base), Ok(with)) = (f.values_in(type_name, &none, wall), f.values_in(type_name, params, wall)) else { return Ok(()) };
+        if f.solve(&base).is_ok()
+            && let Err(e) = f.solve(&with)
+        {
+            return Err(format!("{who}: Constraints are not satisfied: {e}"));
+        }
+        Ok(())
+    }
+
     /// Material `from`, renamed `to` in the families and their components.
     pub fn rename_material_in_families(&mut self, from: &str, to: &str) {
         for f in self.families.values_mut() {
@@ -3789,7 +3863,10 @@ impl Model {
     /// for one that doesn't build.
     pub fn component_local_pieces(&self, c: &Component) -> Vec<Piece> {
         let Some(f) = self.families.get(&c.family) else { return Vec::new() };
-        let Ok(pieces) = f.values(&c.type_name, &c.params).and_then(|v| f.pieces(&v)) else { return Vec::new() };
+        let others = |n: &str| self.families.get(n);
+        let Ok(pieces) = f.values(&c.type_name, &c.params).and_then(|v| f.pieces_with(&c.type_name, &v, &others)) else {
+            return Vec::new();
+        };
         if !c.mirrored {
             return pieces;
         }
@@ -3805,17 +3882,31 @@ impl Model {
             .collect()
     }
 
-    /// Component `c`'s plan marks in the model: its family's symbols in its own axes, mirrored if it is, turned and moved to
-    /// where it stands. A label is lettered upright in the family's axes, so it turns (and mirrors) with the component.
-    pub fn component_marks(&self, c: &Component) -> Vec<crate::family::Mark> {
+    /// Component `c`'s plan marks in the model at detail level `detail`: its family's plan symbols of its type drawn at that
+    /// level ([`crate::family::Symbol::drawn_at`]), in its own axes, mirrored if it is, turned and moved to where it stands.
+    /// A label is lettered upright in the family's axes, so it turns (and mirrors) with the component.
+    pub fn component_marks(&self, c: &Component, detail: crate::graphics::Detail) -> Vec<crate::family::Mark> {
+        self.component_marks_styled(c, detail).into_iter().map(|(m, _)| m).collect()
+    }
+
+    /// [`Model::component_marks`], each with the subcategory of the symbol it came from.
+    pub fn component_marks_styled(&self, c: &Component, detail: crate::graphics::Detail) -> Vec<crate::family::Marked> {
         let Some(f) = self.families.get(&c.family) else { return Vec::new() };
-        if f.symbols.is_empty() {
+        if f.symbols.is_empty() && f.nested.is_empty() {
             return Vec::new();
         }
-        let Ok(marks) = f.values(&c.type_name, &c.params).and_then(|v| f.marks(&v)) else { return Vec::new() };
+        let plan = crate::family::SymbolView::Plan;
+        let others = |n: &str| self.families.get(n);
+        let Ok(marks) = f.values(&c.type_name, &c.params).and_then(|v| f.marks_styled(&c.type_name, &v, plan, Some(detail), &others))
+        else {
+            return Vec::new();
+        };
         let (sin, cos) = c.angle.to_radians().sin_cos();
         let flip = if c.mirrored { -1.0 } else { 1.0 };
-        marks.iter().map(|k| k.map(|q| P2(c.at.0 + q.0 * cos - flip * q.1 * sin, c.at.1 + q.0 * sin + flip * q.1 * cos))).collect()
+        marks
+            .iter()
+            .map(|(k, sub)| (k.map(|q| P2(c.at.0 + q.0 * cos - flip * q.1 * sin, c.at.1 + q.0 * sin + flip * q.1 * cos)), sub.clone()))
+            .collect()
     }
 
     /// Component `c`'s connectors, worked out for its type and values, with their place and the way they face in the
@@ -3983,7 +4074,7 @@ impl Model {
         }
         m.names_from_file();
         // 20 to 21: a template from a file of 20 or older can't name Imported Categories as a group it controls.
-        if format < u64::from(LAYERS_FORMAT) {
+        if format < u64::from(PDF_FORMAT) {
             m.implied_imports();
         }
         m.renamed_clashing_parameters();
@@ -4069,11 +4160,13 @@ impl Model {
         // 20 to 21 has no step here: what it has, `Model::read` gives a template after this.
         // 21 to 22: a swinging door family's leaf shut in its opening is drawn in no plan, and its open leaf is a panel as
         // thick as the leaf, with its swing, at every detail level, as Revit's door families draw them.
-        if self.format < 22 {
+        if self.format < LEAF_FORMAT {
             for f in self.families.values_mut() {
                 f.leaves_drawn_open();
             }
         }
+        // 22 to 23 (a family's per-type forms and symbols, elevation symbols, traced outlines, cut and text parameters) and 23
+        // to 24 (a parametric family from Revit) have no step: a file of 22 or 23 holds none of them, which read as before.
         self.format = FORMAT;
     }
 
@@ -4866,6 +4959,11 @@ impl Model {
             _ => None,
         };
         let need = |key: &str| number(key).ok_or_else(|| format!("family `{name}` has no length `{key}`"));
+        // A type drawn as Revit made it cuts the opening Revit measured for it; one drawn from its rules, the one they say.
+        let hole = match f.check.get(&o.type_name).and_then(|c| c.opening).filter(|_| f.draws_snapshot(&o.type_name)) {
+            Some([w, h, _]) => Some((w, h)),
+            None => f.cut_size(&values)?,
+        };
         Ok(OpeningType {
             width: need(crate::family::WIDTH)?,
             height: need(crate::family::HEIGHT)?,
@@ -4873,6 +4971,7 @@ impl Model {
             operation: f.operation,
             thickness: None,
             identity: f.identity.get(&o.type_name).cloned().unwrap_or_default(),
+            hole,
         })
     }
 
@@ -4893,15 +4992,24 @@ impl Model {
     /// the opening's flips as mirror images (its hinge on the other jamb, its swing to the wall's other side);
     /// none for one that isn't of a family, or doesn't build.
     pub fn opening_local(&self, e: &Element) -> Option<(Vec<Piece>, Vec<crate::family::Mark>)> {
-        self.opening_local_at(e, None)
+        self.opening_local_at(e, crate::graphics::Detail::Fine)
     }
 
-    /// [`Model::opening_local`], with the marks of the symbols a view at detail level `detail` draws; every one with none.
-    fn opening_local_at(&self, e: &Element, detail: Option<crate::graphics::Detail>) -> Option<(Vec<Piece>, Vec<crate::family::Mark>)> {
+    /// [`Model::opening_local`], its plan marks those drawn at detail level `detail`.
+    fn opening_local_at(&self, e: &Element, detail: crate::graphics::Detail) -> Option<(Vec<Piece>, Vec<crate::family::Mark>)> {
+        let (pieces, marks) = self.opening_local_styled(e, detail)?;
+        Some((pieces, marks.into_iter().map(|(m, _)| m).collect()))
+    }
+
+    /// [`Model::opening_local_at`], each mark with the subcategory of the symbol it came from.
+    fn opening_local_styled(&self, e: &Element, detail: crate::graphics::Detail) -> Option<(Vec<Piece>, Vec<crate::family::Marked>)> {
         let (Element::Door(o) | Element::Window(o)) = e else { return None };
         let f = self.families.get(o.family.as_ref()?)?;
         let values = f.values_in(&o.type_name, &o.params, self.thickness(self.wall(o.host)?)).ok()?;
-        let (pieces, marks) = (f.pieces(&values).ok()?, f.marks_at(&values, detail).ok()?);
+        let plan = crate::family::SymbolView::Plan;
+        let others = |n: &str| self.families.get(n);
+        let (pieces, marks) =
+            (f.pieces_with(&o.type_name, &values, &others).ok()?, f.marks_styled(&o.type_name, &values, plan, Some(detail), &others).ok()?);
         let (fx, fy) = (if o.flip_hand { -1.0 } else { 1.0 }, if o.flip_facing { -1.0 } else { 1.0 });
         let mirrored = fx * fy < 0.0;
         let flip = |p: [f64; 3]| [fx * p[0] + 0.0, fy * p[1] + 0.0, p[2]];
@@ -4914,7 +5022,7 @@ impl Model {
                 Piece { tris: tris.collect(), outline: if mirrored { outline.into_iter().rev().collect() } else { outline }, ..pc }
             })
             .collect();
-        let marks = marks.iter().map(|k| k.map(|q| P2(fx * q.0 + 0.0, fy * q.1 + 0.0))).collect();
+        let marks = marks.iter().map(|(k, sub)| (k.map(|q| P2(fx * q.0 + 0.0, fy * q.1 + 0.0)), sub.clone())).collect();
         Some((pieces, marks))
     }
 
@@ -4939,14 +5047,77 @@ impl Model {
             .collect()
     }
 
-    /// The marks a door's or window's family draws in a plan at detail level `detail`, where it stands: those of the symbols
-    /// that level shows ([`crate::family::Symbol::drawn_at`]).
+    /// The marks a door's or window's family draws in plan at detail level `detail`, where it stands.
     pub fn opening_marks(&self, e: &Element, detail: crate::graphics::Detail) -> Vec<crate::family::Mark> {
+        self.opening_marks_styled(e, detail).into_iter().map(|(m, _)| m).collect()
+    }
+
+    /// [`Model::opening_marks`], each with the subcategory of the symbol it came from.
+    pub fn opening_marks_styled(&self, e: &Element, detail: crate::graphics::Detail) -> Vec<crate::family::Marked> {
         let (Element::Door(o) | Element::Window(o)) = e else { return Vec::new() };
-        let (Some((_, marks)), Some((at, u, _))) = (self.opening_local_at(e, Some(detail)), self.opening_frame(o)) else {
+        let (Some((_, marks)), Some((at, u, _))) = (self.opening_local_styled(e, detail), self.opening_frame(o)) else {
             return Vec::new();
         };
-        marks.iter().map(|k| k.map(|q| at + u * q.0 + u.perp() * q.1)).collect()
+        marks.iter().map(|(k, sub)| (k.map(|q| at + u * q.0 + u.perp() * q.1), sub.clone())).collect()
+    }
+
+    /// The lines a component's or a door's or window's family draws in a section or an elevation looking along `looking` at
+    /// detail level `detail`, in the model (mm, z up), each with the subcategory of the symbol it came from: its `front` symbols where the view looks along the family's y within
+    /// 45°, else its `side` ones (Revit's symbolic lines in an elevation: a door's Elevation Swing). A `front` symbol's
+    /// (x, z) stand in the family's plane y = 0 and a `side` one's (y, z) in x = 0, placed as its forms are (mirrored,
+    /// flipped, turned and moved), so the view from the back or the left sees them mirrored.
+    pub fn elevation_lines(&self, e: &Element, looking: P2, detail: crate::graphics::Detail) -> Vec<(Vec<[f64; 3]>, Option<String>)> {
+        use crate::family::{Mark, SymbolView};
+        let (family, type_name, params, wall) = match e {
+            Element::Component(c) => (&c.family, &c.type_name, &c.params, None),
+            Element::Door(o) | Element::Window(o) => match (&o.family, self.wall(o.host)) {
+                (Some(f), Some(w)) => (f, &o.type_name, &o.params, Some(self.thickness(w))),
+                _ => return Vec::new(),
+            },
+            _ => return Vec::new(),
+        };
+        let Some(f) = self.families.get(family) else { return Vec::new() };
+        if !f.symbols.iter().any(|y| y.view != SymbolView::Plan) && f.nested.is_empty() {
+            return Vec::new();
+        }
+        // The family's axes in the model, and where its (x, y, z) stands.
+        let place: Box<dyn Fn([f64; 3]) -> [f64; 3]> = match e {
+            Element::Component(c) => {
+                let base = self.elevation(c.level) + c.offset;
+                let (sin, cos) = c.angle.to_radians().sin_cos();
+                let flip = if c.mirrored { -1.0 } else { 1.0 };
+                let at = c.at;
+                Box::new(move |p| [at.0 + p[0] * cos - flip * p[1] * sin, at.1 + p[0] * sin + flip * p[1] * cos, base + p[2]])
+            }
+            Element::Door(o) | Element::Window(o) => {
+                let Some((at, u, z)) = self.opening_frame(o) else { return Vec::new() };
+                let (fx, fy) = (if o.flip_hand { -1.0 } else { 1.0 }, if o.flip_facing { -1.0 } else { 1.0 });
+                Box::new(move |p| {
+                    let q = at + u * (fx * p[0]) + u.perp() * (fy * p[1]);
+                    [q.0, q.1, z + p[2]]
+                })
+            }
+            _ => return Vec::new(),
+        };
+        let (o, x) = (place([0.0; 3]), place([1.0, 0.0, 0.0]));
+        let along_x = P2(x[0] - o[0], x[1] - o[1]);
+        let side = looking.unit().dot(along_x).abs() > std::f64::consts::FRAC_1_SQRT_2;
+        let view = if side { SymbolView::Side } else { SymbolView::Front };
+        let values = match wall {
+            Some(t) => f.values_in(type_name, params, t),
+            None => f.values(type_name, params),
+        };
+        // Its nested parts' symbols that face the view too (a window's sash, a door's handle).
+        let others = |n: &str| self.families.get(n);
+        let Ok(marks) = values.and_then(|v| f.marks_styled(type_name, &v, view, Some(detail), &others)) else { return Vec::new() };
+        let lift = |q: P2| if side { place([0.0, q.0, q.1]) } else { place([q.0, 0.0, q.1]) };
+        marks
+            .into_iter()
+            .filter_map(|(k, sub)| match k {
+                Mark::Line(pts) => Some((pts.into_iter().map(lift).collect(), sub)),
+                _ => None,
+            })
+            .collect()
     }
 
     /// The level an element stands on: a door's or window's is its wall's, a tag's its door's or
@@ -6827,6 +6998,47 @@ impl Model {
         Ok(())
     }
 
+    /// How family `start` reaches itself through its nested parts' families (those of the project, not the ones a family holds
+    /// itself), as the chain of families from it back to it, `start` last; none where it doesn't. Such a family would nest
+    /// without end, and its nested parts draw nothing.
+    fn nesting_cycle(&self, start: &str) -> Option<Vec<String>> {
+        let first = self.families.get(start)?;
+        if first.nested.is_empty() {
+            return None;
+        }
+        // Depth first, each family once: the way taken so far, and the families already walked without finding it.
+        let mut walked: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        let mut path: Vec<&str> = vec![start];
+        fn walk<'a>(
+            m: &'a Model,
+            f: &'a crate::family::Family,
+            start: &str,
+            path: &mut Vec<&'a str>,
+            walked: &mut std::collections::BTreeSet<&'a str>,
+        ) -> bool {
+            for n in f.nested.iter().filter(|n| !f.embedded.contains_key(&n.family)) {
+                if n.family == start {
+                    return true;
+                }
+                let Some((name, inner)) = m.families.get_key_value(&n.family) else { continue };
+                if !walked.insert(name.as_str()) {
+                    continue;
+                }
+                path.push(name.as_str());
+                if walk(m, inner, start, path, walked) {
+                    return true;
+                }
+                path.pop();
+            }
+            false
+        }
+        walk(self, first, start, &mut path, &mut walked).then(|| {
+            let mut chain: Vec<String> = path.iter().map(|c| c.to_string()).collect();
+            chain.push(start.to_string());
+            chain
+        })
+    }
+
     /// Everything that must hold between commands: references resolve, geometry is finite and
     /// not degenerate, sizes are in range. What is only questionable (doors that overlap or don't fit their wall, walls that
     /// overlap, a room not enclosed) is a warning, not a refusal ([`Model::review`]).
@@ -6837,6 +7049,9 @@ impl Model {
         for (c, style) in &self.object_styles {
             crate::styles::known(c)?;
             style.check(c)?;
+        }
+        for (key, style) in &self.subcategory_styles {
+            style.check(key)?;
         }
         for (n, p) in &self.line_patterns {
             if n.eq_ignore_ascii_case(lines::SOLID) {
@@ -6974,6 +7189,12 @@ impl Model {
                 return Err("a family needs a name".into());
             }
             f.check(&|m| self.materials.contains_key(m)).map_err(|e| format!("family `{n}`: {e}"))?;
+            if let Some(chain) = self.nesting_cycle(n) {
+                return Err(format!(
+                    "family `{n}` nests itself through {}",
+                    chain.iter().map(|c| format!("`{c}`")).collect::<Vec<_>>().join(", ")
+                ));
+            }
         }
         if self.parameters.len() > MAX_PROJECT_PARAMETERS {
             return Err(format!("the project has {} parameters; it holds up to {MAX_PROJECT_PARAMETERS}", self.parameters.len()));
@@ -7448,8 +7669,9 @@ impl Model {
                 let t = self.opening_dims(e).map_err(|e| format!("{who}: {e}"))?;
                 if let Some(f) = o.family.as_ref().and_then(|n| self.families.get(n)) {
                     self.family_values_ok(&who, o.family.as_deref().unwrap_or_default(), f, &o.params)?;
+                    self.family_values_hold(&who, f, &o.type_name, &o.params, self.thickness(w))?;
                     let values = f.values_in(&o.type_name, &o.params, self.thickness(w)).map_err(|e| format!("{who}: {e}"))?;
-                    f.pieces(&values).and_then(|_| f.marks(&values)).map_err(|e| format!("{who}: {e}"))?;
+                    f.pieces(&o.type_name, &values).and_then(|_| f.all_marks(&o.type_name, &values)).map_err(|e| format!("{who}: {e}"))?;
                     size(&format!("{who} width"), t.width)?;
                     size(&format!("{who} height"), t.height)?;
                 }
@@ -7900,8 +8122,13 @@ impl Model {
                 coord(&format!("{who} angle"), c.angle)?;
                 coord(&format!("{who} offset"), c.offset)?;
                 self.family_values_ok(&who, &c.family, f, &c.params)?;
+                self.family_values_hold(&who, f, &c.type_name, &c.params, crate::family::DEFAULT_WALL)?;
                 // Its shape, built once for each family, type and values the project's components have.
-                let build = || f.values(&c.type_name, &c.params).and_then(|v| f.pieces(&v).and(f.marks(&v))).map(|_| ());
+                let build = || {
+                    f.values(&c.type_name, &c.params)
+                        .and_then(|v| f.pieces(&c.type_name, &v).and(f.all_marks(&c.type_name, &v)))
+                        .map(|_| ())
+                };
                 let built = match serde_json::to_string(&c.params) {
                     Ok(values) => shapes.entry((c.family.as_str(), c.type_name.as_str(), values)).or_insert_with(build).clone(),
                     Err(_) => build(),
@@ -8236,6 +8463,7 @@ impl Model {
             line_weights,
             standard,
             object_styles,
+            subcategory_styles,
             line_patterns,
             line_styles,
             fill_patterns,
@@ -8281,6 +8509,7 @@ impl Model {
             && *line_weights == o.line_weights
             && *standard == o.standard
             && *object_styles == o.object_styles
+            && *subcategory_styles == o.subcategory_styles
             && *line_patterns == o.line_patterns
             && *line_styles == o.line_styles
             && *fill_patterns == o.fill_patterns

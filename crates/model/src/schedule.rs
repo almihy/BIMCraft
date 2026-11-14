@@ -659,7 +659,8 @@ pub(crate) fn fixed_fields(m: &Model, cat: &str) -> BTreeSet<String> {
 }
 
 /// Category `cat`'s fields, each once, with what it holds: its own, then the project parameters
-/// for it and, for components, the parameters of the model's families, and then its type's identity data.
+/// for it and, for components, doors and windows, the parameters of the model's families of it, and then its type's
+/// identity data.
 pub fn fields(m: &Model, cat: &str) -> Vec<(String, Kind)> {
     fields_with(m, cat, true)
 }
@@ -684,15 +685,21 @@ fn fields_with(m: &Model, cat: &str, identity_data: bool) -> Vec<(String, Kind)>
             },
         );
     }
-    if cat == "component" {
-        for p in m.families.values().flat_map(|f| &f.parameters) {
+    // A door's or a window's schedule has its families' parameters too, as Revit's (a text one, Fire Rating, among them).
+    let hosted = match cat {
+        "door" => Some(family::Category::Door),
+        "window" => Some(family::Category::Window),
+        _ => None,
+    };
+    if cat == "component" || hosted.is_some() {
+        for p in m.families.values().filter(|f| hosted.is_none_or(|c| f.category == c)).flat_map(|f| &f.parameters) {
             add(
                 &p.name,
                 match p.kind {
                     family::Kind::Length => Kind::Length,
                     family::Kind::Number | family::Kind::Angle => Kind::Number,
                     family::Kind::YesNo => Kind::YesNo,
-                    family::Kind::Material => Kind::Text,
+                    family::Kind::Material | family::Kind::Text => Kind::Text,
                 },
             );
         }

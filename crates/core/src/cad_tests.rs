@@ -1124,19 +1124,19 @@ fn a_new_template_forces_this_builds_format_only_when_import_settings_reach_its_
     run(&mut s, "template", json!({"name": "Plan", "show": ["cadimport"]}));
     // How an import draws, in the template: format 21's.
     run(&mut s, "template", json!({"name": "Plan", "imports": {"plan": {"all": {"halftone": true}}}}));
-    assert_eq!(format(&s), json!(crate::model::LAYERS_FORMAT));
+    assert_eq!(format(&s), json!(crate::model::PDF_FORMAT));
     run(&mut s, "template", json!({"name": "Plan", "imports": {"plan": null}}));
     assert_eq!(format(&s), json!(crate::model::PREVIOUS_FORMAT));
     // A drawing's layers it hides reach its views only through the group the older build can't name: format 21's too.
     run(&mut s, "template", json!({"name": "Plan", "layers": {"plan": ["WALLS"]}}));
-    assert_eq!(format(&s), json!(crate::model::LAYERS_FORMAT));
+    assert_eq!(format(&s), json!(crate::model::PDF_FORMAT));
     run(&mut s, "template", json!({"name": "Plan", "layers": {"plan": null}}));
     assert_eq!(format(&s), json!(crate::model::PREVIOUS_FORMAT));
     // As do a following view's own: the template's (none hidden) win over them.
     let id = one_import(&mut s);
     run(&mut s, "cad_layers", json!({"id": id, "view": one, "hide": ["WALLS"]}));
     run(&mut s, "graphics", json!({"view": one, "template": "Plan"}));
-    assert_eq!(format(&s), json!(crate::model::LAYERS_FORMAT));
+    assert_eq!(format(&s), json!(crate::model::PDF_FORMAT));
 }
 
 fn one_import(s: &mut Session) -> u64 {

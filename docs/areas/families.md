@@ -91,16 +91,17 @@ name: a triangle's face is read from its winding, so every solid emits triangles
 a project only through the `favorite` command (`load` never overwrites without `replace`). The desktop's Family Editor
 (`editor.rs`) edits text (`FormText`, `ParamText`, ...) and changes the project's family only through a `family` command; its
 preview is a scratch `Session` of its own, and it says what's wrong inside the window (the status box, over the view's corner, would lie on its
-buttons).
-
+buttons).
+
 A form's `show` and a symbol's are Revit's Visibility Settings (`family::Show`, `family::Levels`): each box true unless it says
-false, and one that says nothing drawn as `Show::UNSAID` and `Levels::UNSAID` are (every view, every detail level but Coarse), which
-`render.rs` reads for a family's opening in plan. The Family Editor carries both through (`FormText::show`, `SymbolText::show`), and
+false. A form that says nothing is drawn in every view at every detail level, as Revit's default (`Show::in_view`; a symbol that
+says nothing, at every level but Coarse, `Levels::UNSAID`); the built-in door and window families' forms say nothing either (a door's leaf shut in its opening says
+no plan, its handles no Coarse and no plan from above), so a Coarse plan shows a door's jambs. The Family Editor carries both through (`FormText::show`, `SymbolText::show`), and
 each form's and symbol's Visibility/Graphics Overrides row has Edit…, which opens Family Element Visibility Settings as Revit's does
-(`editor.rs::visibility_settings`): for a form View Specific Display (Plan/RCP, Front/Back, Left/Right, When cut in Plan/RCP) and
-Detail Levels, for a symbol its Detail Levels alone; it opens on what is drawn, Default ticks every box, and OK sets `show` only
-when a box changed, so what said nothing keeps saying nothing. The `family` command sets the same with `form`/`symbol` patches
-(`{"id": …, "show": {"plan": true}}` merges; `null` takes it away).
+(`editor.rs::visibility_settings`) and is the only place the editor sets a visibility: for a form View Specific Display (Plan/RCP,
+Front/Back, Left/Right, When cut in Plan/RCP) and Detail Levels, for a symbol its Detail Levels alone; it opens on what is drawn,
+Default ticks every box, and OK sets `show` only when a box changed, so what said nothing keeps saying nothing. The `family`
+command sets the same with `form`/`symbol` patches (`{"id": …, "show": {"plan": true}}` merges; `null` takes it away).
 
 A type of a category or of a family is renamed with `rename_type` (`Model::move_entry` moves it in its map, and `rename_entry` the
 library entry and every reference `Model::lib_refs_mut` visits, so it keeps its GUID). A type or a family goes with `delete_type` (one entry, refused while an element uses it, and for the last type of a category or of a family: a
@@ -144,7 +145,7 @@ numeric is checked finite and within `MAX_COORD`; a label's height and a dot's r
 
 `Model::component_marks` places a component's marks (mirrored, then turned and moved) and `Model::opening_marks` an opening's,
 and `render::marks` draws them: lines in the category's pen (`BY_CATEGORY`, so Object Styles and Visibility/Graphics apply), dots
-as filled discs. Coarse detail leaves them out. A label's anchor is placed with the component (turned, mirrored, moved) but its
+as filled discs. Coarse detail leaves them out, unless a symbol's `show` says Coarse (below). A label's anchor is placed with the component (turned, mirrored, moved) but its
 letters never are: they are always drawn at 0 degrees in the view, left to right with a horizontal baseline, however the component
 stands (the simplest rule; no flipping by quadrant). Symbols are annotation of the component's level: they draw in that level's
 plan and its ceiling plan whatever height the component's forms reach (a ceiling light shows its symbols in the floor plan) and
@@ -154,6 +155,211 @@ all four parts. Library parts: a symbol of any kind has its own id and GUID (`Ha
 `text` or `dot` symbols, or symbols on a category other than a door or a window, is read by an older version only with them left
 out or refused, so the file format is unchanged.
 
+
+## Families from Revit
+
+A family exported from Revit by Arqiflow's add-in (the design: Arqiflow's `docs/superpowers/specs/2026-11-13-revit-families-design.md`,
+section 1) is a BIMCraft family with fields a hand-made one leaves out, all optional and written only when not the default.
+Revit's own parametric sketches aren't readable, so its geometry comes baked per type: a form or a symbol with `types` is
+built only in those (`Form::of_type`, `Symbol::of_type`), so `Family::pieces`, `marks` and `shapes` take the type name
+(`all_marks` checks every symbol of a type), and a family of many per-type forms builds only the type's own (`MAX_FORMS`
+and `MAX_SYMBOLS` 4096, `MAX_PARAMETERS` 256, a symbol's line `MAX_SYMBOL_POINTS` 1024). `like: {new: old}` on `family`
+gives a new type the old one's forms and symbols (`Family::type_like`; Type Properties' Duplicate sends it, and the Family
+Editor's Duplicate, rename and Delete Type do the same to its lists); `rename_type` renames the type in the lists
+(`Library::move_entry`, `Family::rename_type`) and a type taken away (`types: {name: null}`, `delete_type`, purge) takes
+itself out of them, a form or symbol of it alone going with it (`Family::forget_type`), never left of no type and so of
+every one. A form's `show` is Revit's Visibility Settings: the detail levels and the views that draw it, carried on its
+`Piece` and, in the 3D scene, on its `Solid::Mesh` and every `Tri` as a `view3d::Vis` (its bits and the family's x axis in
+plan). A plan draws a component's form when `show.plan` and its detail level say so (`Piece::in_plan`), a family opening's
+at Coarse where its `show` says Coarse, and one that says nothing at every level, as Revit's default (`render.rs::opening` draws what `Piece::in_plan_cut` says); a section or an elevation
+draws one by `show.front` where it looks along the family's y within 45° and `show.side` along its x, at its detail level;
+a 3D view by its own detail level, which a 3D view now has as Revit's do (`detail {view: "{3D}"}`, the view control bar;
+Fine by default, as every BIMCraft view); IFC exports what Fine draws. `Look` carries the view's detail level and, for a
+section or an elevation, the way it looks, and `Look::draws` is the one test a triangle passes (the picture, the section's
+occluders, the card's mesh, whose placed copies fall back to triangles of their own where a copy has one not drawn). A
+symbol's `view` is `plan`, `front` ((x, z) in the family's plane y = 0) or `side` ((y, z) in x = 0); `Model::elevation_lines`
+places a component's or an opening's front or side lines in the model as its forms are (mirrored, flipped, turned), and
+`render::elevation_symbols` draws them in the sections and elevations that see them past their line and within their
+depth, in the category's projection pen, so the back or the left sees them mirrored (a door's Elevation Swing); they are
+not hidden behind what stands in front of them. A symbol's `show` gives its detail levels, Coarse among them; one without
+is drawn at Medium and Fine, as before. A mesh form's `outline` is its silhouette from above as the exporter traced it, in
+place of the hull. A door's or window's `cut` (formulas over its parameters) is the wall's opening where it isn't
+`Width` by `Height` (a frame outside the leaf): `OpeningType::hole`, worked out and never stored, read by `cut()` for the
+wall's hole, its notches, the plan's gap and IFC's opening element, while the type's width and height stay the leaf's.
+`flips` says which of Revit's flip controls it has, and the canvas shows only those arrows (`flip.rs`); `flip` and Space
+flip it all the same, as Revit's API does. `source` (the firm library's entry and version, the application, its category,
+the file), `host`, `subcategories` and a form's or symbol's `subcategory` are stored, checked (`Family::check_described`,
+`check_part`) and shown, never acted on: the `family` list gives each family's `source`, and the Family Editor shows it
+read only. A `text` parameter holds words (`Val::Text`), shown in Properties and in schedules (a door's or window's
+schedule lists its families' parameters as a component's does), which no formula reads; a parameter's `unit` is said
+beside a number and its `group` is the bar Properties and Type Properties list it under. `family {path}` and the inline
+command take `materials: {name: {color, transparency?}}`, added where the project has none of that name, and the whitelist
+of a file's keys takes all of the above; a caller's `source` is laid over the file's. A project is written as format 22
+only when a family uses `types`, `show`, a symbol's `view`, `outline`, `cut` or a text parameter, which a build that reads
+up to 20 would misread (`Model::written_format`); the rest an older build leaves out. `family_library` lists BIMCraft's own
+families (the starter set, named in the project's language, and the symbol sets) for Load Family, and replies one's
+definition as a family file holds it, at no undo step. The sample `crates/core/testdata/families/sample-two-type-flush-door.json`
+(original) has all of it; `family_revit_tests.rs` drives it.
+
+## Families from Revit that stay parametric (round 2)
+
+The owner wants firms to rely on Revit less and less, so a family from Revit stays a family: flexed, its parameters
+changed, new types made, edited in the Family Editor. The export package (Arqiflow's design, section 4) brings Revit's
+definition beside its result per type; the engine translates the one (`family/revit.rs`, `revit::translate`), keeps the
+other as the check and the fallback (`snapshot` forms and symbols), and checks each type (`family/check.rs`).
+
+- **References and dimensions** (`family/parametric.rs`). A `Reference` is a reference plane: a name a formula can say,
+  an `axis` (the family axis it is square to) and `at`, where it stands when nothing places it, in the family's axes;
+  `origin` keeps it there (the plane defining the origin, and z's plane at 0 in every type where none does), and so does a
+  host wall's face (`is_reference` `host_exterior`/`host_interior`, at `±Wall Thickness / 2`). A `Dimension` between
+  references (by name, in order) keeps two of them its `label`'s value apart, or its own `value` when `locked`, or spaces
+  a chain equally when `eq`; `sense` says which way along the axis each gap runs. `Family::solve` places them per type and
+  per axis by Gauss-Jordan elimination over those equations: a plane no equation places stays at its `at` (the translator
+  lists the planes that never move last, so they are the ones kept), two equations that can't both hold are
+  over-constrained, and the type falls back. `values_in` adds each reference's place as `ref(Name)`, which the formula
+  reader reads as a call (`ref(Left) + 50`); validation accepts `ref(X)` for a reference `X`.
+- **Forms Revit has** (`family/shapes.rs`). An extrusion's `holes` (inner loops, cut round by a constrained
+  triangulation); a blend's `top` (the profile at `to`, `profile` at `from`, corners paired one for one where they have as
+  many, else along their lengths from the corners nearest each other); a sweep's `path` (points in the family's axes) and
+  `section` (its profile in 3D, square to one leg of the path anywhere along it: found by its plane and its middle and taken
+  back to the first leg), mitred at each corner, the profile carried along without twisting, capped or joined where the path
+  closes; a swept blend's `section_end` at the path's end. `arcs` keep Revit's arcs as arcs: an edge of a ring (`profile`,
+  `top`, a `hole`, `path`, `section`, `section_end`) from one corner to the next about a `centre` (bound like any number),
+  counter-clockwise unless `clockwise`, about `normal` in 3D; drawn as a circle is, 32 corners a turn. Every new form comes
+  out turned out by its volume's sign.
+- **Nested parts** (`Nested`). Another family of the project at `at`, turned `rotation` about z, `mirrored` across its x
+  (or set on a face by its own `axes`), of `type` or the one each of the parent's types chooses (`type_in`),
+  its parameters from the parent's numbers (`Family::values_given`); `Family::pieces_with` builds them with the project's
+  families (`Model::component_local_pieces` and `opening_local` pass them), at most `MAX_NESTING` deep and `MAX_NESTED` in
+  all. Revit's result already has them, so they are built only in a parametric type.
+- **The check and the fallback.** `Family::run_check` compares each type's parametric pieces with its snapshot ones at
+  Coarse, Medium and Fine (`Family::compare_type`): volume within 1 % (`check::VOLUME`), box within 2 mm (`check::BOX`),
+  the shape surface to surface both ways (`family/compare.rs`: points spread over each shape's triangles measured to the
+  other's nearest point, so a part mirrored, upside down, moved or missing is as far off as it is), and the plan's and the
+  front and side elevations' lines point by point, each within `check::NEAR` (2 mm); a share of a drawing no bigger than
+  `check::NOISE_SHARE` up to `check::NOISE` mm off passes (a seam of facets, a rounding in the export). A door or a window
+  is checked in the wall Revit's result was made in: `to_bimcraft.wall` (mm, one or per type), else the exporter's 200 mm
+  (`TypeCheck::wall` says which). `draws_snapshot(type)` is the one rule what is drawn follows: a type whose check failed
+  and that nobody has changed since (`TypeCheck::as_revit`) draws its snapshot forms and symbols, the others their
+  parametric ones (`build`, `marks`, `shapes` and `conservative_bounds` filter by it). The check runs once, when Revit's
+  definition comes in (`revit`, a package's `definition`): after that BIMCraft's rebuild is what a changed type is. A
+  type whose values change, every type when the definition changes (forms, symbols, parameters, references, dimensions,
+  nested parts; not its types' lists, identity, catalog or source), and those `rebuild` names are `edited`: drawn from
+  their rules, never compared again; Type Properties and the Family Editor offer the rebuild for a type drawn as Revit
+  made it, saying it may differ from Revit's. A type made since, not `like` another, has no check ("Not checked");
+  `like` copies the check of the type duplicated. `editable` (`Family::summarize`) is ok when no type is drawn as Revit
+  made it, at least one matched, and the translation left nothing `untranslated`; its `reason` says why not in plain
+  words. A change of a type its dimensions can't hold (solved before, over-constrained now) is refused, as Revit's
+  "Constraints are not satisfied".
+- **Families that exist already.** Loading a package whose shared nested family the project has otherwise is Revit's
+  "Family Already Exists": `shared` (one choice, or per name) says `overwrite` (the project's values of its types kept),
+  `overwrite_values` or `existing`; unsaid, the load is refused and names them. One the same as the project's asks nothing.
+  A dry run of a file says `exists` and `shared_asks`, which Load Family asks in Revit's dialog before it loads;
+  `keep_values: false` said takes each type the file brings exactly as it brings it ("... and its parameter values").
+- **The samples.** `family_sample_tests.rs` pins asymmetric families, a door in 100, 200 and 300 mm walls and a rebuilt
+  door flipped with its nested handle. The real exported samples are Autodesk's and never kept here: run it with
+  `BIMCRAFT_FAMILY_SAMPLES=<folder of packages>` and each family's match is held to `testdata/families/sample-matches.json`.
+  Re-exported on 14 November after the add-in's last round (packages v9), **23 of Revit's 25 sample families are editable and
+  84 of their 88 types match Revit's result** (9 and 29 before the fidelity work, 21 and 73 after its first round);
+  `sample-matches.json` records each family's types, how many matched and, for one that does not, why. A form that says
+  nothing is drawn in every view at every level, as Revit's default. Revit's joined forms are compared as the one surface they
+  make, a void cuts every solid form of its family that it reaches unless the definition says its `cuts` were measured from the
+  instance (below), and a family the package says is an RPC render placeholder (`revit.rpc`, the sample tree) is checked in
+  plan only and always draws Revit's 3D. Not yet matching: `Plumbing_Fixtures_WC` (its shape drawn coarse 12 mm off Revit's
+  over 0.9 % of it) and `Windows_Arched` (3 of its 6 types match; the rest 7 mm off over under 0.1 % of their shape); each is
+  drawn exactly as Revit's, marked "As in Revit (not yet editable)" with that reason. Never change a tolerance (`NEAR`,
+  `NOISE`, `NOISE_SHARE`, `VOLUME`, `VOLUME_CURVED`, `BOX`, `REACH`) to make a family match.
+- **What the last four families needed.** Subcategory pens: a subcategory's line weight (projection and cut), colour and line
+  pattern (`-1`, Revit's none, reads as no line) draw a family's lines in plan, elevation and section (a door's Elevation Swing
+  dashed in its own weight, a cut frame in its subcategory's cut pen), a component's plan outline and symbols in theirs, and the
+  project's Object Style of the subcategory, now rows under each category in Object Styles, wins over the family's own.
+  `line_patterns` is a family's own pattern definitions (dash and space segments); one the engine cannot hold (an unknown
+  segment, more than 32 segments, a dash or space out of range, a name it may not have) is left out and said in `untranslated`,
+  the subcategories that name it draw solid, and the family still loads. `cuts_by: "instance"` says a void's `cuts` were
+  measured from the placed instance, so each void cuts only what the list names; without it (a removal, which measured
+  nothing) the list limits nothing. A masking region's edges keep the detail levels the package says it read (`levels_read`),
+  and an older package still learns them from Revit's plan. A revolve keeps its turn, a blend's sides run curve to curve
+  (a line's ends join a line's ends, an arc's an arc's) where both rings have as many curves, a masking region's edges each keep
+  their own style, and values set on a nested part, a string dimension's locked segments and a line-meets-arc corner read as
+  formulas. Curves are drawn to within half a millimetre. A screen's lines keep their weight's width as the view zooms in, as
+  Revit's (the retained path too); a sheet's and a picture's follow the paper.
+- **Format 25 is new.** A project that holds subcategory styles, line patterns, void cuts measured from the instance or a
+  subcategory's pens or pattern is written as format 25, which a build that reads up to 24 reads as newer rather than refusing
+  a field it does not know; parametric families stay 24, per-type forms 23. A project's subcategory style outlives its
+  family. A build that reads only up to 24 says the file is from a newer version; it does not open it.
+- **The translator.** B (a bound number) becomes an `Expr`: a number, `ref(Name) + offset` (the offset itself bound where
+  it follows parameters), `scale * Param + offset`, or `(formula)`; then taken into the family's axes: `x + x_offset`,
+  `y_sign × y + y_offset` (and `x_sign × x + x_offset`), `z - z_minus`, where `z_minus` that names a plane (a window's sill) becomes the parameter
+  that puts it there in every type, and that plane is the family's z = 0. A plane's `at` and an extrusion's start and end
+  are coordinates along the positive axis of their normal. An extrusion's loops: the outer ones forms, those inside them
+  holes. A revolve's plane is the axis all its corners share. Symbolic lines in plan, front and side become symbols (an arc a
+  true arc, its turn read from the first type); model lines are left out. What can't be translated (a blend on a sloped
+  plane, a sweep with no profile; round 3 below for what came since) is left out and named in
+  `editable.untranslated`; what is made is tried in every type first (`tried`), so the family always loads.
+- **Commands and files.** `family {revit}` translates; `family {path}` takes a family file with `revit`, or a whole export
+  package (`family`, `definition`, `nested_families`, each nested one loaded first and, if it can't be what it says, as a
+  generic one; `loadable` gives a material named but not brought a grey, cuts a long text, drops a door's own
+  `Wall Thickness` and lists a nested family's subcategories), named after the file without `.arqiflow-family`, and gives
+  back its `place` (Load Family starts placing that type). The reply and the list say `editable` and `check`. A project
+  using any of it is written as format 23 (`Model::written_format`; 22 is `TYPES_FORMAT`, 21 `PDF_FORMAT`). The Family Editor's References
+  tab lists the planes (where each is in the type previewed), the dimensions, the nested families and each type's check,
+  and the window says "Editable" or "As in Revit (not yet editable)" with the reason; a blend, a sweep and Revit's result
+  are kept as they came and only their material, visibility and void are edited. `family_parametric_tests.rs` drives it
+  with original synthetic definitions.
+
+## Families from Revit that stay parametric (round 3)
+
+- **What the translator reads besides.** A model line is drawn in each of plan, front and side its Visibility Settings show
+  it in (an arc not flat in that view as its points). An extrusion on a sloped sketch plane (a chair's back) is a sweep of
+  its loops straight along its normal from its start to its end (`Reader::sloped`); a sloped reference plane stays still
+  and doesn't stop the family (a blend on one still does). A loop that is a lone line (a revolve's axis drawn in its
+  sketch) is no loop; a ring of arcs (a circle drawn as two halves) has its arcs' middles to test what is inside it, so a
+  ring inside it is its hole. A sweep's loops inside another are its `section_holes` (and a swept blend's
+  `section_end_holes`), a tube's inside swept with it, its arcs `section` arcs of `hole` k + 1; `shapes::along_holed`
+  caps its ends round them. A sweep's profile goes on the leg of its path nearest its middle among those it is square to
+  within 18° (a curved path's first chord). Nested parts are placed by `at`, the insertion point: a door-category nested
+  family (a handle) has its own axes there; `x_axis`/`y_axis`/`z_axis` are taken as given, flips in them.
+- **Planes.** A window whose sill plane moves between types and no parameter says where (a head-hung window: its
+  Default Head Height less its Height) takes its z from the chain of labelled or constant dimensions from the level to it
+  (`from_level`), and its `Sill Height`, 0 in every type as Revit has it, becomes that formula, so it is placed in its wall
+  where Revit places it. A dimension Revit doesn't lock that measures the same in every type ties its planes where they
+  move between types, or where a plane's group (planes tied by dimensions that place them) reaches nothing that stays (the
+  origin, a host's face). Planes aligned to the same edge of a form, where they stand together in every type, are
+  aligned to each other. A hosted family's `Wall Thickness` dimension is the wall's.
+- **Nested families.** A package's nested family Revit shares comes into the project; one it doesn't is made beside the
+  project and held by the family it is in (`Family::embedded`, by name, each holding its own; `Family::nested_family` looks
+  there first, then in the project's), so the project's list shows only what is placed in it. Embedded families are
+  checked as the project's are (`check_embedded`: at most `MAX_NESTED`, `MAX_NESTING` deep) and their materials are the
+  project's. A nested part's plan symbols are drawn with its parent's (`Family::marks_with`, `nested_marks`, upright parts
+  only, at most `MAX_NESTED` in all) in plans and in the check. The Family Editor's preview carries the project families
+  its nested parts are of, to any depth, and is drawn again when one of them changes.
+- **The check.** A door's or a window's plan is checked as Revit's floor plan draws it, cutting 1200 mm over its level
+  (`check::PLAN_CUT`) with the opening at its sill: a form the plane cuts as its Plan/RCP says, a form wholly below it (or
+  standing on it: `CUT_EPS`) seen whatever that says (a window board); plans draw them the same way. A family with curves
+  (revolves, arcs) may hold up to 3 % more than Revit's result (`VOLUME_CURVED`): Revit's is its curves in a few facets.
+  Why a family isn't editable is said in an architect's words: its part by its subcategory or material, "placed by a rule
+  BIMCraft can't follow yet", how much more or less it holds than Revit's, its width, depth or height off.
+- **Later in the round.** A form's `show` also carries Revit's Top/Bottom (`plan_top`) and Plan/RCP when cut (`plan_cut`):
+  `Piece::in_plan_cut` is the floor plan's rule for every family (cut: Plan/RCP and when cut; below: Top/Bottom, and for a
+  family other than a door's or a window's its Plan/RCP too; above: such a family's Plan/RCP), and a nested part is drawn
+  where both its own settings and its form's say (`Show::and`). A reference plane that `follows` a host's face (the
+  exporter thickened the host) keeps its offset from it where nothing else ties it to what stays (`free`). A line entry
+  that is `invisible` draws nothing; a `masking` region's edges, which have no Visibility Settings, are
+  drawn at the detail levels where Revit's own plan of the first type has them (`masked_as_revit`: a door's not at Coarse). An arc's `mid` (a bound point on it) makes its centre the one through
+  its corners and that point, per type (`Bend::through`, `circumcentre`): an arched window's head, whose radius follows
+  its width as no sum of parameters does.
+- **Loading.** Load Family is in the Mode panel of Modify | Place Component, Place Door and Place Window and on Insert ›
+  Load from Library, as in Revit (`BimApp::load_family`); the family loaded is placed with its category's tool on the type
+  its package says (`place`), else its first (`place_loaded`): a door's with Door, a window's with Window, any other's with
+  Component. A nested family Revit doesn't share is only ever in its parent's `embedded`, so no Type Selector, the
+  Project Browser's Families nor the Component tool lists it (a project that loaded a door before round 3 still holds its
+  handle as a family of its own, loaded then).
+- **Reload.** `family {path, keep_values: true}` is Revit's Reload with "Overwrite the existing version" in one undo step:
+  the types the file brings are taken as it brings them (not merged over the project's), translated and checked as Revit
+  made them, then each type the project had gets the project's values back (its own, else its parameter's; formulas and
+  instance parameters aside), and a type they change is `flexed`, so it regenerates at them; the reply's `kept` lists them.
+- **Format.** `embedded`, `section_holes`, `section_end_holes`, `plan_top`, `plan_cut` and an arc's `through` are format
+  22's (unreleased when they came: no step).
 
 ## Symbol sets
 

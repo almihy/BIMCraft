@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use bimcraft_core::engine::Session;
 use bimcraft_core::family::{
-    Align as LabelAlign, Category, Circle, Connector, Curve, Expr, Family, Form, IfcClass, Kind as Holds, Label, Levels, Parameter, Plane,
-    Show, Symbol,
+    Align as LabelAlign, Category, Circle, Connector, Curve, Cut, Expr, Family, Flips, Form, Host, IfcClass, Kind as Holds, Label, Levels,
+    Parameter, Plane, Show, Source, Subcategory, Symbol, SymbolView,
 };
 use bimcraft_core::model::{Model, Operation};
 use bimcraft_core::view3d::{AZIMUTH, ELEVATION, Scene};
@@ -143,14 +143,21 @@ impl FormText {
         FormText { profile, to: "1000".into(), axis: ["0".into(), "0".into(), "0".into(), "1".into()], ..FormText::of(&Form::default()) }
     }
 
-    /// Whether the triangles of a file are what it's made of.
+    /// Whether what it's made of is kept as it came (a file's triangles, a blend's two profiles, a sweep's path): the editor
+    /// edits only its material, visibility and void.
     fn mesh(&self) -> bool {
-        !self.original.mesh.is_empty()
+        let f = &self.original;
+        !f.mesh.is_empty() || !f.path.is_empty() || !f.top.is_empty()
     }
 
     /// What it says it is, for its heading.
     fn describe(&self) -> String {
+        let f = &self.original;
         let what = match (self.mesh(), self.shape, self.revolve) {
+            _ if !f.path.is_empty() && !f.section_end.is_empty() => t("Swept Blend"),
+            _ if !f.path.is_empty() => t("Sweep"),
+            _ if !f.top.is_empty() => t("Blend"),
+            (true, _, _) if f.snapshot => t("As in Revit"),
             (true, _, _) => t("Mesh"),
             (_, Shape::Circle, true) => t("Revolved Circle"),
             (_, Shape::Circle, false) => t("Cylinder"),
@@ -192,6 +199,9 @@ struct ParamText {
     instance: bool,
     value: String,
     formula: String,
+    /// Its display unit and its group, as the family has them: kept as they are.
+    unit: Option<String>,
+    group: Option<String>,
 }
 
 /// The name a parameter's kind goes by.
@@ -202,6 +212,7 @@ fn kind_name(k: Holds) -> &'static str {
         Holds::Angle => "Angle",
         Holds::YesNo => msg!("Yes/No"),
         Holds::Material => "Material",
+        Holds::Text => "Text",
     }
 }
 
@@ -222,7 +233,7 @@ fn text_value(kind: Holds, s: &str, who: &str) -> Result<Option<Value>, String> 
         return Ok(None);
     }
     Ok(Some(match kind {
-        Holds::Material => json!(s),
+        Holds::Material | Holds::Text => json!(s),
         Holds::YesNo => json!(matches!(s, "1" | "true" | "yes" | "Yes")),
         Holds::Length | Holds::Number | Holds::Angle => {
             json!(s.parse::<f64>().ok().filter(|x| x.is_finite()).ok_or_else(|| tf("{}: `{}` isn't a number", &[who, s]))?)
@@ -238,17 +249,29 @@ impl ParamText {
             instance: p.instance,
             value: value_text(p.kind, &p.value),
             formula: p.formula.clone().unwrap_or_default(),
+            unit: p.unit.clone(),
+            group: p.group.clone(),
         }
     }
 
     fn parameter(&self) -> Result<Parameter, String> {
+        let formula = Some(self.formula.trim().to_string()).filter(|f| !f.is_empty());
+        // A formula's parameter with nothing typed holds none of its own, as a family file may give it.
         let value = text_value(self.kind, &self.value, &self.name)?.unwrap_or(match self.kind {
-            Holds::Material => json!(""),
+            _ if formula.is_some() => Value::Null,
+            Holds::Material | Holds::Text => json!(""),
             Holds::YesNo => json!(false),
             _ => json!(0.0),
         });
-        let formula = Some(self.formula.trim().to_string()).filter(|f| !f.is_empty());
-        Ok(Parameter { name: self.name.trim().to_string(), kind: self.kind, instance: self.instance, value, formula })
+        Ok(Parameter {
+            name: self.name.trim().to_string(),
+            kind: self.kind,
+            instance: self.instance,
+            value,
+            formula,
+            unit: self.unit.clone(),
+            group: self.group.clone(),
+        })
     }
 }
 
@@ -267,12 +290,20 @@ enum Part {
 struct SymbolText {
     /// Its id and GUID, which it keeps wherever it's moved to in the list.
     ident: (bimcraft_core::model::Id, bimcraft_core::model::Guid),
+    /// The view it is drawn in, its types and its subcategory: kept as they are.
+    view: SymbolView,
+    types: Vec<String>,
+    subcategory: Option<String>,
     part: Part,
     line: String,
     centre: [String; 2],
     radius: String,
     from: String,
     to: String,
+    /// An arc's ends where it follows them (Revit's arc is its centre and two ends), as typed; the dialog carries them as they
+    /// are, so editing an arc never drops them.
+    start: Option<[String; 2]>,
+    end: Option<[String; 2]>,
     value: String,
     align: LabelAlign,
     visible: String,
@@ -285,12 +316,17 @@ impl SymbolText {
         let s = |x: &str| x.to_string();
         let base = SymbolText {
             ident: Default::default(),
+            view: SymbolView::Plan,
+            types: Vec::new(),
+            subcategory: None,
             part,
             line: String::new(),
             centre: Default::default(),
             radius: String::new(),
             from: String::new(),
             to: String::new(),
+            start: None,
+            end: None,
             value: String::new(),
             align: LabelAlign::Left,
             visible: String::new(),
@@ -308,12 +344,14 @@ impl SymbolText {
         let ex = |e: &Expr| expr_text(e);
         let mut t = SymbolText::blank(Part::Line);
         t.ident = (y.id, y.guid);
+        (t.view, t.show, t.types, t.subcategory) = (y.view, y.show, y.types.clone(), y.subcategory.clone());
         t.line = profile_text(&y.line);
         t.visible = y.visible.as_ref().map(expr_text).unwrap_or_default();
-        t.show = y.show;
         if let Some(c) = &y.arc {
             (t.part, t.centre, t.radius, t.from, t.to) =
                 (Part::Arc, [ex(&c.centre[0]), ex(&c.centre[1])], ex(&c.radius), ex(&c.from), ex(&c.to));
+            let point = |p: &[Expr; 2]| [ex(&p[0]), ex(&p[1])];
+            (t.start, t.end) = (c.start.as_ref().map(point), c.end.as_ref().map(point));
         } else if let Some(l) = &y.text {
             (t.part, t.centre, t.radius, t.value, t.align) =
                 (Part::Text, [ex(&l.at[0]), ex(&l.at[1])], ex(&l.height), l.value.clone(), l.align);
@@ -327,10 +365,26 @@ impl SymbolText {
         let visible = (!self.visible.trim().is_empty()).then(|| text_expr(&self.visible));
         let (id, guid) = self.ident;
         let centre = [text_expr(&self.centre[0]), text_expr(&self.centre[1])];
-        let base = Symbol { visible, id, guid, show: self.show, ..Symbol::default() };
+        let base = Symbol {
+            visible,
+            id,
+            guid,
+            view: self.view,
+            show: self.show,
+            types: self.types.clone(),
+            subcategory: self.subcategory.clone(),
+            ..Symbol::default()
+        };
         Ok(match self.part {
             Part::Arc => Symbol {
-                arc: Some(Curve { centre, radius: text_expr(&self.radius), from: text_expr(&self.from), to: text_expr(&self.to) }),
+                arc: Some(Curve {
+                    centre,
+                    radius: text_expr(&self.radius),
+                    from: text_expr(&self.from),
+                    to: text_expr(&self.to),
+                    start: self.start.as_ref().map(|p| [text_expr(&p[0]), text_expr(&p[1])]),
+                    end: self.end.as_ref().map(|p| [text_expr(&p[0]), text_expr(&p[1])]),
+                }),
                 ..base
             },
             Part::Text => Symbol {
@@ -364,6 +418,16 @@ pub(crate) struct FamilyEditor {
     operation: Option<Operation>,
     /// Each type's identity data (Type Mark…), as the family has it: Type Properties sets it, and the editor keeps it as it is.
     identity: BTreeMap<String, bimcraft_core::type_data::TypeIdentity>,
+    /// Where it came from (shown, never edited), what hosts it, its subcategories, its opening and its flip controls: kept as
+    /// the family has them.
+    source: Option<Source>,
+    host: Host,
+    subcategories: Vec<Subcategory>,
+    cut: Option<Cut>,
+    flips: Flips,
+    /// What keeps a family from Revit parametric (its references, dimensions, nested parts, type catalog and check), as the
+    /// family has it: the References tab shows it, and the editor keeps it.
+    kept: Family,
     tab: Tab,
     /// The type shown in Types and on the preview.
     picked: usize,
@@ -397,7 +461,7 @@ struct Settings {
 impl Settings {
     fn of(ed: &FamilyEditor, of: Which) -> Option<Settings> {
         let show = match of {
-            Which::Form(i) => Show::of(ed.forms.get(i)?.show),
+            Which::Form(i) => Show::in_view(ed.forms.get(i)?.show),
             Which::Symbol(i) => {
                 let l = Levels::of(ed.symbols.get(i)?.show);
                 Show { coarse: l.coarse, medium: l.medium, fine: l.fine, ..Show::default() }
@@ -434,6 +498,7 @@ enum Tab {
     Forms,
     Symbols,
     Connectors,
+    References,
 }
 
 impl FamilyEditor {
@@ -458,6 +523,24 @@ impl FamilyEditor {
             ifc: f.ifc.clone(),
             operation: f.operation,
             identity: f.identity.clone(),
+            source: f.source.clone(),
+            host: f.host,
+            subcategories: f.subcategories.clone(),
+            cut: f.cut.clone(),
+            flips: f.flips,
+            kept: Family {
+                references: f.references.clone(),
+                dimensions: f.dimensions.clone(),
+                nested: f.nested.clone(),
+                embedded: f.embedded.clone(),
+                catalog: f.catalog.clone(),
+                check: f.check.clone(),
+                editable: f.editable.clone(),
+                rpc: f.rpc,
+                cuts_measured: f.cuts_measured,
+                line_patterns: f.line_patterns.clone(),
+                ..Family::default()
+            },
             tab: Tab::Parameters,
             picked: 0,
             look: (AZIMUTH, ELEVATION),
@@ -513,6 +596,7 @@ impl FamilyEditor {
         let operation = self.operation.filter(|_| self.category.hosted());
         // Each type's identity data stays with the type, and goes with it.
         let identity = self.identity.iter().filter(|(t, _)| types.contains_key(*t)).map(|(t, i)| (t.clone(), i.clone())).collect();
+        let check = self.kept.check.iter().filter(|(t, _)| types.contains_key(*t)).map(|(t, c)| (t.clone(), c.clone())).collect();
         Ok(Family {
             category: self.category,
             // A kind the category it now is has no row for goes with the change of category.
@@ -525,7 +609,51 @@ impl FamilyEditor {
             symbols,
             operation,
             connectors: self.connectors.clone(),
+            source: self.source.clone(),
+            host: self.host,
+            subcategories: self.subcategories.clone(),
+            cut: self.cut.clone(),
+            flips: self.flips,
+            references: self.kept.references.clone(),
+            dimensions: self.kept.dimensions.clone(),
+            nested: self.kept.nested.clone(),
+            embedded: self.kept.embedded.clone(),
+            catalog: self.kept.catalog.clone(),
+            check,
+            editable: self.kept.editable.clone(),
+            rpc: self.kept.rpc,
+            cuts_measured: self.kept.cuts_measured,
+            line_patterns: self.kept.line_patterns.clone(),
         })
+    }
+
+    /// The lists of types its forms and symbols are of.
+    fn type_lists(&mut self) -> impl Iterator<Item = &mut Vec<String>> {
+        self.forms.iter_mut().map(|f| &mut f.original.types).chain(self.symbols.iter_mut().map(|y| &mut y.types))
+    }
+
+    /// Type `new` made like `old`: of each form and symbol `old` is of, as Duplicate makes it.
+    fn type_like(&mut self, new: &str, old: &str) {
+        for l in self.type_lists().filter(|l| l.iter().any(|t| t == old)) {
+            l.push(new.to_string());
+        }
+        // Its check, the nested parts it is of and the types they choose for it, as the project's family keeps them.
+        self.kept.type_like(new, old);
+    }
+
+    /// Type `old` renamed `new` in its forms' and symbols' lists of types.
+    fn type_renamed(&mut self, old: &str, new: &str) {
+        self.type_lists().flat_map(|l| l.iter_mut()).filter(|t| *t == old).for_each(|t| *t = new.to_string());
+        self.kept.rename_type(old, new);
+    }
+
+    /// Type `gone` taken away: out of the lists, and what was of it alone with it.
+    fn type_gone(&mut self, gone: &str) {
+        let alone = |l: &Vec<String>| !l.is_empty() && l.iter().all(|t| t == gone);
+        self.forms.retain(|f| !alone(&f.original.types));
+        self.symbols.retain(|y| !alone(&y.types));
+        self.type_lists().for_each(|l| l.retain(|t| t != gone));
+        self.kept.forget_type(gone);
     }
 
     /// The `family` command's parameters making the project's family what's typed: its name, its own and the type it drops.
@@ -562,6 +690,10 @@ impl FamilyEditor {
             let m = s.model_mut();
             m.materials = base.materials.clone();
             m.images = base.images.clone();
+            // The families its nested parts are of, and theirs.
+            for (n, other) in nested_of(base, family) {
+                m.families.insert(n.to_string(), other.clone());
+            }
             m.families.insert(name.to_string(), family.clone());
         }
         let place = |s: &mut Session, id: &str, p: Value| s.execute(id, &p).map(|_| ());
@@ -589,6 +721,10 @@ impl FamilyEditor {
                 )
                     .hash(&mut h);
                 (base.materials.len(), base.images.len()).hash(&mut h);
+                // A project family its nested parts are of, changed, draws it again.
+                for (n, other) in nested_of(base, &f) {
+                    (n, serde_json::to_string(other).unwrap_or_default()).hash(&mut h);
+                }
                 h.finish()
             };
             if self.preview.as_ref().is_some_and(|(k, _)| *k == key) {
@@ -616,6 +752,23 @@ impl FamilyEditor {
             Err(e) => self.problem = Some(e),
         }
     }
+}
+
+/// The project's families `family`'s nested parts are of, and those theirs are of, each once: what its preview needs and
+/// what it is drawn again for when one changes. Those it holds itself it carries.
+fn nested_of<'m>(base: &'m Model, family: &Family) -> Vec<(&'m str, &'m Family)> {
+    let mut out: Vec<(&str, &Family)> = Vec::new();
+    let mut want: Vec<String> = family.nested.iter().map(|n| n.family.clone()).collect();
+    while let Some(n) = want.pop() {
+        if out.iter().any(|(m, _)| *m == n) || family.embedded.contains_key(&n) {
+            continue;
+        }
+        if let Some((name, other)) = base.families.get_key_value(&n) {
+            out.push((name.as_str(), other));
+            want.extend(other.nested.iter().map(|x| x.family.clone()));
+        }
+    }
+    out
 }
 
 /// The categories a family may be of, in the order they're offered.
@@ -691,6 +844,16 @@ fn pick(ui: &mut Ui, label: String, current: &str, options: &[String]) -> Option
 }
 
 fn parameters_tab(ed: &mut FamilyEditor, ui: &mut Ui, materials: &[String]) {
+    // Where it came from, read only: the library entry and its version, the application, its own category, the file.
+    if let Some(src) = &ed.source {
+        let version = src.version.map(|v| format!("v{v}"));
+        let said: Vec<&str> =
+            [src.app.as_deref(), src.category.as_deref(), src.file.as_deref(), src.library.as_deref(), version.as_deref()]
+                .into_iter()
+                .flatten()
+                .collect();
+        ui.label(RichText::new(format!("{}: {}", t("Source"), said.join(" · "))).color(pal().muted));
+    }
     if ed.category.hosted() {
         let note = t("A door or a window needs lengths named Width and Height; its formulas can read Wall Thickness, the wall's.");
         ui.label(RichText::new(note).color(pal().muted));
@@ -704,7 +867,7 @@ fn parameters_tab(ed: &mut FamilyEditor, ui: &mut Ui, materials: &[String]) {
         for (i, p) in ed.params.iter_mut().enumerate() {
             let n = i + 1;
             field(ui, format!("{} {n}", t("Parameter Name")), &mut p.name, 130.0);
-            let kinds = [Holds::Length, Holds::Number, Holds::Angle, Holds::YesNo, Holds::Material];
+            let kinds = [Holds::Length, Holds::Number, Holds::Angle, Holds::YesNo, Holds::Material, Holds::Text];
             crate::icons::combo(("fe-param-kind", i)).selected_text(t(kind_name(p.kind))).width(84.0).show_ui(ui, |ui| {
                 for k in kinds {
                     ui.selectable_value(&mut p.kind, k, t(kind_name(k)));
@@ -740,7 +903,15 @@ fn parameters_tab(ed: &mut FamilyEditor, ui: &mut Ui, materials: &[String]) {
     }
     if ui.button(t("Add Parameter")).clicked() {
         let name = (1..).map(|k| format!("{} {k}", t("Parameter"))).find(|n| !ed.params.iter().any(|p| p.name == *n)).unwrap_or_default();
-        ed.params.push(ParamText { name, kind: Holds::Length, instance: false, value: "0".into(), formula: String::new() });
+        ed.params.push(ParamText {
+            name,
+            kind: Holds::Length,
+            instance: false,
+            value: "0".into(),
+            formula: String::new(),
+            unit: None,
+            group: None,
+        });
     }
 }
 
@@ -763,20 +934,28 @@ fn types_tab(ed: &mut FamilyEditor, ui: &mut Ui, materials: &[String]) {
             && let Some((n, set)) = ed.types.get(ed.picked).cloned()
         {
             let name = (2..).map(|k| format!("{n} {k}")).find(|x| !names.contains(x)).unwrap_or_default();
+            // The copy has the forms and symbols of the type it was made from.
+            ed.type_like(&name, &n);
             ed.types.push((name, set));
             ed.picked = ed.types.len() - 1;
         }
         if ui.add_enabled(ed.types.len() > 1, egui::Button::new(t("Delete Type"))).clicked() {
-            ed.types.remove(ed.picked);
+            let (gone, _) = ed.types.remove(ed.picked);
+            ed.type_gone(&gone);
         }
     });
     let own: Vec<(String, Holds)> =
         ed.params.iter().filter(|p| !p.instance && p.formula.trim().is_empty()).map(|p| (p.name.clone(), p.kind)).collect();
+    let was = ed.types.get(ed.picked).map(|(n, _)| n.clone()).unwrap_or_default();
+    let mut renamed = None;
     let Some((name, set)) = ed.types.get_mut(ed.picked) else { return };
     ui.add_space(4.0);
     Grid::new("fe-type").num_columns(2).spacing(vec2(12.0, 5.0)).show(ui, |ui| {
         ui.label(t("Type Name"));
         field(ui, t("Type Name").to_string(), name, 200.0);
+        if *name != was {
+            renamed = Some(name.clone());
+        }
         ui.end_row();
         for (param, kind) in &own {
             ui.label(param);
@@ -805,6 +984,10 @@ fn types_tab(ed: &mut FamilyEditor, ui: &mut Ui, materials: &[String]) {
         }
     });
     ui.label(RichText::new(t("A blank value is the family's own, as the Parameters tab has it.")).color(pal().muted));
+    // Its forms and symbols follow it as its name is typed.
+    if let Some(now) = renamed {
+        ed.type_renamed(&was, &now);
+    }
 }
 
 /// A row of a form's or a symbol's fields, as Revit's Properties have it for a family's element: Visibility/Graphics
@@ -894,6 +1077,15 @@ fn form_fields(ui: &mut Ui, f: &mut FormText, i: usize, options: &[String]) -> b
             ui.label(t("Visible when"));
             field(ui, format!("{} {n}", t("Form Visible")), &mut f.visible, 200.0);
             ui.end_row();
+            if !f.original.types.is_empty() || f.original.subcategory.is_some() {
+                ui.label(t("Types"));
+                let mut said = f.original.types.join(", ");
+                if let Some(sub) = &f.original.subcategory {
+                    said = if said.is_empty() { sub.clone() } else { format!("{said} · {sub}") };
+                }
+                ui.label(RichText::new(said).color(pal().muted));
+                ui.end_row();
+            }
             ui.label(t("Void"));
             let r = ui.checkbox(&mut f.void, t("cuts the forms listed above it"));
             r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, f.void, format!("{} {n}", t("Form Void"))));
@@ -1002,6 +1194,122 @@ fn connectors_tab(ed: &FamilyEditor, ui: &mut Ui) {
     }
 }
 
+/// Its reference planes (where each is in the type previewed), the dimensions placing them, its nested parts and, for a
+/// family from Revit, each type's check.
+fn references_tab(ed: &FamilyEditor, ui: &mut Ui) {
+    let k = &ed.kept;
+    if k.references.is_empty() && k.nested.is_empty() && k.check.is_empty() {
+        ui.label(t("This family has no reference planes."));
+        return;
+    }
+    let picked = ed.types.get(ed.picked).map(|(n, _)| n.clone()).unwrap_or_default();
+    let values = ed.family().ok().and_then(|f| f.values(&picked, &BTreeMap::new()).ok()).unwrap_or_default();
+    let axis = |a: bimcraft_core::family::Axis| match a {
+        bimcraft_core::family::Axis::X => "x",
+        bimcraft_core::family::Axis::Y => "y",
+        bimcraft_core::family::Axis::Z => "z",
+    };
+    if !k.references.is_empty() {
+        ui.label(RichText::new(t("Reference Planes")).strong());
+        Grid::new("fe-refs").num_columns(4).striped(true).spacing(vec2(12.0, 4.0)).show(ui, |ui| {
+            for h in [msg!("Name"), msg!("Axis"), msg!("Position"), msg!("Is Reference")] {
+                ui.label(RichText::new(t(h)).color(pal().muted));
+            }
+            ui.end_row();
+            for r in &k.references {
+                ui.label(&r.name);
+                ui.label(axis(r.axis));
+                let at = match values.get(&bimcraft_core::family::ref_key(&r.name)) {
+                    Some(bimcraft_core::family::Val::Number(x)) => number_text(*x),
+                    _ => expr_text(&r.at),
+                };
+                ui.label(if r.origin { format!("{at} ({})", t("origin")) } else { at });
+                ui.label(r.is_reference.clone().unwrap_or_default());
+                ui.end_row();
+            }
+        });
+    }
+    if !k.dimensions.is_empty() {
+        ui.add_space(6.0);
+        ui.label(RichText::new(t("Dimensions")).strong());
+        Grid::new("fe-dims").num_columns(3).striped(true).spacing(vec2(12.0, 4.0)).show(ui, |ui| {
+            for h in [msg!("Between"), msg!("Label"), msg!("Constraint")] {
+                ui.label(RichText::new(t(h)).color(pal().muted));
+            }
+            ui.end_row();
+            for d in &k.dimensions {
+                ui.label(d.refs.join(" – "));
+                ui.label(d.label.clone().unwrap_or_default());
+                let mut how = Vec::new();
+                if d.eq {
+                    how.push(t("EQ").to_string());
+                }
+                if d.locked {
+                    how.push(format!("{} {}", t("Locked"), d.value.map(number_text).unwrap_or_default()));
+                }
+                ui.label(how.join(", "));
+                ui.end_row();
+            }
+        });
+    }
+    if !k.nested.is_empty() {
+        ui.add_space(6.0);
+        ui.label(RichText::new(t("Nested Families")).strong());
+        for n in &k.nested {
+            ui.label(format!("{} : {}", n.family, n.type_name));
+        }
+    }
+    if !k.check.is_empty() || k.editable.is_some() {
+        ui.add_space(6.0);
+        ui.label(RichText::new(t("Types against Revit")).strong());
+        for (ty, _) in &ed.types {
+            ui.label(format!("{ty}: {}", type_check_text(k.check.get(ty))));
+        }
+    }
+    if let Some(e) = &k.editable {
+        for u in &e.untranslated {
+            ui.label(RichText::new(u).color(pal().muted));
+        }
+    }
+}
+
+/// What a type's check against Revit says, in a few words: matched; drawn as Revit made it, and why; changed since it came
+/// in, so drawn from its rules; or never checked (made since).
+pub(crate) fn type_check_text(c: Option<&bimcraft_core::family::TypeCheck>) -> String {
+    let wall = |c: &bimcraft_core::family::TypeCheck| {
+        c.wall.map(|w| tf(" (in a {} mm wall)", &[&format!("{}", (w * 10.0).round() / 10.0)])).unwrap_or_default()
+    };
+    match c {
+        None => t("Not checked").to_string(),
+        Some(c) if c.edited => t("Changed here: drawn from its rules").to_string(),
+        Some(c) if c.matched => format!("{}{}", t("Matches Revit"), wall(c)),
+        Some(c) => tf("Drawn as Revit made it: {}", &[&c.reason.clone().unwrap_or_default().replace('`', "")]),
+    }
+}
+
+/// The Family Editor's offer for a family some of whose types are drawn as Revit made it: BIMCraft's rebuild of them all, which
+/// may differ from Revit's. Whether it was pressed.
+fn as_revit_offer_all(ui: &mut Ui) -> bool {
+    let mut pressed = false;
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new(t("BIMCraft's rebuild may differ from Revit's.")).color(pal().muted));
+        pressed = ui.button(t("Use BIMCraft's Rebuild")).clicked();
+    });
+    pressed
+}
+
+/// The offer for what's drawn as Revit made it (a type whose check against Revit failed): why, and a button that draws it
+/// from BIMCraft's rebuild instead, which may differ from Revit's. Whether it was pressed.
+pub(crate) fn as_revit_offer(ui: &mut Ui, why: &str) -> bool {
+    let mut pressed = false;
+    ui.label(RichText::new(tf("Drawn as Revit made it: {}", &[why])).color(pal().muted));
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new(t("BIMCraft's rebuild may differ from Revit's.")).color(pal().muted));
+        pressed = ui.button(t("Use BIMCraft's Rebuild")).clicked();
+    });
+    pressed
+}
+
 fn symbols_tab(ed: &mut FamilyEditor, ui: &mut Ui) {
     ui.label(
         RichText::new(t("Symbols are what the plan draws of the family besides its forms: lines, arcs, labels and dots."))
@@ -1016,7 +1324,7 @@ fn symbols_tab(ed: &mut FamilyEditor, ui: &mut Ui) {
             Part::Text => t("Text"),
             Part::Dot => t("Dot"),
         };
-        let heading = format!("{n}. {kind}");
+        let heading = if y.types.is_empty() { format!("{n}. {kind}") } else { format!("{n}. {kind} ({})", y.types.join(", ")) };
         CollapsingHeader::new(heading).id_salt(("fe-symbol", i)).default_open(true).show(ui, |ui| {
             Grid::new(("fe-symbol-grid", i)).num_columns(2).spacing(vec2(12.0, 5.0)).show(ui, |ui| {
                 if y.part == Part::Line {
@@ -1065,6 +1373,12 @@ fn symbols_tab(ed: &mut FamilyEditor, ui: &mut Ui) {
                 ui.end_row();
                 if visibility_row(ui, n) {
                     settings = Some(Which::Symbol(i));
+                }
+                if y.view != SymbolView::Plan {
+                    ui.label(t("View"));
+                    let seen = if y.view == SymbolView::Front { t("Front/Back") } else { t("Left/Right") };
+                    ui.label(RichText::new(seen).color(pal().muted));
+                    ui.end_row();
                 }
             });
             if ui.button(t("Delete")).clicked() {
@@ -1209,6 +1523,31 @@ impl BimApp {
                         ui.end_row();
                     }
                 });
+                // A family from Revit: whether it can be edited here, and why not, in plain words; where a type is drawn as
+                // Revit made it, BIMCraft's rebuild offered in its place.
+                let mut rebuild = false;
+                if let Some(e) = &ed.kept.editable {
+                    let why = e.reason.clone().unwrap_or_default().replace('`', "");
+                    let as_revit = ed.kept.check.values().any(|c| c.as_revit());
+                    if e.ok {
+                        ui.label(RichText::new(t("Editable: its parameters flex it as in Revit.")).color(pal().muted));
+                    } else if as_revit {
+                        ui.label(RichText::new(tf("As in Revit (not yet editable): {}", &[&why])).color(pal().error));
+                        rebuild = as_revit_offer_all(ui);
+                    } else if ed.kept.check.is_empty() {
+                        ui.label(RichText::new(tf("Not checked against Revit: {}", &[&why])).color(pal().muted));
+                    } else {
+                        ui.label(RichText::new(tf("Drawn from its rules, which may differ from Revit's: {}", &[&why])).color(pal().muted));
+                    }
+                }
+                // Taken: each type drawn from its rules in the preview at once, and in the project with OK or Apply.
+                if rebuild {
+                    ed.kept.check.values_mut().for_each(|c| c.edited = true);
+                    if let Ok(mut f) = ed.family() {
+                        f.summarize();
+                        ed.kept.editable = f.editable;
+                    }
+                }
                 ui.add_space(6.0);
                 // What the tabs leave of the screen, to the buttons below: a small one scrolls them.
                 let room = (ctx.content_rect().height() - 330.0).clamp(160.0, 470.0);
@@ -1222,6 +1561,7 @@ impl BimApp {
                                 (Tab::Forms, msg!("Forms")),
                                 (Tab::Symbols, msg!("Symbols")),
                                 (Tab::Connectors, msg!("Connectors")),
+                                (Tab::References, msg!("References")),
                             ] {
                                 if ui.selectable_label(ed.tab == tab, t(label)).clicked() {
                                     ed.tab = tab;
@@ -1237,6 +1577,7 @@ impl BimApp {
                                 Tab::Forms => forms_tab(&mut ed, ui, &materials),
                                 Tab::Symbols => symbols_tab(&mut ed, ui),
                                 Tab::Connectors => connectors_tab(&ed, ui),
+                                Tab::References => references_tab(&ed, ui),
                             },
                         );
                     });
@@ -1305,6 +1646,11 @@ impl BimApp {
                     if self.run("family", p).is_some() {
                         ed.original = Some(ed.name.trim().to_string());
                         made = true;
+                        // Its checks as the project now has them: a type changed here is drawn from its rules from now on.
+                        if let Some(f) = self.session.model.families.get(ed.name.trim()) {
+                            ed.kept.check = f.check.clone();
+                            ed.kept.editable = f.editable.clone();
+                        }
                     } else {
                         // Said in the window; the box over the view's corner would lie on its buttons.
                         ed.problem = Some(std::mem::take(&mut self.status).text);
@@ -1397,6 +1743,10 @@ mod tests {
         panel.ifc =
             Some(IfcClass { class: "IFCPLATE".into(), predefined: Some("CURTAIN_PANEL".into()), object_type: Some("Glass".into()) });
         m.families.insert("System Panel".into(), panel);
+        // And one exported from Revit: each type's forms, Visibility Settings, elevation symbols, a cut, flips, its source.
+        let mut sample: Value = serde_json::from_str(include_str!("../../core/testdata/families/sample-two-type-flush-door.json")).unwrap();
+        sample.as_object_mut().map(|o| (o.remove("name"), o.remove("materials")));
+        m.families.insert("Sample".into(), serde_json::from_value(sample).unwrap());
         for (name, f) in &m.families {
             let back = FamilyEditor::of(name, f).family().unwrap_or_else(|e| panic!("{name}: {e}"));
             let (back, was) = (alike(serde_json::to_value(&back).unwrap()), alike(serde_json::to_value(f).unwrap()));
@@ -1459,13 +1809,17 @@ mod tests {
         let mut ed = FamilyEditor::of("Table", &m.families["Table"]);
         assert_eq!(ed.forms[0].show, None, "the table's top says nothing");
         let set = Settings::of(&ed, Which::Form(0)).unwrap();
-        assert_eq!(set.show, Show::UNSAID, "a form that says nothing is drawn at every level but Coarse");
+        assert_eq!(set.show, Show::ALL, "a form that says nothing is drawn in every view at every level, as Revit's default");
         set.apply(&mut ed);
         assert_eq!(ed.forms[0].show, None, "unchanged, it still says nothing");
         let mut set = Settings::of(&ed, Which::Form(0)).unwrap();
-        set.show.coarse = true;
+        set.show.plan = false;
         set.apply(&mut ed);
-        assert_eq!(ed.forms[0].show, Some(Show::default()));
+        assert_eq!(ed.forms[0].show, Some(Show { plan: false, ..Show::ALL }));
+        let mut set = Settings::of(&ed, Which::Form(0)).unwrap();
+        set.show.plan = true;
+        set.apply(&mut ed);
+        assert_eq!(ed.forms[0].show, Some(Show::ALL), "once changed it says so, even when it says everything");
         ed.symbols.push(SymbolText::blank(Part::Line));
         let last = ed.symbols.len() - 1;
         let mut set = Settings::of(&ed, Which::Symbol(last)).unwrap();
@@ -1477,6 +1831,33 @@ mod tests {
     }
 
     #[test]
+    fn an_arc_following_its_ends_keeps_them_through_the_dialog() {
+        let y = Symbol {
+            arc: Some(Curve {
+                centre: [Expr::Number(0.0), Expr::Number(0.0)],
+                radius: Expr::Formula("Width".into()),
+                from: Expr::Number(0.0),
+                to: Expr::Number(90.0),
+                start: Some([Expr::Formula("Width".into()), Expr::Number(0.0)]),
+                end: Some([Expr::Number(0.0), Expr::Formula("Width - 51".into())]),
+            }),
+            ..Symbol::default()
+        };
+        assert_eq!(SymbolText::of(&y).symbol().unwrap(), y, "as it came");
+        // Edited in the dialog (its radius and angles retyped), it still follows its ends; a plain arc still has none.
+        let mut edited = SymbolText::of(&y);
+        (edited.radius, edited.to) = ("Width + 10".into(), "120".into());
+        let arc = edited.symbol().unwrap().arc.unwrap();
+        assert_eq!((arc.start, arc.end), (y.arc.as_ref().unwrap().start.clone(), y.arc.as_ref().unwrap().end.clone()));
+        assert_eq!(arc.radius, Expr::Formula("Width + 10".into()));
+        let plain = SymbolText::blank(Part::Arc).symbol().unwrap().arc.unwrap();
+        assert!(plain.start.is_none() && plain.end.is_none());
+        // Through the whole editor: the family comes back with the arc's ends.
+        let f = Family { symbols: vec![y.clone()], ..Family::default() };
+        assert_eq!(FamilyEditor::of("Sample", &f).symbols[0].symbol().unwrap(), y);
+    }
+
+    #[test]
     fn symbols_and_parameters_come_back_as_typed() {
         let y = Symbol {
             arc: Some(Curve {
@@ -1484,6 +1865,7 @@ mod tests {
                 radius: Expr::Number(700.0),
                 from: Expr::Number(0.0),
                 to: Expr::Number(90.0),
+                ..Curve::default()
             }),
             ..Symbol::default()
         };
@@ -1519,7 +1901,7 @@ mod tests {
         for part in [Part::Line, Part::Arc, Part::Text, Part::Dot] {
             assert_eq!(SymbolText::of(&SymbolText::blank(part).symbol().unwrap()).part, part);
         }
-        let p = Parameter { name: "Legs".into(), kind: Holds::YesNo, instance: true, value: json!(true), formula: None };
+        let p = Parameter { name: "Legs".into(), kind: Holds::YesNo, instance: true, value: json!(true), ..Default::default() };
         assert_eq!(ParamText::of(&p).parameter().unwrap(), p);
         let area = Parameter {
             name: "Area".into(),
@@ -1527,9 +1909,50 @@ mod tests {
             instance: false,
             value: json!(0.0),
             formula: Some("Width * Depth".into()),
+            unit: Some("m²".into()),
+            group: Some("Dimensions".into()),
         };
         assert_eq!(ParamText::of(&area).parameter().unwrap(), area);
         assert_eq!(kind_name(Holds::YesNo), "Yes/No");
+        // A type duplicated, renamed and taken away in the editor: its forms and symbols follow.
+        let mut sample: Value = serde_json::from_str(include_str!("../../core/testdata/families/sample-two-type-flush-door.json")).unwrap();
+        sample.as_object_mut().map(|o| (o.remove("name"), o.remove("materials")));
+        let f: Family = serde_json::from_value(sample).unwrap();
+        let mut ed = FamilyEditor::of("Sample", &f);
+        let lists = |ed: &FamilyEditor| -> Vec<Vec<String>> {
+            ed.forms.iter().map(|f| f.original.types.clone()).filter(|l| !l.is_empty()).collect()
+        };
+        ed.type_like("900 Copy", "900 x 2100");
+        assert_eq!(lists(&ed), [vec!["900 x 2100".to_string(), "900 Copy".into()], vec!["1000 x 2100".into()]]);
+        ed.type_renamed("900 Copy", "Narrow");
+        assert_eq!(lists(&ed)[0], ["900 x 2100", "Narrow"]);
+        ed.type_gone("1000 x 2100");
+        assert_eq!(lists(&ed), [vec!["900 x 2100".to_string(), "Narrow".into()]]);
+        assert_eq!(ed.forms.len(), f.forms.len() - 1, "the form of that type alone went with it");
+        // A type renamed, duplicated or taken away takes its check and its nested types with it.
+        let check = bimcraft_core::family::TypeCheck { matched: false, reason: Some("it differs".into()), ..Default::default() };
+        ed.kept.check.insert("Narrow".into(), check.clone());
+        ed.kept.nested.push(bimcraft_core::family::Nested {
+            family: "Handle".into(),
+            type_name: "Standard".into(),
+            type_in: [("Narrow".to_string(), "Other".to_string())].into(),
+            ..Default::default()
+        });
+        ed.type_renamed("Narrow", "Slim");
+        assert_eq!(ed.kept.check.get("Slim"), Some(&check));
+        assert!(!ed.kept.check.contains_key("Narrow"));
+        assert_eq!(ed.kept.nested[0].type_in.get("Slim").map(String::as_str), Some("Other"));
+        ed.type_like("Slim Copy", "Slim");
+        assert_eq!(ed.kept.check.get("Slim Copy"), Some(&check));
+        assert_eq!(ed.kept.nested[0].type_in.get("Slim Copy").map(String::as_str), Some("Other"));
+        ed.type_gone("Slim Copy");
+        assert!(!ed.kept.check.contains_key("Slim Copy") && !ed.kept.nested[0].type_in.contains_key("Slim Copy"));
+        ed.type_gone("Slim");
+        assert!(ed.kept.nested[0].type_in.is_empty());
+        // A symbol keeps the view it is drawn in and its detail levels.
+        let back = ed.family().unwrap();
+        assert_eq!(back.symbols.iter().filter(|y| y.view == SymbolView::Front).count(), 1);
+        assert!(back.symbols.iter().filter(|y| y.view == SymbolView::Plan).all(|y| y.show.is_some()));
         // The rest of an editor's tabs list: all of them there.
         let tabs: BTreeSet<&str> = ["Parameters", "Types", "Forms", "Symbols"].into_iter().collect();
         assert_eq!(tabs.len(), 4);

@@ -237,8 +237,10 @@ impl Look {
         self.origin == o.origin && self.clip == o.clip
     }
 
-    fn place(&self) -> Place {
-        Place { hide: self.hide, ..Place::at(self.origin) }
+    /// Where triangles of `d` are made: at the drawing's own pixels, its lines as wide as `canvas::paint` makes them at the view's scale
+    /// (no wider as the view zooms in, [`Drawing::pen_zoom`]).
+    fn place(&self, d: &Drawing) -> Place {
+        Place { hide: self.hide, zoom: d.pen_zoom(), ..Place::at(self.origin) }
     }
 
     /// How far round the canvas triangles are made: half of it again each way, so a pan shows what is there before the exact drawing
@@ -356,6 +358,7 @@ impl Retained {
                 let out = &mut |s| {
                     p.add(s);
                 };
+                let at = Place { zoom: d.pen_zoom(), ..at };
                 canvas::paint_prim(out, p.clip_rect(), at, (prim, *owner, *part, d.half(i)), &set, hovered, thin, &mut textures);
             }
         };
@@ -441,7 +444,7 @@ type Part = (epaint::Mesh, Vec<(Id, Piece)>, Vec<(u32, u32)>);
 fn build(pipeline: &Pipeline, key: &Key, selected: &[Id], hovered: Option<Id>, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Kept> {
     use rayon::prelude::*;
     let d = &key.drawing;
-    let (at, reach, look) = (key.look.place(), key.look.reach(), &key.look);
+    let (at, reach, look) = (key.look.place(&key.drawing), key.look.reach(), &key.look);
     let set: HashSet<Id> = selected.iter().copied().collect();
     let prims: Vec<usize> = (0..d.prims.len()).collect();
     // A part of the drawing's primitives at a time, each thread's triangles in their place in the order, so the whole is what one
@@ -550,7 +553,7 @@ fn retint(pipeline: &Pipeline, key: &Key, mesh: &Mesh, tinted: &mut Tinted, sele
     if pieces > d.prims.len() / 4 + 16 {
         return false;
     }
-    let (at, reach, look) = (key.look.place(), key.look.reach(), &key.look);
+    let (at, reach, look) = (key.look.place(&key.drawing), key.look.reach(), &key.look);
     let mut tessellator = Tessellator::new(look.pixels_per_point, look.options, [1, 1], Vec::new());
     tessellator.set_clip_rect(reach);
     // All first: a piece that doesn't come out the same leaves what is kept as it was.
@@ -861,6 +864,59 @@ mod tests {
             assert!(!looks.contains(&kept), "{name} looks like a look before it");
             looks.push(kept);
         }
+    }
+
+    /// A wall's cut line, counted in pixels down a column through it, drawn from the kept triangles: as wide at four times the
+    /// zoom as at the first, as Revit draws it (a line's width is its weight at the view's scale, never wider as the view zooms in).
+    #[test]
+    fn a_line_kept_on_the_card_is_no_wider_as_the_view_zooms_in() {
+        let Some(card) = card() else {
+            eprintln!("no card: the widths need one");
+            return;
+        };
+        let mut s = Session::new();
+        s.script(
+            "new {\"name\": \"Wall\"}
+wall {\"points\": [[0, 0], [8000, 0]]}",
+        )
+        .unwrap();
+        let m = Arc::clone(&s.model);
+        let level = m.levels()[0].0;
+        let clip = Rect::from_min_size(Pos2::ZERO, vec2(SIDE[0] as f32, SIDE[1] as f32));
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let pipeline = Arc::new(Pipeline::new(&card.0, &card.1, format));
+        crate::style::set_canvas(false, None);
+        // The widest run of dark pixels down the column through the wall's middle: its cut line, as pixels (a soft edge counts its share).
+        let widest = |scale: f64| -> (f32, f32) {
+            let view = View { scale, cx: 4000.0, cy: 0.0, width: SIDE[0], height: SIDE[1] };
+            let d = Arc::new(render::draw(&m, level, view));
+            let at = Place::at(clip.min);
+            let mut kept = Retained::default();
+            let px = frame(&card, format, 1.0, clip, |p, ctx| {
+                assert!(kept.paint(ctx, &pipeline, p, at, at.origin, &d, &[], None, false, &[]), "the card draws it");
+            });
+            assert_eq!(kept.built, 1);
+            let x = (SIDE[0] / 2) as usize;
+            let mut best = 0.0f32;
+            let mut run = 0.0f32;
+            for y in 0..SIDE[1] as usize {
+                let i = (y * SIDE[0] as usize + x) * 4;
+                // How dark: 0 for the paper, 1 for black.
+                let dark = 1.0 - f32::from(px[i]) / 255.0;
+                // The wall's fill is a grey: only its line is dark.
+                if dark > 0.5 {
+                    run += dark;
+                    best = best.max(run);
+                } else {
+                    run = 0.0;
+                }
+            }
+            (best, d.pen_zoom())
+        };
+        let ((far, far_zoom), (near, near_zoom)) = (widest(0.1), widest(0.4));
+        assert!((near_zoom / far_zoom - 4.0).abs() < 1e-3, "the zooms: {far_zoom} {near_zoom}");
+        assert!(far > 0.5, "the wall's line shows: {far}");
+        assert!((near - far).abs() <= 1.0, "a line is {far} px wide at one zoom and {near} px at four times it");
     }
 
     #[test]

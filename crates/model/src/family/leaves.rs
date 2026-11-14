@@ -31,7 +31,9 @@ impl Family {
         {
             return Vec::new();
         }
-        let Some(values) = self.types.keys().find_map(|t| self.values_in(t, &BTreeMap::new(), DEFAULT_WALL).ok()) else {
+        let Some((first, values)) =
+            self.types.keys().find_map(|t| Some((t.as_str(), self.values_in(t, &BTreeMap::new(), DEFAULT_WALL).ok()?)))
+        else {
             return Vec::new();
         };
         let size = |name: &str| match values.get(name) {
@@ -39,12 +41,13 @@ impl Family {
             _ => None,
         };
         let (Some(width), Some(height)) = (size(WIDTH), size(HEIGHT)) else { return Vec::new() };
-        self.shapes(&values)
+        self.shapes(first, &values)
             .into_iter()
             .filter(|s| {
                 let form = &self.forms[s.index];
                 let (along, across, up) = (s.max[0] - s.min[0], s.max[1] - s.min[1], s.max[2] - s.min[2]);
                 !s.void
+                    && !form.snapshot
                     && form.show.is_none()
                     && form.plane == Plane::Xy
                     && form.axis.is_none()
@@ -72,11 +75,13 @@ impl Family {
         if leaves.is_empty() {
             return false;
         }
-        let Some(values) = self.types.keys().find_map(|t| self.values_in(t, &BTreeMap::new(), DEFAULT_WALL).ok()) else {
+        let Some((first, values)) =
+            self.types.keys().find_map(|t| Some((t.clone(), self.values_in(t, &BTreeMap::new(), DEFAULT_WALL).ok()?)))
+        else {
             return false;
         };
         // The leaf's thickness: the thinnest shut leaf's, to the tenth of a millimetre.
-        let shapes = self.shapes(&values);
+        let shapes = self.shapes(&first, &values);
         let thick = shapes.iter().filter(|s| leaves.contains(&s.index)).map(|s| s.max[1] - s.min[1]).fold(f64::INFINITY, f64::min);
         let thick = (thick * 10.0).round() / 10.0;
         let opened = self.opened(&values, thick);
@@ -102,15 +107,10 @@ impl Family {
         for (i, s) in self.symbols.iter().enumerate() {
             let Some(c) = &s.arc else { continue };
             let mut n = |e| number(e, values, &mut read).ok();
-            let (Some(x), Some(y), Some(r), Some(from), Some(to)) = (n(&c.centre[0]), n(&c.centre[1]), n(&c.radius), n(&c.from), n(&c.to))
-            else {
+            let (Some(x), Some(y), Some(r), Some((from, to))) = (n(&c.centre[0]), n(&c.centre[1]), n(&c.radius), c.ends(values)) else {
                 continue;
             };
-            let end = |deg: f64| {
-                let (s, c) = deg.to_radians().sin_cos();
-                P2(x + r * c, y + r * s)
-            };
-            arcs.push((i, P2(x, y), r, [end(from), end(to)]));
+            arcs.push((i, P2(x, y), r, [from, to]));
         }
         let mut opened = Vec::new();
         for (i, s) in self.symbols.iter().enumerate() {

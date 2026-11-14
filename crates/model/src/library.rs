@@ -254,6 +254,24 @@ impl HasPart for crate::model::SplitLine {
     }
 }
 
+impl HasPart for crate::family::Reference {
+    fn ident(&mut self) -> (&mut Id, &mut Guid) {
+        (&mut self.id, &mut self.guid)
+    }
+}
+
+impl HasPart for crate::family::Dimension {
+    fn ident(&mut self) -> (&mut Id, &mut Guid) {
+        (&mut self.id, &mut self.guid)
+    }
+}
+
+impl HasPart for crate::family::Nested {
+    fn ident(&mut self) -> (&mut Id, &mut Guid) {
+        (&mut self.id, &mut self.guid)
+    }
+}
+
 impl HasPart for crate::family::Symbol {
     fn ident(&mut self) -> (&mut Id, &mut Guid) {
         (&mut self.id, &mut self.guid)
@@ -678,6 +696,7 @@ impl Model {
             Kind::FamilyType => name.split_once(": ").is_some_and(|(f, t)| {
                 self.families.get_mut(f).is_some_and(|fam| {
                     fam.identity.remove(t);
+                    fam.forget_type(t);
                     fam.types.remove(t).is_some()
                 })
             }),
@@ -727,6 +746,7 @@ impl Model {
             Kind::FamilyType => match (from.split_once(": "), to.split_once(": ")) {
                 (Some((f, old)), Some((g, new))) if f == g => self.families.get_mut(f).is_some_and(|fam| {
                     mv(&mut fam.identity, old, new);
+                    fam.rename_type(old, new);
                     mv(&mut fam.types, old, new)
                 }),
                 _ => false,
@@ -962,6 +982,9 @@ impl Model {
             add("form", "family", n, f.forms.iter().map(|x| (x.id, x.guid)).collect());
             add("symbol", "family", n, f.symbols.iter().map(|x| (x.id, x.guid)).collect());
             add("connector", "family", n, f.connectors.iter().map(|x| (x.id, x.guid)).collect());
+            add("reference", "family", n, f.references.iter().map(|x| (x.id, x.guid)).collect());
+            add("dimension", "family", n, f.dimensions.iter().map(|x| (x.id, x.guid)).collect());
+            add("nested", "family", n, f.nested.iter().map(|x| (x.id, x.guid)).collect());
         }
         for (n, g) in &self.detail_groups {
             add("member", "detail group", n, g.members.iter().map(|x| (x.id, x.guid)).collect());
@@ -1093,6 +1116,9 @@ impl Model {
             f.forms.iter_mut().for_each(|x| give(&mut x.id, &mut x.guid));
             f.symbols.iter_mut().for_each(|x| give(&mut x.id, &mut x.guid));
             f.connectors.iter_mut().for_each(|x| give(&mut x.id, &mut x.guid));
+            f.references.iter_mut().for_each(|x| give(&mut x.id, &mut x.guid));
+            f.dimensions.iter_mut().for_each(|x| give(&mut x.id, &mut x.guid));
+            f.nested.iter_mut().for_each(|x| give(&mut x.id, &mut x.guid));
         }
         for g in self.detail_groups.values_mut() {
             g.members.iter_mut().for_each(|x| give(&mut x.id, &mut x.guid));
@@ -1302,6 +1328,9 @@ impl Model {
             f.forms.iter_mut().for_each(|x| (x.id, x.guid) = (0, Guid::default()));
             f.symbols.iter_mut().for_each(|x| (x.id, x.guid) = (0, Guid::default()));
             f.connectors.iter_mut().for_each(|x| (x.id, x.guid) = (0, Guid::default()));
+            f.references.iter_mut().for_each(|x| (x.id, x.guid) = (0, Guid::default()));
+            f.dimensions.iter_mut().for_each(|x| (x.id, x.guid) = (0, Guid::default()));
+            f.nested.iter_mut().for_each(|x| (x.id, x.guid) = (0, Guid::default()));
         }
         for g in self.detail_groups.values_mut() {
             g.members.iter_mut().for_each(|x| (x.id, x.guid) = (0, Guid::default()));
@@ -1653,7 +1682,7 @@ impl Model {
         // A build that reads up to 20 can't name Imported Categories as a group a template controls; written for it, a
         // template leaves it out, and reading the file gives it back to the templates it is implied for
         // ([`Model::imports_implied`]); `written_format` makes sure that is each that had it.
-        if m.format < crate::model::LAYERS_FORMAT {
+        if m.format < crate::model::PDF_FORMAT {
             for t in m.view_templates.values_mut() {
                 t.controls.remove(&crate::graphics::Group::Imports);
             }
@@ -1661,22 +1690,70 @@ impl Model {
         serde_json::to_string_pretty(&m).map_err(|e| e.to_string())
     }
 
-    /// The format its file is written in: the oldest that holds all it has. [`crate::model::FORMAT`] when it places a door or
-    /// a window of a family whose forms or symbols say which views or detail levels draw them (`show`), which a file of 21
-    /// would leave out, drawing a door's leaf shut in the wall again; else [`crate::model::LAYERS_FORMAT`] when a page of a PDF it holds is drawn from its lines, which a file of 20 would draw as its raster images alone; else
-    /// [`crate::model::IMAGES_FORMAT`] when it holds images, or a door or a window whose To Room is not on the side it swings
-    /// to or faces (flipped since it was placed, or its rooms flipped), which a file of 19 would give it back from its swing;
-    /// else [`crate::model::PREVIOUS_FORMAT`], so an older build opens it.
+    /// The format its file is written in: the oldest that holds all it has, the newest need first. [`crate::model::STYLES_FORMAT`]
+    /// when the project has subcategory styles, or a family has line patterns, whether its void cuts were measured, or a
+    /// subcategory's line weights or pattern; [`crate::model::PARAMETRIC_FORMAT`] when a family from Revit stays parametric
+    /// (references, dimensions, nested parts, a catalog, blends, sweeps, holes, arcs, an arc that follows its ends, a form's
+    /// `source` and a void's `cuts`, Revit's result kept beside it, its check); [`crate::model::TYPES_FORMAT`] when a family has
+    /// forms or symbols of some of its types only, elevation symbols, a traced outline, a `cut` or a text parameter; [`crate::model::LEAF_FORMAT`] when it
+    /// places a door, a window or a component of a family whose forms or symbols say which views or detail levels draw them
+    /// (`show`), which a file of 21 would leave out, drawing a door's leaf shut in the wall again;
+    /// [`crate::model::PDF_FORMAT`] when a page of a PDF it holds is drawn from its lines, which a file of 20 would draw as its
+    /// raster images alone, or a view or a template hides a page's layers; [`crate::model::IMAGES_FORMAT`] when it holds
+    /// images, or a door or a window whose To Room is not on the side it swings to or faces (flipped since it was placed, or
+    /// its rooms flipped), which a file of 19 would give it back from its swing; else [`crate::model::PREVIOUS_FORMAT`], so
+    /// an older build opens it.
     pub fn written_format(&self) -> u32 {
         use crate::model::Element;
-        // A door or a window of a family whose forms or symbols say which views and detail levels draw them, which a build
-        // of 21 would leave out, drawing a door's leaf shut in its wall again. A family no door or window places draws nothing.
+        // What a build that reads up to 24 refuses as a field it doesn't know (it holds no such fields).
+        let styled = !self.subcategory_styles.is_empty()
+            || self.families.values().any(|f| {
+                f.cuts_measured
+                    || !f.line_patterns.is_empty()
+                    || f.subcategories.iter().any(|s| s.projection.is_some() || s.cut.is_some() || s.pattern.is_some())
+            });
+        if styled {
+            return crate::model::STYLES_FORMAT;
+        }
+        let parametric = self.families.values().any(|f| {
+            !f.references.is_empty()
+                || !f.dimensions.is_empty()
+                || !f.nested.is_empty()
+                || f.catalog.is_some()
+                || !f.check.is_empty()
+                || f.editable.is_some()
+                || f.forms.iter().any(|x| {
+                    x.snapshot
+                        || !x.top.is_empty()
+                        || !x.path.is_empty()
+                        || !x.holes.is_empty()
+                        || !x.arcs.is_empty()
+                        || x.source.is_some()
+                        || x.cuts.is_some()
+                })
+                || f.symbols.iter().any(|y| y.snapshot || y.arc.as_ref().is_some_and(crate::family::Curve::follows_ends))
+        });
+        if parametric {
+            return crate::model::PARAMETRIC_FORMAT;
+        }
+        let families = self.families.values().any(|f| {
+            f.cut.is_some()
+                || f.parameters.iter().any(|p| p.kind == crate::family::Kind::Text)
+                || f.forms.iter().any(|x| !x.types.is_empty() || !x.outline.is_empty())
+                || f.symbols.iter().any(|y| !y.types.is_empty() || y.view != crate::family::SymbolView::Plan)
+        });
+        if families {
+            return crate::model::TYPES_FORMAT;
+        }
+        // A door, a window or a component of a family whose forms or symbols say which views and detail levels draw them, which
+        // a build of 21 would leave out, drawing a door's leaf shut in its wall again. A family no element places draws nothing.
         let says_views = |f: &crate::family::Family| f.forms.iter().any(|x| x.show.is_some()) || f.symbols.iter().any(|x| x.show.is_some());
         if self.elements.values().any(|e| match e {
             Element::Door(o) | Element::Window(o) => o.family.as_ref().and_then(|n| self.families.get(n)).is_some_and(says_views),
+            Element::Component(c) => self.families.get(&c.family).is_some_and(says_views),
             _ => false,
         }) {
-            return crate::model::FORMAT;
+            return crate::model::LEAF_FORMAT;
         }
         // A view or a template that hides a page's layers or sets how an import draws holds what a build of 20 refuses as a
         // field it doesn't know. A template is written without Imported Categories, which 20 can't name, and reading the file
@@ -1689,7 +1766,7 @@ impl Model {
                 .iter()
                 .any(|(name, t)| t.controls.contains(&crate::graphics::Group::Imports) != Self::imports_implied(name, t, &views));
         if pdf_graphics || self.image_types.values().any(crate::raster::ImageType::drawn) {
-            return crate::model::LAYERS_FORMAT;
+            return crate::model::PDF_FORMAT;
         }
         let images = !self.image_types.is_empty() || !self.rare("image").is_empty();
         let rooms_kept = self.elements.values().any(|e| match e {

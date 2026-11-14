@@ -1,0 +1,132 @@
+{
+  "editable": 23,
+  "families": {
+    "Casework_Base_Corner_Sgl-Door.arqiflow-family.json": {
+      "editable": true,
+      "matched": 1,
+      "types": 1
+    },
+    "Casework_Base_Sgl-Door_1.arqiflow-family.json": {
+      "editable": true,
+      "matched": 1,
+      "types": 1
+    },
+    "Doors_ExtDbl_1.arqiflow-family.json": {
+      "editable": true,
+      "matched": 2,
+      "types": 2
+    },
+    "Doors_IntDbl_1.arqiflow-family.json": {
+      "editable": true,
+      "matched": 2,
+      "types": 2
+    },
+    "Doors_IntSgl_1.arqiflow-family.json": {
+      "editable": true,
+      "matched": 3,
+      "types": 3
+    },
+    "Doors_IntSgl_Catalog.arqiflow-family.json": {
+      "editable": true,
+      "matched": 3,
+      "types": 3
+    },
+    "Furniture_Chair.arqiflow-family.json": {
+      "editable": true,
+      "matched": 1,
+      "types": 1
+    },
+    "Lighting_Fixtures_Ceiling_Round.arqiflow-family.json": {
+      "editable": true,
+      "matched": 1,
+      "types": 1
+    },
+    "Lighting_Fixtures_Downlight_Round_LED.arqiflow-family.json": {
+      "editable": true,
+      "matched": 2,
+      "types": 2
+    },
+    "M_Desk.arqiflow-family.json": {
+      "editable": true,
+      "matched": 3,
+      "types": 3
+    },
+    "M_Fixed.arqiflow-family.json": {
+      "editable": true,
+      "matched": 9,
+      "types": 9
+    },
+    "M_Muntin Pattern_2x2.arqiflow-family.json": {
+      "editable": true,
+      "matched": 1,
+      "types": 1
+    },
+    "M_Parking Space.arqiflow-family.json": {
+      "editable": true,
+      "matched": 4,
+      "types": 4
+    },
+    "M_RPC Tree - Deciduous.arqiflow-family.json": {
+      "editable": true,
+      "matched": 18,
+      "types": 18
+    },
+    "M_Rectangular Column.arqiflow-family.json": {
+      "editable": true,
+      "matched": 3,
+      "types": 3
+    },
+    "M_Single-Flush.arqiflow-family.json": {
+      "editable": true,
+      "matched": 7,
+      "types": 7
+    },
+    "M_Trim-Window-Exterior-Flat.arqiflow-family.json": {
+      "editable": true,
+      "matched": 2,
+      "types": 2
+    },
+    "M_Trim-Window-Interior-Flat.arqiflow-family.json": {
+      "editable": true,
+      "matched": 2,
+      "types": 2
+    },
+    "M_Window-Casement-Double.arqiflow-family.json": {
+      "editable": true,
+      "matched": 4,
+      "types": 4
+    },
+    "M_Window-Double-Hung.arqiflow-family.json": {
+      "editable": true,
+      "matched": 4,
+      "types": 4
+    },
+    "Plumbing_Fixtures_Basin_Small.arqiflow-family.json": {
+      "editable": true,
+      "matched": 1,
+      "types": 1
+    },
+    "Plumbing_Fixtures_WC.arqiflow-family.json": {
+      "editable": false,
+      "matched": 0,
+      "types": 1,
+      "why": "its type 540x360x410mm: its shape drawn coarse is 12 mm off Revit's at (73, -266, 224), over 0.9 % of it"
+    },
+    "UC-Universal Columns-Column.arqiflow-family.json": {
+      "editable": true,
+      "matched": 1,
+      "types": 1
+    },
+    "Windows_Arched.arqiflow-family.json": {
+      "editable": false,
+      "matched": 3,
+      "types": 6,
+      "why": "its type 1360x910mm: its shape drawn coarse is 7 mm off Revit's at (304, 26, 1453), over 0.0 % of it (and 2 more types)"
+    },
+    "Windows_Sgl_Casement_Top-Hung.arqiflow-family.json": {
+      "editable": true,
+      "matched": 6,
+      "types": 6
+    }
+  }
+}

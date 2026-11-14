@@ -85,6 +85,28 @@ fn rename_in_type_properties_renames_a_wall_type_and_a_family_type_and_what_is_o
     assert!(h.state().family_dialog.is_some());
 }
 
+#[test]
+fn duplicate_in_type_properties_gives_the_copy_its_types_forms_and_lists_a_familys_groups() {
+    let family = r#"family {"name": "Shelf", "category": "furniture", "parameters": [{"name": "Depth", "kind": "length", "value": 300, "group": "Construction"}, {"name": "Load", "kind": "number", "value": 40, "unit": "kg", "group": "Structural"}, {"name": "Finish Code", "kind": "text", "value": "F1", "group": "Identity Data"}], "types": {"Short": {}, "Tall": {}}, "forms": [{"profile": [[0, 0], [600, 0], [600, 300], [0, 300]], "to": 900, "types": ["Short"]}, {"profile": [[0, 0], [600, 0], [600, 300], [0, 300]], "to": 1800, "types": ["Tall"]}]}
+component {"family": "Shelf", "type": "Short", "at": [2000, 2000]}"#;
+    let mut h = app(&format!(
+        "{BOX}
+{family}"
+    ));
+    let shelf = ids(&h, "component")[0];
+    h.state_mut().select_and_edit_type(shelf);
+    h.run();
+    for group in ["Construction", "Structural", "Identity Data"] {
+        assert!(h.query_all_by_label(group).next().is_some(), "the family's group `{group}`");
+    }
+    press(&mut h, "Duplicate…");
+    type_into(&mut h, "New type", "Short Oak");
+    press(&mut h, "Create");
+    let f = &h.state().session.model.families["Shelf"];
+    assert_eq!(f.forms[0].types, ["Short", "Short Oak"], "the copy has the form of the type it was made from");
+    assert_eq!(f.forms[1].types, ["Tall"]);
+}
+
 impl BimApp {
     fn select_and_edit_type(&mut self, id: Id) {
         self.selection = vec![id];

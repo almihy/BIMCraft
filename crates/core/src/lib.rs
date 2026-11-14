@@ -137,6 +137,20 @@ mod door_leaf_tests;
 #[cfg(test)]
 mod door_tests;
 #[cfg(test)]
+mod family_drawing_tests;
+#[cfg(test)]
+mod family_engine_tests;
+#[cfg(test)]
+mod family_last_four_tests;
+#[cfg(test)]
+mod family_parametric_tests;
+#[cfg(test)]
+mod family_revit_tests;
+#[cfg(test)]
+mod family_rpc_tests;
+#[cfg(test)]
+mod family_sample_tests;
+#[cfg(test)]
 mod flip_tests;
 #[cfg(test)]
 mod line_tests;

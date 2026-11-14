@@ -1,0 +1,729 @@
+{
+  "name": "Sample Two-Type Flush Door",
+  "category": "door",
+  "operation": "swing",
+  "host": "wall",
+  "source": {
+    "app": "BIMCraft sample",
+    "category": "Doors",
+    "file": "Sample Two-Type Flush Door.rfa"
+  },
+  "subcategories": [
+    {
+      "name": "Frame/Mullion",
+      "color": [
+        0,
+        0,
+        0
+      ],
+      "material": "Sample Oak"
+    },
+    {
+      "name": "Panel"
+    },
+    {
+      "name": "Plan Swing"
+    },
+    {
+      "name": "Elevation Swing",
+      "color": [
+        96,
+        96,
+        96
+      ]
+    }
+  ],
+  "materials": {
+    "Sample Oak": {
+      "color": [
+        176,
+        136,
+        88
+      ]
+    },
+    "Sample Steel": {
+      "color": [
+        150,
+        152,
+        158
+      ]
+    }
+  },
+  "cut": {
+    "width": "Width + 2 * Frame Width",
+    "height": "Height + Frame Width"
+  },
+  "flips": {
+    "facing": false
+  },
+  "parameters": [
+    {
+      "name": "Width",
+      "kind": "length",
+      "value": 900,
+      "group": "Dimensions"
+    },
+    {
+      "name": "Height",
+      "kind": "length",
+      "value": 2100,
+      "group": "Dimensions"
+    },
+    {
+      "name": "Frame Width",
+      "kind": "length",
+      "value": 50,
+      "group": "Construction"
+    },
+    {
+      "name": "Leaf Area",
+      "kind": "number",
+      "unit": "m²",
+      "formula": "Width * Height / 1000000",
+      "group": "Other"
+    },
+    {
+      "name": "Fire Rating",
+      "kind": "text",
+      "value": "EI 30",
+      "group": "Identity Data"
+    }
+  ],
+  "types": {
+    "900 x 2100": {
+      "Width": 900
+    },
+    "1000 x 2100": {
+      "Width": 1000,
+      "Fire Rating": "EI 60"
+    }
+  },
+  "forms": [
+    {
+      "profile": [
+        [
+          "-Width / 2 - Frame Width",
+          "-Wall Thickness / 2"
+        ],
+        [
+          "-Width / 2",
+          "-Wall Thickness / 2"
+        ],
+        [
+          "-Width / 2",
+          "Wall Thickness / 2"
+        ],
+        [
+          "-Width / 2 - Frame Width",
+          "Wall Thickness / 2"
+        ]
+      ],
+      "from": 0,
+      "to": "Height + Frame Width",
+      "material": "Sample Oak",
+      "subcategory": "Frame/Mullion"
+    },
+    {
+      "profile": [
+        [
+          "Width / 2",
+          "-Wall Thickness / 2"
+        ],
+        [
+          "Width / 2 + Frame Width",
+          "-Wall Thickness / 2"
+        ],
+        [
+          "Width / 2 + Frame Width",
+          "Wall Thickness / 2"
+        ],
+        [
+          "Width / 2",
+          "Wall Thickness / 2"
+        ]
+      ],
+      "from": 0,
+      "to": "Height + Frame Width",
+      "material": "Sample Oak",
+      "subcategory": "Frame/Mullion"
+    },
+    {
+      "profile": [
+        [
+          "-Width / 2",
+          "-Wall Thickness / 2"
+        ],
+        [
+          "Width / 2",
+          "-Wall Thickness / 2"
+        ],
+        [
+          "Width / 2",
+          "Wall Thickness / 2"
+        ],
+        [
+          "-Width / 2",
+          "Wall Thickness / 2"
+        ]
+      ],
+      "from": "Height",
+      "to": "Height + Frame Width",
+      "material": "Sample Oak",
+      "subcategory": "Frame/Mullion"
+    },
+    {
+      "mesh": [
+        [
+          [
+            -450.0,
+            -20.0,
+            0
+          ],
+          [
+            -450.0,
+            20.0,
+            0
+          ],
+          [
+            450.0,
+            20.0,
+            0
+          ]
+        ],
+        [
+          [
+            -450.0,
+            -20.0,
+            0
+          ],
+          [
+            450.0,
+            20.0,
+            0
+          ],
+          [
+            450.0,
+            -20.0,
+            0
+          ]
+        ],
+        [
+          [
+            -450.0,
+            -20.0,
+            2100
+          ],
+          [
+            450.0,
+            -20.0,
+            2100
+          ],
+          [
+            450.0,
+            20.0,
+            2100
+          ]
+        ],
+        [
+          [
+            -450.0,
+            -20.0,
+            2100
+          ],
+          [
+            450.0,
+            20.0,
+            2100
+          ],
+          [
+            -450.0,
+            20.0,
+            2100
+          ]
+        ],
+        [
+          [
+            -450.0,
+            -20.0,
+            0
+          ],
+          [
+            450.0,
+            -20.0,
+            0
+          ],
+          [
+            450.0,
+            -20.0,
+            2100
+          ]
+        ],
+        [
+          [
+            -450.0,
+            -20.0,
+            0
+          ],
+          [
+            450.0,
+            -20.0,
+            2100
+          ],
+          [
+            -450.0,
+            -20.0,
+            2100
+          ]
+        ],
+        [
+          [
+            -450.0,
+            20.0,
+            0
+          ],
+          [
+            -450.0,
+            20.0,
+            2100
+          ],
+          [
+            450.0,
+            20.0,
+            2100
+          ]
+        ],
+        [
+          [
+            -450.0,
+            20.0,
+            0
+          ],
+          [
+            450.0,
+            20.0,
+            2100
+          ],
+          [
+            450.0,
+            20.0,
+            0
+          ]
+        ],
+        [
+          [
+            -450.0,
+            -20.0,
+            0
+          ],
+          [
+            -450.0,
+            -20.0,
+            2100
+          ],
+          [
+            -450.0,
+            20.0,
+            2100
+          ]
+        ],
+        [
+          [
+            -450.0,
+            -20.0,
+            0
+          ],
+          [
+            -450.0,
+            20.0,
+            2100
+          ],
+          [
+            -450.0,
+            20.0,
+            0
+          ]
+        ],
+        [
+          [
+            450.0,
+            -20.0,
+            0
+          ],
+          [
+            450.0,
+            20.0,
+            0
+          ],
+          [
+            450.0,
+            20.0,
+            2100
+          ]
+        ],
+        [
+          [
+            450.0,
+            -20.0,
+            0
+          ],
+          [
+            450.0,
+            20.0,
+            2100
+          ],
+          [
+            450.0,
+            -20.0,
+            2100
+          ]
+        ]
+      ],
+      "outline": [
+        [
+          -450.0,
+          -20.0
+        ],
+        [
+          450.0,
+          -20.0
+        ],
+        [
+          450.0,
+          20.0
+        ],
+        [
+          -450.0,
+          20.0
+        ]
+      ],
+      "material": "Sample Oak",
+      "types": [
+        "900 x 2100"
+      ],
+      "show": {
+        "plan": false
+      },
+      "subcategory": "Panel"
+    },
+    {
+      "mesh": [
+        [
+          [
+            -500.0,
+            -20.0,
+            0
+          ],
+          [
+            -500.0,
+            20.0,
+            0
+          ],
+          [
+            500.0,
+            20.0,
+            0
+          ]
+        ],
+        [
+          [
+            -500.0,
+            -20.0,
+            0
+          ],
+          [
+            500.0,
+            20.0,
+            0
+          ],
+          [
+            500.0,
+            -20.0,
+            0
+          ]
+        ],
+        [
+          [
+            -500.0,
+            -20.0,
+            2100
+          ],
+          [
+            500.0,
+            -20.0,
+            2100
+          ],
+          [
+            500.0,
+            20.0,
+            2100
+          ]
+        ],
+        [
+          [
+            -500.0,
+            -20.0,
+            2100
+          ],
+          [
+            500.0,
+            20.0,
+            2100
+          ],
+          [
+            -500.0,
+            20.0,
+            2100
+          ]
+        ],
+        [
+          [
+            -500.0,
+            -20.0,
+            0
+          ],
+          [
+            500.0,
+            -20.0,
+            0
+          ],
+          [
+            500.0,
+            -20.0,
+            2100
+          ]
+        ],
+        [
+          [
+            -500.0,
+            -20.0,
+            0
+          ],
+          [
+            500.0,
+            -20.0,
+            2100
+          ],
+          [
+            -500.0,
+            -20.0,
+            2100
+          ]
+        ],
+        [
+          [
+            -500.0,
+            20.0,
+            0
+          ],
+          [
+            -500.0,
+            20.0,
+            2100
+          ],
+          [
+            500.0,
+            20.0,
+            2100
+          ]
+        ],
+        [
+          [
+            -500.0,
+            20.0,
+            0
+          ],
+          [
+            500.0,
+            20.0,
+            2100
+          ],
+          [
+            500.0,
+            20.0,
+            0
+          ]
+        ],
+        [
+          [
+            -500.0,
+            -20.0,
+            0
+          ],
+          [
+            -500.0,
+            -20.0,
+            2100
+          ],
+          [
+            -500.0,
+            20.0,
+            2100
+          ]
+        ],
+        [
+          [
+            -500.0,
+            -20.0,
+            0
+          ],
+          [
+            -500.0,
+            20.0,
+            2100
+          ],
+          [
+            -500.0,
+            20.0,
+            0
+          ]
+        ],
+        [
+          [
+            500.0,
+            -20.0,
+            0
+          ],
+          [
+            500.0,
+            20.0,
+            0
+          ],
+          [
+            500.0,
+            20.0,
+            2100
+          ]
+        ],
+        [
+          [
+            500.0,
+            -20.0,
+            0
+          ],
+          [
+            500.0,
+            20.0,
+            2100
+          ],
+          [
+            500.0,
+            -20.0,
+            2100
+          ]
+        ]
+      ],
+      "outline": [
+        [
+          -500.0,
+          -20.0
+        ],
+        [
+          500.0,
+          -20.0
+        ],
+        [
+          500.0,
+          20.0
+        ],
+        [
+          -500.0,
+          20.0
+        ]
+      ],
+      "material": "Sample Oak",
+      "types": [
+        "1000 x 2100"
+      ],
+      "show": {
+        "plan": false
+      },
+      "subcategory": "Panel"
+    },
+    {
+      "profile": [
+        [
+          "Width / 2 - 120",
+          "-75"
+        ],
+        [
+          "Width / 2 - 60",
+          "-75"
+        ],
+        [
+          "Width / 2 - 60",
+          "75"
+        ],
+        [
+          "Width / 2 - 120",
+          "75"
+        ]
+      ],
+      "from": 1000,
+      "to": 1030,
+      "material": "Sample Steel",
+      "show": {
+        "coarse": false,
+        "plan": false
+      }
+    }
+  ],
+  "symbols": [
+    {
+      "line": [
+        [
+          "-Width / 2",
+          "Wall Thickness / 2"
+        ],
+        [
+          "-Width / 2",
+          "Wall Thickness / 2 + Width"
+        ],
+        [
+          "-Width / 2 + 40",
+          "Wall Thickness / 2 + Width"
+        ],
+        [
+          "-Width / 2 + 40",
+          "Wall Thickness / 2"
+        ],
+        [
+          "-Width / 2",
+          "Wall Thickness / 2"
+        ]
+      ],
+      "show": {},
+      "subcategory": "Panel"
+    },
+    {
+      "arc": {
+        "centre": [
+          "-Width / 2",
+          "Wall Thickness / 2"
+        ],
+        "radius": "Width",
+        "from": 0,
+        "to": 90
+      },
+      "show": {},
+      "subcategory": "Plan Swing"
+    },
+    {
+      "view": "front",
+      "line": [
+        [
+          "Width / 2",
+          0
+        ],
+        [
+          "-Width / 2",
+          "Height / 2"
+        ],
+        [
+          "Width / 2",
+          "Height"
+        ]
+      ],
+      "subcategory": "Elevation Swing"
+    }
+  ]
+}

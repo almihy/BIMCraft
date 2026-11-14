@@ -204,7 +204,8 @@ pub(crate) fn primitive(m: &Model, id: Id) -> Bounds {
     }
     if let crate::model::Element::Component(c) = e {
         let Some(family) = m.families.get(&c.family) else { return Bounds::Unknown };
-        let Some(bounds) = family.values(&c.type_name, &c.params).ok().and_then(|values| family.conservative_bounds(&values)) else {
+        let Some(bounds) = family.values(&c.type_name, &c.params).ok().and_then(|values| family.conservative_bounds(&c.type_name, &values))
+        else {
             return Bounds::Unknown;
         };
         return place_component(m, c, bounds);
