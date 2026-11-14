@@ -266,3 +266,88 @@ fn near(a: &[P2], b: &[P2], past: f64) -> bool {
     let ((a0, a1), (b0, b1)) = (bx(a), bx(b));
     a0.0 <= b1.0 + past && b0.0 <= a1.0 + past && a0.1 <= b1.1 + past && b0.1 <= a1.1 + past
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect(x0: f64, x1: f64, y0: f64, y1: f64) -> Vec<P2> {
+        vec![P2(x0, y0), P2(x1, y0), P2(x1, y1), P2(x0, y1)]
+    }
+
+    fn total(rings: &[Vec<P2>]) -> f64 {
+        rings.iter().map(|r| geom::area(r)).sum()
+    }
+
+    #[test]
+    fn a_ring_with_a_hole_is_cut_into_pieces_round_it() {
+        let outer = rect(0.0, 100.0, 0.0, 60.0);
+        let hole: Vec<P2> = rect(30.0, 70.0, 20.0, 40.0).into_iter().rev().collect();
+        let pieces = slabs(&[&outer, &hole], 0.0, 100.0);
+        assert_eq!(pieces.len(), 4, "{pieces:?}");
+        assert!((total(&pieces) - (6000.0 - 800.0)).abs() < 1e-9);
+        assert!(pieces.iter().all(|p| geom::area(p) > 0.0 && p.len() == 4));
+        assert!(!pieces.iter().any(|p| geom::contains(p, P2(50.0, 30.0))), "the hole is open");
+    }
+
+    #[test]
+    fn a_ring_is_cut_to_the_range() {
+        // An L past the range on its right, and a slope: the part from 10 to 50.
+        let l = vec![P2(0.0, 0.0), P2(100.0, 0.0), P2(100.0, 20.0), P2(40.0, 20.0), P2(40.0, 60.0), P2(0.0, 60.0)];
+        let pieces = slabs(&[&l], 10.0, 50.0);
+        let want = (40.0 - 10.0) * 60.0 + (50.0 - 40.0) * 20.0;
+        assert!((total(&pieces) - want).abs() < 1e-9, "{pieces:?}");
+        assert!(pieces.iter().flatten().all(|q| q.0 >= 10.0 - 1e-9 && q.0 <= 50.0 + 1e-9));
+        // A ring wholly inside the range is as it was: one piece.
+        assert_eq!(slabs(&[&rect(1.0, 5.0, 2.0, 9.0)], 0.0, 10.0).len(), 1);
+        // And a sloped top: a trapezoid keeps its slope.
+        let t = vec![P2(0.0, 0.0), P2(10.0, 0.0), P2(10.0, 10.0), P2(0.0, 5.0)];
+        let cut = slabs(&[&t], 0.0, 5.0);
+        assert_eq!(cut.len(), 1);
+        // 0..5 wide, 0 to 5 at the left and 0 to 7.5 at the right: 5 x (5 + 7.5) / 2.
+        assert!((geom::area(&cut[0]) - 31.25).abs() < 1e-9, "{cut:?}");
+    }
+
+    #[test]
+    fn an_arc_is_flattened_within_a_hundredth_of_a_millimetre() {
+        let (c, r) = (P2(10.0, 20.0), 1900.0);
+        let at = |t: f64| P2(c.0 + r * t.cos(), c.1 + r * t.sin());
+        let (start, end) = (at(0.0), at(std::f64::consts::FRAC_PI_2));
+        let arc = Seg::Arc { centre: c, radius: r, start, end, ccw: true, origin: crate::solid::Origin::new(1, 0) };
+        let back = Seg::Line { a: end, b: start, origin: crate::solid::Origin::new(1, 0) };
+        let poly = polyline(&Loop { segs: vec![arc, back] });
+        assert!(poly.len() > 20, "{}", poly.len());
+        for (a, b) in geom::ring_edges(&poly).take(poly.len() - 1) {
+            let mid = (a + b) * 0.5;
+            assert!((mid.dist(c) - r).abs() <= 0.0101, "{}", mid.dist(c) - r);
+        }
+        assert!(poly.iter().take(poly.len() - 1).all(|q| (q.dist(c) - r).abs() < 1e-9));
+    }
+
+    #[test]
+    fn the_width_and_the_courses_of_a_layer() {
+        // A 20 thick wall layer 3000 tall: its width is its thickness (a hair less), its courses level.
+        let wall = rect(900.0, 920.0, 0.0, 3000.0);
+        assert!((width_of(&wall) - 19.867).abs() < 0.01, "{}", width_of(&wall));
+        assert_eq!(course_of(&wall), P2(1.0, 0.0));
+        // A sloped slab layer: courses along its slope.
+        let slab = vec![P2(0.0, 0.0), P2(1000.0, 500.0), P2(1000.0, 600.0), P2(0.0, 100.0)];
+        let c = course_of(&slab);
+        assert!((c.0 - 0.894427).abs() < 1e-5 && (c.1 - 0.447214).abs() < 1e-5, "{c:?}");
+    }
+
+    #[test]
+    fn the_line_between_two_layers_is_drawn_once() {
+        let layers = vec![(0, vec![rect(0.0, 20.0, 0.0, 100.0)]), (1, vec![rect(20.0, 180.0, 0.0, 100.0)]), (2, vec![rect(180.0, 200.0, 0.0, 100.0)])];
+        let lines = interfaces(&layers);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        for (line, x) in lines.iter().zip([20.0, 180.0]) {
+            assert!(line.iter().all(|q| (q.0 - x).abs() < 1e-9), "{line:?}");
+            let (lo, hi) = line.iter().fold((f64::MAX, f64::MIN), |(a, b), q| (a.min(q.1), b.max(q.1)));
+            assert!((lo - 0.0).abs() < 1e-9 && (hi - 100.0).abs() < 1e-9);
+        }
+        // Layers that do not touch have none; nor does one layer's own join between its pieces.
+        assert!(interfaces(&[(0, vec![rect(0.0, 10.0, 0.0, 10.0)]), (1, vec![rect(50.0, 60.0, 0.0, 10.0)])]).is_empty());
+        assert!(interfaces(&[(0, vec![rect(0.0, 10.0, 0.0, 10.0), rect(10.0, 20.0, 0.0, 10.0)])]).is_empty());
+    }
+}
