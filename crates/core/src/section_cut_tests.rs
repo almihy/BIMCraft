@@ -171,6 +171,27 @@ fn a_section_along_a_wall_cuts_its_window_as_a_hole_and_its_door_as_a_notch() {
     assert!(d.prims.iter().zip(&d.owners).any(|(p, o)| *o == Some(w) && matches!(p, crate::prim::Prim::Fill { .. })));
 }
 
+#[test]
+fn a_cropped_section_cuts_only_what_lies_between_the_ends_of_its_line() {
+    let mut s = project();
+    let w = id_of(&run(&mut s, "wall", json!({"points": [[0, 0], [8000, 0]], "type": "L", "height": 3000, "location": "centre"})));
+    // The plane y = 0 through the core, then cropped to x from 2000 to 3000: its line is those 1000 mm.
+    let sec = section(&mut s, [-500.0, 0.0], [8500.0, 0.0]);
+    let whole = cut(&s, sec);
+    assert!(bbox(&whole.iter().filter(|(i, ..)| *i == w).flat_map(|(_, _, r)| r.iter().copied()).collect::<Vec<_>>()).1 > 8000.0);
+    run(&mut s, "crop", json!({"view": sec, "region": [[2500, -200], [3500, 2500]]}));
+    let rings = cut(&s, sec);
+    let core = of(&rings, w, Some(1));
+    let b = bbox(&core.iter().flat_map(|r| r.iter().copied()).collect::<Vec<_>>());
+    eprintln!("{b:?}");
+    assert!(close(b.0, 0.0, 1e-9) && close(b.1, 1000.0, 1e-9) && close(b.2, 0.0, 1e-9) && close(b.3, 3000.0, 1e-9), "{b:?}");
+    assert!(close(core.iter().map(|r| geom::area(r)).sum::<f64>(), 1000.0 * 3000.0, 1e-6));
+    // The drawing of it keeps to the crop.
+    let view = render::section_fit(&s.model, sec, 800, 600);
+    let d = render::section(&s.model, sec, view);
+    assert!(d.prims.iter().zip(&d.owners).any(|(p, o)| *o == Some(w) && matches!(p, crate::prim::Prim::Fill { .. })));
+}
+
 // ----- a curved wall with a door --------------------------------------------------------------------------------------------
 
 /// Every edge of every ring upright or level: a vertical plane cuts a vertical wall's faces in lines, and the top and the bottom
