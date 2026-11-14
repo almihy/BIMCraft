@@ -529,7 +529,7 @@ mod tests {
     fn a_panel_of_two_rows_hands_over_by_columns_and_only_what_does_not_fit() {
         // Modify's: 11 columns of two small tools, 352 wide, 21 tools in all. 40 over is two columns, not twenty tools' worth.
         let modify = Seen { name: "Modify".into(), natural: 352.0, drawn: 352.0, tools: 21, cols: 11, label: 60.0, ..Default::default() };
-        let got = fits(&[modify.clone()], 352.0 + RULE, 352.0 + RULE - 40.0);
+        let got = fits(std::slice::from_ref(&modify), 352.0 + RULE, 352.0 + RULE - 40.0);
         assert_eq!(got, [("Modify".into(), Fit { compact: false, shown: 9 })]);
         // Room for all of it: none handed over.
         assert!(fits(&[modify], 352.0 + RULE, 352.0 + RULE).is_empty());

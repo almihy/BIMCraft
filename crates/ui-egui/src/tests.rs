@@ -5544,17 +5544,21 @@ fn a_tool_with_choices_of_its_own_opens_them_from_a_panels_list() {
     assert!(!egui::Popup::is_any_open(&h.ctx), "the list and its choices close with it");
 }
 
-/// UN (Project Units) at the least a window can be: the tool is in its panel's list by then, which the shortcut opens, and the
-/// first frame of the tab, which draws every tool, doesn't take the request for a button that is gone the next.
+/// UN (Project Units) at the least a window can be: the tool is a small icon on the ribbon, or in its panel's list, which the
+/// shortcut then opens; the first frame of the tab, which draws every tool, doesn't take the request for a button that is gone the
+/// next.
 #[test]
 fn the_units_shortcut_gets_to_the_choices_in_the_smallest_window_too() {
     let mut h = app(BOX);
     h.set_size(vec2(crate::window::MIN_SIZE[0], crate::window::MIN_SIZE[1]));
     h.run();
     shortcut(&mut h, "UN");
-    assert!(egui::Popup::is_any_open(&h.ctx), "the panel's list is open");
-    let row = h.get_by_label("Project Units").rect().center();
-    click_at(&mut h, row);
+    assert!(egui::Popup::is_any_open(&h.ctx), "the choices, or the panel's list, are open");
+    // A tool on the ribbon has its choices open already; one in a list is a row to click.
+    if h.query_by_label("Feet and inches").is_none() {
+        let row = h.get_by_label("Project Units").rect().center();
+        click_at(&mut h, row);
+    }
     press(&mut h, "Feet and inches");
     assert_eq!(h.state().session.model.units, bimcraft_core::units::Units::FeetInches);
 }
