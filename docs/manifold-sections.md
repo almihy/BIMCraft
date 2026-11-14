@@ -123,3 +123,46 @@ with its drawing over it, as the editor shows it) before (the binary built at th
 
 The poché sits on the picture in every one: the cut's edges are the picture's silhouette edges, nothing is drawn twice, nothing that
 was cut is missing but the sliver above.
+
+## Tests
+
+`crates/core/src/section_cut_tests.rs` (`cargo test -p bimcraft-core --lib section_cut_tests`), reading the rings with
+`render::section_cut_rings` (exact coordinates, in the section's plane):
+
+* A straight wall of three layers (20, 160, 20) with a door and a window; a plane across it through the door: one ring per layer,
+  the core exactly 920 to 1080 by 2100 to 3000, the finishes 900 to 920 and 1080 to 1100, the opening open under the head; the
+  door's leaf, which no section cut before, a rectangle from the floor to 2100 as thick as its leaf; through the window: two
+  pieces per layer (under its sill, over its head) and the glass between.
+* The same wall cut lengthwise (plane through the core): the window is a hole in the cut, the door a notch; the pieces' area is
+  exactly 8 x 3 m less the door and the window (20,100,000 mm2 against 20,100,000), none of the finishes is cut, nothing covers
+  the window or the door's opening.
+* A cropped section: the cut stays between its line's ends (0 to 1000, area 1000 x 3000), the wall running past them.
+* A half-circle wall of three layers with a door at its apex: a plane through the door (three upright rectangles over its head,
+  abutting, the circles' radii to within the facets' 2.5 mm, every edge upright or level; the leaf a rectangle from the floor) and
+  a line across both legs (three layers at each, each upright and level, widths from the circles).
+* A family with a void inside it (a cavity): the cut is the cube's face less the cavity, four pieces of exactly 750,000 mm2; the
+  middle of the cavity is not cut and has no fill in the drawing.
+* A gable roof of 30 degrees with a wall attached under it: lengthwise through the wall, a pentagon with its corners at
+  (500, 0), (6500, 0), (6500, 2577.35), (3500, 4309.40), (500, 2577.35); the roof's cut 8000 x 300 / cos 30 in area.
+* The sample house, three lines of it: a family door, a plain door and a plain window are cut (and walls, floor, roof, ceilings,
+  components).
+* What was cut before is cut still: for seven lines through the sample house and three through the two-storey highrise, every
+  element that `Solid::cuts` cut is cut now, with the area it had (no element differs by more than a millionth), and 14 and 16
+  elements are cut that were not (components, family doors). And every element a layer solid of which the plane crosses (its
+  box a millimetre either side) has a cut: in the sample house 7, 8, 12, 9, 12, 10 and 11 elements cross its seven lines and as
+  many are cut; in the highrise 42, 34 and 34 cross and 50, 42 and 34 are cut (the rest are open pieces and runs).
+* Unit tests of the rings in `section_cut.rs`: a hole cut into four pieces; a ring cut to a range; an arc flattened within
+  0.01 mm of its circle; a layer's width and courses; the line between two layers drawn once.
+
+Numbers: `cargo test -p bimcraft-core --lib section_cut_tests`: 8 passed, 10.4 s (dev profile); `cargo test -p bimcraft-model --lib
+section_cut`: 5 passed. The existing section, sheet, render, selfcheck, elevation, shape, graphics, regions, reinforce, rebar, mep,
+structure, view3d, hatch, pattern, layer, element-solids and quantities tests (`cargo test -p bimcraft-core --lib -- section sheet render
+selfcheck elevation shape_tests graphics regions reinforce rebar mep_tests structure_tests view3d hatch pattern layer element_solids
+quantities`): 484 passed, 0 failed, 7 ignored.
+`every_self_check_runs_under_the_core_tests` runs the new twin (`SectionLayers`) in the sample house and the highrise's sections.
+
+## The browser
+
+`bimcraft-web` built for wasm32-unknown-unknown in the `wasm` profile with the environment of `docs/manifold-trial.md`
+(`unstable-wasm-uu`, LLVM 20), `wasm-bindgen --target nodejs`, and `web-demo/manifold-trial-node.cjs`: volume 803965.7193408788 (the
+analytic value to the last digit), 272 triangles, 13.5 ms: the browser build still links and cuts with Manifold.

@@ -446,6 +446,41 @@ fn compare_with_before(name: &str, s: &mut Session, lines: &[[[f64; 2]; 2]]) -> 
             }
         }
         cut_more += now.keys().filter(|id| !before.contains_key(id)).count();
+        // Every element a layer solid of which the plane passes clean through (its box lies a millimetre either side of it) has a
+        // cut, whatever it is: a closed layer's rings or an open piece's.
+        let (start, end) = (P2(line[0][0], line[0][1]), P2(line[1][0], line[1][1]));
+        let n = (end - start).unit().perp();
+        let m = s.model.clone();
+        let mut crossing = 0;
+        for (&id, _) in m.elements.iter() {
+            let es = element_solids(&m, id);
+            let crosses = es.layers.iter().any(|(_, solid)| {
+                solid.bounds().is_some_and(|b| {
+                    let sides = [b.min[0], b.max[0]]
+                        .into_iter()
+                        .flat_map(|x| [b.min[1], b.max[1]].into_iter().map(move |y| (P2(x, y) - start).dot(n)));
+                    let (lo, hi) = sides.fold((f64::MAX, f64::MIN), |(lo, hi), v| (lo.min(v), hi.max(v)));
+                    lo < -1.0 && hi > 1.0
+                })
+            });
+            if crosses {
+                crossing += 1;
+                // A solid whose box the plane crosses may still miss the solid (round a notch): such an element is allowed to
+                // have no ring only if no triangle of it straddles the plane.
+                let straddles = es.layers.iter().any(|(_, solid)| {
+                    solid.triangles().iter().any(|t| {
+                        let d: Vec<f64> = t.p.iter().map(|q| (P2(q[0], q[1]) - start).dot(n)).collect();
+                        d.iter().any(|v| *v < -1e-6) && d.iter().any(|v| *v > 1e-6)
+                    })
+                });
+                assert!(
+                    now.contains_key(&id) || !straddles,
+                    "{name} {line:?}: element {id} ({:?}) crosses the plane and has no cut",
+                    m.elements.get(id).map(|e| e.category())
+                );
+            }
+        }
+        eprintln!("{name} {line:?}: {crossing} elements cross the plane, {} are cut", now.len());
     }
     cut_more
 }
