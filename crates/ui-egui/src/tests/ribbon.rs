@@ -184,22 +184,55 @@ fn the_modify_panel_hands_its_tools_over_by_columns_and_only_what_does_not_fit()
 }
 
 #[test]
-fn a_panels_name_lists_every_tool_one_under_the_next_as_wide_as_the_widest() {
+fn a_panels_list_of_more_than_ten_tools_runs_in_columns_in_the_panels_order_each_as_wide_as_its_widest() {
     let mut h = window(1280.0, 0.1);
     pick_tab(&mut h, "Modify");
     h.run_steps(3);
     press(&mut h, "Modify ▾");
+    h.run_steps(4);
     let under = h.get_by_label("Modify ▾").rect().bottom();
-    // Each tool's row in the list, in the panel's order: the highest of those below the name is the list's.
+    // Each tool's row in the list, in the panel's order: the highest of those below the name is the list's, and each is there once.
     let mut rows = Vec::new();
     for tool in ROW_ONE.iter().chain(&ROW_TWO) {
-        let row = h.query_all_by_label(tool).map(|n| n.rect()).filter(|r| r.top() > under).min_by(|a, b| a.top().total_cmp(&b.top()));
-        rows.push(row.unwrap_or_else(|| panic!("{tool} is not in the list")));
+        let found: Vec<_> = h.query_all_by_label(tool).map(|n| n.rect()).filter(|r| r.top() > under).collect();
+        let list: Vec<_> = found.iter().filter(|r| r.width() > 100.0 && r.height() > 20.0).collect();
+        assert_eq!(list.len(), 1, "{tool} is in the list once: {found:?}");
+        rows.push(*list[0]);
     }
-    // The panel's own order: its first row's tools, then its second's.
-    assert!(rows.windows(2).all(|w| w[1].top() > w[0].top()), "one under the next, in order: {rows:?}");
-    assert!(rows.iter().all(|r| r.left() == rows[0].left() && r.width() == rows[0].width()), "a column of equal rows");
-    assert!(rows[0].width() > 150.0 && rows[0].width() < 400.0, "as wide as its words, not a window or a fixed 220: {}", rows[0].width());
+    let every = rows.len();
+    // Two columns, split evenly, the panel's order down the first and then down the second.
+    let first: Vec<_> = rows.iter().filter(|r| r.left() == rows[0].left()).collect();
+    let second: Vec<_> = rows.iter().filter(|r| r.left() > rows[0].left()).collect();
+    assert_eq!(first.len() + second.len(), every, "two columns and no more: {rows:?}");
+    assert_eq!(first.len(), every.div_ceil(2), "split evenly");
+    assert!(rows[..first.len()].iter().all(|r| r.left() == rows[0].left()), "the first tools fill the first column");
+    for column in [&first, &second] {
+        assert!(column.windows(2).all(|w| w[1].top() > w[0].top()), "one under the next, in order: {column:?}");
+        assert!(column.iter().all(|r| r.width() == column[0].width()), "a column of equal rows");
+        assert!(column[0].width() > 100.0 && column[0].width() < 400.0, "as wide as its words: {}", column[0].width());
+    }
+    assert_eq!(first[0].top(), second[0].top(), "the second begins where the first does");
+    let gap = second[0].left() - first[0].right();
+    assert!(gap > 0.0 && gap < 20.0, "a small gap between them: {gap}");
+    assert!(first.len() <= 10, "at most ten to a column");
+}
+
+#[test]
+fn a_panels_list_of_ten_tools_or_fewer_is_one_column() {
+    let mut h = window(1280.0, 0.1);
+    pick_tab(&mut h, "Architecture");
+    h.run_steps(3);
+    // Build's tools are fewer than ten.
+    press(&mut h, "Build ▾");
+    h.run_steps(4);
+    let under = h.get_by_label("Build ▾").rect().bottom();
+    let lefts: Vec<f32> = h
+        .query_all_by_role(Role::Button)
+        .map(|n| n.rect())
+        .filter(|r| r.top() > under && r.left() > 100.0 && r.left() < 250.0 && (r.height() - 28.0).abs() < 0.5)
+        .map(|r| r.left())
+        .collect();
+    assert!(lefts.len() >= 2 && lefts.len() <= 10 && lefts.iter().all(|l| *l == lefts[0]), "one column: {lefts:?}");
 }
 
 #[test]
@@ -300,4 +333,22 @@ fn ticking_a_tool_in_edit_tools_leaves_the_floating_tools_open_until_a_click_out
     key(&mut h, Key::Escape);
     h.run_steps(4);
     assert!(h.query_by_label("Beam").is_none(), "Esc");
+}
+
+#[test]
+fn a_row_of_a_list_in_columns_still_opens_its_choices_as_a_submenu() {
+    let mut h = window(1280.0, 0.1);
+    pick_tab(&mut h, "Modify");
+    h.run_steps(3);
+    press(&mut h, "Modify ▾");
+    h.run_steps(4);
+    let under = h.get_by_label("Modify ▾").rect().bottom();
+    let paste =
+        h.query_all_by_label("Paste").map(|n| n.rect()).find(|r| r.top() > under && r.width() > 100.0).expect("Paste's row in the list");
+    click_at(&mut h, paste.center());
+    h.run_steps(4);
+    assert!(h.query_by_label("Aligned to Same Place").is_some(), "its choices open beside the row");
+    // Its rows fill the submenu, not a column of the list.
+    let choice = h.get_by_label("Aligned to Same Place").rect();
+    assert!((choice.width() - 230.0).abs() < 1.0, "{}", choice.width());
 }

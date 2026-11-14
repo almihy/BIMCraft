@@ -1093,7 +1093,7 @@ fn plugin_button(ui: &mut Ui, label: &str, tip: &str) -> Response {
 #[cfg(feature = "plugins")]
 fn plugin_row(ui: &mut Ui, label: &str, tip: &str) -> Response {
     let own = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(12.5), pal().text).size().x + 24.0;
-    let (rect, r) = ui.allocate_exact_size(vec2(ribbon::list_width(ui, own), 28.0), Sense::click());
+    let (rect, r) = ribbon::list_cell(ui, own);
     let enabled = ui.is_enabled();
     r.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, false, label));
     let (fill, ink) = match r.hovered() && enabled {
@@ -1212,7 +1212,7 @@ fn list_row_in(ui: &mut Ui, icon: Icon, label: &str, active: bool, tip: &str, tr
     // A panel's list is as wide as its widest row: an icon, its name and room around them.
     let font = FontId::proportional(13.0);
     let own = ui.painter().layout_no_wrap(label.clone(), font, pal().text).size().x + 38.0 + 14.0;
-    let (rect, r) = ui.allocate_exact_size(vec2(ribbon::list_width(ui, own), 28.0), Sense::click());
+    let (rect, r) = ribbon::list_cell(ui, own);
     let enabled = ui.is_enabled();
     r.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, active, &label));
     let fill = match (active, r.hovered() && enabled) {

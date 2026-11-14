@@ -39,6 +39,11 @@ pub(crate) const SMALL_TOOL: Vec2 = vec2(30.0, 25.0);
 const SMALL_HEIGHT: f32 = 52.0;
 /// The rows a panel's small tools stand in.
 const ROWS: usize = 2;
+/// The most rows a panel's list has in a column before it goes on in another.
+const LIST_ROWS_MAX: usize = 10;
+/// How tall a row of a panel's list is, and the gap between its columns.
+const LIST_ROW: f32 = 28.0;
+const LIST_GAP: f32 = 6.0;
 /// The hairline between panels, with its room.
 const RULE: f32 = 9.0;
 /// What's kept clear at the tab's end, so a fit judged on last frame's widths isn't a pixel over.
@@ -151,6 +156,12 @@ thread_local! {
     static SLOTS: Cell<Option<(egui::Pos2, usize)>> = const { Cell::new(None) };
     /// A panel's list: how wide its rows were last frame, and how wide the widest row is so far.
     static LIST: Cell<(f32, f32)> = const { Cell::new((0.0, 0.0)) };
+    /// A panel's list in columns: where its rows go, as the last frame's rows and widths say.
+    static GRID: RefCell<Option<Grid>> = const { RefCell::new(None) };
+    /// How many rows the list being drawn has had, and how wide the widest of each column was.
+    static LISTED: RefCell<(usize, Vec<f32>)> = const { RefCell::new((0, Vec::new())) };
+    /// Whether the rows drawn now are a submenu's, in a list: a menu of their own, not rows of the list.
+    static NESTED: Cell<bool> = const { Cell::new(false) };
     /// Where the last panel drawn ends.
     static END: Cell<f32> = const { Cell::new(0.0) };
     /// The tab being drawn: the room it has, where it starts, and how much of what it has drawn is gaps (`push_right`'s).
@@ -273,6 +284,50 @@ pub(crate) fn row(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
         add(ui);
         ROW.with(|r| r.set(None));
     });
+}
+
+/// Where the rows of a list in columns go: `per` in a column, each column `widths` wide, from `origin`.
+struct Grid {
+    origin: egui::Pos2,
+    per: usize,
+    widths: Vec<f32>,
+    id: Id,
+}
+
+/// The place of a row of a panel's list, `own` wide at least, and its response. In a list of more rows than a column holds
+/// they fill the first column from the top, then the next, each column as wide as its widest; in a short list they are one
+/// column, and in any menu that is not a panel's list (Paste's choices, a submenu of a list) they fill the menu.
+pub(crate) fn list_cell(ui: &mut Ui, own: f32) -> (Rect, Response) {
+    if !listing() || NESTED.with(Cell::get) {
+        return ui.allocate_exact_size(vec2(ui.available_width().max(200.0), LIST_ROW), Sense::click());
+    }
+    let n = LISTED.with(|l| {
+        let mut l = l.borrow_mut();
+        l.0 += 1;
+        l.0 - 1
+    });
+    let placed = GRID.with(|g| {
+        g.borrow().as_ref().map(|g| {
+            let (col, row) = (n / g.per, n % g.per);
+            let before: f32 = (0..col).map(|c| g.widths.get(c).copied().unwrap_or(0.0) + LIST_GAP).sum();
+            let width = g.widths.get(col).copied().unwrap_or(0.0).max(own);
+            let at = g.origin + vec2(before, row as f32 * LIST_ROW);
+            (col, Rect::from_min_size(at, vec2(width, LIST_ROW)), g.id.with(n))
+        })
+    });
+    match placed {
+        Some((col, rect, id)) => {
+            LISTED.with(|l| {
+                let mut l = l.borrow_mut();
+                if l.1.len() <= col {
+                    l.1.resize(col + 1, 0.0);
+                }
+                l.1[col] = l.1[col].max(own);
+            });
+            (rect, ui.interact(rect, id, Sense::click()))
+        }
+        None => ui.allocate_exact_size(vec2(list_width(ui, own), LIST_ROW), Sense::click()),
+    }
 }
 
 /// How wide a row of the panel's list is: as wide as its widest, which the rows drawn so far and the last frame's list say. A row
@@ -517,7 +572,11 @@ fn open_if_asked(ui: &Ui, r: &Response) {
 /// ribbon to hang them from: a request to open them opens the panel's list, where its row is.
 pub(crate) fn choices(ui: &Ui, r: &Response, open: bool, content: impl FnOnce(&mut Ui)) -> bool {
     if listing() {
-        egui::containers::menu::SubMenu::new().show(ui, r, content);
+        egui::containers::menu::SubMenu::new().show(ui, r, |ui| {
+            let was = NESTED.with(|n| n.replace(true));
+            content(ui);
+            NESTED.with(|n| n.set(was));
+        });
         return false;
     }
     let drawn = r.rect.is_positive() && ui.is_rect_visible(r.rect);
@@ -538,17 +597,46 @@ pub(crate) fn choices(ui: &Ui, r: &Response, open: bool, content: impl FnOnce(&m
 /// the widest.
 fn list(r: &Response, add: &mut impl FnMut(&mut Ui)) {
     own_popup(Popup::default_response_id(r));
-    let key = Popup::default_response_id(r).with("list-width");
+    let id = Popup::default_response_id(r);
+    let (key, shape_key) = (id.with("list-width"), id.with("list-shape"));
     Popup::menu(r).show(|ui| {
         let known = ui.ctx().data(|d| d.get_temp::<f32>(key)).unwrap_or(0.0);
+        // The rows there were and how wide each column was, last frame: more rows than a column holds are split evenly in as
+        // many columns as that takes.
+        let (rows, widths): (usize, Vec<f32>) = ui.ctx().data(|d| d.get_temp(shape_key)).unwrap_or_default();
+        let columns = rows.div_ceil(LIST_ROWS_MAX).max(1);
+        let per = rows.div_ceil(columns).max(1);
         LIST.with(|l| l.set((known, 0.0)));
         ui.spacing_mut().item_spacing.y = 0.0;
+        LISTED.with(|l| *l.borrow_mut() = (0, Vec::new()));
+        NESTED.with(|n| n.set(false));
         LISTING.with(|l| l.set(true));
-        ui.vertical(|ui| add(ui));
+        let origin = ui.cursor().min;
+        let mut used = widths.clone();
+        if columns > 1 {
+            // A column not yet measured is as wide as the one list there was.
+            used.resize(columns, known);
+            GRID.with(|g| *g.borrow_mut() = Some(Grid { origin, per, widths: used.clone(), id: id.with("row") }));
+            // The rows have their places: what else `add` draws (a stack's, a row's layout) takes no room.
+            let mut child = ui.new_child(UiBuilder::new().max_rect(Rect::from_min_size(origin, Vec2::ZERO)));
+            add(&mut child);
+            let wide = used.iter().sum::<f32>() + LIST_GAP * (columns - 1) as f32;
+            ui.allocate_exact_size(vec2(wide, per as f32 * LIST_ROW), Sense::hover());
+        } else {
+            ui.vertical(|ui| add(ui));
+        }
+        GRID.with(|g| *g.borrow_mut() = None);
         LISTING.with(|l| l.set(false));
         let widest = LIST.with(|l| l.replace((0.0, 0.0)).1);
+        let (counted, measured) = LISTED.with(|l| std::mem::take(&mut *l.borrow_mut()));
+        let measured = if columns > 1 { measured } else { Vec::new() };
         if (widest - known).abs() > 0.5 {
             ui.ctx().data_mut(|d| d.insert_temp(key, widest));
+            ui.ctx().request_repaint();
+        }
+        let moved = counted != rows || measured.len() != widths.len() || measured.iter().zip(&widths).any(|(a, b)| (a - b).abs() > 0.5);
+        if moved {
+            ui.ctx().data_mut(|d| d.insert_temp(shape_key, (counted, measured)));
             ui.ctx().request_repaint();
         }
     });
