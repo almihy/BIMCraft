@@ -326,3 +326,36 @@ fn a_drawings_pen_zoom_is_what_its_lines_are_wider_than_their_weights_for_the_zo
     assert!((far / far_zoom - near / near_zoom).abs() < 1e-4, "the same width on a screen at either zoom");
     assert!((far / far_zoom - 1.75).abs() < 1e-4, "pen 10: 0.35 mm of paper at five pixels to the mm: {}", far / far_zoom);
 }
+
+#[test]
+fn a_components_plan_outline_and_symbol_draw_in_their_subcategorys_weight_and_pattern() {
+    let block = |name: &str, sub: &str, subs: Value, patterns: Value| {
+        json!({"name": name, "category": "furniture", "types": {"A": {}}, "subcategories": subs, "line_patterns": patterns,
+               "forms": [{"profile": [[0, 0], [400, 0], [400, 300], [0, 300]], "from": 0, "to": 100, "subcategory": sub}],
+               "symbols": [{"line": [[0, 150], [400, 150]], "subcategory": sub}]})
+    };
+    let mut s = Session::new();
+    run(
+        &mut s,
+        "family",
+        block(
+            "Sample Styled Block",
+            "Edge",
+            json!([{"name": "Edge", "projection": 1, "pattern": "Sample Dash"}]),
+            json!({"Sample Dash": [{"dash": 3.0}, {"space": 1.5}]}),
+        ),
+    );
+    run(&mut s, "family", block("Sample Plain Block", "Plain", json!([{"name": "Plain"}]), json!({})));
+    let styled = id_of(&run(&mut s, "component", json!({"family": "Sample Styled Block", "type": "A", "at": [1000, 1000]})));
+    let plain = id_of(&run(&mut s, "component", json!({"family": "Sample Plain Block", "type": "A", "at": [3000, 1000]})));
+    run(&mut s, "detail", json!({"view": 100000, "detail": "medium"}));
+    let d = render::plan(&s.model, 100000, 4000, 3000);
+    let (a, b) = (strokes(&d, styled), strokes(&d, plain));
+    assert!(a.len() >= 5 && b.len() >= 5, "its outline's four sides and its symbol: {} and {}", a.len(), b.len());
+    for (w, dashed, ..) in &a {
+        assert!((w - d.width(Pen(1))).abs() < 1e-3 && *dashed, "the subcategory's pen 1 and its Dash pattern: {w} {dashed}");
+    }
+    for (w, dashed, ..) in &b {
+        assert!((w - d.width(Pen::PROJECTION)).abs() < 1e-3 && !dashed, "its category's pen, solid: {w} {dashed}");
+    }
+}

@@ -3886,18 +3886,27 @@ impl Model {
     /// level ([`crate::family::Symbol::drawn_at`]), in its own axes, mirrored if it is, turned and moved to where it stands.
     /// A label is lettered upright in the family's axes, so it turns (and mirrors) with the component.
     pub fn component_marks(&self, c: &Component, detail: crate::graphics::Detail) -> Vec<crate::family::Mark> {
+        self.component_marks_styled(c, detail).into_iter().map(|(m, _)| m).collect()
+    }
+
+    /// [`Model::component_marks`], each with the subcategory of the symbol it came from.
+    pub fn component_marks_styled(&self, c: &Component, detail: crate::graphics::Detail) -> Vec<crate::family::Marked> {
         let Some(f) = self.families.get(&c.family) else { return Vec::new() };
         if f.symbols.is_empty() && f.nested.is_empty() {
             return Vec::new();
         }
         let plan = crate::family::SymbolView::Plan;
         let others = |n: &str| self.families.get(n);
-        let Ok(marks) = f.values(&c.type_name, &c.params).and_then(|v| f.marks_with(&c.type_name, &v, plan, Some(detail), &others)) else {
+        let Ok(marks) = f.values(&c.type_name, &c.params).and_then(|v| f.marks_styled(&c.type_name, &v, plan, Some(detail), &others))
+        else {
             return Vec::new();
         };
         let (sin, cos) = c.angle.to_radians().sin_cos();
         let flip = if c.mirrored { -1.0 } else { 1.0 };
-        marks.iter().map(|k| k.map(|q| P2(c.at.0 + q.0 * cos - flip * q.1 * sin, c.at.1 + q.0 * sin + flip * q.1 * cos))).collect()
+        marks
+            .iter()
+            .map(|(k, sub)| (k.map(|q| P2(c.at.0 + q.0 * cos - flip * q.1 * sin, c.at.1 + q.0 * sin + flip * q.1 * cos)), sub.clone()))
+            .collect()
     }
 
     /// Component `c`'s connectors, worked out for its type and values, with their place and the way they face in the

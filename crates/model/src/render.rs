@@ -1185,9 +1185,9 @@ pub fn sketch(m: &Model, view: View, id: Id, e: &Element) -> Drawing {
             }
         }
         Element::Component(c) => {
-            component(&mut d, m, &m.component_pieces(c));
-            let shown = m.component_marks(c, d.detail);
-            marks(&mut d, &shown);
+            component(&mut d, m, e, &m.component_pieces(c));
+            let shown = m.component_marks_styled(c, d.detail);
+            family_marks(&mut d, m, e, &shown);
         }
         // Drawn at its sill, where the cut plane would pass through it whatever the plan's cut is.
         Element::Door(o) | Element::Window(o) => {
@@ -3400,14 +3400,14 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
         if !up && !pieces.is_empty() {
             let (bottom, top) = components.heights(c);
             if bottom < range.cut && top > range.depth {
-                component(&mut d, m, &pieces);
+                component(&mut d, m, e, &pieces);
             }
         }
         // Its symbols are annotation of its level: in that level's plan and ceiling plan, whatever height its forms reach; each
         // at the detail levels it says (none, all but Coarse).
         if c.level == level {
-            let shown = m.component_marks(c, d.detail);
-            marks(&mut d, &shown);
+            let shown = m.component_marks_styled(c, d.detail);
+            family_marks(&mut d, m, e, &shown);
         }
     }
     // Walls and columns below the cut plane, as seen from it; past the bottom, faint.
@@ -3755,7 +3755,7 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
     d
 }
 
-/// A line of a door's or a window's family `e`, of its subcategory `sub` where it has one: in the project's Object Style of
+/// A line of a family `e`'s (a door's, a window's, a component's), of its subcategory `sub` where it has one: in the project's Object Style of
 /// `Category/Subcategory` (its cut pen where `cut`, else its projection pen; its colour and its line pattern), each as far as it
 /// says one; else in its category's pen as a family's lines are.
 fn family_line(d: &mut Drawing, m: &Model, e: &Element, sub: Option<&str>, pts: &[P2], cut: bool, closed: bool) {
@@ -3769,7 +3769,8 @@ fn family_line(d: &mut Drawing, m: &Model, e: &Element, sub: Option<&str>, pts: 
     d.styled(m, &line, px, closed);
 }
 
-/// [`marks`] of a door's or a window's family `e`: each in the subcategory of the symbol it came from ([`family_line`]).
+/// [`marks`] of a family `e`'s (a door's, a window's, a component's): each in the subcategory of the symbol it came from
+/// ([`family_line`]).
 fn family_marks(d: &mut Drawing, m: &Model, e: &Element, marks: &[crate::family::Marked]) {
     use crate::family::Mark;
     for (mark, sub) in marks {
@@ -3812,7 +3813,7 @@ fn marks(d: &mut Drawing, marks: &[crate::family::Mark]) {
 
 /// A component seen from above: each of its forms' outlines, but where a higher form covers it (a
 /// table's top over its legs).
-fn component(d: &mut Drawing, m: &Model, pieces: &[crate::family::Piece]) {
+fn component(d: &mut Drawing, m: &Model, e: &Element, pieces: &[crate::family::Piece]) {
     // Only the forms a plan at its detail level draws, as their Visibility Settings say.
     let kept: Vec<crate::family::Piece>;
     let pieces = if pieces.iter().all(|p| p.in_plan(d.detail)) {
@@ -3847,12 +3848,12 @@ fn component(d: &mut Drawing, m: &Model, pieces: &[crate::family::Piece]) {
             let mut at = 0.0;
             for (s0, s1) in hidden {
                 if s0 > at {
-                    d.line(&[a + u * at, a + u * s0], BY_CATEGORY, INK, false);
+                    family_line(d, m, e, p.subcategory.as_deref(), &[a + u * at, a + u * s0], false, false);
                 }
                 at = f64::max(at, s1);
             }
             if at < len {
-                d.line(&[a + u * at, b], BY_CATEGORY, INK, false);
+                family_line(d, m, e, p.subcategory.as_deref(), &[a + u * at, b], false, false);
             }
         }
     }
