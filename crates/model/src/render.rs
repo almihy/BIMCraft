@@ -2388,11 +2388,18 @@ fn cut_model(
     if let Some(frame) = crate::solid::Frame::vertical(origin.0, u) {
         for (at, (id, _)) in work.placed.iter().enumerate() {
             let Some(e) = m.elements.get(*id) else { continue };
-            // The round runs not made yet are cut below, as they were.
+            // A round run whose tubes are not made yet (a deferred preparation) is cut from its solids as the full preparation's
+            // is: they are made here, for just the runs whose boxes the line's plane crosses.
             let lazy = e.run().is_some() && work.cell(at).is_some();
             // A mass is outlined where the line cuts it, not filled. What Revit does not cut (a sofa, a light fitting, a pipe
             // fitting, a basin) stays in the picture beyond the line.
-            if !look.shows(*id) || matches!(e, Element::Mass(_)) || lazy || one_side(*id) || !crate::graphics::cuttable(m, e) {
+            if !look.shows(*id) || matches!(e, Element::Mass(_)) || !crate::graphics::cuttable(m, e) {
+                continue;
+            }
+            // Its twin, which tests hold it to: what is left out cuts nothing, so a lazy run is made and cut all the same.
+            let twin = lazy && crate::selfcheck::on(crate::selfcheck::Check::OneSideLazy);
+            let aside = one_side(*id);
+            if aside && !twin {
                 continue;
             }
             if cancelled() {
@@ -2401,6 +2408,10 @@ fn cut_model(
             // Only the forms of a family the section draws are cut (its detail level, the way it looks at the family).
             let cut =
                 section_cut::cut_element(&work.solid_cache.get(m, *id), &frame, origin, last - first, first, &|vis| look.draws_vis(vis));
+            if aside {
+                assert!(cut.is_empty(), "{id} is cut by a line it lies all on one side of");
+                continue;
+            }
             if cut.is_empty() {
                 continue;
             }
@@ -2415,31 +2426,6 @@ fn cut_model(
             if !cut.layers.is_empty() {
                 out.layered.insert(*id, cut.layers);
                 out.regions.insert(*id, cut.regions);
-            }
-        }
-    }
-    // The round runs not made yet: only those whose boxes the line's plane crosses.
-    let mut lazy = crate::component_geometry::Components::new(m);
-    for (at, (id, _)) in work.placed.iter().enumerate() {
-        if work.cell(at).is_none() || !look.shows(*id) {
-            continue;
-        }
-        let Some(e) = m.elements.get(*id).filter(|e| e.run().is_some()) else { continue };
-        // Its twin, which tests hold it to: what is left out cuts nothing, so it is made and cut all the same.
-        let twin = crate::selfcheck::on(crate::selfcheck::Check::OneSideLazy);
-        if !twin && one_side(*id) {
-            continue;
-        }
-        if cancelled() {
-            return None;
-        }
-        for s in view3d::lazy_solids(m, *id, e, &mut lazy) {
-            let rings = s.cuts(v.start + u * first, u, last - first);
-            if twin {
-                assert!(!one_side(*id) || rings.is_empty(), "{id} is cut by a line it lies all on one side of");
-            }
-            for ring in rings {
-                out.loose.entry(*id).or_default().push(ring.into_iter().map(|q| P2(q.0 + first, q.1)).collect());
             }
         }
     }
