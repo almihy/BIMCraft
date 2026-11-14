@@ -2997,7 +2997,12 @@ impl Family {
             };
             let (profile_bends, top_bends) = (bends(Ring::Profile, 0)?, bends(Ring::Top, 0)?);
             let hole_bends = (0..form.holes.len()).map(|k| bends(Ring::Hole, k)).collect::<Result<Vec<_>, _>>()?;
-            let ring = if form.circle.is_none() { shapes::bent2(ring, &profile_bends) } else { ring };
+            let (ring, ring_breaks) = if form.circle.is_none() {
+                shapes::bent2_marked(ring, &profile_bends)
+            } else {
+                let at = (0..ring.len()).collect();
+                (ring, at)
+            };
             let (from, to) = (num(&form.from)?, num(&form.to)?);
             if ring.len() < 3 || crate::geom::area(&ring).abs() < 1.0 {
                 return Err("its profile has no area: it needs three corners or more, or a circle".into());
@@ -3008,7 +3013,12 @@ impl Family {
                 let unit = if form.axis.is_some() { " degrees" } else { "" };
                 return Err(format!("sweeps nothing: from {from} to {to}{unit}"));
             }
-            let ring = if crate::geom::area(&ring) < 0.0 { ring.into_iter().rev().collect() } else { ring };
+            let (ring, ring_breaks) = if crate::geom::area(&ring) < 0.0 {
+                let n = ring.len();
+                (ring.into_iter().rev().collect(), ring_breaks.into_iter().map(|b| n - 1 - b).collect())
+            } else {
+                (ring, ring_breaks)
+            };
             // A revolve's sketch plane where it is along the axis it is square to: its triangles moved there.
             let lift = match &form.at {
                 Some(e) => embed(form.plane, P2(0.0, 0.0), num(e)?),
@@ -3049,12 +3059,12 @@ impl Family {
                     too_fine((ring.len() + holes.iter().map(Vec::len).sum::<usize>()).saturating_mul(4), "profile")?;
                     shapes::holed(&ring, &holes, from, to, form.plane)?
                 } else {
-                    let top = shapes::bent2(ring_of(&form.top)?, &top_bends);
+                    let (top, top_breaks) = shapes::bent2_marked(ring_of(&form.top)?, &top_bends);
                     if top.len() < 3 || crate::geom::area(&top).abs() < 1.0 {
                         return Err("its top has no area: it needs three corners or more".into());
                     }
                     too_fine((ring.len() + top.len()).saturating_mul(4), "blend")?;
-                    shapes::blend(&ring, &top, from, to, form.plane)?
+                    shapes::blend((&ring, &ring_breaks), (&top, &top_breaks), from, to, form.plane)?
                 };
                 return Ok(Some(Piece { show: form.show, subcategory: form.subcategory.clone(), ..hulled(tris, material) }));
             }

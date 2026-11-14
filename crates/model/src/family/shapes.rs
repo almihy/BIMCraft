@@ -86,37 +86,128 @@ fn places(ring: &[P2]) -> Vec<f64> {
     out
 }
 
-/// Two rings paired corner to corner, as a blend's sides run: `top` turned to start at its corner nearest `bottom`'s first
-/// (by their angles round their middles); one for one where they have as many corners, else each with a corner put where
-/// the other has one, along their lengths.
-pub(crate) fn paired(bottom: &[P2], top: &[P2]) -> (Vec<P2>, Vec<P2>) {
+/// `ring` turned to start at corner `at`.
+fn rotated<T: Copy>(ring: &[T], at: usize) -> Vec<T> {
+    ring[at..].iter().chain(&ring[..at]).copied().collect()
+}
+
+/// `ring` counter-clockwise, its `breaks` (the corners where one curve ends and the next begins) following it.
+fn ccw_marked(ring: Vec<P2>, breaks: Vec<usize>) -> (Vec<P2>, Vec<usize>) {
+    if crate::geom::area(&ring) < 0.0 {
+        let n = ring.len();
+        let mut breaks: Vec<usize> = breaks.into_iter().filter(|b| *b < n).map(|b| n - 1 - b).collect();
+        breaks.sort_unstable();
+        (ring.into_iter().rev().collect(), breaks)
+    } else {
+        (ring, breaks)
+    }
+}
+
+/// The corners of the open run `pts` (a curve, both its ends in) and where each lies along it, 0 to 1 of its length.
+fn run_places(pts: &[P2]) -> Vec<f64> {
+    let total: f64 = pts.windows(2).map(|w| w[0].dist(w[1])).sum();
+    let mut at = 0.0;
+    let last = pts.len().saturating_sub(1).max(1) as f64;
+    pts.iter()
+        .enumerate()
+        .map(|(i, p)| {
+            if i > 0 {
+                at += pts[i - 1].dist(*p);
+            }
+            if total > 1e-12 { at / total } else { i as f64 / last }
+        })
+        .collect()
+}
+
+/// The point of the open run `pts` at `s` of its length from its first corner.
+fn run_at(pts: &[P2], s: f64, places: &[f64]) -> P2 {
+    for (i, w) in pts.windows(2).enumerate() {
+        let (lo, hi) = (places.get(i).copied().unwrap_or(0.0), places.get(i + 1).copied().unwrap_or(1.0));
+        if s <= hi + 1e-12 {
+            let f = if hi - lo > 1e-12 { ((s - lo) / (hi - lo)).clamp(0.0, 1.0) } else { 0.0 };
+            return w[0] + (w[1] - w[0]) * f;
+        }
+    }
+    pts.last().copied().unwrap_or_default()
+}
+
+/// Two rings paired corner to corner, as a blend's sides run. Where both are drawn of as many curves (`bottom_breaks` and
+/// `top_breaks` are the corners where a curve starts: a line, or an arc drawn as many corners) a curve runs to its own: `top` is
+/// turned to start at its curve that starts nearest `bottom`'s first (by their angles round their middles), then curve k
+/// runs to curve k, each pair with a corner put where the other has one along their lengths, so a line's ends join a line's ends
+/// and an arc's an arc's, as Revit rules them. Else `top` is turned to start at its corner nearest `bottom`'s first; one for one
+/// where they have as many corners, else each with a corner put where the other has one, along the lengths of the rings.
+pub(crate) fn paired(bottom: &[P2], bottom_breaks: &[usize], top: &[P2], top_breaks: &[usize]) -> (Vec<P2>, Vec<P2>) {
     let middle = |r: &[P2]| {
         let n = r.len().max(1) as f64;
         P2(r.iter().map(|p| p.0).sum::<f64>() / n, r.iter().map(|p| p.1).sum::<f64>() / n)
     };
     let (mb, mt) = (middle(bottom), middle(top));
     let angle = |p: P2, m: P2| (p.1 - m.1).atan2(p.0 - m.0);
-    let start = bottom.first().map_or(0.0, |p| angle(*p, mb));
+    let breaks = |r: &[P2], b: &[usize]| {
+        let mut b: Vec<usize> = b.iter().copied().filter(|i| *i < r.len()).collect();
+        b.sort_unstable();
+        b.dedup();
+        b
+    };
+    let (bb, tb) = (breaks(bottom, bottom_breaks), breaks(top, top_breaks));
+    let by_curve = bb.len() >= 2 && bb.len() == tb.len();
+    // Where `top` starts: its corner, or its curve's start, nearest `bottom`'s first.
+    let first_of = bottom.get(if by_curve { bb[0] } else { 0 }).map_or(0.0, |p| angle(*p, mb));
     let gap = |a: f64| {
-        let d = (a - start).rem_euclid(std::f64::consts::TAU);
+        let d = (a - first_of).rem_euclid(std::f64::consts::TAU);
         d.min(std::f64::consts::TAU - d)
     };
-    let first = (0..top.len()).min_by(|i, j| gap(angle(top[*i], mt)).total_cmp(&gap(angle(top[*j], mt)))).unwrap_or(0);
-    let top: Vec<P2> = top[first..].iter().chain(&top[..first]).copied().collect();
-    if bottom.len() == top.len() {
-        return (bottom.to_vec(), top);
+    let candidates: Vec<usize> = if by_curve { tb.clone() } else { (0..top.len()).collect() };
+    let first = candidates.iter().copied().min_by(|i, j| gap(angle(top[*i], mt)).total_cmp(&gap(angle(top[*j], mt)))).unwrap_or(0);
+    let turned = rotated(top, first);
+    if by_curve {
+        let bottom = rotated(bottom, bb[0]);
+        // The curves of each ring, their start corners now counted from its first.
+        let starts = |b: &[usize], from: usize, n: usize| -> Vec<usize> { b.iter().map(|i| (i + n - from) % n).collect() };
+        let (mut bs, mut ts) = (starts(&bb, bb[0], bottom.len()), starts(&tb, first, turned.len()));
+        bs.sort_unstable();
+        ts.sort_unstable();
+        let (mut out_b, mut out_t) = (Vec::new(), Vec::new());
+        for k in 0..bs.len() {
+            let run = |ring: &[P2], s: &[usize]| -> Vec<P2> {
+                let end = s.get(k + 1).copied().unwrap_or(ring.len());
+                let mut pts: Vec<P2> = ring[s[k]..end].to_vec();
+                // The next curve's first corner closes it (the ring's first, for the last).
+                pts.push(ring[end % ring.len()]);
+                pts
+            };
+            let (rb, rt) = (run(&bottom, &bs), run(&turned, &ts));
+            let (pb, pt) = (run_places(&rb), run_places(&rt));
+            let mut at: Vec<f64> = pb[..pb.len() - 1].iter().chain(&pt[..pt.len() - 1]).copied().collect();
+            at.sort_by(f64::total_cmp);
+            at.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+            out_b.extend(at.iter().map(|s| run_at(&rb, *s, &pb)));
+            out_t.extend(at.iter().map(|s| run_at(&rt, *s, &pt)));
+        }
+        return (out_b, out_t);
     }
-    let mut at: Vec<f64> = places(bottom).into_iter().chain(places(&top)).collect();
+    if bottom.len() == turned.len() {
+        return (bottom.to_vec(), turned);
+    }
+    let mut at: Vec<f64> = places(bottom).into_iter().chain(places(&turned)).collect();
     at.sort_by(f64::total_cmp);
     at.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
-    (at.iter().map(|s| at_length(bottom, *s)).collect(), at.iter().map(|s| at_length(&top, *s)).collect())
+    (at.iter().map(|s| at_length(bottom, *s)).collect(), at.iter().map(|s| at_length(&turned, *s)).collect())
 }
 
-/// A blend: `bottom` at `from` and `top` at `to` across `plane`, their corners paired ([`paired`]), its sides ruled between
-/// them, every triangle turned out.
-pub(crate) fn blend(bottom: &[P2], top: &[P2], from: f64, to: f64, plane: Plane) -> Result<Vec<[P3; 3]>, String> {
-    let (bottom, top) = (ccw(bottom.to_vec()), ccw(top.to_vec()));
-    let (b, t) = paired(&bottom, &top);
+/// A blend: `bottom` at `from` and `top` at `to` across `plane`, their corners paired ([`paired`]; `bottom_breaks` and
+/// `top_breaks` are the corners where each curve of a ring starts), its sides ruled between them, every triangle turned out.
+pub(crate) fn blend(
+    (bottom, bottom_breaks): (&[P2], &[usize]),
+    (top, top_breaks): (&[P2], &[usize]),
+    from: f64,
+    to: f64,
+    plane: Plane,
+) -> Result<Vec<[P3; 3]>, String> {
+    let ((bottom, bottom_breaks), (top, top_breaks)) =
+        (ccw_marked(bottom.to_vec(), bottom_breaks.to_vec()), ccw_marked(top.to_vec(), top_breaks.to_vec()));
+    let (b, t) = paired(&bottom, &bottom_breaks, &top, &top_breaks);
     let mut tris = Vec::new();
     for [x, y, z] in cap(&bottom)? {
         tris.push([embed(plane, bottom[x], from), embed(plane, bottom[z], from), embed(plane, bottom[y], from)]);
@@ -384,15 +475,23 @@ pub(crate) fn arc3(a: P3, b: P3, centre: P3, normal: P3, clockwise: bool) -> Vec
 /// `ring` with each of `bends` (the edge from corner `edge` to the next, its centre, clockwise) drawn as its true arc:
 /// the arc's points put in after the corner. An edge past the ring's end is left straight.
 pub(crate) fn bent2(ring: Vec<P2>, bends: &[(usize, P2, bool)]) -> Vec<P2> {
+    bent2_marked(ring, bends).0
+}
+
+/// [`bent2`], and where each of the ring's own corners now is among its points: where one curve (a line, or an arc drawn as many
+/// corners) ends and the next begins.
+pub(crate) fn bent2_marked(ring: Vec<P2>, bends: &[(usize, P2, bool)]) -> (Vec<P2>, Vec<usize>) {
     let n = ring.len();
     let mut out = Vec::with_capacity(n);
+    let mut breaks = Vec::with_capacity(n);
     for (i, p) in ring.iter().enumerate() {
+        breaks.push(out.len());
         out.push(*p);
         if let Some((_, c, cw)) = bends.iter().find(|(e, _, _)| *e == i) {
             out.extend(arc2(*p, ring[(i + 1) % n], *c, *cw));
         }
     }
-    out
+    (out, breaks)
 }
 
 /// [`bent2`] in 3D, for a sweep's path (`closed`: its last corner joins its first) and its profiles.
@@ -426,7 +525,7 @@ mod tests {
         assert!((v - 7500.0 * 10.0).abs() < 1.0, "{v}");
         // A frustum from 100 square to 50 square, 30 tall: h/3 (A1 + A2 + sqrt(A1 A2)).
         let top: Vec<P2> = square(50.0).into_iter().map(|p| P2(p.0 + 25.0, p.1 + 25.0)).collect();
-        let v = volume(&blend(&square(100.0), &top, 0.0, 30.0, Plane::Xy).unwrap());
+        let v = volume(&blend((&square(100.0), &[]), (&top, &[]), 0.0, 30.0, Plane::Xy).unwrap());
         assert!((v - 10.0 * (10000.0 + 2500.0 + 5000.0)).abs() < 1.0, "{v}");
         // A 10 x 10 profile along an L of 100 and 100: 2 x 100 x 100 with the mitre in.
         let section = [[0.0, -5.0, -5.0], [0.0, 5.0, -5.0], [0.0, 5.0, 5.0], [0.0, -5.0, 5.0]];
@@ -444,8 +543,58 @@ mod tests {
         assert!((v - want).abs() < want * 0.01, "{v} against {want}, path {path:?}");
         // Blend rings of different counts pair along their lengths.
         let tri = vec![P2(0.0, 0.0), P2(10.0, 0.0), P2(5.0, 8.0)];
-        let (a, b) = paired(&square(10.0), &tri);
+        let (a, b) = paired(&square(10.0), &[], &tri, &[]);
         assert_eq!(a.len(), b.len());
+    }
+
+    /// A line and an arc, the line first: its corners and where each curve starts.
+    fn line_and_arc(half: f64, centre: P2, ccw_arc: bool) -> (Vec<P2>, Vec<usize>) {
+        let corners = vec![P2(-half, 0.0), P2(half, 0.0)];
+        let (ring, breaks) = bent2_marked(corners, &[(1, centre, !ccw_arc)]);
+        (ring, breaks)
+    }
+
+    #[test]
+    fn a_blend_pairs_its_curves_one_to_one() {
+        // Bottom: a line of 272 and a half circle of radius 136. Top: a line of 265 and an arc of radius 179 over about 96 degrees.
+        // (As a toilet's blend between its bowl's rim and its base.)
+        let bottom = line_and_arc(136.0, P2(0.0, 0.0), true);
+        let top = line_and_arc(132.5, P2(0.0, -(179.0_f64 * 179.0 - 132.5 * 132.5).sqrt()), true);
+        assert_ne!(bottom.0.len(), top.0.len(), "rings of different counts, which the whole ring pairs by share of its length");
+        let on_line = |p: &P2| p.1.abs() < 1e-9;
+        let checked = |bottom: &(Vec<P2>, Vec<usize>), top: &(Vec<P2>, Vec<usize>)| {
+            let (b, t) = paired(&bottom.0, &bottom.1, &top.0, &top.1);
+            assert_eq!(b.len(), t.len());
+            for (p, q) in b.iter().zip(&t) {
+                assert_eq!(on_line(p), on_line(q), "a side runs from {p:?} to {q:?}: a line's point to an arc's");
+            }
+            // The line's ends join the line's ends.
+            for (x, y) in [(-136.0, -132.5), (136.0, 132.5)] {
+                assert!(
+                    b.iter().zip(&t).any(|(p, q)| p.dist(P2(x, 0.0)) < 1e-9 && q.dist(P2(y, 0.0)) < 1e-9),
+                    "the line's end {x} joins {y}: {b:?} {t:?}"
+                );
+            }
+            // Every corner of either ring is kept.
+            for p in &bottom.0 {
+                assert!(b.iter().any(|q| q.dist(*p) < 1e-9), "{p:?} of the bottom is kept");
+            }
+            for p in &top.0 {
+                assert!(t.iter().any(|q| q.dist(*p) < 1e-9), "{p:?} of the top is kept");
+            }
+        };
+        checked(&bottom, &top);
+        // The top starting at its arc, or wound the other way round, pairs the same curves.
+        let arc_first = {
+            let (ring, breaks) =
+                bent2_marked(vec![P2(132.5, 0.0), P2(-132.5, 0.0)], &[(0, P2(0.0, -(179.0_f64 * 179.0 - 132.5 * 132.5).sqrt()), false)]);
+            (ring, breaks)
+        };
+        checked(&bottom, &arc_first);
+        let n = top.0.len();
+        let backwards = (top.0.iter().rev().copied().collect::<Vec<_>>(), top.1.iter().map(|b| n - 1 - b).collect::<Vec<_>>());
+        let solid = blend((&bottom.0, &bottom.1), (&backwards.0, &backwards.1), 0.0, 100.0, Plane::Xy).unwrap();
+        assert!(volume(&solid) > 0.0, "a blend of them encloses a volume");
     }
 
     #[test]
