@@ -297,3 +297,23 @@ fn a_walls_face_lines_stop_at_a_doors_opening() {
         }
     }
 }
+
+#[test]
+fn a_screens_lines_do_not_thicken_as_it_zooms_in() {
+    // Revit keeps a line's width at its weight's for the view's scale whatever the zoom: zooming in makes the drawing bigger, not
+    // its lines heavier. The screen's plan at a tenth of a pixel to the mm and at four times that draws the wall's cut outline as
+    // wide as each other, and as wide as pen 10 is at 1 : 100 (0.35 mm, 5 pixels to a mm of paper).
+    let mut s = Session::new();
+    let wall = id_of(&run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]]})));
+    let widest = |scale: f64| {
+        let view = crate::render::View { scale, cx: 2000.0, cy: 0.0, width: 1000, height: 800 };
+        let d = render::draw(&s.model, 100000, view);
+        let width = strokes(&d, wall).into_iter().filter(|(_, dashed, ..)| !dashed).map(|(w, ..)| w).fold(0.0, f32::max);
+        (width, d.width(Pen(10)))
+    };
+    let ((far, pen_far), (near, pen_near)) = (widest(0.1), widest(0.4));
+    assert!(far > 0.0, "the wall is drawn");
+    assert!((far - near).abs() < 1e-4, "{far} px zoomed out, {near} px zoomed in");
+    assert!((far - pen_far).abs() < 1e-4 && (near - pen_near).abs() < 1e-4, "each is its pen's width: {far} {pen_far}, {near} {pen_near}");
+    assert!((pen_far - pen_near).abs() < 1e-4, "a pen's width is the same at every zoom of a screen");
+}
