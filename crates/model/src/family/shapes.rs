@@ -329,9 +329,6 @@ pub(crate) fn along_holed(path: &[P3], section: &[P3], section_end: &[P3], holes
     Ok(outward(tris))
 }
 
-/// Corners a true arc is drawn with per turn, as a circle's.
-const PER_TURN: f64 = super::SEGMENTS as f64;
-
 /// The points strictly between `a` and `b` of the arc about `centre` from one to the other, counter-clockwise (or clockwise),
 /// its radius going from `a`'s to `b`'s where they differ; an arc from a point back to itself is a whole turn.
 pub(crate) fn arc2(a: P2, b: P2, centre: P2, clockwise: bool) -> Vec<P2> {
@@ -347,7 +344,8 @@ pub(crate) fn arc2(a: P2, b: P2, centre: P2, clockwise: bool) -> Vec<P2> {
     } else {
         (a1 - a0).rem_euclid(tau)
     };
-    let steps = (turn.abs() / tau * PER_TURN).ceil().clamp(1.0, 4.0 * PER_TURN) as usize;
+    // Corners as a circle's: within half a millimetre of the arc, its larger radius where it spirals.
+    let steps = super::sides(turn.abs(), ra.max(rb));
     (1..steps)
         .map(|k| {
             let f = k as f64 / steps as f64;
@@ -448,5 +446,35 @@ mod tests {
         let tri = vec![P2(0.0, 0.0), P2(10.0, 0.0), P2(5.0, 8.0)];
         let (a, b) = paired(&square(10.0), &tri);
         assert_eq!(a.len(), b.len());
+    }
+
+    #[test]
+    fn an_arc_is_drawn_within_half_a_millimetre_of_its_circle() {
+        // 48 degrees at radius 558 (the bowl of a toilet), centre at the origin.
+        let r = 558.0;
+        let (a, b) = (P2(r, 0.0), P2(r * 48.0_f64.to_radians().cos(), r * 48.0_f64.to_radians().sin()));
+        let mid = arc2(a, b, P2(0.0, 0.0), false);
+        let mut pts = vec![a];
+        pts.extend(mid);
+        pts.push(b);
+        assert!(pts.len() > 6, "more corners than 32 a turn gives: {}", pts.len());
+        for w in pts.windows(2) {
+            let m = P2((w[0].0 + w[1].0) / 2.0, (w[0].1 + w[1].1) / 2.0);
+            let sag = r - m.dist(P2(0.0, 0.0));
+            assert!((0.0..=0.5 + 1e-9).contains(&sag), "a chord sags {sag} mm");
+        }
+    }
+
+    #[test]
+    fn a_small_circle_keeps_32_sides() {
+        // Within half a millimetre already: no more than the 32 a turn, whole or in part.
+        assert_eq!(super::super::sides(std::f64::consts::TAU, 50.0), 32);
+        assert_eq!(super::super::sides(std::f64::consts::PI, 50.0), 16);
+        // A large one gets more, to no more than 256 a turn.
+        let big = super::super::sides(std::f64::consts::TAU, 558.0);
+        assert!((64..=256).contains(&big), "{big}");
+        assert_eq!(super::super::sides(std::f64::consts::TAU, 1e9), 256);
+        // At least one side, whatever the turn.
+        assert_eq!(super::super::sides(0.0, 500.0), 1);
     }
 }

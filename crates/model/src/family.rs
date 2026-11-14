@@ -1260,8 +1260,24 @@ impl Shape {
 
 /// How deep a formula may nest.
 const MAX_DEPTH: usize = 64;
-/// Sides a circle's profile is drawn with.
+/// Sides a full turn of a curve is drawn with at least.
 const SEGMENTS: usize = 32;
+/// Sides a full turn of a curve is drawn with at most.
+const MOST_SEGMENTS: usize = 256;
+/// How far a chord of a curve may sag from it, mm: Revit's fine tessellation, which the check compares with, stays within a
+/// fraction of a millimetre of the true surface.
+pub(crate) const SAG: f64 = 0.5;
+
+/// Sides an arc of `turn` radians at radius `r` is drawn with: at least 32 a turn, enough that no chord sags more than [`SAG`],
+/// at most 256 a turn. (A millionth of a side is float noise, not a side.)
+pub(crate) fn sides(turn: f64, r: f64) -> usize {
+    use std::f64::consts::TAU;
+    let turn = turn.abs();
+    let base = (turn / TAU * SEGMENTS as f64 - 1e-9).ceil();
+    let by_sag = if r.is_finite() && r > SAG { (turn / (2.0 * (1.0 - SAG / r).acos()) - 1e-9).ceil() } else { 0.0 };
+    let most = (turn / TAU * MOST_SEGMENTS as f64 - 1e-9).ceil().max(1.0);
+    base.max(by_sag).clamp(1.0, most) as usize
+}
 /// Degrees a symbol's arc turns between the corners it is drawn with.
 const ARC_STEP: f64 = 3.75;
 /// Corners one profile may have.
@@ -2829,8 +2845,9 @@ impl Family {
                     if r <= 0.0 {
                         return Err(format!("its circle's radius is {r}; it needs one above zero"));
                     }
-                    (0..SEGMENTS)
-                        .map(|k| (k as f64 * std::f64::consts::TAU / SEGMENTS as f64).sin_cos())
+                    let n = sides(std::f64::consts::TAU, r);
+                    (0..n)
+                        .map(|k| (k as f64 * std::f64::consts::TAU / n as f64).sin_cos())
                         .map(|(s, c)| P2(x + r * c, y + r * s))
                         .collect()
                 }
@@ -3215,7 +3232,7 @@ fn revolve(ring: &[P2], [p0, p1]: [P2; 2], (from, to): (f64, f64), plane: Plane)
     let w = cross(u, n);
     let turn = to - from;
     let full = turn > 360.0 - 1e-9;
-    let steps = (turn / 360.0 * SEGMENTS as f64 - 1e-9).ceil().max(1.0) as usize;
+    let steps = sides(turn.to_radians(), most.max(-least));
     let angle = |k: usize| (from + turn * (if full { k % steps } else { k }) as f64 / steps as f64).to_radians().sin_cos();
     let at = |i: usize, k: usize| -> P3 {
         let (t, r) = reach.get(i).copied().unwrap_or_default();
@@ -4234,14 +4251,22 @@ mod tests {
         f.pieces("A", &f.values("A", &BTreeMap::new())?)
     }
 
+    /// The area of a polygon sector of `turn` radians about a unit radius, as a revolve out to `r` draws it (`sides` of them).
+    fn sector(turn: f64, r: f64) -> f64 {
+        let n = sides(turn, r) as f64;
+        n / 2.0 * (turn / n).sin()
+    }
+
     #[test]
     fn a_revolve_turns_its_profile_about_its_axis() {
         // A tube: a rectangle across x and z, 100 to `R` out from the z axis, turned all the way round it.
         let ring = json!([[100, 0], ["R", 0], ["R", 500], [100, 500]]);
         let tube = built(json!([{"plane": "xz", "profile": ring, "axis": [[0, 0], [0, 1]], "to": 360}])).unwrap();
         let [p] = tube.as_slice() else { panic!("{tube:?}") };
-        // Its sides are polygons of 32 sides: their area is a hair under the circle's.
-        let k = 16.0 * (std::f64::consts::TAU / 32.0).sin() / std::f64::consts::PI;
+        // Its sides are polygons of as many sides as keep a chord within half a millimetre of the circle (55 out to 300): their
+        // area is a hair under the circle's.
+        assert_eq!(sides(std::f64::consts::TAU, 300.0), 55);
+        let k = sector(std::f64::consts::TAU, 300.0) / std::f64::consts::PI;
         let want = std::f64::consts::PI * (300.0 * 300.0 - 100.0 * 100.0) * 500.0 * k;
         assert!((volume(&p.tris) / want - 1.0).abs() < 1e-6, "{} not {want}", volume(&p.tris));
         assert_eq!((p.bottom, p.top), (0.0, 500.0));
@@ -4251,10 +4276,11 @@ mod tests {
         );
         // A quarter of it, closed at both ends; its axis given the other way round, or across x and y.
         let quarter = built(json!([{"plane": "xz", "profile": ring, "axis": [[0, 1], [0, 0]], "from": 0, "to": 90}])).unwrap();
-        assert!((volume(&quarter[0].tris) / (want / 4.0) - 1.0).abs() < 1e-6, "{}", volume(&quarter[0].tris));
+        let quarter_of = sector(std::f64::consts::FRAC_PI_2, 300.0) * (300.0 * 300.0 - 100.0 * 100.0) * 500.0;
+        assert!((volume(&quarter[0].tris) / quarter_of - 1.0).abs() < 1e-6, "{}", volume(&quarter[0].tris));
         let half = built(json!([{"profile": [[100, 0], [300, 0], [300, 50], [100, 50]], "axis": [[0, 0], [0, 1]], "to": 180}])).unwrap();
-        let ring_of = std::f64::consts::PI * (300.0 * 300.0 - 100.0 * 100.0) * 50.0 * k;
-        assert!((volume(&half[0].tris) / (ring_of / 2.0) - 1.0).abs() < 1e-6, "{}", volume(&half[0].tris));
+        let half_of = sector(std::f64::consts::PI, 300.0) * (300.0 * 300.0 - 100.0 * 100.0) * 50.0;
+        assert!((volume(&half[0].tris) / half_of - 1.0).abs() < 1e-6, "{}", volume(&half[0].tris));
         assert!((half[0].top - half[0].bottom - 300.0).abs() < 1e-6, "turned out of its plane, 300 to one side");
         // A profile across its axis, an axis of one point, a turn of nothing or more than all the way: said.
         for (form, says) in [
@@ -4272,8 +4298,7 @@ mod tests {
     fn a_revolve_faces_out_whatever_plane_side_and_direction_it_turns() {
         // The same tube, 100 to 300 out and 500 along: drawn across each plane, to either side of its axis, the axis given
         // either way round, from any angle: one volume, turned out.
-        let k = 16.0 * (std::f64::consts::TAU / 32.0).sin();
-        let want = k * (300.0 * 300.0 - 100.0 * 100.0) * 500.0;
+        let want = sector(std::f64::consts::TAU, 300.0) * (300.0 * 300.0 - 100.0 * 100.0) * 500.0;
         let across = |a0: f64, a1: f64| json!([[a0, 0], [a1, 0], [a1, 500], [a0, 500]]);
         for (plane, profile, axis) in [
             ("xz", across(100.0, 300.0), json!([[0, 0], [0, 1]])),
@@ -4295,7 +4320,7 @@ mod tests {
         }
         // A part turn is closed by two caps, turned out. About an axis beside the origin, with neither cap in a plane through it
         // (a cap in one adds nothing to the volume, however it faces), the volume is the sector's only if both are.
-        let sector = k / 4.0 * (300.0 * 300.0 - 100.0 * 100.0) * 500.0;
+        let sector = sector(std::f64::consts::FRAC_PI_2, 300.0) * (300.0 * 300.0 - 100.0 * 100.0) * 500.0;
         for (from, to) in [(30, 120), (-120, -30)] {
             for axis in [json!([[1000, 0], [1000, 1]]), json!([[1000, 1], [1000, 0]])] {
                 let part =
@@ -4308,12 +4333,13 @@ mod tests {
 
     #[test]
     fn a_part_turn_about_an_upright_axis_shows_a_slice_in_plan_and_a_circle_makes_a_torus() {
-        let k = 16.0 * (std::f64::consts::TAU / 32.0).sin();
+        let k = 2.0 * sector(std::f64::consts::FRAC_PI_2, 300.0);
         let ring = json!([[100, 0], [300, 0], [300, 500], [100, 500]]);
         let quarter = built(json!([{"plane": "xz", "profile": ring, "axis": [[0, 0], [0, 1]], "to": 90}])).unwrap();
         let outline = &quarter[0].outline;
-        // 4 sin δ (R² − r²) where δ is a step's angle: a quarter of the ring, as the polygon makes it, counter-clockwise, from +x.
-        assert!((crate::geom::area(outline) / (k / 4.0 * (300.0 * 300.0 - 100.0 * 100.0)) - 1.0).abs() < 1e-6, "{outline:?}");
+        // (n / 2) sin δ (R² − r²) where δ is a step's angle and n the steps: a quarter of the ring, as the polygon makes it,
+        // counter-clockwise, from +x.
+        assert!((crate::geom::area(outline) / (k / 2.0 * (300.0 * 300.0 - 100.0 * 100.0)) - 1.0).abs() < 1e-6, "{outline:?}");
         assert!(outline.iter().all(|p| p.0 > -1e-6 && p.1 > -1e-6), "in the first quarter: {outline:?}");
         // The same turned the other way round the axis, the other way round the plan.
         let down = built(json!([{"plane": "xz", "profile": ring, "axis": [[0, 1], [0, 0]], "to": 90}])).unwrap();
@@ -4321,7 +4347,7 @@ mod tests {
         // A profile on the axis: a slice of a disc, its centre one of its corners.
         let wedge =
             built(json!([{"plane": "xz", "profile": [[0, 0], [300, 0], [300, 500], [0, 500]], "axis": [[0, 0], [0, 1]], "to": 90}]));
-        assert!((crate::geom::area(&wedge.unwrap()[0].outline) / (k / 4.0 * 300.0 * 300.0) - 1.0).abs() < 1e-6);
+        assert!((crate::geom::area(&wedge.unwrap()[0].outline) / (k / 2.0 * 300.0 * 300.0) - 1.0).abs() < 1e-6);
         // A circle turned about an axis beside it: a torus. Its volume is its circle's area times the way its centre goes.
         let donut = built(json!([{"plane": "xz", "circle": {"centre": [500, 100], "radius": 100}, "axis": [[0, 0], [0, 1]], "to": 360}]));
         let donut = donut.unwrap();
@@ -4356,15 +4382,17 @@ mod tests {
         let block = json!({"profile": [[-300, -300], [300, -300], [300, 300], [-300, 300]], "from": 0, "to": 200});
         let bowl = json!({"plane": "xz", "profile": [[0, 50], [200, 50], [200, 250], [0, 250]], "axis": [[0, 0], [0, 1]], "to": 360, "void": true});
         let basin = built(json!([block, bowl])).unwrap();
-        let k = 16.0 * (std::f64::consts::TAU / 32.0).sin();
+        let k = sector(std::f64::consts::TAU, 200.0);
         assert!((volume(&basin[0].tris) - (600.0 * 600.0 * 200.0 - k * 200.0 * 200.0 * 150.0)).abs() < 1.0, "{}", volume(&basin[0].tris));
     }
 
     #[test]
     fn voids_of_many_triangles_never_exhaust_the_stack() {
-        // Two revolves of 64 corners each, the one cutting the other, on a small stack: done, and quickly.
-        let ring: Vec<Value> = (0..MAX_PROFILE)
-            .map(|k| (k as f64 * std::f64::consts::TAU / MAX_PROFILE as f64).sin_cos())
+        // Two revolves of 28 corners each (a turn is 71 sides out to 500 mm, within half a millimetre of the circle: about the
+        // faces 64 corners of 32 sides were), the one cutting the other, on a small stack: done, and quickly.
+        const CORNERS: usize = 28;
+        let ring: Vec<Value> = (0..CORNERS)
+            .map(|k| (k as f64 * std::f64::consts::TAU / CORNERS as f64).sin_cos())
             .map(|(s, c)| json!([400.0 + 100.0 * c, 300.0 + 100.0 * s]))
             .collect();
         let worked = std::thread::Builder::new()
