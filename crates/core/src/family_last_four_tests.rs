@@ -282,3 +282,61 @@ fn a_line_pattern_the_engine_cannot_hold_is_said_and_left_out_not_a_reason_to_re
     let e = Session::new().execute("family", &plain).unwrap_err();
     assert!(e.contains("line_patterns") || e.contains("line pattern"), "{e}");
 }
+
+#[test]
+fn object_styles_lists_a_familys_subcategories_under_their_category_and_edits_them() {
+    let mut s = Session::new();
+    run(
+        &mut s,
+        "family",
+        json!({"name": "Sample Block", "category": "furniture", "types": {"A": {}},
+               "forms": [{"profile": [[0, 0], [100, 0], [100, 100], [0, 100]], "from": 0, "to": 100}],
+               "subcategories": [{"name": "Edge", "color": [1, 2, 3]}, {"name": "Rim"}]}),
+    );
+    let row = |v: &Value, key: &str| v["subcategories"].as_array().unwrap().iter().find(|r| r["key"] == key).cloned();
+    let all = run(&mut s, "object_styles", json!({}));
+    let edge = row(&all, "furniture/Edge").expect("a row for each subcategory");
+    assert_eq!(
+        (edge["category"].clone(), edge["name"].clone(), edge["color"].clone(), edge["own"].clone()),
+        (json!("furniture"), json!("Edge"), json!([1, 2, 3]), json!(true))
+    );
+    let rim = row(&all, "furniture/Rim").expect("a plain one too");
+    assert_eq!((rim["projection"].clone(), rim["own"].clone()), (json!(null), json!(false)));
+    // Set, as Revit's dialog sets a row: its weights, colour, pattern and material.
+    let material = s.model.materials.keys().next().expect("the project has a material").clone();
+    let set = run(
+        &mut s,
+        "object_styles",
+        json!({"subcategories": {"furniture/Rim": {"projection": 3, "cut": 5, "color": [9, 8, 7], "pattern": "Dash", "material": material}}}),
+    );
+    let rim = row(&set, "furniture/Rim").unwrap();
+    assert_eq!(
+        (rim["projection"].clone(), rim["cut"].clone(), rim["color"].clone(), rim["pattern"].clone(), rim["material"].clone()),
+        (json!(3), json!(5), json!([9, 8, 7]), json!("Dash"), json!(material))
+    );
+    let style = s.model.subcategory_style("furniture", "Rim").expect("the project's style");
+    assert_eq!((style.projection, style.cut), (Some(crate::pen::Pen(3)), Some(crate::pen::Pen(5))));
+    // What isn't given stays; null takes it back to none, and a style with nothing is no style.
+    let part = run(&mut s, "object_styles", json!({"subcategories": {"furniture/Rim": {"projection": null}}}));
+    let rim = row(&part, "furniture/Rim").unwrap();
+    assert_eq!((rim["projection"].clone(), rim["cut"].clone()), (json!(null), json!(5)));
+    run(
+        &mut s,
+        "object_styles",
+        json!({"subcategories": {"furniture/Rim": {"cut": null, "color": null, "pattern": null, "material": null}}}),
+    );
+    assert!(s.model.subcategory_style("furniture", "Rim").is_none());
+    // Refused: not a subcategory of the project's, a pen that isn't one, a pattern or a material it hasn't.
+    for (given, says) in [
+        (json!({"furniture/Nothing": {"cut": 3}}), "isn't a subcategory"),
+        (json!({"furniture/Rim": {"cut": 0}}), "pen"),
+        (json!({"furniture/Rim": {"cut": 17}}), "pen"),
+        (json!({"furniture/Rim": {"pattern": "No Such"}}), "line pattern"),
+        (json!({"furniture/Rim": {"material": "No Such"}}), "material"),
+        (json!({"furniture/Rim": {"weight": 3}}), "weight"),
+    ] {
+        let e = s.execute("object_styles", &json!({"subcategories": given})).unwrap_err();
+        assert!(e.contains(says), "{given}: {e}");
+    }
+    assert!(s.model.subcategory_style("furniture", "Rim").is_none(), "a refusal changes nothing");
+}
