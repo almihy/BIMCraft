@@ -137,6 +137,9 @@ thread_local! {
     static SMALL: Cell<bool> = const { Cell::new(false) };
     /// The column the next tool of a row is in (`row`), and the most columns a row of the panel being drawn has had.
     static ROW: Cell<Option<usize>> = const { Cell::new(None) };
+    /// Whether the panel being drawn is one of rows alone (as it was last drawn): its columns are its rows' columns, where a panel
+    /// that has a large button too counts its tools one by one, as `fits` does.
+    static BY_ROWS: Cell<bool> = const { Cell::new(false) };
     static COLS: Cell<usize> = const { Cell::new(0) };
     /// How many tools of the panel being drawn were in rows.
     static ROWED: Cell<usize> = const { Cell::new(0) };
@@ -205,8 +208,9 @@ pub(crate) fn small() -> bool {
 }
 
 /// Counts a ribbon tool, and says whether its panel has handed it over to its list: then it isn't drawn on the ribbon. A
-/// handed-over tool takes no room and has no name, so it's found only in the list. A panel hands its tools over by columns: the
-/// ones in a row (`row`) by where each is in its row, the others two to a column when small.
+/// handed-over tool takes no room and has no name, so it's found only in the list. A panel hands its tools over by columns, as
+/// `fits` counts them: a panel of rows alone (`row`) by where each tool is in its row; any other tool by tool, two to a column
+/// when small.
 ///
 /// `smallable` says the tool has a small look (it draws in a `slot`): a panel is made small only if all its tools have.
 pub(crate) fn handed_over(ui: &mut Ui, smallable: bool) -> Option<Response> {
@@ -218,15 +222,16 @@ pub(crate) fn handed_over(ui: &mut Ui, smallable: bool) -> Option<Response> {
     }
     let (n, shown) = TOOLS.with(Cell::get);
     TOOLS.with(|t| t.set((n + 1, shown)));
-    let column = match ROW.with(Cell::get) {
-        Some(c) => {
-            ROW.with(|r| r.set(Some(c + 1)));
-            COLS.with(|k| k.set(k.get().max(c + 1)));
-            ROWED.with(|k| k.set(k.get() + 1));
-            c
-        }
-        None if small() => n / ROWS,
-        None => n,
+    let in_row = ROW.with(Cell::get);
+    if let Some(c) = in_row {
+        ROW.with(|r| r.set(Some(c + 1)));
+        COLS.with(|k| k.set(k.get().max(c + 1)));
+        ROWED.with(|k| k.set(k.get() + 1));
+    }
+    let column = match in_row {
+        Some(c) if BY_ROWS.with(Cell::get) => c,
+        _ if small() => n / ROWS,
+        _ => n,
     };
     (column >= shown).then(|| ui.allocate_response(Vec2::ZERO, Sense::hover()))
 }
@@ -363,6 +368,8 @@ pub(crate) fn panel(ui: &mut Ui, title: &str, mut add: impl FnMut(&mut Ui)) {
     ROWED.with(|c| c.set(0));
     SMALLABLE.with(|c| c.set(0));
     STRAY.with(|c| c.set(false));
+    let rows_id = id.with("rows-only");
+    BY_ROWS.with(|b| b.set(ui.ctx().data(|d| d.get_temp::<bool>(rows_id)).unwrap_or(false)));
     let font = FontId::proportional(11.5);
     let text = ui.painter().layout_no_wrap(name.to_string(), font.clone(), pal().muted).size().x;
     let drawn = ui
@@ -403,6 +410,8 @@ pub(crate) fn panel(ui: &mut Ui, title: &str, mut add: impl FnMut(&mut Ui)) {
     // A panel is one of rows when all its tools are in them; one that has others too (large ones beside a few rows) is counted tool by tool.
     let cols = if ROWED.with(Cell::take) == tools { COLS.with(Cell::take) } else { 0 };
     COLS.with(|c| c.set(0));
+    BY_ROWS.with(|b| b.set(false));
+    ui.ctx().data_mut(|d| d.insert_temp(rows_id, cols > 0));
     TOOLS.with(|t| t.set((0, usize::MAX)));
     SMALL.with(|s| s.set(false));
     ROW.with(|r| r.set(None));
@@ -584,5 +593,151 @@ mod tests {
         assert_eq!(got, [("Modify".into(), Fit { compact: false, shown: 9 })]);
         // Room for all of it: none handed over.
         assert!(fits(&[modify], 352.0 + RULE, 352.0 + RULE).is_empty());
+    }
+
+    /// A tab of panels drawn as the app draws them, to look at what they hand over and when they ask for another frame.
+    mod drawn {
+        use super::super::*;
+
+        /// A panel: how many large buttons, then its rows of small tools, each a count.
+        pub struct Spec {
+            pub name: &'static str,
+            pub large: usize,
+            pub rows: Vec<usize>,
+            /// Whether its tools have a small look.
+            pub smallable: bool,
+        }
+
+        pub struct Tab {
+            pub ctx: egui::Context,
+            pub spec: Vec<Spec>,
+            key: Id,
+        }
+
+        /// What one frame drew: how many tools each panel showed, whether it asked for another frame, and the tab's plan beforehand.
+        pub struct Frame {
+            pub shown: Vec<usize>,
+            pub repaint: bool,
+            pub planned: Vec<(String, Fit)>,
+        }
+
+        fn tool(ui: &mut Ui, big: bool, smallable: bool, shown: &mut usize) {
+            if handed_over(ui, smallable).is_some() {
+                return;
+            }
+            *shown += 1;
+            match (small(), big) {
+                (true, _) | (false, false) => match slot() {
+                    Some(r) => {
+                        ui.interact(r, ui.id().with(("t", r.min.x.to_bits(), r.min.y.to_bits())), Sense::click());
+                    }
+                    None => {
+                        ui.allocate_exact_size(SMALL_TOOL, Sense::click());
+                    }
+                },
+                (false, true) => {
+                    ui.allocate_exact_size(vec2(54.0, HEIGHT), Sense::click());
+                }
+            }
+        }
+
+        impl Tab {
+            pub fn new(spec: Vec<Spec>) -> Tab {
+                Tab { ctx: egui::Context::default(), spec, key: Id::new("tab") }
+            }
+
+            /// One frame in `room`.
+            pub fn frame(&self, room: f32) -> Frame {
+                let mut shown = vec![0; self.spec.len()];
+                let mut planned = Vec::new();
+                let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(3000.0, 300.0))), ..Default::default() };
+                let key = self.key;
+                let mut out = self.ctx.run_ui(input, |ui| {
+                    let last: (Vec<Seen>, f32, f32, f32) = ui.ctx().data(|d| d.get_temp(key)).unwrap_or_default();
+                    if !last.0.is_empty() {
+                        planned = fits(&last.0, last.1 + if (last.3 - room).abs() < 0.5 { last.2 } else { 0.0 }, room - SLACK);
+                    }
+                    tab(ui, key, room, |ui| {
+                        ui.horizontal(|ui| {
+                            for (spec, shown) in self.spec.iter().zip(shown.iter_mut()) {
+                                panel(ui, spec.name, |ui| {
+                                    for _ in 0..spec.large {
+                                        tool(ui, true, spec.smallable, shown);
+                                    }
+                                    if !spec.rows.is_empty() {
+                                        ui.vertical(|ui| {
+                                            for &n in &spec.rows {
+                                                row(ui, |ui| {
+                                                    for _ in 0..n {
+                                                        tool(ui, false, spec.smallable, shown);
+                                                    }
+                                                });
+                                            }
+                                        });
+                                    }
+                                });
+                            }
+                        });
+                    });
+                });
+                out.textures_delta.clear();
+                let repaint = out.viewport_output.values().any(|v| v.repaint_delay.is_zero());
+                Frame { shown, repaint, planned }
+            }
+
+            /// Frames in `room` until one is laid out and asks for no more, or `limit` of them have been drawn.
+            pub fn settle(&self, room: f32, limit: usize) -> (Frame, usize) {
+                let mut frames = 1;
+                let mut f = self.frame(room);
+                while f.repaint && frames < limit {
+                    f = self.frame(room);
+                    frames += 1;
+                }
+                (f, frames)
+            }
+        }
+    }
+
+    #[test]
+    fn a_panel_with_a_large_button_and_rows_hands_over_as_many_tools_as_fits_planned() {
+        for smallable in [true, false] {
+            // A large button and two rows of three and two: five tools, drawn one by one in that order.
+            let spec = vec![
+                drawn::Spec { name: "A", large: 3, rows: vec![], smallable: true },
+                drawn::Spec { name: "Shape", large: 1, rows: vec![3, 2], smallable },
+            ];
+            let tab = drawn::Tab::new(spec);
+            let whole = tab.frame(2000.0);
+            assert_eq!(whole.shown, [3, 6], "all of them in room enough");
+            let mut handed = false;
+            for room in (60..=400).rev().step_by(4) {
+                let (f, _) = tab.settle(room as f32, 12);
+                let Some((_, plan)) = f.planned.iter().find(|(n, _)| n == "Shape") else { continue };
+                if plan.shown == usize::MAX {
+                    continue;
+                }
+                handed = true;
+                // The tools it shows are the first ones in the order they were drawn: two to a column when small.
+                let want = if plan.compact { plan.shown * 2 } else { plan.shown }.min(6);
+                assert_eq!(f.shown[1], want, "room {room}, plan {plan:?}, smallable {smallable}");
+            }
+            assert!(handed, "the panel was handed over at some width");
+        }
+        // A panel of rows alone hands over by the rows' columns: the last of every row together.
+        let tab = drawn::Tab::new(vec![
+            drawn::Spec { name: "A", large: 3, rows: vec![], smallable: true },
+            drawn::Spec { name: "Rows", large: 0, rows: vec![4, 4], smallable: true },
+        ]);
+        tab.frame(2000.0);
+        let mut handed = false;
+        for room in (60..=400).rev().step_by(4) {
+            let (f, _) = tab.settle(room as f32, 12);
+            let Some((_, plan)) = f.planned.iter().find(|(n, _)| n == "Rows") else { continue };
+            if plan.shown != usize::MAX {
+                handed = true;
+                assert_eq!(f.shown[1], plan.shown.min(4) * 2, "room {room}, plan {plan:?}");
+            }
+        }
+        assert!(handed);
     }
 }
