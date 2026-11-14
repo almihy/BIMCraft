@@ -204,3 +204,45 @@ fn each_new_field_alone_is_written_as_25_and_a_subcategory_style_outlives_its_fa
     assert_eq!(only(json!({"cuts_measured": true})).0, 25);
     assert_eq!(only(json!({"subcategories": [{"name": "Edge", "cut": 3}]})).0, 25);
 }
+
+#[test]
+fn a_region_whose_levels_were_read_keeps_them_and_one_whose_levels_were_not_learns_them_from_revits_plan() {
+    let mut s = Session::new();
+    let all = json!({"coarse": true, "medium": true, "fine": true, "plan": true, "front": false, "side": false});
+    let region = |from: f64, to: f64, extra: Value| {
+        let mut r = json!({"view": "plan", "filled": true, "masking": true, "show": all,
+                           "curves": [{"line": [[from, 0, 0], [to, 0, 0]]}]});
+        for (k, v) in extra.as_object().into_iter().flatten() {
+            r[k] = v.clone();
+        }
+        r
+    };
+    // Revit's plan draws both regions' edges at Medium and Fine only, and a package says each is shown at every level (the
+    // second says it read that: `levels_read`; or read Medium and Fine only).
+    let said = |extra: Value| {
+        let mut r = region(0.0, 100.0, extra);
+        r["show"] = json!({"coarse": false, "medium": true, "fine": true, "plan": true, "front": false, "side": false});
+        r
+    };
+    let fam = json!({
+        "name": "Sample Sill", "category": "door", "host": "wall", "types": {"A": {}},
+        "symbols": [{"line": [[0, 0], [100, 0]], "types": ["A"], "snapshot": true, "show": {"coarse": false}},
+                    {"line": [[0, 50], [100, 50]], "types": ["A"], "snapshot": true, "show": {"coarse": false}},
+                    {"line": [[0, 80], [100, 80]], "types": ["A"], "snapshot": true, "show": {"coarse": false}}],
+        "parameters": [{"name": "Width", "kind": "length", "value": 900}, {"name": "Height", "kind": "length", "value": 2100}],
+        "revit": {"reference_planes": [{"id": "c", "name": "Center", "normal": [1, 0, 0], "defines_origin": true, "at": {"A": 0}}],
+                  "lines": [region(0.0, 100.0, json!({})),
+                            // Read, and drawn at every level though Revit's plan draws it at Medium and Fine (something else hides it).
+                            {"view": "plan", "filled": true, "masking": true, "levels_read": true, "show": all,
+                             "curves": [{"line": [[0, 50, 0], [100, 50, 0]]}]},
+                            said(json!({"levels_read": true, "curves": [{"line": [[0, 80, 0], [100, 80, 0]]}]}))]}
+    });
+    run(&mut s, "family", fam);
+    let f = &s.model.families["Sample Sill"];
+    let masks: Vec<_> = f.symbols.iter().filter(|y| !y.snapshot).collect();
+    assert_eq!(masks.len(), 3, "{masks:?}");
+    let levels = |i: usize| masks[i].show.map(|l| (l.coarse, l.medium, l.fine));
+    assert_eq!(levels(0), Some((false, true, true)), "not read: learnt from Revit's plan");
+    assert_eq!(levels(1), Some((true, true, true)), "read: kept, whatever Revit's plan draws");
+    assert_eq!(levels(2), Some((false, true, true)), "read: Medium and Fine");
+}

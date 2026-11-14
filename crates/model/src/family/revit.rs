@@ -1468,10 +1468,11 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     for d in def["lines"].as_array().into_iter().flatten().take(MOST) {
         match reader.lines(d) {
             Ok(made) => {
-                // The detail levels a masking region's edges are drawn at are learnt from Revit's plan, edge by edge, where the
-                // region's invisible edges (`edge_styles`) are already left out: a family says no levels of a region, and Revit's
-                // plan draws these at Medium and Fine but not at Coarse.
-                if d["masking"].as_bool() == Some(true) {
+                // The detail levels a masking region's edges are drawn at are those its definition says where it says it read them
+                // (`levels_read`: its Visibility Settings, read from Revit). An older package says none, and they are learnt from
+                // Revit's plan, edge by edge, where the region's invisible edges (`edge_styles`) are already left out: Revit's
+                // plan draws such a door's at Medium and Fine but not at Coarse.
+                if d["masking"].as_bool() == Some(true) && d["levels_read"].as_bool() != Some(true) {
                     regions.push(symbols.len()..symbols.len() + made.len());
                 }
                 symbols.extend(made)
