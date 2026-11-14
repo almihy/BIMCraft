@@ -1061,7 +1061,7 @@ fn plugin_button(ui: &mut Ui, label: &str, tip: &str) -> Response {
     if ribbon::listing() {
         return plugin_row(ui, label, tip);
     }
-    if let Some(r) = ribbon::handed_over(ui) {
+    if let Some(r) = ribbon::handed_over(ui, false) {
         return r;
     }
     let (label, tip) = (label.to_string(), t(tip));
@@ -1116,7 +1116,7 @@ fn ribbon_button(ui: &mut Ui, icon: Icon, label: &str, active: bool, tip: &str, 
     if ribbon::listing() {
         return list_row_in(ui, icon, label, active, tip, translate);
     }
-    if let Some(r) = ribbon::handed_over(ui) {
+    if let Some(r) = ribbon::handed_over(ui, true) {
         return r;
     }
     let (label, tip) = if translate { (t(label).to_string(), t(tip)) } else { (label.to_string(), t(tip)) };
@@ -1169,7 +1169,7 @@ fn small_button(ui: &mut Ui, icon: Icon, label: &str, active: bool, tip: &str) -
     if ribbon::listing() {
         return list_row(ui, icon, label, active, tip);
     }
-    if let Some(r) = ribbon::handed_over(ui) {
+    if let Some(r) = ribbon::handed_over(ui, true) {
         return r;
     }
     small_icon(ui, icon, t(label), active, t(tip), name)
@@ -1279,7 +1279,7 @@ pub(crate) fn stacked_button(ui: &mut Ui, icon: Icon, label: &str, active: bool,
     if ribbon::listing() {
         return list_row(ui, icon, label, active, tip);
     }
-    if let Some(r) = ribbon::handed_over(ui) {
+    if let Some(r) = ribbon::handed_over(ui, true) {
         return r;
     }
     let (label, tip) = (t(label), t(tip));

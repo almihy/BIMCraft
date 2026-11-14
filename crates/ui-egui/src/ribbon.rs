@@ -73,6 +73,9 @@ pub(crate) struct Seen {
     cols: usize,
     /// The least a panel is: its name.
     label: f32,
+    /// Whether every tool of it can be drawn as a small icon in a slot: a panel with a tool that can't (a plugin's button has no
+    /// icon) or a widget that isn't a tool is never made small, or its tools would stand stacked out of the ribbon.
+    smallable: bool,
 }
 
 impl Seen {
@@ -102,7 +105,7 @@ impl Seen {
         if self.tools < 2 {
             return self.natural;
         }
-        self.width(1, self.cols == 0).min(self.natural)
+        self.width(1, self.cols == 0 && self.smallable).min(self.natural)
     }
 
     /// How wide it is with `shown` of its units, large or small.
@@ -137,6 +140,10 @@ thread_local! {
     static COLS: Cell<usize> = const { Cell::new(0) };
     /// How many tools of the panel being drawn were in rows.
     static ROWED: Cell<usize> = const { Cell::new(0) };
+    /// How many tools of the panel being drawn can be small icons, and whether something that is no tool came out of a small panel's
+    /// grid (`small_tools`).
+    static SMALLABLE: Cell<usize> = const { Cell::new(0) };
+    static STRAY: Cell<bool> = const { Cell::new(false) };
     /// Where the small tools of the panel being drawn start, and how many are drawn so far (`small_tools`).
     static SLOTS: Cell<Option<(egui::Pos2, usize)>> = const { Cell::new(None) };
     /// A panel's list: how wide its rows were last frame, and how wide the widest row is so far.
@@ -200,9 +207,14 @@ pub(crate) fn small() -> bool {
 /// Counts a ribbon tool, and says whether its panel has handed it over to its list: then it isn't drawn on the ribbon. A
 /// handed-over tool takes no room and has no name, so it's found only in the list. A panel hands its tools over by columns: the
 /// ones in a row (`row`) by where each is in its row, the others two to a column when small.
-pub(crate) fn handed_over(ui: &mut Ui) -> Option<Response> {
+///
+/// `smallable` says the tool has a small look (it draws in a `slot`): a panel is made small only if all its tools have.
+pub(crate) fn handed_over(ui: &mut Ui, smallable: bool) -> Option<Response> {
     if listing() {
         return None;
+    }
+    if smallable {
+        SMALLABLE.with(|k| k.set(k.get() + 1));
     }
     let (n, shown) = TOOLS.with(Cell::get);
     TOOLS.with(|t| t.set((n + 1, shown)));
@@ -306,7 +318,7 @@ pub(crate) fn fits(seen: &[Seen], whole: f32, room: f32) -> Vec<(String, Fit)> {
         }
         // A panel of one tool is not made small: a lone icon beside a name saves next to nothing.
         let small = p.compact_width();
-        if p.tools > 1 && small + 1.0 < p.natural {
+        if p.tools > 1 && p.smallable && small + 1.0 < p.natural {
             over -= p.natural - small;
             fit[i].compact = true;
         }
@@ -349,6 +361,8 @@ pub(crate) fn panel(ui: &mut Ui, title: &str, mut add: impl FnMut(&mut Ui)) {
     ROW.with(|r| r.set(None));
     COLS.with(|c| c.set(0));
     ROWED.with(|c| c.set(0));
+    SMALLABLE.with(|c| c.set(0));
+    STRAY.with(|c| c.set(false));
     let font = FontId::proportional(11.5);
     let text = ui.painter().layout_no_wrap(name.to_string(), font.clone(), pal().muted).size().x;
     let drawn = ui
@@ -380,6 +394,12 @@ pub(crate) fn panel(ui: &mut Ui, title: &str, mut add: impl FnMut(&mut Ui)) {
         .rect
         .width();
     let tools = TOOLS.with(Cell::get).0;
+    // A widget that was no tool in a small panel's grid marks the panel for good: it goes on stacked out of the ribbon.
+    let stray_id = id.with("stray");
+    if STRAY.with(Cell::take) {
+        ui.ctx().data_mut(|d| d.insert_temp(stray_id, true));
+    }
+    let smallable = tools > 0 && SMALLABLE.with(Cell::take) == tools && !ui.ctx().data(|d| d.get_temp::<bool>(stray_id)).unwrap_or(false);
     // A panel is one of rows when all its tools are in them; one that has others too (large ones beside a few rows) is counted tool by tool.
     let cols = if ROWED.with(Cell::take) == tools { COLS.with(Cell::take) } else { 0 };
     COLS.with(|c| c.set(0));
@@ -402,7 +422,9 @@ pub(crate) fn panel(ui: &mut Ui, title: &str, mut add: impl FnMut(&mut Ui)) {
         }
         _ => ui.ctx().data(|d| d.get_temp::<f32>(small_id)).unwrap_or(0.0),
     };
-    SEEN.with(|s| s.borrow_mut().push(Seen { name: title.to_string(), natural, drawn, small, tools, cols, label: text + 24.0 }));
+    SEEN.with(|s| {
+        s.borrow_mut().push(Seen { name: title.to_string(), natural, drawn, small, tools, cols, label: text + 24.0, smallable })
+    });
     // A hairline between panels, short of the card's edges.
     let (rule, _) = ui.allocate_exact_size(vec2(RULE, ui.available_height().max(70.0)), Sense::hover());
     ui.painter().vline(rule.center().x, rule.y_range().shrink(4.0), Stroke::new(1.0, pal().border));
@@ -417,6 +439,7 @@ fn small_tools(ui: &mut Ui, add: &mut impl FnMut(&mut Ui)) -> Rect {
     // A child that takes no room: what isn't a tool of the grid (a handed-over tool's nothing) stays out of the way.
     let mut child = ui.new_child(UiBuilder::new().max_rect(Rect::from_min_size(origin, Vec2::ZERO)));
     add(&mut child);
+    STRAY.with(|s| s.set(child.min_rect().size().max_elem() > 0.5));
     let drawn = SLOTS.with(|s| s.take()).map_or(0, |(_, n)| n);
     let columns = drawn.div_ceil(ROWS);
     let width = if columns == 0 { 0.0 } else { columns as f32 * COLUMN - 2.0 };
@@ -497,7 +520,15 @@ mod tests {
     fn panels(list: &[(f32, usize)]) -> Vec<Seen> {
         list.iter()
             .enumerate()
-            .map(|(i, &(w, n))| Seen { name: format!("p{i}"), natural: w, drawn: w, tools: n, label: 60.0, ..Default::default() })
+            .map(|(i, &(w, n))| Seen {
+                name: format!("p{i}"),
+                natural: w,
+                drawn: w,
+                tools: n,
+                label: 60.0,
+                smallable: true,
+                ..Default::default()
+            })
             .collect()
     }
 
@@ -526,9 +557,29 @@ mod tests {
     }
 
     #[test]
+    fn a_panel_whose_tools_have_no_small_look_is_never_made_small_it_hands_its_tools_over() {
+        // Plugin buttons have no icon: small, they would stand stacked out of the ribbon. 38 over: one of six tools goes.
+        let mut seen = panels(&[(200.0, 4), (300.0, 6)]);
+        seen[1].smallable = false;
+        let got = fits(&seen[1..], 300.0 + RULE, 262.0 + RULE);
+        assert_eq!(got, [("p1".into(), Fit { compact: false, shown: 5 })]);
+        // Beside a panel that can be small, that one is the one made small, and this one is left whole.
+        assert_eq!(fits(&seen, 518.0 + 2.0 * RULE, 420.0), [("p0".into(), SMALL)]);
+    }
+
+    #[test]
     fn a_panel_of_two_rows_hands_over_by_columns_and_only_what_does_not_fit() {
         // Modify's: 11 columns of two small tools, 352 wide, 21 tools in all. 40 over is two columns, not twenty tools' worth.
-        let modify = Seen { name: "Modify".into(), natural: 352.0, drawn: 352.0, tools: 21, cols: 11, label: 60.0, ..Default::default() };
+        let modify = Seen {
+            name: "Modify".into(),
+            natural: 352.0,
+            drawn: 352.0,
+            tools: 21,
+            cols: 11,
+            label: 60.0,
+            smallable: true,
+            ..Default::default()
+        };
         let got = fits(std::slice::from_ref(&modify), 352.0 + RULE, 352.0 + RULE - 40.0);
         assert_eq!(got, [("Modify".into(), Fit { compact: false, shown: 9 })]);
         // Room for all of it: none handed over.
