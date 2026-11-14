@@ -457,15 +457,25 @@ pub struct Subcategory {
     pub color: Option<[u8; 3]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub material: Option<String>,
-    /// The pen its lines are drawn in where they are seen (Revit's Line Weight, Projection), 1 to 16; none, its category's.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// The pen its lines are drawn in where they are seen (Revit's Line Weight, Projection), 1 to 16; none, its category's. Revit's
+    /// -1, a subcategory with no weight (a category that has no cut), reads as none.
+    #[serde(default, deserialize_with = "weight", skip_serializing_if = "Option::is_none")]
     pub projection: Option<crate::pen::Pen>,
     /// The pen its forms are outlined in where a view cuts them (Line Weight, Cut), 1 to 16; none, its category's.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, deserialize_with = "weight", skip_serializing_if = "Option::is_none")]
     pub cut: Option<crate::pen::Pen>,
     /// The line pattern its lines are drawn in, by name: one of the family's `line_patterns` or the project's; none, solid.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern: Option<String>,
+}
+
+/// A line weight as Revit says it: a pen, or -1 (or null) where it has none, which is none.
+fn weight<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<crate::pen::Pen>, D::Error> {
+    match Option::<f64>::deserialize(d)? {
+        Some(n) if n < 0.0 => Ok(None),
+        Some(n) => serde_json::from_value(serde_json::json!(n)).map(Some).map_err(serde::de::Error::custom),
+        None => Ok(None),
+    }
 }
 
 /// A door's or a window's opening in its wall where it isn't `Width` by `Height` (a frame outside the leaf): numbers or
@@ -4487,6 +4497,9 @@ mod tests {
         assert_eq!(f.subcategories[0].projection, Some(crate::pen::Pen(1)));
         assert_eq!((f.subcategories[0].cut, f.subcategories[0].pattern.as_deref()), (Some(crate::pen::Pen(3)), Some("Dash")));
         assert_eq!(f.subcategories[1].projection, None, "a subcategory that says nothing says nothing");
+        // Revit's -1 is a weight it has none of (a category with no cut).
+        let none = styled(json!([{"name": "Opening", "projection": -1, "cut": -1}]), json!({})).unwrap();
+        assert_eq!((none.subcategories[0].projection, none.subcategories[0].cut), (None, None));
         assert_eq!(f.line_patterns["Dash"].0.len(), 2);
         assert!(f.line_patterns["Centre"].is_dash());
         // Written and read back as they are; none of them written where none is said.

@@ -1468,9 +1468,10 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     for d in def["lines"].as_array().into_iter().flatten().take(MOST) {
         match reader.lines(d) {
             Ok(made) => {
-                // A region whose edges each say their own style (`edge_styles`) is drawn as they say: no edge is looked for among
-                // Revit's lines to learn the detail levels it is drawn at.
-                if d["masking"].as_bool() == Some(true) && d["edge_styles"].as_bool() != Some(true) {
+                // The detail levels a masking region's edges are drawn at are learnt from Revit's plan, edge by edge, where the
+                // region's invisible edges (`edge_styles`) are already left out: a family says no levels of a region, and Revit's
+                // plan draws these at Medium and Fine but not at Coarse.
+                if d["masking"].as_bool() == Some(true) {
                     regions.push(symbols.len()..symbols.len() + made.len());
                 }
                 symbols.extend(made)
@@ -2462,7 +2463,7 @@ mod tests {
         assert_eq!(edges.len(), 2, "the two invisible edges are not drawn, whatever the region says: {:?}", f.editable);
         assert_eq!(edges[0].subcategory.as_deref(), Some("Plan Swing"));
         assert_eq!(edges[1].subcategory, None);
-        // Nobody looks for them among Revit's lines to learn the levels they draw at: they say nothing of them.
+        // None of Revit's lines is among theirs here, so their levels stay what their region says (nothing).
         assert!(edges.iter().all(|e| e.show.is_none()));
         // Without it, a region's `invisible` is still all its edges.
         let mut g = door(json!({}));
