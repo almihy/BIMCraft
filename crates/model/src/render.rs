@@ -2032,83 +2032,11 @@ fn section_base_cancellable(
     let (first, last) = span(m, work, v, &look, cancelled)?;
     // Each element's cut pieces, filled as one so where they meet (a roof's slopes at its ridge)
     // leaves no seam.
-    let mut cuts: std::collections::BTreeMap<Id, Vec<Vec<P2>>> = std::collections::BTreeMap::new();
-    // The same of the elements' layers, where they have them: each layer's pieces, for its pattern and the line between two.
-    let mut layers: std::collections::BTreeMap<Id, Vec<(u16, Vec<Vec<P2>>)>> = std::collections::BTreeMap::new();
     d.part(Part::Cut);
-    // A bar lies inside the concrete it reinforces, so its cuts are dots over that poché, not pieces of it.
-    let mut dots: Vec<(Id, Vec<P2>)> = Vec::new();
-    // A mass is outlined where the line cuts it, below, not filled.
-    // What lies all on one side of the line's upright plane is cut by none of it, whatever it is made of.
-    let side = |q: P2| (q - v.start).dot(u.perp());
-    let one_side = |id: Id| {
-        work.box_of(id).is_some_and(|[lo, hi]| {
-            let s = [P2(lo[0], lo[1]), P2(hi[0], lo[1]), P2(hi[0], hi[1]), P2(lo[0], hi[1])].map(side);
-            s.iter().all(|x| *x > 1e-3) || s.iter().all(|x| *x < -1e-3)
-        })
-    };
-    // Its twin, which tests hold it to: what is left out cuts nothing.
-    if crate::selfcheck::on(crate::selfcheck::Check::OneSide) {
-        for s in work.shown(&look).filter(|s| one_side(s.owner())) {
-            if cancelled() {
-                return None;
-            }
-            assert!(s.cuts(v.start + u * first, u, last - first).is_empty(), "{} is cut by a line it lies all on one side of", s.owner());
-        }
-    }
-    // Every element the line's plane may cross, cut from its solids: one closed solid to each layer, so the doors, windows and
-    // components are cut as well as the walls; what is not a solid (a pipe's tube, a family's open form) is cut as it was.
-    // Cut from where the view begins, then back along the line from its start.
-    let origin = (v.start + u * first, u);
-    if let Some(frame) = crate::solid::Frame::vertical(origin.0, u) {
-        for (at, (id, _)) in work.placed.iter().enumerate() {
-            let Some(e) = m.elements.get(*id) else { continue };
-            // The round runs not made yet are cut below, as they were.
-            let lazy = e.run().is_some() && work.cell(at).is_some();
-            if !look.shows(*id) || matches!(e, Element::Mass(_)) || lazy || one_side(*id) {
-                continue;
-            }
-            if cancelled() {
-                return None;
-            }
-            let cut = section_cut::cut_element(&work.solid_cache.get(m, *id), &frame, origin, last - first, first);
-            if cut.is_empty() {
-                continue;
-            }
-            if matches!(e, Element::Rebar(_)) {
-                dots.extend(cut.rings().map(|r| (*id, r.clone())));
-                continue;
-            }
-            cuts.entry(*id).or_default().extend(cut.rings().cloned());
-            if !cut.layers.is_empty() {
-                layers.insert(*id, cut.layers);
-            }
-        }
-    }
-    // The round runs not made yet: only those whose boxes the line's plane crosses.
-    let mut lazy = crate::component_geometry::Components::new(m);
-    for (at, (id, _)) in work.placed.iter().enumerate() {
-        if work.cell(at).is_none() || !look.shows(*id) {
-            continue;
-        }
-        let Some(e) = m.elements.get(*id).filter(|e| e.run().is_some()) else { continue };
-        // Its twin, which tests hold it to: what is left out cuts nothing, so it is made and cut all the same.
-        let twin = crate::selfcheck::on(crate::selfcheck::Check::OneSideLazy);
-        if !twin && one_side(*id) {
-            continue;
-        }
-        if cancelled() {
-            return None;
-        }
-        for s in view3d::lazy_solids(m, *id, e, &mut lazy) {
-            let rings = s.cuts(v.start + u * first, u, last - first);
-            if twin {
-                assert!(!one_side(*id) || rings.is_empty(), "{id} is cut by a line it lies all on one side of");
-            }
-            for ring in rings {
-                cuts.entry(*id).or_default().push(ring.into_iter().map(|q| P2(q.0 + first, q.1)).collect());
-            }
-        }
+    let Cut { layered: layers, loose, dots } = cut_model(m, work, v, &look, (first, last), cancelled)?;
+    let mut cuts: std::collections::BTreeMap<Id, Vec<Vec<P2>>> = loose;
+    for (id, by_layer) in &layers {
+        cuts.entry(*id).or_default().extend(by_layer.iter().flat_map(|(_, rings)| rings.iter().cloned()));
     }
     // Poché, then the edge of what is cut over it: joined walls show their union, as in plan, filled
     // as one first so no seam shows where pieces meet.
@@ -2256,6 +2184,132 @@ fn section_base_cancellable(
         return None;
     }
     Some(d)
+}
+
+/// What section or elevation `id` cuts, for the tests to read: each ring (counter-clockwise, simple) of each element, as `(element,
+/// layer, ring)`, in the section's own plane (x along its line from its start, y up, mm); `layer` is that of the element's type for
+/// a closed solid, none for what is cut as an open piece, a round run or a bar. None for an id that is no section or elevation.
+#[doc(hidden)]
+pub fn section_cut_rings(m: &Model, id: impl Key) -> Option<Vec<(Id, Option<u16>, Vec<P2>)>> {
+    let v = m.section(id)?;
+    let look = Look::of(m, id);
+    let work = SectionWork::new(m);
+    section_cut_rings_in(m, &work, v, &look)
+}
+
+/// [`section_cut_rings`] of `w`'s solids, which keep what they cut for the next section.
+#[doc(hidden)]
+pub fn section_cut_rings_with(m: &Model, w: &SectionWork, id: impl Key) -> Option<Vec<(Id, Option<u16>, Vec<P2>)>> {
+    let v = m.section(id)?;
+    let look = Look::of(m, id);
+    section_cut_rings_in(m, w, v, &look)
+}
+
+fn section_cut_rings_in(m: &Model, w: &SectionWork, v: &Section, look: &Look) -> Option<Vec<(Id, Option<u16>, Vec<P2>)>> {
+    let span = span(m, w, v, look, &|| false)?;
+    let Cut { layered, loose, dots } = cut_model(m, w, v, look, span, &|| false)?;
+    let mut out: Vec<(Id, Option<u16>, Vec<P2>)> = Vec::new();
+    for (id, by_layer) in layered {
+        out.extend(by_layer.into_iter().flat_map(|(k, rings)| rings.into_iter().map(move |r| (id, Some(k), r))));
+    }
+    out.extend(loose.into_iter().flat_map(|(id, rings)| rings.into_iter().map(move |r| (id, None, r))));
+    out.extend(dots.into_iter().map(|(id, r)| (id, None, r)));
+    out.sort_by_key(|(id, k, _)| (*id, *k));
+    Some(out)
+}
+
+/// What a section's line cuts of the model.
+#[derive(Default)]
+struct Cut {
+    /// Each element's closed layer solids' rings, by layer.
+    layered: std::collections::BTreeMap<Id, Vec<(u16, Vec<Vec<P2>>)>>,
+    /// The rings of what is cut in no layer: an open piece, a round run made as the cut asks.
+    loose: std::collections::BTreeMap<Id, Vec<Vec<P2>>>,
+    /// A bar's cuts: dots over the concrete it lies in.
+    dots: Vec<(Id, Vec<P2>)>,
+}
+
+/// What the vertical plane of section `v` cuts of every element `look` shows, from `first` to `last` along its line (as
+/// `span` finds them), in the section's own plane: x along its line from its start, y up, mm. None, cancelled.
+fn cut_model(m: &Model, work: &SectionWork, v: &Section, look: &Look, (first, last): (f64, f64), cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Cut> {
+    let u = (v.end - v.start).unit();
+    let mut out = Cut::default();
+    // What lies all on one side of the line's upright plane is cut by none of it, whatever it is made of.
+    let side = |q: P2| (q - v.start).dot(u.perp());
+    let one_side = |id: Id| {
+        work.box_of(id).is_some_and(|[lo, hi]| {
+            let s = [P2(lo[0], lo[1]), P2(hi[0], lo[1]), P2(hi[0], hi[1]), P2(lo[0], hi[1])].map(side);
+            s.iter().all(|x| *x > 1e-3) || s.iter().all(|x| *x < -1e-3)
+        })
+    };
+    // Its twin, which tests hold it to: what is left out cuts nothing.
+    if crate::selfcheck::on(crate::selfcheck::Check::OneSide) {
+        for s in work.shown(look).filter(|s| one_side(s.owner())) {
+            if cancelled() {
+                return None;
+            }
+            assert!(s.cuts(v.start + u * first, u, last - first).is_empty(), "{} is cut by a line it lies all on one side of", s.owner());
+        }
+    }
+    // Every element the line's plane may cross, cut from its solids: one closed solid to each layer, so the doors, windows and
+    // components are cut as well as the walls; what is not a solid (a pipe's tube, a family's open form) is cut as it was.
+    // Cut from where the view begins, then back along the line from its start.
+    let origin = (v.start + u * first, u);
+    if let Some(frame) = crate::solid::Frame::vertical(origin.0, u) {
+        for (at, (id, _)) in work.placed.iter().enumerate() {
+            let Some(e) = m.elements.get(*id) else { continue };
+            // The round runs not made yet are cut below, as they were.
+            let lazy = e.run().is_some() && work.cell(at).is_some();
+            // A mass is outlined where the line cuts it, not filled.
+            if !look.shows(*id) || matches!(e, Element::Mass(_)) || lazy || one_side(*id) {
+                continue;
+            }
+            if cancelled() {
+                return None;
+            }
+            let cut = section_cut::cut_element(&work.solid_cache.get(m, *id), &frame, origin, last - first, first);
+            if cut.is_empty() {
+                continue;
+            }
+            // A bar lies inside the concrete it reinforces, so its cuts are dots over that poché, not pieces of it.
+            if matches!(e, Element::Rebar(_)) {
+                out.dots.extend(cut.rings().map(|r| (*id, r.clone())));
+                continue;
+            }
+            if !cut.open.is_empty() {
+                out.loose.entry(*id).or_default().extend(cut.open);
+            }
+            if !cut.layers.is_empty() {
+                out.layered.insert(*id, cut.layers);
+            }
+        }
+    }
+    // The round runs not made yet: only those whose boxes the line's plane crosses.
+    let mut lazy = crate::component_geometry::Components::new(m);
+    for (at, (id, _)) in work.placed.iter().enumerate() {
+        if work.cell(at).is_none() || !look.shows(*id) {
+            continue;
+        }
+        let Some(e) = m.elements.get(*id).filter(|e| e.run().is_some()) else { continue };
+        // Its twin, which tests hold it to: what is left out cuts nothing, so it is made and cut all the same.
+        let twin = crate::selfcheck::on(crate::selfcheck::Check::OneSideLazy);
+        if !twin && one_side(*id) {
+            continue;
+        }
+        if cancelled() {
+            return None;
+        }
+        for s in view3d::lazy_solids(m, *id, e, &mut lazy) {
+            let rings = s.cuts(v.start + u * first, u, last - first);
+            if twin {
+                assert!(!one_side(*id) || rings.is_empty(), "{id} is cut by a line it lies all on one side of");
+            }
+            for ring in rings {
+                out.loose.entry(*id).or_default().push(ring.into_iter().map(|q| P2(q.0 + first, q.1)).collect());
+            }
+        }
+    }
+    Some(out)
 }
 
 fn section_finish(m: &Model, id: Id, d: Drawing) -> Drawing {

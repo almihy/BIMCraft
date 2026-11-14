@@ -433,7 +433,8 @@ impl Solid {
     /// The rings a section along unit `u` from `p`, `len` long, cuts it into, as (along, up) in mm: where it lies over the
     /// line, level or along a sloped face; a convex mesh that `cut` allows is cut by the plane through the line, where its
     /// edges cross it (a tube across is its ring, an ellipse if it is oblique).
-    pub(crate) fn cuts(&self, p: P2, u: P2, len: f64) -> Vec<Vec<P2>> {
+    #[doc(hidden)]
+    pub fn cuts(&self, p: P2, u: P2, len: f64) -> Vec<Vec<P2>> {
         if let Solid::Mesh { tris, cut: true, .. } = self {
             let side = |q: P3| (P2(q[0], q[1]) - p).dot(u.perp());
             let at = |q: P3| P2((P2(q[0], q[1]) - p).dot(u), q[2]);

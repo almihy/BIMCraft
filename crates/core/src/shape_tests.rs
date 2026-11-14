@@ -362,9 +362,30 @@ fn a_section_shows_the_screed_tapering_over_a_level_structure() {
         (c.0 - x).abs() < 0.5 && (c.1 - y).abs() < 0.5
     };
     let corner = |along: f64, z: f64| corners.iter().any(|c| close(c, along, z));
-    let between = |along: f64, z: f64| lines.iter().any(|l| l.iter().any(|c| close(c, along, z)));
+    // A section is cut from the layers' solids, so a straight edge has no corner where the floor's triangles meet: a point is
+    // on an edge, or on a line, where it lies on any stretch of it.
+    let on_stretch = |pts: &[(f32, f32)], closed: bool, along: f64, z: f64| {
+        let p = view.px(P2(along, z));
+        let n = pts.len();
+        (0..n.saturating_sub(usize::from(!closed))).any(|i| {
+            let (a, b) = (pts[i], pts[(i + 1) % n]);
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let len2 = dx * dx + dy * dy;
+            let t = if len2 > 0.0 { (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / len2).clamp(0.0, 1.0) } else { 0.0 };
+            (p.0 - (a.0 + t * dx)).abs() < 0.5 && (p.1 - (a.1 + t * dy)).abs() < 0.5
+        })
+    };
+    let fills: Vec<Vec<(f32, f32)>> = mine()
+        .filter_map(|p| match p {
+            crate::prim::Prim::Fill { rings, .. } => Some(rings.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    let on_edge = |along: f64, z: f64| fills.iter().any(|r| on_stretch(r, true, along, z));
+    let between = |along: f64, z: f64| lines.iter().any(|l| on_stretch(l, false, along, z));
     // The top falls to the drain; the underside doesn't.
-    assert!(corner(5000.0, -30.0) && corner(5000.0, -275.0) && !corner(5000.0, -305.0), "a flat underside");
+    assert!(corner(5000.0, -30.0) && on_edge(5000.0, -275.0) && !on_edge(5000.0, -305.0), "a flat underside");
     // Between the layers: under the tile, 10 mm under the top; over and under the membrane, level.
     assert!(between(5000.0, -40.0) && between(1000.0, -10.0), "the tile follows the top");
     assert!(between(5000.0, -70.0) && between(1000.0, -70.0) && between(5000.0, -75.0), "the membrane stays level");
@@ -741,9 +762,30 @@ fn a_section_shows_a_roofs_insulation_tapering_over_its_level_structure() {
         (c.0 - x).abs() < 0.5 && (c.1 - y).abs() < 0.5
     };
     let corner = |along: f64, z: f64| corners.iter().any(|c| close(c, along, z));
-    let between = |along: f64, z: f64| lines.iter().any(|l| l.iter().any(|c| close(c, along, z)));
+    // A section is cut from the layers' solids, so a straight edge has no corner where the floor's triangles meet: a point is
+    // on an edge, or on a line, where it lies on any stretch of it.
+    let on_stretch = |pts: &[(f32, f32)], closed: bool, along: f64, z: f64| {
+        let p = view.px(P2(along, z));
+        let n = pts.len();
+        (0..n.saturating_sub(usize::from(!closed))).any(|i| {
+            let (a, b) = (pts[i], pts[(i + 1) % n]);
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let len2 = dx * dx + dy * dy;
+            let t = if len2 > 0.0 { (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / len2).clamp(0.0, 1.0) } else { 0.0 };
+            (p.0 - (a.0 + t * dx)).abs() < 0.5 && (p.1 - (a.1 + t * dy)).abs() < 0.5
+        })
+    };
+    let fills: Vec<Vec<(f32, f32)>> = mine()
+        .filter_map(|p| match p {
+            crate::prim::Prim::Fill { rings, .. } => Some(rings.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    let on_edge = |along: f64, z: f64| fills.iter().any(|r| on_stretch(r, true, along, z));
+    let between = |along: f64, z: f64| lines.iter().any(|l| on_stretch(l, false, along, z));
     // The top falls to the drain; the underside doesn't.
-    assert!(corner(5000.0, 3270.0) && corner(5000.0, 3000.0) && !corner(5000.0, 2960.0), "a level underside");
+    assert!(corner(5000.0, 3270.0) && on_edge(5000.0, 3000.0) && !on_edge(5000.0, 2960.0), "a level underside");
     // Under the finish, 10 mm under the top; over the structure, level.
     assert!(between(5000.0, 3260.0) && between(1000.0, 3300.0), "the finish follows the top");
     assert!(between(5000.0, 3200.0) && between(1000.0, 3200.0), "the structure stays level");
