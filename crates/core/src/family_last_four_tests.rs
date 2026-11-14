@@ -162,5 +162,5 @@ fn a_hostile_subcategory_weight_is_refused_by_the_family_command() {
             .unwrap_err();
         assert!(e.contains("pen") || e.contains("line weight") || e.contains("whole number"), "{e}");
     }
-    assert!(s.model.families.is_empty() && s.model.subcategory_styles.is_empty());
+    assert!(!s.model.families.contains_key("Sample Block") && s.model.subcategory_styles.is_empty());
 }

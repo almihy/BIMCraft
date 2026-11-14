@@ -650,6 +650,9 @@ pub enum Mark {
     Label { at: P2, height: f64, text: String, align: Align },
 }
 
+/// A mark with the subcategory of the symbol it came from: what the pens, colour and pattern it is drawn in come from.
+pub type Marked = (Mark, Option<String>);
+
 impl Mark {
     /// The same mark with every point taken through `f`.
     pub fn map(&self, f: impl Fn(P2) -> P2) -> Mark {
@@ -2521,7 +2524,7 @@ impl Family {
         view: SymbolView,
         detail: Option<crate::graphics::Detail>,
         snapshot: bool,
-    ) -> Result<Vec<(Mark, Option<String>)>, String> {
+    ) -> Result<Vec<Marked>, String> {
         self.marks_where_styled(values, &|y: &Symbol| {
             y.view == view && y.of_type(type_name) && y.snapshot == snapshot && detail.is_none_or(|d| y.drawn_at(d))
         })
@@ -2555,7 +2558,7 @@ impl Family {
         view: SymbolView,
         detail: Option<crate::graphics::Detail>,
         others: Others,
-    ) -> Result<Vec<(Mark, Option<String>)>, String> {
+    ) -> Result<Vec<Marked>, String> {
         let mut out = self.marks_as_styled(type_name, values, view, detail, self.draws_snapshot(type_name))?;
         if !self.draws_snapshot(type_name) {
             self.nested_marks_styled(type_name, values, (view, detail), others, (0, &std::cell::Cell::new(0)), &mut out)?;
@@ -2589,7 +2592,7 @@ impl Family {
         (view, detail): (SymbolView, Option<crate::graphics::Detail>),
         others: Others,
         (depth, spent): (usize, &std::cell::Cell<usize>),
-        out: &mut Vec<(Mark, Option<String>)>,
+        out: &mut Vec<Marked>,
     ) -> Result<(), String> {
         if self.nested.is_empty() {
             return Ok(());
@@ -2664,11 +2667,7 @@ impl Family {
     }
 
     /// [`Family::marks_where`], each mark with the subcategory of the symbol it came from.
-    fn marks_where_styled<'a>(
-        &'a self,
-        values: &BTreeMap<String, Val>,
-        pick: &dyn Fn(&Symbol) -> bool,
-    ) -> Result<Vec<(Mark, Option<String>)>, String> {
+    fn marks_where_styled<'a>(&'a self, values: &BTreeMap<String, Val>, pick: &dyn Fn(&Symbol) -> bool) -> Result<Vec<Marked>, String> {
         let mut read = HashMap::new();
         let mut out = Vec::new();
         for (i, sym) in self.symbols.iter().enumerate() {

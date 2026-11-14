@@ -4982,11 +4982,7 @@ impl Model {
     }
 
     /// [`Model::opening_local_at`], each mark with the subcategory of the symbol it came from.
-    fn opening_local_styled(
-        &self,
-        e: &Element,
-        detail: crate::graphics::Detail,
-    ) -> Option<(Vec<Piece>, Vec<(crate::family::Mark, Option<String>)>)> {
+    fn opening_local_styled(&self, e: &Element, detail: crate::graphics::Detail) -> Option<(Vec<Piece>, Vec<crate::family::Marked>)> {
         let (Element::Door(o) | Element::Window(o)) = e else { return None };
         let f = self.families.get(o.family.as_ref()?)?;
         let values = f.values_in(&o.type_name, &o.params, self.thickness(self.wall(o.host)?)).ok()?;
@@ -5037,7 +5033,7 @@ impl Model {
     }
 
     /// [`Model::opening_marks`], each with the subcategory of the symbol it came from.
-    pub fn opening_marks_styled(&self, e: &Element, detail: crate::graphics::Detail) -> Vec<(crate::family::Mark, Option<String>)> {
+    pub fn opening_marks_styled(&self, e: &Element, detail: crate::graphics::Detail) -> Vec<crate::family::Marked> {
         let (Element::Door(o) | Element::Window(o)) = e else { return Vec::new() };
         let (Some((_, marks)), Some((at, u, _))) = (self.opening_local_styled(e, detail), self.opening_frame(o)) else {
             return Vec::new();

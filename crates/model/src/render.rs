@@ -1193,7 +1193,7 @@ pub fn sketch(m: &Model, view: View, id: Id, e: &Element) -> Drawing {
         // Drawn at its sill, where the cut plane would pass through it whatever the plan's cut is.
         Element::Door(o) | Element::Window(o) => {
             if let Some(w) = m.wall(o.host) {
-                opening(&mut d, m, e, o, w, m.own_base(w) + o.sill, true);
+                opening(&mut d, m, e, o, w, m.own_base(w) + o.sill, true, None);
             }
         }
         Element::Stair(st) => stair(&mut d, m, st, st.level),
@@ -3539,7 +3539,8 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
             && (shown(id) || m.elements.id(o.host).is_some_and(shown))
         {
             d.owner = Some(id);
-            opening(&mut d, m, e, o, w, range.cut, shown(id));
+            // Its jambs are its wall's own outline where the wall is drawn.
+            opening(&mut d, m, e, o, w, range.cut, shown(id), m.elements.id(o.host).filter(|wall| shown(*wall)));
         }
     }
     d.part(Part::Projection);
@@ -3770,7 +3771,7 @@ fn family_line(d: &mut Drawing, m: &Model, e: &Element, sub: Option<&str>, pts: 
 }
 
 /// [`marks`] of a door's or a window's family `e`: each in the subcategory of the symbol it came from ([`family_line`]).
-fn family_marks(d: &mut Drawing, m: &Model, e: &Element, marks: &[(crate::family::Mark, Option<String>)]) {
+fn family_marks(d: &mut Drawing, m: &Model, e: &Element, marks: &[crate::family::Marked]) {
     use crate::family::Mark;
     for (mark, sub) in marks {
         match mark {
@@ -4322,8 +4323,10 @@ fn ink_cut_around(d: &mut Drawing, run: &[P2], gaps: &[Vec<P2>]) {
 }
 
 /// A door or window the cut plane at height `cut` passes through: a gap in the wall, jambs, and
-/// a leaf with its swing, or glass.
-fn opening(d: &mut Drawing, m: &Model, e: &Element, o: &Opening, w: &Wall, cut: f64, shown: bool) {
+/// a leaf with its swing, or glass. `walled` is its wall where that is drawn: the jambs are the wall's own outline then, in its cut
+/// pen (a sketch, or a wall a view doesn't show, has its opening draw them).
+#[allow(clippy::too_many_arguments)]
+fn opening(d: &mut Drawing, m: &Model, e: &Element, o: &Opening, w: &Wall, cut: f64, shown: bool, walled: Option<Id>) {
     let Some(t) = m.opening_type(e) else { return };
     let bottom = m.own_base(w) + o.sill;
     // The gap is the opening it cuts: its family's `cut` where it says one.
@@ -4348,9 +4351,11 @@ fn opening(d: &mut Drawing, m: &Model, e: &Element, o: &Opening, w: &Wall, cut: 
     }
     d.fill(&[gap], PAPER);
     // The jambs are where the wall is cut: the wall's own outline there, in its cut pen.
-    d.own(m.elements.id(o.host));
+    if walled.is_some() {
+        d.own(walled);
+    }
     for s in [g0, g1] {
-        d.line(&[axis.at(s, int), axis.at(s, ext)], BY_CATEGORY, INK, false);
+        d.line(&[axis.at(s, int), axis.at(s, ext)], if walled.is_some() { BY_CATEGORY } else { Pen::HEAVY }, INK, false);
     }
     d.own(owner);
     // At coarse, a window is its gap, as are a family's forms and symbols that say nothing of their detail levels; a door of
