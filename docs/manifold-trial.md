@@ -59,8 +59,8 @@ were touched).
    The shim's `toolchain-wasm32.cmake` has the same `EXISTS ".../clang"` test, and falls back to the PATH lookup the same way.
    (`llvm-ar` likewise resolves from PATH.) No source change: PATH covers it.
 3. **cmake's default generator under vcvars is NMake**, which fails in FetchContent's populate step
-  
-   scratch). Workaround: `CMAKE_GENERATOR=Ninja`.
+   (`NMAKE : fatal error U1073: don't know how to make 'manifold-populate-prefix/src/manifold-populate-stamp/manifold-populate-patch-info.txt'`).
+   Workaround: `CMAKE_GENERATOR=Ninja`.
 4. **Windows paths with backslashes are eaten** in `wasm32-uu/CMakeLists.txt`'s `"SHELL:-isystem ${DIR}"` options (CMake splits
    `SHELL:` like a Unix shell): `-isystem C:Usersal_mi.cargoregistrysrc...` and then `fatal error: 'cstdint' file not found`
    in Clipper2. Fix in the vendored copy (`build/wasm.rs`: `cmake_path()` gives the `-D` paths forward slashes).
