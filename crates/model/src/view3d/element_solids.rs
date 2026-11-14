@@ -13,7 +13,7 @@
 //! and IFC render changes. The design and the numbers are in `docs/manifold-elements.md`.
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use super::{Solid, layered_indexed, solids_in_with};
 use crate::component_geometry::Components;
@@ -213,6 +213,9 @@ fn curve_of(m: &Model, e: &Element, part: &Solid, layer: Option<usize>) -> Optio
 #[derive(Default)]
 pub struct SolidCache {
     entries: Mutex<HashMap<Id, Arc<ElementSolids>>>,
+    /// The walls' index of the model the scene is of, made when first needed: a wall's joins are found through it, not by
+    /// asking the model's lookup for each end.
+    index: OnceLock<Index>,
 }
 
 impl SolidCache {
@@ -221,7 +224,7 @@ impl SolidCache {
         if let Some(kept) = self.entries.lock().ok().and_then(|e| e.get(&id).cloned()) {
             return kept;
         }
-        let made = Arc::new(element_solids(m, id));
+        let made = Arc::new(element_solids_in(m, id, Some(self.index.get_or_init(|| Index::new(m))), &mut Components::new(m)));
         if let Ok(mut entries) = self.entries.lock() {
             entries.insert(id, Arc::clone(&made));
         }
@@ -240,6 +243,7 @@ impl SolidCache {
     /// What it holds of the elements `keep` says are unchanged.
     pub(super) fn kept(&self, keep: impl Fn(Id) -> bool) -> SolidCache {
         let entries = self.entries.lock().map(|e| e.iter().filter(|(id, _)| keep(**id)).map(|(id, s)| (*id, Arc::clone(s))).collect());
-        SolidCache { entries: Mutex::new(entries.unwrap_or_default()) }
+        // The index is of the model the scene was of: the new scene makes its own.
+        SolidCache { entries: Mutex::new(entries.unwrap_or_default()), index: OnceLock::new() }
     }
 }

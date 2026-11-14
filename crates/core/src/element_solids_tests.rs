@@ -402,14 +402,21 @@ fn element_solids_timings() {
         let started = Instant::now();
         let (index, mut components) = (crate::walls::Index::new(&model), crate::component_geometry::Components::new(&model));
         let setup = started.elapsed();
+        // The pieces alone, as the 3D view makes them: what the solids are built from.
+        let started = Instant::now();
+        let mut pieces = 0;
+        for (&id, e) in model.elements.iter() {
+            pieces += crate::view3d::solids_in_with(&model, &[(id, e)], Some(&index), &mut components).len();
+        }
+        let pieces_time = started.elapsed();
         let started = Instant::now();
         let mut made = 0;
         let mut triangles = 0;
         for &id in &ids {
             let es = crate::view3d::element_solids_in(&model, id, Some(&index), &mut components);
             made += es.layers.len();
+            // Asking for the triangles makes Manifold do its booleans, which are lazy.
             triangles += es.layers.iter().map(|(_, s)| s.triangle_count()).sum::<usize>();
-            // The mesh is asked for, as a section would: Manifold's booleans are lazy.
         }
         let cold = started.elapsed();
         let scene = Scene::new(&model);
@@ -423,9 +430,11 @@ fn element_solids_timings() {
             scene.element_solids(&model, id);
         }
         let warm = started.elapsed();
+        let scene_started = Instant::now();
+        let _ = Scene::new(&model);
+        let scene_time = scene_started.elapsed();
         eprintln!(
-            "{name}: {} elements, {made} layer solids, {triangles} triangles. Cold {cold:.2?} (index and families {setup:.2?} more); \
-             through a scene: first {first:.2?}, warm {warm:.2?}",
+            "{name}: {} elements, {pieces} pieces made in {pieces_time:.2?} (the 3D view's whole scene, triangles and planes: {scene_time:.2?});              {made} layer solids, {triangles} triangles. Cold {cold:.2?} (index and families {setup:.2?} more);              through a scene: first {first:.2?}, warm {warm:.2?}",
             ids.len()
         );
     }
