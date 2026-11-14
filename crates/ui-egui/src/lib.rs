@@ -3899,6 +3899,7 @@ impl BimApp {
         // Each panel in full at its own width: only a window narrower than the tab makes them small, from the right.
         let room = (ctx.content_rect().right() - self.ribbon_bottom.x - 12.0).max(240.0);
         let frame = Frame::popup(&ctx.global_style()).fill(pal().surface).inner_margin(0.0);
+        ribbon::forget_popups();
         let shown = Area::new(UiId::new("ribbon-peek")).order(Order::Foreground).fixed_pos(self.ribbon_bottom).show(ctx, |ui| {
             // An area is as wide as it was last, and a first time 600 points: the room is the window's.
             ui.set_max_width(room);
@@ -3912,13 +3913,23 @@ impl BimApp {
         let (released, at) = ctx.input(|i| (i.pointer.primary_released(), i.pointer.interact_pos()));
         let inside = at.is_some_and(|p| rect.contains(p));
         let on_tabs = at.is_some_and(|p| p.y < rect.top());
-        let menu = Popup::is_any_open(ctx);
+        // A menu one of them opened, not a canvas's.
+        let menu = ribbon::menu_open(ctx, &mut self.ribbon_hover);
         // The pointer in them, or a menu one of them opened, keeps them.
         if inside || menu {
             self.ribbon_hover.until = now + ribbon::GRACE;
         }
+        // In Edit Tools a click inside ticks or clears a tool and picks none: the tools stay, a hovered tab's pinned by it, until a
+        // click outside or Esc.
+        let ticking = self.editing_tools && released && inside && !menu;
+        if ticking && !self.ribbon_peek {
+            self.ribbon_peek = true;
+            if let Some(tab) = self.ribbon_hover.tab.take() {
+                self.tab = tab;
+            }
+        }
         // A tool picked, a button done (one that opens a menu keeps it open), or a click elsewhere.
-        if self.tool != tool || (released && !menu && (inside || !on_tabs)) {
+        if self.tool != tool || (released && !menu && !ticking && (inside || !on_tabs)) {
             self.ribbon_peek = false;
             self.ribbon_hover.tab = None;
         } else if !self.ribbon_peek {

@@ -25,6 +25,8 @@ pub(crate) struct Hover {
     pub blocked: bool,
     /// Whether the pointer is on a tab this frame.
     pub on_tab: bool,
+    /// Whether a menu of the tools shown (a panel's list, a tool's choices, and what those open) was open last frame.
+    pub menu: bool,
 }
 
 /// How wide a column of small tools is: a button and the gap to the next.
@@ -155,9 +157,28 @@ thread_local! {
     static LAID: Cell<(f32, f32, f32)> = const { Cell::new((0.0, 0.0, 0.0)) };
     /// A tool's choices were asked for (a shortcut's) while it has no button, being handed over: its panel opens its list.
     static OPEN_LIST: Cell<bool> = const { Cell::new(false) };
+    /// The popups the tools drawn since `forget_popups` can open: their own, to tell them from a canvas's menu.
+    static POPUPS: RefCell<Vec<Id>> = const { RefCell::new(Vec::new()) };
     /// Whether the tab being drawn has been drawn before, so its panels' fit (which tools show) is known: its first frame lays out
     /// every tool, whatever the room.
     static FITTED: Cell<bool> = const { Cell::new(true) };
+}
+
+/// Starts a count of the popups the tools drawn next can open (`menu_open`).
+pub(crate) fn forget_popups() {
+    POPUPS.with(|p| p.borrow_mut().clear());
+}
+
+/// Whether a popup of the tools drawn since `forget_popups` is open, or one a menu of theirs opened was last frame (`hover.menu`),
+/// as a combo box in a menu does: a menu of the canvas's, open meanwhile, is not theirs and holds nothing.
+pub(crate) fn menu_open(ctx: &egui::Context, hover: &mut Hover) -> bool {
+    let own = POPUPS.with(|p| p.borrow().iter().any(|id| Popup::is_id_open(ctx, *id)));
+    hover.menu = own || (hover.menu && Popup::is_any_open(ctx));
+    hover.menu
+}
+
+fn own_popup(id: Id) {
+    POPUPS.with(|p| p.borrow_mut().push(id));
 }
 
 /// Whether the tools drawn now go in a panel's list.
@@ -504,6 +525,7 @@ pub(crate) fn choices(ui: &Ui, r: &Response, open: bool, content: impl FnOnce(&m
     let drawn = r.rect.is_positive() && ui.is_rect_visible(r.rect);
     let asked = open && FITTED.with(Cell::get);
     if drawn {
+        own_popup(Popup::default_response_id(r));
         if asked {
             Popup::open_id(ui.ctx(), Popup::default_response_id(r));
         }
@@ -517,6 +539,7 @@ pub(crate) fn choices(ui: &Ui, r: &Response, open: bool, content: impl FnOnce(&m
 /// The list of a panel's tools, under `r` while it's open: `add` draws them as rows, every tool of the panel in its order, as wide as
 /// the widest.
 fn list(r: &Response, add: &mut impl FnMut(&mut Ui)) {
+    own_popup(Popup::default_response_id(r));
     let key = Popup::default_response_id(r).with("list-width");
     Popup::menu(r).show(|ui| {
         let known = ui.ctx().data(|d| d.get_temp::<f32>(key)).unwrap_or(0.0);

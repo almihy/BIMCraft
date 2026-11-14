@@ -235,3 +235,69 @@ fn a_small_icons_choices_stay_open_when_the_ribbon_moves_under_them() {
     assert!(now.width() < 40.0 && now.left() > at.left() + 20.0, "moved, still a small icon: {at:?} {now:?}");
     assert!(h.query_by_role_and_label(Role::CheckBox, "Properties").is_some(), "its choices are still open");
 }
+
+#[test]
+fn a_menu_the_floating_tools_opened_keeps_them_and_one_of_the_canvas_does_not() {
+    // A panel's list, opened from the floating tools, keeps them with the pointer gone.
+    let mut h = folded(1280.0);
+    let tab = tab_at(&h, "Architecture");
+    h.hover_at(tab);
+    h.run_steps(3);
+    let list = h.get_by_label("Build ▾").rect().center();
+    click_at(&mut h, list);
+    assert!(h.query_all_by_label("Wall").next().is_some(), "the tools are shown");
+    h.hover_at(pos2(700.0, 600.0));
+    h.run_steps(10);
+    assert!(h.query_by_label("Build ▾").is_some(), "their own menu is open: they stay");
+    // Put away with a click, then a menu of the canvas, opened as they are about to go, doesn't hold them.
+    click_at(&mut h, pos2(700.0, 600.0));
+    h.run_steps(4);
+    assert!(h.query_by_label("Build ▾").is_none(), "gone");
+    h.hover_at(tab);
+    h.run_steps(3);
+    assert!(h.query_by_label("Build ▾").is_some(), "shown again");
+    // Within their grace: a frame at a time, the pointer on its way to the canvas.
+    let canvas = pos2(700.0, 600.0);
+    h.hover_at(canvas);
+    h.step();
+    for pressed in [true, false] {
+        h.event(Event::PointerButton { pos: canvas, button: PointerButton::Secondary, pressed, modifiers: Modifiers::NONE });
+    }
+    h.step();
+    h.step();
+    assert!(egui::Popup::is_any_open(&h.ctx), "the canvas's menu is open");
+    assert!(h.query_by_label("Build ▾").is_some(), "they are still in their grace");
+    h.run_steps(10);
+    assert!(h.query_by_label("Build ▾").is_none(), "a menu that is not theirs does not hold them");
+}
+
+#[test]
+fn ticking_a_tool_in_edit_tools_leaves_the_floating_tools_open_until_a_click_outside_or_esc() {
+    let mut h = folded(1280.0);
+    h.state_mut().editing_tools = true;
+    h.run();
+    let tab = tab_at(&h, "Structure");
+    h.hover_at(tab);
+    h.run_steps(3);
+    for _ in 0..2 {
+        let beam = h.get_by_label("Beam").rect().center();
+        click_at(&mut h, beam);
+        h.run_steps(2);
+    }
+    assert!(h.query_by_label("Beam").is_some(), "ticked and cleared: the tools are still there");
+    // The pointer gone, they stay as a pinned tab's do.
+    h.hover_at(pos2(700.0, 600.0));
+    h.run_steps(10);
+    assert!(h.query_by_label("Beam").is_some(), "kept");
+    click_at(&mut h, pos2(700.0, 600.0));
+    assert!(h.query_by_label("Beam").is_none(), "a click outside puts them away");
+    // And Esc, as with a pinned tab.
+    let tab = tab_at(&h, "Structure");
+    click_at(&mut h, tab);
+    let beam = h.get_by_label("Beam").rect().center();
+    click_at(&mut h, beam);
+    assert!(h.query_by_label("Beam").is_some());
+    key(&mut h, Key::Escape);
+    h.run_steps(4);
+    assert!(h.query_by_label("Beam").is_none(), "Esc");
+}
