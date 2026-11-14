@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Manifold trial</title>
+<style>
+  body { font: 16px system-ui, sans-serif; margin: 32px; color: #222; }
+  #result { font: 18px ui-monospace, monospace; margin-top: 12px; }
+  #ok { font-weight: 600; margin-top: 8px; }
+</style>
+</head>
+<body>
+<h1>BIMCraft engine: Manifold trial</h1>
+<p>A 100 mm box minus a cylinder (radius 25, 64 sides), cut by Manifold inside the engine's WebAssembly module.</p>
+<div id="status">Loading the engine...</div>
+<div id="result"></div>
+<div id="ok"></div>
+<script type="module">
+import init, { manifold_trial } from "./pkg/bimcraft_web.js";
+const t0 = performance.now();
+await init();
+const t1 = performance.now();
+const r = JSON.parse(manifold_trial());
+const t2 = performance.now();
+const want = 1e6 - 100 * 32 * 25 * 25 * Math.sin((2 * Math.PI) / 64);
+document.getElementById("status").textContent = `Engine loaded in ${(t1 - t0).toFixed(0)} ms; the cut took ${(t2 - t1).toFixed(1)} ms.`;
+document.getElementById("result").textContent = `volume ${r.volume}, ${r.triangles} triangles (expected volume ${want})`;
+const ok = Math.abs(r.volume - want) < 1e-6 && r.triangles > 100;
+document.getElementById("ok").textContent = ok ? "OK: Manifold runs in this tab" : "FAILED";
+window.manifoldTrial = r;
+window.manifoldTrialOk = ok;
+</script>
+</body>
+</html>
