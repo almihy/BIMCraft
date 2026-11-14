@@ -205,6 +205,12 @@ pub(crate) fn small() -> bool {
     SMALL.with(Cell::get)
 }
 
+/// Whether the ribbon tool whose response is `r` was drawn as a large button just now: not a small icon, not a row of a panel's list,
+/// not handed over (it has no room). What is painted over a large button (a drop-down's chevron) is for this alone.
+pub(crate) fn drawn_large(r: &Response) -> bool {
+    !listing() && !small() && r.rect.width() > SMALL_TOOL.x
+}
+
 /// Counts a ribbon tool, and says whether its panel has handed it over to its list: then it isn't drawn on the ribbon. A
 /// handed-over tool takes no room and has no name, so it's found only in the list. A panel hands its tools over by columns, as
 /// `fits` counts them: a panel of rows alone (`row`) by where each tool is in its row; any other tool by tool, two to a column
@@ -573,6 +579,26 @@ mod tests {
         assert_eq!(fit(&[(200.0, 4), (300.0, 6)], 150.0), [("p0".into(), SMALL), ("p1".into(), Fit { compact: true, shown: 1 })]);
         // Only as many columns as make it fit: 32 over after both are small, so one column of the three goes.
         assert_eq!(fit(&[(200.0, 4), (300.0, 6)], 154.0), [("p0".into(), SMALL), ("p1".into(), Fit { compact: true, shown: 2 })]);
+    }
+
+    #[test]
+    fn something_painted_over_a_large_button_is_for_a_large_one_alone() {
+        let ctx = egui::Context::default();
+        let mut out = ctx.run_ui(Default::default(), |ui| {
+            let large = ui.allocate_response(vec2(60.0, 60.0), Sense::click());
+            let small_icon = ui.allocate_response(SMALL_TOOL, Sense::click());
+            let handed = ui.allocate_response(Vec2::ZERO, Sense::hover());
+            assert!(drawn_large(&large));
+            assert!(!drawn_large(&small_icon), "a small icon");
+            assert!(!drawn_large(&handed), "a tool handed over");
+            super::SMALL.with(|s| s.set(true));
+            assert!(!drawn_large(&large), "a panel drawn small");
+            super::SMALL.with(|s| s.set(false));
+            LISTING.with(|l| l.set(true));
+            assert!(!drawn_large(&large), "a row of a list");
+            LISTING.with(|l| l.set(false));
+        });
+        out.textures_delta.clear();
     }
 
     #[test]

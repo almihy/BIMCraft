@@ -4410,7 +4410,9 @@ impl BimApp {
             let dark = style::dark();
             let tip = msg!("Choose a theme, including a dark interface with a light canvas");
             let r = big_button(ui, Icon::Theme, "Dark Mode", dark, tip);
-            icons::paint_chevron_at(ui.painter(), r.rect.right_top() + vec2(-8.0, 9.0), 12.0, pal().muted);
+            if ribbon::drawn_large(&r) {
+                icons::paint_chevron_at(ui.painter(), r.rect.right_top() + vec2(-8.0, 9.0), 12.0, pal().muted);
+            }
             ribbon::choices(ui, &r, false, |ui| self.theme_choices(ui, true));
             // A plan's or a section's crop region: on to what it shows, or off.
             let view = match self.sheet {
