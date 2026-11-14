@@ -141,6 +141,8 @@ mod family_drawing_tests;
 #[cfg(test)]
 mod family_engine_tests;
 #[cfg(test)]
+mod family_last_four_tests;
+#[cfg(test)]
 mod family_parametric_tests;
 #[cfg(test)]
 mod family_revit_tests;

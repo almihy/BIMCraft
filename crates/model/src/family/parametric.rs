@@ -435,7 +435,9 @@ impl Family {
                 let shown: String = r.chars().take(40).collect();
                 return Err(format!("{who}: `{shown}` isn't one of the family's references"));
             }
+            // A door's or a window's `Wall Thickness` is the wall it stands in (a nested window's own `Wall` plane follows it).
             if let Some(label) = &d.label
+                && !(*label == super::WALL && self.category.hosted())
                 && !self
                     .parameters
                     .iter()

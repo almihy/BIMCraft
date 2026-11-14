@@ -338,13 +338,17 @@ pub fn surface_gap(a: &[[P3; 3]], b: &Surface, near: f64, reach: f64, own: Optio
     gap
 }
 
+/// How far under the cut plane a corner may be and still lie on it, mm: Revit counts a face lying on the cut plane as not cut,
+/// and a coordinate a millionth under it is on it (a trim head's underside worked out as 1199.99999999 for a cut at 1200).
+const ON_PLANE: f64 = 1e-6;
+
 /// What the plane at height `z` cuts of a solid's triangles, as segments: for each triangle with corners on both sides of `z`
-/// (one at exactly `z` is above it), the segment between its two edges' crossings, as a plan draws what its cut plane cuts.
-/// A segment shorter than a millionth of a millimetre is left out.
+/// (one at `z`, or within a millionth of a millimetre under it, is above it), the segment between its two edges' crossings, as
+/// a plan draws what its cut plane cuts. A segment shorter than a millionth of a millimetre is left out.
 pub fn section(tris: &[[P3; 3]], z: f64) -> Vec<[P2; 2]> {
     let mut out = Vec::new();
     for t in tris {
-        let above = t.map(|c| c[2] >= z);
+        let above = t.map(|c| c[2] >= z - ON_PLANE);
         if above.iter().all(|a| *a) || above.iter().all(|a| !*a) {
             continue;
         }
@@ -667,5 +671,22 @@ mod tests {
         assert!(cut.iter().flatten().all(|p| p.0 == 0.0 || p.0 == 100.0 || p.1 == 0.0 || p.1 == 200.0), "{cut:?}");
         // Above the box, below it, or at its bottom face (a corner at exactly z is above it): nothing.
         assert!(section(&b, 400.0).is_empty() && section(&b, -1.0).is_empty() && section(&b, 0.0).is_empty());
+    }
+
+    #[test]
+    fn a_head_whose_underside_is_on_the_cut_plane_is_not_cut() {
+        // A U-shaped trim: two jambs 50 thick and a head between them whose underside works out as 1199.9999999 for a cut at 1200
+        // (Height 1200). Revit counts a face on the cut plane as not cut: the jambs' sections are drawn, no line along the head.
+        let mut u = cuboid([-400.0, 100.0, 0.0], [-350.0, 120.0, 1250.0]);
+        u.extend(cuboid([350.0, 100.0, 0.0], [400.0, 120.0, 1250.0]));
+        u.extend(cuboid([-350.0, 100.0, 1_199.999_999_9], [350.0, 120.0, 1250.0]));
+        let runs = section_runs(&u, 1200.0);
+        assert_eq!(runs.len(), 2, "two jamb rings and nothing along the head: {runs:?}");
+        assert!(runs.iter().all(|r| r.1), "{runs:?}");
+        assert!(section(&u, 1200.0).iter().flatten().all(|p| p.0.abs() >= 350.0 - 1e-9), "nothing between the jambs");
+        // A bottom on the plane, or a millionth under it, is not cut; one a thousandth under it still is.
+        assert!(section(&cuboid([0.0, 0.0, 1200.0], [10.0, 10.0, 1300.0]), 1200.0).is_empty(), "a bottom on the plane");
+        assert!(section(&cuboid([0.0, 0.0, 1_199.999_999_9], [10.0, 10.0, 1300.0]), 1200.0).is_empty(), "a bottom a hair under it");
+        assert!(!section(&cuboid([0.0, 0.0, 1199.999], [10.0, 10.0, 1300.0]), 1200.0).is_empty(), "a bottom a thousandth under it");
     }
 }

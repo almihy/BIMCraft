@@ -971,10 +971,37 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     let walls: Walls = if f.category.hosted() {
         let said = &to["wall"];
         let fits = |w: f64| (1.0..=crate::model::MAX_COORD).contains(&w);
+        // Where it says nothing: a nested door's or window's result was made in its own document at its own `Wall Thickness`, the
+        // first dimension so labelled between ordinary planes (not the host's faces) says how thick, per type or for all.
+        let own = def["dimensions"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .take(super::MAX_DIMENSIONS)
+            .find(|d| {
+                let ids = d["refs"].as_array().map(|r| r.iter().filter_map(|v| v.as_str().map(str::to_string).or_else(|| Some(v.to_string()))).collect::<Vec<_>>());
+                d.get("label").and_then(text) == Some(super::WALL)
+                    && ids.is_some_and(|ids| {
+                        ids.len() >= 2
+                            && ids.iter().all(|i| {
+                                planes.contains_key(i)
+                                    && refs.iter().all(|r| r.0 != *i || !r.3.get("is_reference").and_then(Value::as_str).is_some_and(|k| k.starts_with("host_")))
+                            })
+                    })
+            });
+        let own_wall = |t: &str| {
+            own.and_then(|d| num(&d["value"]).or_else(|| d["value"].get(t).and_then(num)))
+                .map(f64::abs)
+                .filter(|w| fits(*w))
+        };
         f.types
             .keys()
             .map(|t| {
-                let w = num(said).or_else(|| said.get(t).and_then(num)).filter(|w| fits(*w)).unwrap_or(super::DEFAULT_WALL);
+                let w = num(said)
+                    .or_else(|| said.get(t).and_then(num))
+                    .filter(|w| fits(*w))
+                    .or_else(|| own_wall(t))
+                    .unwrap_or(super::DEFAULT_WALL);
                 (t.clone(), w)
             })
             .collect()
@@ -1259,12 +1286,15 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             notes.push("one of its dimensions measures across two directions at once, which BIMCraft can't follow yet".into());
             continue;
         }
-        // The host wall's thickness between its faces: the wall places them, as its own faces.
-        if label.as_deref() == Some(super::WALL) && f.category.hosted() {
+        // The host wall's thickness between its faces: the wall places them, as its own faces. Between two ordinary planes (a nested
+        // window's own `Wall` plane) it is kept: the plane follows the wall it is placed in.
+        let hosts_faces = ids.iter().any(|i| i.ends_with(".exterior") || i.ends_with(".interior"));
+        if label.as_deref() == Some(super::WALL) && f.category.hosted() && hosts_faces {
             continue;
         }
         let label = match label {
             Some(l) if reader.params.contains(&l) => Some(l),
+            Some(l) if l == super::WALL && f.category.hosted() => Some(l),
             Some(l) => {
                 notes.push(format!("one of its sizes is set by `{l}`, which isn't one of the family's numbers"));
                 None
@@ -1448,6 +1478,9 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
             }
             let visible = n.get("visible").and_then(text).map(|v| Expr::Formula(v.to_string()));
             let show = n.get("show").and_then(|s| serde_json::from_value::<Show>(s.clone()).ok()).filter(|s| *s != Show::default());
+            // Revit applies no Visibility Settings of the host family to a shared nested family's instance: it is its own element
+            // in the project, drawn by its own family's settings (its Visible parameter still applies).
+            let show = if n["shared"].as_bool() == Some(true) { None } else { show };
             // Its axes where the definition gives them (a part on a face), taken into the family's: y the other way where
             // the family's is.
             let axis = |k: &str| -> Option<[f64; 3]> {
@@ -1636,8 +1669,10 @@ fn masked_as_revit(f: &Family, first: &str, values: &BTreeMap<String, Val>, made
     use crate::graphics::Detail;
     let probes: Vec<Option<[P2; 3]>> = made.iter().map(|y| edge_points(y, values)).collect();
     let mut found = vec![[false; 3]; made.len()];
+    // The region's own view: a side region's edges are looked for among Revit's side lines, a plan's among its plan's.
+    let view = made.first().map_or(SymbolView::Plan, |y| y.view);
     for (level, d) in [Detail::Coarse, Detail::Medium, Detail::Fine].into_iter().enumerate() {
-        let Ok(marks) = f.marks_where(values, &|y: &Symbol| y.snapshot && y.view == SymbolView::Plan && y.of_type(first) && y.drawn_at(d))
+        let Ok(marks) = f.marks_where(values, &|y: &Symbol| y.snapshot && y.view == view && y.of_type(first) && y.drawn_at(d))
         else {
             return;
         };
@@ -2215,5 +2250,108 @@ mod tests {
         let f = desk(to_a_face);
         assert!(f.references.iter().all(|r| r.name != "Ref Level"), "{:?}", f.references);
         assert_eq!(f.references.len(), 3);
+    }
+
+    /// A door (a hosted family) of the planes `planes` ([id, name, normal, at]) and the dimensions `dimensions`, translated.
+    fn planed(planes: Value, dimensions: Value, more: Value) -> (Family, Exported) {
+        let mut f = door(json!({}));
+        let mut def = json!({"to_bimcraft": {}, "reference_planes": planes, "dimensions": dimensions});
+        for (k, x) in more.as_object().into_iter().flatten() {
+            def[k] = x.clone();
+        }
+        let exported = translate(&mut f, &def, &|_| true);
+        (f, exported)
+    }
+
+    /// The planes of a nested window's own document: its centre (the origin) and its `Wall` plane 150 behind it, the two
+    /// measured by a dimension labelled `Wall Thickness`.
+    fn behind(label: &str) -> (Value, Value) {
+        let at = |v: f64| json!({"A": v, "B": v});
+        (
+            json!([{"id": "c", "name": "Center Front Back", "normal": [0, 1, 0], "defines_origin": true, "at": at(0.0)},
+                   {"id": "w", "name": "Wall", "normal": [0, 1, 0], "at": at(-150.0)}]),
+            json!([{"id": "d", "kind": "linear", "refs": ["c", "w"], "label": label, "value": {"A": 150, "B": 150}}]),
+        )
+    }
+
+    #[test]
+    fn a_wall_thickness_dimension_between_planes_moves_its_plane_with_the_wall() {
+        let (planes, dimensions) = behind("Wall Thickness");
+        let (f, _) = planed(planes, dimensions, json!({}));
+        assert_eq!(f.dimensions.len(), 1, "{:?}", f.editable);
+        assert_eq!(f.dimensions[0].label.as_deref(), Some(super::super::WALL));
+        assert!(f.check_parametric().is_ok(), "{:?}", f.check_parametric());
+        for wall in [150.0, 250.0] {
+            let values = f.values_in("A", &BTreeMap::new(), wall).unwrap();
+            let at = f.solve(&values).unwrap();
+            assert!((at["Wall"] + wall).abs() < 1e-6, "{wall}: {at:?}");
+        }
+    }
+
+    #[test]
+    fn a_wall_thickness_dimension_between_the_hosts_faces_still_leaves_the_wall_to_place_them() {
+        // The host's two faces, measured by `Wall Thickness`: the wall places them, no dimension is kept.
+        let at = |v: f64| json!({"A": v, "B": v});
+        let (f, _) = planed(
+            json!([{"id": "c", "name": "Center", "normal": [0, 1, 0], "defines_origin": true, "at": at(0.0)},
+                   {"id": "h.exterior", "name": "Host Exterior", "normal": [0, 1, 0], "is_reference": "host_exterior", "at": at(100.0)},
+                   {"id": "h.interior", "name": "Host Interior", "normal": [0, 1, 0], "is_reference": "host_interior", "at": at(-100.0)}]),
+            json!([{"id": "d", "kind": "linear", "refs": ["h.exterior", "h.interior"], "label": "Wall Thickness", "value": {"A": 200, "B": 200}}]),
+            json!({}),
+        );
+        assert!(f.dimensions.is_empty(), "{:?}", f.dimensions);
+    }
+
+    #[test]
+    fn a_nested_windows_snapshot_wall_is_its_own_wall_thickness() {
+        // No `to_bimcraft.wall`: Revit's result was made in the wall its own document says (150), not in a 200 one.
+        let (planes, dimensions) = behind("Wall Thickness");
+        let (_, exported) = planed(planes, dimensions, json!({}));
+        assert_eq!(exported.walls.get("A"), Some(&150.0), "{:?}", exported.walls);
+        assert_eq!(exported.walls.get("B"), Some(&150.0));
+        // Said, it is what is said; and any other label says nothing of the wall.
+        let (planes, dimensions) = behind("Wall Thickness");
+        let (_, said) = planed(planes, dimensions, json!({"to_bimcraft": {"wall": 300.0}}));
+        assert_eq!(said.walls.get("A"), Some(&300.0));
+        let (planes, dimensions) = behind("Height");
+        let (_, other) = planed(planes, dimensions, json!({}));
+        assert_eq!(other.walls.get("A"), Some(&super::super::DEFAULT_WALL));
+    }
+
+    #[test]
+    fn a_shared_nested_part_ignores_the_hosts_visibility_settings() {
+        let part = |id: &str, shared: bool| {
+            json!({"id": id, "family": "Trim", "type": "Standard", "shared": shared, "at": [0, 0, 0],
+                   "show": {"plan_top": false, "plan_cut": true}})
+        };
+        let mut f = door(json!({}));
+        translated(&mut f, json!({"to_bimcraft": {}, "nested": [part("1", true), part("2", false)]}));
+        assert_eq!(f.nested.len(), 2, "{:?}", f.editable);
+        assert_eq!(f.nested[0].show, None, "a shared part is drawn by its own family's settings");
+        assert!(f.nested[1].show.is_some_and(|s| !s.plan_top), "one that isn't keeps its host's: {:?}", f.nested[1].show);
+    }
+
+    #[test]
+    fn a_side_masking_region_edge_is_drawn_where_revits_side_view_draws_it() {
+        // A region in the family's yz plane, y -100..100 over z 0..1100; Revit's side view draws all four edges at Medium and
+        // Fine, and its plan has a line along the region's bottom edge (as seen in a plan): the edge is found in its own view.
+        let edge = |a: [f64; 2], b: [f64; 2]| json!({"line": [a, b], "view": "side", "show": {"coarse": false}, "snapshot": true});
+        let mut f = door(json!({"symbols": [
+            edge([-100.0, 0.0], [100.0, 0.0]), edge([100.0, 0.0], [100.0, 1100.0]),
+            edge([100.0, 1100.0], [-100.0, 1100.0]), edge([-100.0, 1100.0], [-100.0, 0.0]),
+            {"line": [[-100.0, 0.0], [100.0, 0.0]], "show": {"coarse": false, "fine": false}, "snapshot": true}]}));
+        let curve = |a: [f64; 3], b: [f64; 3]| json!({"line": [a, b]});
+        translated(
+            &mut f,
+            json!({"to_bimcraft": {}, "lines": [{"view": "side", "masking": true, "curves": [
+                curve([0.0, -100.0, 0.0], [0.0, 100.0, 0.0]), curve([0.0, 100.0, 0.0], [0.0, 100.0, 1100.0]),
+                curve([0.0, 100.0, 1100.0], [0.0, -100.0, 1100.0]), curve([0.0, -100.0, 1100.0], [0.0, -100.0, 0.0])]}]}),
+        );
+        let edges = made(&f);
+        assert_eq!(edges.len(), 4, "{:?}", f.editable);
+        for e in edges {
+            assert_eq!(e.view, SymbolView::Side);
+            assert_eq!(e.show, at_levels(false, true, true), "every edge is Revit's side edge at Medium and Fine");
+        }
     }
 }
