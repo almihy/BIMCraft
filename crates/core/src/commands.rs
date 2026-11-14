@@ -1453,7 +1453,7 @@ other_files(
          isn't held by the family it is in, `embedded`; and its `place`, the type to place, given back; its `subcategories` may \
          say a `projection` and a `cut` line weight (a pen, 1 to 16) and a `pattern` (a name), and `line_patterns` the patterns \
          they name, each added to the project's unless it has one of that name, as the subcategories are its Object Styles of \
-         `Category/Subcategory` unless it has those; `cuts_measured` says the voids' `cuts` were measured, so each void cuts \
+         `Category/Subcategory` unless it has those; `cuts_measured` (a definition's `cuts_by: \"instance\"`) says the voids' `cuts` were measured, so each void cuts \
          the forms it names whatever their order) \
          is translated into `references` (reference planes, which formulas read as `ref(Name)`), the `dimensions` placing them per \
          type (labelled with a parameter, locked, EQ; over-constrained, the family isn't editable), parametric forms (extrusions \

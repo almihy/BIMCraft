@@ -944,8 +944,9 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     f.dimensions.clear();
     f.nested.clear();
     f.check.clear();
-    // What a void cuts was measured (the add-in removed each void and saw which solids grew): then its `cuts` is what it cuts.
-    f.cuts_measured = def["cuts_by"].as_str() == Some("removal");
+    // What a void cuts was measured from the instance (`cuts_by: "instance"`): then its `cuts` is what it cuts. Any other word, as
+    // `removal`, whose lists measured nothing, is no list at all: a void cuts every solid before it that it reaches.
+    f.cuts_measured = def["cuts_by"].as_str() == Some("instance");
     let mut notes = Vec::new();
     if !def.is_object() {
         f.editable =
@@ -2384,12 +2385,17 @@ mod tests {
     #[test]
     fn a_definition_that_says_its_cuts_were_measured_marks_the_family_so() {
         let mut f = door(json!({}));
+        translated(&mut f, json!({"to_bimcraft": {}, "cuts_by": "instance"}));
+        assert!(f.cuts_measured);
+        // `removal` measured nothing and anything else says nothing: neither is a measured list.
         translated(&mut f, json!({"to_bimcraft": {}, "cuts_by": "removal"}));
+        assert!(!f.cuts_measured);
+        translated(&mut f, json!({"to_bimcraft": {}, "cuts_by": "instance"}));
         assert!(f.cuts_measured);
         // Anything else, or nothing, is not; a family translated again says what its definition now says.
         translated(&mut f, json!({"to_bimcraft": {}, "cuts_by": "something else"}));
         assert!(!f.cuts_measured);
-        translated(&mut f, json!({"to_bimcraft": {}, "cuts_by": "removal"}));
+        translated(&mut f, json!({"to_bimcraft": {}, "cuts_by": "instance"}));
         translated(&mut f, json!({"to_bimcraft": {}}));
         assert!(!f.cuts_measured);
     }

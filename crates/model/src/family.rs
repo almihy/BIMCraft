@@ -1128,7 +1128,7 @@ pub struct Family {
     /// compares only its plan and its 3D is always Revit's own result ([`Family::draws_snapshot_forms`]).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub rpc: bool,
-    /// Whether what each of its voids cuts (`Form::cuts`) was measured: the add-in removed each void and saw which solids grew.
+    /// Whether what each of its voids cuts (`Form::cuts`) was measured from the instance (the definition's `cuts_by` is `instance`).
     /// Then a void cuts exactly the solids it names, whatever their order in the family; a family without it (every package
     /// before the add-in measured) has a void cut every solid listed before it that it reaches.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
