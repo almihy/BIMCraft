@@ -200,3 +200,11 @@ C++ already built; `unstable-wasm-uu`, the environment of `docs/manifold-trial.m
 `web-demo/manifold-trial-node.cjs`: `manifold_trial()` (now a box minus `Solid3::cylinder`, through the doorway) gives volume
 803965.7193408788 (the analytic value to the last digit) and 272 triangles, in 17 ms. `cargo check --workspace` and
 `cargo clippy -p bimcraft-geom` are clean.
+
+## Family voids (step 2)
+
+`Family::build` cuts a form by its voids in `crates/model/src/family/cutting.rs`: a closed form and closed voids go to
+`Solid3::from_triangles` and one `difference_all` (no triangle cap); a form or void that `from_triangles` refuses keeps
+`csg::subtract` (cap 20,000), which stays for that alone. `Family::open_forms` names the parametric forms and voids that are not
+closed and why; `check_type` puts them in `TypeCheck::warnings` (a warning, never a refusal). A piece carries one material, so
+the cut faces take it without needing the origin map.

@@ -210,6 +210,10 @@ pub struct TypeCheck {
     /// sill (negative: below it). The check compared it with the one BIMCraft cuts; a type drawn as Revit made it cuts it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opening: Option<[f64; 3]>,
+    /// What isn't wrong enough to fail the type but that someone should know: a form or a void of the definition that is not
+    /// a closed solid, which is therefore cut by the older, limited cutter ([`Family::open_forms`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 impl TypeCheck {

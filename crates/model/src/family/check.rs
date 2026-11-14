@@ -131,12 +131,13 @@ impl Family {
     /// was made in), and, for one that says the opening Revit cut in it, that opening first ([`Family::opening_differs`]: a part of
     /// the type's match). None for a type Revit's result says nothing of: it isn't checked.
     pub fn check_type(&self, t: &str, others: Others, wall: f64, opening: Option<&super::revit::Opening>) -> Option<TypeCheck> {
-        let fail = |reason: String| Some(TypeCheck { matched: false, reason: Some(reason), ..TypeCheck::default() });
         let snapshot_here =
             self.forms.iter().any(|f| f.snapshot && f.of_type(t)) || self.symbols.iter().any(|y| y.snapshot && y.of_type(t));
         if !snapshot_here {
             return None;
         }
+        let warnings = self.values_in(t, &BTreeMap::new(), wall).map(|v| self.open_forms(t, &v)).unwrap_or_default();
+        let fail = |reason: String| Some(TypeCheck { matched: false, reason: Some(reason), warnings: warnings.clone(), ..TypeCheck::default() });
         if !self.has_parametric() {
             return fail("it came without the rules that size it, so it is drawn as Revit made it".into());
         }
@@ -147,10 +148,31 @@ impl Family {
             Ok(found) => match found.iter().find_map(Compared::failed) {
                 Some(why) => fail(why),
                 // A planting's 3D is Revit's render placeholder, drawn as Revit made it whatever its plan says.
-                None => Some(TypeCheck { matched: true, reason: self.rpc.then(|| RPC_3D.to_string()), ..TypeCheck::default() }),
+                None => Some(TypeCheck {
+                    matched: true,
+                    reason: self.rpc.then(|| RPC_3D.to_string()),
+                    warnings: warnings.clone(),
+                    ..TypeCheck::default()
+                }),
             },
             Err(why) => fail(why),
         }
+    }
+
+    /// Which of type `t`'s parametric forms and voids, sized by `values`, are not a closed solid, and why: each of them is cut
+    /// by the older cutter ([`csg::subtract`], which has a limit on triangles) and not on the solid kernel. A warning, never a
+    /// refusal: the family is drawn and cut either way. A form that can't be built is left to the build to say.
+    pub fn open_forms(&self, t: &str, values: &BTreeMap<String, super::Val>) -> Vec<String> {
+        let mut read = HashMap::new();
+        let mut out = Vec::new();
+        for (i, form) in self.forms.iter().enumerate().filter(|(_, f)| !f.snapshot && f.of_type(t)) {
+            let Ok(Some(piece)) = self.solid(i, values, &mut read) else { continue };
+            if let Err(why) = super::cutting::as_solid(&piece.tris, bimcraft_geom::solid::Origin::new(0, 0)) {
+                let what = if form.void { "void" } else { "form" };
+                out.push(format!("{what} {} is not a closed solid, so it is cut by the older, limited cutter: {why}", i + 1));
+            }
+        }
+        out
     }
 
     /// Why the opening type `t` cuts in a wall `wall` mm thick isn't the one Revit cut (`opening`), within [`BOX`] mm: its
