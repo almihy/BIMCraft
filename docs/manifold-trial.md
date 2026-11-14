@@ -133,7 +133,7 @@ after 775 s (web release), 590 s (web wasm), 1066 s (app release), 800 s (app wa
   at the commit pinned in `vendor/manifold-csg-sys/build.rs` (`MANIFOLD_VERSION`) with cmake:
   `-DMANIFOLD_CBIND=ON -DMANIFOLD_TEST=OFF -DMANIFOLD_PAR=OFF -DMANIFOLD_CROSS_SECTION=ON -DMANIFOLD_USE_BUILTIN_CLIPPER2=ON
   -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_BUILD_TYPE=Release`; the three archives are in
-  `build/bindings/c`, `build/src` and `build/_deps/clipper2-build` (they are what a normal build leaves in
+  `build/lib` (manifold, manifoldc) and `build/_deps/clipper2-build` (Clipper2) (they are what a normal build leaves in
   `target/<profile>/build/manifold-csg-sys-*/out/build`). Set both variables for the whole build, e.g.
   `MANIFOLD_CSG_LIB_DIR=/opt/manifold/lib MANIFOLD_CSG_LIB_KIND=static cargo build -p bimcraft`. Wasm has no such switch: it
   would need the vendored crate patched to pass `FETCHCONTENT_SOURCE_DIR_*` and a local shim.
