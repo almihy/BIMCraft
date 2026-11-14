@@ -170,17 +170,18 @@ fn strokes(d: &Drawing, id: Id) -> Vec<(f32, bool, bool, Vec<P2>)> {
 
 #[test]
 fn an_elevation_swing_draws_dashed_in_its_subcategorys_weight() {
-    let swing = json!([{"line": [[-400, 0], [0, 2000], [400, 0]], "view": "front", "subcategory": "Elevation Swing"}]);
+    let swing = |sub: &str| json!([{"line": [[-400, 0], [0, 2000], [400, 0]], "view": "front", "subcategory": sub}]);
     let mut s = Session::new();
     styled_door(
         &mut s,
         "Sample Dashed Swing",
         json!([{"name": "Elevation Swing", "projection": 1, "pattern": "Sample Dash"}]),
         json!({"Sample Dash": [{"dash": 3.0}, {"space": 1.5}]}),
-        swing.clone(),
+        swing("Elevation Swing"),
         None,
     );
-    styled_door(&mut s, "Sample Plain Swing", json!([{"name": "Elevation Swing"}]), json!({}), swing, None);
+    // A subcategory of another name: the project's Object Style of `Elevation Swing` is the first family's, as in Revit.
+    styled_door(&mut s, "Sample Plain Swing", json!([{"name": "Plain Swing"}]), json!({}), swing("Plain Swing"), None);
     run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]]}));
     let dashed = id_of(&run(&mut s, "door", json!({"at": [1000, 0], "family": "Sample Dashed Swing", "type": "900"})));
     let plain = id_of(&run(&mut s, "door", json!({"at": [3000, 0], "family": "Sample Plain Swing", "type": "900"})));
@@ -211,7 +212,7 @@ fn an_elevation_swing_draws_dashed_in_its_subcategorys_weight() {
 fn a_door_frame_cut_draws_in_its_subcategorys_cut_pen() {
     let mut s = Session::new();
     styled_door(&mut s, "Sample Light Frame", json!([{"name": "Frame", "cut": 1}]), json!({}), json!([]), Some("Frame"));
-    styled_door(&mut s, "Sample Heavy Frame", json!([{"name": "Frame"}]), json!({}), json!([]), Some("Frame"));
+    styled_door(&mut s, "Sample Heavy Frame", json!([{"name": "Plain Frame"}]), json!({}), json!([]), Some("Plain Frame"));
     run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]]}));
     let light = id_of(&run(&mut s, "door", json!({"at": [1000, 0], "family": "Sample Light Frame", "type": "900"})));
     let heavy = id_of(&run(&mut s, "door", json!({"at": [3000, 0], "family": "Sample Heavy Frame", "type": "900"})));
@@ -280,7 +281,7 @@ fn a_walls_face_lines_stop_at_a_doors_opening() {
                "parameters": [{"name": "Width", "kind": "length", "value": 1010}, {"name": "Height", "kind": "length", "value": 2100}],
                "types": {"1010": {}}, "forms": [{"profile": [[-505, -20], [505, -20], [505, 20], [-505, 20]], "from": 0, "to": 50}]}),
     );
-    let wall = id_of(&run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]]})));
+    let wall = run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]]}))["ids"][0].as_u64().unwrap_or_default();
     let door = id_of(&run(&mut s, "door", json!({"at": [2000, 0], "family": "Sample Wide Door", "type": "1010"})));
     let half = s.model.thickness(
         s.model
@@ -307,21 +308,21 @@ fn a_walls_face_lines_stop_at_a_doors_opening() {
 }
 
 #[test]
-fn a_screens_lines_do_not_thicken_as_it_zooms_in() {
-    // Revit keeps a line's width at its weight's for the view's scale whatever the zoom: zooming in makes the drawing bigger, not
-    // its lines heavier. The screen's plan at a tenth of a pixel to the mm and at four times that draws the wall's cut outline as
-    // wide as each other, and as wide as pen 10 is at 1 : 100 (0.35 mm, 5 pixels to a mm of paper).
+fn a_drawings_pen_zoom_is_what_its_lines_are_wider_than_their_weights_for_the_zoom_it_was_drawn_at() {
+    // A pen is as wide as on the paper the view stands for, so zooming in four times makes it four times as wide; a screen divides
+    // that by `pen_zoom` and draws every zoom's lines as wide as their weight at the view's scale (the wall's cut outline, pen 10,
+    // is 0.35 mm of paper: 1.75 px at five to the mm) -- Revit keeps a line's width whatever the zoom.
     let mut s = Session::new();
-    let wall = id_of(&run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]]})));
+    let wall = run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]]}))["ids"][0].as_u64().unwrap_or_default();
     let widest = |scale: f64| {
         let view = crate::render::View { scale, cx: 2000.0, cy: 0.0, width: 1000, height: 800 };
         let d = render::draw(&s.model, 100000, view);
         let width = strokes(&d, wall).into_iter().filter(|(_, dashed, ..)| !dashed).map(|(w, ..)| w).fold(0.0, f32::max);
-        (width, d.width(Pen(10)))
+        (width, d.pen_zoom())
     };
-    let ((far, pen_far), (near, pen_near)) = (widest(0.1), widest(0.4));
-    assert!(far > 0.0, "the wall is drawn");
-    assert!((far - near).abs() < 1e-4, "{far} px zoomed out, {near} px zoomed in");
-    assert!((far - pen_far).abs() < 1e-4 && (near - pen_near).abs() < 1e-4, "each is its pen's width: {far} {pen_far}, {near} {pen_near}");
-    assert!((pen_far - pen_near).abs() < 1e-4, "a pen's width is the same at every zoom of a screen");
+    let ((far, far_zoom), (near, near_zoom)) = (widest(0.1), widest(0.4));
+    assert!(far > 0.0 && far_zoom > 0.0, "the wall is drawn");
+    assert!((near / far - 4.0).abs() < 1e-3 && (near_zoom / far_zoom - 4.0).abs() < 1e-3, "{far} {far_zoom}, {near} {near_zoom}");
+    assert!((far / far_zoom - near / near_zoom).abs() < 1e-4, "the same width on a screen at either zoom");
+    assert!((far / far_zoom - 1.75).abs() < 1e-4, "pen 10: 0.35 mm of paper at five pixels to the mm: {}", far / far_zoom);
 }

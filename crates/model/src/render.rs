@@ -140,8 +140,8 @@ pub struct Drawing {
     /// How big annotation is drawn, times the pixels it is drawn in: see [`annotation`].
     #[doc(hidden)]
     pub k: f32,
-    /// How many times [`sheet::DENSITY`] pixels a mm of the paper the view stands for is, so the pens' size on a picture or on
-    /// paper, and what a pattern's dashes are measured in: `k`, not clamped ([`paper_of`]).
+    /// How many times [`sheet::DENSITY`] pixels a mm of the paper the view stands for is, so the pens' size: `k`, not
+    /// clamped ([`paper_of`]).
     paper: f32,
     /// How much of what the view cuts it draws.
     detail: Detail,
@@ -241,7 +241,6 @@ impl Drawing {
     /// One shared path for detail lines and region boundaries, in paper units.
     fn styled(&mut self, m: &Model, st: &crate::lines::LineStyle, mut pts: Vec<(f32, f32)>, closed: bool) {
         let k = sheet::DENSITY as f32 * self.paper;
-        let pen_k = self.pen_k();
         let pattern = st.pattern.as_ref().and_then(|n| m.line_patterns.get(n));
         let color = Rgb(st.color[0], st.color[1], st.color[2]);
         if let Some(p) = pattern.filter(|p| !p.is_dash()) {
@@ -249,7 +248,7 @@ impl Drawing {
                 pts.push(first);
             }
             let part = std::mem::replace(&mut self.part, Part::LinePattern);
-            for graphic in p.geometry(&pts, k, (self.weights.mm(st.pen, true) * sheet::DENSITY) as f32 * pen_k, color) {
+            for graphic in p.geometry(&pts, k, (self.weights.mm(st.pen, true) * sheet::DENSITY) as f32 * self.paper, color) {
                 self.push_pen(graphic.prim, graphic.weighted.then_some(st.pen));
             }
             self.part = part;
@@ -261,7 +260,7 @@ impl Drawing {
     /// Each line's width as its pen draws it in this view, as annotation where `annotation` says its owner is, else as
     /// the model: the last step of drawing a view, once its overrides have set their pens.
     pub(crate) fn weigh(&mut self, annotation: impl Fn(Option<Id>) -> bool) {
-        let (weights, k) = (self.weights, self.pen_k());
+        let (weights, k) = (self.weights, self.paper);
         for ((prim, owner), pen) in self.prims.iter_mut().zip(&self.owners).zip(&self.pens) {
             let Some(pen) = pen else { continue };
             let width = (weights.mm(*pen, annotation(*owner)) * sheet::DENSITY) as f32 * k;
@@ -347,14 +346,14 @@ impl Drawing {
     /// can. [`Drawing::weigh`] sizes annotation's at the end.
     #[doc(hidden)]
     pub fn width(&self, pen: Pen) -> f32 {
-        (self.weights.mm(pen, false) * sheet::DENSITY) as f32 * self.pen_k()
+        (self.weights.mm(pen, false) * sheet::DENSITY) as f32 * self.paper
     }
-    /// How many times [`sheet::DENSITY`] pixels a mm of a pen draws: the zoom ([`Drawing::paper`]) on a picture or on paper, where
-    /// a line is as wide as on the paper the view stands for, however far in or out; one on a screen, where, as in Revit, a
-    /// line's width is its weight's at the view's scale and no wider as the view is zoomed in (the dashes of a line pattern are
-    /// still the paper's, and grow).
-    fn pen_k(&self) -> f32 {
-        if self.screen { 1.0 } else { self.paper }
+    /// How many times wider than their weights' own width a drawing's pens are, for the zoom it was drawn at: what a screen
+    /// divides its lines' widths by, so that a line's width on screen is its weight's at the view's scale and no wider as the view is
+    /// zoomed in, as in Revit (a picture and a sheet keep the paper's: a line is as wide as on the paper the view stands for). A
+    /// pattern's dashes are the paper's still, and grow with the zoom.
+    pub fn pen_zoom(&self) -> f32 {
+        if self.paper.is_finite() && self.paper > 0.0 { self.paper } else { 1.0 }
     }
     /// `px` pixels of annotation, as big as the view's scale makes them.
     fn px(&self, px: f32) -> f32 {

@@ -120,7 +120,7 @@ impl BimApp {
         if let Some(t) = &shot.picture {
             p.image(t.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
         }
-        paint(&p, Place { origin: rect.min, k, paper: false, hide: None }, &shot.drawing, &self.selection, None, true, &[]);
+        paint(&p, Place { origin: rect.min, k, paper: false, zoom: 0.0, hide: None }, &shot.drawing, &self.selection, None, true, &[]);
         if let Some(v) = self.canvas.view(key) {
             let ink = canvas_pal();
             p.rect(outline(v), 0.0, ink.select_fill.gamma_multiply(0.5), Stroke::new(1.5, ink.accent), StrokeKind::Middle);

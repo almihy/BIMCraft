@@ -775,23 +775,35 @@ pub(crate) struct Place {
     pub origin: Pos2,
     pub k: f32,
     pub paper: bool,
+    /// How many times wider than their weights' own width the drawing's lines are for the zoom it was drawn at
+    /// ([`render::Drawing::pen_zoom`]): a screen draws them no wider as the view zooms in, as Revit does. Not given (0), or on
+    /// `paper`, lines are as wide as the drawing says, times `k`.
+    pub zoom: f32,
     /// What of the drawing is left out: a note being written, which its editor draws.
     pub hide: Option<Id>,
 }
 
 impl Place {
     pub(crate) fn at(origin: Pos2) -> Place {
-        Place { origin, k: 1.0, paper: false, hide: None }
+        Place { origin, k: 1.0, paper: false, zoom: 0.0, hide: None }
     }
     pub(crate) fn pos(self, (x, y): (f32, f32)) -> Pos2 {
         self.origin + vec2(x, y) * self.k
     }
 }
 
-/// How many screen pixels wide a line `width` px wide in a drawing shown `k` times its size draws: as wide as its pen
-/// on the paper the view stands for, at least a pixel, so a hairline (0) is one at any zoom; with Thin Lines, one.
-pub(crate) fn on_screen(width: f32, k: f32, thin: bool) -> f32 {
-    if thin { 1.0 } else { (width * k).max(1.0) }
+/// How many screen pixels wide a line `width` px wide in a drawing placed at `at` draws: a screen's lines are as wide as their
+/// weight is at the view's scale, however far the view is zoomed in (the drawing's width over its zoom, [`Place::zoom`]); a
+/// sheet's, or a drawing that says no zoom, are as wide as the drawing says, `k` times. At least a pixel, so a hairline (0) is one
+/// at any zoom; with Thin Lines, one.
+pub(crate) fn on_screen(width: f32, at: Place, thin: bool) -> f32 {
+    if thin {
+        1.0
+    } else if at.paper || at.zoom <= 0.0 {
+        (width * at.k).max(1.0)
+    } else {
+        (width / at.zoom).max(1.0)
+    }
 }
 
 /// The display list, with the selected and hovered elements in the accent colours, but for what `at` leaves out; with
@@ -817,6 +829,7 @@ fn paint_preview(p: &Painter, at: Place, d: &Drawing, preview: &[Id], thin: bool
         p.add(shape);
     };
     let none = HashSet::new();
+    let at = Place { zoom: d.pen_zoom(), ..at };
     for (i, ((prim, owner), part)) in d.prims.iter().zip(&d.owners).zip(&d.parts).enumerate() {
         if let Some(id) = owner.filter(|id| preview.contains(id)) {
             paint_prim(&mut out, p.clip_rect(), at, (prim, Some(id), *part, d.half(i)), &none, Some(id), thin, &mut [].iter());
@@ -839,7 +852,7 @@ fn outside(prim: &Prim, at: Place, thin: bool, clip: Rect) -> bool {
         }
         Prim::Line { pts, width, .. } => {
             pts.iter().for_each(&mut grow);
-            on_screen(*width, at.k, thin) * 8.0 + 4.0
+            on_screen(*width, at, thin) * 8.0 + 4.0
         }
         // A picture's place has more to it; it is few, and drawn.
         Prim::Image { .. } => return false,
@@ -861,6 +874,8 @@ pub(crate) fn paint_to(
     pictures: &[TextureId],
 ) {
     let mut pictures = pictures.iter();
+    // The drawing's lines are no wider as its view zooms in.
+    let at = Place { zoom: d.pen_zoom(), ..at };
     // Looked up for each primitive: not searched through.
     let set: HashSet<Id> = selected.iter().copied().collect();
     for (i, ((prim, owner), part)) in d.prims.iter().zip(&d.owners).zip(&d.parts).enumerate() {
@@ -989,7 +1004,7 @@ pub(crate) fn paint_prim(
             }
         }
         Prim::Line { pts, width, color: c, dash, closed, alpha } => {
-            let stroke = Stroke::new(on_screen(*width, at.k, thin), accent.map_or(seen(color(*c), *alpha), |a| a.0));
+            let stroke = Stroke::new(on_screen(*width, at, thin), accent.map_or(seen(color(*c), *alpha), |a| a.0));
             let mut pts: Vec<Pos2> = pts.iter().map(|q| at.pos(*q)).collect();
             match dash {
                 Some(dash) => {

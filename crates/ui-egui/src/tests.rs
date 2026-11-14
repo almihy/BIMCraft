@@ -1526,10 +1526,19 @@ fn a_line_weight_is_a_pen_picked_from_a_list_and_a_hairline_is_a_pixel_on_screen
     press(&mut h, "OK");
     press(&mut h, "OK");
     assert_eq!(plan_graphics(&h, 100000).categories["wall"].cut.weight, Some(Pen(0)));
-    // On screen a line is its pen's pixels at the zoom, at least one: a hairline is one at any zoom; Thin Lines makes all one.
-    use crate::canvas::on_screen;
-    assert_eq!((on_screen(2.0, 3.0, false), on_screen(0.0, 3.0, false), on_screen(0.2, 1.0, false)), (6.0, 1.0, 1.0));
-    assert_eq!(on_screen(2.0, 3.0, true), 1.0);
+    // On screen a line is its pen's pixels, at least one: a hairline is one at any zoom; Thin Lines makes all one. A drawing that
+    // says no zoom (a sheet) is as wide as it says, times how big it is shown.
+    use crate::canvas::{Place, on_screen};
+    let shown = |k: f32, zoom: f32| Place { k, zoom, ..Place::at(egui::Pos2::ZERO) };
+    assert_eq!((on_screen(2.0, shown(3.0, 0.0), false), on_screen(0.0, shown(3.0, 0.0), false)), (6.0, 1.0));
+    assert_eq!(on_screen(0.2, shown(1.0, 0.0), false), 1.0);
+    assert_eq!(on_screen(2.0, shown(3.0, 0.0), true), 1.0);
+    // A screen's drawing made at a zoom is no wider as it zooms in: its lines' width over the zoom it was made at, whatever its
+    // `k` (Revit keeps a line's width at its weight's for the view's scale).
+    assert_eq!(on_screen(8.0, shown(1.0, 4.0), false), 2.0);
+    assert_eq!(on_screen(32.0, shown(1.0, 16.0), false), 2.0, "four times as far in, as wide");
+    assert_eq!(on_screen(8.0, shown(2.5, 4.0), false), 2.0, "scaled while it is still being zoomed, as wide");
+    assert_eq!(on_screen(8.0, Place { paper: true, ..shown(2.0, 4.0) }, false), 16.0, "a sheet's are the drawing's, times its size");
 }
 
 #[test]
