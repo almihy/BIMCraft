@@ -201,3 +201,18 @@ fn a_panels_name_lists_every_tool_one_under_the_next_as_wide_as_the_widest() {
     assert!(rows.iter().all(|r| r.left() == rows[0].left() && r.width() == rows[0].width()), "a column of equal rows");
     assert!(rows[0].width() > 150.0 && rows[0].width() < 400.0, "as wide as its words, not a window or a fixed 220: {}", rows[0].width());
 }
+
+#[test]
+fn the_rows_of_another_menu_fill_it_whatever_width_a_panels_list_had() {
+    let mut h = window(1280.0, 0.1);
+    pick_tab(&mut h, "Modify");
+    h.run_steps(3);
+    // A panel's list opened and put away: its widest row is not the width of Paste's choices (set to 230).
+    press(&mut h, "Modify ▾");
+    h.key_press(Key::Escape);
+    h.run_steps(3);
+    press(&mut h, "Paste");
+    h.run_steps(3);
+    let row = h.get_by_label("Copy to Clipboard").rect();
+    assert!((row.width() - 230.0).abs() < 1.0, "a row of the menu fills it, 230: {}", row.width());
+}

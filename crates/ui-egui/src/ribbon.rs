@@ -248,8 +248,12 @@ pub(crate) fn row(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
     });
 }
 
-/// How wide a row of the panel's list is: as wide as its widest, which the rows drawn so far and the last frame's list say.
-pub(crate) fn list_width(own: f32) -> f32 {
+/// How wide a row of the panel's list is: as wide as its widest, which the rows drawn so far and the last frame's list say. A row
+/// of any other menu (Paste's choices, Settings') fills it, a menu wide at least.
+pub(crate) fn list_width(ui: &Ui, own: f32) -> f32 {
+    if !listing() {
+        return ui.available_width().max(200.0);
+    }
     LIST.with(|l| {
         let (known, widest) = l.get();
         l.set((known, widest.max(own)));
@@ -514,7 +518,7 @@ fn list(r: &Response, add: &mut impl FnMut(&mut Ui)) {
         LISTING.with(|l| l.set(true));
         ui.vertical(|ui| add(ui));
         LISTING.with(|l| l.set(false));
-        let widest = LIST.with(|l| l.get().1);
+        let widest = LIST.with(|l| l.replace((0.0, 0.0)).1);
         if (widest - known).abs() > 0.5 {
             ui.ctx().data_mut(|d| d.insert_temp(key, widest));
             ui.ctx().request_repaint();
