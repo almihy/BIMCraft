@@ -1079,7 +1079,7 @@ fn plugin_button(ui: &mut Ui, label: &str, tip: &str) -> Response {
         _ => vec![label.clone()],
     };
     let width = lines.iter().map(|l| wide(l)).fold(0.0, f32::max) + 12.0;
-    let (rect, r) = ui.allocate_exact_size(vec2(width.max(54.0), 60.0), Sense::click());
+    let (rect, r) = ui.allocate_exact_size(vec2(width.max(54.0), ribbon::HEIGHT), Sense::click());
     let enabled = ui.is_enabled();
     r.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, false, &label));
     let (fill, stroke, ink) = match r.hovered() && enabled {
@@ -1088,11 +1088,11 @@ fn plugin_button(ui: &mut Ui, label: &str, tip: &str) -> Response {
     };
     let stroke = if r.has_focus() { style::focus_ring() } else { stroke };
     ui.painter().rect(rect, 6.0, fill, stroke, StrokeKind::Inside);
-    let top = rect.center_top() + vec2(0.0, 30.0 - 6.5 * (lines.len().saturating_sub(1)) as f32);
+    let top = rect.center_top() + vec2(0.0, ribbon::HEIGHT / 2.0 - 6.5 * (lines.len().saturating_sub(1)) as f32);
     for (i, line) in lines.iter().enumerate() {
         ui.painter().text(top + vec2(0.0, 13.0 * i as f32), Align2::CENTER_CENTER, line, font.clone(), ink);
     }
-    r.on_hover_text(tip)
+    ribbon::tip(r, tip)
 }
 
 /// A plugin's button in its panel's list: its row is text alone, as its ribbon button has no icon.
@@ -1139,7 +1139,7 @@ fn ribbon_button(ui: &mut Ui, icon: Icon, label: &str, active: bool, tip: &str, 
         _ => vec![label.to_string()],
     };
     let width = lines.iter().map(|l| wide(l)).fold(0.0, f32::max) + 12.0;
-    let (rect, r) = ui.allocate_exact_size(vec2(width.max(54.0), 60.0), Sense::click());
+    let (rect, r) = ui.allocate_exact_size(vec2(width.max(54.0), ribbon::HEIGHT), Sense::click());
     let enabled = ui.is_enabled();
     r.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, active, &label));
     let (fill, stroke, ink) = match (active, r.hovered() && enabled) {
@@ -1157,13 +1157,15 @@ fn ribbon_button(ui: &mut Ui, icon: Icon, label: &str, active: bool, tip: &str, 
         (false, true) => pal().text,
         (false, false) => pal().muted.gamma_multiply(0.6),
     };
+    // A name of one line under the icon; one of two a little closer, so the second line has room above the button's edge.
+    let (first, step) = if lines.len() > 1 { (39.0, 12.0) } else { (42.0, 0.0) };
     for (i, line) in lines.iter().enumerate() {
-        p.text(rect.center_top() + vec2(0.0, 40.0 + 13.0 * i as f32), Align2::CENTER_CENTER, line, font.clone(), text);
+        p.text(rect.center_top() + vec2(0.0, first + step * i as f32), Align2::CENTER_CENTER, line, font.clone(), text);
     }
     if ribbon::editing_tools() {
         return edit_tool(ui, r, rect, name);
     }
-    r.on_hover_text(tip)
+    ribbon::tip(r, tip)
 }
 
 /// Load Family asking Revit's "Family Already Exists": the file, the family's name, what is still to ask (the family itself
@@ -1213,7 +1215,7 @@ fn small_icon(ui: &mut Ui, icon: Icon, label: &str, active: bool, tip: &str, nam
     if ribbon::editing_tools() {
         return edit_tool(ui, r, rect, name);
     }
-    r.on_hover_text(tip)
+    ribbon::tip(r, tip)
 }
 
 /// A ribbon button in its panel's list: a row of its icon and its name.
@@ -1273,7 +1275,7 @@ fn edit_tool(ui: &Ui, r: Response, rect: Rect, name: &str) -> Response {
     if r.clicked() {
         ribbon::toggle(name);
     }
-    ui.interact(rect, r.id.with("edit-tool"), Sense::hover()).on_hover_text(label)
+    ribbon::tip(ui.interact(rect, r.id.with("edit-tool"), Sense::hover()), label)
 }
 
 /// Buttons stacked three high in a panel, as Revit's Settings panel stacks them; in the panel's list they are rows like any other.
@@ -1323,11 +1325,16 @@ pub(crate) fn stacked_button(ui: &mut Ui, icon: Icon, label: &str, active: bool,
     if ribbon::editing_tools() {
         return edit_tool(ui, r, rect, name);
     }
-    r.on_hover_text(tip)
+    ribbon::tip(r, tip)
 }
 
 /// A small icon button, named for screen readers and tests.
 fn icon_button(ui: &mut Ui, icon: Icon, label: &str) -> Response {
+    icon_button_sized(ui, icon, label, 18.0)
+}
+
+/// A small icon button with its icon `side` across: a palette's head has a size smaller than the rest.
+pub(crate) fn icon_button_sized(ui: &mut Ui, icon: Icon, label: &str, side: f32) -> Response {
     let label = t(label);
     let (rect, r) = ui.allocate_exact_size(vec2(26.0, 24.0), Sense::click());
     r.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, label));
@@ -1338,7 +1345,7 @@ fn icon_button(ui: &mut Ui, icon: Icon, label: &str) -> Response {
     if r.has_focus() {
         ui.painter().rect_stroke(rect, 6.0, style::focus_ring(), StrokeKind::Inside);
     }
-    icons::paint(ui.painter(), icon, Rect::from_center_size(rect.center(), vec2(18.0, 18.0)), ink);
+    icons::paint(ui.painter(), icon, Rect::from_center_size(rect.center(), vec2(side, side)), ink);
     r.on_hover_text(label)
 }
 

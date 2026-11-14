@@ -1242,10 +1242,17 @@ impl BimApp {
         let look3 = look_of(&model, active);
         let marks = active.map(|v| dims3d::marks(&model, v, &cam, &look3, dims3d::SCREEN * f64::from(ppp))).unwrap_or_default();
         let dim_at = |at: Pos2| dims3d::pick(&marks, px(at), f64::from(PICK) * f64::from(ppp));
-        let lit_dim = hover.filter(|_| modify && o.drag.is_none() && sketch_z.is_none() && !picking).and_then(dim_at);
+        // Nothing is lit while flying: the pointer is looking about, not pointing at what it passes.
+        let pointing = !flying && !secondary;
+        let lit_dim = hover.filter(|_| pointing && modify && o.drag.is_none() && sketch_z.is_none() && !picking).and_then(dim_at);
         let hovered = hover
             .filter(|_| {
-                (modify || demolish || paint || unpaint) && o.drag.is_none() && o.hot_grip.is_none() && sketch_z.is_none() && !picking
+                pointing
+                    && (modify || demolish || paint || unpaint)
+                    && o.drag.is_none()
+                    && o.hot_grip.is_none()
+                    && sketch_z.is_none()
+                    && !picking
             })
             .filter(|_| lit_dim.is_none())
             .and_then(|at| pick(&o.picker, at))

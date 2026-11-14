@@ -201,11 +201,13 @@ pub fn words(find: &str) -> Vec<String> {
 impl BimApp {
     /// The Project Browser's palette: its tabs and its search over the tree, which scrolls under them.
     pub(crate) fn browser_palette(&mut self, ui: &mut Ui) {
-        egui::Frame::new().inner_margin(egui::Margin { left: 8, right: 8, top: 5, bottom: 3 }).show(ui, |ui| {
+        egui::Frame::new().inner_margin(egui::Margin { left: 8, right: 8, top: 5, bottom: 0 }).show(ui, |ui| {
             self.browser_tabs(ui);
             ui.add_space(3.0);
             self.browser_search(ui);
         });
+        // The tree straight under the search: no gap between them but the tree's own margin.
+        ui.spacing_mut().item_spacing.y = 0.0;
         let scroll = egui::ScrollArea::vertical().auto_shrink([false, false]).min_scrolled_height(0.0);
         scroll.id_salt("browser").show(ui, |ui| {
             egui::Frame::new().inner_margin(egui::Margin { left: 8, right: 8, top: 4, bottom: 8 }).show(ui, |ui| {

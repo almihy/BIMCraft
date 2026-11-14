@@ -1,7 +1,8 @@
 // The 3D view on the graphics card: the passes that make the picture the processor's rasterizer makes (core `view3d.rs`).
 //   1. vs_scene / fs_scene: the opaque surfaces into a colour target (shaded and textured) and an id target (the plane a pixel
 //      shows and its element), with their depth; then vs_instanced / fs_scene, each shape's copies, placed. Under a section box,
-//      fs_scene_cut, which keeps only what lies in it. Then vs_dot / fs_dot, a scan's points, in the same targets and depth.
+//      fs_scene_cut, which keeps only what lies in it and draws the faces turned away as the cut faces. Then
+//      vs_dot / fs_dot, a scan's points, in the same targets and depth.
 //   2. vs_scene and vs_instanced_clear / fs_clear: the surfaces seen through, the nearest of them where it is nearer than anything opaque, into a
 //      colour target and an element target of their own (only when the view sees through something).
 //   3. vs_full / fs_post: an edge wherever the opaque plane changes between a pixel and the one to its right or below it (where
@@ -257,12 +258,37 @@ fn cut_away(world: vec3<f32>) -> bool {
     return any(world < g.cut_lo.xyz) || any(world > g.cut_hi.xyz);
 }
 
+// A surface under a section box, with its depth: a face turned away from the camera is the cut face of the solid the box cuts
+// (the inside of its far side, seen through the cut), drawn in one flat colour lit as if facing the camera and with one plane
+// for the element's whole cut; a hair behind its own depth, so a face turned toward the camera as near as it (a cut wall's foot
+// on the floor's top) is the one drawn, as the processor's `capped` and `CAP_BEHIND` draw it.
+struct CutTargets {
+    @location(0) color: vec4<f32>,
+    @location(1) ids: vec2<u32>,
+    @builtin(frag_depth) depth: f32,
+}
+
+// The plane a cut face's pixels hold: one each element (its place among the owners), past any surface's own.
+const CAP_PLANE: u32 = 0x80000000u;
+
 @fragment
-fn fs_scene_cut(in: SceneOut, @builtin(front_facing) front: bool) -> SceneTargets {
+fn fs_scene_cut(in: SceneOut, @builtin(front_facing) front: bool) -> CutTargets {
     if cut_away(in.world) {
         discard;
     }
-    return scene_targets(in, front);
+    var out: CutTargets;
+    if front {
+        let s = scene_targets(in, true);
+        out.color = s.color;
+        out.ids = s.ids;
+        out.depth = in.clip.z;
+        return out;
+    }
+    out.color = vec4<f32>(floor(in.base * lit(g.back.xyz) + vec3<f32>(0.5)) / 255.0, 1.0);
+    out.ids = vec2<u32>(CAP_PLANE | in.ids.y, in.ids.y);
+    // Larger is nearer: a hundred-thousandth less is behind.
+    out.depth = in.clip.z * (1.0 - 1.0e-5);
+    return out;
 }
 
 struct ClearTargets {

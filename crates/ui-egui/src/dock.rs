@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 use crate::icons::Icon;
 use crate::lang::{t, tf};
 use crate::style::pal;
-use crate::{BimApp, Sheet, icon_button};
+use crate::{BimApp, Sheet, icon_button_sized};
 
 /// A palette that docks. A new one is a row here, its body in [`BimApp::palette_body`] and its name in `lang.rs`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -124,6 +124,8 @@ const RIGHT_EXTRA: f32 = 12.0;
 const PALETTE_MARGIN: f32 = 8.0;
 /// A palette's header bar: its title (or tabs), its Dock menu and its close button.
 const HEADER: f32 = 28.0;
+/// How big the icons of a palette's or a floating view's head are (its Dock and its Close): a size under the toolbars'.
+const HEAD_ICON: f32 = 15.0;
 /// A palette's window, when it starts floating.
 pub const FLOAT_SIZE: Vec2 = vec2(300.0, 420.0);
 /// A view's window, when it starts floating.
@@ -561,10 +563,10 @@ impl BimApp {
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let name = t(shown.name());
-                if icon_button(ui, Icon::Close, &tf("Close {}", &[name])).clicked() {
+                if icon_button_sized(ui, Icon::Close, &tf("Close {}", &[name]), HEAD_ICON).clicked() {
                     self.docking.take(shown);
                 }
-                let r = icon_button(ui, Icon::Dock, &tf("Dock {}", &[name]));
+                let r = icon_button_sized(ui, Icon::Dock, &tf("Dock {}", &[name]), HEAD_ICON);
                 Popup::menu(&r).show(|ui| self.dock_menu(ui, shown, rect));
             });
         });
@@ -684,10 +686,10 @@ impl BimApp {
                     ui.scope_builder(
                         UiBuilder::new().max_rect(rect.shrink2(vec2(4.0, 2.0))).layout(Layout::right_to_left(Align::Center)),
                         |ui| {
-                            if icon_button(ui, Icon::Close, &tf("Close {}", &[&name])).clicked() {
+                            if icon_button_sized(ui, Icon::Close, &tf("Close {}", &[&name]), HEAD_ICON).clicked() {
                                 self.close_view(f.sheet);
                             }
-                            if icon_button(ui, Icon::Dock, &tf("Dock {}", &[&name])).clicked() {
+                            if icon_button_sized(ui, Icon::Dock, &tf("Dock {}", &[&name]), HEAD_ICON).clicked() {
                                 self.dock_view(f.sheet, usize::MAX);
                             }
                         },

@@ -623,7 +623,18 @@ pub(crate) fn combo(ui: &mut Ui, salt: (Id, &str), label: UiId, current: &str, o
 
 /// A button across a value cell, as wide as the drop-downs beside it, its text centred: Edit…, a view template's name.
 pub(crate) fn wide_button(ui: &mut Ui, text: impl Into<egui::WidgetText>) -> egui::Response {
-    ui.add_sized([ui.available_width(), ui.spacing().interact_size.y], Button::new(text).truncate())
+    framed(ui, |ui| ui.add_sized([ui.available_width(), ui.spacing().interact_size.y], Button::new(text).truncate()))
+}
+
+/// `add` with controls bordered as they are outside a [`grid`]: a button or a box to tick in a grid's row, which, unlike its
+/// fields, is not a plain cell.
+pub(crate) fn framed<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let border = ui.ctx().global_style().visuals.widgets.inactive.bg_stroke;
+    ui.scope(|ui| {
+        ui.visuals_mut().widgets.inactive.bg_stroke = border;
+        add(ui)
+    })
+    .inner
 }
 
 /// Element `id` as a link, by its category and its id: whether it was clicked, to select it.
@@ -662,12 +673,12 @@ pub(crate) fn group_header(ui: &mut Ui, group: &str, open: bool) -> bool {
     let rule = Stroke::new(1.0, pal().border);
     p.hline(r.x_range(), r.top() + 0.5, rule);
     p.hline(r.x_range(), r.bottom() - 0.5, rule);
-    // The chevron before the name, pointing down while the group is open.
-    let c = pos2(slot.left() + 6.0, slot.center().y);
+    // The chevron at the bar's right end, pointing down while the group is open, up while it is folded.
+    let c = pos2(slot.right() - 8.0, slot.center().y);
     let chevron =
-        if open { [vec2(-3.5, -2.0), vec2(0.0, 2.0), vec2(3.5, -2.0)] } else { [vec2(-2.0, -3.5), vec2(2.0, 0.0), vec2(-2.0, 3.5)] };
+        if open { [vec2(-3.5, -2.0), vec2(0.0, 2.0), vec2(3.5, -2.0)] } else { [vec2(-3.5, 2.0), vec2(0.0, -2.0), vec2(3.5, 2.0)] };
     p.add(Shape::line(chevron.iter().map(|d| c + *d).collect(), Stroke::new(1.5, pal().icon)));
-    p.text(pos2(slot.left() + 18.0, slot.center().y), Align2::LEFT_CENTER, group, crate::style::semibold(12.5), pal().text);
+    p.text(pos2(slot.left() + 4.0, slot.center().y), Align2::LEFT_CENTER, group, crate::style::semibold(12.5), pal().text);
     if response.has_focus() {
         p.rect_stroke(r, 0.0, crate::style::focus_ring(), StrokeKind::Inside);
     }
@@ -676,8 +687,12 @@ pub(crate) fn group_header(ui: &mut Ui, group: &str, open: bool) -> bool {
 
 /// A group's rows under its header: names on the left and values on the right, half the palette each, as Revit's columns, so a
 /// long name wraps rather than pushing its field past the palette's edge.
+///
+/// Its fields and drop-downs are plain cells until the pointer is on one or it is being edited, as Revit's palette is a table of
+/// values: their border shows then. Its buttons and boxes to tick keep theirs ([`framed`]).
 pub(crate) fn grid(ui: &mut Ui, id: impl egui::AsIdSalt, add: impl FnOnce(&mut Ui)) {
     Frame::new().inner_margin(Margin { left: 6, right: 0, top: 4, bottom: 6 }).show(ui, |ui| {
+        ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::NONE;
         // Room left for the palette's scroll bar: one that comes would otherwise push the rows past the card.
         let gap = ui.spacing().item_spacing.x;
         let half = (ui.available_width() - gap - ui.spacing().scroll.bar_width) / 2.0;
@@ -1658,7 +1673,7 @@ impl BimApp {
                         }
                         Crop => {
                             let mut on = !val.is_null();
-                            let r = ui.checkbox(&mut on, "");
+                            let r = framed(ui, |ui| ui.checkbox(&mut on, ""));
                             r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, label));
                             if r.labelled_by(name.id).changed() {
                                 crop = Some(on);
@@ -1666,7 +1681,7 @@ impl BimApp {
                         }
                         Flag => {
                             let mut on = val.as_bool().unwrap_or(false);
-                            let r = ui.checkbox(&mut on, "");
+                            let r = framed(ui, |ui| ui.checkbox(&mut on, ""));
                             // A checkbox without text names itself "" for screen readers: give it its row's name.
                             r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, label));
                             if r.labelled_by(name.id).changed() {
@@ -1750,7 +1765,7 @@ impl BimApp {
                         Attached => {
                             ui.horizontal(|ui| {
                                 let mut on = !val.is_null();
-                                let r = ui.add_enabled(false, Checkbox::new(&mut on, ""));
+                                let r = framed(ui, |ui| ui.add_enabled(false, Checkbox::new(&mut on, "")));
                                 r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, false, on, label));
                                 r.labelled_by(name.id);
                                 if let Some(other) = id_of(val)
@@ -1938,7 +1953,7 @@ impl BimApp {
                             }
                             Holds::YesNo => {
                                 let mut on = val.as_f64().is_some_and(|x| x != 0.0);
-                                let r = ui.checkbox(&mut on, "");
+                                let r = framed(ui, |ui| ui.checkbox(&mut on, ""));
                                 r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, &p.name));
                                 if r.labelled_by(name.id).changed() {
                                     change = Some((p.name.clone(), Ok(json!(on))));
@@ -2007,7 +2022,7 @@ impl BimApp {
                 let field = match kind {
                     ParameterKind::YesNo => {
                         let mut on = val.as_bool().unwrap_or(false);
-                        let r = ui.checkbox(&mut on, "");
+                        let r = framed(ui, |ui| ui.checkbox(&mut on, ""));
                         r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, name.as_str()));
                         if r.labelled_by(label.id).changed() {
                             change = Some((name.to_string(), Ok(json!(on))));

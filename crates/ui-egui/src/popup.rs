@@ -1,8 +1,8 @@
 //! Shared dialog frame: a draggable title bar, a corner close button, a scrolling body and a fixed footer.
 
 use egui::{
-    Align2, Area, Context, CursorIcon, Id, Label, ModalResponse, Order, Pos2, RichText, ScrollArea, Sense, Stroke, Ui, UiKind, WidgetInfo,
-    WidgetType, vec2,
+    Align2, Area, Context, CursorIcon, Frame, Id, Label, Margin, ModalResponse, Order, Pos2, RichText, ScrollArea, Sense, Stroke, Ui,
+    UiKind, WidgetInfo, WidgetType, vec2,
 };
 
 use crate::lang::t;
@@ -10,6 +10,10 @@ use crate::style::{dialog_row, pal};
 
 const TITLE_HEIGHT: f32 = 30.0;
 const FRAME_MARGIN: f32 = 24.0;
+/// The room inside a dialog's edge: its sides, over its title and under its buttons. egui's own (a menu's) is too tight for a form.
+const PAD: Margin = Margin { left: 20, right: 20, top: 12, bottom: 18 };
+/// The gap between a dialog's rows and between the fields of a row.
+const ROW_GAP: egui::Vec2 = vec2(8.0, 8.0);
 
 pub(crate) struct Modal {
     id: Id,
@@ -55,11 +59,13 @@ impl Modal {
             area = area.current_pos(position);
         }
         let (mut close, mut delta) = (false, egui::Vec2::ZERO);
-        let response = egui::Modal::new(self.id).area(area).show(ctx, |ui| {
-            ui.set_width(self.width.min((ctx.content_rect().width() - FRAME_MARGIN).max(120.0)));
+        let frame = Frame::popup(&ctx.global_style()).inner_margin(PAD);
+        let response = egui::Modal::new(self.id).area(area).frame(frame).show(ctx, |ui| {
+            ui.spacing_mut().item_spacing = ROW_GAP;
+            ui.set_width(self.width.min((ctx.content_rect().width() - FRAME_MARGIN - PAD.sum().x).max(120.0)));
             // An Area starts with last frame's size. Give scrolling a stable budget on the first frame,
             // so controls do not shift while a click or a combo-box selection is in progress.
-            ui.set_max_height((ctx.content_rect().height() - FRAME_MARGIN).max(80.0));
+            ui.set_max_height((ctx.content_rect().height() - FRAME_MARGIN - PAD.sum().y).max(80.0));
             ui.set_min_height(self.min_height.min((ctx.content_rect().height() - FRAME_MARGIN).max(0.0)));
             let (bar, _) = ui.allocate_exact_size(vec2(ui.available_width(), TITLE_HEIGHT), Sense::hover());
             ui.painter().rect_filled(bar, 3.0, pal().panel);
@@ -88,7 +94,7 @@ impl Modal {
             let label = t("Close dialog");
             r.widget_info(|| WidgetInfo::labeled(WidgetType::Button, self.closable, label));
             close = r.on_hover_text(t("Close")).clicked();
-            ui.add_space(4.0);
+            ui.add_space(6.0);
             content(ui)
         });
         if previous.is_some_and(|rect| (rect.size() - response.response.rect.size()).length() > 0.5) {
@@ -122,7 +128,7 @@ impl<R> Response<R> {
 /// leave its action buttons halfway up the window.
 pub(crate) fn body<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     let footer = dialog_row(ui) + 12.0;
-    let max_height = (ui.ctx().content_rect().height() - FRAME_MARGIN - TITLE_HEIGHT - footer - 12.0).max(40.0);
+    let max_height = (ui.ctx().content_rect().height() - FRAME_MARGIN - PAD.sum().y - TITLE_HEIGHT - footer - 12.0).max(40.0);
     let min_height = (ui.min_rect().bottom() - ui.cursor().top() - footer).clamp(0.0, max_height);
     ScrollArea::vertical()
         .id_salt("dialog-body")
@@ -138,10 +144,10 @@ pub(crate) fn body<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
 
 /// A footer remains outside the body's scroll area, at the bottom of the dialog.
 pub(crate) fn footer<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
-    ui.add_space(4.0);
+    ui.add_space(6.0);
     let y = ui.cursor().top();
     ui.painter().hline(ui.max_rect().x_range(), y, Stroke::new(1.0, pal().border));
-    ui.add_space(8.0);
+    ui.add_space(12.0);
     let result = add(ui);
     // Dialogs apply their commands after drawing. Paint the resulting validation message on the next frame,
     // even when the pointer stays on a button that was already hovered.

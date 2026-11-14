@@ -938,7 +938,7 @@ impl BimApp {
                     match ty.as_str() {
                         "boolean" => {
                             let mut on = v.as_bool().unwrap_or(false);
-                            if ui.checkbox(&mut on, "").labelled_by(l.id).changed() {
+                            if crate::properties::framed(ui, |ui| ui.checkbox(&mut on, "")).labelled_by(l.id).changed() {
                                 flag = Some((key.clone(), on));
                             }
                         }

@@ -2269,6 +2269,8 @@ impl Scene {
             x: (usize, usize),
             y: (usize, usize),
             corners: Option<[f64; 3]>,
+            /// Its face turned away from the camera inside a section box: drawn as the cut face ([`capped`]).
+            cap: bool,
         }
         let project = cam.projector();
         let mut tris = Vec::new();
@@ -2283,6 +2285,7 @@ impl Scene {
             // In perspective, what is in front of the eye: a triangle, or the one or two its near part makes.
             let (parts, count) = project.in_front(&t.p);
             let lit = lights(i);
+            let cap = capped(cam, cut, front, t);
             for part in parts.iter().take(count) {
                 let [a, b, c] = weighed(&t.p, part).map(|p| project.at(p));
                 let area = (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0);
@@ -2298,7 +2301,7 @@ impl Scene {
                 let y = (y0.max(0.0) as usize, y1.min(h as f64 - 1.0) as usize);
                 let corners = lit.map(|l| part.map(|w| w[0] * l[0] + w[1] * l[1] + w[2] * l[2]));
                 let n = tris.len();
-                tris.push(Projected { id: i as u32, p: [a, b, c], area, x, y, corners });
+                tris.push(Projected { id: i as u32, p: [a, b, c], area, x, y, corners, cap });
                 for bin in bins.iter_mut().take(y.1 / ROWS + 1).skip(y.0 / ROWS) {
                     bin.push(n);
                 }
@@ -2330,7 +2333,7 @@ impl Scene {
                         {
                             continue;
                         }
-                        let z = z as f32;
+                        let z = if t.cap { z - CAP_BEHIND } else { z } as f32;
                         let global = py * w + px;
                         if front.is_some_and(|f| f.get(global).is_some_and(|d| z <= *d)) {
                             continue;
@@ -2396,6 +2399,7 @@ impl Scene {
                 continue;
             }
             let corners = lights(i);
+            let cap = capped(cam, cut, front, t);
             for py in y0.max(0.0) as usize..=y1.min(h as f64 - 1.0) as usize {
                 for px in x0.max(0.0) as usize..=x1.min(w as f64 - 1.0) as usize {
                     let (x, y) = (px as f64 + 0.5, py as f64 + 0.5);
@@ -2414,7 +2418,7 @@ impl Scene {
                     {
                         continue;
                     }
-                    let z = z as f32;
+                    let z = if cap { z - CAP_BEHIND } else { z } as f32;
                     let k = py * w + px;
                     if front.is_some_and(|f| f.get(k).is_some_and(|d| z <= *d)) {
                         continue;
@@ -2662,8 +2666,15 @@ impl Scene {
         // a section's picture draws as ever. Hidden Line draws its edges whatever the view says.
         let display = if clip.is_some() { DisplayOptions::default() } else { look.display() };
         let shadows = display.ambient_shadows.then(|| ambient(&depth, (w, h), cam));
+        // Under a section box, the faces turned away from the camera are the cut faces (`capped`): lit as if facing it, in one
+        // flat colour, and one plane each element.
+        let caps: Vec<bool> = self.tris.iter().map(|t| !see_through(t) && capped(cam, cut, None, t)).collect();
+        let plane_of = |t: usize| match (caps.get(t), self.tris.get(t)) {
+            (Some(true), Some(tri)) => Some(CAP_PLANE | tri.owner as usize),
+            _ => self.planes.get(t).copied(),
+        };
         let outlined = (display.silhouette > 0).then(|| {
-            let plane = |k: usize| hit.get(k).and_then(|t| self.planes.get(*t as usize)).copied();
+            let plane = |k: usize| hit.get(k).and_then(|t| plane_of(*t as usize));
             outlines(&depth, &plane, (w, h), cam, display.silhouette.min(MAX_SILHOUETTE))
         });
         let edges = display.edges || flat;
@@ -2710,8 +2721,12 @@ impl Scene {
         };
         // What triangle `t` shows at pixel `k`, whose surface is `depths` there: a curve's, the blend of its corners' lighting; a
         // flat face's, its own shade; a texture's colour lit as the face is.
+        let cap_light = lit(back);
         let shaded = |t: usize, k: usize, curve: &[f32], depths: &[f32]| {
             let tri = self.tris.get(t)?;
+            if caps.get(t) == Some(&true) {
+                return Some(if flat { PAPER } else { paint(colour(tri), cap_light) });
+            }
             let corners = curve.get(k).filter(|_| smooth.get(t).is_some_and(Option::is_some));
             let skin = textured(t, k, depths.get(k).copied().unwrap_or_default());
             Some(match (skin, corners) {
@@ -2724,7 +2739,7 @@ impl Scene {
         let tints: BTreeMap<Id, Rgb> = tints.iter().copied().collect();
         let tri = |k: usize| hit.get(k).map(|&t| t as usize).filter(|t| *t < self.tris.len());
         let through = |k: usize| seen.get(k).map(|&t| t as usize).filter(|t| *t < self.tris.len());
-        let plane = |k: usize| tri(k).and_then(|t| self.planes.get(t)).copied();
+        let plane = |k: usize| tri(k).and_then(plane_of);
         // The scan a point at pixel `k` is of, and its colour.
         let dot = |k: usize| {
             let scan = self.scans.get((*hit.get(k)? as usize).checked_sub(first)?)?;
@@ -2973,6 +2988,21 @@ pub struct Clip {
     pub x: (f64, f64),
     pub y: (f64, f64),
 }
+
+/// Whether triangle `t` is drawn as a cut face: under a section box, among the opaque surfaces (no `front`), its face turned
+/// away from the camera. A solid the box cuts shows the inside of its far faces through the cut: drawn in one flat colour, it
+/// shows solid, as Revit shows a cut. Where it is as near as a face turned toward the camera (a cut wall's foot on the floor's
+/// top) it lies behind it ([`CAP_BEHIND`]), so the two don't fight.
+fn capped(cam: &Camera, cut: Option<&Boxed>, front: Option<&[f32]>, t: &Tri) -> bool {
+    cut.is_some() && front.is_none() && dot(cross(sub(t.p[1], t.p[0]), sub(t.p[2], t.p[0])), cam.toward(t.p[0])) < 0.0
+}
+
+/// How far behind its own depth a cut face is drawn, mm.
+pub const CAP_BEHIND: f64 = 0.01;
+
+/// The plane a cut face's pixels hold, for its element `owner`: one for the whole cut, so no edge is drawn across it, past any
+/// surface's own.
+pub const CAP_PLANE: usize = 1 << (usize::BITS - 1);
 
 /// A 3D view's section box as `cam` sees it: what of a pixel's depth, or of the model, it keeps. In a parallel view, the
 /// model point a pixel shows at a depth is the same sum for every pixel; in perspective, that sum gives the point on the plane

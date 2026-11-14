@@ -69,7 +69,7 @@ impl BimApp {
             let name = t("Section Box");
             let label = ui.label(name);
             let mut on = b.is_some_and(|b| b.on);
-            let r = ui.checkbox(&mut on, "");
+            let r = crate::properties::framed(ui, |ui| ui.checkbox(&mut on, ""));
             // A checkbox without text names itself "" for screen readers: give it its row's name.
             r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, name));
             if r.labelled_by(label.id).on_hover_text(t(TIP)).changed() {

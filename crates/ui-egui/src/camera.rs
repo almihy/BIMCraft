@@ -77,7 +77,7 @@ impl BimApp {
     fn tick(ui: &mut Ui, name: &str, now: bool) -> Option<bool> {
         let label = ui.label(t(name));
         let mut on = now;
-        let r = ui.checkbox(&mut on, "");
+        let r = crate::properties::framed(ui, |ui| ui.checkbox(&mut on, ""));
         let named = t(name).to_string();
         r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, &named));
         let changed = r.labelled_by(label.id).changed();

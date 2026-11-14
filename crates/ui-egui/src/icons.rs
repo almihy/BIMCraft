@@ -450,17 +450,18 @@ pub fn own(icon: Icon, compact: bool) -> Vec<Outline> {
             }
         }
         Icon::View3D => {
-            // Match the supplied house reference: a broad roof plane, slight
-            // eave overhangs, an uninterrupted gable face and a tall doorway.
-            g.closed(&[(6.75, 7.5), (15.75, 3.0), (21.0, 9.75), (12.0, 14.25)]);
-            g.line(&[(2.85, 10.5), (6.75, 7.5)]);
-            g.line(&[(3.5, 10.0), (3.5, 16.75), (12.0, 21.0), (20.5, 16.75), (20.5, 10.0)]);
-            g.line(&[(12.0, 14.25), (12.0, 21.0)]);
-            if compact {
-                // Preserve the doorway, widening it to keep a clear interior.
-                g.line(&[(5.75, 17.875), (5.75, 12.625), (9.25, 14.375), (9.25, 19.625)]);
-            } else {
-                g.line(&[(6.25, 18.125), (6.25, 12.875), (8.75, 14.125), (8.75, 19.375)]);
+            // A house seen from above a corner, as Revit's default 3D view's: its gable end on the left, the long side on the right
+            // with a door, and the roof running back from the gable.
+            // The walls: their foot round the near corner, and the corner's edge.
+            g.line(&[(3.0, 12.0), (3.0, 18.0), (10.0, 22.0), (21.0, 16.0), (21.0, 10.0)]);
+            g.line(&[(10.0, 22.0), (10.0, 16.0)]);
+            // The gable end, up to the ridge.
+            g.line(&[(3.0, 12.0), (6.5, 8.5), (10.0, 16.0)]);
+            // The roof's near slope: its eave, its far edge and the ridge.
+            g.closed(&[(10.0, 16.0), (21.0, 10.0), (17.5, 2.5), (6.5, 8.5)]);
+            if !compact {
+                // The door, in the long side.
+                g.line(&[(13.0, 20.4), (13.0, 15.4), (15.5, 14.0), (15.5, 19.0)]);
             }
         }
         Icon::Section => {

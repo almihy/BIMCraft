@@ -4,7 +4,10 @@
 
 use std::cell::{Cell, RefCell};
 
-use egui::{Align2, FontId, Id, Popup, Rect, Response, Sense, Stroke, Ui, UiBuilder, Vec2, WidgetInfo, WidgetType, pos2, vec2};
+use egui::{
+    Align2, FontId, Id, Popup, Rect, RectAlign, Response, Sense, Stroke, Ui, UiBuilder, Vec2, WidgetInfo, WidgetText, WidgetType, pos2,
+    vec2,
+};
 
 use crate::lang::t;
 use crate::presets::Scale;
@@ -31,8 +34,8 @@ pub(crate) struct Hover {
 
 /// How wide a column of small tools is: a button and the gap to the next.
 const COLUMN: f32 = 32.0;
-/// How tall a panel's tools are on the ribbon: a large button's height.
-const HEIGHT: f32 = 60.0;
+/// How tall a panel's tools are on the ribbon: a large button's height, room for its icon and a name of two lines.
+pub(crate) const HEIGHT: f32 = 64.0;
 /// How big a small tool's button is.
 pub(crate) const SMALL_TOOL: Vec2 = vec2(30.0, 25.0);
 /// How tall two rows of small tools are.
@@ -173,6 +176,21 @@ thread_local! {
     /// Whether the tab being drawn has been drawn before, so its panels' fit (which tools show) is known: its first frame lays out
     /// every tool, whatever the room.
     static FITTED: Cell<bool> = const { Cell::new(true) };
+}
+
+/// Where a ribbon tool's tooltip and a panel's list stand: centred under it, as Revit's do; over it, or to a side, where the
+/// window has no room below.
+const UNDER: [RectAlign; 3] = [RectAlign::TOP, RectAlign::BOTTOM_START, RectAlign::BOTTOM_END];
+
+/// A ribbon tool's tooltip, `text`, centred under its button `r` while it is hovered (egui's own starts at the button's left edge).
+pub(crate) fn tip(r: Response, text: impl Into<WidgetText>) -> Response {
+    let mut tooltip = egui::Tooltip::for_enabled(&r);
+    tooltip.popup = tooltip.popup.align(RectAlign::BOTTOM).align_alternatives(&UNDER);
+    tooltip.show(|ui| {
+        ui.set_max_width(ui.spacing().tooltip_width);
+        ui.add(egui::Label::new(text));
+    });
+    r
 }
 
 /// Starts a count of the popups the tools drawn next can open (`menu_open`).
@@ -493,7 +511,7 @@ pub(crate) fn panel(ui: &mut Ui, title: &str, mut add: impl FnMut(&mut Ui)) {
             let label = format!("{name} ▾");
             title_row.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &label));
             open_if_asked(ui, &title_row);
-            list(&title_row.on_hover_text(name), &mut add);
+            list(&tip(title_row, name), &mut add);
         })
         .response
         .rect
@@ -599,7 +617,8 @@ fn list(r: &Response, add: &mut impl FnMut(&mut Ui)) {
     own_popup(Popup::default_response_id(r));
     let id = Popup::default_response_id(r);
     let (key, shape_key) = (id.with("list-width"), id.with("list-shape"));
-    Popup::menu(r).show(|ui| {
+    // Centred under the panel's name, which is centred under its tools.
+    Popup::menu(r).align(RectAlign::BOTTOM).align_alternatives(&UNDER).show(|ui| {
         let known = ui.ctx().data(|d| d.get_temp::<f32>(key)).unwrap_or(0.0);
         // The rows there were and how wide each column was, last frame: more rows than a column holds are split evenly in as
         // many columns as that takes.
