@@ -15,5 +15,12 @@ serde_json = { workspace = true }
 bimcraft-i18n = { workspace = true }
 flate2 = { workspace = true }
 
+# Solids cut from solids (`solid`): Manifold. On the desktop, the default features without `parallel` (no TBB to build); in the
+# browser (wasm32-unknown-unknown), its provisional route without Emscripten, `unstable-wasm-uu` (docs/manifold-trial.md).
+[target.'cfg(not(all(target_arch = "wasm32", target_os = "unknown")))'.dependencies]
+manifold-csg = { version = "0.4.2", default-features = false }
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+manifold-csg = { version = "0.4.2", default-features = false, features = ["unstable-wasm-uu"] }
+
 [build-dependencies]
 bimcraft-i18n = { workspace = true, features = ["catalog"] }
