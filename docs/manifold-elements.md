@@ -20,8 +20,13 @@ pub fn wall_volume(m: &Model, id: Id, openings: bool) -> Option<f64>;       // w
 pub struct ElementSolids {
     pub layers: Vec<(u16, Solid3)>, // one closed solid per layer that has pieces
     pub open: Vec<OpenPiece>,       // pieces that are not solids, and why
+    pub shown: Vec<ShownSolid>,     // where some pieces are drawn in some views only: the layers again, by the way they are shown
 }
-impl ElementSolids { fn volume(&self) -> f64; fn layer(&self, u16) -> Option<&Solid3>; fn is_whole(&self) -> bool }
+impl ElementSolids {
+    fn volume(&self) -> f64; fn layer(&self, u16) -> Option<&Solid3>; fn is_whole(&self) -> bool;
+    fn drawn_layers(&self, drawn: &dyn Fn(Vis) -> bool) -> Vec<(u16, Solid3)>; // what a view draws, for a section to cut
+}
+pub struct ShownSolid { pub layer: u16, pub vis: Vis, pub solid: Solid3 }
 pub struct OpenPiece { pub layer: u16, pub why: SolidError, pub piece: Solid /* as the scene holds it */ }
 
 // the cache, on the scene
@@ -55,13 +60,25 @@ A prism becomes `Solid3::prism` (its ring between its bottom and top planes, eit
 (the box's own axes turned into the plan), a slab a prism between its face's plane and that plane lifted by `rise`, a mesh
 `Solid3::from_triangles`.
 
+### Visibility Settings: `shown`
+
+A family's form says which views draw it (Revit's Family Element Visibility Settings: the detail levels, and a view along the
+family's front or back, left or right; `Vis`, carried by the piece). The picture beyond a section already honours that
+(`Look::draws`). The layer solids unite every piece of a layer whatever it says, which is what a quantity wants, so where any
+piece of an element is drawn in some views only, `build` keeps the layers again by the way they are shown: one `ShownSolid` per
+layer and `Vis` (a layer drawn one way throughout is its own solid again, no second union). `ElementSolids::drawn_layers` gives
+what a view draws, the pieces it draws united, for a section to cut; it is the layers themselves for every element whose pieces
+are drawn everywhere, which is every element but a family's. The engine's door families draw their handles at Medium and Fine
+only, a Coarse section through one does not cut it.
+
 ## What stays open, and why
 
 A piece is left out of its layer's solid, and recorded in `ElementSolids::open` with the reason (`SolidError`) and the piece itself
 (`Solid`), when it is not a closed solid:
 
 - a **triangle mesh with holes or edges used three times** (some family forms, a file's soup): `SolidError::NotClosed` with the
-  open and non-manifold edge counts. Step 4 falls back on `Solid::cuts` for it.
+  open and non-manifold edge counts. Step 4 falls back on `Solid::cuts` for it (which cuts a mesh only where its piece's `cut` is on:
+  a pipe's or conduit's tube).
 - a **prism with no thickness** (a roof piece whose top meets its bottom everywhere), a slab on an upright face:
   `SolidError::Degenerate`.
 
@@ -73,7 +90,7 @@ What the sample models leave open (every element is otherwise closed, tested by 
 
 | Model | Elements | With solids | Layer solids | Open pieces |
 |---|---|---|---|---|
-| Sample house (`sample::SAMPLE`) | 74 | 33 | 52 | 4: the casement and fixed windows' family forms (`window mesh: not closed`) |
+| Sample house (`sample::SAMPLE`) | 74 | 33 | 52 | none: every door and window, the family ones too, is closed (the casement and fixed windows' forms once were not; a test holds the house to none) |
 | Tower, small plate, one storey | 2,953 | 2,050 | 2,475 | 645: 292 furniture and fixture forms (`component`), 210 conduit tubes, 143 pipe tubes (`mesh: not closed`) |
 | Highrise, two storeys | 953 | 950 | 1,214 | none |
 
@@ -135,6 +152,10 @@ exactly which elements an edit made again (`made_again`: those it touched, what 
 those that touch them, a wall's joins, a slab a shaft cuts, until no more change; or the whole scene); the cache of the new scene
 keeps the entries of every element not made again and still in the model, and drops the rest. A whole scene starts empty. An
 element's solids are therefore recomputed exactly when its triangles are.
+
+A section does not use the scene's cache (it has no scene: its `SectionWork` holds its own `SolidCache` per model snapshot), and
+carries what an edit left as it was into the next snapshot's work from the pieces of each element instead (`SectionWork::inherit_solids`,
+`docs/manifold-sections.md`, "Across edits").
 
 `quantities` and the exporters do not use the cache (they take a `Model`, not a scene): each makes the element's solids
 for the figure it asks.

@@ -72,7 +72,7 @@ pub const MIN_CONTOURS: f64 = 50.0;
 /// The version of the project file this build writes, and the newest it reads. 25: a project or a family says how it is drawn in
 /// line weights, colours and patterns: the project's `subcategory_styles` (what each family subcategory draws in), a family's
 /// `line_patterns`, a subcategory's `projection`, `cut` and `pattern` (Revit's Object Styles of a family's subcategories), and
-/// whether a family's void cuts were measured (`cuts_measured`). A build that reads up to 24 refuses each as a field it doesn't
+/// whether a family's void cuts were measured (`cuts_measured`), whether a family is cut in views (`cut_in_views`). A build that reads up to 24 refuses each as a field it doesn't
 /// know, so a project is written as 25 only when it holds one ([`Model::written_format`]); nothing in a file of 24 changes and it
 /// takes no step. 24: a family from Revit stays parametric:
 /// it may hold references (`references`, read by formulas as `ref(Name)`), dimensions that place them (`dimensions`), nested

@@ -382,19 +382,21 @@ fn a_section_cuts_the_samples_doors_and_windows() {
     let mut s = Session::new();
     s.script(crate::sample::SAMPLE).unwrap();
     // Down x = 2000 across the front wall, through the family door 900 wide at (2000, 0); down x = 4500, through the plain door
-    // of the wall y = 4000 (and the casement window's family form, which is open and cut as it was); along y = 5250, through the
+    // of the wall y = 4000 and the casement window's family form (closed, so cut with the rest); along y = 5250, through the
     // plain fixed window in the east wall.
     for (line, want) in [
-        ([[2000.0, -1500.0], [2000.0, 8500.0]], "door"),
-        ([[4500.0, -1500.0], [4500.0, 8500.0]], "door"),
-        ([[-1500.0, 5250.0], [11500.0, 5250.0]], "window"),
+        ([[2000.0, -1500.0], [2000.0, 8500.0]], &["door"][..]),
+        ([[4500.0, -1500.0], [4500.0, 8500.0]], &["door", "window"][..]),
+        ([[-1500.0, 5250.0], [11500.0, 5250.0]], &["window"][..]),
     ] {
         let sec = section(&mut s, line[0], line[1]);
         let rings = cut(&s, sec);
         let cats: std::collections::BTreeSet<&str> =
             rings.iter().filter_map(|(id, ..)| s.model.elements.get(*id).map(|e| e.category())).collect();
         eprintln!("{line:?}: {cats:?}");
-        assert!(cats.contains(want), "{line:?} cuts a {want}: {cats:?}");
+        for want in want {
+            assert!(cats.contains(want), "{line:?} cuts a {want}: {cats:?}");
+        }
         assert!(cats.contains("wall") && cats.contains("floor"), "{cats:?}");
     }
 }
@@ -463,7 +465,8 @@ fn compare_with_before(name: &str, s: &mut Session, lines: &[[[f64; 2]; 2]]) -> 
                     lo < -1.0 && hi > 1.0
                 })
             });
-            if crosses {
+            // Revit's non-cuttable families (a sofa, a light) are not cut, whatever the line crosses.
+            if crosses && m.elements.get(id).is_some_and(|e| crate::graphics::cuttable(&m, e)) {
                 crossing += 1;
                 // A solid whose box the plane crosses may still miss the solid (round a notch): such an element is allowed to
                 // have no ring only if no triangle of it straddles the plane.
@@ -520,4 +523,224 @@ fn what_a_section_cut_before_the_solids_it_cuts_still() {
     ];
     let more = compare_with_before("the highrise", &mut s, &lines);
     eprintln!("{more} elements cut that were not before");
+}
+
+// ----- what Revit cuts ----------------------------------------------------------------------------------------------------
+
+/// A 600 x 600 x 800 box family of category `category` (JSON name), placed at (3000, 3000), and a section through its middle
+/// along x: how many rings the box is cut into.
+fn rings_of_a_box_of(category: &str, extra: serde_json::Value) -> usize {
+    let mut s = Session::new();
+    let mut family = json!({"name": "Box", "category": category, "types": {"A": {}},
+        "forms": [{"profile": [[0, 0], [600, 0], [600, 600], [0, 600]], "from": 0, "to": 800}]});
+    for (k, v) in extra.as_object().into_iter().flatten() {
+        family[k] = v.clone();
+    }
+    run(&mut s, "family", family);
+    let c = id_of(&run(&mut s, "component", json!({"family": "Box", "type": "A", "at": [3000, 3000]})));
+    let sec = section(&mut s, [2000.0, 3300.0], [5000.0, 3300.0]);
+    cut(&s, sec).iter().filter(|(id, ..)| *id == c).count()
+}
+
+/// Revit's cuttable and non-cuttable families (`graphics::cuttable`): Generic Models and Casework are always cut, Furniture and
+/// Plumbing Fixtures only when the family's Enable Cutting in Views is on (off by default), and everything else, the electrical,
+/// lighting, communication and pipe categories, never: they stay in the picture beyond the line.
+#[test]
+fn a_section_cuts_the_categories_revit_cuts_and_leaves_the_rest_in_projection() {
+    use crate::graphics::COMPONENTS;
+    for category in COMPONENTS {
+        let rings = rings_of_a_box_of(category, json!({}));
+        let want = usize::from(matches!(category, "casework" | "generic"));
+        assert_eq!(rings, want, "a box of category {category}: {rings} rings");
+    }
+    // The per-family option: the three categories of Revit's Enable Cutting in Views are cut with it, no other is for it.
+    for category in COMPONENTS {
+        let rings = rings_of_a_box_of(category, json!({"cut_in_views": true}));
+        let want = usize::from(matches!(category, "casework" | "generic" | "furniture" | "plumbing" | "drain"));
+        assert_eq!(rings, want, "a box of category {category}, cut in views: {rings} rings");
+    }
+}
+
+#[test]
+fn the_samples_furniture_stays_in_projection_and_its_casework_is_cut() {
+    let mut s = Session::new();
+    s.script(crate::sample::SAMPLE).unwrap();
+    let m = &s.model;
+    let (mut furniture, mut casework) = (Vec::new(), Vec::new());
+    for (id, e) in m.elements.iter() {
+        match crate::graphics::category_of(m, e) {
+            "furniture" => furniture.push(*id),
+            "casework" => casework.push(*id),
+            _ => {}
+        }
+    }
+    assert!(!furniture.is_empty() && !casework.is_empty());
+    assert!(furniture.iter().all(|id| !crate::graphics::cuttable(m, m.elements.get(*id).unwrap())));
+    assert!(casework.iter().all(|id| crate::graphics::cuttable(m, m.elements.get(*id).unwrap())));
+    // Along x = 3000 through the sofa, and along y = 7000 through the base cabinet at the back.
+    let sec = section(&mut s, [3000.0, -1500.0], [3000.0, 8500.0]);
+    let cut_ids: std::collections::BTreeSet<Id> = cut(&s, sec).iter().map(|(id, ..)| *id).collect();
+    assert!(furniture.iter().all(|id| !cut_ids.contains(id)), "no furniture is cut: {cut_ids:?}");
+    let sec = section(&mut s, [2000.0, -1500.0], [2000.0, 8500.0]);
+    let cut_ids: std::collections::BTreeSet<Id> = cut(&s, sec).iter().map(|(id, ..)| *id).collect();
+    assert!(casework.iter().any(|id| cut_ids.contains(id)), "the base cabinet is cut: {cut_ids:?}");
+}
+
+// ----- a form's Visibility Settings ---------------------------------------------------------------------------------------
+
+/// Whether a section cuts anything of component `c`.
+fn is_cut(s: &Session, sec: Id, c: Id) -> bool {
+    cut(s, sec).iter().any(|(id, ..)| *id == c)
+}
+
+/// A family of three boxes along a diagonal, each at its own place in plan, and a section along x and one along y through each:
+/// the first drawn in no front or side view, the second at Fine only, the third in no front view (so only a section along y,
+/// which looks at its side, cuts it). Whatever a section does not draw it does not cut.
+#[test]
+fn a_section_cuts_only_the_forms_it_draws_by_detail_level_and_direction() {
+    let mut s = Session::new();
+    let boxed = |at: f64, show: serde_json::Value| json!({"profile": [[at, at], [at + 600.0, at], [at + 600.0, at + 600.0], [at, at + 600.0]], "from": 0, "to": 800, "show": show});
+    run(
+        &mut s,
+        "family",
+        json!({"name": "Shown", "category": "generic", "types": {"A": {}}, "forms": [
+            boxed(0.0, json!({"front": false, "side": false})),
+            boxed(1000.0, json!({"coarse": false, "medium": false})),
+            boxed(2000.0, json!({"front": false}))]}),
+    );
+    let c = id_of(&run(&mut s, "component", json!({"family": "Shown", "type": "A", "at": [3000, 3000]})));
+    // The cut through the k-th box, 300 into it: along x at its y, along y at its x.
+    let mut along_x = Vec::new();
+    let mut along_y = Vec::new();
+    for k in 0..3 {
+        let at = 3000.0 + 1000.0 * k as f64 + 300.0;
+        along_x.push(section(&mut s, [2000.0, at], [9000.0, at]));
+        along_y.push(section(&mut s, [at, 2000.0], [at, 9000.0]));
+    }
+    let matrix = |s: &Session, secs: &[Id]| secs.iter().map(|sec| is_cut(s, *sec, c)).collect::<Vec<_>>();
+    // Fine (a new view's level): the first never; the second always; the third only from the side.
+    assert_eq!(matrix(&s, &along_x), [false, true, false], "along x at Fine");
+    assert_eq!(matrix(&s, &along_y), [false, true, true], "along y at Fine");
+    for detail in ["medium", "coarse"] {
+        for sec in along_x.iter().chain(&along_y) {
+            run(&mut s, "detail", json!({"view": sec, "detail": detail}));
+        }
+        assert_eq!(matrix(&s, &along_x), [false, false, false], "along x at {detail}");
+        assert_eq!(matrix(&s, &along_y), [false, false, true], "along y at {detail}");
+    }
+}
+
+/// The engine's own door family draws its handles at Medium and Fine, not at Coarse: a section through a handle cuts it at Fine
+/// and not at Coarse, the leaf and the frame at both.
+#[test]
+fn a_coarse_section_does_not_cut_a_door_handle_a_fine_one_does() {
+    let mut s = project();
+    run(&mut s, "wall", json!({"points": [[0, 0], [8000, 0]], "type": "L", "height": 3000, "location": "centre"}));
+    let door = id_of(&run(&mut s, "door", json!({"at": [4000, 0], "family": "Double Door", "type": "1500 x 2100"})));
+    // The double door's handles lie 40 to 120 either side of its middle, 1000 to 1030 up.
+    let x = centre_x(&s.model, door).0 - 80.0;
+    let sec = section(&mut s, [x, -1000.0], [x, 1000.0]);
+    let handles = |s: &Session| {
+        cut(s, sec).iter().filter(|(id, _, r)| *id == door && close(bbox(r).2, 1000.0, 1e-6) && close(bbox(r).3, 1030.0, 1e-6)).count()
+    };
+    let leaves = |s: &Session| cut(s, sec).iter().filter(|(id, _, r)| *id == door && bbox(r).3 > 2000.0).count();
+    assert_eq!((handles(&s), leaves(&s) > 0), (2, true), "Fine: both faces of the handle, and the leaf");
+    run(&mut s, "detail", json!({"view": sec, "detail": "coarse"}));
+    assert_eq!((handles(&s), leaves(&s) > 0), (0, true), "Coarse: no handle, the leaf still");
+    run(&mut s, "detail", json!({"view": sec, "detail": "medium"}));
+    assert_eq!(handles(&s), 2, "Medium draws the handle");
+}
+
+// ----- the solids kept across edits ---------------------------------------------------------------------------------------
+
+/// A row of walls across a line, a pair of them joined at a corner, and edits: what a section builds again after an edit is what
+/// the edit touched, and the section is what a fresh work makes of it.
+#[test]
+fn a_work_after_an_edit_takes_over_the_solids_of_what_the_edit_left_as_it_was() {
+    let mut s = project();
+    // Eight walls running north-south at 2 m, 4 m ... 16 m, and one more pair joined at a corner further along.
+    let walls: Vec<Id> = (1..=8)
+        .map(|k| id_of(&run(&mut s, "wall", json!({"points": [[2000 * k, -1000], [2000 * k, 1000]], "type": "L", "height": 3000}))))
+        .collect();
+    let corner = id_of(&run(&mut s, "wall", json!({"points": [[20000, -1000], [20000, 0]], "type": "L", "height": 3000})));
+    let sec = section(&mut s, [0.0, -500.0], [24000.0, -500.0]);
+    let before = s.model.clone();
+    let work = render::SectionWork::new(&before);
+    let rings = render::section_cut_rings_with(&before, &work, sec).unwrap();
+    let made = work.solids_kept();
+    assert!(made >= 9, "the nine walls it crosses: {made}");
+    let same_as_fresh = |after: &Model, w: &render::SectionWork| {
+        let kept = render::section_cut_rings_with(after, w, sec).unwrap();
+        assert_eq!(kept, render::section_cut_rings(after, sec).unwrap(), "what a work that took solids over cuts is what a fresh one does");
+        kept
+    };
+
+    // One wall moved: all the others are taken over, it is made again.
+    run(&mut s, "move", json!({"ids": [walls[3]], "by": [100, 0]}));
+    let after = s.model.clone();
+    let next = render::SectionWork::new(&after);
+    let taken = next.inherit_solids(work.solid_carry(), &before, &after);
+    assert_eq!(taken, made - 1, "every wall but the moved one");
+    let moved = same_as_fresh(&after, &next);
+    assert_ne!(moved, rings, "the edit shows");
+    assert_eq!(next.solids_kept(), made);
+
+    // A wall joined to the end of another (their mitre changes what the first is made of): it is made again though it was not
+    // edited, the walls far from it are taken over.
+    run(&mut s, "wall", json!({"points": [[20000, 0], [22000, 0]], "type": "L", "height": 3000}));
+    let (before, work) = (after, next);
+    let after = s.model.clone();
+    let next = render::SectionWork::new(&after);
+    let taken = next.inherit_solids(work.solid_carry(), &before, &after);
+    let _ = same_as_fresh(&after, &next);
+    assert!(taken >= made - 2 && taken < made, "the joined wall {corner} is made again: {taken} of {made}");
+    assert!(next.solids_kept() > taken);
+
+    // Something nothing at all to do with the line: nothing at all is made again.
+    run(&mut s, "wall", json!({"points": [[0, 20000], [4000, 20000]], "type": "L", "height": 3000}));
+    let (before, work) = (after, next);
+    let after = s.model.clone();
+    let next = render::SectionWork::new(&after);
+    let made = work.solids_kept();
+    let taken = next.inherit_solids(work.solid_carry(), &before, &after);
+    assert_eq!(taken, made, "a wall far from the line touches none of them");
+    let _ = same_as_fresh(&after, &next);
+
+    // A library edit (a layer's thickness) says everything is made again.
+    run(
+        &mut s,
+        "type",
+        json!({"category": "wall", "name": "L", "layers": [
+            {"function": "finish", "material": "Render", "thickness": 30},
+            {"function": "structure", "material": "Block", "thickness": 160},
+            {"function": "finish", "material": "Plaster", "thickness": 20}]}),
+    );
+    let (before, work) = (after, next);
+    let after = s.model.clone();
+    let next = render::SectionWork::new(&after);
+    assert_eq!(next.inherit_solids(work.solid_carry(), &before, &after), 0);
+    let _ = same_as_fresh(&after, &next);
+}
+
+// ----- regions: the real outlines -----------------------------------------------------------------------------------------
+
+/// A section along a wall that has a window in it: the cut as regions is one outline with the window a hole in it, where the rings
+/// the drawing fills are trapezoids round the window.
+#[test]
+fn the_cut_is_available_as_outlines_with_their_holes() {
+    let mut s = project();
+    let w = id_of(&run(&mut s, "wall", json!({"points": [[0, 0], [8000, 0]], "type": "L", "height": 3000, "location": "centre"})));
+    run(&mut s, "window", json!({"wall": w, "offset": 4000, "type": "W"}));
+    // Along the wall's core (y = 0 from the wall's start): the core layer.
+    let sec = section(&mut s, [-500.0, 0.0], [8500.0, 0.0]);
+    let regions = render::section_cut_regions(&s.model, sec).unwrap();
+    let core: Vec<&render::Region> = regions.iter().filter(|(id, k, _)| *id == w && *k == 1).map(|(.., r)| r).collect();
+    assert_eq!(core.len(), 1, "one outline: {regions:?}");
+    assert_eq!(core[0].holes.len(), 1, "the window is a hole in it");
+    assert!(close(geom::area(&core[0].outer), 8000.0 * 3000.0, 1e-6), "the outline is the wall's {}", geom::area(&core[0].outer));
+    assert!(close(geom::area(&core[0].holes[0]).abs(), 1200.0 * 1500.0, 1e-6));
+    // The rings are what they were: trapezoids, no hole in any.
+    let rings = cut(&s, sec);
+    let pieces = of(&rings, w, Some(1));
+    assert!(pieces.len() > 1 && close(pieces.iter().map(|r| geom::area(r)).sum::<f64>(), 8000.0 * 3000.0 - 1200.0 * 1500.0, 1e-6));
 }

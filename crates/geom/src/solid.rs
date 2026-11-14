@@ -13,7 +13,7 @@
 //! Millimetres throughout, x east, y north, z up, as the rest of the engine.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use manifold_csg::{BoundingBox, CsgError, Manifold, MeshGL64, OpType};
 
@@ -259,6 +259,10 @@ pub struct Solid3 {
     m: Manifold,
     /// Manifold's original id of each input -> its origin. Every boolean merges its operands' tables.
     origins: Arc<HashMap<u32, Origin>>,
+    /// Its surface as indexed triangles, taken from Manifold (a full copy) the first time something asks, then kept: a plan, a
+    /// section and an elevation slice the same solid again and again. Shared by the clones of this solid, which are the same
+    /// manifold; every operation makes a new solid, with a new cell.
+    surface: Arc<OnceLock<Mesh>>,
 }
 
 impl std::fmt::Debug for Solid3 {
@@ -274,7 +278,7 @@ fn finite3(p: P3) -> bool {
 impl Solid3 {
     /// Nothing: the identity of union.
     pub fn empty() -> Solid3 {
-        Solid3 { m: Manifold::empty(), origins: Arc::new(HashMap::new()) }
+        Solid3 { m: Manifold::empty(), origins: Arc::new(HashMap::new()), surface: Arc::default() }
     }
 
     /// A kernel solid made for `origin`: it gets its own original id, which the table maps to `origin`.
@@ -282,7 +286,7 @@ impl Solid3 {
         let m = if m.original_id() < 0 { m.as_original() } else { m };
         let mut table = HashMap::new();
         table.insert(m.original_id() as u32, origin);
-        Solid3 { m, origins: Arc::new(table) }
+        Solid3 { m, origins: Arc::new(table), surface: Arc::default() }
     }
 
     /// A solid from a mesh of its own (indices into `verts`, counter-clockwise from outside).
@@ -405,7 +409,7 @@ impl Solid3 {
     // ----- booleans ---------------------------------------------------------------------------------------------
 
     fn joined(&self, other: &Solid3, m: Manifold) -> Solid3 {
-        Solid3 { m, origins: merge_tables([&self.origins, &other.origins]) }
+        Solid3 { m, origins: merge_tables([&self.origins, &other.origins]), surface: Arc::default() }
     }
 
     /// Both: what is in either.
@@ -426,7 +430,7 @@ impl Solid3 {
     fn batch<'a>(items: impl IntoIterator<Item = &'a Solid3>, op: OpType) -> Solid3 {
         let items: Vec<&Solid3> = items.into_iter().collect();
         let ms: Vec<Manifold> = items.iter().map(|s| s.m.clone()).collect();
-        Solid3 { m: Manifold::batch_boolean(&ms, op), origins: merge_tables(items.iter().map(|s| &s.origins)) }
+        Solid3 { m: Manifold::batch_boolean(&ms, op), origins: merge_tables(items.iter().map(|s| &s.origins)), surface: Arc::default() }
     }
 
     /// Everything in any of them, in one operation (far faster than one pair at a time). Nothing for none.
@@ -455,7 +459,7 @@ impl Solid3 {
     /// lines.
     pub fn transform(&self, matrix: &Matrix) -> Solid3 {
         let table = self.origins.iter().map(|(id, o)| (*id, Origin { curve: o.curve.and_then(|c| matrix.map_curve(&c)), ..*o })).collect();
-        Solid3 { m: self.m.transform(&matrix.manifold()), origins: Arc::new(table) }
+        Solid3 { m: self.m.transform(&matrix.manifold()), origins: Arc::new(table), surface: Arc::default() }
     }
 
     // ----- questions --------------------------------------------------------------------------------------------
@@ -490,7 +494,7 @@ impl Solid3 {
         if !self.m.status().is_ok() {
             return false;
         }
-        let mesh = self.mesh();
+        let mesh = self.surface();
         mesh.tris.is_empty() || mesh::edge_faults(&mesh.tris) == (0, 0)
     }
 
@@ -499,8 +503,18 @@ impl Solid3 {
         self.origins.get(&id).copied().unwrap_or(Origin::NONE)
     }
 
-    /// The surface as indexed triangles, each with its origin.
+    /// The surface as indexed triangles, each with its origin: a copy of [`Solid3::surface`].
     pub fn mesh(&self) -> Mesh {
+        self.surface().clone()
+    }
+
+    /// The surface as indexed triangles, each with its origin, made once for this solid (and its clones) and kept: what slicing,
+    /// measuring and drawing a solid again and again read, without a copy of Manifold's mesh each time.
+    pub fn surface(&self) -> &Mesh {
+        self.surface.get_or_init(|| self.made_mesh())
+    }
+
+    fn made_mesh(&self) -> Mesh {
         let g = self.m.to_meshgl64();
         let np = g.num_prop().max(3);
         let props = g.vert_properties();
@@ -526,7 +540,7 @@ impl Solid3 {
 
     /// The surface's triangles, each with its origin and its outward unit normal.
     pub fn triangles(&self) -> Vec<Tri> {
-        let mesh = self.mesh();
+        let mesh = self.surface();
         mesh.tris
             .iter()
             .zip(&mesh.origins)

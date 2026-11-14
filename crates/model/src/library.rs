@@ -1691,7 +1691,8 @@ impl Model {
     }
 
     /// The format its file is written in: the oldest that holds all it has, the newest need first. [`crate::model::STYLES_FORMAT`]
-    /// when the project has subcategory styles, or a family has line patterns, whether its void cuts were measured, or a
+    /// when the project has subcategory styles, or a family has line patterns, whether its void cuts were measured, whether it is
+    /// cut in views (`cut_in_views`), or a
     /// subcategory's line weights or pattern; [`crate::model::PARAMETRIC_FORMAT`] when a family from Revit stays parametric
     /// (references, dimensions, nested parts, a catalog, blends, sweeps, holes, arcs, an arc that follows its ends, a form's
     /// `source` and a void's `cuts`, Revit's result kept beside it, its check); [`crate::model::TYPES_FORMAT`] when a family has
@@ -1709,6 +1710,7 @@ impl Model {
         let styled = !self.subcategory_styles.is_empty()
             || self.families.values().any(|f| {
                 f.cuts_measured
+                    || f.cut_in_views
                     || !f.line_patterns.is_empty()
                     || f.subcategories.iter().any(|s| s.projection.is_some() || s.cut.is_some() || s.pattern.is_some())
             });

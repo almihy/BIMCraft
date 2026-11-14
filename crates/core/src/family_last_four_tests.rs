@@ -202,6 +202,10 @@ fn each_new_field_alone_is_written_as_25_and_a_subcategory_style_outlives_its_fa
     // A family's line patterns, its void cuts' having been measured, and a subcategory's pen, each alone.
     assert_eq!(only(json!({"line_patterns": {"Sample Dash": [{"dash": 3.0}, {"space": 1.5}]}})).0, 25);
     assert_eq!(only(json!({"cuts_measured": true})).0, 25);
+    // Revit's Enable Cutting in Views, which a furniture family has off unless it says (a family without it writes nothing).
+    let (f, s) = only(json!({"cut_in_views": true}));
+    assert!(f == 25 && s.model.families["Sample Block"].cut_in_views);
+    assert!(!only(json!({})).1.model.families["Sample Block"].cut_in_views);
     assert_eq!(only(json!({"subcategories": [{"name": "Edge", "cut": 3}]})).0, 25);
 }
 

@@ -195,7 +195,7 @@ impl Solid3 {
     /// lies on; collinear edges of one origin are one line; where an input's curve is tagged and the plane is level, the
     /// edges on it are exact arcs (see [`Curve`]). Nothing for an empty solid or a plane that misses it.
     pub fn slice(&self, frame: &Frame) -> Vec<Loop> {
-        let mesh = self.mesh();
+        let mesh = self.surface();
         let local: Vec<[f64; 3]> = mesh.verts.iter().map(|p| frame.to_local(*p)).collect();
         // A vertex exactly on the plane counts as above it: the plane cuts a hair behind itself.
         let above: Vec<bool> = local.iter().map(|l| l[2] >= 0.0).collect();

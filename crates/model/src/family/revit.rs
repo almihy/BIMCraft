@@ -947,6 +947,11 @@ pub fn translate(f: &mut Family, def: &Value, has_material: &dyn Fn(&str) -> boo
     // What a void cuts was measured from the instance (`cuts_by: "instance"`): then its `cuts` is what it cuts. Any other word, as
     // `removal`, whose lists measured nothing, is no list at all: a void cuts every solid before it that it reaches.
     f.cuts_measured = def["cuts_by"].as_str() == Some("instance");
+    // Revit's "Enable Cutting in Views", where the definition says it (`cut_in_views`, or Revit's own name for it); else what the
+    // family had (off).
+    if let Some(on) = def.get("cut_in_views").or_else(|| def.get("enable_cutting_in_views")).and_then(Value::as_bool) {
+        f.cut_in_views = on;
+    }
     let mut notes = Vec::new();
     if !def.is_object() {
         f.editable =
@@ -2400,6 +2405,19 @@ mod tests {
         translated(&mut f, json!({"to_bimcraft": {}, "cuts_by": "instance"}));
         translated(&mut f, json!({"to_bimcraft": {}}));
         assert!(!f.cuts_measured);
+    }
+
+    #[test]
+    fn a_definition_that_says_cutting_in_views_is_enabled_marks_the_family_so() {
+        let mut f = door(json!({}));
+        assert!(!f.cut_in_views, "Revit's default is off");
+        translated(&mut f, json!({"to_bimcraft": {}, "cut_in_views": true}));
+        assert!(f.cut_in_views);
+        // A definition that says nothing leaves what the family had; one that says off turns it off.
+        translated(&mut f, json!({"to_bimcraft": {}}));
+        assert!(f.cut_in_views);
+        translated(&mut f, json!({"to_bimcraft": {}, "enable_cutting_in_views": false}));
+        assert!(!f.cut_in_views);
     }
 
     /// A revolve of a 100 x 500 rectangle 100 out from its axis (z), a quarter turn, as a definition form, `turn` as given.

@@ -73,6 +73,28 @@ fn main() -> Result<(), String> {
             elements.len(),
             rings.len(),
         );
+        // After an edit of one wall the line crosses: the section on a fresh work (every solid again) against one that takes over
+        // what the edit left as it was (`SectionWork::inherit_solids`).
+        let Some(wall) = rings.iter().map(|(id, ..)| *id).find(|id| matches!(m.elements.get(*id), Some(Element::Wall(_)))) else {
+            continue;
+        };
+        s.execute("move", &json!({"ids": [wall], "by": [50, 0]}))?;
+        let after = s.model.clone();
+        let started = Instant::now();
+        let fresh = render::SectionWork::new(&after);
+        let fresh_rings = render::section_cut_rings_with(&after, &fresh, sec).ok_or("no section")?;
+        let rebuilt = started.elapsed();
+        let started = Instant::now();
+        let next = render::SectionWork::new(&after);
+        let taken = next.inherit_solids(work.solid_carry(), &m, &after);
+        let inherited_rings = render::section_cut_rings_with(&after, &next, sec).ok_or("no section")?;
+        let carried = started.elapsed();
+        assert_eq!(fresh_rings, inherited_rings, "a carried section is the section of a fresh work");
+        println!(
+            "  after an edit of wall {wall}: a fresh work {rebuilt:.2?} (work and cut); a work that took over {taken} of {} solids {carried:.2?} (work, taking over and cut), {} remade",
+            work.solids_kept(),
+            next.solids_kept() - taken
+        );
     }
     Ok(())
 }
