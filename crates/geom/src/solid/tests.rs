@@ -102,6 +102,44 @@ fn case1_curved_wall_with_door_volume() {
     all_closed(&[s]);
 }
 
+/// The facets' volume is short of the arcs' by the segments between them; `volume_on_curves` adds them back, exactly, through
+/// a door's jambs cutting a facet and the inside face (which takes the segment off).
+#[test]
+fn case1_volume_on_curves_is_the_arcs_volume() {
+    let s = curved_wall_door();
+    let (r0, r1) = (5850.0, 6150.0);
+    let wall = HALF_PI / 2.0 * (r1 * r1 - r0 * r0) * 3000.0;
+    let door = 2.0 * HALF_DOOR / 2.0 * (r1 * r1 - r0 * r0) * 2100.0;
+    let want = wall - door;
+    let (facets, arcs) = (s.volume(), s.volume_on_curves());
+    check_volume("case 1 on its arcs", arcs, want, 1e-9);
+    assert!(rel(facets, want) > 1e-5, "the facets are short of the arcs: {facets} against {want}");
+    // A whole round column: the circle's volume, not the polygon's.
+    let col = Solid3::cylinder(P2(100.0, -50.0), 300.0, 0.0, 2800.0, 24, org(3)).unwrap();
+    check_volume("column", col.volume_on_curves(), PI * 300.0 * 300.0 * 2800.0, 1e-9);
+    assert!(col.volume() < PI * 300.0 * 300.0 * 2800.0);
+    // Untagged, nothing is added.
+    let plain = Solid3::cuboid([0.0; 3], [10.0, 20.0, 30.0], org(4)).unwrap();
+    assert_eq!(plain.volume_on_curves(), plain.volume());
+    // A sloped top over a facet: the height is the triangle's own.
+    let c = P2(0.0, 0.0);
+    let ring: Vec<P2> = {
+        let mut r = arc_pts(c, 2100.0, 0.0, HALF_PI, 12);
+        r.extend(arc_pts(c, 1900.0, HALF_PI, 0.0, 12));
+        r
+    };
+    let top = Level { z: 3000.0, g: P2(0.0, 0.1) };
+    let sloped = Solid3::prism(&ring, Level::flat(0.0), top, org(5).with_curve(Curve::band(c, 1900.0, 2100.0))).unwrap();
+    // The ring's area through the mean height over it: the sector's area is exact, the height 3000 + 0.1 y over it: its first
+    // moment in y is (r1^3 - r0^3) / 3 for a quarter ring.
+    let area = HALF_PI / 2.0 * (2100.0 * 2100.0 - 1900.0 * 1900.0);
+    let moment_y = (2100f64.powi(3) - 1900f64.powi(3)) / 3.0;
+    // The height over a segment is taken at the chord's plane, not at each point of it: second order in the sagitta (here 4.5 mm
+    // of 2000, a 0.1 slope: 1.5e-7), where the level top above is exact.
+    check_volume("sloped quarter ring", sloped.volume_on_curves(), 3000.0 * area + 0.1 * moment_y, 1e-6);
+    assert!(rel(sloped.volume_on_curves(), 3000.0 * area + 0.1 * moment_y) < rel(sloped.volume(), 3000.0 * area + 0.1 * moment_y) / 100.0);
+}
+
 #[test]
 fn case1_plan_slice_is_exact_arcs() {
     let s = curved_wall_door();

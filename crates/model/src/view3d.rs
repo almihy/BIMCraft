@@ -295,9 +295,11 @@ impl PreparedSolids {
     }
 }
 
+mod element_solids;
 mod fragments;
 #[doc(hidden)]
 pub mod update;
+pub use element_solids::{ElementSolids, OpenPiece, SolidCache, element_solids, element_solids_in, wall_volume};
 pub use fragments::{FragmentStats, SectionCache};
 pub(crate) type PreparedMade = (Vec<Prepared>, Vec<(Id, Vec<P3>)>, Vec<Option<[P3; 2]>>);
 
@@ -1159,6 +1161,12 @@ pub fn shaded(m: &Model) -> Vec<Solid> {
 }
 
 fn layered(m: &Model, s: Solid) -> Vec<Solid> {
+    layered_indexed(m, s).into_iter().map(|(_, part)| part).collect()
+}
+
+/// [`layered`], each part with the layer of the element's type it is of, counted from the first as the type lists its layers
+/// (none where the element is not split into layers): what a solid per layer (`element_solids`) is made of.
+pub(crate) fn layered_indexed(m: &Model, s: Solid) -> Vec<(Option<usize>, Solid)> {
     let layers = match m.elements.get(s.owner()) {
         Some(Element::Wall(w)) => m.type_layers("wall", &w.type_name),
         Some(Element::Floor(f) | Element::Toposolid(f)) => m.type_layers("floor", &f.type_name),
@@ -1168,19 +1176,19 @@ fn layered(m: &Model, s: Solid) -> Vec<Solid> {
     };
     let total: f64 = layers.iter().map(|l| l.thickness).sum();
     if total <= 0.0 {
-        return vec![s];
+        return vec![(None, s)];
     }
     let colour = |l: &Layer, or: Rgb| m.materials.get(&l.material).map_or(or, |x| Rgb(x.color[0], x.color[1], x.color[2]));
     match s {
         Solid::Slab { owner, color, tex, face, rise } => {
             let mut out = Vec::new();
             let mut above = 0.0;
-            for l in layers {
+            for (k, l) in layers.iter().enumerate() {
                 let r = rise * l.thickness / total;
                 if r > 1e-9 {
                     let lift = rise - above - r;
                     let face = face.iter().map(|p| [p[0], p[1], p[2] + lift]).collect();
-                    out.push(Solid::Slab { owner, color: colour(l, color), tex: over(skin(m, &l.material), tex), face, rise: r });
+                    out.push((Some(k), Solid::Slab { owner, color: colour(l, color), tex: over(skin(m, &l.material), tex), face, rise: r }));
                 }
                 above += r;
             }
@@ -1200,21 +1208,24 @@ fn layered(m: &Model, s: Solid) -> Vec<Solid> {
                 .iter()
                 .enumerate()
                 .filter(|(_, l)| l.thickness > 1e-9 || l.variable)
-                .map(|(k, l)| Solid::Prism {
-                    owner,
-                    color: colour(l, color),
-                    tex: over(skin(m, &l.material), tex),
-                    ring: ring.clone(),
-                    bottom: at(k + 1),
-                    top: at(k),
-                    curve: None,
+                .map(|(k, l)| {
+                    let part = Solid::Prism {
+                        owner,
+                        color: colour(l, color),
+                        tex: over(skin(m, &l.material), tex),
+                        ring: ring.clone(),
+                        bottom: at(k + 1),
+                        top: at(k),
+                        curve: None,
+                    };
+                    (Some(k), part)
                 })
                 .collect()
         }
         // Across the wall from its exterior face in, each layer between two of its boundaries; the
         // outermost and innermost reach whatever lies past them.
         Solid::Prism { owner, color, tex, ring, bottom, top, curve } => {
-            let Some(w) = m.wall(owner) else { return vec![Solid::Prism { owner, color, tex, ring, bottom, top, curve }] };
+            let Some(w) = m.wall(owner) else { return vec![(None, Solid::Prism { owner, color, tex, ring, bottom, top, curve })] };
             let (axis, b) = (Axis::of(w), walls::boundaries(m, w));
             let off = |q: P2| axis.project(q).1;
             let n = layers.len();
@@ -1230,19 +1241,22 @@ fn layered(m: &Model, s: Solid) -> Vec<Solid> {
                     if let Some(lo) = b.get(k + 1).filter(|_| k + 1 < n) {
                         part = geom::clip(&part, |q| off(q) - lo);
                     }
-                    (part.len() >= 3 && geom::area(&part).abs() > 1e-6).then(|| Solid::Prism {
-                        owner,
-                        color: colour(l, color),
-                        tex: over(skin(m, &l.material), tex),
-                        ring: part,
-                        bottom,
-                        top,
-                        curve,
+                    (part.len() >= 3 && geom::area(&part).abs() > 1e-6).then(|| {
+                        let part = Solid::Prism {
+                            owner,
+                            color: colour(l, color),
+                            tex: over(skin(m, &l.material), tex),
+                            ring: part,
+                            bottom,
+                            top,
+                            curve,
+                        };
+                        (Some(k), part)
                     })
                 })
                 .collect()
         }
-        other => vec![other],
+        other => vec![(None, other)],
     }
 }
 
@@ -1303,6 +1317,8 @@ pub struct Scene {
     pub spans: Vec<Span>,
     /// What numbered the planes, so an edit numbers its triangles' among them.
     table: PlaneTable,
+    /// Each element as closed solids, made when first asked for ([`Scene::element_solids`]).
+    solids: SolidCache,
 }
 
 /// An element's triangles in a scene: where they are in its `tris`, and the box round them.
@@ -1512,6 +1528,7 @@ impl Scene {
             shape_keys: HashMap::new(),
             spans: Vec::new(),
             table: PlaneTable::default(),
+            solids: SolidCache::default(),
         })
     }
 
@@ -1575,6 +1592,7 @@ impl Scene {
             shape_keys,
             spans,
             table,
+            solids: SolidCache::default(),
         })
     }
 
@@ -1747,6 +1765,7 @@ impl Scene {
             shape_keys: HashMap::new(),
             spans: Vec::new(),
             table: PlaneTable::default(),
+            solids: SolidCache::default(),
         }
     }
 }
