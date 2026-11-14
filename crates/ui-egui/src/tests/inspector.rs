@@ -118,3 +118,27 @@ fn a_walls_top_offset_is_a_row_under_its_top_constraint() {
     h.run();
     assert!(h.query_by_role_and_label(Role::TextInput, "Top Offset").is_none());
 }
+
+#[test]
+fn a_group_header_named_like_another_in_the_palette_folds_when_clicked() {
+    // A door of a family with a Yes/No parameter has two groups called Other: the element's (Host Wall) and the family's (Fire
+    // Rated). Their bars are two widgets, and one click lands on one.
+    let script = format!(
+        "{BOX}
+family {{\"name\": \"Flush Door\", \"category\": \"door\", \"parameters\": [{{\"name\": \"Width\", \"kind\": \"length\", \"instance\": true, \"value\": 800}}, {{\"name\": \"Height\", \"kind\": \"length\", \"instance\": true, \"value\": 2100}}, {{\"name\": \"Fire Rated\", \"kind\": \"yesno\", \"instance\": true, \"value\": 0}}], \"types\": {{\"800\": {{}}}}}}
+door {{\"at\": [2000, 0], \"family\": \"Flush Door\", \"type\": \"800\"}}"
+    );
+    let mut h = app(&script);
+    let door = ids(&h, "door")[0];
+    h.state_mut().selection = vec![door];
+    h.run();
+    assert!(h.query_by_label("Host Wall").is_some() && h.query_by_label("Fire Rated").is_some(), "both groups show");
+    let bars = h.get_all_by_label("Other").count();
+    assert_eq!(bars, 2, "two bars named Other");
+    h.get_all_by_label("Other").next().expect("a bar").click();
+    h.run();
+    assert!(h.query_by_label("Host Wall").is_none(), "folded");
+    h.get_all_by_label("Other").next().expect("a bar").click();
+    h.run();
+    assert!(h.query_by_label("Host Wall").is_some(), "unfolded again");
+}

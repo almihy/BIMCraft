@@ -62,6 +62,7 @@ impl BimApp {
             origin: rect.min + vec2(view.px(P2(0.0, size.1)).0, view.px(P2(0.0, size.1)).1),
             k: (view.scale / DENSITY) as f32,
             paper: true,
+            zoom: 0.0,
             hide: writing,
         };
         let drawn = |q: Pos2| ((q.x - at.origin.x) / at.k, (q.y - at.origin.y) / at.k);

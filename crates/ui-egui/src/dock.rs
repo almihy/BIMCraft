@@ -120,6 +120,10 @@ pub enum Target {
 const SIDE_WIDTH: f32 = 290.0;
 /// How much wider the right side starts than the left, in points.
 const RIGHT_EXTRA: f32 = 12.0;
+/// The margin round what a palette shows, points.
+const PALETTE_MARGIN: f32 = 8.0;
+/// A palette's header bar: its title (or tabs), its Dock menu and its close button.
+const HEADER: f32 = 28.0;
 /// A palette's window, when it starts floating.
 pub const FLOAT_SIZE: Vec2 = vec2(300.0, 420.0);
 /// A view's window, when it starts floating.
@@ -519,13 +523,13 @@ impl BimApp {
     /// A stack: its title (or its tabs), its Dock menu and its close button, then the palette it shows.
     fn stack_ui(&mut self, ui: &mut Ui, stack: &Stack, floating: bool) {
         let Some(shown) = stack.shown() else { return };
-        let (rect, back) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click_and_drag());
+        let (rect, back) = ui.allocate_exact_size(vec2(ui.available_width(), HEADER), Sense::click_and_drag());
         let p = ui.painter();
         p.line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, pal().border));
         self.drop_headers.push((shown, rect, floating));
         let lone = stack.tabs.len() == 1;
         if lone {
-            let title = self.palette_title(shown);
+            let title = t(shown.name()).to_string();
             back.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &title));
             let at = rect.left_center() + vec2(12.0, 0.0);
             ui.painter().text(at, Align2::LEFT_CENTER, title, crate::style::semibold(13.0), pal().text);
@@ -588,22 +592,18 @@ impl BimApp {
         }
     }
 
-    /// A palette's title: the Project Browser's names the project, as Revit's does.
-    fn palette_title(&self, p: Palette) -> String {
-        match p {
-            Palette::Properties => t(p.name()).to_string(),
-            Palette::Browser => format!("{} · {}", t(p.name()), self.session.model.name),
-            Palette::Checks => t(p.name()).to_string(),
-        }
-    }
-
     /// What a palette shows, under its title: as wide as where it's docked, its scroll bar at the edge.
     pub(crate) fn palette_body(&mut self, ui: &mut Ui, p: Palette) {
         // No wider than the palette: what is wider is cut, never pushes the card past its side (off the window, docked right).
         let scroll = egui::ScrollArea::vertical().auto_shrink([false, false]).min_scrolled_height(0.0).max_width(ui.available_width());
         match p {
             Palette::Properties => {
-                scroll.id_salt("properties").show(ui, |ui| Frame::new().inner_margin(8.0).show(ui, |ui| self.properties(ui)));
+                scroll.id_salt("properties").show(ui, |ui| {
+                    // The groups' header bars run from edge to edge of the palette, past the rows' margin.
+                    ui.ctx().data_mut(|d| d.insert_temp(UiId::new(crate::properties::BLEED), PALETTE_MARGIN));
+                    Frame::new().inner_margin(PALETTE_MARGIN).show(ui, |ui| self.properties(ui));
+                    ui.ctx().data_mut(|d| d.remove::<f32>(UiId::new(crate::properties::BLEED)));
+                });
             }
             Palette::Browser => self.browser_palette(ui),
             Palette::Checks => self.checks_palette(ui),

@@ -1,5 +1,5 @@
 {
-  "editable": 21,
+  "editable": 23,
   "families": {
     "Casework_Base_Corner_Sgl-Door.arqiflow-family.json": {
       "editable": true,
@@ -92,16 +92,14 @@
       "types": 2
     },
     "M_Window-Casement-Double.arqiflow-family.json": {
-      "editable": false,
-      "matched": 0,
-      "types": 4,
-      "why": "its type 1050 x 1350mm: its shape drawn coarse is 13 mm off Revit's at (-30, 26, 19), over 0.0 % of it (and 3 more types)"
+      "editable": true,
+      "matched": 4,
+      "types": 4
     },
     "M_Window-Double-Hung.arqiflow-family.json": {
-      "editable": false,
-      "matched": 0,
-      "types": 4,
-      "why": "its type 600 x 1100mm: drawn coarse, part of Revit's plan is missing from its plan: 50 mm off at (-300, -100), over 50.8 % of it (and 3 more types)"
+      "editable": true,
+      "matched": 4,
+      "types": 4
     },
     "Plumbing_Fixtures_Basin_Small.arqiflow-family.json": {
       "editable": true,
@@ -112,7 +110,7 @@
       "editable": false,
       "matched": 0,
       "types": 1,
-      "why": "its type 540x360x410mm: drawn coarse, part of Revit's shape is missing from its shape: 3 mm off at (135, -69, 390), over 15.2 % of it"
+      "why": "its type 540x360x410mm: its shape drawn coarse is 12 mm off Revit's at (73, -266, 224), over 0.9 % of it"
     },
     "UC-Universal Columns-Column.arqiflow-family.json": {
       "editable": true,
@@ -121,9 +119,9 @@
     },
     "Windows_Arched.arqiflow-family.json": {
       "editable": false,
-      "matched": 0,
+      "matched": 3,
       "types": 6,
-      "why": "its type 1360x1210mm: drawn coarse, part of Revit's shape is missing from its shape: 3 mm off at (-429, 50, 1738), over 2.2 % of it (and 5 more types)"
+      "why": "its type 1360x910mm: its shape drawn coarse is 7 mm off Revit's at (304, 26, 1453), over 0.0 % of it (and 2 more types)"
     },
     "Windows_Sgl_Casement_Top-Hung.arqiflow-family.json": {
       "editable": true,

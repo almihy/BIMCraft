@@ -349,6 +349,13 @@ impl Drawing {
     pub fn width(&self, pen: Pen) -> f32 {
         (self.weights.mm(pen, false) * sheet::DENSITY) as f32 * self.paper
     }
+    /// How many times wider than their weights' own width a drawing's pens are, for the zoom it was drawn at: what a screen
+    /// divides its lines' widths by, so that a line's width on screen is its weight's at the view's scale and no wider as the view is
+    /// zoomed in, as in Revit (a picture and a sheet keep the paper's: a line is as wide as on the paper the view stands for). A
+    /// pattern's dashes are the paper's still, and grow with the zoom.
+    pub fn pen_zoom(&self) -> f32 {
+        if self.paper.is_finite() && self.paper > 0.0 { self.paper } else { 1.0 }
+    }
     /// `px` pixels of annotation, as big as the view's scale makes them.
     fn px(&self, px: f32) -> f32 {
         px * self.k
@@ -1179,14 +1186,14 @@ pub fn sketch(m: &Model, view: View, id: Id, e: &Element) -> Drawing {
             }
         }
         Element::Component(c) => {
-            component(&mut d, m, &m.component_pieces(c));
-            let shown = m.component_marks(c, d.detail);
-            marks(&mut d, &shown);
+            component(&mut d, m, e, &m.component_pieces(c));
+            let shown = m.component_marks_styled(c, d.detail);
+            family_marks(&mut d, m, e, &shown);
         }
         // Drawn at its sill, where the cut plane would pass through it whatever the plan's cut is.
         Element::Door(o) | Element::Window(o) => {
             if let Some(w) = m.wall(o.host) {
-                opening(&mut d, m, e, o, w, m.own_base(w) + o.sill, true);
+                opening(&mut d, m, e, o, w, m.own_base(w) + o.sill, true, None);
             }
         }
         Element::Stair(st) => stair(&mut d, m, st, st.level),
@@ -2406,14 +2413,14 @@ fn elevation_symbols(d: &mut Drawing, m: &Model, v: &Section, look: &Look, cance
             return None;
         }
         d.owner = Some(id);
-        for line in m.elevation_lines(e, looking, d.detail) {
+        for (line, sub) in m.elevation_lines(e, looking, d.detail) {
             // Before the line or past the depth, it isn't seen.
             let ahead = |p: &[f64; 3]| (P2(p[0], p[1]) - v.start).dot(looking);
             if line.iter().any(|p| ahead(p) < -1e-6 || ahead(p) > depth) {
                 continue;
             }
             let pts: Vec<P2> = line.iter().map(|p| P2((P2(p[0], p[1]) - v.start).dot(u), p[2])).collect();
-            d.line(&pts, BY_CATEGORY, INK, false);
+            family_line(d, m, e, sub.as_deref(), &pts, false, false);
         }
     }
     d.part(was);
@@ -3362,14 +3369,14 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
         if !up && !pieces.is_empty() {
             let (bottom, top) = components.heights(c);
             if bottom < range.cut && top > range.depth {
-                component(&mut d, m, &pieces);
+                component(&mut d, m, e, &pieces);
             }
         }
         // Its symbols are annotation of its level: in that level's plan and ceiling plan, whatever height its forms reach; each
         // at the detail levels it says (none, all but Coarse).
         if c.level == level {
-            let shown = m.component_marks(c, d.detail);
-            marks(&mut d, &shown);
+            let shown = m.component_marks_styled(c, d.detail);
+            family_marks(&mut d, m, e, &shown);
         }
     }
     // Walls and columns below the cut plane, as seen from it; past the bottom, faint.
@@ -3452,10 +3459,14 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
             d.fill(rings, POCHE);
         }
     }
+    // A wall's lines stop where an opening the plan cuts leaves it: Revit's wall is cut by its openings, its face lines ending at
+    // the jambs (the opening draws them, in the wall's cut pen).
+    let gaps = opening_gaps(m, all().map(|(id, e)| (*id, e)), range.cut, &shown);
     for (id, runs) in cut_edges(&outlines, 1.0 / d.view.scale) {
         d.owner = Some(id);
+        let own = gaps.get(&id).map_or(&[][..], Vec::as_slice);
         for run in runs {
-            ink_cut(&mut d, &run);
+            ink_cut_around(&mut d, &run, own);
         }
     }
     // A compound wall's layers: each its material's cut pattern where it's wide enough to hold it,
@@ -3496,7 +3507,8 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
             && (shown(id) || m.elements.id(o.host).is_some_and(shown))
         {
             d.owner = Some(id);
-            opening(&mut d, m, e, o, w, range.cut, shown(id));
+            // Its jambs are its wall's own outline where the wall is drawn.
+            opening(&mut d, m, e, o, w, range.cut, shown(id), m.elements.id(o.host).filter(|wall| shown(*wall)));
         }
     }
     d.part(Part::Projection);
@@ -3712,6 +3724,37 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
     d
 }
 
+/// A line of a family `e`'s (a door's, a window's, a component's), of its subcategory `sub` where it has one: in the project's Object Style of
+/// `Category/Subcategory` (its cut pen where `cut`, else its projection pen; its colour and its line pattern), each as far as it
+/// says one; else in its category's pen as a family's lines are.
+fn family_line(d: &mut Drawing, m: &Model, e: &Element, sub: Option<&str>, pts: &[P2], cut: bool, closed: bool) {
+    let Some(style) = sub.and_then(|s| m.subcategory_style(crate::graphics::category_of(m, e), s)) else {
+        return d.line(pts, BY_CATEGORY, INK, closed);
+    };
+    let pen = (if cut { style.cut } else { style.projection }).unwrap_or(BY_CATEGORY);
+    let color = style.color.unwrap_or([INK.0, INK.1, INK.2]);
+    let line = crate::lines::LineStyle { pen, color, pattern: style.pattern.clone() };
+    let px = pts.iter().map(|p| d.view.px(*p)).collect();
+    d.styled(m, &line, px, closed);
+}
+
+/// [`marks`] of a family `e`'s (a door's, a window's, a component's): each in the subcategory of the symbol it came from
+/// ([`family_line`]).
+fn family_marks(d: &mut Drawing, m: &Model, e: &Element, marks: &[crate::family::Marked]) {
+    use crate::family::Mark;
+    for (mark, sub) in marks {
+        match mark {
+            Mark::Line(pts) => family_line(d, m, e, sub.as_deref(), pts, false, false),
+            Mark::Label { at, height, text, align } => {
+                for line in crate::family::lettering(text, *at, *height, *align) {
+                    family_line(d, m, e, sub.as_deref(), &line, false, false);
+                }
+            }
+            dot => self::marks(d, std::slice::from_ref(dot)),
+        }
+    }
+}
+
 /// A family's plan marks, in the model's axes: its lines and lettering in the category's pen, its dots solid ink.
 fn marks(d: &mut Drawing, marks: &[crate::family::Mark]) {
     use crate::family::Mark;
@@ -3739,7 +3782,7 @@ fn marks(d: &mut Drawing, marks: &[crate::family::Mark]) {
 
 /// A component seen from above: each of its forms' outlines, but where a higher form covers it (a
 /// table's top over its legs).
-fn component(d: &mut Drawing, m: &Model, pieces: &[crate::family::Piece]) {
+fn component(d: &mut Drawing, m: &Model, e: &Element, pieces: &[crate::family::Piece]) {
     // Only the forms a plan at its detail level draws, as their Visibility Settings say.
     let kept: Vec<crate::family::Piece>;
     let pieces = if pieces.iter().all(|p| p.in_plan(d.detail)) {
@@ -3774,12 +3817,12 @@ fn component(d: &mut Drawing, m: &Model, pieces: &[crate::family::Piece]) {
             let mut at = 0.0;
             for (s0, s1) in hidden {
                 if s0 > at {
-                    d.line(&[a + u * at, a + u * s0], BY_CATEGORY, INK, false);
+                    family_line(d, m, e, p.subcategory.as_deref(), &[a + u * at, a + u * s0], false, false);
                 }
                 at = f64::max(at, s1);
             }
             if at < len {
-                d.line(&[a + u * at, b], BY_CATEGORY, INK, false);
+                family_line(d, m, e, p.subcategory.as_deref(), &[a + u * at, b], false, false);
             }
         }
     }
@@ -4189,9 +4232,70 @@ fn fit_by(extent: impl Fn(f64) -> [P2; 2], width: u32, height: u32, n: f64) -> V
     View { scale: fits_at, cx: (lo.0 + hi.0) / 2.0, cy: (lo.1 + hi.1) / 2.0, width, height }
 }
 
+/// The gaps the doors and windows the plan at height `cut` cuts leave in their walls, by wall: each a polygon from jamb to jamb
+/// and a little past the wall's two faces, convex pieces (an opening in an arc wall is curved), where the wall and the opening
+/// are shown ([`opening`]).
+fn opening_gaps<'a>(
+    m: &Model,
+    elements: impl Iterator<Item = (Id, &'a Element)>,
+    cut: f64,
+    shown: &dyn Fn(Id) -> bool,
+) -> std::collections::HashMap<Id, Vec<Vec<P2>>> {
+    // How far past the faces a gap reaches, so a face's line lies inside it: mm.
+    const PAST: f64 = 0.5;
+    let mut out: std::collections::HashMap<Id, Vec<Vec<P2>>> = std::collections::HashMap::new();
+    for (id, e) in elements {
+        let (Element::Door(o) | Element::Window(o)) = e else { continue };
+        let (Some(w), Some(wall)) = (m.wall(o.host), m.elements.id(o.host)) else { continue };
+        if !(m.spans(w, cut) && (shown(id) || shown(wall))) {
+            continue;
+        }
+        let Some(t) = m.opening_type(e) else { continue };
+        let (width, height) = t.cut();
+        let bottom = m.own_base(w) + o.sill;
+        if !(bottom <= cut && cut < bottom + height) {
+            continue;
+        }
+        let (axis, (ext, int)) = (Axis::of(w), walls::faces(m, w));
+        let (g0, g1) = ((o.offset - width / 2.0).max(0.0), (o.offset + width / 2.0).min(axis.length()));
+        if g1 - g0 <= 0.0 {
+            continue;
+        }
+        let gap: Vec<P2> = axis.points(g0, g1, int - PAST).into_iter().chain(axis.points(g1, g0, ext + PAST)).collect();
+        out.entry(wall).or_default().extend(walls::convex_pieces(&gap));
+    }
+    out
+}
+
+/// [`ink_cut`] of `run`, but for what lies in `gaps`: the parts outside them, each a line of its own.
+fn ink_cut_around(d: &mut Drawing, run: &[P2], gaps: &[Vec<P2>]) {
+    if gaps.is_empty() {
+        return ink_cut(d, run);
+    }
+    let holes: Vec<&[P2]> = gaps.iter().map(Vec::as_slice).collect();
+    let mut parts = lines_outside_columns(run, &holes);
+    // Nothing of it was in a gap: it is as it was (a ring stays a ring).
+    if parts.len() == 1 && parts[0].len() == run.len() {
+        return ink_cut(d, run);
+    }
+    // A ring that starts and ends outside the gaps is one line through its start, not two that meet there.
+    let closed = run.len() > 2 && run.first().zip(run.last()).is_some_and(|(a, b)| a.dist(*b) < 1e-9);
+    if closed && parts.len() > 1 && parts[0].first() == run.first() && parts[parts.len() - 1].last() == run.last() {
+        let tail = parts.remove(0);
+        if let Some(last) = parts.last_mut() {
+            last.extend(tail.into_iter().skip(1));
+        }
+    }
+    for part in parts {
+        d.line(&part, BY_CATEGORY, INK, false);
+    }
+}
+
 /// A door or window the cut plane at height `cut` passes through: a gap in the wall, jambs, and
-/// a leaf with its swing, or glass.
-fn opening(d: &mut Drawing, m: &Model, e: &Element, o: &Opening, w: &Wall, cut: f64, shown: bool) {
+/// a leaf with its swing, or glass. `walled` is its wall where that is drawn: the jambs are the wall's own outline then, in its cut
+/// pen (a sketch, or a wall a view doesn't show, has its opening draw them).
+#[allow(clippy::too_many_arguments)]
+fn opening(d: &mut Drawing, m: &Model, e: &Element, o: &Opening, w: &Wall, cut: f64, shown: bool, walled: Option<Id>) {
     let Some(t) = m.opening_type(e) else { return };
     let bottom = m.own_base(w) + o.sill;
     // The gap is the opening it cuts: its family's `cut` where it says one.
@@ -4206,17 +4310,21 @@ fn opening(d: &mut Drawing, m: &Model, e: &Element, o: &Opening, w: &Wall, cut: 
     if g1 - g0 <= 0.0 {
         return;
     }
-    // Clear a little past the faces too, where the outlines' outer halves are; along an arc, an arc.
-    let past = 3.0 / d.view.scale;
-    let gap: Vec<P2> = axis.points(g0, g1, int - past).into_iter().chain(axis.points(g1, g0, ext + past)).collect();
+    // The gap between the faces; along an arc, an arc. The wall's own lines stop at it (`opening_gaps`), so it paints only what
+    // lies inside: the poché and the layers' hatch.
+    let gap: Vec<P2> = axis.points(g0, g1, int).into_iter().chain(axis.points(g1, g0, ext)).collect();
     // The opening is the wall's: a hidden door or window leaves it, outlined, owned by no one.
     let owner = d.owner;
     if !shown {
         d.own(None);
     }
     d.fill(&[gap], PAPER);
+    // The jambs are where the wall is cut: the wall's own outline there, in its cut pen.
+    if walled.is_some() {
+        d.own(walled);
+    }
     for s in [g0, g1] {
-        d.line(&[axis.at(s, int), axis.at(s, ext)], Pen::HEAVY, INK, false);
+        d.line(&[axis.at(s, int), axis.at(s, ext)], if walled.is_some() { BY_CATEGORY } else { Pen::HEAVY }, INK, false);
     }
     d.own(owner);
     // At coarse, a window is its gap, as are a family's forms and symbols that say nothing of their detail levels; a door of
@@ -4233,17 +4341,18 @@ fn opening(d: &mut Drawing, m: &Model, e: &Element, o: &Opening, w: &Wall, cut: 
         let detail = d.detail;
         for piece in m.opening_pieces(e).iter().filter(|p| p.in_plan_cut(detail, cut, true)) {
             // What the cut plane crosses is drawn as its section (a frame's jambs, their rebates and stops), as Revit's plan draws
-            // it; what lies under the plane is drawn by its outline from above.
+            // it, in its subcategory's cut weight; what lies under the plane is drawn by its outline from above.
+            let sub = piece.subcategory.as_deref();
             if piece.bottom < cut - crate::family::check::CUT_EPS && cut < piece.top {
                 for (run, closed) in crate::family::compare::section_runs(&piece.tris, cut) {
-                    d.line(&run, BY_CATEGORY, INK, closed);
+                    family_line(d, m, e, sub, &run, true, closed);
                 }
             } else {
-                d.line(&piece.outline, BY_CATEGORY, INK, true);
+                family_line(d, m, e, sub, &piece.outline, false, true);
             }
         }
         d.part(Part::Projection);
-        marks(d, &m.opening_marks(e, detail));
+        family_marks(d, m, e, &m.opening_marks_styled(e, detail));
         d.part(Part::Cut);
         return;
     }

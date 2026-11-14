@@ -69,7 +69,12 @@ pub const CEILING_HEIGHT: f64 = 2600.0;
 pub const MAX_SLOPE: f64 = 75.0;
 /// The closest a floor's contours may be drawn, mm: a site's are a metre or half a metre apart.
 pub const MIN_CONTOURS: f64 = 50.0;
-/// The version of the project file this build writes, and the newest it reads. 24: a family from Revit stays parametric:
+/// The version of the project file this build writes, and the newest it reads. 25: a project or a family says how it is drawn in
+/// line weights, colours and patterns: the project's `subcategory_styles` (what each family subcategory draws in), a family's
+/// `line_patterns`, a subcategory's `projection`, `cut` and `pattern` (Revit's Object Styles of a family's subcategories), and
+/// whether a family's void cuts were measured (`cuts_measured`). A build that reads up to 24 refuses each as a field it doesn't
+/// know, so a project is written as 25 only when it holds one ([`Model::written_format`]); nothing in a file of 24 changes and it
+/// takes no step. 24: a family from Revit stays parametric:
 /// it may hold references (`references`, read by formulas as `ref(Name)`), dimensions that place them (`dimensions`), nested
 /// parts (`nested`), a type catalog, forms that are blends (`top`), sweeps (`path`, `section`), extrusions with holes and
 /// true arcs (`arcs`), Revit's own result kept beside its definition (`snapshot` forms and symbols, drawn only in a type
@@ -146,8 +151,14 @@ pub const MIN_CONTOURS: f64 = 50.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 24;
-/// The format a project is written in when its families need nothing of [`FORMAT`]'s (a parametric family from Revit) but some
+pub const FORMAT: u32 = 25;
+/// [`FORMAT`], by what it brought: line weights, colours and patterns of family subcategories, and measured void cuts.
+pub const STYLES_FORMAT: u32 = FORMAT;
+/// The format a project is written in when it needs nothing of [`STYLES_FORMAT`]'s but a family from Revit stays parametric
+/// (references, dimensions, nested parts, a catalog, blends, sweeps, holes, arcs, Revit's result kept beside it), which a build
+/// that reads up to 23 would misread ([`Model::written_format`]).
+pub const PARAMETRIC_FORMAT: u32 = 24;
+/// The format a project is written in when its families need nothing of [`PARAMETRIC_FORMAT`]'s but some
 /// have per-type forms, elevation symbols, traced outlines, a cut or text parameters, which a build that reads up to 22
 /// would misread ([`Model::written_format`]).
 pub const TYPES_FORMAT: u32 = 23;
@@ -3381,6 +3392,10 @@ pub struct Model {
     /// has set apart from what a project starts with ([`Model::object_style`]).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub object_styles: BTreeMap<String, crate::styles::ObjectStyle>,
+    /// What each family subcategory the project has drawn in, by `Category/Subcategory` (Revit's Object Styles of a family's
+    /// subcategories): each added when a family comes in, unless the project has one of that name ([`Model::subcategory_style`]).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub subcategory_styles: BTreeMap<String, crate::styles::SubcategoryStyle>,
     /// Its line patterns, by name: graphic segments along a centerline, mm on paper.
     #[serde(default = "lines::default_patterns")]
     pub line_patterns: BTreeMap<String, LinePattern>,
@@ -3523,6 +3538,7 @@ impl Model {
             line_weights: None,
             standard,
             object_styles: BTreeMap::new(),
+            subcategory_styles: BTreeMap::new(),
             line_patterns: lines::patterns(language),
             line_styles: lines::styles(language),
             fill_patterns: fills::patterns(language),
@@ -3870,18 +3886,27 @@ impl Model {
     /// level ([`crate::family::Symbol::drawn_at`]), in its own axes, mirrored if it is, turned and moved to where it stands.
     /// A label is lettered upright in the family's axes, so it turns (and mirrors) with the component.
     pub fn component_marks(&self, c: &Component, detail: crate::graphics::Detail) -> Vec<crate::family::Mark> {
+        self.component_marks_styled(c, detail).into_iter().map(|(m, _)| m).collect()
+    }
+
+    /// [`Model::component_marks`], each with the subcategory of the symbol it came from.
+    pub fn component_marks_styled(&self, c: &Component, detail: crate::graphics::Detail) -> Vec<crate::family::Marked> {
         let Some(f) = self.families.get(&c.family) else { return Vec::new() };
         if f.symbols.is_empty() && f.nested.is_empty() {
             return Vec::new();
         }
         let plan = crate::family::SymbolView::Plan;
         let others = |n: &str| self.families.get(n);
-        let Ok(marks) = f.values(&c.type_name, &c.params).and_then(|v| f.marks_with(&c.type_name, &v, plan, Some(detail), &others)) else {
+        let Ok(marks) = f.values(&c.type_name, &c.params).and_then(|v| f.marks_styled(&c.type_name, &v, plan, Some(detail), &others))
+        else {
             return Vec::new();
         };
         let (sin, cos) = c.angle.to_radians().sin_cos();
         let flip = if c.mirrored { -1.0 } else { 1.0 };
-        marks.iter().map(|k| k.map(|q| P2(c.at.0 + q.0 * cos - flip * q.1 * sin, c.at.1 + q.0 * sin + flip * q.1 * cos))).collect()
+        marks
+            .iter()
+            .map(|(k, sub)| (k.map(|q| P2(c.at.0 + q.0 * cos - flip * q.1 * sin, c.at.1 + q.0 * sin + flip * q.1 * cos)), sub.clone()))
+            .collect()
     }
 
     /// Component `c`'s connectors, worked out for its type and values, with their place and the way they face in the
@@ -4972,13 +4997,19 @@ impl Model {
 
     /// [`Model::opening_local`], its plan marks those drawn at detail level `detail`.
     fn opening_local_at(&self, e: &Element, detail: crate::graphics::Detail) -> Option<(Vec<Piece>, Vec<crate::family::Mark>)> {
+        let (pieces, marks) = self.opening_local_styled(e, detail)?;
+        Some((pieces, marks.into_iter().map(|(m, _)| m).collect()))
+    }
+
+    /// [`Model::opening_local_at`], each mark with the subcategory of the symbol it came from.
+    fn opening_local_styled(&self, e: &Element, detail: crate::graphics::Detail) -> Option<(Vec<Piece>, Vec<crate::family::Marked>)> {
         let (Element::Door(o) | Element::Window(o)) = e else { return None };
         let f = self.families.get(o.family.as_ref()?)?;
         let values = f.values_in(&o.type_name, &o.params, self.thickness(self.wall(o.host)?)).ok()?;
         let plan = crate::family::SymbolView::Plan;
         let others = |n: &str| self.families.get(n);
         let (pieces, marks) =
-            (f.pieces_with(&o.type_name, &values, &others).ok()?, f.marks_with(&o.type_name, &values, plan, Some(detail), &others).ok()?);
+            (f.pieces_with(&o.type_name, &values, &others).ok()?, f.marks_styled(&o.type_name, &values, plan, Some(detail), &others).ok()?);
         let (fx, fy) = (if o.flip_hand { -1.0 } else { 1.0 }, if o.flip_facing { -1.0 } else { 1.0 });
         let mirrored = fx * fy < 0.0;
         let flip = |p: [f64; 3]| [fx * p[0] + 0.0, fy * p[1] + 0.0, p[2]];
@@ -4991,7 +5022,7 @@ impl Model {
                 Piece { tris: tris.collect(), outline: if mirrored { outline.into_iter().rev().collect() } else { outline }, ..pc }
             })
             .collect();
-        let marks = marks.iter().map(|k| k.map(|q| P2(fx * q.0 + 0.0, fy * q.1 + 0.0))).collect();
+        let marks = marks.iter().map(|(k, sub)| (k.map(|q| P2(fx * q.0 + 0.0, fy * q.1 + 0.0)), sub.clone())).collect();
         Some((pieces, marks))
     }
 
@@ -5018,17 +5049,24 @@ impl Model {
 
     /// The marks a door's or window's family draws in plan at detail level `detail`, where it stands.
     pub fn opening_marks(&self, e: &Element, detail: crate::graphics::Detail) -> Vec<crate::family::Mark> {
+        self.opening_marks_styled(e, detail).into_iter().map(|(m, _)| m).collect()
+    }
+
+    /// [`Model::opening_marks`], each with the subcategory of the symbol it came from.
+    pub fn opening_marks_styled(&self, e: &Element, detail: crate::graphics::Detail) -> Vec<crate::family::Marked> {
         let (Element::Door(o) | Element::Window(o)) = e else { return Vec::new() };
-        let (Some((_, marks)), Some((at, u, _))) = (self.opening_local_at(e, detail), self.opening_frame(o)) else { return Vec::new() };
-        marks.iter().map(|k| k.map(|q| at + u * q.0 + u.perp() * q.1)).collect()
+        let (Some((_, marks)), Some((at, u, _))) = (self.opening_local_styled(e, detail), self.opening_frame(o)) else {
+            return Vec::new();
+        };
+        marks.iter().map(|(k, sub)| (k.map(|q| at + u * q.0 + u.perp() * q.1), sub.clone())).collect()
     }
 
     /// The lines a component's or a door's or window's family draws in a section or an elevation looking along `looking` at
-    /// detail level `detail`, in the model (mm, z up): its `front` symbols where the view looks along the family's y within
+    /// detail level `detail`, in the model (mm, z up), each with the subcategory of the symbol it came from: its `front` symbols where the view looks along the family's y within
     /// 45°, else its `side` ones (Revit's symbolic lines in an elevation: a door's Elevation Swing). A `front` symbol's
     /// (x, z) stand in the family's plane y = 0 and a `side` one's (y, z) in x = 0, placed as its forms are (mirrored,
     /// flipped, turned and moved), so the view from the back or the left sees them mirrored.
-    pub fn elevation_lines(&self, e: &Element, looking: P2, detail: crate::graphics::Detail) -> Vec<Vec<[f64; 3]>> {
+    pub fn elevation_lines(&self, e: &Element, looking: P2, detail: crate::graphics::Detail) -> Vec<(Vec<[f64; 3]>, Option<String>)> {
         use crate::family::{Mark, SymbolView};
         let (family, type_name, params, wall) = match e {
             Element::Component(c) => (&c.family, &c.type_name, &c.params, None),
@@ -5071,12 +5109,12 @@ impl Model {
         };
         // Its nested parts' symbols that face the view too (a window's sash, a door's handle).
         let others = |n: &str| self.families.get(n);
-        let Ok(marks) = values.and_then(|v| f.marks_with(type_name, &v, view, Some(detail), &others)) else { return Vec::new() };
+        let Ok(marks) = values.and_then(|v| f.marks_styled(type_name, &v, view, Some(detail), &others)) else { return Vec::new() };
         let lift = |q: P2| if side { place([0.0, q.0, q.1]) } else { place([q.0, 0.0, q.1]) };
         marks
             .into_iter()
-            .filter_map(|k| match k {
-                Mark::Line(pts) => Some(pts.into_iter().map(lift).collect()),
+            .filter_map(|(k, sub)| match k {
+                Mark::Line(pts) => Some((pts.into_iter().map(lift).collect(), sub)),
                 _ => None,
             })
             .collect()
@@ -7012,6 +7050,9 @@ impl Model {
             crate::styles::known(c)?;
             style.check(c)?;
         }
+        for (key, style) in &self.subcategory_styles {
+            style.check(key)?;
+        }
         for (n, p) in &self.line_patterns {
             if n.eq_ignore_ascii_case(lines::SOLID) {
                 return Err(format!("line pattern `{n}`: {} is a line with no pattern; name it another way", lines::SOLID));
@@ -8422,6 +8463,7 @@ impl Model {
             line_weights,
             standard,
             object_styles,
+            subcategory_styles,
             line_patterns,
             line_styles,
             fill_patterns,
@@ -8467,6 +8509,7 @@ impl Model {
             && *line_weights == o.line_weights
             && *standard == o.standard
             && *object_styles == o.object_styles
+            && *subcategory_styles == o.subcategory_styles
             && *line_patterns == o.line_patterns
             && *line_styles == o.line_styles
             && *fill_patterns == o.fill_patterns

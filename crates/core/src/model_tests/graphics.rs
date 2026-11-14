@@ -238,18 +238,30 @@ fn hiding_doors_and_windows_leaves_their_openings_in_the_wall() {
 #[test]
 fn a_doors_swing_is_projection_and_the_rest_of_it_is_cut() {
     let mut s = Session::new();
-    house(&mut s);
+    let walls = house(&mut s);
     let door = run(&mut s, "door", json!({"at": [2000, 0]}))["id"].as_u64().unwrap();
     run(
         &mut s,
         "graphics",
         json!({"view": 100000, "categories": {"doors": {"projection": {"color": [0, 0, 200]}, "cut": {"color": [200, 0, 0]}}}}),
     );
-    let l = lines(&plan(&s, 100000), door);
+    let d = plan(&s, 100000);
+    let l = lines(&d, door);
     let blue = Rgb(0, 0, 200);
     assert!(l.iter().any(|x| x.1 == blue && x.0 == 4), "its swing: {l:?}");
-    assert!(l.iter().any(|x| x.1 == RED && x.0 == 7), "its jambs: {l:?}");
+    assert!(l.iter().any(|x| x.1 == RED && x.0 == 6), "its leaf: {l:?}");
     assert!(l.iter().all(|x| x.1 == blue || x.1 == RED));
+    // Its jambs are its wall's own outline where the wall is cut, in the wall's cut pen: not the door's.
+    let jambs = (d.prims.iter().zip(&d.owners).zip(&d.pens))
+        .filter(|((p, o), pen)| match p {
+            Prim::Line { pts, .. } if pts.len() == 2 && **o == Some(walls[0]) && pen.map(|p| p.0) == Some(10) => {
+                let (a, b) = (d.view.mm(pts[0]), d.view.mm(pts[1]));
+                (a.0 - b.0).abs() < 1e-6 && (a.0 - 2000.0).abs() <= 600.0
+            }
+            _ => false,
+        })
+        .count();
+    assert_eq!(jambs, 2, "the wall's jambs at the opening");
 }
 
 #[test]

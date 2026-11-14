@@ -1450,7 +1450,11 @@ other_files(
          `types`, `show`, a symbol's `view`, `outline`, `cut` or a text parameter is written as format 22. A family from Revit \
          stays parametric: `revit` (Revit's definition; also read from a file, and a whole export package at `path` is taken: its \
          `family`, its `definition` and its `nested_families`, each loaded first, a shared one into the project and one that \
-         isn't held by the family it is in, `embedded`; and its `place`, the type to place, given back) \
+         isn't held by the family it is in, `embedded`; and its `place`, the type to place, given back; its `subcategories` may \
+         say a `projection` and a `cut` line weight (a pen, 1 to 16) and a `pattern` (a name), and `line_patterns` the patterns \
+         they name, each added to the project's unless it has one of that name, as the subcategories are its Object Styles of \
+         `Category/Subcategory` unless it has those; `cuts_measured` (a definition's `cuts_by: \"instance\"`) says the voids' `cuts` were measured, so each void cuts \
+         the forms it names whatever their order) \
          is translated into `references` (reference planes, which formulas read as `ref(Name)`), the `dimensions` placing them per \
          type (labelled with a parameter, locked, EQ; over-constrained, the family isn't editable), parametric forms (extrusions \
          with `holes`, revolves, blends with a `top`, sweeps along a `path` with their `section` and its `section_holes`, \
@@ -2035,13 +2039,18 @@ other_files(
         "object_styles",
         "Object Styles",
         &[],
-        "{categories?: {category: {projection?: pen, cut?: pen}, …}, reset?: true} the project's object styles, as Revit's \
+        "{categories?: {category: {projection?: pen, cut?: pen}, …}, subcategories?: {\"Category/Subcategory\": {projection?: pen | null, \
+         cut?: pen | null, color?: [r, g, b] | null, pattern?: line pattern | null, material?: material | null}, …}, reset?: true} \
+         the project's object styles, as Revit's \
          Manage > Object Styles: the pen (0, a hairline, to 16) each model category draws its lines in where it is seen \
          (`projection`) and where a view cuts it (`cut`), in every plan and section; a view's Visibility/Graphics overrides \
          them. A category given keeps the pen it isn't given. The rest of an element's lines keep their own: a compound \
          wall's layers, a door's jambs, a stair's walk line. `reset` goes back to what a project starts with (cut pen 10 and \
-         seen pen 4; a door's and a window's cut 6, a railing seen 6, a mass 4 both). Without either, it says each model \
-         category's, `own` whether the project has set it apart",
+         seen pen 4; a door's and a window's cut 6, a railing seen 6, a mass 4 both). `subcategories` sets what a family's \
+         subcategory (the rows under their category, as `door/Frame/Mullion`) draws in: its line weights (1 to 16; null, its \
+         category's), colour, line pattern (one of the project's) and material (one of the project's); each it isn't given \
+         stays, null takes it back to none, and `reset` leaves them. Without any, it says each model category's, `own` \
+         whether the project has set it apart, and `subcategories`, each with its own settings (none where it has none)",
         object_styles,
     )
     .menu("Manage > Object Styles"),
@@ -11333,6 +11342,8 @@ fn family(s: &mut Session, p: &Value) -> R {
             "editable",
             "revit",
             "rpc",
+            "cuts_measured",
+            "line_patterns",
         ]
         .into_iter()
         .filter_map(|k| fields.remove(k).map(|v| (k.to_string(), v)))
@@ -11441,6 +11452,8 @@ fn family(s: &mut Session, p: &Value) -> R {
         "editable",
         "revit",
         "rpc",
+        "cuts_measured",
+        "line_patterns",
         "rebuild",
     ];
     // The type a file says to place, given back.
@@ -11630,6 +11643,43 @@ fn family(s: &mut Session, p: &Value) -> R {
     } else if from_file {
         f.rpc = false;
     }
+    // Whether what its voids cut was measured, and the line patterns its subcategories name: a saved family brings them back.
+    if let Some(v) = p.get("cuts_measured") {
+        f.cuts_measured = v.as_bool().unwrap_or(false);
+    } else if from_file {
+        f.cuts_measured = false;
+    }
+    // What an export package (Revit's definition comes with it) brings of line patterns that the engine can't hold is left out and
+    // said (`editable.untranslated`), not a reason to refuse the family: its lines are drawn solid.
+    let package = p.get("revit").is_some_and(|v| !v.is_null());
+    let mut not_held: Vec<String> = Vec::new();
+    match p.get("line_patterns") {
+        None if from_file => f.line_patterns.clear(),
+        None => {}
+        Some(Value::Null) => f.line_patterns.clear(),
+        Some(Value::Object(map)) if package => {
+            f.line_patterns.clear();
+            for (name, v) in map {
+                match serde_json::from_value::<crate::lines::LinePattern>(v.clone()) {
+                    Ok(pattern) => {
+                        f.line_patterns.insert(name.clone(), pattern);
+                    }
+                    Err(_) => {
+                        let shown: String = name.chars().take(40).collect();
+                        not_held.push(format!(
+                            "its line pattern `{shown}` can't be held (a segment BIMCraft has no kind of): its lines are drawn solid"
+                        ));
+                        // The subcategories naming it draw solid too.
+                        for sub in f.subcategories.iter_mut().filter(|s| s.pattern.as_ref() == Some(name)) {
+                            sub.pattern = None;
+                        }
+                    }
+                }
+            }
+            not_held.extend(f.drop_unholdable_line_patterns());
+        }
+        Some(v) => f.line_patterns = serde_json::from_value(v.clone()).map_err(|e| field("line_patterns", e))?,
+    }
     // Materials it brings, each added where the project has none of its name: the project's own wins, as in Revit.
     let mut brought: BTreeMap<String, crate::model::Material> = BTreeMap::new();
     if let Some(v) = p.get("materials").filter(|v| !v.is_null()) {
@@ -11705,6 +11755,9 @@ fn family(s: &mut Session, p: &Value) -> R {
     }
     if let Some(def) = p.get("revit").filter(|v| !v.is_null()) {
         let exported = crate::family::revit::translate(&mut f, def, &has);
+        if !not_held.is_empty() {
+            f.editable.get_or_insert_with(Default::default).untranslated.extend(not_held);
+        }
         let others = |n: &str| if n == name.as_str() { None } else { s.model.families.get(n) };
         f.run_check(&others, &exported);
     } else if let Some(w) = was.as_ref().filter(|_| !from_file) {
@@ -11837,6 +11890,9 @@ fn family(s: &mut Session, p: &Value) -> R {
         }
     }
     m.families.insert(to.clone(), f.clone());
+    // Its subcategories become the project's Object Styles of `Category/Subcategory` (and its line patterns the project's), each
+    // unless the project has one of the name: as in Revit, what the project has is kept when a family is loaded.
+    m.take_subcategory_styles(&f);
     let mut reply = json!({"name": to, "family": f, "warnings": warnings, "materials": added, "editable": f.editable, "check": f.check});
     if let Some(place) = place {
         reply["place"] = place;
@@ -15461,6 +15517,74 @@ fn object_styles(s: &mut Session, p: &Value) -> R {
             s.model_mut().object_styles = styles;
         }
     }
+    if let Some(v) = p.get("subcategories").filter(|v| !v.is_null()) {
+        /// What a subcategory is given: each of its settings, or null to take it back to none.
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Given {
+            #[serde(default, deserialize_with = "set")]
+            projection: Option<Option<crate::pen::Pen>>,
+            #[serde(default, deserialize_with = "set")]
+            cut: Option<Option<crate::pen::Pen>>,
+            #[serde(default, deserialize_with = "set")]
+            color: Option<Option<[u8; 3]>>,
+            #[serde(default, deserialize_with = "set")]
+            pattern: Option<Option<String>>,
+            #[serde(default, deserialize_with = "set")]
+            material: Option<Option<String>>,
+        }
+        /// A present field: null is `Some(None)`.
+        fn set<'de, D: serde::Deserializer<'de>, T: serde::Deserialize<'de>>(d: D) -> Result<Option<Option<T>>, D::Error> {
+            <Option<T> as serde::Deserialize>::deserialize(d).map(Some)
+        }
+        let given: BTreeMap<String, Given> = serde_json::from_value(v.clone()).map_err(|e| {
+            bad(c, format!("`subcategories` is {{\"Category/Subcategory\": {{projection?, cut?, color?, pattern?, material?}}, …}}: {e}"))
+        })?;
+        let rows = s.model.subcategory_rows();
+        let mut styles = s.model.subcategory_styles.clone();
+        for (key, g) in given {
+            if !rows.iter().any(|(k, ..)| *k == key) {
+                let there: Vec<&str> = rows.iter().map(|(k, ..)| k.as_str()).take(40).collect();
+                return Err(bad(c, format!("`{key}` isn't a subcategory of the project's families (there are: {})", there.join(", "))));
+            }
+            let mut style = styles.get(&key).cloned().unwrap_or_default();
+            if let Some(x) = g.projection {
+                style.projection = x;
+            }
+            if let Some(x) = g.cut {
+                style.cut = x;
+            }
+            if let Some(x) = g.color {
+                style.color = x;
+            }
+            if let Some(x) = g.pattern {
+                if let Some(n) = &x
+                    && !s.model.line_patterns.contains_key(n)
+                {
+                    let there: Vec<&str> = s.model.line_patterns.keys().map(String::as_str).collect();
+                    return Err(bad(c, format!("`{key}`: there's no line pattern `{n}` (there are: {})", there.join(", "))));
+                }
+                style.pattern = x;
+            }
+            if let Some(x) = g.material {
+                if let Some(n) = &x
+                    && !s.model.materials.contains_key(n)
+                {
+                    return Err(bad(c, format!("`{key}`: there's no material `{n}`")));
+                }
+                style.material = x;
+            }
+            style.check(&key).map_err(|e| bad(c, e))?;
+            if style.is_empty() {
+                styles.remove(&key);
+            } else {
+                styles.insert(key, style);
+            }
+        }
+        if styles != s.model.subcategory_styles {
+            s.model_mut().subcategory_styles = styles;
+        }
+    }
     let m = &s.model;
     let all: Vec<Value> = crate::graphics::MODEL
         .iter()
@@ -15469,7 +15593,16 @@ fn object_styles(s: &mut Session, p: &Value) -> R {
             json!({"category": cat, "projection": st.projection, "cut": st.cut, "own": m.object_styles.contains_key(*cat)})
         })
         .collect();
-    Ok(json!({"categories": all}))
+    let subcategories: Vec<Value> = m
+        .subcategory_rows()
+        .into_iter()
+        .map(|(key, category, name)| {
+            let st = m.subcategory_styles.get(&key).cloned().unwrap_or_default();
+            json!({"key": key, "category": category, "name": name, "projection": st.projection, "cut": st.cut, "color": st.color,
+                   "pattern": st.pattern, "material": st.material, "own": m.subcategory_styles.contains_key(&key)})
+        })
+        .collect();
+    Ok(json!({"categories": all, "subcategories": subcategories}))
 }
 
 fn inspect(s: &mut Session, p: &Value) -> R {

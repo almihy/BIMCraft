@@ -372,7 +372,7 @@ fn canvas_at(ui: &mut Ui, d: &mut TitleBlocksDialog, values: &BTreeMap<String, S
     let (dw, dh) = (drawing.view.width as f32, drawing.view.height as f32);
     let (rect, r) = ui.allocate_exact_size(vec2(dw * k, dh * k), Sense::click_and_drag());
     ui.painter().rect_filled(rect, 0.0, egui::Color32::WHITE);
-    let at = Place { origin: rect.min, k, paper: true, hide: None };
+    let at = Place { origin: rect.min, k, paper: true, zoom: 0.0, hide: None };
     paint(&ui.painter_at(rect), at, drawing, &[], None, false, &[]);
     let view = drawing.view;
     let to_mm = |q: egui::Pos2| view.mm(((q.x - rect.min.x) / k, (q.y - rect.min.y) / k));

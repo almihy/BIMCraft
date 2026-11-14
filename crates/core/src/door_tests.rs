@@ -148,9 +148,19 @@ fn a_doors_leaf_and_swing_show_at_coarse_as_revits_do() {
     run(&mut s, "detail", json!({"view": 100000, "detail": "coarse"}));
     let d = plan(&s);
     assert_eq!((panels(&d, door).len(), arcs(&d, door).len()), (1, 1));
-    // A window at coarse is its gap and jambs only.
-    let glass = d.prims.iter().zip(&d.owners).filter(|(p, o)| **o == Some(window) && matches!(p, Prim::Line { pts, .. } if pts.len() == 2));
-    assert_eq!(glass.count(), 2, "its two jambs");
+    // A window at coarse is its gap and jambs only: the jambs are its wall's own outline, where the wall is cut, and the window draws
+    // no line of its own.
+    let (width, _) = s.model.opening_type(&s.model.elements[&window]).map(|t| t.cut()).unwrap_or_default();
+    let jambs = d.prims.iter().zip(&d.owners).filter(|(p, o)| match p {
+        Prim::Line { pts, .. } if pts.len() == 2 && o.is_some_and(|id| id != window) => {
+            let (a, b) = (d.view.mm(pts[0]), d.view.mm(pts[1]));
+            (a.0 - b.0).abs() < 1e-6 && [6000.0 - width / 2.0, 6000.0 + width / 2.0].iter().any(|x| (a.0 - x).abs() < 1.0)
+        }
+        _ => false,
+    });
+    assert_eq!(jambs.count(), 2, "its two jambs, the wall's");
+    let own = d.prims.iter().zip(&d.owners).filter(|(p, o)| **o == Some(window) && matches!(p, Prim::Line { .. }));
+    assert_eq!(own.count(), 0, "and no line of its own");
 }
 
 /// The room named `name`'s JSON, or null.

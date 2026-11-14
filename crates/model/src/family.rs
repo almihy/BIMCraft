@@ -449,7 +449,7 @@ impl Host {
 }
 
 /// A subcategory of a family's category, as Revit's (`Frame/Mullion`, `Panel`, `Plan Swing`, `Elevation Swing`): its line
-/// colour and its material where it sets them.
+/// colour, its material, its line weights (seen, cut) and its line pattern where it sets them.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Subcategory {
@@ -458,6 +458,25 @@ pub struct Subcategory {
     pub color: Option<[u8; 3]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub material: Option<String>,
+    /// The pen its lines are drawn in where they are seen (Revit's Line Weight, Projection), 1 to 16; none, its category's. Revit's
+    /// -1, a subcategory with no weight (a category that has no cut), reads as none.
+    #[serde(default, deserialize_with = "weight", skip_serializing_if = "Option::is_none")]
+    pub projection: Option<crate::pen::Pen>,
+    /// The pen its forms are outlined in where a view cuts them (Line Weight, Cut), 1 to 16; none, its category's.
+    #[serde(default, deserialize_with = "weight", skip_serializing_if = "Option::is_none")]
+    pub cut: Option<crate::pen::Pen>,
+    /// The line pattern its lines are drawn in, by name: one of the family's `line_patterns` or the project's; none, solid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<String>,
+}
+
+/// A line weight as Revit says it: a pen, or -1 (or null) where it has none, which is none.
+fn weight<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<crate::pen::Pen>, D::Error> {
+    match Option::<f64>::deserialize(d)? {
+        Some(n) if n < 0.0 => Ok(None),
+        Some(n) => serde_json::from_value(serde_json::json!(n)).map(Some).map_err(serde::de::Error::custom),
+        None => Ok(None),
+    }
 }
 
 /// A door's or a window's opening in its wall where it isn't `Width` by `Height` (a frame outside the leaf): numbers or
@@ -641,6 +660,9 @@ pub enum Mark {
     Dot { centre: P2, radius: f64 },
     Label { at: P2, height: f64, text: String, align: Align },
 }
+
+/// A mark with the subcategory of the symbol it came from: what the pens, colour and pattern it is drawn in come from.
+pub type Marked = (Mark, Option<String>);
 
 impl Mark {
     /// The same mark with every point taken through `f`.
@@ -1117,6 +1139,15 @@ pub struct Family {
     /// compares only its plan and its 3D is always Revit's own result ([`Family::draws_snapshot_forms`]).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub rpc: bool,
+    /// Whether what each of its voids cuts (`Form::cuts`) was measured from the instance (the definition's `cuts_by` is `instance`).
+    /// Then a void cuts exactly the solids it names, whatever their order in the family; a family without it (every package
+    /// before the add-in measured) has a void cut every solid listed before it that it reaches.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cuts_measured: bool,
+    /// The line patterns its subcategories name, by name, as Revit's Line Patterns the family was made with: each added to the
+    /// project's when the family is loaded, unless the project has one of the name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub line_patterns: BTreeMap<String, crate::lines::LinePattern>,
 }
 
 impl Symbol {
@@ -1197,6 +1228,8 @@ pub struct Piece {
     pub round: bool,
     /// Its form's Visibility Settings ([`Form::show`]); none, every view at every level.
     pub show: Option<Show>,
+    /// Its form's subcategory ([`Form::subcategory`]): the pens it is outlined in come from it, else from its category.
+    pub subcategory: Option<String>,
 }
 
 impl Piece {
@@ -1261,8 +1294,24 @@ impl Shape {
 
 /// How deep a formula may nest.
 const MAX_DEPTH: usize = 64;
-/// Sides a circle's profile is drawn with.
+/// Sides a full turn of a curve is drawn with at least.
 const SEGMENTS: usize = 32;
+/// Sides a full turn of a curve is drawn with at most.
+const MOST_SEGMENTS: usize = 256;
+/// How far a chord of a curve may sag from it, mm: Revit's fine tessellation, which the check compares with, stays within a
+/// fraction of a millimetre of the true surface.
+pub(crate) const SAG: f64 = 0.5;
+
+/// Sides an arc of `turn` radians at radius `r` is drawn with: at least 32 a turn, enough that no chord sags more than [`SAG`],
+/// at most 256 a turn. (A millionth of a side is float noise, not a side.)
+pub(crate) fn sides(turn: f64, r: f64) -> usize {
+    use std::f64::consts::TAU;
+    let turn = turn.abs();
+    let base = (turn / TAU * SEGMENTS as f64 - 1e-9).ceil();
+    let by_sag = if r.is_finite() && r > SAG { (turn / (2.0 * (1.0 - SAG / r).acos()) - 1e-9).ceil() } else { 0.0 };
+    let most = (turn / TAU * MOST_SEGMENTS as f64 - 1e-9).ceil().max(1.0);
+    base.max(by_sag).clamp(1.0, most) as usize
+}
 /// Degrees a symbol's arc turns between the corners it is drawn with.
 const ARC_STEP: f64 = 3.75;
 /// Corners one profile may have.
@@ -1273,6 +1322,8 @@ pub const MAX_CHAIN: usize = 16;
 pub const MAX_BUILT: usize = 400_000;
 /// Triangles one form, as a file brings it, may have.
 pub const MAX_TRIANGLES: usize = 100_000;
+/// Line patterns one family may bring.
+pub const MAX_LINE_PATTERNS: usize = 256;
 
 /// Parameters, forms, symbols and types one family may have: as many as a family exported from Revit, which carries each
 /// type's own forms, may bring.
@@ -1967,6 +2018,42 @@ impl Family {
         self.ifc.as_ref().filter(|_| self.category == Category::Generic)
     }
 
+    /// Leaves out the line patterns it can't hold (more than [`MAX_LINE_PATTERNS`], a name that isn't one line of text, one
+    /// that is `Solid`, segments [`crate::lines::LinePattern::check`] refuses), and the subcategories' naming them: those are
+    /// drawn solid. What a family from Revit brings that the engine can't hold is said and left out, not a reason to refuse the
+    /// family. What was left out, said in plain words, for `Editable::untranslated`.
+    pub fn drop_unholdable_line_patterns(&mut self) -> Vec<String> {
+        let shown = |n: &str| n.chars().take(40).collect::<String>();
+        let mut said = Vec::new();
+        let mut gone: Vec<String> = Vec::new();
+        let mut kept = 0usize;
+        for (name, pattern) in &self.line_patterns {
+            let why = if !one_line(name, MAX_TEXT) || name == crate::lines::SOLID {
+                Some("its name isn't one a line pattern may have".to_string())
+            } else if kept >= MAX_LINE_PATTERNS {
+                Some(format!("a family holds {MAX_LINE_PATTERNS} line patterns at most"))
+            } else {
+                pattern.check(name).err().map(|e| e.split_once(": ").map_or(e.clone(), |(_, r)| r.to_string()))
+            };
+            match why {
+                Some(why) => {
+                    said.push(format!("its line pattern `{}` can't be held ({why}): its lines are drawn solid", shown(name)));
+                    gone.push(name.clone());
+                }
+                None => kept += 1,
+            }
+        }
+        for name in &gone {
+            self.line_patterns.remove(name);
+        }
+        for sub in &mut self.subcategories {
+            if sub.pattern.as_ref().is_some_and(|p| gone.contains(p)) {
+                sub.pattern = None;
+            }
+        }
+        said
+    }
+
     /// Whether it's sound: its parameters named once each, so formulas can say them, and holding
     /// what their kinds hold; its types setting only the type parameters no formula works out; its
     /// materials in the library (`has_material`); and every type building.
@@ -2285,6 +2372,33 @@ impl Family {
             {
                 return Err(format!("subcategory `{}`: its material is a name of 1 to {MAX_TEXT} characters", sub.name));
             }
+            // A line weight is a pen of Revit's, 1 to 16: not a hairline, which Revit has no weight for.
+            for (what, pen) in [("projection", sub.projection), ("cut", sub.cut)] {
+                if let Some(p) = pen
+                    && !(1..=crate::pen::MAX_PEN).contains(&p.0)
+                {
+                    return Err(format!(
+                        "subcategory `{}`: its {what} line weight is a pen from 1 to {}, not {}",
+                        sub.name,
+                        crate::pen::MAX_PEN,
+                        p.0
+                    ));
+                }
+            }
+            if let Some(p) = &sub.pattern
+                && !one_line(p, MAX_TEXT)
+            {
+                return Err(format!("subcategory `{}`: its line pattern is a name of 1 to {MAX_TEXT} characters", sub.name));
+            }
+        }
+        if self.line_patterns.len() > MAX_LINE_PATTERNS {
+            return Err(format!("it has more than {MAX_LINE_PATTERNS} line patterns"));
+        }
+        for (name, pattern) in &self.line_patterns {
+            if !one_line(name, MAX_TEXT) || name == crate::lines::SOLID {
+                return Err(format!("line pattern: a name of 1 to {MAX_TEXT} characters on one line, and not `{}`", crate::lines::SOLID));
+            }
+            pattern.check(name)?;
         }
         Ok(())
     }
@@ -2446,7 +2560,19 @@ impl Family {
         detail: Option<crate::graphics::Detail>,
         snapshot: bool,
     ) -> Result<Vec<Mark>, String> {
-        self.marks_where(values, &|y: &Symbol| {
+        Ok(self.marks_as_styled(type_name, values, view, detail, snapshot)?.into_iter().map(|(m, _)| m).collect())
+    }
+
+    /// [`Family::marks_as`], each mark with the subcategory of the symbol it came from.
+    fn marks_as_styled(
+        &self,
+        type_name: &str,
+        values: &BTreeMap<String, Val>,
+        view: SymbolView,
+        detail: Option<crate::graphics::Detail>,
+        snapshot: bool,
+    ) -> Result<Vec<Marked>, String> {
+        self.marks_where_styled(values, &|y: &Symbol| {
             y.view == view && y.of_type(type_name) && y.snapshot == snapshot && detail.is_none_or(|d| y.drawn_at(d))
         })
     }
@@ -2467,9 +2593,22 @@ impl Family {
         detail: Option<crate::graphics::Detail>,
         others: Others,
     ) -> Result<Vec<Mark>, String> {
-        let mut out = self.marks(type_name, values, view, detail)?;
+        Ok(self.marks_styled(type_name, values, view, detail, others)?.into_iter().map(|(m, _)| m).collect())
+    }
+
+    /// [`Family::marks_with`], each mark with the subcategory of the symbol it came from (a nested part's, its own family's): what
+    /// the pens, colour and pattern it is drawn in come from.
+    pub fn marks_styled(
+        &self,
+        type_name: &str,
+        values: &BTreeMap<String, Val>,
+        view: SymbolView,
+        detail: Option<crate::graphics::Detail>,
+        others: Others,
+    ) -> Result<Vec<Marked>, String> {
+        let mut out = self.marks_as_styled(type_name, values, view, detail, self.draws_snapshot(type_name))?;
         if !self.draws_snapshot(type_name) {
-            self.nested_marks(type_name, values, (view, detail), others, (0, &std::cell::Cell::new(0)), &mut out)?;
+            self.nested_marks_styled(type_name, values, (view, detail), others, (0, &std::cell::Cell::new(0)), &mut out)?;
         }
         Ok(out)
     }
@@ -2481,10 +2620,26 @@ impl Family {
         &self,
         type_name: &str,
         values: &BTreeMap<String, Val>,
+        at: (SymbolView, Option<crate::graphics::Detail>),
+        others: Others,
+        depth: (usize, &std::cell::Cell<usize>),
+        out: &mut Vec<Mark>,
+    ) -> Result<(), String> {
+        let mut styled = Vec::new();
+        self.nested_marks_styled(type_name, values, at, others, depth, &mut styled)?;
+        out.extend(styled.into_iter().map(|(m, _)| m));
+        Ok(())
+    }
+
+    /// [`Family::nested_marks`], each mark with the subcategory of the symbol it came from.
+    fn nested_marks_styled(
+        &self,
+        type_name: &str,
+        values: &BTreeMap<String, Val>,
         (view, detail): (SymbolView, Option<crate::graphics::Detail>),
         others: Others,
         (depth, spent): (usize, &std::cell::Cell<usize>),
-        out: &mut Vec<Mark>,
+        out: &mut Vec<Marked>,
     ) -> Result<(), String> {
         if self.nested.is_empty() {
             return Ok(());
@@ -2533,10 +2688,10 @@ impl Family {
                 if crate::geom::v3::dot(axes[inner_view.axis()], faces).abs() < 1.0 - 1e-6 {
                     continue;
                 }
-                let mut marks = inner.marks_as(inner_type, &inner_values, inner_view, detail, revit).map_err(said)?;
+                let mut marks = inner.marks_as_styled(inner_type, &inner_values, inner_view, detail, revit).map_err(said)?;
                 if !revit {
                     inner
-                        .nested_marks(inner_type, &inner_values, (inner_view, detail), others, (depth + 1, spent), &mut marks)
+                        .nested_marks_styled(inner_type, &inner_values, (inner_view, detail), others, (depth + 1, spent), &mut marks)
                         .map_err(said)?;
                 }
                 let place = |q: P2| {
@@ -2544,7 +2699,7 @@ impl Family {
                     let p = add(at, add(add(mul(axes[0], p[0]), mul(axes[1], p[1])), mul(axes[2], p[2])));
                     view.flat(p)
                 };
-                out.extend(marks.iter().map(|m| m.scaled(scale).map(place)));
+                out.extend(marks.iter().map(|(m, sub)| (m.scaled(scale).map(place), sub.clone())));
             }
             if out.len() > MAX_SYMBOLS * 4 {
                 return Err(said(format!("its nested parts draw more than {} marks", MAX_SYMBOLS * 4)));
@@ -2555,6 +2710,11 @@ impl Family {
 
     /// The marks of its visible symbols `pick` keeps, sized by `values`, each worked out and checked.
     fn marks_where<'a>(&'a self, values: &BTreeMap<String, Val>, pick: &dyn Fn(&Symbol) -> bool) -> Result<Vec<Mark>, String> {
+        Ok(self.marks_where_styled(values, pick)?.into_iter().map(|(m, _)| m).collect())
+    }
+
+    /// [`Family::marks_where`], each mark with the subcategory of the symbol it came from.
+    fn marks_where_styled<'a>(&'a self, values: &BTreeMap<String, Val>, pick: &dyn Fn(&Symbol) -> bool) -> Result<Vec<Marked>, String> {
         let mut read = HashMap::new();
         let mut out = Vec::new();
         for (i, sym) in self.symbols.iter().enumerate() {
@@ -2582,7 +2742,7 @@ impl Family {
                 if r <= 0.0 {
                     return Err(said(format!("its dot has radius {r}; it needs a radius above zero")));
                 }
-                out.push(Mark::Dot { centre, radius: r });
+                out.push((Mark::Dot { centre, radius: r }, sym.subcategory.clone()));
                 continue;
             }
             if let Some(l) = &sym.text {
@@ -2591,7 +2751,7 @@ impl Family {
                     return Err(said(format!("its text has height {height}; it needs a height above zero")));
                 }
                 let text = said_text(&l.value, values).map_err(said)?;
-                out.push(Mark::Label { at, height, text, align: l.align });
+                out.push((Mark::Label { at, height, text, align: l.align }, sym.subcategory.clone()));
                 continue;
             }
             let mut pts = Vec::new();
@@ -2611,7 +2771,7 @@ impl Family {
                     P2(centre.0 + r * c, centre.1 + r * s)
                 }));
             }
-            out.push(Mark::Line(pts));
+            out.push((Mark::Line(pts), sym.subcategory.clone()));
         }
         Ok(out)
     }
@@ -2627,6 +2787,8 @@ impl Family {
         how: Build,
     ) -> Result<Vec<Piece>, String> {
         let (mut out, mut voids) = (Vec::new(), Vec::new());
+        // The form each solid of `out` is of: what a measured void's `cuts` names.
+        let mut of: Vec<usize> = Vec::new();
         for i in 0..self.forms.len() {
             if !self.forms[i].of_type(type_name) || self.forms[i].snapshot != how.snapshot {
                 continue;
@@ -2638,16 +2800,27 @@ impl Family {
             if self.forms[i].void {
                 voids.push((i, out.len(), piece.tris));
             } else {
+                of.push(i);
                 out.push(piece);
             }
         }
-        // Each void cut from every solid listed before it that it reaches (Revit's `cuts` lists don't limit it: they leave out forms
-        // its void cuts and name some it doesn't). A cut solid is no longer one round surface,
-        // and its outline seen from above is as it was. ponytail: a notch or a hole doesn't show in plan; trace it if it must.
+        // Each void cut from every solid listed before it that it reaches (Revit's `cuts` lists of before the add-in measured them
+        // don't limit it: they leave out forms its void cuts and name some it doesn't). Where they were measured
+        // (`cuts_measured`), a void that names the forms it cuts cuts those and only those, whatever their order. A cut solid is
+        // no longer one round surface, and its outline seen from above is as it was. ponytail: a notch or a hole doesn't show in
+        // plan; trace it if it must.
         // A closed form cut by closed voids is cut on the solid kernel, a form or void that isn't closed by `csg` ([`cutting`]).
-        let voids: Vec<(usize, cutting::Void)> = voids.iter().map(|(i, before, tris)| (*before, cutting::Void::new(*i, tris))).collect();
+        let voids: Vec<(usize, usize, cutting::Void)> =
+            voids.iter().map(|(i, before, tris)| (*i, *before, cutting::Void::new(*i, tris))).collect();
         for (k, piece) in out.iter_mut().enumerate() {
-            let mine: Vec<&cutting::Void> = voids.iter().filter(|(before, _)| *before > k).map(|(_, v)| v).collect();
+            let mine: Vec<&cutting::Void> = voids
+                .iter()
+                .filter(|(i, before, _)| match self.cuts_measured.then(|| self.forms[*i].cuts.as_ref()).flatten() {
+                    Some(list) => self.forms[of[k]].source.as_ref().is_some_and(|src| list.contains(src)),
+                    None => k < *before,
+                })
+                .map(|(_, _, v)| v)
+                .collect();
             if mine.is_empty() {
                 continue;
             }
@@ -2663,6 +2836,7 @@ impl Family {
                     outline: std::mem::take(&mut piece.outline),
                     material: std::mem::take(&mut piece.material),
                     show: piece.show,
+                    subcategory: piece.subcategory.take(),
                 };
             }
         }
@@ -2834,10 +3008,8 @@ impl Family {
                     if r <= 0.0 {
                         return Err(format!("its circle's radius is {r}; it needs one above zero"));
                     }
-                    (0..SEGMENTS)
-                        .map(|k| (k as f64 * std::f64::consts::TAU / SEGMENTS as f64).sin_cos())
-                        .map(|(s, c)| P2(x + r * c, y + r * s))
-                        .collect()
+                    let n = sides(std::f64::consts::TAU, r);
+                    (0..n).map(|k| (k as f64 * std::f64::consts::TAU / n as f64).sin_cos()).map(|(s, c)| P2(x + r * c, y + r * s)).collect()
                 }
                 None if form.profile.len() > MAX_RING => return Err(format!("its profile has more than {MAX_RING} corners")),
                 None => form.profile.iter().map(|[a, b]| Ok(P2(num(a)?, num(b)?))).collect::<Result<_, String>>()?,
@@ -2868,7 +3040,12 @@ impl Family {
             };
             let (profile_bends, top_bends) = (bends(Ring::Profile, 0)?, bends(Ring::Top, 0)?);
             let hole_bends = (0..form.holes.len()).map(|k| bends(Ring::Hole, k)).collect::<Result<Vec<_>, _>>()?;
-            let ring = if form.circle.is_none() { shapes::bent2(ring, &profile_bends) } else { ring };
+            let (ring, ring_breaks) = if form.circle.is_none() {
+                shapes::bent2_marked(ring, &profile_bends)
+            } else {
+                let at = (0..ring.len()).collect();
+                (ring, at)
+            };
             let (from, to) = (num(&form.from)?, num(&form.to)?);
             if ring.len() < 3 || crate::geom::area(&ring).abs() < 1.0 {
                 return Err("its profile has no area: it needs three corners or more, or a circle".into());
@@ -2879,7 +3056,12 @@ impl Family {
                 let unit = if form.axis.is_some() { " degrees" } else { "" };
                 return Err(format!("sweeps nothing: from {from} to {to}{unit}"));
             }
-            let ring = if crate::geom::area(&ring) < 0.0 { ring.into_iter().rev().collect() } else { ring };
+            let (ring, ring_breaks) = if crate::geom::area(&ring) < 0.0 {
+                let n = ring.len();
+                (ring.into_iter().rev().collect(), ring_breaks.into_iter().map(|b| n - 1 - b).collect())
+            } else {
+                (ring, ring_breaks)
+            };
             // A revolve's sketch plane where it is along the axis it is square to: its triangles moved there.
             let lift = match &form.at {
                 Some(e) => embed(form.plane, P2(0.0, 0.0), num(e)?),
@@ -2903,7 +3085,7 @@ impl Family {
                     let inner = lifted(inner);
                     tris.extend(inner.into_iter().map(|[a, b, c]| [a, c, b]));
                 }
-                return Ok(Some(Piece { show: form.show, ..hulled(tris, material) }));
+                return Ok(Some(Piece { show: form.show, subcategory: form.subcategory.clone(), ..hulled(tris, material) }));
             }
             if !form.top.is_empty() || !form.holes.is_empty() {
                 if form.top.len() > MAX_RING || form.holes.len() > MAX_RING || form.holes.iter().any(|h| h.len() > MAX_RING) {
@@ -2920,14 +3102,14 @@ impl Family {
                     too_fine((ring.len() + holes.iter().map(Vec::len).sum::<usize>()).saturating_mul(4), "profile")?;
                     shapes::holed(&ring, &holes, from, to, form.plane)?
                 } else {
-                    let top = shapes::bent2(ring_of(&form.top)?, &top_bends);
+                    let (top, top_breaks) = shapes::bent2_marked(ring_of(&form.top)?, &top_bends);
                     if top.len() < 3 || crate::geom::area(&top).abs() < 1.0 {
                         return Err("its top has no area: it needs three corners or more".into());
                     }
                     too_fine((ring.len() + top.len()).saturating_mul(4), "blend")?;
-                    shapes::blend(&ring, &top, from, to, form.plane)?
+                    shapes::blend((&ring, &ring_breaks), (&top, &top_breaks), from, to, form.plane)?
                 };
-                return Ok(Some(Piece { show: form.show, ..hulled(tris, material) }));
+                return Ok(Some(Piece { show: form.show, subcategory: form.subcategory.clone(), ..hulled(tris, material) }));
             }
             match &form.axis {
                 Some([p, q]) => {
@@ -2940,7 +3122,7 @@ impl Family {
                     let tris = lifted(tris);
                     let outline = outline.into_iter().map(|q| P2(q.0 + lift[0], q.1 + lift[1])).collect();
                     let (bottom, top) = heights(&tris);
-                    Piece { caps: tris.len(), tris, outline, bottom, top, material, round: false, show: None }
+                    Piece { caps: tris.len(), tris, outline, bottom, top, material, round: false, show: None, subcategory: None }
                 }
                 None => {
                     let (tris, caps) = sweep(&ring, from, to, form.plane)?;
@@ -2955,11 +3137,11 @@ impl Family {
                         Plane::Xz => (vec![P2(a0, from), P2(a1, from), P2(a1, to), P2(a0, to)], b0, b1),
                         Plane::Yz => (vec![P2(from, a0), P2(to, a0), P2(to, a1), P2(from, a1)], b0, b1),
                     };
-                    Piece { tris, caps, outline, bottom, top, material, round: form.circle.is_some(), show: None }
+                    Piece { tris, caps, outline, bottom, top, material, round: form.circle.is_some(), show: None, subcategory: None }
                 }
             }
         };
-        Ok(Some(Piece { show: form.show, ..piece }))
+        Ok(Some(Piece { show: form.show, subcategory: form.subcategory.clone(), ..piece }))
     }
 
     /// Where each of its forms lies, sized by `values`, before any void cuts it: its place in
@@ -3125,7 +3307,7 @@ fn circumcentre(a: P2, m: P2, c: P2) -> Option<P2> {
 fn hulled(tris: Vec<[P3; 3]>, material: String) -> Piece {
     let (bottom, top) = heights(&tris);
     let outline = crate::geom::hull(tris.iter().flatten().map(|p| P2(p[0], p[1])).collect());
-    Piece { caps: tris.len(), tris, outline, bottom, top, material, round: false, show: None }
+    Piece { caps: tris.len(), tris, outline, bottom, top, material, round: false, show: None, subcategory: None }
 }
 
 /// The most a nested part may be scaled by.
@@ -3220,7 +3402,7 @@ fn revolve(ring: &[P2], [p0, p1]: [P2; 2], (from, to): (f64, f64), plane: Plane)
     let w = cross(u, n);
     let turn = to - from;
     let full = turn > 360.0 - 1e-9;
-    let steps = (turn / 360.0 * SEGMENTS as f64 - 1e-9).ceil().max(1.0) as usize;
+    let steps = sides(turn.to_radians(), most.max(-least));
     let angle = |k: usize| (from + turn * (if full { k % steps } else { k }) as f64 / steps as f64).to_radians().sin_cos();
     let at = |i: usize, k: usize| -> P3 {
         let (t, r) = reach.get(i).copied().unwrap_or_default();
@@ -3350,7 +3532,7 @@ fn mesh(tris: &[[P3; 3]], traced: &[[f64; 2]], material: String) -> Result<Piece
             ring
         }
     };
-    Ok(Piece { tris: tris.to_vec(), caps: tris.len(), outline, bottom, top, material, round: false, show: None })
+    Ok(Piece { tris: tris.to_vec(), caps: tris.len(), outline, bottom, top, material, round: false, show: None, subcategory: None })
 }
 
 /// The families a new project starts with, BIMCraft's own: tables, chairs, beds, sofas, desks,
@@ -4239,14 +4421,22 @@ mod tests {
         f.pieces("A", &f.values("A", &BTreeMap::new())?)
     }
 
+    /// The area of a polygon sector of `turn` radians about a unit radius, as a revolve out to `r` draws it (`sides` of them).
+    fn sector(turn: f64, r: f64) -> f64 {
+        let n = sides(turn, r) as f64;
+        n / 2.0 * (turn / n).sin()
+    }
+
     #[test]
     fn a_revolve_turns_its_profile_about_its_axis() {
         // A tube: a rectangle across x and z, 100 to `R` out from the z axis, turned all the way round it.
         let ring = json!([[100, 0], ["R", 0], ["R", 500], [100, 500]]);
         let tube = built(json!([{"plane": "xz", "profile": ring, "axis": [[0, 0], [0, 1]], "to": 360}])).unwrap();
         let [p] = tube.as_slice() else { panic!("{tube:?}") };
-        // Its sides are polygons of 32 sides: their area is a hair under the circle's.
-        let k = 16.0 * (std::f64::consts::TAU / 32.0).sin() / std::f64::consts::PI;
+        // Its sides are polygons of as many sides as keep a chord within half a millimetre of the circle (55 out to 300): their
+        // area is a hair under the circle's.
+        assert_eq!(sides(std::f64::consts::TAU, 300.0), 55);
+        let k = sector(std::f64::consts::TAU, 300.0) / std::f64::consts::PI;
         let want = std::f64::consts::PI * (300.0 * 300.0 - 100.0 * 100.0) * 500.0 * k;
         assert!((volume(&p.tris) / want - 1.0).abs() < 1e-6, "{} not {want}", volume(&p.tris));
         assert_eq!((p.bottom, p.top), (0.0, 500.0));
@@ -4256,10 +4446,11 @@ mod tests {
         );
         // A quarter of it, closed at both ends; its axis given the other way round, or across x and y.
         let quarter = built(json!([{"plane": "xz", "profile": ring, "axis": [[0, 1], [0, 0]], "from": 0, "to": 90}])).unwrap();
-        assert!((volume(&quarter[0].tris) / (want / 4.0) - 1.0).abs() < 1e-6, "{}", volume(&quarter[0].tris));
+        let quarter_of = sector(std::f64::consts::FRAC_PI_2, 300.0) * (300.0 * 300.0 - 100.0 * 100.0) * 500.0;
+        assert!((volume(&quarter[0].tris) / quarter_of - 1.0).abs() < 1e-6, "{}", volume(&quarter[0].tris));
         let half = built(json!([{"profile": [[100, 0], [300, 0], [300, 50], [100, 50]], "axis": [[0, 0], [0, 1]], "to": 180}])).unwrap();
-        let ring_of = std::f64::consts::PI * (300.0 * 300.0 - 100.0 * 100.0) * 50.0 * k;
-        assert!((volume(&half[0].tris) / (ring_of / 2.0) - 1.0).abs() < 1e-6, "{}", volume(&half[0].tris));
+        let half_of = sector(std::f64::consts::PI, 300.0) * (300.0 * 300.0 - 100.0 * 100.0) * 50.0;
+        assert!((volume(&half[0].tris) / half_of - 1.0).abs() < 1e-6, "{}", volume(&half[0].tris));
         assert!((half[0].top - half[0].bottom - 300.0).abs() < 1e-6, "turned out of its plane, 300 to one side");
         // A profile across its axis, an axis of one point, a turn of nothing or more than all the way: said.
         for (form, says) in [
@@ -4277,8 +4468,7 @@ mod tests {
     fn a_revolve_faces_out_whatever_plane_side_and_direction_it_turns() {
         // The same tube, 100 to 300 out and 500 along: drawn across each plane, to either side of its axis, the axis given
         // either way round, from any angle: one volume, turned out.
-        let k = 16.0 * (std::f64::consts::TAU / 32.0).sin();
-        let want = k * (300.0 * 300.0 - 100.0 * 100.0) * 500.0;
+        let want = sector(std::f64::consts::TAU, 300.0) * (300.0 * 300.0 - 100.0 * 100.0) * 500.0;
         let across = |a0: f64, a1: f64| json!([[a0, 0], [a1, 0], [a1, 500], [a0, 500]]);
         for (plane, profile, axis) in [
             ("xz", across(100.0, 300.0), json!([[0, 0], [0, 1]])),
@@ -4300,7 +4490,7 @@ mod tests {
         }
         // A part turn is closed by two caps, turned out. About an axis beside the origin, with neither cap in a plane through it
         // (a cap in one adds nothing to the volume, however it faces), the volume is the sector's only if both are.
-        let sector = k / 4.0 * (300.0 * 300.0 - 100.0 * 100.0) * 500.0;
+        let sector = sector(std::f64::consts::FRAC_PI_2, 300.0) * (300.0 * 300.0 - 100.0 * 100.0) * 500.0;
         for (from, to) in [(30, 120), (-120, -30)] {
             for axis in [json!([[1000, 0], [1000, 1]]), json!([[1000, 1], [1000, 0]])] {
                 let part =
@@ -4313,12 +4503,13 @@ mod tests {
 
     #[test]
     fn a_part_turn_about_an_upright_axis_shows_a_slice_in_plan_and_a_circle_makes_a_torus() {
-        let k = 16.0 * (std::f64::consts::TAU / 32.0).sin();
+        let k = 2.0 * sector(std::f64::consts::FRAC_PI_2, 300.0);
         let ring = json!([[100, 0], [300, 0], [300, 500], [100, 500]]);
         let quarter = built(json!([{"plane": "xz", "profile": ring, "axis": [[0, 0], [0, 1]], "to": 90}])).unwrap();
         let outline = &quarter[0].outline;
-        // 4 sin δ (R² − r²) where δ is a step's angle: a quarter of the ring, as the polygon makes it, counter-clockwise, from +x.
-        assert!((crate::geom::area(outline) / (k / 4.0 * (300.0 * 300.0 - 100.0 * 100.0)) - 1.0).abs() < 1e-6, "{outline:?}");
+        // (n / 2) sin δ (R² − r²) where δ is a step's angle and n the steps: a quarter of the ring, as the polygon makes it,
+        // counter-clockwise, from +x.
+        assert!((crate::geom::area(outline) / (k / 2.0 * (300.0 * 300.0 - 100.0 * 100.0)) - 1.0).abs() < 1e-6, "{outline:?}");
         assert!(outline.iter().all(|p| p.0 > -1e-6 && p.1 > -1e-6), "in the first quarter: {outline:?}");
         // The same turned the other way round the axis, the other way round the plan.
         let down = built(json!([{"plane": "xz", "profile": ring, "axis": [[0, 1], [0, 0]], "to": 90}])).unwrap();
@@ -4326,7 +4517,7 @@ mod tests {
         // A profile on the axis: a slice of a disc, its centre one of its corners.
         let wedge =
             built(json!([{"plane": "xz", "profile": [[0, 0], [300, 0], [300, 500], [0, 500]], "axis": [[0, 0], [0, 1]], "to": 90}]));
-        assert!((crate::geom::area(&wedge.unwrap()[0].outline) / (k / 4.0 * 300.0 * 300.0) - 1.0).abs() < 1e-6);
+        assert!((crate::geom::area(&wedge.unwrap()[0].outline) / (k / 2.0 * 300.0 * 300.0) - 1.0).abs() < 1e-6);
         // A circle turned about an axis beside it: a torus. Its volume is its circle's area times the way its centre goes.
         let donut = built(json!([{"plane": "xz", "circle": {"centre": [500, 100], "radius": 100}, "axis": [[0, 0], [0, 1]], "to": 360}]));
         let donut = donut.unwrap();
@@ -4339,6 +4530,106 @@ mod tests {
         )
         .unwrap();
         assert!(f.check(&|_| true).unwrap_err().contains("axis"));
+    }
+
+    /// A family of the subcategories `subs` and the line patterns `patterns` (JSON), checked.
+    fn styled(subs: Value, patterns: Value) -> Result<Family, String> {
+        let f: Family = serde_json::from_value(json!({"types": {"A": {}}, "subcategories": subs, "line_patterns": patterns}))
+            .map_err(|e| e.to_string())?;
+        f.check(&|_| true)?;
+        Ok(f)
+    }
+
+    #[test]
+    fn a_subcategory_says_its_line_weights_and_pattern_and_the_family_the_patterns() {
+        let f = styled(
+            json!([{"name": "Elevation Swing", "projection": 1, "cut": 3, "pattern": "Dash"}, {"name": "Frame"}]),
+            json!({"Dash": [{"dash": 3.0}, {"space": 1.5}], "Centre": [{"dash": 6.0}, {"space": 1.0}, "dot", {"space": 1.0}]}),
+        )
+        .unwrap();
+        assert_eq!(f.subcategories[0].projection, Some(crate::pen::Pen(1)));
+        assert_eq!((f.subcategories[0].cut, f.subcategories[0].pattern.as_deref()), (Some(crate::pen::Pen(3)), Some("Dash")));
+        assert_eq!(f.subcategories[1].projection, None, "a subcategory that says nothing says nothing");
+        // Revit's -1 is a weight it has none of (a category with no cut).
+        let none = styled(json!([{"name": "Opening", "projection": -1, "cut": -1}]), json!({})).unwrap();
+        assert_eq!((none.subcategories[0].projection, none.subcategories[0].cut), (None, None));
+        assert_eq!(f.line_patterns["Dash"].0.len(), 2);
+        assert!(f.line_patterns["Centre"].is_dash());
+        // Written and read back as they are; none of them written where none is said.
+        let back: Family = serde_json::from_value(serde_json::to_value(&f).unwrap()).unwrap();
+        assert_eq!(back, f);
+        let bare = serde_json::to_value(styled(json!([{"name": "Frame"}]), json!({})).unwrap()).unwrap();
+        assert_eq!(bare["subcategories"], json!([{"name": "Frame"}]));
+        assert!(bare.get("line_patterns").is_none());
+    }
+
+    #[test]
+    fn hostile_line_weights_and_patterns_are_refused_in_plain_words() {
+        let weights = [(json!(0), "from 1 to 16"), (json!(17), "from 1 to 16")];
+        for (pen, says) in weights {
+            let e = styled(json!([{"name": "F", "projection": pen}]), json!({})).unwrap_err();
+            assert!(e.contains(says) || e.contains("whole number"), "{e}");
+        }
+        assert!(styled(json!([{"name": "F", "cut": 2.5}]), json!({})).is_err(), "a pen is a whole number");
+        assert!(styled(json!([{"name": "F", "pattern": "two\nlines"}]), json!({})).is_err(), "a pattern's name is on one line");
+        let long = "x".repeat(MAX_TEXT + 1);
+        assert!(styled(json!([{"name": "F", "pattern": long}]), json!({})).unwrap_err().contains("line pattern"));
+        for patterns in [
+            json!({"Solid": [{"dash": 3.0}, {"space": 1.0}]}),
+            json!({"Dash": []}),
+            json!({"Dash": [{"dash": 0.0}]}),
+            json!({"Dash": [{"dash": 1000.0}, {"space": 1.0}]}),
+            json!({"Dash": [{"dash": -1.0}]}),
+        ] {
+            assert!(styled(json!([]), patterns.clone()).is_err(), "{patterns}");
+        }
+        let many: serde_json::Map<String, Value> =
+            (0..=MAX_LINE_PATTERNS).map(|i| (format!("P{i}"), json!([{"dash": 3.0}, {"space": 1.0}]))).collect();
+        assert!(styled(json!([]), Value::Object(many)).unwrap_err().contains("more than"));
+        let segments: Vec<Value> = (0..40).map(|_| json!({"dash": 1.0})).collect();
+        assert!(styled(json!([]), json!({"Long": segments})).is_err(), "more than 32 segments");
+    }
+
+    /// The pieces of a family of `forms` whose voids' cuts were measured, or not (`measured`).
+    fn built_cuts(measured: bool, forms: Value) -> Vec<Piece> {
+        let f: Family = serde_json::from_value(json!({"types": {"A": {}}, "cuts_measured": measured, "forms": forms})).unwrap();
+        f.check(&|_| true).unwrap();
+        f.pieces("A", &f.values("A", &BTreeMap::new()).unwrap()).unwrap()
+    }
+
+    /// Two 100 cubes side by side (A at x 0..100, B at x 200..300) and a void through both, listed between them.
+    fn two_cubes_and_a_void(void_cuts: Value) -> Value {
+        let cube = |x: f64, source: &str| json!({"profile": [[x, 0], [x + 100.0, 0], [x + 100.0, 100], [x, 100]], "from": 0, "to": 100, "source": source});
+        let mut void = json!({"profile": [[-50, 20], [350, 20], [350, 80], [-50, 80]], "from": -10, "to": 110, "void": true});
+        if !void_cuts.is_null() {
+            void["cuts"] = void_cuts;
+        }
+        json!([cube(0.0, "1"), void, cube(200.0, "2")])
+    }
+
+    #[test]
+    fn a_measured_void_cuts_only_what_it_names_whatever_the_order() {
+        // The void is listed between the two, and names the one after it: that one is cut (a bar of 100 x 60 x 100 out of it),
+        // the one before it is whole.
+        let pieces = built_cuts(true, two_cubes_and_a_void(json!(["2"])));
+        assert_eq!(pieces.len(), 2);
+        let (a, b) = (volume(&pieces[0].tris), volume(&pieces[1].tris));
+        assert!((a - 1e6).abs() < 1e-3, "the one it doesn't name is whole: {a}");
+        assert!((b - (1e6 - 100.0 * 60.0 * 100.0)).abs() < 1e-3, "the one it names is cut though it comes after: {b}");
+        // One that names nothing cuts nothing; one that says nothing cuts what comes before it, as ever.
+        let none = built_cuts(true, two_cubes_and_a_void(json!([])));
+        assert!(none.iter().all(|p| (volume(&p.tris) - 1e6).abs() < 1e-3));
+        let says_nothing = built_cuts(true, two_cubes_and_a_void(Value::Null));
+        assert!((volume(&says_nothing[0].tris) - (1e6 - 100.0 * 60.0 * 100.0)).abs() < 1e-3);
+        assert!((volume(&says_nothing[1].tris) - 1e6).abs() < 1e-3);
+    }
+
+    #[test]
+    fn an_unmeasured_void_cuts_every_solid_before_it() {
+        // Whatever `cuts` says (here: only the one after it), a void of a family whose lists weren't measured cuts the one before.
+        let pieces = built_cuts(false, two_cubes_and_a_void(json!(["2"])));
+        assert!((volume(&pieces[0].tris) - (1e6 - 100.0 * 60.0 * 100.0)).abs() < 1e-3, "{}", volume(&pieces[0].tris));
+        assert!((volume(&pieces[1].tris) - 1e6).abs() < 1e-3, "the one after it is whole");
     }
 
     #[test]
@@ -4361,33 +4652,52 @@ mod tests {
         let block = json!({"profile": [[-300, -300], [300, -300], [300, 300], [-300, 300]], "from": 0, "to": 200});
         let bowl = json!({"plane": "xz", "profile": [[0, 50], [200, 50], [200, 250], [0, 250]], "axis": [[0, 0], [0, 1]], "to": 360, "void": true});
         let basin = built(json!([block, bowl])).unwrap();
-        let k = 16.0 * (std::f64::consts::TAU / 32.0).sin();
+        let k = sector(std::f64::consts::TAU, 200.0);
         assert!((volume(&basin[0].tris) - (600.0 * 600.0 * 200.0 - k * 200.0 * 200.0 * 150.0)).abs() < 1.0, "{}", volume(&basin[0].tris));
     }
 
     #[test]
     fn voids_of_many_triangles_never_exhaust_the_stack() {
-        // Two revolves of 64 corners each, the one cutting the other, on a small stack: done, and quickly.
-        let ring: Vec<Value> = (0..MAX_PROFILE)
-            .map(|k| (k as f64 * std::f64::consts::TAU / MAX_PROFILE as f64).sin_cos())
-            .map(|(s, c)| json!([400.0 + 100.0 * c, 300.0 + 100.0 * s]))
-            .collect();
-        let worked = std::thread::Builder::new()
-            .stack_size(256 * 1024)
-            .spawn(move || {
-                let started = std::time::Instant::now();
-                let solid = json!({"plane": "xz", "profile": ring, "axis": [[0, 0], [0, 1]], "to": 360});
-                let void =
-                    json!({"profile": [[-1000, -1000], [1000, -1000], [1000, 0], [-1000, 0]], "from": -10, "to": 1000, "void": true});
-                (built(json!([solid, void])), started.elapsed())
-            })
-            .unwrap()
-            .join()
-            .unwrap();
-        let (pieces, took) = worked;
+        // The largest a revolve comes to that a void can cut: a profile of MAX_PROFILE corners (twice the old test's 28), turned
+        // about an axis 250 mm from it, about 7,500 triangles at the half-millimetre fineness (59 sides a turn; the 64 corners of
+        // 32 sides this test was first written for were 4,100), cut on a small stack (a wasm thread's): done, and in the time it
+        // takes in a release build. A little further out the cut's budget says it has too many faces: said, not a stack overflow.
+        const CORNERS: usize = MAX_PROFILE;
+        let revolve = |out: f64| {
+            let ring: Vec<Value> = (0..CORNERS)
+                .map(|k| (k as f64 * std::f64::consts::TAU / CORNERS as f64).sin_cos())
+                .map(|(s, c)| json!([out + 100.0 * c, 300.0 + 100.0 * s]))
+                .collect();
+            std::thread::Builder::new()
+                .stack_size(256 * 1024)
+                .spawn(move || {
+                    let started = std::time::Instant::now();
+                    let solid = json!({"plane": "xz", "profile": ring, "axis": [[0, 0], [0, 1]], "to": 360});
+                    let void =
+                        json!({"profile": [[-9000, -9000], [9000, -9000], [9000, 0], [-9000, 0]], "from": -10, "to": 1000, "void": true});
+                    (built(json!([solid, void])), started.elapsed())
+                })
+                .unwrap()
+                .join()
+                .unwrap()
+        };
+        let (pieces, took) = revolve(250.0);
         let pieces = pieces.unwrap();
-        assert!(volume(&pieces[0].tris) > 0.0 && took.as_secs_f64() < 10.0, "{took:?}: a hang, not a slow machine");
+        assert!(volume(&pieces[0].tris) > 0.0, "the revolve is left holding something");
+        assert!(pieces[0].tris.len() > 20_000, "cut, it holds more triangles than the 4,100 it was first written for");
+        // A debug build is many times slower than the release the limit is for.
+        #[cfg(not(debug_assertions))]
+        assert!(took.as_secs_f64() < 10.0, "{took:?}: a hang, not a slow machine");
+        let _ = took;
+        // Past what the budget cuts (and past the 256 sides a turn at most, at 7 m): refused, not overflowed.
+        for out in [450.0, 7000.0] {
+            let (too_many, _) = revolve(out);
+            let e = too_many.unwrap_err();
+            assert!(e.contains("too many faces") || e.contains("can't have more than"), "{out}: {e}");
+        }
+        assert_eq!(sides(std::f64::consts::TAU, 7100.0), MOST_SEGMENTS);
     }
+
     /// A one-type lighting family holding `connectors`.
     fn lamp(connectors: Value) -> Family {
         serde_json::from_value(json!({

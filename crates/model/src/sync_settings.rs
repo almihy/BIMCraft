@@ -17,7 +17,8 @@
 //!   copy. A copy takes the place of a phase it is not told of from the order it has them in, which is the room's only while
 //!   changes came one at a time: so whoever tells a copy a change of one phase tells it every phase the room holds with it
 //!   (Arqiflow's page does), and the order is then the room's own, whatever order the changes came in;
-//! - `phase_overrides/<status>`, `object_styles/<category>`, `site_figures/<name>`, `title_values/<key>`: maps of a fixed
+//! - `phase_overrides/<status>`, `object_styles/<category>`, `subcategory_styles/<category>/<subcategory>` (its one key,
+//!   its slash written `%2F`), `site_figures/<name>`, `title_values/<key>`: maps of a fixed
 //!   vocabulary, not of names a person gives: no GUID, the key is the entry's, its value the entry's JSON;
 //! - every other setting (units, language, line weights, standard, georeference…) stays one key, replaced whole.
 //!
@@ -54,7 +55,7 @@ use crate::library::{Entry, Kind, Library};
 use crate::model::Model;
 
 /// The settings that are a map of entries by name.
-const MAPS: [&str; 27] = [
+const MAPS: [&str; 28] = [
     "materials",
     "images",
     "clouds",
@@ -68,6 +69,7 @@ const MAPS: [&str; 27] = [
     "phase_overrides",
     "option_sets",
     "object_styles",
+    "subcategory_styles",
     "line_patterns",
     "line_styles",
     "fill_patterns",
@@ -84,7 +86,7 @@ const MAPS: [&str; 27] = [
     "wire_types",
 ];
 /// The maps whose keys are a fixed vocabulary (a status, a category, Arqiflow's name for a figure): no library entries.
-const FIXED: [&str; 4] = ["phase_overrides", "object_styles", "site_figures", "title_values"];
+const FIXED: [&str; 5] = ["phase_overrides", "object_styles", "subcategory_styles", "site_figures", "title_values"];
 const TYPES: &str = "types";
 const RUNS: &str = "runs";
 const PHASES: &str = "phases";
@@ -213,6 +215,7 @@ pub(crate) fn without_elements(m: &Model) -> Model {
         line_weights: m.line_weights.clone(),
         standard: m.standard,
         object_styles: m.object_styles.clone(),
+        subcategory_styles: m.subcategory_styles.clone(),
         line_patterns: m.line_patterns.clone(),
         line_styles: m.line_styles.clone(),
         fill_patterns: m.fill_patterns.clone(),

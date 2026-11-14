@@ -10,11 +10,6 @@ fn at(h: &Harness<BimApp>, label: &str) -> Pos2 {
     h.get_by_label(label).rect().center()
 }
 
-/// The middle of the widget whose name starts with `label`: the Project Browser's title names the project too.
-fn at_start(h: &Harness<BimApp>, label: &str) -> Pos2 {
-    h.get_by_label_contains(label).rect().center()
-}
-
 /// A palette's Dock menu, and an item of it.
 fn dock_by_menu(h: &mut Harness<BimApp>, palette: &str, item: &str) {
     press(h, &format!("Dock {palette}"));
@@ -84,7 +79,7 @@ fn palettes_dock_left_right_or_bottom_float_and_close_by_their_menus() {
 fn a_palette_dragged_onto_another_stacks_as_its_tab_and_to_an_edge_docks_there() {
     let mut h = app(BOX);
     // The Project Browser's title onto Properties': one stack, two tabs.
-    let (from, to) = (at_start(&h, "Project Browser ·"), at(&h, "Properties"));
+    let (from, to) = (at(&h, "Project Browser"), at(&h, "Properties"));
     drag_screen(&mut h, from, to, PointerButton::Primary);
     let stack = docking(&h).stack_of(Palette::Browser).cloned().unwrap();
     assert_eq!(stack.tabs, [Palette::Properties, Palette::Browser]);
@@ -116,7 +111,7 @@ fn a_palette_dragged_onto_another_stacks_as_its_tab_and_to_an_edge_docks_there()
     assert!(docking(&h).floats.is_empty());
     // The strips keep to the view's drawing: let go on the views' tab bar, by the left edge, it floats.
     let bar = h.state().tab_bar;
-    let from = at_start(&h, "Project Browser ·");
+    let from = at(&h, "Project Browser");
     drag_screen(&mut h, from, pos2(bar.left() + 8.0, bar.center().y), PointerButton::Primary);
     assert!(docking(&h).float_of(Palette::Browser).is_some(), "{:?}", docking(&h));
 }
@@ -359,7 +354,7 @@ fn a_palette_dropped_at_the_top_of_another_goes_above_it_in_its_own_stack() {
     assert_eq!(stacks(&h), [vec![Palette::Properties], vec![Palette::Browser]], "as they start");
     // The Project Browser's title to the top edge of Properties' header: above it, no tabs made.
     let header = h.state().drop_headers.iter().find(|(p, _, _)| *p == Palette::Properties).map(|(_, r, _)| *r).unwrap();
-    let from = at_start(&h, "Project Browser ·");
+    let from = at(&h, "Project Browser");
     drag_screen(&mut h, from, pos2(header.center().x, header.top() + 2.0), PointerButton::Primary);
     assert_eq!(stacks(&h), [vec![Palette::Browser], vec![Palette::Properties]], "the Project Browser above Properties");
 }

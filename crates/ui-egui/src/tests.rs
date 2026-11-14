@@ -1526,10 +1526,19 @@ fn a_line_weight_is_a_pen_picked_from_a_list_and_a_hairline_is_a_pixel_on_screen
     press(&mut h, "OK");
     press(&mut h, "OK");
     assert_eq!(plan_graphics(&h, 100000).categories["wall"].cut.weight, Some(Pen(0)));
-    // On screen a line is its pen's pixels at the zoom, at least one: a hairline is one at any zoom; Thin Lines makes all one.
-    use crate::canvas::on_screen;
-    assert_eq!((on_screen(2.0, 3.0, false), on_screen(0.0, 3.0, false), on_screen(0.2, 1.0, false)), (6.0, 1.0, 1.0));
-    assert_eq!(on_screen(2.0, 3.0, true), 1.0);
+    // On screen a line is its pen's pixels, at least one: a hairline is one at any zoom; Thin Lines makes all one. A drawing that
+    // says no zoom (a sheet) is as wide as it says, times how big it is shown.
+    use crate::canvas::{Place, on_screen};
+    let shown = |k: f32, zoom: f32| Place { k, zoom, ..Place::at(egui::Pos2::ZERO) };
+    assert_eq!((on_screen(2.0, shown(3.0, 0.0), false), on_screen(0.0, shown(3.0, 0.0), false)), (6.0, 1.0));
+    assert_eq!(on_screen(0.2, shown(1.0, 0.0), false), 1.0);
+    assert_eq!(on_screen(2.0, shown(3.0, 0.0), true), 1.0);
+    // A screen's drawing made at a zoom is no wider as it zooms in: its lines' width over the zoom it was made at, whatever its
+    // `k` (Revit keeps a line's width at its weight's for the view's scale).
+    assert_eq!(on_screen(8.0, shown(1.0, 4.0), false), 2.0);
+    assert_eq!(on_screen(32.0, shown(1.0, 16.0), false), 2.0, "four times as far in, as wide");
+    assert_eq!(on_screen(8.0, shown(2.5, 4.0), false), 2.0, "scaled while it is still being zoomed, as wide");
+    assert_eq!(on_screen(8.0, Place { paper: true, ..shown(2.0, 4.0) }, false), 16.0, "a sheet's are the drawing's, times its size");
 }
 
 #[test]
@@ -5484,20 +5493,25 @@ fn ph_and_do_open_phasing_and_design_options_and_so_do_the_manage_tabs_buttons()
 }
 
 #[test]
-fn a_ribbon_tab_wider_than_the_window_folds_its_last_panels_to_buttons_that_list_their_tools() {
+fn a_ribbon_tab_wider_than_the_window_draws_its_last_panels_as_small_icons_that_still_list_their_tools() {
     let mut h = app(BOX);
-    // Narrow enough that Manage folds its last panels; the fit is judged on each tool's average width, a few pixels out.
+    // Narrow enough that Manage makes its last panels small.
     h.set_size(vec2(1020.0, 800.0));
     h.run();
     let window = h.ctx.content_rect().right();
     press(&mut h, "Manage");
-    assert!(h.query_by_label("Design Options").is_none(), "the last panel is folded at {window}");
-    assert!(h.get_by_label("Design Options ▾").rect().right() <= window, "to one button, in the window");
-    assert!(h.get_by_label("Materials").rect().left() >= 0.0, "and the first panel is as it was");
-    // The folded panel lists its tools, and a tool there works as on the ribbon.
-    press(&mut h, "Design Options ▾");
-    press(&mut h, "Design Options");
-    assert!(h.query_by_label("Option set:").is_some());
+    // Settings, its fourteen tools: two high, as small icons.
+    let tool = h.get_by_label("Project Units").rect();
+    assert!(tool.height() < 30.0, "the first panel's tools are small icons at {window}: {tool:?}");
+    assert!(tool.right() <= window, "in the window");
+    assert!(h.get_by_label("Settings ▾").rect().right() <= window, "its name and arrow under it, in the window");
+    // A panel of one tool keeps its large button.
+    assert!(h.get_by_label("Design Options").rect().height() > 45.0);
+    // The panel lists its tools, and a tool there works as on the ribbon.
+    press(&mut h, "Settings ▾");
+    let under = h.get_by_label("Settings ▾").rect().bottom();
+    let row = h.query_all_by_label("Project Units").map(|n| n.rect()).find(|r| r.top() > under);
+    assert!(row.is_some(), "Project Units is in the list");
 }
 
 /// A tool that drops a list of choices down opens it from the list of a panel that has handed the tool over to its name (or folded
@@ -5539,17 +5553,21 @@ fn a_tool_with_choices_of_its_own_opens_them_from_a_panels_list() {
     assert!(!egui::Popup::is_any_open(&h.ctx), "the list and its choices close with it");
 }
 
-/// UN (Project Units) at the least a window can be: the tool is in its panel's list by then, which the shortcut opens, and the
-/// first frame of the tab, which draws every tool, doesn't take the request for a button that is gone the next.
+/// UN (Project Units) at the least a window can be: the tool is a small icon on the ribbon, or in its panel's list, which the
+/// shortcut then opens; the first frame of the tab, which draws every tool, doesn't take the request for a button that is gone the
+/// next.
 #[test]
 fn the_units_shortcut_gets_to_the_choices_in_the_smallest_window_too() {
     let mut h = app(BOX);
     h.set_size(vec2(crate::window::MIN_SIZE[0], crate::window::MIN_SIZE[1]));
     h.run();
     shortcut(&mut h, "UN");
-    assert!(egui::Popup::is_any_open(&h.ctx), "the panel's list is open");
-    let row = h.get_by_label("Project Units").rect().center();
-    click_at(&mut h, row);
+    assert!(egui::Popup::is_any_open(&h.ctx), "the choices, or the panel's list, are open");
+    // A tool on the ribbon has its choices open already; one in a list is a row to click.
+    if h.query_by_label("Feet and inches").is_none() {
+        let row = h.get_by_label("Project Units").rect().center();
+        click_at(&mut h, row);
+    }
     press(&mut h, "Feet and inches");
     assert_eq!(h.state().session.model.units, bimcraft_core::units::Units::FeetInches);
 }
@@ -6648,7 +6666,6 @@ mod lineweights;
 mod links;
 mod look;
 mod mep;
-mod minimap;
 mod navigation;
 mod notes;
 mod objectstyles;
@@ -6665,6 +6682,7 @@ mod purge;
 mod reinforce;
 mod render;
 mod revit;
+mod ribbon;
 mod rooms;
 mod section_box;
 mod selecting;
