@@ -98,6 +98,25 @@ polyhedron).
 `wall_volume_by_prisms` keeps the old figure (the prisms' plan through their height, a curved wall's plan true to its arc) for
 the tests to hold the new one to.
 
+**A piece the kernel refuses is still in the volume.** `ElementSolids::volume()` is the layers' solids and, for each open piece,
+what the piece holds by the old sums (`quantities::piece_volume`: a prism's plan through its height, a slab's through its rise, a
+box's, a mesh's by its triangles), so a wall's or floor's quantity never loses a piece (review finding 6; test
+`a_piece_the_kernel_refuses_is_still_in_the_volume`).
+
+**Measured once for a snapshot, and only where asked (review finding 3).** The model keeps its element solids with it
+(`Model::solids()`, in `derived.rs` beside the lookup: a [`SolidCache`] and each wall's gross volume, made when asked for, one set for a
+snapshot; a copy of the model, which is what a command changes, starts with none; `Model::forget_solids()` for a type, family or
+material changed in place in a model that has made some). Quantities read from it. Element JSON no longer builds a solid unless it
+is asked to: `element_json_with` (the Properties panel, the agent's element and find replies) has what is measured from the solids
+(`json::measured`: a wall's `area_m2` and `volume_m3`, a floor's, roof's and ceiling's `volume_m3`); `element_json_light` (rooms, no
+solids: schedules and `picks`) and `element_json_bare` (the status bar, type lookups, tags that read a mark, Select All Instances,
+Match Properties) leave them out. A schedule row finds them as a field asks (`Row::json_get`), so a wall schedule that shows no
+Area or Volume builds no solid. The 5-storey highrise's 165 walls and floors: JSON and a schedule without volumes 3.7 ms; with them
+305 ms the first time (the solids are built) and 9.7 ms for two more passes (every element's JSON and the schedule again); before,
+282 ms every call (the review's figure) against 5 ms for the old prism sums. Not done: the cache is not carried from one snapshot to
+the next (after an edit the first reader of a wall's volume builds it again, about 1.8 ms a wall); that is `Scene::update`'s
+`SolidCache::kept`, which needs the scene's own account of what an edit touched (hosts, joined neighbours).
+
 ### Why `volume_on_curves`, and not `Solid3::volume`
 
 A curved wall is built as straight facets (a chord a millimetre off its arc, never turning more than 5 degrees), which Manifold

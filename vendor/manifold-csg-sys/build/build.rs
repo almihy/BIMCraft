@@ -17,6 +17,47 @@ use std::{env, path::Path, process::Command};
 
 use super::{cmake_launcher_args, cmake_parallel_args, find_lib_recursive, is_apple};
 
+/// BIMCraft's patch: the cmake arguments of a build for a target that is not the machine's own. The build drives `cmake` itself
+/// (not through the `cmake` crate, which does this), so without these a macOS build for x86_64 on an arm64 runner makes arm64
+/// objects, and a Linux build for riscv64 on an x86_64 one makes x86_64 ones.
+///
+/// * Apple: `CMAKE_OSX_ARCHITECTURES` for the target's architecture, always (it is the machine's own one natively).
+/// * Linux, cross: `CMAKE_SYSTEM_NAME` and `CMAKE_SYSTEM_PROCESSOR`, and the C and C++ compilers named by `CC_<target>` and
+///   `CXX_<target>` (the target's triple with underscores, as `cc` reads them: `CXX_riscv64gc_unknown_linux_gnu`), or
+///   `TARGET_CC`, `TARGET_CXX`. cmake is not given a compiler it was not told of: set them, as the release workflow does.
+fn cross_args(target: &str, target_vendor: &str) -> Vec<String> {
+    let arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    let os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let triple = target.replace('-', "_");
+    let mut out = Vec::new();
+    if is_apple(target_vendor) {
+        let osx = match arch.as_str() {
+            "aarch64" => "arm64",
+            other => other,
+        };
+        out.push(format!("-DCMAKE_OSX_ARCHITECTURES={osx}"));
+        return out;
+    }
+    let host = env::var("HOST").unwrap_or_default();
+    if os != "linux" || host == target {
+        return out;
+    }
+    out.push("-DCMAKE_SYSTEM_NAME=Linux".to_string());
+    out.push(format!("-DCMAKE_SYSTEM_PROCESSOR={arch}"));
+    let named = |kinds: [&str; 2]| kinds.iter().find_map(|k| env::var(k).ok().filter(|v| !v.trim().is_empty()));
+    for (flag, var, generic) in [("C", "CC", "TARGET_CC"), ("CXX", "CXX", "TARGET_CXX")] {
+        println!("cargo:rerun-if-env-changed={var}_{triple}");
+        println!("cargo:rerun-if-env-changed={generic}");
+        match named([&format!("{var}_{triple}"), generic]) {
+            Some(compiler) => out.push(format!("-DCMAKE_{flag}_COMPILER={}", compiler.trim())),
+            None => println!(
+                "cargo:warning=manifold-csg-sys: cross build for {target} with no {var}_{triple} set; cmake picks the host's {var}"
+            ),
+        }
+    }
+    out
+}
+
 pub fn build(
     is_emscripten: bool,
     manifold_src: &Path,
@@ -56,6 +97,8 @@ pub fn build(
         "-DBUILD_SHARED_LIBS=OFF".to_string(),
         "-DCMAKE_POSITION_INDEPENDENT_CODE=ON".to_string(),
     ];
+
+    cmake_args.extend(cross_args(target, target_vendor));
 
     if parallel {
         cmake_args.push("-DMANIFOLD_PAR=ON".to_string());

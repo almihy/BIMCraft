@@ -125,9 +125,24 @@ after 775 s (web release), 590 s (web wasm), 1066 s (app release), 800 s (app wa
 - A **clean build always needs github.com**: `build.rs` clones `wasm-cxx-shim` v0.5.0 (`git clone --depth 1`), and cmake's
   FetchContent clones Manifold v3.5.5 and Clipper2 (2.0.1 + 12 commits); the native build clones Manifold. Tested offline: stops at
   `fatal: unable to access 'https://github.com/zmerlynn/wasm-cxx-shim.git/'`. Cargo's own `CARGO_NET_OFFLINE` does not cover this.
-- To make a clean build work offline: native, `MANIFOLD_CSG_LIB_DIR` (and `MANIFOLD_CSG_LIB_KIND=static`) pointing at a prebuilt
-  libmanifold, libmanifoldc and libClipper2; wasm, no switch exists: it would need the vendored crate patched to pass
-  `FETCHCONTENT_SOURCE_DIR_*` and a local shim.
+- To make a clean **native** build work offline, `MANIFOLD_CSG_LIB_DIR` (and `MANIFOLD_CSG_LIB_KIND`): a directory holding
+  prebuilt `manifoldc`, `manifold` and, for `static`, `Clipper2` (`libmanifoldc.a`, `libmanifold.a`, `libClipper2.a`; on MSVC
+  `manifoldc.lib`, `manifold.lib`, `Clipper2.lib`). The build script then skips the clones and cmake altogether and only
+  emits the link lines (the FFI is hand-written, so no headers are needed). `MANIFOLD_CSG_LIB_KIND` is `dylib` (the default: a
+  shared libmanifold records its own Clipper2 and libstdc++ dependencies) or `static`. To make the libraries, build Manifold
+  at the commit pinned in `vendor/manifold-csg-sys/build.rs` (`MANIFOLD_VERSION`) with cmake:
+  `-DMANIFOLD_CBIND=ON -DMANIFOLD_TEST=OFF -DMANIFOLD_PAR=OFF -DMANIFOLD_CROSS_SECTION=ON -DMANIFOLD_USE_BUILTIN_CLIPPER2=ON
+  -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_BUILD_TYPE=Release`; the three archives are in
+  `build/bindings/c`, `build/src` and `build/_deps/clipper2-build` (they are what a normal build leaves in
+  `target/<profile>/build/manifold-csg-sys-*/out/build`). Set both variables for the whole build, e.g.
+  `MANIFOLD_CSG_LIB_DIR=/opt/manifold/lib MANIFOLD_CSG_LIB_KIND=static cargo build -p bimcraft`. Wasm has no such switch: it
+  would need the vendored crate patched to pass `FETCHCONTENT_SOURCE_DIR_*` and a local shim.
+- **What a clean build clones, and the pins** (`vendor/manifold-csg-sys`, so the C++ is not at the mercy of a moved tag):
+  Manifold by **commit** `32271a1a999ce721ffaf5ab10e9746ceeb696547` (v3.5.5; `MANIFOLD_VERSION` in `build.rs`, used by the
+  native clone and passed to the shim's helper for wasm); its Clipper2 is pinned by commit inside Manifold's own
+  `cmake/manifoldDeps.cmake` (`46f639177fe418f9689e8ddb74f08a870c71f5b4`, "2.0.1 + 12 commits"), so the one pin covers it; the
+  wasm shim by commit `a156e60fcc324f6ce7b7864e39a3de770809423c` (v0.5.0; `WASM_CXX_SHIM_COMMIT` in `build/wasm.rs`, fetched by
+  SHA with `git fetch --depth 1 origin <sha>`). To move a pin, change the constant, and the comment that says which release it is.
 
 ## Linux (not built)
 
@@ -141,7 +156,26 @@ after 775 s (web release), 590 s (web wasm), 1066 s (app release), 800 s (app wa
   `WASM_CXX_SHIM_LIBCXX_HEADERS`). Neither fix 4 nor fix 5 applies on Linux, and no `CMAKE_GENERATOR` is needed.
 - A Linux native build (the fork's CI runs `cargo test --workspace` on three systems; the release job builds the desktop and CLI):
   `cmake`, `git`, a C++17 compiler (g++ or clang++) and network access, or `MANIFOLD_CSG_LIB_DIR`. No TBB, because `parallel` is off.
-  Every native build of the fork, the desktop included, now compiles Manifold once (about 1.5 minutes cold).
+  Every native build of the fork, the desktop included, now compiles Manifold once (about 1.5 minutes cold). The binaries now
+  link libstdc++ besides glibc and libgcc_s, so the deb and rpm packages depend on it (`packaging/linux/nfpm.yaml`).
+
+## The release workflow (`.github/workflows/release.yml`), reviewed; not run here
+
+- **Windows, Linux x86_64 and aarch64 (native runners):** nothing to add. The runners have cmake, git and a C++17 compiler (VS 2022,
+  g++ 11 on ubuntu-22.04), and the C++ is rebuilt on every clean checkout of the runner (about 1.5 minutes).
+- **Linux riscv64 (cross, on ubuntu-24.04): needed `g++-riscv64-linux-gnu`.** The sys crate drives `cmake` itself and used to
+  pass it nothing about the target, so a cross build made x86_64 objects. It is now (a patch in `vendor/manifold-csg-sys/build/build.rs`,
+  `cross_args`) given `CMAKE_SYSTEM_NAME`, `CMAKE_SYSTEM_PROCESSOR` and the compilers named by `CC_riscv64gc_unknown_linux_gnu` and
+  `CXX_riscv64gc_unknown_linux_gnu` (set in the job, with `g++-riscv64-linux-gnu` in its apt line). The riscv64 deb needs libstdc++6 >= 13.
+  Not verified: run the workflow once by `workflow_dispatch` before the next tag.
+- **macOS universal (arm64 runner building x86_64):** the same defect, and worse (the x86_64 slice would link arm64 objects): `cross_args`
+  now passes `CMAKE_OSX_ARCHITECTURES` (arm64 or x86_64) for every Apple target. Not verifiable here; the same dispatch run tells.
+- **Arch packages:** `arch-package.sh` only repackages the tarball (no `cargo`, no compile), so its container needs neither cmake nor git.
+- **Wasm:** neither workflow builds the engine for the browser (`ci.yml`'s only wasm build is the sample plugin, which has no solid
+  kernel); that is `scripts/engine-build.mjs` on the owner's PC, and the Arqiflow image downloads the result. If a job is ever added:
+  `clang-20 lld-20 llvm-20 libc++-20-dev libc++abi-20-dev` from apt.llvm.org, `cmake`, `ninja-build`, `git`, as above.
+- Unsupported: `wasm32-wasip1`/`wasip2` would take the native path and cannot build (the geom crate's cfg sends every wasm target but
+  `wasm32-unknown-unknown` there); no target in the workspace is one.
 
 ## Caveats to carry into step 1
 
@@ -151,8 +185,8 @@ after 775 s (web release), 590 s (web wasm), 1066 s (app release), 800 s (app wa
   engine that is the trap the page already handles by reloading. Manifold itself returns status codes (`from_meshgl64` gives
   `Result`) instead of throwing, which step 1's "refused, with the reason" relies on; not exercised in this trial.
 - The wasm route is the crate's own `unstable-wasm-uu`, labelled provisional; the pins are the crate's (Manifold v3.5.5 from the
-  host pin, wasm-cxx-shim v0.5.0, tested by upstream against Manifold v3.5.0). The C++ sources are cloned by tag at build time,
-  so they are pinned by tag only, not by Cargo.lock.
+  host pin, wasm-cxx-shim v0.5.0, tested by upstream against Manifold v3.5.0). The C++ sources are cloned at build time, outside
+  Cargo.lock, so they are pinned by commit in the vendored crate (see Offline).
 - `unsafe_code = "forbid"` and the clippy lints hold: only the dependency has unsafe code; `solid_trial` is safe Rust.
 - The first wasm build of a fresh clone has the network and the LLVM set-up above as prerequisites; `engine-build.mjs` itself
   needs no change, only its environment.

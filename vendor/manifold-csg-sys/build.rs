@@ -31,7 +31,9 @@ use std::sync::OnceLock;
 /// comment, and declared only once. `flake.nix` and `scripts/pins.py` read
 /// the pin by matching that exact line and fail on anything else. The
 /// nix-offline CI lane fails if they disagree.
-pub(crate) const MANIFOLD_VERSION: &str = "v3.5.5";
+/// BIMCraft's patch: pinned by commit (v3.5.5 is 32271a1a999c...), so the C++ the engine is built from cannot change under a
+/// moved tag. Manifold's own CMake pins its Clipper2 by commit (46f639177fe4..., "2.0.1 + 12 commits"), so that is pinned too.
+pub(crate) const MANIFOLD_VERSION: &str = "32271a1a999ce721ffaf5ab10e9746ceeb696547";
 
 /// `--parallel <N>` for `cmake --build`: `CMAKE_BUILD_PARALLEL_LEVEL` if set,
 /// to throttle only the C++ build, otherwise cargo's `NUM_JOBS`.
