@@ -69,7 +69,12 @@ pub const CEILING_HEIGHT: f64 = 2600.0;
 pub const MAX_SLOPE: f64 = 75.0;
 /// The closest a floor's contours may be drawn, mm: a site's are a metre or half a metre apart.
 pub const MIN_CONTOURS: f64 = 50.0;
-/// The version of the project file this build writes, and the newest it reads. 24: a family from Revit stays parametric:
+/// The version of the project file this build writes, and the newest it reads. 25: a project or a family says how it is drawn in
+/// line weights, colours and patterns: the project's `subcategory_styles` (what each family subcategory draws in), a family's
+/// `line_patterns`, a subcategory's `projection`, `cut` and `pattern` (Revit's Object Styles of a family's subcategories), and
+/// whether a family's void cuts were measured (`cuts_measured`). A build that reads up to 24 refuses each as a field it doesn't
+/// know, so a project is written as 25 only when it holds one ([`Model::written_format`]); nothing in a file of 24 changes and it
+/// takes no step. 24: a family from Revit stays parametric:
 /// it may hold references (`references`, read by formulas as `ref(Name)`), dimensions that place them (`dimensions`), nested
 /// parts (`nested`), a type catalog, forms that are blends (`top`), sweeps (`path`, `section`), extrusions with holes and
 /// true arcs (`arcs`), Revit's own result kept beside its definition (`snapshot` forms and symbols, drawn only in a type
@@ -146,8 +151,14 @@ pub const MIN_CONTOURS: f64 = 50.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 24;
-/// The format a project is written in when its families need nothing of [`FORMAT`]'s (a parametric family from Revit) but some
+pub const FORMAT: u32 = 25;
+/// [`FORMAT`], by what it brought: line weights, colours and patterns of family subcategories, and measured void cuts.
+pub const STYLES_FORMAT: u32 = FORMAT;
+/// The format a project is written in when it needs nothing of [`STYLES_FORMAT`]'s but a family from Revit stays parametric
+/// (references, dimensions, nested parts, a catalog, blends, sweeps, holes, arcs, Revit's result kept beside it), which a build
+/// that reads up to 23 would misread ([`Model::written_format`]).
+pub const PARAMETRIC_FORMAT: u32 = 24;
+/// The format a project is written in when its families need nothing of [`PARAMETRIC_FORMAT`]'s but some
 /// have per-type forms, elevation symbols, traced outlines, a cut or text parameters, which a build that reads up to 22
 /// would misread ([`Model::written_format`]).
 pub const TYPES_FORMAT: u32 = 23;

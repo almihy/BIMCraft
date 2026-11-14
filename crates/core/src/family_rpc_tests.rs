@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use crate::engine::Session;
 use crate::family::check::RPC_3D;
-use crate::model::FORMAT;
+use crate::model::PARAMETRIC_FORMAT;
 
 fn run(s: &mut Session, c: &str, p: Value) -> Value {
     s.execute(c, &p).unwrap_or_else(|e| panic!("{c} {p}: {e}"))
@@ -98,7 +98,7 @@ fn an_rpc_family_is_written_and_read_back_as_it_was() {
     load(&mut s, true);
     let json = s.model.to_json().unwrap();
     let v: Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(v["format"], json!(FORMAT));
+    assert_eq!(v["format"], json!(PARAMETRIC_FORMAT));
     assert_eq!(v["families"]["Sample Tree"]["rpc"], json!(true));
     let (m, left_out) = crate::model::Model::read(&json).unwrap();
     assert!(left_out.is_empty(), "{left_out:?}");

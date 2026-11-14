@@ -266,6 +266,9 @@ fn a_project_using_the_new_fields_is_written_as_23_and_one_without_as_before() {
     );
     assert_eq!(format(&s), json!(PREVIOUS_FORMAT));
     let door = door(&mut s, "900 x 2100");
+    // The sample's subcategories carry colours, which the project draws them in: a style an older build refuses.
+    assert_eq!(format(&s), json!(crate::model::STYLES_FORMAT));
+    s.model_mut().subcategory_styles.clear();
     assert_eq!(format(&s), json!(FORMAT));
     assert_eq!(FORMAT, 23, "a family from Revit that is no more than its result per type");
     // Read back, it is as it was.
@@ -285,8 +288,8 @@ fn a_project_using_the_new_fields_is_written_as_23_and_one_without_as_before() {
 #[test]
 fn a_file_of_a_family_format_keeps_a_templates_imported_categories_as_it_was() {
     use crate::graphics::Group;
-    use crate::model::{FORMAT, Model, PDF_FORMAT, TYPES_FORMAT};
-    assert_eq!((PDF_FORMAT, TYPES_FORMAT, FORMAT), (21, 23, 24));
+    use crate::model::{FORMAT, Model, PARAMETRIC_FORMAT, PDF_FORMAT, TYPES_FORMAT};
+    assert_eq!((PDF_FORMAT, TYPES_FORMAT, PARAMETRIC_FORMAT, FORMAT), (21, 23, 24, 25));
     let mut s = Session::new();
     door(&mut s, "900 x 2100");
     let level = s.model.guid(s.model.levels()[0].0).to_string();
@@ -297,6 +300,8 @@ fn a_file_of_a_family_format_keeps_a_templates_imported_categories_as_it_was() {
     assert_eq!(wanted.len() + 1, all.len(), "{all:?}");
     run(&mut s, "template", json!({"name": "No Imports", "controls": wanted}));
     assert!(!s.model.view_templates["No Imports"].controls.contains(&Group::Imports));
+    // (Without the styles the project drew the sample's subcategory colours in, which are a file of 25's.)
+    s.model_mut().subcategory_styles.clear();
     let text = s.model.to_json().unwrap();
     assert_eq!(serde_json::from_str::<Value>(&text).unwrap()["format"], json!(TYPES_FORMAT));
     let (m, left_out) = Model::read(&text).unwrap();

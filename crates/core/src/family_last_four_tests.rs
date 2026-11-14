@@ -121,7 +121,7 @@ fn a_shared_trim_below_the_cut_is_drawn_in_a_windows_plan() {
 }
 
 #[test]
-fn a_family_saying_its_line_weights_or_patterns_is_written_as_23_and_read_back() {
+fn a_family_saying_its_line_weights_or_patterns_is_written_as_25_and_read_back() {
     let family = |extra: Value| {
         let mut f = json!({"name": "Sample Block", "category": "furniture", "types": {"A": {}},
             "forms": [{"profile": [[0, 0], [100, 0], [100, 100], [0, 100]], "from": 0, "to": 100}], "subcategories": [{"name": "Edge"}]});
@@ -141,12 +141,12 @@ fn a_family_saying_its_line_weights_or_patterns_is_written_as_23_and_read_back()
         v["format"].as_u64().unwrap_or_default()
     };
     let plain = written(family(json!({})));
-    assert!(plain < u64::from(crate::model::TYPES_FORMAT), "no line weights: {plain}");
+    assert!(plain < u64::from(crate::model::STYLES_FORMAT), "no line weights: {plain}");
     let weighted = written(family(json!({"subcategories": [{"name": "Edge", "projection": 2}]})));
-    assert_eq!(weighted, u64::from(crate::model::TYPES_FORMAT));
+    assert_eq!(weighted, u64::from(crate::model::STYLES_FORMAT));
     let patterned = written(family(json!({"subcategories": [{"name": "Edge", "pattern": "Sample Dash"}],
         "line_patterns": {"Sample Dash": [{"dash": 3.0}, {"space": 1.5}]}})));
-    assert_eq!(patterned, u64::from(crate::model::TYPES_FORMAT));
+    assert_eq!(patterned, u64::from(crate::model::STYLES_FORMAT));
 }
 
 #[test]
@@ -163,4 +163,44 @@ fn a_hostile_subcategory_weight_is_refused_by_the_family_command() {
         assert!(e.contains("pen") || e.contains("line weight") || e.contains("whole number"), "{e}");
     }
     assert!(!s.model.families.contains_key("Sample Block") && s.model.subcategory_styles.is_empty());
+}
+
+/// What a build that reads up to 24 refuses as a field it doesn't know (the project's `subcategory_styles`, a family's
+/// `cuts_measured` and `line_patterns`, a subcategory's pens and pattern) is written as 25, each alone, and the file reads back.
+#[test]
+fn each_new_field_alone_is_written_as_25_and_a_subcategory_style_outlives_its_family() {
+    use crate::model::{Model, PREVIOUS_FORMAT, STYLES_FORMAT};
+    assert_eq!(STYLES_FORMAT, 25);
+    let block = |extra: Value| {
+        let mut f = json!({"name": "Sample Block", "category": "furniture", "types": {"A": {}},
+            "forms": [{"profile": [[0, 0], [100, 0], [100, 100], [0, 100]], "from": 0, "to": 100}]});
+        for (k, v) in extra.as_object().into_iter().flatten() {
+            f[k] = v.clone();
+        }
+        f
+    };
+    let format = |s: &Session| {
+        let json = s.model.to_json().unwrap();
+        let (m, left_out) = Model::read(&json).unwrap();
+        assert!(left_out.is_empty(), "{left_out:?}");
+        assert_eq!(m.subcategory_styles, s.model.subcategory_styles);
+        serde_json::from_str::<Value>(&json).unwrap()["format"].as_u64().unwrap_or_default()
+    };
+    let only = |extra: Value| {
+        let mut s = Session::new();
+        run(&mut s, "family", block(extra));
+        (format(&s), s)
+    };
+    assert_eq!(only(json!({})).0, u64::from(PREVIOUS_FORMAT), "the same family with none of them");
+    // A subcategory that has only a colour: what the project's Object Styles take.
+    let (f, mut s) = only(json!({"subcategories": [{"name": "Edge", "color": [200, 0, 0]}]}));
+    assert_eq!((f, s.model.subcategory_styles.len()), (25, 1), "a colour the project draws it in");
+    // The family deleted, what the project drew it in stays, and so does the format.
+    run(&mut s, "family", json!({"name": "Sample Block", "delete": true}));
+    assert!(!s.model.families.contains_key("Sample Block") && s.model.subcategory_styles.len() == 1);
+    assert_eq!(format(&s), 25, "a style outlives its family");
+    // A family's line patterns, its void cuts' having been measured, and a subcategory's pen, each alone.
+    assert_eq!(only(json!({"line_patterns": {"Sample Dash": [{"dash": 3.0}, {"space": 1.5}]}})).0, 25);
+    assert_eq!(only(json!({"cuts_measured": true})).0, 25);
+    assert_eq!(only(json!({"subcategories": [{"name": "Edge", "cut": 3}]})).0, 25);
 }

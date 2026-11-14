@@ -271,9 +271,10 @@ fn a_door_family_form_saying_nothing_is_drawn_in_a_coarse_plan_and_in_3d_as_revi
 }
 
 #[test]
-fn a_project_is_written_as_22_for_a_component_whose_form_says_its_views_23_for_per_type_forms_and_24_for_a_parametric_family() {
-    use crate::model::{FORMAT, LEAF_FORMAT, PREVIOUS_FORMAT, TYPES_FORMAT};
-    assert_eq!((LEAF_FORMAT, TYPES_FORMAT, FORMAT), (22, 23, 24));
+fn a_project_is_written_as_22_for_a_component_whose_form_says_its_views_23_for_per_type_forms_and_24_for_a_parametric_family_25_for_styles()
+{
+    use crate::model::{FORMAT, LEAF_FORMAT, PARAMETRIC_FORMAT, PREVIOUS_FORMAT, TYPES_FORMAT};
+    assert_eq!((LEAF_FORMAT, TYPES_FORMAT, PARAMETRIC_FORMAT, FORMAT), (22, 23, 24, 25));
     let mut s = Session::new();
     let format = |s: &Session| serde_json::from_str::<Value>(&s.model.to_json().unwrap()).unwrap()["format"].clone();
     // A family whose form says which views draw it, placed nowhere: nothing a build of 21 would misread is drawn.
@@ -295,7 +296,7 @@ fn a_project_is_written_as_22_for_a_component_whose_form_says_its_views_23_for_p
     assert_eq!(format(&s), json!(TYPES_FORMAT));
     // A family that stays parametric is 24, over both.
     run(&mut s, "family", json!({"name": "Plinth", "references": [{"name": "Base", "axis": "z", "at": 0}]}));
-    assert_eq!(format(&s), json!(FORMAT));
+    assert_eq!(format(&s), json!(PARAMETRIC_FORMAT));
     run(&mut s, "delete", json!({"ids": [c]}));
-    assert_eq!(format(&s), json!(FORMAT), "parametric whether or not it is placed");
+    assert_eq!(format(&s), json!(PARAMETRIC_FORMAT), "parametric whether or not it is placed");
 }

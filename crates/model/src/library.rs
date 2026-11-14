@@ -1690,10 +1690,12 @@ impl Model {
         serde_json::to_string_pretty(&m).map_err(|e| e.to_string())
     }
 
-    /// The format its file is written in: the oldest that holds all it has, the newest need first. [`crate::model::FORMAT`]
-    /// when a family from Revit stays parametric (references, dimensions, nested parts, a catalog, blends, sweeps, holes, arcs,
-    /// an arc that follows its ends, a form's `source` and a void's `cuts` (and whether they were measured), Revit's result kept beside it, its check); [`crate::model::TYPES_FORMAT`] when a family has forms or symbols of some of
-    /// its types only, elevation symbols, a traced outline, a `cut`, a text parameter, line patterns or a subcategory's line weights or pattern; [`crate::model::LEAF_FORMAT`] when it
+    /// The format its file is written in: the oldest that holds all it has, the newest need first. [`crate::model::STYLES_FORMAT`]
+    /// when the project has subcategory styles, or a family has line patterns, whether its void cuts were measured, or a
+    /// subcategory's line weights or pattern; [`crate::model::PARAMETRIC_FORMAT`] when a family from Revit stays parametric
+    /// (references, dimensions, nested parts, a catalog, blends, sweeps, holes, arcs, an arc that follows its ends, a form's
+    /// `source` and a void's `cuts`, Revit's result kept beside it, its check); [`crate::model::TYPES_FORMAT`] when a family has
+    /// forms or symbols of some of its types only, elevation symbols, a traced outline, a `cut` or a text parameter; [`crate::model::LEAF_FORMAT`] when it
     /// places a door, a window or a component of a family whose forms or symbols say which views or detail levels draw them
     /// (`show`), which a file of 21 would leave out, drawing a door's leaf shut in the wall again;
     /// [`crate::model::PDF_FORMAT`] when a page of a PDF it holds is drawn from its lines, which a file of 20 would draw as its
@@ -1703,12 +1705,21 @@ impl Model {
     /// an older build opens it.
     pub fn written_format(&self) -> u32 {
         use crate::model::Element;
+        // What a build that reads up to 24 refuses as a field it doesn't know (it holds no such fields).
+        let styled = !self.subcategory_styles.is_empty()
+            || self.families.values().any(|f| {
+                f.cuts_measured
+                    || !f.line_patterns.is_empty()
+                    || f.subcategories.iter().any(|s| s.projection.is_some() || s.cut.is_some() || s.pattern.is_some())
+            });
+        if styled {
+            return crate::model::STYLES_FORMAT;
+        }
         let parametric = self.families.values().any(|f| {
             !f.references.is_empty()
                 || !f.dimensions.is_empty()
                 || !f.nested.is_empty()
                 || f.catalog.is_some()
-                || f.cuts_measured
                 || !f.check.is_empty()
                 || f.editable.is_some()
                 || f.forms.iter().any(|x| {
@@ -1723,15 +1734,13 @@ impl Model {
                 || f.symbols.iter().any(|y| y.snapshot || y.arc.as_ref().is_some_and(crate::family::Curve::follows_ends))
         });
         if parametric {
-            return crate::model::FORMAT;
+            return crate::model::PARAMETRIC_FORMAT;
         }
         let families = self.families.values().any(|f| {
             f.cut.is_some()
                 || f.parameters.iter().any(|p| p.kind == crate::family::Kind::Text)
                 || f.forms.iter().any(|x| !x.types.is_empty() || !x.outline.is_empty())
                 || f.symbols.iter().any(|y| !y.types.is_empty() || y.view != crate::family::SymbolView::Plan)
-                || !f.line_patterns.is_empty()
-                || f.subcategories.iter().any(|s| s.projection.is_some() || s.cut.is_some() || s.pattern.is_some())
         });
         if families {
             return crate::model::TYPES_FORMAT;
