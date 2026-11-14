@@ -2318,7 +2318,12 @@ pub fn section_cut_regions_with(m: &Model, w: &SectionWork, id: impl Key) -> Opt
     let look = Look::of(m, id);
     let span = span(m, w, v, &look, &|| false)?;
     let cut = cut_model(m, w, v, &look, span, &|| false)?;
-    Some(cut.regions.into_iter().flat_map(|(id, by_layer)| by_layer.into_iter().flat_map(move |(k, rs)| rs.into_iter().map(move |r| (id, k, r)))).collect())
+    Some(
+        cut.regions
+            .into_iter()
+            .flat_map(|(id, by_layer)| by_layer.into_iter().flat_map(move |(k, rs)| rs.into_iter().map(move |r| (id, k, r))))
+            .collect(),
+    )
 }
 
 fn section_cut_rings_in(m: &Model, w: &SectionWork, v: &Section, look: &Look) -> Option<CutRings> {
@@ -2394,7 +2399,8 @@ fn cut_model(
                 return None;
             }
             // Only the forms of a family the section draws are cut (its detail level, the way it looks at the family).
-            let cut = section_cut::cut_element(&work.solid_cache.get(m, *id), &frame, origin, last - first, first, &|vis| look.draws_vis(vis));
+            let cut =
+                section_cut::cut_element(&work.solid_cache.get(m, *id), &frame, origin, last - first, first, &|vis| look.draws_vis(vis));
             if cut.is_empty() {
                 continue;
             }

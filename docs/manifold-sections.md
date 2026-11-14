@@ -76,7 +76,7 @@ the same `section_base_cancellable`, so they change with it, and with nothing el
   switches, data and voice outlets, lighting, patch panels, racks, air terminals, earthing and inspection boxes are never cut: they
   stay in the picture beyond the line, as before the solids. In the sample house that is the sofa, desk, chairs, table and bed (in
   projection, as `house-sec2` to `house-sec6` show), and the base cabinet (casework), the family doors and the windows are cut:
-  5 more elements for the lines tried than the old cut, all of them doors and the cabinet. (Revit's non-cuttable list also holds
+  5 more elements for the lines tried than the old cut, which are family doors and windows and the cabinet. (Revit's non-cuttable list also holds
   Entourage, Planting, Parking and Mechanical Equipment; the engine has no component category for them.) The old per-piece `cut`
   flag of a mesh (lofted masses, which are outlined, not filled, here) is not what decides a component any more.
 * **A form is cut only where it is drawn.** A form that says it is drawn at Fine only is not cut in a Coarse or Medium section, one
@@ -224,8 +224,8 @@ was cut is missing but the sliver above.
   and a solid made by an operation has its own.
 * What was cut before is cut still: for seven lines through the sample house and three through the two-storey highrise, every
   element that `Solid::cuts` cut is cut now, with the area it had (no element differs by more than a millionth), and 5 and 16
-  elements are cut that were not (5 in the house, over its seven lines: the family doors and the base cabinet; the highrise's are its family doors; the
-  furniture is in projection). And every element a layer solid of which the plane crosses (its
+  elements are cut that were not (5 in the house, over its seven lines: family doors and windows and the base cabinet; the highrise's are its family doors and
+  windows; the furniture is in projection). And every element a layer solid of which the plane crosses (its
   box a millimetre either side) has a cut: in the sample house 7, 8, 12, 9, 12, 10 and 11 elements cross its seven lines and as
   many are cut; in the highrise 42, 34 and 34 cross and 50, 42 and 34 are cut (the rest are open pieces and runs).
 * `family_last_four_tests`: a family's `cut_in_views` alone writes the project as format 25 and reads back; `revit.rs`: a definition's

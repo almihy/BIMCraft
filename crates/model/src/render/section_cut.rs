@@ -87,7 +87,8 @@ pub(crate) fn cut_element(
     }
     if shift != 0.0 {
         let rings = out.layers.iter_mut().flat_map(|(_, r)| r.iter_mut()).chain(out.open.iter_mut());
-        let loops = out.regions.iter_mut().flat_map(|(_, rs)| rs.iter_mut()).flat_map(|r| std::iter::once(&mut r.outer).chain(r.holes.iter_mut()));
+        let loops =
+            out.regions.iter_mut().flat_map(|(_, rs)| rs.iter_mut()).flat_map(|r| std::iter::once(&mut r.outer).chain(r.holes.iter_mut()));
         for ring in rings.chain(loops) {
             for q in ring.iter_mut() {
                 q.0 += shift;

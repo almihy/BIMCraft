@@ -75,7 +75,9 @@ fn main() -> Result<(), String> {
         );
         // After an edit of one wall the line crosses: the section on a fresh work (every solid again) against one that takes over
         // what the edit left as it was (`SectionWork::inherit_solids`).
-        let Some(wall) = rings.iter().map(|(id, ..)| *id).find(|id| matches!(m.elements.get(*id), Some(Element::Wall(_)))) else { continue };
+        let Some(wall) = rings.iter().map(|(id, ..)| *id).find(|id| matches!(m.elements.get(*id), Some(Element::Wall(_)))) else {
+            continue;
+        };
         s.execute("move", &json!({"ids": [wall], "by": [50, 0]}))?;
         let after = s.model.clone();
         let started = Instant::now();

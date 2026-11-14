@@ -599,9 +599,7 @@ fn is_cut(s: &Session, sec: Id, c: Id) -> bool {
 #[test]
 fn a_section_cuts_only_the_forms_it_draws_by_detail_level_and_direction() {
     let mut s = Session::new();
-    let boxed = |at: f64, show: serde_json::Value| {
-        json!({"profile": [[at, at], [at + 600.0, at], [at + 600.0, at + 600.0], [at, at + 600.0]], "from": 0, "to": 800, "show": show})
-    };
+    let boxed = |at: f64, show: serde_json::Value| json!({"profile": [[at, at], [at + 600.0, at], [at + 600.0, at + 600.0], [at, at + 600.0]], "from": 0, "to": 800, "show": show});
     run(
         &mut s,
         "family",

@@ -94,9 +94,7 @@ impl ElementSolids {
                 None => out.push((s.layer, vec![&s.solid])),
             }
         }
-        out.into_iter()
-            .map(|(k, v)| (k, if let [one] = v.as_slice() { (*one).clone() } else { Solid3::union_all(v) }))
-            .collect()
+        out.into_iter().map(|(k, v)| (k, if let [one] = v.as_slice() { (*one).clone() } else { Solid3::union_all(v) })).collect()
     }
 }
 
