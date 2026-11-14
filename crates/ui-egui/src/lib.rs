@@ -50,7 +50,6 @@ mod linestyles;
 mod lineweights;
 mod links;
 mod mep;
-mod minimap;
 mod notes;
 mod objectstyles;
 mod orbit;
@@ -595,6 +594,8 @@ pub struct BimApp {
     /// while folded); where its tabs end.
     ribbon_min: bool,
     ribbon_peek: bool,
+    /// The folded ribbon's tools shown under a tab the pointer is on, until it has left both the tab and them.
+    ribbon_hover: ribbon::Hover,
     /// What High Contrast Point Clouds fills a view's scans with: the user's (Settings > Graphics), crimson at first.
     scan_contrast: [u8; 3],
     background_grid_dialog: Option<background_grid::GridDialog>,
@@ -838,7 +839,6 @@ pub struct BimApp {
     /// The graphics card the 3D view may be drawn on (Settings > Performance).
     card: gpu::Card,
     cut: section::Cut,
-    minimap: minimap::Minimap,
     paper: paper::Papers,
     /// The model as last opened or saved: any other is unsaved.
     saved: Arc<Model>,
@@ -1092,8 +1092,8 @@ fn plugin_button(ui: &mut Ui, label: &str, tip: &str) -> Response {
 /// A plugin's button in its panel's list: its row is text alone, as its ribbon button has no icon.
 #[cfg(feature = "plugins")]
 fn plugin_row(ui: &mut Ui, label: &str, tip: &str) -> Response {
-    let width = ui.available_width().max(200.0);
-    let (rect, r) = ui.allocate_exact_size(vec2(width, 30.0), Sense::click());
+    let own = ui.painter().layout_no_wrap(label.to_string(), FontId::proportional(12.5), pal().text).size().x + 24.0;
+    let (rect, r) = ui.allocate_exact_size(vec2(ribbon::list_width(own), 28.0), Sense::click());
     let enabled = ui.is_enabled();
     r.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, false, label));
     let (fill, ink) = match r.hovered() && enabled {
@@ -1120,6 +1120,10 @@ fn ribbon_button(ui: &mut Ui, icon: Icon, label: &str, active: bool, tip: &str, 
         return r;
     }
     let (label, tip) = if translate { (t(label).to_string(), t(tip)) } else { (label.to_string(), t(tip)) };
+    // A panel too narrow for its large buttons draws them as small icons, two high.
+    if ribbon::small() {
+        return small_icon(ui, icon, &label, active, tip, name);
+    }
     let font = FontId::proportional(12.0);
     let wide = |s: &str| ui.painter().layout_no_wrap(s.to_string(), font.clone(), pal().text).size().x;
     let one = wide(&label);
@@ -1168,8 +1172,16 @@ fn small_button(ui: &mut Ui, icon: Icon, label: &str, active: bool, tip: &str) -
     if let Some(r) = ribbon::handed_over(ui) {
         return r;
     }
-    let (label, tip) = (t(label), t(tip));
-    let (rect, r) = ui.allocate_exact_size(vec2(30.0, 25.0), Sense::click());
+    small_icon(ui, icon, t(label), active, t(tip), name)
+}
+
+/// A small ribbon button's look: `label` and `tip` as they are said (translated), `name` the tool's English name.
+fn small_icon(ui: &mut Ui, icon: Icon, label: &str, active: bool, tip: &str, name: &str) -> Response {
+    // In a panel's two rows of small icons the tool has its place; else the layout gives it one.
+    let (rect, r) = match ribbon::slot() {
+        Some(rect) => (rect, ui.interact(rect, ui.id().with(("small-tool", name)), Sense::click())),
+        None => ui.allocate_exact_size(ribbon::SMALL_TOOL, Sense::click()),
+    };
     let enabled = ui.is_enabled();
     r.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, active, label));
     let (fill, stroke, ink) = match (active, r.hovered() && enabled) {
@@ -1197,9 +1209,10 @@ fn list_row_in(ui: &mut Ui, icon: Icon, label: &str, active: bool, tip: &str, tr
     }
     let name = label;
     let (label, tip) = if translate { (t(label).to_string(), t(tip)) } else { (label.to_string(), t(tip)) };
-    // A panel's list is at least a menu wide.
-    let width = ui.available_width().max(200.0);
-    let (rect, r) = ui.allocate_exact_size(vec2(width, 30.0), Sense::click());
+    // A panel's list is as wide as its widest row: an icon, its name and room around them.
+    let font = FontId::proportional(13.0);
+    let own = ui.painter().layout_no_wrap(label.clone(), font, pal().text).size().x + 38.0 + 14.0;
+    let (rect, r) = ui.allocate_exact_size(vec2(ribbon::list_width(own), 28.0), Sense::click());
     let enabled = ui.is_enabled();
     r.widget_info(|| WidgetInfo::selected(WidgetType::Button, enabled, active, &label));
     let fill = match (active, r.hovered() && enabled) {
@@ -1268,6 +1281,9 @@ pub(crate) fn stacked_button(ui: &mut Ui, icon: Icon, label: &str, active: bool,
         return r;
     }
     let (label, tip) = (t(label), t(tip));
+    if ribbon::small() {
+        return small_icon(ui, icon, label, active, tip, name);
+    }
     let font = FontId::proportional(12.0);
     let width = ui.painter().layout_no_wrap(label.to_string(), font.clone(), pal().text).size().x + 28.0;
     let (rect, r) = ui.allocate_exact_size(vec2(width, 16.0), Sense::click());
@@ -1414,6 +1430,7 @@ impl BimApp {
             palette_filter: None,
             palette_json: RefCell::new(None),
             ribbon_peek: false,
+            ribbon_hover: ribbon::Hover::default(),
             scan_contrast: footer::HIGH_CONTRAST,
             background_grid_dialog: None,
             grid_snapping: false,
@@ -1549,7 +1566,6 @@ impl BimApp {
             active_3d: None,
             card: gpu::Card::default(),
             cut: section::Cut::default(),
-            minimap: minimap::Minimap::default(),
             paper: paper::Papers::default(),
             edit: None,
             new_level: (String::new(), String::new()),
@@ -1950,7 +1966,7 @@ impl BimApp {
         });
         self.options_bar(&ctx);
         self.edge_palette(&ctx);
-        if self.ribbon_min && self.ribbon_peek {
+        if self.ribbon_min && (self.ribbon_peek || self.ribbon_hover.tab.is_some()) {
             self.ribbon_peek(&ctx);
         }
         self.palette_windows(&ctx);
@@ -2939,7 +2955,7 @@ impl BimApp {
     fn shape_tools(&mut self, ui: &mut egui::Ui, id: Id) {
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
-            ui.horizontal(|ui| {
+            ribbon::row(ui, |ui| {
                 let tip =
                     msg!("Modify Sub Elements: select a point, a corner or an edge of the top, then type its height on the Options Bar or its label");
                 let active = self.tool == Tool::ModifySubElements;
@@ -2957,7 +2973,7 @@ impl BimApp {
                     self.shape_convert_lines();
                 }
             });
-            ui.horizontal(|ui| {
+            ribbon::row(ui, |ui| {
                 let tip = msg!("Add Split Line: click two points; the top folds along the line between them");
                 let active = matches!(self.tool, Tool::AddSplitLine(_));
                 if small_button(ui, Icon::AddSplitLine, "Add Split Line", active, tip).clicked() {
@@ -3098,7 +3114,7 @@ impl BimApp {
             return;
         }
         self.typed.clear();
-        self.ribbon_peek = false;
+        self.put_ribbon_away();
         // A snap override waiting for its point goes first, leaving what's being drawn.
         if self.snap_once.take().is_some() {
             return;
@@ -3749,6 +3765,9 @@ impl BimApp {
     }
 
     fn ribbon(&mut self, ui: &mut Ui) {
+        self.ribbon_hover.on_tab = false;
+        // The tab lit is the one whose tools are shown: a hovered one's, when the pointer is on it.
+        let shown = self.ribbon_hover.tab.filter(|_| self.ribbon_min && !self.ribbon_peek).unwrap_or(self.tab);
         Frame::new().inner_margin(Margin::symmetric(6, 5)).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
@@ -3770,7 +3789,7 @@ impl BimApp {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 2.0;
                             for (tab, label) in TABS {
-                                let r = tab_button(ui, label, self.tab == tab, false);
+                                let r = tab_button(ui, label, shown == tab, false);
                                 if changed && self.tab == tab {
                                     r.scroll_to_me(None);
                                 }
@@ -3780,14 +3799,14 @@ impl BimApp {
                             #[cfg(feature = "plugins")]
                             for (i, label) in plugin_tabs.iter().enumerate() {
                                 let tab = Tab::Plugin(i);
-                                let r = tab_button(ui, label, self.tab == tab, false);
+                                let r = tab_button(ui, label, shown == tab, false);
                                 if changed && self.tab == tab {
                                     r.scroll_to_me(None);
                                 }
                                 self.ribbon_tab(&r, tab);
                             }
                             if let Some(name) = self.context() {
-                                let r = tab_button(ui, &name, self.tab == Tab::Context, true);
+                                let r = tab_button(ui, &name, shown == Tab::Context, true);
                                 if changed && self.tab == Tab::Context {
                                     r.scroll_to_me(None);
                                 }
@@ -3811,47 +3830,104 @@ impl BimApp {
                 });
             });
         });
+        // The pointer off the tabs, a tab whose tools were put away shows them again when it comes back.
+        if !self.ribbon_hover.on_tab {
+            self.ribbon_hover.blocked = false;
+        }
         let base = ui.min_rect();
         if !self.ribbon_min {
             ui.painter().hline(base.x_range(), base.bottom(), Stroke::new(1.0, pal().border));
         }
         self.ribbon_bottom = ui.min_rect().left_bottom();
         if !self.ribbon_min {
-            self.ribbon_panels(ui);
+            self.ribbon_panels(ui, None);
         }
     }
 
-    /// A ribbon tab's clicks: one picks it (and, while the ribbon is folded, shows its tools under the tabs, or hides
-    /// them again), two fold the ribbon to its tabs or open it again, as Revit's do.
+    /// A ribbon tab's clicks and hovers. While the ribbon is folded the pointer on a tab shows its tools under the tabs, and they go
+    /// when it leaves; one click pins them there until a tool is picked or a click lands elsewhere (or Esc), another click on the
+    /// tab, or the pointer, puts them away. Two clicks fold the ribbon to its tabs or open it again, as Revit's do.
     fn ribbon_tab(&mut self, r: &Response, tab: Tab) {
+        let hover = &mut self.ribbon_hover;
+        hover.on_tab |= r.hovered();
         if r.double_clicked() {
             self.fold_ribbon(!self.ribbon_min);
         } else if r.clicked() {
-            self.ribbon_peek = self.ribbon_min && !(self.ribbon_peek && self.tab == tab);
+            let pinned = self.ribbon_min && !(self.ribbon_peek && self.tab == tab);
+            self.ribbon_peek = pinned;
+            hover.tab = None;
+            // Put away by a click on its own tab, the tools stay away while the pointer is still on it.
+            hover.blocked = self.ribbon_min && !pinned;
             self.tab = tab;
+        } else if self.ribbon_min && r.hovered() && !hover.blocked {
+            let now = r.ctx.input(|i| i.time);
+            if self.ribbon_peek {
+                // Pinned, they show whichever tab the pointer comes to.
+                self.tab = tab;
+                hover.until = now + ribbon::GRACE;
+            } else if hover.tab.is_some() || !Popup::is_any_open(&r.ctx) {
+                hover.tab = Some(tab);
+                hover.until = now + ribbon::GRACE;
+            }
         }
     }
 
     fn fold_ribbon(&mut self, folded: bool) {
         self.ribbon_min = folded;
         self.ribbon_peek = false;
+        self.ribbon_hover.tab = None;
+        // Folded under the pointer, the tools stay put away until it has left the tabs.
+        self.ribbon_hover.blocked = folded;
     }
 
-    /// The folded ribbon's tools, under its tabs over everything else, until one is picked or a click lands elsewhere.
+    /// The folded ribbon's tools away: pinned or hovered. The pointer on a tab doesn't show them again until it has left the tabs.
+    fn put_ribbon_away(&mut self) {
+        self.ribbon_peek = false;
+        self.ribbon_hover.tab = None;
+        self.ribbon_hover.blocked = true;
+    }
+
+    /// The folded ribbon's tools, under its tabs over everything else: those of the tab the pointer is on until it has left it and
+    /// them (a short grace, to cross from one to the other), or, pinned by a click, until a tool is picked or a click lands elsewhere.
     fn ribbon_peek(&mut self, ctx: &Context) {
         let tool = self.tool.clone();
+        let now = ctx.input(|i| i.time);
+        let (before, hovered) = (self.tab, if self.ribbon_peek { None } else { self.ribbon_hover.tab });
+        if let Some(tab) = hovered {
+            self.tab = tab;
+        }
+        // Each panel in full at its own width: only a window narrower than the tab makes them small, from the right.
+        let room = (ctx.content_rect().right() - self.ribbon_bottom.x - 12.0).max(240.0);
         let frame = Frame::popup(&ctx.global_style()).fill(pal().surface).inner_margin(0.0);
-        let shown = Area::new(UiId::new("ribbon-peek"))
-            .order(Order::Foreground)
-            .fixed_pos(self.ribbon_bottom)
-            .show(ctx, |ui| frame.show(ui, |ui| self.ribbon_panels(ui)).response.rect);
+        let shown = Area::new(UiId::new("ribbon-peek")).order(Order::Foreground).fixed_pos(self.ribbon_bottom).show(ctx, |ui| {
+            // An area is as wide as it was last, and a first time 600 points: the room is the window's.
+            ui.set_max_width(room);
+            frame.show(ui, |ui| self.ribbon_panels(ui, Some(room))).response.rect
+        });
+        // Hovered, not picked: the tab the ribbon was on stays the one.
+        if hovered.is_some_and(|h| h == self.tab) {
+            self.tab = before;
+        }
         let rect = shown.inner;
         let (released, at) = ctx.input(|i| (i.pointer.primary_released(), i.pointer.interact_pos()));
         let inside = at.is_some_and(|p| rect.contains(p));
         let on_tabs = at.is_some_and(|p| p.y < rect.top());
+        let menu = Popup::is_any_open(ctx);
+        // The pointer in them, or a menu one of them opened, keeps them.
+        if inside || menu {
+            self.ribbon_hover.until = now + ribbon::GRACE;
+        }
         // A tool picked, a button done (one that opens a menu keeps it open), or a click elsewhere.
-        if self.tool != tool || (released && !Popup::is_any_open(ctx) && (inside || !on_tabs)) {
+        if self.tool != tool || (released && !menu && (inside || !on_tabs)) {
             self.ribbon_peek = false;
+            self.ribbon_hover.tab = None;
+        } else if !self.ribbon_peek {
+            let left = self.ribbon_hover.until - now;
+            if left <= 0.0 {
+                self.ribbon_hover.tab = None;
+            } else {
+                ctx.request_repaint_after(std::time::Duration::from_secs_f64(left));
+            }
         }
     }
 
@@ -3876,13 +3952,17 @@ impl BimApp {
     }
 
     /// The ribbon tab's panels of tools.
-    fn ribbon_panels(&mut self, ui: &mut Ui) {
+    ///
+    /// A tab wider than the window makes its last panels small, then hands their last tools over to their lists; one still too wide
+    /// scrolls sideways, each tab where it was left. Floating under a folded ribbon's tabs it has `floating`, the room the window
+    /// gives it, and is as wide as its panels.
+    fn ribbon_panels(&mut self, ui: &mut Ui, floating: Option<f32>) {
         Frame::new().inner_margin(Margin::symmetric(6, 4)).show(ui, |ui| {
-            // A tab wider than the window folds its last panels; one still too wide scrolls sideways, each tab where it was
-            // left.
             let key = UiId::new(("ribbon-widths", tab_key(self.tab)));
-            let room = ui.available_width();
-            egui::ScrollArea::horizontal().id_salt(tab_key(self.tab)).auto_shrink([false, true]).show(ui, |ui| {
+            let room = floating.map_or_else(|| ui.available_width(), |w| w - 12.0);
+            let scroll = egui::ScrollArea::horizontal().id_salt(tab_key(self.tab)).auto_shrink([floating.is_some(), true]);
+            let scroll = if floating.is_some() { scroll.max_width(room) } else { scroll };
+            scroll.show(ui, |ui| {
                 ribbon::tab(ui, key, room, |ui| {
                     ui.horizontal(|ui| self.tab_content(ui, self.tab));
                 });
@@ -4235,7 +4315,7 @@ impl BimApp {
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
                 for row in small.chunks(3) {
-                    ui.horizontal(|ui| {
+                    ribbon::row(ui, |ui| {
                         ui.spacing_mut().item_spacing.x = 1.0;
                         for (icon, label, tip, tool) in row {
                             if small_button(ui, *icon, label, structure::same_tool(&self.tool, tool), tip).clicked() {
@@ -4996,7 +5076,7 @@ impl BimApp {
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
                 for (n, row) in rows.into_iter().enumerate() {
-                    ui.horizontal(|ui| {
+                    ribbon::row(ui, |ui| {
                         for (icon, label, tip, tool, enabled) in row {
                             let active = tool
                                 .as_ref()

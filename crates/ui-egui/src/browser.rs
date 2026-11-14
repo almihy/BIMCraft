@@ -199,17 +199,24 @@ pub fn words(find: &str) -> Vec<String> {
 }
 
 impl BimApp {
-    /// The Project Browser's palette: the minimap of the view, its tabs and its search over the tree, which scrolls under them.
+    /// The Project Browser's palette: its tabs and its search over the tree, which scrolls under them.
     pub(crate) fn browser_palette(&mut self, ui: &mut Ui) {
-        egui::Frame::new().inner_margin(egui::Margin { left: 8, right: 8, top: 6, bottom: 4 }).show(ui, |ui| {
-            self.minimap(ui);
+        egui::Frame::new().inner_margin(egui::Margin { left: 8, right: 8, top: 5, bottom: 3 }).show(ui, |ui| {
             self.browser_tabs(ui);
-            ui.add_space(4.0);
+            ui.add_space(3.0);
             self.browser_search(ui);
         });
-        ui.separator();
         let scroll = egui::ScrollArea::vertical().auto_shrink([false, false]).min_scrolled_height(0.0);
-        scroll.id_salt("browser").show(ui, |ui| egui::Frame::new().inner_margin(8.0).show(ui, |ui| self.browser(ui)));
+        scroll.id_salt("browser").show(ui, |ui| {
+            egui::Frame::new().inner_margin(egui::Margin { left: 8, right: 8, top: 4, bottom: 8 }).show(ui, |ui| {
+                // The tree's rows close together: about 22 px from one to the next.
+                let spacing = ui.spacing_mut();
+                spacing.interact_size.y = 20.0;
+                spacing.item_spacing.y = 1.0;
+                spacing.button_padding.y = 2.0;
+                self.browser(ui)
+            })
+        });
     }
 
     /// One tab a kind, its icon, and the one in force named too, so they fit a narrow palette.
@@ -223,9 +230,9 @@ impl BimApp {
                 let what = tf("List {}", &[name]);
                 let font = TextStyle::Small.resolve(ui.style()).clone();
                 let text = on.then(|| ui.painter().layout_no_wrap(name.to_string(), font, pal().text));
-                let width = 26.0 + text.as_ref().map_or(0.0, |g| g.size().x + 6.0);
+                let width = 24.0 + text.as_ref().map_or(0.0, |g| g.size().x + 6.0);
                 let sense = if tab.ready() { Sense::click() } else { Sense::hover() };
-                let (rect, r) = ui.allocate_exact_size(vec2(width, 24.0), sense);
+                let (rect, r) = ui.allocate_exact_size(vec2(width, 22.0), sense);
                 r.widget_info(|| WidgetInfo::selected(WidgetType::Button, tab.ready(), on, &what));
                 let p = ui.painter();
                 let fill = if on {
@@ -244,10 +251,10 @@ impl BimApp {
                     (false, true) => pal().icon,
                     (false, false) => pal().muted.gamma_multiply(0.6),
                 };
-                let icon = Rect::from_center_size(rect.left_center() + vec2(13.0, 0.0), vec2(16.0, 16.0));
+                let icon = Rect::from_center_size(rect.left_center() + vec2(12.0, 0.0), vec2(14.0, 14.0));
                 icons::paint(p, tab.icon(), icon, ink);
                 if let Some(g) = text {
-                    p.galley(rect.left_center() + vec2(24.0, -g.size().y / 2.0), g, pal().accent_ink);
+                    p.galley(rect.left_center() + vec2(22.0, -g.size().y / 2.0), g, pal().accent_ink);
                 }
                 let r = if tab.ready() { r.on_hover_text(&what) } else { r.on_hover_text(t("Coming in a later version")) };
                 if r.clicked() {
@@ -267,12 +274,13 @@ impl BimApp {
             .fill(pal().surface)
             .stroke(Stroke::new(1.0, if focused { pal().accent } else { pal().border }))
             .corner_radius(4.0)
-            .inner_margin(egui::Margin { left: 4, right: 2, top: 1, bottom: 1 });
+            .inner_margin(egui::Margin { left: 4, right: 2, top: 0, bottom: 0 });
         frame.show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
-                let (r, _) = ui.allocate_exact_size(vec2(18.0, 22.0), Sense::hover());
-                icons::paint(ui.painter(), Icon::Search, Rect::from_center_size(r.center(), vec2(15.0, 15.0)), pal().muted);
+                ui.spacing_mut().interact_size.y = 20.0;
+                let (r, _) = ui.allocate_exact_size(vec2(16.0, 20.0), Sense::hover());
+                icons::paint(ui.painter(), Icon::Search, Rect::from_center_size(r.center(), vec2(13.0, 13.0)), pal().muted);
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if !self.browser_find.is_empty() && icon_button(ui, Icon::Close, "Clear the Search").clicked() {
                         self.browser_find.clear();

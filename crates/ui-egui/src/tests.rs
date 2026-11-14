@@ -5484,20 +5484,25 @@ fn ph_and_do_open_phasing_and_design_options_and_so_do_the_manage_tabs_buttons()
 }
 
 #[test]
-fn a_ribbon_tab_wider_than_the_window_folds_its_last_panels_to_buttons_that_list_their_tools() {
+fn a_ribbon_tab_wider_than_the_window_draws_its_last_panels_as_small_icons_that_still_list_their_tools() {
     let mut h = app(BOX);
-    // Narrow enough that Manage folds its last panels; the fit is judged on each tool's average width, a few pixels out.
+    // Narrow enough that Manage makes its last panels small.
     h.set_size(vec2(1020.0, 800.0));
     h.run();
     let window = h.ctx.content_rect().right();
     press(&mut h, "Manage");
-    assert!(h.query_by_label("Design Options").is_none(), "the last panel is folded at {window}");
-    assert!(h.get_by_label("Design Options ▾").rect().right() <= window, "to one button, in the window");
-    assert!(h.get_by_label("Materials").rect().left() >= 0.0, "and the first panel is as it was");
-    // The folded panel lists its tools, and a tool there works as on the ribbon.
-    press(&mut h, "Design Options ▾");
-    press(&mut h, "Design Options");
-    assert!(h.query_by_label("Option set:").is_some());
+    // Settings, its fourteen tools: two high, as small icons.
+    let tool = h.get_by_label("Project Units").rect();
+    assert!(tool.height() < 30.0, "the first panel's tools are small icons at {window}: {tool:?}");
+    assert!(tool.right() <= window, "in the window");
+    assert!(h.get_by_label("Settings ▾").rect().right() <= window, "its name and arrow under it, in the window");
+    // A panel of one tool keeps its large button.
+    assert!(h.get_by_label("Design Options").rect().height() > 45.0);
+    // The panel lists its tools, and a tool there works as on the ribbon.
+    press(&mut h, "Settings ▾");
+    let under = h.get_by_label("Settings ▾").rect().bottom();
+    let row = h.query_all_by_label("Project Units").map(|n| n.rect()).find(|r| r.top() > under);
+    assert!(row.is_some(), "Project Units is in the list");
 }
 
 /// A tool that drops a list of choices down opens it from the list of a panel that has handed the tool over to its name (or folded
@@ -6388,7 +6393,6 @@ mod lineweights;
 mod links;
 mod look;
 mod mep;
-mod minimap;
 mod navigation;
 mod notes;
 mod objectstyles;
@@ -6405,6 +6409,7 @@ mod purge;
 mod reinforce;
 mod render;
 mod revit;
+mod ribbon;
 mod rooms;
 mod section_box;
 mod selecting;

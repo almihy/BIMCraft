@@ -23,16 +23,6 @@ printout does. File > Settings > User Interface > Plans has a box for each (`Bim
 `settings.json` as `origin_marker` and `view_name`, on when the file doesn't say), and New and Open keep them. The 3D view, sections
 and sheets have neither. Tests: `tests/origin.rs`.
 
-The minimap (`minimap.rs`) is at the top of the Project Browser, under a header that folds
-it away: folded at first, so the tree keeps its room (the tests that click the tree's entries where they are drawn rely on it), and
-egui keeps the fold for the session. Unfolded, it is as wide as the palette and no taller than a third of what is left of it. For the
-active plan, ceiling plan, section or elevation it draws the whole view small (`render::plan`, `render::ceiling_plan`, or a section's
-picture and `render::section_over`, fitted into `SIZE`), drawn again only for another model, view or canvas theme, never for a pan or
-a zoom; the 3D view, sheets and schedules have none. The part the view shows is outlined on it, from the canvas's camera
-(`Canvas::view`). A click centres the view there and a drag pans it as it goes, both through `Canvas::centre`, which keeps the zoom: a
-drag begun on the outline takes the view with it, one begun beside it moves the view there first. `tests/minimap.rs` clicks and drags
-it (`Minimap::screen` is where a model point is on it).
-
 View > Dark Mode opens a small theme menu: As the System, Light, Dark, or Dark UI, Light Canvas. The same choices are in
 Settings > User Interface. The last choice keeps plans, ceiling plans, sections, elevations and 3D views on a light background
 while the interface stays dark; sheets stay white paper in every mode. `Settings::light_canvas` is saved alongside `theme`
@@ -592,10 +582,18 @@ steps under it where a drop-down (which doesn't wrap) still reaches over it (`Bi
 even when the window was brought down from a taller one. Nothing is fitted to a size below that: the window is asked not to go there.
 
 The ribbon's panels (`ribbon.rs`). A panel's name, under its tools, is a button (named `Build ▾` for screen readers) whose list
-(`ribbon::list`) draws the same tools again as rows: `ribbon::listing` turns `big_button` and `small_button` into `list_row`. A tab too
-wide for the window makes room from the right, on the last frame's widths (`ribbon::tab`, `ribbon::fits`): a panel hands its last tools
-over to its list (`ribbon::handed_over`: counted, not drawn), and when one tool left isn't room enough it folds to one button that lists
-them all, and the panel before it is asked; what still doesn't fit scrolls sideways. A tool that drops a list of choices down (Project
+(`ribbon::list`) draws every tool of the panel again as rows, one under the next in the panel's order, as wide as the widest:
+`ribbon::listing` turns `big_button` and `small_button` into `list_row`, and a panel's rows (`ribbon::row`: Modify's two) stack in it.
+A tab too wide for the window makes room from the right, on the last frame's widths (`ribbon::tab`, `ribbon::fits`): first, from the
+last panel back, a panel's large buttons become small icons, two high, filled a column at a time (`Fit::compact`, `ribbon::small`,
+`ribbon::slot`; a panel of one tool is left alone); if that is not room enough, from the last panel back again, a panel hands its last
+columns over to its list (`ribbon::handed_over`: counted, not drawn; a panel of rows hands over by column, so both rows lose theirs
+together) and never its first; what still doesn't fit scrolls sideways. A panel is never folded to one named button. With the ribbon
+minimized to its tabs, the pointer on a tab shows that tab's tools under the tabs (`BimApp::ribbon_peek`, `ribbon::Hover`) and they go
+`ribbon::GRACE` seconds after it has left both the tab and them; a click on the tab pins them until a tool is picked, a click lands
+elsewhere or Esc, and another tab hovered meanwhile shows its own. The floating tools are as wide as the panels are, folding nothing
+unless the window is narrower than the tab (`a_window_too_narrow_for_a_tab_draws_its_last_panels_as_small_icons`,
+`tests/ribbon.rs`). A tool that drops a list of choices down (Project
 Units, Schedules, Duplicate View, New Family...) goes through `ribbon::choices`, never `Popup::menu` on its own button: egui keeps one
 popup open, so a popup of a row's own closes the panel's list that holds the row, and with it itself. In a list the choices are a
 submenu of the row; a request to open them at once (UN) opens the panel's list when the tool has no button, and waits for a tab's second

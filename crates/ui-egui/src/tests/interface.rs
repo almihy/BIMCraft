@@ -167,7 +167,7 @@ fn properties_are_the_clean_rows_and_apply_comes_after_them() {
     assert_eq!(rules_by(&h, field), (0, 0), "no lines between or under the rows");
     let apply = h.get_by_label("Apply").rect();
     assert!(apply.top() > field.bottom() + 40.0, "Apply follows the rows, none of them over it: {apply:?} {field:?}");
-    let browser = h.get_by_label_contains("Project Browser ·").rect();
+    let browser = h.get_by_label("Project Browser").rect();
     assert!(apply.top() > browser.top(), "scrolled past the palette's foot with the rows: {apply:?} {browser:?}");
 }
 

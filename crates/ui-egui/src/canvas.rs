@@ -599,13 +599,6 @@ impl Canvas {
         }
     }
 
-    /// Model point `p` in the middle of view `id`, at the zoom it has: where the minimap is clicked or dragged to.
-    pub(crate) fn centre(&mut self, id: Id, p: P2) {
-        if let Some(v) = self.view(id) {
-            self.hold(id, p, self.rect.size() / 2.0, v.scale);
-        }
-    }
-
     /// Zoom by `factor` about the middle of the view.
     pub(crate) fn zoom(&mut self, level: Id, factor: f64) {
         if let Some(v) = self.view(level) {

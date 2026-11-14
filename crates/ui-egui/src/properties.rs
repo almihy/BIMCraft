@@ -636,19 +636,30 @@ fn link(ui: &mut Ui, model: &Model, id: Id) -> bool {
     r.clicked()
 }
 
-/// A parameter group's header: a bar across the palette that folds the group, as Revit's do.
-/// Whether it was clicked.
+/// How far a group's header reaches past the room it is given on each side, the palette's margin: set by the Properties palette
+/// (`palette_body`), whose header bars run from edge to edge. Elsewhere (a dialog) there is none.
+pub(crate) const BLEED: &str = "group-header-bleed";
+
+/// A parameter group's header: a bar across the palette that folds the group, as Revit's do: its own fill and rules over the rows'
+/// plain ground, a heavier name, and the chevron that says whether the rows are shown. Whether it was clicked.
 pub(crate) fn group_header(ui: &mut Ui, group: &str, open: bool) -> bool {
-    let (r, response) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
+    const HEIGHT: f32 = 26.0;
+    let bleed = ui.ctx().data(|d| d.get_temp::<f32>(UiId::new(BLEED))).unwrap_or(0.0);
+    let (slot, _) = ui.allocate_exact_size(vec2(ui.available_width(), HEIGHT), Sense::hover());
+    let r = slot.expand2(vec2(bleed, 0.0));
+    let response = ui.interact(r, ui.id().with(("group-header", group)), Sense::click());
     response.widget_info(|| WidgetInfo::selected(WidgetType::CollapsingHeader, true, open, group));
     let p = ui.painter();
     p.rect_filled(r, 0.0, if response.hovered() { pal().hover_fill } else { pal().bar });
-    p.text(r.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, group, FontId::proportional(13.0), pal().text);
-    // A chevron on the right, pointing down while the group is open.
-    let c = pos2(r.right() - 12.0, r.center().y);
+    let rule = Stroke::new(1.0, pal().border);
+    p.hline(r.x_range(), r.top() + 0.5, rule);
+    p.hline(r.x_range(), r.bottom() - 0.5, rule);
+    // The chevron before the name, pointing down while the group is open.
+    let c = pos2(slot.left() + 6.0, slot.center().y);
     let chevron =
-        if open { [vec2(-4.0, -2.0), vec2(0.0, 2.0), vec2(4.0, -2.0)] } else { [vec2(-2.0, -4.0), vec2(2.0, 0.0), vec2(-2.0, 4.0)] };
+        if open { [vec2(-3.5, -2.0), vec2(0.0, 2.0), vec2(3.5, -2.0)] } else { [vec2(-2.0, -3.5), vec2(2.0, 0.0), vec2(-2.0, 3.5)] };
     p.add(Shape::line(chevron.iter().map(|d| c + *d).collect(), Stroke::new(1.5, pal().icon)));
+    p.text(pos2(slot.left() + 18.0, slot.center().y), Align2::LEFT_CENTER, group, crate::style::semibold(12.5), pal().text);
     if response.has_focus() {
         p.rect_stroke(r, 0.0, crate::style::focus_ring(), StrokeKind::Inside);
     }
@@ -658,10 +669,12 @@ pub(crate) fn group_header(ui: &mut Ui, group: &str, open: bool) -> bool {
 /// A group's rows under its header: names on the left and values on the right, half the palette each, as Revit's columns, so a
 /// long name wraps rather than pushing its field past the palette's edge.
 pub(crate) fn grid(ui: &mut Ui, id: impl egui::AsIdSalt, add: impl FnOnce(&mut Ui)) {
-    Frame::new().inner_margin(Margin { left: 8, right: 0, top: 2, bottom: 6 }).show(ui, |ui| {
+    Frame::new().inner_margin(Margin { left: 6, right: 0, top: 4, bottom: 6 }).show(ui, |ui| {
         // Room left for the palette's scroll bar: one that comes would otherwise push the rows past the card.
-        let half = (ui.available_width() - ui.spacing().item_spacing.x - ui.spacing().scroll.bar_width) / 2.0;
-        Grid::new(id).num_columns(2).min_col_width(half).max_col_width(half).show(ui, add);
+        let gap = ui.spacing().item_spacing.x;
+        let half = (ui.available_width() - gap - ui.spacing().scroll.bar_width) / 2.0;
+        // Rows 24 px from one to the next.
+        Grid::new(id).num_columns(2).spacing(vec2(gap, 2.0)).min_col_width(half).max_col_width(half).show(ui, add);
     });
 }
 
