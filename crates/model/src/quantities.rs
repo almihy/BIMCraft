@@ -14,8 +14,8 @@
 
 use crate::geom::{self, P2};
 use crate::model::{Ceiling, Element, Floor, Id, Model, Roof};
-use crate::view3d::{element_solids, wall_volume};
-use crate::walls::{self, Axis, Plane, Prism};
+use crate::view3d::{Solid, element_solids, wall_volume};
+use crate::walls::{self, Axis, Plane};
 
 /// What a wall measures.
 #[derive(Clone, Debug, PartialEq)]
@@ -55,24 +55,44 @@ pub fn wall(m: &Model, id: Id) -> Option<WallQ> {
 /// the tests.
 #[doc(hidden)]
 pub fn wall_volume_by_prisms(m: &Model, id: Id, openings: bool) -> f64 {
-    walls::prisms(m, id, openings).iter().map(volume_of).sum()
+    walls::prisms(m, id, openings).iter().map(|p| prism_volume(&p.ring, &p.bottom, &p.top, p.curve)).sum()
 }
 
-/// What a wall's prism holds: its plan through how far its top lies over its bottom at its middle (both are planes, so exact),
+/// What a prism holds: its plan through how far its top lies over its bottom at its middle (both are planes, so exact),
 /// the plan of a curved wall's piece true to its arc, not to the chords the ring is drawn with.
-fn volume_of(p: &Prism) -> f64 {
-    let c = geom::centroid(&p.ring);
-    plan_of(p) * (p.top.at(c) - p.bottom.at(c)).max(0.0)
+fn prism_volume(ring: &[P2], bottom: &Plane, top: &Plane, curve: Option<(P2, f64)>) -> f64 {
+    let c = geom::centroid(ring);
+    plan_of(ring, curve) * (top.at(c) - bottom.at(c)).max(0.0)
+}
+
+/// What a piece of an element as the 3D view makes it holds, by the old sums: a prism's (above), a slab's plan through its rise, a
+/// box's, a mesh's by its triangles (one that is not closed has no volume to speak of). What an element's solid leaves out of its
+/// quantity, the pieces the solid kernel refuses, is held to ([`crate::view3d::ElementSolids::volume`]).
+pub(crate) fn piece_volume(piece: &Solid) -> f64 {
+    match piece {
+        Solid::Prism { ring, bottom, top, curve, .. } => prism_volume(ring, bottom, top, *curve),
+        Solid::Slab { face, rise, .. } => {
+            let ring: Vec<P2> = face.iter().map(|p| P2(p[0], p[1])).collect();
+            geom::area(&ring).abs() * rise.max(0.0)
+        }
+        Solid::Box { a, c, z, .. } => (a.1 - a.0).abs() * (c.1 - c.0).abs() * (z.1 - z.0).abs(),
+        Solid::Mesh { tris, .. } => {
+            let det = |a: [f64; 3], b: [f64; 3], c: [f64; 3]| {
+                a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])
+            };
+            (tris.iter().map(|[a, b, c]| det(*a, *b, *c)).sum::<f64>() / 6.0).abs()
+        }
+    }
 }
 
 /// A prism's plan area: its ring's, and for each edge that runs between two points of one circle about a curved wall's centre,
 /// the segment between the chord and the arc, added where the wall is on the centre's side of the edge and taken off where it is
 /// beyond.
-fn plan_of(p: &Prism) -> f64 {
-    let signed = geom::area(&p.ring);
-    let Some((centre, _)) = p.curve else { return signed.abs() };
+fn plan_of(ring: &[P2], curve: Option<(P2, f64)>) -> f64 {
+    let signed = geom::area(ring);
+    let Some((centre, _)) = curve else { return signed.abs() };
     let toward = signed.signum();
-    let on_arc = geom::ring_edges(&p.ring).filter_map(|(a, b)| {
+    let on_arc = geom::ring_edges(ring).filter_map(|(a, b)| {
         let (ra, rb, chord) = (a.dist(centre), b.dist(centre), a.dist(b));
         if chord < 1e-6 || ra < 1e-6 || (ra - rb).abs() > 1e-4 {
             return None;
