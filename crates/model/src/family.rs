@@ -4658,12 +4658,14 @@ mod tests {
 
     #[test]
     fn voids_of_many_triangles_never_exhaust_the_stack() {
-        // The largest a revolve comes to that a void can cut: a profile of MAX_PROFILE corners (twice the old test's 28), turned
-        // about an axis 250 mm from it, about 7,500 triangles at the half-millimetre fineness (59 sides a turn; the 64 corners of
-        // 32 sides this test was first written for were 4,100), cut on a small stack (a wasm thread's): done, and in the time it
-        // takes in a release build. A little further out the cut's budget says it has too many faces: said, not a stack overflow.
+        // The largest a revolve comes to: a profile of MAX_PROFILE corners (twice the old test's 28), turned about an axis `out` mm
+        // from it, 7,500 triangles at 250 mm (59 sides a turn at the half-millimetre fineness; the 64 corners of 32 sides this
+        // test was first written for were 4,100), cut on a small stack (a wasm thread's). A closed void is cut by the solid kernel
+        // (`cutting`), which has no budget of triangles: done, and in the time it takes in a release build, however far out the
+        // revolve is, up to the 256 sides a turn at most. A void that is not a closed solid goes to the older cutter, whose
+        // budget says the revolve has too many faces when it is a little further out: said, not a stack overflow.
         const CORNERS: usize = MAX_PROFILE;
-        let revolve = |out: f64| {
+        let revolve = |out: f64, closed: bool| {
             let ring: Vec<Value> = (0..CORNERS)
                 .map(|k| (k as f64 * std::f64::consts::TAU / CORNERS as f64).sin_cos())
                 .map(|(s, c)| json!([out + 100.0 * c, 300.0 + 100.0 * s]))
@@ -4673,25 +4675,36 @@ mod tests {
                 .spawn(move || {
                     let started = std::time::Instant::now();
                     let solid = json!({"plane": "xz", "profile": ring, "axis": [[0, 0], [0, 1]], "to": 360});
-                    let void =
-                        json!({"profile": [[-9000, -9000], [9000, -9000], [9000, 0], [-9000, 0]], "from": -10, "to": 1000, "void": true});
+                    // The half-plane y < 0, as a closed prism, or as a box of triangles with one left out.
+                    let void = if closed {
+                        json!({"profile": [[-9000, -9000], [9000, -9000], [9000, 0], [-9000, 0]], "from": -10, "to": 1000, "void": true})
+                    } else {
+                        json!({"mesh": cutting::tests::cuboid([-9000.0, -9000.0, -10.0], [9000.0, 0.0, 1000.0], 1), "void": true})
+                    };
                     (built(json!([solid, void])), started.elapsed())
                 })
                 .unwrap()
                 .join()
                 .unwrap()
         };
-        let (pieces, took) = revolve(250.0);
+        let (pieces, took) = revolve(250.0, true);
         let pieces = pieces.unwrap();
         assert!(volume(&pieces[0].tris) > 0.0, "the revolve is left holding something");
-        assert!(pieces[0].tris.len() > 20_000, "cut, it holds more triangles than the 4,100 it was first written for");
+        assert!(cutting::as_solid(&pieces[0].tris, crate::solid::Origin::new(0, 0)).is_ok(), "and it is one closed solid");
         // A debug build is many times slower than the release the limit is for.
         #[cfg(not(debug_assertions))]
         assert!(took.as_secs_f64() < 10.0, "{took:?}: a hang, not a slow machine");
         let _ = took;
-        // Past what the budget cuts (and past the 256 sides a turn at most, at 7 m): refused, not overflowed.
+        // Further out, past what the older cutter's budget allows, and past the 256 sides a turn at most (at 7 m): the kernel cuts it.
         for out in [450.0, 7000.0] {
-            let (too_many, _) = revolve(out);
+            let (cut, _) = revolve(out, true);
+            assert!(volume(&cut.unwrap()[0].tris) > 0.0, "{out}");
+        }
+        // The open void goes to the older cutter: what it can cut it cuts, past its budget it says so.
+        let (cut, _) = revolve(250.0, false);
+        assert!(volume(&cut.unwrap()[0].tris) > 0.0, "an open void is cut by the older cutter");
+        for out in [450.0, 7000.0] {
+            let (too_many, _) = revolve(out, false);
             let e = too_many.unwrap_err();
             assert!(e.contains("too many faces") || e.contains("can't have more than"), "{out}: {e}");
         }

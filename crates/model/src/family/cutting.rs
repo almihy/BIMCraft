@@ -79,7 +79,7 @@ pub(super) fn cut(form: &[[P3; 3]], voids: &[&Void], meter: &mut csg::Meter) -> 
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use std::collections::BTreeMap;
 
     use serde_json::{Value, json};
@@ -105,7 +105,7 @@ mod tests {
     }
 
     /// A box from `lo` to `hi` as triangles turned out, less the first `leave` of the 12 where it is to be left open.
-    fn cuboid(lo: P3, hi: P3, leave: usize) -> Vec<[P3; 3]> {
+    pub(in crate::family) fn cuboid(lo: P3, hi: P3, leave: usize) -> Vec<[P3; 3]> {
         let v = |x: usize, y: usize, z: usize| [[lo[0], hi[0]][x], [lo[1], hi[1]][y], [lo[2], hi[2]][z]];
         [
             [v(0, 0, 1), v(1, 0, 1), v(1, 1, 1), v(0, 1, 1)],
@@ -140,15 +140,22 @@ mod tests {
 
     #[test]
     fn a_curved_tube_with_two_voids_is_cut_exactly() {
-        // A tube of 32 sides, 100 to 300 out and 500 high; a ring-shaped void through its outer wall (250 to 350 out, 100 to 200
-        // up) and a slot through its top, wholly in its wall (80 by 100 and clear of the ring).
+        // A tube, 100 to 300 out and 500 high; a ring-shaped void through its outer wall (250 to 350 out, 100 to 200 up) and a
+        // slot through its top, wholly in its wall (80 by 100 and clear of the ring). A revolve is drawn with as many sides as keep
+        // a chord within half a millimetre of the circle (`family::sides`) at the largest radius of its profile: 55 for the tube
+        // (out to 300), 59 for the ring (out to 350), so the ring's inner polygon is not the tube's.
         let tube = json!({"plane": "xz", "profile": [[100, 0], [300, 0], [300, 500], [100, 500]], "axis": [[0, 0], [0, 1]], "to": 360});
         let ring = json!({"plane": "xz", "profile": [[250, 100], [350, 100], [350, 200], [250, 200]], "axis": [[0, 0], [0, 1]], "to": 360, "void": true});
         let slot = json!({"profile": [[150, -50], [230, -50], [230, 50], [150, 50]], "from": -10, "to": 510, "void": true});
         let f = family(json!([tube, ring, slot]));
         let cut = pieces(&f);
         let [p] = cut.as_slice() else { panic!("{cut:?}") };
-        let exact = (polygon(32.0, 300.0) - polygon(32.0, 100.0)) * 500.0 - (polygon(32.0, 300.0) - polygon(32.0, 250.0)) * 100.0 - 80.0 * 100.0 * 500.0;
+        let tau = std::f64::consts::TAU;
+        let (n_tube, n_ring) = (super::super::sides(tau, 300.0), super::super::sides(tau, 350.0));
+        assert_eq!((n_tube, n_ring), (55, 59));
+        let (outer, inner, sleeve) = (polygon(n_tube as f64, 300.0), polygon(n_tube as f64, 100.0), polygon(n_ring as f64, 250.0));
+        // The ring takes what lies outside its inner polygon (the tube's outer polygon is wholly inside its outer one).
+        let exact = (outer - inner) * 500.0 - (outer - sleeve) * 100.0 - 80.0 * 100.0 * 500.0;
         let v = volume(&p.tris);
         assert!((v / exact - 1.0).abs() < 1e-9, "{v} not {exact}");
         // The tube's own circles are no more than a facet off the true ones: the true volume is a hair more.
