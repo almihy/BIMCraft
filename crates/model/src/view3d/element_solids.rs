@@ -339,7 +339,7 @@ mod tests {
         let (origin, other) = (Origin::new(1, 0), Origin::new(1, 1));
         let why = solid_of(&bad, other).unwrap_err();
         let solid = solid_of(&block, origin).unwrap().unwrap();
-        let es = ElementSolids { layers: vec![(0, solid)], open: vec![OpenPiece { layer: 1, why, piece: bad }] };
+        let es = ElementSolids { layers: vec![(0, solid)], open: vec![OpenPiece { layer: 1, why, piece: bad }], shown: Vec::new() };
         assert!(!es.is_whole());
         let (kept, refused) = (1000.0 * 500.0 * 100.0, geom::area(&ring).abs() * 100.0);
         assert!(refused > 0.0);
