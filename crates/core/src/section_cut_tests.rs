@@ -64,7 +64,11 @@ fn assert_rect(what: &str, ring: &[P2], (x0, x1, z0, z1): (f64, f64, f64, f64), 
     let b = bbox(ring);
     eprintln!("{what}: {ring:?}");
     assert_eq!(ring.len(), 4, "{what} is not four corners: {ring:?}");
-    assert!(close(b.0, x0, tol) && close(b.1, x1, tol) && close(b.2, z0, tol) && close(b.3, z1, tol), "{what}: {b:?} is not {:?}", (x0, x1, z0, z1));
+    assert!(
+        close(b.0, x0, tol) && close(b.1, x1, tol) && close(b.2, z0, tol) && close(b.3, z1, tol),
+        "{what}: {b:?} is not {:?}",
+        (x0, x1, z0, z1)
+    );
     assert!(close(geom::area(ring), (x1 - x0) * (z1 - z0), tol * (x1 - x0 + z1 - z0).max(1.0)), "{what}: its area {}", geom::area(ring));
     // Counter-clockwise, which the drawing's fill and edges rely on.
     assert!(geom::area(ring) > 0.0, "{what} is turned the wrong way");
@@ -95,8 +99,7 @@ fn a_section_across_a_layered_wall_cuts_one_region_per_layer_and_the_doors_leaf(
     }
     assert!(of(&rings, w, None).is_empty(), "every piece of it is a solid");
     assert_rect("the core", of(&rings, w, Some(1))[0], (920.0, 1080.0, 2100.0, 3000.0), 1e-9);
-    let mut faces: Vec<(f64, f64)> =
-        [0u16, 2].iter().map(|k| bbox(of(&rings, w, Some(*k))[0])).map(|b| (b.0, b.1)).collect();
+    let mut faces: Vec<(f64, f64)> = [0u16, 2].iter().map(|k| bbox(of(&rings, w, Some(*k))[0])).map(|b| (b.0, b.1)).collect();
     faces.sort_by(|a, b| a.0.total_cmp(&b.0));
     assert!(close(faces[0].0, 900.0, 1e-9) && close(faces[0].1, 920.0, 1e-9), "{faces:?}");
     assert!(close(faces[1].0, 1080.0, 1e-9) && close(faces[1].1, 1100.0, 1e-9), "{faces:?}");
@@ -129,7 +132,10 @@ fn a_section_across_a_layered_wall_cuts_one_region_per_layer_and_the_doors_leaf(
         let (a, c) = (bbox(pieces[0]), bbox(pieces[1]));
         // The two outer layers are the same whichever face is the exterior: compare as a set of the two ends.
         let ends = |b: (f64, f64, f64, f64)| (b.0.min(b.1), b.0.max(b.1));
-        assert!(close(a.2, 0.0, 1e-9) && close(a.3, 900.0, 1e-9) && close(c.2, 2400.0, 1e-9) && close(c.3, 3000.0, 1e-9), "layer {k}: {a:?} {c:?}");
+        assert!(
+            close(a.2, 0.0, 1e-9) && close(a.3, 900.0, 1e-9) && close(c.2, 2400.0, 1e-9) && close(c.3, 3000.0, 1e-9),
+            "layer {k}: {a:?} {c:?}"
+        );
         let (e0, e1) = ends(a);
         assert!(k != 1 || (close(e0, x0, 1e-9) && close(e1, x1, 1e-9)), "the core's breadth {e0}..{e1}");
     }
@@ -160,7 +166,9 @@ fn a_section_along_a_wall_cuts_its_window_as_a_hole_and_its_door_as_a_notch() {
     // Where the window is there is no wall, where the door is none below its head; wall everywhere else.
     let covered = |p: P2| core.iter().any(|r| geom::contains(r, p));
     assert!(!covered(P2(xw + 500.0, 1650.0)) && !covered(P2(xd + 500.0, 1000.0)));
-    assert!(covered(P2(xw + 500.0, 450.0)) && covered(P2(xw + 500.0, 2700.0)) && covered(P2(xd + 500.0, 2500.0)) && covered(P2(1000.0, 1000.0)));
+    assert!(
+        covered(P2(xw + 500.0, 450.0)) && covered(P2(xw + 500.0, 2700.0)) && covered(P2(xd + 500.0, 2500.0)) && covered(P2(1000.0, 1000.0))
+    );
     // Every piece is a simple ring turned counter-clockwise, a trapezoid at most.
     assert!(core.iter().all(|r| geom::area(r) > 0.0 && r.len() <= 4));
     // The drawing: the section's poché fills them as one region and no seam is inked between pieces.
@@ -218,9 +226,8 @@ fn a_vertical_section_through_a_curved_wall_with_a_door_cuts_exact_lines_and_its
     assert!(of(&rings, w, None).is_empty());
     // Over the door's head, three rectangles side by side, the wall's layers: their breadths are the thicknesses along the line
     // where the plane meets the facets; every edge a line.
-    let mut layers: Vec<(f64, u16, &Vec<P2>)> = (0..3u16)
-        .flat_map(|k| of(&rings, w, Some(k)).into_iter().map(move |r| (bbox(r).0, k, r)))
-        .collect();
+    let mut layers: Vec<(f64, u16, &Vec<P2>)> =
+        (0..3u16).flat_map(|k| of(&rings, w, Some(k)).into_iter().map(move |r| (bbox(r).0, k, r))).collect();
     layers.sort_by(|a, b| a.0.total_cmp(&b.0));
     assert_eq!(layers.len(), 3, "one region per layer: {layers:?}");
     for (_, k, r) in &layers {
@@ -253,9 +260,8 @@ fn a_vertical_section_through_a_curved_wall_with_a_door_cuts_exact_lines_and_its
     // the 20 mm layer, and still every edge is a line.
     let sec = section(&mut s, [-500.0, -1000.0], [4500.0, -1000.0]);
     let rings = cut(&s, sec);
-    let mut cutting: Vec<(f64, u16, &Vec<P2>)> = (0..3u16)
-        .flat_map(|k| of(&rings, w, Some(k)).into_iter().map(move |r| (bbox(r).0, k, r)))
-        .collect();
+    let mut cutting: Vec<(f64, u16, &Vec<P2>)> =
+        (0..3u16).flat_map(|k| of(&rings, w, Some(k)).into_iter().map(move |r| (bbox(r).0, k, r))).collect();
     cutting.sort_by(|a, b| a.0.total_cmp(&b.0));
     assert_eq!(cutting.len(), 6, "three layers at each of its two cuts: {cutting:?}");
     let x = |r: f64| (r * r - 1000.0 * 1000.0).sqrt();
@@ -323,7 +329,13 @@ fn a_section_through_a_family_with_a_void_shows_the_void_in_the_cut() {
         .collect();
     assert!(!fills.is_empty());
     let pixel = view.px(P2(y0 + 500.0, z0 + 500.0));
-    assert!(fills.iter().all(|r| !geom::contains(&r.iter().map(|q| P2(f64::from(q.0), f64::from(q.1))).collect::<Vec<_>>(), P2(f64::from(pixel.0), f64::from(pixel.1)))), "no fill over the cavity");
+    assert!(
+        fills.iter().all(|r| !geom::contains(
+            &r.iter().map(|q| P2(f64::from(q.0), f64::from(q.1))).collect::<Vec<_>>(),
+            P2(f64::from(pixel.0), f64::from(pixel.1))
+        )),
+        "no fill over the cavity"
+    );
 }
 
 // ----- a sloped roof with walls attached ----------------------------------------------------------------------------------
@@ -422,10 +434,15 @@ fn compare_with_before(name: &str, s: &mut Session, lines: &[[[f64; 2]; 2]]) -> 
             if *area < 1e-3 {
                 continue;
             }
-            let Some(new) = now.get(id) else { panic!("{name} {line:?}: element {id} ({:?}) was cut and no longer is", s.model.elements.get(*id).map(|e| e.category())) };
+            let Some(new) = now.get(id) else {
+                panic!("{name} {line:?}: element {id} ({:?}) was cut and no longer is", s.model.elements.get(*id).map(|e| e.category()))
+            };
             // The pieces of a wall, floor or roof abut or overlap a little where they meet; the solids are their unions.
             if (new - area).abs() > 1e-6 * area + 1.0 {
-                eprintln!("{name} {line:?}: element {id} ({:?}) was {area:.3} mm2 and is {new:.3}", s.model.elements.get(*id).map(|e| e.category()));
+                eprintln!(
+                    "{name} {line:?}: element {id} ({:?}) was {area:.3} mm2 and is {new:.3}",
+                    s.model.elements.get(*id).map(|e| e.category())
+                );
             }
         }
         cut_more += now.keys().filter(|id| !before.contains_key(id)).count();

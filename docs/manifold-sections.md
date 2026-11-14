@@ -71,16 +71,30 @@ the same `section_base_cancellable`, so they change with it, and with nothing el
 
 ## Timings
 
-`section_cut_timings` (`cargo test -p bimcraft-core --lib section_cut_timings -- --ignored --nocapture`): a section through the
-middle of each model, along x. One thread. "Cold" is the first section of a fresh `SectionWork`: it makes the element solids of
+`crates/core/examples/section_cut_timings.rs` (`cargo run -p bimcraft-core --release --example section_cut_timings`): a section
+through the middle of each model, along x. One thread. "Cold" is the first section of a fresh `SectionWork`: it makes the element solids of
 every element the line crosses; "warm" is the same section again, the solids kept. The old figure is `Solid::cuts` of every piece
 the scene holds, as the old loop did.
 
 | Model | Elements | Elements cut | Rings | Work prepared | Cut, cold | Cut, warm | Cut before the solids | Whole overlay, cold | Whole overlay, warm |
 |---|---|---|---|---|---|---|---|---|---|
-RELEASE_TABLE
+| Highrise, 20 storeys | 9,522 | 500 | 620 | 6.8 ms | 184 ms | 6.2 ms | 11.5 ms (420 elements) | 187 ms | 11.7 ms |
+| Tower, reference plate, one storey | 10,019 | 141 | 179 | 23 ms | 92 ms | 2.5 ms | 33.9 ms (56 elements) | 93 ms | 3.0 ms |
+| Sample house | 75 | 8 | 14 | 2.3 ms | 5.5 ms | 0.09 ms | 2.2 ms (6 elements) | 5.7 ms | 0.26 ms |
 
-DEBUG_TABLE
+Release build (`--release`, one thread, this PC, the C++ a release build either way). The same figures in the dev profile, which
+builds the engine's Rust at opt-level 1 (what `cargo test` runs; the same code, run as an ignored test before it was moved into the example):
+
+| Model | Cut, cold | Cut, warm | Cut before the solids | Whole overlay, cold | Whole overlay, warm |
+|---|---|---|---|---|---|
+| Highrise, 20 storeys | 265 ms | 50 ms | 20 ms | 389 ms | 183 ms |
+| Tower, reference plate, one storey | 257 ms | 106 ms | 52 ms | 386 ms | 241 ms |
+| Sample house | 25 ms | 7 ms | 6.7 ms | 39 ms | 21 ms |
+
+*Whole overlay* is `SectionOverlay::new`: the cut, the datums, the grids, the layer patterns and the edges (`section_base`), with a
+fit view of 1,600 x 900; *warm* is on a work that holds the solids already (the section was cut once on it). Cold is dominated by
+Manifold making each crossed layer's solid (about 0.3 ms a layer solid: 500 elements, 620 rings); warm is the slice of each layer
+(extracting Manifold's mesh and walking its triangles) and the drawing.
 
 A section of the 9,521-element highrise builds the solids of the 500 elements it crosses, not the model's 9,521 (building all of
 them is 4.4 s, `docs/manifold-elements.md`): the box tests (the old `one_side` test on the element's box, then the layer's bounds

@@ -2186,11 +2186,15 @@ fn section_base_cancellable(
     Some(d)
 }
 
+/// What a section cuts, ring by ring: `(element, layer, ring)`.
+#[doc(hidden)]
+pub type CutRings = Vec<(Id, Option<u16>, Vec<P2>)>;
+
 /// What section or elevation `id` cuts, for the tests to read: each ring (counter-clockwise, simple) of each element, as `(element,
 /// layer, ring)`, in the section's own plane (x along its line from its start, y up, mm); `layer` is that of the element's type for
 /// a closed solid, none for what is cut as an open piece, a round run or a bar. None for an id that is no section or elevation.
 #[doc(hidden)]
-pub fn section_cut_rings(m: &Model, id: impl Key) -> Option<Vec<(Id, Option<u16>, Vec<P2>)>> {
+pub fn section_cut_rings(m: &Model, id: impl Key) -> Option<CutRings> {
     let v = m.section(id)?;
     let look = Look::of(m, id);
     let work = SectionWork::new(m);
@@ -2199,16 +2203,16 @@ pub fn section_cut_rings(m: &Model, id: impl Key) -> Option<Vec<(Id, Option<u16>
 
 /// [`section_cut_rings`] of `w`'s solids, which keep what they cut for the next section.
 #[doc(hidden)]
-pub fn section_cut_rings_with(m: &Model, w: &SectionWork, id: impl Key) -> Option<Vec<(Id, Option<u16>, Vec<P2>)>> {
+pub fn section_cut_rings_with(m: &Model, w: &SectionWork, id: impl Key) -> Option<CutRings> {
     let v = m.section(id)?;
     let look = Look::of(m, id);
     section_cut_rings_in(m, w, v, &look)
 }
 
-fn section_cut_rings_in(m: &Model, w: &SectionWork, v: &Section, look: &Look) -> Option<Vec<(Id, Option<u16>, Vec<P2>)>> {
+fn section_cut_rings_in(m: &Model, w: &SectionWork, v: &Section, look: &Look) -> Option<CutRings> {
     let span = span(m, w, v, look, &|| false)?;
     let Cut { layered, loose, dots } = cut_model(m, w, v, look, span, &|| false)?;
-    let mut out: Vec<(Id, Option<u16>, Vec<P2>)> = Vec::new();
+    let mut out: CutRings = Vec::new();
     for (id, by_layer) in layered {
         out.extend(by_layer.into_iter().flat_map(|(k, rings)| rings.into_iter().map(move |r| (id, Some(k), r))));
     }
@@ -2222,7 +2226,7 @@ fn section_cut_rings_in(m: &Model, w: &SectionWork, v: &Section, look: &Look) ->
 #[derive(Default)]
 struct Cut {
     /// Each element's closed layer solids' rings, by layer.
-    layered: std::collections::BTreeMap<Id, Vec<(u16, Vec<Vec<P2>>)>>,
+    layered: std::collections::BTreeMap<Id, section_cut::LayerRings>,
     /// The rings of what is cut in no layer: an open piece, a round run made as the cut asks.
     loose: std::collections::BTreeMap<Id, Vec<Vec<P2>>>,
     /// A bar's cuts: dots over the concrete it lies in.
@@ -2231,7 +2235,14 @@ struct Cut {
 
 /// What the vertical plane of section `v` cuts of every element `look` shows, from `first` to `last` along its line (as
 /// `span` finds them), in the section's own plane: x along its line from its start, y up, mm. None, cancelled.
-fn cut_model(m: &Model, work: &SectionWork, v: &Section, look: &Look, (first, last): (f64, f64), cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Cut> {
+fn cut_model(
+    m: &Model,
+    work: &SectionWork,
+    v: &Section,
+    look: &Look,
+    (first, last): (f64, f64),
+    cancelled: &(dyn Fn() -> bool + Sync),
+) -> Option<Cut> {
     let u = (v.end - v.start).unit();
     let mut out = Cut::default();
     // What lies all on one side of the line's upright plane is cut by none of it, whatever it is made of.

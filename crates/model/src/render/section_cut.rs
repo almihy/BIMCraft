@@ -16,12 +16,14 @@ use crate::geom::{self, P2};
 use crate::solid::{Frame, Loop, Seg};
 use crate::view3d::ElementSolids;
 
+/// The rings of an element's layers: each layer (as `Origin::layer` counts them) and its rings.
+pub(crate) type LayerRings = Vec<(u16, Vec<Vec<P2>>)>;
+
 /// What a section cuts of one element.
 #[derive(Default)]
 pub(crate) struct ElementCut {
-    /// The rings of each closed layer solid it is cut through, by layer (as `Origin::layer` counts them): simple,
-    /// counter-clockwise, the holes cut out.
-    pub layers: Vec<(u16, Vec<Vec<P2>>)>,
+    /// The rings of each closed layer solid it is cut through, by layer: simple, counter-clockwise, the holes cut out.
+    pub layers: LayerRings,
     /// The rings of its open pieces (as they were cut before the solids), in no layer.
     pub open: Vec<Vec<P2>>,
 }
@@ -148,8 +150,7 @@ pub(crate) fn slabs(rings: &[&[P2]], lo: f64, hi: f64) -> Vec<Vec<P2>> {
             })
             .collect();
         across.sort_by(|x, y| x.2.total_cmp(&y.2));
-        for pair in across.chunks_exact(2) {
-            let (below, above) = (pair[0], pair[1]);
+        for &[below, above] in across.as_chunks::<2>().0 {
             let mut ring = vec![P2(a, below.0), P2(b, below.1), P2(b, above.1), P2(a, above.0)];
             ring.dedup_by(|p, q| p.dist(*q) <= SAME);
             if ring.len() > 1 && ring.first().zip(ring.last()).is_some_and(|(p, q)| p.dist(*q) <= SAME) {
@@ -338,7 +339,11 @@ mod tests {
 
     #[test]
     fn the_line_between_two_layers_is_drawn_once() {
-        let layers = vec![(0, vec![rect(0.0, 20.0, 0.0, 100.0)]), (1, vec![rect(20.0, 180.0, 0.0, 100.0)]), (2, vec![rect(180.0, 200.0, 0.0, 100.0)])];
+        let layers = vec![
+            (0, vec![rect(0.0, 20.0, 0.0, 100.0)]),
+            (1, vec![rect(20.0, 180.0, 0.0, 100.0)]),
+            (2, vec![rect(180.0, 200.0, 0.0, 100.0)]),
+        ];
         let lines = interfaces(&layers);
         assert_eq!(lines.len(), 2, "{lines:?}");
         for (line, x) in lines.iter().zip([20.0, 180.0]) {
