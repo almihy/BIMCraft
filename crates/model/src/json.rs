@@ -241,7 +241,7 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>) -> Value {
                 .flat_map(|(loops, p)| loops.iter().flatten().map(|q| p.at(*q)))
                 .fold(m.elevation(r.level) + r.offset, f64::max);
             let outline = m.roof_outline(r);
-            let q = crate::quantities::roof(m, r);
+            let q = crate::quantities::roof_at(m, id, r);
             extra.insert("ridge".into(), json!(hundredth(ridge)));
             extra.insert("area_m2".into(), json!(m2(q.plan_area)));
             // Its surface, as Revit's roof Area, and what it holds through its thickness.
@@ -304,7 +304,7 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>) -> Value {
         }
         // Areas less the openings and shafts through them.
         Element::Floor(f) | Element::Toposolid(f) => {
-            let q = crate::quantities::floor(m, f);
+            let q = crate::quantities::floor_at(m, id, f);
             extra.insert("area_m2".into(), json!(m2(q.net_area)));
             extra.insert("thickness".into(), json!(m.types.floor.get(&f.type_name).map_or(0.0, |t| t.thickness)));
             // What it holds, less its openings and the shafts through it: under a variable layer, less where its top falls.
@@ -317,7 +317,7 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>) -> Value {
             extra.insert("pattern_angle".into(), json!(f.pattern_angle));
         }
         Element::Ceiling(cl) => {
-            let q = crate::quantities::ceiling(m, cl);
+            let q = crate::quantities::ceiling_at(m, id, cl);
             extra.insert("area_m2".into(), json!(m2(q.net_area)));
             extra.insert("volume_m3".into(), json!(m3(q.volume)));
             extra.insert("perimeter_m".into(), json!(m_of(q.perimeter)));

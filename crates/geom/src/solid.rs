@@ -20,6 +20,7 @@ use manifold_csg::{BoundingBox, CsgError, Manifold, MeshGL64, OpType};
 use crate::geom::v3::P3;
 use crate::geom::{self, P2};
 
+mod curved;
 mod mesh;
 mod slice;
 #[cfg(test)]
