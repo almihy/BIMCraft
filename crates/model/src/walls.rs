@@ -457,10 +457,6 @@ pub(crate) struct LayerGeometry {
 }
 
 impl LayerGeometry {
-    pub(crate) fn joined(&self) -> bool {
-        self.butt.iter().any(Option::is_some)
-    }
-
     pub(crate) fn band(&self, k: usize) -> Vec<P2> {
         let a = &self.lines[k];
         let b = &self.lines[k + 1];

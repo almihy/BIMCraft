@@ -20,8 +20,8 @@ pub enum Check {
     RunEnd,
     /// `render::plan_shows`: what a plan shows, among what may show in it, is what it shows among every element.
     PlanShows,
-    /// A section's wall layers: the walls near its line are every wall whose layers cross it.
-    SectionWalls,
+    /// A section's cut of a layer solid: one whose box the plane passes by is cut by none of it.
+    SectionLayers,
     /// A section's extent: the model's, from the components' farthest points.
     ModelExtent,
     /// A section's heights: those of every solid its look shows.
@@ -59,7 +59,7 @@ impl Check {
         Check::NearOutlines,
         Check::RunEnd,
         Check::PlanShows,
-        Check::SectionWalls,
+        Check::SectionLayers,
         Check::ModelExtent,
         Check::ViewHeights,
         Check::ViewReach,
