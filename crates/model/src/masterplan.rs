@@ -730,7 +730,7 @@ pub fn reshape_all(m: &mut Model) {
 
 /// What shapes the site: its elements, and the masses (buildings) its car parks keep clear of.
 fn relevant(e: Option<&Element>) -> bool {
-    matches!(e, Some(Element::Site(_) | Element::Mass(_)))
+    matches!(e, Some(Element::Site(_) | Element::Mass(_) | Element::SubDivision(_)))
 }
 
 /// A box [x0, y0, x1, y1].
@@ -805,6 +805,13 @@ fn site_box(s: &Site) -> Option<Bx> {
 fn element_box(e: &Element) -> Option<Bx> {
     match e {
         Element::Site(s) => site_box(s),
+        Element::SubDivision(sd) => {
+            let mut b = None;
+            for q in &sd.boundary {
+                add_point(&mut b, q.0, q.1);
+            }
+            b
+        }
         Element::Mass(ms) => {
             let mut b = None;
             for q in &ms.boundary {
@@ -816,8 +823,9 @@ fn element_box(e: &Element) -> Option<Bx> {
     }
 }
 
-fn level_of(e: &Element) -> Option<Guid> {
+fn level_of(m: &Model, e: &Element) -> Option<Guid> {
     match e {
+        Element::SubDivision(sd) => m.subdivision_level(sd),
         Element::Site(s) => Some(s.level),
         Element::Mass(ms) => Some(ms.level),
         _ => None,
@@ -879,7 +887,7 @@ fn plan(m: &Model, before: Option<&Model>, changed: &Changed) -> Vec<Update> {
         for id in &ids {
             for (e, now) in [(m.elements.get(*id), true), (before.and_then(|b| b.elements.get(*id)), false)] {
                 let Some(e) = e else { continue };
-                if let Some(level) = level_of(e) {
+                if let Some(level) = level_of(m, e) {
                     dirty.entry(level).or_default().push((*id, element_box(e), now && matches!(e, Element::Site(_))));
                 }
             }
@@ -988,6 +996,22 @@ fn plan(m: &Model, before: Option<&Model>, changed: &Changed) -> Vec<Update> {
                     (*id, parking::Obstacle { kind, level: level_name.clone(), outline: s.outline.clone() })
                 })
                 .collect();
+            // The sub-divisions on the level, by what they are (`lane/road`, `water/pond`…): a road is a way in, water
+            // and the rest are kept clear of, paving and lawns are driven over, as the masterplan's areas they were.
+            obstacles.extend(m.elements.iter().filter_map(|(id, e)| match e {
+                Element::SubDivision(sd) if !sd.role.is_empty() && m.subdivision_level(sd) == Some(level) => Some((
+                    *id,
+                    parking::Obstacle {
+                        kind: sd.role.clone(),
+                        level: level_name.clone(),
+                        outline: crate::ground::grouped(&m.subdivision_region(sd))
+                            .into_iter()
+                            .map(|(outer, holes)| Poly { outer, holes })
+                            .collect(),
+                    },
+                )),
+                _ => None,
+            }));
             obstacles.extend(masses.iter().filter(|(_, ms)| ms.level == level).map(|(id, ms)| {
                 (
                     *id,
