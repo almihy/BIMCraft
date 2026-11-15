@@ -2,9 +2,17 @@
 
 Arqiflow's "site option B" (10 November): the site and the building are drawn in one model and one editor. Until now
 Arqiflow kept its site and masterplan in an editor of its own and linked it under the building, halftone. Here they are
-BIMCraft elements and tools, in the **Massing & Site** tab, after Revit's where Revit has one (Property Line, Toposolid,
-Building Pad, Site Component, Parking Component, Planting) and after Arqiflow's masterplan where it does not (roads with
-a cross-section, car parks laid out, pitches, ponds, streams).
+BIMCraft elements and tools, in the **Massing & Site** tab, after Revit's where Revit has one (Property Line, Toposolid
+and its Sub-divisions, Excavate, Graded Region, Survey Point and Project Base Point, Site Component, Planting, Parking
+Component) and after Arqiflow's masterplan where it does not (roads from a centre line, car parks laid out, setbacks and
+the buildable line).
+
+**The site as Revit has it** (16 November, Arqiflow's `docs/superpowers/specs/2026-11-16-site-and-parking-as-revit.md`;
+the plan: `docs/site-as-revit-plan.md`): the masterplan's paving, terraces, landscape, water, streams, pitches, playgrounds
+and lanes are **sub-divisions** of the toposolid now; its trees, hedges, bike racks and play areas **family components** of
+the Planting and Site categories; the **Building Pad** is gone for Revit 2024's **Excavate**. A file of format 25 or
+older is converted as it is read (`ground::convert`, `ground::pads_to_floors`). Parking and ramps stay `site` elements
+until phase 2. The ground's code is `ground.rs` (model) and `commands/ground.rs` (core); tests `site_revit_tests.rs`.
 
 The behaviour, the figures and the rules are Arqiflow's, ported: `server/arqiflow/kernel/site_kinds.py` and `roads.py`
 (the server's), `web/components/editor/geom/site.ts` and `roads.ts` (the browser's, the same shapes within 5 mm, by the
@@ -41,16 +49,32 @@ plan. Tests: `masterplan_tests.rs`, and the site's payloads in `hostile_params_n
 - **`toposolid`** (`Element::Toposolid(Floor)`): Revit's Toposolid, the ground: a floor in a category of its own, so it
   is everything a floor is (its outline and openings, a floor type's thickness, `shape` points at their heights,
   `contours`, the Modify tools, Edit Boundary's sketch) and is drawn, scheduled and exported as the ground.
-- **`buildingpad`** (`Element::BuildingPad`, `masterplan::BuildingPad`): Revit's Building Pad: a flat pad along
-  `boundary`, its top `offset` over its `level`, a floor type's thickness under that (`Model::pad_span`).
+- **`subdivision`** (`Element::SubDivision`, `ground::SubDivision`): Revit's Sub-division: `type` (a floor type, its
+  first layer's material its look; the surfaces Asphalt, Paving, Grass, Water… are made when missing), `host` (the
+  toposolid's GUID), `boundary`, `openings`, `offset` (Subdivision Height: + raised, − sunk, excavating its host so far
+  under its surface), `name`, `role` (what the masterplan called it, `lane/road`, `landscape/lawn`…). Its region is clipped
+  to its host's; it follows the host's surface (`Model::subdivision_pieces`), moves, copies and is deleted with it.
+- **`surveypoint`**, **`projectbasepoint`** (`ground::BasePoint`): one of each. Shared coordinates are
+  `(east, north) + R(angle)·(p − survey.at)`, `height + (z − survey.elevation)` (`Model::shared`); `angle` is the project
+  base point's Angle to True North: project north is that far counter-clockwise from true north. Moving the survey point
+  clipped moves the shared coordinates with it; unclipped it moves alone. The georeference's numbers mirror them.
+- A toposolid's `excavated_by` (the floors, roofs and toposolids that excavate it) and `graded_from` (a graded region's
+  existing ground, kept as it was taken, its cut and fill worked out against it: `Model::cut_fill`).
+- A property line's `edges`: each segment's `setback`, `kind` (street, side, rear, corner), `street`, `street_width`;
+  `PropertyLine::buildable` is the plot less a strip along each segment as deep as its setback.
+- Planting and Site families (`family/site.rs`: Tree, Shrub, Hedge; Bike Rack, Bench, Play Equipment), loaded into a
+  project when first placed; a component of them stands on the ground under it (`ground::keep`).
 - **`mass`**: a building on the masterplan is a mass (BIMCraft's), with the masterplan's figures for it under `site`
   (`masterplan::MassSite`: `use`, `phase`, `source`, `ref`, `props`: storeys, floor_height, attic, roof, pitch, ridge,
   overhang, steps, arc, dormers, windows, entrance, materials, unit_type, label, …), its height storeys × floor height
   when it has storeys (the `building.floor_height` figure where it gives none; `masterplan::mass_height`).
 
-### What a building pad does
+### What excavates a toposolid (it was the building pad's)
 
-A pad cuts the toposolid on its level that it lies wholly inside (its corners inside the toposolid's outline, none of the
+`excavate {toposolid, by}` lists the cutters; `Model::toposolid_cut` lowers the ground within each one's footprint to its
+bottom, or cuts a hole through where its bottom is under the toposolid's, and sinks the sunk sub-divisions; the corners
+it makes stand on the ground as it was, so the slope round them stays. What follows is how the pad did it, kept for the
+record. A pad cut the toposolid on its level that it lay wholly inside (its corners inside the toposolid's outline, none of the
 toposolid's corners inside the pad, apart from the toposolid's openings and from the other pads that cut it;
 `Model::pads_in`). `Model::toposolid_cut` is the toposolid with each such pad's outline an opening, and with each of the
 pad's corners a shape point at the ground's height there, so the ground round the pad keeps its slope. The plan and the
@@ -253,8 +277,10 @@ Every one checks its keys (a key it doesn't take is refused, naming the ones it 
   heights over its level (shape points); `contours` mm apart (1000; 0 none); `type` a floor type (`Toposolid`, 1000 mm,
   made when the project hasn't one). Returns `id`, `area_m2`.
 - `edit_boundary {id, sketch?}` on a toposolid: its outline and openings redrawn, as a floor's, its shape points inside kept; `sketch::chain` joins sketch lines end to end into a path's `[x, y, bulge]` points (what the desktop's path tools send).
-- `building_pad {boundary, type?, level?, offset?}` (BP): `type` a floor type (`Building Pad`, 300 mm, made when
-  missing). Returns `id`, `area_m2` and `cuts` (the toposolids it cuts).
+- The ground's commands (`commands/ground.rs`; each one's params in `ALL`): `sub_division` (SD), `road`, `excavate`,
+  `remove_excavation`, `graded_region` (with `replace`, and `source` a project's text), `remove_point`, `base_point`,
+  `planting`, `site_component`, `property_line_table`, `property_line_edit`. `property_line` takes `table`, `start` and
+  `edges`. `site` refuses the kinds that are Revit's elements now, naming the command that makes each.
 - The Modify tools (move, copy, rotate, mirror, array, delete) move a site element's truth: its points, paths and
   control rings; its directions in the world (a pitch's, a bike rack's and a stall's `angle`, a car park's `direction`,
   a mass's `ridge` and arc); mirrored, an arc's bulge, a parking band's `sides` and its bays' sides and a lane's turning
