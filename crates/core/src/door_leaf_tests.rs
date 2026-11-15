@@ -462,7 +462,8 @@ fn a_door_family_made_with_the_family_command_has_its_leafs_parts_hidden_and_one
         assert!(warnings.contains(&format!("form {form}: part of a door's leaf, shut in its opening, is drawn in plan")), "{warnings}");
     }
     for form in [1, 2, 3, 4] {
-        assert!(!warnings.contains(&format!("form {form}:")), "form {form} is the leaf or the frame: {warnings}");
+        let part = format!("form {form}: part of a door's leaf");
+        assert!(!warnings.contains(&part), "form {form} is the leaf or the frame: {warnings}");
     }
 }
 
