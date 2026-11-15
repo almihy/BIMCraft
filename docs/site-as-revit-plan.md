@@ -258,7 +258,16 @@ too), `modify` (a sub-division's type, offset, name, role; a base point). Gone: 
 7. A Graded Region of a linked toposolid needs the link loaded to work out cut and fill; unloaded, it says unknown.
 8. Project north / true north as a plan view's orientation (a view turned by the angle) is not built in this phase: the
    angle is kept and used for shared coordinates, the georeference and the property line table's bearings.
+   **Follow-up (recorded in review, 16 November):** Revit's view property Orientation (Project North / True North) on
+   plan views: `PlanView.orientation` (`#[serde(default)]`), `render::plan_view` turning the drawing by
+   `Model::angle_to_true_north`, the egui's Properties row and the view's crop/annotation turned with it.
 9. Graded Region keeps a copy of the existing ground as it was taken (`graded_from.ground`), so cut and fill holds when
    the source is a link not loaded or a project passed as text (`source`); `replace` takes it again into the same toposolid.
-10. A table-entry dialog for Property Line's Edit Table is not built in the desktop: the command takes the table, and the
-   desktop sketches the line; its Properties show the buildable area.
+10. The desktop has Revit's Property Line dialogs (`crates/ui-egui/src/pltable.rs`): Create Property Line asks "by
+   entering distances and bearings" or "by sketching"; the Edit Table (distance, bearing, line or arc, radius, L/R;
+   Insert, Delete, Up, Down, Add Line to Close) and our Setbacks table (setback, faces street/side/rear/corner, street
+   name and width) open from a property line's Properties. Revit places a table-made line where the next click is; here
+   the table's Start (x, y) says where it begins.
+11. Visibility/Graphics: the survey point and project base point are hidden unless a view shows them (Site > Survey
+   Point / Project Base Point), as Revit's; Reveal Hidden Elements shows them in magenta; hiding Site hides them and the
+   property lines.
