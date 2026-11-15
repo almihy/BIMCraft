@@ -266,7 +266,7 @@ too), `modify` (a sub-division's type, offset, name, role; a base point). Gone: 
 10. The desktop has Revit's Property Line dialogs (`crates/ui-egui/src/pltable.rs`): Create Property Line asks "by
    entering distances and bearings" or "by sketching"; the Edit Table (distance, bearing, line or arc, radius, L/R;
    Insert, Delete, Up, Down, Add Line to Close) and our Setbacks table (setback, faces street/side/rear/corner, street
-   name and width) open from a property line's Properties. Revit places a table-made line where the next click is; here
+   name and width) open from the ribbon's Mode panel with a property line selected. Revit places a table-made line where the next click is; here
    the table's Start (x, y) says where it begins.
 11. Visibility/Graphics: the survey point and project base point are hidden unless a view shows them (Site > Survey
    Point / Project Base Point), as Revit's; Reveal Hidden Elements shows them in magenta; hiding Site hides them and the
