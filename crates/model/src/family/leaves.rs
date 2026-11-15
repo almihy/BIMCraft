@@ -11,7 +11,8 @@
 //! hidden in plan as it is. Built beside the leaf in a family that says nothing of them, seen from above they would be
 //! drawn shut in the opening, two lines a leaf's thickness apart and a mark for each handle, which reads as the leaf drawn
 //! shut. [`Family::leaf_parts`] finds them: a form that says nothing of its views and lies within a hidden leaf's width and
-//! height and within a lever's reach of its faces. [`Family::parts_hidden_with_leaves`] gives each its leaf's settings, as a
+//! height and within a lever's reach of its faces. [`Family::parts_hidden_with_leaves`] gives each its leaf's settings and no
+//! plan at all (a plan draws a part wholly below its cut by Top/Bottom, and a kick plate is one), as a
 //! project is read, whatever its format, and as the `family` command takes a family. It touches only a form that says
 //! nothing, so what a person set is kept (the Family Editor stores a setting it changed, even every box ticked, and a
 //! form that says nothing is one nobody set), and what it did is not done again. The frame's jambs, head and threshold lie
@@ -79,7 +80,8 @@ impl Family {
     }
 
     /// A swinging door's parts that are fixed to a leaf hidden in plan and say nothing of their own views, each with the
-    /// settings of the leaf it rides on, by their place in [`Family::forms`]: a solid that is no void or snapshot, of any
+    /// settings of the leaf it rides on and no plan at all (`plan`, `plan_top` and `plan_cut` off, as a plan draws a part
+    /// below its cut by Top/Bottom), by their place in [`Family::forms`]: a solid that is no void or snapshot, of any
     /// plane (a rose is a circle in the plane of the leaf), within the leaf's width and height and, across the wall, within
     /// the leaf's faces and [`REACH`] beyond them (a lever, a kick plate on each face, a rose, a hook). A leaf hidden in
     /// plan is one [`Family::shut_leaves`]' test accepts that says `plan: false`. Jambs, a head and a threshold lie outside
@@ -101,7 +103,9 @@ impl Family {
                         p.min[k] >= l.min[k] - reach && p.max[k] <= l.max[k] + reach
                     })
                 })?;
-                Some((p.index, *show))
+                // A plan draws a door's part wholly below its cut by Top/Bottom alone (`Piece::in_plan_cut`): a kick plate
+                // is hidden only with that off as well.
+                Some((p.index, Show { plan: false, plan_top: false, plan_cut: false, ..*show }))
             })
             .collect()
     }

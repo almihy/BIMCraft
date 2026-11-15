@@ -103,6 +103,18 @@ Front/Back, Left/Right, When cut in Plan/RCP) and Detail Levels, for a symbol it
 Default ticks every box, and OK sets `show` only when a box changed, so what said nothing keeps saying nothing. The `family`
 command sets the same with `form`/`symbol` patches (`{"id": …, "show": {"plan": true}}` merges; `null` takes it away).
 
+The parts fixed to a door's leaf go with it in plan (`family/leaves.rs`, `Family::leaf_parts`). In Revit a door's kick plates,
+levers and roses are the leaf's, and a plan draws none of them when it draws none of the leaf; built beside a leaf that says
+`plan: false` in a family that says nothing of them, they would be outlined seen from above, shut in the opening, and read as the
+leaf drawn shut. A swinging door family's form that says nothing, is no void or snapshot, and lies within a hidden leaf's width and
+height and within 120 mm of its faces (`REACH`) is given the leaf's settings with `plan`, `plan_top` and `plan_cut` off (a plan
+draws a door's part wholly below its cut by Top/Bottom alone); 3D, elevations and sections still draw it. A jamb, a head or a threshold
+lies outside the leaf's width or height and is left as it is. `Family::parts_hidden_with_leaves` does it as a project is read (every
+format, `Model::migrate`, after `leaves_drawn_open` for a file older than 22), as the `family` command takes a family and as a favorite
+family is loaded; it touches only a form with no `show`, so a form that says anything, even every box ticked (the Family Editor stores
+what it changed), is kept, and a project read again is as it was, so it has no format step. A part a person wants drawn in plan
+says `show: {}` (every box); one that says nothing is hidden again. `Family::problems` warns of a part left drawn in plan.
+
 A type of a category or of a family is renamed with `rename_type` (`Model::move_entry` moves it in its map, and `rename_entry` the
 library entry and every reference `Model::lib_refs_mut` visits, so it keeps its GUID). A type or a family goes with `delete_type` (one entry, refused while an element uses it, and for the last type of a category or of a family: a
 tool needs one to place) and `purge` (every entry of the kinds asked that nothing uses). Use is what `Model::lib_refs_mut` visits, the one place
