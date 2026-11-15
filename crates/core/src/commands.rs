@@ -8191,6 +8191,8 @@ fn floor(s: &mut Session, p: &Value) -> R {
         pattern_origin: P2(0.0, 0.0),
         pattern_angle: 0.0,
         contours,
+        excavated_by: Vec::new(),
+        graded_from: None,
     }));
     Ok(json!({"id": id, "area_m2": area}))
 }

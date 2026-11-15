@@ -34,6 +34,7 @@ pub mod fixtures;
 pub mod gltf;
 pub mod glue;
 pub mod graphics;
+pub mod ground;
 pub mod groups;
 pub mod ids;
 pub mod ifc;

@@ -6,7 +6,8 @@
 
 use super::{Drawing, Part, Prim, Rgb};
 use crate::geom::{self, P2};
-use crate::masterplan::{self, BuildingPad, PropertyLine, Site};
+use crate::ground::{BasePoint, SubDivision};
+use crate::masterplan::{self, PropertyLine, Site};
 use crate::model::{Guid, Id, Model};
 use crate::site::Poly;
 use crate::styles::BY_CATEGORY;
@@ -221,29 +222,78 @@ fn bounds(polys: &[Poly]) -> Option<(P2, P2)> {
     Some(it.fold((first, first), |(lo, hi), q| (P2(lo.0.min(q.0), lo.1.min(q.1)), P2(hi.0.max(q.0), hi.1.max(q.1)))))
 }
 
-/// A property line: dash-dot, as Revit draws one.
+/// A property line: dash-dot, as Revit draws one; and, inside it, the buildable line its setbacks draw, thin and dashed.
 pub(super) fn property_line(d: &mut Drawing, id: Id, p: &PropertyLine) {
     d.own(Some(id));
     d.part(Part::Projection);
     let px = p.ring().iter().map(|q| d.view.px(*q)).collect();
     d.stroke(px, BY_CATEGORY, Rgb(25, 25, 25), Some(vec![14.0, 3.0, 2.0, 3.0]), true);
+    if p.edges.iter().any(|e| e.setback > 0.0) {
+        for ring in p.buildable() {
+            let px = ring.iter().map(|q| d.view.px(*q)).collect();
+            d.stroke(px, BY_CATEGORY, Rgb(200, 60, 40), Some(vec![6.0, 4.0]), true);
+        }
+    }
     d.own(None);
 }
 
-/// A building pad: its outline over a pale fill, at its own height.
-pub(super) fn building_pad(d: &mut Drawing, id: Id, p: &BuildingPad) {
+/// A sub-division: its region filled in its surface's colour and outlined, over its host's fill.
+pub(super) fn subdivision(d: &mut Drawing, m: &Model, id: Id, s: &SubDivision) {
+    let region = m.subdivision_region(s);
+    if region.is_empty() {
+        return;
+    }
+    let (fill, line, _) = m.subdivision_colours(s);
     d.own(Some(id));
     d.part(Part::Projection);
-    d.fill(std::slice::from_ref(&p.boundary), Rgb(236, 234, 228));
-    d.line(&p.boundary, BY_CATEGORY, Rgb(25, 25, 25), true);
+    let rings: Vec<Vec<(f32, f32)>> = region.iter().map(|r| r.iter().map(|q| d.view.px(*q)).collect()).collect();
+    d.push(Prim::fill(rings, Rgb(fill[0], fill[1], fill[2])));
+    for r in &region {
+        let px = r.iter().map(|q| d.view.px(*q)).collect();
+        d.stroke(px, BY_CATEGORY, Rgb(line[0], line[1], line[2]), None, true);
+    }
     d.own(None);
 }
 
-/// Every site element, property line and building pad of `elements` on `level` the view shows, the site's areas first
-/// (by layer, then in the order they were made), then the pads and the property lines over them.
+/// The survey point (a triangle in a circle, a clip beside it when clipped) or the project base point (a circle with a
+/// cross), as Revit draws them, a fixed size on the paper.
+pub(super) fn base_point(d: &mut Drawing, id: Id, b: &BasePoint, survey: bool) {
+    d.own(Some(id));
+    d.part(Part::Projection);
+    let (x, y) = d.view.px(b.at);
+    let r = 9.0_f32;
+    let circle: Vec<(f32, f32)> = (0..24)
+        .map(|k| {
+            let t = std::f32::consts::TAU * k as f32 / 24.0;
+            (x + r * t.cos(), y + r * t.sin())
+        })
+        .collect();
+    let ink = Rgb(40, 40, 40);
+    d.stroke(circle, BY_CATEGORY, ink, None, true);
+    if survey {
+        d.stroke(vec![(x, y - r), (x + r * 0.866, y + r * 0.5), (x - r * 0.866, y + r * 0.5)], BY_CATEGORY, ink, None, true);
+        if b.clipped {
+            d.stroke(vec![(x + r + 3.0, y - r), (x + r + 9.0, y - r), (x + r + 9.0, y - r + 6.0)], BY_CATEGORY, ink, None, false);
+        }
+    } else {
+        d.stroke(vec![(x - r, y), (x + r, y)], BY_CATEGORY, ink, None, false);
+        d.stroke(vec![(x, y - r), (x, y + r)], BY_CATEGORY, ink, None, false);
+    }
+    d.own(None);
+}
+
+/// Every sub-division, site element, property line and base point of `elements` on `level` the view shows: the
+/// sub-divisions on the ground first, then the site's areas (by layer, then in the order they were made), then the
+/// property lines and the base points over them.
 pub(super) fn draw(d: &mut Drawing, m: &Model, level: Guid, elements: &[(Id, &crate::model::Element)], shown: &dyn Fn(Id) -> bool) {
     use crate::model::Element;
-    let _ = m;
+    for (id, e) in elements.iter().filter(|(id, _)| shown(*id)) {
+        if let Element::SubDivision(sd) = e
+            && m.subdivision_level(sd) == Some(level)
+        {
+            subdivision(d, m, *id, sd);
+        }
+    }
     // Ground first, then what lies on it: lawns, paving and water; hedges; lanes; roads; parking; trees over it all.
     let rank = |s: &Site| match s.kind.as_str() {
         "hedge" => 1,
@@ -267,8 +317,9 @@ pub(super) fn draw(d: &mut Drawing, m: &Model, level: Guid, elements: &[(Id, &cr
     }
     for (id, e) in elements.iter().filter(|(id, _)| shown(*id)) {
         match e {
-            Element::BuildingPad(p) if p.level == level => building_pad(d, *id, p),
             Element::PropertyLine(p) if p.level == level => property_line(d, *id, p),
+            Element::SurveyPoint(b) => base_point(d, *id, b, true),
+            Element::ProjectBasePoint(b) => base_point(d, *id, b, false),
             _ => {}
         }
     }

@@ -23,7 +23,7 @@ use crate::schedule;
 /// The categories a plan, a section or a 3D view draws, and so may hide and override: those of the
 /// model, then those of the annotation. A family component is of its family's category (see [`COMPONENTS`]); `component`, which
 /// names them all, is no row of its own (see [`COMPONENT`]).
-pub const MODEL: [&str; 49] = [
+pub const MODEL: [&str; 53] = [
     "wall",
     "floor",
     "ceiling",
@@ -65,14 +65,19 @@ pub const MODEL: [&str; 49] = [
     "voiceoutlet",
     "patchpanel",
     "rack",
+    "planting",
+    "sitecomponent",
     "stair",
     "ramp",
     "railing",
     "roof",
-    // The site and masterplan (masterplan.rs): Revit's Toposolid, Pads, Property Lines, and the site's own.
+    // The site (masterplan.rs, ground.rs): Revit's Toposolid and its Sub-divisions, Property Lines, the Survey Point and
+    // Project Base Point, and the masterplan's own (parking).
     "toposolid",
-    "buildingpad",
+    "subdivision",
     "propertyline",
+    "surveypoint",
+    "projectbasepoint",
     "site",
 ];
 /// What every family component is, named as a whole: an override, a view filter, a view template or a schedule that names
@@ -81,7 +86,7 @@ pub const MODEL: [&str; 49] = [
 pub const COMPONENT: &str = "component";
 /// The categories of family components, the names a family's category goes by in a file: one row each in Visibility/Graphics
 /// and Object Styles, in [`MODEL`]. A door's or a window's family is placed in a wall as a door or a window, so it has none.
-pub const COMPONENTS: [&str; 18] = [
+pub const COMPONENTS: [&str; 20] = [
     "furniture",
     "casework",
     "plumbing",
@@ -100,6 +105,8 @@ pub const COMPONENTS: [&str; 18] = [
     "voiceoutlet",
     "patchpanel",
     "rack",
+    "planting",
+    "sitecomponent",
 ];
 pub const ANNOTATION: [&str; 10] = ["dimension", "tag", "text", "line", "region", "spot", "grid", "level", "section", "elevation"];
 /// The point clouds, which views hide and override as Revit's Visibility/Graphics does on a tab of their own: not a model
@@ -128,6 +135,12 @@ pub struct Sub {
 pub const SUBCATEGORIES: &[Sub] = &[
     Sub { key: "roomreference", parent: "room", name: ui_msg!("Reference"), off: true },
     Sub { key: "roomseparator", parent: "room", name: ui_msg!("Room Separation Lines"), off: false },
+    // As Revit's: a toposolid's sub-divisions under Toposolid; the property lines, the survey point and the project base
+    // point under Site, the two points hidden unless a view shows them.
+    Sub { key: "subdivision", parent: "toposolid", name: ui_msg!("Sub-divisions"), off: false },
+    Sub { key: "propertyline", parent: "sitecomponent", name: ui_msg!("Property Lines"), off: false },
+    Sub { key: "surveypoint", parent: "sitecomponent", name: ui_msg!("Survey Point"), off: true },
+    Sub { key: "projectbasepoint", parent: "sitecomponent", name: ui_msg!("Project Base Point"), off: true },
 ];
 
 /// The subcategory `key` is, if it is one.
@@ -172,6 +185,8 @@ pub fn component_category(category: crate::family::Category) -> Option<&'static 
         C::VoiceOutlet => "voiceoutlet",
         C::PatchPanel => "patchpanel",
         C::Rack => "rack",
+        C::Planting => "planting",
+        C::SiteComponent => "sitecomponent",
         C::Door | C::Window => return None,
     })
 }

@@ -44,7 +44,7 @@ pub fn element(kind: &str, v: &Value) -> Vec<String> {
         "text" => Note, "line" => DetailLine, "region" => FilledRegion, "detailgroup" => DetailGroup, "repeatingdetail" => RepeatingDetail, "spot" => Spot, "schedule" => Schedule, "view3d" => View3D,
         "planview" => PlanView, "link" => Link, "pointcloud" => PointCloud, "cadimport" => CadImport, "image" => crate::raster::ImageInstance,
         "site" => crate::masterplan::Site, "propertyline" => crate::masterplan::PropertyLine, "toposolid" => Floor,
-        "buildingpad" => crate::masterplan::BuildingPad,
+        "subdivision" => crate::ground::SubDivision, "surveypoint" => crate::ground::BasePoint, "projectbasepoint" => crate::ground::BasePoint,
     }
 }
 

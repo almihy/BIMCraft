@@ -259,6 +259,8 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
                         pattern_origin: Default::default(),
                         pattern_angle: 0.0,
                         contours: 0.0,
+                        excavated_by: Vec::new(),
+                        graded_from: None,
                     };
                     let id = cx.model.insert(Element::Floor(floor));
                     cx.from.insert(id, format!("Floor {}", r.id));

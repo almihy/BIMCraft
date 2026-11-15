@@ -392,6 +392,8 @@ pub(super) fn toposolid(s: &mut Session, p: &Value) -> R {
         sketch: Vec::new(),
         shape,
         contours,
+        excavated_by: Vec::new(),
+        graded_from: None,
         params: BTreeMap::new(),
     };
     let area = geom::area(&f.boundary).abs();

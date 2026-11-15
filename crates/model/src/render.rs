@@ -737,7 +737,6 @@ fn plan_filter<'a>(
             Element::RoomSeparator(x) => x.level == level,
             Element::Site(x) => x.level == level,
             Element::PropertyLine(x) => x.level == level,
-            Element::BuildingPad(x) => x.level == level,
             Element::Rebar(_) => m.level_of(e) == Some(level),
             Element::Ceiling(_) => false,
             // A 3D view's own dimension shows in no plan.
@@ -1178,7 +1177,7 @@ fn plan_shows_among(m: &Model, key: Guid, among: bool) -> Vec<P2> {
             }
             Element::Site(st) if st.level == level => extent.extend(st.outline.iter().flat_map(|p| p.outer.iter().copied())),
             Element::PropertyLine(pl) if pl.level == level => extent.extend(pl.ring()),
-            Element::BuildingPad(bp) if bp.level == level => extent.extend(bp.boundary.iter().copied()),
+            Element::SubDivision(sd) if m.subdivision_level(sd) == Some(level) => extent.extend(sd.boundary.iter().copied()),
             Element::Room(r) if r.level == level => extent.push(r.point),
             Element::Mass(ms) if m.mass_cut_by(ms, r.cut) => extent.extend(m.mass_outline(ms, r.cut)),
             Element::Component(c) if c.level == level => {
@@ -1270,7 +1269,7 @@ pub fn sketch(m: &Model, view: View, id: Id, e: &Element) -> Drawing {
         // A site tool's preview: the element as its plan draws it.
         Element::Site(st) => site::site(&mut d, id, st),
         Element::PropertyLine(pl) => site::property_line(&mut d, id, pl),
-        Element::BuildingPad(bp) => site::building_pad(&mut d, id, bp),
+        Element::SubDivision(sd) => site::subdivision(&mut d, m, id, sd),
         _ => {}
     }
     let annotation = on.is_some() || matches!(e, Element::Section(_) | Element::Elevation(_));

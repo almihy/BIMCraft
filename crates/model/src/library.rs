@@ -1483,7 +1483,7 @@ impl crate::model::Element {
             Element::Floor(x) => f(&Kind::Type(category), &mut x.type_name),
             // A toposolid and a building pad are of the floor types, as Revit's of their own floor-like types.
             Element::Toposolid(x) => f(&Kind::Type("floor".into()), &mut x.type_name),
-            Element::BuildingPad(x) => f(&Kind::Type("floor".into()), &mut x.type_name),
+            Element::SubDivision(x) => f(&Kind::Type("floor".into()), &mut x.type_name),
             Element::Ceiling(x) => f(&Kind::Type(category), &mut x.type_name),
             Element::Roof(x) => f(&Kind::Type(category), &mut x.type_name),
             Element::Railing(x) => f(&Kind::Type(category), &mut x.type_name),
@@ -1706,6 +1706,17 @@ impl Model {
     /// an older build opens it.
     pub fn written_format(&self) -> u32 {
         use crate::model::Element;
+        // What a build that reads up to 25 refuses: the site as Revit has it.
+        let site = self.elements.values().any(|e| match e {
+            Element::SubDivision(_) | Element::SurveyPoint(_) | Element::ProjectBasePoint(_) => true,
+            Element::Toposolid(f) => !f.excavated_by.is_empty() || f.graded_from.is_some(),
+            Element::PropertyLine(p) => !p.edges.is_empty(),
+            _ => false,
+        }) || self.families.values().any(|f| matches!(f.category, crate::family::Category::Planting | crate::family::Category::SiteComponent))
+            || self.elements.values().any(|e| e.params().is_some_and(|p| p.keys().any(|k| crate::ground::reserved(k))));
+        if site {
+            return crate::model::SITE_FORMAT;
+        }
         // What a build that reads up to 24 refuses as a field it doesn't know (it holds no such fields).
         let styled = !self.subcategory_styles.is_empty()
             || self.families.values().any(|f| {

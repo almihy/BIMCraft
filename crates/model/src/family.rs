@@ -26,6 +26,8 @@ mod leaves;
 mod parametric;
 pub mod revit;
 mod shapes;
+pub mod site;
+pub use site::site_library;
 mod validate;
 
 pub use parametric::{
@@ -73,12 +75,17 @@ pub enum Category {
     Rack,
     Door,
     Window,
+    /// A tree, a shrub, a hedge: Revit's Planting.
+    Planting,
+    /// A bike rack, a bench, play equipment: Revit's Site (components).
+    #[serde(rename = "sitecomponent")]
+    SiteComponent,
 }
 
 impl Category {
     /// The categories a component may be of (a door's or a window's family is placed in a wall), in the order an import reads
     /// them.
-    pub const PLACED: [Category; 17] = [
+    pub const PLACED: [Category; 19] = [
         Category::Furniture,
         Category::Plumbing,
         Category::Drain,
@@ -96,6 +103,8 @@ impl Category {
         Category::VoiceOutlet,
         Category::PatchPanel,
         Category::Rack,
+        Category::Planting,
+        Category::SiteComponent,
     ];
 
     /// How IFC writes a component of it: the product's class, its predefined type, and the object type a proxy carries where
@@ -120,6 +129,8 @@ impl Category {
             Category::Earthing => ("IFCBUILDINGELEMENTPROXY", ".USERDEFINED.", Some("EarthingRod")),
             Category::InspectionBox => ("IFCBUILDINGELEMENTPROXY", ".USERDEFINED.", Some("InspectionBox")),
             Category::Lighting => ("IFCLIGHTFIXTURE", OPEN, None),
+            Category::Planting => ("IFCGEOGRAPHICELEMENT", OPEN, None),
+            Category::SiteComponent => ("IFCFURNITURE", OPEN, None),
             Category::Generic | Category::Door | Category::Window => ("IFCBUILDINGELEMENTPROXY", OPEN, None),
         }
     }

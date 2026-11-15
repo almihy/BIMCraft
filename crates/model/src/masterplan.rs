@@ -16,8 +16,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::geom::{self, P2};
-use crate::model::{Changed, Element, Floor, Guid, Id, MAX_COORD, MAX_TEXT, Model, ShapePoint};
+use crate::geom::P2;
+use crate::model::{Changed, Element, Guid, Id, MAX_COORD, MAX_TEXT, Model};
 use crate::phasing;
 use crate::prim::Rgb;
 use crate::site::{Poly, Props, parking, shapes};
@@ -126,8 +126,30 @@ pub struct PropertyLine {
     pub name: String,
     pub level: Guid,
     pub points: Vec<[f64; 3]>,
+    /// Each segment's setback and what it faces (from point i to point i + 1, the last back to the first): our addition
+    /// to Revit's, which the buildable line is drawn from ([`PropertyLine::buildable`]). None given, none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub edges: Vec<Edge>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub params: BTreeMap<String, Value>,
+}
+
+/// The kinds of a plot's edge: what it faces.
+pub const EDGE_KINDS: [&str; 4] = ["street", "side", "rear", "corner"];
+
+/// A property line's segment as planning sees it: how far a building keeps back from it (`setback`, mm), what it faces
+/// (`kind`: street, side, rear or corner; empty, not said), and, on a street, the street's name and width.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Edge {
+    #[serde(default, skip_serializing_if = "crate::model::is_zero")]
+    pub setback: f64,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub street: String,
+    #[serde(default, skip_serializing_if = "crate::model::is_zero")]
+    pub street_width: f64,
 }
 
 impl PropertyLine {
@@ -152,6 +174,39 @@ impl PropertyLine {
         out
     }
 
+    /// Segment `i`'s edge: its own, or none (no setback).
+    pub fn edge(&self, i: usize) -> Edge {
+        self.edges.get(i).cloned().unwrap_or_default()
+    }
+
+    /// Its buildable line: the plot less a strip along each segment as deep as that segment's setback (every point at
+    /// least each segment's setback from it), as rings (outlines counter-clockwise, holes clockwise). The plot itself when
+    /// no segment has a setback; empty when the setbacks leave nothing.
+    pub fn buildable(&self) -> Vec<Vec<P2>> {
+        use crate::site::shapes::poly;
+        let n = self.points.len();
+        let plot = vec![poly::ccw(self.ring().iter().map(|q| [q.0, q.1]).collect())];
+        let mut strips: Vec<poly::Ring> = Vec::new();
+        for i in 0..n {
+            let d = self.edge(i).setback;
+            if !(d.is_finite() && d > 0.0) {
+                continue;
+            }
+            let (p, q) = (self.points[i], self.points[(i + 1) % n]);
+            let piece: Vec<[f64; 2]> =
+                shapes::arc_points([p[0], p[1]], [q[0], q[1]], p[2], shapes::ARC_TOLERANCE).into_iter().collect();
+            let mut prev = [p[0], p[1]];
+            for c in piece {
+                strips.push(capsule(prev, c, d.min(MAX_COORD)));
+                prev = c;
+            }
+        }
+        if strips.is_empty() {
+            return plot.iter().map(|r| r.iter().map(|q| P2(q[0], q[1])).collect()).collect();
+        }
+        poly::difference(&plot, &poly::union(&strips)).iter().map(|r| r.iter().map(|q| P2(q[0], q[1])).collect()).collect()
+    }
+
     /// Its area, mm², its arcs' exactly: the polygon of its points and each arc's segment.
     pub fn area(&self) -> f64 {
         let n = self.points.len();
@@ -169,21 +224,6 @@ impl PropertyLine {
         }
         signed.abs()
     }
-}
-
-/// Revit's Building Pad: a flat pad along `boundary` with its top `offset` over its level, a floor type's thickness
-/// under that, which cuts the toposolid it lies in ([`Model::toposolid_cut`]).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct BuildingPad {
-    #[serde(rename = "type")]
-    pub type_name: String,
-    pub level: Guid,
-    pub boundary: Vec<P2>,
-    #[serde(default, skip_serializing_if = "crate::model::is_zero")]
-    pub offset: f64,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub params: BTreeMap<String, Value>,
 }
 
 /// The project's figures, a firm's own (`Model::site_figures`), over Arqiflow's.
@@ -585,8 +625,27 @@ pub fn check_mass_site(who: &str, s: &MassSite) -> Result<(), String> {
     check_props("mass", &s.props).map_err(|e| format!("{who}: {e}"))
 }
 
+/// The strip round a segment from `a` to `b`, `d` wide on each side, with round ends: every point within `d` of it.
+fn capsule(a: [f64; 2], b: [f64; 2], d: f64) -> crate::site::shapes::poly::Ring {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let len = dx.hypot(dy);
+    let base = if len > 1e-9 { dy.atan2(dx) } else { 0.0 };
+    let half = 12;
+    let mut ring = Vec::with_capacity(2 * half + 2);
+    // Round the far end from the right side to the left, then the near end back.
+    for k in 0..=half {
+        let t = base - std::f64::consts::FRAC_PI_2 + std::f64::consts::PI * k as f64 / half as f64;
+        ring.push([b[0] + d * t.cos(), b[1] + d * t.sin()]);
+    }
+    for k in 0..=half {
+        let t = base + std::f64::consts::FRAC_PI_2 + std::f64::consts::PI * k as f64 / half as f64;
+        ring.push([a[0] + d * t.cos(), a[1] + d * t.sin()]);
+    }
+    ring
+}
+
 /// `Model::check`'s rules for a property line: three points or more (up to the model's most), finite, bulges finite,
-/// enclosing an area.
+/// enclosing an area; no more edges than segments, each a setback within 1 km, a kind of [`EDGE_KINDS`], short texts.
 pub fn check_property_line(who: &str, p: &PropertyLine) -> Result<(), String> {
     text(who, "name", &p.name, MAX_TEXT)?;
     if !(3..=crate::model::MAX_POINTS).contains(&p.points.len()) {
@@ -598,6 +657,21 @@ pub fn check_property_line(who: &str, p: &PropertyLine) -> Result<(), String> {
     if p.area() < 1.0 {
         return Err(format!("{who}: its points enclose no area; give the plot's corners in order round it"));
     }
+    if p.edges.len() > p.points.len() {
+        return Err(format!("{who}: it has {} segments, and {} edges are given", p.points.len(), p.edges.len()));
+    }
+    for (i, e) in p.edges.iter().enumerate() {
+        if !(e.setback.is_finite() && (0.0..=1.0e6).contains(&e.setback)) {
+            return Err(format!("{who}: edge {i}'s setback is a length from 0 to 1 km, not {}", e.setback));
+        }
+        if !(e.street_width.is_finite() && (0.0..=1.0e6).contains(&e.street_width)) {
+            return Err(format!("{who}: edge {i}'s street width is a length from 0 to 1 km, not {}", e.street_width));
+        }
+        if !e.kind.is_empty() && !EDGE_KINDS.contains(&e.kind.as_str()) {
+            return Err(format!("{who}: edge {i} faces one of {}; not `{}`", EDGE_KINDS.join(", "), e.kind));
+        }
+        text(who, "edge's street name", &e.street, MAX_TEXT)?;
+    }
     Ok(())
 }
 
@@ -607,6 +681,8 @@ pub fn check_property_line(who: &str, p: &PropertyLine) -> Result<(), String> {
 pub enum Update {
     Site { id: Id, site: Box<Site> },
     Mass { id: Id, height: f64, phase: String, params: BTreeMap<String, Value> },
+    /// The ground's: planting on it, the georeference from the base points (`ground::keep`).
+    Ground(crate::ground::Update),
 }
 
 /// The commands that shape what they make or change themselves (to answer with it), which [`keep`] then leaves alone.
@@ -617,13 +693,14 @@ pub const SHAPES_ITSELF: &[&str] = &["site", "site_edit"];
 /// [`apply`] then changes, none when nothing needs it (so the engine copies the model only when it must).
 pub fn keep(m: &Model, before: &Model) -> Vec<Update> {
     let changed = what_changed(m, before);
-    plan(m, Some(before), &changed)
+    let mut out = plan(m, Some(before), &changed);
+    out.extend(crate::ground::keep(m, before).into_iter().map(Update::Ground));
+    out
 }
 
 /// [`keep`] of the model alone, as a command that shapes itself runs it: `before` is the model before the command.
 pub fn keep_model(m: &mut Model, before: &Model) {
-    let changed = what_changed(m, before);
-    let updates = plan(m, Some(before), &changed);
+    let updates = keep(m, before);
     if !updates.is_empty() {
         apply(m, updates);
     }
@@ -962,66 +1039,8 @@ pub fn apply(m: &mut Model, updates: Vec<Update>) {
                     }
                 }
             }
+            Update::Ground(u) => crate::ground::apply(m, vec![u]),
         }
-    }
-}
-
-// ====================================================================== the toposolid and its pads
-impl Model {
-    /// The building pads that cut toposolid `f`: on its level, each wholly inside its outline and outside its openings
-    /// and the other pads taken.
-    pub fn pads_in(&self, f: &Floor) -> Vec<(Id, &BuildingPad)> {
-        let mut out: Vec<(Id, &BuildingPad)> = Vec::new();
-        for (id, e) in self.elements.iter() {
-            let Element::BuildingPad(p) = e else { continue };
-            if p.level != f.level || p.boundary.len() < 3 {
-                continue;
-            }
-            let apart =
-                |ring: &[P2]| !p.boundary.iter().any(|q| geom::contains(ring, *q)) && !ring.iter().any(|q| geom::contains(&p.boundary, *q));
-            let inside = p.boundary.iter().all(|q| geom::contains(&f.boundary, *q))
-                && !f.boundary.iter().any(|q| geom::contains(&p.boundary, *q))
-                && f.openings.iter().all(|o| apart(o))
-                && out.iter().all(|(_, t)| apart(&t.boundary));
-            if inside {
-                out.push((*id, p));
-            }
-        }
-        out
-    }
-
-    /// Toposolid `f` as its building pads cut it: each pad's outline an opening of it, its corners on the terrain where it
-    /// is shaped, so the ground round a pad stays as it was. The pad fills the hole at its own height (Revit's pad cuts
-    /// the toposolid down, or fills it up, to its bottom; here the hole runs through the toposolid's whole depth and the
-    /// pad is a slab in it).
-    pub fn toposolid_cut(&self, f: &Floor) -> Floor {
-        let pads = self.pads_in(f);
-        if pads.is_empty() {
-            return f.clone();
-        }
-        let mut cut = f.clone();
-        for (_, p) in pads {
-            if !f.shape.is_empty() {
-                for q in &p.boundary {
-                    if !cut.shape.points.iter().any(|s| s.at.dist(*q) <= crate::model::TOL) {
-                        cut.shape.points.push(ShapePoint { at: *q, z: self.shape_height(f, *q), ..Default::default() });
-                    }
-                }
-            }
-            let mut ring = p.boundary.clone();
-            if geom::area(&ring) > 0.0 {
-                ring.reverse();
-            }
-            cut.openings.push(ring);
-        }
-        cut
-    }
-
-    /// A building pad's top and bottom, mm: its level's elevation and offset, and its type's thickness under that.
-    pub fn pad_span(&self, p: &BuildingPad) -> (f64, f64) {
-        let top = self.elevation(p.level) + p.offset;
-        let t = self.types.floor.get(&p.type_name).map_or(300.0, |t| t.thickness);
-        (top - t, top)
     }
 }
 

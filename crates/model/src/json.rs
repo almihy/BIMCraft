@@ -331,12 +331,25 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>, measures: boo
             let ring = pl.ring();
             let perimeter: f64 = ring.iter().zip(ring.iter().cycle().skip(1)).map(|(a, b)| a.dist(*b)).sum();
             extra.insert("perimeter_m".into(), json!((perimeter / 10.0).round() / 100.0));
+            // The buildable line its setbacks draw, and its area.
+            let buildable = pl.buildable();
+            let area: f64 = buildable.iter().map(|r| geom::area(r)).sum::<f64>().max(0.0);
+            extra.insert("buildable".into(), json!(buildable));
+            extra.insert("buildable_area_m2".into(), json!(m2(area)));
         }
-        Element::BuildingPad(bp) => {
-            let (bottom, top) = m.pad_span(bp);
-            extra.insert("area_m2".into(), json!(m2(geom::area(&bp.boundary).abs())));
-            extra.insert("thickness".into(), json!(top - bottom));
-            extra.insert("elevation".into(), json!(top));
+        Element::SubDivision(sd) => {
+            extra.insert("area_m2".into(), json!(m2(m.subdivision_area(sd))));
+            if let Some(level) = m.subdivision_level(sd) {
+                extra.insert("level".into(), json!(level));
+            }
+            extra.insert("offset".into(), json!(sd.offset));
+            extra.insert("region".into(), json!(m.subdivision_region(sd)));
+        }
+        Element::SurveyPoint(b) | Element::ProjectBasePoint(b) => {
+            let [east, north, height] = m.shared(b.at, b.elevation);
+            let round = |v: f64| (v * 1000.0).round() / 1000.0;
+            extra.insert("shared".into(), json!({"east": round(east), "north": round(north), "height": round(height)}));
+            extra.insert("angle_to_true_north".into(), json!(m.angle_to_true_north()));
         }
         // Areas less the openings and shafts through them.
         Element::Floor(f) | Element::Toposolid(f) => {
@@ -349,6 +362,15 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>, measures: boo
             // Where its top's model pattern starts and how far it's turned: shown at their defaults too, to be set by modify.
             extra.insert("pattern_origin".into(), json!(f.pattern_origin));
             extra.insert("pattern_angle".into(), json!(f.pattern_angle));
+            // A graded region's cut and fill against the existing ground (Revit's Cut, Fill and Net Cut/Fill), m³.
+            if let Element::Toposolid(_) = e
+                && let Some((cut, fill)) = m.cut_fill(f)
+            {
+                let r = |v: f64| (v * 1000.0).round() / 1000.0;
+                extra.insert("cut_m3".into(), json!(r(cut)));
+                extra.insert("fill_m3".into(), json!(r(fill)));
+                extra.insert("net_m3".into(), json!(r(cut - fill)));
+            }
         }
         Element::Ceiling(cl) => {
             let q = crate::quantities::ceiling_areas_at(m, cl);

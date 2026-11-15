@@ -310,7 +310,7 @@ fn draws(e: &Element) -> bool {
             Element::Wall(_)
                 | Element::Floor(_)
                 | Element::Toposolid(_)
-                | Element::BuildingPad(_)
+                | Element::SubDivision(_)
                 | Element::Site(_)
                 | Element::Ceiling(_)
                 | Element::Roof(_)

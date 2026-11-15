@@ -153,9 +153,16 @@ pub const MIN_CONTOURS: f64 = 50.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 25;
-/// [`FORMAT`], by what it brought: line weights, colours and patterns of family subcategories, and measured void cuts.
-pub const STYLES_FORMAT: u32 = FORMAT;
+pub const FORMAT: u32 = 26;
+/// [`FORMAT`], by what it brought: the site as Revit has it (sub-divisions, survey and project base points, toposolids
+/// excavated and graded, property lines' edges, planting and site families). The masterplan's areas, trees and
+/// furniture of a file of 25 or older are converted, and its building pads made excavating floors, as it is read
+/// ([`crate::ground::convert`]); a build that reads up to 25 would refuse the new categories, not say "saved by a newer
+/// BIMCraft".
+pub const SITE_FORMAT: u32 = FORMAT;
+/// The format a project is written in when it needs nothing of [`SITE_FORMAT`]'s but has families' subcategories styled
+/// or measured void cuts.
+pub const STYLES_FORMAT: u32 = 25;
 /// The format a project is written in when it needs nothing of [`STYLES_FORMAT`]'s but a family from Revit stays parametric
 /// (references, dimensions, nested parts, a catalog, blends, sweeps, holes, arcs, Revit's result kept beside it), which a build
 /// that reads up to 23 would misread ([`Model::written_format`]).
@@ -673,8 +680,14 @@ pub struct Floor {
     /// stands at a whole number of them over zero, every fifth heavier, and not its creases. 0, none: a floor's creases.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub contours: f64,
-    // ponytail: a toposolid's own category (Revit's Toposolid) when the site is modelled here (site option B); a floor that
-    // draws contours is enough for a linked site's ground.
+    /// A toposolid's: the floors, roofs and toposolids that excavate it (Revit 2024's Excavate), by GUID
+    /// ([`Model::toposolid_cut`]). A floor has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub excavated_by: Vec<Guid>,
+    /// A graded region's (a toposolid copied from the existing ground, Revit 2026's Graded Region): the existing ground,
+    /// which its cut and fill is worked out against ([`Model::cut_fill`]). A floor has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graded_from: Option<crate::ground::GradedFrom>,
     /// Its values of the project's parameters, by name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub params: BTreeMap<String, serde_json::Value>,
@@ -2220,7 +2233,7 @@ impl Element {
     /// Its shape, when it's of a kind that has one: a floor's or a roof's.
     pub fn shape(&self) -> Option<&Shape> {
         match self {
-            Element::Floor(f) => Some(&f.shape),
+            Element::Floor(f) | Element::Toposolid(f) => Some(&f.shape),
             Element::Roof(r) => Some(&r.shape),
             _ => None,
         }
@@ -2228,7 +2241,7 @@ impl Element {
 
     pub fn shape_mut(&mut self) -> Option<&mut Shape> {
         match self {
-            Element::Floor(f) => Some(&mut f.shape),
+            Element::Floor(f) | Element::Toposolid(f) => Some(&mut f.shape),
             Element::Roof(r) => Some(&mut r.shape),
             _ => None,
         }
@@ -2492,10 +2505,17 @@ macro_rules! visit_refs {
                 if let Some(g) = & $($m)? w.attach_top { f(g) }
                 if let Some(g) = & $($m)? w.attach_base { f(g) }
             }
-            Element::Floor(Floor { level, .. }) | Element::Toposolid(Floor { level, .. }) | Element::Ceiling(Ceiling { level, .. }) => f(level),
+            Element::Floor(Floor { level, .. }) | Element::Ceiling(Ceiling { level, .. }) => f(level),
+            Element::Toposolid(Floor { level, excavated_by, .. }) => {
+                f(level);
+                for g in excavated_by {
+                    f(g);
+                }
+            }
             Element::Site(s) => f(& $($m)? s.level),
             Element::PropertyLine(p) => f(& $($m)? p.level),
-            Element::BuildingPad(p) => f(& $($m)? p.level),
+            Element::SubDivision(sd) => f(& $($m)? sd.host),
+            Element::SurveyPoint(_) | Element::ProjectBasePoint(_) => {}
             Element::Room(Room { level, top_level, .. }) => {
                 f(level);
                 if let Some(g) = top_level { f(g) }
@@ -2639,9 +2659,15 @@ pub enum Element {
     /// Revit's Toposolid: the ground, a floor's shape (outline, shape points at their heights, contours) in its own
     /// category.
     Toposolid(Floor),
-    /// Revit's Building Pad: a flat pad that cuts the toposolid it lies in.
-    #[serde(rename = "buildingpad")]
-    BuildingPad(crate::masterplan::BuildingPad),
+    /// Revit's Sub-division: a part of a toposolid's top of a type of its own, raised or sunk (`ground.rs`).
+    #[serde(rename = "subdivision")]
+    SubDivision(crate::ground::SubDivision),
+    /// Revit's Survey Point: where the project is on the survey (its shared coordinates).
+    #[serde(rename = "surveypoint")]
+    SurveyPoint(crate::ground::BasePoint),
+    /// Revit's Project Base Point: a reference point of the project, and the angle to true north.
+    #[serde(rename = "projectbasepoint")]
+    ProjectBasePoint(crate::ground::BasePoint),
 }
 
 impl Element {
@@ -2652,7 +2678,9 @@ impl Element {
             | Element::Floor(Floor { params, .. })
             | Element::Toposolid(Floor { params, .. })
             | Element::PropertyLine(crate::masterplan::PropertyLine { params, .. })
-            | Element::BuildingPad(crate::masterplan::BuildingPad { params, .. })
+            | Element::SubDivision(crate::ground::SubDivision { params, .. })
+            | Element::SurveyPoint(crate::ground::BasePoint { params, .. })
+            | Element::ProjectBasePoint(crate::ground::BasePoint { params, .. })
             | Element::Ceiling(Ceiling { params, .. })
             | Element::Roof(Roof { params, .. })
             | Element::Mass(Mass { params, .. })
@@ -2679,7 +2707,9 @@ impl Element {
             | Element::Floor(Floor { params, .. })
             | Element::Toposolid(Floor { params, .. })
             | Element::PropertyLine(crate::masterplan::PropertyLine { params, .. })
-            | Element::BuildingPad(crate::masterplan::BuildingPad { params, .. })
+            | Element::SubDivision(crate::ground::SubDivision { params, .. })
+            | Element::SurveyPoint(crate::ground::BasePoint { params, .. })
+            | Element::ProjectBasePoint(crate::ground::BasePoint { params, .. })
             | Element::Ceiling(Ceiling { params, .. })
             | Element::Roof(Roof { params, .. })
             | Element::Mass(Mass { params, .. })
@@ -2873,7 +2903,9 @@ impl Element {
             Element::Site(_) => "site",
             Element::PropertyLine(_) => "propertyline",
             Element::Toposolid(_) => "toposolid",
-            Element::BuildingPad(_) => "buildingpad",
+            Element::SubDivision(_) => "subdivision",
+            Element::SurveyPoint(_) => "surveypoint",
+            Element::ProjectBasePoint(_) => "projectbasepoint",
         }
     }
 }
@@ -4026,6 +4058,8 @@ impl Model {
         if format < 4 {
             pens_from_pixels(&mut v);
         }
+        // 25 to 26: a building pad is an excavating floor now (Revit dropped the pad for the toposolid's Excavate).
+        let pads = crate::ground::pads_to_floors(&mut v);
         let mut left_out = Vec::new();
         // An element is an internally tagged enum, which serde reads whole: each is looked into as its category's struct.
         let mut elements = v.get_mut("elements").map_or(Value::Null, Value::take);
@@ -4068,6 +4102,7 @@ impl Model {
         }
         let mut m: Model = serde_json::from_value(v).map_err(|e| e.to_string())?;
         m.migrate();
+        crate::ground::excavate_with_pads(&mut m, &pads);
         // An import's Patterns, which a file may hold from when they could be overridden, are left out: as in Revit, it has none.
         for g in
             m.elements.values_mut().filter_map(crate::graphics::graphics_mut).chain(m.view_templates.values_mut().map(|t| &mut t.graphics))
@@ -4175,6 +4210,13 @@ impl Model {
         }
         // 22 to 23 (a family's per-type forms and symbols, elevation symbols, traced outlines, cut and text parameters) and 23
         // to 24 (a parametric family from Revit) have no step: a file of 22 or 23 holds none of them, which read as before.
+        // 25 to 26: the masterplan's areas are sub-divisions of the toposolid under them, its trees and furniture families'
+        // components on the ground (`ground::convert`); its georeference's numbers are the survey point's and the project
+        // base point's.
+        if self.format < SITE_FORMAT {
+            crate::ground::convert(self);
+            crate::ground::points_from_georeference(self);
+        }
         self.format = FORMAT;
     }
 
@@ -4187,7 +4229,7 @@ impl Model {
         let clashing: Vec<String> = self
             .parameters
             .iter()
-            .filter(|(n, _)| !(crate::paint::reserved(n) || phasing::reserved(n) || crate::massing::reserved(n)))
+            .filter(|(n, _)| !(crate::paint::reserved(n) || phasing::reserved(n) || crate::massing::reserved(n) || crate::ground::reserved(n)))
             .filter(|(n, p)| p.categories.iter().any(|c| crate::schedule::own_field(c, n)))
             .map(|(n, _)| n.clone())
             .collect();
@@ -5139,7 +5181,7 @@ impl Model {
             Element::Floor(f) | Element::Toposolid(f) => Some(f.level),
             Element::Site(st) => Some(st.level),
             Element::PropertyLine(p) => Some(p.level),
-            Element::BuildingPad(p) => Some(p.level),
+            Element::SubDivision(sd) => self.subdivision_level(sd),
             Element::Ceiling(c) => Some(c.level),
             Element::Shaft(sh) => Some(sh.level),
             Element::Mass(ms) => Some(ms.level),
@@ -5167,6 +5209,7 @@ impl Model {
             | Element::RepeatingDetail(RepeatingDetail { view, .. }) => self.plan_level(*view).map(|l| self.guid(l)),
             // A plan view stands on its level: it goes with it.
             Element::PlanView(v) => Some(v.level),
+            Element::SurveyPoint(_) | Element::ProjectBasePoint(_) => None,
             Element::Level(_)
             | Element::Grid(_)
             | Element::Section(_)
@@ -5268,6 +5311,8 @@ impl Model {
             sketch: Vec::new(),
             shape: r.shape.clone(),
             contours: 0.0,
+            excavated_by: Vec::new(),
+            graded_from: None,
             params: BTreeMap::new(),
         }
     }
@@ -5276,7 +5321,7 @@ impl Model {
     /// None for anything else, or with why for a roof that can't take a shape.
     pub fn shapeable(&self, id: impl Key) -> Result<Floor, String> {
         match self.elements.get(id) {
-            Some(Element::Floor(f)) => Ok(f.clone()),
+            Some(Element::Floor(f) | Element::Toposolid(f)) => Ok(f.clone()),
             Some(Element::Roof(r)) => match r.unshapeable() {
                 Some(why) => Err(why.into()),
                 None => Ok(self.roof_as_floor(r)),
@@ -7212,7 +7257,7 @@ impl Model {
             if !crate::family::nameable(n) {
                 return Err(format!("{who}: a name starts with a letter and holds letters, digits, `_` and spaces, up to {MAX_TEXT}"));
             }
-            if crate::paint::reserved(n) || phasing::reserved(n) || crate::massing::reserved(n) {
+            if crate::paint::reserved(n) || phasing::reserved(n) || crate::massing::reserved(n) || crate::ground::reserved(n) {
                 return Err(format!(
                     "{who}: elements hold their phase, their design option, their paint and their mass under that name; name it otherwise"
                 ));
@@ -7461,6 +7506,10 @@ impl Model {
                 checked?;
                 continue;
             }
+            if let Some(checked) = crate::ground::check_value(&who, k, v, e) {
+                checked?;
+                continue;
+            }
             if e.family().and_then(|(f, _)| self.families.get(f)).is_some_and(|f| f.parameters.iter().any(|p| p.name == *k)) {
                 continue;
             }
@@ -7520,12 +7569,13 @@ impl Model {
                 level_ok(pl.level)?;
                 crate::masterplan::check_property_line(&who, pl)?;
             }
-            Element::BuildingPad(bp) => {
-                known(&who, &bp.type_name, &self.types.floor)?;
-                level_ok(bp.level)?;
-                boundary(&who, &bp.boundary)?;
-                coord(&format!("{who} offset"), bp.offset)?;
+            Element::SubDivision(sd) => {
+                crate::ground::check_subdivision(self, &who, sd)?;
+                boundary(&who, &sd.boundary)?;
+                openings(&who, &sd.boundary, &sd.openings)?;
             }
+            Element::SurveyPoint(b) => crate::ground::check_base_point(self, &who, true, b)?,
+            Element::ProjectBasePoint(b) => crate::ground::check_base_point(self, &who, false, b)?,
             Element::Rebar(rb) => {
                 level_ok(rb.level)?;
                 text(&who, "grade", &rb.grade)?;
@@ -7623,6 +7673,19 @@ impl Model {
                     None => {}
                 }
                 shape_ok(&who, f, Variable::of(self.type_layers("floor", &f.type_name)))?;
+                if matches!(e, Element::Floor(_)) && (!f.excavated_by.is_empty() || f.graded_from.is_some()) {
+                    return Err(format!("{who}: only a toposolid is excavated or graded; a floor excavates one"));
+                }
+                if f.excavated_by.len() > MAX_POINTS {
+                    return Err(format!("{who}: at most {MAX_POINTS} elements excavate a toposolid"));
+                }
+                for g in &f.excavated_by {
+                    match self.elements.get(*g) {
+                        Some(Element::Floor(_) | Element::Roof(_) | Element::Toposolid(_)) => {}
+                        Some(x) => return Err(format!("{who}: a {} doesn't excavate; a floor, a roof or a toposolid does", x.category())),
+                        None => {}
+                    }
+                }
             }
             Element::Ceiling(c) => {
                 known(&who, &c.type_name, &self.types.ceiling)?;

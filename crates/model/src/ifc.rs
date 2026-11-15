@@ -293,7 +293,7 @@ const KIND_PRIORITY: &[&str] = &[
     "duct",
     "conduit",
     "cabletray",
-    "buildingpad",
+    "subdivision",
 ];
 
 type TypeKey = (String, String, String, String, Option<Member>, &'static str);
@@ -1351,22 +1351,34 @@ pub fn export(m: &Model) -> String {
             }
             // On a stair or a ramp, it's one of its parts; see below.
             // A room separation line: a virtual element along its line, which bounds spaces and is nothing else.
-            // A building pad: a base slab, its outline swept up through its type's thickness to its top.
-            Element::BuildingPad(bp) => {
-                let Some(&(_, storey)) = storeys.get(&bp.level) else { continue };
+            // A sub-division: its pieces on its host's surface, each a prism from the ground to its top; landscape and water
+            // an IfcGeographicElement, the rest (roads, paving, pitches) an IfcCivilElement, its type and role its object type.
+            Element::SubDivision(sd) => {
+                let Some(level) = m.subdivision_level(sd) else { continue };
+                let Some(&(_, storey)) = storeys.get(&level) else { continue };
                 let at = w.place(Some(storey), (0.0, 0.0, 0.0), None);
-                let (bottom, top) = m.pad_span(bp);
-                let base = m.elevation(bp.level);
-                let profile = w.profile(&bp.boundary, &[]);
-                let shape = w.body(profile, bottom - base, top - bottom, &[]);
-                let ent = w.add(format!(
-                    "IFCSLAB({},$,'Building Pad',$,{},#{at},#{shape},'{id}',.BASESLAB.)",
-                    w.guid(ELEMENT, id),
-                    s(&bp.type_name)
-                ));
-                contained.entry(bp.level).or_default().push(ent);
+                let base = m.elevation(level);
+                let breps: Vec<u64> = m.subdivision_pieces(sd).iter().map(|(ring, bottom, top)| w.prism(ring, bottom, top, base)).collect();
+                if breps.is_empty() {
+                    continue;
+                }
+                let shape = w.solid(&breps, &[]);
+                let what = if sd.role.is_empty() { sd.type_name.clone() } else { format!("{}: {}", sd.type_name, sd.role) };
+                let name = if sd.name.is_empty() { sd.type_name.clone() } else { sd.name.clone() };
+                let natural = ["landscape", "water", "stream", "lane/median"].iter().any(|k| sd.role.starts_with(k))
+                    || ["Grass", "Meadow", "Planting", "Water"].contains(&sd.type_name.as_str());
+                let ent = if natural {
+                    w.add(format!(
+                        "IFCGEOGRAPHICELEMENT({},$,{},$,{},#{at},#{shape},'{id}',.USERDEFINED.)",
+                        w.guid(ELEMENT, id),
+                        s(&name),
+                        s(&what)
+                    ))
+                } else {
+                    w.add(format!("IFCCIVILELEMENT({},$,{},$,{},#{at},#{shape},'{id}')", w.guid(ELEMENT, id), s(&name), s(&what)))
+                };
+                contained.entry(level).or_default().push(ent);
                 products.insert(id, ent);
-                w.typed("IFCSLABTYPE", ".BASESLAB.", &bp.type_name, ent);
             }
             // The site's: planting and water as IfcGeographicElement, the rest (lanes, paving, parking, pitches, play) as
             // IfcCivilElement, each its kind and use as its object type, its 3D view's slabs swept up.

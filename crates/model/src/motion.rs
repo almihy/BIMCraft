@@ -200,12 +200,19 @@ pub fn transform(c: &str, m: &Model, mut e: Element, id: Id, mo: &Motion, with: 
                 }
             }
         }
-        Element::BuildingPad(bp) => {
-            bp.boundary.iter_mut().for_each(|q| *q = f(*q));
+        Element::SubDivision(sd) => {
+            sd.boundary.iter_mut().for_each(|q| *q = f(*q));
+            for o in &mut sd.openings {
+                o.iter_mut().for_each(|q| *q = f(*q));
+            }
             if mo.mirror {
-                bp.boundary.reverse();
+                sd.boundary.reverse();
+                sd.openings.iter_mut().for_each(|o| o.reverse());
             }
         }
+        // A survey point or project base point goes where it is taken (`base_point` keeps the clip's rule); its turn
+        // is its angle to true north, which a move doesn't change.
+        Element::SurveyPoint(b) | Element::ProjectBasePoint(b) => b.at = f(b.at),
         // A frozen room's boundary goes with it.
         Element::Room(r) => {
             r.point = f(r.point);

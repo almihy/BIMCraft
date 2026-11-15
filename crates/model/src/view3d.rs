@@ -875,7 +875,13 @@ pub fn solids_in_with(
                     slabs(&mut out, m, id, TERRAIN, face, rise);
                 }
             }
-            Element::BuildingPad(p) => out.push(slab(id, SLAB, &p.boundary, m.pad_span(p))),
+            // A sub-division on its host's surface, in its surface's colour.
+            Element::SubDivision(sd) => {
+                let c = m.subdivision_colours(sd).2;
+                for (ring, bottom, top) in m.subdivision_pieces(sd) {
+                    out.push(Solid::Prism { owner: id, color: Rgb(c[0], c[1], c[2]), tex: 0, ring, bottom, top, curve: None });
+                }
+            }
             // The site's: each area a thin slab, a tree its trunk and crown, a car park its levels' pieces (masterplan.rs).
             Element::Site(st) => {
                 for (ring, lo, hi, color) in crate::masterplan::solids(m, st) {
