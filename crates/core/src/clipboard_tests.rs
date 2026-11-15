@@ -465,7 +465,7 @@ fn what_has_an_offset_is_raised_by_it_where_there_is_no_level_at_the_new_height(
     let (mut s, l) = three_levels();
     let wall = ids(&run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]], "level": l[0]}))["ids"])[0];
     let pad =
-        run(&mut s, "building_pad", json!({"boundary": [[0, 5000], [3000, 5000], [3000, 8000], [0, 8000]], "level": l[2], "offset": 200}))
+        run(&mut s, "floor", json!({"boundary": [[0, 5000], [3000, 5000], [3000, 8000], [0, 8000]], "level": l[2], "offset": 200}))
             ["id"]
             .as_u64()
             .unwrap();
@@ -480,9 +480,9 @@ fn what_has_an_offset_is_raised_by_it_where_there_is_no_level_at_the_new_height(
     run(&mut s, "copy_to_clipboard", json!({"ids": [wall, pad, beam, bar, cloud]}));
     let r = run(&mut s, "paste", json!({"levels": [l[1]]}));
     assert!(r["left_out"].as_array().unwrap().is_empty(), "{r}");
-    let pad = made_of(&s, &r, "buildingpad")[0];
+    let pad = made_of(&s, &r, "floor")[0];
     match s.model.elements.get(pad) {
-        Some(Element::BuildingPad(p)) => assert_eq!((p.level, p.offset), (s.model.guid(l[2]), 3200.0), "3000 up on its own level"),
+        Some(Element::Floor(p)) => assert_eq!((p.level, p.offset), (s.model.guid(l[2]), 3200.0), "3000 up on its own level"),
         other => panic!("{other:?}"),
     }
     let bar = made_of(&s, &r, "rebar")[0];
