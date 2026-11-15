@@ -298,7 +298,7 @@ impl BimApp {
             "Toposolid" => self.start_tool(Tool::Site(crate::site::SiteTool::Toposolid)),
             "Sub-divide" => self.start_tool(Tool::Site(crate::site::SiteTool::Subdivide)),
             "Road" => self.start_tool(Tool::Site(crate::site::SiteTool::Road)),
-            "Building Pad" => self.start_tool(Tool::Site(crate::site::SiteTool::BuildingPad)),
+            "Planting" => self.start_tool(Tool::Site(crate::site::SiteTool::Planting)),
             "Property Line" => self.start_tool(Tool::Site(crate::site::SiteTool::PropertyLine)),
             "Site Component" => self.start_tool(Tool::Site(crate::site::SiteTool::Component)),
             "Parking Component" => self.start_tool(Tool::Site(crate::site::SiteTool::Stall)),

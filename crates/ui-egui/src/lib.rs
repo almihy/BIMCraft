@@ -2605,7 +2605,7 @@ impl BimApp {
                 Some("footing") => Tool::Stand("footing"),
                 Some("mass") => Tool::Mass(Vec::new()),
                 Some("toposolid") => Tool::Site(site::SiteTool::Toposolid),
-                Some("building_pad") => Tool::Site(site::SiteTool::BuildingPad),
+                Some("sub_division") => Tool::Site(site::SiteTool::Subdivide),
                 Some("property_line") => Tool::Site(site::SiteTool::PropertyLine),
                 Some("show_mass") => {
                     self.show_mass();

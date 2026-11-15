@@ -378,7 +378,7 @@ impl Model {
         }
         let shallow: Vec<&Cut> = cuts.iter().filter(|c| c.floor.is_none_or(|b| b > nominal_bottom + TOL)).collect();
         if shallow.is_empty() {
-            return without_stray_points(cut);
+            return without_stray_points(corners_on_ground(self, f, &ground, cut));
         }
         // The ground each cut wants at `q`, absolute: its bottom, or so far under the ground.
         let height = |q: P2| ground.at(q).unwrap_or_else(|| top.at(q));
@@ -430,8 +430,27 @@ impl Model {
         cut.shape.points = points;
         // A split line of its own may run through a cut; the cut's points are what shape it now.
         cut.shape.lines.clear();
-        without_stray_points(cut)
+        without_stray_points(corners_on_ground(self, f, &ground, cut))
     }
+}
+
+/// `cut`'s corners where a cut made them (its outline's and its holes') lifted onto the ground `f` had there, so the ground
+/// round a hole keeps its slope: a corner with no shape point stands at the toposolid's level otherwise.
+fn corners_on_ground(m: &Model, f: &Floor, ground: &Surface3, mut cut: Floor) -> Floor {
+    if f.shape.is_empty() {
+        return cut;
+    }
+    let top = m.floor_top(f);
+    let corners: Vec<P2> = cut.boundary.iter().chain(cut.openings.iter().flatten()).copied().collect();
+    for q in corners {
+        if cut.shape.points.iter().any(|p| p.at.dist(q) <= TOL) {
+            continue;
+        }
+        if let Some(z) = ground.at(q) {
+            cut.shape.points.push(ShapePoint { at: q, z: z - top.at(q), ..Default::default() });
+        }
+    }
+    cut
 }
 
 /// Whether `q` lies on an edge of `rings`.

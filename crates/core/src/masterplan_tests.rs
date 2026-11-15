@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use crate::engine::Session;
 use crate::geom::P2;
 use crate::model::{Element, Id, Model};
-use crate::prim::{Prim, Rgb};
+use crate::prim::Prim;
 use crate::render;
 
 fn run(s: &mut Session, c: &str, p: Value) -> Value {

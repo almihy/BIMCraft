@@ -3,7 +3,7 @@
 //! draws an outline (a toposolid, a pad, a property line, a sub-region, a car park) or a path (a road, a hedge, a stream, a
 //! row of parking) sketches it, as Floor does, with the Draw panel's lines and arcs; one that places a thing (a tree, a
 //! bike rack, a play area, a pitch, a parking stall) takes a click, Space turning it. Each makes its element with the
-//! core's commands (`toposolid`, `building_pad`, `property_line`, `site`); the Options Bar holds the choices. Here too:
+//! core's commands (`toposolid`, `sub_division`, `road`, `property_line`, `planting`, `site_component`, `site`); the Options Bar holds the choices. Here too:
 //! the site elements' Properties (edited through `site_edit`), their grips (a path's points, an area's control points, a
 //! tree's point) and Edit Boundary / Edit Path.
 
@@ -31,13 +31,14 @@ use crate::{BimApp, Status, Tool, big_button, panel};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SiteTool {
     Toposolid,
-    /// Revit's Sub-divide / Graded Region: an area of the ground of the Options Bar's type (paving, landscape, water…).
+    /// Revit's Sub-divide: a part of a toposolid's top of the Options Bar's type (asphalt, paving, grass, water…).
     Subdivide,
     Road,
-    BuildingPad,
     PropertyLine,
-    /// Planting and site furniture: a tree, a hedge, a bike rack, a play area.
+    /// Revit's Site Component: a bike rack, a bench, play equipment (the site's families).
     Component,
+    /// Revit's Planting: a tree, a shrub, a hedge (the site's families).
+    Planting,
     /// Revit's Parking Component: one stall.
     Stall,
     /// A row of stalls along a path, or a car park laid out over an area.
@@ -55,30 +56,28 @@ pub enum Taking {
     Point,
 }
 
-/// Sub-divide's types, the site's kinds of ground.
-pub const SUBDIVIDE: [&str; 7] = ["paving", "terrace", "landscape", "water", "stream", "pitch", "playground"];
-/// Site Component's kinds.
-pub const COMPONENTS: [&str; 4] = ["tree", "hedge", "bike_rack", "play_area"];
+/// Site Component's families and Planting's, the site's own (`family/site.rs`).
+pub const COMPONENTS: [&str; 3] = [bimcraft_core::family::site::BIKE_RACK, bimcraft_core::family::site::BENCH, bimcraft_core::family::site::PLAY];
+pub const PLANTING: [&str; 3] = [bimcraft_core::family::site::TREE, bimcraft_core::family::site::SHRUB, bimcraft_core::family::site::HEDGE];
 
 /// What the site tools' Options Bars hold, kept between uses as the other tools' are.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SiteChoices {
+    /// Sub-divide's type: one of the surfaces (`ground::SURFACES`).
     pub subdivide: &'static str,
-    pub subdivide_use: &'static str,
+    /// Sub-divide's Height Offset, typed in the project's units; blank, the surface's.
+    pub subdivide_offset: String,
     pub road_use: &'static str,
     /// Typed in the project's units; blank, the figures' width for its use.
     pub road_width: String,
     /// A road's lanes; blank, as many as its width takes.
     pub road_lanes: String,
+    /// Site Component's family and Planting's.
     pub component: &'static str,
-    pub component_use: &'static str,
-    /// A tree's crown, a hedge's width, a play area's radius (lengths) or a bike rack's spaces; blank, the figures'.
-    pub component_size: String,
+    pub planting: &'static str,
     pub stall_use: &'static str,
     /// Parking Area along a path (a row of stalls) rather than over an area (a car park).
     pub parking_row: bool,
-    /// A building pad's top over its level; blank, at it.
-    pub pad_offset: String,
     /// The way a placed thing turns, degrees: Space adds a quarter turn.
     pub angle: f64,
 }
@@ -86,17 +85,15 @@ pub struct SiteChoices {
 impl Default for SiteChoices {
     fn default() -> SiteChoices {
         SiteChoices {
-            subdivide: "paving",
-            subdivide_use: "forecourt",
+            subdivide: "Paving",
+            subdivide_offset: String::new(),
             road_use: "road",
             road_width: String::new(),
             road_lanes: String::new(),
-            component: "tree",
-            component_use: "tree",
-            component_size: String::new(),
+            component: bimcraft_core::family::site::BIKE_RACK,
+            planting: bimcraft_core::family::site::TREE,
             stall_use: "standard",
             parking_row: false,
-            pad_offset: String::new(),
             angle: 0.0,
         }
     }
@@ -357,11 +354,11 @@ impl SiteTool {
     pub fn title(self) -> &'static str {
         match self {
             SiteTool::Toposolid => msg!("Create Toposolid"),
-            SiteTool::Subdivide => msg!("Create Sub-region"),
+            SiteTool::Subdivide => msg!("Create Sub-division"),
             SiteTool::Road => msg!("Create Road Path"),
-            SiteTool::BuildingPad => msg!("Create Pad Boundary"),
             SiteTool::PropertyLine => msg!("Create Property Line"),
             SiteTool::Component => msg!("Place Site Component"),
+            SiteTool::Planting => msg!("Place Planting"),
             SiteTool::Stall => msg!("Place Parking Component"),
             SiteTool::ParkingArea => msg!("Create Parking Area"),
         }
@@ -371,8 +368,10 @@ impl SiteTool {
     pub fn category(self) -> &'static str {
         match self {
             SiteTool::Toposolid => "toposolid",
-            SiteTool::BuildingPad => "buildingpad",
+            SiteTool::Subdivide | SiteTool::Road => "subdivision",
             SiteTool::PropertyLine => "propertyline",
+            SiteTool::Component => "sitecomponent",
+            SiteTool::Planting => "planting",
             _ => "site",
         }
     }
@@ -382,9 +381,8 @@ impl SiteChoices {
     /// The site kind and use a tool makes now, for the tools that make a `site` element.
     pub fn kind(&self, tool: SiteTool) -> Option<(&'static str, &'static str)> {
         Some(match tool {
-            SiteTool::Subdivide => (self.subdivide, self.subdivide_use),
+            // A road's preview is shaped as the masterplan's lanes were; `road` makes its sub-divisions.
             SiteTool::Road => ("lane", self.road_use),
-            SiteTool::Component => (self.component, self.component_use),
             SiteTool::Stall => ("parking_stall", self.stall_use),
             SiteTool::ParkingArea if self.parking_row => ("parking_band", "parking"),
             SiteTool::ParkingArea => ("car_park", "parking"),
@@ -394,6 +392,9 @@ impl SiteChoices {
 
     /// How the tool takes its clicks now: by the shape of the kind it makes.
     pub fn taking(&self, tool: SiteTool) -> Taking {
+        if matches!(tool, SiteTool::Component | SiteTool::Planting) {
+            return Taking::Point;
+        }
         match self.kind(tool) {
             None => Taking::Outline,
             Some((kind, _)) => match shapes::kind(kind).map(|k| k.shape) {
@@ -458,7 +459,7 @@ impl BimApp {
                         Icon::Subdivide,
                         msg!("Sub-divide"),
                         msg!(
-                            "Sub-divide / Graded Region: an area of the ground, of the Options Bar's type: paving, a terrace, a lawn, water, a stream, a pitch, a playground"
+                            "Sub-divide: sketch a part of the toposolid of the Options Bar's type (asphalt, paving, grass, water…), raised or sunk by its Height Offset"
                         ),
                         SiteTool::Subdivide,
                     ),
@@ -467,12 +468,6 @@ impl BimApp {
                         msg!("Road"),
                         msg!("Road: sketch its path with lines and arcs; the Options Bar sets its use, width and lanes"),
                         SiteTool::Road,
-                    ),
-                    (
-                        Icon::BuildingPad,
-                        msg!("Building Pad"),
-                        msg!("Building Pad (BP): sketch a flat pad cut into the toposolid, its top at the Options Bar's offset"),
-                        SiteTool::BuildingPad,
                     ),
                 ],
             ),
@@ -491,10 +486,14 @@ impl BimApp {
                     (
                         Icon::SiteComponent,
                         msg!("Site Component"),
-                        msg!(
-                            "Site Component: a tree, a bike rack or a play area where you click (Space turns it), or a hedge along a sketched path"
-                        ),
+                        msg!("Site Component: a bike rack, a bench or play equipment on the ground where you click; Space turns it"),
                         SiteTool::Component,
+                    ),
+                    (
+                        Icon::SiteComponent,
+                        msg!("Planting"),
+                        msg!("Planting: a tree, a shrub or a hedge on the ground where you click; Space turns it"),
+                        SiteTool::Planting,
                     ),
                     (
                         Icon::ParkingComponent,
@@ -512,7 +511,17 @@ impl BimApp {
             ),
         ];
         for (name, row) in tools {
+            let modify = name == msg!("Modify Site");
             panel(ui, name, |ui| {
+                // Revit's Modify Site: Excavate and Graded Region act on what is selected.
+                if modify {
+                    if big_button(ui, Icon::BuildingPad, msg!("Excavate"), false, msg!("Excavate: select a toposolid and the floors, roofs or toposolids that cut it, then click")).clicked() {
+                        self.site_excavate();
+                    }
+                    if big_button(ui, Icon::Toposolid, msg!("Graded Region"), false, msg!("Graded Region: select the existing toposolid (or none, the lowest) and click: a copy of it is the proposed ground, its cut and fill in its Properties")).clicked() {
+                        self.site_graded_region();
+                    }
+                }
                 for &(icon, label, tip, tool) in &row {
                     // Road beside Sub-divide and Parking Area beside Parking Component, each a big button named under its
                     // icon, as the panels' other tools are.
@@ -549,16 +558,12 @@ impl BimApp {
         let uses = |kind: &str| shapes::kind(kind).map(|k| k.uses).unwrap_or(&[]);
         match tool {
             SiteTool::Subdivide => {
-                if let Some(k) = Self::site_combo(ui, "site-subdivide", msg!("Type:"), self.site.subdivide, &SUBDIVIDE) {
+                let surfaces: Vec<&'static str> = bimcraft_core::ground::SURFACES.iter().map(|x| x.name).collect();
+                if let Some(k) = Self::site_combo(ui, "site-subdivide", msg!("Type:"), self.site.subdivide, &surfaces) {
                     self.site.subdivide = k;
-                    self.site.subdivide_use = uses(k).first().copied().unwrap_or(k);
                 }
-                let u = uses(self.site.subdivide);
-                if u.len() > 1
-                    && let Some(k) = Self::site_combo(ui, "site-subdivide-use", msg!("Use:"), self.site.subdivide_use, u)
-                {
-                    self.site.subdivide_use = k;
-                }
+                let l = ui.label(t("Height Offset:"));
+                ui.add(TextEdit::singleline(&mut self.site.subdivide_offset).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
             }
             SiteTool::Road => {
                 if let Some(k) = Self::site_combo(ui, "site-road-use", msg!("Use:"), self.site.road_use, uses("lane")) {
@@ -572,25 +577,14 @@ impl BimApp {
                 }
             }
             SiteTool::Component => {
-                if let Some(k) = Self::site_combo(ui, "site-component", msg!("Type:"), self.site.component, &COMPONENTS) {
+                if let Some(k) = Self::site_combo(ui, "site-component", msg!("Family:"), self.site.component, &COMPONENTS) {
                     self.site.component = k;
-                    self.site.component_use = uses(k).first().copied().unwrap_or(k);
-                    self.site.component_size.clear();
                 }
-                let u = uses(self.site.component);
-                if u.len() > 1
-                    && let Some(k) = Self::site_combo(ui, "site-component-use", msg!("Use:"), self.site.component_use, u)
-                {
-                    self.site.component_use = k;
+            }
+            SiteTool::Planting => {
+                if let Some(k) = Self::site_combo(ui, "site-planting", msg!("Family:"), self.site.planting, &PLANTING) {
+                    self.site.planting = k;
                 }
-                let (label, hint) = match self.site.component {
-                    "tree" => (msg!("Crown:"), hint),
-                    "hedge" => (msg!("Width:"), hint),
-                    "play_area" => (msg!("Radius:"), hint),
-                    _ => (msg!("Spaces:"), ""),
-                };
-                let l = ui.label(t(label));
-                ui.add(TextEdit::singleline(&mut self.site.component_size).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
             }
             SiteTool::Stall => {
                 if let Some(k) = Self::site_combo(ui, "site-stall", msg!("Use:"), self.site.stall_use, uses("parking_stall")) {
@@ -600,10 +594,6 @@ impl BimApp {
             SiteTool::ParkingArea => {
                 ui.radio_value(&mut self.site.parking_row, false, t("Area"));
                 ui.radio_value(&mut self.site.parking_row, true, t("Row"));
-            }
-            SiteTool::BuildingPad => {
-                let l = ui.label(t("Height Offset:"));
-                ui.add(TextEdit::singleline(&mut self.site.pad_offset).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
             }
             SiteTool::Toposolid | SiteTool::PropertyLine => {}
         }
@@ -635,15 +625,6 @@ impl BimApp {
                     p.insert("lanes".into(), json!(n.round() as i64));
                 }
             }
-            SiteTool::Component => {
-                let size = &self.site.component_size;
-                match self.site.component {
-                    "tree" => length(size).map(|x| p.insert("crown".into(), json!(x))),
-                    "hedge" => length(size).map(|x| p.insert("width".into(), json!(x))),
-                    "play_area" => length(size).map(|x| p.insert("radius".into(), json!(x))),
-                    _ => number(size).filter(|n| *n >= 1.0).map(|n| p.insert("spaces".into(), json!(n.round() as i64))),
-                };
-            }
             _ => {}
         }
         p
@@ -662,6 +643,18 @@ impl BimApp {
 
     /// A placing site tool's click: its element where clicked.
     pub(crate) fn site_click(&mut self, tool: SiteTool, level: Id, at: P2) {
+        // A family of the site's, on the ground under the click.
+        let family = match tool {
+            SiteTool::Component => Some(("site_component", self.site.component)),
+            SiteTool::Planting => Some(("planting", self.site.planting)),
+            _ => None,
+        };
+        if let Some((command, family)) = family {
+            let family = self.session.model.language.word(family).to_string();
+            self.run(command, json!({"family": family, "at": [at.0, at.1], "angle": self.site.angle}));
+            return;
+        }
+        let _ = level;
         if let Some((kind, use_, props)) = self.site_placed(tool, at) {
             self.run("site", json!({"kind": kind, "use": use_, "level": level, "props": props}));
         }
@@ -712,13 +705,24 @@ impl BimApp {
         let points = |r: &[P2]| json!(r.iter().map(|q| [q.0, q.1]).collect::<Vec<_>>());
         let made = match (tool, self.site.taking(tool)) {
             (SiteTool::Toposolid, _) => ring(&lines).map(|r| ("toposolid", json!({"boundary": points(&r), "level": level}))),
-            (SiteTool::BuildingPad, _) => ring(&lines).map(|r| {
-                let mut p = json!({"boundary": points(&r), "level": level});
-                if let Some(o) = m.units.parse(self.site.pad_offset.trim()) {
+            (SiteTool::Subdivide, _) => ring(&lines).map(|r| {
+                let mut p = json!({"boundary": points(&r), "type": self.site.subdivide});
+                if let Some(o) = m.units.parse(self.site.subdivide_offset.trim()) {
                     p["offset"] = json!(o);
                 }
-                ("building_pad", p)
+                ("sub_division", p)
             }),
+            (SiteTool::Road, _) => match solver::chain(&lines) {
+                Ok((path, false)) => {
+                    let mut p = json!({"path": path, "use": self.site.road_use});
+                    for (k, v) in self.site_props(tool) {
+                        p[k] = v;
+                    }
+                    Ok(("road", p))
+                }
+                Ok(_) => Err(t("A path has two ends: leave it open.").into()),
+                Err(e) => Err(e),
+            },
             (SiteTool::PropertyLine, _) => match solver::chain(&lines) {
                 Ok((pts, true)) => Ok(("property_line", json!({"points": pts, "level": level}))),
                 Ok(_) => Err(t("A property line is closed: end it where it began.").into()),
@@ -758,7 +762,7 @@ impl BimApp {
         match self.session.model.elements.get(id)? {
             Element::Site(st) if st.props.contains_key("path") => Some((id, true)),
             Element::Site(st) if st.props.contains_key("control") => Some((id, false)),
-            Element::BuildingPad(_) | Element::PropertyLine(_) => Some((id, false)),
+            Element::SubDivision(_) | Element::PropertyLine(_) => Some((id, false)),
             _ => None,
         }
     }
@@ -769,7 +773,7 @@ impl BimApp {
         let lines = match m.elements.get(id) {
             Some(Element::Site(st)) if st.props.contains_key("path") => path_lines(&props_points(&st.props, "path"), false),
             Some(Element::Site(st)) => path_lines(&props_points(&st.props, "control"), true),
-            Some(Element::BuildingPad(bp)) => solver::lines_of(&bp.boundary, &[]),
+            Some(Element::SubDivision(sd)) => solver::lines_of(&sd.boundary, &sd.openings),
             Some(Element::PropertyLine(pl)) => path_lines(&pl.points, true),
             _ => return,
         };
@@ -795,7 +799,7 @@ impl BimApp {
                 Err(e) => Err(e),
             },
             Some(Element::Site(_)) => ring(&lines).map(|r| ("site_edit", json!({"id": id, "props": {"control": r}}))),
-            Some(Element::BuildingPad(_)) => ring(&lines).map(|r| ("modify", json!({"id": id, "boundary": r}))),
+            Some(Element::SubDivision(_)) => Ok(("edit_boundary", json!({"id": id, "sketch": lines}))),
             Some(Element::PropertyLine(_)) => match solver::chain(&lines) {
                 Ok((pts, true)) => {
                     // Counter-clockwise, as the property line holds it: the other way round, its arcs turned.
@@ -874,6 +878,39 @@ impl BimApp {
         }
         let level = m.elements.id(st.level)?;
         ghost(m, level, &st.kind, &st.use_, props)
+    }
+
+    /// Excavate on the selection: its toposolid cut by the floors, roofs and other toposolids selected with it.
+    pub(crate) fn site_excavate(&mut self) {
+        let m = &self.session.model;
+        let topo = self.selection.iter().copied().find(|id| matches!(m.elements.get(*id), Some(Element::Toposolid(_))));
+        let by: Vec<Id> = self
+            .selection
+            .iter()
+            .copied()
+            .filter(|id| Some(*id) != topo && matches!(m.elements.get(*id), Some(Element::Floor(_) | Element::Roof(_) | Element::Toposolid(_))))
+            .collect();
+        match topo {
+            Some(topo) if !by.is_empty() => {
+                self.run("excavate", json!({"toposolid": topo, "by": by}));
+            }
+            _ => self.status = Status { text: t("Select a toposolid and the floors, roofs or toposolids that excavate it.").into(), error: true },
+        }
+    }
+
+    /// Graded Region on the selection: the selected toposolid (or the lowest) copied in as the proposed ground.
+    pub(crate) fn site_graded_region(&mut self) {
+        let m = &self.session.model;
+        let topo = self.selection.iter().copied().find(|id| matches!(m.elements.get(*id), Some(Element::Toposolid(_))));
+        let p = match topo {
+            Some(t) => json!({"toposolid": t}),
+            None => json!({}),
+        };
+        if let Some(r) = self.run("graded_region", p)
+            && let Some(id) = r["id"].as_u64()
+        {
+            self.selection = vec![id];
+        }
     }
 
     /// Properties of the site element selected alone: its kind, use, name and phase, the props its kind has, and what it

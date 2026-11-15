@@ -67,7 +67,23 @@ fn host_param(c: &str, m: &Model, p: &Value, ring: &[P2]) -> Result<Guid, String
         })
         .max_by(|a, b| a.1.total_cmp(&b.1))
         .map(|(g, _)| g);
-    holding.ok_or_else(|| bad(c, "no toposolid lies under it: give `host`, the toposolid it is a part of, or make one with `toposolid`"))
+    // Else the one it overlaps most.
+    let own = vec![ring.iter().map(|q| [q.0, q.1]).collect::<Vec<[f64; 2]>>()];
+    let overlapping = || {
+        m.elements
+            .with_guids()
+            .filter_map(|(_, g, e)| match e {
+                Element::Toposolid(f) => {
+                    let theirs = vec![f.boundary.iter().map(|q| [q.0, q.1]).collect::<Vec<[f64; 2]>>()];
+                    let a = crate::site::shapes::poly::area(&crate::site::shapes::poly::intersection(&own, &theirs));
+                    (a > 1.0).then_some((g, a))
+                }
+                _ => None,
+            })
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(g, _)| g)
+    };
+    holding.or_else(overlapping).ok_or_else(|| bad(c, "no toposolid lies under it: give `host`, the toposolid it is a part of, or make one with `toposolid`"))
 }
 
 /// Openings: rings, each clockwise.

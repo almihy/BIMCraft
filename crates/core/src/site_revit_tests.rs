@@ -363,10 +363,10 @@ fn an_old_masterplan_is_converted_on_load() {
     let count = |cat: &str| m.elements.values().filter(|e| e.category() == cat).count();
     let kinds: Vec<String> = m.elements.values().filter_map(|e| if let Element::Site(st) = e { Some(st.kind.clone()) } else { None }).collect();
     assert_eq!(kinds, vec!["parking_stall".to_string()], "parking stays");
-    // The lawn, the pond, the pitch, and the road's carriageway and two pavements.
-    assert!(count("subdivision") >= 5, "{}", count("subdivision"));
+    // The lawn, the pond, the pitch, and the road's carriageway (and its pavements, where it has them).
     let roles: Vec<String> = m.elements.values().filter_map(|e| if let Element::SubDivision(sd) = e { Some(sd.role.clone()) } else { None }).collect();
-    for r in ["landscape/lawn", "water/pond", "pitch/tennis", "lane/road", "lane/footpath"] {
+    assert!(count("subdivision") >= 4, "{roles:?}");
+    for r in ["landscape/lawn", "water/pond", "pitch/tennis", "lane/road"] {
         assert!(roles.iter().any(|x| x == r), "{r}: {roles:?}");
     }
     // Where they came from is kept.
@@ -409,4 +409,18 @@ fn the_new_site_reads_back_from_a_file() {
     for (a, b) in m.elements.values().zip(s.model.elements.values()) {
         assert_eq!(a, b);
     }
+}
+
+#[test]
+fn a_road_is_its_carriageway_and_pavements_as_sub_divisions_on_the_ground() {
+    let mut s = Session::new();
+    let t = slope(&mut s);
+    let r = run(&mut s, "road", json!({"path": [[0, 20000], [40000, 20000]], "width": 14000, "lanes": 2}));
+    let ids: Vec<Id> = serde_json::from_value(r["ids"].clone()).unwrap();
+    assert!(!ids.is_empty(), "{r}");
+    assert_eq!(r["host"], json!(t));
+    let roles: Vec<String> =
+        ids.iter().filter_map(|id| if let Some(Element::SubDivision(sd)) = s.model.elements.get(*id) { Some(sd.role.clone()) } else { None }).collect();
+    assert!(roles.iter().any(|x| x == "lane/road"), "{roles:?}");
+    assert!(s.execute("road", &json!({"path": [[0, 0], [10, 0]], "use": "motorway"})).unwrap_err().contains("motorway"));
 }
