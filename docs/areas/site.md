@@ -197,7 +197,9 @@ of Arqiflow's beside them under familiar names. Buildings on the masterplan stay
 | Site Component | a `site` `tree`, `hedge`, `bike_rack`, `play_area` (trees, planting, furniture) | `site` |
 | Parking Component | one stall: a `site` `parking_stall` (bay width by depth, at a point and an angle) | `site` |
 | Parking Area (beside Parking Component) | a `site` `parking_band` (a row of stalls along a path) or `car_park` (an area laid out and counted) | `site` |
-| Building Pad | a `buildingpad`: a flat pad cut into the toposolid at a height | `building_pad` |
+| Excavate | the selected toposolid excavated by the floors, roofs and toposolids selected with it | `excavate` |
+| Graded Region | a copy of the selected (or lowest) toposolid as the proposed ground | `graded_region` |
+| Planting | a Tree, Shrub or Hedge on the ground | `planting` |
 
 In the Revit build each becomes Revit's own element: a toposolid, a property line, a sub-division, planting and site
 components, parking components, a building pad.
