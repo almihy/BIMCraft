@@ -1037,6 +1037,26 @@ pub fn plan(m: &Model, level: impl Key, width: u32, height: u32) -> Drawing {
     draw_plan(m, level, view, false, annotation(m, level, view), scale_of(m, level), Out::Picture)
 }
 
+/// Plan `plan` (a plan view, or a level's own plan) as a sheet's viewport shows it, fitted into `width` x `height` px: its
+/// crop region (or all it shows), its annotation at its scale, no name lettered under it. With the view it is drawn through,
+/// which places anything else drawn over it (model millimetres to its pixels). A `height` of 0 is the plan's own shape:
+/// as many pixels high as its extent is to `width` across.
+pub fn viewport(m: &Model, plan: impl Key, width: u32, height: u32) -> (Drawing, View) {
+    let n = scale_of(m, plan);
+    let extent = plan_extent(m, plan);
+    let height = if height > 0 {
+        height
+    } else {
+        let lo = extent.iter().fold(P2(f64::MAX, f64::MAX), |a, p| P2(a.0.min(p.0), a.1.min(p.1)));
+        let hi = extent.iter().fold(P2(f64::MIN, f64::MIN), |a, p| P2(a.0.max(p.0), a.1.max(p.1)));
+        let tall = (hi.1 - lo.1).max(1000.0) / (hi.0 - lo.0).max(1000.0);
+        let tall = if extent.is_empty() || !tall.is_finite() { 0.75 } else { tall.clamp(0.25, 4.0) };
+        (f64::from(width) * tall).round().max(1.0) as u32
+    };
+    let view = fit(&extent, width, height, n);
+    (draw_plan(m, plan, view, false, annotation(m, plan, view), n, Out::Paper), view)
+}
+
 /// What a plan of `level` takes on paper: all it shows, or cropped, its crop region and the grids'
 /// ends at its edges.
 pub(crate) fn plan_extent(m: &Model, level: impl Key) -> Vec<P2> {

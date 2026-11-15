@@ -1028,3 +1028,26 @@ fn where_two_walls_cut_outlines_meet_at_a_corner_they_join_square_with_no_notch(
     });
     assert!(through, "a run turns the corner");
 }
+
+/// A plan view placed as a sheet's viewport is fitted to its crop region at its scale, drawn without its name under it, and
+/// says the view it is drawn through: what places anything drawn over it. Asked for its own shape, it is as tall as its crop.
+#[test]
+fn a_plan_views_viewport_is_its_crop_and_says_its_view() {
+    let mut s = house();
+    s.execute("duplicate_view", &serde_json::json!({"name": "Ground floor, presentation"})).unwrap();
+    let view = s.model.elements.iter().find(|(_, e)| matches!(e, Element::PlanView(_))).map(|(id, _)| *id).unwrap();
+    s.execute("crop", &serde_json::json!({"view": s.model.guid(view), "region": [[-1000, -1000], [5000, 4000]]})).unwrap();
+    let (d, v) = viewport(&s.model, view, 800, 0);
+    assert_eq!(v.width, 800);
+    assert_eq!(v.height, 667, "the crop's own shape: 5 m high to 6 m across");
+    assert!((v.cx - 2000.0).abs() < 1e-6 && (v.cy - 1500.0).abs() < 1e-6, "centred on its crop: {v:?}");
+    assert_eq!(d.view, v);
+    let (x, y) = v.px(P2(0.0, 0.0));
+    assert!(x > 0.0 && x < 800.0 && y > 0.0 && y < 667.0, "the wall's corner inside the picture: {x}, {y}");
+    // A level's own plan: as its picture fits it, but without the name lettered under it.
+    let level = s.model.levels()[0].0;
+    let (bare, at) = viewport(&s.model, level, 800, 600);
+    let titled = plan(&s.model, level, 800, 600);
+    assert_eq!(at, titled.view);
+    assert!(bare.prims.len() < titled.prims.len(), "no name lettered under it");
+}
