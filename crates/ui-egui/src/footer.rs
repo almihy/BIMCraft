@@ -150,8 +150,15 @@ fn shadowed(base: &Arc<Model>, sheet: Sheet, three_d: Option<Id>, temp: &Temp) -
     {
         // What the view hides for now stays hidden: the mode reveals what it hides for good.
         let for_now = |i: &Id, e: &Element| temp.elements.contains(i) || temp.categories.contains(graphics::category_of(m, e));
-        let cats: Vec<&str> =
+        let mut cats: Vec<&str> =
             g.categories.iter().filter(|(c, o)| o.hidden && !temp.categories.contains(*c)).map(|(c, _)| c.as_str()).collect();
+        // And what is hidden unless a view shows it, as Revit's survey point and project base point are.
+        cats.extend(
+            graphics::SUBCATEGORIES
+                .iter()
+                .filter(|s| s.off && !g.categories.get(s.key).is_some_and(|o| o.shown || o.hidden) && !temp.categories.contains(s.key))
+                .map(|s| s.key),
+        );
         let els: Vec<Id> = g
             .elements
             .iter()

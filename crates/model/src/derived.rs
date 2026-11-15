@@ -157,6 +157,8 @@ pub const RARE: &[&str] = &[
     "elevation",
     "schedule",
     "view3d",
+    "surveypoint",
+    "projectbasepoint",
 ];
 
 /// The categories of a drawing set: views, sheets and what places a view on a sheet. Their names and numbers are kept

@@ -1323,7 +1323,12 @@ impl Look {
             imports_hidden: g.hides("cadimport"),
             ..Look::default()
         };
-        // Nothing to look for: no graphics of its own, and nothing in the project phased or in an option.
+        // What is hidden unless a view shows it (the survey point and the project base point, as Revit's), hidden here
+        // when this view doesn't.
+        for s in SUBCATEGORIES.iter().filter(|s| s.off && crate::derived::RARE.contains(&s.key) && g.hides(s.key)) {
+            look.hidden.extend(m.rare(s.key));
+        }
+        // Nothing else to look for: no graphics of its own, and nothing in the project phased or in an option.
         let linked = m.elements.keys().next_back().is_some_and(|id| crate::link::is_linked(*id));
         if own.draws_as_is() && !linked && !crate::phasing::any(m) && m.rare("mass").is_empty() {
             return look;
@@ -1384,7 +1389,7 @@ impl Look {
                 over = own.over(&over);
             }
             // A subcategory's elements go with their category, hidden.
-            if over.hidden || sub(cat).is_some_and(|s| g.hides(s.parent)) {
+            if over.hidden || sub(cat).is_some_and(|s| g.hides(s.parent) || (s.off && g.hides(cat))) {
                 look.hidden.insert(id);
             } else if !over.is_empty() {
                 look.paint.insert(id, over);
