@@ -222,12 +222,18 @@ fn rows(category: &str) -> &'static [Row] {
             ("Identity Data", "role", msg!("Role"), Text),
         ],
         "surveypoint" => &[
-            ("Other", "east", msg!("E/W"), Length),
-            ("Other", "north", msg!("N/S"), Length),
-            ("Other", "height", msg!("Elev"), Length),
+            ("Other", "shared.north", msg!("N/S"), Length),
+            ("Other", "shared.east", msg!("E/W"), Length),
+            ("Other", "shared.height", msg!("Elev"), Length),
             ("Other", "clipped", msg!("Clipped"), Flag),
         ],
-        "projectbasepoint" => &[("Other", "angle", msg!("Angle to True North"), Number), ("Other", "elevation", "Elevation", Length)],
+        // As Revit's (2020.2 and on): where it is on the survey, and the angle to true north.
+        "projectbasepoint" => &[
+            ("Other", "shared.north", msg!("N/S"), Length),
+            ("Other", "shared.east", msg!("E/W"), Length),
+            ("Other", "shared.height", msg!("Elev"), Length),
+            ("Other", "angle_to_true_north", msg!("Angle to True North"), Number),
+        ],
         "propertyline" => &[
             ("Constraints", "level", "Level", LevelName),
             ("Dimensions", "area_m2", "Area", AreaShown),
@@ -1819,7 +1825,21 @@ impl BimApp {
         if let (Some(on), &[view]) = (crop, ids) {
             self.run("crop", if on { json!({"view": view}) } else { json!({"view": view, "region": null}) });
         }
+        // The survey point's and the project base point's coordinates, angle and clip are set as Revit sets them: the
+        // shared coordinates relocated, the angle turned about the project base point (`base_point`).
+        let point = match ids {
+            [one] => match model.elements.get(*one) {
+                Some(Element::SurveyPoint(_)) => Some("survey"),
+                Some(Element::ProjectBasePoint(_)) => Some("project"),
+                _ => None,
+            },
+            _ => None,
+        };
         match change {
+            Some((key, Ok(val))) if point.is_some() => {
+                let key = if key == "angle_to_true_north" { "angle" } else { key.strip_prefix("shared.").unwrap_or(key) };
+                self.run("base_point", json!({"which": point, key: val}));
+            }
             Some((key, Ok(val))) => {
                 let mut p = nested(key, val);
                 if let Some((k, v)) = also {

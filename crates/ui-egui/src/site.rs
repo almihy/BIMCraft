@@ -422,6 +422,11 @@ impl BimApp {
         if matches!(self.sheet, crate::Sheet::Plan(_))
             && let Some(level) = self.plan_level()
         {
+            // Property Line asks first, as Revit's: by distances and bearings (its Edit Table), or by sketching.
+            if tool == SiteTool::PropertyLine {
+                self.property_line_choice(level);
+                return;
+            }
             self.start_sketch(Of::Site { level, tool }, Vec::new());
         } else {
             self.status = Status { text: t("Open a floor plan to draw on the site.").into(), error: true };
@@ -800,18 +805,9 @@ impl BimApp {
             },
             Some(Element::Site(_)) => ring(&lines).map(|r| ("site_edit", json!({"id": id, "props": {"control": r}}))),
             Some(Element::SubDivision(_)) => Ok(("edit_boundary", json!({"id": id, "sketch": lines}))),
+            // Its points anew (the core turns them counter-clockwise, and keeps the edges' setbacks of the segments left).
             Some(Element::PropertyLine(_)) => match solver::chain(&lines) {
-                Ok((pts, true)) => {
-                    // Counter-clockwise, as the property line holds it: the other way round, its arcs turned.
-                    let ring: Vec<P2> = pts.iter().map(|q| P2(q[0], q[1])).collect();
-                    let pts = if geom::area(&ring) < 0.0 {
-                        let n = pts.len();
-                        (0..n).map(|i| [pts[n - 1 - i][0], pts[n - 1 - i][1], -pts[(2 * n - 2 - i) % n][2]]).collect()
-                    } else {
-                        pts
-                    };
-                    Ok(("modify", json!({"id": id, "points": pts})))
-                }
+                Ok((pts, true)) => Ok(("property_line_edit", json!({"id": id, "points": pts}))),
                 Ok(_) => Err(t("A property line is closed: end it where it began.").into()),
                 Err(e) => Err(e),
             },
@@ -917,6 +913,19 @@ impl BimApp {
     /// measures; of a mass, its masterplan figures. Each edit is one `site_edit`.
     pub(crate) fn site_properties(&mut self, ui: &mut Ui, model: &Model, ids: &[Id]) {
         let &[id] = ids else { return };
+        // A property line: Revit's Edit Table, and our setbacks, each a dialog.
+        if let Some(Element::PropertyLine(_)) = model.elements.get(id) {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                if ui.button(t("Edit Table")).on_hover_text(t("Its segments by distance and bearing, as a surveyor gives them")).clicked() {
+                    self.open_property_line_table(id);
+                }
+                if ui.button(t("Setbacks")).on_hover_text(t("Each segment's setback and what it faces, which draw the buildable line")).clicked() {
+                    self.open_property_line_setbacks(id);
+                }
+            });
+            return;
+        }
         let units = model.units;
         let (kind, uses, figures): (String, &[&str], Vec<(String, String)>) = match model.elements.get(id) {
             Some(Element::Site(st)) => (st.kind.clone(), shapes::kind(&st.kind).map_or(&[], |k| k.uses), site_figures(model, st)),

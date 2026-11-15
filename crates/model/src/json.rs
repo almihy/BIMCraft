@@ -350,6 +350,10 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>, measures: boo
             let round = |v: f64| (v * 1000.0).round() / 1000.0;
             extra.insert("shared".into(), json!({"east": round(east), "north": round(north), "height": round(height)}));
             extra.insert("angle_to_true_north".into(), json!(m.angle_to_true_north()));
+            // The survey point's clip, shown whichever way it is (a file leaves it out when clipped).
+            if let Element::SurveyPoint(_) = e {
+                extra.insert("clipped".into(), json!(b.clipped));
+            }
         }
         // Areas less the openings and shafts through them.
         Element::Floor(f) | Element::Toposolid(f) => {

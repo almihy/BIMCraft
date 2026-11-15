@@ -82,6 +82,8 @@ fn toposolid_sketches_the_grounds_outline_and_finish_makes_it() {
 fn property_line_sketches_its_outline_and_shows_its_buildable_area() {
     let mut h = app(BOX);
     site_tool(&mut h, "Property Line");
+    // Revit's Create Property Line asks how it is made first.
+    press(&mut h, "Create by sketching");
     sketch_loop(&mut h, &[P2(-1000.0, -1000.0), P2(9000.0, -1000.0), P2(4000.0, 6500.0)]);
     press(&mut h, "Finish Edit Mode");
     let [pl] = ids(&h, "propertyline")[..] else { panic!("one property line: {:?}", h.state().status) };
@@ -228,4 +230,54 @@ fn the_new_categories_have_names_where_categories_are_listed() {
     shortcut(&mut h, "VG");
     assert!(h.query_all_by_label("Toposolids").next().is_some(), "Visibility/Graphics lists them");
     assert!(h.query_all_by_label("buildingpad").next().is_none());
+}
+
+#[test]
+fn property_line_by_distances_and_bearings_closes_and_its_setbacks_draw_the_buildable_line() {
+    use crate::pltable::{PlDialog, Row};
+    let mut h = app(BOX);
+    site_tool(&mut h, "Property Line");
+    press(&mut h, "Create by entering distances and bearings");
+    // Revit's Edit Table: 20 m east, 15 m north; Add Line to Close adds 20 m west, and OK closes it with the last line south.
+    let row = |d: &str, b: &str| Row { distance: d.into(), bearing: b.into(), ..Row::default() };
+    match h.state_mut().pl_dialog.as_mut() {
+        Some(PlDialog::Table(t)) => t.rows = vec![row("20000", "N 90°00'00\" E"), row("15000", "N 0 E")],
+        other => panic!("the Edit Table: {other:?}"),
+    }
+    h.run();
+    press(&mut h, "Add Line to Close");
+    match h.state().pl_dialog.as_ref() {
+        Some(PlDialog::Table(t)) => {
+            assert_eq!(t.rows.len(), 3);
+            assert!(t.rows[2].bearing.starts_with("S 53°07'"), "{:?}", t.rows[2]);
+        }
+        other => panic!("{other:?}"),
+    }
+    press(&mut h, "OK");
+    assert!(h.state().pl_dialog.is_none(), "{:?}", h.state().status);
+    let [pl] = ids(&h, "propertyline")[..] else { panic!("one property line: {:?}", h.state().status) };
+    let Some(Element::PropertyLine(line)) = h.state().session.model.elements.get(pl) else { panic!() };
+    assert!((line.area() - 1.5e8).abs() < 10.0, "{}", line.area());
+    // Edit Table reads it back; Setbacks gives each segment its own.
+    h.state_mut().selection = vec![pl];
+    h.run();
+    press(&mut h, "Edit Table");
+    assert!(matches!(h.state().pl_dialog.as_ref(), Some(PlDialog::Table(t)) if t.rows.len() == 3 && t.id == Some(pl)));
+    press(&mut h, "Cancel");
+    press(&mut h, "Setbacks");
+    match h.state_mut().pl_dialog.as_mut() {
+        Some(PlDialog::Setbacks { rows, .. }) => {
+            assert_eq!(rows.len(), 3);
+            rows[0].setback = "3000".into();
+            rows[0].kind = "street".into();
+            rows[0].street = "High Street".into();
+        }
+        other => panic!("{other:?}"),
+    }
+    h.run();
+    press(&mut h, "OK");
+    let Some(Element::PropertyLine(line)) = h.state().session.model.elements.get(pl) else { panic!() };
+    assert_eq!((line.edge(0).setback, line.edge(0).street.as_str()), (3000.0, "High Street"), "{:?}", h.state().status);
+    let buildable: f64 = line.buildable().iter().map(|r| bimcraft_core::geom::area(r)).sum();
+    assert!(buildable < line.area() - 1.0e7, "{buildable}");
 }

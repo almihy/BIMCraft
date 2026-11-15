@@ -57,6 +57,7 @@ mod paper;
 mod pdfread;
 mod phasing;
 mod pin;
+mod pltable;
 #[cfg(feature = "plugins")]
 mod plugins;
 mod popup;
@@ -933,6 +934,8 @@ pub struct BimApp {
     /// Manage > Review Warnings, while open.
     warnings_dialog: Option<warnings::WarningsDialog>,
     selection_filter: Option<filter::SelectionFilter>,
+    /// Property Line's dialog (Create Property Line, Edit Table, Setbacks), while one is open.
+    pl_dialog: Option<pltable::PlDialog>,
     /// Paste Aligned to Selected Levels: the levels dialog, while open.
     paste_levels: Option<clipboard::PasteLevels>,
     /// The lines a person set the witness lines of each wall's temporary dimensions to, for the session as Revit keeps them.
@@ -1647,6 +1650,7 @@ impl BimApp {
             ids_of_selection: None,
             warnings_dialog: None,
             selection_filter: None,
+            pl_dialog: None,
             paste_levels: None,
             witnesses: std::collections::BTreeMap::new(),
             temp_dim_dialog: None,
@@ -2184,6 +2188,7 @@ impl BimApp {
             || self.ids_of_selection.is_some()
             || self.warnings_dialog.is_some()
             || self.selection_filter.is_some()
+            || self.pl_dialog.is_some()
             || self.paste_levels.is_some()
             || self.temp_dim_dialog.is_some()
             || self.paste_views.is_some()
@@ -6258,6 +6263,7 @@ impl BimApp {
         self.ids_of_selection_window(ctx);
         self.warnings_window(ctx);
         self.selection_filter_window(ctx);
+        self.property_line_window(ctx);
         self.paste_levels_window(ctx);
         self.temp_dim_window(ctx);
         self.paste_views_window(ctx);
