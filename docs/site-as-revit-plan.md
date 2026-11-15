@@ -256,4 +256,9 @@ too), `modify` (a sub-division's type, offset, name, role; a base point). Gone: 
    planting placed off any toposolid keeps the offset it was given.
 6. The built-in site families load on first use, not with a new project (an older build reads a project with none).
 7. A Graded Region of a linked toposolid needs the link loaded to work out cut and fill; unloaded, it says unknown.
-8. Project north / true north as a plan view's orientation: done only if it fits this phase (see above).
+8. Project north / true north as a plan view's orientation (a view turned by the angle) is not built in this phase: the
+   angle is kept and used for shared coordinates, the georeference and the property line table's bearings.
+9. Graded Region keeps a copy of the existing ground as it was taken (`graded_from.ground`), so cut and fill holds when
+   the source is a link not loaded or a project passed as text (`source`); `replace` takes it again into the same toposolid.
+10. A table-entry dialog for Property Line's Edit Table is not built in the desktop: the command takes the table, and the
+   desktop sketches the line; its Properties show the buildable area.
