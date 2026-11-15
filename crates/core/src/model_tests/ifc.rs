@@ -1255,64 +1255,6 @@ fn identity_data_goes_out_as_the_property_sets_ifc_has_for_it() {
 }
 
 #[test]
-fn a_floor_type_and_a_building_pad_type_of_one_name_are_two_type_objects_each_with_its_data() {
-    use crate::model_tests::graphics_testing::run;
-    let mut s = Session::new();
-    run(&mut s, "type", json!({"category": "floor", "name": "Generic", "thickness": 200, "type_mark": "F1", "manufacturer": "Acme"}));
-    run(&mut s, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]], "type": "Generic"}));
-    run(&mut s, "building_pad", json!({"boundary": [[10000, 0], [14000, 0], [14000, 4000], [10000, 4000]], "type": "Generic"}));
-    let f = export(&s.model);
-    let types = entities(&f, "IFCSLABTYPE");
-    assert_eq!(types.len(), 2, "a slab type for each kind of element: {types:?}");
-    let predefined: BTreeSet<String> = types.iter().map(|l| top_level_attributes(l)[9].clone()).collect();
-    assert_eq!(predefined, [".BASESLAB.".to_string(), ".FLOOR.".to_string()].into(), "neither is made NOTDEFINED by the other: {types:?}");
-    let guids: BTreeSet<String> = types.iter().map(|l| top_level_attributes(l)[0].clone()).collect();
-    assert_eq!(guids.len(), 2, "each has a GlobalId of its own");
-    for t in &types {
-        // (A slab has its common set; a pad, which has none, holds it in the BIMCraft set.)
-        let mut mark = type_set_of(&f, t, "Pset_SlabCommon");
-        mark.extend(type_set_of(&f, t, TYPE_DATA_SET));
-        assert!(mark.iter().any(|p| p.contains("'Reference'") && p.contains("'F1'")), "each holds the type's data: {t}: {mark:?}");
-        let maker = type_set_of(&f, t, MAKER_SET);
-        assert!(maker.iter().any(|p| p.contains("Acme")), "{maker:?}");
-    }
-    // A project with one of them exports as it did: the GlobalId has no kind in it.
-    let mut t = Session::new();
-    run(&mut t, "type", json!({"category": "floor", "name": "Generic", "thickness": 200}));
-    run(&mut t, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]], "type": "Generic"}));
-    let alone = entities(&export(&t.model), "IFCSLABTYPE");
-    let plain = type_hash("IFCSLABTYPE", "Generic", &None);
-    assert_eq!(alone.len(), 1);
-    assert_eq!(top_level_attributes(&alone[0])[0], crate::ifc::s(&guid(t.model.uid, TYPES, plain)), "{}", alone[0]);
-    dangling(&f);
-}
-
-#[test]
-fn a_type_object_keeps_its_global_id_when_another_kind_of_element_names_its_type_alike_later() {
-    use crate::model_tests::graphics_testing::run;
-    let mut s = Session::new();
-    run(&mut s, "type", json!({"category": "floor", "name": "Generic", "thickness": 200}));
-    run(&mut s, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]], "type": "Generic"}));
-    let before = entities(&export(&s.model), "IFCSLABTYPE");
-    assert_eq!(before.len(), 1);
-    let guid_before = top_level_attributes(&before[0])[0].clone();
-    run(&mut s, "building_pad", json!({"boundary": [[10000, 0], [14000, 0], [14000, 4000], [10000, 4000]], "type": "Generic"}));
-    let after = entities(&export(&s.model), "IFCSLABTYPE");
-    assert_eq!(after.len(), 2, "{after:?}");
-    let floor = after.iter().find(|l| top_level_attributes(l)[9] == ".FLOOR.").expect("the floor's type");
-    assert_eq!(top_level_attributes(floor)[0], guid_before, "the floor type's GlobalId is not changed by a pad of its name");
-    assert_eq!(guid_before, crate::ifc::s(&guid(s.model.uid, TYPES, type_hash("IFCSLABTYPE", "Generic", &None))));
-    // The same whichever was made first: the floor keeps the plain one.
-    let mut t = Session::new();
-    run(&mut t, "type", json!({"category": "floor", "name": "Generic", "thickness": 200}));
-    run(&mut t, "building_pad", json!({"boundary": [[10000, 0], [14000, 0], [14000, 4000], [10000, 4000]], "type": "Generic"}));
-    run(&mut t, "floor", json!({"boundary": [[0, 0], [4000, 0], [4000, 4000], [0, 4000]], "type": "Generic"}));
-    let both = entities(&export(&t.model), "IFCSLABTYPE");
-    let floor = both.iter().find(|l| top_level_attributes(l)[9] == ".FLOOR.").expect("the floor's type");
-    assert_eq!(top_level_attributes(floor)[0], crate::ifc::s(&guid(t.model.uid, TYPES, type_hash("IFCSLABTYPE", "Generic", &None))));
-}
-
-#[test]
 fn a_door_type_is_of_its_door_not_of_the_last_element_written_before_it() {
     use crate::model_tests::graphics_testing::{house, run};
     let mut s = Session::new();

@@ -955,7 +955,7 @@ fn a_hatch_is_an_outline_and_lines_going_nowhere_are_open_chains_and_picks_narro
 }
 
 #[test]
-fn a_property_line_a_floor_a_pad_and_a_toposolid_take_their_boundary_from_the_lines_picked() {
+fn a_property_line_a_floor_a_toposolid_and_a_sub_division_take_their_boundary_from_the_lines_picked() {
     let (mut s, id) = site_session("boundary");
     let r = run(&mut s, "property_line", json!({"cad": {"id": id, "layers": ["A-WALL"]}}));
     assert_eq!(r["area_m2"], 200.0, "the whole of the building, not its faces: {r}");
@@ -968,10 +968,10 @@ fn a_property_line_a_floor_a_pad_and_a_toposolid_take_their_boundary_from_the_li
     assert_eq!(f.level, s.model.guid(s.model.levels()[0].0), "the import's level");
     let r = run(&mut s, "floor", json!({"cad": {"id": id, "entities": [0, 2, 3, 4]}}));
     assert_eq!(r["area_m2"], 80.0, "a face picked by its lines alone, what runs on past it left out: {r}");
-    let r = run(&mut s, "building_pad", json!({"cad": {"id": id, "layers": ["Toposolid"]}}));
-    assert_eq!(r["area_m2"], 80.0, "{r}");
     let r = run(&mut s, "toposolid", json!({"cad": {"id": id, "layers": ["Toposolid"]}}));
     assert_eq!(r["area_m2"], 80.0, "{r}");
+    let r = run(&mut s, "sub_division", json!({"cad": {"id": id, "layers": ["Toposolid"]}}));
+    assert!((r["area_m2"].as_f64().unwrap() - 80.0).abs() < 0.01, "{r}");
 }
 
 #[test]

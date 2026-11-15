@@ -386,7 +386,7 @@ other_files(
          and `area_m2`, `from` (lines, polyline, circle or hatch), `layer` (or `layers` when from several), `entities` (what \
          made it), `labels` (the drawing's texts on any layer whose point lies inside it), and `holes` (clockwise: outlines \
          inside it) when it has any. The same ring found twice (a hatch over the lines round it) is one. `open`: the runs of \
-         lines that close nothing, each `points` and `entities`. `wall`, `floor`, `property_line`, `building_pad` and \
+         lines that close nothing, each `points` and `entities`. `wall`, `floor`, `property_line`, `sub_division` and \
          `toposolid` take the same pick as `cad`",
         cad_outlines,
     ),

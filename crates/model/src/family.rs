@@ -85,7 +85,7 @@ pub enum Category {
 impl Category {
     /// The categories a component may be of (a door's or a window's family is placed in a wall), in the order an import reads
     /// them.
-    pub const PLACED: [Category; 19] = [
+    pub const PLACED: [Category; 17] = [
         Category::Furniture,
         Category::Plumbing,
         Category::Drain,
@@ -103,8 +103,6 @@ impl Category {
         Category::VoiceOutlet,
         Category::PatchPanel,
         Category::Rack,
-        Category::Planting,
-        Category::SiteComponent,
     ];
 
     /// How IFC writes a component of it: the product's class, its predefined type, and the object type a proxy carries where

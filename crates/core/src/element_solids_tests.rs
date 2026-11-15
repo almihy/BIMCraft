@@ -394,7 +394,7 @@ fn columns_stairs_ramps_beams_and_pads_are_solids_and_a_round_column_is_the_circ
     let stair = id_of(&run(&mut s, "stair", json!({"start": [3000, 9000], "end": [3000, 12000], "height": 3000, "railings": true})));
     let ramp = id_of(&run(&mut s, "ramp", json!({"start": [6000, 9000], "end": [6000, 12000], "height": 600})));
     let beam = id_of(&run(&mut s, "beam", json!({"points": [[0, 15000], [4000, 15000]]})));
-    let pad = id_of(&run(&mut s, "building_pad", json!({"boundary": [[0, 18000], [3000, 18000], [3000, 21000], [0, 21000]], "offset": 200})));
+    let pad = id_of(&run(&mut s, "floor", json!({"boundary": [[0, 18000], [3000, 18000], [3000, 21000], [0, 21000]], "offset": 200})));
     for id in [round, square, structural, stair, ramp, beam, pad] {
         let es = element_solids(&s.model, id);
         assert!(es.is_whole(), "element {id}: {:?}", es.open);

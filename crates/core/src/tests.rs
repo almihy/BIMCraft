@@ -2498,13 +2498,13 @@ b"}, "host": "sky", "flips": {"hand": "x"}}),
     // The site's (masterplan.rs): a road, a car park, a toposolid with a pad on it and a property line, last so that no
     // id moves; and payloads with their keys, hostile, and the Modify tools taking them.
     let made: Vec<Value> = [
-        ("site", json!({"kind": "lane", "use": "road", "props": {"path": [[-5000, -5000], [15000, -5000]]}})),
+        ("site", json!({"kind": "parking_stall", "props": {"at": [-5000, -5000]}})),
         ("site", json!({"kind": "car_park", "props": {"control": [[20000, 0], [50000, 0], [50000, 20000], [20000, 20000]]}})),
         (
             "toposolid",
             json!({"boundary": [[-20000, -20000], [0, -20000], [0, -10000], [-20000, -10000]], "points": [[-20000, -20000, 500]]}),
         ),
-        ("building_pad", json!({"boundary": [[-15000, -18000], [-5000, -18000], [-5000, -12000], [-15000, -12000]], "offset": 200})),
+        ("sub_division", json!({"boundary": [[-15000, -18000], [-5000, -18000], [-5000, -12000], [-15000, -12000]], "offset": 200})),
         ("property_line", json!({"points": [[-30000, -30000], [60000, -30000], [60000, 30000, 0.3], [-30000, 30000]]})),
     ]
     .iter()
