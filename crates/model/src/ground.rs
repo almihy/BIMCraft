@@ -97,6 +97,10 @@ pub struct GradedFrom {
     pub toposolid: Guid,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<Guid>,
+    /// The existing ground as it was taken, placed in this model (on the graded toposolid's level): what cut and fill is
+    /// worked out against, whether or not its source is still there (a link unloaded, a project passed as text).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ground: Option<Box<Floor>>,
 }
 
 /// A surface the site is made of: its name (the type's and its material's), its fill on a plan and its line there, its
@@ -546,7 +550,10 @@ impl Model {
     /// graded region, or whose existing ground isn't there.
     pub fn cut_fill(&self, f: &Floor) -> Option<(f64, f64)> {
         let g = f.graded_from.as_ref()?;
-        let (old, source, place) = self.graded_source(g)?;
+        let (old, source, place): (Floor, &Model, Box<dyn Fn(P2) -> P2>) = match &g.ground {
+            Some(ground) => ((**ground).clone(), self, Box::new(|q| q)),
+            None => self.graded_source(g)?,
+        };
         let old_ring: Vec<P2> = old.boundary.iter().map(|q| place(*q)).collect();
         let old_holes: Vec<Vec<P2>> = old.openings.iter().map(|o| o.iter().map(|q| place(*q)).collect()).collect();
         // The existing ground's faces, placed in this model.
@@ -1018,7 +1025,7 @@ pub fn convert(m: &mut Model) {
         let made: Vec<Element> = match s.kind.as_str() {
             "tree" | "hedge" | "bike_rack" | "play_area" => component_of(m, &s),
             _ => match host {
-                Some(h) => subdivisions_of(m, &s, h),
+                Some(h) => subdivisions_from(m, &s, h),
                 None => Vec::new(),
             },
         };
@@ -1035,7 +1042,7 @@ pub fn convert(m: &mut Model) {
 }
 
 /// A converted area's sub-divisions on toposolid `host`: one of its outline, or a road's carriageway, pavements and median.
-fn subdivisions_of(m: &mut Model, s: &crate::masterplan::Site, host: Guid) -> Vec<Element> {
+pub fn subdivisions_from(m: &mut Model, s: &crate::masterplan::Site, host: Guid) -> Vec<Element> {
     let use_ = s.use_or_default().to_string();
     let Some((type_name, offset)) = subdivision_of(&s.kind, &use_, s.surface()) else { return Vec::new() };
     let mut out = Vec::new();

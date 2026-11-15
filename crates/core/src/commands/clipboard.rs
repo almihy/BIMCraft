@@ -888,7 +888,7 @@ fn raise(e: &mut Element, dz: f64) -> bool {
             }
         }
         Element::PointCloud(pc) => pc.offset += dz,
-        Element::BuildingPad(bp) => bp.offset += dz,
+        Element::SurveyPoint(b) | Element::ProjectBasePoint(b) => b.elevation += dz,
         Element::Rebar(rb) => rb.path.iter_mut().for_each(|q| q[2] += dz),
         Element::Floor(f) | Element::Toposolid(f) => f.offset += dz,
         Element::Ceiling(cl) => cl.offset += dz,

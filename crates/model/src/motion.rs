@@ -210,9 +210,18 @@ pub fn transform(c: &str, m: &Model, mut e: Element, id: Id, mo: &Motion, with: 
                 sd.openings.iter_mut().for_each(|o| o.reverse());
             }
         }
-        // A survey point or project base point goes where it is taken (`base_point` keeps the clip's rule); its turn
-        // is its angle to true north, which a move doesn't change.
-        Element::SurveyPoint(b) | Element::ProjectBasePoint(b) => b.at = f(b.at),
+        // The survey point clipped takes the shared coordinates with it (its own stay, everything else's change: the
+        // project is relocated on the survey); unclipped, it moves alone, its shared coordinates read where it now is. As
+        // Revit's. The project base point moves alone, its shared coordinates read where it now is.
+        Element::SurveyPoint(b) => {
+            let to = f(b.at);
+            if !b.clipped {
+                let [east, north, _] = m.shared(to, b.elevation);
+                (b.east, b.north) = (east, north);
+            }
+            b.at = to;
+        }
+        Element::ProjectBasePoint(b) => b.at = f(b.at),
         // A frozen room's boundary goes with it.
         Element::Room(r) => {
             r.point = f(r.point);

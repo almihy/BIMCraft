@@ -2222,6 +2222,7 @@ impl Element {
     pub fn sketch(&self) -> Option<&Vec<crate::sketch::SketchLine>> {
         match self {
             Element::Floor(f) | Element::Toposolid(f) => Some(&f.sketch),
+            Element::SubDivision(sd) => Some(&sd.sketch),
             Element::Ceiling(c) => Some(&c.sketch),
             Element::Roof(r) => Some(&r.sketch),
             Element::Shaft(sh) => Some(&sh.sketch),
@@ -2250,6 +2251,7 @@ impl Element {
     pub fn sketch_mut(&mut self) -> Option<&mut Vec<crate::sketch::SketchLine>> {
         match self {
             Element::Floor(f) | Element::Toposolid(f) => Some(&mut f.sketch),
+            Element::SubDivision(sd) => Some(&mut sd.sketch),
             Element::Ceiling(c) => Some(&mut c.sketch),
             Element::Roof(r) => Some(&mut r.sketch),
             Element::Shaft(sh) => Some(&mut sh.sketch),

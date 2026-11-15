@@ -49,6 +49,7 @@ mod camera;
 pub(crate) mod clipboard;
 mod images;
 mod pin;
+mod ground;
 mod site;
 pub use crate::files::base64;
 pub(crate) use crate::geom::degrees;
@@ -60,7 +61,11 @@ pub(crate) use crate::model::{category, colour, next_number};
 pub(crate) use crate::motion::{Motion, other_side, transform, transformed};
 pub use crate::units::m2;
 use cad_pick::cad_outlines;
-use site::{building_pad, property_line, site as site_cmd, site_edit, site_figures, site_kinds, toposolid};
+use ground::{
+    base_point, excavate, graded_region, planting, property_line_edit, property_line_table, remove_excavation, remove_point, road,
+    site_component, sub_division,
+};
+use site::{property_line, site as site_cmd, site_edit, site_figures, site_kinds, toposolid};
 
 const fn edit(id: &'static str, label: &'static str, aliases: &'static [&'static str], params: &'static str, run: Run) -> Command {
     Command { id, label, aliases, params, run, undoable: true, menu: None, files: Files::None }
@@ -619,7 +624,12 @@ other_files(
         "property_line",
         "Property Line",
         &["PL"],
-        "{points: [[x, y] or [x, y, bulge], …] | cad: {id, entities?, layers?, box?}, level?, name?} Revit's Property Line: \
+        "{points: [[x, y] or [x, y, bulge], …] | table: [{distance, bearing, type?: line|arc, radius?, side?: L|R}, …] | cad: {id, \
+         entities?, layers?, box?}, start?: [x, y], edges?, level?, name?} Revit's Property Line (with `table`, its Edit Table: \
+         from `start`, each segment's distance and survey bearing against true north, N 45°30'00\" E or an azimuth in degrees; \
+         an arc's chord, radius and side; closed by a last segment where it doesn't, its `closure` returned); `edges` each \
+         segment's setback and what it faces ({setback?, kind?: street|side|rear|corner, street?, street_width?}), which draw \
+         its buildable line: \
          the plot's boundary through `points`, \
          closed (the last joins the first), an arc where a point gives the bulge of the piece from it to the next (DXF's: \
          the tangent of a quarter of its angle, positive counter-clockwise), or along the one closed outline a pick of a CAD \
@@ -642,16 +652,113 @@ other_files(
         toposolid,
     ),
     edit(
-        "building_pad",
-        "Building Pad",
-        &["BP"],
-        "{boundary: [[x,y],…] | cad: {id, entities?, layers?, box?}, type?, level?, offset?} Revit's Building Pad: a flat pad \
-         along `boundary` (or the one closed outline a pick of a CAD import's lines makes, as `toposolid` takes it), its top `offset` \
-         over its level, its type's thickness under that (a floor type; `Building Pad`, 300 mm, made when the project hasn't \
-         one). It cuts the toposolid on its level it lies wholly inside: the toposolid's plan and 3D view leave a hole its \
-         shape, its contours stopping at its edge and the ground round it as it was, and the pad is a slab in the hole at its \
-         own height. Returns `id`, `area_m2` and `cuts`, the toposolids it cuts",
-        building_pad,
+        "remove_point",
+        "Delete Point",
+        &[],
+        "{id, point? | at?: [x,y]} Modify Sub Elements' Delete on a toposolid's, a floor's or a flat roof's shape point: by its \
+         `point` id (as `edit_shape` lists them) or the one within a millimetre of `at`; a split line that ran to it goes too",
+        remove_point,
+    ),
+    edit(
+        "sub_division",
+        "Sub-divide",
+        &["SD"],
+        "{boundary: [[x,y],…] | cad, openings?: [[[x,y],…],…], host?, type?, offset?, name?, role?} Revit's Sub-division: a part of a \
+         toposolid's top (its `host`: by default the one under the outline's middle) as its own toposolid `type` (a floor type of \
+         the project, or one of the surfaces made when missing: Asphalt, Paving, Block Paving, Gravel, Concrete, Terrace, Grass, \
+         Meadow, Planting, Water, Sand, Sports Surface, Play Surface; Paving by default). `offset` mm (Revit's Subdivision Height; \
+         the surface's by default) raises it over the ground, or, negative, sinks it into its host, which is excavated so far \
+         under its surface. It follows its host's surface, is clipped to its outline, and moves, copies and goes with it. `role` \
+         says what it is on the site (`lane/road`, `landscape/lawn`, `water/pond`…: a car park keeps clear of it by that). \
+         Returns `id`, `area_m2`, `host`, `element`",
+        sub_division,
+    ),
+    edit(
+        "road",
+        "Road",
+        &[],
+        "{path: [[x,y] or [x,y,bulge],…], host?, width?, use?: road|lane|footpath|promenade, lanes?, lane_width?, kerb?, median?, \
+         oneway?, pavement?, name?} a road from its centre line: its carriageway (Asphalt, at the ground), pavements (Paving, 150 \
+         up) and median (Grass, 150 up) worked out as the masterplan's lanes were, each a sub-division of the toposolid under it \
+         (or `host`); another use is one sub-division of its outline. Returns `ids`, `host`, `notes`",
+        road,
+    ),
+    edit(
+        "excavate",
+        "Excavate",
+        &[],
+        "{toposolid, by: [id, …]} Revit's Excavate: the floors, roofs or toposolids `by` cut the toposolid, each within its \
+         footprint down to its bottom (the ground lowered there; through the toposolid where it reaches under its bottom). \
+         The toposolid keeps them (`excavated_by`) and is cut again as they change. Returns `id`, `excavated_by`, `openings`, `top`",
+        excavate,
+    ),
+    edit(
+        "remove_excavation",
+        "Remove Excavation",
+        &[],
+        "{toposolid, by?: [id, …]} takes those (all, without `by`) off what excavates the toposolid. Returns as `excavate` does",
+        remove_excavation,
+    ),
+    edit(
+        "graded_region",
+        "Graded Region",
+        &[],
+        "{toposolid?, link? | source?, replace?, phase?} Revit's Graded Region: the existing ground copied in as the proposed ground, \
+         a toposolid of its own (the lowest toposolid when `toposolid` doesn't name one): of this project, of the linked model \
+         `link` (loaded), or of the project `source` (its text); on the level of the same name here (else the nearest), at the same \
+         height. Made in `phase` (the last by default); a copy of this project's toposolid demolishes it in that phase. With \
+         `replace`, an existing proposed ground takes the existing ground again (its id, type, excavations and sub-divisions \
+         kept). It keeps the existing ground as it was taken, and its cut and fill against it (Revit 2026's: within its outline, \
+         projected up) are in its `element_json` and schedule. Returns `id`, `cut_m3`, `fill_m3`, `net_m3`, `element`",
+        graded_region,
+    ),
+    edit(
+        "base_point",
+        "Base Point",
+        &[],
+        "{which?: survey|project, at?: [x,y], elevation?, east?, north?, height?, angle?, clipped?} Revit's Survey Point and Project \
+         Base Point (made at the origin when missing). Moved (`at`, `elevation`): the survey point clipped takes the shared \
+         coordinates with it, unclipped it moves alone and reads where it is; the project base point moves alone. `east`, \
+         `north`, `height` (mm): the survey point's shared coordinates; on the project base point, the project relocated on the \
+         survey so it reads them (Specify Coordinates at a Point). `angle` (the project base point's Angle to True North, \
+         degrees): project north is that far counter-clockwise from true north, turned about the base point. Without `which`, \
+         reads. Returns both points (`at`, `elevation`, shared `east`, `north`, `height`, `clipped`) and `angle_to_true_north`",
+        base_point,
+    ),
+    edit(
+        "planting",
+        "Planting",
+        &[],
+        "{at: [x,y], family?: Tree, type?, level?, angle?, params?} Revit's Planting: a family of the Planting category (the site's \
+         Tree, Shrub and Hedge, loaded when the project hasn't it, or the project's own) on the ground: on the level of the \
+         toposolid under `at`, its height the ground's there, and kept on it as the ground or it moves. Returns `id`, `offset`, `element`",
+        planting,
+    ),
+    edit(
+        "site_component",
+        "Site Component",
+        &[],
+        "{at: [x,y], family?: Bench, type?, level?, angle?, params?} Revit's Site Component: a family of the Site category (the \
+         site's Bike Rack, Bench and Play Equipment, or the project's own), on the ground as `planting` is. Returns as `planting`",
+        site_component,
+    ),
+    other(
+        "property_line_table",
+        "Property Line Table",
+        "{id} a property line as Revit's Edit Table shows it: from `start`, each segment's `distance` (an arc's chord, mm), \
+         `bearing` (N 45°30'00\" E, against true north), `azimuth` (degrees clockwise from true north), `type` (line, arc), \
+         an arc's `radius` and `side` (L or R, the way it turns); and its `edges`",
+        property_line_table,
+    ),
+    edit(
+        "property_line_edit",
+        "Edit Property Line",
+        &[],
+        "{id, points? | table?, start?, name?, edges?, level?} changes a property line: its points anew, or its table (as \
+         `property_line` takes it), its name, its level, and its edges' setbacks (`edges`: a list one a segment, or {index: \
+         edge}; each {setback?, kind?: street|side|rear|corner, street?, street_width?}, null clearing one). Returns `id`, \
+         `area_m2`, `buildable_area_m2`, `closure` where a table didn't close, `element`",
+        property_line_edit,
     ),
     edit(
         "mass_floors",
@@ -9849,6 +9956,7 @@ fn boundary_now(e: &Element) -> Option<Vec<SketchLine>> {
         Element::Ceiling(x) => (x.boundary.clone(), x.openings.clone()),
         Element::Roof(r) if r.extrusion.is_none() => (r.boundary.clone(), r.courtyards.clone()),
         Element::Shaft(sh) => (sh.boundary.clone(), Vec::new()),
+        Element::SubDivision(sd) => (sd.boundary.clone(), sd.openings.clone()),
         _ => return None,
     };
     let kept = e.sketch().filter(|ls| sketch::draws(ls, &outline, &holes)).cloned();
@@ -9918,6 +10026,8 @@ fn edit_boundary(s: &mut Session, p: &Value) -> R {
         Element::Ceiling(x) => Element::Ceiling(Ceiling { boundary: r.outer, openings: r.holes, sketch: lines, ..x }),
         Element::Shaft(_) if !r.holes.is_empty() => return Err(bad(c, "a shaft is one outline with no holes in it")),
         Element::Shaft(sh) => Element::Shaft(Shaft { boundary: r.outer, sketch: lines, ..sh }),
+        // A sub-division, as Revit's Edit Boundary on one: its outline and islands anew.
+        Element::SubDivision(sd) => Element::SubDivision(crate::ground::SubDivision { boundary: r.outer, openings: r.holes, sketch: lines, ..sd }),
         Element::Roof(old) => {
             let mut new = Roof { boundary: r.outer, courtyards: r.holes, gables: Vec::new(), sketch: unslope(&lines), ..old.clone() };
             // A slope stays with its edge too, where the edge stays or is cut in two; the lines may say it instead.
@@ -12861,7 +12971,9 @@ fn location_fields(e: &Element) -> &'static [&'static str] {
         E::Grid(_) | E::RoomSeparator(_) | E::Section(_) | E::Elevation(_) => &["start", "end"],
         E::Wall(_) => &["start", "end", "arc"],
         E::Floor(_) | E::Toposolid(_) => &["boundary", "sketch", "pattern_origin"],
-        E::Ceiling(_) | E::Shaft(_) | E::Mass(_) | E::BuildingPad(_) => &["boundary", "sketch"],
+        E::Ceiling(_) | E::Shaft(_) | E::Mass(_) => &["boundary", "sketch"],
+        E::SubDivision(_) => &["boundary", "openings", "sketch", "host"],
+        E::SurveyPoint(_) | E::ProjectBasePoint(_) => &["at"],
         E::Roof(_) => &["boundary", "sketch", "extrusion", "courtyards"],
         E::Door(_) | E::Window(_) => &["host", "offset"],
         E::Room(_) => &["point"],
@@ -13000,6 +13112,10 @@ fn host_line(was: P2, candidates: impl IntoIterator<Item = Id>, line_of: impl Fn
 /// joined, and doors and windows in walls that changed keep their place or go with their wall.
 /// With `end` (`Some(true)` the start, `Some(false)` the end), only that end of one wall or one run goes.
 fn relocate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion, end: Option<bool>) -> Result<(), String> {
+    // A toposolid taken takes its sub-divisions with it, as Revit's; and the survey point unclipped, or the project base
+    // point, moves alone, its shared coordinates following (`ground::moved_point`).
+    let with_parts = with_subdivisions(&s.model, ids);
+    let ids = with_parts.as_slice();
     // A pinned element is held where it is, as in Revit.
     pin::refuse_pinned(c, &s.model, ids, if c == "rotate" { pin::Held::Rotate } else { pin::Held::Move })?;
     let m = &s.model;
@@ -13454,6 +13570,13 @@ pub(crate) fn duplicate_mapped(c: &str, s: &mut Session, ids: &[Id], mo: &Motion
             .filter(|(id, e)| matches!(e, Element::Rebar(r) if r.host.is_some_and(|h| hosts_copied.contains(&h))) && !once.contains(*id))
             .map(|(&id, _)| id),
     );
+    // A toposolid copied brings its sub-divisions, as Revit's.
+    all.extend(
+        m.elements
+            .iter()
+            .filter(|(id, e)| matches!(e, Element::SubDivision(sd) if hosts_copied.contains(&sd.host)) && !once.contains(*id))
+            .map(|(&id, _)| id),
+    );
     duplicate_exactly(c, s, &all, mo)
 }
 
@@ -13544,6 +13667,8 @@ pub(crate) fn duplicate_exactly(c: &str, s: &mut Session, ids: &[Id], mo: &Motio
             }
             Some(Element::Roof(r)) => r.join = r.join.map(|j| hosts.get(&j).copied().unwrap_or(j)),
             Some(Element::Rebar(r)) => r.host = r.host.map(|h| hosts.get(&h).copied().unwrap_or(h)),
+            Some(Element::SubDivision(sd)) => sd.host = hosts.get(&sd.host).copied().unwrap_or(sd.host),
+            Some(Element::Toposolid(t)) => t.excavated_by.iter_mut().for_each(|g| *g = hosts.get(g).copied().unwrap_or(*g)),
             _ => {}
         }
     }
@@ -13780,6 +13905,23 @@ fn temporary_dimension_settings(s: &mut Session, p: &Value) -> R {
         s.model_mut().temporary_dimensions = now;
     }
     Ok(json!({"walls": now.walls.name(), "openings": now.openings.name()}))
+}
+
+/// `ids` and the sub-divisions of the toposolids among them, which go where their host goes.
+fn with_subdivisions(m: &Model, ids: &[Id]) -> Vec<Id> {
+    let hosts: BTreeSet<Guid> =
+        ids.iter().filter(|id| matches!(m.elements.get(**id), Some(Element::Toposolid(_)))).map(|id| m.guid(*id)).collect();
+    let mut out = ids.to_vec();
+    if hosts.is_empty() {
+        return out;
+    }
+    out.extend(
+        m.elements
+            .iter()
+            .filter(|(id, e)| matches!(e, Element::SubDivision(sd) if hosts.contains(&sd.host)) && !ids.contains(id))
+            .map(|(id, _)| *id),
+    );
+    out
 }
 
 /// Element `id` moved `by` in plan, as `move` moves it: what keeps a dimension's constraints.
@@ -14433,6 +14575,7 @@ fn delete_indexed(s: &mut Session, p: &Value) -> R {
                 Some(Element::Door(o) | Element::Window(o)) => gone.contains(&o.host),
                 Some(Element::Railing(r)) => r.host.is_some_and(|h| gone.contains(&h)),
                 Some(Element::Rebar(rb)) => rb.host.is_some_and(|h| gone.contains(&h)),
+                Some(Element::SubDivision(sd)) => gone.contains(&sd.host),
                 Some(Element::PlanView(v)) => gone.contains(&v.level) || v.parent.is_some_and(|p| gone.contains(&p)),
                 Some(Element::Tag(t)) => gone.contains(&t.host) || t.view.is_some_and(|v| gone.contains(&v)),
                 Some(Element::Dimension(d)) => d.view.is_some_and(|v| gone.contains(&v)),
@@ -14485,6 +14628,8 @@ fn delete_indexed(s: &mut Session, p: &Value) -> R {
         .filter(|id| match m.elements.get(*id) {
             Some(Element::Wall(w)) => w.attach_top.is_some_and(|g| gone.contains(&g)) || w.attach_base.is_some_and(|g| gone.contains(&g)),
             Some(Element::Roof(r)) => r.join.is_some_and(|g| gone.contains(&g)),
+            // A toposolid an element that goes excavated is whole there again.
+            Some(Element::Toposolid(t)) => t.excavated_by.iter().any(|g| gone.contains(g)),
             // A 3D view whose work plane's level goes sketches on the lowest level again.
             Some(Element::View3D(v)) => v.work_plane.as_ref().is_some_and(|wp| wp.level.is_some_and(|l| gone.contains(&l))),
             _ => false,
@@ -14528,6 +14673,7 @@ fn delete_indexed(s: &mut Session, p: &Value) -> R {
                 }
             }
             Some(Element::Roof(r)) if r.join.is_some_and(|g| gone.contains(&g)) => r.join = None,
+            Some(Element::Toposolid(t)) => t.excavated_by.retain(|g| !gone.contains(g)),
             Some(Element::View3D(v)) if v.work_plane.as_ref().is_some_and(|wp| wp.level.is_some_and(|l| gone.contains(&l))) => {
                 v.work_plane = None
             }
@@ -14554,6 +14700,7 @@ fn delete_from_scratch(s: &mut Session, p: &Value) -> R {
                         Element::Door(o) | Element::Window(o) => gone.contains(&o.host),
                         Element::Railing(r) => r.host.is_some_and(|h| gone.contains(&h)),
                         Element::Rebar(rb) => rb.host.is_some_and(|h| gone.contains(&h)),
+                        Element::SubDivision(sd) => gone.contains(&sd.host),
                         // A plan view goes with its level and its parent; what is annotated in a view goes with it.
                         Element::PlanView(v) => gone.contains(&v.level) || v.parent.is_some_and(|p| gone.contains(&p)),
                         Element::Tag(t) => gone.contains(&t.host) || t.view.is_some_and(|v| gone.contains(&v)),
@@ -14630,6 +14777,11 @@ fn delete_from_scratch(s: &mut Session, p: &Value) -> R {
             if at.is_some_and(|a| gone.contains(&a)) {
                 *at = None;
             }
+        }
+    }
+    for e in m.elements.values_mut() {
+        if let Element::Toposolid(t) = e {
+            t.excavated_by.retain(|g| !gone.contains(g));
         }
     }
     Ok(json!({"deleted": deleted}))
@@ -14748,6 +14900,14 @@ fn georeference(s: &mut Session, p: &Value) -> R {
             }
         }
         g.check().map_err(|e| bad(c, e))?;
+        // Its numbers are the survey point's and the project base point's: set there, and read back from them.
+        if ["eastings", "northings", "height", "rotation"].iter().any(|k| !absent(p.get(*k))) {
+            ground::points_from_numbers(s.model_mut(), &g);
+        }
+        if let Some((e, n, h, r)) = s.model.georeference_numbers() {
+            let round = |v: f64| (v * 1000.0).round() / 1000.0;
+            (g.eastings, g.northings, g.height, g.rotation) = (round(e), round(n), round(h), round(r));
+        }
         if s.model.georeference.as_ref() != Some(&g) {
             s.model_mut().georeference = Some(g);
         }

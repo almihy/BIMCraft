@@ -9,7 +9,7 @@ use serde_json::{Map, Value, json};
 use super::{R, absent, bad, element_id, element_json, level_param, m2, num, points, string};
 use crate::engine::Session;
 use crate::geom::{self, P2};
-use crate::masterplan::{self, BuildingPad, MassSite, PHASES, PropertyLine, Site};
+use crate::masterplan::{self, MassSite, PHASES, PropertyLine, Site};
 use crate::model::{Element, FloorType, Id, MAX_POINTS, MIN_CONTOURS, Model, ShapePoint};
 use crate::site::{Props, shapes};
 
@@ -85,6 +85,10 @@ pub(super) fn site(s: &mut Session, p: &Value) -> R {
     let c = "site";
     keys(c, p, &["kind", "use", "name", "level", "phase", "source", "ref", "props"])?;
     let kind = kind_param(c, p)?;
+    // What Revit makes as a sub-division, planting or a site component is made so now.
+    if let Some((_, by)) = crate::ground::CONVERTED.iter().find(|(k, _)| *k == kind) {
+        return Err(bad(c, format!("a {} is made with `{by}` now, as Revit makes it", kind.replace('_', " "))));
+    }
     let use_ = string(c, p, "use")?.unwrap_or_default();
     let level = level_param(c, &s.model, p, "level")?;
     let phase = phase_param(c, p)?.unwrap_or_else(|| "new".into());
@@ -273,7 +277,7 @@ pub(super) fn site_kinds(_: &mut Session, p: &Value) -> R {
 }
 
 /// A path's points, [x, y] or [x, y, bulge].
-fn bulged(c: &str, p: &Value, key: &str) -> Result<Vec<[f64; 3]>, String> {
+pub(super) fn bulged(c: &str, p: &Value, key: &str) -> Result<Vec<[f64; 3]>, String> {
     let v = p.get(key).ok_or_else(|| bad(c, format!("`{key}` [[x, y] or [x, y, bulge], …] is required")))?;
     if v.as_array().is_some_and(|a| a.len() > MAX_POINTS) {
         return Err(bad(c, format!("`{key}` has more than {MAX_POINTS} points")));
@@ -287,32 +291,34 @@ fn bulged(c: &str, p: &Value, key: &str) -> Result<Vec<[f64; 3]>, String> {
 
 pub(super) fn property_line(s: &mut Session, p: &Value) -> R {
     let c = "property_line";
-    keys(c, p, &["points", "level", "name", "cad"])?;
-    let (points, level) = match super::cad_pick::picked_outline(c, &s.model, p, &["points"])? {
+    keys(c, p, &["points", "table", "start", "edges", "level", "name", "cad"])?;
+    let mut closure = None;
+    let (points, level) = match super::cad_pick::picked_outline(c, &s.model, p, &["points", "table"])? {
         Some((level, outline, _)) => {
             let level = if absent(p.get("level")) { level } else { level_param(c, &s.model, p, "level")? };
             (outline.into_iter().map(|q| [q.0, q.1, 0.0]).collect(), level)
         }
-        None => (bulged(c, p, "points")?, level_param(c, &s.model, p, "level")?),
+        None => match super::ground::table_param(c, &s.model, p)? {
+            Some((pts, cl)) => {
+                closure = cl;
+                (pts, level_param(c, &s.model, p, "level")?)
+            }
+            None => (bulged(c, p, "points")?, level_param(c, &s.model, p, "level")?),
+        },
     };
-    let mut pl = PropertyLine { name: string(c, p, "name")?.unwrap_or_default(), level, points, params: BTreeMap::new() };
-    // Counter-clockwise, as the plan's areas run: reversed, each arc's bulge on the piece now before it, the other way.
-    let ring: Vec<P2> = pl.points.iter().map(|q| P2(q[0], q[1])).collect();
-    if geom::area(&ring) < 0.0 {
-        let n = pl.points.len();
-        let mut r: Vec<[f64; 3]> = (0..n)
-            .map(|i| {
-                let q = pl.points[n - 1 - i];
-                let b = pl.points[(2 * n - 2 - i) % n][2];
-                [q[0], q[1], -b]
-            })
-            .collect();
-        std::mem::swap(&mut pl.points, &mut r);
-    }
+    let edges = super::ground::edges_param(c, p, points.len(), &[])?.unwrap_or_default();
+    let mut pl = PropertyLine { name: string(c, p, "name")?.unwrap_or_default(), level, points, edges, params: BTreeMap::new() };
+    // Counter-clockwise, as the plan's areas run: reversed, each arc's bulge and each edge on the segment now before it.
+    super::ground::counter_clockwise(&mut pl.points, &mut pl.edges);
     masterplan::check_property_line(c, &pl)?;
     let area = pl.area();
     let id = s.model_mut().insert(Element::PropertyLine(pl));
-    Ok(json!({"id": id, "area_m2": m2(area)}))
+    let mut out = json!({"id": id, "area_m2": m2(area)});
+    if let Some((d, az)) = closure {
+        out["closure"] = json!({"distance": (d * 100.0).round() / 100.0, "bearing": super::ground::bearing_text(az)});
+    }
+    out["buildable_area_m2"] = element_json(&s.model, id)["buildable_area_m2"].clone();
+    Ok(out)
 }
 
 /// The floor type `name`, made `thickness` thick when the project hasn't one of that name.
@@ -399,26 +405,4 @@ pub(super) fn toposolid(s: &mut Session, p: &Value) -> R {
     let area = geom::area(&f.boundary).abs();
     let id = s.model_mut().insert(Element::Toposolid(f));
     Ok(json!({"id": id, "area_m2": m2(area)}))
-}
-
-pub(super) fn building_pad(s: &mut Session, p: &Value) -> R {
-    let c = "building_pad";
-    keys(c, p, &["boundary", "type", "level", "offset", "cad"])?;
-    let (boundary, level) = boundary_param(c, &s.model, p)?;
-    let offset = num(c, p, "offset")?.unwrap_or(0.0);
-    let type_name = type_param(c, s, p, "Building Pad", 300.0)?;
-    let pad = BuildingPad { type_name, level, boundary, offset, params: BTreeMap::new() };
-    let area = geom::area(&pad.boundary).abs();
-    let id = s.model_mut().insert(Element::BuildingPad(pad));
-    // Which toposolid it cuts, if one.
-    let cuts: Vec<Id> = s
-        .model
-        .elements
-        .iter()
-        .filter_map(|(tid, e)| match e {
-            Element::Toposolid(f) if s.model.pads_in(f).iter().any(|(pid, _)| *pid == id) => Some(*tid),
-            _ => None,
-        })
-        .collect();
-    Ok(json!({"id": id, "area_m2": m2(area), "cuts": cuts}))
 }

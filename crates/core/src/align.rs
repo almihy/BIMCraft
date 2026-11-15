@@ -64,7 +64,8 @@ fn element_lines(m: &Model, e: &Element) -> Vec<Line> {
             st.outline.iter().flat_map(|p| std::iter::once(&p.outer).chain(&p.holes)).flat_map(|r| path(r, true)).collect()
         }
         Element::PropertyLine(pl) => path(&pl.ring(), true),
-        Element::BuildingPad(bp) => path(&bp.boundary, true),
+        Element::SubDivision(sd) => std::iter::once(&sd.boundary).chain(&sd.openings).flat_map(|r| path(r, true)).collect(),
+        Element::SurveyPoint(b) | Element::ProjectBasePoint(b) => axes(b.at, 0.0, 300.0),
         Element::Ceiling(c) => std::iter::once(&c.boundary).chain(&c.openings).flat_map(|r| path(r, true)).collect(),
         Element::Roof(r) => {
             std::iter::once(m.roof_outline(r)).chain(r.courtyards.clone()).chain(r.openings.clone()).flat_map(|r| path(&r, true)).collect()
