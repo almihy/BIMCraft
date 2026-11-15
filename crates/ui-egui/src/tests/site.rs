@@ -262,7 +262,13 @@ fn property_line_by_distances_and_bearings_closes_and_its_setbacks_draw_the_buil
     h.state_mut().selection = vec![pl];
     h.run();
     press(&mut h, "Edit Table");
-    assert!(matches!(h.state().pl_dialog.as_ref(), Some(PlDialog::Table(t)) if t.rows.len() == 3 && t.id == Some(pl)));
+    assert!(
+        matches!(h.state().pl_dialog.as_ref(), Some(PlDialog::Table(t)) if t.rows.len() == 3 && t.id == Some(pl)),
+        "{:?} {:?} {:?}",
+        h.state().pl_dialog,
+        h.state().status,
+        h.state().selection
+    );
     press(&mut h, "Cancel");
     press(&mut h, "Setbacks");
     match h.state_mut().pl_dialog.as_mut() {

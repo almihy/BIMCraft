@@ -913,19 +913,6 @@ impl BimApp {
     /// measures; of a mass, its masterplan figures. Each edit is one `site_edit`.
     pub(crate) fn site_properties(&mut self, ui: &mut Ui, model: &Model, ids: &[Id]) {
         let &[id] = ids else { return };
-        // A property line: Revit's Edit Table, and our setbacks, each a dialog.
-        if let Some(Element::PropertyLine(_)) = model.elements.get(id) {
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                if ui.button(t("Edit Table")).on_hover_text(t("Its segments by distance and bearing, as a surveyor gives them")).clicked() {
-                    self.open_property_line_table(id);
-                }
-                if ui.button(t("Setbacks")).on_hover_text(t("Each segment's setback and what it faces, which draw the buildable line")).clicked() {
-                    self.open_property_line_setbacks(id);
-                }
-            });
-            return;
-        }
         let units = model.units;
         let (kind, uses, figures): (String, &[&str], Vec<(String, String)>) = match model.elements.get(id) {
             Some(Element::Site(st)) => (st.kind.clone(), shapes::kind(&st.kind).map_or(&[], |k| k.uses), site_figures(model, st)),

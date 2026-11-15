@@ -782,7 +782,7 @@ impl BimApp {
     }
 
     /// The Mode panel at the ribbon's right end: Finish and Cancel while sketching, Edit Boundary when one floor, ceiling,
-    /// roof or shaft is selected.
+    /// roof or shaft is selected, and with a property line Edit Table and Setbacks.
     pub(crate) fn mode_panel(&mut self, ui: &mut Ui) {
         let sketching = self.sketch.is_some();
         if !sketching && !(self.boundary_selected() && self.tool == Tool::Modify) {
@@ -813,6 +813,19 @@ impl BimApp {
                     let tip = "Edit Boundary: sketch its outline and holes again";
                     if ui.add_enabled_ui(!pinned, |ui| big_button(ui, Icon::Line, "Edit Boundary", false, tip)).inner.clicked() {
                         self.edit_boundary();
+                    }
+                    // A property line's: Revit's Edit Table, and our setbacks.
+                    if let &[id] = self.selection.as_slice()
+                        && matches!(self.session.model.elements.get(id), Some(bimcraft_core::model::Element::PropertyLine(_)))
+                    {
+                        let tip = msg!("Edit Table: its segments by distance and bearing, as a surveyor gives them");
+                        if ui.add_enabled_ui(!pinned, |ui| big_button(ui, Icon::PropertyLine, msg!("Edit Table"), false, tip)).inner.clicked() {
+                            self.open_property_line_table(id);
+                        }
+                        let tip = msg!("Setbacks: each segment's setback and what it faces, which draw the buildable line");
+                        if ui.add_enabled_ui(!pinned, |ui| big_button(ui, Icon::PropertyLine, msg!("Setbacks"), false, tip)).inner.clicked() {
+                            self.open_property_line_setbacks(id);
+                        }
                     }
                 }
             });
