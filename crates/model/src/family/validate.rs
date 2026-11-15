@@ -84,7 +84,8 @@ fn formulas(f: &Family, out: &mut Vec<String>) {
 
 /// What the forms' boxes say, over every type: a void that reaches no solid before it, a door's or
 /// a window's form wholly outside the opening it stands in, one thicker than the wall it's in, a
-/// plan with nothing drawn on it, and a door's leaf drawn shut in a plan that draws it open. A fault every type has is one warning naming all of them.
+/// plan with nothing drawn on it, a door's leaf drawn shut in a plan that draws it open, and a part fixed to a leaf hidden in plan
+/// that a plan draws all the same. A fault every type has is one warning naming all of them.
 fn geometry(f: &Family, out: &mut Vec<String>) {
     if f.category.hosted() && !f.symbols.iter().any(|y| y.view == super::SymbolView::Plan) {
         out.push("its plan draws no symbols: a door's or a window's plan shows its swing or its sill, and this one shows nothing".into());
@@ -92,6 +93,12 @@ fn geometry(f: &Family, out: &mut Vec<String>) {
     for i in f.shut_leaves() {
         out.push(format!(
             "form {}: a door's leaf, shut in its opening, is drawn in plan beside its swing; as Revit's door families do, give it              `show: {{plan: false}}` and draw the leaf open with its symbols (a panel as thick as the leaf, square to the wall)",
+            i + 1
+        ));
+    }
+    for (i, _) in f.leaf_parts() {
+        out.push(format!(
+            "form {}: part of a door's leaf, shut in its opening, is drawn in plan while its leaf is not; as in Revit, a kick plate, lever or rose fixed to the leaf goes with it: give it the leaf's `show: {{plan: false}}`",
             i + 1
         ));
     }

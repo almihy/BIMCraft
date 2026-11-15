@@ -11860,6 +11860,8 @@ fn family(s: &mut Session, p: &Value) -> R {
         }
     }
     f.summarize();
+    // A door's parts fixed to its leaf hidden in plan go with it, as they do when a project is read.
+    f.parts_hidden_with_leaves();
     // Every error of what it comes to, each addressed to what has it, and every warning of it.
     let (errors, warnings) = f.problems(&|m| s.model.materials.contains_key(m) || brought.contains_key(m));
     if !errors.is_empty() {
@@ -12516,7 +12518,9 @@ fn favorite(s: &mut Session, p: &Value) -> R {
                         material.bring_into(m, n).map_err(|e| bad(c, e))?;
                     }
                 }
-                m.families.insert(as_name.clone(), entry.family.clone());
+                let mut family = entry.family.clone();
+                family.parts_hidden_with_leaves();
+                m.families.insert(as_name.clone(), family);
                 m.adopt_materials();
             }
             Ok(json!({"loaded": as_name, "kind": kind}))

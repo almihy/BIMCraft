@@ -93,7 +93,9 @@ pub const MIN_CONTOURS: f64 = 50.0;
 /// Revit's door families do. A file of 21 or older has a swinging door family's shut leaf drawn in no plan and its open
 /// leaf's line made a panel, once, as it is read ([`crate::family::Family::leaves_drawn_open`]); a build that reads up to 21
 /// would leave `show` out and draw the shut leaf in the wall again, so a project is written as 22 only when it places a door,
-/// a window or a component of a family whose forms or symbols say it ([`Model::written_format`]). 21: a page of a PDF may be drawn from its
+/// a window or a component of a family whose forms or symbols say it ([`Model::written_format`]). A door family's parts fixed to its hidden
+/// leaf (kick plates, levers, roses) that say nothing of their views are given the leaf's, as a project of any format is read, with
+/// no step of their own: a form that says something is kept, so a file read again is as it was. 21: a page of a PDF may be drawn from its
 /// lines, layer by layer, over a picture of only its raster images (an image's `drawn`, with a small picture of the whole page,
 /// `thumb`); an image may hide layers of its lines (`hidden`) and a view's graphics hide them in that view (`pdf_layers`).
 /// Nothing in a file of 20 changes (its pages stay pictures of the whole page), but a build that reads up to 20 would leave
@@ -4164,6 +4166,12 @@ impl Model {
             for f in self.families.values_mut() {
                 f.leaves_drawn_open();
             }
+        }
+        // Of any format: the parts fixed to a swinging door's leaf (kick plates, levers, roses) that say nothing of their views
+        // go with the leaf hidden in plan, as in Revit ([`crate::family::Family::parts_hidden_with_leaves`]). It gives a `show`
+        // only where there is none, so a form a person set is kept and a file read again is as it was: it has no format step.
+        for f in self.families.values_mut() {
+            f.parts_hidden_with_leaves();
         }
         // 22 to 23 (a family's per-type forms and symbols, elevation symbols, traced outlines, cut and text parameters) and 23
         // to 24 (a parametric family from Revit) have no step: a file of 22 or 23 holds none of them, which read as before.

@@ -6,10 +6,20 @@
 //! and drawn in the wall and its open leaf was a single line. [`Family::leaves_drawn_open`] gives such a family Revit's
 //! settings once, as its project is read ([`crate::model::Model::migrate`]); [`Family::shut_leaves`] finds the leaves a
 //! warning names.
+//!
+//! The parts fixed to the leaf go with it: its kick plates, its levers and their roses. In Revit they are the leaf's, and
+//! hidden in plan as it is. Built beside the leaf in a family that says nothing of them, seen from above they would be
+//! drawn shut in the opening, two lines a leaf's thickness apart and a mark for each handle, which reads as the leaf drawn
+//! shut. [`Family::leaf_parts`] finds them: a form that says nothing of its views and lies within a hidden leaf's width and
+//! height and within a lever's reach of its faces. [`Family::parts_hidden_with_leaves`] gives each its leaf's settings, as a
+//! project is read, whatever its format, and as the `family` command takes a family. It touches only a form that says
+//! nothing, so what a person set is kept (the Family Editor stores a setting it changed, even every box ticked, and a
+//! form that says nothing is one nobody set), and what it did is not done again. The frame's jambs, head and threshold lie
+//! outside the leaf's width or height and keep drawing.
 
 use std::collections::{BTreeMap, HashMap};
 
-use super::{DEFAULT_WALL, Expr, Family, HEIGHT, Levels, Plane, Show, Val, WIDTH, number};
+use super::{DEFAULT_WALL, Expr, Family, HEIGHT, Levels, Plane, Shape, Show, Val, WIDTH, number};
 use crate::geom::P2;
 use crate::model::Operation;
 
@@ -17,49 +27,93 @@ use crate::model::Operation;
 const LEAF: (f64, f64) = (5.0, 100.0);
 /// How close two points worked out from a family's formulas are the same one, mm.
 const SAME: f64 = 1.0;
+/// How far from a leaf's faces a part still rides on it, mm: a lever stands about 70 mm proud of the leaf, its rose and a
+/// kick plate less, and a hook or a bolt a little more.
+const REACH: f64 = 120.0;
 
 impl Family {
+    /// A swinging door family's width, its height and where each of its forms lies, in its first type that works out: none
+    /// for a family that is not a door, whose leaves do not swing (a sliding or a fixed door's stand in the wall in plan too)
+    /// or whose symbols draw no arc (its swing), or whose size does not work out.
+    fn swinging(&self) -> Option<(f64, f64, Vec<Shape>)> {
+        if self.category != super::Category::Door
+            || matches!(self.operation, Some(Operation::Sliding | Operation::DoubleSliding | Operation::Fixed))
+            || !self.symbols.iter().any(|s| s.arc.is_some())
+        {
+            return None;
+        }
+        let (first, values) =
+            self.types.keys().find_map(|t| Some((t.as_str(), self.values_in(t, &BTreeMap::new(), DEFAULT_WALL).ok()?)))?;
+        let size = |name: &str| match values.get(name) {
+            Some(Val::Number(x)) if *x > 0.0 => Some(*x),
+            _ => None,
+        };
+        Some((size(WIDTH)?, size(HEIGHT)?, self.shapes(first, &values)))
+    }
+
+    /// Whether `s` is a leaf shut in its opening, whatever it says of its views: a solid swept up from the plane of the plan,
+    /// as thick as a leaf, a quarter of the opening `width` wide or more and within it, and half its `height` or more.
+    fn is_leaf(&self, s: &Shape, width: f64, height: f64) -> bool {
+        let form = &self.forms[s.index];
+        let (along, across, up) = (s.max[0] - s.min[0], s.max[1] - s.min[1], s.max[2] - s.min[2]);
+        !s.void
+            && !form.snapshot
+            && form.plane == Plane::Xy
+            && form.axis.is_none()
+            && form.mesh.is_empty()
+            && (LEAF.0..=LEAF.1).contains(&across)
+            && along >= width / 4.0
+            && s.min[0] >= -width / 2.0 - SAME
+            && s.max[0] <= width / 2.0 + SAME
+            && up >= height / 2.0
+    }
+
     /// A swinging door's forms that are its leaves shut in its opening and drawn in a plan as well as its swing, by their place
     /// in [`Family::forms`]: a door family whose symbols draw an arc (its swing), whose leaves swing (not a sliding or a fixed
     /// door, whose leaves stand in the wall in plan too), and, in its first type that works out, a solid swept up from the
     /// plane of the plan, as thick as a leaf, a quarter of the opening wide or more and within it, and half its height or
     /// more; that says nothing of the views that draw it (`show`).
     pub fn shut_leaves(&self) -> Vec<usize> {
-        if self.category != super::Category::Door
-            || matches!(self.operation, Some(Operation::Sliding | Operation::DoubleSliding | Operation::Fixed))
-            || !self.symbols.iter().any(|s| s.arc.is_some())
-        {
-            return Vec::new();
-        }
-        let Some((first, values)) =
-            self.types.keys().find_map(|t| Some((t.as_str(), self.values_in(t, &BTreeMap::new(), DEFAULT_WALL).ok()?)))
-        else {
-            return Vec::new();
-        };
-        let size = |name: &str| match values.get(name) {
-            Some(Val::Number(x)) if *x > 0.0 => Some(*x),
-            _ => None,
-        };
-        let (Some(width), Some(height)) = (size(WIDTH), size(HEIGHT)) else { return Vec::new() };
-        self.shapes(first, &values)
-            .into_iter()
-            .filter(|s| {
-                let form = &self.forms[s.index];
-                let (along, across, up) = (s.max[0] - s.min[0], s.max[1] - s.min[1], s.max[2] - s.min[2]);
-                !s.void
-                    && !form.snapshot
-                    && form.show.is_none()
-                    && form.plane == Plane::Xy
-                    && form.axis.is_none()
-                    && form.mesh.is_empty()
-                    && (LEAF.0..=LEAF.1).contains(&across)
-                    && along >= width / 4.0
-                    && s.min[0] >= -width / 2.0 - SAME
-                    && s.max[0] <= width / 2.0 + SAME
-                    && up >= height / 2.0
+        let Some((width, height, shapes)) = self.swinging() else { return Vec::new() };
+        shapes.iter().filter(|s| self.forms[s.index].show.is_none() && self.is_leaf(s, width, height)).map(|s| s.index).collect()
+    }
+
+    /// A swinging door's parts that are fixed to a leaf hidden in plan and say nothing of their own views, each with the
+    /// settings of the leaf it rides on, by their place in [`Family::forms`]: a solid that is no void or snapshot, of any
+    /// plane (a rose is a circle in the plane of the leaf), within the leaf's width and height and, across the wall, within
+    /// the leaf's faces and [`REACH`] beyond them (a lever, a kick plate on each face, a rose, a hook). A leaf hidden in
+    /// plan is one [`Family::shut_leaves`]' test accepts that says `plan: false`. Jambs, a head and a threshold lie outside
+    /// the leaf's width or height, and are none of them.
+    pub fn leaf_parts(&self) -> Vec<(usize, Show)> {
+        let Some((width, height, shapes)) = self.swinging() else { return Vec::new() };
+        let hidden: Vec<(&Shape, Show)> = shapes
+            .iter()
+            .filter_map(|s| Some((s, self.forms[s.index].show.filter(|v| !v.plan)?)))
+            .filter(|(s, _)| self.is_leaf(s, width, height))
+            .collect();
+        shapes
+            .iter()
+            .filter(|p| !p.void && !self.forms[p.index].snapshot && self.forms[p.index].show.is_none())
+            .filter_map(|p| {
+                let (_, show) = hidden.iter().find(|(l, _)| {
+                    (0..3).all(|k| {
+                        let reach = if k == 1 { REACH } else { SAME };
+                        p.min[k] >= l.min[k] - reach && p.max[k] <= l.max[k] + reach
+                    })
+                })?;
+                Some((p.index, *show))
             })
-            .map(|s| s.index)
             .collect()
+    }
+
+    /// Gives each of a swinging door family's [`Family::leaf_parts`] the settings of the leaf it is fixed to (see the module),
+    /// so a plan draws neither. Whether it changed anything.
+    pub fn parts_hidden_with_leaves(&mut self) -> bool {
+        let parts = self.leaf_parts();
+        for &(i, show) in &parts {
+            self.forms[i].show = Some(show);
+        }
+        !parts.is_empty()
     }
 
     /// Gives a swinging door family of before Visibility Settings Revit's (see the module): its [`Family::shut_leaves`] are
