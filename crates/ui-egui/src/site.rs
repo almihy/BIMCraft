@@ -1,5 +1,5 @@
 //! The Massing & Site tab's site tools, after Revit's ([the site](../../../docs/areas/site.md)): Toposolid, Sub-divide and
-//! Road beside it, Building Pad, Property Line, Site Component, Parking Component and Parking Area beside it. A tool that
+//! Road beside it, Property Line (with Excavate and Graded Region), Site Component, Planting, Parking Component and Parking Area beside it. A tool that
 //! draws an outline (a toposolid, a pad, a property line, a sub-region, a car park) or a path (a road, a hedge, a stream, a
 //! row of parking) sketches it, as Floor does, with the Draw panel's lines and arcs; one that places a thing (a tree, a
 //! bike rack, a play area, a pitch, a parking stall) takes a click, Space turning it. Each makes its element with the
