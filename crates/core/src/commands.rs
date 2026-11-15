@@ -634,8 +634,8 @@ other_files(
          closed (the last joins the first), an arc where a point gives the bulge of the piece from it to the next (DXF's: \
          the tangent of a quarter of its angle, positive counter-clockwise), or along the one closed outline a pick of a CAD \
          import's lines makes (`cad`, as `cad_outlines` takes it; on the import's level unless `level` says). Drawn dash-dot \
-         in plan. Returns `id` and its \
-         `area_m2`, its arcs' exactly",
+         in plan. Returns `id`, its \
+         `area_m2` (its arcs' exactly), `buildable_area_m2`, `closure` where a table didn't close, and `element`",
         property_line,
     ),
     edit(
@@ -648,7 +648,7 @@ other_files(
          one), its top `offset` over its level and shaped through `points`, each the ground's height there over the level (a \
          survey's spot heights); with `cad`, along the one closed outline a pick of a CAD import's lines makes, as \
          `cad_outlines` takes it, on the import's level unless `level` says. Its plan draws its contours `contours` mm apart (1000; 0 none), every fifth heavier; the \
-         Modify tools take it as a floor. Building pads cut it. Returns `id` and `area_m2`",
+         Modify tools take it as a floor; floors, roofs and other toposolids excavate it (`excavate`). Returns `id` and `area_m2`",
         toposolid,
     ),
     edit(
@@ -13113,7 +13113,7 @@ fn host_line(was: P2, candidates: impl IntoIterator<Item = Id>, line_of: impl Fn
 /// With `end` (`Some(true)` the start, `Some(false)` the end), only that end of one wall or one run goes.
 fn relocate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion, end: Option<bool>) -> Result<(), String> {
     // A toposolid taken takes its sub-divisions with it, as Revit's; and the survey point unclipped, or the project base
-    // point, moves alone, its shared coordinates following (`ground::moved_point`).
+    // point, moves alone, its shared coordinates following (`motion::transform`).
     let with_parts = with_subdivisions(&s.model, ids);
     let ids = with_parts.as_slice();
     // A pinned element is held where it is, as in Revit.

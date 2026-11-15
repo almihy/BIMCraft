@@ -317,7 +317,9 @@ pub(super) fn property_line(s: &mut Session, p: &Value) -> R {
     if let Some((d, az)) = closure {
         out["closure"] = json!({"distance": (d * 100.0).round() / 100.0, "bearing": super::ground::bearing_text(az)});
     }
-    out["buildable_area_m2"] = element_json(&s.model, id)["buildable_area_m2"].clone();
+    let e = element_json(&s.model, id);
+    out["buildable_area_m2"] = e["buildable_area_m2"].clone();
+    out["element"] = e;
     Ok(out)
 }
 

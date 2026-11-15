@@ -210,18 +210,75 @@ fn floor_region(f: &Floor) -> Vec<Ring> {
 }
 
 // ====================================================================== the toposolid's surface
-/// A toposolid's top, to read heights from: its planes, each with its box.
+/// A toposolid's top, to read heights from: its planes, each with its box, and a grid over them that says which faces
+/// may lie over each cell (a surveyed ground has thousands of faces, and cut and fill reads it hundreds of thousands of
+/// times).
 pub struct Surface3 {
     faces: Vec<(Vec<P2>, Plane, [f64; 4])>,
+    grid: Grid,
+}
+
+/// [`Surface3`]'s grid: its box, its cells' count a side and size, and each cell's faces.
+#[derive(Default)]
+struct Grid {
+    b: [f64; 4],
+    n: usize,
+    cell: [f64; 2],
+    cells: Vec<Vec<u32>>,
+}
+
+impl Grid {
+    fn of(faces: &[(Vec<P2>, Plane, [f64; 4])]) -> Grid {
+        if faces.len() < 16 {
+            return Grid::default();
+        }
+        let b = faces.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, (_, _, f)| {
+            [b[0].min(f[0]), b[1].min(f[1]), b[2].max(f[2]), b[3].max(f[3])]
+        });
+        if !b.iter().all(|v| v.is_finite()) {
+            return Grid::default();
+        }
+        let n = ((faces.len() as f64).sqrt().ceil() as usize).clamp(1, 512);
+        let cell = [((b[2] - b[0]) / n as f64).max(1e-6), ((b[3] - b[1]) / n as f64).max(1e-6)];
+        let mut cells = vec![Vec::new(); n * n];
+        let index = |v: f64, lo: f64, size: f64| (((v - lo) / size).floor().max(0.0) as usize).min(n - 1);
+        for (k, (_, _, f)) in faces.iter().enumerate() {
+            let (i0, i1) = (index(f[0] - TOL, b[0], cell[0]), index(f[2] + TOL, b[0], cell[0]));
+            let (j0, j1) = (index(f[1] - TOL, b[1], cell[1]), index(f[3] + TOL, b[1], cell[1]));
+            for i in i0..=i1 {
+                for j in j0..=j1 {
+                    cells[j * n + i].push(k as u32);
+                }
+            }
+        }
+        Grid { b, n, cell, cells }
+    }
+
+    /// The faces that may lie over `q`, by index; none when it has no cells (every face is looked at then).
+    fn near(&self, q: P2) -> Option<&[u32]> {
+        if self.n == 0 {
+            return None;
+        }
+        let b = self.b;
+        if q.0 < b[0] - TOL || q.0 > b[2] + TOL || q.1 < b[1] - TOL || q.1 > b[3] + TOL {
+            return Some(&[]);
+        }
+        let i = (((q.0 - b[0]) / self.cell[0]).floor().max(0.0) as usize).min(self.n - 1);
+        let j = (((q.1 - b[1]) / self.cell[1]).floor().max(0.0) as usize).min(self.n - 1);
+        Some(&self.cells[j * self.n + i])
+    }
 }
 
 impl Surface3 {
     /// The top of floor `f`: [`Model::floor_faces`].
     pub fn of(m: &Model, f: &Floor) -> Surface3 {
-        let faces = m
-            .floor_faces(f)
+        Surface3::new(m.floor_faces(f).into_iter().filter(|(r, _)| r.len() >= 3).collect())
+    }
+
+    /// A surface of these faces.
+    fn new(faces: Vec<(Vec<P2>, Plane)>) -> Surface3 {
+        let faces: Vec<(Vec<P2>, Plane, [f64; 4])> = faces
             .into_iter()
-            .filter(|(r, _)| r.len() >= 3)
             .map(|(r, plane)| {
                 let b = r.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| {
                     [b[0].min(q.0), b[1].min(q.1), b[2].max(q.0), b[3].max(q.1)]
@@ -229,17 +286,23 @@ impl Surface3 {
                 (r, plane, b)
             })
             .collect();
-        Surface3 { faces }
+        let grid = Grid::of(&faces);
+        Surface3 { faces, grid }
     }
 
     /// Its height at `q`, mm, where it is over `q`.
     pub fn at(&self, q: P2) -> Option<f64> {
         let near = |r: &[P2]| geom::contains(r, q) || geom::ring_edges(r).any(|(a, b)| geom::dist_to_segment(q, a, b) <= TOL);
-        self.faces
-            .iter()
-            .filter(|(_, _, b)| q.0 >= b[0] - TOL && q.0 <= b[2] + TOL && q.1 >= b[1] - TOL && q.1 <= b[3] + TOL)
-            .find(|(r, _, _)| near(r))
-            .map(|(_, plane, _)| plane.at(q))
+        let boxed = |b: &[f64; 4]| q.0 >= b[0] - TOL && q.0 <= b[2] + TOL && q.1 >= b[1] - TOL && q.1 <= b[3] + TOL;
+        match self.grid.near(q) {
+            Some(ks) => ks
+                .iter()
+                .map(|k| &self.faces[*k as usize])
+                .filter(|(_, _, b)| boxed(b))
+                .find(|(r, _, _)| near(r))
+                .map(|(_, plane, _)| plane.at(q)),
+            None => self.faces.iter().filter(|(_, _, b)| boxed(b)).find(|(r, _, _)| near(r)).map(|(_, plane, _)| plane.at(q)),
+        }
     }
 
     /// Its faces.
@@ -314,7 +377,9 @@ impl Model {
         for g in &f.excavated_by {
             let prisms = match self.elements.get(*g) {
                 Some(Element::Floor(x)) => self.floor_prisms(x),
-                Some(Element::Toposolid(x)) if Some(*g) != own => self.floor_prisms(&self.toposolid_cut(x)),
+                // Another toposolid cuts by its own shape, not as what excavates it cuts it: two toposolids may excavate
+                // each other, which worked out through each other's cuts would never end.
+                Some(Element::Toposolid(x)) if Some(*g) != own => self.floor_prisms(x),
                 Some(Element::Roof(r)) => self.roof_prisms(r),
                 _ => continue,
             };
@@ -577,8 +642,8 @@ impl Model {
         let old_holes: Vec<Vec<P2>> = old.openings.iter().map(|o| o.iter().map(|q| place(*q)).collect()).collect();
         // The existing ground's faces, placed in this model.
         let old_surface = Surface3::of(source, &old);
-        let old_faces = Surface3 {
-            faces: old_surface
+        let old_faces = Surface3::new(
+            old_surface
                 .faces
                 .iter()
                 .map(|(r, plane, _)| {
@@ -586,13 +651,10 @@ impl Model {
                     // A plane through three of its corners, placed.
                     let lifted: Vec<[f64; 3]> = r.iter().zip(&ring).map(|(q, p)| [p.0, p.1, plane.at(*q)]).collect();
                     let placed = Plane::of(&lifted).unwrap_or(*plane);
-                    let b = ring.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| {
-                        [b[0].min(q.0), b[1].min(q.1), b[2].max(q.0), b[3].max(q.1)]
-                    });
-                    (ring, placed, b)
+                    (ring, placed)
                 })
                 .collect(),
-        };
+        );
         let new = self.toposolid_cut(f);
         let new_surface = Surface3::of(self, &new);
         let b = new.boundary.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| {
@@ -1273,3 +1335,86 @@ pub fn points_from_georeference(m: &mut Model) {
     m.insert(Element::SurveyPoint(BasePoint { east: g.eastings, north: g.northings, height: g.height, clipped: true, ..BasePoint::default() }));
     m.insert(Element::ProjectBasePoint(BasePoint { angle: g.rotation, clipped: true, ..BasePoint::default() }));
 }
+
+// ====================================================================== the property line's table
+/// A survey bearing as an azimuth, degrees clockwise from north: `N 45°30'00" E`, `N45-30-00E`, `S 12.5 W`, or a number.
+pub fn bearing(v: &Value) -> Option<f64> {
+    if let Some(a) = v.as_f64() {
+        return a.is_finite().then(|| a.rem_euclid(360.0));
+    }
+    let t = v.as_str()?.trim().to_ascii_uppercase();
+    if t.chars().count() > 64 {
+        return None;
+    }
+    let (first, rest) = (t.chars().next()?, t.get(1..)?);
+    let last = rest.trim_end().chars().last()?;
+    let middle = rest.trim_end().strip_suffix(last)?.trim();
+    if !matches!(first, 'N' | 'S') || !matches!(last, 'E' | 'W') {
+        return None;
+    }
+    // Degrees, minutes and seconds by any marks between them.
+    let nums: Vec<f64> = middle
+        .split(|ch: char| !(ch.is_ascii_digit() || ch == '.'))
+        .filter(|x| !x.is_empty())
+        .map(str::parse::<f64>)
+        .collect::<Result<_, _>>()
+        .ok()?;
+    let deg = match nums.as_slice() {
+        [d] => *d,
+        [d, m] => d + m / 60.0,
+        [d, m, s] => d + m / 60.0 + s / 3600.0,
+        _ => return None,
+    };
+    if !(0.0..=90.0).contains(&deg) {
+        return None;
+    }
+    Some(match (first, last) {
+        ('N', 'E') => deg,
+        ('S', 'E') => 180.0 - deg,
+        ('S', 'W') => 180.0 + deg,
+        _ => (360.0 - deg) % 360.0,
+    })
+}
+
+/// An azimuth as a survey bearing, `N 45°30'00" E`.
+pub fn bearing_text(az: f64) -> String {
+    let az = az.rem_euclid(360.0);
+    let (a, b, d) = if az <= 90.0 {
+        ('N', 'E', az)
+    } else if az <= 180.0 {
+        ('S', 'E', 180.0 - az)
+    } else if az <= 270.0 {
+        ('S', 'W', az - 180.0)
+    } else {
+        ('N', 'W', 360.0 - az)
+    };
+    let total = (d * 3600.0).round() as i64;
+    format!("{a} {}°{:02}'{:02}\" {b}", total / 3600, (total / 60) % 60, total % 60)
+}
+
+/// A property line's segments as Revit's Edit Table shows them: distance (an arc's chord), bearing, line or arc, radius,
+/// side.
+pub fn table_of(m: &Model, pl: &crate::masterplan::PropertyLine) -> Vec<Value> {
+    let theta = m.angle_to_true_north().to_radians();
+    let n = pl.points.len();
+    (0..n)
+        .map(|i| {
+            let (a, b) = (pl.points[i], pl.points[(i + 1) % n]);
+            let d = P2(b[0] - a[0], b[1] - a[1]);
+            let len = (d.0 * d.0 + d.1 * d.1).sqrt();
+            let (sx, sy) = (d.0 * theta.cos() - d.1 * theta.sin(), d.0 * theta.sin() + d.1 * theta.cos());
+            let az = sx.atan2(sy).to_degrees().rem_euclid(360.0);
+            let r = |v: f64| (v * 100.0).round() / 100.0;
+            let mut row = json!({"distance": r(len), "bearing": bearing_text(az), "azimuth": (az * 1e6).round() / 1e6, "type": "line"});
+            if a[2].abs() > 1e-12 {
+                let theta4 = 4.0 * a[2].abs().atan();
+                let radius = len / (2.0 * (theta4 / 2.0).sin()).max(1e-12);
+                row["type"] = json!("arc");
+                row["radius"] = json!(r(radius));
+                row["side"] = json!(if a[2] > 0.0 { "L" } else { "R" });
+            }
+            row
+        })
+        .collect()
+}
+

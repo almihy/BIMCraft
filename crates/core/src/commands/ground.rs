@@ -12,9 +12,11 @@ use super::{R, absent, bad, element_id, element_json, flag, ids_param, level_par
 use crate::engine::Session;
 use crate::geom::{self, P2};
 use crate::ground::{self, BasePoint, GradedFrom, SubDivision};
-use crate::masterplan::{self, Edge, PropertyLine};
+use crate::masterplan::{self, Edge};
 use crate::model::{Element, Floor, Guid, Id, MAX_COORD, MAX_POINTS, Model, TOL};
 use crate::phasing;
+
+pub(super) use crate::ground::{bearing, bearing_text, table_of};
 
 /// Refuses a key `p` holds that the command doesn't take, saying which it does.
 fn keys(c: &str, p: &Value, allowed: &[&str]) -> Result<(), String> {
@@ -218,8 +220,10 @@ pub(super) fn excavate(s: &mut Session, p: &Value) -> R {
     let c = "excavate";
     keys(c, p, &["toposolid", "by"])?;
     let topo = toposolid_param(c, &s.model, p, "toposolid")?;
-    let by = ids_param(c, &s.model, &json!({"ids": p.get("by").cloned().unwrap_or(Value::Null)}))
-        .map_err(|_| bad(c, "`by` [id, …], the floors, roofs or toposolids that cut it, is required"))?;
+    if absent(p.get("by")) {
+        return Err(bad(c, "`by` [id, …], the floors, roofs or toposolids that cut it, is required"));
+    }
+    let by = ids_param(c, &s.model, &json!({"ids": p.get("by").cloned()}))?;
     let mut guids = Vec::new();
     for id in by {
         match s.model.elements.get(id) {
@@ -354,6 +358,9 @@ pub(super) fn graded_region(s: &mut Session, p: &Value) -> R {
         Some(Value::String(t)) if t.len() <= 256 << 20 => Ok(Some(t.clone())),
         _ => Err(bad(c, "`source` is a project's text")),
     })?;
+    if !absent(p.get("source")) && !absent(p.get("link")) {
+        return Err(bad(c, "give `link` (a linked model) or `source` (a project's text), not both"));
+    }
     let replace = if absent(p.get("replace")) { None } else { Some(toposolid_param(c, &s.model, p, "replace")?) };
     let (new, from, demolish): (Floor, GradedFrom, Option<Id>) = if let Some(text) = text_source {
         let other = Model::read(&text).map(|(m, _)| m).map_err(|e| bad(c, format!("`source` isn't a project: {e}")))?;
@@ -593,6 +600,10 @@ fn site_family(c: &str, s: &mut Session, p: &Value, default: &str, category: cra
         return Err(bad(c, format!("no family `{family}`: one of the project's, or of the site's ({})", ours.join(", "))));
     }
     let f = s.model.families.get(&family).ok_or_else(|| bad(c, "no family"))?;
+    if f.category != category {
+        let what = if category == crate::family::Category::Planting { "Planting" } else { "Site" };
+        return Err(bad(c, format!("`{family}` is no family of the {what} category; place it with `component`")));
+    }
     let type_name = match string(c, p, "type")? {
         Some(t) if f.types.contains_key(&t) => t,
         Some(t) => return Err(bad(c, format!("`{family}` has no type `{t}`; it has: {}", f.types.keys().cloned().collect::<Vec<_>>().join(", ")))),
@@ -656,61 +667,6 @@ pub(super) fn site_component(s: &mut Session, p: &Value) -> R {
 }
 
 // ====================================================================== the property line's table
-/// A survey bearing as an azimuth, degrees clockwise from north: `N 45°30'00" E`, `N45-30-00E`, `S 12.5 W`, or a number.
-pub fn bearing(v: &Value) -> Option<f64> {
-    if let Some(a) = v.as_f64() {
-        return a.is_finite().then(|| a.rem_euclid(360.0));
-    }
-    let t = v.as_str()?.trim().to_ascii_uppercase();
-    if t.chars().count() > 64 {
-        return None;
-    }
-    let (first, rest) = (t.chars().next()?, t.get(1..)?);
-    let last = rest.trim_end().chars().last()?;
-    let middle = rest.trim_end().strip_suffix(last)?.trim();
-    if !matches!(first, 'N' | 'S') || !matches!(last, 'E' | 'W') {
-        return None;
-    }
-    // Degrees, minutes and seconds by any marks between them.
-    let nums: Vec<f64> = middle
-        .split(|ch: char| !(ch.is_ascii_digit() || ch == '.'))
-        .filter(|x| !x.is_empty())
-        .map(str::parse::<f64>)
-        .collect::<Result<_, _>>()
-        .ok()?;
-    let deg = match nums.as_slice() {
-        [d] => *d,
-        [d, m] => d + m / 60.0,
-        [d, m, s] => d + m / 60.0 + s / 3600.0,
-        _ => return None,
-    };
-    if !(0.0..=90.0).contains(&deg) {
-        return None;
-    }
-    Some(match (first, last) {
-        ('N', 'E') => deg,
-        ('S', 'E') => 180.0 - deg,
-        ('S', 'W') => 180.0 + deg,
-        _ => (360.0 - deg) % 360.0,
-    })
-}
-
-/// An azimuth as a survey bearing, `N 45°30'00" E`.
-pub fn bearing_text(az: f64) -> String {
-    let az = az.rem_euclid(360.0);
-    let (a, b, d) = if az <= 90.0 {
-        ('N', 'E', az)
-    } else if az <= 180.0 {
-        ('S', 'E', 180.0 - az)
-    } else if az <= 270.0 {
-        ('S', 'W', az - 180.0)
-    } else {
-        ('N', 'W', 360.0 - az)
-    };
-    let total = (d * 3600.0).round() as i64;
-    format!("{a} {}°{:02}'{:02}\" {b}", total / 3600, (total / 60) % 60, total % 60)
-}
-
 /// A table's rows walked from `start`: the property line's points ([x, y, bulge]) and, where they don't close, the
 /// closing segment's distance and bearing. Bearings are against true north (the project base point's angle).
 fn walk_table(c: &str, m: &Model, rows: &[Value], start: P2) -> Result<(Vec<[f64; 3]>, Option<(f64, f64)>), String> {
@@ -764,32 +720,6 @@ fn walk_table(c: &str, m: &Model, rows: &[Value], start: P2) -> Result<(Vec<[f64
     let (sx, sy) = (back.0 * theta.cos() - back.1 * theta.sin(), back.0 * theta.sin() + back.1 * theta.cos());
     let az = sx.atan2(sy).to_degrees().rem_euclid(360.0);
     Ok((out, Some((gap, az))))
-}
-
-/// A property line's segments as Revit's Edit Table shows them: distance (an arc's chord), bearing, line or arc, radius,
-/// side.
-pub fn table_of(m: &Model, pl: &PropertyLine) -> Vec<Value> {
-    let theta = m.angle_to_true_north().to_radians();
-    let n = pl.points.len();
-    (0..n)
-        .map(|i| {
-            let (a, b) = (pl.points[i], pl.points[(i + 1) % n]);
-            let d = P2(b[0] - a[0], b[1] - a[1]);
-            let len = (d.0 * d.0 + d.1 * d.1).sqrt();
-            let (sx, sy) = (d.0 * theta.cos() - d.1 * theta.sin(), d.0 * theta.sin() + d.1 * theta.cos());
-            let az = sx.atan2(sy).to_degrees().rem_euclid(360.0);
-            let r = |v: f64| (v * 100.0).round() / 100.0;
-            let mut row = json!({"distance": r(len), "bearing": bearing_text(az), "azimuth": (az * 1e6).round() / 1e6, "type": "line"});
-            if a[2].abs() > 1e-12 {
-                let theta4 = 4.0 * a[2].abs().atan();
-                let radius = len / (2.0 * (theta4 / 2.0).sin()).max(1e-12);
-                row["type"] = json!("arc");
-                row["radius"] = json!(r(radius));
-                row["side"] = json!(if a[2] > 0.0 { "L" } else { "R" });
-            }
-            row
-        })
-        .collect()
 }
 
 /// `edges` given: a list as long as the segments (each an edge or null), or {index: edge}; each `{setback?, kind?, street?,
@@ -884,11 +814,12 @@ pub(super) fn property_line_edit(s: &mut Session, p: &Value) -> R {
     if !absent(p.get("points")) && !absent(p.get("table")) {
         return Err(bad(c, "give `points` or `table`, not both"));
     }
+    let mut fresh = None;
     if let Some((pts, cl)) = table_param(c, &s.model, p)? {
-        pl.points = pts;
+        fresh = Some(pts);
         closure = cl;
     } else if !absent(p.get("points")) {
-        pl.points = super::site::bulged(c, p, "points")?;
+        fresh = Some(super::site::bulged(c, p, "points")?);
     }
     if let Some(n) = string(c, p, "name")? {
         pl.name = n;
@@ -896,13 +827,28 @@ pub(super) fn property_line_edit(s: &mut Session, p: &Value) -> R {
     if !absent(p.get("level")) {
         pl.level = level_param(c, &s.model, p, "level")?;
     }
-    if let Some(e) = edges_param(c, p, pl.points.len(), &pl.edges)? {
-        pl.edges = e;
+    match fresh {
+        // New points: the edges given are of their segments as given, turned with them; else those it has stay with the
+        // segments of the same number, counted counter-clockwise as it holds them.
+        Some(mut pts) => {
+            let ccw = geom::area(&pts.iter().map(|q| P2(q[0], q[1])).collect::<Vec<_>>()) >= 0.0;
+            let kept = if ccw { pl.edges.clone() } else { Vec::new() };
+            match edges_param(c, p, pts.len(), &kept)? {
+                Some(mut edges) => {
+                    counter_clockwise(&mut pts, &mut edges);
+                    pl.edges = edges;
+                }
+                None => counter_clockwise(&mut pts, &mut Vec::new()),
+            }
+            pl.points = pts;
+        }
+        None => {
+            if let Some(e) = edges_param(c, p, pl.points.len(), &pl.edges)? {
+                pl.edges = e;
+            }
+        }
     }
     pl.edges.truncate(pl.points.len());
-    let (mut pts, mut edges) = (std::mem::take(&mut pl.points), std::mem::take(&mut pl.edges));
-    counter_clockwise(&mut pts, &mut edges);
-    (pl.points, pl.edges) = (pts, edges);
     masterplan::check_property_line(c, &pl)?;
     if let Some(Element::PropertyLine(slot)) = s.model_mut().elements.get_mut(id) {
         *slot = pl;

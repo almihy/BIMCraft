@@ -424,3 +424,60 @@ fn a_road_is_its_carriageway_and_pavements_as_sub_divisions_on_the_ground() {
     assert!(roles.iter().any(|x| x == "lane/road"), "{roles:?}");
     assert!(s.execute("road", &json!({"path": [[0, 0], [10, 0]], "use": "motorway"})).unwrap_err().contains("motorway"));
 }
+
+#[test]
+fn two_toposolids_that_excavate_each_other_are_cut_and_a_deleted_excavator_leaves_the_list() {
+    let mut s = Session::new();
+    let t = slope(&mut s);
+    let other = id(&run(&mut s, "toposolid", json!({"boundary": [[10000, 10000], [20000, 10000], [20000, 20000], [10000, 20000]], "offset": -3000})));
+    run(&mut s, "excavate", json!({"toposolid": t, "by": [other]}));
+    run(&mut s, "excavate", json!({"toposolid": other, "by": [t]}));
+    // Worked out without going round and round.
+    let _ = ground(&s, t, P2(15000.0, 15000.0));
+    let _ = ground(&s, other, P2(15000.0, 15000.0));
+    let _ = crate::element_json(&s.model, t);
+    run(&mut s, "delete", json!({"ids": [other]}));
+    assert!(topo(&s, t).excavated_by.is_empty(), "the toposolid is whole again");
+}
+
+#[test]
+fn the_survey_point_and_project_base_point_are_hidden_unless_a_view_shows_them() {
+    let mut s = Session::new();
+    let r = run(&mut s, "base_point", json!({"which": "survey", "east": 1000}));
+    let sp: Id = r["survey"]["id"].as_u64().unwrap();
+    let level = s.model.levels()[0].0;
+    assert!(!crate::graphics::Look::of(&s.model, level).shows(sp), "hidden, as Revit's");
+    run(&mut s, "graphics", json!({"view": level, "show": ["surveypoint"]}));
+    assert!(crate::graphics::Look::of(&s.model, level).shows(sp), "shown where the view shows it");
+    // Hiding the Site category hides it with the property lines.
+    run(&mut s, "graphics", json!({"view": level, "hide": ["sitecomponent"]}));
+    assert!(!crate::graphics::Look::of(&s.model, level).shows(sp));
+}
+
+#[test]
+fn a_property_line_given_its_points_again_the_other_way_round_keeps_its_setbacks_sound() {
+    let mut s = Session::new();
+    let r = run(&mut s, "property_line", json!({"points": [[0, 0], [20000, 0], [20000, 30000], [0, 30000]], "edges": [{"setback": 6000, "kind": "street"}]}));
+    let pl = id(&r);
+    // Sketched again clockwise: it runs counter-clockwise still, its setbacks with it.
+    let r = run(&mut s, "property_line_edit", json!({"id": pl, "points": [[0, 0], [0, 30000], [20000, 30000], [20000, 0], [10000, -5000]]}));
+    let Some(Element::PropertyLine(line)) = s.model.elements.get(pl) else { panic!() };
+    assert!(crate::geom::area(&line.ring()) > 0.0);
+    assert!(r["buildable_area_m2"].as_f64().is_some(), "{r}");
+    // Given with edges of its own, the edges turn with the points.
+    run(&mut s, "property_line_edit", json!({"id": pl, "points": [[0, 0], [0, 30000], [20000, 30000], [20000, 0]], "edges": [{"setback": 3000, "kind": "side"}]}));
+    let Some(Element::PropertyLine(line)) = s.model.elements.get(pl) else { panic!() };
+    let side = (0..4).find(|i| line.edge(*i).kind == "side").unwrap();
+    let (a, b) = (line.points[side], line.points[(side + 1) % 4]);
+    assert_eq!((a[0], b[0]), (0.0, 0.0), "the west segment, as given: {a:?} {b:?}");
+}
+
+#[test]
+fn planting_refuses_a_family_of_another_category_and_site_refuses_the_kinds_that_went() {
+    let mut s = Session::new();
+    slope(&mut s);
+    let e = s.execute("planting", &json!({"at": [5000, 5000], "family": "Bench"})).unwrap_err();
+    assert!(e.contains("no family of the Planting category"), "{e}");
+    let e = s.execute("site", &json!({"kind": "tree", "props": {"at": [0, 0]}})).unwrap_err();
+    assert!(e.contains("planting"), "{e}");
+}
