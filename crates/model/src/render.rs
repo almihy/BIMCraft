@@ -1041,7 +1041,14 @@ pub fn plan(m: &Model, level: impl Key, width: u32, height: u32) -> Drawing {
 /// crop region (or all it shows), its annotation at its scale, no name lettered under it. With the view it is drawn through,
 /// which places anything else drawn over it (model millimetres to its pixels). A `height` of 0 is the plan's own shape:
 /// as many pixels high as its extent is to `width` across.
+///
+/// A section or an elevation is drawn as a sheet draws it: its picture (where it cuts, what it sees up to its far clip) with
+/// its lines over it, fitted to its crop at its scale, its name left off; its view's first coordinate runs along its line
+/// from its start, the second up.
 pub fn viewport(m: &Model, plan: impl Key, width: u32, height: u32) -> (Drawing, View) {
+    if m.section(plan).is_some() {
+        return section_viewport(m, plan, width, height);
+    }
     let n = scale_of(m, plan);
     let extent = plan_extent(m, plan);
     let height = if height > 0 {
@@ -1049,12 +1056,50 @@ pub fn viewport(m: &Model, plan: impl Key, width: u32, height: u32) -> (Drawing,
     } else {
         let lo = extent.iter().fold(P2(f64::MAX, f64::MAX), |a, p| P2(a.0.min(p.0), a.1.min(p.1)));
         let hi = extent.iter().fold(P2(f64::MIN, f64::MIN), |a, p| P2(a.0.max(p.0), a.1.max(p.1)));
-        let tall = (hi.1 - lo.1).max(1000.0) / (hi.0 - lo.0).max(1000.0);
-        let tall = if extent.is_empty() || !tall.is_finite() { 0.75 } else { tall.clamp(0.25, 4.0) };
-        (f64::from(width) * tall).round().max(1.0) as u32
+        own_height(width, (!extent.is_empty()).then_some((hi.0 - lo.0, hi.1 - lo.1)))
     };
     let view = fit(&extent, width, height, n);
     (draw_plan(m, plan, view, false, annotation(m, plan, view), n, Out::Paper), view)
+}
+
+/// The height of a picture `width` px across of something `across` x `up` mm: its own shape, no flatter than a quarter of
+/// its width and no taller than four times it; three quarters of it when it shows nothing.
+fn own_height(width: u32, size: Option<(f64, f64)>) -> u32 {
+    let tall = size.map(|(across, up)| up.max(1000.0) / across.max(1000.0));
+    let tall = tall.filter(|t| t.is_finite()).map_or(0.75, |t| t.clamp(0.25, 4.0));
+    (f64::from(width) * tall).round().max(1.0) as u32
+}
+
+/// [`viewport`] of section or elevation `id`.
+fn section_viewport(m: &Model, id: impl Key, width: u32, height: u32) -> (Drawing, View) {
+    let work = SectionWork::new(m);
+    let height = if height > 0 {
+        height
+    } else {
+        own_height(width, section_bare(m, &work, id, &|| false).map(|[lo, hi]| (hi.0 - lo.0, hi.1 - lo.1)))
+    };
+    let view = section_fit_with(m, &work, id, width, height);
+    let picture = section_picture_in(m, &work, id, view, &[]);
+    let over = section_in(m, &work, id, view, annotation(m, id, view), scale_of(m, id), picture.as_ref());
+    let mut d = Drawing::new(view);
+    (d.k, d.paper, d.detail, d.weights) = (over.k, over.paper, over.detail, over.weights);
+    if let Some(img) = picture {
+        d.own(m.elements.id(id));
+        d.push(Prim::Image { at: (0.0, 0.0), width: img.width, height: img.height, rgba: img.rgba, ink: false });
+    }
+    // Its name, owned by no element, is the slide's or the sheet's to give: left off, as a sheet's viewport leaves it.
+    let halves: Vec<bool> = (0..over.prims.len()).map(|i| over.half(i)).collect();
+    for (((prim, owner), part), half) in over.prims.into_iter().zip(over.owners).zip(over.parts).zip(halves) {
+        if owner.is_some() {
+            d.own(owner);
+            d.part(part);
+            d.halftone_next(half);
+            d.push(prim);
+        }
+    }
+    d.halftone_next(false);
+    d.notes = over.notes;
+    (d, view)
 }
 
 /// What a plan of `level` takes on paper: all it shows, or cropped, its crop region and the grids'

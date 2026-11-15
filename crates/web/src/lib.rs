@@ -96,35 +96,39 @@ impl Engine {
         Ok(render::svg(&render::plan(&m, id, width, height)))
     }
 
-    /// The model's plan views, in element order: `[{"guid", "name", "level", "scale", "crop"}]`, `level` its level's name,
-    /// `scale` the n of its 1 : n and `crop` its crop region (`[[x, y], [x, y]]`, mm) or null. A level's own plan is not
-    /// one of them: `levels` names those.
+    /// The model's views a sheet places, in element order, its plan views, then its sections, then its elevations:
+    /// `[{"guid", "name", "kind", "level", "scale", "crop"}]`, `kind` "plan", "section" or "elevation", `level` a plan
+    /// view's level's name (null for the others), `scale` the n of its 1 : n and `crop` its crop region (a plan's
+    /// `[[x, y], [x, y]]`, mm; a section's `[bottom, top]` heights) or null. A level's own plan is not one of them:
+    /// `levels` names those.
     pub fn views(&self) -> String {
         let m = &self.s.model;
         let levels = m.levels();
-        let views: Vec<Value> = m
-            .rare("planview")
-            .into_iter()
-            .filter_map(|id| {
-                let v = m.plan_view(id)?;
-                let level = levels.iter().find(|(l, _)| m.guid(*l) == v.level).map(|(_, l)| l.name.clone());
+        let scale = |id| bimcraft_core::graphics::scale_of(m, id);
+        let plans = m.rare("planview").into_iter().filter_map(|id| {
+            let v = m.plan_view(id)?;
+            let level = levels.iter().find(|(l, _)| m.guid(*l) == v.level).map(|(_, l)| l.name.clone());
+            Some(serde_json::json!({
+                "guid": m.guid(id), "name": v.name, "kind": "plan", "level": level, "scale": scale(id), "crop": m.crop_of(id),
+            }))
+        });
+        let cuts = ["section", "elevation"].into_iter().flat_map(|kind| {
+            m.rare(kind).into_iter().filter_map(move |id| {
+                let v = m.section(id)?;
                 Some(serde_json::json!({
-                    "guid": m.guid(id),
-                    "name": v.name,
-                    "level": level,
-                    "scale": bimcraft_core::graphics::scale_of(m, id),
-                    "crop": m.crop_of(id),
+                    "guid": m.guid(id), "name": v.name, "kind": kind, "level": null, "scale": scale(id), "crop": v.crop,
                 }))
             })
-            .collect();
-        Value::Array(views).to_string()
+        });
+        Value::Array(plans.chain(cuts).collect()).to_string()
     }
 
-    /// Plan `view` as a sheet's viewport shows it, as SVG `width` px across: a plan view by its guid, or a level's own plan
-    /// by the level's name (or a plan view's), the lowest level's when empty; fitted to its crop region at its scale
-    /// (`render::viewport`). `height` 0 makes the picture the plan's own shape. Replies `{"svg", "view": {"scale", "cx",
-    /// "cy", "width", "height"}}`: the view it is drawn through, `scale` pixels to the model's millimetre and (`cx`, `cy`)
-    /// the model point (mm, y north) at its centre, which places anything drawn over it.
+    /// View `view` as a sheet's viewport shows it, as SVG `width` px across: a plan view, a section or an elevation by its
+    /// guid, or a level's own plan by the level's name (or a view by its name), the lowest level's plan when empty; fitted
+    /// to its crop at its scale (`render::viewport`), a section's or elevation's picture inside the SVG. `height` 0 makes
+    /// the picture the view's own shape. Replies `{"svg", "view": {"scale", "cx", "cy", "width", "height"}}`: the view it
+    /// is drawn through, `scale` pixels to the model's millimetre and (`cx`, `cy`) the model point at its centre (a plan's
+    /// mm east and north; a section's along its line from its start, and up), which places anything drawn over it.
     pub fn view_svg(&self, view: &str, width: u32, height: u32) -> Result<String, JsError> {
         let m = link::seen(&self.s.model);
         let id = plan_of(&m, view)?;
@@ -212,8 +216,8 @@ impl Engine {
     }
 }
 
-/// The plan `view` names: a plan view by its guid, else a level by its name, else a plan view by its name; the lowest level
-/// when it is empty.
+/// The view `view` names: a plan view, section or elevation by its guid, else a level by its name, else a view by its name;
+/// the lowest level's plan when it is empty.
 fn plan_of(m: &bimcraft_core::model::Model, view: &str) -> Result<bimcraft_core::model::Id, JsError> {
     use bimcraft_core::model::Element;
     let view = view.trim();
@@ -221,12 +225,16 @@ fn plan_of(m: &bimcraft_core::model::Model, view: &str) -> Result<bimcraft_core:
     let found = if view.is_empty() {
         levels.first().map(|(id, _)| *id)
     } else if let Some(g) = bimcraft_core::ids::Guid::parse(view) {
-        m.elements.id(g).filter(|&id| m.plan_level(id).is_some())
+        m.elements.id(g).filter(|&id| m.plan_level(id).is_some() || m.section(id).is_some())
     } else {
-        let named = |(id, e): (&bimcraft_core::model::Id, &Element)| matches!(e, Element::PlanView(v) if v.name == view).then_some(*id);
+        let named = |(id, e): (&bimcraft_core::model::Id, &Element)| match e {
+            Element::PlanView(v) if v.name == view => Some(*id),
+            Element::Section(v) | Element::Elevation(v) if v.name == view => Some(*id),
+            _ => None,
+        };
         levels.iter().find(|(_, l)| l.name == view).map(|(id, _)| *id).or_else(|| m.elements.iter().find_map(named))
     };
-    found.ok_or_else(|| err(format!("no plan view or level `{view}`")))
+    found.ok_or_else(|| err(format!("no view or level `{view}`")))
 }
 
 /// The Manifold trial (docs/manifold-trial.md): a 100 mm box minus a cylinder, cut by Manifold running in this module:
@@ -260,5 +268,13 @@ mod tests {
             assert!(view["height"].as_u64().unwrap() > 0 && view["scale"].as_f64().unwrap() > 0.0, "{view}");
             assert!(view["cx"].is_number() && view["cy"].is_number());
         }
+        // A section is listed with its kind and drawn as a sheet draws it: its picture inside the SVG.
+        e.execute("section", r#"{"start": [-2000, 3000], "end": [14000, 3000], "name": "Section A"}"#).unwrap();
+        let views: Value = serde_json::from_str(&e.views()).unwrap();
+        let cut = views.as_array().unwrap().iter().find(|v| v["name"] == "Section A").expect("listed");
+        assert_eq!(cut["kind"], "section");
+        let got: Value = serde_json::from_str(&e.view_svg(cut["guid"].as_str().unwrap(), 1000, 0).unwrap()).unwrap();
+        assert!(got["svg"].as_str().unwrap().contains("<image"), "its picture");
+        assert_eq!(got["view"]["width"], 1000);
     }
 }
