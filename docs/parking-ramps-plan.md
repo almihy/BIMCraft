@@ -260,3 +260,30 @@ given; below ground `result.ways` holds each ramp's way in (`{at, kind: "both", 
 by the model's language's name; a way off a ramp is the ramp's width (not a drive aisle's), so it no longer grazes the wall
 beside the ramp; 90° bays on a one-way car park take a two-way aisle's width (a car needs it to turn in), not the one-way
 figure meant for angled bays.
+
+### What it came to (16 November)
+
+- **The reviewer's basement** (`a_basement_with_walls_a_column_grid_and_two_ramps_is_filled_as_a_designer_would`, no longer
+  ignored): 7 bays before, one ramp joined; now **36** on the standard's sizes (Saudi Arabia's 2.8 x 5.5 m bays on 7.5 m
+  aisles: two bays fit between columns 8.1 m apart and the aisles only just fit between the column lines; a designer gets some
+  35 to 40), and **57** on the 2.5 x 5 m bays and 6 m aisles its 8.1 m grid is drawn for (17 before); both ramps lead onto
+  aisles. Pictures, the plan of B1: `docs/parking-real-basement-before.png` and `-after.png` (the standard's sizes),
+  `-before-2500.png` and `-after-2500.png`. The 50 the reviewer asked for is reached on the sizes the grid was drawn for; on
+  the standard's it can't be (the hand count is under 40).
+- **A plain basement on a grid** (64.8 x 48 m, columns at 8.1 m and at the backs of the rows): 132, the hand count.
+- **An L-shaped basement**: 67, both arms laid out, the drive off the ramp along the south wall.
+- **An irregular surface lot with two street entrances**: 186 bays, both ways in joined.
+- **Arqiflow's 49 layouts** (the fixtures): 9,460 bays as Arqiflow's solver laid them, 9,739 now; 18 laid out anew, each with
+  more bays (e.g. 246 to 265, 161 to 191, 202 to 230), none with fewer; the other 31 exactly as before.
+- **Time**: the reviewer's basement 60 to 105 ms in the solver (a test build, optimised at level 1), the whole `car_park`
+  command under a second; a 100 x 60 m basement on a grid, 243 bays, 167 ms.
+
+Left:
+- Angled bays are laid out by the fields and the ring only (the stack lays 90° bays).
+- One direction a layout: an L whose arms want their aisles at right angles to each other gets one direction for both (the
+  fields' cut at the inside corner, which turns each part, is still a candidate).
+- A dead end is not limited in length nor given a turning head; cross aisles that close a loop are added only where they
+  cost no bay (or on a one-way car park, always).
+- The accessible bay is a Parking Space of the stall's width beside its access aisle (`result.access_aisles`); the family
+  draws no hatch for the aisle.
+- A masterplan ramp, stall or band of a file of 26 that has no path or point is dropped when converted, not kept.
