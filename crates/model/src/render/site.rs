@@ -105,6 +105,37 @@ fn dot(d: &mut Drawing, at: P2, r: f32, color: Rgb) {
     d.push(Prim::fill(vec![ring], color));
 }
 
+/// An arrow along a drive aisle's length through its middle, its heads at both ends (two-way) or the end it runs to.
+fn aisle_arrow(d: &mut Drawing, ring: &[P2], flow: Option<P2>, color: Rgb) {
+    if ring.len() < 3 {
+        return;
+    }
+    let c = geom::centroid(ring);
+    // Its long way: along its longest side.
+    let n = ring.len();
+    let (mut u, mut long) = (P2(1.0, 0.0), 0.0);
+    for i in 0..n {
+        let e = ring[(i + 1) % n] - ring[i];
+        let len = e.dot(e).sqrt();
+        if len > long {
+            (u, long) = (e * (1.0 / len), len);
+        }
+    }
+    if let Some(f) = flow
+        && f.dot(u) < 0.0
+    {
+        u = u * -1.0;
+    }
+    let half = long * 0.35;
+    let (a, b) = (c - u * half, c + u * half);
+    let pts = vec![d.view.px(a), d.view.px(b)];
+    d.stroke(pts, BY_CATEGORY, color, None, false);
+    super::arrow(d, d.view.px(a), d.view.px(b));
+    if flow.is_none() {
+        super::arrow(d, d.view.px(b), d.view.px(a));
+    }
+}
+
 /// Site element `id`, `s`, on the plan.
 pub(super) fn site(d: &mut Drawing, id: Id, s: &Site) {
     d.own(Some(id));
@@ -132,22 +163,23 @@ pub(super) fn site(d: &mut Drawing, id: Id, s: &Site) {
                 fill_all(d, &s.outline, c[0]);
             }
         }
+        // Its area; its bays and its aisles at ground level are elements of their own. Below ground, its aisles are the
+        // floor: an arrow along each, both ways or the way it runs (Arqiflow's aisle arrows, as the car park's annotation).
         "car_park" => {
-            fill_all(d, &s.outline, fill);
-            for piece in s.layout.iter().flat_map(|l| &l.pieces) {
-                let flag = |k: &str| piece.props.get(k).and_then(serde_json::Value::as_bool).unwrap_or(false);
-                let key = match piece.kind.as_str() {
-                    "stall" if flag("accessible") => "accessible_stall",
-                    "stall" if flag("ev") => "ev_stall",
-                    k => k,
-                };
-                let (f, st) = masterplan::plan_colours(key, "", false);
-                fill_all(d, &piece.outline, tone.c(f));
-                if piece.kind != "aisle" {
-                    outline_all(d, &piece.outline, tone.c(st), &dash);
-                }
+            outline_all(d, &s.outline, stroke, &Some(vec![8.0, 4.0]));
+            let aisles = s.props.get("result").and_then(|r| r.get("aisles")).and_then(serde_json::Value::as_array);
+            for a in aisles.into_iter().flatten() {
+                let ring: Vec<P2> = a
+                    .get("ring")
+                    .and_then(serde_json::Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|q| Some(P2(q.get(0)?.as_f64()?, q.get(1)?.as_f64()?)))
+                    .collect();
+                let flow = a.get("flow").and_then(|f| Some(P2(f.get(0)?.as_f64()?, f.get(1)?.as_f64()?)));
+                aisle_arrow(d, &ring, flow, stroke);
             }
-            outline_all(d, &s.outline, stroke, &dash);
+            let _ = fill;
         }
         "parking_band" => {
             let (af, _) = masterplan::plan_colours("aisle", "", false);

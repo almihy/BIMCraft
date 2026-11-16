@@ -1706,6 +1706,12 @@ impl Model {
     /// an older build opens it.
     pub fn written_format(&self) -> u32 {
         use crate::model::Element;
+        // What a build that reads up to 26 misreads or refuses: ramps along a path, the Parking category.
+        let parking = self.elements.values().any(|e| matches!(e, Element::Ramp(r) if !r.path.is_empty() || !r.slopes.is_empty()))
+            || self.families.values().any(|f| f.category == crate::family::Category::Parking);
+        if parking {
+            return crate::model::PARKING_FORMAT;
+        }
         // What a build that reads up to 25 refuses: the site as Revit has it.
         let site = self.elements.values().any(|e| match e {
             Element::SubDivision(_) | Element::SurveyPoint(_) | Element::ProjectBasePoint(_) => true,

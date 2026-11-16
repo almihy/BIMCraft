@@ -8,6 +8,10 @@ use crate::walls::Plane;
 
 /// A run: from the middle of its foot, `start`, along unit `u`, `length` long, from height `z.0`
 /// up to `z.1`. A stair's has `risers` risers, its first at its start and its last at its end.
+///
+/// Its ends are square to it, but where a ramp's path bends without a landing (a corner, or a
+/// curve cut in chords): there each end lies along `across` (unit, to the run's left), mitred
+/// with the next run's, and `joined` says it goes on from the run before, with no line across.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Run {
     pub start: P2,
@@ -15,17 +19,32 @@ pub struct Run {
     pub length: f64,
     pub z: (f64, f64),
     pub risers: u32,
+    pub across: (P2, P2),
+    pub joined: bool,
 }
 
 impl Run {
+    /// A straight run with square ends.
+    pub fn new(start: P2, u: P2, length: f64, z: (f64, f64), risers: u32) -> Run {
+        Run { start, u, length, z, risers, across: (u.perp(), u.perp()), joined: false }
+    }
+
     pub fn end(&self) -> P2 {
         self.start + self.u * self.length
     }
 
-    /// Its outline, `width` wide, counter-clockwise.
+    /// Its outline, `width` wide, counter-clockwise: its sides, and its ends along `across`.
     pub fn ring(&self, width: f64) -> Vec<P2> {
-        let n = self.u.perp() * (width / 2.0);
-        vec![self.start - n, self.end() - n, self.end() + n, self.start + n]
+        let n = self.u.perp();
+        // Along a cross line from the middle to where it meets the side `width / 2` from the middle.
+        let reach = |a: P2| a * (width / 2.0 / a.dot(n).max(0.2));
+        let (a, b) = (reach(self.across.0), reach(self.across.1));
+        vec![self.start - a, self.end() - b, self.end() + b, self.start + a]
+    }
+
+    /// Its height `along` its length (0 at its start).
+    pub fn z_at(&self, along: f64) -> f64 {
+        if self.length <= 1e-9 { self.z.1 } else { self.z.0 + (self.z.1 - self.z.0) * (along / self.length).clamp(0.0, 1.0) }
     }
 }
 
@@ -53,7 +72,7 @@ fn chain(start: P2, angle: f64, width: f64, runs: Vec<(f64, (f64, f64), u32)>, t
     let (mut at, mut u) = (start, heading(angle));
     let mut out = Layout { runs: Vec::new(), pads: Vec::new(), walk: Vec::new(), width };
     for (i, (length, z, risers)) in runs.into_iter().enumerate() {
-        let run = Run { start: at, u, length, z, risers };
+        let run = Run::new(at, u, length, z, risers);
         out.walk.extend([(run.start, z.0), (run.end(), z.1)]);
         out.runs.push(run);
         let Some(&turn) = turns.get(i) else { break };
@@ -103,22 +122,106 @@ pub fn stair(m: &Model, st: &Stair) -> Layout {
     chain(st.start, st.angle, st.width, runs, &turns)
 }
 
-/// A ramp's runs: its rise split at its landings' heights, each run as long as its slope makes it.
+/// A ramp's runs: along its path when it has one ([`along_path`]); else its rise split at its
+/// landings' heights, each run as long as its own slope (or the ramp's) makes it.
 pub fn ramp(m: &Model, r: &Ramp) -> Layout {
     let (base, top) = m.span(r.level, 0.0, r.top_level, r.height);
-    let k = if r.slope > 0.0 { r.slope / 100.0 } else { 1.0 };
+    if r.path.len() >= 2 {
+        return along_path(r, base, top);
+    }
+    let slope = |i: usize| {
+        let s = r.slopes.get(i).copied().filter(|s| s.is_finite() && *s > 0.0).unwrap_or(r.slope);
+        if s > 0.0 { s / 100.0 } else { 1.0 }
+    };
     let mut ups: Vec<f64> = vec![0.0];
     ups.extend(r.landings.iter().map(|l| l.at));
     ups.push(top - base);
     let runs = ups
         .windows(2)
-        .filter_map(|w| match *w {
-            [a, b] => Some(((b - a) / k, (base + a, base + b), 0)),
+        .enumerate()
+        .filter_map(|(i, w)| match *w {
+            [a, b] => Some(((b - a) / slope(i), (base + a, base + b), 0)),
             _ => None,
         })
         .collect();
     let turns: Vec<f64> = r.landings.iter().map(|l| l.turn).collect();
     chain(r.start, r.angle, r.width, runs, &turns)
+}
+
+/// Each piece of a ramp's path (a line, or an arc of it) as points, the first point left out.
+pub fn path_pieces(path: &[[f64; 3]]) -> Vec<Vec<P2>> {
+    path.windows(2)
+        .map(|w| {
+            crate::site::shapes::arc_points([w[0][0], w[0][1]], [w[1][0], w[1][1]], w[0][2], crate::site::shapes::ARC_TOLERANCE)
+                .into_iter()
+                .map(|q| P2(q[0], q[1]))
+                .collect()
+        })
+        .collect()
+}
+
+/// A ramp's path's pieces' lengths (an arc's by its chords) and slopes (percent; 0 a landing).
+pub fn path_slopes(r: &Ramp) -> Vec<(f64, f64)> {
+    let mut at = r.path.first().map_or(P2(0.0, 0.0), |p| P2(p[0], p[1]));
+    path_pieces(&r.path)
+        .into_iter()
+        .enumerate()
+        .map(|(i, pts)| {
+            let mut len = 0.0;
+            for q in pts {
+                len += at.dist(q);
+                at = q;
+            }
+            (len, r.slopes.get(i).copied().filter(|s| s.is_finite() && *s >= 0.0).unwrap_or(r.slope))
+        })
+        .collect()
+}
+
+/// A ramp along its path (Revit's ramp by sketch): a run for each line of it and each chord of its
+/// arcs, its rise shared out among its pieces by their lengths times their slopes, so it reaches its
+/// top at the path's end; a piece of slope 0 is flat, a landing. Where two runs meet without a
+/// change of slope their ends are mitred and the second is `joined` to the first.
+fn along_path(r: &Ramp, base: f64, top: f64) -> Layout {
+    let pieces = path_pieces(&r.path);
+    let measured = path_slopes(r);
+    let weight: f64 = measured.iter().map(|(l, s)| l * s).sum();
+    let rise = top - base;
+    let mut points: Vec<(P2, usize)> = vec![(P2(r.path[0][0], r.path[0][1]), 0)];
+    for (i, pts) in pieces.iter().enumerate() {
+        points.extend(pts.iter().map(|q| (*q, i)));
+    }
+    points.dedup_by(|b, a| a.0.dist(b.0) < 1e-6);
+    let mut out = Layout { runs: Vec::new(), pads: Vec::new(), walk: Vec::new(), width: r.width };
+    let mut z = base;
+    for w in points.windows(2) {
+        let [(a, _), (b, piece)] = [w[0], w[1]];
+        let length = a.dist(b);
+        let (plen, pslope) = measured.get(piece).copied().unwrap_or((0.0, 0.0));
+        let up = if weight > 1e-9 && plen > 1e-9 { rise * (plen * pslope / weight) * (length / plen) } else if weight <= 1e-9 { rise * length / measured.iter().map(|x| x.0).sum::<f64>().max(1e-9) } else { 0.0 };
+        let u = (b - a).unit();
+        out.runs.push(Run::new(a, u, length, (z, z + up), 0));
+        z += up;
+    }
+    // The last run ends at the top exactly, whatever the sums came to.
+    if let Some(last) = out.runs.last_mut() {
+        last.z.1 = top;
+    }
+    // Mitred where they meet: along the bisector of the two runs' left sides; a run going on at the
+    // same slope is joined to the one before (no line across).
+    for i in 1..out.runs.len() {
+        let (p, q) = (out.runs[i - 1], out.runs[i]);
+        let bis = p.u.perp() + q.u.perp();
+        let a = if bis.dot(bis) > 1e-12 { bis.unit() } else { q.u.perp() };
+        out.runs[i - 1].across.1 = a;
+        out.runs[i].across.0 = a;
+        let grade = |run: &Run| if run.length > 1e-9 { (run.z.1 - run.z.0) / run.length } else { 0.0 };
+        out.runs[i].joined = (grade(&p) - grade(&q)).abs() < 1e-6;
+    }
+    out.walk = out.runs.iter().map(|run| (run.start, run.z.0)).collect();
+    if let Some(last) = out.runs.last() {
+        out.walk.push((last.end(), last.z.1));
+    }
+    out
 }
 
 /// Element `e`'s layout, a stair's or a ramp's.

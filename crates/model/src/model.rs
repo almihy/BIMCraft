@@ -153,13 +153,19 @@ pub const MIN_CONTOURS: f64 = 50.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 26;
+pub const FORMAT: u32 = 27;
+/// [`FORMAT`], by what it brought: ramps and parking as Revit has them (docs/parking-ramps-plan.md): a ramp along a path
+/// with its runs' own slopes, the Parking category and its Parking Space family, a car park's bays and aisles as elements
+/// of their own. The masterplan's ramps, parking stalls and parking bands of a file of 26 or older are converted, and its
+/// car parks laid out again as their bays' elements, as it is read ([`crate::carpark::convert`]); a build that reads up to
+/// 26 would misread a ramp's path and refuse the Parking category, not say "saved by a newer BIMCraft".
 /// [`FORMAT`], by what it brought: the site as Revit has it (sub-divisions, survey and project base points, toposolids
 /// excavated and graded, property lines' edges, planting and site families). The masterplan's areas, trees and
 /// furniture of a file of 25 or older are converted, and its building pads made excavating floors, as it is read
 /// ([`crate::ground::convert`]); a build that reads up to 25 would refuse the new categories, not say "saved by a newer
 /// BIMCraft".
-pub const SITE_FORMAT: u32 = FORMAT;
+pub const SITE_FORMAT: u32 = 26;
+pub const PARKING_FORMAT: u32 = FORMAT;
 /// The format a project is written in when it needs nothing of [`SITE_FORMAT`]'s but has families' subcategories styled
 /// or measured void cuts.
 pub const STYLES_FORMAT: u32 = 25;
@@ -2117,6 +2123,12 @@ pub struct Landing {
 /// A ramp from `level` up to `top_level` (or `height` mm), from the middle of its foot at `start`
 /// toward `angle` degrees: rising at its slope, `slope` percent (rise over run), in one run or in
 /// runs with a landing between each two. Solid down to its level.
+///
+/// Or, as Revit's ramp by sketch, along `path`: its run drawn as lines and arcs end to end from its
+/// foot to its head (`[x, y, bulge]`, the bulge as DXF's, of the piece from that point to the next),
+/// a car park's curved and spiral ramps among them; then `start` and `angle` are the path's first
+/// point and direction, and a flat piece (slope 0) is a landing. `slopes` gives each run (each piece
+/// of a path) its own slope where it isn't `slope` (docs/parking-ramps-plan.md).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Ramp {
@@ -2131,6 +2143,10 @@ pub struct Ramp {
     pub slope: f64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub landings: Vec<Landing>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path: Vec<[f64; 3]>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slopes: Vec<f64>,
     /// Its values of the project's parameters, by name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub params: BTreeMap<String, serde_json::Value>,
@@ -4062,6 +4078,18 @@ impl Model {
         }
         // 25 to 26: a building pad is an excavating floor now (Revit dropped the pad for the toposolid's Excavate).
         let pads = crate::ground::pads_to_floors(&mut v);
+        // 26 to 27: a car park's laid-out blob goes; it is laid out again as elements once read (`carpark::convert`).
+        if format < u64::from(PARKING_FORMAT)
+            && let Some(Value::Object(es)) = v.get_mut("elements")
+        {
+            for e in es.values_mut() {
+                if let Some(o) = e.as_object_mut()
+                    && o.get("category").and_then(Value::as_str) == Some("site")
+                {
+                    o.remove("layout");
+                }
+            }
+        }
         let mut left_out = Vec::new();
         // An element is an internally tagged enum, which serde reads whole: each is looked into as its category's struct.
         let mut elements = v.get_mut("elements").map_or(Value::Null, Value::take);
@@ -4218,6 +4246,11 @@ impl Model {
         if self.format < SITE_FORMAT {
             crate::ground::convert(self);
             crate::ground::points_from_georeference(self);
+        }
+        // 26 to 27: the masterplan's ramps are Ramps, its parking stalls and bands' bays Parking Spaces, and its car parks
+        // laid out again as elements of their own (`carpark::convert`).
+        if self.format < PARKING_FORMAT && crate::carpark::convert(self) {
+            self.sync_library();
         }
         self.format = FORMAT;
     }
@@ -8273,6 +8306,31 @@ impl Model {
                 let (bottom, top) = self.span(r.level, 0.0, r.top_level, r.height);
                 if top <= bottom + TOL {
                     return Err(format!("{who}: its top must be above its base"));
+                }
+                // A ramp by sketch: its path's points, its pieces' slopes (0, a landing, up to 100%).
+                if !r.path.is_empty() {
+                    if !(2..=MAX_POINTS).contains(&r.path.len()) {
+                        return Err(format!("{who}: a ramp's path runs through 2 to {MAX_POINTS} points"));
+                    }
+                    for q in &r.path {
+                        point(&who, P2(q[0], q[1]))?;
+                        if !(q[2].is_finite() && q[2].abs() <= 1e3) {
+                            return Err(format!("{who}: a bulge of its path isn't a finite number"));
+                        }
+                    }
+                    if crate::stairs::path_slopes(r).iter().map(|(l, _)| l).sum::<f64>() < 1.0 {
+                        return Err(format!("{who}: its path has no length"));
+                    }
+                }
+                let runs = if r.path.is_empty() { r.landings.len() + 1 } else { r.path.len() - 1 };
+                if r.slopes.len() > runs {
+                    return Err(format!("{who}: {} slopes given for {runs} runs", r.slopes.len()));
+                }
+                if let Some(s) = r.slopes.iter().find(|s| !(s.is_finite() && (0.0..=100.0).contains(*s))) {
+                    return Err(format!("{who}: a run's slope {s}% isn't from 0% to 100%"));
+                }
+                if r.path.is_empty() && r.slopes.contains(&0.0) {
+                    return Err(format!("{who}: a run's slope is above 0%; a landing is where it is flat"));
                 }
                 coord(&format!("{who} length"), (top - bottom) / r.slope * 100.0)?;
                 landings(&who, &r.landings, None)?;

@@ -2919,6 +2919,8 @@ pub fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, String> 
             width: (width * 100.0).round() / 100.0,
             slope: (slope * 1e6).round() / 1e6,
             landings,
+            path: Vec::new(),
+            slopes: Vec::new(),
         };
         let rid = m.insert(Element::Ramp(ramp));
         from.insert(rid, who(id));

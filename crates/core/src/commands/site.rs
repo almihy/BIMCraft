@@ -86,7 +86,7 @@ pub(super) fn site(s: &mut Session, p: &Value) -> R {
     keys(c, p, &["kind", "use", "name", "level", "phase", "source", "ref", "props"])?;
     let kind = kind_param(c, p)?;
     // What Revit makes as a sub-division, planting or a site component is made so now.
-    if let Some((_, by)) = crate::ground::CONVERTED.iter().find(|(k, _)| *k == kind) {
+    if let Some((_, by)) = crate::ground::CONVERTED.iter().chain(crate::carpark::CONVERTED).find(|(k, _)| *k == kind) {
         return Err(bad(c, format!("a {} is made with `{by}` now, as Revit makes it", kind.replace('_', " "))));
     }
     let use_ = string(c, p, "use")?.unwrap_or_default();
@@ -106,7 +106,6 @@ pub(super) fn site(s: &mut Session, p: &Value) -> R {
         props,
         outline: Vec::new(),
         parts: Vec::new(),
-        layout: None,
         notes: Vec::new(),
         params: BTreeMap::new(),
     };

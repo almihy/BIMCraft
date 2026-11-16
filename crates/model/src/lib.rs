@@ -11,6 +11,7 @@ pub mod alignment;
 pub mod background_grid;
 pub mod bounds;
 pub mod cad;
+pub mod carpark;
 pub mod camera;
 pub mod cloud;
 #[doc(hidden)]

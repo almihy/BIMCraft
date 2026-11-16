@@ -508,6 +508,24 @@ const OWN: &[(&str, usize, &[Own])] = &[
         ],
     ),
     ("component", 4, &[FAMILY, TYPE, LEVEL, COUNT, PHASE_CREATED, PHASE_DEMOLISHED, DESIGN_OPTION, ROOM_NUMBER, ROOM_NAME]),
+    // Revit's Parking Schedule: the parking spaces (components of the Parking category), by their mark, type and level.
+    (
+        "parking",
+        6,
+        &[
+            MARK,
+            TYPE,
+            LEVEL,
+            WIDTH,
+            DEPTH,
+            (msg!("Angle"), Kind::Number, From::Key("stall_angle")),
+            COUNT,
+            FAMILY,
+            PHASE_CREATED,
+            PHASE_DEMOLISHED,
+            DESIGN_OPTION,
+        ],
+    ),
     (
         "stair",
         7,
@@ -721,6 +739,7 @@ fn fields_with(m: &Model, cat: &str, identity_data: bool) -> Vec<(String, Kind)>
         "window" => Some(family::Category::Window),
         _ => None,
     };
+    let hosted = if cat == "parking" { Some(family::Category::Parking) } else { hosted };
     if cat == "component" || hosted.is_some() {
         for p in m.families.values().filter(|f| hosted.is_none_or(|c| f.category == c)).flat_map(|f| &f.parameters) {
             add(
@@ -1218,10 +1237,15 @@ fn sources<'a>(m: &'a Model, sc: &Schedule, cat: &str) -> Vec<(Id, &'a Element, 
     }
     if cat != "massfloor" {
         let rooms = Rooms::new(m);
+        // A parking space is a component of the Parking category.
+        let of = |e: &Element| match e {
+            Element::Component(c) if cat == "parking" => crate::carpark::is_bay(m, c),
+            _ => e.category() == cat,
+        };
         return m
             .elements
             .iter()
-            .filter(|(_, e)| e.category() == cat)
+            .filter(|(_, e)| of(e))
             .map(|(id, e)| (*id, e, element_json_light(m, *id, &rooms)))
             .collect();
     }

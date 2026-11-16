@@ -62,8 +62,8 @@ pub(crate) use crate::motion::{Motion, other_side, transform, transformed};
 pub use crate::units::m2;
 use cad_pick::cad_outlines;
 use ground::{
-    base_point, excavate, graded_region, planting, property_line_edit, property_line_table, remove_excavation, remove_point, road,
-    site_component, sub_division,
+    base_point, car_park, car_park_run, excavate, graded_region, parking_component, planting, property_line_edit, property_line_table,
+    remove_excavation, remove_point, road, site_component, sub_division,
 };
 use site::{property_line, site as site_cmd, site_edit, site_figures, site_kinds, toposolid};
 
@@ -742,6 +742,27 @@ other_files(
          site's Bike Rack, Bench and Play Equipment, or the project's own), on the ground as `planting` is. Returns as `planting`",
         site_component,
     ),
+    edit(
+        "parking_component",
+        "Parking Component",
+        &[],
+        "{at: [x,y], type?: Standard|Accessible|EV|Motorcycle, family?: Parking Space, host?, level?, angle?, mirrored?, mark?,          params?} Revit's Parking Component: a parking space of the Parking category (the engine's Parking Space, loaded when          the project hasn't it; types Standard 2500 x 5000, Accessible 3700 x 5000, EV, Motorcycle 1000 x 2200; type          parameters Width, Depth from the aisle, Angle of its sides to it) at `at` (its middle), its x along the aisle turned          `angle` degrees, its open side to its -y; `mark` its number (Mark). On the surface under it: `host` (a toposolid, a          sub-division or a floor), else the toposolid under it, else a floor of `level`; it keeps to the ground as the ground          changes. Scheduled by `schedule {category: parking}`. Returns `id`, `offset`, `host`, `element`",
+        parking_component,
+    ),
+    edit(
+        "car_park",
+        "Car Park",
+        &[],
+        "{control: [[x,y], …], level?, name?, phase?, standard?, angle?, one_way?, stall_width?, stall_depth?, aisle?, setback?,          end_island?, island_every?, ev_share?, floor_to_floor?, ramp_slope?, direction?, access?: [{at, kind: in|out|both}],          target?, removed?} the car park generator: its area on `level` and its settings (the firm's sizes where none is given:          parking.stall.width, parking.stall.depth, parking.aisle.width, parking.aisle.one_way, …), laid out at once as Parking          Spaces (Mark numbered) and, at ground level, drive aisles (sub-divisions of type Drive Aisle on the toposolid). It keeps          clear of what stands on its level (walls, columns, shafts, stairs, ramps, floor openings, components, masses,          sub-divisions by role); it uses the real columns and never makes its own (below ground with none, `result.         proposed_columns` proposes a grid); below ground its ways in are the real ramps whose foot or head is on its level,          or `access` (it never invents a ramp: with none, nothing is laid out and `result.notes` says so). It runs again when          it or anything near it on its level changes; a bay the person moves or changes is kept, pinned; one they delete stays          out (`removed`). Change it with `site_edit`. Returns `id`, `result`, `bays`, `kept` (pinned), `aisles`",
+        car_park,
+    ),
+    edit(
+        "car_park_run",
+        "Run Car Park",
+        &[],
+        "{id} lays car park `id` out again now, as `car_park` does. Returns as `car_park`",
+        car_park_run,
+    ),
     other(
         "property_line_table",
         "Property Line Table",
@@ -1056,10 +1077,7 @@ other_files(
         "ramp",
         ui_msg!("Ramp"),
         &[],
-        "{start: [x,y], end?: [x,y] | angle?, level?, top_level?, height?, width?, slope?, landings?: [{at, turn?}, …], railings?} a ramp \
-         from the middle of its foot at `start`, climbing toward `end` (or `angle` degrees) up to the next level, or `height` mm, \
-         `width` wide (1200), at `slope` percent (8.33, 1 in 12), as long as that makes it; with landings `at` mm up, turning \
-         as a stair's do, and with `railings`, a railing down each side. Solid down to its level",
+        "{start: [x,y], end?: [x,y] | angle?, path?: [[x,y,bulge?], …], level?, top_level?, height?, width?, slope?, slopes?: [%, …],          landings?: [{at, turn?}, …], railings?} a ramp from the middle of its foot at `start`, climbing toward `end` (or `angle`          degrees) up to the next level, or `height` mm, `width` wide (1200), at `slope` percent (8.33, 1 in 12), as long as that          makes it; with landings `at` mm up, turning as a stair's do, and with `railings`, a railing down each side. Or, as Revit's          ramp by sketch, along `path` (its run from its foot: lines and arcs end to end, a bulge as DXF's; a car park's curved          and spiral ramps, a spiral going round again), its rise shared out among the pieces by their length times their slope          (`slopes`, one a piece, percent; 0 a flat landing; else `slope`). `slopes` without a path: each run's own. Solid down          to its level. Returns `id`, `length`, `railings`",
         ramp,
     )
     .menu("Architecture > Ramp"),
@@ -9625,8 +9643,27 @@ fn sides(c: &str, s: &mut Session, p: &Value, id: Id, level: Guid) -> Result<Vec
 fn ramp(s: &mut Session, p: &Value) -> R {
     let c = "ramp";
     let m = &s.model;
-    let start = point_req(c, p, "start")?;
-    let angle = climb(c, p, start)?;
+    // Revit's ramp by sketch: its run drawn along `path`, lines and arcs end to end from its foot.
+    let path = if absent(p.get("path")) { Vec::new() } else { site::bulged(c, p, "path")? };
+    let (start, angle) = match path.as_slice() {
+        [a, b, ..] => {
+            let first = stairs::path_pieces(&path).first().and_then(|q| q.first().copied()).unwrap_or(P2(b[0], b[1]));
+            (P2(a[0], a[1]), degrees((first.1 - a[1]).atan2(first.0 - a[0]).to_degrees()))
+        }
+        [_] => return Err(bad(c, "a ramp's `path` runs through 2 points or more")),
+        [] => {
+            let start = point_req(c, p, "start")?;
+            (start, climb(c, p, start)?)
+        }
+    };
+    let slopes: Vec<f64> = match p.get("slopes") {
+        v if absent(v) => Vec::new(),
+        Some(Value::Array(a)) if a.len() <= MAX_POINTS => {
+            a.iter().map(|v| v.as_f64().ok_or_else(|| bad(c, "`slopes` is a list of percentages, one a run"))).collect::<Result<_, _>>()?
+        }
+        Some(_) => return Err(bad(c, "`slopes` is a list of percentages, one a run (a piece of its path)")),
+        None => Vec::new(),
+    };
     let level = level_param(c, m, p, "level")?;
     let (top_level, height) = top_param(c, m, p, level)?;
     let r = Ramp {
@@ -9639,6 +9676,8 @@ fn ramp(s: &mut Session, p: &Value) -> R {
         width: num(c, p, "width")?.unwrap_or(RAMP_WIDTH),
         slope: num(c, p, "slope")?.unwrap_or(RAMP_SLOPE),
         landings: landings_param(c, p)?,
+        path,
+        slopes,
     };
     let length: f64 = stairs::ramp(m, &r).runs.iter().map(|r| r.length).sum();
     let level = r.level;
@@ -12998,7 +13037,8 @@ fn location_fields(e: &Element) -> &'static [&'static str] {
         | E::RepeatingDetail(_) => &["start", "end"],
         E::Rebar(_) => &["path", "host"],
         E::Railing(_) => &["path", "host"],
-        E::Stair(_) | E::Ramp(_) => &["start", "angle"],
+        E::Stair(_) => &["start", "angle"],
+        E::Ramp(_) => &["start", "angle", "path"],
         E::Spot(_) => &["at", "host"],
         E::DetailLine(_) => &["curve"],
         E::FilledRegion(_) => &["sketch", "pattern_origin"],
@@ -14540,6 +14580,14 @@ fn delete(s: &mut Session, p: &Value) -> R {
     // A pinned element is not deleted until it is unpinned, as in Revit; what goes with a host it hangs on does go.
     let asked = ids_param("delete", &s.model, p)?;
     pin::refuse_pinned("delete", &s.model, &asked, pin::Held::Delete)?;
+    // As Revit: the survey point and the project base point are always there; a view hides them.
+    if let Some(id) = asked.iter().find(|id| matches!(s.model.elements.get(**id), Some(Element::SurveyPoint(_) | Element::ProjectBasePoint(_)))) {
+        let what = if matches!(s.model.elements.get(*id), Some(Element::SurveyPoint(_))) { "the survey point" } else { "the project base point" };
+        return Err(bad(
+            "delete",
+            format!("{what} ({id}) can't be deleted, as in Revit: hide it in Visibility/Graphics (Site), or move it with `base_point`"),
+        ));
+    }
     #[cfg(test)]
     let mut twin = s.clone();
     let before = Arc::clone(&s.model);

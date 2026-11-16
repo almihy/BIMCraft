@@ -1195,8 +1195,11 @@ fn plan_shows_among(m: &Model, key: Guid, among: bool) -> Vec<P2> {
             Element::Dimension(dm) if m.annotation_in(e, key) => extent.push(dm.at),
             Element::Section(v) | Element::Elevation(v) => extent.extend([v.start, v.end]),
             Element::Tag(t) if m.annotation_in(e, key) => extent.extend(m.anchor(t.host).map(|a| a + t.offset)),
-            Element::Stair(Stair { level: l, top_level: t, .. }) | Element::Ramp(Ramp { level: l, top_level: t, .. })
-                if *l == level || *t == Some(level) =>
+            Element::Stair(Stair { level: l, top_level: t, height: h, .. }) | Element::Ramp(Ramp { level: l, top_level: t, height: h, .. })
+                if {
+                    let (base, top) = m.span(*l, 0.0, *t, *h);
+                    flight(m, level, &r, base, top).is_some()
+                } =>
             {
                 if let Some(l) = stairs::layout(m, e) {
                     extent.extend(l.runs.iter().flat_map(|r| r.ring(l.width)).chain(l.pads.into_iter().flat_map(|p| p.ring)));
@@ -1260,8 +1263,8 @@ pub fn sketch(m: &Model, view: View, id: Id, e: &Element) -> Drawing {
                 opening(&mut d, m, e, o, w, m.own_base(w) + o.sill, true, None);
             }
         }
-        Element::Stair(st) => stair(&mut d, m, st, st.level),
-        Element::Ramp(r) => ramp(&mut d, m, r, r.level),
+        Element::Stair(st) => stair(&mut d, m, st, st.level, &m.shown_range(st.level)),
+        Element::Ramp(r) => ramp(&mut d, m, r, r.level, &m.shown_range(r.level)),
         Element::Railing(rl) => d.line(&stairs::railing(m, rl).into_iter().map(|(p, _)| p).collect::<Vec<_>>(), Pen::MEDIUM, INK, false),
         Element::RoomSeparator(rs) => d.line(&[rs.start, rs.end], Pen::PROJECTION, INK, false),
         Element::Roof(r) => roof(&mut d, m, r),
@@ -3551,6 +3554,15 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
             }
         }
     }
+    // The Parking subcategories the view hides, by the names its family's symbols give them.
+    let parking_hidden: Vec<String> = {
+        let g = crate::graphics::graphics_of(m, key).map_or_else(Default::default, |g| g.resolved(m).into_owned());
+        [("parkingstalllines", crate::family::site::STALL_LINES), ("parkingmarkings", crate::family::site::MARKINGS)]
+            .into_iter()
+            .filter(|(k, _)| g.hides(k))
+            .map(|(_, n)| m.language.word(n).to_string())
+            .collect()
+    };
     // Components it sees, in projection, as Revit draws furniture: whole while any of one is under
     // the cut plane and over the view depth; and the symbols of those on its level.
     for (&id, e) in all().filter(|(id, _)| shown(**id)) {
@@ -3566,7 +3578,11 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
         // Its symbols are annotation of its level: in that level's plan and ceiling plan, whatever height its forms reach; each
         // at the detail levels it says (none, all but Coarse).
         if c.level == level {
-            let shown = m.component_marks_styled(c, d.detail);
+            let mut shown = m.component_marks_styled(c, d.detail);
+            // A parking space's stall lines and markings, each a subcategory a view hides apart (Revit's Parking).
+            if !parking_hidden.is_empty() && crate::carpark::is_bay(m, c) {
+                shown.retain(|(_, sub)| sub.as_deref().is_none_or(|s| !parking_hidden.iter().any(|h| h == s)));
+            }
             family_marks(&mut d, m, e, &shown);
         }
     }
@@ -3787,8 +3803,8 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
             _ if up => {}
             // A mass the plane passes through: its outline, dashed.
             Element::Mass(ms) if m.mass_cut_by(ms, range.cut) => d.dashed(&m.mass_outline(ms, range.cut), BY_CATEGORY, MASS, true),
-            Element::Stair(st) => stair(&mut d, m, st, level),
-            Element::Ramp(r) => ramp(&mut d, m, r, level),
+            Element::Stair(st) => stair(&mut d, m, st, m.guid(level), &range),
+            Element::Ramp(r) => ramp(&mut d, m, r, m.guid(level), &range),
             Element::Railing(rl) if m.level_of(e) == Some(level) => railing(&mut d, m, rl, range.cut),
             // A room separation line: a thin line, on its own level's plan only.
             Element::RoomSeparator(rs) if rs.level == level => {
@@ -4623,70 +4639,178 @@ fn door_leaves(d: &mut Drawing, axis: &Axis, way: &OpeningWay, op: Operation, th
     }
 }
 
-/// A stair in the plan of `level`. From its own level: its risers up to the cut plane, a cut line
-/// across the run there, the rest (and the landings over the cut plane) dashed, and its walk line
-/// marked UP. From the level it climbs to: all of it, and the walk line marked DN.
-fn stair(d: &mut Drawing, m: &Model, st: &Stair, level: impl Key) {
-    let level = m.guid(level);
-    let up = st.level == level;
-    if !up && st.top_level != Some(level) {
-        return;
+/// The heights a stair or a ramp from `base` up to `top` shows between in the plan of `level`, range `r`, as Revit draws
+/// them: from the level below (or its base) up to the view range's top, solid to the cut plane and dashed over it (the
+/// `<Above>` lines). None where none of it is in that.
+#[derive(Clone, Copy, Debug)]
+struct Flight {
+    /// Its lowest height shown, and its highest.
+    lo: f64,
+    hi: f64,
+    /// The cut plane, and the plan's level's elevation: under it, it comes up from the level below (DN).
+    cut: f64,
+    floor: f64,
+}
+
+fn flight(m: &Model, level: Guid, r: &PlanRange, base: f64, top: f64) -> Option<Flight> {
+    let floor = m.elevation(level);
+    let below = m.levels().into_iter().rev().find(|(_, l)| l.elevation < floor - TOL).map(|(_, l)| l.elevation);
+    let lo = below.map_or(base, |b| base.max(b));
+    let hi = top.min(r.top.max(r.cut));
+    (lo < hi - TOL && base < hi && top > lo).then_some(Flight { lo, hi, cut: r.cut, floor })
+}
+
+/// The pieces of the stretch from `a` (height `za`) to `b` (`zb`) that a plan shows, `f`: each from and to, and whether it
+/// is over the cut plane (dashed).
+fn shown_pieces(f: &Flight, a: P2, za: f64, b: P2, zb: f64) -> Vec<(P2, P2, bool)> {
+    let at = |z: f64| if (zb - za).abs() < 1e-9 { 0.0 } else { ((z - za) / (zb - za)).clamp(0.0, 1.0) };
+    let (lo, hi) = if za <= zb { (at(f.lo), at(f.hi)) } else { (at(f.hi), at(f.lo)) };
+    let flat = (zb - za).abs() < 1e-9;
+    if flat && !(f.lo - TOL <= za && za <= f.hi + TOL) {
+        return Vec::new();
     }
+    let (t0, t1) = if flat { (0.0, 1.0) } else { (lo.min(hi), lo.max(hi)) };
+    if t1 - t0 < 1e-9 {
+        return Vec::new();
+    }
+    let p = |t: f64| a + (b - a) * t;
+    let z = |t: f64| za + (zb - za) * t;
+    let tc = if flat { f64::NAN } else { at(f.cut) };
+    if tc > t0 && tc < t1 {
+        vec![(p(t0), p(tc), z((t0 + tc) / 2.0) > f.cut), (p(tc), p(t1), z((tc + t1) / 2.0) > f.cut)]
+    } else {
+        vec![(p(t0), p(t1), z((t0 + t1) / 2.0) > f.cut + 1e-9)]
+    }
+}
+
+/// A walk line's part between heights `lo` and `hi`.
+fn walk_between(line: &[(P2, f64)], lo: f64, hi: f64) -> Vec<(P2, f64)> {
+    let mut out: Vec<(P2, f64)> = Vec::new();
+    for w in line.windows(2) {
+        let [(a, za), (b, zb)] = [w[0], w[1]];
+        let at = |z: f64| if (zb - za).abs() < 1e-9 { 0.0 } else { ((z - za) / (zb - za)).clamp(0.0, 1.0) };
+        let (t0, t1) = if (zb - za).abs() < 1e-9 {
+            if lo - TOL <= za && za <= hi + TOL { (0.0, 1.0) } else { continue }
+        } else {
+            let (x, y) = (at(lo), at(hi));
+            (x.min(y), x.max(y))
+        };
+        if t1 - t0 < 1e-9 {
+            continue;
+        }
+        for t in [t0, t1] {
+            let q = (a + (b - a) * t, za + (zb - za) * t);
+            if out.last().is_none_or(|l| l.0.dist(q.0) > 1e-6) {
+                out.push(q);
+            }
+        }
+    }
+    out
+}
+
+/// A stair's or a ramp's walk lines in a plan: UP from the plan's level (or its base) up, DN from it down to the level
+/// below.
+fn walks(d: &mut Drawing, m: &Model, line: &[(P2, f64)], f: &Flight) {
+    let up = walk_between(line, f.floor.max(f.lo), f.hi);
+    if up.len() >= 2 {
+        walk(d, m, &up, true);
+    }
+    if f.lo < f.floor - TOL {
+        let down = walk_between(line, f.lo, f.floor);
+        if down.len() >= 2 {
+            walk(d, m, &down, false);
+        }
+    }
+}
+
+/// A stair in the plan of `level`, range `r`, on every level it crosses as Revit draws it ([`flight`]): its risers, its
+/// sides and its landings from the level below up to the cut plane, a cut line across the run there, the rest up to the
+/// view range's top dashed, and its walk line marked UP from the level, DN below it.
+fn stair(d: &mut Drawing, m: &Model, st: &Stair, level: Guid, r: &PlanRange) {
+    let (base, top) = m.span(st.level, 0.0, st.top_level, st.height);
+    let Some(f) = flight(m, level, r, base, top) else { return };
     let (_, each, _) = m.flight(st);
     let l = stairs::stair(m, st);
     let half = st.width / 2.0;
-    // The riser the cut plane passes through, counted from the first; from above, none.
-    let rise = m.shown_range(level).cut - m.elevation(st.level);
-    let cut = if up && each > 0.0 { (rise / each).floor() } else { f64::INFINITY };
+    // The riser the cut plane passes through, counted from the first.
+    let cut = if each > 0.0 { ((f.cut - base) / each).floor() } else { f64::INFINITY };
     // Risers below the run drawn.
     let mut below = 0.0;
     for run in &l.runs {
         let at = |along: f64, across: f64| run.start + run.u * along + run.u.perp() * across;
         for k in 0..run.risers {
             let k = f64::from(k);
-            segment(d, at(k * st.tread, -half), at(k * st.tread, half), below + k > cut);
+            let z = base + (below + k) * each;
+            if z >= f.lo - TOL && z + each <= f.hi + TOL {
+                segment(d, at(k * st.tread, -half), at(k * st.tread, half), below + k > cut);
+            }
         }
-        let line = ((cut - below + 0.5) * st.tread).clamp(0.0, run.length);
+        // Along the run, where a height is (half a tread past its riser), clamped to it.
+        let along = |z: f64| if each > 0.0 { (((z - base) / each - below + 0.5) * st.tread).clamp(0.0, run.length) } else { 0.0 };
+        let (from, to) = (along(f.lo), along(f.hi));
+        let line = ((cut - below + 0.5) * st.tread).clamp(from, to);
         for side in [-half, half] {
-            if line > 0.0 {
-                segment(d, at(0.0, side), at(line, side), false);
+            if line > from {
+                segment(d, at(from, side), at(line, side), false);
             }
-            if line < run.length {
-                segment(d, at(line, side), at(run.length, side), true);
+            if line < to {
+                segment(d, at(line, side), at(to, side), true);
             }
         }
-        if cut >= below && line < run.length {
+        if cut >= below && line < run.length && line > from && line < to {
             d.line(&[at(line - 0.4 * st.tread, -half), at(line + 0.4 * st.tread, half)], Pen::PROJECTION, INK, false);
         }
         below += f64::from(run.risers);
     }
     for pad in &l.pads {
-        let over = up && pad.z - m.elevation(st.level) > rise;
-        for (a, b) in geom::ring_edges(&pad.ring) {
-            segment(d, a, b, over);
+        if pad.z >= f.lo - TOL && pad.z <= f.hi + TOL {
+            for (a, b) in geom::ring_edges(&pad.ring) {
+                segment(d, a, b, pad.z > f.cut);
+            }
         }
     }
-    walk(d, m, &l.walk, up);
+    walks(d, m, &l.walk, &f);
 }
 
-/// A ramp in the plan of `level`: from its own level, its runs' and landings' outlines, dashed
-/// where they're over the cut plane, and its walk line marked UP; from the level it climbs to, all
-/// of it, marked DN.
-fn ramp(d: &mut Drawing, m: &Model, r: &Ramp, level: impl Key) {
-    let level = m.guid(level);
-    let up = r.level == level;
-    if !up && r.top_level != Some(level) {
-        return;
-    }
+/// A ramp in the plan of `level`, range `r`, on every level it crosses as Revit draws it ([`flight`]): its runs' sides and
+/// ends and its landings from the level below up to the cut plane, the rest up to the view range's top dashed, a cut line
+/// across it at the cut plane, and its walk line marked UP from the level, DN below it. A curved run's chords show as one
+/// curve: no line across where they meet.
+fn ramp(d: &mut Drawing, m: &Model, r: &Ramp, level: Guid, range: &PlanRange) {
+    let (base, top) = m.span(r.level, 0.0, r.top_level, r.height);
+    let Some(f) = flight(m, level, range, base, top) else { return };
     let l = stairs::ramp(m, r);
-    let cut = if up { m.plan_range(level).cut } else { f64::INFINITY };
-    let rings = l.runs.iter().map(|run| (run.ring(r.width), run.z.0)).chain(l.pads.iter().map(|p| (p.ring.clone(), p.z)));
-    for (ring, z) in rings {
-        for (a, b) in geom::ring_edges(&ring) {
-            segment(d, a, b, z > cut);
+    for (i, run) in l.runs.iter().enumerate() {
+        let ring = run.ring(r.width);
+        let [s0, e0, e1, s1] = [ring[0], ring[1], ring[2], ring[3]];
+        for (a, b) in [(s0, e0), (s1, e1)] {
+            for (p, q, over) in shown_pieces(&f, a, run.z.0, b, run.z.1) {
+                segment(d, p, q, over);
+            }
+        }
+        // Its ends across: where it starts from a landing or the ground, and where it stops.
+        let ends_here = l.runs.get(i + 1).is_none_or(|next| !next.joined);
+        for (go, a, b, z) in [(!run.joined, s0, s1, run.z.0), (ends_here, e0, e1, run.z.1)] {
+            if go && z >= f.lo - TOL && z <= f.hi + TOL {
+                segment(d, a, b, z > f.cut + 1e-9);
+            }
+        }
+        // The cut line, where the cut plane crosses it.
+        if run.z.0 < f.cut && f.cut < run.z.1 && f.cut < f.hi {
+            let t = (f.cut - run.z.0) / (run.z.1 - run.z.0);
+            let (p, q) = (s0 + (e0 - s0) * t, s1 + (e1 - s1) * t);
+            let lean = run.u * (r.width.min(run.length) * 0.15);
+            d.line(&[p - lean, q + lean], Pen::PROJECTION, INK, false);
         }
     }
-    walk(d, m, &l.walk, up);
+    for pad in &l.pads {
+        if pad.z >= f.lo - TOL && pad.z <= f.hi + TOL {
+            for (a, b) in geom::ring_edges(&pad.ring) {
+                segment(d, a, b, pad.z > f.cut + 1e-9);
+            }
+        }
+    }
+    walks(d, m, &l.walk, &f);
 }
 
 /// A railing in a plan cutting at height `cut`: its line, solid where what it runs along is under

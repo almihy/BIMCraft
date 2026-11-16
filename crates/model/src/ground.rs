@@ -116,6 +116,8 @@ pub struct Surface {
 /// The surfaces a new sub-division's type may be, made in a project when it first needs one.
 pub const SURFACES: &[Surface] = &[
     Surface { name: "Asphalt", plan: [164, 170, 178], line: [111, 119, 130], color: [92, 96, 101], offset: 0.0 },
+    // A car park's drive aisles (`carpark.rs`): asphalt, a shade apart so they read beside a road.
+    Surface { name: "Drive Aisle", plan: [176, 181, 188], line: [111, 119, 130], color: [98, 102, 108], offset: 0.0 },
     Surface { name: "Paving", plan: [235, 230, 221], line: [163, 152, 130], color: [143, 131, 113], offset: 40.0 },
     Surface { name: "Block Paving", plan: [230, 222, 208], line: [163, 152, 130], color: [143, 131, 113], offset: 40.0 },
     Surface { name: "Gravel", plan: [236, 231, 219], line: [170, 160, 140], color: [205, 195, 174], offset: 0.0 },
@@ -845,7 +847,9 @@ pub fn load_family(m: &mut Model, name: &str) -> bool {
 
 /// Whether component `c` is planting or a site component, which stands on the ground.
 pub fn on_the_ground(m: &Model, c: &crate::model::Component) -> bool {
-    m.families.get(&c.family).is_some_and(|f| matches!(f.category, crate::family::Category::Planting | crate::family::Category::SiteComponent))
+    m.families.get(&c.family).is_some_and(|f| {
+        matches!(f.category, crate::family::Category::Planting | crate::family::Category::SiteComponent | crate::family::Category::Parking)
+    })
 }
 
 // ====================================================================== keeping it
@@ -985,6 +989,18 @@ fn host_for(m: &Model, level: Guid, q: P2) -> Option<Guid> {
     })
 }
 
+/// The toposolid on `level` whose outline holds `q` (the highest there, where they overlap).
+pub fn toposolid_under(m: &Model, level: Guid, q: P2) -> Option<Guid> {
+    m.elements
+        .with_guids()
+        .filter_map(|(_, g, e)| match e {
+            Element::Toposolid(f) if f.level == level && geom::contains(&f.boundary, q) => Some((g, f.offset)),
+            _ => None,
+        })
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(g, _)| g)
+}
+
 /// A flat toposolid named `Ground` under everything in `boxes`, 5 m past it, on `level`: what converted elements go on in
 /// a project that has no toposolid (Revit has no sub-division without one).
 fn make_ground(m: &mut Model, level: Guid, b: [f64; 4]) -> Guid {
@@ -1015,8 +1031,9 @@ fn make_ground(m: &mut Model, level: Guid, b: [f64; 4]) -> Guid {
 }
 
 /// The values a site element keeps of where it came from, under names no project parameter may take: Arqiflow's `source`
-/// (site, osm, overture, survey…), `ref` (its id there) and `survey` (the survey it was read from).
-pub const KEPT: [&str; 3] = ["source", "ref", "survey"];
+/// (site, osm, overture, survey…), `ref` (its id there) and `survey` (the survey it was read from); and a car park's bays'
+/// and aisles' link to it (`carpark.rs`: the car park, and where and how it placed them).
+pub const KEPT: [&str; 5] = ["source", "ref", "survey", crate::carpark::BY, crate::carpark::PLACED];
 
 /// Whether `name` is one of [`KEPT`].
 pub fn reserved(name: &str) -> bool {

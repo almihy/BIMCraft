@@ -626,6 +626,10 @@ impl Session {
                 let updates = crate::masterplan::keep(&self.model, &before);
                 if !updates.is_empty() {
                     crate::masterplan::apply(self.model_mut(), updates);
+                    // A car park laid out again may have loaded its family or made a type of it.
+                    if !self.model.library_in_step() {
+                        self.model_mut().sync_library();
+                    }
                 }
             }
             // Locked and equal dimensions moved what they measure to as the command moved it.

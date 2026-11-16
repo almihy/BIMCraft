@@ -80,6 +80,8 @@ pub enum Category {
     /// A bike rack, a bench, play equipment: Revit's Site (components).
     #[serde(rename = "sitecomponent")]
     SiteComponent,
+    /// A parking space (a bay): Revit's Parking.
+    Parking,
 }
 
 impl Category {
@@ -129,6 +131,8 @@ impl Category {
             Category::Lighting => ("IFCLIGHTFIXTURE", OPEN, None),
             Category::Planting => ("IFCGEOGRAPHICELEMENT", OPEN, None),
             Category::SiteComponent => ("IFCFURNITURE", OPEN, None),
+            // As Revit exports Parking: a proxy, its object type saying what it is.
+            Category::Parking => ("IFCBUILDINGELEMENTPROXY", ".USERDEFINED.", Some("ParkingSpace")),
             Category::Generic | Category::Door | Category::Window => ("IFCBUILDINGELEMENTPROXY", OPEN, None),
         }
     }

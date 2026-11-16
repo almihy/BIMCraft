@@ -1,8 +1,9 @@
 //! The ground's commands, after Revit's (docs/areas/site.md): `sub_division` (Sub-divide), `road` (our road tool, its
 //! carriageway, pavements and median sub-divisions), `excavate` and `remove_excavation` (Excavate), `graded_region` (Graded
 //! Region), `remove_point` (a toposolid's point deleted, Modify Sub Elements), `base_point` (the Survey Point and the
-//! Project Base Point), `planting` and `site_component` (Planting and Site Component), and `property_line_table` and
-//! `property_line_edit` (Property Line's Edit Table). What they make is `ground.rs`'s.
+//! Project Base Point), `planting` and `site_component` (Planting and Site Component), `property_line_table` and
+//! `property_line_edit` (Property Line's Edit Table), and `parking_component` (Parking Component), `car_park` and
+//! `car_park_run` (the car park generator, `carpark.rs`). What they make is `ground.rs`'s and `carpark.rs`'s.
 
 use std::collections::BTreeMap;
 
@@ -201,7 +202,6 @@ pub(super) fn road(s: &mut Session, p: &Value) -> R {
         props,
         outline: shaped.outline,
         parts: shaped.parts,
-        layout: None,
         notes: Vec::new(),
         params: BTreeMap::new(),
     };
@@ -863,4 +863,149 @@ pub(super) fn property_line_edit(s: &mut Session, p: &Value) -> R {
     }
     out.insert("element".into(), e);
     Ok(Value::Object(out))
+}
+
+// ====================================================================== parking
+/// Revit's Parking Component: a parking space of the Parking category (the engine's Parking Space, loaded when the project
+/// hasn't it, or the project's own) at `at`, of `type` (Standard, Accessible, EV, Motorcycle), turned `angle` (its x along
+/// the aisle, its open side to its -y), numbered `mark`; on the surface under it (`host`: a toposolid, a sub-division or a
+/// floor; else the toposolid under it, else a floor of its level), kept on the ground as the ground changes.
+pub(super) fn parking_component(s: &mut Session, p: &Value) -> R {
+    let c = "parking_component";
+    keys(c, p, &["at", "type", "family", "host", "level", "angle", "mirrored", "mark", "params"])?;
+    let at = point_req(c, p, "at")?;
+    let family = string(c, p, "family")?.unwrap_or_else(|| s.model.language.word(crate::family::site::PARKING_SPACE).to_string());
+    if !ground::load_family(s.model_mut(), &family) {
+        return Err(bad(c, format!("no family `{family}`: one of the project's of the Parking category, or Parking Space")));
+    }
+    let m = &s.model;
+    let f = m.families.get(&family).ok_or_else(|| bad(c, "no family"))?;
+    if f.category != crate::family::Category::Parking {
+        return Err(bad(c, format!("`{family}` is no family of the Parking category; place it with `component`")));
+    }
+    let type_name = match string(c, p, "type")? {
+        Some(t) if f.types.contains_key(&t) => t,
+        Some(t) => return Err(bad(c, format!("`{family}` has no type `{t}`; it has: {}", f.types.keys().cloned().collect::<Vec<_>>().join(", ")))),
+        None => {
+            let standard = m.language.word(crate::family::site::STANDARD).to_string();
+            if f.types.contains_key(&standard) { standard } else { f.types.keys().next().cloned().unwrap_or_default() }
+        }
+    };
+    // Its level: its host's, else the toposolid's under it, else the one given.
+    let level = if !absent(p.get("host")) {
+        let id = element_id(c, m, p.get("host").unwrap_or(&Value::Null))?;
+        match m.elements.get(id) {
+            Some(Element::Toposolid(t) | Element::Floor(t)) => t.level,
+            Some(Element::SubDivision(sd)) => m.subdivision_level(sd).ok_or_else(|| bad(c, "its host's toposolid isn't in the project"))?,
+            Some(e) => return Err(bad(c, format!("a parking space stands on a toposolid, a sub-division or a floor, not a {}", e.category()))),
+            None => return Err(bad(c, format!("no element {id}"))),
+        }
+    } else if absent(p.get("level")) {
+        let under = m
+            .elements
+            .iter()
+            .filter_map(|(_, e)| match e {
+                Element::Toposolid(f) if geom::contains(&f.boundary, at) => Some((f.level, m.elevation(f.level) + f.offset)),
+                _ => None,
+            })
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(l, _)| l);
+        match under {
+            Some(l) => l,
+            None => level_param(c, m, p, "level")?,
+        }
+    } else {
+        level_param(c, m, p, "level")?
+    };
+    let (host, offset) = crate::carpark::surface_at(m, level, at);
+    let mut params: BTreeMap<String, Value> = match p.get("params") {
+        v if absent(v) => BTreeMap::new(),
+        Some(Value::Object(o)) => o.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        Some(v) => return Err(bad(c, format!("`params` is an object {{parameter: value}}, got {v}"))),
+        None => BTreeMap::new(),
+    };
+    if let Some(mark) = string(c, p, "mark")? {
+        params.insert(m.language.word(crate::family::site::MARK).to_string(), json!(mark));
+    }
+    let comp = crate::model::Component {
+        family,
+        type_name,
+        level,
+        at,
+        angle: num(c, p, "angle")?.unwrap_or(0.0),
+        offset,
+        mirrored: flag(c, p, "mirrored")?,
+        params,
+    };
+    let id = s.model_mut().insert(Element::Component(comp));
+    Ok(json!({"id": id, "offset": offset, "host": host.and_then(|g| s.model.elements.id(g)), "element": element_json(&s.model, id)}))
+}
+
+/// The settings a car park takes (its props), each by name at the top of `car_park`'s params.
+const CAR_PARK_OWN: [&str; 4] = ["level", "name", "phase", "props"];
+
+/// The car park generator (docs/parking-ramps-plan.md): a car park's area (`control`) on `level`, its settings, laid out at
+/// once as Parking Spaces and drive aisles among what stands on its level. Its result.
+pub(super) fn car_park(s: &mut Session, p: &Value) -> R {
+    let c = "car_park";
+    let Some(o) = p.as_object() else { return Err(bad(c, "takes {control: [[x, y], …], level?, …settings}")) };
+    let mut props: Map<String, Value> = match o.get("props") {
+        Some(Value::Object(m)) => m.clone(),
+        v if absent(v) => Map::new(),
+        Some(v) => return Err(bad(c, format!("`props` is an object of settings, got {v}"))),
+        None => Map::new(),
+    };
+    for (k, v) in o.iter().filter(|(k, _)| !CAR_PARK_OWN.contains(&k.as_str())) {
+        props.insert(k.clone(), v.clone());
+    }
+    if !props.contains_key("control") {
+        return Err(bad(c, "`control` [[x, y], …], the car park's area, is required"));
+    }
+    let mut site = json!({"kind": "car_park", "props": props});
+    for k in ["level", "name", "phase"] {
+        if let Some(v) = o.get(k) {
+            site[k] = v.clone();
+        }
+    }
+    let made = super::site_cmd(s, &site).map_err(|e| e.replacen("site", "car_park", 1))?;
+    let id = made["id"].as_u64().ok_or_else(|| bad(c, "no car park made"))?;
+    Ok(car_park_answer(&s.model, id))
+}
+
+/// What a car park came to: its result (bays, notes, proposed columns…), its bays' and aisles' ids.
+fn car_park_answer(m: &Model, id: Id) -> Value {
+    let me = m.guid(id).to_string();
+    let (mut bays, mut aisles, mut kept) = (Vec::new(), Vec::new(), Vec::new());
+    for (eid, g, e) in m.elements.with_guids() {
+        let (params, bay) = match e {
+            Element::Component(c) => (&c.params, true),
+            Element::SubDivision(sd) => (&sd.params, false),
+            _ => continue,
+        };
+        if params.get(crate::carpark::BY).and_then(Value::as_str) != Some(me.as_str()) {
+            continue;
+        }
+        match (bay, m.pinned.contains(&g)) {
+            (true, true) => kept.push(eid),
+            (true, false) => bays.push(eid),
+            (false, _) => aisles.push(eid),
+        }
+    }
+    let result = match m.elements.get(id) {
+        Some(Element::Site(st)) => st.props.get("result").cloned().unwrap_or(Value::Null),
+        _ => Value::Null,
+    };
+    json!({"id": id, "result": result, "bays": bays, "kept": kept, "aisles": aisles})
+}
+
+/// A car park laid out again now: what it came to.
+pub(super) fn car_park_run(s: &mut Session, p: &Value) -> R {
+    let c = "car_park_run";
+    keys(c, p, &["id"])?;
+    let id = element_id(c, &s.model, p.get("id").unwrap_or(&Value::Null))?;
+    if !matches!(s.model.elements.get(id), Some(Element::Site(st)) if st.kind == "car_park") {
+        return Err(bad(c, format!("{id} is no car park")));
+    }
+    crate::carpark::run_now(s.model_mut(), id);
+    Ok(car_park_answer(&s.model, id))
 }

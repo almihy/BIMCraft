@@ -5,7 +5,7 @@
 //!
 //! - [`keep`] runs after every command that changes the model ([`crate::engine::Session`]): a site element whose truth
 //!   (its props) changed, and its neighbours (the lanes it meets), are shaped again ([`shapes::normalise`]); a car park is
-//!   laid out again ([`parking::lay_out`]) when it or what it keeps clear of changed; a site element's `phase` and its
+//!   laid out again ([`crate::carpark::keep`]) when it or what it keeps clear of changed; a site element's `phase` and its
 //!   `Phase Created` and `Phase Demolished` are kept in step; a mass with storeys takes its height from them.
 //! - [`transform_props`] moves a site element's truth with the Modify tools (move, copy, rotate, mirror, array).
 //! - [`check_site`] and the other checks are `Model::check`'s rules for them.
@@ -20,7 +20,7 @@ use crate::geom::P2;
 use crate::model::{Changed, Element, Guid, Id, MAX_COORD, MAX_TEXT, Model};
 use crate::phasing;
 use crate::prim::Rgb;
-use crate::site::{Poly, Props, parking, shapes};
+use crate::site::{Poly, Props, shapes};
 
 /// Arqiflow's phases of a site element: what the design makes, what stands and stays, what stands and comes down, what
 /// others will build.
@@ -48,8 +48,8 @@ fn new_phase() -> String {
 }
 
 /// One element of the masterplan (docs/areas/site.md): what it is (`kind`, `use`), what a person drew (`props`, its truth,
-/// mm) and the shape worked out from it (`outline`, `parts`, a car park's `layout`), kept so a reader never works it out
-/// again.
+/// mm) and the shape worked out from it (`outline`, `parts`), kept so a reader never works it out again. A car park lays
+/// out ordinary elements (`carpark.rs`); its result is in its props.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Site {
@@ -74,8 +74,6 @@ pub struct Site {
     pub outline: Vec<Poly>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parts: Vec<shapes::Part>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub layout: Option<parking::Layout>,
     /// What the person should be told of its shape (a pitch outside its type's sizes, a path too short…).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
@@ -592,16 +590,8 @@ pub fn check_site(who: &str, s: &Site) -> Result<(), String> {
             }
         }
     }
-    if let Some(l) = &s.layout {
-        if s.kind != "car_park" {
-            return Err(format!("{who}: only a car park is laid out; a {} has no layout", s.kind.replace('_', " ")));
-        }
-        for piece in &l.pieces {
-            polys_ok(who, "layout", &piece.outline, &mut count)?;
-        }
-        if serde_json::to_string(&l.result).map_or(true, |t| t.len() > 1 << 20) {
-            return Err(format!("{who}: its layout's figures are too big"));
-        }
+    if s.props.get("result").is_some_and(|r| serde_json::to_string(r).map_or(true, |t| t.len() > 1 << 22)) {
+        return Err(format!("{who}: its result is too big"));
     }
     if count > MAX_SHAPE_POINTS {
         return Err(format!("{who}: its shapes hold more than {MAX_SHAPE_POINTS} points; draw it in parts"));
@@ -683,10 +673,12 @@ pub enum Update {
     Mass { id: Id, height: f64, phase: String, params: BTreeMap<String, Value> },
     /// The ground's: planting on it, the georeference from the base points (`ground::keep`).
     Ground(crate::ground::Update),
+    /// A car park laid out again, or one gone (`carpark::keep`): after the shapes, as it reads its area from its props.
+    CarPark(crate::carpark::Update),
 }
 
 /// The commands that shape what they make or change themselves (to answer with it), which [`keep`] then leaves alone.
-pub const SHAPES_ITSELF: &[&str] = &["site", "site_edit"];
+pub const SHAPES_ITSELF: &[&str] = &["site", "site_edit", "car_park", "car_park_run"];
 
 /// After a command: the site elements it changed shaped again, with the lanes they meet; the car parks it touched laid
 /// out again; phases and params in step; masses with storeys their height. Only what changed and its neighbours: what
@@ -695,6 +687,7 @@ pub fn keep(m: &Model, before: &Model) -> Vec<Update> {
     let changed = what_changed(m, before);
     let mut out = plan(m, Some(before), &changed);
     out.extend(crate::ground::keep(m, before).into_iter().map(Update::Ground));
+    out.extend(crate::carpark::keep(m, before).into_iter().map(Update::CarPark));
     out
 }
 
@@ -832,7 +825,7 @@ fn level_of(m: &Model, e: &Element) -> Option<Guid> {
     }
 }
 
-/// What [`keep`] will change, worked out from the model as the command left it.
+/// What [`keep`] will change of the shapes, worked out from the model as the command left it.
 fn plan(m: &Model, before: Option<&Model>, changed: &Changed) -> Vec<Update> {
     let all = matches!(changed, Changed::All);
     let ids: BTreeSet<Id> = match changed {
@@ -893,8 +886,6 @@ fn plan(m: &Model, before: Option<&Model>, changed: &Changed) -> Vec<Update> {
             }
         }
     }
-    let levels: Vec<parking::LevelIn> =
-        m.levels().iter().map(|(_, l)| parking::LevelIn { name: l.name.clone(), elevation: l.elevation }).collect();
     for (level, touched) in dirty {
         let Some(sites) = by_level.get(&level) else { continue };
         let kind_of = |id: Id| sites.iter().find(|(i, _)| *i == id).map(|(_, s)| s.kind.as_str());
@@ -969,73 +960,7 @@ fn plan(m: &Model, before: Option<&Model>, changed: &Changed) -> Vec<Update> {
             });
             let (phase, params) = phase_in_step(&m.phases, &site.phase, &site.params, was);
             (site.phase, site.params) = (phase, params);
-            if site.kind != "car_park" {
-                site.layout = None;
-            }
             now.insert(*id, site);
-        }
-        // Car parks: laid out again when they changed, or what they keep clear of did, near them.
-        let level_name = m.level(level).map(|l| l.name.clone()).unwrap_or_default();
-        let changed_boxes: Vec<(Id, Bx)> = touched.iter().filter_map(|(id, b, _)| b.map(|b| (*id, grow(b, 10_000.0)))).collect();
-        let parks: Vec<Id> = sites
-            .iter()
-            .filter(|(_, s)| s.kind == "car_park")
-            .filter(|(id, s)| {
-                all || write.contains(id)
-                    || site_box(now.get(id).unwrap_or(s)).is_some_and(|b| changed_boxes.iter().any(|(other, c)| other != id && meet(&b, c)))
-            })
-            .map(|(id, _)| *id)
-            .collect();
-        if !parks.is_empty() {
-            // What stands on the level: the other site elements, as they now are, and the masses.
-            let mut obstacles: Vec<(Id, parking::Obstacle)> = sites
-                .iter()
-                .map(|(id, s)| {
-                    let s = now.get(id).unwrap_or(s);
-                    let kind = if s.kind == "lane" { format!("lane/{}", s.use_or_default()) } else { s.kind.clone() };
-                    (*id, parking::Obstacle { kind, level: level_name.clone(), outline: s.outline.clone() })
-                })
-                .collect();
-            // The sub-divisions on the level, by what they are (`lane/road`, `water/pond`…): a road is a way in, water
-            // and the rest are kept clear of, paving and lawns are driven over, as the masterplan's areas they were.
-            obstacles.extend(m.elements.iter().filter_map(|(id, e)| match e {
-                Element::SubDivision(sd) if !sd.role.is_empty() && m.subdivision_level(sd) == Some(level) => Some((
-                    *id,
-                    parking::Obstacle {
-                        kind: sd.role.clone(),
-                        level: level_name.clone(),
-                        outline: crate::ground::grouped(&m.subdivision_region(sd))
-                            .into_iter()
-                            .map(|(outer, holes)| Poly { outer, holes })
-                            .collect(),
-                    },
-                )),
-                _ => None,
-            }));
-            obstacles.extend(masses.iter().filter(|(_, ms)| ms.level == level).map(|(id, ms)| {
-                (
-                    *id,
-                    parking::Obstacle {
-                        kind: "mass".into(),
-                        level: level_name.clone(),
-                        outline: vec![Poly { outer: ms.footprint(), holes: Vec::new() }],
-                    },
-                )
-            }));
-            for id in parks {
-                let Some(s) = now.get(&id).cloned().or_else(|| sites.iter().find(|(i, _)| *i == id).map(|(_, s)| (*s).clone())) else {
-                    continue;
-                };
-                let others: Vec<parking::Obstacle> = obstacles.iter().filter(|(o, _)| *o != id).map(|(_, o)| o.clone()).collect();
-                let mut layout = parking::lay_out(&s.props, &level_name, &levels, &others, &[]);
-                let band = m.guid(id).to_string();
-                for piece in &mut layout.pieces {
-                    piece.props.insert("band".into(), json!(band));
-                }
-                let mut site = s;
-                site.layout = Some(layout);
-                now.insert(id, site);
-            }
         }
         for (id, site) in now {
             if !matches!(m.elements.get(id), Some(Element::Site(old)) if **old == site) {
@@ -1064,6 +989,7 @@ pub fn apply(m: &mut Model, updates: Vec<Update>) {
                 }
             }
             Update::Ground(u) => crate::ground::apply(m, vec![u]),
+            Update::CarPark(u) => crate::carpark::apply(m, vec![u]),
         }
     }
 }
@@ -1163,7 +1089,7 @@ fn rings_of(polys: &[Poly]) -> Vec<Vec<P2>> {
 
 /// What the 3D view builds of a site element: each area a thin slab over its level (lawns 20 mm, paving 40, lanes 50, a
 /// road's carriageway 30 and its pavements and median a kerb's 150 over it, water at its level under the ground), a
-/// tree a trunk and a crown, a hedge its height, a car park its aisles, bays and columns at their levels.
+/// tree a trunk and a crown, a hedge its height (a car park's bays and aisles are elements of their own).
 pub fn solids(m: &Model, s: &Site) -> Vec<Piece3> {
     let z = m.elevation(s.level);
     let mut out: Vec<Piece3> = Vec::new();
@@ -1213,19 +1139,6 @@ pub fn solids(m: &Model, s: &Site) -> Vec<Piece3> {
             }
             for r in rings_of(&crown) {
                 out.push((r, z + h * 0.35, z + h, hex("#5f8f4a")));
-            }
-        }
-        "car_park" => {
-            for piece in s.layout.iter().flat_map(|l| &l.pieces) {
-                let at = m.levels().iter().find(|(_, l)| l.name == piece.level).map_or(z, |(_, l)| l.elevation);
-                let (lo, hi, c) = match piece.kind.as_str() {
-                    "column" => (0.0, num(&s.props, "floor_to_floor").unwrap_or(3500.0).max(1.0), hex("#9aa3b1")),
-                    "stall" => (0.0, 40.0, hex("#a4aab2")),
-                    _ => (0.0, 30.0, hex("#5c6065")),
-                };
-                for r in rings_of(&piece.outline) {
-                    out.push((r, at + lo, at + hi, c));
-                }
             }
         }
         "parking_band" => {

@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use super::fields::*;
 use super::geom::*;
 use super::ring::{attach, lay_ring};
-use super::standards::{Given, Settings, accessible_needed, ramp_length, settings_of};
+use super::standards::{Given, Settings, accessible_needed, settings_of};
 
 // ====================================================================================================== the API
 /// A way in or out: in, out, or both ways.
@@ -65,8 +65,12 @@ pub struct Input {
     pub direction: Option<f64>,
     /// A first look, while the person drags.
     pub quick: bool,
-    /// Below ground: the ramps on the level (one is found when none is given).
+    /// Below ground: the ramps on the level, each kept clear and its foot (its short side further into the plot) a way in.
+    /// None is ever made up: with none, and no `feet`, nothing can be reached.
     pub basement: Option<Vec<Ring>>,
+    /// Below ground: the ways off ramps onto the level given as they are (each the line across the ramp's end, and the way a
+    /// car comes off it): a curved ramp's or one whose outline isn't a rectangle. Its outline is kept clear as `keep_clear`.
+    pub feet: Vec<((Pt, Pt), Pt)>,
     pub settings: Given,
 }
 
@@ -98,8 +102,6 @@ pub struct Entry {
 pub struct Ramp {
     pub poly: Ring,
     pub foot: (Pt, Pt),
-    /// Placed by the solver.
-    pub found: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -453,55 +455,6 @@ fn ramp_foot(ramp: &[Pt], area: &[Pt]) -> ((Pt, Pt), Pt) {
     (foot, [(m[0] - c[0]) / l, (m[1] - c[1]) / l])
 }
 
-/// Below ground with no ramp drawn: a straight two-way ramp against a wall, at a corner, where the most bays are
-/// left (each place tried with a quick look).
-fn find_ramp(input: &Input, s: &Settings) -> Option<Ring> {
-    let l = ramp_length(s);
-    let w = s.drive_aisle;
-    let ground = offset_ring(&ccw(&input.site), s.setback);
-    let n = ground.len();
-    if n == 0 {
-        return None;
-    }
-    let mut best: Option<(Ring, usize)> = None;
-    let mut walls: Vec<usize> = (0..n).collect();
-    walls.sort_by(|&i, &j| {
-        dist(ground[j], ground[(j + 1) % n]).partial_cmp(&dist(ground[i], ground[(i + 1) % n])).unwrap_or(std::cmp::Ordering::Equal)
-    });
-    walls.truncate(3);
-    for i in walls {
-        let a = ground[i];
-        let b = ground[(i + 1) % n];
-        let len = dist(a, b);
-        if len < l + 3.0 {
-            continue;
-        }
-        let t = [(b[0] - a[0]) / len, (b[1] - a[1]) / len];
-        let nn = [-t[1], t[0]];
-        for start in [0.0, len - l] {
-            let p0 = [a[0] + t[0] * start, a[1] + t[1] * start];
-            let poly = vec![
-                p0,
-                [p0[0] + t[0] * l, p0[1] + t[1] * l],
-                [p0[0] + t[0] * l + nn[0] * w, p0[1] + t[1] * l + nn[1] * w],
-                [p0[0] + nn[0] * w, p0[1] + nn[1] * w],
-            ];
-            if !poly.iter().all(|&p| point_in_ring(p, &ground) || dist_to_ring(p, &ground) < 0.01) {
-                continue;
-            }
-            if input.obstacles.iter().any(|o| shared_area(&hull(o), &poly) > 0.01) {
-                continue;
-            }
-            let trial = Input { quick: true, basement: Some(vec![poly.clone()]), ..input.clone() };
-            let bays = solve(&trial).metrics.stalls;
-            if best.as_ref().is_none_or(|(_, b)| bays > *b) {
-                best = Some((poly, bays));
-            }
-        }
-    }
-    best.map(|(p, _)| p)
-}
-
 fn centre(p: &[Pt]) -> Pt {
     let n = p.len().max(1) as f64;
     let mut x = 0.0;
@@ -522,28 +475,6 @@ fn num(v: f64) -> String {
 
 /// The car park laid out (Arqiflow's `solveParking`).
 pub fn solve(input: &Input) -> Solved {
-    if let Some(ramps) = &input.basement
-        && ramps.is_empty()
-    {
-        let s0 = settings_of(&input.settings);
-        if let Some(ramp) = find_ramp(input, &s0) {
-            let mut l = solve(&Input { basement: Some(vec![ramp]), ..input.clone() });
-            for r in &mut l.ramps {
-                r.found = true;
-            }
-            l.notes.insert(
-                    0,
-                    format!(
-                        "No ramp is drawn on this level: one is placed, {} m long and {} m wide ({}% for {} m floor to floor). Draw the ramp where it comes down.",
-                        num(ramp_length(&s0)),
-                        num(s0.drive_aisle),
-                        num(js_round(s0.ramp_slope * 100.0)),
-                        num(s0.floor_to_floor)
-                    ),
-                );
-            return l;
-        }
-    }
     let mut ctx = Ctx::new();
     let mut s = settings_of(&input.settings);
     if input.basement.is_some() && input.settings.column_every.is_none() {
@@ -587,7 +518,10 @@ pub fn solve(input: &Input) -> Solved {
     } else {
         input.access.iter().copied().chain(input.entries.iter().map(|&at| Access { at, kind: AccessKind::Both })).collect()
     };
-    let ramps: Vec<((Pt, Pt), Pt)> = ramp_rings.iter().map(|r| ramp_foot(r, &site)).collect();
+    let mut ramps: Vec<((Pt, Pt), Pt)> = ramp_rings.iter().map(|r| ramp_foot(r, &site)).collect();
+    if basement {
+        ramps.extend(input.feet.iter().copied());
+    }
     for (foot, out) in &ramps {
         streets.push(StreetSide { a: foot.0, b: foot.1, n: *out });
         access.push(Access { at: [(foot.0[0] + foot.1[0]) / 2.0, (foot.0[1] + foot.1[1]) / 2.0], kind: AccessKind::Both });
@@ -742,8 +676,7 @@ pub fn solve(input: &Input) -> Solved {
     trim_drives(&mut plan, &throats);
     if basement && ramps.is_empty() {
         notes.push(
-            "No ramp reaches this level and none fits along a wall: draw the ramp. The layout is shown as if every aisle were reached."
-                .to_string(),
+            "No ramp reaches this level: draw the ramp. The layout is shown as if every aisle were reached.".to_string(),
         );
     } else if basement && throats.is_empty() {
         notes.push("No aisle can be reached straight from the foot of a ramp: move the ramp so its foot faces an aisle. The layout is shown as if every aisle were reached.".to_string());
@@ -919,7 +852,7 @@ pub fn solve(input: &Input) -> Solved {
         usable,
         parts,
         columns,
-        ramps: ramp_rings.iter().zip(ramps.iter()).map(|(poly, r)| Ramp { poly: poly.clone(), foot: r.0, found: false }).collect(),
+        ramps: ramp_rings.iter().zip(ramps.iter()).map(|(poly, r)| Ramp { poly: poly.clone(), foot: r.0 }).collect(),
         direction: js_round(best_deg * 100.0) / 100.0,
         directions,
         ring: plan.ring,

@@ -18,6 +18,8 @@ pub mod standards;
 mod fields;
 mod ring;
 
+pub use fields::StallKind;
+
 #[cfg(test)]
 mod tests;
 
@@ -58,8 +60,7 @@ pub struct Obstacle {
 /// As Arqiflow writes them: an `aisle` with `part` "aisle", "cross", "drive" or "throat" (a way in from the street or
 /// a ramp's foot) and a one-way aisle's `flow` (a unit vector); a `stall` with its `index`, its `mouth` (the middle of
 /// its open side, mm) and `accessible: true` or `ev: true`; an `aisle` with `part` "access" (an accessible bay's
-/// access aisle); a `column`; and an `aisle` with `part` "ramp" for a ramp the layout placed (below ground, none
-/// drawn). Outlines counter-clockwise, to the millimetre.
+/// access aisle); and a `column`. Outlines counter-clockwise, to the millimetre.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Piece {
@@ -103,6 +104,20 @@ const ROADS: [&str; 2] = ["lane", "driveway"];
 /// A lane for people only is no way in for cars.
 const FOOT: [&str; 2] = ["footpath", "promenade"];
 
+/// What a car park is laid out among beyond what its props say (the generator's, `carpark.rs`): what stands on its level
+/// kept clear exactly (walls, columns, shafts, stairs and ramps, openings, the bays the person keeps: no footway round
+/// them, as a car parks beside a column), the ways off the real ramps onto its level below ground, and the firm's sizes
+/// where its props say none. Lengths in mm.
+#[derive(Clone, Debug, Default)]
+pub struct Among {
+    pub keep: Vec<Vec<P2>>,
+    /// Each a ramp's end on the level: the line across it, and the way a car comes off it (unit).
+    pub feet: Vec<((P2, P2), P2)>,
+    /// The firm's sizes, metres: its `aisle` a two-way aisle's, `aisle_one_way` a one-way aisle's.
+    pub defaults: Given,
+    pub aisle_one_way: Option<f64>,
+}
+
 /// The car park whose area and choices are `props` (its `control` ring, mm, and the person's choices), laid out on
 /// `level` among `levels`, keeping clear of `obstacles`, its way in towards the nearest of `streets` (street edges of the
 /// plot, mm).
@@ -120,6 +135,54 @@ pub fn lay_out(props: &Props, level: &str, levels: &[LevelIn], obstacles: &[Obst
     };
     let solved = solve::solve(&input);
     Layout { pieces: pieces_of(&solved, level), result: result_of(&solved, basement) }
+}
+
+/// [`input_of`], and `among` too: what it keeps clear exactly, the ramps' ends below ground, the firm's sizes.
+pub fn input_among(
+    props: &Props,
+    level: &str,
+    levels: &[LevelIn],
+    obstacles: &[Obstacle],
+    streets: &[(P2, P2)],
+    among: &Among,
+) -> Result<(Input, bool), String> {
+    let (mut input, basement) = input_of(props, level, levels, obstacles, streets)?;
+    let b = geom::bounds(&input.site);
+    let ring = |r: &[P2]| -> Option<Ring> {
+        let mut out: Ring = r.iter().filter(|p| finite_pt(p.0, p.1)).map(|p| [r3(p.0 / 1000.0), r3(p.1 / 1000.0)]).collect();
+        if out.len() > 1 && out.first() == out.last() {
+            out.pop();
+        }
+        let q = geom::bounds(&out);
+        (out.len() >= 3 && out.len() <= MAX_POINTS && q.x0 <= b.x1 + 1.0 && b.x0 <= q.x1 + 1.0 && q.y0 <= b.y1 + 1.0 && b.y0 <= q.y1 + 1.0)
+            .then_some(out)
+    };
+    input.keep_clear.extend(among.keep.iter().take(MAX_OBSTACLES).filter_map(|r| ring(r)));
+    if basement {
+        let m = |p: P2| [r3(p.0 / 1000.0), r3(p.1 / 1000.0)];
+        input.feet = among
+            .feet
+            .iter()
+            .filter(|((a, c), o)| finite_pt(a.0, a.1) && finite_pt(c.0, c.1) && o.0.is_finite() && o.1.is_finite())
+            .map(|((a, c), o)| ((m(*a), m(*c)), [o.0, o.1]))
+            .collect();
+    }
+    // The person's sizes first, the firm's where they say none.
+    let d = &among.defaults;
+    let g = &mut input.settings;
+    g.angle = g.angle.or(d.angle);
+    g.one_way = g.one_way.or(d.one_way);
+    g.stall_width = g.stall_width.or(d.stall_width);
+    g.stall_depth = g.stall_depth.or(d.stall_depth);
+    g.accessible_width = g.accessible_width.or(d.accessible_width);
+    // A one-way aisle (angled bays, unless said otherwise) is the firm's one-way width; a two-way, its aisle's.
+    let one_way = g.one_way.unwrap_or(g.angle.unwrap_or(90.0) < 90.0);
+    g.aisle = g.aisle.or(if one_way { among.aisle_one_way } else { d.aisle });
+    g.aisle_two_way = g.aisle_two_way.or(d.aisle);
+    g.ev_share = g.ev_share.or(d.ev_share);
+    g.ramp_slope = g.ramp_slope.or(d.ramp_slope);
+    g.floor_to_floor = g.floor_to_floor.or(d.floor_to_floor);
+    Ok((input, basement))
 }
 
 /// What the car park is laid out from (Arqiflow's `carParkInput`), in metres: the solver's input, and whether it is
@@ -241,6 +304,7 @@ pub fn input_of(
         direction,
         quick: false,
         basement: if basement { Some(ramps) } else { None },
+        feet: Vec::new(),
         settings: given_of(props),
     };
     Ok((input, basement))
@@ -319,8 +383,8 @@ fn r3(v: f64) -> f64 {
     js_round(v * 1000.0) / 1000.0
 }
 
-/// The pieces a layout writes (Arqiflow's `carParkChildren`): its aisles and ways in, its bays, access aisles, columns
-/// and a ramp it found.
+/// The pieces a layout writes (Arqiflow's `carParkChildren`): its aisles and ways in, its bays, access aisles and
+/// columns.
 pub fn pieces_of(l: &solve::Solved, level: &str) -> Vec<Piece> {
     let mut out = Vec::new();
     let mut child = |kind: &str, ring: &[Pt], props: Value| {
@@ -357,9 +421,6 @@ pub fn pieces_of(l: &solve::Solved, level: &str) -> Vec<Piece> {
     }
     for r in &l.columns {
         child("column", r, json!({}));
-    }
-    for r in l.ramps.iter().filter(|r| r.found) {
-        child("aisle", &r.poly, json!({ "part": "ramp" }));
     }
     out
 }

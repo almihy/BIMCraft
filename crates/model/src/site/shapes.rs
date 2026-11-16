@@ -191,6 +191,15 @@ pub const FIGURES: &[(&str, f64, &str)] = &[
     ("parking.bay_depth", 5000.0, "length"),
     ("parking.bay_width", 2500.0, "length"),
     ("parking.level_height", 3200.0, "length"),
+    // The firm's names (Arqiflow's firm rules); the three above are read where a firm gives these none.
+    ("parking.stall.width", 2500.0, "length"),
+    ("parking.stall.depth", 5000.0, "length"),
+    ("parking.aisle.width", 6000.0, "length"),
+    ("parking.aisle.one_way", 3600.0, "length"),
+    ("parking.stall.angle", 90.0, "angle"),
+    ("parking.accessible.width", 3700.0, "length"),
+    ("parking.ev.share", 0.0, "number"),
+    ("parking.ramp.slope", 15.0, "percent"),
     ("area.attic_factor", 0.6, "number"),
 ];
 
@@ -203,6 +212,17 @@ pub fn figure(figures: &Figures, name: &str) -> f64 {
         .filter(|v| v.is_finite() && v.abs() <= poly::MAX_COORD)
         .or_else(|| FIGURES.iter().find(|f| f.0 == name).map(|f| f.1))
         .unwrap_or(0.0)
+}
+
+/// The first of `names` the firm or the project gives (`figures`), else none: a figure read by its new name and its
+/// old ones (`parking.stall.width`, then `parking.bay_width`).
+pub fn figure_of(figures: &Figures, names: &[&str]) -> Option<f64> {
+    names.iter().find_map(|n| figures.0.get(*n).copied().filter(|v| v.is_finite() && v.abs() <= poly::MAX_COORD))
+}
+
+/// A named figure by its new name and its old ones: the firm's or the project's, else Arqiflow's for the first.
+pub fn figure_any(figures: &Figures, names: &[&str]) -> f64 {
+    figure_of(figures, names).unwrap_or_else(|| names.first().map_or(0.0, |n| figure(figures, n)))
 }
 
 /// A pitch's standard size by its use: length × width, the range a person may type (None: fixed), its label and its
@@ -420,6 +440,7 @@ pub fn substring(line: &[Xy], s0: f64, s1: f64) -> Vec<Xy> {
 pub fn fill_defaults(kind_: &str, use_: &str, p: &Props, figures: &Figures) -> Props {
     let mut out = Props::new();
     let f = |n: &str| figure(figures, n);
+    let fa = |n: &[&str]| figure_any(figures, n);
     let mut set = |k: &str, v: Value| {
         if missing(p, k) {
             out.insert(k.into(), v);
@@ -486,14 +507,14 @@ pub fn fill_defaults(kind_: &str, use_: &str, p: &Props, figures: &Figures) -> P
             set("gradient", f("ramp.gradient").into());
         }
         "parking_stall" => {
-            set("width", f("parking.bay_width").into());
-            set("depth", f("parking.bay_depth").into());
+            set("width", fa(&["parking.stall.width", "parking.bay_width"]).into());
+            set("depth", fa(&["parking.stall.depth", "parking.bay_depth"]).into());
             set("angle", 90.0.into());
         }
         "parking_band" => {
-            set("aisle", f("parking.aisle").into());
-            set("bay_depth", f("parking.bay_depth").into());
-            set("bay_width", f("parking.bay_width").into());
+            set("aisle", fa(&["parking.aisle.width", "parking.aisle"]).into());
+            set("bay_depth", fa(&["parking.stall.depth", "parking.bay_depth"]).into());
+            set("bay_width", fa(&["parking.stall.width", "parking.bay_width"]).into());
             set("angle", 90.0.into());
             set("sides", "both".into());
             set("omit", json!([]));
@@ -1248,7 +1269,8 @@ pub fn props_of(kind_: &str) -> serde_json::Map<String, Value> {
                 "stalls": "count", "accessible": "count", "accessible_needed": "count", "ev": "count", "columns": "count",
                 "arrangement": "string", "directions": list(json!("angle")), "basement": "boolean",
                 "area_per_stall": "area", "ways": list(obj(json!({"at": "point", "kind": "string"}))),
-                "notes": list(json!("string")),
+                "notes": list(json!("string")), "kept": "count", "generated": "count", "proposed_columns": "points",
+                "aisles": list(obj(json!({"ring": "points", "flow": "point"}))),
             })),
         }),
         "mass" => json!({
@@ -1313,9 +1335,19 @@ pub fn catalog() -> Value {
             "pitch" => &["pitch.margin"],
             "bike_rack" => &["bike_rack.spaces"],
             "ramp" => &["ramp.width", "ramp.open_length", "ramp.gradient"],
-            "parking_band" => &["parking.aisle", "parking.bay_depth", "parking.bay_width"],
-            "parking_stall" => &["parking.bay_depth", "parking.bay_width"],
-            "car_park" => &["parking.level_height"],
+            "parking_band" => &["parking.aisle.width", "parking.stall.depth", "parking.stall.width"],
+            "parking_stall" => &["parking.stall.depth", "parking.stall.width"],
+            "car_park" => &[
+                "parking.stall.width",
+                "parking.stall.depth",
+                "parking.aisle.width",
+                "parking.aisle.one_way",
+                "parking.stall.angle",
+                "parking.accessible.width",
+                "parking.ev.share",
+                "parking.ramp.slope",
+                "parking.level_height",
+            ],
             "mass" => &[
                 "building.storeys",
                 "building.attic",

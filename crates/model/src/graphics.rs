@@ -23,7 +23,7 @@ use crate::schedule;
 /// The categories a plan, a section or a 3D view draws, and so may hide and override: those of the
 /// model, then those of the annotation. A family component is of its family's category (see [`COMPONENTS`]); `component`, which
 /// names them all, is no row of its own (see [`COMPONENT`]).
-pub const MODEL: [&str; 53] = [
+pub const MODEL: [&str; 54] = [
     "wall",
     "floor",
     "ceiling",
@@ -67,6 +67,7 @@ pub const MODEL: [&str; 53] = [
     "rack",
     "planting",
     "sitecomponent",
+    "parking",
     "stair",
     "ramp",
     "railing",
@@ -86,7 +87,7 @@ pub const MODEL: [&str; 53] = [
 pub const COMPONENT: &str = "component";
 /// The categories of family components, the names a family's category goes by in a file: one row each in Visibility/Graphics
 /// and Object Styles, in [`MODEL`]. A door's or a window's family is placed in a wall as a door or a window, so it has none.
-pub const COMPONENTS: [&str; 20] = [
+pub const COMPONENTS: [&str; 21] = [
     "furniture",
     "casework",
     "plumbing",
@@ -107,6 +108,7 @@ pub const COMPONENTS: [&str; 20] = [
     "rack",
     "planting",
     "sitecomponent",
+    "parking",
 ];
 pub const ANNOTATION: [&str; 10] = ["dimension", "tag", "text", "line", "region", "spot", "grid", "level", "section", "elevation"];
 /// The point clouds, which views hide and override as Revit's Visibility/Graphics does on a tab of their own: not a model
@@ -141,6 +143,9 @@ pub const SUBCATEGORIES: &[Sub] = &[
     Sub { key: "propertyline", parent: "sitecomponent", name: ui_msg!("Property Lines"), off: false },
     Sub { key: "surveypoint", parent: "sitecomponent", name: ui_msg!("Survey Point"), off: true },
     Sub { key: "projectbasepoint", parent: "sitecomponent", name: ui_msg!("Project Base Point"), off: true },
+    // Revit's Parking subcategories: a parking space's stall lines, and its markings (the accessible sign, EV).
+    Sub { key: "parkingstalllines", parent: "parking", name: ui_msg!("Stall Lines"), off: false },
+    Sub { key: "parkingmarkings", parent: "parking", name: ui_msg!("Markings"), off: false },
 ];
 
 /// The subcategory `key` is, if it is one.
@@ -187,6 +192,7 @@ pub fn component_category(category: crate::family::Category) -> Option<&'static 
         C::Rack => "rack",
         C::Planting => "planting",
         C::SiteComponent => "sitecomponent",
+        C::Parking => "parking",
         C::Door | C::Window => return None,
     })
 }

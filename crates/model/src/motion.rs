@@ -100,10 +100,24 @@ pub fn transform(c: &str, m: &Model, mut e: Element, id: Id, mo: &Motion, with: 
             cp.mirrored ^= mo.mirror;
         }
         // A mirror image turns the other way at its landings.
-        Element::Stair(Stair { start, angle, landings, .. }) | Element::Ramp(Ramp { start, angle, landings, .. }) => {
+        Element::Stair(Stair { start, angle, landings, .. }) => {
             (*start, *angle) = turned(f, *start, *angle);
             if mo.mirror {
                 landings.iter_mut().for_each(|l| l.turn = -l.turn + 0.0);
+            }
+        }
+        // A ramp by sketch: its path's points taken, a mirrored arc turning the other way.
+        Element::Ramp(Ramp { start, angle, landings, path, .. }) => {
+            (*start, *angle) = turned(f, *start, *angle);
+            if mo.mirror {
+                landings.iter_mut().for_each(|l| l.turn = -l.turn + 0.0);
+            }
+            for q in path.iter_mut() {
+                let p = f(P2(q[0], q[1]));
+                (q[0], q[1]) = (p.0, p.1);
+                if mo.mirror {
+                    q[2] = -q[2] + 0.0;
+                }
             }
         }
         Element::Railing(rl) => match rl.host {
@@ -185,9 +199,6 @@ pub fn transform(c: &str, m: &Model, mut e: Element, id: Id, mo: &Motion, with: 
             for part in &mut st.parts {
                 part.polys.iter_mut().for_each(poly);
                 part.lines.iter_mut().flatten().for_each(|q| *q = f(*q));
-            }
-            for piece in st.layout.iter_mut().flat_map(|l| l.pieces.iter_mut()) {
-                piece.outline.iter_mut().for_each(poly);
             }
         }
         // A mirror image of an arc bulges the other way.

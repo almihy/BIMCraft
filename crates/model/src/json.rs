@@ -229,6 +229,18 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>, measures: boo
             let base = m.elevation(cp.level) + cp.offset;
             let top = m.component_pieces(cp).iter().map(|p| p.top).fold(base, f64::max);
             extra.insert("height".into(), json!(hundredth(top - base)));
+            // A parking space: its number, its size and its sides' angle (its type's), and what it stands on.
+            if crate::carpark::is_bay(m, cp) {
+                let mark = cp.params.get(m.language.word(crate::family::site::MARK)).cloned().unwrap_or(json!(""));
+                extra.insert("mark".into(), mark);
+                if let Some((w, d, a)) = crate::carpark::bay_size(m, cp) {
+                    extra.insert("width".into(), json!(w));
+                    extra.insert("depth".into(), json!(d));
+                    extra.insert("stall_angle".into(), json!(a));
+                }
+                let (host, _) = crate::carpark::surface_at(m, cp.level, cp.at);
+                extra.insert("host".into(), json!(host.and_then(|g| m.elements.id(g))));
+            }
         }
         Element::Column(col) | Element::StructuralColumn(col) | Element::Footing(col) => {
             let (bottom, top) = m.span(col.level, col.base_offset, col.top_level, col.height);
@@ -263,6 +275,13 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>, measures: boo
             let l = stairs::ramp(m, r);
             extra.insert("height".into(), json!(top - bottom));
             extra.insert("length".into(), json!(hundredth(l.runs.iter().map(|r| r.length).sum())));
+            // Each run's slope as it climbs, percent: a sketched ramp's are worked out from its path and its rise.
+            let grades: Vec<f64> = l
+                .runs
+                .iter()
+                .map(|run| if run.length > 1e-9 { hundredth((run.z.1 - run.z.0) / run.length * 100.0) } else { 0.0 })
+                .collect();
+            extra.insert("run_slopes".into(), json!(grades));
             runs(&mut extra, &l);
         }
         Element::Railing(rl) => {
@@ -322,8 +341,8 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>, measures: boo
             let a: f64 =
                 st.outline.iter().map(|p| geom::area(&p.outer).abs() - p.holes.iter().map(|h| geom::area(h).abs()).sum::<f64>()).sum();
             extra.insert("area_m2".into(), json!(m2(a)));
-            if let Some(l) = &st.layout {
-                extra.insert("stalls".into(), l.result.get("stalls").cloned().unwrap_or(json!(0)));
+            if let Some(n) = st.props.get("result").and_then(|r| r.get("stalls")) {
+                extra.insert("stalls".into(), n.clone());
             }
         }
         Element::PropertyLine(pl) => {

@@ -22,8 +22,23 @@ pub const LENGTH: &str = msg!("Length");
 pub const WIDTH: &str = "Width";
 pub const SPACES: &str = msg!("Spaces");
 pub const RADIUS: &str = msg!("Radius");
+/// Revit's Parking: the engine's parking space, its types and its parameters.
+pub const PARKING_SPACE: &str = msg!("Parking Space");
+pub const STANDARD: &str = msg!("Standard");
+pub const ACCESSIBLE: &str = msg!("Accessible");
+pub const EV: &str = "EV";
+pub const MOTORCYCLE: &str = msg!("Motorcycle");
+pub const DEPTH: &str = "Depth";
+pub const ANGLE: &str = msg!("Angle");
+pub const MARK: &str = "Mark";
+/// Its subcategories, as Revit's Parking has them: the lines of a bay, and what is painted in it.
+pub const STALL_LINES: &str = msg!("Stall Lines");
+pub const MARKINGS: &str = msg!("Markings");
 /// The materials they are made of, made in a project that hasn't them, with these colours.
-pub const MATERIALS: [(&str, [u8; 3]); 3] = [(msg!("Foliage"), [95, 143, 74]), (msg!("Bark"), [107, 79, 58]), ("Metal", [150, 152, 158])];
+pub const MATERIALS: [(&str, [u8; 3]); 4] =
+    [(msg!("Foliage"), [95, 143, 74]), (msg!("Bark"), [107, 79, 58]), ("Metal", [150, 152, 158]), PARKING_PAINT];
+/// What a parking space's pad is painted with.
+pub const PARKING_PAINT: (&str, [u8; 3]) = (msg!("Parking Paint"), [148, 152, 160]);
 
 /// The site's families, by name in `language`.
 pub fn site_library(language: crate::language::Language) -> BTreeMap<String, Family> {
@@ -104,5 +119,51 @@ pub fn site_library(language: crate::language::Language) -> BTreeMap<String, Fam
             "symbols": [{"arc": {"centre": [0, 0], "radius": radius, "from": 0, "to": 360}, "show": {}}]
         }),
     ));
+    families.push((w(PARKING_SPACE), parking_space(language)));
     families.into_iter().filter_map(|(name, v)| serde_json::from_value(v).ok().map(|f| (name, f))).collect()
+}
+
+/// Revit's Parking Space: a bay, its origin in its middle, its x along the aisle and its y into it (its open side, the mouth,
+/// at y = -Depth / 2). Its sides lean at Angle to the aisle (90: square), Width apart square to them, Depth from the aisle to
+/// its back. Types Standard, Accessible (its access aisle within its width), EV and Motorcycle; a Mark each (its number).
+/// In plan: its stall lines (its two sides and its back) and its markings (a wheelchair's wheel and head; EV); in 3D a pad
+/// of paint on the ground.
+fn parking_space(language: crate::language::Language) -> Value {
+    let w = |s: &str| language.word(s).to_string();
+    let (width, depth, angle, mark) = (w(WIDTH), w(DEPTH), w(ANGLE), w(MARK));
+    let (lines, markings) = (w(STALL_LINES), w(MARKINGS));
+    let (standard, accessible, motorcycle) = (w(STANDARD), w(ACCESSIBLE), w(MOTORCYCLE));
+    // Half the bay along the aisle, and how far its back leans past its mouth, each way.
+    let half = format!("{width} / sin({angle}) / 2");
+    let lean = format!("{depth} * cos({angle}) / sin({angle}) / 2");
+    let corner = |x: &str, y: &str| json!([x, y]);
+    let (y0, y1) = (format!("-{depth} / 2"), format!("{depth} / 2"));
+    let ml = corner(&format!("-({half}) - ({lean})"), &y0);
+    let bl = corner(&format!("-({half}) + ({lean})"), &y1);
+    let br = corner(&format!("({half}) + ({lean})"), &y1);
+    let mr = corner(&format!("({half}) - ({lean})"), &y0);
+    let paint = w(PARKING_PAINT.0);
+    json!({
+        "category": "parking",
+        "parameters": [
+            {"name": width, "value": 2500.0, "group": "Dimensions"},
+            {"name": depth, "value": 5000.0, "group": "Dimensions"},
+            {"name": angle, "kind": "angle", "value": 90.0, "group": "Dimensions"},
+            {"name": mark, "kind": "text", "instance": true, "value": "", "group": "Identity Data"}
+        ],
+        "types": {
+            &standard: {},
+            &accessible: {&width: 3700.0},
+            EV: {},
+            &motorcycle: {&width: 1000.0, &depth: 2200.0}
+        },
+        "subcategories": [{"name": lines}, {"name": markings}],
+        "forms": [{"profile": [ml, mr, br, bl], "from": 0, "to": 5, "material": paint, "show": {"plan": false}}],
+        "symbols": [
+            {"line": [ml, bl, br, mr], "show": {}, "subcategory": lines},
+            {"arc": {"centre": [0, 0], "radius": 500, "from": 0, "to": 360}, "show": {}, "subcategory": markings, "types": [accessible]},
+            {"dot": {"centre": [0, 800], "radius": 150}, "show": {}, "subcategory": markings, "types": [accessible]},
+            {"text": {"at": [0, -250], "height": 500, "value": "EV", "align": "center"}, "show": {}, "subcategory": markings, "types": [EV]}
+        ]
+    })
 }
