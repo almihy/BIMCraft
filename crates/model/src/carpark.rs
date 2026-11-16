@@ -160,8 +160,7 @@ pub fn surface_at(m: &Model, level: Guid, at: P2) -> (Option<Guid>, f64) {
 /// The rings in plan of a stair's or a ramp's runs and landings whose heights reach between `lo` and `hi`.
 fn flight_rings(m: &Model, e: &Element, lo: f64, hi: f64) -> Vec<Vec<P2>> {
     let Some(l) = crate::stairs::layout(m, e) else { return Vec::new() };
-    let mut out: Vec<Vec<P2>> =
-        l.runs.iter().filter(|r| r.z.0.min(r.z.1) < hi && r.z.0.max(r.z.1) > lo).map(|r| r.ring(l.width)).collect();
+    let mut out: Vec<Vec<P2>> = l.runs.iter().filter(|r| r.z.0.min(r.z.1) < hi && r.z.0.max(r.z.1) > lo).map(|r| r.ring(l.width)).collect();
     out.extend(l.pads.iter().filter(|p| p.z > lo && p.z < hi).map(|p| p.ring.clone()));
     out
 }
@@ -256,7 +255,8 @@ fn read(m: &Model, park: Id, s: &crate::masterplan::Site) -> Read {
     let near = |ring: &[P2]| ring.iter().any(|q| q.0 >= reach[0] && q.0 <= reach[2] && q.1 >= reach[1] && q.1 <= reach[3]);
     // What a car meets standing on the level: between its floor and its headroom.
     let stands = |lo: f64, hi: f64| lo < e + HEADROOM && hi > e + 10.0;
-    let mut out = Read { obstacles: Vec::new(), among: Among::default(), streets: Vec::new(), replace: Vec::new(), kept: Vec::new(), columns: 0 };
+    let mut out =
+        Read { obstacles: Vec::new(), among: Among::default(), streets: Vec::new(), replace: Vec::new(), kept: Vec::new(), columns: 0 };
     let keep = |ring: Vec<P2>, out: &mut Read| {
         if ring.len() >= 3 && near(&ring) {
             out.among.keep.push(ring);
@@ -385,16 +385,29 @@ fn read(m: &Model, park: Id, s: &crate::masterplan::Site) -> Read {
 // ====================================================================== running it
 /// The type of family `family` a bay of `base` (Standard, Accessible, EV) `w` by `d` at `a` degrees is: `base` when its
 /// sizes are those, else one named for them (made with them when the family hasn't it).
-fn type_for(f: &crate::family::Family, language: crate::language::Language, base: &str, w: f64, d: f64, a: f64) -> (String, Option<BTreeMap<String, Value>>) {
+fn type_for(
+    f: &crate::family::Family,
+    language: crate::language::Language,
+    base: &str,
+    w: f64,
+    d: f64,
+    a: f64,
+) -> (String, Option<BTreeMap<String, Value>>) {
     use crate::family::site as fam;
     let word = |s: &str| language.word(s).to_string();
     let base = word(base);
     let v = |t: &str, name: &str| -> Option<f64> {
-        f.types.get(t).and_then(|t| t.get(name)).and_then(Value::as_f64).or_else(|| f.parameters.iter().find(|p| p.name == name).and_then(|p| p.value.as_f64()))
+        f.types
+            .get(t)
+            .and_then(|t| t.get(name))
+            .and_then(Value::as_f64)
+            .or_else(|| f.parameters.iter().find(|p| p.name == name).and_then(|p| p.value.as_f64()))
     };
     let (wn, dn, an) = (word(fam::WIDTH), word(fam::DEPTH), word(fam::ANGLE));
     let same = |t: &str| {
-        v(t, &wn).is_some_and(|x| (x - w).abs() < 1.0) && v(t, &dn).is_some_and(|x| (x - d).abs() < 1.0) && (v(t, &an).unwrap_or(90.0) - a).abs() < 0.01
+        v(t, &wn).is_some_and(|x| (x - w).abs() < 1.0)
+            && v(t, &dn).is_some_and(|x| (x - d).abs() < 1.0)
+            && (v(t, &an).unwrap_or(90.0) - a).abs() < 0.01
     };
     if f.types.contains_key(&base) && same(&base) {
         return (base, None);
@@ -592,10 +605,11 @@ pub fn run(m: &Model, park: Id) -> Option<Laid> {
     if let Some(l) = &solved
         && !basement
     {
-        let rings: Vec<Vec<[f64; 2]>> =
-            l.aisles.iter().map(|a| a.poly.iter().map(|q| [q[0] * 1000.0, q[1] * 1000.0]).collect()).collect();
+        let rings: Vec<Vec<[f64; 2]>> = l.aisles.iter().map(|a| a.poly.iter().map(|q| [q[0] * 1000.0, q[1] * 1000.0]).collect()).collect();
         let joined = shapes::poly::union(&rings);
-        for (outer, holes) in crate::ground::grouped(&joined.iter().map(|r| r.iter().map(|q| P2(q[0].round(), q[1].round())).collect()).collect::<Vec<_>>()) {
+        for (outer, holes) in
+            crate::ground::grouped(&joined.iter().map(|r| r.iter().map(|q| P2(q[0].round(), q[1].round())).collect()).collect::<Vec<_>>())
+        {
             if outer.len() < 3 || geom::area(&outer).abs() < 1e4 {
                 continue;
             }
@@ -640,7 +654,9 @@ fn plan_box(m: &Model, e: &Element) -> Option<[f64; 4]> {
         Element::Mass(ms) => ms.boundary.clone(),
         Element::SubDivision(sd) => sd.boundary.clone(),
         Element::Site(s) => s.outline.iter().flat_map(|p| p.outer.clone()).collect(),
-        Element::Stair(_) | Element::Ramp(_) => crate::stairs::layout(m, e).map(|l| l.runs.iter().flat_map(|r| r.ring(l.width)).collect())?,
+        Element::Stair(_) | Element::Ramp(_) => {
+            crate::stairs::layout(m, e).map(|l| l.runs.iter().flat_map(|r| r.ring(l.width)).collect())?
+        }
         _ => return None,
     };
     let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
@@ -763,27 +779,22 @@ pub fn keep(m: &Model, before: &Model) -> Vec<Update> {
             removed.entry(by.to_string()).or_default().push(c.at);
         }
     }
-    let levels_changed =
-        changed.iter().any(|id| [m, before].iter().any(|x| matches!(x.elements.get(*id), Some(Element::Level(_)))));
+    let levels_changed = changed.iter().any(|id| [m, before].iter().any(|x| matches!(x.elements.get(*id), Some(Element::Level(_)))));
     for (park, g) in parks {
         let Some(Element::Site(s)) = m.elements.get(park) else { continue };
         let mine = key(g);
         let gone_bays = removed.get(&mine);
-        let run_it = all
-            || levels_changed
-            || gone_bays.is_some()
-            || changed.contains(&park)
-            || {
-                let area = area_of(s);
-                let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
-                for q in &area {
-                    b = [b[0].min(q.0), b[1].min(q.1), b[2].max(q.0), b[3].max(q.1)];
-                }
-                let reach = [b[0] - NEAR, b[1] - NEAR, b[2] + NEAR, b[3] + NEAR];
-                changed.iter().any(|id| {
-                    [m.elements.get(*id), before.elements.get(*id)].into_iter().flatten().any(|e| touches(m, e, s.level, reach))
-                })
-            };
+        let run_it = all || levels_changed || gone_bays.is_some() || changed.contains(&park) || {
+            let area = area_of(s);
+            let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+            for q in &area {
+                b = [b[0].min(q.0), b[1].min(q.1), b[2].max(q.0), b[3].max(q.1)];
+            }
+            let reach = [b[0] - NEAR, b[1] - NEAR, b[2] + NEAR, b[3] + NEAR];
+            changed
+                .iter()
+                .any(|id| [m.elements.get(*id), before.elements.get(*id)].into_iter().flatten().any(|e| touches(m, e, s.level, reach)))
+        };
         if !run_it {
             continue;
         }
@@ -881,7 +892,8 @@ pub fn run_now(m: &mut Model, park: Id) -> Option<Value> {
 
 /// Every car park laid out again (a file from before, read).
 pub fn run_all(m: &mut Model) {
-    let parks: Vec<Id> = m.elements.iter().filter(|(_, e)| matches!(e, Element::Site(s) if s.kind == "car_park")).map(|(id, _)| *id).collect();
+    let parks: Vec<Id> =
+        m.elements.iter().filter(|(_, e)| matches!(e, Element::Site(s) if s.kind == "car_park")).map(|(id, _)| *id).collect();
     for park in parks {
         run_now(m, park);
     }
@@ -889,11 +901,8 @@ pub fn run_all(m: &mut Model) {
 
 // ====================================================================== a file from before
 /// The masterplan kinds `site` no longer takes since ramps and parking are Revit's, and what makes each now.
-pub const CONVERTED: &[(&str, &str)] = &[
-    ("ramp", "ramp (its `path`)"),
-    ("parking_stall", "parking_component"),
-    ("parking_band", "car_park, or parking_component"),
-];
+pub const CONVERTED: &[(&str, &str)] =
+    &[("ramp", "ramp (its `path`)"), ("parking_stall", "parking_component"), ("parking_band", "car_park, or parking_component")];
 
 /// The masterplan's ramps, parking stalls and parking bands of a file from before (format 26 or older) made what Revit
 /// has (docs/parking-ramps-plan.md): each ramp an `Element::Ramp` along its path from its foot, each stall and each of a
@@ -952,20 +961,23 @@ fn ramp_of(m: &Model, s: &crate::masterplan::Site) -> Option<Element> {
     }
     // Reversed: each piece's bulge on the point it now starts from, turning the other way.
     let n = down.len();
-    let path: Vec<[f64; 3]> =
-        (0..n).map(|i| {
+    let path: Vec<[f64; 3]> = (0..n)
+        .map(|i| {
             let q = down[n - 1 - i];
             let bulge = if i + 1 < n { -down[n - 2 - i][2] + 0.0 } else { 0.0 };
             [q[0], q[1], bulge]
-        }).collect();
+        })
+        .collect();
     let figures = crate::masterplan::figures(m);
     let num = |k: &str| s.props.get(k).and_then(Value::as_f64).filter(|v| v.is_finite() && *v > 0.0);
     let width = num("width").unwrap_or_else(|| shapes::figure(&figures, "ramp.width"));
     let gradient = num("gradient").unwrap_or_else(|| shapes::figure(&figures, "ramp.gradient")).clamp(1.0, 50.0);
     let top = m.elevation(s.level);
-    let named = s.props.get("to_level").and_then(Value::as_str).and_then(|name| {
-        m.levels().into_iter().find(|(_, l)| l.name == name && l.elevation < top - 1.0).map(|(id, _)| m.guid(id))
-    });
+    let named = s
+        .props
+        .get("to_level")
+        .and_then(Value::as_str)
+        .and_then(|name| m.levels().into_iter().find(|(_, l)| l.name == name && l.elevation < top - 1.0).map(|(id, _)| m.guid(id)));
     let below = named.or_else(|| m.levels().into_iter().rev().find(|(_, l)| l.elevation < top - 1.0).map(|(id, _)| m.guid(id)));
     let length: f64 = crate::stairs::path_pieces(&path)
         .iter()
@@ -1016,7 +1028,16 @@ fn bay_type(m: &mut Model, base: &str, w: f64, d: f64, a: f64) -> Option<(String
     Some((family, name))
 }
 
-fn bay_element(m: &mut Model, s: &crate::masterplan::Site, base: &str, at: P2, angle: f64, mirrored: bool, size: (f64, f64, f64), mark: Option<String>) -> Option<Element> {
+fn bay_element(
+    m: &mut Model,
+    s: &crate::masterplan::Site,
+    base: &str,
+    at: P2,
+    angle: f64,
+    mirrored: bool,
+    size: (f64, f64, f64),
+    mark: Option<String>,
+) -> Option<Element> {
     let (family, type_name) = bay_type(m, base, size.0, size.1, size.2)?;
     let (_, offset) = surface_at(m, s.level, at);
     let mut params = s.params.clone();

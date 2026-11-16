@@ -209,8 +209,8 @@ fn the_ramp_tool_sketches_a_run_with_lines_and_arcs() {
     h.state_mut().set_tool(crate::Tool::Ramp(Vec::new()));
     h.run();
     press(&mut h, "Sketch Run");
-    click(&mut h, P2(0.0, 0.0));
-    click(&mut h, P2(30000.0, 0.0));
+    click(&mut h, P2(-4000.0, 3000.0));
+    click(&mut h, P2(4000.0, 3000.0));
     press(&mut h, "Finish Edit Mode");
     let ramp = h.state().session.model.elements.values().find_map(|e| match e {
         Element::Ramp(r) => Some(r.clone()),

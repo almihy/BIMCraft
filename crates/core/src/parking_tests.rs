@@ -40,7 +40,9 @@ fn bays(s: &Session, park: Id) -> Vec<(Id, crate::model::Component)> {
         .elements
         .iter()
         .filter_map(|(id, e)| match e {
-            Element::Component(c) if c.params.get(crate::carpark::BY).and_then(Value::as_str) == Some(me.as_str()) => Some((*id, c.clone())),
+            Element::Component(c) if c.params.get(crate::carpark::BY).and_then(Value::as_str) == Some(me.as_str()) => {
+                Some((*id, c.clone()))
+            }
             _ => None,
         })
         .collect()
@@ -99,7 +101,8 @@ fn a_ramp_by_path_climbs_along_lines_and_arcs_its_rise_shared_by_slope() {
 fn a_ramp_shows_on_every_level_it_crosses_dashed_over_the_cut_plane_and_a_stair_too() {
     let (mut s, b1, l1, l2) = with_basement();
     // From B1 straight up to Level 2: through Level 1.
-    let ramp = id(&run(&mut s, "ramp", json!({"start": [0, 0], "angle": 0, "level": "B1", "top_level": "Level 2", "width": 3000, "slope": 15})));
+    let ramp =
+        id(&run(&mut s, "ramp", json!({"start": [0, 0], "angle": 0, "level": "B1", "top_level": "Level 2", "width": 3000, "slope": 15})));
     let stair = id(&run(&mut s, "stair", json!({"start": [0, 20000], "angle": 0, "level": "B1", "top_level": "Level 2"})));
     for level in [b1, l1, l2] {
         let owners = drawn(&s, level);
@@ -150,10 +153,15 @@ fn an_old_masterplan_ramp_and_parking_become_a_ramp_and_parking_spaces() {
         (st.outline, st.parts) = (shaped.outline, shaped.parts);
         Element::Site(Box::new(st))
     };
-    let ramp = m.insert(site("ramp", "cars", json!({"path": [[0, 50000], [30000, 50000]], "width": 3500, "gradient": 12, "to_level": "B1"})));
+    let ramp =
+        m.insert(site("ramp", "cars", json!({"path": [[0, 50000], [30000, 50000]], "width": 3500, "gradient": 12, "to_level": "B1"})));
     let stall = m.insert(site("parking_stall", "accessible", json!({"at": [5000, 30000], "angle": 90})));
     let band = m.insert(site("parking_band", "parking", json!({"path": [[0, 10000], [20000, 10000]], "sides": "both"})));
-    let park = m.insert(site("car_park", "parking", json!({"control": [[40000, 0], [70000, 0], [70000, 30000], [40000, 30000]], "removed": [[41250, 2500]]})));
+    let park = m.insert(site(
+        "car_park",
+        "parking",
+        json!({"control": [[40000, 0], [70000, 0], [70000, 30000], [40000, 30000]], "removed": [[41250, 2500]]}),
+    ));
     let mut v: Value = serde_json::from_str(&m.to_json().unwrap()).unwrap();
     v["format"] = json!(26);
     // A car park of 26 kept its layout in a blob.
@@ -171,7 +179,11 @@ fn an_old_masterplan_ramp_and_parking_become_a_ramp_and_parking_spaces() {
     let Some(Element::Component(c)) = m.elements.get(stall) else { panic!() };
     assert!(c.type_name.starts_with("Accessible"), "{}", c.type_name);
     assert_eq!(m.families[&c.family].category, crate::family::Category::Parking);
-    let band_bays = m.elements.values().filter(|e| matches!(e, Element::Component(c) if crate::carpark::is_bay(&m, c) && c.at.1 != 30000.0 && c.at.0 < 30000.0)).count();
+    let band_bays = m
+        .elements
+        .values()
+        .filter(|e| matches!(e, Element::Component(c) if crate::carpark::is_bay(&m, c) && c.at.1 != 30000.0 && c.at.0 < 30000.0))
+        .count();
     assert!(band_bays >= 10, "{band_bays} of the band's bays");
     assert!(m.elements.get(band).is_some_and(|e| matches!(e, Element::Component(_) | Element::SubDivision(_))));
     assert!(m.elements.values().any(|e| matches!(e, Element::SubDivision(sd) if sd.role == crate::carpark::AISLE_ROLE)));
@@ -203,7 +215,11 @@ fn an_old_masterplan_ramp_and_parking_become_a_ramp_and_parking_spaces() {
 #[test]
 fn a_parking_component_stands_on_the_ground_or_the_floor_with_its_type_and_mark() {
     let (mut s, _, _, _) = with_basement();
-    run(&mut s, "toposolid", json!({"boundary": [[0, 0], [20000, 0], [20000, 20000], [0, 20000]], "points": [[0, 0, 0], [20000, 0, 2000], [20000, 20000, 2000], [0, 20000, 0]], "level": "Level 1"}));
+    run(
+        &mut s,
+        "toposolid",
+        json!({"boundary": [[0, 0], [20000, 0], [20000, 20000], [0, 20000]], "points": [[0, 0, 0], [20000, 0, 2000], [20000, 20000, 2000], [0, 20000, 0]], "level": "Level 1"}),
+    );
     let r = run(&mut s, "parking_component", json!({"at": [10000, 10000], "type": "EV", "mark": "12", "angle": 90}));
     let bay = id(&r);
     assert!((r["offset"].as_f64().unwrap() - 1000.0).abs() < 1.0, "on the ground: {r}");
@@ -265,8 +281,13 @@ fn a_car_park_lays_out_parking_spaces_and_drive_aisles_and_keeps_clear_of_the_bu
     // Numbered from 1, Standard by the firm's default sizes.
     assert!(laid.iter().any(|(_, c)| c.params.get("Mark") == Some(&json!("1"))));
     // The standard's sizes (Saudi Arabia's, 2.8 by 5.5 m) where the firm gives none: a type made for them.
-    assert!(laid.iter().all(|(_, c)| c.type_name.starts_with("Standard") || c.type_name.starts_with("Accessible")), "{:?}", laid[0].1.type_name);
-    let aisles = s.model.elements.values().filter(|e| matches!(e, Element::SubDivision(sd) if sd.role == crate::carpark::AISLE_ROLE)).count();
+    assert!(
+        laid.iter().all(|(_, c)| c.type_name.starts_with("Standard") || c.type_name.starts_with("Accessible")),
+        "{:?}",
+        laid[0].1.type_name
+    );
+    let aisles =
+        s.model.elements.values().filter(|e| matches!(e, Element::SubDivision(sd) if sd.role == crate::carpark::AISLE_ROLE)).count();
     assert!(aisles > 0);
     // A wall and a column across it: it lays out again, keeping clear of both.
     run(&mut s, "wall", json!({"points": [[30000, 5000], [30000, 35000]], "level": "Level 1"}));
@@ -372,8 +393,13 @@ fn the_survey_point_and_project_base_point_cant_be_deleted() {
     let mut s = Session::new();
     let r = run(&mut s, "base_point", json!({"which": "survey", "east": 1000}));
     let _ = r;
-    let points: Vec<Id> =
-        s.model.elements.iter().filter(|(_, e)| matches!(e, Element::SurveyPoint(_) | Element::ProjectBasePoint(_))).map(|(id, _)| *id).collect();
+    let points: Vec<Id> = s
+        .model
+        .elements
+        .iter()
+        .filter(|(_, e)| matches!(e, Element::SurveyPoint(_) | Element::ProjectBasePoint(_)))
+        .map(|(id, _)| *id)
+        .collect();
     assert!(!points.is_empty());
     for p in points {
         let e = s.execute("delete", &json!({"ids": [p]})).unwrap_err();
@@ -387,7 +413,11 @@ fn the_survey_point_and_project_base_point_cant_be_deleted() {
 #[test]
 fn the_sites_elements_take_project_parameters_as_revit_allows() {
     let mut s = Session::new();
-    run(&mut s, "parameter", json!({"name": "Plot Source", "kind": "text", "categories": ["toposolid", "propertyline", "subdivision", "surveypoint", "projectbasepoint"]}));
+    run(
+        &mut s,
+        "parameter",
+        json!({"name": "Plot Source", "kind": "text", "categories": ["toposolid", "propertyline", "subdivision", "surveypoint", "projectbasepoint"]}),
+    );
     let t = id(&run(&mut s, "toposolid", json!({"boundary": [[0, 0], [20000, 0], [20000, 20000], [0, 20000]]})));
     let pl = id(&run(&mut s, "property_line", json!({"points": [[0, 0], [10000, 0], [10000, 10000], [0, 10000]]})));
     let sd = id(&run(&mut s, "sub_division", json!({"boundary": [[1000, 1000], [5000, 1000], [5000, 5000]]})));
@@ -402,7 +432,11 @@ fn the_sites_elements_take_project_parameters_as_revit_allows() {
 #[test]
 fn a_toposolids_contours_are_set_and_turned_off_after_it_is_made() {
     let mut s = Session::new();
-    let t = id(&run(&mut s, "toposolid", json!({"boundary": [[0, 0], [20000, 0], [20000, 20000], [0, 20000]], "points": [[0, 0, 0], [20000, 0, 3000], [20000, 20000, 3000], [0, 20000, 0]]})));
+    let t = id(&run(
+        &mut s,
+        "toposolid",
+        json!({"boundary": [[0, 0], [20000, 0], [20000, 20000], [0, 20000]], "points": [[0, 0, 0], [20000, 0, 3000], [20000, 20000, 3000], [0, 20000, 0]]}),
+    ));
     let l1 = level_named(&s, "Level 1");
     let lines = |s: &Session| drawn(s, l1).iter().filter(|o| **o == Some(t)).count();
     run(&mut s, "modify", json!({"id": t, "contours": 500}));

@@ -259,6 +259,7 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
                         pattern_origin: Default::default(),
                         pattern_angle: 0.0,
                         contours: 0.0,
+                        contours_hidden: false,
                         excavated_by: Vec::new(),
                         graded_from: None,
                     };
