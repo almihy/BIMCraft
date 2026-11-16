@@ -469,6 +469,8 @@ fn row_along(
 pub fn attach(outer: &[Pt], holes: &[Ring], within: f64) -> (Region, Vec<Region>) {
     let mut grounds: Vec<Ring> = vec![outer.to_vec()];
     let mut inner: Vec<Ring> = Vec::new();
+    // The holes cut out of the ground (kept, should no ground be left of any use).
+    let mut cut: Vec<Ring> = Vec::new();
     for given in holes {
         let mut h = given.clone();
         let at = grounds
@@ -508,6 +510,7 @@ pub fn attach(outer: &[Pt], holes: &[Ring], within: f64) -> (Region, Vec<Region>
             Some(left) if !left.is_empty() => {
                 let parts: Vec<Ring> = left.iter().map(|l| offset_ring(&simplify(l, 0.75), 0.0)).filter(|l| l.len() >= 3).collect();
                 grounds.splice(at..at + 1, parts);
+                cut.push(given.clone());
             }
             _ => inner.push(given.clone()),
         }
@@ -515,7 +518,9 @@ pub fn attach(outer: &[Pt], holes: &[Ring], within: f64) -> (Region, Vec<Region>
     grounds.retain(|g| ring_area(&ccw(g)) > 20.0);
     grounds.sort_by(|a, b| ring_area(&ccw(b)).partial_cmp(&ring_area(&ccw(a))).unwrap_or(std::cmp::Ordering::Equal));
     if grounds.is_empty() {
+        // Nothing of use left: the whole outline, with every hole in it (never the outline bare, as if nothing stood on it).
         grounds = vec![outer.to_vec()];
+        inner.append(&mut cut);
     }
     let parts: Vec<Region> = grounds
         .into_iter()

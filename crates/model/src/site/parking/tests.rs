@@ -1496,3 +1496,31 @@ fn one_way_aisles_always_lead_on() {
     }
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
+
+/// What can't hold a car park lays out none and never panics: a tiny basement, one filled by a core, one that is all
+/// columns, a sliver, a ramp's foot facing out of the area.
+#[test]
+fn degenerate_basements_never_panic() {
+    let posts: Vec<Ring> = (0..40).flat_map(|i| (0..30).map(move |j| bx(i as f64 * 1.5, j as f64 * 1.5, i as f64 * 1.5 + 0.6, j as f64 * 1.5 + 0.6))).collect();
+    let cases = [
+        Input { site: bx(0.0, 0.0, 5.0, 5.0), basement: Some(Vec::new()), feet: vec![(([0.1, 1.0], [0.1, 4.0]), [1.0, 0.0])], ..Input::default() },
+        Input { site: bx(0.0, 0.0, 40.0, 30.0), basement: Some(Vec::new()), keep_clear: vec![bx(0.5, 0.5, 39.5, 29.5)], ..Input::default() },
+        Input { site: bx(0.0, 0.0, 60.0, 45.0), basement: Some(Vec::new()), keep_clear: posts, ..Input::default() },
+        Input { site: bx(0.0, 0.0, 200.0, 4.0), basement: Some(Vec::new()), ..Input::default() },
+        Input { site: bx(0.0, 0.0, 60.0, 40.0), basement: Some(Vec::new()), feet: vec![(([0.1, 10.0], [0.1, 16.0]), [-1.0, 0.0])], ..Input::default() },
+        Input { site: vec![[0.0, 0.0], [60.0, 0.0], [60.0, 40.0], [30.0, 0.1], [0.0, 40.0]], basement: Some(Vec::new()), ..Input::default() },
+    ];
+    for (i, input) in cases.iter().enumerate() {
+        if std::env::var("PARKING_ONE").is_ok_and(|n| n != i.to_string()) {
+            continue;
+        }
+        let l = solve(input);
+        if std::env::var_os("PARKING_DEBUG").is_some() {
+            eprintln!("case {i}: parts {:?}", l.parts.iter().map(|p| (p.outer.len(), p.holes.len())).collect::<Vec<_>>());
+        }
+        assert_eq!(faults(&l, &input.keep_clear), Vec::<String>::new(), "case {i}");
+        if i < 4 {
+            assert!(l.stalls.len() <= 2, "case {i}: {} bays", l.stalls.len());
+        }
+    }
+}
