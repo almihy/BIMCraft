@@ -4642,7 +4642,7 @@ fn door_leaves(d: &mut Drawing, axis: &Axis, way: &OpeningWay, op: Operation, th
 }
 
 /// The heights a stair or a ramp from `base` up to `top` shows between in the plan of `level`, range `r`, as Revit draws
-/// them: from the level below (or its base) up to the view range's top, solid to the cut plane and dashed over it (the
+/// them: from the level below (or its base, and only when it reaches this level) up to the view range's top, solid to the cut plane and dashed over it (the
 /// `<Above>` lines). None where none of it is in that.
 #[derive(Clone, Copy, Debug)]
 struct Flight {
@@ -4657,7 +4657,9 @@ struct Flight {
 fn flight(m: &Model, level: Guid, r: &PlanRange, base: f64, top: f64) -> Option<Flight> {
     let floor = m.elevation(level);
     let below = m.levels().into_iter().rev().find(|(_, l)| l.elevation < floor - TOL).map(|(_, l)| l.elevation);
-    let lo = below.map_or(base, |b| base.max(b));
+    // What comes up from the level below shows when it reaches this one (Revit's stair arriving, drawn DN); what stops
+    // under it is below the view's range.
+    let lo = if top >= floor - TOL { below.map_or(base, |b| base.max(b)) } else { base.max(floor) };
     let hi = top.min(r.top.max(r.cut));
     (lo < hi - TOL && base < hi && top > lo).then_some(Flight { lo, hi, cut: r.cut, floor })
 }

@@ -380,7 +380,8 @@ fn an_old_masterplan_is_converted_on_load() {
     // Where they came from is kept.
     assert!(m.elements.values().any(|e| matches!(e, Element::SubDivision(sd) if sd.params.get("source") == Some(&json!("osm")) && sd.params.get("ref") == Some(&json!("way/1")))));
     // The tree, the hedge's two pieces, the bike rack and the play equipment are family components on the ground.
-    let comps: Vec<&crate::model::Component> = m.elements.values().filter_map(|e| if let Element::Component(c) = e { Some(c) } else { None }).collect();
+    let comps: Vec<&crate::model::Component> =
+        m.elements.values().filter_map(|e| if let Element::Component(c) = e { Some(c) } else { None }).filter(|c| !crate::carpark::is_bay(&m, c)).collect();
     assert_eq!(comps.len(), 5, "{comps:?}");
     let tree = comps.iter().find(|c| c.family == "Tree").unwrap();
     assert_eq!(tree.params.get("Crown Diameter"), Some(&json!(5000.0)));

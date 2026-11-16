@@ -12,7 +12,7 @@ fn model_categories_hold_each_family_category_and_no_component_row() {
     assert!(!MODEL.contains(&COMPONENT), "`component` is the name of them all, not a row of its own");
     assert!(crate::graphics::drawn(COMPONENT) && COMPONENTS.iter().all(|c| crate::graphics::drawn(c)));
     // The keys are the names a family's category goes by in a file, and every category a component may be of has one.
-    for c in crate::family::Category::PLACED.into_iter().chain([crate::family::Category::Casework, crate::family::Category::Planting, crate::family::Category::SiteComponent]) {
+    for c in crate::family::Category::PLACED.into_iter().chain([crate::family::Category::Casework, crate::family::Category::Planting, crate::family::Category::SiteComponent, crate::family::Category::Parking]) {
         let named = serde_json::to_value(c).unwrap();
         let key = crate::graphics::component_category(c).unwrap_or_else(|| panic!("{named} has no row"));
         assert_eq!(named, json!(key));
@@ -21,7 +21,7 @@ fn model_categories_hold_each_family_category_and_no_component_row() {
     // A door's or a window's family is placed in a wall, as a door or a window: it is no component.
     assert!(crate::graphics::component_category(crate::family::Category::Door).is_none());
     assert!(crate::graphics::component_category(crate::family::Category::Window).is_none());
-    assert_eq!(COMPONENTS.len(), 20);
+    assert_eq!(COMPONENTS.len(), 21);
 }
 
 #[test]
