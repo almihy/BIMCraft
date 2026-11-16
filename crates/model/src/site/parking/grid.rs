@@ -21,6 +21,13 @@ const PIECE_COST: f64 = 2.0;
 const FOOT_REACH: f64 = 60.0;
 /// A hole no wider or deeper than this (m) is a column.
 const POST: f64 = 2.0;
+/// How far an aisle may fall short of a ramp's foot across it and still take its cars, m (the foot's kerbs, a wall's face).
+const FOOT_SLACK: f64 = 0.5;
+
+/// Whether an aisle from `y0` to `y1` takes the cars off a foot along it (`lo` to `hi` across it).
+fn in_line(lo: f64, hi: f64, y0: f64, y1: f64) -> bool {
+    y0 <= lo + FOOT_SLACK + 1e-6 && y1 >= hi - FOOT_SLACK - 1e-6
+}
 
 /// A ramp's foot in the frame: along the aisles (`along`, a car comes off it along x) or across them.
 #[derive(Clone, Copy, Debug)]
@@ -217,7 +224,7 @@ impl Stack<'_> {
         let mut gain = 0.0;
         if bonus {
             for f in self.feet.iter().filter(|f| f.along) {
-                if ya <= f.lo + 0.3 && ya + self.a >= f.hi - 0.3 && segs.iter().any(|sg| sg[0] <= f.at + 1.0 && sg[1] >= f.at - 1.0) {
+                if in_line(f.lo, f.hi, ya, ya + self.a) && segs.iter().any(|sg| sg[0] <= f.at + 1.0 && sg[1] >= f.at - 1.0) {
                     gain += FOOT_BONUS;
                 }
             }
@@ -415,7 +422,7 @@ fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot]) -> Option<(Plan, V
         if f.along {
             let mut best: Option<(f64, usize)> = None;
             for (k, sg) in segs.iter().enumerate() {
-                if !(sg.y0 <= f.lo + 0.3 && sg.y1 >= f.hi - 0.3) {
+                if !in_line(f.lo, f.hi, sg.y0, sg.y1) {
                     continue;
                 }
                 let gap = if f.dir > 0.0 { sg.x0 - f.at } else { f.at - sg.x1 };
@@ -423,7 +430,8 @@ fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot]) -> Option<(Plan, V
                     continue;
                 }
                 let (lo, hi) = (f.lo.max(sg.y0), f.hi.min(sg.y1));
-                if gap > 0.05 && !box_inside(st.g, f.at.min(f.at + f.dir * gap), lo, f.at.max(f.at + f.dir * gap), hi) {
+                // Between the foot and the aisle's end the way is clear (a sliver the ramp's cut-out leaves is no matter).
+                if gap > FOOT_SLACK && !box_inside(st.g, f.at.min(f.at + f.dir * gap), lo + 0.1, f.at.max(f.at + f.dir * gap), hi - 0.1) {
                     continue;
                 }
                 if best.is_none_or(|(g, _)| gap < g) {
@@ -440,7 +448,7 @@ fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot]) -> Option<(Plan, V
             let half = (f.hi - f.lo).max(s.one_way_entry) / 2.0;
             let mut best: Option<(f64, usize)> = None;
             for (k, sg) in segs.iter().enumerate() {
-                if sg.x0 > mid - half + 1e-6 || sg.x1 < mid + half - 1e-6 {
+                if sg.x0 > mid - half + FOOT_SLACK || sg.x1 < mid + half - FOOT_SLACK {
                     continue;
                 }
                 let gap = if f.dir > 0.0 { sg.y0 - f.at } else { f.at - sg.y1 };
@@ -453,7 +461,9 @@ fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot]) -> Option<(Plan, V
             }
             if let Some((gap, k)) = best {
                 let r = if f.dir > 0.0 { rect(mid - half, f.at, mid + half, f.at + gap.max(0.0)) } else { rect(mid - half, f.at - gap.max(0.0), mid + half, f.at) };
-                if gap <= 0.05 || box_inside(st.g, r.x0, r.y0, r.x1, r.y1) {
+                // Clear from just off the foot (the ramp's cut-out may leave a sliver there) to the aisle.
+                let (y0, y1) = if f.dir > 0.0 { (r.y0 + FOOT_SLACK, r.y1) } else { (r.y0, r.y1 - FOOT_SLACK) };
+                if gap <= FOOT_SLACK || box_inside(st.g, r.x0 + 0.1, y0, r.x1 - 0.1, y1) {
                     let cost = cost_of(&r, &bays);
                     for &i in &cost {
                         bays[i].alive = false;
@@ -465,6 +475,9 @@ fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot]) -> Option<(Plan, V
         }
     }
     let ramps = !feet.is_empty();
+    if std::env::var_os("PARKING_DEBUG").is_some() {
+        eprintln!("   feet {feet:?} segs {:?} reached {reached:?}", segs.iter().map(|s| format!("{:.1}-{:.1}x{:.1}-{:.1}", s.x0, s.x1, s.y0, s.y1)).collect::<Vec<_>>());
+    }
     if !reached.iter().any(|r| *r) {
         if ramps {
             // No foot meets this stack: another candidate will.

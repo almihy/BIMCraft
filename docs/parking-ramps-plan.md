@@ -204,7 +204,7 @@ with no end near it is kept clear (nearness by boxes, not corners); far componen
 pinned has its `placed` brought to where it is, so unpinned it is the car park's again, and pinning or unpinning a bay runs
 its car park; the help of `road`, `parking_component`, `car_park` and `ramp` had lost its line breaks.
 
-Left:
+Left (the first three, and the access aisles, ways below ground and the Mark, done in the solver rework below):
 - **The solver round ramps inside the area.** A basement 60 x 40 m with its walls, a column grid and two Ramps inside it (one
   along a wall, one curved in a corner) gets a handful of bays where a designer lays some 60
   (`a_basement_..._is_filled_as_a_designer_would`, ignored until it passes). The solver cuts the plot once at an inside

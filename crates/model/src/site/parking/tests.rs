@@ -1151,19 +1151,51 @@ fn real_basement(sizes: Option<(f64, f64, f64)>) -> (Input, Vec<Ring>) {
 }
 
 #[test]
-fn zz_real_basement_dev() {
-    for sizes in [Some((2.5, 5.0, 6.0)), None] {
+fn the_reviewers_basement_is_filled_from_both_its_ramps() {
+    for (sizes, least) in [(Some((2.5, 5.0, 6.0)), 50), (None, 33)] {
         let (input, solid) = real_basement(sizes);
         let t = std::time::Instant::now();
         let l = solve(&input);
+        let took = t.elapsed();
         picture(&l, &input, &format!("real_{}", if sizes.is_some() { "firm" } else { "saudi" }));
-        eprintln!("{sizes:?}: {} bays, {} ways in, {:?} in {:?}; notes {:?}", l.stalls.len(), l.entries.len(), l.directions, t.elapsed(), l.notes);
-        for a in &l.aisles {
-            let b = bounds(&a.poly);
-            eprintln!("  {} {:.2} {:.2} {:.2} {:.2}", a.kind.name(), b.x0, b.y0, b.x1, b.y1);
-        }
+        eprintln!("the reviewer's basement, {sizes:?}: {} bays in {took:?}", l.stalls.len());
         assert_eq!(faults(&l, &solid), Vec::<String>::new());
+        assert!(l.stalls.len() >= least, "{} bays: {:?}", l.stalls.len(), l.notes);
+        assert_eq!(l.entries.len(), 2, "a way in off each ramp: {:?}", l.notes);
+        assert!(l.notes.is_empty(), "{:?}", l.notes);
+        for a in &l.aisles {
+            for h in &solid {
+                assert!(!overlap(&a.poly, h), "{:?} {:?} through {h:?}", a.kind, a.poly);
+            }
+        }
     }
+}
+
+#[test]
+fn a_basement_100_by_60_on_a_grid_is_laid_out_in_well_under_a_second() {
+    let mut keep = vec![bx(-0.1, -0.1, 100.1, 0.1), bx(99.9, -0.1, 100.1, 60.1), bx(-0.1, 59.9, 100.1, 60.1), bx(-0.1, -0.1, 0.1, 60.1)];
+    for i in 1..13 {
+        for y in [16.0, 32.0, 48.0] {
+            let x = 8.1 * i as f64;
+            keep.push(bx(x - 0.2, y - 0.2, x + 0.2, y + 0.2));
+        }
+    }
+    let input = Input {
+        site: bx(0.0, 0.0, 100.0, 60.0),
+        basement: Some(Vec::new()),
+        feet: vec![(([99.9, 5.0], [99.9, 11.0]), [-1.0, 0.0])],
+        keep_clear: keep.clone(),
+        settings: Given { stall_width: Some(2.5), stall_depth: Some(5.0), aisle: Some(6.0), column_every: Some(0.0), ..Given::default() },
+        ..Input::default()
+    };
+    let t = std::time::Instant::now();
+    let l = solve(&input);
+    let took = t.elapsed();
+    eprintln!("a basement 100 x 60 m on a grid: {} bays in {took:?}", l.stalls.len());
+    assert_eq!(faults(&l, &keep), Vec::<String>::new());
+    assert!(l.stalls.len() >= 200, "{} bays", l.stalls.len());
+    let limit = if cfg!(debug_assertions) { 3000 } else { 1000 };
+    assert!(took.as_millis() < limit, "{took:?}");
 }
 
 /// A picture of a layout (PARKING_PICTURE names the file): the ground grey, what stands on it black, aisles blue, ways in

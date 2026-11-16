@@ -1268,9 +1268,9 @@ pub fn props_of(kind_: &str) -> serde_json::Map<String, Value> {
             "result": obj(json!({
                 "stalls": "count", "accessible": "count", "accessible_needed": "count", "ev": "count", "columns": "count",
                 "arrangement": "string", "directions": list(json!("angle")), "basement": "boolean",
-                "area_per_stall": "area", "ways": list(obj(json!({"at": "point", "kind": "string"}))),
+                "area_per_stall": "area", "ways": list(obj(json!({"at": "point", "kind": "string", "ramp": "boolean"}))),
                 "notes": list(json!("string")), "kept": "count", "generated": "count", "proposed_columns": "points",
-                "aisles": list(obj(json!({"ring": "points", "flow": "point"}))),
+                "aisles": list(obj(json!({"ring": "points", "flow": "point"}))), "access_aisles": list(json!("points")),
             })),
         }),
         "mass" => json!({

@@ -121,10 +121,13 @@ fn aisle_arrow(d: &mut Drawing, ring: &[P2], flow: Option<P2>, color: Rgb) {
             (u, long) = (e * (1.0 / len), len);
         }
     }
+    // One way: along the way it runs (a short cross aisle runs across its long side), as long as it is that way.
     if let Some(f) = flow
-        && f.dot(u) < 0.0
+        && f.dot(f) > 1e-12
     {
-        u = u * -1.0;
+        u = f * (1.0 / f.dot(f).sqrt());
+        let (lo, hi) = ring.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), q| (lo.min(q.dot(u)), hi.max(q.dot(u))));
+        long = hi - lo;
     }
     let half = long * 0.35;
     let (a, b) = (c - u * half, c + u * half);

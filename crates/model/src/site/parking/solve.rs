@@ -653,12 +653,17 @@ pub fn solve(input: &Input) -> Solved {
                 - paved / PAVED_PER_BAY
                 - if !streets.is_empty() && ins.is_empty() { 10000.0 } else { 0.0 }
                 - if relaxed { 0.5 } else { 0.0 };
+            // A plan no car can come into reaches nothing, whatever it lays.
+            let count = if !streets.is_empty() && ins.is_empty() { 0.0 } else { count };
             let slot = if grid { &mut best_grid } else { &mut best };
             if slot.as_ref().is_none_or(|b| score > b.score) {
                 *slot = Some(Candidate { deg, plan, reach, throats, score, relaxed, count });
             }
         }
+        // 90° bays one way round: only the grid's runs the traffic round its aisles.
+        let one_way = s.one_way && s.angle >= 89.9;
         match (best, best_grid) {
+            (Some(_), Some(g)) if one_way && g.count > 0.0 => Some(g),
             (Some(b), Some(g)) if g.count >= GRID_MARGIN * b.count && g.count > b.count + 1.0 => Some(g),
             (None, Some(g)) => Some(g),
             (b, _) => b,
