@@ -365,9 +365,20 @@ pub fn lay_grid(ctx: &mut Ctx, part: &Region, s: &Settings, origin: Pt, degs: &[
             }
             // Each ramp's foot joined by the shortest way, and (when that turns) by the straight way only: a way that
             // turns may cost a cross aisle the straight one makes (the solver keeps the better).
-            let mut built = vec![build(&st, &stack, &local_feet, true)];
-            if built[0].as_ref().is_none_or(|(_, _, turned)| *turned) {
-                built.push(build(&st, &stack, &local_feet, false));
+            // Cross aisles an aisle wide, and a drive aisle wide where that is narrower (between columns too close for an
+            // aisle): the solver keeps the better.
+            let mut widths = vec![s.aisle];
+            if s.drive_aisle < s.aisle - 1e-6 {
+                widths.push(s.drive_aisle);
+            }
+            let mut built = Vec::new();
+            for cw in widths {
+                let first = build(&st, &stack, &local_feet, true, cw);
+                let again = first.as_ref().is_none_or(|(_, _, turned)| *turned);
+                built.push(first);
+                if again {
+                    built.push(build(&st, &stack, &local_feet, false, cw));
+                }
             }
             for (plan, ups, _) in built.into_iter().flatten() {
                 if std::env::var_os("PARKING_DEBUG").is_some() {
@@ -388,7 +399,8 @@ pub fn lay_grid(ctx: &mut Ctx, part: &Region, s: &Settings, origin: Pt, degs: &[
 
 /// The stack's plan: its aisles' pieces and bays, joined by cross aisles, trimmed to what they serve.
 /// `turns`: a ramp's foot may be joined by a way that turns into an aisle beside it; whether one was.
-fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot], turns: bool) -> Option<(Plan, Vec<Option<f64>>, bool)> {
+/// `cw`: a cross aisle's width (an aisle's, or a drive aisle's: it has no bays on it).
+fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot], turns: bool, cw: f64) -> Option<(Plan, Vec<Option<f64>>, bool)> {
     let s = st.s;
     let mut segs: Vec<Seg> = Vec::new();
     let mut bays: Vec<Bay> = Vec::new();
@@ -426,7 +438,7 @@ fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot], turns: bool) -> Op
     let cost_of = |r: &Rect, bays: &[Bay]| -> Vec<usize> { (0..bays.len()).filter(|&i| bays[i].alive && overlaps(r, &bays[i])).collect() };
     // A ramp's foot: an aisle in line with it, a way straight off it into the first aisle it meets, or a way that turns
     // once into an aisle beside it (off the foot and along, or round the aisle's end): the shortest.
-    let cw = s.aisle.min(s.drive_aisle);
+    let cw = cw.min(s.aisle);
     let clear = |r: &Rect| r.x1 - r.x0 < 0.3 || r.y1 - r.y0 < 0.3 || box_inside(st.g, r.x0 + 0.1, r.y0 + 0.1, r.x1 - 0.1, r.y1 - 0.1);
     let mut ways: Vec<Rect> = Vec::new();
     for f in feet {
