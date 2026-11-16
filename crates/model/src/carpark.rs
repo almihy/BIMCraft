@@ -97,9 +97,15 @@ fn by_of(params: &BTreeMap<String, Value>) -> Option<&str> {
     params.get(BY).and_then(Value::as_str)
 }
 
-/// What a bay's [`PLACED`] says: where, turned how, of which type, on which level, numbered what.
-fn placed_of(c: &Component) -> String {
-    let mark = c.params.get(crate::family::site::MARK).and_then(Value::as_str).unwrap_or("");
+/// What a bay's [`PLACED`] says: where, turned how, of which type, on which level, numbered what (its Mark by the model's
+/// language's name for it, the name the generator writes it under).
+fn placed_of(language: crate::language::Language, c: &Component) -> String {
+    let mark = c
+        .params
+        .get(language.word(crate::family::site::MARK))
+        .or_else(|| c.params.get(crate::family::site::MARK))
+        .and_then(Value::as_str)
+        .unwrap_or("");
     format!("{:.0},{:.0},{:.3},{},{},{},{}", c.at.0, c.at.1, c.angle, c.mirrored, c.type_name, c.level, mark)
 }
 
@@ -319,12 +325,25 @@ fn read(m: &Model, park: Id, s: &crate::masterplan::Site) -> Read {
                 let (lo, hi) = m.span(sh.level, sh.base_offset, sh.top_level, sh.height);
                 if lo < above - 10.0 && hi > below + 10.0 && (stands(lo, hi) || lo < e) {
                     keep(sh.boundary.clone(), &mut out);
+                    // A shaft through the level is a lift's or a stair's core: people walk to it.
+                    if sh.boundary.len() >= 3 && near(&sh.boundary) {
+                        out.among.cores.push(geom::centroid(&sh.boundary));
+                    }
                 }
             }
             // A stair or a ramp in the storey, or under the level down to the one below (a hole in its floor): kept clear
             // where it is; a ramp's end on the level is a way in below ground.
             Element::Stair(_) | Element::Ramp(_) => {
-                for ring in flight_rings(m, el, below + 10.0, above - 10.0) {
+                let rings = flight_rings(m, el, below + 10.0, above - 10.0);
+                if matches!(el, Element::Stair(_)) && !rings.is_empty() {
+                    let pts: Vec<P2> = rings.iter().flatten().copied().collect();
+                    let n = pts.len() as f64;
+                    let c = P2(pts.iter().map(|q| q.0).sum::<f64>() / n, pts.iter().map(|q| q.1).sum::<f64>() / n);
+                    if near(&[c]) {
+                        out.among.cores.push(c);
+                    }
+                }
+                for ring in rings {
                     keep(ring, &mut out);
                 }
                 if let Element::Ramp(r) = el {
@@ -339,14 +358,14 @@ fn read(m: &Model, park: Id, s: &crate::masterplan::Site) -> Read {
             Element::Component(c) => {
                 if is_bay(m, c) && by_of(&c.params) == Some(me.as_str()) {
                     let pinned = m.pinned.contains(&g);
-                    let as_placed = c.params.get(PLACED).and_then(Value::as_str) == Some(placed_of(c).as_str());
+                    let as_placed = c.params.get(PLACED).and_then(Value::as_str) == Some(placed_of(m.language, c).as_str());
                     if pinned || !as_placed {
                         out.kept.push((id, pinned));
                         if let Some((w, d, a)) = bay_size(m, c) {
                             keep(bay_ring(c.at, c.angle, c.mirrored, w, d, a), &mut out);
                         }
                     } else {
-                        out.replace.push((id, placed_of(c)));
+                        out.replace.push((id, placed_of(m.language, c)));
                     }
                     continue;
                 }
@@ -459,6 +478,17 @@ pub fn bay_from(p: &[P2], mouth: P2, a: f64) -> Option<(P2, f64, bool, f64, f64)
     let reach = v.dot(x.perp()).abs();
     let width = f0.dist(f1) * a.to_radians().sin();
     Some((centre, geom::degrees(x.1.atan2(x.0).to_degrees()), mirrored, width, reach))
+}
+
+/// What car park `park` hands the solver (metres), and whether it is below ground: for a check or a picture of its layout.
+pub fn solver_input(m: &Model, park: Id) -> Option<(parking::solve::Input, bool)> {
+    let Some(Element::Site(s)) = m.elements.get(park) else { return None };
+    let level_name = m.level(s.level).map(|l| l.name.clone()).unwrap_or_default();
+    let levels: Vec<LevelIn> = m.levels().iter().map(|(_, l)| LevelIn { name: l.name.clone(), elevation: l.elevation }).collect();
+    let r = read(m, park, s);
+    let mut own = s.props.clone();
+    own.insert("column_every".into(), json!(0));
+    parking::input_among(&own, &level_name, &levels, &r.obstacles, &r.streets, &r.among).ok()
 }
 
 /// Car park `park` laid out again: what it changes. None when it isn't a car park.
@@ -603,7 +633,7 @@ pub fn run(m: &Model, park: Id) -> Option<Laid> {
                 mirrored,
                 params,
             };
-            let placed = placed_of(&c);
+            let placed = placed_of(m.language, &c);
             c.params.insert(PLACED.into(), json!(placed));
             let at_key = placed.rsplitn(2, ',').nth(1).unwrap_or(&placed).to_string();
             let id = free.get_mut(&at_key).and_then(Vec::pop);
@@ -776,7 +806,7 @@ pub fn keep(m: &Model, before: &Model) -> Vec<Update> {
             };
             if by_of(params).is_some_and(|b| gone.contains(b)) {
                 let as_placed = match e {
-                    Element::Component(c) => params.get(PLACED).and_then(Value::as_str) == Some(placed_of(c).as_str()),
+                    Element::Component(c) => params.get(PLACED).and_then(Value::as_str) == Some(placed_of(m.language, c).as_str()),
                     Element::SubDivision(sd) => params.get(PLACED).and_then(Value::as_str) == Some(placed_of_aisle(sd).as_str()),
                     _ => false,
                 };
@@ -891,11 +921,12 @@ pub fn apply(m: &mut Model, updates: Vec<Update>) {
                     }
                 }
                 // Pinned where the person left it, and its `placed` brought to that: unpinned, it is the car park's again.
+                let language = m.language;
                 for g in &pin {
                     if let Some(id) = m.elements.id(*g)
                         && let Some(Element::Component(c)) = m.elements.get_mut(id)
                     {
-                        let now = placed_of(c);
+                        let now = placed_of(language, c);
                         c.params.insert(PLACED.into(), json!(now));
                     }
                 }

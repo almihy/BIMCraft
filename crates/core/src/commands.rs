@@ -14634,10 +14634,19 @@ fn delete(s: &mut Session, p: &Value) -> R {
         assert_eq!(result, expected, "indexed deletion returned a different reply");
         assert_eq!(s.model, twin.model, "indexed deletion left a different model");
     }
-    result.map(|r| {
+    let result = result.map(|r| {
         let gone: Vec<Id> = r["deleted"].as_array().map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
-        pin::hosted_pins_deleted(r, &before, &gone, &asked)
-    })
+        (pin::hosted_pins_deleted(r, &before, &gone, &asked), gone)
+    });
+    // A road deleted whole: the roads it met are shaped again without it (`reshaped`, their first pieces).
+    let (mut r, gone) = result?;
+    let reshaped = ground::roads_after_delete(s, &before, &gone)?;
+    if !reshaped.is_empty()
+        && let Some(o) = r.as_object_mut()
+    {
+        o.insert("reshaped".into(), json!(reshaped));
+    }
+    Ok(r)
 }
 
 fn delete_indexed(s: &mut Session, p: &Value) -> R {

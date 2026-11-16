@@ -6,6 +6,7 @@ use std::collections::HashSet;
 
 use super::fields::*;
 use super::geom::*;
+use super::grid::lay_grid;
 use super::ring::{attach, lay_ring};
 use super::standards::{Given, Settings, accessible_needed, settings_of};
 
@@ -71,6 +72,8 @@ pub struct Input {
     /// Below ground: the ways off ramps onto the level given as they are (each the line across the ramp's end, and the way a
     /// car comes off it): a curved ramp's or one whose outline isn't a rectangle. Its outline is kept clear as `keep_clear`.
     pub feet: Vec<((Pt, Pt), Pt)>,
+    /// The cores on the level (lifts, stairs): with no `target`, the accessible bays go nearest them.
+    pub cores: Vec<Pt>,
     pub settings: Given,
 }
 
@@ -146,6 +149,8 @@ struct StreetSide {
     b: Pt,
     /// Square to the side, into the plot.
     n: Pt,
+    /// A ramp's foot: the way off it is the ramp's width.
+    width: Option<f64>,
 }
 
 #[derive(Clone)]
@@ -241,7 +246,7 @@ fn throat_options(
                         continue;
                     }
                     let at = [end[0] + dir[0] * h.t, end[1] + dir[1] * h.t];
-                    let poly = band([end[0] - dir[0], end[1] - dir[1]], at, width);
+                    let poly = band([end[0] - dir[0], end[1] - dir[1]], at, st.width.unwrap_or(width));
                     if h.t > 0.05 && !free(&poly) {
                         continue;
                     }
@@ -262,7 +267,7 @@ fn throat_options(
         }
         let Some(t) = t else { return };
         let end = [p[0] + st.n[0] * (t + 1.5), p[1] + st.n[1] * (t + 1.5)];
-        let poly = band(p, end, width);
+        let poly = band(p, end, st.width.unwrap_or(width));
         if !free(&poly) {
             return;
         }
@@ -294,7 +299,7 @@ fn throat_options(
                 if let Some((q, d)) = nearest {
                     let dir = [(q[0] - p[0]) / d, (q[1] - p[1]) / d];
                     if dir[0] * st.n[0] + dir[1] * st.n[1] > 0.2 {
-                        let poly = band(p, [q[0] + dir[0] * 1.5, q[1] + dir[1] * 1.5], width);
+                        let poly = band(p, [q[0] + dir[0] * 1.5, q[1] + dir[1] * 1.5], st.width.unwrap_or(width));
                         if free(&poly) {
                             options.push(Throat { at: p, poly, kind, into: dir, len: d, off: 0.0 });
                         }
@@ -426,7 +431,13 @@ struct Candidate {
     throats: Vec<Throat>,
     score: f64,
     relaxed: bool,
+    /// The bays a car reaches.
+    count: f64,
 }
+
+/// The grid's plan is taken over the solver's own when it reaches this share more bays (and two or more): near a tie the
+/// fields and the ring, with their rows along every side, are kept.
+const GRID_MARGIN: f64 = 1.02;
 
 /// A ramp's foot, where cars come off it onto the level: of its two short sides, the one further into the ground
 /// `area`; and the way a car comes off it.
@@ -521,7 +532,7 @@ pub fn solve(input: &Input) -> Solved {
             if !point_in_ring(mid, &site) {
                 n = [-n[0], -n[1]];
             }
-            StreetSide { a, b, n }
+            StreetSide { a, b, n, width: None }
         })
         .collect();
     let mut access: Vec<Access> = if basement {
@@ -534,7 +545,9 @@ pub fn solve(input: &Input) -> Solved {
         ramps.extend(input.feet.iter().copied());
     }
     for (foot, out) in &ramps {
-        streets.push(StreetSide { a: foot.0, b: foot.1, n: *out });
+        // The way off a ramp is as wide as the ramp (no wider than a drive aisle, no narrower than a one-way way in).
+        let w = dist(foot.0, foot.1).clamp(s.one_way_entry.min(s.drive_aisle), s.drive_aisle);
+        streets.push(StreetSide { a: foot.0, b: foot.1, n: *out, width: Some(w) });
         access.push(Access { at: [(foot.0[0] + foot.1[0]) / 2.0, (foot.0[1] + foot.1[1]) / 2.0], kind: AccessKind::Both });
     }
     let removed = &input.removed;
@@ -545,22 +558,28 @@ pub fn solve(input: &Input) -> Solved {
     let free_dirs = input.direction.is_none() && !input.quick && !basement;
 
     let pick = |ctx: &mut Ctx, part: &Region| -> Option<Candidate> {
-        let mut plans: Vec<(f64, WPlan)> = Vec::new();
+        // Each plan, and whether it is the grid's (modules on the grid): the solver's own (fields, ring) and the grid's are
+        // each picked by score, and the grid's taken when it reaches clearly more bays (by bays, then by score).
+        let mut plans: Vec<(f64, WPlan, bool)> = Vec::new();
         for &deg in &degs {
             for plan in lay_plot(ctx, part, deg, &s, origin, &street_lines, free_dirs) {
-                plans.push((deg, plan));
+                plans.push((deg, plan, false));
             }
         }
         if free_dirs {
             for plan in lay_oblique(ctx, part, &s, origin) {
-                plans.push((plan.dirs.first().copied().unwrap_or(f64::NAN), plan));
+                plans.push((plan.dirs.first().copied().unwrap_or(f64::NAN), plan, false));
             }
         }
         for plan in lay_ring(ctx, part, &s, origin, &degs, input.quick, basement) {
-            plans.push((plan.dirs.first().copied().unwrap_or(f64::NAN), plan));
+            plans.push((plan.dirs.first().copied().unwrap_or(f64::NAN), plan, false));
+        }
+        for plan in lay_grid(ctx, part, &s, origin, &degs, &ramps, input.quick) {
+            plans.push((plan.dirs.first().copied().unwrap_or(f64::NAN), plan, true));
         }
         let mut best: Option<Candidate> = None;
-        for (deg, mut plan) in plans {
+        let mut best_grid: Option<Candidate> = None;
+        for (deg, mut plan, grid) in plans {
             // An aisle through what stands on the ground (a column, a wall, a ramp) is no way to drive: that plan is out.
             if plan.aisles.iter().any(|a| part.holes.iter().any(|h| hits(h, &a.poly))) {
                 continue;
@@ -634,11 +653,16 @@ pub fn solve(input: &Input) -> Solved {
                 - paved / PAVED_PER_BAY
                 - if !streets.is_empty() && ins.is_empty() { 10000.0 } else { 0.0 }
                 - if relaxed { 0.5 } else { 0.0 };
-            if best.as_ref().is_none_or(|b| score > b.score) {
-                best = Some(Candidate { deg, plan, reach, throats, score, relaxed });
+            let slot = if grid { &mut best_grid } else { &mut best };
+            if slot.as_ref().is_none_or(|b| score > b.score) {
+                *slot = Some(Candidate { deg, plan, reach, throats, score, relaxed, count });
             }
         }
-        best
+        match (best, best_grid) {
+            (Some(b), Some(g)) if g.count >= GRID_MARGIN * b.count && g.count > b.count + 1.0 => Some(g),
+            (None, Some(g)) => Some(g),
+            (b, _) => b,
+        }
     };
     let mut chosen: Vec<Candidate> = Vec::new();
     for part in &parts {
@@ -664,7 +688,7 @@ pub fn solve(input: &Input) -> Solved {
             plans.push(c.plan);
         }
         notes.push(format!("A building cuts the plot in {n_chosen} parts: each is laid out on its own, with its own way in."));
-        Some(Candidate { deg, plan: join(plans, vec![]), reach, throats, score, relaxed })
+        Some(Candidate { deg, plan: join(plans, vec![]), reach, throats, score, relaxed, count: 0.0 })
     } else {
         chosen.into_iter().next()
     };
@@ -759,13 +783,20 @@ pub fn solve(input: &Input) -> Solved {
 
     // Accessible bays nearest the building's entrance: two to an access aisle, as many as the count needs.
     let need = accessible_needed(&s, kept.len());
-    let target: Pt = input
-        .target
-        .or_else(|| throats.first().map(|t| t.at))
-        .or_else(|| streets.first().map(|st| [(st.a[0] + st.b[0]) / 2.0, (st.a[1] + st.b[1]) / 2.0]))
-        .unwrap_or(origin);
+    let targets: Vec<Pt> = match input.target {
+        Some(t) => vec![t],
+        None if !input.cores.is_empty() => input.cores.clone(),
+        None => vec![
+            throats
+                .first()
+                .map(|t| t.at)
+                .or_else(|| streets.first().map(|st| [(st.a[0] + st.b[0]) / 2.0, (st.a[1] + st.b[1]) / 2.0]))
+                .unwrap_or(origin),
+        ],
+    };
+    let near_of = |p: Pt| targets.iter().map(|&t| dist(p, t)).fold(f64::INFINITY, f64::min);
     let by_near = |kept: &[WStall]| -> Vec<usize> {
-        let mut order: Vec<(f64, usize)> = kept.iter().enumerate().map(|(i, st)| (dist(centre(&st.poly), target), i)).collect();
+        let mut order: Vec<(f64, usize)> = kept.iter().enumerate().map(|(i, st)| (near_of(centre(&st.poly)), i)).collect();
         order.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap_or(std::cmp::Ordering::Equal));
         order.into_iter().map(|x| x.1).collect()
     };

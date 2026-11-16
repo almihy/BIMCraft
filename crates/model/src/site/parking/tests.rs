@@ -260,10 +260,13 @@ fn the_bays_of_every_row_lie_on_one_grid() {
 }
 
 #[test]
-fn an_l_shaped_plot_is_set_out_as_two_fields() {
+fn an_l_shaped_plot_is_set_out_in_both_its_arms() {
     let l = solve(&plot(vec![[0.0, 0.0], [90.0, 0.0], [90.0, 40.0], [40.0, 40.0], [40.0, 90.0], [0.0, 90.0]], &[0]));
-    assert_eq!(l.metrics.fields, 2);
+    assert_eq!(faults(&l, &[]), Vec::<String>::new());
     assert!(l.metrics.stalls >= 150, "{}", l.metrics.stalls);
+    // Bays in the arm along the street and in the arm away from it.
+    assert!(l.stalls.iter().filter(|st| centre(&st.poly)[0] > 45.0).count() >= 30);
+    assert!(l.stalls.iter().filter(|st| centre(&st.poly)[1] > 45.0).count() >= 30);
 }
 
 #[test]
@@ -654,6 +657,7 @@ fn input_from(v: &Value) -> Input {
         quick: v["quick"].as_bool().unwrap_or(false),
         basement: v.get("basement").filter(|b| b.is_object()).map(|b| rings_of(&b["ramps"])),
         feet: Vec::new(),
+        cores: Vec::new(),
         settings: Given {
             standard: s["standard"].as_str().map(str::to_string),
             angle: f("angle"),
@@ -891,31 +895,65 @@ fn compare_layout(l: &Layout, want: &Value) -> Vec<String> {
     out
 }
 
-#[test]
-fn the_layouts_match_arqiflows() {
-    let cases = fixtures();
-    assert!(cases.len() >= 50 || std::env::var_os("PARKING_FIXTURES").is_some(), "{} fixtures", cases.len());
-    let mut report = Vec::new();
-    let mut matched = 0;
-    for (name, case) in &cases {
+/// Each of Arqiflow's cases laid out here: the bays it reached, Arqiflow's, and the differences (none when it is laid out as
+/// Arqiflow's solver laid it).
+fn against_arqiflow() -> Vec<(String, f64, f64, Vec<String>, Vec<String>)> {
+    let mut out = Vec::new();
+    for (name, case) in fixtures() {
         // Below ground with no ramp drawn, Arqiflow's solver made one up; ours never does (the owner, 16 November):
         // those cases are no longer the port's to match.
         if case.get("input").is_some_and(|i| i["basement"].is_object() && i["basement"]["ramps"].as_array().is_none_or(Vec::is_empty)) {
-            matched += 1;
             continue;
         }
-        let diffs = if let Some(input) = case.get("input") {
-            compare_solved(&solve(&input_from(input)), &case["out"])
+        let label = format!("{name} ({})", case["name"]);
+        if let Some(input) = case.get("input") {
+            let p = input_from(input);
+            let l = solve(&p);
+            let theirs = case["out"]["metrics"]["stalls"].as_f64().unwrap_or(f64::NAN);
+            out.push((label, l.metrics.stalls as f64, theirs, compare_solved(&l, &case["out"]), faults(&l, &p.obstacles)));
         } else {
-            compare_layout(&car_park_layout(&case["car_park"]), case)
-        };
-        if diffs.is_empty() {
-            matched += 1;
-        } else {
-            report.push(format!("{name} ({}): {}", case["name"], diffs.join("; ")));
+            let l = car_park_layout(&case["car_park"]);
+            let theirs = case["result"]["stalls"].as_f64().unwrap_or(f64::NAN);
+            let ours = l.result.get("stalls").and_then(Value::as_f64).unwrap_or(0.0);
+            out.push((label, ours, theirs, compare_layout(&l, &case), Vec::new()));
         }
     }
-    assert!(report.is_empty(), "{matched} of {} match Arqiflow's; these do not:\n{}", cases.len(), report.join("\n"));
+    out
+}
+
+/// Arqiflow's layouts (its solver, ported, the one this crate had): each laid out as it laid it, or, where the modules on the
+/// grid reach clearly more bays (docs/parking-ramps-plan.md, "Solver rework"), with more bays and no fault.
+#[test]
+fn the_layouts_match_arqiflows_or_reach_more_bays() {
+    assert!(fixtures().len() >= 50 || std::env::var_os("PARKING_FIXTURES").is_some(), "{} fixtures", fixtures().len());
+    let cases = against_arqiflow();
+    let mut report = Vec::new();
+    let (mut same, mut more) = (0, 0);
+    for (name, ours, theirs, diffs, faults) in &cases {
+        if diffs.is_empty() {
+            same += 1;
+        } else if ours > theirs && faults.is_empty() {
+            more += 1;
+        } else {
+            report.push(format!("{name}: {ours} bays, Arqiflow {theirs}; {}; {}", diffs.join("; "), faults.join("; ")));
+        }
+    }
+    assert!(report.is_empty(), "{same} as Arqiflow's, {more} with more bays; these neither:
+{}", report.join("
+"));
+}
+
+/// The bays each of Arqiflow's cases gets here and got there (`--ignored --nocapture`).
+#[test]
+#[ignore]
+fn yields() {
+    let (mut a, mut b) = (0.0, 0.0);
+    for (name, ours, theirs, diffs, _) in against_arqiflow() {
+        a += ours;
+        b += theirs;
+        eprintln!("{name}: {theirs} -> {ours}{}", if diffs.is_empty() { "" } else { " (laid out anew)" });
+    }
+    eprintln!("all: {b} -> {a}");
 }
 
 // ---------------------------------------------------------------------------------------------------- the element's way in
@@ -1069,4 +1107,107 @@ fn below_ground_a_column_grid_is_stepped_round_and_its_ways_in_miss_the_columns(
             assert!(!overlap(&a.poly, p), "{:?} {:?} through the column {p:?}", a.kind, a.poly);
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------------------- modules on the grid
+/// The reviewer's basement as the generator hands it to the solver: 60 by 40 m in its walls, a column grid 8.1 by 10 m, a
+/// straight ramp along the north wall (its foot at x 31, cars coming off it east) and a curved one in the south-east corner
+/// (its foot at x 36, cars coming off it west). `sizes`: the firm's stall width, depth and aisle (m), or the standard's.
+fn real_basement(sizes: Option<(f64, f64, f64)>) -> (Input, Vec<Ring>) {
+    let mut keep = vec![bx(-0.1, -0.1, 60.1, 0.1), bx(59.9, -0.1, 60.1, 40.1), bx(-0.1, 39.9, 60.1, 40.1), bx(-0.1, -0.1, 0.1, 40.1)];
+    let mut posts = Vec::new();
+    for x in [8.1, 16.2, 24.3, 32.4, 40.5, 48.6] {
+        for y in [10.0, 20.0, 30.0] {
+            posts.push(bx(x - 0.15, y - 0.15, x + 0.15, y + 0.15));
+        }
+    }
+    keep.extend(posts.iter().cloned());
+    // The straight ramp, and the curved one's runs (a straight run, then a quarter turn of 4 m radius to its middle line).
+    let mut ramps = vec![bx(7.67, 33.5, 31.0, 39.5), bx(36.0, 0.5, 52.15, 6.5)];
+    let (cx, cy) = (52.0, 7.5);
+    let k = 8;
+    for i in 0..k {
+        let t0 = -std::f64::consts::FRAC_PI_2 + std::f64::consts::FRAC_PI_2 * i as f64 / k as f64;
+        let t1 = -std::f64::consts::FRAC_PI_2 + std::f64::consts::FRAC_PI_2 * (i + 1) as f64 / k as f64;
+        let p = |r: f64, t: f64| [cx + r * t.cos(), cy + r * t.sin()];
+        ramps.push(vec![p(1.0, t0), p(7.0, t0), p(7.0, t1), p(1.0, t1)]);
+    }
+    keep.extend(ramps.iter().cloned());
+    let settings = match sizes {
+        Some((w, d, a)) => Given { stall_width: Some(w), stall_depth: Some(d), aisle: Some(a), column_every: Some(0.0), ..Given::default() },
+        None => Given { column_every: Some(0.0), ..Given::default() },
+    };
+    let input = Input {
+        site: bx(0.0, 0.0, 60.0, 40.0),
+        basement: Some(Vec::new()),
+        feet: vec![(([31.0, 39.5], [31.0, 33.5]), [1.0, 0.0]), (([36.0, 0.5], [36.0, 6.5]), [-1.0, 0.0])],
+        keep_clear: keep,
+        settings,
+        ..Input::default()
+    };
+    let mut solid = posts;
+    solid.extend(ramps);
+    (input, solid)
+}
+
+#[test]
+fn zz_real_basement_dev() {
+    for sizes in [Some((2.5, 5.0, 6.0)), None] {
+        let (input, solid) = real_basement(sizes);
+        let t = std::time::Instant::now();
+        let l = solve(&input);
+        picture(&l, &input, &format!("real_{}", if sizes.is_some() { "firm" } else { "saudi" }));
+        eprintln!("{sizes:?}: {} bays, {} ways in, {:?} in {:?}; notes {:?}", l.stalls.len(), l.entries.len(), l.directions, t.elapsed(), l.notes);
+        for a in &l.aisles {
+            let b = bounds(&a.poly);
+            eprintln!("  {} {:.2} {:.2} {:.2} {:.2}", a.kind.name(), b.x0, b.y0, b.x1, b.y1);
+        }
+        assert_eq!(faults(&l, &solid), Vec::<String>::new());
+    }
+}
+
+/// A picture of a layout (PARKING_PICTURE names the file): the ground grey, what stands on it black, aisles blue, ways in
+/// green, bays outlined, accessible bays and access aisles orange.
+fn picture(l: &Solved, input: &Input, name: &str) {
+    let Some(dir) = std::env::var_os("PARKING_PICTURE") else { return };
+    use tiny_skia::{Color, FillRule, Paint, PathBuilder, Pixmap, Stroke, Transform};
+    let b = bounds(&input.site);
+    let k = 1200.0 / (b.x1 - b.x0).max(b.y1 - b.y0);
+    let (w, h) = (((b.x1 - b.x0) * k) as u32 + 40, ((b.y1 - b.y0) * k) as u32 + 40);
+    let Some(mut pm) = Pixmap::new(w, h) else { return };
+    pm.fill(Color::WHITE);
+    let tf = |p: Pt| (20.0 + ((p[0] - b.x0) * k) as f32, (h as f64 - 20.0 - (p[1] - b.y0) * k) as f32);
+    let mut draw = |r: &[Pt], rgb: [u8; 3], fill: bool| {
+        let mut pb = PathBuilder::new();
+        for (i, p) in r.iter().enumerate() {
+            let (x, y) = tf(*p);
+            if i == 0 { pb.move_to(x, y) } else { pb.line_to(x, y) }
+        }
+        pb.close();
+        let Some(path) = pb.finish() else { return };
+        let mut paint = Paint::default();
+        paint.set_color_rgba8(rgb[0], rgb[1], rgb[2], 255);
+        if fill {
+            pm.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+        } else {
+            pm.stroke_path(&path, &paint, &Stroke { width: 1.5, ..Stroke::default() }, Transform::identity(), None);
+        }
+    };
+    draw(&input.site, [235, 235, 235], true);
+    for a in &l.aisles {
+        draw(&a.poly, if a.kind == super::fields::AisleKind::Throat { [150, 220, 150] } else { [190, 215, 245] }, true);
+    }
+    for r in input.keep_clear.iter().chain(input.obstacles.iter()) {
+        draw(r, [40, 40, 40], true);
+    }
+    for a in &l.access_aisles {
+        draw(a, [250, 200, 140], true);
+    }
+    for st in &l.stalls {
+        if st.kind == StallKind::Accessible {
+            draw(&st.poly, [240, 150, 60], true);
+        }
+        draw(&st.poly, [90, 90, 90], false);
+    }
+    let _ = pm.save_png(std::path::Path::new(&dir).join(format!("{name}.png")));
 }

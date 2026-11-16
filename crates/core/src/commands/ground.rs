@@ -242,6 +242,46 @@ fn remake(s: &mut Session, def: &ground::RoadDef, pieces: &[Id], host: Guid, sha
     Ok(ids)
 }
 
+/// After a delete: the roads that met a road deleted whole (all its pieces among `deleted`, of `before`) are shaped again
+/// without it, their corners on it gone, as the road made them when it was added. Their first pieces' ids.
+pub(super) fn roads_after_delete(s: &mut Session, before: &Model, deleted: &[Id]) -> Result<Vec<Id>, String> {
+    let mut gone: Vec<(ground::RoadDef, Guid)> = Vec::new();
+    for id in deleted {
+        let Some(Element::SubDivision(sd)) = before.elements.get(*id) else { continue };
+        let Some(r) = &sd.road else { continue };
+        if gone.iter().any(|(g, _)| g.of == r.of) {
+            continue;
+        }
+        let left = s.model.elements.values().any(|e| matches!(e, Element::SubDivision(SubDivision { road: Some(o), .. }) if o.of == r.of));
+        if let (false, Some(level)) = (left, before.subdivision_level(sd)) {
+            gone.push((r.clone(), level));
+        }
+    }
+    let mut levels: Vec<Guid> = gone.iter().map(|(_, l)| *l).collect();
+    levels.sort();
+    levels.dedup();
+    let mut out = Vec::new();
+    for level in levels {
+        let others = roads_on(&s.model, level, None);
+        if others.is_empty() {
+            continue;
+        }
+        let mut defs: Vec<(String, String, crate::site::Props)> =
+            others.iter().map(|(r, _, _)| (r.of.to_string(), r.use_.clone(), r.props.clone())).collect();
+        let without = shaped_among(&s.model, &defs);
+        defs.extend(gone.iter().filter(|(_, l)| *l == level).map(|(r, _)| (r.of.to_string(), r.use_.clone(), r.props.clone())));
+        let with = shaped_among(&s.model, &defs);
+        for (k, (r, ps, h)) in others.iter().enumerate() {
+            let (Some(a), Some(b)) = (with.get(k), without.get(k)) else { continue };
+            if (a.outline != b.outline || a.parts != b.parts) && !b.outline.is_empty() {
+                let again = remake(s, r, ps, *h, b.clone())?;
+                out.extend(again.first().copied());
+            }
+        }
+    }
+    Ok(out)
+}
+
 pub(super) fn road(s: &mut Session, p: &Value) -> R {
     let c = "road";
     let mut allowed = vec!["path", "host", "level", "use", "name", "replace"];

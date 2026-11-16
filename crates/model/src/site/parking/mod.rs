@@ -16,6 +16,7 @@ pub mod solve;
 pub mod standards;
 
 mod fields;
+mod grid;
 mod ring;
 
 pub use fields::StallKind;
@@ -116,6 +117,9 @@ pub struct Among {
     /// The firm's sizes, metres: its `aisle` a two-way aisle's, `aisle_one_way` a one-way aisle's.
     pub defaults: Given,
     pub aisle_one_way: Option<f64>,
+    /// The cores on the level (lifts, stairs: the middle of each), where people walk to from their car: the accessible
+    /// bays go nearest them when the car park names no `target`.
+    pub cores: Vec<P2>,
 }
 
 /// The car park whose area and choices are `props` (its `control` ring, mm, and the person's choices), laid out on
@@ -158,6 +162,7 @@ pub fn input_among(
             .then_some(out)
     };
     input.keep_clear.extend(among.keep.iter().take(MAX_OBSTACLES).filter_map(|r| ring(r)));
+    input.cores = among.cores.iter().filter(|p| finite_pt(p.0, p.1)).take(MAX_OBSTACLES).map(|p| [r3(p.0 / 1000.0), r3(p.1 / 1000.0)]).collect();
     if basement {
         let m = |p: P2| [r3(p.0 / 1000.0), r3(p.1 / 1000.0)];
         input.feet = among
@@ -175,9 +180,11 @@ pub fn input_among(
     g.stall_width = g.stall_width.or(d.stall_width);
     g.stall_depth = g.stall_depth.or(d.stall_depth);
     g.accessible_width = g.accessible_width.or(d.accessible_width);
-    // A one-way aisle (angled bays, unless said otherwise) is the firm's one-way width; a two-way, its aisle's.
-    let one_way = g.one_way.unwrap_or(g.angle.unwrap_or(90.0) < 90.0);
-    g.aisle = g.aisle.or(if one_way { among.aisle_one_way } else { d.aisle });
+    // A one-way aisle between angled bays is the firm's one-way width; a two-way, its aisle's. 90° bays need the two-way
+    // width to turn into, one way or not.
+    let angle = g.angle.unwrap_or(90.0);
+    let one_way = g.one_way.unwrap_or(angle < 90.0);
+    g.aisle = g.aisle.or(if one_way && angle < 89.9 { among.aisle_one_way } else { d.aisle });
     g.aisle_two_way = g.aisle_two_way.or(d.aisle);
     g.ev_share = g.ev_share.or(d.ev_share);
     g.ramp_slope = g.ramp_slope.or(d.ramp_slope);
@@ -305,6 +312,7 @@ pub fn input_of(
         quick: false,
         basement: if basement { Some(ramps) } else { None },
         feet: Vec::new(),
+        cores: Vec::new(),
         settings: given_of(props),
     };
     Ok((input, basement))
@@ -425,13 +433,21 @@ pub fn pieces_of(l: &solve::Solved, level: &str) -> Vec<Piece> {
     out
 }
 
-/// What a layout came to (Arqiflow's `carParkResult`).
+/// What a layout came to (Arqiflow's `carParkResult`), and each accessible bay's access aisle (`access_aisles`, rings in
+/// mm). Below ground its ways in are the ramps' ways off (`ramp: true`).
 pub fn result_of(l: &solve::Solved, basement: bool) -> Props {
-    let ways: Vec<Value> = if basement {
-        Vec::new()
-    } else {
-        l.entries.iter().map(|w| json!({ "at": [to_mm(w.at[0]), to_mm(w.at[1])], "kind": w.kind.name() })).collect()
-    };
+    let ways: Vec<Value> = l
+        .entries
+        .iter()
+        .map(|w| {
+            let mut v = json!({ "at": [to_mm(w.at[0]), to_mm(w.at[1])], "kind": w.kind.name() });
+            if basement && let Some(m) = v.as_object_mut() {
+                m.insert("ramp".into(), Value::Bool(true));
+            }
+            v
+        })
+        .collect();
+    let access: Vec<Value> = l.access_aisles.iter().map(|r| json!(r.iter().map(|p| [to_mm(p[0]), to_mm(p[1])]).collect::<Vec<_>>())).collect();
     let v = json!({
         "stalls": l.metrics.stalls,
         "accessible": l.metrics.accessible,
@@ -443,6 +459,7 @@ pub fn result_of(l: &solve::Solved, basement: bool) -> Props {
         "basement": basement,
         "area_per_stall": l.metrics.area_per_stall,
         "ways": ways,
+        "access_aisles": access,
         "notes": l.notes,
     });
     match v {
@@ -454,7 +471,7 @@ pub fn result_of(l: &solve::Solved, basement: bool) -> Props {
 fn empty_result(why: String, basement: bool) -> Props {
     let v = json!({
         "stalls": 0, "accessible": 0, "accessible_needed": 0, "ev": 0, "columns": 0, "arrangement": "fields",
-        "directions": [], "basement": basement, "area_per_stall": 0, "ways": [], "notes": [why],
+        "directions": [], "basement": basement, "area_per_stall": 0, "ways": [], "access_aisles": [], "notes": [why],
     });
     match v {
         Value::Object(m) => m,
