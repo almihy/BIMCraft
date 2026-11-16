@@ -192,3 +192,25 @@ Visibility/Graphics, or move it").
    piece's GUID, the same on each piece; `props` its centre line `path` and its sizes with its defaults filled in);
    `road {replace: <a piece's id>, ...}` makes it again over what it had, its first piece keeping its id. A format-25 lane
    converted on load keeps its path and widths the same way.
+
+## Review of phase 2 (16 November)
+
+Fixed: a way in off a ramp's foot (or a street) no longer runs through walls, columns or ramps (the solver's `clear` takes
+what is kept clear exactly); a ramp's foot that can't be joined to an aisle is said; posts (holes of 2 m or less, real
+columns) are stepped round, not cut along (a column grid laid out in milliseconds, not tens); a long wall across a car park
+with no end near it is kept clear (nearness by boxes, not corners); far components' pieces aren't worked out; a moved bay
+pinned has its `placed` brought to where it is, so unpinned it is the car park's again, and pinning or unpinning a bay runs
+its car park; the help of `road`, `parking_component`, `car_park` and `ramp` had lost its line breaks.
+
+Left:
+- **The solver round ramps inside the area.** A basement 60 x 40 m with its walls, a column grid and two Ramps inside it (one
+  along a wall, one curved in a corner) gets a handful of bays where a designer lays some 60
+  (`a_basement_..._is_filled_as_a_designer_would`, ignored until it passes). The solver cuts the plot once at an inside
+  corner; ramps at two sides need cuts within cuts, and an aisle laid to meet each foot.
+- Bays are not fitted between real columns (a column in a row costs one or two bays): the field's bay grid could take the
+  columns' pitch (`column_every`, `column_size`) and phase from the real grid.
+- An accessible bay's access aisle is not placed (the solver's `access_aisles`): the Accessible type is the bay alone at the
+  stall's width; Revit's accessible families draw the hatched aisle.
+- Below ground `result.ways` stays empty; the ramps' throats are in `result.aisles` (no `kind`).
+- `placed` holds the Mark under the English name only: in another language a renumbered bay isn't "changed".
+- A masterplan ramp, stall or band of a file of 26 that has no path or point is dropped when converted, not kept.

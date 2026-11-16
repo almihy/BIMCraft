@@ -4,7 +4,8 @@
 //! The solver ([`crate::site::parking`]) keeps its layouts; this reads the model for it and writes ordinary elements.
 //!
 //! - Its own bays and aisles are linked to it: [`BY`] (its GUID) and [`PLACED`] (where and how it placed them) in their
-//!   params. One the person moved, changed or pinned is kept as left, and pinned; one they deleted stays out (its middle
+//!   params. One the person moved, changed or pinned is kept as left, and pinned (unpinned again, it is the car park's to
+//!   replace, as it was when it was pinned); one they deleted stays out (its middle
 //!   added to the car park's `removed`); the rest are replaced each time it runs, keeping their ids where they come back.
 //! - It uses the real columns and never makes its own: below ground with none in its area it proposes a grid in its result.
 //! - Below ground its ways in are the real ramps touching its level (their foot or head on it), or the ways the person
@@ -252,7 +253,14 @@ fn read(m: &Model, park: Id, s: &crate::masterplan::Site) -> Read {
         }
         [b[0] - NEAR, b[1] - NEAR, b[2] + NEAR, b[3] + NEAR]
     };
-    let near = |ring: &[P2]| ring.iter().any(|q| q.0 >= reach[0] && q.0 <= reach[2] && q.1 >= reach[1] && q.1 <= reach[3]);
+    // Near it: its box meets the car park's, grown by `NEAR` (a long wall across it has no corner near it).
+    let near = |ring: &[P2]| {
+        let mut q = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+        for p in ring {
+            q = [q[0].min(p.0), q[1].min(p.1), q[2].max(p.0), q[3].max(p.1)];
+        }
+        q[0] <= reach[2] && reach[0] <= q[2] && q[1] <= reach[3] && reach[1] <= q[3]
+    };
     // What a car meets standing on the level: between its floor and its headroom.
     let stands = |lo: f64, hi: f64| lo < e + HEADROOM && hi > e + 10.0;
     let mut out =
@@ -295,7 +303,7 @@ fn read(m: &Model, park: Id, s: &crate::masterplan::Site) -> Read {
                 level: level_name.clone(),
                 outline: vec![Poly { outer: ms.footprint(), holes: Vec::new() }],
             }),
-            Element::Wall(w) if stands(m.base_z(w), m.top_z(w)) => keep(crate::walls::outline(m, id), &mut out),
+            Element::Wall(w) if near(&[w.start, w.end]) && stands(m.base_z(w), m.top_z(w)) => keep(crate::walls::outline(m, id), &mut out),
             Element::Column(_) | Element::StructuralColumn(_) => {
                 let Some(c) = el.column() else { continue };
                 let (lo, hi) = m.span(c.level, c.base_offset, c.top_level, c.height);
@@ -346,6 +354,10 @@ fn read(m: &Model, park: Id, s: &crate::masterplan::Site) -> Read {
                     if let Some((w, d, a)) = bay_size(m, c) {
                         keep(bay_ring(c.at, c.angle, c.mirrored, w, d, a), &mut out);
                     }
+                    continue;
+                }
+                // Far off, it is nothing to it (a component is smaller than `NEAR`): its pieces are not worked out.
+                if !near(&[c.at]) {
                     continue;
                 }
                 for p in m.component_pieces(c) {
@@ -721,10 +733,20 @@ fn touches(m: &Model, e: &Element, level: Guid, reach: [f64; 4]) -> bool {
 /// one the person deleted kept out of it; a car park deleted takes its own unpinned bays and aisles with it.
 pub fn keep(m: &Model, before: &Model) -> Vec<Update> {
     let all = m.site_figures != before.site_figures;
-    let changed: Vec<Id> = match m.elements.changed_since(&before.elements) {
+    let mut changed: Vec<Id> = match m.elements.changed_since(&before.elements) {
         Changed::Ids(ids) => ids.into_iter().collect(),
         Changed::All => m.elements.iter().map(|(id, _)| *id).chain(before.elements.iter().map(|(id, _)| *id)).collect(),
     };
+    // A bay pinned or unpinned is a change to its car park (unpinned, it is the car park's again).
+    if m.pinned != before.pinned {
+        changed.extend(
+            m.pinned
+                .symmetric_difference(&before.pinned)
+                .filter_map(|g| m.elements.id(*g))
+                .filter(|id| !changed.contains(id))
+                .collect::<Vec<_>>(),
+        );
+    }
     if changed.is_empty() && !all {
         return Vec::new();
     }
@@ -866,6 +888,15 @@ pub fn apply(m: &mut Model, updates: Vec<Update>) {
                         None => {
                             m.insert(e);
                         }
+                    }
+                }
+                // Pinned where the person left it, and its `placed` brought to that: unpinned, it is the car park's again.
+                for g in &pin {
+                    if let Some(id) = m.elements.id(*g)
+                        && let Some(Element::Component(c)) = m.elements.get_mut(id)
+                    {
+                        let now = placed_of(c);
+                        c.params.insert(PLACED.into(), json!(now));
                     }
                 }
                 m.pinned.extend(pin);

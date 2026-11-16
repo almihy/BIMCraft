@@ -71,6 +71,14 @@ impl Ctx {
 
 /// What a bay is worth in paving: a layout with more aisle must win this many m² of it back a bay.
 pub const PAVED_PER_BAY: f64 = 100.0;
+/// A hole no wider or deeper than this (m) is a post, a column: the plot is not cut along its sides.
+const POST: f64 = 2.0;
+/// Whether hole `h` is a post (a column): no wider or deeper than [`POST`].
+fn is_post(h: &[Pt]) -> bool {
+    let q = bounds(h);
+    q.x1 - q.x0 <= POST && q.y1 - q.y0 <= POST
+}
+
 /// A stall facing a drive aisle keeps the drive's id above this, so `place` leaves it as it is.
 pub const EXT_BASE: i64 = 1_000_000;
 
@@ -878,7 +886,9 @@ pub fn lay_plot(
     let mut tried: Vec<String> = Vec::new();
     let outer_corners: Vec<String> =
         reflex_corners(&g.outer, &[]).iter().map(|p| format!("{},{}", to_fixed(p[0], 3), to_fixed(p[1], 3))).collect();
-    for c in reflex_corners(&g.outer, &g.holes) {
+    // The corners of what stands in it, but posts (a column is stepped round, not cut along).
+    let standing: Vec<Ring> = g.holes.iter().filter(|h| !is_post(h)).cloned().collect();
+    for c in reflex_corners(&g.outer, &standing) {
         let wing = outer_corners.contains(&format!("{},{}", to_fixed(c[0], 3), to_fixed(c[1], 3)));
         for horizontal in [true, false] {
             for shift in [-d, 0.0] {

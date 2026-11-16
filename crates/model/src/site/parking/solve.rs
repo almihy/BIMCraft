@@ -493,7 +493,18 @@ pub fn solve(input: &Input) -> Solved {
     holes.extend(input.keep_clear.iter().map(|o| ccw(o)));
     holes.extend(ramp_rings.iter().cloned());
     let (usable, parts) = attach(&offset_ring(&site, s.setback), &holes, s.stall_depth);
-    let clear = Region::new(site.clone(), input.obstacles.iter().map(|o| ccw(o)).collect());
+    // Where a way in may run: off the buildings, and off what is kept clear exactly (walls, columns, ramps: a hair inside
+    // each, so a way off a ramp's foot may start on it).
+    let clear = Region::new(
+        site.clone(),
+        input
+            .obstacles
+            .iter()
+            .map(|o| ccw(o))
+            .chain(input.keep_clear.iter().map(|o| offset_ring(&ccw(o), 0.05)))
+            .filter(|r| r.len() >= 3)
+            .collect(),
+    );
     let origin = site.first().copied().unwrap_or([0.0, 0.0]);
     let mut notes: Vec<String> = Vec::new();
     let street_lines: Vec<(Pt, Pt)> = if basement || raw.is_empty() {
@@ -675,13 +686,19 @@ pub fn solve(input: &Input) -> Solved {
     let Candidate { deg: best_deg, mut plan, reach, throats, relaxed, .. } = best;
     trim_drives(&mut plan, &throats);
     if basement && ramps.is_empty() {
-        notes.push(
-            "No ramp reaches this level: draw the ramp. The layout is shown as if every aisle were reached.".to_string(),
-        );
+        notes.push("No ramp reaches this level: draw the ramp. The layout is shown as if every aisle were reached.".to_string());
     } else if basement && throats.is_empty() {
         notes.push("No aisle can be reached straight from the foot of a ramp: move the ramp so its foot faces an aisle. The layout is shown as if every aisle were reached.".to_string());
     } else if !streets.is_empty() && throats.is_empty() {
         notes.push("No aisle can be reached straight from a street side: place a way in on a street. The layout is shown as if every aisle were reached.".to_string());
+    }
+    // Below ground, each ramp's foot is a way in: one that could not be joined to an aisle is said.
+    if basement && !throats.is_empty() && throats.len() < ramps.len() {
+        notes.push(format!(
+            "{} of the {} ramps' feet could not be joined to an aisle: the bays are laid out from the others.",
+            ramps.len() - throats.len(),
+            ramps.len()
+        ));
     }
     if relaxed && !throats.is_empty() && basement {
         notes.push(

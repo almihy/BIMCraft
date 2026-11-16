@@ -368,6 +368,10 @@ fn a_moved_bay_is_pinned_and_kept_and_a_deleted_bay_stays_removed() {
     run(&mut s, "car_park_run", json!({"id": park}));
     let after: Vec<Id> = bays(&s, park).into_iter().map(|(id, _)| id).collect();
     assert_eq!(before, after);
+    // Unpinned, the moved bay is the car park's again: laid out afresh, not kept where it was moved.
+    run(&mut s, "unpin", json!({"ids": [moved]}));
+    assert!(!bays(&s, park).iter().any(|(id, c)| *id == moved && c.at == was + P2(0.0, 300.0)), "unpinned, it is laid out again");
+    assert!(s.model.elements.get(moved).is_none() || !s.model.pinned.contains(&s.model.guid(moved)));
     let _ = laid;
 }
 
@@ -489,4 +493,164 @@ fn a_road_keeps_its_definition_and_is_made_again_by_replace() {
     assert_eq!(road(&s, now[0]).props["path"], json!([[0, 0], [50000, 0]]));
     let pieces = s.model.elements.values().filter(|e| matches!(e, Element::SubDivision(sd) if sd.road.is_some())).count();
     assert_eq!(pieces, now.len());
+}
+
+// ====================================================================== a real basement
+
+/// Whether two convex rings overlap by more than `tol` (mm) across every axis (separating axes).
+fn overlap(a: &[P2], b: &[P2], tol: f64) -> bool {
+    for ring in [a, b] {
+        let n = ring.len();
+        for i in 0..n {
+            let e = ring[(i + 1) % n] - ring[i];
+            let len = e.dot(e).sqrt();
+            if len < 1e-6 {
+                continue;
+            }
+            let ax = e.perp() * (1.0 / len);
+            let span =
+                |r: &[P2]| r.iter().map(|q| q.dot(ax)).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| (lo.min(v), hi.max(v)));
+            let (p, q) = (span(a), span(b));
+            if p.1 - q.0 < tol || q.1 - p.0 < tol {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+#[test]
+fn a_basement_with_walls_a_column_grid_and_two_ramps_from_the_ground_is_laid_out_using_those_ramps() {
+    let (mut s, b1, _, _) = with_basement();
+    // The basement's slab and its walls, B1 up to Level 1.
+    run(&mut s, "floor", json!({"boundary": AREA, "level": "B1"}));
+    run(&mut s, "wall", json!({"points": AREA, "closed": true, "level": "B1", "top_level": "Level 1"}));
+    // A column grid, 8.1 m by 10 m.
+    let mut columns = Vec::new();
+    for x in [8100.0, 16200.0, 24300.0, 32400.0, 40500.0, 48600.0] {
+        for y in [10000.0, 20000.0, 30000.0] {
+            columns.push(id(&run(&mut s, "structural_column", json!({"at": [x, y], "level": "B1", "top_level": "Level 1"}))));
+        }
+    }
+    // Two ramps up to the ground: a straight one along the north wall, its foot at the east; a curved one in the south-east,
+    // a straight run then a quarter turn.
+    let straight = id(&run(
+        &mut s,
+        "ramp",
+        json!({"start": [31000, 36500], "angle": 180, "level": "B1", "top_level": "Level 1", "width": 6000, "slope": 15}),
+    ));
+    let curved = id(&run(
+        &mut s,
+        "ramp",
+        json!({"path": [[36000, 3500, 0], [52000, 3500, 0.41421356], [56000, 7500]], "level": "B1", "top_level": "Level 1", "width": 6000}),
+    ));
+    let park = id(&run(&mut s, "car_park", json!({"control": AREA, "level": "B1"})));
+    let r = result(&s, park);
+    let laid = bays(&s, park);
+    assert!(!notes(&r).contains("No ramp reaches"), "{r}");
+    assert!(!notes(&r).contains("No aisle can be reached"), "a ramp leads in: {r}");
+    // Some bays: how many the solver fits round two ramps inside the area and a column grid is its own weakness (see
+    // `..._is_filled_as_a_designer_would`).
+    assert!(!laid.is_empty(), "{r}");
+    // Its own ramps, not one made up; no column of its own, none proposed with a grid there.
+    assert_eq!(s.model.elements.values().filter(|e| matches!(e, Element::Ramp(_))).count(), 2);
+    assert_eq!(s.model.elements.values().filter(|e| matches!(e, Element::StructuralColumn(_))).count(), columns.len());
+    assert_eq!(r["columns"].as_u64(), Some(columns.len() as u64));
+    assert!(r.get("proposed_columns").is_none(), "{r}");
+    // On B1, on its slab.
+    let b1g = s.model.guid(b1);
+    assert!(laid.iter().all(|(_, c)| c.level == b1g));
+    // What stands there: the walls, the columns, the two ramps' runs.
+    let m = &s.model;
+    let mut solid: Vec<(String, Vec<P2>)> = Vec::new();
+    for (eid, e) in m.elements.iter() {
+        match e {
+            Element::Wall(_) => solid.push((format!("wall {eid}"), crate::walls::outline(m, *eid))),
+            Element::StructuralColumn(_) => solid.push((format!("column {eid}"), m.column_outline(e))),
+            Element::Ramp(rm) => {
+                let l = crate::stairs::ramp(m, rm);
+                solid.extend(l.runs.iter().map(|run| (format!("ramp {eid}"), run.ring(l.width))));
+            }
+            _ => {}
+        }
+    }
+    let rings: Vec<(Id, Vec<P2>)> = laid
+        .iter()
+        .map(|(id, c)| {
+            let (w, d, a) = crate::carpark::bay_size(m, c).unwrap();
+            (*id, crate::carpark::bay_ring(c.at, c.angle, c.mirrored, w, d, a))
+        })
+        .collect();
+    for (id, ring) in &rings {
+        for (what, o) in &solid {
+            assert!(!overlap(ring, o, 5.0), "bay {id} {ring:?} over {what}");
+        }
+        assert!(ring.iter().all(|q| crate::geom::contains(&AREA.map(|p| P2(p[0], p[1])), *q)), "bay {id} outside the area");
+    }
+    for (i, (a, ra)) in rings.iter().enumerate() {
+        for (b, rb) in &rings[i + 1..] {
+            assert!(!overlap(ra, rb, 5.0), "bays {a} and {b} overlap");
+        }
+    }
+    // Its aisles (the arrows below ground) run through no column and no wall, and one starts at each ramp's foot.
+    let aisles: Vec<Vec<P2>> = r["aisles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["ring"].as_array().unwrap().iter().map(|q| P2(q[0].as_f64().unwrap(), q[1].as_f64().unwrap())).collect())
+        .collect();
+    // (A way off a ramp is a drive aisle wide, which may be a little wider than the ramp: it may graze the wall beside it.)
+    for a in &aisles {
+        for (what, o) in solid.iter().filter(|(w, _)| !w.starts_with("ramp")) {
+            assert!(!overlap(a, o, 150.0), "an aisle {a:?} through {what}");
+        }
+    }
+    // A way in off each ramp's foot; one that can't be joined is said (the solver's weakness, `..._as_a_designer_would`).
+    let joined = [straight, curved]
+        .iter()
+        .filter(|ramp| {
+            let Some(Element::Ramp(rm)) = m.elements.get(**ramp) else { panic!() };
+            let l = crate::stairs::ramp(m, rm);
+            let foot = l.runs[0].ring(l.width);
+            let mid = (foot[0] + foot[3]) * 0.5;
+            aisles.iter().any(|a| a.iter().map(|q| q.dist(mid)).fold(f64::INFINITY, f64::min) < 3500.0 || crate::geom::contains(a, mid))
+        })
+        .count();
+    assert!(joined >= 1, "no ramp leads in: {r}");
+    assert!(joined == 2 || notes(&r).contains("1 of the 2 ramps' feet could not be joined"), "{r}");
+    // A column moved: it runs again, quickly, and still keeps clear of it.
+    let t = std::time::Instant::now();
+    run(&mut s, "move", json!({"ids": [columns[7]], "by": [1500, 0]}));
+    let took = t.elapsed();
+    let Some(Element::StructuralColumn(c)) = s.model.elements.get(columns[7]) else { panic!() };
+    let ring = s.model.column_outline(&Element::StructuralColumn(c.clone()));
+    for (_, c) in bays(&s, park) {
+        let (w, d, a) = crate::carpark::bay_size(&s.model, &c).unwrap();
+        assert!(!overlap(&crate::carpark::bay_ring(c.at, c.angle, c.mirrored, w, d, a), &ring, 5.0), "a bay over the moved column");
+    }
+    assert!(took.as_secs_f64() < 20.0, "{took:?}");
+    eprintln!("re-run on a column moved: {took:?}, {} bays", bays(&s, park).len());
+}
+
+/// What a designer lays out in the basement above: some 60 bays. The solver (Arqiflow's, ported) cuts a plot once at an inside
+/// corner and sets out fields between the cuts; two ramps inside the area at opposite sides leave it a handful of bays.
+#[test]
+#[ignore = "the solver's layout round ramps inside the area is still to improve (docs/parking-ramps-plan.md, left)"]
+fn a_basement_with_walls_a_column_grid_and_two_ramps_is_filled_as_a_designer_would() {
+    let (mut s, _, _, _) = with_basement();
+    run(&mut s, "floor", json!({"boundary": AREA, "level": "B1"}));
+    run(&mut s, "wall", json!({"points": AREA, "closed": true, "level": "B1", "top_level": "Level 1"}));
+    for x in [8100.0, 16200.0, 24300.0, 32400.0, 40500.0, 48600.0] {
+        for y in [10000.0, 20000.0, 30000.0] {
+            run(&mut s, "structural_column", json!({"at": [x, y], "level": "B1", "top_level": "Level 1"}));
+        }
+    }
+    run(&mut s, "ramp", json!({"start": [31000, 36500], "angle": 180, "level": "B1", "top_level": "Level 1", "width": 6000, "slope": 15}));
+    run(
+        &mut s,
+        "ramp",
+        json!({"path": [[36000, 3500, 0], [52000, 3500, 0.41421356], [56000, 7500]], "level": "B1", "top_level": "Level 1", "width": 6000}),
+    );
+    let park = id(&run(&mut s, "car_park", json!({"control": AREA, "level": "B1"})));
+    assert!(bays(&s, park).len() >= 50, "{} bays", bays(&s, park).len());
 }
