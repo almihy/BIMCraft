@@ -287,3 +287,42 @@ Left:
 - The accessible bay is a Parking Space of the stall's width beside its access aisle (`result.access_aisles`); the family
   draws no hatch for the aisle.
 - A masterplan ramp, stall or band of a file of 26 that has no path or point is dropped when converted, not kept.
+
+### Review (16 November, a second look)
+
+Found and fixed (commits after 11a2fe90):
+
+- **Slow on a big basement**: a column near a wall is joined to the outline, and the fields cut the plot at each of its
+  corners as at an L's (150 cuts on a 200 x 150 m basement on a grid: 30 s). A corner with a side under 2 m is a post's;
+  no cut there: 3.5 s (a test build).
+- **Cross aisles that would not fit**: a cross aisle was an aisle wide (7.5 m), so a grid 7.6 m apart took none and a
+  70 m basement got 17 bays. A cross aisle has no bays on it: it is laid a drive aisle wide too (and an aisle wide; the
+  better kept), and set flush with a column's face: 66 bays there.
+- **A ramp left unjoined cost nothing**: a layout joining one of two ramps won on a bay or two. Now an unjoined ramp
+  costs it 10 bays (no more than a quarter of its bays); a plan with no bay is no candidate.
+- **A way off a ramp beside an aisle's end** ran on to the next aisle that covered it (21 m along the south wall of the
+  reviewer's basement). It may now turn once into the aisle beside it (drawn as aisle); both are laid, the better kept.
+- **A row cut by a way** is filled again either side of it, flush with it.
+- **One way round** led cars into dead ends (14 aisles in 13 basements): an aisle with no way in at one end or on at the
+  other is now two-way, and a cross aisle runs from the aisle that runs into it to the one that runs on from it.
+- **Bays over a core**: an area all but filled by what stands on it fell back to the bare outline. Fixed.
+- **Two parts' accessible bays paired** (rows were keyed by each plan's own aisle number): keyed by the aisle on the plot.
+
+Done of what was left:
+
+- **Dead ends** are limited: no aisle runs more than `dead_end` past its last junction (45.7 m, the 150 ft US zoning codes
+  commonly set; no figure is cited from MOMAH or IStructE, so the same is used for them until the firm sets its own: the
+  car park's `dead_end`, mm). A longer one is closed by a cross aisle near its end (one closing two dead ends at once
+  first), else given a turning head (its end bays either side left as paving). It costs bays: the plain basement on a grid
+  132 to 126 (its hand count with the loop closed), Arqiflow's 49 layouts 9,747 to 9,601 (Arqiflow's own: 9,460).
+- **An L whose arms want aisles at right angles**: `lay_split` cuts at the inside corner along each of its sides with a
+  drive aisle, lays each part as modules in its own direction opening onto it, and offers that to the solver: a test L
+  185 to 193.
+- **Angled bays** stay with the fields and the ring. Not in the modules: below ground, among columns, a designer lays 90°
+  bays on two-way aisles (more bays a metre of aisle, cars can turn both ways, the grid is drawn for them); angled bays
+  pay on a one-way surface lot, which the fields lay already.
+
+The empty corner at the bottom left of the reviewer's basement is the way off the curved ramp: it runs west along the
+south wall to the west aisles (it is their cross aisle), and between it and the columns at y 10 m is less than a bay's
+width (2.8 m) on the standard's sizes. Pictures: `docs/parking-real-basement-after-reviewed.png` (37 bays) and
+`-after-2500-reviewed.png` (58).
