@@ -219,3 +219,44 @@ Left:
 - Below ground `result.ways` stays empty; the ramps' throats are in `result.aisles` (no `kind`).
 - `placed` holds the Mark under the English name only: in another language a renumbered bay isn't "changed".
 - A masterplan ramp, stall or band of a file of 26 that has no path or point is dropped when converted, not kept.
+
+## Solver rework (16 November): modules on the grid, as a designer lays them
+
+The reviewer's basement (60 x 40 m in its walls, an 8.1 x 10 m column grid, a straight ramp along the north wall and a curved
+one in the south-east corner) got 7 bays where a designer lays some 60: the ported solver cuts the plot once at an inside
+corner, sets out fields between the cuts, and has no idea of a grid. The rework adds a planner that lays a car park out the
+way a designer does (`site/parking/grid.rs`); the solver's other layouts (fields, ring) stay as candidates and the best by
+bays reached wins, so a surface car park can only gain.
+
+**The stack.** In each direction tried (the area's long sides and square to them, a column grid's axes, each ramp's way
+off), the area is cut across into a stack of modules: an aisle with a row of bays on one side or both (double-loaded the
+norm), and gaps where nothing fits. The stack is found by dynamic programming over the depth of the area (every 100 mm),
+each module scored by the bays it gets less the paving it takes (as the solver scores: 100 m² of aisle a bay), so the aisles
+fall where they serve most bays. What stands on the level is read exactly: a row's bays are set out in the spans its whole
+depth is clear, so they fall between the columns (three 2.5 m bays between columns 8.1 m apart, the column within the row's
+depth or at its back); an aisle is set where it is clear along its length, so it runs between the column lines, and an aisle
+cut in pieces by what stands in it costs the joints it needs. A ramp's foot whose way off runs along the aisles is met by an
+aisle in line with it (the stack is also tried with its phase set by each foot); one whose way off runs across them is met by
+a short way straight off it into the first aisle, the bays it crosses given up.
+
+**Circulation.** The stack's aisles are joined by cross aisles at right angles, chosen greedily: from the aisles a ramp's foot
+(or, above ground, the biggest group) reaches, the cross aisle that brings in the most bays for the fewest it costs, set
+between the columns, until none gains. Cross aisles that cost no bay are added where they close a loop at an aisle's end;
+one-way car parks get a cross aisle at both ends of every aisle and their aisles' traffic runs round (each aisle the other
+way to the one beside it). An aisle runs only as far as what it serves. Bays and aisles no car can reach are left out.
+
+**Irregular areas** are laid out by the same stack: its rows and aisles take the spans of the area at their depth, so an L
+or a notched plot gets modules in each part, joined by the cross aisles; each direction is tried. The fields' cut at an inside
+corner stays a candidate.
+
+**Kept**: never a ramp made up; columns proposed below ground when there are none, now from the chosen layout (a column after
+every three bays, at the backs of the rows, so the grid proposed is the one that gave the most bays); bays removed or kept by
+the person; ids stable (the bays' places are on the same lattice run to run). Angled bays stay with the fields and the ring
+(the stack lays 90° bays).
+
+**Also fixed**: an accessible bay's access aisle (the bay beside it, shared by two accessible bays where a third fits) is
+written (`result.access_aisles`); the accessible bays go nearest the cores (shafts, stairs) below ground when no target is
+given; below ground `result.ways` holds each ramp's way in (`{at, kind: "both", ramp: true}`); a bay's `placed` reads its Mark
+by the model's language's name; a way off a ramp is the ramp's width (not a drive aisle's), so it no longer grazes the wall
+beside the ramp; 90° bays on a one-way car park take a two-way aisle's width (a car needs it to turn in), not the one-way
+figure meant for angled bays.
