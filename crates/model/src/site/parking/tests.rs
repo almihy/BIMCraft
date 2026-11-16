@@ -1232,6 +1232,9 @@ fn picture(l: &Solved, input: &Input, name: &str) {
     for r in input.keep_clear.iter().chain(input.obstacles.iter()) {
         draw(r, [40, 40, 40], true);
     }
+    for r in input.basement.iter().flatten() {
+        draw(r, [120, 120, 120], true);
+    }
     for a in &l.access_aisles {
         draw(a, [250, 200, 140], true);
     }
@@ -1242,4 +1245,160 @@ fn picture(l: &Solved, input: &Input, name: &str) {
         draw(&st.poly, [90, 90, 90], false);
     }
     let _ = pm.save_png(std::path::Path::new(&dir).join(format!("{name}.png")));
+}
+
+// ---------------------------------------------------------------------------------------------------- the review's checks
+/// A repeatable random basement: a rectangle, an L, a notched or a slanted outline in its walls; a column grid (most of
+/// the time) at a random spacing; a core; one or two straight ramps along its walls, their feet into it.
+fn random_basement(r: &mut Rnd) -> (Input, Vec<Ring>) {
+    let w = 40.0 + r.next() * 70.0;
+    let h = 30.0 + r.next() * 50.0;
+    let site: Ring = match (r.next() * 4.0).floor() as i64 {
+        0 => bx(0.0, 0.0, w, h),
+        1 => {
+            let (cw, ch) = (w * (0.35 + r.next() * 0.3), h * (0.35 + r.next() * 0.3));
+            vec![[0.0, 0.0], [w, 0.0], [w, ch], [cw, ch], [cw, h], [0.0, h]]
+        }
+        2 => {
+            let (nx, ny) = (w * (0.3 + r.next() * 0.3), h * (0.2 + r.next() * 0.2));
+            vec![[0.0, 0.0], [w, 0.0], [w, h], [nx + 12.0, h], [nx + 12.0, h - ny], [nx, h - ny], [nx, h], [0.0, h]]
+        }
+        _ => vec![[0.0, 0.0], [w, 0.0], [w + 8.0 * r.next(), h * 0.6], [w * 0.8, h], [0.0, h]],
+    };
+    let mut solid: Vec<Ring> = Vec::new();
+    if r.next() < 0.8 {
+        let (sx, sy) = (7.5 + r.next() * 3.0, 7.5 + r.next() * 5.0);
+        let c = 0.3 + r.next() * 0.3;
+        let (mut x, x1) = (sx, w + 8.0);
+        while x < x1 {
+            let mut y = sy;
+            while y < h {
+                let post = bx(x - c / 2.0, y - c / 2.0, x + c / 2.0, y + c / 2.0);
+                if post.iter().all(|p| point_in_ring(*p, &site)) && dist_to_ring([x, y], &site) > 1.0 {
+                    solid.push(post);
+                }
+                y += sy;
+            }
+            x += sx;
+        }
+    }
+    if r.next() < 0.5 {
+        let (cx, cy) = (w * (0.2 + r.next() * 0.6), h * (0.2 + r.next() * 0.6));
+        let core = bx(cx, cy, cx + 6.0, cy + 7.0);
+        if core.iter().all(|p| point_in_ring(*p, &site)) {
+            solid.retain(|p| !overlap(p, &core));
+            solid.push(core);
+        }
+    }
+    let mut ramps: Vec<Ring> = Vec::new();
+    for k in 0..(1 + (r.next() * 2.0).floor() as usize) {
+        // Along the south wall from the west, or along the west wall from the south.
+        let len = 18.0 + r.next() * 8.0;
+        let at = 0.15 + r.next() * 0.4;
+        let ramp = if k == 0 { bx(w * at, 0.5, w * at + len, 6.5) } else { bx(0.5, h * at, 6.5, h * at + len) };
+        if ramp.iter().all(|p| point_in_ring(*p, &site)) {
+            // No column stands just off either end, where cars come off it (as a structure is drawn round a ramp).
+            let b = bounds(&ramp);
+            let clear = if k == 0 { bx(b.x0 - 8.0, b.y0, b.x1 + 8.0, b.y1) } else { bx(b.x0, b.y0 - 8.0, b.x1, b.y1 + 8.0) };
+            solid.retain(|p| !overlap(p, &clear));
+            ramps.push(ramp);
+        }
+    }
+    let settings = if r.next() < 0.5 {
+        Given { stall_width: Some(2.5), stall_depth: Some(5.0), aisle: Some(6.0), column_every: Some(0.0), ..Given::default() }
+    } else {
+        Given { column_every: Some(0.0), ..Given::default() }
+    };
+    let mut keep = solid.clone();
+    keep.extend(ramps.iter().cloned());
+    let input = Input { site, basement: Some(ramps.clone()), keep_clear: solid.clone(), settings, ..Input::default() };
+    let mut all = solid;
+    all.extend(ramps);
+    let _ = keep;
+    (input, all)
+}
+
+/// Random basements: no bay over a column, a core, a ramp or another bay, none off the ground, every bay opening onto
+/// an aisle; no aisle through what stands; quick.
+#[test]
+fn random_basements_have_no_faults() {
+    let mut r = Rnd(11.0);
+    let mut bad = Vec::new();
+    let mut worst = std::time::Duration::ZERO;
+    let mut total = 0;
+    for i in 0..40 {
+        let (input, solid) = random_basement(&mut r);
+        if std::env::var("PARKING_ONE").is_ok_and(|n| n != i.to_string()) {
+            continue;
+        }
+        let t = std::time::Instant::now();
+        let l = solve(&input);
+        worst = worst.max(t.elapsed());
+        total += l.stalls.len();
+        let mut f = faults(&l, &solid);
+        for a in l.aisles.iter().filter(|a| a.kind != super::fields::AisleKind::Throat) {
+            for h in &solid {
+                if shared_area(&a.poly, h) > 0.01 {
+                    f.push(format!("an aisle through {:?}", centre(h)));
+                }
+            }
+        }
+        if std::env::var_os("PARKING_PICTURE").is_some() {
+            picture(&l, &input, &format!("random_{i}"));
+        }
+        if !f.is_empty() {
+            bad.push(format!("basement {i}: {}", f.join("; ")));
+        }
+        if std::env::var_os("PARKING_DEBUG_YIELD").is_some() {
+            eprintln!("basement {i}: {} bays, notes {:?}", l.stalls.len(), l.notes);
+        }
+    }
+    eprintln!("random basements: {total} bays, the slowest {worst:?}");
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
+/// The biggest a basement gets: 200 by 150 m on an 8.1 m grid (over 400 columns), three ramps, a core.
+#[test]
+fn a_huge_basement_on_a_grid_is_laid_out_in_time() {
+    let mut keep = Vec::new();
+    for i in 1..25 {
+        for j in 1..19 {
+            let (x, y) = (8.1 * i as f64, 8.1 * j as f64);
+            if x < 199.0 && y < 149.0 {
+                keep.push(bx(x - 0.3, y - 0.3, x + 0.3, y + 0.3));
+            }
+        }
+    }
+    let core = bx(90.0, 70.0, 98.0, 78.0);
+    keep.retain(|p| !overlap(p, &core));
+    keep.push(core);
+    let ramps = vec![bx(20.0, 0.5, 44.0, 6.5), bx(193.5, 60.0, 199.5, 84.0), bx(120.0, 143.5, 144.0, 149.5)];
+    // Clear of the ramps and just off their ends.
+    let clear = [bx(12.0, 0.5, 52.0, 6.5), bx(193.5, 52.0, 199.5, 92.0), bx(112.0, 143.5, 152.0, 149.5)];
+    keep.retain(|p| clear.iter().all(|r| !overlap(p, r)));
+    let mut kept = keep.clone();
+    kept.extend(ramps.iter().cloned());
+    let input = Input {
+        site: bx(0.0, 0.0, 200.0, 150.0),
+        basement: Some(Vec::new()),
+        feet: vec![
+            (([44.0, 0.5], [44.0, 6.5]), [1.0, 0.0]),
+            (([193.5, 60.0], [199.5, 60.0]), [0.0, -1.0]),
+            (([120.0, 143.5], [120.0, 149.5]), [-1.0, 0.0]),
+        ],
+        keep_clear: kept,
+        settings: Given { column_every: Some(0.0), ..Given::default() },
+        ..Input::default()
+    };
+    let t = std::time::Instant::now();
+    let l = solve(&input);
+    let took = t.elapsed();
+    picture(&l, &input, "huge");
+    eprintln!("a basement 200 x 150 m on a grid: {} bays in {took:?}, notes {:?}", l.stalls.len(), l.notes);
+    let mut solid = keep;
+    solid.extend(ramps);
+    assert_eq!(faults(&l, &solid), Vec::<String>::new());
+    assert!(l.stalls.len() >= 500, "{} bays", l.stalls.len());
+    let limit = if cfg!(debug_assertions) { 15_000 } else { 5000 };
+    assert!(took.as_millis() < limit, "{took:?}");
 }

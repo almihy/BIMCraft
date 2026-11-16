@@ -363,7 +363,13 @@ pub fn lay_grid(ctx: &mut Ctx, part: &Region, s: &Settings, origin: Pt, degs: &[
             if std::env::var_os("PARKING_DEBUG").is_some() {
                 eprintln!("grid {deg} anchor {anchor:.2} bonus {bonus}: {:?}", stack.iter().map(|(y, v)| format!("{y:.2}{v:?}")).collect::<Vec<_>>());
             }
-            if let Some((plan, ups)) = build(&st, &stack, &local_feet) {
+            // Each ramp's foot joined by the shortest way, and (when that turns) by the straight way only: a way that
+            // turns may cost a cross aisle the straight one makes (the solver keeps the better).
+            let mut built = vec![build(&st, &stack, &local_feet, true)];
+            if built[0].as_ref().is_none_or(|(_, _, turned)| *turned) {
+                built.push(build(&st, &stack, &local_feet, false));
+            }
+            for (plan, ups, _) in built.into_iter().flatten() {
                 if std::env::var_os("PARKING_DEBUG").is_some() {
                     eprintln!("   -> {} bays, {} aisles", plan.stalls.len(), plan.aisles.len());
                 }
@@ -381,7 +387,8 @@ pub fn lay_grid(ctx: &mut Ctx, part: &Region, s: &Settings, origin: Pt, degs: &[
 }
 
 /// The stack's plan: its aisles' pieces and bays, joined by cross aisles, trimmed to what they serve.
-fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot]) -> Option<(Plan, Vec<Option<f64>>)> {
+/// `turns`: a ramp's foot may be joined by a way that turns into an aisle beside it; whether one was.
+fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot], turns: bool) -> Option<(Plan, Vec<Option<f64>>, bool)> {
     let s = st.s;
     let mut segs: Vec<Seg> = Vec::new();
     let mut bays: Vec<Bay> = Vec::new();
@@ -417,10 +424,20 @@ fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot]) -> Option<(Plan, V
     let mut reached = vec![false; ns];
     let mut links: Vec<Link> = Vec::new();
     let cost_of = |r: &Rect, bays: &[Bay]| -> Vec<usize> { (0..bays.len()).filter(|&i| bays[i].alive && overlaps(r, &bays[i])).collect() };
-    // A ramp's foot: an aisle in line with it, or a way straight off it into the first aisle it meets.
+    // A ramp's foot: an aisle in line with it, a way straight off it into the first aisle it meets, or a way that turns
+    // once into an aisle beside it (off the foot and along, or round the aisle's end): the shortest.
+    let cw = s.aisle.min(s.drive_aisle);
+    let clear = |r: &Rect| r.x1 - r.x0 < 0.3 || r.y1 - r.y0 < 0.3 || box_inside(st.g, r.x0 + 0.1, r.y0 + 0.1, r.x1 - 0.1, r.y1 - 0.1);
+    let mut ways: Vec<Rect> = Vec::new();
     for f in feet {
+        // (length, piece, the link's rect onto the piece, the way's rects to draw as aisles)
+        let mut best: Option<(f64, usize, Rect, Vec<Rect>)> = None;
+        let mut offer = |len: f64, k: usize, r: Rect, draw: Vec<Rect>| {
+            if (turns || draw.is_empty()) && best.as_ref().is_none_or(|b| len < b.0 - 1e-6) {
+                best = Some((len, k, r, draw));
+            }
+        };
         if f.along {
-            let mut best: Option<(f64, usize)> = None;
             for (k, sg) in segs.iter().enumerate() {
                 if !in_line(f.lo, f.hi, sg.y0, sg.y1) {
                     continue;
@@ -434,47 +451,92 @@ fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot]) -> Option<(Plan, V
                 if gap > FOOT_SLACK && !box_inside(st.g, f.at.min(f.at + f.dir * gap), lo + 0.1, f.at.max(f.at + f.dir * gap), hi - 0.1) {
                     continue;
                 }
-                if best.is_none_or(|(g, _)| gap < g) {
-                    best = Some((gap, k));
-                }
+                let r = if f.dir > 0.0 { rect(f.at, sg.y0, sg.x0.max(f.at), sg.y1) } else { rect(sg.x1.min(f.at), sg.y0, f.at, sg.y1) };
+                offer(gap.max(0.0), k, r, Vec::new());
             }
-            if let Some((_, k)) = best {
-                reached[k] = true;
-                let r = if f.dir > 0.0 { rect(f.at, segs[k].y0, segs[k].x0.max(f.at), segs[k].y1) } else { rect(segs[k].x1.min(f.at), segs[k].y0, f.at, segs[k].y1) };
-                links.push(Link { r, a: k, b: None, cost: Vec::new() });
+            // Off the foot a turn's width, then square to an aisle above or below.
+            let stub = rect(f.at, f.lo, f.at + f.dir * cw, f.hi);
+            if clear(&rect(stub.x0 + if f.dir > 0.0 { FOOT_SLACK } else { 0.0 }, stub.y0, stub.x1 - if f.dir < 0.0 { FOOT_SLACK } else { 0.0 }, stub.y1)) {
+                for (k, sg) in segs.iter().enumerate() {
+                    if sg.x0 > stub.x0 + FOOT_SLACK || sg.x1 < stub.x1 - FOOT_SLACK {
+                        continue;
+                    }
+                    let band = if sg.y0 >= f.hi - FOOT_SLACK {
+                        rect(stub.x0, f.hi, stub.x1, sg.y0)
+                    } else if sg.y1 <= f.lo + FOOT_SLACK {
+                        rect(stub.x0, sg.y1, stub.x1, f.lo)
+                    } else {
+                        continue;
+                    };
+                    let len = cw + band.y1 - band.y0;
+                    if band.y1 - band.y0 > FOOT_REACH || !clear(&band) {
+                        continue;
+                    }
+                    offer(len, k, band, vec![stub, band]);
+                }
             }
         } else {
             let mid = (f.lo + f.hi) / 2.0;
             let half = (f.hi - f.lo).max(s.one_way_entry) / 2.0;
-            let mut best: Option<(f64, usize)> = None;
             for (k, sg) in segs.iter().enumerate() {
-                if sg.x0 > mid - half + FOOT_SLACK || sg.x1 < mid + half - FOOT_SLACK {
-                    continue;
-                }
-                let gap = if f.dir > 0.0 { sg.y0 - f.at } else { f.at - sg.y1 };
-                if gap < -1.0 || gap > FOOT_REACH {
-                    continue;
-                }
-                if best.is_none_or(|(g, _)| gap < g) {
-                    best = Some((gap, k));
-                }
-            }
-            if let Some((gap, k)) = best {
-                let r = if f.dir > 0.0 { rect(mid - half, f.at, mid + half, f.at + gap.max(0.0)) } else { rect(mid - half, f.at - gap.max(0.0), mid + half, f.at) };
-                // Clear from just off the foot (the ramp's cut-out may leave a sliver there) to the aisle.
-                let (y0, y1) = if f.dir > 0.0 { (r.y0 + FOOT_SLACK, r.y1) } else { (r.y0, r.y1 - FOOT_SLACK) };
-                if gap <= FOOT_SLACK || box_inside(st.g, r.x0 + 0.1, y0, r.x1 - 0.1, y1) {
-                    let cost = cost_of(&r, &bays);
-                    for &i in &cost {
-                        bays[i].alive = false;
+                let covers = sg.x0 <= mid - half + FOOT_SLACK && sg.x1 >= mid + half - FOOT_SLACK;
+                if covers {
+                    let gap = if f.dir > 0.0 { sg.y0 - f.at } else { f.at - sg.y1 };
+                    if gap < -1.0 || gap > FOOT_REACH {
+                        continue;
                     }
-                    reached[k] = true;
-                    links.push(Link { r, a: k, b: None, cost });
+                    let r = if f.dir > 0.0 { rect(mid - half, f.at, mid + half, f.at + gap.max(0.0)) } else { rect(mid - half, f.at - gap.max(0.0), mid + half, f.at) };
+                    // Clear from just off the foot (the ramp's cut-out may leave a sliver there) to the aisle.
+                    let (y0, y1) = if f.dir > 0.0 { (r.y0 + FOOT_SLACK, r.y1) } else { (r.y0, r.y1 - FOOT_SLACK) };
+                    if gap <= FOOT_SLACK || box_inside(st.g, r.x0 + 0.1, y0, r.x1 - 0.1, y1) {
+                        offer(gap.max(0.0), k, r, Vec::new());
+                    }
+                    continue;
                 }
+                // An aisle beside the way off the foot: the way runs on to the aisle's far side, and the aisle on to the way.
+                let far = if f.dir > 0.0 { sg.y1 - f.at } else { f.at - sg.y0 };
+                // Far enough past the foot to turn in (a car turns in along the aisle's end), the foot maybe level with it.
+                if far < 2.5 || far > FOOT_REACH + st.a {
+                    continue;
+                }
+                let (y0, y1) = if f.dir > 0.0 { (sg.y0.max(f.at), sg.y1) } else { (sg.y0, sg.y1.min(f.at)) };
+                let side = if sg.x0 >= mid + half - FOOT_SLACK {
+                    rect(mid + half, y0, sg.x0, y1)
+                } else if sg.x1 <= mid - half + FOOT_SLACK {
+                    rect(sg.x1, y0, mid - half, y1)
+                } else {
+                    continue;
+                };
+                let off = if f.dir > 0.0 { rect(mid - half, f.at, mid + half, sg.y1) } else { rect(mid - half, sg.y0, mid + half, f.at) };
+                let check = if f.dir > 0.0 { rect(off.x0, off.y0 + FOOT_SLACK, off.x1, off.y1) } else { rect(off.x0, off.y0, off.x1, off.y1 - FOOT_SLACK) };
+                let reach = side.x1 - side.x0;
+                if reach > FOOT_REACH || !clear(&check) || !clear(&side) {
+                    continue;
+                }
+                let mut draw = vec![off];
+                if reach > 0.05 {
+                    draw.push(side);
+                }
+                offer(far + reach, k, if reach > 0.05 { side } else { off }, draw);
             }
+        }
+        if let Some((_, k, r, draw)) = best {
+            let mut cost = cost_of(&r, &bays);
+            for d in &draw {
+                cost.extend(cost_of(d, &bays));
+            }
+            cost.sort_unstable();
+            cost.dedup();
+            for &i in &cost {
+                bays[i].alive = false;
+            }
+            reached[k] = true;
+            ways.extend(draw);
+            links.push(Link { r, a: k, b: None, cost });
         }
     }
     let ramps = !feet.is_empty();
+    // A cross aisle has no bays on it: a drive aisle's width is enough (it fits between columns an aisle's width would not).
     if std::env::var_os("PARKING_DEBUG").is_some() {
         eprintln!("   feet {feet:?} segs {:?} reached {reached:?}", segs.iter().map(|s| format!("{:.1}-{:.1}x{:.1}-{:.1}", s.x0, s.x1, s.y0, s.y1)).collect::<Vec<_>>());
     }
@@ -492,11 +554,22 @@ fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot]) -> Option<(Plan, V
         reached[top] = true;
     }
     // Cross aisles: between two pieces of the stack one above the other, at a bay's side, a piece's end or a column's side.
-    let cw = s.aisle;
     let mut xs: Vec<f64> = Vec::new();
     for sg in &segs {
         xs.push(sg.x0);
         xs.push(sg.x1 - cw);
+    }
+    // Flush with what stands between two levels of aisles (a column's face, a core's side).
+    let mut levels: Vec<(f64, f64)> = segs.iter().map(|sg| (sg.y0, sg.y1)).collect();
+    levels.sort_by(|p, q| p.0.total_cmp(&q.0));
+    levels.dedup_by(|p, q| (p.0 - q.0).abs() < 1e-6);
+    for w in levels.windows(2) {
+        if w[1].0 > w[0].1 + 1e-6 {
+            for sp in strip_spans(st.g, w[0].1, w[1].0) {
+                xs.push(sp[0]);
+                xs.push(sp[1] - cw);
+            }
+        }
     }
     for b in &bays {
         xs.push(b.x0);
@@ -552,6 +625,9 @@ fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot]) -> Option<(Plan, V
             }
         }
         let Some((gain, i)) = best else { break };
+        if std::env::var_os("PARKING_DEBUG").is_some() {
+            eprintln!("   options {} best gain {gain:.2} at {:?} bays {}", options.len(), options[i].r, bays.len());
+        }
         if gain <= 0.0 {
             break;
         }
@@ -610,6 +686,11 @@ fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot]) -> Option<(Plan, V
         }
     }
     let crosses: Vec<Link> = options.into_iter().zip(used).filter(|(_, u)| *u).map(|(o, _)| o).collect();
+    // A row cut by a cross aisle or a ramp's way is filled again in what is left of it: the bays given up where the way
+    // crosses it come back on either side, flush with it (no proposed grid: its bays keep their lattice).
+    if st.n == 0 {
+        refill(st, &segs, &on, &mut bays, crosses.iter().map(|l| l.r).chain(links.iter().map(|l| l.r)).chain(ways.iter().copied()));
+    }
     // Each aisle piece runs only as far as what it serves: its bays, its cross aisles, a ramp's way onto it.
     let mut keep = vec![false; ns];
     let mut span: Vec<(f64, f64)> = vec![(f64::INFINITY, f64::NEG_INFINITY); ns];
@@ -660,6 +741,11 @@ fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot]) -> Option<(Plan, V
         plan.aisles.push(LAisle { id: (ns + i) as i64, r: l.r, kind: AisleKind::Cross, flow: None });
         ups.push(flow);
     }
+    // The ways off the ramps' feet that turn into their aisles.
+    for (j, r) in ways.iter().enumerate() {
+        plan.aisles.push(LAisle { id: (ns + crosses.len() + j) as i64, r: *r, kind: AisleKind::Cross, flow: None });
+        ups.push(None);
+    }
     for b in bays.iter().filter(|b| b.alive && keep[b.seg]) {
         plan.stalls.push(LStall {
             r: rect(b.x0, b.y0, b.x1, b.y1),
@@ -674,7 +760,67 @@ fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot]) -> Option<(Plan, V
     if st.n > 0 {
         plan.columns = Some(columns(st, &bays, &plan));
     }
-    (!plan.stalls.is_empty()).then_some((plan, ups))
+    (!plan.stalls.is_empty()).then_some((plan, ups, !ways.is_empty()))
+}
+
+/// Bays laid again in each row where what was given up (a cross aisle's, a way's crossing) left room: in the gaps between
+/// the bays still there, clear of every way, on the pieces the row opens onto.
+fn refill(st: &Stack, segs: &[Seg], on: &[bool], bays: &mut Vec<Bay>, ways: impl Iterator<Item = Rect>) {
+    let ways: Vec<Rect> = ways.collect();
+    let mut rows: Vec<(String, f64, f64, bool)> = Vec::new();
+    for b in bays.iter() {
+        if !rows.iter().any(|r| r.0 == b.row) {
+            rows.push((b.row.clone(), b.y0, b.y1, b.up));
+        }
+    }
+    let mut extra = 0i64;
+    for (row, y0, y1, up) in rows {
+        let cut: Vec<Span> = ways.iter().filter(|r| r.y0 < y1 - 1e-6 && r.y1 > y0 + 1e-6).map(|r| [r.x0, r.x1]).collect();
+        if cut.is_empty() {
+            continue;
+        }
+        let mut pieces: Vec<usize> = bays.iter().filter(|b| b.row == row).map(|b| b.seg).collect();
+        pieces.sort_unstable();
+        pieces.dedup();
+        let clear = strip_spans(st.g, y0, y1);
+        for k in pieces.into_iter().filter(|&k| on[k]) {
+            let mut taken: Vec<Span> = cut.clone();
+            taken.extend(bays.iter().filter(|b| b.alive && b.row == row).map(|b| [b.x0, b.x1]));
+            taken.sort_by(|p, q| p[0].total_cmp(&q[0]));
+            for sp in &clear {
+                let Some(i) = meet(*sp, [segs[k].x0, segs[k].x1]) else { continue };
+                // What of `i` no bay and no way takes.
+                let mut at = i[0];
+                let mut gaps: Vec<Span> = Vec::new();
+                for t in &taken {
+                    if t[1] <= at + 1e-6 || t[0] >= i[1] {
+                        continue;
+                    }
+                    if t[0] > at {
+                        gaps.push([at, t[0]]);
+                    }
+                    at = at.max(t[1]);
+                }
+                if i[1] > at {
+                    gaps.push([at, i[1]]);
+                }
+                for g in gaps {
+                    let n = ((g[1] - g[0] + 1e-6) / st.w).floor() as usize;
+                    if n == 0 {
+                        continue;
+                    }
+                    extra += 1;
+                    // Flush with the way it is beside: from the gap's end when a way closes it there, else its start.
+                    let from_end = ways.iter().any(|r| r.y0 < y1 - 1e-6 && r.y1 > y0 + 1e-6 && (r.x0 - g[1]).abs() < 1e-6);
+                    let x0 = if from_end { g[1] - n as f64 * st.w } else { g[0] };
+                    for j in 0..n {
+                        let x = x0 + j as f64 * st.w;
+                        bays.push(Bay { x0: x, x1: x + st.w, y0, y1, seg: k, up, row: row.clone(), cell: 100_000 * extra + j as i64, alive: true });
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// A proposed grid: a column after every `n` bays, on the lattice, at the back of each row (on the line between two rows

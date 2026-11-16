@@ -439,6 +439,9 @@ struct Candidate {
 /// fields and the ring, with their rows along every side, are kept.
 const GRID_MARGIN: f64 = 1.02;
 
+/// What a ramp whose foot no aisle meets costs a layout below ground, in bays (and no more than a quarter of its bays).
+const UNJOINED: f64 = 10.0;
+
 /// A ramp's foot, where cars come off it onto the level: of its two short sides, the one further into the ground
 /// `area`; and the way a car comes off it.
 fn ramp_foot(ramp: &[Pt], area: &[Pt]) -> ((Pt, Pt), Pt) {
@@ -634,6 +637,9 @@ pub fn solve(input: &Input) -> Solved {
                 plan.islands.push(WIsland { poly: st.poly, kind: IslandKind::Leftover });
             }
             plan.stalls = kept;
+            if plan.stalls.is_empty() {
+                continue;
+            }
             let mut throats = if streets.is_empty() { Vec::new() } else { throats_for(&plan, &streets, &clear, &s, &access, false) };
             let mut relaxed = false;
             if !streets.is_empty() && (throats.is_empty() || throats.len() < access.len()) {
@@ -649,12 +655,16 @@ pub fn solve(input: &Input) -> Solved {
                 plan.stalls.iter().filter(|st| reach.contains(&opens_onto(st)) && !throats.iter().any(|t| hits(&t.poly, &st.poly))).count()
                     as f64;
             let paved = paved_w(&plan);
+            // Below ground every ramp leads onto an aisle: a ramp left unjoined costs the layout as many bays as a ramp's
+            // way round would (a designer never leaves one).
+            let unjoined = if basement { ramps.len().saturating_sub(ins.len()) as f64 * UNJOINED.min(0.25 * count) } else { 0.0 };
             let score = count
                 - paved / PAVED_PER_BAY
+                - unjoined
                 - if !streets.is_empty() && ins.is_empty() { 10000.0 } else { 0.0 }
                 - if relaxed { 0.5 } else { 0.0 };
             // A plan no car can come into reaches nothing, whatever it lays.
-            let count = if !streets.is_empty() && ins.is_empty() { 0.0 } else { count };
+            let count = if !streets.is_empty() && ins.is_empty() { 0.0 } else { count - unjoined };
             let slot = if grid { &mut best_grid } else { &mut best };
             if slot.as_ref().is_none_or(|b| score > b.score) {
                 *slot = Some(Candidate { deg, plan, reach, throats, score, relaxed, count });

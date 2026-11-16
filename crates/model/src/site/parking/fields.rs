@@ -942,9 +942,18 @@ pub fn lay_plot(
     let mut tried: Vec<String> = Vec::new();
     let outer_corners: Vec<String> =
         reflex_corners(&g.outer, &[]).iter().map(|p| format!("{},{}", to_fixed(p[0], 3), to_fixed(p[1], 3))).collect();
-    // The corners of what stands in it, but posts (a column is stepped round, not cut along).
+    // The corners of what stands in it, but posts (a column is stepped round, not cut along): a post's corner on the
+    // outline too (a column near a wall is joined to it), known by its short side.
     let standing: Vec<Ring> = g.holes.iter().filter(|h| !is_post(h)).cloned().collect();
-    for c in reflex_corners(&g.outer, &standing) {
+    let post_corner = |c: Pt| {
+        let n = g.outer.len();
+        (0..n).any(|i| {
+            let (p, q) = (g.outer[i], g.outer[(i + 1) % n]);
+            (dist(p, c) < 1e-6 || dist(q, c) < 1e-6) && dist(p, q) <= POST
+        })
+    };
+    let cut_at: Vec<Pt> = reflex_corners(&g.outer, &standing).into_iter().filter(|&c| !post_corner(c)).collect();
+    for c in cut_at {
         let wing = outer_corners.contains(&format!("{},{}", to_fixed(c[0], 3), to_fixed(c[1], 3)));
         for horizontal in [true, false] {
             for shift in [-d, 0.0] {
