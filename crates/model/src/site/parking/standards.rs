@@ -18,6 +18,8 @@ pub struct Standard {
     pub access_aisle: f64,
     /// Least distance from a street corner to a curb cut.
     pub entry_from_corner: f64,
+    /// The longest a dead-end aisle runs past its last junction before it needs a loop or a turning head.
+    pub dead_end: f64,
     pub source: &'static str,
 }
 
@@ -32,6 +34,7 @@ pub const SAUDI: Standard = Standard {
     accessible_width: 2.8,
     access_aisle: 2.8,
     entry_from_corner: 9.0,
+    dead_end: 45.7,
     source: "MOMAH parking design guide 2023, Table 1; Saudi universal access guide",
 };
 
@@ -46,6 +49,8 @@ pub const US: Standard = Standard {
     accessible_width: 2.44,
     access_aisle: 1.52,
     entry_from_corner: 15.0,
+    // 150 ft, the figure US zoning codes commonly set before a turnaround.
+    dead_end: 45.7,
     source: "ULI Dimensions of Parking; ADA 2010 §208, §502",
 };
 
@@ -60,6 +65,7 @@ pub const UK: Standard = Standard {
     accessible_width: 2.6,
     access_aisle: 1.2,
     entry_from_corner: 10.0,
+    dead_end: 45.7,
     source: "IStructE Car park design 2023; BS 8300",
 };
 
@@ -186,6 +192,8 @@ pub struct Settings {
     pub floor_to_floor: f64,
     pub ramp_slope: f64,
     pub clear_height: f64,
+    /// The longest a dead-end aisle runs past its last junction (0: no limit): longer, it gets a loop or a turning head.
+    pub dead_end: f64,
 }
 
 /// What the person changed of the standard: each left out is the standard's.
@@ -216,6 +224,7 @@ pub struct Given {
     pub floor_to_floor: Option<f64>,
     pub ramp_slope: Option<f64>,
     pub clear_height: Option<f64>,
+    pub dead_end: Option<f64>,
 }
 
 pub fn settings_of(g: &Given) -> Settings {
@@ -248,6 +257,7 @@ pub fn settings_of(g: &Given) -> Settings {
         floor_to_floor: g.floor_to_floor.unwrap_or(3.5),
         ramp_slope: g.ramp_slope.unwrap_or(0.15),
         clear_height: g.clear_height.unwrap_or(2.2),
+        dead_end: g.dead_end.unwrap_or(std.dead_end),
     }
 }
 

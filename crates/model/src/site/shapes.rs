@@ -1263,6 +1263,7 @@ pub fn props_of(kind_: &str) -> serde_json::Map<String, Value> {
             "stall_width": "length", "stall_depth": "length", "aisle": "length", "setback": "length",
             "end_island": "length", "island_every": "count", "ev_share": "fraction", "column_every": "count",
             "column_size": "length", "floor_to_floor": "length", "ramp_slope": "fraction", "direction": "angle",
+            "dead_end": "length",
             "access": list(obj(json!({"at": "point", "kind": "string"}))), "removed": "points", "target": "point",
             "solved": "string",
             "result": obj(json!({

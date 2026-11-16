@@ -1402,3 +1402,42 @@ fn a_huge_basement_on_a_grid_is_laid_out_in_time() {
     let limit = if cfg!(debug_assertions) { 15_000 } else { 5000 };
     assert!(took.as_millis() < limit, "{took:?}");
 }
+
+/// No aisle runs further past its last junction (a cross aisle, another aisle, a ramp's way, a turning head) than a dead
+/// end may: a long basement with its ramp at one end gets its loops.
+#[test]
+fn dead_ends_are_no_longer_than_the_standard_allows() {
+    for sizes in [None, Some((2.5, 5.0, 6.0))] {
+        let given = match sizes {
+            Some((w, d, a)) => Given { stall_width: Some(w), stall_depth: Some(d), aisle: Some(a), column_every: Some(0.0), ..Given::default() },
+            None => Given { column_every: Some(0.0), ..Given::default() },
+        };
+        let input = Input {
+            site: bx(0.0, 0.0, 120.0, 45.0),
+            basement: Some(Vec::new()),
+            feet: vec![(([0.1, 3.0], [0.1, 9.0]), [1.0, 0.0])],
+            settings: given,
+            ..Input::default()
+        };
+        let l = solve(&input);
+        picture(&l, &input, &format!("dead_ends_{}", sizes.is_some()));
+        assert!(l.stalls.len() > 100, "{} bays", l.stalls.len());
+        let limit = l.settings.dead_end;
+        let mut ways: Vec<&Ring> = l.aisles.iter().map(|a| &a.poly).collect();
+        ways.extend(l.entries.iter().map(|e| &e.poly));
+        for a in l.aisles.iter().filter(|a| a.kind == super::fields::AisleKind::Aisle) {
+            let b = bbox(&a.poly);
+            let along_x = b.x1 - b.x0 >= b.y1 - b.y0;
+            let (lo, hi) = if along_x { (b.x0, b.x1) } else { (b.y0, b.y1) };
+            let (mut first, mut last) = (f64::INFINITY, f64::NEG_INFINITY);
+            for w in ways.iter().filter(|w| !std::ptr::eq(**w, &a.poly) && touch_along(w, &a.poly, 2.0)) {
+                let q = bbox(w);
+                let (p0, p1) = if along_x { (q.x0.max(lo), q.x1.min(hi)) } else { (q.y0.max(lo), q.y1.min(hi)) };
+                first = first.min(p0);
+                last = last.max(p1);
+            }
+            assert!(first.is_finite(), "an aisle with no junction: {:?}", a.poly);
+            assert!(first - lo <= limit + 0.5 && hi - last <= limit + 0.5, "a dead end of {:.1} m and {:.1} m on {:?}", first - lo, hi - last, a.poly);
+        }
+    }
+}

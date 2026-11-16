@@ -697,6 +697,76 @@ fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot], turns: bool, cw: f
             used[i] = true;
         }
     }
+    // Dead ends no longer than the standard allows past their last junction: a longer one is closed by a cross aisle
+    // into a reached aisle near its end, or else given a turning head (its end bays either side left as paving).
+    if !s.one_way && s.dead_end > 0.0 {
+        // A piece's ends (its bays and junctions) and how far each runs past its last junction (None: no junction).
+        let dead = |k: usize, used: &[bool], links: &[Link], bays: &[Bay]| -> Option<(f64, f64, f64, f64)> {
+            let mut js: Vec<(f64, f64)> =
+                options.iter().zip(used).filter(|(o, u)| **u && (o.a == k || o.b == Some(k))).map(|(o, _)| (o.r.x0, o.r.x1)).collect();
+            js.extend(links.iter().filter(|l| l.a == k).map(|l| (l.r.x0, l.r.x1)));
+            if js.is_empty() {
+                return None;
+            }
+            let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+            for b in bays.iter().filter(|b| b.alive && b.seg == k) {
+                lo = lo.min(b.x0);
+                hi = hi.max(b.x1);
+            }
+            for j in &js {
+                lo = lo.min(j.0);
+                hi = hi.max(j.1);
+            }
+            let first = js.iter().map(|j| j.0).fold(f64::INFINITY, f64::min);
+            let last = js.iter().map(|j| j.1).fold(f64::NEG_INFINITY, f64::max);
+            Some((lo, hi, first - lo, hi - last))
+        };
+        for k in (0..ns).filter(|&k| on[k]) {
+            for left in [true, false] {
+                let Some((lo, hi, l, r)) = dead(k, &used, &links, &bays) else { break };
+                if (if left { l } else { r }) <= s.dead_end + 1e-6 {
+                    continue;
+                }
+                // A loop: a cross aisle into another reached aisle that leaves no dead end too long; the cheapest, then the
+                // one that ends the other aisle's dead end too, then the nearest the end (a loop round it).
+                let pick = options
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, o)| {
+                        !used[*i] && (o.a == k || o.b == Some(k)) && o.b.is_some_and(|b| on[b] && on[o.a]) && {
+                            let left_over = if left { o.r.x0 - lo } else { hi - o.r.x1 };
+                            left_over <= s.dead_end + 1e-6
+                        }
+                    })
+                    .map(|(i, o)| {
+                        let n = o.cost.iter().filter(|&&j| bays[j].alive).count();
+                        let other = if o.a == k { o.b.unwrap_or(o.a) } else { o.a };
+                        let both = dead(other, &used, &links, &bays).is_some_and(|(_, _, ol, or)| (if left { ol } else { or }) > s.dead_end + 1e-6);
+                        let off = if left { o.r.x0 - lo } else { hi - o.r.x1 };
+                        (i, n, !both, off)
+                    })
+                    .min_by(|p, q| p.1.cmp(&q.1).then(p.2.cmp(&q.2)).then(p.3.total_cmp(&q.3)))
+                    .map(|p| p.0);
+                if let Some(i) = pick {
+                    used[i] = true;
+                    for &j in &options[i].cost {
+                        bays[j].alive = false;
+                    }
+                    continue;
+                }
+                // A turning head: the end bays on both sides of the aisle left as paving, the aisle running to them.
+                let end = if left { lo } else { hi };
+                for b in bays.iter_mut().filter(|b| b.alive && b.seg == k) {
+                    if if left { b.x0 < end + st.w - 1e-6 } else { b.x1 > end - st.w + 1e-6 } {
+                        b.alive = false;
+                        let r = rect(b.x0, b.y0, b.x1, b.y1);
+                        links.push(Link { r, a: k, b: None, cost: Vec::new() });
+                        ways.push(r);
+                    }
+                }
+            }
+        }
+    }
     let crosses: Vec<Link> = options.into_iter().zip(used).filter(|(_, u)| *u).map(|(o, _)| o).collect();
     // A row cut by a cross aisle or a ramp's way is filled again in what is left of it: the bays given up where the way
     // crosses it come back on either side, flush with it (no proposed grid: its bays keep their lattice).

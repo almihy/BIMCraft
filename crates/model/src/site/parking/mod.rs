@@ -338,6 +338,7 @@ fn given_of(props: &Props) -> Given {
         column_size: mm("column_size", 0.1, 3.0),
         floor_to_floor: mm("floor_to_floor", 2.0, 12.0),
         ramp_slope: plain("ramp_slope", 0.02, 0.5),
+        dead_end: mm("dead_end", 0.0, 500.0),
         ..Given::default()
     }
 }

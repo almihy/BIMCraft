@@ -800,12 +800,13 @@ fn a_plain_basement_on_a_grid_gets_what_a_designer_counts_by_hand() {
     let took = t.elapsed();
     // By hand: three modules (5 + 6 + 5 m) across its 48 m; along each row 8 column bays of three bays (24), or 25 on the
     // rows by the walls, which no column stands in: 25 + 4 x 24 + 25 = 146. A cross aisle joins the three aisles at one end,
-    // taking three bays from each of the four rows it crosses (12); four accessible bays take two of the rest as their access
-    // aisles: 132.
+    // taking three bays from each of the four rows it crosses (12); the aisles run 57 m past it, longer than a dead end may
+    // (45.7 m), so a second one closes the loop at the other end between the two aisles the ramp does not end (6); four
+    // accessible bays take two of the rest as their access aisles: 126.
     let n = bays(&s, park).len();
     picture(&s, "plain_basement");
-    eprintln!("a plain basement on a grid: {n} bays, 132 by hand ({took:?})");
-    assert!(n >= 128, "{n} bays: {}", result(&s, park));
+    eprintln!("a plain basement on a grid: {n} bays, 126 by hand ({took:?})");
+    assert!(n >= 124, "{n} bays: {}", result(&s, park));
     assert_eq!(feet_joined(&s, park), 1);
     laid_clear(&s, park, &area.map(|p| P2(p[0], p[1])));
     let r = result(&s, park);
