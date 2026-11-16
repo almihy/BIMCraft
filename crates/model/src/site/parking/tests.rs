@@ -1464,3 +1464,35 @@ fn an_l_gets_each_arm_its_own_direction() {
     // One direction for both arms gets 185; each its own, 193.
     assert!(l.stalls.len() >= 190 && l.directions.len() == 2, "{} bays, {:?}", l.stalls.len(), l.directions);
 }
+
+/// One way round: every one-way aisle has a way on at its far end and a way in at its near end (a cross aisle, another
+/// aisle, a ramp's way): no car is led into a dead end it may not turn back out of.
+#[test]
+fn one_way_aisles_always_lead_on() {
+    let mut r = Rnd(5.0);
+    let mut inputs: Vec<Input> = (0..12).map(|_| random_basement(&mut r).0).collect();
+    inputs.push(real_basement(Some((2.5, 5.0, 6.0))).0);
+    let mut bad = Vec::new();
+    for (i, mut input) in inputs.into_iter().enumerate() {
+        input.settings.one_way = Some(true);
+        let l = solve(&input);
+        let mut ways: Vec<&Ring> = l.aisles.iter().map(|a| &a.poly).collect();
+        ways.extend(l.entries.iter().map(|e| &e.poly));
+        for a in l.aisles.iter().filter(|a| a.kind == super::fields::AisleKind::Aisle) {
+            let Some(f) = a.flow else { continue };
+            let along = |p: Pt| p[0] * f[0] + p[1] * f[1];
+            let (lo, hi) = a.poly.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| (lo.min(along(*p)), hi.max(along(*p))));
+            let reach = l.settings.aisle + 0.5;
+            let (mut ins, mut outs) = (false, false);
+            for w in ways.iter().filter(|w| !std::ptr::eq(**w, &a.poly) && touch_along(w, &a.poly, 2.0)) {
+                let (wlo, whi) = w.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| (lo.min(along(*p)), hi.max(along(*p))));
+                ins |= wlo <= lo + reach;
+                outs |= whi >= hi - reach;
+            }
+            if !(ins && outs) {
+                bad.push(format!("basement {i}: an aisle {:?} running {f:?} with {}", centre(&a.poly), if outs { "no way in" } else { "no way on" }));
+            }
+        }
+    }
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}

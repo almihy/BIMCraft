@@ -1005,19 +1005,38 @@ fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot], turns: bool, cw: f
             let i = ys.iter().position(|y| (y - segs[k].y0).abs() < 1e-6).unwrap_or(0);
             flows[k] = Some(if i % 2 == 0 { 1.0 } else { -1.0 });
         }
+        // An aisle with no way in at one end or no way on at the other is two-way (it is a two-way aisle's width): a car
+        // may not be led one way into a dead end.
+        let reach = st.a + 0.5;
+        for k in (0..ns).filter(|&k| keep[k]) {
+            let js: Vec<Rect> =
+                crosses.iter().filter(|l| l.a == k || l.b == Some(k)).chain(links.iter().filter(|l| l.a == k)).map(|l| l.r).collect();
+            let at_lo = js.iter().any(|r| r.x0 <= segs[k].x0 + reach);
+            let at_hi = js.iter().any(|r| r.x1 >= segs[k].x1 - reach);
+            if !(at_lo && at_hi) {
+                flows[k] = None;
+            }
+        }
     }
     let mut plan = Plan::default();
     for k in (0..ns).filter(|&k| keep[k]) {
         let sg = &segs[k];
         plan.aisles.push(LAisle { id: k as i64, r: rect(sg.x0, sg.y0, sg.x1, sg.y1), kind: AisleKind::Aisle, flow: flows[k] });
     }
-    // A cross aisle's traffic, one way: up (+y) from the aisle below when that aisle runs towards it, else down.
+    // A cross aisle's traffic, one way: up (+y) when the aisle below runs into it and the one above runs on from it, down
+    // the other way round; two-way when the two disagree (or both are two-way).
     let mut ups: Vec<Option<f64>> = vec![None; plan.aisles.len()];
     for (i, l) in crosses.iter().enumerate() {
-        let flow = l.b.and_then(|_| {
-            let fa = flows[l.a]?;
+        let flow = l.b.and_then(|b| {
             let mid = (l.r.x0 + l.r.x1) / 2.0;
-            Some(if fa * (mid - (segs[l.a].x0 + segs[l.a].x1) / 2.0) > 0.0 { 1.0 } else { -1.0 })
+            // +1: the aisle runs into the cross aisle here (it is at its far end); -1: runs on from it; 0: two-way.
+            let end = |k: usize| flows[k].map_or(0.0, |f| if f * (mid - (segs[k].x0 + segs[k].x1) / 2.0) > 0.0 { 1.0 } else { -1.0 });
+            let (ea, eb) = (end(l.a), end(b));
+            match (ea, eb) {
+                (a, b) if a >= 0.0 && b <= 0.0 && a - b > 0.0 => Some(1.0),
+                (a, b) if a <= 0.0 && b >= 0.0 && b - a > 0.0 => Some(-1.0),
+                _ => None,
+            }
         });
         plan.aisles.push(LAisle { id: (ns + i) as i64, r: l.r, kind: AisleKind::Cross, flow: None });
         ups.push(flow);
