@@ -678,9 +678,9 @@ other_files(
         "Road",
         &[],
         "{path: [[x,y] or [x,y,bulge],…], host?, width?, use?: road|lane|footpath|promenade, lanes?, lane_width?, kerb?, median?, \
-         oneway?, pavement?, name?} a road from its centre line: its carriageway (Asphalt, at the ground), pavements (Paving, 150 \
+         oneway?, pavement?, name?, replace?: id} a road from its centre line: its carriageway (Asphalt, at the ground), pavements (Paving, 150 \
          up) and median (Grass, 150 up) worked out as the masterplan's lanes were, each a sub-division of the toposolid under it \
-         (or `host`); another use is one sub-division of its outline. Returns `ids`, `host`, `notes`",
+         (or `host`); another use is one sub-division of its outline. Each piece keeps the road (`road`: `of`, the road's          first piece's GUID; `use`, `name`, and `props`: its `path`, `width`, `lanes`, `lane_width`, `kerb`, `median`,          `oneway`, `pavement`, filled in). `replace: id` (any piece of a road) makes that road again with what is given over          what it had (null takes one back to its default), its first piece keeping its id. Returns `ids`, `host`, `notes`",
         road,
     ),
     edit(
@@ -8316,6 +8316,7 @@ fn floor(s: &mut Session, p: &Value) -> R {
         pattern_origin: P2(0.0, 0.0),
         pattern_angle: 0.0,
         contours,
+        contours_hidden: false,
         excavated_by: Vec::new(),
         graded_from: None,
     }));

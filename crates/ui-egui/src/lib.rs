@@ -5471,6 +5471,10 @@ impl BimApp {
                 let l = ui.label(t("Slope:"));
                 ui.add(TextEdit::singleline(&mut self.ramp_slope).desired_width(48.0).hint_text("%")).labelled_by(l.id);
                 ui.checkbox(&mut self.railings, t("Railings"));
+                // Revit's ramp by sketch: its run drawn with lines and arcs (a car park's curved and spiral ramps).
+                if ui.button(t("Sketch Run")).on_hover_text(t("Draw the ramp's run with lines and arcs, from its foot")).clicked() {
+                    self.set_tool(Tool::Site(crate::site::SiteTool::RampRun));
+                }
             }
             Tool::Roof => {
                 let l = ui.label(t("Slope:"));

@@ -273,7 +273,7 @@ fn trees_and_bike_racks_are_planted_as_families_on_the_ground() {
     assert!(!crate::view3d::solids(&s.model).iter().all(|x| x.owner() != tree), "a tree in 3D");
     assert!(s.execute("planting", &json!({"family": "Unicorn", "at": [0, 0]})).unwrap_err().contains("no family"));
     // Every site family reads.
-    assert_eq!(crate::family::site_library(s.model.language).len(), 6);
+    assert_eq!(crate::family::site_library(s.model.language).len(), 7, "and the Parking Space");
 }
 
 /// A project of format 25 with the masterplan's kinds of before, a building pad among them.
@@ -295,7 +295,6 @@ fn old_project() -> String {
             props: props.as_object().cloned().unwrap_or_default(),
             outline: Vec::new(),
             parts: Vec::new(),
-            layout: None,
             notes: Vec::new(),
             params: Default::default(),
         };
@@ -324,7 +323,6 @@ fn old_project() -> String {
         props: json!({"at": [38000, 2000]}).as_object().cloned().unwrap_or_default(),
         outline: Vec::new(),
         parts: Vec::new(),
-        layout: None,
         notes: Vec::new(),
         params: Default::default(),
     })));
@@ -344,6 +342,7 @@ fn old_project() -> String {
         sketch: Vec::new(),
         shape: Default::default(),
         contours: 0.0,
+        contours_hidden: false,
         excavated_by: Vec::new(),
         graded_from: None,
         params: Default::default(),
@@ -362,7 +361,16 @@ fn an_old_masterplan_is_converted_on_load() {
     m.check().unwrap_or_else(|e| panic!("{e}"));
     let count = |cat: &str| m.elements.values().filter(|e| e.category() == cat).count();
     let kinds: Vec<String> = m.elements.values().filter_map(|e| if let Element::Site(st) = e { Some(st.kind.clone()) } else { None }).collect();
-    assert_eq!(kinds, vec!["parking_stall".to_string()], "parking stays");
+    assert!(kinds.is_empty(), "the stall is a Parking Space now: {kinds:?}");
+    assert!(m.elements.values().any(|e| matches!(e, Element::Component(c) if crate::carpark::is_bay(&m, c))));
+    // The road keeps its definition: its path and widths on each of its pieces.
+    let road = m.elements.values().find_map(|e| match e {
+        Element::SubDivision(sd) if sd.role == "lane/road" => sd.road.clone(),
+        _ => None,
+    });
+    let road = road.expect("the road's definition");
+    assert_eq!(road.props["path"], json!([[0, 35000], [40000, 35000]]));
+    assert!(road.props.get("width").is_some());
     // The lawn, the pond, the pitch, and the road's carriageway (and its pavements, where it has them).
     let roles: Vec<String> = m.elements.values().filter_map(|e| if let Element::SubDivision(sd) = e { Some(sd.role.clone()) } else { None }).collect();
     assert!(count("subdivision") >= 4, "{roles:?}");

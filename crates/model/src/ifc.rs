@@ -870,28 +870,35 @@ pub fn export(m: &Model) -> String {
     w.body = w.add(format!("IFCGEOMETRICREPRESENTATIONSUBCONTEXT('Body','Model',*,*,*,*,#{ctx},$,.MODEL_VIEW.,$)"));
     let axis = w.add(format!("IFCGEOMETRICREPRESENTATIONSUBCONTEXT('Axis','Model',*,*,*,*,#{ctx},$,.GRAPH_VIEW.,$)"));
     // Where it lies on a map: a projected CRS in metres, and the model context's map conversion to it, its scale taking the
-    // project's millimetres to them.
-    if let Some(g) = &m.georeference {
+    // project's millimetres to them. Its numbers are the survey point's and the project base point's (Revit's shared
+    // coordinates) where the project has them, with or without a georeference naming the map; else the georeference's.
+    let numbers = m.georeference_numbers().or_else(|| m.georeference.as_ref().map(|g| (g.eastings, g.northings, g.height, g.rotation)));
+    if let Some((east, north, height, rotation)) = numbers {
         let metre = w.add("IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.)");
         let or_none = |t: &Option<String>| t.as_deref().map_or_else(|| "$".to_string(), s);
-        let crs = w.add(format!(
-            "IFCPROJECTEDCRS({},{},{},{},{},{},#{metre})",
-            s(&g.crs),
-            or_none(&g.description),
-            or_none(&g.geodetic_datum),
-            or_none(&g.vertical_datum),
-            or_none(&g.map_projection),
-            or_none(&g.map_zone)
-        ));
-        let (sin, cos) = g.rotation.to_radians().sin_cos();
+        let crs = match &m.georeference {
+            Some(g) => w.add(format!(
+                "IFCPROJECTEDCRS({},{},{},{},{},{},#{metre})",
+                s(&g.crs),
+                or_none(&g.description),
+                or_none(&g.geodetic_datum),
+                or_none(&g.vertical_datum),
+                or_none(&g.map_projection),
+                or_none(&g.map_zone)
+            )),
+            // No map named: the survey's own coordinates, as Revit exports shared coordinates with no coordinate system.
+            None => w.add(format!("IFCPROJECTEDCRS({},{},$,$,$,$,#{metre})", s("Shared Coordinates"), s("Survey Point"))),
+        };
+        let scale = m.georeference.as_ref().map_or(1.0, |g| g.scale);
+        let (sin, cos) = rotation.to_radians().sin_cos();
         w.add(format!(
             "IFCMAPCONVERSION(#{ctx},#{crs},{},{},{},{},{},{})",
-            real(g.eastings / 1000.0),
-            real(g.northings / 1000.0),
-            real(g.height / 1000.0),
+            real(east / 1000.0),
+            real(north / 1000.0),
+            real(height / 1000.0),
             ratio(cos),
             ratio(sin),
-            ratio(g.scale / 1000.0)
+            ratio(scale / 1000.0)
         ));
     }
     let units = [

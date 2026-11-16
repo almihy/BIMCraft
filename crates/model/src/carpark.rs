@@ -609,6 +609,7 @@ pub fn run(m: &Model, park: Id) -> Option<Laid> {
                 name: String::new(),
                 role: AISLE_ROLE.into(),
                 sketch: Vec::new(),
+                road: None,
                 params: BTreeMap::new(),
             };
             sd.params.insert(BY.into(), json!(key(me)));
@@ -1110,6 +1111,7 @@ fn band_of(m: &mut Model, s: &crate::masterplan::Site) -> Vec<Element> {
             name: s.name.clone(),
             role: AISLE_ROLE.into(),
             sketch: Vec::new(),
+            road: None,
             params: BTreeMap::new(),
         }));
     }

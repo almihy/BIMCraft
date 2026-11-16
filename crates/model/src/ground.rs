@@ -57,8 +57,39 @@ pub struct SubDivision {
     /// The sketch it was drawn or last edited by, as a floor's.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sketch: Vec<crate::sketch::SketchLine>,
+    /// A road's piece (its carriageway, a pavement, its median): the road it is of, as `road` made it, so the road is
+    /// read back and made again (`road {replace}`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub road: Option<RoadDef>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub params: BTreeMap<String, Value>,
+}
+
+/// A road as it was drawn (our road tool, docs/parking-ramps-plan.md): which road (`of`, its first piece's GUID, the same
+/// on each of its pieces), its use and name, and its definition: its centre line `path` and its sizes (`width`, `lanes`,
+/// `lane_width`, `kerb`, `median`, `oneway`, `pavement`…, mm), the masterplan lane's props with its defaults filled in.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RoadDef {
+    pub of: Guid,
+    #[serde(rename = "use", default, skip_serializing_if = "String::is_empty")]
+    pub use_: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    pub props: crate::site::Props,
+}
+
+/// Each of the sub-divisions `ids` made one road: its `of` the first's GUID.
+pub fn link_road(m: &mut Model, ids: &[Id]) {
+    let Some(first) = ids.first() else { return };
+    let of = m.guid(*first);
+    for id in ids {
+        if let Some(Element::SubDivision(sd)) = m.elements.get_mut(*id)
+            && let Some(r) = &mut sd.road
+        {
+            r.of = of;
+        }
+    }
 }
 
 /// The Survey Point or the Project Base Point, as Revit's (2020.2 and on). Each is where it is in the project (`at`,
@@ -764,6 +795,12 @@ impl Model {
 /// `Model::check`'s rules for a sub-division: its host a toposolid, its type a floor type, a simple outline of up to the
 /// model's points, finite, its offset within reach, its texts not too long.
 pub fn check_subdivision(m: &Model, who: &str, s: &SubDivision) -> Result<(), String> {
+    if let Some(r) = &s.road {
+        crate::masterplan::check_props("lane", &r.props).map_err(|e| format!("{who}: its road: {e}"))?;
+        if r.name.chars().count() > crate::model::MAX_TEXT {
+            return Err(format!("{who}: its road's name is too long"));
+        }
+    }
     match m.elements.get(s.host) {
         Some(Element::Toposolid(_)) => {}
         Some(e) => return Err(format!("{who}: its host is a {}; a sub-division is a part of a toposolid", e.category())),
@@ -1022,6 +1059,7 @@ fn make_ground(m: &mut Model, level: Guid, b: [f64; 4]) -> Guid {
         sketch: Vec::new(),
         shape: Default::default(),
         contours: 1000.0,
+        contours_hidden: false,
         excavated_by: Vec::new(),
         graded_from: None,
         params: BTreeMap::new(),
@@ -1128,14 +1166,18 @@ pub fn convert(m: &mut Model) {
             },
         };
         m.elements.remove(id);
+        let mut ids = Vec::new();
         for (k, e) in made.into_iter().enumerate() {
             // The first takes the old element's id and GUID, so what pointed at it points at it still.
             if k == 0 {
                 let _ = m.elements.insert_as(id, guid, e);
+                ids.push(id);
             } else {
-                m.insert(e);
+                ids.push(m.insert(e));
             }
         }
+        // A road's pieces keep it: its path and its widths.
+        link_road(m, &ids);
     }
 }
 
@@ -1143,6 +1185,14 @@ pub fn convert(m: &mut Model) {
 pub fn subdivisions_from(m: &mut Model, s: &crate::masterplan::Site, host: Guid) -> Vec<Element> {
     let use_ = s.use_or_default().to_string();
     let Some((type_name, offset)) = subdivision_of(&s.kind, &use_, s.surface()) else { return Vec::new() };
+    // A road's definition, its sizes filled in where it gave none.
+    let road = (s.kind == "lane").then(|| {
+        let mut props = s.props.clone();
+        for (k, v) in crate::site::shapes::fill_defaults("lane", &use_, &s.props, &crate::masterplan::figures(m)) {
+            props.entry(k).or_insert(v);
+        }
+        RoadDef { of: Guid::default(), use_: use_.clone(), name: s.name.clone(), props }
+    });
     let mut out = Vec::new();
     let mut make = |m: &mut Model, polys: &[crate::site::Poly], type_name: &str, offset: f64, role: String| {
         ensure_type(m, type_name);
@@ -1172,6 +1222,7 @@ pub fn subdivisions_from(m: &mut Model, s: &crate::masterplan::Site, host: Guid)
                 name: s.name.clone(),
                 role: role.clone(),
                 sketch: Vec::new(),
+                road: road.clone(),
                 params: kept_params(s),
             }));
         }

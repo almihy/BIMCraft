@@ -3540,7 +3540,9 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
             // A shaped one's creases: the edges of each of its planes, as thin as its outline; or, drawn as a toposolid is, its
             // contours.
             if f.contours > 0.0 {
-                contours(&mut d, m, f);
+                if !f.contours_hidden {
+                    contours(&mut d, m, f);
+                }
             } else if !f.shape.is_empty() {
                 for (loops, _) in m.shape_planes(f).unwrap_or_default() {
                     for ring in &loops {
@@ -3557,7 +3559,7 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
     // The Parking subcategories the view hides, by the names its family's symbols give them.
     let parking_hidden: Vec<String> = {
         let g = crate::graphics::graphics_of(m, key).map_or_else(Default::default, |g| g.resolved(m).into_owned());
-        [("parkingstalllines", crate::family::site::STALL_LINES), ("parkingmarkings", crate::family::site::MARKINGS)]
+        [("parkingline", crate::family::site::STALL_LINES), ("parkingmarking", crate::family::site::MARKINGS)]
             .into_iter()
             .filter(|(k, _)| g.hides(k))
             .map(|(_, n)| m.language.word(n).to_string())

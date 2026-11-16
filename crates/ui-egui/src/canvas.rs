@@ -3073,6 +3073,8 @@ impl BimApp {
                     width,
                     slope,
                     landings,
+                    path: Vec::new(),
+                    slopes: Vec::new(),
                 }),
                 done,
             ))

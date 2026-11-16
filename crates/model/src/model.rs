@@ -686,6 +686,9 @@ pub struct Floor {
     /// stands at a whole number of them over zero, every fifth heavier, and not its creases. 0, none: a floor's creases.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub contours: f64,
+    /// A toposolid's contours turned off (Revit's Contour Display unticked): its interval kept, none drawn.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub contours_hidden: bool,
     /// A toposolid's: the floors, roofs and toposolids that excavate it (Revit 2024's Excavate), by GUID
     /// ([`Model::toposolid_cut`]). A floor has none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -3217,7 +3220,7 @@ pub struct ProjectParameter {
 pub const MAX_PROJECT_PARAMETERS: usize = 256;
 
 /// The categories project parameters are for.
-pub const PARAMETER_CATEGORIES: [&str; 25] = [
+pub const PARAMETER_CATEGORIES: [&str; 30] = [
     "wall",
     "floor",
     "ceiling",
@@ -3243,6 +3246,12 @@ pub const PARAMETER_CATEGORIES: [&str; 25] = [
     "downconductor",
     "groundconductor",
     "cable",
+    // The site's, as Revit allows project parameters on them: a plot's source, an edge's notes.
+    "toposolid",
+    "propertyline",
+    "subdivision",
+    "surveypoint",
+    "projectbasepoint",
 ];
 
 impl ProjectParameter {
@@ -3850,7 +3859,9 @@ impl Model {
             if p.formula.is_some() {
                 return Err(format!("{who}: `{k}` is worked out by its formula"));
             }
+            // A text parameter's words are no material's name.
             if let crate::family::Val::Text(m) = crate::family::read(p, v).map_err(|e| format!("{who}: {e}"))?
+                && p.kind == crate::family::Kind::Material
                 && !m.is_empty()
                 && !self.materials.contains_key(&m)
             {
@@ -5346,6 +5357,7 @@ impl Model {
             sketch: Vec::new(),
             shape: r.shape.clone(),
             contours: 0.0,
+            contours_hidden: false,
             excavated_by: Vec::new(),
             graded_from: None,
             params: BTreeMap::new(),

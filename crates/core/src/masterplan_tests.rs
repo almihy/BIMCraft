@@ -24,9 +24,6 @@ fn site(s: &Session, id: Id) -> crate::masterplan::Site {
     }
 }
 
-fn outline_area(st: &crate::masterplan::Site) -> f64 {
-    st.outline.iter().map(|p| crate::geom::area(&p.outer).abs()).sum()
-}
 
 fn level(s: &Session) -> Id {
     s.model.levels()[0].0
@@ -41,16 +38,21 @@ fn plan(s: &Session) -> (render::Drawing, Vec<u8>) {
 
 
 
+/// A small car park's area: a site element to try the masterplan's rules on.
+const SMALL: [[f64; 2]; 3] = [[0.0, 0.0], [5000.0, 0.0], [5000.0, 5000.0]];
+
 #[test]
 fn what_cant_be_shaped_or_isnt_in_the_catalogue_is_refused_saying_what_to_fix() {
     let mut s = Session::new();
     for (p, says) in [
         (json!({"kind": "castle", "props": {}}), "one of"),
-        (json!({"kind": "parking_stall", "use": "valet", "props": {"at": [0, 0]}}), "valet"),
-        (json!({"kind": "parking_stall", "props": {"at": [0, 0], "colour": "red"}}), "colour"),
-        (json!({"kind": "parking_stall", "props": {"at": [1e300, 0]}}), "at"),
-        (json!({"kind": "parking_stall", "phase": "ancient", "props": {"at": [0, 0]}}), "phase"),
-        (json!({"kind": "parking_stall", "props": {"at": [0, 0]}, "colour": 1}), "colour"),
+        (json!({"kind": "car_park", "use": "valet", "props": {"control": SMALL}}), "valet"),
+        (json!({"kind": "car_park", "props": {"control": SMALL, "colour": "red"}}), "colour"),
+        (json!({"kind": "car_park", "props": {"control": [[0, 0], [1e300, 0], [0, 1000]]}}), "control"),
+        (json!({"kind": "car_park", "phase": "ancient", "props": {"control": SMALL}}), "phase"),
+        (json!({"kind": "car_park", "props": {"control": SMALL}, "colour": 1}), "colour"),
+        // Ramps and parking are Revit's now.
+        (json!({"kind": "parking_stall", "props": {"at": [0, 0]}}), "parking_component"),
         // What Revit makes as a sub-division, planting or a site component is made so now.
         (json!({"kind": "lane", "props": {"path": [[0, 0], [1000, 0]]}}), "road"),
         (json!({"kind": "tree", "props": {"at": [0, 0]}}), "planting"),
@@ -61,77 +63,54 @@ fn what_cant_be_shaped_or_isnt_in_the_catalogue_is_refused_saying_what_to_fix() 
     }
     assert_eq!(s.model.elements.values().filter(|e| matches!(e, Element::Site(_))).count(), 0);
     // A file's element that breaks the rules is refused by the check too.
-    let stall = id(&run(&mut s, "site", json!({"kind": "parking_stall", "props": {"at": [0, 0]}})));
+    let stall = id(&run(&mut s, "site", json!({"kind": "car_park", "props": {"control": SMALL}})));
     let mut m = (*s.model).clone();
     if let Some(Element::Site(st)) = m.elements.get_mut(stall) {
-        st.props.insert("width".into(), json!(f64::MAX));
+        st.props.insert("stall_width".into(), json!(f64::MAX));
     }
-    assert!(m.check().unwrap_err().contains("width"));
+    assert!(m.check().unwrap_err().contains("stall_width"));
 }
 
 #[test]
 fn the_modify_tools_move_turn_and_mirror_a_site_elements_truth() {
     let mut s = Session::new();
-    let stall = id(&run(&mut s, "site", json!({"kind": "parking_stall", "props": {"at": [10000, 0], "angle": 0}})));
+    let stall = id(&run(&mut s, "site", json!({"kind": "car_park", "props": {"control": [[10000, 0], [15000, 0], [15000, 5000]], "direction": 0}})));
     run(&mut s, "rotate", json!({"ids": [stall], "about": [0, 0], "angle": 90}));
     let st = site(&s, stall);
-    let at = st.props["at"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect::<Vec<_>>();
+    let at = st.props["control"][0].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect::<Vec<_>>();
     assert!(at[0].abs() < 0.01 && (at[1] - 10000.0).abs() < 0.01, "{at:?}");
-    assert!((st.props["angle"].as_f64().unwrap() - 90.0).abs() < 1e-6, "{}", st.props["angle"]);
+    assert!((st.props["direction"].as_f64().unwrap() - 90.0).abs() < 1e-6, "{}", st.props["direction"]);
     // A copy is an element of its own, shaped.
-    let before = s.model.elements.len();
+    let before = s.model.elements.values().filter(|e| matches!(e, Element::Site(_))).count();
     run(&mut s, "copy", json!({"ids": [stall], "by": [50000, 0]}));
-    assert_eq!(s.model.elements.len(), before + 1);
-    // A parking band's sides go to the other side of a mirror.
-    let band =
-        id(&run(&mut s, "site", json!({"kind": "parking_band", "props": {"path": [[0, -30000], [30000, -30000]], "sides": "left"}})));
-    run(&mut s, "mirror", json!({"ids": [band], "axis": [[0, -40000], [1000, -40000]]}));
-    assert_eq!(site(&s, band).props["sides"], json!("right"));
+    assert_eq!(s.model.elements.values().filter(|e| matches!(e, Element::Site(_))).count(), before + 1);
 }
 
 #[test]
-fn a_car_park_is_laid_out_its_pieces_carrying_its_band_and_laid_out_again_round_a_building() {
+fn a_car_park_is_laid_out_as_parking_spaces_and_laid_out_again_round_a_building() {
     let mut s = Session::new();
     let ring = json!([[0, 0], [60000, 0], [60000, 40000], [0, 40000]]);
     let r = run(&mut s, "site", json!({"kind": "car_park", "props": {"control": ring}}));
     let cp = id(&r);
-    let st = site(&s, cp);
-    let layout = st.layout.clone().expect("laid out");
-    let stalls = layout.result["stalls"].as_u64().unwrap();
-    assert!(stalls > 50, "{:?}", layout.result);
+    let stalls = site(&s, cp).props["result"]["stalls"].as_u64().unwrap();
+    assert!(stalls > 50, "{stalls}");
     assert_eq!(r["element"]["stalls"], json!(stalls));
     let guid = s.model.guid(cp).to_string();
-    assert!(layout.pieces.iter().all(|p| p.props["band"] == json!(guid)));
-    assert!(layout.pieces.iter().any(|p| p.kind == "aisle") && layout.pieces.iter().any(|p| p.kind == "stall"));
+    let own = |s: &Session| {
+        s.model.elements.values().filter(|e| matches!(e, Element::Component(c) if c.params.get("car_park") == Some(&json!(guid)))).count()
+    };
+    assert_eq!(own(&s) as u64, stalls);
     // A building put on it: laid out round it, fewer stalls.
     run(&mut s, "mass", json!({"boundary": [[20000, 10000], [40000, 10000], [40000, 30000], [20000, 30000]], "height": 6000}));
-    let fewer = site(&s, cp).layout.unwrap().result["stalls"].as_u64().unwrap();
+    let fewer = site(&s, cp).props["result"]["stalls"].as_u64().unwrap();
     assert!(fewer < stalls, "{fewer} < {stalls}");
-    // Its plan draws its stalls.
-    let (d, _) = plan(&s);
-    let fills = d.prims.iter().zip(&d.owners).filter(|(p, o)| matches!(p, Prim::Fill { .. }) && **o == Some(cp)).count();
-    assert!(fills as u64 > fewer, "{fills}");
-}
-
-#[test]
-fn a_parking_stall_is_one_bay_from_the_figures_at_a_point_and_an_angle() {
-    let mut s = Session::new();
-    let r = run(&mut s, "site", json!({"kind": "parking_stall", "use": "accessible", "props": {"at": [0, 0], "angle": 0}}));
-    let st = site(&s, id(&r));
-    assert_eq!(r["filled"], json!({"width": 2500.0, "depth": 5000.0}));
-    assert!((outline_area(&st) - 2500.0 * 5000.0).abs() < 1.0);
-    let xs: Vec<f64> = st.outline[0].outer.iter().map(|p| p.0).collect();
-    assert!((xs.iter().cloned().fold(f64::MIN, f64::max) - 2500.0).abs() < 0.01, "its depth along its angle: {xs:?}");
-    assert!(st.parts.iter().any(|p| p.role == "accessible_stall") && st.parts.iter().any(|p| p.role == "mouth"));
-    let kinds = run(&mut s, "site_kinds", json!({}));
-    assert_eq!(kinds["kinds"]["parking_stall"]["revit"], json!("Parking Component"));
-    assert_eq!(kinds["kinds"]["parking_stall"]["props"]["depth"], json!("length"));
+    assert_eq!(own(&s) as u64, fewer);
 }
 
 #[test]
 fn a_site_elements_phase_is_its_phase_created_and_demolished_and_the_demolish_tool_reaches_it() {
     let mut s = Session::new();
-    let stall = id(&run(&mut s, "site", json!({"kind": "parking_stall", "phase": "existing", "source": "osm", "props": {"at": [0, 0]}})));
+    let stall = id(&run(&mut s, "site", json!({"kind": "car_park", "phase": "existing", "source": "osm", "props": {"control": SMALL}})));
     let st = site(&s, stall);
     assert_eq!(st.params["Phase Created"], json!("Existing"));
     assert!(st.context(), "existing and fetched: context");
@@ -139,7 +118,7 @@ fn a_site_elements_phase_is_its_phase_created_and_demolished_and_the_demolish_to
     let st = site(&s, stall);
     assert_eq!((st.params["Phase Created"].clone(), st.params["Phase Demolished"].clone()), (json!("Existing"), json!("New Construction")));
     // Its params changed with the Demolish tool's `modify`: its phase follows them.
-    let other = id(&run(&mut s, "site", json!({"kind": "parking_stall", "phase": "existing", "props": {"at": [9000, 0]}})));
+    let other = id(&run(&mut s, "site", json!({"kind": "car_park", "phase": "existing", "props": {"control": [[9000, 0], [14000, 0], [14000, 5000]]}})));
     run(&mut s, "modify", json!({"id": other, "params": {"Phase Demolished": "New Construction"}}));
     assert_eq!(site(&s, other).phase, "demolished");
     // A phase filter hides it as any element: Show New leaves out what stood before.
@@ -155,8 +134,6 @@ fn site_figures_are_the_projects_own_and_what_is_drawn_next_takes_them() {
     let mut s = Session::new();
     let r = run(&mut s, "site_figures", json!({"values": {"parking.bay_width": 2700}}));
     assert_eq!(r["figures"]["parking.bay_width"], json!({"value": 2700.0, "type": "length", "own": true}));
-    let r = run(&mut s, "site", json!({"kind": "parking_stall", "props": {"at": [0, 0]}}));
-    assert_eq!(r["filled"]["width"], json!(2700.0), "{r}");
     assert!(s.execute("site_figures", &json!({"values": {"lane.colour": 1}})).unwrap_err().contains("isn't a figure"));
     assert!(s.execute("site_figures", &json!({"values": {"lane.width": -5}})).is_err());
     run(&mut s, "site_figures", json!({"values": {"parking.bay_width": null}}));
@@ -300,10 +277,9 @@ fn site_elements_go_out_to_ifc_as_geographic_civil_and_virtual_elements() {
 fn a_file_keeps_site_elements_as_the_doc_says_and_an_older_reader_leaves_out_what_it_doesnt_know() {
     let mut s = Session::new();
     ground(&mut s);
-    let stall = id(&run(&mut s, "site", json!({"kind": "parking_stall", "props": {"at": [-10000, -4000]}})));
+    let stall = id(&run(&mut s, "site", json!({"kind": "car_park", "props": {"control": [[0, 50000], [40000, 50000], [40000, 80000], [0, 80000]]}})));
     run(&mut s, "site_edit", json!({"id": stall, "name": "Bay", "phase": "existing", "source": "site", "ref": "street:edge 0"}));
     run(&mut s, "sub_division", json!({"boundary": [[1000, 1000], [5000, 1000], [5000, 5000]]}));
-    run(&mut s, "site", json!({"kind": "car_park", "props": {"control": [[0, 50000], [40000, 50000], [40000, 80000], [0, 80000]]}}));
     run(&mut s, "property_line", json!({"points": [[0, 0], [10000, 0], [10000, 10000, 0.2], [0, 10000]]}));
     let text = s.model.to_json().unwrap();
     let (m, left_out) = Model::read(&text).unwrap();
@@ -316,16 +292,16 @@ fn a_file_keeps_site_elements_as_the_doc_says_and_an_older_reader_leaves_out_wha
     let v: Value = serde_json::from_str(&text).unwrap();
     let elements =
         v["elements"].as_object().map(|o| o.values().cloned().collect::<Vec<_>>()).or_else(|| v["elements"].as_array().cloned()).unwrap();
-    let street = elements.iter().find(|e| e["category"] == "site" && e["kind"] == "parking_stall").unwrap();
+    let street = elements.iter().find(|e| e["category"] == "site" && e["kind"] == "car_park").unwrap();
     assert_eq!(
         (street["use"].clone(), street["phase"].clone(), street["ref"].clone()),
-        (json!("standard"), json!("existing"), json!("street:edge 0"))
+        (json!("parking"), json!("existing"), json!("street:edge 0"))
     );
     assert!(street["outline"][0]["outer"].is_array());
-    assert!(elements.iter().any(|e| e["category"] == "site" && e["layout"]["pieces"].is_array()));
+    assert!(street["props"]["result"]["stalls"].is_number(), "its result in its props, its bays elements");
     assert!(elements.iter().any(|e| e["category"] == "toposolid") && elements.iter().any(|e| e["category"] == "subdivision"));
     // A key of a newer version inside a site element is left out and named.
-    let newer = text.replacen("\"kind\": \"parking_stall\"", "\"kind\": \"parking_stall\", \"glow\": 1", 1);
+    let newer = text.replacen("\"kind\": \"car_park\"", "\"kind\": \"car_park\", \"glow\": 1", 1);
     assert_ne!(newer, text);
     let (_, left_out) = Model::read(&newer).unwrap();
     assert!(left_out.iter().any(|k| k.contains("glow")), "{left_out:?}");
@@ -334,18 +310,18 @@ fn a_file_keeps_site_elements_as_the_doc_says_and_an_older_reader_leaves_out_wha
 #[test]
 fn a_site_schedule_lists_its_elements_by_kind_use_and_area() {
     let mut s = Session::new();
-    run(&mut s, "site", json!({"kind": "parking_stall", "use": "accessible", "props": {"at": [0, 0]}}));
+    run(&mut s, "site", json!({"kind": "car_park", "props": {"control": SMALL}}));
     let r = run(&mut s, "schedule", json!({"name": "Site Schedule", "category": "site"}));
     let text = r.to_string();
-    assert!(text.contains("accessible") && text.contains("parking_stall"), "{text}");
+    assert!(text.contains("parking") && text.contains("car_park"), "{text}");
 }
 
 #[test]
 fn a_site_element_draws_in_its_own_levels_plan_only() {
     let mut s = Session::new();
     run(&mut s, "level", json!({"name": "Deck", "elevation": 3000}));
-    let up = id(&run(&mut s, "site", json!({"kind": "parking_stall", "level": "Deck", "props": {"at": [0, 0]}})));
-    let down = id(&run(&mut s, "site", json!({"kind": "parking_stall", "props": {"at": [0, 0]}})));
+    let up = id(&run(&mut s, "site", json!({"kind": "car_park", "level": "Deck", "props": {"control": SMALL}})));
+    let down = id(&run(&mut s, "site", json!({"kind": "car_park", "props": {"control": SMALL}})));
     let owners = |l: Id| render::plan(&s.model, l, 200, 200).owners.into_iter().flatten().collect::<std::collections::BTreeSet<Id>>();
     let deck = s.model.levels().iter().find(|(_, l)| l.name == "Deck").map(|(id, _)| *id).unwrap();
     assert!(owners(level(&s)).contains(&down) && !owners(level(&s)).contains(&up));
@@ -386,8 +362,8 @@ fn site_edit_gives_a_plain_mass_its_masterplan_figures_new() {
 #[test]
 fn a_site_element_a_tool_previews_is_drawn_as_its_plan_draws_it() {
     let mut s = Session::new();
-    let stall = id(&run(&mut s, "site", json!({"kind": "parking_stall", "props": {"at": [0, 0]}})));
+    let stall = id(&run(&mut s, "site", json!({"kind": "car_park", "props": {"control": SMALL}})));
     let e = s.model.elements.get(stall).cloned().unwrap();
     let v = render::plan(&s.model, level(&s), 400, 400).view;
-    assert!(!render::sketch(&s.model, v, s.model.next_id, &e).prims.is_empty(), "a stall's bay");
+    assert!(!render::sketch(&s.model, v, s.model.next_id, &e).prims.is_empty(), "a car park's area");
 }

@@ -144,8 +144,8 @@ pub const SUBCATEGORIES: &[Sub] = &[
     Sub { key: "surveypoint", parent: "sitecomponent", name: ui_msg!("Survey Point"), off: true },
     Sub { key: "projectbasepoint", parent: "sitecomponent", name: ui_msg!("Project Base Point"), off: true },
     // Revit's Parking subcategories: a parking space's stall lines, and its markings (the accessible sign, EV).
-    Sub { key: "parkingstalllines", parent: "parking", name: ui_msg!("Stall Lines"), off: false },
-    Sub { key: "parkingmarkings", parent: "parking", name: ui_msg!("Markings"), off: false },
+    Sub { key: "parkingline", parent: "parking", name: ui_msg!("Stall Lines"), off: false },
+    Sub { key: "parkingmarking", parent: "parking", name: ui_msg!("Markings"), off: false },
 ];
 
 /// The subcategory `key` is, if it is one.

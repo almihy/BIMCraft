@@ -153,6 +153,7 @@ pub(super) fn sub_division(s: &mut Session, p: &Value) -> R {
         name: string(c, p, "name")?.unwrap_or_default(),
         role: string(c, p, "role")?.unwrap_or_default(),
         sketch: Vec::new(),
+        road: None,
         params: BTreeMap::new(),
     };
     if s.model.subdivision_region(&sd).is_empty() {
@@ -164,9 +165,31 @@ pub(super) fn sub_division(s: &mut Session, p: &Value) -> R {
 
 pub(super) fn road(s: &mut Session, p: &Value) -> R {
     let c = "road";
-    keys(c, p, &["path", "host", "width", "use", "lanes", "lane_width", "kerb", "median", "oneway", "name", "pavement"])?;
-    let path = p.get("path").filter(|v| v.is_array()).ok_or_else(|| bad(c, "`path` [[x, y] or [x, y, bulge], …], its centre line, is required"))?;
-    let use_ = string(c, p, "use")?.unwrap_or_else(|| "road".into());
+    keys(c, p, &["path", "host", "width", "use", "lanes", "lane_width", "kerb", "median", "oneway", "name", "pavement", "replace"])?;
+    // Made again: the road a piece of it is, its definition with what is given over it; its pieces go, the new ones take
+    // its first's id.
+    let mut was: Option<(ground::RoadDef, Vec<Id>, Guid)> = None;
+    if !absent(p.get("replace")) {
+        let piece = element_id(c, &s.model, p.get("replace").unwrap_or(&Value::Null))?;
+        let Some(Element::SubDivision(SubDivision { road: Some(r), host, .. })) = s.model.elements.get(piece) else {
+            return Err(bad(c, format!("{piece} is no piece of a road `road` made")));
+        };
+        let pieces: Vec<Id> = s
+            .model
+            .elements
+            .iter()
+            .filter(|(_, e)| matches!(e, Element::SubDivision(SubDivision { road: Some(o), .. }) if o.of == r.of))
+            .map(|(id, _)| *id)
+            .collect();
+        was = Some((r.clone(), pieces, *host));
+    }
+    let old = was.as_ref().map(|(r, _, _)| r);
+    let path = match p.get("path").filter(|v| v.is_array()) {
+        Some(v) => v.clone(),
+        None => old.and_then(|r| r.props.get("path").cloned()).ok_or_else(|| bad(c, "`path` [[x, y] or [x, y, bulge], …], its centre line, is required"))?,
+    };
+    let path = &path;
+    let use_ = string(c, p, "use")?.or_else(|| old.map(|r| r.use_.clone()).filter(|u| !u.is_empty())).unwrap_or_else(|| "road".into());
     let lane = crate::site::shapes::kind("lane").ok_or_else(|| bad(c, "no lane kind"))?;
     if !lane.uses.contains(&use_.as_str()) {
         return Err(bad(c, format!("`use` is one of {}; not `{use_}`", lane.uses.join(", "))));
@@ -174,8 +197,17 @@ pub(super) fn road(s: &mut Session, p: &Value) -> R {
     let mut props = crate::site::Props::new();
     props.insert("path".into(), path.clone());
     for k in ["width", "lanes", "lane_width", "kerb", "median", "oneway", "pavement"] {
-        if let Some(v) = p.get(k).filter(|v| !v.is_null()) {
-            props.insert(k.into(), v.clone());
+        // What is given, else what the road had (null takes it back to the default).
+        match p.get(k) {
+            Some(Value::Null) => {}
+            Some(v) => {
+                props.insert(k.into(), v.clone());
+            }
+            None => {
+                if let Some(v) = old.and_then(|r| r.props.get(k)) {
+                    props.insert(k.into(), v.clone());
+                }
+            }
         }
     }
     masterplan::check_props("lane", &props).map_err(|e| bad(c, e))?;
@@ -186,7 +218,14 @@ pub(super) fn road(s: &mut Session, p: &Value) -> R {
     if ring.len() < 3 {
         return Err(bad(c, format!("its shape can't be worked out: {}", shaped.notes.join(" "))));
     }
-    let host = host_param(c, &s.model, p, &ring)?;
+    let host = match &was {
+        Some((_, _, h)) if absent(p.get("host")) => *h,
+        _ => host_param(c, &s.model, p, &ring)?,
+    };
+    // Its definition kept on its pieces, its defaults filled in.
+    for (k, v) in &shaped.filled {
+        props.entry(k.clone()).or_insert_with(|| v.clone());
+    }
     let level = match s.model.elements.get(host) {
         Some(Element::Toposolid(f)) => f.level,
         _ => return Err(bad(c, "its host is no toposolid")),
@@ -194,7 +233,7 @@ pub(super) fn road(s: &mut Session, p: &Value) -> R {
     let site = masterplan::Site {
         kind: "lane".into(),
         use_,
-        name: string(c, p, "name")?.unwrap_or_default(),
+        name: string(c, p, "name")?.or_else(|| old.map(|r| r.name.clone())).unwrap_or_default(),
         level,
         phase: "new".into(),
         source: String::new(),
@@ -207,12 +246,28 @@ pub(super) fn road(s: &mut Session, p: &Value) -> R {
     };
     let made = ground::subdivisions_from(s.model_mut(), &site, host);
     let mut ids = Vec::new();
-    for mut e in made {
+    let mut reuse = None;
+    if let Some((r, pieces, _)) = &was {
+        let m = s.model_mut();
+        // Its first piece's id and GUID are the road's.
+        reuse = pieces.iter().copied().find(|id| m.guid(*id) == r.of).or(pieces.first().copied());
+        for id in pieces {
+            m.elements.remove(*id);
+        }
+    }
+    for (k, mut e) in made.into_iter().enumerate() {
         if let Element::SubDivision(sd) = &mut e {
             sd.params.clear();
         }
-        ids.push(s.model_mut().insert(e));
+        match (k, reuse, &was) {
+            (0, Some(id), Some((r, _, _))) => {
+                s.model_mut().elements.insert_as(id, r.of, e).map_err(|e| bad(c, e))?;
+                ids.push(id);
+            }
+            _ => ids.push(s.model_mut().insert(e)),
+        }
     }
+    ground::link_road(s.model_mut(), &ids);
     Ok(json!({"ids": ids, "host": s.model.elements.id(host), "notes": shaped.notes}))
 }
 
@@ -314,6 +369,7 @@ fn copied_ground(m: &mut Model, from: &Model, f: &Floor, place: &dyn Fn(P2) -> P
         sketch: Vec::new(),
         shape,
         contours: f.contours,
+        contours_hidden: false,
         excavated_by: Vec::new(),
         graded_from: None,
         params: BTreeMap::new(),

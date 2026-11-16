@@ -39,10 +39,12 @@ pub enum SiteTool {
     Component,
     /// Revit's Planting: a tree, a shrub, a hedge (the site's families).
     Planting,
-    /// Revit's Parking Component: one stall.
+    /// Revit's Parking Component: a parking space of the Options Bar's type.
     Stall,
-    /// A row of stalls along a path, or a car park laid out over an area.
+    /// The car park generator: an area sketched, laid out as parking spaces and drive aisles.
     ParkingArea,
+    /// Revit's ramp by sketch: its run drawn with lines and arcs end to end from its foot (the Ramp tool's Sketch Run).
+    RampRun,
 }
 
 /// How a tool takes its clicks.
@@ -56,6 +58,13 @@ pub enum Taking {
     Point,
 }
 
+/// Parking Component's types, the Parking Space's.
+pub const PARKING_TYPES: [&str; 4] = [
+    bimcraft_core::family::site::STANDARD,
+    bimcraft_core::family::site::ACCESSIBLE,
+    bimcraft_core::family::site::EV,
+    bimcraft_core::family::site::MOTORCYCLE,
+];
 /// Site Component's families and Planting's, the site's own (`family/site.rs`).
 pub const COMPONENTS: [&str; 3] = [bimcraft_core::family::site::BIKE_RACK, bimcraft_core::family::site::BENCH, bimcraft_core::family::site::PLAY];
 pub const PLANTING: [&str; 3] = [bimcraft_core::family::site::TREE, bimcraft_core::family::site::SHRUB, bimcraft_core::family::site::HEDGE];
@@ -75,9 +84,8 @@ pub struct SiteChoices {
     /// Site Component's family and Planting's.
     pub component: &'static str,
     pub planting: &'static str,
-    pub stall_use: &'static str,
-    /// Parking Area along a path (a row of stalls) rather than over an area (a car park).
-    pub parking_row: bool,
+    /// Parking Component's type.
+    pub stall_type: &'static str,
     /// The way a placed thing turns, degrees: Space adds a quarter turn.
     pub angle: f64,
 }
@@ -92,8 +100,7 @@ impl Default for SiteChoices {
             road_lanes: String::new(),
             component: bimcraft_core::family::site::BIKE_RACK,
             planting: bimcraft_core::family::site::TREE,
-            stall_use: "standard",
-            parking_row: false,
+            stall_type: bimcraft_core::family::site::STANDARD,
             angle: 0.0,
         }
     }
@@ -340,7 +347,6 @@ pub fn ghost(m: &Model, level: Id, kind: &str, use_: &str, props: Props) -> Opti
         props,
         outline: shaped.outline,
         parts: shaped.parts,
-        layout: None,
         notes: Vec::new(),
         params: Default::default(),
     })))
@@ -361,6 +367,7 @@ impl SiteTool {
             SiteTool::Planting => msg!("Place Planting"),
             SiteTool::Stall => msg!("Place Parking Component"),
             SiteTool::ParkingArea => msg!("Create Parking Area"),
+            SiteTool::RampRun => msg!("Create Ramp Sketch"),
         }
     }
 
@@ -372,6 +379,8 @@ impl SiteTool {
             SiteTool::PropertyLine => "propertyline",
             SiteTool::Component => "sitecomponent",
             SiteTool::Planting => "planting",
+            SiteTool::Stall => "parking",
+            SiteTool::RampRun => "ramp",
             _ => "site",
         }
     }
@@ -383,8 +392,6 @@ impl SiteChoices {
         Some(match tool {
             // A road's preview is shaped as the masterplan's lanes were; `road` makes its sub-divisions.
             SiteTool::Road => ("lane", self.road_use),
-            SiteTool::Stall => ("parking_stall", self.stall_use),
-            SiteTool::ParkingArea if self.parking_row => ("parking_band", "parking"),
             SiteTool::ParkingArea => ("car_park", "parking"),
             _ => return None,
         })
@@ -392,8 +399,11 @@ impl SiteChoices {
 
     /// How the tool takes its clicks now: by the shape of the kind it makes.
     pub fn taking(&self, tool: SiteTool) -> Taking {
-        if matches!(tool, SiteTool::Component | SiteTool::Planting) {
+        if matches!(tool, SiteTool::Component | SiteTool::Planting | SiteTool::Stall) {
             return Taking::Point;
+        }
+        if tool == SiteTool::RampRun {
+            return Taking::Path;
         }
         match self.kind(tool) {
             None => Taking::Outline,
@@ -503,13 +513,13 @@ impl BimApp {
                     (
                         Icon::ParkingComponent,
                         msg!("Parking Component"),
-                        msg!("Parking Component: one parking stall where you click; Space turns it"),
+                        msg!("Parking Component: a parking space of the Options Bar's type where you click; Space turns it"),
                         SiteTool::Stall,
                     ),
                     (
                         Icon::ParkingArea,
                         msg!("Parking Area"),
-                        msg!("Parking Area: a row of stalls along a sketched path, or a car park laid out over a sketched area"),
+                        msg!("Parking Area: sketch a car park's area; it is laid out as parking spaces and drive aisles among what stands on its level"),
                         SiteTool::ParkingArea,
                     ),
                 ],
@@ -592,15 +602,21 @@ impl BimApp {
                 }
             }
             SiteTool::Stall => {
-                if let Some(k) = Self::site_combo(ui, "site-stall", msg!("Use:"), self.site.stall_use, uses("parking_stall")) {
-                    self.site.stall_use = k;
+                if let Some(k) = Self::site_combo(ui, "site-stall", msg!("Type:"), self.site.stall_type, &PARKING_TYPES) {
+                    self.site.stall_type = k;
                 }
             }
-            SiteTool::ParkingArea => {
-                ui.radio_value(&mut self.site.parking_row, false, t("Area"));
-                ui.radio_value(&mut self.site.parking_row, true, t("Row"));
+            // A car park's settings are its Properties; the ramp's run takes the Ramp tool's width and slope.
+            SiteTool::RampRun => {
+                if let Some(level) = self.plan_level() {
+                    crate::height_options(ui, &self.session.model, level, &mut self.ramp_top, &mut self.ramp_height, "ramp-run-top");
+                }
+                let l = ui.label(t("Width:"));
+                ui.add(TextEdit::singleline(&mut self.ramp_width).desired_width(64.0).hint_text(hint)).labelled_by(l.id);
+                let l = ui.label(t("Slope:"));
+                ui.add(TextEdit::singleline(&mut self.ramp_slope).desired_width(48.0).hint_text("%")).labelled_by(l.id);
             }
-            SiteTool::Toposolid | SiteTool::PropertyLine => {}
+            SiteTool::ParkingArea | SiteTool::Toposolid | SiteTool::PropertyLine => {}
         }
         if self.site.taking(tool) == Taking::Point {
             let l = ui.label(t("Angle:"));
@@ -649,6 +665,11 @@ impl BimApp {
     /// A placing site tool's click: its element where clicked.
     pub(crate) fn site_click(&mut self, tool: SiteTool, level: Id, at: P2) {
         // A family of the site's, on the ground under the click.
+        if tool == SiteTool::Stall {
+            let type_name = self.session.model.language.word(self.site.stall_type).to_string();
+            self.run("parking_component", json!({"type": type_name, "at": [at.0, at.1], "angle": self.site.angle, "level": level}));
+            return;
+        }
         let family = match tool {
             SiteTool::Component => Some(("site_component", self.site.component)),
             SiteTool::Planting => Some(("planting", self.site.planting)),
@@ -728,6 +749,28 @@ impl BimApp {
                 Ok(_) => Err(t("A path has two ends: leave it open.").into()),
                 Err(e) => Err(e),
             },
+            // Revit's ramp by sketch: its run from its foot, at the Ramp tool's width, slope and top.
+            (SiteTool::RampRun, _) => match solver::chain(&lines) {
+                Ok((path, false)) => {
+                    let mut p = json!({"path": path, "level": level});
+                    if let Some(w) = m.units.parse(&self.ramp_width) {
+                        p["width"] = json!(w);
+                    }
+                    if let Some(sl) = number(&self.ramp_slope) {
+                        p["slope"] = json!(sl);
+                    }
+                    if let Ok(top) = crate::top_params(m, level, self.ramp_top, &self.ramp_height) {
+                        for k in ["top_level", "height"] {
+                            if !top[k].is_null() {
+                                p[k] = top[k].clone();
+                            }
+                        }
+                    }
+                    Ok(("ramp", p))
+                }
+                Ok(_) => Err(t("A ramp's run has two ends: leave it open.").into()),
+                Err(e) => Err(e),
+            },
             (SiteTool::PropertyLine, _) => match solver::chain(&lines) {
                 Ok((pts, true)) => Ok(("property_line", json!({"points": pts, "level": level}))),
                 Ok(_) => Err(t("A property line is closed: end it where it began.").into()),
@@ -743,6 +786,8 @@ impl BimApp {
                 Ok(_) => Err(t("A path has two ends: leave it open.").into()),
                 Err(e) => Err(e),
             },
+            // The car park generator: its area, laid out at once.
+            (SiteTool::ParkingArea, _) => ring(&lines).map(|r| ("car_park", json!({"control": points(&r), "level": level}))),
             (_, Taking::Outline) => ring(&lines).map(|r| {
                 let (kind, use_) = self.site.kind(tool).unwrap_or(("paving", "forecourt"));
                 let mut props = self.site_props(tool);
@@ -1041,7 +1086,7 @@ fn site_figures(m: &Model, st: &Site) -> Vec<(String, String)> {
         let (a, unit) = units.area(area);
         out.push((msg!("Area").to_string(), format!("{a:.2} {unit}")));
     }
-    if let Some(r) = st.layout.as_ref().map(|l| &l.result) {
+    if let Some(r) = st.props.get("result") {
         let count = |k: &str| r.get(k).and_then(Value::as_f64).map(|n| format!("{n:.0}"));
         if let Some(n) = count("stalls") {
             out.push((msg!("Stalls").to_string(), n));
@@ -1052,6 +1097,13 @@ fn site_figures(m: &Model, st: &Site) -> Vec<(String, String)> {
         if let Some(n) = r.get("area_per_stall").and_then(Value::as_f64) {
             let (a, unit) = units.area(n * 1.0e6);
             out.push((msg!("Area per Stall").to_string(), format!("{a:.1} {unit}")));
+        }
+        if let Some(n) = count("kept") {
+            out.push((msg!("Kept Stalls").to_string(), n));
+        }
+        // What the person should know: no ramp reaching it, a way in that can't be joined.
+        for n in r.get("notes").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str) {
+            out.push((msg!("Note").to_string(), n.to_string()));
         }
     }
     if st.kind == "lane" && st.use_ == "road" {

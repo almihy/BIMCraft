@@ -172,14 +172,18 @@ fn excavate_and_graded_region_act_on_the_selection() {
 }
 
 #[test]
-fn parking_component_places_a_stall_and_parking_area_lays_out_a_car_park_or_a_row() {
+fn parking_component_places_a_parking_space_and_parking_area_lays_out_a_car_park() {
     let mut h = app(BOX);
     site_tool(&mut h, "Parking Component");
-    pick(&mut h, Role::ComboBox, "Use:");
+    pick(&mut h, Role::ComboBox, "Type:");
     press(&mut h, "Accessible");
     click(&mut h, P2(4000.0, 3000.0));
-    let (_, stall) = site_of(&h, "parking_stall").unwrap_or_else(|| panic!("{:?}", h.state().status));
-    assert_eq!(stall.use_, "accessible");
+    let bay = h.state().session.model.elements.values().find_map(|e| match e {
+        Element::Component(c) if c.family == "Parking Space" => Some(c.clone()),
+        _ => None,
+    });
+    let bay = bay.unwrap_or_else(|| panic!("{:?}", h.state().status));
+    assert_eq!(bay.type_name, "Accessible");
 
     // A car park wants room: a plan forty metres across.
     let mut h = app(r#"wall {"points": [[-2000,-8000],[42000,-8000],[42000,32000],[-2000,32000]], "closed": true}"#);
@@ -187,18 +191,33 @@ fn parking_component_places_a_stall_and_parking_area_lays_out_a_car_park_or_a_ro
     sketch_loop(&mut h, &[P2(0.0, 0.0), P2(40000.0, 0.0), P2(40000.0, 30000.0), P2(0.0, 30000.0)]);
     press(&mut h, "Finish Edit Mode");
     let (id, park) = site_of(&h, "car_park").unwrap_or_else(|| panic!("{:?}", h.state().status));
-    let stalls = park.layout.as_ref().and_then(|l| l.result.get("stalls")).and_then(Value::as_f64).unwrap_or(0.0);
+    let stalls = park.props.get("result").and_then(|r| r.get("stalls")).and_then(Value::as_f64).unwrap_or(0.0);
     assert!(stalls > 10.0, "laid out: {stalls} stalls");
-    // Properties: its stalls, read only.
-    assert_eq!(h.state().selection, vec![id]);
+    let bays = h.state().session.model.elements.values().filter(|e| matches!(e, Element::Component(c) if c.family == "Parking Space")).count();
+    assert_eq!(bays as f64, stalls, "as parking spaces");
+    // Properties: its stalls, read only; and Run on the ribbon.
+    h.state_mut().selection = vec![id];
+    h.run();
     assert!(h.query_all_by_label("Stalls").next().is_some());
+    press(&mut h, "Run");
+    assert!(site_of(&h, "car_park").is_some(), "{:?}", h.state().status);
+}
 
-    site_tool(&mut h, "Parking Area");
-    pick(&mut h, Role::RadioButton, "Row");
-    click(&mut h, P2(0.0, -5000.0));
-    click(&mut h, P2(30000.0, -5000.0));
+#[test]
+fn the_ramp_tool_sketches_a_run_with_lines_and_arcs() {
+    let mut h = app(BOX);
+    h.state_mut().set_tool(crate::Tool::Ramp(Vec::new()));
+    h.run();
+    press(&mut h, "Sketch Run");
+    click(&mut h, P2(0.0, 0.0));
+    click(&mut h, P2(30000.0, 0.0));
     press(&mut h, "Finish Edit Mode");
-    assert!(site_of(&h, "parking_band").is_some(), "{:?}", h.state().status);
+    let ramp = h.state().session.model.elements.values().find_map(|e| match e {
+        Element::Ramp(r) => Some(r.clone()),
+        _ => None,
+    });
+    let ramp = ramp.unwrap_or_else(|| panic!("{:?}", h.state().status));
+    assert_eq!(ramp.path.len(), 2);
 }
 
 #[test]
@@ -221,7 +240,8 @@ fn the_new_categories_have_names_where_categories_are_listed() {
         ("propertyline", "Property Line", "Property Lines"),
         ("planting", "Planting", "Planting"),
         ("sitecomponent", "Site", "Site"),
-        ("site", "Parking", "Parking"),
+        ("site", "Car Park", "Car Parks"),
+        ("parking", "Parking", "Parking"),
     ] {
         assert_eq!(crate::lang::category(c, false), one);
         assert_eq!(crate::lang::category(c, true), many);

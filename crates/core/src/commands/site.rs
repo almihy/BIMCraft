@@ -399,6 +399,7 @@ pub(super) fn toposolid(s: &mut Session, p: &Value) -> R {
         sketch: Vec::new(),
         shape,
         contours,
+        contours_hidden: false,
         excavated_by: Vec::new(),
         graded_from: None,
         params: BTreeMap::new(),

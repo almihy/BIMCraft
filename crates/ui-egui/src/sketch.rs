@@ -827,6 +827,15 @@ impl BimApp {
                             self.open_property_line_setbacks(id);
                         }
                     }
+                    // A car park's: lay it out again now (it does by itself as what is on its level changes).
+                    if let &[id] = self.selection.as_slice()
+                        && matches!(self.session.model.elements.get(id), Some(bimcraft_core::model::Element::Site(st)) if st.kind == "car_park")
+                    {
+                        let tip = msg!("Run: lay the car park out again among what stands on its level, keeping the bays you moved");
+                        if big_button(ui, Icon::ParkingArea, msg!("Run"), false, tip).clicked() {
+                            self.run("car_park_run", json!({"id": id}));
+                        }
+                    }
                 }
             });
         });

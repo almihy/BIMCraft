@@ -49,7 +49,7 @@ refuses `ramp`, saying `ramp` makes it.
 ## 2. The Parking category and its family
 
 - `family::Category::Parking` (`parking` in files), a row of Visibility/Graphics and Object Styles among the family
-  categories, with two subcategories (`parkingstalllines` "Stall Lines", `parkingmarkings` "Markings", Revit's names) that a
+  categories, with two subcategories (`parkingline` "Stall Lines", `parkingmarking` "Markings", Revit's names) that a
   view hides apart from the rest; the family's symbols are in those subcategories (`Stall Lines`, `Markings`), and the plan
   leaves out a symbol whose subcategory the view hides. IFC: `IfcBuildingElementProxy` (as Revit exports Parking).
 - The engine's own family **Parking Space** (`family/site.rs`, loaded on first use as phase 1's are), types **Standard**
@@ -178,3 +178,17 @@ Visibility/Graphics, or move it").
 3. Real columns are kept clear exactly; the layout is not shifted to fit a column grid (it picks the direction and
    arrangement that keep the most bays among them). Fitting bays between columns is a refinement for later.
 4. Below ground, the aisle arrows are the car park's annotation (from `result.aisles`), not elements.
+
+## Added during the build (asked for by Arqiflow's side)
+
+1. **Project parameters on the site's elements**, as Revit allows: `toposolid`, `propertyline`, `subdivision`,
+   `surveypoint` and `projectbasepoint` are categories a project parameter may be for (`parameter {categories}`), set by
+   `modify {id, params}`.
+2. **A toposolid's contours after it is made**: `modify {id, contours}` (the interval, mm; 0 none) and `modify {id,
+   contours_hidden: true}` (Revit's Contour Display unticked: the interval kept, none drawn).
+3. **IFC's map conversion from the base points alone**: IfcMapConversion and an IfcProjectedCRS are written from the survey
+   point's and project base point's shared coordinates whenever the project has them; a `georeference` only names the map.
+4. **A road keeps its definition**: each sub-division `road` makes holds `road: {of, use, name, props}` (`of` the road's first
+   piece's GUID, the same on each piece; `props` its centre line `path` and its sizes with its defaults filled in);
+   `road {replace: <a piece's id>, ...}` makes it again over what it had, its first piece keeping its id. A format-25 lane
+   converted on load keeps its path and widths the same way.

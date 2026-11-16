@@ -1707,8 +1707,16 @@ impl Model {
     pub fn written_format(&self) -> u32 {
         use crate::model::Element;
         // What a build that reads up to 26 misreads or refuses: ramps along a path, the Parking category.
-        let parking = self.elements.values().any(|e| matches!(e, Element::Ramp(r) if !r.path.is_empty() || !r.slopes.is_empty()))
-            || self.families.values().any(|f| f.category == crate::family::Category::Parking);
+        let parking = self.elements.values().any(|e| match e {
+            Element::Ramp(r) => !r.path.is_empty() || !r.slopes.is_empty(),
+            Element::SubDivision(sd) => sd.road.is_some(),
+            Element::Toposolid(f) => f.contours_hidden,
+            _ => false,
+        })
+            || self.families.values().any(|f| f.category == crate::family::Category::Parking)
+            || self.parameters.values().flat_map(|p| &p.categories).any(|c| {
+                matches!(c.as_str(), "toposolid" | "propertyline" | "subdivision" | "surveypoint" | "projectbasepoint")
+            });
         if parking {
             return crate::model::PARKING_FORMAT;
         }

@@ -2057,6 +2057,7 @@ pub fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, String> 
                 pattern_origin: P2(0.0, 0.0),
                 pattern_angle: 0.0,
                 contours: 0.0,
+                contours_hidden: false,
                 excavated_by: Vec::new(),
                 graded_from: None,
             };
@@ -2115,6 +2116,7 @@ pub fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, String> 
             pattern_origin: P2(0.0, 0.0),
             pattern_angle: 0.0,
             contours: 0.0,
+            contours_hidden: false,
             excavated_by: Vec::new(),
             graded_from: None,
         };

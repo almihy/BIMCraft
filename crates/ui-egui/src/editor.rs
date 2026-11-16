@@ -774,7 +774,7 @@ fn nested_of<'m>(base: &'m Model, family: &Family) -> Vec<(&'m str, &'m Family)>
 }
 
 /// The categories a family may be of, in the order they're offered.
-pub(crate) const CATEGORIES: [Category; 22] = [
+pub(crate) const CATEGORIES: [Category; 23] = [
     Category::Furniture,
     Category::Casework,
     Category::Plumbing,
@@ -795,6 +795,7 @@ pub(crate) const CATEGORIES: [Category; 22] = [
     Category::Generic,
     Category::Planting,
     Category::SiteComponent,
+    Category::Parking,
     Category::Door,
     Category::Window,
 ];
@@ -821,6 +822,7 @@ pub(crate) fn category_label(c: Category) -> String {
         Category::Generic => msg!("Generic"),
         Category::Planting => msg!("Planting"),
         Category::SiteComponent => msg!("Site"),
+        Category::Parking => msg!("Parking"),
         Category::Door => "Door",
         Category::Window => "Window",
     })
