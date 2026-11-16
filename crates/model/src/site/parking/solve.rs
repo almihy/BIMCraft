@@ -561,6 +561,10 @@ pub fn solve(input: &Input) -> Solved {
         }
         let mut best: Option<Candidate> = None;
         for (deg, mut plan) in plans {
+            // An aisle through what stands on the ground (a column, a wall, a ramp) is no way to drive: that plan is out.
+            if plan.aisles.iter().any(|a| part.holes.iter().any(|h| hits(h, &a.poly))) {
+                continue;
+            }
             // The bays a person took out are planted.
             if !removed.is_empty() {
                 let mut kept = Vec::with_capacity(plan.stalls.len());

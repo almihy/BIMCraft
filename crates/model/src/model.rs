@@ -59,6 +59,9 @@ pub const RAILING_INSET: f64 = 50.0;
 pub const MAX_BALUSTERS: f64 = 10_000.0;
 /// Names, marks and numbers longer than this are refused.
 pub const MAX_TEXT: usize = 256;
+/// A text parameter's value, bytes: Revit sets no limit; this one only keeps a file sane (a plot's cadastre parcels as
+/// JSON fit many times over).
+pub const MAX_PARAMETER_TEXT: usize = 4 << 20;
 /// Points one command or floor outline may carry.
 pub const MAX_POINTS: usize = 10_000;
 /// Height of a reflected ceiling plan's cut plane above its level: it looks up from there.
@@ -3258,7 +3261,7 @@ impl ProjectParameter {
     /// Whether `v` is a value it holds.
     pub fn holds(&self, v: &serde_json::Value) -> bool {
         match self.kind {
-            ParameterKind::Text => v.as_str().is_some_and(|t| t.chars().count() <= MAX_TEXT),
+            ParameterKind::Text => v.as_str().is_some_and(|t| t.len() <= MAX_PARAMETER_TEXT),
             ParameterKind::Number | ParameterKind::Length => v.as_f64().is_some_and(|x| x.is_finite() && x.abs() <= MAX_COORD),
             ParameterKind::YesNo => v.is_boolean(),
         }

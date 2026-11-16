@@ -195,7 +195,9 @@ Visibility/Graphics, or move it").
 
 ## Review of phase 2 (16 November)
 
-Fixed: a way in off a ramp's foot (or a street) no longer runs through walls, columns or ramps (the solver's `clear` takes
+Fixed: a plan whose aisle runs through a column, a wall or a ramp is not taken (the ring layout's cross aisles ran through
+columns: that was where a column grid's "good" yield came from); a field's aisles are set just clear of each row of posts and
+its rows step round them; a way in off a ramp's foot (or a street) no longer runs through walls, columns or ramps (the solver's `clear` takes
 what is kept clear exactly); a ramp's foot that can't be joined to an aisle is said; posts (holes of 2 m or less, real
 columns) are stepped round, not cut along (a column grid laid out in milliseconds, not tens); a long wall across a car park
 with no end near it is kept clear (nearness by boxes, not corners); far components' pieces aren't worked out; a moved bay
@@ -207,6 +209,9 @@ Left:
   along a wall, one curved in a corner) gets a handful of bays where a designer lays some 60
   (`a_basement_..._is_filled_as_a_designer_would`, ignored until it passes). The solver cuts the plot once at an inside
   corner; ramps at two sides need cuts within cuts, and an aisle laid to meet each foot.
+- **The solver round a column grid**: a 60 x 40 m basement with an 8.1 x 10 m grid gets a dozen bays where a designer fits
+  some 60 (`below_ground_a_column_grid_is_stepped_round_...`). Fields of aisles across the grid, sized to its bays, are what
+  it lacks.
 - Bays are not fitted between real columns (a column in a row costs one or two bays): the field's bay grid could take the
   columns' pitch (`column_every`, `column_size`) and phase from the real grid.
 - An accessible bay's access aisle is not placed (the solver's `access_aisles`): the Accessible type is the bay alone at the

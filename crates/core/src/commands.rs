@@ -677,13 +677,18 @@ other_files(
         "road",
         "Road",
         &[],
-        "{path: [[x,y] or [x,y,bulge],…], host?, width?, use?: road|lane|footpath|promenade, lanes?, lane_width?, kerb?, median?, \
-         oneway?, pavement?, name?, replace?: id} a road from its centre line: its carriageway (Asphalt, at the ground), pavements (Paving, 150 \
-         up) and median (Grass, 150 up) worked out as the masterplan's lanes were, each a sub-division of the toposolid under it \
-         (or `host`); another use is one sub-division of its outline. Each piece keeps the road (`road`: `of`, the road's \
-         first piece's GUID; `use`, `name`, and `props`: its `path`, `width`, `lanes`, `lane_width`, `kerb`, `median`, \
-         `oneway`, `pavement`, filled in). `replace: id` (any piece of a road) makes that road again with what is given over \
-         what it had (null takes one back to its default), its first piece keeping its id. Returns `ids`, `host`, `notes`",
+        "{path: [[x,y] or [x,y,bulge],…], host?, level?, width?, use?: road|lane|footpath|promenade, lanes?, lane_width?, kerb?, \
+         median?, oneway?, pavement?, heads?: {start?, end?: {shape: round|hammerhead|…, radius?, arm?, side?}}, markings?, \
+         corner_radius?, name?, replace?: id} a road from its centre line: its carriageway (Asphalt, at the ground), pavements \
+         (Paving, 150 up) and median (Grass, 150 up) worked out as the masterplan's lanes were, each a sub-division of the \
+         toposolid under it (or `host`; partly off it, clipped at its edge as Revit clips a sub-division; off every toposolid, a \
+         flat toposolid is made under it on `level`, as Revit has no sub-division without one); another use is one sub-division \
+         of its outline. Roads that meet are joined as the masterplan joined them: where one ends on another its corners are \
+         rounded to `corner_radius` (the kerb's), and a road already made that ends on this one is made again with them \
+         (`joined`, its first piece keeping its id). `heads` are turning heads at its ends; `markings: false` paints none. Each \
+         piece keeps the road (`road`: `of`, the road's first piece's GUID; `use`, `name`, and `props`: its `path` and sizes, \
+         filled in). `replace: id` (any piece of a road) makes that road again with what is given over what it had (null takes \
+         one back to its default), its first piece keeping its id. Returns `ids`, `host`, `joined`, `notes`",
         road,
     ),
     edit(

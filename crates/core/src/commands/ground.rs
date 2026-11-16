@@ -163,9 +163,90 @@ pub(super) fn sub_division(s: &mut Session, p: &Value) -> R {
     Ok(subdivision_answer(&s.model, id))
 }
 
+/// The road keys `road` takes beside `path`: its cross-section, its turning heads and its junctions' kerb radius.
+const ROAD_KEYS: [&str; 10] = ["width", "lanes", "lane_width", "kerb", "median", "oneway", "pavement", "heads", "markings", "corner_radius"];
+
+/// The project's roads on `level` (made by `road`, or converted lanes), but `skip`: each its definition, its pieces and
+/// its host.
+fn roads_on(m: &Model, level: Guid, skip: Option<Guid>) -> Vec<(ground::RoadDef, Vec<Id>, Guid)> {
+    let mut out: Vec<(ground::RoadDef, Vec<Id>, Guid)> = Vec::new();
+    for (id, e) in m.elements.iter() {
+        let Element::SubDivision(sd) = e else { continue };
+        let Some(r) = &sd.road else { continue };
+        if Some(r.of) == skip || m.subdivision_level(sd) != Some(level) {
+            continue;
+        }
+        match out.iter_mut().find(|(o, _, _)| o.of == r.of) {
+            Some((_, pieces, _)) => pieces.push(*id),
+            None => out.push((r.clone(), vec![*id], sd.host)),
+        }
+    }
+    out
+}
+
+/// A road's shapes among the others on its level, as the masterplan shaped its lanes: the corners where one road ends on
+/// another rounded to the kerb's radius (owned by the road that ends there), two pieces end to end joined.
+fn shaped_among(m: &Model, defs: &[(String, String, crate::site::Props)]) -> Vec<crate::site::shapes::Shaped> {
+    let figures = masterplan::figures(m);
+    let items: Vec<crate::site::shapes::Item> = defs
+        .iter()
+        .map(|(key, use_, props)| crate::site::shapes::Item { key, kind: "lane", use_, props, phase: "new", context: false })
+        .collect();
+    crate::site::shapes::normalise(&items, &figures)
+}
+
+/// Road `def` made again as `shaped` on `host`: its pieces go, the new ones take its first's id, GUID and parameters.
+fn remake(s: &mut Session, def: &ground::RoadDef, pieces: &[Id], host: Guid, shaped: crate::site::shapes::Shaped) -> Result<Vec<Id>, String> {
+    let level = match s.model.elements.id(host).and_then(|id| s.model.elements.get(id)) {
+        Some(Element::Toposolid(f)) => f.level,
+        _ => return Err(bad("road", "its host is no toposolid")),
+    };
+    let site = masterplan::Site {
+        kind: "lane".into(),
+        use_: def.use_.clone(),
+        name: def.name.clone(),
+        level,
+        phase: "new".into(),
+        source: String::new(),
+        reference: String::new(),
+        props: def.props.clone(),
+        outline: shaped.outline,
+        parts: shaped.parts,
+        notes: Vec::new(),
+        params: BTreeMap::new(),
+    };
+    let made = ground::subdivisions_from(s.model_mut(), &site, host);
+    let m = s.model_mut();
+    let reuse = pieces.iter().copied().find(|id| m.elements.get(*id).is_some() && m.guid(*id) == def.of).or(pieces.first().copied());
+    let kept = reuse.and_then(|id| match m.elements.get(id) {
+        Some(Element::SubDivision(sd)) => Some(sd.params.clone()),
+        _ => None,
+    });
+    for id in pieces {
+        m.elements.remove(*id);
+    }
+    let mut ids = Vec::new();
+    for (k, mut e) in made.into_iter().enumerate() {
+        if let Element::SubDivision(sd) = &mut e {
+            sd.params = if k == 0 { kept.clone().unwrap_or_default() } else { BTreeMap::new() };
+        }
+        match (k, reuse) {
+            (0, Some(id)) => {
+                s.model_mut().elements.insert_as(id, def.of, e).map_err(|e| bad("road", e))?;
+                ids.push(id);
+            }
+            _ => ids.push(s.model_mut().insert(e)),
+        }
+    }
+    ground::link_road(s.model_mut(), &ids);
+    Ok(ids)
+}
+
 pub(super) fn road(s: &mut Session, p: &Value) -> R {
     let c = "road";
-    keys(c, p, &["path", "host", "width", "use", "lanes", "lane_width", "kerb", "median", "oneway", "name", "pavement", "replace"])?;
+    let mut allowed = vec!["path", "host", "level", "use", "name", "replace"];
+    allowed.extend(ROAD_KEYS);
+    keys(c, p, &allowed)?;
     // Made again: the road a piece of it is, its definition with what is given over it; its pieces go, the new ones take
     // its first's id.
     let mut was: Option<(ground::RoadDef, Vec<Id>, Guid)> = None;
@@ -196,7 +277,7 @@ pub(super) fn road(s: &mut Session, p: &Value) -> R {
     }
     let mut props = crate::site::Props::new();
     props.insert("path".into(), path.clone());
-    for k in ["width", "lanes", "lane_width", "kerb", "median", "oneway", "pavement"] {
+    for k in ROAD_KEYS {
         // What is given, else what the road had (null takes it back to the default).
         match p.get(k) {
             Some(Value::Null) => {}
@@ -213,62 +294,101 @@ pub(super) fn road(s: &mut Session, p: &Value) -> R {
     masterplan::check_props("lane", &props).map_err(|e| bad(c, e))?;
     let figures = masterplan::figures(&s.model);
     let item = crate::site::shapes::Item { key: "road", kind: "lane", use_: &use_, props: &props, phase: "new", context: false };
-    let shaped = crate::site::shapes::normalise(std::slice::from_ref(&item), &figures).pop().unwrap_or_default();
-    let ring: Vec<P2> = shaped.outline.first().map(|x| x.outer.clone()).unwrap_or_default();
+    let alone = crate::site::shapes::normalise(std::slice::from_ref(&item), &figures).pop().unwrap_or_default();
+    let ring: Vec<P2> = alone.outline.first().map(|x| x.outer.clone()).unwrap_or_default();
     if ring.len() < 3 {
-        return Err(bad(c, format!("its shape can't be worked out: {}", shaped.notes.join(" "))));
+        return Err(bad(c, format!("its shape can't be worked out: {}", alone.notes.join(" "))));
     }
+    // Its host: given, the one it had, the toposolid under it (or the one it overlaps most: it is clipped at that one's
+    // edge, as Revit clips a sub-division); off every toposolid (a street of the context past the surveyed ground), a flat
+    // toposolid made under it on its level, as Revit has no sub-division without one.
     let host = match &was {
         Some((_, _, h)) if absent(p.get("host")) => *h,
-        _ => host_param(c, &s.model, p, &ring)?,
+        _ => match host_param(c, &s.model, p, &ring) {
+            Ok(h) => h,
+            Err(_) if absent(p.get("host")) => {
+                let level = if absent(p.get("level")) {
+                    s.model.elements.values().find_map(|e| match e {
+                        Element::Toposolid(f) => Some(f.level),
+                        _ => None,
+                    })
+                } else {
+                    None
+                };
+                let level = match level {
+                    Some(l) => l,
+                    None => level_param(c, &s.model, p, "level")?,
+                };
+                let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+                for q in &ring {
+                    b = [b[0].min(q.0), b[1].min(q.1), b[2].max(q.0), b[3].max(q.1)];
+                }
+                ground::make_ground(s.model_mut(), level, b)
+            }
+            Err(e) => return Err(e),
+        },
     };
-    // Its definition kept on its pieces, its defaults filled in.
-    for (k, v) in &shaped.filled {
-        props.entry(k.clone()).or_insert_with(|| v.clone());
-    }
-    let level = match s.model.elements.get(host) {
+    let level = match s.model.elements.id(host).and_then(|id| s.model.elements.get(id)) {
         Some(Element::Toposolid(f)) => f.level,
         _ => return Err(bad(c, "its host is no toposolid")),
     };
-    let site = masterplan::Site {
-        kind: "lane".into(),
-        use_,
-        name: string(c, p, "name")?.or_else(|| old.map(|r| r.name.clone())).unwrap_or_default(),
-        level,
-        phase: "new".into(),
-        source: String::new(),
-        reference: String::new(),
-        props,
-        outline: shaped.outline,
-        parts: shaped.parts,
-        notes: Vec::new(),
-        params: BTreeMap::new(),
-    };
-    let made = ground::subdivisions_from(s.model_mut(), &site, host);
-    let mut ids = Vec::new();
-    let mut reuse = None;
-    if let Some((r, pieces, _)) = &was {
-        let m = s.model_mut();
-        // Its first piece's id and GUID are the road's.
-        reuse = pieces.iter().copied().find(|id| m.guid(*id) == r.of).or(pieces.first().copied());
-        for id in pieces {
-            m.elements.remove(*id);
-        }
+    // Its definition kept on its pieces, its defaults filled in.
+    for (k, v) in &alone.filled {
+        props.entry(k.clone()).or_insert_with(|| v.clone());
     }
-    for (k, mut e) in made.into_iter().enumerate() {
-        if let Element::SubDivision(sd) = &mut e {
-            sd.params.clear();
-        }
-        match (k, reuse, &was) {
-            (0, Some(id), Some((r, _, _))) => {
-                s.model_mut().elements.insert_as(id, r.of, e).map_err(|e| bad(c, e))?;
-                ids.push(id);
+    // Shaped among the roads on its level: where it ends on one its corners are rounded; where one ends on it, that one is
+    // made again with its corners.
+    let others = roads_on(&s.model, level, old.map(|r| r.of));
+    let mut defs: Vec<(String, String, crate::site::Props)> =
+        others.iter().map(|(r, _, _)| (r.of.to_string(), r.use_.clone(), r.props.clone())).collect();
+    let before = if others.is_empty() { Vec::new() } else { shaped_among(&s.model, &defs) };
+    defs.push(("road".into(), use_.clone(), props.clone()));
+    let mut after = shaped_among(&s.model, &defs);
+    let mut shaped = after.pop().unwrap_or_default();
+    if shaped.outline.is_empty() {
+        shaped = alone.clone();
+    }
+    let name = string(c, p, "name")?.or_else(|| old.map(|r| r.name.clone())).unwrap_or_default();
+    let def = ground::RoadDef { of: old.map_or(Guid::default(), |r| r.of), use_, name, props };
+    let pieces: Vec<Id> = was.as_ref().map(|(_, ps, _)| ps.clone()).unwrap_or_default();
+    let ids = if was.is_some() {
+        remake(s, &def, &pieces, host, shaped)?
+    } else {
+        let site = masterplan::Site {
+            kind: "lane".into(),
+            use_: def.use_.clone(),
+            name: def.name.clone(),
+            level,
+            phase: "new".into(),
+            source: String::new(),
+            reference: String::new(),
+            props: def.props.clone(),
+            outline: shaped.outline,
+            parts: shaped.parts,
+            notes: Vec::new(),
+            params: BTreeMap::new(),
+        };
+        let made = ground::subdivisions_from(s.model_mut(), &site, host);
+        let mut ids = Vec::new();
+        for mut e in made {
+            if let Element::SubDivision(sd) = &mut e {
+                sd.params.clear();
             }
-            _ => ids.push(s.model_mut().insert(e)),
+            ids.push(s.model_mut().insert(e));
+        }
+        ground::link_road(s.model_mut(), &ids);
+        ids
+    };
+    // The roads whose shape it changed (one that ends on it takes its corners), made again.
+    let mut joined = Vec::new();
+    for (k, (r, ps, h)) in others.iter().enumerate() {
+        let (Some(b), Some(a)) = (before.get(k), after.get(k)) else { continue };
+        if b.outline != a.outline || b.parts != a.parts {
+            let again = remake(s, r, ps, *h, a.clone())?;
+            joined.extend(again.first().copied());
         }
     }
-    ground::link_road(s.model_mut(), &ids);
-    Ok(json!({"ids": ids, "host": s.model.elements.id(host), "notes": shaped.notes}))
+    Ok(json!({"ids": ids, "host": s.model.elements.id(host), "joined": joined, "notes": alone.notes}))
 }
 
 pub(super) fn excavate(s: &mut Session, p: &Value) -> R {

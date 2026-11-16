@@ -1040,7 +1040,7 @@ pub fn toposolid_under(m: &Model, level: Guid, q: P2) -> Option<Guid> {
 
 /// A flat toposolid named `Ground` under everything in `boxes`, 5 m past it, on `level`: what converted elements go on in
 /// a project that has no toposolid (Revit has no sub-division without one).
-fn make_ground(m: &mut Model, level: Guid, b: [f64; 4]) -> Guid {
+pub fn make_ground(m: &mut Model, level: Guid, b: [f64; 4]) -> Guid {
     if !m.types.floor.contains_key("Toposolid") {
         m.types.floor.insert("Toposolid".into(), crate::model::FloorType { thickness: 1000.0, layers: Vec::new(), identity: Default::default() });
     }

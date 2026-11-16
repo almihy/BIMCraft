@@ -431,6 +431,12 @@ fn the_sites_elements_take_project_parameters_as_revit_allows() {
         run(&mut s, "modify", json!({"id": e, "params": {"Plot Source": "survey 2026"}}));
         assert_eq!(s.model.elements.get(e).and_then(|e| e.params()).and_then(|p| p.get("Plot Source")), Some(&json!("survey 2026")));
     }
+    // A text parameter holds a long value, as Revit's does: the cadastre's parcels as JSON on the property line.
+    let parcels = json!([{"id": "P-1", "ring": (0..400).map(|i| [i * 10, i * 7]).collect::<Vec<_>>()}]).to_string();
+    assert!(parcels.len() > 4000);
+    run(&mut s, "modify", json!({"id": pl, "params": {"Plot Source": parcels}}));
+    let read = crate::model::Model::read(&s.model.to_json().unwrap()).unwrap().0;
+    assert_eq!(read.elements.get(pl).and_then(|e| e.params()).and_then(|p| p.get("Plot Source")), Some(&json!(parcels)));
 }
 
 #[test]
@@ -653,4 +659,57 @@ fn a_basement_with_walls_a_column_grid_and_two_ramps_is_filled_as_a_designer_wou
     );
     let park = id(&run(&mut s, "car_park", json!({"control": AREA, "level": "B1"})));
     assert!(bays(&s, park).len() >= 50, "{} bays", bays(&s, park).len());
+}
+
+/// Each piece's area of the roads in `ids`, m².
+fn road_area(s: &Session, of: Guid) -> f64 {
+    s.model
+        .elements
+        .values()
+        .filter_map(|e| match e {
+            Element::SubDivision(sd) if sd.road.as_ref().is_some_and(|r| r.of == of) => Some(s.model.subdivision_area(sd) / 1e6),
+            _ => None,
+        })
+        .sum()
+}
+
+#[test]
+fn roads_that_meet_are_joined_with_the_kerbs_radius_and_take_turning_heads_and_markings() {
+    let mut s = Session::new();
+    run(&mut s, "toposolid", json!({"boundary": [[-20000, -60000], [120000, -60000], [120000, 60000], [-20000, 60000]]}));
+    // A side road first, then the main road it ends on: the side road is made again with its corners rounded.
+    let side = run(&mut s, "road", json!({"path": [[50000, 50000], [50000, 6000]], "width": 12000}));
+    let side_of = s.model.guid(serde_json::from_value::<Vec<Id>>(side["ids"].clone()).unwrap()[0]);
+    let alone = road_area(&s, side_of);
+    let main = run(&mut s, "road", json!({"path": [[0, 0], [100000, 0]], "width": 12000, "markings": false}));
+    let joined: Vec<Id> = serde_json::from_value(main["joined"].clone()).unwrap();
+    assert_eq!(joined.len(), 1, "{main}");
+    assert_eq!(s.model.guid(joined[0]), side_of, "the side road keeps its id");
+    assert!(road_area(&s, side_of) > alone + 10.0, "its corners rounded: {alone} then {}", road_area(&s, side_of));
+    let main_of = s.model.guid(serde_json::from_value::<Vec<Id>>(main["ids"].clone()).unwrap()[0]);
+    let pieces = |of: Guid| s.model.elements.values().filter(|e| matches!(e, Element::SubDivision(sd) if sd.road.as_ref().is_some_and(|r| r.of == of))).count();
+    assert!(pieces(main_of) > 0);
+    let Some(Element::SubDivision(sd)) = s.model.elements.values().find(|e| matches!(e, Element::SubDivision(sd) if sd.road.as_ref().is_some_and(|r| r.of == main_of))) else { panic!() };
+    assert_eq!(sd.road.as_ref().unwrap().props["markings"], json!(false));
+    // A cul-de-sac's turning head at its end: more ground than without.
+    let plain = run(&mut s, "road", json!({"path": [[0, -40000], [40000, -40000]], "width": 8000, "use": "lane"}));
+    let plain_of = s.model.guid(serde_json::from_value::<Vec<Id>>(plain["ids"].clone()).unwrap()[0]);
+    let before = road_area(&s, plain_of);
+    let ids: Vec<Id> = serde_json::from_value(plain["ids"].clone()).unwrap();
+    run(&mut s, "road", json!({"replace": ids[0], "heads": {"end": {"shape": "round", "radius": 9000}}}));
+    assert!(road_area(&s, plain_of) > before + 50.0, "{before} then {}", road_area(&s, plain_of));
+}
+
+#[test]
+fn a_road_off_the_ground_gets_a_flat_toposolid_under_it() {
+    let mut s = Session::new();
+    run(&mut s, "toposolid", json!({"boundary": [[0, 0], [20000, 0], [20000, 20000], [0, 20000]]}));
+    let tops = |s: &Session| s.model.elements.values().filter(|e| matches!(e, Element::Toposolid(_))).count();
+    // A street of the context, well past the surveyed ground.
+    let r = run(&mut s, "road", json!({"path": [[100000, 0], [200000, 0]], "width": 12000}));
+    assert_eq!(tops(&s), 2, "a toposolid made under it");
+    let host = id(&json!({"id": r["host"]}));
+    let Some(Element::Toposolid(t)) = s.model.elements.get(host) else { panic!() };
+    assert!(crate::geom::contains(&t.boundary, P2(150000.0, 0.0)));
+    assert!(!serde_json::from_value::<Vec<Id>>(r["ids"].clone()).unwrap().is_empty());
 }

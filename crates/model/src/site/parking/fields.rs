@@ -247,6 +247,26 @@ fn widest(spans: &[Span]) -> Option<Span> {
 
 /// The field laid out one way: a stack of `n` aisles across it, its sides and ends as said. None when the aisles do
 /// not fit inside.
+/// A stack's spans from `y0` to `y1` taken across the posts standing in it: a gap only a post makes is no end to the stack
+/// (its aisles are kept clear of the posts, its rows step round them).
+fn over_posts(g: &Region, spans: Vec<Span>, y0: f64, y1: f64) -> Vec<Span> {
+    let posts: Vec<Bounds> = g.holes.iter().filter(|h| is_post(h)).map(|h| bounds(h)).filter(|q| q.y0 > y0 && q.y1 < y1).collect();
+    if posts.is_empty() || spans.len() < 2 {
+        return spans;
+    }
+    let mut out: Vec<Span> = Vec::with_capacity(spans.len());
+    for sp in spans {
+        if let Some(last) = out.last_mut()
+            && posts.iter().any(|q| q.x0 <= last[1] + 1e-6 && q.x1 >= sp[0] - 1e-6)
+        {
+            last[1] = sp[1];
+            continue;
+        }
+        out.push(sp);
+    }
+    out
+}
+
 #[allow(clippy::too_many_arguments)]
 fn lay_field(
     f: &FieldSpec,
@@ -314,7 +334,7 @@ fn lay_field(
     if let (Some(first), Some(last)) = (own.first(), own.last()) {
         let y_a = first.y0;
         let y_b = last.y1;
-        let spans = strip_spans(g, y_a, y_b);
+        let spans = over_posts(g, strip_spans(g, y_a, y_b), y_a, y_b);
         let [x0s, x1s] = widest(&spans)?;
         let west_face = if west == End::Open { x0s } else { x0s + (if west == End::Row { er } else { 0.0 }) + ca };
         let east_face = if east == End::Open { x1s } else { x1s - (if east == End::Row { er } else { 0.0 }) - ca };
@@ -333,11 +353,16 @@ fn lay_field(
             let flow = if s.one_way && !single { Some(if t.aisle % 2 == 0 { 1.0 } else { -1.0 }) } else { None };
             plan.aisles.push(LAisle { id: t.aisle, r: ar, kind: AisleKind::Aisle, flow });
         }
-        if west != End::Open {
-            plan.aisles.push(LAisle { id: 100, r: rect(west_face - ca, y_a, west_face, y_b), kind: AisleKind::Cross, flow: None });
-        }
-        if east != End::Open {
-            plan.aisles.push(LAisle { id: 101, r: rect(east_face, y_a, east_face + ca, y_b), kind: AisleKind::Cross, flow: None });
+        // A cross aisle runs clear of the posts too (the rows between the aisles step round them).
+        let posted = g.holes.iter().any(|h| is_post(h));
+        for (id, cr, open) in [(100, rect(west_face - ca, y_a, west_face, y_b), west == End::Open), (101, rect(east_face, y_a, east_face + ca, y_b), east == End::Open)] {
+            if open {
+                continue;
+            }
+            if posted && !box_inside(g, cr.x0, cr.y0, cr.x1, cr.y1) {
+                return None;
+            }
+            plan.aisles.push(LAisle { id, r: cr, kind: AisleKind::Cross, flow: None });
         }
         // End rows: bays facing the cross aisles from the field's ends.
         let end_row = |plan: &mut Plan, x0: f64, x1: f64, aisle: i64, side: Side, tag: &str| {
@@ -637,6 +662,34 @@ fn best_field_of(f: &FieldSpec, s: &Settings) -> Option<Plan> {
     let norths: Vec<FSide> = if f.ext.n { vec![FSide::Out, FSide::Row, FSide::None] } else { sides.to_vec() };
     let wests: Vec<End> = if f.ext.w { vec![End::Open, End::Row, End::None] } else { vec![End::Row, End::None] };
     let easts: Vec<End> = if f.ext.e { vec![End::Open, End::Row, End::None] } else { vec![End::Row, End::None] };
+    // The posts standing in it (real columns): the offsets that put each aisle just clear of a row of them, so they stand
+    // among the bays, not in an aisle.
+    let posts: Vec<(f64, f64)> = {
+        let mut v: Vec<(f64, f64)> = Vec::new();
+        for q in f.region.holes.iter().filter(|h| is_post(h)).map(|h| bounds(h)) {
+            if !v.iter().any(|(lo, hi)| (lo - q.y0).abs() < 0.01 && (hi - q.y1).abs() < 0.01) {
+                v.push((q.y0, q.y1));
+            }
+        }
+        v.truncate(64);
+        v
+    };
+    let clear_of_posts = |n: i64, so: FSide, slack: f64| -> Vec<f64> {
+        let a = if s.one_way && n == 1 { s.aisle_two_way } else { s.aisle };
+        let first = b.y0 + if so == FSide::Row { r } else { 0.0 };
+        let mut out = Vec::new();
+        for i in 0..n {
+            let at = first + i as f64 * (a + 2.0 * r);
+            for &(lo, hi) in &posts {
+                for off in [hi + 0.01 - at, lo - 0.01 - a - at] {
+                    if (0.0..=slack).contains(&off) {
+                        out.push(off);
+                    }
+                }
+            }
+        }
+        out
+    };
     let n_max = ((h + 2.0 * r) / (a + 2.0 * r)).floor() + 1.0;
     if !(n_max < 10_000.0) {
         return None;
@@ -672,7 +725,9 @@ fn best_field_of(f: &FieldSpec, s: &Settings) -> Option<Plan> {
                 } else if no == FSide::Out {
                     vec![slack]
                 } else if square {
-                    vec![slack / 2.0, 0.0, slack]
+                    let mut o = vec![slack / 2.0, 0.0, slack];
+                    o.extend(clear_of_posts(n, so, slack));
+                    o
                 } else {
                     let steps = 6f64.min(1f64.max((slack / 1.0).ceil()));
                     let mut o = vec![slack / 2.0];
@@ -681,6 +736,7 @@ fn best_field_of(f: &FieldSpec, s: &Settings) -> Option<Plan> {
                         o.push((slack * i) / steps);
                         i += 1.0;
                     }
+                    o.extend(clear_of_posts(n, so, slack));
                     o
                 };
                 for off in offsets {
