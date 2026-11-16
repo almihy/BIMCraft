@@ -830,7 +830,8 @@ pub fn place(ctx: &mut Ctx, plan: &Plan, frame: &Frame, tag: &str, deg: f64) -> 
             poly: stall_poly(&st.r, st.side, st.sh).into_iter().map(w).collect(),
             mouth: w(mouth_of(&st.r, st.side)),
             aisle: if st.aisle >= EXT_BASE { st.aisle } else { ids.get(&st.aisle).copied().unwrap_or(-1) },
-            row: format!("{tag}|{}|{}", st.row, st.aisle),
+            // By the aisle's id on the plot (unique among plans joined: two parts' rows never pair their accessible bays).
+            row: format!("{tag}|{}|{}", st.row, ids.get(&st.aisle).copied().unwrap_or(st.aisle)),
             cell: st.cell,
             kind: st.kind,
             access: false,

@@ -1441,3 +1441,26 @@ fn dead_ends_are_no_longer_than_the_standard_allows() {
         }
     }
 }
+
+/// An L whose arms want their aisles at right angles (a long arm east, a long arm north, 2.5 x 5 m bays on 6 m aisles, its
+/// ramp in the east arm): each arm laid out in its own direction, off a drive aisle at the corner.
+#[test]
+fn an_l_gets_each_arm_its_own_direction() {
+    let site = vec![[0.0, 0.0], [90.0, 0.0], [90.0, 33.0], [33.0, 33.0], [33.0, 90.0], [0.0, 90.0]];
+    let ramp = bx(84.0, 10.0, 90.0, 30.0);
+    let input = Input {
+        site: site.clone(),
+        basement: Some(Vec::new()),
+        feet: vec![(([84.0, 10.0], [90.0, 10.0]), [0.0, -1.0])],
+        keep_clear: vec![ramp.clone()],
+        settings: Given { stall_width: Some(2.5), stall_depth: Some(5.0), aisle: Some(6.0), column_every: Some(0.0), ..Given::default() },
+        ..Input::default()
+    };
+    let l = solve(&input);
+    picture(&l, &input, "l_split");
+    eprintln!("an L: {} bays, directions {:?}, notes {:?}", l.stalls.len(), l.directions, l.notes);
+    assert_eq!(faults(&l, &[ramp]), Vec::<String>::new());
+    assert!(l.notes.is_empty(), "{:?}", l.notes);
+    // One direction for both arms gets 185; each its own, 193.
+    assert!(l.stalls.len() >= 190 && l.directions.len() == 2, "{} bays, {:?}", l.stalls.len(), l.directions);
+}

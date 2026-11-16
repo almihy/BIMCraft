@@ -40,6 +40,8 @@ struct Foot {
     at: f64,
     /// The way a car comes off it: +1 or -1, along x (along) or y (across).
     dir: f64,
+    /// A drive aisle's side (a split's, `lay_split`): every aisle it meets is reached from it, not one.
+    gate: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -223,7 +225,7 @@ impl Stack<'_> {
         }
         let mut gain = 0.0;
         if bonus {
-            for f in self.feet.iter().filter(|f| f.along) {
+            for f in self.feet.iter().filter(|f| f.along && !f.gate) {
                 if in_line(f.lo, f.hi, ya, ya + self.a) && segs.iter().any(|sg| sg[0] <= f.at + 1.0 && sg[1] >= f.at - 1.0) {
                     gain += FOOT_BONUS;
                 }
@@ -304,11 +306,27 @@ fn overlaps(r: &Rect, b: &Bay) -> bool {
 /// The car park laid out as modules on the grid, in each direction tried: plans for the solver to pick from. 90° bays
 /// only; `feet` are the ramps' ends on the level (the line across each, the way a car comes off it).
 pub fn lay_grid(ctx: &mut Ctx, part: &Region, s: &Settings, origin: Pt, degs: &[f64], feet: &[((Pt, Pt), Pt)], quick: bool) -> Vec<WPlan> {
+    lay_grid_with(ctx, part, s, origin, degs, feet, &[], quick)
+}
+
+/// [`lay_grid`] with `gates`: the sides of drive aisles beside the part (as feet: the line, the way into the part).
+#[allow(clippy::too_many_arguments)]
+fn lay_grid_with(
+    ctx: &mut Ctx,
+    part: &Region,
+    s: &Settings,
+    origin: Pt,
+    degs: &[f64],
+    feet: &[((Pt, Pt), Pt)],
+    gates: &[((Pt, Pt), Pt)],
+    quick: bool,
+) -> Vec<WPlan> {
     if s.angle < 89.9 || part.outer.len() < 3 {
         return Vec::new();
     }
     let mut out = Vec::new();
-    let mut dirs = dirs_of(part, degs, feet);
+    let all: Vec<((Pt, Pt), Pt)> = feet.iter().chain(gates).copied().collect();
+    let mut dirs = dirs_of(part, degs, &all);
     if quick {
         dirs.truncate(2);
     }
@@ -320,15 +338,17 @@ pub fn lay_grid(ctx: &mut Ctx, part: &Region, s: &Settings, origin: Pt, degs: &[
         if !(b.x1 - b.x0).is_finite() || b.y1 - b.y0 < s.aisle {
             continue;
         }
-        let local_feet: Vec<Foot> = feet
+        let local_feet: Vec<Foot> = all
             .iter()
-            .filter_map(|((p, q), o)| {
+            .enumerate()
+            .filter_map(|(i, ((p, q), o))| {
+                let gate = i >= feet.len();
                 let (p, q) = (to_local(&frame, *p), to_local(&frame, *q));
                 let o = [o[0] * frame.c + o[1] * frame.s, -o[0] * frame.s + o[1] * frame.c];
                 if o[0].abs() > 0.9 {
-                    Some(Foot { along: true, lo: p[1].min(q[1]), hi: p[1].max(q[1]), at: (p[0] + q[0]) / 2.0, dir: o[0].signum() })
+                    Some(Foot { along: true, lo: p[1].min(q[1]), hi: p[1].max(q[1]), at: (p[0] + q[0]) / 2.0, dir: o[0].signum(), gate })
                 } else if o[1].abs() > 0.9 {
-                    Some(Foot { along: false, lo: p[0].min(q[0]), hi: p[0].max(q[0]), at: (p[1] + q[1]) / 2.0, dir: o[1].signum() })
+                    Some(Foot { along: false, lo: p[0].min(q[0]), hi: p[0].max(q[0]), at: (p[1] + q[1]) / 2.0, dir: o[1].signum(), gate })
                 } else {
                     None
                 }
@@ -338,7 +358,7 @@ pub fn lay_grid(ctx: &mut Ctx, part: &Region, s: &Settings, origin: Pt, degs: &[
         let st = Stack { g: &g, s, w: s.stall_width, d: s.stall_depth, a: s.aisle, n, c: s.column_size, x0: b.x0, feet: &local_feet };
         // The stack's phase: the area's edge, and each foot's aisle (flush with it either side, or on its middle).
         let mut runs: Vec<(f64, bool)> = vec![(b.y0, false)];
-        for f in local_feet.iter().filter(|f| f.along) {
+        for f in local_feet.iter().filter(|f| f.along && !f.gate) {
             for ya in [f.lo, f.hi - st.a, (f.lo + f.hi - st.a) / 2.0] {
                 let ya = ya.clamp(b.y0, b.y1 - st.a);
                 if runs.iter().all(|r| (r.0 - ya).abs() > 1e-3 || !r.1) {
@@ -397,6 +417,122 @@ pub fn lay_grid(ctx: &mut Ctx, part: &Region, s: &Settings, origin: Pt, degs: &[
     out
 }
 
+/// The car park cut in two at an inside corner (an L, a notch) by a drive aisle along one of the corner's sides, each part
+/// laid out as modules on the grid in its own direction and opening onto the drive aisle: an L whose arms want their aisles
+/// at right angles gets them. Plans for the solver to pick from (the drive aisles, then each part's best).
+pub fn lay_split(ctx: &mut Ctx, part: &Region, s: &Settings, origin: Pt, degs: &[f64], feet: &[((Pt, Pt), Pt)], quick: bool) -> Vec<WPlan> {
+    let mut out = Vec::new();
+    if quick || s.angle < 89.9 || part.outer.len() < 4 {
+        return out;
+    }
+    let d = s.drive_aisle.min(s.aisle);
+    let o = ccw(&part.outer);
+    let n = o.len();
+    // The outline's inside corners whose sides are walls, not a column's notch: the first few.
+    let mut corners: Vec<(Pt, [Pt; 2])> = Vec::new();
+    for i in 0..n {
+        let (a, c, b) = (o[(i + n - 1) % n], o[i], o[(i + 1) % n]);
+        let turn = (c[0] - a[0]) * (b[1] - c[1]) - (c[1] - a[1]) * (b[0] - c[0]);
+        if turn < -1e-6 && dist(a, c) > 2.0 * s.stall_depth && dist(c, b) > 2.0 * s.stall_depth {
+            corners.push((c, [a, b]));
+        }
+    }
+    corners.truncate(3);
+    let mut tried: Vec<(i64, i64, i64)> = Vec::new();
+    for (c, sides) in corners {
+        for other in sides {
+            let l = dist(c, other);
+            let u = [(c[0] - other[0]) / l, (c[1] - other[1]) / l];
+            let nrm = [-u[1], u[0]];
+            let off = |p: Pt| (p[0] - c[0]) * nrm[0] + (p[1] - c[1]) * nrm[1];
+            for shift in [0.0, -d] {
+                let key = ((u[1].atan2(u[0]).to_degrees().rem_euclid(180.0) * 10.0) as i64, ((off([0.0, 0.0]) - shift) * 10.0) as i64, 0);
+                if tried.contains(&key) {
+                    continue;
+                }
+                tried.push(key);
+                // The drive aisle: its clear pieces along the line, in the frame along it.
+                let deg = u[1].atan2(u[0]).to_degrees();
+                let frame = frame_of(c, deg);
+                let g = region_to_local(&frame, part);
+                // In the frame the line is y = 0 (its normal is +y); the drive aisle from `shift` to `shift + d`.
+                let spans: Vec<Span> = strip_spans(&g, shift, shift + d).into_iter().filter(|sp| sp[1] - sp[0] > 2.0 * d).collect();
+                if spans.is_empty() {
+                    continue;
+                }
+                let (lo_y, hi_y) = (shift, shift + d);
+                let below = clip_half(part, &|p| lo_y - off(p));
+                let above = clip_half(part, &|p| off(p) - hi_y);
+                let (Some(below), Some(above)) = (below, above) else { continue };
+                let w = |p: Pt| to_world(&frame, p);
+                let mut plans: Vec<WPlan> = Vec::new();
+                for (sub, gate_y, into) in [(&below, lo_y, -1.0), (&above, hi_y, 1.0)] {
+                    let gates: Vec<((Pt, Pt), Pt)> =
+                        spans.iter().map(|sp| ((w([sp[0], gate_y]), w([sp[1], gate_y])), [nrm[0] * into, nrm[1] * into])).collect();
+                    let mine: Vec<((Pt, Pt), Pt)> = feet
+                        .iter()
+                        .filter(|((p, q), _)| {
+                            let m = [(p[0] + q[0]) / 2.0, (p[1] + q[1]) / 2.0];
+                            if into > 0.0 { off(m) >= hi_y - 0.5 } else { off(m) <= lo_y + 0.5 }
+                        })
+                        .copied()
+                        .collect();
+                    // The part's best that meets each of its ramps' feet with an aisle (a straight way off it may run on).
+                    let meets = |p: &WPlan| {
+                        mine.iter().all(|((a, b), o)| {
+                            let m = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+                            (0..=(FOOT_REACH as usize)).any(|t| {
+                                let q = [m[0] + o[0] * (t as f64 + 0.3), m[1] + o[1] * (t as f64 + 0.3)];
+                                p.aisles.iter().any(|al| point_in_ring(q, &al.poly))
+                            })
+                        })
+                    };
+                    let best = lay_grid_with(ctx, sub, s, origin, degs, &mine, &gates, quick)
+                        .into_iter()
+                        .filter(|p| meets(p))
+                        .max_by(|p, q| score_of(p).total_cmp(&score_of(q)));
+                    match best {
+                        Some(mut b) => {
+                            // Its rows told apart from the other part's (the accessible bays pair along a row).
+                            let tag = plans.len();
+                            for st in &mut b.stalls {
+                                st.row = format!("{tag}/{}", st.row);
+                            }
+                            plans.push(b);
+                        }
+                        None if !mine.is_empty() => {
+                            plans.clear();
+                            break;
+                        }
+                        None => {}
+                    }
+                }
+                if plans.is_empty() {
+                    continue;
+                }
+                let drives: Vec<WAisle> = spans
+                    .iter()
+                    .map(|sp| WAisle {
+                        id: ctx.id(),
+                        poly: corners_of(sp[0], lo_y, sp[1], hi_y).into_iter().map(w).collect(),
+                        kind: AisleKind::Drive,
+                        flow: None,
+                    })
+                    .collect();
+                if std::env::var_os("PARKING_DEBUG").is_some() {
+                    eprintln!("split at {c:?} along {deg:.0} shift {shift}: {} parts, {} bays", plans.len(), plans.iter().map(|p| p.stalls.len()).sum::<usize>());
+                }
+                out.push(join(plans, drives));
+            }
+        }
+    }
+    out
+}
+
+fn corners_of(x0: f64, y0: f64, x1: f64, y1: f64) -> Ring {
+    vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+}
+
 /// The stack's plan: its aisles' pieces and bays, joined by cross aisles, trimmed to what they serve.
 /// `turns`: a ramp's foot may be joined by a way that turns into an aisle beside it; whether one was.
 /// `cw`: a cross aisle's width (an aisle's, or a drive aisle's: it has no bays on it).
@@ -441,7 +577,70 @@ fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot], turns: bool, cw: f
     let cw = cw.min(s.aisle);
     let clear = |r: &Rect| r.x1 - r.x0 < 0.3 || r.y1 - r.y0 < 0.3 || box_inside(st.g, r.x0 + 0.1, r.y0 + 0.1, r.x1 - 0.1, r.y1 - 0.1);
     let mut ways: Vec<Rect> = Vec::new();
-    for f in feet {
+    for f in feet.iter().filter(|f| f.gate) {
+        if f.along {
+            // Every aisle that ends on the drive aisle (or a turn's width short of it) is reached from it.
+            for (k, sg) in segs.iter().enumerate() {
+                if sg.y0 < f.lo - FOOT_SLACK || sg.y1 > f.hi + FOOT_SLACK {
+                    continue;
+                }
+                let gap = if f.dir > 0.0 { sg.x0 - f.at } else { f.at - sg.x1 };
+                if !(-1.0..=cw).contains(&gap) {
+                    continue;
+                }
+                let r = if f.dir > 0.0 { rect(f.at, sg.y0, sg.x0.max(f.at), sg.y1) } else { rect(sg.x1.min(f.at), sg.y0, f.at, sg.y1) };
+                if gap > FOOT_SLACK && !clear(&r) {
+                    continue;
+                }
+                reached[k] = true;
+                if gap > FOOT_SLACK {
+                    ways.push(r);
+                }
+                links.push(Link { r, a: k, b: None, cost: Vec::new() });
+            }
+        } else {
+            // The nearest aisle along the drive aisle, by the cheapest way across to it (none when it runs beside it).
+            let mut best: Option<(f64, usize, Rect, usize)> = None;
+            for (k, sg) in segs.iter().enumerate() {
+                let gap = if f.dir > 0.0 { sg.y0 - f.at } else { f.at - sg.y1 };
+                let (x0, x1) = (sg.x0.max(f.lo), sg.x1.min(f.hi));
+                if !(-1.0..=FOOT_REACH).contains(&gap) || x1 - x0 < cw - 1e-6 {
+                    continue;
+                }
+                let (y0, y1) = if f.dir > 0.0 { (f.at, sg.y0) } else { (sg.y1, f.at) };
+                let mut xs = vec![x0, x1 - cw];
+                if gap > FOOT_SLACK {
+                    for sp in strip_spans(st.g, y0, y1) {
+                        xs.extend([sp[0], sp[1] - cw]);
+                    }
+                }
+                for x in xs.into_iter().filter(|&x| x >= x0 - 1e-6 && x + cw <= x1 + 1e-6) {
+                    let r = rect(x, y0, x + cw, y1);
+                    if gap > FOOT_SLACK && !clear(&r) {
+                        continue;
+                    }
+                    let lost = if gap > FOOT_SLACK { cost_of(&r, &bays).len() } else { 0 };
+                    let score = gap.max(0.0) + lost as f64 * 10.0;
+                    if best.as_ref().is_none_or(|b| score < b.0) {
+                        best = Some((score, k, r, lost));
+                    }
+                }
+            }
+            if let Some((_, k, r, _)) = best {
+                let crossing = r.y1 - r.y0 > FOOT_SLACK;
+                let cost = if crossing { cost_of(&r, &bays) } else { Vec::new() };
+                for &i in &cost {
+                    bays[i].alive = false;
+                }
+                reached[k] = true;
+                if crossing {
+                    ways.push(r);
+                }
+                links.push(Link { r, a: k, b: None, cost });
+            }
+        }
+    }
+    for f in feet.iter().filter(|f| !f.gate) {
         // (length, piece, the link's rect onto the piece, the way's rects to draw as aisles)
         let mut best: Option<(f64, usize, Rect, Vec<Rect>)> = None;
         let mut offer = |len: f64, k: usize, r: Rect, draw: Vec<Rect>| {

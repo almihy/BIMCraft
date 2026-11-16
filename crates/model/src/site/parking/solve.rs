@@ -6,7 +6,7 @@ use std::collections::HashSet;
 
 use super::fields::*;
 use super::geom::*;
-use super::grid::lay_grid;
+use super::grid::{lay_grid, lay_split};
 use super::ring::{attach, lay_ring};
 use super::standards::{Given, Settings, accessible_needed, settings_of};
 
@@ -580,6 +580,9 @@ pub fn solve(input: &Input) -> Solved {
         for plan in lay_grid(ctx, part, &s, origin, &degs, &ramps, input.quick) {
             plans.push((plan.dirs.first().copied().unwrap_or(f64::NAN), plan, true));
         }
+        for plan in lay_split(ctx, part, &s, origin, &degs, &ramps, input.quick) {
+            plans.push((plan.dirs.first().copied().unwrap_or(f64::NAN), plan, true));
+        }
         let mut best: Option<Candidate> = None;
         let mut best_grid: Option<Candidate> = None;
         for (deg, mut plan, grid) in plans {
@@ -665,6 +668,9 @@ pub fn solve(input: &Input) -> Solved {
                 - if relaxed { 0.5 } else { 0.0 };
             // A plan no car can come into reaches nothing, whatever it lays.
             let count = if !streets.is_empty() && ins.is_empty() { 0.0 } else { count - unjoined };
+            if std::env::var_os("PARKING_DEBUG").is_some() {
+                eprintln!("candidate grid {grid} fields {}: {} bays laid, {count} reached, score {score:.1}, ways {}", plan.fields, plan.stalls.len(), ins.len());
+            }
             let slot = if grid { &mut best_grid } else { &mut best };
             if slot.as_ref().is_none_or(|b| score > b.score) {
                 *slot = Some(Candidate { deg, plan, reach, throats, score, relaxed, count });
