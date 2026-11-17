@@ -7,7 +7,7 @@ pub use bimcraft_mep_calc::{conduit, demand, dps, dr, drainage, hydrant, loads, 
 #[doc(hidden)]
 pub use bimcraft_model::run_arm;
 pub use bimcraft_model::{
-    alignment, background_grid, bounds, cad, camera, carpark, cloud, crosscheck, curves, derived, dims, dims3d, draw, dxf, electrical, falls,
+    alignment, background_grid, bounds, cad, camera, carpark, cloud, crosscheck, curves, derived, dims, dims3d, draw, dxf, dxf_out, electrical, falls,
     family, favorites, fills, gltf, glue, graphics, ground, groups, ids, ifc, ifc_classes, import, inquiry, insert, json, lenient, library, lines,
     link, massing, masterplan, merge, model, motion, network, paint, pat, pdf, pen, phasing, quantities, raster, rebar, reinforce, render,
     rooms, runs, schedule, selection, selfcheck, sheet, site, sketch, snap, stairs, standards, styles, symbol_set, tempdims, text, texture,
@@ -37,6 +37,8 @@ mod cloud_tests;
 mod commands;
 #[cfg(test)]
 mod dry_run_tests;
+#[cfg(test)]
+mod dxf_out_tests;
 #[cfg(test)]
 mod eberick_tests;
 #[cfg(test)]

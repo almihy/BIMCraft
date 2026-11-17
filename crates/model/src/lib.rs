@@ -25,6 +25,7 @@ pub mod dims;
 pub mod dims3d;
 pub mod draw;
 pub mod dxf;
+pub mod dxf_out;
 pub mod electrical;
 pub mod falls;
 pub mod family;

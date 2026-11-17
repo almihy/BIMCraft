@@ -181,7 +181,7 @@ other_files(
         "Save",
         "{path?} .bimcraft saves the project (Save As with a path); .ifc exports IFC4; .glb exports the default 3D view's scene as \
          glTF 2.0 (metres, y up, a node for each element named by its id, GUID and category in `extras`; returns `elements` and \
-         `triangles`); .svg or .png exports the lowest level's plan; .pdf prints every sheet, a page each",
+         `triangles`); .svg or .png exports the lowest level's plan; .dxf writes a view as DXF (AutoCAD 2018) in the model's own          coordinates (`view`: a level's, plan view's, section's or elevation's name or id, the lowest level's plan when left out;          `units`: mm (default), cm, m, in or ft; `coordinates`: project (default), survey (the survey point's east and north added,          the project's axes kept) or shared (Revit's shared coordinates, turned to true north); `layers`: {standard layer name: the name to write instead}) — each element's lines and solid          hatches on the layer its category names (A-WALL, A-DOOR, A-GLAZ, A-FLOR, C-PROP, C-ROAD, L-PAVE, L-PLNT-LAWN…), lettering          as lines on A-ANNO-TEXT; returns `layers`, `entities` and `notes`; .pdf prints every sheet, a page each",
         save,
         Files::Write,
     ),
@@ -2308,7 +2308,7 @@ other_files(
          reflected ceiling plan, looking up from 2300 mm), a section, an elevation, a sheet (at 5 px a paper mm), or the 3D view seen from \
          `azimuth` degrees round from east (counter-clockwise) and `elevation` degrees up (by default from the south-east, \
          30° up), fitted; in perspective (see `perspective`) through its lens, and with `eye_elevation` from an eye that high \
-         (mm) looking at the same point, as a PNG (pngBase64), or written to a path: .png, .svg for a plan, .pdf for a sheet. A plan, section, \
+         (mm) looking at the same point, as a PNG (pngBase64), or written to a path: .png, .svg for a plan, .pdf for a sheet, .dxf for a plan, section or elevation (`units`, `coordinates`: see `save`). A plan, section, \
          elevation or sheet that could not draw something as asked (a fill pattern too dense for the view, more ink behind \
          a region than is kept above it) says so in the reply's `notes`",
         render_view,
@@ -3570,6 +3570,14 @@ fn save(s: &mut Session, p: &Value) -> R {
         s.files.write(&path, bytes).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
         return Ok(json!({"path": path, "format": "PDF", "pages": count}));
     }
+    if format == "dxf" {
+        let seen = crate::link::seen(&s.model);
+        let (bytes, mut info) = view_dxf(c, &seen, p)?;
+        drop(seen);
+        s.files.write(&path, bytes).map_err(|e| bad(c, format!("{}: {e}", path.display())))?;
+        info["path"] = json!(path);
+        return Ok(info);
+    }
     if matches!(format.as_str(), "svg" | "png") {
         let level = level_param(c, &s.model, &json!({}), "view")?;
         let bytes = plan_bytes(&render::plan(&crate::link::seen(&s.model), level, 1600, 1000), &path)?;
@@ -3616,6 +3624,52 @@ fn plan_bytes(d: &render::Drawing, path: &Path) -> Result<Vec<u8>, String> {
         "png" => render::png(d)?,
         other => return Err(format!("render: write a .png or .svg, not `.{other}`")),
     })
+}
+
+/// The view `p` names (`view`, else the plan of `level`, the lowest by default) as a DXF file in the units and coordinates `p`
+/// asks for, with what is said of it: its format, units, coordinates, layers, entities and notes.
+fn view_dxf(c: &str, m: &Model, p: &Value) -> Result<(Vec<u8>, Value), String> {
+    use crate::dxf_out::{self, Place, Unit};
+    let id = view_param(c, m, p, false)?;
+    let cut = m.section(id).is_some();
+    if !cut && m.plan_level(id).is_none() {
+        return Err(bad(c, "a DXF is a drawing of a level's plan, a plan view, a section or an elevation"));
+    }
+    let unit = match string(c, p, "units")? {
+        Some(n) => Unit::parse(&n).ok_or_else(|| bad(c, format!("`units` is mm, cm, m, in or ft, not `{n}`")))?,
+        None => Unit::default(),
+    };
+    let mut place = match string(c, p, "coordinates")? {
+        Some(n) => Place::parse(&n).ok_or_else(|| bad(c, format!("`coordinates` is project, survey or shared, not `{n}`")))?,
+        None => Place::default(),
+    };
+    let mut notes = Vec::new();
+    if cut && place != Place::Project {
+        // A section's first coordinate runs along its line and the second up: no survey has them.
+        notes.push(format!("A section's or elevation's drawing runs along its line and up, so `{}` coordinates do not apply: it is written in the project's.", place.name()));
+        place = Place::Project;
+    }
+    // The names a firm gives its layers: {standard name: its name}.
+    let rename = match p.get("layers") {
+        v if absent(v) => BTreeMap::new(),
+        Some(Value::Object(o)) => o
+            .iter()
+            .map(|(k, v)| match v.as_str().map(str::trim).filter(|n| !n.is_empty() && n.chars().count() <= 255) {
+                Some(n) => Ok((k.clone(), n.to_string())),
+                None => Err(bad(c, format!("`layers`: the name for `{k}` must be text, got {v}"))),
+            })
+            .collect::<Result<_, _>>()?,
+        Some(v) => return Err(bad(c, format!("`layers` is {{standard name: the firm's name}}, got {v}"))),
+        None => BTreeMap::new(),
+    };
+    let (d, _) = render::viewport(m, id, 4096, 0);
+    let written = dxf_out::write(m, &d, &dxf_out::Options { unit, place, rename });
+    notes.extend(written.notes);
+    let info = with_notes(
+        json!({"format": "DXF", "view": m.view_name(id), "units": unit.name(), "coordinates": place.name(), "layers": written.layers, "entities": written.entities}),
+        &notes,
+    );
+    Ok((written.text.into_bytes(), info))
 }
 
 /// A picture that only comes as PNG (the 3D view, a section): written to `path`, a .png, when
@@ -3758,6 +3812,12 @@ fn render_view(s: &mut Session, p: &Value) -> R {
     // What its links build is in the picture.
     let seen = crate::link::seen(&s.model);
     let m = &*seen;
+    if let Some(path) = string(c, p, "path")?.filter(|path| ext(Path::new(path)) == "dxf") {
+        let (bytes, mut info) = view_dxf(c, m, p)?;
+        s.files.write(Path::new(&path), bytes).map_err(|e| bad(c, format!("{path}: {e}")))?;
+        info["path"] = json!(path);
+        return Ok(info);
+    }
     let side = |key: &str, default: usize| count_opt(c, p, key, default).map(|n| n.clamp(16, 8192) as u32);
     let (w, h) = (side("width", 1600)?, side("height", 1000)?);
     let (w3, h3) = (w.min(view3d::MAX_SIDE), h.min(view3d::MAX_SIDE));
