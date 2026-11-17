@@ -123,6 +123,10 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>, measures: boo
                 if let Some(path) = cad.path() {
                     extra.insert("linked".into(), json!(path));
                 }
+                // A drawing not read (yet): why, in place of what it draws.
+                if let Some(why) = cad.unread() {
+                    extra.insert("unread".into(), json!(why));
+                }
             }
             if let Some(b) = m.cad_box(id) {
                 extra.insert("extents".into(), json!(b));

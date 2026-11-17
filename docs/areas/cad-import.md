@@ -49,8 +49,18 @@ link Arqiflow made when it handed the engine a DXF copy) reads as the DWG it is.
 decoder runs; a read that left object records out says so in `import_cad`'s `notes` (the desktop puts them on the status bar).
 The decoder runs under `catch_unwind`; and the desktop and the command line (so MCP too) read each new file first in a worker,
 a child process of the program itself (`cadcraft_dwg::worker`: `use_own_worker`, and `serve_if_asked` first thing in `main`),
-so a file that brings the decoder down (an allocation it can't make, a stack overflow) takes only the child. The browser's
-engine reads it in its own instance: a panic there ends the instance (WebAssembly has no unwinding), which a hostile file could do.
+so a file that brings the decoder down (an allocation it can't make, a stack overflow) takes only the child. In the browser a
+panic ends the whole instance (WebAssembly has no unwinding), so the editor's engine decodes no DWG that hasn't been read apart
+first (`dwg::read_elsewhere`, which `apps/bimcraft-web` turns on): each new file is asked for once by its key (`dwg::check`, then
+`dwg::take_wanted`; a file the page gives the window is asked for as it is given, so it is read by the Import CAD box's OK), the
+page reads it in a Web Worker of its own with the build's `dwg_check` (`on_dwg`, `answer_dwg`), and the engine reads it only once
+the worker read it unharmed (`dwg::checked`; acadrust's decoding is deterministic). Meanwhile `import_cad` is refused with
+`dwg::WAITING` (the box waits, "Reading the drawing…", and brings it in when it is read); one the worker couldn't read, or that
+killed it, is refused with "This drawing could not be read: …". A project is never refused for its DWG: `Cad` holds a drawing
+it can't read now (still being read apart, or one that couldn't be read at all, here too) with nothing drawn and why
+(`Cad::unread`, an import's `unread` in its JSON and its Status in Properties), so the project opens and the import stays; every
+copy of one reading shares one slot, which `cad::read_checked` fills once the answer comes, in the model, its undo history and
+the others' copies at once. `crates/core/tests/dwg_elsewhere.rs` holds it (its own binary: the switch is the process's).
 
 A drawing read is found by its file's hash while anything holds it (`cad::READ` keeps weak references only, so a drawing no
 project holds any more is let go, and every drawing a project holds is found however many it holds), so the same file read

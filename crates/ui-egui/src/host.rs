@@ -156,7 +156,35 @@ impl BimApp {
     /// Gives the window the file `name` (a path as the page names its files, "files/<id>/Plan.dxf"), its `bytes`, to read
     /// as a file at that path.
     pub fn give_file(&mut self, name: &str, bytes: Vec<u8>) {
+        // A DWG is read apart as soon as it is given (where DWG files are: `dwg::read_elsewhere`), so it is read by the
+        // time the person has filled in the Import CAD box.
+        if bimcraft_core::dxf::dwg::is_dwg(&bytes) {
+            let _ = bimcraft_core::dxf::dwg::check(&bytes);
+        }
         self.session.files.give(name, bytes);
+    }
+
+    /// The DWG files to read apart since the last call (`bimcraft_core::dxf::dwg::read_elsewhere`): each one's key, as
+    /// text, and its bytes. The page reads each in a Web Worker of its own and answers with [`BimApp::answer_dwg_request`].
+    pub fn take_dwg_requests(&mut self) -> Vec<(String, Arc<Vec<u8>>)> {
+        bimcraft_core::dxf::dwg::take_wanted().into_iter().map(|(k, bytes)| (k.to_string(), bytes)).collect()
+    }
+
+    /// The page's answer for DWG `key`: read safely apart (`Ok`), or why not (the reader's error, or "the reader stopped on
+    /// it" when its worker died). The drawings waiting on it are read, or say they couldn't be, and are drawn again; no
+    /// change of the person's.
+    pub fn answer_dwg_request(&mut self, key: &str, answer: Result<(), String>) {
+        let Ok(key) = key.trim().parse::<u64>() else { return };
+        bimcraft_core::dxf::dwg::checked(key, answer);
+        if bimcraft_core::cad::read_checked() {
+            // The same model, held anew, so every view draws it again with the drawing in it.
+            let was_saved = !self.dirty();
+            self.session.model = Arc::new((*self.session.model).clone());
+            if was_saved {
+                self.saved = Arc::clone(&self.session.model);
+            }
+            self.tidy();
+        }
     }
 
     /// What was written for the page (Export) since the last call: each file's name and bytes.

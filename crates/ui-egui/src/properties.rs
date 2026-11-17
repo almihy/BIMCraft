@@ -410,6 +410,7 @@ fn rows(category: &str) -> &'static [Row] {
             ("Identity Data", "cad", msg!("Drawing"), Shown),
             ("Identity Data", "source", "File", Shown),
             ("Identity Data", "linked", msg!("Linked File"), Shown),
+            ("Identity Data", "unread", msg!("Status"), Shown),
             ("Identity Data", "unit", "Units", Shown),
             ("Identity Data", "entities", msg!("Entities"), Shown),
             ("Identity Data", "layers", "Layers", Shown),

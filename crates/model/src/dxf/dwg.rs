@@ -20,14 +20,117 @@ pub fn is_dwg(bytes: &[u8]) -> bool {
     cadcraft_dwg::is_dwg(bytes)
 }
 
-/// The drawing a DWG file's `bytes` hold, with notes on what the reader left out of it; or why it can't be read.
+/// The drawing a DWG file's `bytes` hold, with notes on what the reader left out of it; or why it can't be read. Where DWG
+/// files are read elsewhere first ([`read_elsewhere`]), only a file read there safely is read here; any other is asked for
+/// ([`take_wanted`]) and refused for now.
 pub fn read(bytes: &[u8]) -> Result<(Dxf, Vec<String>), String> {
+    match check(bytes) {
+        Check::Read => read_here(bytes),
+        Check::Refused(e) => Err(e),
+        Check::Waiting => Err(WAITING.into()),
+    }
+}
+
+/// [`read`] in this instance, whether or not files are read elsewhere first: what the place that reads them first calls.
+pub fn read_here(bytes: &[u8]) -> Result<(Dxf, Vec<String>), String> {
     if bytes.len() > MAX_BYTES {
         return Err(format!("it's {} bytes; up to {MAX_BYTES}", bytes.len()));
     }
     let limits = cadcraft_dwg::Limits { max_dwg_bytes: MAX_BYTES, ..cadcraft_dwg::Limits::DEFAULT };
     let (d, notes) = cadcraft_dwg::read(bytes, limits)?;
     Ok((of_drawing(&d)?, notes))
+}
+
+// Reading elsewhere first. In the browser a panic aborts the whole WebAssembly instance (there is no unwinding), so the
+// decoder's `catch_unwind` holds nothing there, and a hostile DWG would end the editor. A page that hosts the engine reads
+// each DWG first in a Web Worker of its own (as the desktop reads it first in a child process, `cadcraft_dwg::worker`), and
+// tells the engine how that went; the engine reads only a file the worker read safely. acadrust's decoding is
+// deterministic, so a file read safely there is read safely here.
+
+/// What [`read`] says of a file still being read elsewhere first.
+pub const WAITING: &str = "the drawing is still being read; try again in a moment";
+/// Files whose reading elsewhere is remembered, the latest kept.
+const MOST_CHECKED: usize = 256;
+
+static ELSEWHERE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Files read elsewhere, by [`key`], and how that went: `None`, safely; else why not.
+static CHECKED: std::sync::Mutex<Vec<(u64, Option<String>)>> = std::sync::Mutex::new(Vec::new());
+/// Files asked to be read elsewhere and not answered yet: their keys, and the bytes of those not taken yet.
+static WANTED: std::sync::Mutex<Vec<(u64, Option<std::sync::Arc<Vec<u8>>>)>> = std::sync::Mutex::new(Vec::new());
+
+/// Whether a DWG file may be read here, as [`check`] finds it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Check {
+    /// Read it: it was read safely elsewhere, or nothing is read elsewhere.
+    Read,
+    /// It could not be read elsewhere: why, for people ("This drawing could not be read: …").
+    Refused(String),
+    /// It is being read elsewhere.
+    Waiting,
+}
+
+/// From now on, each DWG is read elsewhere first (`on`), or here alone. The browser's engine turns it on, once the page
+/// can read DWG files in a worker of its own.
+pub fn read_elsewhere(on: bool) {
+    ELSEWHERE.store(on, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Whether each DWG is read elsewhere first.
+pub fn reads_elsewhere() -> bool {
+    ELSEWHERE.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// What a file is known by: the hash of its bytes.
+pub fn key(bytes: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut h);
+    h.finish()
+}
+
+/// Whether DWG `bytes` may be read here. A file not read elsewhere yet is asked for ([`take_wanted`]) and waits.
+pub fn check(bytes: &[u8]) -> Check {
+    if !reads_elsewhere() {
+        return Check::Read;
+    }
+    let k = key(bytes);
+    if let Some(said) = CHECKED.lock().ok().and_then(|c| c.iter().rev().find(|(key, _)| *key == k).map(|(_, said)| said.clone())) {
+        return said.map_or(Check::Read, Check::Refused);
+    }
+    if let Ok(mut wanted) = WANTED.lock()
+        && !wanted.iter().any(|(key, _)| *key == k)
+    {
+        wanted.push((k, Some(std::sync::Arc::new(bytes.to_vec()))));
+    }
+    Check::Waiting
+}
+
+/// The files to read elsewhere, asked for since the last call: each one's key (for [`checked`]) and bytes.
+pub fn take_wanted() -> Vec<(u64, std::sync::Arc<Vec<u8>>)> {
+    let Ok(mut wanted) = WANTED.lock() else { return Vec::new() };
+    wanted.iter_mut().filter_map(|(k, bytes)| Some((*k, bytes.take()?))).collect()
+}
+
+/// Whether any file is still being read elsewhere.
+pub fn waiting() -> bool {
+    WANTED.lock().is_ok_and(|w| !w.is_empty())
+}
+
+/// How file `key` was read elsewhere: safely (`Ok`), or why not, said to people as "This drawing could not be read: …".
+pub fn checked(key: u64, read: Result<(), String>) {
+    if let Ok(mut wanted) = WANTED.lock() {
+        wanted.retain(|(k, _)| *k != key);
+    }
+    let said = read.err().map(|e| {
+        let e = e.trim().trim_end_matches('.');
+        format!("This drawing could not be read: {}", if e.is_empty() { "the reader stopped on it" } else { e })
+    });
+    if let Ok(mut c) = CHECKED.lock() {
+        c.retain(|(k, _)| *k != key);
+        c.push((key, said));
+        let over = c.len().saturating_sub(MOST_CHECKED);
+        c.drain(..over);
+    }
 }
 
 /// The import CADCraft's drawing `d` makes: its model space, in its own unit.

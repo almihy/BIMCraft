@@ -30,40 +30,30 @@ static READ: std::sync::Mutex<Vec<Kept>> = std::sync::Mutex::new(Vec::new());
 struct Kept {
     key: u64,
     held: Held,
-    bulk: Option<[P2; 2]>,
-    far: usize,
-    notes: Vec<String>,
     /// The name and link it was read under: a reading under the same shares what a project file holds of it too.
     source: String,
     path: Option<String>,
     bytes: std::sync::Weak<Vec<u8>>,
-    dxf: std::sync::Weak<Dxf>,
+    read: std::sync::Weak<Slot>,
     packed: std::sync::Weak<OnceLock<CadFile>>,
-    index: std::sync::Weak<OnceLock<Index>>,
-    lod: std::sync::Weak<OnceLock<Option<lod::Lod>>>,
 }
 
 impl Kept {
-    fn of(key: u64, cad: &Cad, notes: &[String]) -> Kept {
+    fn of(key: u64, cad: &Cad) -> Kept {
         Kept {
             key,
             held: cad.held,
-            bulk: cad.bulk,
-            far: cad.far,
-            notes: notes.to_vec(),
             source: cad.source.clone(),
             path: cad.path.clone(),
             bytes: Arc::downgrade(&cad.bytes),
-            dxf: Arc::downgrade(&cad.dxf),
+            read: Arc::downgrade(&cad.read),
             packed: Arc::downgrade(&cad.packed),
-            index: Arc::downgrade(&cad.index),
-            lod: Arc::downgrade(&cad.lod),
         }
     }
 
     /// Whether something still holds the drawing.
     fn alive(&self) -> bool {
-        self.dxf.strong_count() > 0
+        self.read.strong_count() > 0
     }
 
     /// The drawing, known by `source` and linked to `path`, if it is still held and its file is `bytes`.
@@ -71,19 +61,76 @@ impl Kept {
         let held = self.bytes.upgrade().filter(|b| b.as_slice() == bytes)?;
         let same = source == self.source && path == self.path;
         let packed = self.packed.upgrade().filter(|_| same).unwrap_or_default();
-        Some(Cad {
-            source,
-            path,
-            bytes: held,
-            held: self.held,
-            dxf: self.dxf.upgrade()?,
-            bulk: self.bulk,
-            far: self.far,
-            packed,
-            index: self.index.upgrade()?,
-            lod: self.lod.upgrade()?,
-        })
+        Some(Cad { source, path, bytes: held, held: self.held, read: self.read.upgrade()?, packed })
     }
+}
+
+/// What a drawing's file reads as, shared by every copy of its reading (a project, its undo history, the model another
+/// copy's changes are merged into): set once read, or once it is known it can't be. A DWG read elsewhere first
+/// ([`dxf::dwg::read_elsewhere`]) leaves it empty until that is done, and [`read_checked`] fills it then, in every copy at
+/// once.
+type Slot = OnceLock<Result<Drawn, String>>;
+
+/// A drawing read.
+struct Drawn {
+    dxf: Arc<Dxf>,
+    /// The box round its bulk, drawing units: all of it but what lies far from the rest.
+    bulk: Option<[P2; 2]>,
+    /// How many of its entities lie far from the rest.
+    far: usize,
+    /// What the reader left out of a DWG.
+    notes: Vec<String>,
+    /// Its entities' boxes and grids of them, made the first time what lies in a box is asked.
+    index: OnceLock<Index>,
+    /// Its level of detail zoomed out, made the first time it is drawn so: none for a sparse drawing.
+    lod: OnceLock<Option<lod::Lod>>,
+}
+
+impl Drawn {
+    fn new(dxf: Arc<Dxf>, notes: Vec<String>) -> Drawn {
+        let (bulk, far) = bulk(&dxf);
+        Drawn { dxf, bulk, far, notes, index: OnceLock::new(), lod: OnceLock::new() }
+    }
+}
+
+/// The drawing of a file not read (yet): it draws nothing.
+static NOTHING: std::sync::LazyLock<Dxf> = std::sync::LazyLock::new(Dxf::default);
+
+/// Fills the drawings waiting on their DWG being read elsewhere ([`dxf::dwg::checked`]) that now may be: each one read
+/// safely there is read here, and each one that couldn't be says why. Whether any changed: what draws them then draws them
+/// again.
+pub fn read_checked() -> bool {
+    let waiting: Vec<(Arc<Slot>, Arc<Vec<u8>>)> = match READ.lock() {
+        Ok(mut kept) => {
+            kept.retain(Kept::alive);
+            kept.iter()
+                .filter_map(|k| {
+                    let read = k.read.upgrade().filter(|r| r.get().is_none())?;
+                    Some((read, k.bytes.upgrade()?))
+                })
+                .collect()
+        }
+        Err(_) => return false,
+    };
+    let mut changed = false;
+    for (slot, bytes) in waiting {
+        let now = match dxf::dwg::check(&bytes) {
+            dxf::dwg::Check::Waiting => continue,
+            dxf::dwg::Check::Refused(e) => Err(e),
+            dxf::dwg::Check::Read => read_dwg(&bytes),
+        };
+        changed |= slot.set(now).is_ok();
+    }
+    changed
+}
+
+/// A DWG file's drawing, read here.
+fn read_dwg(bytes: &[u8]) -> Result<Drawn, String> {
+    let (d, notes) = dxf::dwg::read_here(bytes)?;
+    if d.count() == 0 {
+        return Err("it draws nothing in model space".into());
+    }
+    Ok(Drawn::new(Arc::new(d), notes))
 }
 
 /// What a project's drawings may hold among them, bytes of their files.
@@ -133,17 +180,10 @@ pub struct Cad {
     bytes: Arc<Vec<u8>>,
     /// What `bytes` are: a DXF file, a DWG file, or a page's lines packed ([`packed`]).
     held: Held,
-    dxf: Arc<Dxf>,
-    /// The box round its bulk, drawing units: all of it but what lies far from the rest.
-    bulk: Option<[P2; 2]>,
-    /// How many of its entities lie far from the rest.
-    far: usize,
+    /// What they read as, shared with every copy of this reading.
+    read: Arc<Slot>,
     /// What a project file holds of it, made the first time it's saved.
     packed: Arc<OnceLock<CadFile>>,
-    /// Its entities' boxes and grids of them, made the first time what lies in a box is asked.
-    index: Arc<OnceLock<Index>>,
-    /// Its level of detail zoomed out, made the first time it is drawn so: none for a sparse drawing.
-    lod: Arc<OnceLock<Option<lod::Lod>>>,
 }
 
 /// What a drawing's bytes are.
@@ -300,7 +340,7 @@ impl Grid {
 
 impl std::fmt::Debug for Cad {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Cad({:?}, {} entities)", self.source, self.dxf.count())
+        write!(f, "Cad({:?}, {} entities)", self.source, self.dxf().count())
     }
 }
 
@@ -320,57 +360,74 @@ impl Cad {
         Cad::read(source, path, bytes).map(|(cad, _)| cad)
     }
 
-    /// [`Cad::new`], with notes on what the reader left out of a DWG.
+    /// [`Cad::new`], with notes on what the reader left out of a DWG. A DWG still being read elsewhere first
+    /// ([`dxf::dwg::read_elsewhere`]) is refused for now, with [`dxf::dwg::WAITING`].
     pub fn read(source: &str, path: Option<String>, bytes: Vec<u8>) -> Result<(Cad, Vec<String>), String> {
+        let cad = Cad::kindly(source, path, bytes)?;
+        match cad.read.get() {
+            Some(Ok(d)) => {
+                let notes = d.notes.clone();
+                Ok((cad, notes))
+            }
+            Some(Err(e)) => Err(e.clone()),
+            None => Err(dxf::dwg::WAITING.into()),
+        }
+    }
+
+    /// The drawing a DXF or DWG file's `bytes` hold, as a project holds it: a DWG that can't be read now (still being read
+    /// elsewhere first, or one that couldn't be read at all) is held all the same, with nothing drawn, and says why
+    /// ([`Cad::unread`]); so the project opens, the import with it, and the drawing comes in once it is read. A DXF that
+    /// can't be read is refused, as before.
+    fn kindly(source: &str, path: Option<String>, bytes: Vec<u8>) -> Result<Cad, String> {
         // The same file read again while it is held (the project opened again, its undo history put back, a change from
         // another copy, a reload): the drawing read before, with its grid and level of detail, as the file is the same.
-        let key = {
-            use std::hash::{Hash, Hasher};
-            let mut h = std::collections::hash_map::DefaultHasher::new();
-            bytes.hash(&mut h);
-            h.finish()
-        };
+        let key = dxf::dwg::key(&bytes);
         let source: String = source.chars().take(crate::model::MAX_TEXT).collect();
         let path: Option<String> = path.map(|p| p.chars().take(4096).collect());
         if let Ok(mut kept) = READ.lock() {
             kept.retain(Kept::alive);
-            if let Some((cad, notes)) =
-                kept.iter().filter(|k| k.key == key).find_map(|k| Some((k.cad(source.clone(), path.clone(), &bytes)?, k.notes.clone())))
-            {
-                return Ok((cad, notes));
+            if let Some(cad) = kept.iter().filter(|k| k.key == key).find_map(|k| k.cad(source.clone(), path.clone(), &bytes)) {
+                return Ok(cad);
             }
         }
-        let (cad, notes) = Cad::read_now(&source, path, bytes)?;
+        let (held, read) = if dxf::dwg::is_dwg(&bytes) {
+            let read = OnceLock::new();
+            match dxf::dwg::check(&bytes) {
+                dxf::dwg::Check::Read => {
+                    let _ = read.set(read_dwg(&bytes));
+                }
+                dxf::dwg::Check::Refused(e) => {
+                    let _ = read.set(Err(e));
+                }
+                dxf::dwg::Check::Waiting => {}
+            }
+            (Held::Dwg, read)
+        } else {
+            let d = dxf::read(&bytes)?;
+            if d.count() == 0 {
+                return Err("it draws nothing in model space".into());
+            }
+            (Held::Dxf, OnceLock::from(Ok(Drawn::new(Arc::new(d), Vec::new()))))
+        };
+        let cad = Cad { source, path, bytes: Arc::new(bytes), held, read: Arc::new(read), packed: Arc::default() };
         if let Ok(mut kept) = READ.lock() {
-            kept.push(Kept::of(key, &cad, &notes));
+            kept.push(Kept::of(key, &cad));
         }
-        Ok((cad, notes))
+        Ok(cad)
     }
 
-    fn read_now(source: &str, path: Option<String>, bytes: Vec<u8>) -> Result<(Cad, Vec<String>), String> {
-        let (dxf, held, notes) = if dxf::dwg::is_dwg(&bytes) {
-            let (d, notes) = dxf::dwg::read(&bytes)?;
-            (d, Held::Dwg, notes)
-        } else {
-            (dxf::read(&bytes)?, Held::Dxf, Vec::new())
-        };
-        if dxf.count() == 0 {
-            return Err("it draws nothing in model space".into());
+    /// Why its drawing isn't read, when it isn't: a DWG still being read elsewhere first ([`dxf::dwg::WAITING`]), or one
+    /// that couldn't be read ("This drawing could not be read: …"). It draws nothing meanwhile.
+    pub fn unread(&self) -> Option<&str> {
+        match self.read.get() {
+            Some(Ok(_)) => None,
+            Some(Err(e)) => Some(e),
+            None => Some(dxf::dwg::WAITING),
         }
-        let (bulk, far) = bulk(&dxf);
-        let cad = Cad {
-            source: source.chars().take(crate::model::MAX_TEXT).collect(),
-            path: path.map(|p| p.chars().take(4096).collect()),
-            bytes: Arc::new(bytes),
-            held,
-            dxf: Arc::new(dxf),
-            bulk,
-            far,
-            packed: Arc::default(),
-            index: Arc::default(),
-            lod: Arc::default(),
-        };
-        Ok((cad, notes))
+    }
+
+    fn drawn(&self) -> Option<&Drawn> {
+        self.read.get().and_then(|r| r.as_ref().ok())
     }
 
     /// Whether it holds a DWG file.
@@ -381,37 +438,28 @@ impl Cad {
     /// A page's lines a PDF's [`packed`] `bytes` hold, known by `source`; or why they can't be held.
     pub fn of_lines(source: &str, bytes: Vec<u8>) -> Result<Cad, String> {
         let dxf = packed::unpack(&bytes)?;
-        Ok(Cad::drawn(source, dxf, bytes))
+        Ok(Cad::lines(source, Arc::new(dxf), bytes))
     }
 
     /// Drawing `dxf`, read from a page (never empty: a page that draws nothing has no lines), held packed.
     pub fn of_drawing(source: &str, dxf: Dxf) -> Cad {
         let bytes = packed::pack(&dxf);
-        Cad::drawn(source, dxf, bytes)
+        Cad::lines(source, Arc::new(dxf), bytes)
     }
 
     /// A page's lines its [`packed`] `bytes` hold, already read back as `dxf`.
     pub fn of_unpacked(source: &str, dxf: &Arc<Dxf>, bytes: Vec<u8>) -> Cad {
-        Cad::drawn_shared(source, Arc::clone(dxf), bytes)
+        Cad::lines(source, Arc::clone(dxf), bytes)
     }
 
-    fn drawn(source: &str, dxf: Dxf, bytes: Vec<u8>) -> Cad {
-        Cad::drawn_shared(source, Arc::new(dxf), bytes)
-    }
-
-    fn drawn_shared(source: &str, dxf: Arc<Dxf>, bytes: Vec<u8>) -> Cad {
-        let (bulk, far) = bulk(&dxf);
+    fn lines(source: &str, dxf: Arc<Dxf>, bytes: Vec<u8>) -> Cad {
         Cad {
             source: source.chars().take(crate::model::MAX_TEXT).collect(),
             path: None,
             bytes: Arc::new(bytes),
             held: Held::Lines,
-            dxf,
-            bulk,
-            far,
+            read: Arc::new(OnceLock::from(Ok(Drawn::new(dxf, Vec::new())))),
             packed: Arc::default(),
-            index: Arc::default(),
-            lod: Arc::default(),
         }
     }
 
@@ -419,19 +467,21 @@ impl Cad {
     /// order: what a view or the cursor's reach finds of it. One a placement turned off the axes draws may lie a little
     /// outside the box.
     pub fn entities_in(&self, lo: P2, hi: P2) -> Vec<usize> {
-        self.index.get_or_init(|| Index::new(&self.dxf)).within(&self.dxf, [lo.0, lo.1, hi.0, hi.1])
+        let Some(d) = self.drawn() else { return Vec::new() };
+        d.index.get_or_init(|| Index::new(&d.dxf)).within(&d.dxf, [lo.0, lo.1, hi.0, hi.1])
     }
 
     /// Its level of detail ([`lod`]) and the band of it it is drawn with when a unit of it is `px` pixels: none when it is
     /// drawn entity by entity at that zoom (it is sparse, the view is near, or the band would hold too much).
     pub fn lod_band(&self, px: f64) -> Option<(&lod::Lod, &lod::Band)> {
-        let lod = self.lod.get_or_init(|| lod::Lod::new(&self.dxf, self.bulk, &|e| self.color(e, Colors::Preserve))).as_ref()?;
-        Some((lod, lod.band(&self.dxf, px)?))
+        let d = self.drawn()?;
+        let lod = d.lod.get_or_init(|| lod::Lod::new(&d.dxf, d.bulk, &|e| self.color(e, Colors::Preserve))).as_ref()?;
+        Some((lod, lod.band(&d.dxf, px)?))
     }
 
     /// Entity `i`'s box, drawing units, its low corner and its high.
     pub fn entity_box(&self, i: usize) -> Option<[P2; 2]> {
-        Some(self.dxf.entity(i)?.shape.bounds())
+        Some(self.dxf().entity(i)?.shape.bounds())
     }
 
     /// The bytes it holds: its file, or its packed lines.
@@ -455,8 +505,9 @@ impl Cad {
         self
     }
 
+    /// What it draws: nothing while it isn't read ([`Cad::unread`]).
     pub fn dxf(&self) -> &Dxf {
-        &self.dxf
+        self.drawn().map_or(&NOTHING, |d| &d.dxf)
     }
 
     /// Bytes of its file it holds.
@@ -475,12 +526,12 @@ impl Cad {
 
     /// The box round its bulk, drawing units: what centring it and fitting a view to it go by.
     pub fn bulk(&self) -> Option<[P2; 2]> {
-        self.bulk
+        self.drawn()?.bulk
     }
 
     /// How many of its entities lie far from the rest: the stray lines that make a drawing's extents huge.
     pub fn far(&self) -> usize {
-        self.far
+        self.drawn().map_or(0, |d| d.far)
     }
 
     fn file(&self) -> &CadFile {
@@ -499,7 +550,7 @@ impl Cad {
     /// by block outside a block the ink's, index 7 the ink.
     pub fn color(&self, e: &Entity, colors: Colors) -> Option<Rgb> {
         let own = match e.color {
-            Color::ByLayer => self.dxf.layer(&e.layer).map_or(Color::Index(7), |l| l.color),
+            Color::ByLayer => self.dxf().layer(&e.layer).map_or(Color::Index(7), |l| l.color),
             c => c,
         };
         let rgb = own.rgb()?;
@@ -512,7 +563,7 @@ impl Cad {
 
     /// The pen an entity is drawn with: its weight's, else its layer's, else the finest.
     pub fn pen(&self, e: &Entity) -> Pen {
-        e.weight.or_else(|| self.dxf.layer(&e.layer).and_then(|l| l.weight)).filter(|w| *w > 0.0).map_or(Pen::FINE, Pen::nearest)
+        e.weight.or_else(|| self.dxf().layer(&e.layer).and_then(|l| l.weight)).filter(|w| *w > 0.0).map_or(Pen::FINE, Pen::nearest)
     }
 
     /// An entity's dashes, drawing units, when its linetype (its own, else its layer's) has gaps: on, off, on, …, all of them
@@ -520,8 +571,8 @@ impl Cad {
     /// pieces of one kind side by side are one, and a pattern that starts with a gap or ends with a dash starts with a dash of
     /// nothing or ends with a gap of nothing, so the list is on and off in turn from its start.
     pub fn dash(&self, e: &Entity) -> Option<Vec<f64>> {
-        let name = e.linetype.as_deref().or_else(|| self.dxf.layer(&e.layer).map(|l| l.linetype.as_str()))?;
-        let lt = self.dxf.linetypes.iter().find(|l| l.name.eq_ignore_ascii_case(name))?;
+        let name = e.linetype.as_deref().or_else(|| self.dxf().layer(&e.layer).map(|l| l.linetype.as_str()))?;
+        let lt = self.dxf().linetypes.iter().find(|l| l.name.eq_ignore_ascii_case(name))?;
         let gap = lt.dashes.iter().copied().filter(|d| *d < 0.0).map(f64::abs).fold(f64::INFINITY, f64::min);
         if !gap.is_finite() {
             return None;
@@ -546,7 +597,7 @@ impl Cad {
         if out.last().is_some_and(|p| p.0) {
             out.push((false, 0.0));
         }
-        let k = self.dxf.ltscale;
+        let k = self.dxf().ltscale;
         Some(out.into_iter().map(|(_, len)| len * k).collect())
     }
 
@@ -759,11 +810,11 @@ impl Cad {
             }
             (None, Some(dwg)) => {
                 let bytes = crate::cloud::inflate_of("a CAD drawing", dwg, most.min(dxf::MAX_BYTES))?;
-                Cad::new(&f.source, f.path.clone(), bytes).map_err(|e| format!("CAD drawing `{}`: {e}", f.source))?
+                Cad::kindly(&f.source, f.path.clone(), bytes).map_err(|e| format!("CAD drawing `{}`: {e}", f.source))?
             }
             (None, None) => {
                 let bytes = crate::cloud::inflate_of("a CAD drawing", &f.dxf, most.min(dxf::MAX_BYTES))?;
-                Cad::new(&f.source, f.path.clone(), bytes).map_err(|e| format!("CAD drawing `{}`: {e}", f.source))?
+                Cad::kindly(&f.source, f.path.clone(), bytes).map_err(|e| format!("CAD drawing `{}`: {e}", f.source))?
             }
         };
         let _ = cad.packed.set(f);
@@ -777,7 +828,7 @@ impl<'de> Deserialize<'de> for Cad {
         // A file looked into for keys this build doesn't know (`lenient::unknown`) has its drawings read by the strict
         // reading that follows, not twice: an office DWG takes seconds.
         if crate::lenient::walking() {
-            return Ok(Cad::drawn(&f.source, Dxf::default(), Vec::new()));
+            return Ok(Cad::lines(&f.source, Arc::new(Dxf::default()), Vec::new()));
         }
         Cad::from_file(f, dxf::MAX_BYTES).map_err(serde::de::Error::custom)
     }
@@ -805,7 +856,7 @@ pub(crate) fn deserialize_cads<'de, D: serde::Deserializer<'de>>(d: D) -> Result
                 let f: CadFile = a.next_value()?;
                 // Looked into for unknown keys only (`lenient::unknown`): read by the strict reading that follows.
                 if crate::lenient::walking() {
-                    cads.insert(name, Cad::drawn(&f.source, Dxf::default(), Vec::new()));
+                    cads.insert(name, Cad::lines(&f.source, Arc::new(Dxf::default()), Vec::new()));
                     continue;
                 }
                 let cad = Cad::from_file(f, left).map_err(A::Error::custom)?;

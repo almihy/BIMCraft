@@ -74,13 +74,13 @@ fn a_file_read_again_is_the_drawing_read_before_and_a_project_holding_it_reads_i
     let bytes = crate::dxf::dwg::sample::plan().unwrap();
     let (a, _) = Cad::read("a.dwg", None, bytes.clone()).unwrap();
     let (b, _) = Cad::read("b.dwg", Some("b.dwg".into()), bytes).unwrap();
-    assert!(Arc::ptr_eq(&a.dxf, &b.dxf) && Arc::ptr_eq(&a.index, &b.index), "read once, shared");
+    assert!(Arc::ptr_eq(&a.read, &b.read), "read once, shared");
     assert_eq!((b.source(), b.path(), b.is_dwg()), ("b.dwg", Some("b.dwg"), true));
     // Held in a project file and read back: the same drawing, and the walk for unknown keys reads none.
     let text = serde_json::to_string(&a).unwrap();
     assert!(text.contains("\"dwg\"") && !text.contains("\"dxf\""), "held as the DWG it is");
     let back: Cad = serde_json::from_str(&text).unwrap();
-    assert!(Arc::ptr_eq(&a.dxf, &back.dxf) && back.is_dwg());
+    assert!(Arc::ptr_eq(&a.read, &back.read) && back.is_dwg());
     assert!(crate::lenient::unknown::<Cad>(&serde_json::from_str(&text).unwrap()).is_empty());
 }
 
@@ -94,10 +94,10 @@ fn every_drawing_held_is_shared_however_many_and_one_nothing_holds_is_let_go() {
     let held: Vec<Cad> = files.iter().map(|f| Cad::new("x.dxf", None, f.clone()).unwrap()).collect();
     for (f, cad) in files.iter().zip(&held) {
         let again = Cad::new("x.dxf", None, f.clone()).unwrap();
-        assert!(Arc::ptr_eq(&again.dxf, &cad.dxf) && Arc::ptr_eq(&again.packed, &cad.packed));
+        assert!(Arc::ptr_eq(&again.read, &cad.read) && Arc::ptr_eq(&again.packed, &cad.packed));
     }
     // Let go of, it isn't kept: what reads it next reads it again.
-    let weak = Arc::downgrade(&held[0].dxf);
+    let weak = Arc::downgrade(&held[0].read);
     drop(held);
     assert!(weak.upgrade().is_none(), "nothing holds a drawing no project holds");
 }
