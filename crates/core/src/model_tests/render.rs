@@ -703,6 +703,14 @@ fn an_svg_puts_each_elements_primitives_in_a_group_carrying_its_id_in_painting_o
     assert_eq!(opened, runs);
     assert_eq!(svg.matches("<g ").count(), svg.matches("</g>").count());
     assert_eq!(svg.matches("<path").count(), d.prims.len());
+    // An element that draws last has its group closed before the drawing ends.
+    let mut d = d;
+    let last = d.owners.iter().rposition(Option::is_some).expect("an element draws");
+    d.prims.truncate(last + 1);
+    d.owners.truncate(last + 1);
+    let ends = crate::render::svg(&d);
+    assert!(ends.ends_with("</g></svg>\n"), "{ends}");
+    assert_eq!(ends.matches("<g ").count(), ends.matches("</g>").count());
 }
 
 /// How tall the lettering element `id` draws is, px: its tallest stroke.

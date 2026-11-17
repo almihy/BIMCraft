@@ -5811,6 +5811,9 @@ pub fn svg(d: &Drawing) -> String {
             },
         };
     }
+    if open.is_some() {
+        s.push_str("</g>"); // the group of the element drawn last
+    }
     s.push_str("</svg>\n");
     s
 }
