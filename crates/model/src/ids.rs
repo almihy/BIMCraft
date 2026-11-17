@@ -95,6 +95,19 @@ impl IdBlocks {
         None
     }
 
+    /// What is left of the blocks, as [`IdBlocks::put_back`] takes it.
+    pub fn held(&self) -> Vec<(Id, Id)> {
+        self.lock().ranges.iter().copied().collect()
+    }
+
+    /// The blocks as they were when [`IdBlocks::held`] said them: what was taken since goes back, for work taken back whole
+    /// that no other copy saw (a dry run), so that the work done for real takes the same ids.
+    pub fn put_back(&self, held: Vec<(Id, Id)>) {
+        let mut b = self.lock();
+        b.ranges = held.into();
+        b.overrun = false;
+    }
+
     /// Whether a block ran out since this was last asked.
     pub fn take_overrun(&self) -> bool {
         std::mem::take(&mut self.lock().overrun)

@@ -72,6 +72,9 @@ pub fn seen(m: &Arc<Model>) -> Arc<Model> {
         return Arc::clone(m);
     }
     let mut out = (**m).clone();
+    // What a link builds is numbered from [`LINKED`] up, in this drawn model alone: none of the ids this copy was given to
+    // make things with ([`crate::ids::IdBlocks`]), which the clone would otherwise share.
+    out.blocks = Default::default();
     for (l, other) in links {
         // ponytail: a link that fails (a file whose parts clash with this project's) is drawn as not there; the status of
         // `reload` says which links are loaded.

@@ -938,13 +938,16 @@ impl Session {
     /// It only reads the project, so a session that may only read ([`Session::read_only`]) may try a script too.
     pub fn script_dry_run(&mut self, text: &str) -> Result<Value, String> {
         let kept = Kept::of(self);
+        let blocks = self.blocks.held();
         let read_only = self.read_only.take();
         let dry_run = std::mem::replace(&mut self.dry_run, true);
         let result = self.transaction_in("Script", false, |s| s.run_script(text, false, true)).map(|(results, _)| results);
         let after = Arc::clone(&self.model);
         (self.read_only, self.dry_run) = (read_only, dry_run);
-        // The project as it was, whatever the script did to it; what a dry run says is only what it would do.
+        // The project as it was, whatever the script did to it; what a dry run says is only what it would do. The ids it took
+        // of this copy's blocks go back with it: no other copy saw them, and the script run for real takes the same.
         let _ = kept.keep(self);
+        self.blocks.put_back(blocks);
         let results = result?;
         let before = Arc::clone(&self.model);
         let before = &before;

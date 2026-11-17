@@ -36,6 +36,8 @@ pub const WAITING_TRIES: u32 = 20;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Wait {
     pub text: String,
+    /// The id an element was told with ([`Changes::ids`]): given it when it is taken in, as it would have been at once.
+    pub id: Option<Id>,
     /// How many times it has been offered again and still waits.
     pub tried: u32,
 }
@@ -367,7 +369,8 @@ impl Model {
         }
         // Something would break it: each change on its own, those that pass taken.
         let mut m = base;
-        let mut each: Vec<(Guid, Option<String>)> = c.elements.iter().map(|(g, v)| (*g, v.clone())).collect();
+        // What `complete` takes out goes first, so that what comes in has the ids it is told (the ones taken out held them).
+        let mut each: Vec<(Guid, Option<String>)> = Vec::new();
         if c.complete {
             each.extend(
                 m.elements
@@ -378,6 +381,7 @@ impl Model {
                     .map(|g| (g, None)),
             );
         }
+        each.extend(c.elements.iter().map(|(g, v)| (*g, v.clone())));
         for (g, v) in each {
             let one = Changes { elements: BTreeMap::from([(g, v.clone())]), ..Changes::default() };
             let mut next = m.clone();
@@ -538,6 +542,21 @@ impl Model {
     /// The elements `c` changes, put in or taken out by GUID, unchecked; and with `complete`, those it doesn't name taken
     /// out. Those whose JSON is not an element's are refused.
     fn take_elements(&mut self, c: &Changes, keep: &BTreeSet<Guid>, ids: &BTreeMap<Guid, Id>, out: &mut Merged) -> Result<(), String> {
+        // What `complete` takes out goes first, so that what comes in has the ids it is told (the ones taken out held them: an
+        // empty project's own levels, a model opened from another revision).
+        if c.complete {
+            let gone: Vec<Guid> = self
+                .elements
+                .iter()
+                .filter(|(_, e)| !own(e))
+                .filter_map(|(id, _)| self.elements.guid(*id))
+                .filter(|g| !c.elements.contains_key(g) && !keep.contains(g))
+                .collect();
+            for g in gone {
+                self.elements.remove(g);
+                out.taken.elements.insert(g, None);
+            }
+        }
         for (g, v) in &c.elements {
             if keep.contains(g) {
                 continue;
@@ -598,19 +617,6 @@ impl Model {
                 }
             }
             out.taken.elements.insert(*g, v.clone());
-        }
-        if c.complete {
-            let gone: Vec<Guid> = self
-                .elements
-                .iter()
-                .filter(|(_, e)| !own(e))
-                .filter_map(|(id, _)| self.elements.guid(*id))
-                .filter(|g| !c.elements.contains_key(g) && !keep.contains(g))
-                .collect();
-            for g in gone {
-                self.elements.remove(g);
-                out.taken.elements.insert(g, None);
-            }
         }
         Ok(())
     }
