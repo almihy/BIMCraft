@@ -46,7 +46,7 @@ bimcraft-rvt = { path = "crates/rvt" }
 bimcraft-dwg = { path = "crates/dwg" }
 # A drawing (DWG or DXF) read once into an index and asked of, for the agent (Arqiflow's drawing_read): CADCraft's, from
 # our fork (MIT OR Apache-2.0; its DWG reader is acadrust, MPL-2.0, unmodified, the same version as crates/dwg).
-cadcraft-index = { git = "https://github.com/almihy/cadcraft", rev = "e5c5d464670abec364ccdcf4542c718fdc4541cf" }
+cadcraft-index = { git = "https://github.com/almihy/cadcraft", rev = "7362fbaf4076586dcf13d46a6e90788235b50ba6" }
 # Without their default features, so that the browser's build leaves egui's own fonts out (ui-egui's `egui-fonts`): each
 # member asks for what it uses.
 egui = { version = "0.36", default-features = false }
