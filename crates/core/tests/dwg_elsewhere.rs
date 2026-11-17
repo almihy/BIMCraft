@@ -8,6 +8,7 @@ use bimcraft_core::model::{Element, Model};
 use serde_json::json;
 
 /// A project holding `bytes` as the DWG of one import, as its file's text, written with reading elsewhere off.
+#[cfg(test)]
 fn project_holding(name: &str, bytes: &[u8]) -> String {
     let dir = std::env::temp_dir().join(format!("bimcraft-dwg-elsewhere-{}-{name}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -28,6 +29,7 @@ fn project_holding(name: &str, bytes: &[u8]) -> String {
 }
 
 /// The sample plan with its object records cut short: what the decoder refuses.
+#[cfg(test)]
 fn hostile() -> Vec<u8> {
     let mut b = dwg::sample::plan().unwrap();
     b.truncate(b.len() / 2);

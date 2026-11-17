@@ -55,8 +55,10 @@ const MOST_CHECKED: usize = 256;
 static ELSEWHERE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// Files read elsewhere, by [`key`], and how that went: `None`, safely; else why not.
 static CHECKED: std::sync::Mutex<Vec<(u64, Option<String>)>> = std::sync::Mutex::new(Vec::new());
-/// Files asked to be read elsewhere and not answered yet: their keys, and the bytes of those not taken yet.
-static WANTED: std::sync::Mutex<Vec<(u64, Option<std::sync::Arc<Vec<u8>>>)>> = std::sync::Mutex::new(Vec::new());
+/// A file asked to be read elsewhere and not answered yet: its key, and its bytes until they are taken.
+type Wanted = (u64, Option<std::sync::Arc<Vec<u8>>>);
+/// The files asked to be read elsewhere and not answered yet.
+static WANTED: std::sync::Mutex<Vec<Wanted>> = std::sync::Mutex::new(Vec::new());
 
 /// Whether a DWG file may be read here, as [`check`] finds it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -131,6 +133,17 @@ pub fn checked(key: u64, read: Result<(), String>) {
         let over = c.len().saturating_sub(MOST_CHECKED);
         c.drain(..over);
     }
+}
+
+/// Decodes DWG `bytes` with the third-party reader alone, as the desktop's worker does (`cadcraft_dwg::worker`): what a
+/// place that reads a file apart first runs, since the decoder is where a hostile file can bring an instance down; the
+/// import made of the drawing after it is this crate's own code. The notes on what it left out, or why it can't be read.
+pub fn probe(bytes: &[u8]) -> Result<Vec<String>, String> {
+    if bytes.len() > MAX_BYTES {
+        return Err(format!("it's {} bytes; up to {MAX_BYTES}", bytes.len()));
+    }
+    let limits = cadcraft_dwg::Limits { max_dwg_bytes: MAX_BYTES, ..cadcraft_dwg::Limits::DEFAULT };
+    cadcraft_dwg::read(bytes, limits).map(|(_, notes)| notes)
 }
 
 /// The import CADCraft's drawing `d` makes: its model space, in its own unit.

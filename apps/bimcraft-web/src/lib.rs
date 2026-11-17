@@ -305,12 +305,12 @@ pub fn pdf_job(job: &str, bytes: Vec<u8>) -> Result<Vec<u8>, JsValue> {
     bimcraft_core::raster::run_pdf_job(&job, bytes).map_err(err)
 }
 
-/// Reads a DWG file's `bytes` as the editor would: what the page's worker calls, in an instance of this module of its own,
-/// before the editor reads the file itself (a panic there aborts only the worker). Its notes (what the read left out) as
-/// JSON, or why it can't be read.
+/// Decodes a DWG file's `bytes` as the editor will (`dxf::dwg::probe`, the third-party decoder, where a hostile file can
+/// panic): what the page's worker calls, in an instance of this module of its own, before the editor reads the file itself
+/// (a panic there aborts only the worker). Its notes (what the decoder left out) as JSON, or why it can't be read.
 #[wasm_bindgen]
 pub fn dwg_check(bytes: Vec<u8>) -> Result<String, JsValue> {
-    let (_, notes) = bimcraft_core::dxf::dwg::read_here(&bytes).map_err(err)?;
+    let notes = bimcraft_core::dxf::dwg::probe(&bytes).map_err(err)?;
     Ok(Value::from(notes).to_string())
 }
 

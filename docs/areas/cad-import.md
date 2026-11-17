@@ -53,7 +53,7 @@ so a file that brings the decoder down (an allocation it can't make, a stack ove
 panic ends the whole instance (WebAssembly has no unwinding), so the editor's engine decodes no DWG that hasn't been read apart
 first (`dwg::read_elsewhere`, which `apps/bimcraft-web` turns on): each new file is asked for once by its key (`dwg::check`, then
 `dwg::take_wanted`; a file the page gives the window is asked for as it is given, so it is read by the Import CAD box's OK), the
-page reads it in a Web Worker of its own with the build's `dwg_check` (`on_dwg`, `answer_dwg`), and the engine reads it only once
+page decodes it in a Web Worker of its own with the build's `dwg_check` (the decoder alone, `dwg::probe`, as the desktop's worker does: the import made of it after is our own code; `on_dwg`, `answer_dwg`), and the engine reads it only once
 the worker read it unharmed (`dwg::checked`; acadrust's decoding is deterministic). Meanwhile `import_cad` is refused with
 `dwg::WAITING` (the box waits, "Reading the drawing…", and brings it in when it is read); one the worker couldn't read, or that
 killed it, is refused with "This drawing could not be read: …". A project is never refused for its DWG: `Cad` holds a drawing
