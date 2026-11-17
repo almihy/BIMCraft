@@ -812,3 +812,22 @@ fn what_is_inserted_from_another_project_takes_ids_of_the_blocks() {
     assert!(!ids.is_empty());
     assert!(ids.iter().all(|id| (1_000_000..1_001_000).contains(id)), "another project's ids would be another copy's: {ids:?}");
 }
+
+#[test]
+fn a_whole_model_taken_into_a_new_project_keeps_every_id_it_is_told() {
+    let (mut a, _, _) = two();
+    a.s.give_ids(1_000_000, 1_001_000).unwrap();
+    a.run("wall", json!({"points": [[0, 0], [6000, 0]]}));
+    let all = sync::entries(a.model()).unwrap();
+    // A new project's own levels hold the ids the model's levels have (100000, 100001), under other GUIDs.
+    let mut fresh = Session::new();
+    run(&mut fresh, "new", json!({}));
+    let held: BTreeSet<u64> = fresh.model.elements.keys().copied().collect();
+    assert!(all.ids.values().any(|id| held.contains(id)), "the case: ids the new project's own elements hold");
+    let got = fresh.merge(&Changes::read(&all.to_json()).unwrap(), &BTreeSet::new()).unwrap();
+    assert!(got.refused.is_empty(), "{:?}", got.refused);
+    for (g, id) in &all.ids {
+        assert_eq!(fresh.model.elements.id(*g), Some(*id), "{g}");
+    }
+    assert_eq!(fresh.model.elements.len(), all.elements.len(), "the new project's own elements went");
+}
