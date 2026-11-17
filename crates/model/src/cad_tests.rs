@@ -85,6 +85,87 @@ fn a_file_read_again_is_the_drawing_read_before_and_a_project_holding_it_reads_i
 }
 
 #[test]
+fn every_drawing_held_is_shared_however_many_and_one_nothing_holds_is_let_go() {
+    // Six drawings (more than a few) held at once, each read again: each shares what was read, as a change from another
+    // copy reads every drawing a project holds again.
+    let files: Vec<Vec<u8>> = (0..6)
+        .map(|i| format!("0\nSECTION\n2\nENTITIES\n0\nLINE\n8\n0\n10\n{i}\n20\n0\n11\n9\n21\n9\n0\nENDSEC\n0\nEOF\n").into_bytes())
+        .collect();
+    let held: Vec<Cad> = files.iter().map(|f| Cad::new("x.dxf", None, f.clone()).unwrap()).collect();
+    for (f, cad) in files.iter().zip(&held) {
+        let again = Cad::new("x.dxf", None, f.clone()).unwrap();
+        assert!(Arc::ptr_eq(&again.dxf, &cad.dxf) && Arc::ptr_eq(&again.packed, &cad.packed));
+    }
+    // Let go of, it isn't kept: what reads it next reads it again.
+    let weak = Arc::downgrade(&held[0].dxf);
+    drop(held);
+    assert!(weak.upgrade().is_none(), "nothing holds a drawing no project holds");
+}
+
+#[test]
+fn what_lies_in_a_box_through_placements_is_all_a_scan_of_every_entity_drawn_finds() {
+    // A block (a line and a circle on layer 0 and on X, and a block nested in it) placed turned, mirrored, stretched, through
+    // an extrusion pointing down, and as an array; model space's own lines between them.
+    let pairs = |p: &[(i32, &str)]| p.iter().map(|(c, v)| format!("{c}\n{v}\n")).collect::<String>();
+    let line = |x0: f64, y0: f64, x1: f64, y1: f64| {
+        pairs(&[(0, "LINE"), (8, "0"), (10, &x0.to_string()), (20, &y0.to_string()), (11, &x1.to_string()), (21, &y1.to_string())])
+    };
+    let insert = |at: (f64, f64), extra: &[(i32, &str)]| {
+        let mut p = vec![(0, "INSERT"), (8, "P"), (2, "B")];
+        let (x, y) = (at.0.to_string(), at.1.to_string());
+        p.extend([(10, x.as_str()), (20, y.as_str())]);
+        p.extend_from_slice(extra);
+        pairs(&p)
+    };
+    let blocks = [
+        pairs(&[(0, "BLOCK"), (2, "B"), (10, "2"), (20, "1")]),
+        line(0.0, 0.0, 10.0, 0.0),
+        pairs(&[(0, "CIRCLE"), (8, "X"), (10, "5"), (20, "5"), (40, "2")]),
+        pairs(&[(0, "INSERT"), (2, "N"), (10, "20"), (20, "0"), (50, "45")]),
+        pairs(&[(0, "ENDBLK"), (0, "BLOCK"), (2, "N"), (10, "0"), (20, "0")]),
+        line(0.0, 0.0, 0.0, 7.0),
+        pairs(&[(0, "ENDBLK")]),
+    ]
+    .concat();
+    let entities = [
+        insert((100.0, 100.0), &[(50, "30")]),
+        line(0.0, 0.0, 600.0, 10.0),
+        insert((300.0, 50.0), &[(41, "-1"), (42, "2.5")]),
+        insert((0.0, 300.0), &[(70, "4"), (71, "3"), (44, "40"), (45, "30"), (50, "10")]),
+        line(50.0, 50.0, 52.0, 51.0),
+        insert((500.0, 500.0), &[(230, "-1"), (50, "70"), (41, "3")]),
+    ]
+    .concat();
+    let text = format!("0\nSECTION\n2\nBLOCKS\n{blocks}0\nENDSEC\n0\nSECTION\n2\nENTITIES\n{entities}0\nENDSEC\n0\nEOF\n");
+    let cad = Cad::new("placed.dxf", None, text.into_bytes()).unwrap();
+    let d = cad.dxf();
+    assert!(d.inserts.len() == 15 && d.blocks.len() == 1, "{} placements of {} blocks", d.inserts.len(), d.blocks.len());
+    let boxes: Vec<[P2; 2]> = d.iter().map(|e| e.shape.bounds()).collect();
+    assert_eq!(boxes.len(), d.count());
+    // What each draws, as points along it: one of a placement turned off the axes whose box meets a box but whose lines
+    // don't may be left out, never one whose lines are in it.
+    let points: Vec<Vec<P2>> = d.iter().map(|e| paths(&e.shape).into_iter().flat_map(|(pts, _)| pts).collect()).collect();
+    let mut seed = 7;
+    let mut queries = vec![(P2(-1e6, -1e6), P2(1e6, 1e6))];
+    for _ in 0..2_000 {
+        let (x, y, w, h) = (random(&mut seed) * 700.0 - 50.0, random(&mut seed) * 700.0 - 50.0, random(&mut seed), random(&mut seed));
+        queries.push((P2(x, y), P2(x + w * w * 80.0, y + h * h * 80.0)));
+    }
+    for (lo, hi) in queries {
+        let found = cad.entities_in(lo, hi);
+        for (i, pts) in points.iter().enumerate() {
+            if pts.iter().any(|p| p.0 >= lo.0 && p.0 <= hi.0 && p.1 >= lo.1 && p.1 <= hi.1) {
+                assert!(found.binary_search(&i).is_ok(), "entity {i} in the box {lo:?} to {hi:?}: {found:?}");
+            }
+        }
+        assert!(found.windows(2).all(|w| w[0] < w[1]), "in order, once each");
+    }
+    for (i, b) in boxes.iter().enumerate() {
+        assert_eq!(cad.entity_box(i), Some(*b));
+    }
+}
+
+#[test]
 fn what_lies_in_a_box_is_what_a_scan_of_every_entity_finds() {
     // Small entities, wide ones (past the most cells one is put in), far outliers, a point, and one that isn't a number's.
     let mut seed = 42;

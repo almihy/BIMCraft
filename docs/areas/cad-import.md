@@ -34,7 +34,7 @@ its anonymous block, which is no placement. What the reader doesn't know (3DFACE
 ones) reads as Latin-1, as it always has.
 
 A file is hostile: `MAX_BYTES` caps its size, `MAX_PAIRS` its pairs, `MAX_SHAPES` the shapes it holds (model space's own and its
-blocks', each block once), `MAX_PLACED` what its placements draw among them, `MAX_WORK` the entities nested blocks may multiply into, and every coordinate is a finite number within `MAX_FILE_COORD` (one past that is left out as "past what a
+blocks', each block once) and the placements it holds (each is held, a cell of an array too), `MAX_PLACED` what its placements draw among them, `MAX_WORK` the entities nested blocks may multiply into, and every coordinate is a finite number within `MAX_FILE_COORD` (one past that is left out as "past what a
 drawing holds"). A file that ends after a group code, a value that isn't a number, a binary DXF and a DWG each say why.
 
 ## DWG
@@ -52,8 +52,9 @@ a child process of the program itself (`cadcraft_dwg::worker`: `use_own_worker`,
 so a file that brings the decoder down (an allocation it can't make, a stack overflow) takes only the child. The browser's
 engine reads it in its own instance: a panic there ends the instance (WebAssembly has no unwinding), which a hostile file could do.
 
-A drawing read is kept by its file's hash (the last few, `cad::READ`), so the same file read again (the project opened again,
-its undo history put back, a change from another copy) shares the drawing, its grid and its level of detail; and the walk of a
+A drawing read is found by its file's hash while anything holds it (`cad::READ` keeps weak references only, so a drawing no
+project holds any more is let go, and every drawing a project holds is found however many it holds), so the same file read
+again (the project opened again, its undo history put back, a change from another copy) shares the drawing, its grid and its level of detail; and the walk of a
 project file for keys this build doesn't know (`lenient::unknown`) reads no drawing. The project holds the DWG itself
 (`CadFile::dwg`, deflated and in base64; `Cad::is_dwg`) and reads it again when it opens, so a
 project written with one is format 28 (`DWG_FORMAT`); a project from before holds the DXF it was given, and reads as it did.

@@ -102,12 +102,13 @@ fn a_drawing_that_cant_come_in_says_why_in_its_box() {
     let mut h = app(BOX);
     let dir = drawing("dwg", "plan.dxf");
     let dwg = dir.with_file_name("plan.dwg");
-    std::fs::write(&dwg, "AC1032 not a dxf").unwrap();
+    std::fs::write(&dwg, "AC1032 not a drawing at all").unwrap();
     h.state_mut().import_cad_path(dwg, false);
     h.run();
     press(&mut h, "OK");
     assert!(imports(&h).is_empty());
-    assert!(h.query_by_label_contains("save it as DXF").is_some(), "the reason shows in the box, which stays open");
+    // The reader's reason, naming the file.
+    assert!(h.query_by_label_contains("plan.dwg:").is_some(), "the reason shows in the box, which stays open");
     press(&mut h, "Cancel");
     assert!(h.query_by_label("plan.dwg").is_none());
 }

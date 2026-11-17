@@ -1091,6 +1091,15 @@ impl Out {
 
     /// A placement of block `b` by `xf`, the INSERT's `style`, at `at`, turned `angle` and scaled `scale` as the file says.
     fn place(&mut self, b: usize, xf: Xf, style: &Style, at: P2, angle: f64, scale: [f64; 2]) -> Result<(), String> {
+        // Each placement (each cell of an array) is work, and is held: a hostile array of a small block is refused before
+        // it holds more placements than a drawing may hold shapes, not after it has run the memory out.
+        self.work += 1;
+        if self.work > MAX_WORK {
+            return Err(format!("its blocks place more than {MAX_WORK} entities; up to that many"));
+        }
+        if self.inserts.len() >= MAX_SHAPES {
+            return Err(format!("it places blocks more than {MAX_SHAPES} times; up to that many"));
+        }
         let Some((name, count)) = self.blocks.get(b).map(|k| (k.name.clone(), k.entities.len())) else { return Ok(()) };
         let fits = self.boxes.get(b).copied().and_then(|[lo, hi]| xf.boxed(lo, hi)).is_some_and(|[lo, hi]| {
             let ok = |x: f64| x.is_finite() && x.abs() <= MAX_FILE_COORD;
@@ -2940,7 +2949,9 @@ mod tests {
             &pairs(&[(0, "INSERT"), (2, "A"), (10, "0"), (20, "0"), (70, "1000000"), (71, "1000000"), (44, "1"), (45, "1")]),
         ))
         .unwrap_err();
-        assert!(e.contains("more than"), "{e}");
+        // Refused at the placements a drawing may hold (each one is held), before the entities they'd draw: sixteen
+        // million placements of one point would run the browser's memory out first.
+        assert!(e.contains("places blocks more than"), "{e}");
         // A block of a block of arrays that multiplies past the work bound is refused too.
         let blocks = pairs(&[
             (0, "BLOCK"),

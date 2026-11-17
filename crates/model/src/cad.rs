@@ -20,10 +20,72 @@ use crate::prim::Rgb;
 
 /// Drawings one project may hold.
 pub const MAX_CADS: usize = 64;
-/// The drawings last read ([`Cad::read`]), by their file's hash: a file read again is not read again, an office DWG taking
-/// seconds. The last few are kept; they are shared with the projects holding them.
-static READ: std::sync::Mutex<Vec<(u64, Cad, Vec<String>)>> = std::sync::Mutex::new(Vec::new());
-const KEPT_READS: usize = 4;
+/// The drawings read ([`Cad::read`]) that something still holds (a project, its undo history, the model another copy's
+/// changes are merged into), by their file's hash: a file read again while one is held is not read again, an office DWG
+/// taking seconds. Only weak references are kept, so a drawing nothing holds any more is let go (in the browser its
+/// memory is used again, not held beside the next drawing), and every drawing a project holds is found, however many.
+static READ: std::sync::Mutex<Vec<Kept>> = std::sync::Mutex::new(Vec::new());
+
+/// A drawing read, as [`READ`] keeps it: what a [`Cad`] shares, by weak reference.
+struct Kept {
+    key: u64,
+    held: Held,
+    bulk: Option<[P2; 2]>,
+    far: usize,
+    notes: Vec<String>,
+    /// The name and link it was read under: a reading under the same shares what a project file holds of it too.
+    source: String,
+    path: Option<String>,
+    bytes: std::sync::Weak<Vec<u8>>,
+    dxf: std::sync::Weak<Dxf>,
+    packed: std::sync::Weak<OnceLock<CadFile>>,
+    index: std::sync::Weak<OnceLock<Index>>,
+    lod: std::sync::Weak<OnceLock<Option<lod::Lod>>>,
+}
+
+impl Kept {
+    fn of(key: u64, cad: &Cad, notes: &[String]) -> Kept {
+        Kept {
+            key,
+            held: cad.held,
+            bulk: cad.bulk,
+            far: cad.far,
+            notes: notes.to_vec(),
+            source: cad.source.clone(),
+            path: cad.path.clone(),
+            bytes: Arc::downgrade(&cad.bytes),
+            dxf: Arc::downgrade(&cad.dxf),
+            packed: Arc::downgrade(&cad.packed),
+            index: Arc::downgrade(&cad.index),
+            lod: Arc::downgrade(&cad.lod),
+        }
+    }
+
+    /// Whether something still holds the drawing.
+    fn alive(&self) -> bool {
+        self.dxf.strong_count() > 0
+    }
+
+    /// The drawing, known by `source` and linked to `path`, if it is still held and its file is `bytes`.
+    fn cad(&self, source: String, path: Option<String>, bytes: &[u8]) -> Option<Cad> {
+        let held = self.bytes.upgrade().filter(|b| b.as_slice() == bytes)?;
+        let same = source == self.source && path == self.path;
+        let packed = self.packed.upgrade().filter(|_| same).unwrap_or_default();
+        Some(Cad {
+            source,
+            path,
+            bytes: held,
+            held: self.held,
+            dxf: self.dxf.upgrade()?,
+            bulk: self.bulk,
+            far: self.far,
+            packed,
+            index: self.index.upgrade()?,
+            lod: self.lod.upgrade()?,
+        })
+    }
+}
+
 /// What a project's drawings may hold among them, bytes of their files.
 pub const MAX_HELD: usize = 512 << 20;
 /// Entities a drawing needs before any of it counts as far from the rest: a sparse one is all bulk.
@@ -260,27 +322,27 @@ impl Cad {
 
     /// [`Cad::new`], with notes on what the reader left out of a DWG.
     pub fn read(source: &str, path: Option<String>, bytes: Vec<u8>) -> Result<(Cad, Vec<String>), String> {
-        // The same file read again (the project opened again, its undo history put back, a change from another copy, a
-        // reload): the drawing read last time, with its grid and level of detail, as the file is the same.
+        // The same file read again while it is held (the project opened again, its undo history put back, a change from
+        // another copy, a reload): the drawing read before, with its grid and level of detail, as the file is the same.
         let key = {
             use std::hash::{Hash, Hasher};
             let mut h = std::collections::hash_map::DefaultHasher::new();
             bytes.hash(&mut h);
             h.finish()
         };
-        if let Ok(kept) = READ.lock()
-            && let Some((_, cad, notes)) = kept.iter().find(|(k, cad, _)| *k == key && cad.same_bytes(&bytes))
-        {
-            let mut cad = cad.clone();
-            cad.source = source.chars().take(crate::model::MAX_TEXT).collect();
-            cad.path = path.map(|p| p.chars().take(4096).collect());
-            cad.packed = Arc::default();
-            return Ok((cad, notes.clone()));
-        }
-        let (cad, notes) = Cad::read_now(source, path, bytes)?;
+        let source: String = source.chars().take(crate::model::MAX_TEXT).collect();
+        let path: Option<String> = path.map(|p| p.chars().take(4096).collect());
         if let Ok(mut kept) = READ.lock() {
-            kept.insert(0, (key, cad.clone(), notes.clone()));
-            kept.truncate(KEPT_READS);
+            kept.retain(Kept::alive);
+            if let Some((cad, notes)) =
+                kept.iter().filter(|k| k.key == key).find_map(|k| Some((k.cad(source.clone(), path.clone(), &bytes)?, k.notes.clone())))
+            {
+                return Ok((cad, notes));
+            }
+        }
+        let (cad, notes) = Cad::read_now(&source, path, bytes)?;
+        if let Ok(mut kept) = READ.lock() {
+            kept.push(Kept::of(key, &cad, &notes));
         }
         Ok((cad, notes))
     }
