@@ -1,14 +1,16 @@
 //! Editing together: what changed in a model, element by element, to send to another copy of the same project, and
 //! another copy's changes taken in.
 //!
-//! Copies of one project (two people's windows, a server keeping it) agree on GUIDs, never on ids: each copy gives the
-//! elements it is sent ids of its own. So a change is keyed by GUID. [`Changes`] holds:
+//! Copies of one project (two people's windows, a server keeping it) agree on GUIDs, and a change is keyed by GUID. Ids
+//! travel with the elements too ([`Changes::ids`]): a copy given blocks of ids makes what it makes under ids no other copy
+//! takes ([`crate::ids::IdBlocks`]), and gives an element it is told of the id it is told where that is free, so an id names
+//! one element in every copy. A copy given no blocks numbers as before. [`Changes`] holds:
 //! - `elements`: each changed element by GUID, as its JSON (what the file holds of it, its `guid` aside), or none where
 //!   it was removed;
 //! - `project`: each changed setting of the project (its types, materials, families, units, …) by its key in the file,
 //!   as its JSON, or none where the file leaves it out now.
 //!
-//! The ids and `next_id` stay each copy's. The library's GUIDs are the project's, as an element's are: each entry of it is
+//! `next_id` and the library's ids stay each copy's. The library's GUIDs are the project's, as an element's are: each entry of it is
 //! told by its GUID, so a rename is a change to its name alone, and an element, which points at its type and the rest by GUID as
 //! a file does, says the same whatever they are called (`docs/areas/sync.md`). A link made from a project's text (`link {text}`,
 //! the site Arqiflow links under the building) is each copy's own, made again from its text where it is shown, so it is never
@@ -43,7 +45,8 @@ impl Session {
     /// holds nothing else back. One that waits through [`WAITING_TRIES`] such changes, or that would be more than the queue holds
     /// ([`WAITING_AT_MOST`] of each, [`WAITING_BYTES`] together), is given up on and named in `refused`.
     pub fn merge(&mut self, c: &Changes, keep: &BTreeSet<Guid>) -> Result<Merged, String> {
-        let (mut model, mut merged) = self.model.merged(c, keep, &BTreeMap::new())?;
+        // The ids it is told, so that an element has the same id here as in the copy that made it.
+        let (mut model, mut merged) = self.model.merged(c, keep, &c.ids)?;
         if c.complete {
             self.waiting.clear();
             self.waiting_project.clear();

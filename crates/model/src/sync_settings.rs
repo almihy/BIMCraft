@@ -236,6 +236,7 @@ pub(crate) fn without_elements(m: &Model) -> Model {
         elements: crate::ids::Elements::new(),
         library: m.library.clone(),
         loaded: std::collections::BTreeMap::new(),
+        blocks: m.blocks.clone(),
         derived: crate::derived::Derived::default(),
     }
 }

@@ -3525,6 +3525,10 @@ pub struct Model {
     /// not loaded, and draws nothing.
     #[serde(skip)]
     pub loaded: BTreeMap<String, Arc<Model>>,
+    /// The ids this copy takes for what it makes, when it edits together with others ([`crate::ids::IdBlocks`]): never in a
+    /// file.
+    #[serde(skip)]
+    pub blocks: crate::ids::IdBlocks,
     /// What its elements point at, looked up the other way (`Model::lookup`): no part of the model, never in a file.
     #[serde(skip)]
     pub derived: crate::derived::Derived,
@@ -3623,6 +3627,7 @@ impl Model {
             elements: Elements::new(),
             library: crate::library::Library::default(),
             loaded: BTreeMap::new(),
+            blocks: Default::default(),
             derived: Default::default(),
         };
         // A library to start from: each material its colour, its cut's pattern and its surface's, and the texture it has.
@@ -4470,15 +4475,39 @@ impl Model {
         }
     }
 
-    /// The next id, taken: past every element's, since a hand-edited file can carry a stale `next_id`.
+    /// The next id, taken. A copy given blocks ([`crate::ids::IdBlocks`]) takes it from them; when they ran out it is noted,
+    /// and the command is refused ([`crate::ids::IdBlocks::take_overrun`]), the id given here only to finish it. Else past
+    /// every element's below [`BLOCKS`](crate::ids::BLOCKS), since a hand-edited file can carry a stale `next_id`.
     pub fn fresh_id(&mut self) -> Id {
-        let mut id = self.next_id.max(FIRST_ID).max(self.elements.keys().next_back().map_or(FIRST_ID, |k| k + 1));
+        if self.blocks.given() {
+            let (elements, library) = (&self.elements, &self.library);
+            if let Some(id) = self.blocks.take(|id| !elements.contains_key(id) && !library.taken(id)) {
+                return id;
+            }
+        }
+        let mut id = self.next_id.max(self.counted_floor());
         // The library counts down from the top: past an id of its, on.
-        while self.library.taken(id) {
+        while self.library.taken(id) || self.elements.contains_key(id) {
             id += 1;
         }
         self.next_id = id + 1;
         id
+    }
+
+    /// Where a project's own count of ids is up to: past the highest element id below [`BLOCKS`](crate::ids::BLOCKS) (those
+    /// from blocks are not counted), and past `next_id` where that is further; [`FIRST_ID`] at least. The library counts down
+    /// to it.
+    pub fn counted_floor(&self) -> Id {
+        let top = self.elements.last_below(crate::ids::BLOCKS).map_or(FIRST_ID, |k| k + 1);
+        top.max(self.next_id.min(crate::ids::BLOCKS)).max(FIRST_ID)
+    }
+
+    /// Element `id` is in the model now (taken in from another copy, or put back): the project's own count goes past it when
+    /// it is one of the count's, not a block's.
+    pub fn counted(&mut self, id: Id) {
+        if id < crate::ids::BLOCKS {
+            self.next_id = self.next_id.max(id + 1);
+        }
     }
 
     /// Where element `id`'s model pattern starts (its `pattern_origin`) once its pattern line `line` lies on `reference`:
@@ -8641,6 +8670,7 @@ impl Model {
             elements: _,
             library,
             loaded,
+            blocks: _,
             derived: _,
         } = self;
         *format == o.format

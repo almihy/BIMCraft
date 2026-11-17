@@ -478,7 +478,7 @@ fn an_old_whole_map_is_taken_in_a_whole_room_and_the_entries_told_overrule_it() 
 
 #[test]
 fn the_sync_format_is_a_number_a_room_and_a_page_compare() {
-    assert_eq!(sync::FORMAT, 3);
+    assert_eq!(sync::FORMAT, 4);
 }
 
 #[test]

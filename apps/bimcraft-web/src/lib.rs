@@ -485,8 +485,21 @@ impl WebApp {
         self.execute("link", &serde_json::json!({"text": project, "name": SITE}).to_string())
     }
 
+    /// Ids from `start` to `end` (past it) are this copy's to give what this person makes, from now on: they edit together
+    /// with others, and an element has the same id in every copy (`bimcraft_core::ids::IdBlocks`). A command that runs out of
+    /// them is refused with "needs more element numbers": give more and run it again.
+    pub fn give_ids(&self, start: f64, end: f64) -> Result<(), JsValue> {
+        self.host()?.app.session.give_ids(start as u64, end as u64).map_err(err)
+    }
+
+    /// How many ids are left of those given: ask for more before they run out.
+    pub fn ids_left(&self) -> Result<f64, JsValue> {
+        Ok(self.host()?.app.session.ids_left() as f64)
+    }
+
     /// What changed in the model since this was last called (or since the start, or `load`), to send to the others editing
-    /// it: `{"elements": {guid: json | null}, "project": {key: json | null}}`, by GUID, each element as the file holds it.
+    /// it: `{"elements": {guid: json | null}, "project": {key: json | null}, "ids": {guid: id}}`, by GUID, each element as the
+    /// file holds it, with its id.
     pub fn take_changes(&self) -> Result<String, JsValue> {
         let now = Arc::clone(&self.host()?.app.session.model);
         let sent = self.sent.borrow_mut().replace(Arc::clone(&now));

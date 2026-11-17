@@ -17,9 +17,9 @@ pub const NOT_SETTINGS: [&str; 3] = ["elements", "next_id", "library"];
 /// How copies of a project tell each other what it holds, a number a room and a page compare: a page whose engine says
 /// another is not the room's, and loads again. 1: each setting a whole key (a whole map, `types`); 3: each entry of a map on
 /// its own, by its GUID, with its name apart (`types/wall/<guid>`, `types/wall/<guid>/name`), phases with their places, and the
-/// elements and entries pointing at entries by GUID ([`crate::sync_settings`]). Raised when a copy of the older would misread
-/// what the newer tells.
-pub const FORMAT: u32 = 3;
+/// elements and entries pointing at entries by GUID ([`crate::sync_settings`]); 4: each element's id with it ([`Changes::ids`]).
+/// Raised when a copy of the older would misread what the newer tells.
+pub const FORMAT: u32 = 4;
 
 /// Most changes one call takes, and the longest JSON of one: what comes from another copy is hostile.
 pub const MAX_CHANGES: usize = 200_000;
@@ -51,6 +51,10 @@ pub struct Changes {
     /// Everything there is, not what changed: an element or a setting left out is one there is not.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub complete: bool,
+    /// The id of each element `elements` puts in, so that it has the same id in every copy ([`crate::ids::IdBlocks`]). A copy
+    /// gives an element the id it is told where that is free.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub ids: BTreeMap<Guid, Id>,
 }
 
 impl Changes {
@@ -58,7 +62,8 @@ impl Changes {
         self.elements.is_empty() && self.project.is_empty()
     }
 
-    /// Read from JSON, `{elements: {guid: json | null}, project: {key: json | null}, complete?}`, within the caps.
+    /// Read from JSON, `{elements: {guid: json | null}, project: {key: json | null}, complete?, ids?: {guid: id}}`, within
+    /// the caps.
     pub fn read(text: &str) -> Result<Changes, String> {
         let c: Changes = serde_json::from_str(text).map_err(|e| format!("the changes aren't readable: {e}"))?;
         if c.elements.len() + c.project.len() > MAX_CHANGES {
@@ -66,6 +71,9 @@ impl Changes {
         }
         if let Some(g) = c.elements.keys().find(|g| g.is_nil() || g.pending().is_some()) {
             return Err(format!("{g} is not an element's GUID"));
+        }
+        if let Some((g, id)) = c.ids.iter().find(|(g, id)| !c.elements.contains_key(*g) || !id_of_project(**id)) {
+            return Err(format!("{g}: {id} is not an id of an element the changes put in"));
         }
         if let Some(k) = c.project.keys().find(|k| sync_settings::is_own(k)) {
             return Err(format!("`{k}` is each copy's own, not a setting to change"));
@@ -76,6 +84,16 @@ impl Changes {
     pub fn to_json(&self) -> String {
         serde_json::to_string(self).unwrap_or_else(|_| "{}".into())
     }
+}
+
+/// Whether `id` is one a project's element may have: from [`crate::ids::FIRST_ID`], below the linked elements'.
+fn id_of_project(id: Id) -> bool {
+    (crate::ids::FIRST_ID..crate::ids::LINKED).contains(&id)
+}
+
+/// The id of each element of `m` that `c` puts in, as [`Changes::ids`] says them.
+fn ids_of(m: &Model, c: &Changes) -> BTreeMap<Guid, Id> {
+    c.elements.iter().filter(|(_, v)| v.is_some()).filter_map(|(g, _)| m.elements.id(*g).map(|id| (*g, id))).collect()
 }
 
 /// Whether an element is this copy's own, never sent nor taken: a link made from a project's text.
@@ -103,6 +121,7 @@ pub fn entries(m: &Model) -> Result<Changes, String> {
     for (k, v) in sync_settings::flat(m)? {
         c.project.insert(k, Some(v.to_string()));
     }
+    c.ids = ids_of(m, &c);
     Ok(c)
 }
 
@@ -138,14 +157,20 @@ pub fn changes(before: &Model, after: &Model) -> Result<Changes, String> {
     };
     for g in guids {
         let (was, now) = (before.elements.get(g), after.elements.get(g));
-        if was.is_some_and(own) || now.is_some_and(own) || (was == now && !remapped) {
+        if was.is_some_and(own) || now.is_some_and(own) {
+            continue;
+        }
+        // An element moved to another id (the room's, taken in) is a change too, its text the same: the others are told its id.
+        let renumbered = was.is_some() && now.is_some() && before.elements.id(g) != after.elements.id(g);
+        if was == now && !remapped && !renumbered {
             continue;
         }
         let (a, b) = (was.map(|e| element_text(before, e)).transpose()?, now.map(|e| element_text(after, e)).transpose()?);
-        if a != b {
+        if a != b || renumbered {
             c.elements.insert(g, b);
         }
     }
+    c.ids = ids_of(after, &c);
     if !before.same_settings(after) || library_changed(before, after) {
         let (a, b) = (sync_settings::flat(before)?, sync_settings::flat(after)?);
         for k in a.keys().chain(b.keys()).collect::<BTreeSet<_>>() {
@@ -296,7 +321,7 @@ impl Model {
                 all.check()
             });
             if whole.is_ok() && got.refused.is_empty() {
-                out.taken = Changes { elements: got.taken.elements, project: c.project.clone(), complete: c.complete };
+                out.taken = Changes { elements: got.taken.elements, project: c.project.clone(), complete: c.complete, ids: BTreeMap::new() };
                 out.ids = got.ids;
                 out.fixes.extend(fixes);
                 return Ok((all, out));
@@ -410,6 +435,7 @@ impl Model {
                 elements: now.elements.clone(),
                 project: sync_settings::without(&now.project, &guids),
                 complete: now.complete,
+                ids: now.ids.clone(),
             });
         }
         (kept, now)
@@ -484,6 +510,7 @@ impl Model {
         m.refs_from_file();
         m.elements = self.elements.clone();
         m.loaded = self.loaded.clone();
+        m.blocks = self.blocks.clone();
         if !done.renames.is_empty() {
             m.follow(self);
         }
@@ -534,6 +561,20 @@ impl Model {
                     // What it points at by GUID is named by this model's library.
                     self.element_from_file(&mut e);
                     match self.elements.id(*g) {
+                        // Here under another id than the one it is told, which is free: moved to it, so that it has one id
+                        // in every copy (a copy that numbered it itself before ids were shared, or one that took it in when
+                        // its id was taken here).
+                        Some(id)
+                            if ids.get(g).is_some_and(|want| {
+                                *want != id && !self.elements.contains_key(*want) && !self.library.taken(*want)
+                            }) =>
+                        {
+                            let want = ids[g];
+                            self.elements.remove(id);
+                            self.elements.insert_as(want, *g, e)?;
+                            self.counted(want);
+                            out.ids.insert(*g, want);
+                        }
                         Some(id) => {
                             if self.elements.get(id) != Some(&e) {
                                 self.elements.insert(id, e);
@@ -545,7 +586,7 @@ impl Model {
                                 _ => self.fresh_id(),
                             };
                             self.elements.insert_as(id, *g, e)?;
-                            self.next_id = self.next_id.max(id + 1);
+                            self.counted(id);
                             out.ids.insert(*g, id);
                         }
                     }

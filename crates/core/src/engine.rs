@@ -118,8 +118,8 @@ pub struct Step {
 }
 
 impl Step {
-    /// Without a look at every element: what's new has an id past every one `before` had (ids only go up), and only when
-    /// the counts say something went is `before` searched for what.
+    /// Without a look at every element: what's new is among what changed (the elements' journal), and only when the counts
+    /// say something went is `before` searched for what.
     pub(crate) fn new(label: &str, before: &Model, after: &Model) -> Step {
         let tally = |elements: &mut dyn Iterator<Item = &Element>| {
             let mut counts: Vec<(&'static str, usize)> = Vec::new();
@@ -131,8 +131,7 @@ impl Step {
             }
             counts
         };
-        let first_new = before.elements.keys().next_back().map_or(0, |id| id + 1).max(before.next_id);
-        let made = tally(&mut after.elements.range(first_new..).map(|(_, e)| e));
+        let made = tally(&mut made(before, after).iter().filter_map(|id| after.elements.get(*id)));
         let kept = after.elements.len() - made.iter().map(|(_, n)| n).sum::<usize>();
         let removed = if before.elements.len() > kept {
             tally(&mut before.elements.iter().filter(|(id, _)| !after.elements.contains_key(**id)).map(|(_, e)| e))
@@ -140,6 +139,17 @@ impl Step {
             Vec::new()
         };
         Step { label: label.to_string(), made, removed, checked: false, turned: turned(before, after, &[]) }
+    }
+}
+
+/// The ids of the elements `after` has that `before` has not: what a command made. By what changed between the two, so not
+/// by looking at every element; and not by ids past the highest, since a copy editing together with others takes its ids from
+/// a block that may lie below others' ([`crate::ids::IdBlocks`]).
+pub(crate) fn made(before: &Model, after: &Model) -> Vec<Id> {
+    let new = |id: &Id| after.elements.contains_key(*id) && !before.elements.contains_key(*id);
+    match after.elements.changed_since(&before.elements) {
+        crate::ids::Changed::Ids(ids) => ids.into_iter().filter(new).collect(),
+        crate::ids::Changed::All => after.elements.keys().filter(|id| new(id)).copied().collect(),
     }
 }
 
@@ -186,7 +196,7 @@ fn keep_navigation(model: &mut Arc<Model>, left: &Model, own: &[Id]) {
         match guid {
             Some(guid) => {
                 made |= m.elements.insert_as(id, guid, Element::View3D(there)).is_ok();
-                m.next_id = m.next_id.max(id + 1);
+                m.counted(id);
             }
             None => {
                 if let Some(Element::View3D(v)) = m.elements.get_mut(id) {
@@ -259,6 +269,9 @@ pub struct Session {
     pub(crate) waiting: std::collections::BTreeMap<crate::ids::Guid, crate::sync::Wait>,
     /// The same for settings (a type made of a material not heard of yet), by key with their JSON.
     pub(crate) waiting_project: std::collections::BTreeMap<String, crate::sync::Wait>,
+    /// The ids this session's models take for what they make when it edits together with others ([`Session::give_ids`]): every
+    /// model it holds has them, one it opens or makes included.
+    blocks: crate::ids::IdBlocks,
     /// How many commands, scripts and transactions are under way, one inside another. A command made inside another (a script's
     /// lines, a transaction's) does not work out its warnings: the one outermost says what the whole made, once. Raised only
     /// through [`Nesting`], which lowers it again however the work ends.
@@ -393,6 +406,28 @@ impl Session {
             shadowed: 0,
             waiting: std::collections::BTreeMap::new(),
             waiting_project: std::collections::BTreeMap::new(),
+            blocks: crate::ids::IdBlocks::default(),
+        }
+    }
+
+    /// Ids from `start` to `end` (past it) are this session's to give what it makes, from now on: it edits together with others,
+    /// and an element has the same id in every copy ([`crate::ids::IdBlocks`]). Blocks given before stay, used first.
+    pub fn give_ids(&mut self, start: Id, end: Id) -> Result<(), String> {
+        self.blocks.give(start, end)?;
+        self.hold_blocks();
+        Ok(())
+    }
+
+    /// How many ids are left of those given ([`Session::give_ids`]): a page asks for more before they run out.
+    pub fn ids_left(&self) -> u64 {
+        self.blocks.left()
+    }
+
+    /// The model given this session's blocks, when it was given some and the model has others (one opened or made new).
+    fn hold_blocks(&mut self) {
+        if self.blocks.given() && !self.model.blocks.same(&self.blocks) {
+            let blocks = self.blocks.clone();
+            Arc::make_mut(&mut self.model).blocks = blocks;
         }
     }
 
@@ -534,10 +569,14 @@ impl Session {
         // A library entry's GUID, wherever a command takes a name, is that name.
         let named = named(&self.model, params);
         let params = named.as_ref().unwrap_or(params);
+        let outermost = self.nested == 0;
+        if outermost {
+            self.hold_blocks();
+            self.blocks.take_overrun();
+        }
         let before = Arc::clone(&self.model);
         let verified = self.verified.as_ref().is_some_and(|v| Arc::ptr_eq(v, &before));
-        let (run, first_new, session) = (cmd.run, self.model.next_id, (self.phase.clone(), self.option.clone()));
-        let outermost = self.nested == 0;
+        let (run, session) = (cmd.run, (self.phase.clone(), self.option.clone()));
         let ran = {
             let mut nest = Nesting::enter(self);
             catch_unwind(AssertUnwindSafe(|| run(&mut nest, params)))
@@ -557,7 +596,8 @@ impl Session {
             // A command that splits what stands keeps its phase; one that makes something makes it in the session's;
             // undo, redo and the commands that replace the project make nothing.
             if cmd.undoable && cmd.id != "split" {
-                self.stamp(first_new, COPIES.contains(&cmd.id));
+                let made = made(&before, &self.model);
+                self.stamp(&made, COPIES.contains(&cmd.id));
             }
             // A scan goes with the last point cloud that placed it.
             let unplaced = self.model.unplaced_clouds();
@@ -657,6 +697,12 @@ impl Session {
                 })
                 .map(|()| v)
         });
+        // A command that ran out of the ids it was given is refused, to be run again once more are given: the ids it took past
+        // them would be another copy's.
+        let result = match result {
+            Ok(_) if self.blocks.take_overrun() || self.model.blocks.take_overrun() => Err(crate::ids::OUT_OF_IDS.to_string()),
+            r => r,
+        };
         match result {
             Err(e) => {
                 // A refused command changes nothing: not the model, nor the phase and the option it asked the session for.
@@ -665,6 +711,10 @@ impl Session {
                 Err(e)
             }
             Ok(mut v) => {
+                // One that opened or made a project gives it this session's blocks.
+                if outermost {
+                    self.hold_blocks();
+                }
                 let changed = cmd.undoable && !Arc::ptr_eq(&before, &self.model);
                 // The warnings are looked at before the command is kept: a panic there refuses it, as one in the command does.
                 if changed
@@ -1004,19 +1054,20 @@ impl Session {
         }
     }
 
-    /// What elements from id `first` on, which a command just made, are made in: the session's phase
+    /// What the elements `made`, which a command just made, are made in: the session's phase
     /// (the first phase is no value at all, but for a door or window, which would follow its wall) and design
     /// option. A name the project no longer has is left out. A copy is made in them whatever it was copied from,
     /// and isn't taken down with its original; anything else holds the phase or the option it was given.
-    fn stamp(&mut self, first: Id, copies: bool) {
-        if self.phase.is_none() && self.option.is_none() || self.model.next_id <= first {
+    fn stamp(&mut self, made: &[Id], copies: bool) {
+        if self.phase.is_none() && self.option.is_none() || made.is_empty() {
             return;
         }
         let m = Arc::make_mut(&mut self.model);
         let phase = self.phase.clone().filter(|p| m.phases.contains(p));
         let option = self.option.clone().filter(|o| crate::phasing::option_exists(m, o));
         let is_first = phase.as_ref() == m.phases.first();
-        for (_, e) in m.elements.range_mut(first..) {
+        for id in made {
+            let Some(e) = m.elements.get_mut(*id) else { continue };
             let follows = matches!(e, Element::Door(_) | Element::Window(_));
             let Some(params) = e.params_mut() else { continue };
             if let Some(p) = &phase

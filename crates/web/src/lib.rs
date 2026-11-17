@@ -176,13 +176,26 @@ impl Engine {
     }
 
     /// Everything the model holds, as changes that make another copy of it say the same (`bimcraft_core::sync`):
-    /// `{"elements": {guid: json}, "project": {key: json}, "complete": true}`. A link from a project's text is left out.
+    /// `{"elements": {guid: json}, "project": {key: json}, "complete": true, "ids": {guid: id}}`. A link from a project's text
+    /// is left out.
     pub fn entries(&self) -> Result<String, JsError> {
         bimcraft_core::sync::entries(&self.s.model).map(|c| c.to_json()).map_err(err)
     }
 
-    /// Takes in another copy's changes (`{"elements": {guid: json | null}, "project": {key: json | null}, "complete"?}`):
-    /// the model checked, and what would break it left out. Replies `{"taken": n, "refused": [{what, error}], "fixes": {key: json text | null}, "kept": [{entry, kind, name, uses}]}`: the `fixes` are what this copy tells the room that it did not hear, and `kept` the entries it kept though they were taken out, because something names them (see `Merged`).
+    /// Ids from `start` to `end` (past it) are this copy's to give what it makes, from now on: it edits together with others,
+    /// and an element has the same id in every copy (`bimcraft_core::ids::IdBlocks`). A command that runs out of them is
+    /// refused with "needs more element numbers": give more and run it again.
+    pub fn give_ids(&mut self, start: f64, end: f64) -> Result<(), JsError> {
+        self.s.give_ids(start as u64, end as u64).map_err(err)
+    }
+
+    /// How many ids are left of those given: ask for more before they run out.
+    pub fn ids_left(&self) -> f64 {
+        self.s.ids_left() as f64
+    }
+
+    /// Takes in another copy's changes (`{"elements": {guid: json | null}, "project": {key: json | null}, "complete"?, "ids"?:
+    /// {guid: id}}`; an element is given the id it is told where that is free): the model checked, and what would break it left out. Replies `{"taken": n, "refused": [{what, error}], "fixes": {key: json text | null}, "kept": [{entry, kind, name, uses}]}`: the `fixes` are what this copy tells the room that it did not hear, and `kept` the entries it kept though they were taken out, because something names them (see `Merged`).
     pub fn apply_changes(&mut self, changes: &str) -> Result<String, JsError> {
         let c = bimcraft_core::sync::Changes::read(changes).map_err(err)?;
         let merged = self.s.merge(&c, &Default::default()).map_err(err)?;

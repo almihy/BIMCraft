@@ -1057,15 +1057,20 @@ impl Model {
             }
         }
         // New ones: ids down from the library's lowest, GUIDs made in order (a file read the same makes the same).
-        let floor = self.elements.keys().next_back().map_or(crate::ids::FIRST_ID, |k| k + 1).max(self.next_id);
+        let floor = self.counted_floor();
         // Below every entry's and every part's there has been, so a part taken away leaves its id unused.
         let mut below = self.library.lowest_id().unwrap_or(LAST_ID + 1);
         let given: Vec<(Id, Guid)> = now
             .iter()
             .zip(&keep)
             .map(|((id, p), (keep_id, keep_guid))| {
+                // A copy editing together with others takes new parts' ids from its blocks, as it does elements'.
+                let blocked = (!*keep_id && self.blocks.given()).then(|| self.blocks.take(|n| !ids.contains(&n))).flatten();
                 let id = if *keep_id {
                     *id
+                } else if let Some(b) = blocked {
+                    ids.insert(b);
+                    b
                 } else {
                     let mut next = below.saturating_sub(1);
                     while next >= floor && ids.contains(&next) {
@@ -1212,9 +1217,16 @@ impl Model {
             }
         }
         // New ones: ids down from the library's lowest, GUIDs made in order.
-        let floor = self.elements.keys().next_back().map_or(crate::ids::FIRST_ID, |k| k + 1).max(self.next_id);
+        let floor = self.counted_floor();
         for (k, l) in lines.iter_mut().enumerate() {
-            if !keep[k].0 {
+            // A copy editing together with others takes new parts' ids from its blocks, as it does elements'.
+            if !keep[k].0
+                && self.blocks.given()
+                && let Some(b) = self.blocks.take(|n| !id_taken(self, &claimed_ids, n))
+            {
+                claimed_ids.insert(b);
+                l.id = b;
+            } else if !keep[k].0 {
                 let mut next = below.saturating_sub(1);
                 while next >= floor && id_taken(self, &claimed_ids, next) {
                     next -= 1;
@@ -1352,7 +1364,7 @@ impl Model {
     /// meet, the library goes on past the elements.
     pub fn fresh_library_id(&mut self) -> Id {
         let below = self.library.lowest_id().map_or(LAST_ID, |f| f.saturating_sub(1));
-        let floor = self.elements.keys().next_back().map_or(crate::ids::FIRST_ID, |k| k + 1).max(self.next_id);
+        let floor = self.counted_floor();
         let mut id = below;
         while id >= floor && (self.elements.contains_key(id) || self.library.taken(id)) {
             id -= 1;
