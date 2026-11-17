@@ -5759,13 +5759,27 @@ fn path_data(pts: &[(f32, f32)], closed: bool) -> String {
     s
 }
 
+/// The drawing as SVG. Each run of primitives that draw one element sits in `<g data-id="…">`, the element's id in the
+/// model, so a page showing it can pick and highlight elements; primitives of no element stand bare. Painting order is the
+/// display list's: a group never reorders what it holds.
 pub fn svg(d: &Drawing) -> String {
     let (w, h) = (d.view.width, d.view.height);
     let mut s = format!(
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}"><rect width="{w}" height="{h}" fill="{}"/>"#,
         hex(PAPER)
     );
+    let mut open: Option<Id> = None;
     for (i, p) in d.prims.iter().enumerate() {
+        let owner = d.owners.get(i).copied().flatten();
+        if owner != open {
+            if open.is_some() {
+                s.push_str("</g>");
+            }
+            if let Some(id) = owner {
+                let _ = write!(s, r#"<g data-id="{id}">"#);
+            }
+            open = owner;
+        }
         let _ = match p {
             Prim::Fill { rings, color, rule, alpha } => {
                 let data: Vec<String> = rings.iter().map(|r| path_data(r, true)).collect();

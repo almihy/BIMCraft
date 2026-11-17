@@ -674,6 +674,37 @@ fn svg_and_png_are_well_formed() {
     assert_eq!((pm.width(), pm.height()), (640, 480));
 }
 
+#[test]
+fn an_svg_puts_each_elements_primitives_in_a_group_carrying_its_id_in_painting_order() {
+    let s = house();
+    let d = plan(&s.model, 100000, 640, 480);
+    let svg = svg(&d);
+    // The first wall: every path it draws is in a group of its id.
+    let wall = first_wall(&s);
+    assert!(drawn_by(&d, wall) > 0, "the wall draws something");
+    let in_wall: usize = svg
+        .split(&format!(r#"<g data-id="{wall}">"#))
+        .skip(1)
+        .map(|g| g.split("</g>").next().unwrap_or_default().matches("<path").count())
+        .sum();
+    assert_eq!(in_wall, drawn_by(&d, wall), "{svg}");
+    // The groups are the runs of one owner, in the display list's order; what has no owner is outside them.
+    let mut runs: Vec<Id> = Vec::new();
+    let mut last = None;
+    for o in &d.owners {
+        if let Some(id) = o {
+            if last != Some(*id) {
+                runs.push(*id);
+            }
+        }
+        last = *o;
+    }
+    let opened: Vec<Id> = svg.split(r#"<g data-id=""#).skip(1).filter_map(|g| g.split('"').next()?.parse().ok()).collect();
+    assert_eq!(opened, runs);
+    assert_eq!(svg.matches("<g ").count(), svg.matches("</g>").count());
+    assert_eq!(svg.matches("<path").count(), d.prims.len());
+}
+
 /// How tall the lettering element `id` draws is, px: its tallest stroke.
 fn lettering(d: &Drawing, id: Id) -> f32 {
     (d.prims.iter().zip(&d.owners).zip(&d.parts))
