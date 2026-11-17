@@ -156,7 +156,12 @@ pub const MIN_CONTOURS: f64 = 50.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 27;
+pub const FORMAT: u32 = 28;
+/// [`FORMAT`], by what it brought: a CAD drawing held as the DWG it was brought in as (`dwg` in its `CadFile`), read again
+/// straight when the project opens, where it was held as the DXF it was made into; a build that reads up to 27 would refuse
+/// the field, not say "saved by a newer BIMCraft". A project with no DWG held is written as 27 ([`Model::written_format`]);
+/// nothing in a file of 27 changes.
+pub const DWG_FORMAT: u32 = FORMAT;
 /// [`FORMAT`], by what it brought: ramps and parking as Revit has them (docs/parking-ramps-plan.md): a ramp along a path
 /// with its runs' own slopes, the Parking category and its Parking Space family, a car park's bays and aisles as elements
 /// of their own. The masterplan's ramps, parking stalls and parking bands of a file of 26 or older are converted, and its
@@ -168,7 +173,7 @@ pub const FORMAT: u32 = 27;
 /// ([`crate::ground::convert`]); a build that reads up to 25 would refuse the new categories, not say "saved by a newer
 /// BIMCraft".
 pub const SITE_FORMAT: u32 = 26;
-pub const PARKING_FORMAT: u32 = FORMAT;
+pub const PARKING_FORMAT: u32 = 27;
 /// The format a project is written in when it needs nothing of [`SITE_FORMAT`]'s but has families' subcategories styled
 /// or measured void cuts.
 pub const STYLES_FORMAT: u32 = 25;
@@ -4278,7 +4283,9 @@ impl Model {
         let clashing: Vec<String> = self
             .parameters
             .iter()
-            .filter(|(n, _)| !(crate::paint::reserved(n) || phasing::reserved(n) || crate::massing::reserved(n) || crate::ground::reserved(n)))
+            .filter(|(n, _)| {
+                !(crate::paint::reserved(n) || phasing::reserved(n) || crate::massing::reserved(n) || crate::ground::reserved(n))
+            })
             .filter(|(n, p)| p.categories.iter().any(|c| crate::schedule::own_field(c, n)))
             .map(|(n, _)| n.clone())
             .collect();

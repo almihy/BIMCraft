@@ -117,7 +117,7 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>, measures: boo
         Element::CadImport(ci) => {
             if let Some(cad) = m.cads.get(&ci.cad) {
                 extra.insert("source".into(), json!(cad.source()));
-                extra.insert("entities".into(), json!(cad.dxf().entities.len()));
+                extra.insert("entities".into(), json!(cad.dxf().count()));
                 extra.insert("layers".into(), json!(cad.dxf().layers.len()));
                 extra.insert("unit".into(), json!(cad.dxf().unit));
                 if let Some(path) = cad.path() {
@@ -137,7 +137,7 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>, measures: boo
                 extra.insert("source".into(), json!(t.source()));
                 extra.insert("horizontal_scale".into(), json!((sx * 1e6).round() / 1e6));
                 extra.insert("vertical_scale".into(), json!((sy * 1e6).round() / 1e6));
-                extra.insert("lines".into(), json!(t.lines().map_or(0, |c| c.dxf().entities.len())));
+                extra.insert("lines".into(), json!(t.lines().map_or(0, |c| c.dxf().count())));
             }
             extra.insert("corners".into(), json!(im.corners().map(read_point)));
         }

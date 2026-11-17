@@ -8,7 +8,6 @@ use bimcraft_i18n::ui_msg;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use bimcraft_core::cad::DwgReader;
 use bimcraft_core::engine::Session;
 use bimcraft_core::sample::SAMPLE;
 use bimcraft_ui_egui::control::Control;
@@ -51,8 +50,8 @@ fn main() -> ExitCode {
     if let Some(finish) = bimcraft_update::install::parse(std::env::args_os().skip(1)) {
         return bimcraft_update::install::run(&finish);
     }
-    // Started as the child that reads one DWG for a window (`bimcraft-dwg`): no window of its own.
-    if let Some(code) = dwg_child(&std::env::args().skip(1).collect::<Vec<_>>()) {
+    // Started as the worker that reads one DWG for a window: no window of its own.
+    if let Some(code) = dwg_worker() {
         return code;
     }
     // The window's settings sit beside the favorites, in the folder the core finds for the user's own files: the theme,
@@ -69,7 +68,6 @@ fn main() -> ExitCode {
         }
     };
     let mut session = Session::new();
-    session.dwg = dwg_reader();
     // A blank project starts in the interface's language: its levels named in it.
     if args.is_empty() {
         let _ = session.execute("new", &json!({"language": language.project().code()}));
@@ -239,26 +237,14 @@ fn main() -> ExitCode {
     }
 }
 
-/// The DWG reader a session is given: `bimcraft-dwg`'s, which reads a drawing in a child process of this program, behind the
-/// `dwg` feature. A build without it hands none, and a DWG says to save it as DXF.
-#[cfg(feature = "dwg")]
-fn dwg_reader() -> Option<DwgReader> {
-    bimcraft_dwg::reader()
-}
-
-#[cfg(not(feature = "dwg"))]
-fn dwg_reader() -> Option<DwgReader> {
-    None
-}
-
-/// What this program does when it's started as the child that reads a DWG (`bimcraft_dwg::CHILD_ARG`): none when it isn't.
-#[cfg(feature = "dwg")]
-fn dwg_child(args: &[String]) -> Option<ExitCode> {
-    bimcraft_dwg::child_main(args)
-}
-
-#[cfg(not(feature = "dwg"))]
-fn dwg_child(_: &[String]) -> Option<ExitCode> {
+/// What this program does when it's started as the worker that reads a DWG first (`cadcraft_dwg::worker`): none when it
+/// isn't. Otherwise it says to read each new DWG first in such a worker, a copy of itself, so a file that brings the
+/// decoder down costs only that copy.
+fn dwg_worker() -> Option<ExitCode> {
+    if let Some(code) = cadcraft_dwg::worker::serve_if_asked() {
+        return Some(ExitCode::from(u8::try_from(code).unwrap_or(1)));
+    }
+    cadcraft_dwg::worker::use_own_worker();
     None
 }
 

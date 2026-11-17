@@ -1195,7 +1195,8 @@ fn plan_shows_among(m: &Model, key: Guid, among: bool) -> Vec<P2> {
             Element::Dimension(dm) if m.annotation_in(e, key) => extent.push(dm.at),
             Element::Section(v) | Element::Elevation(v) => extent.extend([v.start, v.end]),
             Element::Tag(t) if m.annotation_in(e, key) => extent.extend(m.anchor(t.host).map(|a| a + t.offset)),
-            Element::Stair(Stair { level: l, top_level: t, height: h, .. }) | Element::Ramp(Ramp { level: l, top_level: t, height: h, .. })
+            Element::Stair(Stair { level: l, top_level: t, height: h, .. })
+            | Element::Ramp(Ramp { level: l, top_level: t, height: h, .. })
                 if {
                     let (base, top) = m.span(*l, 0.0, *t, *h);
                     flight(m, level, &r, base, top).is_some()
@@ -2908,20 +2909,29 @@ impl CadEntities<'_> {
 
     /// Entity `i` if it is a fill shown: its rings, its colour as drawn (its own, halftone or not) and its opacity.
     fn fill(&self, i: usize) -> Option<CadFill<'_>> {
-        let e = self.cad.dxf().entities.get(i)?;
-        let crate::dxf::Shape::Fill { rings, .. } = &e.shape else { return None };
-        if !self.shows(e) {
+        let e = self.cad.dxf().entity(i)?;
+        if !matches!(e.shape, crate::dxf::Shape::Fill { .. }) || !self.shows(&e) {
             return None;
         }
         let half = self.look.is_some_and(|l| l.of_layer(&e.layer).halftone);
-        let own = self.cad.color(e, self.ci.colors).unwrap_or(INK);
-        Some((rings, if half { halftone(own) } else { own }, e.alpha))
+        let own = self.cad.color(&e, self.ci.colors).unwrap_or(INK);
+        let alpha = e.alpha;
+        let rings = match e {
+            std::borrow::Cow::Borrowed(crate::dxf::Entity { shape: crate::dxf::Shape::Fill { rings, .. }, .. }) => {
+                std::borrow::Cow::Borrowed(rings.as_slice())
+            }
+            std::borrow::Cow::Owned(crate::dxf::Entity { shape: crate::dxf::Shape::Fill { rings, .. }, .. }) => {
+                std::borrow::Cow::Owned(rings)
+            }
+            _ => return None,
+        };
+        Some((rings, if half { halftone(own) } else { own }, alpha))
     }
 
     /// Draws entity `i`, if it is shown: all of it halftone, or none ([`Drawing::halftone`]).
     fn draw(&mut self, d: &mut Drawing, i: usize) {
-        let Some(ent) = self.cad.dxf().entities.get(i) else { return };
-        let half = self.over(ent).is_some_and(|o| o.halftone);
+        let Some(layer) = self.cad.dxf().layer_of(i) else { return };
+        let half = self.look.is_some_and(|l| self.overrides.get(layer).map_or_else(|| l.of_layer(layer).halftone, |o| o.halftone));
         d.halftone_next(half);
         self.draw_one(d, i);
         d.halftone_next(false);
@@ -2931,7 +2941,8 @@ impl CadEntities<'_> {
     fn draw_one(&mut self, d: &mut Drawing, i: usize) {
         use crate::dxf::{Horizontal, Shape, Vertical};
         let (cad, ci) = (self.cad, self.ci);
-        let Some(ent) = cad.dxf().entities.get(i) else { return };
+        let Some(ent) = cad.dxf().entity(i) else { return };
+        let ent = &*ent;
         if !self.shows(ent) {
             return;
         }
@@ -3187,7 +3198,7 @@ fn cad_fills_fit(
 }
 
 /// A big fill a picture of cells draws: its rings, its colour as drawn and its opacity.
-type CadFill<'c> = (&'c [Vec<P2>], Rgb, u8);
+type CadFill<'c> = (std::borrow::Cow<'c, [Vec<P2>]>, Rgb, u8);
 
 /// Picture `p` of a drawing's level of detail (placed by `ci`), its runs `runs`, the part of it in the box from `lo` to `hi`
 /// in the drawing's units, drawn as one image ([`Part::Cells`]) in the page's order: each run of cells the pixels their ink

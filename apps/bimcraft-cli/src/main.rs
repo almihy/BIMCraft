@@ -8,7 +8,6 @@ mod window;
 use std::io::Write;
 use std::process::ExitCode;
 
-use bimcraft_core::cad::DwgReader;
 use bimcraft_core::engine::Session;
 use bimcraft_core::sample::SAMPLE;
 use bimcraft_plugin::{Level, Plugins};
@@ -70,7 +69,6 @@ pub(crate) fn note_plugins(plugins: &Plugins, seen: &mut usize) {
 
 fn cli(args: &[String], out: &mut impl Write) -> Result<(), String> {
     let mut s = Session::new();
-    s.dwg = dwg_reader();
     let plugins = load_plugins(&mut s);
     let mut seen = plugins.log().len();
     match args {
@@ -175,26 +173,14 @@ fn mcp_server(args: McpArgs) -> Result<mcp::Server, String> {
     Ok(server)
 }
 
-/// The DWG reader a session is given: `bimcraft-dwg`'s, which reads a drawing in a child process of this program, behind the
-/// `dwg` feature. A build without it hands none, and a DWG says to save it as DXF.
-#[cfg(feature = "dwg")]
-fn dwg_reader() -> Option<DwgReader> {
-    bimcraft_dwg::reader()
-}
-
-#[cfg(not(feature = "dwg"))]
-fn dwg_reader() -> Option<DwgReader> {
-    None
-}
-
-/// What this program does when it's started as the child that reads a DWG (`bimcraft_dwg::CHILD_ARG`): none when it isn't.
-#[cfg(feature = "dwg")]
-fn dwg_child(args: &[String]) -> Option<ExitCode> {
-    bimcraft_dwg::child_main(args)
-}
-
-#[cfg(not(feature = "dwg"))]
-fn dwg_child(_: &[String]) -> Option<ExitCode> {
+/// What this program does when it's started as the worker that reads a DWG first (`cadcraft_dwg::worker`): none when it
+/// isn't. Otherwise it says to read each new DWG first in such a worker, a copy of itself, so a file that brings the
+/// decoder down costs only that copy.
+fn dwg_worker() -> Option<ExitCode> {
+    if let Some(code) = cadcraft_dwg::worker::serve_if_asked() {
+        return Some(ExitCode::from(u8::try_from(code).unwrap_or(1)));
+    }
+    cadcraft_dwg::worker::use_own_worker();
     None
 }
 
@@ -202,7 +188,7 @@ fn main() -> ExitCode {
     // A debug build runs as fast as a release one: the model's self-checks are its tests' (`selfcheck`).
     bimcraft_core::selfcheck::off();
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if let Some(code) = dwg_child(&args) {
+    if let Some(code) = dwg_worker() {
         return code;
     }
     if args.first().is_some_and(|a| a == "mcp") {

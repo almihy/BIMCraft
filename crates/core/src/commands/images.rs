@@ -285,7 +285,7 @@ fn place(c: &str, s: &mut Session, p: &Value, name: &str, new: Option<ImageType>
     let mut reply = json!({
         "id": id, "image": name, "source": t.source(), "dpi": t.dpi(), "pixels": pixels(&t),
         "size": [read_mm(w0), read_mm(h0)], "width": read_mm(width), "height": read_mm(height), "scale": scale,
-        "corners": corners.map(read_point), "lines": t.lines().map_or(0, |l| l.dxf().entities.len()),
+        "corners": corners.map(read_point), "lines": t.lines().map_or(0, |l| l.dxf().count()),
     });
     if t.drawn() {
         reply["layers"] = json!(t.layers());
@@ -380,7 +380,7 @@ pub(super) fn manage_images(s: &mut Session, p: &Value) -> R {
             json!({
                 "name": name, "source": t.source(), "kind": if t.page().is_some() { "pdf" } else { "image" }, "page": t.page(),
                 "dpi": t.dpi(), "pixels": pixels(t), "size": t.size().map(read_mm),
-                "stated_scale": t.stated_scale(), "lines": t.lines().map_or(0, |l| l.dxf().entities.len()),
+                "stated_scale": t.stated_scale(), "lines": t.lines().map_or(0, |l| l.dxf().count()),
                 "layers": t.layers(), "instances": instances(m, name),
             })
         })
@@ -488,7 +488,7 @@ fn reload(c: &str, s: &mut Session, p: &Value) -> Result<Option<Value>, String> 
             }
         }
     }
-    let lines = t.lines().map_or(0, |l| l.dxf().entities.len());
+    let lines = t.lines().map_or(0, |l| l.dxf().count());
     let drawn = t.drawn();
     m.image_types.insert(name.clone(), t);
     let mut out = json!({"image": name, "lines": lines, "layers": layers, "drawn": drawn});

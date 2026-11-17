@@ -225,8 +225,6 @@ pub struct Session {
     pub(crate) checks: usize,
     /// How many times the project was replaced, so a transaction knows its history went with it.
     resets: usize,
-    /// What reads a DWG drawing, when the app has one (`cad::DwgReader`); none says to save it as DXF.
-    pub dwg: Option<crate::cad::DwgReader>,
     /// PDF pages read apart from the session, which `import_pdf` and `pdf_pages` take instead of the file, and whether it may
     /// read one itself (`raster::PdfReads`): the browser's editor reads none, so a hostile file can't end it.
     pub pdf: crate::raster::PdfReads,
@@ -377,7 +375,6 @@ impl Session {
             #[cfg(test)]
             checks: 0,
             resets: 0,
-            dwg: None,
             pdf: crate::raster::PdfReads::default(),
             files: crate::files::Files::default(),
             external: Vec::new(),

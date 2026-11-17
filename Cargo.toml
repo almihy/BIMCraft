@@ -42,10 +42,13 @@ bimcraft-ui-egui = { path = "crates/ui-egui", default-features = false }
 bimcraft-update = { path = "crates/update" }
 # The Revit reader: Apache-2.0 only, so the command line and the desktop take it through an optional feature.
 bimcraft-rvt = { path = "crates/rvt" }
-# The DWG bridge: MIT OR Apache-2.0 itself, over acadrust (MPL-2.0, unmodified); the core never depends on it.
-bimcraft-dwg = { path = "crates/dwg" }
+# DWG drawings read straight into CADCraft's drawing (`cadcraft_doc::Drawing`), from our fork of CADCraft (MIT OR
+# Apache-2.0): its DWG reader is acadrust (MPL-2.0, unmodified, one version across the workspace; NOTICE). The model makes
+# an import of what it reads (dxf/dwg.rs), blocks kept as blocks.
+cadcraft-doc = { git = "https://github.com/almihy/cadcraft", rev = "7362fbaf4076586dcf13d46a6e90788235b50ba6" }
+cadcraft-dwg = { git = "https://github.com/almihy/cadcraft", rev = "7362fbaf4076586dcf13d46a6e90788235b50ba6" }
 # A drawing (DWG or DXF) read once into an index and asked of, for the agent (Arqiflow's drawing_read): CADCraft's, from
-# our fork (MIT OR Apache-2.0; its DWG reader is acadrust, MPL-2.0, unmodified, the same version as crates/dwg).
+# our fork, the same as above.
 cadcraft-index = { git = "https://github.com/almihy/cadcraft", rev = "7362fbaf4076586dcf13d46a6e90788235b50ba6" }
 # Without their default features, so that the browser's build leaves egui's own fonts out (ui-egui's `egui-fonts`): each
 # member asks for what it uses.

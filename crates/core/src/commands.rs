@@ -6937,32 +6937,19 @@ fn beside(s: &Session, path: &str) -> PathBuf {
     }
 }
 
-/// The bytes of the DXF file `path` (a DWG's, read by the session's DWG reader, as the DXF it becomes) and notes on what a
-/// DWG's read left out, or why it can't be brought in.
-fn read_dxf_file(s: &Session, path: &str) -> Result<(Vec<u8>, Vec<String>), String> {
+/// The bytes of the CAD drawing `path`, a DWG or a DXF (which [`Cad::read`] tells apart by their first bytes, so a DWG
+/// given under a .dxf name reads as the DWG it is), or why it can't be brought in.
+fn read_dxf_file(s: &Session, path: &str) -> Result<Vec<u8>, String> {
     let full = beside(s, path);
     match ext(&full).as_str() {
-        "dxf" => {}
-        "dwg" if s.files.given.has(&full) => {
-            return Err(format!("{}: a DWG given as bytes is read once it is converted; give it as the DXF it becomes", full.display()));
-        }
-        "dwg" => {
-            let Some(read) = &s.dwg else {
-                return Err(format!(
-                    "{}: this BIMCraft has no DWG reader built in; save it as DXF (any version, ASCII) from the program that \
-                     made it, or convert it with a DWG to DXF converter, and bring that in",
-                    full.display()
-                ));
-            };
-            return read(&full).map_err(|e| format!("{}: {e}", full.display()));
-        }
-        other => return Err(format!("{}: a .{other} file isn't a CAD drawing BIMCraft reads; it reads DXF", full.display())),
+        "dxf" | "dwg" => {}
+        other => return Err(format!("{}: a .{other} file isn't a CAD drawing BIMCraft reads; it reads DWG and DXF", full.display())),
     }
     let len = s.files.given.size(&full).map_err(|e| format!("{}: {e}", full.display()))?;
     if len > crate::dxf::MAX_BYTES as u64 {
         return Err(format!("{} is too large ({len} bytes; up to {})", full.display(), crate::dxf::MAX_BYTES));
     }
-    s.files.given.read(&full).map(|bytes| (bytes, Vec::new())).map_err(|e| format!("{}: {e}", full.display()))
+    s.files.given.read(&full).map_err(|e| format!("{}: {e}", full.display()))
 }
 
 /// The CAD import `id` names, by id or GUID, and its drawing; or an image of a PDF page, its lines placed as an import's
@@ -7092,8 +7079,7 @@ fn import_cad(s: &mut Session, p: &Value) -> R {
                     format!("the project holds {} CAD drawings already; delete the imports of one first", crate::cad::MAX_CADS),
                 ));
             }
-            let (bytes, read_notes) = read_dxf_file(s, &path).map_err(|e| bad(c, e))?;
-            notes = read_notes;
+            let bytes = read_dxf_file(s, &path).map_err(|e| bad(c, e))?;
             let held: usize = m.cads.values().map(Cad::len).sum();
             if held + bytes.len() > crate::cad::MAX_HELD {
                 return Err(bad(
@@ -7101,7 +7087,8 @@ fn import_cad(s: &mut Session, p: &Value) -> R {
                     format!("the project's CAD drawings would hold {} bytes; it holds up to {}", held + bytes.len(), crate::cad::MAX_HELD),
                 ));
             }
-            let cad = Cad::new(&source, link.then_some(path.clone()), bytes).map_err(|e| bad(c, format!("{path}: {e}")))?;
+            let (cad, read_notes) = Cad::read(&source, link.then_some(path.clone()), bytes).map_err(|e| bad(c, format!("{path}: {e}")))?;
+            notes = read_notes;
             (name, cad, true)
         }
     };
@@ -7158,7 +7145,7 @@ fn import_cad(s: &mut Session, p: &Value) -> R {
         None if dxf.scale.is_some() => dxf.unit.clone(),
         None => format!("{} (read as mm unless `units` says)", dxf.unit),
     };
-    let (entities, layers, far, left_out) = (dxf.entities.len(), dxf.layers.len(), cad.far(), dxf.left_out.clone());
+    let (entities, layers, far, left_out) = (dxf.count(), dxf.layers.len(), cad.far(), dxf.left_out.clone());
     let source = cad.source().to_string();
     let m = s.model_mut();
     if new {
@@ -7291,12 +7278,12 @@ fn reload_cad(s: &mut Session, p: &Value) -> R {
         .path()
         .map(str::to_string)
         .ok_or_else(|| bad(c, format!("CAD drawing `{name}` isn't linked; bring it in again with `import_cad` and `link`")))?;
-    let (bytes, _) = read_dxf_file(s, &path).map_err(|e| bad(c, e))?;
+    let bytes = read_dxf_file(s, &path).map_err(|e| bad(c, e))?;
     if cad.same_bytes(&bytes) {
         return Ok(json!({"cad": name, "changed": false}));
     }
     let new = Cad::new(cad.source(), Some(path.clone()), bytes).map_err(|e| bad(c, format!("{path}: {e}")))?;
-    let entities = new.dxf().entities.len();
+    let entities = new.dxf().count();
     s.model_mut().cads.insert(name.clone(), new);
     Ok(json!({"cad": name, "changed": true, "entities": entities}))
 }
@@ -7307,7 +7294,7 @@ fn relink_cads(s: &mut Session) -> Vec<Value> {
     let linked: Vec<(String, String)> = s.model.cads.iter().filter_map(|(n, cad)| Some((n.clone(), cad.path()?.to_string()))).collect();
     let mut failed = Vec::new();
     for (name, path) in linked {
-        let read = read_dxf_file(s, &path).and_then(|(bytes, _)| {
+        let read = read_dxf_file(s, &path).and_then(|bytes| {
             let held = s.model.cads.get(&name);
             if held.is_some_and(|h| h.same_bytes(&bytes)) {
                 return Ok(None);
@@ -7338,7 +7325,7 @@ fn cad_query(s: &mut Session, p: &Value) -> R {
         return Err(bad(c, format!("`reach` is how far from `at` to look, mm, above 0, not {reach}")));
     }
     let Some((e, d)) = crate::cad::nearest(cad, ci, at, reach) else { return Ok(json!({"id": id, "found": false})) };
-    let color = cad.color(e, Colors::Preserve).map(|c| json!([c.0, c.1, c.2]));
+    let color = cad.color(&e, Colors::Preserve).map(|c| json!([c.0, c.1, c.2]));
     let linetype = e.linetype.clone().or_else(|| cad.dxf().layer(&e.layer).map(|l| l.linetype.clone()));
     Ok(json!({
         "id": id, "found": true, "kind": crate::cad::kind(&e.shape), "layer": e.layer, "color": color,
@@ -7410,7 +7397,7 @@ struct ReadBlock {
 
 fn read_block(cad: &Cad, ci: &CadImport, ins: &crate::dxf::Insert) -> ReadBlock {
     let angle = (ins.angle + ci.angle).rem_euclid(360.0);
-    let shapes = cad.dxf().entities.get(ins.entities.clone()).unwrap_or_default().iter().map(|e| crate::cad::placed(&e.shape, ci));
+    let shapes = cad.dxf().blocks.get(ins.block).into_iter().flat_map(|b| &b.entities).map(|e| crate::cad::placed(&ins.place(e).shape, ci));
     ReadBlock { angle, corners: crate::cad::frame_corners(shapes, angle) }
 }
 
@@ -7489,7 +7476,8 @@ fn cad_read(s: &mut Session, p: &Value) -> R {
         if explode { BTreeMap::new() } else { dxf.inserts.iter().enumerate().map(|(b, i)| (i.entities.start, (b, i))).collect() };
     let (mut total, mut items, mut held) = (0_usize, Vec::new(), 0_usize);
     let mut n = 0;
-    while let Some(e) = dxf.entities.get(n) {
+    let count = dxf.count();
+    while n < count {
         if let Some((b, ins)) = blocks.get(&n) {
             n = ins.entities.end.max(n + 1);
             if !layer_ok(&ins.layer) || !kind_ok("block") {
@@ -7517,9 +7505,12 @@ fn cad_read(s: &mut Session, p: &Value) -> R {
         }
         let here = n;
         n += 1;
-        if !layer_ok(&e.layer) || !kind_ok(crate::cad::kind(&e.shape)) {
+        // Its layer and kind as it is held: a placement's entity is made only when it is wanted.
+        let Some((ins, held_e)) = dxf.held(here) else { continue };
+        if !layer_ok(ins.map_or(&held_e.layer, |i| i.layer_for(held_e))) || !kind_ok(crate::cad::kind(&held_e.shape)) {
             continue;
         }
+        let Some(e) = dxf.entity(here) else { continue };
         let shown = total >= start && items.len() < limit && held < READ_POINTS;
         if area.is_some() || shown {
             let shape = crate::cad::placed(&e.shape, ci);
@@ -7542,10 +7533,19 @@ fn cad_read(s: &mut Session, p: &Value) -> R {
 fn cad_read_summary(id: Id, cad: &Cad, ci: &CadImport, extents: Option<[P2; 2]>) -> Value {
     let dxf = cad.dxf();
     let mut per: BTreeMap<&str, (usize, BTreeMap<&str, usize>)> = BTreeMap::new();
-    for e in &dxf.entities {
-        let (count, kinds) = per.entry(e.layer.as_str()).or_default();
+    let mut count = |layer, kind| {
+        let (count, kinds) = per.entry(layer).or_default();
         *count += 1;
-        *kinds.entry(crate::cad::kind(&e.shape)).or_default() += 1;
+        *kinds.entry(kind).or_default() += 1;
+    };
+    for e in &dxf.entities {
+        count(e.layer.as_str(), crate::cad::kind(&e.shape));
+    }
+    // A placement's entities as its block holds them, each on its layer: none is made.
+    for ins in &dxf.inserts {
+        for e in dxf.blocks.get(ins.block).into_iter().flat_map(|b| &b.entities) {
+            count(ins.layer_for(e), crate::cad::kind(&e.shape));
+        }
     }
     for ins in &dxf.inserts {
         *per.entry(ins.layer.as_str()).or_default().1.entry("block").or_default() += 1;
@@ -7571,8 +7571,7 @@ fn cad_read_summary(id: Id, cad: &Cad, ci: &CadImport, extents: Option<[P2; 2]>)
             json!({"name": name, "count": count, "size": size})
         })
         .collect();
-    let texts: Vec<(usize, &crate::dxf::Entity)> =
-        dxf.entities.iter().enumerate().filter(|(_, e)| matches!(e.shape, crate::dxf::Shape::Text { .. })).collect();
+    let texts: Vec<(usize, crate::dxf::Entity)> = crate::cad::outlines::texts_of(dxf).collect();
     let listed: Vec<Value> = texts
         .iter()
         .take(READ_TEXTS)
@@ -7586,7 +7585,7 @@ fn cad_read_summary(id: Id, cad: &Cad, ci: &CadImport, extents: Option<[P2; 2]>)
     json!({
         "id": id, "cad": ci.cad, "unit": dxf.unit,
         "extents": extents.map(|[a, b]| [read_point(a), read_point(b)]),
-        "entities": dxf.entities.len(), "layers": layers, "blocks": blocks, "texts": listed, "texts_total": texts.len(),
+        "entities": dxf.count(), "layers": layers, "blocks": blocks, "texts": listed, "texts_total": texts.len(),
     })
 }
 
@@ -10971,8 +10970,7 @@ fn title_block(s: &mut Session, p: &Value) -> R {
             Some(u) if u.trim().eq_ignore_ascii_case("auto") => None,
             Some(u) => Some(cloud::unit(&u).ok_or_else(|| bad(c, format!("`units` is auto, mm, cm, m, in or ft, not {u}")))?),
         };
-        let (bytes, read_notes) = read_dxf_file(s, &path).map_err(|e| bad(c, e))?;
-        notes = read_notes;
+        let bytes = read_dxf_file(s, &path).map_err(|e| bad(c, e))?;
         let titleblock::Read { title_block: read, left_out: out, note } =
             titleblock::read_dxf(&bytes, units).map_err(|e| bad(c, format!("{path}: {e}")))?;
         notes.extend(note);

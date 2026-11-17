@@ -23,6 +23,7 @@ pub(crate) fn drawing(layers: &[(&str, Color)], entities: Vec<Entity>) -> Dxf {
         linetypes: Vec::new(),
         ltscale: 1.0,
         entities,
+        blocks: Vec::new(),
         inserts: Vec::new(),
         extents: None,
         left_out: Default::default(),

@@ -122,6 +122,7 @@ fn found_outlines(o: &Opened, p: &Value) -> Result<Value, String> {
         linetypes: Vec::new(),
         ltscale: 1.0,
         entities,
+        blocks: Vec::new(),
         inserts: Vec::new(),
         extents: None,
         left_out: Default::default(),

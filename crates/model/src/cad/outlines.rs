@@ -36,19 +36,24 @@ pub struct Pick {
 /// A piece of the arrangement: its bounded faces (each ring with the entities it came from), its outline, and its entities.
 type Piece = (Vec<(Vec<P2>, Vec<usize>)>, Option<Vec<P2>>, BTreeSet<usize>);
 
-/// The entities of a placed drawing a pick takes, by index.
+/// The entities of a placed drawing a pick takes, by number ([`crate::dxf::Dxf::entity`]). Its layers are asked first, so
+/// a block's placements are made only for what is on a layer picked.
 pub fn picked(cad: &Cad, ci: &CadImport, pick: &Pick) -> Vec<usize> {
     let place = cad_place(ci);
     let inside = |p: P2| pick.window.is_none_or(|[lo, hi]| p.0 >= lo.0 && p.0 <= hi.0 && p.1 >= lo.1 && p.1 <= hi.1);
-    cad.dxf()
-        .entities
-        .iter()
-        .enumerate()
-        .filter(|(n, e)| {
-            pick.entities.as_ref().is_none_or(|s| s.contains(n))
-                && pick.layers.as_ref().is_none_or(|l| l.contains(&e.layer))
-                && (pick.entities.is_some() || pick.layers.is_some() || cad.shows(e, &ci.hidden))
+    let d = cad.dxf();
+    let numbers: Box<dyn Iterator<Item = usize>> = match &pick.entities {
+        Some(s) => Box::new(s.iter().copied()),
+        None => Box::new(0..d.count()),
+    };
+    numbers
+        .filter(|n| {
+            d.layer_of(*n).is_some_and(|layer| {
+                pick.layers.as_ref().is_none_or(|l| l.contains(layer))
+                    && (pick.entities.is_some() || pick.layers.is_some() || !ci.hidden.contains(layer))
+            })
         })
+        .filter_map(|n| Some((n, d.entity(n)?)))
         .filter(|(_, e)| {
             pick.window.is_none() || {
                 let pts: Vec<P2> = match &e.shape {
@@ -158,7 +163,7 @@ pub fn outlines(cad: &Cad, ci: &CadImport, picked: &[usize]) -> Result<Found, St
         ));
     }
     let place = cad_place(ci);
-    let ents = &cad.dxf().entities;
+    let d = cad.dxf();
     let (mut segs, mut owner): (Vec<(P2, P2)>, Vec<usize>) = (Vec::new(), Vec::new());
     let mut rings: Vec<Outline> = Vec::new();
     let single = |ring: Vec<P2>, from: Source, n: usize| Outline {
@@ -171,7 +176,7 @@ pub fn outlines(cad: &Cad, ci: &CadImport, picked: &[usize]) -> Result<Found, St
         depth: 0,
     };
     for &n in picked {
-        let Some(e) = ents.get(n) else { continue };
+        let Some(e) = d.entity(n) else { continue };
         let run: Vec<P2> = match &e.shape {
             Shape::Line(a, b) => vec![place(*a), place(*b)],
             Shape::Arc { c, r, start, end } => arc_points(&place, ci.scale, *c, *r, *start, sweep(*start, *end)),
@@ -395,13 +400,9 @@ fn nest(outlines: &mut [Outline]) {
 /// [`MAX_LABELS`] each, in the drawing's order.
 pub fn labels(cad: &Cad, ci: &CadImport, outlines: &[Outline]) -> Vec<Vec<String>> {
     let place = cad_place(ci);
-    let mut texts: Vec<(P2, usize, &str)> = cad
-        .dxf()
-        .entities
-        .iter()
-        .enumerate()
-        .filter_map(|(n, e)| match &e.shape {
-            Shape::Text { at, text, .. } if !text.trim().is_empty() => Some((place(*at), n, text.as_str())),
+    let mut texts: Vec<(P2, usize, String)> = texts_of(cad.dxf())
+        .filter_map(|(n, e)| match e.shape {
+            Shape::Text { at, text, .. } if !text.trim().is_empty() => Some((place(at), n, text)),
             _ => None,
         })
         .collect();
@@ -417,12 +418,30 @@ pub fn labels(cad: &Cad, ci: &CadImport, outlines: &[Outline]) -> Vec<Vec<String
                 .iter()
                 .take_while(|t| t.0.0 <= hi.0)
                 .filter(|t| t.0.1 >= lo.1 && t.0.1 <= hi.1 && o.contains(t.0))
-                .map(|t| (t.1, t.2))
+                .map(|t| (t.1, t.2.as_str()))
                 .collect();
             found.sort_unstable();
             found.into_iter().take(MAX_LABELS).map(|(_, t)| t.to_string()).collect()
         })
         .collect()
+}
+
+/// The texts drawing `d` draws, each with its number, placed: its own, and those of the blocks that hold any, each placement
+/// of those made only for its texts.
+pub fn texts_of(d: &crate::dxf::Dxf) -> impl Iterator<Item = (usize, crate::dxf::Entity)> + '_ {
+    let is_text = |e: &crate::dxf::Entity| matches!(e.shape, Shape::Text { .. });
+    let own = d.entities.iter().enumerate().filter(move |(_, e)| is_text(e)).map(|(i, e)| (d.own_n(i), e.clone()));
+    let placed = d.inserts.iter().flat_map(move |ins| {
+        let block = d.blocks.get(ins.block);
+        block
+            .into_iter()
+            .flat_map(|b| b.entities.iter().enumerate())
+            .filter(move |(_, e)| is_text(e))
+            .map(move |(j, e)| (ins.entities.start + j, ins.place(e)))
+    });
+    let mut all: Vec<(usize, crate::dxf::Entity)> = own.chain(placed).collect();
+    all.sort_by_key(|(n, _)| *n);
+    all.into_iter()
 }
 
 /// A wall's line: from `start` to `end`, turning `arc` degrees counter-clockwise (0, straight), and the entity it's along.
@@ -441,7 +460,7 @@ pub fn segments(cad: &Cad, ci: &CadImport, picked: &[usize]) -> (Vec<Segment>, u
     let (mut out, mut skipped) = (Vec::new(), 0);
     let at = |c: P2, r: f64, deg: f64| place(c + P2(deg.to_radians().cos(), deg.to_radians().sin()) * r);
     for &n in picked {
-        let Some(e) = cad.dxf().entities.get(n) else { continue };
+        let Some(e) = cad.dxf().entity(n) else { continue };
         match &e.shape {
             Shape::Line(a, b) => out.push(Segment { start: place(*a), end: place(*b), arc: 0.0, entity: n }),
             Shape::Arc { c, r, start, end } => {

@@ -247,9 +247,10 @@ them sooner.
 - **Whole-model rebuilds** after every command are simple and safe, but they set the ceiling on model size. The
   incremental work in 0.5 must keep the "validate in one place" rule: still one `check`, just scoped.
 - **DWG.** Read through acadrust (pure Rust, MPL-2.0, its DWG code ported from ACadSharp, MIT, after the Open Design
-  Alliance's published specification), used unmodified as a separate library behind the apps' `dwg` feature (`crates/dwg`):
-  MPL-2.0's copyleft covers its own files only, so it suits MIT or Apache. Its decoder can't be interrupted, so the apps run it
-  in a child process; a file that brings it down takes only the child. Writing DWG is still open.
+  Alliance's published specification), used unmodified as a separate library through CADCraft's DWG reader (`cadcraft-dwg`,
+  our fork), straight into the import with its blocks kept as blocks: MPL-2.0's copyleft covers its own files only, so it
+  suits MIT or Apache. Its decoder can't be interrupted, so the apps read each new file first in a child process; a file that
+  brings it down takes only the child. Writing DWG is still open.
 - **The family editor's sketch mode** is as big as a small CAD program. Keep text, JSON and form-defined families working
   throughout, so agents and power users never wait on it.
 - **egui** suits a thin UI, but dense dialogs (schedules, V/G, the family editor) push it. Keep the core UI-free so a

@@ -1293,6 +1293,7 @@ impl Vectors {
             linetypes,
             ltscale: 1.0,
             entities,
+            blocks: Vec::new(),
             inserts: Vec::new(),
             extents: None,
             left_out: BTreeMap::new(),

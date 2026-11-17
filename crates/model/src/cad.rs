@@ -1,7 +1,8 @@
 //! CAD drawings brought into a project: Revit's Import CAD and Link CAD. A project holds each drawing once, as a [`Cad`]: the
-//! DXF it was read from, kept whole (deflated, in base64) so a file holds what the user brought in and reads it again as this
-//! build does, and the drawing [`crate::dxf`] reads of it. A `CadImport` element places one on a level, in every plan of it or
-//! in one view only. A linked one remembers its file, and `reload_cad` (and opening the project) reads it again.
+//! file it was read from, a DWG or a DXF, kept whole (deflated, in base64) so a file holds what the user brought in and reads
+//! it again as this build does, and the drawing [`crate::dxf`] reads of it (a DWG through [`crate::dxf::dwg`]), its blocks
+//! held once and placed by reference. A `CadImport` element places one on a level, in every plan of it or in one view only.
+//! A linked one remembers its file, and `reload_cad` (and opening the project) reads it again.
 
 use std::collections::BTreeSet;
 use std::sync::{Arc, OnceLock};
@@ -17,14 +18,9 @@ use crate::geom::P2;
 use crate::pen::Pen;
 use crate::prim::Rgb;
 
-/// What reads a DWG drawing for a session: the DXF the file at a path becomes, and notes on what the read left out, or why it
-/// can't be read. The core reads no DWG of its own; the apps hand their `Session` one (`bimcraft-dwg`, which reads it in a
-/// child process), and a session without one says to save the drawing as DXF.
-pub type DwgReader = Arc<dyn Fn(&std::path::Path) -> Result<(Vec<u8>, Vec<String>), String> + Send + Sync>;
-
 /// Drawings one project may hold.
 pub const MAX_CADS: usize = 64;
-/// What a project's drawings may hold among them, bytes of DXF.
+/// What a project's drawings may hold among them, bytes of their files.
 pub const MAX_HELD: usize = 512 << 20;
 /// Entities a drawing needs before any of it counts as far from the rest: a sparse one is all bulk.
 const BULK_FROM: usize = 20;
@@ -69,8 +65,8 @@ pub struct Cad {
     /// Where it was read from, when it's linked: `reload_cad`, and opening the project, read it again from there.
     path: Option<String>,
     bytes: Arc<Vec<u8>>,
-    /// Whether `bytes` are a page's lines packed ([`packed`]), not a DXF.
-    lines: bool,
+    /// What `bytes` are: a DXF file, a DWG file, or a page's lines packed ([`packed`]).
+    held: Held,
     dxf: Arc<Dxf>,
     /// The box round its bulk, drawing units: all of it but what lies far from the rest.
     bulk: Option<[P2; 2]>,
@@ -78,16 +74,88 @@ pub struct Cad {
     far: usize,
     /// What a project file holds of it, made the first time it's saved.
     packed: Arc<OnceLock<CadFile>>,
-    /// Its entities' boxes and a grid of them, made the first time what lies in a box is asked.
+    /// Its entities' boxes and grids of them, made the first time what lies in a box is asked.
     index: Arc<OnceLock<Index>>,
     /// Its level of detail zoomed out, made the first time it is drawn so: none for a sparse drawing.
     lod: Arc<OnceLock<Option<lod::Lod>>>,
 }
 
-/// A drawing's entities' boxes (x0, y0, x1, y1, drawing units), and a grid over them: each cell the entities whose boxes meet
-/// it, so what lies in a view or under the cursor is found among a few, not looked for among a dense sheet's hundreds of
-/// thousands. One that spans many cells is in none, and always looked at.
+/// What a drawing's bytes are.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Held {
+    Dxf,
+    Dwg,
+    Lines,
+}
+
+/// What lies where in a drawing: a grid of model space's own entities and its placements of blocks, and one of each block's
+/// entities in its own frame, made the first time a placement of it is looked into. A box is looked for among the placements
+/// that reach it, and in each of those among its block's entities that reach the box taken back into the block's frame: a
+/// block placed ten thousand times is gridded once.
 struct Index {
+    /// Model space's own entities (by their place in `entities`), then its placements (by theirs in `inserts`, after them).
+    top: Grid,
+    blocks: Vec<OnceLock<Grid>>,
+}
+
+impl Index {
+    fn new(d: &Dxf) -> Index {
+        let boxed = |e: &Entity| {
+            let [lo, hi] = e.shape.bounds();
+            [lo.0, lo.1, hi.0, hi.1]
+        };
+        let block_boxes: Vec<Option<[P2; 2]>> = d.blocks.iter().map(|b| dxf::union(b.entities.iter().map(|e| e.shape.bounds()))).collect();
+        let none = [f64::NAN; 4];
+        let placed = d.inserts.iter().map(|i| {
+            block_boxes
+                .get(i.block)
+                .copied()
+                .flatten()
+                .and_then(|[lo, hi]| i.xf.boxed(lo, hi))
+                .map_or(none, |[lo, hi]| [lo.0, lo.1, hi.0, hi.1])
+        });
+        Index {
+            top: Grid::new(d.entities.iter().map(boxed).chain(placed).collect()),
+            blocks: d.blocks.iter().map(|_| OnceLock::new()).collect(),
+        }
+    }
+
+    /// The entities of `d` (by their numbers, [`Dxf::entity`]) whose boxes may meet `b`, in the drawing's order: those of a
+    /// placement turned off the axes may lie a little outside it.
+    fn within(&self, d: &Dxf, b: [f64; 4]) -> Vec<usize> {
+        let own = d.entities.len();
+        let mut found = Vec::new();
+        for item in self.top.within(b) {
+            if item < own {
+                found.push(d.own_n(item));
+                continue;
+            }
+            let Some(ins) = d.inserts.get(item - own) else { continue };
+            let (Some(block), Some(grid)) = (d.blocks.get(ins.block), self.blocks.get(ins.block)) else { continue };
+            let Some([lo, hi]) = ins.xf.boxed_back(P2(b[0], b[1]), P2(b[2], b[3])) else { continue };
+            let grid = grid.get_or_init(|| {
+                Grid::new(
+                    block
+                        .entities
+                        .iter()
+                        .map(|e| {
+                            let [lo, hi] = e.shape.bounds();
+                            [lo.0, lo.1, hi.0, hi.1]
+                        })
+                        .collect(),
+                )
+            });
+            found.extend(grid.within([lo.0, lo.1, hi.0, hi.1]).into_iter().map(|j| ins.entities.start + j));
+        }
+        found.sort_unstable();
+        found
+    }
+}
+
+/// Boxes (x0, y0, x1, y1, drawing units), and a grid over them: each cell the boxes that meet it, so what lies in a view or
+/// under the cursor is found among a few, not looked for among a dense sheet's hundreds of thousands. One that spans many
+/// cells is in none, and always looked at.
+struct Grid {
     boxes: Vec<[f64; 4]>,
     lo: P2,
     cell: f64,
@@ -100,16 +168,8 @@ struct Index {
 /// The most cells one entity is put in: past it, it is a wide one.
 const MOST_CELLS: usize = 64;
 
-impl Index {
-    fn new(d: &Dxf) -> Index {
-        let boxes: Vec<[f64; 4]> = d
-            .entities
-            .iter()
-            .map(|e| {
-                let [lo, hi] = e.shape.bounds();
-                [lo.0, lo.1, hi.0, hi.1]
-            })
-            .collect();
+impl Grid {
+    fn new(boxes: Vec<[f64; 4]>) -> Grid {
         let finite = |b: &&[f64; 4]| b.iter().all(|v| v.is_finite());
         let all = boxes.iter().filter(finite).fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |a, b| {
             [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]
@@ -119,7 +179,7 @@ impl Index {
         let cell = ((w * h) / want).sqrt().max(w.max(h) / 4096.0).max(1e-9);
         let (nx, ny) = (((w / cell).ceil() as usize).clamp(1, 4096), ((h / cell).ceil() as usize).clamp(1, 4096));
         let lo = if all[0].is_finite() { P2(all[0], all[1]) } else { P2(0.0, 0.0) };
-        let mut index = Index { boxes: Vec::new(), lo, cell, nx, ny, cells: vec![Vec::new(); nx * ny], wide: Vec::new() };
+        let mut index = Grid { boxes: Vec::new(), lo, cell, nx, ny, cells: vec![Vec::new(); nx * ny], wide: Vec::new() };
         for (i, b) in boxes.iter().enumerate() {
             let Some([x0, y0, x1, y1]) = index.span(b) else {
                 index.wide.push(i as u32);
@@ -150,7 +210,7 @@ impl Index {
         Some([at(b[0], self.lo.0, self.nx), at(b[1], self.lo.1, self.ny), at(b[2], self.lo.0, self.nx), at(b[3], self.lo.1, self.ny)])
     }
 
-    /// The entities whose boxes meet `b`, in the drawing's order.
+    /// The boxes that meet `b`, by their place, in order.
     fn within(&self, b: [f64; 4]) -> Vec<usize> {
         let meets = |i: usize| self.boxes.get(i).is_some_and(|e| e[0] <= b[2] && e[2] >= b[0] && e[1] <= b[3] && e[3] >= b[1]);
         let span = self.span(&b);
@@ -174,7 +234,7 @@ impl Index {
 
 impl std::fmt::Debug for Cad {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Cad({:?}, {} entities)", self.source, self.dxf.entities.len())
+        write!(f, "Cad({:?}, {} entities)", self.source, self.dxf.count())
     }
 }
 
@@ -182,31 +242,48 @@ impl PartialEq for Cad {
     fn eq(&self, other: &Cad) -> bool {
         self.source == other.source
             && self.path == other.path
-            && self.lines == other.lines
+            && self.held == other.held
             && (Arc::ptr_eq(&self.bytes, &other.bytes) || self.bytes == other.bytes)
     }
 }
 
 impl Cad {
-    /// The drawing a DXF file's `bytes` hold, known by `source`, linked to `path` if it's given; or why it can't be held.
+    /// The drawing a DXF or DWG file's `bytes` hold, known by `source`, linked to `path` if it's given; or why it can't be
+    /// held.
     pub fn new(source: &str, path: Option<String>, bytes: Vec<u8>) -> Result<Cad, String> {
-        let dxf = dxf::read(&bytes)?;
-        if dxf.entities.is_empty() {
+        Cad::read(source, path, bytes).map(|(cad, _)| cad)
+    }
+
+    /// [`Cad::new`], with notes on what the reader left out of a DWG.
+    pub fn read(source: &str, path: Option<String>, bytes: Vec<u8>) -> Result<(Cad, Vec<String>), String> {
+        let (dxf, held, notes) = if dxf::dwg::is_dwg(&bytes) {
+            let (d, notes) = dxf::dwg::read(&bytes)?;
+            (d, Held::Dwg, notes)
+        } else {
+            (dxf::read(&bytes)?, Held::Dxf, Vec::new())
+        };
+        if dxf.count() == 0 {
             return Err("it draws nothing in model space".into());
         }
         let (bulk, far) = bulk(&dxf);
-        Ok(Cad {
+        let cad = Cad {
             source: source.chars().take(crate::model::MAX_TEXT).collect(),
             path: path.map(|p| p.chars().take(4096).collect()),
             bytes: Arc::new(bytes),
-            lines: false,
+            held,
             dxf: Arc::new(dxf),
             bulk,
             far,
             packed: Arc::default(),
             index: Arc::default(),
             lod: Arc::default(),
-        })
+        };
+        Ok((cad, notes))
+    }
+
+    /// Whether it holds a DWG file.
+    pub fn is_dwg(&self) -> bool {
+        self.held == Held::Dwg
     }
 
     /// A page's lines a PDF's [`packed`] `bytes` hold, known by `source`; or why they can't be held.
@@ -236,7 +313,7 @@ impl Cad {
             source: source.chars().take(crate::model::MAX_TEXT).collect(),
             path: None,
             bytes: Arc::new(bytes),
-            lines: true,
+            held: Held::Lines,
             dxf,
             bulk,
             far,
@@ -246,10 +323,11 @@ impl Cad {
         }
     }
 
-    /// The entities whose boxes meet the box from `lo` to `hi` (drawing units), by their place in its entities, in its order:
-    /// what a view or the cursor's reach finds of it.
+    /// The entities whose boxes meet the box from `lo` to `hi` (drawing units), by their numbers ([`Dxf::entity`]), in its
+    /// order: what a view or the cursor's reach finds of it. One a placement turned off the axes draws may lie a little
+    /// outside the box.
     pub fn entities_in(&self, lo: P2, hi: P2) -> Vec<usize> {
-        self.index.get_or_init(|| Index::new(&self.dxf)).within([lo.0, lo.1, hi.0, hi.1])
+        self.index.get_or_init(|| Index::new(&self.dxf)).within(&self.dxf, [lo.0, lo.1, hi.0, hi.1])
     }
 
     /// Its level of detail ([`lod`]) and the band of it it is drawn with when a unit of it is `px` pixels: none when it is
@@ -261,11 +339,10 @@ impl Cad {
 
     /// Entity `i`'s box, drawing units, its low corner and its high.
     pub fn entity_box(&self, i: usize) -> Option<[P2; 2]> {
-        let b = self.index.get_or_init(|| Index::new(&self.dxf)).boxes.get(i).copied()?;
-        Some([P2(b[0], b[1]), P2(b[2], b[3])])
+        Some(self.dxf.entity(i)?.shape.bounds())
     }
 
-    /// The bytes it holds: its DXF, or its packed lines.
+    /// The bytes it holds: its file, or its packed lines.
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
@@ -290,7 +367,7 @@ impl Cad {
         &self.dxf
     }
 
-    /// Bytes of DXF it holds.
+    /// Bytes of its file it holds.
     pub fn len(&self) -> usize {
         self.bytes.len()
     }
@@ -317,8 +394,12 @@ impl Cad {
     fn file(&self) -> &CadFile {
         self.packed.get_or_init(|| {
             let held = crate::files::base64(&crate::cloud::deflate(&self.bytes));
-            let (dxf, lines) = if self.lines { (String::new(), Some(held)) } else { (held, None) };
-            CadFile { source: self.source.clone(), path: self.path.clone(), dxf, lines }
+            let (dxf, dwg, lines) = match self.held {
+                Held::Dxf => (held, None, None),
+                Held::Dwg => (String::new(), Some(held), None),
+                Held::Lines => (String::new(), None, Some(held)),
+            };
+            CadFile { source: self.source.clone(), path: self.path.clone(), dxf, dwg, lines }
         })
     }
 
@@ -491,7 +572,7 @@ pub fn kind(shape: &Shape) -> &'static str {
 }
 
 /// The entity of a placed drawing nearest `at` in plan within `reach` mm, of those it shows, and how far it is, mm.
-pub fn nearest<'c>(cad: &'c Cad, ci: &crate::model::CadImport, at: P2, reach: f64) -> Option<(&'c Entity, f64)> {
+pub fn nearest<'c>(cad: &'c Cad, ci: &crate::model::CadImport, at: P2, reach: f64) -> Option<(std::borrow::Cow<'c, Entity>, f64)> {
     let q = crate::model::cad_unplace(ci, at);
     // Mm of plan a unit of the drawing is, along its x and its y: a stretched image's lines are more one way than the other.
     let (kx, ky) = (ci.scale.abs(), (ci.scale * ci.stretch).abs());
@@ -500,12 +581,14 @@ pub fn nearest<'c>(cad: &'c Cad, ci: &crate::model::CadImport, at: P2, reach: f6
     }
     let (rx, ry) = (reach / kx, reach / ky);
     let to_plan = |p: P2| P2(p.0 * kx, p.1 * ky);
-    let entities = &cad.dxf().entities;
     cad.entities_in(P2(q.0 - rx, q.1 - ry), P2(q.0 + rx, q.1 + ry))
         .into_iter()
-        .filter_map(|i| entities.get(i))
+        .filter_map(|i| cad.dxf().entity(i))
         .filter(|e| cad.shows(e, &ci.hidden))
-        .map(|e| (e, distance_scaled(&e.shape, q, &to_plan)))
+        .map(|e| {
+            let d = distance_scaled(&e.shape, q, &to_plan);
+            (e, d)
+        })
         .filter(|(_, d)| *d <= reach)
         .min_by(|a, b| a.1.total_cmp(&b.1))
 }
@@ -530,7 +613,7 @@ fn distance_scaled(shape: &Shape, p: P2, scale: &impl Fn(P2) -> P2) -> f64 {
 /// The box round a drawing's bulk, and how many of its entities lie far from it: past [`FAR`] times the span of the middle
 /// of its entities (the 2nd to the 98th of each hundred, along each axis) beyond it.
 fn bulk(d: &Dxf) -> (Option<[P2; 2]>, usize) {
-    let boxes: Vec<[P2; 2]> = d.entities.iter().map(|e| e.shape.bounds()).collect();
+    let boxes: Vec<[P2; 2]> = d.iter().map(|e| e.shape.bounds()).collect();
     if boxes.len() < BULK_FROM {
         return (dxf::union(boxes), 0);
     }
@@ -552,8 +635,8 @@ fn bulk(d: &Dxf) -> (Option<[P2; 2]>, usize) {
 #[path = "cad_tests.rs"]
 pub(crate) mod tests;
 
-/// How a drawing goes in a project file: its DXF deflated (zlib) and in base64; a PDF page's lines are its packed lines
-/// (`lines`) instead.
+/// How a drawing goes in a project file: its DXF deflated (zlib) and in base64, or its DWG (`dwg`) so; a PDF page's lines are
+/// its packed lines (`lines`) instead.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CadFile {
@@ -562,6 +645,8 @@ struct CadFile {
     path: Option<String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     dxf: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    dwg: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     lines: Option<String>,
 }
@@ -575,12 +660,16 @@ impl Serialize for Cad {
 impl Cad {
     /// A drawing as a file holds it, unpacking no more than `most` bytes.
     fn from_file(f: CadFile, most: usize) -> Result<Cad, String> {
-        let cad = match &f.lines {
-            Some(lines) => {
+        let cad = match (&f.lines, &f.dwg) {
+            (Some(lines), _) => {
                 let bytes = crate::cloud::inflate_of("a page's lines", lines, most.min(dxf::MAX_BYTES))?;
                 Cad::of_lines(&f.source, bytes).map_err(|e| format!("the lines of `{}`: {e}", f.source))?
             }
-            None => {
+            (None, Some(dwg)) => {
+                let bytes = crate::cloud::inflate_of("a CAD drawing", dwg, most.min(dxf::MAX_BYTES))?;
+                Cad::new(&f.source, f.path.clone(), bytes).map_err(|e| format!("CAD drawing `{}`: {e}", f.source))?
+            }
+            (None, None) => {
                 let bytes = crate::cloud::inflate_of("a CAD drawing", &f.dxf, most.min(dxf::MAX_BYTES))?;
                 Cad::new(&f.source, f.path.clone(), bytes).map_err(|e| format!("CAD drawing `{}`: {e}", f.source))?
             }
