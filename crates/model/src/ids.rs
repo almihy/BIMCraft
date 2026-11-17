@@ -25,6 +25,100 @@ pub const FIRST_ID: Id = 100_000;
 /// Where the ids of linked elements begin, in the model the views draw ([`crate::link::seen`]): past any a project makes.
 pub const LINKED: Id = 100_000_000;
 
+/// Where the ids a copy is given in blocks begin ([`IdBlocks`]): past the six-digit ids a project counts up to and its library
+/// counts down from, below [`LINKED`].
+pub const BLOCKS: Id = 1_000_000;
+
+/// What a command that ran out of ids is refused with: the page or job asks for more ([`IdBlocks::give`]) and runs it again.
+pub const OUT_OF_IDS: &str = "needs more element numbers";
+
+/// The ids a copy of a project editing together with others takes for what it makes (elements, and the parts of their shapes),
+/// from blocks a server gives it, so that an element has the same id in every copy and two copies making things at once never
+/// take one id. Not saved: each copy is given its own. Shared by every model a session holds (its undo history among them), so
+/// an id once taken is never taken again, though the element it went to is undone. A copy given none numbers as a project on its
+/// own does ([`Model::fresh_id`](crate::model::Model::fresh_id)).
+#[derive(Clone, Default)]
+pub struct IdBlocks(Arc<std::sync::Mutex<Blocks>>);
+
+#[derive(Default)]
+struct Blocks {
+    /// The blocks not used up yet, each from its first id not taken to its end (past it), in the order they were given.
+    ranges: std::collections::VecDeque<(Id, Id)>,
+    given: bool,
+    /// A block ran out while something was being made: the command that did it is refused, to be run again with more.
+    overrun: bool,
+}
+
+impl IdBlocks {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Blocks> {
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Ids from `start` to `end` (past it) are this copy's to take: within [`BLOCKS`] to [`LINKED`].
+    pub fn give(&self, start: Id, end: Id) -> Result<(), String> {
+        if start < BLOCKS || end > LINKED || start >= end {
+            return Err(format!("ids {start} to {end} are not a block: a block is within {BLOCKS} to {LINKED}"));
+        }
+        let mut b = self.lock();
+        b.ranges.push_back((start, end));
+        b.given = true;
+        Ok(())
+    }
+
+    /// Whether this copy was given blocks: then it takes ids from them alone.
+    pub fn given(&self) -> bool {
+        self.lock().given
+    }
+
+    /// How many ids are left in the blocks.
+    pub fn left(&self) -> u64 {
+        self.lock().ranges.iter().map(|(a, b)| b - a).sum()
+    }
+
+    /// The next id of the blocks that `free` says is free, taken; none, and the overrun noted, when they ran out.
+    pub fn take(&self, free: impl Fn(Id) -> bool) -> Option<Id> {
+        let mut b = self.lock();
+        while let Some((start, end)) = b.ranges.front_mut() {
+            while *start < *end {
+                let id = *start;
+                *start += 1;
+                if free(id) {
+                    if *start == *end {
+                        b.ranges.pop_front();
+                    }
+                    return Some(id);
+                }
+            }
+            b.ranges.pop_front();
+        }
+        b.overrun = true;
+        None
+    }
+
+    /// Whether a block ran out since this was last asked.
+    pub fn take_overrun(&self) -> bool {
+        std::mem::take(&mut self.lock().overrun)
+    }
+
+    /// Whether the two are the same blocks (one session's).
+    pub fn same(&self, other: &IdBlocks) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+/// Every model has its blocks or none; they are not part of what a model is.
+impl PartialEq for IdBlocks {
+    fn eq(&self, _: &IdBlocks) -> bool {
+        true
+    }
+}
+
+impl fmt::Debug for IdBlocks {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "IdBlocks({:?})", self.lock().ranges)
+    }
+}
+
 mod revisions;
 use revisions::Revised;
 pub use revisions::{Revision, RevisionSnapshot};
@@ -547,6 +641,11 @@ impl Elements {
 
     pub fn keys(&self) -> impl DoubleEndedIterator<Item = &Id> {
         self.iter().map(|(id, _)| id)
+    }
+
+    /// The highest id below `below` an element has.
+    pub fn last_below(&self, below: Id) -> Option<Id> {
+        self.chunks.range(..=chunk_of(below)).rev().find_map(|(_, c)| c.range(..below).next_back().map(|(id, _)| *id))
     }
 
     pub fn range(&self, r: std::ops::RangeFrom<Id>) -> impl DoubleEndedIterator<Item = (&Id, &Element)> {

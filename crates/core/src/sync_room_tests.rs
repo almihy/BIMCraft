@@ -21,6 +21,8 @@ fn run(s: &mut Session, id: &str, p: Value) -> Value {
 struct Held {
     elements: BTreeMap<Guid, String>,
     project: BTreeMap<String, String>,
+    /// Each element's id, as the room keeps it beside the element.
+    ids: BTreeMap<Guid, u64>,
 }
 
 impl Held {
@@ -29,6 +31,11 @@ impl Held {
             match v {
                 Some(t) => self.elements.insert(*g, t.clone()),
                 None => self.elements.remove(g),
+            };
+            match c.ids.get(g) {
+                Some(id) if v.is_some() => self.ids.insert(*g, *id),
+                _ if v.is_none() => self.ids.remove(g),
+                _ => None,
             };
         }
         for (k, v) in &c.project {
@@ -84,8 +91,12 @@ impl Copy {
         let mut c = Changes::default();
         for g in self.heard.elements.keys().chain(room.elements.keys()).collect::<BTreeSet<_>>() {
             let (was, now) = (self.heard.elements.get(g), room.elements.get(g));
-            if was != now && only(&g.to_string()) {
+            let id_differs = now.is_some() && self.heard.ids.get(g) != room.ids.get(g);
+            if (was != now || id_differs) && only(&g.to_string()) {
                 c.elements.insert(*g, now.cloned());
+                if let Some(id) = room.ids.get(g).filter(|_| now.is_some()) {
+                    c.ids.insert(*g, *id);
+                }
             }
         }
         for k in self.heard.project.keys().chain(room.project.keys()).collect::<BTreeSet<_>>() {
@@ -213,6 +224,7 @@ fn assert_beta_and_the_wall_everywhere(copies: &[&Copy], room: &Held, beta: Guid
         elements: room.elements.iter().map(|(g, t)| (*g, Some(t.clone()))).collect(),
         project: room.project.iter().map(|(k, t)| (k.clone(), Some(t.clone()))).collect(),
         complete: true,
+        ..Changes::default()
     };
     let got = fresh.merge(&all, &BTreeSet::new()).unwrap();
     assert!(got.refused.is_empty(), "{:?}", got.refused);
@@ -585,4 +597,146 @@ fn three_copies_and_the_server_end_alike_when_one_takes_a_type_out_another_place
         assert!(!x.model().elements.contains_key(junk), "the wall that waits is in none");
         assert!(x.s.waiting.contains_key(&junk), "and waits in each");
     }
+}
+
+
+// ---- The same ids in every copy: each copy given blocks of ids makes what it makes under ids no other takes, and an element
+// has its id with it in the room (Arqiflow's docs/superpowers/specs/2026-11-17-agent-model-work-on-the-pc-design.md, Phase 1).
+
+fn made_id(v: &Value) -> u64 {
+    v["ids"][0].as_u64().or_else(|| v["id"].as_u64()).unwrap_or_else(|| panic!("no id in {v}"))
+}
+
+/// Every element both copies have has one id in both, and it is the room's.
+fn same_ids(a: &Copy, b: &Copy, room: &Held) {
+    for (id, e) in a.model().elements.iter() {
+        if sync::own(e) {
+            continue;
+        }
+        let g = a.model().elements.guid(*id).unwrap();
+        assert_eq!(b.model().elements.id(g), Some(*id), "{} {g}", e.category());
+        if let Some(r) = room.ids.get(&g) {
+            assert_eq!(r, id, "the room's id of {} {g}", e.category());
+        }
+    }
+}
+
+#[test]
+fn two_copies_given_blocks_make_walls_at_once_under_one_id_each_everywhere() {
+    let (mut a, mut b, mut room) = two();
+    a.s.give_ids(1_000_000, 1_001_000).unwrap();
+    b.s.give_ids(1_001_000, 1_002_000).unwrap();
+    let wa = made_id(&a.run("wall", json!({"points": [[0, 0], [6000, 0]]})));
+    let wb = made_id(&b.run("wall", json!({"points": [[0, 4000], [6000, 4000]]})));
+    assert!((1_000_000..1_001_000).contains(&wa), "{wa}");
+    assert!((1_001_000..1_002_000).contains(&wb), "{wb}");
+    a.push(&mut room);
+    b.push(&mut room);
+    settle(&mut [&mut a, &mut b], &mut room);
+    let (ga, gb) = (a.model().elements.guid(wa).unwrap(), b.model().elements.guid(wb).unwrap());
+    assert_eq!(b.model().elements.id(ga), Some(wa), "a's wall has a's id in b");
+    assert_eq!(a.model().elements.id(gb), Some(wb), "b's wall has b's id in a");
+    assert_eq!((room.ids.get(&ga), room.ids.get(&gb)), (Some(&wa), Some(&wb)));
+    same_ids(&a, &b, &room);
+    same_ids(&b, &a, &room);
+}
+
+#[test]
+fn a_command_that_runs_out_of_its_ids_is_refused_and_runs_once_given_more() {
+    let (mut a, _, _) = two();
+    a.s.give_ids(1_000_000, 1_000_001).unwrap();
+    assert_eq!(made_id(&a.run("wall", json!({"points": [[0, 0], [6000, 0]]}))), 1_000_000);
+    assert_eq!(a.s.ids_left(), 0);
+    let before = Arc::clone(&a.s.model);
+    let err = a.s.execute("wall", &json!({"points": [[0, 4000], [6000, 4000]]})).unwrap_err();
+    assert!(err.contains(crate::ids::OUT_OF_IDS), "{err}");
+    assert!(Arc::ptr_eq(&before, &a.s.model), "a refused command changes nothing");
+    a.s.give_ids(1_005_000, 1_006_000).unwrap();
+    assert_eq!(made_id(&a.run("wall", json!({"points": [[0, 4000], [6000, 4000]]}))), 1_005_000);
+}
+
+#[test]
+fn an_id_once_taken_is_not_taken_again_after_undo() {
+    let (mut a, _, _) = two();
+    a.s.give_ids(1_000_000, 1_001_000).unwrap();
+    let w = made_id(&a.run("wall", json!({"points": [[0, 0], [6000, 0]]})));
+    a.run("undo", json!({}));
+    assert!(!a.model().elements.contains_key(w));
+    let again = made_id(&a.run("wall", json!({"points": [[0, 0], [6000, 0]]})));
+    assert_ne!(again, w, "the undone wall's id named it to the others: it is not given to another");
+}
+
+#[test]
+fn an_element_here_under_another_id_than_the_rooms_moves_to_the_rooms() {
+    let (mut a, mut b, mut room) = two();
+    // A copy that numbers what it makes itself (given no blocks, as before ids were shared).
+    let w = made_id(&a.run("wall", json!({"points": [[0, 0], [6000, 0]]})));
+    assert!(w < crate::ids::BLOCKS);
+    let g = a.model().elements.guid(w).unwrap();
+    a.push(&mut room);
+    b.pull_all(&mut room);
+    assert_eq!(b.model().elements.id(g), Some(w));
+    // The room says another id for it: every copy moves it there.
+    room.ids.insert(g, 1_007_000);
+    a.pull_all(&mut room);
+    b.pull_all(&mut room);
+    for x in [&a, &b] {
+        assert_eq!(x.model().elements.id(g), Some(1_007_000));
+        assert!(!x.model().elements.contains_key(w));
+    }
+    // Nothing more to tell: the move is not sent back as a change of its own.
+    a.push(&mut room);
+    assert_eq!(room.ids.get(&g), Some(&1_007_000));
+}
+
+#[test]
+fn what_a_copy_makes_below_the_highest_id_is_counted_and_made_in_its_phase() {
+    let (mut a, mut b, mut room) = two();
+    b.s.give_ids(1_500_000, 1_501_000).unwrap();
+    b.run("wall", json!({"points": [[0, 8000], [6000, 8000]]}));
+    b.push(&mut room);
+    a.pull_all(&mut room);
+    a.s.give_ids(1_000_000, 1_001_000).unwrap();
+    let phase = a.model().phases.last().cloned().expect("a new project has phases");
+    a.s.phase = Some(phase.clone());
+    let w = made_id(&a.run("wall", json!({"points": [[0, 0], [6000, 0]]})));
+    assert!(w < 1_500_000, "below b's wall: {w}");
+    let made: Vec<_> = a.s.undo.last().unwrap().0.made.clone();
+    assert_eq!(made.iter().map(|(_, n)| n).sum::<usize>(), 1, "the step made one element: {made:?}");
+    assert_eq!(made[0].0, a.model().elements.get(w).unwrap().category());
+    if phase != a.model().phases[0] {
+        assert_eq!(a.model().elements.get(w).unwrap().params().and_then(|p| p.get(crate::phasing::CREATED)), Some(&json!(phase)));
+    }
+}
+
+#[test]
+fn a_floors_sketch_lines_have_the_same_ids_in_every_copy() {
+    let (mut a, mut b, mut room) = two();
+    a.s.give_ids(1_000_000, 1_001_000).unwrap();
+    b.s.give_ids(1_001_000, 1_002_000).unwrap();
+    let f = made_id(&a.run("floor", json!({"sketch": [[[0, 0], [4000, 0]], [[4000, 0], [4000, 4000]], [[4000, 4000], [0, 4000]], [[0, 4000], [0, 0]]]})));
+    let lines: Vec<u64> = a.model().elements.get(f).unwrap().sketch().map(|l| l.iter().map(|x| x.id).collect()).unwrap_or_default();
+    assert!(!lines.is_empty(), "a floor drawn by its sketch has its lines");
+    assert!(lines.iter().all(|id| (1_000_000..1_001_000).contains(id)), "from a's block: {lines:?}");
+    // b makes one at the same moment: its lines' ids are b's.
+    let fb = made_id(&b.run("floor", json!({"sketch": [[[0, 6000], [4000, 6000]], [[4000, 6000], [4000, 9000]], [[4000, 9000], [0, 9000]], [[0, 9000], [0, 6000]]]})));
+    a.push(&mut room);
+    b.push(&mut room);
+    settle(&mut [&mut a, &mut b], &mut room);
+    let g = a.model().elements.guid(f).unwrap();
+    let there: Vec<u64> = b.model().elements.get(g).unwrap().sketch().map(|l| l.iter().map(|x| x.id).collect()).unwrap_or_default();
+    assert_eq!(there, lines, "a's floor's lines have a's ids in b");
+    let gb = b.model().elements.guid(fb).unwrap();
+    let theirs = |m: &Model| -> Vec<u64> { m.elements.get(gb).unwrap().sketch().map(|l| l.iter().map(|x| x.id).collect()).unwrap_or_default() };
+    assert_eq!(theirs(a.model()), theirs(b.model()), "and b's floor's lines b's in a");
+    same_ids(&a, &b, &room);
+}
+
+#[test]
+fn changes_naming_an_id_outside_a_projects_are_not_read() {
+    let g = Guid::new();
+    let text = json!({"elements": {g.to_string(): "{}"}, "ids": {g.to_string(): 5}}).to_string();
+    assert!(Changes::read(&text).is_err());
+    let text = json!({"elements": {}, "ids": {g.to_string(): 1_000_000}}).to_string();
+    assert!(Changes::read(&text).is_err(), "an id of an element the changes don't put in");
 }
