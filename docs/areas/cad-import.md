@@ -52,7 +52,10 @@ a child process of the program itself (`cadcraft_dwg::worker`: `use_own_worker`,
 so a file that brings the decoder down (an allocation it can't make, a stack overflow) takes only the child. The browser's
 engine reads it in its own instance: a panic there ends the instance (WebAssembly has no unwinding), which a hostile file could do.
 
-The project holds the DWG itself (`CadFile::dwg`, deflated and in base64; `Cad::is_dwg`) and reads it again when it opens, so a
+A drawing read is kept by its file's hash (the last few, `cad::READ`), so the same file read again (the project opened again,
+its undo history put back, a change from another copy) shares the drawing, its grid and its level of detail; and the walk of a
+project file for keys this build doesn't know (`lenient::unknown`) reads no drawing. The project holds the DWG itself
+(`CadFile::dwg`, deflated and in base64; `Cad::is_dwg`) and reads it again when it opens, so a
 project written with one is format 28 (`DWG_FORMAT`); a project from before holds the DXF it was given, and reads as it did.
 Tests make their DWG with CADCraft's writer (`dwg::sample`), since Autodesk's are never committed;
 `apps/bimcraft-cli/tests/dwg.rs` drives the worker.
