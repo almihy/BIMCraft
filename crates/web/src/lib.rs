@@ -1,6 +1,9 @@
 //! BIMCraft's engine in the browser: a session the page sends commands to, as the CLI and MCP do.
 use std::sync::Arc;
 
+mod drawing;
+pub use drawing::{Drawing, Indexed, Picture};
+
 use bimcraft_core::engine::Session;
 use bimcraft_core::sample::SAMPLE;
 use bimcraft_core::{gltf, ifc, link, render};
