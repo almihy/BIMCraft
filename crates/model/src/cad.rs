@@ -20,6 +20,10 @@ use crate::prim::Rgb;
 
 /// Drawings one project may hold.
 pub const MAX_CADS: usize = 64;
+/// The drawings last read ([`Cad::read`]), by their file's hash: a file read again is not read again, an office DWG taking
+/// seconds. The last few are kept; they are shared with the projects holding them.
+static READ: std::sync::Mutex<Vec<(u64, Cad, Vec<String>)>> = std::sync::Mutex::new(Vec::new());
+const KEPT_READS: usize = 4;
 /// What a project's drawings may hold among them, bytes of their files.
 pub const MAX_HELD: usize = 512 << 20;
 /// Entities a drawing needs before any of it counts as far from the rest: a sparse one is all bulk.
@@ -256,6 +260,32 @@ impl Cad {
 
     /// [`Cad::new`], with notes on what the reader left out of a DWG.
     pub fn read(source: &str, path: Option<String>, bytes: Vec<u8>) -> Result<(Cad, Vec<String>), String> {
+        // The same file read again (the project opened again, its undo history put back, a change from another copy, a
+        // reload): the drawing read last time, with its grid and level of detail, as the file is the same.
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            bytes.hash(&mut h);
+            h.finish()
+        };
+        if let Ok(kept) = READ.lock()
+            && let Some((_, cad, notes)) = kept.iter().find(|(k, cad, _)| *k == key && cad.same_bytes(&bytes))
+        {
+            let mut cad = cad.clone();
+            cad.source = source.chars().take(crate::model::MAX_TEXT).collect();
+            cad.path = path.map(|p| p.chars().take(4096).collect());
+            cad.packed = Arc::default();
+            return Ok((cad, notes.clone()));
+        }
+        let (cad, notes) = Cad::read_now(source, path, bytes)?;
+        if let Ok(mut kept) = READ.lock() {
+            kept.insert(0, (key, cad.clone(), notes.clone()));
+            kept.truncate(KEPT_READS);
+        }
+        Ok((cad, notes))
+    }
+
+    fn read_now(source: &str, path: Option<String>, bytes: Vec<u8>) -> Result<(Cad, Vec<String>), String> {
         let (dxf, held, notes) = if dxf::dwg::is_dwg(&bytes) {
             let (d, notes) = dxf::dwg::read(&bytes)?;
             (d, Held::Dwg, notes)
@@ -681,7 +711,13 @@ impl Cad {
 
 impl<'de> Deserialize<'de> for Cad {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Cad, D::Error> {
-        Cad::from_file(CadFile::deserialize(d)?, dxf::MAX_BYTES).map_err(serde::de::Error::custom)
+        let f = CadFile::deserialize(d)?;
+        // A file looked into for keys this build doesn't know (`lenient::unknown`) has its drawings read by the strict
+        // reading that follows, not twice: an office DWG takes seconds.
+        if crate::lenient::walking() {
+            return Ok(Cad::drawn(&f.source, Dxf::default(), Vec::new()));
+        }
+        Cad::from_file(f, dxf::MAX_BYTES).map_err(serde::de::Error::custom)
     }
 }
 
@@ -704,7 +740,13 @@ pub(crate) fn deserialize_cads<'de, D: serde::Deserializer<'de>>(d: D) -> Result
                     return Err(A::Error::custom(format!("the file holds more than {MAX_CADS} CAD drawings, all a project may hold")));
                 }
                 let left = MAX_HELD.saturating_sub(held);
-                let cad = Cad::from_file(a.next_value()?, left).map_err(A::Error::custom)?;
+                let f: CadFile = a.next_value()?;
+                // Looked into for unknown keys only (`lenient::unknown`): read by the strict reading that follows.
+                if crate::lenient::walking() {
+                    cads.insert(name, Cad::drawn(&f.source, Dxf::default(), Vec::new()));
+                    continue;
+                }
+                let cad = Cad::from_file(f, left).map_err(A::Error::custom)?;
                 held += cad.len();
                 cads.insert(name, cad);
             }

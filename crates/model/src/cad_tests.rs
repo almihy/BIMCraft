@@ -70,6 +70,21 @@ pub(crate) fn dense(n: usize, size: P2) -> Dxf {
 }
 
 #[test]
+fn a_file_read_again_is_the_drawing_read_before_and_a_project_holding_it_reads_it_once() {
+    let bytes = crate::dxf::dwg::sample::plan().unwrap();
+    let (a, _) = Cad::read("a.dwg", None, bytes.clone()).unwrap();
+    let (b, _) = Cad::read("b.dwg", Some("b.dwg".into()), bytes).unwrap();
+    assert!(Arc::ptr_eq(&a.dxf, &b.dxf) && Arc::ptr_eq(&a.index, &b.index), "read once, shared");
+    assert_eq!((b.source(), b.path(), b.is_dwg()), ("b.dwg", Some("b.dwg"), true));
+    // Held in a project file and read back: the same drawing, and the walk for unknown keys reads none.
+    let text = serde_json::to_string(&a).unwrap();
+    assert!(text.contains("\"dwg\"") && !text.contains("\"dxf\""), "held as the DWG it is");
+    let back: Cad = serde_json::from_str(&text).unwrap();
+    assert!(Arc::ptr_eq(&a.dxf, &back.dxf) && back.is_dwg());
+    assert!(crate::lenient::unknown::<Cad>(&serde_json::from_str(&text).unwrap()).is_empty());
+}
+
+#[test]
 fn what_lies_in_a_box_is_what_a_scan_of_every_entity_finds() {
     // Small entities, wide ones (past the most cells one is put in), far outliers, a point, and one that isn't a number's.
     let mut seed = 42;

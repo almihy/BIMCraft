@@ -377,8 +377,8 @@ impl Insert {
     }
 }
 
-/// A DXF file read: what it draws, in its own unit.
-#[derive(Clone, Debug, PartialEq)]
+/// A DXF file read: what it draws, in its own unit. The default draws nothing.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Dxf {
     /// Millimetres to the drawing's unit, from `$INSUNITS`; none when the file is unitless, or in a unit no building is
     /// drawn in, and the user says.
