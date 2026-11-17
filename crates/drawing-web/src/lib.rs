@@ -1,7 +1,8 @@
 //! The agent's drawings (Arqiflow's `drawing_read` and `file_view`, docs/superpowers/specs/2026-11-16-dwg-drawings-design.md in
 //! Arqiflow, section 3): a DWG or DXF read once into an index by CADCraft's reader (`cadcraft-index`, from our fork), and then
-//! asked of from that index, kept open in an engine session between questions. Reading a large office drawing this way keeps
-//! its blocks as blocks: nothing is exploded but what a question asks for.
+//! asked of from that index, kept open between questions. It runs in the person's own Arqiflow (a Web Worker of a browser
+//! tab or the desktop app's hidden page: Arqiflow's web/lib/compute/worker.ts), as a WebAssembly of its own, small beside the
+//! engine's. Reading a large office drawing this way keeps its blocks as blocks: nothing is exploded but what a question asks for.
 //!
 //! The closed outlines a drawing's lines make are found as `cad_outlines` finds them in a model: the lines asked for, blocks
 //! exploded, go to this engine's own Pick Lines ([`bimcraft_core::cad::outlines`]), so the agent gets the same outlines
