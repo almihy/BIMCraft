@@ -740,3 +740,75 @@ fn changes_naming_an_id_outside_a_projects_are_not_read() {
     let text = json!({"elements": {}, "ids": {g.to_string(): 1_000_000}}).to_string();
     assert!(Changes::read(&text).is_err(), "an id of an element the changes don't put in");
 }
+
+// ---- Review of the id blocks (review-id-blocks): what a copy given blocks must not take from them, and what it must give the
+// room's id.
+
+/// A box of walls saved to a file of its own: the path.
+fn saved_house(name: &str) -> String {
+    let mut s = Session::new();
+    run(&mut s, "wall", json!({"points": [[0, 0], [8000, 0], [8000, 6000], [0, 6000]], "closed": true}));
+    let path = std::env::temp_dir().join(format!("bimcraft-ids-{name}-{}.bimcraft", std::process::id()));
+    let path = path.to_string_lossy().into_owned();
+    run(&mut s, "save", json!({"path": path}));
+    path
+}
+
+#[test]
+fn what_a_link_builds_in_the_views_takes_no_id_of_the_blocks() {
+    let (mut a, _, _) = two();
+    a.s.give_ids(1_000_000, 1_001_000).unwrap();
+    let path = saved_house("link");
+    a.run("link", json!({"path": path, "name": "Architecture"}));
+    let _ = std::fs::remove_file(&path);
+    let left = a.s.ids_left();
+    let seen = crate::link::seen(&a.s.model);
+    let linked: Vec<u64> = seen.elements.iter().filter(|(_, e)| matches!(e, Element::Wall(_))).map(|(id, _)| *id).collect();
+    assert_eq!(linked.len(), 4);
+    assert!(linked.iter().all(|id| crate::link::is_linked(*id)), "linked walls are told by their ids: {linked:?}");
+    assert_eq!(a.s.ids_left(), left, "drawing the link takes none of the copy's ids");
+}
+
+#[test]
+fn a_wall_that_waited_for_its_type_is_given_the_rooms_id() {
+    let (mut a, mut b, mut room) = two();
+    a.s.give_ids(1_000_000, 1_001_000).unwrap();
+    b.s.give_ids(1_001_000, 1_002_000).unwrap();
+    a.run("type", json!({"category": "wall", "name": "Ghost", "thickness": 250}));
+    let w = made_id(&a.run("wall", json!({"points": [[0, 0], [6000, 0]], "type": "Ghost"})));
+    let g = a.model().elements.guid(w).unwrap();
+    a.push(&mut room);
+    // The wall reaches b before its type: it waits, then comes in once the type does.
+    let gs = g.to_string();
+    b.pull(&mut room, |k| k == gs);
+    assert!(b.s.waiting.contains_key(&g));
+    b.pull_all(&mut room);
+    assert!(b.s.waiting.is_empty());
+    assert_eq!(b.model().elements.id(g), Some(w), "the wall has a's id in b too");
+}
+
+#[test]
+fn a_dry_run_gives_back_the_ids_it_took_and_the_script_then_makes_what_it_said() {
+    let (mut a, _, _) = two();
+    a.s.give_ids(1_000_000, 1_001_000).unwrap();
+    let left = a.s.ids_left();
+    let script = "wall {\"points\": [[0, 0], [6000, 0]]}";
+    let r = a.s.script_dry_run(script).unwrap();
+    let said = r["made"][0]["id"].as_u64().unwrap();
+    assert_eq!(a.s.ids_left(), left, "a dry run leaves the next id as it was");
+    a.s.script(script).unwrap();
+    let made: Vec<u64> = a.model().elements.iter().filter(|(_, e)| matches!(e, Element::Wall(_))).map(|(id, _)| *id).collect();
+    assert_eq!(made, [said], "the script makes what its dry run said");
+}
+
+#[test]
+fn what_is_inserted_from_another_project_takes_ids_of_the_blocks() {
+    let (mut a, _, _) = two();
+    a.s.give_ids(1_000_000, 1_001_000).unwrap();
+    let path = saved_house("insert");
+    let got = a.run("insert", json!({"path": path}));
+    let _ = std::fs::remove_file(&path);
+    let ids: Vec<u64> = got["ids"].as_object().unwrap().values().map(|v| v.as_u64().unwrap()).collect();
+    assert!(!ids.is_empty());
+    assert!(ids.iter().all(|id| (1_000_000..1_001_000).contains(id)), "another project's ids would be another copy's: {ids:?}");
+}
