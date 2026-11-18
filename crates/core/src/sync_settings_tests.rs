@@ -250,7 +250,8 @@ fn a_name_with_a_slash_or_a_percent_travels_and_comes_back_as_it_was() {
     run(&mut a, "material", json!({"name": "A/B %2F", "color": "#123456"}));
     let c = sync::changes(&before, &a.model).unwrap();
     // Names are values, not parts of keys: no key has a slash of a name in it.
-    assert!(c.project.keys().all(|k| !k.contains("200")), "{:?}", c.project.keys());
+    // (A key holds its entry's GUID, which is random: the name is looked for whole, not a few of its digits.)
+    assert!(c.project.keys().all(|k| !k.contains("200/50") && !k.contains("Wall 200")), "{:?}", c.project.keys());
     assert_eq!(c.project[&name_key(&a.model, "Wall 200/50 100%")], Some("\"Wall 200/50 100%\"".into()));
     send(&before, &a, &mut b);
     assert_eq!(thickness(&b.model, "Wall 200/50 100%"), 250.0);
