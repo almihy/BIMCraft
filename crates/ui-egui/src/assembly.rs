@@ -372,7 +372,9 @@ pub(crate) fn wrapping_label(w: Wrapping, inserts: bool) -> &'static str {
 
 /// A list of the wrappings: all four at inserts, without Both at ends.
 pub(crate) fn wrapping(ui: &mut Ui, salt: &str, label: UiId, value: &mut Wrapping, inserts: bool) {
-    let c = crate::icons::combo(salt).selected_text(t(wrapping_label(*value, inserts))).width(140.0).show_ui(ui, |ui| {
+    // As wide as its cell in Type Properties' table; in Edit Assembly, as its lists of functions.
+    let width = if ui.available_width() < 400.0 { ui.available_width() } else { 160.0 };
+    let c = crate::icons::combo(salt).selected_text(t(wrapping_label(*value, inserts))).width(width).show_ui(ui, |ui| {
         for w in Wrapping::ALL.into_iter().filter(|w| inserts || *w != Wrapping::Both) {
             if ui.selectable_label(*value == w, t(wrapping_label(w, inserts))).clicked() {
                 *value = w;
