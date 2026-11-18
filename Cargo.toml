@@ -50,6 +50,9 @@ cadcraft-dwg = { git = "https://github.com/almihy/cadcraft", rev = "7362fbaf4076
 # A drawing (DWG or DXF) read once into an index and asked of, for the agent (Arqiflow's drawing_read): CADCraft's, from
 # our fork, the same as above.
 cadcraft-index = { git = "https://github.com/almihy/cadcraft", rev = "7362fbaf4076586dcf13d46a6e90788235b50ba6" }
+# A drawing written as DWG (acadrust's own writer) or DXF, for Arqiflow's server, which runs no converter of its own: the
+# same fork and commit as above, without the PDF writer.
+cadcraft-io = { git = "https://github.com/almihy/cadcraft", rev = "7362fbaf4076586dcf13d46a6e90788235b50ba6", default-features = false }
 # Without their default features, so that the browser's build leaves egui's own fonts out (ui-egui's `egui-fonts`): each
 # member asks for what it uses.
 egui = { version = "0.36", default-features = false }
