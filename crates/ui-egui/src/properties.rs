@@ -910,6 +910,9 @@ pub(crate) struct TypeDialog {
     /// Its identity data, as typed and as it was: changed, they make the type's.
     identity: Vec<IdentityField>,
     identity_were: Vec<IdentityField>,
+    /// A wall type's parameters as Revit's Type Properties has them, with its Edit Assembly window, as typed and as they were.
+    wall: Option<crate::assembly::WallForm>,
+    wall_was: Option<crate::assembly::WallForm>,
 }
 
 impl TypeDialog {
@@ -920,7 +923,10 @@ impl TypeDialog {
             (t.is_some_and(|t| t.round), t.map(|t| t.material.clone()).unwrap_or_default())
         });
         let identity = identity_fields(m.identity_of(category, &name));
+        let wall = (category == "wall").then(|| crate::assembly::WallForm::of(m, &name));
         TypeDialog {
+            wall_was: wall.clone(),
+            wall,
             category,
             name,
             elements,
@@ -946,6 +952,8 @@ impl TypeDialog {
         let leaf = json!(DOOR_THICKNESS);
         type_rows(category)
             .iter()
+            // A wall's Width is what its layers add up to, shown and not typed.
+            .filter(|_| category != "wall")
             .map(|(g, k, l)| {
                 let v = &type_json(&types, category, name)[k];
                 // A door type that says no thickness has Revit's Single-Flush's.
@@ -957,6 +965,10 @@ impl TypeDialog {
 
     /// A layered type's layers, as typed: one structure layer as thick as it, without any.
     fn layers(m: &Model, category: &str, name: &str) -> Vec<LayerRow> {
+        // A wall's are Edit Assembly's.
+        if category == "wall" {
+            return Vec::new();
+        }
         let Some((.., thickness, layers)) = m.layered_types().find(|(c, n, ..)| *c == category && *n == name) else { return Vec::new() };
         let typed = |l: &Layer| (l.function, l.material.clone(), m.units.length(l.thickness), l.variable);
         match layers {
@@ -969,7 +981,7 @@ impl TypeDialog {
     /// layers make the type, and how thick it is; `copy` sends them anyway, as a duplicate has them.
     fn params(&self, name: &str, units: Units, copy: bool, duplicate: bool) -> Result<Value, String> {
         let mut p = json!({"category": self.category, "name": name});
-        let layered = copy || self.layers != self.layers_were;
+        let layered = self.wall.is_none() && (copy || self.layers != self.layers_were);
         if layered {
             let layers = self.layers.iter().map(|(function, material, typed, variable)| {
                 let thickness = units.parse(typed).ok_or_else(|| tf("{}: `{}` is not a length", &[t("Thickness"), typed]))?;
@@ -993,6 +1005,9 @@ impl TypeDialog {
         }
         if let Some(o) = p.as_object_mut() {
             o.extend(identity_params(&self.identity, &self.identity_were, duplicate)?);
+            if let (Some(wall), Some(was)) = (&self.wall, &self.wall_was) {
+                o.extend(wall.params(was, units, copy, duplicate)?);
+            }
         }
         Ok(p)
     }
@@ -2226,8 +2241,13 @@ impl BimApp {
                 let round = d.shape.as_ref().is_some_and(|(round, _)| *round);
                 // The groups in the order their first row comes; a run's roundness is a dimension, its material its own group.
                 let mut groups: Vec<&str> = Vec::new();
-                let extra =
-                    [(layered, "Construction"), (d.shape.is_some(), "Dimensions"), (d.shape.is_some(), msg!("Materials and Finishes"))];
+                let wall = d.wall.is_some();
+                let extra = [
+                    (layered, "Construction"),
+                    (wall, msg!("Graphics")),
+                    (d.shape.is_some(), "Dimensions"),
+                    (d.shape.is_some() || wall, msg!("Materials and Finishes")),
+                ];
                 for g in d.fields.iter().map(|f| f.0).chain(extra.iter().filter(|(on, _)| *on).map(|(_, g)| *g)) {
                     if !groups.contains(&g) {
                         groups.push(g);
@@ -2248,7 +2268,9 @@ impl BimApp {
                             ("Materials and Finishes", Some((_, material))) => tb.pick(t("Material"), material, &materials),
                             _ => {}
                         }
-                        if g == "Construction" && layered {
+                        if let Some(w) = &mut d.wall {
+                            wall_rows(tb, g, w, &model);
+                        } else if g == "Construction" && layered {
                             let (out, inward) = if d.category == "wall" { (msg!("Out"), msg!("In")) } else { ("Up", "Down") };
                             let variable = matches!(d.category, "floor" | "roof");
                             tb.full(|ui| layer_editor(ui, &mut d.layers, model.units, &materials, (out, inward), variable));
@@ -2262,6 +2284,10 @@ impl BimApp {
                 (ok, cancel, apply) = typeprops::foot(ui);
             });
         });
+        if let Some(w) = &mut d.wall {
+            let materials: Vec<String> = model.materials.keys().cloned().collect();
+            w.window(ctx, &d.name, model.units, &materials);
+        }
         let switch = match &asked {
             Some(Head::Switch(n)) => Some(n.clone()),
             _ => None,
@@ -2553,6 +2579,40 @@ impl BimApp {
         if !(close || r.should_close()) {
             self.materials_dialog = Some(d);
         }
+    }
+}
+
+/// A wall type's rows of Type Properties' group `g`, as Revit's: under Construction its Structure (Edit… opens Edit
+/// Assembly), Wrapping at Inserts and at Ends, its Width and its Function; under Graphics its Coarse Scale Fill Pattern and
+/// Color; under Materials and Finishes its Structural Material.
+fn wall_rows(tb: &mut typeprops::Table, g: &str, w: &mut crate::assembly::WallForm, m: &Model) {
+    use bimcraft_core::model::WallFunction;
+    match g {
+        "Construction" => {
+            if tb.row(t("Structure"), |ui, l| wide_button(ui, t("Edit…")).labelled_by(l).clicked()) == Some(true) {
+                w.edit();
+            }
+            tb.row(t("Wrapping at Inserts"), |ui, l| crate::assembly::wrapping(ui, "type-wrap-inserts", l, &mut w.assembly.wrap_inserts, true));
+            tb.row(t("Wrapping at Ends"), |ui, l| crate::assembly::wrapping(ui, "type-wrap-ends", l, &mut w.assembly.wrap_ends, false));
+            let width = w.assembly.thickness(m.units).map_or_else(|| "—".to_string(), |x| m.units.length(x));
+            tb.shown(t("Width"), &width);
+            let functions: Vec<String> = WallFunction::ALL.iter().map(|f| t(f.label()).to_string()).collect();
+            let mut picked = t(w.function.label()).to_string();
+            tb.pick(t("Function"), &mut picked, &functions);
+            if let Some(f) = WallFunction::ALL.into_iter().find(|f| t(f.label()) == picked) {
+                w.function = f;
+            }
+        }
+        "Graphics" => {
+            let none = t("<None>").to_string();
+            let patterns: Vec<String> = std::iter::once(none.clone()).chain(m.fill_patterns.keys().cloned()).collect();
+            let mut picked = if w.coarse_fill.is_empty() { none.clone() } else { w.coarse_fill.clone() };
+            tb.pick(t("Coarse Scale Fill Pattern"), &mut picked, &patterns);
+            w.coarse_fill = if picked == none { String::new() } else { picked };
+            tb.color(t("Coarse Scale Fill Color"), &mut w.coarse_color);
+        }
+        "Materials and Finishes" => tb.shown(t("Structural Material"), t(w.assembly.structural_material())),
+        _ => {}
     }
 }
 

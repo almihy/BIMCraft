@@ -3260,17 +3260,38 @@ fn a_selected_wall_attaches_flips_and_takes_another_location_line() {
 }
 
 #[test]
-fn type_properties_build_a_wall_types_layers() {
+fn edit_assembly_builds_a_wall_types_layers_as_revits() {
+    use bimcraft_core::model::{Function, WallFunction, Wrapping};
     use egui_kittest::kittest::{By, NodeT};
     let mut h = app(BOX);
     click(&mut h, P2(4000.0, 0.0));
     press(&mut h, "Edit Type");
-    // One structure layer as thick as the type; a finish inserted outside it, a brick 100 thick.
-    press(&mut h, "Insert Layer");
+    // Type Properties as Revit's: Structure's Edit…, the wrappings, the Width shown, the Function.
+    for label in ["Structure", "Wrapping at Inserts", "Wrapping at Ends", "Width", "Function", "Coarse Scale Fill Pattern", "Structural Material"] {
+        assert!(h.query_all_by_label(label).next().is_some(), "{label}");
+    }
+    press(&mut h, "Edit…");
+    assert!(h.query_by_label("Edit Assembly").is_some());
     let nth = |h: &Harness<BimApp>, role: Role, label: &'static str, n: usize| {
         h.query_all(By::new().role(role).label(label)).nth(n).map(|n| n.accesskit_node().id()).unwrap()
     };
-    // Its material from the library.
+    let last = |h: &Harness<BimApp>, role: Role, label: &'static str| {
+        h.query_all(By::new().role(role).label(label)).last().map(|n| n.accesskit_node().id()).unwrap()
+    };
+    // One structure layer as thick as the type between the Core Boundary rows; a layer inserted is in the core, and Up
+    // takes it out past the boundary, to the exterior side.
+    assert_eq!(h.query_all_by_label("Core Boundary").count(), 2);
+    // The window's own buttons: the ribbon has an Insert tab too.
+    for button in ["Insert", "Up"] {
+        let b = last(&h, Role::Button, button);
+        h.get_by(|n| n.id() == b).click();
+        h.run();
+    }
+    // It is a finish, a brick 100 thick, that wraps. Type Properties' own Function list is the first of that name.
+    let pick = nth(&h, Role::ComboBox, "Function", 1);
+    h.get_by(|n| n.id() == pick).click();
+    h.run();
+    press(&mut h, "Finish 1 [4]");
     let pick = nth(&h, Role::ComboBox, "Material", 0);
     h.get_by(|n| n.id() == pick).click();
     h.run();
@@ -3281,10 +3302,57 @@ fn type_properties_build_a_wall_types_layers() {
     h.key_press_modifiers(Modifiers::COMMAND, Key::A);
     h.get_by(|n| n.id() == thick).type_text("100");
     h.run();
+    let wraps = nth(&h, Role::CheckBox, "Wraps", 0);
+    h.get_by(|n| n.id() == wraps).click();
+    h.run();
+    // The structure's material is the type's structural material.
+    let structural = last(&h, Role::CheckBox, "Structural Material");
+    h.get_by(|n| n.id() == structural).click();
+    h.run();
+    // Edit Assembly's OK, over Type Properties': nothing is changed until Type Properties is done.
+    let ok = last(&h, Role::Button, "OK");
+    h.get_by(|n| n.id() == ok).click();
+    h.run();
+    assert!(h.query_by_label("Edit Assembly").is_none());
+    assert_eq!(h.state().session.model.types.wall["Generic - 200mm"].layers.len(), 0);
+    // And the type's own: an interior wall that wraps its exterior layers at inserts.
+    let pick = nth(&h, Role::ComboBox, "Function", 0);
+    h.get_by(|n| n.id() == pick).click();
+    h.run();
+    press(&mut h, "Interior");
+    let pick = nth(&h, Role::ComboBox, "Wrapping at Inserts", 0);
+    h.get_by(|n| n.id() == pick).click();
+    h.run();
+    press(&mut h, "Exterior");
     press(&mut h, "OK");
     let t = &h.state().session.model.types.wall["Generic - 200mm"];
-    assert_eq!((t.thickness, t.layers.len()), (300.0, 2));
-    assert_eq!((t.layers[0].material.as_str(), t.layers[0].thickness, t.layers[1].thickness), ("Brick", 100.0, 200.0));
+    assert_eq!((t.thickness, t.layers.len(), t.core_layers()), (300.0, 2, 1..2));
+    let (finish, structure) = (&t.layers[0], &t.layers[1]);
+    assert_eq!((finish.function, finish.material.as_str(), finish.thickness, finish.wraps), (Function::Finish, "Brick", 100.0, true));
+    assert_eq!((structure.function, structure.thickness, structure.structural), (Function::Structure, 200.0, true));
+    assert_eq!((t.function, t.wrap_inserts, t.wrap_ends), (WallFunction::Interior, Wrapping::Exterior, Wrapping::None));
+}
+
+#[test]
+fn edit_assemblys_core_boundary_rows_take_a_layer_into_the_core() {
+    use egui_kittest::kittest::{By, NodeT};
+    let mut h = app(r#"wall {"points": [[0, 0], [8000, 0]], "type": "Exterior - 300mm"}"#);
+    click(&mut h, P2(4000.0, 0.0));
+    press(&mut h, "Edit Type");
+    press(&mut h, "Edit…");
+    // Brick, insulation | block | plaster: the insulation, the line above the exterior boundary, taken down into the core.
+    press(&mut h, "Row 2");
+    press(&mut h, "Down");
+    // The boundary rows and the core's only layers stay: nothing to delete on a boundary.
+    press(&mut h, "Row 2");
+    assert!(h.query_all(By::new().role(Role::Button).label("Delete")).last().unwrap().accesskit_node().is_disabled());
+    let ok = h.query_all(By::new().role(Role::Button).label("OK")).last().unwrap().accesskit_node().id();
+    h.get_by(|n| n.id() == ok).click();
+    h.run();
+    press(&mut h, "OK");
+    let t = &h.state().session.model.types.wall["Exterior - 300mm"];
+    assert_eq!(t.core, Some(bimcraft_core::model::Core { exterior: 1, interior: 1 }));
+    assert_eq!(t.core_span(), (100.0, 290.0));
 }
 
 #[test]

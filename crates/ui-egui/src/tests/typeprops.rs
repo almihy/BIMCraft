@@ -53,10 +53,10 @@ fn rename_in_type_properties_renames_a_wall_type_and_a_family_type_and_what_is_o
     h.state_mut().select_and_edit_type(wall);
     h.run();
     // The groups are bars that fold.
-    assert!(h.query_by_role_and_label(Role::TextInput, "Width").is_some());
+    assert!(h.query_by_role_and_label(Role::ComboBox, "Wrapping at Inserts").is_some());
     h.get_by_label("Construction").click();
     h.run();
-    assert!(h.query_by_role_and_label(Role::TextInput, "Width").is_none(), "folded");
+    assert!(h.query_by_role_and_label(Role::ComboBox, "Wrapping at Inserts").is_none(), "folded");
     h.get_by_label("Construction").click();
     h.run();
     press(&mut h, "Rename…");

@@ -10,6 +10,7 @@ use crate::popup::Modal;
 use bimcraft_i18n::msg;
 
 mod array;
+mod assembly;
 mod background_grid;
 mod browser;
 mod cad;
