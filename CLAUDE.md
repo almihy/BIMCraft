@@ -137,7 +137,7 @@ model's dependencies, so switching cargo commands doesn't rebuild the model.
 
 `crates/rvt` (the Revit file reader, Apache-2.0 only; notes: [crates/rvt/CLAUDE.md](crates/rvt/CLAUDE.md); area: [Revit files](docs/areas/revit-import.md)): one module for each part of a file (`container`, `gzip`, `records`, `schema`, `inventory`) and for each element kind it imports (`walls`, `floors`, `roofs`, `columns`, `openings`, `rooms`, `pipes`, `ducts`, `framing`, `generic`), joined by `import.rs`.
 
-`crates/web` (`bimcraft-web`, the engine in WebAssembly for Arqiflow; notes: [crates/web/CLAUDE.md](crates/web/CLAUDE.md)) and `apps/bimcraft-web` (the interface in a browser tab, hosted by Arqiflow's page).
+`crates/web` (`bimcraft-web`, the engine in WebAssembly for Arqiflow; notes: [crates/web/CLAUDE.md](crates/web/CLAUDE.md)), `crates/drawing-web` (drawings read for Arqiflow's agent, a WebAssembly of their own; [notes](crates/drawing-web/CLAUDE.md)) and `apps/bimcraft-web` (the interface in a browser tab, hosted by Arqiflow's page).
 
 `apps/bimcraft` (the desktop: `main.rs`, `startup.rs`: the log and the graphics fallback) and `apps/bimcraft-cli` (`main.rs`; `mcp.rs` the MCP server; `window.rs`: `mcp --connect`; `revit.rs`); notes: [apps/CLAUDE.md](apps/CLAUDE.md). More: `vendor/` (hayro-interpret, patched), `packaging/` (installers and packages: [packaging](docs/areas/packaging.md)), `docs/` (design notes), `.github/workflows/` (CI on every pull request, and the release).
 
