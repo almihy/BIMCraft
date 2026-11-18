@@ -98,6 +98,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use bimcraft_core::engine::Session;
+/// The engine on its own, with no window (crates/web): what a page's model worker and the server run, from this same file.
+pub use bimcraft_web::Engine;
 use bimcraft_core::ids::Guid;
 use bimcraft_core::model::Model;
 use bimcraft_core::sync::{self, Changes};

@@ -712,6 +712,7 @@ version = "0.11.0"
 dependencies = [
  "bimcraft-core",
  "bimcraft-ui-egui",
+ "bimcraft-web",
  "eframe",
  "egui",
  "getrandom 0.2.17",

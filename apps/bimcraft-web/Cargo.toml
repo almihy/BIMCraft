@@ -14,6 +14,8 @@ crate-type = ["cdylib", "rlib"]
 bimcraft-core = { workspace = true }
 # A hosted window: none of the desktop's features (no plugins, updater, egui's own fonts or other languages).
 bimcraft-ui-egui = { workspace = true }
+# The engine on its own (crates/web): its `Engine` comes out of this file too, so a page needs one build of the engine.
+bimcraft-web = { workspace = true }
 eframe = { workspace = true, features = ["wgpu"] }
 egui = { workspace = true }
 js-sys = "0.3"

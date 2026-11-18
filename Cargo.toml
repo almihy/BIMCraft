@@ -25,6 +25,7 @@ bimcraft-render = { path = "crates/render" }
 bimcraft-mep-calc = { path = "crates/mep-calc" }
 bimcraft-geom = { path = "crates/geom" }
 bimcraft-plugin = { path = "crates/plugin" }
+bimcraft-web = { path = "crates/web" }
 bimcraft-i18n = { path = "crates/i18n", default-features = false }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
