@@ -371,10 +371,16 @@ impl Drawing {
     fn grow(&mut self, from: usize, about: (f32, f32)) {
         let k = self.k;
         let at = |p: &mut (f32, f32)| *p = (about.0 + (p.0 - about.0) * k, about.1 + (p.1 - about.1) * k);
-        for prim in self.prims.iter_mut().skip(from).filter(|_| k != 1.0) {
+        for (prim, part) in self.prims.iter_mut().zip(&self.parts).skip(from).filter(|_| k != 1.0) {
             match prim {
                 Prim::Fill { rings, .. } => rings.iter_mut().flatten().for_each(at),
-                Prim::Line { pts, .. } => pts.iter_mut().for_each(at),
+                // A letter's strokes grow with it; a pen's lines are sized at the end ([`Drawing::weigh`]).
+                Prim::Line { pts, width, .. } => {
+                    pts.iter_mut().for_each(at);
+                    if *part == Part::Text {
+                        *width = (*width * k).max(1.0);
+                    }
+                }
                 Prim::Image { .. } => {}
             }
         }
@@ -2912,14 +2918,17 @@ impl CadEntities<'_> {
         Some(o)
     }
 
-    /// Entity `i` if it is a fill shown: its rings, its colour as drawn (its own, halftone or not) and its opacity.
+    /// Entity `i` if it is a fill shown: its rings, its colour as drawn (its own, halftone or not; a patterned hatch with no
+    /// pattern held pale, as [`CadEntities::draw`] fills it) and its opacity.
     fn fill(&self, i: usize) -> Option<CadFill<'_>> {
         let e = self.cad.dxf().entity(i)?;
-        if !matches!(e.shape, crate::dxf::Shape::Fill { .. }) || !self.shows(&e) {
+        let crate::dxf::Shape::Fill { solid, tile, .. } = &e.shape else { return None };
+        if !self.shows(&e) {
             return None;
         }
         let half = self.look.is_some_and(|l| l.of_layer(&e.layer).halftone);
         let own = self.cad.color(&e, self.ci.colors).unwrap_or(INK);
+        let own = if *solid || tile.is_some() { own } else { Rgb(pale(own.0), pale(own.1), pale(own.2)) };
         let alpha = e.alpha;
         let rings = match e {
             std::borrow::Cow::Borrowed(crate::dxf::Entity { shape: crate::dxf::Shape::Fill { rings, .. }, .. }) => {

@@ -799,6 +799,13 @@ pub(crate) fn on_screen(width: f32, at: Place, thin: bool) -> f32 {
     }
 }
 
+/// [`on_screen`] for a line of `part`: a letter's strokes ([`render::Part::Text`]: a note's, a tag's, a CAD drawing's text) are
+/// as wide as their letters are big, `k` times what the drawing says, at least a pixel, and grow and shrink with them as the
+/// view zooms. Kept as wide as a pen however far the view is zoomed out, a drawing's text would swell into blots.
+pub(crate) fn line_on_screen(width: f32, part: render::Part, at: Place, thin: bool) -> f32 {
+    if part == render::Part::Text && !thin { (width * at.k).max(1.0) } else { on_screen(width, at, thin) }
+}
+
 /// The display list, with the selected and hovered elements in the accent colours, but for what `at` leaves out; with
 /// `thin`, every line one pixel wide. Its pictures are `pictures`, in order.
 pub(crate) fn paint(p: &Painter, at: Place, d: &Drawing, selected: &[Id], hovered: Option<Id>, thin: bool, pictures: &[TextureId]) {
@@ -831,7 +838,7 @@ fn paint_preview(p: &Painter, at: Place, d: &Drawing, preview: &[Id], thin: bool
 }
 
 /// Whether `prim` draws nothing inside `clip`, however it is drawn: all of it, past its widest line, to one side.
-fn outside(prim: &Prim, at: Place, thin: bool, clip: Rect) -> bool {
+fn outside((prim, part): (&Prim, render::Part), at: Place, thin: bool, clip: Rect) -> bool {
     let (mut lo, mut hi) = (Pos2::new(f32::INFINITY, f32::INFINITY), Pos2::new(f32::NEG_INFINITY, f32::NEG_INFINITY));
     let mut grow = |q: &(f32, f32)| {
         let q = at.pos(*q);
@@ -845,7 +852,7 @@ fn outside(prim: &Prim, at: Place, thin: bool, clip: Rect) -> bool {
         }
         Prim::Line { pts, width, .. } => {
             pts.iter().for_each(&mut grow);
-            on_screen(*width, at, thin) * 8.0 + 4.0
+            line_on_screen(*width, part, at, thin) * 8.0 + 4.0
         }
         // A picture's place has more to it; it is few, and drawn.
         Prim::Image { .. } => return false,
@@ -899,7 +906,7 @@ pub(crate) fn paint_prim(
     if owner.is_some() && owner == at.hide {
         return;
     }
-    if outside(prim, at, thin, clip) {
+    if outside((prim, part), at, thin, clip) {
         return;
     }
     let accent = match owner {
@@ -997,7 +1004,7 @@ pub(crate) fn paint_prim(
             }
         }
         Prim::Line { pts, width, color: c, dash, closed, alpha } => {
-            let stroke = Stroke::new(on_screen(*width, at, thin), accent.map_or(seen(color(*c), *alpha), |a| a.0));
+            let stroke = Stroke::new(line_on_screen(*width, part, at, thin), accent.map_or(seen(color(*c), *alpha), |a| a.0));
             let mut pts: Vec<Pos2> = pts.iter().map(|q| at.pos(*q)).collect();
             match dash {
                 Some(dash) => {

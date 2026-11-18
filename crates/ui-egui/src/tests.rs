@@ -1539,6 +1539,15 @@ fn a_line_weight_is_a_pen_picked_from_a_list_and_a_hairline_is_a_pixel_on_screen
     assert_eq!(on_screen(32.0, shown(1.0, 16.0), false), 2.0, "four times as far in, as wide");
     assert_eq!(on_screen(8.0, shown(2.5, 4.0), false), 2.0, "scaled while it is still being zoomed, as wide");
     assert_eq!(on_screen(8.0, Place { paper: true, ..shown(2.0, 4.0) }, false), 16.0, "a sheet's are the drawing's, times its size");
+    // A letter's strokes are as wide as its letters are big, zoomed out as in: a CAD drawing's text a tenth of a pixel wide at a
+    // tenth of the paper's zoom stays a pixel, not ten (its labels drawn as blots of colour).
+    use crate::canvas::line_on_screen;
+    use bimcraft_core::render::Part;
+    assert_eq!(line_on_screen(0.1, Part::Text, shown(1.0, 0.1), false), 1.0);
+    assert_eq!(line_on_screen(3.0, Part::Text, shown(2.0, 0.1), false), 6.0, "scaled while zoomed, as its letters are");
+    assert_eq!(line_on_screen(3.0, Part::Text, shown(2.0, 0.1), true), 1.0, "Thin Lines");
+    assert_eq!(line_on_screen(0.1, Part::Projection, shown(1.0, 0.1), false), 1.0, "a pen's line as before");
+    assert_eq!(line_on_screen(8.0, Part::Projection, shown(1.0, 4.0), false), 2.0);
 }
 
 #[test]

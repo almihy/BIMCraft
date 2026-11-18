@@ -262,3 +262,21 @@ fn a_line_keeps_its_pen_when_a_link_goes_under_the_projects() {
     assert_eq!(d.owners, [Some(LINKED), Some(7)]);
     assert_eq!(d.pens, [Some(Pen::PROJECTION), Some(Pen::CUT)], "each line's pen goes with it");
 }
+
+#[test]
+fn zoomed_out_a_big_hatch_with_no_pattern_held_is_as_pale_as_drawn_whole() {
+    use crate::cad::testing::{dense, entity};
+    use crate::dxf::{Color, Shape};
+    // A dense sheet, and on it a big magenta hatch of a pattern not held: filled pale either way, never its full colour.
+    let mut d = dense(30_000, P2(1000.0, 700.0));
+    let ring = vec![P2(100.0, 100.0), P2(600.0, 100.0), P2(600.0, 500.0), P2(100.0, 500.0)];
+    let hatch = Shape::Fill { rings: vec![ring], solid: false, tile: None, shade: false };
+    d.entities.push(crate::dxf::Entity { color: Color::True(255, 0, 255), ..entity("Hatch", hatch) });
+    let cad = crate::cad::Cad::of_drawing("pale.pdf", d);
+    let ci = placed(P2(500.0, 350.0));
+    let view = View { scale: 0.42, cx: 0.0, cy: 0.0, width: 440, height: 320 };
+    let (whole, cells) = (dense_drawn(&cad, &ci, view, false, None), dense_drawn(&cad, &ci, view, true, None));
+    assert!(cells.prims.len() * 10 < whole.prims.len(), "drawn from its cells: {}", cells.prims.len());
+    let magenta = |c: &[u8]| c[0] > 200 && c[1] < 60 && c[2] > 200;
+    assert_eq!((count(&painted(&whole), magenta), count(&painted(&cells), magenta)), (0, 0), "no full magenta, whole or zoomed out");
+}
