@@ -12,7 +12,7 @@ and holds here. The drawings are `bimcraft-render`'s and IFC is `bimcraft-ifc`'s
   `bimcraft-geom`'s, re-exported here under the same paths (`crate::geom`, `crate::units`).
 - **Tests.** A module's tests that need only the model stay with it (inline, or in `<module>_tests.rs` beside it through
   `#[path]`, as `model_tests.rs` and `render_tests.rs`). Those that drive the Session live in the core's
-  `src/model_tests/`, one file per module (`render.rs`, `view3d_update.rs`), and reach the module's items through its
+  `tests/model_views/model_tests/` and `tests/model_parts/model_tests/`, one file per module (`render.rs`, `view3d.rs`), and reach the module's items through its
   public paths; an item only they need, or only the core's code, is `pub` and `#[doc(hidden)]`, never part of
   the model's API; everything else is `pub(crate)` or private, so the dead-code lint sees it.
 - **Self-checks and counters are debug builds'.** A fast path held to its twin (every element asked instead of the lookup's,

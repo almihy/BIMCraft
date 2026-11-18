@@ -70,6 +70,19 @@ changes. A copy is a new element: a new id and a new GUID. IFC writes the GUID a
 
 ## Testing
 
+- **Where tests go.** The library has none (`[lib] test = false`): its tests are eight test crates under `tests/`, one per
+  area, which compile side by side, so a change waits on the largest group, not on all of them. `session` (the engine's
+  own `tests.rs`, the control port, cameras, the samples, the self-checks), `model_views` and `model_parts` (the model's
+  modules driven through the Session, in `model_tests/`), `drawings`, `families` (and IFC), `structure_mep`, `editing`
+  (warnings, the clipboard, live merge, the oracle) and `site_rooms`. Each root re-exports the engine
+  (`pub use bimcraft_core::*`), so a test names `crate::model`, `crate::engine` as inside the library; what a test needs of
+  the library that is not its API is `pub` and `#[doc(hidden)]`. Helpers two groups share are `tests/common/`. A new test
+  goes in the group of its area, in a module marked `#[cfg(test)]` in the group's `main.rs`. Run one group with
+  `cargo test -p bimcraft-core --test drawings`.
+- **The Session's own checks** are the debug build's self-checks (`selfcheck`: `Undone`, `LibrarySync`, `ModelCheck`,
+  `Review`, `Delete`), on in every test and off in the apps, as the model's are: the check of what a command changed held to
+  the whole check, the library synced by what changed held to the whole sync, the warnings brought up to date held to the
+  whole review, Delete through the lookups held to Delete from scratch.
 - Filter while you work: `cargo test -p bimcraft-core <part of a name>`. A module's own tests carry its path, so `schedule::`,
   `view3d::`, `phasing::`, `graphics::`, `render::`, `library::`, `walls::` and `snap::` each run one area; the engine tests in
   `tests.rs`, `mep_tests.rs` and `structure_tests.rs` are named for what they check (`cargo test -p bimcraft-core tags`).
@@ -84,7 +97,7 @@ changes. A copy is a new element: a new id and a new GUID. IFC writes the GUID a
 
 ## Working in the big files
 
-`commands.rs`, `model.rs`, `import.rs` and the two `tests.rs` files are thousands of lines: find what you need with a search
+`commands.rs`, `model.rs`, `import.rs` and `tests/session/tests.rs` are thousands of lines: find what you need with a search
 (`edit("name"`, `fn name`), read the part, and anchor a scripted edit on text that is unique in the file: a doc comment is often
 repeated. A new area's tests go in their own file or module, not on the end of `tests.rs`.
 

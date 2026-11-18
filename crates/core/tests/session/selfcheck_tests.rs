@@ -40,10 +40,20 @@ fn every_self_check_runs_under_the_core_tests() {
     let work = render::SectionWork::new_deferred(&s.model);
     let view = render::section_fit_with(&s.model, &work, section, 400, 300);
     render::SectionOverlay::new(&s.model, &work, section, view);
+    // Sections through the sample's doors and windows: of each, a layer the plane passes by is cut by none of it.
+    for line in [[[2000.0, -1500.0], [2000.0, 8500.0]], [[4500.0, -1500.0], [4500.0, 8500.0]], [[-1500.0, 5250.0], [11500.0, 5250.0]]] {
+        let cut = s.execute("section", &json!({"start": line[0], "end": line[1]})).unwrap();
+        let id = cut["id"].as_u64().unwrap();
+        render::section_cut_rings(&s.model, id).unwrap();
+    }
     // What points at a wall, and the dimensions that hold it.
     let wall = s.model.elements.iter().find(|(_, e)| matches!(e, Element::Wall(_))).map(|(id, _)| *id).unwrap();
     assert!(!s.model.referring(wall).is_empty(), "the doors in it, the dimensions to it");
     assert!(s.model.held_by(wall).is_empty(), "nothing locked");
+    // The Session's own: a wall deleted (through the lookups, held to deleting from scratch), then the delete undone (back to a
+    // model that passed).
+    s.execute("delete", &json!({"ids": [wall]})).unwrap();
+    s.execute("undo", &json!({})).unwrap();
     let missing: Vec<Check> = Check::ALL.into_iter().filter(|c| !selfcheck::ran(*c)).collect();
     assert!(missing.is_empty(), "these self-checks never ran under the core's tests: {missing:?}");
 }
