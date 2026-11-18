@@ -21,6 +21,7 @@ use crate::geom::{self, P2};
 use serde_json::Value;
 
 use crate::geom::v3::P3;
+use crate::ids::compress;
 use crate::model::{Element, Function, Guid, Id, Layer, Model, Operation, ParameterKind, Railing, RoomArea, heading, mix};
 use crate::phasing;
 use crate::stairs;
@@ -158,8 +159,6 @@ fn ratio(x: f64) -> String {
     format!("{x:.12}").trim_end_matches('0').to_string()
 }
 
-/// The digits of an IFC GlobalId, in order.
-const DIGITS: &[u8; 64] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$";
 
 /// A 22-character IFC GlobalId, the same for the same model, role and element on every export.
 #[doc(hidden)]
@@ -167,27 +166,6 @@ pub fn guid(uid: u64, role: u64, id: u64) -> String {
     let hi = mix(uid ^ mix(role.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ id));
     let lo = mix(hi ^ id.rotate_left(17) ^ role);
     compress((u128::from(hi) << 64) | u128::from(lo))
-}
-
-/// 128 bits as an IFC GlobalId: 22 base-64 digits, the first carrying the top 2 bits. An element's GUID written so is its
-/// GlobalId, as IfcOpenShell's `guid.compress` writes a UUID.
-pub fn compress(v: u128) -> String {
-    let digit = |shift: u32| char::from(DIGITS[((v >> shift) & 63) as usize]);
-    std::iter::once(digit(126)).chain((0..21).rev().map(|i| digit(6 * i))).collect()
-}
-
-/// The 128 bits an IFC GlobalId holds; none for one that isn't 22 of its digits, the first at most 3.
-pub fn expand(text: &str) -> Option<u128> {
-    let b = text.as_bytes();
-    if b.len() != 22 {
-        return None;
-    }
-    b.iter()
-        .try_fold(0u128, |v, c| {
-            let d = DIGITS.iter().position(|x| x == c)? as u128;
-            (v >> 122 == 0).then_some((v << 6) | d)
-        })
-        .filter(|_| DIGITS.iter().position(|x| *x == b[0]).is_some_and(|d| d < 4))
 }
 
 /// A GUID's 128 bits folded to 64, to seed what an element writes beside itself.

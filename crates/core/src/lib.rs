@@ -6,9 +6,10 @@ pub use bimcraft_geom::{files, geom, language, prim, shared, skeleton, solid, st
 pub use bimcraft_mep_calc::{conduit, demand, dps, dr, drainage, hydrant, loads, nbr5410, plumbing, reservoir, storm, water};
 #[doc(hidden)]
 pub use bimcraft_model::run_arm;
+pub use bimcraft_ifc::{ifc, import};
 pub use bimcraft_model::{
     alignment, background_grid, bounds, cad, camera, carpark, cloud, crosscheck, curves, derived, dims, dims3d, draw, dxf, dxf_out, electrical, falls,
-    family, favorites, fills, gltf, glue, graphics, ground, groups, ids, ifc, ifc_classes, import, inquiry, insert, json, lenient, library, lines,
+    family, favorites, fills, gltf, glue, graphics, ground, groups, ids, ifc_classes, inquiry, insert, json, lenient, library, lines,
     link, massing, masterplan, merge, model, motion, network, paint, pat, pdf, pen, phasing, quantities, raster, rebar, reinforce, render,
     rooms, runs, schedule, selection, selfcheck, sheet, site, sketch, snap, stairs, standards, styles, symbol_set, tempdims, text, texture,
     titleblock, triad, type_data, view3d, wallchain, walls, warnings, workplane,

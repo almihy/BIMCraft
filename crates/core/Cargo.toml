@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 bimcraft-model = { workspace = true }
+bimcraft-ifc = { workspace = true }
 bimcraft-mep-calc = { workspace = true }
 bimcraft-geom = { workspace = true }
 bimcraft-i18n = { workspace = true }

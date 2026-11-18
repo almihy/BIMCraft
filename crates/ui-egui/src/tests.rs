@@ -7494,7 +7494,7 @@ fn select_by_id_finds_elements_by_id_guid_or_ifc_globalid_says_what_it_missed_an
     let mut h = app(&format!("{BOX}\nwall {{\"points\": [[20000, 20000], [23000, 20000]], \"level\": \"Level 2\"}}"));
     let walls = ids(&h, "wall");
     let (high, low) = (walls[4], walls[1]);
-    let ifc = bimcraft_core::ifc::compress(gid(&h, low).as_u128());
+    let ifc = bimcraft_core::ids::compress(gid(&h, low).as_u128());
     // Manage grew with Room Area Computation and Technical Standards: the ribbon folds Inquiry away in a narrower window.
     h.set_size(vec2(1800.0, 900.0));
     press(&mut h, "Manage");
@@ -7550,7 +7550,7 @@ fn ids_of_selection_shows_each_ones_id_guid_and_ifc_globalid_and_copies_them() {
     h.run();
     from_list(&mut h, "Inquiry", "IDs of Selection");
     let (a, b) = (gid(&h, walls[0]), gid(&h, walls[2]));
-    for text in [walls[0].to_string(), a.to_string(), bimcraft_core::ifc::compress(b.as_u128()), "2 selected.".to_string()] {
+    for text in [walls[0].to_string(), a.to_string(), bimcraft_core::ids::compress(b.as_u128()), "2 selected.".to_string()] {
         assert!(h.query_by_label(&text).is_some(), "{text}");
     }
     press(&mut h, "Copy GUIDs");

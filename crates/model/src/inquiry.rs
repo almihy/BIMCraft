@@ -63,7 +63,7 @@ fn guid_of(word: &str) -> Option<Guid> {
                 .flatten()
                 .map(Guid::from_u128)
         })
-        .or_else(|| crate::ifc::expand(word).map(Guid::from_u128))
+        .or_else(|| crate::ids::expand(word).map(Guid::from_u128))
 }
 
 /// What names element `id`: its id, its GUID, its IFC GlobalId; and what it is, its category and what it is called.
@@ -79,11 +79,11 @@ pub struct Names {
 
 pub fn names(m: &Model, id: Id) -> Option<Names> {
     if let Some(p) = m.library.part(id) {
-        let ifc = crate::ifc::compress(p.guid.as_u128());
+        let ifc = crate::ids::compress(p.guid.as_u128());
         return Some(Names { id, guid: p.guid, ifc, category: p.what.to_string(), name: p.name() });
     }
     if let Some(e) = m.library.get(id) {
-        let ifc = crate::ifc::compress(e.guid.as_u128());
+        let ifc = crate::ids::compress(e.guid.as_u128());
         return Some(Names { id, guid: e.guid, ifc, category: e.kind.label(), name: e.name.clone() });
     }
     let e = m.elements.get(id)?;
@@ -91,7 +91,7 @@ pub fn names(m: &Model, id: Id) -> Option<Names> {
     // Its name, type, number or mark, and none of its rooms.
     let j = crate::json::element_json_bare(m, id);
     let name = ["name", "type", "number", "mark", "text"].iter().find_map(|k| j[*k].as_str().filter(|s| !s.is_empty())).unwrap_or_default();
-    Some(Names { id, guid, ifc: crate::ifc::compress(guid.as_u128()), category: e.category().to_string(), name: name.to_string() })
+    Some(Names { id, guid, ifc: crate::ids::compress(guid.as_u128()), category: e.category().to_string(), name: name.to_string() })
 }
 
 /// The plan to show elements `ids` in, and the rectangle they take in it, south-west corner then north-east: the plan of the

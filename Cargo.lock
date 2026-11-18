@@ -505,6 +505,7 @@ version = "0.11.0"
 dependencies = [
  "bimcraft-geom",
  "bimcraft-i18n",
+ "bimcraft-ifc",
  "bimcraft-mep-calc",
  "bimcraft-model",
  "flate2",
@@ -550,6 +551,18 @@ dependencies = [
 [[package]]
 name = "bimcraft-icons"
 version = "0.11.0"
+
+[[package]]
+name = "bimcraft-ifc"
+version = "0.11.0"
+dependencies = [
+ "bimcraft-geom",
+ "bimcraft-i18n",
+ "bimcraft-model",
+ "bimcraft-workspace-hack",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "bimcraft-mep-calc"

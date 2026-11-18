@@ -653,7 +653,8 @@ pub(crate) fn split(ring: Vec<P2>, piece: &[P2]) -> (Option<Vec<P2>>, Vec<Vec<P2
 }
 
 /// What's left of `rings` outside `hole`: convex pieces, counter-clockwise.
-pub(crate) fn minus(rings: &[Vec<P2>], hole: &[P2]) -> Vec<Vec<P2>> {
+#[doc(hidden)]
+pub fn minus(rings: &[Vec<P2>], hole: &[P2]) -> Vec<Vec<P2>> {
     // The box round a ring: a piece clear of the hole's piece's box is left whole, without cutting it (a big concave ring and
     // a big concave hole make hundreds of pieces each, and cutting each by each is cubic).
     let extent = |ring: &[P2]| {

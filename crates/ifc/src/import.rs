@@ -3507,7 +3507,7 @@ pub fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, String> 
     }
     // Each element's GUID is the GlobalId of what it was made of, where that's one; what points at an element points at it.
     let mut globals: HashMap<Id, u128> =
-        origin.iter().filter_map(|(step, id)| Some((*id, crate::ifc::expand(text(e(*step)?.args.first())?)?))).collect();
+        origin.iter().filter_map(|(step, id)| Some((*id, crate::ids::expand(text(e(*step)?.args.first())?)?))).collect();
     // The rest, GUIDs the file makes: the same file reads the same every time.
     for id in m.elements.keys() {
         globals.entry(*id).or_insert_with(|| Guid::seeded(seed, *id).as_u128());

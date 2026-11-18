@@ -230,7 +230,8 @@ fn named(who: &str, n: &str) -> Result<(), String> {
 }
 
 /// Whether the project's phases, phase filters, overrides and option sets are sound.
-pub(crate) fn check_project(m: &Model) -> Result<(), String> {
+#[doc(hidden)]
+pub fn check_project(m: &Model) -> Result<(), String> {
     if m.phases.is_empty() || m.phases.len() > MAX_PHASES {
         return Err(format!("a project has 1 to {MAX_PHASES} phases, not {}", m.phases.len()));
     }
@@ -304,7 +305,8 @@ pub(crate) fn check_value(m: &Model, who: &str, key: &str, v: &Value) -> Option<
 }
 
 /// Whether the elements' phases are in order: nothing taken down before it was made.
-pub(crate) fn check_order(m: &Model, who: &str, e: &Element) -> Result<(), String> {
+#[doc(hidden)]
+pub fn check_order(m: &Model, who: &str, e: &Element) -> Result<(), String> {
     let created = value(m, e, CREATED).and_then(|n| index(m, n)).unwrap_or(0);
     if let Some(d) = value(m, e, DEMOLISHED).and_then(|n| index(m, n))
         && d < created

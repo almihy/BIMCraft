@@ -17,6 +17,30 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::model::Element;
 
+/// The digits of an IFC GlobalId, in order.
+const DIGITS: &[u8; 64] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$";
+
+/// 128 bits as an IFC GlobalId: 22 base-64 digits, the first carrying the top 2 bits. An element's GUID written so is its
+/// GlobalId, as IfcOpenShell's `guid.compress` writes a UUID.
+pub fn compress(v: u128) -> String {
+    let digit = |shift: u32| char::from(DIGITS[((v >> shift) & 63) as usize]);
+    std::iter::once(digit(126)).chain((0..21).rev().map(|i| digit(6 * i))).collect()
+}
+
+/// The 128 bits an IFC GlobalId holds; none for one that isn't 22 of its digits, the first at most 3.
+pub fn expand(text: &str) -> Option<u128> {
+    let b = text.as_bytes();
+    if b.len() != 22 {
+        return None;
+    }
+    b.iter()
+        .try_fold(0u128, |v, c| {
+            let d = DIGITS.iter().position(|x| x == c)? as u128;
+            (v >> 122 == 0).then_some((v << 6) | d)
+        })
+        .filter(|_| DIGITS.iter().position(|x| *x == b[0]).is_some_and(|d| d < 4))
+}
+
 pub type Id = u64;
 
 /// The first id a project gives: ids have six digits, and more once a project has made 900 000 elements.

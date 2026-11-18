@@ -19,7 +19,7 @@ fn an_element_is_found_by_its_id_its_guid_however_written_or_its_ifc_globalid() 
     let (s, walls) = house();
     let w = walls[1];
     let g = s.model.guid(w).to_string();
-    let ifc = crate::ifc::compress(s.model.guid(w).as_u128());
+    let ifc = crate::ids::compress(s.model.guid(w).as_u128());
     for word in [w.to_string(), g.clone(), g.to_uppercase(), format!("{{{g}}}"), g.replace('-', ""), ifc, format!("\"{w}\"")] {
         assert_eq!(one(&s.model, &word), Some(w), "{word}");
     }
@@ -52,7 +52,7 @@ fn an_element_is_named_by_its_id_guid_and_ifc_globalid() {
     let n = names(&s.model, walls[0]).unwrap();
     assert_eq!((n.id, n.guid, n.category.as_str(), n.name.as_str()), (walls[0], s.model.guid(walls[0]), "wall", "Generic - 200mm"));
     assert_eq!(n.ifc.len(), 22);
-    assert_eq!(crate::ifc::expand(&n.ifc), Some(n.guid.as_u128()));
+    assert_eq!(crate::ids::expand(&n.ifc), Some(n.guid.as_u128()));
     assert_eq!(names(&s.model, 100_000).unwrap().name, "Level 1");
     assert_eq!(names(&s.model, 5), None);
 }

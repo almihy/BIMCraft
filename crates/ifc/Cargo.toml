@@ -1,0 +1,21 @@
+[package]
+name = "bimcraft-ifc"
+description = "BIMCraft's IFC4: the model written as IFC, and IFC (with the STEP files under it) read into the model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bimcraft-model = { workspace = true }
+bimcraft-geom = { workspace = true }
+bimcraft-i18n = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# As the model's: one build of the dependencies for every cargo command (crates/workspace-hack/CLAUDE.md).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+bimcraft-workspace-hack = { path = "../workspace-hack" }
