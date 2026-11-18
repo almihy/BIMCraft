@@ -119,14 +119,15 @@ fn a_window_below_the_walls_base_cuts_only_what_is_in_the_wall() {
 
 #[test]
 fn an_l_of_two_walls_counts_its_corner_once() {
-    // Two walls of 4000 along their location lines, mitred at the corner (0, 0): each is 4000 x 200 in plan, as the corner
-    // counts once, the mitre sharing the 200 x 200 square between them.
+    // Two walls of 4000 along their location lines, butted at the corner (0, 0): the one running through is 4100 x 200 in
+    // plan and the other 3900 x 200, as Revit measures them, the corner's 200 x 200 square counted once.
     let mut s = project();
     let ids = run(&mut s, "wall", json!({"points": [[4000, 0], [0, 0], [0, 4000]], "type": "T", "height": 3000}))["ids"].clone();
     let (a, b) = (ids[0].as_u64().unwrap_or_default(), ids[1].as_u64().unwrap_or_default());
     let (qa, qb) = (measure(&s, a), measure(&s, b));
-    assert_figures(&qa, [12.0, 12.0, 2.4, 2.4]);
-    assert_figures(&qb, [12.0, 12.0, 2.4, 2.4]);
+    let (through, other) = if qa.gross_volume > qb.gross_volume { (&qa, &qb) } else { (&qb, &qa) };
+    assert_figures(through, [12.3, 12.3, 2.46, 2.46]);
+    assert_figures(other, [11.7, 11.7, 2.34, 2.34]);
     // The L of them: its footprint, two 4000 arms of 200 whose corner square is counted once, 1.6 m², 3 m high.
     assert!(near(qa.gross_volume + qb.gross_volume, 1.6e6 * 3000.0));
 }

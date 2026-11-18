@@ -24,28 +24,22 @@ fn corner(degrees: f64) -> Session {
 }
 
 #[test]
-fn walls_meet_at_any_angle_in_a_mitre() {
-    for degrees in [90.0, 60.0, 120.0, 150.0] {
+fn walls_meet_at_any_angle_in_a_butt() {
+    for degrees in [90.0, 60.0, 120.0, 150.0, 20.0] {
         let s = corner(degrees);
         let (a, b) = (outline(&s.model, 100002), outline(&s.model, 100003));
-        // The faces cross on the bisector, 100 / sin(half the angle) from the corner, both ways.
+        // The faces cross on the bisector, 100 / sin(half the angle) from the corner, both ways: the wall running through
+        // reaches the outer crossing; the other stops against its face, from the inner one.
         let half = (degrees / 2.0f64).to_radians();
         let inner = P2(half.cos(), half.sin()) * (100.0 / half.sin());
-        for o in [&a, &b] {
-            assert!(o.iter().any(|p| near(*p, inner)) && o.iter().any(|p| near(*p, inner * -1.0)), "{degrees}°: {o:?}");
-            // Mitred, each is as big as its length times its thickness: nothing overlaps, nothing's missing.
-            assert!((geom::area(o).abs() - 800_000.0).abs() < 1e-3, "{degrees}°: {}", geom::area(o));
-        }
+        let has = |o: &Vec<P2>, q: P2| o.iter().any(|p| near(*p, q));
+        let (through, stops) = if has(&a, inner * -1.0) { (&a, &b) } else { (&b, &a) };
+        assert!(has(through, inner * -1.0) && !has(stops, inner * -1.0), "{degrees}°: one wall runs through: {a:?} {b:?}");
+        assert!(has(stops, inner), "{degrees}°: the other stops against its face, from the inner corner: {stops:?}");
+        // Butted, the two are as big together as their lengths times their thickness: nothing overlaps, nothing's missing.
+        let both = geom::area(&a).abs() + geom::area(&b).abs();
+        assert!((both - 1_600_000.0).abs() < 1e-3, "{degrees}°: {both}");
     }
-}
-
-#[test]
-fn sharp_corners_square_off_rather_than_spike() {
-    let s = corner(20.0);
-    let o = outline(&s.model, 100003);
-    // Outside the corner the faces would cross 5.7 thicknesses back: the end goes square there.
-    assert!(o.iter().all(|p| p.length() < 700.0 || p.length() > 3000.0), "{o:?}");
-    assert!(o.iter().any(|p| near(*p, P2(-20f64.to_radians().sin(), 20f64.to_radians().cos()) * 100.0)), "{o:?}");
 }
 
 #[test]
@@ -60,13 +54,15 @@ fn walls_meeting_at_a_shallow_angle_square_off_rather_than_run_on_metres() {
 }
 
 #[test]
-fn a_wall_ending_on_another_stops_at_its_face() {
+fn a_wall_ending_on_another_runs_its_core_to_its_core() {
     let s = session(
         r#"wall {"points": [[-2000, 0], [2000, 0]], "type": "Exterior - 300mm"}
            wall {"points": [[0, 0], [1000, 3000]], "type": "Interior - 100mm"}"#,
     );
+    // The partition comes to the exterior wall's outside: its one layer, a core, passes the brick and the insulation
+    // there (150 to 0) and stops on the block's face.
     let t = outline(&s.model, 100003);
-    assert!(t.iter().filter(|p| p.1 < 1000.0).all(|p| (p.1 - 150.0).abs() < 1e-6), "{t:?}");
+    assert!(t.iter().filter(|p| p.1 < 1000.0).all(|p| p.1.abs() < 1e-6), "{t:?}");
     assert_eq!(cap(&s.model, 100003, false).len(), 2, "the through wall fills the node");
     // The through wall goes on, square at its ends.
     assert_eq!(outline(&s.model, 100002).len(), 4);

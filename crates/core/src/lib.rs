@@ -129,6 +129,8 @@ mod titleblock_tests;
 #[cfg(test)]
 mod type_data_tests;
 #[cfg(test)]
+mod wall_join_tests;
+#[cfg(test)]
 mod wall_top_offset_tests;
 #[cfg(test)]
 mod wall_type_tests;

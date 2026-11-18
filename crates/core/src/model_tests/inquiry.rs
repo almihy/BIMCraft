@@ -78,7 +78,8 @@ fn the_commands_find_and_name_elements_and_change_nothing() {
     let g = s.model.guid(walls[0]).to_string();
     let r = s.execute("select_by_id", &json!({"text": format!("{g} {} nope", walls[1])})).unwrap();
     assert_eq!((r["ids"].clone(), r["missing"].clone(), r["plan"].clone()), (json!([walls[0], walls[1]]), json!(["nope"]), json!(100_000)));
-    assert!(r["extent"][0][0].as_f64().unwrap() < 0.0 && r["extent"][1][0].as_f64().unwrap() > 8000.0, "{r}");
+    // The two walls' bodies, as their joins leave them: one of them reaches the corner's outer face.
+    assert!(r["extent"][0][0].as_f64().unwrap() < 200.0 && r["extent"][1][0].as_f64().unwrap() > 8000.0, "{r}");
     let r = s.execute("select_by_id", &json!({"text": [walls[2], g]})).unwrap();
     assert_eq!(r["ids"], json!([walls[2], walls[0]]), "a list of them too");
     let r = s.execute("ids_of", &json!({"ids": [walls[0], 100_000]})).unwrap();

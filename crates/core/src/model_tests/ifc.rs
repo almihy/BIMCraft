@@ -988,7 +988,9 @@ fn walls_slabs_doors_and_windows_carry_their_base_quantities() {
         _ => panic!("no window"),
     };
     let q = quantities_of(&f, of_kind(&f, "IFCWALL")[0], "Qto_WallBaseQuantities");
-    let gross = 8000.0 * height / 1e6;
+    // Its body in plan, as its joins at either end leave it (a Butt: 100 more or less than its location line an end).
+    let run = crate::geom::area(&crate::walls::outline(m, wall)).abs() / thick;
+    let gross = run * height / 1e6;
     let cut = (d.width * d.height + wn.width * wn.height.min(height - sill)) / 1e6;
     assert!(near(q["Length"], 8000.0) && near(q["Width"], thick) && near(q["Height"], height), "{q:?}");
     assert!(near(q["GrossSideArea"], gross), "{q:?}");

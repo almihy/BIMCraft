@@ -5,6 +5,9 @@
 //! 160 mm vertical seam at x = -60. The command fixture exercises the automatic order only.
 //! Here that order is the walls' GUIDs': the lower runs through. The fixture gives the wall
 //! placed first the lower one, so H runs through, as above.
+//! The join is `walls/join.rs`'s: each layer of the wall running through takes the cell it shares with its like in the
+//! other, so its finishes run square to the corner's faces (the two walls' finishes being one material, a plan shows no line
+//! there either way), and the two walls' caps step along the same line between them.
 #[cfg(test)]
 mod tests {
     use bimcraft_core::engine::Session;
@@ -141,10 +144,13 @@ mod tests {
             lower_guid_first(&mut s, h, v);
             for (id, end) in [(h, true), (v, false)] {
                 let cap = walls::cap(&s.model, id, end);
-                assert_eq!(cap.len(), 5);
-                for (x, y) in [(100., 100.), (60., 80.), (60., -80.), (-60., -80.), (-100., -100.)] {
+                assert_eq!(cap.len(), 6);
+                // The line between the two bodies, which both caps step along; H's runs on to the corner's outer faces.
+                for (x, y) in [(100., 80.), (60., 80.), (60., -80.), (-60., -80.), (-60., -100.)] {
                     assert!(cap.iter().any(|p| p.dist(map(x, y)) < 1e-6), "{cap:?}");
                 }
+                let own = if id == h { (100., 100.) } else { (-100., -100.) };
+                assert!(cap.iter().any(|p| p.dist(map(own.0, own.1)) < 1e-6), "{cap:?}");
                 let prisms = walls::prisms(&s.model, id, true);
                 assert_eq!(prisms.len(), 1);
                 let p = &prisms[0];
@@ -162,7 +168,10 @@ mod tests {
     fn type_widths_and_guid_order_determine_the_butt() {
         let wider = CORNER.replace(r#""thickness":120"#, r#""thickness":180"#).replace(r#""thickness":20"#, r#""thickness":30"#);
         let (s, h, _) = fixture(&wider);
-        assert_eq!(walls::cap(&s.model, h, true), [P2(130., 110.), P2(90., 80.), P2(90., -80.), P2(-90., -80.), P2(-130., -110.)]);
+        assert_eq!(
+            walls::cap(&s.model, h, true),
+            [P2(130., 110.), P2(130., 80.), P2(90., 80.), P2(90., -80.), P2(-90., -80.), P2(-90., -110.)]
+        );
         // V placed first, with the lower GUID: the concrete runs through. Neither the order the walls were
         // placed in nor their ids count, only their GUIDs: given V's, H runs through.
         let mut lines: Vec<_> = CORNER.lines().collect();
@@ -170,26 +179,43 @@ mod tests {
         lines.swap(n - 1, n - 2);
         let (mut s, v, h) = fixture(&lines.join("\n"));
         assert!(v < h);
-        let concrete = [P2(100., 100.), P2(60., 80.), P2(-60., 80.), P2(-60., -80.), P2(-100., -100.)];
-        assert_eq!(walls::cap(&s.model, h, true), concrete);
-        assert_eq!(walls::cap(&s.model, v, false), concrete.into_iter().rev().collect::<Vec<_>>());
+        // The concrete through: V's layers run up to H's faces, H's stop against them.
+        assert_eq!(
+            walls::cap(&s.model, h, true),
+            [P2(60., 100.), P2(60., 80.), P2(-60., 80.), P2(-60., -80.), P2(-100., -80.), P2(-100., -100.)]
+        );
+        assert_eq!(
+            walls::cap(&s.model, v, false),
+            [P2(-100., -80.), P2(-60., -80.), P2(-60., 80.), P2(60., 80.), P2(60., 100.), P2(100., 100.)]
+        );
         swap_guids(&mut s, v, h);
-        let masonry = [P2(100., 100.), P2(60., 80.), P2(60., -80.), P2(-60., -80.), P2(-100., -100.)];
-        assert_eq!(walls::cap(&s.model, h, true), masonry);
-        assert_eq!(walls::cap(&s.model, v, false), masonry.into_iter().rev().collect::<Vec<_>>());
+        // The masonry through.
+        assert_eq!(
+            walls::cap(&s.model, h, true),
+            [P2(100., 100.), P2(100., 80.), P2(60., 80.), P2(60., -80.), P2(-60., -80.), P2(-60., -100.)]
+        );
+        assert_eq!(
+            walls::cap(&s.model, v, false),
+            [P2(-100., -100.), P2(-60., -100.), P2(-60., -80.), P2(60., -80.), P2(60., 80.), P2(100., 80.)]
+        );
     }
 
     #[test]
-    fn other_junctions_keep_the_ordinary_cap() {
-        for script in [
-            CORNER.replace("[0,-4000]", "[800,-4000]"),
-            CORNER.replacen(r#""height":3000"#, r#""height":2900"#, 1),
-            CORNER.replacen(r#""material":"Inner plaster""#, r#""material":"Outer render""#, 1),
-            CORNER.replace(r#""function":"structure""#, r#""function":"substrate""#),
+    fn every_corner_of_two_straight_walls_cleans_up() {
+        // Out of square, of two heights, of finishes of two materials, of cores that are no structure: a Butt all the same,
+        // the two bodies filling the corner between them with nothing twice.
+        for (script, square) in [
+            (CORNER.replace("[0,-4000]", "[800,-4000]"), false),
+            (CORNER.replacen(r#""height":3000"#, r#""height":2900"#, 1), true),
+            (CORNER.replacen(r#""material":"Inner plaster""#, r#""material":"Outer render""#, 1), true),
+            (CORNER.replace(r#""function":"structure""#, r#""function":"substrate""#), true),
         ] {
             let (s, h, v) = fixture(&script);
-            assert_eq!(walls::cap(&s.model, h, true).len(), 3);
-            assert_eq!(walls::cap(&s.model, v, false).len(), 3);
+            assert!(walls::cap(&s.model, h, true).len() > 3 && walls::cap(&s.model, v, false).len() > 3);
+            if square {
+                let both: f64 = [h, v].iter().map(|id| geom::area(&walls::outline(&s.model, *id)).abs()).sum();
+                assert!((both - 2.0 * 4000.0 * 200.0).abs() < 1e-3, "{both}");
+            }
         }
     }
 
@@ -208,19 +234,19 @@ mod tests {
             .join("\n");
         let (s, h, v) = fixture(&reversed);
         let cap = walls::cap(&s.model, h, true);
-        assert_eq!(cap, [P2(100., 100.), P2(60., 80.), P2(60., -80.), P2(-60., -80.), P2(-100., -100.)]);
-        assert_eq!(walls::cap(&s.model, v, true), cap.into_iter().rev().collect::<Vec<_>>());
+        assert_eq!(cap, [P2(100., 100.), P2(100., 80.), P2(60., 80.), P2(60., -80.), P2(-60., -80.), P2(-60., -100.)]);
+        let other = walls::cap(&s.model, v, true);
+        for p in [P2(100., 80.), P2(60., 80.), P2(60., -80.), P2(-60., -80.), P2(-60., -100.)] {
+            assert!(other.contains(&p), "{other:?}");
+        }
     }
 
     #[test]
-    fn opening_near_the_join_restores_the_miter_on_both_walls() {
+    fn a_window_near_the_corner_leaves_the_join_as_it_is() {
         let (mut s, h, v) = fixture(CORNER);
+        let before = (walls::cap(&s.model, h, true), walls::cap(&s.model, v, false));
         s.execute("window", &serde_json::json!({"at":[0,-660]})).unwrap();
-        assert_eq!(walls::cap(&s.model, h, true).len(), 3);
-        assert_eq!(walls::cap(&s.model, v, false).len(), 3);
-        s.execute("undo", &serde_json::json!({})).unwrap();
-        assert_eq!(walls::cap(&s.model, h, true).len(), 5);
-        assert_eq!(walls::cap(&s.model, v, false).len(), 5);
+        assert_eq!((walls::cap(&s.model, h, true), walls::cap(&s.model, v, false)), before);
     }
 
     #[test]
@@ -234,7 +260,7 @@ mod tests {
             }
             let caps = |s: &Session, h, v| (walls::cap(&s.model, h, true), walls::cap(&s.model, v, false));
             let before = caps(&s, h, v);
-            assert_eq!(before.0.len(), 5);
+            assert_eq!(before.0.len(), 6);
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("corner.bimcraft");
             s.execute("save", &serde_json::json!({"path": path})).unwrap();

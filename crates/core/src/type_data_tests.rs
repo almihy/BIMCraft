@@ -221,7 +221,9 @@ fn a_wall_schedule_has_area_and_volume_less_its_openings() {
         _ => panic!("no window"),
     };
     let (d, wn) = (size(door), size(window));
-    let net = (8000.0 * height - d.width * d.height - wn.width * wn.height.min(height - sill)) / 1e6;
+    // Each wall's body in plan is what its joins leave it: a Butt takes 100 off an end or adds it.
+    let body = |id: u64| crate::geom::area(&crate::walls::outline(m, id)).abs() / thick;
+    let net = (body(walls[0]) * height - d.width * d.height - wn.width * wn.height.min(height - sill)) / 1e6;
     let r = run(&mut s, "schedule", json!({"name": "Wall Schedule"}));
     let columns: Vec<&str> = r["columns"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
     let (a, v) = (columns.iter().position(|c| c.starts_with("Area")), columns.iter().position(|c| c.starts_with("Volume")));
@@ -236,7 +238,7 @@ fn a_wall_schedule_has_area_and_volume_less_its_openings() {
         by_id.iter().any(|&(area, volume)| (area - net).abs() < 0.006 && (volume - net * thick / 1e3).abs() < 0.006),
         "{by_id:?} vs {net}"
     );
-    let full = 6000.0 * height / 1e6;
+    let full = body(walls[1]) * height / 1e6;
     assert!(by_id.iter().any(|&(area, _)| (area - full).abs() < 0.006), "{by_id:?}");
     // One quantity function: the schedule's cells are the IFC's numbers, to the schedule's rounding.
     let q = crate::quantities::wall(m, walls[0]).unwrap_or_else(|| panic!("a wall"));

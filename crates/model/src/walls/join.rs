@@ -234,8 +234,9 @@ pub(super) fn end_cut(m: &Model, id: Id, at_end: bool, other: Id, other_end: Opt
             cut.seams.push([a, b]);
         }
     }
-    // Beside a layer that runs on past its neighbour: the other wall's layers along its side there.
-    for k in 1..me.layers() {
+    // Beside a layer that runs on past its neighbour: the other wall's layers along its side there. At a corner each such
+    // side is the end of a layer of the other wall, which draws it; a wall that runs on draws no ends of its own there.
+    for k in (1..me.layers()).filter(|_| other_end.is_none()) {
         let (outer, inner) = (held(k - 1), held(k));
         let longer = if outer > inner { k - 1 } else { k };
         for step in outer.min(inner)..outer.max(inner) {

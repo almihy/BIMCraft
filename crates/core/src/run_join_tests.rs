@@ -460,8 +460,10 @@ fn a_wall_refusing_to_join_leaves_its_corner_square_and_stretches_for_no_one() {
     );
     let ids = walls(&s);
     let [a, b] = ids[..] else { panic!() };
-    // Joining, the corner is mitred: each outline reaches a point outside its own rectangle.
-    assert!(crate::walls::outline(&s.model, a).iter().any(|p| p.0 < -1e-9), "mitred");
+    // Joining, the corner is butted: the wall running through reaches a point outside its own rectangle.
+    let past =
+        crate::walls::outline(&s.model, a).iter().any(|p| p.0 < -1e-9) || crate::walls::outline(&s.model, b).iter().any(|p| p.1 < -1e-9);
+    assert!(past, "butted");
     s.execute("modify", &json!({"id": a, "join": false})).unwrap();
     // Refused: each end stands square in its own rectangle, on both sides of the pair.
     for (id, inside) in [(a, 0), (b, 1)] {
