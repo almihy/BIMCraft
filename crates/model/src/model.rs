@@ -374,9 +374,127 @@ pub struct Wall {
     /// its ends stretch with what they meet; an unjoined wall's ends stay square and follow no one.
     #[serde(default = "yes", skip_serializing_if = "is_yes")]
     pub join: bool,
+    /// Whether its start, and its end, joins what it meets: Revit's Allow Join and Disallow Join, which are a wall end's.
+    /// An end set not to join stays square wherever the wall goes.
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub join_start: bool,
+    #[serde(default = "yes", skip_serializing_if = "is_yes")]
+    pub join_end: bool,
     /// Its values of the project's parameters, by name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub params: BTreeMap<String, serde_json::Value>,
+}
+
+impl Wall {
+    /// Whether its end (`at_end`, else its start) joins what it meets there.
+    pub fn joins(&self, at_end: bool) -> bool {
+        self.join && if at_end { self.join_end } else { self.join_start }
+    }
+}
+
+/// How two walls join where their ends meet, as the Wall Joins tool sets it: a Butt (the default: one runs through to the
+/// other's far face), a Mitre (both cut on the line from the inner corner to the outer) or a Square off.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum JoinKind {
+    #[default]
+    Butt,
+    #[serde(alias = "miter")]
+    Mitre,
+    SquareOff,
+}
+
+impl JoinKind {
+    pub const ALL: [JoinKind; 3] = [JoinKind::Butt, JoinKind::Mitre, JoinKind::SquareOff];
+
+    /// Its name in commands and files.
+    pub fn name(self) -> &'static str {
+        match self {
+            JoinKind::Butt => "butt",
+            JoinKind::Mitre => "mitre",
+            JoinKind::SquareOff => "square-off",
+        }
+    }
+
+    /// As the Wall Joins tool names it, Revit's words.
+    pub fn label(self) -> &'static str {
+        match self {
+            JoinKind::Butt => ui_msg!("Butt"),
+            JoinKind::Mitre => ui_msg!("Miter"),
+            JoinKind::SquareOff => ui_msg!("Square off"),
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<JoinKind> {
+        let n = name.trim().to_ascii_lowercase().replace([' ', '_'], "-").replace("miter", "mitre");
+        JoinKind::ALL.into_iter().find(|k| k.name() == n)
+    }
+}
+
+/// Whether a plan cleans a join up: as its view says (Revit's Use View Setting), always (Clean Join), or never, the wall
+/// ends drawn butting against one another (Don't Clean Join).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum JoinDisplay {
+    #[default]
+    ViewSetting,
+    Clean,
+    DontClean,
+}
+
+impl JoinDisplay {
+    pub const ALL: [JoinDisplay; 3] = [JoinDisplay::Clean, JoinDisplay::DontClean, JoinDisplay::ViewSetting];
+
+    /// Its name in commands and files.
+    pub fn name(self) -> &'static str {
+        match self {
+            JoinDisplay::ViewSetting => "view-setting",
+            JoinDisplay::Clean => "clean",
+            JoinDisplay::DontClean => "dont-clean",
+        }
+    }
+
+    /// As the Wall Joins tool names it, Revit's words.
+    pub fn label(self) -> &'static str {
+        match self {
+            JoinDisplay::ViewSetting => ui_msg!("Use View Setting"),
+            JoinDisplay::Clean => ui_msg!("Clean Join"),
+            JoinDisplay::DontClean => ui_msg!("Don't Clean Join"),
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<JoinDisplay> {
+        let n = name.trim().to_ascii_lowercase().replace([' ', '_'], "-").replace('\'', "");
+        let n = match n.as_str() {
+            "use-view-setting" => "view-setting",
+            "clean-join" => "clean",
+            "dont-clean-join" => "dont-clean",
+            other => other,
+        };
+        JoinDisplay::ALL.into_iter().find(|d| d.name() == n)
+    }
+}
+
+/// A join of two wall ends as the Wall Joins tool left it, kept with the model so that it stays as the person set it: the
+/// two ends (each a wall's GUID and whether it is its end, else its start; the lower GUID first), its kind, the wall that
+/// runs through a Butt or is squared by a Square off (`first`; none: the wall made first), and how plans show it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WallJoin {
+    pub ends: [(Guid, bool); 2],
+    #[serde(default)]
+    pub kind: JoinKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first: Option<Guid>,
+    #[serde(default)]
+    pub display: JoinDisplay,
+}
+
+impl WallJoin {
+    /// The two ends in the order a join keeps them.
+    pub fn key(a: (Guid, bool), b: (Guid, bool)) -> [(Guid, bool); 2] {
+        if a <= b { [a, b] } else { [b, a] }
+    }
 }
 
 /// A room's Limit Offset unless it says: its top 2500 mm over its own level.
@@ -3813,6 +3931,10 @@ pub struct Model {
     /// older BIMCraft opens the rest, so it took no `FORMAT` step.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub pinned: BTreeSet<Guid>,
+    /// The joins of wall ends the Wall Joins tool has set: their kind, which wall runs through, how plans show them. A join
+    /// it holds nothing of is a Butt, the wall made first running through.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wall_joins: Vec<WallJoin>,
     /// What temporary dimensions measure to and from by default (Revit's Manage > Additional Settings > Temporary Dimensions):
     /// a wall's lines, and a door's or a window's. A file from before leaves it out, and reads as centre lines, as it always did.
     #[serde(default, skip_serializing_if = "crate::tempdims::Settings::is_default")]
@@ -3924,6 +4046,7 @@ impl Model {
             wire_types: crate::electrical::wire_types(),
             georeference: None,
             pinned: BTreeSet::new(),
+            wall_joins: Vec::new(),
             temporary_dimensions: Default::default(),
             elements: Elements::new(),
             library: crate::library::Library::default(),
@@ -9005,6 +9128,7 @@ impl Model {
             wire_types,
             georeference,
             pinned,
+            wall_joins,
             temporary_dimensions,
             elements: _,
             library,
@@ -9052,6 +9176,7 @@ impl Model {
             && *wire_types == o.wire_types
             && *georeference == o.georeference
             && *pinned == o.pinned
+            && *wall_joins == o.wall_joins
             && *temporary_dimensions == o.temporary_dimensions
             && *library == o.library
             && loaded.len() == o.loaded.len()
@@ -9087,6 +9212,26 @@ impl Model {
         let mut ids: Vec<Id> = self.pinned.iter().filter_map(|g| self.elements.id(*g)).collect();
         ids.sort_unstable();
         ids
+    }
+
+    /// What the Wall Joins tool set for the join of these two wall ends, if anything.
+    pub fn wall_join(&self, a: (Guid, bool), b: (Guid, bool)) -> Option<&WallJoin> {
+        if self.wall_joins.is_empty() {
+            return None;
+        }
+        let key = WallJoin::key(a, b);
+        self.wall_joins.iter().find(|j| j.ends == key)
+    }
+
+    /// Whether a kept join names a wall that is gone.
+    pub fn has_stale_wall_joins(&self) -> bool {
+        self.wall_joins.iter().any(|j| j.ends.iter().any(|(g, _)| !matches!(self.elements.get(*g), Some(Element::Wall(_)))))
+    }
+
+    /// The kept joins of walls that are gone, let go.
+    pub fn forget_stale_wall_joins(&mut self) {
+        let elements = &self.elements;
+        self.wall_joins.retain(|j| j.ends.iter().all(|(g, _)| matches!(elements.get(*g), Some(Element::Wall(_)))));
     }
 
     /// Whether a pin names an element that is gone.

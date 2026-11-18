@@ -198,9 +198,11 @@ pub(super) struct Cut {
 }
 
 /// The cut of wall `id`'s end (`at_end`, else its start) against wall `other`, which ends there too at its end or its start
-/// (`other_end`), or which it ends on the side of (none). `through`: at a corner, this wall runs through. None when either
-/// is no straight wall of a type, or they run too nearly the same way for their layers to cross near the join.
-pub(super) fn end_cut(m: &Model, id: Id, at_end: bool, other: Id, other_end: Option<bool>, through: bool) -> Option<Cut> {
+/// (`other_end`), or which it ends on the side of (none). `through`: at a corner, this wall runs through; with `square`,
+/// it is squared instead (Revit's Square off): its end stands at 90 degrees to itself where the other wall's far face meets
+/// its own nearer face, where a Butt would run it on to a point along that far face. None when either is no straight wall
+/// of a type, or they run too nearly the same way for their layers to cross near the join.
+pub(super) fn end_cut(m: &Model, id: Id, at_end: bool, other: Id, other_end: Option<bool>, through: bool, square: bool) -> Option<Cut> {
     let (me, o) = (Strips::of(m, id)?, Strips::of(m, other)?);
     // The way this wall goes into the join, from its end there.
     let (node, way) = if at_end { (me.end, me.dir) } else { (me.start, me.dir * -1.0) };
@@ -220,10 +222,20 @@ pub(super) fn end_cut(m: &Model, id: Id, at_end: bool, other: Id, other_end: Opt
     let (reach, _) = solve(&mine, &theirs, through && other_end.is_some());
     let held = |k: usize| reach.get(k).and_then(|r| r.first()).copied().unwrap_or(0);
     let far = 6.0 * me.thick().max(o.thick());
+    // Squared: no layer runs past where the other's far face meets this wall's nearer face.
+    let along = |q: P2| (q - node).dot(way);
+    let stop = match (square && through && other_end.is_some(), lines.last()) {
+        (true, Some(last)) => Some(along(me.cross(0, &o, *last)?).min(along(me.cross(me.layers(), &o, *last)?))),
+        _ => None,
+    };
+    let squared = |q: P2| match stop {
+        Some(t) if along(q) > t => q - way * (along(q) - t),
+        _ => q,
+    };
     let mut cut = Cut::default();
     for k in 0..me.layers() {
         let line = *lines.get(held(k))?;
-        let (a, b) = (me.cross(k, &o, line)?, me.cross(k + 1, &o, line)?);
+        let (a, b) = (squared(me.cross(k, &o, line)?), squared(me.cross(k + 1, &o, line)?));
         if a.dist(node) > far || b.dist(node) > far {
             return None;
         }

@@ -340,6 +340,8 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
                 attach_base: None,
                 room_bounding: true,
                 join: true,
+                join_start: true,
+                join_end: true,
             };
             let note = if tid == 0 {
                 "no_type".to_string()

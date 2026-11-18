@@ -27,17 +27,24 @@ neighbour nor stretches with one whose end is dragged (`walls::arms` leaves it o
 footing under such a wall stops at its face as if it were a wall too. The desktop's right-click menu offers Disallow Join and
 Allow Join for the walls and runs selected (`context::Action`, a `modify {join}` command).
 
-At a square corner of two compound walls, one core runs through and the other stops on it (`walls/compound.rs`). It takes
-two walls and nothing else joined there, ending at the same point square to each other, straight, on their centre lines,
-unattached, with the same base and top; each type three layers, finish, structure and finish, each with a material and a
-thickness and none variable; on each face of the corner the same finish material in both walls; each wall longer than twice
-the thicker one's thickness; and no door or window within that thickness of the corner. Any other corner keeps the mitred
-cap. The wall with the lower GUID runs through: its core reaches the far face of the other's, whose core stops at the near
-face of it, and the finishes on each face meet on the diagonal, as in a mitred cap. By GUID, not id, since a GUID never
-changes: a corner brought in by Insert from File, whose ids can come in the other way round, keeps the same core through.
-A copy is new walls with new GUIDs, so a copied corner can run the other core through. Where the cores' materials differ the return draws a seam along its core's end; where they are the same the
-core reads as one. The cap is then five points, a step round the core (`walls::cap`), and plans and sections draw each
-layer to where it ends (`walls::layer_geometry`, `LayerGeometry::band`, `LayerGeometry::interfaces`).
+Two straight walls join as Revit's (`walls/join.rs`). Where their ends meet they Butt, the default: one runs through to the
+other's far face and the other stops against it, the wall made first (the lower id) running through until the Wall Joins tool
+says otherwise. Where one ends on the other's side it stops against it, the other running on. Either way their layers clean
+up by rank, the core before what is outside it and then by priority (`join::Rank`, `join::solve`): a layer runs from its own
+wall through the other's layers of a worse rank, stops before one a better layer has taken, and where it reaches its like the
+two join, the cell going to the wall running through. So finishes wrap a corner and cores join as an L, and a partition's core
+passes the plaster of the wall it ends on to stop on its core. Each wall's end is then stepped, a layer at a time
+(`join::end_cut`, `WallEnd::stepped`: its cap), and the wall running on is broken where the other's layers pass into it: in
+plan each of its layers is its pieces (`join::gaps`, `LayerGeometry::bands`), and its solid gives up that part between the
+other wall's base and top (`tongues`, in `walls::prisms`), so sections, 3D, quantities and IFC share nothing twice. A plan
+draws a line between two layers only where their materials differ (`LayerGeometry::interfaces`). Quantities follow the Butt,
+as Revit's: an L of two 4 m walls is 12.3 and 11.7 m² a side.
+The `wall_join` command is the Wall Joins tool for two ends that meet: `kind` butt, mitre (both cut on the line from the inner
+corner to the outer, the faces' crossings) or square-off (the first wall ends at 90 degrees to itself where the other's far
+face meets its nearer face), `through`, `next` and `previous` for which wall is first, `display` (kept; plans do not read it
+yet), `reset`. What it sets is kept with the model (`Model::wall_joins`, by the two ends' GUIDs; let go with its walls after
+each command, as a pin is). Allow Join is each end's (`Wall::join_start`, `join_end`, `Wall::joins`; `join` off is both).
+Still as before: arc walls, three or more walls at a point, and walls within about 12 degrees of parallel, which mitre.
 
 A wall type is Revit's basic wall type (file format 29, `WALL_FORMAT`; written only when a type needs it). Its layers are Edit
 Assembly's rows, each a `Function` with Revit's priority (`Function::priority`: Structure 1, Substrate 2, Thermal/Air Layer 3,

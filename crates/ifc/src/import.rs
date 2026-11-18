@@ -1957,6 +1957,8 @@ pub fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, String> 
             attach_base: None,
             room_bounding: true,
             join: true,
+            join_start: true,
+            join_end: true,
         };
         let id = m.insert(Element::Wall(wall));
         from.insert(id, who(w.ifc));

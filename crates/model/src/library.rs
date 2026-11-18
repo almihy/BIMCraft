@@ -1721,8 +1721,11 @@ impl Model {
         // What a build that reads up to 28 refuses: a wall type as Revit's, a layer's Finish 2, Wraps or Structural Material.
         let layer =
             |l: &crate::model::Layer| l.wraps || l.structural || l.priority.is_some() || l.function == crate::model::Function::Finish2;
+        let ends = |e: &Element| matches!(e, Element::Wall(w) if !(w.join_start && w.join_end));
         if self.types.wall.values().any(crate::model::WallType::is_revits)
             || self.layered_types().any(|(.., layers)| layers.iter().any(layer))
+            || !self.wall_joins.is_empty()
+            || self.elements.values().any(ends)
         {
             return crate::model::WALL_FORMAT;
         }

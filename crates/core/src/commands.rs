@@ -1793,6 +1793,21 @@ other_files(
         pin::pin,
     ),
     edit(
+        "wall_join",
+        ui_msg!("Wall Joins"),
+        &[],
+        "{walls: [id, id], kind?: butt|mitre|square-off, through?: id, next?: true, previous?: true, display?: clean|dont-clean|\
+         view-setting, reset?: true} sets how two walls join where their ends meet, as Revit's Wall Joins tool: a Butt (the \
+         default; one wall runs through to the other's far face, their layers cleaned up by priority), a Mitre (both cut on the \
+         line from the inner corner to the outer) or a Square off. `through` names the wall that runs through a Butt (or is \
+         squared); `next` and `previous` step to the other order, as the tool's buttons; none given keeps the order it has \
+         (the wall made first, until one is set). `display` is how plans show it: cleaned up, the wall ends butting against one \
+         another, or as the view says. `reset` forgets what was set, back to the default Butt. A wall ending on another's side \
+         has one configuration only and is refused here. Whether an end joins at all is the wall's `join_start` and `join_end` \
+         (`modify`), Revit's Allow Join and Disallow Join. Returns {walls, ends, kind, through, display}",
+        wall_join,
+    ),
+    edit(
         "unpin",
         ui_msg!("Unpin"),
         &["UP"],
@@ -8140,6 +8155,8 @@ fn wall(s: &mut Session, p: &Value) -> R {
                 attach_base,
                 room_bounding,
                 join: true,
+                join_start: true,
+                join_end: true,
             }))
         })
         .collect();
@@ -9978,6 +9995,8 @@ fn dormer(s: &mut Session, p: &Value) -> R {
             attach_base: Some(host),
             room_bounding: true,
             join: true,
+            join_start: true,
+            join_end: true,
         })
     };
     let (l, r) = (micron(at + n * (w / 2.0)), micron(at - n * (w / 2.0)));
@@ -13023,6 +13042,82 @@ fn layered(
     }
 }
 
+/// The Wall Joins tool: the kind, order and display of the join of two wall ends, kept with the model.
+fn wall_join(s: &mut Session, p: &Value) -> R {
+    use crate::model::{JoinDisplay, JoinKind, WallJoin};
+    let c = "wall_join";
+    only(c, p, &["walls", "kind", "through", "next", "previous", "display", "reset"])?;
+    let ids: Vec<Id> = match p.get("walls") {
+        Some(Value::Array(a)) if a.len() == 2 => {
+            a.iter().map(|v| v.as_u64().ok_or(())).collect::<Result<_, _>>().map_err(|()| bad(c, "`walls` is two wall ids"))?
+        }
+        _ => return Err(bad(c, "`walls` is the two walls that meet: [id, id]")),
+    };
+    let m = &s.model;
+    let (a, b) = (ids[0], ids[1]);
+    let (Some(wa), Some(wb)) = (m.wall(a), m.wall(b)) else { return Err(bad(c, format!("{a} and {b} are not two walls"))) };
+    // The ends that meet: each wall's start or end at one point.
+    let ends = |w: &crate::model::Wall| [(w.start, false), (w.end, true)];
+    let met = ends(wa).into_iter().find_map(|(pa, ea)| ends(wb).into_iter().find(|(pb, _)| pa.dist(*pb) <= TOL).map(|(_, eb)| (ea, eb)));
+    let Some((ea, eb)) = met.filter(|_| a != b) else {
+        return Err(bad(
+            c,
+            format!(
+                "walls {a} and {b} do not meet end to end; a wall ending on another's side joins it one way only, which is not set here"
+            ),
+        ));
+    };
+    let (ga, gb) = (m.guid(a), m.guid(b));
+    let key = WallJoin::key((ga, ea), (gb, eb));
+    let mut join = m.wall_join((ga, ea), (gb, eb)).cloned().unwrap_or(WallJoin {
+        ends: key,
+        kind: JoinKind::Butt,
+        first: None,
+        display: JoinDisplay::ViewSetting,
+    });
+    if let Some(name) = string(c, p, "kind")? {
+        join.kind = JoinKind::from_name(&name).ok_or_else(|| bad(c, format!("`kind` is butt, mitre or square-off, not `{name}`")))?;
+    }
+    if let Some(name) = string(c, p, "display")? {
+        join.display =
+            JoinDisplay::from_name(&name).ok_or_else(|| bad(c, format!("`display` is clean, dont-clean or view-setting, not `{name}`")))?;
+    }
+    // The wall that is first now: the one set, else the one made first.
+    let now = join.first.unwrap_or(if a < b { ga } else { gb });
+    match p.get("through") {
+        v if absent(v) => {}
+        Some(v) => {
+            let id = v
+                .as_u64()
+                .filter(|id| *id == a || *id == b)
+                .ok_or_else(|| bad(c, format!("`through` is one of the two walls, {a} or {b}")))?;
+            join.first = Some(m.guid(id));
+        }
+        None => {}
+    }
+    // Two walls have two orders: Next and Previous both step to the other.
+    if flag(c, p, "next")? || flag(c, p, "previous")? {
+        join.first = Some(if now == ga { gb } else { ga });
+    }
+    let reset = flag(c, p, "reset")?;
+    let m = s.model_mut();
+    m.wall_joins.retain(|j| j.ends != key);
+    if !reset {
+        m.wall_joins.push(join.clone());
+        m.wall_joins.sort_by(|x, y| x.ends.cmp(&y.ends));
+    } else {
+        join = WallJoin { ends: key, kind: JoinKind::Butt, first: None, display: JoinDisplay::ViewSetting };
+    }
+    let through = join.first.unwrap_or(if a < b { ga } else { gb });
+    Ok(json!({
+        "walls": [a, b],
+        "ends": [if ea { "end" } else { "start" }, if eb { "end" } else { "start" }],
+        "kind": join.kind.name(),
+        "through": if through == ga { a } else { b },
+        "display": join.display.name(),
+    }))
+}
+
 fn modify(s: &mut Session, p: &Value) -> R {
     let c = "modify";
     let fields = p.as_object().ok_or_else(|| bad(c, "params must be {id | ids, …fields}"))?;
@@ -13272,7 +13367,9 @@ fn arms_at(m: &Model, at: P2, (lo, hi): (f64, f64)) -> usize {
         .values()
         .filter(|e| match e {
             Element::Wall(w) => {
-                w.join && (w.start.dist(at) <= TOL || w.end.dist(at) <= TOL) && m.base_z(w) <= hi + TOL && lo - TOL <= m.top_z(w)
+                (w.joins(false) && w.start.dist(at) <= TOL || w.joins(true) && w.end.dist(at) <= TOL)
+                    && m.base_z(w) <= hi + TOL
+                    && lo - TOL <= m.top_z(w)
             }
             e => e.run().is_some_and(|r| {
                 r.join

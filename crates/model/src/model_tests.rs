@@ -22,6 +22,8 @@ fn wall(level: Guid, a: P2, b: P2) -> Element {
         attach_base: None,
         room_bounding: true,
         join: true,
+        join_start: true,
+        join_end: true,
     })
 }
 

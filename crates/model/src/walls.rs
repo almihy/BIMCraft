@@ -250,12 +250,13 @@ fn arms(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> (Vec<Arm>, bo
     let node = if at_end { w.end } else { w.start };
     let mut arms = vec![arm(m, id, w, at_end, true)];
     let mut through = false;
-    // A wall that refuses to join meets nothing at this end: its own square end is its whole cap.
-    if !w.join {
+    // An end that refuses to join meets nothing: its own square end is its whole cap.
+    if !w.joins(at_end) {
         return (arms, false);
     }
-    // A wall that refuses to join is no candidate for anyone either: neither side is mitred.
-    let joins = |o: &Wall| o.join && stacked(m, w, o);
+    // An end that refuses to join is no candidate for anyone either, nor a wall that refuses altogether for one ending on
+    // its side: neither is cut to the other.
+    let joins = |o: &Wall, end: Option<bool>| end.map_or(o.join, |e| o.joins(e)) && stacked(m, w, o);
     let candidates: Box<dyn Iterator<Item = (Id, &Wall)> + '_> = match index {
         Some(index) => Box::new(index.neighbours_at(id, node).into_iter().filter_map(|id| Some((id, m.wall(id)?)))),
         // The walls whose location lines come within the thickest wall's thickness of the node (those that end at it,
@@ -274,11 +275,11 @@ fn arms(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> (Vec<Arm>, bo
             continue;
         }
         if o.start.dist(node) <= TOL {
-            if joins(o) {
+            if joins(o, Some(false)) {
                 arms.push(arm(m, other, o, false, false));
             }
         } else if o.end.dist(node) <= TOL {
-            if joins(o) {
+            if joins(o, Some(true)) {
                 arms.push(arm(m, other, o, true, false));
             }
         } else {
@@ -286,7 +287,11 @@ fn arms(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> (Vec<Arm>, bo
             let ax = Axis::of(o);
             let (s, across) = ax.project(node);
             let (ext, int) = faces(m, o);
-            if s > TOL && s < ax.length() - TOL && (int - TOL..=ext + TOL).contains(&across) && ax.distance(node, across) <= TOL && joins(o)
+            if s > TOL
+                && s < ax.length() - TOL
+                && (int - TOL..=ext + TOL).contains(&across)
+                && ax.distance(node, across) <= TOL
+                && joins(o, None)
             {
                 let (t, (e, i), c) = (ax.tangent(s), (ax.at(s, ext), ax.at(s, int)), ax.at(s, (ext + int) / 2.0));
                 arms.push(Arm { id: other, at_end: false, mine: false, way: t, ccw: e, cw: i, centre: c, thick: ext - int });
@@ -353,13 +358,22 @@ fn end_geometry(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> WallE
     // change once a join keeps its order (the Wall Joins tool's Previous and Next). A wall ending on another's side stops
     // against it, the other running on.
     if n == 2 && !through {
-        let runs_through = id < next.id;
-        if let Some(cut) = join::end_cut(m, id, at_end, next.id, Some(next.at_end), runs_through) {
-            return WallEnd::stepped(cut, at_end);
+        // What the Wall Joins tool set for this corner, if anything: its kind, and which wall is first.
+        let kept = m.wall_join((m.guid(id), at_end), (m.guid(next.id), next.at_end));
+        let first = kept.and_then(|j| j.first).map_or(id < next.id, |g| g == m.guid(id));
+        match kept.map_or(crate::model::JoinKind::Butt, |j| j.kind) {
+            // A Mitre is the faces' crossings, below.
+            crate::model::JoinKind::Mitre => {}
+            kind => {
+                let square = kind == crate::model::JoinKind::SquareOff;
+                if let Some(cut) = join::end_cut(m, id, at_end, next.id, Some(next.at_end), first, square) {
+                    return WallEnd::stepped(cut, at_end);
+                }
+            }
         }
     }
     if n == 3 && through && next.id == prev.id {
-        if let Some(cut) = join::end_cut(m, id, at_end, next.id, None, false) {
+        if let Some(cut) = join::end_cut(m, id, at_end, next.id, None, false, false) {
             return WallEnd::stepped(cut, at_end);
         }
     }
@@ -392,8 +406,8 @@ fn tees(m: &Model, id: Id, index: Option<&Index>) -> Vec<(Id, bool)> {
     let near = m.lookup().walls_near_at(&[(reach, m.base_z(w), m.top_z(w))], thickest + 1.0);
     let mut out = Vec::new();
     for other in near.into_iter().filter(|o| *o != id) {
-        let Some(o) = m.wall(other).filter(|o| o.arc == 0.0 && o.join) else { continue };
-        for at_end in [false, true] {
+        let Some(o) = m.wall(other).filter(|o| o.arc == 0.0) else { continue };
+        for at_end in [false, true].into_iter().filter(|e| o.joins(*e)) {
             let node = if at_end { o.end } else { o.start };
             let (s, across) = axis.project(node);
             if s <= TOL || s >= axis.length() - TOL || !(int - TOL..=ext + TOL).contains(&across) {

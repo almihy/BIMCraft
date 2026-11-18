@@ -232,6 +232,7 @@ pub(crate) fn without_elements(m: &Model) -> Model {
         wire_types: m.wire_types.clone(),
         georeference: m.georeference.clone(),
         pinned: m.pinned.clone(),
+        wall_joins: m.wall_joins.clone(),
         temporary_dimensions: m.temporary_dimensions,
         elements: crate::ids::Elements::new(),
         library: m.library.clone(),

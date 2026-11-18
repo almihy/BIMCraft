@@ -617,6 +617,10 @@ impl Session {
             if self.model.has_stale_pins() {
                 self.model_mut().forget_stale_pins();
             }
+            // And a join the Wall Joins tool set, with its walls.
+            if self.model.has_stale_wall_joins() {
+                self.model_mut().forget_stale_wall_joins();
+            }
             // What a command was given by id points at the element's GUID; what it put in the library has an id and a GUID.
             if verified {
                 self.model_mut().resolve_changed(&before);
