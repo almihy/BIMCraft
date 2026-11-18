@@ -178,6 +178,7 @@ pub fn drawn(icon: Icon) -> Option<&'static Drawn> {
         Icon::TrimSingle => Some(&TRIMSINGLE),
         Icon::TrimMultiple => Some(&TRIMMULTIPLE),
         Icon::Split => Some(&SPLIT),
+        Icon::WallJoins => Some(&WALLJOINS),
         Icon::Flip => Some(&FLIP),
         Icon::Attach => Some(&ATTACH),
         Icon::Detach => Some(&DETACH),
@@ -2105,6 +2106,17 @@ static SPLIT: Drawn = Drawn {
         (false, &[[2.0, 12.0], [9.0, 12.0]]),
         (false, &[[15.0, 12.0], [22.0, 12.0]]),
         (false, &[[10.0, 17.0], [14.0, 7.0]]),
+    ],
+    small: &[
+    ],
+};
+
+static WALLJOINS: Drawn = Drawn {
+    name: "WallJoins",
+    origin: Origin::Arqiflow,
+    outlines: &[
+        (true, &[[3.0, 4.0], [21.0, 4.0], [21.0, 10.0], [9.0, 10.0], [9.0, 21.0], [3.0, 21.0]]),
+        (false, &[[9.0, 4.0], [9.0, 10.0]]),
     ],
     small: &[
     ],

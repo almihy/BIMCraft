@@ -395,6 +395,14 @@ fn end_geometry(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> WallE
     WallEnd::plain(if through { vec![cw, ccw] } else { vec![cw, node, ccw] })
 }
 
+/// The wall end that wall `id`'s end (`at_end`, else its start) joins, when it joins one other wall end and nothing else:
+/// the join the Wall Joins tool changes.
+pub fn end_join(m: &Model, id: Id, at_end: bool) -> Option<(Id, bool)> {
+    let (arms, through) = arms(m, id, at_end, None);
+    let other = arms.iter().find(|a| a.id != id)?;
+    (arms.len() == 2 && !through).then_some((other.id, other.at_end))
+}
+
 /// The straight walls that end on the side of the straight wall `id`, each with which of its ends does (its end, else its
 /// start): those whose join there is theirs and this wall's alone.
 fn tees(m: &Model, id: Id, index: Option<&Index>) -> Vec<(Id, bool)> {

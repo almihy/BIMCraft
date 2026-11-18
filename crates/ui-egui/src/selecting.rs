@@ -81,6 +81,7 @@ pub(crate) fn tool_name(tool: &Tool) -> &'static str {
         Tool::Align(_) => msg!("Align"),
         Tool::Trim(_) => msg!("Trim/Extend to Corner"),
         Tool::Split => msg!("Split Element"),
+        Tool::WallJoins(_) => msg!("Wall Joins"),
         Tool::Offset => msg!("Offset"),
         Tool::Dimension(..) => msg!("Aligned Dimension"),
         Tool::Text => msg!("Text"),

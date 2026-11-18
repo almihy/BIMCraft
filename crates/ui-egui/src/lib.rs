@@ -219,6 +219,8 @@ pub enum Tool {
     },
     /// Split the wall picked.
     Split,
+    /// Revit's Wall Joins: the join picked (its two walls), once one is; its kind, order and display are then the options'.
+    WallJoins(Option<(Id, Id)>),
     /// Copy (or move) the wall picked to the cursor's side, by the Options Bar's distance.
     Offset,
     /// Take the element picked down in the phase of the view on screen, or, if it comes down in it already, back up.
@@ -1741,6 +1743,7 @@ impl BimApp {
             | Tool::TrimTo { .. }
             | Tool::Vertex { .. }
             | Tool::Split
+            | Tool::WallJoins(_)
             | Tool::Offset
             | Tool::Demolish
             | Tool::Linework
@@ -2584,6 +2587,7 @@ impl BimApp {
                 Some("scale_elements") => Tool::Scale(Vec::new()),
                 Some("corner") => Tool::Trim(None),
                 Some("split") => Tool::Split,
+                Some("wall_join") => Tool::WallJoins(None),
                 Some("linework") => Tool::Linework,
                 Some("detail_group") => Tool::DetailGroup,
                 Some("repeating_detail") => Tool::RepeatingDetail(None),
@@ -2870,6 +2874,7 @@ impl BimApp {
                 | Tool::TrimTo { .. }
                 | Tool::Vertex { .. }
                 | Tool::Split
+                | Tool::WallJoins(_)
                 | Tool::Offset
                 | Tool::Demolish
                 | Tool::Linework
@@ -5095,6 +5100,13 @@ impl BimApp {
                     true,
                 ),
                 (
+                    Icon::WallJoins,
+                    msg!("Wall Joins"),
+                    msg!("Wall Joins: click the square over a join of two walls, then pick Butt, Miter or Square off and its order"),
+                    Some(Tool::WallJoins(None)),
+                    true,
+                ),
+                (
                     Icon::Linework,
                     msg!("Linework"),
                     msg!("Linework (LW): click an edge to draw it in another line style, or hide it, in this view only"),
@@ -5361,6 +5373,58 @@ impl BimApp {
     }
 
     /// The tool's own options on the Options Bar, after its name.
+    /// The Wall Joins tool's options for the join of walls `a` and `b`, as Revit's contextual tab has them: Butt, Miter or
+    /// Square off; Previous and Next for which wall is first; how plans show it; and Disallow Join, which lets both ends go.
+    /// Each is a `wall_join` command (Disallow Join a `modify` of the two ends), undone like any other.
+    fn wall_join_options(&mut self, ui: &mut Ui, a: Id, b: Id) {
+        use bimcraft_core::model::{JoinDisplay, JoinKind};
+        let m = Arc::clone(&self.session.model);
+        let Some((ea, eb)) = join_ends(&m, a, b) else {
+            self.tool = Tool::WallJoins(None);
+            return;
+        };
+        let kept = m.wall_join((m.guid(a), ea), (m.guid(b), eb));
+        let (kind, display) = (kept.map_or(JoinKind::Butt, |j| j.kind), kept.map_or(JoinDisplay::ViewSetting, |j| j.display));
+        let mut run: Option<Value> = None;
+        for k in JoinKind::ALL {
+            if ui.radio(kind == k, t(k.label())).clicked() && kind != k {
+                run = Some(json!({"walls": [a, b], "kind": k.name()}));
+            }
+        }
+        ui.separator();
+        // A Mitre has one order; a Butt and a Square off have two.
+        let ordered = kind != JoinKind::Mitre;
+        if ui.add_enabled(ordered, egui::Button::new(t("Previous"))).clicked() {
+            run = Some(json!({"walls": [a, b], "previous": true}));
+        }
+        if ui.add_enabled(ordered, egui::Button::new(t("Next"))).clicked() {
+            run = Some(json!({"walls": [a, b], "next": true}));
+        }
+        ui.separator();
+        let l = ui.label(t("Display:"));
+        let c = icons::combo("wall-join-display").selected_text(t(display.label())).width(150.0).show_ui(ui, |ui| {
+            for d in JoinDisplay::ALL {
+                if ui.selectable_label(display == d, t(d.label())).clicked() && display != d {
+                    run = Some(json!({"walls": [a, b], "display": d.name()}));
+                }
+            }
+        });
+        c.response.labelled_by(l.id);
+        ui.separator();
+        if ui.button(t("Disallow Join")).clicked() {
+            // Every wall end at the join, as Revit's: two independent ends, and no join left to have picked.
+            let step = self.run("modify", json!({"id": a, if ea { "join_end" } else { "join_start" }: false})).is_some();
+            if step {
+                self.run("modify", json!({"id": b, if eb { "join_end" } else { "join_start" }: false}));
+            }
+            self.tool = Tool::WallJoins(None);
+            return;
+        }
+        if let Some(p) = run {
+            self.run("wall_join", p);
+        }
+    }
+
     fn tool_options(&mut self, ui: &mut Ui) {
         if self.note_edit.is_some() {
             self.note_options(ui);
@@ -5504,6 +5568,7 @@ impl BimApp {
             Tool::Move(_) => {
                 ui.checkbox(&mut self.constrain, t("Constrain"));
             }
+            Tool::WallJoins(Some((a, b))) => self.wall_join_options(ui, a, b),
             Tool::Copy(_) => {
                 ui.checkbox(&mut self.constrain, t("Constrain"));
                 ui.checkbox(&mut self.multiple, t("Multiple"));
@@ -5727,6 +5792,8 @@ impl BimApp {
             Tool::Vertex { delete: false } => msg!("Click a polyline or a spline where a vertex goes."),
             Tool::Vertex { delete: true } => msg!("Click a polyline's corner or a spline's point to take it out."),
             Tool::Split => msg!("Click a wall or a line where to split it."),
+            Tool::WallJoins(None) => msg!("Move the cursor over a wall join, and click within the square that displays."),
+            Tool::WallJoins(Some(_)) => msg!("Pick the join's configuration on the bar above, or click another join; Modify exits."),
             Tool::Offset => msg!("Point to a wall or a line: the offset goes to the cursor's side. Click to place it."),
             Tool::Demolish => msg!("Click an element to take it down in the view's phase; click it again to take it back."),
             Tool::Linework => msg!("Click an edge to draw it in the line style in the Options Bar; <By Category> puts it back."),
@@ -6355,4 +6422,30 @@ impl eframe::App for BimApp {
             raw.events.retain(|e| !matches!(e, Event::Key { key: Key::Tab, .. }));
         }
     }
+}
+
+/// Which end of wall `a` and which of wall `b` meet at one point (its end, else its start), if any do.
+pub(crate) fn join_ends(m: &Model, a: Id, b: Id) -> Option<(bool, bool)> {
+    let (wa, wb) = (m.wall(a)?, m.wall(b)?);
+    let ends = |w: &bimcraft_core::model::Wall| [(w.start, false), (w.end, true)];
+    ends(wa).into_iter().find_map(|(pa, ea)| ends(wb).into_iter().find(|(pb, _)| pa.dist(*pb) <= 0.5).map(|(_, eb)| (ea, eb)))
+}
+
+/// Where walls `a` and `b` join end to end.
+pub(crate) fn join_point(m: &Model, a: Id, b: Id) -> Option<P2> {
+    let (ea, _) = join_ends(m, a, b)?;
+    m.wall(a).map(|w| if ea { w.end } else { w.start })
+}
+
+/// The join of two wall ends nearest `at` among wall `id`'s: its two walls and where they meet, the end of `id` nearer
+/// the point, when that end joins one other wall end.
+pub(crate) fn join_near(m: &Model, id: Id, at: P2) -> Option<(Id, Id, P2)> {
+    let w = m.wall(id)?;
+    let at_end = w.end.dist(at) < w.start.dist(at);
+    let node = if at_end { w.end } else { w.start };
+    // Within reach of the join: no farther along the wall than a few of its thicknesses.
+    if node.dist(at) > 4.0 * m.thickness(w).max(100.0) {
+        return None;
+    }
+    bimcraft_core::walls::end_join(m, id, at_end).map(|(other, _)| (id, other, node))
 }

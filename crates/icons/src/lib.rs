@@ -61,6 +61,7 @@ icon_names! {
     Offset,
     Trim,
     Split,
+    WallJoins,
     Dimension,
     Tag,
     TagAll,

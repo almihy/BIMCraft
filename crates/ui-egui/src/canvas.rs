@@ -1864,6 +1864,7 @@ impl BimApp {
             Tool::Split => {
                 d.pick_all(q, PICK).into_iter().find(|id| matches!(model.elements.get(id), Some(Element::Wall(_) | Element::DetailLine(_))))
             }
+            Tool::WallJoins(_) => d.pick_all(q, PICK).into_iter().find(|id| model.wall(*id).is_some()),
             Tool::Trim(_) | Tool::Offset => {
                 d.pick_all(q, PICK).into_iter().find(|id| matches!(model.elements.get(id), Some(Element::Wall(_) | Element::DetailLine(_))))
             }
@@ -2591,6 +2592,10 @@ impl BimApp {
                 if let Some(id) = hovered {
                     self.run("split", json!({"id": id, "at": point(self.snap(m, level, v, at, &[], false).at)}));
                 }
+            }
+            // The join under the cursor is the one the options change; a click on no join lets go of the one picked.
+            Tool::WallJoins(_) => {
+                self.tool = Tool::WallJoins(hovered.and_then(|id| crate::join_near(m, id, v.mm(at))).map(|(a, b, _)| (a, b)));
             }
             // A pinned element is not offset in place; a copy of it is.
             Tool::Offset if !self.offset_copy && hovered.is_some_and(|id| m.is_pinned(id)) => {
@@ -4350,6 +4355,20 @@ impl BimApp {
                     alignment_pick(m, key, self.sketch.as_ref(), *reference, hovered, v.mm(q), 2.0 * f64::from(PICK) / v.scale)
                 {
                     p.line_segment([sc.screen(line.0), sc.screen(line.1)], Stroke::new(4.0, canvas_pal().hover));
+                }
+                return;
+            }
+            &Tool::WallJoins(picked) => {
+                // Revit's square over a join: over the one under the cursor, and heavier over the one picked.
+                let square = |at: P2, heavy: bool| {
+                    let r = egui::Rect::from_center_size(sc.screen(at), vec2(26.0, 26.0));
+                    p.rect_stroke(r, 0.0, Stroke::new(if heavy { 2.5 } else { 1.5 }, canvas_pal().hover), egui::StrokeKind::Middle);
+                };
+                if let Some((_, _, at)) = hovered.and_then(|id| crate::join_near(m, id, v.mm(q))) {
+                    square(at, false);
+                }
+                if let Some(at) = picked.and_then(|(a, b)| crate::join_point(m, a, b)) {
+                    square(at, true);
                 }
                 return;
             }

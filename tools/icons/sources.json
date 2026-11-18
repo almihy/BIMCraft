@@ -152,6 +152,7 @@
     "TrimSingle": "arrow-right-to-line",
     "TrimMultiple": "own:TrimMultiple",
     "Split": "own:Split",
+    "WallJoins": "own:WallJoins",
     "Flip": "arrow-down-up",
     "Attach": "arrow-up-to-line",
     "Detach": "arrow-down-from-line",

@@ -314,6 +314,7 @@ impl BimApp {
             "Align" => self.start_tool(Tool::Align(None)),
             "Trim/Extend to Corner" => self.start_tool(Tool::Trim(None)),
             "Split" => self.start_tool(Tool::Split),
+            "Wall Joins" => self.start_tool(Tool::WallJoins(None)),
             "Offset" => self.start_tool(Tool::Offset),
             "Demolish" => self.start_tool(Tool::Demolish),
             "Paint" => self.start_tool(Tool::Paint),

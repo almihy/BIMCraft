@@ -418,6 +418,11 @@ pub fn own(icon: Icon, compact: bool) -> Vec<Outline> {
                 g.line(&[(13.5, 14.0), (16.5, 17.0), (13.5, 20.0)]);
             }
         }
+        Icon::WallJoins => {
+            // Two walls meeting at a corner, one butting the other.
+            g.closed(&[(3.0, 4.0), (21.0, 4.0), (21.0, 10.0), (9.0, 10.0), (9.0, 21.0), (3.0, 21.0)]);
+            g.line(&[(9.0, 4.0), (9.0, 10.0)]);
+        }
         Icon::Split => {
             // Two separated segments with a narrow cut mark.
             g.closed(&[(3.0, 8.0), (9.0, 8.0), (9.0, 16.0), (3.0, 16.0)]);
