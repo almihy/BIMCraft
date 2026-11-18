@@ -212,7 +212,13 @@ file, the PC otherwise idle):
 | `model.rs` | about 100 s | 81 s (the model 26 s, then the core's tests 52 s) |
 | `commands.rs` | | 51 s (the core's tests 49 s) |
 
-What is left after every change is the core's test binary: 2.9 MB of tests in one crate, compiled on one thread, about
-50 s whatever changed below it. The next step is to split it into test crates that compile side by side (the tests that
-drive the Session by area: views and drawings, MEP and structure, the site, families, IFC), each linking the same
-libraries, so a change waits on the largest of them rather than on all of them.
+What is left after every change is the core's test binary: 2.9 MB of tests in one crate, about 50 s whatever changed
+below it.
+
+**Tried and left (18 November, branch infra/core-tests-split, not merged): the core's tests as eight test crates.** Each
+group compiled in about 6 s on its own, but after a change below them all eight rebuild at once beside ui-egui's tests,
+and each repeats the generic code it uses: a change in `commands.rs` went from about 51 s to about 92 s (ui-egui's tests
+from 45 s to 70 s, slowed by the groups beside them), and testing the core alone gained 4 s (49 s to 45 s), for twenty
+test executables and 20 GB more of build output. The core's tests stay one test build of the library. What that branch
+also did, and could be taken on its own if wanted: the Session's checks under `cfg(test)` as debug-build self-checks
+(`selfcheck`), and the self-check test reaching every check by itself.
