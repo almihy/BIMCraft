@@ -389,17 +389,30 @@ pub(crate) fn wrapping(ui: &mut Ui, salt: &str, label: UiId, value: &mut Wrappin
 fn layers(ui: &mut Ui, e: &mut Editing, units: Units, materials: &[String]) {
     let muted = |s: &str| RichText::new(s).color(pal().muted);
     let mut structural: Option<usize> = None;
-    Grid::new("assembly-layers").num_columns(6).striped(true).spacing(vec2(8.0, 4.0)).show(ui, |ui| {
-        ui.label("");
+    // A ruled table in a frame, as Type Properties': a head, a line under each row and between the columns, the row picked
+    // filled across. The fills go under the cells, so their places are kept before the cells are drawn.
+    let rule = egui::Stroke::new(1.0, pal().border.gamma_multiply(0.6));
+    let gap = vec2(12.0, 6.0);
+    let frame = egui::Frame::new().fill(pal().surface).stroke(egui::Stroke::new(1.0, pal().border)).inner_margin(egui::Margin::symmetric(8, 3));
+    let framed = frame.show(ui, |ui| {
+    ui.set_width(ui.available_width());
+    let (head_fill, picked_fill) = (ui.painter().add(egui::Shape::Noop), ui.painter().add(egui::Shape::Noop));
+    // Each column's left edge, and each row's top and bottom (the head's first).
+    let (mut columns, mut rows): (Vec<f32>, Vec<(f32, f32)>) = (Vec::new(), Vec::new());
+    Grid::new("assembly-layers").num_columns(6).min_row_height(24.0).spacing(gap).show(ui, |ui| {
+        let number = ui.label("");
         let function = ui.label(muted(t("Function")));
         let material = ui.label(muted(t("Material")));
         let thickness = ui.label(muted(t("Thickness")));
         let wraps = ui.label(muted(t("Wraps")));
         let structure = ui.label(muted(t("Structural Material")));
+        columns = [&function, &material, &thickness, &wraps, &structure].map(|r| r.rect.left()).to_vec();
+        rows.push((number.rect.top(), number.rect.bottom()));
         ui.end_row();
         for (i, line) in e.draft.lines().into_iter().enumerate() {
             let number = (i + 1).to_string();
-            let pick = ui.selectable_label(e.picked == Some(i), &number);
+            let pick = ui.add_sized([22.0, 20.0], egui::Button::selectable(e.picked == Some(i), &number));
+            rows.push((pick.rect.top(), pick.rect.bottom()));
             let name = tf("Row {}", &[&number]);
             let on = e.picked == Some(i);
             pick.widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, on, &name));
@@ -457,6 +470,26 @@ fn layers(ui: &mut Ui, e: &mut Editing, units: Units, materials: &[String]) {
             ui.end_row();
         }
     });
+    (head_fill, picked_fill, columns, rows)
+    });
+    let (head_fill, picked_fill, columns, rows) = framed.inner;
+    let outer = framed.response.rect;
+    let p = ui.painter();
+    let band = |(top, bottom): (f32, f32)| egui::Rect::from_x_y_ranges(outer.x_range(), top - gap.y / 2.0..=bottom + gap.y / 2.0);
+    for (i, row) in rows.iter().enumerate() {
+        let r = band(*row).intersect(outer);
+        if i == 0 {
+            p.set(head_fill, egui::Shape::rect_filled(r, 0.0, pal().panel));
+        } else if e.picked == Some(i - 1) {
+            p.set(picked_fill, egui::Shape::rect_filled(r, 0.0, pal().hover_fill));
+        }
+        if i + 1 < rows.len() {
+            p.line_segment([r.left_bottom(), r.right_bottom()], rule);
+        }
+    }
+    for x in columns {
+        p.line_segment([egui::pos2(x - gap.x / 2.0, outer.top()), egui::pos2(x - gap.x / 2.0, outer.bottom())], rule);
+    }
     // One structural material: the one just ticked.
     if let Some(k) = structural {
         for (j, row) in e.draft.rows.iter_mut().enumerate() {
