@@ -111,6 +111,10 @@ debug = "line-tables-only"
 opt-level = 1
 [profile.dev.package.bimcraft-model]
 opt-level = 1
+[profile.dev.package.bimcraft-site]
+opt-level = 1
+[profile.dev.package.bimcraft-ifc]
+opt-level = 1
 [profile.dev.package.bimcraft-mep-calc]
 opt-level = 1
 [profile.dev.package.bimcraft-geom]
