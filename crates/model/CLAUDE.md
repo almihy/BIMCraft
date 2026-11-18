@@ -1,9 +1,11 @@
 # bimcraft-model
 
-The building model and everything that reads it: elements, types, families and the library, what each element is in plan
-and 3D, the views drawn from it (plans, sections, the 3D view, sheets, PDF, glTF), schedules, IFC export and import, the
-site, warnings and the model's half of live merge. Its module map is in the root [CLAUDE.md](../../CLAUDE.md); how a change
-goes (a command, a rule in `Model::check`, ids and GUIDs) is in [crates/core/CLAUDE.md](../core/CLAUDE.md), and holds here.
+The building model: elements, types, families and the library, what each element is in plan and in 3D (`solids`), schedules,
+title blocks' data, warnings and the model's half of live merge. Its module map is in the root [CLAUDE.md](../../CLAUDE.md);
+how a change goes (a command, a rule in `Model::check`, ids and GUIDs) is in [crates/core/CLAUDE.md](../core/CLAUDE.md),
+and holds here. The drawings are `bimcraft-render`'s and IFC is `bimcraft-ifc`'s, both above it; the site's geometry is
+`bimcraft-site`'s, under it. Nothing here draws: what the model needs of a drawing's numbers lives here (`prim::DENSITY`,
+`Dimension3D::length`, `titleblock::sheet_values`).
 
 - **Under the commands.** Nothing here knows about the `Session` or the commands (`bimcraft-core`); what runs after every
   command takes the model (`masterplan::keep`, `constraints`), and the engine applies it. The geometry under it is

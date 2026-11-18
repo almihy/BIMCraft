@@ -1,6 +1,6 @@
 [package]
 name = "bimcraft-model"
-description = "BIMCraft's building model and what it is drawn and exported as: elements, types, families, plans, sections, the 3D view, sheets, IFC"
+description = "BIMCraft's building model: elements, types, families, the library, schedules, and what each element is in 3D"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

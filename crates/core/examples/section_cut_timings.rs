@@ -6,7 +6,7 @@ use std::time::Instant;
 use bimcraft_core::engine::Session;
 use bimcraft_core::geom::P2;
 use bimcraft_core::model::{Element, Id, Model};
-use bimcraft_core::{render, view3d};
+use bimcraft_core::{render, solids};
 use serde_json::json;
 
 /// Every element a line is cut by, as it was before the solids: what `Solid::cuts` made of every piece the scene holds.

@@ -1,7 +1,8 @@
-//! BIMCraft's building model and everything that reads it: the elements, their types, families and the library
-//! (`model`, `ids`, `library`), what each element is in plan and 3D, the views drawn from it (`render`, `view3d`, `sheet`,
-//! `pdf`, `gltf`), the schedules, IFC export and import, and the site. The commands that change it and the Session that runs
-//! them are `bimcraft-core`'s, which re-exports each module here under its old path. Nothing here knows about a UI.
+//! BIMCraft's building model: the elements, their types, families and the library (`model`, `ids`, `library`), what each
+//! element is in plan and in 3D (`solids`), the schedules and the title blocks' data. The commands that change it and the
+//! Session that runs them are `bimcraft-core`'s; its drawings are `bimcraft-render`'s and IFC `bimcraft-ifc`'s, above it;
+//! the site's geometry is `bimcraft-site`'s, under it. The core re-exports each module here under its old path. Nothing here
+//! draws or knows about a UI.
 
 // The crates under the model, by the paths its modules have always named them by (`crate::geom`, `crate::units`).
 pub use bimcraft_geom::{csg, files, font, geom, language, prim, shared, skeleton, solid, step, triangulation, units, xlsx};

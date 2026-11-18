@@ -1,7 +1,7 @@
 # Splitting bimcraft-core: a plan
 
-Status: steps 1 to 3 done, and the icons (step 6); step 4 (render, site and IFC out of the model) is next. What was done,
-how it was done and the numbers are under *Where it stands*, at the end.
+Status: done, steps 1 to 6 (18 November 2026, branch infra/crate-split-2): the model's drawings, its site geometry and IFC
+are crates of their own. How step 4 went and its numbers are at the end, under *Step 4*.
 
 ## Why
 
