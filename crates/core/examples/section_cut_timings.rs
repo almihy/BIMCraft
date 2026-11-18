@@ -13,7 +13,7 @@ use serde_json::json;
 fn cut_before(m: &Model, start: P2, end: P2) -> usize {
     let u = (end - start).unit();
     let mut owners: std::collections::BTreeSet<Id> = Default::default();
-    for piece in view3d::solids(m) {
+    for piece in solids::solids(m) {
         if !piece.cuts(start - u * 1e5, u, 2e5 + start.dist(end)).is_empty() {
             owners.insert(piece.owner());
         }

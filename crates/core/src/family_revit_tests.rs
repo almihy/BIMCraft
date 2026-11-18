@@ -129,11 +129,11 @@ fn the_wall_opening_is_the_familys_cut_and_its_width_stays_the_leafs() {
     // The wall's pieces leave a gap 1000 wide round x 2000.
     let Element::Door(o) = &s.model.elements[&d] else { panic!("a door") };
     let wall = s.model.elements.id(o.host).unwrap();
-    let solids = crate::view3d::solids(&s.model);
+    let solids = crate::solids::solids(&s.model);
     let xs: Vec<f64> = solids
         .iter()
         .filter_map(|x| match x {
-            crate::view3d::Solid::Prism { owner, ring, .. } if *owner == wall => Some(ring.clone()),
+            crate::solids::Solid::Prism { owner, ring, .. } if *owner == wall => Some(ring.clone()),
             _ => None,
         })
         .flatten()

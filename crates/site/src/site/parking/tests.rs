@@ -938,9 +938,15 @@ fn the_layouts_match_arqiflows_or_reach_more_bays() {
             report.push(format!("{name}: {ours} bays, Arqiflow {theirs}; {}; {}", diffs.join("; "), faults.join("; ")));
         }
     }
-    assert!(report.is_empty(), "{same} as Arqiflow's, {more} with more bays; these neither:
-{}", report.join("
-"));
+    assert!(
+        report.is_empty(),
+        "{same} as Arqiflow's, {more} with more bays; these neither:
+{}",
+        report.join(
+            "
+"
+        )
+    );
 }
 
 /// The bays each of Arqiflow's cases gets here and got there (`--ignored --nocapture`).
@@ -1134,7 +1140,9 @@ fn real_basement(sizes: Option<(f64, f64, f64)>) -> (Input, Vec<Ring>) {
     }
     keep.extend(ramps.iter().cloned());
     let settings = match sizes {
-        Some((w, d, a)) => Given { stall_width: Some(w), stall_depth: Some(d), aisle: Some(a), column_every: Some(0.0), ..Given::default() },
+        Some((w, d, a)) => {
+            Given { stall_width: Some(w), stall_depth: Some(d), aisle: Some(a), column_every: Some(0.0), ..Given::default() }
+        }
         None => Given { column_every: Some(0.0), ..Given::default() },
     };
     let input = Input {
@@ -1409,7 +1417,9 @@ fn a_huge_basement_on_a_grid_is_laid_out_in_time() {
 fn dead_ends_are_no_longer_than_the_standard_allows() {
     for sizes in [None, Some((2.5, 5.0, 6.0))] {
         let given = match sizes {
-            Some((w, d, a)) => Given { stall_width: Some(w), stall_depth: Some(d), aisle: Some(a), column_every: Some(0.0), ..Given::default() },
+            Some((w, d, a)) => {
+                Given { stall_width: Some(w), stall_depth: Some(d), aisle: Some(a), column_every: Some(0.0), ..Given::default() }
+            }
             None => Given { column_every: Some(0.0), ..Given::default() },
         };
         let input = Input {
@@ -1437,7 +1447,13 @@ fn dead_ends_are_no_longer_than_the_standard_allows() {
                 last = last.max(p1);
             }
             assert!(first.is_finite(), "an aisle with no junction: {:?}", a.poly);
-            assert!(first - lo <= limit + 0.5 && hi - last <= limit + 0.5, "a dead end of {:.1} m and {:.1} m on {:?}", first - lo, hi - last, a.poly);
+            assert!(
+                first - lo <= limit + 0.5 && hi - last <= limit + 0.5,
+                "a dead end of {:.1} m and {:.1} m on {:?}",
+                first - lo,
+                hi - last,
+                a.poly
+            );
         }
     }
 }
@@ -1490,7 +1506,11 @@ fn one_way_aisles_always_lead_on() {
                 outs |= whi >= hi - reach;
             }
             if !(ins && outs) {
-                bad.push(format!("basement {i}: an aisle {:?} running {f:?} with {}", centre(&a.poly), if outs { "no way in" } else { "no way on" }));
+                bad.push(format!(
+                    "basement {i}: an aisle {:?} running {f:?} with {}",
+                    centre(&a.poly),
+                    if outs { "no way in" } else { "no way on" }
+                ));
             }
         }
     }
@@ -1501,14 +1521,35 @@ fn one_way_aisles_always_lead_on() {
 /// columns, a sliver, a ramp's foot facing out of the area.
 #[test]
 fn degenerate_basements_never_panic() {
-    let posts: Vec<Ring> = (0..40).flat_map(|i| (0..30).map(move |j| bx(i as f64 * 1.5, j as f64 * 1.5, i as f64 * 1.5 + 0.6, j as f64 * 1.5 + 0.6))).collect();
+    let posts: Vec<Ring> = (0..40)
+        .flat_map(|i| (0..30).map(move |j| bx(i as f64 * 1.5, j as f64 * 1.5, i as f64 * 1.5 + 0.6, j as f64 * 1.5 + 0.6)))
+        .collect();
     let cases = [
-        Input { site: bx(0.0, 0.0, 5.0, 5.0), basement: Some(Vec::new()), feet: vec![(([0.1, 1.0], [0.1, 4.0]), [1.0, 0.0])], ..Input::default() },
-        Input { site: bx(0.0, 0.0, 40.0, 30.0), basement: Some(Vec::new()), keep_clear: vec![bx(0.5, 0.5, 39.5, 29.5)], ..Input::default() },
+        Input {
+            site: bx(0.0, 0.0, 5.0, 5.0),
+            basement: Some(Vec::new()),
+            feet: vec![(([0.1, 1.0], [0.1, 4.0]), [1.0, 0.0])],
+            ..Input::default()
+        },
+        Input {
+            site: bx(0.0, 0.0, 40.0, 30.0),
+            basement: Some(Vec::new()),
+            keep_clear: vec![bx(0.5, 0.5, 39.5, 29.5)],
+            ..Input::default()
+        },
         Input { site: bx(0.0, 0.0, 60.0, 45.0), basement: Some(Vec::new()), keep_clear: posts, ..Input::default() },
         Input { site: bx(0.0, 0.0, 200.0, 4.0), basement: Some(Vec::new()), ..Input::default() },
-        Input { site: bx(0.0, 0.0, 60.0, 40.0), basement: Some(Vec::new()), feet: vec![(([0.1, 10.0], [0.1, 16.0]), [-1.0, 0.0])], ..Input::default() },
-        Input { site: vec![[0.0, 0.0], [60.0, 0.0], [60.0, 40.0], [30.0, 0.1], [0.0, 40.0]], basement: Some(Vec::new()), ..Input::default() },
+        Input {
+            site: bx(0.0, 0.0, 60.0, 40.0),
+            basement: Some(Vec::new()),
+            feet: vec![(([0.1, 10.0], [0.1, 16.0]), [-1.0, 0.0])],
+            ..Input::default()
+        },
+        Input {
+            site: vec![[0.0, 0.0], [60.0, 0.0], [60.0, 40.0], [30.0, 0.1], [0.0, 40.0]],
+            basement: Some(Vec::new()),
+            ..Input::default()
+        },
     ];
     for (i, input) in cases.iter().enumerate() {
         if std::env::var("PARKING_ONE").is_ok_and(|n| n != i.to_string()) {

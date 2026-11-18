@@ -197,7 +197,13 @@ fn along_path(r: &Ramp, base: f64, top: f64) -> Layout {
         let [(a, _), (b, piece)] = [w[0], w[1]];
         let length = a.dist(b);
         let (plen, pslope) = measured.get(piece).copied().unwrap_or((0.0, 0.0));
-        let up = if weight > 1e-9 && plen > 1e-9 { rise * (plen * pslope / weight) * (length / plen) } else if weight <= 1e-9 { rise * length / measured.iter().map(|x| x.0).sum::<f64>().max(1e-9) } else { 0.0 };
+        let up = if weight > 1e-9 && plen > 1e-9 {
+            rise * (plen * pslope / weight) * (length / plen)
+        } else if weight <= 1e-9 {
+            rise * length / measured.iter().map(|x| x.0).sum::<f64>().max(1e-9)
+        } else {
+            0.0
+        };
         let u = (b - a).unit();
         out.runs.push(Run::new(a, u, length, (z, z + up), 0));
         z += up;

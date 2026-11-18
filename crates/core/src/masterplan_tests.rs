@@ -24,7 +24,6 @@ fn site(s: &Session, id: Id) -> crate::masterplan::Site {
     }
 }
 
-
 fn level(s: &Session) -> Id {
     s.model.levels()[0].0
 }
@@ -35,8 +34,6 @@ fn plan(s: &Session) -> (render::Drawing, Vec<u8>) {
     let png = render::png(&d).unwrap();
     (d, png)
 }
-
-
 
 /// A small car park's area: a site element to try the masterplan's rules on.
 const SMALL: [[f64; 2]; 3] = [[0.0, 0.0], [5000.0, 0.0], [5000.0, 5000.0]];
@@ -74,7 +71,11 @@ fn what_cant_be_shaped_or_isnt_in_the_catalogue_is_refused_saying_what_to_fix() 
 #[test]
 fn the_modify_tools_move_turn_and_mirror_a_site_elements_truth() {
     let mut s = Session::new();
-    let stall = id(&run(&mut s, "site", json!({"kind": "car_park", "props": {"control": [[10000, 0], [15000, 0], [15000, 5000]], "direction": 0}})));
+    let stall = id(&run(
+        &mut s,
+        "site",
+        json!({"kind": "car_park", "props": {"control": [[10000, 0], [15000, 0], [15000, 5000]], "direction": 0}}),
+    ));
     run(&mut s, "rotate", json!({"ids": [stall], "about": [0, 0], "angle": 90}));
     let st = site(&s, stall);
     let at = st.props["control"][0].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect::<Vec<_>>();
@@ -118,7 +119,11 @@ fn a_site_elements_phase_is_its_phase_created_and_demolished_and_the_demolish_to
     let st = site(&s, stall);
     assert_eq!((st.params["Phase Created"].clone(), st.params["Phase Demolished"].clone()), (json!("Existing"), json!("New Construction")));
     // Its params changed with the Demolish tool's `modify`: its phase follows them.
-    let other = id(&run(&mut s, "site", json!({"kind": "car_park", "phase": "existing", "props": {"control": [[9000, 0], [14000, 0], [14000, 5000]]}})));
+    let other = id(&run(
+        &mut s,
+        "site",
+        json!({"kind": "car_park", "phase": "existing", "props": {"control": [[9000, 0], [14000, 0], [14000, 5000]]}}),
+    ));
     run(&mut s, "modify", json!({"id": other, "params": {"Phase Demolished": "New Construction"}}));
     assert_eq!(site(&s, other).phase, "demolished");
     // A phase filter hides it as any element: Show New leaves out what stood before.
@@ -277,7 +282,11 @@ fn site_elements_go_out_to_ifc_as_geographic_civil_and_virtual_elements() {
 fn a_file_keeps_site_elements_as_the_doc_says_and_an_older_reader_leaves_out_what_it_doesnt_know() {
     let mut s = Session::new();
     ground(&mut s);
-    let stall = id(&run(&mut s, "site", json!({"kind": "car_park", "props": {"control": [[0, 50000], [40000, 50000], [40000, 80000], [0, 80000]]}})));
+    let stall = id(&run(
+        &mut s,
+        "site",
+        json!({"kind": "car_park", "props": {"control": [[0, 50000], [40000, 50000], [40000, 80000], [0, 80000]]}}),
+    ));
     run(&mut s, "site_edit", json!({"id": stall, "name": "Bay", "phase": "existing", "source": "site", "ref": "street:edge 0"}));
     run(&mut s, "sub_division", json!({"boundary": [[1000, 1000], [5000, 1000], [5000, 5000]]}));
     run(&mut s, "property_line", json!({"points": [[0, 0], [10000, 0], [10000, 10000, 0.2], [0, 10000]]}));

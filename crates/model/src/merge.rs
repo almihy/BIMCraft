@@ -323,7 +323,8 @@ impl Model {
                 all.check()
             });
             if whole.is_ok() && got.refused.is_empty() {
-                out.taken = Changes { elements: got.taken.elements, project: c.project.clone(), complete: c.complete, ids: BTreeMap::new() };
+                out.taken =
+                    Changes { elements: got.taken.elements, project: c.project.clone(), complete: c.complete, ids: BTreeMap::new() };
                 out.ids = got.ids;
                 out.fixes.extend(fixes);
                 return Ok((all, out));
@@ -584,9 +585,9 @@ impl Model {
                         // in every copy (a copy that numbered it itself before ids were shared, or one that took it in when
                         // its id was taken here).
                         Some(id)
-                            if ids.get(g).is_some_and(|want| {
-                                *want != id && !self.elements.contains_key(*want) && !self.library.taken(*want)
-                            }) =>
+                            if ids
+                                .get(g)
+                                .is_some_and(|want| *want != id && !self.elements.contains_key(*want) && !self.library.taken(*want)) =>
                         {
                             let want = ids[g];
                             self.elements.remove(id);

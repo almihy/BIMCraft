@@ -9,12 +9,12 @@
 //! slope) less its openings and the shafts, its volume the solid's.
 //!
 //! The volumes (the net ones of walls, floors, ceilings and roofs, a column's) are read from the element's closed solids
-//! (`view3d::element_solids`: its layers' pieces unioned by Manifold, a curved face taken as the cylinder it lies on), not
+//! (`solids::element_solids`: its layers' pieces unioned by Manifold, a curved face taken as the cylinder it lies on), not
 //! summed over the pieces. Areas are measured as they were.
 
 use crate::geom::{self, P2};
 use crate::model::{Ceiling, Element, Floor, Id, Model, Roof};
-use crate::view3d::Solid;
+use crate::solids::Solid;
 use crate::walls::{self, Axis, Plane};
 
 /// What a wall measures.
@@ -33,7 +33,7 @@ pub struct WallQ {
     pub net_volume: f64,
 }
 
-/// Wall `id`, measured from its solids (`view3d::wall_volume`, over `walls::prisms`): where each door and window really is along it and up it, held to the
+/// Wall `id`, measured from its solids (`solids::wall_volume`, over `walls::prisms`): where each door and window really is along it and up it, held to the
 /// wall (one past its end, or under its base, cuts only what is in it; two that overlap cut what they cover once), the top
 /// where it is attached, its arc, and its corners once (the mitre shares them between the walls that meet). Its volume is the
 /// solid's, without the openings (gross) and with them (net); its side is the area of the middle of its thickness (its
@@ -68,7 +68,7 @@ fn prism_volume(ring: &[P2], bottom: &Plane, top: &Plane, curve: Option<(P2, f64
 
 /// What a piece of an element as the 3D view makes it holds, by the old sums: a prism's (above), a slab's plan through its rise, a
 /// box's, a mesh's by its triangles (one that is not closed has no volume to speak of). What an element's solid leaves out of its
-/// quantity, the pieces the solid kernel refuses, is held to ([`crate::view3d::ElementSolids::volume`]).
+/// quantity, the pieces the solid kernel refuses, is held to ([`crate::solids::ElementSolids::volume`]).
 pub(crate) fn piece_volume(piece: &Solid) -> f64 {
     match piece {
         Solid::Prism { ring, bottom, top, curve, .. } => prism_volume(ring, bottom, top, *curve),

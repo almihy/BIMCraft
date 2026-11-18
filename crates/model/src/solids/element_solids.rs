@@ -306,7 +306,8 @@ impl SolidCache {
     }
 
     /// What it holds of the elements `keep` says are unchanged.
-    pub(super) fn kept(&self, keep: impl Fn(Id) -> bool) -> SolidCache {
+    #[doc(hidden)]
+    pub fn kept(&self, keep: impl Fn(Id) -> bool) -> SolidCache {
         let entries = self.entries.lock().map(|e| e.iter().filter(|(id, _)| keep(**id)).map(|(id, s)| (*id, Arc::clone(s))).collect());
         // The index is of the model the scene was of: the new scene makes its own.
         SolidCache { entries: Mutex::new(entries.unwrap_or_default()), index: OnceLock::new() }

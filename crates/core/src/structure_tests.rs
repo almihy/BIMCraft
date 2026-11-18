@@ -351,11 +351,11 @@ fn the_3d_view_has_a_solid_for_a_beam_a_round_one_and_the_columns_and_footings()
     let tube = made(&mut s, "beam", json!({"points": [[0, 2000], [6000, 2000]], "type": "Steel Tube 150", "justify": "centre"}));
     let column = made(&mut s, "structural_column", json!({"at": [0, 0]}));
     let footing = made(&mut s, "footing", json!({"at": [0, 0]}));
-    let solids = crate::view3d::solids(&s.model);
+    let solids = crate::solids::solids(&s.model);
     let of = |id: u64| solids.iter().filter(|x| x.owner() == id).collect::<Vec<_>>();
     assert_eq!(of(beam).iter().map(|x| x.heights()).collect::<Vec<_>>(), vec![(2300.0, 2800.0)]);
-    assert!(matches!(of(beam).as_slice(), [crate::view3d::Solid::Prism { .. }]));
-    assert!(matches!(of(tube).as_slice(), [crate::view3d::Solid::Mesh { round: true, .. }]));
+    assert!(matches!(of(beam).as_slice(), [crate::solids::Solid::Prism { .. }]));
+    assert!(matches!(of(tube).as_slice(), [crate::solids::Solid::Mesh { round: true, .. }]));
     assert_eq!(of(column)[0].heights(), (0.0, 3000.0));
     assert_eq!(of(footing)[0].heights(), (-400.0, 0.0));
 }

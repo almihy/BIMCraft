@@ -1283,13 +1283,13 @@ impl Look {
     }
 
     /// Whether it draws triangle `t`: its element shown, and its form drawn at the view's detail level and, in a section or
-    /// an elevation, the way it looks ([`crate::view3d::Vis`]).
-    pub fn draws(&self, t: &crate::view3d::Tri) -> bool {
+    /// an elevation, the way it looks ([`crate::solids::Vis`]).
+    pub fn draws(&self, t: &crate::solids::Tri) -> bool {
         self.shows(t.owner) && t.vis.drawn(self.detail, self.looking)
     }
 
     /// Whether a triangle of `vis` is drawn at its detail level and the way it looks, whatever element it is of.
-    pub fn draws_vis(&self, vis: crate::view3d::Vis) -> bool {
+    pub fn draws_vis(&self, vis: crate::solids::Vis) -> bool {
         vis.drawn(self.detail, self.looking)
     }
 

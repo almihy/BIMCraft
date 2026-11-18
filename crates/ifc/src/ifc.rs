@@ -159,7 +159,6 @@ fn ratio(x: f64) -> String {
     format!("{x:.12}").trim_end_matches('0').to_string()
 }
 
-
 /// A 22-character IFC GlobalId, the same for the same model, role and element on every export.
 #[doc(hidden)]
 pub fn guid(uid: u64, role: u64, id: u64) -> String {

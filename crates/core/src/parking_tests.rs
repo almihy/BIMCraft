@@ -850,7 +850,11 @@ fn an_irregular_surface_car_park_takes_both_its_street_entrances() {
     run(&mut s, "toposolid", json!({"boundary": [[-20000, -20000], [120000, -20000], [120000, 100000], [-20000, 100000]]}));
     // A five-sided lot with streets on its south and its east sides, an entrance on each.
     let lot = [[0.0, 0.0], [90000.0, 0.0], [95000.0, 45000.0], [60000.0, 75000.0], [0.0, 62000.0]];
-    run(&mut s, "property_line", json!({"points": lot, "edges": [{"kind": "street"}, {"kind": "street"}, {"kind": "side"}, {"kind": "side"}, {"kind": "side"}]}));
+    run(
+        &mut s,
+        "property_line",
+        json!({"points": lot, "edges": [{"kind": "street"}, {"kind": "street"}, {"kind": "side"}, {"kind": "side"}, {"kind": "side"}]}),
+    );
     let park = id(&run(
         &mut s,
         "car_park",
@@ -863,7 +867,8 @@ fn an_irregular_surface_car_park_takes_both_its_street_entrances() {
     assert!(!notes(&r).contains("could not be joined"), "{r}");
     // Some 4200 m² of ground: a well laid car park takes a bay for every 30 m² or less of it.
     assert!(n >= 140, "{n} bays: {r}");
-    let aisles = s.model.elements.values().filter(|e| matches!(e, Element::SubDivision(sd) if sd.role == crate::carpark::AISLE_ROLE)).count();
+    let aisles =
+        s.model.elements.values().filter(|e| matches!(e, Element::SubDivision(sd) if sd.role == crate::carpark::AISLE_ROLE)).count();
     assert!(aisles > 0);
 }
 
@@ -873,7 +878,11 @@ fn accessible_bays_get_their_access_aisles_near_the_cores() {
     european_sizes(&mut s);
     run(&mut s, "floor", json!({"boundary": AREA, "level": "B1"}));
     // A lift core in the north-west of the basement, B1 up to Level 2.
-    run(&mut s, "shaft", json!({"boundary": [[3000, 30000], [8000, 30000], [8000, 35000], [3000, 35000]], "level": "B1", "top_level": "Level 2"}));
+    run(
+        &mut s,
+        "shaft",
+        json!({"boundary": [[3000, 30000], [8000, 30000], [8000, 35000], [3000, 35000]], "level": "B1", "top_level": "Level 2"}),
+    );
     run(&mut s, "ramp", json!({"start": [59000, 20000], "angle": 0, "level": "B1", "top_level": "Level 1", "width": 6000, "slope": 15}));
     let park = plain_basement(&mut s, &AREA);
     let r = result(&s, park);
@@ -897,7 +906,11 @@ fn accessible_bays_get_their_access_aisles_near_the_cores() {
     assert_eq!(accessible.len() as u64, need);
     for (_, c) in &accessible {
         let ring = ring_of(c);
-        assert!(access.iter().any(|a| overlap(&ring, a, -5.0) && !overlap(&ring, a, 5.0)), "an accessible bay at {:?} with no access aisle", c.at);
+        assert!(
+            access.iter().any(|a| overlap(&ring, a, -5.0) && !overlap(&ring, a, 5.0)),
+            "an accessible bay at {:?} with no access aisle",
+            c.at
+        );
     }
     for (_, c) in &laid {
         assert!(access.iter().all(|a| !overlap(&ring_of(c), a, 5.0)), "a bay on an access aisle at {:?}", c.at);
@@ -971,9 +984,15 @@ fn roads_that_meet_are_joined_with_the_kerbs_radius_and_take_turning_heads_and_m
     assert_eq!(s.model.guid(joined[0]), side_of, "the side road keeps its id");
     assert!(road_area(&s, side_of) > alone + 10.0, "its corners rounded: {alone} then {}", road_area(&s, side_of));
     let main_of = s.model.guid(serde_json::from_value::<Vec<Id>>(main["ids"].clone()).unwrap()[0]);
-    let pieces = |of: Guid| s.model.elements.values().filter(|e| matches!(e, Element::SubDivision(sd) if sd.road.as_ref().is_some_and(|r| r.of == of))).count();
+    let pieces = |of: Guid| {
+        s.model.elements.values().filter(|e| matches!(e, Element::SubDivision(sd) if sd.road.as_ref().is_some_and(|r| r.of == of))).count()
+    };
     assert!(pieces(main_of) > 0);
-    let Some(Element::SubDivision(sd)) = s.model.elements.values().find(|e| matches!(e, Element::SubDivision(sd) if sd.road.as_ref().is_some_and(|r| r.of == main_of))) else { panic!() };
+    let Some(Element::SubDivision(sd)) =
+        s.model.elements.values().find(|e| matches!(e, Element::SubDivision(sd) if sd.road.as_ref().is_some_and(|r| r.of == main_of)))
+    else {
+        panic!()
+    };
     assert_eq!(sd.road.as_ref().unwrap().props["markings"], json!(false));
     // A cul-de-sac's turning head at its end: more ground than without.
     let plain = run(&mut s, "road", json!({"path": [[0, -40000], [40000, -40000]], "width": 8000, "use": "lane"}));

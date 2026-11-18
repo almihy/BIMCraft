@@ -86,7 +86,9 @@ fn host_param(c: &str, m: &Model, p: &Value, ring: &[P2]) -> Result<Guid, String
             .max_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(g, _)| g)
     };
-    holding.or_else(overlapping).ok_or_else(|| bad(c, "no toposolid lies under it: give `host`, the toposolid it is a part of, or make one with `toposolid`"))
+    holding
+        .or_else(overlapping)
+        .ok_or_else(|| bad(c, "no toposolid lies under it: give `host`, the toposolid it is a part of, or make one with `toposolid`"))
 }
 
 /// Openings: rings, each clockwise.
@@ -113,7 +115,10 @@ fn surface_type(c: &str, s: &mut Session, p: &Value, default: &str) -> Result<St
             let surfaces: Vec<&str> = ground::SURFACES.iter().map(|x| x.name).collect();
             return Err(bad(
                 c,
-                format!("no toposolid type `{name}`: name one of the project's floor types, a material, or a surface ({})", surfaces.join(", ")),
+                format!(
+                    "no toposolid type `{name}`: name one of the project's floor types, a material, or a surface ({})",
+                    surfaces.join(", ")
+                ),
             ));
         }
         ground::ensure_type(s.model_mut(), &name);
@@ -164,7 +169,8 @@ pub(super) fn sub_division(s: &mut Session, p: &Value) -> R {
 }
 
 /// The road keys `road` takes beside `path`: its cross-section, its turning heads and its junctions' kerb radius.
-const ROAD_KEYS: [&str; 10] = ["width", "lanes", "lane_width", "kerb", "median", "oneway", "pavement", "heads", "markings", "corner_radius"];
+const ROAD_KEYS: [&str; 10] =
+    ["width", "lanes", "lane_width", "kerb", "median", "oneway", "pavement", "heads", "markings", "corner_radius"];
 
 /// The project's roads on `level` (made by `road`, or converted lanes), but `skip`: each its definition, its pieces and
 /// its host.
@@ -196,7 +202,13 @@ fn shaped_among(m: &Model, defs: &[(String, String, crate::site::Props)]) -> Vec
 }
 
 /// Road `def` made again as `shaped` on `host`: its pieces go, the new ones take its first's id, GUID and parameters.
-fn remake(s: &mut Session, def: &ground::RoadDef, pieces: &[Id], host: Guid, shaped: crate::site::shapes::Shaped) -> Result<Vec<Id>, String> {
+fn remake(
+    s: &mut Session,
+    def: &ground::RoadDef,
+    pieces: &[Id],
+    host: Guid,
+    shaped: crate::site::shapes::Shaped,
+) -> Result<Vec<Id>, String> {
     let level = match s.model.elements.id(host).and_then(|id| s.model.elements.get(id)) {
         Some(Element::Toposolid(f)) => f.level,
         _ => return Err(bad("road", "its host is no toposolid")),
@@ -307,7 +319,9 @@ pub(super) fn road(s: &mut Session, p: &Value) -> R {
     let old = was.as_ref().map(|(r, _, _)| r);
     let path = match p.get("path").filter(|v| v.is_array()) {
         Some(v) => v.clone(),
-        None => old.and_then(|r| r.props.get("path").cloned()).ok_or_else(|| bad(c, "`path` [[x, y] or [x, y, bulge], …], its centre line, is required"))?,
+        None => old
+            .and_then(|r| r.props.get("path").cloned())
+            .ok_or_else(|| bad(c, "`path` [[x, y] or [x, y, bulge], …], its centre line, is required"))?,
     };
     let path = &path;
     let use_ = string(c, p, "use")?.or_else(|| old.map(|r| r.use_.clone()).filter(|u| !u.is_empty())).unwrap_or_else(|| "road".into());
@@ -588,7 +602,8 @@ pub(super) fn graded_region(s: &mut Session, p: &Value) -> R {
     } else if !absent(p.get("link")) {
         let lid = element_id(c, &s.model, p.get("link").unwrap_or(&Value::Null))?;
         let Some(Element::Link(link)) = s.model.elements.get(lid).cloned() else { return Err(bad(c, format!("{lid} is no link"))) };
-        let linked = s.model.loaded.get(&link.path).cloned().ok_or_else(|| bad(c, format!("link `{}` isn't loaded: load it first", link.name)))?;
+        let linked =
+            s.model.loaded.get(&link.path).cloned().ok_or_else(|| bad(c, format!("link `{}` isn't loaded: load it first", link.name)))?;
         let tid = pick(&linked, p.get("toposolid"))?;
         let Some(Element::Toposolid(f)) = linked.elements.get(tid) else { return Err(bad(c, "no toposolid")) };
         let cut = linked.toposolid_cut(f);
@@ -666,7 +681,8 @@ pub(super) fn remove_point(s: &mut Session, p: &Value) -> R {
         return Err(bad(c, "it has no such point"));
     }
     // A split line that ran to it goes too.
-    let pts: Vec<P2> = f.shape.points.iter().map(|q| q.at).chain(f.boundary.iter().copied()).chain(f.openings.iter().flatten().copied()).collect();
+    let pts: Vec<P2> =
+        f.shape.points.iter().map(|q| q.at).chain(f.boundary.iter().copied()).chain(f.openings.iter().flatten().copied()).collect();
     f.shape.lines.retain(|l| [l.a, l.b].iter().all(|e| pts.iter().any(|q| q.dist(*e) <= TOL)));
     let shape = f.shape.clone();
     if let Some(sh) = s.model_mut().elements.get_mut(id).and_then(Element::shape_mut) {
@@ -812,7 +828,8 @@ pub(super) fn points_from_numbers(m: &mut Model, g: &crate::model::Georeference)
 fn site_family(c: &str, s: &mut Session, p: &Value, default: &str, category: crate::family::Category) -> Result<(String, String), String> {
     let family = string(c, p, "family")?.unwrap_or_else(|| s.model.language.word(default).to_string());
     if !ground::load_family(s.model_mut(), &family) {
-        let ours: Vec<String> = crate::family::site_library(s.model.language).into_iter().filter(|(_, f)| f.category == category).map(|(n, _)| n).collect();
+        let ours: Vec<String> =
+            crate::family::site_library(s.model.language).into_iter().filter(|(_, f)| f.category == category).map(|(n, _)| n).collect();
         return Err(bad(c, format!("no family `{family}`: one of the project's, or of the site's ({})", ours.join(", "))));
     }
     let f = s.model.families.get(&family).ok_or_else(|| bad(c, "no family"))?;
@@ -822,7 +839,9 @@ fn site_family(c: &str, s: &mut Session, p: &Value, default: &str, category: cra
     }
     let type_name = match string(c, p, "type")? {
         Some(t) if f.types.contains_key(&t) => t,
-        Some(t) => return Err(bad(c, format!("`{family}` has no type `{t}`; it has: {}", f.types.keys().cloned().collect::<Vec<_>>().join(", ")))),
+        Some(t) => {
+            return Err(bad(c, format!("`{family}` has no type `{t}`; it has: {}", f.types.keys().cloned().collect::<Vec<_>>().join(", "))));
+        }
         None => f.types.keys().next().cloned().unwrap_or_default(),
     };
     Ok((family, type_name))
@@ -860,16 +879,8 @@ fn place_on_ground(c: &str, s: &mut Session, p: &Value, default: &str, category:
         None => BTreeMap::new(),
     };
     let angle = num(c, p, "angle")?.unwrap_or(0.0);
-    let comp = crate::model::Component {
-        family,
-        type_name,
-        level,
-        at,
-        angle,
-        offset: (offset * 100.0).round() / 100.0,
-        mirrored: false,
-        params,
-    };
+    let comp =
+        crate::model::Component { family, type_name, level, at, angle, offset: (offset * 100.0).round() / 100.0, mirrored: false, params };
     let id = s.model_mut().insert(Element::Component(comp));
     Ok(json!({"id": id, "offset": (offset * 100.0).round() / 100.0, "element": element_json(&s.model, id)}))
 }
@@ -1016,7 +1027,9 @@ pub(super) fn property_line_table(s: &mut Session, p: &Value) -> R {
     let Some(Element::PropertyLine(pl)) = s.model.elements.get(id) else { return Err(bad(c, format!("{id} is no property line"))) };
     let first = pl.points.first().map(|q| [q[0], q[1]]).unwrap_or_default();
     let edges: Vec<Value> = (0..pl.points.len()).map(|i| serde_json::to_value(pl.edge(i)).unwrap_or(Value::Null)).collect();
-    Ok(json!({"id": id, "start": first, "table": table_of(&s.model, pl), "edges": edges, "angle_to_true_north": s.model.angle_to_true_north()}))
+    Ok(
+        json!({"id": id, "start": first, "table": table_of(&s.model, pl), "edges": edges, "angle_to_true_north": s.model.angle_to_true_north()}),
+    )
 }
 
 pub(super) fn property_line_edit(s: &mut Session, p: &Value) -> R {
@@ -1101,7 +1114,9 @@ pub(super) fn parking_component(s: &mut Session, p: &Value) -> R {
     }
     let type_name = match string(c, p, "type")? {
         Some(t) if f.types.contains_key(&t) => t,
-        Some(t) => return Err(bad(c, format!("`{family}` has no type `{t}`; it has: {}", f.types.keys().cloned().collect::<Vec<_>>().join(", ")))),
+        Some(t) => {
+            return Err(bad(c, format!("`{family}` has no type `{t}`; it has: {}", f.types.keys().cloned().collect::<Vec<_>>().join(", "))));
+        }
         None => {
             let standard = m.language.word(crate::family::site::STANDARD).to_string();
             if f.types.contains_key(&standard) { standard } else { f.types.keys().next().cloned().unwrap_or_default() }
@@ -1113,7 +1128,9 @@ pub(super) fn parking_component(s: &mut Session, p: &Value) -> R {
         match m.elements.get(id) {
             Some(Element::Toposolid(t) | Element::Floor(t)) => t.level,
             Some(Element::SubDivision(sd)) => m.subdivision_level(sd).ok_or_else(|| bad(c, "its host's toposolid isn't in the project"))?,
-            Some(e) => return Err(bad(c, format!("a parking space stands on a toposolid, a sub-division or a floor, not a {}", e.category()))),
+            Some(e) => {
+                return Err(bad(c, format!("a parking space stands on a toposolid, a sub-division or a floor, not a {}", e.category())));
+            }
             None => return Err(bad(c, format!("no element {id}"))),
         }
     } else if absent(p.get("level")) {

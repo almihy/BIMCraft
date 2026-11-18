@@ -1,5 +1,6 @@
 //! `view3d::fragments`'s tests that drive the Session (moved out of `view3d/fragments.rs`).
 
+use crate::solids::*;
 use crate::view3d::*;
 use std::sync::Arc;
 

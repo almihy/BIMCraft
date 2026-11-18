@@ -669,7 +669,12 @@ pub fn solve(input: &Input) -> Solved {
             // A plan no car can come into reaches nothing, whatever it lays.
             let count = if !streets.is_empty() && ins.is_empty() { 0.0 } else { count - unjoined };
             if std::env::var_os("PARKING_DEBUG").is_some() {
-                eprintln!("candidate grid {grid} fields {}: {} bays laid, {count} reached, score {score:.1}, ways {}", plan.fields, plan.stalls.len(), ins.len());
+                eprintln!(
+                    "candidate grid {grid} fields {}: {} bays laid, {count} reached, score {score:.1}, ways {}",
+                    plan.fields,
+                    plan.stalls.len(),
+                    ins.len()
+                );
             }
             let slot = if grid { &mut best_grid } else { &mut best };
             if slot.as_ref().is_none_or(|b| score > b.score) {

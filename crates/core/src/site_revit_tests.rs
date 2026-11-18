@@ -62,7 +62,11 @@ fn a_sub_division_follows_its_hosts_surface_raised_or_sunk_by_its_offset_and_cli
     let mut s = Session::new();
     let t = slope(&mut s);
     // Half on the toposolid, half off it: clipped to it, on the ground there.
-    let r = run(&mut s, "sub_division", json!({"boundary": [[30000, 10000], [50000, 10000], [50000, 20000], [30000, 20000]], "type": "Asphalt"}));
+    let r = run(
+        &mut s,
+        "sub_division",
+        json!({"boundary": [[30000, 10000], [50000, 10000], [50000, 20000], [30000, 20000]], "type": "Asphalt"}),
+    );
     let road = id(&r);
     assert_eq!(r["host"], json!(t));
     assert!((r["area_m2"].as_f64().unwrap() - 100.0).abs() < 0.5, "{r}");
@@ -81,7 +85,11 @@ fn a_sub_division_follows_its_hosts_surface_raised_or_sunk_by_its_offset_and_cli
     let q = crate::geom::centroid(ring);
     assert!((top.at(q) - bottom.at(q) - 150.0).abs() < 1e-6);
     // A pond sunk 500: its host comes down that far under the ground within it, and stays outside.
-    let pond = id(&run(&mut s, "sub_division", json!({"boundary": [[5000, 5000], [15000, 5000], [15000, 15000], [5000, 15000]], "type": "Water", "offset": -500})));
+    let pond = id(&run(
+        &mut s,
+        "sub_division",
+        json!({"boundary": [[5000, 5000], [15000, 5000], [15000, 15000], [5000, 15000]], "type": "Water", "offset": -500}),
+    ));
     assert!((ground(&s, t, P2(10000.0, 10000.0)) - (1000.0 - 500.0)).abs() < 2.0, "{}", ground(&s, t, P2(10000.0, 10000.0)));
     assert!((ground(&s, t, P2(20000.0, 30000.0)) - 2000.0).abs() < 2.0);
     // Drawn on the plan in its surface's colour; scheduled by type and area.
@@ -95,7 +103,8 @@ fn a_sub_division_follows_its_hosts_surface_raised_or_sunk_by_its_offset_and_cli
 fn a_sub_division_moves_copies_and_goes_with_its_host() {
     let mut s = Session::new();
     let t = slope(&mut s);
-    let lawn = id(&run(&mut s, "sub_division", json!({"boundary": [[1000, 1000], [5000, 1000], [5000, 5000], [1000, 5000]], "type": "Grass"})));
+    let lawn =
+        id(&run(&mut s, "sub_division", json!({"boundary": [[1000, 1000], [5000, 1000], [5000, 5000], [1000, 5000]], "type": "Grass"})));
     run(&mut s, "move", json!({"ids": [t], "by": [100000, 0]}));
     let Some(Element::SubDivision(sd)) = s.model.elements.get(lawn) else { panic!() };
     assert_eq!(sd.boundary[0], P2(101000.0, 1000.0), "it went with its host");
@@ -113,7 +122,11 @@ fn a_floor_that_excavates_a_toposolid_cuts_it_down_to_its_bottom() {
     let mut s = Session::new();
     let t = slope(&mut s);
     // A basement floor 10 m square, its top at -200 and 200 thick: its bottom at -400, over the toposolid's bottom.
-    let f = id(&run(&mut s, "floor", json!({"boundary": [[15000, 15000], [25000, 15000], [25000, 25000], [15000, 25000]], "offset": -200, "type": "Generic - 200mm"})));
+    let f = id(&run(
+        &mut s,
+        "floor",
+        json!({"boundary": [[15000, 15000], [25000, 15000], [25000, 25000], [15000, 25000]], "offset": -200, "type": "Generic - 200mm"}),
+    ));
     let r = run(&mut s, "excavate", json!({"toposolid": t, "by": [f]}));
     assert_eq!(r["excavated_by"], json!([f]), "{r}");
     assert!((ground(&s, t, P2(20000.0, 20000.0)) + 400.0).abs() < 2.0, "down to its bottom: {}", ground(&s, t, P2(20000.0, 20000.0)));
@@ -145,7 +158,8 @@ fn a_graded_region_copies_the_existing_ground_demolishes_it_and_works_out_cut_an
     let (cut, fill) = (e["cut_m3"].as_f64().unwrap(), e["fill_m3"].as_f64().unwrap());
     assert!((cut - 25.0).abs() < 1.0 && (fill - 25.0).abs() < 1.0, "{cut} {fill}");
     // Taken again: the existing ground anew into the same toposolid, its sub-divisions kept.
-    let lawn = id(&run(&mut s, "sub_division", json!({"boundary": [[1000, 1000], [3000, 1000], [3000, 3000]], "host": new, "type": "Grass"})));
+    let lawn =
+        id(&run(&mut s, "sub_division", json!({"boundary": [[1000, 1000], [3000, 1000], [3000, 3000]], "host": new, "type": "Grass"})));
     let again = run(&mut s, "graded_region", json!({"toposolid": existing, "replace": new}));
     assert_eq!(id(&again), new);
     assert!(topo(&s, new).shape.points.is_empty() && s.model.elements.get(lawn).is_some());
@@ -180,7 +194,9 @@ fn a_property_line_from_a_table_of_bearings_and_distances_closes_and_reads_back(
     let area = r["area_m2"].as_f64().unwrap();
     assert!((area - (400.0 + std::f64::consts::PI * 100.0 / 2.0)).abs() < 0.5, "a half circle on its side: {area}");
     let t = run(&mut s, "property_line_table", json!({"id": id(&r)}));
-    assert!(t["table"].as_array().unwrap().iter().any(|row| row["type"] == "arc" && (row["radius"].as_f64().unwrap() - 10000.0).abs() < 1.0));
+    assert!(
+        t["table"].as_array().unwrap().iter().any(|row| row["type"] == "arc" && (row["radius"].as_f64().unwrap() - 10000.0).abs() < 1.0)
+    );
 }
 
 #[test]
@@ -231,7 +247,10 @@ fn the_project_base_point_reads_its_shared_coordinates_and_turns_them_by_true_no
     assert!((e[0]).abs() < 1e-6 && (e[1] - 1000.0).abs() < 1e-6, "{e:?}");
     // Specify Coordinates at a Point: the project base point reads what it's given.
     let r = run(&mut s, "base_point", json!({"which": "project", "east": 1000, "north": 2000, "height": 30}));
-    assert_eq!((r["project"]["east"].clone(), r["project"]["north"].clone(), r["project"]["height"].clone()), (json!(1000.0), json!(2000.0), json!(30.0)));
+    assert_eq!(
+        (r["project"]["east"].clone(), r["project"]["north"].clone(), r["project"]["height"].clone()),
+        (json!(1000.0), json!(2000.0), json!(30.0))
+    );
     assert!(s.execute("base_point", &json!({"which": "project", "clipped": true})).unwrap_err().contains("no clip"));
     // The georeference reads its numbers from them.
     run(&mut s, "georeference", json!({"crs": "EPSG:31983"}));
@@ -244,7 +263,14 @@ fn the_project_base_point_reads_its_shared_coordinates_and_turns_them_by_true_no
 #[test]
 fn an_old_georeference_becomes_the_survey_point_and_project_base_point() {
     let mut m = Model::new("old");
-    m.georeference = Some(crate::model::Georeference { crs: "EPSG:31983".into(), eastings: 1000.0, northings: 2000.0, rotation: 30.0, scale: 1.0, ..Default::default() });
+    m.georeference = Some(crate::model::Georeference {
+        crs: "EPSG:31983".into(),
+        eastings: 1000.0,
+        northings: 2000.0,
+        rotation: 30.0,
+        scale: 1.0,
+        ..Default::default()
+    });
     m.format = 25;
     let (read, _) = Model::read(&m.to_json().unwrap()).unwrap();
     let (sp, pb) = (read.survey_point().unwrap().1.clone(), read.project_base_point().unwrap().1.clone());
@@ -270,7 +296,7 @@ fn trees_and_bike_racks_are_planted_as_families_on_the_ground() {
     let r = run(&mut s, "site_component", json!({"family": "Bike Rack", "at": [5000, 5000], "params": {"Spaces": 4}}));
     let Some(Element::Component(c)) = s.model.elements.get(id(&r)) else { panic!() };
     assert_eq!(s.model.families.get(&c.family).map(|f| f.category), Some(crate::family::Category::SiteComponent));
-    assert!(!crate::view3d::solids(&s.model).iter().all(|x| x.owner() != tree), "a tree in 3D");
+    assert!(!crate::solids::solids(&s.model).iter().all(|x| x.owner() != tree), "a tree in 3D");
     assert!(s.execute("planting", &json!({"family": "Unicorn", "at": [0, 0]})).unwrap_err().contains("no family"));
     // Every site family reads.
     assert_eq!(crate::family::site_library(s.model.language).len(), 7, "and the Parking Space");
@@ -299,7 +325,8 @@ fn old_project() -> String {
             params: Default::default(),
         };
         let key = "k".to_string();
-        let item = crate::site::shapes::Item { key: &key, kind: &st.kind, use_: &st.use_, props: &st.props, phase: "existing", context: true };
+        let item =
+            crate::site::shapes::Item { key: &key, kind: &st.kind, use_: &st.use_, props: &st.props, phase: "existing", context: true };
         let shaped = crate::site::shapes::normalise(std::slice::from_ref(&item), &figures).pop().unwrap();
         (st.outline, st.parts) = (shaped.outline, shaped.parts);
         Element::Site(Box::new(st))
@@ -360,7 +387,8 @@ fn an_old_masterplan_is_converted_on_load() {
     assert!(left_out.is_empty(), "{left_out:?}");
     m.check().unwrap_or_else(|e| panic!("{e}"));
     let count = |cat: &str| m.elements.values().filter(|e| e.category() == cat).count();
-    let kinds: Vec<String> = m.elements.values().filter_map(|e| if let Element::Site(st) = e { Some(st.kind.clone()) } else { None }).collect();
+    let kinds: Vec<String> =
+        m.elements.values().filter_map(|e| if let Element::Site(st) = e { Some(st.kind.clone()) } else { None }).collect();
     assert!(kinds.is_empty(), "the stall is a Parking Space now: {kinds:?}");
     assert!(m.elements.values().any(|e| matches!(e, Element::Component(c) if crate::carpark::is_bay(&m, c))));
     // The road keeps its definition: its path and widths on each of its pieces.
@@ -372,7 +400,8 @@ fn an_old_masterplan_is_converted_on_load() {
     assert_eq!(road.props["path"], json!([[0, 35000], [40000, 35000]]));
     assert!(road.props.get("width").is_some());
     // The lawn, the pond, the pitch, and the road's carriageway (and its pavements, where it has them).
-    let roles: Vec<String> = m.elements.values().filter_map(|e| if let Element::SubDivision(sd) = e { Some(sd.role.clone()) } else { None }).collect();
+    let roles: Vec<String> =
+        m.elements.values().filter_map(|e| if let Element::SubDivision(sd) = e { Some(sd.role.clone()) } else { None }).collect();
     assert!(count("subdivision") >= 4, "{roles:?}");
     for r in ["landscape/lawn", "water/pond", "pitch/tennis", "lane/road"] {
         assert!(roles.iter().any(|x| x == r), "{r}: {roles:?}");
@@ -380,8 +409,12 @@ fn an_old_masterplan_is_converted_on_load() {
     // Where they came from is kept.
     assert!(m.elements.values().any(|e| matches!(e, Element::SubDivision(sd) if sd.params.get("source") == Some(&json!("osm")) && sd.params.get("ref") == Some(&json!("way/1")))));
     // The tree, the hedge's two pieces, the bike rack and the play equipment are family components on the ground.
-    let comps: Vec<&crate::model::Component> =
-        m.elements.values().filter_map(|e| if let Element::Component(c) = e { Some(c) } else { None }).filter(|c| !crate::carpark::is_bay(&m, c)).collect();
+    let comps: Vec<&crate::model::Component> = m
+        .elements
+        .values()
+        .filter_map(|e| if let Element::Component(c) = e { Some(c) } else { None })
+        .filter(|c| !crate::carpark::is_bay(&m, c))
+        .collect();
     assert_eq!(comps.len(), 5, "{comps:?}");
     let tree = comps.iter().find(|c| c.family == "Tree").unwrap();
     assert_eq!(tree.params.get("Crown Diameter"), Some(&json!(5000.0)));
@@ -405,7 +438,11 @@ fn the_new_site_reads_back_from_a_file() {
     let mut s = Session::new();
     let t = slope(&mut s);
     run(&mut s, "sub_division", json!({"boundary": [[1000, 1000], [5000, 1000], [5000, 5000]], "type": "Grass"}));
-    let f = id(&run(&mut s, "floor", json!({"boundary": [[15000, 15000], [25000, 15000], [25000, 25000], [15000, 25000]], "offset": -200, "type": "Generic - 200mm"})));
+    let f = id(&run(
+        &mut s,
+        "floor",
+        json!({"boundary": [[15000, 15000], [25000, 15000], [25000, 25000], [15000, 25000]], "offset": -200, "type": "Generic - 200mm"}),
+    ));
     run(&mut s, "excavate", json!({"toposolid": t, "by": [f]}));
     run(&mut s, "base_point", json!({"which": "survey", "east": 1}));
     run(&mut s, "planting", json!({"at": [3000, 3000]}));
@@ -428,8 +465,10 @@ fn a_road_is_its_carriageway_and_pavements_as_sub_divisions_on_the_ground() {
     let ids: Vec<Id> = serde_json::from_value(r["ids"].clone()).unwrap();
     assert!(!ids.is_empty(), "{r}");
     assert_eq!(r["host"], json!(t));
-    let roles: Vec<String> =
-        ids.iter().filter_map(|id| if let Some(Element::SubDivision(sd)) = s.model.elements.get(*id) { Some(sd.role.clone()) } else { None }).collect();
+    let roles: Vec<String> = ids
+        .iter()
+        .filter_map(|id| if let Some(Element::SubDivision(sd)) = s.model.elements.get(*id) { Some(sd.role.clone()) } else { None })
+        .collect();
     assert!(roles.iter().any(|x| x == "lane/road"), "{roles:?}");
     assert!(s.execute("road", &json!({"path": [[0, 0], [10, 0]], "use": "motorway"})).unwrap_err().contains("motorway"));
 }
@@ -438,7 +477,11 @@ fn a_road_is_its_carriageway_and_pavements_as_sub_divisions_on_the_ground() {
 fn two_toposolids_that_excavate_each_other_are_cut_and_a_deleted_excavator_leaves_the_list() {
     let mut s = Session::new();
     let t = slope(&mut s);
-    let other = id(&run(&mut s, "toposolid", json!({"boundary": [[10000, 10000], [20000, 10000], [20000, 20000], [10000, 20000]], "offset": -3000})));
+    let other = id(&run(
+        &mut s,
+        "toposolid",
+        json!({"boundary": [[10000, 10000], [20000, 10000], [20000, 20000], [10000, 20000]], "offset": -3000}),
+    ));
     run(&mut s, "excavate", json!({"toposolid": t, "by": [other]}));
     run(&mut s, "excavate", json!({"toposolid": other, "by": [t]}));
     // Worked out without going round and round.
@@ -466,15 +509,24 @@ fn the_survey_point_and_project_base_point_are_hidden_unless_a_view_shows_them()
 #[test]
 fn a_property_line_given_its_points_again_the_other_way_round_keeps_its_setbacks_sound() {
     let mut s = Session::new();
-    let r = run(&mut s, "property_line", json!({"points": [[0, 0], [20000, 0], [20000, 30000], [0, 30000]], "edges": [{"setback": 6000, "kind": "street"}]}));
+    let r = run(
+        &mut s,
+        "property_line",
+        json!({"points": [[0, 0], [20000, 0], [20000, 30000], [0, 30000]], "edges": [{"setback": 6000, "kind": "street"}]}),
+    );
     let pl = id(&r);
     // Sketched again clockwise: it runs counter-clockwise still, its setbacks with it.
-    let r = run(&mut s, "property_line_edit", json!({"id": pl, "points": [[0, 0], [0, 30000], [20000, 30000], [20000, 0], [10000, -5000]]}));
+    let r =
+        run(&mut s, "property_line_edit", json!({"id": pl, "points": [[0, 0], [0, 30000], [20000, 30000], [20000, 0], [10000, -5000]]}));
     let Some(Element::PropertyLine(line)) = s.model.elements.get(pl) else { panic!() };
     assert!(crate::geom::area(&line.ring()) > 0.0);
     assert!(r["buildable_area_m2"].as_f64().is_some(), "{r}");
     // Given with edges of its own, the edges turn with the points.
-    run(&mut s, "property_line_edit", json!({"id": pl, "points": [[0, 0], [0, 30000], [20000, 30000], [20000, 0]], "edges": [{"setback": 3000, "kind": "side"}]}));
+    run(
+        &mut s,
+        "property_line_edit",
+        json!({"id": pl, "points": [[0, 0], [0, 30000], [20000, 30000], [20000, 0]], "edges": [{"setback": 3000, "kind": "side"}]}),
+    );
     let Some(Element::PropertyLine(line)) = s.model.elements.get(pl) else { panic!() };
     let side = (0..4).find(|i| line.edge(*i).kind == "side").unwrap();
     let (a, b) = (line.points[side], line.points[(side + 1) % 4]);

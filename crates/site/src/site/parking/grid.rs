@@ -381,7 +381,10 @@ fn lay_grid_with(
             }
             seen.push(key);
             if std::env::var_os("PARKING_DEBUG").is_some() {
-                eprintln!("grid {deg} anchor {anchor:.2} bonus {bonus}: {:?}", stack.iter().map(|(y, v)| format!("{y:.2}{v:?}")).collect::<Vec<_>>());
+                eprintln!(
+                    "grid {deg} anchor {anchor:.2} bonus {bonus}: {:?}",
+                    stack.iter().map(|(y, v)| format!("{y:.2}{v:?}")).collect::<Vec<_>>()
+                );
             }
             // Each ramp's foot joined by the shortest way, and (when that turns) by the straight way only: a way that
             // turns may cost a cross aisle the straight one makes (the solver keeps the better).
@@ -520,7 +523,11 @@ pub fn lay_split(ctx: &mut Ctx, part: &Region, s: &Settings, origin: Pt, degs: &
                     })
                     .collect();
                 if std::env::var_os("PARKING_DEBUG").is_some() {
-                    eprintln!("split at {c:?} along {deg:.0} shift {shift}: {} parts, {} bays", plans.len(), plans.iter().map(|p| p.stalls.len()).sum::<usize>());
+                    eprintln!(
+                        "split at {c:?} along {deg:.0} shift {shift}: {} parts, {} bays",
+                        plans.len(),
+                        plans.iter().map(|p| p.stalls.len()).sum::<usize>()
+                    );
                 }
                 out.push(join(plans, drives));
             }
@@ -667,7 +674,12 @@ fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot], turns: bool, cw: f
             }
             // Off the foot a turn's width, then square to an aisle above or below.
             let stub = rect(f.at, f.lo, f.at + f.dir * cw, f.hi);
-            if clear(&rect(stub.x0 + if f.dir > 0.0 { FOOT_SLACK } else { 0.0 }, stub.y0, stub.x1 - if f.dir < 0.0 { FOOT_SLACK } else { 0.0 }, stub.y1)) {
+            if clear(&rect(
+                stub.x0 + if f.dir > 0.0 { FOOT_SLACK } else { 0.0 },
+                stub.y0,
+                stub.x1 - if f.dir < 0.0 { FOOT_SLACK } else { 0.0 },
+                stub.y1,
+            )) {
                 for (k, sg) in segs.iter().enumerate() {
                     if sg.x0 > stub.x0 + FOOT_SLACK || sg.x1 < stub.x1 - FOOT_SLACK {
                         continue;
@@ -696,7 +708,11 @@ fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot], turns: bool, cw: f
                     if gap < -1.0 || gap > FOOT_REACH {
                         continue;
                     }
-                    let r = if f.dir > 0.0 { rect(mid - half, f.at, mid + half, f.at + gap.max(0.0)) } else { rect(mid - half, f.at - gap.max(0.0), mid + half, f.at) };
+                    let r = if f.dir > 0.0 {
+                        rect(mid - half, f.at, mid + half, f.at + gap.max(0.0))
+                    } else {
+                        rect(mid - half, f.at - gap.max(0.0), mid + half, f.at)
+                    };
                     // Clear from just off the foot (the ramp's cut-out may leave a sliver there) to the aisle.
                     let (y0, y1) = if f.dir > 0.0 { (r.y0 + FOOT_SLACK, r.y1) } else { (r.y0, r.y1 - FOOT_SLACK) };
                     if gap <= FOOT_SLACK || box_inside(st.g, r.x0 + 0.1, y0, r.x1 - 0.1, y1) {
@@ -719,7 +735,11 @@ fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot], turns: bool, cw: f
                     continue;
                 };
                 let off = if f.dir > 0.0 { rect(mid - half, f.at, mid + half, sg.y1) } else { rect(mid - half, sg.y0, mid + half, f.at) };
-                let check = if f.dir > 0.0 { rect(off.x0, off.y0 + FOOT_SLACK, off.x1, off.y1) } else { rect(off.x0, off.y0, off.x1, off.y1 - FOOT_SLACK) };
+                let check = if f.dir > 0.0 {
+                    rect(off.x0, off.y0 + FOOT_SLACK, off.x1, off.y1)
+                } else {
+                    rect(off.x0, off.y0, off.x1, off.y1 - FOOT_SLACK)
+                };
                 let reach = side.x1 - side.x0;
                 if reach > FOOT_REACH || !clear(&check) || !clear(&side) {
                     continue;
@@ -749,7 +769,10 @@ fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot], turns: bool, cw: f
     let ramps = !feet.is_empty();
     // A cross aisle has no bays on it: a drive aisle's width is enough (it fits between columns an aisle's width would not).
     if std::env::var_os("PARKING_DEBUG").is_some() {
-        eprintln!("   feet {feet:?} segs {:?} reached {reached:?}", segs.iter().map(|s| format!("{:.1}-{:.1}x{:.1}-{:.1}", s.x0, s.x1, s.y0, s.y1)).collect::<Vec<_>>());
+        eprintln!(
+            "   feet {feet:?} segs {:?} reached {reached:?}",
+            segs.iter().map(|s| format!("{:.1}-{:.1}x{:.1}-{:.1}", s.x0, s.x1, s.y0, s.y1)).collect::<Vec<_>>()
+        );
     }
     if !reached.iter().any(|r| *r) {
         if ramps {
@@ -861,7 +884,8 @@ fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot], turns: bool, cw: f
     if s.one_way {
         for k in (0..ns).filter(|&k| on[k]) {
             for left in [true, false] {
-                let near_end = |r: &Rect| if left { (r.x0 - segs[k].x0).abs() < st.w * 3.0 } else { (segs[k].x1 - r.x1).abs() < st.w * 3.0 };
+                let near_end =
+                    |r: &Rect| if left { (r.x0 - segs[k].x0).abs() < st.w * 3.0 } else { (segs[k].x1 - r.x1).abs() < st.w * 3.0 };
                 let has = options.iter().enumerate().any(|(i, o)| used[i] && (o.a == k || o.b == Some(k)) && near_end(&o.r));
                 if has {
                     continue;
@@ -940,7 +964,8 @@ fn build(st: &Stack, stack: &[(f64, Variant)], feet: &[Foot], turns: bool, cw: f
                     .map(|(i, o)| {
                         let n = o.cost.iter().filter(|&&j| bays[j].alive).count();
                         let other = if o.a == k { o.b.unwrap_or(o.a) } else { o.a };
-                        let both = dead(other, &used, &links, &bays).is_some_and(|(_, _, ol, or)| (if left { ol } else { or }) > s.dead_end + 1e-6);
+                        let both = dead(other, &used, &links, &bays)
+                            .is_some_and(|(_, _, ol, or)| (if left { ol } else { or }) > s.dead_end + 1e-6);
                         let off = if left { o.r.x0 - lo } else { hi - o.r.x1 };
                         (i, n, !both, off)
                     })
@@ -1115,7 +1140,17 @@ fn refill(st: &Stack, segs: &[Seg], on: &[bool], bays: &mut Vec<Bay>, ways: impl
                     let x0 = if from_end { g[1] - n as f64 * st.w } else { g[0] };
                     for j in 0..n {
                         let x = x0 + j as f64 * st.w;
-                        bays.push(Bay { x0: x, x1: x + st.w, y0, y1, seg: k, up, row: row.clone(), cell: 100_000 * extra + j as i64, alive: true });
+                        bays.push(Bay {
+                            x0: x,
+                            x1: x + st.w,
+                            y0,
+                            y1,
+                            seg: k,
+                            up,
+                            row: row.clone(),
+                            cell: 100_000 * extra + j as i64,
+                            alive: true,
+                        });
                     }
                 }
             }
@@ -1144,7 +1179,8 @@ fn columns(st: &Stack, bays: &[Bay], plan: &Plan) -> Vec<Rect> {
         let back = if b.up { b.y0 } else { b.y1 };
         for xc in xs {
             let on_line = rect(xc - c / 2.0, back - c / 2.0, xc + c / 2.0, back + c / 2.0);
-            let inside = if b.up { rect(xc - c / 2.0, back, xc + c / 2.0, back + c) } else { rect(xc - c / 2.0, back - c, xc + c / 2.0, back) };
+            let inside =
+                if b.up { rect(xc - c / 2.0, back, xc + c / 2.0, back + c) } else { rect(xc - c / 2.0, back - c, xc + c / 2.0, back) };
             let r = if box_inside(st.g, on_line.x0, on_line.y0, on_line.x1, on_line.y1) { on_line } else { inside };
             if !box_inside(st.g, r.x0, r.y0, r.x1, r.y1) {
                 continue;

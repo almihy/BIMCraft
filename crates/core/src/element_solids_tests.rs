@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-//! One closed solid per element, per material layer (`view3d::element_solids`): the volumes of each layer against figures worked
+//! One closed solid per element, per material layer (`solids::element_solids`): the volumes of each layer against figures worked
 //! by hand, closedness, origins and curve tags, the cache, and every element of the sample models.
 
 use std::f64::consts::PI;
@@ -12,7 +12,8 @@ use crate::model::{Element, Id};
 use crate::model_tests::graphics_testing::run;
 use crate::quantities;
 use crate::solid::{Frame, Origin, Seg};
-use crate::view3d::{ElementSolids, Scene, element_solids};
+use crate::solids::{ElementSolids, element_solids};
+use crate::view3d::Scene;
 
 fn near(a: f64, b: f64, tol: f64) -> bool {
     (a - b).abs() <= tol * b.abs().max(1.0)
@@ -127,7 +128,11 @@ fn a_curved_wall_with_a_door_is_closed_on_its_arcs() {
     assert!(near(curve.radii[0], 1900.0, 1e-9) && near(curve.radii[1], 2100.0, 1e-9), "{curve:?}");
     // A section through it at mid height shows arcs of exactly those radii: the two faces of each side of the door.
     let loops = solid.slice(&Frame::plan(1500.0));
-    let arcs: Vec<f64> = loops.iter().flat_map(|l| l.segs.iter()).filter_map(|g| if let Seg::Arc { radius, .. } = g { Some(*radius) } else { None }).collect();
+    let arcs: Vec<f64> = loops
+        .iter()
+        .flat_map(|l| l.segs.iter())
+        .filter_map(|g| if let Seg::Arc { radius, .. } = g { Some(*radius) } else { None })
+        .collect();
     assert_eq!(arcs.len(), 4, "{loops:?}");
     assert!(arcs.iter().all(|r| near(*r, 1900.0, 1e-9) || near(*r, 2100.0, 1e-9)), "{arcs:?}");
     // Through the door the section is the one run of wall over its head.
@@ -168,7 +173,11 @@ fn a_holed_floor_less_a_shaft_is_one_closed_solid() {
     assert_near("its top layer", whole.layer(0).unwrap().volume(), 47e6 * 50.0, 1e-9);
     assert_near("its bottom layer", whole.layer(1).unwrap().volume(), 47e6 * 150.0, 1e-9);
     // A shaft 1.5 m x 1 m through its middle, from below to above.
-    run(&mut s, "shaft", json!({"boundary": [[4000, 2000], [5500, 2000], [5500, 3000], [4000, 3000]], "base_offset": -1000, "height": 3000}));
+    run(
+        &mut s,
+        "shaft",
+        json!({"boundary": [[4000, 2000], [5500, 2000], [5500, 3000], [4000, 3000]], "base_offset": -1000, "height": 3000}),
+    );
     let es = element_solids(&s.model, f);
     assert!(es.is_whole(), "{:?}", es.open);
     assert_sound(f, &es);
@@ -247,7 +256,12 @@ fn the_scene_keeps_each_elements_solids_until_an_edit_touches_it() {
     run(&mut s, "wall", json!({"points": [[5000, 0], [5000, 4000]], "type": "T", "height": 3000}));
     let joined = s.model.clone();
     let third = next.update(&after, &joined);
-    assert!(third.solids_kept() < next.solids_kept(), "{} of {}: the wall it ends on is made again", third.solids_kept(), next.solids_kept());
+    assert!(
+        third.solids_kept() < next.solids_kept(),
+        "{} of {}: the wall it ends on is made again",
+        third.solids_kept(),
+        next.solids_kept()
+    );
     assert_near("a, joined", third.element_solids(&joined, a).volume(), Scene::new(&joined).element_solids(&joined, a).volume(), 1e-12);
 }
 
@@ -270,7 +284,7 @@ fn census(m: &crate::model::Model) -> (Census, std::collections::BTreeMap<Id, El
     let index = crate::walls::Index::new(m);
     let mut components = crate::component_geometry::Components::new(m);
     for (&id, e) in m.elements.iter() {
-        let es = crate::view3d::element_solids_in(m, id, Some(&index), &mut components);
+        let es = crate::solids::element_solids_in(m, id, Some(&index), &mut components);
         c.elements += 1;
         if !es.layers.is_empty() {
             c.with_solids += 1;
@@ -281,10 +295,10 @@ fn census(m: &crate::model::Model) -> (Census, std::collections::BTreeMap<Id, El
         c.open += es.open.len();
         for o in &es.open {
             let kind = match &o.piece {
-                crate::view3d::Solid::Box { .. } => "box",
-                crate::view3d::Solid::Slab { .. } => "slab",
-                crate::view3d::Solid::Prism { .. } => "prism",
-                crate::view3d::Solid::Mesh { .. } => "mesh",
+                crate::solids::Solid::Box { .. } => "box",
+                crate::solids::Solid::Slab { .. } => "slab",
+                crate::solids::Solid::Prism { .. } => "prism",
+                crate::solids::Solid::Mesh { .. } => "mesh",
             };
             let why = match &o.why {
                 crate::solid::SolidError::NotClosed { .. } => "not closed".to_string(),
@@ -330,7 +344,11 @@ fn every_element_of_the_sample_house_has_closed_solids_or_a_recorded_open_piece(
         match e {
             Element::Floor(f) => assert_near("a floor", all[&id].volume(), m.floor_volume(f), 1e-9),
             Element::Ceiling(cl) => {
-                let net: f64 = m.ceiling_slabs(cl).iter().map(|(face, rise)| m.less_shafts(face, *rise).0.iter().map(|r| crate::geom::area(r).abs()).sum::<f64>()).sum();
+                let net: f64 = m
+                    .ceiling_slabs(cl)
+                    .iter()
+                    .map(|(face, rise)| m.less_shafts(face, *rise).0.iter().map(|r| crate::geom::area(r).abs()).sum::<f64>())
+                    .sum();
                 let width = m.types.ceiling.get(&cl.type_name).map_or(0.0, |t| t.thickness);
                 assert_near("a ceiling", all[&id].volume(), net * width, 1e-9);
             }
@@ -441,14 +459,14 @@ fn element_solids_timings() {
         let started = Instant::now();
         let mut pieces = 0;
         for (&id, e) in model.elements.iter() {
-            pieces += crate::view3d::solids_in_with(&model, &[(id, e)], Some(&index), &mut components).len();
+            pieces += crate::solids::solids_in_with(&model, &[(id, e)], Some(&index), &mut components).len();
         }
         let pieces_time = started.elapsed();
         let started = Instant::now();
         let mut made = 0;
         let mut triangles = 0;
         for &id in &ids {
-            let es = crate::view3d::element_solids_in(&model, id, Some(&index), &mut components);
+            let es = crate::solids::element_solids_in(&model, id, Some(&index), &mut components);
             made += es.layers.len();
             // Asking for the triangles makes Manifold do its booleans, which are lazy.
             triangles += es.layers.iter().map(|(_, s)| s.triangle_count()).sum::<usize>();

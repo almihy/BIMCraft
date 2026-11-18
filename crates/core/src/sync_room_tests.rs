@@ -599,7 +599,6 @@ fn three_copies_and_the_server_end_alike_when_one_takes_a_type_out_another_place
     }
 }
 
-
 // ---- The same ids in every copy: each copy given blocks of ids makes what it makes under ids no other takes, and an element
 // has its id with it in the room (Arqiflow's docs/superpowers/specs/2026-11-17-agent-model-work-on-the-pc-design.md, Phase 1).
 
@@ -714,12 +713,19 @@ fn a_floors_sketch_lines_have_the_same_ids_in_every_copy() {
     let (mut a, mut b, mut room) = two();
     a.s.give_ids(1_000_000, 1_001_000).unwrap();
     b.s.give_ids(1_001_000, 1_002_000).unwrap();
-    let f = made_id(&a.run("floor", json!({"sketch": [[[0, 0], [4000, 0]], [[4000, 0], [4000, 4000]], [[4000, 4000], [0, 4000]], [[0, 4000], [0, 0]]]})));
+    let f =
+        made_id(&a.run(
+            "floor",
+            json!({"sketch": [[[0, 0], [4000, 0]], [[4000, 0], [4000, 4000]], [[4000, 4000], [0, 4000]], [[0, 4000], [0, 0]]]}),
+        ));
     let lines: Vec<u64> = a.model().elements.get(f).unwrap().sketch().map(|l| l.iter().map(|x| x.id).collect()).unwrap_or_default();
     assert!(!lines.is_empty(), "a floor drawn by its sketch has its lines");
     assert!(lines.iter().all(|id| (1_000_000..1_001_000).contains(id)), "from a's block: {lines:?}");
     // b makes one at the same moment: its lines' ids are b's.
-    let fb = made_id(&b.run("floor", json!({"sketch": [[[0, 6000], [4000, 6000]], [[4000, 6000], [4000, 9000]], [[4000, 9000], [0, 9000]], [[0, 9000], [0, 6000]]]})));
+    let fb = made_id(&b.run(
+        "floor",
+        json!({"sketch": [[[0, 6000], [4000, 6000]], [[4000, 6000], [4000, 9000]], [[4000, 9000], [0, 9000]], [[0, 9000], [0, 6000]]]}),
+    ));
     a.push(&mut room);
     b.push(&mut room);
     settle(&mut [&mut a, &mut b], &mut room);
@@ -727,7 +733,8 @@ fn a_floors_sketch_lines_have_the_same_ids_in_every_copy() {
     let there: Vec<u64> = b.model().elements.get(g).unwrap().sketch().map(|l| l.iter().map(|x| x.id).collect()).unwrap_or_default();
     assert_eq!(there, lines, "a's floor's lines have a's ids in b");
     let gb = b.model().elements.guid(fb).unwrap();
-    let theirs = |m: &Model| -> Vec<u64> { m.elements.get(gb).unwrap().sketch().map(|l| l.iter().map(|x| x.id).collect()).unwrap_or_default() };
+    let theirs =
+        |m: &Model| -> Vec<u64> { m.elements.get(gb).unwrap().sketch().map(|l| l.iter().map(|x| x.id).collect()).unwrap_or_default() };
     assert_eq!(theirs(a.model()), theirs(b.model()), "and b's floor's lines b's in a");
     same_ids(&a, &b, &room);
 }

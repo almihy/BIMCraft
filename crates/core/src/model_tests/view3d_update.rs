@@ -1,7 +1,8 @@
 //! `view3d::update`'s tests that drive the Session (moved out of `view3d/update.rs`).
 
 use crate::model::Id;
-use crate::view3d::{Scene, Tri};
+use crate::solids::Tri;
+use crate::view3d::Scene;
 use std::collections::{BTreeSet, HashMap};
 
 use std::sync::Arc;

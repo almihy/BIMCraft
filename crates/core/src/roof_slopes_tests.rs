@@ -36,7 +36,7 @@ fn pitches(s: &Session, id: u64) -> Vec<f64> {
 
 /// How high roof `id`'s top is over (`x`, `y`), mm above Level 1.
 fn top(s: &Session, id: u64, x: f64, y: f64) -> f64 {
-    crate::view3d::tops_at(&s.model, P2(x, y)).get(&id).copied().unwrap_or(f64::NAN)
+    crate::solids::tops_at(&s.model, P2(x, y)).get(&id).copied().unwrap_or(f64::NAN)
 }
 
 fn near(a: f64, b: f64) -> bool {

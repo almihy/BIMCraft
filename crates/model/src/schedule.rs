@@ -1242,12 +1242,7 @@ fn sources<'a>(m: &'a Model, sc: &Schedule, cat: &str) -> Vec<(Id, &'a Element, 
             Element::Component(c) if cat == "parking" => crate::carpark::is_bay(m, c),
             _ => e.category() == cat,
         };
-        return m
-            .elements
-            .iter()
-            .filter(|(_, e)| of(e))
-            .map(|(id, e)| (*id, e, element_json_light(m, *id, &rooms)))
-            .collect();
+        return m.elements.iter().filter(|(_, e)| of(e)).map(|(id, e)| (*id, e, element_json_light(m, *id, &rooms))).collect();
     }
     let mut out = Vec::new();
     for (&id, e) in &m.elements {

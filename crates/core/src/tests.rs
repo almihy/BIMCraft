@@ -1849,7 +1849,7 @@ fn components_show_in_plan_from_above_in_3d_and_beyond_a_section() {
     assert!(lines(&s).is_empty());
     run(&mut s, "modify", json!({"id": id, "offset": 0}));
     // In 3D, each form a solid, the top in its material's colour.
-    let solids = crate::view3d::shaded(&s.model);
+    let solids = crate::solids::shaded(&s.model);
     let colours: Vec<[u8; 3]> = solids.iter().filter(|x| x.owner() == id).map(|x| x.color()).map(|c| [c.0, c.1, c.2]).collect();
     assert_eq!(colours.len(), 3);
     assert!(colours.contains(&s.model.materials["Timber"].color), "{colours:?}");
@@ -3828,7 +3828,7 @@ fn walls_attached_to_a_roof_follow_its_underside() {
     run(&mut s, "delete", json!({"ids": [low["id"]]}));
     run(&mut s, "modify", json!({"ids": ids, "attach_top": roof}));
     let tan = 30f64.to_radians().tan();
-    let top = |s: &Session, id: u64, p: P2| crate::view3d::tops_at(&s.model, p)[&id];
+    let top = |s: &Session, id: u64, p: P2| crate::solids::tops_at(&s.model, p)[&id];
     assert!((top(&s, ids[1], P2(8000.0, 3000.0)) - (3000.0 + 3100.0 * tan)).abs() < 1.0, "the east wall reaches the ridge");
     assert!((top(&s, ids[0], P2(4000.0, 0.0)) - (3000.0 + 100.0 * tan)).abs() < 1.0, "the south wall keeps under its slope");
     let window = run(&mut s, "window", json!({"at": [8000, 3000], "sill": 3200}));
@@ -3868,7 +3868,7 @@ fn sloped_floors_rise_along_their_slope_arrow() {
         .as_u64()
         .unwrap();
     let (tan, cos) = (5f64.to_radians().tan(), 5f64.to_radians().cos());
-    let top = |s: &Session, x: f64| crate::view3d::tops_at(&s.model, P2(x, 1000.0))[&ramp];
+    let top = |s: &Session, x: f64| crate::solids::tops_at(&s.model, P2(x, 1000.0))[&ramp];
     assert!((top(&s, 1500.0) - (100.0 + 500.0 * tan)).abs() < 1e-6);
     assert!((top(&s, 4000.0) - (100.0 + 3000.0 * tan)).abs() < 1e-6);
     let e = element(&mut s, ramp);
@@ -3878,7 +3878,7 @@ fn sloped_floors_rise_along_their_slope_arrow() {
         [0]
     .as_u64()
     .unwrap();
-    let tops = crate::view3d::tops_at(&s.model, P2(4000.0, 1000.0));
+    let tops = crate::solids::tops_at(&s.model, P2(4000.0, 1000.0));
     assert!((tops[&under] - (100.0 + 3000.0 * tan - 200.0 / cos)).abs() < 1e-6, "{tops:?}");
     // A slope needs its arrow, and no more than 75°.
     assert!(s.execute("modify", &json!({"id": ramp, "arrow": null})).unwrap_err().contains("arrow"));
@@ -3903,7 +3903,7 @@ fn ceilings_fill_rooms_out_to_the_faces_of_their_walls() {
     let id = c["id"].as_u64().unwrap();
     let e = element(&mut s, id);
     assert_eq!((id_of(&s, &e["level"]), e["offset"].as_f64(), e["thickness"].as_f64()), (Some(100000), Some(2600.0), Some(20.0)));
-    assert_eq!(crate::view3d::tops_at(&s.model, P2(2000.0, 3000.0))[&id], 2620.0);
+    assert_eq!(crate::solids::tops_at(&s.model, P2(2000.0, 3000.0))[&id], 2620.0);
     // Sketched, lower, in tiles; where no walls close around a point, it needs a boundary.
     let tiles = run(
         &mut s,
@@ -3936,7 +3936,7 @@ fn shafts_cut_the_floors_ceilings_and_roofs_they_pass_through() {
     // A 1 x 2 m shaft from Level 1 up to the next: through the ceiling and the upper floor, not the
     // ground floor under it, nor the roof high over it.
     let shaft = run(&mut s, "shaft", json!({"boundary": [[3000, 2000], [4000, 2000], [4000, 4000], [3000, 4000]]}))["id"].as_u64().unwrap();
-    let tops = |s: &Session, x: f64| crate::view3d::tops_at(&s.model, P2(x, 3000.0));
+    let tops = |s: &Session, x: f64| crate::solids::tops_at(&s.model, P2(x, 3000.0));
     let inside = tops(&s, 3500.0);
     assert!(inside.contains_key(&ground) && inside.contains_key(&roof), "{inside:?}");
     assert!(!inside.contains_key(&upper) && !inside.contains_key(&ceiling), "{inside:?}");
@@ -3979,7 +3979,7 @@ fn a_floor_with_curved_openings_is_cut_round_them_into_few_pieces() {
     let area: f64 = pieces.iter().map(|(r, _)| crate::geom::area(r)).sum();
     let whole = crate::geom::area(&f.boundary).abs() - f.openings.iter().map(|o| crate::geom::area(o).abs()).sum::<f64>();
     assert!((area - whole).abs() < 1000.0, "{area} mm² of {whole}");
-    let over = |x: f64| crate::view3d::tops_at(&s.model, P2(x, 0.0)).contains_key(&id);
+    let over = |x: f64| crate::solids::tops_at(&s.model, P2(x, 0.0)).contains_key(&id);
     assert_eq!([-4500.0, 4500.0, 0.0, 9000.0].map(over), [false, false, true, true]);
 }
 
@@ -3995,7 +3995,7 @@ fn stairs_turn_at_landings_into_several_runs() {
     assert_eq!(e["runs"], json!([[[1000.0, 1000.0], [1000.0, 2960.0]], [[1500.0, 3460.0], [3740.0, 3460.0]]]), "{e}");
     assert!(near(&e["end"], [3740.0, 3460.0]), "{e}");
     let each = 3000.0 / 17.0;
-    let tops = |s: &Session, x: f64, y: f64| crate::view3d::tops_at(&s.model, P2(x, y)).get(&st).copied();
+    let tops = |s: &Session, x: f64, y: f64| crate::solids::tops_at(&s.model, P2(x, y)).get(&st).copied();
     assert!((tops(&s, 1000.0, 3460.0).unwrap() - 8.0 * each).abs() < 1e-6, "the landing, 8 risers up");
     assert!((tops(&s, 3600.0, 3460.0).unwrap() - 16.0 * each).abs() < 1e-6, "the last tread, a riser under Level 2");
     assert_eq!(tops(&s, 2500.0, 2000.0), None, "nothing between the runs");
@@ -4035,7 +4035,7 @@ fn ramps_climb_at_their_slope_with_landings_between_runs() {
     let e = element(&mut s, r);
     assert_eq!((e["width"].as_f64(), e["length"].as_f64()), (Some(1200.0), Some(7200.0)), "{e}");
     assert_eq!(e["runs"], json!([[[-4000.0, -6000.0], [-400.0, -6000.0]], [[-400.0, -4800.0], [-4000.0, -4800.0]]]), "{e}");
-    let top = |s: &Session, x: f64, y: f64| crate::view3d::tops_at(&s.model, P2(x, y)).get(&r).copied();
+    let top = |s: &Session, x: f64, y: f64| crate::solids::tops_at(&s.model, P2(x, y)).get(&r).copied();
     assert!((top(&s, -2200.0, -6000.0).unwrap() - 150.0).abs() < 1e-6, "halfway up its first run");
     assert!((top(&s, 200.0, -5400.0).unwrap() - 300.0).abs() < 1e-6, "the landing");
     assert!((top(&s, -2200.0, -4800.0).unwrap() - 450.0).abs() < 1e-6, "halfway up its second run");
@@ -4058,7 +4058,7 @@ fn railings_run_along_stairs_and_ramps_or_along_a_path() {
     assert_eq!((left["side"].as_str(), left["height"].as_f64()), (Some("left"), Some(1000.0)));
     assert_eq!(left["path"], json!([[550.0, 1000.0], [550.0, 5480.0]]), "{left}");
     // Its rail rises with the stair, a metre over its walk line.
-    let rail = |s: &Session, id: u64, p: P2| crate::view3d::tops_at(&s.model, p).get(&id).copied();
+    let rail = |s: &Session, id: u64, p: P2| crate::solids::tops_at(&s.model, p).get(&id).copied();
     let at = |y: f64| 3000.0 * (y - 1000.0) / 4480.0 + 1000.0;
     assert!((rail(&s, ids[0], P2(550.0, 3000.0)).unwrap() - at(3000.0)).abs() < 1.0, "{:?}", rail(&s, ids[0], P2(550.0, 3000.0)));
     // It goes where its stair goes, and with it.
@@ -4097,7 +4097,7 @@ fn hip_roofs_cover_any_footprint_with_valleys_where_wings_meet() {
     let roof = run(&mut s, "roof", json!({}))["id"].as_u64().unwrap();
     let (tan, rise) = (30f64.to_radians().tan(), 300.0 / 30f64.to_radians().cos());
     let eave = 3000.0 - 500.0 * tan;
-    let top = |s: &Session, x: f64, y: f64| crate::view3d::tops_at(&s.model, P2(x, y)).get(&roof).copied();
+    let top = |s: &Session, x: f64, y: f64| crate::solids::tops_at(&s.model, P2(x, y)).get(&roof).copied();
     let ridge = eave + 3600.0 * tan + rise;
     // Both wings' ridges, and over the corner where they meet.
     for (x, y) in [(9000.0, 3000.0), (3000.0, 9000.0), (3000.0, 3000.0)] {
@@ -4128,11 +4128,11 @@ fn extrusion_roofs_sweep_their_profile_across() {
     let e = element(&mut s, roof);
     assert_eq!((e["ridge"].as_f64(), e["area_m2"].as_f64()), (Some(5000.0), Some(64.8)), "{e}");
     // Halfway up its west slope: 1 m up, 300 mm thick across the slope.
-    let top = crate::view3d::tops_at(&s.model, P2(1250.0, 3000.0))[&roof];
+    let top = crate::solids::tops_at(&s.model, P2(1250.0, 3000.0))[&roof];
     assert!((top - (4000.0 + 300.0 * 3500f64.hypot(2000.0) / 3500.0)).abs() < 1e-6, "{top}");
     // Walls attach to it: the south wall's top follows its east slope.
     run(&mut s, "modify", json!({"ids": ids, "attach_top": roof}));
-    let wall = crate::view3d::tops_at(&s.model, P2(4000.0, 0.0))[&ids[0]];
+    let wall = crate::solids::tops_at(&s.model, P2(4000.0, 0.0))[&ids[0]];
     assert!((wall - (3000.0 + 2000.0 * 4500.0 / 5500.0)).abs() < 1e-6, "{wall}");
     // A profile runs along its line one way, and it's swept across some depth.
     let e = s.execute("modify", &json!({"id": roof, "extrusion": {"profile": [[0, 0], [0, 1000]]}})).unwrap_err();
@@ -4153,7 +4153,7 @@ fn dormers_stand_out_of_a_roof_and_open_it_under_them() {
     let (tan, rise) = (30f64.to_radians().tan(), 300.0 / 30f64.to_radians().cos());
     let front = 3000.0 + 1100.0 * tan + rise;
     let ridge = front + 800.0 + 800.0 * tan;
-    let top = |s: &Session, id: u64, x: f64, y: f64| crate::view3d::tops_at(&s.model, P2(x, y)).get(&id).copied();
+    let top = |s: &Session, id: u64, x: f64, y: f64| crate::solids::tops_at(&s.model, P2(x, y)).get(&id).copied();
     assert!((top(&s, roof, 6000.0, 1300.0).unwrap() - (ridge + rise)).abs() < 1e-6, "{:?}", top(&s, roof, 6000.0, 1300.0));
     assert_eq!(top(&s, host, 6000.0, 1300.0), None, "the roof is open under it");
     assert!(top(&s, host, 2000.0, 1300.0).is_some(), "and whole beside it");
@@ -4203,7 +4203,7 @@ fn roofs_slope_round_a_courtyard_up_to_a_ring_of_ridges() {
     let court = json!([[6000, 6000], [10000, 6000], [10000, 10000], [6000, 10000]]);
     let roof = run(&mut s, "roof", json!({"boundary": outline, "courtyards": [court]}))["id"].as_u64().unwrap();
     let (tan, rise) = (30f64.to_radians().tan(), 300.0 / 30f64.to_radians().cos());
-    let top = |s: &Session, x: f64, y: f64| crate::view3d::tops_at(&s.model, P2(x, y)).get(&roof).copied();
+    let top = |s: &Session, x: f64, y: f64| crate::solids::tops_at(&s.model, P2(x, y)).get(&roof).copied();
     // Each wing's ridge 3 m in from both its eaves: a ring of ridges round the courtyard, open over it.
     let ridge = 3000.0 + 3000.0 * tan;
     for (x, y) in [(8000.0, 3000.0), (13000.0, 8000.0), (8000.0, 13000.0), (3000.0, 8000.0), (3000.0, 3000.0), (13000.0, 13000.0)] {
@@ -4267,7 +4267,7 @@ fn roofs_over_the_walls_leave_a_loop_of_walls_standing_free_open_as_a_courtyard(
     // Each wing 7.2 m from eaves to eaves, its ridge 3.6 m in from both, where the slopes have risen
     // from 500 mm below the base: 3000 + 3100 tan 30°. Its area: 17.2² less 2.8².
     assert_eq!((e["ridge"].as_f64(), e["area_m2"].as_f64()), (Some(4789.79), Some(288.0)), "{e}");
-    let top = |s: &Session, id: u64, x: f64, y: f64| crate::view3d::tops_at(&s.model, P2(x, y)).get(&id).copied();
+    let top = |s: &Session, id: u64, x: f64, y: f64| crate::solids::tops_at(&s.model, P2(x, y)).get(&id).copied();
     assert_eq!(top(&s, roof, 8000.0, 8000.0), None, "the courtyard is open");
     // Courtyards given are the roof's own; one too small to stay open past the overhang is roofed over.
     let given = run(&mut s, "roof", json!({"courtyards": []}))["id"].as_u64().unwrap();
@@ -4305,7 +4305,7 @@ fn floors_over_the_walls_leave_a_loop_of_walls_standing_free_open_as_a_courtyard
     let court = json!([[[6000.0, 6000.0], [6000.0, 10000.0], [10000.0, 10000.0], [10000.0, 6000.0]]]);
     assert_eq!((made["area_m2"].as_f64(), e["area_m2"].as_f64(), e["openings"].clone()), (Some(240.0), Some(240.0), court), "{e}");
     // Open over the courtyard in 3D, and in a section across it: cut in both wings, not between.
-    let top = |s: &Session, id: u64, x: f64, y: f64| crate::view3d::tops_at(&s.model, P2(x, y)).get(&id).copied();
+    let top = |s: &Session, id: u64, x: f64, y: f64| crate::solids::tops_at(&s.model, P2(x, y)).get(&id).copied();
     assert_eq!((top(&s, floor, 8000.0, 8000.0), top(&s, floor, 8000.0, 3000.0)), (None, Some(3000.0)));
     let sec = run(&mut s, "section", json!({"start": [8000, -2000], "end": [8000, 18000]}))["id"].as_u64().unwrap();
     let view = crate::render::section_fit(&s.model, sec, 800, 600);
@@ -4345,7 +4345,7 @@ fn ceilings_in_a_room_round_a_loop_of_walls_stop_at_its_faces() {
     let island = json!([[[5900.0, 5900.0], [5900.0, 10100.0], [10100.0, 10100.0], [10100.0, 5900.0]]]);
     assert_eq!((made["area_m2"].as_f64(), e["area_m2"].as_f64(), e["openings"].clone()), (Some(232.0), Some(232.0), island), "{e}");
     // Open over the courtyard in 3D, and in a section across it: cut in both wings, not between.
-    let top = |s: &Session, x: f64, y: f64| crate::view3d::tops_at(&s.model, P2(x, y)).get(&id).copied();
+    let top = |s: &Session, x: f64, y: f64| crate::solids::tops_at(&s.model, P2(x, y)).get(&id).copied();
     assert_eq!((top(&s, 8000.0, 8000.0), top(&s, 8000.0, 3000.0)), (None, Some(2620.0)));
     let sec = run(&mut s, "section", json!({"start": [8000, -2000], "end": [8000, 18000]}))["id"].as_u64().unwrap();
     let view = crate::render::section_fit(&s.model, sec, 800, 600);
@@ -4467,7 +4467,7 @@ fn floors_roofs_and_ceilings_are_built_of_layers_from_the_top_down() {
     let r = run(&mut s, "roof", json!({"type": "Tiled roof"}))["id"].as_u64().unwrap();
     run(&mut s, "modify", json!({"ids": ids, "attach_top": r}));
     let ceiling = run(&mut s, "ceiling", json!({"point": [4000, 3000], "type": "Board"}))["id"].as_u64().unwrap();
-    let solids = crate::view3d::shaded(&s.model);
+    let solids = crate::solids::shaded(&s.model);
     let of = |id: u64| {
         solids.iter().filter(|x| x.owner() == id).map(|x| (x.heights(), x.color())).map(|(h, c)| (h, [c.0, c.1, c.2])).collect::<Vec<_>>()
     };
@@ -5464,7 +5464,7 @@ fn masses_show_in_plans_sections_and_the_3d_view_and_a_category_hides_them() {
     let seen = picture.shows();
     assert!(!seen.contains(&id) && walls.iter().any(|w| seen.contains(w)), "{seen:?}");
     // In 3D: a solid up to its top, seen through a little unless the view says otherwise.
-    assert_eq!(crate::view3d::tops_at(&s.model, P2(5000.0, 3000.0)).get(&id), Some(&9000.0));
+    assert_eq!(crate::solids::tops_at(&s.model, P2(5000.0, 3000.0)).get(&id), Some(&9000.0));
     assert!(crate::graphics::Look::of_3d(&s.model).transparency(id) > 0);
     // `mass` is a category a view may hide, in every drawing.
     run(&mut s, "graphics", json!({"view": 100000, "hide": ["masses"]}));

@@ -28,12 +28,13 @@ use crate::model::{
 };
 use crate::pen::{Pen, Weights};
 pub use crate::prim::{LIGHT_POCHE, OPAQUE, PAPER, POCHE, Part, Prim, Rgb, Rule, View};
+use crate::solids::Solid;
 use crate::styles::{BY_CATEGORY, ObjectStyle};
 use crate::units::Units;
-use crate::view3d::{self, Camera, Clip, Image, Scene, Solid};
+use crate::view3d::{self, Camera, Clip, Image, Scene};
 pub use crate::view3d::{FragmentStats, SectionCache};
 use crate::walls::{self, Axis};
-use crate::{font, massing, sheet, stairs};
+use crate::{font, massing, sheet, solids, stairs};
 
 mod dimensions;
 use dimensions::dimension;
@@ -1402,7 +1403,7 @@ pub struct PreparationStats {
 /// over what an edit left as it was ([`SectionWork::inherit_solids`]).
 #[derive(Default)]
 pub struct SolidCarry {
-    entries: Vec<(Id, std::sync::Arc<view3d::ElementSolids>, Vec<view3d::Solid>)>,
+    entries: Vec<(Id, std::sync::Arc<solids::ElementSolids>, Vec<solids::Solid>)>,
 }
 
 impl SolidCarry {
@@ -1421,7 +1422,7 @@ impl SolidCarry {
 pub struct SectionWork {
     /// Elements and geometry-definition identities; stale work is rebuilt even after a library-only edit.
     of: GeometryKey,
-    solids: view3d::PreparedSolids,
+    solids: solids::PreparedSolids,
     ranges: std::collections::HashMap<Id, std::ops::Range<usize>>,
     #[doc(hidden)]
     pub placed: Vec<(Id, Vec<[f64; 3]>)>,
@@ -1436,14 +1437,14 @@ pub struct SectionWork {
     deferred_runs: usize,
     resolved: std::sync::atomic::AtomicUsize,
     /// The element solids a section is cut through, made when first asked for and kept for as long as this work is of its
-    /// model (`view3d::SolidCache`).
-    solid_cache: view3d::SolidCache,
+    /// model (`solids::SolidCache`).
+    solid_cache: solids::SolidCache,
 }
 
 impl SectionWork {
     pub fn new(m: &Model) -> Self {
-        let (solids, placed, boxes) = view3d::solids_and_extremes(m);
-        let solids = view3d::PreparedSolids::Owned(solids);
+        let (solids, placed, boxes) = solids::solids_and_extremes(m);
+        let solids = solids::PreparedSolids::Owned(solids);
         // Each element's solids lie together, in the order of the elements.
         let mut ranges: std::collections::HashMap<Id, std::ops::Range<usize>> = std::collections::HashMap::new();
         for (i, s) in solids.iter().enumerate() {
@@ -1466,8 +1467,8 @@ impl SectionWork {
 
     /// Cooperative geometry preparation. No partial work is returned.
     pub fn new_cancellable(m: &Model, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Self> {
-        let (solids, placed, boxes) = view3d::solids_and_extremes_cancellable(m, cancelled)?;
-        Self::assembled_cancellable(m, view3d::PreparedSolids::Owned(solids), placed, boxes, cancelled)
+        let (solids, placed, boxes) = solids::solids_and_extremes_cancellable(m, cancelled)?;
+        Self::assembled_cancellable(m, solids::PreparedSolids::Owned(solids), placed, boxes, cancelled)
     }
 
     /// Opt-in envelope preparation. Exact extrema are resolved only when a fitting
@@ -1480,8 +1481,8 @@ impl SectionWork {
     /// ([`section_fit_cancellable`], [`SectionOverlay::new_cancellable`]): a cancelled one
     /// leaves each component's extrema whole or unresolved, and the model's extent unset.
     pub fn new_deferred_cancellable(m: &Model, cancelled: &(dyn Fn() -> bool + Sync)) -> Option<Self> {
-        let ((solids, placed, boxes), deferred) = view3d::solids_and_extremes_deferred(m, cancelled)?;
-        let mut work = Self::assembled_cancellable(m, view3d::PreparedSolids::Owned(solids), placed, boxes, cancelled)?;
+        let ((solids, placed, boxes), deferred) = solids::solids_and_extremes_deferred(m, cancelled)?;
+        let mut work = Self::assembled_cancellable(m, solids::PreparedSolids::Owned(solids), placed, boxes, cancelled)?;
         for ((id, _), d) in work.placed.iter().zip(&deferred) {
             match m.elements.get(*id) {
                 Some(Element::Component(_)) if *d => work.deferred_components += 1,
@@ -1505,15 +1506,15 @@ impl SectionWork {
 
     pub(crate) fn from_prepared_cancellable(
         m: &Model,
-        (solids, placed, boxes): view3d::PreparedMade,
+        (solids, placed, boxes): solids::PreparedMade,
         cancelled: &(dyn Fn() -> bool + Sync),
     ) -> Option<Self> {
-        Self::assembled_cancellable(m, view3d::PreparedSolids::Cached(solids), placed, boxes, cancelled)
+        Self::assembled_cancellable(m, solids::PreparedSolids::Cached(solids), placed, boxes, cancelled)
     }
 
     fn assembled_cancellable(
         m: &Model,
-        solids: view3d::PreparedSolids,
+        solids: solids::PreparedSolids,
         placed: Vec<(Id, Vec<[f64; 3]>)>,
         boxes: Vec<Option<[[f64; 3]; 2]>>,
         cancelled: &(dyn Fn() -> bool + Sync),
@@ -1637,7 +1638,7 @@ impl SectionWork {
     ) -> &'s Vec<[f64; 3]> {
         let Some(cell) = self.cell(at) else { return points };
         cell.get_or_init(|| {
-            let points = m.elements.get(id).map_or_else(Vec::new, |e| view3d::lazy_points(m, id, e, components));
+            let points = m.elements.get(id).map_or_else(Vec::new, |e| solids::lazy_points(m, id, e, components));
             self.resolved.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             points
         })
@@ -1676,7 +1677,7 @@ impl SectionWork {
     }
 
     /// The solids `look` shows, but the components'.
-    fn shown<'a>(&'a self, look: &'a Look) -> impl Iterator<Item = &'a view3d::Solid> + 'a {
+    fn shown<'a>(&'a self, look: &'a Look) -> impl Iterator<Item = &'a solids::Solid> + 'a {
         self.solids.iter().filter(|s| look.shows(s.owner()))
     }
 
@@ -1758,7 +1759,7 @@ fn heights(m: &Model, w: &SectionWork, look: &Look, cancelled: &(dyn Fn() -> boo
     let found = if w.deferred.is_empty() { of(&mut w.heights(look)) } else { w.deferred_heights(m, look, cancelled)? };
     // Its twin, which tests hold it to: of every solid the look shows.
     if crate::selfcheck::on(crate::selfcheck::Check::ViewHeights) {
-        assert_eq!(found, of(&mut view3d::solids(m).iter().filter(|s| look.shows(s.owner())).map(|s| s.heights())), "a view's heights");
+        assert_eq!(found, of(&mut solids::solids(m).iter().filter(|s| look.shows(s.owner())).map(|s| s.heights())), "a view's heights");
     }
     Some(found)
 }
@@ -1799,7 +1800,7 @@ fn span(m: &Model, w: &SectionWork, v: &Section, look: &Look, cancelled: &(dyn F
     // Its twin, which tests hold it to: every corner of every solid the look shows, as far along the line.
     if crate::selfcheck::on(crate::selfcheck::Check::ViewReach) {
         let fold = |xs: &mut dyn Iterator<Item = f64>| xs.fold((f64::MAX, f64::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)));
-        let every = view3d::solids(m);
+        let every = solids::solids(m);
         let all = fold(&mut every.iter().filter(|s| look.shows(s.owner())).flat_map(|s| s.corners()).map(|p| along(P2(p[0], p[1]))));
         assert_eq!((least, most), all, "how far along its line a view's solids reach");
     }
@@ -2316,7 +2317,7 @@ fn section_base_cancellable(
             }
             continue;
         }
-        for (s0, s1) in view3d::crossings(&ms.boundary, v.start, u) {
+        for (s0, s1) in solids::crossings(&ms.boundary, v.start, u) {
             let (a, b) = (s0.max(first), s1.min(last));
             if b - a > 1e-6 {
                 d.dashed(&[P2(a, z0), P2(b, z0), P2(b, z1), P2(a, z1)], BY_CATEGORY, MASS, true);
@@ -4029,7 +4030,7 @@ fn component(d: &mut Drawing, m: &Model, e: &Element, pieces: &[crate::family::P
                 .iter()
                 .enumerate()
                 .filter(|(j, q)| *j != i && q.top > p.top + 1e-6)
-                .flat_map(|(_, q)| view3d::crossings(&q.outline, a, u))
+                .flat_map(|(_, q)| solids::crossings(&q.outline, a, u))
                 .map(|(s0, s1)| (s0.max(0.0), s1.min(len)))
                 .filter(|(s0, s1)| s1 > s0)
                 .collect();
@@ -4075,7 +4076,7 @@ fn shaft(d: &mut Drawing, ring: &[P2]) {
     let Some((lo, hi)) = bounds(ring) else { return };
     for (from, to) in [(lo, hi), (P2(lo.0, hi.1), P2(hi.0, lo.1))] {
         let u = (to - from).unit();
-        for (s0, s1) in view3d::crossings(ring, from - u, u) {
+        for (s0, s1) in solids::crossings(ring, from - u, u) {
             d.line(&[from - u + u * s0, from - u + u * s1], Pen::PROJECTION, INK, false);
         }
     }
@@ -4209,7 +4210,7 @@ fn hatching(d: &mut Drawing, ring: &[P2], pattern: Pattern, u: P2, color: Rgb, g
     let span = |dir: P2| ring.iter().map(|q| q.dot(dir)).fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), x| (a.min(x), b.max(x)));
     let n = u.perp();
     let mut segment = |d: &mut Drawing, from: P2, dir: P2, s0: f64, s1: f64| {
-        for (a, b) in view3d::crossings(&ring, from, dir) {
+        for (a, b) in solids::crossings(&ring, from, dir) {
             let (a, b) = (a.max(s0), b.min(s1));
             if b > a {
                 d.line(&[from + dir * a, from + dir * b], Pen::FINE, color, false);
@@ -4357,7 +4358,7 @@ fn ceiling(d: &mut Drawing, m: &Model, c: &Ceiling) {
             // ceiling up) pairs with neither and would vanish.
             let from = mid + across * (k as f64 * t.grid + 1e-3) - u * (hi - lo).length();
             for piece in &pieces {
-                for (s0, s1) in view3d::crossings(piece, from, u) {
+                for (s0, s1) in solids::crossings(piece, from, u) {
                     d.line(&[from + u * s0, from + u * s1], Pen::PROJECTION, INK, false);
                 }
             }

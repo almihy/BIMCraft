@@ -137,7 +137,8 @@ impl Family {
             return None;
         }
         let warnings = self.values_in(t, &BTreeMap::new(), wall).map(|v| self.open_forms(t, &v)).unwrap_or_default();
-        let fail = |reason: String| Some(TypeCheck { matched: false, reason: Some(reason), warnings: warnings.clone(), ..TypeCheck::default() });
+        let fail =
+            |reason: String| Some(TypeCheck { matched: false, reason: Some(reason), warnings: warnings.clone(), ..TypeCheck::default() });
         if !self.has_parametric() {
             return fail("it came without the rules that size it, so it is drawn as Revit made it".into());
         }

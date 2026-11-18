@@ -5,15 +5,15 @@
 
 // The crates under the model, by the paths its modules have always named them by (`crate::geom`, `crate::units`).
 pub use bimcraft_geom::{csg, files, font, geom, language, prim, shared, skeleton, solid, step, triangulation, units, xlsx};
-pub use bimcraft_site::site;
 pub use bimcraft_mep_calc::{conduit, demand, dps, dr, drainage, hydrant, loads, nbr5410, plumbing, reservoir, storm, water};
+pub use bimcraft_site::site;
 
 pub mod alignment;
 pub mod background_grid;
 pub mod bounds;
 pub mod cad;
-pub mod carpark;
 pub mod camera;
+pub mod carpark;
 pub mod cloud;
 #[doc(hidden)]
 pub mod component_geometry;
@@ -72,6 +72,7 @@ pub mod selfcheck;
 pub mod sheet;
 pub mod sketch;
 pub mod snap;
+pub mod solids;
 pub mod stairs;
 pub mod standards;
 pub mod styles;

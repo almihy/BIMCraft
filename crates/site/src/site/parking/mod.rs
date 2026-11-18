@@ -162,7 +162,8 @@ pub fn input_among(
             .then_some(out)
     };
     input.keep_clear.extend(among.keep.iter().take(MAX_OBSTACLES).filter_map(|r| ring(r)));
-    input.cores = among.cores.iter().filter(|p| finite_pt(p.0, p.1)).take(MAX_OBSTACLES).map(|p| [r3(p.0 / 1000.0), r3(p.1 / 1000.0)]).collect();
+    input.cores =
+        among.cores.iter().filter(|p| finite_pt(p.0, p.1)).take(MAX_OBSTACLES).map(|p| [r3(p.0 / 1000.0), r3(p.1 / 1000.0)]).collect();
     if basement {
         let m = |p: P2| [r3(p.0 / 1000.0), r3(p.1 / 1000.0)];
         input.feet = among
@@ -448,7 +449,8 @@ pub fn result_of(l: &solve::Solved, basement: bool) -> Props {
             v
         })
         .collect();
-    let access: Vec<Value> = l.access_aisles.iter().map(|r| json!(r.iter().map(|p| [to_mm(p[0]), to_mm(p[1])]).collect::<Vec<_>>())).collect();
+    let access: Vec<Value> =
+        l.access_aisles.iter().map(|r| json!(r.iter().map(|p| [to_mm(p[0]), to_mm(p[1])]).collect::<Vec<_>>())).collect();
     let v = json!({
         "stalls": l.metrics.stalls,
         "accessible": l.metrics.accessible,

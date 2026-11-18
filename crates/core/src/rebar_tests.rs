@@ -176,10 +176,10 @@ fn the_3d_view_draws_a_bar_as_a_tube_along_each_straight_piece_of_its_path() {
     let mut s = Session::new();
     let hoop = [[100, -70, -30], [100, 70, -30], [100, 70, -470], [100, -70, -470]];
     let id = ids(&run(&mut s, "rebar", json!({"points": hoop, "closed": true, "diameter": 8})))[0];
-    let solids = crate::view3d::solids(&s.model);
+    let solids = crate::solids::solids(&s.model);
     let mine: Vec<_> = solids.iter().filter(|x| x.owner() == id).collect();
     assert_eq!(mine.len(), 4);
-    assert!(mine.iter().all(|x| matches!(x, crate::view3d::Solid::Mesh { round: true, cut: true, .. })));
+    assert!(mine.iter().all(|x| matches!(x, crate::solids::Solid::Mesh { round: true, cut: true, .. })));
     // Its heights are over the level, and half a diameter more either side of its path.
     let (lo, hi) = mine.iter().map(|x| x.heights()).fold((f64::MAX, f64::MIN), |(l, h), (a, b)| (l.min(a), h.max(b)));
     assert!((lo - -474.0).abs() < 1e-6 && (hi - -26.0).abs() < 1e-6, "{lo} {hi}");

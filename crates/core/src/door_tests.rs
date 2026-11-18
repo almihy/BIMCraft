@@ -96,9 +96,9 @@ fn a_door_types_thickness_is_its_leafs_in_plan_3d_and_ifc() {
     run(&mut s, "type", json!({"category": "door", "name": "Thick", "width": 1100}));
     assert_eq!(s.model.types.door["Thick"].thickness, Some(40.0));
     // In 3D, a box 40 thick.
-    let scene = crate::view3d::solids(&s.model);
+    let scene = crate::solids::solids(&s.model);
     let leaf = scene.iter().find_map(|x| match x {
-        crate::view3d::Solid::Box { owner, c, .. } if *owner == door => Some(*c),
+        crate::solids::Solid::Box { owner, c, .. } if *owner == door => Some(*c),
         _ => None,
     });
     assert_eq!(leaf, Some((-20.0, 20.0)));

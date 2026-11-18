@@ -373,14 +373,14 @@ fn a_joined_runs_3d_body_is_cut_where_its_outline_is() {
            strip_footing {"points": [[3000, 1000], [3000, 0]]}"#,
     );
     let [through, ending] = runs(&s, "stripfooting")[..] else { panic!() };
-    let solids = crate::view3d::solids(&s.model);
+    let solids = crate::solids::solids(&s.model);
     let of = |id: u64| solids.iter().filter(|x| x.owner() == id).collect::<Vec<_>>();
     // The cut run's body stands on the very outline the plan fills: no point of it under the face the
     // plan cut it at — plan and 3D can't show different joints.
     let outline = outline(&s, ending);
     let outline_min = outline.iter().map(|p| p.1).fold(f64::INFINITY, f64::min);
     let ring = match of(ending).as_slice() {
-        [crate::view3d::Solid::Prism { ring, .. }] => (*ring).clone(),
+        [crate::solids::Solid::Prism { ring, .. }] => (*ring).clone(),
         other => panic!("the cut run is one prism, not {} solids", other.len()),
     };
     assert!((ring.iter().map(|p| p.1).fold(f64::INFINITY, f64::min) - outline_min).abs() < 1e-9, "{ring:?}");
@@ -390,7 +390,7 @@ fn a_joined_runs_3d_body_is_cut_where_its_outline_is() {
     );
     // The through run keeps its plain rectangle: its body is not cut by anything.
     match of(through).as_slice() {
-        [crate::view3d::Solid::Prism { ring, .. }] => {
+        [crate::solids::Solid::Prism { ring, .. }] => {
             assert!(ring.iter().any(|p| near(*p, P2(0.0, -300.0))), "{ring:?}");
         }
         other => panic!("the through run is one prism, not {} solids", other.len()),
@@ -404,11 +404,11 @@ fn a_round_runs_body_is_cut_by_the_same_planes_as_its_outline() {
            pipe {"points": [[3000, 1000], [3000, 0]]}"#,
     );
     let [through, ending] = runs(&s, "pipe")[..] else { panic!() };
-    let solids = crate::view3d::solids(&s.model);
+    let solids = crate::solids::solids(&s.model);
     let of = |id: u64| solids.iter().filter(|x| x.owner() == id).collect::<Vec<_>>();
     let whole = 4 * crate::runs::SIDES;
     let cut = match of(ending).as_slice() {
-        [crate::view3d::Solid::Mesh { tris, round, .. }] => {
+        [crate::solids::Solid::Mesh { tris, round, .. }] => {
             assert!(*round, "a pipe's body is a tube");
             assert_ne!(tris.len(), whole, "cut away from the shared tube's {whole} triangles");
             (*tris).clone()
@@ -422,7 +422,7 @@ fn a_round_runs_body_is_cut_by_the_same_planes_as_its_outline() {
     // The pipe nothing ends on stays the shared tube to the last triangle: a view still draws one shape
     // for every round run of a material.
     match of(through).as_slice() {
-        [crate::view3d::Solid::Mesh { tris, round, .. }] => {
+        [crate::solids::Solid::Mesh { tris, round, .. }] => {
             assert!(*round && tris.len() == whole, "{} triangles", tris.len());
         }
         other => panic!("the through pipe is one mesh, not {} solids", other.len()),

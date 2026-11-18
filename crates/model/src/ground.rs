@@ -185,11 +185,7 @@ pub fn ensure_type(m: &mut Model, name: &str) {
     if let Some(s) = surface(name)
         && !m.materials.contains_key(name)
     {
-        let material = crate::model::Material {
-            color: s.color,
-            surface_color: Some(s.plan),
-            ..crate::model::Material::default()
-        };
+        let material = crate::model::Material { color: s.color, surface_color: Some(s.plan), ..crate::model::Material::default() };
         m.materials.insert(name.to_string(), material);
     }
     let layer = crate::model::Layer {
@@ -221,10 +217,8 @@ pub fn grouped(rings: &[Vec<P2>]) -> Vec<(Vec<P2>, Vec<Vec<P2>>)> {
     for h in rings.iter().filter(|r| r.len() >= 3 && geom::area(r) < 0.0) {
         let Some(q) = h.first() else { continue };
         // The smallest outline holding it.
-        if let Some(o) = outers
-            .iter_mut()
-            .filter(|(o, _)| geom::contains(o, *q))
-            .min_by(|a, b| geom::area(&a.0).total_cmp(&geom::area(&b.0)))
+        if let Some(o) =
+            outers.iter_mut().filter(|(o, _)| geom::contains(o, *q)).min_by(|a, b| geom::area(&a.0).total_cmp(&geom::area(&b.0)))
         {
             o.1.push(h.clone());
         }
@@ -416,10 +410,7 @@ impl Model {
                 Some(Element::Roof(r)) => self.roof_prisms(r),
                 _ => continue,
             };
-            let bottom = prisms
-                .iter()
-                .flat_map(|(ring, bottom, _)| ring.iter().map(move |q| bottom.at(*q)))
-                .fold(f64::INFINITY, f64::min);
+            let bottom = prisms.iter().flat_map(|(ring, bottom, _)| ring.iter().map(move |q| bottom.at(*q))).fold(f64::INFINITY, f64::min);
             if !bottom.is_finite() {
                 continue;
             }
@@ -929,13 +920,15 @@ pub fn keep(m: &Model, before: &Model) -> Vec<Update> {
             out.push(Update::Offset { id: *id, offset });
         }
     }
-    let points_changed =
-        changed.iter().any(|id| matches!(m.elements.get(*id).or_else(|| before.elements.get(*id)), Some(Element::SurveyPoint(_) | Element::ProjectBasePoint(_))));
+    let points_changed = changed.iter().any(|id| {
+        matches!(m.elements.get(*id).or_else(|| before.elements.get(*id)), Some(Element::SurveyPoint(_) | Element::ProjectBasePoint(_)))
+    });
     if (points_changed || m.georeference != before.georeference)
         && let (Some(g), Some((e, n, h, r))) = (&m.georeference, m.georeference_numbers())
     {
         let round = |v: f64| (v * 1000.0).round() / 1000.0;
-        let next = crate::model::Georeference { eastings: round(e), northings: round(n), height: round(h), rotation: round(r), ..g.clone() };
+        let next =
+            crate::model::Georeference { eastings: round(e), northings: round(n), height: round(h), rotation: round(r), ..g.clone() };
         if next != *g {
             out.push(Update::Georeference(next));
         }
@@ -1042,7 +1035,9 @@ pub fn toposolid_under(m: &Model, level: Guid, q: P2) -> Option<Guid> {
 /// a project that has no toposolid (Revit has no sub-division without one).
 pub fn make_ground(m: &mut Model, level: Guid, b: [f64; 4]) -> Guid {
     if !m.types.floor.contains_key("Toposolid") {
-        m.types.floor.insert("Toposolid".into(), crate::model::FloorType { thickness: 1000.0, layers: Vec::new(), identity: Default::default() });
+        m.types
+            .floor
+            .insert("Toposolid".into(), crate::model::FloorType { thickness: 1000.0, layers: Vec::new(), identity: Default::default() });
     }
     let pad = 5000.0;
     let f = Floor {
@@ -1151,12 +1146,7 @@ pub fn convert(m: &mut Model) {
         }
     }
     for (id, guid, s) in olds {
-        let middle = s
-            .outline
-            .first()
-            .map(|p| geom::centroid(&p.outer))
-            .or_else(|| point(&s.props, "at"))
-            .unwrap_or_default();
+        let middle = s.outline.first().map(|p| geom::centroid(&p.outer)).or_else(|| point(&s.props, "at")).unwrap_or_default();
         let host = ground.or_else(|| host_for(m, s.level, middle));
         let made: Vec<Element> = match s.kind.as_str() {
             "tree" | "hedge" | "bike_rack" | "play_area" => component_of(m, &s),
@@ -1294,7 +1284,8 @@ fn component_of(m: &mut Model, s: &crate::masterplan::Site) -> Vec<Element> {
             if !load_family(m, &family) {
                 return Vec::new();
             }
-            let radius = num(&s.props, "radius").or_else(|| (control.len() >= 3).then(|| (geom::area(&control).abs() / std::f64::consts::PI).sqrt()));
+            let radius = num(&s.props, "radius")
+                .or_else(|| (control.len() >= 3).then(|| (geom::area(&control).abs() / std::f64::consts::PI).sqrt()));
             if let Some(r) = radius.filter(|r| *r > 0.0) {
                 own.insert(w(site::RADIUS), json!((r * 100.0).round() / 100.0));
             }
@@ -1400,7 +1391,13 @@ pub fn points_from_georeference(m: &mut Model) {
     if m.survey_point().is_some() || m.project_base_point().is_some() {
         return;
     }
-    m.insert(Element::SurveyPoint(BasePoint { east: g.eastings, north: g.northings, height: g.height, clipped: true, ..BasePoint::default() }));
+    m.insert(Element::SurveyPoint(BasePoint {
+        east: g.eastings,
+        north: g.northings,
+        height: g.height,
+        clipped: true,
+        ..BasePoint::default()
+    }));
     m.insert(Element::ProjectBasePoint(BasePoint { angle: g.rotation, clipped: true, ..BasePoint::default() }));
 }
 
@@ -1485,4 +1482,3 @@ pub fn table_of(m: &Model, pl: &crate::masterplan::PropertyLine) -> Vec<Value> {
         })
         .collect()
 }
-

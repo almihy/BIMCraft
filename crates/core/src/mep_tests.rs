@@ -364,13 +364,13 @@ fn the_3d_view_has_a_solid_for_a_run() {
     for c in CASES {
         let mut s = Session::new();
         let a = made(&mut s, c.command, json!({"points": [[0, 0], [6000, 0]], "offset": 2400}));
-        let solids = crate::view3d::solids(&s.model);
+        let solids = crate::solids::solids(&s.model);
         let mine: Vec<_> = solids.iter().filter(|x| x.owner() == a).collect();
         let w = element_json(&s.model, a)["width"].as_f64().unwrap();
         let depth = element_json(&s.model, a)["depth"].as_f64().unwrap();
         let (lo, hi) = mine[0].heights();
         assert!((lo - (2400.0 - depth / 2.0)).abs() < 1e-6 && (hi - (2400.0 + depth / 2.0)).abs() < 1e-6, "{}: {lo} {hi} {w}", c.category);
-        assert_eq!(matches!(mine.as_slice(), [crate::view3d::Solid::Mesh { round: true, .. }]), c.round, "{}", c.category);
+        assert_eq!(matches!(mine.as_slice(), [crate::solids::Solid::Mesh { round: true, .. }]), c.round, "{}", c.category);
     }
 }
 

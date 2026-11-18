@@ -10,7 +10,7 @@ use crate::geom::{self, P2};
 use crate::model::{Element, Id, Model};
 use crate::model_tests::graphics_testing::run;
 use crate::render;
-use crate::view3d::element_solids;
+use crate::solids::element_solids;
 
 type Rings = Vec<(Id, Option<u16>, Vec<P2>)>;
 
@@ -406,7 +406,7 @@ fn a_section_cuts_the_samples_doors_and_windows() {
 fn cut_before(m: &Model, start: P2, end: P2) -> std::collections::BTreeMap<Id, f64> {
     let u = (end - start).unit();
     let mut out: std::collections::BTreeMap<Id, f64> = Default::default();
-    for piece in crate::view3d::solids(m) {
+    for piece in crate::solids::solids(m) {
         for ring in piece.cuts(start - u * 1e5, u, 2e5 + start.dist(end)) {
             *out.entry(piece.owner()).or_default() += geom::area(&ring).abs();
         }

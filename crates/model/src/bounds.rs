@@ -250,7 +250,7 @@ mod tests {
 
     fn encloses_solids(m: &Model, id: Id) {
         let Bounds::Box([lo, hi]) = BoundsCache::default().get(m, id) else { panic!("finite primitive bounds") };
-        let corners: Vec<_> = crate::view3d::solids(m).iter().filter(|s| s.owner() == id).flat_map(|s| s.corners()).collect();
+        let corners: Vec<_> = crate::solids::solids(m).iter().filter(|s| s.owner() == id).flat_map(|s| s.corners()).collect();
         assert!(!corners.is_empty());
         for p in corners {
             for i in 0..3 {

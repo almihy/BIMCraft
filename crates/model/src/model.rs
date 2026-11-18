@@ -4597,7 +4597,7 @@ impl Model {
     /// The box round every solid and placed scan, its min and max corners; none in an empty project.
     pub fn model_box(&self) -> Option<([f64; 3], [f64; 3])> {
         let clouds = self.elements.iter().filter_map(|(id, _)| self.cloud_box(*id)).flat_map(|(lo, hi)| [lo, hi]);
-        let pts = crate::view3d::solids(self).iter().flat_map(|s| s.corners()).chain(clouds).collect::<Vec<_>>();
+        let pts = crate::solids::solids(self).iter().flat_map(|s| s.corners()).chain(clouds).collect::<Vec<_>>();
         let first = *pts.first()?;
         Some(
             pts.iter()
@@ -4608,10 +4608,10 @@ impl Model {
     /// What a level stretches over without an extent of its own: every solid and grid in plan,
     /// [`LEVEL_PAST`] past them (10 m each way of the origin in an empty project).
     pub fn model_extent(&self) -> [P2; 2] {
-        self.model_extent_of(crate::view3d::solids(self).iter().flat_map(|s| s.corners()).map(|p| P2(p[0], p[1])))
+        self.model_extent_of(crate::solids::solids(self).iter().flat_map(|s| s.corners()).map(|p| P2(p[0], p[1])))
     }
 
-    /// [`Model::model_extent`], of `corners`, in plan: those of [`crate::view3d::solids`] of this model, or the points
+    /// [`Model::model_extent`], of `corners`, in plan: those of [`crate::solids::solids`] of this model, or the points
     /// that may be farthest among them.
     pub(crate) fn model_extent_of(&self, corners: impl Iterator<Item = P2>) -> [P2; 2] {
         // The grids, scans and drawings, in the order of their ids, from the lookup.
@@ -5573,7 +5573,7 @@ impl Model {
     pub fn roof_at(&self, level: impl Key, p: P2) -> Option<Id> {
         let above = self.level_above(level);
         let shown = |id: &Id| matches!(self.elements.get(id), Some(Element::Roof(r)) if self.same(r.level, level) || above.is_some_and(|a| self.same(r.level, a)));
-        crate::view3d::tops_at(self, p).into_iter().filter(|(id, _)| shown(id)).max_by(|a, b| a.1.total_cmp(&b.1)).map(|(id, _)| id)
+        crate::solids::tops_at(self, p).into_iter().filter(|(id, _)| shown(id)).max_by(|a, b| a.1.total_cmp(&b.1)).map(|(id, _)| id)
     }
 
     /// The footprint edge nearest `p`, within `within` mm, of the roofs a plan of `level` shows:
@@ -6834,7 +6834,7 @@ impl Model {
                 .get(id)
                 .is_some_and(|e| self.level_of(e).is_some_and(|l| self.same(l, level)) && !matches!(e, Element::Ceiling(_)))
         };
-        crate::view3d::tops_at(self, p).into_iter().filter(|(id, _)| on(id)).max_by(|a, b| a.1.total_cmp(&b.1)).map(|(id, _)| id)
+        crate::solids::tops_at(self, p).into_iter().filter(|(id, _)| on(id)).max_by(|a, b| a.1.total_cmp(&b.1)).map(|(id, _)| id)
     }
 
     /// What a spot elevation reads: in a plan, the top of its host at its point (none while its
@@ -6842,7 +6842,7 @@ impl Model {
     pub fn spot_value(&self, sp: &Spot) -> Option<f64> {
         // ponytail: builds every solid per spot, per drawing; share one set of solids if plans carry many spots.
         match self.elements.get(sp.view)? {
-            Element::Level(_) | Element::PlanView(_) => crate::view3d::tops_at(self, sp.at).get(&self.elements.id(sp.host?)?).copied(),
+            Element::Level(_) | Element::PlanView(_) => crate::solids::tops_at(self, sp.at).get(&self.elements.id(sp.host?)?).copied(),
             Element::Section(_) | Element::Elevation(_) => Some(sp.at.1),
             _ => None,
         }

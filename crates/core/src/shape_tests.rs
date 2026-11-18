@@ -29,7 +29,7 @@ fn slab(s: &mut Session) -> u64 {
 
 /// How high floor `id`'s top is over (`x`, `y`), mm above Level 1.
 fn top(s: &Session, id: u64, x: f64, y: f64) -> f64 {
-    crate::view3d::tops_at(&s.model, P2(x, y)).get(&id).copied().unwrap_or(f64::NAN)
+    crate::solids::tops_at(&s.model, P2(x, y)).get(&id).copied().unwrap_or(f64::NAN)
 }
 
 fn near(a: f64, b: f64) -> bool {
@@ -320,11 +320,11 @@ fn a_variable_layer_keeps_the_underside_flat_and_takes_up_the_fall() {
     // In the 3D view, at a point 29 mm down: the tile follows the top, the screed takes what's left, the membrane and the
     // concrete under it stay level.
     let q = P2(4000.0, 2900.0);
-    let mut layers: Vec<(f64, f64)> = crate::view3d::shaded(&s.model)
+    let mut layers: Vec<(f64, f64)> = crate::solids::shaded(&s.model)
         .into_iter()
         .filter(|x| x.owner() == f)
         .filter_map(|x| match x {
-            crate::view3d::Solid::Prism { ring, bottom, top, .. } if crate::geom::contains(&ring, q) => Some((bottom.at(q), top.at(q))),
+            crate::solids::Solid::Prism { ring, bottom, top, .. } if crate::geom::contains(&ring, q) => Some((bottom.at(q), top.at(q))),
             _ => None,
         })
         .collect();
@@ -703,11 +703,11 @@ fn a_roofs_variable_layer_keeps_its_underside_level_and_takes_up_the_fall() {
     // structure stays level on Level 2.
     let q = P2(4000.0, 2900.0);
     let t = 3310.0 - 40.0 * 2900.0 / 3000.0;
-    let mut layers: Vec<(f64, f64)> = crate::view3d::shaded(&s.model)
+    let mut layers: Vec<(f64, f64)> = crate::solids::shaded(&s.model)
         .into_iter()
         .filter(|x| x.owner() == roof)
         .filter_map(|x| match x {
-            crate::view3d::Solid::Prism { ring, bottom, top, .. } if crate::geom::contains(&ring, q) => Some((bottom.at(q), top.at(q))),
+            crate::solids::Solid::Prism { ring, bottom, top, .. } if crate::geom::contains(&ring, q) => Some((bottom.at(q), top.at(q))),
             _ => None,
         })
         .collect();

@@ -8,6 +8,7 @@ use crate::model::{Element, Id, Model};
 use crate::prim::{PAPER, Rgb};
 use std::collections::{BTreeSet, HashMap};
 
+use crate::solids::*;
 use crate::view3d::*;
 
 #[test]

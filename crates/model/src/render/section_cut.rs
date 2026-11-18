@@ -1,4 +1,4 @@
-//! What a section cuts of the model, from the element solids (`view3d::element_solids`, step 4 of the Manifold plan).
+//! What a section cuts of the model, from the element solids (`solids::element_solids`, step 4 of the Manifold plan).
 //!
 //! Each layer of an element is one closed solid; the section's vertical plane is cut through it by `bimcraft-geom::solid`
 //! ([`Solid3::slice`]), which gives closed loops (outer ones counter-clockwise, holes clockwise, the solid on their left) of
@@ -8,14 +8,14 @@
 //! drawing joins as it joins a wall's abutting pieces: no seam in the fill, no line along the join).
 //!
 //! A piece of an element that is not a solid (an open mesh: a pipe's tube, a family's form with holes in its skin) is cut as
-//! it was before there were solids: [`crate::view3d::Solid::cuts`].
+//! it was before there were solids: [`crate::solids::Solid::cuts`].
 //!
 //! Everything is in a section's own plane: `x` along its line from where the cut begins, `y` up, in mm.
 
 use crate::geom::{self, P2};
 use crate::model::Id;
 use crate::solid::{Frame, Loop, Seg};
-use crate::view3d::{ElementSolids, Vis};
+use crate::solids::{ElementSolids, Vis};
 
 /// The rings of an element's layers: each layer (as `Origin::layer` counts them) and its rings.
 pub(crate) type LayerRings = Vec<(u16, Vec<Vec<P2>>)>;

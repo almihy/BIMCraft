@@ -191,8 +191,7 @@ impl PropertyLine {
                 continue;
             }
             let (p, q) = (self.points[i], self.points[(i + 1) % n]);
-            let piece: Vec<[f64; 2]> =
-                shapes::arc_points([p[0], p[1]], [q[0], q[1]], p[2], shapes::ARC_TOLERANCE).into_iter().collect();
+            let piece: Vec<[f64; 2]> = shapes::arc_points([p[0], p[1]], [q[0], q[1]], p[2], shapes::ARC_TOLERANCE).into_iter().collect();
             let mut prev = [p[0], p[1]];
             for c in piece {
                 strips.push(capsule(prev, c, d.min(MAX_COORD)));
@@ -669,8 +668,16 @@ pub fn check_property_line(who: &str, p: &PropertyLine) -> Result<(), String> {
 /// What a command left that [`keep`] works out again: an element's new shape, props, phase and params, a car park's
 /// layout, a mass's height.
 pub enum Update {
-    Site { id: Id, site: Box<Site> },
-    Mass { id: Id, height: f64, phase: String, params: BTreeMap<String, Value> },
+    Site {
+        id: Id,
+        site: Box<Site>,
+    },
+    Mass {
+        id: Id,
+        height: f64,
+        phase: String,
+        params: BTreeMap<String, Value>,
+    },
     /// The ground's: planting on it, the georeference from the base points (`ground::keep`).
     Ground(crate::ground::Update),
     /// A car park laid out again, or one gone (`carpark::keep`): after the shapes, as it reads its area from its props.

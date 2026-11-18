@@ -355,7 +355,10 @@ fn lay_field(
         }
         // A cross aisle runs clear of the posts too (the rows between the aisles step round them).
         let posted = g.holes.iter().any(|h| is_post(h));
-        for (id, cr, open) in [(100, rect(west_face - ca, y_a, west_face, y_b), west == End::Open), (101, rect(east_face, y_a, east_face + ca, y_b), east == End::Open)] {
+        for (id, cr, open) in [
+            (100, rect(west_face - ca, y_a, west_face, y_b), west == End::Open),
+            (101, rect(east_face, y_a, east_face + ca, y_b), east == End::Open),
+        ] {
             if open {
                 continue;
             }

@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use crate::ids::{Elements, Guid, Id};
 use crate::model::Element;
 use crate::model::Model;
-use crate::view3d::SolidCache;
+use crate::solids::SolidCache;
 
 const SHIFT: u32 = 10;
 
@@ -604,7 +604,7 @@ impl Solids {
         if let Some(kept) = self.gross.lock().ok().and_then(|g| g.get(&id).copied()) {
             return Some(kept);
         }
-        let made = crate::view3d::wall_volume(m, id, false)?;
+        let made = crate::solids::wall_volume(m, id, false)?;
         if let Ok(mut g) = self.gross.lock() {
             g.insert(id, made);
         }

@@ -465,8 +465,7 @@ fn what_has_an_offset_is_raised_by_it_where_there_is_no_level_at_the_new_height(
     let (mut s, l) = three_levels();
     let wall = ids(&run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]], "level": l[0]}))["ids"])[0];
     let pad =
-        run(&mut s, "floor", json!({"boundary": [[0, 5000], [3000, 5000], [3000, 8000], [0, 8000]], "level": l[2], "offset": 200}))
-            ["id"]
+        run(&mut s, "floor", json!({"boundary": [[0, 5000], [3000, 5000], [3000, 8000], [0, 8000]], "level": l[2], "offset": 200}))["id"]
             .as_u64()
             .unwrap();
     let beam = ids(&run(&mut s, "beam", json!({"points": [[0, 10000], [4000, 10000]], "level": l[2]}))["ids"])[0];

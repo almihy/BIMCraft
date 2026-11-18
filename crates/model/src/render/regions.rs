@@ -451,7 +451,7 @@ fn outside(prim: &Prim, view: View, rings: &[Vec<P2>], boxes: &[Option<Extent>])
         fn spans(&self, a: P2, u: P2, len: f64) -> Vec<(f64, f64)> {
             #[cfg(debug_assertions)]
             spend(self.0.iter().map(|r| r.len()).sum());
-            let over = self.0.iter().flat_map(|r| view3d::crossings(r, a, u)).map(|(lo, hi)| (lo.max(0.0), hi.min(len)));
+            let over = self.0.iter().flat_map(|r| solids::crossings(r, a, u)).map(|(lo, hi)| (lo.max(0.0), hi.min(len)));
             gaps(joined(over.filter(|(lo, hi)| hi - lo > EPS).collect()), len)
         }
         fn point(&self, a: P2) -> bool {
@@ -747,7 +747,7 @@ impl Keep for Within<'_> {
             .flat_map(|mk| {
                 #[cfg(debug_assertions)]
                 spend(mk.ring.len());
-                view3d::crossings(&mk.ring, a, u)
+                solids::crossings(&mk.ring, a, u)
             })
             .map(|(x, y)| (x.max(0.0), y.min(len)))
             .filter(|(x, y)| y - x > EPS)
