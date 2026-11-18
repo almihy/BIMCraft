@@ -54,12 +54,12 @@ mod site;
 pub use crate::files::base64;
 pub(crate) use crate::geom::degrees;
 pub(crate) use crate::geom::{micron, tidy};
-pub use crate::{element_json, element_json_with};
 pub(crate) use crate::json::{hundredth, mass_size, read_mm, read_point, top_range};
 pub(crate) use crate::model::bad;
 pub(crate) use crate::model::{category, colour, next_number};
 pub(crate) use crate::motion::{Motion, other_side, transform, transformed};
 pub use crate::units::m2;
+pub use crate::{element_json, element_json_with};
 use cad_pick::cad_outlines;
 use ground::{
     base_point, car_park, car_park_run, excavate, graded_region, parking_component, planting, property_line_edit, property_line_table,
@@ -3115,31 +3115,19 @@ fn next_grid_name(m: &Model) -> String {
 // ---------- files and history ----------
 
 /// Project files this large or larger are refused.
-const MAX_FILE: u64 = 256 << 20;
+#[doc(hidden)]
+pub const MAX_FILE: u64 = 256 << 20;
 
 /// IFC files this large or larger are refused. Reading one peaks at about 12 to 14 times its size in memory (measured on
 /// Revit-like, meshed and BIMCraft-written files of 17 to 81 MB), so one just under 512 MiB stays under about 8 GB.
-const MAX_IFC: u64 = 512 << 20;
+#[doc(hidden)]
+pub const MAX_IFC: u64 = 512 << 20;
 
 /// Files of `extension` (in lower case) this large or larger are refused by `open`: an IFC file at [`MAX_IFC`], a project at
 /// [`MAX_FILE`].
-fn max_file(extension: &str) -> u64 {
+#[doc(hidden)]
+pub fn max_file(extension: &str) -> u64 {
     if extension == "ifc" { MAX_IFC } else { MAX_FILE }
-}
-
-#[cfg(test)]
-mod max_file_tests {
-    use super::*;
-
-    #[test]
-    fn an_ifc_file_may_be_twice_as_large_as_a_project_so_issue_264s_opens() {
-        // Issue #264: an IFC file of 282,607,463 bytes was refused as too large; a project or a family keeps its 256 MiB.
-        assert!(max_file("ifc") > 282_607_463);
-        assert_eq!(max_file("ifc"), 512 << 20);
-        for other in ["bimcraft", "json", "", "ifczip", "IFC"] {
-            assert_eq!(max_file(other), MAX_FILE, "{other}");
-        }
-    }
 }
 
 fn ext(p: &Path) -> String {
@@ -8821,14 +8809,16 @@ fn near_point(m: &Model, level: Guid, p: P2, reach: f64) -> BTreeSet<Id> {
 /// Of the lines a plan of `level` shows that `keep` takes (walls' faces, centre lines and ends,
 /// doors' and windows' centres and jambs, grids, the centre lines and faces of the columns it cuts), the nearest `p`,
 /// within 100 mm.
-pub(crate) fn reference_near(m: &Model, level: impl Key, p: P2, keep: impl Fn(Line) -> bool) -> Option<Reference> {
+#[doc(hidden)]
+pub fn reference_near(m: &Model, level: impl Key, p: P2, keep: impl Fn(Line) -> bool) -> Option<Reference> {
     let level = m.guid(level);
     nearest_reference(m, level, p, keep, near_point(m, level, p, 100.0).into_iter())
 }
 
 /// [`reference_near`] among every element: its twin, which tests hold it to.
-#[cfg(test)]
-pub(crate) fn reference_near_everywhere(m: &Model, level: impl Key, p: P2, keep: impl Fn(Line) -> bool) -> Option<Reference> {
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+pub fn reference_near_everywhere(m: &Model, level: impl Key, p: P2, keep: impl Fn(Line) -> bool) -> Option<Reference> {
     let level = m.guid(level);
     nearest_reference(m, level, p, keep, m.elements.iter().map(|(id, _)| *id))
 }
@@ -8851,7 +8841,8 @@ fn nearest_reference(m: &Model, level: Guid, p: P2, keep: impl Fn(Line) -> bool,
 /// Of the ends of the lines a plan of `level` (`view`, when not the level's own) shows (walls' centre lines and faces,
 /// doors' and windows' jambs, grids, the corners and centre lines of the columns it cuts, its detail lines), the nearest
 /// `p`, within 100 mm.
-pub(crate) fn endpoint_near(m: &Model, level: Guid, view: Option<Guid>, p: P2) -> Option<Reference> {
+#[doc(hidden)]
+pub fn endpoint_near(m: &Model, level: Guid, view: Option<Guid>, p: P2) -> Option<Reference> {
     let plan = view.unwrap_or(level);
     let mut ids = near_point(m, level, p, 100.0);
     // The view's detail lines: what points at it.
@@ -8860,8 +8851,9 @@ pub(crate) fn endpoint_near(m: &Model, level: Guid, view: Option<Guid>, p: P2) -
 }
 
 /// [`endpoint_near`] among every element: its twin, which tests hold it to.
-#[cfg(test)]
-pub(crate) fn endpoint_near_everywhere(m: &Model, level: Guid, view: Option<Guid>, p: P2) -> Option<Reference> {
+#[cfg(debug_assertions)]
+#[doc(hidden)]
+pub fn endpoint_near_everywhere(m: &Model, level: Guid, view: Option<Guid>, p: P2) -> Option<Reference> {
     nearest_end(m, level, view, p, m.elements.iter().map(|(id, _)| *id))
 }
 
@@ -14682,12 +14674,12 @@ fn delete(s: &mut Session, p: &Value) -> R {
             format!("{what} ({id}) can't be deleted, as in Revit: hide it in Visibility/Graphics (Site), or move it with `base_point`"),
         ));
     }
-    #[cfg(test)]
-    let mut twin = s.clone();
+    #[cfg(debug_assertions)]
+    let twin = crate::selfcheck::on(crate::selfcheck::Check::Delete).then(|| s.clone());
     let before = Arc::clone(&s.model);
     let result = delete_indexed(s, p);
-    #[cfg(test)]
-    {
+    #[cfg(debug_assertions)]
+    if let Some(mut twin) = twin {
         let expected = delete_from_scratch(&mut twin, p);
         assert_eq!(result, expected, "indexed deletion returned a different reply");
         assert_eq!(s.model, twin.model, "indexed deletion left a different model");
@@ -14834,7 +14826,7 @@ fn delete_indexed(s: &mut Session, p: &Value) -> R {
     Ok(json!({"deleted": deleted}))
 }
 
-#[cfg(test)]
+#[cfg(debug_assertions)]
 fn delete_from_scratch(s: &mut Session, p: &Value) -> R {
     let c = "delete";
     let m = &s.model;

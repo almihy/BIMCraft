@@ -50,11 +50,21 @@ pub enum Check {
     HeldBy,
     /// A component's outline in plan, from the operation's geometry, is its pieces' outlines.
     ComponentOutline,
+    /// The core's Session: a model undo or redo goes back to passed the whole check when it was made.
+    Undone,
+    /// The core's Session: the library synced by what a command changed is the library synced whole, and in step after.
+    LibrarySync,
+    /// The core's Session: the check of what a command changed gives what the whole model's check gives.
+    ModelCheck,
+    /// The core's Session: the warnings brought up to date after a command, nested ones too, are the whole model's.
+    Review,
+    /// The core's Delete: what it deletes through the lookups is what deleting from scratch deletes, with the same reply.
+    Delete,
 }
 
 impl Check {
     /// Every check.
-    pub const ALL: [Check; 19] = [
+    pub const ALL: [Check; 24] = [
         Check::PlanElements,
         Check::NearOutlines,
         Check::RunEnd,
@@ -74,6 +84,11 @@ impl Check {
         Check::Dims3d,
         Check::HeldBy,
         Check::ComponentOutline,
+        Check::Undone,
+        Check::LibrarySync,
+        Check::ModelCheck,
+        Check::Review,
+        Check::Delete,
     ];
 }
 

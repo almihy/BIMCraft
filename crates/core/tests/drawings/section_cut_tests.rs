@@ -7,8 +7,8 @@ use serde_json::json;
 
 use crate::engine::Session;
 use crate::geom::{self, P2};
+use crate::graphics_testing::run;
 use crate::model::{Element, Id, Model};
-use crate::model_tests::graphics_testing::run;
 use crate::render;
 use crate::solids::element_solids;
 

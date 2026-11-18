@@ -8,8 +8,8 @@ use std::f64::consts::PI;
 use serde_json::json;
 
 use crate::engine::Session;
+use crate::graphics_testing::run;
 use crate::model::{Element, Id};
-use crate::model_tests::graphics_testing::run;
 use crate::quantities;
 use crate::solid::{Frame, Origin, Seg};
 use crate::solids::{ElementSolids, element_solids};

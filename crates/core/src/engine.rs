@@ -219,7 +219,7 @@ pub const READ_ONLY: &str = "which is read-only for agents";
 /// The commands that copy what stands: a copy is made in the session's phase and isn't taken down with its original.
 const COPIES: [&str; 4] = ["copy", "mirror", "rotate", "array"];
 
-#[cfg_attr(test, derive(Clone))]
+#[cfg_attr(debug_assertions, derive(Clone))]
 pub struct Session {
     pub model: Arc<Model>,
     /// Where the model was opened from or last saved to.
@@ -228,11 +228,14 @@ pub struct Session {
     /// project's first phase, and no option. Not the model's: set with `phase` and `option`.
     pub phase: Option<String>,
     pub option: Option<String>,
-    pub(crate) undo: Vec<(Step, Arc<Model>)>,
+    #[doc(hidden)]
+    pub undo: Vec<(Step, Arc<Model>)>,
     pub(crate) redo: Vec<(Step, Arc<Model>)>,
     /// How many times a command's model was checked, for tests that it was or wasn't.
-    #[cfg(test)]
-    pub(crate) checks: usize,
+    /// Debug builds: how many times a command's model was checked.
+    #[cfg(debug_assertions)]
+    #[doc(hidden)]
+    pub checks: usize,
     /// How many times the project was replaced, so a transaction knows its history went with it.
     resets: usize,
     /// PDF pages read apart from the session, which `import_pdf` and `pdf_pages` take instead of the file, and whether it may
@@ -264,7 +267,8 @@ pub struct Session {
     warned: Option<Box<(Arc<Model>, Review)>>,
     /// Elements another copy told that the model would not take as they were (a wall of a type not heard of yet), by GUID with their
     /// JSON: offered again when the settings change ([`Session::merge`]).
-    pub(crate) waiting: std::collections::BTreeMap<crate::ids::Guid, crate::sync::Wait>,
+    #[doc(hidden)]
+    pub waiting: std::collections::BTreeMap<crate::ids::Guid, crate::sync::Wait>,
     /// The same for settings (a type made of a material not heard of yet), by key with their JSON.
     pub(crate) waiting_project: std::collections::BTreeMap<String, crate::sync::Wait>,
     /// The ids this session's models take for what they make when it edits together with others ([`Session::give_ids`]): every
@@ -273,14 +277,16 @@ pub struct Session {
     /// How many commands, scripts and transactions are under way, one inside another. A command made inside another (a script's
     /// lines, a transaction's) does not work out its warnings: the one outermost says what the whole made, once. Raised only
     /// through [`Nesting`], which lowers it again however the work ends.
-    pub(crate) nested: u8,
+    #[doc(hidden)]
+    pub nested: u8,
     /// Tests only: the warnings of the model after the last command made inside another, brought up to date from those after the
     /// one before it, one command at a time, and held to the whole model's: what the outermost's look at the end can't check.
-    #[cfg(test)]
+    #[cfg(debug_assertions)]
     shadow: Option<Box<(Arc<Model>, Review)>>,
     /// Tests only: how many times that was looked at.
-    #[cfg(test)]
-    pub(crate) shadowed: usize,
+    #[cfg(debug_assertions)]
+    #[doc(hidden)]
+    pub shadowed: usize,
 }
 
 /// One more command, script or transaction under way ([`Session::nested`]), until it is dropped: a panic that comes out of the
@@ -313,14 +319,16 @@ impl Drop for Nesting<'_> {
     }
 }
 
-#[cfg(test)]
+#[cfg(debug_assertions)]
 thread_local! {
     /// Tests only: where the next call of [`forced_panic`] with that name panics, to hold what a panic leaves behind to account.
-    pub(crate) static FORCED_PANIC: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
+    #[doc(hidden)]
+    pub static FORCED_PANIC: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
 }
 
-/// Tests only: panics here when [`FORCED_PANIC`] names `at`, once.
-#[cfg(test)]
+/// Debug builds, for tests: panics here when [`FORCED_PANIC`] names `at`, once.
+#[cfg(debug_assertions)]
+#[allow(clippy::panic, reason = "a test asks for it, to see what a panic in a command leaves behind")]
 fn forced_panic(at: &'static str) {
     if FORCED_PANIC.with(|f| f.get()) == Some(at) {
         FORCED_PANIC.with(|f| f.set(None));
@@ -385,7 +393,7 @@ impl Session {
             option: None,
             undo: Vec::new(),
             redo: Vec::new(),
-            #[cfg(test)]
+            #[cfg(debug_assertions)]
             checks: 0,
             resets: 0,
             pdf: crate::raster::PdfReads::default(),
@@ -397,9 +405,9 @@ impl Session {
             clipboard: None,
             warned: None,
             nested: 0,
-            #[cfg(test)]
+            #[cfg(debug_assertions)]
             shadow: None,
-            #[cfg(test)]
+            #[cfg(debug_assertions)]
             shadowed: 0,
             waiting: std::collections::BTreeMap::new(),
             waiting_project: std::collections::BTreeMap::new(),
@@ -443,7 +451,7 @@ impl Session {
         self.waiting_project.clear();
         self.resets += 1;
         self.warned = None;
-        #[cfg(test)]
+        #[cfg(debug_assertions)]
         {
             self.shadow = None;
         }
@@ -582,12 +590,14 @@ impl Session {
             if Arc::ptr_eq(&before, &self.model) {
                 return Ok(v);
             }
-            #[cfg(test)]
+            #[cfg(debug_assertions)]
             forced_panic("post");
             // Back to a model that passed (undo, redo): it is as it was then.
             if self.verified.as_ref().is_some_and(|v| Arc::ptr_eq(v, &self.model)) {
-                #[cfg(test)]
-                assert_eq!(self.model.check(), Ok(()), "`{}` went back to a model that doesn't pass", cmd.id);
+                #[cfg(debug_assertions)]
+                if crate::selfcheck::on(crate::selfcheck::Check::Undone) {
+                    assert_eq!(self.model.check(), Ok(()), "`{}` went back to a model that doesn't pass", cmd.id);
+                }
                 return Ok(v);
             }
             // A command that splits what stands keeps its phase; one that makes something makes it in the session's;
@@ -625,19 +635,20 @@ impl Session {
             }
             // A library in step needs nothing; after a verified model, what the command changed says whether it is.
             let in_step = if verified { self.model.library_in_step_since(&before) } else { self.model.library_in_step() };
-            #[cfg(test)]
-            if verified {
+            #[cfg(debug_assertions)]
+            if verified && crate::selfcheck::on(crate::selfcheck::Check::LibrarySync) {
                 assert_eq!(in_step, self.model.library_in_step(), "library_in_step_since differs after `{}` {params}", cmd.id);
             }
             if !in_step {
                 // After a verified model, what the command changed is synced; else (or when more than elements
                 // changed) the whole library.
-                #[cfg(test)]
-                let oracle = verified.then(|| sync_oracle(&self.model, &before));
+                #[cfg(debug_assertions)]
+                let oracle =
+                    (verified && crate::selfcheck::on(crate::selfcheck::Check::LibrarySync)).then(|| sync_oracle(&self.model, &before));
                 if !(verified && self.model_mut().sync_since(&before)) {
                     self.model_mut().sync_library();
                 }
-                #[cfg(test)]
+                #[cfg(debug_assertions)]
                 if let Some(Some((incremental, whole))) = oracle {
                     assert!(
                         incremental.elements.iter().eq(whole.elements.iter()) && incremental.library.parts().eq(whole.library.parts()),
@@ -679,14 +690,14 @@ impl Session {
             let edited = if cmd.undoable && cmd.id != "insert" { self.model.check_edits(&before, cmd.id, params) } else { Ok(()) };
             edited
                 .and_then(|()| {
-                    #[cfg(test)]
+                    #[cfg(debug_assertions)]
                     {
                         self.checks += 1;
                     }
                     let checked = if verified { self.model.check_changed(&before) } else { self.model.check() };
                     // Tests hold the two to the same answer after every command they run.
-                    #[cfg(test)]
-                    if verified {
+                    #[cfg(debug_assertions)]
+                    if verified && crate::selfcheck::on(crate::selfcheck::Check::ModelCheck) {
                         let full = self.model.check();
                         assert_eq!(checked, full, "check_changed differs from check after `{}` {params}", cmd.id);
                     }
@@ -724,8 +735,8 @@ impl Session {
                 }
                 self.verified = Some(Arc::clone(&self.model));
                 if changed {
-                    #[cfg(test)]
-                    if !outermost {
+                    #[cfg(debug_assertions)]
+                    if !outermost && crate::selfcheck::on(crate::selfcheck::Check::Review) {
                         self.shadow_review(&before);
                     }
                     let step = Step { checked: verified, ..Step::new(cmd.label, &before, &self.model) };
@@ -764,12 +775,14 @@ impl Session {
     /// The warnings the change from `before` to the model now made, those that weren't among the warnings before it, as a
     /// command's result gives them. The warnings of the model now are kept.
     fn fresh_warnings(&mut self, before: &Arc<Model>) -> Vec<Value> {
-        #[cfg(test)]
+        #[cfg(debug_assertions)]
         forced_panic("report");
         let prev = self.review_of(before);
         let now = self.model.reviewed_since(before, &prev);
-        #[cfg(test)]
-        now.assert_whole(&self.model);
+        #[cfg(debug_assertions)]
+        if crate::selfcheck::on(crate::selfcheck::Check::Review) {
+            now.assert_whole(&self.model);
+        }
         let fresh: Vec<Value> = Model::new_warnings(&now.warnings, &prev.warnings).into_iter().map(|w| w.json(&self.model)).collect();
         self.warned = Some(Box::new((Arc::clone(&self.model), now)));
         fresh
@@ -793,7 +806,7 @@ impl Session {
     /// Tests only: the warnings after a command made inside another, brought up to date from those after the command before it
     /// and held to those of the whole model, as the outermost's are after each command of its own. (What this works out is no
     /// part of what the tests count.)
-    #[cfg(test)]
+    #[cfg(debug_assertions)]
     fn shadow_review(&mut self, before: &Arc<Model>) {
         let counted = crate::warnings::REVIEWS.with(std::cell::Cell::get);
         let prev = match self.shadow.take() {
@@ -856,8 +869,9 @@ impl Session {
     }
 
     /// Whether the model now is the one the last command left that passed the check, so the next checks only what it changes.
-    #[cfg(test)]
-    pub(crate) fn verified_now(&self) -> bool {
+    #[cfg(debug_assertions)]
+    #[doc(hidden)]
+    pub fn verified_now(&self) -> bool {
         self.verified.as_ref().is_some_and(|v| Arc::ptr_eq(v, &self.model))
     }
 
@@ -1225,7 +1239,7 @@ fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
 
 /// The library synced both ways, by what changed since `before` and whole, each new GUID made the same way in order:
 /// what the engine holds the incremental sync to in tests. None where the incremental one can't say.
-#[cfg(test)]
+#[cfg(debug_assertions)]
 fn sync_oracle(m: &Model, before: &Model) -> Option<(Model, Model)> {
     let counter = || {
         let mut n = 0u64;

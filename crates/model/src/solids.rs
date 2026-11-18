@@ -264,7 +264,6 @@ impl PreparedSolids {
     }
 
     #[doc(hidden)]
-
     pub fn painted(&self, range: std::ops::Range<usize>) -> impl Iterator<Item = Solid> {
         let (owned, cached) = self.slices(range);
         owned.iter().cloned().chain(cached.iter().map(Prepared::painted))
@@ -1290,7 +1289,7 @@ pub fn tops_at(m: &Model, p: P2) -> BTreeMap<Id, f64> {
     tops
 }
 
-/// The box `points` span; none for none.
+/// The box round `points`, lowest corner and highest; none for no points.
 #[doc(hidden)]
 pub fn bounds(points: impl Iterator<Item = P3>) -> Option<[P3; 2]> {
     points.fold(None, |b, p| {

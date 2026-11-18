@@ -13,7 +13,7 @@ use crate::model::{Element, Id};
 use crate::prim::Prim;
 use crate::render::{self, Drawing};
 
-const SAMPLE: &str = include_str!("../testdata/families/sample-two-type-flush-door.json");
+const SAMPLE: &str = include_str!("../../testdata/families/sample-two-type-flush-door.json");
 const NAME: &str = "Sample Two-Type Flush Door";
 
 fn run(s: &mut Session, c: &str, p: Value) -> Value {

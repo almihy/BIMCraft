@@ -658,8 +658,6 @@ pub(crate) type Work<'a> = (&'a PreparedSolids, &'a HashMap<Id, std::ops::Range<
 /// only when it shows).
 type Boxed3 = (Id, Option<[P3; 2]>, std::ops::Range<usize>);
 
-/// The box round `points`, lowest corner and highest; none for no points.
-
 /// A picture's depth buffer as tiles of [`Tiles::SIDE`] px, each keeping its farthest depth: what an element must be nearer
 /// than somewhere to show.
 struct Tiles {

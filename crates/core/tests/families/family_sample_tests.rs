@@ -152,7 +152,7 @@ fn an_l_shaped_desk_matches_only_the_right_way_round() {
 #[test]
 fn the_exported_samples_match_as_recorded() {
     let Ok(dir) = std::env::var("BIMCRAFT_FAMILY_SAMPLES") else { return };
-    let expected: Value = serde_json::from_str(include_str!("../testdata/families/sample-matches.json")).unwrap();
+    let expected: Value = serde_json::from_str(include_str!("../../testdata/families/sample-matches.json")).unwrap();
     let mut differ = Vec::new();
     let mut matched_families = 0;
     for (file, want) in expected["families"].as_object().unwrap() {

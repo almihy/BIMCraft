@@ -245,7 +245,7 @@ fn what_bimcraft_writes_in_its_own_sets_is_not_read_twice() {
     let wall = house.model.elements.iter().find(|(_, e)| e.category() == "wall").map(|(id, _)| *id).unwrap();
     house.execute("modify", &serde_json::json!({"id": wall, "params": {"Fire": "EI60"}})).unwrap();
     let mut coverage = crate::engine::Session::new();
-    coverage.script(include_str!("../../../ci/ifc-coverage.txt")).unwrap();
+    coverage.script(include_str!("../../../../ci/ifc-coverage.txt")).unwrap();
     for (s, parameters) in [(house, vec!["Fire"]), (coverage, Vec::new())] {
         let text = crate::ifc::export(&s.model);
         let i = ifc(text.as_bytes(), "x").unwrap();
