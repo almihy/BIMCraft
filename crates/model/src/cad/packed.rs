@@ -474,8 +474,17 @@ pub fn unpack(bytes: &[u8]) -> Result<Dxf, String> {
                     continue;
                 }
                 let wide = if wide > 0.0 { wide.clamp(0.01, 100.0) } else { 1.0 };
-                let shape =
-                    Shape::Text { at: P2(x, y), height, angle, text, align: Align { h, v }, tag: None, wide, mirrored: flags & 16 != 0 };
+                let shape = Shape::Text {
+                    at: P2(x, y),
+                    height,
+                    angle,
+                    text,
+                    align: Align { h, v },
+                    tag: None,
+                    wide,
+                    mirrored: flags & 16 != 0,
+                    font: None,
+                };
                 (shape, None, None)
             }
             _ => return Err(Reader::bad()),
@@ -555,6 +564,7 @@ mod tests {
                         tag: None,
                         wide: 0.5,
                         mirrored: true,
+                        font: None,
                     },
                 },
             ],
@@ -846,6 +856,7 @@ mod tests {
                         tag: None,
                         wide: 0.5,
                         mirrored: true,
+                        font: None,
                     },
                 ),
             ],
@@ -945,6 +956,7 @@ mod tests {
                     tag: None,
                     wide: wild(&mut next),
                     mirrored: next() % 2 == 0,
+                    font: None,
                 },
             };
             entities.push(Entity { layer, color: Color::True(9, 9, 9), linetype, weight, alpha: (next() % 256) as u8, shape });
@@ -1032,6 +1044,7 @@ mod tests {
                     tag: None,
                     wide: 1.0,
                     mirrored: false,
+                    font: None,
                 },
                 ..line("L0", None)
             },

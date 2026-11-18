@@ -37,6 +37,27 @@ A file is hostile: `MAX_BYTES` caps its size, `MAX_PAIRS` its pairs, `MAX_SHAPES
 blocks', each block once) and the placements it holds (each is held, a cell of an array too), `MAX_PLACED` what its placements draw among them, `MAX_WORK` the entities nested blocks may multiply into, and every coordinate is a finite number within `MAX_FILE_COORD` (one past that is left out as "past what a
 drawing holds"). A file that ends after a group code, a value that isn't a number, a binary DXF and a DWG each say why.
 
+## Text and its fonts
+
+The canvas letters a drawing's text itself (`crate::font`: our lettering, and behind it the fonts that letter what it has
+not, Arabic joined and read from the right; [views and graphics](views-and-graphics.md)), never in the drawing's fonts. A
+text's font matters for one thing. Old Arabic SHX fonts (`xarab.shx`, `xarb.shx`) draw an Arabic letter for each Latin key
+and write from the insertion point leftward: a drawing in one stores "Hu]H] Hgtw,G" and shows «اعداد الفصول». So a text
+keeps its style's font (`Shape::Text::font`: a DXF's STYLE table, a DWG's text style) beside its words as the file holds
+them, and `dxf/fonts.rs` reads it when it is drawn or asked for: `fonts::shown` is the Arabic it shows, by CADCraft's
+table for that font (`cadcraft_fonts::keyboard`, which knows a font by its glyph data, not its name: the same reading as
+Arqiflow's drawing viewer and its agent's drawing reader), and `fonts::aligned` ends a left-aligned one at its point.
+`Drawing`'s plan, the level of detail's boxes, `cad_read` and `cad_outlines`' labels all read through them.
+
+The font's file must be here for that, and BIMCraft carries none: a host gives it at run time. `fonts::missing` lists the
+SHX fonts a model's drawings name and lack; a page asks (`WebApp::fonts_missing`, `Engine::fonts_missing`), finds each
+(the firm's, the computer's, a stand-in) and gives it (`WebApp::give_font`, which draws the drawings again; `add_font` for
+an engine with no window), as it gives the drawing viewer its fonts. `bimcraft-cli run --font FILE` gives one on the
+command line. A font given after its drawing was read still reads it: nothing of the reading is kept in the model. A font
+not given, or one CADCraft has no table for, leaves the text as the file holds it. To look at it: a DXF with a STYLE
+naming `xarab.shx`, `--font` a copy of the font, and `render` the plan (`BIMCRAFT_XARAB=path` runs the test with the real
+font, which is not ours to carry).
+
 ## DWG
 
 A DWG is read straight, with no DXF between (`dxf/dwg.rs`): CADCraft's DWG reader (`cadcraft-dwg`, from our fork

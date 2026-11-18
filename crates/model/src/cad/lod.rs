@@ -414,9 +414,10 @@ impl Lod {
             let ink = Ink { color: self.color_of.get(i).copied().unwrap_or(0), alpha: f64::from(e.alpha) / 255.0 };
             // A text's box is its letters', turned and aligned; one of numbers that aren't is drawn itself.
             let b = match &e.shape {
-                Shape::Text { at, height, angle, text, align, wide, .. } => {
-                    let w = f64::from(crate::font::width(text, 1.0)) * height * wide;
-                    text_box(*at, (w, *height), *angle, (align.h, align.v)).unwrap_or([f64::NEG_INFINITY, 0.0, f64::INFINITY, 0.0])
+                Shape::Text { at, height, angle, text, align, wide, font, .. } => {
+                    let h = crate::dxf::fonts::aligned(font.as_ref(), text, align.h);
+                    let w = f64::from(crate::font::width(&crate::dxf::fonts::read(font.as_ref(), text), 1.0)) * height * wide;
+                    text_box(*at, (w, *height), *angle, (h, align.v)).unwrap_or([f64::NEG_INFINITY, 0.0, f64::INFINITY, 0.0])
                 }
                 _ => b,
             };
@@ -447,8 +448,8 @@ impl Lod {
             let Some(sums) = p.sums(layer) else { continue };
             match &e.shape {
                 Shape::Point(_) => {}
-                Shape::Text { height, text, wide, .. } => {
-                    let w = f64::from(crate::font::width(text, 1.0)) * height * wide;
+                Shape::Text { height, text, wide, font, .. } => {
+                    let w = f64::from(crate::font::width(&crate::dxf::fonts::read(font.as_ref(), text), 1.0)) * height * wide;
                     sums.spread(b, w * height * TEXT_INK / (cell * cell) * CELL_PX, ink);
                 }
                 Shape::Fill { rings, .. } => sums.spread(b, fill_area(rings) / (cell * cell), ink),

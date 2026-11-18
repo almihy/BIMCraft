@@ -231,6 +231,7 @@ fn shape(s: Shape) -> dxf::Shape {
             tag: None,
             wide: 1.0,
             mirrored: false,
+            font: None,
         },
         Shape::Fill { rings, solid } => {
             dxf::Shape::Fill { rings: rings.into_iter().map(|r| r.into_iter().map(p).collect()).collect(), solid, tile: None, shade: false }

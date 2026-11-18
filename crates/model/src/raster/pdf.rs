@@ -1281,6 +1281,7 @@ impl Vectors {
                         tag: None,
                         wide: t.wide,
                         mirrored: t.mirrored,
+                        font: None,
                     },
                 }),
             }

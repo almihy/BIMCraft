@@ -2985,17 +2985,20 @@ impl CadEntities<'_> {
         let k = ci.scale * frame.scale;
         let px_of = |p: &P2| frame.px(place(*p));
         match &ent.shape {
-            Shape::Text { at, height, angle, text, align, wide: factor, mirrored, .. } => {
+            Shape::Text { at, height, angle, text, align, wide: factor, mirrored, font, .. } => {
                 let px = (height * k) as f32;
                 if px < 1.0 {
                     return;
                 }
+                // In an old Arabic SHX font laid out on the keyboard, the Arabic it shows, written from its point leftward.
+                let h = crate::dxf::fonts::aligned(font.as_ref(), text, align.h);
+                let text = &*crate::dxf::fonts::read(font.as_ref(), text);
                 // Its width as drawn, and the way its letters run: backwards when it is mirrored.
                 let wide = f64::from(font::width(text, px)) / k * factor;
                 let run = if *mirrored { -1.0 } else { 1.0 };
                 let (u, v) =
                     (P2(angle.to_radians().cos(), angle.to_radians().sin()), P2(-angle.to_radians().sin(), angle.to_radians().cos()));
-                let left = match align.h {
+                let left = match h {
                     Horizontal::Left => *at,
                     Horizontal::Center => *at - u * (run * wide / 2.0),
                     Horizontal::Right => *at - u * (run * wide),

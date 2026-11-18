@@ -99,7 +99,7 @@ use std::sync::Arc;
 
 use bimcraft_core::engine::Session;
 /// The engine on its own, with no window (crates/web): what a page's model worker and the server run, from this same file.
-pub use bimcraft_web::Engine;
+pub use bimcraft_web::{Engine, add_font, has_font};
 use bimcraft_core::ids::Guid;
 use bimcraft_core::model::Model;
 use bimcraft_core::sync::{self, Changes};
@@ -670,6 +670,26 @@ impl WebApp {
         }
         self.repaint();
         Ok(())
+    }
+
+    /// The fonts the model's drawings name that could read their text and are not here (a JSON list, as the styles spell
+    /// them): old Arabic SHX fonts draw an Arabic letter for each Latin key, and a text in one reads in Arabic once the
+    /// page gives the font ([`WebApp::give_font`]), as Arqiflow's drawing viewer is given it. Empty before the start.
+    pub fn fonts_missing(&self) -> String {
+        let missing = self.runner.app_mut::<Host>().map(|host| host.app.fonts_missing()).unwrap_or_default();
+        serde_json::to_string(&missing).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// A font file the page gives (the firm's, the computer's, or a stand-in), by its file name: "shx" or "outline";
+    /// throws why it was refused. The drawings are drawn again by it. Before or after the start.
+    pub fn give_font(&self, name: &str, bytes: &[u8]) -> Result<String, JsValue> {
+        let kind = match self.runner.app_mut::<Host>() {
+            Some(mut host) => host.app.give_font(name, bytes),
+            None => bimcraft_core::dxf::fonts::add(name, bytes),
+        }
+        .map_err(err)?;
+        self.repaint();
+        Ok(kind.to_string())
     }
 
     /// Letters the interface in the page's own fonts: `sans` (variable in weight or not) and `mono`, each the bytes of a

@@ -51,6 +51,9 @@ bimcraft-rvt = { path = "crates/rvt" }
 # an import of what it reads (dxf/dwg.rs), blocks kept as blocks.
 cadcraft-doc = { git = "https://github.com/almihy/cadcraft", rev = "1f9002884bbf2331e212fe9c2ca90e670d116e29" }
 cadcraft-dwg = { git = "https://github.com/almihy/cadcraft", rev = "1f9002884bbf2331e212fe9c2ca90e670d116e29" }
+# A drawing's fonts, given by a host at run time, and the Arabic an old SHX font laid out on the keyboard shows
+# (dxf/fonts.rs). cadcraft-dwg builds it already.
+cadcraft-fonts = { git = "https://github.com/almihy/cadcraft", rev = "1f9002884bbf2331e212fe9c2ca90e670d116e29" }
 # A drawing (DWG or DXF) read once into an index and asked of, for the agent (Arqiflow's drawing_read): CADCraft's, from
 # our fork, the same as above.
 cadcraft-index = { git = "https://github.com/almihy/cadcraft", rev = "1f9002884bbf2331e212fe9c2ca90e670d116e29" }

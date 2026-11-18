@@ -293,8 +293,8 @@ impl<'d> Walk<'d> {
                 K::Text(t) => self.text(t, None),
                 K::MText(t) => {
                     let color = super::leading_color(&t.contents).unwrap_or(style.color);
-                    let lines =
-                        mtext_lines(p(t.insert), t.height, t.rotation.to_degrees(), i64::from(t.attach), Some(t.line_spacing), &t.contents);
+                    let (at, turn, attach) = (p(t.insert), t.rotation.to_degrees(), i64::from(t.attach));
+                    let lines = mtext_lines(at, t.height, turn, attach, Some(t.line_spacing), &t.contents, self.font(&t.style));
                     for line in lines {
                         put(out, Some(line), color)?;
                     }
@@ -364,6 +364,11 @@ impl<'d> Walk<'d> {
         Ok(())
     }
 
+    /// The font text style `style` names, if the drawing has the style and it names one.
+    fn font(&self, style: &str) -> Option<std::sync::Arc<str>> {
+        self.d.text_style(style).map(|s| s.font.trim()).filter(|f| !f.is_empty()).map(std::sync::Arc::from)
+    }
+
     /// A line of text, with its style's backward and upside-down flags, and its `tag` (an attribute's).
     fn text(&self, t: &cadcraft_doc::Text, tag: Option<String>) -> Option<Shape> {
         let h = match t.halign {
@@ -390,6 +395,7 @@ impl<'d> Walk<'d> {
             wide: Some(t.width_factor),
             flags,
             angle: t.rotation.to_degrees(),
+            font: self.font(&t.style),
         };
         line.shape(&t.value, tag)
     }

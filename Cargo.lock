@@ -587,6 +587,7 @@ dependencies = [
  "bimcraft-workspace-hack",
  "cadcraft-doc",
  "cadcraft-dwg",
+ "cadcraft-fonts",
  "encoding_rs",
  "flate2",
  "getrandom 0.3.4",
