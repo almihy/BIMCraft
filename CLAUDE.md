@@ -31,7 +31,7 @@ and MCP server, and milestone 2, the egui desktop app, are done. What works and 
   only under the fence in [docs/rvt-provenance.md](docs/rvt-provenance.md): the code is `crates/rvt`, Apache-2.0 only
   because it holds code ported from rvt-rs, `bimcraft-core` never depends on it, and every module and format finding
   there names its source. Assets are original or openly licensed; the lettering of drawings is drawn in code (`font.rs`), the one exception being
-  IBM Plex under the OFL, the interface's font and one text types letter notes in (`assets/fonts`, read by `text.rs`;
+  IBM Plex and, for Arabic, Noto Sans Arabic, under the OFL: the interface's fonts and ones text types letter notes in (`assets/fonts`, read by `text.rs`;
   `NOTICE` and each OFL.txt go in every package); a text type may also name a font the user's system has, read where it is
   and never bundled or copied into a project.
 - **The core has no UI.** `bimcraft-core` must not depend on a UI toolkit, so front ends stay swappable.

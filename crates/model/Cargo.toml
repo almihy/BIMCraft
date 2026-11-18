@@ -23,6 +23,10 @@ encoding_rs = { workspace = true }
 getrandom = { workspace = true }
 rayon = { workspace = true }
 ttf-parser = { workspace = true }
+# Right-to-left text on the canvas (text.rs): its runs ordered, and shaped so that Arabic joins. The versions the
+# interface's text already builds (vendor/epaint).
+harfrust = "0.12"
+unicode-bidi = "0.3.18"
 i_overlay = { workspace = true }
 hayro = { workspace = true }
 png = "0.18"

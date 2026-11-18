@@ -5,7 +5,8 @@
 //! draws or knows about a UI.
 
 // The crates under the model, by the paths its modules have always named them by (`crate::geom`, `crate::units`).
-pub use bimcraft_geom::{csg, files, font, geom, language, prim, shared, skeleton, solid, step, triangulation, units, xlsx};
+pub mod font;
+pub use bimcraft_geom::{csg, files, geom, language, prim, shared, skeleton, solid, step, triangulation, units, xlsx};
 pub use bimcraft_mep_calc::{conduit, demand, dps, dr, drainage, hydrant, loads, nbr5410, plumbing, reservoir, storm, water};
 pub use bimcraft_site::site;
 

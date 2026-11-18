@@ -7,8 +7,12 @@
 //! Sans or Mono, under the OFL (`assets/fonts`, which every package carries with its licence). A font the system hasn't
 //! is stood in for by its look-alikes (Arial by Liberation Sans, Arimo, Helvetica…), else Plex Sans: so Arial, the
 //! default, letters a note on any system, and a project from another machine opens and draws. A character a face has
-//! no letter for is lettered from Plex Sans, then Plex Mono, then the system's wide fonts (CJK ones among them), else
-//! drawn as a question mark. Bold and italic are a family's own faces where it has them; else a face is made bold by
+//! no letter for is lettered from Plex Sans, then Plex Mono, then Noto Sans Arabic (OFL, carried as Plex is), then the
+//! system's wide fonts (CJK ones among them), else drawn as a question mark.
+//!
+//! Right-to-left text (Arabic, Hebrew) is laid out as it reads: a line's runs are ordered by the Unicode Bidirectional
+//! Algorithm (its direction that of its first strong letter), and a right-to-left run is shaped by its font (harfrust),
+//! so Arabic's letters join. A line with none is laid out character by character, as it always was. Bold and italic are a family's own faces where it has them; else a face is made bold by
 //! drawing its outlines and strokes heavier (a variable one by its weight) and italic by slanting it.
 
 use serde::{Deserialize, Serialize};
@@ -24,6 +28,11 @@ use crate::language::Language;
 pub const PLEX_SANS: &[u8] = include_bytes!("../../../assets/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf");
 /// IBM Plex Mono, regular (OFL).
 pub const PLEX_MONO: &[u8] = include_bytes!("../../../assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf");
+
+/// Noto Sans Arabic, regular and bold (OFL): Arabic where the font asked for has none, as in a browser, which has no
+/// system fonts.
+pub const NOTO_ARABIC: &[u8] = include_bytes!("../../../assets/fonts/noto-sans-arabic/NotoSansArabic-Regular.ttf");
+pub const NOTO_ARABIC_BOLD: &[u8] = include_bytes!("../../../assets/fonts/noto-sans-arabic/NotoSansArabic-Bold.ttf");
 
 /// The text size a project's first text type has, mm on paper.
 pub const DEFAULT_SIZE: f64 = 2.5;
@@ -44,6 +53,8 @@ pub const ARIAL: &str = "Arial";
 pub const LETTERING: &str = "BIMCraft Lettering";
 pub const SANS: &str = "IBM Plex Sans";
 pub const MONO: &str = "IBM Plex Mono";
+/// Stands behind the others for Arabic; not a font a text type names.
+pub const ARABIC: &str = "Noto Sans Arabic";
 /// The fonts every BIMCraft has.
 pub const BUNDLED: [&str; 3] = [SANS, MONO, LETTERING];
 
@@ -53,6 +64,8 @@ pub enum Source {
     Lettering,
     Sans,
     Mono,
+    /// Noto Sans Arabic, its bold a file of its own.
+    Arabic,
     /// A system font's file, which of its faces, and its family.
     File {
         path: Arc<Path>,
@@ -72,10 +85,11 @@ pub struct Face {
 }
 
 impl Face {
-    /// One of ours, bold and italic as asked: Plex Sans by its own weight, the others drawn heavier; all slanted.
+    /// One of ours, bold and italic as asked: Plex Sans and Noto Sans Arabic by their own weight, the others drawn
+    /// heavier; all slanted.
     pub fn bundled(source: Source, bold: bool, italic: bool) -> Face {
-        let sans = source == Source::Sans;
-        Face { source, weight: (bold && sans).then_some(700), heavy: bold && !sans, slant: italic }
+        let own = matches!(source, Source::Sans | Source::Arabic);
+        Face { source, weight: (bold && own).then_some(700), heavy: bold && !own, slant: italic }
     }
 
     /// The family that letters it.
@@ -84,6 +98,7 @@ impl Face {
             Source::Lettering => LETTERING,
             Source::Sans => SANS,
             Source::Mono => MONO,
+            Source::Arabic => ARABIC,
             Source::File { family, .. } => family,
         }
     }
@@ -457,52 +472,215 @@ fn made(face: &Face, c: char) -> Shape {
         let space = made(face, ' ');
         return Shape { advance: space.advance * TAB as f32, ..Shape::default() };
     }
-    let bold = face.heavy || face.weight.is_some_and(|w| w >= 600);
-    let ours = [Source::Sans, Source::Mono].map(|s| Face::bundled(s, bold, face.slant));
-    let index = system::index();
-    let wide = system::FALLBACKS.iter().filter_map(|f| index.family(f)).filter_map(|faces| pick(faces, bold, face.slant));
-    std::iter::once(face.clone())
-        .chain(ours)
-        .find_map(|f| drawn(&f, c))
-        .or_else(|| wide.into_iter().find_map(|f| drawn(&f, c)))
-        .unwrap_or_else(|| lettered(face.heavy, '?'))
+    if unseen(c) {
+        return Shape::default();
+    }
+    behind(face).find_map(|f| drawn(&f, c)).unwrap_or_else(|| lettered(face.heavy, '?'))
 }
 
-/// `c` in `face`, if it has a letter for it.
-fn drawn(face: &Face, c: char) -> Option<Shape> {
-    let file;
-    let (data, index): (&[u8], u32) = match &face.source {
-        Source::Lettering => return (crate::font::has(c) || c.is_whitespace()).then(|| lettered(face.heavy, c)),
-        Source::Sans => (PLEX_SANS, 0),
-        Source::Mono => (PLEX_MONO, 0),
-        Source::File { path, index, .. } => {
-            file = system::load(path)?;
-            (file.as_slice(), *index)
-        }
+/// Whether `c` only says how text runs or joins (the direction marks and embeddings, the joiners): nothing is drawn of it.
+fn unseen(c: char) -> bool {
+    matches!(c, '\u{061C}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
+}
+
+/// `face`, then the faces that letter what it has no letter for, in the order they are asked: Plex Sans, Plex Mono, Noto
+/// Sans Arabic, the system's wide fonts.
+fn behind(face: &Face) -> impl Iterator<Item = Face> {
+    let bold = face.heavy || face.weight.is_some_and(|w| w >= 600);
+    let slant = face.slant;
+    let ours = [Source::Sans, Source::Mono, Source::Arabic].map(move |s| Face::bundled(s, bold, slant));
+    let wide = move || {
+        let index = system::index();
+        system::FALLBACKS.iter().filter_map(|f| index.family(f)).filter_map(|faces| pick(faces, bold, slant)).collect::<Vec<_>>()
     };
+    std::iter::once(face.clone()).chain(ours).chain(std::iter::once_with(wide).flatten())
+}
+
+/// A face's file: one of ours, or a system font's as read.
+enum Bytes {
+    Ours(&'static [u8]),
+    File(Arc<Vec<u8>>),
+}
+
+impl Bytes {
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            Bytes::Ours(b) => b,
+            Bytes::File(f) => f.as_slice(),
+        }
+    }
+}
+
+/// The file `face`'s letters are in and which of its faces; none for our lettering, which is no file.
+fn bytes(face: &Face) -> Option<(Bytes, u32)> {
+    Some(match &face.source {
+        Source::Lettering => return None,
+        Source::Sans => (Bytes::Ours(PLEX_SANS), 0),
+        Source::Mono => (Bytes::Ours(PLEX_MONO), 0),
+        Source::Arabic => (Bytes::Ours(if face.weight.is_some_and(|w| w >= 600) { NOTO_ARABIC_BOLD } else { NOTO_ARABIC }), 0),
+        Source::File { path, index, .. } => (Bytes::File(system::load(path)?), *index),
+    })
+}
+
+/// `face`'s file read, set to its weight.
+fn open<'a>(face: &Face, data: &'a [u8], index: u32) -> Option<ttf_parser::Face<'a>> {
     let mut parsed = ttf_parser::Face::parse(data, index).ok()?;
     if let Some(w) = face.weight {
         parsed.set_variation(ttf_parser::Tag::from_bytes(b"wght"), f32::from(w));
     }
-    let glyph = parsed.glyph_index(c).filter(|g| g.0 != 0)?;
+    Some(parsed)
+}
+
+/// A font's capitals' height, in its units: as it says, else as its H stands (an older font's OS/2 table doesn't say),
+/// else half its em.
+fn cap(parsed: &ttf_parser::Face) -> f32 {
     let em = f32::from(parsed.units_per_em().max(16));
-    // Its capitals' height as it says, else as its H stands (an older font's OS/2 table doesn't say), else half its em.
     let h = || parsed.glyph_index('H').and_then(|g| parsed.glyph_bounding_box(g)).map(|b| b.y_max);
-    let cap = f32::from(parsed.capital_height().filter(|&h| h > 0).or_else(h).unwrap_or(0)).max(em * 0.5);
+    f32::from(parsed.capital_height().filter(|&h| h > 0).or_else(h).unwrap_or(0)).max(em * 0.5)
+}
+
+/// `c` in `face`, if it has a letter for it.
+fn drawn(face: &Face, c: char) -> Option<Shape> {
+    if face.source == Source::Lettering {
+        return (bimcraft_geom::font::has(c) || c.is_whitespace()).then(|| lettered(face.heavy, c));
+    }
+    let (data, index) = bytes(face)?;
+    let parsed = open(face, data.as_slice(), index)?;
+    let glyph = parsed.glyph_index(c).filter(|g| g.0 != 0)?;
+    Some(outlined(face, &parsed, glyph))
+}
+
+/// Glyph `glyph` of `face`'s file, drawn.
+fn outlined(face: &Face, parsed: &ttf_parser::Face, glyph: ttf_parser::GlyphId) -> Shape {
+    let cap = cap(parsed);
     let advance = f32::from(parsed.glyph_hor_advance(glyph).unwrap_or(0)) / cap;
     let mut out = Outline { k: 1.0 / cap, rings: Vec::new(), at: (0.0, 0.0) };
     parsed.outline_glyph(glyph, &mut out);
     let fill: Vec<Vec<(f32, f32)>> = out.rings.into_iter().filter(|r| r.len() > 2 && r.len() < 20_000).take(1000).collect();
     // A bold the family hasn't: its outline drawn round in a heavy line.
     let strokes = if face.heavy { fill.iter().map(|r| r.iter().chain(r.first()).copied().collect()).collect() } else { Vec::new() };
-    let stroke = if face.heavy { 0.07 } else { 0.0 };
-    Some(Shape { fill, strokes, stroke, advance: advance + stroke })
+    let stroke = if face.heavy { HEAVY } else { 0.0 };
+    Shape { fill, strokes, stroke, advance: advance + stroke }
+}
+
+/// How wide the line is that draws a bold a family hasn't, in capital heights.
+const HEAVY: f32 = 0.07;
+
+/// Whether `face` itself has a letter for `c`.
+fn has(face: &Face, c: char) -> bool {
+    if face.source == Source::Lettering {
+        return bimcraft_geom::font::has(c);
+    }
+    bytes(face).is_some_and(|(data, index)| open(face, data.as_slice(), index).is_some_and(|p| p.glyph_index(c).is_some_and(|g| g.0 != 0)))
+}
+
+/// The face that letters `c` in a text of `face`: itself or the first behind it that has the letter, kept.
+fn face_of(face: &Face, c: char) -> Option<Face> {
+    type Kept = Mutex<HashMap<(Face, char), Option<Face>>>;
+    static KEPT: OnceLock<Kept> = OnceLock::new();
+    let kept = KEPT.get_or_init(Default::default);
+    let key = (face.clone(), c);
+    if let Some(f) = kept.lock().ok().and_then(|m| m.get(&key).cloned()) {
+        return f;
+    }
+    let f = behind(face).find(|f| has(f, c));
+    if let Ok(mut m) = kept.lock() {
+        if m.len() > 20_000 {
+            m.clear();
+        }
+        m.insert(key, f.clone());
+    }
+    f
+}
+
+/// Glyph `id` of `face`'s file drawn, kept: a shaped run's letters, which are its font's glyphs, not characters.
+fn glyph(face: &Face, id: u16) -> Arc<Shape> {
+    type Kept = Mutex<HashMap<(Face, u16), Arc<Shape>>>;
+    static KEPT: OnceLock<Kept> = OnceLock::new();
+    let kept = KEPT.get_or_init(Default::default);
+    let key = (face.clone(), id);
+    if let Some(s) = kept.lock().ok().and_then(|m| m.get(&key).cloned()) {
+        return s;
+    }
+    let made =
+        bytes(face).and_then(|(data, index)| open(face, data.as_slice(), index).map(|p| outlined(face, &p, ttf_parser::GlyphId(id))));
+    let s = Arc::new(made.unwrap_or_default());
+    if let Ok(mut m) = kept.lock() {
+        if m.len() > 20_000 {
+            m.clear();
+        }
+        m.insert(key, s.clone());
+    }
+    s
+}
+
+/// A glyph of a shaped run: which of the font's, the first of the run's characters it stands for, how far the next glyph
+/// is from it and where it is drawn from its place, in capital heights (y up).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Shaped {
+    glyph: u16,
+    cluster: usize,
+    advance: f32,
+    dx: f32,
+    dy: f32,
+}
+
+/// The most characters of a run that is shaped as one: a longer one is shaped in pieces.
+const MAX_SHAPED: usize = 2000;
+
+/// Right-to-left `text` shaped in `face`: its glyphs from left to right as they are read, kept. None when the face is no
+/// file a shaper reads.
+fn shaped(face: &Face, text: &[char]) -> Option<Arc<[Shaped]>> {
+    type Kept = Mutex<HashMap<(Face, String), Option<Arc<[Shaped]>>>>;
+    static KEPT: OnceLock<Kept> = OnceLock::new();
+    let kept = KEPT.get_or_init(Default::default);
+    let key = (face.clone(), text.iter().collect::<String>());
+    if let Some(s) = kept.lock().ok().and_then(|m| m.get(&key).cloned()) {
+        return s;
+    }
+    let s = shape_run(face, text);
+    if let Ok(mut m) = kept.lock() {
+        if m.len() > 20_000 {
+            m.clear();
+        }
+        m.insert(key, s.clone());
+    }
+    s
+}
+
+fn shape_run(face: &Face, text: &[char]) -> Option<Arc<[Shaped]>> {
+    let (data, index) = bytes(face)?;
+    let cap = cap(&open(face, data.as_slice(), index)?);
+    let font = harfrust::FontRef::from_index(data.as_slice(), index).ok()?;
+    let plan = harfrust::ShaperData::new(&font);
+    // A variable font at its weight; Noto Sans Arabic's bold is a file of its own.
+    let weight = face.weight.filter(|_| face.source != Source::Arabic);
+    let instance = weight.map(|w| {
+        harfrust::ShaperInstance::from_variations(&font, [harfrust::Variation { tag: harfrust::Tag::new(b"wght"), value: f32::from(w) }])
+    });
+    let shaper = plan.shaper(&font).instance(instance.as_ref()).build();
+    let mut buffer = harfrust::UnicodeBuffer::new();
+    for (i, c) in text.iter().enumerate() {
+        buffer.add(*c, i as u32);
+    }
+    buffer.guess_segment_properties();
+    buffer.set_direction(harfrust::Direction::RightToLeft);
+    let out = shaper.shape(buffer, harfrust::ShapeOptions::new());
+    let glyphs = out.glyph_infos().iter().zip(out.glyph_positions()).map(|(g, p)| Shaped {
+        glyph: u16::try_from(g.glyph_id).unwrap_or(0),
+        cluster: g.cluster as usize,
+        advance: p.x_advance as f32 / cap,
+        dx: p.x_offset as f32 / cap,
+        dy: p.y_offset as f32 / cap,
+    });
+    Some(glyphs.collect())
 }
 
 /// `c` in our lettering, its capital 1 high.
 fn lettered(bold: bool, c: char) -> Shape {
     let s: String = c.to_string();
-    let strokes = crate::font::strokes(&s, 0.0, 0.0, 12.0).into_iter().map(|l| l.into_iter().map(|(x, y)| (x / 12.0, -y / 12.0)).collect());
+    let strokes =
+        bimcraft_geom::font::strokes(&s, 0.0, 0.0, 12.0).into_iter().map(|l| l.into_iter().map(|(x, y)| (x / 12.0, -y / 12.0)).collect());
     let n = c.to_uppercase().count() as f32;
     Shape { fill: Vec::new(), strokes: strokes.collect(), stroke: if bold { 0.16 } else { 0.1 }, advance: n * 11.0 / 12.0 }
 }
@@ -551,7 +729,9 @@ impl ttf_parser::OutlineBuilder for Outline {
     fn close(&mut self) {}
 }
 
-/// A character laid out: the `index`-th of its note's text, `x` mm from its line's left end, `advance` mm wide.
+/// A character laid out: the `index`-th of its note's text, its left `x` mm from its line's left end, `advance` mm wide.
+/// One read right to left (`rtl`) begins at its right. One of a shaped run has its `glyphs`: what its font draws for it
+/// and the characters joined to it (none for one drawn with the character before it), in place of its own letter.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Placed {
     pub index: usize,
@@ -559,10 +739,23 @@ pub struct Placed {
     pub x: f64,
     pub advance: f64,
     pub style: Style,
+    pub rtl: bool,
+    pub glyphs: Option<Arc<[Glyph]>>,
+}
+
+/// A glyph of a shaped run laid out: its `shape` drawn from `x` mm along its line and `dy` capital heights above the
+/// baseline, slanted when its face is made italic.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Glyph {
+    pub shape: Arc<Shape>,
+    pub x: f64,
+    pub dy: f32,
+    pub slant: bool,
 }
 
 /// A line of a note laid out: characters `start` up to `end` (its line break not among them), its `top` and `baseline` mm
-/// down from the note's top left.
+/// down from the note's top left. Its `chars` are in the text's order, each where it is read: left to right, unless the
+/// line has right-to-left text.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Line {
     pub start: usize,
@@ -592,15 +785,8 @@ pub fn layout(t: &TextType, text: &str, styles: &[Style]) -> Layout {
     let mut index = 0;
     for (i, line) in text.split('\n').enumerate() {
         let top = i as f64 * LINE_PITCH * size;
-        let mut x = 0.0;
-        let mut chars = Vec::new();
-        for ch in line.chars() {
-            let style = styles.get(index).copied().unwrap_or_default();
-            let advance = f64::from(shape(&resolve(&font, style.bold, style.italic), ch).advance) * size * wf;
-            chars.push(Placed { index, ch, x, advance, style });
-            x += advance;
-            index += 1;
-        }
+        let (chars, x) = line_laid(&font, size * wf, line, index, styles);
+        index += chars.len();
         lines.push(Line { start: index - chars.len(), end: index, top, baseline: top + size, width: x, chars });
         index += 1;
     }
@@ -609,12 +795,150 @@ pub fn layout(t: &TextType, text: &str, styles: &[Style]) -> Layout {
     Layout { font, size, width_factor: wf, lines, width, height }
 }
 
+/// Whether `c` is read right to left, or is a number or a mark of such text: its line is ordered and shaped.
+fn right_to_left(c: char) -> bool {
+    use unicode_bidi::BidiClass::{AL, AN, R, RLE, RLI, RLO};
+    c >= '\u{0590}' && matches!(unicode_bidi::bidi_class(c), R | AL | AN | RLE | RLO | RLI)
+}
+
+/// A line's characters laid out, the first of them the `first`-th of its text, a capital height `k` mm wide as well as
+/// tall; and how wide the line is.
+fn line_laid(font: &str, k: f64, line: &str, first: usize, styles: &[Style]) -> (Vec<Placed>, f64) {
+    let style = |i: usize| styles.get(first + i).copied().unwrap_or_default();
+    let face = |i: usize| resolve(font, style(i).bold, style(i).italic);
+    let mut x = 0.0;
+    let mut out = Vec::new();
+    let single = |out: &mut Vec<Placed>, x: &mut f64, i: usize, ch: char, rtl: bool| {
+        let advance = f64::from(shape(&face(i), ch).advance) * k;
+        out.push(Placed { index: first + i, ch, x: *x, advance, style: style(i), rtl, glyphs: None });
+        *x += advance;
+    };
+    if !line.chars().any(right_to_left) {
+        for (i, ch) in line.chars().enumerate() {
+            single(&mut out, &mut x, i, ch, false);
+        }
+        return (out, x);
+    }
+    let chars: Vec<char> = line.chars().collect();
+    // Which character each byte of the line is in, and one past the last.
+    let mut at = vec![chars.len(); line.len() + 1];
+    for (i, (b, c)) in line.char_indices().enumerate() {
+        at.iter_mut().skip(b).take(c.len_utf8()).for_each(|a| *a = i);
+    }
+    let info = unicode_bidi::BidiInfo::new(line, None);
+    for para in &info.paragraphs {
+        let (levels, runs) = info.visual_runs(para, para.range.clone());
+        for run in runs {
+            let (a, b) = (at.get(run.start).copied().unwrap_or(0), at.get(run.end).copied().unwrap_or(chars.len()));
+            if !levels.get(run.start).is_some_and(|l| l.is_rtl()) {
+                for (i, &ch) in chars.iter().enumerate().take(b).skip(a) {
+                    single(&mut out, &mut x, i, ch, false);
+                }
+                continue;
+            }
+            // The face that letters each character: a space's, and that of one no font has, is its neighbour's, so
+            // that words are shaped with the spaces between them.
+            let mut faces: Vec<Option<Face>> = (a..b)
+                .map(|i| chars.get(i).copied().filter(|c| !c.is_whitespace() && !unseen(*c)).and_then(|c| face_of(&face(i), c)))
+                .map(|f| f.filter(|f| f.source != Source::Lettering))
+                .collect();
+            for i in 1..faces.len() {
+                if faces[i].is_none() {
+                    faces[i] = faces[i - 1].clone();
+                }
+            }
+            for i in (0..faces.len().saturating_sub(1)).rev() {
+                if faces[i].is_none() {
+                    faces[i] = faces[i + 1].clone();
+                }
+            }
+            // Its stretches of one face and one style, the last first: they are read from the right.
+            let mut end = b;
+            while end > a {
+                let of = |i: usize| (faces.get(i - a).cloned().flatten(), style(i));
+                let mut start = end - 1;
+                while start > a && of(start - 1) == of(end - 1) && end - start < MAX_SHAPED {
+                    start -= 1;
+                }
+                let run_face = of(start).0;
+                let part = chars.get(start..end).unwrap_or_default();
+                let glyphs = run_face.as_ref().and_then(|f| shaped(f, part));
+                let (Some(f), Some(glyphs)) = (run_face, glyphs) else {
+                    for (i, &ch) in chars.iter().enumerate().take(end).skip(start).rev() {
+                        single(&mut out, &mut x, i, ch, true);
+                    }
+                    end = start;
+                    continue;
+                };
+                // Glyphs of one cluster stand for the characters from theirs up to the cluster's before them (on their
+                // left, later in the text): drawn as one, its width shared among those characters.
+                let last = part.len().saturating_sub(1);
+                let mut rest = glyphs.iter().peekable();
+                let mut upto = part.len();
+                while let Some(head) = rest.peek() {
+                    let cluster = head.cluster.min(last);
+                    let mut pen = 0.0;
+                    let mut drawn = Vec::new();
+                    while let Some(g) = rest.next_if(|g| g.cluster.min(last) == cluster) {
+                        let heavy = if f.heavy && g.advance > 0.0 { f64::from(HEAVY) } else { 0.0 };
+                        drawn.push(Glyph { shape: glyph(&f, g.glyph), x: x + (pen + f64::from(g.dx)) * k, dy: g.dy, slant: f.slant });
+                        pen += f64::from(g.advance) + heavy;
+                    }
+                    let n = upto.saturating_sub(cluster).max(1);
+                    let each = pen * k / n as f64;
+                    let mut drawn = Some(Arc::<[Glyph]>::from(drawn));
+                    for j in 0..n {
+                        let i = start + cluster + j;
+                        let Some(&ch) = chars.get(i) else { break };
+                        out.push(Placed {
+                            index: first + i,
+                            ch,
+                            x: x + each * (n - 1 - j) as f64,
+                            advance: each,
+                            style: style(i),
+                            rtl: true,
+                            glyphs: Some(drawn.take().unwrap_or_else(|| Arc::from(Vec::new()))),
+                        });
+                    }
+                    x += pen * k;
+                    upto = upto.min(cluster);
+                }
+                end = start;
+            }
+        }
+    }
+    // A character the ordering left out (it should leave none) still has its place in the text.
+    for (i, &ch) in chars.iter().enumerate() {
+        if !out.iter().any(|p| p.index == first + i) {
+            out.push(Placed { index: first + i, ch, x, advance: 0.0, style: style(i), rtl: false, glyphs: None });
+        }
+    }
+    out.sort_by_key(|p| p.index);
+    (out, x)
+}
+
+/// Stretches `cells` (each from its left to its right) joined where they touch, from the left.
+fn joined(mut cells: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
+    cells.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut out: Vec<(f64, f64)> = Vec::new();
+    for (a, b) in cells {
+        match out.last_mut() {
+            Some(last) if a <= last.1 + 1e-9 => last.1 = last.1.max(b),
+            _ => out.push((a, b)),
+        }
+    }
+    out
+}
+
 impl Layout {
     /// Where a caret before character `index` stands: x, and its top and bottom, mm.
     pub fn caret(&self, index: usize) -> (f64, f64, f64) {
         let line = self.lines.iter().find(|l| index <= l.end).or(self.lines.last());
         let Some(l) = line else { return (0.0, 0.0, self.size) };
-        let x = l.chars.iter().find(|c| c.index >= index).map_or(l.width, |c| c.x);
+        // Before a character is at its left, or at its right when it is read from the right; after the last, its other end.
+        let before = |c: &Placed| if c.rtl { c.x + c.advance } else { c.x };
+        let after = |c: &Placed| if c.rtl { c.x } else { c.x + c.advance };
+        let x = l.chars.iter().find(|c| c.index >= index).map(before).or_else(|| l.chars.last().map(after)).unwrap_or(0.0);
         (x, l.top - 0.2 * self.size, l.baseline + 0.3 * self.size)
     }
 
@@ -630,7 +954,14 @@ impl Layout {
         let n = self.lines.len();
         let i = if y.is_finite() { ((y + 0.3 * self.size) / pitch).floor().clamp(0.0, n.saturating_sub(1) as f64) as usize } else { 0 };
         let Some(l) = self.lines.get(i) else { return 0 };
-        l.chars.iter().find(|c| x < c.x + c.advance / 2.0).map_or(l.end, |c| c.index)
+        if !l.chars.iter().any(|c| c.rtl) {
+            return l.chars.iter().find(|c| x < c.x + c.advance / 2.0).map_or(l.end, |c| c.index);
+        }
+        // The character it is on or nearest: before it on the side it is read from, else after it.
+        let off = |c: &Placed| (c.x - x).max(x - c.x - c.advance).max(0.0);
+        let Some(c) = l.chars.iter().min_by(|a, b| off(a).total_cmp(&off(b))) else { return l.end };
+        let left = x < c.x + c.advance / 2.0;
+        if left != c.rtl { c.index } else { c.index + 1 }
     }
 
     /// The boxes characters `from` up to `to` take, line by line: left, top, right, bottom, mm.
@@ -641,13 +972,13 @@ impl Layout {
             if to <= l.start && !(from == to && from == l.start) || from > l.end {
                 continue;
             }
-            let x = |i: usize| l.chars.iter().find(|c| c.index >= i).map_or(l.width, |c| c.x);
-            let (a, b) = (x(from.max(l.start)), x(to.min(l.end)));
+            let mut cells: Vec<(f64, f64)> =
+                l.chars.iter().filter(|c| c.index >= from && c.index < to && c.advance > 0.0).map(|c| (c.x, c.x + c.advance)).collect();
             // A line break taken in shows as a sliver past its line's end.
-            let b = if to > l.end && from <= l.end { b + 0.3 * self.size } else { b };
-            if b > a {
-                out.push([a, l.top - 0.2 * self.size, b, l.baseline + 0.3 * self.size]);
+            if to > l.end && from <= l.end {
+                cells.push((l.width, l.width + 0.3 * self.size));
             }
+            out.extend(joined(cells).into_iter().map(|(a, b)| [a, l.top - 0.2 * self.size, b, l.baseline + 0.3 * self.size]));
         }
         out
     }
@@ -664,37 +995,68 @@ impl Layout {
         let (size, wf) = (self.size as f32, self.width_factor as f32);
         for l in &self.lines {
             for c in &l.chars {
-                let face = resolve(&self.font, c.style.bold, c.style.italic);
-                let s = shape(&face, c.ch);
-                let slant = if face.slant { SLANT } else { 0.0 };
-                let (x0, base) = (c.x as f32, l.baseline as f32);
-                let at = |&(gx, gy): &(f32, f32)| (x0 + (gx * wf + slant * gy) * size, base - gy * size);
-                if !s.fill.is_empty() {
-                    out.fill.push(s.fill.iter().map(|r| r.iter().map(at).collect()).collect());
+                let base = l.baseline as f32;
+                let mut put = |s: &Shape, x0: f32, dy: f32, slant: bool| {
+                    let slant = if slant { SLANT } else { 0.0 };
+                    let at = |&(gx, gy): &(f32, f32)| (x0 + (gx * wf + slant * (gy + dy)) * size, base - (gy + dy) * size);
+                    if !s.fill.is_empty() {
+                        out.fill.push(s.fill.iter().map(|r| r.iter().map(at).collect()).collect());
+                    }
+                    out.strokes.extend(s.strokes.iter().map(|r| (r.iter().map(at).collect::<Vec<_>>(), s.stroke * size)));
+                };
+                match &c.glyphs {
+                    Some(glyphs) => glyphs.iter().for_each(|g| put(&g.shape, g.x as f32, g.dy, g.slant)),
+                    None => {
+                        let face = resolve(&self.font, c.style.bold, c.style.italic);
+                        put(&shape(&face, c.ch), c.x as f32, 0.0, face.slant);
+                    }
                 }
-                out.strokes.extend(s.strokes.iter().map(|r| (r.iter().map(at).collect::<Vec<_>>(), s.stroke * size)));
             }
             // An underline under each stretch of underlined characters.
-            let mut stretch: Option<(f64, f64)> = None;
-            let y = l.baseline + 0.18 * self.size;
-            for c in &l.chars {
-                match (&mut stretch, c.style.underline) {
-                    (Some((_, b)), true) => *b = c.x + c.advance,
-                    (None, true) => stretch = Some((c.x, c.x + c.advance)),
-                    (Some((a, b)), false) => {
-                        out.underlines.push(((*a, y), (*b, y)));
-                        stretch = None;
-                    }
-                    (None, false) => {}
-                }
-            }
-            if let Some((a, b)) = stretch {
-                out.underlines.push(((a, y), (b, y)));
-            }
+            let under = l.chars.iter().filter(|c| c.style.underline).map(|c| (c.x, c.x + c.advance)).collect();
+            out.underlines
+                .extend(joined(under).into_iter().map(|(a, b)| ((a, l.baseline + 0.18 * self.size), (b, l.baseline + 0.18 * self.size))));
         }
         out.underline_width = 0.07 * size;
         out
     }
+}
+
+/// A label lettered in our lettering, what it has no letter for in the fonts behind it ([`crate::font::label`]): its
+/// capitals 1 tall, x from its left end, y down from its baseline. Each of `fill` is a letter's rings, filled by the
+/// non-zero rule; each of `strokes` a line and how wide it is.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Label {
+    pub width: f32,
+    pub fill: Vec<Vec<Vec<(f32, f32)>>>,
+    pub strokes: Vec<(Vec<(f32, f32)>, f32)>,
+}
+
+/// `text` as a label, on one line, kept.
+pub fn label(text: &str) -> Arc<Label> {
+    type Kept = Mutex<HashMap<String, Arc<Label>>>;
+    static KEPT: OnceLock<Kept> = OnceLock::new();
+    let kept = KEPT.get_or_init(Default::default);
+    if let Some(l) = kept.lock().ok().and_then(|m| m.get(text).cloned()) {
+        return l;
+    }
+    let t = TextType { font: LETTERING.to_string(), size: 1.0, ..TextType::default() };
+    let line = text.replace('\n', " ");
+    let laid = layout(&t, &line, &[]);
+    let drawn = laid.drawn();
+    let up = |(x, y): (f32, f32)| (x, y - 1.0);
+    let l = Arc::new(Label {
+        width: laid.width as f32,
+        fill: drawn.fill.into_iter().map(|rings| rings.into_iter().map(|r| r.into_iter().map(up).collect()).collect()).collect(),
+        strokes: drawn.strokes.into_iter().map(|(r, w)| (r.into_iter().map(up).collect(), w)).collect(),
+    });
+    if let Ok(mut m) = kept.lock() {
+        if m.len() > 5_000 {
+            m.clear();
+        }
+        m.insert(text.to_string(), l.clone());
+    }
+    l
 }
 
 /// A layout's lettering, mm: what [`Layout::drawn`] gives.
@@ -988,6 +1350,85 @@ mod tests {
         let d = l.drawn();
         assert_eq!(d.underlines.len(), 1);
         assert_eq!(d.underlines[0].1.0, l.lines[0].chars[2].x);
+    }
+
+    #[test]
+    fn arabic_is_read_from_the_right_its_letters_joined_and_none_a_question_mark() {
+        // "house": ba, ya, ta. Each letter stands left of the one before it.
+        let l = plain("بيت");
+        let c = &l.lines[0].chars;
+        assert_eq!(c.len(), 3);
+        assert!(c.iter().all(|c| c.rtl && c.advance > 0.0), "{c:?}");
+        assert!(c[0].x > c[1].x && c[1].x > c[2].x, "{c:?}");
+        assert!((c[0].x + c[0].advance - l.lines[0].width).abs() < 1e-9, "the first letter ends the line on the right");
+        // Shaped: the ya between two letters is its middle form, not the letter as it stands alone.
+        let face = Face::bundled(Source::Arabic, false, false);
+        let alone = shape(&face, 'ي');
+        let joined = c[1].glyphs.as_ref().and_then(|g| g.first()).map(|g| g.shape.clone()).expect("a shaped letter");
+        assert!(!joined.fill.is_empty() && *joined != *alone, "ya is joined on both sides");
+        let d = l.drawn();
+        assert!(d.fill.len() >= 3 && d.strokes.is_empty(), "letters of a font, no lettered question mark");
+        // In our lettering too, which has no Arabic: Noto's letters, filled.
+        let t = TextType { font: LETTERING.into(), ..TextType::default() };
+        let d = layout(&t, "بيت", &[]).drawn();
+        assert!(d.fill.len() >= 3 && d.strokes.is_empty());
+    }
+
+    #[test]
+    fn a_line_of_two_directions_is_ordered_as_it_reads() {
+        // Latin first: the line runs left to right, the Arabic word after it read from its right.
+        let l = plain("A بيت");
+        let c = &l.lines[0].chars;
+        assert!(!c[0].rtl && c[0].x == 0.0);
+        assert!(c[2].x > c[4].x && c[4].x > c[0].x, "{c:?}");
+        // Arabic first: the line runs right to left, so what follows the word stands on its left.
+        let l = plain("بيت.");
+        let c = &l.lines[0].chars;
+        assert!(c[3].x < c[2].x && c[2].x < c[0].x, "{c:?}");
+        // A number in it keeps its digits left to right.
+        let l = plain("بيت 12");
+        let c = &l.lines[0].chars;
+        assert!(c[4].x < c[5].x && c[5].x < c[2].x, "{c:?}");
+        // Every character of the text has its place, once, in the text's order.
+        for text in ["A بيت", "بيت.", "بيت 12", "السلام عليكم world 3", "\u{200F}بيت\u{200E}"] {
+            let l = plain(text);
+            let got: Vec<usize> = l.lines[0].chars.iter().map(|c| c.index).collect();
+            assert_eq!(got, (0..text.chars().count()).collect::<Vec<_>>(), "{text}");
+            let wide: f64 = l.lines[0].chars.iter().map(|c| c.advance).sum();
+            assert!((wide - l.lines[0].width).abs() < 1e-6, "{text}: the letters fill the line");
+        }
+    }
+
+    #[test]
+    fn a_caret_and_a_selection_follow_right_to_left_text() {
+        let l = plain("بيت");
+        let w = l.lines[0].width;
+        // Before the first letter is the line's right end; after the last, its left.
+        assert!((l.caret(0).0 - w).abs() < 1e-9 && l.caret(3).0.abs() < 1e-9);
+        for i in 0..=3 {
+            let (x, top, _) = l.caret(i);
+            assert_eq!(l.index_at((x, top + 1.0)), i, "a click where the caret stands puts it back");
+        }
+        assert_eq!(l.index_at((w + 5.0, 0.0)), 0);
+        assert_eq!(l.index_at((-5.0, 0.0)), 3);
+        // The first letter alone is the right end of the word; all of it, one box.
+        let b = l.boxes(0, 1);
+        assert!(b.len() == 1 && (b[0][2] - w).abs() < 1e-9 && b[0][0] > 0.0, "{b:?}");
+        let b = l.boxes(0, 3);
+        assert!(b.len() == 1 && b[0][0].abs() < 1e-9 && (b[0][2] - w).abs() < 1e-9, "{b:?}");
+        // Underlined, one line under the whole word.
+        let t = TextType { underline: true, ..TextType::default() };
+        let d = layout(&t, "بيت", &styles(&t, "بيت", false, &[])).drawn();
+        assert_eq!(d.underlines.len(), 1);
+    }
+
+    #[test]
+    fn a_label_the_lettering_cannot_letter_is_lettered_behind_it() {
+        let l = label("ROOM غرفة");
+        assert!(!l.strokes.is_empty() && !l.fill.is_empty(), "Latin in the lettering's lines, Arabic in Noto's letters");
+        assert!(l.width > 5.0);
+        let (lo, hi) = l.fill.iter().flatten().flatten().fold((f32::MAX, f32::MIN), |(lo, hi), p| (lo.min(p.1), hi.max(p.1)));
+        assert!(lo > -2.0 && hi < 1.0, "on its baseline, y down: {lo} {hi}");
     }
 
     #[test]

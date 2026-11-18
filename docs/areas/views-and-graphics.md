@@ -204,8 +204,18 @@ Sans. So Arial, the default, letters on any system, and a file naming a font thi
 takes any name) and draws with what stands in; the `text_type` command refuses a font the system can't letter, unless the
 type has it already. A family's own bold and italic faces are taken where it has them; else a variable face is set to
 `wght` 700, any other is made bold by its outline drawn round heavier (our lettering by heavier strokes), and italic by
-slanting it. A character a face hasn't is lettered from Plex Sans, then Plex Mono, then the system's wide fonts
+slanting it. A character a face hasn't is lettered from Plex Sans, then Plex Mono, then Noto Sans Arabic (carried as
+Plex is: a browser has no system fonts), then the system's wide fonts
 (`system::FALLBACKS`: Noto Sans CJK, Microsoft YaHei, PingFang…), else drawn as the lettering's question mark.
+Right-to-left text (Arabic, Hebrew) is laid out as it reads (`text::line_laid`): a line with any has its runs ordered by
+the Unicode Bidirectional Algorithm (`unicode-bidi`; the line's direction is its first strong letter's), and each
+right-to-left run is shaped in its face by `harfrust`, so Arabic's letters join; `Placed::rtl` and `Placed::glyphs` say
+so, a line's `chars` stay in the text's order, and `caret`, `index_at`, `boxes` and the underlines follow where each
+character stands. A line with none is laid out character by character, as before. The canvas's labels (a room's name,
+a level's, a tag, a CAD drawing's text: `Drawing::text_shaped`) are our lettering's lines where it has every letter;
+a text it cannot letter alone (`font::label`: Arabic, Greek, CJK) is laid out the same way in the lettering, so its
+other letters come from the fonts behind it, filled. `crates/model/src/font.rs` is that choice: `width`, `strokes` and
+`label`, which every caller of the lettering goes through.
 `text::shape` reads a glyph's outline with `ttf-parser` once and keeps it. `text_type` without a name lists the fonts
 (`text::families`) and what letters each type here (`drawn_with`); Type Properties shows "drawn with" when that differs. A note may override bold, italic and underline on parts of itself: `override_format`
 lets its `runs` (character ranges, a line break one character) count, each setting any of the three either way, so a part

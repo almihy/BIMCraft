@@ -614,12 +614,11 @@ pub fn families() -> [FontFamily; 3] {
     [FontFamily::Proportional, FontFamily::Monospace, FontFamily::Name(SEMIBOLD.into())]
 }
 // The core's, which text types letter notes in: the window holds one copy.
-use bimcraft_core::text::{PLEX_MONO, PLEX_SANS};
+use bimcraft_core::text::{NOTO_ARABIC as ARABIC, NOTO_ARABIC_BOLD as ARABIC_BOLD, PLEX_MONO, PLEX_SANS};
 
 /// Noto Sans Arabic, behind Plex, which has no Arabic: a room's or a level's name from an Arabic file, a check that quotes
-/// it, read in Arabic letters rather than as question marks. Bold behind the semibold family.
-const ARABIC: &[u8] = include_bytes!("../../../assets/fonts/noto-sans-arabic/NotoSansArabic-Regular.ttf");
-const ARABIC_BOLD: &[u8] = include_bytes!("../../../assets/fonts/noto-sans-arabic/NotoSansArabic-Bold.ttf");
+/// it, read in Arabic letters rather than as question marks. Bold behind the semibold family. The core's too, which
+/// letters the canvas's Arabic in it.
 
 /// The lettering a hosting page sets its own text in (`host.rs`), for the window to wear: a sans, variable in weight or
 /// not, and a monospace, as the bytes of TrueType or OpenType files.

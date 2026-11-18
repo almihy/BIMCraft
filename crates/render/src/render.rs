@@ -438,9 +438,22 @@ impl Drawing {
         let w = font::width(text, height);
         let across = if mirrored { -wide } else { wide };
         let part = std::mem::replace(&mut self.part, Part::Text);
-        for pts in font::strokes(text, -w / 2.0, height / 2.0, height) {
-            let pts = pts.into_iter().map(|(a, b)| (a * across, b)).map(|(a, b)| (x + a * c - b * s, y + a * s + b * c)).collect();
-            self.push(Prim::line(pts, (height / 10.0).max(1.0), color, None, false));
+        let turned = |(a, b): (f32, f32)| (a * across, b);
+        let placed = |(a, b): (f32, f32)| (x + a * c - b * s, y + a * s + b * c);
+        if let Some(label) = font::label(text) {
+            // What the lettering has no letter for (Arabic, joined and read from the right): letters of a font, filled.
+            let at = |&(a, b): &(f32, f32)| placed(turned((a * height - w / 2.0, b * height + height / 2.0)));
+            for (line, wide) in &label.strokes {
+                self.push(Prim::line(line.iter().map(at).collect(), (wide * height).max(1.0), color, None, false));
+            }
+            for letter in &label.fill {
+                self.push(Prim::fill(letter.iter().map(|r| r.iter().map(at).collect()).collect(), color));
+            }
+        } else {
+            for pts in font::strokes(text, -w / 2.0, height / 2.0, height) {
+                let pts = pts.into_iter().map(turned).map(placed).collect();
+                self.push(Prim::line(pts, (height / 10.0).max(1.0), color, None, false));
+            }
         }
         self.part = part;
     }
