@@ -66,7 +66,8 @@ impl BimApp {
     pub fn hosted_on(session: Session) -> BimApp {
         let mut app = BimApp::new(session);
         app.hosted = true;
-        // The page checks the model against the firm's rules and the brief: the Checks palette is open from the start.
+        // The page checks the model against the firm's rules and the brief: the Checks palette is docked on the right,
+        // closed until the person opens it (the page's kept settings, `use_page_settings`, say how they left it).
         app.docking = app.first_docking();
         // What it writes (Export) is the page's to keep, not a file on this computer's disk.
         app.session.files.keep_writes = true;

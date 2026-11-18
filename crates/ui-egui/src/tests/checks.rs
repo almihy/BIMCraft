@@ -58,7 +58,7 @@ fn tap(h: &mut Harness<BimApp>, label: &str) {
 
 /// The Checks in front of their stack, as a click on the status bar's count puts them.
 fn front(h: &mut Harness<BimApp>) {
-    h.state_mut().docking.activate(Palette::Checks);
+    h.state_mut().open_checks();
     h.run();
 }
 
@@ -67,8 +67,11 @@ fn docking<'a>(h: &'a Harness<'_, BimApp>) -> &'a crate::dock::Docking {
 }
 
 #[test]
-fn a_hosted_window_has_the_checks_palette_open_and_the_desktops_has_none() {
+fn a_hosted_window_has_the_checks_palette_closed_on_the_right_and_the_desktops_has_none() {
     let mut h = hosted(BOX);
+    // Closed at first: the model has the room until the person asks for the checks.
+    assert!(!docking(&h).shown(Palette::Checks));
+    front(&mut h);
     // A sidebar of its own down the right side, the whole height: no tab of anything's, and nothing else there.
     assert_eq!(docking(&h).docked(Palette::Checks), Some(Side::Right));
     assert_eq!(docking(&h).side(Side::Right).len(), 1);
@@ -89,6 +92,34 @@ fn a_hosted_window_has_the_checks_palette_open_and_the_desktops_has_none() {
     from_list(&mut h, "Windows", "User Interface");
     pick(&mut h, Role::CheckBox, "Checks");
     assert!(!docking(&h).shown(Palette::Checks));
+}
+
+#[test]
+fn a_hosted_window_keeps_its_settings_with_the_page() {
+    let mut h = hosted(BOX);
+    h.state_mut().use_page_settings(None);
+    h.run();
+    // Nothing changed yet: nothing to keep beyond what it starts with.
+    let first = h.state_mut().take_settings_to_keep();
+    assert!(first.as_deref().is_none_or(|j| j.contains("\"palettes\"")));
+    // The person opens the Checks and minimises the ribbon: the page is given the settings to keep, once.
+    front(&mut h);
+    h.state_mut().ribbon_min = true;
+    h.run();
+    let kept = h.state_mut().take_settings_to_keep().expect("the changed settings, for the page");
+    assert_eq!(h.state_mut().take_settings_to_keep(), None, "once");
+    // The next window the page opens, on another project, is as the person left the last.
+    let mut next = hosted(&two_levels());
+    next.state_mut().use_page_settings(Some(&kept));
+    next.run();
+    assert!(docking(&next).shown(Palette::Checks), "the Checks open, as they were left");
+    assert_eq!(docking(&next).docked(Palette::Checks), Some(Side::Right));
+    assert!(next.state().ribbon_min, "and the rest of the settings too");
+    // What the page kept and cannot read is no harm: the window starts as at first.
+    let mut fresh = hosted(BOX);
+    fresh.state_mut().use_page_settings(Some("not json"));
+    fresh.run();
+    assert!(!docking(&fresh).shown(Palette::Checks));
 }
 
 #[test]
@@ -137,7 +168,9 @@ fn the_status_bars_count_opens_the_palette() {
     let far = *ids(&h, "wall").last().unwrap();
     h.state_mut().set_checks(&checks(far)).unwrap();
     h.run();
-    assert!(h.query_by_label("Bedroom area — Failed").is_some(), "open from the start");
+    assert!(h.query_by_label("Bedroom area — Failed").is_none(), "closed at first");
+    press(&mut h, "Checks: 2 flags");
+    assert!(h.query_by_label("Bedroom area — Failed").is_some(), "the count opens it");
     // Closed by its ×, the count opens it again where it was: its own sidebar on the right.
     press(&mut h, "Close Checks");
     assert!(!docking(&h).shown(Palette::Checks) && h.query_by_label("Bedroom area — Failed").is_none());

@@ -234,6 +234,24 @@ impl Host {
     }
 }
 
+/// Where the browser keeps the window's settings.
+const SETTINGS_KEY: &str = "bimcraft.settings";
+
+fn storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.local_storage().ok().flatten()
+}
+
+/// The settings this browser kept, if it keeps any (a private window may not).
+fn kept_settings() -> Option<String> {
+    storage()?.get_item(SETTINGS_KEY).ok().flatten()
+}
+
+fn keep_settings(json: &str) {
+    if let Some(s) = storage() {
+        let _ = s.set_item(SETTINGS_KEY, json);
+    }
+}
+
 impl eframe::App for Host {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.app.ui(ui, frame);
@@ -249,6 +267,9 @@ impl eframe::App for Host {
         self.tell_pdf();
         self.tell_dwg();
         self.tell_context(ui);
+        if let Some(settings) = self.app.take_settings_to_keep() {
+            keep_settings(&settings);
+        }
         if let Some(rule) = self.app.take_rule_request() {
             later_with(self.on_rule.borrow().clone(), JsValue::from_str(&rule));
         }
@@ -404,7 +425,10 @@ impl WebApp {
             let (model, _) = Model::read(&text).map_err(err)?;
             session.reset(model, None);
         }
-        let app = BimApp::hosted_on(session);
+        let mut app = BimApp::hosted_on(session);
+        // The window's settings (the palettes' layout, the ribbon, the look the person chose) are kept in this browser, as
+        // the desktop keeps them in a file: the next project opens as they left the last.
+        app.use_page_settings(kept_settings().as_deref());
         *self.sent.borrow_mut() = Some(Arc::clone(&app.session.model));
         let mut host = Host {
             seen: Arc::clone(&app.session.model),

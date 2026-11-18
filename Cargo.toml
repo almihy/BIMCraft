@@ -88,6 +88,11 @@ hayro-interpret = { path = "vendor/hayro-interpret" }
 # wasm32-uu/CMakeLists.txt): the browser build's cmake paths with forward slashes and quoted, so a path with a backslash or a
 # space in it (G:\Software Development\...) does not break. Drop this when upstream does it (docs/manifold-trial.md).
 manifold-csg-sys = { path = "vendor/manifold-csg-sys" }
+# epaint 0.36.2 with right-to-left text (marked "BIMCraft's patch" in src/text/text_layout.rs): egui shaped a line in the
+# direction of its first letter and placed every run left to right, so a check that began with an Arabic room's name was
+# drawn backwards, English and all. Its levels are now resolved by the Unicode Bidirectional Algorithm and each row is
+# shown in the order it reads. Drop this when egui does bidi (its TODO in text_layout.rs's segment_into_runs).
+epaint = { path = "vendor/epaint" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

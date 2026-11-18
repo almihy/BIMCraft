@@ -390,11 +390,13 @@ impl BimApp {
     }
 
     /// The layout the window starts in: Revit's, and when a page hosts the window, the Checks a sidebar of their own down
-    /// the right side, the whole height.
+    /// the right side, the whole height, closed until asked for (the status bar's count of flags, or Palettes): the model
+    /// has the room. Where the person left them is kept with the rest of the settings.
     pub(crate) fn first_docking(&self) -> crate::dock::Docking {
         let mut d = crate::dock::Docking::default();
         if self.offers_checks() {
             d.put(Palette::Checks, crate::dock::Target::Side(crate::dock::Side::Right));
+            d.show(Palette::Checks, false);
         }
         d
     }
