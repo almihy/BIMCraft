@@ -294,12 +294,14 @@ impl SolidCache {
     }
 
     /// Every element it holds, with its solids.
-    pub(crate) fn entries(&self) -> Vec<(Id, Arc<ElementSolids>)> {
+    #[doc(hidden)]
+    pub fn entries(&self) -> Vec<(Id, Arc<ElementSolids>)> {
         self.entries.lock().map(|e| e.iter().map(|(id, s)| (*id, Arc::clone(s))).collect()).unwrap_or_default()
     }
 
     /// Keeps `solids` as element `id`'s (made from the same pieces, in the same library, as it would be now).
-    pub(crate) fn adopt(&self, id: Id, solids: Arc<ElementSolids>) {
+    #[doc(hidden)]
+    pub fn adopt(&self, id: Id, solids: Arc<ElementSolids>) {
         if let Ok(mut entries) = self.entries.lock() {
             entries.insert(id, solids);
         }

@@ -53,7 +53,7 @@ fn dense_drawn(
 
 #[test]
 fn a_dense_drawing_zoomed_out_on_a_screen_draws_its_cells_and_looks_as_it_does_drawn_whole() {
-    let cad = crate::cad::Cad::of_drawing("dense.pdf", crate::cad::tests::dense(60_000, P2(1000.0, 700.0)));
+    let cad = crate::cad::Cad::of_drawing("dense.pdf", crate::cad::testing::dense(60_000, P2(1000.0, 700.0)));
     let mut ci = crate::model::CadImport {
         cad: String::new(),
         level: crate::ids::Guid::default(),
@@ -152,7 +152,7 @@ fn alike(a: &[u8], b: &[u8], levels: f64) -> bool {
 /// The verifier's sheet: a red fill 380 by 260 drawn first, 30 000 short black strokes over it, and a white mask over its
 /// left half drawn last, which hides what it covers.
 fn under_and_over() -> crate::dxf::Dxf {
-    use crate::cad::tests::{drawing, entity, random};
+    use crate::cad::testing::{drawing, entity, random};
     use crate::dxf::{Color, Shape};
     let rect = |x0: f64, y0: f64, x1: f64, y1: f64| vec![vec![P2(x0, y0), P2(x1, y0), P2(x1, y1), P2(x0, y1)]];
     let mut entities = vec![entity("Zones", Shape::Fill { rings: rect(20.0, 20.0, 400.0, 280.0), solid: true, tile: None, shade: false })];
@@ -197,7 +197,7 @@ fn zoomed_out_a_dense_drawing_keeps_the_pages_order_a_fill_under_its_lines_and_a
 
 #[test]
 fn zoomed_out_solid_fills_stay_solid_and_take_the_views_overrides_as_they_do_drawn_whole() {
-    use crate::cad::tests::{drawing, entity, random};
+    use crate::cad::testing::{drawing, entity, random};
     use crate::dxf::{Color, Shape};
     // 20 000 red squares a unit across on Poche (the verifier's sheet of small fills), and over them as many short strokes.
     let mut seed = 3;
@@ -245,4 +245,20 @@ fn zoomed_out_solid_fills_stay_solid_and_take_the_views_overrides_as_they_do_dra
     near(count(&a, pink), count(&b, pink), "halftone fills");
     assert_eq!((count(&a, red), count(&b, red)), (0, 0), "no full red left in halftone");
     assert!(alike(&a, &b, 10.0), "a mean of {:?} against {:?}", mean(&b), mean(&a));
+}
+
+#[test]
+fn a_line_keeps_its_pen_when_a_link_goes_under_the_projects() {
+    use crate::ids::LINKED;
+    use crate::pen::Pen;
+    use crate::prim::{Rgb, View};
+    use crate::render::Drawing;
+    let mut d = Drawing::new(View { scale: 1.0, cx: 0.0, cy: 0.0, width: 10, height: 10 });
+    d.own(Some(7));
+    d.stroke(vec![(0.0, 0.0), (1.0, 1.0)], Pen::CUT, Rgb(0, 0, 0), None, false);
+    d.own(Some(LINKED));
+    d.stroke(vec![(2.0, 2.0), (3.0, 3.0)], Pen::PROJECTION, Rgb(0, 0, 0), None, false);
+    d.linked_under();
+    assert_eq!(d.owners, [Some(LINKED), Some(7)]);
+    assert_eq!(d.pens, [Some(Pen::PROJECTION), Some(Pen::CUT)], "each line's pen goes with it");
 }

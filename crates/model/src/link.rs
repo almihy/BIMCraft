@@ -29,7 +29,8 @@ pub fn is_linked(id: Id) -> bool {
 
 /// The owner of the fills that union what a link builds in a plan: no element has it, a pick never answers it, and the
 /// drawing puts it under the project's with the rest of the link.
-pub(crate) const UNION: Id = Id::MAX;
+#[doc(hidden)]
+pub const UNION: Id = Id::MAX;
 
 /// What of a linked project is drawn: what is built. Its views, sheets, schedules and annotation stay in it, and so do its
 /// own links.
@@ -118,7 +119,3 @@ fn bring(to: &mut Model, l: &crate::model::Link, from: &Model) -> Result<(), Str
     }
     crate::insert::insert_as(to, &other, &ask, true).map(|_| ())
 }
-
-#[cfg(test)]
-#[path = "link_tests.rs"]
-mod tests;

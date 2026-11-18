@@ -132,7 +132,8 @@ impl Tri {
 
     /// How see-through it is in `look`: as much as its material, or the view makes it, whichever is more. A view's own
     /// override counts only where it changes the picture.
-    pub(crate) fn alpha(&self, look: &Look) -> u8 {
+    #[doc(hidden)]
+    pub fn alpha(&self, look: &Look) -> u8 {
         let view = if look.is_plain() { 0 } else { look.transparency(self.owner) };
         self.clearness().max(view)
     }
@@ -256,7 +257,8 @@ impl PreparedSolids {
         self.in_range(0..self.len())
     }
 
-    pub(crate) fn in_range(&self, range: std::ops::Range<usize>) -> impl Iterator<Item = &Solid> {
+    #[doc(hidden)]
+    pub fn in_range(&self, range: std::ops::Range<usize>) -> impl Iterator<Item = &Solid> {
         let (owned, cached) = self.slices(range);
         owned.iter().chain(cached.iter().map(|s| &**s))
     }
@@ -358,7 +360,8 @@ impl Solid {
     }
 
     /// Its corners.
-    pub(crate) fn corners(&self) -> Vec<P3> {
+    #[doc(hidden)]
+    pub fn corners(&self) -> Vec<P3> {
         let mut out = Vec::new();
         match self {
             Solid::Box { frame, a, c, z, .. } => {

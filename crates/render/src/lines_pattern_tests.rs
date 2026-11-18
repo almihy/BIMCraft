@@ -1,4 +1,4 @@
-//! `lines`'s pattern tests that need only the model.
+//! Line patterns drawn (`lines::LinePattern::geometry` on a drawing): their marks as pixels, at their size on paper.
 
 use crate::render::{self, Prim, Rgb};
 

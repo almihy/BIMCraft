@@ -8,13 +8,14 @@ pub use bimcraft_mep_calc::{conduit, demand, dps, dr, drainage, hydrant, loads, 
 #[doc(hidden)]
 pub use bimcraft_model::run_arm;
 pub use bimcraft_model::{
-    alignment, background_grid, bounds, cad, camera, carpark, cloud, crosscheck, curves, derived, dims, dims3d, draw, dxf, dxf_out,
-    electrical, falls, family, favorites, fills, gltf, glue, graphics, ground, groups, ids, ifc_classes, inquiry, insert, json, lenient,
-    library, lines, link, massing, masterplan, merge, model, motion, network, paint, pat, pdf, pen, phasing, quantities, raster, rebar,
-    reinforce, render, rooms, runs, schedule, selection, selfcheck, sheet, site, sketch, snap, solids, stairs, standards, styles,
-    symbol_set, tempdims, text, texture, titleblock, triad, type_data, view3d, wallchain, walls, warnings, workplane,
+    alignment, background_grid, bounds, cad, camera, carpark, cloud, crosscheck, curves, derived, dims, draw, dxf, electrical, falls,
+    family, favorites, fills, glue, graphics, ground, groups, ids, ifc_classes, insert, json, lenient, library, lines, link, massing,
+    masterplan, merge, model, motion, network, paint, pat, pen, phasing, quantities, raster, rebar, reinforce, rooms, runs, schedule,
+    selection, selfcheck, site, sketch, solids, stairs, standards, styles, symbol_set, tempdims, text, texture, titleblock, type_data,
+    wallchain, walls, warnings, workplane,
 };
 use bimcraft_model::{constraints, sync_settings, timber};
+pub use bimcraft_render::{dims3d, dxf_out, gltf, inquiry, pdf, render, sheet, snap, triad, view3d};
 // What only the tests here name by its old path.
 #[cfg(test)]
 use bimcraft_model::{component_geometry, fixtures};

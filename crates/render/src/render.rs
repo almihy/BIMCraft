@@ -5921,3 +5921,7 @@ fn paint(pm: &mut Pixmap, d: &Drawing) {
 #[cfg(test)]
 #[path = "render_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "lines_pattern_tests.rs"]
+mod lines_pattern_tests;

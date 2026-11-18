@@ -21,6 +21,7 @@ bimcraft-icons = { path = "crates/icons" }
 bimcraft-model = { path = "crates/model" }
 bimcraft-ifc = { path = "crates/ifc" }
 bimcraft-site = { path = "crates/site" }
+bimcraft-render = { path = "crates/render" }
 bimcraft-mep-calc = { path = "crates/mep-calc" }
 bimcraft-geom = { path = "crates/geom" }
 bimcraft-plugin = { path = "crates/plugin" }
@@ -114,6 +115,8 @@ opt-level = 1
 [profile.dev.package.bimcraft-site]
 opt-level = 1
 [profile.dev.package.bimcraft-ifc]
+opt-level = 1
+[profile.dev.package.bimcraft-render]
 opt-level = 1
 [profile.dev.package.bimcraft-mep-calc]
 opt-level = 1

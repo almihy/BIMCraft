@@ -173,7 +173,8 @@ impl Geom {
 
     /// Where [`unit_tube`] goes to be this run's, as `owner`'s copy of the `shape`th shape: its line along the tube's x, the
     /// radius along y and z, round its line from east (from the north, upright).
-    pub(crate) fn tube_place(&self, owner: crate::model::Id, shape: usize) -> crate::component_geometry::ComponentInstance {
+    #[doc(hidden)]
+    pub fn tube_place(&self, owner: crate::model::Id, shape: usize) -> crate::component_geometry::ComponentInstance {
         let (d, r) = (unit(sub(self.b, self.a)), self.width / 2.0);
         let e1 = if self.vertical() { [1.0, 0.0, 0.0] } else { unit([-d[1], d[0], 0.0]) };
         let e2 = cross(d, e1);
@@ -400,7 +401,8 @@ pub fn outline(m: &Model, id: Id) -> Vec<P2> {
 }
 
 /// [`outline`], its joins found through `index` when there is one.
-pub(crate) fn outline_in(m: &Model, id: Id, index: Option<&walls::Index>) -> Vec<P2> {
+#[doc(hidden)]
+pub fn outline_in(m: &Model, id: Id, index: Option<&walls::Index>) -> Vec<P2> {
     let Some(e) = m.elements.get(id) else { return Vec::new() };
     let Some(g) = m.run_geom(e) else { return Vec::new() };
     if !joinable(&g) {

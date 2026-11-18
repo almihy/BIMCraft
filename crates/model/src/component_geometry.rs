@@ -6,7 +6,8 @@ use crate::geom::P2;
 use crate::model::{Component, Id, Model};
 
 /// What a shape is the shape of: its family, its type, whether it is mirrored, and the values its family evaluates.
-pub(crate) type Key = (String, String, bool, String);
+#[doc(hidden)]
+pub type Key = (String, String, bool, String);
 
 /// One local family shape and every component that places it. Mirroring and instance parameters
 /// are part of the shape key; rotation and translation belong to the placement.
@@ -21,7 +22,8 @@ pub struct SharedComponents {
     #[doc(hidden)]
     pub instances: Vec<ComponentInstance>,
     /// Each shape's key, and where it is in `shapes`.
-    pub(crate) keys: BTreeMap<Key, usize>,
+    #[doc(hidden)]
+    pub keys: BTreeMap<Key, usize>,
 }
 
 /// A copy of a local shape: `owner`'s, at `at`, its shape's axes taken to `axes` (each square to the others, any length, so a
@@ -41,7 +43,8 @@ pub struct ComponentInstance {
 
 impl ComponentInstance {
     /// A component's: turned about the vertical by the angle whose sine and cosine these are.
-    pub(crate) fn turned(owner: Id, shape: usize, at: [f64; 3], sin: f64, cos: f64) -> Self {
+    #[doc(hidden)]
+    pub fn turned(owner: Id, shape: usize, at: [f64; 3], sin: f64, cos: f64) -> Self {
         Self { owner, shape, at, axes: [[cos, sin, 0.0], [-sin, cos, 0.0], [0.0, 0.0, 1.0]] }
     }
 
@@ -63,14 +66,16 @@ impl ComponentInstance {
     }
 
     /// The other way: a normal of the copy, of its shape.
-    pub(crate) fn local_normal(&self, n: [f64; 3]) -> [f64; 3] {
+    #[doc(hidden)]
+    pub fn local_normal(&self, n: [f64; 3]) -> [f64; 3] {
         let dot = |v: [f64; 3]| v[0] * n[0] + v[1] * n[1] + v[2] * n[2];
         let [a, b, c] = self.axes;
         crate::geom::v3::unit([dot(a), dot(b), dot(c)])
     }
 
     /// Whether its axes span space, so a normal can be placed.
-    pub(crate) fn solid(&self) -> bool {
+    #[doc(hidden)]
+    pub fn solid(&self) -> bool {
         self.axes.iter().all(|v| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).is_normal()) && self.at.iter().all(|v| v.is_finite())
     }
 
@@ -90,7 +95,8 @@ impl ComponentInstance {
 }
 
 impl SharedComponents {
-    pub(crate) fn key(model: &Model, c: &Component) -> Key {
+    #[doc(hidden)]
+    pub fn key(model: &Model, c: &Component) -> Key {
         // Paint, phase and design-option metadata live in `params` too. Only names that the family
         // evaluates can change its local geometry; appearance is resolved per placement later.
         let params = model.families.get(&c.family).map(|family| {
@@ -197,7 +203,8 @@ impl<'a> Components<'a> {
     }
 
     /// [`Components::heights`] of a component of the model's.
-    pub(crate) fn heights_of(&mut self, c: &'a Component) -> (f64, f64) {
+    #[doc(hidden)]
+    pub fn heights_of(&mut self, c: &'a Component) -> (f64, f64) {
         if !c.params.is_empty() {
             return self.heights(c);
         }
@@ -226,7 +233,8 @@ impl<'a> Components<'a> {
     /// in plan) or up. Those within a micron of the hull of all of them in plan, and the lowest and highest: the same
     /// points [`Components::pieces`] places, by the same sums, so the farthest of them any way is the farthest of every
     /// point of its pieces, to the last bit.
-    pub(crate) fn extremes(&mut self, c: &Component) -> Vec<[f64; 3]> {
+    #[doc(hidden)]
+    pub fn extremes(&mut self, c: &Component) -> Vec<[f64; 3]> {
         let key = Self::key(c);
         if !self.extremes.contains_key(&key) {
             let points: Vec<[f64; 3]> = self.local(c).iter().flat_map(|pc| pc.tris.iter().flatten().copied()).collect();
@@ -255,7 +263,8 @@ impl<'a> Components<'a> {
     }
 
     /// Its geometry's heights over its base, lowest and highest: none (infinity, minus infinity) when it has no pieces.
-    pub(crate) fn local_heights(&mut self, c: &Component) -> (f64, f64) {
+    #[doc(hidden)]
+    pub fn local_heights(&mut self, c: &Component) -> (f64, f64) {
         self.local(c).iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| (lo.min(p.bottom), hi.max(p.top)))
     }
 
@@ -266,7 +275,8 @@ impl<'a> Components<'a> {
     }
 
     /// Its pieces' outlines in plan, as [`Components::pieces`] places them, without their triangles.
-    pub(crate) fn outlines(&mut self, c: &Component) -> Vec<P2> {
+    #[doc(hidden)]
+    pub fn outlines(&mut self, c: &Component) -> Vec<P2> {
         let base = self.model.elevation(c.level) + c.offset;
         let (sin, cos) = c.angle.to_radians().sin_cos();
         let place = |p: [f64; 3]| [c.at.0 + p[0] * cos - p[1] * sin, c.at.1 + p[0] * sin + p[1] * cos, base + p[2]];

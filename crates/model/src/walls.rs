@@ -450,14 +450,16 @@ pub fn layer_lines_in(m: &Model, id: Id, index: Option<&Index>) -> Vec<Vec<P2>> 
 }
 
 #[derive(Default)]
-pub(crate) struct LayerGeometry {
-    pub(crate) lines: Vec<Vec<P2>>,
+#[doc(hidden)]
+pub struct LayerGeometry {
+    pub lines: Vec<Vec<P2>>,
     // A core can reach beyond the finish beside it at either end.
     butt: [Option<compound::Butt>; 2],
 }
 
 impl LayerGeometry {
-    pub(crate) fn band(&self, k: usize) -> Vec<P2> {
+    #[doc(hidden)]
+    pub fn band(&self, k: usize) -> Vec<P2> {
         let a = &self.lines[k];
         let b = &self.lines[k + 1];
         let mut ring: Vec<_> = a.iter().chain(b.iter().rev()).copied().collect();
@@ -473,7 +475,8 @@ impl LayerGeometry {
         ring
     }
 
-    pub(crate) fn interfaces(&self) -> impl Iterator<Item = &[P2]> {
+    #[doc(hidden)]
+    pub fn interfaces(&self) -> impl Iterator<Item = &[P2]> {
         self.lines
             .iter()
             .skip(1)
@@ -483,7 +486,8 @@ impl LayerGeometry {
     }
 }
 
-pub(crate) fn layer_geometry(m: &Model, id: Id, index: Option<&Index>) -> LayerGeometry {
+#[doc(hidden)]
+pub fn layer_geometry(m: &Model, id: Id, index: Option<&Index>) -> LayerGeometry {
     let Some(w) = m.wall(id) else { return LayerGeometry::default() };
     let axis = Axis::of(w);
     let len = axis.length();
@@ -612,7 +616,8 @@ impl Bound {
 }
 
 /// A polygon as convex pieces, each counter-clockwise: itself when it's convex, else its triangles.
-pub(crate) fn convex_pieces(ring: &[P2]) -> Vec<Vec<P2>> {
+#[doc(hidden)]
+pub fn convex_pieces(ring: &[P2]) -> Vec<Vec<P2>> {
     if ring.len() < 3 {
         return Vec::new();
     }
@@ -635,7 +640,8 @@ thread_local! {
 
 /// `ring` cut by the convex counter-clockwise `piece`: the part inside it (if any), and the parts
 /// outside, apart. A repeated point of the piece's is no edge to cut by.
-pub(crate) fn split(ring: Vec<P2>, piece: &[P2]) -> (Option<Vec<P2>>, Vec<Vec<P2>>) {
+#[doc(hidden)]
+pub fn split(ring: Vec<P2>, piece: &[P2]) -> (Option<Vec<P2>>, Vec<Vec<P2>>) {
     #[cfg(debug_assertions)]
     SPLITS.with(|n| n.set(n.get() + 1));
     let big = |r: &Vec<P2>| r.len() >= 3 && geom::area(r).abs() > 1.0;

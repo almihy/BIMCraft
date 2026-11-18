@@ -464,7 +464,3 @@ pub fn batt(c: &Curve, width: f64) -> Vec<crate::geom::P2> {
 #[cfg(test)]
 #[path = "lines_tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "lines_pattern_tests.rs"]
-mod pattern_tests;

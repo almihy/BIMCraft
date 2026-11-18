@@ -66,7 +66,8 @@ impl Path {
 }
 
 /// A graphic and whether the line pen sizes it (including a dot's filled disk).
-pub(crate) struct Graphic {
+#[doc(hidden)]
+pub struct Graphic {
     pub prim: Prim,
     pub weighted: bool,
 }
@@ -79,7 +80,8 @@ impl LinePattern {
         self.geometry(pts, px_per_mm, width, color).into_iter().map(|g| g.prim).collect()
     }
 
-    pub(crate) fn geometry(&self, pts: &[(f32, f32)], px_per_mm: f32, width: f32, color: Rgb) -> Vec<Graphic> {
+    #[doc(hidden)]
+    pub fn geometry(&self, pts: &[(f32, f32)], px_per_mm: f32, width: f32, color: Rgb) -> Vec<Graphic> {
         if pts.len() < 2 || !px_per_mm.is_finite() || px_per_mm <= 0.0 {
             return Vec::new();
         }

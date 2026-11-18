@@ -36,14 +36,16 @@ enum Shape {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Key {
+#[doc(hidden)]
+pub struct Key {
     own: Option<Revision>,
     levels: [Option<Revision>; 2],
     shape: Shape,
 }
 
 impl Key {
-    pub(crate) fn of(m: &Model, id: Id) -> Self {
+    #[doc(hidden)]
+    pub fn of(m: &Model, id: Id) -> Self {
         let mut key = Self { own: m.elements.revision(id), levels: [None; 2], shape: Shape::Other };
         let Some(e) = m.elements.get(id) else { return key };
         if let Some(c) = e.column() {

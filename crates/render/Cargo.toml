@@ -1,0 +1,23 @@
+[package]
+name = "bimcraft-render"
+description = "BIMCraft's drawings of the model: plans, sections and elevations, the 3D view, sheets, and what they are written as (PDF, DXF, glTF)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bimcraft-model = { workspace = true }
+bimcraft-i18n = { workspace = true }
+serde_json = { workspace = true }
+tiny-skia = { workspace = true }
+flate2 = { workspace = true }
+rayon = { workspace = true }
+i_overlay = { workspace = true }
+
+# As the model's: one build of the dependencies for every cargo command (crates/workspace-hack/CLAUDE.md).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+bimcraft-workspace-hack = { path = "../workspace-hack" }

@@ -2478,7 +2478,8 @@ pub const MIN_PAPER: f64 = 100.0;
 pub const MAX_PAPER: f64 = 1219.2;
 
 /// The ISO aliases also name their bare format in margins and folding marks.
-pub(crate) fn paper_name(size: &str) -> String {
+#[doc(hidden)]
+pub fn paper_name(size: &str) -> String {
     let upper = size.trim().to_ascii_uppercase();
     let iso = upper.strip_prefix("ISO").map(str::trim_start).unwrap_or(&upper);
     if matches!(iso, "A0" | "A1" | "A2" | "A3" | "A4" | "B1" | "B2" | "B3" | "B4") { iso.into() } else { upper }
@@ -4656,7 +4657,8 @@ impl Model {
 
     /// [`Model::model_extent`], of `corners`, in plan: those of [`crate::solids::solids`] of this model, or the points
     /// that may be farthest among them.
-    pub(crate) fn model_extent_of(&self, corners: impl Iterator<Item = P2>) -> [P2; 2] {
+    #[doc(hidden)]
+    pub fn model_extent_of(&self, corners: impl Iterator<Item = P2>) -> [P2; 2] {
         // The grids, scans and drawings, in the order of their ids, from the lookup.
         let lookup = self.lookup();
         let others: BTreeSet<Id> = lookup.grids().chain(lookup.rare("pointcloud")).chain(lookup.rare("cadimport")).collect();
@@ -4897,7 +4899,8 @@ impl Model {
     }
 
     /// Whether the wall spans height `z`.
-    pub(crate) fn spans(&self, w: &Wall, z: f64) -> bool {
+    #[doc(hidden)]
+    pub fn spans(&self, w: &Wall, z: f64) -> bool {
         self.base_z(w) <= z && z < self.top_z(w)
     }
 
@@ -6001,7 +6004,8 @@ impl Model {
     }
 
     /// Every shaft's span and plan box, as [`Model::less_shafts`] asks of them, by id.
-    pub(crate) fn shaft_table(&self) -> Vec<crate::derived::ShaftReach> {
+    #[doc(hidden)]
+    pub fn shaft_table(&self) -> Vec<crate::derived::ShaftReach> {
         let mut table = Vec::new();
         for id in self.rare("shaft") {
             let Some(Element::Shaft(sh)) = self.elements.get(id) else { continue };

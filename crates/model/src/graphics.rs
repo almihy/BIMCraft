@@ -340,7 +340,8 @@ pub enum Dash {
 
 impl Dash {
     /// The on and off lengths a line is drawn with, px.
-    pub(crate) fn pattern(self) -> Option<Vec<f32>> {
+    #[doc(hidden)]
+    pub fn pattern(self) -> Option<Vec<f32>> {
         match self {
             Dash::Solid => None,
             Dash::Dashed => Some(vec![10.0, 5.0]),
@@ -1256,7 +1257,8 @@ impl Look {
         (s.foreground.is_some() || s.background.is_some()).then_some(s)
     }
 
-    pub(crate) fn pattern_styles(&self) -> BTreeMap<Id, [Style; 2]> {
+    #[doc(hidden)]
+    pub fn pattern_styles(&self) -> BTreeMap<Id, [Style; 2]> {
         self.paint
             .iter()
             .filter(|(id, _)| self.pattern_style(**id, false).is_some() || self.pattern_style(**id, true).is_some())

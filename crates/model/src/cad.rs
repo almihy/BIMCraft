@@ -774,6 +774,9 @@ fn bulk(d: &Dxf) -> (Option<[P2; 2]>, usize) {
     (dxf::union(boxes.into_iter().filter(near)), far)
 }
 
+#[doc(hidden)]
+pub mod testing;
+
 #[cfg(test)]
 #[path = "cad_tests.rs"]
 pub(crate) mod tests;

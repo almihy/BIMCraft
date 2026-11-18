@@ -334,11 +334,13 @@ impl Cloud {
     }
 
     /// Its points, shared: what a view keeps of it without copying them.
-    pub(crate) fn shared_points(&self) -> Arc<Vec<[f32; 3]>> {
+    #[doc(hidden)]
+    pub fn shared_points(&self) -> Arc<Vec<[f32; 3]>> {
         Arc::clone(&self.points)
     }
 
-    pub(crate) fn shared_colours(&self) -> Option<Arc<Vec<[u8; 3]>>> {
+    #[doc(hidden)]
+    pub fn shared_colours(&self) -> Option<Arc<Vec<[u8; 3]>>> {
         self.colours.clone()
     }
 
