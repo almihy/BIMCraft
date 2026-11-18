@@ -223,3 +223,27 @@ fn a_square_off_ends_the_first_wall_at_90_degrees_where_a_butt_runs_it_to_a_poin
     run(&mut s, "wall_join", json!({"walls": [a, b], "kind": "square-off"}));
     assert_eq!((plan_area(&s, a), plan_area(&s, b)), (820_000.0, 780_000.0));
 }
+
+#[test]
+fn a_join_set_not_to_clean_up_leaves_the_layers_whole_and_draws_the_line_they_butt_on() {
+    let (mut s, south, _) = room("Block");
+    let ids: Vec<u64> = s.model.elements.iter().filter(|(_, e)| e.category() == "wall").map(|(id, _)| *id).collect();
+    // The south wall is the last of the four made: at its corner with the east wall, made before it, it stops.
+    let east = ids[2];
+    let cleaned = walls::layer_geometry(&s.model, south, None);
+    assert_eq!(cleaned.butts().count(), 0);
+    run(&mut s, "wall_join", json!({"walls": [south, east], "display": "dont-clean"}));
+    let g = walls::layer_geometry(&s.model, south, None);
+    // One line across the wall where it stops against the east wall's inside face, and every layer ends on it.
+    let butt: Vec<&[P2]> = g.butts().collect();
+    assert_eq!(butt.len(), 1);
+    let x = butt[0][0].0;
+    assert!(butt[0].iter().all(|p| (p.0 - x).abs() < 1e-6) && (butt[0][0].1 - butt[0][1].1).abs() > 314.0, "{butt:?}");
+    for k in 0..4 {
+        let reach = g.bands(k).iter().flatten().map(|p| p.0).fold(f64::NEG_INFINITY, f64::max);
+        assert!((reach - x).abs() < 1e-6, "layer {k} ends on it: {reach} {x}");
+    }
+    // Cleaned again, the brick wraps the corner once more.
+    run(&mut s, "wall_join", json!({"walls": [south, east], "display": "clean"}));
+    assert_eq!(walls::layer_geometry(&s.model, south, None).butts().count(), 0);
+}

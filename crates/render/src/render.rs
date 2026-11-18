@@ -3725,11 +3725,20 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
     for (&id, e) in all() {
         let Element::Wall(w) = e else { continue };
         let layers = m.type_layers("wall", &w.type_name);
-        if layers.is_empty() || !m.spans(w, range.cut) || !shown(id) || d.detail == Detail::Coarse {
+        if !m.spans(w, range.cut) || !shown(id) {
             continue;
         }
         d.owner = Some(id);
         let geometry = walls::layer_geometry(m, id, index);
+        // A join set not to clean up shows the line its walls butt on, at any detail and whatever the walls are made of.
+        for line in geometry.butts() {
+            for part in lines_outside_columns(line, &columns) {
+                d.line(&part, BY_CATEGORY, INK, false);
+            }
+        }
+        if layers.is_empty() || d.detail == Detail::Coarse {
+            continue;
+        }
         let along = (w.end - w.start).unit();
         for (k, layer) in layers.iter().enumerate() {
             let room = layer.thickness * d.view.scale;

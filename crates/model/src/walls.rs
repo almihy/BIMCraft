@@ -366,14 +366,15 @@ fn end_geometry(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> WallE
             crate::model::JoinKind::Mitre => {}
             kind => {
                 let square = kind == crate::model::JoinKind::SquareOff;
-                if let Some(cut) = join::end_cut(m, id, at_end, next.id, Some(next.at_end), first, square) {
+                let clean = kept.is_none_or(|j| j.display != crate::model::JoinDisplay::DontClean);
+                if let Some(cut) = join::end_cut(m, id, at_end, next.id, Some(next.at_end), first, square, clean) {
                     return WallEnd::stepped(cut, at_end);
                 }
             }
         }
     }
     if n == 3 && through && next.id == prev.id {
-        if let Some(cut) = join::end_cut(m, id, at_end, next.id, None, false, false) {
+        if let Some(cut) = join::end_cut(m, id, at_end, next.id, None, false, false, true) {
             return WallEnd::stepped(cut, at_end);
         }
     }
@@ -516,6 +517,7 @@ pub struct LayerGeometry {
     pub lines: Vec<Vec<P2>>,
     bands: Vec<Vec<Vec<P2>>>,
     seams: Vec<Vec<P2>>,
+    butts: Vec<Vec<P2>>,
 }
 
 impl LayerGeometry {
@@ -528,6 +530,13 @@ impl LayerGeometry {
     #[doc(hidden)]
     pub fn interfaces(&self) -> impl Iterator<Item = &[P2]> {
         self.seams.iter().map(Vec::as_slice)
+    }
+
+    /// The lines its ends butt on where a join is set not to clean up (Revit's Don't Clean Join): drawn at any detail, of a
+    /// wall with layers or without.
+    #[doc(hidden)]
+    pub fn butts(&self) -> impl Iterator<Item = &[P2]> {
+        self.butts.iter().map(Vec::as_slice)
     }
 }
 
@@ -628,7 +637,8 @@ pub fn layer_geometry(m: &Model, id: Id, index: Option<&Index>) -> LayerGeometry
     for rings in &mut bands {
         rings.retain(|r| geom::area(r).abs() > 1e-6);
     }
-    LayerGeometry { lines, bands, seams }
+    let butts = ends.iter().filter_map(|e| e.cut.as_ref()).filter_map(|c| c.butt).map(|b| b.to_vec()).collect();
+    LayerGeometry { lines, bands, seams, butts }
 }
 
 /// A plane over the plan: its height at `q` is `z + g.0 · q.0 + g.1 · q.1`.

@@ -195,14 +195,28 @@ fn between(order: &[usize]) -> Vec<usize> {
 pub(super) struct Cut {
     pub(super) layers: Vec<[P2; 2]>,
     pub(super) seams: Vec<[P2; 2]>,
+    /// The line the wall stops on against the other, where the join is not cleaned up: drawn at every level of detail.
+    pub(super) butt: Option<[P2; 2]>,
 }
 
 /// The cut of wall `id`'s end (`at_end`, else its start) against wall `other`, which ends there too at its end or its start
 /// (`other_end`), or which it ends on the side of (none). `through`: at a corner, this wall runs through; with `square`,
 /// it is squared instead (Revit's Square off): its end stands at 90 degrees to itself where the other wall's far face meets
 /// its own nearer face, where a Butt would run it on to a point along that far face. None when either is no straight wall
-/// of a type, or they run too nearly the same way for their layers to cross near the join.
-pub(super) fn end_cut(m: &Model, id: Id, at_end: bool, other: Id, other_end: Option<bool>, through: bool, square: bool) -> Option<Cut> {
+/// of a type, or they run too nearly the same way for their layers to cross near the join. Without `clean` (Revit's Don't
+/// Clean Join) the layers are left as they come: the wall running through whole to the other's far face, the other whole
+/// against its near face, and a line drawn between the two.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn end_cut(
+    m: &Model,
+    id: Id,
+    at_end: bool,
+    other: Id,
+    other_end: Option<bool>,
+    through: bool,
+    square: bool,
+    clean: bool,
+) -> Option<Cut> {
     let (me, o) = (Strips::of(m, id)?, Strips::of(m, other)?);
     // The way this wall goes into the join, from its end there.
     let (node, way) = if at_end { (me.end, me.dir) } else { (me.start, me.dir * -1.0) };
@@ -220,7 +234,8 @@ pub(super) fn end_cut(m: &Model, id: Id, at_end: bool, other: Id, other_end: Opt
         None => Side { ranks: o.ranks.clone(), arrives: vec![(0..me.layers()).collect(), (0..me.layers()).rev().collect()] },
     };
     let (reach, _) = solve(&mine, &theirs, through && other_end.is_some());
-    let held = |k: usize| reach.get(k).and_then(|r| r.first()).copied().unwrap_or(0);
+    let whole = if through && other_end.is_some() { o.layers() } else { 0 };
+    let held = |k: usize| if clean { reach.get(k).and_then(|r| r.first()).copied().unwrap_or(0) } else { whole };
     let far = 6.0 * me.thick().max(o.thick());
     // Squared: no layer runs past where the other's far face meets this wall's nearer face.
     let along = |q: P2| (q - node).dot(way);
@@ -242,9 +257,13 @@ pub(super) fn end_cut(m: &Model, id: Id, at_end: bool, other: Id, other_end: Opt
         cut.layers.push([a, b]);
         // The layer of the other wall past its end, when it stops short of the far face.
         let past = mine.arrives.first().and_then(|order| order.get(held(k))).copied();
-        if past.is_some_and(|j| o.materials.get(j) != me.materials.get(k)) {
+        if clean && past.is_some_and(|j| o.materials.get(j) != me.materials.get(k)) {
             cut.seams.push([a, b]);
         }
+    }
+    // Not cleaned up, the wall that stops draws the line the two ends butt on, face to face.
+    if !clean && whole == 0 {
+        cut.butt = cut.layers.first().zip(cut.layers.last()).map(|(first, last)| [first[0], last[1]]);
     }
     // Beside a layer that runs on past its neighbour: the other wall's layers along its side there. At a corner each such
     // side is the end of a layer of the other wall, which draws it; a wall that runs on draws no ends of its own there.

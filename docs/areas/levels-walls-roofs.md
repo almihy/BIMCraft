@@ -41,8 +41,10 @@ draws a line between two layers only where their materials differ (`LayerGeometr
 as Revit's: an L of two 4 m walls is 12.3 and 11.7 m² a side.
 The `wall_join` command is the Wall Joins tool for two ends that meet: `kind` butt, mitre (both cut on the line from the inner
 corner to the outer, the faces' crossings) or square-off (the first wall ends at 90 degrees to itself where the other's far
-face meets its nearer face), `through`, `next` and `previous` for which wall is first, `display` (kept; plans do not read it
-yet), `reset`. What it sets is kept with the model (`Model::wall_joins`, by the two ends' GUIDs; let go with its walls after
+face meets its nearer face), `through`, `next` and `previous` for which wall is first, `display` (`dont-clean`: the layers
+are left whole, the wall that stops ending on one line a plan draws at any detail, `LayerGeometry::butts`; a view's own
+Wall Join Display is not read yet), `reset`. The desktop's Wall Joins tool (Modify tab; `Tool::WallJoins`, `wall_join_options`)
+picks the join under the cursor, a square over it, and runs the command from its options. What it sets is kept with the model (`Model::wall_joins`, by the two ends' GUIDs; let go with its walls after
 each command, as a pin is). Allow Join is each end's (`Wall::join_start`, `join_end`, `Wall::joins`; `join` off is both).
 Still as before: arc walls, three or more walls at a point, and walls within about 12 degrees of parallel, which mitre.
 
