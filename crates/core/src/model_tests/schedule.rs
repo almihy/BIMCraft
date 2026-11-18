@@ -94,8 +94,9 @@ fn a_multi_category_schedule_lists_its_categories_elements_with_the_fields_they_
         assert_eq!(wall[2], Value::Null, "a wall has a thickness, not a width");
         let (l, h) = (wall[4].as_f64().unwrap(), wall[3].as_f64().unwrap());
         assert!(l > 0.0 && h > 0.0, "{wall:?}");
-        // One side of it, less the doors and windows in it.
-        let gross = fine(l * h / 1e6);
+        // One side of it, less the doors and windows in it: of its body, which a Butt at either end leaves up to a
+        // thickness longer than its location line.
+        let gross = fine((l + 400.0) * h / 1e6);
         assert!(wall[5].as_f64().unwrap() <= gross, "a wall's area is its length by its height, less its openings: {wall:?}");
     }
 }

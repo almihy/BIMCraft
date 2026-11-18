@@ -1165,17 +1165,22 @@ fn the_type_selector_and_edit_type_change_types_as_in_revit() {
     assert_eq!(field(&h, wall, "type"), json!("Exterior - 300mm"));
     // Edit Type changes the type, so every wall of it.
     press(&mut h, "Edit Type");
-    type_into(&mut h, "Width", "350");
+    // Its Width is what its layers add up to, shown and not typed, as Revit's.
+    assert!(h.query_by_role_and_label(Role::TextInput, "Width").is_none());
+    h.get_by_role_and_label(Role::ComboBox, "Function").click();
+    h.run();
+    press(&mut h, "Interior");
     press(&mut h, "OK");
-    assert_eq!(h.state().session.model.types.wall.get("Exterior - 300mm").map(|t| t.thickness), Some(350.0));
+    let function = h.state().session.model.types.wall.get("Exterior - 300mm").map(|t| t.function);
+    assert_eq!(function, Some(bimcraft_core::model::WallFunction::Interior));
     // Duplicate makes a new type, and OK puts the selected wall on it.
     press(&mut h, "Edit Type");
     press(&mut h, "Duplicate…");
     type_into(&mut h, "New type", "Party - 250mm");
     press(&mut h, "Create");
-    type_into(&mut h, "Width", "250");
     press(&mut h, "OK");
-    assert_eq!(h.state().session.model.types.wall.get("Party - 250mm").map(|t| t.thickness), Some(250.0));
+    let copy = h.state().session.model.types.wall.get("Party - 250mm").map(|t| (t.thickness, t.layers.len(), t.function));
+    assert_eq!(copy, Some((300.0, 4, bimcraft_core::model::WallFunction::Interior)), "a copy of the type, its layers and all");
     assert_eq!(field(&h, wall, "type"), json!("Party - 250mm"));
     // With a tool on, the Type Selector picks the type of what it places.
     key(&mut h, Key::Escape);

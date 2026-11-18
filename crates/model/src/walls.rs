@@ -348,11 +348,12 @@ fn end_geometry(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> WallE
     if n < 2 {
         return WallEnd::plain(vec![me.cw, me.ccw]);
     }
-    // Two straight walls: a Butt, Revit's default, their layers cleaned up by rank. At a corner the wall of the lower GUID
-    // runs through (an id is given anew when the corner comes in from another file; a GUID never changes); a wall ending
-    // on another's side stops against it, the other running on.
+    // Two straight walls: a Butt, Revit's default, their layers cleaned up by rank. At a corner the wall made first (the
+    // lower id) runs through, so the same walls drawn the same way join the same way; which one does is the person's to
+    // change once a join keeps its order (the Wall Joins tool's Previous and Next). A wall ending on another's side stops
+    // against it, the other running on.
     if n == 2 && !through {
-        let runs_through = m.guid(id) < m.guid(next.id);
+        let runs_through = id < next.id;
         if let Some(cut) = join::end_cut(m, id, at_end, next.id, Some(next.at_end), runs_through) {
             return WallEnd::stepped(cut, at_end);
         }
@@ -600,6 +601,11 @@ pub fn layer_geometry(m: &Model, id: Id, index: Option<&Index>) -> LayerGeometry
         lines.push(line);
     }
     seams.extend(ends.iter().filter_map(|e| e.cut.as_ref()).flat_map(|c| c.seams.iter().map(|s| s.to_vec())));
+    // A line of no length (a layer as thin as nothing, two layers ending together) and a piece of no area are nothing to draw.
+    seams.retain(|l| l.windows(2).any(|w| matches!(w, [a, b] if a.dist(*b) > 1e-6)));
+    for rings in &mut bands {
+        rings.retain(|r| geom::area(r).abs() > 1e-6);
+    }
     LayerGeometry { lines, bands, seams }
 }
 

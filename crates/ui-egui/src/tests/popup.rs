@@ -16,7 +16,8 @@ fn action(h: &Harness<BimApp>, id: &str, label: &str) -> egui::Rect {
 fn close(h: &mut Harness<BimApp>, id: &str) {
     let r = area(h, id);
     let button = h
-        .get_all_by_role(Role::Button)
+        // The dialog's own corner button: a tall dialog lies over the ribbon, whose buttons are in that corner too.
+        .get_all_by_role_and_label(Role::Button, "Close dialog")
         .find(|n| r.contains_rect(n.rect()) && n.rect().center().x > r.right() - 45.0 && n.rect().center().y < r.top() + 45.0)
         .expect("corner close button");
     assert!(button.rect().center().x > r.right() - 45.0);
@@ -56,7 +57,8 @@ fn popup_corner_close_discards_type_and_nested_vg_drafts() {
     h.state_mut().selection = vec![wall];
     h.state_mut().edit_type();
     h.run();
-    type_role(&mut h, Role::TextInput, "Width", "321");
+    // A draft, typed and not applied (a wall's Width is shown, not typed, as Revit's).
+    type_role(&mut h, Role::TextInput, "Type Mark", "W9");
     close(&mut h, "type-properties");
     assert!(h.state().type_dialog.is_none());
     assert_eq!(h.state().session.model.to_json().unwrap(), model);

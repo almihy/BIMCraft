@@ -60,10 +60,11 @@ fn an_element_is_named_by_its_id_guid_and_ifc_globalid() {
 #[test]
 fn elements_show_in_the_plan_of_their_level_where_they_are_drawn() {
     let (mut s, walls) = house();
-    // The east wall, on Level 1: from its outer face to its inner one, south to north.
+    // The east wall, on Level 1: from its outer face to its inner one, south to north; it stops against the south wall,
+    // made before it, and runs through the north one.
     let (level, [lo, hi]) = shown(&s.model, &[walls[1]]).unwrap();
     assert_eq!(level, 100_000);
-    assert!((lo.0 - 7900.0).abs() < 50.0 && (hi.0 - 8100.0).abs() < 50.0 && lo.1 < 0.0 && hi.1 > 6000.0, "{lo:?} {hi:?}");
+    assert!((lo.0 - 7900.0).abs() < 50.0 && (hi.0 - 8100.0).abs() < 50.0 && lo.1 < 200.0 && hi.1 > 6000.0, "{lo:?} {hi:?}");
     let up = s.execute("wall", &json!({"points": [[0, 0], [3000, 0]], "level": "Level 2"})).unwrap()["ids"][0].as_u64().unwrap();
     assert_eq!(shown(&s.model, &[up, walls[0]]).unwrap().0, 100_001, "the first's level");
     assert_eq!(shown(&s.model, &[100_001]).map(|(l, _)| l), None, "a level draws nothing in its own plan");

@@ -1191,10 +1191,9 @@ fn a_wall_attached_to_a_floor_above_still_measures_its_side_and_volume() {
     assert!(q.gross_volume > 0.0 && (q.gross_side - q.gross_volume / q.width).abs() < 1e-6, "{q:?}");
     // Under the floor, which is 200 thick over a level 3000 up: its underside is 2800. The wall's inside half (y from 0 to 100) is
     // under the floor and stands to 2800; its outside half (y from -100 to 0) is past the floor's edge and stands to its own
-    // top, 3000. Mitred at its corners the wall's plan is 810 000 mm² outside the floor's edge and 790 000 within (the
-    // trapezoids 8200 and 8000, 8000 and 7800 wide, 100 deep): 810 000 x 3000 + 790 000 x 2800 = 4.642e9 mm³, its side that
-    // through 200: 23.21 m².
-    let volume = 810_000.0 * 3000.0 + 790_000.0 * 2800.0;
+    // top, 3000. Made first, it runs through both its corners: its plan is 8200 by 200, of which 8000 by 100 is within the
+    // floor's edge: 840 000 x 3000 + 800 000 x 2800 = 4.76e9 mm³, its side that through 200: 23.8 m².
+    let volume = 840_000.0 * 3000.0 + 800_000.0 * 2800.0;
     assert!((q.gross_volume - volume).abs() < 1.0 && (q.gross_side - volume / 200.0).abs() < 1e-3, "{q:?} {free:?}");
     assert!(q.gross_side < free.gross_side, "{q:?} {free:?}");
 }

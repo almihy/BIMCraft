@@ -88,7 +88,7 @@ fn plans_cut_the_walls_that_span_their_cut_plane() {
 fn walls_join_where_they_meet_but_not_across_levels() {
     let mut m = Model::new("t");
     let bottom = boxed(&mut m);
-    // Mitred at the corners: the outer corner where the outer faces cross.
+    // Butted at the corners, the wall made first running through: to the outer corner, where the outer faces cross.
     assert!(walls::cap(&m, bottom, false).contains(&P2(-100.0, -100.0)));
     // A partition ending mid-span on the bottom wall stops at its face.
     let t = m.insert(wall(m.guid(100000), P2(3000.0, 0.0), P2(3000.0, 4000.0)));

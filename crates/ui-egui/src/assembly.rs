@@ -284,7 +284,8 @@ impl WallForm {
     pub(crate) fn params(&self, was: &WallForm, units: Units, layers: bool, copy: bool) -> Result<serde_json::Map<String, Value>, String> {
         let mut p = serde_json::Map::new();
         let (a, b) = (&self.assembly, &was.assembly);
-        if layers || a.rows != b.rows || (a.exterior, a.interior) != (b.exterior, b.interior) {
+        // A copy is a type of its own: it has its layers whatever the one it copies holds them as.
+        if layers || copy || a.rows != b.rows || (a.exterior, a.interior) != (b.exterior, b.interior) {
             let (layers, core) = a.params(units)?;
             p.insert("layers".into(), layers);
             p.insert("core".into(), core);
