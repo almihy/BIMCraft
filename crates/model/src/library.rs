@@ -1719,8 +1719,10 @@ impl Model {
     pub fn written_format(&self) -> u32 {
         use crate::model::Element;
         // What a build that reads up to 28 refuses: a wall type as Revit's, a layer's Finish 2, Wraps or Structural Material.
-        let layer = |l: &crate::model::Layer| l.wraps || l.structural || l.function == crate::model::Function::Finish2;
-        if self.types.wall.values().any(crate::model::WallType::is_revits) || self.layered_types().any(|(.., layers)| layers.iter().any(layer))
+        let layer =
+            |l: &crate::model::Layer| l.wraps || l.structural || l.priority.is_some() || l.function == crate::model::Function::Finish2;
+        if self.types.wall.values().any(crate::model::WallType::is_revits)
+            || self.layered_types().any(|(.., layers)| layers.iter().any(layer))
         {
             return crate::model::WALL_FORMAT;
         }

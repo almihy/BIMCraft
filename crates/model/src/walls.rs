@@ -11,6 +11,8 @@ mod compound;
 #[doc(hidden)]
 pub mod index;
 #[doc(hidden)]
+pub mod join;
+#[doc(hidden)]
 pub use index::Index;
 pub(crate) use index::reach;
 

@@ -1,6 +1,6 @@
 //! A wall type's Type Properties as Revit's, and its Edit Assembly window: the layers from the exterior side to the interior
-//! side with the two Core Boundary rows among them, each layer's Function, Material, Thickness, Wraps and Structural
-//! Material; Insert, Delete, Up and Down on the row picked; Default Wrapping at Inserts and at Ends. What is typed here is
+//! side with the two Core Boundary rows among them, each layer's Function, Priority, Material, Thickness, Wraps and
+//! Structural Material; Insert, Duplicate, Delete, Up and Down on the row picked; Default Wrapping at Inserts and at Ends. What is typed here is
 //! a draft: OK puts it in the Type Properties dialog, whose OK or Apply runs the `type` command.
 
 use bimcraft_core::model::{Function, Model, WallFunction, WallType, Wrapping};
@@ -25,6 +25,8 @@ pub(crate) struct Row {
     pub(crate) thickness: String,
     pub(crate) wraps: bool,
     pub(crate) structural: bool,
+    /// Its priority where walls join when it is not its function's (Revit 2026's Priority column).
+    pub(crate) priority: Option<u8>,
 }
 
 /// A wall type's structure as typed: its layers, exterior side first, how many lie outside the core on each side, and its
@@ -56,6 +58,7 @@ impl Assembly {
                 thickness: units.length(t.thickness),
                 wraps: false,
                 structural: false,
+                priority: None,
             }],
             layers => layers
                 .iter()
@@ -65,6 +68,7 @@ impl Assembly {
                     thickness: units.length(l.thickness),
                     wraps: l.wraps,
                     structural: l.structural,
+                    priority: l.priority,
                 })
                 .collect(),
         };
@@ -85,10 +89,6 @@ impl Assembly {
 
     fn in_core(&self, k: usize) -> bool {
         k >= self.exterior && k < self.rows.len() - self.interior
-    }
-
-    fn core_count(&self) -> usize {
-        self.rows.len() - self.exterior - self.interior
     }
 
     /// How thick it is, when every thickness typed is a length.
@@ -119,14 +119,22 @@ impl Assembly {
             Line::Layer(k) if k >= n - self.interior => self.interior += 1,
             _ => {}
         }
-        let row = Row { function: Function::Structure, material: String::new(), thickness: "0".into(), wraps: false, structural: false };
+        let row = Row {
+            function: Function::Structure,
+            material: String::new(),
+            thickness: "0".into(),
+            wraps: false,
+            structural: false,
+            priority: None,
+        };
         self.rows.insert(k.min(n), row);
         self.lines().iter().position(|l| *l == Line::Layer(k.min(n))).unwrap_or(0)
     }
 
-    /// Whether line `at` is a layer Delete may take: any but the core's only one.
+    /// Whether line `at` is a layer Delete may take: any while another is left. The core may be left with none, as Revit's
+    /// since 2026.
     fn can_delete(&self, at: usize) -> bool {
-        matches!(self.lines().get(at), Some(Line::Layer(k)) if !(self.in_core(*k) && self.core_count() == 1))
+        matches!(self.lines().get(at), Some(Line::Layer(_))) && self.rows.len() > 1
     }
 
     fn delete(&mut self, at: usize) {
@@ -143,18 +151,27 @@ impl Assembly {
         }
     }
 
+    /// A copy of the layer on line `at` under it, on its side of the Core Boundary rows (Edit Assembly's Duplicate). The line
+    /// the copy is on.
+    fn duplicate(&mut self, at: usize) -> usize {
+        let Some(Line::Layer(k)) = self.lines().get(at).copied() else { return at };
+        let Some(row) = self.rows.get(k).cloned() else { return at };
+        if k < self.exterior {
+            self.exterior += 1;
+        } else if !self.in_core(k) {
+            self.interior += 1;
+        }
+        // One structural material: the copy is not it too.
+        self.rows.insert(k + 1, Row { structural: false, ..row });
+        self.lines().iter().position(|l| *l == Line::Layer(k + 1)).unwrap_or(at)
+    }
+
     /// Whether the layer on line `at` may go up a line (`down`: down one): past another layer, or across a Core Boundary
-    /// row into or out of the core, which keeps one layer at least.
+    /// row into or out of the core.
     fn can_move(&self, at: usize, down: bool) -> bool {
         let lines = self.lines();
-        let Some(Line::Layer(k)) = lines.get(at).copied() else { return false };
         let to = if down { at.checked_add(1) } else { at.checked_sub(1) };
-        match to.and_then(|i| lines.get(i)) {
-            Some(Line::Layer(_)) => true,
-            // Out of the core only when it leaves a layer there.
-            Some(Line::Boundary(_)) => !self.in_core(k) || self.core_count() > 1,
-            None => false,
-        }
+        matches!(lines.get(at), Some(Line::Layer(_))) && to.is_some_and(|i| i < lines.len())
     }
 
     /// The layer on line `at` moved a line; the line it is on after.
@@ -208,6 +225,9 @@ impl Assembly {
                 if r.structural {
                     l["structural"] = json!(true);
                 }
+                if let Some(p) = r.priority {
+                    l["priority"] = json!(p);
+                }
                 Ok(l)
             })
             .collect::<Result<Vec<Value>, String>>()?;
@@ -218,7 +238,11 @@ impl Assembly {
             (Some(a), Some(b)) => (a, self.rows.len() - 1 - b),
             _ => (0, 0),
         };
-        let core = if implied == (self.exterior, self.interior) { Value::Null } else { json!({"exterior": self.exterior, "interior": self.interior}) };
+        let core = if implied == (self.exterior, self.interior) {
+            Value::Null
+        } else {
+            json!({"exterior": self.exterior, "interior": self.interior})
+        };
         Ok((Value::Array(layers), core))
     }
 }
@@ -316,6 +340,10 @@ impl WallForm {
                     if ui.add(Button::new(t("Insert")).min_size(size)).clicked() {
                         e.picked = Some(e.draft.insert(at));
                     }
+                    let layer = at.is_some_and(|i| e.draft.can_move(i, false) || e.draft.can_move(i, true) || e.draft.can_delete(i));
+                    if ui.add_enabled(layer, Button::new(t("Duplicate")).min_size(size)).clicked() {
+                        e.picked = at.map(|i| e.draft.duplicate(i));
+                    }
                     if ui.add_enabled(at.is_some_and(|i| e.draft.can_delete(i)), Button::new(t("Delete")).min_size(size)).clicked() {
                         e.draft.delete(at.unwrap_or_default());
                         e.picked = None;
@@ -393,84 +421,102 @@ fn layers(ui: &mut Ui, e: &mut Editing, units: Units, materials: &[String]) {
     // filled across. The fills go under the cells, so their places are kept before the cells are drawn.
     let rule = egui::Stroke::new(1.0, pal().border.gamma_multiply(0.6));
     let gap = vec2(12.0, 6.0);
-    let frame = egui::Frame::new().fill(pal().surface).stroke(egui::Stroke::new(1.0, pal().border)).inner_margin(egui::Margin::symmetric(8, 3));
+    let frame =
+        egui::Frame::new().fill(pal().surface).stroke(egui::Stroke::new(1.0, pal().border)).inner_margin(egui::Margin::symmetric(8, 3));
     let framed = frame.show(ui, |ui| {
-    ui.set_width(ui.available_width());
-    let (head_fill, picked_fill) = (ui.painter().add(egui::Shape::Noop), ui.painter().add(egui::Shape::Noop));
-    // Each column's left edge, and each row's top and bottom (the head's first).
-    let (mut columns, mut rows): (Vec<f32>, Vec<(f32, f32)>) = (Vec::new(), Vec::new());
-    Grid::new("assembly-layers").num_columns(6).min_row_height(24.0).spacing(gap).show(ui, |ui| {
-        let number = ui.label("");
-        let function = ui.label(muted(t("Function")));
-        let material = ui.label(muted(t("Material")));
-        let thickness = ui.label(muted(t("Thickness")));
-        let wraps = ui.label(muted(t("Wraps")));
-        let structure = ui.label(muted(t("Structural Material")));
-        columns = [&function, &material, &thickness, &wraps, &structure].map(|r| r.rect.left()).to_vec();
-        rows.push((number.rect.top(), number.rect.bottom()));
-        ui.end_row();
-        for (i, line) in e.draft.lines().into_iter().enumerate() {
-            let number = (i + 1).to_string();
-            let pick = ui.add_sized([22.0, 20.0], egui::Button::selectable(e.picked == Some(i), &number));
-            rows.push((pick.rect.top(), pick.rect.bottom()));
-            let name = tf("Row {}", &[&number]);
-            let on = e.picked == Some(i);
-            pick.widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, on, &name));
-            if pick.clicked() {
-                e.picked = Some(i);
-            }
-            match line {
-                Line::Boundary(interior) => {
-                    ui.label(t("Core Boundary"));
-                    ui.label(t(if interior { msg!("Layers Below Wrap") } else { msg!("Layers Above Wrap") }));
-                    ui.label(units.length(0.0));
-                    ui.label("");
-                    ui.label("");
+        ui.set_width(ui.available_width());
+        let (head_fill, picked_fill) = (ui.painter().add(egui::Shape::Noop), ui.painter().add(egui::Shape::Noop));
+        // Each column's left edge, and each row's top and bottom (the head's first).
+        let (mut columns, mut rows): (Vec<f32>, Vec<(f32, f32)>) = (Vec::new(), Vec::new());
+        Grid::new("assembly-layers").num_columns(7).min_row_height(24.0).spacing(gap).show(ui, |ui| {
+            let number = ui.label("");
+            let function = ui.label(muted(t("Function")));
+            let priority = ui.label(muted(t("Priority")));
+            let material = ui.label(muted(t("Material")));
+            let thickness = ui.label(muted(t("Thickness")));
+            let wraps = ui.label(muted(t("Wraps")));
+            let structure = ui.label(muted(t("Structural Material")));
+            columns = [&function, &priority, &material, &thickness, &wraps, &structure].map(|r| r.rect.left()).to_vec();
+            rows.push((number.rect.top(), number.rect.bottom()));
+            ui.end_row();
+            for (i, line) in e.draft.lines().into_iter().enumerate() {
+                let number = (i + 1).to_string();
+                let pick = ui.add_sized([22.0, 20.0], egui::Button::selectable(e.picked == Some(i), &number));
+                rows.push((pick.rect.top(), pick.rect.bottom()));
+                let name = tf("Row {}", &[&number]);
+                let on = e.picked == Some(i);
+                pick.widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, on, &name));
+                if pick.clicked() {
+                    e.picked = Some(i);
                 }
-                Line::Layer(k) => {
-                    let core = e.draft.in_core(k);
-                    let Some(row) = e.draft.rows.get_mut(k) else { continue };
-                    let c = crate::icons::combo(("assembly-function", k)).selected_text(t(row.function.label())).width(160.0).show_ui(
-                        ui,
-                        |ui| {
-                            for f in Function::ALL {
-                                if ui.selectable_label(row.function == f, t(f.label())).clicked() {
-                                    row.function = f;
+                match line {
+                    Line::Boundary(interior) => {
+                        ui.label(t("Core Boundary"));
+                        ui.label("");
+                        ui.label(t(if interior { msg!("Layers Below Wrap") } else { msg!("Layers Above Wrap") }));
+                        ui.label(units.length(0.0));
+                        ui.label("");
+                        ui.label("");
+                    }
+                    Line::Layer(k) => {
+                        let core = e.draft.in_core(k);
+                        let Some(row) = e.draft.rows.get_mut(k) else { continue };
+                        let c = crate::icons::combo(("assembly-function", k)).selected_text(t(row.function.label())).width(160.0).show_ui(
+                            ui,
+                            |ui| {
+                                for f in Function::ALL {
+                                    if ui.selectable_label(row.function == f, t(f.label())).clicked() {
+                                        row.function = f;
+                                    }
+                                }
+                            },
+                        );
+                        c.response.labelled_by(function.id);
+                        // Its priority where walls join: its function's until another is picked.
+                        let own = row.function.priority();
+                        let now = row.priority.or(own);
+                        let c = crate::icons::combo(("assembly-priority", k))
+                            .selected_text(now.map_or_else(|| "—".to_string(), |p| p.to_string()))
+                            .width(44.0)
+                            .show_ui(ui, |ui| {
+                                for p in 1..=5u8 {
+                                    if ui.selectable_label(now == Some(p), p.to_string()).clicked() {
+                                        row.priority = Some(p).filter(|p| Some(*p) != own);
+                                    }
+                                }
+                            });
+                        c.response.labelled_by(priority.id);
+                        let shown = if row.material.is_empty() { t(BY_CATEGORY) } else { row.material.as_str() };
+                        let c = crate::icons::combo(("assembly-material", k)).selected_text(shown).width(150.0).show_ui(ui, |ui| {
+                            if ui.selectable_label(row.material.is_empty(), t(BY_CATEGORY)).clicked() {
+                                row.material.clear();
+                            }
+                            for n in materials {
+                                if ui.selectable_label(row.material == *n, n).clicked() {
+                                    row.material.clone_from(n);
                                 }
                             }
-                        },
-                    );
-                    c.response.labelled_by(function.id);
-                    let shown = if row.material.is_empty() { t(BY_CATEGORY) } else { row.material.as_str() };
-                    let c = crate::icons::combo(("assembly-material", k)).selected_text(shown).width(150.0).show_ui(ui, |ui| {
-                        if ui.selectable_label(row.material.is_empty(), t(BY_CATEGORY)).clicked() {
-                            row.material.clear();
+                        });
+                        c.response.labelled_by(material.id);
+                        ui.add_sized([70.0, 20.0], TextEdit::singleline(&mut row.thickness).hint_text(units.name()))
+                            .labelled_by(thickness.id);
+                        // Only a layer outside the core wraps; only one in it is the structural material.
+                        let r = ui.add_enabled(!core, egui::Checkbox::without_text(&mut row.wraps));
+                        let now = row.wraps;
+                        r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, !core, now, t("Wraps")));
+                        r.labelled_by(wraps.id);
+                        let r = ui.add_enabled(core, egui::Checkbox::without_text(&mut row.structural));
+                        let now = row.structural;
+                        r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, core, now, t("Structural Material")));
+                        if r.labelled_by(structure.id).changed() && now {
+                            structural = Some(k);
                         }
-                        for n in materials {
-                            if ui.selectable_label(row.material == *n, n).clicked() {
-                                row.material.clone_from(n);
-                            }
-                        }
-                    });
-                    c.response.labelled_by(material.id);
-                    ui.add_sized([70.0, 20.0], TextEdit::singleline(&mut row.thickness).hint_text(units.name())).labelled_by(thickness.id);
-                    // Only a layer outside the core wraps; only one in it is the structural material.
-                    let r = ui.add_enabled(!core, egui::Checkbox::without_text(&mut row.wraps));
-                    let now = row.wraps;
-                    r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, !core, now, t("Wraps")));
-                    r.labelled_by(wraps.id);
-                    let r = ui.add_enabled(core, egui::Checkbox::without_text(&mut row.structural));
-                    let now = row.structural;
-                    r.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, core, now, t("Structural Material")));
-                    if r.labelled_by(structure.id).changed() && now {
-                        structural = Some(k);
                     }
                 }
+                ui.end_row();
             }
-            ui.end_row();
-        }
-    });
-    (head_fill, picked_fill, columns, rows)
+        });
+        (head_fill, picked_fill, columns, rows)
     });
     let (head_fill, picked_fill, columns, rows) = framed.inner;
     let outer = framed.response.rect;

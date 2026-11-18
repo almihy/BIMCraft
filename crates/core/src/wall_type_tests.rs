@@ -43,13 +43,9 @@ fn a_types_core_lies_between_its_core_boundary_rows() {
     let t = &s.model.types.wall["W"];
     assert_eq!((t.core, t.core_span()), (Some(Core { exterior: 2, interior: 1 }), (80.0, 235.0)));
     // The location lines that name the core follow it.
-    assert_eq!(
-        [Location::ExteriorCore, Location::CoreCentre, Location::InteriorCore].map(|l| walls::depth(t, l)),
-        [80.0, 157.5, 235.0]
-    );
-    let id = run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]], "type": "W", "location": "exterior-core"}))["ids"][0]
-        .as_u64()
-        .unwrap();
+    assert_eq!([Location::ExteriorCore, Location::CoreCentre, Location::InteriorCore].map(|l| walls::depth(t, l)), [80.0, 157.5, 235.0]);
+    let id =
+        run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]], "type": "W", "location": "exterior-core"}))["ids"][0].as_u64().unwrap();
     let Some(Element::Wall(w)) = s.model.elements.get(id) else { panic!("no wall") };
     assert_eq!(walls::faces(&s.model, w), (80.0, -170.0));
     assert_eq!(walls::core_faces(&s.model, w), Some((0.0, -155.0)));
@@ -64,18 +60,32 @@ fn a_types_core_lies_between_its_core_boundary_rows() {
 }
 
 #[test]
-fn a_core_holds_a_layer_with_a_thickness() {
+fn a_core_may_hold_no_layer_as_revits_since_2026() {
     let mut s = Session::new();
     run(&mut s, "type", json!({"category": "wall", "name": "W", "layers": layers()}));
-    let e = fails(&mut s, "type", json!({"category": "wall", "name": "W", "core": {"exterior": 3, "interior": 2}}));
-    assert!(e.contains("it holds one layer at least"), "{e}");
-    // A membrane of no thickness alone is no core.
-    let thin = json!([{"function": "finish", "thickness": 20}, {"function": "membrane", "thickness": 0}, {"thickness": 100}]);
-    let e = fails(&mut s, "type", json!({"category": "wall", "name": "M", "layers": thin, "core": {"exterior": 1, "interior": 1}}));
-    assert!(e.contains("its core has no thickness"), "{e}");
-    // A type without layers has no rows to set.
+    // Every layer moved to the interior side of the core, as a finish wall's: the core is where the boundaries are.
+    let made = run(&mut s, "type", json!({"category": "wall", "name": "W", "core": {"exterior": 0, "interior": 5}}));
+    assert_eq!(made["type"]["core_layers"], json!([0, 0]));
+    assert_eq!(s.model.types.wall["W"].core_span(), (0.0, 0.0));
+    run(&mut s, "type", json!({"category": "wall", "name": "W", "core": {"exterior": 3, "interior": 2}}));
+    assert_eq!(s.model.types.wall["W"].core_span(), (95.0, 95.0));
+    // More layers outside the core than there are is no core at all; a type without layers has no rows to set.
+    let e = fails(&mut s, "type", json!({"category": "wall", "name": "W", "core": {"exterior": 4, "interior": 2}}));
+    assert!(e.contains("of the 5 it has"), "{e}");
     let e = fails(&mut s, "type", json!({"category": "wall", "name": "Generic - 200mm", "core": {"exterior": 0, "interior": 0}}));
-    assert!(e.contains("it holds one layer at least"), "{e}");
+    assert!(e.contains("of the 0 it has"), "{e}");
+}
+
+#[test]
+fn a_layers_priority_is_its_functions_unless_it_has_its_own() {
+    let mut s = Session::new();
+    let ls = json!([{"function": "finish", "thickness": 20, "priority": 2}, {"function": "thermal", "thickness": 60}, {"thickness": 140}]);
+    run(&mut s, "type", json!({"category": "wall", "name": "W", "layers": ls}));
+    let t = &s.model.types.wall["W"];
+    assert_eq!(t.layers.iter().map(|l| l.join_priority()).collect::<Vec<_>>(), [Some(2), Some(3), Some(1)]);
+    assert_eq!(s.model.written_format(), WALL_FORMAT);
+    let e = fails(&mut s, "type", json!({"category": "wall", "name": "W", "layers": [{"thickness": 100, "priority": 6}]}));
+    assert!(e.contains("a layer's priority is 1 (the best) to 5, not 6"), "{e}");
 }
 
 #[test]
@@ -87,13 +97,10 @@ fn a_layer_is_finish_1_or_finish_2_wraps_and_one_is_the_structural_material() {
     let made = run(&mut s, "type", json!({"category": "wall", "name": "W", "layers": ls}));
     assert_eq!(made["type"]["structural_material"], "Block");
     let t = &s.model.types.wall["W"];
-    assert_eq!(t.layers.iter().map(|l| l.function).collect::<Vec<_>>(), [
-        Function::Finish,
-        Function::Thermal,
-        Function::Substrate,
-        Function::Structure,
-        Function::Finish2
-    ]);
+    assert_eq!(
+        t.layers.iter().map(|l| l.function).collect::<Vec<_>>(),
+        [Function::Finish, Function::Thermal, Function::Substrate, Function::Structure, Function::Finish2]
+    );
     assert_eq!(t.layers.iter().map(|l| l.wraps).collect::<Vec<_>>(), [true, false, false, false, true]);
     // Revit's priorities: a lower number runs through a higher one; a membrane has none.
     assert_eq!(Function::ALL.map(Function::priority), [Some(1), Some(2), Some(3), Some(4), Some(5), None]);
@@ -113,13 +120,10 @@ fn a_layer_is_finish_1_or_finish_2_wraps_and_one_is_the_structural_material() {
 fn a_type_has_revits_function_wrapping_and_coarse_fill() {
     let mut s = Session::new();
     let t = &s.model.types.wall["Generic - 200mm"];
-    assert_eq!((t.function, t.wrap_inserts, t.wrap_ends, &t.coarse_fill, t.coarse_color), (
-        WallFunction::Exterior,
-        Wrapping::None,
-        Wrapping::None,
-        &None,
-        [0, 0, 0]
-    ));
+    assert_eq!(
+        (t.function, t.wrap_inserts, t.wrap_ends, &t.coarse_fill, t.coarse_color),
+        (WallFunction::Exterior, Wrapping::None, Wrapping::None, &None, [0, 0, 0])
+    );
     let pattern = s.model.fill_patterns.keys().next().expect("the starter project has fill patterns").clone();
     run(
         &mut s,
@@ -128,18 +132,17 @@ fn a_type_has_revits_function_wrapping_and_coarse_fill() {
                "coarse_fill": pattern, "coarse_color": [128, 128, 128]}),
     );
     let t = &s.model.types.wall["Generic - 200mm"];
-    assert_eq!((t.function, t.wrap_inserts, t.wrap_ends, t.coarse_fill.as_deref(), t.coarse_color, t.thickness), (
-        WallFunction::CoreShaft,
-        Wrapping::Both,
-        Wrapping::Interior,
-        Some(pattern.as_str()),
-        [128, 128, 128],
-        200.0
-    ));
+    assert_eq!(
+        (t.function, t.wrap_inserts, t.wrap_ends, t.coarse_fill.as_deref(), t.coarse_color, t.thickness),
+        (WallFunction::CoreShaft, Wrapping::Both, Wrapping::Interior, Some(pattern.as_str()), [128, 128, 128], 200.0)
+    );
     // Each kept when not given; Revit's "Do not wrap" and null clear.
     run(&mut s, "type", json!({"category": "wall", "name": "Generic - 200mm", "wrap_inserts": "Do not wrap", "coarse_fill": null}));
     let t = &s.model.types.wall["Generic - 200mm"];
-    assert_eq!((t.function, t.wrap_inserts, t.wrap_ends, &t.coarse_fill), (WallFunction::CoreShaft, Wrapping::None, Wrapping::Interior, &None));
+    assert_eq!(
+        (t.function, t.wrap_inserts, t.wrap_ends, &t.coarse_fill),
+        (WallFunction::CoreShaft, Wrapping::None, Wrapping::Interior, &None)
+    );
     for (p, why) in [
         (json!({"function": "load-bearing"}), "`function` is interior, exterior, foundation, retaining, soffit or core-shaft"),
         (json!({"wrap_ends": "both"}), "wrapping at ends is none, exterior or interior, not both"),
@@ -204,7 +207,11 @@ fn a_plan_of_coarse_detail_fills_a_wall_with_its_types_coarse_scale_fill_only() 
     run(&mut s, "detail", json!({"view": 100000, "detail": "coarse"}));
     assert_eq!(middle(&s), (PAPER.0, PAPER.1, PAPER.2));
     // With the solid fill in a colour: that colour.
-    run(&mut s, "type", json!({"category": "wall", "name": "Generic - 200mm", "coarse_fill": crate::fills::SOLID_FILL, "coarse_color": [200, 30, 30]}));
+    run(
+        &mut s,
+        "type",
+        json!({"category": "wall", "name": "Generic - 200mm", "coarse_fill": crate::fills::SOLID_FILL, "coarse_color": [200, 30, 30]}),
+    );
     assert_eq!(middle(&s), (200, 30, 30));
     // Which a finer view does not draw.
     run(&mut s, "detail", json!({"view": 100000, "detail": "medium"}));

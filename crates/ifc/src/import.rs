@@ -3356,6 +3356,8 @@ pub fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, String> 
             break;
         }
     }
+    // Each wall's `IsExternal`, by its product.
+    let mut external: Vec<(u64, bool)> = Vec::new();
     'sets: for rel in named(&["IFCRELDEFINESBYPROPERTIES"]).into_iter().filter_map(e) {
         let Some(set) = reference(rel.args.get(5)).and_then(e).filter(|x| x.name == "IFCPROPERTYSET") else { continue };
         // What BIMCraft writes in sets of its own, other than the parameters, it reads into fields.
@@ -3366,6 +3368,15 @@ pub fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, String> 
         }
         for prop in refs(set.args.get(4)).into_iter().filter_map(e).filter(|x| x.name == "IFCPROPERTYSINGLEVALUE") {
             let Some(raw) = text(prop.args.first()) else { continue };
+            // A wall's `IsExternal` is its type's Function, set below, and no parameter.
+            if called == "Pset_WallCommon" && raw == "IsExternal" {
+                if let Some(V::Typed(_, v)) = prop.args.get(2)
+                    && let V::Enum(b) = &**v
+                {
+                    external.extend(refs(rel.args.get(4)).into_iter().map(|pid| (pid, b == "T")));
+                }
+                continue;
+            }
             // `LoadBearing` is what makes a column or a floor structural, read above.
             let name = if ours { Some(raw.to_string()).filter(|n| crate::family::nameable(n)) } else { parameter_name(raw) };
             let Some(name) = name.filter(|n| ours || n != "LoadBearing") else { continue };
@@ -3388,6 +3399,22 @@ pub fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, String> 
             if !put(&mut m, &mut skipped, &refs(rel.args.get(4)), &name, kind, &value) {
                 break 'sets;
             }
+        }
+    }
+
+    // A wall type none of whose walls is external is an interior one (Revit's Function of the type); a type with an external
+    // wall, or of which the file says nothing, stays exterior.
+    let mut said: BTreeMap<String, bool> = BTreeMap::new();
+    for (pid, is) in external {
+        for id in elements_from.get(&pid).into_iter().flatten() {
+            if let Some(Element::Wall(w)) = m.elements.get(id) {
+                *said.entry(w.type_name.clone()).or_insert(false) |= is;
+            }
+        }
+    }
+    for (name, any_external) in said {
+        if let Some(t) = m.types.wall.get_mut(&name).filter(|_| !any_external) {
+            t.function = crate::model::WallFunction::Interior;
         }
     }
 

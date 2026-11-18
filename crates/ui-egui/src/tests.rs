@@ -3267,7 +3267,9 @@ fn edit_assembly_builds_a_wall_types_layers_as_revits() {
     click(&mut h, P2(4000.0, 0.0));
     press(&mut h, "Edit Type");
     // Type Properties as Revit's: Structure's Edit…, the wrappings, the Width shown, the Function.
-    for label in ["Structure", "Wrapping at Inserts", "Wrapping at Ends", "Width", "Function", "Coarse Scale Fill Pattern", "Structural Material"] {
+    for label in
+        ["Structure", "Wrapping at Inserts", "Wrapping at Ends", "Width", "Function", "Coarse Scale Fill Pattern", "Structural Material"]
+    {
         assert!(h.query_all_by_label(label).next().is_some(), "{label}");
     }
     press(&mut h, "Edit…");
@@ -3343,16 +3345,28 @@ fn edit_assemblys_core_boundary_rows_take_a_layer_into_the_core() {
     // Brick, insulation | block | plaster: the insulation, the line above the exterior boundary, taken down into the core.
     press(&mut h, "Row 2");
     press(&mut h, "Down");
-    // The boundary rows and the core's only layers stay: nothing to delete on a boundary.
+    // A boundary row is no layer: nothing to delete or duplicate on it.
     press(&mut h, "Row 2");
     assert!(h.query_all(By::new().role(Role::Button).label("Delete")).last().unwrap().accesskit_node().is_disabled());
+    assert!(h.get_by_label("Duplicate").accesskit_node().is_disabled());
+    // The brick duplicated under itself, outside the core still, and given a priority of its own (Revit 2026's column).
+    press(&mut h, "Row 1");
+    press(&mut h, "Duplicate");
+    let pick = h.query_all(By::new().role(Role::ComboBox).label("Priority")).nth(1).unwrap().accesskit_node().id();
+    h.get_by(|n| n.id() == pick).click();
+    h.run();
+    press(&mut h, "2");
     let ok = h.query_all(By::new().role(Role::Button).label("OK")).last().unwrap().accesskit_node().id();
     h.get_by(|n| n.id() == ok).click();
     h.run();
     press(&mut h, "OK");
     let t = &h.state().session.model.types.wall["Exterior - 300mm"];
-    assert_eq!(t.core, Some(bimcraft_core::model::Core { exterior: 1, interior: 1 }));
-    assert_eq!(t.core_span(), (100.0, 290.0));
+    assert_eq!(t.core, Some(bimcraft_core::model::Core { exterior: 2, interior: 1 }));
+    assert_eq!((t.layers.len(), t.thickness, t.core_span()), (5, 400.0, (200.0, 390.0)));
+    assert_eq!(
+        t.layers.iter().map(|l| (l.material.as_str(), l.join_priority())).collect::<Vec<_>>(),
+        [("Brick", Some(4)), ("Brick", Some(2)), ("Insulation", Some(3)), ("Concrete block", Some(1)), ("Plaster", Some(4))]
+    );
 }
 
 #[test]

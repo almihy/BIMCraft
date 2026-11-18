@@ -2592,7 +2592,9 @@ fn wall_rows(tb: &mut typeprops::Table, g: &str, w: &mut crate::assembly::WallFo
             if tb.row(t("Structure"), |ui, l| wide_button(ui, t("Edit…")).labelled_by(l).clicked()) == Some(true) {
                 w.edit();
             }
-            tb.row(t("Wrapping at Inserts"), |ui, l| crate::assembly::wrapping(ui, "type-wrap-inserts", l, &mut w.assembly.wrap_inserts, true));
+            tb.row(t("Wrapping at Inserts"), |ui, l| {
+                crate::assembly::wrapping(ui, "type-wrap-inserts", l, &mut w.assembly.wrap_inserts, true)
+            });
             tb.row(t("Wrapping at Ends"), |ui, l| crate::assembly::wrapping(ui, "type-wrap-ends", l, &mut w.assembly.wrap_ends, false));
             let width = w.assembly.thickness(m.units).map_or_else(|| "—".to_string(), |x| m.units.length(x));
             tb.shown(t("Width"), &width);

@@ -98,14 +98,14 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use bimcraft_core::engine::Session;
-/// The engine on its own, with no window (crates/web): what a page's model worker and the server run, from this same file.
-pub use bimcraft_web::Engine;
 use bimcraft_core::ids::Guid;
 use bimcraft_core::model::Model;
 use bimcraft_core::sync::{self, Changes};
 use bimcraft_ui_egui::BimApp;
 use bimcraft_ui_egui::host::{Controls, HostLook, Skin, Waive, editor_takes_key};
 use bimcraft_ui_egui::hostview::ContextKey;
+/// The engine on its own, with no window (crates/web): what a page's model worker and the server run, from this same file.
+pub use bimcraft_web::Engine;
 use serde_json::Value;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;

@@ -696,6 +696,17 @@ pub struct Layer {
     /// most, in its core.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub structural: bool,
+    /// Its priority where walls join, 1 (the best) to 5, when it is not its function's own: Edit Assembly's Priority
+    /// column, which Revit 2026 set apart from the Function.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<u8>,
+}
+
+impl Layer {
+    /// Its priority where walls join: its own, else its function's; a membrane left to its function has none.
+    pub fn join_priority(&self) -> Option<u8> {
+        self.priority.or(self.function.priority())
+    }
 }
 
 /// Where a layer of a type is variable: its index, and how thick the layers above it and below it are, mm.
@@ -3162,8 +3173,9 @@ impl Element {
 }
 
 /// A wall type: how thick its walls are and, a compound one, its layers from the exterior side in,
-/// which make up that thickness. Its core lies between Edit Assembly's two Core Boundary rows (`core`); a type that
-/// sets none has it from its first structure layer to its last (all of it, without one). As Revit's Type Properties of a
+/// which make up that thickness. Its core lies between Edit Assembly's two Core Boundary rows (`core`), and may hold no
+/// layer at all, as Revit's since 2026 (a finish wall); a type that sets none has it from its first structure layer to its
+/// last (all of it, without one). As Revit's Type Properties of a
 /// basic wall: its Function, Wrapping at Inserts and at Ends, and the fill a plan of coarse detail gives it.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -3198,7 +3210,7 @@ impl WallType {
     pub fn core_layers(&self) -> std::ops::Range<usize> {
         let n = self.layers.len();
         match self.core {
-            Some(c) if c.exterior + c.interior < n => c.exterior..n - c.interior,
+            Some(c) if c.exterior + c.interior <= n => c.exterior..n - c.interior,
             _ => {
                 let is = |l: &Layer| l.function == Function::Structure;
                 match (self.layers.iter().position(is), self.layers.iter().rposition(is)) {
@@ -7685,6 +7697,9 @@ impl Model {
             if cat != "wall" && layers.iter().any(|l| l.wraps) {
                 return Err(format!("{who}: only a wall's layer wraps, at its inserts and its ends"));
             }
+            if let Some(p) = layers.iter().filter_map(|l| l.priority).find(|p| !(1..=5).contains(p)) {
+                return Err(format!("{who}: a layer's priority is 1 (the best) to 5, not {p}"));
+            }
             let structural = layers.iter().filter(|l| l.structural).count();
             if structural > 1 {
                 return Err(format!("{who}: {structural} layers are its structural material; a type has one at most"));
@@ -7694,15 +7709,11 @@ impl Model {
             let who = format!("wall type `{n}`");
             if let Some(c) = t.core {
                 let count = t.layers.len();
-                if c.exterior + c.interior >= count.max(1) || t.layers.is_empty() {
+                if c.exterior + c.interior > count || t.layers.is_empty() {
                     return Err(format!(
-                        "{who}: its core has {} layers outside it on the exterior side and {} on the interior side, of {count};                          it holds one layer at least",
+                        "{who}: its core boundaries leave {} layers outside the core on the exterior side and {} on the interior side, of the {count} it has",
                         c.exterior, c.interior
                     ));
-                }
-                let (c0, c1) = t.core_span();
-                if c1 - c0 <= 0.0 {
-                    return Err(format!("{who}: its core has no thickness; put a layer with a thickness between its core boundaries"));
                 }
             }
             if t.wrap_ends == Wrapping::Both {
@@ -7711,7 +7722,9 @@ impl Model {
             if let Some(f) = &t.coarse_fill {
                 text(&who, "coarse_fill", f)?;
                 if !self.fill_patterns.contains_key(f) {
-                    return Err(format!("{who}: fill pattern `{f}` isn't in the project; add it with `fill_pattern`, or see `fill_patterns`"));
+                    return Err(format!(
+                        "{who}: fill pattern `{f}` isn't in the project; add it with `fill_pattern`, or see `fill_patterns`"
+                    ));
                 }
             }
         }

@@ -137,9 +137,10 @@ fn project_parameters_go_out_in_a_property_set_and_come_back_with_their_kinds() 
         s.execute("modify", &json!({"id": id, "params": values})).unwrap();
     }
     let file = crate::ifc::export(&s.model);
-    // One property set for each element with values; the elements' quantities are defined by properties too.
+    // One property set for each element with values, and each of the four walls' common set, which says whether it is
+    // external; the elements' quantities are defined by properties too.
     let (sets, quantities) = (file.matches("IFCPROPERTYSET(").count(), file.matches("IFCELEMENTQUANTITY(").count());
-    assert_eq!((sets, file.matches("IFCRELDEFINESBYPROPERTIES(").count()), (4, sets + quantities));
+    assert_eq!((sets, file.matches("IFCRELDEFINESBYPROPERTIES(").count()), (8, sets + quantities));
     assert!(file.contains("IFCPROPERTYSINGLEVALUE('Finish Height',$,IFCLENGTHMEASURE(2400.),$)"), "{file}");
     assert!(file.contains("IFCPROPERTYSINGLEVALUE('Accessible',$,IFCBOOLEAN(.T.),$)"));
     let i = ifc(file.as_bytes(), "x").unwrap();

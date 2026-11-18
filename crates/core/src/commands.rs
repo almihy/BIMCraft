@@ -54,12 +54,12 @@ mod site;
 pub use crate::files::base64;
 pub(crate) use crate::geom::degrees;
 pub(crate) use crate::geom::{micron, tidy};
-pub use crate::{element_json, element_json_with};
 pub(crate) use crate::json::{hundredth, mass_size, read_mm, read_point, top_range};
 pub(crate) use crate::model::bad;
 pub(crate) use crate::model::{category, colour, next_number};
 pub(crate) use crate::motion::{Motion, other_side, transform, transformed};
 pub use crate::units::m2;
+pub use crate::{element_json, element_json_with};
 use cad_pick::cad_outlines;
 use ground::{
     base_point, car_park, car_park_run, excavate, graded_region, parking_component, planting, property_line_edit, property_line_table,
@@ -1438,11 +1438,12 @@ other_files(
          a footing's type is a `width` by `depth`, or `round` (`width` across); a run's (a beam's, a pipe's, a cable tray's…) too, \
          made of a `material` of the library. A door type's `thickness` is its leaf's, as Revit's door Thickness (none, or `null` to clear it, 50 mm as Revit's \
          Single-Flush), which plans draw the leaf as and 3D views and IFC build; a window type has none. A wall type may have `layers` [{function?: structure|\
-         substrate|thermal|finish|finish2|membrane, material?, thickness, wraps?, structural?}, …] from its exterior side in, as \
+         substrate|thermal|finish|finish2|membrane, material?, thickness, wraps?, structural?, priority?}, …] from its exterior side in, as \
          the rows of Revit's Edit Assembly (functions Structure [1], Substrate [2], Thermal/Air Layer [3], Finish 1 [4] `finish`, \
          Finish 2 [5] `finish2`, Membrane Layer, which may be 0 thick): it's as thick as they are, and a new `thickness` goes to \
-         its structure. `core` {exterior, interior} is its two Core Boundary rows: how many layers lie outside the core on each \
-         side (null, or new `layers` without it: from its first structure layer to its last); the answer's `core_layers` is \
+         its structure. A layer's `priority` (1 the best to 5) is its standing where walls join, when it is not its function's \
+         (Revit 2026's Priority column). `core` {exterior, interior} is its two Core Boundary rows: how many layers lie outside the core on each \
+         side, which may be all of them, a core holding no layer as a finish wall's (null, or new `layers` without it: from its first structure layer to its last); the answer's `core_layers` is \
          [first, one past the last]. A layer's `wraps` (outside the core) turns it round the jambs of inserts and the wall's \
          ends where the type's `wrap_inserts` (none|exterior|interior|both, Revit's Wrapping at Inserts) and `wrap_ends` \
          (none|exterior|interior, Wrapping at Ends) say; `structural` marks the one layer whose material is the type's \
@@ -12840,9 +12841,8 @@ fn edit_type(s: &mut Session, p: &Value) -> R {
             };
             let coarse_color = match p.get("coarse_color") {
                 v if absent(v) => old.coarse_color,
-                Some(v) => {
-                    serde_json::from_value::<[u8; 3]>(v.clone()).map_err(|_| bad(c, "`coarse_color` is [red, green, blue], each 0 to 255"))?
-                }
+                Some(v) => serde_json::from_value::<[u8; 3]>(v.clone())
+                    .map_err(|_| bad(c, "`coarse_color` is [red, green, blue], each 0 to 255"))?,
                 None => old.coarse_color,
             };
             let functions = "interior, exterior, foundation, retaining, soffit or core-shaft";
@@ -12852,7 +12852,14 @@ fn edit_type(s: &mut Session, p: &Value) -> R {
                 identity,
                 core,
                 function: word(c, p, "function", old.function, crate::model::WallFunction::from_name, functions)?,
-                wrap_inserts: word(c, p, "wrap_inserts", old.wrap_inserts, crate::model::Wrapping::from_name, "none, exterior, interior or both")?,
+                wrap_inserts: word(
+                    c,
+                    p,
+                    "wrap_inserts",
+                    old.wrap_inserts,
+                    crate::model::Wrapping::from_name,
+                    "none, exterior, interior or both",
+                )?,
                 wrap_ends: word(c, p, "wrap_ends", old.wrap_ends, crate::model::Wrapping::from_name, "none, exterior or interior")?,
                 coarse_fill,
                 coarse_color,
