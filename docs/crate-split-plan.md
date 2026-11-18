@@ -182,3 +182,37 @@ The before column was measured at 5bda50ab, not at this branch's base (94d57bea,
 tests and ui-egui's tests each on its own; after is both in one command. A clean build gains nothing yet:
 the model crate is still 3.4 MB everything waits for, and the core's test binary still holds the tests of the model's
 modules that drive the Session.
+
+## Step 4 (18 November 2026, branch infra/crate-split-2)
+
+Done, one commit each, all of it on the main line's code of that morning:
+
+1. A build script's missing path (manifold-csg-sys watched a `patches` folder the published crate has no copy of) made
+   cargo rerun it on every build, which, as a path dependency of ours, rebuilt geom, the model and everything above each
+   time: a build with no change took about 90 s, now 2 s. Fixed first, on its own (8d37efd9, on the main line at once).
+2. `bimcraft-ifc` (ifc, import), above the model and beside the drawings; an IFC GlobalId as text went down into `ids`.
+3. `bimcraft-site` (site), under the model: it needs only geom.
+4. The element solids out of `view3d` into the model's `solids` (Solid, Tri, Vis, the prepared solids, element_solids,
+   tops_at), which the model's own queries ask; `view3d` kept the scene, camera, picture, picking and GPU mesh.
+5. What the model read of the drawings went down (`prim::INK`, `prim::DENSITY`, `Dimension3D::length`,
+   `titleblock::sheet_values`); what drew went up (`Look::dress` takes a drawing's parts, `raster::picture` returns one,
+   the title block's drawing is `sheet`'s, the cursor plane is `view3d`'s); a viewport's size on its sheet is added by
+   the core's `element_json`, the model's own (which schedules and filters read) leaves it out.
+6. `bimcraft-render` (render, view3d, sheet, dims3d, triad, snap, inquiry, pdf, dxf_out, gltf), above the model.
+
+The model is 2.3 MB of code (3.4 before), the drawings 0.6 MB, IFC 0.28 MB, the site 0.33 MB. Every suite passes but
+three of ui-egui's (two popup tests and the ribbon's one-column test), which fail the same on the main line before it.
+
+Measured as before (`cargo test -p bimcraft-core -p bimcraft-ui-egui --no-run --timings`, a function body changed in the
+file, the PC otherwise idle):
+
+| One line changed in | Before (main line, with 1.) | After |
+| --- | --- | --- |
+| `render.rs` | 100 s (the model 43 s, then the core's tests 55 s) | 64 s (render about 10 s, then the core's tests 53 s) |
+| `model.rs` | about 100 s | 81 s (the model 26 s, then the core's tests 52 s) |
+| `commands.rs` | | 51 s (the core's tests 49 s) |
+
+What is left after every change is the core's test binary: 2.9 MB of tests in one crate, compiled on one thread, about
+50 s whatever changed below it. The next step is to split it into test crates that compile side by side (the tests that
+drive the Session by area: views and drawings, MEP and structure, the site, families, IFC), each linking the same
+libraries, so a change waits on the largest of them rather than on all of them.
