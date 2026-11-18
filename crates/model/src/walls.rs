@@ -11,6 +11,7 @@ use std::f64::consts::{PI, TAU};
 pub mod index;
 #[doc(hidden)]
 pub mod join;
+mod wrap;
 #[doc(hidden)]
 pub use index::Index;
 pub(crate) use index::reach;
@@ -324,11 +325,13 @@ struct WallEnd {
     outline: Vec<P2>,
     /// Its layers' ends, where it joins another straight wall and their layers clean up ([`join::end_cut`]).
     cut: Option<join::Cut>,
+    /// It joins nothing: the end its layers wrap at, where its type wraps at ends.
+    free: bool,
 }
 
 impl WallEnd {
     fn plain(outline: Vec<P2>) -> Self {
-        Self { outline, cut: None }
+        Self { outline, cut: None, free: false }
     }
 
     /// The end `cut` makes: its cap steps from layer to layer, from its face on the clockwise side of the way it leaves the
@@ -340,7 +343,7 @@ impl WallEnd {
             cut.layers.iter().rev().flat_map(|[a, b]| [*b, *a]).collect()
         };
         outline.dedup_by(|a, b| a.dist(*b) < 1e-6);
-        Self { outline, cut: Some(cut) }
+        Self { outline, cut: Some(cut), free: false }
     }
 }
 
@@ -351,7 +354,7 @@ fn end_geometry(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> WallE
     let Some(i) = arms.iter().position(|a| a.id == id) else { return WallEnd::default() };
     let (prev, me, next) = (&arms[(i + n - 1) % n], &arms[i], &arms[(i + 1) % n]);
     if n < 2 {
-        return WallEnd::plain(vec![me.cw, me.ccw]);
+        return WallEnd { free: true, ..WallEnd::plain(vec![me.cw, me.ccw]) };
     }
     // Two straight walls: a Butt, Revit's default, their layers cleaned up by rank. At a corner the wall made first (the
     // lower id) runs through, so the same walls drawn the same way join the same way; which one does is the person's to
@@ -638,6 +641,97 @@ pub fn layer_geometry(m: &Model, id: Id, index: Option<&Index>) -> LayerGeometry
         rings.retain(|r| geom::area(r).abs() > 1e-6);
     }
     let butts = ends.iter().filter_map(|e| e.cut.as_ref()).filter_map(|c| c.butt).map(|b| b.to_vec()).collect();
+    // Where its type wraps its layers, at its free ends and at the jambs of its doors and windows: the layers' pieces and
+    // the lines between them are the wrapped ones ([`wrap::shape`]), its joined ends staying as their joins cut them.
+    let wraps = m.types.wall.get(&w.type_name).filter(|t| {
+        use crate::model::Wrapping;
+        w.arc == 0.0
+            && t.layers.len() == layers
+            && t.layers.iter().any(|l| l.wraps)
+            && (t.wrap_ends != Wrapping::None || t.wrap_inserts != Wrapping::None)
+    });
+    if let (Some(t), Some(&face)) = (wraps, offs.first()) {
+        use crate::model::Wrapping;
+        let guid = m.guid(id);
+        let openings: Vec<(f64, f64)> = m
+            .lookup()
+            .referrers(&guid)
+            .filter_map(|k| m.elements.get(k))
+            .filter_map(|e| match e {
+                Element::Door(o) | Element::Window(o) if o.host == guid => {
+                    let (width, _) = m.opening_type(e)?.cut();
+                    Some((o.offset - width / 2.0, o.offset + width / 2.0))
+                }
+                _ => None,
+            })
+            .collect();
+        let at = |i: usize| if ends.get(i).is_some_and(|e| e.free) { t.wrap_ends } else { Wrapping::None };
+        let bodies = wrap::bodies(len, &openings, [at(0), at(1)], t.wrap_inserts);
+        let (pieces, lines_between) = wrap::shape(t, &bodies);
+        let deep: Vec<f64> = offs.iter().map(|o| face - o).collect();
+        // A point `s` along the wall and `d` deep; at an end a join has cut, on that cut where layer `k` ends.
+        let point = |s: f64, d: f64, k: usize| -> P2 {
+            let joined = |i: usize| ends.get(i).is_some_and(|e| !e.free);
+            let end = if s <= 1e-6 && joined(0) {
+                Some(0)
+            } else if s >= len - 1e-6 && joined(1) {
+                Some(1)
+            } else {
+                None
+            };
+            match (end, deep.get(k), deep.get(k + 1)) {
+                (Some(i), Some(&d0), Some(&d1)) if d1 > d0 => {
+                    let (a, b) = (end_of(k, k, i), end_of(k + 1, k, i));
+                    a + (b - a) * ((d - d0) / (d1 - d0))
+                }
+                _ => w.start + u * s + u.perp() * (face - d),
+            }
+        };
+        bands = pieces
+            .iter()
+            .enumerate()
+            .map(|(k, list)| {
+                let gaps = gaps_of(k);
+                list.iter()
+                    .flat_map(|&[s0, s1, d0, d1]| {
+                        let (a0, a1, b0, b1) = (point(s0, d0, k), point(s1, d0, k), point(s0, d1, k), point(s1, d1, k));
+                        if gaps.is_empty() {
+                            vec![vec![a0, a1, b1, b0]]
+                        } else {
+                            left(a0, a1, &gaps).into_iter().zip(left(b0, b1, &gaps)).map(|((a, a2), (b, b2))| vec![a, a2, b2, b]).collect()
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        // The lines between layers: a layer's boundary by the layer under it, so a joined end's is where that one is cut
+        // (the shorter of the two is found as before, from `lines`); a return's, where it stands.
+        let boundary = |d: f64| deep.iter().position(|x| (x - d).abs() < 1e-6).filter(|b| *b > 0 && *b < layers);
+        let mut wrapped: Vec<Vec<P2>> = Vec::new();
+        for [[s0, d0], [s1, d1]] in lines_between {
+            let along_wall = (d0 - d1).abs() < 1e-9;
+            let line = match boundary(d0).filter(|_| along_wall) {
+                Some(b) => {
+                    let whole = lines.get(b).filter(|l| l.len() == 2);
+                    let end = |s: f64, i: usize| {
+                        let cut = (i == 0 && s <= 1e-6 || i == 1 && s >= len - 1e-6) && ends.get(i).is_some_and(|e| !e.free);
+                        whole.filter(|_| cut).and_then(|l| l.get(i).copied()).unwrap_or_else(|| point(s, d0, b))
+                    };
+                    let (a, c) = (end(s0, 0), end(s1, 1));
+                    let both: Vec<join::Gap> = gaps_of(b - 1).into_iter().chain(gaps_of(b)).collect();
+                    if both.is_empty() { vec![vec![a, c]] } else { left(a, c, &both).into_iter().map(|(a, c)| vec![a, c]).collect() }
+                }
+                None => vec![vec![w.start + u * s0 + u.perp() * (face - d0), w.start + u * s1 + u.perp() * (face - d1)]],
+            };
+            wrapped.extend(line);
+        }
+        wrapped.extend(ends.iter().filter_map(|e| e.cut.as_ref()).flat_map(|c| c.seams.iter().map(|s| s.to_vec())));
+        seams = wrapped;
+        seams.retain(|l| l.windows(2).any(|w| matches!(w, [a, b] if a.dist(*b) > 1e-6)));
+        for rings in &mut bands {
+            rings.retain(|r| geom::area(r).abs() > 1e-6);
+        }
+    }
     LayerGeometry { lines, bands, seams, butts }
 }
 

@@ -247,3 +247,39 @@ fn a_join_set_not_to_clean_up_leaves_the_layers_whole_and_draws_the_line_they_bu
     run(&mut s, "wall_join", json!({"walls": [south, east], "display": "clean"}));
     assert_eq!(walls::layer_geometry(&s.model, south, None).butts().count(), 0);
 }
+
+#[test]
+fn layers_wrap_at_a_walls_free_ends_and_at_its_windows_jambs_but_not_where_it_joins() {
+    let mut s = Session::new();
+    for name in ["Brick", "Insulation", "Block", "Plaster"] {
+        run(&mut s, "material", json!({"name": name}));
+    }
+    run(
+        &mut s,
+        "type",
+        json!({"category": "wall", "name": "Ext", "wrap_ends": "exterior", "wrap_inserts": "both", "layers": [
+        {"function": "finish", "material": "Brick", "thickness": 100, "wraps": true},
+        {"function": "thermal", "material": "Insulation", "thickness": 60, "wraps": true},
+        {"function": "structure", "material": "Block", "thickness": 140},
+        {"function": "finish2", "material": "Plaster", "thickness": 15, "wraps": true}]}),
+    );
+    run(&mut s, "type", json!({"category": "window", "name": "W", "width": 1000, "height": 1200, "sill": 900}));
+    // East along y = 0 on its exterior face (the brick from y = 0 down to -100, the block from -160 to -300), free at its
+    // start, a window in its middle, and a wall joined to its end.
+    let a = run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]], "type": "Ext", "location": "exterior-finish"}))["ids"][0]
+        .as_u64()
+        .unwrap();
+    run(&mut s, "window", json!({"wall": a, "offset": 2000, "type": "W"}));
+    run(&mut s, "wall", json!({"points": [[4000, 0], [4000, -3000]], "type": "Ext", "location": "exterior-finish"}));
+    let g = walls::layer_geometry(&s.model, a, None);
+    let holds = |k: usize, x: f64, y: f64| g.bands(k).iter().any(|r| crate::geom::contains(r, P2(x, y)));
+    // The free end: the brick turns down it across the block's end, the insulation inside the brick, the block behind both.
+    assert!(holds(0, 50.0, -230.0) && holds(1, 130.0, -230.0) && holds(2, 200.0, -230.0));
+    assert!(!holds(2, 50.0, -230.0) && !holds(2, 130.0, -230.0), "the block stops short of the returns");
+    // The jamb at 1500, both sides wrapping: the brick to the block's middle (-230) from outside, the plaster from inside.
+    assert!(holds(0, 1450.0, -200.0) && holds(3, 1495.0, -260.0) && !holds(0, 1450.0, -260.0));
+    // In the window's width there is no layer at all.
+    assert!((0..4).all(|k| !holds(k, 2000.0, -230.0)));
+    // The joined end is its join's: no return there, the brick running on to the corner.
+    assert!(holds(0, 3950.0, -50.0) && !holds(0, 3950.0, -230.0));
+}

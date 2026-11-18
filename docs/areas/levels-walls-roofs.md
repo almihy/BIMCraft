@@ -46,6 +46,13 @@ are left whole, the wall that stops ending on one line a plan draws at any detai
 Wall Join Display is not read yet), `reset`. The desktop's Wall Joins tool (Modify tab; `Tool::WallJoins`, `wall_join_options`)
 picks the join under the cursor, a square over it, and runs the command from its options. What it sets is kept with the model (`Model::wall_joins`, by the two ends' GUIDs; let go with its walls after
 each command, as a pin is). Allow Join is each end's (`Wall::join_start`, `join_end`, `Wall::joins`; `join` off is both).
+Layers wrap as Revit's (`walls/wrap.rs`, worked out along the wall and across it): at an end that joins nothing, on the
+side the type's Wrapping at Ends says, and at the jambs of its doors and windows, on Wrapping at Inserts' side, the layers
+outside the core ticked Wraps turn the corner and run across the core's end to its far boundary, one inside another, each
+keeping its thickness; with both sides wrapping at an insert, each to the core's middle. What they cross stops short by
+their thickness. A plan draws the wrapped pieces and the lines round each return (`layer_geometry`); a joined end stays as
+its join cut it. Not yet: the solids (3D, sections and quantities keep the layers square at ends and jambs), an insert's own
+Wall Closure plane, and turning the wrap off at one end.
 Still as before: arc walls, three or more walls at a point, and walls within about 12 degrees of parallel, which mitre.
 
 A wall type is Revit's basic wall type (file format 29, `WALL_FORMAT`; written only when a type needs it). Its layers are Edit
