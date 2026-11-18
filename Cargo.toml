@@ -45,14 +45,14 @@ bimcraft-rvt = { path = "crates/rvt" }
 # DWG drawings read straight into CADCraft's drawing (`cadcraft_doc::Drawing`), from our fork of CADCraft (MIT OR
 # Apache-2.0): its DWG reader is acadrust (MPL-2.0, unmodified, one version across the workspace; NOTICE). The model makes
 # an import of what it reads (dxf/dwg.rs), blocks kept as blocks.
-cadcraft-doc = { git = "https://github.com/almihy/cadcraft", rev = "83ed872f25239f2b284fe6b96537fc7fb5bdd770" }
-cadcraft-dwg = { git = "https://github.com/almihy/cadcraft", rev = "83ed872f25239f2b284fe6b96537fc7fb5bdd770" }
+cadcraft-doc = { git = "https://github.com/almihy/cadcraft", rev = "1f9002884bbf2331e212fe9c2ca90e670d116e29" }
+cadcraft-dwg = { git = "https://github.com/almihy/cadcraft", rev = "1f9002884bbf2331e212fe9c2ca90e670d116e29" }
 # A drawing (DWG or DXF) read once into an index and asked of, for the agent (Arqiflow's drawing_read): CADCraft's, from
 # our fork, the same as above.
-cadcraft-index = { git = "https://github.com/almihy/cadcraft", rev = "83ed872f25239f2b284fe6b96537fc7fb5bdd770" }
+cadcraft-index = { git = "https://github.com/almihy/cadcraft", rev = "1f9002884bbf2331e212fe9c2ca90e670d116e29" }
 # A drawing written as DWG (acadrust's own writer) or DXF, for Arqiflow's server, which runs no converter of its own: the
 # same fork and commit as above, without the PDF writer.
-cadcraft-io = { git = "https://github.com/almihy/cadcraft", rev = "83ed872f25239f2b284fe6b96537fc7fb5bdd770", default-features = false }
+cadcraft-io = { git = "https://github.com/almihy/cadcraft", rev = "1f9002884bbf2331e212fe9c2ca90e670d116e29", default-features = false }
 # Without their default features, so that the browser's build leaves egui's own fonts out (ui-egui's `egui-fonts`): each
 # member asks for what it uses.
 egui = { version = "0.36", default-features = false }
