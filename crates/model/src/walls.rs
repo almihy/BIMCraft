@@ -15,7 +15,7 @@ pub use index::Index;
 pub(crate) use index::reach;
 
 use crate::geom::{self, P2};
-use crate::model::{Element, Function, Guid, Id, Layer, Location, Model, TOL, Wall};
+use crate::model::{Element, Guid, Id, Location, Model, TOL, Wall, WallType};
 
 /// A wall's location line, from its start to its end: straight, or an arc.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -151,29 +151,15 @@ pub fn sweep_through(a: P2, p: P2, b: P2) -> f64 {
     if side < 0.0 { sweep.to_degrees() } else { -sweep.to_degrees() }
 }
 
-/// Where a wall's core lies, as how far its exterior and its interior boundaries are from the wall's exterior face: from the
-/// first structure layer to the last. None when no layer is structure.
-fn core_span(layers: &[Layer]) -> Option<(f64, f64)> {
-    let mut core: Option<(f64, f64)> = None;
-    let mut at = 0.0;
-    for l in layers {
-        if l.function == Function::Structure {
-            core = Some((core.map_or(at, |c| c.0), at + l.thickness));
-        }
-        at += l.thickness;
-    }
-    core
-}
-
-/// How far from the exterior face of a wall of `thickness` with `layers` its location line `loc`
-/// lies. The core runs from the first structure layer to the last; without one, it's all of it.
-pub fn depth(thickness: f64, layers: &[Layer], loc: Location) -> f64 {
-    let (c0, c1) = core_span(layers).unwrap_or((0.0, thickness));
+/// How far from the exterior face of a wall of type `t` its location line `loc` lies: its core between the type's Core
+/// Boundary rows ([`WallType::core_span`]).
+pub fn depth(t: &WallType, loc: Location) -> f64 {
+    let (c0, c1) = t.core_span();
     match loc {
-        Location::Centre => thickness / 2.0,
+        Location::Centre => t.thickness / 2.0,
         Location::CoreCentre => (c0 + c1) / 2.0,
         Location::ExteriorFinish => 0.0,
-        Location::InteriorFinish => thickness,
+        Location::InteriorFinish => t.thickness,
         Location::ExteriorCore => c0,
         Location::InteriorCore => c1,
     }
@@ -183,7 +169,7 @@ pub fn depth(thickness: f64, layers: &[Layer], loc: Location) -> f64 {
 /// its exterior face to its interior one.
 pub fn boundaries(m: &Model, w: &Wall) -> Vec<f64> {
     let Some(t) = m.types.wall.get(&w.type_name) else { return vec![0.0, 0.0] };
-    let ext = depth(t.thickness, &t.layers, w.location);
+    let ext = depth(t, w.location);
     let mut out = vec![ext];
     let mut at = ext;
     for l in &t.layers {
@@ -199,7 +185,7 @@ pub fn boundaries(m: &Model, w: &Wall) -> Vec<f64> {
 /// A wall's exterior and interior faces: how far to the left of its location line they lie.
 pub fn faces(m: &Model, w: &Wall) -> (f64, f64) {
     let t = m.thickness(w);
-    let ext = m.types.wall.get(&w.type_name).map_or(t / 2.0, |ty| depth(t, &ty.layers, w.location));
+    let ext = m.types.wall.get(&w.type_name).map_or(t / 2.0, |ty| depth(ty, w.location));
     (ext, ext - t)
 }
 
@@ -209,11 +195,11 @@ pub fn faces(m: &Model, w: &Wall) -> (f64, f64) {
 pub fn core_faces(m: &Model, w: &Wall) -> Option<(f64, f64)> {
     let ty = m.types.wall.get(&w.type_name)?;
     let t = m.thickness(w);
-    let (c0, c1) = core_span(&ty.layers)?;
+    let (c0, c1) = ty.core_span();
     if c0 <= 1e-6 && c1 >= t - 1e-6 {
         return None;
     }
-    let ext = depth(t, &ty.layers, w.location);
+    let ext = depth(ty, w.location);
     Some((ext - c0, ext - c1))
 }
 

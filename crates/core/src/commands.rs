@@ -1438,8 +1438,17 @@ other_files(
          a footing's type is a `width` by `depth`, or `round` (`width` across); a run's (a beam's, a pipe's, a cable tray's…) too, \
          made of a `material` of the library. A door type's `thickness` is its leaf's, as Revit's door Thickness (none, or `null` to clear it, 50 mm as Revit's \
          Single-Flush), which plans draw the leaf as and 3D views and IFC build; a window type has none. A wall type may have `layers` [{function?: structure|\
-         substrate|thermal|membrane|finish, material?, thickness}, …] from its exterior side in: it's as thick as they are, \
-         its core from its first structure layer to its last, and a new `thickness` goes to its structure. A ceiling type may \
+         substrate|thermal|finish|finish2|membrane, material?, thickness, wraps?, structural?}, …] from its exterior side in, as \
+         the rows of Revit's Edit Assembly (functions Structure [1], Substrate [2], Thermal/Air Layer [3], Finish 1 [4] `finish`, \
+         Finish 2 [5] `finish2`, Membrane Layer, which may be 0 thick): it's as thick as they are, and a new `thickness` goes to \
+         its structure. `core` {exterior, interior} is its two Core Boundary rows: how many layers lie outside the core on each \
+         side (null, or new `layers` without it: from its first structure layer to its last); the answer's `core_layers` is \
+         [first, one past the last]. A layer's `wraps` (outside the core) turns it round the jambs of inserts and the wall's \
+         ends where the type's `wrap_inserts` (none|exterior|interior|both, Revit's Wrapping at Inserts) and `wrap_ends` \
+         (none|exterior|interior, Wrapping at Ends) say; `structural` marks the one layer whose material is the type's \
+         Structural Material. A wall type's `function` is interior|exterior|foundation|retaining|soffit|core-shaft (exterior \
+         unless given); `coarse_fill` (a fill pattern's name, see `fill_pattern`; null for none) and `coarse_color` [r, g, b] \
+         are what a plan of coarse detail fills it with. Each is kept when not given. A ceiling type may \
          have `grid`: its square tiles' width, mm, which reflected ceiling plans draw (0, none); a railing type, `height` (its \
          rail over what it runs along) and `spacing` (its balusters' centres, 0 for none). Floor, roof and ceiling types may \
          have `layers` too, from the top down; a layer's `material` is one of the library's (see `material`). Any type also has \
@@ -12808,9 +12817,53 @@ fn edit_type(s: &mut Session, p: &Value) -> R {
     let t = match cat.as_str() {
         "wall" => {
             let (thickness, layers) = layered(c, p, m.types.wall.get(&name).map(|t| (t.thickness, t.layers.as_slice())), thickness, &need)?;
-            let t = WallType { thickness, layers, identity };
+            let old = m.types.wall.get(&name).cloned().unwrap_or_default();
+            // As a named word of `what`, kept when not given.
+            fn word<T>(c: &str, p: &Value, key: &str, old: T, from: fn(&str) -> Option<T>, what: &str) -> Result<T, String> {
+                match string(c, p, key)? {
+                    Some(n) => from(&n).ok_or_else(|| bad(c, format!("`{key}` is {what}, not `{n}`"))),
+                    None => Ok(old),
+                }
+            }
+            // The Core Boundary rows: as given; kept while the layers are; with new layers and none given, from the first
+            // structure layer to the last again.
+            let core = match p.get("core") {
+                Some(Value::Null) => None,
+                Some(v) => Some(serde_json::from_value::<crate::model::Core>(v.clone()).map_err(|e| bad(c, format!("`core`: {e}")))?),
+                None if absent(p.get("layers")) => old.core,
+                None => None,
+            };
+            let coarse_fill = match p.get("coarse_fill") {
+                Some(Value::Null) => None,
+                None => old.coarse_fill,
+                Some(_) => string(c, p, "coarse_fill")?.filter(|n| !n.trim().is_empty()),
+            };
+            let coarse_color = match p.get("coarse_color") {
+                v if absent(v) => old.coarse_color,
+                Some(v) => {
+                    serde_json::from_value::<[u8; 3]>(v.clone()).map_err(|_| bad(c, "`coarse_color` is [red, green, blue], each 0 to 255"))?
+                }
+                None => old.coarse_color,
+            };
+            let functions = "interior, exterior, foundation, retaining, soffit or core-shaft";
+            let t = WallType {
+                thickness,
+                layers,
+                identity,
+                core,
+                function: word(c, p, "function", old.function, crate::model::WallFunction::from_name, functions)?,
+                wrap_inserts: word(c, p, "wrap_inserts", old.wrap_inserts, crate::model::Wrapping::from_name, "none, exterior, interior or both")?,
+                wrap_ends: word(c, p, "wrap_ends", old.wrap_ends, crate::model::Wrapping::from_name, "none, exterior or interior")?,
+                coarse_fill,
+                coarse_color,
+            };
             m.types.wall.insert(name.clone(), t.clone());
-            json!(t)
+            let mut out = json!(t);
+            // What it comes to, for whoever reads the answer: where its core lies and what carries it.
+            let layers = t.core_layers();
+            out["core_layers"] = json!([layers.start, layers.end]);
+            out["structural_material"] = json!(t.structural_material());
+            out
         }
         "floor" => {
             let (thickness, layers) =

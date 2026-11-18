@@ -1873,7 +1873,7 @@ pub fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, String> 
                 &mut m.types.wall,
                 &base,
                 |k| (k.thickness - t).abs() < 0.05 && k.layers == layers,
-                WallType { thickness: t, layers: layers.clone(), identity: Default::default() },
+                WallType { thickness: t, layers: layers.clone(), ..Default::default() },
             );
             let on = |x: P2| micron(c + (x - c).unit() * ((r0 + r1) / 2.0));
             let arc = (arc * 1e6).round() / 1e6;
@@ -1921,7 +1921,7 @@ pub fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, String> 
             &mut m.types.wall,
             &base,
             |k| (k.thickness - t).abs() < 0.05 && k.layers == layers,
-            WallType { thickness: t, layers: layers.clone(), identity: Default::default() },
+            WallType { thickness: t, layers: layers.clone(), ..Default::default() },
         );
         raw.push(RawWall {
             ifc: id,

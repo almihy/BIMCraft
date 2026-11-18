@@ -126,7 +126,8 @@ pub(crate) fn function(revit: u32) -> Function {
     match revit {
         1 | 200 => Function::Structure,
         3 => Function::Thermal,
-        4 | 5 => Function::Finish,
+        4 => Function::Finish,
+        5 => Function::Finish2,
         100 => Function::Membrane,
         _ => Function::Substrate,
     }
@@ -315,7 +316,7 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
                         &mut cx.model.types.wall,
                         &base,
                         |k| (k.thickness - typ.thickness).abs() < 0.05 && k.layers == typ.layers,
-                        WallType { thickness: typ.thickness, layers: typ.layers.clone(), identity: Default::default() },
+                        WallType { thickness: typ.thickness, layers: typ.layers.clone(), ..Default::default() },
                     );
                     made.insert(key, n.clone());
                     n

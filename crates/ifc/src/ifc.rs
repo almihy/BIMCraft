@@ -1677,7 +1677,7 @@ pub fn export(m: &Model) -> String {
             let category = match l.function {
                 Function::Structure => "'LoadBearing'",
                 Function::Thermal => "'Insulation'",
-                Function::Finish => "'Finish'",
+                Function::Finish | Function::Finish2 => "'Finish'",
                 Function::Substrate => "'Substrate'",
                 Function::Membrane => "'Membrane'",
             };

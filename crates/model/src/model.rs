@@ -156,12 +156,17 @@ pub const MIN_CONTOURS: f64 = 50.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 28;
-/// [`FORMAT`], by what it brought: a CAD drawing held as the DWG it was brought in as (`dwg` in its `CadFile`), read again
+pub const FORMAT: u32 = 29;
+/// [`FORMAT`], by what it brought: a wall type as Revit's (its Core Boundary rows, Function, Wrapping at Inserts and at
+/// Ends, Coarse Scale Fill), a layer's Finish 2, Wraps and Structural Material; a build that reads up to 28 would refuse the
+/// fields, not say "saved by a newer BIMCraft". A project whose types have none of them is written as 28 or older
+/// ([`Model::written_format`]); nothing in a file of 28 changes.
+pub const WALL_FORMAT: u32 = FORMAT;
+/// The format a project is written in when it needs nothing of [`WALL_FORMAT`]'s but holds a CAD drawing as the DWG it was brought in as (`dwg` in its `CadFile`), read again
 /// straight when the project opens, where it was held as the DXF it was made into; a build that reads up to 27 would refuse
 /// the field, not say "saved by a newer BIMCraft". A project with no DWG held is written as 27 ([`Model::written_format`]);
 /// nothing in a file of 27 changes.
-pub const DWG_FORMAT: u32 = FORMAT;
+pub const DWG_FORMAT: u32 = 28;
 /// [`FORMAT`], by what it brought: ramps and parking as Revit has them (docs/parking-ramps-plan.md): a ramp along a path
 /// with its runs' own slopes, the Parking category and its Parking Space family, a car park's bays and aisles as elements
 /// of their own. The masterplan's ramps, parking stalls and parking bands of a file of 26 or older are converted, and its
@@ -486,7 +491,9 @@ impl Location {
 }
 
 /// What a layer of a wall does: carries it (structure, its core), backs another (substrate),
-/// insulates (thermal), seals it (a membrane, which may be as thin as nothing), or finishes a face.
+/// insulates (thermal), seals it (a membrane, which may be as thin as nothing), or finishes a face: Revit's layer
+/// functions, Structure [1], Substrate [2], Thermal/Air Layer [3], Finish 1 [4] (`finish`), Finish 2 [5] (`finish2`) and
+/// Membrane Layer.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Function {
@@ -495,7 +502,170 @@ pub enum Function {
     Substrate,
     Thermal,
     Membrane,
+    #[serde(alias = "finish1")]
     Finish,
+    Finish2,
+}
+
+impl Function {
+    pub const ALL: [Function; 6] =
+        [Function::Structure, Function::Substrate, Function::Thermal, Function::Finish, Function::Finish2, Function::Membrane];
+
+    /// Its priority where walls join, as Revit's number in brackets: 1 the highest, a layer of which runs through those of
+    /// a lower one (a higher number); a membrane has none.
+    pub fn priority(self) -> Option<u8> {
+        match self {
+            Function::Structure => Some(1),
+            Function::Substrate => Some(2),
+            Function::Thermal => Some(3),
+            Function::Finish => Some(4),
+            Function::Finish2 => Some(5),
+            Function::Membrane => None,
+        }
+    }
+
+    /// Its name in commands and files.
+    pub fn name(self) -> &'static str {
+        match self {
+            Function::Structure => "structure",
+            Function::Substrate => "substrate",
+            Function::Thermal => "thermal",
+            Function::Membrane => "membrane",
+            Function::Finish => "finish",
+            Function::Finish2 => "finish2",
+        }
+    }
+
+    /// As Edit Assembly names it, Revit's words.
+    pub fn label(self) -> &'static str {
+        match self {
+            Function::Structure => ui_msg!("Structure [1]"),
+            Function::Substrate => ui_msg!("Substrate [2]"),
+            Function::Thermal => ui_msg!("Thermal/Air Layer [3]"),
+            Function::Finish => ui_msg!("Finish 1 [4]"),
+            Function::Finish2 => ui_msg!("Finish 2 [5]"),
+            Function::Membrane => ui_msg!("Membrane Layer"),
+        }
+    }
+}
+
+/// What a wall type is for, Revit's Function of a wall type: it sorts and filters walls in schedules and views, and says
+/// whether IFC writes the wall as external.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WallFunction {
+    Interior,
+    #[default]
+    Exterior,
+    Foundation,
+    Retaining,
+    Soffit,
+    CoreShaft,
+}
+
+impl WallFunction {
+    pub const ALL: [WallFunction; 6] = [
+        WallFunction::Interior,
+        WallFunction::Exterior,
+        WallFunction::Foundation,
+        WallFunction::Retaining,
+        WallFunction::Soffit,
+        WallFunction::CoreShaft,
+    ];
+
+    /// Its name in commands and files.
+    pub fn name(self) -> &'static str {
+        match self {
+            WallFunction::Interior => "interior",
+            WallFunction::Exterior => "exterior",
+            WallFunction::Foundation => "foundation",
+            WallFunction::Retaining => "retaining",
+            WallFunction::Soffit => "soffit",
+            WallFunction::CoreShaft => "core-shaft",
+        }
+    }
+
+    /// As Type Properties names it, Revit's words.
+    pub fn label(self) -> &'static str {
+        match self {
+            WallFunction::Interior => ui_msg!("Interior"),
+            WallFunction::Exterior => ui_msg!("Exterior"),
+            WallFunction::Foundation => ui_msg!("Foundation"),
+            WallFunction::Retaining => ui_msg!("Retaining"),
+            WallFunction::Soffit => ui_msg!("Soffit"),
+            WallFunction::CoreShaft => ui_msg!("Core-shaft"),
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<WallFunction> {
+        let n = name.trim().to_ascii_lowercase().replace([' ', '_'], "-");
+        WallFunction::ALL.into_iter().find(|f| f.name() == n)
+    }
+
+    fn is_exterior(&self) -> bool {
+        *self == WallFunction::Exterior
+    }
+}
+
+/// Which of a wall type's layers turn the corner at a door's or a window's jambs (Revit's Wrapping at Inserts) and at the
+/// wall's free ends (Wrapping at Ends, which is never `both`): those on its exterior side of the core, on its interior side,
+/// or both; of them, the layers whose `wraps` is on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Wrapping {
+    #[default]
+    #[serde(alias = "do-not-wrap")]
+    None,
+    Exterior,
+    Interior,
+    Both,
+}
+
+impl Wrapping {
+    pub const ALL: [Wrapping; 4] = [Wrapping::None, Wrapping::Exterior, Wrapping::Interior, Wrapping::Both];
+
+    /// Its name in commands and files.
+    pub fn name(self) -> &'static str {
+        match self {
+            Wrapping::None => "none",
+            Wrapping::Exterior => "exterior",
+            Wrapping::Interior => "interior",
+            Wrapping::Both => "both",
+        }
+    }
+
+    /// As Type Properties names it for inserts, Revit's words (at ends, `None` reads "None").
+    pub fn label(self) -> &'static str {
+        match self {
+            Wrapping::None => ui_msg!("Do not wrap"),
+            Wrapping::Exterior => ui_msg!("Exterior"),
+            Wrapping::Interior => ui_msg!("Interior"),
+            Wrapping::Both => ui_msg!("Both"),
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Wrapping> {
+        let n = name.trim().to_ascii_lowercase().replace([' ', '_'], "-");
+        if n == "do-not-wrap" {
+            return Some(Wrapping::None);
+        }
+        Wrapping::ALL.into_iter().find(|w| w.name() == n)
+    }
+
+    fn is_none(&self) -> bool {
+        *self == Wrapping::None
+    }
+}
+
+/// Where a wall type's core lies among its layers, as Edit Assembly's two Core Boundary rows: how many layers lie outside
+/// it on the exterior side, and how many on the interior side.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Core {
+    #[serde(default)]
+    pub exterior: usize,
+    #[serde(default)]
+    pub interior: usize,
 }
 
 /// A layer of a compound type: of a wall, from its exterior in; of a floor, a roof or a ceiling,
@@ -518,6 +688,14 @@ pub struct Layer {
     /// it the level underside. One a type at most.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub variable: bool,
+    /// A wall's layer outside its core that turns the corner at inserts and at ends where its type wraps that side
+    /// (Edit Assembly's Wraps).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub wraps: bool,
+    /// The layer whose material is the type's Structural Material (Edit Assembly's Structural Material): one a type at
+    /// most, in its core.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub structural: bool,
 }
 
 /// Where a layer of a type is variable: its index, and how thick the layers above it and below it are, mm.
@@ -2984,8 +3162,9 @@ impl Element {
 }
 
 /// A wall type: how thick its walls are and, a compound one, its layers from the exterior side in,
-/// which make up that thickness. Its core runs from its first structure layer to its last (all of
-/// it, without one).
+/// which make up that thickness. Its core lies between Edit Assembly's two Core Boundary rows (`core`); a type that
+/// sets none has it from its first structure layer to its last (all of it, without one). As Revit's Type Properties of a
+/// basic wall: its Function, Wrapping at Inserts and at Ends, and the fill a plan of coarse detail gives it.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WallType {
@@ -2994,6 +3173,67 @@ pub struct WallType {
     pub layers: Vec<Layer>,
     #[serde(default, skip_serializing_if = "crate::type_data::TypeIdentity::is_empty")]
     pub identity: crate::type_data::TypeIdentity,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub core: Option<Core>,
+    #[serde(default, skip_serializing_if = "WallFunction::is_exterior")]
+    pub function: WallFunction,
+    #[serde(default, skip_serializing_if = "Wrapping::is_none")]
+    pub wrap_inserts: Wrapping,
+    #[serde(default, skip_serializing_if = "Wrapping::is_none")]
+    pub wrap_ends: Wrapping,
+    /// Revit's Coarse Scale Fill Pattern, one of the project's fill patterns by name (none: no fill), and its colour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coarse_fill: Option<String>,
+    #[serde(default, skip_serializing_if = "is_black")]
+    pub coarse_color: [u8; 3],
+}
+
+fn is_black(c: &[u8; 3]) -> bool {
+    *c == [0, 0, 0]
+}
+
+impl WallType {
+    /// The layers of its core, as indices into `layers`: between its Core Boundary rows, or, setting none, from its first
+    /// structure layer to its last (all of them, without one). Empty for a type without layers.
+    pub fn core_layers(&self) -> std::ops::Range<usize> {
+        let n = self.layers.len();
+        match self.core {
+            Some(c) if c.exterior + c.interior < n => c.exterior..n - c.interior,
+            _ => {
+                let is = |l: &Layer| l.function == Function::Structure;
+                match (self.layers.iter().position(is), self.layers.iter().rposition(is)) {
+                    (Some(a), Some(b)) => a..b + 1,
+                    _ => 0..n,
+                }
+            }
+        }
+    }
+
+    /// Where its core lies: how far its exterior and its interior boundaries are from the wall's exterior face, mm.
+    pub fn core_span(&self) -> (f64, f64) {
+        if self.layers.is_empty() {
+            return (0.0, self.thickness);
+        }
+        let core = self.core_layers();
+        let sum = |ls: &[Layer]| ls.iter().map(|l| l.thickness).sum::<f64>();
+        let before = sum(self.layers.get(..core.start).unwrap_or_default());
+        (before, before + sum(self.layers.get(core).unwrap_or_default()))
+    }
+
+    /// Whether it holds what [`WALL_FORMAT`] brought.
+    pub fn is_revits(&self) -> bool {
+        self.core.is_some()
+            || self.function != WallFunction::Exterior
+            || self.wrap_inserts != Wrapping::None
+            || self.wrap_ends != Wrapping::None
+            || self.coarse_fill.is_some()
+            || self.coarse_color != [0, 0, 0]
+    }
+
+    /// The material of the layer ticked Structural Material, Revit's Structural Material of the type; none ticked, none.
+    pub fn structural_material(&self) -> Option<&str> {
+        self.layers.iter().find(|l| l.structural).map(|l| l.material.as_str()).filter(|m| !m.is_empty())
+    }
 }
 
 /// A floor type: how thick its floors are and, a compound one, its layers from the top down.
@@ -3706,7 +3946,7 @@ impl Model {
         }
         m.families = crate::family::library(language).into();
         for (n, t) in [("Generic - 200mm", 200.0), ("Interior - 100mm", 100.0)] {
-            m.types.wall.insert(n.into(), WallType { thickness: t, layers: Vec::new(), identity: Default::default() });
+            m.types.wall.insert(n.into(), WallType { thickness: t, ..Default::default() });
         }
         // An exterior wall's layers, outside in: brick, insulation, a block core, plaster.
         let layer = |function, material: &str, thickness| Layer {
@@ -3721,7 +3961,7 @@ impl Model {
             layer(Function::Structure, "Concrete block", 140.0),
             layer(Function::Finish, "Plaster", 10.0),
         ];
-        m.types.wall.insert("Exterior - 300mm".into(), WallType { thickness: 300.0, layers, identity: Default::default() });
+        m.types.wall.insert("Exterior - 300mm".into(), WallType { thickness: 300.0, layers, ..Default::default() });
         m.types.floor.insert("Generic - 200mm".into(), FloorType { thickness: 200.0, layers: Vec::new(), identity: Default::default() });
         for (n, w) in [("Single 900 x 2100", 900.0), ("Single 800 x 2100", 800.0)] {
             m.types.door.insert(n.into(), OpeningType { width: w, height: 2100.0, ..Default::default() });
@@ -7441,6 +7681,38 @@ impl Model {
             let sum: f64 = layers.iter().map(|l| l.thickness).sum();
             if !layers.is_empty() && (sum - thickness).abs() > 1e-6 {
                 return Err(format!("{who}: its layers add up to {sum} mm, not its thickness, {thickness} mm"));
+            }
+            if cat != "wall" && layers.iter().any(|l| l.wraps) {
+                return Err(format!("{who}: only a wall's layer wraps, at its inserts and its ends"));
+            }
+            let structural = layers.iter().filter(|l| l.structural).count();
+            if structural > 1 {
+                return Err(format!("{who}: {structural} layers are its structural material; a type has one at most"));
+            }
+        }
+        for (n, t) in &self.types.wall {
+            let who = format!("wall type `{n}`");
+            if let Some(c) = t.core {
+                let count = t.layers.len();
+                if c.exterior + c.interior >= count.max(1) || t.layers.is_empty() {
+                    return Err(format!(
+                        "{who}: its core has {} layers outside it on the exterior side and {} on the interior side, of {count};                          it holds one layer at least",
+                        c.exterior, c.interior
+                    ));
+                }
+                let (c0, c1) = t.core_span();
+                if c1 - c0 <= 0.0 {
+                    return Err(format!("{who}: its core has no thickness; put a layer with a thickness between its core boundaries"));
+                }
+            }
+            if t.wrap_ends == Wrapping::Both {
+                return Err(format!("{who}: wrapping at ends is none, exterior or interior, not both"));
+            }
+            if let Some(f) = &t.coarse_fill {
+                text(&who, "coarse_fill", f)?;
+                if !self.fill_patterns.contains_key(f) {
+                    return Err(format!("{who}: fill pattern `{f}` isn't in the project; add it with `fill_pattern`, or see `fill_patterns`"));
+                }
             }
         }
         for (cat, types) in
