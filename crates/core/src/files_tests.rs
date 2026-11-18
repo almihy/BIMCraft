@@ -98,7 +98,7 @@ fn a_model_given_as_bytes_is_linked_and_read_again_when_given_again() {
 }
 
 #[test]
-fn a_drawing_given_as_bytes_comes_in_and_a_dwg_given_unconverted_says_so() {
+fn a_drawing_given_as_bytes_comes_in_a_dwg_as_it_is() {
     let mut s = keeping();
     s.files.give("files/doc_4/Survey.dxf", plan_dxf().into_bytes());
     let r = run(&mut s, "import_cad", json!({"path": "files/doc_4/Survey.dxf"}));
@@ -107,9 +107,15 @@ fn a_drawing_given_as_bytes_comes_in_and_a_dwg_given_unconverted_says_so() {
     // Linked, it keeps where it was read from, for a reload.
     let r = run(&mut s, "import_cad", json!({"path": "files/doc_4/Survey.dxf", "name": "Survey linked", "link": true}));
     assert_eq!(s.model.cads[r["cad"].as_str().unwrap()].path(), Some("files/doc_4/Survey.dxf"));
-    s.files.give("files/doc_5/Old.dwg", b"AC1032 not converted".to_vec());
-    let e = fails(&mut s, "import_cad", json!({"path": "files/doc_5/Old.dwg"}));
-    assert!(e.contains("give it as the DXF it becomes"), "{e}");
+    let dwg = crate::dxf::dwg::sample::plan().unwrap();
+    s.files.give("files/doc_5/Plan.dwg", dwg.clone());
+    let r = run(&mut s, "import_cad", json!({"path": "files/doc_5/Plan.dwg"}));
+    assert_eq!((r["cad"].as_str(), r["entities"].as_u64()), (Some("Plan"), Some(11)), "{r}");
+    // A DWG given under the .dxf name an older Arqiflow gave it (a link made then) reads as the DWG it is.
+    s.files.give("files/doc_6/Old.dxf", dwg);
+    let r = run(&mut s, "import_cad", json!({"path": "files/doc_6/Old.dxf"}));
+    assert_eq!(r["entities"].as_u64(), Some(11), "{r}");
+    assert!(s.model.cads["Old"].is_dwg());
 }
 
 #[test]

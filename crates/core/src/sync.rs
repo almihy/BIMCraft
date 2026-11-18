@@ -62,11 +62,11 @@ impl Session {
         let mut bytes = self.waiting_bytes();
         for g in &merged.waiting {
             if let Some(Some(text)) = c.elements.get(g) {
-                hold(&mut self.waiting, *g, g.to_string(), text, 0, &mut bytes, &mut gave_up);
+                hold(&mut self.waiting, *g, g.to_string(), text, c.ids.get(g).copied(), 0, &mut bytes, &mut gave_up);
             }
         }
         for (k, text) in &merged.waiting_project {
-            hold(&mut self.waiting_project, k.clone(), k.clone(), text, 0, &mut bytes, &mut gave_up);
+            hold(&mut self.waiting_project, k.clone(), k.clone(), text, None, 0, &mut bytes, &mut gave_up);
         }
         // The library changed: what waits is offered again, on the model the changes made, apart from them. (Not what has just been
         // refused: the model it was refused by is this one.)
@@ -75,12 +75,16 @@ impl Session {
             let mut again = Changes::default();
             for (g, w) in self.waiting.iter().filter(|(g, _)| !merged.waiting.contains(g)) {
                 again.elements.insert(*g, Some(w.text.clone()));
+                // The id it was told, as it would have had it at once.
+                if let Some(id) = w.id {
+                    again.ids.insert(*g, id);
+                }
             }
             for (k, w) in self.waiting_project.iter().filter(|(k, _)| !merged.waiting_project.contains_key(*k)) {
                 again.project.insert(k.clone(), Some(w.text.clone()));
             }
             if !again.is_empty()
-                && let Ok((later_model, later)) = model.merged(&again, keep, &BTreeMap::new())
+                && let Ok((later_model, later)) = model.merged(&again, keep, &again.ids)
             {
                 for g in again.elements.keys() {
                     let (taken, waits) = (later.taken.elements.contains_key(g), later.waiting.contains(g));
@@ -134,6 +138,7 @@ fn hold<K: Ord>(
     key: K,
     what: String,
     text: &str,
+    id: Option<Id>,
     tried: u32,
     bytes: &mut usize,
     gave_up: &mut Vec<(String, String)>,
@@ -145,7 +150,7 @@ fn hold<K: Ord>(
         return;
     }
     *bytes += text.len();
-    map.insert(key, Wait { text: text.to_string(), tried });
+    map.insert(key, Wait { text: text.to_string(), id, tried });
 }
 
 impl Session {

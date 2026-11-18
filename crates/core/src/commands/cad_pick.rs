@@ -32,7 +32,7 @@ type Boundary = (Guid, Vec<P2>, Vec<Vec<P2>>);
 /// The pick `v` gives (`{id, entities?, layers?, box?}`), on the import `id` names: the entities it takes.
 fn pick(c: &str, m: &Model, v: &Value) -> Result<(crate::model::Id, crate::model::CadImport, crate::cad::Cad, Vec<usize>), String> {
     let (id, ci, cad) = cad_import(c, m, v)?;
-    let count = cad.dxf().entities.len();
+    let count = cad.dxf().count();
     let entities = match v.get("entities") {
         e if absent(e) => None,
         Some(Value::Array(a)) if a.len() <= outlines::MAX_PICKED => Some(
@@ -185,8 +185,8 @@ pub(super) fn cad_outlines(s: &mut Session, p: &Value) -> R {
     };
     let m = &s.model;
     let picked = found(c, m, p)?;
-    let ents = &picked.cad.dxf().entities;
-    let layer_of = |n: &usize| ents.get(*n).map(|e| e.layer.clone());
+    let drawing = picked.cad.dxf();
+    let layer_of = |n: &usize| drawing.layer_of(*n).map(str::to_string);
     let ring = |r: &[P2]| json!(r.iter().map(|q| [hundredth(q.0), hundredth(q.1)]).collect::<Vec<_>>());
     let rows: Vec<Value> = picked
         .found

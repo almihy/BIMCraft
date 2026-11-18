@@ -147,12 +147,12 @@ fn units_scale_position_angle_layers_and_colours_are_the_users_to_say() {
 }
 
 #[test]
-fn a_dwg_says_to_save_it_as_dxf_and_a_file_that_isnt_one_says_why() {
+fn a_broken_dwg_and_a_file_that_isnt_a_drawing_say_why() {
     let mut s = Session::new();
-    let e = fails(&mut s, "import_cad", json!({"path": file("dwg", "plan.dwg", "AC1032")}));
-    assert!(e.contains("DWG") && e.contains("save it as DXF"), "{e}");
+    let e = fails(&mut s, "import_cad", json!({"path": file("dwg", "plan.dwg", "AC1032 broken")}));
+    assert!(e.contains("plan.dwg"), "{e}");
     let e = fails(&mut s, "import_cad", json!({"path": file("dwg", "plan.pdf", "%PDF")}));
-    assert!(e.contains("reads DXF"), "{e}");
+    assert!(e.contains("reads DWG and DXF"), "{e}");
     let e = fails(&mut s, "import_cad", json!({"path": file("dwg", "broken.dxf", "0\nSECTION\n2\nENTITIES\nhello\n")}));
     assert!(e.contains("broken.dxf") && e.contains("group code"), "{e}");
     let e = fails(&mut s, "import_cad", json!({"path": file("dwg", "empty.dxf", &dxf("4", &[], ""))}));
@@ -162,42 +162,45 @@ fn a_dwg_says_to_save_it_as_dxf_and_a_file_that_isnt_one_says_why() {
     assert!(s.model.cads.is_empty());
 }
 
-/// A DWG reader as the apps hand a session one: here one that gives `plan()`'s DXF for a file that begins as a DWG does, with
-/// a note, and says why for any other.
-fn dwg_reader() -> crate::cad::DwgReader {
-    std::sync::Arc::new(|path: &std::path::Path| {
-        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-        if !bytes.starts_with(b"AC10") {
-            return Err("it isn't a DWG file".into());
-        }
-        Ok((plan().into_bytes(), vec!["2 of the DWG's object records couldn't be read and were left out".into()]))
-    })
-}
-
 #[test]
-fn a_dwg_comes_in_through_the_reader_a_session_is_given_and_is_held_as_the_dxf_it_became() {
+fn a_dwg_comes_in_straight_its_blocks_placed_and_is_held_as_the_dwg_it_is() {
     let mut s = Session::new();
-    s.dwg = Some(dwg_reader());
-    let path = file("dwg-reader", "site.dwg", "AC1032 a drawing");
-    let r = run(&mut s, "import_cad", json!({"path": path, "link": true, "layers": "all"}));
-    assert_eq!((r["cad"].as_str(), r["source"].as_str(), r["unit"].as_str()), (Some("site"), Some("site.dwg"), Some("m")), "{r}");
-    assert_eq!(r["notes"], json!(["2 of the DWG's object records couldn't be read and were left out"]), "{r}");
-    assert_eq!(s.model.cads["site"].dxf().entities.len(), 6);
-    // Reloaded through it too; a file it can't read says why, and the drawing keeps what it had.
+    let path = dir("dwg-direct").join("site.dwg");
+    std::fs::write(&path, crate::dxf::dwg::sample::plan().unwrap()).unwrap();
+    let r = run(&mut s, "import_cad", json!({"path": path, "link": true, "layers": "all", "at": [0, 0], "position": "origin"}));
+    assert_eq!((r["cad"].as_str(), r["source"].as_str(), r["unit"].as_str()), (Some("site"), Some("site.dwg"), Some("mm")), "{r}");
+    assert_eq!(r["entities"], 11, "{r}");
+    let cad = &s.model.cads["site"];
+    assert!(cad.is_dwg() && cad.same_bytes(&std::fs::read(&path).unwrap()));
+    assert_eq!((cad.dxf().blocks.len(), cad.dxf().inserts.len()), (1, 3));
+    let id = r["id"].as_u64().unwrap();
+    // Read through its placements: the block once, three times placed, each a `block` item; exploded, its circles where
+    // each placement puts them.
+    let summary = run(&mut s, "cad_read", json!({"id": id}));
+    assert_eq!(summary["blocks"][0]["count"], 3, "{summary}");
+    assert_eq!(summary["texts"][0]["text"], "Kitchen", "{summary}");
+    let read = run(&mut s, "cad_read", json!({"id": id, "kinds": ["circle"], "explode": true}));
+    let centres: Vec<&Value> = read["items"].as_array().unwrap().iter().map(|i| &i["c"]).collect();
+    assert_eq!(centres, [&json!([1000.0, 1000.0]), &json!([2000.0, 1000.0]), &json!([3000.0, 2000.0])], "{read}");
+    // Queried where the turned chair's line runs north from its middle.
+    let q = run(&mut s, "cad_query", json!({"id": id, "at": [2000, 1150], "reach": 20}));
+    assert_eq!((q["kind"].as_str(), q["layer"].as_str()), (Some("line"), Some("FURN")), "{q}");
+    // Walls from its lines.
+    let w = run(&mut s, "wall", json!({"cad": {"id": id, "layers": ["WALLS"]}}));
+    assert_eq!(w["ids"].as_array().map(Vec::len), Some(4), "{w}");
+    // Reloaded unchanged; a file that isn't a drawing any more says why, and the drawing keeps what it had.
     assert_eq!(run(&mut s, "reload_cad", json!({"cad": "site"}))["changed"], false);
-    std::fs::write(&path, "not a drawing").unwrap();
+    std::fs::write(&path, "AC1032 not a drawing").unwrap();
     let e = fails(&mut s, "reload_cad", json!({"cad": "site"}));
-    assert!(e.contains("site.dwg") && e.contains("isn't a DWG"), "{e}");
-    assert_eq!(s.model.cads["site"].dxf().entities.len(), 6);
-    // A project file holds the DXF, so one opened where no DWG reader is still has the drawing; the link says why it wasn't
-    // read again.
-    let saved = dir("dwg-reader").join("p.bim");
+    assert!(e.contains("site.dwg"), "{e}");
+    assert_eq!(s.model.cads["site"].dxf().count(), 11);
+    // A project file holds the DWG and reads it again when it opens.
+    let saved = dir("dwg-direct").join("p.bim");
     run(&mut s, "save", json!({"path": saved}));
-    let mut plain = Session::new();
-    let r = run(&mut plain, "open", json!({"path": saved}));
-    assert_eq!(plain.model.cads["site"].dxf().entities.len(), 6);
-    let why = r["cads_not_reloaded"].to_string();
-    assert!(why.contains("site") && why.contains("save it as DXF"), "{r}");
+    let mut again = Session::new();
+    run(&mut again, "open", json!({"path": saved}));
+    assert!(again.model.cads["site"].is_dwg());
+    assert_eq!(again.model.cads["site"].dxf().count(), 11);
 }
 
 #[test]
@@ -735,8 +738,8 @@ fn read_lists_what_matches_in_model_millimetres_a_block_as_one_item_unless_explo
     assert_eq!(r["total"], 15, "{r}");
     assert_eq!(r["items"][10], json!({"n": 10, "kind": "line", "layer": "C-PRKG", "points": [[1000.0, 32000.0], [-1500.0, 32000.0]]}));
     // `n` is the drawing's: what the project holds names the same entity.
-    let held = &s.model.cads["site"].dxf().entities;
-    assert!(matches!(held[10].shape, crate::dxf::Shape::Line(..)) && held[14].layer == "A-FLOR");
+    let held = s.model.cads["site"].dxf();
+    assert!(matches!(held.entity(10).unwrap().shape, crate::dxf::Shape::Line(..)) && held.entity(14).unwrap().layer == "A-FLOR");
 }
 
 #[test]
@@ -1210,4 +1213,107 @@ fn a_dense_drawing_zoomed_out_on_a_screen_draws_its_cells_and_still_picks_and_sn
     let reach = Reach { point: 300.0, line: 300.0 };
     let f = snap(&s.model, one, P2(12_000.0 - 40.0, 8_000.0 + 30.0), reach, &[], false, &Snaps::default());
     assert_eq!((f.kind, f.at), (Kind::Endpoint, P2(12_000.0, 8_000.0)), "{f:?}");
+}
+
+/// A real office DWG where `BIMCRAFT_REAL_DWG` names one (never committed): read straight, blocks placed by reference, and
+/// drawn, snapped to, picked, read and built from, with the time each takes. Prints what it measured.
+#[test]
+fn a_real_dwg_where_one_is_named() {
+    let Ok(path) = std::env::var("BIMCRAFT_REAL_DWG") else { return };
+    let t = std::time::Instant::now();
+    let mut s = Session::new();
+    let r = run(&mut s, "import_cad", json!({"path": path, "layers": "all", "at": [0, 0]}));
+    let read = t.elapsed();
+    let id = r["id"].as_u64().unwrap();
+    let name = r["cad"].as_str().unwrap().to_string();
+    let cad = s.model.cads[&name].clone();
+    let d = cad.dxf();
+    let held: usize = d.entities.len() + d.blocks.iter().map(|b| b.entities.len()).sum::<usize>();
+    println!(
+        "read {read:.2?}: {} entities drawn ({} own, {} blocks holding {held} shapes in all, {} placements), {} layers, unit {}",
+        d.count(),
+        d.entities.len(),
+        d.blocks.len(),
+        d.inserts.len(),
+        d.layers.len(),
+        r["unit"]
+    );
+    assert!(d.count() > dxf_max(), "past what exploding allowed: {}", d.count());
+    let (one, _) = levels(&s);
+    let ext = s.model.cad_box(id).unwrap();
+    let (lo, hi) = (ext[0], ext[1]);
+    let mid = (lo + hi) * 0.5;
+    // Drawn fitted on a screen (its level of detail), then zoomed in on a part, and on paper.
+    let fit = crate::prim::View { scale: 1500.0 / (hi.0 - lo.0).max(hi.1 - lo.1), cx: mid.0, cy: mid.1, width: 1600, height: 1000 };
+    let t = std::time::Instant::now();
+    let screen = render::draw(&s.model, one, fit);
+    println!("drawn fitted (first, makes its level of detail) {:.2?}: {} primitives", t.elapsed(), screen.prims.len());
+    let t = std::time::Instant::now();
+    let again = render::draw(&s.model, one, fit);
+    println!("drawn fitted again {:.2?}: {} primitives", t.elapsed(), again.prims.len());
+    let near = crate::prim::View { scale: 0.05, ..fit };
+    let t = std::time::Instant::now();
+    let zoomed = render::draw(&s.model, one, near);
+    println!("drawn zoomed in (0.05 px a mm) {:.2?}: {} primitives", t.elapsed(), zoomed.prims.len());
+    if let Ok(out) = std::env::var("BIMCRAFT_REAL_DWG_PNG") {
+        std::fs::write(&out, render::png(&screen).unwrap()).unwrap();
+        std::fs::write(out.replace(".png", "-zoomed.png"), render::png(&zoomed).unwrap()).unwrap();
+    }
+    // Picked where it draws, as one element.
+    let picked = (0..400).find_map(|k| {
+        let p = P2(lo.0 + (hi.0 - lo.0) * f64::from(k % 20) / 20.0, lo.1 + (hi.1 - lo.1) * f64::from(k / 20) / 20.0);
+        zoomed.pick(near.px(p), 3.0).filter(|o| *o == id).map(|_| p)
+    });
+    println!("picked: {picked:?}");
+    // Read: the summary, and a placement's entities exploded where it lands.
+    let t = std::time::Instant::now();
+    let summary = run(&mut s, "cad_read", json!({"id": id}));
+    println!(
+        "cad_read summary {:.2?}: {} blocks, first {}",
+        t.elapsed(),
+        summary["blocks"].as_array().map_or(0, Vec::len),
+        summary["blocks"][0]
+    );
+    let ins = &d.inserts[d.inserts.len() / 2];
+    let page = run(&mut s, "cad_read", json!({"id": id, "start": ins.entities.start, "limit": 5, "explode": true}));
+    println!("a placement's entities: {}", page["items"].to_string().chars().take(400).collect::<String>());
+    // Snapped to: the nearest corner of what is near the middle of a placement.
+    let at = crate::cad::placed(
+        &ins.place(&d.blocks[ins.block].entities[0]).shape,
+        s.model
+            .elements
+            .get(id)
+            .and_then(|e| match e {
+                crate::model::Element::CadImport(ci) => Some(ci),
+                _ => None,
+            })
+            .unwrap(),
+    );
+    let probe = at.bounds()[0] + P2(3.0, 3.0);
+    let t = std::time::Instant::now();
+    let f = snap(&s.model, one, probe, Reach { point: 300.0, line: 300.0 }, &[], false, &Snaps::default());
+    println!("snapped near {probe:?} in {:.2?}: {:?} at {:?}", t.elapsed(), f.kind, f.at);
+    // Outlines and walls from the lines of the busiest layer with "WALL" in its name, inside a part of the drawing.
+    let wall_layer =
+        summary["layers"].as_array().unwrap().iter().filter_map(|l| l["name"].as_str()).find(|n| n.to_uppercase().contains("WALL"));
+    if let Some(layer) = wall_layer {
+        let t = std::time::Instant::now();
+        let o = run(&mut s, "cad_outlines", json!({"id": id, "layers": [layer]}));
+        println!("cad_outlines on {layer} {:.2?}: {} outlines", t.elapsed(), o["outlines"].as_array().map_or(0, Vec::len));
+        let quarter =
+            [[mid.0 - (hi.0 - lo.0) / 8.0, mid.1 - (hi.1 - lo.1) / 8.0], [mid.0 + (hi.0 - lo.0) / 8.0, mid.1 + (hi.1 - lo.1) / 8.0]];
+        let t = std::time::Instant::now();
+        match s.execute("wall", &json!({"cad": {"id": id, "layers": [layer], "box": quarter}})) {
+            Ok(w) => println!(
+                "walls from {layer}'s lines in the middle {:.2?}: {}",
+                t.elapsed(),
+                w.to_string().chars().take(200).collect::<String>()
+            ),
+            Err(e) => println!("walls from {layer}'s lines: {e}"),
+        }
+    }
+}
+
+fn dxf_max() -> usize {
+    crate::dxf::MAX_SHAPES
 }

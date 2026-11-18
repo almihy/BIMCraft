@@ -476,8 +476,8 @@ fn cad_scene(
     let Some([lo, hi]) = crate::dxf::union(corners) else { return };
     let near = |b: [P2; 2]| b[0].0 <= hi.0 && b[1].0 >= lo.0 && b[0].1 <= hi.1 && b[1].1 >= lo.1;
     // Only those whose boxes reach the window: a dense sheet's hundreds of thousands are never all looked at.
-    let entities = &cad.dxf().entities;
-    for e in cad.entities_in(lo, hi).into_iter().filter_map(|i| entities.get(i)) {
+    for e in cad.entities_in(lo, hi).into_iter().filter_map(|i| cad.dxf().entity(i)) {
+        let e = &*e;
         if !cad.shows(e, &ci.hidden) || in_view.is_some_and(|h| h.contains(&e.layer)) {
             continue;
         }

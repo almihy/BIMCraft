@@ -95,10 +95,13 @@ pub(crate) fn insert_as(to: &mut Model, from: &Model, ids: &[Id], linked: bool) 
         });
         let left = phasing_here(to, &mut e);
         let taken = to.elements.contains_key(id) || to.library.get(id).is_some();
-        let new = if linked || taken || id < crate::model::FIRST_ID { to.fresh_id() } else { id };
+        // A copy editing together with others takes every id from its blocks: the other project's would be any copy's.
+        let new = if linked || taken || id < crate::model::FIRST_ID || to.blocks.given() { to.fresh_id() } else { id };
         let guid = instead.get(&g).copied().unwrap_or(g);
         to.elements.insert_as(new, guid, e)?;
-        to.next_id = to.next_id.max(new + 1);
+        if !linked {
+            to.counted(new);
+        }
         out.left_out.extend(left.into_iter().map(|why| format!("element {new}: {why}")));
         if guid != g {
             out.copies.push(new);

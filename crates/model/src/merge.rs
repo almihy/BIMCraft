@@ -36,6 +36,8 @@ pub const WAITING_TRIES: u32 = 20;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Wait {
     pub text: String,
+    /// The id an element was told with ([`Changes::ids`]): given it when it is taken in, as it would have been at once.
+    pub id: Option<Id>,
     /// How many times it has been offered again and still waits.
     pub tried: u32,
 }

@@ -62,20 +62,18 @@ and libm (MIT). The guest SDK (crates/plugin-sdk) has no runtime of its own.
 DWG drawings: acadrust and ACadSharp
 ==============================================================================
 
-The desktop app and the command line, built with their default `dwg` feature,
-read DWG drawings through BIMCraft's bridge (crates/dwg, MIT OR Apache-2.0),
-which uses the acadrust crate, version 0.6.6, unmodified, as a separate
-library:
+BIMCraft reads DWG drawings through CADCraft's DWG reader (cadcraft-dwg, from
+the fork at https://github.com/almihy/cadcraft, MIT OR Apache-2.0), which uses
+the acadrust crate, version 0.6.8, unmodified, as a separate library:
 
   acadrust  MPL-2.0  reads DWG files
     by Hakan AK (its authors, as its manifest names them)
     https://github.com/hakanaktt/acadrust
-    https://crates.io/crates/acadrust/0.6.6
+    https://crates.io/crates/acadrust/0.6.8
 
 The Mozilla Public License 2.0 applies to acadrust's own files only. Their
 source, unchanged, is at the addresses above; the licence's text is at
-https://mozilla.org/MPL/2.0/. A build without the `dwg` feature
-(`--no-default-features`) holds none of it.
+https://mozilla.org/MPL/2.0/.
 
 acadrust's DWG reader holds code ported from ACadSharp, which carries this
 notice:

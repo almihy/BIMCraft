@@ -31,6 +31,9 @@ use crate::prim::Rgb;
 
 /// Entities a drawing needs before it is drawn simplified zoomed out: a sparser one is drawn whole quickly.
 pub const LOD_FROM: usize = 10_000;
+/// The most entities (its placements' among them) a drawing may draw to have one: past it, its boxes, layers and colours
+/// held for each would be too much, and it draws entity by entity.
+pub const LOD_MOST: usize = 8_000_000;
 /// Each band's cells across the long side of the drawing's bulk, coarsest first.
 pub const BANDS: [u32; 7] = [64, 128, 256, 512, 1024, 2048, 4096];
 /// An entity no more than this many of a band's cells across goes in its cells; a bigger one is drawn itself.
@@ -254,7 +257,8 @@ impl Lod {
     /// The level of detail of drawing `d`, over its `bulk`, its entities in the colours `color` gives (none, the view's ink):
     /// none for a drawing too sparse to need one, of no bulk, or of more layers than a mark can name.
     pub fn new(d: &Dxf, bulk: Option<[P2; 2]>, color: &dyn Fn(&Entity) -> Option<Rgb>) -> Option<Lod> {
-        if d.entities.len() < LOD_FROM {
+        let count = d.count();
+        if !(LOD_FROM..=LOD_MOST).contains(&count) {
             return None;
         }
         let [lo, hi] = bulk?;
@@ -263,15 +267,16 @@ impl Lod {
             return None;
         }
         let mut layers: Vec<String> = Vec::new();
-        let mut known: HashMap<&str, u16> = HashMap::new();
-        let mut layer_of = Vec::with_capacity(d.entities.len());
+        let mut known: HashMap<String, u16> = HashMap::new();
+        let mut layer_of = Vec::with_capacity(count);
         let mut colors: Vec<(Option<Rgb>, bool)> = Vec::new();
         let mut color_at: HashMap<Held, u8> = HashMap::new();
-        let mut color_of = Vec::with_capacity(d.entities.len());
-        let mut boxes = Vec::with_capacity(d.entities.len());
+        let mut color_of = Vec::with_capacity(count);
+        let mut boxes = Vec::with_capacity(count);
         // A colour by layer is its layer's: looked up once a layer.
         let mut by_layer: Vec<Option<Option<Rgb>>> = Vec::new();
-        for e in &d.entities {
+        for e in d.iter() {
+            let e = &*e;
             boxes.push(bounds(&e.shape));
             let n = match known.get(e.layer.as_str()) {
                 Some(n) => *n,
@@ -281,7 +286,7 @@ impl Lod {
                     }
                     layers.push(e.layer.clone());
                     let n = (layers.len() - 1) as u16;
-                    known.insert(e.layer.as_str(), n);
+                    known.insert(e.layer.clone(), n);
                     n
                 }
             };
@@ -386,7 +391,6 @@ impl Lod {
         let small = |b: &[f64; 4]| inside(b) && (b[2] - b[0]).max(b[3] - b[1]) <= SMALL_CELLS * cell;
         let most = self.most.0.min(self.most.1.saturating_sub(self.held.load(Ordering::Relaxed)));
         let laid: f64 = d
-            .entities
             .iter()
             .zip(&self.boxes)
             .filter(|(_, b)| small(&b.map(f64::from)))
@@ -405,7 +409,7 @@ impl Lod {
         // Big entities drawn themselves: those before picture k at k, the last after them all.
         let mut wholes: Vec<Vec<u32>> = Vec::new();
         let mut held = 0_usize;
-        for (i, e) in d.entities.iter().enumerate() {
+        for (i, e) in d.numbered() {
             let (Some(b), Some(&layer)) = (self.entity_box(i), self.layer_of.get(i)) else { continue };
             let ink = Ink { color: self.color_of.get(i).copied().unwrap_or(0), alpha: f64::from(e.alpha) / 255.0 };
             // A text's box is its letters', turned and aligned; one of numbers that aren't is drawn itself.

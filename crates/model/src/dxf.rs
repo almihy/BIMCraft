@@ -10,10 +10,14 @@ use std::collections::{BTreeMap, HashMap};
 use crate::geom::P2;
 use crate::prim::Rgb;
 
+pub mod dwg;
+
 /// What a file may be before it's refused, bytes.
 pub const MAX_BYTES: usize = 128 << 20;
-/// The most shapes a drawing may hold once its blocks are placed.
+/// The most shapes a drawing may hold: model space's own and its blocks', a block held once however often it is placed.
 pub const MAX_SHAPES: usize = 1_000_000;
+/// The most entities a drawing's placements of blocks may draw among them.
+pub const MAX_PLACED: usize = 16_000_000;
 /// How deep a block may be inside a block.
 pub const MAX_DEPTH: usize = 16;
 /// How far a file's coordinates may lie from its origin, in its own unit.
@@ -310,8 +314,19 @@ pub struct Entity {
     pub shape: Shape,
 }
 
-/// A block placed in model space by an INSERT (one for each cell of its array): what it placed is `entities`, a range of
-/// [`Dxf::entities`], blocks nested in it included. A DIMENSION's block is no placement.
+/// A block definition model space places, held once however many times it is placed: its entities in its own frame (its
+/// base at the origin), the blocks nested in it placed into it. An entity of it on layer 0 takes the layer of what places
+/// it, one by block its colour and linetype ([`Insert::place`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Block {
+    pub name: String,
+    pub entities: Vec<Entity>,
+}
+
+/// A block placed in model space by an INSERT (one for each cell of its array): the block it draws ([`Dxf::blocks`]) and
+/// where. What it draws are the drawing's entities `entities` (their numbers, as [`Dxf::entity`] takes them), blocks nested
+/// in it included: one for each of its block's, made as they are asked for and never held. A DIMENSION's block is no
+/// placement.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Insert {
     /// The block's name.
@@ -324,12 +339,46 @@ pub struct Insert {
     pub angle: f64,
     /// Its scale along the block's x and y, as the file says.
     pub scale: [f64; 2],
-    /// The entities it placed.
+    /// The entities it draws.
     pub entities: std::ops::Range<usize>,
+    /// The block it draws, in [`Dxf::blocks`].
+    pub block: usize,
+    /// Where its block's frame lands in the drawing.
+    pub xf: Xf,
+    /// The INSERT's colour and linetype, which its block's entities by block take.
+    pub color: Color,
+    pub linetype: Option<String>,
+    /// How many of the drawing's own entities come before it.
+    pub own: usize,
 }
 
-/// A DXF file read: what it draws, in its own unit.
-#[derive(Clone, Debug, PartialEq)]
+/// What stands for "by block" among a block's entities' linetypes, until a placement gives its own.
+const BYBLOCK: &str = "\u{0}BYBLOCK";
+
+impl Insert {
+    /// The layer entity `e` of its block is on, placed by it: its own, or this placement's for one on layer 0.
+    pub fn layer_for<'a>(&'a self, e: &'a Entity) -> &'a str {
+        if e.layer == "0" { &self.layer } else { &e.layer }
+    }
+
+    /// Entity `e` of its block as this placement draws it: where it lands, on its layer, in its colour and linetype.
+    pub fn place(&self, e: &Entity) -> Entity {
+        Entity {
+            layer: self.layer_for(e).to_string(),
+            color: if e.color == Color::ByBlock { self.color } else { e.color },
+            linetype: match e.linetype.as_deref() {
+                Some(BYBLOCK) => self.linetype.clone(),
+                _ => e.linetype.clone(),
+            },
+            weight: e.weight,
+            alpha: e.alpha,
+            shape: transformed(e.shape.clone(), self.xf),
+        }
+    }
+}
+
+/// A DXF file read: what it draws, in its own unit. The default draws nothing.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Dxf {
     /// Millimetres to the drawing's unit, from `$INSUNITS`; none when the file is unitless, or in a unit no building is
     /// drawn in, and the user says.
@@ -343,8 +392,11 @@ pub struct Dxf {
     pub linetypes: Vec<Linetype>,
     /// `$LTSCALE`: what every linetype's dashes are multiplied by.
     pub ltscale: f64,
+    /// Model space's own entities, in file order: all it draws but what its placements of blocks do.
     pub entities: Vec<Entity>,
-    /// The blocks model space places, in file order: each placement that placed any entity.
+    /// The blocks model space places, each once.
+    pub blocks: Vec<Block>,
+    /// The blocks model space places, in file order: each placement that draws any entity.
     pub inserts: Vec<Insert>,
     /// `$EXTMIN` and `$EXTMAX`, the drawing's extents as the file says them.
     pub extents: Option<[P2; 2]>,
@@ -361,7 +413,58 @@ impl Dxf {
 
     /// The box round everything drawn, drawing units: an arc's or circle's whole circle, a text's point.
     pub fn bounds(&self) -> Option<[P2; 2]> {
-        union(self.entities.iter().map(|e| e.shape.bounds()))
+        union(self.iter().map(|e| e.shape.bounds()))
+    }
+
+    /// How many entities it draws: its own and its placements'. Entity `n`, from 0 to this, is [`Dxf::entity`]`(n)`, in
+    /// the drawing's order: an entity of its own, or one of a placement's, which are numbered one after the other where the
+    /// placement is.
+    pub fn count(&self) -> usize {
+        self.entities.len() + self.inserts.last().map_or(0, |i| i.entities.end - i.own)
+    }
+
+    /// Entity `n` as it is held: the placement that draws it (none for one of model space's own) and the entity, of the
+    /// placement's block (in its frame, see [`Insert::place`]) or of model space.
+    pub fn held(&self, n: usize) -> Option<(Option<&Insert>, &Entity)> {
+        let k = self.inserts.partition_point(|i| i.entities.start <= n);
+        let Some(ins) = k.checked_sub(1).and_then(|k| self.inserts.get(k)) else { return Some((None, self.entities.get(n)?)) };
+        if n < ins.entities.end {
+            let block = self.blocks.get(ins.block)?;
+            return Some((Some(ins), block.entities.get(n - ins.entities.start)?));
+        }
+        Some((None, self.entities.get(ins.own + (n - ins.entities.end))?))
+    }
+
+    /// Entity `n` as the drawing draws it ([`Dxf::count`]): one of its own as it is, a placement's made now.
+    pub fn entity(&self, n: usize) -> Option<Cow<'_, Entity>> {
+        Some(match self.held(n)? {
+            (None, e) => Cow::Borrowed(e),
+            (Some(ins), e) => Cow::Owned(ins.place(e)),
+        })
+    }
+
+    /// The layer entity `n` is on, without placing it.
+    pub fn layer_of(&self, n: usize) -> Option<&str> {
+        Some(match self.held(n)? {
+            (None, e) => &e.layer,
+            (Some(ins), e) => ins.layer_for(e),
+        })
+    }
+
+    /// Every entity it draws, in its order, as [`Dxf::entity`] gives each.
+    pub fn iter(&self) -> impl Iterator<Item = Cow<'_, Entity>> + '_ {
+        self.numbered().map(|(_, e)| e)
+    }
+
+    /// [`Dxf::iter`] with each entity's number.
+    pub fn numbered(&self) -> impl Iterator<Item = (usize, Cow<'_, Entity>)> + '_ {
+        (0..self.count()).filter_map(|n| Some((n, self.entity(n)?)))
+    }
+
+    /// The number of model space's own entity `i` ([`Dxf::entities`]) among all it draws.
+    pub fn own_n(&self, i: usize) -> usize {
+        let k = self.inserts.partition_point(|ins| ins.own <= i);
+        i + k.checked_sub(1).and_then(|k| self.inserts.get(k)).map_or(0, |ins| ins.entities.end - ins.own)
     }
 }
 
@@ -612,7 +715,7 @@ impl<'a> Ent<'a> {
 
 // ---------- the sections ----------
 
-struct Block<'a> {
+struct Def<'a> {
     base: P2,
     ents: Vec<Ent<'a>>,
 }
@@ -623,7 +726,7 @@ struct Reader<'a> {
     header: HashMap<&'a str, Vec<(i32, &'a str)>>,
     layers: Vec<Layer>,
     linetypes: Vec<Linetype>,
-    blocks: HashMap<String, Block<'a>>,
+    blocks: HashMap<String, Def<'a>>,
     /// The ENTITIES section's, once seen.
     ents: Option<Vec<Ent<'a>>>,
 }
@@ -667,21 +770,10 @@ impl<'a> Reader<'a> {
             (Some(lo), Some(hi)) if lo.0 <= hi.0 && lo.1 <= hi.1 => Some([lo, hi]),
             _ => None,
         };
-        let mut out = Out { entities: Vec::new(), inserts: Vec::new(), left_out: BTreeMap::new(), work: 0 };
+        let mut out = Out::default();
         self.place(&mut out, &ents, Xf::ID, None, 0)?;
         let mut layers = std::mem::take(&mut self.layers);
-        for e in &out.entities {
-            if !layers.iter().any(|l| l.name == e.layer) {
-                layers.push(Layer {
-                    name: e.layer.clone(),
-                    color: Color::Index(7),
-                    linetype: "Continuous".into(),
-                    weight: None,
-                    off: false,
-                    frozen: false,
-                });
-            }
-        }
+        out.missing_layers(&mut layers);
         Ok(Dxf {
             scale,
             unit: unit.into(),
@@ -690,6 +782,7 @@ impl<'a> Reader<'a> {
             linetypes: std::mem::take(&mut self.linetypes),
             ltscale,
             entities: out.entities,
+            blocks: out.blocks,
             inserts: out.inserts,
             extents,
             left_out: out.left_out,
@@ -783,7 +876,7 @@ impl<'a> Reader<'a> {
     }
 
     fn blocks(&mut self) -> Result<(), String> {
-        let mut open: Option<(String, Block<'a>)> = None;
+        let mut open: Option<(String, Def<'a>)> = None;
         while let Some((code, value)) = self.p.next()? {
             if code != 0 {
                 continue;
@@ -793,7 +886,7 @@ impl<'a> Reader<'a> {
                 "BLOCK" => {
                     let e = self.entity("BLOCK")?;
                     let name = e.str(2).unwrap_or("").to_string();
-                    open = Some((name, Block { base: e.point(10)?.unwrap_or(P2(0.0, 0.0)), ents: Vec::new() }));
+                    open = Some((name, Def { base: e.point(10)?.unwrap_or(P2(0.0, 0.0)), ents: Vec::new() }));
                 }
                 "ENDBLK" => {
                     self.entity("ENDBLK")?;
@@ -856,8 +949,8 @@ fn weight(v: Option<i64>) -> Option<f64> {
 // ---------- placing ----------
 
 /// Where a block's entities go: `p` lands on `o + x * p.0 + y * p.1`.
-#[derive(Clone, Copy)]
-struct Xf {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Xf {
     o: P2,
     x: P2,
     y: P2,
@@ -868,8 +961,38 @@ impl Xf {
     /// What an extrusion pointing down does: x the other way.
     const MIRROR_X: Xf = Xf { o: P2(0.0, 0.0), x: P2(-1.0, 0.0), y: P2(0.0, 1.0) };
 
-    fn at(self, p: P2) -> P2 {
+    /// Where point `p` lands.
+    pub fn at(self, p: P2) -> P2 {
         self.o + self.x * p.0 + self.y * p.1
+    }
+
+    /// Where a point that lands on `q` came from; none when it flattens everything to a line.
+    pub fn back(self, q: P2) -> Option<P2> {
+        let det = self.x.cross(self.y);
+        if !det.is_normal() {
+            return None;
+        }
+        let d = q - self.o;
+        Some(P2(d.cross(self.y) / det, self.x.cross(d) / det))
+    }
+
+    /// The box round where the box from `lo` to `hi` lands.
+    pub fn boxed(self, lo: P2, hi: P2) -> Option<[P2; 2]> {
+        union([lo, P2(hi.0, lo.1), hi, P2(lo.0, hi.1)].map(|p| {
+            let q = self.at(p);
+            [q, q]
+        }))
+    }
+
+    /// The box round where the box from `lo` to `hi` came from; none when it flattens everything.
+    pub fn boxed_back(self, lo: P2, hi: P2) -> Option<[P2; 2]> {
+        let corners = [lo, P2(hi.0, lo.1), hi, P2(lo.0, hi.1)];
+        let mut back = Vec::with_capacity(4);
+        for p in corners {
+            let q = self.back(p)?;
+            back.push([q, q]);
+        }
+        union(back)
     }
 
     fn vec(self, v: P2) -> P2 {
@@ -898,12 +1021,29 @@ struct Inherit<'b> {
     linetype: Option<&'b str>,
 }
 
+/// What a drawing is read into: model space's own entities, the blocks it places (each once) and the placements, what was
+/// left out, and the bounds' counts.
+#[derive(Default)]
 struct Out {
     entities: Vec<Entity>,
     inserts: Vec<Insert>,
+    blocks: Vec<Block>,
+    /// Each block made, by name: its place in `blocks`, what its entities leave out (each placement leaves it out again), and
+    /// the box round it; none for one that draws nothing.
+    made: HashMap<String, (Option<usize>, BTreeMap<String, usize>)>,
+    /// The box round each block's entities, in its frame.
+    boxes: Vec<[P2; 2]>,
     left_out: BTreeMap<String, usize>,
     work: usize,
+    /// Shapes held, model space's and its blocks'.
+    held: usize,
+    /// Entities the placements draw.
+    placed: usize,
 }
+
+/// What a block's entities take from the INSERT that places them, made once for all its placements: layer 0, by block,
+/// kept so, each placement giving its own ([`Insert::place`]).
+const PLACED: Inherit<'static> = Inherit { layer: "0", color: Color::ByBlock, linetype: Some(BYBLOCK) };
 
 impl Out {
     fn left(&mut self, what: &str) {
@@ -916,11 +1056,98 @@ impl Out {
             self.left("past what a drawing holds");
             return Ok(());
         }
-        if self.entities.len() >= MAX_SHAPES {
+        if self.held >= MAX_SHAPES {
             return Err(format!("it draws more than {MAX_SHAPES} shapes; up to that many"));
         }
+        self.held += 1;
         self.entities.push(e);
         Ok(())
+    }
+
+    /// Block `name` as placements draw it, made the first time (`make` puts its entities, in its own frame, its base at the
+    /// origin, into the `Out` it is given, and says whether the drawing defines it): its place in `blocks`, none when it isn't
+    /// defined or draws nothing.
+    fn block(&mut self, name: &str, make: impl FnOnce(&mut Out) -> Result<bool, String>) -> Result<Option<usize>, String> {
+        if !self.made.contains_key(name) {
+            let mut inner = Out { work: self.work, held: self.held, ..Out::default() };
+            let defined = make(&mut inner)?;
+            self.work = inner.work;
+            self.held = inner.held;
+            let bx = union(inner.entities.iter().map(|e| e.shape.bounds())).filter(|_| defined);
+            let made = bx.map(|bx| {
+                self.blocks.push(Block { name: name.chars().take(MAX_CHARS).collect(), entities: inner.entities });
+                self.boxes.push(bx);
+                self.blocks.len() - 1
+            });
+            self.made.insert(name.to_string(), (made, inner.left_out));
+        }
+        let Some((made, left)) = self.made.get(name) else { return Ok(None) };
+        let b = *made;
+        for (what, n) in left.clone() {
+            *self.left_out.entry(what).or_default() += n;
+        }
+        Ok(b)
+    }
+
+    /// A placement of block `b` by `xf`, the INSERT's `style`, at `at`, turned `angle` and scaled `scale` as the file says.
+    fn place(&mut self, b: usize, xf: Xf, style: &Style, at: P2, angle: f64, scale: [f64; 2]) -> Result<(), String> {
+        // Each placement (each cell of an array) is work, and is held: a hostile array of a small block is refused before
+        // it holds more placements than a drawing may hold shapes, not after it has run the memory out.
+        self.work += 1;
+        if self.work > MAX_WORK {
+            return Err(format!("its blocks place more than {MAX_WORK} entities; up to that many"));
+        }
+        if self.inserts.len() >= MAX_SHAPES {
+            return Err(format!("it places blocks more than {MAX_SHAPES} times; up to that many"));
+        }
+        let Some((name, count)) = self.blocks.get(b).map(|k| (k.name.clone(), k.entities.len())) else { return Ok(()) };
+        let fits = self.boxes.get(b).copied().and_then(|[lo, hi]| xf.boxed(lo, hi)).is_some_and(|[lo, hi]| {
+            let ok = |x: f64| x.is_finite() && x.abs() <= MAX_FILE_COORD;
+            ok(lo.0) && ok(lo.1) && ok(hi.0) && ok(hi.1)
+        });
+        if !fits {
+            *self.left_out.entry("past what a drawing holds".into()).or_default() += count;
+            return Ok(());
+        }
+        if self.placed + count > MAX_PLACED {
+            return Err(format!("its blocks place more than {MAX_PLACED} entities; up to that many"));
+        }
+        let start = self.entities.len() + self.placed;
+        self.placed += count;
+        self.inserts.push(Insert {
+            name,
+            layer: style.layer.clone(),
+            at,
+            angle,
+            scale,
+            entities: start..start + count,
+            block: b,
+            xf,
+            color: style.color,
+            linetype: style.linetype.clone(),
+            own: self.entities.len(),
+        });
+        Ok(())
+    }
+
+    /// The layers named by what it holds that `layers` doesn't have, added with defaults: an entity's, a block's (but layer 0,
+    /// which a placement's stands for) and a placement's.
+    fn missing_layers(&self, layers: &mut Vec<Layer>) {
+        let blocks = self.blocks.iter().flat_map(|b| &b.entities).map(|e| e.layer.as_str()).filter(|l| *l != "0");
+        let names = self.entities.iter().map(|e| e.layer.as_str()).chain(blocks).chain(self.inserts.iter().map(|i| i.layer.as_str()));
+        let mut known: std::collections::HashSet<String> = layers.iter().map(|l| l.name.clone()).collect();
+        for name in names {
+            if known.insert(name.to_string()) {
+                layers.push(Layer {
+                    name: name.to_string(),
+                    color: Color::Index(7),
+                    linetype: "Continuous".into(),
+                    weight: None,
+                    off: false,
+                    frozen: false,
+                });
+            }
+        }
     }
 }
 
@@ -1110,25 +1337,31 @@ impl<'a> Reader<'a> {
         // Through the extrusion's mirror, which is all that is above a placement in model space, the turn is mirrored too.
         let degrees = e.num(50)?.unwrap_or(0.0);
         let angle = if xf.x.0 < 0.0 { 180.0 - degrees } else { degrees }.rem_euclid(360.0);
+        // Placed by model space, the block is made once, in its own frame, and each cell of the array places it.
+        let made = if depth == 0 { self.made(out, name)? } else { None };
         for row in 0..rows {
             for col in 0..cols {
                 let o = at + ex * (dx * col as f64) + ey * (dy * row as f64);
                 let local = Xf { o, x: ex * sx, y: ey * sy };
-                let first = out.entities.len();
-                self.block(out, name, style, xf.then(local), depth)?;
-                if depth == 0 && out.entities.len() > first {
-                    out.inserts.push(Insert {
-                        name: name.chars().take(MAX_CHARS).collect(),
-                        layer: style.layer.clone(),
-                        at: xf.at(o),
-                        angle,
-                        scale: [sx, sy],
-                        entities: first..out.entities.len(),
-                    });
+                match made {
+                    Some(b) => out.place(b, xf.then(local), style, xf.at(o), angle, [sx, sy])?,
+                    None if depth == 0 => {}
+                    None => self.block(out, name, style, xf.then(local), depth)?,
                 }
             }
         }
         Ok(())
+    }
+
+    /// Block `name` made for placements ([`Out::block`]): its entities in its own frame, taking layer 0 and by block from
+    /// each placement.
+    fn made(&self, out: &mut Out, name: &str) -> Result<Option<usize>, String> {
+        let Some(block) = self.blocks.get(name) else {
+            out.left("INSERT of a block the file doesn't define");
+            return Ok(None);
+        };
+        let unbased = Xf { o: P2(-block.base.0, -block.base.1), ..Xf::ID };
+        out.block(name, |inner| self.place(inner, &block.ents, unbased, Some(&PLACED), 1).map(|()| true))
     }
 
     /// The block named, its base on `xf`'s origin.
@@ -1249,10 +1482,15 @@ fn bulge_points(a: P2, b: P2, bulge: f64) -> Vec<P2> {
 
 fn ellipse(e: &Ent) -> Result<Option<Shape>, String> {
     let (Some(c), Some(m), Some(ratio)) = (e.point(10)?, e.point(11)?, e.num(40)?) else { return Ok(None) };
+    Ok(ellipse_shape(c, m, ratio, e.num(41)?.unwrap_or(0.0), e.num(42)?.unwrap_or(std::f64::consts::TAU)))
+}
+
+/// The ellipse round `c` with major axis `m` (from its centre), its minor `ratio` of that, from parameter `u0` to `u1`
+/// (radians), as a polyline.
+fn ellipse_shape(c: P2, m: P2, ratio: f64, u0: f64, u1: f64) -> Option<Shape> {
     if ratio <= 0.0 || m.length() == 0.0 {
-        return Ok(None);
+        return None;
     }
-    let (u0, u1) = (e.num(41)?.unwrap_or(0.0), e.num(42)?.unwrap_or(std::f64::consts::TAU));
     let mut sweep = (u1 - u0).rem_euclid(std::f64::consts::TAU);
     let whole = sweep < 1e-9;
     if whole {
@@ -1269,27 +1507,30 @@ fn ellipse(e: &Ent) -> Result<Option<Shape>, String> {
     if whole {
         pts.pop();
     }
-    Ok(Some(Shape::Polyline { pts, closed: whole }))
+    Some(Shape::Polyline { pts, closed: whole })
 }
 
 fn spline(e: &Ent) -> Result<Option<Shape>, String> {
     let flags = e.int(70)?.unwrap_or(0);
-    let closed = flags & 1 != 0;
-    let degree = e.int(71)?.unwrap_or(3).clamp(1, 11) as usize;
-    let knots = e.all(40)?;
-    let controls = e.points(10, 41)?;
-    let fit = e.points(11, 0)?;
+    let fit: Vec<P2> = e.points(11, 0)?.into_iter().map(|(p, _)| p).collect();
+    Ok(spline_shape(e.int(71)?.unwrap_or(3), flags & 1 != 0, &e.all(40)?, &e.points(10, 41)?, fit))
+}
+
+/// A spline of `degree` over `knots`, its `controls` each with its weight (0 or none: 1), or else through its `fit` points, as
+/// a polyline.
+fn spline_shape(degree: i64, closed: bool, knots: &[f64], controls: &[(P2, f64)], fit: Vec<P2>) -> Option<Shape> {
+    let degree = degree.clamp(1, 11) as usize;
     if controls.len() > degree && knots.len() == controls.len() + degree + 1 {
         let weighted: Vec<(P2, f64)> = controls.iter().map(|(p, w)| (*p, if *w > 0.0 { *w } else { 1.0 })).collect();
-        let (Some(&u0), Some(&u1)) = (knots.get(degree), knots.get(controls.len())) else { return Ok(None) };
+        let (Some(&u0), Some(&u1)) = (knots.get(degree), knots.get(controls.len())) else { return None };
         let n = ((controls.len() - degree) * SPLINE_STEPS).clamp(SPLINE_STEPS, MAX_SPLINE_POINTS);
-        let pts: Vec<P2> = (0..=n).filter_map(|i| de_boor(degree, &knots, &weighted, u0 + (u1 - u0) * i as f64 / n as f64)).collect();
-        return Ok((pts.len() >= 2).then_some(Shape::Polyline { pts, closed }));
+        let pts: Vec<P2> = (0..=n).filter_map(|i| de_boor(degree, knots, &weighted, u0 + (u1 - u0) * i as f64 / n as f64)).collect();
+        return (pts.len() >= 2).then_some(Shape::Polyline { pts, closed });
     }
     if fit.len() >= 2 {
-        return Ok(Some(Shape::Polyline { pts: fit.into_iter().map(|(p, _)| p).collect(), closed }));
+        return Some(Shape::Polyline { pts: fit, closed });
     }
-    Ok(None)
+    None
 }
 
 /// The point at `u` of the B-spline of `degree` over `knots` with weighted `controls`, by de Boor's recurrence in
@@ -1419,40 +1660,70 @@ fn decode(s: &str, mtext: bool) -> String {
 
 fn text(e: &Ent) -> Result<Option<Shape>, String> {
     let (Some(first), Some(height), Some(words)) = (e.point(10)?, e.num(40)?, e.str(1)) else { return Ok(None) };
-    if height <= 0.0 {
-        return Ok(None);
-    }
-    let words = decode(words, false).replace('\n', " ");
-    if words.trim().is_empty() {
-        return Ok(None);
-    }
-    let (h, v) = (e.int(72)?.unwrap_or(0), e.int(73)?.unwrap_or(0));
-    let second = e.point(11)?;
-    let (at, align) = match (h, v, second) {
-        (0, 0, _) | (3 | 5, _, _) | (_, _, None) => (first, Align { h: Horizontal::Left, v: Vertical::Baseline }),
-        (4, _, Some(p)) => (p, Align { h: Horizontal::Center, v: Vertical::Middle }),
-        (h, v, Some(p)) => {
-            let h = match h {
-                1 => Horizontal::Center,
-                2 => Horizontal::Right,
-                _ => Horizontal::Left,
-            };
-            let v = match v {
-                1 => Vertical::Bottom,
-                2 => Vertical::Middle,
-                3 => Vertical::Top,
-                _ => Vertical::Baseline,
-            };
-            (p, Align { h, v })
-        }
-    };
     let tag = (e.kind == "ATTRIB").then(|| e.str(2).map(|t| t.trim().to_string())).flatten().filter(|t| !t.is_empty());
-    let wide = e.num(41)?.filter(|w| *w > 0.0).map_or(1.0, |w| w.clamp(0.01, 100.0));
-    // Backward (2) reads it mirrored; upside down (4) is that turned half round.
-    let flags = e.int(71)?.unwrap_or(0);
-    let (backward, upside) = (flags & 2 != 0, flags & 4 != 0);
-    let angle = e.num(50)?.unwrap_or(0.0) + if upside { 180.0 } else { 0.0 };
-    Ok(Some(Shape::Text { at, height, angle, text: words, align, tag, wide, mirrored: backward != upside }))
+    let line = Line {
+        first,
+        second: e.point(11)?,
+        height,
+        align: (e.int(72)?.unwrap_or(0), e.int(73)?.unwrap_or(0)),
+        wide: e.num(41)?,
+        flags: e.int(71)?.unwrap_or(0),
+        angle: e.num(50)?.unwrap_or(0.0),
+    };
+    Ok(line.shape(words, tag))
+}
+
+/// One line of text as a file gives it: its first point (group 10) and second (11), its height, its alignment (72 and
+/// 73), its width factor (41), its flags (71: backward 2, upside down 4) and its angle, degrees.
+struct Line {
+    first: P2,
+    second: Option<P2>,
+    height: f64,
+    align: (i64, i64),
+    wide: Option<f64>,
+    flags: i64,
+    angle: f64,
+}
+
+impl Line {
+    /// The text it draws of `words` (a file's, its codes undone here), with its `tag` (an attribute's); none for one of no
+    /// height or of nothing to read.
+    fn shape(&self, words: &str, tag: Option<String>) -> Option<Shape> {
+        let (first, height) = (self.first, self.height);
+        if height <= 0.0 {
+            return None;
+        }
+        let words = decode(words, false).replace('\n', " ");
+        if words.trim().is_empty() {
+            return None;
+        }
+        let (h, v) = self.align;
+        let second = self.second;
+        let (at, align) = match (h, v, second) {
+            (0, 0, _) | (3 | 5, _, _) | (_, _, None) => (first, Align { h: Horizontal::Left, v: Vertical::Baseline }),
+            (4, _, Some(p)) => (p, Align { h: Horizontal::Center, v: Vertical::Middle }),
+            (h, v, Some(p)) => {
+                let h = match h {
+                    1 => Horizontal::Center,
+                    2 => Horizontal::Right,
+                    _ => Horizontal::Left,
+                };
+                let v = match v {
+                    1 => Vertical::Bottom,
+                    2 => Vertical::Middle,
+                    3 => Vertical::Top,
+                    _ => Vertical::Baseline,
+                };
+                (p, Align { h, v })
+            }
+        };
+        let wide = self.wide.filter(|w| *w > 0.0).map_or(1.0, |w| w.clamp(0.01, 100.0));
+        // Backward (2) reads it mirrored; upside down (4) is that turned half round.
+        let flags = self.flags;
+        let (backward, upside) = (flags & 2 != 0, flags & 4 != 0);
+        let angle = self.angle + if upside { 180.0 } else { 0.0 };
+        Some(Shape::Text { at, height, angle, text: words, align, tag, wide, mirrored: backward != upside })
+    }
 }
 
 /// A multi-line text's lines, each a text of its own, stepped down from where its attachment point puts the block.
@@ -1468,23 +1739,32 @@ fn mtext(e: &Ent) -> Result<Vec<Shape>, String> {
         }
     }
     raw.push_str(e.str(1).unwrap_or(""));
-    let words = decode(&raw, true);
-    let lines: Vec<&str> = words.lines().collect();
-    if lines.iter().all(|l| l.trim().is_empty()) {
-        return Ok(Vec::new());
-    }
     let angle = match (e.num(50)?, e.point(11)?) {
         (Some(a), _) => a,
         (None, Some(dir)) if dir.length() > 0.0 => dir.1.atan2(dir.0).to_degrees(),
         _ => 0.0,
     };
-    let attach = e.int(71)?.unwrap_or(1).clamp(1, 9) - 1;
+    Ok(mtext_lines(at, height, angle, e.int(71)?.unwrap_or(1), e.num(44)?, &raw))
+}
+
+/// A multi-line text's lines (its words `raw`, as a file holds them), each a text of its own, stepped down from where its
+/// attachment point (`attach`, 1 to 9) at `at` puts the block; `spacing`, its line spacing factor.
+fn mtext_lines(at: P2, height: f64, angle: f64, attach: i64, spacing: Option<f64>, raw: &str) -> Vec<Shape> {
+    if height <= 0.0 {
+        return Vec::new();
+    }
+    let words = decode(raw, true);
+    let lines: Vec<&str> = words.lines().collect();
+    if lines.iter().all(|l| l.trim().is_empty()) {
+        return Vec::new();
+    }
+    let attach = attach.clamp(1, 9) - 1;
     let h = match attach % 3 {
         0 => Horizontal::Left,
         1 => Horizontal::Center,
         _ => Horizontal::Right,
     };
-    let spacing = height * 5.0 / 3.0 * e.num(44)?.filter(|f| *f > 0.0).unwrap_or(1.0);
+    let spacing = height * 5.0 / 3.0 * spacing.filter(|f| *f > 0.0).unwrap_or(1.0);
     let block = height + spacing * (lines.len() - 1) as f64;
     let up = P2(-angle.to_radians().sin(), angle.to_radians().cos());
     let top = at
@@ -1493,7 +1773,7 @@ fn mtext(e: &Ent) -> Result<Vec<Shape>, String> {
             1 => block / 2.0,
             _ => block,
         };
-    Ok(lines
+    lines
         .iter()
         .enumerate()
         .map(|(i, line)| Shape::Text {
@@ -1506,7 +1786,7 @@ fn mtext(e: &Ent) -> Result<Vec<Shape>, String> {
             wide: 1.0,
             mirrored: false,
         })
-        .collect())
+        .collect()
 }
 
 /// A hatch's boundary paths, each a ring: a polyline's (bulges flattened) or edges joined end to end.
@@ -1822,8 +2102,13 @@ mod tests {
         pts.iter().any(|q| q.dist(p) < 1e-6)
     }
 
-    fn shapes(d: &Dxf) -> Vec<&Shape> {
-        d.entities.iter().map(|e| &e.shape).collect()
+    fn shapes(d: &Dxf) -> Vec<Shape> {
+        d.iter().map(|e| e.into_owned().shape).collect()
+    }
+
+    /// Every entity it draws, its placements' made.
+    fn all(d: &Dxf) -> Vec<Entity> {
+        d.iter().map(Cow::into_owned).collect()
     }
 
     #[test]
@@ -2040,7 +2325,7 @@ mod tests {
         ]));
         assert_eq!(
             shapes(&d),
-            [&Shape::Polyline { pts: vec![P2(0.0, 0.0), P2(5.0, 0.0), P2(5.0, 5.0)], closed: true }, &Shape::Point(P2(9.0, 9.0))]
+            [Shape::Polyline { pts: vec![P2(0.0, 0.0), P2(5.0, 0.0), P2(5.0, 5.0)], closed: true }, Shape::Point(P2(9.0, 9.0))]
         );
     }
 
@@ -2083,15 +2368,16 @@ mod tests {
             (45, "0"),
         ]);
         let d = read_text(&file("", "", &blocks, &entities)).unwrap();
-        assert_eq!(d.entities.len(), 4, "{:?}", d.entities);
-        let lines: Vec<&Entity> = d.entities.iter().filter(|e| matches!(e.shape, Shape::Line(..))).collect();
+        assert_eq!(all(&d).len(), 4, "{:?}", all(&d));
+        let every = all(&d);
+        let lines: Vec<&Entity> = every.iter().filter(|e| matches!(e.shape, Shape::Line(..))).collect();
         assert_eq!(lines.len(), 2);
         assert_eq!((lines[0].layer.as_str(), lines[0].color), ("DOORS", Color::Index(3)), "layer 0 and by block take the INSERT's");
         let Shape::Line(a, b) = lines[0].shape else { panic!() };
         assert!(near(a, P2(100.0, 100.0)) && near(b, P2(100.0, 120.0)), "scaled by 2, turned 90°: {a:?} {b:?}");
         let Shape::Line(a, b) = lines[1].shape else { panic!() };
         assert!(near(a, P2(100.0, 150.0)) && near(b, P2(100.0, 170.0)), "the second column, 50 along the turned x: {a:?} {b:?}");
-        let circles: Vec<&Entity> = d.entities.iter().filter(|e| matches!(e.shape, Shape::Circle { .. })).collect();
+        let circles: Vec<&Entity> = every.iter().filter(|e| matches!(e.shape, Shape::Circle { .. })).collect();
         assert_eq!(circles[0].layer, "GLASS", "a block's own layer stays");
         assert_eq!(circles[1].shape, Shape::Circle { c: P2(100.0, 150.0), r: 2.0 });
     }
@@ -2130,16 +2416,16 @@ mod tests {
             (0, "ENDBLK"),
         ]);
         let d = read_text(&file("", "", &blocks, &pairs(&[(0, "INSERT"), (2, "OUTER"), (10, "100"), (20, "0")]))).unwrap();
-        assert_eq!(shapes(&d), [&Shape::Point(P2(111.0, 0.0))]);
+        assert_eq!(shapes(&d), [Shape::Point(P2(111.0, 0.0))]);
         let d = read_text(&file("", "", &blocks, &pairs(&[(0, "INSERT"), (2, "SELF"), (10, "0"), (20, "0")]))).unwrap();
-        assert_eq!(d.entities.len(), MAX_DEPTH, "{:?}", d.entities);
+        assert_eq!(all(&d).len(), MAX_DEPTH, "{:?}", all(&d));
         assert_eq!(d.left_out.get(&format!("a block nested deeper than {MAX_DEPTH}")), Some(&1));
         let d = read_text(&file("", "", &blocks, &pairs(&[(0, "INSERT"), (2, "NOWHERE"), (10, "0"), (20, "0")]))).unwrap();
         assert_eq!(d.left_out.get("INSERT of a block the file doesn't define"), Some(&1));
         // A base point other than the origin: the block's base lands on the insertion point.
         let based = pairs(&[(0, "BLOCK"), (2, "B"), (10, "5"), (20, "5"), (0, "POINT"), (10, "5"), (20, "5"), (0, "ENDBLK")]);
         let d = read_text(&file("", "", &based, &pairs(&[(0, "INSERT"), (2, "B"), (10, "1"), (20, "2")]))).unwrap();
-        assert_eq!(shapes(&d), [&Shape::Point(P2(1.0, 2.0))]);
+        assert_eq!(shapes(&d), [Shape::Point(P2(1.0, 2.0))]);
     }
 
     #[test]
@@ -2220,7 +2506,7 @@ mod tests {
         ]);
         let d = read_text(&file("", "", &blocks, &entities)).unwrap();
         // The line, three bays of three (the nested mark is its bay's), the dimension's line, the line.
-        assert_eq!(d.entities.len(), 1 + 3 * 3 + 1 + 1, "{:?}", d.entities);
+        assert_eq!(all(&d).len(), 1 + 3 * 3 + 1 + 1, "{:?}", all(&d));
         let got: Vec<_> =
             d.inserts.iter().map(|i| (i.name.as_str(), i.layer.as_str(), i.at, i.angle, i.scale, i.entities.clone())).collect();
         assert_eq!(
@@ -2232,7 +2518,7 @@ mod tests {
             ],
             "a block not defined and a dimension's block are no placements"
         );
-        assert!(d.entities[1..10].iter().all(|e| e.layer == "PARK"));
+        assert!(all(&d)[1..10].iter().all(|e| e.layer == "PARK"));
         // An insertion point read through the extrusion's mirror: x the other way, the turn mirrored.
         let mirrored = pairs(&[(0, "INSERT"), (2, "BAY"), (10, "10"), (20, "0"), (50, "30"), (230, "-1")]);
         let d = read_text(&file("", "", &blocks, &mirrored)).unwrap();
@@ -2256,14 +2542,14 @@ mod tests {
         ]);
         // Mirrored in x: the quarter from east to north becomes the one from north to west.
         let d = read_text(&file("", "", &blocks, &pairs(&[(0, "INSERT"), (2, "A"), (10, "0"), (20, "0"), (41, "-1")]))).unwrap();
-        assert_eq!(shapes(&d), [&Shape::Arc { c: P2(0.0, 0.0), r: 1.0, start: 90.0, end: 180.0 }]);
+        assert_eq!(shapes(&d), [Shape::Arc { c: P2(0.0, 0.0), r: 1.0, start: 90.0, end: 180.0 }]);
         // Stretched: no longer round, so it's points on the ellipse.
         let d = read_text(&file("", "", &blocks, &pairs(&[(0, "INSERT"), (2, "A"), (10, "0"), (20, "0"), (41, "2"), (42, "1")]))).unwrap();
-        let Shape::Polyline { pts, closed: false } = &d.entities[0].shape else { panic!("{:?}", d.entities) };
+        let Shape::Polyline { pts, closed: false } = &all(&d)[0].shape.clone() else { panic!("{:?}", all(&d)) };
         assert!(near(pts[0], P2(2.0, 0.0)) && near(pts[pts.len() - 1], P2(0.0, 1.0)), "{pts:?}");
         // An extrusion pointing down mirrors x too.
         let d = drawing(&pairs(&[(0, "LINE"), (10, "1"), (20, "2"), (11, "3"), (21, "4"), (210, "0"), (220, "0"), (230, "-1")]));
-        assert_eq!(shapes(&d), [&Shape::Line(P2(-1.0, 2.0), P2(-3.0, 4.0))]);
+        assert_eq!(shapes(&d), [Shape::Line(P2(-1.0, 2.0), P2(-3.0, 4.0))]);
     }
 
     #[test]
@@ -2301,7 +2587,7 @@ mod tests {
         assert_eq!(
             shapes(&d),
             [
-                &Shape::Text {
+                Shape::Text {
                     at: P2(5.0, 5.0),
                     height: 2.5,
                     angle: 30.0,
@@ -2311,7 +2597,7 @@ mod tests {
                     wide: 1.0,
                     mirrored: false
                 },
-                &Shape::Text {
+                Shape::Text {
                     at: P2(8.0, 9.0),
                     height: 1.0,
                     angle: 0.0,
@@ -2321,7 +2607,7 @@ mod tests {
                     wide: 1.0,
                     mirrored: false
                 },
-                &Shape::Text {
+                Shape::Text {
                     at: P2(8.0, 9.0),
                     height: 1.0,
                     angle: 0.0,
@@ -2646,14 +2932,14 @@ mod tests {
         assert!(matches!(&d.entities[0].shape, Shape::Text { text, .. } if text == "café"), "{:?}", d.entities);
         // Windows line ends throughout.
         let d = read_text(&file("", "", "", &pairs(&[(0, "POINT"), (10, "1"), (20, "2")])).replace('\n', "\r\n")).unwrap();
-        assert_eq!(shapes(&d), [&Shape::Point(P2(1.0, 2.0))]);
+        assert_eq!(shapes(&d), [Shape::Point(P2(1.0, 2.0))]);
     }
 
     #[test]
     fn hostile_counts_and_arrays_stop_at_the_bounds_rather_than_run_away() {
         // A count the vertices don't bear out is ignored.
         let d = drawing(&pairs(&[(0, "LWPOLYLINE"), (90, "1000000000"), (10, "0"), (20, "0"), (10, "1"), (20, "1")]));
-        assert_eq!(shapes(&d), [&Shape::Polyline { pts: vec![P2(0.0, 0.0), P2(1.0, 1.0)], closed: false }]);
+        assert_eq!(shapes(&d), [Shape::Polyline { pts: vec![P2(0.0, 0.0), P2(1.0, 1.0)], closed: false }]);
         // An array past what the drawing may draw is refused, not drawn for an hour.
         let blocks = pairs(&[(0, "BLOCK"), (2, "A"), (10, "0"), (20, "0"), (0, "POINT"), (10, "0"), (20, "0"), (0, "ENDBLK")]);
         let e = read_text(&file(
@@ -2663,7 +2949,9 @@ mod tests {
             &pairs(&[(0, "INSERT"), (2, "A"), (10, "0"), (20, "0"), (70, "1000000"), (71, "1000000"), (44, "1"), (45, "1")]),
         ))
         .unwrap_err();
-        assert!(e.contains("more than"), "{e}");
+        // Refused at the placements a drawing may hold (each one is held), before the entities they'd draw: sixteen
+        // million placements of one point would run the browser's memory out first.
+        assert!(e.contains("places blocks more than"), "{e}");
         // A block of a block of arrays that multiplies past the work bound is refused too.
         let blocks = pairs(&[
             (0, "BLOCK"),

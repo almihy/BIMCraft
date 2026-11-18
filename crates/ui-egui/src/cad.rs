@@ -36,6 +36,9 @@ pub(crate) struct CadBox {
     this_view: bool,
     /// Why it couldn't be brought in, shown in the box.
     error: Option<String>,
+    /// OK was pressed while its DWG was still being read apart (in a page that reads DWG files in a worker of its own):
+    /// it is brought in once that is done.
+    waiting: bool,
 }
 
 impl CadBox {
@@ -73,6 +76,7 @@ impl BimApp {
             by_origin: false,
             this_view: false,
             error: None,
+            waiting: false,
         });
     }
 
@@ -125,7 +129,13 @@ impl BimApp {
                 ui.add_space(6.0);
                 ui.add_enabled(plan, Checkbox::new(&mut b.this_view, t("Current view only")))
                     .on_hover_text(t("In this plan only, not in every plan of its level"));
-                if let Some(e) = &b.error {
+                if b.waiting {
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(t("Reading the drawing…"));
+                    });
+                } else if let Some(e) = &b.error {
                     ui.add_space(6.0);
                     ui.label(RichText::new(e).color(pal().error));
                 }
@@ -133,14 +143,18 @@ impl BimApp {
             crate::popup::footer(ui, |ui| {
                 ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
                     close = ui.button(t("Cancel")).clicked();
-                    ok = ui.add_enabled(!b.name.trim().is_empty(), Button::new(t("OK"))).clicked();
+                    ok = ui.add_enabled(!b.name.trim().is_empty() && !b.waiting, Button::new(t("OK"))).clicked();
                 });
             });
         });
-        if ok {
-            self.bring_in_cad();
-        } else if close || r.should_close() {
+        let read = b.waiting && !bimcraft_core::dxf::dwg::waiting();
+        if b.waiting {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
+        if close || r.should_close() {
             self.cad_box = None;
+        } else if ok || read {
+            self.bring_in_cad();
         }
     }
 
@@ -177,11 +191,12 @@ impl BimApp {
                     self.status = crate::Status { text: said.join("; "), error: false };
                 }
             }
-            // Said in the box, not on the status bar under it.
+            // Said in the box, not on the status bar under it; a DWG still being read apart is brought in once it is.
             None => {
                 let e = std::mem::take(&mut self.status).text;
                 if let Some(b) = self.cad_box.as_mut() {
-                    b.error = Some(e);
+                    b.waiting = e.contains(bimcraft_core::dxf::dwg::WAITING);
+                    b.error = (!b.waiting).then_some(e);
                 }
             }
         }

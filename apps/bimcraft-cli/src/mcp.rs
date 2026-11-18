@@ -149,7 +149,6 @@ fn tools() -> Value {
 impl Server {
     pub fn new() -> Self {
         let mut session = Session::new();
-        session.dwg = crate::dwg_reader();
         let plugins = crate::load_plugins(&mut session);
         let seen = plugins.log().len();
         Server { backend: Backend::Own(Box::new(session)), plugins: Some(plugins), seen }

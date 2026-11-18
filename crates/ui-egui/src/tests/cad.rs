@@ -102,12 +102,13 @@ fn a_drawing_that_cant_come_in_says_why_in_its_box() {
     let mut h = app(BOX);
     let dir = drawing("dwg", "plan.dxf");
     let dwg = dir.with_file_name("plan.dwg");
-    std::fs::write(&dwg, "AC1032 not a dxf").unwrap();
+    std::fs::write(&dwg, "AC1032 not a drawing at all").unwrap();
     h.state_mut().import_cad_path(dwg, false);
     h.run();
     press(&mut h, "OK");
     assert!(imports(&h).is_empty());
-    assert!(h.query_by_label_contains("save it as DXF").is_some(), "the reason shows in the box, which stays open");
+    // The reader's reason, naming the file.
+    assert!(h.query_by_label_contains("plan.dwg:").is_some(), "the reason shows in the box, which stays open");
     press(&mut h, "Cancel");
     assert!(h.query_by_label("plan.dwg").is_none());
 }
@@ -260,23 +261,18 @@ fn a_right_click_reloads_a_linked_drawing_from_its_file() {
 }
 
 #[test]
-fn a_dwg_comes_in_through_the_box_with_the_reader_the_app_is_given_and_its_notes_on_the_status_bar() {
+fn a_dwg_comes_in_through_the_box_read_straight() {
     let mut h = app(BOX);
-    // The desktop hands its session `bimcraft-dwg`'s reader; a test hands it one that gives a DXF's text.
-    let dxf = std::fs::read(drawing("dwg-reader", "plan.dxf")).unwrap();
-    h.state_mut().session.dwg = Some(std::sync::Arc::new(move |_: &std::path::Path| {
-        Ok((dxf.clone(), vec!["3 of the DWG's object records couldn't be read and were left out".into()]))
-    }));
-    let dwg = drawing("dwg-reader", "plan.dxf").with_file_name("site.dwg");
-    std::fs::write(&dwg, "AC1032").unwrap();
+    let dwg = drawing("dwg-direct", "plan.dxf").with_file_name("site.dwg");
+    std::fs::write(&dwg, bimcraft_core::dxf::dwg::sample::plan().unwrap()).unwrap();
     h.state_mut().import_cad_path(dwg, false);
     h.run();
     press(&mut h, "OK");
     let placed = imports(&h);
     assert_eq!(placed.len(), 1);
-    assert_eq!(h.state().session.model.cads["site"].source(), "site.dwg");
-    let status = &h.state().status;
-    assert!(!status.error && status.text.contains("3 of the DWG's object records"), "{status:?}");
+    let cad = &h.state().session.model.cads["site"];
+    assert_eq!((cad.source(), cad.is_dwg(), cad.dxf().count()), ("site.dwg", true, 11));
+    assert!(!h.state().status.error, "{:?}", h.state().status);
 }
 
 #[test]

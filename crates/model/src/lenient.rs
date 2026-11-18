@@ -17,9 +17,22 @@ type Error = serde_json::Error;
 /// The keys of `v` that no struct of `T` has, as JSON pointers (`/types/walls/Generic/finish`), in the order read.
 pub fn unknown<'de, T: de::Deserialize<'de>>(v: &Value) -> Vec<String> {
     let found = RefCell::new(Vec::new());
+    let was = WALKING.replace(true);
     // What else is wrong with it is for the strict reading to say.
     let _ = T::deserialize(Walk { v: v.clone(), at: String::new(), found: &found });
+    WALKING.set(was);
     found.into_inner()
+}
+
+thread_local! {
+    /// Whether [`unknown`] is walking a file on this thread: what is costly to read and holds no keys of its own to find (a
+    /// CAD drawing's file, read again by the strict reading) is passed over then.
+    static WALKING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether [`unknown`] is walking a file on this thread.
+pub(crate) fn walking() -> bool {
+    WALKING.get()
 }
 
 /// The keys of an element's JSON (its `category`, and `guid`, taken out) that its kind doesn't have; none for a category

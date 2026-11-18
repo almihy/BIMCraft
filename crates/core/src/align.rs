@@ -91,7 +91,6 @@ fn element_lines(m: &Model, e: &Element) -> Vec<Line> {
             let Some(cad) = m.cads.get(&ci.cad) else { return Vec::new() };
             let place = crate::model::cad_place(ci);
             cad.dxf()
-                .entities
                 .iter()
                 .filter(|e| cad.shows(e, &ci.hidden))
                 .filter(|e| {
@@ -110,7 +109,6 @@ fn element_lines(m: &Model, e: &Element) -> Vec<Line> {
                 let place = crate::model::cad_place(&ci);
                 out.extend(
                     cad.dxf()
-                        .entities
                         .iter()
                         .flat_map(|e| crate::cad::paths(&e.shape))
                         .flat_map(|(pts, closed)| path(&pts, closed))

@@ -730,7 +730,8 @@ pub fn from_dxf(dxf: &Dxf, mm: f64) -> (TitleBlock, BTreeMap<String, usize>) {
         lo = P2(lo.0.min(p.0), lo.1.min(p.1));
         hi = P2(hi.0.max(p.0), hi.1.max(p.1));
     };
-    for e in &dxf.entities {
+    for e in dxf.iter() {
+        let e = &*e;
         let hidden = dxf.layer(&e.layer).is_some_and(|l| l.off || l.frozen);
         if hidden {
             *left_out.entry("on a layer turned off or frozen".into()).or_default() += 1;
@@ -820,7 +821,7 @@ pub struct Read {
 /// [`from_dxf`] of DXF text, a title block drawn in `units` (`auto`: the file's own, else mm); and, when the drawing names
 /// no unit and none was given, a note that says it was read in mm, and how big that made it.
 pub fn read_dxf(bytes: &[u8], units: Option<f64>) -> Result<Read, String> {
-    let dxf = dxf::read(bytes)?;
+    let dxf = if dxf::dwg::is_dwg(bytes) { dxf::dwg::read(bytes)?.0 } else { dxf::read(bytes)? };
     let mm = units.or(dxf.scale).unwrap_or(1.0);
     let (tb, left_out) = from_dxf(&dxf, mm);
     let note = (units.is_none() && dxf.scale.is_none()).then(|| {

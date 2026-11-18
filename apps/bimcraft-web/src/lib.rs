@@ -61,6 +61,19 @@
 //! app.answer_pdf(id, null, "the reader stopped"); // it threw, the worker died or took too long
 //! ```
 //!
+//! A DWG is never decoded in the editor's own instance either until it has been read safely apart, as the desktop reads each
+//! one first in a child process: the editor asks the page to read it in a Web Worker of its own that calls `dwg_check`, and
+//! reads it itself only once the worker read it unharmed (the decoding is deterministic). One the worker could not read, or
+//! that killed it, comes in as a drawing that isn't read, saying why ("This drawing could not be read: …"); a project holding
+//! it still opens. Each file is asked for once, by its key, as soon as the editor is given it (Import CAD, a project opened, a
+//! change from another copy):
+//!
+//! ```js
+//! app.on_dwg(onRead);  // onRead({key}, bytes): run dwg_check(bytes) in the worker, then
+//! app.answer_dwg(key, null);                    // read unharmed
+//! app.answer_dwg(key, "the reader stopped");    // it threw, the worker died or took too long
+//! ```
+//!
 //! The model's checks against the firm's rules and the client's brief are the page's (its server runs them after a save);
 //! the Checks palette lists them, flagged first, and asks the page to show a rule:
 //!
@@ -116,6 +129,8 @@ struct Host {
     on_render: Rc<RefCell<Option<js_sys::Function>>>,
     /// Called with `({id, path, job}, bytes)` to read a PDF apart, in the page's worker.
     on_pdf: Rc<RefCell<Option<js_sys::Function>>>,
+    /// Called with `({key}, bytes)` to read a DWG apart, in the page's worker.
+    on_dwg: Rc<RefCell<Option<js_sys::Function>>>,
 }
 
 /// How long what the person sees must hold still before the page is told it changed, seconds: a pan or a zoom is one change.
@@ -198,6 +213,25 @@ impl Host {
     }
 }
 
+impl Host {
+    /// After a frame: hands the page each DWG to read apart first. With no one to read it, it is answered at once as one that
+    /// can't be read: the editor never decodes a DWG not read apart.
+    fn tell_dwg(&mut self) {
+        for (key, bytes) in self.app.take_dwg_requests() {
+            let Some(f) = self.on_dwg.borrow().clone() else {
+                self.app.answer_dwg_request(&key, Err("this page reads no DWG files".into()));
+                continue;
+            };
+            let ask = serde_json::json!({"key": key}).to_string();
+            let bytes = js_sys::Uint8Array::from(bytes.as_slice());
+            wasm_bindgen_futures::spawn_local(async move {
+                let ask = js_sys::JSON::parse(&ask).unwrap_or(JsValue::NULL);
+                let _ = f.call2(&JsValue::NULL, &ask, &bytes);
+            });
+        }
+    }
+}
+
 impl eframe::App for Host {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.app.ui(ui, frame);
@@ -211,6 +245,7 @@ impl eframe::App for Host {
         }
         self.tell_files();
         self.tell_pdf();
+        self.tell_dwg();
         self.tell_context(ui);
         if let Some(rule) = self.app.take_rule_request() {
             later_with(self.on_rule.borrow().clone(), JsValue::from_str(&rule));
@@ -270,6 +305,15 @@ pub fn pdf_job(job: &str, bytes: Vec<u8>) -> Result<Vec<u8>, JsValue> {
     bimcraft_core::raster::run_pdf_job(&job, bytes).map_err(err)
 }
 
+/// Decodes a DWG file's `bytes` as the editor will (`dxf::dwg::probe`, the third-party decoder, where a hostile file can
+/// panic): what the page's worker calls, in an instance of this module of its own, before the editor reads the file itself
+/// (a panic there aborts only the worker). Its notes (what the decoder left out) as JSON, or why it can't be read.
+#[wasm_bindgen]
+pub fn dwg_check(bytes: Vec<u8>) -> Result<String, JsValue> {
+    let notes = bimcraft_core::dxf::dwg::probe(&bytes).map_err(err)?;
+    Ok(Value::from(notes).to_string())
+}
+
 /// BIMCraft's sample house as a project file, to start on.
 #[wasm_bindgen]
 pub fn sample_project() -> Result<String, JsValue> {
@@ -314,12 +358,16 @@ pub struct WebApp {
     on_render: Rc<RefCell<Option<js_sys::Function>>>,
     /// What the page is asked to read a PDF apart with.
     on_pdf: Rc<RefCell<Option<js_sys::Function>>>,
+    /// What the page is asked to read a DWG apart with.
+    on_dwg: Rc<RefCell<Option<js_sys::Function>>>,
 }
 
 #[wasm_bindgen]
 impl WebApp {
     #[wasm_bindgen(constructor)]
     pub fn new() -> WebApp {
+        // The editor never decodes a DWG the page has not read apart first.
+        bimcraft_core::dxf::dwg::read_elsewhere(true);
         WebApp {
             runner: eframe::WebRunner::new(),
             ctx: Rc::new(RefCell::new(None)),
@@ -336,6 +384,7 @@ impl WebApp {
             on_waive: Rc::new(RefCell::new(None)),
             on_render: Rc::new(RefCell::new(None)),
             on_pdf: Rc::new(RefCell::new(None)),
+            on_dwg: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -369,6 +418,7 @@ impl WebApp {
             on_waive: Rc::clone(&self.on_waive),
             on_render: Rc::clone(&self.on_render),
             on_pdf: Rc::clone(&self.on_pdf),
+            on_dwg: Rc::clone(&self.on_dwg),
         };
         self.hold_editor_keys(&canvas)?;
         let ctx = Rc::clone(&self.ctx);
@@ -673,6 +723,30 @@ impl WebApp {
             _ => Err(error.unwrap_or_else(|| "the reader gave nothing".into())),
         };
         self.host()?.app.answer_pdf_request(id as u64, answer);
+        self.repaint();
+        Ok(())
+    }
+
+    /// How the page reads a DWG apart before the editor reads it: `on_read({key}, bytes)` runs `dwg_check(bytes)` in a Web
+    /// Worker of its own and answers with `answer_dwg`. Until it is set, every DWG comes in as one that can't be read. Set it
+    /// before `start`, so a project holding a DWG has it read.
+    pub fn on_dwg(&self, on_read: Option<js_sys::Function>) {
+        *self.on_dwg.borrow_mut() = on_read;
+        self.repaint();
+    }
+
+    /// Answers the ask to read DWG `key` apart: read unharmed (`error` null), or why not (`dwg_check` threw, or its worker
+    /// died or took too long). The drawings waiting on it are read and drawn, or say they couldn't be.
+    pub fn answer_dwg(&self, key: &str, error: Option<String>) -> Result<(), JsValue> {
+        let answer = match error {
+            None => Ok(()),
+            Some(e) => Err(e),
+        };
+        {
+            let mut host = self.host()?;
+            host.app.answer_dwg_request(key, answer);
+            host.seen = Arc::clone(&host.app.session.model);
+        }
         self.repaint();
         Ok(())
     }
