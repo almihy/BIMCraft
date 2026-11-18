@@ -8,8 +8,9 @@ use std::sync::Arc;
 
 use bimcraft_core::geom::P2;
 use bimcraft_core::model::{Element, Id, Model, paper};
+use bimcraft_core::prim::DENSITY;
 use bimcraft_core::render::{Drawing, Prim, View};
-use bimcraft_core::sheet::{self, DENSITY};
+use bimcraft_core::sheet;
 use egui::{Color32, ColorImage, PointerButton, Pos2, Rect, Stroke, StrokeKind, TextureHandle, TextureId, TextureOptions, Ui, vec2};
 
 use crate::canvas::{PICK, Place, click_modifiers, paint};

@@ -135,7 +135,26 @@ mod warnings_tests;
 mod workplane_tests;
 
 pub use commands::{command_of, floor_outline, opening_of, roof_footprint, run_category_of, runs_of, stood_of};
-pub use json::{element_json, element_json_bare, element_json_with};
+pub use json::element_json_bare;
+
+/// Element `id`'s JSON ([`json::element_json`]) with what is found by drawing it: a viewport's size on its sheet, mm
+/// ([`sheet::size`]).
+pub fn element_json(m: &model::Model, id: model::Id) -> serde_json::Value {
+    drawn(m, id, json::element_json(m, id))
+}
+
+/// [`element_json`], a room's boundary found among `rooms` ([`json::element_json_with`]).
+pub fn element_json_with(m: &model::Model, id: model::Id, rooms: &rooms::Rooms) -> serde_json::Value {
+    drawn(m, id, json::element_json_with(m, id, rooms))
+}
+
+/// `json`, element `id`'s, with what drawing it finds.
+fn drawn(m: &model::Model, id: model::Id, mut json: serde_json::Value) -> serde_json::Value {
+    if let (Some(model::Element::Viewport(v)), Some(o)) = (m.elements.get(id), json.as_object_mut()) {
+        o.insert("size".into(), serde_json::json!(sheet::size(m, v.view, v.scale)));
+    }
+    json
+}
 
 #[cfg(test)]
 mod connector_tests;

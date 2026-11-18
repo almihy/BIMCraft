@@ -321,7 +321,7 @@ fn a_baseline_dimensions_numbers_have_places_to_drag_them_from() {
     // A mm of paper, in model mm, as the plan draws it.
     let level = s.model.levels().first().map(|l| l.0).unwrap_or_default();
     let drawn = crate::render::plan(&s.model, level, 800, 600);
-    let mm = f64::from(drawn.k) / drawn.view.scale * crate::sheet::DENSITY;
+    let mm = f64::from(drawn.k) / drawn.view.scale * crate::prim::DENSITY;
     let (first, second) = (spots[0].1, spots[1].1);
     assert!((first - crate::geom::P2(2000.0, -2000.0)).length() < 1e-6, "{first:?}: the middle of a to b, on the first line");
     assert!((second - crate::geom::P2(6000.0, -2000.0 - 10.0 * mm)).length() < 1e-3, "{second:?}: the middle of b to c, a spacing out");

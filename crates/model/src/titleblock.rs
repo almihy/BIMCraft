@@ -8,6 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use bimcraft_i18n::msg;
 use serde::{Deserialize, Serialize};
 
 use crate::dxf::{self, Dxf, Horizontal, Shape, Vertical};
@@ -16,7 +17,6 @@ use crate::language::Language;
 use crate::model::{Element, Key, Model};
 use crate::pen::{MAX_PEN, Pen};
 use crate::prim::Rgb;
-use crate::render::Drawing;
 
 /// The widest and tallest a title block may be, mm: an A0's long side.
 pub const MAX_SIZE: f64 = 1189.0;
@@ -647,71 +647,28 @@ fn natural(a: &str, b: &str) -> std::cmp::Ordering {
     split(a).cmp(&split(b))
 }
 
-const INK: Rgb = Rgb(25, 25, 25);
-
-/// Title block `tb` drawn on sheet drawing `d` with its bottom left corner at paper point `at`, mm, its fields filled in
-/// from `values`.
-pub fn draw(d: &mut Drawing, tb: &TitleBlock, at: P2, values: &BTreeMap<String, String>) {
-    let ink = |c: Option<[u8; 3]>| c.map_or(INK, |[r, g, b]| Rgb(r, g, b));
-    for f in &tb.fills {
-        // A ring inside an odd number of the others is a hole (a hatch's island): wound the other way, so it stays empty.
-        let rings: Vec<Vec<(f32, f32)>> = f
-            .rings
-            .iter()
-            .enumerate()
-            .map(|(i, r)| {
-                let depth =
-                    r.first().map_or(0, |p| f.rings.iter().enumerate().filter(|(j, o)| *j != i && crate::geom::contains(o, *p)).count());
-                let ccw = crate::geom::area(r) >= 0.0;
-                let mut r: Vec<P2> = if ccw == (depth % 2 == 0) { r.clone() } else { r.iter().rev().copied().collect() };
-                r.dedup();
-                r.iter().map(|p| d.view.px(*p + at)).collect()
-            })
-            .collect();
-        // Filled by the non-zero rule, as lettering is, so the desktop's canvas leaves its holes empty too.
-        let part = d.part;
-        if rings.len() > 1 {
-            d.part = crate::prim::Part::Text;
-        }
-        d.push(crate::prim::Prim::fill(rings, ink(f.color)));
-        d.part = part;
-    }
-    for l in &tb.lines {
-        let pts: Vec<P2> = l.points.iter().map(|p| *p + at).collect();
-        d.line(&pts, l.pen, ink(l.color), l.closed);
-    }
-    for t in &tb.texts {
-        let text = fill(&t.text, values);
-        if text.trim().is_empty() {
-            continue;
-        }
-        let layout = t.layout(&tb.font, &text);
-        // Its top left: back along the baseline by its justification, up its capitals' height, turned with it.
-        let start = match t.align {
-            Align::Left => 0.0,
-            Align::Center => -layout.width / 2.0,
-            Align::Right => -layout.width,
-        };
-        let (s, c) = t.angle.to_radians().sin_cos();
-        let top_left = t.at + at + P2(start * c, start * s) + P2(-t.size * s, t.size * c);
-        let frame = crate::render::frame_at(d, top_left, t.angle);
-        crate::render::lettering(d, &layout, frame, ink(t.color));
-    }
+/// What each field of sheet `id`'s title block says, by key: [`values`], its scale as its title box gives it.
+pub fn sheet_values(m: &Model, id: impl crate::model::Key) -> BTreeMap<String, String> {
+    let guid = m.guid(id);
+    let scaled: Vec<&crate::model::Viewport> = m
+        .on_sheet(id)
+        .into_iter()
+        .filter_map(|v| match m.elements.get(v) {
+            Some(Element::Viewport(vp)) if vp.sheet == guid && !matches!(m.elements.get(vp.view), Some(Element::Schedule(_))) => Some(vp),
+            _ => None,
+        })
+        .collect();
+    values(m, id, &scale_value(&scaled, m.language, m.units))
 }
 
-/// Title block `tb` on its own, filled in from `values`, as a sheet draws it: what a preview of it shows, `ROOM` mm clear
-/// round it, at [`crate::sheet::DENSITY`] px a paper mm, in model `m`'s annotation pens.
-pub fn preview(m: &Model, tb: &TitleBlock, values: &BTreeMap<String, String>) -> Drawing {
-    const ROOM: f64 = 2.0;
-    let density = crate::sheet::DENSITY;
-    let side = |mm: f64| ((mm.clamp(1.0, MAX_SIZE) + 2.0 * ROOM) * density).round() as u32;
-    let view =
-        crate::prim::View { scale: density, cx: tb.width / 2.0, cy: tb.height / 2.0, width: side(tb.width), height: side(tb.height) };
-    let mut d = Drawing::new(view);
-    d.weights = m.line_weights().at(m.units.default_scale());
-    draw(&mut d, tb, P2(0.0, 0.0), values);
-    d.weigh(|_| true);
-    d
+/// The scale a title block's `{SCALE}` gives: its views' (`1 : 100`), when they share one, else "AS INDICATED", in `language`.
+#[doc(hidden)]
+pub fn scale_value(views: &[&crate::model::Viewport], language: crate::language::Language, units: crate::units::Units) -> String {
+    match views.split_first() {
+        None => String::new(),
+        Some((first, rest)) if rest.iter().all(|v| v.scale == first.scale) => units.scale(first.scale),
+        Some(_) => language.word(msg!("AS INDICATED")).into(),
+    }
 }
 
 /// A title block read from DXF drawing `dxf`, whose unit is `mm` millimetres (a drawing of the title block at full size on

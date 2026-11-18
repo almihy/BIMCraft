@@ -23,7 +23,6 @@ use crate::geom::P2;
 use crate::model::{Element, Id, Model};
 use crate::prim::{Part, Prim, Rgb, Rule};
 use crate::render::Drawing;
-use crate::sheet;
 
 /// The unit a file's numbers are in (`$INSUNITS`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -334,7 +333,7 @@ impl Body<'_> {
         }
         self.colour(color);
         // A mm of paper is DENSITY px of a drawing the size of its paper; the pens' widths are in the view's own.
-        let mm = f64::from(width) / (sheet::DENSITY * f64::from(self.d.pen_zoom()));
+        let mm = f64::from(width) / (crate::prim::DENSITY * f64::from(self.d.pen_zoom()));
         if part != Part::Text && mm.is_finite() && mm >= 0.0 {
             let hundredths = mm * 100.0;
             let w =

@@ -349,7 +349,7 @@ fn size_tab(ui: &mut Ui, d: &mut TitleBlocksDialog) {
 /// The title block as it prints, to pick a text on and drag it: a click picks the text under it (or none), a drag moves the text
 /// picked, and the arrow keys nudge it half a millimetre while no field has the keyboard.
 fn canvas(ui: &mut Ui, model: &Model, d: &mut TitleBlocksDialog, values: &BTreeMap<String, String>) {
-    let drawing = titleblock::preview(model, &d.tb, values);
+    let drawing = bimcraft_core::sheet::title_block_preview(model, &d.tb, values);
     let (dw, dh) = (drawing.view.width as f32, drawing.view.height as f32);
     let (room_w, room_h) = (860.0, 480.0);
     ui.horizontal(|ui| {
@@ -585,7 +585,7 @@ impl BimApp {
                         // What it looks like, filled in as the first sheet that names it would be, else with its defaults.
                         let sheet = model.elements.iter().find_map(|(id, e)| matches!(e, Element::Sheet(s) if s.title_block == d.name).then_some(*id));
                         // No sheet names it yet: the automatic fields as a sheet of one view at 1 : 100 would have them.
-                        let mut values = sheet.map(|s| bimcraft_core::sheet::title_values(&model, s)).unwrap_or_else(|| {
+                        let mut values = sheet.map(|s| bimcraft_core::titleblock::sheet_values(&model, s)).unwrap_or_else(|| {
                             [
                                 ("PROJECT", model.name.clone()),
                                 ("SHEET_NAME", t("Sheet Name").to_string()),

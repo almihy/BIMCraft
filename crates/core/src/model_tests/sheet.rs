@@ -4,7 +4,7 @@ use crate::model::Element;
 
 use crate::engine::Session;
 use crate::geom::P2;
-use crate::prim::POCHE;
+use crate::prim::{DENSITY, POCHE};
 use crate::render::png;
 use crate::sheet::*;
 

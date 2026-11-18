@@ -13,7 +13,7 @@ pub(super) fn dimension(d: &mut Drawing, m: &Model, dim: &Dimension) {
         return;
     }
     let t = m.dimension_type(dim);
-    let ink = Ink { mm: f64::from(d.k) / d.view.scale * sheet::DENSITY, color: Rgb(t.color[0], t.color[1], t.color[2]), t };
+    let ink = Ink { mm: f64::from(d.k) / d.view.scale * crate::prim::DENSITY, color: Rgb(t.color[0], t.color[1], t.color[2]), t };
     match dim.kind {
         DimKind::Aligned | DimKind::Linear => aligned(d, m, dim, &ink),
         DimKind::Angular => angular(d, m, dim, &ink),
@@ -92,7 +92,7 @@ impl Ink {
         let layout = crate::text::layout(&tt, text, &crate::text::styles(&tt, text, false, &[]));
         // Clockwise on screen, y down.
         let angle = -(along.1.atan2(along.0) as f32);
-        let k = d.px(sheet::DENSITY as f32);
+        let k = d.px(crate::prim::DENSITY as f32);
         let [l, top, r, b] = layout.frame(0.0);
         let centre = ((l + r) / 2.0, (top + b) / 2.0);
         let origin = NoteFrame { at: (0.0, 0.0), k, angle }.px(centre);

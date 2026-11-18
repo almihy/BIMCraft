@@ -193,7 +193,8 @@ fn parking_component_places_a_parking_space_and_parking_area_lays_out_a_car_park
     let (id, park) = site_of(&h, "car_park").unwrap_or_else(|| panic!("{:?}", h.state().status));
     let stalls = park.props.get("result").and_then(|r| r.get("stalls")).and_then(Value::as_f64).unwrap_or(0.0);
     assert!(stalls > 10.0, "laid out: {stalls} stalls");
-    let bays = h.state().session.model.elements.values().filter(|e| matches!(e, Element::Component(c) if c.family == "Parking Space")).count();
+    let bays =
+        h.state().session.model.elements.values().filter(|e| matches!(e, Element::Component(c) if c.family == "Parking Space")).count();
     assert_eq!(bays as f64, stalls, "as parking spaces");
     // Properties: its stalls, read only; and Run on the ribbon.
     h.state_mut().selection = vec![id];

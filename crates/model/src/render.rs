@@ -27,14 +27,14 @@ use crate::model::{
     OpeningWay, Operation, Pattern, PlanRange, Railing, Ramp, Roof, Section, Shaft, Stair, TOL, Tag, View3D, Wall,
 };
 use crate::pen::{Pen, Weights};
-pub use crate::prim::{LIGHT_POCHE, OPAQUE, PAPER, POCHE, Part, Prim, Rgb, Rule, View};
+pub use crate::prim::{INK, LIGHT_POCHE, OPAQUE, PAPER, POCHE, Part, Prim, Rgb, Rule, View};
 use crate::solids::Solid;
 use crate::styles::{BY_CATEGORY, ObjectStyle};
 use crate::units::Units;
 use crate::view3d::{self, Camera, Clip, Image, Scene};
 pub use crate::view3d::{FragmentStats, SectionCache};
 use crate::walls::{self, Axis};
-use crate::{font, massing, sheet, solids, stairs};
+use crate::{font, massing, solids, stairs};
 
 mod dimensions;
 use dimensions::dimension;
@@ -44,8 +44,6 @@ pub mod regions;
 mod section_cut;
 mod site;
 
-#[doc(hidden)]
-pub const INK: Rgb = Rgb(25, 25, 25);
 const FAINT: Rgb = Rgb(120, 120, 120);
 const GRID: Rgb = Rgb(60, 100, 150);
 /// A mass's outline, dashed.
@@ -142,7 +140,7 @@ pub struct Drawing {
     /// How big annotation is drawn, times the pixels it is drawn in: see [`annotation`].
     #[doc(hidden)]
     pub k: f32,
-    /// How many times [`sheet::DENSITY`] pixels a mm of the paper the view stands for is, so the pens' size: `k`, not
+    /// How many times [`crate::prim::DENSITY`] pixels a mm of the paper the view stands for is, so the pens' size: `k`, not
     /// clamped ([`paper_of`]).
     paper: f32,
     /// How much of what the view cuts it draws.
@@ -218,6 +216,12 @@ impl Drawing {
         self.halftone.get(i).copied().unwrap_or(false)
     }
     /// Primitive `i` halftone ([`Drawing::halftone`]).
+    /// Its primitives drawn as `look` says ([`Look::dress`]): colours, weights and dashes overridden, some in halftone.
+    pub fn dress(&mut self, look: &Look) {
+        for i in look.dress(&mut self.prims, &self.owners, &self.parts, &mut self.pens) {
+            self.set_half(i);
+        }
+    }
     pub(crate) fn set_half(&mut self, i: usize) {
         if self.halftone.len() <= i {
             self.halftone.resize(i + 1, false);
@@ -242,7 +246,7 @@ impl Drawing {
     }
     /// One shared path for detail lines and region boundaries, in paper units.
     fn styled(&mut self, m: &Model, st: &crate::lines::LineStyle, mut pts: Vec<(f32, f32)>, closed: bool) {
-        let k = sheet::DENSITY as f32 * self.paper;
+        let k = crate::prim::DENSITY as f32 * self.paper;
         let pattern = st.pattern.as_ref().and_then(|n| m.line_patterns.get(n));
         let color = Rgb(st.color[0], st.color[1], st.color[2]);
         if let Some(p) = pattern.filter(|p| !p.is_dash()) {
@@ -250,7 +254,7 @@ impl Drawing {
                 pts.push(first);
             }
             let part = std::mem::replace(&mut self.part, Part::LinePattern);
-            for graphic in p.geometry(&pts, k, (self.weights.mm(st.pen, true) * sheet::DENSITY) as f32 * self.paper, color) {
+            for graphic in p.geometry(&pts, k, (self.weights.mm(st.pen, true) * crate::prim::DENSITY) as f32 * self.paper, color) {
                 self.push_pen(graphic.prim, graphic.weighted.then_some(st.pen));
             }
             self.part = part;
@@ -265,7 +269,7 @@ impl Drawing {
         let (weights, k) = (self.weights, self.paper);
         for ((prim, owner), pen) in self.prims.iter_mut().zip(&self.owners).zip(&self.pens) {
             let Some(pen) = pen else { continue };
-            let width = (weights.mm(*pen, annotation(*owner)) * sheet::DENSITY) as f32 * k;
+            let width = (weights.mm(*pen, annotation(*owner)) * crate::prim::DENSITY) as f32 * k;
             match prim {
                 Prim::Line { width: w, .. } => *w = width,
                 // Only dot fills carry a pen. Other fills and font outlines keep their geometry.
@@ -348,7 +352,7 @@ impl Drawing {
     /// can. [`Drawing::weigh`] sizes annotation's at the end.
     #[doc(hidden)]
     pub fn width(&self, pen: Pen) -> f32 {
-        (self.weights.mm(pen, false) * sheet::DENSITY) as f32 * self.paper
+        (self.weights.mm(pen, false) * crate::prim::DENSITY) as f32 * self.paper
     }
     /// How many times wider than their weights' own width a drawing's pens are, for the zoom it was drawn at: what a screen
     /// divides its lines' widths by, so that a line's width on screen is its weight's at the view's scale and no wider as the view is
@@ -2065,7 +2069,7 @@ pub fn section_over(m: &Model, id: impl Key, view: View, picture: &Image) -> Dra
 /// Section or elevation `id` as `section` draws it, its annotation `k` times the size it is laid out at: a sheet's, at
 /// paper size. Its pens are the line weights' at the scale `k` and `view` make, a viewport's.
 pub fn section_at(m: &Model, id: impl Key, view: View, k: f32) -> Drawing {
-    section_in(m, &SectionWork::new(m), id, view, k, f64::from(k) * sheet::DENSITY / view.scale, None)
+    section_in(m, &SectionWork::new(m), id, view, k, f64::from(k) * crate::prim::DENSITY / view.scale, None)
 }
 
 /// [`section_at`], over `picture` as [`section_over`] is.
@@ -2075,7 +2079,7 @@ pub fn section_at_over(m: &Model, id: impl Key, view: View, k: f32, picture: &Im
 
 /// [`section_at_over`], of `w`'s solids and points.
 pub(crate) fn section_at_over_in(m: &Model, w: &SectionWork, id: impl Key, view: View, k: f32, picture: &Image) -> Drawing {
-    section_in(m, w, id, view, k, f64::from(k) * sheet::DENSITY / view.scale, Some(picture))
+    section_in(m, w, id, view, k, f64::from(k) * crate::prim::DENSITY / view.scale, Some(picture))
 }
 
 /// The model cut and datums for one immutable snapshot and framing. Repainting
@@ -2575,7 +2579,7 @@ fn section_finish_cancellable(m: &Model, id: Id, mut d: Drawing, cancelled: &(dy
     elevation_symbols(&mut d, m, v, &look, cancelled)?;
     d.owner = None;
     d.by_category(|o| style_of(m, o));
-    look.dress(&mut d);
+    d.dress(&look);
     d.weigh(|o| annotates(m, o));
     let at = (24.0 + font::width(&v.name, 16.0) / 2.0, view.height as f32 - 26.0);
     d.text_turned(&v.name, at, 16.0, 0.0, INK);
@@ -2659,7 +2663,7 @@ pub fn draw_ceiling(m: &Model, level: impl Key, view: View) -> Drawing {
 
 /// How big the annotation of view `id` is drawn through `view`, times the size it is laid out at. A view with a scale
 /// holds it as paper at that scale would: its lettering and marks a fixed size on paper, which `scale` mm of the model per
-/// mm of paper and `view` showing `view.scale` pixels to the mm make of it ([`sheet::DENSITY`] pixels to a mm of paper); on
+/// mm of paper and `view` showing `view.scale` pixels to the mm make of it ([`crate::prim::DENSITY`] pixels to a mm of paper); on
 /// a sheet, where the viewport sets the scale, it is 1. A view with no scale of its own is at the units' default
 /// ([`crate::units::Units::default_scale`]). A shortcut: clamped to a tenth and ten times, so a hostile scale or zoom
 /// can't draw lettering a screen tall; widen it if a plan at 1 : 10000 on screen wants more. The pens aren't clamped
@@ -2670,13 +2674,13 @@ pub fn annotation(m: &Model, id: impl Key, view: View) -> f32 {
 
 /// [`annotation`] for a view at scale 1 : `n` shown at `scale` pixels to the mm.
 fn annotation_of(n: f64, scale: f64) -> f32 {
-    (n * scale / sheet::DENSITY).clamp(0.1, 10.0) as f32
+    (n * scale / crate::prim::DENSITY).clamp(0.1, 10.0) as f32
 }
 
 /// [`annotation_of`] unclamped, what sizes the pens: but for a hostile scale or zoom, 0 (a hairline) when it isn't a
 /// number and no more than a million.
 fn paper_of(n: f64, scale: f64) -> f32 {
-    let k = n * scale / sheet::DENSITY;
+    let k = n * scale / crate::prim::DENSITY;
     if k.is_finite() && k > 0.0 { k.min(1e6) as f32 } else { 0.0 }
 }
 
@@ -2687,7 +2691,7 @@ fn detail_of(m: &Model, id: impl Key) -> Detail {
 
 /// Plan `level` as `draw` draws it, its annotation `k` times the size it is laid out at: a sheet's, at paper size.
 pub fn draw_at(m: &Model, level: impl Key, view: View, k: f32) -> Drawing {
-    draw_plan(m, level, view, false, k, f64::from(k) * sheet::DENSITY / view.scale, Out::Paper)
+    draw_plan(m, level, view, false, k, f64::from(k) * crate::prim::DENSITY / view.scale, Out::Paper)
 }
 
 /// The points of the scans a plan sees, from its cut plane down to its view depth, as Revit draws a point cloud in plan: from
@@ -3082,7 +3086,9 @@ pub(crate) fn images(d: &mut Drawing, m: &Model, key: Guid, layer: crate::raster
         if let Some([u0, v0, u1, v1]) = t.covers() {
             let [tl, tr, _, bl] = corners;
             let at = |u: f64, v: f64| (tl.0 + (tr.0 - tl.0) * u + (bl.0 - tl.0) * v, tl.1 + (tr.1 - tl.1) * u + (bl.1 - tl.1) * v);
-            crate::raster::draw(d, t, [at(u0, v0), at(u1, v0), at(u1, v1), at(u0, v1)]);
+            if let Some(p) = crate::raster::picture(t, (d.view.width, d.view.height), [at(u0, v0), at(u1, v0), at(u1, v1), at(u0, v1)]) {
+                d.push(p);
+            }
         }
         // A page drawn from its lines: they go over its picture, of the layers it and the view show.
         if t.drawn()
@@ -3929,7 +3935,7 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
     }
     d.owner = None;
     d.by_category(|o| style_of(m, o));
-    look.dress(&mut d);
+    d.dress(&look);
     if let Some(g) = crate::graphics::graphics_of(m, key) {
         linework(&mut d, m, &g.linework);
     }
@@ -4938,7 +4944,7 @@ fn fill_pattern(d: &mut Drawing, p: &crate::fills::FillPattern, rings: &[Vec<P2>
     let window = (d.view.mm((0.0, h)), d.view.mm((w, 0.0)));
     // A drafting pattern's mm are the view's paper's.
     let k = match p.target {
-        crate::fills::Target::Drafting => (sheet::DENSITY as f32 * d.paper) as f64 / d.view.scale,
+        crate::fills::Target::Drafting => (crate::prim::DENSITY as f32 * d.paper) as f64 / d.view.scale,
         crate::fills::Target::Model => 1.0,
     };
     let closest = p.lines.iter().map(|l| l.spacing).fold(f64::INFINITY, f64::min) * k * d.view.scale;
@@ -5042,7 +5048,7 @@ pub(crate) fn detail_line(d: &mut Drawing, m: &Model, l: &DetailLine) {
     d.styled(m, st, pts, closed);
     // Its centre marks: a cross 3 mm across on paper, solid.
     if l.centre_mark {
-        let arm = d.px((1.5 * sheet::DENSITY) as f32);
+        let arm = d.px((1.5 * crate::prim::DENSITY) as f32);
         for c in l.curve.centres() {
             let (x, y) = d.view.px(c);
             d.stroke(vec![(x - arm, y), (x + arm, y)], st.pen, Rgb(r, g, b), None, false);
@@ -5143,7 +5149,7 @@ fn segments(pts: &[(f32, f32)], closed: bool) -> Vec<((f32, f32), (f32, f32))> {
 /// (within a pixel of it, as far as the two overlap); the rest of the element's lines as they were. One pass over the
 /// drawing: an element's lines are split along its edges one after another, in the order the view lists them.
 fn linework(d: &mut Drawing, m: &Model, items: &[crate::graphics::Linework]) {
-    let px_per_mm = sheet::DENSITY as f32 * d.paper;
+    let px_per_mm = crate::prim::DENSITY as f32 * d.paper;
     let mut edges: std::collections::HashMap<Id, Vec<Edge>> = std::collections::HashMap::new();
     for l in items {
         let Some(id) = m.elements.id(l.element) else { continue };
@@ -5339,7 +5345,7 @@ impl Drawing {
     /// Where note `n` lands in this drawing.
     pub fn note_frame(&self, n: &Note) -> NoteFrame {
         // Counter-clockwise in the view, clockwise on screen.
-        NoteFrame { at: self.view.px(n.at), k: self.px(sheet::DENSITY as f32), angle: -(n.angle.to_radians() as f32) }
+        NoteFrame { at: self.view.px(n.at), k: self.px(crate::prim::DENSITY as f32), angle: -(n.angle.to_radians() as f32) }
     }
 }
 
@@ -5394,7 +5400,7 @@ pub(crate) fn lettering(d: &mut Drawing, layout: &crate::text::Layout, frame: No
 
 /// Where lettering with its top left at paper point `top_left`, turned `angle` degrees counter-clockwise, lands in `d`.
 pub(crate) fn frame_at(d: &Drawing, top_left: P2, angle: f64) -> NoteFrame {
-    NoteFrame { at: d.view.px(top_left), k: d.px(sheet::DENSITY as f32), angle: -(angle.to_radians() as f32) }
+    NoteFrame { at: d.view.px(top_left), k: d.px(crate::prim::DENSITY as f32), angle: -(angle.to_radians() as f32) }
 }
 
 /// A spot elevation's mark at pixel `at`: a triangle standing on the point, and the height it

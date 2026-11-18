@@ -7,17 +7,15 @@
 //! up to the tool: floors, ceilings, roofs and shafts need a level one ([`is_level`]), and stand on the level below it
 //! ([`host`]).
 //!
-//! Apart from the view's plane, a tool that draws on what is under the cursor (Wall, a component) takes a
-//! [`CursorPlane`]: the level face there ([`crate::view3d::Surface`], which `Scene::surface_in` and `Mesh::surface` find),
-//! at its height, as a level and an offset over it, which the plan's tools and their commands take; where nothing is under
-//! the cursor, the lowest level's plane, the ground.
+//! Apart from the view's plane, a tool that draws on what is under the cursor (Wall, a component) takes the 3D view's
+//! cursor plane (`bimcraft-render`'s `view3d::cursor_plane`): the level face there, at its height, as a level and an offset
+//! over it, which the plan's tools and their commands take; where nothing is under the cursor, the lowest level's plane.
 
 use serde::{Deserialize, Serialize};
 
 use crate::geom::P2;
 use crate::geom::v3::{P3, add, cross, dot, mul, sub, unit};
 use crate::model::{Guid, Id, MAX_COORD, Model, TOL};
-use crate::view3d::Camera;
 use crate::walls::Plane;
 
 /// A 3D view's work plane: on `level`, through three `points`, or on a `surface` picked on the model; `offset` mm off it,
@@ -179,40 +177,4 @@ pub fn host(m: &Model, p: Plane, at: P2) -> Option<(Id, f64)> {
     let levels = m.levels();
     let (id, l) = levels.iter().rev().find(|(_, l)| l.elevation <= z + TOL).or(levels.first())?;
     z.is_finite().then_some((*id, z - l.elevation))
-}
-
-/// A level plane a tool draws on: the element whose face it is (a level, for its own plane or the ground), the level its
-/// points go on and how far over it, mm, and its height.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CursorPlane {
-    pub on: Id,
-    pub level: Id,
-    pub offset: f64,
-    pub z: f64,
-}
-
-/// How nearly straight up a face's normal turns for the face to be level: within about half a degree.
-const UP: f64 = 0.99995;
-
-/// The plane a tool draws on at pixel `at` of a 3D view through `cam`, where the line of sight meets `under`: a level face turned up at
-/// its height, on its element's level (a level's plane, that level), else on the highest level at or below it (the lowest,
-/// if none is). Nothing under the cursor, the lowest level's plane. None for a face that isn't level or is turned down, or
-/// with no level to stand on.
-pub fn cursor_plane(m: &Model, cam: &Camera, at: (f64, f64), under: Option<crate::view3d::Surface>) -> Option<CursorPlane> {
-    let levels = m.levels();
-    let ground = || {
-        let (id, l) = levels.first()?;
-        Some(crate::view3d::Surface { id: *id, at: cam.on_plane(at, l.elevation)?, normal: [0.0, 0.0, 1.0] })
-    };
-    let s = under.or_else(ground)?;
-    let z = s.at[2];
-    if !(s.normal[2] >= UP && z.is_finite()) {
-        return None;
-    }
-    let own = m.level(s.id).map(|_| s.id).or_else(|| m.elements.get(s.id).and_then(|e| m.level_of(e)).and_then(|g| m.elements.id(g)));
-    let below = levels.iter().rev().find(|(_, l)| l.elevation <= z + TOL).or(levels.first()).map(|(id, _)| *id);
-    let level = own.or(below)?;
-    // To the micron, as the commands keep points: no float noise from the line of sight.
-    let offset = ((z - m.elevation(level)) * 1e3).round() / 1e3 + 0.0;
-    Some(CursorPlane { on: s.id, level, offset, z: m.elevation(level) + offset })
 }

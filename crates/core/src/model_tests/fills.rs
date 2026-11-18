@@ -449,7 +449,7 @@ fn a_hatch_keeps_its_spacing_on_the_paper_at_every_scale_and_a_model_pattern_its
     run(&mut s, "filled_region", json!({"sketch": lines(6000.0, 0.0, 4000.0), "type": "Brick", "line_style": null}));
     let level = s.model.levels()[0].0;
     let at = |n: f64| {
-        let view = View { scale: crate::sheet::DENSITY / n, cx: 5000.0, cy: 2000.0, width: 2000, height: 600 };
+        let view = View { scale: crate::prim::DENSITY / n, cx: 5000.0, cy: 2000.0, width: 2000, height: 600 };
         crate::render::draw_at(&s.model, level, view, 1.0)
     };
     // Perpendicular distances between neighbouring lines of the 45 degree hatch, in px, and how many lines each has.

@@ -29,7 +29,8 @@ use bimcraft_core::view3d::{
     AZIMUTH, Camera, ELEVATION, Image, MAX_SIDE, P3, Scene, Surface, box_grips, move_box_face, on_floor_top, shape_handles, shape_pick_3d,
     shape_snap_3d,
 };
-use bimcraft_core::workplane::{CursorPlane, Frame, cursor_plane};
+use bimcraft_core::view3d::{CursorPlane, cursor_plane};
+use bimcraft_core::workplane::Frame;
 use egui::{
     Align, Color32, ColorImage, Layout, PointerButton, Pos2, Rect, Sense, Stroke, StrokeKind, TextureHandle, TextureOptions, Ui, UiBuilder,
     pos2, vec2,
@@ -745,7 +746,7 @@ impl BimApp {
         let picks = std::mem::take(&mut self.orbit.dim3);
         match (picks.as_slice(), r) {
             (&[a, b], _) => {
-                let (p, q) = bimcraft_core::dims3d::ends([a, b]);
+                let (p, q) = a.ends(b);
                 let Some(on) = bimcraft_core::dims3d::line_through(cam, p, q, at) else {
                     self.status = Status { text: t("The view runs along the dimension: turn it to place its line.").into(), error: true };
                     self.orbit.dim3 = picks;
@@ -1361,7 +1362,7 @@ impl BimApp {
             let screen = |q: P3| on_screen(&cam, rect, ppp, q);
             match o.dim3.as_slice() {
                 &[a, b] => {
-                    let (from, to) = dims3d::ends([a, b]);
+                    let (from, to) = a.ends(b);
                     if let Some(on) = dims3d::line_through(&cam, from, to, px(at)) {
                         let type_name = bimcraft_core::dims::default_type(&model.dimension_types, bimcraft_core::model::DimKind::Aligned);
                         let d = Dimension3D {

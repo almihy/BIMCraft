@@ -85,7 +85,7 @@ fn its_line_and_number_are_painted_into_the_processors_picture_where_the_camera_
     let view = m.default_3d().unwrap();
     let (scene, look) = (Scene::new(m), Look::of_3d(m));
     let cam = scene.fit_in(crate::camera::AZIMUTH, crate::camera::ELEVATION, 800, 600, &look);
-    let (a, b) = line(the(&s, id));
+    let (a, b) = the(&s, id).line();
     // Its line, a third of the way along: off the model, where the picture is paper.
     let along = add(a, mul(sub(b, a), 1.0 / 3.0));
     for cam in [cam, cam.orbit(40.0, 10.0)] {

@@ -17,7 +17,6 @@ use crate::cad::Cad;
 use crate::geom::P2;
 use crate::model::{Guid, MAX_TEXT, is_zero};
 use crate::prim::Prim;
-use crate::render::Drawing;
 
 /// Images one project may hold.
 pub const MAX_TYPES: usize = 256;
@@ -1045,12 +1044,13 @@ impl PdfReads {
     }
 }
 
-/// Draws image `t` on `d` over the pixels `corners` (the picture's top left, top right, bottom right and bottom left, px of
-/// `d`), as far as they lie in it: one picture, each of its pixels the image's nearest at the level that is about its size.
-pub(crate) fn draw(d: &mut Drawing, t: &ImageType, corners: [(f64, f64); 4]) {
-    let Some(p) = t.levels() else { return };
-    let Some(base) = p.levels.first() else { return };
-    let (vw, vh) = (f64::from(d.view.width), f64::from(d.view.height));
+/// Image `t` as a picture over the pixels `corners` (its top left, top right, bottom right and bottom left) of a drawing
+/// of `size` px, as far as they lie in it: each of its pixels the image's nearest at the level that is about its size. None
+/// where none of it is in the drawing, or it is too big to draw.
+pub fn picture(t: &ImageType, size: (u32, u32), corners: [(f64, f64); 4]) -> Option<Prim> {
+    let p = t.levels()?;
+    let base = p.levels.first()?;
+    let (vw, vh) = (f64::from(size.0), f64::from(size.1));
     let xs = corners.map(|c| c.0);
     let ys = corners.map(|c| c.1);
     let lo = (
@@ -1062,23 +1062,23 @@ pub(crate) fn draw(d: &mut Drawing, t: &ImageType, corners: [(f64, f64); 4]) {
         ys.iter().copied().fold(f64::NEG_INFINITY, f64::max).ceil().min(vh),
     );
     if !(lo.0 < hi.0 && lo.1 < hi.1) {
-        return;
+        return None;
     }
     let (pw, ph) = ((hi.0 - lo.0) as u32, (hi.1 - lo.1) as u32);
     if u64::from(pw) * u64::from(ph) > MAX_DRAWN {
-        return;
+        return None;
     }
     // Picture (u across, v down, 0 to 1) to pixel: the top left plus u along the top and v down the left side.
     let [tl, tr, _, bl] = corners;
     let (ex, ey) = ((tr.0 - tl.0, tr.1 - tl.1), (bl.0 - tl.0, bl.1 - tl.1));
     let det = ex.0 * ey.1 - ex.1 * ey.0;
     if det.abs() < 1e-9 {
-        return;
+        return None;
     }
     // Pixels of the base level a pixel of the view spans: which level is drawn.
     let across = (ex.0.hypot(ex.1) / f64::from(base.w)).min(ey.0.hypot(ey.1) / f64::from(base.h));
     let step = if across > 0.0 { (1.0 / across).log2().floor().max(0.0) as usize } else { 0 };
-    let Some(l) = p.levels.get(step.min(p.levels.len() - 1)) else { return };
+    let l = p.levels.get(step.min(p.levels.len() - 1))?;
     let mut rgba = vec![0_u8; pw as usize * ph as usize * 4];
     for y in 0..ph {
         let qy = lo.1 + f64::from(y) + 0.5 - tl.1;
@@ -1096,7 +1096,7 @@ pub(crate) fn draw(d: &mut Drawing, t: &ImageType, corners: [(f64, f64); 4]) {
             }
         }
     }
-    d.push(Prim::Image { at: (lo.0 as f32, lo.1 as f32), width: pw, height: ph, rgba, ink: false });
+    Some(Prim::Image { at: (lo.0 as f32, lo.1 as f32), width: pw, height: ph, rgba, ink: false })
 }
 
 #[cfg(test)]
@@ -1267,10 +1267,9 @@ mod tests {
     fn an_image_draws_its_pixels_where_its_corners_say() {
         let t =
             ImageType::picture("q.png", &png(2, 2, |x, y| [if x == 0 { 0 } else { 255 }, if y == 0 { 0 } else { 255 }, 0, 255])).unwrap();
-        let mut d = Drawing::new(crate::prim::View { scale: 1.0, cx: 50.0, cy: 50.0, width: 100, height: 100 });
-        draw(&mut d, &t, [(10.0, 10.0), (30.0, 10.0), (30.0, 30.0), (10.0, 30.0)]);
-        let Some(Prim::Image { at, width, height, rgba, .. }) = d.prims.first() else { panic!("no picture") };
-        assert_eq!((*at, *width, *height), ((10.0, 10.0), 20, 20));
+        let picture = picture(&t, (100, 100), [(10.0, 10.0), (30.0, 10.0), (30.0, 30.0), (10.0, 30.0)]);
+        let Some(Prim::Image { at, width, height, rgba, .. }) = picture else { panic!("no picture") };
+        assert_eq!((at, width, height), ((10.0, 10.0), 20, 20));
         let px = |x: usize, y: usize| &rgba[(y * 20 + x) * 4..(y * 20 + x) * 4 + 4];
         assert_eq!(px(2, 2), [0, 0, 0, 255]);
         assert_eq!(px(17, 2), [255, 0, 0, 255]);

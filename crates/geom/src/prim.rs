@@ -7,6 +7,10 @@ use crate::geom::P2;
 pub struct Rgb(pub u8, pub u8, pub u8);
 
 pub const PAPER: Rgb = Rgb(255, 255, 255);
+/// Paper px per mm in a sheet's drawing: plan lettering 10 px tall comes out 2 mm on paper.
+pub const DENSITY: f64 = 5.0;
+/// What a drawing is drawn in where nothing says otherwise: a near black.
+pub const INK: Rgb = Rgb(25, 25, 25);
 /// Wall poché, the grey of cut walls.
 pub const POCHE: Rgb = Rgb(168, 168, 168);
 /// A cut compound wall's layers that aren't its structure: lighter.

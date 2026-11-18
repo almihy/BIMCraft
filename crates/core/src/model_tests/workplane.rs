@@ -3,8 +3,7 @@
 use crate::camera::{AZIMUTH, ELEVATION};
 use crate::engine::Session;
 use crate::graphics::Look;
-use crate::view3d::{Scene, Surface};
-use crate::workplane::*;
+use crate::view3d::{Scene, Surface, cursor_plane};
 
 #[test]
 fn a_level_face_is_drawn_on_at_its_height_over_its_elements_level_and_a_face_that_isnt_level_is_not() {

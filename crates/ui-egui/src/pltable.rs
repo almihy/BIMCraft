@@ -12,8 +12,8 @@ use serde_json::{Value, json};
 
 use crate::lang::{t, tf};
 use crate::popup::Modal;
-use crate::sketch::Of;
 use crate::site::SiteTool;
+use crate::sketch::Of;
 use crate::style::pal;
 use crate::{BimApp, Status, Tool};
 
@@ -52,14 +52,22 @@ pub(crate) struct EdgeRow {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum PlDialog {
     /// Revit's Create Property Line: how it is made, on `level`.
-    Choose { level: Id },
+    Choose {
+        level: Id,
+    },
     Table(Table),
-    Setbacks { id: Id, rows: Vec<EdgeRow> },
+    Setbacks {
+        id: Id,
+        rows: Vec<EdgeRow>,
+    },
 }
 
 /// What a row's bearing comes to, an azimuth in degrees, and its distance, mm.
 fn read_row(r: &Row, units: Units, i: usize) -> Result<(f64, f64), String> {
-    let d = units.parse(r.distance.trim()).filter(|d| *d > 0.0).ok_or_else(|| tf("Row {}: the distance is a length", &[&(i + 1).to_string()]))?;
+    let d = units
+        .parse(r.distance.trim())
+        .filter(|d| *d > 0.0)
+        .ok_or_else(|| tf("Row {}: the distance is a length", &[&(i + 1).to_string()]))?;
     let text = r.bearing.trim();
     let az = text
         .parse::<f64>()
@@ -79,7 +87,10 @@ fn table_json(rows: &[Row], units: Units) -> Result<Vec<Value>, String> {
             let (d, az) = read_row(r, units, i)?;
             let mut v = json!({"distance": d, "bearing": az});
             if r.arc {
-                let radius = units.parse(r.radius.trim()).filter(|x| *x > 0.0).ok_or_else(|| tf("Row {}: an arc needs its radius", &[&(i + 1).to_string()]))?;
+                let radius = units
+                    .parse(r.radius.trim())
+                    .filter(|x| *x > 0.0)
+                    .ok_or_else(|| tf("Row {}: an arc needs its radius", &[&(i + 1).to_string()]))?;
                 v["type"] = json!("arc");
                 v["radius"] = json!(radius);
                 v["side"] = json!(if r.right { "R" } else { "L" });
@@ -150,7 +161,12 @@ impl BimApp {
                 let seg = &table[i];
                 let len = |x: f64| if x > 0.0 { units.length(x) } else { String::new() };
                 EdgeRow {
-                    segment: format!("{}  {}  {}", i + 1, units.length(seg["distance"].as_f64().unwrap_or(0.0)), seg["bearing"].as_str().unwrap_or("")),
+                    segment: format!(
+                        "{}  {}  {}",
+                        i + 1,
+                        units.length(seg["distance"].as_f64().unwrap_or(0.0)),
+                        seg["bearing"].as_str().unwrap_or("")
+                    ),
                     setback: len(e.setback),
                     kind: e.kind.clone(),
                     street: e.street.clone(),
@@ -186,7 +202,8 @@ impl BimApp {
         });
         if table {
             let row = Row::default();
-            self.pl_dialog = Some(PlDialog::Table(Table { id: None, level, start: "0, 0".into(), rows: vec![row.clone(), row], picked: 0 }));
+            self.pl_dialog =
+                Some(PlDialog::Table(Table { id: None, level, start: "0, 0".into(), rows: vec![row.clone(), row], picked: 0 }));
         } else if sketch {
             self.pl_dialog = None;
             self.start_sketch(Of::Site { level, tool: SiteTool::PropertyLine }, Vec::new());
@@ -222,22 +239,22 @@ impl BimApp {
                                 .on_hover_text(t("Distance"));
                             ui.add(TextEdit::singleline(&mut row.bearing).desired_width(150.0).hint_text("N 45°30'00\" E"))
                                 .on_hover_text(t("Bearing"));
-                            crate::icons::combo(format!("property-line-type-{i}")).selected_text(t(if row.arc { "Arc" } else { "Line" })).width(70.0).show_ui(
-                                ui,
-                                |ui| {
+                            crate::icons::combo(format!("property-line-type-{i}"))
+                                .selected_text(t(if row.arc { "Arc" } else { "Line" }))
+                                .width(70.0)
+                                .show_ui(ui, |ui| {
                                     ui.selectable_value(&mut row.arc, false, t("Line"));
                                     ui.selectable_value(&mut row.arc, true, t("Arc"));
-                                },
-                            );
+                                });
                             ui.add_enabled(row.arc, TextEdit::singleline(&mut row.radius).desired_width(90.0)).on_hover_text(t("Radius"));
                             ui.add_enabled_ui(row.arc, |ui| {
-                                crate::icons::combo(format!("property-line-side-{i}")).selected_text(if row.right { "R" } else { "L" }).width(44.0).show_ui(
-                                    ui,
-                                    |ui| {
+                                crate::icons::combo(format!("property-line-side-{i}"))
+                                    .selected_text(if row.right { "R" } else { "L" })
+                                    .width(44.0)
+                                    .show_ui(ui, |ui| {
                                         ui.selectable_value(&mut row.right, false, "L");
                                         ui.selectable_value(&mut row.right, true, "R");
-                                    },
-                                );
+                                    });
                             });
                             ui.end_row();
                         }
@@ -264,7 +281,10 @@ impl BimApp {
                     }
                     to_close = ui.button(t("Add Line to Close")).clicked();
                 });
-                ui.label(RichText::new(t("Bearings are against true north. A table that doesn't close is closed by a last line.")).color(pal().muted));
+                ui.label(
+                    RichText::new(t("Bearings are against true north. A table that doesn't close is closed by a last line."))
+                        .color(pal().muted),
+                );
             });
             crate::popup::footer(ui, |ui| {
                 ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
@@ -342,14 +362,18 @@ impl BimApp {
                         ui.end_row();
                         for (i, row) in rows.iter_mut().enumerate() {
                             ui.label(&row.segment);
-                            ui.add(TextEdit::singleline(&mut row.setback).desired_width(90.0).hint_text(units.name())).on_hover_text(t("Setback"));
-                            crate::icons::combo(format!("property-line-kind-{i}")).selected_text(kind_name(&row.kind)).width(90.0).show_ui(ui, |ui| {
-                                for k in &kinds {
-                                    if ui.selectable_label(row.kind == *k, kind_name(k)).clicked() {
-                                        row.kind = (*k).to_string();
+                            ui.add(TextEdit::singleline(&mut row.setback).desired_width(90.0).hint_text(units.name()))
+                                .on_hover_text(t("Setback"));
+                            crate::icons::combo(format!("property-line-kind-{i}")).selected_text(kind_name(&row.kind)).width(90.0).show_ui(
+                                ui,
+                                |ui| {
+                                    for k in &kinds {
+                                        if ui.selectable_label(row.kind == *k, kind_name(k)).clicked() {
+                                            row.kind = (*k).to_string();
+                                        }
                                     }
-                                }
-                            });
+                                },
+                            );
                             let street = row.kind == "street" || row.kind == "corner";
                             ui.add_enabled(street, TextEdit::singleline(&mut row.street).desired_width(150.0)).on_hover_text(t("Street"));
                             ui.add_enabled(street, TextEdit::singleline(&mut row.width).desired_width(90.0).hint_text(units.name()))
@@ -372,7 +396,10 @@ impl BimApp {
                 if s.trim().is_empty() {
                     return Ok(0.0);
                 }
-                units.parse(s.trim()).filter(|x| *x >= 0.0).ok_or_else(|| tf("Segment {}: the {} is a length", &[&(i + 1).to_string(), what]))
+                units
+                    .parse(s.trim())
+                    .filter(|x| *x >= 0.0)
+                    .ok_or_else(|| tf("Segment {}: the {} is a length", &[&(i + 1).to_string(), what]))
             };
             let edges: Result<Vec<Value>, String> = rows
                 .iter()

@@ -328,7 +328,7 @@ fn a_dimension_s_type_draws_its_ticks_its_lines_and_its_strings() {
     // The first line from a to b at `at`, the next, a to c, 10 mm of paper further out (down the page).
     let first = d.view.px(crate::geom::P2(6000.0, -2000.0));
     // A mm of paper, in model mm.
-    let mm = f64::from(d.k) / d.view.scale * crate::sheet::DENSITY;
+    let mm = f64::from(d.k) / d.view.scale * crate::prim::DENSITY;
     let below = d.view.px(crate::geom::P2(6000.0, -2000.0 - 10.0 * mm));
     assert!(!dark(first), "a to b ends at b: nothing past it on the first line");
     assert!(dark(below), "a to c, one baseline spacing out");

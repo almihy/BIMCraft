@@ -11,9 +11,9 @@ use crate::library::Kind as LibKind;
 use crate::model::{Column, Element, Floor, Id, Mass, Model, Unbound, Wall, paper};
 use crate::rebar;
 use crate::sketch;
+use crate::stairs;
 use crate::units::m2;
 use crate::walls::Axis;
-use crate::{sheet, stairs};
 
 /// An element as agents read it: its fields (what it points at by GUID) plus its `id`, its `guid` and derived values.
 pub fn element_json(m: &Model, id: Id) -> Value {
@@ -314,7 +314,7 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>, measures: boo
             extra.insert("title_block".into(), json!(sh.title_block));
             extra.insert("paper".into(), json!(paper(&sh.size)));
             // What its title block's fields say, filled in; and which of them are its own to give.
-            extra.insert("title_values".into(), json!(sheet::title_values(m, id)));
+            extra.insert("title_values".into(), json!(crate::titleblock::sheet_values(m, id)));
             if let Some(tb) = m.title_blocks.get(&sh.title_block) {
                 let own: Vec<&str> =
                     tb.fields.iter().filter(|f| f.scope == crate::titleblock::Scope::Sheet).map(|f| f.key.as_str()).collect();
@@ -326,7 +326,7 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>, measures: boo
         }
         Element::Viewport(v) => {
             extra.insert("title".into(), json!(m.view_name(v.view)));
-            extra.insert("size".into(), json!(sheet::size(m, v.view, v.scale)));
+            // Its size on the sheet is found by drawing it: `bimcraft-core`'s `element_json` adds it.
         }
         Element::Section(v) | Element::Elevation(v) => {
             let l = v.looking();
@@ -482,7 +482,7 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>, measures: boo
             extra.insert("computation_height".into(), json!(l.computation_height));
         }
         Element::Dimension3D(d) => {
-            extra.insert("length".into(), json!(hundredth(crate::dims3d::length(d))));
+            extra.insert("length".into(), json!(hundredth(d.length())));
         }
         Element::Grid(_) | Element::Schedule(_) | Element::View3D(_) | Element::PlanView(_) => {}
     }

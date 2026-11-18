@@ -8982,7 +8982,7 @@ fn dimension_3d(s: &mut Session, p: &Value) -> R {
         None => s.model_mut().insert(Element::View3D(View3D::default_view())),
     };
     let d = Dimension3D { view: s.model.guid(view), refs, at, type_name };
-    let length = crate::dims3d::length(&d);
+    let length = d.length();
     let id = s.model_mut().insert(Element::Dimension3D(d));
     Ok(json!({"id": id, "view": view, "length": hundredth(length)}))
 }

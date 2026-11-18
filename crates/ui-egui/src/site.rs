@@ -66,7 +66,8 @@ pub const PARKING_TYPES: [&str; 4] = [
     bimcraft_core::family::site::MOTORCYCLE,
 ];
 /// Site Component's families and Planting's, the site's own (`family/site.rs`).
-pub const COMPONENTS: [&str; 3] = [bimcraft_core::family::site::BIKE_RACK, bimcraft_core::family::site::BENCH, bimcraft_core::family::site::PLAY];
+pub const COMPONENTS: [&str; 3] =
+    [bimcraft_core::family::site::BIKE_RACK, bimcraft_core::family::site::BENCH, bimcraft_core::family::site::PLAY];
 pub const PLANTING: [&str; 3] = [bimcraft_core::family::site::TREE, bimcraft_core::family::site::SHRUB, bimcraft_core::family::site::HEDGE];
 
 /// What the site tools' Options Bars hold, kept between uses as the other tools' are.
@@ -519,7 +520,9 @@ impl BimApp {
                     (
                         Icon::ParkingArea,
                         msg!("Parking Area"),
-                        msg!("Parking Area: sketch a car park's area; it is laid out as parking spaces and drive aisles among what stands on its level"),
+                        msg!(
+                            "Parking Area: sketch a car park's area; it is laid out as parking spaces and drive aisles among what stands on its level"
+                        ),
                         SiteTool::ParkingArea,
                     ),
                 ],
@@ -530,7 +533,15 @@ impl BimApp {
             panel(ui, name, |ui| {
                 // Revit's Modify Site: Excavate and Graded Region act on what is selected.
                 if modify {
-                    if big_button(ui, Icon::BuildingPad, msg!("Excavate"), false, msg!("Excavate: select a toposolid and the floors, roofs or toposolids that cut it, then click")).clicked() {
+                    if big_button(
+                        ui,
+                        Icon::BuildingPad,
+                        msg!("Excavate"),
+                        false,
+                        msg!("Excavate: select a toposolid and the floors, roofs or toposolids that cut it, then click"),
+                    )
+                    .clicked()
+                    {
                         self.site_excavate();
                     }
                     if big_button(ui, Icon::Toposolid, msg!("Graded Region"), false, msg!("Graded Region: select the existing toposolid (or none, the lowest) and click: a copy of it is the proposed ground, its cut and fill in its Properties")).clicked() {
@@ -929,13 +940,18 @@ impl BimApp {
             .selection
             .iter()
             .copied()
-            .filter(|id| Some(*id) != topo && matches!(m.elements.get(*id), Some(Element::Floor(_) | Element::Roof(_) | Element::Toposolid(_))))
+            .filter(|id| {
+                Some(*id) != topo && matches!(m.elements.get(*id), Some(Element::Floor(_) | Element::Roof(_) | Element::Toposolid(_)))
+            })
             .collect();
         match topo {
             Some(topo) if !by.is_empty() => {
                 self.run("excavate", json!({"toposolid": topo, "by": by}));
             }
-            _ => self.status = Status { text: t("Select a toposolid and the floors, roofs or toposolids that excavate it.").into(), error: true },
+            _ => {
+                self.status =
+                    Status { text: t("Select a toposolid and the floors, roofs or toposolids that excavate it.").into(), error: true }
+            }
         }
     }
 

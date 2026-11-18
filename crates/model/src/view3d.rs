@@ -2891,6 +2891,42 @@ impl Scene {
     }
 }
 
+/// A level plane a tool draws on: the element whose face it is (a level, for its own plane or the ground), the level its
+/// points go on and how far over it, mm, and its height.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CursorPlane {
+    pub on: Id,
+    pub level: Id,
+    pub offset: f64,
+    pub z: f64,
+}
+
+/// How nearly straight up a face's normal turns for the face to be level: within about half a degree.
+const LEVEL_UP: f64 = 0.99995;
+
+/// The plane a tool draws on at pixel `at` of a 3D view through `cam`, where the line of sight meets `under`: a level face turned up at
+/// its height, on its element's level (a level's plane, that level), else on the highest level at or below it (the lowest,
+/// if none is). Nothing under the cursor, the lowest level's plane. None for a face that isn't level or is turned down, or
+/// with no level to stand on.
+pub fn cursor_plane(m: &Model, cam: &Camera, at: (f64, f64), under: Option<Surface>) -> Option<CursorPlane> {
+    let levels = m.levels();
+    let ground = || {
+        let (id, l) = levels.first()?;
+        Some(Surface { id: *id, at: cam.on_plane(at, l.elevation)?, normal: [0.0, 0.0, 1.0] })
+    };
+    let s = under.or_else(ground)?;
+    let z = s.at[2];
+    if !(s.normal[2] >= LEVEL_UP && z.is_finite()) {
+        return None;
+    }
+    let own = m.level(s.id).map(|_| s.id).or_else(|| m.elements.get(s.id).and_then(|e| m.level_of(e)).and_then(|g| m.elements.id(g)));
+    let below = levels.iter().rev().find(|(_, l)| l.elevation <= z + crate::model::TOL).or(levels.first()).map(|(id, _)| *id);
+    let level = own.or(below)?;
+    // To the micron, as the commands keep points: no float noise from the line of sight.
+    let offset = ((z - m.elevation(level)) * 1e3).round() / 1e3 + 0.0;
+    Some(CursorPlane { on: s.id, level, offset, z: m.elevation(level) + offset })
+}
+
 #[cfg(test)]
 #[path = "view3d_tests.rs"]
 mod tests;

@@ -840,7 +840,10 @@ fn site_family(c: &str, s: &mut Session, p: &Value, default: &str, category: cra
     let type_name = match string(c, p, "type")? {
         Some(t) if f.types.contains_key(&t) => t,
         Some(t) => {
-            return Err(bad(c, format!("`{family}` has no type `{t}`; it has: {}", f.types.keys().cloned().collect::<Vec<_>>().join(", "))));
+            return Err(bad(
+                c,
+                format!("`{family}` has no type `{t}`; it has: {}", f.types.keys().cloned().collect::<Vec<_>>().join(", ")),
+            ));
         }
         None => f.types.keys().next().cloned().unwrap_or_default(),
     };
@@ -1115,7 +1118,10 @@ pub(super) fn parking_component(s: &mut Session, p: &Value) -> R {
     let type_name = match string(c, p, "type")? {
         Some(t) if f.types.contains_key(&t) => t,
         Some(t) => {
-            return Err(bad(c, format!("`{family}` has no type `{t}`; it has: {}", f.types.keys().cloned().collect::<Vec<_>>().join(", "))));
+            return Err(bad(
+                c,
+                format!("`{family}` has no type `{t}`; it has: {}", f.types.keys().cloned().collect::<Vec<_>>().join(", ")),
+            ));
         }
         None => {
             let standard = m.language.word(crate::family::site::STANDARD).to_string();

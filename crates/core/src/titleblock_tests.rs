@@ -74,8 +74,8 @@ fn its_fields_are_filled_in_from_the_project_the_sheet_and_the_automatic_ones() 
     run(&mut s, "sheet", json!({"number": "A102", "name": "Cortes", "title_block": "ESCRITORIO", "fields": {"desenho": "M.S."}}));
     run(&mut s, "sheet", json!({"number": "A101", "name": "Plantas", "title_block": "ESCRITORIO"}));
     run(&mut s, "title_values", json!({"values": {"CLIENTE": "Maria Conceição"}}));
-    let a101 = sheet::title_values(&s.model, sheet_id(&s, "A101"));
-    let a102 = sheet::title_values(&s.model, sheet_id(&s, "A102"));
+    let a101 = crate::titleblock::sheet_values(&s.model, sheet_id(&s, "A101"));
+    let a102 = crate::titleblock::sheet_values(&s.model, sheet_id(&s, "A102"));
     assert_eq!(a101["CLIENTE"], "Maria Conceição");
     assert_eq!(a102["CLIENTE"], "Maria Conceição", "a project field is the same on every sheet");
     assert_eq!((a101["DESENHO"].as_str(), a102["DESENHO"].as_str()), ("A.B.", "M.S."), "a sheet field is each sheet's, else its default");
@@ -90,8 +90,8 @@ fn its_fields_are_filled_in_from_the_project_the_sheet_and_the_automatic_ones() 
     run(&mut s, "title_values", json!({"values": {"DATE": "10/11/2026"}}));
     let a102_id = sheet_id(&s, "A102");
     run(&mut s, "modify", json!({"id": a102_id, "fields": {"DATE": "12/11/2026", "DESENHO": null}}));
-    let a101 = sheet::title_values(&s.model, sheet_id(&s, "A101"));
-    let a102 = sheet::title_values(&s.model, sheet_id(&s, "A102"));
+    let a101 = crate::titleblock::sheet_values(&s.model, sheet_id(&s, "A101"));
+    let a102 = crate::titleblock::sheet_values(&s.model, sheet_id(&s, "A102"));
     assert_eq!((a101["DATE"].as_str(), a102["DATE"].as_str()), ("10/11/2026", "12/11/2026"));
     assert_eq!(a102["DESENHO"], "A.B.", "a value taken away gives the default again");
     // What `elements` says of a sheet: its fields filled in, and which are its own to give.
@@ -101,7 +101,7 @@ fn its_fields_are_filled_in_from_the_project_the_sheet_and_the_automatic_ones() 
     assert_eq!(e["sheet_fields"], json!(["DESENHO"]));
     // A null clears a project value.
     run(&mut s, "title_values", json!({"values": {"CLIENTE": null}}));
-    assert_eq!(sheet::title_values(&s.model, sheet_id(&s, "A101"))["CLIENTE"], "");
+    assert_eq!(crate::titleblock::sheet_values(&s.model, sheet_id(&s, "A101"))["CLIENTE"], "");
 }
 
 #[test]
@@ -115,7 +115,7 @@ fn the_revision_is_the_latest_of_the_clouds_on_the_sheet_and_its_views() {
     )
     .unwrap();
     let id = sheet_id(&s, "A101");
-    assert_eq!(sheet::title_values(&s.model, id)["REVISION"], "");
+    assert_eq!(crate::titleblock::sheet_values(&s.model, id)["REVISION"], "");
     run(
         &mut s,
         "detail_line",
@@ -131,7 +131,7 @@ fn the_revision_is_the_latest_of_the_clouds_on_the_sheet_and_its_views() {
         "detail_line",
         json!({"points": [[0, 0], [1000, 0], [1000, 1000]], "closed": true, "cloud": 200, "revision": "D", "view": "Level 2"}),
     );
-    assert_eq!(sheet::title_values(&s.model, id)["REVISION"], "C", "Level 2 isn't on the sheet");
+    assert_eq!(crate::titleblock::sheet_values(&s.model, id)["REVISION"], "C", "Level 2 isn't on the sheet");
 }
 
 #[test]
@@ -250,7 +250,7 @@ fn a_new_title_block_starts_as_the_built_in_one_and_another_like_it() {
     assert_eq!(s.model.title_blocks["B"].height, 55.0);
     // The built-in one drawn as a title block shows what the built-in title box does.
     run(&mut s, "sheet", json!({"number": "A101", "name": "Plans", "title_block": "B"}));
-    let v = sheet::title_values(&s.model, sheet_id(&s, "A101"));
+    let v = crate::titleblock::sheet_values(&s.model, sheet_id(&s, "A101"));
     assert_eq!(crate::titleblock::fill("{SHEET_NUMBER} {SHEET_NAME}", &v), "A101 Plans");
 }
 
@@ -279,11 +279,15 @@ fn scale_is_the_views_scale_alone_or_as_indicated() {
     .unwrap();
     let id = sheet_id(&s, "A101");
     let levels: Vec<Id> = s.model.levels().iter().map(|(id, _)| *id).collect();
-    assert_eq!(sheet::title_values(&s.model, id)["SCALE"], "", "nothing on it, no scale");
+    assert_eq!(crate::titleblock::sheet_values(&s.model, id)["SCALE"], "", "nothing on it, no scale");
     run(&mut s, "place", json!({"sheet": "A101", "view": levels[0], "scale": 50}));
-    assert_eq!(sheet::title_values(&s.model, id)["SCALE"], "1 : 50", "the scale alone, for the title block to letter as it likes");
+    assert_eq!(
+        crate::titleblock::sheet_values(&s.model, id)["SCALE"],
+        "1 : 50",
+        "the scale alone, for the title block to letter as it likes"
+    );
     run(&mut s, "place", json!({"sheet": "A101", "view": levels[1], "scale": 100}));
-    assert_eq!(sheet::title_values(&s.model, id)["SCALE"], "INDICADA");
+    assert_eq!(crate::titleblock::sheet_values(&s.model, id)["SCALE"], "INDICADA");
 }
 
 #[test]
@@ -380,7 +384,7 @@ fn a_fill_with_islands_is_drawn_as_lettering_is_so_every_canvas_leaves_them_empt
         json!({"name": "Selo", "width": 60, "height": 20, "fills": [{"rings": band}, {"rings": [[[0, 12], [5, 12], [5, 17]]]}]}),
     );
     let tb = s.model.title_blocks["Selo"].clone();
-    let d = crate::titleblock::preview(&s.model, &tb, &Default::default());
+    let d = crate::sheet::title_block_preview(&s.model, &tb, &Default::default());
     let parts: Vec<crate::prim::Part> =
         d.prims.iter().zip(&d.parts).filter_map(|(p, part)| matches!(p, crate::prim::Prim::Fill { .. }).then_some(*part)).collect();
     // Its fills come first, then its lettering (a new one starts as the built-in box, with its texts).

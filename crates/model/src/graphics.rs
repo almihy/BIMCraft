@@ -17,7 +17,6 @@ use crate::language::Language;
 use crate::model::{Element, Guid, Id, Key, MAX_TEXT, Model, ViewRange};
 use crate::pen::{MAX_PEN, Pen};
 use crate::prim::{Part, Prim, Rgb};
-use crate::render::Drawing;
 use crate::schedule;
 
 /// The categories a plan, a section or a 3D view draws, and so may hide and override: those of the
@@ -1484,14 +1483,15 @@ impl Look {
         self.hidden.is_empty() && self.paint.is_empty()
     }
 
-    /// `d` with its primitives drawn as the view says: the colours, weights and dashes of each
-    /// element's lines in projection and cut, its fills, lighter in halftone.
-    pub fn dress(&self, d: &mut Drawing) {
-        if self.paint.is_empty() {
-            return;
-        }
+    /// A drawing's primitives (with each one's owner, part and pen) drawn as the view says: the colours, weights and
+    /// dashes of each element's lines in projection and cut, its fills, lighter in halftone. Which of them are in halftone,
+    /// by index, for the drawing to mark ([`crate::render::Drawing::dress`]).
+    pub fn dress(&self, prims: &mut [Prim], owners: &[Option<Id>], parts: &[Part], pens: &mut [Option<Pen>]) -> Vec<usize> {
         let mut halves = Vec::new();
-        for (i, (((prim, owner), part), pen)) in d.prims.iter_mut().zip(&d.owners).zip(&d.parts).zip(d.pens.iter_mut()).enumerate() {
+        if self.paint.is_empty() {
+            return halves;
+        }
+        for (i, (((prim, owner), part), pen)) in prims.iter_mut().zip(owners).zip(parts).zip(pens.iter_mut()).enumerate() {
             let Some(over) = owner.and_then(|id| self.paint.get(&id)) else { continue };
             if over.halftone && !matches!(prim, Prim::Image { .. } if *part != Part::Cells) {
                 halves.push(i);
@@ -1550,9 +1550,7 @@ impl Look {
                 Prim::Image { .. } => {}
             }
         }
-        for i in halves {
-            d.set_half(i);
-        }
+        halves
     }
 }
 

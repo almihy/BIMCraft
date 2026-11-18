@@ -2,7 +2,6 @@
 //! line goes; the dimension is the view's, drawn over its picture on either painter, and stays as the view turns.
 
 use super::*;
-use bimcraft_core::dims3d;
 use bimcraft_core::model::Dimension3D;
 use bimcraft_core::view3d::P3;
 
@@ -78,7 +77,7 @@ fn a_dimension_in_the_3d_view_stays_as_the_view_orbits_and_is_picked_where_it_is
     assert!((h.state().orbit.camera.unwrap().azimuth - before.azimuth).abs() > 10.0, "it turned");
     assert_eq!(dims(&h), vec![(id, d.clone())], "the same dimension, where it was in the model");
     // A click on its line, where the turned view draws it, picks it.
-    let (a, b) = dims3d::line(&d);
+    let (a, b) = d.line();
     let along = [0, 1, 2].map(|k| a[k] + (b[k] - a[k]) / 3.0);
     let on = h.state().screen3(along);
     click_at(&mut h, on);

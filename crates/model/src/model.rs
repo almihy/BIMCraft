@@ -1299,6 +1299,49 @@ pub struct Ref3 {
     pub edge: Option<[[f64; 3]; 2]>,
 }
 
+impl Dimension3D {
+    /// The two points it measures between: its first reference's and its second's; to an edge, the foot of the square to it.
+    pub fn measured(&self) -> ([f64; 3], [f64; 3]) {
+        self.refs[0].ends(self.refs[1])
+    }
+
+    /// How long it is, mm.
+    pub fn length(&self) -> f64 {
+        use crate::geom::v3::{dot, sub};
+        let (p, q) = self.measured();
+        let d = sub(q, p);
+        dot(d, d).sqrt()
+    }
+
+    /// Where its line runs: from over its first point to over its second, moved square off them to pass through `at`.
+    pub fn line(&self) -> ([f64; 3], [f64; 3]) {
+        use crate::geom::v3::{add, dot, mul, sub, unit};
+        let (p, q) = self.measured();
+        let u = unit(sub(q, p));
+        let off = sub(self.at, p);
+        let off = sub(off, mul(u, dot(off, u)));
+        (add(p, off), add(q, off))
+    }
+}
+
+impl Ref3 {
+    /// The two points a dimension from this reference to `other` measures between ([`Dimension3D::measured`]).
+    pub fn ends(self, other: Ref3) -> ([f64; 3], [f64; 3]) {
+        use crate::geom::v3::{add, dot, mul, sub};
+        // The foot of the square from `p` to the line through edge `e`.
+        let foot = |p: [f64; 3], [a, b]: [[f64; 3]; 2]| {
+            let d = sub(b, a);
+            let l = dot(d, d);
+            if l <= 1e-12 { a } else { add(a, mul(d, dot(sub(p, a), d) / l)) }
+        };
+        match (self.edge, other.edge) {
+            (_, Some(e)) => (self.at, foot(self.at, e)),
+            (Some(e), None) => (foot(other.at, e), other.at),
+            (None, None) => (self.at, other.at),
+        }
+    }
+}
+
 /// A dimension's segment `segment` (counted as its values are) kept at `length` mm, Revit's padlock.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -7873,7 +7916,7 @@ impl Model {
                 if d.refs.iter().any(|r| r.edge.is_some_and(|[a, b]| (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f64>().sqrt() <= TOL)) {
                     return Err(format!("{who}: an edge it measures to has its two ends in one place"));
                 }
-                if crate::dims3d::length(d) <= TOL {
+                if d.length() <= TOL {
                     return Err(format!("{who}: it measures nothing: its references are in one place, or one lies on the other's edge"));
                 }
                 if !self.dimension_types.contains_key(&d.type_name) {
@@ -9140,7 +9183,7 @@ fn fresh_uid() -> u64 {
 }
 
 /// A file from before pens (format 3 and older) as one after: each line weight of a view's, a filter's or a phase's
-/// overrides (the `weight` of a `cut` or `projection` style) was pixels of a sheet's drawing, [`crate::sheet::DENSITY`] to
+/// overrides (the `weight` of a `cut` or `projection` style) was pixels of a sheet's drawing, [`crate::prim::DENSITY`] to
 /// the mm, and is the pen nearest that wide on paper. A weight that isn't a number is left for reading to refuse.
 fn pens_from_pixels(v: &mut serde_json::Value) {
     use serde_json::Value;
@@ -9148,7 +9191,7 @@ fn pens_from_pixels(v: &mut serde_json::Value) {
         Value::Object(o) => {
             for (k, v) in o.iter_mut() {
                 if let ("cut" | "projection", Some(px)) = (k.as_str(), v.get("weight").and_then(Value::as_f64)) {
-                    v["weight"] = crate::pen::Pen::nearest(px / crate::sheet::DENSITY).0.into();
+                    v["weight"] = crate::pen::Pen::nearest(px / crate::prim::DENSITY).0.into();
                 }
                 pens_from_pixels(v);
             }

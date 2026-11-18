@@ -10,7 +10,7 @@ use crate::font;
 use crate::geom::v3::{P3, add, dot, mul, sub, unit};
 use crate::graphics::Look;
 use crate::ids::Key;
-use crate::model::{Dimension3D, Element, Id, Model, Ref3};
+use crate::model::{Dimension3D, Element, Id, Model};
 use crate::prim::Rgb;
 use crate::view3d::{Camera, Image};
 
@@ -26,45 +26,9 @@ pub struct Mark {
     pub color: Rgb,
 }
 
-/// The foot of the square from `p` to the line through edge `e`.
-fn foot(p: P3, [a, b]: [P3; 2]) -> P3 {
-    let d = sub(b, a);
-    let l = dot(d, d);
-    if l <= 1e-12 { a } else { add(a, mul(d, dot(sub(p, a), d) / l)) }
-}
-
 fn dist(a: P3, b: P3) -> f64 {
     let d = sub(b, a);
     dot(d, d).sqrt()
-}
-
-/// The two points `d` measures between: its first reference's and its second's; to an edge, the foot of the square to it.
-pub fn measured(d: &Dimension3D) -> (P3, P3) {
-    ends(d.refs)
-}
-
-/// The two points a dimension of references `a` and `b` measures between, as [`measured`] says.
-pub fn ends([a, b]: [Ref3; 2]) -> (P3, P3) {
-    match (a.edge, b.edge) {
-        (_, Some(e)) => (a.at, foot(a.at, e)),
-        (Some(e), None) => (foot(b.at, e), b.at),
-        (None, None) => (a.at, b.at),
-    }
-}
-
-/// How long `d` is, mm.
-pub fn length(d: &Dimension3D) -> f64 {
-    let (p, q) = measured(d);
-    dist(p, q)
-}
-
-/// Where its line runs: from over its first point to over its second, moved square off them to pass through `d.at`.
-pub fn line(d: &Dimension3D) -> (P3, P3) {
-    let (p, q) = measured(d);
-    let u = unit(sub(q, p));
-    let off = sub(d.at, p);
-    let off = sub(off, mul(u, dot(off, u)));
-    (add(p, off), add(q, off))
 }
 
 /// Where a pick at pixel `at` through `cam` puts the line of a dimension from `p` to `q`: on the plane through them that
@@ -117,8 +81,8 @@ pub fn marks_of(m: &Model, owner: Id, d: &Dimension3D, cam: &Camera, mm: f64) ->
     let color = Rgb(t.color[0], t.color[1], t.color[2]);
     let weights = m.line_weights().at(m.units.default_scale());
     let pen = |p| (weights.mm(p, true) * mm).max(1.0) as f32;
-    let (p, q) = measured(d);
-    let (a, b) = line(d);
+    let (p, q) = d.measured();
+    let (a, b) = d.line();
     let at = |x: P3| -> Option<(f64, f64)> {
         cam.in_front(x, x)?;
         let (x, y, _) = cam.project(x);

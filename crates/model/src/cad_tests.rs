@@ -224,7 +224,7 @@ fn a_dense_drawing_has_bands_of_cells_each_under_a_pixel_and_a_sparse_one_none()
     assert!(matches!(band.steps.as_slice(), [lod::Step::Picture(_), lod::Step::Whole(_)]), "{:?}", band.steps);
     assert!(band.len() > 1000 && band.len() < 20_000 * 3, "{}", band.len());
     // Its ink is all there: as much line as the strokes are long (a cell a cell), and their ends; and the hatches' area.
-    let as_drawn = |_: usize, c: Option<Rgb>, _: bool| Some(c.unwrap_or(crate::render::INK));
+    let as_drawn = |_: usize, c: Option<Rgb>, _: bool| Some(c.unwrap_or(crate::prim::INK));
     let all = lod.picture(band, 1, &as_drawn).unwrap();
     let ink: f64 = all.cells_in(P2(-1e9, -1e9), P2(1e9, 1e9)).map(|(_, c)| lod::ink_of(c.ink)).sum();
     let want: f64 = cad
@@ -249,7 +249,7 @@ fn a_dense_drawing_has_bands_of_cells_each_under_a_pixel_and_a_sparse_one_none()
     }
     // A layer hidden lays no ink: Doors, red, is gone; the rest the same.
     let doors = lod.layers.iter().position(|l| l == "Doors").unwrap();
-    let hidden = lod.picture(band, 2, &|l, c, _| (l != doors).then(|| c.unwrap_or(crate::render::INK))).unwrap();
+    let hidden = lod.picture(band, 2, &|l, c, _| (l != doors).then(|| c.unwrap_or(crate::prim::INK))).unwrap();
     assert!(hidden.cells_in(P2(-1e9, -1e9), P2(1e9, 1e9)).all(|(_, c)| c.rgb.0 < 150 || c.rgb.2 > 100), "no red left");
     let left: f64 = hidden.cells_in(P2(-1e9, -1e9), P2(1e9, 1e9)).map(|(_, c)| lod::ink_of(c.ink)).sum();
     assert!(left < ink * 0.72 && left > ink * 0.6, "{left} of {ink}");

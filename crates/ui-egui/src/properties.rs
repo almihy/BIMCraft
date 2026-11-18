@@ -2102,7 +2102,7 @@ impl BimApp {
         let mut chosen = sheet.title_block.clone();
         let mut change: Option<Value> = None;
         let tb = model.title_blocks.get(&sheet.title_block);
-        let values = bimcraft_core::sheet::title_values(model, id);
+        let values = bimcraft_core::titleblock::sheet_values(model, id);
         grid(ui, ("sheet-title-block", id), |ui| {
             let label = ui.label(t("Title Block"));
             let shown = match chosen.as_str() {

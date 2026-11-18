@@ -305,7 +305,7 @@ impl Lod {
             };
             // A patterned hatch with no pattern held is filled pale; one drawn with its pattern is its tint, its colour.
             if let Shape::Fill { solid: false, tile: None, .. } = e.shape {
-                let Rgb(r, g, b) = c.unwrap_or(crate::render::INK);
+                let Rgb(r, g, b) = c.unwrap_or(crate::prim::INK);
                 c = Some(Rgb(pale(r), pale(g), pale(b)));
             }
             let fill = matches!(e.shape, Shape::Fill { .. });
@@ -734,7 +734,7 @@ impl Band {
                         for m in marks {
                             let x = usize::from(u16::from_le_bytes([m[0], m[1]]));
                             let k = usize::from(m[3]);
-                            let (ink, c) = (ink_of(m[2]), palette.get(k).copied().unwrap_or(crate::render::INK));
+                            let (ink, c) = (ink_of(m[2]), palette.get(k).copied().unwrap_or(crate::prim::INK));
                             let fill = colors.get(k).is_some_and(|c| c.1);
                             if let Some(p) = row.get_mut(x) {
                                 if p.iter().all(|v| *v == 0.0) {
@@ -816,9 +816,9 @@ fn length(shape: &Shape) -> f64 {
     if d.is_finite() { d } else { 0.0 }
 }
 
-/// The colour among `colors` of `fill`'s kind nearest `c` (the view's ink as [`crate::render::INK`]).
+/// The colour among `colors` of `fill`'s kind nearest `c` (the view's ink as [`crate::prim::INK`]).
 fn nearest(colors: &[(Option<Rgb>, bool)], c: Option<Rgb>, fill: bool) -> u8 {
-    let rgb = |c: Option<Rgb>| c.unwrap_or(crate::render::INK);
+    let rgb = |c: Option<Rgb>| c.unwrap_or(crate::prim::INK);
     let d = |a: Rgb, b: Rgb| {
         let (r, g, b2) = (i32::from(a.0) - i32::from(b.0), i32::from(a.1) - i32::from(b.1), i32::from(a.2) - i32::from(b.2));
         r * r + g * g + b2 * b2
