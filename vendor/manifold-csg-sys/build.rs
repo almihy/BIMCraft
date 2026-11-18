@@ -357,7 +357,12 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=build");
     println!("cargo:rerun-if-changed=src/lib.rs");
-    println!("cargo:rerun-if-changed=patches");
+    // BIMCraft's patch: the published crate has no patches folder, and a rerun-if-changed path that does not exist makes
+    // cargo run this script on every build, which, as a path dependency of ours, rebuilt geom, the model and everything
+    // above it each time. Watched only when it is there.
+    if Path::new(env!("CARGO_MANIFEST_DIR")).join("patches").exists() {
+        println!("cargo:rerun-if-changed=patches");
+    }
 
     // Offline / bring-your-own build override (host only). Lets consumers
     // who can't run the build-script's `git clone` (sandboxed builders like
