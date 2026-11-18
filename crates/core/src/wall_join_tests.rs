@@ -283,3 +283,56 @@ fn layers_wrap_at_a_walls_free_ends_and_at_its_windows_jambs_but_not_where_it_jo
     // The joined end is its join's: no return there, the brick running on to the corner.
     assert!(holds(0, 3950.0, -50.0) && !holds(0, 3950.0, -230.0));
 }
+
+#[test]
+fn a_wall_joins_two_walls_meeting_in_line_as_it_would_the_one_wall() {
+    // The south wall of `room` drawn in two lengths that meet where the partition comes in.
+    let mut s = Session::new();
+    for name in ["Brick", "Insulation", "Block", "Plaster"] {
+        run(&mut s, "material", json!({"name": name}));
+    }
+    run(
+        &mut s,
+        "type",
+        json!({"category": "wall", "name": "Ext", "layers": [
+        {"function": "finish", "material": "Brick", "thickness": 100},
+        {"function": "thermal", "material": "Insulation", "thickness": 60},
+        {"function": "structure", "material": "Block", "thickness": 140},
+        {"function": "finish2", "material": "Plaster", "thickness": 15}]}),
+    );
+    run(
+        &mut s,
+        "type",
+        json!({"category": "wall", "name": "Part", "layers": [
+        {"function": "finish2", "material": "Plaster", "thickness": 15},
+        {"function": "structure", "material": "Block", "thickness": 100},
+        {"function": "finish2", "material": "Plaster", "thickness": 15}]}),
+    );
+    let ids = run(&mut s, "wall", json!({"points": [[3000, 0], [1500, 0], [0, 0]], "type": "Ext"}))["ids"].clone();
+    let (east, west) = (ids[0].as_u64().unwrap(), ids[1].as_u64().unwrap());
+    let part = run(&mut s, "wall", json!({"points": [[1500, 0], [1500, 1200]], "type": "Part"}))["ids"][0].as_u64().unwrap();
+    // The partition: its core through the plaster to the block, as against one wall.
+    let p = walls::layer_geometry(&s.model, part, None);
+    let lowest = |k: usize| p.bands(k).iter().map(|r| span(r).0).fold(f64::INFINITY, f64::min);
+    assert_eq!([lowest(0), lowest(1), lowest(2)], [157.5, 142.5, 157.5]);
+    // The two lengths stand square against each other at 1500, and each gives up its half of the plaster under the core.
+    for (id, from, to) in [(east, 1550.0, 3000.0), (west, 0.0, 1450.0)] {
+        assert_eq!(walls::cap(&s.model, id, id == east).len(), 2, "square at the node");
+        let g = walls::layer_geometry(&s.model, id, None);
+        let plaster: Vec<(f64, f64)> = g
+            .bands(3)
+            .iter()
+            .map(|r| r.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), q| (lo.min(q.0), hi.max(q.0))))
+            .collect();
+        assert_eq!(plaster.len(), 1);
+        assert!((plaster[0].0 - from).abs() < 1e-6 && (plaster[0].1 - to).abs() < 1e-6, "{plaster:?}");
+        let block = g.bands(2).iter().flatten().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), q| (lo.min(q.0), hi.max(q.0)));
+        assert_eq!(
+            block,
+            (from.min(1500.0).min(if id == east { 1500.0 } else { 0.0 }), to.max(1500.0).min(if id == east { 3000.0 } else { 1500.0 }))
+        );
+    }
+    // Their solids and the partition's share nothing: its core's 100 by 15 comes out of the plaster, half from each.
+    let area = |id: u64| walls::prisms(&s.model, id, false).iter().map(|q| crate::geom::area(&q.ring).abs()).sum::<f64>();
+    assert!((area(east) - (1500.0 * 315.0 - 50.0 * 15.0)).abs() < 1.0 && (area(west) - (1500.0 * 315.0 - 50.0 * 15.0)).abs() < 1.0);
+}

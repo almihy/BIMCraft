@@ -381,6 +381,18 @@ fn end_geometry(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> WallE
             return WallEnd::stepped(cut, at_end);
         }
     }
+    // Three ends at a point, two of them one wall carried on in line (a wall split in two, or drawn in two lengths): the
+    // third joins the pair as it would the one wall, and the two stand square against each other there.
+    if n == 3 && !through {
+        if in_line(m, me, prev) || in_line(m, me, next) {
+            return WallEnd::plain(vec![me.cw, me.ccw]);
+        }
+        if in_line(m, prev, next)
+            && let Some(cut) = join::end_cut(m, id, at_end, next.id, None, false, false, true)
+        {
+            return WallEnd::stepped(cut, at_end);
+        }
+    }
     let node = if at_end { w.end } else { w.start };
     let limit = arms.iter().map(|a| a.thick).fold(0.0, f64::max);
     // Where a face of this wall crosses a neighbour's facing face, near enough to the corner either way; else its own
@@ -397,6 +409,20 @@ fn end_geometry(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> WallE
     };
     let (cw, ccw) = (meet(me.cw, prev.ccw, prev), meet(me.ccw, next.cw, next));
     WallEnd::plain(if through { vec![cw, ccw] } else { vec![cw, node, ccw] })
+}
+
+/// Whether two walls leaving a node are one wall carried on: of one type on one location line, running opposite ways.
+fn in_line(m: &Model, a: &Arm, b: &Arm) -> bool {
+    let (Some(x), Some(y)) = (m.wall(a.id), m.wall(b.id)) else { return false };
+    a.id != b.id
+        && a.way.dot(b.way) < -1.0 + 1e-9
+        && x.arc == 0.0
+        && y.arc == 0.0
+        && x.type_name == y.type_name
+        && x.location == y.location
+        // Their exterior faces are one line: each one's is where the other's is, the other way round the node.
+        && a.ccw.dist(b.cw) < 1e-6
+        && a.cw.dist(b.ccw) < 1e-6
 }
 
 /// The wall end that wall `id`'s end (`at_end`, else its start) joins, when it joins one other wall end and nothing else:
@@ -422,11 +448,19 @@ fn tees(m: &Model, id: Id, index: Option<&Index>) -> Vec<(Id, bool)> {
         for at_end in [false, true].into_iter().filter(|e| o.joins(*e)) {
             let node = if at_end { o.end } else { o.start };
             let (s, across) = axis.project(node);
-            if s <= TOL || s >= axis.length() - TOL || !(int - TOL..=ext + TOL).contains(&across) {
+            if !(int - TOL..=ext + TOL).contains(&across) || axis.distance(node, across) > TOL {
                 continue;
             }
             let (arms, through) = arms(m, other, at_end, index);
-            if through && arms.len() == 3 && arms.iter().filter(|a| a.id == id).count() == 2 {
+            let on_its_side = s > TOL && s < axis.length() - TOL;
+            // On its side; or at its end, where it carries on as another wall in line with it.
+            let ends_on = if on_its_side {
+                through && arms.len() == 3 && arms.iter().filter(|a| a.id == id).count() == 2
+            } else {
+                let pair: Vec<&Arm> = arms.iter().filter(|a| a.id != other).collect();
+                !through && matches!(pair.as_slice(), [a, b] if (a.id == id || b.id == id) && in_line(m, a, b))
+            };
+            if ends_on {
                 out.push((other, at_end));
             }
         }

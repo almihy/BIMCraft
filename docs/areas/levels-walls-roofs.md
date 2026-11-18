@@ -53,7 +53,10 @@ keeping its thickness; with both sides wrapping at an insert, each to the core's
 their thickness. A plan draws the wrapped pieces and the lines round each return (`layer_geometry`); a joined end stays as
 its join cut it. Not yet: the solids (3D, sections and quantities keep the layers square at ends and jambs), an insert's own
 Wall Closure plane, and turning the wrap off at one end.
-Still as before: arc walls, three or more walls at a point, and walls within about 12 degrees of parallel, which mitre.
+Three ends at a point of which two are one wall carried on in line (one type, one location line: a wall split, or drawn in
+two lengths; `in_line`) join as the third would the one wall: the two stand square against each other and each gives up its
+part to the third's layers. Still as before: arc walls, other meetings of three or more walls, and walls within about 12
+degrees of parallel, which mitre.
 
 A wall type is Revit's basic wall type (file format 29, `WALL_FORMAT`; written only when a type needs it). Its layers are Edit
 Assembly's rows, each a `Function` with Revit's priority (`Function::priority`: Structure 1, Substrate 2, Thermal/Air Layer 3,
