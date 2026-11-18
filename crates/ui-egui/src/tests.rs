@@ -3293,7 +3293,7 @@ fn edit_assembly_builds_a_wall_types_layers_as_revits() {
     let pick = nth(&h, Role::ComboBox, "Function", 1);
     h.get_by(|n| n.id() == pick).click();
     h.run();
-    press(&mut h, "Finish 1 [4]");
+    press(&mut h, "Finish 1");
     let pick = nth(&h, Role::ComboBox, "Material", 0);
     h.get_by(|n| n.id() == pick).click();
     h.run();

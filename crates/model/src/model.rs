@@ -536,14 +536,14 @@ impl Function {
         }
     }
 
-    /// As Edit Assembly names it, Revit's words.
+    /// As Edit Assembly names it, Revit's words since 2026, when the priority left the name for a column of its own.
     pub fn label(self) -> &'static str {
         match self {
-            Function::Structure => ui_msg!("Structure [1]"),
-            Function::Substrate => ui_msg!("Substrate [2]"),
-            Function::Thermal => ui_msg!("Thermal/Air Layer [3]"),
-            Function::Finish => ui_msg!("Finish 1 [4]"),
-            Function::Finish2 => ui_msg!("Finish 2 [5]"),
+            Function::Structure => ui_msg!("Structure"),
+            Function::Substrate => ui_msg!("Substrate"),
+            Function::Thermal => ui_msg!("Thermal/Air Layer"),
+            Function::Finish => ui_msg!("Finish 1"),
+            Function::Finish2 => ui_msg!("Finish 2"),
             Function::Membrane => ui_msg!("Membrane Layer"),
         }
     }
