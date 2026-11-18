@@ -19,6 +19,9 @@ use cadcraft_index::{Opened, Query, Shape};
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 
+mod convert;
+pub use convert::{dwg_of, dxf_of};
+
 fn err(e: impl std::fmt::Display) -> JsError {
     JsError::new(&e.to_string())
 }

@@ -19,3 +19,10 @@ serde_json = { workspace = true }
 wasm-bindgen = "=0.2.129"
 getrandom = { workspace = true, features = ["wasm_js"] }
 cadcraft-index = { workspace = true }
+cadcraft-io = { workspace = true }
+# A DWG read as DXF by acadrust itself (its re-export here), for what Arqiflow's server still reads as DXF.
+cadcraft-dwg = { workspace = true }
+
+[dev-dependencies]
+# The tests read the drawings written back.
+cadcraft-doc = { workspace = true }
