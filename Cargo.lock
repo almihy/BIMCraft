@@ -579,6 +579,7 @@ dependencies = [
  "bimcraft-geom",
  "bimcraft-i18n",
  "bimcraft-mep-calc",
+ "bimcraft-site",
  "bimcraft-workspace-hack",
  "cadcraft-doc",
  "cadcraft-dwg",
@@ -627,6 +628,19 @@ dependencies = [
  "flate2",
  "memchr",
  "serde_json",
+]
+
+[[package]]
+name = "bimcraft-site"
+version = "0.11.0"
+dependencies = [
+ "bimcraft-geom",
+ "bimcraft-workspace-hack",
+ "i_overlay",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tiny-skia 0.11.4",
 ]
 
 [[package]]

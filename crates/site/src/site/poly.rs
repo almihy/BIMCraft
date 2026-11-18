@@ -27,7 +27,7 @@ pub type Xy = [f64; 2];
 pub type Ring = Vec<Xy>;
 
 /// The farthest a point may lie from the origin, mm (the model's own limit).
-pub const MAX_COORD: f64 = crate::model::MAX_COORD;
+pub const MAX_COORD: f64 = crate::geom::MAX_COORD;
 /// Arqiflow's mitre limit for a strip's corners (Clipper2's default): a sharper corner is squared off.
 pub const MITRE_LIMIT: f64 = 2.0;
 /// How far a rounded offset's pieces stay off the true arc, mm (Arqiflow's `grow`: 2 mm).

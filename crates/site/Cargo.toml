@@ -1,0 +1,25 @@
+[package]
+name = "bimcraft-site"
+description = "BIMCraft's site geometry: plots, pads, roads and car parks laid out and drawn as shapes, under the model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bimcraft-geom = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rayon = { workspace = true }
+i_overlay = { workspace = true }
+
+# As the model's: one build of the dependencies for every cargo command (crates/workspace-hack/CLAUDE.md).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+bimcraft-workspace-hack = { path = "../workspace-hack" }
+
+# A test draws a car park to look at.
+[dev-dependencies]
+tiny-skia = { workspace = true }

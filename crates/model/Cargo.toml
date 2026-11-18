@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 bimcraft-i18n = { workspace = true }
 bimcraft-geom = { workspace = true }
+bimcraft-site = { workspace = true }
 bimcraft-mep-calc = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

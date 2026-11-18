@@ -5,6 +5,7 @@
 
 // The crates under the model, by the paths its modules have always named them by (`crate::geom`, `crate::units`).
 pub use bimcraft_geom::{csg, files, font, geom, language, prim, shared, skeleton, solid, step, triangulation, units, xlsx};
+pub use bimcraft_site::site;
 pub use bimcraft_mep_calc::{conduit, demand, dps, dr, drainage, hydrant, loads, nbr5410, plumbing, reservoir, storm, water};
 
 pub mod alignment;
@@ -69,7 +70,6 @@ pub mod schedule;
 pub mod selection;
 pub mod selfcheck;
 pub mod sheet;
-pub mod site;
 pub mod sketch;
 pub mod snap;
 pub mod stairs;
