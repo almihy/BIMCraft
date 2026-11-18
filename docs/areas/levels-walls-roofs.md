@@ -42,14 +42,17 @@ layer to where it ends (`walls::layer_geometry`, `LayerGeometry::band`, `LayerGe
 A wall type is Revit's basic wall type (file format 29, `WALL_FORMAT`; written only when a type needs it). Its layers are Edit
 Assembly's rows, each a `Function` with Revit's priority (`Function::priority`: Structure 1, Substrate 2, Thermal/Air Layer 3,
 Finish 1 `finish` 4, Finish 2 `finish2` 5, Membrane Layer none), a material, a thickness, `wraps` (outside the core) and
-`structural` (the one layer whose material is the type's Structural Material, `WallType::structural_material`). Its core lies
+`structural` (the one layer whose material is the type's Structural Material, `WallType::structural_material`) and, when it is
+not its function's, a `priority` of its own, 1 to 5 (Revit 2026's Priority column; `Layer::join_priority`). Its core lies
 between the two Core Boundary rows, `core` {exterior, interior}: how many layers lie outside it on each side; a type that sets
 none has it from its first structure layer to its last (`WallType::core_layers`, `core_span`, which the core location lines
-and `walls::core_faces` read). The type also holds `function` (Interior, Exterior, Foundation, Retaining, Soffit, Core-shaft:
+and `walls::core_faces` read); it may hold no layer, as Revit's since 2026 (a finish wall). How two walls' layers clean up where
+they join is `walls/join.rs` (`join::solve`: which wall's layer holds each cell of the patch the walls share, by rank: core
+first, then priority), not yet read by the drawings. The type also holds `function` (Interior, Exterior, Foundation, Retaining, Soffit, Core-shaft:
 IFC writes `IsExternal` in `Pset_WallCommon` by it, false for Interior and Core-shaft), `wrap_inserts` and `wrap_ends`
 (Wrapping at Inserts and at Ends; stored, drawn with the joins), and `coarse_fill` with `coarse_color` (Coarse Scale Fill: a
-plan of coarse detail draws a wall as its two lines, filled only with that pattern). `Model::check` refuses only a core
-without a layer of some thickness, wrapping at ends of both, a fill pattern the project lacks, two structural materials and a
+plan of coarse detail draws a wall as its two lines, filled only with that pattern). `Model::check` refuses only core
+boundaries past the layers there are, a priority that is not 1 to 5, wrapping at ends of both, a fill pattern the project lacks, two structural materials and a
 layer that wraps in a floor, roof or ceiling. The desktop's Type Properties of a wall and its Edit Assembly window are
 `crates/ui-egui/src/assembly.rs`; the Revit reader brings in Finish 2 but not yet the core boundaries or wraps.
 
