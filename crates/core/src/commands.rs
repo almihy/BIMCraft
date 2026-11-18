@@ -54,7 +54,7 @@ mod site;
 pub use crate::files::base64;
 pub(crate) use crate::geom::degrees;
 pub(crate) use crate::geom::{micron, tidy};
-pub use crate::json::{element_json, element_json_with};
+pub use crate::{element_json, element_json_with};
 pub(crate) use crate::json::{hundredth, mass_size, read_mm, read_point, top_range};
 pub(crate) use crate::model::bad;
 pub(crate) use crate::model::{category, colour, next_number};
