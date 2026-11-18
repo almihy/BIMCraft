@@ -3732,9 +3732,8 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
         let geometry = walls::layer_geometry(m, id, index);
         let along = (w.end - w.start).unit();
         for (k, layer) in layers.iter().enumerate() {
-            let ring = geometry.band(k);
             let room = layer.thickness * d.view.scale;
-            for piece in outside_columns(vec![ring], &columns) {
+            for piece in outside_columns(geometry.bands(k).to_vec(), &columns) {
                 cut_layer(&mut d, m, layer, &piece, along, room);
             }
         }

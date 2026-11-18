@@ -7,7 +7,6 @@
 
 use std::f64::consts::{PI, TAU};
 
-mod compound;
 #[doc(hidden)]
 pub mod index;
 #[doc(hidden)]
@@ -318,12 +317,25 @@ pub fn cap_in(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> Vec<P2>
 #[derive(Default)]
 struct WallEnd {
     outline: Vec<P2>,
-    butt: Option<compound::Butt>,
+    /// Its layers' ends, where it joins another straight wall and their layers clean up ([`join::end_cut`]).
+    cut: Option<join::Cut>,
 }
 
 impl WallEnd {
     fn plain(outline: Vec<P2>) -> Self {
-        Self { outline, butt: None }
+        Self { outline, cut: None }
+    }
+
+    /// The end `cut` makes: its cap steps from layer to layer, from its face on the clockwise side of the way it leaves the
+    /// node (its interior face at its start, its exterior one at its end) round to the other.
+    fn stepped(cut: join::Cut, at_end: bool) -> Self {
+        let mut outline: Vec<P2> = if at_end {
+            cut.layers.iter().flat_map(|[a, b]| [*a, *b]).collect()
+        } else {
+            cut.layers.iter().rev().flat_map(|[a, b]| [*b, *a]).collect()
+        };
+        outline.dedup_by(|a, b| a.dist(*b) < 1e-6);
+        Self { outline, cut: Some(cut) }
     }
 }
 
@@ -336,11 +348,19 @@ fn end_geometry(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> WallE
     if n < 2 {
         return WallEnd::plain(vec![me.cw, me.ccw]);
     }
-    if n == 2
-        && !through
-        && let Some(end) = compound::corner(m, me, next)
-    {
-        return end;
+    // Two straight walls: a Butt, Revit's default, their layers cleaned up by rank. At a corner the wall of the lower GUID
+    // runs through (an id is given anew when the corner comes in from another file; a GUID never changes); a wall ending
+    // on another's side stops against it, the other running on.
+    if n == 2 && !through {
+        let runs_through = m.guid(id) < m.guid(next.id);
+        if let Some(cut) = join::end_cut(m, id, at_end, next.id, Some(next.at_end), runs_through) {
+            return WallEnd::stepped(cut, at_end);
+        }
+    }
+    if n == 3 && through && next.id == prev.id {
+        if let Some(cut) = join::end_cut(m, id, at_end, next.id, None, false) {
+            return WallEnd::stepped(cut, at_end);
+        }
     }
     let node = if at_end { w.end } else { w.start };
     let limit = arms.iter().map(|a| a.thick).fold(0.0, f64::max);
@@ -358,6 +378,33 @@ fn end_geometry(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> WallE
     };
     let (cw, ccw) = (meet(me.cw, prev.ccw, prev), meet(me.ccw, next.cw, next));
     WallEnd::plain(if through { vec![cw, ccw] } else { vec![cw, node, ccw] })
+}
+
+/// The straight walls that end on the side of the straight wall `id`, each with which of its ends does (its end, else its
+/// start): those whose join there is theirs and this wall's alone.
+fn tees(m: &Model, id: Id, index: Option<&Index>) -> Vec<(Id, bool)> {
+    let Some(w) = m.wall(id).filter(|w| w.arc == 0.0 && w.join) else { return Vec::new() };
+    let axis = Axis::of(w);
+    let (ext, int) = faces(m, w);
+    let thickest = m.types.wall.values().map(|t| t.thickness).filter(|t| t.is_finite()).fold(0.0, f64::max);
+    let reach = [w.start.0.min(w.end.0), w.start.1.min(w.end.1), w.start.0.max(w.end.0), w.start.1.max(w.end.1)];
+    let near = m.lookup().walls_near_at(&[(reach, m.base_z(w), m.top_z(w))], thickest + 1.0);
+    let mut out = Vec::new();
+    for other in near.into_iter().filter(|o| *o != id) {
+        let Some(o) = m.wall(other).filter(|o| o.arc == 0.0 && o.join) else { continue };
+        for at_end in [false, true] {
+            let node = if at_end { o.end } else { o.start };
+            let (s, across) = axis.project(node);
+            if s <= TOL || s >= axis.length() - TOL || !(int - TOL..=ext + TOL).contains(&across) {
+                continue;
+            }
+            let (arms, through) = arms(m, other, at_end, index);
+            if through && arms.len() == 3 && arms.iter().filter(|a| a.id == id).count() == 2 {
+                out.push((other, at_end));
+            }
+        }
+    }
+    out
 }
 
 /// Wall `id`'s centre line, an arc as chords: each end it joins others at run on (or back) to the
@@ -427,7 +474,7 @@ fn on_cap(axis: &Axis, cap: &[P2], at_end: bool, off: f64) -> P2 {
 }
 
 /// The lines of wall `id`'s faces and of the boundaries between its layers, exterior first, each
-/// from its start cap to its end cap.
+/// from its start cap to its end cap: between two layers that end apart, to where the shorter ends.
 pub fn layer_lines(m: &Model, id: Id) -> Vec<Vec<P2>> {
     layer_lines_in(m, id, None)
 }
@@ -437,40 +484,27 @@ pub fn layer_lines_in(m: &Model, id: Id, index: Option<&Index>) -> Vec<Vec<P2>> 
     layer_geometry(m, id, index).lines
 }
 
+/// A wall's layers in plan: each layer's pieces (one, or more where a wall ending on its side passes through the layer),
+/// the lines of its faces and between its layers, and the lines the plan draws between layers: where two of its own lie
+/// side by side, and where one ends on or runs beside a layer of another wall of another material.
 #[derive(Default)]
 #[doc(hidden)]
 pub struct LayerGeometry {
     pub lines: Vec<Vec<P2>>,
-    // A core can reach beyond the finish beside it at either end.
-    butt: [Option<compound::Butt>; 2],
+    bands: Vec<Vec<Vec<P2>>>,
+    seams: Vec<Vec<P2>>,
 }
 
 impl LayerGeometry {
+    /// Layer `k`'s pieces, each a ring.
     #[doc(hidden)]
-    pub fn band(&self, k: usize) -> Vec<P2> {
-        let a = &self.lines[k];
-        let b = &self.lines[k + 1];
-        let mut ring: Vec<_> = a.iter().chain(b.iter().rev()).copied().collect();
-        if k == 1 {
-            let n = ring.len();
-            if let Some(start) = &self.butt[0] {
-                [ring[0], ring[n - 1]] = start.core;
-            }
-            if let Some(end) = &self.butt[1] {
-                [ring[a.len() - 1], ring[a.len()]] = end.core;
-            }
-        }
-        ring
+    pub fn bands(&self, k: usize) -> &[Vec<P2>] {
+        self.bands.get(k).map_or(&[], Vec::as_slice)
     }
 
     #[doc(hidden)]
     pub fn interfaces(&self) -> impl Iterator<Item = &[P2]> {
-        self.lines
-            .iter()
-            .skip(1)
-            .take(self.lines.len().saturating_sub(2))
-            .map(Vec::as_slice)
-            .chain(self.butt.iter().flatten().filter(|b| b.draw_seam).map(|b| b.core.as_slice()))
+        self.seams.iter().map(Vec::as_slice)
     }
 }
 
@@ -479,23 +513,94 @@ pub fn layer_geometry(m: &Model, id: Id, index: Option<&Index>) -> LayerGeometry
     let Some(w) = m.wall(id) else { return LayerGeometry::default() };
     let axis = Axis::of(w);
     let len = axis.length();
+    let offs = boundaries(m, w);
+    let layers = offs.len().saturating_sub(1);
     let ends = [end_geometry(m, id, false, index), end_geometry(m, id, true, index)];
-    let lines = boundaries(m, w)
-        .into_iter()
-        .enumerate()
-        .map(|(k, off)| {
-            let mut line = axis.points(0.0, len, off);
-            for (i, end) in ends.iter().enumerate() {
-                let last = line.len() - 1;
-                line[if i == 0 { 0 } else { last }] = match &end.butt {
-                    Some(b) => b.turns[k],
-                    None => on_cap(&axis, &end.outline, i == 1, off),
-                };
+    // Where boundary `b` of layer `k` ends, at the wall's start (0) or its end (1).
+    let end_of = |b: usize, k: usize, at: usize| -> P2 {
+        let off = offs.get(b).copied().unwrap_or(0.0);
+        let cut = ends.get(at).and_then(|e| e.cut.as_ref()).and_then(|c| c.layers.get(k)).and_then(|l| l.get(b - k)).copied();
+        cut.unwrap_or_else(|| ends.get(at).map_or(axis.at(0.0, off), |e| on_cap(&axis, &e.outline, at == 1, off)))
+    };
+    // Boundary `b` as layer `k` has it: along the wall, from the layer's start to its end.
+    let side = |b: usize, k: usize| -> Vec<P2> {
+        let mut line = axis.points(0.0, len, offs.get(b).copied().unwrap_or(0.0));
+        if let Some(first) = line.first_mut() {
+            *first = end_of(b, k, 0);
+        }
+        if let Some(last) = line.last_mut() {
+            *last = end_of(b, k, 1);
+        }
+        line
+    };
+    // How far along the wall a point is: of a straight wall, past its ends too.
+    let u = (w.end - w.start).unit();
+    let along = |q: P2| if w.arc == 0.0 { (q - w.start).dot(u) } else { axis.project(q).0 };
+    // Each layer's gaps, where walls ending on this one's side pass through it.
+    let broken: Vec<Vec<Option<join::Gap>>> =
+        tees(m, id, index).into_iter().filter_map(|(other, at_end)| join::gaps(m, id, other, at_end)).collect();
+    let gaps_of = |k: usize| -> Vec<join::Gap> { broken.iter().filter_map(|g| g.get(k).copied().flatten()).collect() };
+    // A straight line from `a` to `b` less the gaps: the stretches left, in order.
+    let left = |a: P2, b: P2, gaps: &[join::Gap]| -> Vec<(P2, P2)> {
+        let d = b - a;
+        let at = |line: (P2, P2)| geom::line_intersection(a, b, line.0, line.0 + line.1).map(|q| (q - a).dot(d) / d.dot(d).max(1e-12));
+        let mut cuts: Vec<(f64, f64)> =
+            gaps.iter().filter_map(|g| Some((at(g.from)?, at(g.to)?))).map(|(x, y)| (x.min(y), x.max(y))).collect();
+        cuts.sort_by(|x, y| x.0.total_cmp(&y.0));
+        let (mut out, mut from) = (Vec::new(), 0.0);
+        for (lo, hi) in cuts {
+            if lo > from {
+                out.push((a + d * from, a + d * lo.min(1.0)));
             }
-            line
-        })
-        .collect();
-    LayerGeometry { lines, butt: ends.map(|e| e.butt) }
+            from = from.max(hi);
+        }
+        if from < 1.0 {
+            out.push((a + d * from, b));
+        }
+        out
+    };
+    let mut bands = Vec::with_capacity(layers);
+    for k in 0..layers {
+        let (outer, inner) = (side(k, k), side(k + 1, k));
+        let gaps = gaps_of(k);
+        let rings = match (outer.as_slice(), inner.as_slice()) {
+            ([a0, a1], [b0, b1]) if !gaps.is_empty() => {
+                left(*a0, *a1, &gaps).into_iter().zip(left(*b0, *b1, &gaps)).map(|((a, a2), (b, b2))| vec![a, a2, b2, b]).collect()
+            }
+            _ => vec![outer.iter().chain(inner.iter().rev()).copied().collect()],
+        };
+        bands.push(rings);
+    }
+    // Each boundary's line: a face's is its layer's; between two layers, to where the shorter of them ends.
+    let mut lines = Vec::with_capacity(offs.len());
+    let mut seams: Vec<Vec<P2>> = Vec::new();
+    for b in 0..offs.len() {
+        let (before, after) = (b.checked_sub(1), (b < layers).then_some(b));
+        let line = match (before, after) {
+            (Some(x), Some(y)) => {
+                let (p, q) = (side(b, x), side(b, y));
+                let mut line = p.clone();
+                if let (Some(first), Some(a), Some(c)) = (line.first_mut(), p.first(), q.first()) {
+                    *first = if along(*a) >= along(*c) { *a } else { *c };
+                }
+                if let (Some(last), Some(a), Some(c)) = (line.last_mut(), p.last(), q.last()) {
+                    *last = if along(*a) <= along(*c) { *a } else { *c };
+                }
+                // The line between the two, where both are there.
+                let gaps: Vec<join::Gap> = gaps_of(x).into_iter().chain(gaps_of(y)).collect();
+                match line.as_slice() {
+                    [a, c] if !gaps.is_empty() => seams.extend(left(*a, *c, &gaps).into_iter().map(|(a, c)| vec![a, c])),
+                    _ => seams.push(line.clone()),
+                }
+                line
+            }
+            (None, Some(k)) | (Some(k), None) => side(b, k),
+            (None, None) => Vec::new(),
+        };
+        lines.push(line);
+    }
+    seams.extend(ends.iter().filter_map(|e| e.cut.as_ref()).flat_map(|c| c.seams.iter().map(|s| s.to_vec())));
+    LayerGeometry { lines, bands, seams }
 }
 
 /// A plane over the plan: its height at `q` is `z + g.0 · q.0 + g.1 · q.1`.

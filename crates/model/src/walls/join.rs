@@ -9,7 +9,8 @@
 
 use std::collections::BTreeSet;
 
-use crate::model::{Function, WallType};
+use crate::geom::{self, P2};
+use crate::model::{Function, Id, Model, TOL, WallType};
 
 /// A layer's standing where walls join: in the core before outside it, then by its function's priority (1 the best).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -121,6 +122,164 @@ pub fn solve(a: &Side, b: &Side, a_through: bool) -> (Reach, Reach) {
     }
     let [ra, rb] = held;
     (ra, rb)
+}
+
+/// A straight wall as the join's geometry reads it: a point of its location line, the way it runs, how far to its left each
+/// of its layers' boundaries lies (its exterior face first), and each layer's rank and material.
+struct Strips<'a> {
+    start: P2,
+    end: P2,
+    dir: P2,
+    offs: Vec<f64>,
+    ranks: Vec<Rank>,
+    materials: Vec<&'a str>,
+}
+
+impl Strips<'_> {
+    fn of(m: &Model, id: Id) -> Option<Strips<'_>> {
+        let w = m.wall(id)?;
+        let t = m.types.wall.get(&w.type_name)?;
+        let offs = super::boundaries(m, w);
+        if w.arc != 0.0 || w.start.dist(w.end) <= TOL || offs.len() < 2 {
+            return None;
+        }
+        let materials = if t.layers.is_empty() { vec![""] } else { t.layers.iter().map(|l| l.material.as_str()).collect() };
+        let ranks = Rank::of(t);
+        (ranks.len() + 1 == offs.len()).then(|| Strips {
+            start: w.start,
+            end: w.end,
+            dir: (w.end - w.start).unit(),
+            offs,
+            ranks,
+            materials,
+        })
+    }
+
+    fn layers(&self) -> usize {
+        self.ranks.len()
+    }
+
+    /// A point of its boundary `k`.
+    fn on(&self, k: usize) -> P2 {
+        self.start + self.dir.perp() * self.offs.get(k).copied().unwrap_or(0.0)
+    }
+
+    /// Where its boundary `k` crosses boundary `j` of `other`.
+    fn cross(&self, k: usize, other: &Strips, j: usize) -> Option<P2> {
+        let (p, q) = (self.on(k), other.on(j));
+        geom::line_intersection(p, p + self.dir, q, q + other.dir)
+    }
+
+    fn thick(&self) -> f64 {
+        self.offs.first().zip(self.offs.last()).map_or(0.0, |(a, b)| (a - b).abs())
+    }
+
+    /// Its boundaries, by index, in the order something going `way` from `from` crosses them: first to last, or back.
+    fn crossed(&self, from: P2, way: P2) -> Option<Vec<usize>> {
+        let along = |k: usize| geom::line_intersection(from, from + way, self.on(k), self.on(k) + self.dir).map(|q| (q - from).dot(way));
+        let (first, last) = (along(0)?, along(self.layers())?);
+        let all: Vec<usize> = (0..=self.layers()).collect();
+        Some(if first <= last { all } else { all.into_iter().rev().collect() })
+    }
+}
+
+/// The layers between boundaries crossed in `order`: layer `min(a, b)` between each two.
+fn between(order: &[usize]) -> Vec<usize> {
+    order.windows(2).filter_map(|w| Some(*w.first()?.min(w.get(1)?))).collect()
+}
+
+/// How a straight wall's end is cut where it joins another straight wall: each layer's end, the point on its exterior
+/// boundary and the one on its interior boundary, and the lines the plan draws there: where a layer ends on, or runs beside,
+/// a layer of the other wall of another material.
+#[derive(Default)]
+pub(super) struct Cut {
+    pub(super) layers: Vec<[P2; 2]>,
+    pub(super) seams: Vec<[P2; 2]>,
+}
+
+/// The cut of wall `id`'s end (`at_end`, else its start) against wall `other`, which ends there too at its end or its start
+/// (`other_end`), or which it ends on the side of (none). `through`: at a corner, this wall runs through. None when either
+/// is no straight wall of a type, or they run too nearly the same way for their layers to cross near the join.
+pub(super) fn end_cut(m: &Model, id: Id, at_end: bool, other: Id, other_end: Option<bool>, through: bool) -> Option<Cut> {
+    let (me, o) = (Strips::of(m, id)?, Strips::of(m, other)?);
+    // The way this wall goes into the join, from its end there.
+    let (node, way) = if at_end { (me.end, me.dir) } else { (me.start, me.dir * -1.0) };
+    if way.cross(o.dir).abs() < 0.2 {
+        return None;
+    }
+    let lines = o.crossed(node, way)?;
+    let mine = Side { ranks: me.ranks.clone(), arrives: vec![between(&lines)] };
+    let theirs = match other_end {
+        Some(end) => {
+            let (from, back) = if end { (o.end, o.dir) } else { (o.start, o.dir * -1.0) };
+            Side { ranks: o.ranks.clone(), arrives: vec![between(&me.crossed(from, back)?)] }
+        }
+        // It runs on through: its layers come to this wall's from either side.
+        None => Side { ranks: o.ranks.clone(), arrives: vec![(0..me.layers()).collect(), (0..me.layers()).rev().collect()] },
+    };
+    let (reach, _) = solve(&mine, &theirs, through && other_end.is_some());
+    let held = |k: usize| reach.get(k).and_then(|r| r.first()).copied().unwrap_or(0);
+    let far = 6.0 * me.thick().max(o.thick());
+    let mut cut = Cut::default();
+    for k in 0..me.layers() {
+        let line = *lines.get(held(k))?;
+        let (a, b) = (me.cross(k, &o, line)?, me.cross(k + 1, &o, line)?);
+        if a.dist(node) > far || b.dist(node) > far {
+            return None;
+        }
+        cut.layers.push([a, b]);
+        // The layer of the other wall past its end, when it stops short of the far face.
+        let past = mine.arrives.first().and_then(|order| order.get(held(k))).copied();
+        if past.is_some_and(|j| o.materials.get(j) != me.materials.get(k)) {
+            cut.seams.push([a, b]);
+        }
+    }
+    // Beside a layer that runs on past its neighbour: the other wall's layers along its side there.
+    for k in 1..me.layers() {
+        let (outer, inner) = (held(k - 1), held(k));
+        let longer = if outer > inner { k - 1 } else { k };
+        for step in outer.min(inner)..outer.max(inner) {
+            let beside = mine.arrives.first().and_then(|order| order.get(step)).copied();
+            if beside.is_some_and(|j| o.materials.get(j) != me.materials.get(longer)) {
+                cut.seams.push([me.cross(k, &o, *lines.get(step)?)?, me.cross(k, &o, *lines.get(step + 1)?)?]);
+            }
+        }
+    }
+    Some(cut)
+}
+
+/// A stretch of a wall's layer another wall's layer holds, where that wall ends on its side: between two lines across it,
+/// each a point and the way it runs, the first nearer the wall's start.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Gap {
+    pub(super) from: (P2, P2),
+    pub(super) to: (P2, P2),
+}
+
+/// Where each layer of the straight wall `id` is broken by the straight wall `other`, whose end (`other_end`, else its
+/// start) lies on its side: a gap for each layer the other's layers pass through, none for those that run on whole.
+pub(super) fn gaps(m: &Model, id: Id, other: Id, other_end: bool) -> Option<Vec<Option<Gap>>> {
+    let (me, o) = (Strips::of(m, id)?, Strips::of(m, other)?);
+    if me.dir.cross(o.dir).abs() < 0.2 {
+        return None;
+    }
+    // The other's boundaries in the order this wall crosses them, start to end; this wall's in the order the other does.
+    let lines = o.crossed(me.start, me.dir)?;
+    let (from, way) = if other_end { (o.end, o.dir) } else { (o.start, o.dir * -1.0) };
+    let cells = between(&lines);
+    let mine = Side { ranks: me.ranks.clone(), arrives: vec![cells.clone(), cells.iter().rev().copied().collect()] };
+    let theirs = Side { ranks: o.ranks.clone(), arrives: vec![between(&me.crossed(from, way)?)] };
+    let (reach, _) = solve(&mine, &theirs, true);
+    let line = |n: usize| lines.get(n).map(|j| (o.on(*j), o.dir));
+    Some(
+        (0..me.layers())
+            .map(|k| {
+                let (before, after) = (reach.get(k)?.first().copied()?, reach.get(k)?.get(1).copied()?);
+                (before + after < o.layers()).then_some(())?;
+                Some(Gap { from: line(before)?, to: line(o.layers() - after)? })
+            })
+            .collect(),
+    )
 }
 
 #[cfg(test)]
