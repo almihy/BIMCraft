@@ -88,3 +88,34 @@ fn layers_of_one_material_join_with_no_line_and_of_two_with_one() {
     let (s, _, part) = room("Stud");
     assert!(line_at(&walls::layer_geometry(&s.model, part, None), 1500.0, 142.5));
 }
+
+#[test]
+fn the_wall_running_on_gives_up_its_plaster_where_a_partitions_core_passes_into_it() {
+    let (s, south, part) = room("Block");
+    // In plan the two walls' solids share nothing: the partition's core takes 100 by 15 of the wall's plaster.
+    let area = |id: u64| walls::prisms(&s.model, id, false).iter().map(|p| crate::geom::area(&p.ring).abs()).sum::<f64>();
+    let whole = crate::geom::area(&walls::outline(&s.model, south)).abs();
+    assert!((area(south) - (whole - 100.0 * 15.0)).abs() < 1.0, "{} of {whole}", area(south));
+    assert!((area(part) - crate::geom::area(&walls::outline(&s.model, part)).abs()).abs() < 1.0);
+    let inside = |id: u64, q: P2| walls::prisms(&s.model, id, false).iter().any(|p| crate::geom::contains(&p.ring, q));
+    // In the plaster's depth under the partition's core, and beside it.
+    assert!(inside(part, P2(1500.0, 150.0)) && !inside(south, P2(1500.0, 150.0)));
+    assert!(inside(south, P2(1440.0, 150.0)) && !inside(part, P2(1440.0, 150.0)));
+    // The block behind it is the wall's still.
+    assert!(inside(south, P2(1500.0, 100.0)));
+}
+
+#[test]
+fn a_low_partition_leaves_the_wall_its_plaster_over_its_top() {
+    let (mut s, south, part) = room("Block");
+    run(&mut s, "modify", json!({"id": part, "top_level": null, "height": 1000}));
+    assert_eq!(s.model.top_z(s.model.wall(part).unwrap()), 1000.0);
+    // Over the partition's top the wall's plaster is whole again: a piece of it from 1000 up, where the core passes below.
+    let over: Vec<(f64, f64)> = walls::prisms(&s.model, south, false)
+        .iter()
+        .filter(|p| crate::geom::contains(&p.ring, P2(1480.0, 147.0)))
+        .map(|p| (p.bottom.at(P2(1480.0, 147.0)), p.top.at(P2(1480.0, 147.0))))
+        .collect();
+    let top = s.model.top_z(s.model.wall(south).unwrap());
+    assert_eq!(over, [(1000.0, top)]);
+}

@@ -955,7 +955,53 @@ pub fn prisms_in(m: &Model, id: Id, openings: bool, index: Option<&Index>) -> Ve
             }
         }
     }
+    // Where a wall ending on this one's side runs its layers into it, that part is the other's: this wall keeps only what
+    // is under the other's base or over its top there.
+    for (hole, lo, hi) in tongues(m, id, index) {
+        let pieces: Vec<Vec<P2>> = convex_pieces(&hole);
+        let mut cut = Vec::with_capacity(out.len());
+        for p in out {
+            for ring in minus(std::slice::from_ref(&p.ring), &hole) {
+                cut.push(Prism { ring, bottom: p.bottom, top: p.top, curve: p.curve });
+            }
+            for piece in &pieces {
+                let Some(inside) = split(p.ring.clone(), piece).0 else { continue };
+                for (bottom, top) in [(p.bottom, Plane::flat(lo)), (Plane::flat(hi), p.top)] {
+                    // Only where it has some height: under the other wall where its base is over this one's, over it
+                    // where its top is under this one's.
+                    let part = geom::clip(&inside, |q| top.at(q) - bottom.at(q) - TOL);
+                    if part.len() >= 3 && geom::area(&part).abs() > 1.0 {
+                        cut.push(Prism { ring: part, bottom, top, curve: p.curve });
+                    }
+                }
+            }
+        }
+        out = cut;
+    }
     out
+}
+
+/// Where walls ending on the side of the straight wall `id` run into its body: each one's part of the plan there (its end's
+/// cap, closed back along its own faces), with the heights it stands between.
+fn tongues(m: &Model, id: Id, index: Option<&Index>) -> Vec<(Vec<P2>, f64, f64)> {
+    let Some(w) = m.wall(id) else { return Vec::new() };
+    let back = 2.0 * m.thickness(w) + 1.0;
+    tees(m, id, index)
+        .into_iter()
+        .filter_map(|(other, at_end)| {
+            let o = m.wall(other)?;
+            let end = end_geometry(m, other, at_end, index);
+            // Only an end whose layers were run into this wall: a plain one stops at its face and takes nothing.
+            end.cut.as_ref()?;
+            let a = arm(m, other, o, at_end, false);
+            let mut ring = vec![a.cw + a.way * back];
+            ring.extend(end.outline.iter().copied());
+            ring.push(a.ccw + a.way * back);
+            ring.dedup_by(|p, q| p.dist(*q) < 1e-6);
+            let (lo, hi) = heights(m, o);
+            (ring.len() >= 3 && geom::area(&ring).abs() > 1.0).then_some((ring, lo, hi))
+        })
+        .collect()
 }
 
 #[cfg(test)]
