@@ -1810,6 +1810,15 @@ pub fn export(m: &Model) -> String {
         }
         w.define(ent, CONNECTOR_SET, &own, (CONNECTOR, CONNECTOR_DEFINES), id);
     }
+    // A wall says whether it is external, `IsExternal` in its `Pset_WallCommon`, by its type's Function as Revit's export
+    // does: an Interior or a Core-shaft wall is not, the others are.
+    for (&id, &ent) in &products {
+        let Some(Element::Wall(wl)) = m.elements.get(id) else { continue };
+        let Some(t) = m.types.wall.get(&wl.type_name) else { continue };
+        let external = !matches!(t.function, crate::model::WallFunction::Interior | crate::model::WallFunction::CoreShaft);
+        let p = w.add(format!("IFCPROPERTYSINGLEVALUE('IsExternal',$,IFCBOOLEAN({}),$)", if external { ".T." } else { ".F." }));
+        w.common.entry(id).or_insert((ent, "Pset_WallCommon", Vec::new())).2.push(p);
+    }
     // A phased project's elements say what the work does to them, as IFC's `Status` (PEnum_ElementStatus) in their `Pset_*Common`: taken down in
     // any phase, DEMOLISH (TEMPORARY when made in that phase too); made in the first phase, EXISTING; else NEW. A door or a
     // window with no phase of its own follows its wall. A project with no phases says nothing: all of it is new work.

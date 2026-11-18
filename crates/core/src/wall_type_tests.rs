@@ -182,3 +182,42 @@ fn a_file_is_written_as_29_only_when_a_type_needs_it_and_reads_back_the_same() {
         assert_eq!((&back.types.wall["W"], left_out.as_slice()), (&t.model.types.wall["W"], &[][..]), "{p}");
     }
 }
+
+fn pixel(png: &[u8], (x, y): (f32, f32)) -> (u8, u8, u8) {
+    let pm = tiny_skia::Pixmap::decode_png(png).unwrap();
+    let c = pm.pixel(x as u32, y as u32).unwrap();
+    (c.red(), c.green(), c.blue())
+}
+
+#[test]
+fn a_plan_of_coarse_detail_fills_a_wall_with_its_types_coarse_scale_fill_only() {
+    use crate::geom::P2;
+    use crate::prim::{PAPER, POCHE};
+    let mut s = Session::new();
+    run(&mut s, "wall", json!({"points": [[0, 0], [6000, 0]], "type": "Generic - 200mm"}));
+    let middle = |s: &Session| {
+        let d = crate::render::plan(&s.model, 100000, 800, 600);
+        pixel(&crate::render::png(&d).unwrap(), d.view.px(P2(3000.0, 0.0)))
+    };
+    assert_eq!(middle(&s), (POCHE.0, POCHE.1, POCHE.2), "fine: its poché");
+    // Coarse, with no Coarse Scale Fill Pattern: its two lines and nothing between, as Revit draws it.
+    run(&mut s, "detail", json!({"view": 100000, "detail": "coarse"}));
+    assert_eq!(middle(&s), (PAPER.0, PAPER.1, PAPER.2));
+    // With the solid fill in a colour: that colour.
+    run(&mut s, "type", json!({"category": "wall", "name": "Generic - 200mm", "coarse_fill": crate::fills::SOLID_FILL, "coarse_color": [200, 30, 30]}));
+    assert_eq!(middle(&s), (200, 30, 30));
+    // Which a finer view does not draw.
+    run(&mut s, "detail", json!({"view": 100000, "detail": "medium"}));
+    assert_eq!(middle(&s), (POCHE.0, POCHE.1, POCHE.2));
+}
+
+#[test]
+fn ifc_says_whether_a_wall_is_external_by_its_types_function() {
+    let mut s = Session::new();
+    run(&mut s, "wall", json!({"points": [[0, 0], [6000, 0]], "type": "Generic - 200mm"}));
+    assert!(crate::ifc::export(&s.model).contains("IFCPROPERTYSINGLEVALUE('IsExternal',$,IFCBOOLEAN(.T.),$)"));
+    run(&mut s, "type", json!({"category": "wall", "name": "Generic - 200mm", "function": "interior"}));
+    let file = crate::ifc::export(&s.model);
+    assert!(file.contains("IFCPROPERTYSINGLEVALUE('IsExternal',$,IFCBOOLEAN(.F.),$)"), "an interior wall is not external");
+    assert!(file.contains("'Pset_WallCommon'"));
+}

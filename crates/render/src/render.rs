@@ -3688,9 +3688,21 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
     for (id, o) in &outlines {
         d.owner = Some(*id);
         let rings = std::slice::from_ref(o);
+        let wall_type = match m.elements.get(*id) {
+            Some(Element::Wall(w)) => m.types.wall.get(&w.type_name),
+            _ => None,
+        };
         if pattern_style(&d, true).is_some() {
             d.fill(rings, PAPER);
             override_patterns(&mut d, m, rings, true, (P2(0.0, 0.0), 0.0));
+        } else if let Some(t) = wall_type.filter(|_| d.detail == Detail::Coarse) {
+            // A wall at coarse detail is its two lines, as Revit's, filled only with its type's Coarse Scale Fill Pattern
+            // in its colour.
+            d.fill(rings, PAPER);
+            if let Some(p) = t.coarse_fill.as_ref().and_then(|n| m.fill_patterns.get(n)) {
+                let [r, g, b] = t.coarse_color;
+                fill_pattern(&mut d, p, rings, rings, Rgb(r, g, b), (P2(0.0, 0.0), 0.0));
+            }
         } else {
             d.fill(rings, POCHE);
         }
