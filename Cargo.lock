@@ -523,7 +523,10 @@ name = "bimcraft-drawing-web"
 version = "0.11.0"
 dependencies = [
  "bimcraft-core",
+ "cadcraft-doc",
+ "cadcraft-dwg",
  "cadcraft-index",
+ "cadcraft-io",
  "getrandom 0.3.4",
  "serde_json",
  "wasm-bindgen",
@@ -885,7 +888,7 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 [[package]]
 name = "cadcraft-color"
 version = "0.21.0"
-source = "git+https://github.com/almihy/cadcraft?rev=7362fbaf4076586dcf13d46a6e90788235b50ba6#7362fbaf4076586dcf13d46a6e90788235b50ba6"
+source = "git+https://github.com/almihy/cadcraft?rev=1f9002884bbf2331e212fe9c2ca90e670d116e29#1f9002884bbf2331e212fe9c2ca90e670d116e29"
 dependencies = [
  "serde",
 ]
@@ -893,7 +896,7 @@ dependencies = [
 [[package]]
 name = "cadcraft-doc"
 version = "0.21.0"
-source = "git+https://github.com/almihy/cadcraft?rev=7362fbaf4076586dcf13d46a6e90788235b50ba6#7362fbaf4076586dcf13d46a6e90788235b50ba6"
+source = "git+https://github.com/almihy/cadcraft?rev=1f9002884bbf2331e212fe9c2ca90e670d116e29#1f9002884bbf2331e212fe9c2ca90e670d116e29"
 dependencies = [
  "cadcraft-color",
  "cadcraft-geom",
@@ -905,7 +908,7 @@ dependencies = [
 [[package]]
 name = "cadcraft-dwg"
 version = "0.21.0"
-source = "git+https://github.com/almihy/cadcraft?rev=7362fbaf4076586dcf13d46a6e90788235b50ba6#7362fbaf4076586dcf13d46a6e90788235b50ba6"
+source = "git+https://github.com/almihy/cadcraft?rev=1f9002884bbf2331e212fe9c2ca90e670d116e29#1f9002884bbf2331e212fe9c2ca90e670d116e29"
 dependencies = [
  "acadrust",
  "cadcraft-color",
@@ -919,7 +922,7 @@ dependencies = [
 [[package]]
 name = "cadcraft-fonts"
 version = "0.21.0"
-source = "git+https://github.com/almihy/cadcraft?rev=7362fbaf4076586dcf13d46a6e90788235b50ba6#7362fbaf4076586dcf13d46a6e90788235b50ba6"
+source = "git+https://github.com/almihy/cadcraft?rev=1f9002884bbf2331e212fe9c2ca90e670d116e29#1f9002884bbf2331e212fe9c2ca90e670d116e29"
 dependencies = [
  "cadcraft-geom",
  "craft-dxf",
@@ -935,7 +938,7 @@ dependencies = [
 [[package]]
 name = "cadcraft-geom"
 version = "0.21.0"
-source = "git+https://github.com/almihy/cadcraft?rev=7362fbaf4076586dcf13d46a6e90788235b50ba6#7362fbaf4076586dcf13d46a6e90788235b50ba6"
+source = "git+https://github.com/almihy/cadcraft?rev=1f9002884bbf2331e212fe9c2ca90e670d116e29#1f9002884bbf2331e212fe9c2ca90e670d116e29"
 dependencies = [
  "serde",
 ]
@@ -943,7 +946,7 @@ dependencies = [
 [[package]]
 name = "cadcraft-index"
 version = "0.21.0"
-source = "git+https://github.com/almihy/cadcraft?rev=7362fbaf4076586dcf13d46a6e90788235b50ba6#7362fbaf4076586dcf13d46a6e90788235b50ba6"
+source = "git+https://github.com/almihy/cadcraft?rev=1f9002884bbf2331e212fe9c2ca90e670d116e29#1f9002884bbf2331e212fe9c2ca90e670d116e29"
 dependencies = [
  "cadcraft-color",
  "cadcraft-doc",
@@ -960,7 +963,7 @@ dependencies = [
 [[package]]
 name = "cadcraft-io"
 version = "0.21.0"
-source = "git+https://github.com/almihy/cadcraft?rev=7362fbaf4076586dcf13d46a6e90788235b50ba6#7362fbaf4076586dcf13d46a6e90788235b50ba6"
+source = "git+https://github.com/almihy/cadcraft?rev=1f9002884bbf2331e212fe9c2ca90e670d116e29#1f9002884bbf2331e212fe9c2ca90e670d116e29"
 dependencies = [
  "cadcraft-color",
  "cadcraft-doc",
@@ -979,7 +982,7 @@ dependencies = [
 [[package]]
 name = "cadcraft-render"
 version = "0.21.0"
-source = "git+https://github.com/almihy/cadcraft?rev=7362fbaf4076586dcf13d46a6e90788235b50ba6#7362fbaf4076586dcf13d46a6e90788235b50ba6"
+source = "git+https://github.com/almihy/cadcraft?rev=1f9002884bbf2331e212fe9c2ca90e670d116e29#1f9002884bbf2331e212fe9c2ca90e670d116e29"
 dependencies = [
  "cadcraft-color",
  "cadcraft-doc",
