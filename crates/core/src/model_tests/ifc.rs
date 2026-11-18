@@ -278,10 +278,11 @@ fn a_phased_projects_elements_say_what_the_work_does_to_them_in_their_common_set
     let f = export(&s.model);
     let wall = of_kind(&f, "IFCWALL");
     let common = |ent| set_of(&f, ent, "Pset_WallCommon");
-    assert_eq!(common(wall[0]), [status("DEMOLISH")]);
-    assert_eq!(common(wall[1]), [status("NEW")]);
-    assert_eq!(common(wall[2]), [status("TEMPORARY")], "made and taken down in the same phase");
-    assert_eq!(common(wall[3]), [status("EXISTING")], "no value is the first phase");
+    let external = "IFCPROPERTYSINGLEVALUE('IsExternal',$,IFCBOOLEAN(.T.),$)".to_string();
+    assert_eq!(common(wall[0]), [external.clone(), status("DEMOLISH")]);
+    assert_eq!(common(wall[1]), [external.clone(), status("NEW")]);
+    assert_eq!(common(wall[2]), [external.clone(), status("TEMPORARY")], "made and taken down in the same phase");
+    assert_eq!(common(wall[3]), [external, status("EXISTING")], "no value is the first phase");
     // A door with no phase of its own follows its wall; a window holding one says its own.
     assert_eq!(set_of(&f, of_kind(&f, "IFCDOOR")[0], "Pset_DoorCommon"), [status("DEMOLISH")]);
     assert_eq!(set_of(&f, of_kind(&f, "IFCWINDOW")[0], "Pset_WindowCommon"), [status("NEW")]);
@@ -840,7 +841,8 @@ fn a_project_with_no_phasing_gives_no_status() {
     run(&mut s, "structural_column", json!({"at": [0, 0]}));
     let f = export(&s.model);
     assert!(!f.contains("'Status'"), "all of it is new work: nothing to say");
-    assert!(!f.contains("'Pset_WallCommon'"));
+    // A wall's common set says only whether it is external, by its type's Function.
+    assert_eq!(set_of(&f, of_kind(&f, "IFCWALL")[0], "Pset_WallCommon"), ["IFCPROPERTYSINGLEVALUE('IsExternal',$,IFCBOOLEAN(.T.),$)"]);
     assert_eq!(set_of(&f, of_kind(&f, "IFCCOLUMN")[0], "Pset_ColumnCommon"), ["IFCPROPERTYSINGLEVALUE('LoadBearing',$,IFCBOOLEAN(.T.),$)"]);
 }
 

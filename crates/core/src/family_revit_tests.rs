@@ -289,7 +289,7 @@ fn a_project_using_the_new_fields_is_written_as_23_and_one_without_as_before() {
 fn a_file_of_a_family_format_keeps_a_templates_imported_categories_as_it_was() {
     use crate::graphics::Group;
     use crate::model::{FORMAT, Model, PARAMETRIC_FORMAT, PDF_FORMAT, TYPES_FORMAT};
-    assert_eq!((PDF_FORMAT, TYPES_FORMAT, PARAMETRIC_FORMAT, FORMAT), (21, 23, 24, 28));
+    assert_eq!((PDF_FORMAT, TYPES_FORMAT, PARAMETRIC_FORMAT, FORMAT), (21, 23, 24, 29));
     let mut s = Session::new();
     door(&mut s, "900 x 2100");
     let level = s.model.guid(s.model.levels()[0].0).to_string();

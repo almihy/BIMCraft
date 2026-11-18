@@ -277,7 +277,7 @@ fn a_door_family_form_saying_nothing_is_drawn_in_a_coarse_plan_and_in_3d_as_revi
 fn a_project_is_written_as_22_for_a_component_whose_form_says_its_views_23_for_per_type_forms_and_24_for_a_parametric_family_25_for_styles()
 {
     use crate::model::{FORMAT, LEAF_FORMAT, PARAMETRIC_FORMAT, PREVIOUS_FORMAT, STYLES_FORMAT, TYPES_FORMAT};
-    assert_eq!((LEAF_FORMAT, TYPES_FORMAT, PARAMETRIC_FORMAT, STYLES_FORMAT, FORMAT), (22, 23, 24, 25, 28));
+    assert_eq!((LEAF_FORMAT, TYPES_FORMAT, PARAMETRIC_FORMAT, STYLES_FORMAT, FORMAT), (22, 23, 24, 25, 29));
     let mut s = Session::new();
     let format = |s: &Session| serde_json::from_str::<Value>(&s.model.to_json().unwrap()).unwrap()["format"].clone();
     // A family whose form says which views draw it, placed nowhere: nothing a build of 21 would misread is drawn.
