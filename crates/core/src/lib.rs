@@ -131,6 +131,8 @@ mod type_data_tests;
 #[cfg(test)]
 mod wall_top_offset_tests;
 #[cfg(test)]
+mod wall_type_tests;
+#[cfg(test)]
 mod warnings_tests;
 #[cfg(test)]
 mod workplane_tests;
