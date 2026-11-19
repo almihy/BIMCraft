@@ -459,3 +459,12 @@ fn shot_the_walls_drawn_in_revit() {
     std::fs::write(format!("{dir}/engine-walls.png"), crate::render::png(&crate::render::plan(&s.model, 100000, 1800, 1300)).unwrap())
         .unwrap();
 }
+
+#[test]
+#[ignore]
+fn shot_coarse_joins() {
+    let (mut s, _, _) = room("Block");
+    run(&mut s, "detail", json!({"view": 100000, "detail": "coarse"}));
+    let dir = std::env::var("SHOT").unwrap();
+    std::fs::write(format!("{dir}/coarse.png"), crate::render::png(&crate::render::plan(&s.model, 100000, 1400, 1100)).unwrap()).unwrap();
+}

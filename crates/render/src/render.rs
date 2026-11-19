@@ -3726,6 +3726,15 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
         }
         d.halftone_next(false);
     }
+    // At coarse detail walls are paper between their two lines: their union is papered as one first, so the poché under it
+    // shows through no seam where two walls' own fills meet at a join.
+    if d.detail == Detail::Coarse {
+        d.owner = None;
+        let walls = outlines.iter().filter(|(id, _)| m.wall(*id).is_some() && !crate::link::is_linked(*id)).map(|(id, o)| (*id, o.clone()));
+        for (_, rings) in cut_unions(&look, walls) {
+            d.fill(&rings, PAPER);
+        }
+    }
     // One fill per wall or column: in one even-odd fill, overlapping walls would cancel out.
     for (id, o) in &outlines {
         d.owner = Some(*id);
