@@ -268,6 +268,22 @@ fn bimcrafts_own_curtain_wall_comes_back_from_ifc_as_it_was() {
     assert_eq!(entities(&again).len(), entities(&text).len());
 }
 
+/// The box round each element's solids, in whole millimetres, in order.
+fn boxes(m: &Model) -> Vec<[i64; 6]> {
+    let mut by: BTreeMap<Id, [f64; 6]> = BTreeMap::new();
+    for solid in crate::solids::solids(m) {
+        let b = by.entry(solid.owner()).or_insert([f64::MAX, f64::MAX, f64::MAX, f64::MIN, f64::MIN, f64::MIN]);
+        for c in solid.corners() {
+            for k in 0..3 {
+                (b[k], b[k + 3]) = (b[k].min(c[k]), b[k + 3].max(c[k]));
+            }
+        }
+    }
+    let mut out: Vec<[i64; 6]> = by.into_values().map(|b| b.map(|x| x.round() as i64)).collect();
+    out.sort_unstable();
+    out
+}
+
 #[test]
 fn another_programs_curtain_wall_and_a_damaged_set_keep_coming_in_as_generic_parts() {
     let mut s = Session::new();
@@ -278,6 +294,12 @@ fn another_programs_curtain_wall_and_a_damaged_set_keep_coming_in_as_generic_par
     let foreign = text.replace("'BIMCraft_CurtainWall'", "'Other_CurtainWall'");
     let damaged = text.replace(r#"{"type":"Storefront""#, r#"{"type":7"#);
     assert_ne!(damaged, text);
+    let boxes = boxes(&s.model);
+    assert_eq!(boxes.len(), 30);
+    // By hand: the first panel of the low row, 25 mm of glass about the wall's line, between the first two grid lines;
+    // and the mullion on the wall's start, 50 wide inside the wall and 150 deep about its line, as tall as the low row.
+    assert!(boxes.contains(&[1000, 1988, 0, 2500, 2013, 2400]) || boxes.contains(&[1000, 1987, 0, 2500, 2012, 2400]), "{boxes:?}");
+    assert!(boxes.contains(&[1000, 1925, 0, 1050, 2075, 2425]), "{boxes:?}");
     for file in [foreign, damaged] {
         let back = crate::import::ifc(file.as_bytes(), "x").unwrap();
         let t = &back.model;
@@ -289,6 +311,8 @@ fn another_programs_curtain_wall_and_a_damaged_set_keep_coming_in_as_generic_par
             components.iter().filter_map(|c| t.families.get(&c.family)?.ifc.as_ref().map(|i| i.class.clone())).collect();
         assert_eq!(classes, BTreeSet::from(["IFCMEMBER".to_string(), "IFCPLATE".to_string()]));
         assert!(back.skipped.iter().any(|l| l.contains("IFCCURTAINWALL")), "{:?}", back.skipped);
+        // Each stands where the panel or mullion it was does: the bodies and the placements the file gave are theirs.
+        assert_eq!(self::boxes(t), boxes);
         // Out again as the plates and members they were, the wall no more.
         let f = Step { all: entities(&crate::ifc::export(t)) };
         assert_eq!((f.of("IFCPLATE").len(), f.of("IFCMEMBER").len(), f.of("IFCCURTAINWALL").len()), (8, 22, 0));
