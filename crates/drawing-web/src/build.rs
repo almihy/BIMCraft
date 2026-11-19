@@ -23,7 +23,7 @@ use serde_json::{Value, json};
 /// The most lines and shapes read (a clean plan has a few thousand).
 const MOST: usize = 400_000;
 /// A wall's thickness, between.
-const WALL_MIN: f64 = 40.0;
+const WALL_MIN: f64 = 18.0;
 const WALL_MAX: f64 = 620.0;
 /// A glazing run's two lines, between.
 const GLASS_MIN: f64 = 10.0;
@@ -530,7 +530,7 @@ fn meet(walls: &mut [Wall], cols: &[Group]) {
                 let x = P(e.0 + u.0 * s, e.1 + u.1 * s);
                 let near = s.abs() <= reach && t >= -(lines[n].2 / 2.0 + 60.0) && t <= ol + lines[n].2 / 2.0 + 60.0;
                 // Two walls that stop at one column meet inside it.
-                let at_column = s.abs() <= 1500.0 && t >= -1500.0 && t <= ol + 1500.0 && in_column(x);
+                let at_column = s.abs() <= 1500.0 && t >= -1500.0 && t <= ol + 1500.0 && in_column(x) && in_column(e);
                 if !near && !at_column {
                     continue;
                 }
@@ -547,6 +547,41 @@ fn meet(walls: &mut [Wall], cols: &[Group]) {
             }
         }
     }
+}
+
+/// A frame drawn round the plan on the walls' layer is taken off: walls that lie along the box of all the walls, with
+/// everything else well inside it. True when one was.
+fn unframed(walls: &mut Vec<Wall>) -> bool {
+    let pts = |ws: &[Wall]| -> Option<(P, P)> {
+        let mut g = Group::default();
+        for w in ws {
+            g.grow(w.a);
+            g.grow(w.b);
+        }
+        g.bounds()
+    };
+    let Some((lo, hi)) = pts(walls) else { return false };
+    let on_edge = |w: &Wall| {
+        let near = |a: f64, b: f64| (a - b).abs() < 100.0;
+        (near(w.a.0, lo.0) && near(w.b.0, lo.0)) || (near(w.a.0, hi.0) && near(w.b.0, hi.0)) || (near(w.a.1, lo.1) && near(w.b.1, lo.1)) || (near(w.a.1, hi.1) && near(w.b.1, hi.1))
+    };
+    let (edge, rest): (Vec<usize>, Vec<usize>) = (0..walls.len()).partition(|i| on_edge(&walls[*i]));
+    if edge.len() < 4 || rest.is_empty() {
+        return false;
+    }
+    let inner: Vec<Wall> = rest.iter().map(|i| Wall { a: walls[*i].a, b: walls[*i].b, g: 0.0, openings: Vec::new() }).collect();
+    let Some((il, ih)) = pts(&inner) else { return false };
+    let long: f64 = edge.iter().map(|i| walls[*i].b.sub(walls[*i].a).len()).sum();
+    let round = 2.0 * ((hi.0 - lo.0) + (hi.1 - lo.1));
+    if il.0 - lo.0 < 300.0 || il.1 - lo.1 < 300.0 || hi.0 - ih.0 < 300.0 || hi.1 - ih.1 < 300.0 || long < 0.9 * round {
+        return false;
+    }
+    let mut n = 0;
+    walls.retain(|_| {
+        n += 1;
+        !edge.contains(&(n - 1))
+    });
+    true
 }
 
 // ---------------------------------------------------------------------------------------------- arcs
@@ -837,6 +872,7 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
 
     let (mut door_taken, mut window_taken) = (vec![false; doors.len()], vec![false; windows.len()]);
     let mut found = walls(&wall_segs, &doors, &tips, &windows, &columns, &mut door_taken, &mut window_taken);
+    let framed = unframed(&mut found.walls);
     let (wall_curves, arcs_used) = curved(&wall_arcs, WALL_MIN, WALL_MAX);
 
     // A door no gap holds goes to a wall it stands along, or one that ends at its jamb (a door in a corner, between
@@ -1155,6 +1191,7 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
             "faces": listed(&mut found.lone),
             "gaps": listed(&mut found.gaps),
             "arcs": lone_arcs,
+            "frame": framed,
             "doors": doors_left,
             "columns": cols_left,
             "layers": other.into_iter().map(|(l, n)| json!({"layer": l, "items": n})).collect::<Vec<_>>(),
