@@ -485,7 +485,26 @@ fn fs_post(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     // selecting it would show nothing).
     if g.size.w > 0.5 {
         let clear = textureLoad(clear_ids, vec2<i32>(x, y), 0).x;
-        if clear != 0u {
+        // What is seen through has its edges too, where it ends or another element's begins, as the processor's.
+        var beside = 0u;
+        var ends = false;
+        if x + 1 < size.x {
+            let r = textureLoad(clear_ids, vec2<i32>(x + 1, y), 0).x;
+            ends = ends || r != clear;
+            beside = r;
+        }
+        if y + 1 < size.y {
+            let b = textureLoad(clear_ids, vec2<i32>(x, y + 1), 0).x;
+            ends = ends || b != clear;
+            if beside == 0u {
+                beside = b;
+            }
+        }
+        let first = select(clear, beside, clear == 0u);
+        if (g.display.x > 0.5 || lines) && !on_dot && ends && first != 0u {
+            let owner = owners[first - 1u];
+            rgb = select(owner.edge.xyz, owner.tint.xyz, owner.tint.w > 0.5);
+        } else if clear != 0u {
             let owner = owners[clear - 1u];
             var s = bytes(textureLoad(clear_color, vec2<i32>(x, y), 0));
             var weight = owner.edge.w;

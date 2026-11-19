@@ -1591,6 +1591,18 @@ impl Scene {
                 }
                 None => c,
             };
+            // What is seen through has its edges too, where it ends or another element's begins: a pane of glass reads as
+            // one, and two curtain panels joined with no mullion between them show the joint.
+            let clear = |k: usize| through(k).and_then(|t| self.tris.get(t)).map(|t| t.owner);
+            let glass = clear(k);
+            let c = if edges && dot(k).is_none() && ((px + 1 < w && clear(k + 1) != glass) || (py + 1 < h && clear(k + w) != glass)) {
+                match [k, k + 1, k + w].into_iter().find_map(clear) {
+                    Some(o) => tints.get(&o).copied().unwrap_or_else(|| look.edge(o, EDGE)),
+                    None => c,
+                }
+            } else {
+                c
+            };
             [c.0, c.1, c.2, 255]
         };
         let mut rgba = vec![0; w * h * 4];

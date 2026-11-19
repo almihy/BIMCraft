@@ -702,6 +702,12 @@ hides panels or mullions alone by their category.
   coarse form. A curved wall's panels are flat between grid lines, so they draw straight. A panel's cut pen starts at
   `Pen::FINE` (25 mm of glass is two lines 0.25 mm apart at 1 : 100) and a mullion's at a window's; both are ours.
 - **Sections and elevations** cut and show them from their solids, glass as a window's (opaque in the hidden-line picture).
+- **Joints.** An edge is drawn where the plane a pixel shows changes, so two panels joined with no mullion between them (the
+  Exterior Glazing type) would read as one sheet. `Scene::edge_plane` gives a curtain panel's triangles a number of their
+  plane and their panel (`Scene::panels`), which the hidden-line picture and the card's mesh read in place of the plane's:
+  each panel's edges show in an elevation, a section and Hidden Line. In Shaded, where glass is seen through, both painters
+  (`picture_cancellable`, `gpu.wgsl`'s `fs_post`) draw an edge wherever what is seen through ends or another element's
+  begins, in that element's edge colour: a pane reads as a pane, a window's too.
 - **Picking.** The wall owns its extents in every plan, section and elevation, drawn in no ink (`alpha` 0; a PDF and a
   DXF leave them out): in a plan a fill and a dashed outline over its panels and mullions, so `Drawing::pick` takes the
   wall and `pick_all` (Tab) goes on to the mullion or panel under the cursor; in a section or an elevation a dashed outline
@@ -710,6 +716,13 @@ hides panels or mullions alone by their category.
   the wall dashed, as Revit does. A hand-made grid line (`Element::CurtainGrid`) draws nothing; in a section or an
   elevation it is there to be picked a little past the wall's edges and across it wherever no mullion lies on it. The 3D
   view picks the panel or mullion itself; `inquiry::pick_chain` gives the wall before it, for a front end's Tab.
+- **The grid for a front end** (`render/curtain_grid.rs`): every grid line of a wall as points in the model (`marks`: the
+  type's, the borders and the hand-made ones, each of those with its element) and the wall's outline (`outline`), which a
+  front end draws dashed through its own projection over a wall that is selected or worked on, since no drawing holds them;
+  the grid line under the cursor along its whole length, a hand-made one before the type's (`line_near`), which is how one
+  under a mullion is picked; the place on a wall a point of a section shows (`in_section`) or a model point is (`place_of`);
+  the line the Curtain Grid tool would put at a place, with its snap and the lines either side (`aim`); and where a drag on
+  the screen leaves a hand-made line (`dragged`). A wall is read straight from end to end in a section.
 - **Out.** DXF puts panels on `A-GLAZ` and mullions on `A-GLAZ-CWMG`; glTF has a node for each, as for any element. The
   3D scene's update makes a curtain wall's panels and mullions again whenever something may have moved the wall (they
   hold where they are in the wall, not in the model, so an edit of its level changes none of them).

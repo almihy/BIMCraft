@@ -1303,7 +1303,7 @@ impl BimApp {
             Some((at, id)) if modify => chain_at(&o.picker, at, id),
             _ => Vec::new(),
         };
-        let stepped = crate::curtain::tools::tab_through(&mut self.canvas, &mut self.tab_cycle, &mut self.flow, ui, under);
+        let stepped = crate::curtain::tools::tab_through(&mut self.canvas, &mut self.tab_cycle, &mut self.flow, ui, hover.is_some(), under);
         let hovered = if modify { stepped } else { hovered.map(|(_, id)| id) };
         self.canvas.hovered = hovered;
         // The floor or roof being shaped is drawn as it is, not in the selection's colour: edit mode's marks are what's lit.

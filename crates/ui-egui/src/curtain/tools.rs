@@ -180,7 +180,13 @@ fn off(pts: &[Pos2], at: Pos2) -> f32 {
     };
     match pts {
         [only] => only.distance(at),
-        _ => pts.windows(2).map(|w| one(w[0], w[1])).fold(f32::INFINITY, f32::min),
+        _ => pts
+            .windows(2)
+            .map(|w| match w {
+                [a, b] => one(*a, *b),
+                _ => f32::INFINITY,
+            })
+            .fold(f32::INFINITY, f32::min),
     }
 }
 
@@ -227,19 +233,21 @@ fn middle(m: &Model, id: Id) -> Option<P3> {
 
 /// Tab over a section, an elevation or the 3D view, as over a plan (`BimApp::tab_step`): `under` is what a click at the
 /// cursor may mean, in order; Tab steps on through it and Shift+Tab back, and a cursor over something else starts again.
-/// What is lit and what a click takes is what it gives. The app's own fields, so a view holding its own state can call it.
+/// What is lit and what a click takes is what it gives; `over` says the cursor is over the view. The app's own fields, so a view holding its own state can call it.
 pub(crate) fn tab_through(
     canvas: &mut crate::canvas::Canvas,
     tab_cycle: &mut bool,
     flow: &mut crate::selecting::Flow,
     ui: &Ui,
+    over: bool,
     under: Vec<Id>,
 ) -> Option<Id> {
     if under != canvas.under {
         (canvas.under, canvas.cycle) = (under, 0);
         flow.preview.clear();
     }
-    let tab = ui.input(|i| i.key_pressed(Key::Tab));
+    // Tab is the view's while the cursor is over it; elsewhere it moves between a palette's fields, as ever.
+    let tab = over && ui.input(|i| i.key_pressed(Key::Tab));
     if tab {
         ui.ctx().memory_mut(|m| {
             if let Some(f) = m.focused() {
@@ -503,7 +511,11 @@ impl BimApp {
         };
         match params {
             Some(params) => {
-                let params = self.typed("mullion", params);
+                let mut params = self.typed("mullion", params);
+                // The project's first mullion: of the type the Type Selector shows, which the command then makes.
+                if params.get("type").is_none() && m.types.mullion.is_empty() {
+                    params["type"] = json!(curtain::MULLION);
+                }
                 self.run("mullion", params);
             }
             None => self.status = Status { text: t("Click a grid line of a curtain wall.").into(), error: true },

@@ -5934,6 +5934,8 @@ impl BimApp {
                 );
             }
             (Sheet::View3D, Tool::AddPoint | Tool::AddSplitLine(_)) => {}
+            // The curtain tools work on the wall as an elevation, a section and the 3D view show it.
+            (Sheet::View3D | Sheet::Section(_), Tool::CurtainGrid | Tool::Mullion | Tool::GridSegments(_)) => {}
             (Sheet::View3D | Sheet::Section(_) | Sheet::Paper(_), _) => {
                 return msg!("This tool works in plan views: open one from the Project Browser.");
             }

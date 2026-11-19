@@ -325,7 +325,7 @@ impl BimApp {
             (Tool::Modify, Some(q)) => chain_at(&self.cut, &d, q),
             _ => Vec::new(),
         };
-        let stepped = crate::curtain::tools::tab_through(&mut self.canvas, &mut self.tab_cycle, &mut self.flow, ui, under);
+        let stepped = crate::curtain::tools::tab_through(&mut self.canvas, &mut self.tab_cycle, &mut self.flow, ui, local.is_some(), under);
         let hovered = match (&self.tool, local) {
             (Tool::Modify, _) => stepped,
             (Tool::Demolish, Some(q)) => pick(&self.cut, &d, q),

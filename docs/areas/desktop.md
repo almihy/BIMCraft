@@ -770,5 +770,55 @@ Empty System Panel nothing but its identity data; a Rectangular Mullion Offset, 
 side 1, a Circular Mullion Offset, Material and Radius. The panel and mullion drop-downs name each type with its family ("System
 Panel : Glazed") and offer the starter types the project hasn't made yet, which the `type` command makes when one is named. OK and
 Apply send what changed, Duplicate all of it, as the `type` command's `curtain`. Still to come: Automatically Embed, a mullion's
-Angle, Profile, Position and corner mullions, a grid's Angle, Mark and Comments on a wall, a panel and a mullion, and the Curtain
-Grid and Mullion tools (their icons are drawn: `Icon::CurtainGrid`, `Icon::Mullion`).
+Angle, Profile, Position and corner mullions, a grid's Angle, and Mark and Comments on a wall, a panel and a mullion.
+
+**The tools that work on a curtain wall by hand** are `curtain/tools.rs`, on the Architecture tab's Build panel after Window, as
+Revit's: Curtain Grid and Mullion, and Add/Remove Segments on the tab of a selected grid line. They work in an elevation, a
+section and the 3D view, and for standing lines in a plan. Each view says only where a model point is on its screen and what
+place on a curtain wall is under the cursor (`tools::Over`: a plan from the wall picked and the cursor along it; a section from
+`curtain_grid::in_section`; the 3D view from the point of the panel or mullion the picture shows, `Picker::surface`), and
+`BimApp::curtain_over` does the rest the same everywhere, with the core's geometry (`render::curtain_grid`) and one command a
+click.
+
+- **Curtain Grid** (`Tool::CurtainGrid`; Modify | Place Curtain Grid, whose Placement panel shows All Segments, lit): over a
+  curtain wall its grid lines show dashed, and the line a click would put is previewed across the wall, dashed, square to the
+  edge the cursor is nearest on the screen (along the base, the top or a lying line: a standing line; beside an end or a standing
+  line: a lying one; a plan gives standing lines only), with a temporary dimension to the line either side. Within 8 px it snaps
+  to the middle and the thirds between those lines ("Midpoint", "1/3 of curtain panel", lettered beside the cursor) and, lying,
+  to a level (its name); else it is where the cursor is, to the millimetre. A click runs `curtain_grid {wall, vertical, at}`;
+  the tool stays for the next line, Esc ends. One Segment and All Except Picked are not built, and not shown: the window
+  shows no button that does nothing.
+- **Mullion** (`Tool::Mullion`; Modify | Place Mullion, whose Placement panel is Grid Line, Grid Line Segment and All Grid
+  Lines, `tools::On`): the grid line under the cursor (within 10 px), its one segment, or every line of the wall is lit, and a
+  click runs `mullion {wall, type, on, at, vertical}`. Shift is the one segment and Ctrl every grid line, whatever the panel
+  says, as Revit's. The Type Selector lists the mullion types under Rectangular Mullion and Circular Mullion (`Subject::New("mullion")`);
+  in a project with none yet it lists Revit's starter types, which the first mullion makes, 50 x 150mm picked.
+- **Add/Remove Segments** (`Tool::GridSegments(wall)`; the Curtain Grid panel of Modify | Curtain Wall Grids, and of a selected
+  curtain wall, panel or mullion, since a type's own grid lines are no elements to select): the wall's segments show thin, the
+  removed ones dashed, the one under the cursor lit; a click runs `add_remove_segments {wall, at, vertical, remove}` (remove
+  what stands, put back what was removed), and the engine's refusal (a panel that would be no rectangle, with the segments
+  that would make it one) is the status bar's. A click in empty space, or Esc, finishes. Not in a plan, which shows no
+  segments: a click there says so.
+- **A hand-made grid line selected** shows dashed in the selection's colour with a temporary dimension to the line either side:
+  a click on one makes it a field, and the length typed moves the line (`modify {id, at}`; from the line before it for the
+  first, from the line after it for the second). A press on the line anywhere along it and a drag moves it along its wall,
+  between the lines either side (`curtain_grid::dragged`: the drag on the screen read along the way the line moves, so it is
+  the same in an elevation, a plan and the 3D view, where the press no longer orbits); Delete removes it. A selected curtain
+  wall shows all its grid lines dashed.
+- **Pins.** A selected panel, mullion or grid line that is pinned shows its pin in an elevation, a section and the 3D view too
+  (`BimApp::pin_glyph`, at its middle; a plan's is `pin_overlay`): a click unpins it, and then its Type Selector takes a type
+  and Delete takes a mullion.
+- **Tab.** In the 3D view a curtain wall is taken first wherever the cursor is on one of its panels or mullions, shown as a
+  dashed outline of the whole wall, as in a plan; Tab goes on to the hand-made grid line under the cursor, then the panel or
+  mullion (`tools::chain`, `tools::tab_through`, which keeps `Canvas::under` and `cycle` as the plan's Tab does). In a section
+  or an elevation what the view picks comes first (the wall at its edge, the mullion or panel inside it) and Tab goes on to the
+  hand-made grid line that runs there, so one under a mullion is reached. The status bar names what is lit in these views too.
+- **The right-click menu** of a curtain wall, a panel or a mullion has Select Panels (Along Vertical Grid, Along Horizontal
+  Grid, On Host) and Select Mullions (On Gridline, On Inside, On Border, On Host): `Action::SelectCurtain`, `tools::Among`.
+  The grid ones are offered from a panel or a mullion.
+- **Pick Walls** in a sketch takes a curtain wall by its panel or mullion too (all the 3D view shows of it), along its location
+  line: a curtain wall has no faces of its own.
+
+Still to come: One Segment and All Except Picked, a grid line of the wall's type made independent (unpinned) and moved, picking
+a hand-made grid line in a plan (it is selected in another view; the plan then shows its dimensions and drags it), and snapping
+a new line to grids, reference planes and an adjoining curtain wall's lines.

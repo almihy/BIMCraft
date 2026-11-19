@@ -1558,7 +1558,10 @@ impl BimApp {
             Subject::Elements(category) => (category, self.shared_type(model)),
             Subject::Mixed(_) => ("multiple categories", None),
             Subject::New(category) => {
-                (category, self.types.get(category).cloned().or_else(|| model.default_type(category).map(String::from)))
+                let picked = self.types.get(category).cloned().or_else(|| model.default_type(category).map(String::from));
+                // The Mullion tool's, before the project has a mullion type: the one its first mullion is of.
+                let starter = (category == "mullion").then(|| bimcraft_core::curtain::MULLION.to_string());
+                (category, picked.or(starter))
             }
             Subject::Plan(_) => ("floor plan", None),
             Subject::CeilingPlan => ("ceiling plan", None),

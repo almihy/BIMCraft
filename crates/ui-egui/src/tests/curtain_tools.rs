@@ -310,6 +310,30 @@ fn in_the_3d_view_a_curtain_wall_is_picked_first_and_tab_goes_on_to_the_panel_un
 }
 
 #[test]
+fn in_the_3d_view_tab_reaches_a_hand_made_grid_line_and_a_drag_moves_it_along_its_wall() {
+    let mut h = app(PLAIN);
+    let wall = ids(&h, "wall")[0];
+    let line = grid_line(&mut h, wall, true, 2000.0);
+    h.state_mut().open_sheet(Sheet::View3D);
+    h.run_steps(4);
+    let camera = h.state().orbit.camera;
+    let at = h.state().screen3([2000.0, -12.5, 1500.0]);
+    h.hover_at(at);
+    h.run();
+    assert_eq!(h.state().canvas.hovered, Some(wall), "the wall first");
+    key(&mut h, Key::Tab);
+    assert_eq!(h.state().canvas.hovered, Some(line), "Tab: the grid line, before the panel");
+    click_at(&mut h, at);
+    assert_eq!(h.state().selection, [line]);
+    // A press on the line and a drag along the wall moves it, and the view is not turned.
+    let to = h.state().screen3([3200.0, -12.5, 1500.0]);
+    drag_screen(&mut h, at, to, PointerButton::Primary);
+    let now = lines(&h)[0].1;
+    assert!((now - 3200.0).abs() < 60.0, "{now} {}", h.state().status.text);
+    assert_eq!(h.state().orbit.camera, camera, "the drag was the line's, not the view's");
+}
+
+#[test]
 fn in_an_elevation_tab_reaches_the_grid_line_under_a_mullion() {
     let (mut h, wall) = elevation(PLAIN);
     let line = grid_line(&mut h, wall, true, 2000.0);
