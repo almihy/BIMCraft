@@ -882,16 +882,122 @@ fn curtain_set(w: &mut Step, m: &Model, id: Id, wl: &crate::model::Wall, ent: u6
     w.define(ent, CURTAIN, &props, (CURTAIN_SET, CURTAIN_DEFINES), id);
 }
 
+/// A door or a window itself, placed at `at` (its jamb toward its wall's start, at its sill, x along the wall): a panel
+/// centred in the wall, a door's as thick as its leaf, a window's 50 mm; of a family, its forms as a component's are. With
+/// its type object, its quantities and what it is made of. `cw` is how wide the opening it stands in the middle of is.
+fn opening_product(
+    w: &mut Step,
+    m: &Model,
+    id: Id,
+    e: &Element,
+    o: &crate::model::Opening,
+    t: &crate::model::OpeningType,
+    at: u64,
+    cw: f64,
+) -> u64 {
+    // The door or window itself: a panel centred in the wall, a door's as thick as its leaf, a window's 50 mm; of a family, its forms as a component's are,
+    // closed face sets in their materials' colours, standing at the middle of the opening.
+    let mut made_of: Vec<u64> = Vec::new();
+    let (fill_at, shape) = match m.opening_local(e).filter(|_| o.family.is_some()) {
+        Some((pieces, _)) => {
+            let mut items = Vec::new();
+            for piece in pieces.iter().filter(|p| p.at(crate::graphics::Detail::Fine)) {
+                let set = w.faceset(&piece.tris);
+                if !piece.material.trim().is_empty() {
+                    let (material, style) = w.material_style(m, piece.material.trim());
+                    if let Some(style) = style {
+                        w.add(format!("IFCSTYLEDITEM(#{set},(#{style}),$)"));
+                    }
+                    if !made_of.contains(&material) {
+                        made_of.push(material);
+                    }
+                }
+                items.push(set);
+            }
+            let rep = w.add(format!("IFCSHAPEREPRESENTATION(#{},'Body','Tessellation',({}))", w.body, refs(&items)));
+            (w.place(Some(at), (cw / 2.0, 0.0, 0.0), None), w.add(format!("IFCPRODUCTDEFINITIONSHAPE($,$,(#{rep}))")))
+        }
+        None => {
+            let thick = if matches!(e, Element::Door(_)) { t.leaf() } else { 50.0 };
+            let profile = w.rectangle(P2(t.width / 2.0, 0.0), P2(t.width, thick));
+            (w.place(Some(at), (0.0, 0.0, 0.0), None), w.body(profile, 0.0, t.height, &[]))
+        }
+    };
+    let (h, wd) = (real(t.height), real(t.width));
+    // Named `Family:Type` as Revit names them; a project's own type, by its name.
+    let label = o.family.as_ref().map_or_else(|| o.type_name.clone(), |f| format!("{f}:{}", o.type_name));
+    let name = s(&label);
+    // How it opens, as its family or its type says; a door that says nothing swings.
+    let ent = if matches!(e, Element::Door(_)) {
+        let operation = Operation::ifc_door(t.operation, o.flip_hand);
+        w.add(format!(
+            "IFCDOOR({},$,{name},$,{name},#{fill_at},#{shape},{},{h},{wd},.DOOR.,{operation},$)",
+            w.guid(ELEMENT, id),
+            s(&o.mark)
+        ))
+    } else {
+        let partitioning = Operation::ifc_window_partitioning(t.operation);
+        w.add(format!(
+            "IFCWINDOW({},$,{name},$,{name},#{fill_at},#{shape},{},{h},{wd},.WINDOW.,{partitioning},$)",
+            w.guid(ELEMENT, id),
+            s(&o.mark)
+        ))
+    };
+    // Its type object: after its PredefinedType, the operation (a door's) or partitioning (a window's) its type has, that
+    // the occurrence's own sizes take precedence over the type's, and no user-defined operation.
+    let (class, predefined, how) = if matches!(e, Element::Door(_)) {
+        ("IFCDOORTYPE", ".DOOR.", Operation::ifc_door(t.operation, false))
+    } else {
+        ("IFCWINDOWTYPE", ".WINDOW.", Operation::ifc_window_partitioning(t.operation))
+    };
+    w.typed_with(class, "", predefined, &format!(",{how},.T.,$"), &label, ent);
+    let qto = if matches!(e, Element::Door(_)) { "Qto_DoorBaseQuantities" } else { "Qto_WindowBaseQuantities" };
+    let values = [
+        ("Width", "LENGTH", t.width),
+        ("Height", "LENGTH", t.height),
+        ("Perimeter", "LENGTH", 2.0 * (t.width + t.height)),
+        ("Area", "AREA", t.width * t.height / 1e6),
+    ];
+    w.quantities(ent, qto, &values, id);
+    // What a family's door or window is made of: its material, or the set of them.
+    let relating = match made_of.as_slice() {
+        [] => None,
+        [one] => Some(*one),
+        many => {
+            let parts: Vec<u64> = many.iter().map(|x| w.add(format!("IFCMATERIALCONSTITUENT($,$,#{x},$,$)"))).collect();
+            Some(w.add(format!("IFCMATERIALCONSTITUENTSET({},$,({}))", s(&o.type_name), refs(&parts))))
+        }
+    };
+    if let Some(r) = relating {
+        w.add(format!("IFCRELASSOCIATESMATERIAL({},$,$,$,(#{ent}),#{r})", w.guid(COMPONENT_MATERIALS, id)));
+    }
+    ent
+}
+
 /// Each curtain wall's panels as `IfcPlate`s (`CURTAIN_PANEL`) and its mullions as `IfcMember`s (`MULLION`), placed in their
 /// wall's frame and aggregated under it (so not in the storey too, which holds the wall): a panel a rectangle of its type's
 /// thickness swept up its height, a mullion its type's section swept along its length, each in its type's material and with
 /// what it measures (`quantities::panel`, `quantities::mullion`). An empty panel is an open cell: nothing is written for it.
+/// A door that fills a cell (`curtain_door`) is aggregated with them, an `IfcDoor`.
 fn curtain_parts(w: &mut Step, m: &Model, curtains: &BTreeMap<Id, (u64, u64)>, products: &mut BTreeMap<Id, u64>) {
     let mut parts: BTreeMap<Id, Vec<u64>> = BTreeMap::new();
     for (&id, e) in &m.elements {
-        let Some((host, wl, axis)) = crate::curtain::host_of(e).and_then(|h| crate::curtain::host(m, h)) else { continue };
+        let of = crate::curtain::host_of(e).or_else(|| crate::curtain::door_host(e));
+        let Some((host, wl, axis)) = of.and_then(|h| crate::curtain::host(m, h)) else { continue };
         let Some(&(_, wall_at)) = curtains.get(&host) else { continue };
         w.kind = e.category();
+        // A door that fills a cell: an `IfcDoor` as any other, but a part of its curtain wall, which has no body for it to
+        // void: no opening element, and nothing it fills.
+        if let Element::Door(o) = e {
+            let Some(t) = m.opening_type(e) else { continue };
+            let (u, way) = (axis.tangent(0.0), axis.tangent(o.offset));
+            let jamb = axis.at(o.offset, walls::centre(m, wl)) - way * (t.width / 2.0) - wl.start;
+            let at = w.place(Some(wall_at), (jamb.dot(u), jamb.dot(u.perp()), o.sill), Some(P2(way.dot(u), way.dot(u.perp()))));
+            let ent = opening_product(w, m, id, e, o, &t, at, t.width);
+            products.insert(id, ent);
+            parts.entry(host).or_default().push(ent);
+            continue;
+        }
         // The wall's frame: at its start and its base, x the way it sets off.
         let (u, base) = (axis.tangent(0.0), m.own_base(wl));
         let local = |p: [f64; 3]| {
@@ -1785,83 +1891,8 @@ pub fn export(m: &Model) -> String {
         let shape = w.body(profile, 0.0, ch, &[]);
         let opening = w.add(format!("IFCOPENINGELEMENT({},$,'Opening',$,$,#{at},#{shape},$,.OPENING.)", w.guid(OPENING, id)));
         w.add(format!("IFCRELVOIDSELEMENT({},$,$,$,#{wall},#{opening})", w.guid(VOIDS, id)));
-        // The door or window itself: a panel centred in the wall, a door's as thick as its leaf, a window's 50 mm; of a family, its forms as a component's are,
-        // closed face sets in their materials' colours, standing at the middle of the opening.
-        let mut made_of: Vec<u64> = Vec::new();
-        let (fill_at, shape) = match m.opening_local(e).filter(|_| o.family.is_some()) {
-            Some((pieces, _)) => {
-                let mut items = Vec::new();
-                for piece in pieces.iter().filter(|p| p.at(crate::graphics::Detail::Fine)) {
-                    let set = w.faceset(&piece.tris);
-                    if !piece.material.trim().is_empty() {
-                        let (material, style) = w.material_style(m, piece.material.trim());
-                        if let Some(style) = style {
-                            w.add(format!("IFCSTYLEDITEM(#{set},(#{style}),$)"));
-                        }
-                        if !made_of.contains(&material) {
-                            made_of.push(material);
-                        }
-                    }
-                    items.push(set);
-                }
-                let rep = w.add(format!("IFCSHAPEREPRESENTATION(#{},'Body','Tessellation',({}))", w.body, refs(&items)));
-                (w.place(Some(at), (cw / 2.0, 0.0, 0.0), None), w.add(format!("IFCPRODUCTDEFINITIONSHAPE($,$,(#{rep}))")))
-            }
-            None => {
-                let thick = if matches!(e, Element::Door(_)) { t.leaf() } else { 50.0 };
-                let profile = w.rectangle(P2(t.width / 2.0, 0.0), P2(t.width, thick));
-                (w.place(Some(at), (0.0, 0.0, 0.0), None), w.body(profile, 0.0, t.height, &[]))
-            }
-        };
-        let (h, wd) = (real(t.height), real(t.width));
-        // Named `Family:Type` as Revit names them; a project's own type, by its name.
-        let label = o.family.as_ref().map_or_else(|| o.type_name.clone(), |f| format!("{f}:{}", o.type_name));
-        let name = s(&label);
-        // How it opens, as its family or its type says; a door that says nothing swings.
-        let ent = if matches!(e, Element::Door(_)) {
-            let operation = Operation::ifc_door(t.operation, o.flip_hand);
-            w.add(format!(
-                "IFCDOOR({},$,{name},$,{name},#{fill_at},#{shape},{},{h},{wd},.DOOR.,{operation},$)",
-                w.guid(ELEMENT, id),
-                s(&o.mark)
-            ))
-        } else {
-            let partitioning = Operation::ifc_window_partitioning(t.operation);
-            w.add(format!(
-                "IFCWINDOW({},$,{name},$,{name},#{fill_at},#{shape},{},{h},{wd},.WINDOW.,{partitioning},$)",
-                w.guid(ELEMENT, id),
-                s(&o.mark)
-            ))
-        };
-        // Its type object: after its PredefinedType, the operation (a door's) or partitioning (a window's) its type has, that
-        // the occurrence's own sizes take precedence over the type's, and no user-defined operation.
-        let (class, predefined, how) = if matches!(e, Element::Door(_)) {
-            ("IFCDOORTYPE", ".DOOR.", Operation::ifc_door(t.operation, false))
-        } else {
-            ("IFCWINDOWTYPE", ".WINDOW.", Operation::ifc_window_partitioning(t.operation))
-        };
-        w.typed_with(class, "", predefined, &format!(",{how},.T.,$"), &label, ent);
+        let ent = opening_product(&mut w, m, id, e, o, &t, at, cw);
         w.add(format!("IFCRELFILLSELEMENT({},$,$,$,#{opening},#{ent})", w.guid(FILLS, id)));
-        let qto = if matches!(e, Element::Door(_)) { "Qto_DoorBaseQuantities" } else { "Qto_WindowBaseQuantities" };
-        let values = [
-            ("Width", "LENGTH", t.width),
-            ("Height", "LENGTH", t.height),
-            ("Perimeter", "LENGTH", 2.0 * (t.width + t.height)),
-            ("Area", "AREA", t.width * t.height / 1e6),
-        ];
-        w.quantities(ent, qto, &values, id);
-        // What a family's door or window is made of: its material, or the set of them.
-        let relating = match made_of.as_slice() {
-            [] => None,
-            [one] => Some(*one),
-            many => {
-                let parts: Vec<u64> = many.iter().map(|x| w.add(format!("IFCMATERIALCONSTITUENT($,$,#{x},$,$)"))).collect();
-                Some(w.add(format!("IFCMATERIALCONSTITUENTSET({},$,({}))", s(&o.type_name), refs(&parts))))
-            }
-        };
-        if let Some(r) = relating {
-            w.add(format!("IFCRELASSOCIATESMATERIAL({},$,$,$,(#{ent}),#{r})", w.guid(COMPONENT_MATERIALS, id)));
-        }
         contained.entry(wl.level).or_default().push(ent);
         products.insert(id, ent);
     }

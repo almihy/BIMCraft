@@ -248,6 +248,8 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
             OpeningType { width, height: p.height, sill: p.sill, ..Default::default() },
         );
         let opening = Opening {
+            panel: None,
+            cell: None,
             type_name,
             family: None,
             host: cx.model.guid(p.host),

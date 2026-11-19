@@ -16,6 +16,11 @@
 //! - **Pinned is the type's**, as Revit's: what the wall placed counts as pinned ([`placed`]); Unpin frees it (`free`),
 //!   and it then keeps the type a person gave it. A mullion deleted is remembered on the wall (`no_mullion`), a segment
 //!   removed to join two panels too (`merged`).
+//! - **A door** in a curtain wall is Revit's panel swapped for a door: a door (`Element::Door`) the wall hosts whose
+//!   `panel` is the key of the cell it fills. It is a person's element (its own GUID, a door in schedules and IFC); the
+//!   layout places no panel in its cell and writes where the cell is on it ([`door_fits`]), so it is as large as its cell
+//!   and goes where its cell goes. A door whose cell is gone goes to the cell that holds the place it was; with no such
+//!   cell, or in a wall that is no curtain wall any more, the layout deletes it.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -703,12 +708,17 @@ pub fn laid(m: &Model, id: Id) -> Vec<(Guid, Element)> {
     let mut out = Vec::new();
     let default_panel = default_panel(m, ct);
     let existing = |guid: Guid| m.elements.id(guid).and_then(|id| m.elements.get(id));
+    // A cell a door fills has no panel.
+    let doors: BTreeSet<String> = door_fits(m, host, Some(&g), &w.curtain.merged).0.into_iter().map(|d| d.key).collect();
 
     for (lo, hi) in g.panels(&w.curtain.merged) {
         let (Some(u0), Some(u1), Some(v0), Some(v1)) = (g.u.get(lo.0), g.u.get(hi.0 + 1), g.v.get(lo.1), g.v.get(hi.1 + 1)) else {
             continue;
         };
         let key = segment_key(&u0.key, &v0.key);
+        if doors.contains(&key) {
+            continue;
+        }
         let guid = child_guid(m.uid, host, &key);
         let (type_name, free, params) = match existing(guid) {
             Some(Element::CurtainPanel(p)) if p.free => (p.type_name.clone(), true, p.params.clone()),
@@ -814,6 +824,118 @@ fn trim(m: &Model, join: JoinCondition, g: &Grid, all: &mut [Mullion]) {
     }
 }
 
+// ====================================================================== doors
+/// A door that fills a cell of its curtain wall: the door, the cell's key and where the cell is (as a panel's span).
+#[derive(Clone, Debug, PartialEq)]
+pub struct DoorFit {
+    pub id: Id,
+    pub key: String,
+    pub cell: [f64; 4],
+}
+
+/// The wall a curtain wall's door is in: its host's GUID, for a door that fills a cell (`panel` set).
+pub fn door_host(e: &Element) -> Option<Guid> {
+    match e {
+        Element::Door(o) if o.panel.is_some() => Some(o.host),
+        _ => None,
+    }
+}
+
+/// The doors that fill cells of the wall whose GUID is `host`, by id.
+pub fn doors_of(m: &Model, host: Guid) -> Vec<Id> {
+    let mut ids: Vec<Id> = m.lookup().referrers(&host).filter(|id| m.elements.get(*id).and_then(door_host) == Some(host)).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
+/// The cells of grid `g` as its panels fill them (joined cells are one): each one's key and span.
+pub fn cells(g: &Grid, merged: &BTreeSet<String>) -> Vec<(String, [f64; 4])> {
+    g.panels(merged)
+        .into_iter()
+        .filter_map(|(lo, hi)| {
+            let (u0, u1, v0, v1) = (g.u.get(lo.0)?, g.u.get(hi.0 + 1)?, g.v.get(lo.1)?, g.v.get(hi.1 + 1)?);
+            Some((segment_key(&u0.key, &v0.key), [u0.at, u1.at, v0.at, v1.at]))
+        })
+        .collect()
+}
+
+/// The cell among `cells` that holds the place `s` mm along the wall and `z` mm over its base.
+pub fn cell_at(cells: &[(String, [f64; 4])], s: f64, z: f64) -> Option<&(String, [f64; 4])> {
+    if !(s.is_finite() && z.is_finite()) {
+        return None;
+    }
+    cells.iter().find(|(_, c)| s >= c[0] - 1e-6 && s < c[1] - 1e-6 && z >= c[2] - 1e-6 && z < c[3] - 1e-6)
+}
+
+/// The middle of the cell a door fills, as it stands: mm along its wall and mm over the wall's base.
+fn door_middle(o: &crate::model::Opening) -> (f64, f64) {
+    let height = o.cell_size().map_or(0.0, |(_, h)| h);
+    (o.offset, o.sill + (height / 2.0).max(1.0))
+}
+
+/// The doors of the wall whose GUID is `host`, each in the cell it fills now, and those that have none (to delete). A
+/// door stays in the cell its key names; one whose cell is gone goes to the cell that holds the place its middle was. Of
+/// two doors in one cell the one of the lower GUID stays (the same in every copy of the project), and a door that kept its
+/// cell before one that came to it. With no grid (`g` none: the wall is no curtain wall, or too small for one), none has a
+/// cell.
+pub fn door_fits(m: &Model, host: Guid, g: Option<&Grid>, merged: &BTreeSet<String>) -> (Vec<DoorFit>, Vec<Id>) {
+    let mut doors: Vec<(Guid, Id, &crate::model::Opening)> = doors_of(m, host)
+        .into_iter()
+        .filter_map(|id| match (m.elements.guid(id), m.elements.get(id)) {
+            (Some(guid), Some(Element::Door(o))) => Some((guid, id, o)),
+            _ => None,
+        })
+        .collect();
+    if doors.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    doors.sort_by_key(|(guid, ..)| *guid);
+    let Some(g) = g else { return (Vec::new(), doors.into_iter().map(|(_, id, _)| id).collect()) };
+    let cells = cells(g, merged);
+    let (mut fits, mut gone): (Vec<DoorFit>, Vec<Id>) = (Vec::new(), Vec::new());
+    let mut moved = Vec::new();
+    for (_, id, o) in doors {
+        match cells.iter().find(|(key, _)| Some(key) == o.panel.as_ref()) {
+            Some((key, _)) if fits.iter().any(|f| f.key == *key) => gone.push(id),
+            Some((key, cell)) => fits.push(DoorFit { id, key: key.clone(), cell: *cell }),
+            None => moved.push((id, o)),
+        }
+    }
+    for (id, o) in moved {
+        let (s, z) = door_middle(o);
+        match cell_at(&cells, s, z) {
+            Some((key, cell)) if !fits.iter().any(|f| f.key == *key) => fits.push(DoorFit { id, key: key.clone(), cell: *cell }),
+            _ => gone.push(id),
+        }
+    }
+    (fits, gone)
+}
+
+/// Each door of curtain wall `id` named by the cell that holds the place it stands at now, whatever cell its key names:
+/// after the wall's lines were named anew (the wall flipped, mirrored, split, or a copy), when a key that is still a
+/// cell's may be another cell's.
+pub fn rehome_doors(m: &mut Model, id: Id) {
+    let (Some(g), Some(host)) = (grid(m, id), m.elements.guid(id)) else { return };
+    let Some(merged) = m.wall(id).map(|w| w.curtain.merged.clone()) else { return };
+    let cells = cells(&g, &merged);
+    for door in doors_of(m, host) {
+        let Some(Element::Door(o)) = m.elements.get(door) else { continue };
+        let (s, z) = door_middle(o);
+        let Some((key, _)) = cell_at(&cells, s, z) else { continue };
+        if o.panel.as_ref() != Some(key)
+            && let Some(Element::Door(o)) = m.elements.get_mut(door)
+        {
+            o.panel = Some(key.clone());
+        }
+    }
+}
+
+/// The door that fills the cell named `key` of the wall whose GUID is `host`.
+pub fn door_in(m: &Model, host: Guid, key: &str) -> Option<Id> {
+    doors_of(m, host).into_iter().find(|id| matches!(m.elements.get(*id), Some(Element::Door(o)) if o.panel.as_deref() == Some(key)))
+}
+
 // ====================================================================== kept after each command
 /// What [`keep`] found to do: elements to take out, and elements to put (each at the id it had, or new, with its GUID).
 #[derive(Default)]
@@ -869,7 +991,8 @@ pub fn keep(m: &Model, before: &Model) -> Update {
                         }
                         Some(Element::Level(_) | Element::Roof(_) | Element::Floor(_)) => level = true,
                         Some(e) => {
-                            if let Some(h) = host_of(e) {
+                            // (A door that fills a cell too: its cell's panel is back when it goes.)
+                            if let Some(h) = host_of(e).or_else(|| door_host(e)) {
                                 match m.elements.id(h) {
                                     Some(w) => {
                                         walls.insert(w);
@@ -911,9 +1034,25 @@ fn relay(m: &Model, id: Id, up: &mut Update) {
     let Some(w) = m.wall(id) else { return };
     let mine: Vec<Id> = m.hosted_by(host);
     if !is_curtain(m, w) {
-        // A basic wall has none of these: a wall whose type was changed loses them.
+        // A basic wall has none of these: a wall whose type was changed loses them, and the doors that filled its cells.
         up.remove.extend(mine.into_iter().filter(|c| m.elements.get(*c).is_some_and(|e| host_of(e).is_some())));
+        up.remove.extend(doors_of(m, host));
         return;
+    }
+    // Its doors: each in its cell, as large as it; one with no cell goes.
+    let g = if doors_of(m, host).is_empty() { None } else { grid(m, id) };
+    let (fits, gone) = door_fits(m, host, g.as_ref(), &w.curtain.merged);
+    up.remove.extend(gone);
+    for fit in fits {
+        let Some(Element::Door(o)) = m.elements.get(fit.id) else { continue };
+        let [s0, s1, z0, _] = fit.cell;
+        let (offset, sill) = ((s0 + s1) / 2.0, z0);
+        if o.panel.as_ref() != Some(&fit.key) || o.cell != Some(fit.cell) || o.offset != offset || o.sill != sill {
+            let door = crate::model::Opening { panel: Some(fit.key), cell: Some(fit.cell), offset, sill, ..o.clone() };
+            if let Some(guid) = m.elements.guid(fit.id) {
+                up.put.push((Some(fit.id), guid, Element::Door(door)));
+            }
+        }
     }
     let want = laid(m, id);
     let wanted: BTreeSet<Guid> = want.iter().map(|(g, _)| *g).collect();
@@ -936,7 +1075,16 @@ fn relay(m: &Model, id: Id, up: &mut Update) {
 
 /// What [`keep`] worked out, made so.
 pub fn apply(m: &mut Model, up: Update) {
-    for id in up.remove {
+    // A door the layout takes out (its wall is no curtain wall any more, or its cell went and no other holds its place)
+    // takes its tags and its pin with it, as a door deleted does.
+    let mut with: Vec<Id> = Vec::new();
+    for id in &up.remove {
+        if let (Some(Element::Door(_)), Some(guid)) = (m.elements.get(*id), m.elements.guid(*id)) {
+            with.extend(m.lookup().referrers(&guid).filter(|t| matches!(m.elements.get(*t), Some(Element::Tag(t)) if t.host == guid)));
+            m.pinned.remove(&guid);
+        }
+    }
+    for id in up.remove.into_iter().chain(with) {
         m.elements.remove(id);
     }
     for (id, guid, e) in up.put {
@@ -1397,6 +1545,8 @@ pub fn hand_to(m: &mut Model, id: Id, hand: &Hand, along: &dyn Fn(f64) -> f64) {
             }
         }
     }
+    // The wall's lines are named anew: its doors are in the cells that hold them now.
+    rehome_doors(m, id);
     lay(m, id);
 }
 

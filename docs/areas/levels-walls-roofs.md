@@ -324,6 +324,24 @@ Empty and four mullion types. A wall's own Number, Justification and Offset each
 - A wall given a curtain type (`modify`, `match_properties`, or its type made one by `type`) loses its doors and windows,
   named in `deleted` with Revit's "Switching wall type to family curtain wall"; given a basic type it loses its panels,
   mullions and hand-made lines.
+- `curtain_door {panel | wall, at | point, z?, type?, family?, flip_facing?, flip_hand?, mark?}`: a panel swapped for a
+  door, a storefront's entrance: Revit's Unpin and Type Selector in one step (the panel may be pinned). The door is an
+  `Element::Door` the curtain wall hosts, with two fields of its own: `panel`, the key of the cell it fills (the key the
+  panel there had), and `cell`, that cell's span, which the layout writes as it writes a panel's (`curtain::door_fits`,
+  from `relay`), with the door's `offset` (the cell's middle) and `sill` (its bottom). The layout places no panel in a
+  cell a door fills, and `Model::opening_dims` gives the door its cell's width and height in place of its type's, so
+  plans, solids, schedules, tags, rooms (From/To Room) and IFC read a door of that size and nothing else knows it is a
+  curtain wall's. A family's door keeps its family's own size, standing at the middle of its cell's bottom. It follows
+  its cell (a type's spacing changed, a line moved, cells joined); when its cell is gone it fills the cell that holds the
+  place it was, and with none, or in a wall that stops being a curtain wall, it is deleted with its tags (`modify` and
+  `type` say so in `deleted`). A wall flipped, mirrored, split or copied names its lines anew, so `curtain::hand_to`
+  names each door's cell by where the door stands (`curtain::rehome_doors`). It is not slid along its wall (`move`
+  refuses, naming what to do); pasted alone into a basic wall it is an ordinary door. Deleted, its cell has its panel
+  again. Of two doors in one cell (two copies editing together) the one of the lower GUID stays. `Model::check` asks
+  only that a curtain wall's door has its `panel` and a sound `cell`, and that no other door or window has them; an
+  ordinary `door` or `window` in a curtain wall stays refused (a window in one is not built). IFC writes it as an
+  `IfcDoor` aggregated under its `IfcCurtainWall` with the plates and members: no opening element, no void, no fill;
+  reading that back as a curtain wall's door is not built.
 - Copy, array, mirror, rotate, paste and Insert from File copy the wall with its hand-made lines and what was done by
   hand; its panels and mullions are never copied, the copy lays out its own. A panel or a mullion alone is not moved,
   copied, turned or mirrored. `flip` and a mirror keep the grid where it is in the model (a Beginning justification
