@@ -434,6 +434,48 @@ fn walls_ending_on_a_wall_from_both_sides_each_join_it_as_a_t() {
     }
 }
 
+#[test]
+fn a_partition_joins_a_wall_that_changes_type_where_it_meets_it() {
+    // The room's south wall, its east half of a thicker block: two walls in line, of two types, and the partition at
+    // the point where they meet.
+    let (mut s, south, part) = room("Block");
+    run(
+        &mut s,
+        "type",
+        json!({"category": "wall", "name": "Thick", "layers": [
+        {"function": "finish", "material": "Brick", "thickness": 100},
+        {"function": "structure", "material": "Block", "thickness": 300},
+        {"function": "finish2", "material": "Plaster", "thickness": 15}]}),
+    );
+    run(&mut s, "split", json!({"id": south, "at": [1500, 0]}));
+    let halves: Vec<u64> = s
+        .model
+        .elements
+        .iter()
+        .filter(|(id, e)| matches!(e, crate::model::Element::Wall(w) if w.start.1 == 0.0 && w.end.1 == 0.0) && **id != part)
+        .map(|(id, _)| *id)
+        .collect();
+    let [west, east] = halves[..] else { panic!("two halves: {halves:?}") };
+    let (west, east) =
+        if s.model.wall(west).unwrap().start.0.max(s.model.wall(west).unwrap().end.0) <= 1500.0 { (west, east) } else { (east, west) };
+    run(&mut s, "modify", json!({"id": east, "type": "Thick"}));
+    // The halves stand square against each other at x = 1500, each as thick as its type.
+    let xs =
+        |id: u64| walls::outline(&s.model, id).iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), q| (lo.min(q.0), hi.max(q.0)));
+    assert_eq!((xs(west).1, xs(east).0), (1500.0, 1500.0));
+    // The partition's core passes plaster to block, as on the one wall: past its own plaster's end.
+    let p = walls::layer_geometry(&s.model, part, None);
+    let lowest = |k: usize| p.bands(k).iter().map(|r| span(r).0).fold(f64::INFINITY, f64::min);
+    assert!(lowest(1) < lowest(0) - 10.0, "{} {}", lowest(1), lowest(0));
+    // And where it passes, the wall it joins gives up its plaster.
+    let plaster = |id: u64, q: P2| {
+        let g = walls::layer_geometry(&s.model, id, None);
+        let k = s.model.types.wall[&s.model.wall(id).unwrap().type_name].layers.len() - 1;
+        g.bands(k).iter().any(|r| crate::geom::contains(r, q))
+    };
+    assert!(plaster(west, P2(1000.0, 150.0)) && !plaster(west, P2(1475.0, 150.0)), "the west half's plaster stops at the core");
+}
+
 /// The three walls drawn in Revit 2025 on 19 November (its picture is with the walls design), for laying beside it: one
 /// along the south, one up from its east end, one ending on it from the brick side.
 #[test]

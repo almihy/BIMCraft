@@ -438,18 +438,12 @@ fn carried_on(m: &Model, arms: &[Arm]) -> Option<(usize, usize)> {
     best
 }
 
-/// Whether two walls leaving a node are one wall carried on: of one type on one location line, running opposite ways.
+/// Whether two walls leaving a node are one wall carried on: straight, running opposite ways. They may be of two types (a
+/// wall that changes where a partition meets it): each stands square against the other, their faces where their own
+/// types put them.
 fn in_line(m: &Model, a: &Arm, b: &Arm) -> bool {
     let (Some(x), Some(y)) = (m.wall(a.id), m.wall(b.id)) else { return false };
-    a.id != b.id
-        && a.way.dot(b.way) < -1.0 + 1e-9
-        && x.arc == 0.0
-        && y.arc == 0.0
-        && x.type_name == y.type_name
-        && x.location == y.location
-        // Their exterior faces are one line: each one's is where the other's is, the other way round the node.
-        && a.ccw.dist(b.cw) < 1e-6
-        && a.cw.dist(b.ccw) < 1e-6
+    a.id != b.id && a.way.dot(b.way) < -1.0 + 1e-9 && x.arc == 0.0 && y.arc == 0.0
 }
 
 /// The walls wall `id`'s end (`at_end`, else its start) is joined to: those ending there with it, and one it ends on.
