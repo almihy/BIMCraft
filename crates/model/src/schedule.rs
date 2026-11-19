@@ -210,6 +210,10 @@ const OPERATION: Own = (msg!("Operation"), Kind::Text, From::Operation);
 const NAME: Own = ("Name", Kind::Text, From::Key("name"));
 const HOST: Own = ("Wall", Kind::Number, From::Ref("host"));
 const COUNT: Own = (msg!("Count"), Kind::Number, From::Count);
+/// The wall a curtain panel or a mullion is part of, by its id: Revit's Host Id.
+const HOST_ID: Own = ("Host", Kind::Number, From::Ref("host"));
+/// What a curtain panel or a mullion is made of: its type's material.
+const MATERIAL: Own = (msg!("Material"), Kind::Text, From::Material);
 const PHASE_CREATED: Own = ("Phase Created", Kind::Text, From::Param);
 const PHASE_DEMOLISHED: Own = ("Phase Demolished", Kind::Text, From::Param);
 const DESIGN_OPTION: Own = ("Design Option", Kind::Text, From::Param);
@@ -248,7 +252,7 @@ fn identity(cat: &str) -> &'static [Own] {
     let typed = cat == MULTI
         || matches!(
             cat,
-            "wall" | "floor" | "roof" | "ceiling" | "door" | "window" | "column" | "structuralcolumn" | "footing" | "railing" | "component"
+            "wall" | "floor" | "roof" | "ceiling" | "door" | "window" | "column" | "structuralcolumn" | "footing" | "railing" | "component" | "curtainpanel" | "mullion"
         )
         || crate::model::RUN_CATEGORIES.contains(&cat);
     if typed { IDENTITY } else { &[] }
@@ -564,6 +568,19 @@ const OWN: &[(&str, usize, &[Own])] = &[
         "railing",
         5,
         &[ID, TYPE, LEVEL, ("Length", Kind::Length, From::PathLength), HEIGHT, COUNT, PHASE_CREATED, PHASE_DEMOLISHED, DESIGN_OPTION],
+    ),
+    // A curtain wall's parts, Revit's Curtain Panels and Curtain Wall Mullions: each by its type, on its wall (`Host`, the
+    // wall's id), with what it measures (`quantities::panel`, `quantities::mullion`) and what it is made of; made and taken
+    // down with its wall unless it says otherwise. A mullion's Thickness is across its wall, its Width along it.
+    (
+        "curtainpanel",
+        7,
+        &[ID, TYPE, LEVEL, HOST_ID, WIDTH, HEIGHT, AREA, THICKNESS, MATERIAL, VOLUME, COUNT, PHASE_CREATED, PHASE_DEMOLISHED, DESIGN_OPTION],
+    ),
+    (
+        "mullion",
+        7,
+        &[ID, TYPE, LEVEL, HOST_ID, LENGTH, THICKNESS, WIDTH, MATERIAL, VOLUME, COUNT, PHASE_CREATED, PHASE_DEMOLISHED, DESIGN_OPTION],
     ),
     (
         "mass",
@@ -1121,7 +1138,7 @@ impl Row<'_> {
                     .map_or(Value::Null, |op| Value::String(m.language.word(op.label()).to_string())),
                 // Its parameter of that name, or its wall's for a door or window with none; a phase it holds none of
                 // is the project's first.
-                From::Param => match phasing::value(m, self.e, name) {
+                From::Param => match phasing::value(m, self.e, name).or_else(|| of_host(m, self.e, name)) {
                     Some(v) if !v.is_empty() => Value::String(v.to_string()),
                     _ if name == phasing::CREATED => m.phases.first().map_or(Value::Null, |p| Value::String(p.clone())),
                     _ => Value::Null,
@@ -1192,7 +1209,14 @@ impl Row<'_> {
             _ => None,
         };
         let named = |l: &&crate::model::Layer| !l.material.trim().is_empty();
+        // A curtain panel's and a mullion's is its type's own.
+        let part = match e {
+            Element::CurtainPanel(_) => m.types.curtain_panel.get(ty).map(|t| t.material.clone()),
+            Element::Mullion(_) => m.types.mullion.get(ty).map(|t| t.material.clone()),
+            _ => None,
+        };
         let name = match layers {
+            _ if part.is_some() => part,
             Some(ls) => ls
                 .iter()
                 .filter(named)
@@ -1212,6 +1236,16 @@ impl Row<'_> {
         };
         name.filter(|n| !n.trim().is_empty()).map_or(Value::Null, Value::String)
     }
+}
+
+/// What curtain panel or mullion `e` holds none of under `key` (a phase, a design option): its wall's, as a door's is.
+fn of_host<'a>(m: &'a Model, e: &Element, key: &str) -> Option<&'a str> {
+    let host = match e {
+        Element::CurtainPanel(p) => p.host,
+        Element::Mullion(x) => x.host,
+        _ => return None,
+    };
+    m.wall(host)?.params.get(key)?.as_str()
 }
 
 /// `x` to the millionth, so sums and formulas come out as written.

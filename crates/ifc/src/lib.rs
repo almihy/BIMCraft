@@ -5,7 +5,7 @@
 // The crates under it, by the paths its modules have always named them by (`crate::model`, `crate::geom`).
 pub use bimcraft_geom::{geom, skeleton, step, triangulation};
 pub use bimcraft_model::{
-    family, graphics, ids, ifc_classes, library, massing, masterplan, model, phasing, quantities, rebar, rooms, runs, schedule, stairs,
+    curtain, family, graphics, ids, ifc_classes, library, massing, masterplan, model, phasing, quantities, rebar, rooms, runs, schedule, stairs,
     walls,
 };
 
