@@ -857,8 +857,8 @@ fn rooms(labels: &[Label]) -> Vec<Value> {
 /// `build` (JSON params: k?): see the module.
 pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
     let p: Value = if params.trim().is_empty() { json!({}) } else { serde_json::from_str(params).map_err(|e| format!("the parameters are not JSON: {e}"))? };
-    if let Some(key) = p.as_object().and_then(|m| m.keys().find(|key| !["k", "drawn"].contains(&key.as_str()))) {
-        return Err(format!("unknown parameter `{key}`; build takes: k, drawn"));
+    if let Some(key) = p.as_object().and_then(|m| m.keys().find(|key| !["k", "drawn", "single"].contains(&key.as_str()))) {
+        return Err(format!("unknown parameter `{key}`; build takes: k, drawn, single"));
     }
     let k = match p.get("k") {
         None | Some(Value::Null) => 1.0,
@@ -906,12 +906,27 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
     let (mut door_taken, mut window_taken) = (vec![false; doors.len()], vec![false; windows.len()]);
     let mut found = walls(&wall_segs, &doors, &tips, &windows, &columns, &mut door_taken, &mut window_taken);
     let framed = unframed(&mut found.walls);
+    // A plan whose walls are drawn as one line each: with `single` (a thickness, mm), every wall line left without a
+    // second face is a wall that thick, centred on it.
+    let single = match p.get("single") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(v.as_f64().filter(|x| x.is_finite() && *x >= 20.0 && *x <= 2000.0).ok_or_else(|| format!("`single` is a wall's thickness in mm, 20 to 2000, not {v}"))?),
+    };
+    if let Some(t) = single {
+        for s in found.lone.drain(..) {
+            if s.b.sub(s.a).len() >= 500.0 {
+                found.walls.push(Wall { a: s.a, b: s.b, g: t, openings: Vec::new() });
+            }
+        }
+    }
     let (wall_curves, arcs_used) = curved(&wall_arcs, WALL_MIN, WALL_MAX);
 
     // A door no gap holds goes to a wall it stands along, or one that ends at its jamb (a door in a corner, between
     // a wall's end and the wall across), which is then run on past it. One known by its swing goes only to a wall
     // along its opening, on its line (either reading of it); one with no swing only to a wall it stands in.
     let mut doors_left: Vec<Value> = Vec::new();
+    // Doors no wall holds yet: a glass run may (below).
+    let mut pending: Vec<usize> = Vec::new();
     let host = |walls: &[Wall], n: usize| -> Option<(f64, usize, f64, f64)> {
         let g = doors.get(n)?;
         let c = g.centre()?;
@@ -935,7 +950,7 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
                     let d = s.b.sub(s.a);
                     (d.0 * u.0 + d.1 * u.1).abs() / d.len().max(1.0)
                 });
-                if along < 0.97 || off > w.g / 2.0 + 60.0 {
+                if along < 0.97 || off > w.g / 2.0 + 120.0 {
                     continue;
                 }
             } else if off > w.g / 2.0 + 100.0 {
@@ -981,11 +996,7 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
                 let mid = (t0 + t1) / 2.0;
                 w.openings.push((P(a.0 + u.0 * mid, a.1 + u.1 * mid), t1 - t0, true, vec![which]));
             }
-            None => {
-                if let (Some(c), Some((lo, hi))) = (doors[n].centre(), doors[n].bounds()) {
-                    doors_left.push(json!({"at": pt(c), "size": mm((hi.0 - lo.0).max(hi.1 - lo.1))}));
-                }
-            }
+            None => pending.push(n),
         }
     }
 
@@ -1102,6 +1113,40 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
         curtain.push(json!({"a": pt(arc_point(a, a.s)), "b": pt(arc_point(a, a.s + a.sweep)), "arc": (a.sweep * 100.0).round() / 100.0}));
     }
 
+    // A door standing in a glass run: the run parts for a short wall, as wide as the door, that holds it (a glass
+    // wall takes no ordinary door).
+    for n in pending {
+        let known = tips.get(n).is_some_and(Option::is_some);
+        let mut pick = host(&runs, n).map(|b| (n, b));
+        if known {
+            if let Some(other) = host(&runs, n ^ 1) {
+                if pick.as_ref().is_none_or(|(_, b)| other.0 < b.0) {
+                    pick = Some((n ^ 1, other));
+                }
+            }
+        }
+        match pick {
+            Some((which, (_, m, t0, t1))) if known => {
+                let r = runs.swap_remove(m);
+                let len = r.b.sub(r.a).len().max(1.0);
+                let u = P((r.b.0 - r.a.0) / len, (r.b.1 - r.a.1) / len);
+                let on = |t: f64| P(r.a.0 + u.0 * t, r.a.1 + u.1 * t);
+                if t0 >= 300.0 {
+                    runs.push(Wall { a: r.a, b: on(t0), g: 60.0, openings: Vec::new() });
+                }
+                if len - t1 >= 300.0 {
+                    runs.push(Wall { a: on(t1), b: r.b, g: 60.0, openings: Vec::new() });
+                }
+                let (t0, t1) = (t0.max(-2000.0), t1.min(len + 2000.0));
+                found.walls.push(Wall { a: on(t0), b: on(t1), g: 100.0, openings: vec![(on((t0 + t1) / 2.0), t1 - t0, true, vec![which])] });
+            }
+            _ => {
+                if let (Some(c), Some((lo, hi))) = (doors[n].centre(), doors[n].bounds()) {
+                    doors_left.push(json!({"at": pt(c), "size": mm((hi.0 - lo.0).max(hi.1 - lo.1))}));
+                }
+            }
+        }
+    }
     let solid = found.walls.len();
     found.walls.append(&mut runs);
     meet(&mut found.walls, &columns);
