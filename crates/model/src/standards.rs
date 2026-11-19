@@ -404,6 +404,9 @@ impl TechnicalStandard {
                 map.insert("roof", ObjectStyle { projection: Pen(5), cut: Pen(10) }); // 0.25mm / 0.50mm
                 map.insert("door", ObjectStyle { projection: Pen(3), cut: Pen(7) }); // 0.18mm / 0.35mm
                 map.insert("window", ObjectStyle { projection: Pen(3), cut: Pen(7) }); // 0.18mm / 0.35mm
+                // A curtain wall's mullions as a window's frame; its panels, 25 mm of glass, in the finest pen.
+                map.insert("curtainpanel", ObjectStyle { projection: Pen(3), cut: Pen(1) });
+                map.insert("mullion", ObjectStyle { projection: Pen(3), cut: Pen(7) });
                 map.insert("railing", ObjectStyle { projection: Pen(5), cut: Pen(7) }); // 0.25mm / 0.35mm
                 map.insert("stair", ObjectStyle { projection: Pen(5), cut: Pen(10) }); // 0.25mm / 0.50mm
                 map.insert("beam", ObjectStyle { projection: Pen(5), cut: Pen(12) }); // 0.25mm / 0.70mm
@@ -419,6 +422,9 @@ impl TechnicalStandard {
                 map.insert("roof", ObjectStyle { projection: Pen(4), cut: Pen(10) });
                 map.insert("door", ObjectStyle { projection: Pen(2), cut: Pen(6) });
                 map.insert("window", ObjectStyle { projection: Pen(2), cut: Pen(6) });
+                // A curtain wall's mullions as a window's frame; its panels, 25 mm of glass, in the finest pen.
+                map.insert("curtainpanel", ObjectStyle { projection: Pen(2), cut: Pen(1) });
+                map.insert("mullion", ObjectStyle { projection: Pen(2), cut: Pen(6) });
                 map.insert("railing", ObjectStyle { projection: Pen(4), cut: Pen(7) });
                 map.insert("stair", ObjectStyle { projection: Pen(4), cut: Pen(9) });
                 map.insert("beam", ObjectStyle { projection: Pen(4), cut: Pen(11) });
@@ -434,6 +440,9 @@ impl TechnicalStandard {
                 map.insert("roof", ObjectStyle { projection: Pen(4), cut: Pen(10) });
                 map.insert("door", ObjectStyle { projection: Pen(4), cut: Pen(6) });
                 map.insert("window", ObjectStyle { projection: Pen(4), cut: Pen(6) });
+                // A curtain wall's mullions as a window's frame; its panels, 25 mm of glass, in the finest pen.
+                map.insert("curtainpanel", ObjectStyle { projection: Pen(4), cut: Pen(1) });
+                map.insert("mullion", ObjectStyle { projection: Pen(4), cut: Pen(6) });
                 map.insert("railing", ObjectStyle { projection: Pen(6), cut: Pen(10) });
                 map.insert("stair", ObjectStyle { projection: Pen(4), cut: Pen(10) });
                 map.insert("beam", ObjectStyle { projection: Pen(4), cut: Pen(10) });

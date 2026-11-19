@@ -28,11 +28,15 @@ pub struct ObjectStyle {
 
 /// What a project's categories start with, ours: what's cut, [`Pen::CUT`], and what's seen, [`Pen::PROJECTION`]; a door's
 /// and a window's cut, which is their leaf and frame, [`Pen::MEDIUM`], as is a railing seen; a mass, outlined where it's cut
-/// as where it's seen, [`Pen::PROJECTION`] both.
+/// as where it's seen, [`Pen::PROJECTION`] both. A curtain wall's mullions are cut as a window's frame is, and its panels
+/// in the finest pen ([`Pen::FINE`]: a panel is 25 mm of glass, two lines a quarter of a millimetre apart at 1 : 100, which
+/// a heavier pen closes up); its grid lines are thin both ways.
 pub fn default_of(category: &str) -> ObjectStyle {
     match category {
         "mass" => ObjectStyle { projection: Pen::PROJECTION, cut: Pen::PROJECTION },
-        "door" | "window" => ObjectStyle { projection: Pen::PROJECTION, cut: Pen::MEDIUM },
+        "curtaingrid" => ObjectStyle { projection: Pen::PROJECTION, cut: Pen::PROJECTION },
+        "curtainpanel" => ObjectStyle { projection: Pen::PROJECTION, cut: Pen::FINE },
+        "door" | "window" | "mullion" => ObjectStyle { projection: Pen::PROJECTION, cut: Pen::MEDIUM },
         "railing" => ObjectStyle { projection: Pen::MEDIUM, cut: Pen::CUT },
         _ => ObjectStyle { projection: Pen::PROJECTION, cut: Pen::CUT },
     }
