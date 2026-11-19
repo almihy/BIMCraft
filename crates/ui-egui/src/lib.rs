@@ -22,6 +22,7 @@ mod clipboard;
 mod clouds;
 mod context;
 pub mod control;
+mod curtain;
 mod dialog;
 mod dimgrips;
 mod dimtypes;
