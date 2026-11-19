@@ -12,7 +12,7 @@ use bimcraft_core::model::{
     Clearance, Column, Component, DEFAULT_HEIGHT, DimKind, Dimension, Element, Extrusion, Floor, Id, Landing, Line, MAX_COORD, Mass, Model,
     RISER, Ramp, Reference, Roof, Section, Spot, Stair, TOL, TREAD, Tag, Wall,
 };
-use bimcraft_core::render::{self, Drawing, Prim, Rgb, View};
+use bimcraft_core::render::{self, Drawing, Prim, Rgb, View, curtain_grid};
 use bimcraft_core::snap::{self, Found, Kind, Reach};
 use bimcraft_core::view3d::shape_snap_plan;
 use bimcraft_core::walls::{self, Axis};
@@ -2003,6 +2003,10 @@ impl BimApp {
                 d.pick_all(q, PICK).into_iter().find(|id| matches!(model.elements.get(id), Some(Element::DetailLine(_))))
             }
             Tool::Door | Tool::Window | Tool::PickHost(_) => d.pick(q, PICK).filter(|id| model.wall(*id).is_some()),
+            // A curtain wall, wherever on it the cursor is.
+            Tool::CurtainGrid | Tool::Mullion | Tool::GridSegments(_) => {
+                d.pick_all(q, PICK).into_iter().find(|id| curtain_grid::wall_of(&model, *id) == Some(*id))
+            }
             Tool::Demolish | Tool::Linework => d.pick(q, PICK),
             // Search all candidates: a non-alignable annotation must not hide a model edge.
             Tool::Align(Some(_)) if sketching => None,
@@ -2144,8 +2148,10 @@ impl BimApp {
             return;
         }
         // A click on a shape point's height label is the label's.
+        let mut curtain_click = None;
         if let Some(at) = self.clicked_at(&response).filter(|_| !dragged && !writing) {
             let q = (at.x - rect.min.x, at.y - rect.min.y);
+            curtain_click = Some(q);
             // What lay under the press, which the hand may have left by the time the button came up.
             let found = if Some(q) == local { hovered } else { under_at(q) };
             if self.snap_once == Some(crate::Once::Between(None)) {
@@ -2299,6 +2305,25 @@ impl BimApp {
         self.dimension_grips(ui, &model, &view, rect);
         self.image_grips(ui, &model, &view, rect);
         self.pin_overlay(ui, &model, &view, rect);
+        // The curtain tools: a plan shows a curtain wall from above, so a place on it is as far along it as the cursor,
+        // half way up.
+        let place = |q: (f32, f32)| {
+            let wall = d.pick_all(q, PICK).into_iter().find_map(|id| curtain_grid::wall_of(&model, id))?;
+            let at = view.mm(q);
+            let height = bimcraft_core::curtain::grid(&model, wall)?.height;
+            curtain_grid::place_of(&model, wall, [at.0, at.1, 0.0]).map(|x| curtain_grid::Place { z: height / 2.0, ..x })
+        };
+        let screen = |q: [f64; 3]| pos(rect.min, view.px(P2(q[0], q[1])));
+        let over = crate::curtain::tools::Over {
+            rect,
+            response: &response,
+            screen: &screen,
+            hover: picking.map(|q| (pos(rect.min, q), place(q))),
+            click: curtain_click.map(|q| (pos(rect.min, q), place(q))),
+            plan: true,
+            outline: false,
+        };
+        self.curtain_over(ui, &p, &over);
         self.flip_overlay(ui, &model, &view, rect, self.canvas.drag.is_some());
         self.site_grip_overlay(ui, &model, &view, rect, level);
         self.camera_grip_overlay(ui, &model, &view, rect, level);
@@ -2593,6 +2618,8 @@ impl BimApp {
                 // What Tab highlighted is picked, or passed over: either way it is done.
                 self.flow.preview.clear();
             }
+            // The curtain tools' clicks are `curtain_over`'s, with the place on the wall.
+            Tool::CurtainGrid | Tool::Mullion | Tool::GridSegments(_) => {}
             Tool::Door | Tool::Window => {
                 let door = matches!(self.tool, Tool::Door);
                 let cat = if door { "door" } else { "window" };

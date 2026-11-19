@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use bimcraft_core::geom::P2;
 use bimcraft_core::model::{Id, Model};
-use bimcraft_core::render::{self, Rgb, View};
+use bimcraft_core::render::{self, Rgb, View, curtain_grid};
 use bimcraft_core::view3d::{Image, MAX_SIDE};
 use egui::{Color32, ColorImage, Context, Rect, TextureHandle, TextureOptions, Ui, pos2};
 use serde_json::json;
@@ -301,7 +301,38 @@ impl BimApp {
             d.pick((x, y), PICK / k)
                 .or_else(|| cut.image.as_ref().filter(|_| displaying)?.pick(f64::from(x) * source_ppp[0], f64::from(y) * source_ppp[1]))
         };
-        let hovered = local.filter(|_| matches!(self.tool, Tool::Modify | Tool::Demolish)).and_then(|q| pick(&self.cut, &d, q));
+        // The place on a curtain wall under a point of the view, and the hand-made grid line that runs there.
+        let section = model.section(id).cloned();
+        let look = bimcraft_core::graphics::Look::of(&model, id);
+        let on_wall = |q: (f32, f32)| curtain_grid::in_section(&model, section.as_ref()?, &look, view.mm(q), f64::from(PICK) / view.scale);
+        let line_at = |q: (f32, f32)| {
+            let (v, wall) = (section.as_ref()?, on_wall(q)?.wall);
+            let marks = curtain_grid::marks(&model, wall);
+            let project = |p: [f64; 3]| {
+                let (x, y) = view.px(curtain_grid::to_section(v, p));
+                (f64::from(x), f64::from(y))
+            };
+            curtain_grid::line_near(&marks, &project, (f64::from(q.0), f64::from(q.1)), f64::from(PICK))?.line
+        };
+        // What a click may mean, in Tab's order: what the view picks, then the grid line under the cursor (which a mullion
+        // on it, the picture's, comes before).
+        let chain_at = |cut: &Cut, d: &render::Drawing, q: (f32, f32)| {
+            let found: Vec<Id> = pick(cut, d, q).into_iter().collect();
+            crate::curtain::tools::chain(&model, &found, line_at(q), false)
+        };
+        let curtain_tool = matches!(self.tool, Tool::CurtainGrid | Tool::Mullion | Tool::GridSegments(_));
+        let under = match (&self.tool, local) {
+            (Tool::Modify, Some(q)) => chain_at(&self.cut, &d, q),
+            _ => Vec::new(),
+        };
+        let stepped = crate::curtain::tools::tab_through(&mut self.canvas, &mut self.tab_cycle, &mut self.flow, ui, under);
+        let hovered = match (&self.tool, local) {
+            (Tool::Modify, _) => stepped,
+            (Tool::Demolish, Some(q)) => pick(&self.cut, &d, q),
+            (_, Some(q)) if curtain_tool => on_wall(q).map(|x| x.wall),
+            _ => None,
+        };
+        self.canvas.hovered = hovered;
         let tints: Vec<(Id, Rgb)> = self
             .selection
             .iter()
@@ -397,9 +428,13 @@ impl BimApp {
         }
         match (clicked, &self.tool) {
             (Some(q), Tool::Modify) => {
-                let found = pick(&self.cut, &d, q);
+                // What Tab stepped to under the cursor, where the click is where the cursor was.
+                let chain = chain_at(&self.cut, &d, q);
+                let found = if chain == self.canvas.under { stepped } else { chain.first().copied() };
                 self.pick_up(found.into_iter().collect(), click_modifiers(ui));
             }
+            // The curtain tools' clicks are `curtain_over`'s.
+            (Some(_), Tool::CurtainGrid | Tool::Mullion | Tool::GridSegments(_)) => {}
             (Some(q), Tool::Demolish) => {
                 if let Some(id) = pick(&self.cut, &d, q) {
                     self.demolish(id);
@@ -417,6 +452,23 @@ impl BimApp {
                     Status { text: crate::lang::t("this tool works in plan views: open one from the Project Browser").into(), error: true }
             }
             (None, _) => {}
+        }
+        if let Some(v) = &section {
+            let screen = |q: [f64; 3]| {
+                let (x, y) = view.px(curtain_grid::to_section(v, q));
+                pos2(rect.min.x + x, rect.min.y + y)
+            };
+            let on = |q: (f32, f32)| (pos2(rect.min.x + q.0, rect.min.y + q.1), on_wall(q));
+            let over = crate::curtain::tools::Over {
+                rect,
+                response: &response,
+                screen: &screen,
+                hover: local.map(on),
+                click: clicked.map(on),
+                plan: false,
+                outline: false,
+            };
+            self.curtain_over(ui, &p, &over);
         }
         self.context_menu(&response);
         self.nav_bar(ui, rect, id);

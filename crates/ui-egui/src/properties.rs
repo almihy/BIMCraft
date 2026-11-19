@@ -1131,6 +1131,7 @@ impl BimApp {
             ([], Tool::Wall(_), _) => Subject::New("wall"),
             ([], Tool::Door, _) => Subject::New("door"),
             ([], Tool::Window, _) => Subject::New("window"),
+            ([], Tool::Mullion, _) => Subject::New("mullion"),
             ([], Tool::Room, _) => Subject::New("room"),
             ([], Tool::Level, _) => Subject::New("level"),
             ([], Tool::Grid(_), _) => Subject::New("grid"),
@@ -1600,7 +1601,9 @@ impl BimApp {
         } else {
             // The Wall tool always offers Revit's three curtain wall types: one the project hasn't got is made by its first wall.
             // (The Wall tool's alone: a dormer's walls are the project's.)
-            let unmade = subject == Subject::New("wall") && matches!(self.tool, Tool::Wall(_));
+            // The Mullion tool offers Revit's mullion types while the project has none: its first mullion makes them all.
+            let unmade = (subject == Subject::New("wall") && matches!(self.tool, Tool::Wall(_)))
+                || (subject == Subject::New("mullion") && model.types.mullion.is_empty());
             crate::curtain::names(model, category, unmade).into_iter().chain(pairs.iter().map(label)).collect()
         };
         // A panel or a mullion its curtain wall placed is pinned, of the type the wall's type gives it: no other until it is
