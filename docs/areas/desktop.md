@@ -743,3 +743,32 @@ Ctrl+click adds it, Shift+click takes it away (`click_set`, then `pick_up`), a p
 something else. Revit has no default Ctrl+A for the model, and neither has the app (in a text field it is the field's, as everywhere); its way is Select All Instances (the right-click menu's Select All Instances > Visible in View or In Entire Project: every element of the selected elements' types, shown in the view or not; SA is In Entire Project, as Revit's, and the shortcut list's "Select All Instances" has no default keys). The menu's Recent Commands submenu lists the last five commands used, each once, newest first (`Flow::recent`; `repeat_recent` starts one and makes it the newest), beside Repeat. Arrow keys call `move` with a step of about three pixels at the view's zoom (`nudge_step`), ten times
 that with Shift. The status bar names the element under the cursor from `Canvas::hovered`; the cursor shape is asked for in
 `plan_cursor` and kept in `Nav::icon` for tests.
+
+## Curtain walls
+
+Curtain walls in the window are `curtain.rs` (the model's are `bimcraft_core::curtain`), and read as Revit's. A type's family
+(`curtain::family`: Basic Wall, Curtain Wall, System Panel, Empty System Panel, Rectangular Mullion, Circular Mullion) is what
+the status bar says of the element under the cursor ("Walls : Curtain Wall : Storefront"), what the Type Selector shows over the
+type, the headings its list is under where a category has several families (`curtain::listed`), Type Properties' Family, and
+the Curtain Wall group under the Project Browser's Walls (curtain panel types and mullion types are listed there as any system
+family's). The Wall tool's list always ends with Curtain Wall, Exterior Glazing and Storefront (`curtain::names`): one the
+project hasn't got is made by the first wall drawn with it (the `wall` command), and Edit Type is off until then, since there is
+no type to edit. A selected wall's list holds the curtain wall types the project has.
+
+Properties of a wall of a curtain type are `rows("curtainwall")` (`rows_of` picks them while every wall selected is one): no
+Location Line; Vertical Grid and Horizontal Grid with Number (`Kind::GridNumber`: typed while the type's Layout that way is Fixed
+Number, greyed otherwise), Justification and Offset, each `modify {curtain: {vertical: {…}}}`; Length and Area. A panel shows
+Height, Width, Area and its host wall as a link, a mullion its Length and host, a hand-made grid line its Distance along the wall
+(or over its base) and host. A panel's or a mullion's Type Selector is greyed while it is pinned (what its wall placed, whose type
+the wall's type decides); freed by Unpin, a pick runs `modify {ids, type}`.
+
+Type Properties (`curtain::Form`, inside `TypeDialog`): a curtain wall type has Construction (Function, Curtain Panel, Join
+Condition), Vertical Grid and Horizontal Grid (Layout, Spacing, which is greyed for None and Fixed Number, Adjust for Mullion
+Size), Vertical Mullions and Horizontal Mullions (Interior Type, Border 1 Type, Border 2 Type) and Identity Data, never a basic
+wall's Structure or Edit Assembly; its Type list is the curtain wall types. A System Panel has Offset, Material and Thickness, an
+Empty System Panel nothing but its identity data; a Rectangular Mullion Offset, Thickness, Material, Width on side 2 and Width on
+side 1, a Circular Mullion Offset, Material and Radius. The panel and mullion drop-downs name each type with its family ("System
+Panel : Glazed") and offer the starter types the project hasn't made yet, which the `type` command makes when one is named. OK and
+Apply send what changed, Duplicate all of it, as the `type` command's `curtain`. Still to come: Automatically Embed, a mullion's
+Angle, Profile, Position and corner mullions, a grid's Angle, Mark and Comments on a wall, a panel and a mullion, and the Curtain
+Grid and Mullion tools (their icons are drawn: `Icon::CurtainGrid`, `Icon::Mullion`).

@@ -93,7 +93,12 @@ pub(crate) fn names(m: &Model, category: &str, unmade: bool) -> Vec<String> {
 /// `names` of `category` as the Type Selector lists them, as Revit's: under the family each is of, a heading for each
 /// family that has any ("Basic Wall", then "Curtain Wall"). One list with no heading while they are all of one family.
 pub(crate) fn listed(m: &Model, category: &str, names: &[String]) -> Vec<(Option<&'static str>, Vec<String>)> {
-    let of = |f: &str| names.iter().filter(|n| family(m, category, n) == Some(f)).cloned().collect::<Vec<_>>();
+    // By name within a family: the starter types the project hasn't made yet among its own.
+    let of = |f: &str| {
+        let mut of: Vec<String> = names.iter().filter(|n| family(m, category, n) == Some(f)).cloned().collect();
+        of.sort();
+        of
+    };
     let groups: Vec<(Option<&'static str>, Vec<String>)> =
         families(category).iter().map(|f| (Some(*f), of(f))).filter(|(_, names)| !names.is_empty()).collect();
     if groups.len() < 2 { vec![(None, names.to_vec())] } else { groups }

@@ -1636,7 +1636,9 @@ impl BimApp {
             None => (family, current.clone()),
         };
         let first = if below.is_some() { rect.top() + 16.0 } else { rect.center().y };
-        p.text(egui::pos2(x, first), Align2::LEFT_CENTER, family, FontId::proportional(13.0), pal().text);
+        // Greyed while its curtain wall's type decides it.
+        let ink = if placed { pal().muted } else { pal().text };
+        p.text(egui::pos2(x, first), Align2::LEFT_CENTER, family, FontId::proportional(13.0), ink);
         if let Some(t) = &below {
             p.text(egui::pos2(x, rect.top() + 34.0), Align2::LEFT_CENTER, t, FontId::proportional(12.5), pal().muted);
         }
