@@ -642,7 +642,7 @@ impl Mesh {
             let color = packed(t);
             let face = unit(cross(sub(t.p[1], t.p[0]), sub(t.p[2], t.p[0])));
             let smooth = scene.smooth.get(i).and_then(Option::as_deref);
-            let plane = scene.planes.get(i).map_or(i, |p| *p) as u32 + 1;
+            let plane = scene.edge_plane(i).unwrap_or(i) as u32 + 1;
             let tex = tex_of(t);
             for (k, p) in t.p.iter().enumerate() {
                 let normal = smooth.map_or(face, |n| unit(n[k])).map(|v| v as f32);
@@ -697,7 +697,7 @@ impl Mesh {
                 let planes = u32::try_from(mesh.instance_planes.len()).map_err(|_| too_many())?;
                 mesh.instance_planes.try_reserve(local.len()).map_err(room)?;
                 for i in order.iter().map(|k| first + k) {
-                    mesh.instance_planes.push(scene.planes.get(i).map_or(i, |p| *p) as u32 + 1);
+                    mesh.instance_planes.push(scene.edge_plane(i).unwrap_or(i) as u32 + 1);
                 }
                 let at = sub(place.at, origin).map(|v| v as f32);
                 let axes = place.axes.map(|v| v.map(|x| x as f32));

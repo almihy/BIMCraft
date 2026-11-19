@@ -74,6 +74,9 @@ pub struct Scene {
     /// The masses, which a section's picture leaves out: it outlines where its line cuts them.
     #[doc(hidden)]
     pub masses: BTreeSet<Id>,
+    /// The curtain panels: two of them in one plane show the joint between them ([`Scene::edge_plane`]).
+    #[doc(hidden)]
+    pub panels: BTreeSet<Id>,
     /// Each level's plane: its name, and the corners of its extent at its elevation.
     #[doc(hidden)]
     pub levels: Vec<(Id, String, [P3; 4])>,
@@ -297,6 +300,7 @@ impl Scene {
             faces: Arc::default(),
             skins: Vec::new(),
             masses: BTreeSet::new(),
+            panels: BTreeSet::new(),
             levels: Vec::new(),
             scans: Vec::new(),
             edges: OnceLock::new(),
@@ -361,6 +365,7 @@ impl Scene {
             faces: Arc::new(faces),
             skins,
             masses,
+            panels: panels_of(m),
             levels,
             scans,
             edges: OnceLock::new(),
@@ -522,7 +527,7 @@ impl Scene {
         if cancelled() {
             return None;
         }
-        Some(Scene { planes, faces: Arc::new(faces), scans: scans_of(m), ..Scene::bare(tris) })
+        Some(Scene { planes, faces: Arc::new(faces), scans: scans_of(m), panels: panels_of(m), ..Scene::bare(tris) })
     }
 
     /// A scene of `tris` alone: no planes, faces, textures, smooth normals, levels or scans.
@@ -534,6 +539,7 @@ impl Scene {
             faces: Arc::new(Vec::new()),
             skins: Vec::new(),
             masses: BTreeSet::new(),
+            panels: BTreeSet::new(),
             levels: Vec::new(),
             scans: Vec::new(),
             edges: OnceLock::new(),
@@ -556,6 +562,11 @@ fn skins_for(m: &Model, skins: &mut [Option<Sampler>], tris: &[Tri]) {
             *slot = x.texture.as_ref().and_then(|t| Sampler::new(t, x.color, &m.images));
         }
     }
+}
+
+/// The curtain panels of the model: what [`Scene::edge_plane`] tells apart in one plane.
+pub(crate) fn panels_of(m: &Model) -> BTreeSet<Id> {
+    m.elements.iter().filter(|(_, e)| matches!(e, Element::CurtainPanel(_))).map(|(id, _)| *id).collect()
 }
 
 /// What a scene takes of the whole model, not of each element's triangles: the masses, each level's plane, and the scans. A
@@ -1224,6 +1235,21 @@ impl Scene {
         }
     }
 
+    /// The plane triangle `i` lies in, as the edges drawn where the plane changes read it: its plane's number, and for a
+    /// curtain panel's triangle a number of that plane and that panel, so two panels side by side in one plane (joined with
+    /// no mullion between them) show the joint between them, as Revit draws each panel's edges.
+    #[doc(hidden)]
+    pub fn edge_plane(&self, i: usize) -> Option<usize> {
+        let plane = self.planes.get(i).copied()?;
+        match self.tris.get(i) {
+            Some(t) if !self.panels.is_empty() && self.panels.contains(&t.owner) => {
+                let mixed = (plane as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ t.owner.wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+                Some(((mixed >> 33) as usize) | PANEL_PLANE)
+            }
+            _ => Some(plane),
+        }
+    }
+
     /// The edges of the model's surfaces: where two meet at an angle (not in one plane, nor one curve) and where one ends,
     /// each as the triangle it is an edge of and its ends, in the order of their triangles.
     #[doc(hidden)]
@@ -1459,7 +1485,7 @@ impl Scene {
         let caps: Vec<bool> = self.tris.iter().map(|t| !see_through(t) && capped(cam, cut, None, t)).collect();
         let plane_of = |t: usize| match (caps.get(t), self.tris.get(t)) {
             (Some(true), Some(tri)) => Some(CAP_PLANE | tri.owner as usize),
-            _ => self.planes.get(t).copied(),
+            _ => self.edge_plane(t),
         };
         let outlined = (display.silhouette > 0).then(|| {
             let plane = |k: usize| hit.get(k).and_then(|t| plane_of(*t as usize));
@@ -1791,6 +1817,9 @@ pub const CAP_BEHIND: f64 = 0.01;
 /// The plane a cut face's pixels hold, for its element `owner`: one for the whole cut, so no edge is drawn across it, past any
 /// surface's own.
 pub const CAP_PLANE: usize = 1 << (usize::BITS - 1);
+/// The bit a curtain panel's plane holds ([`Scene::edge_plane`]): past any plane's number, and within what a card's vertex
+/// holds.
+const PANEL_PLANE: usize = 1 << 30;
 
 /// A 3D view's section box as `cam` sees it: what of a pixel's depth, or of the model, it keeps. In a parallel view, the
 /// model point a pixel shows at a depth is the same sum for every pixel; in perspective, that sum gives the point on the plane
