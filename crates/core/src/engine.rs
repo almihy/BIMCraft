@@ -1079,6 +1079,10 @@ impl Session {
         let option = self.option.clone().filter(|o| crate::phasing::option_exists(m, o));
         let is_first = phase.as_ref() == m.phases.first();
         for id in made {
+            // A curtain wall's panels and mullions are made in what their wall is, and hold none of their own.
+            if m.elements.get(*id).is_some_and(|e| crate::curtain::host_of(e).is_some()) {
+                continue;
+            }
             let Some(e) = m.elements.get_mut(*id) else { continue };
             let follows = matches!(e, Element::Door(_) | Element::Window(_));
             let Some(params) = e.params_mut() else { continue };

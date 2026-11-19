@@ -29,7 +29,7 @@ use crate::walls::Axis;
 /// The most lines a grid has one way: past it a spacing is too small for its wall, and the rest are left out.
 pub const MAX_LINES: usize = 500;
 /// Two lines nearer than this are one, mm.
-const NEAR: f64 = 1.0;
+pub const NEAR: f64 = 1.0;
 
 /// How a curtain type spaces its grid lines one way: Revit's Layout.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -506,7 +506,9 @@ fn rule_lines(rule: &GridRule, set: &GridSet, extent: f64) -> Vec<(i64, f64)> {
             if !origin.is_finite() {
                 return Vec::new();
             }
-            let first = ((0.0 - origin) * way / spacing).floor() as i64 - 1;
+            // The first line that may lie in the wall, counted along the way the lines run from the origin.
+            let from = if way > 0.0 { origin } else { extent - origin };
+            let first = ((0.0 - from) / spacing).floor() as i64 - 1;
             let mut out = Vec::new();
             let mut k = first.max(-(MAX_LINES as i64) * 4);
             while out.len() < MAX_LINES {
@@ -1126,5 +1128,329 @@ pub fn refresh_depths(m: &mut Model) {
         if let Some(t) = m.types.wall.get_mut(&n) {
             t.thickness = d;
         }
+    }
+}
+
+// ====================================================================== worked on by hand
+/// A segment of a grid line, between two lines that cross it: which way its line runs (`vertical`: it stands), its line
+/// among its way's lines and the crossing line it starts at (indices), its key ([`segment_key`]), where its line is and
+/// where it runs from and to (mm along the wall or over its base), and which border its line is (0: none).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Segment {
+    pub vertical: bool,
+    pub line: usize,
+    pub from: usize,
+    pub key: String,
+    pub at: f64,
+    pub span: [f64; 2],
+    pub border: u8,
+}
+
+impl Segment {
+    /// The key of the mullion on it.
+    pub fn mullion_key(&self) -> String {
+        format!("m:{}", self.key)
+    }
+
+    /// Its middle: mm along the wall from its start, and mm over the wall's base.
+    pub fn middle(&self) -> [f64; 2] {
+        let mid = (self.span[0] + self.span[1]) / 2.0;
+        if self.vertical { [self.at, mid] } else { [mid, self.at] }
+    }
+}
+
+impl Grid {
+    /// The segment of line `line` (a standing one when `vertical`) that starts at crossing line `from`.
+    pub fn segment(&self, vertical: bool, line: usize, from: usize) -> Option<Segment> {
+        let (lines, across) = if vertical { (&self.u, &self.v) } else { (&self.v, &self.u) };
+        let (l, a, b) = (lines.get(line)?, across.get(from)?, across.get(from + 1)?);
+        Some(Segment { vertical, line, from, key: segment_key(&l.key, &a.key), at: l.at, span: [a.at, b.at], border: l.border })
+    }
+
+    /// Every segment of every line, borders too: the standing lines', then the lying ones'.
+    pub fn segments(&self) -> Vec<Segment> {
+        let mut out = Vec::new();
+        for vertical in [true, false] {
+            let (lines, across) = if vertical { (&self.u, &self.v) } else { (&self.v, &self.u) };
+            for i in 0..lines.len() {
+                for j in 0..across.len().saturating_sub(1) {
+                    out.extend(self.segment(vertical, i, j));
+                }
+            }
+        }
+        out
+    }
+
+    /// The segment nearest the place `s` mm along the wall and `z` mm over its base: of the line nearest it (a standing
+    /// one or a lying one, whichever is nearer; `way` says which when given), the segment the place is beside.
+    pub fn segment_near(&self, s: f64, z: f64, way: Option<bool>) -> Option<Segment> {
+        if !(s.is_finite() && z.is_finite()) {
+            return None;
+        }
+        let (i, j) = self.nearest(s, z);
+        let (du, dv) = ((self.u.get(i)?.at - s).abs(), (self.v.get(j)?.at - z).abs());
+        let (ci, cj) = self.cell(s, z);
+        if way.unwrap_or(du <= dv) { self.segment(true, i, cj) } else { self.segment(false, j, ci) }
+    }
+
+    /// The segment at the place: as [`Grid::segment_near`], when its line is within a millimetre of it.
+    pub fn segment_at(&self, vertical: bool, s: f64, z: f64) -> Option<Segment> {
+        self.segment_near(s, z, Some(vertical)).filter(|g| (g.at - if vertical { s } else { z }).abs() <= NEAR)
+    }
+
+    /// With the segments `merged` names removed, the joined cells that are no panel: together not a rectangle, or with a
+    /// segment still standing inside them. Each as the box round it, from its lower left cell to its upper right one
+    /// (column, row). Empty when every panel is sound.
+    pub fn trouble(&self, merged: &BTreeSet<String>) -> Vec<((usize, usize), (usize, usize))> {
+        let (nu, nv) = (self.u.len().saturating_sub(1), self.v.len().saturating_sub(1));
+        if nu == 0 || nv == 0 || merged.is_empty() {
+            return Vec::new();
+        }
+        let at = |i: usize, j: usize| j * nu + i;
+        let mut group: Vec<usize> = (0..nu * nv).collect();
+        fn find(g: &[usize], mut x: usize) -> usize {
+            while let Some(&p) = g.get(x) {
+                if p == x {
+                    break;
+                }
+                x = p;
+            }
+            x
+        }
+        let join = |group: &mut Vec<usize>, a: usize, b: usize| {
+            let (a, b) = (find(group, a), find(group, b));
+            if let Some(slot) = group.get_mut(a.max(b)) {
+                *slot = a.min(b);
+            }
+        };
+        for j in 0..nv {
+            for i in 0..nu {
+                if i + 1 < nu && !self.has_segment(merged, true, i + 1, j) {
+                    join(&mut group, at(i, j), at(i + 1, j));
+                }
+                if j + 1 < nv && !self.has_segment(merged, false, j + 1, i) {
+                    join(&mut group, at(i, j), at(i, j + 1));
+                }
+            }
+        }
+        // Each group's box, how many cells it has, and whether a segment stands inside it.
+        type Joined = (Cell, Cell, usize, bool);
+        let mut boxes: BTreeMap<usize, Joined> = BTreeMap::new();
+        for j in 0..nv {
+            for i in 0..nu {
+                let root = find(&group, at(i, j));
+                // A segment still there between two cells of one panel stands inside it.
+                let inside = (i + 1 < nu && self.has_segment(merged, true, i + 1, j) && find(&group, at(i + 1, j)) == root)
+                    || (j + 1 < nv && self.has_segment(merged, false, j + 1, i) && find(&group, at(i, j + 1)) == root);
+                let b = boxes.entry(root).or_insert(((i, j), (i, j), 0, false));
+                b.0 = (b.0.0.min(i), b.0.1.min(j));
+                b.1 = (b.1.0.max(i), b.1.1.max(j));
+                b.2 += 1;
+                b.3 |= inside;
+            }
+        }
+        boxes
+            .into_values()
+            .filter(|(lo, hi, count, inside)| *inside || (hi.0 - lo.0 + 1) * (hi.1 - lo.1 + 1) != *count)
+            .map(|(lo, hi, ..)| (lo, hi))
+            .collect()
+    }
+
+    /// The segments between the cells of the box from cell `lo` to cell `hi` (column, row): none of a border.
+    pub fn within(&self, lo: (usize, usize), hi: (usize, usize)) -> Vec<Segment> {
+        let mut out = Vec::new();
+        for i in lo.0 + 1..=hi.0 {
+            for j in lo.1..=hi.1 {
+                out.extend(self.segment(true, i, j));
+            }
+        }
+        for j in lo.1 + 1..=hi.1 {
+            for i in lo.0..=hi.0 {
+                out.extend(self.segment(false, j, i));
+            }
+        }
+        out.retain(|g| g.border == 0);
+        out
+    }
+}
+
+/// Curtain wall `id` laid out now: its panels and mullions as its grid, its type and what a person changed give them. The
+/// engine does it after every command ([`keep`]); a command that answers with them, or changed what they are named by,
+/// does it itself.
+pub fn lay(m: &mut Model, id: Id) {
+    let mut up = Update::default();
+    relay(m, id, &mut up);
+    apply(m, up);
+}
+
+/// What a person did to a curtain wall's grid, held by where it is and not by its lines' names: the segments removed,
+/// the mullions deleted, and the panels and mullions freed or put on by hand. A wall copied, mirrored, flipped or split
+/// names its lines anew (a copy's hand-made lines are other elements, a wall turned round counts from its other end), so
+/// what was done is taken off the wall as it was ([`hand`]) and put on the wall as it is ([`hand_to`]).
+#[derive(Clone, Debug, Default)]
+pub struct Hand {
+    /// The wall it was taken off: put back on that wall, a freed panel or mullion keeps its id.
+    wall: Option<Guid>,
+    merged: Vec<(bool, [f64; 2])>,
+    no_mullion: Vec<(bool, [f64; 2])>,
+    panels: Vec<([f64; 2], Id, Panel)>,
+    mullions: Vec<([f64; 2], Id, Mullion)>,
+}
+
+impl Hand {
+    pub fn is_empty(&self) -> bool {
+        self.merged.is_empty() && self.no_mullion.is_empty() && self.panels.is_empty() && self.mullions.is_empty()
+    }
+}
+
+/// What a person did to curtain wall `id`'s grid, by place. Empty for a wall that is not a curtain wall.
+pub fn hand(m: &Model, id: Id) -> Hand {
+    let mut out = Hand::default();
+    let (Some(g), Some(w), Some(host)) = (grid(m, id), m.wall(id), m.elements.guid(id)) else { return out };
+    out.wall = Some(host);
+    if !(w.curtain.merged.is_empty() && w.curtain.no_mullion.is_empty()) {
+        for seg in g.segments() {
+            if seg.border == 0 && w.curtain.merged.contains(&seg.key) {
+                out.merged.push((seg.vertical, seg.middle()));
+            }
+            if w.curtain.no_mullion.contains(&seg.mullion_key()) {
+                out.no_mullion.push((seg.vertical, seg.middle()));
+            }
+        }
+    }
+    for c in m.hosted_by(host) {
+        match m.elements.get(c) {
+            Some(Element::CurtainPanel(p)) if p.free => {
+                out.panels.push(([(p.span[0] + p.span[1]) / 2.0, (p.span[2] + p.span[3]) / 2.0], c, p.clone()));
+            }
+            Some(Element::Mullion(x)) if x.free => {
+                let mid = (x.from + x.to) / 2.0;
+                out.mullions.push((if x.vertical { [x.at, mid] } else { [mid, x.at] }, c, x.clone()));
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// `hand` put on curtain wall `id` as it is now, each place `s` mm along the wall it was taken from now `along(s)` mm
+/// along this one: its removed segments, deleted mullions and freed panels and mullions named by this wall's lines, and
+/// the wall laid out. What has no place on this wall (a segment whose line is not here) is left out. Whatever the wall
+/// remembered and held freed before is replaced.
+pub fn hand_to(m: &mut Model, id: Id, hand: &Hand, along: &dyn Fn(f64) -> f64) {
+    let Some(host) = m.elements.guid(id) else { return };
+    let freed: Vec<Id> = m
+        .hosted_by(host)
+        .into_iter()
+        .filter(|c| m.elements.get(*c).is_some_and(|e| host_of(e).is_some() && !placed(e) && !matches!(e, Element::CurtainGrid(_))))
+        .collect();
+    for c in freed {
+        m.elements.remove(c);
+    }
+    let Some(g) = grid(m, id) else { return };
+    // A place off this wall (the other half of a wall split) names nothing here.
+    let on = |s: f64, z: f64| s >= -NEAR && s <= g.length + NEAR && z >= -NEAR && z <= g.height + NEAR;
+    let seg = |vertical: bool, at: &[f64; 2]| g.segment_at(vertical, along(at[0]), at[1]).filter(|_| on(along(at[0]), at[1]));
+    let merged: BTreeSet<String> = hand.merged.iter().filter_map(|(v, at)| seg(*v, at)).filter(|x| x.border == 0).map(|x| x.key).collect();
+    // Only what leaves every panel sound: a segment whose neighbours are not here would leave half a join.
+    let merged = if g.trouble(&merged).is_empty() { merged } else { BTreeSet::new() };
+    let no_mullion: BTreeSet<String> = hand.no_mullion.iter().filter_map(|(v, at)| seg(*v, at)).map(|x| x.mullion_key()).collect();
+    let mut put: Vec<(String, Id, Element)> = Vec::new();
+    let cells = g.panels(&merged);
+    for (at, was, p) in &hand.panels {
+        // (A type this project lacks, of a wall from another file: the wall's own type's instead.)
+        if !on(along(at[0]), at[1]) || !m.types.curtain_panel.contains_key(&p.type_name) {
+            continue;
+        }
+        let (i, j) = g.cell(along(at[0]), at[1]);
+        let Some((lo, _)) = cells.iter().find(|(lo, hi)| (lo.0..=hi.0).contains(&i) && (lo.1..=hi.1).contains(&j)) else { continue };
+        let (Some(u), Some(v)) = (g.u.get(lo.0), g.v.get(lo.1)) else { continue };
+        let key = segment_key(&u.key, &v.key);
+        put.push((key.clone(), *was, Element::CurtainPanel(Panel { host, key, free: true, ..p.clone() })));
+    }
+    for (at, was, x) in &hand.mullions {
+        if !m.types.mullion.contains_key(&x.type_name) {
+            continue;
+        }
+        let Some(s) = seg(x.vertical, at) else { continue };
+        let key = s.mullion_key();
+        put.push((key.clone(), *was, Element::Mullion(Mullion { host, key, free: true, ..x.clone() })));
+    }
+    if let Some(Element::Wall(w)) = m.elements.get_mut(id) {
+        (w.curtain.merged, w.curtain.no_mullion) = (merged, no_mullion);
+    }
+    for (key, was, e) in put {
+        let guid = child_guid(m.uid, host, &key);
+        // On the wall it was taken off, it is the element it was, at its id. The name may be another's now (a pinned
+        // panel's, on a wall turned round): this one takes its place, and the layout makes the other again.
+        let its_own = hand.wall == Some(host) && !m.elements.contains_key(was);
+        match (m.elements.id(guid), its_own) {
+            (Some(c), false) => {
+                m.elements.insert(c, e);
+            }
+            (there, _) => {
+                if let Some(c) = there {
+                    m.elements.remove(c);
+                }
+                let c = if its_own { was } else { m.fresh_id() };
+                let _ = m.elements.insert_as(c, guid, e);
+            }
+        }
+    }
+    lay(m, id);
+}
+
+/// A mullion of type `type_name` put by hand on the segment whose mullion key is `key` of the wall whose GUID is `host`,
+/// free of the wall's type: where it is is the layout's to fill in ([`lay`]). Its id, or none when one is there already.
+pub fn put_mullion(m: &mut Model, host: Guid, seg: &Segment, type_name: &str) -> Option<Id> {
+    let key = seg.mullion_key();
+    let guid = child_guid(m.uid, host, &key);
+    if m.elements.id(guid).is_some() {
+        return None;
+    }
+    let x = Mullion {
+        type_name: type_name.to_string(),
+        host,
+        key,
+        vertical: seg.vertical,
+        at: seg.at,
+        from: seg.span[0],
+        to: seg.span[1],
+        trim: [0.0, 0.0],
+        border: seg.border,
+        free: true,
+        params: BTreeMap::new(),
+    };
+    let id = m.fresh_id();
+    m.elements.insert_as(id, guid, Element::Mullion(x)).ok().map(|()| id)
+}
+
+/// Whether the wall's type gives the panel or mullion something to be: a panel always (the type's panel), a mullion when
+/// the type names a mullion type for the line it is on. One the type gives nothing is only ever there by hand.
+pub fn typed(m: &Model, e: &Element) -> bool {
+    match e {
+        Element::CurtainPanel(_) => true,
+        Element::Mullion(x) => host(m, x.host).and_then(|(_, w, _)| curtain_of(m, w)).is_some_and(|ct| {
+            let ms = if x.vertical { &ct.vertical_mullions } else { &ct.horizontal_mullions };
+            let name = match x.border {
+                1 => &ms.border1,
+                2 => &ms.border2,
+                _ => &ms.interior,
+            };
+            m.types.mullion.contains_key(name)
+        }),
+        _ => false,
+    }
+}
+
+/// A wall's own grid settings as they are once the wall runs the other way (flipped, or a mirror image), so its type's
+/// lines stay where they are in the model: counted from the Beginning they are counted from the End, and an Offset from
+/// the Center is to the other side.
+pub fn reverse(grid: &mut WallGrid) {
+    let set = &mut grid.vertical;
+    match set.justification {
+        Justification::Beginning => set.justification = Justification::End,
+        Justification::End => set.justification = Justification::Beginning,
+        Justification::Center => set.offset = -set.offset + 0.0,
     }
 }

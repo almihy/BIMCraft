@@ -46,6 +46,8 @@ mod curtain_sync_tests;
 #[cfg(test)]
 mod curtain_tests;
 #[cfg(test)]
+mod curtain_tools_tests;
+#[cfg(test)]
 mod dry_run_tests;
 #[cfg(test)]
 mod dxf_out_tests;
