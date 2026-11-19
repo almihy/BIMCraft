@@ -40,6 +40,8 @@ fn boxed(m: &mut Model) -> Id {
 
 fn door(host: Guid, offset: f64) -> Element {
     Element::Door(Opening {
+        panel: None,
+        cell: None,
         params: Default::default(),
         family: None,
         type_name: "Single 900 x 2100".into(),

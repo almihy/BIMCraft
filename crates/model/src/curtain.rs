@@ -20,7 +20,8 @@
 //!   `panel` is the key of the cell it fills. It is a person's element (its own GUID, a door in schedules and IFC); the
 //!   layout places no panel in its cell and writes where the cell is on it ([`door_fits`]), so it is as large as its cell
 //!   and goes where its cell goes. A door whose cell is gone goes to the cell that holds the place it was; with no such
-//!   cell, or in a wall that is no curtain wall any more, the layout deletes it.
+//!   cell, or in a wall that is no curtain wall any more, it is deleted ([`Update::doors`]: by the engine after the
+//!   command, as any door is deleted).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -942,11 +943,36 @@ pub fn door_in(m: &Model, host: Guid, key: &str) -> Option<Id> {
 pub struct Update {
     remove: Vec<Id>,
     put: Vec<(Option<Id>, Guid, Element)>,
+    /// The doors that have no cell any more: [`apply`] leaves them for whoever runs the layout to delete as a door is
+    /// deleted, with all that hangs on it (the engine, after a command; [`drop_doors`], with no engine).
+    doors: Vec<Id>,
 }
 
 impl Update {
     pub fn is_empty(&self) -> bool {
-        self.remove.is_empty() && self.put.is_empty()
+        self.remove.is_empty() && self.put.is_empty() && self.doors.is_empty()
+    }
+
+    /// The doors to delete: those whose wall is no curtain wall any more, or whose cell went with no other at its place.
+    pub fn doors(&self) -> Vec<Id> {
+        let mut ids = self.doors.clone();
+        ids.sort_unstable();
+        ids.dedup();
+        ids
+    }
+}
+
+/// `doors` taken out with their tags and pins, where no engine deletes them (a file being read).
+pub fn drop_doors(m: &mut Model, doors: &[Id]) {
+    let mut with: Vec<Id> = Vec::new();
+    for id in doors {
+        if let (Some(Element::Door(_)), Some(guid)) = (m.elements.get(*id), m.elements.guid(*id)) {
+            with.extend(m.lookup().referrers(&guid).filter(|t| matches!(m.elements.get(*t), Some(Element::Tag(t)) if t.host == guid)));
+            m.pinned.remove(&guid);
+        }
+    }
+    for id in doors.iter().copied().chain(with) {
+        m.elements.remove(id);
     }
 }
 
@@ -1009,7 +1035,7 @@ pub fn keep(m: &Model, before: &Model) -> Update {
             if level { all() } else { walls }
         }
     };
-    let mut up = Update { remove: orphans, put: Vec::new() };
+    let mut up = Update { remove: orphans, put: Vec::new(), doors: Vec::new() };
     up.remove.sort_unstable();
     up.remove.dedup();
     for id in walls {
@@ -1025,7 +1051,9 @@ pub fn keep_all(m: &mut Model) {
     for id in walls {
         relay(m, id, &mut up);
     }
+    let doors = up.doors();
     apply(m, up);
+    drop_doors(m, &doors);
 }
 
 /// Wall `id`'s panels and mullions as they are against as they should be: what differs, into `up`.
@@ -1036,13 +1064,13 @@ fn relay(m: &Model, id: Id, up: &mut Update) {
     if !is_curtain(m, w) {
         // A basic wall has none of these: a wall whose type was changed loses them, and the doors that filled its cells.
         up.remove.extend(mine.into_iter().filter(|c| m.elements.get(*c).is_some_and(|e| host_of(e).is_some())));
-        up.remove.extend(doors_of(m, host));
+        up.doors.extend(doors_of(m, host));
         return;
     }
     // Its doors: each in its cell, as large as it; one with no cell goes.
     let g = if doors_of(m, host).is_empty() { None } else { grid(m, id) };
     let (fits, gone) = door_fits(m, host, g.as_ref(), &w.curtain.merged);
-    up.remove.extend(gone);
+    up.doors.extend(gone);
     for fit in fits {
         let Some(Element::Door(o)) = m.elements.get(fit.id) else { continue };
         let [s0, s1, z0, _] = fit.cell;
@@ -1075,16 +1103,7 @@ fn relay(m: &Model, id: Id, up: &mut Update) {
 
 /// What [`keep`] worked out, made so.
 pub fn apply(m: &mut Model, up: Update) {
-    // A door the layout takes out (its wall is no curtain wall any more, or its cell went and no other holds its place)
-    // takes its tags and its pin with it, as a door deleted does.
-    let mut with: Vec<Id> = Vec::new();
-    for id in &up.remove {
-        if let (Some(Element::Door(_)), Some(guid)) = (m.elements.get(*id), m.elements.guid(*id)) {
-            with.extend(m.lookup().referrers(&guid).filter(|t| matches!(m.elements.get(*t), Some(Element::Tag(t)) if t.host == guid)));
-            m.pinned.remove(&guid);
-        }
-    }
-    for id in up.remove.into_iter().chain(with) {
+    for id in up.remove {
         m.elements.remove(id);
     }
     for (id, guid, e) in up.put {

@@ -13340,6 +13340,20 @@ fn edit_type(s: &mut Session, p: &Value) -> R {
 /// What Revit says when a wall is given a curtain wall type, and what it does about the doors and windows in it.
 const CURTAIN_INSERTS: &str = "Switching wall type to family curtain wall. A curtain wall hosts no doors or windows: those in it were                                deleted (`deleted`), as Revit does.";
 
+/// Doors that filled cells of curtain walls and have none now, deleted as `delete` deletes a door, pinned or not: what the
+/// engine does with those a command's layout left without a cell.
+pub(crate) fn drop_curtain_doors(s: &mut Session, ids: &[Id]) -> Result<(), String> {
+    let ids: Vec<Id> = ids.iter().copied().filter(|id| s.model.elements.contains_key(*id)).collect();
+    let pinned: Vec<Guid> = s.model.pinned_among(&ids).into_iter().map(|id| s.model.guid(id)).collect();
+    if !pinned.is_empty() {
+        let m = s.model_mut();
+        for g in pinned {
+            m.pinned.remove(&g);
+        }
+    }
+    if ids.is_empty() { Ok(()) } else { delete_elements(s, &ids).map(|_| ()) }
+}
+
 /// What is said when a curtain wall is given a basic type and had doors in its cells.
 const CURTAIN_DOORS: &str =
     "A basic wall has no curtain grid: the doors that filled cells of it were deleted (`deleted`). Place doors in the wall with `door`.";

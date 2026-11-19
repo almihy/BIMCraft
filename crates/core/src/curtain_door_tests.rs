@@ -412,3 +412,30 @@ fn door_of(m: &Model, id: Id) -> Opening {
         e => panic!("{id} is no door: {e:?}"),
     }
 }
+
+#[test]
+fn a_tagged_and_dimensioned_door_goes_cleanly_when_match_properties_makes_its_wall_basic() {
+    let mut s = Session::new();
+    let (w, d) = entrance(&mut s);
+    let basic = wall(&mut s, json!({"points": [[0, 5000], [6000, 5000]]}));
+    let side = wall(&mut s, json!({"points": [[-2000, 0], [-2000, 5000]]}));
+    let tag = run(&mut s, "tag", json!({"ids": [d]}))["ids"][0].as_u64().unwrap();
+    run(&mut s, "pin", json!({"ids": [d]}));
+    run(&mut s, "dimension", json!({"refs": [{"id": side}, {"id": d, "face": "centre"}], "at": [0, -1000]}));
+    run(&mut s, "match_properties", json!({"from": basic, "ids": [w]}));
+    assert!(!s.model.elements.contains_key(d) && !s.model.elements.contains_key(tag));
+    assert!(panels(&s, w).is_empty() && doors(&s).is_empty());
+    assert_eq!(s.model.check(), Ok(()));
+    // And comes back with its panelless cell when that is undone.
+    run(&mut s, "undo", json!({}));
+    assert_eq!((doors(&s), panels(&s, w).len()), (vec![d], 7));
+}
+
+#[test]
+fn an_ifc_file_with_the_door_reads_back_as_a_sound_model() {
+    let mut s = Session::new();
+    entrance(&mut s);
+    let text = crate::ifc::export(&s.model);
+    let back = crate::import::ifc(text.as_bytes(), "x").unwrap();
+    assert_eq!(back.model.check(), Ok(()));
+}

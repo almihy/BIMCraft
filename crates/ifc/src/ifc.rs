@@ -885,6 +885,7 @@ fn curtain_set(w: &mut Step, m: &Model, id: Id, wl: &crate::model::Wall, ent: u6
 /// A door or a window itself, placed at `at` (its jamb toward its wall's start, at its sill, x along the wall): a panel
 /// centred in the wall, a door's as thick as its leaf, a window's 50 mm; of a family, its forms as a component's are. With
 /// its type object, its quantities and what it is made of. `cw` is how wide the opening it stands in the middle of is.
+#[allow(clippy::too_many_arguments)]
 fn opening_product(
     w: &mut Step,
     m: &Model,
