@@ -55,6 +55,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
+The tests that draw on the graphics card (the desktop's `gpu::headless`) pass without drawing on a developer's computer, where
+a busy card stalls them for many minutes. CI runs them. After a change to the 3D view on the card (`crates/ui-egui/src/gpu.rs`,
+`gpu.wgsl`, `orbit.rs`), run them yourself: set `BIMCRAFT_GPU_TESTS=1` and `cargo test -p bimcraft-ui-egui`.
+
 ## Looking at the result
 
 After a change, look at what it makes, as the area says. How to do it for each kind of result is in
