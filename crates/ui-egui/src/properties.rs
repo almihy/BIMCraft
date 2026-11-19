@@ -2991,7 +2991,7 @@ impl BimApp {
                         (&mut s.quadrant, msg!("Quadrants"), "SQ", msg!("A circle's, an ellipse's or an arc's points along its axes: east, north, west and south")),
                         (&mut s.tangent, msg!("Tangents"), "ST", msg!("Where a line from the last point touches a circle or an arc")),
                         (&mut s.annotation, msg!("Annotation Anchors"), "", msg!("Where a note, dimension, tag, spot elevation, section or elevation mark, detail group or repeating detail is placed")),
-                        (&mut s.cloud, msg!("Snap to Point Clouds"), "", msg!("A scan's points where the plan's cut plane cuts it, to trace what was measured")),
+                        (&mut s.cloud, msg!("Snap to Point Clouds"), "PC", msg!("A scan's points where the plan's cut plane cuts it, to trace what was measured")),
                     ];
                     Grid::new("object-snaps").num_columns(2).spacing(vec2(40.0, 6.0)).show(ui, |ui| {
                         for (i, (on, name, keys, tip)) in kinds.iter_mut().enumerate() {

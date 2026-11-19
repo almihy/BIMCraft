@@ -193,10 +193,6 @@ impl Strips<'_> {
         self.ranks.len()
     }
 
-    fn straight(&self) -> bool {
-        self.axis.arc().is_none()
-    }
-
     /// Its boundary `k`.
     fn edge(&self, k: usize) -> Edge {
         let off = self.offs.get(k).copied().unwrap_or(0.0);
@@ -220,6 +216,35 @@ impl Strips<'_> {
         self.offs.first().zip(self.offs.last()).map_or(0.0, |(a, b)| (a - b).abs())
     }
 
+    /// The half of it to the left of its location line (`left`), or to its right: its layers there, the one the line runs
+    /// through cut along it. With it, the material across the line from that half, and which of the wall's layers the
+    /// half's first is.
+    fn half(&self, left: bool) -> (Strips<'_>, Option<&str>, usize) {
+        let layers = self.layers();
+        // The boundaries strictly to the left of the line, and the first strictly to its right.
+        let above = self.offs.iter().filter(|o| **o > 1e-6).count().min(layers);
+        let below = self.offs.iter().position(|o| *o < -1e-6).unwrap_or(self.offs.len()).max(1);
+        let (offs, first, count, beyond) = if left {
+            let mut offs: Vec<f64> = self.offs.iter().take(above).copied().collect();
+            offs.push(0.0);
+            (offs, 0, above, self.materials.get(below - 1).copied().filter(|_| below < self.offs.len()))
+        } else {
+            let mut offs = vec![0.0];
+            offs.extend(self.offs.iter().skip(below).copied());
+            (offs, below - 1, (layers + 1).saturating_sub(below), above.checked_sub(1).and_then(|k| self.materials.get(k).copied()))
+        };
+        let half = Strips {
+            axis: self.axis,
+            start: self.start,
+            end: self.end,
+            dir: self.dir,
+            offs,
+            ranks: self.ranks.iter().skip(first).take(count).copied().collect(),
+            materials: self.materials.iter().skip(first).take(count).copied().collect(),
+        };
+        (half, beyond, first)
+    }
+
     /// Its boundaries, by index, in the order something going `way` from `from` crosses them near `near`: first to last, or
     /// back.
     fn crossed(&self, from: P2, way: P2, near: P2) -> Option<Vec<usize>> {
@@ -241,6 +266,9 @@ fn between(order: &[usize]) -> Vec<usize> {
 #[derive(Default)]
 pub(super) struct Cut {
     pub(super) layers: Vec<[P2; 2]>,
+    /// Where a layer's end bends between those two points, for the layers whose does: where three walls or more end at
+    /// a point, the layer the wall's location line runs through ends against the wall on either side of it.
+    pub(super) bends: Vec<Vec<P2>>,
     pub(super) seams: Vec<[P2; 2]>,
     /// The line the wall stops on against the other, where the join is not cleaned up: drawn at every level of detail.
     pub(super) butt: Option<[P2; 2]>,
@@ -265,6 +293,25 @@ pub(super) fn end_cut(
     clean: bool,
 ) -> Option<Cut> {
     let (me, o) = (Strips::of(m, id)?, Strips::of(m, other)?);
+    let far = 6.0 * me.thick().max(o.thick());
+    cut_of(&me, at_end, &o, other_end, through, square, clean, None, far)
+}
+
+/// [`end_cut`], of walls as the join's geometry reads them. `beyond`: the material past the other's last boundary, where
+/// something stands there (the rest of a wall cut in half along its location line); `far`: how far from the join a layer
+/// may end.
+#[allow(clippy::too_many_arguments)]
+fn cut_of(
+    me: &Strips,
+    at_end: bool,
+    o: &Strips,
+    other_end: Option<bool>,
+    through: bool,
+    square: bool,
+    clean: bool,
+    beyond: Option<&str>,
+    far: f64,
+) -> Option<Cut> {
     // The way this wall goes into the join, from its end there, and the way the other runs there.
     let (node, way) = me.out(at_end);
     let beside = other_end.map_or_else(|| o.axis.tangent(o.axis.project(node).0), |end| o.out(end).1);
@@ -284,11 +331,10 @@ pub(super) fn end_cut(
     let (reach, _) = solve(&mine, &theirs, through && other_end.is_some());
     let whole = if through && other_end.is_some() { o.layers() } else { 0 };
     let held = |k: usize| if clean { reach.get(k).and_then(|r| r.first()).copied().unwrap_or(0) } else { whole };
-    let far = 6.0 * me.thick().max(o.thick());
     // Squared: no layer runs past where the other's far face meets this wall's nearer face.
     let along = |q: P2| (q - node).dot(way);
     let stop = match (square && through && other_end.is_some(), lines.last()) {
-        (true, Some(last)) => Some(along(me.cross(0, &o, *last, node)?).min(along(me.cross(me.layers(), &o, *last, node)?))),
+        (true, Some(last)) => Some(along(me.cross(0, o, *last, node)?).min(along(me.cross(me.layers(), o, *last, node)?))),
         _ => None,
     };
     let squared = |q: P2| match stop {
@@ -298,14 +344,17 @@ pub(super) fn end_cut(
     let mut cut = Cut::default();
     for k in 0..me.layers() {
         let line = *lines.get(held(k))?;
-        let (a, b) = (squared(me.cross(k, &o, line, node)?), squared(me.cross(k + 1, &o, line, node)?));
+        let (a, b) = (squared(me.cross(k, o, line, node)?), squared(me.cross(k + 1, o, line, node)?));
         if a.dist(node) > far || b.dist(node) > far {
             return None;
         }
         cut.layers.push([a, b]);
         // The layer of the other wall past its end, when it stops short of the far face.
-        let past = mine.arrives.first().and_then(|order| order.get(held(k))).copied();
-        if clean && past.is_some_and(|j| o.materials.get(j) != me.materials.get(k)) {
+        let past = match mine.arrives.first().and_then(|order| order.get(held(k))) {
+            Some(j) => o.materials.get(*j).copied(),
+            None => beyond,
+        };
+        if clean && past.is_some_and(|x| Some(&x) != me.materials.get(k)) {
             cut.seams.push([a, b]);
         }
     }
@@ -321,11 +370,59 @@ pub(super) fn end_cut(
         for step in outer.min(inner)..outer.max(inner) {
             let beside = mine.arrives.first().and_then(|order| order.get(step)).copied();
             if beside.is_some_and(|j| o.materials.get(j) != me.materials.get(longer)) {
-                cut.seams.push([me.cross(k, &o, *lines.get(step)?, node)?, me.cross(k, &o, *lines.get(step + 1)?, node)?]);
+                cut.seams.push([me.cross(k, o, *lines.get(step)?, node)?, me.cross(k, o, *lines.get(step + 1)?, node)?]);
             }
         }
     }
     Some(cut)
+}
+
+/// The cut of wall `id`'s end (`at_end`, else its start) where three walls or more end at a point, none of them running
+/// on: against the wall next round the point counter-clockwise, `next`, and the one before, `prev` (each a wall and which
+/// of its ends is there). Each wall is read as two halves, either side of its location line: between two neighbours'
+/// location lines, the half of each that faces the other joins it as two walls do at a corner, their layers cleaned up by
+/// rank, the wall made first running through. The layer a wall's location line runs through ends against both
+/// neighbours: its end bends. Towards a neighbour too nearly in line for their layers to cross near the point, it ends square.
+pub(super) fn wedge_cut(m: &Model, id: Id, at_end: bool, next: (Id, bool), prev: (Id, bool)) -> Option<Cut> {
+    let (me, n, p) = (Strips::of(m, id)?, Strips::of(m, next.0)?, Strips::of(m, prev.0)?);
+    let far = 6.0 * me.thick().max(n.thick()).max(p.thick());
+    // Leaving the point from its start, a wall's left is its counter-clockwise side; from its end, its right is.
+    let towards = |mine: bool, other: &Strips, (other_id, other_end): (Id, bool), others_left: bool| -> Option<(Cut, usize)> {
+        let (half, _, first) = me.half(mine);
+        let (theirs, beyond, _) = other.half(others_left);
+        // A neighbour too nearly in line to cross: the half ends square at the point, as two walls in line do.
+        let cut = cut_of(&half, at_end, &theirs, Some(other_end), id < other_id, false, true, beyond, far).unwrap_or_else(|| {
+            let s = if at_end { half.axis.length() } else { 0.0 };
+            let at = |k: usize| half.axis.at(s, half.offs.get(k).copied().unwrap_or(0.0));
+            Cut { layers: (0..half.layers()).map(|k| [at(k), at(k + 1)]).collect(), ..Cut::default() }
+        });
+        Some((cut, first))
+    };
+    let (to_next, to_prev) = (towards(!at_end, &n, next, next.1)?, towards(at_end, &p, prev, !prev.1)?);
+    // The half on its left has its exterior layers, the first of them.
+    let ((left, _), (right, first)) = if at_end { (to_prev, to_next) } else { (to_next, to_prev) };
+    let mut cut = Cut { seams: left.seams.iter().chain(&right.seams).copied().collect(), ..Cut::default() };
+    for (k, ends) in left.layers.iter().enumerate() {
+        match right.layers.first().filter(|_| k == first) {
+            // The layer the location line runs through: its end against one neighbour, along the line, and against the other.
+            Some(rest) => {
+                cut.layers.push([ends[0], rest[1]]);
+                let mut bend = vec![ends[1], rest[0]];
+                bend.dedup_by(|a, b| a.dist(*b) < 1e-6);
+                cut.bends.push(bend);
+            }
+            None => {
+                cut.layers.push(*ends);
+                cut.bends.push(Vec::new());
+            }
+        }
+    }
+    let shared = usize::from(first < left.layers.len());
+    for ends in right.layers.iter().skip(shared) {
+        cut.layers.push(*ends);
+        cut.bends.push(Vec::new());
+    }
+    (cut.layers.len() == me.layers()).then_some(cut)
 }
 
 /// A stretch of a wall's layer another wall's layer holds, where that wall ends on its side: between two lines across it,

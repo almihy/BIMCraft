@@ -153,6 +153,8 @@ pub enum Sheet {
 pub enum Tool {
     /// Select the element under the cursor.
     Modify,
+    /// Pick New Host: the door or window that moves to the wall clicked next, where it is clicked.
+    PickHost(Id),
     /// The points of the wall chain clicked so far.
     Wall(Vec<P2>),
     Door,
@@ -358,7 +360,35 @@ pub(crate) fn failed(text: String) -> Status {
 enum Once {
     Only(Snap),
     Off,
+    /// SW: the work plane grid's crossings alone.
+    Grid,
+    /// SR: what lines up with objects away from the cursor, alone.
+    Remote,
+    /// SZ: the first point of the chain being drawn, which closes its loop.
+    Close,
+    /// S2: midway between two points, each snapped as ever; the first of them, once it is picked.
+    Between(Option<P2>),
 }
+
+/// Revit's snap overrides, in the order of its Snap Overrides menu: each one's shortcut, what Keyboard Shortcuts and the
+/// menu call it, and what it does to the next point picked (nothing: the override taken off).
+pub(crate) const SNAP_OVERRIDES: [(&str, &str, Option<Once>); 15] = [
+    ("SI", msg!("Snap to Intersections"), Some(Once::Only(Snap::Intersection))),
+    ("SE", msg!("Snap to Endpoints"), Some(Once::Only(Snap::Endpoint))),
+    ("SM", msg!("Snap to Midpoints"), Some(Once::Only(Snap::Midpoint))),
+    ("S2", msg!("Snap Mid Between 2 Points"), Some(Once::Between(None))),
+    ("SN", msg!("Snap to Nearest"), Some(Once::Only(Snap::Nearest))),
+    ("SW", msg!("Snap to Work Plane Grid"), Some(Once::Grid)),
+    ("SQ", msg!("Snap to Quadrants"), Some(Once::Only(Snap::Quadrant))),
+    ("SC", msg!("Snap to Centres"), Some(Once::Only(Snap::Centre))),
+    ("SP", msg!("Snap to Perpendiculars"), Some(Once::Only(Snap::Perpendicular))),
+    ("ST", msg!("Snap to Tangents"), Some(Once::Only(Snap::Tangent))),
+    ("PC", msg!("Snap to Point Clouds"), Some(Once::Only(Snap::Point))),
+    ("SR", msg!("Snap to Remote Objects"), Some(Once::Remote)),
+    ("SZ", msg!("Close Open Loop"), Some(Once::Close)),
+    ("SO", msg!("Snaps Off"), Some(Once::Off)),
+    ("SS", msg!("Turn Snap Override Off"), None),
+];
 
 /// The ribbon's tabs. `Context` is the contextual Modify tab of the tool or the selection.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -438,7 +468,7 @@ type Buttons<'a> = &'a [(Icon, &'a str, &'a str, Option<Tool>, bool)];
 
 /// The desktop's own two-letter shortcuts, which [`BimApp::shortcut`] takes before the commands'
 /// aliases, and what Keyboard Shortcuts (KS) calls them.
-const SHORTCUTS: [(&str, &str); 64] = [
+const SHORTCUTS: [(&str, &str); 69] = [
     ("3D", "3D View"),
     ("MD", "Modify"),
     ("SB", "Floor: Structural"),
@@ -478,6 +508,11 @@ const SHORTCUTS: [(&str, &str); 64] = [
     ("SN", msg!("Snap to Nearest")),
     ("SO", msg!("Snaps Off")),
     ("SS", msg!("Turn Snap Override Off")),
+    ("S2", msg!("Snap Mid Between 2 Points")),
+    ("SW", msg!("Snap to Work Plane Grid")),
+    ("PC", msg!("Snap to Point Clouds")),
+    ("SR", msg!("Snap to Remote Objects")),
+    ("SZ", msg!("Close Open Loop")),
     ("VV", "Visibility/Graphics"),
     ("VG", "Visibility/Graphics"),
     ("EH", "Hide Element"),
@@ -605,6 +640,9 @@ pub struct BimApp {
     background_grid_dialog: Option<background_grid::GridDialog>,
     /// Global grid snapping preference, independent of view graphics and templates.
     grid_snapping: bool,
+    /// Revit's Drag Elements on Selection: a drag from an element not yet selected moves it. Off, only what is selected
+    /// drags, and a drag from anything else boxes a selection.
+    pub(crate) drag_on_selection: bool,
     /// The origin marker on a plan, and the view's name in its corner (File > Settings): working aids, drawn on the screen and
     /// never in a drawing that is printed or exported.
     show_origin: bool,
@@ -1479,6 +1517,7 @@ impl BimApp {
             scan_contrast: footer::HIGH_CONTRAST,
             background_grid_dialog: None,
             grid_snapping: false,
+            drag_on_selection: true,
             show_origin: true,
             show_view_name: true,
             ribbon_bottom: Pos2::ZERO,
@@ -1768,6 +1807,7 @@ impl BimApp {
             | Tool::WallJoins(_)
             | Tool::Offset
             | Tool::Demolish
+            | Tool::PickHost(_)
             | Tool::Linework
             | Tool::Attach
             | Tool::GableEdge
@@ -2379,7 +2419,11 @@ impl BimApp {
         }
         for ch in typed.chars() {
             let listening = self.base().is_some() || self.filleting();
-            if listening && (ch.is_ascii_digit() || ch == '.' || !self.typed_length.is_empty()) {
+            // S2 is a shortcut (Snap Mid Between 2 Points): its 2, after an S, starts no length.
+            let s2 = ch == '2'
+                && self.typed_length.is_empty()
+                && (shortcut.ends_with(['s', 'S']) || shortcut.is_empty() && self.typed.ends_with('S'));
+            if listening && !s2 && (ch.is_ascii_digit() || ch == '.' || !self.typed_length.is_empty()) {
                 self.typed_length.push(ch);
             } else {
                 shortcut.push(ch);
@@ -2569,19 +2613,8 @@ impl BimApp {
                 return true;
             }
             // Revit's snap overrides: for the next point picked, that snap alone, or none.
-            "SE" | "SM" | "SI" | "SC" | "SP" | "SQ" | "ST" | "SN" | "SO" | "SS" => {
-                self.snap_once = match self.typed.as_str() {
-                    "SQ" => Some(Once::Only(Snap::Quadrant)),
-                    "ST" => Some(Once::Only(Snap::Tangent)),
-                    "SE" => Some(Once::Only(Snap::Endpoint)),
-                    "SM" => Some(Once::Only(Snap::Midpoint)),
-                    "SI" => Some(Once::Only(Snap::Intersection)),
-                    "SC" => Some(Once::Only(Snap::Centre)),
-                    "SP" => Some(Once::Only(Snap::Perpendicular)),
-                    "SN" => Some(Once::Only(Snap::Nearest)),
-                    "SO" => Some(Once::Off),
-                    _ => None,
-                };
+            code if SNAP_OVERRIDES.iter().any(|(keys, ..)| *keys == code) => {
+                self.snap_once = SNAP_OVERRIDES.iter().find(|(keys, ..)| *keys == code).and_then(|(.., once)| *once);
                 return true;
             }
             code if mep::fixture_with(code).is_some() => Tool::Fixture(mep::fixture_with(code).map_or("", |f| f.key)),
@@ -2696,8 +2729,9 @@ impl BimApp {
     pub(crate) fn snaps_now(&self) -> Snaps {
         match self.snap_once {
             Some(Once::Only(kind)) => Snaps::only(kind),
-            Some(Once::Off) => Snaps::none(),
-            None => self.snaps,
+            Some(Once::Off | Once::Grid | Once::Close) => Snaps::none(),
+            Some(Once::Remote) => Snaps { alignment_guides: true, ..Snaps::none() },
+            Some(Once::Between(_)) | None => self.snaps,
         }
     }
 
@@ -2706,6 +2740,11 @@ impl BimApp {
         match self.snap_once? {
             Once::Only(kind) => Some(tf("Snap: {} (next point)", &[t(kind.name())])),
             Once::Off => Some(t("Snaps off (next point)").to_string()),
+            Once::Grid => Some(tf("Snap: {} (next point)", &[t("Work Plane Grid")])),
+            Once::Remote => Some(tf("Snap: {} (next point)", &[t("Remote Objects")])),
+            Once::Close => Some(tf("Snap: {} (next point)", &[t("Close")])),
+            Once::Between(None) => Some(t("Mid between 2 points: pick the first point").to_string()),
+            Once::Between(Some(_)) => Some(t("Mid between 2 points: pick the second point").to_string()),
         }
     }
 
@@ -2899,6 +2938,7 @@ impl BimApp {
                 | Tool::WallJoins(_)
                 | Tool::Offset
                 | Tool::Demolish
+                | Tool::PickHost(_)
                 | Tool::Linework
         );
         // A tool of the hand's own ends Pan and Zoom Region, and one asked for before its elements waits for them (Enter).
@@ -3586,6 +3626,7 @@ impl BimApp {
         fresh.font_finder = self.font_finder;
         fresh.scan_contrast = self.scan_contrast;
         fresh.grid_snapping = self.grid_snapping;
+        fresh.drag_on_selection = self.drag_on_selection;
         (fresh.show_origin, fresh.show_view_name) = (self.show_origin, self.show_view_name);
         fresh.canvas.nav.wheel = self.canvas.nav.wheel;
         fresh.custom_shortcuts = std::mem::take(&mut self.custom_shortcuts);
@@ -5267,6 +5308,20 @@ impl BimApp {
                 }
             });
         }
+        // A door or a window selected: Revit's Pick New Host, which puts it in another wall.
+        let opening = match (&self.tool, self.selection.as_slice()) {
+            (Tool::PickHost(id), _) => Some(*id),
+            (Tool::Modify, &[id]) if matches!(self.session.model.elements.get(id), Some(Element::Door(_) | Element::Window(_))) => Some(id),
+            _ => None,
+        };
+        if let Some(id) = opening {
+            panel(ui, msg!("Host"), |ui| {
+                let tip = msg!("Pick New Host: click the wall the door or window moves to, where it goes");
+                if big_button(ui, Icon::Attach, "Pick New Host", matches!(self.tool, Tool::PickHost(_)), tip).clicked() {
+                    self.start_tool(Tool::PickHost(id));
+                }
+            });
+        }
         // A roof selected: which of its edges stand upright; a flat one's shape too.
         let shaping = matches!(self.tool, Tool::ModifySubElements | Tool::AddPoint | Tool::AddSplitLine(_));
         if let Some(roof) = self.selected_roof()
@@ -5860,6 +5915,7 @@ impl BimApp {
             Tool::WallJoins(Some(_)) => msg!("Pick the join's configuration on the bar above, or click another join; Modify exits."),
             Tool::Offset => msg!("Point to a wall or a line: the offset goes to the cursor's side. Click to place it."),
             Tool::Demolish => msg!("Click an element to take it down in the view's phase; click it again to take it back."),
+            Tool::PickHost(_) => msg!("Click the wall the door or window moves to, where it goes."),
             Tool::Linework => msg!("Click an edge to draw it in the line style in the Options Bar; <By Category> puts it back."),
             Tool::DetailGroup => msg!("Click where the group's origin goes."),
             Tool::RepeatingDetail(None) => msg!("Click where the repeating detail starts."),
@@ -5964,6 +6020,14 @@ impl BimApp {
                 funnel.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, t("Filter Selection")));
                 if funnel.on_hover_text(t("Filter Selection")).clicked() {
                     self.open_filter();
+                }
+                // Revit's Drag Elements on Selection, a switch of the status bar: lit while a drag moves what it starts on.
+                let on = self.drag_on_selection;
+                let (r, drag) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::click());
+                icons::paint(ui.painter(), Icon::Modify, r, if on { pal().accent_ink } else { pal().muted });
+                drag.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, on, t("Drag Elements on Selection")));
+                if drag.on_hover_text(t("Drag Elements on Selection: off, an element is selected before it can be dragged")).clicked() {
+                    self.drag_on_selection = !on;
                 }
                 // The page's checks of the model, flagged and not: a click opens the Checks palette.
                 self.checks_badge(ui);

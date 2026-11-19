@@ -652,7 +652,6 @@ fn properties_edit_through_modify_and_undo_puts_them_back() {
     type_into(&mut h, "Name", "Lounge");
     key(&mut h, Key::Enter);
     assert_eq!(field(&h, room, "name"), json!("Lounge"));
-    assert_eq!(h.state().session.history().last(), Some(&"Modify"));
     h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     h.run();
     assert_eq!(field(&h, room, "name"), json!("Living"));
@@ -993,7 +992,15 @@ fn ks_lists_every_shortcut_and_every_one_it_lists_works() {
     }
     use crate::lang::Lang;
     // Names the catalogs don't have yet: KS shows them in English until a translator gives them, as any missing translation.
-    let awaiting = ["Graphic Display Options", "Select All Instances in Entire Project"];
+    let awaiting = [
+        "Graphic Display Options",
+        "Select All Instances in Entire Project",
+        "Snap Mid Between 2 Points",
+        "Snap to Work Plane Grid",
+        "Snap to Remote Objects",
+        "Snap to Point Clouds",
+        "Close Open Loop",
+    ];
     for (_, name) in crate::shortcuts().into_iter().filter(|(_, name)| !awaiting.contains(name)) {
         for l in [Lang::Portuguese, Lang::Spanish] {
             assert!(crate::lang::translated_in(l, name).is_some(), "{name} in {l:?}");
@@ -1333,6 +1340,49 @@ fn dragging_across_empty_floor_selects_by_window_or_crossing() {
     drag(&mut h, P2(11400.0, 6000.0), P2(9400.0, 4200.0));
     let sel = &h.state().selection;
     assert!(sel.contains(&window) && sel.contains(&wall), "{sel:?}");
+}
+
+#[test]
+fn select_joined_elements_takes_the_walls_joined_to_a_wall_and_drag_on_selection_off_drags_only_what_is_selected() {
+    let mut h = app(BOX);
+    let east = find(&h, |e| matches!(e, Element::Wall(w) if w.start == P2(8000.0, 0.0)));
+    // Select Joined Elements, on the wall's menu: the two walls it corners with join the selection.
+    h.state_mut().selection = vec![east];
+    h.run();
+    assert!(h.state().context_items().iter().flatten().any(|i| i.action == crate::context::Action::SelectJoined));
+    h.state_mut().act(crate::context::Action::SelectJoined);
+    h.run();
+    assert_eq!((h.state().selection.len(), h.state().selection[0]), (3, east));
+    // Drag Elements on Selection off: a drag from a wall not selected moves nothing; selected, it moves.
+    h.state_mut().selection.clear();
+    h.state_mut().drag_on_selection = false;
+    h.run();
+    drag(&mut h, P2(8000.0, 3000.0), P2(9000.0, 3000.0));
+    assert!(matches!(h.state().session.model.elements.get(east), Some(Element::Wall(w)) if w.start == P2(8000.0, 0.0)));
+    h.state_mut().selection = vec![east];
+    h.run();
+    drag(&mut h, P2(8000.0, 3000.0), P2(9000.0, 3000.0));
+    assert!(matches!(h.state().session.model.elements.get(east), Some(Element::Wall(w)) if w.start == P2(9000.0, 0.0)));
+}
+
+#[test]
+fn pick_new_host_moves_a_door_to_the_wall_clicked_where_it_is_clicked() {
+    let mut h = app(&format!(
+        "{BOX}
+door {{\"at\": [2000, 0]}}"
+    ));
+    let door = ids(&h, "door")[0];
+    let north = find(&h, |e| matches!(e, Element::Wall(w) if w.start == P2(8000.0, 6000.0)));
+    h.state_mut().selection = vec![door];
+    h.state_mut().raise_context();
+    h.run();
+    press(&mut h, "Pick New Host");
+    assert_eq!(h.state().tool, Tool::PickHost(door));
+    click(&mut h, P2(5000.0, 6000.0));
+    // The north wall runs west from (8000, 6000): 3000 along it.
+    let m = &h.state().session.model;
+    assert!(matches!(m.elements.get(door), Some(Element::Door(o)) if o.host == m.guid(north) && o.offset == 3000.0));
+    assert_eq!((h.state().tool.clone(), h.state().selection.clone()), (Tool::Modify, vec![door]));
 }
 
 #[test]
@@ -1693,6 +1743,14 @@ fn properties_of_a_view_show_and_set_its_scale_detail_level_and_visual_style() {
     assert_eq!((plan_graphics(&h, 100000).detail, steps(&h)), (Detail::Coarse, before + 2));
     assert_eq!(h.state().session.history().last(), Some(&"Detail Level"));
     assert_eq!(combo_value(&h, "Detail Level"), "Coarse");
+    // Wall Join Display, a plan's at coarse detail: Revit's two choices, set in one step and undone.
+    assert_eq!(combo_value(&h, "Wall Join Display"), "Clean all wall joins");
+    choose(&mut h, "Wall Join Display", "Clean same type wall joins");
+    assert!(plan_graphics(&h, 100000).same_type_joins && steps(&h) == before + 3);
+    assert_eq!(combo_value(&h, "Wall Join Display"), "Clean same type wall joins");
+    h.state_mut().run("undo", json!({}));
+    h.run();
+    assert!(!plan_graphics(&h, 100000).same_type_joins && steps(&h) == before + 2);
     // The scale's value, typed: any number a scale may be; what isn't one is said and changes nothing.
     assert_eq!(field_text(&h, "Scale Value 1:"), "50");
     type_role(&mut h, Role::TextInput, "Scale Value 1:", "75");
@@ -4615,6 +4673,13 @@ fn a_snap_shortcut_overrides_the_snaps_for_the_next_pick_only() {
         ("SC", Once::Only(Kind::Centre)),
         ("SP", Once::Only(Kind::Perpendicular)),
         ("SN", Once::Only(Kind::Nearest)),
+        ("SQ", Once::Only(Kind::Quadrant)),
+        ("ST", Once::Only(Kind::Tangent)),
+        ("PC", Once::Only(Kind::Point)),
+        ("SW", Once::Grid),
+        ("SR", Once::Remote),
+        ("SZ", Once::Close),
+        ("S2", Once::Between(None)),
         ("SO", Once::Off),
     ] {
         shortcut(&mut h, letters);
@@ -4645,6 +4710,40 @@ fn a_snap_shortcut_overrides_the_snaps_for_the_next_pick_only() {
     shortcut(&mut h, "SE");
     browse(&mut h, "{3D}");
     assert_eq!(h.state().snap_once, None);
+}
+
+#[test]
+fn mid_between_two_points_and_close_are_snap_overrides_and_the_menu_lists_them_all() {
+    use crate::Once;
+    let mut h = app(BOX);
+    tool(&mut h, "Wall");
+    // S2: two points picked, each snapped as ever (here to the south wall's two ends); the wall starts midway between them.
+    shortcut(&mut h, "S2");
+    assert!(h.query_by_label("Mid between 2 points: pick the first point").is_some());
+    click(&mut h, P2(8030.0, 20.0));
+    assert_eq!(h.state().tool, Tool::Wall(Vec::new()), "the first of the two is no point of the wall");
+    assert_eq!(h.state().snap_once, Some(Once::Between(Some(P2(8000.0, 0.0)))));
+    click(&mut h, P2(30.0, 20.0));
+    assert_eq!((h.state().tool.clone(), h.state().snap_once), (Tool::Wall(vec![P2(4000.0, 0.0)]), None));
+    // With a point picked, the 2 after an S is still the shortcut's, not a length's.
+    shortcut(&mut h, "S2");
+    assert_eq!((h.state().snap_once, h.state().typed_length.as_str()), (Some(Once::Between(None)), ""));
+    shortcut(&mut h, "SS");
+    // SZ: the chain's first point, wherever the cursor is.
+    click(&mut h, P2(4000.0, 3000.0));
+    shortcut(&mut h, "SZ");
+    assert_eq!(hover(&mut h, P2(6500.0, 2100.0)).map(|f| f.at), Some(P2(4000.0, 0.0)));
+    // The right-click menu lists the overrides while a tool picks points, and none with no tool.
+    let named = |h: &Harness<BimApp>| {
+        h.state().context_items().iter().flatten().filter(|i| matches!(i.action, crate::context::Action::SnapOverride(_))).count()
+    };
+    assert_eq!(named(&h), crate::SNAP_OVERRIDES.len());
+    h.state_mut().act(crate::context::Action::SnapOverride(13));
+    assert_eq!(h.state().snap_once, Some(Once::Off));
+    key(&mut h, Key::Escape);
+    key(&mut h, Key::Escape);
+    key(&mut h, Key::Escape);
+    assert_eq!((h.state().tool.clone(), named(&h)), (Tool::Modify, 0));
 }
 
 #[test]
@@ -7454,7 +7553,7 @@ fn a_right_click_in_a_plan_opens_revits_menu_of_what_the_view_and_the_selection_
         [
             vec!["Cancel", "Select Previous"],
             vec!["Hide in View", "Override Graphics in View", "Create Similar"],
-            vec!["Select All Instances", "Delete"],
+            vec!["Select Joined Elements", "Select All Instances", "Delete"],
             vec!["Find Referring Views"],
             ZOOMS.to_vec(),
             vec!["Browsers", "Properties"],

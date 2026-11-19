@@ -494,6 +494,46 @@ fn typed() -> Session {
     s
 }
 
+#[test]
+fn three_walls_ending_at_a_point_join_by_their_layers_each_to_the_one_on_either_side() {
+    // Three walls of one type out of a point, 120 degrees apart, and three more a right angle and a half apart.
+    for (n, angles) in [[90.0_f64, 210.0, 330.0], [0.0, 90.0, 225.0]].into_iter().enumerate() {
+        let mut s = typed();
+        let ids: Vec<u64> = angles
+            .iter()
+            .map(|a| {
+                let (x, y) = (3000.0 * a.to_radians().cos(), 3000.0 * a.to_radians().sin());
+                run(&mut s, "wall", json!({"points": [[0, 0], [x, y]], "type": "Ext"}))["ids"][0].as_u64().unwrap()
+            })
+            .collect();
+        // Round the point every place is one layer of one wall: none held twice, none left empty where the walls stand.
+        let mut blocks = 0;
+        for i in -40..=40 {
+            for j in -40..=40 {
+                let q = P2(f64::from(i) * 15.0 + 3.7, f64::from(j) * 15.0 + 2.3);
+                let (count, layer) = held(&s, &ids, q);
+                assert!(count <= 1, "walls {n}: {count} layers at {q:?}");
+                assert!(count == 1 || q.dist(P2(0.0, 0.0)) > 150.0, "walls {n}: nothing at {q:?}");
+                blocks += usize::from(layer == Some(2) && q.dist(P2(0.0, 0.0)) < 60.0);
+            }
+        }
+        // Their block, the structure, is one piece through the point; and no line is drawn inside it.
+        assert!(blocks >= 40, "walls {n}: {blocks}");
+        let lines: Vec<Vec<P2>> = ids
+            .iter()
+            .flat_map(|id| walls::layer_geometry(&s.model, *id, None).interfaces().map(<[P2]>::to_vec).collect::<Vec<_>>())
+            .collect();
+        let inside = |q: P2| held(&s, &ids, q).1 == Some(2);
+        for l in &lines {
+            for w in l.windows(2) {
+                let mid = P2((w[0].0 + w[1].0) / 2.0, (w[0].1 + w[1].1) / 2.0);
+                let across = (w[1] - w[0]).unit().perp() * 2.0;
+                assert!(!(inside(mid + across) && inside(mid - across)), "walls {n}: a line through the block at {mid:?}");
+            }
+        }
+    }
+}
+
 /// How many layers of walls `ids` hold point `q`, and which layer the first is.
 fn held(s: &Session, ids: &[u64], q: P2) -> (usize, Option<usize>) {
     let mut found = (0, None);
@@ -674,4 +714,22 @@ fn shot_curved_joins() {
     run(&mut s, "detail", json!({"view": 100000, "detail": "fine"}));
     let dir = std::env::var("SHOT").unwrap();
     std::fs::write(format!("{dir}/curved.png"), crate::render::png(&crate::render::plan(&s.model, 100000, 1800, 1500)).unwrap()).unwrap();
+}
+
+/// Three walls ending at a point, 120 degrees apart and as a T's arms askew: a picture to look at.
+#[test]
+#[ignore]
+fn shot_y_joins() {
+    let mut s = typed();
+    for a in [90.0_f64, 210.0, 330.0] {
+        let (x, y) = (1400.0 * a.to_radians().cos(), 1400.0 * a.to_radians().sin());
+        run(&mut s, "wall", json!({"points": [[0, 0], [x, y]], "type": "Ext"}));
+    }
+    for a in [0.0_f64, 90.0, 225.0] {
+        let (x, y) = (3600.0 + 1400.0 * a.to_radians().cos(), 1400.0 * a.to_radians().sin());
+        run(&mut s, "wall", json!({"points": [[3600, 0], [x, y]], "type": "Ext", "location": "core-center"}));
+    }
+    run(&mut s, "detail", json!({"view": 100000, "detail": "fine"}));
+    let dir = std::env::var("SHOT").unwrap();
+    std::fs::write(format!("{dir}/y.png"), crate::render::png(&crate::render::plan(&s.model, 100000, 1800, 1000)).unwrap()).unwrap();
 }

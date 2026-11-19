@@ -79,9 +79,8 @@ fn three_walls_meeting_share_the_node() {
     // Three 3 m arms 200 mm thick, less the triangle they'd all three cover where they meet.
     let hub = 3f64.sqrt() / 4.0 * 200.0 * 200.0;
     assert!((total - (3.0 * 600_000.0 - hub)).abs() < 1.0, "{total}");
-    for id in [100_002, 100_003, 100_004] {
-        assert!(cap(&s.model, id, false).iter().any(|p| near(*p, P2(0.0, 0.0))), "{id}");
-    }
+    // The wall made first runs through the point; the others end against it and each other.
+    assert!(cap(&s.model, 100_002, false).iter().any(|p| near(*p, P2(0.0, 0.0))));
 }
 
 #[test]

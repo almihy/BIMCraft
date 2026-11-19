@@ -71,6 +71,10 @@ pub(crate) enum Action {
     AllowJoin,
     /// The selected doors' and windows' From Room and To Room swapped (Revit's Flip From/To Room).
     FlipFromToRoom,
+    /// Select Joined Elements: the walls joined to the walls selected, with them.
+    SelectJoined,
+    /// Snap Overrides: the nth of Revit's snap overrides ([`crate::SNAP_OVERRIDES`]), for the next point picked.
+    SnapOverride(u8),
 }
 
 impl Action {
@@ -108,6 +112,8 @@ impl Action {
             Action::DisallowJoin => msg!("Disallow Join"),
             Action::AllowJoin => msg!("Allow Join"),
             Action::FlipFromToRoom => msg!("Flip From/To Room"),
+            Action::SnapOverride(_) => "Snap Override",
+            Action::SelectJoined => msg!("Select Joined Elements"),
         }
     }
 
@@ -121,6 +127,7 @@ impl Action {
             Action::SelectAllInstances | Action::SelectAllInstancesProject => Some(msg!("Select All Instances")),
             Action::Recent(_) => Some(msg!("Recent Commands")),
             Action::ProjectBrowser => Some(msg!("Browsers")),
+            Action::SnapOverride(_) => Some(msg!("Snap Overrides")),
             _ => None,
         }
     }
@@ -146,7 +153,7 @@ impl Item {
     fn label(&self) -> String {
         match self.of {
             Some(of) if self.action == Action::Repeat => tf(msg!("Repeat [{}]"), &[t(of)]),
-            Some(of) if matches!(self.action, Action::Recent(_)) => t(of).to_string(),
+            Some(of) if matches!(self.action, Action::Recent(_) | Action::SnapOverride(_)) => t(of).to_string(),
             _ => t(self.action.label()).to_string(),
         }
     }
@@ -232,6 +239,13 @@ impl BimApp {
             first.insert(0, Item::new(Action::FinishPick, true));
         }
         let mut groups = vec![first];
+        // Snap Overrides, while a tool picks points, as Revit's menu has them.
+        if self.tool != Tool::Modify {
+            let overrides = crate::SNAP_OVERRIDES.iter().enumerate();
+            groups.push(
+                overrides.map(|(i, (_, name, _))| Item { of: Some(name), ..Item::new(Action::SnapOverride(i as u8), true) }).collect(),
+            );
+        }
         if some {
             let m = &self.session.model;
             // Revit offers Disallow Join or Allow Join on a selected wall's end, where the join is: in a plan, on its end grip;
@@ -319,6 +333,10 @@ impl BimApp {
             } else {
                 vec![Item::new(Action::SelectAllInstances, true), Item::new(Action::SelectAllInstancesProject, true)]
             };
+            // A wall's: the walls joined to it, to drag the join as one.
+            if self.selection.iter().any(|id| m.wall(*id).is_some()) {
+                select.insert(0, Item::new(Action::SelectJoined, true));
+            }
             select.push(Item::new(Action::Delete, true));
             groups.push(select);
         }
@@ -350,6 +368,8 @@ impl BimApp {
             }
             Action::Recent(i) => self.repeat_recent(usize::from(i)),
             Action::SelectPrevious => self.select_previous(),
+            Action::SelectJoined => self.select_joined(),
+            Action::SnapOverride(i) => self.snap_once = crate::SNAP_OVERRIDES.get(usize::from(i)).and_then(|(.., once)| *once),
             Action::CreateSimilar => self.create_similar(),
             Action::Finish => self.finish_open_shape(),
             Action::FinishPick => self.finish_pattern_lines(),
@@ -434,6 +454,23 @@ impl BimApp {
     }
 
     /// Select Previous: the selection before this one, again.
+    /// Select Joined Elements, as Revit's: the walls that end where a selected wall ends, the wall it ends on and those
+    /// that end on it, added to the selection.
+    fn select_joined(&mut self) {
+        use bimcraft_core::walls;
+        let m = &self.session.model;
+        let mut all: std::collections::BTreeSet<bimcraft_core::model::Id> = self.selection.iter().copied().collect();
+        for id in self.selection.iter().copied().filter(|id| m.wall(*id).is_some()) {
+            all.extend([false, true].into_iter().flat_map(|end| walls::joined_at(m, id, end)));
+            all.extend(walls::ending_on(m, id).into_iter().map(|(other, _)| other));
+        }
+        // What was selected stays first, in its order.
+        let mut selection = self.selection.clone();
+        selection.extend(all.into_iter().filter(|id| !self.selection.contains(id)));
+        self.selection = selection;
+        self.raise_context();
+    }
+
     fn select_previous(&mut self) {
         let before = self.previous_selection();
         if !before.is_empty() {

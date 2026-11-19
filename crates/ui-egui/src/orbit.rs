@@ -388,16 +388,38 @@ fn aim(
 
 /// Where a point aimed at `q` on `plane`, at pixel `at` (`ppp` pixels a point), lands: snapped as its level's plan snaps
 /// (`snap::snap`: ends, middles, crossings, guides from `from`, else the nearest 10 mm), within as many mm of it as the snap's
-/// points cover on the plane there.
+/// points cover on the plane there. With `steps`, Manage > Snaps' dimension snap increments (and whether the tool counts
+/// along a rectangle's sides): the ones in force for how large the plane is drawn under the cursor, as a plan's zoom.
 #[allow(clippy::too_many_arguments)]
-fn snap3d(m: &Model, cam: &Camera, at: (f64, f64), ppp: f32, q: P3, plane: CursorPlane, from: &[P2], square: bool, o: &Snaps) -> Found {
+fn snap3d(
+    m: &Model,
+    cam: &Camera,
+    at: (f64, f64),
+    ppp: f32,
+    q: P3,
+    plane: CursorPlane,
+    from: &[P2],
+    square: bool,
+    o: &Snaps,
+    steps: Option<(&snap::Increments, bool)>,
+) -> Found {
     let per_px = cam
         .on_plane((at.0 + 1.0, at.1), plane.z)
         .map(|r| (r[0] - q[0]).hypot(r[1] - q[1]))
         .filter(|d| d.is_finite() && *d > 0.0)
         .unwrap_or(1.0 / cam.scale.max(1e-9));
     let reach = Reach { point: SNAP * f64::from(ppp) * per_px, line: f64::from(PICK) * f64::from(ppp) * per_px };
-    snap::snap(m, plane.level, P2(q[0], q[1]), reach, from, square, o)
+    let mut o = *o;
+    if let Some((steps, corners)) = steps {
+        // Points to the mm on the plane there, as a plan's scale is.
+        let scale = 1.0 / (f64::from(ppp) * per_px);
+        let radius = from.last().map_or(0.0, |l| l.dist(P2(q[0], q[1])));
+        o.increments = true;
+        o.corners = corners;
+        o.step = steps.length(scale).unwrap_or(0.0);
+        o.angle = steps.angle(scale, radius).unwrap_or(0.0);
+    }
+    snap::snap(m, plane.level, P2(q[0], q[1]), reach, from, square, &o)
 }
 
 /// What the Aligned Dimension tool picks at pixel `at` of the 3D view through `cam` (`ppp` pixels a point): a corner seen within
@@ -911,6 +933,8 @@ impl BimApp {
         }
         let wheel = if flying { 0.0 } else { wheel };
         let snaps = self.snaps_now();
+        // Its dimension snap increments, which a shortcut's one-pick override has none of.
+        let steps = self.snap_once.is_none().then(|| (self.snap_steps.clone(), self.shape() == crate::draw::Shape::Rectangle));
         // The points a drawing tool's next snaps from (guides, perpendiculars), as in a plan.
         let from: Vec<P2> = match (&self.tool, self.shape()) {
             (Tool::Wall(chain), crate::draw::Shape::Line) => chain.clone(),
@@ -1443,7 +1467,7 @@ impl BimApp {
         let aimed = |picker: &Option<Picker>, at: Pos2| -> Option<(P3, CursorPlane, Found)> {
             let under = picker.as_ref().and_then(|k| k.surface(Some(scene), &cam, px(at)));
             let (q, plane) = aim(&model, &cam, px(at), held, fallback, under)?;
-            let f = snap3d(&model, &cam, px(at), ppp, q, plane, &from, shift, &snaps);
+            let f = snap3d(&model, &cam, px(at), ppp, q, plane, &from, shift, &snaps, steps.as_ref().map(|(s, c)| (s, *c)));
             Some(([f.at.0, f.at.1, plane.z], plane, f))
         };
         if let Some((q, plane, found)) = hover.filter(|_| drawing && o.drag.is_none()).and_then(|at| aimed(&o.picker, at))

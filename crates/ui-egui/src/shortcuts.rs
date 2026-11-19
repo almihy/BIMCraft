@@ -6,13 +6,12 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use bimcraft_core::geom::P2;
-use bimcraft_core::snap::Kind as Snap;
 use egui::{Align, Context, Grid, Id as UiId, Layout, RichText, ScrollArea, TextEdit, vec2};
 
 use crate::graphics;
 use crate::lang::{Lang, t, tf, translated_in};
 use crate::pal;
-use crate::{BimApp, Once, Tab, Tool, phasing};
+use crate::{BimApp, Tab, Tool, phasing};
 
 /// A shortcuts file is a few lines; one over this isn't one.
 const MAX_FILE: u64 = 64 << 10;
@@ -376,14 +375,9 @@ impl BimApp {
             "Pin" => self.pin_selection(true),
             "Unpin" => self.pin_selection(false),
             // Revit's snap overrides, for the next point picked.
-            "Snap to Endpoints" => self.snap_once = Some(Once::Only(Snap::Endpoint)),
-            "Snap to Midpoints" => self.snap_once = Some(Once::Only(Snap::Midpoint)),
-            "Snap to Intersections" => self.snap_once = Some(Once::Only(Snap::Intersection)),
-            "Snap to Centres" => self.snap_once = Some(Once::Only(Snap::Centre)),
-            "Snap to Perpendiculars" => self.snap_once = Some(Once::Only(Snap::Perpendicular)),
-            "Snap to Nearest" => self.snap_once = Some(Once::Only(Snap::Nearest)),
-            "Snaps Off" => self.snap_once = Some(Once::Off),
-            "Turn Snap Override Off" => self.snap_once = None,
+            name if crate::SNAP_OVERRIDES.iter().any(|(_, n, _)| *n == name) => {
+                self.snap_once = crate::SNAP_OVERRIDES.iter().find(|(_, n, _)| *n == name).and_then(|(.., once)| *once);
+            }
             "Show Mass" => self.show_mass(),
             "Mass Floors" => self.by_mass("mass_floors"),
             "Wall by Face" => self.by_mass("wall_by_face"),

@@ -633,6 +633,22 @@ impl BimApp {
                     }
                 });
                 ui.end_row();
+                // Revit's Wall Join Display, a plan's: it has a say at coarse detail only, and is grey at the others.
+                if matches!(self.sheet, Sheet::Plan(_) | Sheet::Ceiling(_)) {
+                    let names = [msg!("Clean all wall joins"), msg!("Clean same type wall joins")];
+                    let coarse = shown.detail == Detail::Coarse;
+                    let label = ui.add_enabled(note.is_none() && coarse, egui::Label::new(t("Wall Join Display")));
+                    let label = if let Some(n) = &note { label.on_hover_text(n) } else { label };
+                    ui.add_enabled_ui(note.is_none() && coarse, |ui| {
+                        let options: Vec<String> = names.iter().map(|n| t(n).to_string()).collect();
+                        let now = t(names[usize::from(shown.same_type_joins)]);
+                        if let Some(picked) = crate::properties::combo(ui, (0, "wall-join-display"), label.id, now, &options) {
+                            let joins = if picked == options[1] { "same-type" } else { "all" };
+                            set = Some(("detail", json!({"view": view, "wall_joins": joins})));
+                        }
+                    });
+                    ui.end_row();
+                }
             } else if self.sheet == Sheet::View3D {
                 let note = controlled(Group::Style);
                 let label = ui.label(t("Visual Style"));

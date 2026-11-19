@@ -1570,6 +1570,12 @@ impl BimApp {
     pub(crate) fn snap_skipping(&self, m: &Model, level: Id, v: &View, at: (f32, f32), from: &[P2], square: bool, skip: &[Id]) -> Found {
         let reach = Reach { point: SNAP / v.scale, line: f64::from(PICK) / v.scale };
         let snaps = self.snaps_in(v, at, from);
+        // Close (SZ): the first point of what is being drawn, wherever the cursor is.
+        if self.snap_once == Some(crate::Once::Close)
+            && let Some(first) = from.first()
+        {
+            return Found { at: *first, kind: Kind::Endpoint, guide: None, source: None };
+        }
         // A camera's mark is a symbol, not a set of snap points: anywhere on it lands on its eye.
         if snaps.endpoint
             && let Some((id, eye)) = render::camera_at(m, level, v, at, &crate::camgrips::shown_cameras(m, &self.selection))
@@ -1587,13 +1593,17 @@ impl BimApp {
             }
             None => snap::snap_skipping(m, view, v.mm(at), reach, from, square, &snaps, skip),
         };
-        if matches!(found.kind, Kind::Free | Kind::Angle)
-            && !square
-            && self.snap_once.is_none()
-            && self.grid_snapping
-            && let Some(at) = self.background_grid().nearest(v.mm(at))
-        {
-            return Found { at, kind: Kind::Intersection, guide: None, source: None };
+        // The grid's crossings: while Grid snapping is on, or for the one point Snap to Work Plane Grid (SW) is for.
+        let gridded = if self.snap_once.is_none() { self.grid_snapping } else { self.snap_once == Some(crate::Once::Grid) };
+        let found =
+            match self.background_grid().nearest(v.mm(at)).filter(|_| matches!(found.kind, Kind::Free | Kind::Angle) && !square && gridded)
+            {
+                Some(at) => Found { at, kind: Kind::Intersection, guide: None, source: None },
+                None => found,
+            };
+        // Mid Between 2 Points (S2), its first point picked: midway from it to where the cursor snaps.
+        if let Some(crate::Once::Between(Some(a))) = self.snap_once {
+            return Found { at: P2((a.0 + found.at.0) / 2.0, (a.1 + found.at.1) / 2.0), kind: Kind::Midpoint, guide: None, source: None };
         }
         found
     }
@@ -1915,7 +1925,7 @@ impl BimApp {
             Tool::TrimTo { .. } => {
                 d.pick_all(q, PICK).into_iter().find(|id| matches!(model.elements.get(id), Some(Element::DetailLine(_))))
             }
-            Tool::Door | Tool::Window => d.pick(q, PICK).filter(|id| model.wall(*id).is_some()),
+            Tool::Door | Tool::Window | Tool::PickHost(_) => d.pick(q, PICK).filter(|id| model.wall(*id).is_some()),
             Tool::Demolish | Tool::Linework => d.pick(q, PICK),
             // Search all candidates: a non-alignable annotation must not hide a model edge.
             Tool::Align(Some(_)) if sketching => None,
@@ -1994,7 +2004,9 @@ impl BimApp {
             let o = (o.x - rect.min.x, o.y - rect.min.y);
             self.canvas.prior = None;
             // With a tool waiting for its elements a drag only boxes them.
-            self.canvas.drag = Some(match d.pick(o, PICK).filter(|_| self.flow.pending.is_none()) {
+            // Without Drag Elements on Selection, only what is already selected drags.
+            let draggable = |id: &Id| self.drag_on_selection || self.selection.contains(id);
+            self.canvas.drag = Some(match d.pick(o, PICK).filter(|id| self.flow.pending.is_none() && draggable(id)) {
                 Some(id) => {
                     // From a wall of the chain Tab highlighted, the whole chain is what is dragged, as Revit's.
                     match self.canvas.pressed_chain.take().filter(|(wall, _)| *wall == id) {
@@ -2057,9 +2069,15 @@ impl BimApp {
             let q = (at.x - rect.min.x, at.y - rect.min.y);
             // What lay under the press, which the hand may have left by the time the button came up.
             let found = if Some(q) == local { hovered } else { under_at(q) };
-            self.click(&model, (level, key), &view, q, found, click_modifiers(ui));
-            // A snap override typed was for that point.
-            self.snap_once = None;
+            if self.snap_once == Some(crate::Once::Between(None)) {
+                // Mid Between 2 Points (S2): the first of the two, which the tool takes no point from.
+                let first = self.snap(&model, level, &view, q, &[], false).at;
+                self.snap_once = Some(crate::Once::Between(Some(first)));
+            } else {
+                self.click(&model, (level, key), &view, q, found, click_modifiers(ui));
+                // A snap override typed was for that point.
+                self.snap_once = None;
+            }
         }
         // A double click ends a spline or a polyline at the point clicked, as Enter does.
         if response.double_clicked() && !on_control && !dragged && !writing && self.finishable() {
@@ -2809,6 +2827,17 @@ impl BimApp {
                 }
             }
             // The selected walls, onto the roof or floor picked; then Modify, the walls still selected.
+            &Tool::PickHost(opening) => {
+                // The wall clicked takes the door or window, at the place along it that was clicked.
+                if let Some((wall, w)) = hovered.and_then(|id| Some((id, m.wall(id)?))) {
+                    let along = bimcraft_core::walls::Axis::of(w).project(v.mm(at)).0;
+                    let host = serde_json::to_value(m.guid(wall)).unwrap_or_default();
+                    if self.run("modify", json!({"id": opening, "host": host, "offset": along.round()})).is_some() {
+                        self.tool = Tool::Modify;
+                        self.selection = vec![opening];
+                    }
+                }
+            }
             Tool::Attach => {
                 if let Some(id) = hovered {
                     let field = if self.attach_base { "attach_base" } else { "attach_top" };

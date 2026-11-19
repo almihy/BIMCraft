@@ -337,11 +337,14 @@ impl WallEnd {
     /// The end `cut` makes: its cap steps from layer to layer, from its face on the clockwise side of the way it leaves the
     /// node (its interior face at its start, its exterior one at its end) round to the other.
     fn stepped(cut: join::Cut, at_end: bool) -> Self {
-        let mut outline: Vec<P2> = if at_end {
-            cut.layers.iter().flat_map(|[a, b]| [*a, *b]).collect()
-        } else {
-            cut.layers.iter().rev().flat_map(|[a, b]| [*b, *a]).collect()
-        };
+        // Each layer's end, from its exterior side to its interior one: bent, where it ends against two walls.
+        let ends = cut.layers.iter().enumerate().map(|(k, [a, b])| {
+            let mut end = vec![*a];
+            end.extend(cut.bends.get(k).into_iter().flatten().copied());
+            end.push(*b);
+            end
+        });
+        let mut outline: Vec<P2> = if at_end { ends.flatten().collect() } else { ends.rev().flat_map(|e| e.into_iter().rev()).collect() };
         outline.dedup_by(|a, b| a.dist(*b) < 1e-6);
         Self { outline, cut: Some(cut), free: false }
     }
@@ -397,6 +400,16 @@ fn end_geometry(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> WallE
         if let Some(cut) = arms.get(a).and_then(|on| join::end_cut(m, id, at_end, on.id, None, false, false, true)) {
             return WallEnd::stepped(cut, at_end);
         }
+    }
+    // Three ends or more at a point, none in line with another: each joins the one on either side of it, half a wall to
+    // half a wall, their layers cleaned up by rank as at a corner.
+    if n >= 3
+        && !through
+        && prev.id != id
+        && next.id != id
+        && let Some(cut) = join::wedge_cut(m, id, at_end, (next.id, next.at_end), (prev.id, prev.at_end))
+    {
+        return WallEnd::stepped(cut, at_end);
     }
     let node = if at_end { w.end } else { w.start };
     let limit = arms.iter().map(|a| a.thick).fold(0.0, f64::max);
@@ -753,20 +766,38 @@ pub fn layer_geometry(m: &Model, id: Id, index: Option<&Index>) -> LayerGeometry
         }
         out
     };
+    // Where layer `k`'s end bends, at the wall's start (0) or its end (1), from its exterior side to its interior one.
+    let bends = |k: usize, at: usize| -> &[P2] {
+        ends.get(at).and_then(|e| e.cut.as_ref()).and_then(|c| c.bends.get(k)).map_or(&[], Vec::as_slice)
+    };
+    // The pieces of a layer between its two sides, each from the wall's start to its end, less `gaps`: each a ring. With
+    // `whole`, the sides run to the layer's ends, which bend where its end does.
+    let rings_of = |outer: &[P2], inner: &[P2], gaps: &[join::Gap], k: usize, whole: [bool; 2]| -> Vec<Vec<P2>> {
+        let sides: Vec<(Vec<P2>, Vec<P2>)> = if gaps.is_empty() {
+            vec![(outer.to_vec(), inner.to_vec())]
+        } else {
+            left(outer, gaps).into_iter().zip(left(inner, gaps)).collect()
+        };
+        let last = sides.len().saturating_sub(1);
+        sides
+            .into_iter()
+            .enumerate()
+            .map(|(i, (a, b))| {
+                let mut ring = a;
+                if i == last && whole[1] {
+                    ring.extend(bends(k, 1));
+                }
+                ring.extend(b.into_iter().rev());
+                if i == 0 && whole[0] {
+                    ring.extend(bends(k, 0).iter().rev());
+                }
+                ring
+            })
+            .collect()
+    };
     let mut bands = Vec::with_capacity(layers);
     for k in 0..layers {
-        let (outer, inner) = (side(k, k), side(k + 1, k));
-        let gaps = gaps_of(k);
-        let rings: Vec<Vec<P2>> = if gaps.is_empty() {
-            vec![outer.iter().chain(inner.iter().rev()).copied().collect()]
-        } else {
-            left(&outer, &gaps)
-                .into_iter()
-                .zip(left(&inner, &gaps))
-                .map(|(a, b)| a.into_iter().chain(b.into_iter().rev()).collect())
-                .collect()
-        };
-        bands.push(rings);
+        bands.push(rings_of(&side(k, k), &side(k + 1, k), &gaps_of(k), k, [true, true]));
     }
     // Each boundary's line: a face's is its layer's; between two layers, to where the shorter of them ends.
     let mut lines = Vec::with_capacity(offs.len());
@@ -858,15 +889,10 @@ pub fn layer_geometry(m: &Model, id: Id, index: Option<&Index>) -> LayerGeometry
                 list.iter()
                     .flat_map(|&[s0, s1, d0, d1]| {
                         let (a0, a1, b0, b1) = (point(s0, d0, k), point(s1, d0, k), point(s0, d1, k), point(s1, d1, k));
-                        if gaps.is_empty() {
-                            vec![vec![a0, a1, b1, b0]]
-                        } else {
-                            left(&[a0, a1], &gaps)
-                                .into_iter()
-                                .zip(left(&[b0, b1], &gaps))
-                                .map(|(a, b)| a.into_iter().chain(b.into_iter().rev()).collect())
-                                .collect()
-                        }
+                        // A piece as deep as its layer, at an end of the wall: the layer's end there, bent where it is.
+                        let deep = |d: f64, b: usize| deep.get(b).is_some_and(|x| (x - d).abs() < 1e-6);
+                        let full = deep(d0, k) && deep(d1, k + 1);
+                        rings_of(&[a0, a1], &[b0, b1], &gaps, k, [full && s0 <= 1e-6, full && s1 >= len - 1e-6])
                     })
                     .collect()
             })
