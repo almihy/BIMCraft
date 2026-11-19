@@ -217,4 +217,7 @@ icon_names! {
     AddVertex,
     DeleteVertex,
     ConvertSpline,
+    CurtainGrid,
+    Mullion,
+    CurtainPanel,
 }

@@ -555,9 +555,9 @@ fn type_rows(category: &str) -> &'static [(&'static str, &'static str, &'static 
 fn icon(category: &str) -> Icon {
     match category {
         "wall" => Icon::Wall,
-        "curtainpanel" => Icon::Wall,
-        "mullion" => Icon::Wall,
-        "curtaingrid" => Icon::Grid,
+        "curtainpanel" => Icon::CurtainPanel,
+        "mullion" => Icon::Mullion,
+        "curtaingrid" => Icon::CurtainGrid,
         "door" => Icon::Door,
         "window" => Icon::Window,
         "room" => Icon::Room,
