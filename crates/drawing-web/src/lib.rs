@@ -19,6 +19,9 @@ use cadcraft_index::{Opened, Query, Shape};
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 
+mod convert;
+pub use convert::{dwg_of, dxf_of};
+
 fn err(e: impl std::fmt::Display) -> JsError {
     JsError::new(&e.to_string())
 }
@@ -43,8 +46,31 @@ pub struct Picture {
     pub about: String,
 }
 
+/// A font file given by the host (the firm's, the computer's, or a stand-in from Arqiflow's package), registered under
+/// its file name for every drawing drawn after: "shx" or "outline", or why it was refused. The fonts a drawing's styles
+/// name and lack are [`Drawing::fonts_missing`]; Arqiflow's runner finds them as the Files viewer does.
+#[wasm_bindgen]
+pub fn add_font(name: &str, bytes: &[u8]) -> Result<String, JsError> {
+    match cadcraft_index::given::add_font(name, bytes) {
+        Ok(cadcraft_index::given::Added::Shx) => Ok("shx".into()),
+        Ok(cadcraft_index::given::Added::Outline) => Ok("outline".into()),
+        Err(e) => Err(JsError::new(&e)),
+    }
+}
+
+/// Whether a font a text style names is here (given, or built in).
+#[wasm_bindgen]
+pub fn has_font(name: &str) -> bool {
+    cadcraft_index::given::found(name)
+}
+
 #[wasm_bindgen]
 impl Drawing {
+    /// The fonts its text styles name that are not here (JSON list, as the styles spell them).
+    pub fn fonts_missing(&self) -> String {
+        serde_json::to_string(&self.o.fonts_missing()).unwrap_or_else(|_| "[]".into())
+    }
+
     /// A DWG or DXF file's `bytes` (`name` says which by its extension; a DWG is known by its first bytes too) read and indexed.
     pub fn index(bytes: &[u8], name: &str) -> Result<Indexed, JsError> {
         let (pack, summary) = cadcraft_index::index(bytes, name).map_err(err)?;
@@ -205,6 +231,7 @@ fn shape(s: Shape) -> dxf::Shape {
             tag: None,
             wide: 1.0,
             mirrored: false,
+            font: None,
         },
         Shape::Fill { rings, solid } => {
             dxf::Shape::Fill { rings: rings.into_iter().map(|r| r.into_iter().map(p).collect()).collect(), solid, tile: None, shade: false }

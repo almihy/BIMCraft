@@ -642,6 +642,9 @@ pub struct BimApp {
     preset_note: Option<String>,
     settings_path: Option<PathBuf>,
     settings_kept: Option<settings::Settings>,
+    /// The settings are kept by the hosting page ([`BimApp::use_page_settings`]), and what it is to keep next.
+    settings_to_page: bool,
+    settings_out: Option<String>,
     /// The window's size, kept and brought within its screen (`window.rs`).
     window: window::Tracker,
     theme_wanted: Option<egui::ThemePreference>,
@@ -1485,6 +1488,8 @@ impl BimApp {
             preset_note: None,
             settings_path: None,
             settings_kept: None,
+            settings_to_page: false,
+            settings_out: None,
             window: window::Tracker::default(),
             theme_wanted: None,
             light_canvas: false,
@@ -3586,6 +3591,7 @@ impl BimApp {
         fresh.docking = std::mem::take(&mut self.docking);
         fresh.checks = std::mem::take(&mut self.checks);
         (fresh.settings_path, fresh.settings_kept) = (self.settings_path.take(), self.settings_kept.take());
+        (fresh.settings_to_page, fresh.settings_out) = (self.settings_to_page, self.settings_out.take());
         fresh.window = std::mem::take(&mut self.window);
         #[cfg(feature = "updater")]
         {

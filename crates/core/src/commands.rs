@@ -7442,7 +7442,8 @@ fn read_item(n: usize, layer: &str, shape: &crate::dxf::Shape) -> Value {
         Shape::Circle { c, r } => json!({"c": read_point(*c), "r": read_mm(*r)}),
         Shape::Arc { c, r, start, end } => json!({"c": read_point(*c), "r": read_mm(*r), "start": read_mm(*start), "end": read_mm(*end)}),
         Shape::Point(at) => json!({"at": read_point(*at)}),
-        Shape::Text { at, height, angle, text, .. } => {
+        Shape::Text { at, height, angle, text, font, .. } => {
+            let text = crate::dxf::fonts::read(font.as_ref(), text);
             json!({"text": text, "at": read_point(*at), "height": read_mm(*height), "angle": read_mm(*angle)})
         }
         Shape::Fill { rings, solid, tile, shade } => {
@@ -7663,7 +7664,8 @@ fn cad_read_summary(id: Id, cad: &Cad, ci: &CadImport, extents: Option<[P2; 2]>)
         .iter()
         .take(READ_TEXTS)
         .filter_map(|(n, e)| match crate::cad::placed(&e.shape, ci) {
-            crate::dxf::Shape::Text { at, height, text, .. } => {
+            crate::dxf::Shape::Text { at, height, text, font, .. } => {
+                let text = crate::dxf::fonts::read(font.as_ref(), &text);
                 Some(json!({"n": n, "text": text, "layer": e.layer, "at": read_point(at), "height": read_mm(height)}))
             }
             _ => None,

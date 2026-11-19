@@ -105,7 +105,7 @@ use bimcraft_ui_egui::BimApp;
 use bimcraft_ui_egui::host::{Controls, HostLook, Skin, Waive, editor_takes_key};
 use bimcraft_ui_egui::hostview::ContextKey;
 /// The engine on its own, with no window (crates/web): what a page's model worker and the server run, from this same file.
-pub use bimcraft_web::Engine;
+pub use bimcraft_web::{Engine, add_font, has_font};
 use serde_json::Value;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -234,6 +234,24 @@ impl Host {
     }
 }
 
+/// Where the browser keeps the window's settings.
+const SETTINGS_KEY: &str = "bimcraft.settings";
+
+fn storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.local_storage().ok().flatten()
+}
+
+/// The settings this browser kept, if it keeps any (a private window may not).
+fn kept_settings() -> Option<String> {
+    storage()?.get_item(SETTINGS_KEY).ok().flatten()
+}
+
+fn keep_settings(json: &str) {
+    if let Some(s) = storage() {
+        let _ = s.set_item(SETTINGS_KEY, json);
+    }
+}
+
 impl eframe::App for Host {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.app.ui(ui, frame);
@@ -249,6 +267,9 @@ impl eframe::App for Host {
         self.tell_pdf();
         self.tell_dwg();
         self.tell_context(ui);
+        if let Some(settings) = self.app.take_settings_to_keep() {
+            keep_settings(&settings);
+        }
         if let Some(rule) = self.app.take_rule_request() {
             later_with(self.on_rule.borrow().clone(), JsValue::from_str(&rule));
         }
@@ -404,7 +425,10 @@ impl WebApp {
             let (model, _) = Model::read(&text).map_err(err)?;
             session.reset(model, None);
         }
-        let app = BimApp::hosted_on(session);
+        let mut app = BimApp::hosted_on(session);
+        // The window's settings (the palettes' layout, the ribbon, the look the person chose) are kept in this browser, as
+        // the desktop keeps them in a file: the next project opens as they left the last.
+        app.use_page_settings(kept_settings().as_deref());
         *self.sent.borrow_mut() = Some(Arc::clone(&app.session.model));
         let mut host = Host {
             seen: Arc::clone(&app.session.model),
@@ -646,6 +670,26 @@ impl WebApp {
         }
         self.repaint();
         Ok(())
+    }
+
+    /// The fonts the model's drawings name that could read their text and are not here (a JSON list, as the styles spell
+    /// them): old Arabic SHX fonts draw an Arabic letter for each Latin key, and a text in one reads in Arabic once the
+    /// page gives the font ([`WebApp::give_font`]), as Arqiflow's drawing viewer is given it. Empty before the start.
+    pub fn fonts_missing(&self) -> String {
+        let missing = self.runner.app_mut::<Host>().map(|host| host.app.fonts_missing()).unwrap_or_default();
+        serde_json::to_string(&missing).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// A font file the page gives (the firm's, the computer's, or a stand-in), by its file name: "shx" or "outline";
+    /// throws why it was refused. The drawings are drawn again by it. Before or after the start.
+    pub fn give_font(&self, name: &str, bytes: &[u8]) -> Result<String, JsValue> {
+        let kind = match self.runner.app_mut::<Host>() {
+            Some(mut host) => host.app.give_font(name, bytes),
+            None => bimcraft_core::dxf::fonts::add(name, bytes),
+        }
+        .map_err(err)?;
+        self.repaint();
+        Ok(kind.to_string())
     }
 
     /// Letters the interface in the page's own fonts: `sans` (variable in weight or not) and `mono`, each the bytes of a

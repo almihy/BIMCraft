@@ -402,7 +402,9 @@ pub fn labels(cad: &Cad, ci: &CadImport, outlines: &[Outline]) -> Vec<Vec<String
     let place = cad_place(ci);
     let mut texts: Vec<(P2, usize, String)> = texts_of(cad.dxf())
         .filter_map(|(n, e)| match e.shape {
-            Shape::Text { at, text, .. } if !text.trim().is_empty() => Some((place(at), n, text)),
+            Shape::Text { at, text, font, .. } if !text.trim().is_empty() => {
+                Some((place(at), n, crate::dxf::fonts::read(font.as_ref(), &text).into_owned()))
+            }
             _ => None,
         })
         .collect();

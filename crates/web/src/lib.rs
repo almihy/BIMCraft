@@ -16,6 +16,20 @@ fn err(e: impl std::fmt::Display) -> JsError {
     JsError::new(&e.to_string())
 }
 
+/// A font file a host gives (the firm's, the computer's, or a stand-in), by its file name, for every engine of this
+/// module: "shx" or "outline", or why it was refused. A drawing's text in an old Arabic SHX font laid out on the keyboard
+/// reads in Arabic by it (`bimcraft_core::dxf::fonts`). The fonts a model's drawings lack are [`Engine::fonts_missing`].
+#[wasm_bindgen]
+pub fn add_font(name: &str, bytes: &[u8]) -> Result<String, JsError> {
+    bimcraft_core::dxf::fonts::add(name, bytes).map(str::to_string).map_err(err)
+}
+
+/// Whether font `name`, as a text style names it, is here, or is no font a text is read by.
+#[wasm_bindgen]
+pub fn has_font(name: &str) -> bool {
+    bimcraft_core::dxf::fonts::has(name)
+}
+
 impl Default for Engine {
     fn default() -> Engine {
         Engine::new()
@@ -34,6 +48,13 @@ impl Engine {
         let p: Value =
             if params.trim().is_empty() { Value::Object(Default::default()) } else { serde_json::from_str(params).map_err(err)? };
         self.s.execute(name, &p).map(|v| v.to_string()).map_err(err)
+    }
+
+    /// The fonts the model's drawings name that could read their text and are not here (a JSON list, as the styles
+    /// spell them): what a host finds and gives with [`add_font`].
+    pub fn fonts_missing(&self) -> String {
+        let missing = bimcraft_core::dxf::fonts::missing(self.s.model.cads.values().map(|c| c.dxf()));
+        serde_json::to_string(&missing).unwrap_or_else(|_| "[]".into())
     }
 
     /// Runs a script: one `ID {json}` per line.

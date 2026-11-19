@@ -161,6 +161,26 @@ Reserved Font Name, so the fonts keep it. "IBM Plex" is a trademark of IBM Corp,
 The place the two files were obtained from was not recorded when they were added.
 
 ==============================================================================
+Noto Sans Arabic, Arabic lettering
+==============================================================================
+
+BIMCraft letters Arabic in two fonts built into it (crates/model/src/text.rs includes them when it is compiled: the
+canvas's text and, behind Plex, the windows'). They are kept in assets/fonts of the source:
+
+  Noto Sans Arabic Regular, Version 2.013
+    assets/fonts/noto-sans-arabic/NotoSansArabic-Regular.ttf, 271652 bytes
+    sha256 7ed3fe069312aceac454f17cf613a30f95271d6ed7ce58005ed4d016bd3823d7
+
+  Noto Sans Arabic Bold, Version 2.013
+    assets/fonts/noto-sans-arabic/NotoSansArabic-Bold.ttf, 298372 bytes
+    sha256 5ccd1a8914f7c7e8aa8050f2c7c37b10fc5e855f06583c2a2248a436aad3fc0f
+
+    their name tables say: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/arabic)
+
+These Font Software files are licensed under the SIL Open Font License, Version 1.1. Its text is in
+assets/fonts/noto-sans-arabic/OFL.txt, and every copy of BIMCraft carries it. BIMCraft does not change the fonts.
+
+==============================================================================
 lucide, and Arqiflow's own icons in its style
 ==============================================================================
 

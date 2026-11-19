@@ -414,9 +414,15 @@ impl Lod {
             let ink = Ink { color: self.color_of.get(i).copied().unwrap_or(0), alpha: f64::from(e.alpha) / 255.0 };
             // A text's box is its letters', turned and aligned; one of numbers that aren't is drawn itself.
             let b = match &e.shape {
-                Shape::Text { at, height, angle, text, align, wide, .. } => {
-                    let w = f64::from(crate::font::width(text, 1.0)) * height * wide;
-                    text_box(*at, (w, *height), *angle, (align.h, align.v)).unwrap_or([f64::NEG_INFINITY, 0.0, f64::INFINITY, 0.0])
+                Shape::Text { at, height, angle, text, align, wide, font, .. } => {
+                    let (start, w) = text_span(font.as_ref(), text, *height, *wide);
+                    // Left-aligned, it lies from where its pen starts: at its point, or left of it in a font that writes
+                    // leftward.
+                    let from = match align.h {
+                        Horizontal::Left => *at + P2(angle.to_radians().cos(), angle.to_radians().sin()) * start,
+                        _ => *at,
+                    };
+                    text_box(from, (w, *height), *angle, (align.h, align.v)).unwrap_or([f64::NEG_INFINITY, 0.0, f64::INFINITY, 0.0])
                 }
                 _ => b,
             };
@@ -447,8 +453,8 @@ impl Lod {
             let Some(sums) = p.sums(layer) else { continue };
             match &e.shape {
                 Shape::Point(_) => {}
-                Shape::Text { height, text, wide, .. } => {
-                    let w = f64::from(crate::font::width(text, 1.0)) * height * wide;
+                Shape::Text { height, text, wide, font, .. } => {
+                    let (_, w) = text_span(font.as_ref(), text, *height, *wide);
                     sums.spread(b, w * height * TEXT_INK / (cell * cell) * CELL_PX, ink);
                 }
                 Shape::Fill { rings, .. } => sums.spread(b, fill_area(rings) / (cell * cell), ink),
@@ -1024,6 +1030,18 @@ impl Sums {
 
 /// The box of a text `size` (width, height) at `at`, turned `angle` degrees and aligned so: low x, low y, high x, high y; none
 /// for a text of no height or of numbers that aren't.
+/// Where a text `height` tall, its letters `wide` times their font's width, lies along its baseline from where its pen
+/// starts, and how wide it is: as its font letters it, or as ours does one of no font.
+fn text_span(font: Option<&std::sync::Arc<crate::dxf::Font>>, text: &str, height: f64, wide: f64) -> (f64, f64) {
+    match font {
+        Some(f) => {
+            let l = crate::dxf::fonts::lettered(f, text, wide);
+            (f64::from(l.start) * height, f64::from(l.width) * height)
+        }
+        None => (0.0, f64::from(crate::font::width(text, 1.0)) * height * wide),
+    }
+}
+
 fn text_box(at: P2, (w, h): (f64, f64), angle: f64, (ah, av): (Horizontal, Vertical)) -> Option<[f64; 4]> {
     if !(w.is_finite() && h.is_finite() && w >= 0.0 && h > 0.0) {
         return None;

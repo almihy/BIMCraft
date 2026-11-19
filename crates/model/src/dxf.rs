@@ -6,11 +6,13 @@
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 use crate::geom::P2;
 use crate::prim::Rgb;
 
 pub mod dwg;
+pub mod fonts;
 
 /// What a file may be before it's refused, bytes.
 pub const MAX_BYTES: usize = 128 << 20;
@@ -26,6 +28,8 @@ pub const MAX_FILE_COORD: f64 = 1e12;
 const MAX_WORK: usize = 4_000_000;
 /// The most values one entity may hold: a polyline's vertices, a hatch's edges.
 const MAX_PAIRS: usize = 2_000_000;
+/// The most text styles whose fonts are kept.
+const MAX_STYLES: usize = 10_000;
 /// The most rows, and the most columns, an INSERT's array may have.
 const MAX_ARRAY: usize = 10_000;
 /// The most segments a flattened arc, circle or ellipse gets.
@@ -192,6 +196,9 @@ pub enum Shape {
         tag: Option<String>,
         wide: f64,
         mirrored: bool,
+        /// The font its text style gives it, which letters it ([`fonts::lettered`]); none for a text of no drawing's (a
+        /// PDF page's), lettered in ours. Its `text` is as the file holds it.
+        font: Option<Arc<Font>>,
     },
     /// A hatch's boundaries, or a solid: `solid` when filled through, else patterned, which a view draws as it can. A patterned
     /// one may hold its pattern (`tile`, a PDF's tiling pattern), drawn as its cell repeated inside its rings; its colour and
@@ -298,6 +305,19 @@ impl Shape {
             Shape::Fill { rings, tile, .. } => rings.iter().flatten().all(p) && tile.as_ref().is_none_or(|t| t.fits(MAX_FILE_COORD)),
         }
     }
+}
+
+/// The font a text is lettered in, as its text style says: the font's file or family (`romans.shx`, "Arial"; empty for
+/// the stroke font), its big font (an SHX font of East Asian or Arabic characters), how far its letters lean (radians),
+/// whether it writes downward, and the drawing's code page (`$DWGCODEPAGE`, `ANSI_1256`), by which an SHX font draws a
+/// character.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Font {
+    pub name: String,
+    pub big: String,
+    pub oblique: f64,
+    pub vertical: bool,
+    pub code_page: String,
 }
 
 /// An entity of model space, placed: its layer, how it is drawn, and its shape.
@@ -542,8 +562,17 @@ pub fn read(bytes: &[u8]) -> Result<Dxf, String> {
 
 /// [`read`] of text.
 pub fn read_text(text: &str) -> Result<Dxf, String> {
-    Reader { p: Pairs::new(text), header: HashMap::new(), layers: Vec::new(), linetypes: Vec::new(), blocks: HashMap::new(), ents: None }
-        .read()
+    Reader {
+        p: Pairs::new(text),
+        header: HashMap::new(),
+        layers: Vec::new(),
+        linetypes: Vec::new(),
+        styles: HashMap::new(),
+        plain: std::cell::OnceCell::new(),
+        blocks: HashMap::new(),
+        ents: None,
+    }
+    .read()
 }
 
 /// The text as Latin-1, byte for byte.
@@ -726,6 +755,10 @@ struct Reader<'a> {
     header: HashMap<&'a str, Vec<(i32, &'a str)>>,
     layers: Vec<Layer>,
     linetypes: Vec<Linetype>,
+    /// The STYLE table: each text style's font, by the style's name in capitals.
+    styles: HashMap<String, Arc<Font>>,
+    /// The font of a text whose style the table has not: the stroke font.
+    plain: std::cell::OnceCell<Arc<Font>>,
     blocks: HashMap<String, Def<'a>>,
     /// The ENTITIES section's, once seen.
     ents: Option<Vec<Ent<'a>>>,
@@ -839,6 +872,27 @@ impl<'a> Reader<'a> {
         Ok(Ent { kind, line, codes })
     }
 
+    /// The drawing's code page (`$DWGCODEPAGE`), or empty when the header names none.
+    fn code_page(&self) -> String {
+        let named = self.header.get("$DWGCODEPAGE").and_then(|pairs| pairs.iter().find(|(c, _)| *c == 3));
+        named.map_or(String::new(), |(_, v)| v.trim().to_string())
+    }
+
+    /// The font of the text style entity `e` names (group 7; Standard when it names none): the stroke font when the
+    /// file's table has no such style. A text's own lean (group 51) is its font's.
+    fn font(&self, e: &Ent) -> Result<Option<Arc<Font>>, String> {
+        let style = e.str(7).map(str::trim).filter(|s| !s.is_empty()).unwrap_or("STANDARD").to_uppercase();
+        let font = match self.styles.get(&style) {
+            Some(f) => f.clone(),
+            None => self.plain.get_or_init(|| Arc::new(Font { code_page: self.code_page(), ..Font::default() })).clone(),
+        };
+        let lean = if e.kind == "MTEXT" { None } else { e.num(51)?.filter(|a| a.is_finite()).map(f64::to_radians) };
+        Ok(Some(match lean {
+            Some(o) if (o - font.oblique).abs() > 1e-9 => Arc::new(Font { oblique: o, ..(*font).clone() }),
+            _ => font,
+        }))
+    }
+
     fn tables(&mut self) -> Result<(), String> {
         while let Some((code, value)) = self.p.next()? {
             if code != 0 {
@@ -866,6 +920,21 @@ impl<'a> Reader<'a> {
                 "LTYPE" => {
                     let e = self.entity("LTYPE")?;
                     self.linetypes.push(Linetype { name: e.str(2).unwrap_or("").to_string(), dashes: e.all(49)? });
+                }
+                "STYLE" => {
+                    let e = self.entity("STYLE")?;
+                    if let Some(name) = e.str(2)
+                        && self.styles.len() < MAX_STYLES
+                    {
+                        let font = Font {
+                            name: e.str(3).unwrap_or("").trim().to_string(),
+                            big: e.str(4).unwrap_or("").trim().to_string(),
+                            oblique: e.num(50)?.filter(|a| a.is_finite()).unwrap_or(0.0).to_radians(),
+                            vertical: e.int(70)?.unwrap_or(0) & 4 != 0,
+                            code_page: self.code_page(),
+                        };
+                        self.styles.insert(name.trim().to_uppercase(), Arc::new(font));
+                    }
                 }
                 kind => {
                     self.entity(kind)?;
@@ -1257,13 +1326,13 @@ impl<'a> Reader<'a> {
                     if e.kind == "ATTRIB" && e.int(70)?.unwrap_or(0) & 1 != 0 {
                         continue;
                     }
-                    text(e)?
+                    text(e, self.font(e)?)?
                 }
                 "MTEXT" => {
                     // A colour its formatting gives the whole of it, before its first word, over the entity's.
                     let raw: String = e.codes.iter().filter(|(c, _)| *c == 3 || *c == 1).map(|(_, v)| *v).collect();
                     let color = leading_color(&raw).unwrap_or(style.color);
-                    for line in mtext(e)? {
+                    for line in mtext(e, self.font(e)?)? {
                         out.push(Entity {
                             layer: style.layer.clone(),
                             color,
@@ -1408,9 +1477,9 @@ fn transformed(shape: Shape, xf: Xf) -> Shape {
             }
             None => Shape::Polyline { pts: arc_points(c, r, start, end - start).into_iter().map(at).collect(), closed: false },
         },
-        Shape::Text { at: p, height, angle, text, align, tag, wide, mirrored } => {
+        Shape::Text { at: p, height, angle, text, align, tag, wide, mirrored, font } => {
             let (k, turn) = xf.similarity().map_or((xf.x.length(), xf.x.1.atan2(xf.x.0).to_degrees()), |(k, t, _)| (k, t));
-            Shape::Text { at: at(p), height: height * k, angle: angle + turn, text, align, tag, wide, mirrored }
+            Shape::Text { at: at(p), height: height * k, angle: angle + turn, text, align, tag, wide, mirrored, font }
         }
     }
 }
@@ -1658,7 +1727,7 @@ fn decode(s: &str, mtext: bool) -> String {
     out
 }
 
-fn text(e: &Ent) -> Result<Option<Shape>, String> {
+fn text(e: &Ent, font: Option<Arc<Font>>) -> Result<Option<Shape>, String> {
     let (Some(first), Some(height), Some(words)) = (e.point(10)?, e.num(40)?, e.str(1)) else { return Ok(None) };
     let tag = (e.kind == "ATTRIB").then(|| e.str(2).map(|t| t.trim().to_string())).flatten().filter(|t| !t.is_empty());
     let line = Line {
@@ -1669,6 +1738,7 @@ fn text(e: &Ent) -> Result<Option<Shape>, String> {
         wide: e.num(41)?,
         flags: e.int(71)?.unwrap_or(0),
         angle: e.num(50)?.unwrap_or(0.0),
+        font,
     };
     Ok(line.shape(words, tag))
 }
@@ -1683,6 +1753,8 @@ struct Line {
     wide: Option<f64>,
     flags: i64,
     angle: f64,
+    /// Its text style's font.
+    font: Option<Arc<Font>>,
 }
 
 impl Line {
@@ -1722,12 +1794,12 @@ impl Line {
         let flags = self.flags;
         let (backward, upside) = (flags & 2 != 0, flags & 4 != 0);
         let angle = self.angle + if upside { 180.0 } else { 0.0 };
-        Some(Shape::Text { at, height, angle, text: words, align, tag, wide, mirrored: backward != upside })
+        Some(Shape::Text { at, height, angle, text: words, align, tag, wide, mirrored: backward != upside, font: self.font.clone() })
     }
 }
 
 /// A multi-line text's lines, each a text of its own, stepped down from where its attachment point puts the block.
-fn mtext(e: &Ent) -> Result<Vec<Shape>, String> {
+fn mtext(e: &Ent, font: Option<Arc<Font>>) -> Result<Vec<Shape>, String> {
     let (Some(at), Some(height)) = (e.point(10)?, e.num(40)?) else { return Ok(Vec::new()) };
     if height <= 0.0 {
         return Ok(Vec::new());
@@ -1744,12 +1816,12 @@ fn mtext(e: &Ent) -> Result<Vec<Shape>, String> {
         (None, Some(dir)) if dir.length() > 0.0 => dir.1.atan2(dir.0).to_degrees(),
         _ => 0.0,
     };
-    Ok(mtext_lines(at, height, angle, e.int(71)?.unwrap_or(1), e.num(44)?, &raw))
+    Ok(mtext_lines(at, height, angle, e.int(71)?.unwrap_or(1), e.num(44)?, &raw, font))
 }
 
 /// A multi-line text's lines (its words `raw`, as a file holds them), each a text of its own, stepped down from where its
 /// attachment point (`attach`, 1 to 9) at `at` puts the block; `spacing`, its line spacing factor.
-fn mtext_lines(at: P2, height: f64, angle: f64, attach: i64, spacing: Option<f64>, raw: &str) -> Vec<Shape> {
+fn mtext_lines(at: P2, height: f64, angle: f64, attach: i64, spacing: Option<f64>, raw: &str, font: Option<Arc<Font>>) -> Vec<Shape> {
     if height <= 0.0 {
         return Vec::new();
     }
@@ -1785,6 +1857,7 @@ fn mtext_lines(at: P2, height: f64, angle: f64, attach: i64, spacing: Option<f64
             tag: None,
             wide: 1.0,
             mirrored: false,
+            font: font.clone(),
         })
         .collect()
 }
@@ -2595,7 +2668,8 @@ mod tests {
                     align: Align { h: Horizontal::Left, v: Vertical::Baseline },
                     tag: None,
                     wide: 1.0,
-                    mirrored: false
+                    mirrored: false,
+                    font: Some(Arc::new(Font::default())),
                 },
                 Shape::Text {
                     at: P2(8.0, 9.0),
@@ -2605,7 +2679,8 @@ mod tests {
                     align: Align { h: Horizontal::Center, v: Vertical::Top },
                     tag: None,
                     wide: 1.0,
-                    mirrored: false
+                    mirrored: false,
+                    font: Some(Arc::new(Font::default())),
                 },
                 Shape::Text {
                     at: P2(8.0, 9.0),
@@ -2615,7 +2690,8 @@ mod tests {
                     align: Align { h: Horizontal::Center, v: Vertical::Middle },
                     tag: None,
                     wide: 1.0,
-                    mirrored: false
+                    mirrored: false,
+                    font: Some(Arc::new(Font::default())),
                 },
             ]
         );

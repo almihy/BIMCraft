@@ -66,7 +66,8 @@ impl BimApp {
     pub fn hosted_on(session: Session) -> BimApp {
         let mut app = BimApp::new(session);
         app.hosted = true;
-        // The page checks the model against the firm's rules and the brief: the Checks palette is open from the start.
+        // The page checks the model against the firm's rules and the brief: the Checks palette is docked on the right,
+        // closed until the person opens it (the page's kept settings, `use_page_settings`, say how they left it).
         app.docking = app.first_docking();
         // What it writes (Export) is the page's to keep, not a file on this computer's disk.
         app.session.files.keep_writes = true;
@@ -177,14 +178,37 @@ impl BimApp {
         let Ok(key) = key.trim().parse::<u64>() else { return };
         bimcraft_core::dxf::dwg::checked(key, answer);
         if bimcraft_core::cad::read_checked() {
-            // The same model, held anew, so every view draws it again with the drawing in it.
-            let was_saved = !self.dirty();
-            self.session.model = Arc::new((*self.session.model).clone());
-            if was_saved {
-                self.saved = Arc::clone(&self.session.model);
-            }
-            self.tidy();
+            self.draw_again();
         }
+    }
+
+    /// The same model, held anew, so every view draws it again: what it draws changed (a drawing was read, a font was
+    /// given), with no change of the person's.
+    fn draw_again(&mut self) {
+        let was_saved = !self.dirty();
+        self.session.model = Arc::new((*self.session.model).clone());
+        if was_saved {
+            self.saved = Arc::clone(&self.session.model);
+        }
+        self.tidy();
+    }
+
+    /// The fonts the model's drawings name that could read their text and are not here
+    /// (`bimcraft_core::dxf::fonts::missing`): the page finds each (the firm's, the computer's, a stand-in) and gives it
+    /// with [`BimApp::give_font`].
+    pub fn fonts_missing(&self) -> Vec<String> {
+        bimcraft_core::dxf::fonts::missing(self.session.model.cads.values().map(|c| c.dxf()))
+    }
+
+    /// A font file the page gives, by its file name: "shx" or "outline", or why it was refused. Text in an old Arabic
+    /// SHX font laid out on the keyboard reads in Arabic by it, and the drawings are drawn again; no change of the
+    /// person's.
+    pub fn give_font(&mut self, name: &str, bytes: &[u8]) -> Result<&'static str, String> {
+        let kind = bimcraft_core::dxf::fonts::add(name, bytes)?;
+        if !self.session.model.cads.is_empty() {
+            self.draw_again();
+        }
+        Ok(kind)
     }
 
     /// What was written for the page (Export) since the last call: each file's name and bytes.

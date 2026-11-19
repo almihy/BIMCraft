@@ -14,11 +14,12 @@ use bimcraft_plugin::{Level, Plugins};
 use serde_json::{Value, json};
 
 const USAGE: &str = "USAGE:
-  bimcraft-cli run [FILE] [--sample | --highrise] [--cmd 'ID {json}']… [--script FILE]… [--save PATH]…
+  bimcraft-cli run [FILE] [--sample | --highrise] [--font FILE]… [--cmd 'ID {json}']… [--script FILE]… [--save PATH]…
       Open FILE (a .bimcraft project, or an .ifc or Revit .rvt file to import) or start empty, then in order: build the sample house, run
       commands and scripts (one `ID {json}` per line), save. --save writes by extension:
       .bimcraft (the project), .ifc (IFC4), .glb (the 3D view's scene as glTF), .svg or .png (the lowest level's plan).
       --highrise builds an original 20-storey performance sample (about 10,000 elements).
+      --font gives a font file a CAD drawing's text style names (romans.shx, a firm's own): its text is lettered in it.
   bimcraft-cli info FILE         levels, element counts, types and warnings of a project or an IFC file; of a Revit .rvt or
                                  .rfa file, its release, last save, levels and element counts by category
   bimcraft-cli convert IN OUT    a project, an IFC file or a Revit .rvt file to .ifc, .glb, .svg, .png or .bimcraft
@@ -83,6 +84,11 @@ fn cli(args: &[String], out: &mut impl Write) -> Result<(), String> {
                     "--script" => {
                         let path = value()?;
                         s.script(&std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?)?
+                    }
+                    "--font" => {
+                        let path = value()?;
+                        let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
+                        bimcraft_core::dxf::fonts::add(path, &bytes).map(|_| Vec::new())?
                     }
                     "--save" => vec![s.execute("save", &json!({ "path": value()? }))?],
                     flag if flag.starts_with("--") => return Err(format!("unknown option `{flag}`\n\n{USAGE}")),

@@ -301,8 +301,28 @@ impl BimApp {
 
     /// Keeps the settings in `path`: what it holds now, and from now on what changes.
     pub fn use_settings(&mut self, path: PathBuf) {
+        let kept = read(&path);
+        self.take_kept_settings(kept.as_ref());
+        self.settings_path = Some(path);
+    }
+
+    /// Keeps the settings with the hosting page: `json` is what it kept (none the first time); from now on what changes
+    /// is given to it ([`BimApp::take_settings_to_keep`]). The palettes' layout, the ribbon and the rest are as the person
+    /// left them in the last project they opened, as in a window with a settings file.
+    pub fn use_page_settings(&mut self, json: Option<&str>) {
+        let kept = json.filter(|j| j.len() as u64 <= MAX_FILE).and_then(|j| serde_json::from_str::<Value>(j).ok());
+        self.take_kept_settings(kept.as_ref());
+        self.settings_to_page = true;
+    }
+
+    /// The settings for the hosting page to keep, when they have changed since it was last given them.
+    pub fn take_settings_to_keep(&mut self) -> Option<String> {
+        self.settings_out.take()
+    }
+
+    fn take_kept_settings(&mut self, kept: Option<&Value>) {
         let now = self.settings_now(ThemePreference::System);
-        let kept = read(&path).map_or(now.clone(), |v| Settings::from_json(&v, now));
+        let kept = kept.map_or(now.clone(), |v| Settings::from_json(v, now));
         (self.lang, self.ribbon_min, self.docking) = (kept.language, kept.ribbon_minimized, kept.docking.clone());
         (self.compact, self.scale) = (kept.compact, kept.scale);
         (self.scheme, self.accent) = (kept.scheme, kept.accent);
@@ -321,7 +341,6 @@ impl BimApp {
         self.system_title_bar = kept.system_title_bar;
         (self.agents.listen, self.agents.port, self.agents.edit) = (kept.agents_listen, kept.agents_port, kept.agents_edit);
         self.settings_kept = Some(kept);
-        self.settings_path = Some(path);
     }
 
     /// Lets the 3D view be drawn on the card `state` is the window's, when the user asks (Settings > Performance).
@@ -363,7 +382,9 @@ impl BimApp {
 
     /// Writes the settings file when what it keeps has changed, between drags: once a frame.
     pub(crate) fn keep_settings(&mut self, ctx: &Context) {
-        let Some(path) = self.settings_path.clone() else { return };
+        if self.settings_path.is_none() && !self.settings_to_page {
+            return;
+        }
         if self.dragging.is_some() || ctx.input(|i| i.pointer.any_down()) {
             return;
         }
@@ -371,8 +392,12 @@ impl BimApp {
         if self.settings_kept.as_ref() == Some(&now) {
             return;
         }
-        if let Err(e) = write(&path, &now) {
-            self.status = failed(crate::lang::tf("Couldn't save the setting: {}", &[&e]));
+        if let Some(path) = &self.settings_path {
+            if let Err(e) = write(path, &now) {
+                self.status = failed(crate::lang::tf("Couldn't save the setting: {}", &[&e]));
+            }
+        } else {
+            self.settings_out = Some(now.to_json().to_string());
         }
         self.settings_kept = Some(now);
     }

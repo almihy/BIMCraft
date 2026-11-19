@@ -637,7 +637,7 @@ fn similar(shape: &Shape, f: impl Fn(P2) -> P2, turn: f64, k: f64) -> Shape {
             Shape::Arc { c: f(*c), r: r * k, start: s, end: s + (end - start) }
         }
         Shape::Point(p) => Shape::Point(f(*p)),
-        Shape::Text { at, height, angle, text, align, tag, wide, mirrored } => Shape::Text {
+        Shape::Text { at, height, angle, text, align, tag, wide, mirrored, font } => Shape::Text {
             at: f(*at),
             height: height * k,
             angle: (angle + turn).rem_euclid(360.0),
@@ -646,6 +646,7 @@ fn similar(shape: &Shape, f: impl Fn(P2) -> P2, turn: f64, k: f64) -> Shape {
             tag: tag.clone(),
             wide: *wide,
             mirrored: *mirrored,
+            font: font.clone(),
         },
         Shape::Fill { rings, solid, tile, shade } => Shape::Fill {
             rings: rings.iter().map(ring).collect(),
@@ -669,7 +670,7 @@ pub fn placed(shape: &Shape, ci: &crate::model::CadImport) -> Shape {
             let (pts, closed) = runs.pop().unwrap_or_default();
             Shape::Polyline { pts: pts.into_iter().map(f).collect(), closed }
         }
-        Shape::Text { at, height, angle, text, align, tag, wide, mirrored } => {
+        Shape::Text { at, height, angle, text, align, tag, wide, mirrored, font } => {
             // Its baseline turned as the page is, its height as its up stretches, its width as its baseline does.
             let (sin, cos) = angle.to_radians().sin_cos();
             let (o, along, up) = (f(*at), f(*at + P2(cos, sin)), f(*at + P2(-sin, cos)));
@@ -685,6 +686,7 @@ pub fn placed(shape: &Shape, ci: &crate::model::CadImport) -> Shape {
                 tag: tag.clone(),
                 wide,
                 mirrored: *mirrored,
+                font: font.clone(),
             }
         }
         other => similar(other, f, ci.angle, ci.scale),

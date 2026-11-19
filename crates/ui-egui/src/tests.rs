@@ -6812,6 +6812,7 @@ mod images;
 mod inspector;
 mod interface;
 mod korean;
+mod arabic;
 mod light_canvas;
 mod lines;
 mod lineweights;
