@@ -170,7 +170,7 @@ fn the_wall_joins_tool_refuses_what_is_no_join_of_two_ends() {
     for (p, why) in [
         (json!({"walls": [a, t], "kind": "mitre"}), "a T join is a butt"),
         (json!({"walls": [a, a]}), "do not join"),
-        (json!({"walls": [a]}), "`walls` is the two walls that meet"),
+        (json!({"walls": [a]}), "`walls` is the walls that meet"),
         (json!({"walls": [a, b], "kind": "lap"}), "`kind` is butt, mitre or square-off"),
         (json!({"walls": [a, b], "through": t}), "`through` is one of the two walls"),
         (json!({"walls": [a, b], "display": "tidy"}), "`display` is clean, dont-clean or view-setting"),
