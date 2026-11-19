@@ -110,7 +110,7 @@ use bimcraft_core::dims::Placing as DimMode;
 use bimcraft_core::engine::{self, Session};
 use bimcraft_core::geom::P2;
 use bimcraft_core::model::{CEILING_HEIGHT, DimKind, Element, Id, Justify, Location, Model, RAMP_WIDTH, Reference, RoomArea, STAIR_WIDTH};
-use bimcraft_core::snap::{Kind as Snap, Snaps};
+use bimcraft_core::snap::{Increments, Kind as Snap, Snaps};
 use bimcraft_core::units::Units;
 use bimcraft_core::{element_json_bare, render, schedule, stairs};
 use egui::containers::menu::{MenuButton, SubMenuButton};
@@ -819,6 +819,11 @@ pub struct BimApp {
     /// The snaps in force (Manage > Snaps), and whether their dialog is open.
     snaps: Snaps,
     show_snaps: bool,
+    /// Manage > Snaps' dimension snap increments: the lengths and angles a point steps by, the one in force by the zoom.
+    snap_steps: Increments,
+    /// While the Snaps dialog is open: what was in force when it opened, for Cancel, and its two lists as typed.
+    snaps_kept: Option<(Snaps, Increments, bool)>,
+    snap_text: (String, String),
     /// An override of them for the next point picked, typed as a shortcut.
     snap_once: Option<Once>,
     /// The Measure tool's last ruler: where it starts and ends.
@@ -1591,6 +1596,9 @@ impl BimApp {
             angle_edit: None,
             snaps: Snaps::default(),
             show_snaps: false,
+            snap_steps: Increments::default(),
+            snaps_kept: None,
+            snap_text: (String::new(), String::new()),
             snap_once: None,
             measured: None,
             open_units: false,
@@ -3561,6 +3569,7 @@ impl BimApp {
         (fresh.hosted, fresh.save_asked, fresh.skin) = (self.hosted, self.save_asked, self.skin);
         (fresh.own_title_bar, fresh.system_title_bar) = (self.own_title_bar, self.system_title_bar);
         (fresh.thin, fresh.lang, fresh.snaps, fresh.ribbon_min) = (self.thin, self.lang, self.snaps, self.ribbon_min);
+        fresh.snap_steps = std::mem::take(&mut self.snap_steps);
         (fresh.compact, fresh.scale) = (self.compact, self.scale);
         (fresh.tools_hidden, fresh.presets) = (std::mem::take(&mut self.tools_hidden), std::mem::take(&mut self.presets));
         fresh.font_finder = self.font_finder;

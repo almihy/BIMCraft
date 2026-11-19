@@ -98,6 +98,81 @@ pub struct Snaps {
     pub alignment_guides: bool,
     /// Alignment snap tolerance in screen pixels (default 8.0 px).
     pub alignment_tolerance: f32,
+    /// The length a point with nothing to snap to steps by, mm; none or less for no steps.
+    pub step: f64,
+    /// Revit's dimension snap increments: a length counts from the last point picked in `step`s, and a direction from it
+    /// always takes the nearest `angle`. Without: a free point rounds to `step` on the plan, and a direction takes an angle
+    /// only when it is near one.
+    pub increments: bool,
+    /// With `increments`, the point is the far corner of a rectangle from the last one: its width and its height each count
+    /// in `step`s, and no direction is taken.
+    pub corners: bool,
+}
+
+/// How much of the screen, in points, a dimension snap increment has to stay under to be the one in force. Revit's Snaps
+/// dialog says "the largest value that represents less than 2mm on screen is used"; measured in Revit 2025 on a screen at
+/// 175%, 100 mm gave way to 20 mm between 11.6 and 13.5 points: an eighth of an inch.
+pub const FINE: f64 = 12.0;
+
+/// Manage > Snaps' dimension snap increments, as Revit's: lengths in mm and angles in degrees, each list used or not. The
+/// one in force changes with the zoom ([`Increments::length`], [`Increments::angle`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Increments {
+    pub lengths: Vec<f64>,
+    pub lengths_on: bool,
+    pub angles: Vec<f64>,
+    pub angles_on: bool,
+}
+
+impl Default for Increments {
+    /// Revit's metric defaults.
+    fn default() -> Increments {
+        Increments { lengths: vec![1000.0, 100.0, 20.0, 5.0], lengths_on: true, angles: vec![90.0, 45.0, 15.0, 5.0, 1.0], angles_on: true }
+    }
+}
+
+/// Of `values`, the largest that stays under `most`, else the smallest of them: none if there are none.
+fn in_force(values: &[f64], most: f64) -> Option<f64> {
+    let real = || values.iter().copied().filter(|v| v.is_finite() && *v > 0.0);
+    real().filter(|v| *v < most).max_by(f64::total_cmp).or_else(|| real().min_by(f64::total_cmp))
+}
+
+impl Increments {
+    /// The length increment in force in a view drawn at `scale` points to the mm: none while lengths aren't used.
+    pub fn length(&self, scale: f64) -> Option<f64> {
+        if !self.lengths_on || !(scale.is_finite() && scale > 0.0) {
+            return None;
+        }
+        in_force(&self.lengths, FINE / scale)
+    }
+
+    /// The angle increment in force `radius` mm from the point turned about, in a view drawn at `scale` points to the mm:
+    /// the largest whose arc there stays under [`FINE`]. None while angles aren't used.
+    pub fn angle(&self, scale: f64, radius: f64) -> Option<f64> {
+        if !self.angles_on || !(scale.is_finite() && scale > 0.0) {
+            return None;
+        }
+        let across = radius * scale;
+        let most = if across.is_finite() && across > 0.0 { (FINE / across).to_degrees() } else { f64::INFINITY };
+        in_force(&self.angles, most).filter(|a| (1e-6..=180.0).contains(a))
+    }
+
+    /// A list as its box shows it, as Revit's: `1000 ; 100 ; 20 ; 5 ;`.
+    pub fn text(values: &[f64]) -> String {
+        values.iter().map(|v| format!("{v} ; ")).collect::<String>().trim_end().to_string()
+    }
+
+    /// A list typed in its box: numbers above nothing, parted by semicolons, largest first. None if any part isn't one.
+    pub fn parse(text: &str) -> Option<Vec<f64>> {
+        let mut out = Vec::new();
+        for part in text.split(';').map(|p| p.trim().trim_end_matches('°').trim()).filter(|p| !p.is_empty()) {
+            let v: f64 = part.parse().ok().filter(|v: &f64| v.is_finite() && *v > 0.0)?;
+            out.push(v);
+        }
+        out.sort_by(|a, b| b.total_cmp(a));
+        out.dedup();
+        (!out.is_empty()).then_some(out)
+    }
 }
 
 impl Snaps {
@@ -117,6 +192,9 @@ impl Snaps {
             angle: 0.0,
             alignment_guides: false,
             alignment_tolerance: 8.0,
+            step: STEP,
+            increments: false,
+            corners: false,
         }
     }
 
@@ -156,6 +234,9 @@ impl Default for Snaps {
             angle: 15.0,
             alignment_guides: true,
             alignment_tolerance: 8.0,
+            step: STEP,
+            increments: false,
+            corners: false,
         }
     }
 }
@@ -198,8 +279,8 @@ fn bearing(d: P2) -> f64 {
     if d.0 == 0.0 && d.1 == 0.0 { 0.0 } else { norm(d.1.atan2(d.0).to_degrees()) }
 }
 
-fn round(p: P2) -> P2 {
-    P2((p.0 / STEP).round() * STEP, (p.1 / STEP).round() * STEP)
+fn round(p: P2, step: f64) -> P2 {
+    P2((p.0 / step).round() * step, (p.1 / step).round() * step)
 }
 
 /// `p` to the micron: what a point meant to be exact is, without float noise.
@@ -762,6 +843,8 @@ pub fn in_sketch(m: &Model, sk: Sketch<'_>, p: P2, reach: Reach, from: &[P2], sq
 
 fn solve(scene: Scene, p: P2, reach: Reach, from: &[P2], square: bool, o: &Snaps, nearest_lines: bool) -> Found {
     let last = from.last().copied();
+    // What a free point steps by: the snaps' own, the usual where they have none.
+    let step = if o.step.is_finite() && o.step > 0.0 { o.step } else { STEP };
     let mut p = p;
     // The coordinate a square step pinned to the last point's: y if it runs along x.
     let mut pinned = None;
@@ -857,6 +940,7 @@ fn solve(scene: Scene, p: P2, reach: Reach, from: &[P2], square: bool, o: &Snaps
 
     // A guide through the last point at the angle the cursor is nearest.
     if (1.0..=180.0).contains(&o.angle)
+        && !(o.increments && o.corners)
         && let Some(l) = last
         && p.dist(l) > 2.0 * STEP
     {
@@ -868,7 +952,10 @@ fn solve(scene: Scene, p: P2, reach: Reach, from: &[P2], square: bool, o: &Snaps
                 let u = P2(a.to_radians().cos(), a.to_radians().sin());
                 (a, u, u.dot(d), u.cross(d).abs())
             })
-            .filter(|(_, _, along, perp)| *along > 0.0 && *perp <= reach.line && (perp / along).atan().to_degrees() <= tolerance)
+            // With increments the direction is always the nearest of them; without, only one the cursor is near.
+            .filter(|(_, _, along, perp)| {
+                *along > 0.0 && (o.increments || (*perp <= reach.line && (perp / along).atan().to_degrees() <= tolerance))
+            })
             .min_by(|x, y| x.3.total_cmp(&y.3));
         if let Some((angle, u, along, _)) = best {
             let guide = Some(Guide { from: l, angle, corner: corner_on(from, u) });
@@ -878,13 +965,15 @@ fn solve(scene: Scene, p: P2, reach: Reach, from: &[P2], square: bool, o: &Snaps
                 .filter_map(|&(a, b, of)| Some((ray_hit(l, u, a, b)?, of)))
                 .filter(|(q, _)| q.dist(p) <= reach.point)
                 .min_by(|x, y| by_distance(&x.0, &y.0));
-            // Else the grid point that lies on it, if one does, else as long as the nearest 10 mm.
-            let grid = round(p);
-            let on_grid = u.cross(grid - l).abs() <= 1e-3 && u.dot(grid - l) > 0.0;
+            // Else the grid point that lies on it, if one does, else as long as the nearest step; with increments, as
+            // long as the nearest of them from the last point.
+            let grid = round(p, step);
+            let on_grid = !o.increments && u.cross(grid - l).abs() <= 1e-3 && u.dot(grid - l) > 0.0;
+            let long = if o.increments && o.step <= 0.0 { along } else { (along / step).round().max(1.0) * step };
             return match cross {
                 Some((q, source)) if o.intersection => Found { at: micron(q), kind: Kind::Intersection, guide, source },
                 _ if on_grid => Found { at: grid, kind: Kind::Angle, guide, source: None },
-                _ => Found { at: micron(l + u * ((along / STEP).round().max(1.0) * STEP)), kind: Kind::Angle, guide, source: None },
+                _ => Found { at: micron(l + u * long), kind: Kind::Angle, guide, source: None },
             };
         }
     }
@@ -932,8 +1021,21 @@ fn solve(scene: Scene, p: P2, reach: Reach, from: &[P2], square: bool, o: &Snaps
             return Found { at: micron(c.at(t)), kind: Kind::Nearest, guide: None, source };
         }
     }
-    // Rounded, but not off the line a square step keeps to.
-    let mut at = round(p);
+    // With increments, as far from the last point as the nearest of them, the way the cursor lies; with none, where it is.
+    if o.increments
+        && let Some(l) = last
+    {
+        let (far, u) = (p.dist(l), (p - l).unit());
+        let at = match (o.step > 0.0, o.corners) {
+            (true, true) => l + round(p - l, step),
+            (true, false) if far > 0.0 => l + u * ((far / step).round() * step),
+            _ => p,
+        };
+        return Found { at: micron(at), kind: Kind::Free, guide: None, source: None };
+    }
+    // Rounded, but not off the line a square step keeps to. An increment is a length from a point: the first point picked
+    // has none to count from, and rounds as it always has.
+    let mut at = round(p, if o.increments { STEP } else { step });
     match pinned {
         Some((true, y)) => at.1 = y,
         Some((false, x)) => at.0 = x,

@@ -170,8 +170,8 @@ fn a_wall_drawn_over_a_scan_snaps_to_where_the_plan_cuts_it_unless_manage_snaps_
     key(&mut h, egui::Key::Escape);
     press(&mut h, "Manage");
     press(&mut h, "Snaps");
-    pick(&mut h, Role::CheckBox, "Point Cloud");
-    press(&mut h, "Close");
+    pick(&mut h, Role::CheckBox, "Snap to Point Clouds");
+    press(&mut h, "OK");
     assert!(!h.state().snaps.cloud);
     tool(&mut h, "Wall");
     assert_ne!(hover(&mut h, P2(4010.0, -970.0)).map(|f| f.kind), Some(Kind::Point));

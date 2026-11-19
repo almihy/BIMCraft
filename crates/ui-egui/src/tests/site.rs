@@ -84,12 +84,12 @@ fn property_line_sketches_its_outline_and_shows_its_buildable_area() {
     site_tool(&mut h, "Property Line");
     // Revit's Create Property Line asks how it is made first.
     press(&mut h, "Create by sketching");
-    sketch_loop(&mut h, &[P2(-1000.0, -1000.0), P2(9000.0, -1000.0), P2(4000.0, 6500.0)]);
+    sketch_loop(&mut h, &[P2(-1000.0, -1000.0), P2(9000.0, -1000.0), P2(9000.0, 6000.0)]);
     press(&mut h, "Finish Edit Mode");
     let [pl] = ids(&h, "propertyline")[..] else { panic!("one property line: {:?}", h.state().status) };
     let Some(Element::PropertyLine(line)) = h.state().session.model.elements.get(pl) else { panic!() };
     assert_eq!(line.points.len(), 3);
-    assert!((line.area() - 3.75e7).abs() < 1.0, "{}", line.area());
+    assert!((line.area() - 3.5e7).abs() < 1.0, "{}", line.area());
     // Properties: its area, perimeter and buildable area.
     assert!(h.query_all_by_label("Perimeter").next().is_some());
     assert!(h.query_all_by_label("Buildable Area").next().is_some());

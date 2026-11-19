@@ -477,7 +477,8 @@ fn a_drag_lets_go_where_the_button_came_up_not_where_the_hand_had_got_to_by_the_
     deliver(&mut h, vec![Event::PointerMoved(grip), button(grip, true)]);
     deliver(&mut h, vec![Event::PointerMoved(half)]);
     deliver(&mut h, vec![Event::PointerMoved(to), button(to, false), Event::PointerMoved(gone)]);
-    assert_eq!(walls(&h)[0], (P2(0.0, 0.0), P2(8000.0, -1000.0)));
+    // Where it let go, as its length and angle from the other end step at this zoom: 8,100 at 7°.
+    assert_eq!(walls(&h)[0], (P2(0.0, 0.0), P2(8039.624, -987.142)));
 }
 
 #[test]
@@ -3120,7 +3121,7 @@ mass {"boundary": [[1000, 1000], [3000, 1000], [3000, 2000], [1000, 2000]], "nam
         press(&mut h, tr("Manage"));
         press(&mut h, tr("Snaps"));
         missed.extend(english(&h, l));
-        press(&mut h, tr("Close"));
+        press(&mut h, tr("Cancel"));
         press(&mut h, tr("Annotate"));
         press(&mut h, tr("Measure"));
         missed.extend(english(&h, l));
@@ -3525,9 +3526,9 @@ fn manage_snaps_has_annotation_anchors() {
     assert!(h.state().snaps.annotation);
     press(&mut h, "Manage");
     press(&mut h, "Snaps");
-    assert!(h.query_by_label("Annotation Anchor").is_some());
-    pick(&mut h, Role::CheckBox, "Annotation Anchor");
-    press(&mut h, "Close");
+    assert!(h.query_by_label("Annotation Anchors").is_some());
+    pick(&mut h, Role::CheckBox, "Annotation Anchors");
+    press(&mut h, "OK");
     assert!(!h.state().snaps.annotation);
 }
 
@@ -4291,26 +4292,38 @@ fn manage_snaps_switches_each_snap_and_the_angle_steps() {
     assert!(h.state().show_snaps && h.query_by_label("Object Snaps").is_some());
     shortcut(&mut h, "WA");
     assert_eq!(h.state().tool, Tool::Modify);
-    pick(&mut h, Role::CheckBox, "Midpoint");
-    press(&mut h, "Close");
+    pick(&mut h, Role::CheckBox, "Midpoints (SM)");
+    press(&mut h, "OK");
     assert!(!h.state().snaps.midpoint && h.state().snaps.endpoint);
     tool(&mut h, "Wall");
     assert_eq!(hover(&mut h, P2(4030.0, 20.0)).map(|f| f.kind), Some(Kind::Nearest), "no middle to stick to now");
-    // The angle steps: off, a drawn wall goes where the cursor does.
+    // The angular increments: unticked, a drawn wall goes the way the cursor does, its length still in whole increments.
     press(&mut h, "Manage");
     press(&mut h, "Snaps");
-    pick(&mut h, Role::ComboBox, "Angle steps");
-    press(&mut h, "Off");
-    press(&mut h, "Close");
-    assert_eq!(h.state().snaps.angle, 0.0);
+    pick(&mut h, Role::CheckBox, "Angular dimension snap increments");
+    press(&mut h, "OK");
+    assert!(!h.state().snap_steps.angles_on && h.state().snap_steps.lengths_on);
     key(&mut h, Key::Escape);
     let mut h = app("");
-    h.state_mut().snaps.angle = 0.0;
+    h.state_mut().snap_steps.angles_on = false;
     tool(&mut h, "Wall");
     click(&mut h, P2(0.0, 0.0));
     click(&mut h, P2(3470.0, 2020.0));
     key(&mut h, Key::Enter);
-    assert_eq!(walls(&h)[0].1, P2(3470.0, 2020.0));
+    let end = walls(&h)[0].1;
+    assert!((degrees(P2(0.0, 0.0), end) - degrees(P2(0.0, 0.0), P2(3470.0, 2020.0))).abs() < 0.1, "{end:?}");
+    let step = h.state().snap_steps.length(h.state().canvas.scale()).unwrap();
+    assert!(((end.length() / step).round() * step - end.length()).abs() < 1e-2, "{end:?} in {step}s");
+    // Ticked, as it opens: the wall takes the nearest whole angle too, and both show in whole increments.
+    let mut h = app("");
+    tool(&mut h, "Wall");
+    click(&mut h, P2(0.0, 0.0));
+    click(&mut h, P2(3470.0, 2020.0));
+    key(&mut h, Key::Enter);
+    let end = walls(&h)[0].1;
+    let angle = degrees(P2(0.0, 0.0), end);
+    assert!((angle - angle.round()).abs() < 1e-3 && (angle - 30.0).abs() < 1.0, "{angle}");
+    assert!(((end.length() / step).round() * step - end.length()).abs() < 1e-2, "{end:?} in {step}s");
 }
 
 #[test]
@@ -4338,6 +4351,38 @@ fn walls_drawn_near_alignment_guide_snap_to_other_walls_reference_points() {
 }
 
 #[test]
+fn manage_snaps_checks_none_restores_defaults_and_cancel_puts_back_what_was() {
+    use bimcraft_core::snap::Snaps;
+    let mut h = app("");
+    press(&mut h, "Manage");
+    press(&mut h, "Snaps");
+    // Revit's dialog: its groups, and the rule the increments go by.
+    for label in ["Dimension Snaps", "Object Snaps", "Temporary Overrides", "Endpoints (SE)", "Perpendicular (SP)"] {
+        assert!(h.query_by_label(label).is_some(), "{label}");
+    }
+    assert!(h.query_by_label_contains("less than 2mm on screen").is_some());
+    press(&mut h, "Check None");
+    assert!(!h.state().snaps.endpoint && !h.state().snaps.tangent && !h.state().snaps.cloud);
+    pick(&mut h, Role::CheckBox, "Length dimension snap increments");
+    assert!(!h.state().snap_steps.lengths_on);
+    press(&mut h, "Restore Defaults");
+    assert_eq!((h.state().snaps, h.state().snap_steps.clone()), (Snaps::default(), bimcraft_core::snap::Increments::default()));
+    // Cancel: as it was when the dialog opened.
+    press(&mut h, "Check None");
+    press(&mut h, "Cancel");
+    assert!(!h.state().show_snaps && h.state().snaps == Snaps::default());
+    // OK keeps it.
+    press(&mut h, "Snaps");
+    press(&mut h, "Check None");
+    press(&mut h, "OK");
+    assert!(!h.state().show_snaps && !h.state().snaps.endpoint);
+    press(&mut h, "Snaps");
+    press(&mut h, "Check All");
+    press(&mut h, "OK");
+    assert!(h.state().snaps.endpoint && h.state().snaps.quadrant);
+}
+
+#[test]
 fn manage_snaps_toggles_alignment_guides() {
     let mut h = app("");
     assert!(h.state().snaps.alignment_guides);
@@ -4345,7 +4390,7 @@ fn manage_snaps_toggles_alignment_guides() {
     press(&mut h, "Snaps");
     assert!(h.query_by_label("Alignment Guides").is_some());
     pick(&mut h, Role::CheckBox, "Alignment Guides");
-    press(&mut h, "Close");
+    press(&mut h, "OK");
     assert!(!h.state().snaps.alignment_guides);
 }
 
@@ -4394,8 +4439,8 @@ fn the_measure_tool_lays_a_ruler_between_two_snapped_points_and_esc_takes_it_awa
     assert_eq!(h.state().tool, Tool::Measure(None));
     click(&mut h, P2(0.0, 0.0));
     assert_eq!(h.state().tool, Tool::Measure(Some(P2(0.0, 0.0))));
-    click(&mut h, P2(3000.0, 4000.0));
-    assert_eq!(h.state().measured, Some((P2(0.0, 0.0), P2(3000.0, 4000.0))));
+    click(&mut h, P2(0.0, 4000.0));
+    assert_eq!(h.state().measured, Some((P2(0.0, 0.0), P2(0.0, 4000.0))));
     assert_eq!(h.state().tool, Tool::Measure(None), "ready for another");
     key(&mut h, Key::Escape);
     assert_eq!((h.state().measured, h.state().tool.clone()), (None, Tool::Measure(None)));
@@ -4416,23 +4461,29 @@ fn a_selected_walls_ends_are_grips_to_drag_and_ctrl_turns_it_about_the_other_end
     let mut h = app(BOX);
     click(&mut h, P2(2000.0, 0.0));
     drag(&mut h, P2(8000.0, 0.0), P2(8000.0, -1000.0));
-    assert_eq!(walls(&h)[0], (P2(0.0, 0.0), P2(8000.0, -1000.0)));
-    assert_eq!(walls(&h)[1].0, P2(8000.0, -1000.0), "the wall joined there followed");
+    // Its length and its angle from the other end step as Revit's increments do at this zoom: 8,100 at 7°.
+    assert_eq!(walls(&h)[0], (P2(0.0, 0.0), P2(8039.624, -987.142)));
+    assert_eq!(walls(&h)[1].0, P2(8039.624, -987.142), "the wall joined there followed");
     assert_eq!(h.state().selection, ids(&h, "wall")[..1], "still selected, to drag again");
     // Ctrl keeps its length: it turns about its start toward the cursor.
     let length = walls(&h)[0].0.dist(walls(&h)[0].1);
     h.event(Event::ModifiersChanged(Modifiers::COMMAND));
     h.run();
-    drag(&mut h, P2(8000.0, -1000.0), P2(4000.0, 1500.0));
+    drag(&mut h, P2(8039.624, -987.142), P2(4000.0, 1500.0));
     h.event(Event::ModifiersChanged(Modifiers::NONE));
     h.run();
     let (a, b) = walls(&h)[0];
     assert_eq!(a, P2(0.0, 0.0));
     assert!((a.dist(b) - length).abs() < 1e-2, "{} {length}", a.dist(b));
-    assert!((degrees(a, b) - degrees(P2(0.0, 0.0), P2(4000.0, 1500.0))).abs() < 1e-2, "{b:?}");
+    // Toward the cursor, to the whole degree: 20.56° is 21°.
+    assert!((degrees(a, b) - 21.0).abs() < 1e-2, "{b:?}");
     // The start is a grip too, and the other end stays.
     drag(&mut h, P2(0.0, 0.0), P2(-500.0, 200.0));
-    assert_eq!((walls(&h)[0].0, walls(&h)[0].1), (P2(-500.0, 200.0), b));
+    // By where it was dropped, its length and angle counted from the end that stayed.
+    let a = walls(&h)[0].0;
+    assert!(a.dist(P2(-500.0, 200.0)) < 80.0 && walls(&h)[0].1 == b, "{a:?}");
+    let whole = |x: f64| (x - x.round()).abs() < 1e-3;
+    assert!(whole(a.dist(b) / 100.0) && whole(degrees(b, a)), "{} at {}", a.dist(b), degrees(b, a));
     // A drag that starts away from the ends moves the wall, as it did, not one end.
     let (a, b) = walls(&h)[0];
     drag(&mut h, (a + b) * 0.5, (a + b) * 0.5 + P2(0.0, 500.0));
@@ -4455,7 +4506,7 @@ fn a_selected_runs_ends_are_grips_that_drag_one_end_with_snaps_and_ctrl_keeps_th
     drag(&mut h, P2(4000.0, 0.0), P2(5500.0, 1200.0));
     let (a, b) = ends(&h);
     assert_eq!(a, P2(0.0, 0.0), "the start stayed");
-    assert_eq!(b, P2(5500.0, 1200.0), "the end went where it was dropped");
+    assert_eq!(b, P2(5497.19, 1168.464), "the end went where it was dropped: 5,620 at 12° from its start, as the increments step");
     assert_eq!(h.state().selection, vec![footing], "still selected, to drag again");
     // Ctrl keeps its length: it turns about its start toward the cursor.
     let length = a.dist(b);
@@ -4467,11 +4518,16 @@ fn a_selected_runs_ends_are_grips_that_drag_one_end_with_snaps_and_ctrl_keeps_th
     let (a, b) = ends(&h);
     assert_eq!(a, P2(0.0, 0.0));
     assert!((a.dist(b) - length).abs() < 1e-2, "{} {length}", a.dist(b));
-    assert!((degrees(a, b) - degrees(P2(0.0, 0.0), P2(2000.0, 4000.0))).abs() < 1e-2, "{b:?}");
+    // Toward the cursor, to the whole degree: 63.43° is 63°.
+    assert!((degrees(a, b) - 63.0).abs() < 1e-2, "{b:?}");
     // The start is a grip too, and the other end stays.
     drag(&mut h, P2(0.0, 0.0), P2(-500.0, 200.0));
+    let (a, far) = ends(&h);
+    // By where it was dropped, its length and angle counted from the end that stayed.
+    assert!(a.dist(P2(-500.0, 200.0)) < 80.0 && far == b, "{a:?}");
+    let whole = |x: f64| (x - x.round()).abs() < 1e-3;
+    assert!(whole(a.dist(b) / 20.0) && whole(degrees(b, a)), "{} at {}", a.dist(b), degrees(b, a));
     let (a, b) = ends(&h);
-    assert_eq!((a, b), (P2(-500.0, 200.0), b));
     // Reframe, so the middle of the run is on screen to drag from.
     h.get_by_label("Zoom to Fit").click();
     h.run();

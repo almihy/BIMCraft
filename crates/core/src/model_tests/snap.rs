@@ -637,3 +637,63 @@ fn a_camera_on_another_level_has_no_points_here() {
     let level = s.model.levels().last().unwrap().0;
     assert_eq!(snap(&s.model, level, P2(5030.0, 5020.0), REACH, &[], false, &Snaps::default()).kind, Kind::Endpoint);
 }
+
+#[test]
+fn the_increment_in_force_is_the_largest_under_an_eighth_of_an_inch_on_screen() {
+    let inc = Increments::default();
+    // As measured in Revit 2025: at 8.6 mm to the point of the screen (0.116 points to the mm) lengths step by 100, one
+    // notch of the wheel closer (0.136) by 20.
+    assert_eq!((inc.length(0.116), inc.length(0.136)), (Some(100.0), Some(20.0)));
+    // Far out by the metre, close in by 5 mm, and closer still by 5 mm yet: the smallest there is.
+    assert_eq!((inc.length(0.005), inc.length(1.0), inc.length(50.0)), (Some(1000.0), Some(5.0), Some(5.0)));
+    // An angle's by how far the cursor is from the point turned about: a degree's arc 300 points out is 5 points.
+    assert_eq!(
+        (inc.angle(1.0, 300.0), inc.angle(1.0, 100.0), inc.angle(1.0, 20.0), inc.angle(1.0, 5.0)),
+        (Some(1.0), Some(5.0), Some(15.0), Some(90.0))
+    );
+    assert_eq!(inc.angle(1.0, 5000.0), Some(1.0));
+    // Unticked, or with nothing to measure by, none.
+    let off = Increments { lengths_on: false, angles_on: false, ..Increments::default() };
+    assert_eq!(
+        (off.length(1.0), off.angle(1.0, 100.0), inc.length(0.0), inc.length(f64::NAN), inc.angle(-1.0, 10.0)),
+        (None, None, None, None, None)
+    );
+    assert_eq!(Increments { lengths: vec![], ..Increments::default() }.length(1.0), None);
+}
+
+#[test]
+fn increments_are_typed_and_shown_as_revits_lists() {
+    assert_eq!(Increments::text(&[1000.0, 100.0, 20.0, 5.0]), "1000 ; 100 ; 20 ; 5 ;");
+    assert_eq!(Increments::parse("1000 ; 100 ; 20 ; 5 ;"), Some(vec![1000.0, 100.0, 20.0, 5.0]));
+    assert_eq!(Increments::parse("5;90.00° ; 45°;5"), Some(vec![90.0, 45.0, 5.0]));
+    assert_eq!(
+        (Increments::parse(""), Increments::parse("10; ten"), Increments::parse("0; -5"), Increments::parse("inf")),
+        (None, None, None, None)
+    );
+}
+
+#[test]
+fn with_increments_a_length_counts_from_the_last_point_and_a_direction_takes_the_nearest_angle() {
+    let m = Session::new().model;
+    let o = Snaps { increments: true, step: 100.0, angle: 5.0, ..Snaps::default() };
+    // 37° and a bit from east, 2,512 long: 35° and 2,500.
+    let from = [P2(13.0, 7.0)];
+    let p = from[0] + P2(37.4f64.to_radians().cos(), 37.4f64.to_radians().sin()) * 2512.0;
+    let f = at(&m, p, &from, &o);
+    assert_eq!(f.kind, Kind::Angle);
+    assert!((f.at.dist(from[0]) - 2500.0).abs() < 1e-2, "{:?}", f.at);
+    assert!((degrees(from[0], f.at) - 35.0).abs() < 1e-3, "{}", degrees(from[0], f.at));
+    // With no angles, where the cursor points, 2,500 from the last point; with no lengths either, where it is.
+    let f = at(&m, p, &from, &Snaps { angle: 0.0, ..o });
+    assert_eq!(f.kind, Kind::Free);
+    assert!((f.at.dist(from[0]) - 2500.0).abs() < 1e-2 && (degrees(from[0], f.at) - 37.4).abs() < 1e-3, "{:?}", f.at);
+    let f = at(&m, p, &from, &Snaps { angle: 0.0, step: 0.0, ..o });
+    assert!(f.at.dist(p) < 1e-2, "{:?}", f.at);
+    // The first point has nothing to count from: it rounds to 10 mm, whatever the increment.
+    assert_eq!(at(&m, P2(1234.0, 5678.0), &[], &o).at, P2(1230.0, 5680.0));
+    // A rectangle's far corner: its width and its height each a whole number of steps, at any angle.
+    assert_eq!(at(&m, P2(2449.0, 1380.0), &from, &Snaps { corners: true, ..o }).at, P2(2413.0, 1407.0));
+    // Shift keeps it level with the last point, a whole number of steps along.
+    let f = snap(&m, 100_000, P2(2449.0, 300.0), REACH, &from, true, &Snaps { angle: 0.0, ..o });
+    assert_eq!(f.at, P2(2413.0, 7.0));
+}

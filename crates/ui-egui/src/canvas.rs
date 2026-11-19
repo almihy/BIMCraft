@@ -485,6 +485,12 @@ impl Canvas {
         }
     }
 
+    /// The points a mm takes in the plan shown: its zoom.
+    #[cfg(test)]
+    pub fn scale(&self) -> f64 {
+        self.level.and_then(|l| self.view(l)).map_or(0.0, |v| v.scale)
+    }
+
     /// Whether the cursor was over the plan last frame.
     pub fn hovering(&self) -> bool {
         self.cursor.is_some()
@@ -1383,8 +1389,8 @@ fn micron(p: P2) -> P2 {
     P2((p.0 * 1e3).round() / 1e3, (p.1 * 1e3).round() / 1e3)
 }
 
-/// `d`'s direction, turned onto the nearest multiple of `inc` degrees when it's within 3° of one
-/// (less where they lie closer), as Revit's angle snaps do; `inc` outside 1 to 180 for none.
+/// `d`'s direction, turned onto the nearest multiple of `inc` degrees, as Revit's angular dimension snap increments do;
+/// `inc` outside 1 to 180 for none.
 fn snap_angle(d: P2, inc: f64) -> P2 {
     let a = d.1.atan2(d.0);
     if !(1.0..=180.0).contains(&inc) {
@@ -1392,8 +1398,7 @@ fn snap_angle(d: P2, inc: f64) -> P2 {
     }
     let step = inc.to_radians();
     let near = (a / step).round() * step;
-    let a = if (a - near).abs() <= 3f64.to_radians().min(0.4 * step) { near } else { a };
-    P2(a.cos(), a.sin())
+    P2(near.cos(), near.sin())
 }
 
 /// `a` degrees turned into [0, 360).
@@ -1538,11 +1543,32 @@ impl BimApp {
         self.snap_skipping(m, level, v, at, from, square, &[])
     }
 
+    /// The snaps in force for a point picked at pixel `at` of `v`, with the points `from` picked: Manage > Snaps', its
+    /// dimension snap increments the ones the view's zoom brings into force (a shortcut's override has none).
+    fn snaps_in(&self, v: &View, at: (f32, f32), from: &[P2]) -> snap::Snaps {
+        let mut snaps = self.snaps_now();
+        if self.snap_once.is_none() {
+            let radius = from.last().map_or(0.0, |l| l.dist(v.mm(at)));
+            snaps.increments = true;
+            // A rectangle's far corner counts along its width and its height, not as a length at an angle.
+            snaps.corners = self.shape() == draw::Shape::Rectangle || matches!(self.tool, Tool::Shaft(_) | Tool::PatternCorner(_));
+            snaps.step = self.snap_steps.length(v.scale).unwrap_or(0.0);
+            snaps.angle = self.snap_steps.angle(v.scale, radius).unwrap_or(0.0);
+        }
+        snaps
+    }
+
+    /// The angle a turn about `centre` steps by with the cursor at `to` in `v`: the angular increment in force there, none
+    /// while they are off.
+    fn turn_step(&self, v: &View, centre: P2, to: P2) -> f64 {
+        self.snap_steps.angle(v.scale, centre.dist(to)).unwrap_or(0.0)
+    }
+
     /// [`snap`](Self::snap), but what `skip` names attracts nothing: what is dragged does not snap to itself.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn snap_skipping(&self, m: &Model, level: Id, v: &View, at: (f32, f32), from: &[P2], square: bool, skip: &[Id]) -> Found {
         let reach = Reach { point: SNAP / v.scale, line: f64::from(PICK) / v.scale };
-        let snaps = self.snaps_now();
+        let snaps = self.snaps_in(v, at, from);
         // A camera's mark is a symbol, not a set of snap points: anywhere on it lands on its eye.
         if snaps.endpoint
             && let Some((id, eye)) = render::camera_at(m, level, v, at, &crate::camgrips::shown_cameras(m, &self.selection))
@@ -2530,7 +2556,9 @@ impl BimApp {
                 self.tool = match (place, start) {
                     (true, _) => Tool::Array { centre: self.snap_point(m, level, v, at, &[], false), start: None, place: false },
                     (false, None) => Tool::Array { centre, start: Some(v.mm(at)), place: false },
-                    (false, Some(from)) => return self.array_radial(centre, angle_between(centre, from, v.mm(at), self.snaps.angle)),
+                    (false, Some(from)) => {
+                        return self.array_radial(centre, angle_between(centre, from, v.mm(at), self.turn_step(v, centre, v.mm(at))));
+                    }
                 };
             }
             Tool::Paste => {
@@ -2547,7 +2575,9 @@ impl BimApp {
                 self.tool = match (place, start) {
                     (true, _) => Tool::Rotate { centre: self.snap_point(m, level, v, at, &[], false), start: None, place: false },
                     (false, None) => Tool::Rotate { centre, start: Some(v.mm(at)), place: false },
-                    (false, Some(from)) => return self.turn(centre, angle_between(centre, from, v.mm(at), self.snaps.angle)),
+                    (false, Some(from)) => {
+                        return self.turn(centre, angle_between(centre, from, v.mm(at), self.turn_step(v, centre, v.mm(at))));
+                    }
                 };
             }
             // A ruler: its start, then its end, which stays on show until Esc or another start.
@@ -3477,7 +3507,7 @@ impl BimApp {
                 return;
             }
             (_, Some(f)) if f.at.dist(base) > TOL => (f.at - base).unit(),
-            _ => snap_angle(cursor - base, self.snaps.angle),
+            _ => snap_angle(cursor - base, 0.0),
         };
         // An angle with no length: as far along it as the cursor is.
         let typed = if typed.trim().is_empty() {
@@ -3580,7 +3610,12 @@ impl BimApp {
         // A grid's end slides along its own line, as Revit's: what it snaps to is projected onto the line.
         if matches!(self.gripped().and_then(|id| m.elements.get(id)), Some(Element::Grid(_))) && fixed.dist(mine) > TOL {
             let u = (mine - fixed).unit();
-            return (found, micron(fixed + u * (found.at - fixed).dot(u)));
+            // With nothing there to snap to, its length along the line is what steps, in the increment in force.
+            let long = match (found.kind, self.snap_steps.length(v.scale)) {
+                (Kind::Free | Kind::Angle, Some(step)) if self.snap_once.is_none() => ((v.mm(q) - fixed).dot(u) / step).round() * step,
+                _ => (found.at - fixed).dot(u),
+            };
+            return (found, micron(fixed + u * long));
         }
         let at = if mods.command && fixed.dist(found.at) > TOL {
             micron(fixed + (found.at - fixed).unit() * mine.dist(fixed))
@@ -4321,7 +4356,7 @@ impl BimApp {
                 p.line_segment([c - vec2(8.0, 0.0), c + vec2(8.0, 0.0)], thin);
                 p.line_segment([c - vec2(0.0, 8.0), c + vec2(0.0, 8.0)], thin);
                 if let (Some(from), false) = (start, place) {
-                    let angle = angle_between(centre, from, v.mm(q), self.snaps.angle);
+                    let angle = angle_between(centre, from, v.mm(q), self.turn_step(v, centre, v.mm(q)));
                     p.line_segment([c, sc.screen(from)], thin);
                     p.line_segment([c, cursor], stroke);
                     ghost(&turned(c, angle));
@@ -4337,7 +4372,7 @@ impl BimApp {
                 p.line_segment([c - vec2(8.0, 0.0), c + vec2(8.0, 0.0)], thin);
                 p.line_segment([c - vec2(0.0, 8.0), c + vec2(0.0, 8.0)], thin);
                 if let (Some(from), false) = (start, place) {
-                    let angle = angle_between(centre, from, v.mm(q), self.snaps.angle);
+                    let angle = angle_between(centre, from, v.mm(q), self.turn_step(v, centre, v.mm(q)));
                     p.line_segment([c, sc.screen(from)], thin);
                     p.line_segment([c, cursor], stroke);
                     for a in self.array_angles(angle) {

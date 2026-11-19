@@ -205,7 +205,7 @@ fn grid_snapping_is_shared_between_manage_snaps_and_the_bottom_menu() {
     press(&mut h, "Snaps");
     pick(&mut h, Role::CheckBox, "Grid snapping");
     assert!(h.state().grid_snapping);
-    press(&mut h, "Close");
+    press(&mut h, "OK");
     pick(&mut h, Role::Button, "Background Grids");
     assert_eq!(h.get_by_label("Grid snapping").accesskit_node().toggled(), Some(egui::accesskit::Toggled::True));
     pick(&mut h, Role::CheckBox, "Grid snapping");
@@ -213,6 +213,6 @@ fn grid_snapping_is_shared_between_manage_snaps_and_the_bottom_menu() {
     key(&mut h, Key::Escape);
     press(&mut h, "Snaps");
     assert_eq!(h.get_by_label("Grid snapping").accesskit_node().toggled(), Some(egui::accesskit::Toggled::False));
-    press(&mut h, "Close");
+    press(&mut h, "OK");
     assert_eq!(h.state().session.model.to_json().unwrap(), model);
 }

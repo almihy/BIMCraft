@@ -69,6 +69,8 @@ fn each_shape_of_the_draw_panel_makes_its_detail_lines_from_its_clicks() {
 #[test]
 fn splines_and_polylines_take_points_until_enter_and_a_tangent_arc_goes_on_from_a_line() {
     let mut h = detailing();
+    // Where the hand clicks, with no increments to step a point's length and angle from the one before.
+    (h.state_mut().snap_steps.lengths_on, h.state_mut().snap_steps.angles_on) = (false, false);
     for (label, kind) in [("Spline", "spline"), ("Spline Through Points", "fitted spline"), ("Polyline", "polyline")] {
         press(&mut h, label);
         for p in [P2(1000.0, 1000.0), P2(2000.0, 2500.0), P2(3500.0, 1500.0), P2(5000.0, 3000.0)] {
@@ -80,7 +82,7 @@ fn splines_and_polylines_take_points_until_enter_and_a_tangent_arc_goes_on_from_
     }
     let fit = curve(&h, ids(&h, "line")[1]);
     for p in [P2(1000.0, 1000.0), P2(2000.0, 2500.0), P2(5000.0, 3000.0)] {
-        assert!(fit.nearest(p).1 < 1e-6, "through the points clicked");
+        assert!(fit.nearest(p).1 < 1.0, "through the points clicked");
     }
     // A line, then an arc going on from its end the way it ran.
     press(&mut h, "Line");

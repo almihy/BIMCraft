@@ -18,7 +18,7 @@ use bimcraft_core::model::{
 };
 use bimcraft_core::rooms::Rooms;
 use bimcraft_core::schedule::{self, Field, Filter, Op, Sort};
-use bimcraft_core::snap::Kind as Snap;
+use bimcraft_core::snap::{Increments, Snaps};
 use bimcraft_core::texture::{Kind as TextureKind, Texture};
 use bimcraft_core::units::Units;
 use egui::{
@@ -2928,72 +2928,143 @@ impl BimApp {
     }
 }
 
-/// The angles a direction snaps to multiples of, degrees: none, or every one of these.
-const ANGLE_STEPS: [f64; 6] = [0.0, 5.0, 15.0, 30.0, 45.0, 90.0];
+/// A dimension snap angle list as Revit's box shows it: `90.00° ; 45.00° ;`.
+fn angles_text(values: &[f64]) -> String {
+    values.iter().map(|v| format!("{v:.2}° ; ")).collect::<String>().trim_end().to_string()
+}
+
+/// A titled, framed group of a dialog, as Revit's group boxes.
+fn group_box(ui: &mut Ui, title: &str, add: impl FnOnce(&mut Ui)) {
+    ui.label(RichText::new(title).strong());
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        add(ui);
+    });
+    ui.add_space(8.0);
+}
 
 impl BimApp {
-    /// Manage > Snaps: what a picked point sticks to, and the angles a direction steps by. A change
-    /// is in force at once.
+    /// Manage > Snaps, laid out as Revit's: the dimension snap increments (lengths and angles, the one in force by the
+    /// zoom), the object snaps with their shortcuts, and the temporary overrides. OK keeps what was set, Cancel puts back
+    /// what was in force when it opened.
     pub(crate) fn snaps_window(&mut self, ctx: &Context) {
         if !self.show_snaps {
             return;
         }
-        let mut close = false;
-        let r = Modal::new(UiId::new("snaps"), t("Snaps")).width(380.0).show(ctx, |ui| {
+        if self.snaps_kept.is_none() {
+            self.snaps_kept = Some((self.snaps, self.snap_steps.clone(), self.grid_snapping));
+            self.snap_text = (Increments::text(&self.snap_steps.lengths), angles_text(&self.snap_steps.angles));
+        }
+        let (mut ok, mut cancel, mut restore) = (false, false, false);
+        let lengths = Increments::parse(&self.snap_text.0);
+        let angles = Increments::parse(&self.snap_text.1).filter(|a| a.iter().all(|v| *v <= 180.0));
+        let r = Modal::new(UiId::new("snaps"), t("Snaps")).width(520.0).show(ctx, |ui| {
             crate::popup::body(ui, |ui| {
                 ui.add_space(6.0);
-                ui.label(RichText::new(t("Object Snaps")).strong());
-                let s = &mut self.snaps;
-                let kinds: [(&mut bool, Snap, &str); 10] = [
-                    (&mut s.endpoint, Snap::Endpoint, msg!("The ends of walls, grids and what else is drawn, and the points picked so far")),
-                    (&mut s.midpoint, Snap::Midpoint, msg!("The middle of a wall, along its arc")),
-                    (&mut s.intersection, Snap::Intersection, msg!("Where two walls or grids cross")),
-                    (&mut s.centre, Snap::Centre, msg!("The centre of a curved wall, a column or a component")),
-                    (&mut s.perpendicular, Snap::Perpendicular, msg!("The foot of the perpendicular from the last point to a wall or grid")),
-                    (&mut s.quadrant, Snap::Quadrant, msg!("A circle's, an ellipse's or an arc's points along its axes: east, north, west and south")),
-                    (&mut s.tangent, Snap::Tangent, msg!("Where a line from the last point touches a circle or an arc")),
-                    (&mut s.nearest, Snap::Nearest, msg!("A wall's centre line, so a wall drawn on it meets it")),
-                    (&mut s.annotation, Snap::Anchor, msg!("Where a note, dimension, tag, spot elevation, section or elevation mark, detail group or repeating detail is placed")),
-                    (&mut s.cloud, Snap::Point, msg!("A scan's points where the plan's cut plane cuts it, to trace what was measured")),
-                ];
-                for (on, kind, tip) in kinds {
-                    ui.checkbox(on, t(kind.name())).on_hover_text(t(tip));
-                }
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    let label = ui.label(t("Angle steps"));
-                    let now = if s.angle >= 1.0 { format!("{}°", s.angle) } else { t("Off").to_string() };
-                    let c = crate::icons::combo("snap-angle").selected_text(now).width(110.0).show_ui(ui, |ui| {
-                        for step in ANGLE_STEPS {
-                            let name = if step >= 1.0 { format!("{step}°") } else { t("Off").to_string() };
-                            ui.selectable_value(&mut s.angle, step, name);
+                group_box(ui, t("Dimension Snaps"), |ui| {
+                    ui.label(t("Snaps adjust as views are zoomed. The largest value that represents less than 2mm on screen is used."));
+                    ui.add_space(4.0);
+                    let inc = &mut self.snap_steps;
+                    let wrong = ui.visuals().error_fg_color;
+                    let tick = ui.checkbox(&mut inc.lengths_on, t("Length dimension snap increments"));
+                    ui.add_enabled(inc.lengths_on, TextEdit::singleline(&mut self.snap_text.0).desired_width(f32::INFINITY)).labelled_by(tick.id);
+                    if lengths.is_none() {
+                        ui.colored_label(wrong, t("Lengths above zero, parted by semicolons: 1000 ; 100 ; 20 ; 5 ;"));
+                    }
+                    ui.add_space(4.0);
+                    let tick = ui.checkbox(&mut inc.angles_on, t("Angular dimension snap increments"));
+                    ui.add_enabled(inc.angles_on, TextEdit::singleline(&mut self.snap_text.1).desired_width(f32::INFINITY)).labelled_by(tick.id);
+                    if angles.is_none() {
+                        ui.colored_label(wrong, t("Angles up to 180°, parted by semicolons: 90° ; 45° ; 15° ; 5° ; 1° ;"));
+                    }
+                });
+                group_box(ui, t("Object Snaps"), |ui| {
+                    let s = &mut self.snaps;
+                    let named = |name: &str, keys: &str| if keys.is_empty() { t(name).to_string() } else { format!("{} ({keys})", t(name)) };
+                    let mut kinds: [(&mut bool, &str, &str, &str); 10] = [
+                        (&mut s.endpoint, msg!("Endpoints"), "SE", msg!("The ends of walls, grids and what else is drawn, and the points picked so far")),
+                        (&mut s.intersection, msg!("Intersections"), "SI", msg!("Where two walls or grids cross")),
+                        (&mut s.midpoint, msg!("Midpoints"), "SM", msg!("The middle of a wall, along its arc")),
+                        (&mut s.centre, msg!("Centres"), "SC", msg!("The centre of a curved wall, a column or a component")),
+                        (&mut s.nearest, msg!("Nearest"), "SN", msg!("A wall's centre line, so a wall drawn on it meets it")),
+                        (&mut s.perpendicular, msg!("Perpendicular"), "SP", msg!("The foot of the perpendicular from the last point to a wall or grid")),
+                        (&mut s.quadrant, msg!("Quadrants"), "SQ", msg!("A circle's, an ellipse's or an arc's points along its axes: east, north, west and south")),
+                        (&mut s.tangent, msg!("Tangents"), "ST", msg!("Where a line from the last point touches a circle or an arc")),
+                        (&mut s.annotation, msg!("Annotation Anchors"), "", msg!("Where a note, dimension, tag, spot elevation, section or elevation mark, detail group or repeating detail is placed")),
+                        (&mut s.cloud, msg!("Snap to Point Clouds"), "", msg!("A scan's points where the plan's cut plane cuts it, to trace what was measured")),
+                    ];
+                    Grid::new("object-snaps").num_columns(2).spacing(vec2(40.0, 6.0)).show(ui, |ui| {
+                        for (i, (on, name, keys, tip)) in kinds.iter_mut().enumerate() {
+                            ui.checkbox(on, named(name, keys)).on_hover_text(t(tip));
+                            if i % 2 == 1 {
+                                ui.end_row();
+                            }
                         }
                     });
-                    c.response.labelled_by(label.id).on_hover_text(t(
-                        "A direction from the last point sticks to multiples of this angle, from east and from the line before; a dashed guide shows it",
-                    ));
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        let (all, none) = (ui.button(t("Check All")).clicked(), ui.button(t("Check None")).clicked());
+                        if all || none {
+                            for (on, ..) in &mut kinds {
+                                **on = all;
+                            }
+                        }
+                    });
+                    ui.add_space(4.0);
+                    ui.separator();
+                    ui.checkbox(&mut s.alignment_guides, t("Alignment Guides")).on_hover_text(t("Show temporary alignment guides (smart snapping) when drawing"));
+                    if s.alignment_guides {
+                        ui.horizontal(|ui| {
+                            ui.label(t("Snap tolerance"));
+                            ui.add(egui::Slider::new(&mut s.alignment_tolerance, 2.0..=32.0).suffix(" px"));
+                        });
+                    }
+                    ui.checkbox(&mut self.grid_snapping, t("Grid snapping"))
+                        .on_hover_text(t("Applies to all views; snaps to the active view's enabled main grid or subgrid, even when hidden"));
                 });
-                ui.add_space(8.0);
-                ui.separator();
-                ui.add_space(4.0);
-                ui.checkbox(&mut s.alignment_guides, t("Alignment Guides")).on_hover_text(t(
-                "Show temporary alignment guides (smart snapping) when drawing",
-            ));
-            if s.alignment_guides {
-                ui.horizontal(|ui| {
-                    ui.label(t("Snap tolerance"));
-                    ui.add(egui::Slider::new(&mut s.alignment_tolerance, 2.0..=32.0).suffix(" px"));
+                group_box(ui, t("Temporary Overrides"), |ui| {
+                    ui.label(t("While using an interactive tool, keyboard shortcuts (shown in parentheses) can be used to specify a snap type for a single pick."));
+                    ui.add_space(4.0);
+                    Grid::new("snap-overrides").num_columns(2).spacing(vec2(40.0, 4.0)).show(ui, |ui| {
+                        for (what, keys) in [
+                            (msg!("Object snaps"), msg!("Use shortcuts listed above")),
+                            (msg!("Snaps Off"), "(SO)"),
+                            (msg!("Turn Override Off"), "(SS)"),
+                            (msg!("Force horizontal and vertical"), "(SHIFT)"),
+                        ] {
+                            ui.label(t(what));
+                            ui.label(t(keys));
+                            ui.end_row();
+                        }
+                    });
                 });
-                }
-                ui.separator();
-                ui.checkbox(&mut self.grid_snapping, t("Grid snapping"))
-                    .on_hover_text(t("Applies to all views; snaps to the active view's enabled main grid or subgrid, even when hidden"));
             });
             crate::popup::footer(ui, |ui| {
-                ui.with_layout(Layout::right_to_left(Align::Min), |ui| close = ui.button(t("Close")).clicked());
+                ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                    cancel = ui.button(t("Cancel")).clicked();
+                    ok = ui.button(t("OK")).clicked();
+                    restore = ui.button(t("Restore Defaults")).clicked();
+                });
             });
         });
-        if close || r.should_close() {
+        // What is typed is in force as soon as it reads as a list; what doesn't read leaves the list as it was.
+        if let Some(v) = lengths {
+            self.snap_steps.lengths = v;
+        }
+        if let Some(v) = angles {
+            self.snap_steps.angles = v;
+        }
+        if restore {
+            (self.snaps, self.snap_steps) = (Snaps::default(), Increments::default());
+            self.snap_text = (Increments::text(&self.snap_steps.lengths), angles_text(&self.snap_steps.angles));
+        }
+        if cancel || (r.should_close() && !ok) {
+            if let Some((snaps, steps, grid)) = self.snaps_kept.take() {
+                (self.snaps, self.snap_steps, self.grid_snapping) = (snaps, steps, grid);
+            }
+            self.show_snaps = false;
+        } else if ok {
+            self.snaps_kept = None;
             self.show_snaps = false;
         }
     }
