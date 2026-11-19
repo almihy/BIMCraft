@@ -8275,6 +8275,10 @@ msgstr "房间面积计算：测量房间面积的位置；当前为{}"
 msgid "Room Bounding"
 msgstr "房间边界"
 
+#: crates/ui-egui/src/properties.rs:325
+msgid "Moves With Nearby Elements"
+msgstr "随附近图元移动"
+
 #: crates/model/src/schedule.rs:218
 msgid "Room Name"
 msgstr ""

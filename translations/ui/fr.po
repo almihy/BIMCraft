@@ -8275,6 +8275,10 @@ msgstr "Calcul de la surface des pièces: où la surface des pièces est mesuré
 msgid "Room Bounding"
 msgstr "Délimitation de pièce"
 
+#: crates/ui-egui/src/properties.rs:325
+msgid "Moves With Nearby Elements"
+msgstr "Se déplace avec les éléments voisins"
+
 #: crates/model/src/schedule.rs:218
 msgid "Room Name"
 msgstr ""

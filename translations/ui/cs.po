@@ -8274,6 +8274,10 @@ msgstr "Výpočet plochy místností: kde se plochy místností měří; nyní {
 msgid "Room Bounding"
 msgstr "Ohraničení místnosti"
 
+#: crates/ui-egui/src/properties.rs:325
+msgid "Moves With Nearby Elements"
+msgstr "Přesouvá se s blízkými prvky"
+
 #: crates/model/src/schedule.rs:218
 msgid "Room Name"
 msgstr ""

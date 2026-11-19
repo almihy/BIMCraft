@@ -8274,6 +8274,10 @@ msgstr "Raumflächenberechnung: wo Raumflächen gemessen werden; aktuell {}"
 msgid "Room Bounding"
 msgstr "Raumbegrenzung"
 
+#: crates/ui-egui/src/properties.rs:325
+msgid "Moves With Nearby Elements"
+msgstr "Wird mit Elementen in der Nähe verschoben"
+
 #: crates/model/src/schedule.rs:218
 msgid "Room Name"
 msgstr ""

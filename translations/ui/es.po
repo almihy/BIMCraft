@@ -8275,6 +8275,10 @@ msgstr "Cálculo de área de la habitación: dónde se miden las áreas de las h
 msgid "Room Bounding"
 msgstr "Delimitación de habitación"
 
+#: crates/ui-egui/src/properties.rs:325
+msgid "Moves With Nearby Elements"
+msgstr "Se mueve con elementos cercanos"
+
 #: crates/model/src/schedule.rs:218
 msgid "Room Name"
 msgstr "Nombre de habitación"

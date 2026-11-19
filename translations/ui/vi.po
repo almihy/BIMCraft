@@ -8275,6 +8275,10 @@ msgstr "Cách tính diện tích phòng: nơi đo diện tích phòng; hiện l�
 msgid "Room Bounding"
 msgstr "Tạo biên phòng"
 
+#: crates/ui-egui/src/properties.rs:325
+msgid "Moves With Nearby Elements"
+msgstr "Di chuyển cùng phần tử lân cận"
+
 #: crates/model/src/schedule.rs:218
 msgid "Room Name"
 msgstr ""

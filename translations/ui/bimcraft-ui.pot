@@ -8275,6 +8275,10 @@ msgstr ""
 msgid "Room Bounding"
 msgstr ""
 
+#: crates/ui-egui/src/properties.rs:325
+msgid "Moves With Nearby Elements"
+msgstr ""
+
 #: crates/model/src/schedule.rs:218
 msgid "Room Name"
 msgstr ""

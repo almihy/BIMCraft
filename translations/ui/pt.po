@@ -8275,6 +8275,10 @@ msgstr "Cálculo de área do ambiente: onde a área dos ambientes é medida; ago
 msgid "Room Bounding"
 msgstr "Delimitação de ambiente"
 
+#: crates/ui-egui/src/properties.rs:325
+msgid "Moves With Nearby Elements"
+msgstr "Move-se com elementos próximos"
+
 #: crates/model/src/schedule.rs:218
 msgid "Room Name"
 msgstr "Nome do ambiente"
