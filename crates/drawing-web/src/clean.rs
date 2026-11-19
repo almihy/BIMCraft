@@ -1317,5 +1317,315 @@ pub(crate) fn look(o: &Opened, m: &Measured, params: &str, long: u32) -> Result<
     Ok(Looked { png, about })
 }
 
+/// A multi-line text's words without its inline codes, near enough to read a title by: a paragraph break is a space,
+/// a code that runs to a semicolon (a font, a height, a colour) is left out, and so are the braces.
+fn plain_words(raw: &str) -> String {
+    let mut out = String::new();
+    let mut it = raw.chars().peekable();
+    while let Some(c) = it.next() {
+        match c {
+            '{' | '}' => {}
+            '\\' => match it.next() {
+                Some('P') | Some('N') | Some('n') => out.push(' '),
+                Some('f' | 'F' | 'H' | 'h' | 'C' | 'c' | 'T' | 'Q' | 'W' | 'A' | 'S' | 'p') => {
+                    for d in it.by_ref() {
+                        if d == ';' {
+                            break;
+                        }
+                    }
+                }
+                Some('L' | 'l' | 'O' | 'o' | 'K' | 'k') => {}
+                Some(d) => out.push(d),
+                None => {}
+            },
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// The grid `pieces` lays over the drawing, cells on its longer side.
+const PIECE_GRID: usize = 1400;
+/// An item whose box holds this many others' centres is a frame, a title block or a block as large as a plan: it joins
+/// nothing to anything.
+const FRAME_HOLDS: u32 = 30;
+/// A piece with fewer items, or shorter than this share of the drawing's longer side, is a stray.
+const PIECE_ITEMS: usize = 6;
+const PIECE_SHARE: f64 = 0.012;
+
+/// `pieces`: the separate drawings lying in the model space, found by where the drawing is drawn and where it is
+/// empty, each numbered on one picture of the whole. `params` (JSON): `{box?, gap?}`: only what has its centre in
+/// `box`; `gap` (mm), how far apart two things are still one piece (not given: 0.6% of the longer side of what is
+/// looked at). Frames, title blocks and blocks as large as a plan join nothing: what they hold is told apart by the
+/// gaps inside them. A proposal for whoever looks at the picture: two pieces may be one drawing, and one piece two.
+///
+/// `about`: `{width, height, extents, gap, pieces: [{n, box, items, texts (its largest words, the largest first),
+/// marks (words that read as level marks, the commonest first)}], strays (how many items are in no piece)}`, the
+/// pieces in reading order: rows from the top, each from the left.
+pub(crate) fn pieces(o: &Opened, m: &Measured, params: &str, long: u32) -> Result<Looked, String> {
+    let p = parsed(params)?;
+    checked(&p, &["box", "gap"], "pieces")?;
+    let s = Seen::of(o, m);
+    let area = given(&p, "box").map(|v| area_of(&s, v)).transpose()?;
+    let all: Vec<(&Entity, &Bounds2)> =
+        s.items().filter(|(_, b)| real(b) && area.as_ref().is_none_or(|a| a.contains(b.center()))).collect();
+    if all.is_empty() {
+        return Err("nothing to look at: no item with a box is in `box`".into());
+    }
+    let mut round = Bounds2::EMPTY;
+    for (_, b) in &all {
+        round = round.union(b);
+    }
+    let longer = round.width().max(round.height()).max(1e-9);
+    let cell = longer / PIECE_GRID as f64;
+    let (nx, ny) = (((round.width() / cell).ceil() as usize).max(1) + 1, ((round.height() / cell).ceil() as usize).max(1) + 1);
+    let gap = match given(&p, "gap") {
+        None => longer * 0.006,
+        Some(v) => match v.as_f64() {
+            Some(g) if g.is_finite() && g > 0.0 => g / m.mm,
+            _ => return Err(format!("`gap` is a length in mm, not {v}")),
+        },
+    };
+    let reach = ((gap / cell).ceil() as isize).clamp(1, 40);
+    let at = |q: Vec2| -> (usize, usize) {
+        ((((q.x - round.min.x) / cell) as usize).min(nx - 1), (((q.y - round.min.y) / cell) as usize).min(ny - 1))
+    };
+    // How many centres lie in each cell, summed from the corner, so that a box's are counted at once.
+    let mut sum = vec![0u32; (nx + 1) * (ny + 1)];
+    for (_, b) in &all {
+        let (i, j) = at(b.center());
+        sum[(j + 1) * (nx + 1) + i + 1] += 1;
+    }
+    for j in 1..=ny {
+        for i in 1..=nx {
+            sum[j * (nx + 1) + i] = sum[j * (nx + 1) + i] + sum[(j - 1) * (nx + 1) + i] + sum[j * (nx + 1) + i - 1] - sum[(j - 1) * (nx + 1) + i - 1];
+        }
+    }
+    let holds = |b: &Bounds2| -> u32 {
+        let ((i0, j0), (i1, j1)) = (at(b.min), at(b.max));
+        let (i1, j1) = (i1 + 1, j1 + 1);
+        sum[j1 * (nx + 1) + i1] + sum[j0 * (nx + 1) + i0] - sum[j0 * (nx + 1) + i1] - sum[j1 * (nx + 1) + i0]
+    };
+    // Where the drawing is drawn: a line along itself, anything else over its box; a frame nowhere.
+    let mut drawn = vec![false; nx * ny];
+    let mut frame = vec![false; all.len()];
+    for (n, (e, b)) in all.iter().enumerate() {
+        let big = b.width().max(b.height()) > 12.0 * cell;
+        match &e.kind {
+            EntityKind::Line(l) => {
+                let (a, z) = (l.a.xy(), l.b.xy());
+                let steps = ((((z.x - a.x).abs().max((z.y - a.y).abs())) / cell).ceil() as usize).max(1) * 2;
+                // A line that runs most of the way across is a sheet's border or a cut line: it joins nothing.
+                if b.width().max(b.height()) > 0.25 * longer {
+                    frame[n] = true;
+                    continue;
+                }
+                for k in 0..=steps {
+                    let t = k as f64 / steps as f64;
+                    let (i, j) = at(Vec2::new(a.x + (z.x - a.x) * t, a.y + (z.y - a.y) * t));
+                    drawn[j * nx + i] = true;
+                }
+            }
+            _ if big && holds(b) >= FRAME_HOLDS => frame[n] = true,
+            _ => {
+                let ((i0, j0), (i1, j1)) = (at(b.min), at(b.max));
+                for j in j0..=j1 {
+                    for i in i0..=i1 {
+                        drawn[j * nx + i] = true;
+                    }
+                }
+            }
+        }
+    }
+    // Cells within reach of one another are one piece.
+    let mut piece = vec![0u32; nx * ny];
+    let mut boxes: Vec<(usize, usize, usize, usize)> = Vec::new(); // of each piece, in cells
+    let mut stack: Vec<(usize, usize)> = Vec::new();
+    for j in 0..ny {
+        for i in 0..nx {
+            if !drawn[j * nx + i] || piece[j * nx + i] != 0 {
+                continue;
+            }
+            let id = boxes.len() as u32 + 1;
+            let mut bx = (i, j, i, j);
+            piece[j * nx + i] = id;
+            stack.push((i, j));
+            while let Some((ci, cj)) = stack.pop() {
+                bx = (bx.0.min(ci), bx.1.min(cj), bx.2.max(ci), bx.3.max(cj));
+                for dj in -reach..=reach {
+                    for di in -reach..=reach {
+                        let (qi, qj) = (ci as isize + di, cj as isize + dj);
+                        if qi < 0 || qj < 0 || qi as usize >= nx || qj as usize >= ny {
+                            continue;
+                        }
+                        let q = qj as usize * nx + qi as usize;
+                        if drawn[q] && piece[q] == 0 {
+                            piece[q] = id;
+                            stack.push((qi as usize, qj as usize));
+                        }
+                    }
+                }
+            }
+            boxes.push(bx);
+        }
+    }
+    // Each piece's box in the drawing, and one inside another is that other's (a courtyard's planting in its plan).
+    let mut found: Vec<Bounds2> = boxes
+        .iter()
+        .map(|&(i0, j0, i1, j1)| {
+            Bounds2::new(
+                Vec2::new(round.min.x + i0 as f64 * cell, round.min.y + j0 as f64 * cell),
+                Vec2::new(round.min.x + (i1 + 1) as f64 * cell, round.min.y + (j1 + 1) as f64 * cell),
+            )
+        })
+        .collect();
+    found.sort_by(|a, b| (b.width() * b.height()).total_cmp(&(a.width() * a.height())));
+    let mut kept: Vec<Bounds2> = Vec::new();
+    for b in found {
+        match kept.iter_mut().find(|k| k.contains(b.center())) {
+            Some(k) => *k = k.union(&b),
+            None => kept.push(b),
+        }
+    }
+    // What each holds: its items, its largest words and what reads as level marks.
+    struct Piece {
+        b: Bounds2,
+        items: usize,
+        texts: Vec<(f64, String)>,
+        marks: BTreeMap<String, usize>,
+    }
+    let mut out: Vec<Piece> = kept.into_iter().map(|b| Piece { b, items: 0, texts: Vec::new(), marks: BTreeMap::new() }).collect();
+    let mut strays = 0usize;
+    for (n, (e, b)) in all.iter().enumerate() {
+        if frame[n] {
+            continue;
+        }
+        let Some(pc) = out.iter_mut().find(|pc| pc.b.contains(b.center())) else {
+            strays += 1;
+            continue;
+        };
+        pc.items += 1;
+        let words = match &e.kind {
+            EntityKind::Text(t) => Some((t.height, t.value.clone())),
+            EntityKind::MText(t) => Some((t.height, plain_words(&t.contents))),
+            _ => None,
+        };
+        if let Some((h, w)) = words {
+            let w = w.split_whitespace().collect::<Vec<_>>().join(" ");
+            if w.is_empty() {
+                continue;
+            }
+            let mark = w.len() <= 8 && (w.starts_with('+') || w.starts_with('-')) && w.contains('.') && w[1..].chars().all(|c| c.is_ascii_digit() || c == '.');
+            if mark {
+                *pc.marks.entry(w).or_default() += 1;
+            } else if w.chars().count() >= 3 {
+                pc.texts.push((h, w));
+            }
+        }
+    }
+    let before = out.len();
+    out.retain(|pc| pc.items >= PIECE_ITEMS && pc.b.width().max(pc.b.height()) >= PIECE_SHARE * longer);
+    strays += before - out.len();
+    if out.is_empty() {
+        return Err("no separate drawing was found: look at the drawing itself".into());
+    }
+    // Reading order: rows from the top (a row is what lies within half the usual height of its first), each from the left.
+    let mut hs: Vec<f64> = out.iter().map(|pc| pc.b.height()).collect();
+    hs.sort_by(f64::total_cmp);
+    let row = hs[hs.len() / 2] * 0.5;
+    out.sort_by(|a, b| b.b.center().y.total_cmp(&a.b.center().y));
+    let mut rows: Vec<Vec<Piece>> = Vec::new();
+    for pc in out {
+        match rows.last_mut() {
+            Some(r) if (r[0].b.center().y - pc.b.center().y).abs() <= row => r.push(pc),
+            _ => rows.push(vec![pc]),
+        }
+    }
+    let mut out: Vec<Piece> = Vec::new();
+    for mut r in rows {
+        r.sort_by(|a, b| a.b.min.x.total_cmp(&b.b.min.x));
+        out.extend(r);
+    }
+
+    // The picture: the drawing as it is, each piece boxed and numbered in red.
+    let mut model = EntityStore::new();
+    for (e, _) in &all {
+        model.push((*e).clone());
+    }
+    let red = Color::True(Rgb(225, 0, 0));
+    let base = all[0].0;
+    let mut said: Vec<Value> = Vec::new();
+    for (k, pc) in out.iter_mut().enumerate() {
+        let b = pc.b;
+        let corners = [b.min, Vec2::new(b.max.x, b.min.y), b.max, Vec2::new(b.min.x, b.max.y)];
+        for c in 0..4 {
+            let (a, z) = (corners[c], corners[(c + 1) % 4]);
+            let mut e = base.clone();
+            e.common = cadcraft_doc::Common { layer: "0".into(), color: red, ..cadcraft_doc::Common::default() };
+            e.kind = EntityKind::Line(cadcraft_doc::Line { a: Vec3::new(a.x, a.y, 0.0), b: Vec3::new(z.x, z.y, 0.0) });
+            model.push(e);
+        }
+        // Large enough to read on a picture of the whole file, and above the box so that it covers nothing.
+        let h = (b.height().min(b.width()) * 0.3).max(longer * 0.012);
+        let mut e = base.clone();
+        e.common = cadcraft_doc::Common { layer: "0".into(), color: red, ..cadcraft_doc::Common::default() };
+        e.kind = EntityKind::Text(cadcraft_doc::Text {
+            insert: Vec3::new(b.min.x, b.max.y + h * 0.2, 0.0),
+            align_pt: None,
+            height: h,
+            value: format!("{}", k + 1),
+            rotation: 0.0,
+            width_factor: 1.0,
+            oblique: 0.0,
+            style: "Standard".into(),
+            halign: cadcraft_doc::HAlign::default(),
+            valign: cadcraft_doc::VAlign::default(),
+        });
+        model.push(e);
+        pc.texts.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let mut texts: Vec<&str> = Vec::new();
+        for (_, w) in &pc.texts {
+            if !texts.contains(&w.as_str()) {
+                texts.push(w);
+            }
+            if texts.len() == 6 {
+                break;
+            }
+        }
+        let mut marks: Vec<(&String, &usize)> = pc.marks.iter().collect();
+        marks.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
+        said.push(json!({
+            "n": k + 1, "box": s.box_out(&b), "items": pc.items, "texts": texts,
+            "marks": marks.iter().take(4).map(|(w, _)| w.as_str()).collect::<Vec<_>>(),
+        }));
+    }
+    let mut d = s.d.clone();
+    d.model = model;
+    let long = long.clamp(LEAST_LONG, MOST_LONG);
+    let (w, h) = (round.width().max(1e-9), round.height().max(1e-9));
+    let k = f64::from(long) / (w.max(h) * (1.0 + 2.0 * MARGIN));
+    let pad = w.max(h) * MARGIN;
+    let width = (((w + 2.0 * pad) * k).round() as u32).max(1);
+    let height = (((h + 2.0 * pad) * k).round() as u32).max(1);
+    let view = View { center: round.center(), scale: k, width, height };
+    let px = 1.0 / k;
+    let opts = cadcraft_render::Options {
+        tolerance: px * 0.5,
+        min_dash: px * 2.0,
+        view_height: f64::from(height) * px,
+        view: Some(view.world_bounds()),
+        transparency: true,
+        ..cadcraft_render::Options::default()
+    };
+    let list = cadcraft_render::build(&d, &Space::Model, &opts);
+    let raster = RasterOptions { background: Rgb(255, 255, 255), hairline: 1.0, px_per_mm: 0.0, antialias: true };
+    let png = render_png(&list, &view, &raster).ok_or("the picture could not be drawn")?;
+    let about = json!({
+        "width": width, "height": height, "extents": s.box_out(&view.world_bounds()), "gap": hundredth(gap * m.mm),
+        "pieces": said, "strays": strays,
+    });
+    Ok(Looked { png, about })
+}
+
 #[cfg(test)]
 mod tests;

@@ -147,6 +147,14 @@ impl Drawing {
         let p = clean::look(&self.o, self.measured(), params, long).map_err(err)?;
         Ok(Picture { png: p.png, about: p.about.to_string() })
     }
+
+    /// The separate drawings lying in the model space, found by where it is drawn and where it is empty, each boxed
+    /// and numbered on one picture of the whole (JSON params: box?, gap?: mm), `long` pixels on its longer side;
+    /// `about` (JSON): width, height, extents, gap, pieces: [{n, box, items, texts, marks}], strays.
+    pub fn pieces(&self, params: &str, long: u32) -> Result<Picture, JsError> {
+        let p = clean::pieces(&self.o, self.measured(), params, long).map_err(err)?;
+        Ok(Picture { png: p.png, about: p.about.to_string() })
+    }
 }
 
 impl Drawing {
