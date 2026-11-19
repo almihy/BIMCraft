@@ -26,6 +26,21 @@ Width, Height, Length, Thickness and Area, each its own category's field of that
 empty where not (a wall's area is its own, one side less its openings, and a door's or window's is its width by its height; a
 roof's is its surface's), and Material, its type's structure layer's (or its thickest's), a run's type's or a family's first material
 parameter's. Its filters, sorting, grouping, totals and calculated fields are any schedule's; only it lists categories.
+A curtain wall's parts are categories of their own, as Revit's Curtain Panels and Curtain Wall Mullions: `curtainpanel` (Id,
+Type, Level, Host, Width, Height, Area, then Thickness, Material, Volume, Count, the phases and the design option) and `mullion`
+(Id, Type, Level, Host, Length, Thickness, Width, then Material, Volume, Count, the phases and the design option), each with
+its type's identity data and the project parameters put on it (`PARAMETER_CATEGORIES` has both). `Host` is the wall's id; a
+mullion's Thickness is across its wall and its Width along it (side 1 and side 2 together; a circular one's diameter both ways);
+a part that holds no phase or design option of its own shows its wall's, as a door does. Neither is among the schedules every
+project has (`VIEWS`): one is made as a beam schedule is, `schedule {"name": "Curtain Panel Schedule", "category":
+"curtainpanel"}`. The curtain wall itself stays in the Wall Schedule: its Thickness is its type's depth, its Area its length by
+its height, and its Volume 0, because it has no solid of its own and its panels and mullions hold theirs, so a schedule of
+every category counts nothing twice. All three read `quantities::wall`, `quantities::panel` and `quantities::mullion`, which
+IFC's quantity sets read too; a panel's and a mullion's `volume_m3` is to the cubic centimetre. A multi-category schedule
+lists both categories, with Material their type's. `elements` gives a curtain wall `curtain: true`, `panels` and `mullions`
+(how many it has) and `vertical_grid` and `horizontal_grid` (its grid lines, mm along it and mm over its base, borders
+included), and a panel and a mullion their `host`, `level`, `thickness`, `material` and what they measure.
+
 ## Quantities and type identity data
 
 **Area, Volume and Perimeter** are fields of the walls', floors', ceilings' and roofs' schedules, as Revit's (Area and Volume are

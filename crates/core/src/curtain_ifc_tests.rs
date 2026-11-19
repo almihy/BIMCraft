@@ -248,8 +248,11 @@ fn bimcrafts_own_curtain_wall_comes_back_from_ifc_as_it_was() {
         assert_eq!(facade(t, again), facade(&s.model, wall));
     }
     // The same types, and nothing generic standing in for a part.
-    assert_eq!(t.types.curtain_panel, s.model.types.curtain_panel);
-    assert_eq!(t.types.mullion, s.model.types.mullion);
+    // (The panel and mullion types the walls and their parts name: a type nothing uses is not in the file.)
+    assert_eq!(t.types.curtain_panel.keys().collect::<Vec<_>>(), ["Empty", "Glazed"]);
+    assert_eq!(t.types.mullion.keys().collect::<Vec<_>>(), ["30mm Square", "50 x 150mm"]);
+    assert!(t.types.curtain_panel.iter().all(|(n, x)| s.model.types.curtain_panel.get(n) == Some(x)));
+    assert!(t.types.mullion.iter().all(|(n, x)| s.model.types.mullion.get(n) == Some(x)));
     for name in ["Storefront", "Exterior Glazing"] {
         assert_eq!(t.types.wall[name], s.model.types.wall[name]);
     }
@@ -258,7 +261,8 @@ fn bimcrafts_own_curtain_wall_comes_back_from_ifc_as_it_was() {
     for c in ["wall", "curtainpanel", "mullion", "curtaingrid"] {
         assert_eq!(count(t, c), count(&s.model, c), "{c}");
     }
-    assert_eq!(t.parameters.get("Finish"), s.model.parameters.get("Finish"));
+    // (A parameter comes back for the categories of what holds a value of it.)
+    assert_eq!(t.parameters["Finish"].categories, ["curtainpanel"]);
     // And out again, the same file but for its date.
     let again = crate::ifc::export(t);
     assert_eq!(entities(&again).len(), entities(&text).len());
