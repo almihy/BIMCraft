@@ -38,6 +38,8 @@ mod clipboard_tests;
 mod cloud_tests;
 mod commands;
 #[cfg(test)]
+mod curtain_sync_tests;
+#[cfg(test)]
 mod curtain_tests;
 #[cfg(test)]
 mod dry_run_tests;
