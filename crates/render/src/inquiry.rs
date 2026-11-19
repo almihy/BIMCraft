@@ -117,3 +117,12 @@ pub fn shown(m: &Model, ids: &[Id]) -> Option<(Id, [P2; 2])> {
     let (lo, hi) = pts.iter().fold((first, first), |(lo, hi), q| (P2(lo.0.min(q.0), lo.1.min(q.1)), P2(hi.0.max(q.0), hi.1.max(q.1))));
     Some((level, [lo, hi]))
 }
+
+/// What a click on element `id` may mean, in the order Tab goes through it: a curtain wall's panel, mullion or grid line is
+/// its wall first, as Revit takes the wall and Tab goes on to what it holds; anything else is itself alone. For the views
+/// that find one element under the cursor (the 3D view, a section's picture): a plan's drawing orders them itself
+/// (`Drawing::pick_all`).
+pub fn pick_chain(m: &Model, id: Id) -> Vec<Id> {
+    let host = m.elements.get(id).and_then(crate::curtain::host_of).and_then(|h| m.elements.id(h));
+    host.into_iter().chain([id]).collect()
+}

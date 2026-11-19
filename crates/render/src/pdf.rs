@@ -39,6 +39,8 @@ pub fn contents(d: &Drawing, paper: P2) -> (String, Vec<Picture>) {
     let mut images = Vec::new();
     for (i, p) in d.prims.iter().enumerate() {
         match p {
+            // What is drawn in no ink is there for the cursor (a curtain wall's extents), not for paper.
+            Prim::Fill { alpha: 0, .. } | Prim::Line { alpha: 0, .. } => {}
             Prim::Fill { rings, color: c, rule, alpha } => {
                 let see = seen_through(&mut s, *alpha);
                 let _ = write!(s, "{} rg ", color(*c));
@@ -84,6 +86,7 @@ fn alphas(d: &Drawing) -> String {
         .prims
         .iter()
         .filter_map(|p| match p {
+            Prim::Fill { alpha: 0, .. } | Prim::Line { alpha: 0, .. } => None,
             Prim::Fill { alpha, .. } | Prim::Line { alpha, .. } => Some(*alpha),
             Prim::Image { .. } => None,
         })

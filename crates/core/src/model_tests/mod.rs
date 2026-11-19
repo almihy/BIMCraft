@@ -5,6 +5,7 @@ mod background_grid;
 mod component_geometry;
 mod constraints;
 mod crosscheck;
+mod curtain_render;
 mod derived;
 mod dims3d;
 mod fills;

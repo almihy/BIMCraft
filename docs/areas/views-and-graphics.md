@@ -685,6 +685,36 @@ element has no model pattern, or the lines aren't parallel or have no length), s
 sets it with `modify`. `pattern_origin` and `pattern_angle` are in the `modify`, `filled_region` and `floor` command docs, and
 `elements` shows them for a region and a floor even at their defaults.
 
+## Curtain walls in views
+
+A curtain wall (`curtain.rs`) has no solid, so no view draws the wall: what shows are its panels and mullions, each an
+element of its own category (`curtainpanel` Curtain Panels, `mullion` Curtain Wall Mullions, `curtaingrid` Curtain Wall
+Grids: rows of Visibility/Graphics and Object Styles like any model category, cuttable). The wall stays a Wall, as Revit's:
+whatever hides it (its category, a filter, its phase, its own override) hides what it holds (`Look::with`), and a view
+hides panels or mullions alone by their category.
+
+- **Plans** (`render/curtain_wall.rs`): no poché, layers or cut outline. A panel the cut plane cuts is its thickness, an
+  outline closed at its ends: glass (a see-through material, or none) is not filled, another material is, as what is cut
+  is, with its cut pattern at Fine. A mullion cut is its section, a rectangle or a circle, filled. What tops out under
+  the cut plane and over the view depth is its outline in projection (a sill mullion between the standing ones), what is
+  over the cut plane is not drawn, and a reflected ceiling plan sees what starts over its cut. One drawing at Coarse,
+  Medium and Fine: Revit's own at each is not verified (`revit-facts.md` in Arqiflow's specs), and it has no two-line
+  coarse form. A curved wall's panels are flat between grid lines, so they draw straight. A panel's cut pen starts at
+  `Pen::FINE` (25 mm of glass is two lines 0.25 mm apart at 1 : 100) and a mullion's at a window's; both are ours.
+- **Sections and elevations** cut and show them from their solids, glass as a window's (opaque in the hidden-line picture).
+- **Picking.** The wall owns its extents in every plan, section and elevation, drawn in no ink (`alpha` 0; a PDF and a
+  DXF leave them out): in a plan a fill and a dashed outline over its panels and mullions, so `Drawing::pick` takes the
+  wall and `pick_all` (Tab) goes on to the mullion or panel under the cursor; in a section or an elevation a dashed outline
+  only, so the wall is taken at its edge and the picture's pick takes the panel or mullion inside it, and not at all
+  where the picture shows none of it (`curtain_wall::behind`). A front end that highlights an element's primitives shows
+  the wall dashed, as Revit does. A hand-made grid line (`Element::CurtainGrid`) draws nothing; in a section or an
+  elevation it is there to be picked a little past the wall's edges and across it wherever no mullion lies on it. The 3D
+  view picks the panel or mullion itself; `inquiry::pick_chain` gives the wall before it, for a front end's Tab.
+- **Out.** DXF puts panels on `A-GLAZ` and mullions on `A-GLAZ-CWMG`; glTF has a node for each, as for any element. The
+  3D scene's update makes a curtain wall's panels and mullions again whenever something may have moved the wall (they
+  hold where they are in the wall, not in the model, so an edit of its level changes none of them).
+- **Snapping.** A curtain wall snaps by its location line, its ends and its middle; it has no faces to snap to.
+
 ## Linked models
 
 A `Link` element (`link.rs`; commands `link` and `reload`) is another project shown in this one as a reference. The file holds its name, its

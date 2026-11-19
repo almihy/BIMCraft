@@ -684,6 +684,8 @@ impl Users {
 pub fn plural(category: &str) -> String {
     match category {
         "structuralcolumn" => "structural columns".into(),
+        "curtainpanel" => "curtain panels".into(),
+        "curtaingrid" => "curtain grid lines".into(),
         "detailgroup" => "detail groups".into(),
         "line" => "detail lines".into(),
         "region" => "filled regions".into(),

@@ -38,6 +38,7 @@ use crate::{font, massing, solids, stairs};
 
 mod dimensions;
 use dimensions::dimension;
+mod curtain_wall;
 mod hatch;
 #[doc(hidden)]
 pub mod regions;
@@ -576,6 +577,8 @@ fn cut_outlines(m: &Model, elements: &[(Id, &Element)], z: f64, look: &Look, ind
         .iter()
         .filter(|(id, _)| look.shows(*id))
         .filter_map(|&(id, e)| match e {
+            // A curtain wall has no solid to cut: its panels and mullions are drawn each as it is cut (`curtain_wall`).
+            Element::Wall(w) if crate::curtain::is_curtain(m, w) => None,
             Element::Wall(w) if m.spans(w, z) => Some((id, walls::outline_in(m, id, index))),
             _ => stands(m, id, e, index).filter(|(_, bottom, top)| *bottom <= z && z < *top).map(|(outline, ..)| (id, outline)),
         })
@@ -606,6 +609,8 @@ fn seen_below(m: &Model, elements: &[(Id, &Element)], r: &PlanRange, look: &Look
             // A footing or a run hangs under the level it is drawn on, its top flush with the view's bottom: that is seen.
             let flush = if matches!(e, Element::Footing(_) | crate::model::run_arm!(_)) { TOL } else { 0.0 };
             let (outline, top) = match e {
+                // A curtain wall seen below is its panels and mullions, each drawn as it is seen (`curtain_wall`).
+                Element::Wall(w) if crate::curtain::is_curtain(m, w) => return None,
                 Element::Wall(w) => {
                     let top = m.top_z(w);
                     // Joining a wall scans its neighbours. Reject other storeys before
@@ -751,6 +756,11 @@ fn plan_filter<'a>(
         .filter(|(id, e)| match e {
             Element::Wall(w) => m.base_z(w) <= r.cut && m.top_z(w) > r.depth - TOL,
             Element::Door(o) | Element::Window(o) => m.wall(o.host).is_some_and(|w| m.spans(w, r.cut)),
+            // A curtain wall's own, where the wall's grid may show: it is laid from the wall's own base to its own top,
+            // whatever the wall is attached to, a mullion on its border reaching no farther.
+            Element::CurtainPanel(_) | Element::Mullion(_) | Element::CurtainGrid(_) => {
+                crate::curtain::host_of(e).and_then(|h| m.wall(h)).is_some_and(|w| m.own_base(w) <= r.cut && m.own_top(w) > r.depth - TOL)
+            }
             Element::Component(c) => {
                 let (bottom, top) = components.heights_of(c);
                 // Its plan symbols are annotation of its level, whatever height its forms reach.
@@ -1175,6 +1185,7 @@ fn plan_shows_among(m: &Model, key: Guid, among: bool) -> Vec<P2> {
         if among { plan_elements(m, key, level, &r, false, &mut components) } else { m.elements.iter().map(|(id, e)| (*id, e)).collect() };
     let mut extent: Vec<P2> = cut_outlines(m, &elements, r.cut, &look, index).into_iter().flat_map(|(_, o)| o).collect();
     extent.extend(seen_below(m, &elements, &r, &look, index).into_iter().flat_map(|(_, o, _)| o));
+    extent.extend(curtain_wall::shows(m, &elements, &r, &look));
     // What it shows besides what is cut and seen: of its level, in it, or of the kinds a plan looks for among all.
     let rest: Vec<(Id, &Element)> = if among {
         let lookup = m.lookup();
@@ -2173,6 +2184,7 @@ impl SectionOverlay {
         };
         if let Some(image) = picture {
             behind_model(&mut d, m, image);
+            curtain_wall::behind(&mut d, m, image);
             d.picture(m, self.id, image);
         }
         section_finish_cancellable(m, self.id, d, cancelled)
@@ -2185,6 +2197,7 @@ fn section_in(m: &Model, work: &SectionWork, id: impl Key, view: View, k: f32, n
     let Some(id) = m.elements.id(id) else { return d };
     if let Some(image) = picture {
         behind_model(&mut d, m, image);
+        curtain_wall::behind(&mut d, m, image);
         d.picture(m, id, image);
     }
     section_finish(m, id, d)
@@ -2393,6 +2406,8 @@ fn section_base_cancellable(
     if cancelled() {
         return None;
     }
+    // The curtain walls it looks at: their extents and hand-made grid lines, for the cursor.
+    curtain_wall::in_section(&mut d, m, v, &look, (first, last));
     Some(d)
 }
 
@@ -3683,6 +3698,8 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
             }
         }
     }
+    // A curtain wall's panels and mullions the plan sees and does not cut: below its cut plane, or over a ceiling plan's.
+    curtain_wall::seen(&mut d, m, &elements, &range, &look, up);
     // A run's centre line, faint and dashed, where it is seen but not cut: Revit's mark of a beam, and where to pick it.
     for (&id, e) in all().filter(|_| !up).filter(|(id, _)| shown(**id)) {
         let Some(g) = m.run_geom(e).filter(|g| !g.vertical()) else { continue };
@@ -3803,7 +3820,7 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
     for (&id, e) in all() {
         let Element::Wall(w) = e else { continue };
         let layers = m.type_layers("wall", &w.type_name);
-        if !m.spans(w, range.cut) || !shown(id) {
+        if !m.spans(w, range.cut) || !shown(id) || crate::curtain::is_curtain(m, w) {
             continue;
         }
         d.owner = Some(id);
@@ -3845,6 +3862,8 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
             opening(&mut d, m, e, o, w, range.cut, shown(id), m.elements.id(o.host).filter(|wall| shown(*wall)));
         }
     }
+    // A curtain wall's panels and mullions the plan cuts, and the wall's own extents for the cursor.
+    curtain_wall::cut(&mut d, m, &elements, &range, &look, up);
     d.part(Part::Projection);
     // A ceiling plan isn't cropped: the crop region is the floor plan's.
     let crop = m.shown_crop(key).filter(|_| !up);

@@ -93,7 +93,10 @@ impl Scene {
             for id in wanted.iter().filter(|id| !made.contains_key(id)) {
                 let own = tris.get(id).map(Vec::as_slice).unwrap_or_default();
                 let was = self.span(*id).and_then(|s| self.tris.get(s.at.clone())).unwrap_or_default();
-                if changed.contains(id) || own != was {
+                // A curtain wall has no triangles to compare: its panels and mullions hold where they are in the wall, not in
+                // the model, so whatever may have moved the wall (its level, what its top is attached to) may have moved them.
+                let curtain = after.wall(*id).is_some_and(|w| crate::curtain::is_curtain(after, w));
+                if changed.contains(id) || own != was || curtain {
                     regions.extend(self.span(*id).map(|s| s.bounds));
                     regions.extend(bounds(own.iter().flat_map(|t| t.p)));
                     regions.extend(shaft_reach(before, *id));
@@ -325,6 +328,8 @@ fn draws(e: &Element) -> bool {
                 | Element::Railing(_)
                 | Element::Door(_)
                 | Element::Window(_)
+                | Element::CurtainPanel(_)
+                | Element::Mullion(_)
         )
 }
 

@@ -22,7 +22,7 @@ use crate::schedule;
 /// The categories a plan, a section or a 3D view draws, and so may hide and override: those of the
 /// model, then those of the annotation. A family component is of its family's category (see [`COMPONENTS`]); `component`, which
 /// names them all, is no row of its own (see [`COMPONENT`]).
-pub const MODEL: [&str; 54] = [
+pub const MODEL: [&str; 57] = [
     "wall",
     "floor",
     "ceiling",
@@ -30,6 +30,11 @@ pub const MODEL: [&str; 54] = [
     "mass",
     "door",
     "window",
+    // A curtain wall's own (curtain.rs): the wall itself is a Wall, as Revit's; its panels, mullions and hand-made grid lines
+    // each a category, hidden with their wall whatever hides it.
+    "curtainpanel",
+    "mullion",
+    "curtaingrid",
     "room",
     "roomseparator",
     "column",
@@ -1354,10 +1359,15 @@ impl Look {
         // Each applied filter, and the elements it picks out.
         let applied: Vec<(&Applied, BTreeSet<Id>)> =
             g.filters.iter().filter_map(|a| Some((a, m.view_filters.get(&a.filter)?.matching(m)))).collect();
+        // A curtain wall's panels, mullions and grid lines, each with its wall: hidden with it.
+        let mut hosted: Vec<(Id, Guid)> = Vec::new();
         for (&id, e) in &m.elements {
             let cat = category_of(m, e);
             if !drawn(cat) {
                 continue;
+            }
+            if let Some(host) = crate::curtain::host_of(e) {
+                hosted.push((id, host));
             }
             // What isn't in its phase isn't there; what its phase filter doesn't display is hidden; what it
             // overrides is drawn as the project's override says, under whatever else the view says.
@@ -1408,6 +1418,14 @@ impl Look {
                 look.hidden.insert(id);
             } else if !over.is_empty() {
                 look.paint.insert(id, over);
+            }
+        }
+        // As Revit's: a curtain wall's panels and mullions have their own categories, and are hidden whenever their wall is
+        // (its category, a filter, its phase, its own override).
+        for (id, host) in hosted {
+            if m.elements.id(host).is_some_and(|w| look.hidden.contains(&w)) {
+                look.hidden.insert(id);
+                look.paint.remove(&id);
             }
         }
         look

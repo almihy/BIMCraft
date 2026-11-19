@@ -1,7 +1,7 @@
 # bimcraft-render
 
 Everything that draws the model: plans, sections and elevations (`render`, with `render/` for dimensions, hatches, regions,
-the section cut and the site), the 3D view (`view3d`: the scene, the camera, the picture, picking, the GPU mesh and its
+the section cut, the site and curtain walls), the 3D view (`view3d`: the scene, the camera, the picture, picking, the GPU mesh and its
 updates, the cursor plane its tools draw on), sheets and their title blocks drawn (`sheet`), 3D dimensions drawn and picked
 (`dims3d`), the view's axes (`triad`), snapping (`snap`), what is under the cursor (`inquiry`), and what a drawing is
 written as (`pdf`, `dxf_out`, `gltf`).
