@@ -2262,6 +2262,27 @@ mod tests {
     }
 
     #[test]
+    fn curtain_panels_show_their_edges_and_the_joints_between_them_on_the_card_as_on_the_processor() {
+        let Some(mut gpu) = headless() else {
+            eprintln!("no graphics adapter here: the card's picture is not compared");
+            return;
+        };
+        // Glass joined with no mullion between the panes, glass between mullions, and a basic wall behind them.
+        let mut s = Session::new();
+        s.script(
+            r#"wall {"points": [[0,0],[6000,0]], "type": "Exterior Glazing", "height": 3000}
+wall {"points": [[0,2000],[6000,2000]], "type": "Storefront", "height": 3000}
+wall {"points": [[0,4000],[6000,4000]], "height": 3000}"#,
+        )
+        .unwrap();
+        let panel = *s.model.elements.iter().find(|(_, e)| e.category() == "curtainpanel").unwrap().0;
+        draws_as_the_processor(&mut gpu, &s, &[]);
+        draws_as_the_processor(&mut gpu, &s, &[(panel, Rgb(0, 120, 215))]);
+        s.execute("visual_style", &serde_json::json!({"style": "hidden_line"})).unwrap();
+        draws_as_the_processor(&mut gpu, &s, &[]);
+    }
+
+    #[test]
     fn the_card_draws_hidden_line_as_the_processor_does() {
         let Some(mut gpu) = headless() else {
             eprintln!("no graphics adapter here: the card's picture is not compared");
