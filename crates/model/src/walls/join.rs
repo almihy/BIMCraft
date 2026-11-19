@@ -265,13 +265,9 @@ pub(super) fn end_cut(
     clean: bool,
 ) -> Option<Cut> {
     let (me, o) = (Strips::of(m, id)?, Strips::of(m, other)?);
-    // A curved wall run into on its side is not broken for the wall that ends on it: that join is the faces' alone.
-    if other_end.is_none() && !o.straight() {
-        return None;
-    }
     // The way this wall goes into the join, from its end there, and the way the other runs there.
     let (node, way) = me.out(at_end);
-    let beside = other_end.map_or(o.dir, |end| o.out(end).1);
+    let beside = other_end.map_or_else(|| o.axis.tangent(o.axis.project(node).0), |end| o.out(end).1);
     if way.cross(beside).abs() < 0.2 {
         return None;
     }
@@ -345,11 +341,13 @@ pub(super) struct Gap {
 pub(super) fn gaps(m: &Model, id: Id, other: Id, other_end: bool) -> Option<Vec<Option<Gap>>> {
     let (me, o) = (Strips::of(m, id)?, Strips::of(m, other)?);
     let (from, way) = o.out(other_end);
-    if !me.straight() || me.dir.cross(way).abs() < 0.2 {
+    // The way this wall runs where the other ends on it: a curved one's, there.
+    let along = me.axis.tangent(me.axis.project(from).0);
+    if along.cross(way).abs() < 0.2 {
         return None;
     }
     // The other's boundaries in the order this wall crosses them, start to end; this wall's in the order the other does.
-    let lines = o.crossed(me.start, me.dir, from)?;
+    let lines = o.crossed(from - along * (4.0 * o.thick() + me.thick()), along, from)?;
     let cells = between(&lines);
     let mine = Side { ranks: me.ranks.clone(), arrives: vec![cells.clone(), cells.iter().rev().copied().collect()] };
     let theirs = Side { ranks: o.ranks.clone(), arrives: vec![between(&me.crossed(from, way, from)?)] };

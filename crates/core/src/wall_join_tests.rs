@@ -595,6 +595,39 @@ fn shot_coarse_joins() {
     std::fs::write(format!("{dir}/coarse.png"), crate::render::png(&crate::render::plan(&s.model, 100000, 1400, 1100)).unwrap()).unwrap();
 }
 
+#[test]
+fn a_wall_ending_on_a_curved_walls_side_joins_it_by_its_layers() {
+    // A quarter of a circle of 3 m about (1000, 0), and a wall out from inside it, square to it, ending on its line.
+    let mut s = typed();
+    let curved = run(&mut s, "wall", json!({"points": [[4000, 0], [1000, 3000]], "arc": 90, "type": "Ext"}))["ids"][0].as_u64().unwrap();
+    let stem = run(&mut s, "wall", json!({"points": [[2600, 1200], [3400, 1800]], "type": "Ext"}))["ids"][0].as_u64().unwrap();
+    assert_eq!(walls::ends_on(&s.model, stem, true), Some(curved));
+    // The curved wall is broken where the other's layers pass into it: its brick, inside, is in two pieces.
+    let g = walls::layer_geometry(&s.model, curved, None);
+    let pieces: Vec<usize> = (0..4).map(|k| g.bands(k).len()).collect();
+    assert_eq!(pieces[0], 2, "{pieces:?}");
+    assert_eq!(pieces[3], 1, "its plaster, outside, runs on whole: {pieces:?}");
+    // The stem's block reaches the curved wall's block, past its brick and insulation: farther from the centre than the
+    // curved wall's inner face.
+    let p = walls::layer_geometry(&s.model, stem, None);
+    let reach = |k: usize| p.bands(k).iter().flatten().map(|q| q.dist(P2(1000.0, 0.0))).fold(0.0, f64::max);
+    assert!(reach(2) > 3000.0 && reach(0) < 2850.0, "block to {}, brick to {}", reach(2), reach(0));
+    // No place is held by two layers (but for a hair along the curve, where a straight layer ends on a chord of it).
+    let mut twice = Vec::new();
+    for i in 0..60 {
+        for j in 0..60 {
+            let q = P2(3100.0 + 10.0 * f64::from(i) + 0.37, 1500.0 + 10.0 * f64::from(j) + 0.41);
+            let hair = [2842.5, 2942.5, 3002.5, 3142.5, 3157.5].iter().any(|r| (q.dist(P2(1000.0, 0.0)) - r).abs() < 1.0);
+            if !hair && held(&s, &[curved, stem], q).0 > 1 {
+                twice.push(q);
+            }
+        }
+    }
+    assert!(twice.is_empty(), "{} places held twice, the first {:?}", twice.len(), twice.first());
+    // And the curved wall's own curve is whole where nothing meets it: a place in its block, far from the join.
+    assert_eq!(held(&s, &[curved, stem], P2(1000.0 + 3070.0 * 0.6, 3070.0 * 0.8)), (1, Some(2)));
+}
+
 /// A curved wall at a corner with a straight one, and one ending on its side: a picture to look at.
 #[test]
 #[ignore]

@@ -483,7 +483,7 @@ pub fn ending_on(m: &Model, id: Id) -> Vec<(Id, bool)> {
 /// The walls, straight or curved, that end on the side of the straight wall `id`, each with which of its ends does (its end, else its
 /// start): those whose join there is theirs and this wall's alone.
 fn tees(m: &Model, id: Id, index: Option<&Index>) -> Vec<(Id, bool)> {
-    let Some(w) = m.wall(id).filter(|w| w.arc == 0.0 && w.join) else { return Vec::new() };
+    let Some(w) = m.wall(id).filter(|w| w.join) else { return Vec::new() };
     let axis = Axis::of(w);
     let (ext, int) = faces(m, w);
     let thickest = m.types.wall.values().map(|t| t.thickness).filter(|t| t.is_finite()).fold(0.0, f64::max);
@@ -698,22 +698,58 @@ pub fn layer_geometry(m: &Model, id: Id, index: Option<&Index>) -> LayerGeometry
         .filter_map(|(other, at_end)| join::gaps(m, id, other, at_end))
         .collect();
     let gaps_of = |k: usize| -> Vec<join::Gap> { broken.iter().filter_map(|g| g.get(k).copied().flatten()).collect() };
-    // A straight line from `a` to `b` less the gaps: the stretches left, in order.
-    let left = |a: P2, b: P2, gaps: &[join::Gap]| -> Vec<(P2, P2)> {
-        let d = b - a;
-        let at = |line: (P2, P2)| geom::line_intersection(a, b, line.0, line.0 + line.1).map(|q| (q - a).dot(d) / d.dot(d).max(1e-12));
+    // A line along the wall (two points of a straight wall's, the points of a curved one's) less the gaps: the stretches
+    // left, in order.
+    let left = |line: &[P2], gaps: &[join::Gap]| -> Vec<Vec<P2>> {
+        let mut far = vec![0.0];
+        for s in line.windows(2) {
+            far.push(far.last().copied().unwrap_or(0.0) + s[0].dist(s[1]));
+        }
+        let total = far.last().copied().unwrap_or(0.0);
+        if line.len() < 2 || total <= 0.0 {
+            return Vec::new();
+        }
+        let last = line.len() - 2;
+        // How far along it a line across it crosses it: where it does nearest that line's own point, the first and the
+        // last stretch carried on past the ends.
+        let at = |cross: (P2, P2)| -> Option<f64> {
+            line.windows(2)
+                .enumerate()
+                .filter_map(|(i, s)| {
+                    let (a, d) = (s[0], s[1] - s[0]);
+                    let q = geom::line_intersection(a, s[1], cross.0, cross.0 + cross.1)?;
+                    let t = (q - a).dot(d) / d.dot(d).max(1e-12);
+                    ((t >= -1e-9 || i == 0) && (t <= 1.0 + 1e-9 || i == last))
+                        .then(|| (q.dist(cross.0), far.get(i).copied().unwrap_or(0.0) + t * d.length()))
+                })
+                .min_by(|x, y| x.0.total_cmp(&y.0))
+                .map(|(_, s)| s)
+        };
+        // The stretch from `s0` to `s1` along it.
+        let point = |s: f64| -> P2 {
+            let i = far.iter().rposition(|f| *f <= s).unwrap_or(0).min(last);
+            let (a, b) = (line.get(i).copied().unwrap_or_default(), line.get(i + 1).copied().unwrap_or_default());
+            let span = (far.get(i + 1).copied().unwrap_or(0.0) - far.get(i).copied().unwrap_or(0.0)).max(1e-12);
+            a + (b - a) * ((s - far.get(i).copied().unwrap_or(0.0)) / span)
+        };
+        let stretch = |s0: f64, s1: f64| -> Vec<P2> {
+            let mut out = vec![point(s0)];
+            out.extend(line.iter().zip(&far).filter(|(_, f)| **f > s0 + 1e-9 && **f < s1 - 1e-9).map(|(q, _)| *q));
+            out.push(point(s1));
+            out
+        };
         let mut cuts: Vec<(f64, f64)> =
             gaps.iter().filter_map(|g| Some((at(g.from)?, at(g.to)?))).map(|(x, y)| (x.min(y), x.max(y))).collect();
         cuts.sort_by(|x, y| x.0.total_cmp(&y.0));
         let (mut out, mut from) = (Vec::new(), 0.0);
         for (lo, hi) in cuts {
             if lo > from {
-                out.push((a + d * from, a + d * lo.min(1.0)));
+                out.push(stretch(from, lo.min(total)));
             }
             from = from.max(hi);
         }
-        if from < 1.0 {
-            out.push((a + d * from, b));
+        if from < total {
+            out.push(stretch(from, total));
         }
         out
     };
@@ -721,11 +757,14 @@ pub fn layer_geometry(m: &Model, id: Id, index: Option<&Index>) -> LayerGeometry
     for k in 0..layers {
         let (outer, inner) = (side(k, k), side(k + 1, k));
         let gaps = gaps_of(k);
-        let rings = match (outer.as_slice(), inner.as_slice()) {
-            ([a0, a1], [b0, b1]) if !gaps.is_empty() => {
-                left(*a0, *a1, &gaps).into_iter().zip(left(*b0, *b1, &gaps)).map(|((a, a2), (b, b2))| vec![a, a2, b2, b]).collect()
-            }
-            _ => vec![outer.iter().chain(inner.iter().rev()).copied().collect()],
+        let rings: Vec<Vec<P2>> = if gaps.is_empty() {
+            vec![outer.iter().chain(inner.iter().rev()).copied().collect()]
+        } else {
+            left(&outer, &gaps)
+                .into_iter()
+                .zip(left(&inner, &gaps))
+                .map(|(a, b)| a.into_iter().chain(b.into_iter().rev()).collect())
+                .collect()
         };
         bands.push(rings);
     }
@@ -746,9 +785,10 @@ pub fn layer_geometry(m: &Model, id: Id, index: Option<&Index>) -> LayerGeometry
                 }
                 // The line between the two, where both are there.
                 let gaps: Vec<join::Gap> = gaps_of(x).into_iter().chain(gaps_of(y)).collect();
-                match line.as_slice() {
-                    [a, c] if !gaps.is_empty() => seams.extend(left(*a, *c, &gaps).into_iter().map(|(a, c)| vec![a, c])),
-                    _ => seams.push(line.clone()),
+                if gaps.is_empty() {
+                    seams.push(line.clone());
+                } else {
+                    seams.extend(left(&line, &gaps));
                 }
                 line
             }
@@ -821,7 +861,11 @@ pub fn layer_geometry(m: &Model, id: Id, index: Option<&Index>) -> LayerGeometry
                         if gaps.is_empty() {
                             vec![vec![a0, a1, b1, b0]]
                         } else {
-                            left(a0, a1, &gaps).into_iter().zip(left(b0, b1, &gaps)).map(|((a, a2), (b, b2))| vec![a, a2, b2, b]).collect()
+                            left(&[a0, a1], &gaps)
+                                .into_iter()
+                                .zip(left(&[b0, b1], &gaps))
+                                .map(|(a, b)| a.into_iter().chain(b.into_iter().rev()).collect())
+                                .collect()
                         }
                     })
                     .collect()
@@ -842,7 +886,7 @@ pub fn layer_geometry(m: &Model, id: Id, index: Option<&Index>) -> LayerGeometry
                     };
                     let (a, c) = (end(s0, 0), end(s1, 1));
                     let both: Vec<join::Gap> = gaps_of(b - 1).into_iter().chain(gaps_of(b)).collect();
-                    if both.is_empty() { vec![vec![a, c]] } else { left(a, c, &both).into_iter().map(|(a, c)| vec![a, c]).collect() }
+                    if both.is_empty() { vec![vec![a, c]] } else { left(&[a, c], &both) }
                 }
                 None => vec![vec![w.start + u * s0 + u.perp() * (face - d0), w.start + u * s1 + u.perp() * (face - d1)]],
             };
