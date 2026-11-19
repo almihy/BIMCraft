@@ -178,7 +178,8 @@ pub(super) fn cut(d: &mut Drawing, m: &Model, elements: &[(Id, &Element)], range
         if !curtain::is_curtain(m, w) {
             continue;
         }
-        let (bottom, top) = (m.base_z(w), m.top_z(w));
+        // Its grid's heights: its own base and top, whatever it is attached to.
+        let (bottom, top) = (m.own_base(w), m.own_top(w));
         if !(cut_by(range, bottom, top) || seen_by(range, up, bottom, top)) {
             continue;
         }

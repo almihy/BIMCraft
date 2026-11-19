@@ -756,9 +756,10 @@ fn plan_filter<'a>(
         .filter(|(id, e)| match e {
             Element::Wall(w) => m.base_z(w) <= r.cut && m.top_z(w) > r.depth - TOL,
             Element::Door(o) | Element::Window(o) => m.wall(o.host).is_some_and(|w| m.spans(w, r.cut)),
-            // A curtain wall's own, where the wall itself may show.
+            // A curtain wall's own, where the wall's grid may show: it is laid from the wall's own base to its own top,
+            // whatever the wall is attached to, a mullion on its border reaching no farther.
             Element::CurtainPanel(_) | Element::Mullion(_) | Element::CurtainGrid(_) => {
-                crate::curtain::host_of(e).and_then(|h| m.wall(h)).is_some_and(|w| m.base_z(w) <= r.cut && m.top_z(w) > r.depth - TOL)
+                crate::curtain::host_of(e).and_then(|h| m.wall(h)).is_some_and(|w| m.own_base(w) <= r.cut && m.own_top(w) > r.depth - TOL)
             }
             Element::Component(c) => {
                 let (bottom, top) = components.heights_of(c);

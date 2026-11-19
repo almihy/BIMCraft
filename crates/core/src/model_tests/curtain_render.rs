@@ -260,8 +260,8 @@ fn a_section_cuts_a_curtain_walls_panels_and_an_elevation_shows_them_and_takes_t
     assert!(!owned(&d, w).is_empty() && owned(&d, w).iter().all(|(p, _)| !seen(p)));
     assert_eq!(d.pick(at(0.0, 1500.0), 3.0), Some(w));
     assert_eq!(d.pick(at(2250.0, 1200.0), 3.0), None);
-    // A line drawn on the wall by hand, between two of its own: there to be picked across the wall where no mullion lies
-    // on it (none does: the type's mullions are the type's lines'), and a little past its edges.
+    // A line drawn on the wall by hand: there to be picked a little past the wall's edges. Across the wall the type's
+    // mullions lie on it, as on its own lines, and they are the picture's to pick.
     let host = s.model.guid(w);
     let line = {
         let m = std::sync::Arc::make_mut(&mut s.model);
@@ -274,6 +274,11 @@ fn a_section_cuts_a_curtain_walls_panels_and_an_elevation_shows_them_and_takes_t
     let d = render::section_over(&s.model, el, view, &picture);
     assert!(owned(&d, line).iter().all(|(p, _)| !seen(p)));
     assert_eq!(d.pick(at(-60.0, 1200.0), 2.0), Some(line), "past the wall's edge");
+    assert_eq!(d.pick(at(2250.0, 1200.0), 2.0), None, "the mullion on it is the picture's");
+    assert!(matches!(
+        picture.pick(f64::from(at(2250.0, 1200.0).0), f64::from(at(2250.0, 1200.0).1)).and_then(|id| s.model.elements.get(id)),
+        Some(Element::Mullion(_))
+    ));
     // A wall in front of it hides it: its edge is no longer its own to pick.
     run(&mut s, "wall", json!({"points": [[-500, -1000], [6500, -1000]], "height": 3500}));
     let view = render::section_fit(&s.model, el, 900, 600);
