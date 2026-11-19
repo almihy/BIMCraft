@@ -114,7 +114,7 @@ fn a_rule_s_parts_each_select_and_together_all_must_hold() {
     assert_eq!(total(&d, json!({"layers": ["WALL", "0"]})), 5);
     // Kinds, as `query` names them.
     assert_eq!(total(&d, json!({"kinds": ["line"]})), 5);
-    assert_eq!(total(&d, json!({"kinds": ["blocks", "text"]})), 4);
+    assert_eq!(total(&d, json!({"kinds": ["blocks", "text"]})), 5);
     // Blocks: by name, or by how the name begins; never another kind of item.
     assert_eq!(total(&d, json!({"blocks": ["dr_d01"]})), 2);
     assert_eq!(total(&d, json!({"blocks": ["DR_*"]})), 3);
@@ -125,7 +125,7 @@ fn a_rule_s_parts_each_select_and_together_all_must_hold() {
     // The longer side of the item's box, mm.
     assert_eq!(total(&d, json!({"min_size": 5000})), 4);
     assert_eq!(total(&d, json!({"min_size": 5000, "max_size": 6000})), 3);
-    assert_eq!(total(&d, json!({"max_size": 600})), 1);
+    assert_eq!(total(&d, json!({"max_size": 600, "kinds": ["circle", "line"]})), 1);
     // Handles, as `query` gives them.
     assert_eq!(total(&d, json!({"handles": [format!("{:x}", wall.0)]})), 1);
     // Every part given must hold.
@@ -176,8 +176,8 @@ fn counts_total_by_kind_by_layer_and_by_block() {
     );
     assert_eq!(c["layers"][3], json!({"name": "0", "items": 1, "kinds": {"line": 1}, "color": "#ffffff", "colors": {"#ff0000": 1}}));
     // The colours the items are drawn in, the most used first: red is two walls on WALL and the one on layer 0.
-    assert_eq!(c["colors"][0], json!({"color": "#ff0000", "aci": 1, "items": 3, "layers": ["0", "WALL"]}));
-    assert_eq!(c["colors"][1], json!({"color": "#0000ff", "aci": 5, "items": 3, "layers": ["DOORS"]}));
+    assert_eq!(c["colors"][0], json!({"color": "#0000ff", "aci": 5, "items": 3, "layers": ["DOORS"]}));
+    assert_eq!(c["colors"][1], json!({"color": "#ff0000", "aci": 1, "items": 3, "layers": ["0", "WALL"]}));
     let rest: Vec<&str> = c["colors"].as_array().expect("colours").iter().skip(2).filter_map(|c| c["color"].as_str()).collect();
     assert_eq!(rest, ["#00ff00", "#00ffff", "#ffffff"]);
     assert_eq!(c["layers"].as_array().expect("layers").len(), 5);
@@ -264,9 +264,9 @@ fn a_part_is_cropped_kept_dropped_sorted_and_moved_in_that_order() {
     assert_eq!(names, ["0", "A-DOOR", "A-WALL", "FURN", "SWING", "X-UNSURE"]);
     // Each looks as it did on its new layer, which is white and continuous: the walls that were red by their layer are
     // red by themselves, the doors blue and dashed; the wall that was red by itself still is.
-    let drawn: BTreeSet<(String, Color, String)> =
-        part.model.iter().filter(|e| e.common.layer.starts_with("A-")).map(|e| (e.common.layer.clone(), e.common.color, e.common.linetype.clone())).collect();
-    assert_eq!(drawn, BTreeSet::from([("A-DOOR".into(), Color::Index(5), "DASHED".into()), ("A-WALL".into(), Color::Index(1), "ByLayer".into())]));
+    let drawn: BTreeSet<(String, String, String)> =
+        part.model.iter().filter(|e| e.common.layer.starts_with("A-")).map(|e| (e.common.layer.clone(), e.common.color.name(), e.common.linetype.clone())).collect();
+    assert_eq!(drawn, BTreeSet::from([("A-DOOR".into(), "Blue".into(), "DASHED".into()), ("A-WALL".into(), "Red".into(), "ByLayer".into())]));
     assert!(part.layer("A-WALL").is_some_and(|l| l.color == Color::Index(7) && l.linetype == "Continuous"));
     // Sorted onto a layer of the same colour, an item still leaves its colour to its layer.
     let (same, _) = cut(&o, &m, &json!({"box": ROOM, "sort": [{"to": "WALL", "colors": ["red"]}, {"to": "WALL", "kinds": ["text"]}]}).to_string()).expect("cut");
@@ -401,11 +401,11 @@ fn a_picture_shows_only_what_is_selected_in_the_drawing_s_own_colours() {
     let p = look(&o, &m, &json!({"box": ROOM, "drop": [{"layers": ["TEXT"]}]}).to_string(), 600).expect("drawn");
     assert_eq!(&p.png[..8], b"\x89PNG\r\n\x1a\n");
     let a = &p.about;
-    assert_eq!((a["width"].as_u64(), a["height"].as_u64()), (Some(600), Some(409)));
+    assert_eq!((a["width"].as_u64(), a["height"].as_u64()), (Some(600), Some(411)));
     assert_eq!((a["items"].as_u64(), a["color_by"].as_str()), (Some(8), Some("own")));
     assert_eq!(a["selected"], json!([[-100.0, -100.0], [6000.0, 4000.0]]));
     // The picture's edges: what was selected and a margin round it.
-    assert_eq!(a["extents"], json!([[-222.0, -128.82], [6122.0, 4028.82]]));
+    assert_eq!(a["extents"], json!([[-222.0, -222.82], [6122.0, 4122.82]]));
     // The legend: the layers the items are on, the most used first, each with its own colour, and the colours its
     // items are drawn in when they are not all the layer's.
     assert_eq!(
@@ -463,8 +463,14 @@ fn a_picture_by_layer_gives_each_layer_a_colour_of_its_own() {
     assert_eq!(o.drawing.layer("WALL").map(|l| l.color), Some(Color::Index(1)));
 }
 
-/// Whether a PNG has a pixel of this colour (a thin line's pixels are smoothed, so: near it).
+/// Whether a PNG on white has a pixel of this colour: a thin line's pixels are smoothed into the white, so one at
+/// least half way from white to it, and on the way.
 fn holds_color(png: &[u8], c: Rgb) -> bool {
-    let near = |a: u8, b: u8| a.abs_diff(b) < 24;
-    image::load_from_memory(png).expect("a PNG").to_rgb8().pixels().any(|p| near(p.0[0], c.0) && near(p.0[1], c.1) && near(p.0[2], c.2))
+    let want = [f64::from(c.0) - 255.0, f64::from(c.1) - 255.0, f64::from(c.2) - 255.0];
+    let far = want.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
+    image::load_from_memory(png).expect("a PNG").to_rgb8().pixels().any(|p| {
+        let got = [f64::from(p.0[0]) - 255.0, f64::from(p.0[1]) - 255.0, f64::from(p.0[2]) - 255.0];
+        let share = got.iter().zip(&want).fold(0.0_f64, |m, (g, w)| if w.abs() == far { g / w } else { m });
+        share >= 0.5 && got.iter().zip(&want).all(|(g, w)| (g - w * share).abs() < 12.0)
+    })
 }
