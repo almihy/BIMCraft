@@ -300,6 +300,9 @@ struct Scene<'a> {
     lines: Vec<(P2, P2, Option<Id>)>,
     /// The walls, with their thickness and their ids.
     walls: Vec<(Axis, f64, Id)>,
+    /// The faces of the walls the cursor is at, and their cores' faces: lines a point lands on where it is nearer one than
+    /// the wall's own line, as Revit's.
+    faces: Vec<(P2, P2, Id)>,
     /// The detail lines near, of any shape.
     curves: Vec<(Curve, Option<Id>)>,
     /// Their chords near, each with its line's place in `curves`: crossed with other lines, never with their own.
@@ -350,15 +353,18 @@ impl<'a> Scene<'a> {
 
     /// What `level`'s plan has within `window` mm of `p`, but for what `look` hides: a cheap look at
     /// each element's extent first, so a plan of thousands of walls costs a few microseconds a wall.
-    fn of(m: &'a Model, level: Id, p: P2, window: f64, look: &'a Look, skip: &[Id]) -> Scene<'a> {
+    fn of(m: &'a Model, level: Id, p: P2, window: f64, look: &'a Look, skip: &[Id], faces: bool) -> Scene<'a> {
         let mut s = Scene {
             points: Vec::new(),
             lines: Vec::new(),
             walls: Vec::new(),
+            faces: Vec::new(),
             curves: Vec::new(),
             chords: Vec::new(),
             cloud: Some((m, level, look)),
         };
+        // The walls whose faces are worked out: those the cursor is at, the first few.
+        let mut faced = 0;
         let view = level;
         // A plan is cut where its view range says, which a plan view of its own may say otherwise than its level does.
         let plan = m.plan_level(view).is_some();
@@ -458,7 +464,32 @@ impl<'a> Scene<'a> {
                         Some(c) => s.points.push((c, Kind::Centre, of)),
                         None => s.lines.push((a.start, a.end, of)),
                     }
-                    s.walls.push((a, m.thickness(w), id));
+                    let thick = m.thickness(w);
+                    s.walls.push((a, thick, id));
+                    // A straight wall the cursor is at: its faces as its plan draws them, joined to the walls it meets, and
+                    // its core's two faces.
+                    let slack = window - MAX_HALF_THICKNESS;
+                    let (along, across) = a.project(p);
+                    let (ext, int) = crate::walls::faces(m, w);
+                    // Within reach of its body, a thickness past either end: where a corner carries it on.
+                    let at_it = (int - slack..=ext + slack).contains(&across) && (-thick - slack..=a.length() + thick + slack).contains(&along);
+                    if faces && faced < MAX_OUTLINES && a.centre().is_none() && at_it {
+                        faced += 1;
+                        let ring = crate::walls::outline(m, id);
+                        let mut edges: Vec<(P2, P2)> = geom::ring_edges(&ring).collect();
+                        if let Some((outer, inner)) = crate::walls::core_faces(m, w) {
+                            edges.extend([outer, inner].map(|off| (a.at(0.0, off), a.at(a.length(), off))));
+                        }
+                        for (x, y) in edges.into_iter().filter(|(x, y)| x.dist(*y) > TOL) {
+                            s.points.extend([(x, Kind::Endpoint, of), (y, Kind::Endpoint, of)]);
+                            // The middle of a face, not of the steps of an end.
+                            if x.dist(y) > thick {
+                                s.points.push(((x + y) * 0.5, Kind::Midpoint, of));
+                            }
+                            s.lines.push((x, y, of));
+                            s.faces.push((x, y, id));
+                        }
+                    }
                 }
                 Element::Grid(g) if near(&[g.start, g.end]) => {
                     s.points.extend([(g.start, Kind::Endpoint, of), (g.end, Kind::Endpoint, of)]);
@@ -691,11 +722,12 @@ fn tangents(curves: &[(Curve, Option<Id>)], from: P2) -> Vec<(P2, Option<Id>)> {
 
 /// Where the segments `lines` cross each other, each with the element of the first of the two: the nearer, as `solve`
 /// sorts them.
-fn crossings(lines: &[(P2, P2, Option<Id>)]) -> Vec<(P2, Option<Id>)> {
+fn crossings(lines: &[(P2, P2, Option<Id>)], faced: &[Id]) -> Vec<(P2, Option<Id>)> {
     let on = |q: P2, (a, b): (P2, P2)| geom::dist_to_segment(q, a, b) <= TOL;
     let mut out = Vec::new();
     for (i, &(a, b, of)) in lines.iter().enumerate() {
-        for &(c, d, _) in lines.iter().skip(i + 1) {
+        // A wall's own line and its faces meet at its ends and corners, which are its to snap to as ends: no crossing.
+        for &(c, d, _) in lines.iter().skip(i + 1).filter(|(_, _, other)| *other != of || !of.is_some_and(|id| faced.contains(&id))) {
             if let Some(q) = geom::line_intersection(a, b, c, d)
                 && on(q, (a, b))
                 && on(q, (c, d))
@@ -774,7 +806,7 @@ pub fn snap(m: &Model, level: Id, p: P2, reach: Reach, from: &[P2], square: bool
 #[allow(clippy::too_many_arguments)]
 pub fn snap_skipping(m: &Model, level: Id, p: P2, reach: Reach, from: &[P2], square: bool, o: &Snaps, skip: &[Id]) -> Found {
     let look = Look::of(m, level);
-    let scene = Scene::of(m, level, p, reach.point.max(reach.line) + MAX_HALF_THICKNESS, &look, skip);
+    let scene = Scene::of(m, level, p, reach.point.max(reach.line) + MAX_HALF_THICKNESS, &look, skip, true);
     solve(scene, p, reach, from, square, o, false)
 }
 
@@ -798,7 +830,7 @@ thread_local! {
 pub fn in_sketch(m: &Model, sk: Sketch<'_>, p: P2, reach: Reach, from: &[P2], square: bool, o: &Snaps) -> Found {
     let look = Look::of(m, sk.view);
     let window = reach.point.max(reach.line) + MAX_HALF_THICKNESS;
-    let mut scene = Scene::of(m, sk.view, p, window, &look, sk.editing.as_slice());
+    let mut scene = Scene::of(m, sk.view, p, window, &look, sk.editing.as_slice(), false);
     // The edges of what the plan builds, as the plan draws it: a section has none of them.
     if m.plan_level(sk.view).is_some() {
         let level = m.guid(m.plan_level(sk.view).unwrap_or(sk.view));
@@ -859,6 +891,9 @@ fn solve(scene: Scene, p: P2, reach: Reach, from: &[P2], square: bool, o: &Snaps
             (p.0, pinned) = (f.0, Some((false, f.0)));
         }
     }
+    // The walls whose faces are among the lines.
+    let mut faced: Vec<Id> = scene.faces.iter().map(|(_, _, id)| *id).collect();
+    faced.dedup();
     let by_distance = |a: &P2, b: &P2| a.dist(p).total_cmp(&b.dist(p));
     // The lines that pass near the cursor: what it can cross, or stand square to.
     let mut near: Vec<(P2, P2, Option<Id>)> =
@@ -887,7 +922,7 @@ fn solve(scene: Scene, p: P2, reach: Reach, from: &[P2], square: bool, o: &Snaps
         points.extend(from.iter().map(|q| (*q, Kind::Endpoint, None)));
     }
     if o.intersection {
-        points.extend(crossings(&near).into_iter().map(|(q, of)| (q, Kind::Intersection, of)));
+        points.extend(crossings(&near, &faced).into_iter().map(|(q, of)| (q, Kind::Intersection, of)));
         let on = |q: P2, a: P2, b: P2| geom::dist_to_segment(q, a, b) <= TOL;
         for (i, &(a, b, k)) in chords.iter().enumerate() {
             let others =
@@ -1010,6 +1045,21 @@ fn solve(scene: Scene, p: P2, reach: Reach, from: &[P2], square: bool, o: &Snaps
             .map(|(a, t, id)| (a, a.distance(p, 0.0) - t / 2.0, *id))
             .filter(|(_, d, _)| *d <= reach.line)
             .min_by(|x, y| x.1.total_cmp(&y.1));
+        // One of its faces, or its core's, where the cursor is within reach of it and nearer it than the wall's own line.
+        let face = scene
+            .faces
+            .iter()
+            .filter(|(_, _, of)| on.is_none_or(|(_, _, id)| id == *of))
+            .map(|&(x, y, of)| {
+                let (u, len) = ((y - x).unit(), x.dist(y));
+                let s = ((p - x).dot(u) / STEP).round() * STEP;
+                (x + u * s.clamp(0.0, len), geom::dist_to_segment(p, x, y), of)
+            })
+            .filter(|(_, d, _)| *d <= reach.line && on.is_none_or(|(a, _, _)| *d < a.distance(p, 0.0)))
+            .min_by(|x, y| x.1.total_cmp(&y.1));
+        if let Some((at, _, id)) = face {
+            return Found { at: micron(at), kind: Kind::Nearest, guide: None, source: Some(id) };
+        }
         if let Some((a, _, id)) = on {
             let at = micron(a.at((a.project(p).0 / STEP).round() * STEP, 0.0));
             return Found { at, kind: Kind::Nearest, guide: None, source: Some(id) };

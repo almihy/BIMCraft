@@ -53,9 +53,13 @@ fn a_dragged_element_pressed_a_few_pixels_off_its_centre_lands_exactly_on_the_sn
     let col = ids(&h, "column")[0];
     // Pressed 3 px beside the centre: the grab point is the centre's snap, so the centre goes onto the wall's middle exactly.
     let a = h.state().screen(P2(2000.0, 2000.0)) + vec2(3.0, 2.0);
-    let b = h.state().screen(P2(4000.0, 0.0)) + vec2(2.0, -3.0);
+    let b = h.state().screen(P2(4000.0, 0.0)) + vec2(2.0, -1.0);
     drag_screen(&mut h, a, b, PointerButton::Primary);
     assert_eq!(at(&h, col), P2(4000.0, 0.0), "{:?}", h.state().status);
+    // Let go nearer the wall's face than its own line, it is the face's middle it lands on.
+    let (a, b) = (h.state().screen(P2(4000.0, 0.0)), h.state().screen(P2(4000.0, 100.0)) + vec2(2.0, 1.0));
+    drag_screen(&mut h, a, b, PointerButton::Primary);
+    assert_eq!(at(&h, col), P2(4000.0, 100.0), "{:?}", h.state().status);
 }
 
 #[test]

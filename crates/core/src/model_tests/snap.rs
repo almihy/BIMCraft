@@ -700,3 +700,31 @@ fn with_increments_a_length_counts_from_the_last_point_and_a_direction_takes_the
     let f = snap(&m, 100_000, P2(2449.0, 300.0), REACH, &from, true, &Snaps { angle: 0.0, ..o });
     assert_eq!(f.at, P2(2413.0, 7.0));
 }
+
+#[test]
+fn a_point_lands_on_a_walls_face_or_its_cores_where_it_is_nearer_one_than_the_walls_own_line() {
+    let mut s = Session::new();
+    s.script(
+        r#"type {"category": "wall", "name": "Ext", "layers": [{"function": "finish", "thickness": 100}, {"function": "structure", "thickness": 200}, {"function": "finish2", "thickness": 20}]}
+wall {"points": [[0, 0], [6000, 0], [6000, 4000]], "type": "Ext"}"#,
+    )
+    .unwrap();
+    let m = &s.model;
+    let reach = Reach { point: 60.0, line: 40.0 };
+    let at = |p: P2| {
+        let f = snap(m, 100_000, p, reach, &[], false, &Snaps::default());
+        (f.kind, f.at)
+    };
+    // The wall is 320 thick on its centre line, its brick out (north, the left of the way it was drawn): faces at 160 and
+    // -160, its core from 60 to -140.
+    assert_eq!(at(P2(2003.0, 10.0)), (Kind::Nearest, P2(2000.0, 0.0)), "its own line");
+    assert_eq!(at(P2(2003.0, 150.0)), (Kind::Nearest, P2(2000.0, 160.0)), "its exterior face");
+    assert_eq!(at(P2(2003.0, -150.0)), (Kind::Nearest, P2(2000.0, -160.0)), "its interior face");
+    assert_eq!(at(P2(2003.0, 70.0)), (Kind::Nearest, P2(2000.0, 60.0)), "its core's exterior face");
+    assert_eq!(at(P2(2003.0, -130.0)), (Kind::Nearest, P2(2000.0, -140.0)), "its core's interior face");
+    // The corner its faces make with the next wall's, where the plan draws it, is an end to land on.
+    let f = snap(m, 100_000, P2(6155.0, -158.0), reach, &[], false, &Snaps::default());
+    assert_eq!((f.kind, f.at), (Kind::Endpoint, P2(6160.0, -160.0)));
+    // Nearest off, a face holds nothing.
+    assert_eq!(snap(m, 100_000, P2(2003.0, 150.0), reach, &[], false, &Snaps { nearest: false, ..Snaps::default() }).kind, Kind::Free);
+}
