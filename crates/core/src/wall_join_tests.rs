@@ -677,8 +677,39 @@ fn three_walls_at_a_point_join_in_an_order_that_the_wall_joins_tool_steps_throug
     assert!((right(&s) - 157.5).abs() < 1e-6 && s.model.wall_joins.is_empty());
     let back = run(&mut s, "wall_join", json!({"walls": [left, up, down], "previous": true}));
     assert_eq!(back["order"], json!([down, up, left]));
-    // What is a join of two walls' is refused of three.
-    assert!(s.execute("wall_join", &json!({"walls": [left, up, down], "kind": "mitre"})).is_err());
+    run(&mut s, "wall_join", json!({"walls": [left, up, down], "reset": true}));
+    // In 3D the walls' solids follow the order too: where the third wall's layers run into the first two, the place is
+    // its alone. No point of the plan is in two walls' solids.
+    let solid =
+        |s: &Session, id: u64, q: P2| walls::prisms(&s.model, id, false).iter().filter(|p| crate::geom::contains(&p.ring, q)).count();
+    for i in -25..=25 {
+        for j in -25..=25 {
+            let q = P2(f64::from(i) * 13.0 + 3.7, f64::from(j) * 13.0 + 2.3);
+            let n: usize = [left, up, down].iter().map(|id| solid(&s, *id, q)).sum();
+            assert!(n <= 1, "{n} solids at {q:?}");
+        }
+    }
+    // Don't Clean Join: every wall whole against what is there. The third's block no longer runs into the first two.
+    let blocks = |s: &Session| walls::layer_geometry(&s.model, down, None).bands(2).iter().map(|r| crate::geom::area(r).abs()).sum::<f64>();
+    let cleaned = blocks(&s);
+    run(&mut s, "wall_join", json!({"walls": [left, up, down], "display": "dont-clean"}));
+    assert!(blocks(&s) < cleaned, "{} then {}", cleaned, blocks(&s));
+    for i in -30..=30 {
+        for j in -30..=30 {
+            let q = P2(f64::from(i) * 12.0 + 3.7, f64::from(j) * 12.0 + 2.3);
+            assert!(held(&s, &[left, up, down], q).0 <= 1, "not cleaned: two layers at {q:?}");
+        }
+    }
+    run(&mut s, "wall_join", json!({"walls": [left, up, down], "display": "clean"}));
+    // A Mitre: every wall's faces to where they cross its neighbours', the walls meeting at the point.
+    let said = run(&mut s, "wall_join", json!({"walls": [left, up, down], "kind": "mitre"}));
+    assert_eq!(said["kind"], json!("mitre"));
+    for id in [left, up, down] {
+        assert!(walls::outline(&s.model, id).iter().any(|p| p.dist(P2(0.0, 0.0)) < 1e-6), "wall {id} meets the others at the point");
+    }
+    // A Square off, and which wall runs `through`, are two walls'.
+    assert!(s.execute("wall_join", &json!({"walls": [left, up, down], "kind": "square-off"})).is_err());
+    assert!(s.execute("wall_join", &json!({"walls": [left, up, down], "through": left})).is_err());
 }
 
 /// How many layers of walls `ids` hold point `q`, and which layer the first is.

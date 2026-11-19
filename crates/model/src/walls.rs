@@ -403,10 +403,13 @@ fn end_geometry(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> WallE
     }
     // Three or four ends at a point, none in line with another, as Revit joins them: in order, the first two as the
     // corner they would be alone, each one after butting what is there.
-    if let Some(order) = node_order(m, &arms, through)
+    let order = node_order(m, &arms, through);
+    let (kind, clean) = order.as_deref().map_or((crate::model::JoinKind::Butt, true), |order| order_setting(m, order));
+    let mitred = kind == crate::model::JoinKind::Mitre;
+    if let Some(order) = order.as_deref().filter(|_| !mitred)
         && let Some(place) = order.iter().position(|(other, end)| *other == id && *end == at_end)
         && let Some(cut) =
-            join::ordered(m, &order).and_then(|mut joined| (place < joined.cuts.len()).then(|| joined.cuts.swap_remove(place)))
+            join::ordered(m, order, clean).and_then(|mut joined| (place < joined.cuts.len()).then(|| joined.cuts.swap_remove(place)))
     {
         return WallEnd::stepped(cut, at_end);
     }
@@ -414,6 +417,7 @@ fn end_geometry(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> WallE
     // half a wall, their layers cleaned up by rank as at a corner.
     if n >= 3
         && !through
+        && !mitred
         && prev.id != id
         && next.id != id
         && let Some(cut) = join::wedge_cut(m, id, at_end, (next.id, next.at_end), (prev.id, prev.at_end), n == 3)
@@ -464,6 +468,20 @@ fn node_order(m: &Model, arms: &[Arm], through: bool) -> Option<Vec<(Id, bool)>>
         order = ranked.into_iter().map(|(_, end)| end).collect();
     }
     Some(order)
+}
+
+/// What the Wall Joins tool set for the join of the wall ends `order`, three or four at a point: its kind (a Butt, or a
+/// Mitre: each wall's faces run to where they cross its neighbours', the walls meeting at the point), and whether their
+/// layers clean up. Kept on each two ends' join, all alike.
+pub fn order_setting(m: &Model, order: &[(Id, bool)]) -> (crate::model::JoinKind, bool) {
+    let kept = order
+        .iter()
+        .enumerate()
+        .find_map(|(i, a)| order.iter().skip(i + 1).find_map(|b| m.wall_join((m.guid(a.0), a.1), (m.guid(b.0), b.1))));
+    match kept {
+        Some(j) => (j.kind, j.display != crate::model::JoinDisplay::DontClean),
+        None => (crate::model::JoinKind::Butt, true),
+    }
 }
 
 /// The order the three or four walls ending where wall `id`'s end (`at_end`, else its start) is join in, where none runs
@@ -976,7 +994,11 @@ pub fn layer_geometry(m: &Model, id: Id, index: Option<&Index>) -> LayerGeometry
         let (arms, through) = arms(m, id, at_end, index);
         let Some(order) = node_order(m, &arms, through) else { continue };
         let Some(place) = order.iter().position(|(other, end)| *other == id && *end == at_end) else { continue };
-        let Some(joined) = join::ordered(m, &order) else { continue };
+        let (kind, clean) = order_setting(m, &order);
+        if kind == crate::model::JoinKind::Mitre {
+            continue;
+        }
+        let Some(joined) = join::ordered(m, &order, clean) else { continue };
         let holes: Vec<(usize, &Vec<P2>)> =
             joined.taken.iter().filter(|(wall, ..)| *wall == place).map(|(_, k, hole)| (*k, hole)).collect();
         for (k, hole) in &holes {
@@ -1403,9 +1425,22 @@ pub fn prisms_in(m: &Model, id: Id, openings: bool, index: Option<&Index>) -> Ve
 fn tongues(m: &Model, id: Id, index: Option<&Index>) -> Vec<(Vec<P2>, f64, f64)> {
     let Some(w) = m.wall(id) else { return Vec::new() };
     let back = 2.0 * m.thickness(w) + 1.0;
+    // And the walls that butt it where three or four end at a point, each one later in the join's order than it: what of
+    // its plan their ends stand in is theirs.
+    let mut later: Vec<(Id, bool)> = Vec::new();
+    for at_end in [false, true] {
+        let (arms, through) = arms(m, id, at_end, index);
+        let Some(order) = node_order(m, &arms, through) else { continue };
+        if order_setting(m, &order).0 == crate::model::JoinKind::Mitre {
+            continue;
+        }
+        let place = order.iter().position(|(other, end)| *other == id && *end == at_end).unwrap_or(order.len());
+        later.extend(order.into_iter().skip(place + 1).filter(|_| place >= 1 || true).skip(usize::from(place == 0)));
+    }
     tees(m, id, index)
         .into_iter()
         .filter(|(other, at_end)| tee_cleans(m, *other, *at_end, id))
+        .chain(later)
         .filter_map(|(other, at_end)| {
             let o = m.wall(other)?;
             let end = end_geometry(m, other, at_end, index);

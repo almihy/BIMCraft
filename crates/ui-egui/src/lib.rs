@@ -5516,21 +5516,42 @@ impl BimApp {
     /// and which of its ends is there): a Butt, Previous and Next stepping through the orders (which wall runs through,
     /// which butts it, which butts both), and Disallow Join, which lets every end go.
     fn ordered_join_options(&mut self, ui: &mut Ui, order: &[(Id, bool)]) {
-        use bimcraft_core::model::JoinKind;
+        use bimcraft_core::model::{JoinDisplay, JoinKind};
         let walls: Vec<Id> = order.iter().map(|(id, _)| *id).collect();
-        ui.add_enabled_ui(false, |ui| {
-            for k in JoinKind::ALL {
-                let _ = ui.radio(k == JoinKind::Butt, t(k.label()));
-            }
-        });
-        ui.separator();
+        let m = Arc::clone(&self.session.model);
+        let (kind, _) = bimcraft_core::walls::order_setting(&m, order);
+        let display = order
+            .iter()
+            .enumerate()
+            .find_map(|(i, a)| order.iter().skip(i + 1).find_map(|b| m.wall_join((m.guid(a.0), a.1), (m.guid(b.0), b.1))))
+            .map_or(JoinDisplay::ViewSetting, |j| j.display);
         let mut run: Option<Value> = None;
-        if ui.button(t("Previous")).clicked() {
+        // A Butt or a Mitre; a Square off is two walls'.
+        for k in JoinKind::ALL {
+            let r = ui.add_enabled(k != JoinKind::SquareOff, egui::RadioButton::new(kind == k, t(k.label())));
+            if r.clicked() && kind != k {
+                run = Some(json!({"walls": walls, "kind": k.name()}));
+            }
+        }
+        ui.separator();
+        // A Mitre has one order.
+        let ordered = kind != JoinKind::Mitre;
+        if ui.add_enabled(ordered, egui::Button::new(t("Previous"))).clicked() {
             run = Some(json!({"walls": walls, "previous": true}));
         }
-        if ui.button(t("Next")).clicked() {
+        if ui.add_enabled(ordered, egui::Button::new(t("Next"))).clicked() {
             run = Some(json!({"walls": walls, "next": true}));
         }
+        ui.separator();
+        let l = ui.label(t("Display:"));
+        let c = icons::combo("wall-join-display").selected_text(t(display.label())).width(150.0).show_ui(ui, |ui| {
+            for d in JoinDisplay::ALL {
+                if ui.selectable_label(display == d, t(d.label())).clicked() && display != d {
+                    run = Some(json!({"walls": walls, "display": d.name()}));
+                }
+            }
+        });
+        c.response.labelled_by(l.id);
         ui.separator();
         if ui.button(t("Disallow Join")).clicked() {
             for (id, at_end) in order {

@@ -1814,7 +1814,8 @@ other_files(
          (`modify`), Revit's Allow Join and Disallow Join. Returns {walls, ends, kind, through, display}. Three or four walls \
          ending at one point (`walls` all of them) join in an order, as Revit's: the first runs through, the second butts it, \
          each one after butts what is there. `order` sets it ([id, …], every wall once), `next` and `previous` step through \
-         the orders (six of three walls), `reset` goes back to the order they were made in; it returns {walls, order}",
+         the orders (six of three walls), `reset` goes back to the order they were made in; `kind` is butt or mitre (every wall's \
+         faces to where they cross its neighbours') and `display` as of two walls; it returns {walls, order, kind, display}",
         wall_join,
     ),
     edit(
@@ -13160,13 +13161,24 @@ fn ordered_join(s: &mut Session, p: &Value, ids: &[Id]) -> R {
             there == given
         })
         .ok_or_else(|| bad(c, "`walls` are not the three or four straight walls that end at one point, none in line with another"))?;
-    for key in ["kind", "through", "display"] {
-        if !absent(p.get(key)) {
-            return Err(bad(
-                c,
-                format!("`{key}` is a join of two walls'; three or four joining at a point take `order`, `next`, `previous` or `reset`"),
-            ));
-        }
+    if !absent(p.get("through")) {
+        return Err(bad(c, "`through` is a join of two walls'; three or four joining at a point take `order`, `next` or `previous`"));
+    }
+    let (mut kind, clean) = crate::walls::order_setting(m, &now);
+    let mut display = now
+        .iter()
+        .enumerate()
+        .find_map(|(i, a)| now.iter().skip(i + 1).find_map(|b| m.wall_join((m.guid(a.0), a.1), (m.guid(b.0), b.1))))
+        .map_or(JoinDisplay::ViewSetting, |j| j.display);
+    let _ = clean;
+    if let Some(name) = string(c, p, "kind")? {
+        kind = JoinKind::from_name(&name)
+            .filter(|k| *k != JoinKind::SquareOff)
+            .ok_or_else(|| bad(c, format!("`kind` of three or four walls at a point is butt or mitre, not `{name}`")))?;
+    }
+    if let Some(name) = string(c, p, "display")? {
+        display =
+            JoinDisplay::from_name(&name).ok_or_else(|| bad(c, format!("`display` is clean, dont-clean or view-setting, not `{name}`")))?;
     }
     let end_of = |id: Id| now.iter().find(|(other, _)| *other == id).map(|(_, end)| *end);
     let mut order: Vec<Id> = now.iter().map(|(id, _)| *id).collect();
@@ -13191,7 +13203,7 @@ fn ordered_join(s: &mut Session, p: &Value, ids: &[Id]) -> R {
     }
     let reset = flag(c, p, "reset")?;
     if reset {
-        order = given.clone();
+        (order, kind, display) = (given.clone(), JoinKind::Butt, JoinDisplay::ViewSetting);
     }
     // Kept two ends at a time: each two walls' join says which of them comes first.
     let ends: Vec<(Guid, bool)> = given.iter().filter_map(|id| Some((m.guid(*id), end_of(*id)?))).collect();
@@ -13199,12 +13211,7 @@ fn ordered_join(s: &mut Session, p: &Value, ids: &[Id]) -> R {
     for (i, a) in order.iter().enumerate() {
         for b in order.iter().skip(i + 1) {
             let (Some(ea), Some(eb)) = (end_of(*a), end_of(*b)) else { continue };
-            kept.push(WallJoin {
-                ends: WallJoin::key((m.guid(*a), ea), (m.guid(*b), eb)),
-                kind: JoinKind::Butt,
-                first: Some(m.guid(*a)),
-                display: JoinDisplay::ViewSetting,
-            });
+            kept.push(WallJoin { ends: WallJoin::key((m.guid(*a), ea), (m.guid(*b), eb)), kind, first: Some(m.guid(*a)), display });
         }
     }
     let m = s.model_mut();
@@ -13213,7 +13220,7 @@ fn ordered_join(s: &mut Session, p: &Value, ids: &[Id]) -> R {
         m.wall_joins.extend(kept);
         m.wall_joins.sort_by(|x, y| x.ends.cmp(&y.ends));
     }
-    Ok(json!({"walls": given, "order": order}))
+    Ok(json!({"walls": given, "order": order, "kind": kind.name(), "display": display.name()}))
 }
 
 /// The order after `order`, counting up: none after the last.

@@ -158,8 +158,8 @@ fn the_wall_joins_tool_steps_three_walls_at_a_point_through_their_six_orders() {
     press(&mut h, "Wall Joins");
     click(&mut h, P2(7800.0, 0.0));
     assert!(matches!(h.state().tool, Tool::WallJoins(Some(_))), "a join of three walls is one the tool takes, as Revit's");
-    // A Butt, with nothing else to choose; Previous and Next are live.
-    assert!(h.get_by_label("Miter").accesskit_node().is_disabled() && !h.get_by_label("Next").accesskit_node().is_disabled());
+    // A Butt or a Mitre, as Revit's; a Square off is two walls'. Previous and Next are live.
+    assert!(h.get_by_label("Square off").accesskit_node().is_disabled() && !h.get_by_label("Next").accesskit_node().is_disabled());
     let before = h.state().session.history().len();
     let mut seen = vec![order(&h).unwrap()];
     for _ in 0..6 {
@@ -174,4 +174,13 @@ fn the_wall_joins_tool_steps_three_walls_at_a_point_through_their_six_orders() {
     press(&mut h, "Previous");
     assert_eq!(order(&h), Some(vec![third, east, south]));
     assert!(matches!(h.state().tool, Tool::WallJoins(Some(_))), "the join stays picked");
+    // A Mitre has one order: Previous and Next go off. Its display is set as a two-wall join's is.
+    press(&mut h, "Miter");
+    let setting = |h: &Harness<BimApp>| {
+        bimcraft_core::walls::order_setting(&h.state().session.model, &[(south, true), (east, false), (third, false)])
+    };
+    assert_eq!(setting(&h), (JoinKind::Mitre, true));
+    assert!(h.get_by_label("Next").accesskit_node().is_disabled());
+    press(&mut h, "Butt");
+    assert_eq!(setting(&h), (JoinKind::Butt, true));
 }

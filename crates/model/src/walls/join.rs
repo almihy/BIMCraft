@@ -445,8 +445,10 @@ fn inside(ring: &[P2], from: P2, way: P2) -> Option<(f64, f64)> {
 }
 
 /// The join of the wall ends `ends` (each a wall, and whether it is its end that is there, else its start), in their
-/// order. None unless they are three or more straight walls of types, the first two crossing near the point.
-pub(super) fn ordered(m: &Model, ends: &[(Id, bool)]) -> Option<Ordered> {
+/// order. None unless they are three or more straight walls of types, the first two crossing near the point. Without
+/// `clean` (Revit's Don't Clean Join) no layer runs into another wall's: each wall stands whole against what is there, and
+/// a line is drawn where it stops.
+pub(super) fn ordered(m: &Model, ends: &[(Id, bool)], clean: bool) -> Option<Ordered> {
     let strips: Vec<Strips> = ends.iter().map(|(id, _)| Strips::of(m, *id).filter(Strips::straight)).collect::<Option<_>>()?;
     let (first, second) = (strips.first()?, strips.get(1)?);
     let (e0, e1) = (ends.first()?.1, ends.get(1)?.1);
@@ -455,8 +457,8 @@ pub(super) fn ordered(m: &Model, ends: &[(Id, bool)]) -> Option<Ordered> {
     }
     let far = 6.0 * strips.iter().map(Strips::thick).fold(0.0, f64::max);
     let mut cuts = vec![
-        cut_of(first, e0, second, Some(e1), true, false, true, None, far)?,
-        cut_of(second, e1, first, Some(e0), false, false, true, None, far)?,
+        cut_of(first, e0, second, Some(e1), true, false, clean, None, far)?,
+        cut_of(second, e1, first, Some(e0), false, false, clean, None, far)?,
     ];
     // The two walls' layers near the point, each from well back along its wall to where the corner ends it.
     let mut pieces: Vec<Piece> = Vec::new();
@@ -476,7 +478,7 @@ pub(super) fn ordered(m: &Model, ends: &[(Id, bool)]) -> Option<Ordered> {
     }
     let mut taken = Vec::new();
     for (w, strip) in strips.iter().enumerate().skip(2) {
-        let (cut, mine, gone) = butting(strip, ends.get(w)?.1, w, &pieces, far)?;
+        let (cut, mine, gone) = butting(strip, ends.get(w)?.1, w, &pieces, far, clean)?;
         // What it ran through is no longer the earlier walls': to the walls after it, too.
         let mut left: Vec<Piece> = Vec::new();
         for (n, piece) in pieces.iter().enumerate() {
@@ -502,7 +504,14 @@ pub(super) fn ordered(m: &Model, ends: &[(Id, bool)]) -> Option<Ordered> {
 /// one; past the last thing it runs through with nothing to stop it, it ends there, and with nothing in its way at all,
 /// square at the point.
 #[allow(clippy::type_complexity)]
-fn butting(me: &Strips, at_end: bool, place: usize, pieces: &[Piece], far: f64) -> Option<(Cut, Vec<Piece>, Vec<(usize, Vec<P2>)>)> {
+fn butting(
+    me: &Strips,
+    at_end: bool,
+    place: usize,
+    pieces: &[Piece],
+    far: f64,
+    clean: bool,
+) -> Option<(Cut, Vec<Piece>, Vec<(usize, Vec<P2>)>)> {
     let (node, way) = me.out(at_end);
     let across = way.perp();
     let offset = |q: P2| (q - node).dot(across);
@@ -548,7 +557,7 @@ fn butting(me: &Strips, at_end: bool, place: usize, pieces: &[Piece], far: f64) 
             let mut passed: Vec<usize> = Vec::new();
             let mut stopper: Option<usize> = None;
             for (n, ..) in &hits {
-                if pieces.get(*n).is_some_and(|p| p.rank <= rank) {
+                if pieces.get(*n).is_some_and(|p| !clean || p.rank <= rank) {
                     stopper = Some(*n);
                     break;
                 }
@@ -566,7 +575,7 @@ fn butting(me: &Strips, at_end: bool, place: usize, pieces: &[Piece], far: f64) 
             let (t0, t1) = (reach(near), reach(last));
             let (q0, q1) = (at(from, t0), at(to, t1));
             let stopped_by = stopper.and_then(|n| pieces.get(n)).map(|p| p.material.clone());
-            if stopped_by.as_deref().is_some_and(|other| other != material) {
+            if stopped_by.as_deref().is_some_and(|other| !clean || other != material) {
                 cut.seams.push([q0, q1]);
             }
             // Beside the stretch before it, where one runs on past the other: the shorter one's stopper is beside the longer.
