@@ -17,7 +17,7 @@
 //! A wall whose type has no compound structure and whose box holds curtain panels is a **curtain wall** ([`crate::curtain`]):
 //! it comes in as BIMCraft's, of a curtain type named as the file names its type, with grid lines drawn where its panels'
 //! boxes put them (then those panels are the wall's own, and `generic` leaves their records out), or, where the boxes give no
-//! grid that holds, with no grid, one panel of glass, and its panels as the boxes `generic` makes of them. Its mullions are boxes
+//! grid that holds, with no grid, its one cell left open, and its panels as the boxes `generic` makes of them. Its mullions are boxes
 //! either way.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -327,6 +327,8 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
                         let new = PanelType { thickness: *t, ..glass };
                         kind(&mut cx.model.types.curtain_panel, &format!("{} {t}mm", facade::GLAZED), |k| *k == new, new.clone())
                     }
+                    // No grid: its panels are the boxes `generic` makes of them, so its one cell is left open, never glass twice.
+                    _ if grid.is_none() => facade::EMPTY.to_string(),
                     _ => facade::GLAZED.to_string(),
                 };
                 let c = CurtainType { panel: fill, ..CurtainType::default() };
@@ -451,7 +453,7 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
                     "plain" => cx.note(
                         "wall",
                         r.id,
-                        "a curtain wall whose panels' boxes give no grid that holds (it is curved or runs along no axis, or its panels do not each fill a cell of whole grid lines): it comes in with no grid, as one panel of glass, and its panels and mullions as boxes of their own where their boxes run along an axis",
+                        "a curtain wall whose panels' boxes give no grid that holds (it is curved or runs along no axis, or its panels do not each fill a cell of whole grid lines): it comes in with no grid and its one cell left open (an Empty panel), its panels and mullions as boxes of their own where their boxes run along an axis",
                     ),
                     "panels" => cx.note(
                         "wall",

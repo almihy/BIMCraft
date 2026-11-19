@@ -173,3 +173,79 @@ fn adjust_for_mullion_size_gives_every_panel_the_same_width_of_glass() {
     assert_eq!(json["curtain"]["vertical"]["number"], 2);
     assert_eq!(json["curtain_wall"], true);
 }
+
+#[test]
+fn a_wall_selected_with_its_panels_and_mullions_moves_copies_mirrors_turns_and_is_deleted_as_the_wall_alone() {
+    let mut s = Session::new();
+    let w = wall(&mut s, json!({"points": [[0, 0], [6000, 0]], "type": "Storefront", "height": 3000}));
+    let all = |s: &Session| {
+        let mut ids = vec![w];
+        ids.extend(panels(s, w).into_iter().map(|(id, _)| id));
+        ids.extend(mullions(s, w).into_iter().map(|(id, _)| id));
+        ids
+    };
+    // A box round the wall takes it with everything it holds, pinned as the wall's placing them makes them.
+    let ids = all(&s);
+    run(&mut s, "move", json!({"ids": ids, "by": [0, 2000]}));
+    assert_eq!(s.model.wall(w).unwrap().start.1, 2000.0);
+    let ids = all(&s);
+    run(&mut s, "rotate", json!({"ids": ids, "about": [0, 2000], "angle": 90}));
+    let ids = all(&s);
+    run(&mut s, "mirror", json!({"ids": ids, "axis": [[0, 0], [0, 1000]]}));
+    let ids = all(&s);
+    let copied = run(&mut s, "copy", json!({"ids": ids, "by": [0, 9000]}));
+    let walls = s.model.elements.values().filter(|e| matches!(e, Element::Wall(_))).count();
+    assert_eq!(walls, 2, "{copied}");
+    let children = s.model.elements.values().filter(|e| curtain::host_of(e).is_some()).count();
+    assert_eq!(children, 2 * (8 + 22), "each wall has its own, none twice");
+    let ids = all(&s);
+    run(&mut s, "delete", json!({"ids": ids}));
+    assert_eq!(s.model.elements.values().filter(|e| curtain::host_of(e).is_some()).count(), 8 + 22, "the copy's stay");
+    assert_eq!(s.model.check(), Ok(()));
+}
+
+#[test]
+fn a_curtain_wall_that_needs_more_ids_than_its_copy_was_given_is_refused_whole_and_drawn_once_given_more() {
+    let mut s = Session::new();
+    s.give_ids(1_000_000, 1_000_010).unwrap();
+    let before = s.model.clone();
+    let e = s.execute("wall", &json!({"points": [[0, 0], [6000, 0]], "type": "Storefront", "height": 3000})).unwrap_err();
+    assert!(e.contains(crate::ids::OUT_OF_IDS), "{e}");
+    assert_eq!(*s.model, *before);
+    s.give_ids(1_001_000, 1_002_000).unwrap();
+    let w = wall(&mut s, json!({"points": [[0, 0], [6000, 0]], "type": "Storefront", "height": 3000}));
+    assert_eq!(panels(&s, w).len(), 8);
+    assert!(panels(&s, w).iter().all(|(id, _)| *id >= 1_001_000));
+}
+
+/// A tower's worth of storefront: how long one edit, a change of the type and a level moved take. Run with
+/// `--ignored --nocapture`.
+#[test]
+#[ignore = "a timing, read by a person"]
+fn timing_a_large_facade() {
+    let mut s = Session::new();
+    let mut first = 0;
+    let t = std::time::Instant::now();
+    for i in 0..40 {
+        let y = f64::from(i) * 5000.0;
+        let w = wall(&mut s, json!({"points": [[0, y], [60000, y]], "type": "Storefront", "height": 12000}));
+        if i == 0 {
+            first = w;
+        }
+    }
+    let n = s.model.elements.len();
+    println!("40 walls of 60 m by 12 m, {n} elements: {:?}", t.elapsed());
+    let t = std::time::Instant::now();
+    run(&mut s, "modify", json!({"id": first, "end": [61000, 0]}));
+    println!("one wall lengthened: {:?}", t.elapsed());
+    let t = std::time::Instant::now();
+    run(&mut s, "wall", json!({"points": [[-5000, 0], [-5000, 4000]]}));
+    println!("a basic wall drawn beside them: {:?}", t.elapsed());
+    let t = std::time::Instant::now();
+    run(&mut s, "type", json!({"category": "wall", "name": "Storefront", "curtain": {"horizontal": {"spacing": 3000}}}));
+    println!("the type's spacing changed, every wall laid out again: {:?}", t.elapsed());
+    let level = s.model.levels().first().map(|(id, _)| *id).unwrap();
+    let t = std::time::Instant::now();
+    run(&mut s, "modify", json!({"id": level, "elevation": 100}));
+    println!("a level moved: {:?}", t.elapsed());
+}

@@ -11,7 +11,7 @@
 //! way. The result is held to the file before it is used ([`Grid::of`]): the lines must make as many cells as the wall has
 //! panels, and each panel must lie in a cell of its own and fill it but for the mullions round it. A grid with a segment
 //! removed (a panel over two cells), a panel that is no rectangle, a wall at an angle or a curved one does not pass, and the
-//! wall then comes in with no grid, as one panel of glass, its panels and mullions as the boxes `generic` makes of them.
+//! wall then comes in with no grid, its one cell left open, its panels and mullions as the boxes `generic` makes of them.
 
 use std::collections::BTreeMap;
 

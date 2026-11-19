@@ -72,7 +72,7 @@ Moved from the root `CLAUDE.md`, word for word: the root keeps the rules and the
   panels touch or the mullion between them is as wide on one side as on the other, and off by half the difference where it is
   not. Where the boxes give no grid that holds (a curved wall, one at an angle, a panel over two cells where a segment was
   removed, a panel that is no rectangle, a panel in the boxes of two curtain walls) the wall comes in as a curtain wall with no
-  grid, one panel of glass over its whole face, and its panels as boxes, as before (where their boxes run along an axis: a
+  grid, its one cell left open (an Empty panel), and its panels as boxes, as before (where their boxes run along an axis: a
   wall at an angle has its one panel alone, since `generic` leaves the envelope of a turned panel out). Not read either way:
   the type's grid rules, justification and offsets, the panels' and mullions' types and materials, which panels are pinned, and
   a door in a curtain wall (it is left out: `openings.rs`). **Mullions still come in as boxes** of a family of their category

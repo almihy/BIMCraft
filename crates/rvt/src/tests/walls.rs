@@ -323,11 +323,11 @@ fn a_wall_whose_box_holds_curtain_panels_comes_in_as_a_curtain_wall_with_the_gri
         assert!(panels.iter().all(|x| x.type_name == "Glazed 24.4mm"), "{:?}", panels[0].type_name);
         assert_eq!(m.types.curtain_panel["Glazed 24.4mm"].thickness, 24.4);
         assert_eq!(parts(id).iter().filter(|e| matches!(e, Element::CurtainGrid(_))).count(), 2);
-        // The second: a curtain wall with no grid, one panel of glass, its panels boxes of their own.
+        // The second: a curtain wall with no grid, its one cell left open, its panels boxes of their own (never glass twice).
         let (id, w) = wall(106);
         assert!(w.type_name.starts_with("Storefront"));
-        assert_eq!(m.types.wall[&w.type_name].curtain.as_ref().unwrap().panel, "Glazed");
-        assert!(matches!(parts(id).as_slice(), [Element::CurtainPanel(x)] if x.type_name == "Glazed"), "one panel, and no line");
+        assert_eq!(m.types.wall[&w.type_name].curtain.as_ref().unwrap().panel, "Empty");
+        assert!(matches!(parts(id).as_slice(), [Element::CurtainPanel(x)] if x.type_name == "Empty"), "one panel, and no line");
         // The third: no curtain wall, a plane as thick as its box.
         let (_, w) = wall(107);
         assert!(!m.types.wall[&w.type_name].is_curtain());

@@ -348,7 +348,7 @@ Stand-ins, each told in the report with its ids:
   mullions of a curtain wall, and the layers of such a type, are not read.
 - A wall of such a type whose box holds curtain panels' boxes comes in as a curtain wall (`curtain.rs`). Its grid is not the
   file's, which is not read: it is worked out from its panels' boxes (a line midway between two neighbours) and used only where
-  it accounts for every panel, each in a cell of its own; else the wall has no grid, one panel of glass, and its panels are boxes. Its panels
+  it accounts for every panel, each in a cell of its own; else the wall has no grid, its one cell left open, and its panels are boxes. Its panels
   come in as glass and its mullions as boxes: their types are not read. An approximation, checked on synthetic files and run once
   on the `Snowdon Towers Sample Architectural.rvt` that the project owner's own Revit 2025 installs with its samples (read where it
   is, never copied or committed, numbers only: 42 curtain walls, 12 with a grid that holds; it is not one of the tabled files, and
