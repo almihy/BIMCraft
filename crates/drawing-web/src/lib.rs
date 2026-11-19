@@ -19,6 +19,7 @@ use cadcraft_index::{Opened, Query, Shape};
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 
+mod clean;
 mod convert;
 pub use convert::{dwg_of, dxf_of};
 
@@ -30,6 +31,8 @@ fn err(e: impl std::fmt::Display) -> JsError {
 #[wasm_bindgen]
 pub struct Drawing {
     o: Opened,
+    /// What the reader's instruments measure of it, once, when the first of them is asked (src/clean.rs).
+    measured: std::sync::OnceLock<clean::Measured>,
 }
 
 /// A file read and indexed: the drawing packed, and its summary (JSON).
@@ -43,6 +46,13 @@ pub struct Indexed {
 #[wasm_bindgen(getter_with_clone)]
 pub struct Picture {
     pub png: Vec<u8>,
+    pub about: String,
+}
+
+/// A part of the drawing written as a DWG: its bytes, and what it holds (JSON: items, kinds, layers, extents).
+#[wasm_bindgen(getter_with_clone)]
+pub struct Extracted {
+    pub bytes: Vec<u8>,
     pub about: String,
 }
 
@@ -80,7 +90,7 @@ impl Drawing {
     /// The drawing an index's `pack` holds, open.
     #[wasm_bindgen(constructor)]
     pub fn open(pack: &[u8]) -> Result<Drawing, JsError> {
-        Ok(Drawing { o: Opened::unpack(pack).map_err(err)? })
+        Ok(Drawing { o: Opened::unpack(pack).map_err(err)?, measured: Default::default() })
     }
 
     /// What it holds, in short (JSON).
@@ -108,6 +118,36 @@ impl Drawing {
     pub fn outlines(&self, params: &str) -> Result<String, JsError> {
         let p: Value = if params.trim().is_empty() { json!({}) } else { serde_json::from_str(params).map_err(err)? };
         found_outlines(&self.o, &p).map(|v| v.to_string()).map_err(err)
+    }
+
+    /// What a rule selects, counted (JSON params, a rule: layers?, kinds?, blocks?, box?, min_size?, max_size?, handles?;
+    /// empty: everything): JSON {total, kinds, layers: [{name, items, kinds}], blocks: [{name, placed, size, layers}],
+    /// blocks_more?, extents}. The drawing reader's first question of a drawing, and of every box it takes for a plan.
+    pub fn counts(&self, params: &str) -> Result<String, JsError> {
+        clean::counts(&self.o, self.measured(), params).map(|v| v.to_string()).map_err(err)
+    }
+
+    /// A part of the drawing written as a DWG of `version` ("2018" ... "2000"; empty: 2018), from the drawing open here
+    /// and never from its file read again (JSON params: box?, keep?: [rule], drop?: [rule], sort?: [{to, ...rule}],
+    /// move?: [dx, dy]): cropped, filtered, re-sorted onto other layers and moved, in that order, its blocks kept as
+    /// blocks, and what nothing uses any more left out.
+    pub fn extract(&self, params: &str, version: &str) -> Result<Extracted, JsError> {
+        let (bytes, about) = clean::extract(&self.o, self.measured(), params, version).map_err(err)?;
+        Ok(Extracted { bytes, about: about.to_string() })
+    }
+
+    /// A picture of only what is selected (JSON params: box?, keep?: [rule], drop?: [rule]), fitted to it, `long` pixels
+    /// on its longer side, each layer in a colour of its own; `about` (JSON): width, height, extents (the box the
+    /// picture's edges are at), selected, items, legend: [{layer, color, items}].
+    pub fn look(&self, params: &str, long: u32) -> Result<Picture, JsError> {
+        let p = clean::look(&self.o, self.measured(), params, long).map_err(err)?;
+        Ok(Picture { png: p.png, about: p.about.to_string() })
+    }
+}
+
+impl Drawing {
+    fn measured(&self) -> &clean::Measured {
+        self.measured.get_or_init(|| clean::Measured::of(&self.o))
     }
 }
 

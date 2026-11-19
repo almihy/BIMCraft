@@ -1,0 +1,470 @@
+use std::sync::Arc;
+
+use cadcraft_doc::geom::Vec3;
+use cadcraft_doc::{Block, Circle, Common, Drawing as Doc, Entity, EntityKind, HAlign, Handle, Insert, Layout, Line, Linetype, Space, Text, VAlign};
+use cadcraft_index::Opened;
+use serde_json::{Value, json};
+
+use super::*;
+
+fn on(layer: &str) -> Common {
+    Common { layer: layer.into(), ..Common::default() }
+}
+
+fn line(a: (f64, f64), b: (f64, f64)) -> EntityKind {
+    EntityKind::Line(Line { a: Vec3::new(a.0, a.1, 0.0), b: Vec3::new(b.0, b.1, 0.0) })
+}
+
+fn circle(c: (f64, f64), r: f64) -> EntityKind {
+    EntityKind::Circle(Circle { center: Vec3::new(c.0, c.1, 0.0), radius: r })
+}
+
+fn text(at: (f64, f64), words: &str) -> EntityKind {
+    EntityKind::Text(Text {
+        insert: Vec3::new(at.0, at.1, 0.0),
+        align_pt: None,
+        height: 200.0,
+        value: words.into(),
+        rotation: 0.0,
+        width_factor: 1.0,
+        oblique: 0.0,
+        style: "Standard".into(),
+        halign: HAlign::default(),
+        valign: VAlign::default(),
+    })
+}
+
+fn placed(block: &str, at: (f64, f64)) -> EntityKind {
+    EntityKind::Insert(Insert { block: block.into(), insert: Vec3::new(at.0, at.1, 0.0), ..Insert::default() })
+}
+
+fn block(d: &mut Doc, name: &str, items: Vec<(Common, EntityKind)>) {
+    let mut b = Block::new(name);
+    for (common, kind) in items {
+        b.entities.push(Entity { handle: d.new_handle(), common, kind });
+    }
+    d.blocks.insert(name.into(), Arc::new(b));
+}
+
+/// A room drawn in mm with no order: two walls on WALL and one on layer 0, a table and a chair (a block holding
+/// another) on FURN, two doors (a block: its leaf on layer 0, its swing on a layer of its own) on DOORS, a room name;
+/// a second drawing 50 m to the right; a sheet; and a layer and a block nothing uses. Colour tells as much as layer:
+/// WALL is red, and the wall on layer 0 is red by itself; FURN is green, and the table cyan and dashed by itself;
+/// DOORS is blue and dashed. The handles of its first wall and of its first door come with it.
+fn room() -> (Doc, Handle, Handle) {
+    let mut d = Doc::new_metric();
+    for l in ["WALL", "FURN", "DOORS", "SWING", "TEXT", "UNUSED"] {
+        d.ensure_layer(l);
+    }
+    d.linetypes.push(Linetype::simple("DASHED", "Dashed", &[12.0, -6.0]));
+    for (l, color, linetype) in [("WALL", 1, "Continuous"), ("FURN", 3, "Continuous"), ("DOORS", 5, "DASHED")] {
+        let layer = d.layer_mut(l).expect("the layer");
+        (layer.color, layer.linetype) = (Color::Index(color), linetype.into());
+    }
+    block(&mut d, "DR_D01", vec![(on("0"), line((0.0, 0.0), (900.0, 0.0))), (on("SWING"), circle((0.0, 0.0), 100.0))]);
+    block(&mut d, "DR_D02", vec![(on("0"), line((0.0, 0.0), (800.0, 0.0)))]);
+    block(&mut d, "LEG", vec![(on("0"), circle((0.0, 0.0), 20.0))]);
+    block(&mut d, "CHAIR", vec![(on("0"), line((0.0, 0.0), (400.0, 0.0))), (on("0"), placed("LEG", (0.0, 0.0)))]);
+    block(&mut d, "CAR", vec![(on("0"), line((0.0, 0.0), (4500.0, 0.0)))]);
+    let m = Space::Model;
+    let mut add = |c: Common, k: EntityKind| d.add(&m, c, k).expect("added");
+    let wall = add(on("WALL"), line((0.0, 0.0), (6000.0, 0.0)));
+    add(on("WALL"), line((0.0, 0.0), (0.0, 4000.0)));
+    add(Common { color: Color::Index(1), ..on("0") }, line((0.0, 4000.0), (6000.0, 4000.0)));
+    add(Common { color: Color::Index(4), linetype: "DASHED".into(), ..on("FURN") }, circle((1000.0, 1000.0), 300.0));
+    add(on("FURN"), placed("CHAIR", (4000.0, 3000.0)));
+    let door = add(on("DOORS"), placed("DR_D01", (3000.0, 0.0)));
+    add(on("DOORS"), placed("DR_D01", (0.0, 2000.0)));
+    add(on("DOORS"), placed("DR_D02", (5000.0, 4000.0)));
+    add(on("TEXT"), text((2000.0, 2000.0), "Bedroom"));
+    // The second drawing, and a wall that reaches from the first into it: its centre is in neither.
+    add(on("WALL"), line((50_000.0, 0.0), (56_000.0, 0.0)));
+    add(on("WALL"), line((5000.0, 2000.0), (51_000.0, 2000.0)));
+    let mut sheet = Layout::new("A1", 1);
+    sheet.entities.push(Entity { handle: d.new_handle(), common: on("TEXT"), kind: text((10.0, 10.0), "Ground floor") });
+    d.layouts = vec![sheet];
+    (d, wall, door)
+}
+
+/// The drawing opened as Arqiflow's worker opens it: from its pack.
+fn open(d: &Doc) -> (Opened, Measured) {
+    let o = Opened::unpack(&cadcraft_index::pack(d).expect("packed")).expect("opened");
+    let m = Measured::of(&o);
+    (o, m)
+}
+
+fn count(d: &Doc, rule: Value) -> Value {
+    let (o, m) = open(d);
+    counts(&o, &m, &rule.to_string()).expect("counted")
+}
+
+fn total(d: &Doc, rule: Value) -> u64 {
+    count(d, rule)["total"].as_u64().expect("a total")
+}
+
+/// The first room's box, mm.
+const ROOM: [[f64; 2]; 2] = [[-500.0, -500.0], [6500.0, 4500.0]];
+
+#[test]
+fn a_rule_s_parts_each_select_and_together_all_must_hold() {
+    let (d, wall, _) = room();
+    assert_eq!(total(&d, json!({})), 11);
+    // Layers: any of the list, by name in any case.
+    assert_eq!(total(&d, json!({"layers": ["wall"]})), 4);
+    assert_eq!(total(&d, json!({"layers": ["WALL", "0"]})), 5);
+    // Kinds, as `query` names them.
+    assert_eq!(total(&d, json!({"kinds": ["line"]})), 5);
+    assert_eq!(total(&d, json!({"kinds": ["blocks", "text"]})), 4);
+    // Blocks: by name, or by how the name begins; never another kind of item.
+    assert_eq!(total(&d, json!({"blocks": ["dr_d01"]})), 2);
+    assert_eq!(total(&d, json!({"blocks": ["DR_*"]})), 3);
+    assert_eq!(total(&d, json!({"blocks": ["DR_*", "CHAIR"]})), 4);
+    // A box selects by the centre of the item's own box: the wall reaching out of the room is not in it.
+    assert_eq!(total(&d, json!({"box": ROOM})), 9);
+    assert_eq!(total(&d, json!({"box": [[49_000, -500], [57_000, 500]]})), 1);
+    // The longer side of the item's box, mm.
+    assert_eq!(total(&d, json!({"min_size": 5000})), 4);
+    assert_eq!(total(&d, json!({"min_size": 5000, "max_size": 6000})), 3);
+    assert_eq!(total(&d, json!({"max_size": 600})), 1);
+    // Handles, as `query` gives them.
+    assert_eq!(total(&d, json!({"handles": [format!("{:x}", wall.0)]})), 1);
+    // Every part given must hold.
+    assert_eq!(total(&d, json!({"layers": ["WALL"], "box": ROOM})), 2);
+    assert_eq!(total(&d, json!({"layers": ["WALL", "0"], "kinds": ["line"], "box": ROOM, "min_size": 5000})), 2);
+    assert_eq!(total(&d, json!({"layers": ["FURN"], "blocks": ["DR_*"]})), 0);
+}
+
+#[test]
+fn a_rule_selects_by_the_colour_and_the_linetype_an_item_is_drawn_in() {
+    let (d, ..) = room();
+    // Red: the walls on WALL, red by their layer, and the wall on layer 0, red by itself; however red is named.
+    for red in [json!("red"), json!(1), json!("#FF0000"), json!("1")] {
+        assert_eq!(total(&d, json!({"colors": [red]})), 5);
+    }
+    assert_eq!(total(&d, json!({"colors": ["red"], "layers": ["0"]})), 1);
+    assert_eq!(total(&d, json!({"colors": ["cyan"]})), 1);
+    assert_eq!(total(&d, json!({"colors": ["cyan", 5]})), 4);
+    // A true colour that is not in the drawing selects nothing; a layer's colour is not its items' when they have their own.
+    assert_eq!(total(&d, json!({"colors": ["#123456"]})), 0);
+    assert_eq!(total(&d, json!({"colors": ["green"]})), 1);
+    // "bylayer": the items that leave their colour to their layer, alone or beside colours.
+    assert_eq!(total(&d, json!({"colors": ["bylayer"]})), 9);
+    assert_eq!(total(&d, json!({"colors": ["bylayer", "cyan"]})), 10);
+    // Linetypes the same way: the doors are dashed by their layer, the table by itself.
+    assert_eq!(total(&d, json!({"linetypes": ["dashed"]})), 4);
+    assert_eq!(total(&d, json!({"linetypes": ["Continuous"]})), 7);
+    assert_eq!(total(&d, json!({"linetypes": ["bylayer"]})), 10);
+    assert_eq!(total(&d, json!({"linetypes": ["DASHED"], "colors": ["blue"], "kinds": ["block"]})), 3);
+    let (o, m) = open(&d);
+    assert!(counts(&o, &m, r#"{"colors": ["mauve"]}"#).expect_err("refused").contains("`mauve` is not a colour"));
+    assert!(counts(&o, &m, r#"{"colors": "red"}"#).expect_err("refused").contains("`colors` is a list of colours"));
+    assert!(counts(&o, &m, r#"{"linetypes": ["DOTTY"]}"#).expect_err("refused").contains("the drawing has no linetype `DOTTY` (it has: ByBlock, ByLayer, Continuous, DASHED)"));
+}
+
+#[test]
+fn counts_total_by_kind_by_layer_and_by_block() {
+    let (d, ..) = room();
+    let c = count(&d, json!({"box": ROOM}));
+    assert_eq!(c["total"], 9);
+    assert_eq!(c["kinds"], json!({"block": 4, "circle": 1, "line": 3, "text": 1}));
+    // The layers with the most items first, then by name.
+    // Each layer's own colour, and the colours its items are drawn in when they are not all the layer's.
+    assert_eq!(c["layers"][0], json!({"name": "DOORS", "items": 3, "kinds": {"block": 3}, "color": "#0000ff"}));
+    assert_eq!(
+        c["layers"][1],
+        json!({"name": "FURN", "items": 2, "kinds": {"block": 1, "circle": 1}, "color": "#00ff00", "colors": {"#00ff00": 1, "#00ffff": 1}})
+    );
+    assert_eq!(c["layers"][3], json!({"name": "0", "items": 1, "kinds": {"line": 1}, "color": "#ffffff", "colors": {"#ff0000": 1}}));
+    // The colours the items are drawn in, the most used first: red is two walls on WALL and the one on layer 0.
+    assert_eq!(c["colors"][0], json!({"color": "#ff0000", "aci": 1, "items": 3, "layers": ["0", "WALL"]}));
+    assert_eq!(c["colors"][1], json!({"color": "#0000ff", "aci": 5, "items": 3, "layers": ["DOORS"]}));
+    let rest: Vec<&str> = c["colors"].as_array().expect("colours").iter().skip(2).filter_map(|c| c["color"].as_str()).collect();
+    assert_eq!(rest, ["#00ff00", "#00ffff", "#ffffff"]);
+    assert_eq!(c["layers"].as_array().expect("layers").len(), 5);
+    // The blocks most placed first: the size of what the definition draws at scale 1, the layers its placements are on.
+    assert_eq!(c["blocks"][0], json!({"name": "DR_D01", "placed": 2, "size": [1000.0, 200.0], "layers": ["DOORS"]}));
+    assert_eq!(c["blocks"][1]["name"], "CHAIR");
+    assert_eq!(c["blocks"][1]["size"], json!([420.0, 40.0]));
+    assert!(c.get("blocks_more").is_none());
+    assert_eq!(c["extents"], json!([[-100.0, -100.0], [6000.0, 4000.0]]));
+    // Nothing selected is counted as nothing.
+    let none = count(&d, json!({"box": [[100_000, 0], [101_000, 1000]]}));
+    assert_eq!((none["total"].as_u64(), none["extents"].is_null()), (Some(0), true));
+}
+
+#[test]
+fn more_blocks_than_are_listed_are_said() {
+    let mut d = Doc::new_metric();
+    for n in 0..BLOCKS_LISTED + 5 {
+        let name = format!("B{n}");
+        block(&mut d, &name, vec![(on("0"), line((0.0, 0.0), (100.0, 0.0)))]);
+        d.add(&Space::Model, on("0"), placed(&name, (n as f64 * 200.0, 0.0))).expect("added");
+    }
+    let c = count(&d, json!({}));
+    assert_eq!(c["blocks"].as_array().expect("blocks").len(), BLOCKS_LISTED);
+    assert_eq!(c["blocks_more"], 5);
+}
+
+#[test]
+fn an_unknown_parameter_is_refused_by_name() {
+    let (d, ..) = room();
+    let (o, m) = open(&d);
+    let refused = |r: Result<Value, String>| r.expect_err("refused");
+    assert!(refused(counts(&o, &m, r#"{"layer": ["WALL"]}"#)).contains("unknown parameter `layer`; counts takes: layers, kinds, blocks"));
+    assert!(refused(cut(&o, &m, r#"{"crop": [[0, 0], [1, 1]]}"#).map(|c| c.1)).contains("unknown parameter `crop`; extract takes: box, keep, drop, sort, move"));
+    assert!(refused(cut(&o, &m, r#"{"keep": [{"colour": 1}]}"#).map(|c| c.1)).contains("unknown parameter `colour`; a rule of `keep` takes"));
+    assert!(refused(cut(&o, &m, r#"{"sort": [{"layer": "A-WALL", "layers": ["WALL"]}]}"#).map(|c| c.1)).contains("unknown parameter `layer`; a rule of `sort` takes: to, layers"));
+    assert!(refused(cut(&o, &m, r#"{"sort": [{"layers": ["WALL"]}]}"#).map(|c| c.1)).contains("names the layer its items go to (`to`)"));
+    assert!(look(&o, &m, r#"{"sort": []}"#, 400).map(|p| p.about).expect_err("refused").contains("unknown parameter `sort`; look takes: box, keep, drop"));
+    // What is asked for and is not in the drawing, or is not what a part holds, is said too.
+    assert!(refused(counts(&o, &m, r#"{"layers": ["WALLS"]}"#)).contains("the drawing has no layer `WALLS` (it has: 0, Defpoints, WALL"));
+    assert!(refused(counts(&o, &m, r#"{"kinds": ["wall"]}"#)).contains("`wall` is not a kind"));
+    assert!(refused(counts(&o, &m, r#"{"box": [0, 0, 1, 1]}"#)).contains("`box` is two corners"));
+    assert!(refused(counts(&o, &m, r#"{"min_size": "big"}"#)).contains("`min_size` is the longer side"));
+    assert!(refused(cut(&o, &m, r#"{"move": 5}"#).map(|c| c.1)).contains("`move` is [dx, dy]"));
+    assert!(refused(cut(&o, &m, r#"{"box": [[100000, 0], [101000, 1000]]}"#).map(|c| c.1)).contains("nothing is selected"));
+    assert!(extract(&o, &m, "{}", "R14").expect_err("refused").contains("not one CADCraft writes"));
+}
+
+fn layers_of(d: &Doc) -> Vec<String> {
+    let mut l: Vec<String> = d.model.iter().map(|e| format!("{}@{}", kind_of(&e.kind), e.common.layer)).collect();
+    l.sort();
+    l
+}
+
+#[test]
+fn a_part_is_cropped_kept_dropped_sorted_and_moved_in_that_order() {
+    let (d, ..) = room();
+    let (o, m) = open(&d);
+    // Cropped: the room alone, without the wall that reaches out of it or the second drawing.
+    let (part, about) = cut(&o, &m, &json!({"box": ROOM}).to_string()).expect("cut");
+    assert_eq!((part.model.len(), about["items"].as_u64()), (9, Some(9)));
+    assert_eq!(about["extents"], json!([[-100.0, -100.0], [6000.0, 4000.0]]));
+    // Kept: only what one of the rules selects; then dropped: what one of the rules selects of those.
+    let (part, _) = cut(&o, &m, &json!({"box": ROOM, "keep": [{"layers": ["WALL", "0"]}, {"kinds": ["block"]}]}).to_string()).expect("cut");
+    assert_eq!(part.model.len(), 7);
+    let (part, _) =
+        cut(&o, &m, &json!({"box": ROOM, "keep": [{"layers": ["WALL", "0"]}, {"kinds": ["block"]}], "drop": [{"blocks": ["CHAIR"]}]}).to_string()).expect("cut");
+    assert_eq!(layers_of(&part), ["block@DOORS", "block@DOORS", "block@DOORS", "line@0", "line@WALL", "line@WALL"]);
+    // Sorted: each item on the layer of the first rule that selects it as it was; an item no rule selects keeps its
+    // layer. The long line on layer 0 is a wall by its size; the first rule takes the doors before the second could.
+    let sort = json!([
+        {"to": "A-DOOR", "blocks": ["DR_*"]},
+        {"to": "X-UNSURE", "kinds": ["block"]},
+        {"to": "A-WALL", "layers": ["WALL"]},
+        {"to": "A-WALL", "layers": ["0"], "kinds": ["line"], "min_size": 3000},
+    ]);
+    let (part, about) = cut(&o, &m, &json!({"box": ROOM, "drop": [{"layers": ["TEXT"]}], "sort": sort, "move": [-1000, 500]}).to_string()).expect("cut");
+    assert_eq!(layers_of(&part), ["block@A-DOOR", "block@A-DOOR", "block@A-DOOR", "block@X-UNSURE", "circle@FURN", "line@A-WALL", "line@A-WALL", "line@A-WALL"]);
+    assert_eq!(about["layers"][0], json!({"name": "A-DOOR", "items": 3}));
+    assert_eq!(about["kinds"], json!({"block": 4, "circle": 1, "line": 3}));
+    // The layers made, and those nothing is on any more left out (but 0, and SWING, which the door's block draws on).
+    let mut names: Vec<&str> = part.layers.iter().map(|l| l.name.as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(names, ["0", "A-DOOR", "A-WALL", "FURN", "SWING", "X-UNSURE"]);
+    // Each looks as it did on its new layer, which is white and continuous: the walls that were red by their layer are
+    // red by themselves, the doors blue and dashed; the wall that was red by itself still is.
+    let drawn: BTreeSet<(String, Color, String)> =
+        part.model.iter().filter(|e| e.common.layer.starts_with("A-")).map(|e| (e.common.layer.clone(), e.common.color, e.common.linetype.clone())).collect();
+    assert_eq!(drawn, BTreeSet::from([("A-DOOR".into(), Color::Index(5), "DASHED".into()), ("A-WALL".into(), Color::Index(1), "ByLayer".into())]));
+    assert!(part.layer("A-WALL").is_some_and(|l| l.color == Color::Index(7) && l.linetype == "Continuous"));
+    // Sorted onto a layer of the same colour, an item still leaves its colour to its layer.
+    let (same, _) = cut(&o, &m, &json!({"box": ROOM, "sort": [{"to": "WALL", "colors": ["red"]}, {"to": "WALL", "kinds": ["text"]}]}).to_string()).expect("cut");
+    let on_wall: Vec<Color> = same.model.iter().filter(|e| e.common.layer == "WALL").map(|e| e.common.color).collect();
+    assert_eq!(on_wall, [Color::ByLayer, Color::ByLayer, Color::Index(1), Color::Index(7)]);
+    // Moved: added to every coordinate, the extents with it.
+    assert_eq!(about["extents"], json!([[-1100.0, 400.0], [5000.0, 4500.0]]));
+    let first = part.model.iter().next().expect("the first wall");
+    assert_eq!(first.kind, line((-1000.0, 500.0), (5000.0, 500.0)));
+    let door = part.model.iter().find_map(|e| if let EntityKind::Insert(i) = &e.kind { Some(i.insert) } else { None }).expect("a placement");
+    assert_eq!((door.x, door.y), (3000.0, 3500.0));
+    // The open drawing is as it was.
+    assert_eq!(o.drawing.model.len(), 11);
+    assert_eq!(o.drawing.model.iter().next().expect("the first wall").kind, line((0.0, 0.0), (6000.0, 0.0)));
+}
+
+#[test]
+fn a_placement_is_kept_whole_and_re_sorted_and_what_nothing_uses_is_left_out() {
+    let (d, _, door) = room();
+    let (o, m) = open(&d);
+    let params = json!({"box": ROOM, "drop": [{"layers": ["TEXT"]}], "sort": [{"to": "A-DOOR", "blocks": ["DR_D01"]}]}).to_string();
+    let (bytes, about) = extract(&o, &m, &params, "2018").expect("extracted");
+    assert!(cadcraft_dwg::is_dwg(&bytes));
+    assert_eq!(cadcraft_dwg::version(&bytes).as_deref(), Some("AC1032"));
+    let back = cadcraft_index::read(&bytes, "part.dwg").expect("read back");
+    assert_eq!(back.model.len(), 8);
+    assert_eq!(about["items"], 8);
+    // The door is still a placement of its block, with the handle it had, on its new layer.
+    let e = back.model.get(door).expect("the door, by its handle");
+    assert!(matches!(&e.kind, EntityKind::Insert(i) if i.block == "DR_D01"));
+    assert_eq!(e.common.layer, "A-DOOR");
+    // And drawn as it was, blue and dashed, which it had left to its old layer.
+    assert_eq!((e.common.color, e.common.linetype.as_str()), (Color::Index(5), "DASHED"));
+    // Its definition came with it, as it was: the leaf on layer 0, which a DWG draws on the placement's layer (so it
+    // follows the door to A-DOOR with nothing rewritten), and the swing on its own layer, which stays.
+    let def = back.block("DR_D01").expect("the door's block");
+    let inside: Vec<&str> = def.entities.iter().map(|e| e.common.layer.as_str()).collect();
+    assert_eq!(inside, ["0", "SWING"]);
+    // A block in a block comes too; a block nothing places does not.
+    assert!(back.block("CHAIR").is_some() && back.block("LEG").is_some() && back.block("DR_D02").is_some());
+    assert!(back.block("CAR").is_none());
+    // Layers nothing is on are left out, and the sheet's items.
+    let has = |n: &str| back.layers.iter().any(|l| l.name == n);
+    assert!(has("0") && has("A-DOOR") && has("WALL") && has("FURN") && has("SWING") && has("DOORS"));
+    assert!(!has("UNUSED") && !has("TEXT"));
+    assert!(back.layouts.iter().all(|l| l.entities.iter().all(|e| matches!(e.kind, EntityKind::Viewport(_)))));
+    assert!(back.layouts.iter().all(|l| l.name != "A1"));
+}
+
+#[test]
+fn the_extract_indexed_again_holds_what_was_asked() {
+    let (d, ..) = room();
+    let (o, m) = open(&d);
+    let params = json!({
+        "box": ROOM,
+        "keep": [{"layers": ["WALL", "0", "DOORS"]}],
+        "sort": [{"to": "A-WALL", "kinds": ["line"]}, {"to": "A-DOOR", "kinds": ["block"]}],
+        "move": [-3000, -2000],
+    })
+    .to_string();
+    let (bytes, about) = extract(&o, &m, &params, "2013").expect("extracted");
+    // Indexed as any drawing is, and asked of with the same instruments.
+    let (pack, summary) = cadcraft_index::index(&bytes, "part.dwg").expect("indexed");
+    let o2 = Opened::unpack(&pack).expect("opened");
+    let m2 = Measured::of(&o2);
+    let c = counts(&o2, &m2, "").expect("counted");
+    assert_eq!(c["total"], 6);
+    assert_eq!(c["total"], about["items"]);
+    assert_eq!(c["kinds"], about["kinds"]);
+    assert_eq!(c["kinds"], json!({"block": 3, "line": 3}));
+    let by_layer = |v: &Value| -> Vec<(String, u64)> {
+        v["layers"].as_array().expect("layers").iter().map(|l| (l["name"].as_str().unwrap_or("").to_string(), l["items"].as_u64().unwrap_or(0))).collect()
+    };
+    assert_eq!(by_layer(&c), by_layer(&about));
+    assert_eq!(by_layer(&c), [("A-DOOR".to_string(), 3), ("A-WALL".to_string(), 3)]);
+    assert_eq!(c["extents"], about["extents"]);
+    assert_eq!(c["extents"], json!([[-3100.0, -2100.0], [3000.0, 2000.0]]));
+    assert_eq!(c["blocks"][0]["name"], "DR_D01");
+    assert_eq!(summary["items"], 6);
+    assert_eq!(summary["sheets"], json!([]));
+}
+
+/// The room drawn in metres in a real grid, 400 km east and 5,000 km north: given out in mm less an offset.
+fn far() -> Doc {
+    let mut d = Doc::new_metric();
+    d.header.set("INSUNITS", HVal::Int(6));
+    let (x, y) = (400_000.0, 5_000_000.0);
+    block(&mut d, "DOOR", vec![(on("0"), line((0.0, 0.0), (0.9, 0.0)))]);
+    for (a, b) in [((0.0, 0.0), (6.0, 0.0)), ((6.0, 0.0), (6.0, 4.0)), ((6.0, 4.0), (0.0, 4.0)), ((0.0, 4.0), (0.0, 0.0))] {
+        d.add(&Space::Model, on("WALL"), line((x + a.0, y + a.1), (x + b.0, y + b.1))).expect("added");
+    }
+    d.add(&Space::Model, on("DOORS"), placed("DOOR", (x + 3.0, y))).expect("added");
+    d
+}
+
+#[test]
+fn a_drawing_far_out_is_asked_and_moved_in_the_coordinates_query_gives() {
+    let d = far();
+    let (o, m) = open(&d);
+    let off = o.offset();
+    assert_eq!(off, [400_000_000.0, 5_000_000_000.0]);
+    // A box is taken less the offset, as `query` gives points, or with it.
+    let near = json!({"box": [[2000, -1000], [7000, 5000]]});
+    assert_eq!(counts(&o, &m, &near.to_string()).expect("counted")["total"], 4);
+    let true_box = json!({"box": [[off[0] + 2000.0, off[1] - 1000.0], [off[0] + 7000.0, off[1] + 5000.0]]});
+    assert_eq!(counts(&o, &m, &true_box.to_string()).expect("counted")["total"], 4);
+    let all = counts(&o, &m, "").expect("counted");
+    assert_eq!(all["extents"], json!([[0.0, 0.0], [6000.0, 4000.0]]));
+    assert_eq!(all["blocks"][0]["size"], json!([900.0, 0.0]));
+    assert_eq!(counts(&o, &m, r#"{"min_size": 5000}"#).expect("counted")["total"], 2);
+    // Not moved, the part lies where it lay: its extents less the offset, which is said.
+    let (part, about) = cut(&o, &m, "{}").expect("cut");
+    assert_eq!(about["extents"], json!([[0.0, 0.0], [6000.0, 4000.0]]));
+    assert_eq!(about["offset"], json!(off));
+    assert_eq!(part.model.iter().next().expect("a wall").kind, line((400_000.0, 5_000_000.0), (400_006.0, 5_000_000.0)));
+    // Moved so that the point `query` gives as (6000, 4000) lands on 0, 0: the part is no longer far out.
+    let (bytes, about) = extract(&o, &m, r#"{"move": [-6000, -4000]}"#, "").expect("extracted");
+    assert_eq!(about["extents"], json!([[-6000.0, -4000.0], [0.0, 0.0]]));
+    assert!(about.get("offset").is_none());
+    let (pack, summary) = cadcraft_index::index(&bytes, "part.dwg").expect("indexed");
+    assert_eq!((summary["unit"].as_str(), summary.get("offset")), (Some("m"), None));
+    assert_eq!(summary["extents"], json!([[-6000.0, -4000.0], [0.0, 0.0]]));
+    let o2 = Opened::unpack(&pack).expect("opened");
+    let doors = o2.query(&cadcraft_index::Query { kinds: Some(vec!["block".into()]), ..Default::default() }).expect("asked");
+    assert_eq!(doors["items"][0]["at"], json!([-3000.0, -4000.0]));
+}
+
+#[test]
+fn a_picture_shows_only_what_is_selected_in_the_drawing_s_own_colours() {
+    let (d, ..) = room();
+    let (o, m) = open(&d);
+    let p = look(&o, &m, &json!({"box": ROOM, "drop": [{"layers": ["TEXT"]}]}).to_string(), 600).expect("drawn");
+    assert_eq!(&p.png[..8], b"\x89PNG\r\n\x1a\n");
+    let a = &p.about;
+    assert_eq!((a["width"].as_u64(), a["height"].as_u64()), (Some(600), Some(409)));
+    assert_eq!((a["items"].as_u64(), a["color_by"].as_str()), (Some(8), Some("own")));
+    assert_eq!(a["selected"], json!([[-100.0, -100.0], [6000.0, 4000.0]]));
+    // The picture's edges: what was selected and a margin round it.
+    assert_eq!(a["extents"], json!([[-222.0, -128.82], [6122.0, 4028.82]]));
+    // The legend: the layers the items are on, the most used first, each with its own colour, and the colours its
+    // items are drawn in when they are not all the layer's.
+    assert_eq!(
+        a["legend"],
+        json!([
+            {"layer": "DOORS", "color": "#0000ff", "items": 3},
+            {"layer": "FURN", "color": "#00ff00", "items": 2, "colors": {"#00ff00": 1, "#00ffff": 1}},
+            {"layer": "WALL", "color": "#ff0000", "items": 2},
+            {"layer": "0", "color": "#ffffff", "items": 1, "colors": {"#ff0000": 1}},
+        ])
+    );
+    assert!(holds_color(&p.png, Rgb(255, 0, 0)) && holds_color(&p.png, Rgb(0, 0, 255)) && holds_color(&p.png, Rgb(0, 255, 255)));
+    // Only layer WALL: fitted to those lines.
+    let p = look(&o, &m, r#"{"keep": [{"layers": ["WALL"], "max_size": 6000}], "color_by": "own"}"#, 100).expect("drawn");
+    assert_eq!(p.about["items"], 3);
+    assert_eq!(p.about["selected"], json!([[0.0, 0.0], [56_000.0, 4000.0]]));
+    assert_eq!(p.about["width"], 200);
+    assert!(look(&o, &m, r#"{"box": [[100000, 0], [101000, 1000]]}"#, 400).is_err());
+    assert!(look(&o, &m, r#"{"color_by": "kind"}"#, 400).map(|p| p.about).expect_err("refused").contains("`color_by` is \"own\""));
+    // A layer that is off is not in a picture of the drawing as it is, and the legend says so.
+    let mut dark = d.clone();
+    dark.layer_mut("WALL").expect("the layer").on = false;
+    let (o, m) = open(&dark);
+    let p = look(&o, &m, &json!({"box": ROOM, "keep": [{"layers": ["WALL", "DOORS"]}]}).to_string(), 600).expect("drawn");
+    assert_eq!(p.about["legend"][1], json!({"layer": "WALL", "color": "#ff0000", "items": 2, "off": true}));
+    assert!(!holds_color(&p.png, Rgb(255, 0, 0)));
+    // By layer, it is drawn all the same.
+    let p = look(&o, &m, &json!({"box": ROOM, "keep": [{"layers": ["WALL", "DOORS"]}], "color_by": "layer"}).to_string(), 600).expect("drawn");
+    let walls = Rgb::parse_hex(p.about["legend"][1]["color"].as_str().unwrap_or("")).expect("a colour");
+    assert!(holds_color(&p.png, walls));
+}
+
+#[test]
+fn a_picture_by_layer_gives_each_layer_a_colour_of_its_own() {
+    let (d, ..) = room();
+    let (o, m) = open(&d);
+    let p = look(&o, &m, &json!({"box": ROOM, "drop": [{"layers": ["TEXT"]}], "color_by": "layer"}).to_string(), 600).expect("drawn");
+    let a = &p.about;
+    assert_eq!((a["items"].as_u64(), a["color_by"].as_str()), (Some(8), Some("layer")));
+    // The legend: the layers the items are on, the most used first, then those only a block draws on.
+    let legend = a["legend"].as_array().expect("a legend");
+    let named: Vec<(&str, u64)> = legend.iter().map(|l| (l["layer"].as_str().unwrap_or(""), l["items"].as_u64().unwrap_or(9))).collect();
+    assert_eq!(named, [("DOORS", 3), ("FURN", 2), ("WALL", 2), ("0", 1), ("SWING", 0)]);
+    assert_eq!(legend[4]["in_blocks"], true);
+    let colors: BTreeSet<&str> = legend.iter().filter_map(|l| l["color"].as_str()).collect();
+    assert_eq!(colors.len(), 5);
+    assert!(colors.iter().all(|c| c.len() == 7 && c.starts_with('#')));
+    // The colours are in the picture, whatever colour an item had (the wall on layer 0 is no longer red), and the open
+    // drawing's layers keep their own.
+    for row in legend.iter().take(4) {
+        let c = Rgb::parse_hex(row["color"].as_str().unwrap_or("")).expect("a colour");
+        assert!(holds_color(&p.png, c), "no pixel of {row}");
+    }
+    assert!(!holds_color(&p.png, Rgb(255, 0, 0)));
+    assert_eq!(o.drawing.layer("WALL").map(|l| l.color), Some(Color::Index(1)));
+}
+
+/// Whether a PNG has a pixel of this colour (a thin line's pixels are smoothed, so: near it).
+fn holds_color(png: &[u8], c: Rgb) -> bool {
+    let near = |a: u8, b: u8| a.abs_diff(b) < 24;
+    image::load_from_memory(png).expect("a PNG").to_rgb8().pixels().any(|p| near(p.0[0], c.0) && near(p.0[1], c.1) && near(p.0[2], c.2))
+}

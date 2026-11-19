@@ -20,7 +20,7 @@ use crate::err;
 const VERSIONS: [(&str, &str); 6] =
     [("2000", "AC1015"), ("2004", "AC1018"), ("2007", "AC1021"), ("2010", "AC1024"), ("2013", "AC1027"), ("2018", "AC1032")];
 
-fn version(asked: &str) -> Result<Version, String> {
+pub(crate) fn version(asked: &str) -> Result<Version, String> {
     let asked = asked.trim();
     let code = if asked.is_empty() {
         "AC1032"
