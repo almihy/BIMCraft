@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use cadcraft_doc::geom::Vec3;
-use cadcraft_doc::{Block, Circle, Common, Drawing as Doc, Entity, EntityKind, HAlign, Handle, Insert, Layout, Line, Linetype, Space, Text, VAlign};
+use cadcraft_doc::{
+    Block, Circle, Common, Drawing as Doc, Entity, EntityKind, HAlign, Handle, Insert, Layout, Line, Linetype, Space, Text, VAlign,
+};
 use cadcraft_index::Opened;
 use serde_json::{Value, json};
 
@@ -158,7 +160,11 @@ fn a_rule_selects_by_the_colour_and_the_linetype_an_item_is_drawn_in() {
     let (o, m) = open(&d);
     assert!(counts(&o, &m, r#"{"colors": ["mauve"]}"#).expect_err("refused").contains("`mauve` is not a colour"));
     assert!(counts(&o, &m, r#"{"colors": "red"}"#).expect_err("refused").contains("`colors` is a list of colours"));
-    assert!(counts(&o, &m, r#"{"linetypes": ["DOTTY"]}"#).expect_err("refused").contains("the drawing has no linetype `DOTTY` (it has: ByBlock, ByLayer, Continuous, DASHED)"));
+    assert!(
+        counts(&o, &m, r#"{"linetypes": ["DOTTY"]}"#)
+            .expect_err("refused")
+            .contains("the drawing has no linetype `DOTTY` (it has: ByBlock, ByLayer, Continuous, DASHED)")
+    );
 }
 
 #[test]
@@ -211,11 +217,24 @@ fn an_unknown_parameter_is_refused_by_name() {
     let (o, m) = open(&d);
     let refused = |r: Result<Value, String>| r.expect_err("refused");
     assert!(refused(counts(&o, &m, r#"{"layer": ["WALL"]}"#)).contains("unknown parameter `layer`; counts takes: layers, kinds, blocks"));
-    assert!(refused(cut(&o, &m, r#"{"crop": [[0, 0], [1, 1]]}"#).map(|c| c.1)).contains("unknown parameter `crop`; extract takes: box, keep, drop, sort, move"));
-    assert!(refused(cut(&o, &m, r#"{"keep": [{"colour": 1}]}"#).map(|c| c.1)).contains("unknown parameter `colour`; a rule of `keep` takes"));
-    assert!(refused(cut(&o, &m, r#"{"sort": [{"layer": "A-WALL", "layers": ["WALL"]}]}"#).map(|c| c.1)).contains("unknown parameter `layer`; a rule of `sort` takes: to, layers"));
+    assert!(
+        refused(cut(&o, &m, r#"{"crop": [[0, 0], [1, 1]]}"#).map(|c| c.1))
+            .contains("unknown parameter `crop`; extract takes: box, keep, drop, sort, move")
+    );
+    assert!(
+        refused(cut(&o, &m, r#"{"keep": [{"colour": 1}]}"#).map(|c| c.1)).contains("unknown parameter `colour`; a rule of `keep` takes")
+    );
+    assert!(
+        refused(cut(&o, &m, r#"{"sort": [{"layer": "A-WALL", "layers": ["WALL"]}]}"#).map(|c| c.1))
+            .contains("unknown parameter `layer`; a rule of `sort` takes: to, layers")
+    );
     assert!(refused(cut(&o, &m, r#"{"sort": [{"layers": ["WALL"]}]}"#).map(|c| c.1)).contains("names the layer its items go to (`to`)"));
-    assert!(look(&o, &m, r#"{"sort": []}"#, 400).map(|p| p.about).expect_err("refused").contains("unknown parameter `sort`; look takes: box, keep, drop"));
+    assert!(
+        look(&o, &m, r#"{"sort": []}"#, 400)
+            .map(|p| p.about)
+            .expect_err("refused")
+            .contains("unknown parameter `sort`; look takes: box, keep, drop")
+    );
     // What is asked for and is not in the drawing, or is not what a part holds, is said too.
     assert!(refused(counts(&o, &m, r#"{"layers": ["WALLS"]}"#)).contains("the drawing has no layer `WALLS` (it has: 0, Defpoints, WALL"));
     assert!(refused(counts(&o, &m, r#"{"kinds": ["wall"]}"#)).contains("`wall` is not a kind"));
@@ -243,8 +262,12 @@ fn a_part_is_cropped_kept_dropped_sorted_and_moved_in_that_order() {
     // Kept: only what one of the rules selects; then dropped: what one of the rules selects of those.
     let (part, _) = cut(&o, &m, &json!({"box": ROOM, "keep": [{"layers": ["WALL", "0"]}, {"kinds": ["block"]}]}).to_string()).expect("cut");
     assert_eq!(part.model.len(), 7);
-    let (part, _) =
-        cut(&o, &m, &json!({"box": ROOM, "keep": [{"layers": ["WALL", "0"]}, {"kinds": ["block"]}], "drop": [{"blocks": ["CHAIR"]}]}).to_string()).expect("cut");
+    let (part, _) = cut(
+        &o,
+        &m,
+        &json!({"box": ROOM, "keep": [{"layers": ["WALL", "0"]}, {"kinds": ["block"]}], "drop": [{"blocks": ["CHAIR"]}]}).to_string(),
+    )
+    .expect("cut");
     assert_eq!(layers_of(&part), ["block@DOORS", "block@DOORS", "block@DOORS", "line@0", "line@WALL", "line@WALL"]);
     // Sorted: each item on the layer of the first rule that selects it as it was; an item no rule selects keeps its
     // layer. The long line on layer 0 is a wall by its size; the first rule takes the doors before the second could.
@@ -254,8 +277,12 @@ fn a_part_is_cropped_kept_dropped_sorted_and_moved_in_that_order() {
         {"to": "A-WALL", "layers": ["WALL"]},
         {"to": "A-WALL", "layers": ["0"], "kinds": ["line"], "min_size": 3000},
     ]);
-    let (part, about) = cut(&o, &m, &json!({"box": ROOM, "drop": [{"layers": ["TEXT"]}], "sort": sort, "move": [-1000, 500]}).to_string()).expect("cut");
-    assert_eq!(layers_of(&part), ["block@A-DOOR", "block@A-DOOR", "block@A-DOOR", "block@X-UNSURE", "circle@FURN", "line@A-WALL", "line@A-WALL", "line@A-WALL"]);
+    let (part, about) =
+        cut(&o, &m, &json!({"box": ROOM, "drop": [{"layers": ["TEXT"]}], "sort": sort, "move": [-1000, 500]}).to_string()).expect("cut");
+    assert_eq!(
+        layers_of(&part),
+        ["block@A-DOOR", "block@A-DOOR", "block@A-DOOR", "block@X-UNSURE", "circle@FURN", "line@A-WALL", "line@A-WALL", "line@A-WALL"]
+    );
     assert_eq!(about["layers"][0], json!({"name": "A-DOOR", "items": 3}));
     assert_eq!(about["kinds"], json!({"block": 4, "circle": 1, "line": 3}));
     // The layers made, and those nothing is on any more left out (but 0, and SWING, which the door's block draws on).
@@ -264,19 +291,29 @@ fn a_part_is_cropped_kept_dropped_sorted_and_moved_in_that_order() {
     assert_eq!(names, ["0", "A-DOOR", "A-WALL", "FURN", "SWING", "X-UNSURE"]);
     // Each looks as it did on its new layer, which is white and continuous: the walls that were red by their layer are
     // red by themselves, the doors blue and dashed; the wall that was red by itself still is.
-    let drawn: BTreeSet<(String, String, String)> =
-        part.model.iter().filter(|e| e.common.layer.starts_with("A-")).map(|e| (e.common.layer.clone(), e.common.color.name(), e.common.linetype.clone())).collect();
-    assert_eq!(drawn, BTreeSet::from([("A-DOOR".into(), "Blue".into(), "DASHED".into()), ("A-WALL".into(), "Red".into(), "ByLayer".into())]));
+    let drawn: BTreeSet<(String, String, String)> = part
+        .model
+        .iter()
+        .filter(|e| e.common.layer.starts_with("A-"))
+        .map(|e| (e.common.layer.clone(), e.common.color.name(), e.common.linetype.clone()))
+        .collect();
+    assert_eq!(
+        drawn,
+        BTreeSet::from([("A-DOOR".into(), "Blue".into(), "DASHED".into()), ("A-WALL".into(), "Red".into(), "ByLayer".into())])
+    );
     assert!(part.layer("A-WALL").is_some_and(|l| l.color == Color::Index(7) && l.linetype == "Continuous"));
     // Sorted onto a layer of the same colour, an item still leaves its colour to its layer.
-    let (same, _) = cut(&o, &m, &json!({"box": ROOM, "sort": [{"to": "WALL", "colors": ["red"]}, {"to": "WALL", "kinds": ["text"]}]}).to_string()).expect("cut");
+    let (same, _) =
+        cut(&o, &m, &json!({"box": ROOM, "sort": [{"to": "WALL", "colors": ["red"]}, {"to": "WALL", "kinds": ["text"]}]}).to_string())
+            .expect("cut");
     let on_wall: Vec<Color> = same.model.iter().filter(|e| e.common.layer == "WALL").map(|e| e.common.color).collect();
     assert_eq!(on_wall, [Color::ByLayer, Color::ByLayer, Color::Index(1), Color::Index(7)]);
     // Moved: added to every coordinate, the extents with it.
     assert_eq!(about["extents"], json!([[-1100.0, 400.0], [5000.0, 4500.0]]));
     let first = part.model.iter().next().expect("the first wall");
     assert_eq!(first.kind, line((-1000.0, 500.0), (5000.0, 500.0)));
-    let door = part.model.iter().find_map(|e| if let EntityKind::Insert(i) = &e.kind { Some(i.insert) } else { None }).expect("a placement");
+    let door =
+        part.model.iter().find_map(|e| if let EntityKind::Insert(i) = &e.kind { Some(i.insert) } else { None }).expect("a placement");
     assert_eq!((door.x, door.y), (3000.0, 3500.0));
     // The open drawing is as it was.
     assert_eq!(o.drawing.model.len(), 11);
@@ -338,7 +375,12 @@ fn the_extract_indexed_again_holds_what_was_asked() {
     assert_eq!(c["kinds"], about["kinds"]);
     assert_eq!(c["kinds"], json!({"block": 3, "line": 3}));
     let by_layer = |v: &Value| -> Vec<(String, u64)> {
-        v["layers"].as_array().expect("layers").iter().map(|l| (l["name"].as_str().unwrap_or("").to_string(), l["items"].as_u64().unwrap_or(0))).collect()
+        v["layers"]
+            .as_array()
+            .expect("layers")
+            .iter()
+            .map(|l| (l["name"].as_str().unwrap_or("").to_string(), l["items"].as_u64().unwrap_or(0)))
+            .collect()
     };
     assert_eq!(by_layer(&c), by_layer(&about));
     assert_eq!(by_layer(&c), [("A-DOOR".to_string(), 3), ("A-WALL".to_string(), 3)]);
@@ -418,6 +460,8 @@ fn a_picture_shows_only_what_is_selected_in_the_drawing_s_own_colours() {
         ])
     );
     assert!(holds_color(&p.png, Rgb(255, 0, 0)) && holds_color(&p.png, Rgb(0, 0, 255)) && holds_color(&p.png, Rgb(0, 255, 255)));
+    // White (index 7: here the doors' swings, on SWING) is drawn black on the picture's white.
+    assert!(holds_color(&p.png, Rgb(0, 0, 0)));
     // Only layer WALL: fitted to those lines.
     let p = look(&o, &m, r#"{"keep": [{"layers": ["WALL"], "max_size": 6000}], "color_by": "own"}"#, 100).expect("drawn");
     assert_eq!(p.about["items"], 3);
@@ -433,7 +477,8 @@ fn a_picture_shows_only_what_is_selected_in_the_drawing_s_own_colours() {
     assert_eq!(p.about["legend"][1], json!({"layer": "WALL", "color": "#ff0000", "items": 2, "off": true}));
     assert!(!holds_color(&p.png, Rgb(255, 0, 0)));
     // By layer, it is drawn all the same.
-    let p = look(&o, &m, &json!({"box": ROOM, "keep": [{"layers": ["WALL", "DOORS"]}], "color_by": "layer"}).to_string(), 600).expect("drawn");
+    let p =
+        look(&o, &m, &json!({"box": ROOM, "keep": [{"layers": ["WALL", "DOORS"]}], "color_by": "layer"}).to_string(), 600).expect("drawn");
     let walls = Rgb::parse_hex(p.about["legend"][1]["color"].as_str().unwrap_or("")).expect("a colour");
     assert!(holds_color(&p.png, walls));
 }
@@ -500,7 +545,15 @@ fn a_real_drawing_s_plan_is_counted_extracted_and_indexed_again() {
     let all = counts(&o, &m, "").expect("counted");
     timed("counts of the whole", t);
     assert_eq!(all["total"], summary["items"]);
-    eprintln!("{} items, {} layers, {} colours, {} blocks listed and {} more", all["total"], all["layers"].as_array().map_or(0, Vec::len), all["colors"].as_array().map_or(0, Vec::len), all["blocks"].as_array().map_or(0, Vec::len), all["blocks_more"]);
+    eprintln!("unit {} ({} mm), extents {}, offset {}", summary["unit"], summary["mm"], summary["extents"], summary["offset"]);
+    eprintln!(
+        "{} items, {} layers, {} colours, {} blocks listed and {} more",
+        all["total"],
+        all["layers"].as_array().map_or(0, Vec::len),
+        all["colors"].as_array().map_or(0, Vec::len),
+        all["blocks"].as_array().map_or(0, Vec::len),
+        all["blocks_more"]
+    );
     // The fullest 40 m by 30 m of its bulk (all of it is some 100 m by 55 m), on a 10 m grid.
     let ext: [[f64; 2]; 2] = serde_json::from_value(summary["extents"].clone()).expect("extents");
     let t = std::time::Instant::now();
@@ -528,6 +581,16 @@ fn a_real_drawing_s_plan_is_counted_extracted_and_indexed_again() {
     let t = std::time::Instant::now();
     let p = look(&o, &m, &json!({"box": best, "color_by": "layer"}).to_string(), 1600).expect("drawn");
     timed(&format!("look, by layer ({} layers in the legend)", p.about["legend"].as_array().map_or(0, Vec::len)), t);
+    // The part as it is, its dimensions (with their blocks and styles), hatches and leaders too, written and read again.
+    let t = std::time::Instant::now();
+    let (dwg, about) = extract(&o, &m, &json!({"box": best}).to_string(), "2018").expect("extracted whole");
+    timed(&format!("extract of the box with nothing dropped ({} items, {} KB)", about["items"], dwg.len() / 1024), t);
+    let (pack1, _) = cadcraft_index::index(&dwg, "part.dwg").expect("indexed again");
+    let o1 = Opened::unpack(&pack1).expect("opened");
+    let c1 = counts(&o1, &Measured::of(&o1), "").expect("counted");
+    assert_eq!(c1["kinds"], about["kinds"]);
+    assert_eq!(c1["total"], most);
+    eprintln!("its kinds: {}", c1["kinds"]);
     // Its hatches and dimensions dropped, its blocks to one layer, its origin to the box's corner.
     let params = json!({
         "box": best,
@@ -539,7 +602,13 @@ fn a_real_drawing_s_plan_is_counted_extracted_and_indexed_again() {
     let t = std::time::Instant::now();
     let (part, about) = cut(&o, &m, &params).expect("cut");
     timed("cut (the part as a drawing)", t);
-    eprintln!("the part: {} of {} blocks, {} of {} layers", part.blocks.len(), o.drawing.blocks.len(), part.layers.len(), o.drawing.layers.len());
+    eprintln!(
+        "the part: {} of {} blocks, {} of {} layers",
+        part.blocks.len(),
+        o.drawing.blocks.len(),
+        part.layers.len(),
+        o.drawing.layers.len()
+    );
     let t = std::time::Instant::now();
     let (dwg, about2) = extract(&o, &m, &params, "2018").expect("extracted");
     timed(&format!("extract ({} items, {} KB)", about["items"], dwg.len() / 1024), t);
@@ -554,7 +623,10 @@ fn a_real_drawing_s_plan_is_counted_extracted_and_indexed_again() {
     assert_eq!(c["kinds"], about["kinds"]);
     assert!(c["kinds"].get("hatch").is_none() && c["kinds"].get("dimension").is_none());
     let blocks = c["kinds"]["block"].as_u64().unwrap_or(0);
-    assert_eq!(c["layers"].as_array().and_then(|l| l.iter().find(|l| l["name"] == "X-BLOCKS")).map(|l| l["items"].as_u64().unwrap_or(0)), Some(blocks));
+    assert_eq!(
+        c["layers"].as_array().and_then(|l| l.iter().find(|l| l["name"] == "X-BLOCKS")).map(|l| l["items"].as_u64().unwrap_or(0)),
+        Some(blocks)
+    );
     assert_eq!(summary2["sheets"], json!([]));
     // Moved to its corner: its extents begin near 0, 0 and are no wider than the box and what reaches out of it.
     eprintln!("its extents: {} (asked: {})", c["extents"], about["extents"]);

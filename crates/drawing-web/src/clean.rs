@@ -92,7 +92,12 @@ fn real(b: &Bounds2) -> bool {
 impl<'a> Seen<'a> {
     fn of(o: &'a Opened, m: &'a Measured) -> Seen<'a> {
         let off = o.offset();
-        Seen { d: &o.drawing, m, offset: Vec2::new(off[0], off[1]), layers: o.drawing.layers.iter().map(|l| (l.name.to_lowercase(), l)).collect() }
+        Seen {
+            d: &o.drawing,
+            m,
+            offset: Vec2::new(off[0], off[1]),
+            layers: o.drawing.layers.iter().map(|l| (l.name.to_lowercase(), l)).collect(),
+        }
     }
 
     fn layer(&self, e: &Entity) -> Option<&'a Layer> {
@@ -210,7 +215,8 @@ fn kind_named(word: &str) -> Option<&'static str> {
 }
 
 fn area_of(s: &Seen, v: &Value) -> Result<Bounds2, String> {
-    let b: [[f64; 2]; 2] = serde_json::from_value(v.clone()).map_err(|_| format!("`box` is two corners [[x0, y0], [x1, y1]] in mm, not {v}"))?;
+    let b: [[f64; 2]; 2] =
+        serde_json::from_value(v.clone()).map_err(|_| format!("`box` is two corners [[x0, y0], [x1, y1]] in mm, not {v}"))?;
     if !b.iter().flatten().all(|x| x.is_finite()) {
         return Err(format!("`box` is two corners [[x0, y0], [x1, y1]] in mm, not {v}"));
     }
@@ -280,12 +286,20 @@ impl Rule {
             let hs = names(x, "handles", "handles (the `h` of an item)")?;
             r.handles = Some(
                 hs.iter()
-                    .map(|h| cadcraft_doc::Handle::parse_hex(h).map(|h| h.0).ok_or_else(|| format!("`{h}` is not a handle (the `h` of an item, as 1A2F)")))
+                    .map(|h| {
+                        cadcraft_doc::Handle::parse_hex(h)
+                            .map(|h| h.0)
+                            .ok_or_else(|| format!("`{h}` is not a handle (the `h` of an item, as 1A2F)"))
+                    })
                     .collect::<Result<_, _>>()?,
             );
         }
         if let Some(x) = given(v, "colors") {
-            let not = || format!("`colors` is a list of colours (an index 1 to 255, \"#rrggbb\", red, yellow, green, cyan, blue, magenta, white, or \"bylayer\"), not {x}");
+            let not = || {
+                format!(
+                    "`colors` is a list of colours (an index 1 to 255, \"#rrggbb\", red, yellow, green, cyan, blue, magenta, white, or \"bylayer\"), not {x}"
+                )
+            };
             let mut c = Colors::default();
             for one in x.as_array().ok_or_else(not)? {
                 let word = match one {
@@ -298,7 +312,11 @@ impl Rule {
                     Some(k @ (Color::Index(_) | Color::True(_))) => {
                         c.drawn.insert(rgb(k).to_u32());
                     }
-                    _ => return Err(format!("`{word}` is not a colour: an index 1 to 255, \"#rrggbb\", red, yellow, green, cyan, blue, magenta, white, or \"bylayer\"")),
+                    _ => {
+                        return Err(format!(
+                            "`{word}` is not a colour: an index 1 to 255, \"#rrggbb\", red, yellow, green, cyan, blue, magenta, white, or \"bylayer\""
+                        ));
+                    }
                 }
             }
             r.colors = Some(c);
@@ -329,7 +347,8 @@ impl Rule {
             return false;
         }
         if let Some(l) = &self.linetypes
-            && !((l.by_layer && matches!(e.common.linetype.trim().to_lowercase().as_str(), "bylayer" | "")) || l.drawn.contains(&s.linetype(e)))
+            && !((l.by_layer && matches!(e.common.linetype.trim().to_lowercase().as_str(), "bylayer" | ""))
+                || l.drawn.contains(&s.linetype(e)))
         {
             return false;
         }
@@ -358,7 +377,10 @@ impl Rule {
                 return false;
             }
             let long = b.width().max(b.height());
-            if self.area.as_ref().is_some_and(|a| !a.contains(b.center())) || self.min.is_some_and(|m| long < m) || self.max.is_some_and(|m| long > m) {
+            if self.area.as_ref().is_some_and(|a| !a.contains(b.center()))
+                || self.min.is_some_and(|m| long < m)
+                || self.max.is_some_and(|m| long > m)
+            {
                 return false;
             }
         }
@@ -396,7 +418,11 @@ fn selected(s: &Seen, p: &Value) -> Result<Vec<usize>, String> {
 }
 
 fn parsed(params: &str) -> Result<Value, String> {
-    if params.trim().is_empty() { Ok(json!({})) } else { serde_json::from_str(params).map_err(|e| format!("the parameters are not JSON ({e})")) }
+    if params.trim().is_empty() {
+        Ok(json!({}))
+    } else {
+        serde_json::from_str(params).map_err(|e| format!("the parameters are not JSON ({e})"))
+    }
 }
 
 /// `counts`: what a rule (`params`, JSON; empty: everything) selects of model space, counted:
@@ -471,7 +497,9 @@ pub(crate) fn counts(o: &Opened, m: &Measured, params: &str) -> Result<Value, St
         .take(BLOCKS_LISTED)
         .map(|(name, (n, on))| {
             // What the definition draws in its own frame, as the index measures a block.
-            let own = s.d.block(name).map(|blk| blk.entities.iter().fold(Bounds2::EMPTY, |acc, e| acc.union(&entity_bounds_cached(s.d, e, 1, &mut cache))));
+            let own =
+                s.d.block(name)
+                    .map(|blk| blk.entities.iter().fold(Bounds2::EMPTY, |acc, e| acc.union(&entity_bounds_cached(s.d, e, 1, &mut cache))));
             let size = match own {
                 Some(b) if real(&b) => [hundredth(b.width() * m.mm), hundredth(b.height() * m.mm)],
                 _ => [0.0, 0.0],
@@ -479,7 +507,8 @@ pub(crate) fn counts(o: &Opened, m: &Measured, params: &str) -> Result<Value, St
             json!({"name": name, "placed": n, "size": size, "layers": on})
         })
         .collect();
-    let mut out = json!({"total": total, "kinds": kinds, "layers": layers, "colors": colors, "blocks": listed, "extents": s.box_out(&round)});
+    let mut out =
+        json!({"total": total, "kinds": kinds, "layers": layers, "colors": colors, "blocks": listed, "extents": s.box_out(&round)});
     if colors_more > 0 {
         out["colors_more"] = json!(colors_more);
     }
@@ -501,7 +530,13 @@ struct Used {
 }
 
 fn used(d: &Doc) -> Used {
-    let mut u = Used { blocks: BTreeSet::new(), layers: BTreeSet::new(), text_styles: BTreeSet::new(), dim_styles: BTreeSet::new(), every_style: false };
+    let mut u = Used {
+        blocks: BTreeSet::new(),
+        layers: BTreeSet::new(),
+        text_styles: BTreeSet::new(),
+        dim_styles: BTreeSet::new(),
+        every_style: false,
+    };
     // Blocks named and not yet gone through.
     let mut waiting: Vec<Arc<cadcraft_doc::Block>> = Vec::new();
     fn name(d: &Doc, u: &mut Used, waiting: &mut Vec<Arc<cadcraft_doc::Block>>, block: &str) {
@@ -518,6 +553,9 @@ fn used(d: &Doc) -> Used {
                 name(d, u, waiting, &i.block);
                 for a in &i.attribs {
                     u.text_styles.insert(a.text.style.to_lowercase());
+                    if let Some(ml) = &a.multiline {
+                        u.text_styles.insert(ml.mtext.style.to_lowercase());
+                    }
                     if let Some(l) = &a.props.layer {
                         u.layers.insert(l.to_lowercase());
                     }
@@ -531,6 +569,9 @@ fn used(d: &Doc) -> Used {
             }
             EntityKind::AttDef(a) => {
                 u.text_styles.insert(a.text.style.to_lowercase());
+                if let Some(ml) = &a.multiline {
+                    u.text_styles.insert(ml.mtext.style.to_lowercase());
+                }
             }
             EntityKind::Dimension(dim) => {
                 u.every_style = true;
@@ -587,9 +628,13 @@ fn purge(d: &mut Doc) {
     d.blocks.retain(|n, _| u.blocks.contains(n) || n.starts_with("*Model_Space") || n.starts_with("*Paper_Space"));
     d.layers.retain(|l| l.name == "0" || u.layers.contains(&l.name.to_lowercase()));
     d.dim_styles.retain(|st| u.dim_styles.contains(&st.name.to_lowercase()));
-    if !u.every_style {
+    // The table styles stay, and their cells name text styles: with any that has cells of its own, every text style stays.
+    if !u.every_style && d.table_styles.iter().all(|t| t.cell_styles.is_empty()) {
         let current = d.header.str("TEXTSTYLE", "Standard").to_lowercase();
-        let named: BTreeSet<String> = d.mleader_styles.iter().map(|st| st.text_style.to_lowercase()).collect();
+        // The styles that stay name text styles too: the multileader styles, and a linetype with letters or a shape in it.
+        let in_linetypes = d.linetypes.iter().flat_map(|l| l.pattern.iter()).filter_map(|e| e.style.as_ref());
+        let named: BTreeSet<String> =
+            d.mleader_styles.iter().map(|st| &st.text_style).chain(in_linetypes).map(|n| n.to_lowercase()).collect();
         d.text_styles.retain(|st| {
             let low = st.name.to_lowercase();
             low == "standard" || low == current || u.text_styles.contains(&low) || named.contains(&low)
@@ -729,7 +774,10 @@ pub(crate) fn cut(o: &Opened, m: &Measured, params: &str) -> Result<(Doc, Value)
     let extents = match (shift, real(&round)) {
         (_, false) => Value::Null,
         (Some(_), true) => {
-            json!([[hundredth(round.min.x * m.mm), hundredth(round.min.y * m.mm)], [hundredth(round.max.x * m.mm), hundredth(round.max.y * m.mm)]])
+            json!([
+                [hundredth(round.min.x * m.mm), hundredth(round.min.y * m.mm)],
+                [hundredth(round.max.x * m.mm), hundredth(round.max.y * m.mm)]
+            ])
         }
         (None, true) => s.box_out(&round),
     };
@@ -791,6 +839,9 @@ pub(crate) struct Looked {
 /// inside a block placement, what is on layer `0` takes the placement's colour and what is on a layer of its own that
 /// layer's (in the legend with `in_blocks`); only a colour set on an item inside a block stays.
 ///
+/// A colour given as `#ffffff` with index 7 (AutoCAD's white, the colour of most layers) is drawn black on the picture's
+/// white, as the viewer and a print draw it; every other colour is drawn as it is given.
+///
 /// `about`: `{width, height, extents (the box the picture's edges are at, mm), selected (the box round the items),
 /// items, color_by, legend: [{layer, color: "#rrggbb", items}]}`, the layers with the most items first. By "own", a
 /// layer's `color` is its own, with `colors` (`{"#rrggbb": n}`) when its items are drawn in others, and `off` or
@@ -802,7 +853,12 @@ pub(crate) fn look(o: &Opened, m: &Measured, params: &str, long: u32) -> Result<
     let by_layer = match given(&p, "color_by").map(|v| v.as_str().unwrap_or("")) {
         None | Some("own") => false,
         Some("layer") => true,
-        Some(_) => return Err(format!("`color_by` is \"own\" (the drawing's own colours) or \"layer\" (each layer in a colour of its own), not {}", p["color_by"])),
+        Some(_) => {
+            return Err(format!(
+                "`color_by` is \"own\" (the drawing's own colours) or \"layer\" (each layer in a colour of its own), not {}",
+                p["color_by"]
+            ));
+        }
     };
     let chosen = selected(&s, &p)?;
     let mut model = EntityStore::new();
@@ -839,7 +895,11 @@ pub(crate) fn look(o: &Opened, m: &Measured, params: &str, long: u32) -> Result<
     let mut legend: Vec<Value> = Vec::new();
     for (n, (low, items)) in order.iter().enumerate() {
         // The layer's name as the drawing spells it (an item may name a layer the table lacks).
-        let name = s.layers.get(low).map(|l| l.name.clone()).or_else(|| d.model.iter().find(|e| e.common.layer.to_lowercase() == *low).map(|e| e.common.layer.clone()));
+        let name = s
+            .layers
+            .get(low)
+            .map(|l| l.name.clone())
+            .or_else(|| d.model.iter().find(|e| e.common.layer.to_lowercase() == *low).map(|e| e.common.layer.clone()));
         let name = name.unwrap_or_else(|| low.clone());
         if by_layer {
             let color = layer_color(n);
