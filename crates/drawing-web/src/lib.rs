@@ -22,6 +22,7 @@ use wasm_bindgen::prelude::*;
 mod build;
 mod clean;
 mod convert;
+mod standard;
 pub use convert::{dwg_of, dxf_of};
 
 fn err(e: impl std::fmt::Display) -> JsError {

@@ -944,8 +944,83 @@ fn rooms(labels: &[Label]) -> Vec<Value> {
 }
 
 // ---------------------------------------------------------------------------------------------- the answer
-/// `build` (JSON params: k?): see the module.
+/// `build` (JSON params: k?, single?, drawn?): see the module. A drawing that carries its build marks (the layers
+/// `X-BUILD-...` that [`crate::standard`] lays over a clean plan) is built from them alone, as they stand now: what a
+/// person moved, added or deleted there is what is answered.
 pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
+    let marked = o.drawing.model.iter().any(|e| e.common.layer.to_uppercase().starts_with("X-BUILD"));
+    if marked { from_marks(o, params) } else { computed(o, params) }
+}
+
+/// What the build marks of a drawing say, in `build`'s own words; its rooms from its labels, as ever.
+fn from_marks(o: &Opened, params: &str) -> Result<Value, String> {
+    use crate::standard::{COLUMN, DOOR, GLASS, ROUND_MARK, WALL, WINDOW};
+    let mut out = computed(o, params)?;
+    let k = serde_json::from_str::<Value>(params).ok().and_then(|p| p.get("k").and_then(Value::as_f64)).filter(|x| x.is_finite() && *x > 0.0).unwrap_or(1.0);
+    let unit = o.summary().get("mm").and_then(Value::as_f64).filter(|m| m.is_finite() && *m > 0.0).unwrap_or(1.0);
+    let off = o.offset();
+    let real = |x: f64, y: f64| P((x * unit - off[0]) * k, (y * unit - off[1]) * k);
+    let long = |l: f64| l * unit * k;
+    let (mut walls, mut curtain, mut doors, mut windows, mut columns): (Vec<Value>, Vec<Value>, Vec<Value>, Vec<Value>, Vec<Value>) = Default::default();
+    for e in o.drawing.model.iter() {
+        let layer = e.common.layer.to_uppercase();
+        match &e.kind {
+            cadcraft_doc::EntityKind::LwPolyline(pl) if layer == WALL || layer == GLASS => {
+                for w in pl.vertices.windows(2) {
+                    let (a, b) = (real(w[0].p.x, w[0].p.y), real(w[1].p.x, w[1].p.y));
+                    let wide = if pl.const_width > 0.0 { pl.const_width } else { w[0].start_width };
+                    let mut row = json!({"a": pt(a), "b": pt(b)});
+                    if w[0].bulge != 0.0 {
+                        row["arc"] = json!(((4.0 * w[0].bulge.atan()).to_degrees() * 100.0).round() / 100.0);
+                    }
+                    if layer == WALL {
+                        row["thickness"] = json!(mm(long(wide)));
+                        walls.push(row);
+                    } else {
+                        curtain.push(row);
+                    }
+                }
+            }
+            cadcraft_doc::EntityKind::Insert(i) if layer == DOOR || layer == WINDOW => {
+                let width = long(i.scale.x.abs());
+                let (u, a) = (P(i.rotation.cos(), i.rotation.sin()), real(i.insert.x, i.insert.y));
+                let b = P(a.0 + u.0 * width, a.1 + u.1 * width);
+                let mid = P((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0);
+                let mut row = json!({"at": pt(mid), "width": mm(width), "a": pt(a), "b": pt(b)});
+                if layer == DOOR {
+                    // The leaf's tip: off its hinge, on the side the mark is turned to.
+                    let side = if i.scale.y < 0.0 { -1.0 } else { 1.0 };
+                    row["toward"] = pt(P(a.0 - u.1 * width * side, a.1 + u.0 * width * side));
+                    doors.push(row);
+                } else {
+                    windows.push(row);
+                }
+            }
+            cadcraft_doc::EntityKind::Insert(i) if layer == COLUMN => {
+                let at = real(i.insert.x, i.insert.y);
+                if i.block.eq_ignore_ascii_case(ROUND_MARK) {
+                    columns.push(json!({"at": pt(at), "round": true, "width": mm(long(i.scale.x.abs()))}));
+                } else {
+                    let angle = (i.rotation.to_degrees().rem_euclid(180.0) * 10.0).round() / 10.0;
+                    columns.push(json!({"at": pt(at), "width": mm(long(i.scale.x.abs())), "depth": mm(long(i.scale.y.abs())), "angle": angle}));
+                }
+            }
+            _ => {}
+        }
+    }
+    let layers = out["left"]["layers"].take();
+    out["walls"] = json!(walls);
+    out["curtain"] = json!(curtain);
+    out["doors"] = json!(doors);
+    out["windows"] = json!(windows);
+    out["columns"] = json!(columns);
+    out["left"] = json!({"layers": layers});
+    out["from_marks"] = json!(true);
+    Ok(out)
+}
+
+/// What a clean plan draws, worked out from its lines and blocks.
+pub(crate) fn computed(o: &Opened, params: &str) -> Result<Value, String> {
     let p: Value = if params.trim().is_empty() { json!({}) } else { serde_json::from_str(params).map_err(|e| format!("the parameters are not JSON: {e}"))? };
     if let Some(key) = p.as_object().and_then(|m| m.keys().find(|key| !["k", "drawn", "single"].contains(&key.as_str()))) {
         return Err(format!("unknown parameter `{key}`; build takes: k, drawn, single"));
@@ -1282,8 +1357,8 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
         }
         for (at, width, door, items) in &w.openings {
             if *door {
-                let mut row = json!({"at": pt(*at), "width": mm(*width), "wall": n});
-                let _ = &row;
+                let ends = (P(at.0 - u.0 * width / 2.0, at.1 - u.1 * width / 2.0), P(at.0 + u.0 * width / 2.0, at.1 + u.1 * width / 2.0));
+                let mut row = json!({"at": pt(*at), "width": mm(*width), "wall": n, "a": pt(ends.0), "b": pt(ends.1)});
                 if let Some(Some(tip)) = items.first().and_then(|i| tips.get(*i)) {
                     row["toward"] = pt(*tip);
                     doors_out.push(row);
@@ -1303,7 +1378,8 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
                 }
                 doors_out.push(row);
             } else if !items.is_empty() || *width < GLASS_WALL {
-                windows_out.push(json!({"at": pt(*at), "width": mm(*width), "wall": n}));
+                let ends = (P(at.0 - u.0 * width / 2.0, at.1 - u.1 * width / 2.0), P(at.0 + u.0 * width / 2.0, at.1 + u.1 * width / 2.0));
+                windows_out.push(json!({"at": pt(*at), "width": mm(*width), "wall": n, "a": pt(ends.0), "b": pt(ends.1)}));
             }
         }
     }
@@ -1493,6 +1569,19 @@ mod tests {
         let k = std::env::var("BUILD_K").unwrap_or_default();
         let out = build(&o, &if k.is_empty() { String::new() } else { format!("{{\"k\": {k}, \"drawn\": true}}") }).expect("build");
         std::fs::write(format!("{path}.build.json"), serde_json::to_string(&out).expect("json")).expect("write");
+        // The standard drawing, and what it is read back as.
+        let kp = if k.is_empty() { String::new() } else { format!("{{\"k\": {k}}}") };
+        let (bytes, about) = crate::standard::standard(&o, &kp, "").expect("standard");
+        let marked = format!("{path}.standard.dwg");
+        std::fs::write(&marked, &bytes).expect("write");
+        let (pack, _) = cadcraft_index::index(&bytes, &marked).expect("index");
+        let back = build(&Opened::unpack(&pack).expect("open"), &kp).expect("build from marks");
+        println!("standard: {about:.0}");
+        for key in ["walls", "doors", "windows", "curtain", "columns", "rooms"] {
+            println!("  back {key}: {} (was {})", back[key].as_array().map_or(0, Vec::len), out[key].as_array().map_or(0, Vec::len));
+        }
+        println!("  first wall {} / back {}", out["walls"][0], back["walls"][0]);
+        println!("  first door {} / back {}", out["doors"][0], back["doors"][0]);
         for key in ["walls", "doors", "windows", "curtain", "columns", "rooms"] {
             println!("{key}: {}", out[key].as_array().map_or(0, Vec::len));
         }
