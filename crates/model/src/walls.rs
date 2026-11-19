@@ -377,7 +377,7 @@ fn end_geometry(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> WallE
         }
     }
     if n == 3 && through && next.id == prev.id {
-        if let Some(cut) = join::end_cut(m, id, at_end, next.id, None, false, false, true) {
+        if let Some(cut) = join::end_cut(m, id, at_end, next.id, None, false, false, tee_cleans(m, id, at_end, next.id)) {
             return WallEnd::stepped(cut, at_end);
         }
     }
@@ -439,6 +439,25 @@ pub fn end_join(m: &Model, id: Id, at_end: bool) -> Option<(Id, bool)> {
     let (arms, through) = arms(m, id, at_end, None);
     let other = arms.iter().find(|a| a.id != id)?;
     (arms.len() == 2 && !through).then_some((other.id, other.at_end))
+}
+
+/// Whether the layers of wall `ender`'s end and of wall `through`, on whose side it ends, clean up: not where the Wall
+/// Joins tool set that join to Don't Clean Join.
+fn tee_cleans(m: &Model, ender: Id, at_end: bool, through: Id) -> bool {
+    m.tee_join((m.guid(ender), at_end), m.guid(through)).is_none_or(|j| j.display != crate::model::JoinDisplay::DontClean)
+}
+
+/// The wall on whose side wall `id`'s end (`at_end`, else its start) ends, the two of them alone there: a T join, which
+/// the Wall Joins tool shows and sets how plans draw.
+pub fn ends_on(m: &Model, id: Id, at_end: bool) -> Option<Id> {
+    let (arms, through) = arms(m, id, at_end, None);
+    let other = arms.iter().find(|a| a.id != id)?.id;
+    (through && arms.len() == 3 && arms.iter().filter(|a| a.id == other).count() == 2).then_some(other)
+}
+
+/// The wall ends that end on the side of wall `id`: each a wall and which of its ends (its end, else its start).
+pub fn ending_on(m: &Model, id: Id) -> Vec<(Id, bool)> {
+    tees(m, id, None).into_iter().filter(|(other, at_end)| ends_on(m, *other, *at_end) == Some(id)).collect()
 }
 
 /// The straight walls that end on the side of the straight wall `id`, each with which of its ends does (its end, else its
@@ -614,8 +633,11 @@ pub fn layer_geometry(m: &Model, id: Id, index: Option<&Index>) -> LayerGeometry
     let u = (w.end - w.start).unit();
     let along = |q: P2| if w.arc == 0.0 { (q - w.start).dot(u) } else { axis.project(q).0 };
     // Each layer's gaps, where walls ending on this one's side pass through it.
-    let broken: Vec<Vec<Option<join::Gap>>> =
-        tees(m, id, index).into_iter().filter_map(|(other, at_end)| join::gaps(m, id, other, at_end)).collect();
+    let broken: Vec<Vec<Option<join::Gap>>> = tees(m, id, index)
+        .into_iter()
+        .filter(|(other, at_end)| tee_cleans(m, *other, *at_end, id))
+        .filter_map(|(other, at_end)| join::gaps(m, id, other, at_end))
+        .collect();
     let gaps_of = |k: usize| -> Vec<join::Gap> { broken.iter().filter_map(|g| g.get(k).copied().flatten()).collect() };
     // A straight line from `a` to `b` less the gaps: the stretches left, in order.
     let left = |a: P2, b: P2, gaps: &[join::Gap]| -> Vec<(P2, P2)> {
@@ -1156,6 +1178,7 @@ fn tongues(m: &Model, id: Id, index: Option<&Index>) -> Vec<(Vec<P2>, f64, f64)>
     let back = 2.0 * m.thickness(w) + 1.0;
     tees(m, id, index)
         .into_iter()
+        .filter(|(other, at_end)| tee_cleans(m, *other, *at_end, id))
         .filter_map(|(other, at_end)| {
             let o = m.wall(other)?;
             let end = end_geometry(m, other, at_end, index);

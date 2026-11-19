@@ -1805,7 +1805,7 @@ other_files(
          squared); `next` and `previous` step to the other order, as the tool's buttons; none given keeps the order it has \
          (the wall made first, until one is set). `display` is how plans show it: cleaned up, the wall ends butting against one \
          another, or as the view says. `reset` forgets what was set, back to the default Butt. A wall ending on another's side \
-         has one configuration only and is refused here. Whether an end joins at all is the wall's `join_start` and `join_end` \
+         (a T join) is a Butt with the wall run into through: only its `display` is set, its `ends` the ending wall's and `side`. Whether an end joins at all is the wall's `join_start` and `join_end` \
          (`modify`), Revit's Allow Join and Disallow Join. Returns {walls, ends, kind, through, display}",
         wall_join,
     ),
@@ -13064,12 +13064,7 @@ fn wall_join(s: &mut Session, p: &Value) -> R {
     let ends = |w: &crate::model::Wall| [(w.start, false), (w.end, true)];
     let met = ends(wa).into_iter().find_map(|(pa, ea)| ends(wb).into_iter().find(|(pb, _)| pa.dist(*pb) <= TOL).map(|(_, eb)| (ea, eb)));
     let Some((ea, eb)) = met.filter(|_| a != b) else {
-        return Err(bad(
-            c,
-            format!(
-                "walls {a} and {b} do not meet end to end; a wall ending on another's side joins it one way only, which is not set here"
-            ),
-        ));
+        return tee_join(s, p, a, b);
     };
     let (ga, gb) = (m.guid(a), m.guid(b));
     let key = WallJoin::key((ga, ea), (gb, eb));
@@ -13118,6 +13113,59 @@ fn wall_join(s: &mut Session, p: &Value) -> R {
         "ends": [if ea { "end" } else { "start" }, if eb { "end" } else { "start" }],
         "kind": join.kind.name(),
         "through": if through == ga { a } else { b },
+        "display": join.display.name(),
+    }))
+}
+
+/// `wall_join` for a wall that ends on another's side (a T join): it is a Butt, the wall run into going through, and only
+/// how plans show it is set.
+fn tee_join(s: &mut Session, p: &Value, a: Id, b: Id) -> R {
+    use crate::model::{JoinDisplay, JoinKind, WallJoin};
+    let c = "wall_join";
+    let m = &s.model;
+    let tee = [(a, b), (b, a)].into_iter().find_map(|(ender, through)| {
+        [false, true].into_iter().find(|e| walls::ends_on(m, ender, *e) == Some(through)).map(|e| (ender, e, through))
+    });
+    let Some((ender, at_end, through)) = tee else {
+        return Err(bad(c, format!("walls {a} and {b} do not join: neither meets the other's end nor ends on its side")));
+    };
+    if string(c, p, "kind")?.is_some_and(|k| JoinKind::from_name(&k) != Some(JoinKind::Butt))
+        || flag(c, p, "next")?
+        || flag(c, p, "previous")?
+        || p.get("through").is_some_and(|v| !v.is_null() && v.as_u64() != Some(through))
+    {
+        return Err(bad(
+            c,
+            format!(
+                "wall {ender} ends on the side of wall {through}: a T join is a butt with wall {through} through; only its `display` is set"
+            ),
+        ));
+    }
+    let key = WallJoin::key((m.guid(ender), at_end), (m.guid(through), false));
+    let mut join = m.tee_join((m.guid(ender), at_end), m.guid(through)).cloned().unwrap_or(WallJoin {
+        ends: key,
+        kind: JoinKind::Butt,
+        first: None,
+        display: JoinDisplay::ViewSetting,
+    });
+    if let Some(name) = string(c, p, "display")? {
+        join.display =
+            JoinDisplay::from_name(&name).ok_or_else(|| bad(c, format!("`display` is clean, dont-clean or view-setting, not `{name}`")))?;
+    }
+    let reset = flag(c, p, "reset")?;
+    let m = s.model_mut();
+    m.wall_joins.retain(|j| j.ends != key);
+    if reset {
+        join.display = JoinDisplay::ViewSetting;
+    } else {
+        m.wall_joins.push(join.clone());
+        m.wall_joins.sort_by(|x, y| x.ends.cmp(&y.ends));
+    }
+    Ok(json!({
+        "walls": [ender, through],
+        "ends": [if at_end { "end" } else { "start" }, "side"],
+        "kind": "butt",
+        "through": through,
         "display": join.display.name(),
     }))
 }

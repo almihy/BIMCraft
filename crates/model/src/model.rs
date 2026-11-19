@@ -9223,6 +9223,13 @@ impl Model {
         self.wall_joins.iter().find(|j| j.ends == key)
     }
 
+    /// What the Wall Joins tool set for the T join of a wall's end (`ender`: its GUID and whether its end, else its start)
+    /// on the side of wall `through`. Kept as a join of that end and the through wall's start, which stands for its side:
+    /// the one end cannot both end on a wall's side and meet its start.
+    pub fn tee_join(&self, ender: (Guid, bool), through: Guid) -> Option<&WallJoin> {
+        self.wall_join(ender, (through, false))
+    }
+
     /// Whether a kept join names a wall that is gone.
     pub fn has_stale_wall_joins(&self) -> bool {
         self.wall_joins.iter().any(|j| j.ends.iter().any(|(g, _)| !matches!(self.elements.get(*g), Some(Element::Wall(_)))))

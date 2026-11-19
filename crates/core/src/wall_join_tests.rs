@@ -168,8 +168,8 @@ fn the_wall_joins_tool_refuses_what_is_no_join_of_two_ends() {
     let (mut s, a, b) = corner();
     let t = run(&mut s, "wall", json!({"points": [[2000, 0], [2000, 3000]]}))["ids"][0].as_u64().unwrap();
     for (p, why) in [
-        (json!({"walls": [a, t]}), "do not meet end to end"),
-        (json!({"walls": [a, a]}), "do not meet end to end"),
+        (json!({"walls": [a, t], "kind": "mitre"}), "a T join is a butt"),
+        (json!({"walls": [a, a]}), "do not join"),
         (json!({"walls": [a]}), "`walls` is the two walls that meet"),
         (json!({"walls": [a, b], "kind": "lap"}), "`kind` is butt, mitre or square-off"),
         (json!({"walls": [a, b], "through": t}), "`through` is one of the two walls"),
@@ -351,6 +351,40 @@ fn move_with_disjoin_leaves_what_the_wall_was_joined_to_as_it_is() {
     assert_eq!(wall(&s, b), (P2(0.0, 0.0), P2(0.0, 4000.0), true));
     run(&mut s, "undo", json!({}));
     assert_eq!(wall(&s, a), (P2(4000.0, 0.0), P2(0.0, 0.0), true));
+}
+
+#[test]
+fn a_t_join_set_not_to_clean_leaves_both_walls_layers_whole_and_draws_the_line_they_butt_on() {
+    let (mut s, south, part) = room("Block");
+    let set = run(&mut s, "wall_join", json!({"walls": [south, part], "display": "dont-clean"}));
+    assert_eq!(
+        (set["walls"].clone(), set["ends"].clone(), set["through"].clone()),
+        (json!([part, south]), json!(["start", "side"]), json!(south))
+    );
+    // The partition's layers all stop on the wall's face, and the wall's plaster runs on in one piece.
+    let p = walls::layer_geometry(&s.model, part, None);
+    let lowest = |k: usize| p.bands(k).iter().map(|r| span(r).0).fold(f64::INFINITY, f64::min);
+    assert_eq!([lowest(0), lowest(1), lowest(2)], [157.5, 157.5, 157.5]);
+    let g = walls::layer_geometry(&s.model, south, None);
+    assert_eq!([0, 1, 2, 3].map(|k| g.bands(k).len()), [1, 1, 1, 1]);
+    assert_eq!(p.butts().count(), 1, "the line the partition stops on");
+    let whole = crate::geom::area(&walls::outline(&s.model, south)).abs();
+    let area = walls::prisms(&s.model, south, false).iter().map(|q| crate::geom::area(&q.ring).abs()).sum::<f64>();
+    assert!((area - whole).abs() < 1.0, "the wall's solid is whole: {area} of {whole}");
+    // Its kind and its order are not for setting: a T join is a butt, the wall run into through.
+    for wrong in [json!({"kind": "mitre"}), json!({"next": true}), json!({"through": part})] {
+        let mut q = wrong.clone();
+        q["walls"] = json!([south, part]);
+        assert!(s.execute("wall_join", &q).is_err_and(|e| e.to_string().contains("T join")), "{wrong}");
+    }
+    // Clean Join, or reset: as it was.
+    run(&mut s, "wall_join", json!({"walls": [part, south], "reset": true}));
+    assert!(s.model.wall_joins.is_empty());
+    let p = walls::layer_geometry(&s.model, part, None);
+    assert_eq!(p.bands(1).iter().map(|r| span(r).0).fold(f64::INFINITY, f64::min), 142.5);
+    // Two walls that do not touch have no join to set.
+    let far = run(&mut s, "wall", json!({"points": [[9000, 9000], [9000, 12000]], "type": "Part"}))["ids"][0].as_u64().unwrap();
+    assert!(s.execute("wall_join", &json!({"walls": [south, far], "display": "clean"})).is_err());
 }
 
 /// The three walls drawn in Revit 2025 on 19 November (its picture is with the walls design), for laying beside it: one

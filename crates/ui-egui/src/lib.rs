@@ -5398,7 +5398,10 @@ impl BimApp {
         use bimcraft_core::model::{JoinDisplay, JoinKind};
         let m = Arc::clone(&self.session.model);
         let Some((ea, eb)) = join_ends(&m, a, b) else {
-            self.tool = Tool::WallJoins(None);
+            match tee_of(&m, a, b) {
+                Some((ender, at_end, through)) => self.tee_join_options(ui, ender, at_end, through),
+                None => self.tool = Tool::WallJoins(None),
+            }
             return;
         };
         let kept = m.wall_join((m.guid(a), ea), (m.guid(b), eb));
@@ -5435,6 +5438,42 @@ impl BimApp {
             if step {
                 self.run("modify", json!({"id": b, if eb { "join_end" } else { "join_start" }: false}));
             }
+            self.tool = Tool::WallJoins(None);
+            return;
+        }
+        if let Some(p) = run {
+            self.run("wall_join", p);
+        }
+    }
+
+    /// The Wall Joins tool's options for a T join, wall `ender`'s end on the side of wall `through`: as Revit's, a Butt with
+    /// nothing else to choose and no order to step through, how plans show it, and Disallow Join for the end.
+    fn tee_join_options(&mut self, ui: &mut Ui, ender: Id, at_end: bool, through: Id) {
+        use bimcraft_core::model::{JoinDisplay, JoinKind};
+        let m = Arc::clone(&self.session.model);
+        let display = m.tee_join((m.guid(ender), at_end), m.guid(through)).map_or(JoinDisplay::ViewSetting, |j| j.display);
+        ui.add_enabled_ui(false, |ui| {
+            for k in JoinKind::ALL {
+                let _ = ui.radio(k == JoinKind::Butt, t(k.label()));
+            }
+            ui.separator();
+            let _ = ui.button(t("Previous"));
+            let _ = ui.button(t("Next"));
+        });
+        ui.separator();
+        let l = ui.label(t("Display:"));
+        let mut run: Option<Value> = None;
+        let c = icons::combo("wall-join-display").selected_text(t(display.label())).width(150.0).show_ui(ui, |ui| {
+            for d in JoinDisplay::ALL {
+                if ui.selectable_label(display == d, t(d.label())).clicked() && display != d {
+                    run = Some(json!({"walls": [ender, through], "display": d.name()}));
+                }
+            }
+        });
+        c.response.labelled_by(l.id);
+        ui.separator();
+        if ui.button(t("Disallow Join")).clicked() {
+            self.run("modify", json!({"id": ender, if at_end { "join_end" } else { "join_start" }: false}));
             self.tool = Tool::WallJoins(None);
             return;
         }
@@ -6450,21 +6489,41 @@ pub(crate) fn join_ends(m: &Model, a: Id, b: Id) -> Option<(bool, bool)> {
     ends(wa).into_iter().find_map(|(pa, ea)| ends(wb).into_iter().find(|(pb, _)| pa.dist(*pb) <= 0.5).map(|(_, eb)| (ea, eb)))
 }
 
-/// Where walls `a` and `b` join end to end.
-pub(crate) fn join_point(m: &Model, a: Id, b: Id) -> Option<P2> {
-    let (ea, _) = join_ends(m, a, b)?;
-    m.wall(a).map(|w| if ea { w.end } else { w.start })
+/// The T join of walls `a` and `b`: the one that ends on the other's side, which of its ends does, and the other.
+pub(crate) fn tee_of(m: &Model, a: Id, b: Id) -> Option<(Id, bool, Id)> {
+    [(a, b), (b, a)].into_iter().find_map(|(ender, through)| {
+        [false, true].into_iter().find(|e| bimcraft_core::walls::ends_on(m, ender, *e) == Some(through)).map(|e| (ender, e, through))
+    })
 }
 
-/// The join of two wall ends nearest `at` among wall `id`'s: its two walls and where they meet, the end of `id` nearer
-/// the point, when that end joins one other wall end.
+/// Where walls `a` and `b` join: end to end, or the one's end on the other's side.
+pub(crate) fn join_point(m: &Model, a: Id, b: Id) -> Option<P2> {
+    let end = |id: Id, at_end: bool| m.wall(id).map(|w| if at_end { w.end } else { w.start });
+    match join_ends(m, a, b) {
+        Some((ea, _)) => end(a, ea),
+        None => tee_of(m, a, b).and_then(|(ender, at_end, _)| end(ender, at_end)),
+    }
+}
+
+/// The join nearest `at` among wall `id`'s: its two walls and where they meet. The end of `id` nearer the point, when
+/// that end joins one other wall end or ends on another wall's side; else where another wall ends on the side of `id`.
 pub(crate) fn join_near(m: &Model, id: Id, at: P2) -> Option<(Id, Id, P2)> {
+    use bimcraft_core::walls;
     let w = m.wall(id)?;
+    // Within reach of the join: no farther along the wall than a few of its thicknesses.
+    let reach = 4.0 * m.thickness(w).max(100.0);
     let at_end = w.end.dist(at) < w.start.dist(at);
     let node = if at_end { w.end } else { w.start };
-    // Within reach of the join: no farther along the wall than a few of its thicknesses.
-    if node.dist(at) > 4.0 * m.thickness(w).max(100.0) {
-        return None;
+    if node.dist(at) <= reach {
+        let other = walls::end_join(m, id, at_end).map(|(other, _)| other).or_else(|| walls::ends_on(m, id, at_end));
+        if let Some(other) = other {
+            return Some((id, other, node));
+        }
     }
-    bimcraft_core::walls::end_join(m, id, at_end).map(|(other, _)| (id, other, node))
+    walls::ending_on(m, id)
+        .into_iter()
+        .filter_map(|(other, e)| m.wall(other).map(|o| (other, if e { o.end } else { o.start })))
+        .filter(|(_, node)| node.dist(at) <= reach)
+        .min_by(|x, y| x.1.dist(at).total_cmp(&y.1.dist(at)))
+        .map(|(other, node)| (other, id, node))
 }

@@ -88,3 +88,40 @@ fn disallow_join_on_a_walls_end_grip_is_that_ends_alone() {
     choose_item(&mut h, "Allow Join");
     assert!(h.state().session.model.wall(south).is_some_and(|w| w.join_end));
 }
+
+#[test]
+fn the_wall_joins_tool_picks_a_t_join_from_either_wall_and_sets_only_how_it_shows() {
+    // A wall up from the middle of the south wall: its start ends on the south wall's side.
+    let mut h = app(&format!(
+        "{BOX}
+wall {{\"points\": [[4000, 0], [4000, 3000]]}}"
+    ));
+    let south = ids(&h, "wall")[0];
+    let stem = *ids(&h, "wall").last().unwrap();
+    topmost(&mut h, "Modify");
+    press(&mut h, "Wall Joins");
+    // A click on the wall that ends there, near that end.
+    click(&mut h, P2(4000.0, 400.0));
+    assert!(matches!(h.state().tool, Tool::WallJoins(Some(j)) if j == (stem, south)), "{:?}", h.state().tool);
+    // A T join is a butt, the wall run into through: nothing else to choose and no order to step.
+    for label in ["Miter", "Square off", "Previous", "Next"] {
+        assert!(h.get_by_label(label).accesskit_node().is_disabled(), "{label}");
+    }
+    key(&mut h, Key::Escape);
+    topmost(&mut h, "Modify");
+    press(&mut h, "Wall Joins");
+    // A click on the wall run into, beside where the other ends on it: the same join.
+    click(&mut h, P2(4300.0, 0.0));
+    assert!(matches!(h.state().tool, Tool::WallJoins(Some(j)) if j == (stem, south)), "{:?}", h.state().tool);
+    // How it shows is kept with the model.
+    pick(&mut h, Role::ComboBox, "Display:");
+    press(&mut h, "Don't Clean Join");
+    let m = &h.state().session.model;
+    assert_eq!(m.tee_join((m.guid(stem), false), m.guid(south)).map(|j| j.display), Some(JoinDisplay::DontClean));
+    // Disallow Join frees the end that ends there, and only it.
+    press(&mut h, "Disallow Join");
+    let m = &h.state().session.model;
+    assert!(!m.wall(stem).unwrap().join_start && m.wall(stem).unwrap().join_end);
+    assert!(m.wall(south).unwrap().join_start && m.wall(south).unwrap().join_end);
+    assert!(matches!(h.state().tool, Tool::WallJoins(None)));
+}

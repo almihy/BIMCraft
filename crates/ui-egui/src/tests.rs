@@ -6782,6 +6782,7 @@ fn the_massing_tab_makes_floors_walls_a_floor_and_a_roof_from_the_selected_mass(
 }
 
 mod align;
+mod arabic;
 mod autosave;
 mod browser;
 mod cad;
@@ -6812,7 +6813,6 @@ mod images;
 mod inspector;
 mod interface;
 mod korean;
-mod arabic;
 mod light_canvas;
 mod lines;
 mod lineweights;

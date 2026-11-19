@@ -14,11 +14,7 @@ fn laid_out(h: &mut Harness<'_, BimApp>, text: &str, wrap: f32) -> Vec<Vec<(char
         job.wrap.max_width = wrap;
         f.layout_job(job)
     });
-    galley
-        .rows
-        .iter()
-        .map(|r| r.glyphs.iter().map(|g| (g.chr, g.pos.x + r.pos.x, g.max_x() + r.pos.x)).collect())
-        .collect()
+    galley.rows.iter().map(|r| r.glyphs.iter().map(|g| (g.chr, g.pos.x + r.pos.x, g.max_x() + r.pos.x)).collect()).collect()
 }
 
 /// The glyphs of `word`, found at its place in `text`, of a row laid out from `text`.
@@ -121,4 +117,3 @@ fn english_alone_is_laid_out_as_before() {
     let row = &laid_out(&mut h, text, f32::INFINITY)[0];
     assert!(reads_left_to_right(row));
 }
-
