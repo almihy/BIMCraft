@@ -479,7 +479,8 @@ impl<'a> Scene<'a> {
                     // Within reach of its body, a thickness past either end: where a corner carries it on.
                     let at_it =
                         (int - slack..=ext + slack).contains(&across) && (-thick - slack..=a.length() + thick + slack).contains(&along);
-                    if faces && faced < MAX_OUTLINES && a.centre().is_none() && at_it {
+                    // A curtain wall has no faces: it snaps by its line and its ends.
+                    if faces && faced < MAX_OUTLINES && a.centre().is_none() && at_it && !crate::curtain::is_curtain(m, w) {
                         faced += 1;
                         let ring = crate::walls::outline(m, id);
                         let mut edges: Vec<(P2, P2)> = geom::ring_edges(&ring).collect();

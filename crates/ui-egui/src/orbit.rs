@@ -22,7 +22,7 @@ use bimcraft_core::dims3d;
 use bimcraft_core::geom::{self, P2};
 use bimcraft_core::graphics::{Look, VisualStyle};
 use bimcraft_core::model::{Dimension3D, Id, Model, Ref3, TOL, ViewCamera};
-use bimcraft_core::render::{self, Rgb};
+use bimcraft_core::render::{self, Rgb, curtain_grid};
 use bimcraft_core::snap::{self, Found, Kind, Reach, Snaps};
 use bimcraft_core::view3d::gpu::{Hit, Mesh};
 use bimcraft_core::view3d::{
@@ -1138,6 +1138,7 @@ impl BimApp {
         if response.drag_started()
             && o.grip.is_none()
             && o.boxing.is_none()
+            && !self.canvas.controls.pressed()
             && !held
             && o.lift.is_none()
             && let Some(origin) = ui.input(|i| i.pointer.press_origin())
@@ -1280,8 +1281,31 @@ impl BimApp {
                     && !picking
             })
             .filter(|_| lit_dim.is_none())
-            .and_then(|at| pick(&o.picker, at))
-            .map(|h| h.id);
+            .and_then(|at| Some((at, pick(&o.picker, at)?.id)));
+        // The place on a curtain wall the picture shows at a point, and the hand-made grid line that runs there.
+        let place_at = |picker: &Option<Picker>, at: Pos2| {
+            let s = surface(picker, &cam, at)?;
+            curtain_grid::place_of(&model, curtain_grid::wall_of(&model, s.id)?, s.at)
+        };
+        let line_at = |picker: &Option<Picker>, at: Pos2| {
+            let marks = curtain_grid::marks(&model, place_at(picker, at)?.wall);
+            let project = |q: P3| {
+                let (x, y, _) = cam.project(q);
+                (x, y)
+            };
+            curtain_grid::line_near(&marks, &project, px(at), f64::from(PICK) * f64::from(ppp))?.line
+        };
+        // What a click there may mean, in Tab's order, as in a plan: a curtain wall before its grid line, its panel or its
+        // mullion.
+        let chain_at =
+            |picker: &Option<Picker>, at: Pos2, found: Id| crate::curtain::tools::chain(&model, &[found], line_at(picker, at), true);
+        let under = match hovered {
+            Some((at, id)) if modify => chain_at(&o.picker, at, id),
+            _ => Vec::new(),
+        };
+        let stepped = crate::curtain::tools::tab_through(&mut self.canvas, &mut self.tab_cycle, &mut self.flow, ui, hover.is_some(), under);
+        let hovered = if modify { stepped } else { hovered.map(|(_, id)| id) };
+        self.canvas.hovered = hovered;
         // The floor or roof being shaped is drawn as it is, not in the selection's colour: edit mode's marks are what's lit.
         let tints: Vec<(Id, Rgb)> = selection
             .iter()
@@ -1636,6 +1660,17 @@ impl BimApp {
         let clicked = click
             .filter(|_| sketch_z.is_none() && !picking)
             .map(|at| dim_at(at).filter(|_| modify).or_else(|| pick(&o.picker, at).map(|h| h.id)));
+        // Of a curtain wall, what Tab stepped to: the wall first.
+        let clicked = match (clicked, click) {
+            (Some(Some(id)), Some(at)) if modify && dim_at(at).is_none() => {
+                let chain = chain_at(&o.picker, at, id);
+                Some(if chain == self.canvas.under { stepped } else { chain.first().copied() })
+            }
+            (found, _) => found,
+        };
+        let curtain_tool = matches!(self.tool, Tool::CurtainGrid | Tool::Mullion | Tool::GridSegments(_));
+        let curtain_hover = hover.filter(|_| pointing && o.drag.is_none()).map(|at| (at, place_at(&o.picker, at)));
+        let curtain_click = click.filter(|_| sketch_z.is_none() && !picking).map(|at| (at, place_at(&o.picker, at)));
         let dim_click = click.filter(|_| dimming).map(|at| (px(at), dim_pick(at)));
         // The face of what's clicked, as paint names the faces of an element.
         let face = click.and_then(|at| pick(&o.picker, at).map(|h| h.face).filter(|f| !f.is_empty()));
@@ -1651,6 +1686,8 @@ impl BimApp {
                 None => self.status = Status { text: self.needs_face(), error: true },
             },
             Some(_) if dimming => {}
+            // The curtain tools' clicks are `curtain_over`'s.
+            Some(_) if curtain_tool => {}
             Some(_) => {
                 self.status =
                     Status { text: crate::lang::t("this tool works in plan views: open one from the Project Browser").into(), error: true }
@@ -1707,6 +1744,18 @@ impl BimApp {
                 let aimed = aim(at);
                 self.work_plane_pick(aimed);
             }
+        }
+        if sketch_z.is_none() {
+            let over = crate::curtain::tools::Over {
+                rect,
+                response: &response,
+                screen: &screen,
+                hover: curtain_hover,
+                click: curtain_click,
+                plan: false,
+                outline: true,
+            };
+            self.curtain_over(ui, &p, &over);
         }
         // A right button let go after a flight was the flight's, not a click for the menu.
         if !flew {

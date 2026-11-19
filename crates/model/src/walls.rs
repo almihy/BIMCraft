@@ -252,12 +252,13 @@ fn arms(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> (Vec<Arm>, bo
     let mut arms = vec![arm(m, id, w, at_end, true)];
     let mut through = false;
     // An end that refuses to join meets nothing: its own square end is its whole cap.
-    if !w.joins(at_end) {
+    // A curtain wall joins nothing, and nothing joins it: its panels and mullions end where its line does.
+    if !w.joins(at_end) || crate::curtain::is_curtain(m, w) {
         return (arms, false);
     }
     // An end that refuses to join is no candidate for anyone either, nor a wall that refuses altogether for one ending on
     // its side: neither is cut to the other.
-    let joins = |o: &Wall, end: Option<bool>| end.map_or(o.join, |e| o.joins(e)) && stacked(m, w, o);
+    let joins = |o: &Wall, end: Option<bool>| end.map_or(o.join, |e| o.joins(e)) && !crate::curtain::is_curtain(m, o) && stacked(m, w, o);
     let candidates: Box<dyn Iterator<Item = (Id, &Wall)> + '_> = match index {
         Some(index) => Box::new(index.neighbours_at(id, node).into_iter().filter_map(|id| Some((id, m.wall(id)?)))),
         // The walls whose location lines come within the thickest wall's thickness of the node (those that end at it,
@@ -1262,6 +1263,10 @@ pub fn heights(m: &Model, w: &Wall) -> (f64, f64) {
 /// the wall from face to face at each jamb whose head reaches the top there, which a plan seeing the wall from above draws.
 pub fn notches(m: &Model, id: Id) -> Vec<[P2; 2]> {
     let Some(w) = m.wall(id) else { return Vec::new() };
+    // A curtain wall has no solid to notch: a door in it fills its cell, to the wall's top where the cell reaches it.
+    if crate::curtain::is_curtain(m, w) {
+        return Vec::new();
+    }
     let guid = m.guid(id);
     let (axis, (ext, int), base) = (Axis::of(w), faces(m, w), m.own_base(w));
     let mut out = Vec::new();
@@ -1328,6 +1333,10 @@ pub fn prisms(m: &Model, id: Id, openings: bool) -> Vec<Prism> {
 #[doc(hidden)]
 pub fn prisms_in(m: &Model, id: Id, openings: bool, index: Option<&Index>) -> Vec<Prism> {
     let Some(w) = m.wall(id) else { return Vec::new() };
+    // A curtain wall has no solid of its own: its panels and mullions are elements, each with its own.
+    if crate::curtain::is_curtain(m, w) {
+        return Vec::new();
+    }
     let guid = m.guid(id);
     let axis = Axis::of(w);
     let (ext, int) = faces(m, w);

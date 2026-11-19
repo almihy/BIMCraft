@@ -58,6 +58,7 @@ pub fn element(kind: &str, v: &Value) -> Vec<String> {
         "planview" => PlanView, "link" => Link, "pointcloud" => PointCloud, "cadimport" => CadImport, "image" => crate::raster::ImageInstance,
         "site" => crate::masterplan::Site, "propertyline" => crate::masterplan::PropertyLine, "toposolid" => Floor,
         "subdivision" => crate::ground::SubDivision, "surveypoint" => crate::ground::BasePoint, "projectbasepoint" => crate::ground::BasePoint,
+        "curtainpanel" => crate::curtain::Panel, "mullion" => crate::curtain::Mullion, "curtaingrid" => crate::curtain::GridLine,
     }
 }
 

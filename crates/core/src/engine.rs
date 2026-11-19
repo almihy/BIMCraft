@@ -673,6 +673,19 @@ impl Session {
                     }
                 }
             }
+            // Curtain walls the command touched laid out again: their panels and mullions as their grid, their type and
+            // their own lines now give them (curtain.rs).
+            if cmd.undoable {
+                let update = crate::curtain::keep(&self.model, &before);
+                if !update.is_empty() {
+                    // A door that filled a cell and has none now goes as a door deleted does, with what hangs on it.
+                    let doors = update.doors();
+                    crate::curtain::apply(self.model_mut(), update);
+                    if !doors.is_empty() {
+                        crate::commands::drop_curtain_doors(self, &doors)?;
+                    }
+                }
+            }
             // Locked and equal dimensions moved what they measure to as the command moved it.
             if cmd.undoable {
                 keep_constraints(self, &before)?;
@@ -1071,6 +1084,10 @@ impl Session {
         let option = self.option.clone().filter(|o| crate::phasing::option_exists(m, o));
         let is_first = phase.as_ref() == m.phases.first();
         for id in made {
+            // A curtain wall's panels and mullions are made in what their wall is, and hold none of their own.
+            if m.elements.get(*id).is_some_and(|e| crate::curtain::host_of(e).is_some()) {
+                continue;
+            }
             let Some(e) = m.elements.get_mut(*id) else { continue };
             let follows = matches!(e, Element::Door(_) | Element::Window(_));
             let Some(params) = e.params_mut() else { continue };

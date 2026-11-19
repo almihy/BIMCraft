@@ -19,11 +19,11 @@ impl Dice {
         self.0.wrapping_mul(0x2545_f491_4f6c_dd1d)
     }
 
-    fn below(&mut self, n: usize) -> usize {
+    pub(crate) fn below(&mut self, n: usize) -> usize {
         (self.next() % n.max(1) as u64) as usize
     }
 
-    fn mm(&mut self, span: i64) -> i64 {
+    pub(crate) fn mm(&mut self, span: i64) -> i64 {
         (self.next() % (2 * span as u64 + 1)) as i64 - span
     }
 }

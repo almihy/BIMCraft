@@ -2557,6 +2557,84 @@ b"}, "host": "sky", "flips": {"hand": "x"}}),
         json!({"cad": "x"}),
         json!({"cad": {"id": cad, "entities": [6]}}),
     ];
+    // A curtain wall (a storefront: panels and mullions its type placed), a grid line drawn on it by hand, a mullion put on
+    // by hand and a panel freed, last so that no id moves; and the Curtain Grid, Add/Remove Segments and Mullion tools'
+    // payloads with their keys, hostile, with the Modify tools taking the wall, its panels and its lines.
+    let curtain = base
+        .execute("wall", &json!({"points": [[0, -40000], [6000, -40000]], "type": "Storefront", "height": 3000}))
+        .map_or(Value::Null, |r| r["ids"][0].clone());
+    let grid_line =
+        base.execute("curtain_grid", &json!({"wall": curtain, "vertical": true, "at": 700})).map_or(Value::Null, |r| r["ids"][0].clone());
+    // (Every segment of a storefront has its type's mullion: one unpinned stands for one put on by hand.)
+    let by_hand =
+        base.model.elements.iter().find(|(_, e)| matches!(e, crate::model::Element::Mullion(_))).map_or(Value::Null, |(id, _)| json!(id));
+    let _ = base.execute("unpin", &json!({"ids": [by_hand]}));
+    let _ = base.execute("modify", &json!({"id": by_hand, "type": "30mm Square"}));
+    let panel = base
+        .execute("curtain_grid", &json!({"wall": curtain, "vertical": false, "at": 600}))
+        .map_or(Value::Null, |r| r["panels"][0].clone());
+    let _ = base.execute("unpin", &json!({"ids": [panel]}));
+    // A door in one of its cells (a panel swapped for it), last so that no id moves.
+    let curtain_door = base.execute("curtain_door", &json!({"wall": curtain, "at": [3700, 1500]})).map_or(Value::Null, |r| r["id"].clone());
+    assert!([&curtain, &grid_line, &by_hand, &panel, &curtain_door].iter().all(|v| v.is_u64()), "the sweep's base has its curtain wall");
+    let curtains = [
+        json!({"wall": curtain, "vertical": true, "at": 1e300}),
+        json!({"wall": curtain, "vertical": "x", "at": -1}),
+        json!({"wall": curtain, "vertical": false, "at": 1800}),
+        json!({"wall": curtain, "lines": [{"vertical": true, "at": 100}, {"point": [1e300, 0]}, {"z": -1e300}, 5]}),
+        json!({"wall": curtain, "lines": vec![json!({"vertical": true, "at": 3}); 100_000]}),
+        json!({"wall": curtain, "point": [3000, -40000], "z": 1e9}),
+        json!({"wall": curtain, "point": [3100, -40000], "z": 1500}),
+        json!({"wall": curtain, "at": [1500, 1200], "remove": true}),
+        json!({"wall": curtain, "at": [700, 1200], "vertical": true}),
+        json!({"wall": curtain, "segments": [[1500, 1200], [1e300, 0], "x"], "remove": false}),
+        json!({"wall": curtain, "segments": vec![json!([1500, 1200]); 100_000], "remove": "x"}),
+        json!({"wall": curtain, "at": [0, 0], "on": "all", "type": "Nope"}),
+        json!({"wall": curtain, "on": "all"}),
+        json!({"wall": curtain, "on": "segment", "at": [1500, 1200], "type": "30mm Square", "vertical": false}),
+        json!({"wall": 100002, "on": "grid_line", "at": [f64::MAX, 0]}),
+        json!({"host": curtain, "on": [], "at": "x", "z": 1e300}),
+        json!({"ids": [curtain, panel, by_hand], "by": [100, 0]}),
+        json!({"ids": [panel, grid_line], "about": [0, 0], "angle": 90, "copy": true}),
+        json!({"ids": [grid_line], "by": [9.99e8, 0]}),
+        json!({"ids": [curtain], "axis": [[0, 0], [1000, 1000]], "copy": true}),
+        json!({"ids": [curtain, grid_line, panel], "axis": [[0, -40000], [0, 1000]]}),
+        json!({"ids": [curtain, grid_line], "levels": ["Level 2"]}),
+        json!({"id": curtain, "at": [3000, -40000]}),
+        json!({"id": curtain, "type": "Generic - 200mm"}),
+        json!({"id": 100002, "type": "Storefront"}),
+        json!({"ids": [100002, 100003, curtain], "type": "Exterior Glazing"}),
+        json!({"id": grid_line, "at": 1e300}),
+        json!({"id": grid_line, "at": -5, "vertical": false, "host": 100002}),
+        json!({"ids": [panel]}),
+        json!({"ids": [by_hand, grid_line]}),
+        json!({"id": panel, "type": "Empty", "free": false, "span": [1e300, 0, 0, 0], "key": ""}),
+        json!({"id": by_hand, "type": "Nope", "key": "m:u0|v0", "border": 255, "trim": [1e300, -1e300]}),
+        json!({"id": curtain, "curtain": {"vertical": {"number": 1e300, "justification": "x", "offset": 1e300}, "merged": ["x"], "no_mullion": 5}}),
+        json!({"id": curtain, "curtain": {"horizontal": {"number": 200, "justification": "end", "offset": -1e8}, "merged": ["u0|v0", "ut1|v0"]}}),
+        json!({"category": "wall", "name": "Storefront", "curtain": {"vertical": {"layout": "fixed-distance", "spacing": 1e-300}, "panel": 5}}),
+        json!({"category": "wall", "name": "Storefront", "curtain": {"horizontal": {"layout": "minimum-spacing", "spacing": 1.5}, "join_condition": "x"}}),
+        json!({"category": "wall", "name": "Generic - 200mm", "curtain": true}),
+        json!({"category": "wall", "name": "Storefront", "curtain": null, "thickness": 1e300}),
+        json!({"category": "mullion", "name": "30mm Square", "thickness": -1, "side1": 1e300, "round": "x"}),
+        json!({"category": "curtainpanel", "name": "Glazed", "thickness": 1e300, "empty": true, "offset": -1e300}),
+        json!({"from": panel, "ids": [curtain, by_hand, 100002]}),
+        // Curtain Wall Door: a panel swapped for a door, by its id or a place, and what then works on the door.
+        json!({"panel": panel}),
+        json!({"panel": panel, "type": "Nope", "flip_facing": "x"}),
+        json!({"panel": curtain_door, "family": 5, "mark": "x".repeat(100_000)}),
+        json!({"wall": curtain, "at": [5000, 1000], "flip_hand": true}),
+        json!({"wall": curtain, "at": [1e300, -1e300]}),
+        json!({"wall": curtain, "point": [2000, -40000], "z": 1e300}),
+        json!({"wall": curtain, "at": "x", "panel": null}),
+        json!({"ids": [curtain_door], "by": [500, 0]}),
+        json!({"ids": [curtain_door, curtain], "axis": [[0, 0], [1000, 1000]], "copy": true}),
+        json!({"id": curtain_door, "offset": 1e300, "sill": -1e300}),
+        json!({"id": curtain_door, "wall": 100002}),
+        json!({"id": curtain_door, "host": 100002, "type": "Nope"}),
+        json!({"ids": [curtain_door]}),
+        json!({"id": curtain, "at": [5200, -40000]}),
+    ];
     let hostile: Vec<Value> = hostile
         .into_iter()
         .chain(detailing.into_iter().map(|(_, p)| p))
@@ -2565,6 +2643,7 @@ b"}, "host": "sky", "flips": {"hand": "x"}}),
         .chain(grips)
         .chain(site)
         .chain(picks)
+        .chain(curtains)
         .collect();
     // Each command against each value, on a copy of the same session; the commands shared out between the cores.
     let cmds: Vec<_> = commands().iter().filter(|c| !matches!(c.id, "open" | "save")).collect();

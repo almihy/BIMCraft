@@ -90,6 +90,9 @@ enum Kind {
     Link,
     /// One of these values (as the command names it, and its label): a drop-down, the first when it has none.
     Choice(&'static [(&'static str, &'static str)]),
+    /// A curtain wall's Number of grid lines one way (`true`: its vertical grid's): typed while its type's Layout that way
+    /// is Fixed Number, greyed otherwise, as Revit's.
+    GridNumber(bool),
 }
 
 use Kind::*;
@@ -105,6 +108,8 @@ fn field_of(e: &Value, key: &str, kind: Kind) -> Value {
     match key.split('.').try_fold(e, |v, k| v.get(k)) {
         Some(v) => v.clone(),
         None if matches!(kind, Length | Number) => json!(0.0),
+        // A wall's JSON leaves its Number out while it is the one a grid has unless told.
+        None if matches!(kind, GridNumber(_)) => json!(bimcraft_core::curtain::NUMBER),
         None => Value::Null,
     }
 }
@@ -143,6 +148,33 @@ fn rows(category: &str) -> &'static [Row] {
             (msg!("Other"), "start", msg!("Start"), Point),
             ("Other", "end", msg!("End"), Point),
         ],
+        // A wall of a curtain type, as Revit's curtain wall: no Location Line, and its grid's own settings each way.
+        "curtainwall" => &[
+            ("Constraints", "level", "Base Constraint", Level),
+            ("Constraints", "base_offset", "Base Offset", Length),
+            ("Constraints", "attach_base", "Base is Attached", Attached),
+            ("Constraints", "top_level", "Top Constraint", TopLevel),
+            ("Constraints", "height", "Unconnected Height", Height),
+            ("Constraints", "top_offset", "Top Offset", Length),
+            ("Constraints", "attach_top", "Top is Attached", Attached),
+            ("Constraints", "room_bounding", "Room Bounding", Flag),
+            (msg!("Vertical Grid"), "curtain.vertical.number", "Number", GridNumber(true)),
+            ("Vertical Grid", "curtain.vertical.justification", msg!("Justification"), Choice(GRID_JUSTIFICATION)),
+            ("Vertical Grid", "curtain.vertical.offset", "Offset", Length),
+            (msg!("Horizontal Grid"), "curtain.horizontal.number", "Number", GridNumber(false)),
+            ("Horizontal Grid", "curtain.horizontal.justification", "Justification", Choice(GRID_JUSTIFICATION)),
+            ("Horizontal Grid", "curtain.horizontal.offset", "Offset", Length),
+            ("Dimensions", "length", "Length", LengthShown),
+            ("Dimensions", "area_m2", "Area", AreaShown),
+        ],
+        "curtainpanel" => &[
+            ("Dimensions", "height", "Height", LengthShown),
+            ("Dimensions", "width", "Width", LengthShown),
+            ("Dimensions", "area_m2", "Area", AreaShown),
+            ("Other", "host", "Host", Link),
+        ],
+        "mullion" => &[("Dimensions", "length", "Length", LengthShown), ("Other", "host", "Host", Link)],
+        "curtaingrid" => &[("Other", "at", msg!("Distance"), Length), ("Other", "host", "Host", Link)],
         "door" => &[
             ("Constraints", "level", "Level", LevelName),
             (msg!("Identity Data"), "mark", "Mark", Text),
@@ -481,10 +513,21 @@ const PLAN_DEPENDENT: &[Row] = &[
     ("Extents", "crop", "Crop View", Crop),
 ];
 
+/// A curtain grid's Justification, as `modify` names each and as Revit does.
+const GRID_JUSTIFICATION: &[(&str, &str)] = &[("beginning", msg!("Beginning")), ("center", msg!("Center")), ("end", msg!("End"))];
+
+/// The rows of the elements `ids`, all of `category`: a wall's are a curtain wall's while every one of them is of a curtain
+/// type.
+fn rows_of(m: &Model, category: &str, ids: &[Id]) -> &'static [Row] {
+    let curtain = |id: &Id| m.wall(*id).is_some_and(|w| bimcraft_core::curtain::is_curtain(m, w));
+    if category == "wall" && !ids.is_empty() && ids.iter().all(curtain) { rows("curtainwall") } else { rows(category) }
+}
+
 /// Type `name` of `category` as the project's JSON holds it: `types` is the project's `Types` as JSON.
 fn type_json<'a>(types: &'a Value, category: &str, name: &str) -> &'a Value {
     let of = match category {
         "structuralcolumn" => &types["structural_column"],
+        "curtainpanel" => &types["curtain_panel"],
         run if bimcraft_core::model::RUN_CATEGORIES.contains(&run) => &types["runs"][category],
         other => &types[other],
     };
@@ -512,6 +555,9 @@ fn type_rows(category: &str) -> &'static [(&'static str, &'static str, &'static 
 fn icon(category: &str) -> Icon {
     match category {
         "wall" => Icon::Wall,
+        "curtainpanel" => Icon::CurtainPanel,
+        "mullion" => Icon::Mullion,
+        "curtaingrid" => Icon::CurtainGrid,
         "door" => Icon::Door,
         "window" => Icon::Window,
         "room" => Icon::Room,
@@ -599,7 +645,8 @@ fn shown(kind: Kind, v: &Value, units: Units) -> String {
         MetresShown => each(&|x| units.length(x * 1000.0)),
         AreaShown => each(&|x| {
             let (area, unit) = units.area(x * 1e6);
-            format!("{area:.2} {unit}")
+            // (No area is 0.00, never -0.00.)
+            format!("{:.2} {unit}", area + 0.0)
         }),
         _ => text(v),
     }
@@ -914,6 +961,10 @@ pub(crate) struct TypeDialog {
     /// A wall type's parameters as Revit's Type Properties has them, with its Edit Assembly window, as typed and as they were.
     wall: Option<crate::assembly::WallForm>,
     wall_was: Option<crate::assembly::WallForm>,
+    /// A curtain wall type's, a curtain panel type's or a mullion type's parameters, as typed and as they were: such a type
+    /// has these and its identity data, and none of the rest.
+    curtain: Option<crate::curtain::Form>,
+    curtain_was: Option<crate::curtain::Form>,
 }
 
 impl TypeDialog {
@@ -924,8 +975,12 @@ impl TypeDialog {
             (t.is_some_and(|t| t.round), t.map(|t| t.material.clone()).unwrap_or_default())
         });
         let identity = identity_fields(m.identity_of(category, &name));
-        let wall = (category == "wall").then(|| crate::assembly::WallForm::of(m, &name));
+        // A curtain wall type has no layers: Revit's Curtain Wall Type Properties, never Edit Assembly.
+        let curtain = crate::curtain::Form::of(m, category, &name);
+        let wall = (category == "wall" && curtain.is_none()).then(|| crate::assembly::WallForm::of(m, &name));
         TypeDialog {
+            curtain_was: curtain.clone(),
+            curtain,
             wall_was: wall.clone(),
             wall,
             category,
@@ -982,6 +1037,11 @@ impl TypeDialog {
     /// layers make the type, and how thick it is; `copy` sends them anyway, as a duplicate has them.
     fn params(&self, name: &str, units: Units, copy: bool, duplicate: bool) -> Result<Value, String> {
         let mut p = json!({"category": self.category, "name": name});
+        if let (Some(form), Some(was), Some(o)) = (&self.curtain, &self.curtain_was, p.as_object_mut()) {
+            o.extend(form.params(was, units, duplicate)?);
+            o.extend(identity_params(&self.identity, &self.identity_were, duplicate)?);
+            return Ok(p);
+        }
         let layered = self.wall.is_none() && (copy || self.layers != self.layers_were);
         if layered {
             let layers = self.layers.iter().map(|(function, material, typed, variable)| {
@@ -1071,6 +1131,7 @@ impl BimApp {
             ([], Tool::Wall(_), _) => Subject::New("wall"),
             ([], Tool::Door, _) => Subject::New("door"),
             ([], Tool::Window, _) => Subject::New("window"),
+            ([], Tool::Mullion, _) => Subject::New("mullion"),
             ([], Tool::Room, _) => Subject::New("room"),
             ([], Tool::Level, _) => Subject::New("level"),
             ([], Tool::Grid(_), _) => Subject::New("grid"),
@@ -1161,7 +1222,8 @@ impl BimApp {
             false => self.shared_type(m),
             true => self.types.get(category).cloned().or_else(|| m.default_type(category).map(String::from)),
         };
-        Some((category, name?, ids))
+        // A starter curtain wall type the Wall tool is to draw with is made by its first wall: none to edit until then.
+        Some((category, name.filter(|n| category != "wall" || m.types.wall.contains_key(n))?, ids))
     }
 
     /// The family and type a door or window is of: the selected ones', while they share them; with none selected, what the tool places.
@@ -1246,13 +1308,14 @@ impl BimApp {
                 Some(e) => (
                     format!("{} (1)", lang::category(e.category(), true)),
                     vec![id],
-                    if camera_view { &[][..] } else { rows(e.category()) },
+                    if camera_view { &[][..] } else { rows_of(&model, e.category(), &[id]) },
                 ),
                 None => return,
             },
             Subject::Elements(category) => {
                 let ids = self.palette_ids();
-                (format!("{} ({})", lang::category(category, true), ids.len()), ids, rows(category))
+                let rows = rows_of(&model, category, &ids);
+                (format!("{} ({})", lang::category(category, true), ids.len()), ids, rows)
             }
             Subject::Mixed(n) => (tf("Multiple Categories ({})", &[&n.to_string()]), Vec::new(), &[][..]),
             Subject::New(category) => (tf("New {}", &[&lang::category(category, true)]), Vec::new(), &[][..]),
@@ -1495,7 +1558,10 @@ impl BimApp {
             Subject::Elements(category) => (category, self.shared_type(model)),
             Subject::Mixed(_) => ("multiple categories", None),
             Subject::New(category) => {
-                (category, self.types.get(category).cloned().or_else(|| model.default_type(category).map(String::from)))
+                let picked = self.types.get(category).cloned().or_else(|| model.default_type(category).map(String::from));
+                // The Mullion tool's, before the project has a mullion type: the one its first mullion is of.
+                let starter = (category == "mullion").then(|| bimcraft_core::curtain::MULLION.to_string());
+                (category, picked.or(starter))
             }
             Subject::Plan(_) => ("floor plan", None),
             Subject::CeilingPlan => ("ceiling plan", None),
@@ -1536,9 +1602,17 @@ impl BimApp {
         let names: Vec<String> = if category == "component" {
             pairs.iter().map(label).collect()
         } else {
-            model.type_names(category).into_iter().map(String::from).chain(pairs.iter().map(label)).collect()
+            // The Wall tool always offers Revit's three curtain wall types: one the project hasn't got is made by its first wall.
+            // (The Wall tool's alone: a dormer's walls are the project's.)
+            // The Mullion tool offers Revit's mullion types while the project has none: its first mullion makes them all.
+            let unmade = (subject == Subject::New("wall") && matches!(self.tool, Tool::Wall(_)))
+                || (subject == Subject::New("mullion") && model.types.mullion.is_empty());
+            crate::curtain::names(model, category, unmade).into_iter().chain(pairs.iter().map(label)).collect()
         };
-        let enabled = !names.is_empty();
+        // A panel or a mullion its curtain wall placed is pinned, of the type the wall's type gives it: no other until it is
+        // unpinned, as Revit's greyed Type Selector says.
+        let placed = matches!(category, "curtainpanel" | "mullion") && self.palette_ids().iter().any(|id| model.is_pinned(*id));
+        let enabled = !names.is_empty() && !placed;
         let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), 50.0), if enabled { Sense::click() } else { Sense::hover() });
         r.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, enabled, t("Type Selector")));
         let p = ui.painter();
@@ -1558,14 +1632,20 @@ impl BimApp {
             Subject::CeilingPlan => t("Ceiling Plan").to_string(),
             Subject::View3D => t("3D View").to_string(),
             Subject::Mixed(_) => t("Multiple Categories").to_string(),
-            _ => lang::category(category, false),
+            // The family the type is of, as Revit's: Basic Wall, Curtain Wall, System Panel, Rectangular Mullion.
+            _ => match current.as_deref().and_then(|n| crate::curtain::family(model, category, n)) {
+                Some(family) => t(family).to_string(),
+                None => lang::category(category, false),
+            },
         };
         let (family, below) = match &picked_pair {
             Some((f, t)) => (f.clone(), Some(t.clone())),
             None => (family, current.clone()),
         };
         let first = if below.is_some() { rect.top() + 16.0 } else { rect.center().y };
-        p.text(egui::pos2(x, first), Align2::LEFT_CENTER, family, FontId::proportional(13.0), pal().text);
+        // Greyed while its curtain wall's type decides it.
+        let ink = if placed { pal().muted } else { pal().text };
+        p.text(egui::pos2(x, first), Align2::LEFT_CENTER, family, FontId::proportional(13.0), ink);
         if let Some(t) = &below {
             p.text(egui::pos2(x, rect.top() + 34.0), Align2::LEFT_CENTER, t, FontId::proportional(12.5), pal().muted);
         }
@@ -1576,6 +1656,29 @@ impl BimApp {
         if r.has_focus() {
             p.rect_stroke(rect, 3.0, crate::style::focus_ring(), StrokeKind::Inside);
         }
+        // A curtain panel freed of its wall's type may be swapped for a door, as Revit's Type Selector offers it; and a
+        // curtain wall's door back for a panel type. What is offered after the element's own types: its heading, each
+        // entry's label, and for a door its family (none for one of the project's own door types) and type.
+        type Swap = (&'static str, Vec<(String, Option<String>, String)>);
+        let swap: Option<Swap> = match subject {
+            Subject::Element(id)
+                if category == "curtainpanel" && enabled && matches!(model.elements.get(id), Some(Element::CurtainPanel(_))) =>
+            {
+                let own = model.type_names("door").into_iter().map(|n| (n.to_string(), None, n.to_string()));
+                let of_families = model
+                    .families
+                    .iter()
+                    .filter(|(_, x)| x.category == bimcraft_core::family::Category::Door)
+                    .flat_map(|(f, x)| x.types.keys().map(move |t| (format!("{f}: {t}"), Some(f.clone()), t.clone())));
+                Some((msg!("Doors"), own.chain(of_families).collect()))
+            }
+            Subject::Element(id) if matches!(model.elements.get(id), Some(Element::Door(o)) if o.panel.is_some()) => {
+                let panels = crate::curtain::names(model, "curtainpanel", false).into_iter().map(|n| (n.clone(), None, n));
+                Some((msg!("Curtain Panels"), panels.collect()))
+            }
+            _ => None,
+        };
+        let mut swapped = None;
         let mut picked = None;
         // A component's list holds every family's types, more than a window has room for (issue 64): it scrolls, as tall as
         // the room on the selector's roomier side.
@@ -1583,13 +1686,33 @@ impl BimApp {
         let room = (window.bottom() - rect.bottom()).max(rect.top() - window.top()) - 16.0;
         Popup::menu(&r).width(rect.width()).show(|ui| {
             egui::ScrollArea::vertical().max_height(room.max(100.0)).show(ui, |ui| {
-                for n in &names {
-                    if ui.selectable_label(current.as_ref() == Some(n), n).clicked() {
-                        picked = Some(n.clone());
+                // Under the family each is of, where there are several: Basic Wall, then Curtain Wall.
+                for (family, names) in crate::curtain::listed(model, category, &names) {
+                    if let Some(family) = family {
+                        let heading = RichText::new(t(family)).font(crate::style::semibold(12.0)).color(pal().muted);
+                        ui.add(egui::Label::new(heading).selectable(false));
+                    }
+                    for n in &names {
+                        if ui.selectable_label(current.as_ref() == Some(n), n).clicked() {
+                            picked = Some(n.clone());
+                        }
+                    }
+                }
+                if let Some((heading, entries)) = swap.as_ref().filter(|(_, entries)| !entries.is_empty()) {
+                    let heading = RichText::new(t(heading)).font(crate::style::semibold(12.0)).color(pal().muted);
+                    ui.add(egui::Label::new(heading).selectable(false));
+                    for entry in entries {
+                        if ui.selectable_label(false, &entry.0).clicked() {
+                            swapped = Some(entry.clone());
+                        }
                     }
                 }
             });
         });
+        if let (Some((_, family, name)), Subject::Element(id)) = (swapped, subject) {
+            self.curtain_swap(model, id, family, name);
+            return;
+        }
         let pair = picked.as_ref().and_then(|n| pairs.iter().find(|p| label(p) == *n)).cloned();
         match (picked, subject) {
             (Some(n), Subject::Element(_) | Subject::Elements(_)) if current.as_ref() != Some(&n) && pair.is_some() => {
@@ -1816,6 +1939,25 @@ impl BimApp {
                                 && link(ui, model, other)
                             {
                                 select = Some(other);
+                            }
+                        }
+                        // Typed while every wall's type lays that grid out by a Fixed Number; else greyed, as Revit's.
+                        GridNumber(vertical) => {
+                            let fixed = |id: &Id| {
+                                let rule = model.wall(*id).and_then(|w| bimcraft_core::curtain::curtain_of(model, w));
+                                let rule = rule.map(|c| if vertical { c.vertical } else { c.horizontal });
+                                rule.is_some_and(|r| r.layout == bimcraft_core::curtain::Layout::FixedNumber)
+                            };
+                            let said = val.as_u64().map_or_else(String::new, |n| n.to_string());
+                            if ids.iter().all(fixed) {
+                                if let Some(typed) = self.field(ui, id, key, said, name.id, "") {
+                                    let n = typed.trim().parse::<u32>().map(|n| json!(n));
+                                    change = Some((key, n.map_err(|_| tf("`{}` is not a whole number", &[typed.trim()]))));
+                                }
+                            } else {
+                                let mut said = said;
+                                let field = TextEdit::singleline(&mut said).desired_width(f32::INFINITY);
+                                ui.add_enabled(false, field).labelled_by(name.id);
                             }
                         }
                         Text | Number | Length | LengthIf | Point | PaperPoint | Outline | Height | Limit(_) => {
@@ -2230,11 +2372,19 @@ impl BimApp {
     pub(crate) fn type_properties(&mut self, ctx: &Context) {
         let Some(mut d) = self.type_dialog.take() else { return };
         let model = Arc::clone(&self.session.model);
-        let names: Vec<String> = model.type_names(d.category).into_iter().map(String::from).collect();
+        // The types of the family the one shown is of, as Revit's Type list: a curtain wall type's are the curtain wall types.
+        let family = crate::curtain::family(&model, d.category, &d.name);
+        let names: Vec<String> = model
+            .type_names(d.category)
+            .into_iter()
+            .filter(|n| crate::curtain::family(&model, d.category, n) == family)
+            .map(String::from)
+            .collect();
         let (mut ok, mut cancel, mut apply, mut asked) = (false, false, false, None);
         let r = Modal::new(UiId::new("type-properties"), t("Type Properties")).width(crate::typeprops::WIDTH).show(ctx, |ui| {
             crate::popup::body(ui, |ui| {
-                let family = tf("System Family: {}", &[&lang::category(d.category, true)]);
+                let family = family.map_or_else(|| lang::category(d.category, true), |f| t(f).to_string());
+                let family = tf("System Family: {}", &[&family]);
                 asked = typeprops::head(ui, "type", &family, &names, &d.name, &mut d.naming, true);
                 let below = typeprops::foot_height(ui, d.error.is_some());
                 let materials: Vec<String> = model.materials.keys().cloned().collect();
@@ -2255,6 +2405,10 @@ impl BimApp {
                     }
                 }
                 typeprops::table(ui, "type", below, |tb| {
+                    if let Some(form) = &mut d.curtain {
+                        form.rows(tb, &model);
+                        return identity_group(tb, &mut d.identity);
+                    }
                     for g in groups {
                         tb.group(g);
                         for (_, key, label, typed) in d.fields.iter_mut().filter(|f| f.0 == g) {
@@ -2313,7 +2467,7 @@ impl BimApp {
                     // A duplicate is round, and made of a material, as the type it copies is.
                     let types = serde_json::to_value(&model.types).unwrap_or_default();
                     let from = type_json(&types, d.category, &d.name);
-                    if d.shape.is_none() {
+                    if d.shape.is_none() && d.curtain.is_none() {
                         for key in ["round", "material"] {
                             if !from[key].is_null() {
                                 p[key] = from[key].clone();

@@ -201,7 +201,10 @@
     "ResetShape": "own:ResetShape",
     "AddVertex": "own:AddVertex",
     "DeleteVertex": "own:DeleteVertex",
-    "ConvertSpline": "own:ConvertSpline"
+    "ConvertSpline": "own:ConvertSpline",
+    "CurtainGrid": "own:CurtainGrid",
+    "Mullion": "own:Mullion",
+    "CurtainPanel": "own:CurtainPanel"
   },
   "small": {
     "Railing": "own:Railing.small",

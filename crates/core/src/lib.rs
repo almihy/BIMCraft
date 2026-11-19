@@ -8,11 +8,11 @@ pub use bimcraft_mep_calc::{conduit, demand, dps, dr, drainage, hydrant, loads, 
 #[doc(hidden)]
 pub use bimcraft_model::run_arm;
 pub use bimcraft_model::{
-    alignment, background_grid, bounds, cad, camera, carpark, cloud, crosscheck, curves, derived, dims, draw, dxf, electrical, falls,
-    family, favorites, fills, glue, graphics, ground, groups, ids, ifc_classes, insert, json, lenient, library, lines, link, massing,
-    masterplan, merge, model, motion, network, paint, pat, pen, phasing, quantities, raster, rebar, reinforce, rooms, runs, schedule,
-    selection, selfcheck, site, sketch, solids, stairs, standards, styles, symbol_set, tempdims, text, texture, titleblock, type_data,
-    wallchain, walls, warnings, workplane,
+    alignment, background_grid, bounds, cad, camera, carpark, cloud, crosscheck, curtain, curves, derived, dims, draw, dxf, electrical,
+    falls, family, favorites, fills, glue, graphics, ground, groups, ids, ifc_classes, insert, json, lenient, library, lines, link,
+    massing, masterplan, merge, model, motion, network, paint, pat, pen, phasing, quantities, raster, rebar, reinforce, rooms, runs,
+    schedule, selection, selfcheck, site, sketch, solids, stairs, standards, styles, symbol_set, tempdims, text, texture, titleblock,
+    type_data, wallchain, walls, warnings, workplane,
 };
 use bimcraft_model::{constraints, sync_settings, timber};
 pub use bimcraft_render::{dims3d, dxf_out, gltf, inquiry, pdf, render, sheet, snap, triad, view3d};
@@ -37,6 +37,18 @@ mod clipboard_tests;
 #[cfg(test)]
 mod cloud_tests;
 mod commands;
+#[cfg(test)]
+mod curtain_door_tests;
+#[cfg(test)]
+mod curtain_ifc_tests;
+#[cfg(test)]
+mod curtain_schedule_tests;
+#[cfg(test)]
+mod curtain_sync_tests;
+#[cfg(test)]
+mod curtain_tests;
+#[cfg(test)]
+mod curtain_tools_tests;
 #[cfg(test)]
 mod dry_run_tests;
 #[cfg(test)]

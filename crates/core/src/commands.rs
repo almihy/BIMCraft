@@ -47,6 +47,7 @@ mod array;
 mod cad_pick;
 mod camera;
 pub(crate) mod clipboard;
+mod curtain;
 mod ground;
 mod images;
 mod pin;
@@ -403,7 +404,15 @@ other_files(
          its right). `location`: the line of it the points are on: centre (the default), core-centre, exterior-finish, \
          interior-finish, exterior-core or interior-core; its exterior side is to the left of its start to its end, so walls \
          drawn clockwise face out. `attach_top`, `attach_base`: a roof or floor its top follows from below, or its base stands \
-         on. `room_bounding`: false for a wall rooms run past (a low wall, a balustrade); true, the default, bounds them",
+         on. `room_bounding`: false for a wall rooms run past (a low wall, a balustrade); true, the default, bounds them. \
+         A curtain wall is a wall of a curtain wall type, drawn the same way: `type` \"Curtain Wall\" (one panel of glass), \
+         \"Exterior Glazing\" (a grid, no mullions) or \"Storefront\" (a grid with mullions), each made when first named, or a \
+         type of the project's own (`type`, `curtain`). It has no layers and joins no wall; its panels (category \
+         `curtainpanel`), mullions (`mullion`) and hand-made grid lines (`curtaingrid`) are elements it hosts (`elements` \
+         lists them, each with its `host`), laid out again whenever the wall, its type or its lines change. Its own grid \
+         settings are `modify {id, curtain: {vertical: {number?, justification?: beginning|center|end, offset?}, \
+         horizontal: {…}}}` (the Number of a fixed-number layout, where the lines are counted from, and how far the first \
+         is from there). Work on it with `curtain_grid`, `add_remove_segments` and `mullion`; its entrance is a panel swapped for a door (`curtain_door`), and it takes no ordinary `door` or `window`",
         wall,
     )
     .menu("Architecture > Wall"),
@@ -1462,7 +1471,27 @@ other_files(
          Rating…) and in tags, and IFC carries them on the type object (Reference and FireRating in its `Pset_*Common`, Manufacturer and \
          ModelLabel in `Pset_ManufacturerTypeInformation`, the rest in `BIMCraft_TypeData`; an element with no type object holds \
          them itself). A new type starts with none, so send the identity data you want it to have: only the desktop's Duplicate \
-         copies a type's. A family's types take theirs through `family`'s `identity`",
+         copies a type's. A family's types take theirs through `family`'s `identity`. \
+         Curtain walls: a wall type with `curtain` is a curtain wall type, as Revit's (no layers; its walls are a grid of \
+         panels and mullions): `curtain: {panel?, join_condition?, vertical?: {layout?, spacing?, adjust_for_mullion?}, \
+         horizontal?, vertical_mullions?: {interior?, border1?, border2?}, horizontal_mullions?}`, each key kept when not \
+         given; `curtain: true` is a plain one (one panel, no grid) and `curtain: null` makes it a basic type again (give \
+         `thickness` or `layers`). `panel` is a curtain panel type (the project's first glazed one when not given); \
+         `vertical` is the grid of lines that stand along the wall and `horizontal` of those that lie up it, each a `layout` \
+         (none, fixed-distance, fixed-number, maximum-spacing, minimum-spacing; Revit's words are read too) with its \
+         `spacing` in mm (a fixed number takes the wall's own Number: `modify {id, curtain: {vertical: {number}}}`); the \
+         mullion sets name a mullion type for the lines between the borders (`interior`), the first border (`border1`: the \
+         wall's start, or its base) and the last (`border2`), null or \"\" for none; `join_condition` is not-defined, \
+         vertical-grid-continuous, horizontal-grid-continuous, border-and-vertical-grid-continuous or \
+         border-and-horizontal-grid-continuous. Category `curtainpanel` is a panel type `{thickness, offset?, material?, \
+         empty?}` (`offset` mm to the exterior of the wall's line; `empty: true` leaves its cells open, Revit's Empty System \
+         Panel) and category `mullion` a mullion type `{thickness, side1, side2 | width, offset?, material?}` (rectangular: \
+         `thickness` deep across the wall, `side1` and `side2` wide to each side of its grid line, or `width` shared \
+         between them) or `{round: true, radius | thickness, offset?, material?}` (circular). A project starts with none of \
+         these: the wall types Curtain Wall, Exterior Glazing and Storefront, the panel types Glazed, Solid and Empty and \
+         the mullion types 50 x 150mm, 30mm Square, 25mm Radius and 50mm Radius are made when first named (by `wall`, \
+         `modify`, `mullion` or a `curtain` here). Making a basic type that walls use a curtain type deletes the doors and \
+         windows in them, as Revit does (`deleted`, with a `note`)",
         edit_type,
     ),
     edit_files(
@@ -1796,8 +1825,38 @@ other_files(
          deleted.\" and names the ids; `unpin` them first. Copies, arrays, pastes and a move, rotate or mirror with `copy` of \
          a pinned element are free, and its type, settings and height can be changed. Deleting a host deletes the pinned doors \
          and windows in it, with a note. Any element can be pinned, grids and levels by habit. Pins are kept in the file. \
-         Returns {pinned, already}: those now pinned, and those that were",
+         Returns {pinned, already}: those now pinned, and those that were. A curtain wall's panels and mullions are pinned \
+         by their wall, as Revit's: what the wall's type placed counts as pinned (its type is the wall's, and it is not deleted) \
+         until `unpin` frees it; `pin` on a freed one gives it back to the wall's type",
         pin::pin,
+    ),
+    edit(
+        "curtain_grid",
+        "Curtain Grid",
+        &[],
+        "{wall, vertical, at} | {wall, point: [x, y]} | {wall, z} | {wall, lines: [{vertical, at} | {point} | {z}, …]} adds grid lines to          curtain wall `wall` by hand, as Revit's Curtain Grid tool: `vertical: true`, a line that stands `at` mm along the wall's          location line from its start; `vertical: false`, one that lies `at` mm over the wall's base. Or by place: `point`          [x, y] in plan puts a standing line through the nearest place on the wall, `z` (an elevation in the model, mm) a lying          one at that height; `lines` adds several at once. Each line crosses the whole wall and every panel it passes is split in          two (Revit's All Segments; One Segment and All Except Picked are not built yet: remove the segments not wanted with          `add_remove_segments`). A line outside the wall, or within 1 mm of a line already there, is refused. Returns {ids: the          new lines (elements of category `curtaingrid`), wall, panels: the wall's panels now}. A line made here is moved with          `modify {id, at}` (a standing one with `move` too: it slides along its wall) and taken away with `delete`, its panels          joining again. The lines a curtain wall type lays out (its Vertical Grid and Horizontal Grid) are not elements yet:          change them through the type (`type`, `curtain`) or the wall's own Number, Justification and Offset (`modify`, `curtain`)",
+        curtain::curtain_grid,
+    ),
+    edit(
+        "add_remove_segments",
+        "Add/Remove Segments",
+        &[],
+        "{wall, at: [s, z] | point: [x, y], z?, vertical?, remove?: true, segments?: [[s, z], …]} removes a segment of a curtain          wall's grid line so the panels either side of it become one, or puts it back, as Revit's Add/Remove Segments. A segment          is the part of a grid line between two lines that cross it, named by a place near it: `at` [s, z] (mm along the wall          from its start, mm over its base; the middle of the edge between the two panels is the surest), or `point` [x, y] in          plan with `z` (an elevation in the model; the wall's base when not given). The line nearest the place is taken,          standing or lying; `vertical` says which when both are as near. `remove: false` puts a removed segment back. `segments`          names several, changed together. A border's segment is refused, and so is a change that would leave a panel that is          not a rectangle (an L, or a segment left standing inside a panel): the error lists the places to give together in          `segments`. A mullion on a removed segment goes with it. The joined panel is the lower left one of the two, with its          type. Returns {wall, removed | restored: [[s, z], …], panels: the wall's panels now}",
+        curtain::add_remove_segments,
+    ),
+    edit(
+        "mullion",
+        "Mullion",
+        &[],
+        "{wall, type?, on?: grid_line | segment | all, at: [s, z] | point: [x, y], z?, vertical?} puts mullions on a curtain          wall's grid lines, as Revit's Mullion tool: `on: grid_line` (the default; Revit's Grid Line) on every segment of the          line nearest the place, `segment` (Grid Line Segment) on the one segment there, `all` (All Grid Lines; no place          needed) on every segment of every line, the wall's four borders too. The place is `at` [s, z] (mm along the wall from          its start, mm over its base) or `point` [x, y] in plan with `z` (an elevation; the wall's base when not given);          `vertical` says whether the line meant stands or lies when both are as near. `type` is one of the project's mullion          types (`type`, category `mullion`; the default is `50 x 150mm`, made with the other starter types when the project          has none). A segment that has a mullion keeps it, and a removed segment gets none. A mullion put on here is not          pinned: it keeps its type whatever the wall's type says, changes type with `modify {id, type}` and goes with          `delete`. Returns {ids: the mullions put on, skipped: segments that had one, wall, type}",
+        curtain::mullion,
+    ),
+    edit(
+        "curtain_door",
+        "Curtain Wall Door",
+        &[],
+        "{panel, type?, family?, flip_facing?, flip_hand?, mark?} | {wall, at: [s, z] | point: [x, y], z?, …} swaps a panel of a          curtain wall for a door, a storefront's entrance: what Revit does when a panel is unpinned and a door picked in the          Type Selector, in one step (the panel may be pinned). `panel` is the panel's id (`elements` with category          `curtainpanel`); or name its cell by a place inside it: `wall` with `at` [s, z] (mm along the wall from its start, mm          over its base) or `point` [x, y] in plan with `z` (an elevation; the wall's base when not given). The door is an          ordinary door (category `door`: schedules, tags, From/To Room, `flip`, IFC's IfcDoor) of `type`, one of the project's          door types (the default one when not given), or of a door `family` and its `type`; but it fills its cell: its width          and height are the cell's, whatever its type says (a family's door keeps its own size, at the middle of the cell's          bottom), and it goes where its cell goes when the grid changes. So it is not moved along the wall: move a grid line,          or delete it and swap another panel. The mullions round the cell stay (delete the one under it with `delete` for a          threshold-free entrance). `delete` the door and the cell has its panel again; a door whose cell is removed goes to          the cell that holds its place, and goes with the grid when the wall is given a basic type. A window in a curtain          wall is not built yet. Returns {id, wall, panel_key, offset, sill, width, height, mark}",
+        curtain::curtain_door,
     ),
     edit(
         "wall_join",
@@ -1823,14 +1882,19 @@ other_files(
         ui_msg!("Unpin"),
         &["UP"],
         "{ids: [id,…]} lets pinned elements be moved, turned and deleted again. Returns {unpinned, ids}: those that were pinned, and \
-         those asked for",
+         those asked for. A curtain wall's panel or mullion unpinned is free of its wall's type: change its type with \
+         `modify {id, type}` (a panel to `Empty` to leave its cell open), and delete a mullion with `delete`; it keeps what \
+         it is given when the wall is laid out again",
         pin::unpin,
     ),
     edit(
         "copy",
         msg!("Copy"),
         &["CO"],
-        "{ids: [id,…], by: [dx, dy]} copies elements, with the doors and windows of copied walls; returns the copies' ids",
+        "{ids: [id,…], by: [dx, dy]} copies elements, with the doors and windows of copied walls; returns the copies' ids. A \
+         curtain wall's copy has the wall's hand-made grid lines (among the ids) and lays out its own panels and mullions, \
+         with what was done by hand (segments removed, mullions deleted or put on, panels and mullions unpinned); a panel \
+         or a mullion is not copied or moved on its own",
         copy,
     ),
     other(
@@ -1980,7 +2044,11 @@ other_files(
         &["DE"],
         "{ids: [id,…]} a pinned element is refused (\"Pinned objects were not deleted. To delete them, unpin them before using \
          Delete.\"; the error names them): `unpin` it or leave it out. Deleting a wall deletes its doors and windows, deleting those their tags; a view takes its notes and \
-         spot elevations, and what a spot elevation reads takes it; dimensions lose what's deleted",
+         spot elevations, and what a spot elevation reads takes it; dimensions lose what's deleted. A curtain wall takes its \
+         panels, mullions and grid lines (all in `deleted`). A mullion deleted stays gone from its wall (`mullion` puts one back); \
+         one its wall's type placed is pinned, so `unpin` it first. A curtain panel is not deleted, as in Revit: change its type \
+         to an empty one, or join it to its neighbour with `add_remove_segments`. A curtain grid line drawn by hand goes, and \
+         the panels either side join",
         delete,
     ),
     edit(
@@ -3417,7 +3485,36 @@ fn insert_from(s: &mut Session, p: &Value) -> R {
         Some(_) => ids_param(c, &other.model, p)?,
         None => Vec::new(),
     };
-    let made = crate::insert::insert(s.model_mut(), &other.model, &ids).map_err(|e| bad(c, e))?;
+    let mut made = crate::insert::insert(s.model_mut(), &other.model, &ids).map_err(|e| bad(c, e))?;
+    // A curtain wall brought in is laid out here, where its panels and mullions have this project's names: its hand-made
+    // grid lines come with it, asked for or not, and what was done to its grid by hand is put where it was.
+    let m = s.model_mut();
+    let walls: Vec<(Id, Id)> = made
+        .ids
+        .iter()
+        .filter(|(from, here)| crate::curtain::grid(&other.model, **from).is_some() && crate::curtain::grid(m, **here).is_some())
+        .map(|(from, here)| (*from, *here))
+        .collect();
+    for (from, here) in walls {
+        let host = m.guid(here);
+        for l in other.model.hosted_by(other.model.guid(from)) {
+            match (other.model.elements.get(l), made.ids.get(&l)) {
+                (Some(Element::CurtainGrid(g)), None) => {
+                    let line = m.insert(Element::CurtainGrid(crate::curtain::GridLine { host, ..g.clone() }));
+                    made.ids.insert(l, line);
+                }
+                // Its panels and mullions that came are the ones this project lays out, under its names for them.
+                (Some(Element::CurtainPanel(_) | Element::Mullion(_)), Some(child)) => {
+                    m.elements.remove(*child);
+                    made.ids.remove(&l);
+                }
+                _ => {}
+            }
+        }
+        let hand = crate::curtain::hand(&other.model, from);
+        crate::curtain::hand_to(m, here, &hand, &|s| s);
+    }
+    made.copies.retain(|id| m.elements.contains_key(id));
     let there: BTreeMap<String, Id> = made.ids.iter().map(|(a, b)| (a.to_string(), *b)).collect();
     Ok(json!({"ids": there, "copies": made.copies, "library": made.library, "left_out": made.left_out}))
 }
@@ -8104,6 +8201,13 @@ fn wire_type(s: &mut Session, p: &Value) -> R {
 
 fn wall(s: &mut Session, p: &Value) -> R {
     let c = "wall";
+    // A starter curtain wall type (Curtain Wall, Exterior Glazing, Storefront) is made when first drawn with.
+    if let Some(n) = string(c, p, "type")?
+        && crate::curtain::STARTER_WALLS.contains(&n.as_str())
+        && !s.model.types.wall.contains_key(&n)
+    {
+        crate::curtain::ensure_starter(s.model_mut(), &n);
+    }
     let m = &s.model;
     // One wall each, from start to end and turning: along `points`, or along each line a pick of a CAD import takes.
     let (segs, level, skipped): (Vec<(P2, P2, f64)>, Option<Guid>, usize) = match cad_pick::picked_segments(c, m, p)? {
@@ -8171,6 +8275,7 @@ fn wall(s: &mut Session, p: &Value) -> R {
                 join: true,
                 join_start: true,
                 join_end: true,
+                curtain: Default::default(),
             }))
         })
         .collect();
@@ -8226,11 +8331,24 @@ fn flip(s: &mut Session, p: &Value) -> R {
     let (ids, openings): (Vec<Id>, Vec<Id>) = all.iter().partition(|id| m.wall(**id).is_some());
     let m = s.model_mut();
     let lengths: BTreeMap<Guid, f64> = ids.iter().filter_map(|id| Some((m.guid(*id), Axis::of(m.wall(*id)?).length()))).collect();
+    // A curtain wall's grid stays where it is in the model: counted from its other end, and what was done to it by hand
+    // (segments removed, mullions deleted, panels and mullions freed) put where it was.
+    let hands: Vec<(Id, crate::curtain::Hand)> = ids
+        .iter()
+        .filter(|id| m.wall(**id).is_some_and(|w| crate::curtain::is_curtain(m, w)))
+        .map(|id| (*id, crate::curtain::hand(m, *id)))
+        .collect();
     for (id, e) in m.elements.iter_mut() {
         match e {
             Element::Wall(w) if ids.contains(id) => {
                 std::mem::swap(&mut w.start, &mut w.end);
                 w.arc = -w.arc + 0.0;
+                if hands.iter().any(|(h, _)| h == id) {
+                    crate::curtain::reverse(&mut w.curtain);
+                }
+            }
+            Element::CurtainGrid(l) if l.vertical && lengths.contains_key(&l.host) => {
+                l.at = lengths.get(&l.host).copied().unwrap_or_default() - l.at;
             }
             Element::Door(o) | Element::Window(o) if lengths.contains_key(&o.host) => {
                 o.offset = lengths.get(&o.host).copied().unwrap_or_default() - o.offset;
@@ -8258,6 +8376,10 @@ fn flip(s: &mut Session, p: &Value) -> R {
             }
             _ => {}
         }
+    }
+    for (id, hand) in &hands {
+        let length = lengths.get(&m.guid(*id)).copied().unwrap_or_default();
+        crate::curtain::hand_to(m, *id, hand, &|s| length - s);
     }
     let hosts: BTreeMap<Guid, Guid> = m
         .elements
@@ -8306,9 +8428,11 @@ pub fn opening_of(m: &Model, p: &Value, is_door: bool) -> Result<Element, String
     build_opening(m, p, is_door).map(|o| if is_door { Element::Door(o) } else { Element::Window(o) })
 }
 
-fn build_opening(m: &Model, p: &Value, is_door: bool) -> Result<Opening, String> {
-    let c = if is_door { "door" } else { "window" };
-    let types = if is_door { &m.types.door } else { &m.types.window };
+/// The family (if any), the type and the family's own sill that `p` asks a door or a window to be of: `family` with `type`
+/// (its first when not given), or `type` alone, one of the project's own (the default one when not given). `c` is the
+/// command asking.
+fn opening_kind(c: &str, m: &Model, p: &Value, is_door: bool) -> Result<(Option<String>, String, Option<f64>), String> {
+    let what = if is_door { "door" } else { "window" };
     // Of a family's type, or one of the project's own.
     let family = string(c, p, "family")?;
     let (type_name, family_sill) = match &family {
@@ -8316,7 +8440,7 @@ fn build_opening(m: &Model, p: &Value, is_door: bool) -> Result<Opening, String>
             let kind = if is_door { crate::family::Category::Door } else { crate::family::Category::Window };
             let f = m.families.get(name).filter(|f| f.category == kind).ok_or_else(|| {
                 let names: Vec<&str> = m.families.iter().filter(|(_, f)| f.category == kind).map(|(n, _)| n.as_str()).collect();
-                bad(c, format!("there's no {c} family `{name}` (there are: {})", names.join(", ")))
+                bad(c, format!("there's no {what} family `{name}` (there are: {})", names.join(", ")))
             })?;
             let type_name = match string(c, p, "type")? {
                 Some(t) => t,
@@ -8329,8 +8453,24 @@ fn build_opening(m: &Model, p: &Value, is_door: bool) -> Result<Opening, String>
             };
             (type_name, sill)
         }
-        None => (type_param(c, p, m, c)?, None),
+        None => (type_param(c, p, m, what)?, None),
     };
+    Ok((family, type_name, family_sill))
+}
+
+/// The mark a new door (or window) takes: the next after those there are.
+fn next_mark(m: &Model, is_door: bool) -> String {
+    next_number(m.elements.values().filter_map(|e| match e {
+        Element::Door(o) if is_door => Some(o.mark.as_str()),
+        Element::Window(o) if !is_door => Some(o.mark.as_str()),
+        _ => None,
+    }))
+}
+
+fn build_opening(m: &Model, p: &Value, is_door: bool) -> Result<Opening, String> {
+    let c = if is_door { "door" } else { "window" };
+    let types = if is_door { &m.types.door } else { &m.types.window };
+    let (family, type_name, family_sill) = opening_kind(c, m, p, is_door)?;
     let at = point_opt(c, p, "at")?;
     let (host, along_at) = match id_opt(c, p, "wall")? {
         Some(h) => {
@@ -8356,6 +8496,20 @@ fn build_opening(m: &Model, p: &Value, is_door: bool) -> Result<Opening, String>
             })?
         }
     };
+    if m.wall(host).is_some_and(|w| crate::curtain::is_curtain(m, w)) {
+        return Err(bad(
+            c,
+            format!(
+                "wall {} is a curtain wall, which hosts no ordinary doors or windows, as in Revit: its cells are filled by its                  panels. {}",
+                m.shown(host),
+                if is_door {
+                    "Swap one of its panels for a door with `curtain_door` (`panel`, or `wall` and `at`), or place the door in a basic wall"
+                } else {
+                    "Swap a panel instead (`unpin` it, then `modify` its `type`), or place the window in a basic wall"
+                }
+            ),
+        ));
+    }
     let offset = num(c, p, "offset")?.unwrap_or(along_at);
     let default_sill = family_sill.unwrap_or_else(|| match &family {
         Some(_) if is_door => 0.0,
@@ -8381,6 +8535,8 @@ fn build_opening(m: &Model, p: &Value, is_door: bool) -> Result<Opening, String>
     };
     let o = Opening {
         params: Default::default(),
+        panel: None,
+        cell: None,
         family,
         type_name,
         host,
@@ -10011,6 +10167,7 @@ fn dormer(s: &mut Session, p: &Value) -> R {
             join: true,
             join_start: true,
             join_end: true,
+            curtain: Default::default(),
         })
     };
     let (l, r) = (micron(at + n * (w / 2.0)), micron(at - n * (w / 2.0)));
@@ -12851,6 +13008,87 @@ fn families(m: &Model) -> Value {
     Value::Object(all)
 }
 
+/// Whether the `type` command is to make or keep wall type `name` a curtain type: `curtain` given (not null), or the type
+/// is one already and `curtain` isn't given.
+fn curtain_wanted(m: &Model, p: &Value, name: &str) -> bool {
+    match p.get("curtain") {
+        Some(Value::Null) => false,
+        Some(_) => true,
+        None => m.types.wall.get(name).is_some_and(WallType::is_curtain),
+    }
+}
+
+/// A curtain type as `type`'s `curtain` gives it over what the type had (`old`): each key kept when not given, a grid's
+/// and a mullion set's keys too. A layout and a join condition are read in Revit's words in any case ("Fixed Distance").
+/// A starter panel or mullion type it names is made when the project lacks it.
+fn curtain_type(
+    c: &str,
+    m: &mut Model,
+    given: Option<&Value>,
+    old: Option<&crate::curtain::CurtainType>,
+) -> Result<crate::curtain::CurtainType, String> {
+    let mut v = serde_json::to_value(old.cloned().unwrap_or_default()).map_err(|e| bad(c, e.to_string()))?;
+    let given = match given {
+        None => Value::Object(Default::default()),
+        Some(Value::Bool(true)) => Value::Object(Default::default()),
+        Some(g @ Value::Object(_)) => g.clone(),
+        Some(_) => {
+            return Err(bad(
+                c,
+                "`curtain` is {panel?, join_condition?, vertical?, horizontal?, vertical_mullions?, horizontal_mullions?}, true for a plain curtain type, or null for a basic wall type",
+            ));
+        }
+    };
+    let word = |v: &Value| v.as_str().map(|s| json!(s.trim().to_ascii_lowercase().replace([' ', '_'], "-")));
+    if let (Some(to), Some(from)) = (v.as_object_mut(), given.as_object()) {
+        for (k, g) in from {
+            match (k.as_str(), g) {
+                ("vertical" | "horizontal" | "vertical_mullions" | "horizontal_mullions", Value::Object(inner)) => {
+                    let slot = to.entry(k.clone()).or_insert_with(|| Value::Object(Default::default()));
+                    if let Some(slot) = slot.as_object_mut() {
+                        for (ik, iv) in inner {
+                            let iv = if ik == "layout" { word(iv).unwrap_or_else(|| iv.clone()) } else { iv.clone() };
+                            // A mullion type given as null is none.
+                            slot.insert(ik.clone(), if iv.is_null() && k.ends_with("mullions") { json!("") } else { iv });
+                        }
+                    }
+                }
+                ("join_condition", g) => {
+                    to.insert(k.clone(), word(g).unwrap_or_else(|| g.clone()));
+                }
+                ("panel", Value::Null) => {
+                    to.insert(k.clone(), json!(""));
+                }
+                _ => {
+                    to.insert(k.clone(), g.clone());
+                }
+            }
+        }
+    }
+    let ct: crate::curtain::CurtainType = serde_json::from_value(v).map_err(|e| {
+        bad(
+            c,
+            format!(
+                "`curtain`: {e}. It is {{panel?, join_condition?: not-defined|vertical-grid-continuous|horizontal-grid-continuous|\
+                 border-and-vertical-grid-continuous|border-and-horizontal-grid-continuous, vertical?, horizontal?: {{layout: none|fixed-distance|\
+                 fixed-number|maximum-spacing|minimum-spacing, spacing?, adjust_for_mullion?}}, vertical_mullions?, horizontal_mullions?: \
+                 {{interior?, border1?, border2?}}}}"
+            ),
+        )
+    })?;
+    // What it names of the starter types, made where the project has none.
+    let starter_mullion = |n: &str| crate::curtain::STARTER_MULLIONS.iter().any(|(s, ..)| *s == n);
+    let named: Vec<&str> = [&ct.vertical_mullions, &ct.horizontal_mullions].into_iter().flat_map(|ms| ms.named()).map(|(_, n)| n).collect();
+    if named.iter().any(|n| starter_mullion(n) && !m.types.mullion.contains_key(*n)) {
+        crate::curtain::ensure_mullions(m);
+    }
+    let starter_panel = [crate::curtain::GLAZED, crate::curtain::SOLID, crate::curtain::EMPTY].contains(&ct.panel.as_str());
+    if m.types.curtain_panel.is_empty() || (starter_panel && !m.types.curtain_panel.contains_key(&ct.panel)) {
+        crate::curtain::ensure_panels(m);
+    }
+    Ok(ct)
+}
+
 fn edit_type(s: &mut Session, p: &Value) -> R {
     let c = "type";
     let cat = category(&string(c, p, "category")?.ok_or_else(|| bad(c, "`category` is required: wall, floor, ceiling, door or window"))?);
@@ -12862,6 +13100,69 @@ fn edit_type(s: &mut Session, p: &Value) -> R {
     let mut identity = m.identity_of(&cat, &name).cloned().unwrap_or_default();
     identity.read(p).map_err(|e| bad(c, e))?;
     let t = match cat.as_str() {
+        // A curtain wall type (`curtain` given, or the type is one and it isn't taken away): no layers, and as deep as what
+        // it names.
+        "wall" if curtain_wanted(m, p, &name) => {
+            let old = m.types.wall.get(&name).cloned().unwrap_or_default();
+            if !absent(p.get("layers")) || !absent(p.get("core")) {
+                return Err(bad(c, "a curtain wall type has no layers: its panels and mullions are what it is made of"));
+            }
+            let ct = curtain_type(c, m, p.get("curtain"), old.curtain.as_ref())?;
+            let function = match string(c, p, "function")? {
+                Some(n) => crate::model::WallFunction::from_name(&n).ok_or_else(|| {
+                    bad(c, format!("`function` is interior, exterior, foundation, retaining, soffit or core-shaft, not `{n}`"))
+                })?,
+                None => old.function,
+            };
+            let t = WallType { thickness: crate::curtain::depth(m, &ct), identity, function, curtain: Some(ct), ..WallType::default() };
+            m.types.wall.insert(name.clone(), t.clone());
+            json!(t)
+        }
+        "curtainpanel" => {
+            let old = m.types.curtain_panel.get(&name).cloned();
+            let empty = match p.get("empty") {
+                v if absent(v) => old.as_ref().is_some_and(|t| t.empty),
+                _ => flag(c, p, "empty")?,
+            };
+            let t = crate::curtain::PanelType {
+                thickness: thickness.or(old.as_ref().map(|t| t.thickness)).unwrap_or(25.0),
+                offset: num(c, p, "offset")?.or(old.as_ref().map(|t| t.offset)).unwrap_or(0.0),
+                material: string(c, p, "material")?.or(old.map(|t| t.material)).unwrap_or_default(),
+                empty,
+                identity,
+            };
+            m.types.curtain_panel.insert(name.clone(), t.clone());
+            crate::curtain::refresh_depths(m);
+            json!(t)
+        }
+        "mullion" => {
+            let old = m.types.mullion.get(&name).cloned();
+            let round = match p.get("round") {
+                v if absent(v) => old.as_ref().is_some_and(|t| t.round),
+                _ => flag(c, p, "round")?,
+            };
+            let radius = num(c, p, "radius")?;
+            let thickness = match (round, radius) {
+                (true, Some(r)) => Some(2.0 * r),
+                _ => thickness,
+            };
+            // `width` is both sides together, half each; `side1` and `side2` each its own.
+            let half = width.map(|w| w / 2.0);
+            let t = crate::curtain::MullionType {
+                thickness: thickness
+                    .or(old.as_ref().map(|t| t.thickness))
+                    .ok_or_else(|| need(if round { "radius" } else { "thickness" }))?,
+                side1: num(c, p, "side1")?.or(half).or(old.as_ref().map(|t| t.side1)).unwrap_or(if round { 0.0 } else { 25.0 }),
+                side2: num(c, p, "side2")?.or(half).or(old.as_ref().map(|t| t.side2)).unwrap_or(if round { 0.0 } else { 25.0 }),
+                round,
+                offset: num(c, p, "offset")?.or(old.as_ref().map(|t| t.offset)).unwrap_or(0.0),
+                material: string(c, p, "material")?.or(old.map(|t| t.material)).unwrap_or_default(),
+                identity,
+            };
+            m.types.mullion.insert(name.clone(), t.clone());
+            crate::curtain::refresh_depths(m);
+            json!(t)
+        }
         "wall" => {
             let (thickness, layers) = layered(c, p, m.types.wall.get(&name).map(|t| (t.thickness, t.layers.as_slice())), thickness, &need)?;
             let old = m.types.wall.get(&name).cloned().unwrap_or_default();
@@ -12909,6 +13210,7 @@ fn edit_type(s: &mut Session, p: &Value) -> R {
                 wrap_ends: word(c, p, "wrap_ends", old.wrap_ends, crate::model::Wrapping::from_name, "none, exterior or interior")?,
                 coarse_fill,
                 coarse_color,
+                curtain: None,
             };
             m.types.wall.insert(name.clone(), t.clone());
             let mut out = json!(t);
@@ -13010,12 +13312,86 @@ fn edit_type(s: &mut Session, p: &Value) -> R {
                 c,
                 format!(
                     "`{other}` has no types; use wall, floor, ceiling, door, window, column, structural column, footing, beam, \
-                     strip footing, pipe, conduit, cable tray, wire, down conductor, earthing conductor, cable, roof or railing"
+                     strip footing, pipe, conduit, cable tray, wire, down conductor, earthing conductor, cable, roof, railing, \
+                     curtainpanel (a curtain panel type) or mullion (a mullion type); a curtain wall type is a wall type with `curtain`"
                 ),
             ));
         }
     };
-    Ok(json!({"category": cat, "name": name, "type": t}))
+    let mut reply = json!({"category": cat, "name": name, "type": t});
+    // A basic wall type made a curtain type: its walls host no doors or windows any more. A curtain type made a basic
+    // one: its walls keep nothing of their grids.
+    if cat == "wall" {
+        with_inserts_dropped(s, &mut reply)?;
+        let m = &s.model;
+        let was_curtain = |w: &Wall| !w.curtain.is_default() && !crate::curtain::is_curtain(m, w);
+        let basic: Vec<Id> =
+            m.elements.iter().filter(|(_, e)| matches!(e, Element::Wall(w) if was_curtain(w))).map(|(id, _)| *id).collect();
+        let m = s.model_mut();
+        for id in basic {
+            if let Some(Element::Wall(w)) = m.elements.get_mut(id) {
+                w.curtain = Default::default();
+            }
+        }
+    }
+    Ok(reply)
+}
+
+/// What Revit says when a wall is given a curtain wall type, and what it does about the doors and windows in it.
+const CURTAIN_INSERTS: &str = "Switching wall type to family curtain wall. A curtain wall hosts no doors or windows: those in it were                                deleted (`deleted`), as Revit does.";
+
+/// Doors that filled cells of curtain walls and have none now, deleted as `delete` deletes a door, pinned or not: what the
+/// engine does with those a command's layout left without a cell.
+pub(crate) fn drop_curtain_doors(s: &mut Session, ids: &[Id]) -> Result<(), String> {
+    let ids: Vec<Id> = ids.iter().copied().filter(|id| s.model.elements.contains_key(*id)).collect();
+    let pinned: Vec<Guid> = s.model.pinned_among(&ids).into_iter().map(|id| s.model.guid(id)).collect();
+    if !pinned.is_empty() {
+        let m = s.model_mut();
+        for g in pinned {
+            m.pinned.remove(&g);
+        }
+    }
+    if ids.is_empty() { Ok(()) } else { delete_elements(s, &ids).map(|_| ()) }
+}
+
+/// What is said when a curtain wall is given a basic type and had doors in its cells.
+const CURTAIN_DOORS: &str =
+    "A basic wall has no curtain grid: the doors that filled cells of it were deleted (`deleted`). Place doors in the wall with `door`.";
+
+/// The doors and windows that stand in curtain walls deleted, with what hangs on them (their tags), pinned or not: as
+/// Revit does when a wall is given a curtain wall type. `reply` then lists what went as `deleted`, with a `note`.
+fn with_inserts_dropped(s: &mut Session, reply: &mut Value) -> Result<(), String> {
+    let m = &s.model;
+    let curtain = |host: Guid| m.wall(host).is_some_and(|w| crate::curtain::is_curtain(m, w));
+    let inserts: Vec<Id> = m
+        .elements
+        .iter()
+        .filter(|(_, e)| match e {
+            // A curtain wall's own door (a panel swapped for one) stays while its wall is a curtain wall, and goes with the
+            // grid when it stops being one.
+            Element::Door(o) if o.panel.is_some() => !curtain(o.host),
+            Element::Door(o) | Element::Window(o) => curtain(o.host),
+            _ => false,
+        })
+        .map(|(id, _)| *id)
+        .collect();
+    if inserts.is_empty() {
+        return Ok(());
+    }
+    let pinned: Vec<Guid> = m.pinned_among(&inserts).into_iter().map(|id| m.guid(id)).collect();
+    if !pinned.is_empty() {
+        let m = s.model_mut();
+        for g in pinned {
+            m.pinned.remove(&g);
+        }
+    }
+    let cells = inserts.iter().all(|id| s.model.elements.get(*id).is_some_and(|e| crate::curtain::door_host(e).is_some()));
+    let deleted = delete_elements(s, &inserts)?;
+    if let Some(o) = reply.as_object_mut() {
+        o.insert("deleted".into(), deleted);
+        o.insert("note".into(), json!(if cells { CURTAIN_DOORS } else { CURTAIN_INSERTS }));
+    }
+    Ok(())
 }
 
 /// A layered type's thickness and layers from `type`'s params, over the one named that way already
@@ -13289,8 +13665,15 @@ fn tee_join(s: &mut Session, p: &Value, a: Id, b: Id) -> R {
 fn modify(s: &mut Session, p: &Value) -> R {
     let c = "modify";
     let fields = p.as_object().ok_or_else(|| bad(c, "params must be {id | ids, …fields}"))?;
+    let ids = ids_param(c, &s.model, p)?;
+    // A starter curtain wall type is made when a wall is first given it, as when one is first drawn with it.
+    if let Some(Value::String(n)) = fields.get("type")
+        && !s.model.types.wall.contains_key(n)
+        && ids.iter().any(|id| s.model.wall(*id).is_some())
+    {
+        crate::curtain::ensure_starter(s.model_mut(), n);
+    }
     let m = &s.model;
-    let ids = ids_param(c, m, p)?;
     // Where a pinned element is changes only by what says where that kind of element is: a change of its type, its settings
     // or its height is no move, and the element stays editable.
     let placed: Vec<Id> = ids
@@ -13298,9 +13681,24 @@ fn modify(s: &mut Session, p: &Value) -> R {
         .copied()
         .filter(|id| m.elements.get(*id).is_some_and(|e| location_fields(e).iter().any(|k| fields.contains_key(*k))))
         .collect();
+    // A panel or a mullion its curtain wall placed is the type's until it is unpinned, as Revit's.
+    if fields.contains_key("type")
+        && let Some(id) = ids.iter().find(|id| m.elements.get(**id).is_some_and(crate::curtain::placed))
+    {
+        let what = m.elements.get(*id).map_or("element", Element::category);
+        return Err(bad(
+            c,
+            format!(
+                "{what} {id} is pinned: its curtain wall's type decides its type, as in Revit. Run `unpin` with `ids: [{id}]` first, \
+                 then change its type"
+            ),
+        ));
+    }
     pin::refuse_pinned(c, m, &placed, pin::Held::Move)?;
     let mut edited = Vec::new();
     let mut rescaled = Vec::new();
+    // Whether a basic wall is given a curtain wall type: its doors and windows then go, as Revit's.
+    let mut made_curtain = false;
     // Footings the command changes itself, and the ones that follow their wall's base as it goes up or down.
     let moving_footings: Vec<Id> =
         ids.iter().copied().filter(|id| m.elements.get(*id).is_some_and(|e| e.category() == "stripfooting")).collect();
@@ -13353,7 +13751,17 @@ fn modify(s: &mut Session, p: &Value) -> R {
         // A strip footing glued to the wall keeps its top on the wall's base: raised or lowered along its level
         // (its `base_offset` or the level's), the footing rises or falls with it. A footing changed by hand is
         // soon no footing of that wall: the condition is read again from the geometry.
+        // A curtain wall given a basic type keeps nothing of its grid.
+        if let (Element::Wall(old), Element::Wall(w)) = (e, &mut e2)
+            && crate::curtain::is_curtain(m, old)
+            && !crate::curtain::is_curtain(m, w)
+            && !fields.contains_key("curtain")
+        {
+            w.curtain = Default::default();
+        }
         if let (Element::Wall(old), Element::Wall(w)) = (e, &e2) {
+            // (Or a basic one of a curtain wall: the doors that filled its cells go, with what hangs on them.)
+            made_curtain |= old.type_name != w.type_name && crate::curtain::is_curtain(m, old) != crate::curtain::is_curtain(m, w);
             let (before, after) = (m.base_z(old), m.base_z(w));
             if (after - before).abs() > 1e-9 {
                 for (fid, fid_wall) in crate::glue::footings_of(m, &[id]) {
@@ -13407,10 +13815,17 @@ fn modify(s: &mut Session, p: &Value) -> R {
     for (id, e) in edited {
         m.elements.insert(id, e);
     }
-    let said = match (p.get("ids"), ids.as_slice()) {
+    let mut dropped = json!({});
+    if made_curtain {
+        with_inserts_dropped(s, &mut dropped)?;
+    }
+    let mut said = match (p.get("ids"), ids.as_slice()) {
         (None, [one]) => element_json(&s.model, *one),
         _ => json!({"modified": ids}),
     };
+    if let (Some(o), Some(d)) = (said.as_object_mut(), dropped.as_object_mut()) {
+        o.append(d);
+    }
     Ok(said)
 }
 
@@ -13427,6 +13842,11 @@ fn location_fields(e: &Element) -> &'static [&'static str] {
         E::Ceiling(_) | E::Shaft(_) | E::Mass(_) => &["boundary", "sketch"],
         E::SubDivision(_) => &["boundary", "openings", "sketch", "host"],
         E::SurveyPoint(_) | E::ProjectBasePoint(_) => &["at"],
+        // What its wall's grid gives a panel or a mullion, and, pinned (the type's), its type: as Revit's, which changes a
+        // panel's or a mullion's type only once it is unpinned.
+        E::CurtainPanel(_) => &["span", "host", "key", "type"],
+        E::Mullion(_) => &["at", "from", "to", "trim", "vertical", "host", "key", "type"],
+        E::CurtainGrid(_) => &["at", "vertical", "host"],
         E::Roof(_) => &["boundary", "sketch", "extrusion", "courtyards"],
         E::Door(_) | E::Window(_) => &["host", "offset"],
         E::Room(_) => &["point"],
@@ -13575,8 +13995,19 @@ fn relocate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion, end: Option<bool>
     // point, moves alone, its shared coordinates following (`motion::transform`).
     let with_parts = with_subdivisions(&s.model, ids);
     let ids = with_parts.as_slice();
-    // A pinned element is held where it is, as in Revit.
-    pin::refuse_pinned(c, &s.model, ids, if c == "rotate" { pin::Held::Rotate } else { pin::Held::Move })?;
+    // A curtain wall's panel or mullion on its own is not moved, pinned by its wall or freed.
+    if let Some(id) = pin::held_alone(&s.model, ids)
+        .into_iter()
+        .find(|id| matches!(s.model.elements.get(*id), Some(Element::CurtainPanel(_) | Element::Mullion(_))))
+        .filter(|id| {
+            s.model.elements.get(*id).and_then(crate::curtain::host_of).is_some_and(|h| !ids.iter().any(|i| s.model.guid(*i) == h))
+        })
+    {
+        let category = s.model.elements.get(id).map_or("element", Element::category);
+        return Err(bad(c, format!("{category} {id} is where its curtain wall's grid puts it; move the wall, or a grid line")));
+    }
+    // A pinned element is held where it is, as in Revit. (A curtain wall's panels and mullions go where their wall goes.)
+    pin::refuse_pinned(c, &s.model, &pin::held_alone(&s.model, ids), if c == "rotate" { pin::Held::Rotate } else { pin::Held::Move })?;
     let m = &s.model;
     // The walls, and what points at each: found among those, not every element.
     let lookup = m.lookup();
@@ -13601,6 +14032,8 @@ fn relocate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion, end: Option<bool>
                 walls.insert(id, w);
             }
             Element::Door(o) | Element::Window(o) if moving_guids.contains(&o.host) => {}
+            // A curtain wall's own go with it: its grid lines below, its panels and mullions laid out after the command.
+            e if crate::curtain::host_of(&e).is_some_and(|h| moving_guids.contains(&h)) => {}
             // Moving one end of a run: the other end stays where it was, as a wall's does.
             mut e => {
                 // A grid's end: the other stays, as a wall's does.
@@ -13946,7 +14379,7 @@ fn relocate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion, end: Option<bool>
     // Doors and windows in walls that changed keep their place, or go with their wall: those pointing at them, by id.
     let hosted: BTreeSet<Id> =
         walls.keys().filter_map(|w| m.elements.guid(*w)).flat_map(|g| lookup.referrers(&g).collect::<Vec<_>>()).collect();
-    for (id, e) in hosted.into_iter().filter_map(|id| Some((id, m.elements.get(id)?))) {
+    for (id, e) in hosted.iter().filter_map(|id| Some((*id, m.elements.get(*id)?))) {
         let (Element::Door(o) | Element::Window(o)) = e else { continue };
         let Some(host) = m.elements.id(o.host) else { continue };
         let (Some(before), Some(after)) = (old(&host), walls.get(&host)) else { continue };
@@ -13963,6 +14396,31 @@ fn relocate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion, end: Option<bool>
         others.retain(|(other, _)| *other != id);
         others.push((id, if matches!(e, Element::Door(_)) { Element::Door(o) } else { Element::Window(o) }));
     }
+    // A curtain wall's hand-made standing grid lines likewise: each stays where it is in the model, or goes with its wall.
+    for (id, e) in hosted.iter().filter_map(|id| Some((*id, m.elements.get(*id)?))) {
+        let Element::CurtainGrid(l) = e else { continue };
+        let Some(host) = m.elements.id(l.host) else { continue };
+        let (Some(before), Some(after)) = (old(&host), walls.get(&host)) else { continue };
+        if !l.vertical {
+            continue;
+        }
+        let spot = Axis::of(before).at(l.at, 0.0);
+        let at = if carried(l.host) || moving.contains(&id) { f(spot) } else { spot };
+        let axis = Axis::of(after);
+        let along = if after.arc == 0.0 { (at - after.start).dot(axis.tangent(0.0)) } else { axis.project(at).0 };
+        others.retain(|(other, _)| *other != id);
+        others.push((id, Element::CurtainGrid(crate::curtain::GridLine { at: (along * 1e3).round() / 1e3, ..l.clone() })));
+    }
+    // A curtain wall mirrored runs back the other way: what was done to its grid by hand is put where it was.
+    let hands: Vec<(Id, crate::curtain::Hand, f64)> = if mo.mirror && end.is_none() {
+        let curtain = |id: &&Id| m.wall(**id).is_some_and(|w| crate::curtain::is_curtain(m, w));
+        ids.iter()
+            .filter(curtain)
+            .map(|id| (*id, crate::curtain::hand(m, *id), m.wall(*id).map_or(0.0, |w| Axis::of(w).length())))
+            .collect()
+    } else {
+        Vec::new()
+    };
     // Revit's Moves With Nearby Elements: a component set so goes with the wall nearest it, when that wall is taken whole
     // and slid (not turned or mirrored).
     if let (None, Some(by)) = (end, mo.slide) {
@@ -14000,6 +14458,9 @@ fn relocate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion, end: Option<bool>
     }
     for id in flipped {
         massing::mirrored(m, id);
+    }
+    for (id, hand, length) in &hands {
+        crate::curtain::hand_to(m, *id, hand, &|s| length - s);
     }
     // Dimensions keep to the same lines of mirrored walls, which run the other way: their starts
     // and ends swap, and their doors' and windows' jambs.
@@ -14078,6 +14539,9 @@ pub(crate) fn duplicate_exactly(c: &str, s: &mut Session, ids: &[Id], mo: &Motio
             // A copied wall brings its doors and windows, a stair or a ramp its railings; see below.
             Element::Door(o) | Element::Window(o) if copying_guids.contains(&o.host) => {}
             Element::Railing(Railing { host: Some(h), .. }) if copying_guids.contains(&h) => {}
+            // A copied curtain wall brings its hand-made grid lines (below); its panels and mullions are never copied: the
+            // copy lays out its own.
+            e if crate::curtain::host_of(&e).is_some_and(|h| copying_guids.contains(&h)) => {}
             e @ (Element::Dimension(_) | Element::Tag(_) | Element::Spot(_)) => notes.push((id, e)),
             e => copies.push((id, e)),
         }
@@ -14088,11 +14552,16 @@ pub(crate) fn duplicate_exactly(c: &str, s: &mut Session, ids: &[Id], mo: &Motio
         .filter(|(_, e)| match e {
             Element::Door(o) | Element::Window(o) => copying_guids.contains(&o.host),
             Element::Railing(r) => r.host.is_some_and(|h| copying_guids.contains(&h)),
+            Element::CurtainGrid(l) => copying_guids.contains(&l.host),
             _ => false,
         })
         .map(|(&id, e)| {
             let mut e = e.clone();
             match &mut e {
+                // On a mirrored copy, which runs back the other way: as far from its other end.
+                Element::CurtainGrid(l) if mo.mirror && l.vertical => {
+                    l.at = m.wall(l.host).map_or(l.at, |w| Axis::of(w).length() - l.at);
+                }
                 // On a mirrored copy, which runs back the other way: from its other end, on the other jamb.
                 Element::Door(o) | Element::Window(o) if mo.mirror => {
                     o.offset = m.wall(o.host).map_or(o.offset, |w| Axis::of(w).length() - o.offset);
@@ -14102,6 +14571,15 @@ pub(crate) fn duplicate_exactly(c: &str, s: &mut Session, ids: &[Id], mo: &Motio
                 _ => {}
             }
             (id, e)
+        })
+        .collect();
+    // What was done by hand to each curtain wall copied (segments removed, mullions deleted, panels and mullions freed), to
+    // put on its copy, whose lines are named anew.
+    let hands: Vec<(Guid, crate::curtain::Hand, f64)> = ids
+        .iter()
+        .filter_map(|id| {
+            let w = m.wall(*id).filter(|w| crate::curtain::is_curtain(m, w))?;
+            Some((m.guid(*id), crate::curtain::hand(m, *id), Axis::of(w).length()))
         })
         .collect();
     let m = s.model_mut();
@@ -14121,6 +14599,7 @@ pub(crate) fn duplicate_exactly(c: &str, s: &mut Session, ids: &[Id], mo: &Motio
                 }))
             }
             Element::Railing(r) => r.host = r.host.map(|h| hosts.get(&h).copied().unwrap_or(h)),
+            Element::CurtainGrid(l) => l.host = hosts.get(&l.host).copied().unwrap_or(l.host),
             Element::Door(o) | Element::Window(o) => {
                 o.host = hosts.get(&o.host).copied().unwrap_or(o.host);
                 o.mark = next_number(m.elements.values().filter_map(|e| match e {
@@ -14153,6 +14632,11 @@ pub(crate) fn duplicate_exactly(c: &str, s: &mut Session, ids: &[Id], mo: &Motio
             Some(Element::SubDivision(sd)) => sd.host = hosts.get(&sd.host).copied().unwrap_or(sd.host),
             Some(Element::Toposolid(t)) => t.excavated_by.iter_mut().for_each(|g| *g = hosts.get(g).copied().unwrap_or(*g)),
             _ => {}
+        }
+    }
+    for (from, hand, length) in &hands {
+        if let Some(copy) = hosts.get(from).and_then(|g| m.elements.id(*g)) {
+            crate::curtain::hand_to(m, copy, hand, &|s| if mo.mirror { length - s } else { s });
         }
     }
     for (from, mut e) in notes {
@@ -14488,7 +14972,8 @@ fn move_elements(s: &mut Session, p: &Value) -> R {
                 .walls_near_at(&[span], thickest + 1.0)
                 .into_iter()
                 .filter_map(|w| {
-                    let wall = m.wall(w)?;
+                    // A curtain wall takes no door or window.
+                    let wall = m.wall(w).filter(|wall| !crate::curtain::is_curtain(m, wall))?;
                     let axis = Axis::of(wall);
                     let ((along, across), (ext, int)) = (axis.project(at), crate::walls::faces(m, wall));
                     let within = along > TOL && along < axis.length() - TOL && (int - TOL..=ext + TOL).contains(&across);
@@ -14671,6 +15156,18 @@ fn split(s: &mut Session, p: &Value) -> R {
         }
         later.push(oid);
     }
+    // A curtain wall's halves are each laid out afresh: its hand-made lines and what was done to its grid by hand go to
+    // the half they are in.
+    let curtain = crate::curtain::is_curtain(m, &w);
+    let hand = crate::curtain::hand(m, id);
+    let lines: Vec<(Id, crate::curtain::GridLine)> = m
+        .hosted_by(m.guid(id))
+        .into_iter()
+        .filter_map(|l| match m.elements.get(l) {
+            Some(Element::CurtainGrid(g)) => Some((l, g.clone())),
+            _ => None,
+        })
+        .collect();
     let (mut first, mut second) = (w.clone(), w);
     (first.end, second.start) = (cut, cut);
     // Neither piece is the mass's face now.
@@ -14688,6 +15185,21 @@ fn split(s: &mut Session, p: &Value) -> R {
             o.host = host;
             o.offset -= along;
         }
+    }
+    for (lid, l) in lines {
+        if !l.vertical {
+            // A lying line crosses both halves.
+            m.insert(Element::CurtainGrid(crate::curtain::GridLine { host, ..l }));
+        } else if (l.at - along).abs() <= crate::curtain::NEAR {
+            // The cut is a border of both now.
+            m.elements.remove(lid);
+        } else if l.at > along {
+            m.elements.insert(lid, Element::CurtainGrid(crate::curtain::GridLine { host, at: l.at - along, ..l }));
+        }
+    }
+    if curtain {
+        crate::curtain::hand_to(m, id, &hand, &|s| s);
+        crate::curtain::hand_to(m, new, &hand, &|s| s - along);
     }
     Ok(json!({"ids": [id, new]}))
 }
@@ -14833,6 +15345,15 @@ fn trim_extend(s: &mut Session, p: &Value) -> R {
 fn keep_openings(c: &str, m: &Model, id: Id, before: &Wall, after: &Wall) -> Result<Vec<(Id, Element)>, String> {
     let (was, now) = (Axis::of(before), Axis::of(after));
     let mut out = Vec::new();
+    // A curtain wall's hand-made standing grid lines stay where they are in the plan too.
+    for lid in m.hosted_by(m.guid(id)) {
+        if let Some(Element::CurtainGrid(l)) = m.elements.get(lid)
+            && l.vertical
+        {
+            let along = ((was.at(l.at, 0.0) - after.start).dot(now.tangent(0.0)) * 1e3).round() / 1e3;
+            out.push((lid, Element::CurtainGrid(crate::curtain::GridLine { at: along, ..l.clone() })));
+        }
+    }
     for (&oid, e) in &m.elements {
         let (Element::Door(o) | Element::Window(o)) = e else { continue };
         if !m.same(o.host, id) {
@@ -15123,7 +15644,33 @@ fn purge(s: &mut Session, p: &Value) -> R {
 fn delete(s: &mut Session, p: &Value) -> R {
     // A pinned element is not deleted until it is unpinned, as in Revit; what goes with a host it hangs on does go.
     let asked = ids_param("delete", &s.model, p)?;
-    pin::refuse_pinned("delete", &s.model, &asked, pin::Held::Delete)?;
+    let m = &s.model;
+    // A curtain wall's panels, mullions and grid lines go with their wall, pinned by it or not.
+    let all: BTreeSet<Id> = asked.iter().copied().collect();
+    let with_wall =
+        |id: &Id| m.elements.get(*id).and_then(crate::curtain::host_of).and_then(|h| m.elements.id(h)).is_some_and(|h| all.contains(&h));
+    // As Revit: a curtain panel is never deleted on its own.
+    if let Some(id) = asked.iter().find(|id| matches!(m.elements.get(**id), Some(Element::CurtainPanel(_))) && !with_wall(id)) {
+        return Err(bad(
+            "delete",
+            format!(
+                "curtain panel {id} can't be deleted, as in Revit: every cell of a curtain wall's grid has a panel. Change its type to \
+                 an empty one (`unpin` it, then `modify` it with `type: \"Empty\"`), or remove a grid segment to join it with its \
+                 neighbour (`add_remove_segments`)"
+            ),
+        ));
+    }
+    let held: Vec<Id> = asked.iter().copied().filter(|id| !with_wall(id) || m.pinned.contains(&m.guid(*id))).collect();
+    pin::refuse_pinned("delete", m, &held, pin::Held::Delete)?;
+    // What a curtain wall is to remember: a mullion deleted stays gone, and a grid line deleted is named by nothing.
+    let mut forgotten: Vec<(Guid, Option<String>, Option<String>)> = Vec::new();
+    for id in asked.iter().filter(|id| !with_wall(id)) {
+        match m.elements.get(*id) {
+            Some(Element::Mullion(x)) => forgotten.push((x.host, Some(x.key.clone()), None)),
+            Some(Element::CurtainGrid(l)) => forgotten.push((l.host, None, Some(format!("g{}", m.guid(*id))))),
+            _ => {}
+        }
+    }
     // As Revit: the survey point and the project base point are always there; a view hides them.
     if let Some(id) =
         asked.iter().find(|id| matches!(s.model.elements.get(**id), Some(Element::SurveyPoint(_) | Element::ProjectBasePoint(_))))
@@ -15151,6 +15698,27 @@ fn delete(s: &mut Session, p: &Value) -> R {
     });
     // A road deleted whole: the roads it met are shaped again without it (`reshaped`, their first pieces).
     let (mut r, gone) = result?;
+    for (host, mullion, line) in forgotten {
+        let Some(wall) = s.model.elements.id(host) else { continue };
+        if let Some(Element::Wall(w)) = s.model_mut().elements.get_mut(wall) {
+            if let Some(key) = mullion {
+                w.curtain.no_mullion.insert(key);
+            }
+            if let Some(line) = line {
+                let names = |key: &String| key.trim_start_matches("m:").split('|').any(|part| part == line);
+                w.curtain.merged.retain(|k| !names(k));
+                w.curtain.no_mullion.retain(|k| !names(k));
+            }
+        }
+        // Without the line, what is still removed may join cells that make no rectangle: those segments are back.
+        let unsound = match (crate::curtain::grid(&s.model, wall), s.model.wall(wall)) {
+            (Some(g), Some(w)) => !g.trouble(&w.curtain.merged).is_empty(),
+            _ => false,
+        };
+        if unsound && let Some(Element::Wall(w)) = s.model_mut().elements.get_mut(wall) {
+            w.curtain.merged.clear();
+        }
+    }
     let reshaped = ground::roads_after_delete(s, &before, &gone)?;
     if !reshaped.is_empty()
         && let Some(o) = r.as_object_mut()
@@ -15193,7 +15761,9 @@ fn delete_indexed(s: &mut Session, p: &Value) -> R {
                 Some(Element::Spot(sp)) => gone.contains(&sp.view) || sp.host.is_some_and(|h| gone.contains(&h)),
                 Some(Element::CadImport(ci)) => ci.view.is_some_and(|v| gone.contains(&v)),
                 Some(Element::Image(im)) => gone.contains(&im.view),
-                _ => false,
+                // A curtain wall's panels, mullions and grid lines go with it.
+                Some(e) => crate::curtain::host_of(e).is_some_and(|h| gone.contains(&h)),
+                None => false,
             };
             if hosted {
                 next.insert(guid);
@@ -15321,7 +15891,7 @@ fn delete_from_scratch(s: &mut Session, p: &Value) -> R {
                         // An import in one view only goes with it.
                         Element::CadImport(ci) => ci.view.is_some_and(|v| gone.contains(&v)),
                         Element::Image(im) => gone.contains(&im.view),
-                        _ => false,
+                        e => crate::curtain::host_of(e).is_some_and(|h| gone.contains(&h)),
                     }
             })
             .map(|(_, id, _)| id)

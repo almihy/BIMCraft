@@ -93,7 +93,7 @@ const PHASES: &str = "phases";
 /// The last part of the key of an entry's name.
 const NAME: &str = "name";
 /// The categories whose types are fields of `types` of their own, by their key in the file and their kind in the library.
-const CATEGORIES: [(&str, &str); 10] = [
+const CATEGORIES: [(&str, &str); 12] = [
     ("wall", "wall"),
     ("floor", "floor"),
     ("door", "door"),
@@ -104,6 +104,8 @@ const CATEGORIES: [(&str, &str); 10] = [
     ("railing", "railing"),
     ("structural_column", "structuralcolumn"),
     ("footing", "footing"),
+    ("curtain_panel", "curtainpanel"),
+    ("mullion", "mullion"),
 ];
 
 fn is_split(setting: &str) -> bool {

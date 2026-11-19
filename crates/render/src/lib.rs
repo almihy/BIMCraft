@@ -5,9 +5,10 @@
 
 // The crates under it, by the paths its modules have always named them by (`crate::model`, `crate::geom`).
 pub use bimcraft_model::{
-    bounds, cad, camera, carpark, cloud, component_geometry, curves, derived, dims, dxf, family, files, fills, font, geom, graphics,
-    ground, groups, ids, json, language, lines, link, massing, masterplan, model, paint, pen, prim, raster, rooms, runs, schedule,
-    selfcheck, shared, site, sketch, solid, solids, stairs, standards, styles, text, texture, titleblock, units, walls, workplane,
+    bounds, cad, camera, carpark, cloud, component_geometry, curtain, curves, derived, dims, dxf, family, files, fills, font, geom,
+    graphics, ground, groups, ids, json, language, lines, link, massing, masterplan, model, paint, pen, prim, raster, rooms, runs,
+    schedule, selfcheck, shared, site, sketch, solid, solids, stairs, standards, styles, text, texture, titleblock, units, walls,
+    workplane,
 };
 
 pub mod dims3d;

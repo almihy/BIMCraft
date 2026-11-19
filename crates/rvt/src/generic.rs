@@ -16,6 +16,8 @@
 //! A box stands for an element as its envelope, which is a fair stand-in for a fitting or a piece of equipment and none for what
 //! follows a path or holds other elements, so a category says how its box is taken (`Shape`):
 //!
+//! A curtain panel whose wall came in as a curtain wall with its grid (`walls`, `curtain`) is that wall's own panel, and no box.
+//!
 //! - a path (a railing, a mullion, a wall sweep, a slab edge, a conduit) comes in only where its box runs along an axis (across it at
 //!   most a third of its length, or standing with its plan at most a quarter of its height): the box of a path that turns a corner
 //!   or runs across the axes is the envelope of the path, a block where there is none, and is left out with that;
@@ -184,6 +186,11 @@ fn boxes(
         )
     };
     for r in f.of_category(category) {
+        // A panel its curtain wall's grid was worked out from is that wall's panel, laid out by it: no box too.
+        if cx.curtain_panels.contains_key(&r.id) {
+            cx.note(label, r.id, "comes in as a panel of its curtain wall, where the wall's grid puts it: its type is not read");
+            continue;
+        }
         if known.is_some_and(|k| k.contains(&boxed(&r.bbox))) {
             let why =
                 "its box is that of an element of a category the reader knows: it is taken as that element's companion, not a second body";

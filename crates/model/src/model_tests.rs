@@ -24,6 +24,7 @@ fn wall(level: Guid, a: P2, b: P2) -> Element {
         join: true,
         join_start: true,
         join_end: true,
+        curtain: Default::default(),
     })
 }
 
@@ -39,6 +40,8 @@ fn boxed(m: &mut Model) -> Id {
 
 fn door(host: Guid, offset: f64) -> Element {
     Element::Door(Opening {
+        panel: None,
+        cell: None,
         params: Default::default(),
         family: None,
         type_name: "Single 900 x 2100".into(),

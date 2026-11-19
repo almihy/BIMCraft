@@ -8,7 +8,7 @@ use bimcraft_i18n::msg;
 
 use bimcraft_core::element_json_bare;
 use bimcraft_core::geom::P2;
-use bimcraft_core::model::{Element, Id, Model};
+use bimcraft_core::model::{Id, Model};
 use egui::{Context, Modifiers, Response, Ui};
 use serde_json::json;
 use std::sync::Arc;
@@ -70,6 +70,9 @@ pub(crate) fn tool_name(tool: &Tool) -> &'static str {
         Tool::Wall(_) => msg!("Wall"),
         Tool::Door => msg!("Door"),
         Tool::Window => msg!("Window"),
+        Tool::CurtainGrid => msg!("Curtain Grid"),
+        Tool::Mullion => msg!("Mullion"),
+        Tool::GridSegments(_) => msg!("Add/Remove Segments"),
         Tool::Room => msg!("Room"),
         Tool::RoomSeparator(_) => msg!("Room Separator"),
         Tool::Level => msg!("Level"),
@@ -281,22 +284,13 @@ fn name_of(m: &Model, id: Id) -> Option<String> {
     let e = m.elements.get(id)?;
     let json = element_json_bare(m, id);
     let mut parts = vec![category(e.category(), true)];
-    let family = json["family"].as_str().filter(|f| !f.is_empty()).map(str::to_string).or_else(|| system_family(e));
+    let ty = json["type"].as_str().filter(|t| !t.is_empty());
+    // One with types but no family of its own is of one of Revit's system families: Basic Wall, Curtain Wall, System Panel.
+    let system = || ty.and_then(|ty| crate::curtain::family(m, e.category(), ty)).map(|f| t(f).to_string());
+    let family = json["family"].as_str().filter(|f| !f.is_empty()).map(str::to_string).or_else(system);
     parts.extend(family);
-    parts.extend(json["type"].as_str().filter(|t| !t.is_empty()).map(str::to_string));
+    parts.extend(ty.map(str::to_string));
     Some(parts.join(" : "))
-}
-
-/// The family of an element that has types but no family of its own: Revit's system families.
-fn system_family(e: &Element) -> Option<String> {
-    let name = match e {
-        Element::Wall(_) => msg!("Basic Wall"),
-        Element::Floor(_) => msg!("Floor"),
-        Element::Roof(_) => msg!("Basic Roof"),
-        Element::Ceiling(_) => msg!("Compound Ceiling"),
-        _ => return None,
-    };
-    Some(t(name).to_string())
 }
 
 #[cfg(test)]

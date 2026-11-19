@@ -16,17 +16,22 @@ fn area(h: &Harness<BimApp>, id: &str) -> egui::Rect {
 
 #[test]
 fn every_kind_of_type_opens_in_one_dialog_of_one_size_with_family_type_duplicate_and_rename() {
-    let mut h = app(&format!("{BOX}\n{CHAIR}"));
+    // A curtain wall too, whose type, panels and mullions each have Type Properties of their own.
+    let curtain = r#"wall {"points": [[0,9000],[6000,9000]], "type": "Storefront"}"#;
+    let mut h = app(&format!("{BOX}\n{CHAIR}\n{curtain}"));
     let m = h.state().session.model.clone();
     let opened = [
-        ("type-properties", "wall"),
-        ("family-type-properties", "component"),
-        ("text-type-properties", "text"),
-        ("fill-patterns", "region"),
+        ("type-properties", "wall", 0),
+        ("type-properties", "wall", 4),
+        ("type-properties", "curtainpanel", 0),
+        ("type-properties", "mullion", 0),
+        ("family-type-properties", "component", 0),
+        ("text-type-properties", "text", 0),
+        ("fill-patterns", "region", 0),
     ];
     let mut widths = Vec::new();
-    for (id, category) in opened {
-        let of = ids(&h, category)[0];
+    for (id, category, nth) in opened {
+        let of = ids(&h, category)[nth];
         h.state_mut().select_and_edit_type(of);
         h.run();
         for label in ["Type Properties", "Family:", "Type Parameters", "OK", "Cancel"] {

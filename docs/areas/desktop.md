@@ -743,3 +743,87 @@ Ctrl+click adds it, Shift+click takes it away (`click_set`, then `pick_up`), a p
 something else. Revit has no default Ctrl+A for the model, and neither has the app (in a text field it is the field's, as everywhere); its way is Select All Instances (the right-click menu's Select All Instances > Visible in View or In Entire Project: every element of the selected elements' types, shown in the view or not; SA is In Entire Project, as Revit's, and the shortcut list's "Select All Instances" has no default keys). The menu's Recent Commands submenu lists the last five commands used, each once, newest first (`Flow::recent`; `repeat_recent` starts one and makes it the newest), beside Repeat. Arrow keys call `move` with a step of about three pixels at the view's zoom (`nudge_step`), ten times
 that with Shift. The status bar names the element under the cursor from `Canvas::hovered`; the cursor shape is asked for in
 `plan_cursor` and kept in `Nav::icon` for tests.
+
+## Curtain walls
+
+Curtain walls in the window are `curtain.rs` (the model's are `bimcraft_core::curtain`), and read as Revit's. A type's family
+(`curtain::family`: Basic Wall, Curtain Wall, System Panel, Empty System Panel, Rectangular Mullion, Circular Mullion) is what
+the status bar says of the element under the cursor ("Walls : Curtain Wall : Storefront"), what the Type Selector shows over the
+type, the headings its list is under where a category has several families (`curtain::listed`), Type Properties' Family, and
+the Curtain Wall group under the Project Browser's Walls (curtain panel types and mullion types are listed there as any system
+family's). The Wall tool's list always ends with Curtain Wall, Exterior Glazing and Storefront (`curtain::names`): one the
+project hasn't got is made by the first wall drawn with it (the `wall` command), and Edit Type is off until then, since there is
+no type to edit. A selected wall's list holds the curtain wall types the project has.
+
+Properties of a wall of a curtain type are `rows("curtainwall")` (`rows_of` picks them while every wall selected is one): no
+Location Line; Vertical Grid and Horizontal Grid with Number (`Kind::GridNumber`: typed while the type's Layout that way is Fixed
+Number, greyed otherwise), Justification and Offset, each `modify {curtain: {vertical: {…}}}`; Length and Area. A panel shows
+Height, Width, Area and its host wall as a link, a mullion its Length and host, a hand-made grid line its Distance along the wall
+(or over its base) and host. A panel's or a mullion's Type Selector is greyed while it is pinned (what its wall placed, whose type
+the wall's type decides); freed by Unpin, a pick runs `modify {ids, type}`.
+
+Type Properties (`curtain::Form`, inside `TypeDialog`): a curtain wall type has Construction (Function, Curtain Panel, Join
+Condition), Vertical Grid and Horizontal Grid (Layout, Spacing, which is greyed for None and Fixed Number, Adjust for Mullion
+Size), Vertical Mullions and Horizontal Mullions (Interior Type, Border 1 Type, Border 2 Type) and Identity Data, never a basic
+wall's Structure or Edit Assembly; its Type list is the curtain wall types. A System Panel has Offset, Material and Thickness, an
+Empty System Panel nothing but its identity data; a Rectangular Mullion Offset, Thickness, Material, Width on side 2 and Width on
+side 1, a Circular Mullion Offset, Material and Radius. The panel and mullion drop-downs name each type with its family ("System
+Panel : Glazed") and offer the starter types the project hasn't made yet, which the `type` command makes when one is named. OK and
+Apply send what changed, Duplicate all of it, as the `type` command's `curtain`. Still to come: Automatically Embed, a mullion's
+Angle, Profile, Position and corner mullions, a grid's Angle, and Mark and Comments on a wall, a panel and a mullion.
+
+**The tools that work on a curtain wall by hand** are `curtain/tools.rs`, on the Architecture tab's Build panel after Window, as
+Revit's: Curtain Grid and Mullion, and Add/Remove Segments on the tab of a selected grid line. They work in an elevation, a
+section and the 3D view, and for standing lines in a plan. Each view says only where a model point is on its screen and what
+place on a curtain wall is under the cursor (`tools::Over`: a plan from the wall picked and the cursor along it; a section from
+`curtain_grid::in_section`; the 3D view from the point of the panel or mullion the picture shows, `Picker::surface`), and
+`BimApp::curtain_over` does the rest the same everywhere, with the core's geometry (`render::curtain_grid`) and one command a
+click.
+
+- **Curtain Grid** (`Tool::CurtainGrid`; Modify | Place Curtain Grid, whose Placement panel shows All Segments, lit): over a
+  curtain wall its grid lines show dashed, and the line a click would put is previewed across the wall, dashed, square to the
+  edge the cursor is nearest on the screen (along the base, the top or a lying line: a standing line; beside an end or a standing
+  line: a lying one; a plan gives standing lines only), with a temporary dimension to the line either side. Within 8 px it snaps
+  to the middle and the thirds between those lines ("Midpoint", "1/3 of curtain panel", lettered beside the cursor) and, lying,
+  to a level (its name); else it is where the cursor is, to the millimetre. A click runs `curtain_grid {wall, vertical, at}`;
+  the tool stays for the next line, Esc ends. One Segment and All Except Picked are not built, and not shown: the window
+  shows no button that does nothing.
+- **Mullion** (`Tool::Mullion`; Modify | Place Mullion, whose Placement panel is Grid Line, Grid Line Segment and All Grid
+  Lines, `tools::On`): the grid line under the cursor (within 10 px), its one segment, or every line of the wall is lit, and a
+  click runs `mullion {wall, type, on, at, vertical}`. Shift is the one segment and Ctrl every grid line, whatever the panel
+  says, as Revit's. The Type Selector lists the mullion types under Rectangular Mullion and Circular Mullion (`Subject::New("mullion")`);
+  in a project with none yet it lists Revit's starter types, which the first mullion makes, 50 x 150mm picked.
+- **Add/Remove Segments** (`Tool::GridSegments(wall)`; the Curtain Grid panel of Modify | Curtain Wall Grids, and of a selected
+  curtain wall, panel or mullion, since a type's own grid lines are no elements to select): the wall's segments show thin, the
+  removed ones dashed, the one under the cursor lit; a click runs `add_remove_segments {wall, at, vertical, remove}` (remove
+  what stands, put back what was removed), and the engine's refusal (a panel that would be no rectangle, with the segments
+  that would make it one) is the status bar's. A click in empty space, or Esc, finishes. Not in a plan, which shows no
+  segments: a click there says so.
+- **A hand-made grid line selected** shows dashed in the selection's colour with a temporary dimension to the line either side:
+  a click on one makes it a field, and the length typed moves the line (`modify {id, at}`; from the line before it for the
+  first, from the line after it for the second). A press on the line anywhere along it and a drag moves it along its wall,
+  between the lines either side (`curtain_grid::dragged`: the drag on the screen read along the way the line moves, so it is
+  the same in an elevation, a plan and the 3D view, where the press no longer orbits); Delete removes it. A selected curtain
+  wall shows all its grid lines dashed.
+- **Pins.** A selected panel, mullion or grid line that is pinned shows its pin in an elevation, a section and the 3D view too
+  (`BimApp::pin_glyph`, at its middle; a plan's is `pin_overlay`): a click unpins it, and then its Type Selector takes a type
+  and Delete takes a mullion.
+- **Tab.** In the 3D view a curtain wall is taken first wherever the cursor is on one of its panels or mullions, shown as a
+  dashed outline of the whole wall, as in a plan; Tab goes on to the hand-made grid line under the cursor, then the panel or
+  mullion (`tools::chain`, `tools::tab_through`, which keeps `Canvas::under` and `cycle` as the plan's Tab does). In a section
+  or an elevation what the view picks comes first (the wall at its edge, the mullion or panel inside it) and Tab goes on to the
+  hand-made grid line that runs there, so one under a mullion is reached. The status bar names what is lit in these views too.
+- **The right-click menu** of a curtain wall, a panel or a mullion has Select Panels (Along Vertical Grid, Along Horizontal
+  Grid, On Host) and Select Mullions (On Gridline, On Inside, On Border, On Host): `Action::SelectCurtain`, `tools::Among`.
+  The grid ones are offered from a panel or a mullion.
+- **A door in a curtain wall**, as Revit's: a selected panel that is unpinned lists the project's door types and its door
+  families' types under Doors, after the panel types, in its Type Selector; one picked runs `curtain_door {panel, type, family}`
+  and the door is selected (`BimApp::curtain_swap`). A curtain wall's door has a door's Properties, and its Type Selector lists
+  the panel types under Curtain Panels after the door types: one picked deletes the door, frees the panel the wall lays there
+  again and gives it that type (three commands, so three steps of Undo).
+- **Pick Walls** in a sketch takes a curtain wall by its panel or mullion too (all the 3D view shows of it), along its location
+  line: a curtain wall has no faces of its own.
+
+Still to come: One Segment and All Except Picked, a grid line of the wall's type made independent (unpinned) and moved, picking
+a hand-made grid line in a plan (it is selected in another view; the plan then shows its dimensions and drags it), and snapping
+a new line to grids, reference planes and an adjoining curtain wall's lines.

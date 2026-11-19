@@ -1021,6 +1021,25 @@ pub fn own(icon: Icon, compact: bool) -> Vec<Outline> {
             g.line(&[(6.0, 12.0), (16.0, 7.0)]);
             g.line(&[(12.5, 6.0), (16.0, 7.0), (14.7, 10.4)]);
         }
+        Icon::CurtainGrid => {
+            // A curtain wall seen from the front: its grid's lines, two standing and one lying.
+            g.closed(&[(3.0, 3.0), (21.0, 3.0), (21.0, 21.0), (3.0, 21.0)]);
+            g.line(&[(9.0, 3.0), (9.0, 21.0)]);
+            g.line(&[(15.0, 3.0), (15.0, 21.0)]);
+            g.line(&[(3.0, 12.0), (21.0, 12.0)]);
+        }
+        Icon::Mullion => {
+            // A mullion cut in plan, the panels either side meeting it.
+            g.closed(&[(9.0, 5.0), (15.0, 5.0), (15.0, 19.0), (9.0, 19.0)]);
+            g.line(&[(2.0, 12.0), (9.0, 12.0)]);
+            g.line(&[(15.0, 12.0), (22.0, 12.0)]);
+        }
+        Icon::CurtainPanel => {
+            // One panel of glass, with two glints across it.
+            g.closed(&[(4.0, 3.0), (20.0, 3.0), (20.0, 21.0), (4.0, 21.0)]);
+            g.line(&[(8.0, 10.0), (11.0, 7.0)]);
+            g.line(&[(8.0, 15.0), (15.0, 8.0)]);
+        }
         Icon::Railing => {
             // Three equally spaced balusters between a handrail and base rail.
             g.line(&[(3.0, 5.0), (21.0, 5.0)]);
@@ -1599,6 +1618,9 @@ fn borrowed(drawing: &Drawn, compact: bool) -> Vec<Outline> {
 /// boxes have the app's softly rounded corners.
 const SHARP: &[Icon] = &[
     Icon::Wall,
+    Icon::CurtainGrid,
+    Icon::Mullion,
+    Icon::CurtainPanel,
     Icon::Door,
     Icon::Window,
     Icon::Room,

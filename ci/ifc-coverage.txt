@@ -70,3 +70,7 @@ beam {"points": [[0,9500],[6000,9500]], "offset": 3000, "type": "B 150x600", "ju
 beam {"points": [[0,10000],[6000,10000]], "offset": 3000, "type": "B 150x600"}
 beam {"points": [[0,10500],[6000,10500]], "offset": 3000, "end_offset": 3500, "type": "Steel Tube 150", "justify": "centre"}
 beam {"points": [[0,11000],[6000,11000]], "offset": 3000, "type": "B 120x300"}
+# Curtain walls: a storefront (a grid with mullions on every line) and a curved wall of glazing, each an IfcCurtainWall with no
+# body, its panels IfcPlates and its mullions IfcMembers aggregated under it.
+wall {"points": [[0,20000],[6000,20000]], "type": "Storefront", "height": 3000}
+wall {"points": [[0,24000],[6000,24000]], "arc": 60, "type": "Exterior Glazing", "height": 4000}

@@ -144,7 +144,13 @@ pub fn transform(c: &str, m: &Model, mut e: Element, id: Id, mo: &Motion, with: 
             }
         }
         // A mirror image runs back the other way, so its exterior side is the mirror image of the old one.
-        Element::Wall(w) => (w.start, w.end) = if mo.mirror { (f(w.end), f(w.start)) } else { (f(w.start), f(w.end)) },
+        Element::Wall(w) => {
+            (w.start, w.end) = if mo.mirror { (f(w.end), f(w.start)) } else { (f(w.start), f(w.end)) };
+            // A curtain wall's grid is its mirror image too: counted from its other end.
+            if mo.mirror && crate::curtain::is_curtain(m, w) {
+                crate::curtain::reverse(&mut w.curtain);
+            }
+        }
         Element::Grid(g) => (g.start, g.end) = (f(g.start), f(g.end)),
         Element::RoomSeparator(rs) => (rs.start, rs.end) = (f(rs.start), f(rs.end)),
         Element::Rebar(rb) => {
@@ -240,11 +246,38 @@ pub fn transform(c: &str, m: &Model, mut e: Element, id: Id, mo: &Motion, with: 
                 k.map(f);
             }
         }
+        // A curtain wall's door is where its cell is.
+        Element::Door(o) if o.panel.is_some() && !within(o.host) => {
+            return Err(bad(
+                c,
+                format!(
+                    "door {id} fills a cell of its curtain wall's grid and is where that cell is: move a grid line (`modify` a                      hand-made one's `at`, or the wall type's spacing), or delete it and put a door in another panel (`curtain_door`)"
+                ),
+            ));
+        }
         Element::Door(o) | Element::Window(o) if !within(o.host) => match (mo.slide, m.wall(o.host)) {
             (Some(by), Some(w)) => o.offset += by.dot((w.end - w.start).unit()),
             _ => return Err(bad(c, format!("{category} {id} turns and mirrors only with its wall; select the wall too"))),
         },
         Element::Door(_) | Element::Window(_) => {}
+        // A curtain wall's own go where it goes, laid out again after the command. Alone, a grid line that stands on the wall
+        // slides along it; nothing else of a curtain wall moves by itself.
+        Element::CurtainGrid(l) if !within(l.host) => match (mo.slide, m.wall(l.host), l.vertical) {
+            (Some(by), Some(w), true) => l.at += by.dot((w.end - w.start).unit()),
+            (_, _, false) => {
+                return Err(bad(
+                    c,
+                    format!("curtain grid line {id} lies up its wall; change how high it is with `modify` (`at`, mm over the wall's base)"),
+                ));
+            }
+            _ => return Err(bad(c, format!("curtain grid line {id} turns and mirrors only with its wall; select the wall too"))),
+        },
+        Element::CurtainPanel(crate::curtain::Panel { host, .. }) | Element::Mullion(crate::curtain::Mullion { host, .. })
+            if !within(*host) =>
+        {
+            return Err(bad(c, format!("{category} {id} is where its curtain wall's grid puts it; move the wall, or a grid line")));
+        }
+        Element::CurtainGrid(_) | Element::CurtainPanel(_) | Element::Mullion(_) => {}
         Element::Dimension(d) => d.at = f(d.at),
         // In plan, its points and edges; their heights stay.
         Element::Dimension3D(d) => {

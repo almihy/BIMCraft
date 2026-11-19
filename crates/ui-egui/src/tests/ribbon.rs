@@ -125,7 +125,8 @@ fn the_floating_tools_show_every_panel_in_full_when_the_window_has_room() {
 
 #[test]
 fn a_window_too_narrow_for_a_tab_draws_its_last_panels_as_small_icons_not_a_folded_button() {
-    let mut h = window(1100.0, 0.1);
+    // Architecture, with Curtain Grid and Mullion in Build, is wider than this: its last panels give way, Build does not.
+    let mut h = window(1220.0, 0.1);
     h.run_steps(4);
     // Datum, the last panel of Architecture: its tools two high as icons, its name and arrow under them as always.
     let level = h.get_by_label("Level").rect();
@@ -222,17 +223,17 @@ fn a_panels_list_of_ten_tools_or_fewer_is_one_column() {
     let mut h = window(1280.0, 0.1);
     pick_tab(&mut h, "Architecture");
     h.run_steps(3);
-    // Build's tools are fewer than ten.
-    press(&mut h, "Build ▾");
+    // Circulation's tools are fewer than ten (Build's are eleven, with Curtain Grid and Mullion).
+    press(&mut h, "Circulation ▾");
     h.run_steps(4);
-    let under = h.get_by_label("Build ▾").rect().bottom();
-    let lefts: Vec<f32> = h
-        .query_all_by_role(Role::Button)
-        .map(|n| n.rect())
-        .filter(|r| r.top() > under && r.left() > 100.0 && r.left() < 250.0 && (r.height() - 28.0).abs() < 0.5)
+    let under = h.get_by_label("Circulation ▾").rect().bottom();
+    // Each tool's row in the list: the one below the panel's name.
+    let lefts: Vec<f32> = ["Stair", "Ramp", "Railing"]
+        .iter()
+        .flat_map(|tool| h.query_all_by_label(tool).map(|n| n.rect()).filter(|r| r.top() > under && r.height() > 20.0))
         .map(|r| r.left())
         .collect();
-    assert!(lefts.len() >= 2 && lefts.len() <= 10 && lefts.iter().all(|l| *l == lefts[0]), "one column: {lefts:?}");
+    assert!(lefts.len() == 3 && lefts.iter().all(|l| *l == lefts[0]), "one column: {lefts:?}");
 }
 
 #[test]

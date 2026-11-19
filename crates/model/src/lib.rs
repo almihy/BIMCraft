@@ -22,6 +22,7 @@ pub mod component_geometry;
 #[doc(hidden)]
 pub mod constraints;
 pub mod crosscheck;
+pub mod curtain;
 pub mod curves;
 pub mod derived;
 pub mod dims;
