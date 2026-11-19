@@ -1550,6 +1550,7 @@ impl BimApp {
         if self.snap_once.is_none() {
             let radius = from.last().map_or(0.0, |l| l.dist(v.mm(at)));
             snaps.increments = true;
+            snaps.turn = self.snap_turn;
             // A rectangle's far corner counts along its width and its height, not as a length at an angle.
             snaps.corners = self.shape() == draw::Shape::Rectangle || matches!(self.tool, Tool::Shaft(_) | Tool::PatternCorner(_));
             snaps.step = self.snap_steps.length(v.scale).unwrap_or(0.0);
@@ -1856,13 +1857,26 @@ impl BimApp {
             });
         }
         let tabbed = std::mem::take(&mut self.tab_cycle) || tab;
-        if tabbed {
+        // The snap Tab stepped to is the cursor's where it was stepped: moved, it is the nearest again.
+        if self.snap_turn_at != local {
+            (self.snap_turn, self.snap_turn_at) = (0, local);
+        }
+        // With the cursor of a tool that picks points snapped to something, Tab steps the snap on to the next there, as
+        // Revit's (Shift and Tab back): another end or middle within reach, another line of the wall it is at.
+        // A number being typed keeps Tab for its fields.
+        let typing = !(self.typed_length.trim().is_empty() && self.drawing.other.trim().is_empty());
+        let snapped =
+            !typing && self.tool != Tool::Modify && self.canvas.found.get().is_some_and(|f| !matches!(f.kind, Kind::Free | Kind::Angle));
+        if tabbed && snapped {
+            let back = std::mem::take(&mut self.flow.back) || (tab && ui.input(|i| i.modifiers.shift));
+            self.snap_turn += if back { -1 } else { 1 };
+        } else if tabbed {
             // Shift and Tab go back: from the app's hook, or from the key itself.
             let back = std::mem::take(&mut self.flow.back) || (tab && ui.input(|i| i.modifiers.shift));
             self.tab_step(&model, back);
         }
         // While a rectangle is drawn, Tab moves between its width and its height; a line's or a wall's, its length and its angle.
-        if tabbed && (self.typed_fields() == 2 || self.line_angle_field()) {
+        if tabbed && !snapped && (self.typed_fields() == 2 || self.line_angle_field()) {
             std::mem::swap(&mut self.typed_length, &mut self.drawing.other);
             self.drawing.field = 1 - self.drawing.field.min(1);
         }

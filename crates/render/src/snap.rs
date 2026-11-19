@@ -107,6 +107,9 @@ pub struct Snaps {
     /// With `increments`, the point is the far corner of a rectangle from the last one: its width and its height each count
     /// in `step`s, and no direction is taken.
     pub corners: bool,
+    /// How many times Tab has stepped the snap on from the one nearest the cursor (back, with Shift, below nothing): the
+    /// points within reach in turn, or the lines of the wall the cursor is at (its own, its faces, its core's).
+    pub turn: i32,
 }
 
 /// How much of the screen, in points, a dimension snap increment has to stay under to be the one in force. Revit's Snaps
@@ -199,6 +202,7 @@ impl Snaps {
             step: STEP,
             increments: false,
             corners: false,
+            turn: 0,
         }
     }
 
@@ -241,6 +245,7 @@ impl Default for Snaps {
             step: STEP,
             increments: false,
             corners: false,
+            turn: 0,
         }
     }
 }
@@ -472,7 +477,8 @@ impl<'a> Scene<'a> {
                     let (along, across) = a.project(p);
                     let (ext, int) = crate::walls::faces(m, w);
                     // Within reach of its body, a thickness past either end: where a corner carries it on.
-                    let at_it = (int - slack..=ext + slack).contains(&across) && (-thick - slack..=a.length() + thick + slack).contains(&along);
+                    let at_it =
+                        (int - slack..=ext + slack).contains(&across) && (-thick - slack..=a.length() + thick + slack).contains(&along);
                     if faces && faced < MAX_OUTLINES && a.centre().is_none() && at_it {
                         faced += 1;
                         let ring = crate::walls::outline(m, id);
@@ -784,6 +790,12 @@ fn corner_on(from: &[P2], d: P2) -> Option<f64> {
 
 /// How points rank where two lie as near: an end before a crossing before a middle before an annotation's anchor before
 /// a centre or any other point.
+/// Of `list`, the one Tab has stepped to: the first with no steps, round again past the last.
+fn turned<T>(list: &[T], turn: i32) -> Option<&T> {
+    let n = i32::try_from(list.len()).ok().filter(|n| *n > 0)?;
+    list.get(usize::try_from(turn.rem_euclid(n)).ok()?)
+}
+
 fn rank(k: Kind) -> u8 {
     match k {
         Kind::Endpoint => 0,
@@ -943,10 +955,11 @@ fn solve(scene: Scene, p: P2, reach: Reach, from: &[P2], square: bool, o: &Snaps
     {
         points.extend(tangents(&scene.curves, l).into_iter().map(|(q, of)| (micron(q), Kind::Tangent, of)));
     }
-    let hit = points
-        .into_iter()
-        .filter(|(q, _, _)| q.dist(p) <= reach.point)
-        .min_by(|a, b| by_distance(&a.0, &b.0).then(rank(a.1).cmp(&rank(b.1))));
+    let mut hits: Vec<(P2, Kind, Option<Id>)> = points.into_iter().filter(|(q, _, _)| q.dist(p) <= reach.point).collect();
+    hits.sort_by(|a, b| by_distance(&a.0, &b.0).then(rank(a.1).cmp(&rank(b.1))));
+    // One point is one stop for Tab, whatever lines end or cross there.
+    hits.dedup_by(|a, b| a.0.dist(b.0) <= TOL);
+    let hit = turned(&hits, o.turn).copied();
     if let Some((at, kind, source)) = hit {
         return Found { at, kind, guide: None, source };
     }
@@ -1057,6 +1070,36 @@ fn solve(scene: Scene, p: P2, reach: Reach, from: &[P2], square: bool, o: &Snaps
             })
             .filter(|(_, d, _)| *d <= reach.line && on.is_none_or(|(a, _, _)| *d < a.distance(p, 0.0)))
             .min_by(|x, y| x.1.total_cmp(&y.1));
+        // Tab steps on through the wall's lines, from the one it would land on: the rest by how near they are.
+        if o.turn != 0
+            && let Some((a, _, id)) = on
+        {
+            let own = micron(a.at((a.project(p).0 / STEP).round() * STEP, 0.0));
+            let mut lines: Vec<(P2, f64)> = vec![(own, a.distance(p, 0.0))];
+            // Its faces that run along it: not the short edges of its ends.
+            let way = (a.end - a.start).unit();
+            let along = |x: P2, y: P2| (y - x).unit().cross(way).abs() < 1e-6;
+            lines.extend(scene.faces.iter().filter(|(x, y, of)| *of == id && along(*x, *y)).map(|&(x, y, _)| {
+                let (u, len) = ((y - x).unit(), x.dist(y));
+                let s = ((p - x).dot(u) / STEP).round() * STEP;
+                (micron(x + u * s.clamp(0.0, len)), geom::dist_to_segment(p, x, y))
+            }));
+            lines.sort_by(|x, y| x.1.total_cmp(&y.1));
+            // One stop for each line across the wall: a face and a step of a join may lie on one, the nearer kept.
+            let mut seen: Vec<f64> = Vec::new();
+            lines.retain(|(q, _)| {
+                let across = a.project(*q).1;
+                let new = !seen.iter().any(|s| (s - across).abs() <= TOL);
+                seen.push(across);
+                new
+            });
+            let first = face.map_or(own, |(at, _, _)| micron(at));
+            let start = lines.iter().position(|(q, _)| q.dist(first) <= TOL).unwrap_or(0);
+            lines.rotate_left(start);
+            if let Some((at, _)) = turned(&lines, o.turn) {
+                return Found { at: *at, kind: Kind::Nearest, guide: None, source: Some(id) };
+            }
+        }
         if let Some((at, _, id)) = face {
             return Found { at: micron(at), kind: Kind::Nearest, guide: None, source: Some(id) };
         }

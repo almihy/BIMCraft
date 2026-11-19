@@ -725,6 +725,19 @@ wall {"points": [[0, 0], [6000, 0], [6000, 4000]], "type": "Ext"}"#,
     // The corner its faces make with the next wall's, where the plan draws it, is an end to land on.
     let f = snap(m, 100_000, P2(6155.0, -158.0), reach, &[], false, &Snaps::default());
     assert_eq!((f.kind, f.at), (Kind::Endpoint, P2(6160.0, -160.0)));
+    // Tab steps the snap on: at the wall's free end, from the end of its own line to the corners of its faces and the
+    // ends of its core's, each once, and round again; Shift and Tab the other way.
+    let end =
+        |turn: i32| snap(m, 100_000, P2(10.0, 8.0), Reach { point: 200.0, line: 40.0 }, &[], false, &Snaps { turn, ..Snaps::default() }).at;
+    let stops: Vec<P2> = (0..5).map(end).collect();
+    assert_eq!(stops[0], P2(0.0, 0.0));
+    for q in [P2(0.0, 160.0), P2(0.0, -160.0), P2(0.0, 60.0), P2(0.0, -140.0)] {
+        assert_eq!(stops.iter().filter(|s| **s == q).count(), 1, "{q:?} in {stops:?}");
+    }
+    assert_eq!((end(5), end(-1)), (stops[0], stops[4]));
+    // Along the wall, through its lines: its own, then the others by how near they are.
+    let on = |turn: i32| snap(m, 100_000, P2(2003.0, 10.0), reach, &[], false, &Snaps { turn, ..Snaps::default() }).at;
+    assert_eq!([on(0), on(1), on(2), on(3), on(4), on(5)].map(|q| q.1), [0.0, 60.0, 160.0, -140.0, -160.0, 0.0]);
     // Nearest off, a face holds nothing.
     assert_eq!(snap(m, 100_000, P2(2003.0, 150.0), reach, &[], false, &Snaps { nearest: false, ..Snaps::default() }).kind, Kind::Free);
 }

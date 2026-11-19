@@ -7982,3 +7982,28 @@ door {{\"at\": [2000, 0]}}"
     }
     assert_eq!(bimcraft_core::rooms::openings_looked_up(), seen, "the palette's From Room and To Room come from what it keeps");
 }
+
+#[test]
+fn tab_steps_the_snap_through_what_is_at_the_cursor_and_a_move_starts_again() {
+    use bimcraft_core::snap::Kind;
+    let mut h = app(BOX);
+    tool(&mut h, "Wall");
+    // Over the south wall, its own line; Tab, its face nearest the cursor; and on to the other.
+    let first = hover(&mut h, P2(2040.0, 30.0)).unwrap();
+    assert_eq!((first.kind, first.at), (Kind::Nearest, P2(2040.0, 0.0)));
+    let step = |h: &mut Harness<BimApp>, shift: bool| {
+        h.key_press_modifiers(if shift { Modifiers::SHIFT } else { Modifiers::NONE }, Key::Tab);
+        h.run();
+        h.state().canvas.found.get().unwrap()
+    };
+    assert_eq!(step(&mut h, false).at, P2(2040.0, 100.0));
+    assert_eq!(step(&mut h, false).at, P2(2040.0, -100.0));
+    assert_eq!(step(&mut h, false).at, P2(2040.0, 0.0), "round again");
+    assert_eq!(step(&mut h, true).at, P2(2040.0, -100.0), "Shift and Tab, back");
+    // The point picked is the one Tab left it on.
+    click(&mut h, P2(2040.0, 30.0));
+    assert_eq!(h.state().tool, Tool::Wall(vec![P2(2040.0, -100.0)]));
+    // The cursor moved, the snap is the nearest once more.
+    hover(&mut h, P2(5040.0, 30.0));
+    assert_eq!(h.state().snap_turn, 0);
+}

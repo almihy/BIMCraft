@@ -827,6 +827,10 @@ pub struct BimApp {
     /// While the Snaps dialog is open: what was in force when it opened, for Cancel, and its two lists as typed.
     snaps_kept: Option<(Snaps, Increments, bool)>,
     snap_text: (String, String),
+    /// How many times Tab has stepped the snap on from the nearest (Shift and Tab back), and the cursor it was stepped at:
+    /// moved, the snap is the nearest again.
+    snap_turn: i32,
+    snap_turn_at: Option<(f32, f32)>,
     /// An override of them for the next point picked, typed as a shortcut.
     snap_once: Option<Once>,
     /// The Measure tool's last ruler: where it starts and ends.
@@ -1604,6 +1608,8 @@ impl BimApp {
             snap_steps: Increments::default(),
             snaps_kept: None,
             snap_text: (String::new(), String::new()),
+            snap_turn: 0,
+            snap_turn_at: None,
             snap_once: None,
             measured: None,
             open_units: false,
