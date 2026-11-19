@@ -1287,10 +1287,12 @@ pub fn lay(m: &mut Model, id: Id) {
 /// what was done is taken off the wall as it was ([`hand`]) and put on the wall as it is ([`hand_to`]).
 #[derive(Clone, Debug, Default)]
 pub struct Hand {
+    /// The wall it was taken off: put back on that wall, a freed panel or mullion keeps its id.
+    wall: Option<Guid>,
     merged: Vec<(bool, [f64; 2])>,
     no_mullion: Vec<(bool, [f64; 2])>,
-    panels: Vec<([f64; 2], Panel)>,
-    mullions: Vec<([f64; 2], Mullion)>,
+    panels: Vec<([f64; 2], Id, Panel)>,
+    mullions: Vec<([f64; 2], Id, Mullion)>,
 }
 
 impl Hand {
@@ -1303,6 +1305,7 @@ impl Hand {
 pub fn hand(m: &Model, id: Id) -> Hand {
     let mut out = Hand::default();
     let (Some(g), Some(w), Some(host)) = (grid(m, id), m.wall(id), m.elements.guid(id)) else { return out };
+    out.wall = Some(host);
     if !(w.curtain.merged.is_empty() && w.curtain.no_mullion.is_empty()) {
         for seg in g.segments() {
             if seg.border == 0 && w.curtain.merged.contains(&seg.key) {
@@ -1316,11 +1319,11 @@ pub fn hand(m: &Model, id: Id) -> Hand {
     for c in m.hosted_by(host) {
         match m.elements.get(c) {
             Some(Element::CurtainPanel(p)) if p.free => {
-                out.panels.push(([(p.span[0] + p.span[1]) / 2.0, (p.span[2] + p.span[3]) / 2.0], p.clone()));
+                out.panels.push(([(p.span[0] + p.span[1]) / 2.0, (p.span[2] + p.span[3]) / 2.0], c, p.clone()));
             }
             Some(Element::Mullion(x)) if x.free => {
                 let mid = (x.from + x.to) / 2.0;
-                out.mullions.push((if x.vertical { [x.at, mid] } else { [mid, x.at] }, x.clone()));
+                out.mullions.push((if x.vertical { [x.at, mid] } else { [mid, x.at] }, c, x.clone()));
             }
             _ => {}
         }
@@ -1350,9 +1353,9 @@ pub fn hand_to(m: &mut Model, id: Id, hand: &Hand, along: &dyn Fn(f64) -> f64) {
     // Only what leaves every panel sound: a segment whose neighbours are not here would leave half a join.
     let merged = if g.trouble(&merged).is_empty() { merged } else { BTreeSet::new() };
     let no_mullion: BTreeSet<String> = hand.no_mullion.iter().filter_map(|(v, at)| seg(*v, at)).map(|x| x.mullion_key()).collect();
-    let mut put: Vec<(String, Element)> = Vec::new();
+    let mut put: Vec<(String, Id, Element)> = Vec::new();
     let cells = g.panels(&merged);
-    for (at, p) in &hand.panels {
+    for (at, was, p) in &hand.panels {
         // (A type this project lacks, of a wall from another file: the wall's own type's instead.)
         if !on(along(at[0]), at[1]) || !m.types.curtain_panel.contains_key(&p.type_name) {
             continue;
@@ -1361,28 +1364,33 @@ pub fn hand_to(m: &mut Model, id: Id, hand: &Hand, along: &dyn Fn(f64) -> f64) {
         let Some((lo, _)) = cells.iter().find(|(lo, hi)| (lo.0..=hi.0).contains(&i) && (lo.1..=hi.1).contains(&j)) else { continue };
         let (Some(u), Some(v)) = (g.u.get(lo.0), g.v.get(lo.1)) else { continue };
         let key = segment_key(&u.key, &v.key);
-        put.push((key.clone(), Element::CurtainPanel(Panel { host, key, free: true, ..p.clone() })));
+        put.push((key.clone(), *was, Element::CurtainPanel(Panel { host, key, free: true, ..p.clone() })));
     }
-    for (at, x) in &hand.mullions {
+    for (at, was, x) in &hand.mullions {
         if !m.types.mullion.contains_key(&x.type_name) {
             continue;
         }
         let Some(s) = seg(x.vertical, at) else { continue };
         let key = s.mullion_key();
-        put.push((key.clone(), Element::Mullion(Mullion { host, key, free: true, ..x.clone() })));
+        put.push((key.clone(), *was, Element::Mullion(Mullion { host, key, free: true, ..x.clone() })));
     }
     if let Some(Element::Wall(w)) = m.elements.get_mut(id) {
         (w.curtain.merged, w.curtain.no_mullion) = (merged, no_mullion);
     }
-    for (key, e) in put {
+    for (key, was, e) in put {
         let guid = child_guid(m.uid, host, &key);
-        // The name may be another's now (a pinned panel's, on a wall turned round): this one takes its place.
-        match m.elements.id(guid) {
-            Some(c) => {
+        // On the wall it was taken off, it is the element it was, at its id. The name may be another's now (a pinned
+        // panel's, on a wall turned round): this one takes its place, and the layout makes the other again.
+        let its_own = hand.wall == Some(host) && !m.elements.contains_key(was);
+        match (m.elements.id(guid), its_own) {
+            (Some(c), false) => {
                 m.elements.insert(c, e);
             }
-            None => {
-                let c = m.fresh_id();
+            (there, _) => {
+                if let Some(c) = there {
+                    m.elements.remove(c);
+                }
+                let c = if its_own { was } else { m.fresh_id() };
                 let _ = m.elements.insert_as(c, guid, e);
             }
         }

@@ -13918,6 +13918,17 @@ fn relocate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion, end: Option<bool>
     // point, moves alone, its shared coordinates following (`motion::transform`).
     let with_parts = with_subdivisions(&s.model, ids);
     let ids = with_parts.as_slice();
+    // A curtain wall's panel or mullion on its own is not moved, pinned by its wall or freed.
+    if let Some(id) = pin::held_alone(&s.model, ids)
+        .into_iter()
+        .find(|id| matches!(s.model.elements.get(*id), Some(Element::CurtainPanel(_) | Element::Mullion(_))))
+        .filter(|id| {
+            s.model.elements.get(*id).and_then(crate::curtain::host_of).is_some_and(|h| !ids.iter().any(|i| s.model.guid(*i) == h))
+        })
+    {
+        let category = s.model.elements.get(id).map_or("element", Element::category);
+        return Err(bad(c, format!("{category} {id} is where its curtain wall's grid puts it; move the wall, or a grid line")));
+    }
     // A pinned element is held where it is, as in Revit. (A curtain wall's panels and mullions go where their wall goes.)
     pin::refuse_pinned(c, &s.model, &pin::held_alone(&s.model, ids), if c == "rotate" { pin::Held::Rotate } else { pin::Held::Move })?;
     let m = &s.model;
@@ -15620,6 +15631,14 @@ fn delete(s: &mut Session, p: &Value) -> R {
                 w.curtain.merged.retain(|k| !names(k));
                 w.curtain.no_mullion.retain(|k| !names(k));
             }
+        }
+        // Without the line, what is still removed may join cells that make no rectangle: those segments are back.
+        let unsound = match (crate::curtain::grid(&s.model, wall), s.model.wall(wall)) {
+            (Some(g), Some(w)) => !g.trouble(&w.curtain.merged).is_empty(),
+            _ => false,
+        };
+        if unsound && let Some(Element::Wall(w)) = s.model_mut().elements.get_mut(wall) {
+            w.curtain.merged.clear();
         }
     }
     let reshaped = ground::roads_after_delete(s, &before, &gone)?;

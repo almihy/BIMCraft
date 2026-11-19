@@ -62,6 +62,18 @@ fn curtain_grid_adds_lines_by_hand_and_they_move_and_go() {
     run(&mut s, "delete", json!({"ids": [line]}));
     assert_eq!(panels(&s, w).len(), 4);
     assert_eq!(spans(&s, w)[0], [0.0, 4000.0, 0.0, 1000.0]);
+    // A line that goes takes what was removed along it, and what its going would leave no rectangle.
+    let lines = ids(&run(
+        &mut s,
+        "curtain_grid",
+        json!({"wall": w, "lines": [{"vertical": true, "at": 1000}, {"vertical": true, "at": 2000}]}),
+    )["ids"]);
+    run(&mut s, "add_remove_segments", json!({"wall": w, "at": [1000, 500]}));
+    run(&mut s, "add_remove_segments", json!({"wall": w, "segments": [[500, 1000], [1500, 1000], [1000, 2000]]}));
+    assert_eq!(s.model.wall(w).unwrap().curtain.merged.len(), 4);
+    run(&mut s, "delete", json!({"ids": [lines[0]]}));
+    assert!(curtain::grid(&s.model, w).unwrap().trouble(&s.model.wall(w).unwrap().curtain.merged).is_empty());
+    s.model.check().unwrap();
 }
 
 #[test]
@@ -374,6 +386,10 @@ fn a_copy_of_a_curtain_wall_lays_out_its_own_panels_with_what_was_done_by_hand()
         let e = fails(&mut s, command, p);
         assert!(e.contains("curtain wall's grid"), "{command}: {e}");
     }
+    // Pinned by its wall, a panel says the same: unpinning it would not let it move.
+    let pinned = panels(&s, w).into_iter().find(|(_, p)| !p.free).unwrap().0;
+    let e = fails(&mut s, "move", json!({"ids": [pinned], "by": [0, 100]}));
+    assert!(e.contains("curtain wall's grid") && !e.contains("unpin"), "{e}");
     s.model.check().unwrap();
 }
 
@@ -384,9 +400,19 @@ fn a_curtain_wall_mirrored_flipped_or_moved_keeps_its_grid_where_it_is() {
     let was = picture(&s, w);
     // Flipped, it runs the other way and everything stands where it stood.
     let start = s.model.wall(w).unwrap().start;
+    let freed = |s: &Session| -> Vec<Id> {
+        s.model
+            .hosted_by(s.model.guid(w))
+            .into_iter()
+            .filter(|id| !s.model.is_pinned(*id) && !matches!(s.model.elements.get(*id), Some(Element::CurtainGrid(_))))
+            .collect()
+    };
+    let ids_before = freed(&s);
+    assert_eq!(ids_before.len(), 2);
     run(&mut s, "flip", json!({"ids": [w]}));
     assert_ne!(s.model.wall(w).unwrap().start, start);
     assert_eq!(picture(&s, w), was);
+    assert_eq!(freed(&s), ids_before, "a freed panel and a mullion put on by hand are the elements they were");
     assert_eq!(s.model.wall(w).unwrap().curtain.merged.len(), 1);
     assert_eq!(s.model.wall(w).unwrap().curtain.no_mullion.len(), 1);
     run(&mut s, "flip", json!({"ids": [w]}));

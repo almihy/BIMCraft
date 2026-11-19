@@ -2565,9 +2565,11 @@ b"}, "host": "sky", "flips": {"hand": "x"}}),
         .map_or(Value::Null, |r| r["ids"][0].clone());
     let grid_line =
         base.execute("curtain_grid", &json!({"wall": curtain, "vertical": true, "at": 700})).map_or(Value::Null, |r| r["ids"][0].clone());
-    let by_hand = base
-        .execute("mullion", &json!({"wall": curtain, "on": "segment", "at": [700, 1200], "type": "30mm Square"}))
-        .map_or(Value::Null, |r| r["ids"][0].clone());
+    // (Every segment of a storefront has its type's mullion: one unpinned stands for one put on by hand.)
+    let by_hand =
+        base.model.elements.iter().find(|(_, e)| matches!(e, crate::model::Element::Mullion(_))).map_or(Value::Null, |(id, _)| json!(id));
+    let _ = base.execute("unpin", &json!({"ids": [by_hand]}));
+    let _ = base.execute("modify", &json!({"id": by_hand, "type": "30mm Square"}));
     let panel = base
         .execute("curtain_grid", &json!({"wall": curtain, "vertical": false, "at": 600}))
         .map_or(Value::Null, |r| r["panels"][0].clone());
