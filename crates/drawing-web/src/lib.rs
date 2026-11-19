@@ -19,6 +19,7 @@ use cadcraft_index::{Opened, Query, Shape};
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 
+mod build;
 mod clean;
 mod convert;
 pub use convert::{dwg_of, dxf_of};
@@ -146,6 +147,12 @@ impl Drawing {
     pub fn look(&self, params: &str, long: u32) -> Result<Picture, JsError> {
         let p = clean::look(&self.o, self.measured(), params, long).map_err(err)?;
         Ok(Picture { png: p.png, about: p.about.to_string() })
+    }
+
+    /// What a clean plan draws as building elements (JSON params: k?: real millimetres to one of the drawing's):
+    /// JSON {walls, doors, windows, curtain, columns, rooms, thicknesses, left} (src/build.rs).
+    pub fn build(&self, params: &str) -> Result<String, JsError> {
+        build::build(&self.o, params).map(|v| v.to_string()).map_err(err)
     }
 
     /// The separate drawings lying in the model space, found by where it is drawn and where it is empty, each boxed
