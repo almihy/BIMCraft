@@ -349,7 +349,10 @@ Stand-ins, each told in the report with its ids:
 - A wall of such a type whose box holds curtain panels' boxes comes in as a curtain wall (`curtain.rs`). Its grid is not the
   file's, which is not read: it is worked out from its panels' boxes (a line midway between two neighbours) and used only where
   it accounts for every panel, each in a cell of its own; else the wall has one open cell and its panels are boxes. Its panels
-  come in as glass and its mullions as boxes: their types are not read. An approximation, checked on synthetic files only.
+  come in as glass and its mullions as boxes: their types are not read. An approximation, checked on synthetic files and run once
+  on the `Snowdon Towers Sample Architectural.rvt` that the project owner's own Revit 2025 installs with its samples (read where it
+  is, never copied or committed, numbers only: 42 curtain walls, 12 with a grid that holds; it is not one of the tabled files, and
+  nothing was looked for in its bytes).
 - A floor, a ceiling or a roof whose box is taller than its type is thick is sloped or stepped: it comes in level, as thick as its
   type, at the bottom of its box. The slope blocks of the edges (rvt-rs RE-56) are not read, and no sample's slopes were compared
   with another reader's. A wall is never attached to such a roof, because the stand-in is not the roof its top would follow.

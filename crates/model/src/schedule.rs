@@ -252,7 +252,19 @@ fn identity(cat: &str) -> &'static [Own] {
     let typed = cat == MULTI
         || matches!(
             cat,
-            "wall" | "floor" | "roof" | "ceiling" | "door" | "window" | "column" | "structuralcolumn" | "footing" | "railing" | "component" | "curtainpanel" | "mullion"
+            "wall"
+                | "floor"
+                | "roof"
+                | "ceiling"
+                | "door"
+                | "window"
+                | "column"
+                | "structuralcolumn"
+                | "footing"
+                | "railing"
+                | "component"
+                | "curtainpanel"
+                | "mullion"
         )
         || crate::model::RUN_CATEGORIES.contains(&cat);
     if typed { IDENTITY } else { &[] }
@@ -575,7 +587,22 @@ const OWN: &[(&str, usize, &[Own])] = &[
     (
         "curtainpanel",
         7,
-        &[ID, TYPE, LEVEL, HOST_ID, WIDTH, HEIGHT, AREA, THICKNESS, MATERIAL, VOLUME, COUNT, PHASE_CREATED, PHASE_DEMOLISHED, DESIGN_OPTION],
+        &[
+            ID,
+            TYPE,
+            LEVEL,
+            HOST_ID,
+            WIDTH,
+            HEIGHT,
+            AREA,
+            THICKNESS,
+            MATERIAL,
+            VOLUME,
+            COUNT,
+            PHASE_CREATED,
+            PHASE_DEMOLISHED,
+            DESIGN_OPTION,
+        ],
     ),
     (
         "mullion",

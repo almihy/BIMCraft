@@ -385,8 +385,7 @@ fn finish(mut cx: Import, schema: String) -> Result<Imported, String> {
     cx.model.sync_library();
     // Each curtain wall lays out its panels, which are the wall's: one the model's rules refuse is told as the wall's.
     bimcraft_core::curtain::keep_all(&mut cx.model);
-    let laid: Vec<(Id, Guid)> =
-        cx.model.elements.iter().filter_map(|(id, e)| Some((*id, bimcraft_core::curtain::host_of(e)?))).collect();
+    let laid: Vec<(Id, Guid)> = cx.model.elements.iter().filter_map(|(id, e)| Some((*id, bimcraft_core::curtain::host_of(e)?))).collect();
     for (id, host) in laid {
         if let Some(wall) = cx.model.elements.id(host).and_then(|w| cx.from.get(&w)).cloned() {
             cx.from.entry(id).or_insert(wall.replacen("Wall", "Curtain wall part of wall", 1));

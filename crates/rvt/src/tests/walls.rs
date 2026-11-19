@@ -317,7 +317,8 @@ fn a_wall_whose_box_holds_curtain_panels_comes_in_as_a_curtain_wall_with_the_gri
         assert_eq!(g.u.iter().map(|l| l.at).collect::<Vec<_>>(), [0.0, 3048.0, 6096.0]);
         assert_eq!(g.v.iter().map(|l| l.at).collect::<Vec<_>>(), [0.0, 1524.0, 3048.0]);
         let parts = |id: Id| -> Vec<&Element> { m.hosted_by(m.guid(id)).into_iter().filter_map(|c| m.elements.get(c)).collect() };
-        let panels: Vec<&curtain::Panel> = parts(id).into_iter().filter_map(|e| if let Element::CurtainPanel(x) = e { Some(x) } else { None }).collect();
+        let panels: Vec<&curtain::Panel> =
+            parts(id).into_iter().filter_map(|e| if let Element::CurtainPanel(x) = e { Some(x) } else { None }).collect();
         assert_eq!(panels.len(), 4);
         assert!(panels.iter().all(|x| x.type_name == "Glazed 24.4mm"), "{:?}", panels[0].type_name);
         assert_eq!(m.types.curtain_panel["Glazed 24.4mm"].thickness, 24.4);

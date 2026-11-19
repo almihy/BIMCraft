@@ -21,8 +21,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use bimcraft_core::geom::P2;
 use bimcraft_core::curtain::{self as facade, CurtainType, GridLine, PanelType};
+use bimcraft_core::geom::P2;
 use bimcraft_core::model::{Element, Function, Id, Layer, Location, Wall, WallType};
 
 use crate::curves::{BoundedArc, BoundedLine, first_arc, first_line};
@@ -316,9 +316,8 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
             if let (None, Some((panels, shared))) = (read_type.as_ref(), curtains.get(&r.id)) {
                 let (s, e, turn) = if flip == Some(true) { (end, start, -arc) } else { (start, end, arc) };
                 let boxes: Vec<[f64; 6]> = panels.iter().filter_map(|p| f.current.get(p)).map(|p| p.bbox).collect();
-                let grid = (!*shared)
-                    .then(|| crate::curtain::Grid::of(s, e, turn, mm(r.bbox[2]), mm(r.bbox[5] - r.bbox[2]), &boxes))
-                    .flatten();
+                let grid =
+                    (!*shared).then(|| crate::curtain::Grid::of(s, e, turn, mm(r.bbox[2]), mm(r.bbox[5] - r.bbox[2]), &boxes)).flatten();
                 facade::ensure_panels(&mut cx.model);
                 // Its panels: glass, as thick as their boxes agree on; where no grid holds, one open cell.
                 let fill = match &grid {

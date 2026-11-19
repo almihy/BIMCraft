@@ -1690,6 +1690,10 @@ struct OwnCurtain {
     freed: Vec<CurtainFreed>,
 }
 
+/// A curtain wall of BIMCraft's own, made: its element, its hand-made lines, what its top and its base were attached to, and
+/// its parts, each with its key.
+type MadeCurtain = (Id, Vec<CurtainLine>, [Option<Guid>; 2], Vec<(Id, String)>);
+
 /// The most hand-made lines, and unpinned parts, one curtain wall's set is read with.
 const MAX_CURTAIN_ITEMS: usize = 100_000;
 
@@ -1946,12 +1950,10 @@ pub fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, String> 
             _ => {}
         }
     }
-    let storey_by_guid: HashMap<u128, Id> = level_of
-        .iter()
-        .filter_map(|(sid, level)| Some((crate::ids::expand(text(e(*sid)?.args.first())?)?, *level)))
-        .collect();
+    let storey_by_guid: HashMap<u128, Id> =
+        level_of.iter().filter_map(|(sid, level)| Some((crate::ids::expand(text(e(*sid)?.args.first())?)?, *level))).collect();
     // Each made: its element, its lines, what it was attached to, and its parts as (element, key).
-    let mut own_curtains: Vec<(Id, Vec<CurtainLine>, [Option<Guid>; 2], Vec<(Id, String)>)> = Vec::new();
+    let mut own_curtains: Vec<MadeCurtain> = Vec::new();
     let mut own_parts: HashSet<u64> = HashSet::new();
     for id in named(&["IFCCURTAINWALL"]) {
         let Some(own) = curtain_sets.get(&id).and_then(OwnCurtain::read) else { continue };
@@ -1962,10 +1964,7 @@ pub fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, String> 
             || types.mullions.iter().any(|(n, t)| m.types.mullion.get(n).is_some_and(|x| x != t));
         // Its levels: its storey's, and the one its top is constrained to, which must be in the file too.
         let top = match wall.top_level {
-            Some(g) => match storey_by_guid.get(&g.as_u128()) {
-                Some(level) => Some(Some(Guid::of_id(*level))),
-                None => None,
-            },
+            Some(g) => storey_by_guid.get(&g.as_u128()).map(|level| Some(Guid::of_id(*level))),
             None => Some(None),
         };
         let (Some(top), Some(storey), false) = (top, storey_of(id).and_then(|s| level_of.get(&s).copied()), clash) else { continue };
@@ -3777,7 +3776,9 @@ pub fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, String> 
                 from.insert(id, format!("a grid line of {}", from.get(&wall).cloned().unwrap_or_default()));
             }
         }
-        let standing = |g: Option<Guid>| g.filter(|g| matches!(m.elements.id(*g).and_then(|id| m.elements.get(id)), Some(Element::Roof(_) | Element::Floor(_))));
+        let standing = |g: Option<Guid>| {
+            g.filter(|g| matches!(m.elements.id(*g).and_then(|id| m.elements.get(id)), Some(Element::Roof(_) | Element::Floor(_))))
+        };
         let (top, base) = (standing(top), standing(base));
         if let Some(Element::Wall(w)) = m.elements.get_mut(wall) {
             (w.attach_top, w.attach_base) = (top, base);

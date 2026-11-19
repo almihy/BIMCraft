@@ -67,9 +67,12 @@ pub(crate) struct Grid {
     pub thickness: Option<f64>,
 }
 
+/// From where to where a panel's box reaches one way, mm.
+type Span = (f64, f64);
+
 /// The lines between intervals over `extent`: one midway between each interval's end and the nearest start at or after it
 /// that is no more than a mullion away, each once.
-fn lines(spans: &[(f64, f64)], extent: f64) -> Vec<f64> {
+fn lines(spans: &[Span], extent: f64) -> Vec<f64> {
     let mut starts: Vec<f64> = spans.iter().map(|s| s.0).collect();
     starts.sort_by(f64::total_cmp);
     let mut out: Vec<f64> = Vec::new();
@@ -87,7 +90,7 @@ fn lines(spans: &[(f64, f64)], extent: f64) -> Vec<f64> {
 }
 
 /// The cell of `lines` over `extent` that `(lo, hi)` lies in and fills but for a mullion each side: its index.
-fn cell(lines: &[f64], extent: f64, (lo, hi): (f64, f64)) -> Option<usize> {
+fn cell(lines: &[f64], extent: f64, (lo, hi): Span) -> Option<usize> {
     let i = lines.partition_point(|l| *l <= (lo + hi) / 2.0);
     let from = if i == 0 { 0.0 } else { *lines.get(i - 1)? };
     let to = lines.get(i).copied().unwrap_or(extent);
@@ -105,14 +108,20 @@ impl Grid {
             return None;
         }
         // The axis it runs along (x: 0, y: 1) and which way.
-        let (axis, way) = if d.1.abs() <= NEAR { (0, d.0.signum()) } else if d.0.abs() <= NEAR { (1, d.1.signum()) } else { return None };
+        let (axis, way) = if d.1.abs() <= NEAR {
+            (0, d.0.signum())
+        } else if d.0.abs() <= NEAR {
+            (1, d.1.signum())
+        } else {
+            return None;
+        };
         let origin = if axis == 0 { start.0 } else { start.1 };
         let along = |b: &[f64; 6]| {
             let (a, z) = ((mm(b[axis]) - origin) * way, (mm(b[axis + 3]) - origin) * way);
             (a.min(z), a.max(z))
         };
         let up = |b: &[f64; 6]| (mm(b[2]) - base, mm(b[5]) - base);
-        let (us, vs): (Vec<(f64, f64)>, Vec<(f64, f64)>) = panels.iter().map(|b| (along(b), up(b))).unzip();
+        let (us, vs): (Vec<Span>, Vec<Span>) = panels.iter().map(|b| (along(b), up(b))).unzip();
         let (vertical, horizontal) = (lines(&us, length), lines(&vs, height));
         // Held to the file: as many cells as panels, and each panel in a cell of its own.
         if (vertical.len() + 1).checked_mul(horizontal.len() + 1) != Some(panels.len()) {

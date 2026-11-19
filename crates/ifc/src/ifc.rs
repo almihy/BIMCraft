@@ -952,7 +952,8 @@ fn curtain_parts(w: &mut Step, m: &Model, curtains: &BTreeMap<Id, (u64, u64)>, p
                         ([d.0, d.1, 0.0], [0.0, 0.0, 1.0])
                     }
                 };
-                let section = if t.round { Section::new(t.thickness, t.thickness, true) } else { Section::new(q.width, t.thickness, false) };
+                let section =
+                    if t.round { Section::new(t.thickness, t.thickness, true) } else { Section::new(q.width, t.thickness, false) };
                 let profile = w.section_profile(section);
                 let aim = w.aim(sweep, wide);
                 let material = t.material.trim();

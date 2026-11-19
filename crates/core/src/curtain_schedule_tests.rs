@@ -92,7 +92,8 @@ fn a_curtain_wall_stays_in_the_wall_schedule_with_its_depth_and_its_face() {
     let mut s = Session::new();
     let w = storefront(&mut s);
     let basic = run(&mut s, "wall", json!({"points": [[0, 8000], [6000, 8000]], "height": 3000}))["ids"][0].as_u64().unwrap();
-    let t = run(&mut s, "schedule", json!({"category": "wall", "fields": ["Id", "Type", "Length", "Height", "Thickness", "Area", "Volume"]}));
+    let t =
+        run(&mut s, "schedule", json!({"category": "wall", "fields": ["Id", "Type", "Length", "Height", "Thickness", "Area", "Volume"]}));
     let row = t["rows"].as_array().unwrap().iter().find(|r| r[0].as_f64() == Some(w as f64)).unwrap();
     // As deep as its mullions; its length by its height; nothing of its own to hold (its panels and mullions hold theirs).
     assert_eq!(*row, json!([w as f64, "Storefront", 6000.0, 3000.0, 150.0, 18.0, 0.0]));
@@ -102,7 +103,11 @@ fn a_curtain_wall_stays_in_the_wall_schedule_with_its_depth_and_its_face() {
     assert_eq!((q.length, q.width, q.height), (6000.0, 150.0, Some(3000.0)));
     assert_eq!((q.gross_side, q.net_side, q.gross_volume, q.net_volume), (18.0e6, 18.0e6, 0.0, 0.0));
     // Every category together: each panel and mullion a row, with what it is made of.
-    let t = run(&mut s, "schedule", json!({"name": "All", "category": "multicategory", "fields": ["Category", "Type", "Material", "Area", "Length"]}));
+    let t = run(
+        &mut s,
+        "schedule",
+        json!({"name": "All", "category": "multicategory", "fields": ["Category", "Type", "Material", "Area", "Length"]}),
+    );
     let rows = t["rows"].as_array().unwrap();
     assert_eq!(rows.iter().filter(|r| r[0] == "curtainpanel" && r[2] == "Glass" && r[3].as_f64().is_some_and(|a| a > 0.0)).count(), 8);
     assert_eq!(rows.iter().filter(|r| r[0] == "mullion" && r[2] == "Metal" && r[4].as_f64().is_some_and(|l| l > 0.0)).count(), 22);

@@ -125,7 +125,8 @@ fn a_curtain_wall_goes_out_as_a_curtain_wall_of_plates_and_members() {
     let made: Vec<u64> = f.related("IFCRELASSOCIATESMATERIAL").into_iter().flat_map(|r| r[..r.len() - 1].to_vec()).collect();
     assert!(both.iter().all(|id| made.contains(id)));
     // The property sets: IsExternal on each, as the type's Function says.
-    for (class, set) in [("IFCCURTAINWALL", "Pset_CurtainWallCommon"), ("IFCPLATE", "Pset_PlateCommon"), ("IFCMEMBER", "Pset_MemberCommon")] {
+    for (class, set) in [("IFCCURTAINWALL", "Pset_CurtainWallCommon"), ("IFCPLATE", "Pset_PlateCommon"), ("IFCMEMBER", "Pset_MemberCommon")]
+    {
         let sets = f.of("IFCPROPERTYSET").into_iter().filter(|(_, a)| a.contains(&format!("'{set}'"))).count();
         assert_eq!(sets, f.of(class).len(), "{set}");
     }
@@ -209,10 +210,14 @@ fn bimcrafts_own_curtain_wall_comes_back_from_ifc_as_it_was() {
         m.insert(Element::CurtainGrid(GridLine { host, vertical: true, at: 700.0 }));
         curtain::keep_all(m);
         let g = curtain::grid(m, w).unwrap();
-        let keys: Vec<String> = m.hosted_by(host).into_iter().filter_map(|id| match m.elements.get(id)? {
-            Element::Mullion(x) if x.vertical && x.border == 0 => Some(x.key.clone()),
-            _ => None,
-        }).collect();
+        let keys: Vec<String> = m
+            .hosted_by(host)
+            .into_iter()
+            .filter_map(|id| match m.elements.get(id)? {
+                Element::Mullion(x) if x.vertical && x.border == 0 => Some(x.key.clone()),
+                _ => None,
+            })
+            .collect();
         let Some(Element::Wall(wall)) = m.elements.get_mut(w) else { panic!() };
         wall.curtain.merged.insert(curtain::segment_key(&g.u[3].key, &g.v[0].key));
         wall.curtain.no_mullion.insert(keys[0].clone());
