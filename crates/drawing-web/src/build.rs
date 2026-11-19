@@ -203,20 +203,35 @@ fn clusters(segs: &[Seg]) -> Vec<Cluster> {
         })
         .collect();
     by.sort_by(|a, b| a.0.total_cmp(&b.0));
-    // Lines chain into one set while each turns no more than a fifth of a degree from the last (and the set no more
-    // than `PARALLEL` in all); the set's frame is their mean direction by length, so that how far across a line lies
-    // is true along the whole of a long wall.
+    // The directions most is drawn along come first: the longest-drawn direction takes every line within half
+    // `PARALLEL` of it, then the next of what is left, and so on. A set's frame is its lines' mean direction by
+    // length, so that how far across a line lies is true along the whole of a long wall, and the two faces of a wall
+    // are never parted by where a set happens to end (a curved wall's chords run through every direction).
     let mut sets: Vec<Vec<(f64, Seg)>> = Vec::new();
-    let (mut first, mut last) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
-    for (th, s) in by {
-        if th - last > 0.2 || th - first > PARALLEL {
-            first = th;
-            sets.push(Vec::new());
+    let mut left: Vec<(f64, Seg)> = by;
+    while !left.is_empty() {
+        // The weight drawn within a tenth of a degree of each line's direction; `left` is sorted by direction.
+        let (mut best, mut most, mut lo) = (0usize, -1.0f64, 0usize);
+        let mut sum = 0.0;
+        let mut hi = 0usize;
+        for i in 0..left.len() {
+            while hi < left.len() && left[hi].0 - left[i].0 <= 0.1 {
+                sum += left[hi].1.b.sub(left[hi].1.a).len();
+                hi += 1;
+            }
+            while left[i].0 - left[lo].0 > 0.1 {
+                sum -= left[lo].1.b.sub(left[lo].1.a).len();
+                lo += 1;
+            }
+            if sum > most {
+                most = sum;
+                best = i;
+            }
         }
-        last = th;
-        if let Some(set) = sets.last_mut() {
-            set.push((th, s));
-        }
+        let at = left[best].0;
+        let (taken, rest): (Vec<_>, Vec<_>) = left.into_iter().partition(|(th, _)| (th - at).abs() <= PARALLEL / 2.0);
+        sets.push(taken);
+        left = rest;
     }
     let mut out: Vec<Cluster> = Vec::new();
     for set in sets {
