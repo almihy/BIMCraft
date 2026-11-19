@@ -8395,6 +8395,12 @@ impl Model {
             }
             Element::Door(o) | Element::Window(o) => {
                 let w = self.wall(o.host).ok_or(format!("{who}: host wall {} doesn't exist", self.shown(o.host)))?;
+                if crate::curtain::is_curtain(self, w) {
+                    return Err(format!(
+                        "{who}: its host wall {} is a curtain wall, which hosts no doors or windows (its cells are filled by its                          panels); delete it, or put it in a basic wall",
+                        self.shown(o.host)
+                    ));
+                }
                 let t = self.opening_dims(e).map_err(|e| format!("{who}: {e}"))?;
                 if let Some(f) = o.family.as_ref().and_then(|n| self.families.get(n)) {
                     self.family_values_ok(&who, o.family.as_deref().unwrap_or_default(), f, &o.params)?;

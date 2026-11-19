@@ -5,9 +5,10 @@
 
 use serde_json::{Value, json};
 
-use super::{R, ids_param, only};
+use super::{R, bad, ids_param, only};
+use crate::curtain::{Mullion, Panel};
 use crate::engine::Session;
-use crate::model::{Id, Model};
+use crate::model::{Element, Id, Model};
 
 /// What a command refused to do to a pinned element: Revit's own failures say "Can't move pinned element." and "Can't rotate
 /// pinned element."; and "Pinned objects were not deleted. To delete them, unpin them before using delete.".
@@ -43,7 +44,7 @@ const OWN_WORDS: &str = "Pinned objects deleted.";
 /// `result` (an object) with `pinned`, those of `gone` that were pinned and went with their host (Revit warns "Some pinned objects
 /// were deleted because their parent or host object was deleted."), and a note saying so. Nothing when none did.
 pub(super) fn hosted_pins_deleted(result: Value, before: &Model, gone: &[Id], asked: &[Id]) -> Value {
-    let went: Vec<Id> = before.pinned_among(gone).into_iter().filter(|id| !asked.contains(id)).collect();
+    let went: Vec<Id> = by_hand(before, gone).into_iter().filter(|id| !asked.contains(id)).collect();
     pins_note(result, went, &[])
 }
 
@@ -51,9 +52,20 @@ pub(super) fn hosted_pins_deleted(result: Value, before: &Model, gone: &[Id], as
 /// "Pinned objects deleted." (its EditingFailures list); those that hung on a deleted host keep the host words. `pinned` lists
 /// both and the note both sentences, each when it applies.
 pub(super) fn type_pins_deleted(result: Value, before: &Model, gone: &[Id], instances: &[Id]) -> Value {
-    let pinned = before.pinned_among(gone);
+    let pinned = by_hand(before, gone);
     let (own, hosted): (Vec<Id>, Vec<Id>) = pinned.into_iter().partition(|id| instances.contains(id));
     pins_note(result, hosted, &own)
+}
+
+/// Those of `ids` a person pinned: a curtain wall's panels and mullions count as pinned while their wall holds them
+/// (`curtain::placed`), which is no pin anyone set, so nothing is said of them when they go with their wall.
+fn by_hand(m: &Model, ids: &[Id]) -> Vec<Id> {
+    ids.iter().copied().filter(|id| m.pinned.contains(&m.guid(*id))).collect()
+}
+
+/// Whether the element is a curtain wall's panel or mullion, which its wall pins and Unpin frees (`free`).
+fn curtain_child(m: &Model, id: Id) -> bool {
+    matches!(m.elements.get(id), Some(Element::CurtainPanel(_) | Element::Mullion(_)))
 }
 
 fn pins_note(mut result: Value, hosted: Vec<Id>, own: &[Id]) -> Value {
@@ -78,10 +90,31 @@ pub(super) fn pin(s: &mut Session, p: &Value) -> R {
     let c = "pin";
     only(c, p, &["ids", "id"])?;
     let ids = ids_param(c, &s.model, p)?;
-    let guids: Vec<_> = ids.iter().map(|id| s.model.guid(*id)).collect();
-    let already = s.model.pinned_among(&ids);
+    let m = &s.model;
+    let already = m.pinned_among(&ids);
+    // A curtain wall's panel or mullion is pinned by being the wall's again: it goes back to what the wall's type gives it,
+    // as Revit's does. One put on by hand where the type has none has nothing to be pinned to.
+    let (children, others): (Vec<Id>, Vec<Id>) = ids.iter().partition(|id| curtain_child(m, **id));
+    if let Some(id) =
+        children.iter().find(|id| m.elements.get(**id).is_some_and(|e| !crate::curtain::placed(e) && !crate::curtain::typed(m, e)))
+    {
+        return Err(bad(
+            c,
+            format!(
+                "mullion {id} was put on by hand where its curtain wall's type has no mullion, so there is nothing to pin it to: \
+                 Revit pins a mullion only to what a curtain wall's type lays out. Leave it out of `ids`"
+            ),
+        ));
+    }
+    let guids: Vec<_> = others.iter().map(|id| m.guid(*id)).collect();
     if already.len() < ids.len() {
-        s.model_mut().pinned.extend(guids);
+        let m = s.model_mut();
+        for id in children {
+            if let Some(Element::CurtainPanel(Panel { free, .. }) | Element::Mullion(Mullion { free, .. })) = m.elements.get_mut(id) {
+                *free = false;
+            }
+        }
+        m.pinned.extend(guids);
     }
     Ok(json!({"pinned": ids, "already": already}))
 }
@@ -93,9 +126,16 @@ pub(super) fn unpin(s: &mut Session, p: &Value) -> R {
     let was = s.model.pinned_among(&ids);
     if !was.is_empty() {
         let guids: Vec<_> = ids.iter().map(|id| s.model.guid(*id)).collect();
+        // A panel or a mullion its curtain wall placed is freed: it keeps its type from here on, whatever the wall's says.
+        let held: Vec<Id> = was.iter().copied().filter(|id| s.model.elements.get(*id).is_some_and(crate::curtain::placed)).collect();
         let m = s.model_mut();
         for g in guids {
             m.pinned.remove(&g);
+        }
+        for id in held {
+            if let Some(Element::CurtainPanel(Panel { free, .. }) | Element::Mullion(Mullion { free, .. })) = m.elements.get_mut(id) {
+                *free = true;
+            }
         }
     }
     Ok(json!({"unpinned": was, "ids": ids}))

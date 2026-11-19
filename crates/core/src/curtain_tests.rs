@@ -7,22 +7,22 @@ use crate::curtain::{self, Mullion, Panel};
 use crate::engine::Session;
 use crate::model::{CURTAIN_FORMAT, Element, Id};
 
-fn run(s: &mut Session, id: &str, p: Value) -> Value {
+pub(crate) fn run(s: &mut Session, id: &str, p: Value) -> Value {
     s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"))
 }
 
-fn fails(s: &mut Session, id: &str, p: Value) -> String {
+pub(crate) fn fails(s: &mut Session, id: &str, p: Value) -> String {
     let before = s.model.clone();
     let e = s.execute(id, &p).expect_err(&format!("{id} {p} should fail"));
     assert_eq!(*s.model, *before, "a refused {id} changes nothing");
     e
 }
 
-fn wall(s: &mut Session, p: Value) -> Id {
+pub(crate) fn wall(s: &mut Session, p: Value) -> Id {
     run(s, "wall", p)["ids"][0].as_u64().unwrap()
 }
 
-fn panels(s: &Session, wall: Id) -> Vec<(Id, Panel)> {
+pub(crate) fn panels(s: &Session, wall: Id) -> Vec<(Id, Panel)> {
     let host = s.model.guid(wall);
     s.model
         .elements
@@ -34,7 +34,7 @@ fn panels(s: &Session, wall: Id) -> Vec<(Id, Panel)> {
         .collect()
 }
 
-fn mullions(s: &Session, wall: Id) -> Vec<(Id, Mullion)> {
+pub(crate) fn mullions(s: &Session, wall: Id) -> Vec<(Id, Mullion)> {
     let host = s.model.guid(wall);
     s.model
         .elements
