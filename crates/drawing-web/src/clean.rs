@@ -436,7 +436,7 @@ fn selected(s: &Seen, p: &Value) -> Result<Vec<usize>, String> {
 /// What `box` holds that `keep` and `drop` left out, so that whoever cleans a drawing sees what the rules cost:
 /// `{items, layers: [{name, items}], blocks: [{name, placed, layers}]}`, the most first, the 25 layers and the 40
 /// blocks with the most (with `more_layers` and `more_blocks` when there are others). Blocks are placements left out,
-/// by name, with the layers they were placed on; `layers` counts everything else by the layer it was on.
+/// by name, with the layers they were placed on and what each `holds` (its own items by their layer); `layers` counts everything else by the layer it was on.
 fn left_out(s: &Seen, p: &Value, chosen: &[usize]) -> Result<Value, String> {
     let area = given(p, "box").map(|v| area_of(s, v)).transpose()?;
     let mut layers: BTreeMap<String, usize> = BTreeMap::new();
@@ -463,7 +463,24 @@ fn left_out(s: &Seen, p: &Value, chosen: &[usize]) -> Result<Value, String> {
     let mut out = json!({
         "items": items,
         "layers": ls.iter().take(25).map(|(name, n)| json!({"name": name, "items": n})).collect::<Vec<_>>(),
-        "blocks": bs.iter().take(40).map(|(name, (n, on))| json!({"name": name, "placed": n, "layers": on})).collect::<Vec<_>>(),
+        "blocks": bs
+            .iter()
+            .take(40)
+            .map(|(name, (n, on))| {
+                // What the block holds, by the layer its own items are on (the six most): a block named "014" that
+                // holds glazing lines says what it is.
+                let mut holds: BTreeMap<&str, usize> = BTreeMap::new();
+                if let Some(blk) = s.d.block(name) {
+                    for e in blk.entities.iter() {
+                        *holds.entry(e.common.layer.as_str()).or_default() += 1;
+                    }
+                }
+                let mut holds: Vec<(&str, usize)> = holds.into_iter().collect();
+                holds.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+                let holds: BTreeMap<&str, usize> = holds.into_iter().take(6).collect();
+                json!({"name": name, "placed": n, "layers": on, "holds": holds})
+            })
+            .collect::<Vec<_>>(),
     });
     if ls.len() > 25 {
         out["more_layers"] = json!(ls.len() - 25);
