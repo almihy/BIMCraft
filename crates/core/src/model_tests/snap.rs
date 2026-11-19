@@ -738,6 +738,10 @@ wall {"points": [[0, 0], [6000, 0], [6000, 4000]], "type": "Ext"}"#,
     // Along the wall, through its lines: its own, then the others by how near they are.
     let on = |turn: i32| snap(m, 100_000, P2(2003.0, 10.0), reach, &[], false, &Snaps { turn, ..Snaps::default() }).at;
     assert_eq!([on(0), on(1), on(2), on(3), on(4), on(5)].map(|q| q.1), [0.0, 60.0, 160.0, -140.0, -160.0, 0.0]);
+    // Its core's faces go as far as its join carries them: the block's outer face runs on to the next wall's block, past
+    // the wall's own line's end at x = 6000.
+    let f = snap(m, 100_000, P2(6080.0, 52.0), reach, &[], false, &Snaps::default());
+    assert_eq!((f.kind, f.at), (Kind::Nearest, P2(6080.0, 60.0)));
     // Nearest off, a face holds nothing.
     assert_eq!(snap(m, 100_000, P2(2003.0, 150.0), reach, &[], false, &Snaps { nearest: false, ..Snaps::default() }).kind, Kind::Free);
 }

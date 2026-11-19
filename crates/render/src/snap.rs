@@ -483,8 +483,14 @@ impl<'a> Scene<'a> {
                         faced += 1;
                         let ring = crate::walls::outline(m, id);
                         let mut edges: Vec<(P2, P2)> = geom::ring_edges(&ring).collect();
-                        if let Some((outer, inner)) = crate::walls::core_faces(m, w) {
-                            edges.extend([outer, inner].map(|off| (a.at(0.0, off), a.at(a.length(), off))));
+                        // Its core's two faces, as far as its joins carry or cut them.
+                        if crate::walls::core_faces(m, w).is_some()
+                            && let Some(core) = m.types.wall.get(&w.type_name).map(crate::model::WallType::core_layers)
+                        {
+                            let geometry = crate::walls::layer_geometry(m, id, None);
+                            for line in [core.start, core.end].into_iter().filter_map(|b| geometry.lines.get(b)) {
+                                edges.extend(line.windows(2).filter_map(|s| Some((*s.first()?, *s.get(1)?))));
+                            }
                         }
                         for (x, y) in edges.into_iter().filter(|(x, y)| x.dist(*y) > TOL) {
                             s.points.extend([(x, Kind::Endpoint, of), (y, Kind::Endpoint, of)]);
