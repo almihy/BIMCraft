@@ -5465,6 +5465,11 @@ impl BimApp {
             }
             return;
         };
+        // Three or four walls ending at the point: their order, which Previous and Next step through.
+        if let Some(order) = bimcraft_core::walls::join_order(&m, a, ea) {
+            self.ordered_join_options(ui, &order);
+            return;
+        }
         let kept = m.wall_join((m.guid(a), ea), (m.guid(b), eb));
         let (kind, display) = (kept.map_or(JoinKind::Butt, |j| j.kind), kept.map_or(JoinDisplay::ViewSetting, |j| j.display));
         let mut run: Option<Value> = None;
@@ -5498,6 +5503,40 @@ impl BimApp {
             let step = self.run("modify", json!({"id": a, if ea { "join_end" } else { "join_start" }: false})).is_some();
             if step {
                 self.run("modify", json!({"id": b, if eb { "join_end" } else { "join_start" }: false}));
+            }
+            self.tool = Tool::WallJoins(None);
+            return;
+        }
+        if let Some(p) = run {
+            self.run("wall_join", p);
+        }
+    }
+
+    /// The Wall Joins tool's options for three or four walls ending at one point, in the order they join in (each a wall
+    /// and which of its ends is there): a Butt, Previous and Next stepping through the orders (which wall runs through,
+    /// which butts it, which butts both), and Disallow Join, which lets every end go.
+    fn ordered_join_options(&mut self, ui: &mut Ui, order: &[(Id, bool)]) {
+        use bimcraft_core::model::JoinKind;
+        let walls: Vec<Id> = order.iter().map(|(id, _)| *id).collect();
+        ui.add_enabled_ui(false, |ui| {
+            for k in JoinKind::ALL {
+                let _ = ui.radio(k == JoinKind::Butt, t(k.label()));
+            }
+        });
+        ui.separator();
+        let mut run: Option<Value> = None;
+        if ui.button(t("Previous")).clicked() {
+            run = Some(json!({"walls": walls, "previous": true}));
+        }
+        if ui.button(t("Next")).clicked() {
+            run = Some(json!({"walls": walls, "next": true}));
+        }
+        ui.separator();
+        if ui.button(t("Disallow Join")).clicked() {
+            for (id, at_end) in order {
+                if self.run("modify", json!({"id": id, if *at_end { "join_end" } else { "join_start" }: false})).is_none() {
+                    break;
+                }
             }
             self.tool = Tool::WallJoins(None);
             return;
@@ -6585,7 +6624,10 @@ pub(crate) fn join_near(m: &Model, id: Id, at: P2) -> Option<(Id, Id, P2)> {
     let at_end = w.end.dist(at) < w.start.dist(at);
     let node = if at_end { w.end } else { w.start };
     if node.dist(at) <= reach {
-        let other = walls::end_join(m, id, at_end).map(|(other, _)| other).or_else(|| walls::ends_on(m, id, at_end));
+        // Its one other wall end, the wall it ends on, or one of the two or three other ends at a join of three or four.
+        let among =
+            || walls::join_order(m, id, at_end).and_then(|order| order.into_iter().map(|(other, _)| other).find(|other| *other != id));
+        let other = walls::end_join(m, id, at_end).map(|(other, _)| other).or_else(|| walls::ends_on(m, id, at_end)).or_else(among);
         if let Some(other) = other {
             return Some((id, other, node));
         }

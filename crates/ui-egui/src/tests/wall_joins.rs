@@ -143,3 +143,35 @@ fn the_view_bars_detail_menu_has_wall_join_display_for_a_coarse_view() {
     press(&mut h, "Clean all wall joins");
     assert!(!same(&h));
 }
+
+#[test]
+fn the_wall_joins_tool_steps_three_walls_at_a_point_through_their_six_orders() {
+    // A third wall out of the corner at (8000, 0), down to the right: three ends at the point.
+    let mut h = app(&format!("{BOX}\nwall {{\"points\": [[8000, 0], [10000, -1500]]}}"));
+    let (south, east) = corner(&h);
+    let third = *ids(&h, "wall").last().unwrap();
+    let order = |h: &Harness<BimApp>| {
+        bimcraft_core::walls::join_order(&h.state().session.model, south, true).map(|o| o.into_iter().map(|(id, _)| id).collect::<Vec<_>>())
+    };
+    assert_eq!(order(&h), Some(vec![south, east, third]), "the order they were made in");
+    topmost(&mut h, "Modify");
+    press(&mut h, "Wall Joins");
+    click(&mut h, P2(7800.0, 0.0));
+    assert!(matches!(h.state().tool, Tool::WallJoins(Some(_))), "a join of three walls is one the tool takes, as Revit's");
+    // A Butt, with nothing else to choose; Previous and Next are live.
+    assert!(h.get_by_label("Miter").accesskit_node().is_disabled() && !h.get_by_label("Next").accesskit_node().is_disabled());
+    let before = h.state().session.history().len();
+    let mut seen = vec![order(&h).unwrap()];
+    for _ in 0..6 {
+        press(&mut h, "Next");
+        seen.push(order(&h).unwrap());
+    }
+    assert_eq!(h.state().session.history().len(), before + 6, "each an undo step");
+    assert_eq!(seen.first(), seen.last(), "six orders, and round again");
+    seen.sort();
+    seen.dedup();
+    assert_eq!(seen.len(), 6);
+    press(&mut h, "Previous");
+    assert_eq!(order(&h), Some(vec![third, east, south]));
+    assert!(matches!(h.state().tool, Tool::WallJoins(Some(_))), "the join stays picked");
+}

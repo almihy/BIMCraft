@@ -581,6 +581,50 @@ fn three_walls_ending_at_a_point_join_by_their_layers_each_to_the_one_on_either_
     }
 }
 
+#[test]
+fn three_walls_at_a_point_join_in_an_order_that_the_wall_joins_tool_steps_through() {
+    let mut s = typed();
+    let mut wall = |points: Value| run(&mut s, "wall", json!({"points": points, "type": "Ext"}))["ids"][0].as_u64().unwrap();
+    let (left, up, down) = (wall(json!([[-3000, 0], [0, 0]])), wall(json!([[0, 0], [0, 3000]])), wall(json!([[0, 0], [2400, -1800]])));
+    // How far right the wall from the left runs, and how far down the wall going up.
+    let right = |s: &Session| walls::outline(&s.model, left).iter().map(|p| p.0).fold(f64::NEG_INFINITY, f64::max);
+    let low = |s: &Session| walls::outline(&s.model, up).iter().map(|p| p.1).fold(f64::INFINITY, f64::min);
+    // As made: the wall from the left runs through, to the far face of the one going up (x = 157.5); that one butts it,
+    // its brick stopping on the upper face.
+    assert!((right(&s) - 157.5).abs() < 1e-6 && low(&s) > -157.0, "{} {}", right(&s), low(&s));
+    // Next steps through the six orders and comes round; every one leaves no place held twice or left empty.
+    let mut seen = vec![vec![left, up, down]];
+    for _ in 0..6 {
+        let said = run(&mut s, "wall_join", json!({"walls": [left, up, down], "next": true}));
+        let order: Vec<u64> = said["order"].as_array().unwrap().iter().map(|v| v.as_u64().unwrap()).collect();
+        assert_eq!(walls::join_order(&s.model, left, true).unwrap().iter().map(|(id, _)| *id).collect::<Vec<_>>(), order);
+        for i in -30..=30 {
+            for j in -30..=30 {
+                let q = P2(f64::from(i) * 12.0 + 3.7, f64::from(j) * 12.0 + 2.3);
+                let (count, _) = held(&s, &[left, up, down], q);
+                assert!(count <= 1, "{order:?}: {count} layers at {q:?}");
+                assert!(count == 1 || q.dist(P2(0.0, 0.0)) > 150.0, "{order:?}: nothing at {q:?}");
+            }
+        }
+        seen.push(order);
+    }
+    assert_eq!(seen.first(), seen.last(), "the seventh is the first again");
+    seen.pop();
+    seen.sort();
+    seen.dedup();
+    assert_eq!(seen.len(), 6);
+    // The wall going up first: it runs through, down to the far face of the wall from the left (y = -157.5).
+    run(&mut s, "wall_join", json!({"walls": [left, up, down], "order": [up, left, down]}));
+    assert!((low(&s) + 157.5).abs() < 1e-6 && right(&s) < 157.0, "{} {}", right(&s), low(&s));
+    // Previous is Next the other way; reset is the order they were made in, in one undo step each.
+    run(&mut s, "wall_join", json!({"walls": [left, up, down], "reset": true}));
+    assert!((right(&s) - 157.5).abs() < 1e-6 && s.model.wall_joins.is_empty());
+    let back = run(&mut s, "wall_join", json!({"walls": [left, up, down], "previous": true}));
+    assert_eq!(back["order"], json!([down, up, left]));
+    // What is a join of two walls' is refused of three.
+    assert!(s.execute("wall_join", &json!({"walls": [left, up, down], "kind": "mitre"})).is_err());
+}
+
 /// How many layers of walls `ids` hold point `q`, and which layer the first is.
 fn held(s: &Session, ids: &[u64], q: P2) -> (usize, Option<usize>) {
     let mut found = (0, None);
@@ -763,32 +807,20 @@ fn shot_curved_joins() {
     std::fs::write(format!("{dir}/curved.png"), crate::render::png(&crate::render::plan(&s.model, 100000, 1800, 1500)).unwrap()).unwrap();
 }
 
-/// Three walls ending at a point, 120 degrees apart and as a T's arms askew: a picture to look at.
+/// Three walls ending at a point, as drawn in Revit, in three of their six orders: a picture to look at.
 #[test]
 #[ignore]
 fn shot_y_joins() {
     let mut s = typed();
-    for a in [90.0_f64, 210.0, 330.0] {
-        let (x, y) = (1400.0 * a.to_radians().cos(), 1400.0 * a.to_radians().sin());
-        run(&mut s, "wall", json!({"points": [[0, 0], [x, y]], "type": "Ext"}));
+    for (n, first) in [0, 1, 2].into_iter().enumerate() {
+        let x = 3200.0 * n as f64;
+        let mut wall = |points: Value| run(&mut s, "wall", json!({"points": points, "type": "Ext"}))["ids"][0].as_u64().unwrap();
+        let ids = [wall(json!([[x - 1300.0, 0], [x, 0]])), wall(json!([[x, 0], [x, 1300]])), wall(json!([[x, 0], [x + 1100.0, -800]]))];
+        let mut order = ids.to_vec();
+        order.rotate_left(first);
+        run(&mut s, "wall_join", json!({"walls": ids, "order": order}));
     }
-    // The three walls drawn in Revit: one in from the left, one up, one down to the right.
-    run(&mut s, "wall", json!({"points": [[2600, 0], [4000, 0]], "type": "Ext"}));
-    run(&mut s, "wall", json!({"points": [[4000, 0], [4000, 1400]], "type": "Ext"}));
-    run(&mut s, "wall", json!({"points": [[4000, 0], [5100, -800]], "type": "Ext"}));
     run(&mut s, "detail", json!({"view": 100000, "detail": "fine"}));
     let dir = std::env::var("SHOT").unwrap();
-    std::fs::write(format!("{dir}/y.png"), crate::render::png(&crate::render::plan(&s.model, 100000, 1800, 1000)).unwrap()).unwrap();
-}
-
-#[test]
-#[ignore]
-fn shot_y_close() {
-    let mut s = typed();
-    run(&mut s, "wall", json!({"points": [[-700, 0], [0, 0]], "type": "Ext"}));
-    run(&mut s, "wall", json!({"points": [[0, 0], [0, 700]], "type": "Ext"}));
-    run(&mut s, "wall", json!({"points": [[0, 0], [600, -430]], "type": "Ext"}));
-    run(&mut s, "detail", json!({"view": 100000, "detail": "fine"}));
-    let dir = std::env::var("SHOT").unwrap();
-    std::fs::write(format!("{dir}/yc.png"), crate::render::png(&crate::render::plan(&s.model, 100000, 1400, 1300)).unwrap()).unwrap();
+    std::fs::write(format!("{dir}/y.png"), crate::render::png(&crate::render::plan(&s.model, 100000, 2400, 900)).unwrap()).unwrap();
 }

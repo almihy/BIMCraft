@@ -1811,7 +1811,10 @@ other_files(
          (the wall made first, until one is set). `display` is how plans show it: cleaned up, the wall ends butting against one \
          another, or as the view says. `reset` forgets what was set, back to the default Butt. A wall ending on another's side \
          (a T join) is a Butt with the wall run into through: only its `display` is set, its `ends` the ending wall's and `side`. Whether an end joins at all is the wall's `join_start` and `join_end` \
-         (`modify`), Revit's Allow Join and Disallow Join. Returns {walls, ends, kind, through, display}",
+         (`modify`), Revit's Allow Join and Disallow Join. Returns {walls, ends, kind, through, display}. Three or four walls \
+         ending at one point (`walls` all of them) join in an order, as Revit's: the first runs through, the second butts it, \
+         each one after butts what is there. `order` sets it ([id, …], every wall once), `next` and `previous` step through \
+         the orders (six of three walls), `reset` goes back to the order they were made in; it returns {walls, order}",
         wall_join,
     ),
     edit(
@@ -13068,13 +13071,16 @@ fn layered(
 fn wall_join(s: &mut Session, p: &Value) -> R {
     use crate::model::{JoinDisplay, JoinKind, WallJoin};
     let c = "wall_join";
-    only(c, p, &["walls", "kind", "through", "next", "previous", "display", "reset"])?;
+    only(c, p, &["walls", "kind", "through", "next", "previous", "display", "reset", "order"])?;
     let ids: Vec<Id> = match p.get("walls") {
-        Some(Value::Array(a)) if a.len() == 2 => {
-            a.iter().map(|v| v.as_u64().ok_or(())).collect::<Result<_, _>>().map_err(|()| bad(c, "`walls` is two wall ids"))?
+        Some(Value::Array(a)) if (2..=4).contains(&a.len()) => {
+            a.iter().map(|v| v.as_u64().ok_or(())).collect::<Result<_, _>>().map_err(|()| bad(c, "`walls` is wall ids"))?
         }
-        _ => return Err(bad(c, "`walls` is the two walls that meet: [id, id]")),
+        _ => return Err(bad(c, "`walls` is the walls that meet: [id, id], or the three or four that end at one point")),
     };
+    if ids.len() > 2 {
+        return ordered_join(s, p, &ids);
+    }
     let m = &s.model;
     let (a, b) = (ids[0], ids[1]);
     let (Some(wa), Some(wb)) = (m.wall(a), m.wall(b)) else { return Err(bad(c, format!("{a} and {b} are not two walls"))) };
@@ -13133,6 +13139,90 @@ fn wall_join(s: &mut Session, p: &Value) -> R {
         "through": if through == ga { a } else { b },
         "display": join.display.name(),
     }))
+}
+
+/// `wall_join` for three or four walls ending at one point: the order they join in.
+fn ordered_join(s: &mut Session, p: &Value, ids: &[Id]) -> R {
+    use crate::model::{JoinDisplay, JoinKind, WallJoin};
+    let c = "wall_join";
+    let m = &s.model;
+    let mut given: Vec<Id> = ids.to_vec();
+    given.sort_unstable();
+    given.dedup();
+    // The join they all end at: found from the first wall's either end.
+    let now = [false, true]
+        .into_iter()
+        .filter_map(|end| crate::walls::join_order(m, ids[0], end))
+        .find(|order| {
+            let mut there: Vec<Id> = order.iter().map(|(id, _)| *id).collect();
+            there.sort_unstable();
+            there == given
+        })
+        .ok_or_else(|| bad(c, "`walls` are not the three or four straight walls that end at one point, none in line with another"))?;
+    for key in ["kind", "through", "display"] {
+        if !absent(p.get(key)) {
+            return Err(bad(
+                c,
+                format!("`{key}` is a join of two walls'; three or four joining at a point take `order`, `next`, `previous` or `reset`"),
+            ));
+        }
+    }
+    let end_of = |id: Id| now.iter().find(|(other, _)| *other == id).map(|(_, end)| *end);
+    let mut order: Vec<Id> = now.iter().map(|(id, _)| *id).collect();
+    if let Some(v) = p.get("order").filter(|v| !absent(Some(v))) {
+        let asked: Vec<Id> = v.as_array().into_iter().flatten().filter_map(Value::as_u64).collect();
+        let mut sorted = asked.clone();
+        sorted.sort_unstable();
+        if sorted != given {
+            return Err(bad(c, "`order` is the same walls as `walls`, each once: [id, …]"));
+        }
+        order = asked;
+    }
+    // Every order, counted up from the one they were made in; Next and Previous step along them, and round.
+    let step = i64::from(flag(c, p, "next")?) - i64::from(flag(c, p, "previous")?);
+    if step != 0 {
+        let mut all = vec![given.clone()];
+        while let Some(next) = all.last().and_then(|last| next_order(last)) {
+            all.push(next);
+        }
+        let at = all.iter().position(|o| *o == order).unwrap_or(0) as i64;
+        order = all[(at + step).rem_euclid(all.len() as i64) as usize].clone();
+    }
+    let reset = flag(c, p, "reset")?;
+    if reset {
+        order = given.clone();
+    }
+    // Kept two ends at a time: each two walls' join says which of them comes first.
+    let ends: Vec<(Guid, bool)> = given.iter().filter_map(|id| Some((m.guid(*id), end_of(*id)?))).collect();
+    let mut kept = Vec::new();
+    for (i, a) in order.iter().enumerate() {
+        for b in order.iter().skip(i + 1) {
+            let (Some(ea), Some(eb)) = (end_of(*a), end_of(*b)) else { continue };
+            kept.push(WallJoin {
+                ends: WallJoin::key((m.guid(*a), ea), (m.guid(*b), eb)),
+                kind: JoinKind::Butt,
+                first: Some(m.guid(*a)),
+                display: JoinDisplay::ViewSetting,
+            });
+        }
+    }
+    let m = s.model_mut();
+    m.wall_joins.retain(|j| !j.ends.iter().all(|e| ends.contains(e)));
+    if !reset {
+        m.wall_joins.extend(kept);
+        m.wall_joins.sort_by(|x, y| x.ends.cmp(&y.ends));
+    }
+    Ok(json!({"walls": given, "order": order}))
+}
+
+/// The order after `order`, counting up: none after the last.
+fn next_order(order: &[Id]) -> Option<Vec<Id>> {
+    let mut next = order.to_vec();
+    let rise = (0..next.len().checked_sub(1)?).rev().find(|i| next[*i] < next[*i + 1])?;
+    let swap = (rise + 1..next.len()).rev().find(|j| next[*j] > next[rise])?;
+    next.swap(rise, swap);
+    next[rise + 1..].reverse();
+    Some(next)
 }
 
 /// `wall_join` for a wall that ends on another's side (a T join): it is a Butt, the wall run into going through, and only

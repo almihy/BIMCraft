@@ -448,7 +448,30 @@ fn node_order(m: &Model, arms: &[Arm], through: bool) -> Option<Vec<(Id, bool)>>
     order.sort_unstable();
     let apart = order.windows(2).all(|w| w[0].0 != w[1].0);
     let straight = order.iter().all(|(id, _)| m.wall(*id).is_some_and(|w| w.arc == 0.0));
-    (apart && straight).then_some(order)
+    if !(apart && straight) {
+        return None;
+    }
+    // The order the Wall Joins tool left, kept wall by wall (each two ends' join says which of them is first): a wall
+    // comes before as many of the others as it is first of.
+    if !m.wall_joins.is_empty() {
+        let before = |x: (Id, bool), y: (Id, bool)| match m.wall_join((m.guid(x.0), x.1), (m.guid(y.0), y.1)).and_then(|j| j.first) {
+            Some(first) => first == m.guid(x.0),
+            None => x.0 < y.0,
+        };
+        let firsts: Vec<usize> = order.iter().map(|x| order.iter().filter(|y| *y != x && before(*x, **y)).count()).collect();
+        let mut ranked: Vec<(usize, (Id, bool))> = firsts.into_iter().zip(order.iter().copied()).collect();
+        ranked.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        order = ranked.into_iter().map(|(_, end)| end).collect();
+    }
+    Some(order)
+}
+
+/// The order the three or four walls ending where wall `id`'s end (`at_end`, else its start) is join in, where none runs
+/// on in line with another: each a wall and which of its ends is there. The first runs through, the second butts it, and
+/// each one after butts what is there. None for any other join.
+pub fn join_order(m: &Model, id: Id, at_end: bool) -> Option<Vec<(Id, bool)>> {
+    let (arms, through) = arms(m, id, at_end, None);
+    node_order(m, &arms, through)
 }
 
 /// The wall that runs on through a node others end at: the one with two arms there, when it is the only one.
