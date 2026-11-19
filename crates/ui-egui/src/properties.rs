@@ -1599,7 +1599,8 @@ impl BimApp {
             pairs.iter().map(label).collect()
         } else {
             // The Wall tool always offers Revit's three curtain wall types: one the project hasn't got is made by its first wall.
-            let unmade = subject == Subject::New("wall");
+            // (The Wall tool's alone: a dormer's walls are the project's.)
+            let unmade = subject == Subject::New("wall") && matches!(self.tool, Tool::Wall(_));
             crate::curtain::names(model, category, unmade).into_iter().chain(pairs.iter().map(label)).collect()
         };
         // A panel or a mullion its curtain wall placed is pinned, of the type the wall's type gives it: no other until it is
