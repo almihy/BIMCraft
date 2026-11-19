@@ -137,7 +137,18 @@ impl Drawing {
     /// onto other layers and moved, in that order, its other blocks kept as blocks, and what nothing uses any more left
     /// out.
     pub fn extract(&self, params: &str, version: &str) -> Result<Extracted, JsError> {
-        let (bytes, about) = clean::extract(&self.o, self.measured(), params, version).map_err(err)?;
+        // With `standard` ({k}), the part is a plan: what will be built of it is laid over it, on layers that are off
+        // (src/standard.rs), and `about.build` says what that is.
+        let mut p: Value = if params.trim().is_empty() { json!({}) } else { serde_json::from_str(params).map_err(err)? };
+        let standard = p.as_object_mut().and_then(|m| m.remove("standard")).filter(|v| v.is_object());
+        let (mut bytes, mut about) = clean::extract(&self.o, self.measured(), &p.to_string(), version).map_err(err)?;
+        if let Some(s) = standard {
+            let (pack, _) = cadcraft_index::index(&bytes, "clean.dwg").map_err(err)?;
+            let part = Opened::unpack(&pack).map_err(err)?;
+            let (marked, built) = standard::standard(&part, &s.to_string(), version).map_err(err)?;
+            bytes = marked;
+            about["build"] = built;
+        }
         Ok(Extracted { bytes, about: about.to_string() })
     }
 
