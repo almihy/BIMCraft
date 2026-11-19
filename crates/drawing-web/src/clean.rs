@@ -422,10 +422,14 @@ fn selected(s: &Seen, p: &Value) -> Result<Vec<usize>, String> {
     let keep = rules(s, p, "keep")?;
     let drop = rules(s, p, "drop")?;
     let any = |rs: &[Rule], e: &Entity, b: &Bounds2| rs.iter().any(|r| r.holds(s, e, b));
+    // What will be built of a clean plan lies over it on layers that are off (`X-BUILD-...`, src/standard.rs): it is
+    // no part of the drawing unless a `keep` rule names those layers.
+    let marks = given(p, "keep").is_some_and(|k| k.to_string().to_uppercase().contains("X-BUILD"));
     Ok(s.items()
         .enumerate()
         .filter(|(_, (e, b))| {
-            area.as_ref().is_none_or(|a| real(b) && a.contains(b.center()))
+            (marks || !e.common.layer.to_uppercase().starts_with("X-BUILD"))
+                && area.as_ref().is_none_or(|a| real(b) && a.contains(b.center()))
                 && keep.as_ref().is_none_or(|k| any(k, e, b))
                 && !drop.as_ref().is_some_and(|d| any(d, e, b))
         })

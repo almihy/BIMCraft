@@ -1008,13 +1008,23 @@ fn from_marks(o: &Opened, params: &str) -> Result<Value, String> {
             _ => {}
         }
     }
-    let layers = out["left"]["layers"].take();
+    // With `single`, the wall lines left with no second face are walls too: the last of what is worked out with it.
+    let asked: Value = serde_json::from_str(params).unwrap_or_else(|_| json!({}));
+    if asked.get("single").is_some_and(|v| !v.is_null()) {
+        let mut plain = asked.clone();
+        if let Some(m) = plain.as_object_mut() {
+            m.remove("single");
+        }
+        let without = computed(o, &plain.to_string())?;
+        let (all, before) = (out["walls"].as_array().cloned().unwrap_or_default(), without["walls"].as_array().map_or(0, Vec::len));
+        walls.extend(all.into_iter().skip(before));
+        out["left"] = without["left"].clone();
+    }
     out["walls"] = json!(walls);
     out["curtain"] = json!(curtain);
     out["doors"] = json!(doors);
     out["windows"] = json!(windows);
     out["columns"] = json!(columns);
-    out["left"] = json!({"layers": layers});
     out["from_marks"] = json!(true);
     Ok(out)
 }
@@ -1555,6 +1565,61 @@ mod tests {
         assert_eq!(r.len(), 2);
         assert_eq!(r[0]["name"], "CLASSROOM");
         assert_eq!(r[0]["number"], "101");
+    }
+
+    #[test]
+    fn a_plan_carries_what_will_be_built_and_is_built_from_it_again() {
+        use cadcraft_doc::geom::Vec3;
+        use cadcraft_doc::{Block, Common, Drawing as Doc, Entity, EntityKind, Insert, Line};
+        let on = |layer: &str| Common { layer: layer.into(), ..Common::default() };
+        let line = |a: (f64, f64), b: (f64, f64)| EntityKind::Line(Line { a: Vec3::new(a.0, a.1, 0.0), b: Vec3::new(b.0, b.1, 0.0) });
+        let mut d = Doc::new_metric();
+        for l in ["A-WALL", "A-DOOR", "A-COLS"] {
+            d.ensure_layer(l);
+        }
+        // A wall 200 thick from 0 to 5000 with a door 900 wide at 2000, hinged at 2000 and open upward; a column.
+        let mut door = Block::new("D900");
+        for kind in [line((0.0, 0.0), (0.0, 900.0)), EntityKind::Arc(cadcraft_doc::Arc { center: Vec3::new(0.0, 0.0, 0.0), radius: 900.0, start: 0.0, end: std::f64::consts::FRAC_PI_2 })] {
+            door.entities.push(Entity { handle: d.new_handle(), common: on("0"), kind });
+        }
+        d.blocks.insert("D900".into(), std::sync::Arc::new(door));
+        let mut col = Block::new("C30_60");
+        for kind in [line((0.0, 0.0), (600.0, 0.0)), line((600.0, 0.0), (600.0, 300.0)), line((600.0, 300.0), (0.0, 300.0)), line((0.0, 300.0), (0.0, 0.0))] {
+            col.entities.push(Entity { handle: d.new_handle(), common: on("0"), kind });
+        }
+        d.blocks.insert("C30_60".into(), std::sync::Arc::new(col));
+        let mut put = |d: &mut Doc, layer: &str, kind: EntityKind| {
+            let handle = d.new_handle();
+            d.model.push(Entity { handle, common: on(layer), kind });
+        };
+        for (a, b) in [((0.0, 0.0), (2000.0, 0.0)), ((0.0, 200.0), (2000.0, 200.0)), ((2900.0, 0.0), (5000.0, 0.0)), ((2900.0, 200.0), (5000.0, 200.0))] {
+            put(&mut d, "A-WALL", line(a, b));
+        }
+        put(&mut d, "A-DOOR", EntityKind::Insert(Insert { block: "D900".into(), insert: Vec3::new(2000.0, 200.0, 0.0), ..Insert::default() }));
+        put(&mut d, "A-COLS", EntityKind::Insert(Insert { block: "C30_60".into(), insert: Vec3::new(8000.0, 0.0, 0.0), ..Insert::default() }));
+        let o = Opened::unpack(&cadcraft_index::pack(&d).expect("packed")).expect("opened");
+        let first = build(&o, "").expect("build");
+        assert_eq!((first["walls"].as_array().map(Vec::len), first["doors"].as_array().map(Vec::len), first["columns"].as_array().map(Vec::len)), (Some(1), Some(1), Some(1)), "{first}");
+        assert_eq!(first["walls"][0]["thickness"], 200.0);
+        assert_eq!(first["doors"][0]["width"], 900.0);
+        assert_eq!((first["columns"][0]["width"].clone(), first["columns"][0]["depth"].clone()), (json!(600.0), json!(300.0)));
+
+        let (bytes, about) = crate::standard::standard(&o, "", "").expect("standard");
+        assert_eq!((about["walls"].clone(), about["doors"].clone(), about["columns"].clone()), (json!(1), json!(1), json!(1)));
+        let (pack, _) = cadcraft_index::index(&bytes, "plan.dwg").expect("index");
+        let again = Opened::unpack(&pack).expect("opened");
+        // Its marks are on layers that are off: no part of the drawing as it is looked at.
+        assert!(again.drawing.layers.iter().filter(|l| l.name.starts_with("X-BUILD")).all(|l| !l.on && !l.plot));
+        let back = build(&again, "").expect("build from marks");
+        assert_eq!(back["from_marks"], true);
+        for key in ["walls", "doors", "columns"] {
+            assert_eq!(back[key].as_array().map(Vec::len), Some(1), "{key}: {back}");
+        }
+        assert_eq!((back["walls"][0]["a"].clone(), back["walls"][0]["b"].clone(), back["walls"][0]["thickness"].clone()), (first["walls"][0]["a"].clone(), first["walls"][0]["b"].clone(), json!(200.0)));
+        assert_eq!((back["doors"][0]["at"].clone(), back["doors"][0]["width"].clone()), (first["doors"][0]["at"].clone(), json!(900.0)));
+        // The door opens to the side its leaf was drawn on.
+        assert!(back["doors"][0]["toward"][1].as_f64().is_some_and(|y| y > 200.0), "{}", back["doors"][0]);
+        assert_eq!(back["columns"][0]["at"], first["columns"][0]["at"]);
     }
 
     /// Not a test of the suite: `BUILD_DWG=path cargo test -p bimcraft-drawing-web a_real_drawing -- --ignored --nocapture`

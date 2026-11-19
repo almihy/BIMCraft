@@ -286,7 +286,9 @@ fn a_part_is_cropped_kept_dropped_sorted_and_moved_in_that_order() {
         layers_of(&part),
         ["block@A-DOOR", "block@A-DOOR", "block@A-DOOR", "block@X-UNSURE", "circle@FURN", "line@A-WALL", "line@A-WALL", "line@A-WALL"]
     );
-    assert_eq!(about["layers"][0], json!({"name": "A-DOOR", "items": 3}));
+    // A clean layer says the blocks placed on it, each with the kinds it holds.
+    assert_eq!((about["layers"][0]["name"].clone(), about["layers"][0]["items"].clone()), (json!("A-DOOR"), json!(3)));
+    assert_eq!(about["layers"][0]["blocks"][0], json!({"name": "DR_D01", "placed": 2, "kinds": {"circle": 1, "line": 1}}));
     assert_eq!(about["kinds"], json!({"block": 4, "circle": 1, "line": 3}));
     // The layers made, and those nothing is on any more left out (but 0, and SWING, which the door's block draws on).
     let mut names: Vec<&str> = part.layers.iter().map(|l| l.name.as_str()).collect();
