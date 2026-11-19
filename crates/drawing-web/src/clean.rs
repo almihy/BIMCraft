@@ -433,6 +433,47 @@ fn selected(s: &Seen, p: &Value) -> Result<Vec<usize>, String> {
         .collect())
 }
 
+/// What `box` holds that `keep` and `drop` left out, so that whoever cleans a drawing sees what the rules cost:
+/// `{items, layers: [{name, items}], blocks: [{name, placed, layers}]}`, the most first, the 25 layers and the 40
+/// blocks with the most (with `more_layers` and `more_blocks` when there are others). Blocks are placements left out,
+/// by name, with the layers they were placed on; `layers` counts everything else by the layer it was on.
+fn left_out(s: &Seen, p: &Value, chosen: &[usize]) -> Result<Value, String> {
+    let area = given(p, "box").map(|v| area_of(s, v)).transpose()?;
+    let mut layers: BTreeMap<String, usize> = BTreeMap::new();
+    let mut blocks: BTreeMap<String, (usize, BTreeSet<String>)> = BTreeMap::new();
+    let mut items = 0usize;
+    for (n, (e, b)) in s.items().enumerate() {
+        if chosen.binary_search(&n).is_ok() || !area.as_ref().is_none_or(|a| real(b) && a.contains(b.center())) {
+            continue;
+        }
+        items += 1;
+        match &e.kind {
+            EntityKind::Insert(i) => {
+                let (placed, on) = blocks.entry(i.block.clone()).or_default();
+                *placed += 1;
+                on.insert(e.common.layer.clone());
+            }
+            _ => *layers.entry(e.common.layer.clone()).or_default() += 1,
+        }
+    }
+    let mut ls: Vec<(String, usize)> = layers.into_iter().collect();
+    ls.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let mut bs: Vec<(String, (usize, BTreeSet<String>))> = blocks.into_iter().collect();
+    bs.sort_by(|a, b| b.1.0.cmp(&a.1.0).then_with(|| a.0.cmp(&b.0)));
+    let mut out = json!({
+        "items": items,
+        "layers": ls.iter().take(25).map(|(name, n)| json!({"name": name, "items": n})).collect::<Vec<_>>(),
+        "blocks": bs.iter().take(40).map(|(name, (n, on))| json!({"name": name, "placed": n, "layers": on})).collect::<Vec<_>>(),
+    });
+    if ls.len() > 25 {
+        out["more_layers"] = json!(ls.len() - 25);
+    }
+    if bs.len() > 40 {
+        out["more_blocks"] = json!(bs.len() - 40);
+    }
+    Ok(out)
+}
+
 /// The most items `open` may make of the placements it takes apart: past it the call is refused.
 pub const MOST_OPENED: usize = 400_000;
 /// How deep `open` may go (`depth`): a block in a block in a block in a block.
@@ -943,6 +984,8 @@ pub(crate) fn cut(o: &Opened, m: &Measured, params: &str) -> Result<(Doc, Value)
     let mut model = EntityStore::new();
     let mut kinds: BTreeMap<&str, usize> = BTreeMap::new();
     let mut per_layer: BTreeMap<String, usize> = BTreeMap::new();
+    // By clean layer: the blocks placed on it, by name.
+    let mut placed_on: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
     let mut round = Bounds2::EMPTY;
     let mut made: Vec<String> = Vec::new();
     for (_, (src, b)) in s.items().enumerate().filter(|(n, _)| chosen.binary_search(n).is_ok()) {
@@ -980,6 +1023,9 @@ pub(crate) fn cut(o: &Opened, m: &Measured, params: &str) -> Result<(Doc, Value)
         }
         *kinds.entry(kind_of(&e.kind)).or_default() += 1;
         *per_layer.entry(e.common.layer.clone()).or_default() += 1;
+        if let EntityKind::Insert(i) = &e.kind {
+            *placed_on.entry(e.common.layer.clone()).or_default().entry(i.block.clone()).or_default() += 1;
+        }
         if real(b) {
             round = round.union(b);
         }
@@ -1022,7 +1068,22 @@ pub(crate) fn cut(o: &Opened, m: &Measured, params: &str) -> Result<(Doc, Value)
 
     let mut layers: Vec<(String, usize)> = per_layer.into_iter().collect();
     layers.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    let layers: Vec<Value> = layers.into_iter().map(|(name, n)| json!({"name": name, "items": n})).collect();
+    // Each layer with the blocks placed on it, the most placed first (the 15 most, and how many more names).
+    let layers: Vec<Value> = layers
+        .into_iter()
+        .map(|(name, n)| {
+            let mut row = json!({"name": name, "items": n});
+            if let Some(bs) = placed_on.get(&name) {
+                let mut bs: Vec<(&String, &usize)> = bs.iter().collect();
+                bs.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
+                row["blocks"] = bs.iter().take(15).map(|(b, k)| json!({"name": b, "placed": k})).collect();
+                if bs.len() > 15 {
+                    row["more_blocks"] = json!(bs.len() - 15);
+                }
+            }
+            row
+        })
+        .collect();
     // The extents in the new drawing's own coordinates when it was moved (it is no longer far out); else as `query`
     // gives the open drawing's, less its offset, which is then said too.
     let extents = match (shift, real(&round)) {
@@ -1036,6 +1097,7 @@ pub(crate) fn cut(o: &Opened, m: &Measured, params: &str) -> Result<(Doc, Value)
         (None, true) => s.box_out(&round),
     };
     let mut about = json!({"items": d.model.len(), "kinds": kinds, "layers": layers, "extents": extents});
+    about["left_out"] = left_out(&s, &p, &chosen)?;
     if shift.is_none() && s.offset != Vec2::ZERO {
         about["offset"] = json!([s.offset.x, s.offset.y]);
     }
