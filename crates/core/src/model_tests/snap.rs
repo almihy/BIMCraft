@@ -646,7 +646,10 @@ fn the_increment_in_force_is_the_largest_under_an_eighth_of_an_inch_on_screen() 
     assert_eq!((inc.length(0.116), inc.length(0.136)), (Some(100.0), Some(20.0)));
     // Far out by the metre, close in by 5 mm, and closer still by 5 mm yet: the smallest there is.
     assert_eq!((inc.length(0.005), inc.length(1.0), inc.length(50.0)), (Some(1000.0), Some(5.0), Some(5.0)));
-    // An angle's by how far the cursor is from the point turned about: a degree's arc 300 points out is 5 points.
+    // An angle's by how far the cursor is from the point turned about, as measured in Revit 2025: whole degrees from 113
+    // points out, 5° at 102 and at 39, 15° at 29.
+    let at = |radius| inc.angle(1.0, radius);
+    assert_eq!((at(113.0), at(102.0), at(39.0), at(29.0)), (Some(1.0), Some(5.0), Some(5.0), Some(15.0)));
     assert_eq!(
         (inc.angle(1.0, 300.0), inc.angle(1.0, 100.0), inc.angle(1.0, 20.0), inc.angle(1.0, 5.0)),
         (Some(1.0), Some(5.0), Some(15.0), Some(90.0))

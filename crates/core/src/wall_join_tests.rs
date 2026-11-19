@@ -352,3 +352,29 @@ fn move_with_disjoin_leaves_what_the_wall_was_joined_to_as_it_is() {
     run(&mut s, "undo", json!({}));
     assert_eq!(wall(&s, a), (P2(4000.0, 0.0), P2(0.0, 0.0), true));
 }
+
+/// The three walls drawn in Revit 2025 on 19 November (its picture is with the walls design), for laying beside it: one
+/// along the south, one up from its east end, one ending on it from the brick side.
+#[test]
+#[ignore]
+fn shot_the_walls_drawn_in_revit() {
+    let mut s = Session::new();
+    for name in ["Brick", "Insulation", "Block", "Plaster"] {
+        run(&mut s, "material", json!({"name": name}));
+    }
+    run(
+        &mut s,
+        "type",
+        json!({"category": "wall", "name": "Ext", "layers": [
+        {"function": "finish", "material": "Brick", "thickness": 102.5},
+        {"function": "thermal", "material": "Insulation", "thickness": 75},
+        {"function": "structure", "material": "Block", "thickness": 100},
+        {"function": "finish2", "material": "Plaster", "thickness": 12.5}]}),
+    );
+    run(&mut s, "wall", json!({"points": [[0, 0], [3000, 0], [3000, 2000]], "type": "Ext"}));
+    run(&mut s, "wall", json!({"points": [[1500, 2000], [1500, 0]], "type": "Ext"}));
+    run(&mut s, "detail", json!({"view": 100000, "detail": "fine"}));
+    let dir = std::env::var("SHOT").unwrap();
+    std::fs::write(format!("{dir}/engine-walls.png"), crate::render::png(&crate::render::plan(&s.model, 100000, 1800, 1300)).unwrap())
+        .unwrap();
+}

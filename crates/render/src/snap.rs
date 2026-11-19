@@ -114,6 +114,10 @@ pub struct Snaps {
 /// 175%, 100 mm gave way to 20 mm between 11.6 and 13.5 points: an eighth of an inch.
 pub const FINE: f64 = 12.0;
 
+/// The same for an angle increment's arc at the cursor. Measured in Revit 2025 with a line drawn at 18° and at 53°: 5°
+/// gave way to 1° between 102 and 113 points from the start (an arc of 8.9 and of 9.9), and 15° to 5° between 29 and 39.
+pub const FINE_ARC: f64 = 9.5;
+
 /// Manage > Snaps' dimension snap increments, as Revit's: lengths in mm and angles in degrees, each list used or not. The
 /// one in force changes with the zoom ([`Increments::length`], [`Increments::angle`]).
 #[derive(Clone, Debug, PartialEq)]
@@ -147,13 +151,13 @@ impl Increments {
     }
 
     /// The angle increment in force `radius` mm from the point turned about, in a view drawn at `scale` points to the mm:
-    /// the largest whose arc there stays under [`FINE`]. None while angles aren't used.
+    /// the largest whose arc there stays under [`FINE_ARC`]. None while angles aren't used.
     pub fn angle(&self, scale: f64, radius: f64) -> Option<f64> {
         if !self.angles_on || !(scale.is_finite() && scale > 0.0) {
             return None;
         }
         let across = radius * scale;
-        let most = if across.is_finite() && across > 0.0 { (FINE / across).to_degrees() } else { f64::INFINITY };
+        let most = if across.is_finite() && across > 0.0 { (FINE_ARC / across).to_degrees() } else { f64::INFINITY };
         in_force(&self.angles, most).filter(|a| (1e-6..=180.0).contains(a))
     }
 
