@@ -176,7 +176,7 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
                         return Err(if named.iter().any(|w| !cx.curtain.contains(w)) {
                             format!("its host wall {} was left out", named[0])
                         } else {
-                            "its host is a curtain wall, which BIMCraft has no element for".to_string()
+                            "its host is a curtain wall, which holds no door or window of BIMCraft's (a curtain wall's door is a panel of it, and panels' types are not read)".to_string()
                         });
                     }
                 };

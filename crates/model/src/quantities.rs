@@ -42,6 +42,13 @@ pub struct WallQ {
 pub fn wall(m: &Model, id: Id) -> Option<WallQ> {
     let wl = m.wall(id)?;
     let (length, width) = (Axis::of(wl).length(), m.thickness(wl));
+    // A curtain wall has no solid of its own: its face is its grid's, its length by its height, and it holds nothing (its
+    // panels and mullions hold theirs, [`panel`] and [`mullion`], so a sum over walls and their parts counts nothing twice).
+    if crate::curtain::is_curtain(m, wl) {
+        let height = m.own_top(wl) - m.own_base(wl);
+        let side = (length * height).max(0.0);
+        return Some(WallQ { length, width, height: Some(height), gross_side: side, net_side: side, gross_volume: 0.0, net_volume: 0.0 });
+    }
     // The solids are the model's own, kept: a wall's, and its volume before its openings, are made once for each snapshot.
     let solids = m.solids();
     let gross_volume = solids.wall_gross_volume(m, id).unwrap_or_default();
@@ -258,6 +265,45 @@ fn roof_with(m: &Model, r: &Roof, id: Option<Id>, volume: bool) -> RoofQ {
     let thickness = m.types.roof.get(&r.type_name).map_or(0.0, |t| t.thickness);
     let volume = if !volume { 0.0 } else { id.map_or(by_prisms, |id| solid_volume(m, id)) };
     RoofQ { thickness, perimeter: geom::perimeter(&outline), plan_area, gross_surface_area, surface_area, volume }
+}
+
+/// What a curtain panel measures: its width along its wall and its height (mm), how thick its type is, the area of its face
+/// (mm²) and what it holds (mm³). An empty panel (Revit's Empty System Panel) is an open cell: it has its face and holds nothing.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PanelQ {
+    pub width: f64,
+    pub height: f64,
+    pub thickness: f64,
+    pub area: f64,
+    pub volume: f64,
+}
+
+/// Curtain panel `p`, measured: a flat sheet between its grid lines, as its solid is.
+pub fn panel(m: &Model, p: &crate::curtain::Panel) -> PanelQ {
+    let (width, height) = p.size();
+    let (width, height) = (width.max(0.0), height.max(0.0));
+    let thickness = m.types.curtain_panel.get(&p.type_name).filter(|t| !t.empty).map_or(0.0, |t| t.thickness);
+    PanelQ { width, height, thickness, area: width * height, volume: width * height * thickness }
+}
+
+/// What a mullion measures: its length as it is cut at its ends (mm), how deep it is across its wall and how wide along it
+/// (a circular one its diameter both ways), the area of its section (mm²) and what it holds (mm³).
+#[derive(Clone, Debug, PartialEq)]
+pub struct MullionQ {
+    pub length: f64,
+    pub thickness: f64,
+    pub width: f64,
+    pub round: bool,
+    pub section: f64,
+    pub volume: f64,
+}
+
+/// Mullion `x`, measured: its type's section along its length, as its solid is. None when its type is gone.
+pub fn mullion(m: &Model, x: &crate::curtain::Mullion) -> Option<MullionQ> {
+    let t = m.types.mullion.get(&x.type_name)?;
+    let (length, width) = (x.length(), t.width());
+    let section = if t.round { std::f64::consts::PI * t.thickness * t.thickness / 4.0 } else { width * t.thickness };
+    Some(MullionQ { length, thickness: t.thickness, width, round: t.round, section, volume: section * length })
 }
 
 /// What a column measures.

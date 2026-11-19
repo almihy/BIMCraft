@@ -1651,6 +1651,88 @@ fn adopt<T>(m: &mut Model, field: fn(&mut Model) -> &mut T, new: T) -> Result<()
     checked
 }
 
+/// What BIMCraft's own set on a curtain wall holds (`ifc::CURTAIN`), read strictly: a key this version doesn't know, or a
+/// value of another kind, and the wall comes in as another program's does.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CurtainTypes {
+    wall: WallType,
+    #[serde(default)]
+    panels: BTreeMap<String, crate::curtain::PanelType>,
+    #[serde(default)]
+    mullions: BTreeMap<String, crate::curtain::MullionType>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CurtainLine {
+    guid: Guid,
+    #[serde(default)]
+    vertical: bool,
+    at: f64,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CurtainFreed {
+    key: String,
+    #[serde(rename = "type")]
+    type_name: String,
+    #[serde(default)]
+    mullion: bool,
+}
+
+/// A curtain wall of BIMCraft's own as its set gives it: the wall, its types, its hand-made lines and what was unpinned.
+struct OwnCurtain {
+    wall: Wall,
+    types: CurtainTypes,
+    lines: Vec<CurtainLine>,
+    freed: Vec<CurtainFreed>,
+}
+
+/// A curtain wall of BIMCraft's own, made: its element, its hand-made lines, what its top and its base were attached to, and
+/// its parts, each with its key.
+type MadeCurtain = (Id, Vec<CurtainLine>, [Option<Guid>; 2], Vec<(Id, String)>);
+
+/// The most hand-made lines, and unpinned parts, one curtain wall's set is read with.
+const MAX_CURTAIN_ITEMS: usize = 100_000;
+
+impl OwnCurtain {
+    /// The set's four texts read, and the wall with its types checked as a project's rules check them, on a project of
+    /// its own: none where anything is missing, misspelt, too long or against a rule.
+    fn read(texts: &HashMap<String, String>) -> Option<OwnCurtain> {
+        fn part<T: serde::de::DeserializeOwned>(texts: &HashMap<String, String>, name: &str) -> Option<T> {
+            serde_json::from_str(texts.get(name).filter(|t| t.len() <= crate::ifc::MAX_CURTAIN_JSON)?).ok()
+        }
+        let own = OwnCurtain {
+            wall: part(texts, "Wall")?,
+            types: part(texts, "Types")?,
+            lines: part(texts, "Lines")?,
+            freed: part(texts, "Freed")?,
+        };
+        let sound = own.lines.len() <= MAX_CURTAIN_ITEMS
+            && own.freed.len() <= MAX_CURTAIN_ITEMS
+            && own.lines.iter().all(|l| l.at.is_finite() && l.guid.pending().is_none() && !l.guid.is_nil())
+            && own.freed.iter().all(|f| f.key.len() <= MAX_TEXT && f.type_name.len() <= MAX_TEXT)
+            && own.types.wall.is_curtain();
+        if !sound {
+            return None;
+        }
+        // On a project of its own: the wall on its first level, of these types alone.
+        let mut trial = Model::new("curtain wall");
+        let level = trial.levels().first().map(|(id, _)| trial.guid(*id))?;
+        trial.types.wall.insert(own.wall.type_name.clone(), own.types.wall.clone());
+        trial.types.curtain_panel.extend(own.types.panels.clone());
+        trial.types.mullion.extend(own.types.mullions.clone());
+        let wall = Wall { level, top_level: None, attach_top: None, attach_base: None, params: Default::default(), ..own.wall.clone() };
+        trial.insert(Element::Wall(wall));
+        trial.adopt_materials();
+        trial.sync_library();
+        crate::curtain::keep_all(&mut trial);
+        trial.check().is_ok().then_some(own)
+    }
+}
+
 const WALLS: &[&str] = &["IFCWALL", "IFCWALLSTANDARDCASE", "IFCWALLELEMENTEDCASE"];
 const OPENINGS: &[&str] = &["IFCDOOR", "IFCDOORSTANDARDCASE", "IFCWINDOW", "IFCWINDOWSTANDARDCASE"];
 const SLABS: &[&str] = &["IFCSLAB", "IFCSLABSTANDARDCASE", "IFCSLABELEMENTEDCASE"];
@@ -1834,6 +1916,124 @@ pub fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, String> 
         }
         seen.insert(id);
     };
+
+    // BIMCraft's own curtain walls (`ifc::CURTAIN` on an `IfcCurtainWall`): the wall as its set gives it, on its storey's
+    // level, of the types the set holds; its plates and members as the panels and mullions they were, by their keys
+    // (`ifc::CURTAIN_PART`), so what each holds of the project's parameters and phases finds it. The wall lays them out
+    // again once every element has its GUID (below), which is when its hand-made lines come in under theirs. One whose
+    // set is missing, damaged or against a rule, or whose types differ from ones of their names already here, is another
+    // program's: its parts come in as generic components, as before.
+    let texts_of = |set: &Entity| -> HashMap<String, String> {
+        refs(set.args.get(4))
+            .into_iter()
+            .filter_map(e)
+            .filter(|p| p.name == "IFCPROPERTYSINGLEVALUE")
+            .filter_map(|p| match (text(p.args.first()), p.args.get(2)) {
+                (Some(name), Some(V::Typed(_, v))) => match &**v {
+                    V::Str(s) => Some((name.to_string(), s.clone())),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect()
+    };
+    let (mut curtain_sets, mut part_keys): (HashMap<u64, HashMap<String, String>>, HashMap<u64, String>) = Default::default();
+    for rel in named(&["IFCRELDEFINESBYPROPERTIES"]).into_iter().filter_map(e) {
+        let Some(set) = reference(rel.args.get(5)).and_then(e).filter(|x| x.name == "IFCPROPERTYSET") else { continue };
+        match text(set.args.get(2)) {
+            Some(crate::ifc::CURTAIN) => curtain_sets.extend(refs(rel.args.get(4)).into_iter().map(|p| (p, texts_of(set)))),
+            Some(crate::ifc::CURTAIN_PART) => {
+                if let Some(key) = texts_of(set).remove("Key").filter(|k| k.len() <= MAX_TEXT) {
+                    part_keys.extend(refs(rel.args.get(4)).into_iter().map(|p| (p, key.clone())));
+                }
+            }
+            _ => {}
+        }
+    }
+    let storey_by_guid: HashMap<u128, Id> =
+        level_of.iter().filter_map(|(sid, level)| Some((crate::ids::expand(text(e(*sid)?.args.first())?)?, *level))).collect();
+    // Each made: its element, its lines, what it was attached to, and its parts as (element, key).
+    let mut own_curtains: Vec<MadeCurtain> = Vec::new();
+    let mut own_parts: HashSet<u64> = HashSet::new();
+    for id in named(&["IFCCURTAINWALL"]) {
+        let Some(own) = curtain_sets.get(&id).and_then(OwnCurtain::read) else { continue };
+        let OwnCurtain { mut wall, types, lines, freed } = own;
+        // Its types, unless the project has others of their names.
+        let clash = m.types.wall.get(&wall.type_name).is_some_and(|t| *t != types.wall)
+            || types.panels.iter().any(|(n, t)| m.types.curtain_panel.get(n).is_some_and(|x| x != t))
+            || types.mullions.iter().any(|(n, t)| m.types.mullion.get(n).is_some_and(|x| x != t));
+        // Its levels: its storey's, and the one its top is constrained to, which must be in the file too.
+        let top = match wall.top_level {
+            Some(g) => storey_by_guid.get(&g.as_u128()).map(|level| Some(Guid::of_id(*level))),
+            None => Some(None),
+        };
+        let (Some(top), Some(storey), false) = (top, storey_of(id).and_then(|s| level_of.get(&s).copied()), clash) else { continue };
+        let attached = [wall.attach_top.take(), wall.attach_base.take()];
+        (wall.level, wall.top_level) = (Guid::of_id(storey), top);
+        // What it holds of the project's parameters and phases comes in from their own sets, as every element's.
+        wall.params.clear();
+        m.types.wall.insert(wall.type_name.clone(), types.wall);
+        m.types.curtain_panel.extend(types.panels);
+        m.types.mullion.extend(types.mullions);
+        let fill = m.types.curtain_panel.keys().next().cloned().unwrap_or_default();
+        let made = m.insert(Element::Wall(wall));
+        from.insert(made, who(id));
+        origin.entry(id).or_insert(made);
+        elements_from.entry(id).or_default().push(made);
+        seen.insert(id);
+        // Its parts: each plate and member by its key, unpinned where the set says so, with the type it was given; and what
+        // was unpinned and has no body in the file (an empty panel).
+        let mut freed: HashMap<(bool, String), String> = freed.into_iter().map(|f| ((f.mullion, f.key), f.type_name)).collect();
+        let mut parts = Vec::new();
+        let mut part = |m: &mut Model, mullion: bool, key: String, free: Option<String>| {
+            let host = Guid::of_id(made);
+            let known = |name: &String| if mullion { m.types.mullion.contains_key(name) } else { m.types.curtain_panel.contains_key(name) };
+            let free = free.filter(known);
+            let (is_free, type_name) = (free.is_some(), free.unwrap_or_else(|| fill.clone()));
+            let params = Default::default();
+            let element = if mullion {
+                let x = crate::curtain::Mullion {
+                    type_name,
+                    host,
+                    key: key.clone(),
+                    vertical: false,
+                    at: 0.0,
+                    from: 0.0,
+                    to: 0.0,
+                    trim: [0.0, 0.0],
+                    border: 0,
+                    free: is_free,
+                    params,
+                };
+                Element::Mullion(x)
+            } else {
+                Element::CurtainPanel(crate::curtain::Panel { type_name, host, key: key.clone(), span: [0.0; 4], free: is_free, params })
+            };
+            let child = m.insert(element);
+            parts.push((child, key));
+            child
+        };
+        for p in l.parts.get(&id).into_iter().flatten().copied() {
+            let Some(x) = e(p) else { continue };
+            let mullion = match x.name.as_str() {
+                "IFCPLATE" => false,
+                "IFCMEMBER" => true,
+                _ => continue,
+            };
+            seen.insert(p);
+            own_parts.insert(p);
+            let Some(key) = part_keys.get(&p).cloned() else { continue };
+            let free = freed.remove(&(mullion, key.clone()));
+            let child = part(&mut m, mullion, key, free);
+            from.insert(child, who(p));
+            elements_from.entry(p).or_default().push(child);
+        }
+        for ((mullion, key), type_name) in freed {
+            let child = part(&mut m, mullion, key, Some(type_name));
+            from.insert(child, format!("an unpinned part of {}", who(id)));
+        }
+        own_curtains.push((made, lines, attached, parts));
+    }
 
     // Walls: the line the faces run along, and how thick they are across it.
     let mut raw: Vec<RawWall> = Vec::new();
@@ -3381,8 +3581,12 @@ pub fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, String> 
         }
         for prop in refs(set.args.get(4)).into_iter().filter_map(e).filter(|x| x.name == "IFCPROPERTYSINGLEVALUE") {
             let Some(raw) = text(prop.args.first()) else { continue };
+            // A part of BIMCraft's own curtain wall says its wall's again: no parameter of its own.
+            if raw == "IsExternal" && refs(rel.args.get(4)).iter().all(|pid| own_parts.contains(pid)) {
+                continue;
+            }
             // A wall's `IsExternal` is its type's Function, set below, and no parameter.
-            if called == "Pset_WallCommon" && raw == "IsExternal" {
+            if matches!(called, "Pset_WallCommon" | "Pset_CurtainWallCommon") && raw == "IsExternal" {
                 if let Some(V::Typed(_, v)) = prop.args.get(2)
                     && let V::Enum(b) = &**v
                 {
@@ -3552,8 +3756,42 @@ pub fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, String> 
     for id in m.elements.keys() {
         globals.entry(*id).or_insert_with(|| Guid::seeded(seed, *id).as_u128());
     }
+    // A panel's and a mullion's is made of its wall's and its key, as its wall makes it when it lays them out.
+    for (wall, _, _, parts) in &own_curtains {
+        let Some(host) = globals.get(wall).copied() else { continue };
+        for (child, key) in parts {
+            globals.insert(*child, crate::curtain::child_guid(m.uid, Guid::from_u128(host), key).as_u128());
+        }
+    }
     m.elements = m.elements.regiven(&globals);
     m.resolve();
+    // BIMCraft's own curtain walls: their hand-made grid lines under the GUIDs they had (which the keys of what stands on
+    // them hold), what they were attached to where it came in, and their panels and mullions laid out again.
+    for (wall, lines, [top, base], _) in own_curtains {
+        let host = m.guid(wall);
+        for line in lines {
+            let id = m.fresh_id();
+            let grid = crate::curtain::GridLine { host, vertical: line.vertical, at: line.at };
+            if m.elements.insert_as(id, line.guid, Element::CurtainGrid(grid)).is_ok() {
+                from.insert(id, format!("a grid line of {}", from.get(&wall).cloned().unwrap_or_default()));
+            }
+        }
+        let standing = |g: Option<Guid>| {
+            g.filter(|g| matches!(m.elements.id(*g).and_then(|id| m.elements.get(id)), Some(Element::Roof(_) | Element::Floor(_))))
+        };
+        let (top, base) = (standing(top), standing(base));
+        if let Some(Element::Wall(w)) = m.elements.get_mut(wall) {
+            (w.attach_top, w.attach_base) = (top, base);
+        }
+    }
+    crate::curtain::keep_all(&mut m);
+    // What a wall laid out that the file had no part for is the wall's: one a rule refuses is left out as its.
+    let laid: Vec<(Id, Guid)> = m.elements.iter().filter_map(|(id, x)| Some((*id, crate::curtain::host_of(x)?))).collect();
+    for (id, host) in laid {
+        if let Some(wall) = m.elements.id(host).and_then(|w| from.get(&w)).cloned() {
+            from.entry(id).or_insert_with(|| format!("a part of {wall}"));
+        }
+    }
     // The library's GUIDs too, the file makes: the same file reads the same every time.
     m.library = crate::library::Library::default();
     m.forget_parts();
@@ -3571,10 +3809,16 @@ pub fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, String> 
             .iter()
             .filter_map(|(k, x)| match x {
                 Element::Door(o) | Element::Window(o) if o.host == gone => Some(*k),
+                x if crate::curtain::host_of(x) == Some(gone) => Some(*k),
                 _ => None,
             })
             .collect();
         for h in hosted {
+            // A curtain wall's own parts go with it and say nothing more.
+            if m.elements.get(h).is_some_and(|x| crate::curtain::host_of(x).is_some()) {
+                m.elements.remove(h);
+                continue;
+            }
             skipped.push(format!("{}: its wall was left out", from.get(&h).cloned().unwrap_or_default()));
             m.elements.remove(h);
         }

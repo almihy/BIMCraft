@@ -167,6 +167,18 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>, measures: boo
             if let Some(r) = axis.radius() {
                 extra.insert("radius".into(), json!(hundredth(r)));
             }
+            // A curtain wall says so, with how many panels and mullions it has and where its grid lines are (mm along it
+            // from its start, and mm over its base, the borders first and last): a facade read without listing its parts.
+            if let Some(g) = crate::curtain::grid(m, id) {
+                let count = |want: fn(&Element) -> bool| {
+                    m.hosted_by(m.guid(id)).into_iter().filter(|c| m.elements.get(*c).is_some_and(want)).count()
+                };
+                extra.insert("curtain".into(), json!(true));
+                extra.insert("panels".into(), json!(count(|e| matches!(e, Element::CurtainPanel(_)))));
+                extra.insert("mullions".into(), json!(count(|e| matches!(e, Element::Mullion(_)))));
+                extra.insert("vertical_grid".into(), json!(g.u.iter().map(|l| hundredth(l.at)).collect::<Vec<_>>()));
+                extra.insert("horizontal_grid".into(), json!(g.v.iter().map(|l| hundredth(l.at)).collect::<Vec<_>>()));
+            }
         }
         Element::Door(o) | Element::Window(o) => {
             if let (Some(t), Some(w)) = (m.opening_type(e), m.wall(o.host)) {
@@ -368,16 +380,34 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>, measures: boo
             extra.insert("offset".into(), json!(sd.offset));
             extra.insert("region".into(), json!(m.subdivision_region(sd)));
         }
+        // A panel and a mullion: their wall's level, what they measure and what they are made of (`quantities.rs`).
         Element::CurtainPanel(p) => {
-            let (width, height) = p.size();
-            extra.insert("width".into(), json!(width));
-            extra.insert("height".into(), json!(height));
-            extra.insert("area_m2".into(), json!(m2(width * height)));
+            let q = crate::quantities::panel(m, p);
+            extra.insert("width".into(), json!(q.width));
+            extra.insert("height".into(), json!(q.height));
+            extra.insert("area_m2".into(), json!(m2(q.area)));
+            extra.insert("volume_m3".into(), json!(fine_m3(q.volume)));
             extra.insert("pinned".into(), json!(!p.free));
+            if let Some(w) = m.wall(p.host) {
+                extra.insert("level".into(), json!(w.level));
+            }
+            if let Some(t) = m.types.curtain_panel.get(&p.type_name) {
+                extra.insert("thickness".into(), json!(t.thickness));
+                extra.insert("material".into(), json!(t.material));
+            }
         }
         Element::Mullion(x) => {
             extra.insert("length".into(), json!(x.length()));
             extra.insert("pinned".into(), json!(!x.free));
+            if let Some(w) = m.wall(x.host) {
+                extra.insert("level".into(), json!(w.level));
+            }
+            if let (Some(q), Some(t)) = (crate::quantities::mullion(m, x), m.types.mullion.get(&x.type_name)) {
+                extra.insert("thickness".into(), json!(q.thickness));
+                extra.insert("width".into(), json!(q.width));
+                extra.insert("volume_m3".into(), json!(fine_m3(q.volume)));
+                extra.insert("material".into(), json!(t.material));
+            }
         }
         Element::CurtainGrid(_) => {}
         Element::SurveyPoint(b) | Element::ProjectBasePoint(b) => {
@@ -554,6 +584,11 @@ pub fn hundredth(x: f64) -> f64 {
 /// mm³ as m³, to the litre.
 pub fn m3(mm3: f64) -> f64 {
     (mm3 / 1e6).round() / 1e3
+}
+
+/// mm³ as m³, to the cubic centimetre: a panel's and a mullion's, which a litre would round by a tenth.
+pub fn fine_m3(mm3: f64) -> f64 {
+    (mm3 / 1e3).round() / 1e6
 }
 
 /// mm as m, to the centimetre.

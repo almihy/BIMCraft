@@ -271,6 +271,80 @@ fn types_with_one_name_and_different_layers_are_told_apart() {
     assert_eq!(i.model.types.wall["Brick wall (2)"].thickness, 152.4);
 }
 
+/// `OST_CurtainWallPanels` and `OST_CurtainWallMullions`.
+const PANELS: i64 = -2_000_170;
+const MULLIONS: i64 = -2_000_171;
+
+#[test]
+fn a_wall_whose_box_holds_curtain_panels_comes_in_as_a_curtain_wall_with_the_grid_their_boxes_give() {
+    use bimcraft_core::curtain;
+    for release in [2019, 2024] {
+        let mut p = base(release);
+        p.types.push(TypeRec::new(502, WALLS));
+        p.data.push(Block { id: 502, payload: name_bytes("Storefront") });
+        // 20 ft along x, 10 ft tall, half a foot deep: two panels along by two up, a mullion's 0.2 ft between them and at the
+        // borders, and the mullion that stands in the middle.
+        p.recs.push(Rec::new(105, WALLS).at([0.0, -0.25, 0.0, 20.0, 0.25, 10.0], &[10, 11, 502, 105]));
+        p.data.push(Block { id: 105, payload: line_bytes(0.0, 20.0, [0.0, 0.0, 0.0], [1.0, 0.0, 0.0]) });
+        let mut id = 200;
+        for (x0, x1) in [(0.2, 9.9), (10.1, 19.8)] {
+            for (z0, z1) in [(0.2, 4.9), (5.1, 9.8)] {
+                p.recs.push(Rec::new(id, PANELS).at([x0, -0.04, z0, x1, 0.04, z1], &[]));
+                id += 1;
+            }
+        }
+        p.recs.push(Rec::new(210, MULLIONS).at([9.9, -0.25, 0.0, 10.1, 0.25, 10.0], &[]));
+        // The same type along y with one panel over two cells of three: no grid of whole lines holds its panels.
+        p.recs.push(Rec::new(106, WALLS).at([29.75, 0.0, 0.0, 30.25, 20.0, 10.0], &[10, 11, 502, 106]));
+        p.data.push(Block { id: 106, payload: line_bytes(0.0, 20.0, [30.0, 0.0, 0.0], [0.0, 1.0, 0.0]) });
+        for (n, (y0, y1, z0, z1)) in [(0.2, 9.9, 0.2, 4.9), (10.1, 19.8, 0.2, 4.9), (0.2, 19.8, 5.1, 9.8)].into_iter().enumerate() {
+            p.recs.push(Rec::new(220 + n as u32, PANELS).at([29.96, y0, z0, 30.04, y1, z1], &[]));
+        }
+        // And one with no panel in its box: no curtain wall the reader can tell, the plane of its box as before.
+        p.recs.push(Rec::new(107, WALLS).at([0.0, 39.75, 0.0, 20.0, 40.25, 10.0], &[10, 11, 502, 107]));
+        p.data.push(Block { id: 107, payload: line_bytes(0.0, 20.0, [0.0, 40.0, 0.0], [1.0, 0.0, 0.0]) });
+        let (i, origins) = import_with_origins(&p);
+        let m = &i.model;
+        m.check().unwrap();
+        let wall = |n: u32| walls(&i).into_iter().find(|(id, _)| origins[id] == format!("Wall {n}")).unwrap();
+        // The first: a curtain wall of a type named as the file's, its lines midway between its panels, four panels of glass
+        // as thick as their boxes, and no box standing in for a panel.
+        let (id, w) = wall(105);
+        assert_eq!(w.type_name, "Storefront", "Revit {release}");
+        let t = &m.types.wall[&w.type_name];
+        assert!(t.is_curtain() && t.layers.is_empty());
+        let g = curtain::grid(m, id).unwrap();
+        assert_eq!(g.u.iter().map(|l| l.at).collect::<Vec<_>>(), [0.0, 3048.0, 6096.0]);
+        assert_eq!(g.v.iter().map(|l| l.at).collect::<Vec<_>>(), [0.0, 1524.0, 3048.0]);
+        let parts = |id: Id| -> Vec<&Element> { m.hosted_by(m.guid(id)).into_iter().filter_map(|c| m.elements.get(c)).collect() };
+        let panels: Vec<&curtain::Panel> =
+            parts(id).into_iter().filter_map(|e| if let Element::CurtainPanel(x) = e { Some(x) } else { None }).collect();
+        assert_eq!(panels.len(), 4);
+        assert!(panels.iter().all(|x| x.type_name == "Glazed 24.4mm"), "{:?}", panels[0].type_name);
+        assert_eq!(m.types.curtain_panel["Glazed 24.4mm"].thickness, 24.4);
+        assert_eq!(parts(id).iter().filter(|e| matches!(e, Element::CurtainGrid(_))).count(), 2);
+        // The second: a curtain wall with no grid, one panel of glass, its panels boxes of their own.
+        let (id, w) = wall(106);
+        assert!(w.type_name.starts_with("Storefront"));
+        assert_eq!(m.types.wall[&w.type_name].curtain.as_ref().unwrap().panel, "Glazed");
+        assert!(matches!(parts(id).as_slice(), [Element::CurtainPanel(x)] if x.type_name == "Glazed"), "one panel, and no line");
+        // The third: no curtain wall, a plane as thick as its box.
+        let (_, w) = wall(107);
+        assert!(!m.types.wall[&w.type_name].is_curtain());
+        assert_eq!(m.types.wall[&w.type_name].thickness, 152.4);
+        // The boxes: the mullion and the three panels of the wall with no grid; the four panels of the first are its own.
+        let families: Vec<&str> =
+            m.elements.values().filter_map(|e| if let Element::Component(c) = e { Some(c.family.as_str()) } else { None }).collect();
+        assert_eq!(families.iter().filter(|f| **f == "Curtain Panels").count(), 3, "{families:?}");
+        assert_eq!(families.iter().filter(|f| **f == "Curtain Wall Mullions").count(), 1);
+        let said = |what: &str| i.skipped.iter().find(|s| s.contains(what)).cloned().unwrap_or_default();
+        assert!(said("midway between the boxes of its panels").contains("105"), "{:?}", i.skipped);
+        assert!(said("no grid that holds").contains("106"), "{:?}", i.skipped);
+        assert!(said("comes in as the plane").contains("107"), "{:?}", i.skipped);
+        assert!(said("comes in as a panel of its curtain wall").contains("200, 201, 202, 203"), "{:?}", i.skipped);
+    }
+}
+
 #[test]
 fn walls_whose_types_have_no_layers_come_in_as_the_plane_their_own_boxes_give() {
     let mut p = base(2024);
@@ -304,7 +378,14 @@ fn the_walls_of_the_architectural_sample_are_those_of_rvt_rss_export_of_the_same
         let at = |id: u32| walls(&i).into_iter().find(|(m, _)| from[m] == format!("Wall {id}"));
         // All 56: the nine curtain walls come in as the plane their own boxes give, and the note says what of them is not read.
         assert_eq!(walls(&i).len(), 56, "{}: {:?}", path.display(), i.skipped);
-        assert!(i.skipped.iter().any(|s| s.contains("9 walls") && s.contains("curtain wall")), "{:?}", i.skipped);
+        // (As the plane of its box, or as a curtain wall with or without a grid: three notes, nine walls between them.)
+        let told: usize = i
+            .skipped
+            .iter()
+            .filter(|s| s.contains("curtain wall") && s.split(' ').nth(1).is_some_and(|w| w.starts_with("wall")) && !s.contains("left out"))
+            .filter_map(|s| s.split(' ').next()?.parse::<usize>().ok())
+            .sum();
+        assert_eq!(told, 9, "{:?}", i.skipped);
         for theirs in &RAC_WALLS {
             let id = theirs.id;
             let (m, w) = at(id).unwrap_or_else(|| panic!("{}: wall {id} is missing", path.display()));

@@ -71,6 +71,26 @@ class where it hasn't ([families](families.md)); a class is never forced into an
   roof's or a stair's parts. A mullion, a plate, a post, a stud, a stringer, a user's own type (its object type says what it
   is), one that stands or slopes past a beam's limit: generic, as before. A member that comes in as a beam goes back out as an
   `IfcBeam`.
+- **`IfcCurtainWall`.** BIMCraft's own comes back as the curtain wall it was. Export writes a curtain wall
+  ([levels, walls and roofs](levels-walls-roofs.md)) as an `IfcCurtainWall` of an `IfcCurtainWallType`, in its storey, with its
+  axis and no body, `Pset_CurtainWallCommon` (`IsExternal` from its type's Function) and `Qto_CurtainWallQuantities`; its panels
+  as `IfcPlate`s (`CURTAIN_PANEL`, `IfcPlateType`, a rectangle of the type's thickness swept up the panel's height,
+  `Pset_PlateCommon`, `Qto_PlateBaseQuantities`) and its mullions as `IfcMember`s (`MULLION`, `IfcMemberType`, the type's
+  rectangle or circle swept along its length, `Pset_MemberCommon`, `Qto_MemberBaseQuantities`), each placed in its wall's frame,
+  made of its type's material, aggregated under the wall and not contained in the storey too. An empty panel is an open cell
+  and writes nothing. What IFC has no place for is in two sets only BIMCraft reads: `BIMCraft_CurtainWall` on the wall
+  (`ifc::CURTAIN`: `Wall`, the wall as a project file holds it, with its own grid settings, removed segments and deleted
+  mullions; `Types`, its type and the panel and mullion types it and its parts name; `Lines`, the grid lines drawn by hand
+  with their GUIDs; `Freed`, the unpinned panels and mullions by key with their types) and `BIMCraft_CurtainPart` on each
+  part (`Key`: which cell or segment it is). Import (`OwnCurtain::read`) reads the four texts strictly (an unknown key, a
+  wrong kind, more than `MAX_CURTAIN_JSON` of text) and checks the wall with its types on a project of its own by the
+  model's rules; then the wall comes in on its storey's level under its GlobalId, its types as they were, its lines under
+  their GUIDs (which the keys of what stands on them hold), its plates and members as the panels and mullions of their keys
+  (so the project parameters and phases each holds find it), and `curtain::keep_all` lays it out. A panel's and a mullion's
+  GUID is made of its wall's and its key in the project it is in, so it is not the one it had in the project the file was
+  written from. A curtain wall with no such set, a set that does not read, one whose top is constrained to a level the file
+  lacks, or types that differ from ones of their names already read, is another program's: left out as the whole of its
+  parts, which come in as generic components that remember their class, as before (`ifc_generic_tests`, `curtain_ifc_tests`).
 - **`IfcAirTerminal` stays generic.** BIMCraft's `Category::AirTerminal` is a lightning air terminal (a captor), written as a
   proxy of object type `LightningTerminal`; IFC's is a supply or extract grille or diffuser. Reading one as the other would put
   diffusers in the SPDA tab's category, so it stays a generic component of its class, as Revit's Air Terminals do

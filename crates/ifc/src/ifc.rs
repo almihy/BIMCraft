@@ -75,6 +75,10 @@ const MAKER: u64 = 59;
 const MAKER_DEFINES: u64 = 60;
 const TYPE_DATA: u64 = 61;
 const TYPE_DATA_DEFINES: u64 = 62;
+const CURTAIN_SET: u64 = 63;
+const CURTAIN_DEFINES: u64 = 64;
+const CURTAIN_PART_SET: u64 = 65;
+const CURTAIN_PART_DEFINES: u64 = 66;
 
 /// The property set an element's values of the project's parameters go in.
 pub const PARAMETERS: &str = "Project Parameters";
@@ -106,6 +110,17 @@ pub const MAKER_SET: &str = "Pset_ManufacturerTypeInformation";
 
 /// The property set an element's phase and design option go in; on the project, its phases and design option sets.
 pub const PHASING: &str = "BIMCraft_Phasing";
+/// The property set on a curtain wall (an `IfcCurtainWall`) holding what IFC has no place for, as the JSON a project file
+/// holds it in, so BIMCraft reads its own curtain wall back as it was: `Wall` (the wall: its line, its heights and its own grid
+/// settings, removed segments and deleted mullions), `Types` (its type, and the panel and mullion types its type and its
+/// parts name), `Lines` (the grid lines drawn by hand, each with its GUID) and `Freed` (the panels and mullions unpinned,
+/// each by its key with its type).
+pub const CURTAIN: &str = "BIMCraft_CurtainWall";
+/// The property set on a curtain wall's part (an `IfcPlate`, an `IfcMember`): `Key`, which cell or segment of its wall's
+/// grid it is.
+pub const CURTAIN_PART: &str = "BIMCraft_CurtainPart";
+/// The most text one property of [`CURTAIN`] holds, which a reader refuses past.
+pub const MAX_CURTAIN_JSON: usize = 4 << 20;
 
 /// What a `Phase Created` says of itself when the element holds none: it was made in the first phase.
 pub const IMPLIED: &str = "Implied: no phase is set for it, so it was made in the first phase";
@@ -734,8 +749,11 @@ impl Step {
 }
 
 /// The `Pset_*Common` an element's IFC entity carries; none for what has none BIMCraft writes.
-fn common_pset(e: &Element) -> Option<&'static str> {
+fn common_pset(m: &Model, e: &Element) -> Option<&'static str> {
     Some(match e {
+        Element::Wall(w) if crate::curtain::is_curtain(m, w) => "Pset_CurtainWallCommon",
+        Element::CurtainPanel(_) => "Pset_PlateCommon",
+        Element::Mullion(_) => "Pset_MemberCommon",
         Element::Wall(_) => "Pset_WallCommon",
         Element::Floor(_) => "Pset_SlabCommon",
         Element::Roof(_) => "Pset_RoofCommon",
@@ -766,6 +784,9 @@ fn has_fire_rating(pset: &str) -> bool {
             | "Pset_BeamCommon"
             | "Pset_StairCommon"
             | "Pset_RampCommon"
+            | "Pset_CurtainWallCommon"
+            | "Pset_PlateCommon"
+            | "Pset_MemberCommon"
     )
 }
 
@@ -819,6 +840,156 @@ pub fn wall_quantities(m: &Model, id: Id) -> Vec<(&'static str, &'static str, f6
         ("NetVolume", "VOLUME", q.net_volume / 1e9),
     ]);
     values
+}
+
+/// What a curtain wall's `BIMCraft_CurtainWall` holds ([`CURTAIN`]), on its entity `ent`.
+fn curtain_set(w: &mut Step, m: &Model, id: Id, wl: &crate::model::Wall, ent: u64) {
+    let host = m.guid(id);
+    let (mut lines, mut freed) = (Vec::new(), Vec::new());
+    let (mut panels, mut mullions) = (BTreeMap::new(), BTreeMap::new());
+    if let Some(c) = crate::curtain::curtain_of(m, wl) {
+        panels.extend(m.types.curtain_panel.get_key_value(&c.panel));
+        for ms in [&c.vertical_mullions, &c.horizontal_mullions] {
+            mullions.extend(ms.named().into_iter().filter_map(|(_, n)| m.types.mullion.get_key_value(n)));
+        }
+    }
+    for c in m.hosted_by(host) {
+        match m.elements.get(c) {
+            Some(Element::CurtainGrid(l)) => lines.push(serde_json::json!({"guid": m.guid(c), "vertical": l.vertical, "at": l.at})),
+            Some(Element::CurtainPanel(p)) => {
+                panels.extend(m.types.curtain_panel.get_key_value(&p.type_name));
+                if p.free {
+                    freed.push(serde_json::json!({"key": p.key, "type": p.type_name}));
+                }
+            }
+            Some(Element::Mullion(x)) => {
+                mullions.extend(m.types.mullion.get_key_value(&x.type_name));
+                if x.free {
+                    freed.push(serde_json::json!({"key": x.key, "type": x.type_name, "mullion": true}));
+                }
+            }
+            _ => {}
+        }
+    }
+    let types = serde_json::json!({"wall": m.types.wall.get(&wl.type_name), "panels": panels, "mullions": mullions});
+    let texts = [
+        ("Wall", serde_json::to_string(wl)),
+        ("Types", serde_json::to_string(&types)),
+        ("Lines", serde_json::to_string(&lines)),
+        ("Freed", serde_json::to_string(&freed)),
+    ];
+    let props: Vec<u64> = texts.into_iter().filter_map(|(name, text)| Some(w.text_property(name, None, &text.ok()?))).collect();
+    w.define(ent, CURTAIN, &props, (CURTAIN_SET, CURTAIN_DEFINES), id);
+}
+
+/// Each curtain wall's panels as `IfcPlate`s (`CURTAIN_PANEL`) and its mullions as `IfcMember`s (`MULLION`), placed in their
+/// wall's frame and aggregated under it (so not in the storey too, which holds the wall): a panel a rectangle of its type's
+/// thickness swept up its height, a mullion its type's section swept along its length, each in its type's material and with
+/// what it measures (`quantities::panel`, `quantities::mullion`). An empty panel is an open cell: nothing is written for it.
+fn curtain_parts(w: &mut Step, m: &Model, curtains: &BTreeMap<Id, (u64, u64)>, products: &mut BTreeMap<Id, u64>) {
+    let mut parts: BTreeMap<Id, Vec<u64>> = BTreeMap::new();
+    for (&id, e) in &m.elements {
+        let Some((host, wl, axis)) = crate::curtain::host_of(e).and_then(|h| crate::curtain::host(m, h)) else { continue };
+        let Some(&(_, wall_at)) = curtains.get(&host) else { continue };
+        w.kind = e.category();
+        // The wall's frame: at its start and its base, x the way it sets off.
+        let (u, base) = (axis.tangent(0.0), m.own_base(wl));
+        let local = |p: [f64; 3]| {
+            let d = P2(p[0], p[1]) - wl.start;
+            (d.dot(u), d.dot(u.perp()), p[2] - base)
+        };
+        let turned = |d: P2| P2(d.dot(u), d.dot(u.perp()));
+        let (ent, key, material) = match e {
+            Element::CurtainPanel(p) => {
+                let Some(([a, b, _, _], _, thickness)) = crate::curtain::panel_face(m, p) else { continue };
+                let q = crate::quantities::panel(m, p);
+                let along = P2(b[0] - a[0], b[1] - a[1]);
+                let width = along.length();
+                if !(width > crate::model::TOL && q.height > crate::model::TOL && thickness > 0.0) {
+                    continue;
+                }
+                let material = m.types.curtain_panel.get(&p.type_name).map_or("", |t| t.material.trim());
+                let at = w.place(Some(wall_at), local(a), Some(turned(along.unit())));
+                let profile = w.rectangle(P2(width / 2.0, 0.0), P2(width, thickness));
+                let style = if material.is_empty() { None } else { w.material_style(m, material).1 };
+                let shape = w.bodies(&[(profile, 0.0, q.height)], &[], style);
+                let ent = w.add(format!(
+                    "IFCPLATE({},$,{},$,{},#{at},#{shape},'{id}',.CURTAIN_PANEL.)",
+                    w.guid(ELEMENT, id),
+                    s(&p.type_name),
+                    s(&p.type_name)
+                ));
+                w.typed("IFCPLATETYPE", ".CURTAIN_PANEL.", &p.type_name, ent);
+                let values = [
+                    ("Width", "LENGTH", thickness),
+                    ("Perimeter", "LENGTH", 2.0 * (width + q.height)),
+                    ("GrossArea", "AREA", width * q.height / 1e6),
+                    ("NetArea", "AREA", width * q.height / 1e6),
+                    ("GrossVolume", "VOLUME", width * q.height * thickness / 1e9),
+                    ("NetVolume", "VOLUME", width * q.height * thickness / 1e9),
+                ];
+                w.quantities(ent, "Qto_PlateBaseQuantities", &values, id);
+                (ent, &p.key, material)
+            }
+            Element::Mullion(x) => {
+                let (Some((a, b, across, out, t)), Some(q)) = (crate::curtain::mullion_line(m, x), crate::quantities::mullion(m, x)) else {
+                    continue;
+                };
+                let run = crate::geom::v3::sub(b, a);
+                let length = crate::geom::v3::dot(run, run).sqrt();
+                if !(length > crate::model::TOL && q.section > 0.0) {
+                    continue;
+                }
+                let at = w.place(Some(wall_at), local(a), None);
+                // Its section's x is its width (along the wall for one that stands, up it for one that lies), its y its depth.
+                let (sweep, wide) = match across {
+                    Some(along) => {
+                        let d = turned(along);
+                        ([0.0, 0.0, 1.0], [d.0, d.1, 0.0])
+                    }
+                    None => {
+                        let d = turned(out.perp() * -1.0);
+                        ([d.0, d.1, 0.0], [0.0, 0.0, 1.0])
+                    }
+                };
+                let section =
+                    if t.round { Section::new(t.thickness, t.thickness, true) } else { Section::new(q.width, t.thickness, false) };
+                let profile = w.section_profile(section);
+                let aim = w.aim(sweep, wide);
+                let material = t.material.trim();
+                let solid = w.add(format!("IFCEXTRUDEDAREASOLID(#{profile},#{aim},#{},{})", w.z, real(length)));
+                if let Some(style) = if material.is_empty() { None } else { w.material_style(m, material).1 } {
+                    w.add(format!("IFCSTYLEDITEM(#{solid},(#{style}),$)"));
+                }
+                let rep = w.add(format!("IFCSHAPEREPRESENTATION(#{},'Body','SweptSolid',(#{solid}))", w.body));
+                let shape = w.add(format!("IFCPRODUCTDEFINITIONSHAPE($,$,(#{rep}))"));
+                let ent = w.add(format!(
+                    "IFCMEMBER({},$,{},$,{},#{at},#{shape},'{id}',.MULLION.)",
+                    w.guid(ELEMENT, id),
+                    s(&x.type_name),
+                    s(&x.type_name)
+                ));
+                w.typed("IFCMEMBERTYPE", ".MULLION.", &x.type_name, ent);
+                let values = member_quantities(section.width(), section.depth(), t.round, length);
+                w.quantities(ent, "Qto_MemberBaseQuantities", &values, id);
+                (ent, &x.key, material)
+            }
+            _ => continue,
+        };
+        if !material.is_empty() {
+            let material = w.material(m, material);
+            w.add(format!("IFCRELASSOCIATESMATERIAL({},$,$,$,(#{ent}),#{material})", w.guid(COMPONENT_MATERIALS, id)));
+        }
+        let key = w.text_property("Key", None, key);
+        w.define(ent, CURTAIN_PART, &[key], (CURTAIN_PART_SET, CURTAIN_PART_DEFINES), id);
+        products.insert(id, ent);
+        parts.entry(host).or_default().push(ent);
+    }
+    for (host, parts) in parts {
+        if let Some((ent, _)) = curtains.get(&host) {
+            w.add(format!("IFCRELAGGREGATES({},$,$,$,#{ent},({}))", w.guid(PARTS, host), refs(&parts)));
+        }
+    }
 }
 
 pub fn export(m: &Model) -> String {
@@ -912,6 +1083,8 @@ pub fn export(m: &Model) -> String {
     let mut products: BTreeMap<Id, u64> = BTreeMap::new();
     // Walls as (entity, placement), for the openings in them.
     let mut placed: BTreeMap<Id, (u64, u64)> = BTreeMap::new();
+    // Curtain walls as (entity, placement), for their panels and mullions.
+    let mut curtains: BTreeMap<Id, (u64, u64)> = BTreeMap::new();
     // Floors, ceilings and roofs as (entity, placement, its height), for the shafts through them.
     let mut hosts: BTreeMap<Id, (u64, u64, f64)> = BTreeMap::new();
     // Stairs and ramps as (entity, placement, its height, its parts), for the railings along them.
@@ -933,6 +1106,33 @@ pub fn export(m: &Model) -> String {
                 let pts: Vec<u64> = path.points(0.0, path.length(), 0.0).into_iter().map(|p| w.point(local(p))).collect();
                 let line = w.add(format!("IFCPOLYLINE(({}))", refs(&pts)));
                 let axis_rep = w.add(format!("IFCSHAPEREPRESENTATION(#{axis},'Axis','Curve2D',(#{line}))"));
+                // A curtain wall: an `IfcCurtainWall` with its line and no body of its own, the whole its panels and
+                // mullions are parts of (written below, once every wall is).
+                if crate::curtain::is_curtain(m, wl) {
+                    let shape = w.add(format!("IFCPRODUCTDEFINITIONSHAPE($,$,(#{axis_rep}))"));
+                    let ent = w.add(format!(
+                        "IFCCURTAINWALL({},$,{},$,{},#{at},#{shape},'{id}',.NOTDEFINED.)",
+                        w.guid(ELEMENT, id),
+                        s(&wl.type_name),
+                        s(&wl.type_name)
+                    ));
+                    contained.entry(wl.level).or_default().push(ent);
+                    products.insert(id, ent);
+                    curtains.insert(id, (ent, at));
+                    w.typed("IFCCURTAINWALLTYPE", ".NOTDEFINED.", &wl.type_name, ent);
+                    if let Some(q) = crate::quantities::wall(m, id) {
+                        let values = [
+                            ("Length", "LENGTH", q.length),
+                            ("Height", "LENGTH", q.height.unwrap_or_default()),
+                            ("Width", "LENGTH", q.width),
+                            ("GrossSideArea", "AREA", q.gross_side / 1e6),
+                            ("NetSideArea", "AREA", q.net_side / 1e6),
+                        ];
+                        w.quantities(ent, "Qto_CurtainWallQuantities", &values, id);
+                    }
+                    curtain_set(&mut w, m, id, wl, ent);
+                    continue;
+                }
                 // Its outline swept up, mitred where it joins others as the plan's is; attached to a
                 // roof or a floor, a closed shell for each piece under (or over) a plane of it.
                 let shape = if wl.attach_top.is_none() && wl.attach_base.is_none() {
@@ -1509,6 +1709,7 @@ pub fn export(m: &Model) -> String {
             _ => {}
         }
     }
+    curtain_parts(&mut w, m, &curtains, &mut products);
     // Railings along stairs and ramps join their parts; each stair and ramp is the sum of its parts.
     for (&id, e) in &m.elements {
         if let Element::Railing(rl) = e
@@ -1813,11 +2014,18 @@ pub fn export(m: &Model) -> String {
     // A wall says whether it is external, `IsExternal` in its `Pset_WallCommon`, by its type's Function as Revit's export
     // does: an Interior or a Core-shaft wall is not, the others are.
     for (&id, &ent) in &products {
-        let Some(Element::Wall(wl)) = m.elements.get(id) else { continue };
+        // A curtain wall says so in its `Pset_CurtainWallCommon`, and its panels and mullions as their wall does, in their
+        // `Pset_PlateCommon` and `Pset_MemberCommon`.
+        let Some(e) = m.elements.get(id) else { continue };
+        let wl = match e {
+            Element::Wall(wl) => Some(wl),
+            _ => crate::curtain::host_of(e).and_then(|h| m.wall(h)),
+        };
+        let (Some(wl), Some(pset)) = (wl, common_pset(m, e)) else { continue };
         let Some(t) = m.types.wall.get(&wl.type_name) else { continue };
         let external = !matches!(t.function, crate::model::WallFunction::Interior | crate::model::WallFunction::CoreShaft);
         let p = w.add(format!("IFCPROPERTYSINGLEVALUE('IsExternal',$,IFCBOOLEAN({}),$)", if external { ".T." } else { ".F." }));
-        w.common.entry(id).or_insert((ent, "Pset_WallCommon", Vec::new())).2.push(p);
+        w.common.entry(id).or_insert((ent, pset, Vec::new())).2.push(p);
     }
     // A phased project's elements say what the work does to them, as IFC's `Status` (PEnum_ElementStatus) in their `Pset_*Common`: taken down in
     // any phase, DEMOLISH (TEMPORARY when made in that phase too); made in the first phase, EXISTING; else NEW. A door or a
@@ -1825,7 +2033,7 @@ pub fn export(m: &Model) -> String {
     if phasing::any(m) {
         for (&id, &ent) in &products {
             let Some(e) = m.elements.get(id) else { continue };
-            let Some(pset) = common_pset(e) else { continue };
+            let Some(pset) = common_pset(m, e) else { continue };
             let Some(status) = ifc_status(m, e) else { continue };
             let p = w.add(format!("IFCPROPERTYENUMERATEDVALUE('Status',$,(IFCLABEL('{status}')),$)"));
             w.common.entry(id).or_insert((ent, pset, Vec::new())).2.push(p);
@@ -1845,7 +2053,7 @@ pub fn export(m: &Model) -> String {
         if own_type.is_some_and(|k| !written.insert(k)) {
             continue;
         }
-        let common = common_pset(e);
+        let common = common_pset(m, e);
         let mut common_props = Vec::new();
         let mut rest = Vec::new();
         if !identity.type_mark.is_empty() {

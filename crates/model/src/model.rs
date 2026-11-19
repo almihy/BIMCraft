@@ -3684,7 +3684,7 @@ pub struct ProjectParameter {
 pub const MAX_PROJECT_PARAMETERS: usize = 256;
 
 /// The categories project parameters are for.
-pub const PARAMETER_CATEGORIES: [&str; 30] = [
+pub const PARAMETER_CATEGORIES: [&str; 32] = [
     "wall",
     "floor",
     "ceiling",
@@ -3716,6 +3716,9 @@ pub const PARAMETER_CATEGORIES: [&str; 30] = [
     "subdivision",
     "surveypoint",
     "projectbasepoint",
+    // A curtain wall's parts, Revit's Curtain Panels and Curtain Wall Mullions.
+    "curtainpanel",
+    "mullion",
 ];
 
 impl ProjectParameter {

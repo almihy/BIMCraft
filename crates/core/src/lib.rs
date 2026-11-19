@@ -38,6 +38,10 @@ mod clipboard_tests;
 mod cloud_tests;
 mod commands;
 #[cfg(test)]
+mod curtain_ifc_tests;
+#[cfg(test)]
+mod curtain_schedule_tests;
+#[cfg(test)]
 mod curtain_sync_tests;
 #[cfg(test)]
 mod curtain_tests;

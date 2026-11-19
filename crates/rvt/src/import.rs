@@ -92,6 +92,9 @@ pub(crate) struct Import {
     /// The model's wall for each Revit wall made, and the walls left out for having no layers (curtain walls): hosts of doors.
     pub walls: HashMap<u32, Id>,
     pub curtain: BTreeSet<u32>,
+    /// The curtain panels a curtain wall's grid was worked out from, each with its wall: the wall lays them out as its own, so
+    /// they are no boxes too.
+    pub curtain_panels: BTreeMap<u32, u32>,
     /// The model's roof for each Revit roof made: the walls whose tops follow one name it.
     pub roofs: HashMap<u32, Id>,
     /// What was left out or noted, by (left out, kind, reason): the ids it concerned. Told as one line each in the end.
@@ -253,6 +256,7 @@ pub(crate) fn build(revit: &mut Revit, name: &str) -> Result<(Imported, HashMap<
         levels: HashMap::new(),
         walls: HashMap::new(),
         curtain: BTreeSet::new(),
+        curtain_panels: BTreeMap::new(),
         roofs: HashMap::new(),
         groups: BTreeMap::new(),
     };
@@ -379,6 +383,14 @@ fn finish(mut cx: Import, schema: String) -> Result<Imported, String> {
     cx.model.adopt_materials();
     // What the import put in the library (types, materials) and its parts get their ids and GUIDs, as `Model::check` asks.
     cx.model.sync_library();
+    // Each curtain wall lays out its panels, which are the wall's: one the model's rules refuse is told as the wall's.
+    bimcraft_core::curtain::keep_all(&mut cx.model);
+    let laid: Vec<(Id, Guid)> = cx.model.elements.iter().filter_map(|(id, e)| Some((*id, bimcraft_core::curtain::host_of(e)?))).collect();
+    for (id, host) in laid {
+        if let Some(wall) = cx.model.elements.id(host).and_then(|w| cx.from.get(&w)).cloned() {
+            cx.from.entry(id).or_insert(wall.replacen("Wall", "Curtain wall part of wall", 1));
+        }
+    }
     let m = &mut cx.model;
     let mut dropped: Vec<(Id, String)> = Vec::new();
     let mut checked = false;
@@ -397,10 +409,16 @@ fn finish(mut cx: Import, schema: String) -> Result<Imported, String> {
             .iter()
             .filter_map(|(k, x)| match x {
                 Element::Door(o) | Element::Window(o) if o.host == gone => Some(*k),
+                x if bimcraft_core::curtain::host_of(x) == Some(gone) => Some(*k),
                 _ => None,
             })
             .collect();
         for h in hosted {
+            // A curtain wall's lines, panels and mullions go with it and say nothing more.
+            if m.elements.get(h).is_some_and(|x| bimcraft_core::curtain::host_of(x).is_some()) {
+                m.elements.remove(h);
+                continue;
+            }
             dropped.push((h, "its wall was left out".to_string()));
             m.elements.remove(h);
         }
