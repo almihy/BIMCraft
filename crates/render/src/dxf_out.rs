@@ -433,6 +433,9 @@ fn layer_of(m: &Model, e: &Element) -> String {
         Element::Wall(_) => "A-WALL",
         Element::Door(_) => "A-DOOR",
         Element::Window(_) => "A-GLAZ",
+        // A curtain wall's glazing, and its mullions (the National CAD Standard's A-GLAZ-CWMG).
+        Element::CurtainPanel(_) | Element::CurtainGrid(_) => "A-GLAZ",
+        Element::Mullion(_) => "A-GLAZ-CWMG",
         Element::Room(_) => "A-AREA-IDEN",
         Element::RoomSeparator(_) => "A-AREA-SEPR",
         Element::Floor(_) => "A-FLOR",
@@ -555,6 +558,8 @@ pub fn write(m: &Model, d: &Drawing, o: &Options) -> Written {
     };
     for (i, prim) in d.prims.iter().enumerate() {
         match prim {
+            // What is drawn in no ink is there for the cursor (a curtain wall's extents), not for a drawing.
+            Prim::Line { alpha: 0, .. } | Prim::Fill { alpha: 0, .. } => {}
             Prim::Line { pts, width, color, dash, closed, alpha } => b.line(pts, *width, *color, dash.as_ref(), *closed, *alpha, i),
             Prim::Fill { rings, color, rule, alpha } => b.fill(rings, *color, *rule, *alpha, i),
             Prim::Image { .. } => b.pictures += 1,
