@@ -387,6 +387,33 @@ fn a_t_join_set_not_to_clean_leaves_both_walls_layers_whole_and_draws_the_line_t
     assert!(s.execute("wall_join", &json!({"walls": [south, far], "display": "clean"})).is_err());
 }
 
+#[test]
+fn a_walls_end_dragged_alone_leaves_its_join_and_several_walls_ends_at_a_point_go_together() {
+    let (mut s, south, _) = room("Block");
+    let walls_at = |s: &Session, q: P2| {
+        s.model
+            .elements
+            .values()
+            .filter(|e| matches!(e, crate::model::Element::Wall(w) if w.start.dist(q) < 1e-6 || w.end.dist(q) < 1e-6))
+            .count()
+    };
+    // The south wall runs from (3000, 0) to (0, 0), where the west wall starts. Its end moved as `move` ever did: the
+    // west wall's start follows it.
+    run(&mut s, "move", json!({"ids": [south], "by": [0, -500], "end": "end"}));
+    assert_eq!(walls_at(&s, P2(0.0, -500.0)), 2);
+    run(&mut s, "undo", json!({}));
+    // Dragged alone, as Revit's Drag Wall End: the west wall stays where it was.
+    run(&mut s, "move", json!({"ids": [south], "by": [0, -500], "end": "end", "joined": false}));
+    assert_eq!((walls_at(&s, P2(0.0, -500.0)), walls_at(&s, P2(0.0, 0.0))), (1, 1));
+    run(&mut s, "undo", json!({}));
+    // Both walls' ends there, by the point they share: they go together, in one step.
+    let west = *s.model.elements.iter().find(|(_, e)| matches!(e, crate::model::Element::Wall(w) if w.start == P2(0.0, 0.0))).unwrap().0;
+    run(&mut s, "move", json!({"ids": [south, west], "by": [-400, -500], "node": [0, 0]}));
+    assert_eq!((walls_at(&s, P2(-400.0, -500.0)), walls_at(&s, P2(0.0, 0.0))), (2, 0));
+    // A wall with no end at the point is refused, and nothing moves.
+    assert!(s.execute("move", &json!({"ids": [south], "by": [10, 10], "node": [1500, 1500]})).is_err());
+}
+
 /// The room's south wall with a partition ending on it from each side at x = 1500: one up into the room, one down.
 fn crossing(split: bool) -> (Session, Vec<u64>, u64, u64) {
     let (mut s, south, up) = room("Block");

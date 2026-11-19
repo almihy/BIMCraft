@@ -438,6 +438,8 @@ pub struct Canvas {
     crop_drag: Option<(Id, usize)>,
     /// A selected wall's end being dragged: the wall, and whether it's its start.
     pub(crate) grip: Option<(Id, bool)>,
+    /// The point several selected walls end at, while their shared end is dragged (Revit's Drag Wall End on a join).
+    pub(crate) joint: Option<P2>,
     /// A selected level's end being dragged in a section or an elevation: the level, and whether
     /// it's its far end.
     level_grip: Option<(Id, bool)>,
@@ -525,6 +527,7 @@ impl Default for Canvas {
             hovered: None,
             crop_drag: None,
             grip: None,
+            joint: None,
             level_grip: None,
             press: None,
             lifted: None,
@@ -2054,6 +2057,7 @@ impl BimApp {
         let dragged = self.sketch_drag(ui, &response, rect, &view, level);
         self.canvas.found.set(None);
         self.grip_drag(ui, &response, rect, &view, level);
+        self.joint_drag(ui, &response, rect, &view, level);
         self.line_grip_drag(ui, &response, rect, &view, level);
         let dragged = self.shape_grip_drag(ui, &response, rect, &view, level) || dragged;
         let dragged = self.site_grip_drag(ui, &response, rect, &view, level) || dragged;
@@ -2070,6 +2074,7 @@ impl BimApp {
             && !on_control
             && self.canvas.crop_drag.is_none()
             && self.canvas.grip.is_none()
+            && self.canvas.joint.is_none()
             && self.drawing.grip.is_none()
             && self.site_grip.is_none()
             && self.camera_grip.is_none()
@@ -2290,6 +2295,7 @@ impl BimApp {
             }
         }
         self.grip_overlay(ui, &model, &view, rect, level, &d, d.place);
+        self.joint_overlay(ui, &model, &view, rect, level);
         self.dimension_grips(ui, &model, &view, rect);
         self.image_grips(ui, &model, &view, rect);
         self.pin_overlay(ui, &model, &view, rect);
@@ -3784,9 +3790,109 @@ impl BimApp {
                 self.snap_once = None;
                 let by = to - if start { ends.0 } else { ends.1 };
                 if by.length() > 1e-6 && !self.refuse_pinned() {
-                    self.run("move", json!({"ids": [id], "by": point(by), "end": if start { "start" } else { "end" }}));
+                    let mut p = json!({"ids": [id], "by": point(by), "end": if start { "start" } else { "end" }});
+                    // A wall's end goes alone, as Revit's Drag Wall End: what it was joined to there stays.
+                    if m.wall(id).is_some() {
+                        p["joined"] = json!(false);
+                    }
+                    self.run("move", p);
                 }
             }
+        }
+    }
+
+    /// The points two or more of the selected walls end at, in a plan with no tool running: each a grip that drags those
+    /// walls' ends together, as Revit's Drag Wall End on a join whose walls are selected.
+    pub(crate) fn shared_ends(&self) -> Vec<P2> {
+        if self.tool != Tool::Modify || self.selection.len() < 2 || !matches!(self.sheet, Sheet::Plan(_) | Sheet::Ceiling(_)) {
+            return Vec::new();
+        }
+        let m = &self.session.model;
+        let ends: Vec<P2> = self.selection.iter().filter_map(|id| m.wall(*id)).flat_map(|w| [w.start, w.end]).collect();
+        let mut shared: Vec<P2> = Vec::new();
+        for (k, e) in ends.iter().enumerate() {
+            let twice = ends.iter().skip(k + 1).any(|o| o.dist(*e) <= TOL);
+            if twice && !shared.iter().any(|s| s.dist(*e) <= TOL) {
+                shared.push(*e);
+            }
+        }
+        shared
+    }
+
+    /// The selected walls that end at `node`.
+    fn walls_ending_at(&self, node: P2) -> Vec<Id> {
+        let m = &self.session.model;
+        let ends_there = |id: &Id| m.wall(*id).is_some_and(|w| w.start.dist(node) <= TOL || w.end.dist(node) <= TOL);
+        self.selection.iter().copied().filter(ends_there).collect()
+    }
+
+    /// A drag from the end several selected walls share moves that end of each of them; on release, one `move` with
+    /// `node`. The walls of the join that are not selected stay, and leave it.
+    fn joint_drag(&mut self, ui: &Ui, response: &Response, rect: Rect, view: &View, level: Id) {
+        let shared = self.shared_ends();
+        if shared.is_empty() {
+            self.canvas.joint = None;
+            return;
+        }
+        let at = |p: P2| pos(rect.min, view.px(p));
+        for e in &shared {
+            self.control_rect(ui, Rect::from_center_size(at(*e), vec2(GRIP_REACH, GRIP_REACH)));
+        }
+        if response.drag_started_by(PointerButton::Primary)
+            && self.canvas.crop_drag.is_none()
+            && let Some(o) = ui.input(|i| i.pointer.press_origin())
+            && let Some(node) = shared
+                .iter()
+                .copied()
+                .filter(|e| at(*e).distance(o) <= 8.0)
+                .min_by(|a, b| at(*a).distance(o).total_cmp(&at(*b).distance(o)))
+            && !self.refuse_pinned_ids(&self.walls_ending_at(node))
+        {
+            self.canvas.joint = Some(node);
+        }
+        let Some(node) = self.canvas.joint else { return };
+        if response.drag_stopped() {
+            self.canvas.joint = None;
+            if !self.canvas.quick()
+                && let Some(q) = ui.input(|i| i.pointer.latest_pos())
+            {
+                let m = std::sync::Arc::clone(&self.session.model);
+                let shift = ui.input(|i| i.modifiers.shift);
+                let to = self.snap(&m, level, view, (q.x - rect.min.x, q.y - rect.min.y), &[], shift).at;
+                self.snap_once = None;
+                let by = to - node;
+                if by.length() > 1e-6 {
+                    self.run("move", json!({"ids": self.walls_ending_at(node), "by": point(by), "node": point(node)}));
+                }
+            }
+        }
+    }
+
+    /// The grips at the ends the selected walls share, and while one is dragged, the walls' location lines as they would run.
+    fn joint_overlay(&mut self, ui: &mut Ui, m: &Model, v: &View, rect: Rect, level: Id) {
+        let shared = self.shared_ends();
+        if shared.is_empty() {
+            return;
+        }
+        let p = ui.painter_at(rect);
+        let at = |q: P2| pos(rect.min, v.px(q));
+        let held = self.canvas.joint;
+        let cursor = ui.input(|i| i.pointer.latest_pos());
+        for e in shared {
+            let mut drawn = e;
+            if let (true, Some(q)) = (held.is_some_and(|h| h.dist(e) <= TOL), cursor) {
+                let shift = ui.input(|i| i.modifiers.shift);
+                let found = self.snap(m, level, v, (q.x - rect.min.x, q.y - rect.min.y), &[], shift);
+                drawn = found.at;
+                for w in self.walls_ending_at(e).iter().filter_map(|id| m.wall(*id)) {
+                    let other = if w.start.dist(e) <= TOL { w.end } else { w.start };
+                    p.line_segment([at(other), at(drawn)], Stroke::new(1.0, pal().accent));
+                }
+                self.canvas.found.set(Some(found));
+            }
+            let r = Rect::from_center_size(at(drawn), vec2(9.0, 9.0));
+            p.rect_filled(r, 1.0, if drawn == e { pal().surface } else { pal().accent });
+            p.rect_stroke(r, 1.0, Stroke::new(1.5, pal().accent), StrokeKind::Middle);
         }
     }
 

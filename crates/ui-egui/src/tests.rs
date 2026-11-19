@@ -1386,6 +1386,33 @@ door {{\"at\": [2000, 0]}}"
 }
 
 #[test]
+fn the_end_two_selected_walls_share_is_one_grip_that_drags_both_and_one_walls_end_goes_alone() {
+    let mut h = app(BOX);
+    let south = find(&h, |e| matches!(e, Element::Wall(w) if w.start == P2(0.0, 0.0)));
+    let east = find(&h, |e| matches!(e, Element::Wall(w) if w.start == P2(8000.0, 0.0)));
+    let ends = |h: &Harness<BimApp>, id: Id| match h.state().session.model.elements.get(id) {
+        Some(Element::Wall(w)) => (w.start, w.end),
+        _ => unreachable!(),
+    };
+    // One wall selected: its end at the corner, dragged, goes alone, as Revit's Drag Wall End; the east wall stays.
+    h.state_mut().selection = vec![south];
+    h.run();
+    drag(&mut h, P2(8000.0, 0.0), P2(9000.0, -1000.0));
+    assert!(ends(&h, south).1.dist(P2(9000.0, -1000.0)) < 100.0, "{:?}", ends(&h, south));
+    assert_eq!(ends(&h, east).0, P2(8000.0, 0.0));
+    h.state_mut().run("undo", json!({}));
+    // Both selected: the corner is one grip, and the two ends go together in one step.
+    h.state_mut().selection = vec![south, east];
+    h.run();
+    assert_eq!(h.state().shared_ends(), [P2(8000.0, 0.0)]);
+    let before = h.state().session.history().len();
+    drag(&mut h, P2(8000.0, 0.0), P2(9000.0, -1000.0));
+    assert!(ends(&h, south).1.dist(P2(9000.0, -1000.0)) < 100.0, "{:?}", ends(&h, south));
+    assert_eq!(ends(&h, south).1, ends(&h, east).0, "the two ends are still one point");
+    assert_eq!(h.state().session.history().len(), before + 1);
+}
+
+#[test]
 fn dragging_a_wall_moves_it_and_the_walls_and_room_around_follow() {
     let mut h = app(&format!("{BOX}\nroom {{\"point\": [2000, 3000]}}"));
     let room = ids(&h, "room")[0];
@@ -4521,7 +4548,7 @@ fn a_selected_walls_ends_are_grips_to_drag_and_ctrl_turns_it_about_the_other_end
     drag(&mut h, P2(8000.0, 0.0), P2(8000.0, -1000.0));
     // Its length and its angle from the other end step as Revit's increments do at this zoom: 8,100 at 7°.
     assert_eq!(walls(&h)[0], (P2(0.0, 0.0), P2(8039.624, -987.142)));
-    assert_eq!(walls(&h)[1].0, P2(8039.624, -987.142), "the wall joined there followed");
+    assert_eq!(walls(&h)[1].0, P2(8000.0, 0.0), "the wall joined there stays, as Revit's does: the end is dragged out of the join");
     assert_eq!(h.state().selection, ids(&h, "wall")[..1], "still selected, to drag again");
     // Ctrl keeps its length: it turns about its start toward the cursor.
     let length = walls(&h)[0].0.dist(walls(&h)[0].1);

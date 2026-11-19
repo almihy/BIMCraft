@@ -1776,11 +1776,14 @@ other_files(
         "move",
         ui_msg!("Move"),
         &["MV"],
-        "{ids: [id,…], by: [dx, dy], end?: start|end, disjoin?: true} moves elements in plan; walls joined to a moved wall \
+        "{ids: [id,…], by: [dx, dy], end?: start|end, joined?: false, node?: [x, y], disjoin?: true} moves elements in plan; \
+         walls joined to a moved wall \
          stretch to stay joined, and doors and windows slide along their walls. With `disjoin` (the Move tool's Disjoin) the \
          walls moved leave their joins instead: what they were joined to stays as it is, and they join what they meet where \
          they land. With `end`, only that end of one wall, one run or one grid \
-         moves. A pinned element is not moved (Revit's \"Can't move pinned element.\"): `unpin` it first",
+         moves, and the walls joined there follow it; with `joined: false` a wall's end moves alone, as Revit's Drag Wall End \
+         does: what was joined there stays and leaves the join. With `node`, the ends at that point of every wall in `ids` move \
+         together, and the walls not in `ids` stay. A pinned element is not moved (Revit's \"Can't move pinned element.\"): `unpin` it first",
         move_elements,
     ),
     edit(
@@ -14298,6 +14301,45 @@ fn move_elements(s: &mut Session, p: &Value) -> R {
     let grid = |id: Id| matches!(s.model.elements.get(id), Some(Element::Grid(_)));
     if end.is_some() && !matches!(ids.as_slice(), [one] if s.model.wall(*one).is_some() || s.model.run_of(*one).is_some() || grid(*one)) {
         return Err(bad(c, "`end` moves an end of one wall, one run or one grid; give `ids` one of them"));
+    }
+    // Revit's Drag Wall End: a wall's end taken alone (`joined: false`), or the ends at one point of the walls given
+    // (`node`). What else ends there stays where it is, and so leaves the join.
+    let node = point_opt(c, p, "node")?;
+    let joined = absent(p.get("joined")) || flag(c, p, "joined")?;
+    let at = match (node, end, ids.as_slice()) {
+        (Some(at), ..) => Some(at),
+        (None, Some(start), [one]) if !joined => s.model.wall(*one).map(|w| if start { w.start } else { w.end }),
+        _ => None,
+    };
+    if let Some(at) = at {
+        pin::refuse_pinned(c, &s.model, &ids, pin::Held::Move)?;
+        let mut moved = Vec::new();
+        for id in &ids {
+            let Some(mut w) = s.model.wall(*id).cloned() else {
+                return Err(bad(c, format!("`node` and `joined` move the ends of walls; element {id} is no wall")));
+            };
+            // The end named, else the one at the point.
+            let start = match (node, end) {
+                (None, Some(start)) => start,
+                _ if w.start.dist(at) <= TOL => true,
+                _ if w.end.dist(at) <= TOL => false,
+                _ => return Err(bad(c, format!("wall {id} has no end at `node`"))),
+            };
+            if start {
+                w.start = micron(w.start + by)
+            } else {
+                w.end = micron(w.end + by)
+            }
+            if w.start.dist(w.end) <= TOL {
+                return Err(bad(c, format!("wall {id} would have no length")));
+            }
+            moved.push((*id, w));
+        }
+        let m = s.model_mut();
+        for (id, w) in moved {
+            m.elements.insert(id, Element::Wall(w));
+        }
+        return Ok(json!({"moved": ids}));
     }
     // Disjoin, as the Move tool's: the walls taken leave their joins, so nothing they were joined to stretches after them;
     // where they come to stand they join what they meet there, as any wall does.
