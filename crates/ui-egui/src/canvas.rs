@@ -2386,6 +2386,17 @@ impl BimApp {
     /// comes within `SNAP` px of it.
     fn dragged(&self, m: &Model, level: Id, v: &View, base: P2, q: (f32, f32), mods: Modifiers) -> (P2, Option<Found>) {
         let skip: &[Id] = if mods.command { &[] } else { &self.selection };
+        // Walls drag as Revit's: one with an end joined to a wall that is not dragged with it goes only square to itself,
+        // so the join neither stretches nor shrinks, and Shift frees it; one joined to nothing goes anywhere, and Shift
+        // holds it square to itself. (A copy, with Ctrl, is no wall of the plan yet: it goes as anything else does.)
+        let across = if mods.command { None } else { walls_normal(m, &self.selection) };
+        if let Some((normal, joined)) = across {
+            let f = self.snap_skipping(m, level, v, q, &[base], false, skip);
+            let free = matches!(f.kind, Kind::Free | Kind::Angle);
+            let to = if free { v.mm(q) } else { f.at };
+            let by = if joined != mods.shift { normal * (to - base).dot(normal) } else { to - base };
+            return (if free { round(by) } else { micron(by) }, Some(f));
+        }
         let f = self.snap_skipping(m, level, v, q, &[base], mods.shift, skip);
         let free = matches!(f.kind, Kind::Free | Kind::Angle);
         let to = if free && !mods.shift { v.mm(q) } else { f.at };
@@ -3427,7 +3438,10 @@ impl BimApp {
             self.tool = again;
             return;
         }
-        let params = json!({"ids": self.selection, "by": point(to - from)});
+        let mut params = json!({"ids": self.selection, "by": point(to - from)});
+        if !copy && self.disjoin {
+            params["disjoin"] = json!(true);
+        }
         match self.run(if copy { "copy" } else { "move" }, params) {
             None => self.tool = again,
             Some(_) if copy && self.multiple => self.tool = again,
@@ -4902,4 +4916,22 @@ impl BimApp {
             }
         }
     }
+}
+
+/// Of a selection that is straight walls all running one way: the way square to them, and whether any of them has an end
+/// joined to a wall outside the selection. None for anything else selected.
+fn walls_normal(m: &Model, selection: &[Id]) -> Option<(P2, bool)> {
+    let mut normal: Option<P2> = None;
+    let mut joined = false;
+    for &id in selection {
+        let w = m.wall(id).filter(|w| w.arc == 0.0 && w.start.dist(w.end) > 0.0)?;
+        let n = (w.end - w.start).unit().perp();
+        match normal {
+            Some(first) if first.cross(n).abs() > 1e-9 => return None,
+            None => normal = Some(n),
+            _ => {}
+        }
+        joined |= [false, true].into_iter().any(|end| bimcraft_core::walls::joined_at(m, id, end).iter().any(|o| !selection.contains(o)));
+    }
+    normal.map(|n| (n, joined))
 }

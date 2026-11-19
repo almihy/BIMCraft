@@ -1774,8 +1774,10 @@ other_files(
         "move",
         ui_msg!("Move"),
         &["MV"],
-        "{ids: [id,…], by: [dx, dy], end?: start|end} moves elements in plan; walls joined to a moved wall stretch to stay \
-         joined, and doors and windows slide along their walls. With `end`, only that end of one wall, one run or one grid \
+        "{ids: [id,…], by: [dx, dy], end?: start|end, disjoin?: true} moves elements in plan; walls joined to a moved wall \
+         stretch to stay joined, and doors and windows slide along their walls. With `disjoin` (the Move tool's Disjoin) the \
+         walls moved leave their joins instead: what they were joined to stays as it is, and they join what they meet where \
+         they land. With `end`, only that end of one wall, one run or one grid \
          moves. A pinned element is not moved (Revit's \"Can't move pinned element.\"): `unpin` it first",
         move_elements,
     ),
@@ -14232,7 +14234,27 @@ fn move_elements(s: &mut Session, p: &Value) -> R {
     if end.is_some() && !matches!(ids.as_slice(), [one] if s.model.wall(*one).is_some() || s.model.run_of(*one).is_some() || grid(*one)) {
         return Err(bad(c, "`end` moves an end of one wall, one run or one grid; give `ids` one of them"));
     }
-    relocate(c, s, &ids, &Motion { map: &|q| q + by, slide: Some(by), mirror: false }, end)?;
+    // Disjoin, as the Move tool's: the walls taken leave their joins, so nothing they were joined to stretches after them;
+    // where they come to stand they join what they meet there, as any wall does.
+    let disjoin = flag(c, p, "disjoin")? && end.is_none();
+    let held: Vec<(Id, bool)> =
+        if disjoin { ids.iter().filter_map(|id| Some((*id, s.model.wall(*id)?.join))).collect() } else { Vec::new() };
+    let joining = |s: &mut Session, on: Option<bool>| {
+        let m = s.model_mut();
+        for (id, was) in &held {
+            if let Some(Element::Wall(w)) = m.elements.get_mut(*id) {
+                w.join = on.unwrap_or(*was);
+            }
+        }
+    };
+    if disjoin {
+        joining(s, Some(false));
+    }
+    let moved = relocate(c, s, &ids, &Motion { map: &|q| q + by, slide: Some(by), mirror: false }, end);
+    if disjoin {
+        joining(s, None);
+    }
+    moved?;
     Ok(json!({"moved": ids}))
 }
 

@@ -738,6 +738,8 @@ pub struct BimApp {
     thin: bool,
     /// Move and Copy keep to horizontal and vertical.
     constrain: bool,
+    /// The Move tool's Disjoin: the selection leaves its joins before it moves, and what it was joined to stays.
+    disjoin: bool,
     /// Copy places copy after copy from the same base point.
     multiple: bool,
     /// The Options Bar's Rotate angle, Copy for Rotate and for Mirror, and Offset distance and Copy.
@@ -1537,6 +1539,7 @@ impl BimApp {
             attach_base: false,
             thin: false,
             constrain: false,
+            disjoin: false,
             multiple: false,
             angle: String::new(),
             rotate_copy: false,
@@ -5567,6 +5570,7 @@ impl BimApp {
             Tool::Level => self.level_options(ui),
             Tool::Move(_) => {
                 ui.checkbox(&mut self.constrain, t("Constrain"));
+                ui.checkbox(&mut self.disjoin, t("Disjoin"));
             }
             Tool::WallJoins(Some((a, b))) => self.wall_join_options(ui, a, b),
             Tool::Copy(_) => {

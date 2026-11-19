@@ -425,6 +425,14 @@ fn in_line(m: &Model, a: &Arm, b: &Arm) -> bool {
         && a.cw.dist(b.ccw) < 1e-6
 }
 
+/// The walls wall `id`'s end (`at_end`, else its start) is joined to: those ending there with it, and one it ends on.
+pub fn joined_at(m: &Model, id: Id, at_end: bool) -> Vec<Id> {
+    let mut ids: Vec<Id> = arms(m, id, at_end, None).0.iter().map(|a| a.id).filter(|other| *other != id).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
 /// The wall end that wall `id`'s end (`at_end`, else its start) joins, when it joins one other wall end and nothing else:
 /// the join the Wall Joins tool changes.
 pub fn end_join(m: &Model, id: Id, at_end: bool) -> Option<(Id, bool)> {

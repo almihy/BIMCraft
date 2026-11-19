@@ -336,3 +336,19 @@ fn a_wall_joins_two_walls_meeting_in_line_as_it_would_the_one_wall() {
     let area = |id: u64| walls::prisms(&s.model, id, false).iter().map(|q| crate::geom::area(&q.ring).abs()).sum::<f64>();
     assert!((area(east) - (1500.0 * 315.0 - 50.0 * 15.0)).abs() < 1.0 && (area(west) - (1500.0 * 315.0 - 50.0 * 15.0)).abs() < 1.0);
 }
+
+#[test]
+fn move_with_disjoin_leaves_what_the_wall_was_joined_to_as_it_is() {
+    let wall = |s: &Session, id: u64| s.model.wall(id).map(|w| (w.start, w.end, w.join)).unwrap();
+    // Joined, the second wall stretches after the first: its start goes with the corner.
+    let (mut s, a, b) = corner();
+    run(&mut s, "move", json!({"ids": [a], "by": [0, -500]}));
+    assert_eq!(wall(&s, b), (P2(0.0, -500.0), P2(0.0, 4000.0), true));
+    // Disjoined, it stays as it was, and the wall moved joins again whatever it comes to meet.
+    let (mut s, a, b) = corner();
+    run(&mut s, "move", json!({"ids": [a], "by": [0, -500], "disjoin": true}));
+    assert_eq!(wall(&s, a), (P2(4000.0, -500.0), P2(0.0, -500.0), true));
+    assert_eq!(wall(&s, b), (P2(0.0, 0.0), P2(0.0, 4000.0), true));
+    run(&mut s, "undo", json!({}));
+    assert_eq!(wall(&s, a), (P2(4000.0, 0.0), P2(0.0, 0.0), true));
+}

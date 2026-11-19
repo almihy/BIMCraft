@@ -6804,6 +6804,7 @@ mod typeprops;
 mod view_controls;
 mod wall_dims;
 mod wall_joins;
+mod wall_moves;
 mod warnings;
 mod window;
 mod working3d;
