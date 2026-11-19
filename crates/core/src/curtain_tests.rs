@@ -154,3 +154,22 @@ fn a_saved_curtain_wall_opens_as_it_was() {
     assert_eq!(back.hosted_by(host).len(), 8 + 22);
     back.check().unwrap();
 }
+
+#[test]
+fn adjust_for_mullion_size_gives_every_panel_the_same_width_of_glass() {
+    let mut s = Session::new();
+    let grid = json!({"layout": "fixed-number", "adjust_for_mullion": true});
+    let all = json!({"interior": "50 x 150mm", "border1": "50 x 150mm", "border2": "50 x 150mm"});
+    run(&mut s, "type", json!({"category": "wall", "name": "Even", "curtain": {"vertical": grid, "vertical_mullions": all}}));
+    let w = wall(&mut s, json!({"points": [[0, 0], [6000, 0]], "type": "Even", "height": 3000}));
+    run(&mut s, "modify", json!({"id": w, "curtain": {"vertical": {"number": 2}}}));
+    // 6000 less two borders of 50 and two mullions of 50 between: three panels showing 1933.33 of glass each.
+    let g = curtain::grid(&s.model, w).unwrap();
+    let clear = (6000.0 - 200.0) / 3.0;
+    let at: Vec<f64> = g.u.iter().map(|l| l.at).collect();
+    assert!((at[1] - (50.0 + clear + 25.0)).abs() < 1e-6 && (at[2] - (50.0 + 2.0 * clear + 75.0)).abs() < 1e-6, "{at:?}");
+    // The wall's own settings are read back as they are, beside what says it is a curtain wall.
+    let json = crate::commands::element_json(&s.model, w);
+    assert_eq!(json["curtain"]["vertical"]["number"], 2);
+    assert_eq!(json["curtain_wall"], true);
+}

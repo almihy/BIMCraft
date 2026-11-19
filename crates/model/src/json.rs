@@ -173,7 +173,7 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>, measures: boo
                 let count = |want: fn(&Element) -> bool| {
                     m.hosted_by(m.guid(id)).into_iter().filter(|c| m.elements.get(*c).is_some_and(want)).count()
                 };
-                extra.insert("curtain".into(), json!(true));
+                extra.insert("curtain_wall".into(), json!(true));
                 extra.insert("panels".into(), json!(count(|e| matches!(e, Element::CurtainPanel(_)))));
                 extra.insert("mullions".into(), json!(count(|e| matches!(e, Element::Mullion(_)))));
                 // The doors that fill cells of it (`curtain_door`), where it has any.

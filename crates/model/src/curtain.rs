@@ -492,8 +492,19 @@ pub fn is_curtain(m: &Model, w: &Wall) -> bool {
 }
 
 /// Where a rule's own lines lie over `extent` mm: each with the number it is counted by from the justification's origin.
-fn rule_lines(rule: &GridRule, set: &GridSet, extent: f64) -> Vec<(i64, f64)> {
-    let even = |panels: usize| (1..panels.min(MAX_LINES + 1)).map(|i| (i as i64, extent * i as f64 / panels as f64)).collect();
+/// `widths`: how wide the mullions on the first border, between the borders and on the last border are (0 where the type puts
+/// none), which a rule that ticks Adjust for Mullion Size divides by, so the panels show the same width of glass: the
+/// borders' mullions lie wholly inside the wall and each line between has half its mullion on either side.
+fn rule_lines(rule: &GridRule, set: &GridSet, extent: f64, widths: [f64; 3]) -> Vec<(i64, f64)> {
+    let even = |panels: usize| -> Vec<(i64, f64)> {
+        let n = panels.min(MAX_LINES + 1);
+        let [b1, w, b2] = widths;
+        let clear = (extent - b1 - b2 - w * (n as f64 - 1.0)) / n as f64;
+        if rule.adjust_for_mullion && clear > NEAR {
+            return (1..n).map(|i| (i as i64, b1 + clear * i as f64 + w * (i as f64 - 0.5))).collect();
+        }
+        (1..n).map(|i| (i as i64, extent * i as f64 / n as f64)).collect()
+    };
     let spacing = rule.spacing;
     match rule.layout {
         Layout::None => Vec::new(),
@@ -538,13 +549,13 @@ fn rule_lines(rule: &GridRule, set: &GridSet, extent: f64) -> Vec<(i64, f64)> {
 
 /// The lines one way over `extent` mm: the borders, the rule's and the hand-made ones (`manual`: each line's GUID and where
 /// it is), in order; a line within a millimetre of one before it is left out (a hand-made one before the rule's).
-fn lines_of(prefix: char, rule: &GridRule, set: &GridSet, extent: f64, manual: &[(Guid, f64)]) -> Vec<Line> {
+fn lines_of(prefix: char, rule: &GridRule, set: &GridSet, extent: f64, widths: [f64; 3], manual: &[(Guid, f64)]) -> Vec<Line> {
     let mut inner: Vec<Line> = manual
         .iter()
         .filter(|(_, at)| at.is_finite() && *at > NEAR && *at < extent - NEAR)
         .map(|(g, at)| Line { key: format!("g{g}"), at: *at, manual: Some(*g), border: 0 })
         .collect();
-    inner.extend(rule_lines(rule, set, extent).into_iter().map(|(k, at)| Line {
+    inner.extend(rule_lines(rule, set, extent, widths).into_iter().map(|(k, at)| Line {
         key: format!("{prefix}t{k}"),
         at,
         manual: None,
@@ -584,11 +595,16 @@ pub fn grid(m: &Model, id: Id) -> Option<Grid> {
         return None;
     }
     let (mu, mv) = manual_lines(m, host);
+    // How wide each way's mullions are: the first border's, those between, the last border's.
+    let widths = |ms: &Mullions| {
+        let of = |n: &str| m.types.mullion.get(n).map_or(0.0, MullionType::width);
+        [of(&ms.border1), of(&ms.interior), of(&ms.border2)]
+    };
     Some(Grid {
         length,
         height,
-        u: lines_of('u', &ct.vertical, &w.curtain.vertical, length, &mu),
-        v: lines_of('v', &ct.horizontal, &w.curtain.horizontal, height, &mv),
+        u: lines_of('u', &ct.vertical, &w.curtain.vertical, length, widths(&ct.vertical_mullions), &mu),
+        v: lines_of('v', &ct.horizontal, &w.curtain.horizontal, height, widths(&ct.horizontal_mullions), &mv),
     })
 }
 

@@ -118,7 +118,7 @@ fn an_agent_reads_a_facade_from_its_wall_and_a_part_names_its_host() {
     let mut s = Session::new();
     let w = storefront(&mut s);
     let j = crate::commands::element_json(&s.model, w);
-    assert_eq!(j["curtain"], true);
+    assert_eq!(j["curtain_wall"], true);
     assert_eq!((j["panels"].clone(), j["mullions"].clone()), (json!(8), json!(22)));
     assert_eq!(j["vertical_grid"], json!([0.0, 1500.0, 3000.0, 4500.0, 6000.0]));
     assert_eq!(j["horizontal_grid"], json!([0.0, 2400.0, 3000.0]));

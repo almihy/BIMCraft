@@ -37,7 +37,7 @@ project has (`VIEWS`): one is made as a beam schedule is, `schedule {"name": "Cu
 its height, and its Volume 0, because it has no solid of its own and its panels and mullions hold theirs, so a schedule of
 every category counts nothing twice. All three read `quantities::wall`, `quantities::panel` and `quantities::mullion`, which
 IFC's quantity sets read too; a panel's and a mullion's `volume_m3` is to the cubic centimetre. A multi-category schedule
-lists both categories, with Material their type's. `elements` gives a curtain wall `curtain: true`, `panels` and `mullions`
+lists both categories, with Material their type's. `elements` gives a curtain wall `curtain_wall: true`, `panels` and `mullions`
 (how many it has) and `vertical_grid` and `horizontal_grid` (its grid lines, mm along it and mm over its base, borders
 included), and a panel and a mullion their `host`, `level`, `thickness`, `material` and what they measure.
 
