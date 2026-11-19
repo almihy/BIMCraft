@@ -480,7 +480,7 @@ pub fn ending_on(m: &Model, id: Id) -> Vec<(Id, bool)> {
     tees(m, id, None).into_iter().filter(|(other, at_end)| ends_on(m, *other, *at_end) == Some(id)).collect()
 }
 
-/// The straight walls that end on the side of the straight wall `id`, each with which of its ends does (its end, else its
+/// The walls, straight or curved, that end on the side of the straight wall `id`, each with which of its ends does (its end, else its
 /// start): those whose join there is theirs and this wall's alone.
 fn tees(m: &Model, id: Id, index: Option<&Index>) -> Vec<(Id, bool)> {
     let Some(w) = m.wall(id).filter(|w| w.arc == 0.0 && w.join) else { return Vec::new() };
@@ -491,7 +491,7 @@ fn tees(m: &Model, id: Id, index: Option<&Index>) -> Vec<(Id, bool)> {
     let near = m.lookup().walls_near_at(&[(reach, m.base_z(w), m.top_z(w))], thickest + 1.0);
     let mut out = Vec::new();
     for other in near.into_iter().filter(|o| *o != id) {
-        let Some(o) = m.wall(other).filter(|o| o.arc == 0.0) else { continue };
+        let Some(o) = m.wall(other) else { continue };
         for at_end in [false, true].into_iter().filter(|e| o.joins(*e)) {
             let node = if at_end { o.end } else { o.start };
             let (s, across) = axis.project(node);
@@ -639,8 +639,47 @@ pub fn layer_geometry(m: &Model, id: Id, index: Option<&Index>) -> LayerGeometry
         cut.unwrap_or_else(|| ends.get(at).map_or(axis.at(0.0, off), |e| on_cap(&axis, &e.outline, at == 1, off)))
     };
     // Boundary `b` as layer `k` has it: along the wall, from the layer's start to its end.
+    // How far along a curved wall `q` lies, measured round its centre from its start, or from its end (`from_end`): less
+    // than nothing before its start, more than its length past its end.
+    let turned = |q: P2, from_end: bool| -> f64 {
+        let Some((c, r, a0, sweep)) = axis.arc() else { return axis.project(q).0 };
+        let base = if from_end { a0 + sweep } else { a0 };
+        let d = (sweep.signum() * ((q.1 - c.1).atan2(q.0 - c.0) - base) + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU)
+            - std::f64::consts::PI;
+        r * d + if from_end { len } else { 0.0 }
+    };
     let side = |b: usize, k: usize| -> Vec<P2> {
-        let mut line = axis.points(0.0, len, offs.get(b).copied().unwrap_or(0.0));
+        // A curved wall's runs from where its end is cut to where its other is: no station of it past either.
+        let (from, to) = if w.arc == 0.0 {
+            (0.0, len)
+        } else {
+            // Past its own ends too, as far as a join carries it on: a thickness or two.
+            let past = 4.0 * (offs.first().copied().unwrap_or(0.0) - offs.last().copied().unwrap_or(0.0)).abs();
+            (turned(end_of(b, k, 0), false).clamp(-past, len), turned(end_of(b, k, 1), true).clamp(0.0, len + past))
+        };
+        if to <= from {
+            return vec![end_of(b, k, 0), end_of(b, k, 1)];
+        }
+        let off = offs.get(b).copied().unwrap_or(0.0);
+        let mut line = if w.arc == 0.0 {
+            axis.points(from, to, off)
+        } else {
+            // The same places along the curve whichever layer's side this is, and where the layer on its other side is cut:
+            // two layers' sides along one boundary are one line, with no sliver between them.
+            let other = if b == k { k.checked_sub(1) } else { (k + 1 < layers).then_some(k + 1) };
+            let mut at: Vec<f64> = axis.stations(0.0, len).into_iter().filter(|s| *s > from + 1e-6 && *s < to - 1e-6).collect();
+            // Past its ends it curves on: every 25 mm from the end, the same for every layer.
+            let steps = |far: f64| (1..).map(|n| f64::from(n) * 25.0).take_while(move |d| *d < far);
+            at.extend(steps(-from).map(|d| -d).chain(steps(to - len).map(|d| len + d)).filter(|s| *s > from + 1e-6 && *s < to - 1e-6));
+            if let Some(o) = other {
+                at.extend([0, 1].map(|i| turned(end_of(b, o, i), i == 1)).into_iter().filter(|s| *s > from + 1e-6 && *s < to - 1e-6));
+            }
+            at.sort_by(f64::total_cmp);
+            let mut line = vec![axis.at(from, off)];
+            line.extend(at.into_iter().map(|s| axis.at(s, off)));
+            line.push(axis.at(to, off));
+            line
+        };
         if let Some(first) = line.first_mut() {
             *first = end_of(b, k, 0);
         }

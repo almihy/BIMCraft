@@ -476,6 +476,90 @@ fn a_partition_joins_a_wall_that_changes_type_where_it_meets_it() {
     assert!(plaster(west, P2(1000.0, 150.0)) && !plaster(west, P2(1475.0, 150.0)), "the west half's plaster stops at the core");
 }
 
+/// A session with the `Ext` wall type of `room`.
+fn typed() -> Session {
+    let mut s = Session::new();
+    for name in ["Brick", "Insulation", "Block", "Plaster"] {
+        run(&mut s, "material", json!({"name": name}));
+    }
+    run(
+        &mut s,
+        "type",
+        json!({"category": "wall", "name": "Ext", "layers": [
+        {"function": "finish", "material": "Brick", "thickness": 100},
+        {"function": "thermal", "material": "Insulation", "thickness": 60},
+        {"function": "structure", "material": "Block", "thickness": 140},
+        {"function": "finish2", "material": "Plaster", "thickness": 15}]}),
+    );
+    s
+}
+
+/// How many layers of walls `ids` hold point `q`, and which layer the first is.
+fn held(s: &Session, ids: &[u64], q: P2) -> (usize, Option<usize>) {
+    let mut found = (0, None);
+    for id in ids {
+        let g = walls::layer_geometry(&s.model, *id, None);
+        for k in 0..4 {
+            let n = g.bands(k).iter().filter(|r| crate::geom::contains(r, q)).count();
+            if n > 0 && found.1.is_none() {
+                found.1 = Some(k);
+            }
+            found.0 += n;
+        }
+    }
+    found
+}
+
+#[test]
+fn a_curved_wall_joins_a_straight_one_by_its_layers_at_a_corner_and_ending_on_its_side() {
+    // A straight wall east to (4000, 0) and a curved one on from there, a quarter turn up to (7000, 3000): a corner where
+    // they run on smoothly is no corner, so the curve starts square to it, turning the other way: from (4000, 0) north.
+    let mut s = typed();
+    let straight = run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]], "type": "Ext"}))["ids"][0].as_u64().unwrap();
+    let curved = run(&mut s, "wall", json!({"points": [[4000, 0], [1000, 3000]], "arc": 90, "type": "Ext"}))["ids"][0].as_u64().unwrap();
+    let both = [straight, curved];
+    assert!(s.model.wall(curved).is_some_and(|w| w.arc != 0.0));
+    // Their layers are cut to each other: over the corner no place is held by two layers, and the corner itself is block.
+    let mut twice = Vec::new();
+    for i in 0..60 {
+        for j in 0..60 {
+            let q = P2(3700.0 + 10.0 * f64::from(i) + 0.37, -300.0 + 10.0 * f64::from(j) + 0.41);
+            if held(&s, &both, q).0 > 1 {
+                twice.push(q);
+            }
+        }
+    }
+    // (But for a hair along the curved wall's own boundaries, where a straight wall's layer ends on a chord of the curve:
+    // under a millimetre for a layer this thick on a curve this wide.)
+    let on_a_boundary = |q: &P2| [2842.5, 2942.5, 3002.5, 3142.5, 3157.5].iter().any(|r| (q.dist(P2(1000.0, 0.0)) - r).abs() < 1.0);
+    twice.retain(|q| !on_a_boundary(q));
+    assert!(twice.is_empty(), "{} places held twice, the first {:?}", twice.len(), twice.first());
+    assert_eq!(held(&s, &both, P2(4070.0, -60.0)), (1, Some(2)), "where block meets block, one of the two walls holds it");
+    assert_eq!(held(&s, &both, P2(3990.0, 5.0)), (1, Some(1)), "and insulation where theirs meet");
+    // The curved wall's layers end on the straight wall's lines, not on its own square end: its plaster, on the outside
+    // of the corner, runs past its start to the straight wall's plaster.
+    let g = walls::layer_geometry(&s.model, curved, None);
+    let low = g.bands(3).iter().map(|r| span(r).0).fold(f64::INFINITY, f64::min);
+    assert!(low < -100.0, "its plaster reaches the outside of the corner: {low}");
+
+    // A curved wall ending on a straight wall's side: its block passes the plaster, as a straight one's does.
+    let mut s = typed();
+    let south = run(&mut s, "wall", json!({"points": [[0, 0], [6000, 0]], "type": "Ext"}))["ids"][0].as_u64().unwrap();
+    let stem = run(&mut s, "wall", json!({"points": [[3000, 0], [5000, -2000]], "arc": 90, "type": "Ext"}))["ids"][0].as_u64().unwrap();
+    let g = walls::layer_geometry(&s.model, south, None);
+    let pieces: Vec<usize> = (0..4).map(|k| g.bands(k).len()).collect();
+    assert!(pieces.iter().any(|n| *n == 2), "the wall run into is broken where the curved wall's layers pass: {pieces:?}");
+    let mut twice = 0;
+    for i in 0..80 {
+        for j in 0..40 {
+            let q = P2(2600.0 + 10.0 * f64::from(i) + 0.37, -200.0 + 10.0 * f64::from(j) + 0.41);
+            let hair = [1842.5, 1942.5, 2002.5, 2142.5, 2157.5].iter().any(|r| (q.dist(P2(5000.0, 0.0)) - r).abs() < 1.0);
+            twice += usize::from(!hair && held(&s, &[south, stem], q).0 > 1);
+        }
+    }
+    assert_eq!(twice, 0, "no place held by two layers where the curved wall ends on the straight one");
+}
+
 /// The three walls drawn in Revit 2025 on 19 November (its picture is with the walls design), for laying beside it: one
 /// along the south, one up from its east end, one ending on it from the brick side.
 #[test]
@@ -509,4 +593,17 @@ fn shot_coarse_joins() {
     run(&mut s, "detail", json!({"view": 100000, "detail": "coarse"}));
     let dir = std::env::var("SHOT").unwrap();
     std::fs::write(format!("{dir}/coarse.png"), crate::render::png(&crate::render::plan(&s.model, 100000, 1400, 1100)).unwrap()).unwrap();
+}
+
+/// A curved wall at a corner with a straight one, and one ending on its side: a picture to look at.
+#[test]
+#[ignore]
+fn shot_curved_joins() {
+    let mut s = typed();
+    run(&mut s, "wall", json!({"points": [[0, 0], [4000, 0]], "type": "Ext"}));
+    run(&mut s, "wall", json!({"points": [[4000, 0], [1000, 3000]], "arc": 90, "type": "Ext"}));
+    run(&mut s, "wall", json!({"points": [[1500, 0], [3000, -1500]], "arc": 90, "type": "Ext"}));
+    run(&mut s, "detail", json!({"view": 100000, "detail": "fine"}));
+    let dir = std::env::var("SHOT").unwrap();
+    std::fs::write(format!("{dir}/curved.png"), crate::render::png(&crate::render::plan(&s.model, 100000, 1800, 1500)).unwrap()).unwrap();
 }
