@@ -178,8 +178,12 @@ pub fn index(m: &Model, name: &str) -> Option<usize> {
 }
 
 /// The value of built-in parameter `key` an element has: its own, or a door's or window's none, its
-/// wall's.
+/// wall's. A curtain wall's panels, mullions and grid lines are made, taken down and in a design option as their wall
+/// is, always: they are the wall's own.
 pub fn value<'a>(m: &'a Model, e: &'a Element, key: &str) -> Option<&'a str> {
+    if let Some(host) = crate::curtain::host_of(e) {
+        return m.wall(host)?.params.get(key)?.as_str();
+    }
     let own = e.params().and_then(|p| p.get(key)).and_then(Value::as_str);
     own.or_else(|| match e {
         Element::Door(o) | Element::Window(o) => m.wall(o.host)?.params.get(key)?.as_str(),
@@ -190,7 +194,10 @@ pub fn value<'a>(m: &'a Model, e: &'a Element, key: &str) -> Option<&'a str> {
 /// What element `e` is in the phase at `at` in the project's order; none when it isn't there: made
 /// after it, or taken down before it. Only what holds parameters is phased: annotation is a view's.
 pub fn status(m: &Model, e: &Element, at: usize) -> Option<Status> {
-    e.params()?;
+    // (A curtain grid line holds none and is its wall's all the same.)
+    if !matches!(e, Element::CurtainGrid(_)) {
+        e.params()?;
+    }
     let created = value(m, e, CREATED).and_then(|n| index(m, n)).unwrap_or(0);
     let demolished = value(m, e, DEMOLISHED).and_then(|n| index(m, n));
     if created > at {
@@ -334,7 +341,12 @@ pub fn pin_first(m: &mut Model) {
     let loose: Vec<Id> = m
         .elements
         .iter()
-        .filter(|(_, e)| !matches!(e, Element::Door(_) | Element::Window(_)) && e.params().is_some() && value(m, e, CREATED).is_none())
+        .filter(|(_, e)| {
+            !matches!(e, Element::Door(_) | Element::Window(_))
+                && crate::curtain::host_of(e).is_none()
+                && e.params().is_some()
+                && value(m, e, CREATED).is_none()
+        })
         .map(|(id, _)| *id)
         .collect();
     for id in loose {

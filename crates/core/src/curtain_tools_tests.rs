@@ -264,3 +264,341 @@ fn a_wall_given_a_curtain_type_loses_its_doors_and_one_given_a_basic_type_its_gr
     assert!(s.model.hosted_by(s.model.guid(w)).is_empty());
     s.model.check().unwrap();
 }
+
+/// A curtain wall worked on by hand: standing lines at 2000 and 4000 and a lying one at 1000 (six cells), the segment
+/// between the two lower right cells removed, a mullion on the upper segment of the line at 2000, the upper left panel
+/// freed and made Solid, and the mullion put on the lower segment of the line at 2000 deleted.
+fn worked(s: &mut Session) -> Id {
+    let w = plain(s);
+    run(
+        s,
+        "curtain_grid",
+        json!({"wall": w, "lines": [{"vertical": true, "at": 2000}, {"vertical": true, "at": 4000}, {"vertical": false, "at": 1000}]}),
+    );
+    run(s, "add_remove_segments", json!({"wall": w, "at": [4000, 500]}));
+    run(s, "mullion", json!({"wall": w, "at": [2000, 2000]}));
+    let low = mullions(s, w).into_iter().find(|(_, x)| x.from == 0.0).unwrap().0;
+    run(s, "delete", json!({"ids": [low]}));
+    let panel = panels(s, w).into_iter().find(|(_, p)| p.span == [0.0, 2000.0, 1000.0, 3000.0]).unwrap().0;
+    run(s, "unpin", json!({"ids": [panel]}));
+    run(s, "modify", json!({"id": panel, "type": "Solid"}));
+    w
+}
+
+/// Where a curtain wall's panels and mullions are in the model, with their types: each panel's two ends in plan and its
+/// heights, each mullion's middle. Sorted, to the millimetre, so two walls that stand alike read alike.
+fn picture(s: &Session, w: Id) -> Vec<String> {
+    let axis = crate::walls::Axis::of(s.model.wall(w).unwrap());
+    let at = |along: f64| {
+        let p = axis.at(along, 0.0);
+        (p.0.round() as i64, p.1.round() as i64)
+    };
+    let mut out: Vec<String> = panels(s, w)
+        .into_iter()
+        .map(|(_, p)| {
+            let (mut a, mut b) = (at(p.span[0]), at(p.span[1]));
+            if b < a {
+                std::mem::swap(&mut a, &mut b);
+            }
+            format!("panel {a:?} {b:?} {} {} {} {}", p.span[2], p.span[3], p.type_name, p.free)
+        })
+        .collect();
+    out.extend(mullions(s, w).into_iter().map(|(_, x)| {
+        let mid = (x.from + x.to) / 2.0;
+        let (place, up) = if x.vertical { (at(x.at), mid) } else { (at(mid), x.at) };
+        format!("mullion {place:?} {up} {} {}", x.type_name, x.free)
+    }));
+    out.sort();
+    out
+}
+
+fn shifted(picture: &[String], from: &str, to: &str) -> Vec<String> {
+    let mut out: Vec<String> = picture.iter().map(|l| l.replace(from, to)).collect();
+    out.sort();
+    out
+}
+
+fn lines(s: &Session, w: Id) -> usize {
+    s.model.hosted_by(s.model.guid(w)).into_iter().filter(|id| matches!(s.model.elements.get(*id), Some(Element::CurtainGrid(_)))).count()
+}
+
+#[test]
+fn a_copy_of_a_curtain_wall_lays_out_its_own_panels_with_what_was_done_by_hand() {
+    let mut s = Session::new();
+    let w = worked(&mut s);
+    let was = picture(&s, w);
+    assert_eq!(was.len(), 5 + 1, "{was:#?}");
+    assert!(was.iter().any(|l| l.contains("Solid true")) && was.iter().any(|l| l.starts_with("mullion")));
+    // Copied with a panel and a mullion of its own picked too: none is copied itself, none doubles.
+    let panel = panels(&s, w)[0].0;
+    let mullion = mullions(&s, w)[0].0;
+    let made = ids(&run(&mut s, "copy", json!({"ids": [w, panel, mullion], "by": [0, 5000]}))["ids"]);
+    let copy = *made.iter().find(|id| s.model.wall(**id).is_some()).unwrap();
+    assert_eq!(lines(&s, copy), 3);
+    assert_eq!(picture(&s, copy), shifted(&was, ", 0)", ", 5000)"));
+    assert_eq!(picture(&s, w), was, "the wall copied is as it was");
+    let count = |s: &Session, w: Id| s.model.hosted_by(s.model.guid(w)).len();
+    assert_eq!(count(&s, copy), count(&s, w));
+    // Its lines are its own: moving the copy's changes the copy alone.
+    let host = s.model.guid(copy);
+    let line = made
+        .iter()
+        .copied()
+        .find(|id| matches!(s.model.elements.get(*id), Some(Element::CurtainGrid(l)) if l.host == host && l.vertical && l.at == 2000.0))
+        .unwrap();
+    run(&mut s, "modify", json!({"id": line, "at": 2500}));
+    assert_eq!(picture(&s, w), was);
+    // The clipboard, an array and a paste to another level do the same.
+    run(&mut s, "copy_to_clipboard", json!({"ids": [w]}));
+    let pasted = ids(&run(&mut s, "paste", json!({"by": [0, 9000]}))["ids"]);
+    let pasted = *pasted.iter().find(|id| s.model.wall(**id).is_some()).unwrap();
+    assert_eq!(picture(&s, pasted), shifted(&was, ", 0)", ", 9000)"));
+    let arrayed = run(&mut s, "array", json!({"ids": [w], "by": [0, -4000], "count": 3}));
+    let members = arrayed["members"].as_array().unwrap();
+    assert_eq!(members.len(), 2);
+    for (n, member) in members.iter().enumerate() {
+        let wall = ids(member).into_iter().find(|id| s.model.wall(*id).is_some()).unwrap();
+        assert_eq!(picture(&s, wall), shifted(&was, ", 0)", &format!(", {})", -4000 * (n as i64 + 1))));
+    }
+    let up = ids(&run(&mut s, "paste", json!({"ids": [w], "levels": ["Level 2"]}))["ids"]);
+    let up = *up.iter().find(|id| s.model.wall(**id).is_some()).unwrap();
+    assert_eq!(picture(&s, up), was);
+    // A panel or a mullion alone is not copied, moved, turned or mirrored.
+    for (command, more) in [
+        ("copy", json!({"by": [0, 100]})),
+        ("move", json!({"by": [0, 100]})),
+        ("rotate", json!({"about": [0, 0], "angle": 90, "copy": true})),
+    ] {
+        let mut p = more;
+        p["ids"] = json!([panels(&s, w).into_iter().find(|(_, p)| p.free).unwrap().0]);
+        let e = fails(&mut s, command, p);
+        assert!(e.contains("curtain wall's grid"), "{command}: {e}");
+    }
+    s.model.check().unwrap();
+}
+
+#[test]
+fn a_curtain_wall_mirrored_flipped_or_moved_keeps_its_grid_where_it_is() {
+    let mut s = Session::new();
+    let w = worked(&mut s);
+    let was = picture(&s, w);
+    // Flipped, it runs the other way and everything stands where it stood.
+    let start = s.model.wall(w).unwrap().start;
+    run(&mut s, "flip", json!({"ids": [w]}));
+    assert_ne!(s.model.wall(w).unwrap().start, start);
+    assert_eq!(picture(&s, w), was);
+    assert_eq!(s.model.wall(w).unwrap().curtain.merged.len(), 1);
+    assert_eq!(s.model.wall(w).unwrap().curtain.no_mullion.len(), 1);
+    run(&mut s, "flip", json!({"ids": [w]}));
+    assert_eq!(picture(&s, w), was);
+    // Mirrored across x = 5000: the mirror image has the removed segment on the left.
+    let mirrored = shifted(
+        &was.iter()
+            .map(|l| {
+                // Each x to 10000 - x.
+                let mut out = String::new();
+                let mut rest = l.as_str();
+                while let Some(i) = rest.find('(') {
+                    let j = i + rest[i..].find(',').unwrap();
+                    let x: i64 = rest[i + 1..j].parse().unwrap();
+                    out.push_str(&rest[..=i]);
+                    out.push_str(&(10000 - x).to_string());
+                    rest = &rest[j..];
+                }
+                out.push_str(rest);
+                out
+            })
+            .collect::<Vec<_>>(),
+        "",
+        "",
+    );
+    let image = ids(&run(&mut s, "mirror", json!({"ids": [w], "axis": [[5000, 0], [5000, 1000]], "copy": true}))["ids"]);
+    let image = *image.iter().find(|id| s.model.wall(**id).is_some()).unwrap();
+    let ends = |l: &String| -> String {
+        // A panel's two ends, lower first, as `picture` gives them.
+        if !l.starts_with("panel") {
+            return l.clone();
+        }
+        let parts: Vec<&str> = l.splitn(2, ") (").collect();
+        let (a, rest) = (parts[0].trim_start_matches("panel ("), parts[1]);
+        let (b, tail) = rest.split_once(") ").unwrap();
+        let (mut a, mut b) = (a.to_string(), b.to_string());
+        let x = |v: &str| v.split(',').next().unwrap().trim().parse::<i64>().unwrap();
+        if x(&b) < x(&a) {
+            std::mem::swap(&mut a, &mut b);
+        }
+        format!("panel ({a}) ({b}) {tail}")
+    };
+    let mut mirrored: Vec<String> = mirrored.iter().map(ends).collect();
+    mirrored.sort();
+    assert_eq!(picture(&s, image), mirrored);
+    run(&mut s, "delete", json!({"ids": [image]}));
+    run(&mut s, "mirror", json!({"ids": [w], "axis": [[5000, 0], [5000, 1000]]}));
+    assert_eq!(picture(&s, w), mirrored);
+    // The type's own lines stay too: Exterior Glazing's stand every 1500 from the start, and after a flip from the end.
+    let g = wall(&mut s, json!({"points": [[0, 20000], [5000, 20000]], "type": "Exterior Glazing", "height": 3000}));
+    let glazing = picture(&s, g);
+    assert_eq!(glazing.len(), 4);
+    run(&mut s, "flip", json!({"ids": [g]}));
+    assert_eq!(picture(&s, g), glazing);
+    assert_eq!(s.model.wall(g).unwrap().curtain.vertical.justification, curtain::Justification::End);
+    // A wall whose start is dragged keeps its hand-made lines where they are in the model.
+    let h = wall(&mut s, json!({"points": [[0, 30000], [6000, 30000]], "type": "Curtain Wall", "height": 3000}));
+    let line = ids(&run(&mut s, "curtain_grid", json!({"wall": h, "vertical": true, "at": 2000}))["ids"])[0];
+    run(&mut s, "move", json!({"ids": [h], "by": [-1000, 0], "end": "start"}));
+    assert!(matches!(s.model.elements.get(line), Some(Element::CurtainGrid(l)) if l.at == 3000.0));
+    // Moved or turned whole, with its panels picked too, it goes as one.
+    let mut all = vec![h];
+    all.extend(s.model.hosted_by(s.model.guid(h)));
+    run(&mut s, "move", json!({"ids": all, "by": [0, -7000]}));
+    run(&mut s, "rotate", json!({"ids": all, "about": [0, 0], "angle": 90}));
+    assert!(matches!(s.model.elements.get(line), Some(Element::CurtainGrid(l)) if l.at == 3000.0));
+    assert_eq!(panels(&s, h).len(), 2);
+    s.model.check().unwrap();
+}
+
+#[test]
+fn a_curtain_wall_split_lays_out_each_half_with_what_falls_in_it() {
+    let mut s = Session::new();
+    let w = worked(&mut s);
+    let was = picture(&s, w);
+    let halves = ids(&run(&mut s, "split", json!({"id": w, "at": [3000, 0]}))["ids"]);
+    let (first, second) = (halves[0], halves[1]);
+    assert_eq!((lines(&s, first), lines(&s, second)), (2, 2), "a standing line each, and the lying line in both");
+    // Together they stand as the wall did, but for the cut: the panels it crosses are two each.
+    let (a, b) = (picture(&s, first), picture(&s, second));
+    assert_eq!(a.iter().filter(|l| l.starts_with("panel")).count(), 4);
+    assert_eq!(b.iter().filter(|l| l.starts_with("panel")).count(), 3, "the removed segment stays removed: {b:#?}");
+    for l in was.iter().filter(|l| l.starts_with("mullion") || l.contains("Solid")) {
+        assert!(a.contains(l), "{l} in {a:#?}");
+    }
+    assert_eq!(s.model.wall(second).unwrap().curtain.merged.len(), 1);
+    assert!(s.model.wall(first).unwrap().curtain.merged.is_empty());
+    assert_eq!(s.model.wall(first).unwrap().curtain.no_mullion.len(), 1);
+    // A line on the cut is a border of both.
+    let on = ids(&run(&mut s, "curtain_grid", json!({"wall": second, "vertical": true, "at": 2000}))["ids"])[0];
+    let again = ids(&run(&mut s, "split", json!({"id": second, "at": [5000, 0]}))["ids"]);
+    assert!(!s.model.elements.contains_key(on));
+    assert_eq!((lines(&s, again[0]), lines(&s, again[1])), (2, 1));
+    s.model.check().unwrap();
+}
+
+/// An edit of a curtain wall, or of something of one, picked by the dice.
+fn edit(s: &mut Session, dice: &mut crate::oracle_tests::Dice) -> (String, Value) {
+    let of = |s: &Session, dice: &mut crate::oracle_tests::Dice, categories: &[&str]| {
+        let ids: Vec<Id> = s.model.elements.iter().filter(|(_, e)| categories.contains(&e.category())).map(|(id, _)| *id).collect();
+        ids.get(dice.below(ids.len())).copied()
+    };
+    let curtain = |s: &Session, dice: &mut crate::oracle_tests::Dice| {
+        let ids: Vec<Id> = s.model.elements.iter().filter(|(id, _)| curtain::grid(&s.model, **id).is_some()).map(|(id, _)| *id).collect();
+        ids.get(dice.below(ids.len())).copied()
+    };
+    let place = |dice: &mut crate::oracle_tests::Dice| json!([dice.below(7) * 1000, dice.below(7) * 500]);
+    let by = |dice: &mut crate::oracle_tests::Dice| json!([dice.mm(3000), dice.mm(3000)]);
+    let child = ["curtainpanel", "mullion", "curtaingrid"];
+    match dice.below(22) {
+        0 | 1 => {
+            ("curtain_grid".into(), json!({"wall": curtain(s, dice), "vertical": dice.below(2) == 0, "at": 250 * (1 + dice.below(20))}))
+        }
+        2 | 3 => ("add_remove_segments".into(), json!({"wall": curtain(s, dice), "at": place(dice), "remove": dice.below(3) > 0})),
+        4 => {
+            ("mullion".into(), json!({"wall": curtain(s, dice), "at": place(dice), "on": (["grid_line", "segment", "all"][dice.below(3)])}))
+        }
+        5 => ("unpin".into(), json!({"ids": [of(s, dice, &child)]})),
+        6 => ("pin".into(), json!({"ids": [of(s, dice, &child)]})),
+        7 => ("delete".into(), json!({"ids": [of(s, dice, &["mullion", "curtaingrid", "wall"])]})),
+        8 => ("modify".into(), json!({"id": of(s, dice, &["curtainpanel"]), "type": (["Solid", "Empty", "Glazed"][dice.below(3)])})),
+        9 => ("modify".into(), json!({"id": of(s, dice, &["mullion"]), "type": (["30mm Square", "25mm Radius"][dice.below(2)])})),
+        10 => ("modify".into(), json!({"id": of(s, dice, &["curtaingrid"]), "at": 250 * (1 + dice.below(20))})),
+        11 => ("move".into(), json!({"ids": [of(s, dice, &["wall", "curtaingrid", "curtainpanel"])], "by": by(dice)})),
+        12 => ("copy".into(), json!({"ids": [of(s, dice, &["wall", "curtaingrid"])], "by": [dice.mm(3000), 9000 + dice.mm(3000)]})),
+        13 => ("mirror".into(), json!({"ids": [curtain(s, dice)], "axis": [[0, 0], [1000, dice.mm(1000)]], "copy": dice.below(2) == 0})),
+        14 => ("flip".into(), json!({"ids": [curtain(s, dice)]})),
+        15 => {
+            let wall = curtain(s, dice);
+            let at = wall.and_then(|w| s.model.wall(w)).map(|w| w.start + (w.end - w.start) * (0.2 + 0.1 * dice.below(6) as f64));
+            ("split".into(), json!({"id": wall, "at": at.map(|p| [p.0, p.1])}))
+        }
+        16 => ("modify".into(), json!({"id": curtain(s, dice), "height": 2500 + 250 * dice.below(8)})),
+        17 => {
+            let types = ["Storefront", "Exterior Glazing", "Curtain Wall", "Generic - 200mm"];
+            ("modify".into(), json!({"id": of(s, dice, &["wall"]), "type": types[dice.below(4)]}))
+        }
+        18 => ("move".into(), json!({"ids": [curtain(s, dice)], "by": by(dice), "end": if dice.below(2) == 0 { "start" } else { "end" }})),
+        19 => ("door".into(), json!({"wall": of(s, dice, &["wall"]), "offset": 1000 + dice.below(3000)})),
+        20 => {
+            let rule = json!({"layout": (["none", "fixed-distance", "fixed-number", "maximum-spacing"][dice.below(4)]), "spacing": 900 + 300 * dice.below(4)});
+            ("type".into(), json!({"category": "wall", "name": "Storefront", "curtain": {"vertical": rule}}))
+        }
+        _ => (if dice.below(2) == 0 { "undo" } else { "redo" }.into(), json!({})),
+    }
+}
+
+/// Curtain walls edited at random: the engine holds each command's check by what changed to the whole check, and its
+/// library synced both ways (in tests), and a wall is always laid out as its grid says.
+#[test]
+fn random_edits_of_curtain_walls_check_the_same_by_what_changed_as_whole() {
+    let mut kinds = std::collections::BTreeSet::new();
+    for seed in [1u64, 2, 3, 4] {
+        let mut s = Session::new();
+        wall(&mut s, json!({"points": [[0, 0], [6000, 0]], "type": "Storefront", "height": 3000}));
+        wall(&mut s, json!({"points": [[0, 4000], [6000, 4000]], "type": "Exterior Glazing", "height": 3000}));
+        wall(&mut s, json!({"points": [[8000, 0], [8000, 6000]], "type": "Curtain Wall", "height": 3000, "arc": 30}));
+        wall(&mut s, json!({"points": [[0, -4000], [6000, -4000]], "height": 3000}));
+        let mut dice = crate::oracle_tests::Dice(0x5eed_c0ff_ee11_d00d ^ seed);
+        let (mut done, mut refused) = (0, 0);
+        for _ in 0..120 {
+            let (cmd, p) = edit(&mut s, &mut dice);
+            match s.execute(&cmd, &p) {
+                Ok(_) => {
+                    done += 1;
+                    kinds.insert(cmd.clone());
+                }
+                Err(_) => refused += 1,
+            }
+            // Laid out: nothing left for the upkeep to do.
+            let walls: Vec<Id> = s.model.elements.iter().filter(|(_, e)| matches!(e, Element::Wall(_))).map(|(id, _)| *id).collect();
+            for w in walls {
+                let want = curtain::laid(&s.model, w);
+                let have = panels(&s, w).len() + mullions(&s, w).len();
+                let same = want.iter().all(|(g, e)| s.model.elements.id(*g).and_then(|id| s.model.elements.get(id)) == Some(e));
+                assert!(same && have == want.len(), "seed {seed}: after {cmd} {p}, wall {w} is not as its grid lays it out");
+            }
+        }
+        assert!(done > 30 && refused > 0, "seed {seed}: {done} done, {refused} refused: the edits should do both");
+        assert_eq!(s.model.check(), Ok(()));
+    }
+    for kind in ["curtain_grid", "add_remove_segments", "mullion", "unpin", "delete", "modify", "move", "copy", "mirror", "flip", "split"] {
+        assert!(kinds.contains(kind), "no {kind} was done");
+    }
+}
+
+#[test]
+fn a_curtain_wall_inserted_from_a_file_is_laid_out_here_with_what_was_done_by_hand() {
+    let mut a = Session::new();
+    let w = worked(&mut a);
+    let was = picture(&a, w);
+    let path = std::env::temp_dir().join(format!("bimcraft-curtain-insert-{}.bimcraft", std::process::id()));
+    run(&mut a, "save", json!({"path": path.to_str().unwrap()}));
+    // The whole file, and the wall alone: its lines come with it, and its panels and mullions are this project's.
+    for ids in [json!(null), json!([w])] {
+        let mut b = Session::new();
+        wall(&mut b, json!({"points": [[0, 9000], [6000, 9000]], "type": "Storefront", "height": 3000}));
+        let made = run(&mut b, "insert", json!({"path": path.to_str().unwrap(), "ids": ids}));
+        let here = made["ids"][w.to_string()].as_u64().unwrap();
+        assert_eq!(picture(&b, here), was, "{made}");
+        assert_eq!(lines(&b, here), 3);
+        let host = b.model.guid(here);
+        for (id, e) in b.model.elements.iter().filter(|(_, e)| matches!(e, Element::CurtainPanel(_) | Element::Mullion(_))) {
+            let key = match e {
+                Element::CurtainPanel(p) if p.host == host => p.key.clone(),
+                Element::Mullion(x) if x.host == host => x.key.clone(),
+                _ => continue,
+            };
+            assert_eq!(b.model.elements.guid(*id), Some(curtain::child_guid(b.model.uid, host, &key)));
+        }
+        assert!(made["ids"].as_object().unwrap().values().all(|id| b.model.elements.contains_key(id.as_u64().unwrap())), "{made}");
+        b.model.check().unwrap();
+    }
+    let _ = std::fs::remove_file(&path);
+}

@@ -274,3 +274,60 @@ Revit has default shortcuts for Trim/Extend to Corner (TR), Offset (OF), Fillet 
 `corner`, `offset`, `fillet`, `split` and `detail_line` have; it has none for Trim/Extend to a boundary, vertices, Convert
 Spline, Edit Boundary, line patterns and styles or fill patterns, which have none here. Explode Polyline is EX, ours (PX is
 the desktop's Plumbing Fixture).
+
+## Curtain walls
+
+A curtain wall is a wall whose type is a curtain type (`WallType.curtain`, `curtain.rs`, whose header holds the design):
+no layers and no solid of its own, a grid with a panel in each cell and mullions on its lines' segments. The wall is
+drawn, moved, attached and bounded by rooms as any wall; `WallType::is_curtain` is asked wherever a wall's layers, joins
+or solid are read (it joins nothing, and hosts no ordinary door or window: the `door` and `window` commands refuse one,
+and `Model::check` holds the rule).
+
+**The model.** Panels (`Element::CurtainPanel`), mullions (`Element::Mullion`) and grid lines drawn by hand
+(`Element::CurtainGrid`) are elements the wall hosts, each holding where it is in the wall: mm along its location line
+from its start, and mm over its base. The type's own lines are worked out (`curtain::grid`), never stored. A line has a
+key (a border `u0`/`u1`/`v0`/`v1`, the type's `ut3`, a hand-made line's `g<guid>`), a panel its lower left lines', a
+mullion its line's and the line its segment starts at; an element's GUID is made from its wall's GUID and its key
+(`curtain::child_guid`), so every copy of a project lays the same elements out. `curtain::keep` (run by
+`Session::execute` after every undoable command) lays a wall out again when it, its type, a type its type names, a level
+or one of its own changed; `curtain::lay` does one wall at once, for a command that answers with its panels. What a
+person did is kept on the wall and its children: segments removed (`Wall.curtain.merged`), mullions deleted
+(`no_mullion`), and panels and mullions unpinned or put on by hand (`free`, which keep their type across layouts).
+Those are named by keys, and a wall copied, mirrored, flipped or split names its lines anew: `curtain::hand` takes what
+was done off a wall by place, and `curtain::hand_to` puts it on the wall as it is now.
+
+**Types** (the `type` command). Category `wall` with `curtain: {panel, join_condition, vertical: {layout, spacing,
+adjust_for_mullion}, horizontal, vertical_mullions: {interior, border1, border2}, horizontal_mullions}` (layouts none,
+fixed-distance, fixed-number, maximum-spacing, minimum-spacing; `curtain: true` a plain one, `null` a basic type again);
+`curtainpanel` `{thickness, offset, material, empty}`; `mullion` `{thickness, side1, side2 | width, round, radius,
+offset, material}`. Three starter wall types are made when first drawn with or given to a wall: Curtain Wall (one panel),
+Exterior Glazing (a grid, no mullions) and Storefront (a grid with mullions), with the panel types Glazed, Solid and
+Empty and four mullion types. A wall's own Number, Justification and Offset each way are `modify {id, curtain:
+{vertical: {number, justification, offset}, horizontal}}`.
+
+**The tools** (`commands/curtain.rs`), places given as `at: [s, z]` (mm along the wall, mm over its base) or a plan
+`point` with an elevation `z`:
+
+- `curtain_grid {wall, vertical, at}` (or `point`, `z`, `lines`): Revit's Curtain Grid, All Segments. A line is moved
+  with `modify {id, at}` (a standing one with `move` too) and goes with `delete`. One Segment and All Except Picked are
+  not built; the type's own lines are not elements yet, so they are not unpinned and moved.
+- `add_remove_segments {wall, at, remove?, segments?}`: joins the panels either side of a segment, or parts them. A
+  border's segment is refused, and so is a change that would leave a panel that is not a rectangle: the error lists the
+  places to give together.
+- `mullion {wall, type?, on: grid_line | segment | all, at}`: Revit's Mullion tool. `all` takes the borders too (the
+  help does not say; it is what Revit does as far as we know). A segment that has a mullion keeps it.
+- `delete`: a mullion goes and stays gone (pinned, the type's, it is unpinned first); a panel is refused, as Revit's
+  (give it an empty type, or join it to its neighbour); a wall takes all its own with it.
+- `unpin` frees a panel or a mullion the wall placed, which then takes a type with `modify {id, type}` or
+  `match_properties`; `pin` gives it back to the wall's type. A mullion put on by hand where the type has none can't be
+  pinned.
+- A wall given a curtain type (`modify`, `match_properties`, or its type made one by `type`) loses its doors and windows,
+  named in `deleted` with Revit's "Switching wall type to family curtain wall"; given a basic type it loses its panels,
+  mullions and hand-made lines.
+- Copy, array, mirror, rotate, paste and Insert from File copy the wall with its hand-made lines and what was done by
+  hand; its panels and mullions are never copied, the copy lays out its own. A panel or a mullion alone is not moved,
+  copied, turned or mirrored. `flip` and a mirror keep the grid where it is in the model (a Beginning justification
+  becomes End). `split` gives each half the lines and the hand work that fall in it, a lying line to both; a wall whose
+  end is dragged, trimmed or filleted keeps its standing lines where they are in plan.
+- Phases and design options: a panel, a mullion and a grid line are made, demolished and in an option as their wall
+  (`phasing::value`).

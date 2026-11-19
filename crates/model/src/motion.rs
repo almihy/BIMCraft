@@ -144,7 +144,13 @@ pub fn transform(c: &str, m: &Model, mut e: Element, id: Id, mo: &Motion, with: 
             }
         }
         // A mirror image runs back the other way, so its exterior side is the mirror image of the old one.
-        Element::Wall(w) => (w.start, w.end) = if mo.mirror { (f(w.end), f(w.start)) } else { (f(w.start), f(w.end)) },
+        Element::Wall(w) => {
+            (w.start, w.end) = if mo.mirror { (f(w.end), f(w.start)) } else { (f(w.start), f(w.end)) };
+            // A curtain wall's grid is its mirror image too: counted from its other end.
+            if mo.mirror && crate::curtain::is_curtain(m, w) {
+                crate::curtain::reverse(&mut w.curtain);
+            }
+        }
         Element::Grid(g) => (g.start, g.end) = (f(g.start), f(g.end)),
         Element::RoomSeparator(rs) => (rs.start, rs.end) = (f(rs.start), f(rs.end)),
         Element::Rebar(rb) => {

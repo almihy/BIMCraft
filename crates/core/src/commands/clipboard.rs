@@ -191,6 +191,8 @@ fn with_hosted(m: &Model, ids: &[Id]) -> Vec<Id> {
             Element::Door(o) | Element::Window(o) => guids.contains(&o.host),
             Element::Railing(r) => r.host.is_some_and(|h| guids.contains(&h)),
             Element::Rebar(r) => r.host.is_some_and(|h| guids.contains(&h)),
+            // A curtain wall's hand-made grid lines; its panels and mullions its copy lays out itself.
+            Element::CurtainGrid(l) => guids.contains(&l.host),
             _ => false,
         };
         if goes && seen.insert(id) {

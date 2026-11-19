@@ -63,6 +63,16 @@ fn by_hand(m: &Model, ids: &[Id]) -> Vec<Id> {
     ids.iter().copied().filter(|id| m.pinned.contains(&m.guid(*id))).collect()
 }
 
+/// Those of `ids` held on their own account: all but a curtain wall's panels and mullions that go with their wall (it is
+/// among `ids`) and that nobody pinned by hand. What the wall placed counts as pinned only against being worked on alone.
+pub(super) fn held_alone(m: &Model, ids: &[Id]) -> Vec<Id> {
+    let with_wall = |id: &Id| {
+        m.elements.get(*id).and_then(crate::curtain::host_of).and_then(|h| m.elements.id(h)).is_some_and(|h| ids.contains(&h))
+            && !m.pinned.contains(&m.guid(*id))
+    };
+    ids.iter().copied().filter(|id| !with_wall(id)).collect()
+}
+
 /// Whether the element is a curtain wall's panel or mullion, which its wall pins and Unpin frees (`free`).
 fn curtain_child(m: &Model, id: Id) -> bool {
     matches!(m.elements.get(id), Some(Element::CurtainPanel(_) | Element::Mullion(_)))

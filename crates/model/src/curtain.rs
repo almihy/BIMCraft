@@ -506,7 +506,9 @@ fn rule_lines(rule: &GridRule, set: &GridSet, extent: f64) -> Vec<(i64, f64)> {
             if !origin.is_finite() {
                 return Vec::new();
             }
-            let first = ((0.0 - origin) * way / spacing).floor() as i64 - 1;
+            // The first line that may lie in the wall, counted along the way the lines run from the origin.
+            let from = if way > 0.0 { origin } else { extent - origin };
+            let first = ((0.0 - from) / spacing).floor() as i64 - 1;
             let mut out = Vec::new();
             let mut k = first.max(-(MAX_LINES as i64) * 4);
             while out.len() < MAX_LINES {
@@ -1341,7 +1343,9 @@ pub fn hand_to(m: &mut Model, id: Id, hand: &Hand, along: &dyn Fn(f64) -> f64) {
         m.elements.remove(c);
     }
     let Some(g) = grid(m, id) else { return };
-    let seg = |vertical: bool, at: &[f64; 2]| g.segment_at(vertical, along(at[0]), at[1]);
+    // A place off this wall (the other half of a wall split) names nothing here.
+    let on = |s: f64, z: f64| s >= -NEAR && s <= g.length + NEAR && z >= -NEAR && z <= g.height + NEAR;
+    let seg = |vertical: bool, at: &[f64; 2]| g.segment_at(vertical, along(at[0]), at[1]).filter(|_| on(along(at[0]), at[1]));
     let merged: BTreeSet<String> = hand.merged.iter().filter_map(|(v, at)| seg(*v, at)).filter(|x| x.border == 0).map(|x| x.key).collect();
     // Only what leaves every panel sound: a segment whose neighbours are not here would leave half a join.
     let merged = if g.trouble(&merged).is_empty() { merged } else { BTreeSet::new() };
@@ -1349,6 +1353,10 @@ pub fn hand_to(m: &mut Model, id: Id, hand: &Hand, along: &dyn Fn(f64) -> f64) {
     let mut put: Vec<(String, Element)> = Vec::new();
     let cells = g.panels(&merged);
     for (at, p) in &hand.panels {
+        // (A type this project lacks, of a wall from another file: the wall's own type's instead.)
+        if !on(along(at[0]), at[1]) || !m.types.curtain_panel.contains_key(&p.type_name) {
+            continue;
+        }
         let (i, j) = g.cell(along(at[0]), at[1]);
         let Some((lo, _)) = cells.iter().find(|(lo, hi)| (lo.0..=hi.0).contains(&i) && (lo.1..=hi.1).contains(&j)) else { continue };
         let (Some(u), Some(v)) = (g.u.get(lo.0), g.v.get(lo.1)) else { continue };
@@ -1356,6 +1364,9 @@ pub fn hand_to(m: &mut Model, id: Id, hand: &Hand, along: &dyn Fn(f64) -> f64) {
         put.push((key.clone(), Element::CurtainPanel(Panel { host, key, free: true, ..p.clone() })));
     }
     for (at, x) in &hand.mullions {
+        if !m.types.mullion.contains_key(&x.type_name) {
+            continue;
+        }
         let Some(s) = seg(x.vertical, at) else { continue };
         let key = s.mullion_key();
         put.push((key.clone(), Element::Mullion(Mullion { host, key, free: true, ..x.clone() })));
@@ -1365,9 +1376,15 @@ pub fn hand_to(m: &mut Model, id: Id, hand: &Hand, along: &dyn Fn(f64) -> f64) {
     }
     for (key, e) in put {
         let guid = child_guid(m.uid, host, &key);
-        if m.elements.id(guid).is_none() {
-            let c = m.fresh_id();
-            let _ = m.elements.insert_as(c, guid, e);
+        // The name may be another's now (a pinned panel's, on a wall turned round): this one takes its place.
+        match m.elements.id(guid) {
+            Some(c) => {
+                m.elements.insert(c, e);
+            }
+            None => {
+                let c = m.fresh_id();
+                let _ = m.elements.insert_as(c, guid, e);
+            }
         }
     }
     lay(m, id);
@@ -1413,5 +1430,17 @@ pub fn typed(m: &Model, e: &Element) -> bool {
             m.types.mullion.contains_key(name)
         }),
         _ => false,
+    }
+}
+
+/// A wall's own grid settings as they are once the wall runs the other way (flipped, or a mirror image), so its type's
+/// lines stay where they are in the model: counted from the Beginning they are counted from the End, and an Offset from
+/// the Center is to the other side.
+pub fn reverse(grid: &mut WallGrid) {
+    let set = &mut grid.vertical;
+    match set.justification {
+        Justification::Beginning => set.justification = Justification::End,
+        Justification::End => set.justification = Justification::Beginning,
+        Justification::Center => set.offset = -set.offset + 0.0,
     }
 }
