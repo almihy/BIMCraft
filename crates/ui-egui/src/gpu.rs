@@ -1856,9 +1856,14 @@ pub(crate) fn alone_on(kind: wgpu::DeviceType) {
 }
 
 /// The machine's graphics card with no window to show on, for tests; none on a runner that has no adapter (those tests say so
-/// and pass).
+/// and pass). On a developer's computer there is none unless `BIMCRAFT_GPU_TESTS` is set: the card's tests stall for many
+/// minutes when the card is busy (another build's tests, the app itself), and they hold up every run of the suite for work
+/// that never touches the card. CI runs them always; run them here with the variable set after a change to the 3D view.
 #[cfg(test)]
 pub(crate) fn headless() -> Option<Gpu> {
+    if std::env::var_os("CI").is_none() && std::env::var_os("BIMCRAFT_GPU_TESTS").is_none() {
+        return None;
+    }
     // Without the debug names a debug build gives each object: tests make cards side by side, and the Vulkan loader looks a name's
     // device up in lists it doesn't lock against another thread making or dropping an instance, which crashes one run in a few.
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
