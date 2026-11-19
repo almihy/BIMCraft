@@ -867,6 +867,16 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
     // What each item of the drawing is, by the layer it lies on itself: what a placement's block draws is the placement's.
     let layer_of: HashMap<String, String> =
         o.drawing.model.iter().map(|e| (format!("{:X}", e.handle.0), e.common.layer.to_uppercase())).collect();
+    // The block each placement places: a placement is one door, one window, one column, whatever lies near it.
+    let block_of: HashMap<String, String> = o
+        .drawing
+        .model
+        .iter()
+        .filter_map(|e| match &e.kind {
+            cadcraft_doc::EntityKind::Insert(i) => Some((format!("{:X}", e.handle.0), i.block.clone())),
+            _ => None,
+        })
+        .collect();
     let flat = o.shapes(None, None, true, MOST)?;
     let mut order: Vec<String> = Vec::new();
     let mut groups: HashMap<String, Group> = HashMap::new();
@@ -901,7 +911,24 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
     let doors_drawn = touching(of("A-DOOR"), 30.0);
     let (doors, tips) = door_marks(doors_drawn.clone());
     let windows = of("A-WIND");
-    let columns = touching(of("A-COLS"), 10.0);
+    // A column block is one column, as it is placed; loose lines make one where they close on one another.
+    let mut columns: Vec<Group> = Vec::new();
+    let mut column_blocks: Vec<Option<String>> = Vec::new();
+    let mut loose: Vec<Group> = Vec::new();
+    for h in order.iter().filter(|h| layer_of.get(*h).is_some_and(|l| l == "A-COLS")) {
+        let Some(g) = groups.get(h) else { continue };
+        match block_of.get(h) {
+            Some(name) => {
+                columns.push(g.clone());
+                column_blocks.push(Some(name.clone()));
+            }
+            None => loose.push(g.clone()),
+        }
+    }
+    for g in touching(loose, 5.0) {
+        columns.push(g);
+        column_blocks.push(None);
+    }
 
     let (mut door_taken, mut window_taken) = (vec![false; doors.len()], vec![false; windows.len()]);
     let mut found = walls(&wall_segs, &doors, &tips, &windows, &columns, &mut door_taken, &mut window_taken);
@@ -1234,9 +1261,12 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
         None
     };
     let (mut cols, mut cols_left) = (Vec::new(), 0usize);
-    for g in &columns {
+    for (g, block) in columns.iter().zip(&column_blocks) {
         match column(g) {
-            Some(c) => {
+            Some(mut c) => {
+                if let Some(name) = block {
+                    c["block"] = json!(name);
+                }
                 let w = c["width"].as_f64().unwrap_or(0.0);
                 let d = c["depth"].as_f64().unwrap_or(w);
                 if w.min(d) >= 50.0 && w.max(d) <= 3000.0 { cols.push(c) } else { cols_left += 1 }
