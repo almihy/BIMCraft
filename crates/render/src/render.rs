@@ -2862,6 +2862,9 @@ fn cad_drawing(
     })) else {
         return;
     };
+    // On a screen its entities are drawn a way round the view too, for the view to move over.
+    let round = if d.screen { (hi - lo) * ROUND_A_SCREEN } else { P2(0.0, 0.0) };
+    let (near, far) = (lo - round, hi + round);
     // What the frame may draw of its hatches' patterns, and the smallest a pattern's cell may be on it before a hatch is its
     // tint.
     let (budget, least) = if d.screen { (hatch::SCREEN_POINTS, hatch::SCREEN_PX) } else { (hatch::PAPER_POINTS, hatch::PAPER_PX) };
@@ -2872,7 +2875,7 @@ fn cad_drawing(
         && let Some(picture) = cad_picture(ci, (in_view, look), lod, band)
         && cad_fills_fit(d, ci, lod, band, [lo, hi])
     {
-        let meets = |i: usize| lod.entity_box(i).is_some_and(|b| b[0] <= hi.0 && b[2] >= lo.0 && b[1] <= hi.1 && b[3] >= lo.1);
+        let meets = |i: usize| lod.entity_box(i).is_some_and(|b| b[0] <= far.0 && b[2] >= near.0 && b[1] <= far.1 && b[3] >= near.1);
         let cells_half = look.is_some_and(|l| {
             let shown = |name: &&String| !(ci.hidden.contains(*name) || in_view.is_some_and(|v| v.contains(*name)));
             lod.layers.iter().filter(shown).all(|name| l.of_layer(name).halftone)
@@ -2897,10 +2900,14 @@ fn cad_drawing(
         }
         return;
     }
-    for i in cad.entities_in(lo, hi) {
+    for i in cad.entities_in(near, far) {
         ents.draw(d, i);
     }
 }
+
+/// How far round a screen's view a drawing's entities are drawn, of the view's own size each way: what a canvas shows moved, before
+/// it is drawn again where the view came to rest, has the drawing there (as the canvas keeps its triangles that far round).
+const ROUND_A_SCREEN: f64 = 0.5;
 
 /// A CAD drawing's entities being drawn ([`cad_drawing`]): the drawing, its placement, the layers the view hides and how it
 /// draws them, the view's box in the drawing's units, each layer's override worked out once, and what is left of the frame's
@@ -3050,7 +3057,10 @@ impl CadEntities<'_> {
                 // In its own colour, halftone or not.
                 let own = import_fill(over.as_ref(), cad.color(ent, ci.colors).unwrap_or(INK));
                 // Drawn with its pattern, its cell laid again cut to it; where the cell is too small to see, its tint.
-                if let Some(t) = tile {
+                // One the view doesn't reach (drawn for the view to move over) is its tint: the frame's patterns are the view's.
+                let [low, high] = ent.shape.bounds();
+                let seen = low.0 <= self.hi.0 && high.0 >= self.lo.0 && low.1 <= self.hi.1 && high.1 >= self.lo.1;
+                if let Some(t) = tile.as_ref().filter(|_| seen) {
                     let px = |p: P2| frame.px(place(p));
                     let color = |c: [u8; 3]| {
                         let c = match ci.colors {

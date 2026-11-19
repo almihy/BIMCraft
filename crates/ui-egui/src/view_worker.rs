@@ -9,6 +9,10 @@ use std::sync::{OnceLock, mpsc};
 #[cfg(not(target_arch = "wasm32"))]
 type Task = Box<dyn FnOnce() + Send>;
 
+/// Whether a job runs in the frame that starts it ([`Latest::start`]): a browser page, which has no thread to give it. A view that
+/// moves then asks for nothing until it rests (`canvas::PlanCache::moving`).
+pub(crate) const IN_FRAME: bool = cfg!(target_arch = "wasm32");
+
 /// Cooperative cancellation; identity also names a generation across counter wrap/undo.
 #[derive(Clone, Default)]
 pub(crate) struct Cancel(Arc<AtomicBool>);

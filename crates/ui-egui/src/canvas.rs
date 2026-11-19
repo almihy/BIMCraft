@@ -79,6 +79,49 @@ pub(crate) struct PlanCache {
     work: PlanWork,
     /// What each room lit so far covers, of the model it was found in.
     outlines: Option<(Weak<Model>, HashMap<Id, RoomOutline>)>,
+    /// Where a plan is made in the frame: the view it was last asked at and since when, and when the last was made and how long it took.
+    rest: Rest,
+}
+
+/// A moving view's last place and since when, and the last plan made for one: when, and how long it took.
+#[derive(Default, Clone, Copy)]
+struct Rest {
+    seen: Option<(View, web_time::Instant)>,
+    made: Option<(web_time::Instant, web_time::Duration)>,
+}
+
+/// How long a view is still before its plan is made where making it holds the frame.
+pub(crate) const REST: web_time::Duration = web_time::Duration::from_millis(120);
+/// The least between two plans made for a view that never rests, and how many times the last one's making.
+const APART: web_time::Duration = web_time::Duration::from_millis(250);
+const APART_COSTS: u32 = 3;
+/// How far a view may zoom in on a kept drawing before it is made again though the view still moves: its lines are that much wider,
+/// and a dense drawing's cells that much coarser.
+const NEARER: f64 = 4.0;
+
+/// Whether the drawing kept of `kept` no longer serves a view at `view` while it moves: the view shows past what was drawn round
+/// `kept` (`render`'s `ROUND_A_SCREEN`, half a view each way), or is [`NEARER`] times nearer.
+pub(crate) fn out_of_reach(kept: View, view: View) -> bool {
+    let k = view.scale / kept.scale;
+    let (x, y) = view.px(kept.mm((0.0, 0.0)));
+    let (x, y) = (f64::from(x), f64::from(y));
+    let (kw, kh) = (k * f64::from(kept.width), k * f64::from(kept.height));
+    let (w, h) = (f64::from(view.width), f64::from(view.height));
+    k > NEARER || x - kw / 2.0 > 0.0 || x + kw * 1.5 < w || y - kh / 2.0 > 0.0 || y + kh * 1.5 < h
+}
+
+/// How long a view at `view`, `still` for that long, waits yet for its plan where making one holds the frame; none when it is made
+/// now: the view has rested, or it has left what the drawing kept (of `kept`) covers and the last plan (made `since` ago, in `cost`)
+/// is long enough past that a view which never rests still gets drawings without stopping at each.
+pub(crate) fn waits(kept: View, view: View, still: web_time::Duration, made: Option<(web_time::Duration, web_time::Duration)>) -> Option<web_time::Duration> {
+    if still >= REST {
+        return None;
+    }
+    let due = made.is_none_or(|(since, cost)| since >= APART.max(cost * APART_COSTS));
+    if due && out_of_reach(kept, view) {
+        return None;
+    }
+    Some(REST - still)
 }
 
 /// What a room covers in plan, and whether it is bounded.
@@ -179,7 +222,24 @@ impl PlanCache {
             return self.drawing(model, level, view, ceiling);
         };
         if drawing.view == view {
+            self.rest.seen = None;
             return drawing;
+        }
+        // Where the plan is made in this frame, a view that moves is shown what is kept, moved by the card, until it rests.
+        if crate::view_worker::IN_FRAME {
+            let now = web_time::Instant::now();
+            let since = match self.rest.seen {
+                Some((v, since)) if v == view => since,
+                _ => now,
+            };
+            self.rest.seen = Some((view, since));
+            let made = self.rest.made.map(|(at, cost)| (now.duration_since(at), cost));
+            if let Some(wait) = waits(drawing.view, view, now.duration_since(since), made) {
+                // Asked for frame by frame: a page woken before a wait is over is not woken again.
+                let _ = wait;
+                ctx.request_repaint();
+                return drawing;
+            }
         }
         // One at a time, each for where the view is when it starts: a view that never stops still gets drawings.
         let wake = ctx.clone();
@@ -200,10 +260,19 @@ impl PlanCache {
                 hovered,
             });
         }
+        let from = web_time::Instant::now();
         if worker.start().is_err() {
             return self.drawing(model, level, view, ceiling);
         }
-        ctx.request_repaint_after(web_time::Duration::from_millis(16));
+        if crate::view_worker::IN_FRAME && idle {
+            self.rest.made = Some((web_time::Instant::now(), from.elapsed()));
+        }
+        if crate::view_worker::IN_FRAME {
+            // What was made in this frame is shown in the next.
+            ctx.request_repaint();
+        } else {
+            ctx.request_repaint_after(web_time::Duration::from_millis(16));
+        }
         drawing
     }
 

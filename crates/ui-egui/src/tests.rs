@@ -7825,6 +7825,37 @@ fn ids_of_selection_shows_each_ones_id_guid_and_ifc_globalid_and_copies_them() {
 }
 
 #[test]
+fn a_moving_view_waits_for_its_plan_until_it_rests_or_leaves_what_is_kept() {
+    use crate::canvas::{REST, out_of_reach, waits};
+    use web_time::Duration;
+    let kept = bimcraft_core::render::View { scale: 0.1, cx: 0.0, cy: 0.0, width: 1000, height: 800 };
+    let ms = Duration::from_millis;
+    // Moved a little: what is kept covers it, and it waits out the rest of its rest.
+    let near = bimcraft_core::render::View { cx: 2000.0, ..kept };
+    assert!(!out_of_reach(kept, near));
+    assert_eq!(waits(kept, near, ms(20), None), Some(REST - ms(20)));
+    assert_eq!(waits(kept, near, REST, None), None);
+    // Half a view each way is drawn round the kept one: just inside it serves, past it does not.
+    assert!(!out_of_reach(kept, bimcraft_core::render::View { cx: 4900.0, ..kept }));
+    assert!(out_of_reach(kept, bimcraft_core::render::View { cx: 5100.0, ..kept }));
+    assert!(!out_of_reach(kept, bimcraft_core::render::View { cy: -3900.0, ..kept }));
+    assert!(out_of_reach(kept, bimcraft_core::render::View { cy: -4100.0, ..kept }));
+    // Zoomed in it serves up to four times nearer; zoomed out, until the view is wider than what was drawn.
+    assert!(!out_of_reach(kept, bimcraft_core::render::View { scale: 0.39, ..kept }));
+    assert!(out_of_reach(kept, bimcraft_core::render::View { scale: 0.41, ..kept }));
+    assert!(!out_of_reach(kept, bimcraft_core::render::View { scale: 0.051, ..kept }));
+    assert!(out_of_reach(kept, bimcraft_core::render::View { scale: 0.049, ..kept }));
+    // Past what is kept, a plan is made though the view still moves: the first at once, the next no sooner than a quarter of a
+    // second and three times the last one's making after it.
+    let far = bimcraft_core::render::View { cx: 9000.0, ..kept };
+    assert_eq!(waits(kept, far, ms(0), None), None);
+    assert_eq!(waits(kept, far, ms(0), Some((ms(100), ms(10)))), Some(REST));
+    assert_eq!(waits(kept, far, ms(0), Some((ms(260), ms(10)))), None);
+    assert_eq!(waits(kept, far, ms(0), Some((ms(500), ms(200)))), Some(REST));
+    assert_eq!(waits(kept, far, ms(0), Some((ms(600), ms(200)))), None);
+}
+
+#[test]
 fn plan_cache_reuses_drawings_and_invalidates_geometry_view_and_ceiling() {
     let mut s = Session::new();
     s.script(BOX).unwrap();
