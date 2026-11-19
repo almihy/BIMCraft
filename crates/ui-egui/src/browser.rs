@@ -78,8 +78,8 @@ impl Tab {
 }
 
 /// The categories of the system's families the browser lists, besides the runs': what Edit Type edits and the Type Selector picks.
-const SYSTEM_FAMILIES: [&str; 10] =
-    ["wall", "floor", "roof", "ceiling", "door", "window", "column", "railing", "structuralcolumn", "footing"];
+const SYSTEM_FAMILIES: [&str; 12] =
+    ["wall", "curtainpanel", "mullion", "floor", "roof", "ceiling", "door", "window", "column", "railing", "structuralcolumn", "footing"];
 
 /// What a click on an entry does.
 #[derive(Clone, Debug, PartialEq)]
@@ -570,14 +570,18 @@ impl BimApp {
         let delete = |params: serde_json::Value| vec![("Delete", Act::Do("delete_type", params))];
         let system = SYSTEM_FAMILIES.iter().chain(&bimcraft_core::model::RUN_CATEGORIES).filter_map(|category| {
             let names = m.type_names(category);
-            let leaves = names
-                .iter()
-                .map(|ty| {
-                    let on = self.types.get(category).is_some_and(|t| t == ty);
-                    Node::leaf(ty, Act::Pick(category, ty.to_string()), on)
-                        .with_menu(delete(serde_json::json!({"category": category, "type": ty})))
-                })
-                .collect();
+            let leaf = |ty: &&str| {
+                let on = self.types.get(category).is_some_and(|t| t == ty);
+                Node::leaf(ty, Act::Pick(category, ty.to_string()), on)
+                    .with_menu(delete(serde_json::json!({"category": category, "type": ty})))
+            };
+            // The curtain wall types under their family, Curtain Wall, as Revit's Walls has them.
+            let curtain = |ty: &&str| *category == "wall" && crate::curtain::family(m, category, ty) == Some(crate::curtain::CURTAIN_WALL);
+            let mut leaves: Vec<Node> = names.iter().filter(|ty| !curtain(ty)).map(leaf).collect();
+            let curtains: Vec<Node> = names.iter().filter(|ty| curtain(ty)).map(leaf).collect();
+            if !curtains.is_empty() {
+                leaves.push(Node::group(t(crate::curtain::CURTAIN_WALL), false, curtains));
+            }
             (!names.is_empty()).then(|| Node::group(&crate::lang::category(category, true), false, leaves))
         });
         let components = m.families.iter().map(|(name, f)| {

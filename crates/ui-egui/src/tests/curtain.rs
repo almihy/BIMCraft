@@ -275,3 +275,27 @@ fn a_panel_types_and_a_mullion_types_properties_are_revits_and_change_them() {
     assert!(h.query_by_label("System Family: Empty System Panel").is_some());
     assert!(h.query_by_label("Thickness").is_none() && h.query_all_by_label("Identity Data").next().is_some());
 }
+
+#[test]
+fn the_project_browser_lists_curtain_wall_types_under_curtain_wall_and_the_panel_and_mullion_types() {
+    let mut h = app(&format!("{BOX}\n{STORE}"));
+    press(&mut h, "List Families");
+    // Under Walls: the basic wall types, and the curtain wall types under their family.
+    h.get_by_label("Walls").click_accesskit();
+    h.run();
+    assert!(h.query_by_label("Generic - 200mm").is_some() && h.query_by_label("Storefront").is_none());
+    h.get_by_label("Curtain Wall").click_accesskit();
+    h.run();
+    // A click makes it the Wall tool's type, as any type's does; its menu is any type's.
+    h.get_by_label("Storefront").click_accesskit();
+    h.run();
+    assert_eq!(h.state().types.get("wall").map(String::as_str), Some("Storefront"));
+    // Curtain panel types and mullion types are listed as the other system types are: each under its category's group.
+    // (The groups' names, Curtain Panels and Curtain Wall Mullions, are `lang::category`'s.)
+    for (category, ty) in [("curtainpanel", "Glazed"), ("mullion", "50 x 150mm")] {
+        assert!(h.query_by_label(ty).is_none());
+        h.get_by_label(&crate::lang::category(category, true)).click_accesskit();
+        h.run();
+        assert!(h.query_by_label(ty).is_some(), "{category}: no `{ty}`");
+    }
+}
