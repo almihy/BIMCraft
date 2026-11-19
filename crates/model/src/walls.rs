@@ -1263,6 +1263,10 @@ pub fn heights(m: &Model, w: &Wall) -> (f64, f64) {
 /// the wall from face to face at each jamb whose head reaches the top there, which a plan seeing the wall from above draws.
 pub fn notches(m: &Model, id: Id) -> Vec<[P2; 2]> {
     let Some(w) = m.wall(id) else { return Vec::new() };
+    // A curtain wall has no solid to notch: a door in it fills its cell, to the wall's top where the cell reaches it.
+    if crate::curtain::is_curtain(m, w) {
+        return Vec::new();
+    }
     let guid = m.guid(id);
     let (axis, (ext, int), base) = (Axis::of(w), faces(m, w), m.own_base(w));
     let mut out = Vec::new();

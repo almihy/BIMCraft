@@ -246,6 +246,15 @@ pub fn transform(c: &str, m: &Model, mut e: Element, id: Id, mo: &Motion, with: 
                 k.map(f);
             }
         }
+        // A curtain wall's door is where its cell is.
+        Element::Door(o) if o.panel.is_some() && !within(o.host) => {
+            return Err(bad(
+                c,
+                format!(
+                    "door {id} fills a cell of its curtain wall's grid and is where that cell is: move a grid line (`modify` a                      hand-made one's `at`, or the wall type's spacing), or delete it and put a door in another panel (`curtain_door`)"
+                ),
+            ));
+        }
         Element::Door(o) | Element::Window(o) if !within(o.host) => match (mo.slide, m.wall(o.host)) {
             (Some(by), Some(w)) => o.offset += by.dot((w.end - w.start).unit()),
             _ => return Err(bad(c, format!("{category} {id} turns and mirrors only with its wall; select the wall too"))),

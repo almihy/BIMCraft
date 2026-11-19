@@ -3359,6 +3359,8 @@ pub fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, String> 
         });
         let flip_hand = operated.map_or_else(|| enumeration(o.args.get(11)).is_some_and(|op| op.contains("RIGHT")), |(_, right)| right);
         let op = Opening {
+            panel: None,
+            cell: None,
             params: Default::default(),
             family: None,
             type_name,

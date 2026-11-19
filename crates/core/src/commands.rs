@@ -412,7 +412,7 @@ other_files(
          lists them, each with its `host`), laid out again whenever the wall, its type or its lines change. Its own grid \
          settings are `modify {id, curtain: {vertical: {number?, justification?: beginning|center|end, offset?}, \
          horizontal: {…}}}` (the Number of a fixed-number layout, where the lines are counted from, and how far the first \
-         is from there). Work on it with `curtain_grid`, `add_remove_segments` and `mullion`; it takes no `door` or `window`",
+         is from there). Work on it with `curtain_grid`, `add_remove_segments` and `mullion`; its entrance is a panel swapped for a door (`curtain_door`), and it takes no ordinary `door` or `window`",
         wall,
     )
     .menu("Architecture > Wall"),
@@ -1850,6 +1850,13 @@ other_files(
         &[],
         "{wall, type?, on?: grid_line | segment | all, at: [s, z] | point: [x, y], z?, vertical?} puts mullions on a curtain          wall's grid lines, as Revit's Mullion tool: `on: grid_line` (the default; Revit's Grid Line) on every segment of the          line nearest the place, `segment` (Grid Line Segment) on the one segment there, `all` (All Grid Lines; no place          needed) on every segment of every line, the wall's four borders too. The place is `at` [s, z] (mm along the wall from          its start, mm over its base) or `point` [x, y] in plan with `z` (an elevation; the wall's base when not given);          `vertical` says whether the line meant stands or lies when both are as near. `type` is one of the project's mullion          types (`type`, category `mullion`; the default is `50 x 150mm`, made with the other starter types when the project          has none). A segment that has a mullion keeps it, and a removed segment gets none. A mullion put on here is not          pinned: it keeps its type whatever the wall's type says, changes type with `modify {id, type}` and goes with          `delete`. Returns {ids: the mullions put on, skipped: segments that had one, wall, type}",
         curtain::mullion,
+    ),
+    edit(
+        "curtain_door",
+        "Curtain Wall Door",
+        &[],
+        "{panel, type?, family?, flip_facing?, flip_hand?, mark?} | {wall, at: [s, z] | point: [x, y], z?, …} swaps a panel of a          curtain wall for a door, a storefront's entrance: what Revit does when a panel is unpinned and a door picked in the          Type Selector, in one step (the panel may be pinned). `panel` is the panel's id (`elements` with category          `curtainpanel`); or name its cell by a place inside it: `wall` with `at` [s, z] (mm along the wall from its start, mm          over its base) or `point` [x, y] in plan with `z` (an elevation; the wall's base when not given). The door is an          ordinary door (category `door`: schedules, tags, From/To Room, `flip`, IFC's IfcDoor) of `type`, one of the project's          door types (the default one when not given), or of a door `family` and its `type`; but it fills its cell: its width          and height are the cell's, whatever its type says (a family's door keeps its own size, at the middle of the cell's          bottom), and it goes where its cell goes when the grid changes. So it is not moved along the wall: move a grid line,          or delete it and swap another panel. The mullions round the cell stay (delete the one under it with `delete` for a          threshold-free entrance). `delete` the door and the cell has its panel again; a door whose cell is removed goes to          the cell that holds its place, and goes with the grid when the wall is given a basic type. A window in a curtain          wall is not built yet. Returns {id, wall, panel_key, offset, sill, width, height, mark}",
+        curtain::curtain_door,
     ),
     edit(
         "wall_join",
@@ -8421,9 +8428,11 @@ pub fn opening_of(m: &Model, p: &Value, is_door: bool) -> Result<Element, String
     build_opening(m, p, is_door).map(|o| if is_door { Element::Door(o) } else { Element::Window(o) })
 }
 
-fn build_opening(m: &Model, p: &Value, is_door: bool) -> Result<Opening, String> {
-    let c = if is_door { "door" } else { "window" };
-    let types = if is_door { &m.types.door } else { &m.types.window };
+/// The family (if any), the type and the family's own sill that `p` asks a door or a window to be of: `family` with `type`
+/// (its first when not given), or `type` alone, one of the project's own (the default one when not given). `c` is the
+/// command asking.
+fn opening_kind(c: &str, m: &Model, p: &Value, is_door: bool) -> Result<(Option<String>, String, Option<f64>), String> {
+    let what = if is_door { "door" } else { "window" };
     // Of a family's type, or one of the project's own.
     let family = string(c, p, "family")?;
     let (type_name, family_sill) = match &family {
@@ -8431,7 +8440,7 @@ fn build_opening(m: &Model, p: &Value, is_door: bool) -> Result<Opening, String>
             let kind = if is_door { crate::family::Category::Door } else { crate::family::Category::Window };
             let f = m.families.get(name).filter(|f| f.category == kind).ok_or_else(|| {
                 let names: Vec<&str> = m.families.iter().filter(|(_, f)| f.category == kind).map(|(n, _)| n.as_str()).collect();
-                bad(c, format!("there's no {c} family `{name}` (there are: {})", names.join(", ")))
+                bad(c, format!("there's no {what} family `{name}` (there are: {})", names.join(", ")))
             })?;
             let type_name = match string(c, p, "type")? {
                 Some(t) => t,
@@ -8444,8 +8453,24 @@ fn build_opening(m: &Model, p: &Value, is_door: bool) -> Result<Opening, String>
             };
             (type_name, sill)
         }
-        None => (type_param(c, p, m, c)?, None),
+        None => (type_param(c, p, m, what)?, None),
     };
+    Ok((family, type_name, family_sill))
+}
+
+/// The mark a new door (or window) takes: the next after those there are.
+fn next_mark(m: &Model, is_door: bool) -> String {
+    next_number(m.elements.values().filter_map(|e| match e {
+        Element::Door(o) if is_door => Some(o.mark.as_str()),
+        Element::Window(o) if !is_door => Some(o.mark.as_str()),
+        _ => None,
+    }))
+}
+
+fn build_opening(m: &Model, p: &Value, is_door: bool) -> Result<Opening, String> {
+    let c = if is_door { "door" } else { "window" };
+    let types = if is_door { &m.types.door } else { &m.types.window };
+    let (family, type_name, family_sill) = opening_kind(c, m, p, is_door)?;
     let at = point_opt(c, p, "at")?;
     let (host, along_at) = match id_opt(c, p, "wall")? {
         Some(h) => {
@@ -8475,8 +8500,13 @@ fn build_opening(m: &Model, p: &Value, is_door: bool) -> Result<Opening, String>
         return Err(bad(
             c,
             format!(
-                "wall {} is a curtain wall, which hosts no ordinary doors or windows, as in Revit: its cells are filled by its                  panels. Swap a panel instead (`unpin` it, then `modify` its `type`), or place the {c} in a basic wall",
-                m.shown(host)
+                "wall {} is a curtain wall, which hosts no ordinary doors or windows, as in Revit: its cells are filled by its                  panels. {}",
+                m.shown(host),
+                if is_door {
+                    "Swap one of its panels for a door with `curtain_door` (`panel`, or `wall` and `at`), or place the door in a basic wall"
+                } else {
+                    "Swap a panel instead (`unpin` it, then `modify` its `type`), or place the window in a basic wall"
+                }
             ),
         ));
     }
@@ -8505,6 +8535,8 @@ fn build_opening(m: &Model, p: &Value, is_door: bool) -> Result<Opening, String>
     };
     let o = Opening {
         params: Default::default(),
+        panel: None,
+        cell: None,
         family,
         type_name,
         host,
@@ -13308,6 +13340,24 @@ fn edit_type(s: &mut Session, p: &Value) -> R {
 /// What Revit says when a wall is given a curtain wall type, and what it does about the doors and windows in it.
 const CURTAIN_INSERTS: &str = "Switching wall type to family curtain wall. A curtain wall hosts no doors or windows: those in it were                                deleted (`deleted`), as Revit does.";
 
+/// Doors that filled cells of curtain walls and have none now, deleted as `delete` deletes a door, pinned or not: what the
+/// engine does with those a command's layout left without a cell.
+pub(crate) fn drop_curtain_doors(s: &mut Session, ids: &[Id]) -> Result<(), String> {
+    let ids: Vec<Id> = ids.iter().copied().filter(|id| s.model.elements.contains_key(*id)).collect();
+    let pinned: Vec<Guid> = s.model.pinned_among(&ids).into_iter().map(|id| s.model.guid(id)).collect();
+    if !pinned.is_empty() {
+        let m = s.model_mut();
+        for g in pinned {
+            m.pinned.remove(&g);
+        }
+    }
+    if ids.is_empty() { Ok(()) } else { delete_elements(s, &ids).map(|_| ()) }
+}
+
+/// What is said when a curtain wall is given a basic type and had doors in its cells.
+const CURTAIN_DOORS: &str =
+    "A basic wall has no curtain grid: the doors that filled cells of it were deleted (`deleted`). Place doors in the wall with `door`.";
+
 /// The doors and windows that stand in curtain walls deleted, with what hangs on them (their tags), pinned or not: as
 /// Revit does when a wall is given a curtain wall type. `reply` then lists what went as `deleted`, with a `note`.
 fn with_inserts_dropped(s: &mut Session, reply: &mut Value) -> Result<(), String> {
@@ -13316,7 +13366,13 @@ fn with_inserts_dropped(s: &mut Session, reply: &mut Value) -> Result<(), String
     let inserts: Vec<Id> = m
         .elements
         .iter()
-        .filter(|(_, e)| matches!(e, Element::Door(o) | Element::Window(o) if curtain(o.host)))
+        .filter(|(_, e)| match e {
+            // A curtain wall's own door (a panel swapped for one) stays while its wall is a curtain wall, and goes with the
+            // grid when it stops being one.
+            Element::Door(o) if o.panel.is_some() => !curtain(o.host),
+            Element::Door(o) | Element::Window(o) => curtain(o.host),
+            _ => false,
+        })
         .map(|(id, _)| *id)
         .collect();
     if inserts.is_empty() {
@@ -13329,10 +13385,11 @@ fn with_inserts_dropped(s: &mut Session, reply: &mut Value) -> Result<(), String
             m.pinned.remove(&g);
         }
     }
+    let cells = inserts.iter().all(|id| s.model.elements.get(*id).is_some_and(|e| crate::curtain::door_host(e).is_some()));
     let deleted = delete_elements(s, &inserts)?;
     if let Some(o) = reply.as_object_mut() {
         o.insert("deleted".into(), deleted);
-        o.insert("note".into(), json!(CURTAIN_INSERTS));
+        o.insert("note".into(), json!(if cells { CURTAIN_DOORS } else { CURTAIN_INSERTS }));
     }
     Ok(())
 }
@@ -13703,7 +13760,8 @@ fn modify(s: &mut Session, p: &Value) -> R {
             w.curtain = Default::default();
         }
         if let (Element::Wall(old), Element::Wall(w)) = (e, &e2) {
-            made_curtain |= old.type_name != w.type_name && !crate::curtain::is_curtain(m, old) && crate::curtain::is_curtain(m, w);
+            // (Or a basic one of a curtain wall: the doors that filled its cells go, with what hangs on them.)
+            made_curtain |= old.type_name != w.type_name && crate::curtain::is_curtain(m, old) != crate::curtain::is_curtain(m, w);
             let (before, after) = (m.base_z(old), m.base_z(w));
             if (after - before).abs() > 1e-9 {
                 for (fid, fid_wall) in crate::glue::footings_of(m, &[id]) {
