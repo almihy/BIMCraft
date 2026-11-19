@@ -36,6 +36,8 @@ const MASS: Rgb = Rgb(158, 190, 224);
 /// The ground: a toposolid's earth.
 const TERRAIN: Rgb = Rgb(150, 168, 118);
 const RAIL: Rgb = Rgb(120, 122, 128);
+/// A mullion made of nothing the library has: aluminium.
+const MULLION: Rgb = Rgb(150, 152, 158);
 /// A beam, a footing, a structural column made of nothing the library has.
 #[doc(hidden)]
 pub const STRUCTURE: Rgb = Rgb(182, 184, 190);
@@ -901,6 +903,56 @@ pub fn solids_in_with(
                         let (_, bottom, top) = g.prism();
                         let ring = crate::runs::outline_in(m, id, index);
                         out.push(Solid::Prism { owner: id, color, tex, ring, bottom, top, curve: None });
+                    }
+                }
+            }
+            // A curtain panel: a flat sheet of its type's material between its grid lines, as thick as its type says.
+            Element::CurtainPanel(p) => {
+                let Some((corners, n, thickness)) = crate::curtain::panel_face(m, p) else { continue };
+                let [a, b, _, d] = corners;
+                let (o, e) = (P2(a[0], a[1]), P2(b[0], b[1]));
+                let material = m.types.curtain_panel.get(&p.type_name).map_or("", |t| t.material.as_str());
+                let (color, tex) = match m.materials.get(material) {
+                    Some(x) => (Rgb(x.color[0], x.color[1], x.color[2]), skin(m, material)),
+                    None => (GLASS, skin(m, m.language.word("Glass")) & !TEXTURE),
+                };
+                let frame = Frame { o, u: n.perp() * -1.0, n };
+                out.push(Solid::Box {
+                    owner: id,
+                    color,
+                    tex,
+                    frame,
+                    a: (0.0, o.dist(e)),
+                    c: (-thickness / 2.0, thickness / 2.0),
+                    z: (a[2], d[2]),
+                });
+            }
+            // A mullion: a bar along its grid line's segment, its type's section; a circular one a tube.
+            Element::Mullion(x) => {
+                let Some((a, b, along, n, t)) = crate::curtain::mullion_line(m, x) else { continue };
+                let (color, tex) = match m.materials.get(&t.material) {
+                    Some(mat) => (Rgb(mat.color[0], mat.color[1], mat.color[2]), skin(m, &t.material)),
+                    None => (MULLION, 0),
+                };
+                if t.round {
+                    for (tris, caps) in crate::rebar::tubes(&[a, b], t.thickness) {
+                        out.push(Solid::Mesh { owner: id, color, tex, tris, caps, round: true, cut: true, vis: Vis::ALWAYS });
+                    }
+                    continue;
+                }
+                let (s1, s2) = t.sides();
+                let c = (-t.thickness / 2.0, t.thickness / 2.0);
+                match along {
+                    // Standing: its width along the wall, about its grid line.
+                    Some(u) => {
+                        let frame = Frame { o: P2(a[0], a[1]), u, n };
+                        out.push(Solid::Box { owner: id, color, tex, frame, a: (-s1, s2), c, z: (a[2], b[2]) });
+                    }
+                    // Lying: its width up the wall, about its grid line's height.
+                    None => {
+                        let (o, e) = (P2(a[0], a[1]), P2(b[0], b[1]));
+                        let frame = Frame { o, u: n.perp() * -1.0, n };
+                        out.push(Solid::Box { owner: id, color, tex, frame, a: (0.0, o.dist(e)), c, z: (a[2] - s1, a[2] + s2) });
                     }
                 }
             }

@@ -245,6 +245,24 @@ pub fn transform(c: &str, m: &Model, mut e: Element, id: Id, mo: &Motion, with: 
             _ => return Err(bad(c, format!("{category} {id} turns and mirrors only with its wall; select the wall too"))),
         },
         Element::Door(_) | Element::Window(_) => {}
+        // A curtain wall's own go where it goes, laid out again after the command. Alone, a grid line that stands on the wall
+        // slides along it; nothing else of a curtain wall moves by itself.
+        Element::CurtainGrid(l) if !within(l.host) => match (mo.slide, m.wall(l.host), l.vertical) {
+            (Some(by), Some(w), true) => l.at += by.dot((w.end - w.start).unit()),
+            (_, _, false) => {
+                return Err(bad(
+                    c,
+                    format!("curtain grid line {id} lies up its wall; change how high it is with `modify` (`at`, mm over the wall's base)"),
+                ));
+            }
+            _ => return Err(bad(c, format!("curtain grid line {id} turns and mirrors only with its wall; select the wall too"))),
+        },
+        Element::CurtainPanel(crate::curtain::Panel { host, .. }) | Element::Mullion(crate::curtain::Mullion { host, .. })
+            if !within(*host) =>
+        {
+            return Err(bad(c, format!("{category} {id} is where its curtain wall's grid puts it; move the wall, or a grid line")));
+        }
+        Element::CurtainGrid(_) | Element::CurtainPanel(_) | Element::Mullion(_) => {}
         Element::Dimension(d) => d.at = f(d.at),
         // In plan, its points and edges; their heights stay.
         Element::Dimension3D(d) => {

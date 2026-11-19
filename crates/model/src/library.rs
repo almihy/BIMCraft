@@ -689,6 +689,8 @@ impl Model {
                 "railing" => self.types.railing.remove(name).is_some(),
                 "structuralcolumn" => self.types.structural_column.remove(name).is_some(),
                 "footing" => self.types.footing.remove(name).is_some(),
+                "curtainpanel" => self.types.curtain_panel.remove(name).is_some(),
+                "mullion" => self.types.mullion.remove(name).is_some(),
                 run if RUN_CATEGORIES.contains(&run) => self.types.runs.get_mut(run).is_some_and(|t| t.remove(name).is_some()),
                 _ => false,
             },
@@ -740,6 +742,8 @@ impl Model {
                 "railing" => mv(&mut self.types.railing, from, to),
                 "structuralcolumn" => mv(&mut self.types.structural_column, from, to),
                 "footing" => mv(&mut self.types.footing, from, to),
+                "curtainpanel" => mv(&mut self.types.curtain_panel, from, to),
+                "mullion" => mv(&mut self.types.mullion, from, to),
                 run if RUN_CATEGORIES.contains(&run) => self.types.runs.get_mut(run).is_some_and(|t| mv(t, from, to)),
                 _ => false,
             },
@@ -836,6 +840,8 @@ impl Model {
         add(Kind::Type("railing".into()), &mut t.railing.keys());
         add(Kind::Type("structuralcolumn".into()), &mut t.structural_column.keys());
         add(Kind::Type("footing".into()), &mut t.footing.keys());
+        add(Kind::Type("curtainpanel".into()), &mut t.curtain_panel.keys());
+        add(Kind::Type("mullion".into()), &mut t.mullion.keys());
         for (cat, types) in &t.runs {
             add(Kind::Type(cat.clone()), &mut types.keys());
         }
@@ -1496,6 +1502,8 @@ impl crate::model::Element {
             // A toposolid and a building pad are of the floor types, as Revit's of their own floor-like types.
             Element::Toposolid(x) => f(&Kind::Type("floor".into()), &mut x.type_name),
             Element::SubDivision(x) => f(&Kind::Type("floor".into()), &mut x.type_name),
+            Element::CurtainPanel(x) => f(&Kind::Type(category), &mut x.type_name),
+            Element::Mullion(x) => f(&Kind::Type(category), &mut x.type_name),
             Element::Ceiling(x) => f(&Kind::Type(category), &mut x.type_name),
             Element::Roof(x) => f(&Kind::Type(category), &mut x.type_name),
             Element::Railing(x) => f(&Kind::Type(category), &mut x.type_name),
@@ -1579,6 +1587,21 @@ impl Model {
         }
         for r in t.runs.values_mut().flat_map(|x| x.values_mut()).filter(|r| !r.material.is_empty()) {
             f(&Kind::Material, &mut r.material);
+        }
+        // A curtain wall type names its panel type and its mullion types; they name their materials.
+        for c in t.wall.values_mut().filter_map(|x| x.curtain.as_mut()) {
+            if !c.panel.is_empty() {
+                f(&Kind::Type("curtainpanel".into()), &mut c.panel);
+            }
+            for ms in [&mut c.vertical_mullions, &mut c.horizontal_mullions] {
+                for n in ms.names_mut().into_iter().filter(|n| !n.is_empty()) {
+                    f(&Kind::Type("mullion".into()), n);
+                }
+            }
+        }
+        let materials = t.curtain_panel.values_mut().map(|x| &mut x.material).chain(t.mullion.values_mut().map(|x| &mut x.material));
+        for name in materials.filter(|n| !n.is_empty()) {
+            f(&Kind::Material, name);
         }
         for m in self.materials.values_mut() {
             if let Some(tx) = m.texture.as_mut().filter(|tx| !tx.image.is_empty()) {
@@ -1721,6 +1744,17 @@ impl Model {
         // What a build that reads up to 28 refuses: a wall type as Revit's, a layer's Finish 2, Wraps or Structural Material.
         let layer =
             |l: &crate::model::Layer| l.wraps || l.structural || l.priority.is_some() || l.function == crate::model::Function::Finish2;
+        // What a build that reads up to 29 refuses: curtain walls, their types and their panels, mullions and grid lines.
+        if self.types.wall.values().any(crate::model::WallType::is_curtain)
+            || !self.types.curtain_panel.is_empty()
+            || !self.types.mullion.is_empty()
+            || self.elements.values().any(|e| match e {
+                Element::Wall(w) => !w.curtain.is_default(),
+                e => crate::curtain::host_of(e).is_some(),
+            })
+        {
+            return crate::model::CURTAIN_FORMAT;
+        }
         let ends = |e: &Element| matches!(e, Element::Wall(w) if !(w.join_start && w.join_end));
         if self.types.wall.values().any(crate::model::WallType::is_revits)
             || self.layered_types().any(|(.., layers)| layers.iter().any(layer))

@@ -156,12 +156,17 @@ pub const MIN_CONTOURS: f64 = 50.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 29;
-/// [`FORMAT`], by what it brought: a wall type as Revit's (its Core Boundary rows, Function, Wrapping at Inserts and at
+pub const FORMAT: u32 = 30;
+/// [`FORMAT`], by what it brought: curtain walls (`curtain.rs`): a wall type's `curtain`, a wall's `curtain`, the types
+/// `curtain_panel` and `mullion` and the elements `curtainpanel`, `mullion` and `curtaingrid`; a build that reads up to 29
+/// would refuse them, not say "saved by a newer BIMCraft". A project with none of them is written as 29 or older
+/// ([`Model::written_format`]); nothing in a file of 29 changes.
+pub const CURTAIN_FORMAT: u32 = FORMAT;
+/// The format a project is written in when it needs nothing of [`CURTAIN_FORMAT`]'s but holds a wall type as Revit's (its Core Boundary rows, Function, Wrapping at Inserts and at
 /// Ends, Coarse Scale Fill), a layer's Finish 2, Wraps and Structural Material; a build that reads up to 28 would refuse the
 /// fields, not say "saved by a newer BIMCraft". A project whose types have none of them is written as 28 or older
 /// ([`Model::written_format`]); nothing in a file of 28 changes.
-pub const WALL_FORMAT: u32 = FORMAT;
+pub const WALL_FORMAT: u32 = 29;
 /// The format a project is written in when it needs nothing of [`WALL_FORMAT`]'s but holds a CAD drawing as the DWG it was brought in as (`dwg` in its `CadFile`), read again
 /// straight when the project opens, where it was held as the DXF it was made into; a build that reads up to 27 would refuse
 /// the field, not say "saved by a newer BIMCraft". A project with no DWG held is written as 27 ([`Model::written_format`]);
@@ -380,6 +385,9 @@ pub struct Wall {
     pub join_start: bool,
     #[serde(default = "yes", skip_serializing_if = "is_yes")]
     pub join_end: bool,
+    /// A curtain wall's own settings of its grid, and what was removed from it ([`crate::curtain`]); a basic wall's is empty.
+    #[serde(default, skip_serializing_if = "crate::curtain::WallGrid::is_default")]
+    pub curtain: crate::curtain::WallGrid,
     /// Its values of the project's parameters, by name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub params: BTreeMap<String, serde_json::Value>,
@@ -2225,7 +2233,7 @@ fn shutter() -> f64 {
 fn is_shutter(v: &f64) -> bool {
     *v == shutter()
 }
-fn is_zero2(v: &[f64; 2]) -> bool {
+pub(crate) fn is_zero2(v: &[f64; 2]) -> bool {
     *v == [0.0; 2]
 }
 fn far() -> f64 {
@@ -2898,6 +2906,9 @@ macro_rules! visit_refs {
             Element::Site(s) => f(& $($m)? s.level),
             Element::PropertyLine(p) => f(& $($m)? p.level),
             Element::SubDivision(sd) => f(& $($m)? sd.host),
+            Element::CurtainPanel(x) => f(& $($m)? x.host),
+            Element::Mullion(x) => f(& $($m)? x.host),
+            Element::CurtainGrid(x) => f(& $($m)? x.host),
             Element::SurveyPoint(_) | Element::ProjectBasePoint(_) => {}
             Element::Room(Room { level, top_level, .. }) => {
                 f(level);
@@ -3051,6 +3062,12 @@ pub enum Element {
     /// Revit's Project Base Point: a reference point of the project, and the angle to true north.
     #[serde(rename = "projectbasepoint")]
     ProjectBasePoint(crate::ground::BasePoint),
+    /// Revit's Curtain Panel: a panel a curtain wall fills a cell of its grid with (`curtain.rs`).
+    CurtainPanel(crate::curtain::Panel),
+    /// Revit's Curtain Wall Mullion: on a segment of a curtain wall's grid line.
+    Mullion(crate::curtain::Mullion),
+    /// Revit's Curtain Grid: a grid line drawn by hand on a curtain wall.
+    CurtainGrid(crate::curtain::GridLine),
 }
 
 impl Element {
@@ -3062,6 +3079,8 @@ impl Element {
             | Element::Toposolid(Floor { params, .. })
             | Element::PropertyLine(crate::masterplan::PropertyLine { params, .. })
             | Element::SubDivision(crate::ground::SubDivision { params, .. })
+            | Element::CurtainPanel(crate::curtain::Panel { params, .. })
+            | Element::Mullion(crate::curtain::Mullion { params, .. })
             | Element::SurveyPoint(crate::ground::BasePoint { params, .. })
             | Element::ProjectBasePoint(crate::ground::BasePoint { params, .. })
             | Element::Ceiling(Ceiling { params, .. })
@@ -3091,6 +3110,8 @@ impl Element {
             | Element::Toposolid(Floor { params, .. })
             | Element::PropertyLine(crate::masterplan::PropertyLine { params, .. })
             | Element::SubDivision(crate::ground::SubDivision { params, .. })
+            | Element::CurtainPanel(crate::curtain::Panel { params, .. })
+            | Element::Mullion(crate::curtain::Mullion { params, .. })
             | Element::SurveyPoint(crate::ground::BasePoint { params, .. })
             | Element::ProjectBasePoint(crate::ground::BasePoint { params, .. })
             | Element::Ceiling(Ceiling { params, .. })
@@ -3289,6 +3310,9 @@ impl Element {
             Element::SubDivision(_) => "subdivision",
             Element::SurveyPoint(_) => "surveypoint",
             Element::ProjectBasePoint(_) => "projectbasepoint",
+            Element::CurtainPanel(_) => "curtainpanel",
+            Element::Mullion(_) => "mullion",
+            Element::CurtainGrid(_) => "curtaingrid",
         }
     }
 }
@@ -3319,6 +3343,11 @@ pub struct WallType {
     pub coarse_fill: Option<String>,
     #[serde(default, skip_serializing_if = "is_black")]
     pub coarse_color: [u8; 3],
+    /// What makes it a curtain type, Revit's Curtain Wall family of wall types ([`crate::curtain`]): its walls have no
+    /// layers and no solid of their own, a grid with panels and mullions instead. Its `thickness` is then how deep its
+    /// walls reach across their line, for what asks how near a wall is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub curtain: Option<crate::curtain::CurtainType>,
 }
 
 fn is_black(c: &[u8; 3]) -> bool {
@@ -3351,6 +3380,11 @@ impl WallType {
         let sum = |ls: &[Layer]| ls.iter().map(|l| l.thickness).sum::<f64>();
         let before = sum(self.layers.get(..core.start).unwrap_or_default());
         (before, before + sum(self.layers.get(core).unwrap_or_default()))
+    }
+
+    /// Whether it is a curtain type: its walls are curtain walls.
+    pub fn is_curtain(&self) -> bool {
+        self.curtain.is_some()
     }
 
     /// Whether it holds what [`WALL_FORMAT`] brought.
@@ -3618,6 +3652,11 @@ pub struct Types {
     /// The types of the runs, by category, then name: `runs["beam"]["Beam 200 x 500"]`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub runs: BTreeMap<String, BTreeMap<String, RunType>>,
+    /// Curtain panel types and mullion types, which curtain wall types name and panels and mullions are of.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub curtain_panel: BTreeMap<String, crate::curtain::PanelType>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub mullion: BTreeMap<String, crate::curtain::MullionType>,
 }
 
 /// What a project parameter holds: text, a number, a length (mm), or yes or no.
@@ -5437,6 +5476,8 @@ impl Model {
             "roof" => names(&self.types.roof),
             "ceiling" => names(&self.types.ceiling),
             "railing" => names(&self.types.railing),
+            "curtainpanel" => names(&self.types.curtain_panel),
+            "mullion" => names(&self.types.mullion),
             run if RUN_CATEGORIES.contains(&run) => self.types.runs.get(run).map(names).unwrap_or_default(),
             _ => Vec::new(),
         }
@@ -5457,6 +5498,8 @@ impl Model {
             "railing" => "Railing - 1000mm",
             "structuralcolumn" => "Concrete 300 x 300",
             "footing" => "Footing 1200 x 1200",
+            "curtainpanel" => "Glazed",
+            "mullion" => "50 x 150mm",
             "beam" => "Beam 200 x 500",
             "stripfooting" => "Strip 600 x 300",
             "pipe" => "PVC 50",
@@ -5691,6 +5734,9 @@ impl Model {
             Element::Site(st) => Some(st.level),
             Element::PropertyLine(p) => Some(p.level),
             Element::SubDivision(sd) => self.subdivision_level(sd),
+            Element::CurtainPanel(crate::curtain::Panel { host, .. })
+            | Element::Mullion(crate::curtain::Mullion { host, .. })
+            | Element::CurtainGrid(crate::curtain::GridLine { host, .. }) => self.wall(*host).map(|w| w.level),
             Element::Ceiling(c) => Some(c.level),
             Element::Shaft(sh) => Some(sh.level),
             Element::Mass(ms) => Some(ms.level),
@@ -7845,6 +7891,34 @@ impl Model {
             if t.wrap_ends == Wrapping::Both {
                 return Err(format!("{who}: wrapping at ends is none, exterior or interior, not both"));
             }
+            if let Some(c) = &t.curtain {
+                if !t.layers.is_empty() {
+                    return Err(format!("{who}: a curtain wall type has no layers; its panels and mullions are what it is made of"));
+                }
+                if !c.panel.is_empty() && !self.types.curtain_panel.contains_key(&c.panel) {
+                    return Err(format!(
+                        "{who}: curtain panel type `{}` isn't in the project; add it with `type` (category `curtainpanel`)",
+                        c.panel
+                    ));
+                }
+                for (way, rule, ms) in
+                    [("vertical", &c.vertical, &c.vertical_mullions), ("horizontal", &c.horizontal, &c.horizontal_mullions)]
+                {
+                    use crate::curtain::Layout;
+                    if !matches!(rule.layout, Layout::None | Layout::FixedNumber) {
+                        size(&format!("{who} {way} grid spacing"), rule.spacing)?;
+                    } else if !(rule.spacing.is_finite() && rule.spacing >= 0.0 && rule.spacing <= MAX_COORD) {
+                        return Err(format!("{who}: its {way} grid spacing isn't a length"));
+                    }
+                    for (which, n) in ms.named() {
+                        if !n.is_empty() && !self.types.mullion.contains_key(n) {
+                            return Err(format!(
+                                "{who}: its {way} mullions' {which} type `{n}` isn't in the project; add it with `type` (category `mullion`)"
+                            ));
+                        }
+                    }
+                }
+            }
             if let Some(f) = &t.coarse_fill {
                 text(&who, "coarse_fill", f)?;
                 if !self.fill_patterns.contains_key(f) {
@@ -7852,6 +7926,32 @@ impl Model {
                         "{who}: fill pattern `{f}` isn't in the project; add it with `fill_pattern`, or see `fill_patterns`"
                     ));
                 }
+            }
+        }
+        for (n, t) in &self.types.curtain_panel {
+            let who = format!("curtain panel type `{n}`");
+            size(&format!("{who} thickness"), t.thickness)?;
+            coord(&format!("{who} offset"), t.offset)?;
+            text(&who, "material", &t.material)?;
+            if !t.material.is_empty() && !self.materials.contains_key(&t.material) {
+                return Err(format!("{who}: material `{}` isn't in the library; add it with `material`", t.material));
+            }
+        }
+        for (n, t) in &self.types.mullion {
+            let who = format!("mullion type `{n}`");
+            size(&format!("{who} thickness"), t.thickness)?;
+            coord(&format!("{who} offset"), t.offset)?;
+            for (what, v) in [("width on side 1", t.side1), ("width on side 2", t.side2)] {
+                if !(v.is_finite() && (0.0..=MAX_COORD).contains(&v)) {
+                    return Err(format!("{who}: its {what} isn't a length of 0 or more"));
+                }
+            }
+            if !t.round && t.side1 + t.side2 <= 0.0 {
+                return Err(format!("{who}: its widths on side 1 and side 2 are both 0; a mullion has a width"));
+            }
+            text(&who, "material", &t.material)?;
+            if !t.material.is_empty() && !self.materials.contains_key(&t.material) {
+                return Err(format!("{who}: material `{}` isn't in the library; add it with `material`", t.material));
             }
         }
         for (cat, types) in
@@ -8105,6 +8205,7 @@ impl Model {
                 level_ok(rs.level)?;
                 line(&who, rs.start, rs.end)?;
             }
+            Element::CurtainPanel(_) | Element::Mullion(_) | Element::CurtainGrid(_) => self.check_curtain_child(&who, e)?,
             Element::Site(st) => {
                 level_ok(st.level)?;
                 crate::masterplan::check_site(&who, st)?;
@@ -8184,6 +8285,19 @@ impl Model {
                     None => size(&format!("{who} height"), w.height)?,
                 }
                 coord(&format!("{who} top offset"), w.top_offset)?;
+                for (way, set) in [("vertical", &w.curtain.vertical), ("horizontal", &w.curtain.horizontal)] {
+                    coord(&format!("{who} {way} grid offset"), set.offset)?;
+                    if set.number > crate::curtain::MAX_NUMBER {
+                        return Err(format!(
+                            "{who}: its {way} grid's Number is {}; it is {} at most",
+                            set.number,
+                            crate::curtain::MAX_NUMBER
+                        ));
+                    }
+                }
+                if w.curtain.merged.len() + w.curtain.no_mullion.len() > 4 * crate::curtain::MAX_LINES * crate::curtain::MAX_LINES {
+                    return Err(format!("{who}: its curtain grid remembers more removed segments and mullions than a grid has"));
+                }
                 let (base, top) = (self.base_z(w), self.top_z(w));
                 if top <= base + TOL {
                     let (tall, short) = ((top - base).round() + 0.0, (base - top).round() + 0.0);
@@ -9200,9 +9314,47 @@ pub fn culprit(error: &str) -> Option<Id> {
 }
 
 impl Model {
-    /// Whether element `id` is pinned.
+    /// Whether element `id` is pinned: pinned by a person, or a curtain wall's panel or mullion the wall placed and nobody
+    /// freed, which Revit pins.
     pub fn is_pinned(&self, id: impl Key) -> bool {
-        !self.pinned.is_empty() && self.elements.guid(id).is_some_and(|g| self.pinned.contains(&g))
+        let Some(id) = self.elements.id(id) else { return false };
+        (!self.pinned.is_empty() && self.elements.guid(id).is_some_and(|g| self.pinned.contains(&g)))
+            || self.elements.get(id).is_some_and(crate::curtain::placed)
+    }
+
+    /// The elements wall (or other host) `host` hosts that are a curtain wall's own: its panels, mullions and hand-made grid
+    /// lines, by id.
+    pub fn hosted_by(&self, host: Guid) -> Vec<Id> {
+        self.lookup().referrers(&host).filter(|id| self.elements.get(*id).and_then(crate::curtain::host_of) == Some(host)).collect()
+    }
+
+    /// A curtain wall's panel, mullion or grid line: its host is a curtain wall, its type one of the project's, and where it
+    /// is is finite and within reach.
+    fn check_curtain_child(&self, who: &str, e: &Element) -> Result<(), String> {
+        let Some(host) = crate::curtain::host_of(e) else { return Ok(()) };
+        match self.wall(host) {
+            Some(w) if crate::curtain::is_curtain(self, w) => {}
+            Some(_) => return Err(format!("{who}: its host {} isn't a curtain wall", self.shown(host))),
+            None => return Err(format!("{who}: its host {host} isn't a wall of the project")),
+        }
+        let numbers: Vec<f64> = match e {
+            Element::CurtainPanel(p) => {
+                known(who, &p.type_name, &self.types.curtain_panel)?;
+                text(who, "key", &p.key)?;
+                p.span.to_vec()
+            }
+            Element::Mullion(x) => {
+                known(who, &x.type_name, &self.types.mullion)?;
+                text(who, "key", &x.key)?;
+                vec![x.at, x.from, x.to, x.trim[0], x.trim[1]]
+            }
+            Element::CurtainGrid(l) => vec![l.at],
+            _ => Vec::new(),
+        };
+        for v in numbers {
+            coord(who, v)?;
+        }
+        Ok(())
     }
 
     /// Those of `ids` that are pinned, in the order given.

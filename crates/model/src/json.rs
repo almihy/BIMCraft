@@ -368,6 +368,18 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>, measures: boo
             extra.insert("offset".into(), json!(sd.offset));
             extra.insert("region".into(), json!(m.subdivision_region(sd)));
         }
+        Element::CurtainPanel(p) => {
+            let (width, height) = p.size();
+            extra.insert("width".into(), json!(width));
+            extra.insert("height".into(), json!(height));
+            extra.insert("area_m2".into(), json!(m2(width * height)));
+            extra.insert("pinned".into(), json!(!p.free));
+        }
+        Element::Mullion(x) => {
+            extra.insert("length".into(), json!(x.length()));
+            extra.insert("pinned".into(), json!(!x.free));
+        }
+        Element::CurtainGrid(_) => {}
         Element::SurveyPoint(b) | Element::ProjectBasePoint(b) => {
             let [east, north, height] = m.shared(b.at, b.elevation);
             let round = |v: f64| (v * 1000.0).round() / 1000.0;

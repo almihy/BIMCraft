@@ -238,6 +238,8 @@ fn copy_definition(to: &mut Model, from: &Model, kind: &Kind, name: &str) -> boo
             "structuralcolumn" => one(&mut t.structural_column, Some(&f.structural_column), name),
             "footing" => one(&mut t.footing, Some(&f.footing), name),
             "railing" => one(&mut t.railing, Some(&f.railing), name),
+            "curtainpanel" => one(&mut t.curtain_panel, Some(&f.curtain_panel), name),
+            "mullion" => one(&mut t.mullion, Some(&f.mullion), name),
             run => one(t.runs.entry(run.to_string()).or_default(), f.runs.get(run), name),
         },
         Kind::Material => one(&mut to.materials, Some(&from.materials), name),

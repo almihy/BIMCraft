@@ -1,0 +1,1130 @@
+//! Curtain walls, as Revit's: a wall whose type is a curtain type ([`CurtainType`] in its [`WallType`]). It has no layers
+//! and no solid of its own: a grid of lines along it and up it, a panel in each cell and mullions on the lines' segments.
+//!
+//! - **The grid** is the type's (its Vertical Grid and Horizontal Grid: a [`GridRule`] each), placed by the wall's own
+//!   Number, Justification and Offset ([`WallGrid`]), and the lines drawn by hand: [`GridLine`] elements the wall hosts.
+//!   [`grid`] works it out; nothing of the type's lines is stored.
+//! - **Panels and mullions are elements** the wall hosts ([`Panel`], [`Mullion`]), each holding where it is in the wall
+//!   (mm along its location line from its start, and mm over its base), so what draws, measures or exports one reads it
+//!   and its wall's line and nothing else. The wall lays them out again after a command that changed it, its type, a type
+//!   its type names or one of its lines ([`keep`], which the engine runs and [`apply`] makes so).
+//! - **Identity.** A line has a key: a border (`u0`, `u1`, `v0`, `v1`), the type's (`ut3`: its fourth from the
+//!   justification's origin) or a hand-made line's GUID (`g…`). A panel's key is its lower left lines', a mullion's its line's
+//!   and that of the line its segment starts at. An element's GUID is made of its wall's and its key ([`child_guid`]), the
+//!   same in every copy of the project: two copies laying one wall out make the same elements, never two of each. One
+//!   whose key is still there keeps its id, its parameters and, freed, its type.
+//! - **Pinned is the type's**, as Revit's: what the wall placed counts as pinned ([`placed`]); Unpin frees it (`free`),
+//!   and it then keeps the type a person gave it. A mullion deleted is remembered on the wall (`no_mullion`), a segment
+//!   removed to join two panels too (`merged`).
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use bimcraft_i18n::ui_msg;
+use serde::{Deserialize, Serialize};
+
+use crate::geom::P2;
+use crate::model::{Changed, Element, Guid, Id, Model, TOL, Wall, WallType};
+use crate::walls::Axis;
+
+/// The most lines a grid has one way: past it a spacing is too small for its wall, and the rest are left out.
+pub const MAX_LINES: usize = 500;
+/// Two lines nearer than this are one, mm.
+const NEAR: f64 = 1.0;
+
+/// How a curtain type spaces its grid lines one way: Revit's Layout.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Layout {
+    #[default]
+    None,
+    FixedDistance,
+    FixedNumber,
+    MaximumSpacing,
+    MinimumSpacing,
+}
+
+impl Layout {
+    pub const ALL: [Layout; 5] = [Layout::None, Layout::FixedDistance, Layout::FixedNumber, Layout::MaximumSpacing, Layout::MinimumSpacing];
+
+    /// Its name in commands and files.
+    pub fn name(self) -> &'static str {
+        match self {
+            Layout::None => "none",
+            Layout::FixedDistance => "fixed-distance",
+            Layout::FixedNumber => "fixed-number",
+            Layout::MaximumSpacing => "maximum-spacing",
+            Layout::MinimumSpacing => "minimum-spacing",
+        }
+    }
+
+    /// As Type Properties names it, Revit's words.
+    pub fn label(self) -> &'static str {
+        match self {
+            Layout::None => ui_msg!("None"),
+            Layout::FixedDistance => ui_msg!("Fixed Distance"),
+            Layout::FixedNumber => ui_msg!("Fixed Number"),
+            Layout::MaximumSpacing => ui_msg!("Maximum Spacing"),
+            Layout::MinimumSpacing => ui_msg!("Minimum Spacing"),
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Layout> {
+        let n = name.trim().to_ascii_lowercase().replace([' ', '_'], "-");
+        Layout::ALL.into_iter().find(|l| l.name() == n)
+    }
+
+    fn is_none(&self) -> bool {
+        *self == Layout::None
+    }
+}
+
+/// A curtain type's grid one way: its Layout, its Spacing (mm; a Fixed Number has none) and Adjust for Mullion Size.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GridRule {
+    #[serde(default, skip_serializing_if = "Layout::is_none")]
+    pub layout: Layout,
+    #[serde(default, skip_serializing_if = "crate::model::is_zero")]
+    pub spacing: f64,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub adjust_for_mullion: bool,
+}
+
+impl GridRule {
+    fn is_default(&self) -> bool {
+        *self == GridRule::default()
+    }
+}
+
+/// The mullion types a curtain type puts on its lines one way: on those between its borders (Interior Type), on its
+/// first border (Border 1 Type: a vertical grid's at the wall's start, a horizontal one's at its base) and on its last
+/// (Border 2 Type). Each one of the project's mullion types by name, or empty: none.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Mullions {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub interior: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub border1: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub border2: String,
+}
+
+impl Mullions {
+    fn is_empty(&self) -> bool {
+        self.interior.is_empty() && self.border1.is_empty() && self.border2.is_empty()
+    }
+
+    /// The three names, with what each is called in a message.
+    pub fn named(&self) -> [(&'static str, &str); 3] {
+        [("interior", &self.interior), ("border 1", &self.border1), ("border 2", &self.border2)]
+    }
+
+    pub(crate) fn names_mut(&mut self) -> [&mut String; 3] {
+        [&mut self.interior, &mut self.border1, &mut self.border2]
+    }
+}
+
+/// Which mullions run through where they cross: Revit's Join Condition.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum JoinCondition {
+    #[default]
+    NotDefined,
+    VerticalGridContinuous,
+    HorizontalGridContinuous,
+    BorderAndVerticalGridContinuous,
+    BorderAndHorizontalGridContinuous,
+}
+
+impl JoinCondition {
+    pub const ALL: [JoinCondition; 5] = [
+        JoinCondition::NotDefined,
+        JoinCondition::VerticalGridContinuous,
+        JoinCondition::HorizontalGridContinuous,
+        JoinCondition::BorderAndVerticalGridContinuous,
+        JoinCondition::BorderAndHorizontalGridContinuous,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            JoinCondition::NotDefined => "not-defined",
+            JoinCondition::VerticalGridContinuous => "vertical-grid-continuous",
+            JoinCondition::HorizontalGridContinuous => "horizontal-grid-continuous",
+            JoinCondition::BorderAndVerticalGridContinuous => "border-and-vertical-grid-continuous",
+            JoinCondition::BorderAndHorizontalGridContinuous => "border-and-horizontal-grid-continuous",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            JoinCondition::NotDefined => ui_msg!("Not Defined"),
+            JoinCondition::VerticalGridContinuous => ui_msg!("Vertical Grid Continuous"),
+            JoinCondition::HorizontalGridContinuous => ui_msg!("Horizontal Grid Continuous"),
+            JoinCondition::BorderAndVerticalGridContinuous => ui_msg!("Border and Vertical Grid Continuous"),
+            JoinCondition::BorderAndHorizontalGridContinuous => ui_msg!("Border and Horizontal Grid Continuous"),
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<JoinCondition> {
+        let n = name.trim().to_ascii_lowercase().replace([' ', '_'], "-");
+        JoinCondition::ALL.into_iter().find(|l| l.name() == n)
+    }
+
+    fn is_default(&self) -> bool {
+        *self == JoinCondition::NotDefined
+    }
+
+    /// Whether a vertical mullion runs through a horizontal one where they cross (else the horizontal one does). A
+    /// border's runs through what ends on it either way, and with a Border and … condition through the other border too:
+    /// a vertical border through a horizontal one with Border and Vertical Grid Continuous, and the other way round.
+    fn vertical_through(self, vertical_border: bool, horizontal_border: bool) -> bool {
+        match (vertical_border, horizontal_border) {
+            (true, false) => true,
+            (false, true) => false,
+            _ => matches!(
+                self,
+                JoinCondition::NotDefined | JoinCondition::VerticalGridContinuous | JoinCondition::BorderAndVerticalGridContinuous
+            ),
+        }
+    }
+}
+
+/// What makes a wall type a curtain type, as Revit's Type Properties of a curtain wall: the panel its cells are filled
+/// with (one of the project's curtain panel types; empty: the project's first glazed one), its Join Condition, its grid
+/// and its mullions each way. The vertical grid's lines stand along the wall; the horizontal grid's lie up it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CurtainType {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub panel: String,
+    #[serde(default, skip_serializing_if = "JoinCondition::is_default")]
+    pub join_condition: JoinCondition,
+    #[serde(default, skip_serializing_if = "GridRule::is_default")]
+    pub vertical: GridRule,
+    #[serde(default, skip_serializing_if = "GridRule::is_default")]
+    pub horizontal: GridRule,
+    #[serde(default, skip_serializing_if = "Mullions::is_empty")]
+    pub vertical_mullions: Mullions,
+    #[serde(default, skip_serializing_if = "Mullions::is_empty")]
+    pub horizontal_mullions: Mullions,
+}
+
+/// A curtain panel type, Revit's System Panel: `thickness` mm of `material` (one of the library's, or none), its middle
+/// `offset` mm to the exterior side of its wall's location line. An `empty` one is Revit's Empty System Panel: a cell
+/// left open, which has no solid.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PanelType {
+    pub thickness: f64,
+    #[serde(default, skip_serializing_if = "crate::model::is_zero")]
+    pub offset: f64,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub material: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub empty: bool,
+    #[serde(default, skip_serializing_if = "crate::type_data::TypeIdentity::is_empty")]
+    pub identity: crate::type_data::TypeIdentity,
+}
+
+/// A mullion type, Revit's Rectangular Mullion or (`round`) Circular Mullion. A rectangular one is `thickness` mm deep
+/// across its wall and `side1` + `side2` mm wide along it: `side1` to one side of its grid line (toward the wall's start,
+/// or its base), `side2` to the other. A circular one is `thickness` mm across (twice its Radius). Its middle is `offset`
+/// mm to the exterior side of the wall's location line.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MullionType {
+    pub thickness: f64,
+    #[serde(default, skip_serializing_if = "crate::model::is_zero")]
+    pub side1: f64,
+    #[serde(default, skip_serializing_if = "crate::model::is_zero")]
+    pub side2: f64,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub round: bool,
+    #[serde(default, skip_serializing_if = "crate::model::is_zero")]
+    pub offset: f64,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub material: String,
+    #[serde(default, skip_serializing_if = "crate::type_data::TypeIdentity::is_empty")]
+    pub identity: crate::type_data::TypeIdentity,
+}
+
+impl MullionType {
+    /// How far it reaches to each side of its grid line, mm: a circular one its radius both ways.
+    pub fn sides(&self) -> (f64, f64) {
+        if self.round { (self.thickness / 2.0, self.thickness / 2.0) } else { (self.side1, self.side2) }
+    }
+
+    /// How wide it is along its wall, mm.
+    pub fn width(&self) -> f64 {
+        let (a, b) = self.sides();
+        a + b
+    }
+}
+
+/// Where a grid starts counting from: Revit's Justification.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Justification {
+    #[default]
+    Beginning,
+    #[serde(alias = "centre")]
+    Center,
+    End,
+}
+
+impl Justification {
+    pub const ALL: [Justification; 3] = [Justification::Beginning, Justification::Center, Justification::End];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Justification::Beginning => "beginning",
+            Justification::Center => "center",
+            Justification::End => "end",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Justification::Beginning => ui_msg!("Beginning"),
+            Justification::Center => ui_msg!("Center"),
+            Justification::End => ui_msg!("End"),
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Justification> {
+        let n = name.trim().to_ascii_lowercase().replace("centre", "center");
+        Justification::ALL.into_iter().find(|l| l.name() == n)
+    }
+
+    fn is_default(&self) -> bool {
+        *self == Justification::Beginning
+    }
+}
+
+/// The lines a Fixed Number grid has unless its wall says: Revit's own.
+pub const NUMBER: u32 = 4;
+/// The most lines a wall's Number asks for, Revit's own limit.
+pub const MAX_NUMBER: u32 = 200;
+
+fn number() -> u32 {
+    NUMBER
+}
+
+fn is_number(n: &u32) -> bool {
+    *n == NUMBER
+}
+
+/// A curtain wall's own settings of its grid one way, Revit's instance properties: the Number of lines a Fixed Number
+/// layout has, the Justification its lines are counted from, and the Offset of the first from there, mm.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GridSet {
+    #[serde(default = "number", skip_serializing_if = "is_number")]
+    pub number: u32,
+    #[serde(default, skip_serializing_if = "Justification::is_default")]
+    pub justification: Justification,
+    #[serde(default, skip_serializing_if = "crate::model::is_zero")]
+    pub offset: f64,
+}
+
+impl Default for GridSet {
+    fn default() -> GridSet {
+        GridSet { number: NUMBER, justification: Justification::Beginning, offset: 0.0 }
+    }
+}
+
+impl GridSet {
+    fn is_default(&self) -> bool {
+        *self == GridSet::default()
+    }
+}
+
+/// What a wall keeps of its curtain grid: its own settings each way, the segments of grid lines removed so the panels
+/// either side are one (`merged`, each a segment's key), and the mullions deleted from it (`no_mullion`, each a
+/// mullion's key). A basic wall's is empty.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WallGrid {
+    #[serde(default, skip_serializing_if = "GridSet::is_default")]
+    pub vertical: GridSet,
+    #[serde(default, skip_serializing_if = "GridSet::is_default")]
+    pub horizontal: GridSet,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub merged: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub no_mullion: BTreeSet<String>,
+}
+
+impl WallGrid {
+    pub fn is_default(&self) -> bool {
+        *self == WallGrid::default()
+    }
+}
+
+/// A curtain grid line drawn by hand on curtain wall `host`, Revit's Curtain Grid: `vertical`, it stands `at` mm along
+/// the wall's location line from its start; else it lies `at` mm over the wall's base.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GridLine {
+    pub host: Guid,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub vertical: bool,
+    pub at: f64,
+}
+
+/// A curtain panel of curtain wall `host`: of one of the project's curtain panel types, filling the cell named `key`,
+/// from `span[0]` to `span[1]` mm along the wall's location line and from `span[2]` to `span[3]` mm over its base. The
+/// wall places it and lays it out again; `free` (unpinned), it keeps its type.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Panel {
+    #[serde(rename = "type")]
+    pub type_name: String,
+    pub host: Guid,
+    pub key: String,
+    pub span: [f64; 4],
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub free: bool,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub params: BTreeMap<String, serde_json::Value>,
+}
+
+/// A mullion of curtain wall `host`: of one of the project's mullion types, on the segment named `key` of a grid line.
+/// `vertical`, it stands `at` mm along the wall from its start, from `from` to `to` mm over the wall's base; else it lies
+/// `at` mm over the base, from `from` to `to` mm along the wall. `trim` is how far each end stops short of its segment's
+/// (negative: runs past it), where it meets a mullion that runs through or runs through one itself. `flip` swaps its two
+/// sides (a border's, so its Side 1 is always toward the wall's middle). The wall places it; `free` (unpinned, or put on
+/// by hand), it keeps its type.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Mullion {
+    #[serde(rename = "type")]
+    pub type_name: String,
+    pub host: Guid,
+    pub key: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub vertical: bool,
+    pub at: f64,
+    pub from: f64,
+    pub to: f64,
+    #[serde(default, skip_serializing_if = "crate::model::is_zero2")]
+    pub trim: [f64; 2],
+    /// On a border of the grid (1: the wall's start or base; 2: its end or top), it lies wholly inside the wall, its outer
+    /// side on the border, as Revit's; between borders (0) it is about its grid line.
+    #[serde(default, skip_serializing_if = "is_no_border")]
+    pub border: u8,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub free: bool,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub params: BTreeMap<String, serde_json::Value>,
+}
+
+fn is_no_border(b: &u8) -> bool {
+    *b == 0
+}
+
+/// How far a mullion of type `t` on border `border` reaches to the lower and to the upper side of its grid line, mm (the
+/// lower: toward the wall's start, or its base): about the line between borders, wholly inside the wall on one.
+pub fn reach(t: &MullionType, border: u8) -> (f64, f64) {
+    let (a, b) = t.sides();
+    match border {
+        1 => (0.0, a + b),
+        2 => (a + b, 0.0),
+        _ => (a, b),
+    }
+}
+
+impl Mullion {
+    /// Its length, mm: its segment's, less what its ends stop short by.
+    pub fn length(&self) -> f64 {
+        (self.to - self.from - self.trim[0] - self.trim[1]).max(0.0)
+    }
+
+    /// Where it starts and ends along its line, trimmed.
+    pub fn ends(&self) -> (f64, f64) {
+        (self.from + self.trim[0], self.to - self.trim[1])
+    }
+}
+
+impl Panel {
+    /// Its width along the wall and its height, mm.
+    pub fn size(&self) -> (f64, f64) {
+        (self.span[1] - self.span[0], self.span[3] - self.span[2])
+    }
+}
+
+// ====================================================================== the grid
+/// A grid line of a curtain wall: its key, where it is (mm along the wall for a vertical one, mm over the wall's base for a
+/// horizontal one), the hand-made line it is (its element's GUID), and which border (0: none; 1: the first; 2: the last).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Line {
+    pub key: String,
+    pub at: f64,
+    pub manual: Option<Guid>,
+    pub border: u8,
+}
+
+/// A curtain wall's grid: how long the wall is along its location line and how tall over its base, its vertical lines
+/// from its start to its end (`u`) and its horizontal ones from its base to its top (`v`), the borders first and last.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Grid {
+    pub length: f64,
+    pub height: f64,
+    pub u: Vec<Line>,
+    pub v: Vec<Line>,
+}
+
+/// The wall type of wall `w` when it is a curtain type.
+pub fn curtain_of<'a>(m: &'a Model, w: &Wall) -> Option<&'a CurtainType> {
+    m.types.wall.get(&w.type_name).and_then(|t| t.curtain.as_ref())
+}
+
+/// Whether wall `w` is a curtain wall.
+pub fn is_curtain(m: &Model, w: &Wall) -> bool {
+    curtain_of(m, w).is_some()
+}
+
+/// Where a rule's own lines lie over `extent` mm: each with the number it is counted by from the justification's origin.
+fn rule_lines(rule: &GridRule, set: &GridSet, extent: f64) -> Vec<(i64, f64)> {
+    let even = |panels: usize| (1..panels.min(MAX_LINES + 1)).map(|i| (i as i64, extent * i as f64 / panels as f64)).collect();
+    let spacing = rule.spacing;
+    match rule.layout {
+        Layout::None => Vec::new(),
+        Layout::FixedNumber => even(set.number as usize + 1),
+        _ if !(spacing.is_finite() && spacing > NEAR) => Vec::new(),
+        Layout::MaximumSpacing => even(((extent / spacing) - 1e-9).ceil().max(1.0) as usize),
+        Layout::MinimumSpacing => even(((extent / spacing) + 1e-9).floor().max(1.0) as usize),
+        Layout::FixedDistance => {
+            // From the justification's origin, every `spacing` both ways: a line on the origin itself when the offset moves
+            // it into the wall (the Beginning's and the End's own origin is a border), and the Center's at the wall's middle.
+            let (origin, way) = match set.justification {
+                Justification::Beginning => (set.offset, 1.0),
+                Justification::Center => (extent / 2.0 + set.offset, 1.0),
+                Justification::End => (extent - set.offset, -1.0),
+            };
+            if !origin.is_finite() {
+                return Vec::new();
+            }
+            let first = ((0.0 - origin) * way / spacing).floor() as i64 - 1;
+            let mut out = Vec::new();
+            let mut k = first.max(-(MAX_LINES as i64) * 4);
+            while out.len() < MAX_LINES {
+                let at = origin + way * spacing * k as f64;
+                let along = if way > 0.0 { at } else { extent - at };
+                if along >= extent - NEAR {
+                    break;
+                }
+                if along > NEAR {
+                    out.push((k, at));
+                }
+                k += 1;
+                if k > first + (MAX_LINES as i64) * 8 {
+                    break;
+                }
+            }
+            out
+        }
+    }
+}
+
+/// The lines one way over `extent` mm: the borders, the rule's and the hand-made ones (`manual`: each line's GUID and where
+/// it is), in order; a line within a millimetre of one before it is left out (a hand-made one before the rule's).
+fn lines_of(prefix: char, rule: &GridRule, set: &GridSet, extent: f64, manual: &[(Guid, f64)]) -> Vec<Line> {
+    let mut inner: Vec<Line> = manual
+        .iter()
+        .filter(|(_, at)| at.is_finite() && *at > NEAR && *at < extent - NEAR)
+        .map(|(g, at)| Line { key: format!("g{g}"), at: *at, manual: Some(*g), border: 0 })
+        .collect();
+    inner.extend(rule_lines(rule, set, extent).into_iter().map(|(k, at)| Line {
+        key: format!("{prefix}t{k}"),
+        at,
+        manual: None,
+        border: 0,
+    }));
+    // Hand-made lines first among those at one place, so the rule's is the one left out.
+    inner.sort_by(|a, b| a.at.total_cmp(&b.at).then(b.manual.is_some().cmp(&a.manual.is_some())).then(a.key.cmp(&b.key)));
+    let mut out = vec![Line { key: format!("{prefix}0"), at: 0.0, manual: None, border: 1 }];
+    for l in inner {
+        if out.last().is_some_and(|p| l.at - p.at > NEAR) && out.len() <= MAX_LINES {
+            out.push(l);
+        }
+    }
+    out.push(Line { key: format!("{prefix}1"), at: extent, manual: None, border: 2 });
+    out
+}
+
+/// The hand-made grid lines of the wall whose GUID is `host`: each one's GUID and where it is, vertical ones and then
+/// horizontal ones.
+fn manual_lines(m: &Model, host: Guid) -> (Vec<(Guid, f64)>, Vec<(Guid, f64)>) {
+    let (mut u, mut v) = (Vec::new(), Vec::new());
+    for id in m.hosted_by(host) {
+        if let (Some(Element::CurtainGrid(l)), Some(g)) = (m.elements.get(id), m.elements.guid(id)) {
+            if l.vertical { u.push((g, l.at)) } else { v.push((g, l.at)) }
+        }
+    }
+    (u, v)
+}
+
+/// Curtain wall `id`'s grid; none for a wall that is not one.
+pub fn grid(m: &Model, id: Id) -> Option<Grid> {
+    let w = m.wall(id)?;
+    let ct = curtain_of(m, w)?;
+    let host = m.elements.guid(id)?;
+    let (length, height) = (Axis::of(w).length(), m.own_top(w) - m.own_base(w));
+    if !(length.is_finite() && height.is_finite() && length > NEAR && height > NEAR) {
+        return None;
+    }
+    let (mu, mv) = manual_lines(m, host);
+    Some(Grid {
+        length,
+        height,
+        u: lines_of('u', &ct.vertical, &w.curtain.vertical, length, &mu),
+        v: lines_of('v', &ct.horizontal, &w.curtain.horizontal, height, &mv),
+    })
+}
+
+/// The key of the segment of line `line` that starts where line `from` crosses it: a mullion's, and a removed segment's.
+pub fn segment_key(line: &str, from: &str) -> String {
+    format!("{line}|{from}")
+}
+
+/// The GUID of the panel or mullion named `key` (a mullion's with `m:` before it) of the wall whose GUID is `host`, in a
+/// project of `seed` (its `uid`): the same in every copy of the project.
+pub fn child_guid(seed: u64, host: Guid, key: &str) -> Guid {
+    let n = format!("{host}/{key}").bytes().fold(0xCBF2_9CE4_8422_2325_u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01B3));
+    Guid::seeded(seed ^ 0x6375_7274_6169_6E00, n)
+}
+
+/// A cell of the grid: columns `i` (between vertical lines `i` and `i + 1`) and rows `j`.
+type Cell = (usize, usize);
+
+impl Grid {
+    /// Whether the segment of vertical line `i` beside row `j` (or, `vertical` false, of horizontal line `i` under column
+    /// `j`) is there: a border's always is, another's unless `merged` names it.
+    fn has_segment(&self, merged: &BTreeSet<String>, vertical: bool, i: usize, j: usize) -> bool {
+        let (lines, across) = if vertical { (&self.u, &self.v) } else { (&self.v, &self.u) };
+        match (lines.get(i), across.get(j)) {
+            (Some(l), Some(f)) => l.border != 0 || !merged.contains(&segment_key(&l.key, &f.key)),
+            _ => true,
+        }
+    }
+
+    /// The panels: each the cells it covers, from its lower left one to its upper right one. Cells either side of a
+    /// removed segment are one panel where together they make a rectangle; where they would not, each stays its own.
+    pub fn panels(&self, merged: &BTreeSet<String>) -> Vec<(Cell, Cell)> {
+        let (nu, nv) = (self.u.len().saturating_sub(1), self.v.len().saturating_sub(1));
+        if nu == 0 || nv == 0 {
+            return Vec::new();
+        }
+        let at = |i: usize, j: usize| j * nu + i;
+        let mut group: Vec<usize> = (0..nu * nv).collect();
+        fn find(g: &mut [usize], mut x: usize) -> usize {
+            while let Some(&p) = g.get(x) {
+                if p == x {
+                    break;
+                }
+                x = p;
+            }
+            x
+        }
+        if !merged.is_empty() {
+            for j in 0..nv {
+                for i in 0..nu {
+                    if i + 1 < nu && !self.has_segment(merged, true, i + 1, j) {
+                        let (a, b) = (find(&mut group, at(i, j)), find(&mut group, at(i + 1, j)));
+                        if let Some(slot) = group.get_mut(a.max(b)) {
+                            *slot = a.min(b);
+                        }
+                    }
+                    if j + 1 < nv && !self.has_segment(merged, false, j + 1, i) {
+                        let (a, b) = (find(&mut group, at(i, j)), find(&mut group, at(i, j + 1)));
+                        if let Some(slot) = group.get_mut(a.max(b)) {
+                            *slot = a.min(b);
+                        }
+                    }
+                }
+            }
+        }
+        // Each group's box and how many cells it has: a rectangle fills its box.
+        let mut boxes: BTreeMap<usize, (Cell, Cell, usize)> = BTreeMap::new();
+        for j in 0..nv {
+            for i in 0..nu {
+                let root = find(&mut group, at(i, j));
+                let b = boxes.entry(root).or_insert(((i, j), (i, j), 0));
+                b.0 = (b.0.0.min(i), b.0.1.min(j));
+                b.1 = (b.1.0.max(i), b.1.1.max(j));
+                b.2 += 1;
+            }
+        }
+        let mut out = Vec::new();
+        for (root, (lo, hi, count)) in boxes {
+            if (hi.0 - lo.0 + 1) * (hi.1 - lo.1 + 1) == count {
+                out.push((lo, hi));
+            } else {
+                // Not a rectangle: its cells one by one.
+                for j in 0..nv {
+                    for i in 0..nu {
+                        if find(&mut group, at(i, j)) == root {
+                            out.push(((i, j), (i, j)));
+                        }
+                    }
+                }
+            }
+        }
+        out.sort_by_key(|(lo, _)| (lo.1, lo.0));
+        out
+    }
+
+    /// The vertical line nearest `s` mm along the wall and the horizontal one nearest `z` mm over its base, as indices.
+    pub fn nearest(&self, s: f64, z: f64) -> (usize, usize) {
+        let near = |lines: &[Line], x: f64| {
+            lines.iter().enumerate().min_by(|a, b| (a.1.at - x).abs().total_cmp(&(b.1.at - x).abs())).map_or(0, |(i, _)| i)
+        };
+        (near(&self.u, s), near(&self.v, z))
+    }
+
+    /// The column `s` mm along the wall is in and the row `z` mm over its base is in.
+    pub fn cell(&self, s: f64, z: f64) -> Cell {
+        let slot = |lines: &[Line], x: f64| lines.iter().rposition(|l| l.at <= x + 1e-6).unwrap_or(0).min(lines.len().saturating_sub(2));
+        (slot(&self.u, s), slot(&self.v, z))
+    }
+}
+
+// ====================================================================== what a wall has
+/// The panels and mullions curtain wall `id` has now, as its grid, its type and what a person changed give them: each
+/// with its GUID. None for a wall that is not a curtain wall (it has none).
+pub fn laid(m: &Model, id: Id) -> Vec<(Guid, Element)> {
+    let Some(g) = grid(m, id) else { return Vec::new() };
+    let (Some(w), Some(host)) = (m.wall(id), m.elements.guid(id)) else { return Vec::new() };
+    let Some(ct) = curtain_of(m, w) else { return Vec::new() };
+    let mut out = Vec::new();
+    let default_panel = default_panel(m, ct);
+    let existing = |guid: Guid| m.elements.id(guid).and_then(|id| m.elements.get(id));
+
+    for (lo, hi) in g.panels(&w.curtain.merged) {
+        let (Some(u0), Some(u1), Some(v0), Some(v1)) = (g.u.get(lo.0), g.u.get(hi.0 + 1), g.v.get(lo.1), g.v.get(hi.1 + 1)) else {
+            continue;
+        };
+        let key = segment_key(&u0.key, &v0.key);
+        let guid = child_guid(m.uid, host, &key);
+        let (type_name, free, params) = match existing(guid) {
+            Some(Element::CurtainPanel(p)) if p.free => (p.type_name.clone(), true, p.params.clone()),
+            Some(Element::CurtainPanel(p)) => (default_panel.clone(), false, p.params.clone()),
+            _ => (default_panel.clone(), false, BTreeMap::new()),
+        };
+        if type_name.is_empty() {
+            continue;
+        }
+        out.push((guid, Element::CurtainPanel(Panel { type_name, host, key, span: [u0.at, u1.at, v0.at, v1.at], free, params })));
+    }
+
+    // Mullions: on each line's segments between the lines that cross it. A segment's mullion is the type's for that line
+    // (its interior, or a border's), unless it was deleted; a freed one, or one put on by hand where the type has none, is
+    // kept as it is.
+    let side = |ms: &Mullions, border: u8| match border {
+        1 => ms.border1.clone(),
+        2 => ms.border2.clone(),
+        _ => ms.interior.clone(),
+    };
+    let mut found: Vec<Mullion> = Vec::new();
+    for vertical in [true, false] {
+        let (lines, across, ms) = if vertical { (&g.u, &g.v, &ct.vertical_mullions) } else { (&g.v, &g.u, &ct.horizontal_mullions) };
+        for (i, line) in lines.iter().enumerate() {
+            for (j, pair) in across.windows(2).enumerate() {
+                let [from, to] = pair else { continue };
+                if !g.has_segment(&w.curtain.merged, vertical, i, j) {
+                    continue;
+                }
+                let key = format!("m:{}", segment_key(&line.key, &from.key));
+                let guid = child_guid(m.uid, host, &key);
+                let was = match existing(guid) {
+                    Some(Element::Mullion(x)) => Some(x),
+                    _ => None,
+                };
+                let (type_name, free) = match was {
+                    Some(x) if x.free => (x.type_name.clone(), true),
+                    _ if w.curtain.no_mullion.contains(&key) => continue,
+                    _ => (side(ms, line.border), false),
+                };
+                if type_name.is_empty() || !m.types.mullion.contains_key(&type_name) {
+                    continue;
+                }
+                found.push(Mullion {
+                    type_name,
+                    host,
+                    key,
+                    vertical,
+                    at: line.at,
+                    from: from.at,
+                    to: to.at,
+                    trim: [0.0, 0.0],
+                    border: line.border,
+                    free,
+                    params: was.map(|x| x.params.clone()).unwrap_or_default(),
+                });
+            }
+        }
+    }
+    trim(m, ct.join_condition, &g, &mut found);
+    out.extend(found.into_iter().map(|x| (child_guid(m.uid, host, &x.key), Element::Mullion(x))));
+    out
+}
+
+/// The panel type a curtain type fills its cells with: the one it names, or the project's first that is not empty.
+fn default_panel(m: &Model, ct: &CurtainType) -> String {
+    if m.types.curtain_panel.contains_key(&ct.panel) {
+        return ct.panel.clone();
+    }
+    m.types.curtain_panel.iter().find(|(_, t)| !t.empty).map(|(n, _)| n.clone()).unwrap_or_default()
+}
+
+/// Each mullion's ends cut where it meets one that runs through, and run on to the far side of one it runs through itself,
+/// by the type's Join Condition.
+fn trim(m: &Model, join: JoinCondition, g: &Grid, all: &mut [Mullion]) {
+    // What stands on each crossing: (vertical line's place, horizontal line's place) -> the widest mullion each way there.
+    let key = |s: f64, z: f64| ((s * 16.0).round() as i64, (z * 16.0).round() as i64);
+    let mut at_u: BTreeMap<(i64, i64), (f64, f64)> = BTreeMap::new();
+    let mut at_v: BTreeMap<(i64, i64), (f64, f64)> = BTreeMap::new();
+    for x in all.iter() {
+        let Some(t) = m.types.mullion.get(&x.type_name) else { continue };
+        let sides = reach(t, x.border);
+        for end in [x.from, x.to] {
+            let (k, map) = if x.vertical { (key(x.at, end), &mut at_u) } else { (key(end, x.at), &mut at_v) };
+            let e = map.entry(k).or_insert((0.0, 0.0));
+            *e = (e.0.max(sides.0), e.1.max(sides.1));
+        }
+    }
+    let border = |lines: &[Line], at: f64| lines.iter().any(|l| l.border != 0 && (l.at - at).abs() <= NEAR);
+    for x in all.iter_mut() {
+        for (n, end) in [x.from, x.to].into_iter().enumerate() {
+            let (k, other) = if x.vertical { (key(x.at, end), &at_v) } else { (key(end, x.at), &at_u) };
+            let Some(&(s1, s2)) = other.get(&k) else { continue };
+            let (vb, hb) = if x.vertical { (border(&g.u, x.at), border(&g.v, end)) } else { (border(&g.u, end), border(&g.v, x.at)) };
+            let through = join.vertical_through(vb, hb) == x.vertical;
+            // The crossing mullion reaches `s1` toward the lower side of its line and `s2` toward the upper: this end
+            // stops at the side it comes from, or runs through to the far one.
+            let (near, far) = if n == 0 { (s2, s1) } else { (s1, s2) };
+            if let Some(slot) = x.trim.get_mut(n) {
+                *slot = if through { -far } else { near };
+            }
+        }
+    }
+}
+
+// ====================================================================== kept after each command
+/// What [`keep`] found to do: elements to take out, and elements to put (each at the id it had, or new, with its GUID).
+#[derive(Default)]
+pub struct Update {
+    remove: Vec<Id>,
+    put: Vec<(Option<Id>, Guid, Element)>,
+}
+
+impl Update {
+    pub fn is_empty(&self) -> bool {
+        self.remove.is_empty() && self.put.is_empty()
+    }
+}
+
+/// Whether the element is a curtain wall's own: a panel, a mullion or a hand-made grid line. Its host's GUID.
+pub fn host_of(e: &Element) -> Option<Guid> {
+    match e {
+        Element::CurtainPanel(p) => Some(p.host),
+        Element::Mullion(x) => Some(x.host),
+        Element::CurtainGrid(l) => Some(l.host),
+        _ => None,
+    }
+}
+
+/// Whether the wall placed the panel or mullion and still holds it, as Revit's pin on what a curtain type placed.
+pub fn placed(e: &Element) -> bool {
+    matches!(e, Element::CurtainPanel(Panel { free: false, .. }) | Element::Mullion(Mullion { free: false, .. }))
+}
+
+/// After a command: the curtain walls it touched laid out again. A wall is touched when it changed, when one of its panels,
+/// mullions or grid lines did, when a level did (its height may have), or when the types did (every curtain wall, then).
+/// What [`apply`] then changes; empty when nothing needs it.
+pub fn keep(m: &Model, before: &Model) -> Update {
+    let all = || m.elements.iter().filter(|(_, e)| matches!(e, Element::Wall(_))).map(|(id, _)| *id).collect::<BTreeSet<Id>>();
+    let mut orphans: Vec<Id> = Vec::new();
+    let walls: BTreeSet<Id> = match m.elements.changed_since(&before.elements) {
+        _ if m.types != before.types || m.uid != before.uid => all(),
+        Changed::All => all(),
+        Changed::Ids(ids) => {
+            let mut walls = BTreeSet::new();
+            let mut level = false;
+            for id in ids {
+                for x in [m, before] {
+                    match x.elements.get(id) {
+                        Some(Element::Wall(_)) => {
+                            walls.insert(id);
+                            // A wall that is gone takes what it hosted with it.
+                            if !m.elements.contains_key(id)
+                                && let Some(g) = before.elements.guid(id)
+                            {
+                                orphans.extend(before.hosted_by(g).into_iter().filter(|c| m.elements.contains_key(*c)));
+                            }
+                        }
+                        Some(Element::Level(_) | Element::Roof(_) | Element::Floor(_)) => level = true,
+                        Some(e) => {
+                            if let Some(h) = host_of(e) {
+                                match m.elements.id(h) {
+                                    Some(w) => {
+                                        walls.insert(w);
+                                    }
+                                    None if m.elements.contains_key(id) => orphans.push(id),
+                                    None => {}
+                                }
+                            }
+                        }
+                        None => {}
+                    }
+                }
+            }
+            if level { all() } else { walls }
+        }
+    };
+    let mut up = Update { remove: orphans, put: Vec::new() };
+    up.remove.sort_unstable();
+    up.remove.dedup();
+    for id in walls {
+        relay(m, id, &mut up);
+    }
+    up
+}
+
+/// Every curtain wall laid out again: a file read from elsewhere, or from before.
+pub fn keep_all(m: &mut Model) {
+    let mut up = Update::default();
+    let walls: Vec<Id> = m.elements.iter().filter(|(_, e)| matches!(e, Element::Wall(_))).map(|(id, _)| *id).collect();
+    for id in walls {
+        relay(m, id, &mut up);
+    }
+    apply(m, up);
+}
+
+/// Wall `id`'s panels and mullions as they are against as they should be: what differs, into `up`.
+fn relay(m: &Model, id: Id, up: &mut Update) {
+    let Some(host) = m.elements.guid(id) else { return };
+    let Some(w) = m.wall(id) else { return };
+    let mine: Vec<Id> = m.hosted_by(host);
+    if !is_curtain(m, w) {
+        // A basic wall has none of these: a wall whose type was changed loses them.
+        up.remove.extend(mine.into_iter().filter(|c| m.elements.get(*c).is_some_and(|e| host_of(e).is_some())));
+        return;
+    }
+    let want = laid(m, id);
+    let wanted: BTreeSet<Guid> = want.iter().map(|(g, _)| *g).collect();
+    for c in mine {
+        let Some(e) = m.elements.get(c) else { continue };
+        let ours = matches!(e, Element::CurtainPanel(_) | Element::Mullion(_));
+        if ours && !m.elements.guid(c).is_some_and(|g| wanted.contains(&g)) {
+            up.remove.push(c);
+        }
+    }
+    for (guid, e) in want {
+        match m.elements.id(guid) {
+            Some(c) if m.elements.get(c) == Some(&e) => {}
+            // The GUID is another kind of element's: leave both be (a file from elsewhere).
+            Some(c) if !m.elements.get(c).is_some_and(|x| host_of(x).is_some()) => {}
+            c => up.put.push((c, guid, e)),
+        }
+    }
+}
+
+/// What [`keep`] worked out, made so.
+pub fn apply(m: &mut Model, up: Update) {
+    for id in up.remove {
+        m.elements.remove(id);
+    }
+    for (id, guid, e) in up.put {
+        match id {
+            Some(id) => {
+                m.elements.insert(id, e);
+            }
+            None => {
+                let id = m.fresh_id();
+                // A GUID taken meanwhile leaves the element out: the next layout puts it.
+                let _ = m.elements.insert_as(id, guid, e);
+            }
+        }
+    }
+}
+
+// ====================================================================== where they are
+/// A panel's or a mullion's wall: its id, the wall and its location line.
+pub fn host<'a>(m: &'a Model, host: Guid) -> Option<(Id, &'a Wall, Axis)> {
+    let id = m.elements.id(host)?;
+    let w = m.wall(id)?;
+    Some((id, w, Axis::of(w)))
+}
+
+/// A panel in the model: its four corners in plan and height (lower start, lower end, upper end, upper start) on the
+/// plane through its middle, the way its outside faces, and its thickness. Flat from one side to the other, as Revit's
+/// on a curved wall. None when its wall or its type is gone, or its type is empty.
+pub fn panel_face(m: &Model, p: &Panel) -> Option<([[f64; 3]; 4], P2, f64)> {
+    let t = m.types.curtain_panel.get(&p.type_name).filter(|t| !t.empty)?;
+    let (_, w, axis) = host(m, p.host)?;
+    let [s0, s1, z0, z1] = p.span;
+    let (a, b) = (axis.at(s0, 0.0), axis.at(s1, 0.0));
+    let along = (b - a).unit();
+    if !(along.0.is_finite() && along.1.is_finite()) {
+        return None;
+    }
+    // The exterior is to the wall's left.
+    let out = along.perp();
+    let (a, b) = (a + out * t.offset, b + out * t.offset);
+    let base = m.own_base(w);
+    Some(([[a.0, a.1, base + z0], [b.0, b.1, base + z0], [b.0, b.1, base + z1], [a.0, a.1, base + z1]], out, t.thickness))
+}
+
+/// A mullion in the model: the two ends of its middle line (x, y, z), the way its width runs (a unit vector in plan for a
+/// vertical one; straight up, `None`, for a horizontal one), the way its depth runs (out of the wall, in plan), and its
+/// type. A horizontal one on a curved wall is straight from end to end. None when its wall or type is gone.
+pub fn mullion_line<'a>(m: &'a Model, x: &Mullion) -> Option<([f64; 3], [f64; 3], Option<P2>, P2, &'a MullionType)> {
+    let t = m.types.mullion.get(&x.type_name)?;
+    let (_, w, axis) = host(m, x.host)?;
+    let base = m.own_base(w);
+    let (from, to) = x.ends();
+    if to - from <= TOL {
+        return None;
+    }
+    // Its middle line: on its grid line, or on a border half its width inside it.
+    let (lower, upper) = reach(t, x.border);
+    let shift = (upper - lower) / 2.0 - (t.sides().1 - t.sides().0) / 2.0;
+    if x.vertical {
+        let along = axis.tangent(x.at);
+        let out = along.perp();
+        let p = axis.at(x.at, 0.0) + along * shift + out * t.offset;
+        Some(([p.0, p.1, base + from], [p.0, p.1, base + to], Some(along), out, t))
+    } else {
+        let (a, b) = (axis.at(x.from, 0.0), axis.at(x.to, 0.0));
+        let along = (b - a).unit();
+        if !(along.0.is_finite() && along.1.is_finite()) {
+            return None;
+        }
+        let out = along.perp();
+        // Trimmed along the straight line between its segment's ends.
+        let (a, b) = (a + along * x.trim[0] + out * t.offset, b - along * x.trim[1] + out * t.offset);
+        Some(([a.0, a.1, base + x.at + shift], [b.0, b.1, base + x.at + shift], None, out, t))
+    }
+}
+
+/// The types a wall type's curtain names: its panel and its six mullions, each with what it is called.
+pub fn names(t: &WallType) -> Vec<(&'static str, &'static str, &str)> {
+    let Some(c) = &t.curtain else { return Vec::new() };
+    let mut out = vec![("curtain_panel", "curtain panel", c.panel.as_str())];
+    for (which, ms) in [("vertical", &c.vertical_mullions), ("horizontal", &c.horizontal_mullions)] {
+        for (what, n) in ms.named() {
+            let _ = (which, what);
+            out.push(("mullion", "mullion", n));
+        }
+    }
+    out
+}
+
+// ====================================================================== what a project starts with
+/// The curtain wall types every project can draw without making one, as Revit's template has them: the plain Curtain
+/// Wall (one panel, no grid), Exterior Glazing (a grid, no mullions) and Storefront (a grid with mullions). A project gets
+/// one, with the panel and mullion types it names, when it is first asked for ([`ensure_starter`]): a project that draws
+/// no curtain wall holds nothing of them, and an older build still opens it.
+pub const STARTER_WALLS: [&str; 3] = ["Curtain Wall", "Exterior Glazing", "Storefront"];
+/// The starter curtain panel types: Revit's System Panel Glazed and Solid, and its Empty System Panel.
+pub const GLAZED: &str = "Glazed";
+pub const SOLID: &str = "Solid";
+pub const EMPTY: &str = "Empty";
+/// The starter mullion types: Revit's Rectangular Mullion 50 x 150mm and 30mm Square, and Circular Mullion 25mm Radius
+/// and 50mm Radius.
+pub const MULLION: &str = "50 x 150mm";
+pub const STARTER_MULLIONS: [(&str, bool, f64, f64); 4] = [
+    (MULLION, false, 150.0, 25.0),
+    ("30mm Square", false, 30.0, 15.0),
+    ("25mm Radius", true, 50.0, 0.0),
+    ("50mm Radius", true, 100.0, 0.0),
+];
+
+/// How deep a curtain type's walls reach across their line, mm: its deepest panel or mullion, which its `thickness` holds.
+pub fn depth(m: &Model, c: &CurtainType) -> f64 {
+    let panel = m.types.curtain_panel.get(&default_panel(m, c)).map_or(0.0, |t| t.thickness + 2.0 * t.offset.abs());
+    let mullions = [&c.vertical_mullions, &c.horizontal_mullions]
+        .into_iter()
+        .flat_map(|ms| ms.named())
+        .filter_map(|(_, n)| m.types.mullion.get(n))
+        .map(|t| t.thickness + 2.0 * t.offset.abs());
+    mullions.fold(panel, f64::max).max(25.0)
+}
+
+/// The starter curtain panel types the project lacks, made: Glazed (glass), Solid and Empty.
+pub fn ensure_panels(m: &mut Model) {
+    let material = |m: &Model, name: &str| {
+        let word = m.language.word(name).to_string();
+        if m.materials.contains_key(&word) { word } else { String::new() }
+    };
+    let (glass, metal) = (material(m, "Glass"), material(m, "Metal"));
+    let types = &mut m.types.curtain_panel;
+    for (name, material, empty) in [(GLAZED, glass, false), (SOLID, metal, false), (EMPTY, String::new(), true)] {
+        if !types.contains_key(name) {
+            types.insert(name.to_string(), PanelType { thickness: 25.0, material, empty, ..PanelType::default() });
+        }
+    }
+}
+
+/// The starter mullion types the project lacks, made.
+pub fn ensure_mullions(m: &mut Model) {
+    let word = m.language.word("Metal").to_string();
+    let material = if m.materials.contains_key(&word) { word } else { String::new() };
+    for (name, round, thickness, side) in STARTER_MULLIONS {
+        if !m.types.mullion.contains_key(name) {
+            let t = MullionType { thickness, side1: side, side2: side, round, material: material.clone(), ..MullionType::default() };
+            m.types.mullion.insert(name.to_string(), t);
+        }
+    }
+}
+
+/// Starter curtain wall type `name` made, with what it names, when the project has no wall type of that name: whether it
+/// is one of [`STARTER_WALLS`] (there now).
+pub fn ensure_starter(m: &mut Model, name: &str) -> bool {
+    if !STARTER_WALLS.contains(&name) {
+        return false;
+    }
+    if m.types.wall.contains_key(name) {
+        return true;
+    }
+    ensure_panels(m);
+    let rule = |layout, spacing| GridRule { layout, spacing, adjust_for_mullion: false };
+    let mut c = CurtainType { panel: GLAZED.into(), ..CurtainType::default() };
+    match name {
+        "Exterior Glazing" => {
+            c.vertical = rule(Layout::FixedDistance, 1500.0);
+            c.horizontal = rule(Layout::FixedDistance, 4000.0);
+        }
+        "Storefront" => {
+            ensure_mullions(m);
+            c.vertical = rule(Layout::MaximumSpacing, 1500.0);
+            c.horizontal = rule(Layout::FixedDistance, 2400.0);
+            let all = || Mullions { interior: MULLION.into(), border1: MULLION.into(), border2: MULLION.into() };
+            (c.vertical_mullions, c.horizontal_mullions) = (all(), all());
+        }
+        _ => {}
+    }
+    let thickness = depth(m, &c);
+    m.types.wall.insert(name.to_string(), WallType { thickness, curtain: Some(c), ..WallType::default() });
+    true
+}
+
+/// Every curtain wall type's `thickness` brought to how deep it reaches now ([`depth`]): after a panel or a mullion type
+/// it names changed.
+pub fn refresh_depths(m: &mut Model) {
+    let now: Vec<(String, f64)> = m
+        .types
+        .wall
+        .iter()
+        .filter_map(|(n, t)| t.curtain.as_ref().map(|c| (n.clone(), depth(m, c))))
+        .filter(|(n, d)| m.types.wall.get(n).is_some_and(|t| (t.thickness - d).abs() > 1e-9))
+        .collect();
+    for (n, d) in now {
+        if let Some(t) = m.types.wall.get_mut(&n) {
+            t.thickness = d;
+        }
+    }
+}

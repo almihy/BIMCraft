@@ -24,6 +24,7 @@ fn wall(level: Guid, a: P2, b: P2) -> Element {
         join: true,
         join_start: true,
         join_end: true,
+        curtain: Default::default(),
     })
 }
 

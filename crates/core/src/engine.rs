@@ -673,6 +673,14 @@ impl Session {
                     }
                 }
             }
+            // Curtain walls the command touched laid out again: their panels and mullions as their grid, their type and
+            // their own lines now give them (curtain.rs).
+            if cmd.undoable {
+                let update = crate::curtain::keep(&self.model, &before);
+                if !update.is_empty() {
+                    crate::curtain::apply(self.model_mut(), update);
+                }
+            }
             // Locked and equal dimensions moved what they measure to as the command moved it.
             if cmd.undoable {
                 keep_constraints(self, &before)?;

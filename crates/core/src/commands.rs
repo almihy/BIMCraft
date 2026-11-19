@@ -8104,6 +8104,13 @@ fn wire_type(s: &mut Session, p: &Value) -> R {
 
 fn wall(s: &mut Session, p: &Value) -> R {
     let c = "wall";
+    // A starter curtain wall type (Curtain Wall, Exterior Glazing, Storefront) is made when first drawn with.
+    if let Some(n) = string(c, p, "type")?
+        && crate::curtain::STARTER_WALLS.contains(&n.as_str())
+        && !s.model.types.wall.contains_key(&n)
+    {
+        crate::curtain::ensure_starter(s.model_mut(), &n);
+    }
     let m = &s.model;
     // One wall each, from start to end and turning: along `points`, or along each line a pick of a CAD import takes.
     let (segs, level, skipped): (Vec<(P2, P2, f64)>, Option<Guid>, usize) = match cad_pick::picked_segments(c, m, p)? {
@@ -8171,6 +8178,7 @@ fn wall(s: &mut Session, p: &Value) -> R {
                 join: true,
                 join_start: true,
                 join_end: true,
+                curtain: Default::default(),
             }))
         })
         .collect();
@@ -10011,6 +10019,7 @@ fn dormer(s: &mut Session, p: &Value) -> R {
             join: true,
             join_start: true,
             join_end: true,
+            curtain: Default::default(),
         })
     };
     let (l, r) = (micron(at + n * (w / 2.0)), micron(at - n * (w / 2.0)));
@@ -12851,6 +12860,87 @@ fn families(m: &Model) -> Value {
     Value::Object(all)
 }
 
+/// Whether the `type` command is to make or keep wall type `name` a curtain type: `curtain` given (not null), or the type
+/// is one already and `curtain` isn't given.
+fn curtain_wanted(m: &Model, p: &Value, name: &str) -> bool {
+    match p.get("curtain") {
+        Some(Value::Null) => false,
+        Some(_) => true,
+        None => m.types.wall.get(name).is_some_and(WallType::is_curtain),
+    }
+}
+
+/// A curtain type as `type`'s `curtain` gives it over what the type had (`old`): each key kept when not given, a grid's
+/// and a mullion set's keys too. A layout and a join condition are read in Revit's words in any case ("Fixed Distance").
+/// A starter panel or mullion type it names is made when the project lacks it.
+fn curtain_type(
+    c: &str,
+    m: &mut Model,
+    given: Option<&Value>,
+    old: Option<&crate::curtain::CurtainType>,
+) -> Result<crate::curtain::CurtainType, String> {
+    let mut v = serde_json::to_value(old.cloned().unwrap_or_default()).map_err(|e| bad(c, e.to_string()))?;
+    let given = match given {
+        None => Value::Object(Default::default()),
+        Some(Value::Bool(true)) => Value::Object(Default::default()),
+        Some(g @ Value::Object(_)) => g.clone(),
+        Some(_) => {
+            return Err(bad(
+                c,
+                "`curtain` is {panel?, join_condition?, vertical?, horizontal?, vertical_mullions?, horizontal_mullions?}, true for a plain curtain type, or null for a basic wall type",
+            ));
+        }
+    };
+    let word = |v: &Value| v.as_str().map(|s| json!(s.trim().to_ascii_lowercase().replace([' ', '_'], "-")));
+    if let (Some(to), Some(from)) = (v.as_object_mut(), given.as_object()) {
+        for (k, g) in from {
+            match (k.as_str(), g) {
+                ("vertical" | "horizontal" | "vertical_mullions" | "horizontal_mullions", Value::Object(inner)) => {
+                    let slot = to.entry(k.clone()).or_insert_with(|| Value::Object(Default::default()));
+                    if let Some(slot) = slot.as_object_mut() {
+                        for (ik, iv) in inner {
+                            let iv = if ik == "layout" { word(iv).unwrap_or_else(|| iv.clone()) } else { iv.clone() };
+                            // A mullion type given as null is none.
+                            slot.insert(ik.clone(), if iv.is_null() && k.ends_with("mullions") { json!("") } else { iv });
+                        }
+                    }
+                }
+                ("join_condition", g) => {
+                    to.insert(k.clone(), word(g).unwrap_or_else(|| g.clone()));
+                }
+                ("panel", Value::Null) => {
+                    to.insert(k.clone(), json!(""));
+                }
+                _ => {
+                    to.insert(k.clone(), g.clone());
+                }
+            }
+        }
+    }
+    let ct: crate::curtain::CurtainType = serde_json::from_value(v).map_err(|e| {
+        bad(
+            c,
+            format!(
+                "`curtain`: {e}. It is {{panel?, join_condition?: not-defined|vertical-grid-continuous|horizontal-grid-continuous|\
+                 border-and-vertical-grid-continuous|border-and-horizontal-grid-continuous, vertical?, horizontal?: {{layout: none|fixed-distance|\
+                 fixed-number|maximum-spacing|minimum-spacing, spacing?, adjust_for_mullion?}}, vertical_mullions?, horizontal_mullions?: \
+                 {{interior?, border1?, border2?}}}}"
+            ),
+        )
+    })?;
+    // What it names of the starter types, made where the project has none.
+    let starter_mullion = |n: &str| crate::curtain::STARTER_MULLIONS.iter().any(|(s, ..)| *s == n);
+    let named: Vec<&str> = [&ct.vertical_mullions, &ct.horizontal_mullions].into_iter().flat_map(|ms| ms.named()).map(|(_, n)| n).collect();
+    if named.iter().any(|n| starter_mullion(n) && !m.types.mullion.contains_key(*n)) {
+        crate::curtain::ensure_mullions(m);
+    }
+    let starter_panel = [crate::curtain::GLAZED, crate::curtain::SOLID, crate::curtain::EMPTY].contains(&ct.panel.as_str());
+    if m.types.curtain_panel.is_empty() || (starter_panel && !m.types.curtain_panel.contains_key(&ct.panel)) {
+        crate::curtain::ensure_panels(m);
+    }
+    Ok(ct)
+}
+
 fn edit_type(s: &mut Session, p: &Value) -> R {
     let c = "type";
     let cat = category(&string(c, p, "category")?.ok_or_else(|| bad(c, "`category` is required: wall, floor, ceiling, door or window"))?);
@@ -12862,6 +12952,69 @@ fn edit_type(s: &mut Session, p: &Value) -> R {
     let mut identity = m.identity_of(&cat, &name).cloned().unwrap_or_default();
     identity.read(p).map_err(|e| bad(c, e))?;
     let t = match cat.as_str() {
+        // A curtain wall type (`curtain` given, or the type is one and it isn't taken away): no layers, and as deep as what
+        // it names.
+        "wall" if curtain_wanted(m, p, &name) => {
+            let old = m.types.wall.get(&name).cloned().unwrap_or_default();
+            if !absent(p.get("layers")) || !absent(p.get("core")) {
+                return Err(bad(c, "a curtain wall type has no layers: its panels and mullions are what it is made of"));
+            }
+            let ct = curtain_type(c, m, p.get("curtain"), old.curtain.as_ref())?;
+            let function = match string(c, p, "function")? {
+                Some(n) => crate::model::WallFunction::from_name(&n).ok_or_else(|| {
+                    bad(c, format!("`function` is interior, exterior, foundation, retaining, soffit or core-shaft, not `{n}`"))
+                })?,
+                None => old.function,
+            };
+            let t = WallType { thickness: crate::curtain::depth(m, &ct), identity, function, curtain: Some(ct), ..WallType::default() };
+            m.types.wall.insert(name.clone(), t.clone());
+            json!(t)
+        }
+        "curtainpanel" => {
+            let old = m.types.curtain_panel.get(&name).cloned();
+            let empty = match p.get("empty") {
+                v if absent(v) => old.as_ref().is_some_and(|t| t.empty),
+                _ => flag(c, p, "empty")?,
+            };
+            let t = crate::curtain::PanelType {
+                thickness: thickness.or(old.as_ref().map(|t| t.thickness)).unwrap_or(25.0),
+                offset: num(c, p, "offset")?.or(old.as_ref().map(|t| t.offset)).unwrap_or(0.0),
+                material: string(c, p, "material")?.or(old.map(|t| t.material)).unwrap_or_default(),
+                empty,
+                identity,
+            };
+            m.types.curtain_panel.insert(name.clone(), t.clone());
+            crate::curtain::refresh_depths(m);
+            json!(t)
+        }
+        "mullion" => {
+            let old = m.types.mullion.get(&name).cloned();
+            let round = match p.get("round") {
+                v if absent(v) => old.as_ref().is_some_and(|t| t.round),
+                _ => flag(c, p, "round")?,
+            };
+            let radius = num(c, p, "radius")?;
+            let thickness = match (round, radius) {
+                (true, Some(r)) => Some(2.0 * r),
+                _ => thickness,
+            };
+            // `width` is both sides together, half each; `side1` and `side2` each its own.
+            let half = width.map(|w| w / 2.0);
+            let t = crate::curtain::MullionType {
+                thickness: thickness
+                    .or(old.as_ref().map(|t| t.thickness))
+                    .ok_or_else(|| need(if round { "radius" } else { "thickness" }))?,
+                side1: num(c, p, "side1")?.or(half).or(old.as_ref().map(|t| t.side1)).unwrap_or(if round { 0.0 } else { 25.0 }),
+                side2: num(c, p, "side2")?.or(half).or(old.as_ref().map(|t| t.side2)).unwrap_or(if round { 0.0 } else { 25.0 }),
+                round,
+                offset: num(c, p, "offset")?.or(old.as_ref().map(|t| t.offset)).unwrap_or(0.0),
+                material: string(c, p, "material")?.or(old.map(|t| t.material)).unwrap_or_default(),
+                identity,
+            };
+            m.types.mullion.insert(name.clone(), t.clone());
+            crate::curtain::refresh_depths(m);
+            json!(t)
+        }
         "wall" => {
             let (thickness, layers) = layered(c, p, m.types.wall.get(&name).map(|t| (t.thickness, t.layers.as_slice())), thickness, &need)?;
             let old = m.types.wall.get(&name).cloned().unwrap_or_default();
@@ -12909,6 +13062,7 @@ fn edit_type(s: &mut Session, p: &Value) -> R {
                 wrap_ends: word(c, p, "wrap_ends", old.wrap_ends, crate::model::Wrapping::from_name, "none, exterior or interior")?,
                 coarse_fill,
                 coarse_color,
+                curtain: None,
             };
             m.types.wall.insert(name.clone(), t.clone());
             let mut out = json!(t);
@@ -13427,6 +13581,11 @@ fn location_fields(e: &Element) -> &'static [&'static str] {
         E::Ceiling(_) | E::Shaft(_) | E::Mass(_) => &["boundary", "sketch"],
         E::SubDivision(_) => &["boundary", "openings", "sketch", "host"],
         E::SurveyPoint(_) | E::ProjectBasePoint(_) => &["at"],
+        // What its wall's grid gives a panel or a mullion, and, pinned (the type's), its type: as Revit's, which changes a
+        // panel's or a mullion's type only once it is unpinned.
+        E::CurtainPanel(_) => &["span", "host", "key", "type"],
+        E::Mullion(_) => &["at", "from", "to", "trim", "vertical", "host", "key", "type"],
+        E::CurtainGrid(_) => &["at", "vertical", "host"],
         E::Roof(_) => &["boundary", "sketch", "extrusion", "courtyards"],
         E::Door(_) | E::Window(_) => &["host", "offset"],
         E::Room(_) => &["point"],

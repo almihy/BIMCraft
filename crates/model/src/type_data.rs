@@ -172,6 +172,9 @@ impl Model {
             Element::Floor(f) | Element::Toposolid(f) => t.floor.get(&f.type_name).map(|x| &x.identity),
             // A sub-division is of a floor type, as a toposolid is.
             Element::SubDivision(sd) => t.floor.get(&sd.type_name).map(|x| &x.identity),
+            Element::CurtainPanel(p) => t.curtain_panel.get(&p.type_name).map(|x| &x.identity),
+            Element::Mullion(x) => t.mullion.get(&x.type_name).map(|x| &x.identity),
+            Element::CurtainGrid(_) => None,
             Element::Roof(r) => t.roof.get(&r.type_name).map(|x| &x.identity),
             Element::Ceiling(c) => t.ceiling.get(&c.type_name).map(|x| &x.identity),
             Element::Railing(r) => t.railing.get(&r.type_name).map(|x| &x.identity),
@@ -199,6 +202,8 @@ impl Model {
         of!("column", t.column);
         of!("structural column", t.structural_column);
         of!("footing", t.footing);
+        of!("curtain panel", t.curtain_panel);
+        of!("mullion", t.mullion);
         for (category, types) in &t.runs {
             of!(category, types);
         }
@@ -228,6 +233,8 @@ impl Model {
             "column" => t.column.get(name).map(|x| &x.identity),
             "structuralcolumn" => t.structural_column.get(name).map(|x| &x.identity),
             "footing" => t.footing.get(name).map(|x| &x.identity),
+            "curtainpanel" => t.curtain_panel.get(name).map(|x| &x.identity),
+            "mullion" => t.mullion.get(name).map(|x| &x.identity),
             run => t.runs.get(run)?.get(name).map(|x| &x.identity),
         }
     }
