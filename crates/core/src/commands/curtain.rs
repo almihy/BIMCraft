@@ -1,6 +1,7 @@
 //! A curtain wall worked on by hand, as Revit's tools: Curtain Grid (a grid line added), Add/Remove Segments (two panels
 //! joined, or parted again) and Mullion (mullions put on a grid line, a segment or every line). What they change is what
-//! the wall remembers and the lines it hosts (`curtain.rs`); the wall lays its panels and mullions out from that.
+//! the wall remembers and the lines it hosts (`curtain.rs`); the wall lays its panels and mullions out from that. And a
+//! panel swapped for a door (`curtain_door`), as Revit's Type Selector does it.
 
 use std::collections::BTreeSet;
 
@@ -9,7 +10,7 @@ use serde_json::{Value, json};
 use super::{R, absent, bad, element_id, flag, num, only, point, point_opt, string, type_param};
 use crate::curtain::{self, Grid, GridLine, MAX_LINES, NEAR, Segment};
 use crate::engine::Session;
-use crate::model::{Element, Guid, Id, Model, Wall};
+use crate::model::{Element, Guid, Id, Model, Opening, Side, Wall};
 use crate::walls::Axis;
 
 /// The curtain wall `wall` (or `host`) names: its id, its GUID, the wall and its grid.
@@ -309,4 +310,89 @@ pub(super) fn mullion(s: &mut Session, p: &Value) -> R {
     }
     curtain::lay(m, id);
     Ok(json!({"ids": ids, "skipped": targets.len() - ids.len(), "wall": id, "type": type_name}))
+}
+
+pub(super) fn curtain_door(s: &mut Session, p: &Value) -> R {
+    let c = "curtain_door";
+    only(c, p, &["panel", "wall", "host", "at", "point", "z", "type", "family", "flip_facing", "flip_hand", "mark"])?;
+    let m = &s.model;
+    // The cell: a panel's, or the one at a place on the wall.
+    let (wall, host, key) = if absent(p.get("panel")) {
+        let (id, host, w, g) = host(c, m, p)?;
+        let (along, up) = place(c, m, w, p)?;
+        let cells = curtain::cells(&g, &w.curtain.merged);
+        let (key, _) = curtain::cell_at(&cells, along, up).ok_or_else(|| {
+            bad(
+                c,
+                format!(
+                    "[{along}, {up}] is outside wall {id}, which is {} mm long and {} mm tall: `at` is [s, z], mm along the wall from                      its start and mm over its base, inside the cell the door is to fill",
+                    fine(g.length),
+                    fine(g.height)
+                ),
+            )
+        })?;
+        (id, host, key.clone())
+    } else {
+        let id = element_id(c, m, p.get("panel").unwrap_or(&Value::Null))?;
+        match m.elements.get(id) {
+            Some(Element::CurtainPanel(x)) => {
+                let wall = m.elements.id(x.host).ok_or_else(|| bad(c, format!("curtain panel {id} has no wall")))?;
+                (wall, x.host, x.key.clone())
+            }
+            Some(Element::Door(o)) if o.panel.is_some() => {
+                return Err(bad(
+                    c,
+                    format!(
+                        "door {id} fills that cell already: change its type with `modify {{id, type}}`, or `delete` it for the panel to come back"
+                    ),
+                ));
+            }
+            e => {
+                let what = e.map_or("element", Element::category);
+                return Err(bad(
+                    c,
+                    format!(
+                        "{what} {id} isn't a curtain panel: `panel` is the id of the panel the door takes the place of (`elements`                          with category `curtainpanel`), or name its cell with `wall` and `at` [s, z]"
+                    ),
+                ));
+            }
+        }
+    };
+    if let Some(door) = curtain::door_in(m, host, &key) {
+        return Err(bad(
+            c,
+            format!("door {door} fills that cell of wall {wall} already: change its type with `modify {{id, type}}`, or `delete` it first"),
+        ));
+    }
+    let (family, type_name, _) = super::opening_kind(c, m, p, true)?;
+    let mark = match string(c, p, "mark")? {
+        Some(mark) => mark,
+        None => super::next_mark(m, true),
+    };
+    let o = Opening {
+        type_name,
+        family,
+        host,
+        // The wall's layout says where its cell is, and so where it stands and how large it is.
+        offset: 0.0,
+        sill: 0.0,
+        mark,
+        flip_facing: flag(c, p, "flip_facing")?,
+        flip_hand: flag(c, p, "flip_hand")?,
+        to_room_side: Side::Left,
+        panel: Some(key.clone()),
+        cell: None,
+        params: Default::default(),
+    };
+    let o = Opening { to_room_side: o.swing_side(), ..o };
+    let m = s.model_mut();
+    let id = m.insert(Element::Door(o));
+    curtain::lay(m, wall);
+    let Some(Element::Door(o)) = m.elements.get(id) else {
+        return Err(bad(c, format!("wall {wall} has no cell `{key}` for a door")));
+    };
+    let (width, height) = o.cell_size().unwrap_or_default();
+    Ok(
+        json!({"id": id, "wall": wall, "panel_key": key, "offset": o.offset, "sill": o.sill, "width": width, "height": height, "mark": o.mark}),
+    )
 }

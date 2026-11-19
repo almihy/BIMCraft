@@ -176,6 +176,12 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>, measures: boo
                 extra.insert("curtain".into(), json!(true));
                 extra.insert("panels".into(), json!(count(|e| matches!(e, Element::CurtainPanel(_)))));
                 extra.insert("mullions".into(), json!(count(|e| matches!(e, Element::Mullion(_)))));
+                // The doors that fill cells of it (`curtain_door`), where it has any.
+                let doors = crate::curtain::doors_of(m, m.guid(id));
+                if !doors.is_empty() {
+                    extra.insert("doors".into(), json!(doors.len()));
+                    extra.insert("door_ids".into(), json!(doors));
+                }
                 extra.insert("vertical_grid".into(), json!(g.u.iter().map(|l| hundredth(l.at)).collect::<Vec<_>>()));
                 extra.insert("horizontal_grid".into(), json!(g.v.iter().map(|l| hundredth(l.at)).collect::<Vec<_>>()));
             }
@@ -189,6 +195,10 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>, measures: boo
                 }
                 extra.insert("level".into(), json!(w.level));
                 extra.insert("at".into(), json!(m.anchor(id)));
+                // A curtain wall's door says so: it fills a cell of its wall's grid, and its width and height are the cell's.
+                if o.cell_size().is_some() {
+                    extra.insert("curtain_door".into(), json!(true));
+                }
                 // The rooms either side, as Revit's From Room and To Room (set as it was placed: a door's To Room, the one it
                 // swung into), the room a door swings into now, and its hinge and the side of its wall it swings to: what its
                 // flips mean, said back.

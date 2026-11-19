@@ -551,6 +551,8 @@ fn place_openings(s: &mut Session, loose: &[Id], by: P2, level: Option<Guid>) ->
         let door = matches!(e, Element::Door(_));
         let mut copy = o.clone();
         (copy.host, copy.offset, copy.sill) = (host, offset, sill);
+        // A curtain wall's door pasted alone is an ordinary door of the basic wall it lands in, of its type's own size.
+        (copy.panel, copy.cell) = (None, None);
         copy.mark = next_number(m.elements.values().filter_map(|e| match e {
             Element::Door(o) if door => Some(o.mark.as_str()),
             Element::Window(o) if !door => Some(o.mark.as_str()),

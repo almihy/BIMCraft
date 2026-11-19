@@ -2574,7 +2574,9 @@ b"}, "host": "sky", "flips": {"hand": "x"}}),
         .execute("curtain_grid", &json!({"wall": curtain, "vertical": false, "at": 600}))
         .map_or(Value::Null, |r| r["panels"][0].clone());
     let _ = base.execute("unpin", &json!({"ids": [panel]}));
-    assert!([&curtain, &grid_line, &by_hand, &panel].iter().all(|v| v.is_u64()), "the sweep's base has its curtain wall");
+    // A door in one of its cells (a panel swapped for it), last so that no id moves.
+    let curtain_door = base.execute("curtain_door", &json!({"wall": curtain, "at": [3700, 1500]})).map_or(Value::Null, |r| r["id"].clone());
+    assert!([&curtain, &grid_line, &by_hand, &panel, &curtain_door].iter().all(|v| v.is_u64()), "the sweep's base has its curtain wall");
     let curtains = [
         json!({"wall": curtain, "vertical": true, "at": 1e300}),
         json!({"wall": curtain, "vertical": "x", "at": -1}),
@@ -2617,6 +2619,21 @@ b"}, "host": "sky", "flips": {"hand": "x"}}),
         json!({"category": "mullion", "name": "30mm Square", "thickness": -1, "side1": 1e300, "round": "x"}),
         json!({"category": "curtainpanel", "name": "Glazed", "thickness": 1e300, "empty": true, "offset": -1e300}),
         json!({"from": panel, "ids": [curtain, by_hand, 100002]}),
+        // Curtain Wall Door: a panel swapped for a door, by its id or a place, and what then works on the door.
+        json!({"panel": panel}),
+        json!({"panel": panel, "type": "Nope", "flip_facing": "x"}),
+        json!({"panel": curtain_door, "family": 5, "mark": "x".repeat(100_000)}),
+        json!({"wall": curtain, "at": [5000, 1000], "flip_hand": true}),
+        json!({"wall": curtain, "at": [1e300, -1e300]}),
+        json!({"wall": curtain, "point": [2000, -40000], "z": 1e300}),
+        json!({"wall": curtain, "at": "x", "panel": null}),
+        json!({"ids": [curtain_door], "by": [500, 0]}),
+        json!({"ids": [curtain_door, curtain], "axis": [[0, 0], [1000, 1000]], "copy": true}),
+        json!({"id": curtain_door, "offset": 1e300, "sill": -1e300}),
+        json!({"id": curtain_door, "wall": 100002}),
+        json!({"id": curtain_door, "host": 100002, "type": "Nope"}),
+        json!({"ids": [curtain_door]}),
+        json!({"id": curtain, "at": [5200, -40000]}),
     ];
     let hostile: Vec<Value> = hostile
         .into_iter()

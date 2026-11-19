@@ -1278,12 +1278,27 @@ pub struct Opening {
     /// flips, and swapped by Flip From/To Room. Its From Room is on the other side.
     #[serde(default)]
     pub to_room_side: Side,
+    /// A curtain wall's door, Revit's panel swapped for a door: the cell of its wall's grid it fills, by the key the panel
+    /// there had (`curtain.rs`). The wall lays no panel in that cell while the door fills it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub panel: Option<String>,
+    /// And where that cell is, as a panel's span: from `cell[0]` to `cell[1]` mm along the wall's location line and from
+    /// `cell[2]` to `cell[3]` mm over its base. The wall's layout writes it, with the door's `offset` and `sill`; the door
+    /// is as wide and as high as it ([`Model::opening_dims`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell: Option<[f64; 4]>,
     /// Its values of the project's parameters, by name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub params: BTreeMap<String, serde_json::Value>,
 }
 
 impl Opening {
+    /// The width and height of the cell of its curtain wall it fills: none for a door or window of a basic wall.
+    pub fn cell_size(&self) -> Option<(f64, f64)> {
+        let [s0, s1, z0, z1] = self.cell.filter(|_| self.panel.is_some())?;
+        Some((s1 - s0, z1 - z0))
+    }
+
     /// The side of its wall a door swings to, or a window faces, now: its wall's left (start to end), or flipped facing
     /// its right.
     pub fn swing_side(&self) -> Side {
@@ -5544,9 +5559,14 @@ impl Model {
         let is_door = matches!(e, Element::Door(_));
         let Some(name) = &o.family else {
             let types = if is_door { &self.types.door } else { &self.types.window };
-            return types.get(&o.type_name).cloned().ok_or_else(|| {
+            let t = types.get(&o.type_name).cloned().ok_or_else(|| {
                 let names: Vec<&str> = types.keys().map(String::as_str).collect();
                 format!("type `{}` doesn't exist (there are: {})", o.type_name, names.join(", "))
+            })?;
+            // A curtain wall's door is as wide and as high as the cell it fills, whatever its type says.
+            return Ok(match o.cell_size() {
+                Some((width, height)) => OpeningType { width, height, hole: None, ..t },
+                None => t,
             });
         };
         let f = self.families.get(name).ok_or_else(|| {
@@ -8408,11 +8428,32 @@ impl Model {
             }
             Element::Door(o) | Element::Window(o) => {
                 let w = self.wall(o.host).ok_or(format!("{who}: host wall {} doesn't exist", self.shown(o.host)))?;
-                if crate::curtain::is_curtain(self, w) {
-                    return Err(format!(
-                        "{who}: its host wall {} is a curtain wall, which hosts no doors or windows (its cells are filled by its                          panels); delete it, or put it in a basic wall",
-                        self.shown(o.host)
-                    ));
+                // A curtain wall hosts a door only as one that fills a cell of its grid (`curtain_door`): the layout keeps
+                // which cell and where it is, so only that it is said is checked here.
+                match (crate::curtain::is_curtain(self, w), &o.panel, o.cell) {
+                    (true, Some(key), Some(cell)) if matches!(e, Element::Door(_)) => {
+                        text(&who, "panel", key)?;
+                        let sound = cell.iter().all(|x| x.is_finite() && x.abs() <= MAX_COORD) && cell[1] > cell[0] && cell[3] > cell[2];
+                        if key.is_empty() || !sound {
+                            return Err(format!(
+                                "{who}: the cell of curtain wall {} it fills isn't one ({cell:?}); delete it and swap a panel for a door with `curtain_door`",
+                                self.shown(o.host)
+                            ));
+                        }
+                    }
+                    (true, ..) => {
+                        return Err(format!(
+                            "{who}: its host wall {} is a curtain wall, which hosts no ordinary doors or windows (its cells are filled by its panels); delete it, put it in a basic wall, or swap a panel for a door with `curtain_door`",
+                            self.shown(o.host)
+                        ));
+                    }
+                    (false, None, None) => {}
+                    (false, ..) => {
+                        return Err(format!(
+                            "{who}: it fills a cell of a curtain wall's grid (`panel`), but its host wall {} isn't a curtain wall; delete it and place a `door` in that wall",
+                            self.shown(o.host)
+                        ));
+                    }
                 }
                 let t = self.opening_dims(e).map_err(|e| format!("{who}: {e}"))?;
                 if let Some(f) = o.family.as_ref().and_then(|n| self.families.get(n)) {

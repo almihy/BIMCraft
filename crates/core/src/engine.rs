@@ -678,7 +678,12 @@ impl Session {
             if cmd.undoable {
                 let update = crate::curtain::keep(&self.model, &before);
                 if !update.is_empty() {
+                    // A door that filled a cell and has none now goes as a door deleted does, with what hangs on it.
+                    let doors = update.doors();
                     crate::curtain::apply(self.model_mut(), update);
+                    if !doors.is_empty() {
+                        crate::commands::drop_curtain_doors(self, &doors)?;
+                    }
                 }
             }
             // Locked and equal dimensions moved what they measure to as the command moved it.
