@@ -302,6 +302,8 @@ pub struct Owner {
     pub id: Id,
     pub edge: Rgb,
     pub transparency: u8,
+    /// A curtain panel: its edges show where it is seen through.
+    pub panel: bool,
 }
 
 struct Node {
@@ -622,7 +624,7 @@ impl Mesh {
                 return n;
             }
             let n = *owners.entry((id, alpha)).or_insert_with(|| {
-                mesh.owners.push(Owner { id, edge: look.edge(id, EDGE), transparency: alpha });
+                mesh.owners.push(Owner { id, edge: look.edge(id, EDGE), transparency: alpha, panel: scene.panels.contains(&id) });
                 mesh.owners.len() as u32
             });
             last = Some(((id, alpha), n));

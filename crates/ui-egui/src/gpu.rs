@@ -1189,7 +1189,9 @@ impl Gpu {
                 let (e, t) = (rgb(o.edge), tinted.get(&o.id));
                 let c = t.map_or([0.0; 3], |c| rgb(*c));
                 let shows = 1.0 - f32::from(o.transparency) / 100.0;
-                put(&mut owners, &[e[0], e[1], e[2], shows, c[0], c[1], c[2], if t.is_some() { 1.0 } else { 0.0 }]);
+                // The tint's fourth: 1 where tinted, and 2 more for a curtain panel, whose edges show through its glass.
+                let flags = if t.is_some() { 1.0 } else { 0.0 } + if o.panel { 2.0 } else { 0.0 };
+                put(&mut owners, &[e[0], e[1], e[2], shows, c[0], c[1], c[2], flags]);
             }
             write(&up.owners, &owners);
             up.tints = Some(tints.to_vec());

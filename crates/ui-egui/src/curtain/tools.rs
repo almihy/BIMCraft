@@ -357,10 +357,44 @@ impl BimApp {
         }
         };
         let mut found: Vec<Id> =
-            walls.iter().flat_map(|wall| m.hosted_by(m.guid(*wall))).filter(|id| m.elements.get(*id).is_some_and(&wanted)).collect();
+            walls.iter().flat_map(|wall| m.hosted_by(m.guid(*wall))).filter(|id| m.elements.get(*id).is_some_and(wanted)).collect();
         found.sort_unstable();
         if !found.is_empty() {
             self.selection = found;
+        }
+    }
+
+    /// The Type Selector's swap, as Revit's: curtain panel `id` for a door of type `name` (of `family`, or one of the
+    /// project's own), which is then selected; or curtain wall door `id` back for its panel, freed and given type `name`.
+    pub(crate) fn curtain_swap(&mut self, m: &Model, id: Id, family: Option<String>, name: String) {
+        match m.elements.get(id) {
+            Some(Element::CurtainPanel(_)) => {
+                let mut p = json!({"panel": id, "type": name});
+                if let Some(f) = family {
+                    p["family"] = json!(f);
+                }
+                if let Some(door) = self.run("curtain_door", p).and_then(|made| made["id"].as_u64()) {
+                    self.selection = vec![door];
+                }
+            }
+            Some(Element::Door(o)) => {
+                let (Some(key), host) = (o.panel.clone(), o.host) else { return };
+                if self.run("delete", json!({"ids": [id]})).is_none() {
+                    return;
+                }
+                // The panel the wall laid in the cell again: freed, and of the type picked.
+                let now = &self.session.model;
+                let panel = now
+                    .hosted_by(host)
+                    .into_iter()
+                    .find(|p| matches!(now.elements.get(*p), Some(Element::CurtainPanel(x)) if x.key == key));
+                if let Some(panel) = panel {
+                    self.run("unpin", json!({"ids": [panel]}));
+                    self.run("modify", json!({"ids": [panel], "type": name}));
+                    self.selection = vec![panel];
+                }
+            }
+            _ => {}
         }
     }
 
@@ -576,13 +610,10 @@ impl BimApp {
         let selection = self.selection.clone();
         let mut walls: Vec<Id> = Vec::new();
         for id in &selection {
-            match m.elements.get(*id) {
-                Some(Element::Wall(_) | Element::CurtainGrid(_)) => {
-                    if let Some(wall) = grid::wall_of(m, *id).filter(|w| !walls.contains(w)) {
-                        walls.push(wall);
-                    }
-                }
-                _ => {}
+            if matches!(m.elements.get(*id), Some(Element::Wall(_) | Element::CurtainGrid(_)))
+                && let Some(wall) = grid::wall_of(m, *id).filter(|w| !walls.contains(w))
+            {
+                walls.push(wall);
             }
         }
         for wall in walls {

@@ -816,6 +816,11 @@ click.
 - **The right-click menu** of a curtain wall, a panel or a mullion has Select Panels (Along Vertical Grid, Along Horizontal
   Grid, On Host) and Select Mullions (On Gridline, On Inside, On Border, On Host): `Action::SelectCurtain`, `tools::Among`.
   The grid ones are offered from a panel or a mullion.
+- **A door in a curtain wall**, as Revit's: a selected panel that is unpinned lists the project's door types and its door
+  families' types under Doors, after the panel types, in its Type Selector; one picked runs `curtain_door {panel, type, family}`
+  and the door is selected (`BimApp::curtain_swap`). A curtain wall's door has a door's Properties, and its Type Selector lists
+  the panel types under Curtain Panels after the door types: one picked deletes the door, frees the panel the wall lays there
+  again and gives it that type (three commands, so three steps of Undo).
 - **Pick Walls** in a sketch takes a curtain wall by its panel or mullion too (all the 3D view shows of it), along its location
   line: a curtain wall has no faces of its own.
 

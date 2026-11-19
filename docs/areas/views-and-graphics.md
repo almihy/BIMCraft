@@ -706,8 +706,9 @@ hides panels or mullions alone by their category.
   Exterior Glazing type) would read as one sheet. `Scene::edge_plane` gives a curtain panel's triangles a number of their
   plane and their panel (`Scene::panels`), which the hidden-line picture and the card's mesh read in place of the plane's:
   each panel's edges show in an elevation, a section and Hidden Line. In Shaded, where glass is seen through, both painters
-  (`picture_cancellable`, `gpu.wgsl`'s `fs_post`) draw an edge wherever what is seen through ends or another element's
-  begins, in that element's edge colour: a pane reads as a pane, a window's too.
+  (`picture_cancellable`, `gpu.wgsl`'s `fs_post`) draw an edge wherever a curtain panel seen through ends or another
+  panel begins, in its edge colour: a pane reads as a pane. A panel's alone (the card knows one by its owner's tint flag,
+  `gpu::Owner::panel`): a window's glass and what a view makes transparent are drawn as ever.
 - **Picking.** The wall owns its extents in every plan, section and elevation, drawn in no ink (`alpha` 0; a PDF and a
   DXF leave them out): in a plan a fill and a dashed outline over its panels and mullions, so `Drawing::pick` takes the
   wall and `pick_all` (Tab) goes on to the mullion or panel under the cursor; in a section or an elevation a dashed outline

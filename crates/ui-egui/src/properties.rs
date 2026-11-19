@@ -1656,6 +1656,29 @@ impl BimApp {
         if r.has_focus() {
             p.rect_stroke(rect, 3.0, crate::style::focus_ring(), StrokeKind::Inside);
         }
+        // A curtain panel freed of its wall's type may be swapped for a door, as Revit's Type Selector offers it; and a
+        // curtain wall's door back for a panel type. What is offered after the element's own types: its heading, each
+        // entry's label, and for a door its family (none for one of the project's own door types) and type.
+        type Swap = (&'static str, Vec<(String, Option<String>, String)>);
+        let swap: Option<Swap> = match subject {
+            Subject::Element(id)
+                if category == "curtainpanel" && enabled && matches!(model.elements.get(id), Some(Element::CurtainPanel(_))) =>
+            {
+                let own = model.type_names("door").into_iter().map(|n| (n.to_string(), None, n.to_string()));
+                let of_families = model
+                    .families
+                    .iter()
+                    .filter(|(_, x)| x.category == bimcraft_core::family::Category::Door)
+                    .flat_map(|(f, x)| x.types.keys().map(move |t| (format!("{f}: {t}"), Some(f.clone()), t.clone())));
+                Some((msg!("Doors"), own.chain(of_families).collect()))
+            }
+            Subject::Element(id) if matches!(model.elements.get(id), Some(Element::Door(o)) if o.panel.is_some()) => {
+                let panels = crate::curtain::names(model, "curtainpanel", false).into_iter().map(|n| (n.clone(), None, n));
+                Some((msg!("Curtain Panels"), panels.collect()))
+            }
+            _ => None,
+        };
+        let mut swapped = None;
         let mut picked = None;
         // A component's list holds every family's types, more than a window has room for (issue 64): it scrolls, as tall as
         // the room on the selector's roomier side.
@@ -1675,8 +1698,21 @@ impl BimApp {
                         }
                     }
                 }
+                if let Some((heading, entries)) = swap.as_ref().filter(|(_, entries)| !entries.is_empty()) {
+                    let heading = RichText::new(t(heading)).font(crate::style::semibold(12.0)).color(pal().muted);
+                    ui.add(egui::Label::new(heading).selectable(false));
+                    for entry in entries {
+                        if ui.selectable_label(false, &entry.0).clicked() {
+                            swapped = Some(entry.clone());
+                        }
+                    }
+                }
             });
         });
+        if let (Some((_, family, name)), Subject::Element(id)) = (swapped, subject) {
+            self.curtain_swap(model, id, family, name);
+            return;
+        }
         let pair = picked.as_ref().and_then(|n| pairs.iter().find(|p| label(p) == *n)).cloned();
         match (picked, subject) {
             (Some(n), Subject::Element(_) | Subject::Elements(_)) if current.as_ref() != Some(&n) && pair.is_some() => {

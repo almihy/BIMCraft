@@ -27,6 +27,14 @@ fn on(s: f64, z: f64) -> P2 {
     P2(1000.0 + s, z)
 }
 
+/// A click on the middle of panel `id`, in the elevation.
+fn click_at_panel(h: &mut Harness<BimApp>, id: Id) {
+    let Some(Element::CurtainPanel(x)) = h.state().session.model.elements.get(id).cloned() else { panic!() };
+    let [s0, s1, z0, z1] = x.span;
+    click(h, on((s0 + s1) / 2.0, (z0 + z1) / 2.0));
+    assert_eq!(h.state().selection, [id]);
+}
+
 fn hover(h: &mut Harness<BimApp>, p: P2) {
     let pos = h.state().screen(p);
     h.hover_at(pos);
@@ -235,8 +243,8 @@ fn a_selected_grid_line_moves_by_its_temporary_dimension_typed_by_a_drag_and_goe
     assert_eq!(h.state().selection, [line]);
     // Its distance to the wall's start, and to its end.
     assert!(h.query_by_label("Grid line distance 2000").is_some() && h.query_by_label("Grid line distance 4000").is_some());
-    press(&mut h, "Grid line distance 2000");
-    h.run();
+    let label = h.get_by_label("Grid line distance 2000").rect().center();
+    click_at(&mut h, label);
     // The dimension is a field now, with the keyboard.
     use egui_kittest::kittest::NodeT as _;
     h.key_press_modifiers(Modifiers::COMMAND, Key::A);
@@ -262,7 +270,8 @@ fn a_pinned_panel_or_mullion_shows_its_pin_in_an_elevation_and_unpinned_takes_a_
     h.run();
     let pin = format!("Unpin element {panel}");
     assert!(h.state().session.model.is_pinned(panel));
-    press(&mut h, &pin);
+    let at = h.get_by_label(&pin).rect().center();
+    click_at(&mut h, at);
     assert!(!h.state().session.model.is_pinned(panel), "{}", h.state().status.text);
     assert!(h.query_by_label(&pin).is_none(), "no pin on what is free");
     press(&mut h, "Type Selector");
@@ -405,6 +414,33 @@ fn pick_walls_takes_a_curtain_wall_by_its_panel_along_its_centre_line() {
     h.state_mut().sketch_click(&m, P2(3000.0, 0.0), P2(3000.0, 0.0), 50.0, Some(panel), Modifiers::NONE);
     let sk = h.state().sketch.as_ref().unwrap();
     assert_eq!(sk.lines.len(), 1, "a line along the curtain wall");
+}
+
+#[test]
+fn an_unpinned_panels_type_selector_swaps_it_for_a_door_and_the_doors_swaps_it_back_for_a_panel() {
+    let (mut h, wall) = elevation(STORE);
+    let panel = ids(&h, "curtainpanel")[1];
+    click_at_panel(&mut h, panel);
+    let pin = h.get_by_label(&format!("Unpin element {panel}")).rect().center();
+    click_at(&mut h, pin);
+    assert!(!h.state().session.model.is_pinned(panel), "the pin, clicked with the pointer");
+    press(&mut h, "Type Selector");
+    assert!(h.query_by_label("Doors").is_some(), "the doors, under their heading");
+    let door_type = h.state().session.model.type_names("door")[0].to_string();
+    press(&mut h, &door_type);
+    let doors = ids(&h, "door");
+    assert_eq!(doors.len(), 1, "{}", h.state().status.text);
+    assert_eq!(h.state().selection, doors, "the door is selected");
+    assert!(h.state().session.model.elements.get(panel).is_none(), "in the panel's place");
+    assert_eq!(field(&h, doors[0], "host"), json!(wall));
+    // A door's Properties, and back: a panel type under Curtain Panels.
+    assert!(h.query_by_label("Sill Height").is_some() || h.query_by_label("Mark").is_some(), "a door's Properties");
+    press(&mut h, "Type Selector");
+    assert!(h.query_by_label("Curtain Panels").is_some());
+    press(&mut h, "Solid");
+    assert!(ids(&h, "door").is_empty(), "{}", h.state().status.text);
+    let back = h.state().selection[0];
+    assert_eq!(field(&h, back, "type"), json!("Solid"));
 }
 
 // ---------- what the core gives the tools ----------
