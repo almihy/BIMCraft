@@ -519,6 +519,15 @@ fn three_walls_ending_at_a_point_join_by_their_layers_each_to_the_one_on_either_
         }
         // Their block, the structure, is one piece through the point; and no line is drawn inside it.
         assert!(blocks >= 40, "walls {n}: {blocks}");
+        // Each wall's block runs unbroken into the others': all the way along its middle, 72.5 to the right of the wall's
+        // location line (which runs in its insulation), nothing but block.
+        for a in angles {
+            let (way, right) = (P2(a.to_radians().cos(), a.to_radians().sin()), P2(a.to_radians().sin(), -a.to_radians().cos()));
+            for step in 0..=20 {
+                let q = way * (f64::from(step) * 20.0 + 1.3) + right * 72.5;
+                assert_eq!(held(&s, &ids, q), (1, Some(2)), "walls {n}: the block of the wall at {a} degrees, at {q:?}");
+            }
+        }
         let lines: Vec<Vec<P2>> = ids
             .iter()
             .flat_map(|id| walls::layer_geometry(&s.model, *id, None).interfaces().map(<[P2]>::to_vec).collect::<Vec<_>>())
@@ -727,7 +736,7 @@ fn shot_y_joins() {
     }
     for a in [0.0_f64, 90.0, 225.0] {
         let (x, y) = (3600.0 + 1400.0 * a.to_radians().cos(), 1400.0 * a.to_radians().sin());
-        run(&mut s, "wall", json!({"points": [[3600, 0], [x, y]], "type": "Ext", "location": "core-center"}));
+        run(&mut s, "wall", json!({"points": [[3600, 0], [x, y]], "type": "Ext"}));
     }
     run(&mut s, "detail", json!({"view": 100000, "detail": "fine"}));
     let dir = std::env::var("SHOT").unwrap();

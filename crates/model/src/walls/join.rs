@@ -166,6 +166,8 @@ struct Strips<'a> {
     offs: Vec<f64>,
     ranks: Vec<Rank>,
     materials: Vec<&'a str>,
+    /// How far to its left its core's faces lie: the exterior one, the interior one.
+    core: (f64, f64),
 }
 
 impl Strips<'_> {
@@ -178,6 +180,9 @@ impl Strips<'_> {
         }
         let materials = if t.layers.is_empty() { vec![""] } else { t.layers.iter().map(|l| l.material.as_str()).collect() };
         let ranks = Rank::of(t);
+        let cored = if t.layers.is_empty() { 0..1 } else { t.core_layers() };
+        let face = |k: usize| offs.get(k).copied().unwrap_or(0.0);
+        let core = (face(cored.start), face(cored.end));
         (ranks.len() + 1 == offs.len()).then(|| Strips {
             axis: super::Axis::of(w),
             start: w.start,
@@ -186,7 +191,22 @@ impl Strips<'_> {
             offs,
             ranks,
             materials,
+            core,
         })
+    }
+
+    /// The line along it, nearest its location line, that runs in its core: how far to its left. Its location line, when
+    /// that runs in its core.
+    fn spine(&self) -> f64 {
+        0.0_f64.clamp(self.core.1.min(self.core.0), self.core.0.max(self.core.1))
+    }
+
+    /// The line `off` mm to its left.
+    fn line(&self, off: f64) -> Edge {
+        match self.axis.arc() {
+            Some((c, ..)) => Edge::Circle(c, c.dist(self.axis.at(0.0, off))),
+            None => Edge::Line(self.start + self.dir.perp() * off, self.dir),
+        }
     }
 
     fn layers(&self) -> usize {
@@ -216,20 +236,20 @@ impl Strips<'_> {
         self.offs.first().zip(self.offs.last()).map_or(0.0, |(a, b)| (a - b).abs())
     }
 
-    /// The half of it to the left of its location line (`left`), or to its right: its layers there, the one the line runs
-    /// through cut along it. With it, the material across the line from that half, and which of the wall's layers the
-    /// half's first is.
-    fn half(&self, left: bool) -> (Strips<'_>, Option<&str>, usize) {
+    /// The half of it to the left (`left`), or to the right, of the line `at` mm to the left of its location line: its
+    /// layers there, the one the line runs through cut along it. With it, the material across the line from that half, and
+    /// which of the wall's layers the half's first is.
+    fn half(&self, left: bool, at: f64) -> (Strips<'_>, Option<&str>, usize) {
         let layers = self.layers();
         // The boundaries strictly to the left of the line, and the first strictly to its right.
-        let above = self.offs.iter().filter(|o| **o > 1e-6).count().min(layers);
-        let below = self.offs.iter().position(|o| *o < -1e-6).unwrap_or(self.offs.len()).max(1);
+        let above = self.offs.iter().filter(|o| **o > at + 1e-6).count().min(layers);
+        let below = self.offs.iter().position(|o| *o < at - 1e-6).unwrap_or(self.offs.len()).max(1);
         let (offs, first, count, beyond) = if left {
             let mut offs: Vec<f64> = self.offs.iter().take(above).copied().collect();
-            offs.push(0.0);
+            offs.push(at);
             (offs, 0, above, self.materials.get(below - 1).copied().filter(|_| below < self.offs.len()))
         } else {
-            let mut offs = vec![0.0];
+            let mut offs = vec![at];
             offs.extend(self.offs.iter().skip(below).copied());
             (offs, below - 1, (layers + 1).saturating_sub(below), above.checked_sub(1).and_then(|k| self.materials.get(k).copied()))
         };
@@ -241,6 +261,7 @@ impl Strips<'_> {
             offs,
             ranks: self.ranks.iter().skip(first).take(count).copied().collect(),
             materials: self.materials.iter().skip(first).take(count).copied().collect(),
+            core: self.core,
         };
         (half, beyond, first)
     }
@@ -379,17 +400,24 @@ fn cut_of(
 
 /// The cut of wall `id`'s end (`at_end`, else its start) where three walls or more end at a point, none of them running
 /// on: against the wall next round the point counter-clockwise, `next`, and the one before, `prev` (each a wall and which
-/// of its ends is there). Each wall is read as two halves, either side of its location line: between two neighbours'
-/// location lines, the half of each that faces the other joins it as two walls do at a corner, their layers cleaned up by
-/// rank, the wall made first running through. The layer a wall's location line runs through ends against both
-/// neighbours: its end bends. Towards a neighbour too nearly in line for their layers to cross near the point, it ends square.
-pub(super) fn wedge_cut(m: &Model, id: Id, at_end: bool, next: (Id, bool), prev: (Id, bool)) -> Option<Cut> {
+/// of its ends is there). Each wall is read as two halves, either side of a line along it: between two neighbours'
+/// lines, the half of each that faces the other joins it as two walls do at a corner, their layers cleaned up by rank,
+/// the wall made first running through. The layer a wall's line runs through ends against both neighbours: its end
+/// bends. Towards a neighbour too nearly in line for their layers to cross near the point, it ends square.
+///
+/// The line is the wall's location line; with `cored` (three walls), the line nearest that which runs in its core
+/// ([`Strips::spine`]), so the three cores come together whatever lines the walls stand on. Those three lines need not
+/// cross at one point: the triangle they leave between them, which no two walls' halves cover, is the core's of the
+/// wall made first.
+pub(super) fn wedge_cut(m: &Model, id: Id, at_end: bool, next: (Id, bool), prev: (Id, bool), cored: bool) -> Option<Cut> {
     let (me, n, p) = (Strips::of(m, id)?, Strips::of(m, next.0)?, Strips::of(m, prev.0)?);
     let far = 6.0 * me.thick().max(n.thick()).max(p.thick());
+    let spine = |x: &Strips| if cored { x.spine() } else { 0.0 };
+    let (node, _) = me.out(at_end);
     // Leaving the point from its start, a wall's left is its counter-clockwise side; from its end, its right is.
     let towards = |mine: bool, other: &Strips, (other_id, other_end): (Id, bool), others_left: bool| -> Option<(Cut, usize)> {
-        let (half, _, first) = me.half(mine);
-        let (theirs, beyond, _) = other.half(others_left);
+        let (half, _, first) = me.half(mine, spine(&me));
+        let (theirs, beyond, _) = other.half(others_left, spine(other));
         // A neighbour too nearly in line to cross: the half ends square at the point, as two walls in line do.
         let cut = cut_of(&half, at_end, &theirs, Some(other_end), id < other_id, false, true, beyond, far).unwrap_or_else(|| {
             let s = if at_end { half.axis.length() } else { 0.0 };
@@ -421,6 +449,49 @@ pub(super) fn wedge_cut(m: &Model, id: Id, at_end: bool, next: (Id, bool), prev:
     for ends in right.layers.iter().skip(shared) {
         cut.layers.push(*ends);
         cut.bends.push(Vec::new());
+    }
+    // The triangle between the three walls' lines, for the wall made first: its halves run to where its line crosses
+    // each neighbour's, and its core takes in the triangle from there round by where the neighbours' two lines cross.
+    let on_line = left.layers.last().map(|l| l[1]).zip(right.layers.first().map(|l| l[0]));
+    if cored
+        && id < next.0
+        && id < prev.0
+        && next.0 != prev.0
+        && let Some((m_left, m_right)) = on_line
+    {
+        let mine = me.line(spine(&me));
+        // The half on the left ends towards the neighbour on that side: the next round the point from a wall's start.
+        let (to_left, to_right) = if at_end { (&p, &n) } else { (&n, &p) };
+        let corners = (
+            meet(mine, to_left.line(spine(to_left)), node),
+            meet(mine, to_right.line(spine(to_right)), node),
+            meet(n.line(spine(&n)), p.line(spine(&p)), node),
+        );
+        if let (Some(a), Some(b), Some(third)) = corners
+            && a.dist(b) > 1e-6
+            && third.dist(node) <= far
+        {
+            // Its core's half on a side has to reach the corner there: it does, running through, unless the neighbour's
+            // layers are better than its core.
+            let (reaches_left, reaches_right) = (a.dist(m_left) < 1e-6, b.dist(m_right) < 1e-6);
+            let last = left.layers.len() - 1;
+            if shared == 1 {
+                // Its line runs through a layer: that layer's end goes round the triangle.
+                if let Some(bend) = cut.bends.get_mut(last).filter(|_| reaches_left && reaches_right) {
+                    *bend = vec![a, third, b];
+                }
+            } else if (spine(&me) - me.core.0).abs() < 1e-6 {
+                // Its line is its core's exterior face: the core is the first layer on the right.
+                if let (Some(ends), Some(bend), true) = (cut.layers.get_mut(last + 1), cut.bends.get_mut(last + 1), reaches_right) {
+                    ends[0] = a;
+                    *bend = vec![third, b];
+                }
+            } else if let (Some(ends), Some(bend), true) = (cut.layers.get_mut(last), cut.bends.get_mut(last), reaches_left) {
+                // Its line is its core's interior face: the core is the last layer on the left.
+                ends[1] = b;
+                *bend = vec![a, third];
+            }
+        }
     }
     (cut.layers.len() == me.layers()).then_some(cut)
 }

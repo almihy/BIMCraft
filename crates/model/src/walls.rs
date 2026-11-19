@@ -407,7 +407,7 @@ fn end_geometry(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> WallE
         && !through
         && prev.id != id
         && next.id != id
-        && let Some(cut) = join::wedge_cut(m, id, at_end, (next.id, next.at_end), (prev.id, prev.at_end))
+        && let Some(cut) = join::wedge_cut(m, id, at_end, (next.id, next.at_end), (prev.id, prev.at_end), n == 3)
     {
         return WallEnd::stepped(cut, at_end);
     }

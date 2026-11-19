@@ -113,7 +113,12 @@ pub(crate) fn out_of_reach(kept: View, view: View) -> bool {
 /// How long a view at `view`, `still` for that long, waits yet for its plan where making one holds the frame; none when it is made
 /// now: the view has rested, or it has left what the drawing kept (of `kept`) covers and the last plan (made `since` ago, in `cost`)
 /// is long enough past that a view which never rests still gets drawings without stopping at each.
-pub(crate) fn waits(kept: View, view: View, still: web_time::Duration, made: Option<(web_time::Duration, web_time::Duration)>) -> Option<web_time::Duration> {
+pub(crate) fn waits(
+    kept: View,
+    view: View,
+    still: web_time::Duration,
+    made: Option<(web_time::Duration, web_time::Duration)>,
+) -> Option<web_time::Duration> {
     if still >= REST {
         return None;
     }
