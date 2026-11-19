@@ -213,6 +213,10 @@ impl Strips<'_> {
         self.ranks.len()
     }
 
+    fn straight(&self) -> bool {
+        self.axis.arc().is_none()
+    }
+
     /// Its boundary `k`.
     fn edge(&self, k: usize) -> Edge {
         let off = self.offs.get(k).copied().unwrap_or(0.0);
@@ -396,6 +400,219 @@ fn cut_of(
         }
     }
     Some(cut)
+}
+
+/// A piece of a wall's layer near a join, convex: which wall's it is (by its place in the join's order) and which layer's.
+#[derive(Clone)]
+struct Piece {
+    wall: usize,
+    layer: usize,
+    rank: Rank,
+    material: String,
+    ring: Vec<P2>,
+}
+
+/// What walls ending at a point make of one another, taken in order, as Revit's join of three or four walls is: the
+/// first two join as the corner they would be alone, the first running through; each wall after them butts what is
+/// there, its layers running in by rank (through layers of a worse rank, to the first of its own rank or a better).
+pub(super) struct Ordered {
+    /// Each wall's end, in the order given.
+    pub(super) cuts: Vec<Cut>,
+    /// What the walls give up to those after them: the wall (by its place in the order), its layer, and the piece of it
+    /// a later wall's layer runs through, convex.
+    pub(super) taken: Vec<(usize, usize, Vec<P2>)>,
+}
+
+/// Where the line through `from` going `way` is inside the convex `ring`: how far along it, in and out.
+fn inside(ring: &[P2], from: P2, way: P2) -> Option<(f64, f64)> {
+    let ccw = geom::area(ring) >= 0.0;
+    let (mut lo, mut hi) = (f64::NEG_INFINITY, f64::INFINITY);
+    for (a, b) in geom::ring_edges(ring) {
+        let edge = if ccw { b - a } else { a - b };
+        // Inside is to the left of each edge of a counter-clockwise ring.
+        let (side, turn) = (edge.cross(from - if ccw { a } else { b }), edge.cross(way));
+        if turn.abs() < 1e-12 {
+            if side < 0.0 {
+                return None;
+            }
+        } else if turn > 0.0 {
+            lo = lo.max(-side / turn);
+        } else {
+            hi = hi.min(-side / turn);
+        }
+    }
+    (hi - lo > 1e-9).then_some((lo, hi))
+}
+
+/// The join of the wall ends `ends` (each a wall, and whether it is its end that is there, else its start), in their
+/// order. None unless they are three or more straight walls of types, the first two crossing near the point.
+pub(super) fn ordered(m: &Model, ends: &[(Id, bool)]) -> Option<Ordered> {
+    let strips: Vec<Strips> = ends.iter().map(|(id, _)| Strips::of(m, *id).filter(Strips::straight)).collect::<Option<_>>()?;
+    let (first, second) = (strips.first()?, strips.get(1)?);
+    let (e0, e1) = (ends.first()?.1, ends.get(1)?.1);
+    if strips.len() < 3 {
+        return None;
+    }
+    let far = 6.0 * strips.iter().map(Strips::thick).fold(0.0, f64::max);
+    let mut cuts = vec![
+        cut_of(first, e0, second, Some(e1), true, false, true, None, far)?,
+        cut_of(second, e1, first, Some(e0), false, false, true, None, far)?,
+    ];
+    // The two walls' layers near the point, each from well back along its wall to where the corner ends it.
+    let mut pieces: Vec<Piece> = Vec::new();
+    for (w, cut) in cuts.iter().enumerate() {
+        let (strip, (_, at_end)) = (strips.get(w)?, ends.get(w)?);
+        let (node, way) = strip.out(*at_end);
+        let back = |q: P2| q - way * ((q - node).dot(way) + far);
+        for (k, [a, b]) in cut.layers.iter().enumerate() {
+            pieces.push(Piece {
+                wall: w,
+                layer: k,
+                rank: *strip.ranks.get(k)?,
+                material: strip.materials.get(k)?.to_string(),
+                ring: vec![back(*a), *a, *b, back(*b)],
+            });
+        }
+    }
+    let mut taken = Vec::new();
+    for (w, strip) in strips.iter().enumerate().skip(2) {
+        let (cut, mine, gone) = butting(strip, ends.get(w)?.1, w, &pieces, far)?;
+        // What it ran through is no longer the earlier walls': to the walls after it, too.
+        let mut left: Vec<Piece> = Vec::new();
+        for (n, piece) in pieces.iter().enumerate() {
+            let holes: Vec<&Vec<P2>> = gone.iter().filter(|(of, _)| *of == n).map(|(_, hole)| hole).collect();
+            if holes.is_empty() {
+                left.push(piece.clone());
+                continue;
+            }
+            let rings = holes.iter().fold(vec![piece.ring.clone()], |rings, hole| super::minus(&rings, hole));
+            left.extend(rings.into_iter().map(|ring| Piece { ring, ..piece.clone() }));
+            taken.extend(holes.into_iter().map(|hole| (piece.wall, piece.layer, hole.clone())));
+        }
+        pieces = left;
+        pieces.extend(mine);
+        cuts.push(cut);
+    }
+    Some(Ordered { cuts, taken })
+}
+
+/// The end of a wall that butts what `pieces` hold already: its cut, its own layers' pieces near the point, and what of
+/// `pieces` (by their places) its layers run through. A layer runs on from its wall, each line of it along the wall on its
+/// own, through what is empty and through layers of a worse rank, and stops at the first layer of its own rank or a better
+/// one; past the last thing it runs through with nothing to stop it, it ends there, and with nothing in its way at all,
+/// square at the point.
+#[allow(clippy::type_complexity)]
+fn butting(me: &Strips, at_end: bool, place: usize, pieces: &[Piece], far: f64) -> Option<(Cut, Vec<Piece>, Vec<(usize, Vec<P2>)>)> {
+    let (node, way) = me.out(at_end);
+    let across = way.perp();
+    let offset = |q: P2| (q - node).dot(across);
+    let at = |u: f64, t: f64| node + across * u + way * t;
+    // Where the pieces' corners lie across the wall: between two of them next each other, every piece's edges run
+    // straight across.
+    let mut corners: Vec<f64> = pieces.iter().flat_map(|p| p.ring.iter().map(|q| offset(*q))).collect();
+    corners.sort_by(f64::total_cmp);
+    let (mut cut, mut mine, mut gone) = (Cut::default(), Vec::new(), Vec::new());
+    // Each layer's first and last stretch: how far along it ends, and the material that stops it.
+    let mut edges: Vec<[(f64, Option<String>); 2]> = Vec::new();
+    for k in 0..me.layers() {
+        let (Edge::Line(p0, _), Edge::Line(p1, _)) = (me.edge(k), me.edge(k + 1)) else { return None };
+        let (u0, u1) = (offset(p0), offset(p1));
+        let (lo, hi) = (u0.min(u1), u0.max(u1));
+        let mut marks: Vec<f64> = corners.iter().copied().filter(|c| *c > lo + 1e-6 && *c < hi - 1e-6).collect();
+        marks.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+        if u0 > u1 {
+            marks.reverse();
+        }
+        let mut stops = vec![u0];
+        stops.extend(marks);
+        stops.push(u1);
+        let (rank, material) = (*me.ranks.get(k)?, *me.materials.get(k)?);
+        // The layer's end, across it from its exterior side: the points of it, and each stretch's reach and stopper.
+        let mut end: Vec<P2> = Vec::new();
+        let mut reaches: Vec<(f64, Option<String>)> = Vec::new();
+        for pair in stops.windows(2) {
+            let (from, to) = (pair[0], pair[1]);
+            if (to - from).abs() <= 1e-6 {
+                continue;
+            }
+            let inset = (to - from).signum() * 1e-7;
+            let (near, middle, last) = (from + inset, (from + to) / 2.0, to - inset);
+            // What lies along the middle of the stretch, nearest first.
+            let mut hits: Vec<(usize, f64, f64)> = pieces
+                .iter()
+                .enumerate()
+                .filter_map(|(n, p)| inside(&p.ring, at(middle, 0.0), way).map(|(t0, t1)| (n, t0, t1)))
+                .filter(|(_, _, t1)| *t1 > -far + 1e-6)
+                .collect();
+            hits.sort_by(|a, b| a.1.total_cmp(&b.1));
+            let mut passed: Vec<usize> = Vec::new();
+            let mut stopper: Option<usize> = None;
+            for (n, ..) in &hits {
+                if pieces.get(*n).is_some_and(|p| p.rank <= rank) {
+                    stopper = Some(*n);
+                    break;
+                }
+                passed.push(*n);
+            }
+            // How far each side of the stretch runs: into the stopper, else out of the last thing passed, else to the point.
+            let reach = |u: f64| -> f64 {
+                let through = |n: usize| pieces.get(n).and_then(|p| inside(&p.ring, at(u, 0.0), way));
+                let t = match stopper {
+                    Some(n) => through(n).map(|(t0, _)| t0),
+                    None => passed.iter().filter_map(|n| through(*n).map(|(_, t1)| t1)).max_by(f64::total_cmp),
+                };
+                t.unwrap_or(0.0).clamp(-far, far)
+            };
+            let (t0, t1) = (reach(near), reach(last));
+            let (q0, q1) = (at(from, t0), at(to, t1));
+            let stopped_by = stopper.and_then(|n| pieces.get(n)).map(|p| p.material.clone());
+            if stopped_by.as_deref().is_some_and(|other| other != material) {
+                cut.seams.push([q0, q1]);
+            }
+            // Beside the stretch before it, where one runs on past the other: the shorter one's stopper is beside the longer.
+            if let (Some(before), Some((t_before, stopper_before))) = (end.last().copied(), reaches.last()) {
+                let beside = if *t_before < t0 { stopper_before.as_deref() } else { stopped_by.as_deref() };
+                if before.dist(q0) > 1e-6 && beside.is_some_and(|other| other != material) {
+                    cut.seams.push([before, q0]);
+                }
+            }
+            for n in passed {
+                let Some(piece) = pieces.get(n) else { continue };
+                let within =
+                    geom::clip(&geom::clip(&piece.ring, |q| offset(q) - lo.max(from.min(to))), |q| hi.min(from.max(to)) - offset(q));
+                if within.len() >= 3 && geom::area(&within).abs() > 1.0 {
+                    gone.push((n, within));
+                }
+            }
+            mine.push(Piece {
+                wall: place,
+                layer: k,
+                rank,
+                material: material.to_string(),
+                ring: vec![at(from, -far), q0, q1, at(to, -far)],
+            });
+            end.extend([q0, q1]);
+            reaches.extend([(t0, stopped_by.clone()), (t1, stopped_by)]);
+        }
+        end.dedup_by(|a, b| a.dist(*b) < 1e-6);
+        let (a, b) = (*end.first()?, *end.last()?);
+        cut.layers.push([a, b]);
+        cut.bends.push(end.iter().copied().skip(1).take(end.len().saturating_sub(2)).collect());
+        edges.push([reaches.first()?.clone(), reaches.last()?.clone()]);
+    }
+    // Between two of its own layers, where one runs on past the other: the shorter one's stopper is beside the longer.
+    for k in 1..cut.layers.len() {
+        let (Some(before), Some(after), Some(e0), Some(e1)) = (cut.layers.get(k - 1), cut.layers.get(k), edges.get(k - 1), edges.get(k))
+        else {
+            continue;
+        };
+        let ((t_before, stop_before), (t_after, stop_after)) = (&e0[1], &e1[0]);
+        let (beside, longer) = if t_before < t_after { (stop_before, k) } else { (stop_after, k - 1) };
+        if before[1].dist(after[0]) > 1e-6 && beside.as_deref().is_some_and(|other| Some(&other) != me.materials.get(longer)) {
+            cut.seams.push([before[1], after[0]]);
+        }
+    }
+    Some((cut, mine, gone))
 }
 
 /// The cut of wall `id`'s end (`at_end`, else its start) where three walls or more end at a point, none of them running

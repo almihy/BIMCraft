@@ -546,14 +546,25 @@ fn three_walls_ending_at_a_point_join_by_their_layers_each_to_the_one_on_either_
         }
         // Their block, the structure, is one piece through the point; and no line is drawn inside it.
         assert!(blocks >= 40, "walls {n}: {blocks}");
-        // Each wall's block runs unbroken into the others': all the way along its middle, 72.5 to the right of the wall's
-        // location line (which runs in its insulation), nothing but block.
-        for a in angles {
-            let (way, right) = (P2(a.to_radians().cos(), a.to_radians().sin()), P2(a.to_radians().sin(), -a.to_radians().cos()));
-            for step in 0..=20 {
-                let q = way * (f64::from(step) * 20.0 + 1.3) + right * 72.5;
-                assert_eq!(held(&s, &ids, q), (1, Some(2)), "walls {n}: the block of the wall at {a} degrees, at {q:?}");
+        // Their blocks are one piece: from the middle of the first wall's block, 400 out, block all the way to the middle
+        // of each of the others', step by step.
+        let block = |i: i32, j: i32| held(&s, &ids, P2(f64::from(i) * 10.0 + 0.7, f64::from(j) * 10.0 + 0.3)) == (1, Some(2));
+        let middle = |a: f64| {
+            let q = P2(a.to_radians().cos(), a.to_radians().sin()) * 400.0 + P2(a.to_radians().sin(), -a.to_radians().cos()) * 72.5;
+            ((q.0 / 10.0).round() as i32, (q.1 / 10.0).round() as i32)
+        };
+        let mut reached = std::collections::BTreeSet::from([middle(angles[0])]);
+        let mut edge = vec![middle(angles[0])];
+        while let Some((i, j)) = edge.pop() {
+            for next in [(i + 1, j), (i - 1, j), (i, j + 1), (i, j - 1)] {
+                if next.0.abs() <= 60 && next.1.abs() <= 60 && block(next.0, next.1) && reached.insert(next) {
+                    edge.push(next);
+                }
             }
+        }
+        assert!(block(middle(angles[0]).0, middle(angles[0]).1));
+        for a in &angles[1..] {
+            assert!(reached.contains(&middle(*a)), "walls {n}: the block of the wall at {a} degrees is apart from the first's");
         }
         let lines: Vec<Vec<P2>> = ids
             .iter()
@@ -761,11 +772,23 @@ fn shot_y_joins() {
         let (x, y) = (1400.0 * a.to_radians().cos(), 1400.0 * a.to_radians().sin());
         run(&mut s, "wall", json!({"points": [[0, 0], [x, y]], "type": "Ext"}));
     }
-    for a in [0.0_f64, 90.0, 225.0] {
-        let (x, y) = (3600.0 + 1400.0 * a.to_radians().cos(), 1400.0 * a.to_radians().sin());
-        run(&mut s, "wall", json!({"points": [[3600, 0], [x, y]], "type": "Ext"}));
-    }
+    // The three walls drawn in Revit: one in from the left, one up, one down to the right.
+    run(&mut s, "wall", json!({"points": [[2600, 0], [4000, 0]], "type": "Ext"}));
+    run(&mut s, "wall", json!({"points": [[4000, 0], [4000, 1400]], "type": "Ext"}));
+    run(&mut s, "wall", json!({"points": [[4000, 0], [5100, -800]], "type": "Ext"}));
     run(&mut s, "detail", json!({"view": 100000, "detail": "fine"}));
     let dir = std::env::var("SHOT").unwrap();
     std::fs::write(format!("{dir}/y.png"), crate::render::png(&crate::render::plan(&s.model, 100000, 1800, 1000)).unwrap()).unwrap();
+}
+
+#[test]
+#[ignore]
+fn shot_y_close() {
+    let mut s = typed();
+    run(&mut s, "wall", json!({"points": [[-700, 0], [0, 0]], "type": "Ext"}));
+    run(&mut s, "wall", json!({"points": [[0, 0], [0, 700]], "type": "Ext"}));
+    run(&mut s, "wall", json!({"points": [[0, 0], [600, -430]], "type": "Ext"}));
+    run(&mut s, "detail", json!({"view": 100000, "detail": "fine"}));
+    let dir = std::env::var("SHOT").unwrap();
+    std::fs::write(format!("{dir}/yc.png"), crate::render::png(&crate::render::plan(&s.model, 100000, 1400, 1300)).unwrap()).unwrap();
 }

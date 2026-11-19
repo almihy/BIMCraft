@@ -401,7 +401,16 @@ fn end_geometry(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> WallE
             return WallEnd::stepped(cut, at_end);
         }
     }
-    // Three ends or more at a point, none in line with another: each joins the one on either side of it, half a wall to
+    // Three or four ends at a point, none in line with another, as Revit joins them: in order, the first two as the
+    // corner they would be alone, each one after butting what is there.
+    if let Some(order) = node_order(m, &arms, through)
+        && let Some(place) = order.iter().position(|(other, end)| *other == id && *end == at_end)
+        && let Some(cut) =
+            join::ordered(m, &order).and_then(|mut joined| (place < joined.cuts.len()).then(|| joined.cuts.swap_remove(place)))
+    {
+        return WallEnd::stepped(cut, at_end);
+    }
+    // Else each joins the one on either side of it, half a wall to
     // half a wall, their layers cleaned up by rank as at a corner.
     if n >= 3
         && !through
@@ -427,6 +436,19 @@ fn end_geometry(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> WallE
     };
     let (cw, ccw) = (meet(me.cw, prev.ccw, prev), meet(me.ccw, next.cw, next));
     WallEnd::plain(if through { vec![cw, ccw] } else { vec![cw, node, ccw] })
+}
+
+/// The order the walls ending at a node join in, where they are three or four straight walls' ends and none runs on in
+/// line with another: the order they were made in (their ids). Each is a wall and which of its ends is there.
+fn node_order(m: &Model, arms: &[Arm], through: bool) -> Option<Vec<(Id, bool)>> {
+    if through || !(3..=4).contains(&arms.len()) || carried_on(m, arms).is_some() {
+        return None;
+    }
+    let mut order: Vec<(Id, bool)> = arms.iter().map(|a| (a.id, a.at_end)).collect();
+    order.sort_unstable();
+    let apart = order.windows(2).all(|w| w[0].0 != w[1].0);
+    let straight = order.iter().all(|(id, _)| m.wall(*id).is_some_and(|w| w.arc == 0.0));
+    (apart && straight).then_some(order)
 }
 
 /// The wall that runs on through a node others end at: the one with two arms there, when it is the only one.
@@ -925,7 +947,60 @@ pub fn layer_geometry(m: &Model, id: Id, index: Option<&Index>) -> LayerGeometry
             rings.retain(|r| geom::area(r).abs() > 1e-6);
         }
     }
+    // Where it joins walls made after it at a point of three or four ends, their layers run through some of its own by
+    // rank ([`join::ordered`]): it gives those up, and the lines between its layers there with them.
+    for at_end in [false, true] {
+        let (arms, through) = arms(m, id, at_end, index);
+        let Some(order) = node_order(m, &arms, through) else { continue };
+        let Some(place) = order.iter().position(|(other, end)| *other == id && *end == at_end) else { continue };
+        let Some(joined) = join::ordered(m, &order) else { continue };
+        let holes: Vec<(usize, &Vec<P2>)> =
+            joined.taken.iter().filter(|(wall, ..)| *wall == place).map(|(_, k, hole)| (*k, hole)).collect();
+        for (k, hole) in &holes {
+            if let Some(rings) = bands.get_mut(*k) {
+                *rings = minus(rings, hole);
+            }
+        }
+        // A line of its own that runs along the side of what it gave up is gone there.
+        let sides: Vec<(P2, P2)> = holes.iter().flat_map(|(_, hole)| geom::ring_edges(hole)).collect();
+        seams = seams
+            .into_iter()
+            .flat_map(|line| {
+                let segments: Vec<[P2; 2]> = line.windows(2).filter_map(|w| Some([*w.first()?, *w.get(1)?])).collect();
+                segments.into_iter().flat_map(|s| uncovered(s, &sides)).map(|s| s.to_vec()).collect::<Vec<_>>()
+            })
+            .collect();
+    }
     LayerGeometry { lines, bands, seams, butts }
+}
+
+/// What is left of the line `s` where none of `sides` lies along it.
+fn uncovered(s: [P2; 2], sides: &[(P2, P2)]) -> Vec<[P2; 2]> {
+    let (a, d) = (s[0], s[1] - s[0]);
+    let len = d.length();
+    if len <= 1e-9 {
+        return Vec::new();
+    }
+    let u = d * (1.0 / len);
+    let on = |q: P2| (q - a).cross(u).abs() < 1e-4;
+    let mut covers: Vec<(f64, f64)> = sides
+        .iter()
+        .filter(|(p, q)| on(*p) && on(*q))
+        .map(|(p, q)| ((*p - a).dot(u), (*q - a).dot(u)))
+        .map(|(x, y)| (x.min(y), x.max(y)))
+        .collect();
+    covers.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let (mut out, mut from) = (Vec::new(), 0.0);
+    for (lo, hi) in covers {
+        if lo > from + 1e-6 {
+            out.push([a + u * from, a + u * lo.min(len)]);
+        }
+        from = from.max(hi);
+    }
+    if from < len - 1e-6 {
+        out.push([a + u * from, s[1]]);
+    }
+    out
 }
 
 /// A plane over the plan: its height at `q` is `z + g.0 · q.0 + g.1 · q.1`.
