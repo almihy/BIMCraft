@@ -376,20 +376,25 @@ fn end_geometry(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> WallE
             }
         }
     }
-    if n == 3 && through && next.id == prev.id {
-        if let Some(cut) = join::end_cut(m, id, at_end, next.id, None, false, false, tee_cleans(m, id, at_end, next.id)) {
-            return WallEnd::stepped(cut, at_end);
-        }
+    // Walls ending on the side of one that runs on (one, or one from each side: a crossing): each joins it as a T.
+    if n >= 3
+        && through
+        && let Some(on) = running_on(&arms).filter(|on| *on != id)
+        && let Some(cut) = join::end_cut(m, id, at_end, on, None, false, false, tee_cleans(m, id, at_end, on))
+    {
+        return WallEnd::stepped(cut, at_end);
     }
-    // Three ends at a point, two of them one wall carried on in line (a wall split in two, or drawn in two lengths): the
-    // third joins the pair as it would the one wall, and the two stand square against each other there.
-    if n == 3 && !through {
-        if in_line(m, me, prev) || in_line(m, me, next) {
+    // Ends at a point, two of them one wall carried on in line (a wall split in two, or drawn in two lengths; where two
+    // such pairs cross, the pair with the wall made first): the others join the pair as they would the one wall, and the
+    // two stand square against each other there.
+    if n >= 3
+        && !through
+        && let Some((a, b)) = carried_on(m, &arms)
+    {
+        if i == a || i == b {
             return WallEnd::plain(vec![me.cw, me.ccw]);
         }
-        if in_line(m, prev, next)
-            && let Some(cut) = join::end_cut(m, id, at_end, next.id, None, false, false, true)
-        {
+        if let Some(cut) = arms.get(a).and_then(|on| join::end_cut(m, id, at_end, on.id, None, false, false, true)) {
             return WallEnd::stepped(cut, at_end);
         }
     }
@@ -409,6 +414,28 @@ fn end_geometry(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> WallE
     };
     let (cw, ccw) = (meet(me.cw, prev.ccw, prev), meet(me.ccw, next.cw, next));
     WallEnd::plain(if through { vec![cw, ccw] } else { vec![cw, node, ccw] })
+}
+
+/// The wall that runs on through a node others end at: the one with two arms there, when it is the only one.
+fn running_on(arms: &[Arm]) -> Option<Id> {
+    let mut twice = arms.iter().map(|a| a.id).filter(|id| arms.iter().filter(|a| a.id == *id).count() == 2);
+    let on = twice.next()?;
+    twice.all(|id| id == on).then_some(on)
+}
+
+/// Of the ends at a node, the two that are one wall carried on in line, by their places among `arms`: where two such pairs
+/// cross, the pair that has the wall made first (the lowest id).
+fn carried_on(m: &Model, arms: &[Arm]) -> Option<(usize, usize)> {
+    let mut best: Option<(usize, usize)> = None;
+    for (a, x) in arms.iter().enumerate() {
+        for (b, y) in arms.iter().enumerate().skip(a + 1) {
+            let first = |p: (usize, usize)| arms.get(p.0).map(|q| q.id).min(arms.get(p.1).map(|q| q.id));
+            if in_line(m, x, y) && best.is_none_or(|kept| first((a, b)) < first(kept)) {
+                best = Some((a, b));
+            }
+        }
+    }
+    best
 }
 
 /// Whether two walls leaving a node are one wall carried on: of one type on one location line, running opposite ways.
@@ -451,8 +478,7 @@ fn tee_cleans(m: &Model, ender: Id, at_end: bool, through: Id) -> bool {
 /// the Wall Joins tool shows and sets how plans draw.
 pub fn ends_on(m: &Model, id: Id, at_end: bool) -> Option<Id> {
     let (arms, through) = arms(m, id, at_end, None);
-    let other = arms.iter().find(|a| a.id != id)?.id;
-    (through && arms.len() == 3 && arms.iter().filter(|a| a.id == other).count() == 2).then_some(other)
+    if through { running_on(&arms).filter(|on| *on != id) } else { None }
 }
 
 /// The wall ends that end on the side of wall `id`: each a wall and which of its ends (its end, else its start).
@@ -482,10 +508,10 @@ fn tees(m: &Model, id: Id, index: Option<&Index>) -> Vec<(Id, bool)> {
             let on_its_side = s > TOL && s < axis.length() - TOL;
             // On its side; or at its end, where it carries on as another wall in line with it.
             let ends_on = if on_its_side {
-                through && arms.len() == 3 && arms.iter().filter(|a| a.id == id).count() == 2
+                through && running_on(&arms) == Some(id)
             } else {
-                let pair: Vec<&Arm> = arms.iter().filter(|a| a.id != other).collect();
-                !through && matches!(pair.as_slice(), [a, b] if (a.id == id || b.id == id) && in_line(m, a, b))
+                let pair = carried_on(m, &arms).and_then(|(a, b)| Some((arms.get(a)?.id, arms.get(b)?.id)));
+                !through && pair.is_some_and(|(a, b)| (a == id || b == id) && a != other && b != other)
             };
             if ends_on {
                 out.push((other, at_end));

@@ -387,6 +387,53 @@ fn a_t_join_set_not_to_clean_leaves_both_walls_layers_whole_and_draws_the_line_t
     assert!(s.execute("wall_join", &json!({"walls": [south, far], "display": "clean"})).is_err());
 }
 
+/// The room's south wall with a partition ending on it from each side at x = 1500: one up into the room, one down.
+fn crossing(split: bool) -> (Session, Vec<u64>, u64, u64) {
+    let (mut s, south, up) = room("Block");
+    let down = run(&mut s, "wall", json!({"points": [[1500, 0], [1500, -1200]], "type": "Part"}))["ids"][0].as_u64().unwrap();
+    let mut through = vec![south];
+    if split {
+        // The south wall in two lengths that meet where the partitions do: four ends at the point.
+        let made = run(&mut s, "split", json!({"id": south, "at": [1500, 0]}));
+        through = s
+            .model
+            .elements
+            .iter()
+            .filter(|(id, e)| {
+                matches!(e, crate::model::Element::Wall(w) if w.start.1 == 0.0 && w.end.1 == 0.0) && **id != up && **id != down
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        assert_eq!(through.len(), 2, "{made}");
+    }
+    (s, through, up, down)
+}
+
+#[test]
+fn walls_ending_on_a_wall_from_both_sides_each_join_it_as_a_t() {
+    for split in [false, true] {
+        let (s, through, up, down) = crossing(split);
+        // Up into the room, the partition's core passes the wall's plaster to its block (142.5), its plaster stops on the
+        // wall's face (157.5); down outside, its core passes the brick and the insulation to the block's other side (2.5).
+        let lowest =
+            |id: u64, k: usize| walls::layer_geometry(&s.model, id, None).bands(k).iter().map(|r| span(r).0).fold(f64::INFINITY, f64::min);
+        let highest = |id: u64, k: usize| {
+            walls::layer_geometry(&s.model, id, None).bands(k).iter().map(|r| span(r).1).fold(f64::NEG_INFINITY, f64::max)
+        };
+        assert_eq!([lowest(up, 0), lowest(up, 1), lowest(up, 2)], [157.5, 142.5, 157.5], "split {split}");
+        assert_eq!([highest(down, 0), highest(down, 1), highest(down, 2)], [-157.5, 2.5, -157.5], "split {split}");
+        // The wall run into gives up its brick, insulation and plaster where the cores pass, 100 wide, and keeps its block
+        // whole; split in two there, its halves stand square against each other.
+        let has = |k: usize, q: P2| {
+            through.iter().any(|id| walls::layer_geometry(&s.model, *id, None).bands(k).iter().any(|r| crate::geom::contains(r, q)))
+        };
+        for (k, y) in [(0, -107.5), (1, -27.5), (3, 150.0)] {
+            assert!(!has(k, P2(1500.0, y)) && has(k, P2(1440.0, y)) && has(k, P2(1560.0, y)), "layer {k}, split {split}");
+        }
+        assert!(has(2, P2(1440.0, 72.5)) && has(2, P2(1560.0, 72.5)) && (split || has(2, P2(1500.0, 72.5))), "split {split}");
+    }
+}
+
 /// The three walls drawn in Revit 2025 on 19 November (its picture is with the walls design), for laying beside it: one
 /// along the south, one up from its east end, one ending on it from the brick side.
 #[test]
