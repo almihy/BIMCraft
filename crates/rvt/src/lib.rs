@@ -8,6 +8,7 @@
 pub mod atom;
 mod columns;
 mod container;
+mod curtain;
 pub mod curves;
 pub mod data;
 mod ducts;

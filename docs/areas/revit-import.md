@@ -57,8 +57,32 @@ Moved from the root `CLAUDE.md`, word for word: the root keeps the rules and the
   that turns a corner or runs across the axes, whose box is a block where there is none, is left out with that; and a whole (a stair,
   a truss, a beam system) is left out where its box holds a box of its parts' categories, which come in on their own. Conduits come
   in as boxes and not as runs: the finding that a duct's or a cable tray's data holds its line (below) was made on those two
-  categories, and no conduit was looked at. A curtain wall still comes in as the plane of its box, its panels and mullions as boxes
-  over it.
+  categories, and no conduit was looked at.
+- **Curtain walls** (`curtain.rs`, `walls.rs`). A wall whose type has no compound structure and whose record's box holds the box
+  of a curtain panel is a curtain wall, and comes in as BIMCraft's ([levels, walls and roofs](levels-walls-roofs.md)): on its
+  location line, with its base and top, of a curtain type named as the file names its type and with no grid rule of its own. A
+  type with no layers and no panel in its walls' boxes (a tilted solar panel, a trellis member) is no curtain wall the reader can
+  tell: it stays the plane of its box, as before. **The file's curtain grid lines are not read**: no finding says where their
+  records are or what their data holds, and none was looked for. Where the wall is straight and runs along an axis, its grid is
+  worked out from the boxes of its panels (nothing new is read: their records' boxes, which made the boxes they came in as): a
+  line midway between the facing edges of two neighbouring panels, which are a mullion apart or touch, each way; held to the
+  file before it is used (as many cells as panels, each panel in a cell of its own and filling it but for a mullion each side).
+  The lines come in as grid lines drawn by hand, so the wall lays out a panel in each cell, of glass as thick as the panels'
+  boxes agree on (`Glazed`, or `Glazed 24.4mm`), and those panels' records make no boxes too. A line is exact where the two
+  panels touch or the mullion between them is as wide on one side as on the other, and off by half the difference where it is
+  not. Where the boxes give no grid that holds (a curved wall, one at an angle, a panel over two cells where a segment was
+  removed, a panel that is no rectangle, a panel in the boxes of two curtain walls) the wall comes in as a curtain wall with one
+  open cell (its type's panel is `Empty`, so nothing is drawn twice) and its panels as boxes, as before. Not read either way:
+  the type's grid rules, justification and offsets, the panels' and mullions' types and materials, which panels are pinned, and
+  a door in a curtain wall (it is left out: `openings.rs`). **Mullions still come in as boxes** of a family of their category
+  where their boxes run along an axis, never as BIMCraft's mullions: their types' sections and which line each stands on would
+  have to be read. The notes say which of the three a wall came in as. Checked on synthetic files
+  (`a_wall_whose_box_holds_curtain_panels_comes_in_as_a_curtain_wall_with_the_grid_their_boxes_give`) and run once on the
+  Snowdon Towers architectural sample that Revit 2025 installs (not the tabled 2024 file, so no pinned number covers it): of its
+  43 walls with no layers, 42 hold panels and are curtain walls, 12 with a grid that holds (47 lines, 109 panels theirs) and 30
+  with one open cell (most run at an angle), and one stays a plane; the project checks. The comparisons with the tabled samples
+  (nine curtain walls in the architectural basic one) run only with `BIMCRAFT_RVT_SAMPLES` set, which it was not when this was
+  written: their pinned counts of walls stand, and what they say of doors in curtain walls was not re-run.
 
   Every note of an element left out reads `N kinds left out, why (ids …)` (`Import::left_out`; an element the model's rules drop
   after it was made goes through `Import::dropped`), because the desktop adds those numbers up for its status line
