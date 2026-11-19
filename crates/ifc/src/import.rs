@@ -2778,7 +2778,17 @@ pub fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, String> 
             }
             let level = level_for(id, z);
             let offset = ((z - elevation(level)) * 1000.0).round() / 1000.0 + 0.0;
-            let c = Component { family, type_name, level, at: micron(at), angle, offset, mirrored, params: BTreeMap::new() };
+            let c = Component {
+                family,
+                type_name,
+                level,
+                at: micron(at),
+                angle,
+                offset,
+                mirrored,
+                moves_with_nearby: false,
+                params: BTreeMap::new(),
+            };
             let cid = m.insert(Element::Component(c));
             from.insert(cid, who(id));
             origin.entry(id).or_insert(cid);

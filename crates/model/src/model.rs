@@ -2442,6 +2442,9 @@ pub struct Component {
     pub offset: f64,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub mirrored: bool,
+    /// Revit's Moves With Nearby Elements: it goes with the wall nearest it when that wall is moved.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub moves_with_nearby: bool,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub params: BTreeMap<String, serde_json::Value>,
 }

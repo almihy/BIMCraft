@@ -1728,6 +1728,7 @@ impl Model {
             || self.elements.values().any(ends)
             || self.elements.values().filter_map(crate::graphics::graphics_of_element).any(|g| g.same_type_joins)
             || self.view_templates.values().any(|t| t.graphics.same_type_joins)
+            || self.elements.values().any(|e| matches!(e, Element::Component(c) if c.moves_with_nearby))
         {
             return crate::model::WALL_FORMAT;
         }

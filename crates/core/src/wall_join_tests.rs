@@ -414,6 +414,62 @@ fn a_walls_end_dragged_alone_leaves_its_join_and_several_walls_ends_at_a_point_g
     assert!(s.execute("move", &json!({"ids": [south], "by": [10, 10], "node": [1500, 1500]})).is_err());
 }
 
+#[test]
+fn a_door_moved_with_disjoin_lands_in_the_wall_that_stands_where_it_goes() {
+    let (mut s, south, _) = room("Block");
+    let door = run(&mut s, "door", json!({"at": [800, 0]}))["id"].as_u64().unwrap();
+    let hosted = |s: &Session| match s.model.elements.get(door) {
+        Some(crate::model::Element::Door(o)) => (s.model.elements.id(o.host).unwrap(), o.offset),
+        _ => unreachable!(),
+    };
+    assert_eq!(hosted(&s).0, south);
+    // Moved as ever, it slides along its own wall: what of the move is across the wall is lost.
+    run(&mut s, "move", json!({"ids": [door], "by": [300, 2400]}));
+    assert_eq!(hosted(&s).0, south);
+    run(&mut s, "undo", json!({}));
+    // With Disjoin it leaves its wall for the one that stands where it lands: the north wall, 2400 up, which runs east
+    // from (0, 2400), so 800 along it.
+    run(&mut s, "move", json!({"ids": [door], "by": [0, 2400], "disjoin": true}));
+    let north =
+        *s.model.elements.iter().find(|(_, e)| matches!(e, crate::model::Element::Wall(w) if w.start == P2(0.0, 2400.0))).unwrap().0;
+    assert_eq!(hosted(&s), (north, 800.0));
+    // Where no wall stands it is refused, and nothing moves.
+    let before = s.model.clone();
+    assert!(s.execute("move", &json!({"ids": [door], "by": [0, -1000], "disjoin": true})).is_err());
+    assert_eq!(*s.model, *before);
+}
+
+#[test]
+fn a_component_set_to_move_with_nearby_elements_goes_with_the_wall_nearest_it() {
+    let (mut s, south, _) = room("Block");
+    run(
+        &mut s,
+        "family",
+        json!({"name": "Desk", "category": "furniture", "types": {"A": {}}, "forms": [{"profile": [[0, 0], [600, 0], [600, 300]], "to": 700}]}),
+    );
+    let mut desk = |at: [i32; 2]| run(&mut s, "component", json!({"family": "Desk", "type": "A", "at": at}))["id"].as_u64().unwrap();
+    // Three desks: two by the south wall (y = 0), one of them set to move with nearby elements; one so set by the north
+    // wall (y = 2400).
+    let (with, without, north) = (desk([1000, 500]), desk([2000, 500]), desk([1000, 2000]));
+    for id in [with, north] {
+        run(&mut s, "modify", json!({"id": id, "moves_with_nearby": true}));
+    }
+    let at = |s: &Session, id: u64| match s.model.elements.get(id) {
+        Some(crate::model::Element::Component(c)) => c.at,
+        _ => unreachable!(),
+    };
+    // The south wall moved 400 out: the desk set so goes with it; the one not set stays, and so does the one whose
+    // nearest wall is another.
+    run(&mut s, "move", json!({"ids": [south], "by": [0, -400]}));
+    assert_eq!((at(&s, with), at(&s, without), at(&s, north)), (P2(1000.0, 100.0), P2(2000.0, 500.0), P2(1000.0, 2000.0)));
+    // One undo step takes both back.
+    run(&mut s, "undo", json!({}));
+    assert_eq!(at(&s, with), P2(1000.0, 500.0));
+    // Only the wall's end moved, the desk stays: the wall has not gone anywhere.
+    run(&mut s, "move", json!({"ids": [south], "by": [0, -400], "end": "start"}));
+    assert_eq!(at(&s, with), P2(1000.0, 500.0));
+}
+
 /// The room's south wall with a partition ending on it from each side at x = 1500: one up into the room, one down.
 fn crossing(split: bool) -> (Session, Vec<u64>, u64, u64) {
     let (mut s, south, up) = room("Block");

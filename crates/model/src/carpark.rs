@@ -631,6 +631,7 @@ pub fn run(m: &Model, park: Id) -> Option<Laid> {
                 angle: (turn * 1000.0).round() / 1000.0,
                 offset,
                 mirrored,
+                moves_with_nearby: false,
                 params,
             };
             let placed = placed_of(m.language, &c);
@@ -1114,6 +1115,7 @@ fn bay_element(
         angle: (angle * 1000.0).round() / 1000.0,
         offset,
         mirrored,
+        moves_with_nearby: false,
         params,
     }))
 }

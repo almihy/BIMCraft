@@ -220,6 +220,7 @@ fn boxes(
                 angle: 0.0,
                 offset: micron(mm(r.bbox[2]) - mm(elevation)),
                 mirrored: false,
+                moves_with_nearby: false,
                 params,
             })
         })();

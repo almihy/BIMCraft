@@ -12727,6 +12727,7 @@ fn component(s: &mut Session, p: &Value) -> R {
         angle: num(c, p, "angle")?.unwrap_or(0.0),
         offset: num(c, p, "offset")?.unwrap_or(0.0),
         mirrored: flag(c, p, "mirrored")?,
+        moves_with_nearby: false,
         params,
     };
     let id = s.model_mut().insert(Element::Component(comp));
@@ -13559,6 +13560,9 @@ fn host_line(was: P2, candidates: impl IntoIterator<Item = Id>, line_of: impl Fn
 /// Take elements by `mo`, keeping walls joined: walls joined to a taken wall stretch to stay
 /// joined, and doors and windows in walls that changed keep their place or go with their wall.
 /// With `end` (`Some(true)` the start, `Some(false)` the end), only that end of one wall or one run goes.
+/// How far from a component the wall it moves with may be (Revit's Moves With Nearby Elements), mm.
+const NEARBY: f64 = 3000.0;
+
 fn relocate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion, end: Option<bool>) -> Result<(), String> {
     // A toposolid taken takes its sub-divisions with it, as Revit's; and the survey point unclipped, or the project base
     // point, moves alone, its shared coordinates following (`motion::transform`).
@@ -13951,6 +13955,30 @@ fn relocate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion, end: Option<bool>
         }
         others.retain(|(other, _)| *other != id);
         others.push((id, if matches!(e, Element::Door(_)) { Element::Door(o) } else { Element::Window(o) }));
+    }
+    // Revit's Moves With Nearby Elements: a component set so goes with the wall nearest it, when that wall is taken whole
+    // and slid (not turned or mirrored).
+    if let (None, Some(by)) = (end, mo.slide) {
+        let nearby: Vec<(Id, Component)> = m
+            .elements
+            .iter()
+            .filter_map(|(id, e)| match e {
+                Element::Component(c) if c.moves_with_nearby && !moving.contains(id) => Some((*id, c.clone())),
+                _ => None,
+            })
+            .collect();
+        for (id, mut comp) in nearby {
+            let reach = ([comp.at.0, comp.at.1, comp.at.0, comp.at.1], f64::NEG_INFINITY, f64::INFINITY);
+            let nearest = lookup
+                .walls_near_at(&[reach], NEARBY)
+                .into_iter()
+                .filter_map(|w| Some((w, Axis::of(m.wall(w)?).distance(comp.at, 0.0))))
+                .min_by(|a, b| a.1.total_cmp(&b.1));
+            if nearest.is_some_and(|(w, _)| moving.contains(&w)) {
+                comp.at = micron(comp.at + by);
+                others.push((id, Element::Component(comp)));
+            }
+        }
     }
     let m = s.model_mut();
     let mut flipped = Vec::new();
@@ -14434,6 +14462,41 @@ fn move_elements(s: &mut Session, p: &Value) -> R {
     // Disjoin, as the Move tool's: the walls taken leave their joins, so nothing they were joined to stretches after them;
     // where they come to stand they join what they meet there, as any wall does.
     let disjoin = flag(c, p, "disjoin")? && end.is_none();
+    // Disjoined, a door or a window leaves its wall too: it lands in the wall that stands where it is moved to.
+    let mut landed: Vec<(Id, Guid, f64)> = Vec::new();
+    if disjoin {
+        let m = &s.model;
+        let thickest = m.types.wall.values().map(|t| t.thickness).filter(|t| t.is_finite()).fold(0.0, f64::max);
+        for id in &ids {
+            let Some(Element::Door(o) | Element::Window(o)) = m.elements.get(*id) else { continue };
+            let Some(host) = m.wall(o.host) else { continue };
+            // With its own wall it rides along, as ever.
+            if m.elements.id(o.host).is_some_and(|h| ids.contains(&h)) {
+                continue;
+            }
+            let at = Axis::of(host).at(o.offset, 0.0) + by;
+            let span = ([at.0, at.1, at.0, at.1], m.base_z(host), m.top_z(host));
+            let found = m
+                .lookup()
+                .walls_near_at(&[span], thickest + 1.0)
+                .into_iter()
+                .filter_map(|w| {
+                    let wall = m.wall(w)?;
+                    let axis = Axis::of(wall);
+                    let ((along, across), (ext, int)) = (axis.project(at), crate::walls::faces(m, wall));
+                    let within = along > TOL && along < axis.length() - TOL && (int - TOL..=ext + TOL).contains(&across);
+                    within.then(|| (w, along, axis.distance(at, 0.0)))
+                })
+                .min_by(|a, b| a.2.total_cmp(&b.2));
+            let Some((wall, along, _)) = found else {
+                return Err(bad(c, format!("no wall stands where element {id} would land: a door or a window is moved into a wall")));
+            };
+            landed.push((*id, m.guid(wall), (along * 1000.0).round() / 1000.0));
+        }
+        pin::refuse_pinned(c, m, &landed.iter().map(|(id, ..)| *id).collect::<Vec<_>>(), pin::Held::Move)?;
+    }
+    let all = ids.clone();
+    let ids: Vec<Id> = ids.into_iter().filter(|id| !landed.iter().any(|(other, ..)| other == id)).collect();
     let held: Vec<(Id, bool)> =
         if disjoin { ids.iter().filter_map(|id| Some((*id, s.model.wall(*id)?.join))).collect() } else { Vec::new() };
     let joining = |s: &mut Session, on: Option<bool>| {
@@ -14447,12 +14510,19 @@ fn move_elements(s: &mut Session, p: &Value) -> R {
     if disjoin {
         joining(s, Some(false));
     }
-    let moved = relocate(c, s, &ids, &Motion { map: &|q| q + by, slide: Some(by), mirror: false }, end);
+    let moved =
+        if ids.is_empty() { Ok(()) } else { relocate(c, s, &ids, &Motion { map: &|q| q + by, slide: Some(by), mirror: false }, end) };
     if disjoin {
         joining(s, None);
     }
     moved?;
-    Ok(json!({"moved": ids}))
+    let m = s.model_mut();
+    for (id, host, offset) in landed {
+        if let Some(Element::Door(o) | Element::Window(o)) = m.elements.get_mut(id) {
+            (o.host, o.offset) = (host, offset);
+        }
+    }
+    Ok(json!({"moved": all}))
 }
 
 fn copy(s: &mut Session, p: &Value) -> R {

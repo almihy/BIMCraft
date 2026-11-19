@@ -322,6 +322,7 @@ fn rows(category: &str) -> &'static [Row] {
         "component" => &[
             ("Constraints", "level", "Level", Level),
             ("Constraints", "offset", "Height Offset From Level", Length),
+            ("Constraints", "moves_with_nearby", msg!("Moves With Nearby Elements"), Flag),
             ("Other", "at", "Location", Point),
             ("Other", "angle", "Rotation (°)", Number),
         ],

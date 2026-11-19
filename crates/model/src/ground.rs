@@ -1242,6 +1242,7 @@ fn component_of(m: &mut Model, s: &crate::masterplan::Site) -> Vec<Element> {
             angle,
             offset: (ground * 100.0).round() / 100.0,
             mirrored: false,
+            moves_with_nearby: false,
             params,
         })
     };

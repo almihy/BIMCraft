@@ -4798,6 +4798,7 @@ impl BimApp {
                         angle,
                         offset: 0.0,
                         mirrored: false,
+                        moves_with_nearby: false,
                         params: Default::default(),
                     };
                     let e = Element::Component(c);

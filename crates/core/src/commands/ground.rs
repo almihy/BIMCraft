@@ -882,8 +882,17 @@ fn place_on_ground(c: &str, s: &mut Session, p: &Value, default: &str, category:
         None => BTreeMap::new(),
     };
     let angle = num(c, p, "angle")?.unwrap_or(0.0);
-    let comp =
-        crate::model::Component { family, type_name, level, at, angle, offset: (offset * 100.0).round() / 100.0, mirrored: false, params };
+    let comp = crate::model::Component {
+        family,
+        type_name,
+        level,
+        at,
+        angle,
+        offset: (offset * 100.0).round() / 100.0,
+        mirrored: false,
+        moves_with_nearby: false,
+        params,
+    };
     let id = s.model_mut().insert(Element::Component(comp));
     Ok(json!({"id": id, "offset": (offset * 100.0).round() / 100.0, "element": element_json(&s.model, id)}))
 }
@@ -1174,6 +1183,7 @@ pub(super) fn parking_component(s: &mut Session, p: &Value) -> R {
         angle: num(c, p, "angle")?.unwrap_or(0.0),
         offset,
         mirrored: flag(c, p, "mirrored")?,
+        moves_with_nearby: false,
         params,
     };
     let id = s.model_mut().insert(Element::Component(comp));
