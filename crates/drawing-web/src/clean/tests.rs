@@ -188,7 +188,7 @@ fn counts_total_by_kind_by_layer_and_by_block() {
     assert_eq!(rest, ["#00ff00", "#00ffff", "#ffffff"]);
     assert_eq!(c["layers"].as_array().expect("layers").len(), 5);
     // The blocks most placed first: the size of what the definition draws at scale 1, the layers its placements are on.
-    assert_eq!(c["blocks"][0], json!({"name": "DR_D01", "placed": 2, "size": [1000.0, 200.0], "layers": ["DOORS"]}));
+    assert_eq!(c["blocks"][0], json!({"name": "DR_D01", "placed": 2, "size": [1000.0, 200.0], "holds": 2, "layers": ["DOORS"]}));
     assert_eq!(c["blocks"][1]["name"], "CHAIR");
     assert_eq!(c["blocks"][1]["size"], json!([420.0, 40.0]));
     assert!(c.get("blocks_more").is_none());
@@ -216,10 +216,13 @@ fn an_unknown_parameter_is_refused_by_name() {
     let (d, ..) = room();
     let (o, m) = open(&d);
     let refused = |r: Result<Value, String>| r.expect_err("refused");
-    assert!(refused(counts(&o, &m, r#"{"layer": ["WALL"]}"#)).contains("unknown parameter `layer`; counts takes: layers, kinds, blocks"));
+    assert!(
+        refused(counts(&o, &m, r#"{"layer": ["WALL"]}"#))
+            .contains("unknown parameter `layer`; counts takes: open, depth, layers, kinds, blocks")
+    );
     assert!(
         refused(cut(&o, &m, r#"{"crop": [[0, 0], [1, 1]]}"#).map(|c| c.1))
-            .contains("unknown parameter `crop`; extract takes: box, keep, drop, sort, move")
+            .contains("unknown parameter `crop`; extract takes: open, depth, box, keep, drop, sort, move")
     );
     assert!(
         refused(cut(&o, &m, r#"{"keep": [{"colour": 1}]}"#).map(|c| c.1)).contains("unknown parameter `colour`; a rule of `keep` takes")
@@ -233,7 +236,7 @@ fn an_unknown_parameter_is_refused_by_name() {
         look(&o, &m, r#"{"sort": []}"#, 400)
             .map(|p| p.about)
             .expect_err("refused")
-            .contains("unknown parameter `sort`; look takes: box, keep, drop")
+            .contains("unknown parameter `sort`; look takes: open, depth, box, keep, drop")
     );
     // What is asked for and is not in the drawing, or is not what a part holds, is said too.
     assert!(refused(counts(&o, &m, r#"{"layers": ["WALLS"]}"#)).contains("the drawing has no layer `WALLS` (it has: 0, Defpoints, WALL"));
@@ -520,6 +523,219 @@ fn holds_color(png: &[u8], c: Rgb) -> bool {
     })
 }
 
+/// Two floors, each one block placed once, as an office draws them: FLOOR holds a slab edge on layer 0, a column line on
+/// COLS drawn ByBlock, a door (a block in it) and a column on COLS. The first placement is turned a quarter, twice the
+/// size and yellow; the second lies as drawn and leaves its colour to its layer STRUCT (green). Their handles come too.
+fn floors() -> (Doc, Handle, Handle) {
+    let mut d = Doc::new_metric();
+    for (l, color) in [("STRUCT", 3), ("COLS", 5), ("SWING", 7)] {
+        d.ensure_layer(l);
+        d.layer_mut(l).expect("the layer").color = Color::Index(color);
+    }
+    block(&mut d, "DR_D01", vec![(on("0"), line((0.0, 0.0), (900.0, 0.0))), (on("SWING"), circle((0.0, 0.0), 100.0))]);
+    let by_block = |layer: &str| Common { color: Color::ByBlock, ..on(layer) };
+    block(
+        &mut d,
+        "FLOOR",
+        vec![
+            (on("0"), line((0.0, 0.0), (1000.0, 0.0))),
+            (by_block("COLS"), line((0.0, 0.0), (0.0, 500.0))),
+            (by_block("0"), placed("DR_D01", (2000.0, 0.0))),
+            (on("COLS"), circle((0.0, 0.0), 50.0)),
+        ],
+    );
+    let turned = EntityKind::Insert(Insert {
+        block: "FLOOR".into(),
+        insert: Vec3::new(10_000.0, 0.0, 0.0),
+        scale: Vec3::new(2.0, 2.0, 2.0),
+        rotation: std::f64::consts::FRAC_PI_2,
+        ..Insert::default()
+    });
+    let a = d.add(&Space::Model, Common { color: Color::Index(2), ..on("STRUCT") }, turned).expect("added");
+    let b = d.add(&Space::Model, on("STRUCT"), placed("FLOOR", (0.0, 0.0))).expect("added");
+    d.add(&Space::Model, on("STRUCT"), line((0.0, -1000.0), (5000.0, -1000.0))).expect("added");
+    (d, a, b)
+}
+
+/// An item's points to the millimetre, with its layer and colour: what a test compares.
+fn shown(e: &Entity) -> String {
+    let p = |v: Vec3| format!("{:.0},{:.0}", v.x + 0.0, v.y + 0.0).replace("-0,", "0,").replace(",-0", ",0");
+    let what = match &e.kind {
+        EntityKind::Line(l) => format!("line {} {}", p(l.a), p(l.b)),
+        EntityKind::Circle(c) => format!("circle {} r{:.0}", p(c.center), c.radius),
+        EntityKind::Insert(i) => format!("{} {} x{:.0} {:.0}°", i.block, p(i.insert), i.scale.x, i.rotation.to_degrees()),
+        EntityKind::Text(t) => format!("text {} {}", t.value, p(t.insert)),
+        other => kind_of(other).to_string(),
+    };
+    format!("{what} on {} {}", e.common.layer, e.common.color.name())
+}
+
+#[test]
+fn a_placement_is_opened_as_explode_takes_it_apart() {
+    let (d, a, b) = floors();
+    let (o, m) = open(&d);
+    let whole = Seen::of(&o, &m);
+    // The first floor alone, by its handle: placed, turned and scaled as the placement was. On layer 0, the slab edge
+    // takes the placement's layer; drawn ByBlock, the column line and the door take its yellow; ByLayer stays ByLayer
+    // of the item's own layer. The door stays a placement.
+    let apart = super::open(&whole, &json!({"open": [{"handles": [a.hex()]}]})).expect("opened").expect("asked");
+    let items: Vec<String> = apart.d.model.iter().map(|e| shown(e)).collect();
+    assert_eq!(
+        items,
+        [
+            "line 10000,0 10000,2000 on STRUCT ByLayer",
+            "line 10000,0 9000,0 on COLS Yellow",
+            "DR_D01 10000,4000 x2 90° on STRUCT Yellow",
+            "circle 10000,0 r100 on COLS ByLayer",
+            "FLOOR 0,0 x1 0° on STRUCT ByLayer",
+            "line 0,-1000 5000,-1000 on STRUCT ByLayer",
+        ]
+    );
+    assert_eq!(apart.said(), json!({"placements": 1, "items": 4}));
+    // The open drawing is as it was, and what came out has handles of its own, past the drawing's.
+    assert_eq!(o.drawing.model.len(), 3);
+    assert!(apart.d.model.iter().take(4).all(|e| e.handle.0 >= o.drawing.handseed));
+    // A placement that leaves its colour to its layer: what it draws ByBlock on another layer is given that layer's
+    // colour, so it is drawn as it was.
+    let apart = super::open(&whole, &json!({"open": [{"handles": [b.hex()]}]})).expect("opened").expect("asked");
+    let items: Vec<String> = apart.d.model.iter().skip(1).take(3).map(|e| shown(e)).collect();
+    assert_eq!(items, ["line 0,0 1000,0 on STRUCT ByLayer", "line 0,0 0,500 on COLS Green", "DR_D01 2000,0 x1 0° on STRUCT ByLayer"]);
+    // Two deep, the door is taken apart too: its leaf, on layer 0 and ByLayer, on the layer the door took and in that
+    // layer's colour; its swing on its own.
+    let apart = super::open(&whole, &json!({"open": [{"handles": [a.hex()]}], "depth": 2})).expect("opened").expect("asked");
+    let items: Vec<String> = apart.d.model.iter().skip(2).take(2).map(|e| shown(e)).collect();
+    assert_eq!(items, ["line 10000,4000 10000,5800 on STRUCT ByLayer", "circle 10000,4000 r200 on SWING ByLayer"]);
+    assert_eq!(apart.said(), json!({"placements": 2, "items": 5}));
+    assert!(
+        super::open(&whole, &json!({"open": [{}], "depth": 9})).err().expect("refused").contains("`depth` is how deep `open` goes, 1 to 4")
+    );
+    assert!(super::open(&whole, &json!({"depth": 2})).expect("not asked").is_none());
+}
+
+#[test]
+fn an_opened_item_is_an_item_of_the_drawing_in_all_three() {
+    let (d, a, _) = floors();
+    let (o, m) = open(&d);
+    let count = |p: Value| counts(&o, &m, &p.to_string()).expect("counted");
+    // Not opened, the floors are two blocks; `holds` tells a floor from a door.
+    let c = count(json!({}));
+    assert_eq!((c["total"].as_u64(), c.get("opened")), (Some(3), None));
+    assert_eq!(c["blocks"][0], json!({"name": "FLOOR", "placed": 2, "size": [2950.0, 600.0], "holds": 4, "layers": ["STRUCT"]}));
+    // Opened, their items are counted on their own layers, and chosen by a rule as any item is: by layer, by colour
+    // as drawn, by the handle they are given (the placement's, and their place in the block).
+    let c = count(json!({"open": [{"blocks": ["FLOOR"]}]}));
+    assert_eq!(c["total"], 9);
+    assert_eq!(c["opened"], json!({"placements": 2, "items": 8}));
+    assert_eq!(c["kinds"], json!({"block": 2, "circle": 2, "line": 5}));
+    assert_eq!(c["blocks"][0], json!({"name": "DR_D01", "placed": 2, "size": [1000.0, 200.0], "holds": 2, "layers": ["STRUCT"]}));
+    assert_eq!(count(json!({"open": [{"blocks": ["FLOOR"]}], "layers": ["COLS"]}))["total"], 4);
+    assert_eq!(count(json!({"open": [{"blocks": ["FLOOR"]}], "layers": ["COLS"], "colors": ["yellow"]}))["total"], 1);
+    assert_eq!(
+        count(json!({"open": [{"blocks": ["FLOOR"]}], "handles": [format!("{}.1", a.hex()), format!("{}.3", a.hex())]}))["kinds"],
+        json!({"circle": 1, "line": 1})
+    );
+    assert_eq!(
+        count(json!({"open": [{"blocks": ["FLOOR"]}], "depth": 2, "handles": [format!("{}.2.0", a.hex().to_lowercase())]}))["layers"][0]["name"],
+        "STRUCT"
+    );
+    assert_eq!(count(json!({"open": [{"blocks": ["FLOOR"]}], "depth": 2}))["opened"], json!({"placements": 4, "items": 10}));
+    // A picture of the opened drawing's columns alone.
+    let p = look(&o, &m, &json!({"open": [{"blocks": ["FLOOR"]}], "keep": [{"layers": ["COLS"]}]}).to_string(), 300).expect("drawn");
+    assert_eq!((p.about["items"].as_u64(), &p.about["opened"]), (Some(4), &json!({"placements": 2, "items": 8})));
+    assert_eq!(p.about["legend"][0]["colors"], json!({"#0000ff": 2, "#00ff00": 1, "#ffff00": 1}));
+    // Extracted: an opened item is cropped by its own centre, sorted and written as any item; the block no longer
+    // placed is left out, and the one still placed comes.
+    let params = json!({
+        "open": [{"blocks": ["FLOOR"]}],
+        "box": [[8000, -500], [11_000, 3000]],
+        "sort": [{"to": "A-COLS", "layers": ["COLS"]}, {"to": "A-FLOR", "kinds": ["line"]}],
+    })
+    .to_string();
+    let (bytes, about) = extract(&o, &m, &params, "2018").expect("extracted");
+    assert_eq!(about["opened"], json!({"placements": 2, "items": 8}));
+    assert_eq!(about["layers"], json!([{"name": "A-COLS", "items": 2}, {"name": "A-FLOR", "items": 1}]));
+    let back = cadcraft_index::read(&bytes, "part.dwg").expect("read back");
+    let mut items: Vec<String> = back.model.iter().map(|e| shown(e)).collect();
+    items.sort();
+    assert_eq!(
+        items,
+        ["circle 10000,0 r100 on A-COLS Blue", "line 10000,0 10000,2000 on A-FLOR Green", "line 10000,0 9000,0 on A-COLS Yellow"]
+    );
+    assert!(back.block("FLOOR").is_none() && back.block("DR_D01").is_none());
+    let (_, about) = cut(&o, &m, &json!({"open": [{"blocks": ["FLOOR"]}]}).to_string()).expect("cut");
+    assert_eq!(about["kinds"], json!({"block": 2, "circle": 2, "line": 5}));
+}
+
+#[test]
+fn an_array_and_attributes_are_opened_too() {
+    let mut d = Doc::new_metric();
+    d.ensure_layer("TAGS");
+    block(&mut d, "POST", vec![(on("0"), circle((0.0, 0.0), 100.0))]);
+    let row = EntityKind::Insert(Insert {
+        block: "POST".into(),
+        insert: Vec3::new(0.0, 1000.0, 0.0),
+        cols: 3,
+        col_spacing: 2000.0,
+        ..Insert::default()
+    });
+    let row = d.add(&Space::Model, on("TAGS"), row).expect("added");
+    let Some(EntityKind::Text(words)) = Some(text((500.0, 500.0), "C1")) else { return };
+    let tag = cadcraft_doc::Attrib {
+        tag: "NO".into(),
+        text: words,
+        invisible: false,
+        constant: false,
+        prompt: String::new(),
+        props: Default::default(),
+        multiline: None,
+        modes: Default::default(),
+    };
+    let hidden = cadcraft_doc::Attrib { tag: "COST".into(), invisible: true, ..tag.clone() };
+    let tagged = EntityKind::Insert(Insert { block: "POST".into(), attribs: vec![tag, hidden], ..Insert::default() });
+    let tagged = d.add(&Space::Model, on("TAGS"), tagged).expect("added");
+    let (o, m) = open(&d);
+    let whole = Seen::of(&o, &m);
+    let apart = super::open(&whole, &json!({"open": [{"kinds": ["block"]}]})).expect("opened").expect("asked");
+    let items: Vec<String> = apart.d.model.iter().map(|e| shown(e)).collect();
+    // Each copy of the array; and the attribute that shows, as a text (the hidden one is not drawn, so not made).
+    assert_eq!(
+        items,
+        [
+            "circle 0,1000 r100 on TAGS ByLayer",
+            "circle 2000,1000 r100 on TAGS ByLayer",
+            "circle 4000,1000 r100 on TAGS ByLayer",
+            "circle 0,0 r100 on TAGS ByLayer",
+            "text C1 500,500 on TAGS ByLayer",
+        ]
+    );
+    let mut called: Vec<&str> = apart.paths.values().map(String::as_str).collect();
+    called.sort_unstable();
+    let (row, tagged) = (row.hex(), tagged.hex());
+    assert_eq!(called, [format!("{row}.0"), format!("{row}.0@1"), format!("{row}.0@2"), format!("{tagged}.0"), format!("{tagged}.1")]);
+}
+
+#[test]
+fn opening_too_much_is_refused_with_the_blocks_that_make_the_most() {
+    let mut d = Doc::new_metric();
+    block(&mut d, "SEAT", (0..1001).map(|n| (on("0"), line((0.0, f64::from(n)), (500.0, f64::from(n))))).collect());
+    block(&mut d, "DESK", vec![(on("0"), line((0.0, 0.0), (1200.0, 0.0)))]);
+    for n in 0..400 {
+        d.add(&Space::Model, on("0"), placed("SEAT", (f64::from(n) * 600.0, 0.0))).expect("added");
+    }
+    d.add(&Space::Model, on("0"), placed("DESK", (0.0, 5000.0))).expect("added");
+    let (o, m) = open(&d);
+    let refused = counts(&o, &m, r#"{"open": [{"kinds": ["block"]}]}"#).expect_err("refused");
+    assert!(refused.contains("would take 401 placements apart into 400401 items, more than the 400000 it may"), "{refused}");
+    assert!(refused.contains("The blocks that make the most: SEAT (400 placed, 400400 items), DESK (1 placed, 1 items)"), "{refused}");
+    assert!(
+        look(&o, &m, r#"{"open": [{"kinds": ["block"]}]}"#, 300).is_err() && cut(&o, &m, r#"{"open": [{"kinds": ["block"]}]}"#).is_err()
+    );
+    // The seats left closed (the reader drops them by name), the rest opens.
+    let c = counts(&o, &m, r#"{"open": [{"blocks": ["DESK"]}]}"#).expect("counted");
+    assert_eq!((c["total"].as_u64(), &c["opened"]), (Some(401), &json!({"placements": 1, "items": 1})));
+    assert_eq!(c["blocks"][0]["holds"], 1001);
+}
+
 /// A real office drawing (14 MB, 99,221 items), when it is on this computer: opened as the worker opens it, its
 /// fullest 40 m by 30 m found by counting, that part extracted and indexed again. Says how long each step took.
 /// `cargo test -p bimcraft-drawing-web -- --ignored --nocapture a_real_drawing`
@@ -591,6 +807,51 @@ fn a_real_drawing_s_plan_is_counted_extracted_and_indexed_again() {
     assert_eq!(c1["kinds"], about["kinds"]);
     assert_eq!(c1["total"], most);
     eprintln!("its kinds: {}", c1["kinds"]);
+    // The large blocks in the box (a floor's columns, furniture, annotation, each placed once) opened: what they hold
+    // is counted on its own layers, the columns' lines on S-COLS.
+    let lines_on = |c: &Value, layer: &str| -> u64 {
+        c["layers"].as_array().and_then(|l| l.iter().find(|l| l["name"] == layer)).map_or(0, |l| l["kinds"]["line"].as_u64().unwrap_or(0))
+    };
+    let closed = counts(&o, &m, &json!({"box": best}).to_string()).expect("counted");
+    let large: Vec<&Value> =
+        closed["blocks"].as_array().expect("blocks").iter().filter(|b| b["holds"].as_u64().unwrap_or(0) >= 200).collect();
+    let told: Vec<String> =
+        large.iter().map(|b| format!("{} holds {}, {} placed, size {}", b["name"], b["holds"], b["placed"], b["size"])).collect();
+    eprintln!("blocks of 200 items or more in the box: {}", told.join("; "));
+    let names: Vec<&str> = large.iter().filter_map(|b| b["name"].as_str()).collect();
+    let t = std::time::Instant::now();
+    let opened = counts(&o, &m, &json!({"open": [{"blocks": names}], "box": best}).to_string()).expect("counted");
+    timed(&format!("counts with those opened ({})", opened["opened"]), t);
+    eprintln!(
+        "items in the box: {} closed, {} opened; lines on S-COLS: {} closed, {} opened",
+        closed["total"],
+        opened["total"],
+        lines_on(&closed, "S-COLS"),
+        lines_on(&opened, "S-COLS")
+    );
+    assert!(opened["opened"]["placements"].as_u64().unwrap_or(0) > 0);
+    assert!(opened["kinds"]["line"].as_u64() > closed["kinds"]["line"].as_u64());
+    // By size, in the whole drawing: every placement 2 m or more on its longer side as this drawing measures (it says
+    // it is in inches, and its sheets come out some 8 m wide), and the columns' lines on S-COLS.
+    let all_lines = lines_on(&all, "S-COLS");
+    let t = std::time::Instant::now();
+    let by_size = counts(&o, &m, &json!({"open": [{"kinds": ["block"], "min_size": 2000}]}).to_string()).expect("counted");
+    timed(&format!("counts of the whole with the 78 largest placements opened ({})", by_size["opened"]), t);
+    eprintln!("lines on S-COLS in the whole: {} closed, {} opened", all_lines, lines_on(&by_size, "S-COLS"));
+    assert!(lines_on(&by_size, "S-COLS") > all_lines);
+    let t = std::time::Instant::now();
+    let p = look(&o, &m, &json!({"open": [{"kinds": ["block"], "min_size": 2000}], "keep": [{"layers": ["S-COLS"]}]}).to_string(), 1600)
+        .expect("drawn");
+    timed(&format!("look at S-COLS alone, opened ({} items)", p.about["items"]), t);
+    let t = std::time::Instant::now();
+    let refused = counts(&o, &m, &json!({"open": [{"kinds": ["block"]}], "depth": 4}).to_string());
+    timed(
+        &format!(
+            "every block opened four deep: {}",
+            refused.map_or_else(|e| e.chars().take(260).collect::<String>(), |c| c["opened"].to_string())
+        ),
+        t,
+    );
     // Its hatches and dimensions dropped, its blocks to one layer, its origin to the box's corner.
     let params = json!({
         "box": best,

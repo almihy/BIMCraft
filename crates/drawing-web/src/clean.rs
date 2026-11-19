@@ -15,6 +15,11 @@
 //! of red, yellow, green, cyan, blue, magenta, white); `"bylayer"` in either selects the items that leave it to their
 //! layer.
 //!
+//! All three take `open` first (`open: [rule]`, `depth?`): the block placements its rules select are taken apart as
+//! AutoCAD's EXPLODE does, for that question only, and what they hold is counted, drawn, cropped and sorted as items of
+//! the drawing (see [`open`]); the answer then says `opened: {placements, items}`. Much of an office's plan lies in a
+//! few large blocks placed once (a floor's columns, its furniture, its sheet frame).
+//!
 //! Coordinates in and out are the ones `query` answers and takes: the drawing's millimetres, less its offset when it
 //! lies far out. A box given far out is taken as the drawing's own, as `query` and `outlines` take it.
 
@@ -64,6 +69,8 @@ struct Seen<'a> {
     offset: Vec2,
     /// Its layers by name, lower case.
     layers: HashMap<String, &'a Layer>,
+    /// The handles of the items that came out of placements taken apart (`open`), as a rule names them.
+    paths: Option<&'a HashMap<u64, String>>,
 }
 
 /// A colour as it is drawn, for telling two apart: white (7) for what names none.
@@ -97,6 +104,7 @@ impl<'a> Seen<'a> {
             m,
             offset: Vec2::new(off[0], off[1]),
             layers: o.drawing.layers.iter().map(|l| (l.name.to_lowercase(), l)).collect(),
+            paths: None,
         }
     }
 
@@ -165,7 +173,8 @@ struct Rule {
     /// The longer side of the item's box, drawing units.
     min: Option<f64>,
     max: Option<f64>,
-    handles: Option<BTreeSet<u64>>,
+    /// Upper case: an item's own handle, or an opened item's (`1A2F.17`).
+    handles: Option<BTreeSet<String>>,
     colors: Option<Colors>,
     linetypes: Option<Linetypes>,
 }
@@ -284,15 +293,16 @@ impl Rule {
         r.max = size("max_size")?;
         if let Some(x) = given(v, "handles") {
             let hs = names(x, "handles", "handles (the `h` of an item)")?;
-            r.handles = Some(
-                hs.iter()
-                    .map(|h| {
-                        cadcraft_doc::Handle::parse_hex(h)
-                            .map(|h| h.0)
-                            .ok_or_else(|| format!("`{h}` is not a handle (the `h` of an item, as 1A2F)"))
-                    })
-                    .collect::<Result<_, _>>()?,
-            );
+            let one = |h: &String| {
+                let h = h.trim().to_uppercase();
+                let own = h.split('.').next().unwrap_or("");
+                let ok =
+                    cadcraft_doc::Handle::parse_hex(own).is_some() && h.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '@');
+                ok.then_some(h.clone()).ok_or_else(|| {
+                    format!("`{h}` is not a handle (the `h` of an item, as 1A2F; of an item out of an opened placement, as 1A2F.17)")
+                })
+            };
+            r.handles = Some(hs.iter().map(one).collect::<Result<_, _>>()?);
         }
         if let Some(x) = given(v, "colors") {
             let not = || {
@@ -369,8 +379,14 @@ impl Rule {
                 return false;
             }
         }
-        if self.handles.as_ref().is_some_and(|h| !h.contains(&e.handle.0)) {
-            return false;
+        if let Some(hs) = &self.handles {
+            let named = match s.paths.and_then(|p| p.get(&e.handle.0)) {
+                Some(path) => hs.contains(path),
+                None => hs.contains(&format!("{:X}", e.handle.0)),
+            };
+            if !named {
+                return false;
+            }
         }
         if self.area.is_some() || self.min.is_some() || self.max.is_some() {
             if !real(b) {
@@ -417,6 +433,234 @@ fn selected(s: &Seen, p: &Value) -> Result<Vec<usize>, String> {
         .collect())
 }
 
+/// The most items `open` may make of the placements it takes apart: past it the call is refused.
+pub const MOST_OPENED: usize = 400_000;
+/// How deep `open` may go (`depth`): a block in a block in a block in a block.
+const DEEPEST: u64 = 4;
+
+/// The drawing with the placements `open` selects taken apart: a drawing of its own beside the open one, which is as
+/// it was, with its measures, and what an opened item is called.
+struct Apart {
+    d: Doc,
+    m: Measured,
+    paths: HashMap<u64, String>,
+    placements: usize,
+    items: usize,
+}
+
+impl Apart {
+    fn seen<'a>(&'a self, o: &Opened) -> Seen<'a> {
+        let off = o.offset();
+        Seen {
+            d: &self.d,
+            m: &self.m,
+            offset: Vec2::new(off[0], off[1]),
+            layers: self.d.layers.iter().map(|l| (l.name.to_lowercase(), l)).collect(),
+            paths: Some(&self.paths),
+        }
+    }
+
+    /// `opened` in an answer: how many placements were taken apart (those nested in them too), and how many items
+    /// they became.
+    fn said(&self) -> Value {
+        json!({"placements": self.placements, "items": self.items})
+    }
+}
+
+/// The copies of an array placement (MINSERT), each by how far it lies from the first, in the drawing's frame.
+fn cells(i: &cadcraft_doc::Insert) -> impl Iterator<Item = Vec2> + '_ {
+    let (cols, rows) = (i.cols.max(1), i.rows.max(1));
+    (0..rows)
+        .flat_map(move |r| (0..cols).map(move |c| Vec2::new(f64::from(c) * i.col_spacing, f64::from(r) * i.row_spacing).rotate(i.rotation)))
+}
+
+/// How many items a placement of block `name` becomes, opened `depth` deep (its attributes apart).
+fn becomes(d: &Doc, name: &str, depth: u64, known: &mut HashMap<(String, u64), usize>) -> usize {
+    let Some(blk) = d.block(name) else { return 1 };
+    let key = (blk.name.clone(), depth);
+    if let Some(n) = known.get(&key) {
+        return *n;
+    }
+    let mut n = 0_usize;
+    for e in blk.entities.iter() {
+        n = n.saturating_add(match &e.kind {
+            EntityKind::AttDef(a) => usize::from(a.constant),
+            EntityKind::Insert(i) if depth > 1 && d.block(&i.block).is_some() => {
+                let each = becomes(d, &i.block, depth - 1, known).saturating_add(i.attribs.iter().filter(|a| !a.invisible).count());
+                each.saturating_mul(i.cols.max(1) as usize).saturating_mul(i.rows.max(1) as usize)
+            }
+            _ => 1,
+        });
+    }
+    known.insert(key, n);
+    n
+}
+
+/// What an item of a block's definition has when the placement `by` is taken apart, as EXPLODE leaves it: on layer
+/// `0` it takes the placement's layer; a colour, linetype or lineweight ByBlock takes the placement's; ByLayer stays,
+/// of the item's own layer. (When the placement leaves its colour or linetype to its layer and the item is on another,
+/// the placement's layer's is written on the item, so that it is drawn as it was.)
+fn inherited(s: &Seen, by: &cadcraft_doc::Common, own: &cadcraft_doc::Common) -> cadcraft_doc::Common {
+    let mut c = own.clone();
+    if c.layer == "0" {
+        c.layer.clone_from(&by.layer);
+    }
+    let same_layer = c.layer.eq_ignore_ascii_case(&by.layer);
+    let by_layer = s.layers.get(&by.layer.to_lowercase()).copied();
+    if c.color == Color::ByBlock {
+        c.color = match by.color {
+            Color::ByLayer if !same_layer => layer_own(by_layer),
+            other => other,
+        };
+    }
+    if c.linetype.trim().eq_ignore_ascii_case("byblock") {
+        let theirs = by.linetype.trim();
+        c.linetype = if (theirs.is_empty() || theirs.eq_ignore_ascii_case("bylayer")) && !same_layer {
+            by_layer.map_or_else(|| "Continuous".to_string(), |l| l.linetype.clone())
+        } else {
+            by.linetype.clone()
+        };
+    }
+    if c.lineweight == cadcraft_doc::Lineweight::ByBlock {
+        c.lineweight = by.lineweight;
+    }
+    c.visible = c.visible && by.visible;
+    c
+}
+
+/// The placement `i` (with `common`, called `path`) taken apart into `out`, each item with what it is called: its
+/// block's items placed by `place` (the placement's own scale, rotation and insertion, after those of what it was
+/// nested in), `depth` deep; and its attributes, as texts. A block placed in it stays a placement at the last depth.
+#[allow(clippy::too_many_arguments)]
+fn take_apart(
+    s: &Seen,
+    common: &cadcraft_doc::Common,
+    i: &cadcraft_doc::Insert,
+    place: &Mat3,
+    path: &str,
+    depth: u64,
+    out: &mut Vec<(cadcraft_doc::Common, EntityKind, String)>,
+    placements: &mut usize,
+) {
+    let Some(blk) = s.d.block(&i.block) else { return };
+    *placements += 1;
+    let base = blk.base.xy();
+    let len = blk.entities.len();
+    for (cell, by) in cells(i).enumerate() {
+        // The block's frame to the drawing's, for this copy.
+        let m = place.then_before(Mat3::translate(by)).then_before(i.transform(base));
+        for (n, e) in blk.entities.iter().enumerate() {
+            let called = if cell == 0 { format!("{path}.{n}") } else { format!("{path}.{n}@{cell}") };
+            let c = inherited(s, common, &e.common);
+            match &e.kind {
+                // An attribute's definition is not drawn in a placement (its attribute is), but a constant one is, as text.
+                EntityKind::AttDef(a) => {
+                    if a.constant {
+                        let mut k = EntityKind::Text(a.text.clone());
+                        k.transform(&m);
+                        out.push((c, k, called));
+                    }
+                }
+                EntityKind::Insert(nested) if depth > 1 && s.d.block(&nested.block).is_some() => {
+                    take_apart(s, &c, nested, &m, &called, depth - 1, out, placements);
+                }
+                kind => {
+                    let mut k = kind.clone();
+                    k.transform(&m);
+                    out.push((c, k, called));
+                }
+            }
+        }
+    }
+    // Its attributes, as the texts they show: each with its definition's properties and those set on it.
+    for (n, a) in i.attribs.iter().enumerate().filter(|(_, a)| !a.invisible) {
+        let def = blk.entities.iter().find(|e| matches!(&e.kind, EntityKind::AttDef(d) if d.tag.eq_ignore_ascii_case(&a.tag)));
+        let c = a.props.over(&def.map_or_else(|| common.clone(), |e| inherited(s, common, &e.common)));
+        let mut k = match a.multiline_text() {
+            Some(t) => EntityKind::MText(t),
+            None => EntityKind::Text(a.text.clone()),
+        };
+        // An attribute is kept in the frame its placement is in: the drawing's, or that of the block it was nested in.
+        k.transform(place);
+        out.push((c, k, format!("{path}.{}", len + n)));
+    }
+}
+
+/// `open`: the drawing with every block placement one of `p.open`'s rules selects taken apart, as AutoCAD's EXPLODE
+/// does, `p.depth` deep (1 when not given: the blocks placed in an opened block stay placements; 2 opens those too,
+/// whichever they are; [`DEEPEST`] at most). None when `open` is not given. The items that come out are items of the
+/// drawing from then on, with handles of their own in it; a rule names one by its placement's handle and its place in
+/// the block, from 0, as `query` lists the block: `1A2F.17` (`1A2F.17.3` for item 3 of the block that item 17 placed;
+/// `1A2F.17@2` in the third copy of an array; an attribute's place follows the block's items). Refused when more than
+/// [`MOST_OPENED`] items would come out, with the blocks that make the most.
+fn open(s: &Seen, p: &Value) -> Result<Option<Apart>, String> {
+    let Some(rules) = rules(s, p, "open")? else { return Ok(None) };
+    let depth = match given(p, "depth") {
+        None => 1,
+        Some(v) => v
+            .as_u64()
+            .filter(|d| (1..=DEEPEST).contains(d))
+            .ok_or_else(|| format!("`depth` is how deep `open` goes, 1 to {DEEPEST}, not {v}"))?,
+    };
+    let chosen: Vec<bool> = s
+        .items()
+        .map(|(e, b)| matches!(&e.kind, EntityKind::Insert(i) if s.d.block(&i.block).is_some()) && rules.iter().any(|r| r.holds(s, e, b)))
+        .collect();
+    // Counted before anything is made, so that a careless `open` (every seat of a hall) costs nothing.
+    let mut known = HashMap::new();
+    let mut by_block: HashMap<&str, (usize, usize)> = HashMap::new();
+    let mut total = 0_usize;
+    for ((e, _), _) in s.items().zip(&chosen).filter(|(_, c)| **c) {
+        let EntityKind::Insert(i) = &e.kind else { continue };
+        let each = becomes(s.d, &i.block, depth, &mut known).saturating_add(i.attribs.iter().filter(|a| !a.invisible).count());
+        let n = each.saturating_mul(i.cols.max(1) as usize).saturating_mul(i.rows.max(1) as usize);
+        total = total.saturating_add(n);
+        let (placed, items) = by_block.entry(i.block.as_str()).or_default();
+        *placed += 1;
+        *items = items.saturating_add(n);
+    }
+    if total > MOST_OPENED {
+        let mut most: Vec<_> = by_block.into_iter().collect();
+        most.sort_by(|a, b| b.1.1.cmp(&a.1.1).then_with(|| a.0.cmp(b.0)));
+        let named: Vec<String> =
+            most.iter().take(8).map(|(name, (placed, items))| format!("{name} ({placed} placed, {items} items)")).collect();
+        return Err(format!(
+            "`open` would take {} placements apart into {total} items, more than the {MOST_OPENED} it may: open fewer (by `blocks`, `box` or `min_size`). The blocks that make the most: {}",
+            chosen.iter().filter(|c| **c).count(),
+            named.join(", ")
+        ));
+    }
+    let mut d = s.d.clone();
+    let mut model = EntityStore::new();
+    let mut boxes: Vec<Option<Bounds2>> = Vec::with_capacity(s.m.boxes.len() + total);
+    let mut paths = HashMap::with_capacity(total);
+    let (mut placements, mut items) = (0_usize, 0_usize);
+    let mut out = Vec::new();
+    for ((e, b), open) in s.items().zip(&chosen) {
+        match &e.kind {
+            EntityKind::Insert(i) if *open => {
+                take_apart(s, &e.common, i, &Mat3::translate(Vec2::ZERO), &format!("{:X}", e.handle.0), depth, &mut out, &mut placements);
+                for (common, kind, called) in out.drain(..) {
+                    let handle = d.new_handle();
+                    paths.insert(handle.0, called);
+                    model.push(Entity { handle, common, kind });
+                    boxes.push(None);
+                    items += 1;
+                }
+            }
+            _ => {
+                model.push(e.clone());
+                boxes.push(Some(*b));
+            }
+        }
+    }
+    d.model = model;
+    // The boxes of what stayed are known; those of what came out are measured.
+    let mut cache = BlockBoundsCache::default();
+    let boxes = d.model.iter().zip(boxes).map(|(e, known)| known.unwrap_or_else(|| entity_bounds_cached(&d, e, 0, &mut cache))).collect();
+    Ok(Some(Apart { m: Measured { mm: s.m.mm, boxes }, d, paths, placements, items }))
+}
+
 fn parsed(params: &str) -> Result<Value, String> {
     if params.trim().is_empty() {
         Ok(json!({}))
@@ -432,11 +676,15 @@ fn parsed(params: &str) -> Result<Value, String> {
 /// items are drawn in, when they are not all the layer's. `colors`: the colours the items are drawn in (their own, or
 /// their layer's), the most used first, [`COLORS_LISTED`] at most (`colors_more`), each with its index when it is one
 /// of AutoCAD's 255 (`aci`, else null) and the layers of its items. The blocks most placed first, [`BLOCKS_LISTED`] at
-/// most (`blocks_more`: how many more there are); `size` is the box of what the definition draws at scale 1, mm, and
+/// most (`blocks_more`: how many more there are); `size` is the box of what the definition draws at scale 1, mm,
+/// `holds` how many items the definition holds (a block placed in it is one), and
 /// `layers` the layers its placements are on. `extents` is the box round what was counted (null when nothing has one).
 pub(crate) fn counts(o: &Opened, m: &Measured, params: &str) -> Result<Value, String> {
-    let s = Seen::of(o, m);
-    let rule = Rule::read(&s, &parsed(params)?, "counts", &[])?;
+    let p = parsed(params)?;
+    let whole = Seen::of(o, m);
+    let apart = open(&whole, &p)?;
+    let s = apart.as_ref().map_or(whole, |a| a.seen(o));
+    let rule = Rule::read(&s, &p, "counts", &["open", "depth"])?;
     let mut total = 0_usize;
     let mut kinds: BTreeMap<&str, usize> = BTreeMap::new();
     let mut per_layer: HashMap<&str, (usize, BTreeMap<&str, usize>, BTreeMap<String, usize>)> = HashMap::new();
@@ -504,7 +752,8 @@ pub(crate) fn counts(o: &Opened, m: &Measured, params: &str) -> Result<Value, St
                 Some(b) if real(&b) => [hundredth(b.width() * m.mm), hundredth(b.height() * m.mm)],
                 _ => [0.0, 0.0],
             };
-            json!({"name": name, "placed": n, "size": size, "layers": on})
+            let holds = s.d.block(name).map_or(0, |blk| blk.entities.len());
+            json!({"name": name, "placed": n, "size": size, "holds": holds, "layers": on})
         })
         .collect();
     let mut out =
@@ -514,6 +763,9 @@ pub(crate) fn counts(o: &Opened, m: &Measured, params: &str) -> Result<Value, St
     }
     if more > 0 {
         out["blocks_more"] = json!(more);
+    }
+    if let Some(a) = &apart {
+        out["opened"] = a.said();
     }
     Ok(out)
 }
@@ -644,9 +896,11 @@ fn purge(d: &mut Doc) {
 
 /// A part of the open drawing as a drawing of its own, and what it holds: see [`extract`], which writes it.
 pub(crate) fn cut(o: &Opened, m: &Measured, params: &str) -> Result<(Doc, Value), String> {
-    let s = Seen::of(o, m);
     let p = parsed(params)?;
-    checked(&p, &["box", "keep", "drop", "sort", "move"], "extract")?;
+    checked(&p, &["open", "depth", "box", "keep", "drop", "sort", "move"], "extract")?;
+    let whole = Seen::of(o, m);
+    let apart = open(&whole, &p)?;
+    let s = apart.as_ref().map_or(whole, |a| a.seen(o));
     let chosen = selected(&s, &p)?;
     if chosen.is_empty() {
         return Err("nothing is selected: no item of the drawing is in `box`, kept by `keep` and not dropped by `drop`".into());
@@ -785,6 +1039,9 @@ pub(crate) fn cut(o: &Opened, m: &Measured, params: &str) -> Result<(Doc, Value)
     if shift.is_none() && s.offset != Vec2::ZERO {
         about["offset"] = json!([s.offset.x, s.offset.y]);
     }
+    if let Some(a) = &apart {
+        about["opened"] = a.said();
+    }
     Ok((d, about))
 }
 
@@ -847,9 +1104,11 @@ pub(crate) struct Looked {
 /// layer's `color` is its own, with `colors` (`{"#rrggbb": n}`) when its items are drawn in others, and `off` or
 /// `frozen` when it is and so is not in the picture.
 pub(crate) fn look(o: &Opened, m: &Measured, params: &str, long: u32) -> Result<Looked, String> {
-    let s = Seen::of(o, m);
     let p = parsed(params)?;
-    checked(&p, &["box", "keep", "drop", "color_by"], "look")?;
+    checked(&p, &["open", "depth", "box", "keep", "drop", "color_by"], "look")?;
+    let whole = Seen::of(o, m);
+    let apart = open(&whole, &p)?;
+    let s = apart.as_ref().map_or(whole, |a| a.seen(o));
     let by_layer = match given(&p, "color_by").map(|v| v.as_str().unwrap_or("")) {
         None | Some("own") => false,
         Some("layer") => true,
@@ -956,10 +1215,13 @@ pub(crate) fn look(o: &Opened, m: &Measured, params: &str, long: u32) -> Result<
     let list = cadcraft_render::build(&d, &Space::Model, &opts);
     let raster = RasterOptions { background: Rgb(255, 255, 255), hairline: 1.0, px_per_mm: 0.0, antialias: true };
     let png = render_png(&list, &view, &raster).ok_or("the picture could not be drawn")?;
-    let about = json!({
+    let mut about = json!({
         "width": width, "height": height, "extents": s.box_out(&view.world_bounds()), "selected": s.box_out(&round),
         "items": chosen.len(), "color_by": if by_layer { "layer" } else { "own" }, "legend": legend,
     });
+    if let Some(a) = &apart {
+        about["opened"] = a.said();
+    }
     Ok(Looked { png, about })
 }
 

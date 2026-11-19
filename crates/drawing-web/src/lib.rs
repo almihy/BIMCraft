@@ -120,25 +120,29 @@ impl Drawing {
         found_outlines(&self.o, &p).map(|v| v.to_string()).map_err(err)
     }
 
-    /// What a rule selects, counted (JSON params, a rule: layers?, kinds?, blocks?, box?, min_size?, max_size?, handles?;
-    /// empty: everything): JSON {total, kinds, layers: [{name, items, kinds}], blocks: [{name, placed, size, layers}],
-    /// blocks_more?, extents}. The drawing reader's first question of a drawing, and of every box it takes for a plan.
+    /// What a rule selects, counted (JSON params, a rule: layers?, kinds?, blocks?, box?, min_size?, max_size?, handles?,
+    /// colors?, linetypes?; with open?: [rule] and depth?, the block placements those select are taken apart first;
+    /// empty: everything): JSON {total, kinds, layers: [{name, items, kinds, color, colors?}], colors, blocks: [{name,
+    /// placed, size, holds, layers}], blocks_more?, extents, opened?}. The drawing reader's first question of a drawing,
+    /// and of every box it takes for a plan.
     pub fn counts(&self, params: &str) -> Result<String, JsError> {
         clean::counts(&self.o, self.measured(), params).map(|v| v.to_string()).map_err(err)
     }
 
     /// A part of the drawing written as a DWG of `version` ("2018" ... "2000"; empty: 2018), from the drawing open here
-    /// and never from its file read again (JSON params: box?, keep?: [rule], drop?: [rule], sort?: [{to, ...rule}],
-    /// move?: [dx, dy]): cropped, filtered, re-sorted onto other layers and moved, in that order, its blocks kept as
-    /// blocks, and what nothing uses any more left out.
+    /// and never from its file read again (JSON params: open?: [rule], depth?, box?, keep?: [rule], drop?: [rule],
+    /// sort?: [{to, ...rule}], move?: [dx, dy]): its chosen block placements taken apart, cropped, filtered, re-sorted
+    /// onto other layers and moved, in that order, its other blocks kept as blocks, and what nothing uses any more left
+    /// out.
     pub fn extract(&self, params: &str, version: &str) -> Result<Extracted, JsError> {
         let (bytes, about) = clean::extract(&self.o, self.measured(), params, version).map_err(err)?;
         Ok(Extracted { bytes, about: about.to_string() })
     }
 
-    /// A picture of only what is selected (JSON params: box?, keep?: [rule], drop?: [rule]), fitted to it, `long` pixels
-    /// on its longer side, each layer in a colour of its own; `about` (JSON): width, height, extents (the box the
-    /// picture's edges are at), selected, items, legend: [{layer, color, items}].
+    /// A picture of only what is selected (JSON params: open?: [rule], depth?, box?, keep?: [rule], drop?: [rule],
+    /// color_by?: "own" | "layer"), fitted to it, `long` pixels on its longer side, in the drawing's own colours or each
+    /// layer in a colour of its own; `about` (JSON): width, height, extents (the box the picture's edges are at),
+    /// selected, items, color_by, legend: [{layer, color, items}], opened?.
     pub fn look(&self, params: &str, long: u32) -> Result<Picture, JsError> {
         let p = clean::look(&self.o, self.measured(), params, long).map_err(err)?;
         Ok(Picture { png: p.png, about: p.about.to_string() })
