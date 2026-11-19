@@ -1093,7 +1093,20 @@ pub(crate) fn cut(o: &Opened, m: &Measured, params: &str) -> Result<(Doc, Value)
             if let Some(bs) = placed_on.get(&name) {
                 let mut bs: Vec<(&String, &usize)> = bs.iter().collect();
                 bs.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
-                row["blocks"] = bs.iter().take(15).map(|(b, k)| json!({"name": b, "placed": k})).collect();
+                // Each with the kinds of item it holds: a block with arcs among windows is likely a door's swing.
+                row["blocks"] = bs
+                    .iter()
+                    .take(15)
+                    .map(|(b, k)| {
+                        let mut holds: BTreeMap<&str, usize> = BTreeMap::new();
+                        if let Some(blk) = d.block(b) {
+                            for e in blk.entities.iter() {
+                                *holds.entry(kind_of(&e.kind)).or_default() += 1;
+                            }
+                        }
+                        json!({"name": b, "placed": k, "kinds": holds})
+                    })
+                    .collect();
                 if bs.len() > 15 {
                     row["more_blocks"] = json!(bs.len() - 15);
                 }
