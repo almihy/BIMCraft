@@ -3785,6 +3785,13 @@ pub fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, String> 
         }
     }
     crate::curtain::keep_all(&mut m);
+    // What a wall laid out that the file had no part for is the wall's: one a rule refuses is left out as its.
+    let laid: Vec<(Id, Guid)> = m.elements.iter().filter_map(|(id, x)| Some((*id, crate::curtain::host_of(x)?))).collect();
+    for (id, host) in laid {
+        if let Some(wall) = m.elements.id(host).and_then(|w| from.get(&w)).cloned() {
+            from.entry(id).or_insert_with(|| format!("a part of {wall}"));
+        }
+    }
     // The library's GUIDs too, the file makes: the same file reads the same every time.
     m.library = crate::library::Library::default();
     m.forget_parts();

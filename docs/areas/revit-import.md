@@ -71,8 +71,9 @@ Moved from the root `CLAUDE.md`, word for word: the root keeps the rules and the
   boxes agree on (`Glazed`, or `Glazed 24.4mm`), and those panels' records make no boxes too. A line is exact where the two
   panels touch or the mullion between them is as wide on one side as on the other, and off by half the difference where it is
   not. Where the boxes give no grid that holds (a curved wall, one at an angle, a panel over two cells where a segment was
-  removed, a panel that is no rectangle, a panel in the boxes of two curtain walls) the wall comes in as a curtain wall with one
-  open cell (its type's panel is `Empty`, so nothing is drawn twice) and its panels as boxes, as before. Not read either way:
+  removed, a panel that is no rectangle, a panel in the boxes of two curtain walls) the wall comes in as a curtain wall with no
+  grid, one panel of glass over its whole face, and its panels as boxes, as before (where their boxes run along an axis: a
+  wall at an angle has its one panel alone, since `generic` leaves the envelope of a turned panel out). Not read either way:
   the type's grid rules, justification and offsets, the panels' and mullions' types and materials, which panels are pinned, and
   a door in a curtain wall (it is left out: `openings.rs`). **Mullions still come in as boxes** of a family of their category
   where their boxes run along an axis, never as BIMCraft's mullions: their types' sections and which line each stands on would
@@ -80,7 +81,8 @@ Moved from the root `CLAUDE.md`, word for word: the root keeps the rules and the
   (`a_wall_whose_box_holds_curtain_panels_comes_in_as_a_curtain_wall_with_the_grid_their_boxes_give`) and run once on the
   Snowdon Towers architectural sample that Revit 2025 installs (not the tabled 2024 file, so no pinned number covers it): of its
   43 walls with no layers, 42 hold panels and are curtain walls, 12 with a grid that holds (47 lines, 109 panels theirs) and 30
-  with one open cell (most run at an angle), and one stays a plane; the project checks. The comparisons with the tabled samples
+  with none (most run at an angle), and one stays a plane; 6 doors whose hosts are curtain walls are left out; the project
+  checks. The comparisons with the tabled samples
   (nine curtain walls in the architectural basic one) run only with `BIMCRAFT_RVT_SAMPLES` set, which it was not when this was
   written: their pinned counts of walls stand, and what they say of doors in curtain walls was not re-run.
 

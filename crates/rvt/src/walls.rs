@@ -17,7 +17,8 @@
 //! A wall whose type has no compound structure and whose box holds curtain panels is a **curtain wall** ([`crate::curtain`]):
 //! it comes in as BIMCraft's, of a curtain type named as the file names its type, with grid lines drawn where its panels'
 //! boxes put them (then those panels are the wall's own, and `generic` leaves their records out), or, where the boxes give no
-//! grid that holds, with one open cell and its panels as the boxes `generic` makes of them. Its mullions are boxes either way.
+//! grid that holds, with no grid, one panel of glass, and its panels as the boxes `generic` makes of them. Its mullions are boxes
+//! either way.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -319,15 +320,14 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
                 let grid =
                     (!*shared).then(|| crate::curtain::Grid::of(s, e, turn, mm(r.bbox[2]), mm(r.bbox[5] - r.bbox[2]), &boxes)).flatten();
                 facade::ensure_panels(&mut cx.model);
-                // Its panels: glass, as thick as their boxes agree on; where no grid holds, one open cell.
+                // Its panels: glass, as thick as their boxes agree on; where no grid holds, the one panel of a plain curtain wall.
                 let fill = match &grid {
-                    None => facade::EMPTY.to_string(),
                     Some(crate::curtain::Grid { thickness: Some(t), .. }) if (*t - 25.0).abs() > 0.05 => {
                         let glass = cx.model.types.curtain_panel.get(facade::GLAZED).cloned().unwrap_or_default();
                         let new = PanelType { thickness: *t, ..glass };
                         kind(&mut cx.model.types.curtain_panel, &format!("{} {t}mm", facade::GLAZED), |k| *k == new, new.clone())
                     }
-                    Some(_) => facade::GLAZED.to_string(),
+                    _ => facade::GLAZED.to_string(),
                 };
                 let c = CurtainType { panel: fill, ..CurtainType::default() };
                 let thickness = facade::depth(&cx.model, &c);
@@ -355,7 +355,7 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
                 .and_then(|t| cx.levels.get(&t).copied());
             let key = (tid, (typ.thickness * 1000.0).round() as i64);
             let type_name = match (made.get(&key), &curtain) {
-                // A curtain type by the file's name for it: one with a grid read and one with an open cell are two types.
+                // A curtain type by the file's name for it: two whose panels differ in thickness are two types.
                 (_, Some((_, new))) => {
                     let base = typ.name.clone().unwrap_or_default();
                     kind(&mut cx.model.types.wall, &base, |k| k == new, new.clone())
@@ -407,7 +407,7 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
             let note = if agreed.is_some() || local.is_some() { "panels".to_string() } else { note };
             let note = match &curtain {
                 Some((Facade { grid: Some(_), .. }, _)) => "grid".to_string(),
-                Some(_) => "open".to_string(),
+                Some(_) => "plain".to_string(),
                 None => note,
             };
             Ok((wall, note, curtain.map(|(facade, _)| facade)))
@@ -448,10 +448,10 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
                         r.id,
                         "a curtain wall: its grid lines are put midway between the boxes of its panels (the file's own grid lines are not read), its panels come in as glass (their types are not read), and its mullions as boxes of their own",
                     ),
-                    "open" => cx.note(
+                    "plain" => cx.note(
                         "wall",
                         r.id,
-                        "a curtain wall whose panels' boxes give no grid that holds (it is curved or runs along no axis, or its panels do not each fill a cell of whole grid lines): it comes in with one open cell, and its panels and mullions as boxes of their own where their boxes run along an axis",
+                        "a curtain wall whose panels' boxes give no grid that holds (it is curved or runs along no axis, or its panels do not each fill a cell of whole grid lines): it comes in with no grid, as one panel of glass, and its panels and mullions as boxes of their own where their boxes run along an axis",
                     ),
                     "panels" => cx.note(
                         "wall",

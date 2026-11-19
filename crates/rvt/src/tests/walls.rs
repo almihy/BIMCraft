@@ -323,12 +323,11 @@ fn a_wall_whose_box_holds_curtain_panels_comes_in_as_a_curtain_wall_with_the_gri
         assert!(panels.iter().all(|x| x.type_name == "Glazed 24.4mm"), "{:?}", panels[0].type_name);
         assert_eq!(m.types.curtain_panel["Glazed 24.4mm"].thickness, 24.4);
         assert_eq!(parts(id).iter().filter(|e| matches!(e, Element::CurtainGrid(_))).count(), 2);
-        // The second: a curtain wall with one open cell, its panels boxes of their own.
+        // The second: a curtain wall with no grid, one panel of glass, its panels boxes of their own.
         let (id, w) = wall(106);
-        assert_ne!(w.type_name, "Storefront");
         assert!(w.type_name.starts_with("Storefront"));
-        assert_eq!(m.types.wall[&w.type_name].curtain.as_ref().unwrap().panel, "Empty");
-        assert_eq!(parts(id).len(), 1, "one panel, of the empty type, and no line");
+        assert_eq!(m.types.wall[&w.type_name].curtain.as_ref().unwrap().panel, "Glazed");
+        assert!(matches!(parts(id).as_slice(), [Element::CurtainPanel(x)] if x.type_name == "Glazed"), "one panel, and no line");
         // The third: no curtain wall, a plane as thick as its box.
         let (_, w) = wall(107);
         assert!(!m.types.wall[&w.type_name].is_curtain());
@@ -379,7 +378,14 @@ fn the_walls_of_the_architectural_sample_are_those_of_rvt_rss_export_of_the_same
         let at = |id: u32| walls(&i).into_iter().find(|(m, _)| from[m] == format!("Wall {id}"));
         // All 56: the nine curtain walls come in as the plane their own boxes give, and the note says what of them is not read.
         assert_eq!(walls(&i).len(), 56, "{}: {:?}", path.display(), i.skipped);
-        assert!(i.skipped.iter().any(|s| s.contains("9 walls") && s.contains("curtain wall")), "{:?}", i.skipped);
+        // (As the plane of its box, or as a curtain wall with or without a grid: three notes, nine walls between them.)
+        let told: usize = i
+            .skipped
+            .iter()
+            .filter(|s| s.contains("curtain wall") && s.split(' ').nth(1).is_some_and(|w| w.starts_with("wall")) && !s.contains("left out"))
+            .filter_map(|s| s.split(' ').next()?.parse::<usize>().ok())
+            .sum();
+        assert_eq!(told, 9, "{:?}", i.skipped);
         for theirs in &RAC_WALLS {
             let id = theirs.id;
             let (m, w) = at(id).unwrap_or_else(|| panic!("{}: wall {id} is missing", path.display()));

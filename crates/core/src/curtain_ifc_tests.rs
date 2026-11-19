@@ -131,6 +131,10 @@ fn a_curtain_wall_goes_out_as_a_curtain_wall_of_plates_and_members() {
         assert_eq!(sets, f.of(class).len(), "{set}");
     }
     assert_eq!(f.of("IFCPROPERTYSET").iter().filter(|(_, a)| a.contains("'Pset_WallCommon'")).count(), 1);
+    // Every GlobalId in the file is its own: the wall's, its parts', their types', their sets' and their relations'.
+    let ids: Vec<&str> = f.all.values().filter_map(|(_, a)| a.strip_prefix('\'')?.split('\'').next()).filter(|g| g.len() == 22).collect();
+    assert!(ids.len() > 150, "{}", ids.len());
+    assert_eq!(ids.iter().collect::<BTreeSet<_>>().len(), ids.len());
     // The wall's quantities: its length, height and depth and its face.
     let q = f.quantities(wall, "Qto_CurtainWallQuantities");
     assert_eq!((q["Length"], q["Height"], q["Width"], q["GrossSideArea"]), (6000.0, 3000.0, 150.0, 18.0));
