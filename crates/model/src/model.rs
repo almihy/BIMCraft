@@ -6635,6 +6635,16 @@ impl Model {
             Element::Column(c) | Element::StructuralColumn(c) | Element::Footing(c) => Some(c.at),
             Element::Component(c) => Some(c.at),
             Element::Room(r) => Some(r.point),
+            // A curtain wall's own: the middle of the panel or the mullion along its wall, a grid line where it stands.
+            Element::CurtainPanel(p) => self.wall(p.host).map(|w| walls::Axis::of(w).at((p.span[0] + p.span[1]) / 2.0, 0.0)),
+            Element::Mullion(x) => {
+                let s = if x.vertical { x.at } else { (x.from + x.to) / 2.0 };
+                self.wall(x.host).map(|w| walls::Axis::of(w).at(s, 0.0))
+            }
+            Element::CurtainGrid(l) => self.wall(l.host).map(|w| {
+                let axis = walls::Axis::of(w);
+                axis.at(if l.vertical { l.at } else { axis.length() / 2.0 }, 0.0)
+            }),
             run_arm!(r) => middle(r.start, r.end),
             Element::Stair(s) => Some(s.start),
             Element::Ramp(r) => Some(r.start),
@@ -9833,6 +9843,9 @@ pub fn category(s: &str) -> String {
         "mass" | "masses" => "mass".into(),
         "switch" | "switches" => "switch".into(),
         "pipeaccessory" | "pipeaccessories" => "pipeaccessory".into(),
+        // Revit's names of a curtain wall's categories.
+        "curtainwallmullion" | "curtainwallmullions" | "mullions" => "mullion".into(),
+        "curtainwallgrid" | "curtainwallgrids" | "curtaingrids" => "curtaingrid".into(),
         _ => s.trim_end_matches('s').to_string(),
     }
 }
