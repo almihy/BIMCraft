@@ -25,6 +25,10 @@ const MOST: usize = 400_000;
 /// A wall's thickness, between.
 const WALL_MIN: f64 = 18.0;
 const WALL_MAX: f64 = 620.0;
+/// A break in a wall's lines up to this long is no opening.
+const BREAK: f64 = 350.0;
+/// Under this, a pair of lines is a thin partition at most: paired last.
+const THIN: f64 = 40.0;
 /// A glazing run's two lines, between.
 const GLASS_MIN: f64 = 10.0;
 const GLASS_MAX: f64 = 350.0;
@@ -199,19 +203,36 @@ fn clusters(segs: &[Seg]) -> Vec<Cluster> {
         })
         .collect();
     by.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let mut out: Vec<Cluster> = Vec::new();
-    let mut first = f64::NEG_INFINITY;
+    // Lines chain into one set while each turns no more than a fifth of a degree from the last (and the set no more
+    // than `PARALLEL` in all); the set's frame is their mean direction by length, so that how far across a line lies
+    // is true along the whole of a long wall.
+    let mut sets: Vec<Vec<(f64, Seg)>> = Vec::new();
+    let (mut first, mut last) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
     for (th, s) in by {
-        if th - first > PARALLEL {
+        if th - last > 0.2 || th - first > PARALLEL {
             first = th;
-            let t = th.to_radians();
-            out.push(Cluster { u: P(t.cos(), t.sin()), n: P(-t.sin(), t.cos()), faces: Vec::new() });
+            sets.push(Vec::new());
         }
-        if let Some(c) = out.last_mut() {
+        last = th;
+        if let Some(set) = sets.last_mut() {
+            set.push((th, s));
+        }
+    }
+    let mut out: Vec<Cluster> = Vec::new();
+    for set in sets {
+        let long: f64 = set.iter().map(|(_, s)| s.b.sub(s.a).len()).sum();
+        if long <= 0.0 {
+            continue;
+        }
+        let mean = set.iter().map(|(th, s)| th * s.b.sub(s.a).len()).sum::<f64>() / long;
+        let t = mean.to_radians();
+        let mut c = Cluster { u: P(t.cos(), t.sin()), n: P(-t.sin(), t.cos()), faces: Vec::new() };
+        for (_, s) in set {
             let mid = P((s.a.0 + s.b.0) / 2.0, (s.a.1 + s.b.1) / 2.0);
             let (t0, t1) = (s.a.dot(c.u), s.b.dot(c.u));
             c.faces.push((mid.dot(c.n), t0.min(t1), t0.max(t1)));
         }
+        out.push(c);
     }
     for c in &mut out {
         c.faces.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -265,7 +286,9 @@ fn paired(c: &Cluster, min: f64, max: f64) -> (Vec<Piece>, Vec<Vec<(f64, f64)>>)
             }
         }
     }
-    cands.sort_by(|a, b| a.0.total_cmp(&b.0));
+    // The nearest first; but a pair nearer than a wall is thick (a thin partition, or a wall's face and a line drawn
+    // beside it) only after every wall has its two faces.
+    cands.sort_by(|a, b| (a.0 < THIN).cmp(&(b.0 < THIN)).then(a.0.total_cmp(&b.0)));
     let mut used: Vec<Vec<(f64, f64)>> = vec![Vec::new(); f.len()];
     let mut out = Vec::new();
     for (g, i, j, lo, hi) in cands {
@@ -390,6 +413,16 @@ fn door_marks(groups: Vec<Group>) -> (Vec<Group>, Vec<Option<P>>) {
     (out, tips)
 }
 
+/// Whether columns standing on a wall's line fill most of its gap `lo..hi`: the wall then runs through them.
+fn filled(cols: &[InFrame], d: f64, g: f64, lo: f64, hi: f64) -> bool {
+    let covered: f64 = cols
+        .iter()
+        .filter(|x| x.near <= d + g / 2.0 + 50.0 && x.far >= d - g / 2.0 - 50.0)
+        .map(|x| (x.hi.min(hi) - x.lo.max(lo)).max(0.0))
+        .sum();
+    covered >= 0.6 * (hi - lo)
+}
+
 struct Found {
     walls: Vec<Wall>,
     /// Stretches of face no other face pairs with.
@@ -414,7 +447,6 @@ fn walls(segs: &[Seg], doors: &[Group], tips: &[Option<P>], windows: &[Group], c
         let (mut ds, ws, cs) = (in_frame(&c, doors), in_frame(&c, windows), in_frame(&c, cols));
         // A door known by its swing stands only in a wall along its opening.
         ds.retain(|x| tips.get(x.n).is_none_or(Option::is_none) || x.hi - x.lo >= 3.0 * (x.far - x.near));
-        let no_col = vec![false; cols.len()];
         // The pieces along one line, in order.
         pieces.sort_by(|a, b| a.d.total_cmp(&b.d));
         let mut lines: Vec<Vec<Piece>> = Vec::new();
@@ -440,7 +472,8 @@ fn walls(segs: &[Seg], doors: &[Group], tips: &[Option<P>], windows: &[Group], c
             };
             for q in line.iter().skip(1) {
                 let gap = q.lo - run.1;
-                if gap <= 30.0 {
+                // A break narrower than any opening is a slip of the drawing: the wall is whole.
+                if gap <= BREAK {
                     run.1 = run.1.max(q.hi);
                     continue;
                 }
@@ -472,7 +505,7 @@ fn walls(segs: &[Seg], doors: &[Group], tips: &[Option<P>], windows: &[Group], c
                 }
                 // A column standing in the wall: the wall runs through it.
                 if !joined && gap <= 3000.0 {
-                    joined = !standing(&cs, &no_col, d, g, run.1, q.lo).is_empty();
+                    joined = filled(&cs, d, g, run.1, q.lo);
                 }
                 // A wall meeting this one: one of its faces runs on past the gap.
                 if !joined && gap <= WALL_MAX + 100.0 {
@@ -963,7 +996,6 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
     let mut curtain: Vec<Value> = Vec::new();
     // The straight runs, as walls of glass: their ends meet the walls and one another as walls' do.
     let mut runs: Vec<Wall> = Vec::new();
-    let no_col = vec![false; columns.len()];
     // Glazing along a wall, inside its thickness: (the wall, from where to where along it).
     let mut glass_on: Vec<(usize, f64, f64)> = Vec::new();
     for c in clusters(&glass_segs) {
@@ -1023,7 +1055,8 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
             for q in loose.iter().skip(1) {
                 // Joined where they touch, and through a column standing between them.
                 let gap = q.lo - run.1;
-                if gap <= 60.0 || (gap <= 3000.0 && !standing(&cs, &no_col, first.d, 200.0, run.1, q.lo).is_empty()) {
+                let column = cs.iter().any(|x| x.near <= first.d + 150.0 && x.far >= first.d - 150.0 && x.hi.min(q.lo) - x.lo.max(run.1) > 0.0);
+                if gap <= 60.0 || (gap <= 3000.0 && column) {
                     run.1 = run.1.max(q.hi);
                 } else {
                     close(run, &mut runs);
