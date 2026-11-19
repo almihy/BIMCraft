@@ -39,24 +39,41 @@ drawing holds"). A file that ends after a group code, a value that isn't a numbe
 
 ## Text and its fonts
 
-The canvas letters a drawing's text itself (`crate::font`: our lettering, and behind it the fonts that letter what it has
-not, Arabic joined and read from the right; [views and graphics](views-and-graphics.md)), never in the drawing's fonts. A
-text's font matters for one thing. Old Arabic SHX fonts (`xarab.shx`, `xarb.shx`) draw an Arabic letter for each Latin key
-and write from the insertion point leftward: a drawing in one stores "Hu]H] Hgtw,G" and shows «اعداد الفصول». So a text
-keeps its style's font (`Shape::Text::font`: a DXF's STYLE table, a DWG's text style) beside its words as the file holds
-them, and `dxf/fonts.rs` reads it when it is drawn or asked for: `fonts::shown` is the Arabic it shows, by CADCraft's
-table for that font (`cadcraft_fonts::keyboard`, which knows a font by its glyph data, not its name: the same reading as
-Arqiflow's drawing viewer and its agent's drawing reader), and `fonts::aligned` ends a left-aligned one at its point.
-`Drawing`'s plan, the level of detail's boxes, `cad_read` and `cad_outlines`' labels all read through them.
+A DXF's or a DWG's text is lettered in its text style's font by CADCraft's own text code (`cadcraft_fonts`, which the DWG
+reader builds already; `dxf/fonts.rs`), not in our lettering: an SHX font's strokes, a TrueType font's outlines, Arabic
+joined and read from the right, the characters a font lacks from its fallbacks. So a drawing reads on the canvas as it
+does in Arqiflow's drawing viewer, which is that code too, and in the program that made it. An old Arabic SHX font that
+draws an Arabic letter for each Latin key (`xarab.shx`: a drawing stores "Hu]H] Hgtw,G" and shows «اعداد الفصول»,
+written from its point leftward) draws so with nothing more said.
 
-The font's file must be here for that, and BIMCraft carries none: a host gives it at run time. `fonts::missing` lists the
-SHX fonts a model's drawings name and lack; a page asks (`WebApp::fonts_missing`, `Engine::fonts_missing`), finds each
-(the firm's, the computer's, a stand-in) and gives it (`WebApp::give_font`, which draws the drawings again; `add_font` for
-an engine with no window), as it gives the drawing viewer its fonts. `bimcraft-cli run --font FILE` gives one on the
-command line. A font given after its drawing was read still reads it: nothing of the reading is kept in the model. A font
-not given, or one CADCraft has no table for, leaves the text as the file holds it. To look at it: a DXF with a STYLE
-naming `xarab.shx`, `--font` a copy of the font, and `render` the plan (`BIMCRAFT_XARAB=path` runs the test with the real
-font, which is not ours to carry).
+A text keeps its font beside its words as the file holds them (`Shape::Text::font`, a `dxf::Font`: the style's font file
+or family, its big font, its lean, its vertical flag, and the drawing's `$DWGCODEPAGE`, by which an SHX font draws a
+character; a text's own lean, group 51, is its font's). A style's texts share one; a text whose style the file has not
+has the stroke font. The reader still lays the text out (`Line::shape`: its point, alignment, width factor, backward and
+upside-down; `mtext_lines`: a multi-line text's lines, its formatting codes dropped, so a font named inside one is not
+followed). `fonts::lettered` shapes one line in its font (capitals 1 tall, from where its pen starts, with the span it
+takes: `start` is less than 0 for a font that writes leftward), kept by font and text, and the plan lays those shapes
+from the text's point by its alignment: strokes in the entity's pen, a TrueType letter's rings filled by even-odd. The
+level of detail's boxes are of the same span. A text of no drawing (a PDF page's, which has no text styles: `font` none)
+is lettered in ours, as before.
+
+The font's file must be here, and BIMCraft carries none of a drawing's: on the desktop and the command line CADCraft
+finds the system's TrueType fonts; a page gives them at run time. `fonts::missing` lists the fonts and big fonts a
+model's drawings name and lack; a page asks (`WebApp::fonts_missing`, `Engine::fonts_missing`), finds each (the firm's,
+the computer's, a stand-in) and gives it (`WebApp::give_font`, which draws the drawings again; `add_font` for an engine
+with no window), as it gives the drawing viewer its fonts. `bimcraft-cli run --font FILE` gives one on the command line.
+A font given after its drawing was read still letters it: nothing of the lettering is kept in the model. A font not here
+is stood in for by CADCraft's stroke font, as in the viewer. In a browser, which has no system fonts, what a font lacks
+(Arabic in `romans.shx`) comes from the fonts built into CADCraft's text code when it is built with `CRAFT_FONTS_DIR`
+(Arqiflow's engine build gives Noto Naskh Arabic, as its viewer's does); a build without draws CADCraft's stand-in.
+
+Lettering gives shapes, not words. What a text in a keyboard-laid Arabic font says, for who reads it as words (`cad_read`,
+`cad_outlines`' labels: the agent), is `fonts::shown`, by CADCraft's table for the font (`cadcraft_fonts::keyboard`, which
+knows a font by its glyph data, not its name, and has the xarab family's): the same reading as Arqiflow's agent's drawing
+reader. Another such font draws right all the same; its words read as the keys until CADCraft has its table.
+
+To look at it: a DXF with STYLEs naming an SHX font, a TrueType font and `xarab.shx`, `--font` copies of the SHX fonts,
+and `render` the plan (`BIMCRAFT_XARAB=path` runs the tests with the real xarab, which is not ours to carry).
 
 ## DWG
 

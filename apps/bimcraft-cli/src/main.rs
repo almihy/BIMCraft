@@ -19,8 +19,7 @@ const USAGE: &str = "USAGE:
       commands and scripts (one `ID {json}` per line), save. --save writes by extension:
       .bimcraft (the project), .ifc (IFC4), .glb (the 3D view's scene as glTF), .svg or .png (the lowest level's plan).
       --highrise builds an original 20-storey performance sample (about 10,000 elements).
-      --font gives a font file a CAD drawing's text style names: text in an old Arabic SHX font laid out on the keyboard
-      (xarab.shx) then reads in Arabic.
+      --font gives a font file a CAD drawing's text style names (romans.shx, a firm's own): its text is lettered in it.
   bimcraft-cli info FILE         levels, element counts, types and warnings of a project or an IFC file; of a Revit .rvt or
                                  .rfa file, its release, last save, levels and element counts by category
   bimcraft-cli convert IN OUT    a project, an IFC file or a Revit .rvt file to .ifc, .glb, .svg, .png or .bimcraft

@@ -8,10 +8,13 @@
 //! under `catch_unwind` (`cadcraft_dwg::read`). A native app that called `cadcraft_dwg::worker::use_own_worker` reads each
 //! file first in a child process of its own, so a file that brings the decoder down costs only that child.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use cadcraft_doc::{Common, Drawing, Entity as Item, EntityKind as K, HAlign, Lineweight, Transparency, VAlign};
 
 use super::{
-    Color, Dxf, Inherit, Layer, Line, Linetype, MAX_BYTES, MAX_CHARS, MAX_DEPTH, MAX_WORK, Out, P2, PLACED, Shape, Style, Xf, arc,
+    Color, Dxf, Font, Inherit, Layer, Line, Linetype, MAX_BYTES, MAX_CHARS, MAX_DEPTH, MAX_WORK, Out, P2, PLACED, Shape, Style, Xf, arc,
     ellipse_shape, insunits, mtext_lines, polyline, spline_shape, styled,
 };
 
@@ -148,7 +151,23 @@ pub fn probe(bytes: &[u8]) -> Result<Vec<String>, String> {
 
 /// The import CADCraft's drawing `d` makes: its model space, in its own unit.
 pub fn of_drawing(d: &Drawing) -> Result<Dxf, String> {
-    let walk = Walk { d };
+    // Each text style's font, once: a style's texts share it.
+    let code_page = d.header.str("DWGCODEPAGE", "").trim().to_string();
+    let fonts = d
+        .text_styles
+        .iter()
+        .map(|s| {
+            let font = Font {
+                name: s.font.trim().to_string(),
+                big: s.big_font.trim().to_string(),
+                oblique: if s.oblique.is_finite() { s.oblique } else { 0.0 },
+                vertical: s.vertical,
+                code_page: code_page.clone(),
+            };
+            (s.name.trim().to_uppercase(), Arc::new(font))
+        })
+        .collect();
+    let walk = Walk { d, fonts, plain: Arc::new(Font { code_page, ..Font::default() }) };
     let mut out = Out::default();
     walk.place(&mut out, d.model.iter().map(|e| &**e), Xf::ID, None, 0)?;
     let (scale, unit) = insunits(d.header.i64("INSUNITS", 0));
@@ -236,6 +255,10 @@ fn style_of(c: &Common, inh: Option<&Inherit>) -> Style {
 /// A walk through CADCraft's drawing, placing its entities as [`super::Reader::place`] places a DXF file's.
 struct Walk<'d> {
     d: &'d Drawing,
+    /// Each text style's font, by the style's name in capitals.
+    fonts: HashMap<String, Arc<Font>>,
+    /// The font of a text whose style the drawing has not: the stroke font.
+    plain: Arc<Font>,
 }
 
 impl<'d> Walk<'d> {
@@ -294,7 +317,7 @@ impl<'d> Walk<'d> {
                 K::MText(t) => {
                     let color = super::leading_color(&t.contents).unwrap_or(style.color);
                     let (at, turn, attach) = (p(t.insert), t.rotation.to_degrees(), i64::from(t.attach));
-                    let lines = mtext_lines(at, t.height, turn, attach, Some(t.line_spacing), &t.contents, self.font(&t.style));
+                    let lines = mtext_lines(at, t.height, turn, attach, Some(t.line_spacing), &t.contents, self.font(&t.style, None));
                     for line in lines {
                         put(out, Some(line), color)?;
                     }
@@ -364,9 +387,14 @@ impl<'d> Walk<'d> {
         Ok(())
     }
 
-    /// The font text style `style` names, if the drawing has the style and it names one.
-    fn font(&self, style: &str) -> Option<std::sync::Arc<str>> {
-        self.d.text_style(style).map(|s| s.font.trim()).filter(|f| !f.is_empty()).map(std::sync::Arc::from)
+    /// The font of text style `style`, leaning `lean` (a text's own; none, the style's): the stroke font when the
+    /// drawing has no such style.
+    fn font(&self, style: &str, lean: Option<f64>) -> Option<Arc<Font>> {
+        let font = self.fonts.get(&style.trim().to_uppercase()).unwrap_or(&self.plain);
+        Some(match lean.filter(|o| o.is_finite()) {
+            Some(o) if (o - font.oblique).abs() > 1e-9 => Arc::new(Font { oblique: o, ..(**font).clone() }),
+            _ => font.clone(),
+        })
     }
 
     /// A line of text, with its style's backward and upside-down flags, and its `tag` (an attribute's).
@@ -395,7 +423,7 @@ impl<'d> Walk<'d> {
             wide: Some(t.width_factor),
             flags,
             angle: t.rotation.to_degrees(),
-            font: self.font(&t.style),
+            font: self.font(&t.style, Some(t.oblique)),
         };
         line.shape(&t.value, tag)
     }

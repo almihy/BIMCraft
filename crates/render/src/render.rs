@@ -2990,14 +2990,40 @@ impl CadEntities<'_> {
                 if px < 1.0 {
                     return;
                 }
-                // In an old Arabic SHX font laid out on the keyboard, the Arabic it shows, written from its point leftward.
-                let h = crate::dxf::fonts::aligned(font.as_ref(), text, align.h);
-                let text = &*crate::dxf::fonts::read(font.as_ref(), text);
-                // Its width as drawn, and the way its letters run: backwards when it is mirrored.
-                let wide = f64::from(font::width(text, px)) / k * factor;
                 let run = if *mirrored { -1.0 } else { 1.0 };
                 let (u, v) =
                     (P2(angle.to_radians().cos(), angle.to_radians().sin()), P2(-angle.to_radians().sin(), angle.to_radians().cos()));
+                // A drawing's text, lettered in its style's font as the drawing's own program letters it: its shapes laid
+                // from where its pen starts, which a font that writes leftward (an old Arabic SHX font) ends at.
+                if let Some(font) = font {
+                    let l = crate::dxf::fonts::lettered(font, text, *factor);
+                    let (start, wide) = (f64::from(l.start) * height, f64::from(l.width) * height);
+                    let pen = match align.h {
+                        Horizontal::Left => *at,
+                        Horizontal::Center => *at - u * (run * (start + wide / 2.0)),
+                        Horizontal::Right => *at - u * (run * (start + wide)),
+                    };
+                    let base = match align.v {
+                        Vertical::Baseline | Vertical::Bottom => pen,
+                        Vertical::Middle => pen - v * (height / 2.0),
+                        Vertical::Top => pen - v * *height,
+                    };
+                    let to = |&(x, y): &(f32, f32)| frame.px(place(base + u * (run * f64::from(x) * height) + v * (f64::from(y) * height)));
+                    let pen = lines.and_then(|s| s.weight).unwrap_or_else(|| cad.pen(ent));
+                    let part = std::mem::replace(&mut d.part, Part::Text);
+                    for line in &l.strokes {
+                        d.stroke_seen(line.iter().map(to).collect(), pen, color, None, false, ent.alpha);
+                    }
+                    for letter in &l.fills {
+                        let rings = letter.iter().map(|r| r.iter().map(to).collect()).collect();
+                        d.push(Prim::Fill { rings, color, rule: Rule::EvenOdd, alpha: ent.alpha });
+                    }
+                    d.part = part;
+                    return;
+                }
+                let h = align.h;
+                // Its width as drawn, and the way its letters run: backwards when it is mirrored.
+                let wide = f64::from(font::width(text, px)) / k * factor;
                 let left = match h {
                     Horizontal::Left => *at,
                     Horizontal::Center => *at - u * (run * wide / 2.0),
