@@ -1233,7 +1233,9 @@ impl Grid {
                 }
             }
         }
-        let mut boxes: BTreeMap<usize, ((usize, usize), (usize, usize), usize, bool)> = BTreeMap::new();
+        // Each group's box, how many cells it has, and whether a segment stands inside it.
+        type Joined = (Cell, Cell, usize, bool);
+        let mut boxes: BTreeMap<usize, Joined> = BTreeMap::new();
         for j in 0..nv {
             for i in 0..nu {
                 let root = find(&group, at(i, j));

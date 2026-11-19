@@ -13287,9 +13287,20 @@ fn edit_type(s: &mut Session, p: &Value) -> R {
         }
     };
     let mut reply = json!({"category": cat, "name": name, "type": t});
-    // A basic wall type made a curtain type: its walls host no doors or windows any more.
+    // A basic wall type made a curtain type: its walls host no doors or windows any more. A curtain type made a basic
+    // one: its walls keep nothing of their grids.
     if cat == "wall" {
         with_inserts_dropped(s, &mut reply)?;
+        let m = &s.model;
+        let was_curtain = |w: &Wall| !w.curtain.is_default() && !crate::curtain::is_curtain(m, w);
+        let basic: Vec<Id> =
+            m.elements.iter().filter(|(_, e)| matches!(e, Element::Wall(w) if was_curtain(w))).map(|(id, _)| *id).collect();
+        let m = s.model_mut();
+        for id in basic {
+            if let Some(Element::Wall(w)) = m.elements.get_mut(id) {
+                w.curtain = Default::default();
+            }
+        }
     }
     Ok(reply)
 }
@@ -13683,6 +13694,14 @@ fn modify(s: &mut Session, p: &Value) -> R {
         // A strip footing glued to the wall keeps its top on the wall's base: raised or lowered along its level
         // (its `base_offset` or the level's), the footing rises or falls with it. A footing changed by hand is
         // soon no footing of that wall: the condition is read again from the geometry.
+        // A curtain wall given a basic type keeps nothing of its grid.
+        if let (Element::Wall(old), Element::Wall(w)) = (e, &mut e2)
+            && crate::curtain::is_curtain(m, old)
+            && !crate::curtain::is_curtain(m, w)
+            && !fields.contains_key("curtain")
+        {
+            w.curtain = Default::default();
+        }
         if let (Element::Wall(old), Element::Wall(w)) = (e, &e2) {
             made_curtain |= old.type_name != w.type_name && !crate::curtain::is_curtain(m, old) && crate::curtain::is_curtain(m, w);
             let (before, after) = (m.base_z(old), m.base_z(w));
@@ -15569,8 +15588,9 @@ fn delete(s: &mut Session, p: &Value) -> R {
     let asked = ids_param("delete", &s.model, p)?;
     let m = &s.model;
     // A curtain wall's panels, mullions and grid lines go with their wall, pinned by it or not.
+    let all: BTreeSet<Id> = asked.iter().copied().collect();
     let with_wall =
-        |id: &Id| m.elements.get(*id).and_then(crate::curtain::host_of).and_then(|h| m.elements.id(h)).is_some_and(|h| asked.contains(&h));
+        |id: &Id| m.elements.get(*id).and_then(crate::curtain::host_of).and_then(|h| m.elements.id(h)).is_some_and(|h| all.contains(&h));
     // As Revit: a curtain panel is never deleted on its own.
     if let Some(id) = asked.iter().find(|id| matches!(m.elements.get(**id), Some(Element::CurtainPanel(_))) && !with_wall(id)) {
         return Err(bad(

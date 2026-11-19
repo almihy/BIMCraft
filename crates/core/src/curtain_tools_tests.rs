@@ -628,3 +628,52 @@ fn a_curtain_wall_inserted_from_a_file_is_laid_out_here_with_what_was_done_by_ha
     }
     let _ = std::fs::remove_file(&path);
 }
+
+#[test]
+fn a_curtain_walls_panels_mullions_and_lines_are_phased_and_optioned_as_their_wall() {
+    let mut s = Session::new();
+    let w = storefront(&mut s);
+    run(&mut s, "curtain_grid", json!({"wall": w, "vertical": true, "at": 700}));
+    run(&mut s, "option", json!({"set": "Facade", "options": ["Brick", "Glass"]}));
+    run(&mut s, "modify", json!({"id": w, "params": {"Phase Created": "New Construction", "Design Option": "Facade: Glass"}}));
+    let m = &s.model;
+    let (existing, new) = (crate::phasing::index(m, "Existing").unwrap(), crate::phasing::index(m, "New Construction").unwrap());
+    let shown = crate::graphics::Graphics::default();
+    let mut all = m.hosted_by(m.guid(w));
+    all.push(w);
+    let mut kinds = std::collections::BTreeSet::new();
+    for id in all {
+        let e = m.elements.get(id).unwrap();
+        kinds.insert(e.category());
+        assert_eq!(crate::phasing::status(m, e, existing), None, "{} {id} is not there before its wall", e.category());
+        assert_eq!(crate::phasing::status(m, e, new), Some(crate::phasing::Status::New), "{} {id}", e.category());
+        assert!(!crate::phasing::option_shown(m, &shown, e), "{} {id} is in its wall's option, which is not the primary", e.category());
+    }
+    assert_eq!(kinds.into_iter().collect::<Vec<_>>(), ["curtaingrid", "curtainpanel", "mullion", "wall"]);
+    // Taken down with it too; and a wall given a basic type keeps nothing of its grid.
+    run(&mut s, "modify", json!({"id": w, "params": {"Phase Demolished": "New Construction", "Design Option": null}}));
+    let m = &s.model;
+    let panel = panels(&s, w)[0].0;
+    assert_eq!(crate::phasing::status(m, m.elements.get(panel).unwrap(), new), Some(crate::phasing::Status::Temporary));
+    run(&mut s, "modify", json!({"id": w, "curtain": {"vertical": {"number": 7}}}));
+    run(&mut s, "modify", json!({"id": w, "type": "Generic - 200mm"}));
+    assert!(s.model.wall(w).unwrap().curtain.is_default());
+}
+
+#[test]
+fn curtain_walls_filleted_keep_their_hand_made_lines_where_they_are() {
+    let mut s = Session::new();
+    let a = wall(&mut s, json!({"points": [[-4000, 0], [0, 0]], "type": "Curtain Wall", "height": 3000}));
+    let b = wall(&mut s, json!({"points": [[0, 0], [0, 4000]], "type": "Curtain Wall", "height": 3000}));
+    let on_a = ids(&run(&mut s, "curtain_grid", json!({"wall": a, "vertical": true, "at": 1000}))["ids"])[0];
+    let on_b = ids(&run(&mut s, "curtain_grid", json!({"wall": b, "vertical": true, "at": 3000}))["ids"])[0];
+    run(&mut s, "fillet", json!({"ids": [a, b], "radius": 1500}));
+    // Wall b starts 1500 further on: its line is as far from the corner as it was.
+    let at = |id: Id| match s.model.elements.get(id) {
+        Some(Element::CurtainGrid(l)) => l.at,
+        _ => f64::NAN,
+    };
+    assert_eq!((at(on_a), at(on_b)), (1000.0, 1500.0));
+    assert_eq!(spans(&s, b), [[0.0, 1500.0, 0.0, 3000.0], [1500.0, 2500.0, 0.0, 3000.0]]);
+    s.model.check().unwrap();
+}
