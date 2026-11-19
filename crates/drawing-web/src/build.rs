@@ -343,6 +343,53 @@ fn standing(all: &[InFrame], taken: &[bool], d: f64, g: f64, lo: f64, hi: f64) -
         .collect()
 }
 
+/// A door as its swing draws it: the arc's centre is its hinge, one end of the arc is the tip of its open leaf and
+/// the other is where it latches, on the wall's line. Each such door becomes the line of its opening alone (hinge
+/// to latch), with the leaf's tip beside it: where it stands, how wide it is and which way it opens, whatever the
+/// walls round it are. Which end is the leaf is not always drawn plainly, so both readings are given, side by side
+/// (`n` and `n ^ 1`, the likelier first), and the walls decide: the one a wall runs along is taken, and the other
+/// goes with it. A door drawn with no swing stays as it is, after them.
+fn door_marks(groups: Vec<Group>) -> (Vec<Group>, Vec<Option<P>>) {
+    let mut out: Vec<Group> = Vec::new();
+    let mut tips: Vec<Option<P>> = Vec::new();
+    let mut plain: Vec<Group> = Vec::new();
+    for g in groups {
+        let ink: Vec<P> = g.segs.iter().flat_map(|s| [s.a, s.b, P((s.a.0 + s.b.0) / 2.0, (s.a.1 + s.b.1) / 2.0)]).collect();
+        let along = |a: P, b: P| -> usize {
+            let d = b.sub(a);
+            let len = d.len().max(1.0);
+            ink.iter()
+                .filter(|q| {
+                    let t = q.sub(a).dot(d) / len;
+                    let off = (q.sub(a).0 * d.1 - q.sub(a).1 * d.0).abs() / len;
+                    t > 0.15 * len && t < 1.1 * len && off < 90.0
+                })
+                .count()
+        };
+        let mut found = 0;
+        for a in g.arcs.iter().filter(|a| a.sweep >= 25.0 && a.sweep <= 140.0 && a.r >= 350.0 && a.r <= 2000.0) {
+            let (e0, e1) = (arc_point(a, a.s), arc_point(a, a.s + a.sweep));
+            // The likelier reading first: the leaf is where more is drawn.
+            let (tip, latch) = if along(a.c, e0) >= along(a.c, e1) { (e0, e1) } else { (e1, e0) };
+            for (latch, tip) in [(latch, tip), (tip, latch)] {
+                let mut m = Group::default();
+                m.seg(a.c, latch);
+                out.push(m);
+                tips.push(Some(tip));
+            }
+            found += 1;
+        }
+        if found == 0 {
+            plain.push(g);
+        }
+    }
+    for g in plain {
+        out.push(g);
+        tips.push(None);
+    }
+    (out, tips)
+}
+
 struct Found {
     walls: Vec<Wall>,
     /// Stretches of face no other face pairs with.
@@ -351,7 +398,8 @@ struct Found {
     gaps: Vec<Seg>,
 }
 
-fn walls(segs: &[Seg], doors: &[Group], windows: &[Group], cols: &[Group], door_taken: &mut [bool], window_taken: &mut [bool]) -> Found {
+#[allow(clippy::too_many_arguments)]
+fn walls(segs: &[Seg], doors: &[Group], tips: &[Option<P>], windows: &[Group], cols: &[Group], door_taken: &mut [bool], window_taken: &mut [bool]) -> Found {
     let mut found = Found { walls: Vec::new(), lone: Vec::new(), gaps: Vec::new() };
     for c in clusters(segs) {
         let at = |t: f64, d: f64| P(c.u.0 * t + c.n.0 * d, c.u.1 * t + c.n.1 * d);
@@ -363,7 +411,9 @@ fn walls(segs: &[Seg], doors: &[Group], windows: &[Group], cols: &[Group], door_
                 }
             }
         }
-        let (ds, ws, cs) = (in_frame(&c, doors), in_frame(&c, windows), in_frame(&c, cols));
+        let (mut ds, ws, cs) = (in_frame(&c, doors), in_frame(&c, windows), in_frame(&c, cols));
+        // A door known by its swing stands only in a wall along its opening.
+        ds.retain(|x| tips.get(x.n).is_none_or(Option::is_none) || x.hi - x.lo >= 3.0 * (x.far - x.near));
         let no_col = vec![false; cols.len()];
         // The pieces along one line, in order.
         pieces.sort_by(|a, b| a.d.total_cmp(&b.d));
@@ -401,11 +451,22 @@ fn walls(segs: &[Seg], doors: &[Group], windows: &[Group], cols: &[Group], door_
                     if !dn.is_empty() || !wn.is_empty() {
                         for n in &dn {
                             door_taken[*n] = true;
+                            if tips.get(*n).is_some_and(Option::is_some) {
+                                door_taken[*n ^ 1] = true;
+                            }
                         }
                         for n in &wn {
                             window_taken[*n] = true;
                         }
-                        openings.push(Opening { lo: run.1, hi: q.lo, door: !dn.is_empty(), items: if dn.is_empty() { wn } else { dn } });
+                        // Doors known by their swing are each as wide as they are drawn; others fill the gap.
+                        let known: Vec<&InFrame> = ds.iter().filter(|x| dn.contains(&x.n) && tips.get(x.n).is_some_and(Option::is_some)).collect();
+                        if !known.is_empty() && known.len() == dn.len() {
+                            for x in known {
+                                openings.push(Opening { lo: x.lo.max(run.1), hi: x.hi.min(q.lo), door: true, items: vec![x.n] });
+                            }
+                        } else {
+                            openings.push(Opening { lo: run.1, hi: q.lo, door: !dn.is_empty(), items: if dn.is_empty() { wn } else { dn } });
+                        }
                         joined = true;
                     }
                 }
@@ -728,8 +789,8 @@ fn rooms(labels: &[Label]) -> Vec<Value> {
 /// `build` (JSON params: k?): see the module.
 pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
     let p: Value = if params.trim().is_empty() { json!({}) } else { serde_json::from_str(params).map_err(|e| format!("the parameters are not JSON: {e}"))? };
-    if let Some(key) = p.as_object().and_then(|m| m.keys().find(|key| key.as_str() != "k")) {
-        return Err(format!("unknown parameter `{key}`; build takes: k"));
+    if let Some(key) = p.as_object().and_then(|m| m.keys().find(|key| !["k", "drawn"].contains(&key.as_str()))) {
+        return Err(format!("unknown parameter `{key}`; build takes: k, drawn"));
     }
     let k = match p.get("k") {
         None | Some(Value::Null) => 1.0,
@@ -769,26 +830,27 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
     let wall_groups = of("A-WALL");
     let wall_segs: Vec<Seg> = wall_groups.iter().flat_map(|g| g.segs.iter().copied()).filter(|s| s.b.sub(s.a).len() >= 20.0).collect();
     let wall_arcs: Vec<Arc> = wall_groups.iter().flat_map(|g| g.arcs.iter().copied()).collect();
-    let doors = touching(of("A-DOOR"), 30.0);
+    let doors_drawn = touching(of("A-DOOR"), 30.0);
+    let (doors, tips) = door_marks(doors_drawn.clone());
     let windows = of("A-WIND");
     let columns = touching(of("A-COLS"), 10.0);
 
     let (mut door_taken, mut window_taken) = (vec![false; doors.len()], vec![false; windows.len()]);
-    let mut found = walls(&wall_segs, &doors, &windows, &columns, &mut door_taken, &mut window_taken);
+    let mut found = walls(&wall_segs, &doors, &tips, &windows, &columns, &mut door_taken, &mut window_taken);
     let (wall_curves, arcs_used) = curved(&wall_arcs, WALL_MIN, WALL_MAX);
 
-    // A door no gap holds goes to the nearest wall: one it stands along, or one that ends at its jamb (a door in a
-    // corner, between a wall's end and the wall across), which is then run on past it.
+    // A door no gap holds goes to a wall it stands along, or one that ends at its jamb (a door in a corner, between
+    // a wall's end and the wall across), which is then run on past it. One known by its swing goes only to a wall
+    // along its opening, on its line (either reading of it); one with no swing only to a wall it stands in.
     let mut doors_left: Vec<Value> = Vec::new();
-    for (n, g) in doors.iter().enumerate() {
-        if door_taken[n] {
-            continue;
-        }
-        let Some(c) = g.centre() else { continue };
-        let Some((lo, hi)) = g.bounds() else { continue };
+    let host = |walls: &[Wall], n: usize| -> Option<(f64, usize, f64, f64)> {
+        let g = doors.get(n)?;
+        let c = g.centre()?;
+        let (lo, hi) = g.bounds()?;
         let size = (hi.0 - lo.0).max(hi.1 - lo.1);
-        let mut best: Option<(f64, usize, f64, f64, f64)> = None;
-        for (m, w) in found.walls.iter().enumerate() {
+        let known = tips.get(n).is_some_and(Option::is_some);
+        let mut best: Option<(f64, usize, f64, f64)> = None;
+        for (m, w) in walls.iter().enumerate() {
             let len = w.b.sub(w.a).len();
             if len < 1.0 {
                 continue;
@@ -798,18 +860,45 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
             if t < -(size + 300.0) || t > len + size + 300.0 {
                 continue;
             }
-            let foot = P(w.a.0 + u.0 * t, w.a.1 + u.1 * t);
-            let off = c.sub(foot).len();
+            let off = c.sub(P(w.a.0 + u.0 * t, w.a.1 + u.1 * t)).len();
+            if known {
+                let along = g.segs.first().map_or(0.0, |s| {
+                    let d = s.b.sub(s.a);
+                    (d.0 * u.0 + d.1 * u.1).abs() / d.len().max(1.0)
+                });
+                if along < 0.97 || off > w.g / 2.0 + 60.0 {
+                    continue;
+                }
+            } else if off > w.g / 2.0 + 100.0 {
+                continue;
+            }
             // Past a wall's end counts against it: a wall it stands along is the nearer.
             let past = (-t).max(t - len).max(0.0);
-            if off <= w.g / 2.0 + 0.75 * size && best.is_none_or(|b| off + past < b.0) {
+            if best.is_none_or(|b| off + past < b.0) {
                 let along: Vec<f64> = g.points().iter().map(|q| q.sub(w.a).dot(u)).collect();
                 let (t0, t1) = (along.iter().copied().fold(f64::INFINITY, f64::min), along.iter().copied().fold(f64::NEG_INFINITY, f64::max));
-                best = Some((off + past, m, t0, t1, off));
+                best = Some((off + past, m, t0, t1));
             }
         }
-        match best {
-            Some((_, m, t0, t1, off)) => {
+        best
+    };
+    for n in 0..doors.len() {
+        if door_taken[n] {
+            continue;
+        }
+        let known = tips.get(n).is_some_and(Option::is_some);
+        let mut pick = host(&found.walls, n).map(|b| (n, b));
+        if known {
+            door_taken[n ^ 1] = true;
+            if let Some(other) = host(&found.walls, n ^ 1) {
+                if pick.as_ref().is_none_or(|(_, b)| other.0 < b.0) {
+                    pick = Some((n ^ 1, other));
+                }
+            }
+        }
+        door_taken[n] = true;
+        match pick {
+            Some((which, (_, m, t0, t1))) => {
                 let w = &mut found.walls[m];
                 let len = w.b.sub(w.a).len();
                 let u = P((w.b.0 - w.a.0) / len, (w.b.1 - w.a.1) / len);
@@ -821,10 +910,13 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
                     w.b = P(a.0 + u.0 * t1, a.1 + u.1 * t1);
                 }
                 let mid = (t0 + t1) / 2.0;
-                let _ = off;
-                w.openings.push((P(a.0 + u.0 * mid, a.1 + u.1 * mid), t1 - t0, true, vec![n]));
+                w.openings.push((P(a.0 + u.0 * mid, a.1 + u.1 * mid), t1 - t0, true, vec![which]));
             }
-            None => doors_left.push(json!({"at": pt(c), "size": mm(size)})),
+            None => {
+                if let (Some(c), Some((lo, hi))) = (doors[n].centre(), doors[n].bounds()) {
+                    doors_left.push(json!({"at": pt(c), "size": mm((hi.0 - lo.0).max(hi.1 - lo.1))}));
+                }
+            }
         }
     }
 
@@ -973,6 +1065,11 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
             if *door {
                 let mut row = json!({"at": pt(*at), "width": mm(*width), "wall": n});
                 let _ = &row;
+                if let Some(Some(tip)) = items.first().and_then(|i| tips.get(*i)) {
+                    row["toward"] = pt(*tip);
+                    doors_out.push(row);
+                    continue;
+                }
                 // The side it swings to: where what draws it lies, off the wall.
                 let mut all = Group::default();
                 for i in items {
@@ -997,6 +1094,31 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
     }
     let lone_arcs: usize = arcs_used.iter().filter(|u| !**u).count();
 
+    // With `drawn`, what the plan draws on each of those layers, as lines: to lay under what was built and compare.
+    let drawn = if p.get("drawn").and_then(Value::as_bool).unwrap_or(false) {
+        let lines = |gs: &[Group]| -> Value {
+            let mut out: Vec<Value> = Vec::new();
+            for g in gs {
+                for s in &g.segs {
+                    out.push(json!([mm(s.a.0), mm(s.a.1), mm(s.b.0), mm(s.b.1)]));
+                }
+                for a in &g.arcs {
+                    for w in arc_points(a, 12).windows(2) {
+                        out.push(json!([mm(w[0].0), mm(w[0].1), mm(w[1].0), mm(w[1].1)]));
+                    }
+                }
+                for (c, r) in &g.circles {
+                    for w in arc_points(&Arc { c: *c, r: *r, s: 0.0, sweep: 360.0 }, 16).windows(2) {
+                        out.push(json!([mm(w[0].0), mm(w[0].1), mm(w[1].0), mm(w[1].1)]));
+                    }
+                }
+            }
+            json!(out)
+        };
+        Some(json!({"walls": lines(&wall_groups), "doors": lines(&doors_drawn), "windows": lines(&windows), "columns": lines(&columns)}))
+    } else {
+        None
+    };
     let (mut cols, mut cols_left) = (Vec::new(), 0usize);
     for g in &columns {
         match column(g) {
@@ -1021,7 +1143,7 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
     thick.sort_by(|a, b| b.1.total_cmp(&a.1));
     let mut other: Vec<(String, usize)> = other.into_iter().collect();
     other.sort();
-    Ok(json!({
+    let mut answer = json!({
         "walls": walls_out,
         "doors": doors_out,
         "windows": windows_out,
@@ -1037,7 +1159,11 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
             "columns": cols_left,
             "layers": other.into_iter().map(|(l, n)| json!({"layer": l, "items": n})).collect::<Vec<_>>(),
         },
-    }))
+    });
+    if let Some(d) = drawn {
+        answer["drawn"] = d;
+    }
+    Ok(answer)
 }
 
 #[cfg(test)]
@@ -1064,7 +1190,7 @@ mod tests {
         let faces = [s((0.0, 0.0), (2000.0, 0.0)), s((0.0, 200.0), (2000.0, 200.0)), s((2900.0, 0.0), (5000.0, 0.0)), s((2900.0, 200.0), (5000.0, 200.0))];
         let doors = [boxed((2000.0, 100.0), (2900.0, 1000.0))];
         let (mut dt, mut wt) = (vec![false], Vec::new());
-        let f = walls(&faces, &doors, &[], &[], &mut dt, &mut wt);
+        let f = walls(&faces, &doors, &[None], &[], &[], &mut dt, &mut wt);
         assert_eq!(f.walls.len(), 1);
         let w = &f.walls[0];
         assert!((w.a.0 - 0.0).abs() < 1.0 && (w.b.0 - 5000.0).abs() < 1.0 && (w.a.1 - 100.0).abs() < 1.0 && (w.g - 200.0).abs() < 1.0);
@@ -1075,7 +1201,7 @@ mod tests {
     #[test]
     fn a_gap_nothing_stands_in_parts_the_wall_and_is_said() {
         let faces = [s((0.0, 0.0), (2000.0, 0.0)), s((0.0, 200.0), (2000.0, 200.0)), s((2900.0, 0.0), (5000.0, 0.0)), s((2900.0, 200.0), (5000.0, 200.0))];
-        let f = walls(&faces, &[], &[], &[], &mut [], &mut []);
+        let f = walls(&faces, &[], &[], &[], &[], &mut [], &mut []);
         assert_eq!((f.walls.len(), f.gaps.len()), (2, 1));
     }
 
@@ -1092,7 +1218,7 @@ mod tests {
             s((3000.0, 200.0), (3000.0, 4000.0)),
             s((3200.0, 200.0), (3200.0, 4000.0)),
         ];
-        let mut f = walls(&faces, &[], &[], &[], &mut [], &mut []);
+        let mut f = walls(&faces, &[], &[], &[], &[], &mut [], &mut []);
         meet(&mut f.walls, &[]);
         assert_eq!(f.walls.len(), 3, "{:?}", f.walls.iter().map(|w| (w.a, w.b)).collect::<Vec<_>>());
         let along_x = f.walls.iter().find(|w| (w.a.1 - w.b.1).abs() < 1.0).expect("the wall along x");
@@ -1105,7 +1231,7 @@ mod tests {
     fn a_narrow_space_between_two_walls_is_not_a_wall() {
         // Two walls 200 thick with 400 between them: the nearest faces pair, and each face once.
         let faces = [s((0.0, 0.0), (4000.0, 0.0)), s((0.0, 200.0), (4000.0, 200.0)), s((0.0, 600.0), (4000.0, 600.0)), s((0.0, 800.0), (4000.0, 800.0))];
-        let f = walls(&faces, &[], &[], &[], &mut [], &mut []);
+        let f = walls(&faces, &[], &[], &[], &[], &mut [], &mut []);
         assert_eq!(f.walls.len(), 2);
         assert!(f.walls.iter().all(|w| (w.g - 200.0).abs() < 1.0));
     }
@@ -1142,7 +1268,7 @@ mod tests {
         let (pack, _) = cadcraft_index::index(&bytes, &path).expect("index");
         let o = Opened::unpack(&pack).expect("open");
         let k = std::env::var("BUILD_K").unwrap_or_default();
-        let out = build(&o, &if k.is_empty() { String::new() } else { format!("{{\"k\": {k}}}") }).expect("build");
+        let out = build(&o, &if k.is_empty() { String::new() } else { format!("{{\"k\": {k}, \"drawn\": true}}") }).expect("build");
         std::fs::write(format!("{path}.build.json"), serde_json::to_string(&out).expect("json")).expect("write");
         for key in ["walls", "doors", "windows", "curtain", "columns", "rooms"] {
             println!("{key}: {}", out[key].as_array().map_or(0, Vec::len));
