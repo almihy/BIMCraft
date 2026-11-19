@@ -63,3 +63,28 @@ fn disallow_join_frees_both_ends_of_the_join() {
     assert_eq!(plan_area(&h, south), 8100.0 * 200.0);
     assert!(matches!(h.state().tool, Tool::WallJoins(None)), "no join is left there to have picked");
 }
+
+#[test]
+fn disallow_join_on_a_walls_end_grip_is_that_ends_alone() {
+    let mut h = app(BOX);
+    let south = ids(&h, "wall")[0];
+    click(&mut h, P2(4000.0, 0.0));
+    // The right click on its east end: that end refuses, its west end joins on.
+    let east = h.state().screen(P2(8000.0, 0.0));
+    assert_eq!(offered(&mut h, east, &["Disallow Join", "Allow Join"]), ["Disallow Join"]);
+    choose_item(&mut h, "Disallow Join");
+    let w = h.state().session.model.wall(south).cloned().unwrap();
+    assert!(w.join && w.join_start && !w.join_end, "{w:?}");
+    assert_eq!(plan_area(&h, south), 8100.0 * 200.0, "square at the east, through at the west");
+    // That end now offers Allow Join, the other still Disallow Join.
+    assert_eq!(offered(&mut h, east, &["Disallow Join", "Allow Join"]), ["Allow Join"]);
+    key(&mut h, Key::Escape);
+    click(&mut h, P2(4000.0, 0.0));
+    let west = h.state().screen(P2(0.0, 0.0));
+    assert_eq!(offered(&mut h, west, &["Disallow Join", "Allow Join"]), ["Disallow Join"]);
+    key(&mut h, Key::Escape);
+    click(&mut h, P2(4000.0, 0.0));
+    assert_eq!(offered(&mut h, east, &["Disallow Join", "Allow Join"]), ["Allow Join"]);
+    choose_item(&mut h, "Allow Join");
+    assert!(h.state().session.model.wall(south).is_some_and(|w| w.join_end));
+}

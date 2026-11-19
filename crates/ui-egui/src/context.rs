@@ -242,10 +242,11 @@ impl BimApp {
                 None => None,
             };
             let joins: Vec<bool> = match self.sheet {
+                // The end under the pointer: a wall's own end (Allow Join is each end's), a run's whole.
                 Sheet::Plan(_) | Sheet::Ceiling(_) => self
                     .menu_end
-                    .filter(|(sheet, id)| *sheet == self.sheet && self.selection.contains(id))
-                    .and_then(|(_, id)| join_of(&id))
+                    .filter(|(sheet, id, _)| *sheet == self.sheet && self.selection.contains(id))
+                    .and_then(|(_, id, end)| m.wall(id).map(|w| w.joins(end)).or_else(|| join_of(&id)))
                     .into_iter()
                     .collect(),
                 Sheet::Section(_) | Sheet::View3D => self.selection.iter().filter_map(join_of).collect(),
@@ -517,6 +518,17 @@ impl BimApp {
     /// Turn the joins of every selected wall and run off or on, as one command: the flag acts on the
     /// whole element, both ends alike, and is saved with it.
     fn set_joins(&mut self, join: bool) {
+        // On a wall's end grip in a plan: that end's own, as Revit's. (Allowing takes up the whole wall's too, should it
+        // have been refused altogether.)
+        if let Some((_, id, end)) = self.menu_end.filter(|(sheet, id, _)| *sheet == self.sheet && self.session.model.wall(*id).is_some()) {
+            let key = if end { "join_end" } else { "join_start" };
+            let mut p = serde_json::json!({"id": id, key: join});
+            if join {
+                p["join"] = serde_json::json!(true);
+            }
+            self.run("modify", p);
+            return;
+        }
         let ids: Vec<bimcraft_core::model::Id> = self
             .selection
             .iter()
@@ -555,7 +567,7 @@ impl BimApp {
     /// offers its join.
     pub(crate) fn context_menu(&mut self, response: &Response) {
         if response.secondary_clicked() {
-            self.menu_end = response.interact_pointer_pos().and_then(|at| self.end_under(at)).map(|id| (self.sheet, id));
+            self.menu_end = response.interact_pointer_pos().and_then(|at| self.end_under(at)).map(|(id, end)| (self.sheet, id, end));
         }
         let groups = self.context_items();
         let mut chosen = None;

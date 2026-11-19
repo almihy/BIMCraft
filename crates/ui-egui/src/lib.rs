@@ -929,7 +929,7 @@ pub struct BimApp {
     go_to_view: Option<context::GoToView>,
     /// The selected wall or run whose end grip the last right click landed on, and the view it was in: the menu offers its
     /// join there.
-    menu_end: Option<(Sheet, Id)>,
+    menu_end: Option<(Sheet, Id, bool)>,
     /// The selection as last seen, and the one before it, which Select Previous brings back.
     selection_seen: Vec<Id>,
     selection_before: Vec<Id>,
