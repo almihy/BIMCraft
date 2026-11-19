@@ -474,3 +474,89 @@ fn holds_color(png: &[u8], c: Rgb) -> bool {
         share >= 0.5 && got.iter().zip(&want).all(|(g, w)| (g - w * share).abs() < 12.0)
     })
 }
+
+/// A real office drawing (14 MB, 99,221 items), when it is on this computer: opened as the worker opens it, its
+/// fullest 40 m by 30 m found by counting, that part extracted and indexed again. Says how long each step took.
+/// `cargo test -p bimcraft-drawing-web -- --ignored --nocapture a_real_drawing`
+#[test]
+#[ignore = "reads a large drawing from this computer's Downloads"]
+fn a_real_drawing_s_plan_is_counted_extracted_and_indexed_again() {
+    let path = std::env::var("READER_TEST_DWG").unwrap_or_else(|_| r"C:\Users\al_mi\Downloads\School DWG.dwg".into());
+    let Ok(bytes) = std::fs::read(&path) else {
+        eprintln!("no drawing at {path}: nothing tested");
+        return;
+    };
+    let timed = |what: &str, t: std::time::Instant| eprintln!("{what}: {:.2} s", t.elapsed().as_secs_f64());
+    let t = std::time::Instant::now();
+    let (pack, summary) = cadcraft_index::index(&bytes, "school.dwg").expect("indexed");
+    timed("read and indexed", t);
+    let t = std::time::Instant::now();
+    let o = Opened::unpack(&pack).expect("opened");
+    timed("opened from its pack", t);
+    let t = std::time::Instant::now();
+    let m = Measured::of(&o);
+    timed("measured (once, at the first question)", t);
+    let t = std::time::Instant::now();
+    let all = counts(&o, &m, "").expect("counted");
+    timed("counts of the whole", t);
+    assert_eq!(all["total"], summary["items"]);
+    eprintln!("{} items, {} layers, {} colours, {} blocks listed and {} more", all["total"], all["layers"].as_array().map_or(0, Vec::len), all["colors"].as_array().map_or(0, Vec::len), all["blocks"].as_array().map_or(0, Vec::len), all["blocks_more"]);
+    // The fullest 40 m by 30 m of its bulk (all of it is some 100 m by 55 m), on a 10 m grid.
+    let ext: [[f64; 2]; 2] = serde_json::from_value(summary["extents"].clone()).expect("extents");
+    let t = std::time::Instant::now();
+    let (mut best, mut most, mut asked) = ([[0.0; 2]; 2], 0_u64, 0);
+    let mut y = ext[0][1];
+    while y < ext[1][1] {
+        let mut x = ext[0][0];
+        while x < ext[1][0] {
+            let b = [[x, y], [x + 40_000.0, y + 30_000.0]];
+            let n = counts(&o, &m, &json!({"box": b}).to_string()).expect("counted")["total"].as_u64().unwrap_or(0);
+            asked += 1;
+            if n > most {
+                (best, most) = (b, n);
+            }
+            x += 10_000.0;
+        }
+        y += 10_000.0;
+    }
+    timed(&format!("{asked} boxes counted"), t);
+    eprintln!("the fullest: {most} items in {best:?}");
+    assert!(most > 1000);
+    let t = std::time::Instant::now();
+    let p = look(&o, &m, &json!({"box": best}).to_string(), 1600).expect("drawn");
+    timed(&format!("look, own colours ({} by {}, {} KB)", p.about["width"], p.about["height"], p.png.len() / 1024), t);
+    let t = std::time::Instant::now();
+    let p = look(&o, &m, &json!({"box": best, "color_by": "layer"}).to_string(), 1600).expect("drawn");
+    timed(&format!("look, by layer ({} layers in the legend)", p.about["legend"].as_array().map_or(0, Vec::len)), t);
+    // Its hatches and dimensions dropped, its blocks to one layer, its origin to the box's corner.
+    let params = json!({
+        "box": best,
+        "drop": [{"kinds": ["hatch", "dimension"]}],
+        "sort": [{"to": "X-BLOCKS", "kinds": ["block"]}],
+        "move": [-best[0][0], -best[0][1]],
+    })
+    .to_string();
+    let t = std::time::Instant::now();
+    let (part, about) = cut(&o, &m, &params).expect("cut");
+    timed("cut (the part as a drawing)", t);
+    eprintln!("the part: {} of {} blocks, {} of {} layers", part.blocks.len(), o.drawing.blocks.len(), part.layers.len(), o.drawing.layers.len());
+    let t = std::time::Instant::now();
+    let (dwg, about2) = extract(&o, &m, &params, "2018").expect("extracted");
+    timed(&format!("extract ({} items, {} KB)", about["items"], dwg.len() / 1024), t);
+    assert_eq!(about, about2);
+    let t = std::time::Instant::now();
+    let (pack2, summary2) = cadcraft_index::index(&dwg, "part.dwg").expect("indexed again");
+    timed("the part read and indexed again", t);
+    assert_eq!(summary2["items"], about["items"]);
+    let o2 = Opened::unpack(&pack2).expect("opened");
+    let m2 = Measured::of(&o2);
+    let c = counts(&o2, &m2, "").expect("counted");
+    assert_eq!(c["kinds"], about["kinds"]);
+    assert!(c["kinds"].get("hatch").is_none() && c["kinds"].get("dimension").is_none());
+    let blocks = c["kinds"]["block"].as_u64().unwrap_or(0);
+    assert_eq!(c["layers"].as_array().and_then(|l| l.iter().find(|l| l["name"] == "X-BLOCKS")).map(|l| l["items"].as_u64().unwrap_or(0)), Some(blocks));
+    assert_eq!(summary2["sheets"], json!([]));
+    // Moved to its corner: its extents begin near 0, 0 and are no wider than the box and what reaches out of it.
+    eprintln!("its extents: {} (asked: {})", c["extents"], about["extents"]);
+    assert_eq!(c["extents"], about["extents"]);
+}

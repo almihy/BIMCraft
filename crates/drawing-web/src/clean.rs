@@ -79,8 +79,9 @@ fn layer_own(l: Option<&Layer>) -> Color {
     }
 }
 
+/// A number to the hundredth (and never a zero with a minus sign).
 fn hundredth(x: f64) -> f64 {
-    (x * 100.0).round() / 100.0
+    (x * 100.0).round() / 100.0 + 0.0
 }
 
 /// A box that has a size: not empty, and not endless.
