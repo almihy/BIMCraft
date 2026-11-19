@@ -381,6 +381,71 @@ fn standing(all: &[InFrame], taken: &[bool], d: f64, g: f64, lo: f64, hi: f64) -
         .collect()
 }
 
+/// The wall a door or a window goes to, when no gap of a wall holds it: one it stands along, or one that ends at its
+/// jamb. One `known` by the line of its opening goes only to a wall along that line; another only to a wall it
+/// stands in. (how far off, the wall, from where to where along it)
+fn along_wall(walls: &[Wall], g: &Group, known: bool) -> Option<(f64, usize, f64, f64)> {
+    let c = g.centre()?;
+    let (lo, hi) = g.bounds()?;
+    let size = (hi.0 - lo.0).max(hi.1 - lo.1);
+    let mut best: Option<(f64, usize, f64, f64)> = None;
+    for (m, w) in walls.iter().enumerate() {
+        let len = w.b.sub(w.a).len();
+        if len < 1.0 {
+            continue;
+        }
+        let u = P((w.b.0 - w.a.0) / len, (w.b.1 - w.a.1) / len);
+        let t = c.sub(w.a).dot(u);
+        if t < -(size + 300.0) || t > len + size + 300.0 {
+            continue;
+        }
+        let off = c.sub(P(w.a.0 + u.0 * t, w.a.1 + u.1 * t)).len();
+        if known {
+            let along = g.segs.first().map_or(0.0, |s| {
+                let d = s.b.sub(s.a);
+                (d.0 * u.0 + d.1 * u.1).abs() / d.len().max(1.0)
+            });
+            if along < 0.97 || off > w.g / 2.0 + 120.0 {
+                continue;
+            }
+        } else if off > w.g / 2.0 + 100.0 {
+            continue;
+        }
+        // Past a wall's end counts against it: a wall it stands along is the nearer.
+        let past = (-t).max(t - len).max(0.0);
+        if best.is_none_or(|b| off + past < b.0) {
+            let along: Vec<f64> = g.points().iter().map(|q| q.sub(w.a).dot(u)).collect();
+            let (t0, t1) = (along.iter().copied().fold(f64::INFINITY, f64::min), along.iter().copied().fold(f64::NEG_INFINITY, f64::max));
+            best = Some((off + past, m, t0, t1));
+        }
+    }
+    best
+}
+
+/// A window block as the line of its opening: along its longer side, through its middle. None for what is not shaped
+/// as a window in a wall (too deep, too short).
+fn window_mark(g: &Group) -> Option<Group> {
+    let longest = g.segs.iter().max_by(|a, b| a.b.sub(a.a).len().total_cmp(&b.b.sub(b.a).len()))?;
+    let d = longest.b.sub(longest.a);
+    let th = d.1.atan2(d.0);
+    let (u, n) = (P(th.cos(), th.sin()), P(-th.sin(), th.cos()));
+    let (mut lo, mut hi, mut near, mut far) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+    for p in g.points() {
+        lo = lo.min(p.dot(u));
+        hi = hi.max(p.dot(u));
+        near = near.min(p.dot(n));
+        far = far.max(p.dot(n));
+    }
+    // A sheet of glass (thin) and a mullion (short) are parts of a glass wall, not windows.
+    if hi - lo < 400.0 || far - near > 700.0 || far - near < 60.0 || far - near > (hi - lo) {
+        return None;
+    }
+    let mid = (near + far) / 2.0;
+    let mut m = Group::default();
+    m.seg(P(u.0 * lo + n.0 * mid, u.1 * lo + n.1 * mid), P(u.0 * hi + n.0 * mid, u.1 * hi + n.1 * mid));
+    Some(m)
+}
+
 /// A door as its swing draws it: the arc's centre is its hinge, one end of the arc is the tip of its open leaf and
 /// the other is where it latches, on the wall's line. Each such door becomes the line of its opening alone (hinge
 /// to latch), with the leaf's tip beside it: where it stands, how wide it is and which way it opens, whatever the
@@ -447,7 +512,8 @@ struct Found {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn walls(segs: &[Seg], doors: &[Group], tips: &[Option<P>], windows: &[Group], cols: &[Group], door_taken: &mut [bool], window_taken: &mut [bool]) -> Found {
+fn walls(segs: &[Seg], doors: &[Group], tips: &[Option<P>], windows: &[Group], marked: &[bool], cols: &[Group], door_taken: &mut [bool], window_taken: &mut [bool]) -> Found {
+    let is_mark = |n: usize| marked.get(n).copied().unwrap_or(false);
     let mut found = Found { walls: Vec::new(), lone: Vec::new(), gaps: Vec::new() };
     for c in clusters(segs) {
         let at = |t: f64, d: f64| P(c.u.0 * t + c.n.0 * d, c.u.1 * t + c.n.1 * d);
@@ -462,6 +528,8 @@ fn walls(segs: &[Seg], doors: &[Group], tips: &[Option<P>], windows: &[Group], c
         let (mut ds, ws, cs) = (in_frame(&c, doors), in_frame(&c, windows), in_frame(&c, cols));
         // A door known by its swing stands only in a wall along its opening.
         ds.retain(|x| tips.get(x.n).is_none_or(Option::is_none) || x.hi - x.lo >= 3.0 * (x.far - x.near));
+        let mut ws = ws;
+        ws.retain(|x| !is_mark(x.n) || x.hi - x.lo >= 3.0 * (x.far - x.near));
         // The pieces along one line, in order.
         pieces.sort_by(|a, b| a.d.total_cmp(&b.d));
         let mut lines: Vec<Vec<Piece>> = Vec::new();
@@ -512,8 +580,15 @@ fn walls(segs: &[Seg], doors: &[Group], tips: &[Option<P>], windows: &[Group], c
                             for x in known {
                                 openings.push(Opening { lo: x.lo.max(run.1), hi: x.hi.min(q.lo), door: true, items: vec![x.n] });
                             }
+                        } else if !dn.is_empty() {
+                            openings.push(Opening { lo: run.1, hi: q.lo, door: true, items: dn });
+                        } else if wn.iter().all(|n| is_mark(*n)) {
+                            // Window blocks are each as wide as they are drawn.
+                            for x in ws.iter().filter(|x| wn.contains(&x.n)) {
+                                openings.push(Opening { lo: x.lo.max(run.1), hi: x.hi.min(q.lo), door: false, items: vec![x.n] });
+                            }
                         } else {
-                            openings.push(Opening { lo: run.1, hi: q.lo, door: !dn.is_empty(), items: if dn.is_empty() { wn } else { dn } });
+                            openings.push(Opening { lo: run.1, hi: q.lo, door: false, items: Vec::new() });
                         }
                         joined = true;
                     }
@@ -925,7 +1000,12 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
     let wall_arcs: Vec<Arc> = wall_groups.iter().flat_map(|g| g.arcs.iter().copied()).collect();
     let doors_drawn = touching(of("A-DOOR"), 30.0);
     let (doors, tips) = door_marks(doors_drawn.clone());
-    let windows = of("A-WIND");
+    // A window block is one window, the line of its opening; loose glazing lines stay as they are drawn.
+    let windows_drawn = of("A-WIND");
+    let window_handles: Vec<&String> = order.iter().filter(|h| layer_of.get(*h).is_some_and(|l| l == "A-WIND") && groups.contains_key(*h)).collect();
+    let window_marks: Vec<Option<Group>> = windows_drawn.iter().zip(&window_handles).map(|(g, h)| if block_of.contains_key(*h) { window_mark(g) } else { None }).collect();
+    let marked: Vec<bool> = window_marks.iter().map(Option::is_some).collect();
+    let windows: Vec<Group> = windows_drawn.iter().zip(&window_marks).map(|(g, m)| m.clone().unwrap_or_else(|| g.clone())).collect();
     // A column block is one column, as it is placed; loose lines make one where they close on one another.
     let mut columns: Vec<Group> = Vec::new();
     let mut column_blocks: Vec<Option<String>> = Vec::new();
@@ -946,7 +1026,7 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
     }
 
     let (mut door_taken, mut window_taken) = (vec![false; doors.len()], vec![false; windows.len()]);
-    let mut found = walls(&wall_segs, &doors, &tips, &windows, &columns, &mut door_taken, &mut window_taken);
+    let mut found = walls(&wall_segs, &doors, &tips, &windows, &marked, &columns, &mut door_taken, &mut window_taken);
     let framed = unframed(&mut found.walls);
     // A plan whose walls are drawn as one line each: with `single` (a thickness, mm), every wall line left without a
     // second face is a wall that thick, centred on it.
@@ -969,45 +1049,7 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
     let mut doors_left: Vec<Value> = Vec::new();
     // Doors no wall holds yet: a glass run may (below).
     let mut pending: Vec<usize> = Vec::new();
-    let host = |walls: &[Wall], n: usize| -> Option<(f64, usize, f64, f64)> {
-        let g = doors.get(n)?;
-        let c = g.centre()?;
-        let (lo, hi) = g.bounds()?;
-        let size = (hi.0 - lo.0).max(hi.1 - lo.1);
-        let known = tips.get(n).is_some_and(Option::is_some);
-        let mut best: Option<(f64, usize, f64, f64)> = None;
-        for (m, w) in walls.iter().enumerate() {
-            let len = w.b.sub(w.a).len();
-            if len < 1.0 {
-                continue;
-            }
-            let u = P((w.b.0 - w.a.0) / len, (w.b.1 - w.a.1) / len);
-            let t = c.sub(w.a).dot(u);
-            if t < -(size + 300.0) || t > len + size + 300.0 {
-                continue;
-            }
-            let off = c.sub(P(w.a.0 + u.0 * t, w.a.1 + u.1 * t)).len();
-            if known {
-                let along = g.segs.first().map_or(0.0, |s| {
-                    let d = s.b.sub(s.a);
-                    (d.0 * u.0 + d.1 * u.1).abs() / d.len().max(1.0)
-                });
-                if along < 0.97 || off > w.g / 2.0 + 120.0 {
-                    continue;
-                }
-            } else if off > w.g / 2.0 + 100.0 {
-                continue;
-            }
-            // Past a wall's end counts against it: a wall it stands along is the nearer.
-            let past = (-t).max(t - len).max(0.0);
-            if best.is_none_or(|b| off + past < b.0) {
-                let along: Vec<f64> = g.points().iter().map(|q| q.sub(w.a).dot(u)).collect();
-                let (t0, t1) = (along.iter().copied().fold(f64::INFINITY, f64::min), along.iter().copied().fold(f64::NEG_INFINITY, f64::max));
-                best = Some((off + past, m, t0, t1));
-            }
-        }
-        best
-    };
+    let host = |walls: &[Wall], n: usize| -> Option<(f64, usize, f64, f64)> { along_wall(walls, doors.get(n)?, tips.get(n).is_some_and(Option::is_some)) };
     for n in 0..doors.len() {
         if door_taken[n] {
             continue;
@@ -1042,8 +1084,29 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
         }
     }
 
+    // A window block no gap holds goes to the wall along it, as a door does.
+    for n in 0..windows.len() {
+        if window_taken[n] || !marked[n] {
+            continue;
+        }
+        if let Some((_, m, t0, t1)) = along_wall(&found.walls, &windows[n], true) {
+            let w = &mut found.walls[m];
+            let len = w.b.sub(w.a).len();
+            let u = P((w.b.0 - w.a.0) / len, (w.b.1 - w.a.1) / len);
+            let a = w.a;
+            if t0 < 0.0 {
+                w.a = P(a.0 + u.0 * t0, a.1 + u.1 * t0);
+            }
+            if t1 > len {
+                w.b = P(a.0 + u.0 * t1, a.1 + u.1 * t1);
+            }
+            let mid = (t0 + t1) / 2.0;
+            w.openings.push((P(a.0 + u.0 * mid, a.1 + u.1 * mid), t1 - t0, false, vec![n]));
+            window_taken[n] = true;
+        }
+    }
     // Glazing no wall holds: runs of its own.
-    let glass: Vec<&Group> = windows.iter().enumerate().filter(|(n, _)| !window_taken[*n]).map(|(_, g)| g).collect();
+    let glass: Vec<&Group> = windows_drawn.iter().enumerate().filter(|(n, _)| !window_taken[*n]).map(|(_, g)| g).collect();
     let glass_segs: Vec<Seg> = glass.iter().flat_map(|g| g.segs.iter().copied()).filter(|s| s.b.sub(s.a).len() >= 100.0).collect();
     let glass_arcs: Vec<Arc> = glass.iter().flat_map(|g| g.arcs.iter().copied()).collect();
     let mut curtain: Vec<Value> = Vec::new();
@@ -1203,7 +1266,7 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
         let len = w.b.sub(w.a).len();
         let u = if len > 0.0 { P((w.b.0 - w.a.0) / len, (w.b.1 - w.a.1) / len) } else { P(1.0, 0.0) };
         let on = |t: f64| P(w.a.0 + u.0 * t, w.a.1 + u.1 * t);
-        let mut wide: Vec<(f64, f64)> = w.openings.iter().filter(|o| !o.2 && o.1 >= GLASS_WALL)
+        let mut wide: Vec<(f64, f64)> = w.openings.iter().filter(|o| !o.2 && o.3.is_empty() && o.1 >= GLASS_WALL)
             .map(|o| { let t = o.0.sub(w.a).dot(u); ((t - o.1 / 2.0).max(0.0), (t + o.1 / 2.0).min(len)) }).collect();
         wide.sort_by(|a, b| a.0.total_cmp(&b.0));
         let mut from = 0.0;
@@ -1239,7 +1302,7 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
                     }
                 }
                 doors_out.push(row);
-            } else if *width < GLASS_WALL {
+            } else if !items.is_empty() || *width < GLASS_WALL {
                 windows_out.push(json!({"at": pt(*at), "width": mm(*width), "wall": n}));
             }
         }
@@ -1271,7 +1334,7 @@ pub(crate) fn build(o: &Opened, params: &str) -> Result<Value, String> {
             }
             json!(out)
         };
-        Some(json!({"walls": lines(&wall_groups), "doors": lines(&doors_drawn), "windows": lines(&windows), "columns": lines(&columns)}))
+        Some(json!({"walls": lines(&wall_groups), "doors": lines(&doors_drawn), "windows": lines(&windows_drawn), "columns": lines(&columns)}))
     } else {
         None
     };
@@ -1350,7 +1413,7 @@ mod tests {
         let faces = [s((0.0, 0.0), (2000.0, 0.0)), s((0.0, 200.0), (2000.0, 200.0)), s((2900.0, 0.0), (5000.0, 0.0)), s((2900.0, 200.0), (5000.0, 200.0))];
         let doors = [boxed((2000.0, 100.0), (2900.0, 1000.0))];
         let (mut dt, mut wt) = (vec![false], Vec::new());
-        let f = walls(&faces, &doors, &[None], &[], &[], &mut dt, &mut wt);
+        let f = walls(&faces, &doors, &[None], &[], &[], &[], &mut dt, &mut wt);
         assert_eq!(f.walls.len(), 1);
         let w = &f.walls[0];
         assert!((w.a.0 - 0.0).abs() < 1.0 && (w.b.0 - 5000.0).abs() < 1.0 && (w.a.1 - 100.0).abs() < 1.0 && (w.g - 200.0).abs() < 1.0);
@@ -1361,7 +1424,7 @@ mod tests {
     #[test]
     fn a_gap_nothing_stands_in_parts_the_wall_and_is_said() {
         let faces = [s((0.0, 0.0), (2000.0, 0.0)), s((0.0, 200.0), (2000.0, 200.0)), s((2900.0, 0.0), (5000.0, 0.0)), s((2900.0, 200.0), (5000.0, 200.0))];
-        let f = walls(&faces, &[], &[], &[], &[], &mut [], &mut []);
+        let f = walls(&faces, &[], &[], &[], &[], &[], &mut [], &mut []);
         assert_eq!((f.walls.len(), f.gaps.len()), (2, 1));
     }
 
@@ -1378,7 +1441,7 @@ mod tests {
             s((3000.0, 200.0), (3000.0, 4000.0)),
             s((3200.0, 200.0), (3200.0, 4000.0)),
         ];
-        let mut f = walls(&faces, &[], &[], &[], &[], &mut [], &mut []);
+        let mut f = walls(&faces, &[], &[], &[], &[], &[], &mut [], &mut []);
         meet(&mut f.walls, &[]);
         assert_eq!(f.walls.len(), 3, "{:?}", f.walls.iter().map(|w| (w.a, w.b)).collect::<Vec<_>>());
         let along_x = f.walls.iter().find(|w| (w.a.1 - w.b.1).abs() < 1.0).expect("the wall along x");
@@ -1391,7 +1454,7 @@ mod tests {
     fn a_narrow_space_between_two_walls_is_not_a_wall() {
         // Two walls 200 thick with 400 between them: the nearest faces pair, and each face once.
         let faces = [s((0.0, 0.0), (4000.0, 0.0)), s((0.0, 200.0), (4000.0, 200.0)), s((0.0, 600.0), (4000.0, 600.0)), s((0.0, 800.0), (4000.0, 800.0))];
-        let f = walls(&faces, &[], &[], &[], &[], &mut [], &mut []);
+        let f = walls(&faces, &[], &[], &[], &[], &[], &mut [], &mut []);
         assert_eq!(f.walls.len(), 2);
         assert!(f.walls.iter().all(|w| (w.g - 200.0).abs() < 1.0));
     }
