@@ -6920,6 +6920,7 @@ mod clipboard;
 mod clouds;
 mod control;
 mod curtain;
+mod curtain_tools;
 mod dialog;
 mod dimensions;
 mod dims3d;

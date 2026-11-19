@@ -73,6 +73,9 @@ pub(crate) enum Action {
     FlipFromToRoom,
     /// Select Joined Elements: the walls joined to the walls selected, with them.
     SelectJoined,
+    /// Select Panels and Select Mullions: the panels or mullions of the selected ones' curtain wall, as Revit's menu picks
+    /// them (along a grid, on a grid line, inside, on the border, all of the host).
+    SelectCurtain(crate::curtain::tools::Among),
     /// Snap Overrides: the nth of Revit's snap overrides ([`crate::SNAP_OVERRIDES`]), for the next point picked.
     SnapOverride(u8),
 }
@@ -114,6 +117,7 @@ impl Action {
             Action::FlipFromToRoom => msg!("Flip From/To Room"),
             Action::SnapOverride(_) => "Snap Override",
             Action::SelectJoined => msg!("Select Joined Elements"),
+            Action::SelectCurtain(among) => among.label(),
         }
     }
 
@@ -128,6 +132,7 @@ impl Action {
             Action::Recent(_) => Some(msg!("Recent Commands")),
             Action::ProjectBrowser => Some(msg!("Browsers")),
             Action::SnapOverride(_) => Some(msg!("Snap Overrides")),
+            Action::SelectCurtain(among) => Some(if among.mullions() { msg!("Select Mullions") } else { msg!("Select Panels") }),
             _ => None,
         }
     }
@@ -145,7 +150,7 @@ pub(crate) struct Item {
 }
 
 impl Item {
-    fn new(action: Action, enabled: bool) -> Item {
+    pub(crate) fn new(action: Action, enabled: bool) -> Item {
         Item { action, enabled, of: None, checked: None }
     }
 
@@ -337,6 +342,8 @@ impl BimApp {
             if self.selection.iter().any(|id| m.wall(*id).is_some()) {
                 select.insert(0, Item::new(Action::SelectJoined, true));
             }
+            // A curtain wall's, a panel's and a mullion's: Select Panels and Select Mullions.
+            select.extend(self.curtain_select_items());
             select.push(Item::new(Action::Delete, true));
             groups.push(select);
         }
@@ -369,6 +376,7 @@ impl BimApp {
             Action::Recent(i) => self.repeat_recent(usize::from(i)),
             Action::SelectPrevious => self.select_previous(),
             Action::SelectJoined => self.select_joined(),
+            Action::SelectCurtain(among) => self.select_among(among),
             Action::SnapOverride(i) => self.snap_once = crate::SNAP_OVERRIDES.get(usize::from(i)).and_then(|(.., once)| *once),
             Action::CreateSimilar => self.create_similar(),
             Action::Finish => self.finish_open_shape(),

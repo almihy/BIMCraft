@@ -61,8 +61,16 @@ fn to_clip(d: vec3<f32>) -> vec4<f32> {
 struct Owner {
     // rgb: the edge colour; w: how much of the element shows over what is behind it, 1 for opaque.
     edge: vec4<f32>,
-    // rgb: the tint; w: 1 where the element is tinted.
+    // rgb: the tint; w: 1 where the element is tinted, and 2 more where it is a curtain panel.
     tint: vec4<f32>,
+}
+
+fn tinted(o: Owner) -> bool {
+    return (o.tint.w > 0.5 && o.tint.w < 1.5) || o.tint.w > 2.5;
+}
+
+fn is_panel(o: Owner) -> bool {
+    return o.tint.w > 1.5;
 }
 
 struct Skin {
@@ -460,7 +468,7 @@ fn fs_post(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         // In the tint where the pixel's own element is tinted, else in the edge colour of the first element of it, the pixel
         // to its right and the one below it that shows one.
         var color = vec3<f32>(48.0);
-        if here.y != 0u && owners[here.y - 1u].tint.w > 0.5 {
+        if here.y != 0u && tinted(owners[here.y - 1u]) {
             color = owners[here.y - 1u].tint.xyz;
         } else if here.y != 0u {
             color = owners[here.y - 1u].edge.xyz;
@@ -477,7 +485,7 @@ fn fs_post(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         if g.display.z > 0.5 && !on_dot {
             rgb = floor(rgb * ambient(x, y, textureLoad(scene_depth, vec2<i32>(x, y), 0)) + vec3<f32>(0.5));
         }
-        if owners[here.y - 1u].tint.w > 0.5 {
+        if tinted(owners[here.y - 1u]) {
             rgb = floor((rgb + owners[here.y - 1u].tint.xyz) / 2.0);
         }
     }
@@ -485,11 +493,34 @@ fn fs_post(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     // selecting it would show nothing).
     if g.size.w > 0.5 {
         let clear = textureLoad(clear_ids, vec2<i32>(x, y), 0).x;
-        if clear != 0u {
+        // A curtain panel seen through has its edges, where it ends or another panel begins, as the processor's.
+        var beside = 0u;
+        var ends = false;
+        if x + 1 < size.x {
+            let r = textureLoad(clear_ids, vec2<i32>(x + 1, y), 0).x;
+            ends = ends || r != clear;
+            beside = r;
+        }
+        if y + 1 < size.y {
+            let b = textureLoad(clear_ids, vec2<i32>(x, y + 1), 0).x;
+            ends = ends || b != clear;
+            if beside == 0u {
+                beside = b;
+            }
+        }
+        let first = select(clear, beside, clear == 0u);
+        var panel_edge = false;
+        if (g.display.x > 0.5 || lines) && !on_dot && ends && first != 0u {
+            panel_edge = is_panel(owners[first - 1u]);
+        }
+        if panel_edge {
+            let owner = owners[first - 1u];
+            rgb = select(owner.edge.xyz, owner.tint.xyz, tinted(owner));
+        } else if clear != 0u {
             let owner = owners[clear - 1u];
             var s = bytes(textureLoad(clear_color, vec2<i32>(x, y), 0));
             var weight = owner.edge.w;
-            if owner.tint.w > 0.5 {
+            if tinted(owner) {
                 s = floor((s + owner.tint.xyz) / 2.0);
                 weight = max(weight, 0.35);
             }
@@ -699,7 +730,7 @@ fn wire_quad(w: WireIn, i: u32) -> WireOut {
     o.p = p;
     o.q = q;
     let owner = owners[w.owner - 1u];
-    o.color = select(owner.edge.xyz, owner.tint.xyz, owner.tint.w > 0.5);
+    o.color = select(owner.edge.xyz, owner.tint.xyz, tinted(owner));
     return o;
 }
 
@@ -711,7 +742,7 @@ fn vs_wire(w: WireIn, @builtin(vertex_index) i: u32) -> WireOut {
 // Only what is tinted, which is drawn over the rest. A point for the others.
 @vertex
 fn vs_wire_tinted(w: WireIn, @builtin(vertex_index) i: u32) -> WireOut {
-    if owners[w.owner - 1u].tint.w < 0.5 {
+    if !tinted(owners[w.owner - 1u]) {
         var o: WireOut;
         o.clip = vec4<f32>(0.0, 0.0, 0.0, 1.0);
         return o;

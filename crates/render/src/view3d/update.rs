@@ -196,6 +196,7 @@ impl Scene {
             skins,
             edges: std::sync::OnceLock::new(),
             masses,
+            panels: super::panels_of(after),
             levels,
             scans,
             placements: out.placements,

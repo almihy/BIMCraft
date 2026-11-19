@@ -650,8 +650,10 @@ impl BimApp {
                 Some(_) => {}
                 None => chain.push(p),
             },
-            // A line along the wall's location line, round with it where it's an arc.
+            // A line along the wall's location line, round with it where it's an arc. A curtain wall is picked by its panel or
+            // its mullion too (all the 3D view shows of it), and its line is its centre line: it has no faces of its own.
             Tool::SketchPick => {
+                let wall = wall.map(|id| bimcraft_core::render::curtain_grid::wall_of(m, id).unwrap_or(id));
                 if let Some(w) = wall.and_then(|id| m.wall(id)) {
                     let axis = bimcraft_core::walls::Axis::of(w);
                     let line = match w.arc {

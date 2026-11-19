@@ -160,6 +160,12 @@ pub enum Tool {
     Wall(Vec<P2>),
     Door,
     Window,
+    /// Revit's Curtain Grid: a click on a curtain wall puts a grid line across it.
+    CurtainGrid,
+    /// Revit's Mullion: a click on a curtain wall's grid line puts mullions on it.
+    Mullion,
+    /// Add/Remove Segments, on this curtain wall: a click on a segment of a grid line removes it or puts it back.
+    GridSegments(Id),
     Room,
     /// Room separation lines, one a click from the point before: the last point clicked, while the chain goes on.
     RoomSeparator(Option<P2>),
@@ -876,6 +882,8 @@ pub struct BimApp {
     measured: Option<(P2, P2)>,
     /// Tab pressed over the plan, taken from egui's focus keys: cycle what's under the cursor.
     tab_cycle: bool,
+    /// The Curtain Grid, Add/Remove Segments and Mullion tools, and a selected grid line's drag (`curtain/tools.rs`).
+    curtain_tools: curtain::tools::State,
     /// What the hand picks and repeats: a tool waiting for its elements, the last tool, Tab's chain (`selecting.rs`).
     flow: selecting::Flow,
     /// What a window handed over that `pace` kept back for the frames after the one it came in.
@@ -1637,6 +1645,7 @@ impl BimApp {
             reloading: None,
             scale_length: String::new(),
             tab_cycle: false,
+            curtain_tools: Default::default(),
             flow: selecting::Flow::default(),
             held: Vec::new(),
             show_shortcuts: false,
@@ -1824,6 +1833,9 @@ impl BimApp {
             Tool::Unpaint => Some("Remove Paint"),
             Tool::Door => Some(msg!("Place Door")),
             Tool::Window => Some(msg!("Place Window")),
+            Tool::CurtainGrid => Some(msg!("Place Curtain Grid")),
+            Tool::Mullion => Some(msg!("Place Mullion")),
+            Tool::GridSegments(_) => Some(msg!("Curtain Wall Grids")),
             Tool::Room => Some(msg!("Place Room")),
             Tool::RoomSeparator(_) => Some(msg!("Place Room Separation")),
             Tool::Level => Some(msg!("Place Level")),
@@ -4274,6 +4286,15 @@ impl BimApp {
                 (Icon::Wall, "Wall", msg!("Wall (WA): each click builds a wall; Enter or Esc ends the chain"), Tool::Wall(Vec::new())),
                 (Icon::Door, "Door", msg!("Door (DR): click a wall"), Tool::Door),
                 (Icon::Window, "Window", msg!("Window (WN): click a wall"), Tool::Window),
+                (
+                    Icon::CurtainGrid,
+                    msg!("Curtain Grid"),
+                    msg!(
+                        "Curtain Grid: click a curtain wall's edge, in an elevation, a section or a 3D view, to put a grid line across it"
+                    ),
+                    Tool::CurtainGrid,
+                ),
+                (Icon::Mullion, msg!("Mullion"), msg!("Mullion: click a curtain wall's grid line to put mullions on it"), Tool::Mullion),
                 (Icon::Column, "Column", msg!("Column (CL): click where it stands"), Tool::Column),
                 (Icon::Component, "Component", msg!("Component (CM): a family's type, where you click; Space turns it"), Tool::Component),
                 (Icon::Roof, "Roof", msg!("Roof by Footprint: click inside the walls to roof them, on the level above"), Tool::Roof),
@@ -5244,6 +5265,8 @@ impl BimApp {
             Tool::DetailLine(_) => self.draw_panel(ui, draw::Target::Detail),
             _ => {}
         }
+        // The Curtain Grid and Mullion tools' Placement, and a curtain wall's Add/Remove Segments.
+        self.curtain_panels(ui);
         // Placing a component, a door or a window: Revit's Mode panel, which loads a family from a file.
         if matches!(self.tool, Tool::Component | Tool::Fixture(_) | Tool::Door | Tool::Window) {
             panel(ui, msg!("Mode"), |ui| {
@@ -5911,6 +5934,8 @@ impl BimApp {
                 );
             }
             (Sheet::View3D, Tool::AddPoint | Tool::AddSplitLine(_)) => {}
+            // The curtain tools work on the wall as an elevation, a section and the 3D view show it.
+            (Sheet::View3D | Sheet::Section(_), Tool::CurtainGrid | Tool::Mullion | Tool::GridSegments(_)) => {}
             (Sheet::View3D | Sheet::Section(_) | Sheet::Paper(_), _) => {
                 return msg!("This tool works in plan views: open one from the Project Browser.");
             }
@@ -5929,6 +5954,9 @@ impl BimApp {
             Tool::Attach => msg!("Pick a roof or a floor: the selected walls' tops follow its underside."),
             Tool::Door => msg!("Click a wall to place the door."),
             Tool::Window => msg!("Click a wall to place the window."),
+            Tool::CurtainGrid => msg!("Click a curtain wall's edge to place a grid line across it. Esc ends."),
+            Tool::Mullion => msg!("Click a grid line to place a mullion: Shift for its one segment, Ctrl for all grid lines. Esc ends."),
+            Tool::GridSegments(_) => msg!("Click a grid line segment to remove it or to put it back; click in empty space to finish."),
             Tool::Room => msg!("Click inside walls to place a room; the outline shows the room you'd get."),
             Tool::RoomSeparator(None) => msg!("Click the separation line's start."),
             Tool::RoomSeparator(Some(_)) => msg!("Click the line's next point; each click places a line. Esc ends the chain."),

@@ -121,22 +121,27 @@ impl BimApp {
             let Some(spot) = pin_spot(m, id) else { continue };
             let (x, y) = v.px(spot);
             let at = pos2(rect.min.x + x, rect.min.y + y) + vec2(14.0, -14.0);
-            let r = Rect::from_center_size(at, vec2(20.0, 20.0));
-            let response = self.control(ui, r, ui.id().with(("pin", id)));
-            let name = tf("Unpin element {}", &[&id.to_string()]);
-            response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, name.clone()));
-            let ink = if response.hovered() { pal().hover } else { pal().accent };
-            p.rect_filled(r, 3.0, pal().surface);
-            crate::icons::paint(&p, Icon::Pin, r.shrink(2.0), ink);
-            if response.hovered() {
-                crate::canvas::tag(&p, r.right_bottom() + vec2(2.0, 4.0), Align2::LEFT_TOP, t("Pinned: click to unpin"));
-            }
-            if response.clicked() {
+            if self.pin_glyph(ui, &p, at, id) {
                 unpin.push(id);
             }
         }
         if !unpin.is_empty() {
             self.run("unpin", json!({"ids": unpin}));
         }
+    }
+
+    /// The pin of pinned element `id` at `at`, in any view; whether it was clicked, which unpins the element.
+    pub(crate) fn pin_glyph(&mut self, ui: &Ui, p: &egui::Painter, at: egui::Pos2, id: Id) -> bool {
+        let r = Rect::from_center_size(at, vec2(20.0, 20.0));
+        let response = self.control(ui, r, ui.id().with(("pin", id)));
+        let name = tf("Unpin element {}", &[&id.to_string()]);
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, name.clone()));
+        let ink = if response.hovered() { pal().hover } else { pal().accent };
+        p.rect_filled(r, 3.0, pal().surface);
+        crate::icons::paint(p, Icon::Pin, r.shrink(2.0), ink);
+        if response.hovered() {
+            crate::canvas::tag(p, r.right_bottom() + vec2(2.0, 4.0), Align2::LEFT_TOP, t("Pinned: click to unpin"));
+        }
+        response.clicked()
     }
 }

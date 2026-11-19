@@ -38,6 +38,7 @@ use crate::{font, massing, solids, stairs};
 
 mod dimensions;
 use dimensions::dimension;
+pub mod curtain_grid;
 mod curtain_wall;
 mod hatch;
 #[doc(hidden)]

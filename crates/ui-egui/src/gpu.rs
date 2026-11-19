@@ -1189,7 +1189,9 @@ impl Gpu {
                 let (e, t) = (rgb(o.edge), tinted.get(&o.id));
                 let c = t.map_or([0.0; 3], |c| rgb(*c));
                 let shows = 1.0 - f32::from(o.transparency) / 100.0;
-                put(&mut owners, &[e[0], e[1], e[2], shows, c[0], c[1], c[2], if t.is_some() { 1.0 } else { 0.0 }]);
+                // The tint's fourth: 1 where tinted, and 2 more for a curtain panel, whose edges show through its glass.
+                let flags = if t.is_some() { 1.0 } else { 0.0 } + if o.panel { 2.0 } else { 0.0 };
+                put(&mut owners, &[e[0], e[1], e[2], shows, c[0], c[1], c[2], flags]);
             }
             write(&up.owners, &owners);
             up.tints = Some(tints.to_vec());
@@ -2259,6 +2261,27 @@ mod tests {
         let w = 640;
         let solid = (w..w * 479).filter(|&k| [k, k - 1, k + 1, k - w, k + w].iter().all(|&n| differs(n))).count();
         assert!(solid < 40, "{solid} pixels differ across an area of the picture");
+    }
+
+    #[test]
+    fn curtain_panels_show_their_edges_and_the_joints_between_them_on_the_card_as_on_the_processor() {
+        let Some(mut gpu) = headless() else {
+            eprintln!("no graphics adapter here: the card's picture is not compared");
+            return;
+        };
+        // Glass joined with no mullion between the panes, glass between mullions, and a basic wall behind them.
+        let mut s = Session::new();
+        s.script(
+            r#"wall {"points": [[0,0],[6000,0]], "type": "Exterior Glazing", "height": 3000}
+wall {"points": [[0,2000],[6000,2000]], "type": "Storefront", "height": 3000}
+wall {"points": [[0,4000],[6000,4000]], "height": 3000}"#,
+        )
+        .unwrap();
+        let panel = *s.model.elements.iter().find(|(_, e)| e.category() == "curtainpanel").unwrap().0;
+        draws_as_the_processor(&mut gpu, &s, &[]);
+        draws_as_the_processor(&mut gpu, &s, &[(panel, Rgb(0, 120, 215))]);
+        s.execute("visual_style", &serde_json::json!({"style": "hidden_line"})).unwrap();
+        draws_as_the_processor(&mut gpu, &s, &[]);
     }
 
     #[test]

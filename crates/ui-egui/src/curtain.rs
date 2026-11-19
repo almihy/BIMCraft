@@ -15,6 +15,8 @@ use crate::lang::{t, tf};
 use crate::properties::combo;
 use crate::typeprops::Table;
 
+pub(crate) mod tools;
+
 pub(crate) const BASIC_WALL: &str = msg!("Basic Wall");
 pub(crate) const CURTAIN_WALL: &str = msg!("Curtain Wall");
 pub(crate) const SYSTEM_PANEL: &str = msg!("System Panel");
