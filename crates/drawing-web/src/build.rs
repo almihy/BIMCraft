@@ -625,6 +625,13 @@ fn is_number(w: &str) -> bool {
     digits > 0 && w.chars().count() <= 8 && w.chars().all(|c| c.is_ascii_alphanumeric() || "-./".contains(c)) && digits * 2 >= w.chars().count()
 }
 
+/// A level mark among the labels ("+5.00", "±0.00", "-3.20").
+fn is_level(w: &str) -> bool {
+    let w = w.trim();
+    (w.starts_with('+') || w.starts_with('-') || w.starts_with('±') || w.ends_with('+'))
+        && w.chars().all(|c| c.is_ascii_digit() || "+-±., ".contains(c))
+}
+
 fn is_area(w: &str) -> bool {
     let l = w.to_lowercase();
     l.contains("m2") || l.contains("m²") || l.contains("sqm") || l.contains("sq.m") || l.contains("م2") || l.contains("م²")
@@ -650,7 +657,7 @@ fn rooms(labels: &[Label]) -> Vec<Value> {
         for j in i + 1..n {
             let h = labels[i].h.max(labels[j].h).max(50.0);
             let d = labels[i].at.sub(labels[j].at);
-            if d.0.abs() < 8.0 * h && d.1.abs() < 2.6 * h {
+            if d.0.abs() < 10.0 * h && d.1.abs() < 3.2 * h {
                 let (a, b) = (root(&mut parent, i), root(&mut parent, j));
                 if a != b {
                     parent[a] = b;
@@ -680,7 +687,7 @@ fn rooms(labels: &[Label]) -> Vec<Value> {
             y += l.at.1 + 0.5 * l.h;
             for line in l.text.lines() {
                 let line = line.trim();
-                if line.is_empty() || is_area(line) {
+                if line.is_empty() || is_area(line) || is_level(line) {
                     continue;
                 }
                 if number.is_none() && is_number(line) {
@@ -694,7 +701,8 @@ fn rooms(labels: &[Label]) -> Vec<Value> {
             continue;
         }
         let c = P(x / set.len() as f64, y / set.len() as f64);
-        let mut row = json!({"at": pt(c), "name": name.join(" ")});
+        let tallest = set.iter().map(|i| labels[*i].h).fold(0.0, f64::max);
+        let mut row = json!({"at": pt(c), "name": name.join(" "), "height": mm(tallest)});
         if let Some(num) = number {
             row["number"] = json!(num);
         }
