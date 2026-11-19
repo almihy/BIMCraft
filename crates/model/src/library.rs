@@ -1726,6 +1726,8 @@ impl Model {
             || self.layered_types().any(|(.., layers)| layers.iter().any(layer))
             || !self.wall_joins.is_empty()
             || self.elements.values().any(ends)
+            || self.elements.values().filter_map(crate::graphics::graphics_of_element).any(|g| g.same_type_joins)
+            || self.view_templates.values().any(|t| t.graphics.same_type_joins)
         {
             return crate::model::WALL_FORMAT;
         }

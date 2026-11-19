@@ -585,6 +585,10 @@ pub struct Graphics {
     /// How much it draws of what it cuts.
     #[serde(skip_serializing_if = "is_fine")]
     pub detail: Detail,
+    /// Revit's Wall Join Display, "Clean same type wall joins": at coarse detail, walls of two types show the line where
+    /// they meet (unset, "Clean all wall joins": none shows). A join set to Clean Join shows none either way.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub same_type_joins: bool,
     /// How a 3D view draws its surfaces.
     #[serde(skip_serializing_if = "is_shaded")]
     pub style: VisualStyle,
@@ -741,6 +745,7 @@ impl Graphics {
         }
         if t.controls.contains(&Group::Detail) {
             g.detail = t.graphics.detail;
+            g.same_type_joins = t.graphics.same_type_joins;
         }
         if t.controls.contains(&Group::Style) {
             g.style = t.graphics.style;
@@ -1170,7 +1175,7 @@ pub fn check_followed(m: &Model, old: &Element, new: &Element) -> Result<(), Str
     follows(Group::Phase, (&a.phase, &a.phase_filter) == (&b.phase, &b.phase_filter), "phase and phase filter")?;
     follows(Group::Options, a.options == b.options, "design options")?;
     follows(Group::Scale, a.scale == b.scale, "scale")?;
-    follows(Group::Detail, a.detail == b.detail, "detail level")?;
+    follows(Group::Detail, (a.detail, a.same_type_joins) == (b.detail, b.same_type_joins), "detail level")?;
     follows(Group::Style, a.style == b.style, "visual style")?;
     follows(Group::BackgroundGrid, a.background_grid == b.background_grid, "background grids")?;
     let imports = |g: &Graphics| (g.layers.clone(), g.pdf_layers.clone(), g.imports.clone(), g.pdf_imports.clone());
@@ -1239,6 +1244,8 @@ pub struct Look {
     display: crate::camera::DisplayOptions,
     /// Its detail level, which says which of a family's forms it draws.
     detail: Detail,
+    /// Whether only walls of one type clean up where they join, at coarse detail.
+    same_type_joins: bool,
     /// The way a section or an elevation looks, in plan: which of a family's forms it draws, by their front and side.
     looking: Option<crate::geom::P2>,
 }
@@ -1323,6 +1330,7 @@ impl Look {
         let mut look = Look {
             style: g.style,
             detail: g.detail,
+            same_type_joins: g.same_type_joins,
             layers: g.layers.clone(),
             pdf_layers: g.pdf_layers.clone(),
             imports: g.imports.clone(),
@@ -1434,6 +1442,11 @@ impl Look {
     /// no imports.
     pub fn draws_pdf_lines(&self, image: &str) -> bool {
         !self.imports_hidden && !self.pdf_imports.get(image).is_some_and(|l| l.all.hidden)
+    }
+
+    /// Whether the view cleans only the joins of walls of one type (Revit's Wall Join Display), at coarse detail.
+    pub fn same_type_joins(&self) -> bool {
+        self.same_type_joins
     }
 
     /// Whether the view draws element `id`.

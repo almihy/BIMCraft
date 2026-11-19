@@ -906,7 +906,7 @@ impl<'a> BoxGrid<'a> {
     }
 }
 
-fn cut_edges(outlines: &[(Id, Vec<P2>)], reach: f64) -> Vec<(Id, Vec<Vec<P2>>)> {
+fn cut_edges(outlines: &[(Id, Vec<P2>)], reach: f64, cleans: &dyn Fn(Id, Id) -> bool) -> Vec<(Id, Vec<Vec<P2>>)> {
     // How far past an edge, outward, a point is looked for in another outline: mm.
     const PAST: f64 = 1.0;
     let boxes: Vec<(P2, P2)> = outlines
@@ -929,7 +929,10 @@ fn cut_edges(outlines: &[(Id, Vec<P2>)], reach: f64) -> Vec<(Id, Vec<Vec<P2>>)> 
         if crate::selfcheck::on(crate::selfcheck::Check::NearOutlines) {
             assert_eq!(found, (0..outlines.len()).filter(|&j| near(i, j)).collect::<Vec<_>>(), "the outlines near outline {i}");
         }
-        let others: Vec<&[P2]> = found.into_iter().filter(|&j| near(i, j)).map(|j| outlines[j].1.as_slice()).collect();
+        let found: Vec<usize> = found.into_iter().filter(|&j| near(i, j)).collect();
+        let others: Vec<&[P2]> = found.iter().map(|&j| outlines[j].1.as_slice()).collect();
+        // Those it cleans up with: no line shows where it meets one of them.
+        let merged: Vec<&[P2]> = found.iter().filter(|&&j| cleans(*id, outlines[j].0)).map(|&j| outlines[j].1.as_slice()).collect();
         if others.is_empty() {
             let mut ring = o.clone();
             ring.extend(o.first().copied());
@@ -960,7 +963,7 @@ fn cut_edges(outlines: &[(Id, Vec<P2>)], reach: f64) -> Vec<(Id, Vec<Vec<P2>>)> 
             for w in ts.windows(2) {
                 let (p, q) = (a + (b - a) * w[0], a + (b - a) * w[1]);
                 let probe = (p + q) * 0.5 + out_of;
-                if others.iter().any(|r| geom::contains(r, probe)) {
+                if merged.iter().any(|r| geom::contains(r, probe)) {
                     continue;
                 }
                 match runs.last_mut() {
@@ -2255,7 +2258,7 @@ fn section_base_cancellable(
         }
     }
     let pieces: Vec<(Id, Vec<P2>)> = cuts.iter().flat_map(|(owner, rings)| rings.iter().map(|r| (*owner, r.clone()))).collect();
-    for (owner, runs) in cut_edges(&pieces, 1.0 / d.view.scale) {
+    for (owner, runs) in cut_edges(&pieces, 1.0 / d.view.scale, &|_, _| true) {
         if cancelled() {
             return None;
         }
@@ -3761,7 +3764,21 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
     // A wall's lines stop where an opening the plan cuts leaves it: Revit's wall is cut by its openings, its face lines ending at
     // the jambs (the opening draws them, in the wall's cut pen).
     let gaps = opening_gaps(m, all().map(|(id, e)| (*id, e)), range.cut, &shown);
-    for (id, runs) in cut_edges(&outlines, 1.0 / d.view.scale) {
+    // Revit's Wall Join Display, at coarse detail: with "Clean same type wall joins", two walls of two types show the line
+    // where they meet, unless their join is set to Clean Join.
+    let apart = d.detail == Detail::Coarse && look.same_type_joins();
+    let cleans = |a: Id, b: Id| {
+        let (Some(x), Some(y)) = (m.wall(a), m.wall(b)) else { return true };
+        let (ga, gb) = (m.guid(a), m.guid(b));
+        !apart
+            || x.type_name == y.type_name
+            || m.wall_joins.iter().any(|j| {
+                j.display == crate::model::JoinDisplay::Clean
+                    && j.ends.iter().all(|(g, _)| *g == ga || *g == gb)
+                    && j.ends[0].0 != j.ends[1].0
+            })
+    };
+    for (id, runs) in cut_edges(&outlines, 1.0 / d.view.scale, &cleans) {
         d.owner = Some(id);
         let own = gaps.get(&id).map_or(&[][..], Vec::as_slice);
         for run in runs {

@@ -1411,11 +1411,13 @@ other_files(
         "detail",
         "Detail Level",
         &[],
-        "{view, detail?: coarse | medium | fine} how much a plan, a section, an elevation or a 3D view (`{3D}` or by name) \
+        "{view, detail?: coarse | medium | fine, wall_joins?: all | same-type} how much a plan, a section, an elevation or a 3D view (`{3D}` or by name) \
          draws: coarse, one poché and openings as their gaps (a door of the project's own type still its leaf and swing, as \
          Revit's); medium, compound layers with the lines between them and an opening's leaf, swing and glass; fine (the \
          default), the layers' patterns and a floor's surface pattern too. A family's forms and symbols that say which detail \
-         levels draw them (`show`) are drawn at those, in every kind of view. Without `detail` it only says what the view has",
+         levels draw them (`show`) are drawn at those, in every kind of view. `wall_joins` is Revit's Wall Join Display, for \
+         coarse detail: `all` (the default) shows no line where walls join, `same-type` shows one between walls of two types. \
+         Without `detail` it only says what the view has",
         view_detail,
     ),
     edit(
@@ -4797,6 +4799,7 @@ fn view_template(s: &mut Session, p: &Value) -> R {
             options: resolved.options.clone(),
             scale: resolved.scale,
             detail: resolved.detail,
+            same_type_joins: resolved.same_type_joins,
             style: resolved.style,
             background_grid: resolved.background_grid,
             layers: resolved.layers.clone(),
@@ -10908,6 +10911,12 @@ fn view_detail(s: &mut Session, p: &Value) -> R {
     // is first changed, as `graphics` makes it.
     let is_3d = matches!(p.get("view"), Some(Value::String(n)) if n.eq_ignore_ascii_case("{3D}") || n.eq_ignore_ascii_case("3D"));
     let level = detail_param(c, p)?;
+    let joins = match string(c, p, "wall_joins")?.as_deref() {
+        None => None,
+        Some("all") => Some(false),
+        Some("same-type") => Some(true),
+        Some(other) => return Err(bad(c, format!("`wall_joins` is all or same-type, not `{other}`"))),
+    };
     let view = match (is_3d, s.model.default_3d(), level) {
         (true, Some(v), _) => v,
         (true, None, Some(_)) => s.model_mut().insert(Element::View3D(View3D::default_view())),
@@ -10921,9 +10930,15 @@ fn view_detail(s: &mut Session, p: &Value) -> R {
         own_to_set(c, &s.model, view, Group::Detail, "detail level")?;
         change_graphics(s, view, |g| g.detail = level);
     }
+    if let Some(same) = joins {
+        own_to_set(c, &s.model, view, Group::Detail, "wall join display")?;
+        change_graphics(s, view, |g| g.same_type_joins = same);
+    }
     let m = &s.model;
-    let now = graphics::graphics_of(m, view).map(|g| g.resolved(m).detail).unwrap_or_default();
-    Ok(json!({"view": view, "name": m.view_name(view), "detail": now}))
+    let now = graphics::graphics_of(m, view).map(|g| g.resolved(m)).unwrap_or_default();
+    Ok(
+        json!({"view": view, "name": m.view_name(view), "detail": now.detail, "wall_joins": if now.same_type_joins { "same-type" } else { "all" }}),
+    )
 }
 
 /// What to call element `id` in a message: a view's or a sheet's name, else its category and id.

@@ -419,6 +419,15 @@ impl BimApp {
                     self.run("detail", json!({"view": view, "detail": d.name()}));
                 }
             }
+            // Revit's Wall Join Display, which a view has at coarse detail only.
+            ui.separator();
+            ui.add_enabled_ui(now.detail == Detail::Coarse, |ui| {
+                for (same, name) in [(false, msg!("Clean all wall joins")), (true, msg!("Clean same type wall joins"))] {
+                    if ui.selectable_label(now.same_type_joins == same, t(name)).clicked() {
+                        self.run("detail", json!({"view": view, "wall_joins": if same { "same-type" } else { "all" }}));
+                    }
+                }
+            });
         });
     }
 

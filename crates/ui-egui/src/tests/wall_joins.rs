@@ -125,3 +125,21 @@ wall {{\"points\": [[4000, 0], [4000, 3000]]}}"
     assert!(m.wall(south).unwrap().join_start && m.wall(south).unwrap().join_end);
     assert!(matches!(h.state().tool, Tool::WallJoins(None)));
 }
+
+#[test]
+fn the_view_bars_detail_menu_has_wall_join_display_for_a_coarse_view() {
+    let mut h = app(BOX);
+    let level = h.state().plan_key().unwrap();
+    let same =
+        |h: &Harness<BimApp>| bimcraft_core::graphics::graphics_of(&h.state().session.model, level).is_some_and(|g| g.same_type_joins);
+    // At fine detail the two choices are there and off, as Revit greys the property.
+    pick(&mut h, Role::Button, "Detail Level");
+    assert!(h.get_by_label("Clean same type wall joins").accesskit_node().is_disabled());
+    press(&mut h, "Coarse");
+    pick(&mut h, Role::Button, "Detail Level");
+    press(&mut h, "Clean same type wall joins");
+    assert!(same(&h));
+    pick(&mut h, Role::Button, "Detail Level");
+    press(&mut h, "Clean all wall joins");
+    assert!(!same(&h));
+}

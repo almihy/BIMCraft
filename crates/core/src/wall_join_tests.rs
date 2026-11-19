@@ -628,6 +628,41 @@ fn a_wall_ending_on_a_curved_walls_side_joins_it_by_its_layers() {
     assert_eq!(held(&s, &[curved, stem], P2(1000.0 + 3070.0 * 0.6, 3070.0 * 0.8)), (1, Some(2)));
 }
 
+/// How many stretches of line a plan of `s` draws along the line from `a` to `b`, within 3 mm of it.
+fn inked(s: &Session, a: P2, b: P2) -> usize {
+    let d = crate::render::plan(&s.model, 100_000, 1200, 900);
+    let on = |q: P2| crate::geom::dist_to_segment(q, a, b) < 3.0;
+    d.prims
+        .iter()
+        .filter_map(|p| match p {
+            crate::render::Prim::Line { pts, .. } => Some(pts.iter().map(|q| d.view.mm(*q)).collect::<Vec<P2>>()),
+            _ => None,
+        })
+        .map(|pts| pts.windows(2).filter(|w| w[0].dist(w[1]) > 1.0 && on(w[0]) && on(w[1])).count())
+        .sum()
+}
+
+#[test]
+fn a_coarse_view_set_to_clean_same_type_joins_shows_the_line_between_walls_of_two_types() {
+    let (mut s, south, part) = room("Block");
+    run(&mut s, "detail", json!({"view": 100000, "detail": "coarse"}));
+    // The partition meets the south wall's inside face from x = 1435 to 1565 at y = 157.5: no line there while every join
+    // is cleaned, Revit's default.
+    let (a, b) = (P2(1440.0, 157.5), P2(1560.0, 157.5));
+    assert_eq!(run(&mut s, "detail", json!({"view": 100000}))["wall_joins"], json!("all"));
+    assert_eq!(inked(&s, a, b), 0);
+    // Clean same type wall joins: the two are of two types, and the line shows.
+    let set = run(&mut s, "detail", json!({"view": 100000, "wall_joins": "same-type"}));
+    assert_eq!((set["detail"].clone(), set["wall_joins"].clone()), (json!("coarse"), json!("same-type")));
+    assert!(inked(&s, a, b) > 0, "the line between the wall and the partition");
+    // The join set to Clean Join cleans up whatever the view says.
+    run(&mut s, "wall_join", json!({"walls": [south, part], "display": "clean"}));
+    assert_eq!(inked(&s, a, b), 0);
+    // A file that holds the setting is written in the format that knows it, and it is refused by name when wrong.
+    assert_eq!(s.model.written_format(), crate::model::WALL_FORMAT);
+    assert!(s.execute("detail", &json!({"view": 100000, "wall_joins": "some"})).is_err());
+}
+
 /// A curved wall at a corner with a straight one, and one ending on its side: a picture to look at.
 #[test]
 #[ignore]
