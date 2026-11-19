@@ -527,7 +527,9 @@ dependencies = [
  "cadcraft-dwg",
  "cadcraft-index",
  "cadcraft-io",
+ "cadcraft-render",
  "getrandom 0.3.4",
+ "image",
  "serde_json",
  "wasm-bindgen",
 ]
