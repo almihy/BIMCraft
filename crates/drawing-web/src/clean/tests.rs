@@ -175,10 +175,15 @@ fn counts_total_by_kind_by_layer_and_by_block() {
     assert_eq!(c["kinds"], json!({"block": 4, "circle": 1, "line": 3, "text": 1}));
     // The layers with the most items first, then by name.
     // Each layer's own colour, and the colours its items are drawn in when they are not all the layer's.
-    assert_eq!(c["layers"][0], json!({"name": "DOORS", "items": 3, "kinds": {"block": 3}, "color": "#0000ff"}));
+    // And the linetypes they are drawn in, when any is not solid: DOORS is dashed, and so is the table on FURN.
+    assert_eq!(
+        c["layers"][0],
+        json!({"name": "DOORS", "items": 3, "kinds": {"block": 3}, "color": "#0000ff", "linetypes": {"dashed": 3}})
+    );
     assert_eq!(
         c["layers"][1],
-        json!({"name": "FURN", "items": 2, "kinds": {"block": 1, "circle": 1}, "color": "#00ff00", "colors": {"#00ff00": 1, "#00ffff": 1}})
+        json!({"name": "FURN", "items": 2, "kinds": {"block": 1, "circle": 1}, "color": "#00ff00", "colors": {"#00ff00": 1, "#00ffff": 1},
+               "linetypes": {"continuous": 1, "dashed": 1}})
     );
     assert_eq!(c["layers"][3], json!({"name": "0", "items": 1, "kinds": {"line": 1}, "color": "#ffffff", "colors": {"#ff0000": 1}}));
     // The colours the items are drawn in, the most used first: red is two walls on WALL and the one on layer 0.
@@ -448,19 +453,20 @@ fn a_picture_shows_only_what_is_selected_in_the_drawing_s_own_colours() {
     let p = look(&o, &m, &json!({"box": ROOM, "drop": [{"layers": ["TEXT"]}]}).to_string(), 600).expect("drawn");
     assert_eq!(&p.png[..8], b"\x89PNG\r\n\x1a\n");
     let a = &p.about;
-    assert_eq!((a["width"].as_u64(), a["height"].as_u64()), (Some(600), Some(411)));
-    assert_eq!((a["items"].as_u64(), a["color_by"].as_str()), (Some(8), Some("own")));
-    assert_eq!(a["selected"], json!([[-100.0, -100.0], [6000.0, 4000.0]]));
-    // The picture's edges: what was selected and a margin round it.
-    assert_eq!(a["extents"], json!([[-222.0, -222.82], [6122.0, 4122.82]]));
+    assert_eq!((a["width"].as_u64(), a["height"].as_u64()), (Some(600), Some(429)));
+    // A box is a view: the wall that runs out of the room into the second drawing is in it too, cut at its edge.
+    assert_eq!((a["items"].as_u64(), a["color_by"].as_str()), (Some(9), Some("own")));
+    assert_eq!(a["selected"], json!([[-100.0, -100.0], [51_000.0, 4000.0]]));
+    // The picture's edges are the box's (to the pixel: 5000 mm high at 600 px for 7000 mm is 428.6 px, drawn as 429).
+    assert_eq!(a["extents"], json!([[-500.0, -502.5], [6500.0, 4502.5]]));
     // The legend: the layers the items are on, the most used first, each with its own colour, and the colours its
     // items are drawn in when they are not all the layer's.
     assert_eq!(
         a["legend"],
         json!([
             {"layer": "DOORS", "color": "#0000ff", "items": 3},
+            {"layer": "WALL", "color": "#ff0000", "items": 3},
             {"layer": "FURN", "color": "#00ff00", "items": 2, "colors": {"#00ff00": 1, "#00ffff": 1}},
-            {"layer": "WALL", "color": "#ff0000", "items": 2},
             {"layer": "0", "color": "#ffffff", "items": 1, "colors": {"#ff0000": 1}},
         ])
     );
@@ -479,7 +485,7 @@ fn a_picture_shows_only_what_is_selected_in_the_drawing_s_own_colours() {
     dark.layer_mut("WALL").expect("the layer").on = false;
     let (o, m) = open(&dark);
     let p = look(&o, &m, &json!({"box": ROOM, "keep": [{"layers": ["WALL", "DOORS"]}]}).to_string(), 600).expect("drawn");
-    assert_eq!(p.about["legend"][1], json!({"layer": "WALL", "color": "#ff0000", "items": 2, "off": true}));
+    assert_eq!(p.about["legend"][1], json!({"layer": "WALL", "color": "#ff0000", "items": 3, "off": true}));
     assert!(!holds_color(&p.png, Rgb(255, 0, 0)));
     // By layer, it is drawn all the same.
     let p =
@@ -494,11 +500,11 @@ fn a_picture_by_layer_gives_each_layer_a_colour_of_its_own() {
     let (o, m) = open(&d);
     let p = look(&o, &m, &json!({"box": ROOM, "drop": [{"layers": ["TEXT"]}], "color_by": "layer"}).to_string(), 600).expect("drawn");
     let a = &p.about;
-    assert_eq!((a["items"].as_u64(), a["color_by"].as_str()), (Some(8), Some("layer")));
+    assert_eq!((a["items"].as_u64(), a["color_by"].as_str()), (Some(9), Some("layer")));
     // The legend: the layers the items are on, the most used first, then those only a block draws on.
     let legend = a["legend"].as_array().expect("a legend");
     let named: Vec<(&str, u64)> = legend.iter().map(|l| (l["layer"].as_str().unwrap_or(""), l["items"].as_u64().unwrap_or(9))).collect();
-    assert_eq!(named, [("DOORS", 3), ("FURN", 2), ("WALL", 2), ("0", 1), ("SWING", 0)]);
+    assert_eq!(named, [("DOORS", 3), ("WALL", 3), ("FURN", 2), ("0", 1), ("SWING", 0)]);
     assert_eq!(legend[4]["in_blocks"], true);
     let colors: BTreeSet<&str> = legend.iter().filter_map(|l| l["color"].as_str()).collect();
     assert_eq!(colors.len(), 5);

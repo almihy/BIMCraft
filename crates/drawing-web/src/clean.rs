@@ -418,6 +418,12 @@ fn rules(s: &Seen, p: &Value, key: &str) -> Result<Option<Vec<Rule>>, String> {
 /// The model space items `{box?, keep?, drop?}` selects, by their place in the store: those whose centre is in `box`,
 /// that one of `keep`'s rules selects (when it is given), and none of `drop`'s does.
 fn selected(s: &Seen, p: &Value) -> Result<Vec<usize>, String> {
+    selected_by(s, p, false)
+}
+
+/// [`selected`], with `meet`: an item is in `box` when its box meets it at all (a picture of the box shows every wall
+/// that runs into it), not only when its centre is in it (what a cut takes).
+fn selected_by(s: &Seen, p: &Value, meet: bool) -> Result<Vec<usize>, String> {
     let area = given(p, "box").map(|v| area_of(s, v)).transpose()?;
     let keep = rules(s, p, "keep")?;
     let drop = rules(s, p, "drop")?;
@@ -429,7 +435,7 @@ fn selected(s: &Seen, p: &Value) -> Result<Vec<usize>, String> {
         .enumerate()
         .filter(|(_, (e, b))| {
             (marks || !e.common.layer.to_uppercase().starts_with("X-BUILD"))
-                && area.as_ref().is_none_or(|a| real(b) && a.contains(b.center()))
+                && area.as_ref().is_none_or(|a| real(b) && if meet { a.intersects(b) } else { a.contains(b.center()) })
                 && keep.as_ref().is_none_or(|k| any(k, e, b))
                 && !drop.as_ref().is_some_and(|d| any(d, e, b))
         })
@@ -732,11 +738,12 @@ fn parsed(params: &str) -> Result<Value, String> {
 }
 
 /// `counts`: what a rule (`params`, JSON; empty: everything) selects of model space, counted:
-/// `{total, kinds: {kind: n}, layers: [{name, items, kinds, color, colors?}], colors: [{color, aci, items, layers}],
+/// `{total, kinds: {kind: n}, layers: [{name, items, kinds, color, colors?, linetypes?}], colors: [{color, aci, items, layers}],
 /// blocks: [{name, placed, size: [w, h], layers}], extents}`.
 /// The layers with the most items first: `color` is the layer's own, and `colors` (`{"#rrggbb": n}`) the colours its
 /// items are drawn in, when they are not all the layer's. `colors`: the colours the items are drawn in (their own, or
-/// their layer's), the most used first, [`COLORS_LISTED`] at most (`colors_more`), each with its index when it is one
+/// their layer's), the most used first (a layer's `linetypes`, `{name: n}` in lower case, the same of the linetypes
+/// they are drawn in, when any is not continuous), [`COLORS_LISTED`] at most (`colors_more`), each with its index when it is one
 /// of AutoCAD's 255 (`aci`, else null) and the layers of its items. The blocks most placed first, [`BLOCKS_LISTED`] at
 /// most (`blocks_more`: how many more there are); `size` is the box of what the definition draws at scale 1, mm,
 /// `holds` how many items the definition holds (a block placed in it is one), and
@@ -750,6 +757,7 @@ pub(crate) fn counts(o: &Opened, m: &Measured, params: &str) -> Result<Value, St
     let mut total = 0_usize;
     let mut kinds: BTreeMap<&str, usize> = BTreeMap::new();
     let mut per_layer: HashMap<&str, (usize, BTreeMap<&str, usize>, BTreeMap<String, usize>)> = HashMap::new();
+    let mut per_linetype: HashMap<&str, BTreeMap<String, usize>> = HashMap::new();
     let mut placed: HashMap<&str, (usize, BTreeSet<&str>)> = HashMap::new();
     let mut per_color: HashMap<u32, (usize, Option<u8>, BTreeSet<&str>)> = HashMap::new();
     let mut round = Bounds2::EMPTY;
@@ -764,6 +772,7 @@ pub(crate) fn counts(o: &Opened, m: &Measured, params: &str) -> Result<Value, St
         *n += 1;
         *ks.entry(k).or_default() += 1;
         *cs.entry(rgb(color).hex()).or_default() += 1;
+        *per_linetype.entry(e.common.layer.as_str()).or_default().entry(s.linetype(e)).or_default() += 1;
         let (n, aci, on) = per_color.entry(rgb(color).to_u32()).or_default();
         *n += 1;
         if let Color::Index(i) = color {
@@ -788,6 +797,12 @@ pub(crate) fn counts(o: &Opened, m: &Measured, params: &str) -> Result<Value, St
             let mut row = json!({"name": name, "items": n, "kinds": ks, "color": own});
             if cs.keys().any(|c| *c != own) {
                 row["colors"] = json!(cs);
+            }
+            // The linetypes its items are drawn in, when any is not solid: a dashed line is what is above or below the cut.
+            if let Some(lt) = per_linetype.get(name)
+                && lt.keys().any(|l| l != "continuous")
+            {
+                row["linetypes"] = json!(lt);
             }
             row
         })
@@ -1185,8 +1200,9 @@ pub(crate) struct Looked {
     pub about: Value,
 }
 
-/// `look`: a picture of only what `params` (JSON `{box?, keep?, drop?, color_by?}`; the first three as [`extract`]
-/// takes them) selects, fitted to it, `long` pixels on its longer side, on white.
+/// `look`: a picture of only what `params` (JSON `{box?, keep?, drop?, color_by?}`; `keep` and `drop` as [`extract`]
+/// takes them) selects, fitted to it, `long` pixels on its longer side, on white. A `box` is a view: every item that
+/// runs into it is drawn, cut at its edges, and the picture is the box (a cut takes only what is centred in it).
 ///
 /// `color_by` "own" (when not given): the drawing's own colours, layers that are off or frozen not drawn, as the
 /// index's own pictures and the viewer show it: what a person sees. "layer": each layer in a colour of its own, every
@@ -1217,7 +1233,9 @@ pub(crate) fn look(o: &Opened, m: &Measured, params: &str, long: u32) -> Result<
             ));
         }
     };
-    let chosen = selected(&s, &p)?;
+    // A `box` is a view: what runs into it is drawn, cut at its edges, and the picture is the box.
+    let area = given(&p, "box").map(|v| area_of(&s, v)).transpose()?;
+    let chosen = selected_by(&s, &p, true)?;
     let mut model = EntityStore::new();
     // By layer (lower case): how many items, and how many in each colour drawn.
     let mut per_layer: HashMap<String, (usize, BTreeMap<String, usize>)> = HashMap::new();
@@ -1293,11 +1311,18 @@ pub(crate) fn look(o: &Opened, m: &Measured, params: &str, long: u32) -> Result<
         }
     }
 
+    let selected_box = round;
+    let margin = if let Some(a) = area {
+        round = a;
+        0.0
+    } else {
+        MARGIN
+    };
     let long = long.clamp(LEAST_LONG, MOST_LONG);
     let (w, h) = (round.width().max(1e-9), round.height().max(1e-9));
-    let k = f64::from(long) / (w.max(h) * (1.0 + 2.0 * MARGIN));
+    let k = f64::from(long) / (w.max(h) * (1.0 + 2.0 * margin));
     // The margin is a share of the larger side on both, so a thin selection (one wall) still has a picture to be in.
-    let pad = w.max(h) * MARGIN;
+    let pad = w.max(h) * margin;
     let width = (((w + 2.0 * pad) * k).round() as u32).max(1);
     let height = (((h + 2.0 * pad) * k).round() as u32).max(1);
     let view = View { center: round.center(), scale: k, width, height };
@@ -1314,7 +1339,7 @@ pub(crate) fn look(o: &Opened, m: &Measured, params: &str, long: u32) -> Result<
     let raster = RasterOptions { background: Rgb(255, 255, 255), hairline: 1.0, px_per_mm: 0.0, antialias: true };
     let png = render_png(&list, &view, &raster).ok_or("the picture could not be drawn")?;
     let mut about = json!({
-        "width": width, "height": height, "extents": s.box_out(&view.world_bounds()), "selected": s.box_out(&round),
+        "width": width, "height": height, "extents": s.box_out(&view.world_bounds()), "selected": s.box_out(&selected_box),
         "items": chosen.len(), "color_by": if by_layer { "layer" } else { "own" }, "legend": legend,
     });
     if let Some(a) = &apart {
