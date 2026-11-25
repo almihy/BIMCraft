@@ -150,10 +150,16 @@ fn a_curtain_wall_warns_about_a_wall_it_overlaps_and_never_about_its_own() {
     let rules: Vec<&str> = all["warnings"].as_array().unwrap().iter().filter_map(|w| w["rule"].as_str()).collect();
     assert!(!rules.is_empty() && rules.iter().all(|r| *r == "identical_instances" || *r == "walls_overlap"), "{all}");
     assert!(all["warnings"].as_array().unwrap().iter().all(|w| w["elements"].as_array().is_some_and(|e| e.len() == 2)), "{all}");
-    // A basic wall along a curtain wall still overlaps it (embedding one in the other comes later).
+    // A basic wall along a curtain wall of a type that does not embed overlaps it; along a Storefront, which embeds itself
+    // as Revit's does, it holds the storefront in the opening it cuts, and nothing is amiss.
     let mut s = Session::new();
-    storefront(&mut s);
+    run(&mut s, "wall", json!({"points": [[0, 0], [6000, 0]], "type": "Exterior Glazing", "height": 3000}));
     run(&mut s, "wall", json!({"points": [[1000, 0], [5000, 0]], "height": 3000}));
     let found = run(&mut s, "warnings", json!({"rule": "walls_overlap"}));
     assert_eq!(found["count"], 1, "{found}");
+    let mut s = Session::new();
+    storefront(&mut s);
+    run(&mut s, "wall", json!({"points": [[0, 0], [6000, 0]], "height": 3000}));
+    let found = run(&mut s, "warnings", json!({"rule": "walls_overlap"}));
+    assert_eq!(found["count"], 0, "{found}");
 }
