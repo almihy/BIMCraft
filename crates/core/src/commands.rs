@@ -14202,7 +14202,8 @@ fn relocate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion, end: Option<bool>
     // The walls whose ends may lie on a taken wall's line as it was, and those near a taken footing: its end
     // or span may meet a wall's end there, as the footing's own outline meets it.
     let boxes: Vec<_> = moved.iter().map(|(before, _)| (crate::derived::axis_box(before), m.base_z(before), m.top_z(before))).collect();
-    let mut near = if boxes.is_empty() { BTreeSet::new() } else { lookup.walls_near_at(&boxes, 2.0 * TOL) };
+    // (as far as the thickest wall: one joined where the centre lines end has its line off the taken wall's)
+    let mut near = if boxes.is_empty() { BTreeSet::new() } else { lookup.walls_near_at(&boxes, 2.0 * TOL + thickest) };
     for (rid, (before, _)) in &taken {
         let Some(e) = m.elements.get(*rid) else { continue };
         let Some(g) = m.run_geom(e) else { continue };
@@ -14229,6 +14230,18 @@ fn relocate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion, end: Option<bool>
             for (before, after) in moved.iter().filter(|(before, _)| before.join && stacked(m, w, before)) {
                 if at.dist(before.start) <= TOL || at.dist(before.end) <= TOL {
                     *end = if at.dist(before.start) <= TOL { after.start } else { after.end };
+                    break;
+                }
+                // Joined where their centre lines end (a wall put on another of its lines keeps its joins, as walls'
+                // ends do in `walls::arms`): the end goes as far as the taken wall's end there went.
+                let centre_end = |x: &Wall, e: bool| {
+                    let ax = Axis::of(x);
+                    ax.at(if e { ax.length() } else { 0.0 }, walls::centre(m, x))
+                };
+                let mine = centre_end(w, at.dist(w.end) <= TOL && at.dist(w.start) > TOL);
+                if let Some(e) = [false, true].into_iter().find(|e| centre_end(before, *e).dist(mine) <= TOL) {
+                    let (was, now) = if e { (before.end, after.end) } else { (before.start, after.start) };
+                    *end = micron(at + (now - was));
                     break;
                 }
                 if Axis::of(before).distance(at, 0.0) <= TOL {

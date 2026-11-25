@@ -272,15 +272,26 @@ fn arms(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> (Vec<Arm>, bo
     };
     // Where they meet is asked first: whether they overlap in height takes both walls' heights, under any roof or floor
     // they're attached to.
+    // A wall's end is where its location line ends, or where its centre line does: a wall put on another of its lines
+    // stays where it is (`modify` of its `location`), and keeps the joins it had there, as Revit's does.
+    let centre_end = |o: &Wall, end: bool| {
+        let ax = Axis::of(o);
+        ax.at(if end { ax.length() } else { 0.0 }, centre(m, o))
+    };
+    let here = centre_end(w, at_end);
+    let meets = |o: &Wall, end: bool| {
+        let at = if end { o.end } else { o.start };
+        at.dist(node) <= TOL || (at.dist(node) <= m.thickness(w).max(m.thickness(o)) && centre_end(o, end).dist(here) <= TOL)
+    };
     for (other, o) in candidates {
         if other == id {
             continue;
         }
-        if o.start.dist(node) <= TOL {
+        if meets(o, false) {
             if joins(o, Some(false)) {
                 arms.push(arm(m, other, o, false, false));
             }
-        } else if o.end.dist(node) <= TOL {
+        } else if meets(o, true) {
             if joins(o, Some(true)) {
                 arms.push(arm(m, other, o, true, false));
             }

@@ -134,3 +134,42 @@ fn curved_glazing_embeds_in_a_curved_wall_round_the_same_centre() {
     let expected = r * std::f64::consts::PI / 3.0 * 3000.0 * 200.0 / 1e9;
     assert!((cut - expected).abs() < 0.01, "{cut} {expected}");
 }
+
+/// The volume of every wall of the model, m3.
+fn all_walls(s: &mut Session) -> f64 {
+    let all = run(s, "elements", json!({"category": "wall"}));
+    all["elements"].as_array().unwrap().iter().map(|e| e["volume_m3"].as_f64().unwrap()).sum()
+}
+
+#[test]
+fn a_wall_put_on_its_face_keeps_its_joins_as_revits_does() {
+    let mut s = Session::new();
+    run(&mut s, "type", json!({"category": "wall", "name": "Generic - 200mm", "thickness": 200}));
+    run(&mut s, "type", json!({"category": "wall", "name": "Generic - 300mm", "thickness": 300}));
+    // a room's corner and a tee, on their centre lines
+    let a = wall(&mut s, json!({"points": [[0, 0], [5000, 0]], "type": "Generic - 200mm", "height": 3000}));
+    let b = wall(&mut s, json!({"points": [[0, 5000], [0, 0]], "type": "Generic - 300mm", "height": 3000}));
+    let c = wall(&mut s, json!({"points": [[2500, 3000], [2500, 0]], "type": "Generic - 200mm", "height": 3000}));
+    let before = all_walls(&mut s);
+    let solid = |s: &Session, id: Id| crate::walls::outline(&s.model, id);
+    let outlines: Vec<_> = [a, b, c].iter().map(|id| solid(&s, *id)).collect();
+    // each put on a face: the walls stay where they are, their lines move, and every join stays
+    run(&mut s, "modify", json!({"id": a, "location": "exterior-finish"}));
+    run(&mut s, "modify", json!({"id": b, "location": "interior-finish"}));
+    run(&mut s, "modify", json!({"id": c, "location": "exterior-finish"}));
+    assert!((all_walls(&mut s) - before).abs() < 1e-6, "{} {before}", all_walls(&mut s));
+    let ring = |r: &Vec<crate::geom::P2>| {
+        let mut v: Vec<(i64, i64)> = r.iter().map(|p| ((p.0 * 10.0).round() as i64, (p.1 * 10.0).round() as i64)).collect();
+        v.sort_unstable();
+        v.dedup();
+        v
+    };
+    for (id, was) in [a, b, c].iter().zip(&outlines) {
+        assert_eq!(ring(&solid(&s, *id)), ring(was), "wall {id}");
+    }
+    assert_eq!(crate::walls::joined_at(&s.model, a, false), vec![b]);
+    // and moved, the wall joined at its centre line stretches with it
+    run(&mut s, "move", json!({"ids": [b], "by": [-1000, 0]}));
+    let wa = s.model.wall(a).unwrap().clone();
+    assert!((crate::walls::Axis::of(&wa).length() - 6000.0).abs() < 1e-6, "{wa:?}");
+}
