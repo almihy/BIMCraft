@@ -495,6 +495,39 @@ fn a_picture_shows_only_what_is_selected_in_the_drawing_s_own_colours() {
 }
 
 #[test]
+fn shapes_given_over_a_picture_are_drawn_over_the_drawing_in_their_frame() {
+    let (d, ..) = room();
+    let (o, m) = open(&d);
+    // shapes in metres, the drawing in millimetres moved by 100 mm: a wall's strip, a mark round a place, a word
+    let over = json!({"scale": 1000.0, "shift": [100.0, 0.0], "shapes": [
+        {"polyline": [[0.0, 0.0], [3.0, 0.0], [3.0, 0.2], [0.0, 0.2]], "closed": true, "color": "#ff00ff", "width": 0.05},
+        {"circle": [2.0, 2.0, 0.4], "color": "#ff8000"},
+        {"arc": [2.0, 2.0, 0.6, 0.0, 1.5], "color": "#ff8000"},
+        {"line": [[0.0, 3.0], [1.0, 3.0]], "color": "#ff8000"},
+        {"text": [0.5, 1.0, 0.3, "1"], "color": "#ff8000"}
+    ]});
+    let p = look(&o, &m, &json!({"box": ROOM, "keep": [{"layers": ["WALL"]}], "over": over}).to_string(), 600).expect("drawn");
+    assert_eq!(p.about["over"], 5);
+    // the legend is the drawing's alone
+    assert!(p.about["legend"].as_array().expect("a legend").iter().all(|l| l["layer"] != OVER_LAYER));
+    assert!(holds_color(&p.png, Rgb(255, 0, 255)) && holds_color(&p.png, Rgb(255, 128, 0)) && holds_color(&p.png, Rgb(255, 0, 0)));
+    // with no box, the picture is fitted to the drawing's items and the shapes both
+    let far = json!({"shapes": [{"circle": [20000.0, 20000.0, 500.0], "color": "#ff00ff"}]});
+    let p = look(&o, &m, &json!({"keep": [{"layers": ["WALL"], "max_size": 6000}], "over": far}).to_string(), 400).expect("drawn");
+    assert!(p.about["extents"][1][1].as_f64().expect("a number") >= 20_500.0);
+    // what is not a shape is refused by name
+    for (bad, says) in [
+        (json!({"shapes": [{"square": [0, 0], "color": "#ff00ff"}]}), "unknown parameter `square`"),
+        (json!({"shapes": [{"line": [[0, 0], [1, 1]]}]}), "`color`"),
+        (json!({"shapes": [{"circle": [0, 0], "color": "#ff00ff"}]}), "a circle is 3 numbers"),
+        (json!({"scale": 0, "shapes": []}), "scale is a number above 0"),
+    ] {
+        let e = look(&o, &m, &json!({"box": ROOM, "over": bad}).to_string(), 300).map(|p| p.about).expect_err("refused");
+        assert!(e.contains(says), "{e}");
+    }
+}
+
+#[test]
 fn a_picture_by_layer_gives_each_layer_a_colour_of_its_own() {
     let (d, ..) = room();
     let (o, m) = open(&d);

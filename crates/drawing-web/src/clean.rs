@@ -1213,13 +1213,22 @@ pub(crate) struct Looked {
 /// A colour given as `#ffffff` with index 7 (AutoCAD's white, the colour of most layers) is drawn black on the picture's
 /// white, as the viewer and a print draw it; every other colour is drawn as it is given.
 ///
+/// `over` (optional) draws given shapes over the drawing, so one picture shows a drawing with what was made from it
+/// (a model built from a plan, the places a check found): `{scale?, shift?: [dx, dy], shapes: [...]}`, a point (x, y)
+/// of the shapes lying at (x * scale + dx, y * scale + dy) in the drawing (its units; defaults 1 and [0, 0]). Each
+/// shape is one of `{"line": [[x, y], [x, y]]}`, `{"polyline": [[x, y], ...], "closed"?: bool}`, `{"circle": [x, y,
+/// r]}`, `{"arc": [x, y, r, a0, a1]}` (radians, counter-clockwise), `{"text": [x, y, height, "words"]}`, with
+/// `"color": "#rrggbb"` and, for a line or polyline, `"width"?` (in the shapes' units; none: a hairline). They are
+/// drawn after the drawing's items, in their own colours, on no layer of the drawing; without a `box` the picture is
+/// fitted to them too. `about.over` says how many were drawn.
+///
 /// `about`: `{width, height, extents (the box the picture's edges are at, mm), selected (the box round the items),
 /// items, color_by, legend: [{layer, color: "#rrggbb", items}]}`, the layers with the most items first. By "own", a
 /// layer's `color` is its own, with `colors` (`{"#rrggbb": n}`) when its items are drawn in others, and `off` or
 /// `frozen` when it is and so is not in the picture.
 pub(crate) fn look(o: &Opened, m: &Measured, params: &str, long: u32) -> Result<Looked, String> {
     let p = parsed(params)?;
-    checked(&p, &["open", "depth", "box", "keep", "drop", "color_by"], "look")?;
+    checked(&p, &["open", "depth", "box", "keep", "drop", "color_by", "over"], "look")?;
     let whole = Seen::of(o, m);
     let apart = open(&whole, &p)?;
     let s = apart.as_ref().map_or(whole, |a| a.seen(o));
@@ -1254,10 +1263,19 @@ pub(crate) fn look(o: &Opened, m: &Measured, params: &str, long: u32) -> Result<
         }
         model.push(e);
     }
+    let mut d = s.d.clone();
+    let over = match given(&p, "over") {
+        Some(v) => Some(overlay(v, &mut d, &mut model)?),
+        None => None,
+    };
+    if let Some((_, b)) = &over
+        && real(b)
+    {
+        round = round.union(b);
+    }
     if !real(&round) {
         return Err("nothing to draw: no item with a box is in `box`, kept by `keep` and not dropped by `drop`".into());
     }
-    let mut d = s.d.clone();
     d.model = model;
     // The layers drawn: those the items are on, the most used first; by layer, then those only blocks' contents are on.
     let mut order: Vec<(String, usize)> = per_layer.iter().map(|(l, (n, _))| (l.clone(), *n)).collect();
@@ -1345,7 +1363,113 @@ pub(crate) fn look(o: &Opened, m: &Measured, params: &str, long: u32) -> Result<
     if let Some(a) = &apart {
         about["opened"] = a.said();
     }
+    if let Some((n, _)) = over {
+        about["over"] = json!(n);
+    }
     Ok(Looked { png, about })
+}
+
+/// The layer `look`'s `over` shapes are drawn on: none of a drawing's own.
+const OVER_LAYER: &str = "*look over*";
+
+/// `look`'s `over`: its shapes as items of the drawing on a layer of their own, each in its own colour, pushed after
+/// the drawing's so they are drawn over them; how many, and the box round them.
+fn overlay(v: &Value, d: &mut Doc, model: &mut EntityStore) -> Result<(usize, Bounds2), String> {
+    use cadcraft_doc::geom::PolyVertex;
+    use cadcraft_doc::{Arc as CArc, Circle, HAlign, LwPolyline, Text, VAlign};
+    checked(v, &["scale", "shift", "shapes"], "over")?;
+    let num = |x: &Value, what: &str| x.as_f64().ok_or(format!("`over`: {what} is a number, not {x}"));
+    let scale = given(v, "scale").map(|x| num(x, "scale")).transpose()?.unwrap_or(1.0);
+    let shift = match given(v, "shift") {
+        Some(Value::Array(a)) if a.len() == 2 => [num(&a[0], "shift")?, num(&a[1], "shift")?],
+        Some(x) => return Err(format!("`over`: shift is [dx, dy], not {x}")),
+        None => [0.0, 0.0],
+    };
+    if !(scale.is_finite() && scale > 0.0) {
+        return Err(format!("`over`: scale is a number above 0, not {scale}"));
+    }
+    let at = |x: f64, y: f64| Vec3::new(x * scale + shift[0], y * scale + shift[1], 0.0);
+    let point = |x: &Value| -> Result<Vec3, String> {
+        match x.as_array().map(|a| a.as_slice()) {
+            Some([a, b]) => Ok(at(num(a, "a point's x")?, num(b, "a point's y")?)),
+            _ => Err(format!("`over`: a point is [x, y], not {x}")),
+        }
+    };
+    let numbers = |x: &Value, n: usize, what: &str| -> Result<Vec<f64>, String> {
+        let a = x.as_array().filter(|a| a.len() == n).ok_or(format!("`over`: {what} is {n} numbers, not {x}"))?;
+        a.iter().map(|y| num(y, what)).collect()
+    };
+    let shapes = given(v, "shapes").and_then(Value::as_array).ok_or("`over` gives its `shapes`, a list")?;
+    if d.layers.iter().all(|l| l.name != OVER_LAYER) {
+        d.layers.push(Layer::new(OVER_LAYER));
+    }
+    let mut b = Bounds2::EMPTY;
+    let mut grow = |p: &Vec3, r: f64| {
+        b = b.union(&Bounds2 { min: Vec2::new(p.x - r, p.y - r), max: Vec2::new(p.x + r, p.y + r) });
+    };
+    for (n, sh) in shapes.iter().enumerate() {
+        let what = format!("`over` shape {n}");
+        checked(sh, &["line", "polyline", "closed", "circle", "arc", "text", "color", "width"], &what)?;
+        let color = given(sh, "color")
+            .and_then(Value::as_str)
+            .and_then(Rgb::parse_hex)
+            .ok_or(format!("{what} gives its `color` as \"#rrggbb\""))?;
+        let width = given(sh, "width").map(|x| num(x, "width")).transpose()?.unwrap_or(0.0) * scale;
+        let kind = if let Some(x) = given(sh, "line") {
+            let pts = x.as_array().filter(|a| a.len() == 2).ok_or(format!("{what}: a line is two points"))?;
+            let (a, z) = (point(&pts[0])?, point(&pts[1])?);
+            grow(&a, 0.0);
+            grow(&z, 0.0);
+            if width > 0.0 {
+                let vx = |p: Vec3| PolyVertex { p: Vec2::new(p.x, p.y), bulge: 0.0, start_width: width, end_width: width };
+                EntityKind::LwPolyline(LwPolyline { vertices: vec![vx(a), vx(z)], closed: false, const_width: width, elevation: 0.0, plinegen: false })
+            } else {
+                EntityKind::Line(cadcraft_doc::Line { a, b: z })
+            }
+        } else if let Some(x) = given(sh, "polyline") {
+            let pts: Vec<Vec3> = x.as_array().ok_or(format!("{what}: a polyline is a list of points"))?.iter().map(&point).collect::<Result<_, _>>()?;
+            if pts.len() < 2 {
+                return Err(format!("{what}: a polyline has two points or more"));
+            }
+            pts.iter().for_each(|p| grow(p, 0.0));
+            let closed = given(sh, "closed").and_then(Value::as_bool).unwrap_or(false);
+            let vertices = pts.iter().map(|p| PolyVertex { p: Vec2::new(p.x, p.y), bulge: 0.0, start_width: width, end_width: width }).collect();
+            EntityKind::LwPolyline(LwPolyline { vertices, closed, const_width: width, elevation: 0.0, plinegen: false })
+        } else if let Some(x) = given(sh, "circle") {
+            let c = numbers(x, 3, "a circle")?;
+            let center = at(c[0], c[1]);
+            grow(&center, c[2] * scale);
+            EntityKind::Circle(Circle { center, radius: c[2] * scale })
+        } else if let Some(x) = given(sh, "arc") {
+            let c = numbers(x, 5, "an arc")?;
+            let center = at(c[0], c[1]);
+            grow(&center, c[2] * scale);
+            EntityKind::Arc(CArc { center, radius: c[2] * scale, start: c[3], end: c[4] })
+        } else if let Some(x) = given(sh, "text") {
+            let a = x.as_array().filter(|a| a.len() == 4).ok_or(format!("{what}: a text is [x, y, height, \"words\"]"))?;
+            let insert = at(num(&a[0], "a text's x")?, num(&a[1], "a text's y")?);
+            let height = num(&a[2], "a text's height")? * scale;
+            grow(&insert, height);
+            EntityKind::Text(Text {
+                insert,
+                align_pt: None,
+                height,
+                value: a[3].as_str().ok_or(format!("{what}: a text's words are a string"))?.into(),
+                rotation: 0.0,
+                width_factor: 1.0,
+                oblique: 0.0,
+                style: "Standard".into(),
+                halign: HAlign::default(),
+                valign: VAlign::default(),
+            })
+        } else {
+            return Err(format!("{what} is a line, polyline, circle, arc or text"));
+        };
+        let common = cadcraft_doc::Common { layer: OVER_LAYER.into(), color: Color::True(color), ..cadcraft_doc::Common::default() };
+        let handle = d.new_handle();
+        model.push(Entity { handle, common, kind });
+    }
+    Ok((shapes.len(), b))
 }
 
 /// A multi-line text's words without its inline codes, near enough to read a title by: a paragraph break is a space,
