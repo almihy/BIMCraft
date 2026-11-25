@@ -431,6 +431,14 @@ other_files(
     )
     .menu("Architecture > Door"),
     edit(
+        "wall_opening",
+        "Wall Opening",
+        &[],
+        "{wall, offset? | at?: [x, y], width, height, base_offset?} a rectangle cut through a wall from face to face, as Revit's          Wall Opening (Architecture > Opening > Wall; Rectangular Straight Wall Opening): `width` mm wide along the wall, its          middle `offset` mm along the wall's location line from its start (or where `at`, a point in plan, is along it),          standing `base_offset` mm (0) over the wall's base level `height` mm tall (Revit's Base Offset and Unconnected          Height). A curved wall is cut across, square to its line. It is hosted by the wall: deleted with it, sliding along          it with `move`, going with it when it moves, is copied or split, and `modify` changes its `offset`, `width`,          `base_offset` and `height`. A curtain wall has no body to cut and is refused. `elements` (category `wallopening`)          gives its `host`, `at` (its middle in plan), `from` and `to` (mm along the wall), `bottom` and `top` (elevations,          mm). Returns {id, host, offset}",
+        wall_opening,
+    )
+    .menu("Architecture > Opening"),
+    edit(
         "window",
         "Window",
         &["WN"],
@@ -8407,6 +8415,33 @@ fn flip(s: &mut Session, p: &Value) -> R {
     Ok(json!({"flipped": all}))
 }
 
+/// Revit's Wall Opening: a rectangle cut through wall `wall` (`WallOpening`).
+fn wall_opening(s: &mut Session, p: &Value) -> R {
+    let c = "wall_opening";
+    only(c, p, &["wall", "offset", "at", "width", "height", "base_offset"])?;
+    let m = &s.model;
+    let h = id_opt(c, p, "wall")?.ok_or_else(|| bad(c, "`wall` is required: the wall to cut"))?;
+    let w = m.wall(h).ok_or_else(|| bad(c, format!("{h} is not a wall")))?;
+    if crate::curtain::is_curtain(m, w) {
+        return Err(bad(c, format!("wall {h} is a curtain wall, which has no body to cut: remove a panel's glass with an empty panel type instead")));
+    }
+    let offset = match (num(c, p, "offset")?, point_opt(c, p, "at")?) {
+        (Some(o), _) => o,
+        (None, Some(a)) => along(w, a),
+        (None, None) => return Err(bad(c, "give `offset`, mm along the wall from its start, or `at` [x, y] on it")),
+    };
+    let width = num(c, p, "width")?.ok_or_else(|| bad(c, "`width` is required, mm along the wall"))?;
+    let height = num(c, p, "height")?.ok_or_else(|| bad(c, "`height` is required, mm"))?;
+    let base_offset = num(c, p, "base_offset")?.unwrap_or(0.0);
+    let length = Axis::of(w).length();
+    if offset + width / 2.0 <= 0.0 || offset - width / 2.0 >= length {
+        return Err(bad(c, format!("from {} to {} mm along wall {h} is past its ends (it is {} mm long)", offset - width / 2.0, offset + width / 2.0, length.round())));
+    }
+    let host = m.guid(h);
+    let id = s.model_mut().insert(Element::WallOpening(crate::model::WallOpening { host, offset, width, base_offset, height }));
+    Ok(json!({"id": id, "host": h, "offset": offset}))
+}
+
 fn door(s: &mut Session, p: &Value) -> R {
     opening(s, p, true)
 }
@@ -13798,6 +13833,12 @@ fn modify(s: &mut Session, p: &Value) -> R {
                         o.offset *= k;
                         rescaled.push((*oid, if matches!(oe, Element::Door(_)) { Element::Door(o) } else { Element::Window(o) }));
                     }
+                    if let Element::WallOpening(o) = oe
+                        && m.same(o.host, id)
+                    {
+                        let o = crate::model::WallOpening { offset: o.offset * k, width: o.width * k, ..o.clone() };
+                        rescaled.push((*oid, Element::WallOpening(o)));
+                    }
                 }
             }
         }
@@ -13848,7 +13889,7 @@ fn location_fields(e: &Element) -> &'static [&'static str] {
         E::Mullion(_) => &["at", "from", "to", "trim", "vertical", "host", "key", "type"],
         E::CurtainGrid(_) => &["at", "vertical", "host"],
         E::Roof(_) => &["boundary", "sketch", "extrusion", "courtyards"],
-        E::Door(_) | E::Window(_) => &["host", "offset"],
+        E::Door(_) | E::Window(_) | E::WallOpening(_) => &["host", "offset"],
         E::Room(_) => &["point"],
         E::Dimension(_) | E::Dimension3D(_) => &["at", "refs"],
         E::Tag(_) => &["host", "offset"],
@@ -14032,6 +14073,7 @@ fn relocate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion, end: Option<bool>
                 walls.insert(id, w);
             }
             Element::Door(o) | Element::Window(o) if moving_guids.contains(&o.host) => {}
+            Element::WallOpening(o) if moving_guids.contains(&o.host) => {}
             // A curtain wall's own go with it: its grid lines below, its panels and mullions laid out after the command.
             e if crate::curtain::host_of(&e).is_some_and(|h| moving_guids.contains(&h)) => {}
             // Moving one end of a run: the other end stays where it was, as a wall's does.
@@ -14396,6 +14438,18 @@ fn relocate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion, end: Option<bool>
         others.retain(|(other, _)| *other != id);
         others.push((id, if matches!(e, Element::Door(_)) { Element::Door(o) } else { Element::Window(o) }));
     }
+    // And wall openings: each keeps its place, or goes with its wall.
+    for (id, e) in hosted.iter().filter_map(|id| Some((*id, m.elements.get(*id)?))) {
+        let Element::WallOpening(o) = e else { continue };
+        let Some(host) = m.elements.id(o.host) else { continue };
+        let (Some(before), Some(after)) = (old(&host), walls.get(&host)) else { continue };
+        let spot = Axis::of(before).at(o.offset, 0.0);
+        let at = if carried(o.host) || moving.contains(&id) { f(spot) } else { spot };
+        let axis = Axis::of(after);
+        let offset = if after.arc == 0.0 { (at - after.start).dot(axis.tangent(0.0)) } else { axis.project(at).0 };
+        others.retain(|(other, _)| *other != id);
+        others.push((id, Element::WallOpening(crate::model::WallOpening { offset, ..o.clone() })));
+    }
     // A curtain wall's hand-made standing grid lines likewise: each stays where it is in the model, or goes with its wall.
     for (id, e) in hosted.iter().filter_map(|id| Some((*id, m.elements.get(*id)?))) {
         let Element::CurtainGrid(l) = e else { continue };
@@ -14538,6 +14592,7 @@ pub(crate) fn duplicate_exactly(c: &str, s: &mut Session, ids: &[Id], mo: &Motio
         match transformed(c, m, id, mo, &copying)? {
             // A copied wall brings its doors and windows, a stair or a ramp its railings; see below.
             Element::Door(o) | Element::Window(o) if copying_guids.contains(&o.host) => {}
+            Element::WallOpening(o) if copying_guids.contains(&o.host) => {}
             Element::Railing(Railing { host: Some(h), .. }) if copying_guids.contains(&h) => {}
             // A copied curtain wall brings its hand-made grid lines (below); its panels and mullions are never copied: the
             // copy lays out its own.
@@ -14551,6 +14606,7 @@ pub(crate) fn duplicate_exactly(c: &str, s: &mut Session, ids: &[Id], mo: &Motio
         .iter()
         .filter(|(_, e)| match e {
             Element::Door(o) | Element::Window(o) => copying_guids.contains(&o.host),
+            Element::WallOpening(o) => copying_guids.contains(&o.host),
             Element::Railing(r) => r.host.is_some_and(|h| copying_guids.contains(&h)),
             Element::CurtainGrid(l) => copying_guids.contains(&l.host),
             _ => false,
@@ -14566,6 +14622,9 @@ pub(crate) fn duplicate_exactly(c: &str, s: &mut Session, ids: &[Id], mo: &Motio
                 Element::Door(o) | Element::Window(o) if mo.mirror => {
                     o.offset = m.wall(o.host).map_or(o.offset, |w| Axis::of(w).length() - o.offset);
                     o.flip_hand = !o.flip_hand;
+                }
+                Element::WallOpening(o) if mo.mirror => {
+                    o.offset = m.wall(o.host).map_or(o.offset, |w| Axis::of(w).length() - o.offset);
                 }
                 Element::Railing(r) if mo.mirror => r.side = r.side.map(other_side),
                 _ => {}
@@ -14600,6 +14659,7 @@ pub(crate) fn duplicate_exactly(c: &str, s: &mut Session, ids: &[Id], mo: &Motio
             }
             Element::Railing(r) => r.host = r.host.map(|h| hosts.get(&h).copied().unwrap_or(h)),
             Element::CurtainGrid(l) => l.host = hosts.get(&l.host).copied().unwrap_or(l.host),
+            Element::WallOpening(o) => o.host = hosts.get(&o.host).copied().unwrap_or(o.host),
             Element::Door(o) | Element::Window(o) => {
                 o.host = hosts.get(&o.host).copied().unwrap_or(o.host);
                 o.mark = next_number(m.elements.values().filter_map(|e| match e {
@@ -15156,6 +15216,16 @@ fn split(s: &mut Session, p: &Value) -> R {
         }
         later.push(oid);
     }
+    for (&oid, e) in &m.elements {
+        let Element::WallOpening(o) = e else { continue };
+        if !m.same(o.host, id) || o.offset + o.width / 2.0 <= along + TOL {
+            continue;
+        }
+        if o.offset - o.width / 2.0 < along - TOL {
+            return Err(bad(c, format!("wall opening {oid} is in the way; split elsewhere")));
+        }
+        later.push(oid);
+    }
     // A curtain wall's halves are each laid out afresh: its hand-made lines and what was done to its grid by hand go to
     // the half they are in.
     let curtain = crate::curtain::is_curtain(m, &w);
@@ -15182,6 +15252,9 @@ fn split(s: &mut Session, p: &Value) -> R {
     let host = m.guid(new);
     for oid in later {
         if let Some(Element::Door(o) | Element::Window(o)) = m.elements.get_mut(oid) {
+            o.host = host;
+            o.offset -= along;
+        } else if let Some(Element::WallOpening(o)) = m.elements.get_mut(oid) {
             o.host = host;
             o.offset -= along;
         }
@@ -15745,6 +15818,7 @@ fn delete_indexed(s: &mut Session, p: &Value) -> R {
             }
             let hosted = match m.elements.get(id) {
                 Some(Element::Door(o) | Element::Window(o)) => gone.contains(&o.host),
+                Some(Element::WallOpening(o)) => gone.contains(&o.host),
                 Some(Element::Railing(r)) => r.host.is_some_and(|h| gone.contains(&h)),
                 Some(Element::Rebar(rb)) => rb.host.is_some_and(|h| gone.contains(&h)),
                 Some(Element::SubDivision(sd)) => gone.contains(&sd.host),
@@ -15872,6 +15946,7 @@ fn delete_from_scratch(s: &mut Session, p: &Value) -> R {
                 !gone.contains(id)
                     && match e {
                         Element::Door(o) | Element::Window(o) => gone.contains(&o.host),
+                        Element::WallOpening(o) => gone.contains(&o.host),
                         Element::Railing(r) => r.host.is_some_and(|h| gone.contains(&h)),
                         Element::Rebar(rb) => rb.host.is_some_and(|h| gone.contains(&h)),
                         Element::SubDivision(sd) => gone.contains(&sd.host),

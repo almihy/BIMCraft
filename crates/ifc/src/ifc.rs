@@ -1897,6 +1897,44 @@ pub fn export(m: &Model) -> String {
         contained.entry(wl.level).or_default().push(ent);
         products.insert(id, ent);
     }
+    // A wall opening (Revit's Wall Opening), and a curtain wall embedded in a basic wall, void the wall they cut: an
+    // IfcOpeningElement each, filled by nothing (the curtain wall is its own product beside it).
+    for (&id, e) in &m.elements {
+        let cuts: Vec<(Id, (f64, f64), (f64, f64))> = match e {
+            Element::WallOpening(o) => {
+                let (Some(wl), Some(host)) = (m.wall(o.host), m.elements.id(o.host)) else { continue };
+                let (along, up) = o.cut(m, wl);
+                vec![(host, along, up)]
+            }
+            Element::Wall(cw) if crate::curtain::curtain_of(m, cw).is_some_and(|c| c.embed) => m
+                .elements
+                .iter()
+                .filter_map(|(&h, he)| match he {
+                    Element::Wall(hw) => crate::curtain::embeds(m, cw, hw).map(|(along, up)| (h, along, up)),
+                    _ => None,
+                })
+                .collect(),
+            _ => continue,
+        };
+        for (host, (s0, s1), (z0, z1)) in cuts {
+            let (Some(wl), Some(&(wall, wall_at))) = (m.wall(host), placed.get(&host)) else { continue };
+            let axis = Axis::of(wl);
+            let (cw, ch) = (s1 - s0, z1 - z0);
+            let mid = (s0 + s1) / 2.0;
+            let (u, way) = (axis.tangent(0.0), axis.tangent(mid));
+            let jamb = axis.at(mid, walls::centre(m, wl)) - way * (cw / 2.0) - wl.start;
+            let at = w.place(Some(wall_at), (jamb.dot(u), jamb.dot(u.perp()), z0 - m.own_base(wl)), Some(P2(way.dot(u), way.dot(u.perp()))));
+            let bow = axis.radius().map_or(0.0, |r| {
+                let inner = r - m.thickness(wl) / 2.0 - walls::centre(m, wl).abs();
+                if inner > cw / 2.0 { inner - (inner * inner - cw * cw / 4.0).sqrt() } else { cw }
+            });
+            let profile = w.rectangle(P2(cw / 2.0, 0.0), P2(cw, m.thickness(wl) + 20.0 + 2.0 * bow));
+            let shape = w.body(profile, 0.0, ch, &[]);
+            let key = mix(id) ^ mix(host);
+            let opening = w.add(format!("IFCOPENINGELEMENT({},$,'Opening',$,$,#{at},#{shape},$,.OPENING.)", w.guid(OPENING, key)));
+            w.add(format!("IFCRELVOIDSELEMENT({},$,$,$,#{wall},#{opening})", w.guid(VOIDS, key)));
+        }
+    }
     // Compound types' layers: a layer set for each type used, each layer's material once, with its
     // colour for viewers to shade it in; for each wall type and line its walls stand on, the set's
     // use, from their exterior faces in.

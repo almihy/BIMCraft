@@ -187,6 +187,8 @@ pub fn value<'a>(m: &'a Model, e: &'a Element, key: &str) -> Option<&'a str> {
     let own = e.params().and_then(|p| p.get(key)).and_then(Value::as_str);
     own.or_else(|| match e {
         Element::Door(o) | Element::Window(o) => m.wall(o.host)?.params.get(key)?.as_str(),
+        // A wall opening holds none: it is made, taken down and in a design option as its wall is.
+        Element::WallOpening(o) => m.wall(o.host)?.params.get(key)?.as_str(),
         _ => None,
     })
 }
@@ -194,8 +196,8 @@ pub fn value<'a>(m: &'a Model, e: &'a Element, key: &str) -> Option<&'a str> {
 /// What element `e` is in the phase at `at` in the project's order; none when it isn't there: made
 /// after it, or taken down before it. Only what holds parameters is phased: annotation is a view's.
 pub fn status(m: &Model, e: &Element, at: usize) -> Option<Status> {
-    // (A curtain grid line holds none and is its wall's all the same.)
-    if !matches!(e, Element::CurtainGrid(_)) {
+    // (A curtain grid line and a wall opening hold none and are their wall's all the same.)
+    if !matches!(e, Element::CurtainGrid(_) | Element::WallOpening(_)) {
         e.params()?;
     }
     let created = value(m, e, CREATED).and_then(|n| index(m, n)).unwrap_or(0);

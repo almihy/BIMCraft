@@ -603,6 +603,9 @@ fn walls_and_grids(m: &Model, scope: &Scope, out: &mut Vec<Warning>) {
                     let Some(second) = centre_line(m, v) else { continue };
                     if let Some(along) = overlap_of(&line, m.thickness(w), &second, m.thickness(v))
                         && !same_wall(m, w, v)
+                        // A curtain wall embedded in the other stands in the opening it cuts there, as Revit's does.
+                        && crate::curtain::embeds(m, w, v).is_none()
+                        && crate::curtain::embeds(m, v, w).is_none()
                         && matches!((m.elements.get(id), m.elements.get(other)), (Some(x), Some(y)) if coexist(m, x, y))
                     {
                         let (low, high) = if id < other { (id, other) } else { (other, id) };

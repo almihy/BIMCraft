@@ -189,6 +189,7 @@ fn with_hosted(m: &Model, ids: &[Id]) -> Vec<Id> {
     for (&id, e) in m.elements.iter() {
         let goes = match e {
             Element::Door(o) | Element::Window(o) => guids.contains(&o.host),
+            Element::WallOpening(o) => guids.contains(&o.host),
             Element::Railing(r) => r.host.is_some_and(|h| guids.contains(&h)),
             Element::Rebar(r) => r.host.is_some_and(|h| guids.contains(&h)),
             // A curtain wall's hand-made grid lines; its panels and mullions its copy lays out itself.

@@ -182,6 +182,21 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>, measures: boo
                     extra.insert("doors".into(), json!(doors.len()));
                     extra.insert("door_ids".into(), json!(doors));
                 }
+                // The basic walls it is embedded in (Automatically Embed), by id.
+                if let Some(Element::Wall(cw)) = m.elements.get(id)
+                    && crate::curtain::curtain_of(m, cw).is_some_and(|c| c.embed)
+                {
+                    let mut hosts: Vec<Id> = Vec::new();
+                    if let Some(b) = crate::walls::reach(m, cw) {
+                        for other in m.lookup().walls_near_at(&[(b, m.base_z(cw), m.top_z(cw))], 1.0) {
+                            if other != id && m.wall(other).is_some_and(|host| crate::curtain::embeds(m, cw, host).is_some()) {
+                                hosts.push(other);
+                            }
+                        }
+                    }
+                    hosts.sort_unstable();
+                    extra.insert("embedded_in".into(), json!(hosts));
+                }
                 extra.insert("vertical_grid".into(), json!(g.u.iter().map(|l| hundredth(l.at)).collect::<Vec<_>>()));
                 extra.insert("horizontal_grid".into(), json!(g.v.iter().map(|l| hundredth(l.at)).collect::<Vec<_>>()));
             }
@@ -420,6 +435,20 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>, measures: boo
             }
         }
         Element::CurtainGrid(_) => {}
+        Element::WallOpening(o) => {
+            if let Some(w) = m.wall(o.host) {
+                extra.insert("level".into(), json!(w.level));
+                let ((s0, s1), (z0, z1)) = o.cut(m, w);
+                let axis = crate::walls::Axis::of(w);
+                let round = |v: f64| (v * 1000.0).round() / 1000.0;
+                extra.insert("at".into(), json!(axis.at(o.offset, 0.0)));
+                extra.insert("from".into(), json!(round(s0)));
+                extra.insert("to".into(), json!(round(s1)));
+                extra.insert("bottom".into(), json!(round(z0)));
+                extra.insert("top".into(), json!(round(z1)));
+                extra.insert("area_m2".into(), json!(round((s1 - s0) * (z1 - z0) / 1e6)));
+            }
+        }
         Element::SurveyPoint(b) | Element::ProjectBasePoint(b) => {
             let [east, north, height] = m.shared(b.at, b.elevation);
             let round = |v: f64| (v * 1000.0).round() / 1000.0;

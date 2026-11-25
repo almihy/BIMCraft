@@ -108,6 +108,9 @@ impl Index {
                 Element::Door(o) | Element::Window(o) => {
                     index.hosts.entry(o.host).or_default().push(id);
                 }
+                Element::WallOpening(o) => {
+                    index.hosts.entry(o.host).or_default().push(id);
+                }
                 _ => {}
             }
         }

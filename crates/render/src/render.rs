@@ -3863,6 +3863,19 @@ fn draw_plan_among(m: &Model, key: Guid, view: View, up: bool, k: f32, n: f64, o
             opening(&mut d, m, e, o, w, range.cut, shown(id), m.elements.id(o.host).filter(|wall| shown(*wall)));
         }
     }
+    // A wall opening or an embedded curtain wall: the gap it cuts between the wall's faces, its jambs the wall's outline there.
+    for (wall, _) in walls_with_other_cuts(m, range.cut, &shown) {
+        let Some(w) = m.wall(wall) else { continue };
+        let (axis, (ext, int)) = (Axis::of(w), walls::faces(m, w));
+        d.owner = Some(wall);
+        for (g0, g1) in other_gaps_at(m, wall, range.cut) {
+            let gap: Vec<P2> = axis.points(g0, g1, int).into_iter().chain(axis.points(g1, g0, ext)).collect();
+            d.fill(&[gap], PAPER);
+            for s in [g0, g1] {
+                d.line(&[axis.at(s, int), axis.at(s, ext)], BY_CATEGORY, INK, false);
+            }
+        }
+    }
     // A curtain wall's panels and mullions the plan cuts, and the wall's own extents for the cursor.
     curtain_wall::cut(&mut d, m, &elements, &range, &look, up);
     d.part(Part::Projection);
@@ -4618,7 +4631,46 @@ fn opening_gaps<'a>(
         let gap: Vec<P2> = axis.points(g0, g1, int - PAST).into_iter().chain(axis.points(g1, g0, ext + PAST)).collect();
         out.entry(wall).or_default().extend(walls::convex_pieces(&gap));
     }
+    // Wall openings and embedded curtain walls cut their walls' lines too.
+    for (wall, _) in walls_with_other_cuts(m, cut, shown) {
+        let Some(w) = m.wall(wall) else { continue };
+        let (axis, (ext, int)) = (Axis::of(w), walls::faces(m, w));
+        for (g0, g1) in other_gaps_at(m, wall, cut) {
+            let gap: Vec<P2> = axis.points(g0, g1, int - PAST).into_iter().chain(axis.points(g1, g0, ext + PAST)).collect();
+            out.entry(wall).or_default().extend(walls::convex_pieces(&gap));
+        }
+    }
     out
+}
+
+/// The walls of the model the plan cut at `cut` passes through, shown, that something other than a door or window cuts
+/// (a wall opening, an embedded curtain wall).
+fn walls_with_other_cuts(m: &Model, cut: f64, shown: &dyn Fn(Id) -> bool) -> Vec<(Id, ())> {
+    let mut hosts: std::collections::BTreeSet<Id> = m
+        .elements
+        .iter()
+        .filter_map(|(_, e)| match e {
+            Element::WallOpening(o) => m.elements.id(o.host),
+            _ => None,
+        })
+        .collect();
+    if m.types.wall.values().any(|t| t.curtain.as_ref().is_some_and(|c| c.embed)) {
+        hosts.extend(m.elements.iter().filter(|(_, e)| matches!(e, Element::Wall(_))).map(|(id, _)| *id));
+    }
+    hosts.into_iter().filter(|id| shown(*id) && m.wall(*id).is_some_and(|w| m.spans(w, cut) && !crate::curtain::is_curtain(m, w))).map(|id| (id, ())).collect()
+}
+
+/// The stretches along wall `wall` (mm from its start, held to its ends) that its wall openings and embedded curtain
+/// walls cut at the plan's cut plane `cut`.
+fn other_gaps_at(m: &Model, wall: Id, cut: f64) -> Vec<(f64, f64)> {
+    let Some(w) = m.wall(wall) else { return Vec::new() };
+    let length = Axis::of(w).length();
+    walls::other_cuts(m, wall)
+        .into_iter()
+        .filter(|(_, (z0, z1))| *z0 <= cut && cut < *z1)
+        .map(|((s0, s1), _)| (s0.max(0.0), s1.min(length)))
+        .filter(|(g0, g1)| g1 - g0 > 0.0)
+        .collect()
 }
 
 /// [`ink_cut`] of `run`, but for what lies in `gaps`: the parts outside them, each a line of its own.

@@ -174,7 +174,7 @@ impl Model {
             Element::SubDivision(sd) => t.floor.get(&sd.type_name).map(|x| &x.identity),
             Element::CurtainPanel(p) => t.curtain_panel.get(&p.type_name).map(|x| &x.identity),
             Element::Mullion(x) => t.mullion.get(&x.type_name).map(|x| &x.identity),
-            Element::CurtainGrid(_) => None,
+            Element::CurtainGrid(_) | Element::WallOpening(_) => None,
             Element::Roof(r) => t.roof.get(&r.type_name).map(|x| &x.identity),
             Element::Ceiling(c) => t.ceiling.get(&c.type_name).map(|x| &x.identity),
             Element::Railing(r) => t.railing.get(&r.type_name).map(|x| &x.identity),

@@ -1292,6 +1292,31 @@ pub struct Opening {
     pub params: BTreeMap<String, serde_json::Value>,
 }
 
+/// Revit's Wall Opening (Architecture > Opening > Wall, the category Rectangular Straight Wall Opening): a rectangle cut
+/// through its host wall from face to face, a straight wall or a curved one (across it, square to its line), hosted by
+/// it and deleted with it, moving and stretching with it as a door does. Its middle is `offset` mm along the host's
+/// location line from its start, as a door's; it is `width` mm wide along that line, and stands from `base_offset` mm
+/// over its host's base level (Revit's Base Offset, its Base Constraint the host's level) `height` mm tall (Revit's
+/// Unconnected Height). It has no type, as Revit's has none to choose.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WallOpening {
+    pub host: Guid,
+    pub offset: f64,
+    pub width: f64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub base_offset: f64,
+    pub height: f64,
+}
+
+impl WallOpening {
+    /// The stretch it cuts along its host's location line, mm from its start, and the heights it cuts between.
+    pub fn cut(&self, m: &Model, w: &Wall) -> ((f64, f64), (f64, f64)) {
+        let z0 = m.elevation(w.level) + self.base_offset;
+        ((self.offset - self.width / 2.0, self.offset + self.width / 2.0), (z0, z0 + self.height))
+    }
+}
+
 impl Opening {
     /// The width and height of the cell of its curtain wall it fills: none for a door or window of a basic wall.
     pub fn cell_size(&self) -> Option<(f64, f64)> {
@@ -2924,6 +2949,7 @@ macro_rules! visit_refs {
             Element::CurtainPanel(x) => f(& $($m)? x.host),
             Element::Mullion(x) => f(& $($m)? x.host),
             Element::CurtainGrid(x) => f(& $($m)? x.host),
+            Element::WallOpening(x) => f(& $($m)? x.host),
             Element::SurveyPoint(_) | Element::ProjectBasePoint(_) => {}
             Element::Room(Room { level, top_level, .. }) => {
                 f(level);
@@ -3083,6 +3109,9 @@ pub enum Element {
     Mullion(crate::curtain::Mullion),
     /// Revit's Curtain Grid: a grid line drawn by hand on a curtain wall.
     CurtainGrid(crate::curtain::GridLine),
+    /// Revit's Wall Opening: a rectangle cut through a wall (`WallOpening`).
+    #[serde(rename = "wallopening")]
+    WallOpening(WallOpening),
 }
 
 impl Element {
@@ -3328,6 +3357,7 @@ impl Element {
             Element::CurtainPanel(_) => "curtainpanel",
             Element::Mullion(_) => "mullion",
             Element::CurtainGrid(_) => "curtaingrid",
+            Element::WallOpening(_) => "wallopening",
         }
     }
 }
@@ -5759,7 +5789,8 @@ impl Model {
             Element::SubDivision(sd) => self.subdivision_level(sd),
             Element::CurtainPanel(crate::curtain::Panel { host, .. })
             | Element::Mullion(crate::curtain::Mullion { host, .. })
-            | Element::CurtainGrid(crate::curtain::GridLine { host, .. }) => self.wall(*host).map(|w| w.level),
+            | Element::CurtainGrid(crate::curtain::GridLine { host, .. })
+            | Element::WallOpening(WallOpening { host, .. }) => self.wall(*host).map(|w| w.level),
             Element::Ceiling(c) => Some(c.level),
             Element::Shaft(sh) => Some(sh.level),
             Element::Mass(ms) => Some(ms.level),
@@ -6665,6 +6696,7 @@ impl Model {
                 let axis = walls::Axis::of(w);
                 axis.at(if l.vertical { l.at } else { axis.length() / 2.0 }, 0.0)
             }),
+            Element::WallOpening(o) => self.wall(o.host).map(|w| walls::Axis::of(w).at(o.offset, 0.0)),
             run_arm!(r) => middle(r.start, r.end),
             Element::Stair(s) => Some(s.start),
             Element::Ramp(r) => Some(r.start),
@@ -8239,6 +8271,23 @@ impl Model {
                 line(&who, rs.start, rs.end)?;
             }
             Element::CurtainPanel(_) | Element::Mullion(_) | Element::CurtainGrid(_) => self.check_curtain_child(&who, e)?,
+            Element::WallOpening(o) => {
+                match self.wall(o.host) {
+                    Some(w) if crate::curtain::is_curtain(self, w) => {
+                        return Err(format!("{who}: its host {} is a curtain wall, which a wall opening can't cut", self.shown(o.host)));
+                    }
+                    Some(_) => {}
+                    None => return Err(format!("{who}: its host {} isn't a wall of the project", o.host)),
+                }
+                for v in [o.offset, o.base_offset] {
+                    coord(&who, v)?;
+                }
+                for (name, v) in [("width", o.width), ("height", o.height)] {
+                    if !(v.is_finite() && v > 0.0) {
+                        return Err(format!("{who}: its {name} must be more than 0 mm"));
+                    }
+                }
+            }
             Element::Site(st) => {
                 level_ok(st.level)?;
                 crate::masterplan::check_site(&who, st)?;

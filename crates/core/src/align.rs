@@ -68,6 +68,8 @@ fn element_lines(m: &Model, e: &Element) -> Vec<Line> {
         Element::SurveyPoint(b) | Element::ProjectBasePoint(b) => axes(b.at, 0.0, 300.0),
         // A curtain wall's own align by their wall's line.
         Element::CurtainPanel(_) | Element::Mullion(_) | Element::CurtainGrid(_) => Vec::new(),
+        // A wall opening slides along its wall: aligned by its wall's line, as a curtain wall's own are.
+        Element::WallOpening(_) => Vec::new(),
         Element::Ceiling(c) => std::iter::once(&c.boundary).chain(&c.openings).flat_map(|r| path(r, true)).collect(),
         Element::Roof(r) => {
             std::iter::once(m.roof_outline(r)).chain(r.courtyards.clone()).chain(r.openings.clone()).flat_map(|r| path(&r, true)).collect()

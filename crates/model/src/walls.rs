@@ -1309,6 +1309,24 @@ pub struct Prism {
     pub curve: Option<(P2, f64)>,
 }
 
+/// What cuts wall `id` besides its doors and windows: its wall openings (Revit's Wall Opening) and the curtain walls
+/// embedded in it (Automatically Embed), each as the stretch along its location line (mm from its start) and the
+/// heights it cuts between.
+pub fn other_cuts(m: &Model, id: Id) -> Vec<((f64, f64), (f64, f64))> {
+    let Some(w) = m.wall(id) else { return Vec::new() };
+    let guid = m.guid(id);
+    let mut out: Vec<((f64, f64), (f64, f64))> = m
+        .lookup()
+        .referrers(&guid)
+        .filter_map(|k| match m.elements.get(k) {
+            Some(Element::WallOpening(o)) if o.host == guid => Some(o.cut(m, w)),
+            _ => None,
+        })
+        .collect();
+    out.extend(crate::curtain::embedded_cuts(m, id, None));
+    out
+}
+
 /// `gaps` (an opening's lower and upper edge, each) as the stretches they cover together: sorted, and joined where they touch or
 /// overlap, so that one inside another (a window in a door's span) leaves the door's and nothing between.
 fn merged(mut gaps: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
@@ -1357,8 +1375,11 @@ pub fn prisms_in(m: &Model, id: Id, openings: bool, index: Option<&Index>) -> Ve
                 let (width, height) = m.opening_type(e)?.cut();
                 Some(((o.offset - width / 2.0, o.offset + width / 2.0), (z0 + o.sill, z0 + o.sill + height)))
             }
+            // A wall opening: from its base offset over the wall's level, as tall as it is.
+            Element::WallOpening(o) if o.host == guid => Some(o.cut(m, w)),
             _ => None,
         })
+        .chain(crate::curtain::embedded_cuts(m, id, index))
         .collect();
     let mut cuts = axis.stations(0.0, len);
     cuts.extend(holes.iter().flat_map(|((s0, s1), _)| [*s0, *s1]).filter(|s| *s > 0.0 && *s < len));

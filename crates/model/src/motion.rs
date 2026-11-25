@@ -260,6 +260,12 @@ pub fn transform(c: &str, m: &Model, mut e: Element, id: Id, mo: &Motion, with: 
             _ => return Err(bad(c, format!("{category} {id} turns and mirrors only with its wall; select the wall too"))),
         },
         Element::Door(_) | Element::Window(_) => {}
+        // A wall opening slides along its wall alone, as a door does; it turns and mirrors only with it.
+        Element::WallOpening(o) if !within(o.host) => match (mo.slide, m.wall(o.host)) {
+            (Some(by), Some(w)) => o.offset += by.dot((w.end - w.start).unit()),
+            _ => return Err(bad(c, format!("{category} {id} turns and mirrors only with its wall; select the wall too"))),
+        },
+        Element::WallOpening(_) => {}
         // A curtain wall's own go where it goes, laid out again after the command. Alone, a grid line that stands on the wall
         // slides along it; nothing else of a curtain wall moves by itself.
         Element::CurtainGrid(l) if !within(l.host) => match (mo.slide, m.wall(l.host), l.vertical) {

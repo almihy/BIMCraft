@@ -214,6 +214,10 @@ pub struct CurtainType {
     pub vertical_mullions: Mullions,
     #[serde(default, skip_serializing_if = "Mullions::is_empty")]
     pub horizontal_mullions: Mullions,
+    /// Revit's Automatically Embed: a wall of the type drawn inside a basic wall, along it, cuts its own opening in that
+    /// wall and stands in it ([`embeds`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub embed: bool,
 }
 
 /// A curtain panel type, Revit's System Panel: `thickness` mm of `material` (one of the library's, or none), its middle
@@ -1285,6 +1289,8 @@ pub fn ensure_starter(m: &mut Model, name: &str) -> bool {
         }
         "Storefront" => {
             ensure_mullions(m);
+            // Revit's Storefront embeds itself in the basic wall it is drawn in.
+            c.embed = true;
             c.vertical = rule(Layout::MaximumSpacing, 1500.0);
             c.horizontal = rule(Layout::FixedDistance, 2400.0);
             let all = || Mullions { interior: MULLION.into(), border1: MULLION.into(), border2: MULLION.into() };
@@ -1638,4 +1644,70 @@ pub fn reverse(grid: &mut WallGrid) {
         Justification::End => set.justification = Justification::Beginning,
         Justification::Center => set.offset = -set.offset + 0.0,
     }
+}
+
+
+/// Where the curtain wall `cw` cuts the basic wall `host`, as Revit's Automatically Embed: its type embeds, it stands at
+/// heights the host has, and its line runs inside the host's body along the host's line (a straight one along a straight
+/// wall, a curved one round the same centre). The stretch along the host's location line it covers (mm from the host's
+/// start, held to the host's ends) and the heights between its base and its top; none when it is not embedded there.
+pub fn embeds(m: &Model, cw: &Wall, host: &Wall) -> Option<((f64, f64), (f64, f64))> {
+    if !curtain_of(m, cw).is_some_and(|c| c.embed) || is_curtain(m, host) {
+        return None;
+    }
+    let (z0, z1) = (m.base_z(cw), m.top_z(cw));
+    let (h0, h1) = (m.base_z(host), m.top_z(host));
+    if z1 <= h0 + TOL || z0 >= h1 - TOL {
+        return None;
+    }
+    let (own, axis) = (crate::walls::Axis::of(cw), crate::walls::Axis::of(host));
+    let (ext, int) = crate::walls::faces(m, host);
+    let (len, length) = (own.length(), axis.length());
+    if len <= TOL || (own.radius().is_some() != axis.radius().is_some()) {
+        return None;
+    }
+    // Along the host's line: every point of the curtain wall's line inside the host's body, and on the host's line where
+    // its own is (round the same centre, a curved one).
+    let mut along = Vec::with_capacity(9);
+    for k in 0..=8 {
+        let q = own.at(len * f64::from(k) / 8.0, 0.0);
+        let (s, across) = axis.project(q);
+        if axis.distance(q, across) > TOL {
+            // Past one of the host's ends: that part cuts nothing; anywhere else it is off the host's line.
+            if s <= TOL || s >= length - TOL {
+                continue;
+            }
+            return None;
+        }
+        if !(int - TOL..=ext + TOL).contains(&across) {
+            return None;
+        }
+        along.push(s);
+    }
+    if along.len() < 2 {
+        return None;
+    }
+    let (s0, s1) = along.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), s| (a.min(*s), b.max(*s)));
+    (s1 - s0 > TOL).then_some(((s0.max(0.0), s1.min(length)), (z0.max(h0), z1.min(h1))))
+}
+
+/// The cuts curtain walls embedded in basic wall `id` make in it ([`embeds`]), each as [`embeds`] gives it.
+pub fn embedded_cuts(m: &Model, id: Id, _index: Option<&crate::walls::Index>) -> Vec<((f64, f64), (f64, f64))> {
+    let Some(host) = m.wall(id) else { return Vec::new() };
+    if is_curtain(m, host) || !m.types.wall.values().any(|t| t.curtain.as_ref().is_some_and(|c| c.embed)) {
+        return Vec::new();
+    }
+    let Some(b) = crate::walls::reach(m, host) else { return Vec::new() };
+    let mut out = Vec::new();
+    for other in m.lookup().walls_near_at(&[(b, m.base_z(host), m.top_z(host))], m.thickness(host) + TOL) {
+        if other == id {
+            continue;
+        }
+        if let Some(cw) = m.wall(other)
+            && let Some(cut) = embeds(m, cw, host)
+        {
+            out.push(cut);
+        }
+    }
+    out
 }

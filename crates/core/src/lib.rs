@@ -40,6 +40,8 @@ mod commands;
 #[cfg(test)]
 mod curtain_door_tests;
 #[cfg(test)]
+mod wall_opening_tests;
+#[cfg(test)]
 mod curtain_ifc_tests;
 #[cfg(test)]
 mod curtain_schedule_tests;
