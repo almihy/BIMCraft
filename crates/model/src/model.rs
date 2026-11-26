@@ -5180,7 +5180,10 @@ impl Model {
         let pts = corners.chain(others.into_iter().flat_map(|id| match self.elements.get(id) {
             Some(Element::Grid(g)) => vec![g.start, g.end],
             Some(Element::PointCloud(_)) => self.cloud_box(id).map_or(Vec::new(), |(lo, hi)| vec![P2(lo[0], lo[1]), P2(hi[0], hi[1])]),
-            Some(Element::CadImport(_)) => self.cad_box(id).map_or(Vec::new(), |b| b.to_vec()),
+            // A drawing in one view only is that view's, as Revit's "Current view only" import: it does not stretch
+            // the levels every other view shows (a file of a building's every floor side by side, linked under each
+            // level, stretched them hundreds of metres past the building in 3D)
+            Some(Element::CadImport(c)) if c.view.is_none() => self.cad_box(id).map_or(Vec::new(), |b| b.to_vec()),
             _ => Vec::new(),
         }));
         // Folded as they come, the first the start: no list of every corner of every mesh.

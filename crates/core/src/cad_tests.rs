@@ -110,6 +110,21 @@ fn a_drawing_comes_in_in_its_files_unit_its_middle_on_the_origin_with_its_layers
 }
 
 #[test]
+fn a_drawing_in_one_view_only_does_not_stretch_the_levels_a_drawing_on_its_level_does() {
+    let mut s = Session::new();
+    run(&mut s, "wall", json!({"points": [[0, 0], [8000, 0]]}));
+    let level = s.model.levels()[0].0;
+    let before = s.model.level_extent(level).unwrap();
+    // a drawing 200 m away, in the level's plan view only: the levels stay round the building
+    let path = file("view-only", "far.dxf", &plan());
+    run(&mut s, "import_cad", json!({"path": path, "view": "Level 1", "position": "origin", "at": [200000, 0]}));
+    assert_eq!(s.model.level_extent(level), Some(before));
+    // the same drawing in every plan of the level: the levels reach it, as they reach a grid
+    run(&mut s, "import_cad", json!({"cad": "far", "position": "origin", "at": [200000, 0]}));
+    assert!(s.model.level_extent(level).unwrap()[1].0 > 200000.0);
+}
+
+#[test]
 fn units_scale_position_angle_layers_and_colours_are_the_users_to_say() {
     let mut s = Session::new();
     let path = file("say", "plan.dxf", &plan());
