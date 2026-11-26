@@ -156,12 +156,16 @@ pub const MIN_CONTOURS: f64 = 50.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 32;
-/// [`FORMAT`], by what it brought: a stair by component (a stair's `flights`, `StairRun`, and its `sketched` landings) and a
+pub const FORMAT: u32 = 33;
+/// [`FORMAT`], by what it brought: a wall put on another of its lines keeps the line it was drawn on (a wall's `drawn_on`), by
+/// which its joins are found; a build that reads up to 32 would refuse it, not say "saved by a newer BIMCraft". A project
+/// with none is written as 32 or older ([`Model::written_format`]); nothing in a file of 32 changes.
+pub const DRAWN_FORMAT: u32 = FORMAT;
+/// The format of a stair by component (a stair's `flights`, `StairRun`, and its `sketched` landings) and a
 /// wall opening's parameter values (`params`); a build that reads up to 31 would refuse them, not say "saved by a newer
 /// BIMCraft". A project with none of them is written as 31 or older ([`Model::written_format`]); nothing in a file of 31
 /// changes.
-pub const STAIR_FORMAT: u32 = FORMAT;
+pub const STAIR_FORMAT: u32 = 32;
 /// [`FORMAT`], by what it brought: wall openings (the element `wallopening`, Revit's Wall Opening) and a curtain type's
 /// `embed` (Automatically Embed); a build that reads up to 30 would refuse them, not say "saved by a newer BIMCraft". A
 /// project with none of them is written as 30 or older ([`Model::written_format`]); nothing in a file of 30 changes.
@@ -374,6 +378,11 @@ pub struct Wall {
     pub arc: f64,
     #[serde(default, skip_serializing_if = "is_centre")]
     pub location: Location,
+    /// The line its ends were drawn on, where that is not its location line: a wall put on another of its lines stays where
+    /// it is (`modify` of its `location`) and keeps the line it was drawn on, whose ends its joins are found by, as Revit
+    /// keeps a wall's joins when its Location Line changes. None: its location line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drawn_on: Option<Location>,
     /// The roof or floor its top follows, from below, instead of its top constraint; and the one its
     /// base stands on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -403,6 +412,11 @@ pub struct Wall {
 }
 
 impl Wall {
+    /// The line its ends were drawn on ([`Wall::drawn_on`]): its location line unless it was put on another since.
+    pub fn drawn(&self) -> Location {
+        self.drawn_on.unwrap_or(self.location)
+    }
+
     /// Whether its end (`at_end`, else its start) joins what it meets there.
     pub fn joins(&self, at_end: bool) -> bool {
         self.join && if at_end { self.join_end } else { self.join_start }

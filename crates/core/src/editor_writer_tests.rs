@@ -158,3 +158,59 @@ fn a_curved_wall_a_wall_tees_into_holds_its_body_wherever_the_tee_ends_in_it() {
         run(&mut s, "delete", json!({"ids": [t]}));
     }
 }
+
+#[test]
+fn walls_join_by_the_lines_they_were_drawn_on_whatever_line_they_are_put_on_after() {
+    let mut s = Session::new();
+    types(&mut s);
+    let state = |s: &mut Session, ids: &[Id]| -> Vec<(Vec<u64>, Vec<u64>, f64)> {
+        ids.iter()
+            .map(|id| {
+                let e = listed(s, *id);
+                (ids_of(&e["joined_at_start"]), ids_of(&e["joined_at_end"]), (e["volume_m3"].as_f64().unwrap() * 1e6).round())
+            })
+            .collect()
+    };
+    // Drawn on their faces, their face lines ending at one point: they join there, as Revit joins location curves' ends.
+    let a = wall(&mut s, json!({"points": [[0, 150], [5000, 150]], "type": "G300", "height": 3000, "location": "exterior-finish"}));
+    let b = wall(&mut s, json!({"points": [[5000, 3000], [5000, 150]], "type": "G200", "height": 3000, "location": "interior-finish"}));
+    assert_eq!(ids(&listed(&mut s, a)["joined_at_end"]), vec![b]);
+    let drawn = state(&mut s, &[a, b]);
+    // Put on their centre lines and back, they keep that join and their bodies.
+    for loc in ["centre", "interior-finish", "exterior-finish"] {
+        for id in [a, b] {
+            run(&mut s, "modify", json!({"id": id, "location": loc}));
+            assert_eq!(state(&mut s, &[a, b]), drawn, "wall {id} on {loc}");
+        }
+    }
+    // Drawn on their centre lines, not meeting: once both are on faces their location lines end at one point (the School's F1
+    // w:50da009f684f and w:392badd6aaa8), and still they do not join, as Revit makes no join when a Location Line changes.
+    let c = wall(&mut s, json!({"points": [[0, 10000], [5000, 10000]], "type": "G300", "height": 3000}));
+    let d = wall(&mut s, json!({"points": [[5100, 13000], [5100, 10150]], "type": "G200", "height": 3000}));
+    let apart = state(&mut s, &[c, d]);
+    assert!(apart.iter().all(|(s0, s1, _)| s0.is_empty() && s1.is_empty()), "{apart:?}");
+    run(&mut s, "modify", json!({"id": c, "location": "exterior-finish"}));
+    run(&mut s, "modify", json!({"id": d, "location": "interior-finish"}));
+    let (ce, de) = (listed(&mut s, c)["end"].clone(), listed(&mut s, d)["end"].clone());
+    assert_eq!((ce.clone(), de.clone()), (json!([5000.0, 10150.0]), json!([5000.0, 10150.0])), "{ce} {de}");
+    assert_eq!(state(&mut s, &[c, d]), apart);
+    // Its ends placed again, a wall is drawn on its location line from then on: placed where the other's drawn line ends,
+    // there it joins.
+    run(&mut s, "modify", json!({"id": d, "end": [5000, 10000]}));
+    assert!(listed(&mut s, d).get("drawn_on").is_none_or(Value::is_null));
+    assert_eq!(listed(&mut s, c)["drawn_on"], "centre");
+    assert_eq!(ids(&listed(&mut s, c)["joined_at_end"]), vec![d]);
+    // Saved and opened, the line each was drawn on is kept, and the file says what reads it.
+    let path = std::env::temp_dir().join(format!("bimcraft-drawn-on-{}.bimcraft", std::process::id()));
+    run(&mut s, "save", json!({"path": path.to_str().unwrap()}));
+    let text = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    let (m, left_out) = crate::model::Model::read(&text).unwrap();
+    assert!(left_out.is_empty(), "{left_out:?}");
+    assert_eq!(m, *s.model);
+    assert_eq!(s.model.written_format(), crate::model::DRAWN_FORMAT);
+}
+
+fn ids_of(v: &Value) -> Vec<u64> {
+    v.as_array().map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default()
+}

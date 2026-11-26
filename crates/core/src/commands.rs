@@ -8277,6 +8277,7 @@ fn wall(s: &mut Session, p: &Value) -> R {
                 top_offset,
                 arc,
                 location,
+                drawn_on: None,
                 attach_top,
                 attach_base,
                 room_bounding,
@@ -10262,6 +10263,7 @@ fn dormer(s: &mut Session, p: &Value) -> R {
             top_offset: 0.0,
             arc: 0.0,
             location: Location::Centre,
+            drawn_on: None,
             attach_top: Some(roof_guid),
             attach_base: Some(host),
             room_bounding: true,
@@ -13878,12 +13880,20 @@ fn modify(s: &mut Session, p: &Value) -> R {
                 }
             }
         }
-        // A wall put on another of its lines stays where it is: its line moves across it instead.
+        // A wall whose ends are placed is drawn on its location line again: its joins are found where that ends.
+        if let Element::Wall(w) = &mut e2
+            && (fields.contains_key("start") || fields.contains_key("end"))
+        {
+            w.drawn_on = None;
+        }
+        // A wall put on another of its lines stays where it is: its line moves across it instead, and it keeps the line it
+        // was drawn on, whose ends its joins are found by (as Revit keeps a wall's joins when its Location Line changes).
         if let (Element::Wall(old), Element::Wall(w)) = (e, &mut e2)
             && old.location != w.location
             && !fields.contains_key("start")
             && !fields.contains_key("end")
         {
+            w.drawn_on = Some(old.drawn()).filter(|d| *d != w.location);
             let (before, after) = (walls::faces(m, &Wall { location: old.location, ..w.clone() }).0, walls::faces(m, w).0);
             let axis = Axis::of(w);
             let length = axis.length();

@@ -253,6 +253,21 @@ pub fn centre_end(m: &Model, w: &Wall, at_end: bool) -> P2 {
     ax.at(if at_end { ax.length() } else { 0.0 }, centre(m, w))
 }
 
+/// Where the line wall `w`'s ends were drawn on ends ([`Wall::drawn`]): at its end with `at_end`, else at its start. Its location
+/// line's end until it is put on another of its lines.
+pub fn drawn_end(m: &Model, w: &Wall, at_end: bool) -> P2 {
+    let ax = Axis::of(w);
+    let s = if at_end { ax.length() } else { 0.0 };
+    if w.drawn() == w.location {
+        return ax.at(s, 0.0);
+    }
+    let off = match m.types.wall.get(&w.type_name) {
+        Some(t) => depth(t, w.location) - depth(t, w.drawn()),
+        None => 0.0,
+    };
+    ax.at(s, off)
+}
+
 /// The way wall `w` leaves its end (`at_end`, else its start): into itself.
 fn way_in(w: &Wall, at_end: bool) -> P2 {
     let ax = Axis::of(w);
@@ -260,13 +275,14 @@ fn way_in(w: &Wall, at_end: bool) -> P2 {
 }
 
 /// Whether wall `a`'s end (`a_end`, else its start) and wall `b`'s (`b_end`) are one point the two join at, as Revit's
-/// ends are: their location lines ending there; or their centre lines ending there (a wall put on another of its lines
-/// stays where it is, `modify` of its `location`, and keeps the joins it had there, as Revit's does); or the two
+/// ends are: the lines they were drawn on ending there ([`drawn_end`]: a wall drawn on a face joins where its face line ends,
+/// and one put on another of its lines since, `modify` of its `location`, stays where it is and keeps the joins it had,
+/// as Revit keeps them, its location line making and parting none); or their centre lines ending there; or the two
 /// running on from each other end to end, in line or nearly (a straight wall into a curved one along its tangent), their
 /// ends at one place along them and their bodies touching across: a wall that changes thickness, or steps, where Revit
 /// joins the end drawn in the other's end. Not whether either may join (`Wall::joins`), nor their heights.
 pub fn ends_meet(m: &Model, a: &Wall, a_end: bool, b: &Wall, b_end: bool) -> bool {
-    let (p, q) = (if a_end { a.end } else { a.start }, if b_end { b.end } else { b.start });
+    let (p, q) = (drawn_end(m, a, a_end), drawn_end(m, b, b_end));
     if p.dist(q) <= TOL {
         return true;
     }
@@ -304,8 +320,15 @@ fn arms(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> (Vec<Arm>, bo
     // An end that refuses to join is no candidate for anyone either, nor a wall that refuses altogether for one ending on
     // its side: neither is cut to the other.
     let joins = |o: &Wall, end: Option<bool>| end.map_or(o.join, |e| o.joins(e)) && !crate::curtain::is_curtain(m, o) && stacked(m, w, o);
+    // Looked for round where its location line, its drawn line and its centre line end: the ends it may meet another by.
+    let ends = [node, drawn_end(m, w, at_end), centre_end(m, w, at_end)];
     let candidates: Box<dyn Iterator<Item = (Id, &Wall)> + '_> = match index {
-        Some(index) => Box::new(index.neighbours_at(id, node).into_iter().filter_map(|id| Some((id, m.wall(id)?)))),
+        Some(index) => {
+            let mut ids: Vec<Id> = ends.iter().flat_map(|q| index.neighbours_at(id, *q)).collect();
+            ids.sort_unstable();
+            ids.dedup();
+            Box::new(ids.into_iter().filter_map(|id| Some((id, m.wall(id)?))))
+        }
         // The walls whose location lines come within the thickest wall's thickness of the node (those that end at it,
         // and those it ends on: the node within their thickness), of heights it overlaps (only those join it).
         None => {
@@ -331,11 +354,11 @@ fn arms(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> (Vec<Arm>, bo
                 arms.push(arm(m, other, o, true, false));
             }
         } else {
-            // A wall it ends on: where its centre line ends within the other's thickness, between its ends (so a wall put on
-            // another of its lines keeps the tee it had and makes none, as Revit's does).
+            // A wall it ends on: where the line it was drawn on, or its centre line, ends within the other's thickness, between
+            // its ends (so a wall put on another of its lines keeps the tee it had and makes none, as Revit's does).
             let ax = Axis::of(o);
             let (ext, int) = faces(m, o);
-            let on = [centre_end(m, w, at_end)].into_iter().find_map(|q| {
+            let on = [ends[1], ends[2]].into_iter().find_map(|q| {
                 let (s, across) = ax.project(q);
                 (s > TOL && s < ax.length() - TOL && (int - TOL..=ext + TOL).contains(&across) && ax.distance(q, across) <= TOL)
                     .then_some(s)
@@ -618,11 +641,13 @@ fn tees(m: &Model, id: Id, index: Option<&Index>) -> Vec<(Id, bool)> {
     for other in near.into_iter().filter(|o| *o != id) {
         let Some(o) = m.wall(other) else { continue };
         for at_end in [false, true].into_iter().filter(|e| o.joins(*e)) {
-            let node = if at_end { o.end } else { o.start };
-            let (s, across) = axis.project(node);
-            if !(int - TOL..=ext + TOL).contains(&across) || axis.distance(node, across) > TOL {
+            // Where it may end on this wall: the end of the line it was drawn on, or of its centre line (as `arms` finds it).
+            let Some((s, _)) = [drawn_end(m, o, at_end), centre_end(m, o, at_end)].into_iter().find_map(|node| {
+                let (s, across) = axis.project(node);
+                ((int - TOL..=ext + TOL).contains(&across) && axis.distance(node, across) <= TOL).then_some((s, across))
+            }) else {
                 continue;
-            }
+            };
             let (arms, through) = arms(m, other, at_end, index);
             let on_its_side = s > TOL && s < axis.length() - TOL;
             // On its side; or at its end, where it carries on as another wall in line with it.

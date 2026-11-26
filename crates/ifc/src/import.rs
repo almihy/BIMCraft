@@ -2153,6 +2153,7 @@ pub fn from_step(file: File, name: &str, seed: u64) -> Result<Imported, String> 
             top_offset: 0.0,
             arc: w.arc,
             location: Default::default(),
+            drawn_on: None,
             attach_top: None,
             attach_base: None,
             room_bounding: true,

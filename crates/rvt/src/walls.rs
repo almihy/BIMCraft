@@ -389,6 +389,7 @@ pub(crate) fn import(cx: &mut Import, f: &Facts, g: &Gathered) {
                 top_offset: 0.0,
                 arc,
                 location: Location::Centre,
+                drawn_on: None,
                 attach_top: None,
                 attach_base: None,
                 room_bounding: true,

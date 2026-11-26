@@ -18,6 +18,7 @@ fn wall(level: Guid, a: P2, b: P2) -> Element {
         top_offset: 0.0,
         arc: 0.0,
         location: Location::Centre,
+        drawn_on: None,
         attach_top: None,
         attach_base: None,
         room_bounding: true,

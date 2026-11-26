@@ -1744,6 +1744,10 @@ impl Model {
         // What a build that reads up to 28 refuses: a wall type as Revit's, a layer's Finish 2, Wraps or Structural Material.
         let layer =
             |l: &crate::model::Layer| l.wraps || l.structural || l.priority.is_some() || l.function == crate::model::Function::Finish2;
+        // What a build that reads up to 32 refuses: a wall that keeps the line it was drawn on.
+        if self.elements.values().any(|e| matches!(e, Element::Wall(w) if w.drawn_on.is_some())) {
+            return crate::model::DRAWN_FORMAT;
+        }
         // What a build that reads up to 31 refuses: a stair by component, a wall opening's parameter values.
         if self.elements.values().any(|e| match e {
             Element::Stair(st) => !st.flights.is_empty() || !st.sketched.is_empty(),
