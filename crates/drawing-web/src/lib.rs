@@ -19,10 +19,8 @@ use cadcraft_index::{Opened, Query, Shape};
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 
-mod build;
 mod clean;
 mod convert;
-mod standard;
 pub use convert::{dwg_of, dxf_of};
 
 fn err(e: impl std::fmt::Display) -> JsError {
@@ -137,18 +135,7 @@ impl Drawing {
     /// onto other layers and moved, in that order, its other blocks kept as blocks, and what nothing uses any more left
     /// out.
     pub fn extract(&self, params: &str, version: &str) -> Result<Extracted, JsError> {
-        // With `standard` ({k}), the part is a plan: what will be built of it is laid over it, on layers that are off
-        // (src/standard.rs), and `about.build` says what that is.
-        let mut p: Value = if params.trim().is_empty() { json!({}) } else { serde_json::from_str(params).map_err(err)? };
-        let standard = p.as_object_mut().and_then(|m| m.remove("standard")).filter(|v| v.is_object());
-        let (mut bytes, mut about) = clean::extract(&self.o, self.measured(), &p.to_string(), version).map_err(err)?;
-        if let Some(s) = standard {
-            let (pack, _) = cadcraft_index::index(&bytes, "clean.dwg").map_err(err)?;
-            let part = Opened::unpack(&pack).map_err(err)?;
-            let (marked, built) = standard::standard(&part, &s.to_string(), version).map_err(err)?;
-            bytes = marked;
-            about["build"] = built;
-        }
+        let (bytes, about) = clean::extract(&self.o, self.measured(), params, version).map_err(err)?;
         Ok(Extracted { bytes, about: about.to_string() })
     }
 
@@ -161,10 +148,14 @@ impl Drawing {
         Ok(Picture { png: p.png, about: p.about.to_string() })
     }
 
-    /// What a clean plan draws as building elements (JSON params: k?: real millimetres to one of the drawing's):
-    /// JSON {walls, doors, windows, curtain, columns, rooms, thicknesses, left} (src/build.rs).
-    pub fn build(&self, params: &str) -> Result<String, JsError> {
-        build::build(&self.o, params).map(|v| v.to_string()).map_err(err)
+    /// The drawing's lines as a reader of plans takes them (cadcraft-index's `Opened::lines`): model space flattened,
+    /// blocks exploded, dimensions as the lines they draw, each straight piece a segment and each circular piece a true
+    /// arc, by layer, in metres less `offset`. JSON params: `layers?`, `unit?` (what the drawing was made in; none: the
+    /// header's), `chord?` (metres), `solids?`, `most?`. JSON {segs, arcs, circles, order, bbox, unit, header_unit,
+    /// metres, offset, left_out}.
+    pub fn lines(&self, params: &str) -> Result<String, JsError> {
+        let p: Value = if params.trim().is_empty() { json!({}) } else { serde_json::from_str(params).map_err(err)? };
+        self.o.lines(&p).map(|v| v.to_string()).map_err(err)
     }
 
     /// The separate drawings lying in the model space, found by where it is drawn and where it is empty, each boxed

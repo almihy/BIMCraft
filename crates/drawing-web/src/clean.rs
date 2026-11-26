@@ -428,14 +428,10 @@ fn selected_by(s: &Seen, p: &Value, meet: bool) -> Result<Vec<usize>, String> {
     let keep = rules(s, p, "keep")?;
     let drop = rules(s, p, "drop")?;
     let any = |rs: &[Rule], e: &Entity, b: &Bounds2| rs.iter().any(|r| r.holds(s, e, b));
-    // What will be built of a clean plan lies over it on layers that are off (`X-BUILD-...`, src/standard.rs): it is
-    // no part of the drawing unless a `keep` rule names those layers.
-    let marks = given(p, "keep").is_some_and(|k| k.to_string().to_uppercase().contains("X-BUILD"));
     Ok(s.items()
         .enumerate()
         .filter(|(_, (e, b))| {
-            (marks || !e.common.layer.to_uppercase().starts_with("X-BUILD"))
-                && area.as_ref().is_none_or(|a| real(b) && if meet { a.intersects(b) } else { a.contains(b.center()) })
+            area.as_ref().is_none_or(|a| real(b) && if meet { a.intersects(b) } else { a.contains(b.center()) })
                 && keep.as_ref().is_none_or(|k| any(k, e, b))
                 && !drop.as_ref().is_some_and(|d| any(d, e, b))
         })
@@ -761,9 +757,7 @@ pub(crate) fn counts(o: &Opened, m: &Measured, params: &str) -> Result<Value, St
     let mut placed: HashMap<&str, (usize, BTreeSet<&str>)> = HashMap::new();
     let mut per_color: HashMap<u32, (usize, Option<u8>, BTreeSet<&str>)> = HashMap::new();
     let mut round = Bounds2::EMPTY;
-    // The build marks of a clean plan (`X-BUILD-...`) are counted only when the rule names their layers.
-    let marks = given(&p, "layers").is_some_and(|l| l.to_string().to_uppercase().contains("X-BUILD"));
-    for (e, b) in s.items().filter(|(e, b)| (marks || !e.common.layer.to_uppercase().starts_with("X-BUILD")) && rule.holds(&s, e, b)) {
+    for (e, b) in s.items().filter(|(e, b)| rule.holds(&s, e, b)) {
         total += 1;
         let k = kind_of(&e.kind);
         *kinds.entry(k).or_default() += 1;

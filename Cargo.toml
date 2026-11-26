@@ -49,20 +49,20 @@ bimcraft-rvt = { path = "crates/rvt" }
 # DWG drawings read straight into CADCraft's drawing (`cadcraft_doc::Drawing`), from our fork of CADCraft (MIT OR
 # Apache-2.0): its DWG reader is acadrust (MPL-2.0, unmodified, one version across the workspace; NOTICE). The model makes
 # an import of what it reads (dxf/dwg.rs), blocks kept as blocks.
-cadcraft-doc = { git = "https://github.com/almihy/cadcraft", rev = "1f9002884bbf2331e212fe9c2ca90e670d116e29" }
-cadcraft-dwg = { git = "https://github.com/almihy/cadcraft", rev = "1f9002884bbf2331e212fe9c2ca90e670d116e29" }
+cadcraft-doc = { git = "https://github.com/almihy/cadcraft", rev = "0da204648bcce6fe02cef0d69d54e0b9af39a667" }
+cadcraft-dwg = { git = "https://github.com/almihy/cadcraft", rev = "0da204648bcce6fe02cef0d69d54e0b9af39a667" }
 # A drawing's fonts, given by a host at run time, and the Arabic an old SHX font laid out on the keyboard shows
 # (dxf/fonts.rs). cadcraft-dwg builds it already.
-cadcraft-fonts = { git = "https://github.com/almihy/cadcraft", rev = "1f9002884bbf2331e212fe9c2ca90e670d116e29" }
+cadcraft-fonts = { git = "https://github.com/almihy/cadcraft", rev = "0da204648bcce6fe02cef0d69d54e0b9af39a667" }
 # A drawing (DWG or DXF) read once into an index and asked of, for the agent (Arqiflow's drawing_read): CADCraft's, from
 # our fork, the same as above.
-cadcraft-index = { git = "https://github.com/almihy/cadcraft", rev = "1f9002884bbf2331e212fe9c2ca90e670d116e29" }
+cadcraft-index = { git = "https://github.com/almihy/cadcraft", rev = "0da204648bcce6fe02cef0d69d54e0b9af39a667" }
 # A drawing written as DWG (acadrust's own writer) or DXF, for Arqiflow's server, which runs no converter of its own: the
 # same fork and commit as above, without the PDF writer.
-cadcraft-io = { git = "https://github.com/almihy/cadcraft", rev = "1f9002884bbf2331e212fe9c2ca90e670d116e29", default-features = false }
+cadcraft-io = { git = "https://github.com/almihy/cadcraft", rev = "0da204648bcce6fe02cef0d69d54e0b9af39a667", default-features = false }
 # CADCraft's renderer, which the index draws its pictures with: the drawing reader draws a picture of only what it
 # selects, fitted to it (crates/drawing-web, `look`). The same fork and commit; cadcraft-index builds it already.
-cadcraft-render = { git = "https://github.com/almihy/cadcraft", rev = "1f9002884bbf2331e212fe9c2ca90e670d116e29" }
+cadcraft-render = { git = "https://github.com/almihy/cadcraft", rev = "0da204648bcce6fe02cef0d69d54e0b9af39a667" }
 # Without their default features, so that the browser's build leaves egui's own fonts out (ui-egui's `egui-fonts`): each
 # member asks for what it uses.
 egui = { version = "0.36", default-features = false }
