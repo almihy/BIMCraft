@@ -260,8 +260,8 @@ fn way_in(w: &Wall, at_end: bool) -> P2 {
 }
 
 /// Whether wall `a`'s end (`a_end`, else its start) and wall `b`'s (`b_end`) are one point the two join at, as Revit's
-/// ends are: their location lines ending there; or, a thickness apart at most, their centre lines ending there (a wall put
-/// on another of its lines stays where it is, `modify` of its `location`, and keeps the joins it had there); or the two
+/// ends are: their location lines ending there; or their centre lines ending there (a wall put on another of its lines
+/// stays where it is, `modify` of its `location`, and keeps the joins it had there, as Revit's does); or the two
 /// running on from each other end to end, in line or nearly (a straight wall into a curved one along its tangent), their
 /// ends at one place along them and their bodies touching across: a wall that changes thickness, or steps, where Revit
 /// joins the end drawn in the other's end. Not whether either may join (`Wall::joins`), nor their heights.
@@ -271,12 +271,12 @@ pub fn ends_meet(m: &Model, a: &Wall, a_end: bool, b: &Wall, b_end: bool) -> boo
         return true;
     }
     let (ta, tb) = (m.thickness(a), m.thickness(b));
-    if p.dist(q) > ta.max(tb) + (ta + tb) {
-        return false;
-    }
     let (ca, cb) = (centre_end(m, a, a_end), centre_end(m, b, b_end));
-    if p.dist(q) <= ta.max(tb) && ca.dist(cb) <= TOL {
+    if ca.dist(cb) <= TOL {
         return true;
+    }
+    if ca.dist(cb) > ta + tb {
+        return false;
     }
     let (ua, ub) = (way_in(a, a_end), way_in(b, b_end));
     if ua.dot(ub) > -CARRIED_ON.to_radians().cos() {
@@ -331,14 +331,16 @@ fn arms(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> (Vec<Arm>, bo
                 arms.push(arm(m, other, o, true, false));
             }
         } else {
-            // A wall it ends on: the node within its thickness, between its ends.
+            // A wall it ends on: the node within its thickness, between its ends. The node, or where its centre line ends:
+            // a wall put on another of its lines keeps the tee it had, as Revit's does.
             let ax = Axis::of(o);
-            let (s, across) = ax.project(node);
             let (ext, int) = faces(m, o);
-            if s > TOL
-                && s < ax.length() - TOL
-                && (int - TOL..=ext + TOL).contains(&across)
-                && ax.distance(node, across) <= TOL
+            let on = [node, centre_end(m, w, at_end)].into_iter().find_map(|q| {
+                let (s, across) = ax.project(q);
+                (s > TOL && s < ax.length() - TOL && (int - TOL..=ext + TOL).contains(&across) && ax.distance(q, across) <= TOL)
+                    .then_some(s)
+            });
+            if let Some(s) = on
                 && joins(o, None)
             {
                 let (t, (e, i), c) = (ax.tangent(s), (ax.at(s, ext), ax.at(s, int)), ax.at(s, (ext + int) / 2.0));
