@@ -173,3 +173,37 @@ fn a_wall_put_on_its_face_keeps_its_joins_as_revits_does() {
     let wa = s.model.wall(a).unwrap().clone();
     assert!((crate::walls::Axis::of(&wa).length() - 6000.0).abs() < 1e-6, "{wa:?}");
 }
+
+#[test]
+fn a_wall_opening_is_saved_and_opened_as_it_was_in_the_format_that_brought_it() {
+    let mut s = Session::new();
+    let w = basic(&mut s);
+    assert!(s.model.written_format() < crate::model::OPENING_FORMAT);
+    run(&mut s, "wall_opening", json!({"wall": w, "offset": 3000, "width": 1000, "height": 2440, "base_offset": 100}));
+    assert_eq!(s.model.written_format(), crate::model::OPENING_FORMAT);
+    let path = std::env::temp_dir().join(format!("bimcraft-wall-opening-{}.bimcraft", std::process::id()));
+    run(&mut s, "save", json!({"path": path.to_str().unwrap()}));
+    let text = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    let (m, left_out) = crate::model::Model::read(&text).unwrap();
+    assert!(left_out.is_empty(), "{left_out:?}");
+    assert_eq!(m, *s.model);
+}
+
+#[test]
+fn three_walls_at_a_node_each_put_on_a_face_keep_their_joins() {
+    let mut s = Session::new();
+    run(&mut s, "type", json!({"category": "wall", "name": "Generic - 200mm", "thickness": 200}));
+    let a = wall(&mut s, json!({"points": [[0, 0], [5000, 0]], "type": "Generic - 200mm", "height": 3000}));
+    let b = wall(&mut s, json!({"points": [[0, 5000], [0, 0]], "type": "Generic - 200mm", "height": 3000}));
+    let c = wall(&mut s, json!({"points": [[-4000, 0], [0, 0]], "type": "Generic - 200mm", "height": 3000}));
+    let before = all_walls(&mut s);
+    let joined: Vec<Vec<Id>> = [a, b, c].iter().map(|id| crate::walls::joined_at(&s.model, *id, *id != a)).collect();
+    assert!(joined.iter().all(|j| j.len() == 2), "{joined:?}");
+    run(&mut s, "modify", json!({"id": a, "location": "exterior-finish"}));
+    run(&mut s, "modify", json!({"id": b, "location": "interior-finish"}));
+    run(&mut s, "modify", json!({"id": c, "location": "exterior-finish"}));
+    let now: Vec<Vec<Id>> = [a, b, c].iter().map(|id| crate::walls::joined_at(&s.model, *id, *id != a)).collect();
+    assert_eq!(now, joined);
+    assert!((all_walls(&mut s) - before).abs() < 1e-6, "{} {before}", all_walls(&mut s));
+}

@@ -156,12 +156,16 @@ pub const MIN_CONTOURS: f64 = 50.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 30;
+pub const FORMAT: u32 = 31;
+/// [`FORMAT`], by what it brought: wall openings (the element `wallopening`, Revit's Wall Opening) and a curtain type's
+/// `embed` (Automatically Embed); a build that reads up to 30 would refuse them, not say "saved by a newer BIMCraft". A
+/// project with none of them is written as 30 or older ([`Model::written_format`]); nothing in a file of 30 changes.
+pub const OPENING_FORMAT: u32 = FORMAT;
 /// [`FORMAT`], by what it brought: curtain walls (`curtain.rs`): a wall type's `curtain`, a wall's `curtain`, the types
 /// `curtain_panel` and `mullion` and the elements `curtainpanel`, `mullion` and `curtaingrid`; a build that reads up to 29
 /// would refuse them, not say "saved by a newer BIMCraft". A project with none of them is written as 29 or older
 /// ([`Model::written_format`]); nothing in a file of 29 changes.
-pub const CURTAIN_FORMAT: u32 = FORMAT;
+pub const CURTAIN_FORMAT: u32 = 30;
 /// The format a project is written in when it needs nothing of [`CURTAIN_FORMAT`]'s but holds a wall type as Revit's (its Core Boundary rows, Function, Wrapping at Inserts and at
 /// Ends, Coarse Scale Fill), a layer's Finish 2, Wraps and Structural Material; a build that reads up to 28 would refuse the
 /// fields, not say "saved by a newer BIMCraft". A project whose types have none of them is written as 28 or older

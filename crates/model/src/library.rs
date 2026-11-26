@@ -1744,6 +1744,12 @@ impl Model {
         // What a build that reads up to 28 refuses: a wall type as Revit's, a layer's Finish 2, Wraps or Structural Material.
         let layer =
             |l: &crate::model::Layer| l.wraps || l.structural || l.priority.is_some() || l.function == crate::model::Function::Finish2;
+        // What a build that reads up to 30 refuses: a wall opening, a curtain type that embeds.
+        if self.elements.values().any(|e| matches!(e, Element::WallOpening(_)))
+            || self.types.wall.values().any(|t| t.curtain.as_ref().is_some_and(|c| c.embed))
+        {
+            return crate::model::OPENING_FORMAT;
+        }
         // What a build that reads up to 29 refuses: curtain walls, their types and their panels, mullions and grid lines.
         if self.types.wall.values().any(crate::model::WallType::is_curtain)
             || !self.types.curtain_panel.is_empty()

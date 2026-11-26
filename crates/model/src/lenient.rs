@@ -59,6 +59,7 @@ pub fn element(kind: &str, v: &Value) -> Vec<String> {
         "site" => crate::masterplan::Site, "propertyline" => crate::masterplan::PropertyLine, "toposolid" => Floor,
         "subdivision" => crate::ground::SubDivision, "surveypoint" => crate::ground::BasePoint, "projectbasepoint" => crate::ground::BasePoint,
         "curtainpanel" => crate::curtain::Panel, "mullion" => crate::curtain::Mullion, "curtaingrid" => crate::curtain::GridLine,
+        "wallopening" => crate::model::WallOpening,
     }
 }
 

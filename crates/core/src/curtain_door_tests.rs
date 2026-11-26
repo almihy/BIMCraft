@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use crate::curtain_tests::{fails, panels, run, wall};
 use crate::engine::Session;
 use crate::geom::P2;
-use crate::model::{CURTAIN_FORMAT, Element, Id, Model, Opening};
+use crate::model::{Element, Id, Model, OPENING_FORMAT, Opening};
 use crate::prim::Prim;
 use crate::solids::Solid;
 use crate::sync::{self, Changes};
@@ -70,7 +70,8 @@ fn a_panel_is_swapped_for_a_door_that_fills_its_cell() {
     assert!(!s.model.elements.contains_key(panel));
     assert_eq!(crate::curtain_tests::mullions(&s, w).len(), 22);
     assert_eq!(s.model.check(), Ok(()));
-    assert_eq!(s.model.written_format(), CURTAIN_FORMAT);
+    // (a storefront embeds itself, as Revit's: the file is of the wall openings' format)
+    assert_eq!(s.model.written_format(), OPENING_FORMAT);
     // As agents read it.
     let j = crate::commands::element_json(&s.model, d);
     assert_eq!((j["width"].as_f64(), j["height"].as_f64(), j["panel"].as_str()), (Some(1500.0), Some(2400.0), Some(key.as_str())), "{j}");
@@ -328,7 +329,7 @@ fn it_is_saved_and_opened_as_it_was() {
     let (m, left_out) = Model::read(&text).unwrap();
     assert!(left_out.is_empty(), "{left_out:?}");
     assert_eq!(m, *s.model);
-    assert_eq!(m.written_format(), CURTAIN_FORMAT);
+    assert_eq!(m.written_format(), OPENING_FORMAT);
     assert_eq!(m.check(), Ok(()));
     // Opened, it is laid out as it was: nothing to do.
     let mut t = Session::new();
