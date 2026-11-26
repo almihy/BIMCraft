@@ -167,6 +167,12 @@ fn json_of(m: &Model, id: Id, rooms: Option<&crate::rooms::Rooms>, measures: boo
             if let Some(r) = axis.radius() {
                 extra.insert("radius".into(), json!(hundredth(r)));
             }
+            // The walls each end is joined to (by id), as Revit's Elements At Join: those ending there with it and one it
+            // ends on. A curtain wall joins none.
+            if !crate::curtain::is_curtain(m, w) {
+                extra.insert("joined_at_start".into(), json!(crate::walls::joined_at(m, id, false)));
+                extra.insert("joined_at_end".into(), json!(crate::walls::joined_at(m, id, true)));
+            }
             // A curtain wall says so, with how many panels and mullions it has and where its grid lines are (mm along it
             // from its start, and mm over its base, the borders first and last): a facade read without listing its parts.
             if let Some(g) = crate::curtain::grid(m, id) {

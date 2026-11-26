@@ -1744,6 +1744,14 @@ impl Model {
         // What a build that reads up to 28 refuses: a wall type as Revit's, a layer's Finish 2, Wraps or Structural Material.
         let layer =
             |l: &crate::model::Layer| l.wraps || l.structural || l.priority.is_some() || l.function == crate::model::Function::Finish2;
+        // What a build that reads up to 31 refuses: a stair by component, a wall opening's parameter values.
+        if self.elements.values().any(|e| match e {
+            Element::Stair(st) => !st.runs.is_empty() || !st.sketched.is_empty(),
+            Element::WallOpening(o) => !o.params.is_empty(),
+            _ => false,
+        }) {
+            return crate::model::STAIR_FORMAT;
+        }
         // What a build that reads up to 30 refuses: a wall opening, a curtain type that embeds.
         if self.elements.values().any(|e| matches!(e, Element::WallOpening(_)))
             || self.types.wall.values().any(|t| t.curtain.as_ref().is_some_and(|c| c.embed))

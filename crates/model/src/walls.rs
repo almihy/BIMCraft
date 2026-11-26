@@ -243,6 +243,51 @@ pub(crate) fn arm(m: &Model, id: Id, w: &Wall, at_end: bool, mine: bool) -> Arm 
     Arm { id, at_end, mine, way, ccw: axis.at(s, ccw), cw: axis.at(s, cw), centre: axis.at(s, (ext + int) / 2.0), thick: ext - int }
 }
 
+/// How far two wall ends meeting end to end may turn from running on in line (or, a straight wall and a curved one, along
+/// its tangent) and still be one wall carried on there, its centre line stepping across: 15 degrees.
+const CARRIED_ON: f64 = 15.0;
+
+/// Where wall `w`'s centre line ends: at its end with `at_end`, else at its start.
+pub fn centre_end(m: &Model, w: &Wall, at_end: bool) -> P2 {
+    let ax = Axis::of(w);
+    ax.at(if at_end { ax.length() } else { 0.0 }, centre(m, w))
+}
+
+/// The way wall `w` leaves its end (`at_end`, else its start): into itself.
+fn way_in(w: &Wall, at_end: bool) -> P2 {
+    let ax = Axis::of(w);
+    if at_end { ax.tangent(ax.length()) * -1.0 } else { ax.tangent(0.0) }
+}
+
+/// Whether wall `a`'s end (`a_end`, else its start) and wall `b`'s (`b_end`) are one point the two join at, as Revit's
+/// ends are: their location lines ending there; or, a thickness apart at most, their centre lines ending there (a wall put
+/// on another of its lines stays where it is, `modify` of its `location`, and keeps the joins it had there); or the two
+/// running on from each other end to end, in line or nearly (a straight wall into a curved one along its tangent), their
+/// ends at one place along them and their bodies touching across: a wall that changes thickness, or steps, where Revit
+/// joins the end drawn in the other's end. Not whether either may join (`Wall::joins`), nor their heights.
+pub fn ends_meet(m: &Model, a: &Wall, a_end: bool, b: &Wall, b_end: bool) -> bool {
+    let (p, q) = (if a_end { a.end } else { a.start }, if b_end { b.end } else { b.start });
+    if p.dist(q) <= TOL {
+        return true;
+    }
+    let (ta, tb) = (m.thickness(a), m.thickness(b));
+    if p.dist(q) > ta.max(tb) + (ta + tb) {
+        return false;
+    }
+    let (ca, cb) = (centre_end(m, a, a_end), centre_end(m, b, b_end));
+    if p.dist(q) <= ta.max(tb) && ca.dist(cb) <= TOL {
+        return true;
+    }
+    let (ua, ub) = (way_in(a, a_end), way_in(b, b_end));
+    if ua.dot(ub) > -CARRIED_ON.to_radians().cos() {
+        return false;
+    }
+    // Along the way the two run, halfway between their own (the same either way round), and across it.
+    let along = (ua - ub).unit();
+    let d = cb - ca;
+    d.dot(along).abs() <= TOL && d.cross(along).abs() < (ta + tb) / 2.0 - TOL
+}
+
 /// The walls at wall `id`'s start (or `at_end`, its end), round the node counter-clockwise, its own
 /// among them: those ending there, and a wall it ends on, both ways from where it does. Whether it
 /// ends on one, too.
@@ -272,17 +317,7 @@ fn arms(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> (Vec<Arm>, bo
     };
     // Where they meet is asked first: whether they overlap in height takes both walls' heights, under any roof or floor
     // they're attached to.
-    // A wall's end is where its location line ends, or where its centre line does: a wall put on another of its lines
-    // stays where it is (`modify` of its `location`), and keeps the joins it had there, as Revit's does.
-    let centre_end = |o: &Wall, end: bool| {
-        let ax = Axis::of(o);
-        ax.at(if end { ax.length() } else { 0.0 }, centre(m, o))
-    };
-    let here = centre_end(w, at_end);
-    let meets = |o: &Wall, end: bool| {
-        let at = if end { o.end } else { o.start };
-        at.dist(node) <= TOL || (at.dist(node) <= m.thickness(w).max(m.thickness(o)) && centre_end(o, end).dist(here) <= TOL)
-    };
+    let meets = |o: &Wall, end: bool| ends_meet(m, w, at_end, o, end);
     for (other, o) in candidates {
         if other == id {
             continue;

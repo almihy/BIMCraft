@@ -3294,6 +3294,8 @@ impl BimApp {
                 riser: RISER,
                 tread: TREAD,
                 landings: Vec::new(),
+                runs: Vec::new(),
+                sketched: Vec::new(),
             };
             let (n, _, _) = m.flight(&st);
             // As many risers as the run clicked holds, a tread between each two.

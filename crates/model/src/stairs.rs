@@ -21,20 +21,24 @@ pub struct Run {
     pub risers: u32,
     pub across: (P2, P2),
     pub joined: bool,
+    /// Its own width, where it has one (a run of a stair by component); else the layout's.
+    pub width: Option<f64>,
 }
 
 impl Run {
     /// A straight run with square ends.
     pub fn new(start: P2, u: P2, length: f64, z: (f64, f64), risers: u32) -> Run {
-        Run { start, u, length, z, risers, across: (u.perp(), u.perp()), joined: false }
+        Run { start, u, length, z, risers, across: (u.perp(), u.perp()), joined: false, width: None }
     }
 
     pub fn end(&self) -> P2 {
         self.start + self.u * self.length
     }
 
-    /// Its outline, `width` wide, counter-clockwise: its sides, and its ends along `across`.
+    /// Its outline, `width` wide (or its own width, where it has one), counter-clockwise: its sides, and its ends along
+    /// `across`.
     pub fn ring(&self, width: f64) -> Vec<P2> {
+        let width = self.width.unwrap_or(width);
         let n = self.u.perp();
         // Along a cross line from the middle to where it meets the side `width / 2` from the middle.
         let reach = |a: P2| a * (width / 2.0 / a.dot(n).max(0.2));
@@ -100,10 +104,31 @@ fn ccw(ring: Vec<P2>) -> Vec<P2> {
     if geom::area(&ring) < 0.0 { ring.into_iter().rev().collect() } else { ring }
 }
 
-/// A stair's runs: its risers split at its landings, each run a tread shorter than its risers.
+/// A stair's runs: its risers split at its landings, each run a tread shorter than its risers. A stair by component's are
+/// its runs as drawn, climbing one after the other, with its sketched landings at the top of the run before each.
 pub fn stair(m: &Model, st: &Stair) -> Layout {
     let (n, each, _) = m.flight(st);
     let base = m.elevation(st.level);
+    if !st.runs.is_empty() {
+        let mut out = Layout { runs: Vec::new(), pads: Vec::new(), walk: Vec::new(), width: st.width };
+        let mut up = 0u32;
+        for (k, r) in st.runs.iter().enumerate() {
+            let z = (base + f64::from(up) * each, base + f64::from(up + r.risers) * each);
+            up += r.risers;
+            let u = if r.start.dist(r.end) > 1e-9 { (r.end - r.start).unit() } else { heading(st.angle) };
+            let run = Run { width: Some(r.width), ..Run::new(r.start, u, r.start.dist(r.end), z, r.risers) };
+            out.walk.extend([(run.start, z.0), (run.end(), z.1)]);
+            out.runs.push(run);
+            if let Some(ring) = st.sketched.get(k) {
+                out.pads.push(Pad { ring: ccw(ring.clone()), z: z.1 });
+                if ring.len() >= 3 {
+                    let c = ring.iter().fold(P2(0.0, 0.0), |a, q| a + *q) * (1.0 / ring.len() as f64);
+                    out.walk.push((c, z.1));
+                }
+            }
+        }
+        return out;
+    }
     let mut breaks: Vec<u32> = vec![0];
     breaks.extend(st.landings.iter().map(|l| (l.at.max(0.0).min(f64::from(n))) as u32));
     breaks.push(n);

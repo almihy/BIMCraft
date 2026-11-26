@@ -156,11 +156,16 @@ pub const MIN_CONTOURS: f64 = 50.0;
 /// 2: the library has ids and GUIDs too
 /// (`library`), and what names a library entry holds its GUID. 1: elements have GUIDs, ids six digits, and what points at
 /// an element holds its GUID. None (0): a file from before.
-pub const FORMAT: u32 = 31;
+pub const FORMAT: u32 = 32;
+/// [`FORMAT`], by what it brought: a stair by component (a stair's `runs`, `StairRun`, and its `sketched` landings) and a
+/// wall opening's parameter values (`params`); a build that reads up to 31 would refuse them, not say "saved by a newer
+/// BIMCraft". A project with none of them is written as 31 or older ([`Model::written_format`]); nothing in a file of 31
+/// changes.
+pub const STAIR_FORMAT: u32 = FORMAT;
 /// [`FORMAT`], by what it brought: wall openings (the element `wallopening`, Revit's Wall Opening) and a curtain type's
 /// `embed` (Automatically Embed); a build that reads up to 30 would refuse them, not say "saved by a newer BIMCraft". A
 /// project with none of them is written as 30 or older ([`Model::written_format`]); nothing in a file of 30 changes.
-pub const OPENING_FORMAT: u32 = FORMAT;
+pub const OPENING_FORMAT: u32 = 31;
 /// [`FORMAT`], by what it brought: curtain walls (`curtain.rs`): a wall type's `curtain`, a wall's `curtain`, the types
 /// `curtain_panel` and `mullion` and the elements `curtainpanel`, `mullion` and `curtaingrid`; a build that reads up to 29
 /// would refuse them, not say "saved by a newer BIMCraft". A project with none of them is written as 29 or older
@@ -1311,6 +1316,9 @@ pub struct WallOpening {
     #[serde(default, skip_serializing_if = "is_zero")]
     pub base_offset: f64,
     pub height: f64,
+    /// Its values of the project's parameters, by name (Revit's Wall Opening takes project parameters too).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub params: BTreeMap<String, serde_json::Value>,
 }
 
 impl WallOpening {
@@ -2520,9 +2528,29 @@ pub struct Stair {
     pub tread: f64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub landings: Vec<Landing>,
+    /// Revit's stair by component: its runs as drawn, each from the middle of its first riser to the middle of its last, in
+    /// the order they climb, each of its own width and number of risers ([`StairRun`]). Then `start`, `angle` and `width`
+    /// are the first run's, `landings` is empty, and its risers are the runs' together, the rise shared out evenly.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runs: Vec<StairRun>,
+    /// Its landings as Revit's sketched landings, with `runs`: each an outline in plan, at the top of the run before it (the
+    /// first after the first run, and so on).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sketched: Vec<Vec<P2>>,
     /// Its values of the project's parameters, by name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub params: BTreeMap<String, serde_json::Value>,
+}
+
+/// A run of a stair by component, as Revit's straight run is drawn: from the middle of its first riser (`start`) to the
+/// middle of its last (`end`), `width` wide, with `risers` risers, so its treads are its length over one fewer.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StairRun {
+    pub start: P2,
+    pub end: P2,
+    pub width: f64,
+    pub risers: u32,
 }
 
 /// A landing between two runs of a stair or a ramp: after `at` risers of a stair, or `at` mm up a
@@ -3144,7 +3172,8 @@ impl Element {
             | Element::Component(Component { params, .. })
             | Element::Stair(Stair { params, .. })
             | Element::Ramp(Ramp { params, .. })
-            | Element::Railing(Railing { params, .. }) => Some(params),
+            | Element::Railing(Railing { params, .. })
+            | Element::WallOpening(WallOpening { params, .. }) => Some(params),
             Element::Site(s) => Some(&s.params),
             _ => None,
         }
@@ -3175,7 +3204,8 @@ impl Element {
             | Element::Component(Component { params, .. })
             | Element::Stair(Stair { params, .. })
             | Element::Ramp(Ramp { params, .. })
-            | Element::Railing(Railing { params, .. }) => Some(params),
+            | Element::Railing(Railing { params, .. })
+            | Element::WallOpening(WallOpening { params, .. }) => Some(params),
             Element::Site(s) => Some(&mut s.params),
             _ => None,
         }
@@ -3733,7 +3763,7 @@ pub struct ProjectParameter {
 pub const MAX_PROJECT_PARAMETERS: usize = 256;
 
 /// The categories project parameters are for.
-pub const PARAMETER_CATEGORIES: [&str; 32] = [
+pub const PARAMETER_CATEGORIES: [&str; 33] = [
     "wall",
     "floor",
     "ceiling",
@@ -3768,6 +3798,8 @@ pub const PARAMETER_CATEGORIES: [&str; 32] = [
     // A curtain wall's parts, Revit's Curtain Panels and Curtain Wall Mullions.
     "curtainpanel",
     "mullion",
+    // Revit's Wall Opening.
+    "wallopening",
 ];
 
 impl ProjectParameter {
@@ -5881,6 +5913,11 @@ impl Model {
         let (base, top) = self.span(st.level, 0.0, st.top_level, st.height);
         let rise = top - base;
         // Not a number, or less than one, is none.
+        if !st.runs.is_empty() {
+            let n = st.runs.iter().map(|r| r.risers).fold(0u32, u32::saturating_add);
+            let each = if n > 0 { rise / f64::from(n) } else { 0.0 };
+            return (n, each, st.runs.iter().map(|r| r.start.dist(r.end)).sum());
+        }
         let n = (rise / st.riser - 1e-9).ceil().clamp(0.0, 1e6) as u32;
         let each = if n > 0 { rise / f64::from(n) } else { 0.0 };
         let runs = u32::try_from(st.landings.len()).unwrap_or(u32::MAX).saturating_add(1);
@@ -9026,6 +9063,28 @@ impl Model {
                     return Err(format!("{who}: {n} risers; a stair takes 2 to 200, so check its height and its riser ({} mm)", st.riser));
                 }
                 landings(&who, &st.landings, Some(f64::from(n)))?;
+                if !st.runs.is_empty() && !st.landings.is_empty() {
+                    return Err(format!("{who}: a stair by its runs has sketched landings, not `landings`"));
+                }
+                if st.runs.len() > 100 || st.sketched.len() >= st.runs.len().max(1) {
+                    return Err(format!("{who}: {} runs and {} landings: a landing goes between two runs", st.runs.len(), st.sketched.len()));
+                }
+                for (k, r) in st.runs.iter().enumerate() {
+                    point(&format!("{who} run {k} start"), r.start)?;
+                    point(&format!("{who} run {k} end"), r.end)?;
+                    size(&format!("{who} run {k} width"), r.width)?;
+                    if r.risers < 1 || r.start.dist(r.end) <= TOL && r.risers > 1 {
+                        return Err(format!("{who} run {k}: {} risers along {:.0} mm", r.risers, r.start.dist(r.end)));
+                    }
+                }
+                for (k, ring) in st.sketched.iter().enumerate() {
+                    if !(3..=MAX_POINTS).contains(&ring.len()) || geom::area(ring).abs() <= TOL {
+                        return Err(format!("{who} landing {k}: an outline of 3 points or more, with an area"));
+                    }
+                    for q in ring {
+                        point(&format!("{who} landing {k}"), *q)?;
+                    }
+                }
             }
             Element::Ramp(r) => {
                 level_ok(r.level)?;

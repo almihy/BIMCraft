@@ -1109,7 +1109,7 @@ other_files(
          as many risers as keep each at most `riser` mm (180), treads `tread` deep (280), `width` wide (1000). One straight \
          run, as long as that makes it; or with landings (each as deep as the stair is wide) after `at` risers, the next run \
          going on as `turn` says: 0 straight on, 90 or -90 turned left or right, 180 or -180 back beside it, to its left or right. \
-         With `railings`, a railing down each side too",
+         Or, as Revit's stair by component, `runs` [{start, end, width?, risers}, …] (then no `start`): each straight run          drawn from the middle of its first riser to the middle of its last, `width` wide (the stair's), with `risers` risers,          in the order they climb, the rise shared out evenly over all of them, its treads its length over one riser fewer          (`tread` says the stair's); and `landings` [{outline: [[x,y], …]}, …], each sketched in plan, at the top of the run          before it: two runs side by side with a landing across their ends, a well between them, are a stair with two          flights. With `railings`, a railing down each side too",
         stair,
     )
     .menu("Architecture > Stair"),
@@ -8438,7 +8438,7 @@ fn wall_opening(s: &mut Session, p: &Value) -> R {
         return Err(bad(c, format!("from {} to {} mm along wall {h} is past its ends (it is {} mm long)", offset - width / 2.0, offset + width / 2.0, length.round())));
     }
     let host = m.guid(h);
-    let id = s.model_mut().insert(Element::WallOpening(crate::model::WallOpening { host, offset, width, base_offset, height }));
+    let id = s.model_mut().insert(Element::WallOpening(crate::model::WallOpening { host, offset, width, base_offset, height, params: Default::default() }));
     Ok(json!({"id": id, "host": h, "offset": offset}))
 }
 
@@ -9915,14 +9915,78 @@ fn landings_param(c: &str, p: &Value) -> Result<Vec<Landing>, String> {
     }
 }
 
+/// `runs` [{start, end, width?, risers}, …] and their sketched `landings` [{outline}, …], a stair by component's; none
+/// when no `runs` is given.
+fn stair_runs(c: &str, p: &Value, width: f64) -> Result<(Vec<crate::model::StairRun>, Vec<Vec<P2>>), String> {
+    let Some(given) = p.get("runs").filter(|v| !absent(Some(v))) else { return Ok((Vec::new(), Vec::new())) };
+    let a = given.as_array().filter(|a| (1..=100).contains(&a.len())).ok_or_else(|| bad(c, "`runs` is a list of 1 to 100 runs [{start, end, width?, risers}, …]"))?;
+    let mut runs = Vec::new();
+    for (k, r) in a.iter().enumerate() {
+        let at = |key: &str| r.get(key).and_then(point).ok_or_else(|| bad(c, format!("`runs` {k}: `{key}` [x, y] is required")));
+        let risers = r.get("risers").and_then(Value::as_u64).filter(|n| (1..=200).contains(n))
+            .ok_or_else(|| bad(c, format!("`runs` {k}: `risers`, 1 to 200, is required")))?;
+        let w = match r.get("width") {
+            v if absent(v) => width,
+            Some(v) => v.as_f64().filter(|w| w.is_finite() && *w > 0.0).ok_or_else(|| bad(c, format!("`runs` {k}: `width` is mm")))?,
+            None => width,
+        };
+        if let Some(extra) = r.as_object().and_then(|o| o.keys().find(|k| !["start", "end", "width", "risers"].contains(&k.as_str()))) {
+            return Err(bad(c, format!("`runs` {k}: `{extra}` isn't a run's (start, end, width, risers)")));
+        }
+        runs.push(crate::model::StairRun { start: at("start")?, end: at("end")?, width: w, risers: risers as u32 });
+    }
+    let mut sketched = Vec::new();
+    match p.get("landings") {
+        v if absent(v) => {}
+        Some(Value::Array(ls)) => {
+            for (k, l) in ls.iter().enumerate() {
+                let ring = l.get("outline").and_then(Value::as_array).ok_or_else(|| bad(c, format!("`landings` {k}: a stair by its runs takes each landing as {{outline: [[x, y], …]}}")))?;
+                sketched.push(ring.iter().map(|q| point(q).ok_or_else(|| bad(c, format!("`landings` {k}: {q} is not a point [x, y] in mm")))).collect::<Result<Vec<_>, _>>()?);
+            }
+        }
+        Some(_) => return Err(bad(c, "`landings` is a list [{outline}, …]")),
+        None => {}
+    }
+    Ok((runs, sketched))
+}
+
 fn stair(s: &mut Session, p: &Value) -> R {
     let c = "stair";
     let m = &s.model;
+    let dim = |key: &str, default: f64| num(c, p, key).map(|v| v.unwrap_or(default));
+    let (runs, sketched) = stair_runs(c, p, dim("width", STAIR_WIDTH)?)?;
+    if let Some(first) = runs.first() {
+        if !absent(p.get("start")) {
+            return Err(bad(c, "a stair by its `runs` starts where its first run does: give `runs` or `start`, not both"));
+        }
+        let level = level_param(c, m, p, "level")?;
+        let (top_level, height) = top_param(c, m, p, level)?;
+        let length = first.start.dist(first.end);
+        let tread = if first.risers > 1 && length > TOL { length / f64::from(first.risers - 1) } else { TREAD };
+        let st = Stair {
+            params: Default::default(),
+            level,
+            top_level,
+            height,
+            start: first.start,
+            angle: if length > TOL { degrees((first.end.1 - first.start.1).atan2(first.end.0 - first.start.0).to_degrees()) } else { 0.0 },
+            width: first.width,
+            riser: dim("riser", RISER)?,
+            tread: dim("tread", (tread * 1000.0).round() / 1000.0)?,
+            landings: Vec::new(),
+            runs,
+            sketched,
+        };
+        let (n, each, length) = m.flight(&st);
+        let level = st.level;
+        let id = s.model_mut().insert(Element::Stair(st));
+        let railings = sides(c, s, p, id, level)?;
+        return Ok(json!({"id": id, "risers": n, "riser": (each * 100.0).round() / 100.0, "length": length, "railings": railings}));
+    }
     let start = point_req(c, p, "start")?;
     let angle = climb(c, p, start)?;
     let level = level_param(c, m, p, "level")?;
     let (top_level, height) = top_param(c, m, p, level)?;
-    let dim = |key: &str, default: f64| num(c, p, key).map(|v| v.unwrap_or(default));
     let st = Stair {
         params: Default::default(),
         level,
@@ -9934,6 +9998,8 @@ fn stair(s: &mut Session, p: &Value) -> R {
         riser: dim("riser", RISER)?,
         tread: dim("tread", TREAD)?,
         landings: landings_param(c, p)?,
+        runs: Vec::new(),
+        sketched: Vec::new(),
     };
     let (n, _, length) = m.flight(&st);
     let level = st.level;
@@ -14232,14 +14298,11 @@ fn relocate(c: &str, s: &mut Session, ids: &[Id], mo: &Motion, end: Option<bool>
                     *end = if at.dist(before.start) <= TOL { after.start } else { after.end };
                     break;
                 }
-                // Joined where their centre lines end (a wall put on another of its lines keeps its joins, as walls'
-                // ends do in `walls::arms`): the end goes as far as the taken wall's end there went.
-                let centre_end = |x: &Wall, e: bool| {
-                    let ax = Axis::of(x);
-                    ax.at(if e { ax.length() } else { 0.0 }, walls::centre(m, x))
-                };
-                let mine = centre_end(w, at.dist(w.end) <= TOL && at.dist(w.start) > TOL);
-                if let Some(e) = [false, true].into_iter().find(|e| centre_end(before, *e).dist(mine) <= TOL) {
+                // Joined end to end another way (where their centre lines end, a wall put on another of its lines keeping its
+                // joins; or carried on with a step across, `walls::ends_meet`): the end goes as far as the taken wall's end
+                // there went.
+                let mine = at.dist(w.end) <= TOL && at.dist(w.start) > TOL;
+                if let Some(e) = [false, true].into_iter().find(|e| walls::ends_meet(m, w, mine, before, *e)) {
                     let (was, now) = if e { (before.end, after.end) } else { (before.start, after.start) };
                     *end = micron(at + (now - was));
                     break;
