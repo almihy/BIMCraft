@@ -423,7 +423,9 @@ impl WallEnd {
 }
 
 fn end_geometry(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> WallEnd {
-    let Some(w) = m.wall(id) else { return WallEnd::default() };
+    if m.wall(id).is_none() {
+        return WallEnd::default();
+    }
     let (arms, through) = arms(m, id, at_end, index);
     let n = arms.len();
     let Some(i) = arms.iter().position(|a| a.id == id) else { return WallEnd::default() };
@@ -496,7 +498,8 @@ fn end_geometry(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> WallE
     {
         return WallEnd::stepped(cut, at_end);
     }
-    let node = if at_end { w.end } else { w.start };
+    // The node is where its centre line ends, not its location line: the same wherever its location line is put.
+    let node = me.centre;
     let limit = arms.iter().map(|a| a.thick).fold(0.0, f64::max);
     // Where a face of this wall crosses a neighbour's facing face, near enough to the corner either way; else its own
     // end. A crossing far along the wall is no corner at all: two walls meeting at a shallow angle cross metres in.
