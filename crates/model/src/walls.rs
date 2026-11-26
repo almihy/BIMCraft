@@ -506,6 +506,11 @@ fn end_geometry(m: &Model, id: Id, at_end: bool, index: Option<&Index>) -> WallE
     // The corner is where the two centre lines cross (when that is near the node): walls standing on a face meet
     // there, a thickness or more from their location lines' node, their far faces running on past it.
     let meet = |face: P2, other: P2, near: &Arm| {
+        // Two walls running on from each other (in line, or a straight one along a curved one's tangent) end square,
+        // each at its own end, as two straight ones do ([`ends_meet`]): their nearly parallel lines cross nowhere near.
+        if me.way.dot(near.way) < -CARRIED_ON.to_radians().cos() {
+            return face;
+        }
         let corner = geom::line_intersection(me.centre, me.centre + me.way, near.centre, near.centre + near.way)
             .filter(|c| c.dist(node) <= limit)
             .unwrap_or(node);

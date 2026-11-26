@@ -168,6 +168,10 @@ struct Strips<'a> {
     materials: Vec<&'a str>,
     /// How far to its left its core's faces lie: the exterior one, the interior one.
     core: (f64, f64),
+    /// How far to its left the line its ends were drawn on lies ([`crate::model::Wall::drawn`]): its location line's 0
+    /// unless it was put on another since. Its joins are worked from there, so they keep their shape whatever line it
+    /// is put on.
+    drawn: f64,
 }
 
 impl Strips<'_> {
@@ -183,6 +187,7 @@ impl Strips<'_> {
         let cored = if t.layers.is_empty() { 0..1 } else { t.core_layers() };
         let face = |k: usize| offs.get(k).copied().unwrap_or(0.0);
         let core = (face(cored.start), face(cored.end));
+        let drawn = super::depth(t, w.location) - super::depth(t, w.drawn());
         (ranks.len() + 1 == offs.len()).then(|| Strips {
             axis: super::Axis::of(w),
             start: w.start,
@@ -192,13 +197,14 @@ impl Strips<'_> {
             ranks,
             materials,
             core,
+            drawn,
         })
     }
 
-    /// The line along it, nearest its location line, that runs in its core: how far to its left. Its location line, when
-    /// that runs in its core.
+    /// The line along it, nearest the line it was drawn on, that runs in its core: how far to its left. The line it was
+    /// drawn on, when that runs in its core.
     fn spine(&self) -> f64 {
-        0.0_f64.clamp(self.core.1.min(self.core.0), self.core.0.max(self.core.1))
+        self.drawn.clamp(self.core.1.min(self.core.0), self.core.0.max(self.core.1))
     }
 
     /// The line `off` mm to its left.
@@ -226,9 +232,11 @@ impl Strips<'_> {
         }
     }
 
-    /// Its end (`at_end`, else its start), and the way it runs on out of itself there.
+    /// Its end (`at_end`, else its start): where the line it was drawn on ends; and the way it runs on out of itself there.
     fn out(&self, at_end: bool) -> (P2, P2) {
-        if at_end { (self.end, self.axis.tangent(self.axis.length())) } else { (self.start, self.axis.tangent(0.0) * -1.0) }
+        let s = if at_end { self.axis.length() } else { 0.0 };
+        let way = if at_end { self.axis.tangent(s) } else { self.axis.tangent(0.0) * -1.0 };
+        (self.axis.at(s, self.drawn), way)
     }
 
     /// Where its boundary `k` crosses boundary `j` of `other`, near `near`.
@@ -266,6 +274,7 @@ impl Strips<'_> {
             ranks: self.ranks.iter().skip(first).take(count).copied().collect(),
             materials: self.materials.iter().skip(first).take(count).copied().collect(),
             core: self.core,
+            drawn: self.drawn,
         };
         (half, beyond, first)
     }
@@ -631,14 +640,15 @@ fn butting(
 /// the wall made first running through. The layer a wall's line runs through ends against both neighbours: its end
 /// bends. Towards a neighbour too nearly in line for their layers to cross near the point, it ends square.
 ///
-/// The line is the wall's location line; with `cored` (three walls), the line nearest that which runs in its core
+/// The line is the one the wall was drawn on (its location line unless it was put on another since); with `cored` (three
+/// walls), the line nearest that which runs in its core
 /// ([`Strips::spine`]), so the three cores come together whatever lines the walls stand on. Those three lines need not
 /// cross at one point: the triangle they leave between them, which no two walls' halves cover, is the core's of the
 /// wall made first.
 pub(super) fn wedge_cut(m: &Model, id: Id, at_end: bool, next: (Id, bool), prev: (Id, bool), cored: bool) -> Option<Cut> {
     let (me, n, p) = (Strips::of(m, id)?, Strips::of(m, next.0)?, Strips::of(m, prev.0)?);
     let far = 6.0 * me.thick().max(n.thick()).max(p.thick());
-    let spine = |x: &Strips| if cored { x.spine() } else { 0.0 };
+    let spine = |x: &Strips| if cored { x.spine() } else { x.drawn };
     let (node, _) = me.out(at_end);
     // Leaving the point from its start, a wall's left is its counter-clockwise side; from its end, its right is.
     let towards = |mine: bool, other: &Strips, (other_id, other_end): (Id, bool), others_left: bool| -> Option<(Cut, usize)> {
