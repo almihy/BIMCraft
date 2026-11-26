@@ -137,3 +137,24 @@ fn a_wall_opening_takes_project_parameter_values() {
     assert_eq!(listed(&mut s, o)["params"]["Arqiflow id"], "o:1");
     assert_eq!(s.model.written_format(), crate::model::STAIR_FORMAT);
 }
+
+#[test]
+fn a_curved_wall_a_wall_tees_into_holds_its_body_wherever_the_tee_ends_in_it() {
+    // The School's F1 w:be418c889062 and the wall teeing into it, w:c367f95bcedb: the arc's volume swung from 3.3 to 4.3 m3
+    // as the tee's end moved by less than a micron (its location line put on a face and back, rounded).
+    let mut s = Session::new();
+    types(&mut s);
+    let arc = wall(
+        &mut s,
+        json!({"points": [[193807.5142853367, 72486.72833137562], [197120.33124730273, 75667.53814323182]],
+               "arc": 68.1160990852998, "type": "G200", "height": 4000}),
+    );
+    let alone = listed(&mut s, arc)["volume_m3"].as_f64().unwrap();
+    assert!((alone - 3.9).abs() < 0.001, "{alone}");
+    for end in [[196678.85306574675, 74490.45824618677], [196678.853, 74490.459]] {
+        let t = wall(&mut s, json!({"points": [[195744.73762617406, 81143.6581043662], end], "type": "G200", "height": 4000}));
+        let v = listed(&mut s, arc)["volume_m3"].as_f64().unwrap();
+        assert!((v - alone).abs() < 0.001, "the arc with the tee ending at {end:?}: {v} m3, alone {alone}");
+        run(&mut s, "delete", json!({"ids": [t]}));
+    }
+}

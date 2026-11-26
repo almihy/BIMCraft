@@ -62,16 +62,32 @@ fn sliver(t: &Tri) -> f64 {
     let root = |s: f64| (r2 - s * s).max(0.0).sqrt();
     let f0 = |s: f64| (s * root(s) + r2 * (s / r).clamp(-1.0, 1.0).asin()) / 2.0 - d * s;
     let f1 = |s: f64| -(root(s).powi(3)) / 3.0 - d * s * s / 2.0;
-    // The integral of g(s) (alpha + beta s) from a to b.
-    let part = |a: f64, b: f64, alpha: f64, beta: f64| alpha * (f0(b) - f0(a)) + beta * (f1(b) - f1(a));
+    // The integral of g(s) times the triangle's height over s, which rises linearly from nothing at `zero` to `ell` at
+    // `full`, from a to b (a < b, the two of zero and full). In closed form over a facet's width; over a sliver of one (under
+    // QUADRATURE_WIDTH along it, as where a cut meets a facet's corner) the closed form's terms, each divided by the width,
+    // cancel to nothing but their rounding (hundreds of millions of mm³ off where a top and a bottom vertex stand at one
+    // point), so there it is Gauss-Legendre's three points, exact to the width's sixth power.
+    let part = |a: f64, b: f64, zero: f64, full: f64| {
+        let w = b - a;
+        if w >= QUADRATURE_WIDTH {
+            let k = ell / (full - zero);
+            return -k * zero * (f0(b) - f0(a)) + k * (f1(b) - f1(a));
+        }
+        let height = |s: f64| ell * ((s - zero) / (full - zero)).clamp(0.0, 1.0);
+        let g = |s: f64| root(s) - d;
+        let (m, half, x) = ((a + b) / 2.0, w / 2.0, (0.6f64).sqrt());
+        half * ((5.0 / 9.0) * (g(m - half * x) * height(m - half * x) + g(m + half * x) * height(m + half * x))
+            + (8.0 / 9.0) * g(m) * height(m))
+    };
     let mut sum = 0.0;
     if s1 - s0 > 1e-12 {
-        let k = ell / (s1 - s0);
-        sum += part(s0, s1, -k * s0, k);
+        sum += part(s0, s1, s0, s1);
     }
     if s2 - s1 > 1e-12 {
-        let k = ell / (s2 - s1);
-        sum += part(s1, s2, k * s2, -k);
+        sum += part(s1, s2, s2, s1);
     }
     if h > 0.0 { sum } else { -sum }
 }
+
+/// How narrow (mm, along its plane) a part of a facet is integrated by quadrature, not in closed form: see [`sliver`].
+const QUADRATURE_WIDTH: f64 = 1.0;
